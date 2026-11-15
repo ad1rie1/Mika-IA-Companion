@@ -42,20 +42,13 @@ from typing import Any
 from mika.contracts import memory as c
 from mika.faculties.memory.faculty import MemoryParams
 from mika.faculties.memory.knowledge import Testimony
+from mika.faculties.memory.tables import keys_of
 from mika.kernel.clock import DAY
 from mika.vocab.affect import emotion_of, facets, facets_valence, valence
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity, Verdict
 from mika.vocab.privacy import admissible as admissible  # le verdict vit dans ``vocab.privacy`` : réexporté
 from mika.vocab.words import elided, fold, stems
-
-
-def _keys(raw: Any) -> tuple[str, ...]:
-    try:
-        got = json.loads(raw or "[]")
-    except (TypeError, ValueError):
-        return ()
-    return tuple(str(x) for x in got) if isinstance(got, list) else ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,14 +107,14 @@ class Item:
     @classmethod
     def of(cls, row: dict[str, Any]) -> Item:
         return cls(
-            id=int(row["id"]), kind=row["kind"], text=row["text"], about=_keys(row["about"]),
+            id=int(row["id"]), kind=row["kind"], text=row["text"], about=keys_of(row["about"]),
             sensitivity=int(row["sensitivity"]), importance=float(row["importance"]),
             confidence=None if row["confidence"] is None else float(row["confidence"]), origin=row["origin"],
             source=row["source"], emotion=row["emotion"], born_at=int(row["born_at"]),
             touched_at=int(row["touched_at"]), recalled_at=int(row["recalled_at"] or 0), recalls=int(row["recalls"]),
             status=row["status"], recipient=row.get("recipient"), due=row.get("due"),
-            told_by=_keys(row.get("told_by")), heard_by=_keys(row.get("heard_by")), secret=bool(row.get("secret")),
-            informants=_keys(row.get("informants")), about_self=bool(row.get("about_self")),
+            told_by=keys_of(row.get("told_by")), heard_by=keys_of(row.get("heard_by")), secret=bool(row.get("secret")),
+            informants=keys_of(row.get("informants")), about_self=bool(row.get("about_self")),
             shown_at=int(row.get("shown_at") or 0), durable_self=int(row.get("about_self") or 0) >= 2,
             between_us=bool(row.get("between_us")),
             knowledge_kind=str(row.get("knowledge_kind") or "claim"), holder=row.get("holder"),
@@ -246,18 +239,25 @@ def unsaid_public_line(person: str, names: dict[str, str], when: str = "") -> st
     return phrase("memory.unsaid.public", who=who, that_who=elided(who, "que"))
 
 
+#: une tonalité au-delà (en deçà) de laquelle une émotion ou un ressenti est positif (négatif) ; entre les deux,
+#: neutre. La même pour toute la mémoire : ``cues`` la lit pour dire qu'un moment fait mal
+SIGN = 0.15
+
+
+def _sign(v: float) -> int:
+    return 1 if v > SIGN else -1 if v < -SIGN else 0
+
+
 def valence_sign(emotion: str | None) -> int:
     e = emotion_of(emotion)
     if e is None:
         return 0
-    v = valence(e)
-    return 1 if v > 0.15 else -1 if v < -0.15 else 0
+    return _sign(valence(e))
 
 
 def facets_sign(felt: tuple[tuple[str, float], ...]) -> int:
     """La tonalité d'un ressenti à plusieurs facettes (ADR 0083) : sa valence pondérée par les intensités."""
-    v = facets_valence(felt)
-    return 1 if v > 0.15 else -1 if v < -0.15 else 0
+    return _sign(facets_valence(felt))
 
 
 def rank(item: Item, similarity: float, now: int, p: MemoryParams, *, interlocutor: str | None,

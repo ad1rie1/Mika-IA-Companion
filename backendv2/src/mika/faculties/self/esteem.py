@@ -30,7 +30,7 @@ from mika.contracts import runtime as rt
 from mika.contracts import self_ as c
 from mika.contracts import social as social_c
 from mika.faculties.self.faculty import SELF, SelfState, day_of, lived_day_of
-from mika.faculties.self.knobs import SelfParams, params
+from mika.faculties.self.params import SelfParams, params
 from mika.faculties.self.records import (
     ABANDONED,
     BLOCKED,

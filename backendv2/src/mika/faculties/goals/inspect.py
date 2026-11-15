@@ -1,8 +1,9 @@
 """Ce que les buts montrent à un opérateur.
 
 - **La fiche d'un but** (type d'objet ``goal``, clé = son numéro) : son
-  résumé, ses séances et leurs verdicts, son carnet et les consignes reçues,
-  ses épisodes et ce que l'arbitre en a pensé.
+  résumé, ses séances (chacune, et chaque fois qu'elle en a parlé : le compte
+  rendu, et de quoi relire le prompt), son carnet et les consignes reçues, et ce
+  que l'arbitre en a pensé.
 - **Buts** : les vivants (actifs, en attente, en pause) et les clos. Les
   projets ont leur menu à eux (``projects``, ADR 0031).
 - **Sur la fiche d'une personne** : les buts qui la concernent.
@@ -46,7 +47,8 @@ from mika.faculties.goals.faculty import (
     ready_to_undertake,
     status,
 )
-from mika.faculties.goals.work import next_step_at, why_not_now
+from mika.faculties.goals.tools import REPORTS_PER_EPISODE
+from mika.faculties.goals.work import Why, next_step_at, why_not_now
 from mika.kernel.builtin import SELECTED
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.events import Content, Event
@@ -80,7 +82,7 @@ from mika.kernel.inspect import (
     pct_fr,
 )
 from mika.kernel.text import fold
-from mika.vocab.episodes import Kind, goal_target
+from mika.vocab.episodes import Kind, goal_target, outcome_words
 
 GOALS_PAGE = 50
 #: l'historique d'un but (pas, consignes, notes, effets, épisodes), par page : tout le journal, du plus récent
@@ -90,11 +92,8 @@ NOTES_CURSOR = "avant_notes"
 #: les buts clos filtrés par autorité : relus par lots jusqu'à remplir la page, au plus tant de lots
 CLOSED_SCAN = 200
 CLOSED_SCAN_BATCHES = 10
-DIFF_SHOWN = 20_000
 SUMMARY_CLAMP = 280
 FORGOTTEN = "(oublié)"
-#: les approbations, dans la console
-APPROVALS = Ref.approvals("ouvrir les actions à autoriser")
 
 #: ``project`` : un ancien projet, d'avant les projets à part (ADR 0031), relu au rejeu
 KIND_FR = {c.REMINDER: "rappel", c.EXPLORATION: "exploration", c.PROJECT: "ancien projet"}
@@ -110,12 +109,13 @@ STATUS_TONE = {c.ACTIVE: "ok", c.WAITING: "info", c.PAUSED: "warn", c.ACHIEVED: 
                c.ABANDONED: "muted", c.FAILED: "danger", c.CANCELLED: "muted"}
 VERDICT_FR = {c.CONTINUE: "continuer", c.DONE: "fini", c.BLOCKED: "bloquée", c.WAIT: "attendre"}
 VERDICT_TONE = {c.CONTINUE: "info", c.DONE: "ok", c.BLOCKED: "danger", c.WAIT: "muted"}
-OUTCOME_FR = {"done": "fait", "abstained": "abstenue", "superseded": "supplanté", "timeout": "délai dépassé",
-              "failed": "échec", "preempted": "préempté", "interrupted": "interrompu", "cancelled": "annulé"}
-OUTCOME_TONE = {"done": "ok", "abstained": "muted", "superseded": "warn", "timeout": "danger", "failed": "danger",
-                "preempted": "warn", "interrupted": "warn", "cancelled": "muted"}
 
+#: les buts clos : un vieux journal y garde ses anciens projets
 KIND_PARAM = Param("sorte", "Sorte", kind="select", choices=tuple(KIND_FR.items()))
+#: les buts vivants : un ancien projet encore vivant est clos à la première passe de ``tend`` (même en pause), le
+#: chercher là ne trouverait rien
+LIVE_KIND_PARAM = Param("sorte", "Sorte", kind="select",
+                        choices=tuple((k, v) for k, v in KIND_FR.items() if k != c.PROJECT))
 AUTHORITY_PARAM = Param("autorite", "Autorité", kind="select", choices=tuple(AUTHORITY_FR.items()))
 
 
@@ -153,15 +153,11 @@ def _said(content: Content | None, empty: str = "—") -> str:
     return content.text if content.text is not None else FORGOTTEN
 
 
-def _name(frame: Frame, key: str | None) -> str:
-    return frame.get(identity_c.IDENTITY(key)).name if key else ""
-
-
 def _who(frame: Frame, key: str | None) -> str:
     """Une personne par son nom (le compte, ou ce qu'elle a dit s'appeler) ; sa clé seulement sans nom."""
     if not key:
         return "—"
-    return _name(frame, key) or key
+    return identity_c.person_name(frame, key) or key
 
 
 def _person(frame: Frame, key: str | None) -> Ref | str:
@@ -308,7 +304,7 @@ LIVE_COLUMNS = (Column("but", "fit", detail=True), Column("titre"), Column("sort
                 Column("séances", "num", detail=True), Column("prochaine séance", detail=True), Column("échéance"), Column("pour qui"))
 
 
-@GOALS.inspect("vivants", title="Buts vivants", section="buts", order=10, params=[KIND_PARAM, AUTHORITY_PARAM],
+@GOALS.inspect("vivants", title="Buts vivants", section="buts", order=10, params=[LIVE_KIND_PARAM, AUTHORITY_PARAM],
                description="Ce qu'elle se propose de faire ensuite : ses explorations et ses rappels, actifs, en "
                            "attente ou en pause. Ses projets ont leur menu à eux (Projets).")
 def _live_view(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
@@ -478,7 +474,7 @@ def _summary_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block
     if g.kind == c.REMINDER:
         blocks.append(_reminder_card(g, frame, ctx, texts))
     elif g.kind == c.PROJECT:
-        blocks.append(Note("Un ancien projet, d'avant les projets à part (ADR 0031) : il ne fait plus de séance. "
+        blocks.append(Note("Un ancien projet, d'avant les projets à part : il ne fait plus de séance. "
                            "Les projets se mènent désormais dans le menu Projets.", tone="muted"))
     elif g.details_ref:
         blocks.append(Prose(_text(texts, g.details_ref), title="Ce qu'elle cherche"))
@@ -519,20 +515,46 @@ def _plan_progress(g: Goal, p: Any) -> Meter:
 #: l'en-tête que la faculté déclare (``app/handmade/subjects/goal.py``)
 NEXT_SESSION = "prochaine séance"
 
+#: ce qui retient sa séance (``work.why_not_now``), en mots ; ``{whom}`` : la réponse qu'elle attend, ou un délai
+WHY_WORDS: dict[Why, str] = {
+    Why.OLD_PROJECT: "un ancien projet (avant les projets à part) : il n'a plus de séance",
+    Why.WAITING: "elle attend {whom}",
+    Why.BUSY: "une séance est en cours",
+    Why.BUDGET: "au bout de ses séances ({done} sur {most})",
+    Why.ASLEEP: "elle dort : aucune séance la nuit",
+    Why.NO_SLOT: "plus de créneau",
+    Why.HOUR_CAP: "plafond atteint : {cap} séances par heure, tous buts confondus",
+    Why.LATER: "pas encore : l'espacement des séances la fixe plus tard",
+}
+#: les raisons qui se datent : la date de la séance, puis ces mots entre parenthèses (la forme de la prochaine
+#: exécution d'un projet, ``projects.inspect.LATER_WORDS``)
+LATER_WORDS: dict[Why, str] = {Why.LATER: "l'espacement des séances la fixe plus tard"}
+
+
+def _cited(why: Why, said: Mapping[str, Any], frame: Frame) -> dict[str, Any]:
+    """Ce que les mots d'une raison citent : la personne qu'elle attend par son nom (sa clé sans nom), « un délai »
+    sans personne."""
+    if why is Why.WAITING:
+        whom = said.get("whom") or ""
+        return {"whom": f"la réponse de {_who(frame, whom)}" if whom else "un délai"}
+    return dict(said)
+
 
 def next_session(g: Goal, s: GoalsState, frame: Frame, when: Callable[[int], str]) -> str:
-    """La prochaine séance d'un but, en mots : « dès que possible », quand (et pourquoi pas avant), ou ce qui la retient
-    (``why_not_now``) ; vide pour un but qui n'en aura pas — un rappel, un but clos ou en pause. Une seule règle pour
-    son en-tête, ses listes, sa fiche et son rythme."""
+    """La prochaine séance d'un but, en mots : « dès que possible », quand (la date, puis pourquoi pas avant :
+    ``LATER_WORDS``), ou ce qui la retient (``WHY_WORDS``) ; vide pour un but qui n'en aura pas — un rappel, un but
+    clos ou en pause. La raison vient de ``work.why_not_now``, en code : rien ne se relit dans une phrase. Une seule
+    règle pour son en-tête, ses listes, sa fiche et son rythme."""
     if g.kind == c.REMINDER or status(g, frame.now) not in (c.ACTIVE, c.WAITING):
         return ""
-    why = why_not_now(g, s, frame)
-    if not why:
+    held = why_not_now(g, s, frame)
+    if held is None:
         return "dès que possible"
+    why, said = held
     nxt = next_step_at(g, s, frame)
-    if nxt is not None and nxt > frame.now and why.startswith("pas encore"):
-        return f"{when(nxt)} ({why.split(' : ', 1)[-1]})"
-    return why
+    if why in LATER_WORDS and nxt is not None and nxt > frame.now:
+        return f"{when(nxt)} ({LATER_WORDS[why].format(**_cited(why, said, frame))})"
+    return WHY_WORDS[why].format(**_cited(why, said, frame))
 
 
 def _state_notes(g: Goal, s: GoalsState, frame: Frame, ctx: InspectContext, texts: Mapping[str, str]) -> list[Block]:
@@ -706,33 +728,119 @@ def _rhythm_blocks(g: Goal, p: Any, nxt: str, most: int, spacing: int) -> list[B
     ]
 
 
-# ── La fiche : pas ────────────────────────────────────────────────────────
+# ── La fiche : séances ────────────────────────────────────────────────────
 
 
-STEP_COLUMNS = (Column("quand", "fit"), Column("verdict"), Column("preuve"), Column("résumé"),
-                Column("outils utilisés"), Column("notable", "num"), Column("", "fit"))
+def _episode_kind(d: rt.EpisodeStarted) -> str:
+    kind = str(d.kind)
+    if kind == Kind.STEP:
+        return "séance de travail"
+    reasons = str(d.reason).split(",")
+    if c.REMIND in reasons:
+        return "dire le rappel"
+    if c.SHARE in reasons:
+        return "raconter"
+    return kind.lower()
+
+
+def _started(g: Goal, ctx: InspectContext) -> tuple[list[Event[Any]], Pager]:
+    """Une page des épisodes de ce but : ceux qu'il vise (ses séances), et ceux qui
+    portent sur lui en visant quelqu'un (le rappel, le récit). Deux lectures
+    fusionnées : chacune rend un de plus que la page, la page prend les plus
+    récents de l'union, et la suite reprend après le dernier montré."""
+    target = goal_target(g.id)
+    before = ctx.int_param("avant", 0) or None
+    found = {e.seq: e for field in ("target", "subject")
+             for e in ctx.events([rt.EPISODE_STARTED], HISTORY_PAGE + 1, where=(field, target), before=before)}
+    ordered = [found[seq] for seq in sorted(found, reverse=True)]
+    page = ordered[:HISTORY_PAGE]
+    older = (("avant", str(page[-1].seq)),) if len(ordered) > HISTORY_PAGE else ()
+    return page, Pager(param="avant", size=HISTORY_PAGE, older=older)
+
+
+def _outcomes(started: list[Event[Any]], ctx: InspectContext) -> dict[str, str]:
+    """L'issue de ces épisodes, par corrélation."""
+    corrs = [e.correlation for e in started]
+    ended = ctx.events([rt.EPISODE_ENDED], len(corrs) + 1, correlations=corrs)
+    return {e.correlation: str(e.data.outcome) for e in ended}
+
+
+def _episode_tab(corr: str, tab: str, text: str) -> Ref:
+    return Ref("episode", corr, text, (("onglet", tab),))
+
+
+SESSION_COLUMNS = (Column("quand", "fit"), Column("épisode"), Column("vers", detail=True), Column("issue", "fit"),
+                   Column("verdict", "fit"), Column("preuve", "fit"), Column("résumé"), Column("outils utilisés"),
+                   Column("notable", "num"), Column("comptes rendus", detail=True), Column("prompt", detail=True),
+                   Column("outils", detail=True), Column("appels", detail=True), Column("décision", detail=True))
+#: les colonnes du compte rendu (verdict, preuve, résumé, outils utilisés, notable, comptes rendus) d'un épisode qui
+#: n'en a pas : une parole (le rappel dit, le récit), une séance en cours
+NO_REPORT = ("—",) * 6
+
+
+def _reports(corrs: Sequence[str], ctx: InspectContext) -> dict[str, list[Any]]:
+    """Les comptes rendus de ces épisodes, par corrélation, du plus récent au plus ancien. Une séance peut en rendre
+    plusieurs : un « fini » sans preuve est noté sans la clore, et elle peut en rendre un autre ensuite. La lecture
+    va jusqu'au plafond de l'outil pour chaque épisode de la page : aucun n'est coupé."""
+    found: dict[str, list[Any]] = {}
+    if corrs:
+        for e in ctx.events([c.STEP_REPORTED], len(corrs) * REPORTS_PER_EPISODE, correlations=corrs):
+            found.setdefault(e.correlation, []).append(e.data)
+    return found
+
+
+def _report_words(step: Any, frame: Frame) -> str:
+    verdict, proof = _step_badges(str(step.verdict), bool(step.proven), frame, int(step.wait_s), step.wait_for)
+    return verdict.text + (f" · {proof.text}" if isinstance(proof, Badge) else "")
+
+
+def _all_reports(steps: Sequence[Any], frame: Frame) -> str:
+    """Tous les comptes rendus d'une séance, du premier au dernier : « 1 », ou « 2 : fini · sans preuve, puis fini ·
+    prouvé ». La ligne montre le dernier ; ceux d'avant comptent aussi (« « fini » sans preuve », les preuves)."""
+    if len(steps) == 1:
+        return "1"
+    return f"{len(steps)} : " + ", puis ".join(_report_words(step, frame) for step in reversed(steps))
 
 
 @GOALS.inspect("seances", title="Séances", subject="goal", order=20,
-               description="Chaque séance de travail : son verdict, sa preuve et son compte rendu.")
+               description="Chaque fois qu'elle y a travaillé ou en a parlé : le compte rendu de la séance (son "
+                           "verdict, sa preuve, ce qu'elle en a dit), et de quoi relire le prompt exact, les outils "
+                           "appelés, les appels de modèle et la décision.")
 def _steps_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     g = _subject_goal(s, ctx)
     if isinstance(g, Note):
         return [g]
+    target = goal_target(g.id)
+    started, pager = _started(g, ctx)
+    outcomes = _outcomes(started, ctx)
+    reports = _reports([e.correlation for e in started], ctx)
     rows = []
-    found, pager = _journal_page(ctx, [c.STEP_REPORTED], ("goal", g.id))
-    for e in found:
-        d = e.data
-        verdict, proof = _step_badges(str(d.verdict), bool(d.proven), frame, int(d.wait_s), d.wait_for)
-        rows.append(Row((When(e.at), verdict, proof, Text(_said(d.summary), clamp=SUMMARY_CLAMP),
-                         ", ".join(d.tools) or "—", f"{num_fr(float(d.notable), 1)}",
-                         Ref("episode", e.correlation, "épisode"))))
-    blocks: list[Block] = [
+    for e in started:
+        outcome = outcomes.get(e.correlation)
+        towards = e.data.target if e.data.target != target else None
+        # une réponse ou une initiative qui en a parlé, menée à bien, « a parlé » (comme sur la page Épisodes)
+        issue = Badge(*outcome_words(outcome, e.data.kind)) if outcome else Badge("en cours", "info")
+        steps = reports.get(e.correlation, [])
+        report: tuple[Any, ...] = NO_REPORT
+        if steps:
+            step = steps[0]  # le plus récent : son dernier mot sur la séance
+            verdict, proof = _step_badges(str(step.verdict), bool(step.proven), frame, int(step.wait_s), step.wait_for)
+            report = (verdict, proof, Text(_said(step.summary), clamp=SUMMARY_CLAMP), ", ".join(step.tools) or "—",
+                      num_fr(float(step.notable), 1), _all_reports(steps, frame))
+        rows.append(Row((When(e.at), _episode_kind(e.data), _who(frame, towards) if towards else "—", issue, *report,
+                         _episode_tab(e.correlation, "prompt", "prompt"), _episode_tab(e.correlation, "outils", "outils"),
+                         _episode_tab(e.correlation, "appels", "appels"),
+                         _episode_tab(e.correlation, "decision", "décision")),
+                        href=Ref("episode", e.correlation, "")))
+    return [
         Fields((("séances faites", _steps(g)), ("sans verdict d'affilée", g.silent), ("« fini » sans preuve", g.unproven),
                 ("preuves", g.evidence)), title="Où il en est", columns=2),
-        Table(STEP_COLUMNS, tuple(rows), title="Ses séances", empty="aucune séance rapportée", pager=pager),
+        Table(SESSION_COLUMNS, tuple(rows), title="Ses séances", empty="aucune séance encore", pager=pager,
+              caption="« prompt » : ce qu'elle a vraiment reçu (persona, cadre, carnet, fil) et ce qu'elle a "
+                      "répondu ; « outils » : chaque appel et son résultat ; « décision » : pourquoi cette séance-là. "
+                      "Une séance qui a rendu compte plusieurs fois montre le dernier ; « comptes rendus » les dit "
+                      "tous."),
     ]
-    return blocks
 
 
 # ── La fiche : carnet ─────────────────────────────────────────────────────
@@ -819,82 +927,6 @@ def _operation(e: Event[Any], frame: Frame) -> Entry:
     if name == "deposited":
         return Entry(e.at, f"fichier déposé : {d.name}", _said(d.note, "") if d.note is not None else "", meta=by)
     return Entry(e.at, name, meta=by)
-
-
-# ── La fiche : épisodes ───────────────────────────────────────────────────
-
-
-def _episode_kind(d: rt.EpisodeStarted) -> str:
-    kind = str(d.kind)
-    if kind == Kind.STEP:
-        return "séance de travail"
-    reasons = str(d.reason).split(",")
-    if c.REMIND in reasons:
-        return "dire le rappel"
-    if c.SHARE in reasons:
-        return "raconter"
-    return kind.lower()
-
-
-def _started(g: Goal, ctx: InspectContext) -> tuple[list[Event[Any]], Pager]:
-    """Une page des épisodes de ce but : ceux qu'il vise (ses séances), et ceux qui
-    portent sur lui en visant quelqu'un (le rappel, le récit). Deux lectures
-    fusionnées : chacune rend un de plus que la page, la page prend les plus
-    récents de l'union, et la suite reprend après le dernier montré."""
-    target = goal_target(g.id)
-    before = ctx.int_param("avant", 0) or None
-    found = {e.seq: e for field in ("target", "subject")
-             for e in ctx.events([rt.EPISODE_STARTED], HISTORY_PAGE + 1, where=(field, target), before=before)}
-    ordered = [found[seq] for seq in sorted(found, reverse=True)]
-    page = ordered[:HISTORY_PAGE]
-    older = (("avant", str(page[-1].seq)),) if len(ordered) > HISTORY_PAGE else ()
-    return page, Pager(param="avant", size=HISTORY_PAGE, older=older)
-
-
-def _outcomes(started: list[Event[Any]], ctx: InspectContext) -> dict[str, str]:
-    """L'issue de ces épisodes, par corrélation."""
-    corrs = [e.correlation for e in started]
-    ended = ctx.events([rt.EPISODE_ENDED], len(corrs) + 1, correlations=corrs)
-    return {e.correlation: str(e.data.outcome) for e in ended}
-
-
-def _episode_tab(corr: str, tab: str, text: str) -> Ref:
-    return Ref("episode", corr, text, (("onglet", tab),))
-
-
-@GOALS.inspect("episodes", title="Épisodes et prompts", subject="goal", order=50,
-               description="Chaque fois qu'elle y a travaillé (ou en a parlé) : le résultat de la séance, et de quoi relire "
-                           "le prompt exact, les outils appelés, les appels de modèle et la décision.")
-def _episodes_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    g = _subject_goal(s, ctx)
-    if isinstance(g, Note):
-        return [g]
-    target = goal_target(g.id)
-    started, pager = _started(g, ctx)
-    outcomes = _outcomes(started, ctx)
-    corrs = [e.correlation for e in started]
-    reported = {e.correlation: e.data for e in ctx.events([c.STEP_REPORTED], len(corrs) + 1, correlations=corrs)} \
-        if corrs else {}
-    rows = []
-    for e in started:
-        outcome = outcomes.get(e.correlation)
-        towards = e.data.target if e.data.target != target else None
-        issue = (Badge(OUTCOME_FR.get(outcome, outcome), OUTCOME_TONE.get(outcome, "")) if outcome
-                 else Badge("en cours", "info"))
-        step = reported.get(e.correlation)
-        result: Any = Text(_said(step.summary), clamp=SUMMARY_CLAMP) if step is not None else "—"
-        verdict: Any = Badge(VERDICT_FR.get(str(step.verdict), str(step.verdict)),
-                             VERDICT_TONE.get(str(step.verdict), "")) if step is not None else "—"
-        rows.append(Row((When(e.at), _episode_kind(e.data), _who(frame, towards) if towards else "—", issue,
-                         verdict, result, _episode_tab(e.correlation, "prompt", "prompt"),
-                         _episode_tab(e.correlation, "outils", "outils"), _episode_tab(e.correlation, "appels", "appels"),
-                         _episode_tab(e.correlation, "decision", "décision")),
-                        href=Ref("episode", e.correlation, "")))
-    return [Table((Column("quand", "fit"), "épisode", Column("vers", detail=True), Column("issue", "fit"), Column("verdict", "fit"),
-                   "résultat", Column("Prompt", detail=True), Column("Outils", detail=True), Column("Appels", detail=True), Column("Décision", detail=True)),
-                  tuple(rows), title="Ses épisodes", empty="aucun épisode encore", pager=pager,
-                  caption="« prompt » : ce qu'elle a vraiment reçu (persona, cadre, carnet, fil) et ce qu'elle a "
-                          "répondu ; « outils » : chaque appel et son résultat ; « décision » : pourquoi cette séance-là.")]
 
 
 # ── La fiche : décisions ──────────────────────────────────────────────────

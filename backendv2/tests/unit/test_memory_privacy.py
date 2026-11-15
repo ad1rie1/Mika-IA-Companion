@@ -22,12 +22,14 @@ from hypothesis import strategies as st
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import transcript as transcript_c
-from mika.faculties.memory import consolidation as cons
+from mika.faculties.memory import cues
 from mika.faculties.memory import extraction as x
-from mika.faculties.memory.extraction import Conversation, Line, Speaker
+from mika.faculties.memory.conversation import Conversation, Line, Speaker
 from mika.faculties.memory.faculty import MemoryState, _promised
+from mika.faculties.memory.kept import _closed_memories
 from mika.faculties.memory.recall import _recall, feelings
 from mika.faculties.memory.salience import admissible, unsaid
+from mika.faculties.memory.shown import _promises
 from mika.faculties.memory.tools import SearchArgs, memory_search
 from mika.kernel.clock import DAY, HOUR, US
 from mika.kernel.events import Content, Origin
@@ -297,16 +299,16 @@ def test_a_silence_request_covers_what_it_asks_for():
     """La portée d'une demande de silence (ADR 0092) : dans un message qui raconte, ce message ; seule (« garde ça
     pour toi »), ce que la même personne vient de dire depuis sa demande précédente ; jamais les mots d'une autre."""
     def line(seq, text, person="user_2"):
-        return x.Line(seq, 0, "Alice", text, person)
+        return Line(seq, 0, "Alice", text, person)
 
     burst = [line(1, "j'ai été licenciée"), line(2, "Paul m'a quittée"), line(3, "je suis enceinte, dis-le à personne")]
-    assert x.silence_scope(burst) == {3}
-    after = [line(1, "j'ai été licenciée"), line(2, "Bob a eu un bébé", "user_3"), x.Line(3, 0, "Mika", "oh non"),
+    assert cues.silence_scope(burst) == {3}
+    after = [line(1, "j'ai été licenciée"), line(2, "Bob a eu un bébé", "user_3"), Line(3, 0, "Mika", "oh non"),
              line(4, "Paul m'a quittée"), line(5, "garde ça pour toi stp")]
-    assert x.silence_scope(after) == {1, 4, 5}
+    assert cues.silence_scope(after) == {1, 4, 5}
     again = [line(1, "je bosse chez X"), line(2, "garde ça pour toi"), line(3, "je déménage"), line(4, "motus")]
-    assert x.silence_scope(again) == {1, 2, 3, 4}
-    assert x.silence_scope([line(1, "il fait beau")]) is None
+    assert cues.silence_scope(again) == {1, 2, 3, 4}
+    assert cues.silence_scope([line(1, "il fait beau")]) is None
 
 
 def test_a_secret_the_model_spreads_is_kept_as_a_confidence():
@@ -314,7 +316,7 @@ def test_a_secret_the_model_spreads_is_kept_as_a_confidence():
     grossesse. Le licenciement et la rupture restent des confidences — discrètes, pas muettes. Ce qui laisse
     entendre de soi-même qu'il est à garder (« je l'ai dit à personne ») garde le jugement du modèle."""
     def line(seq, text):
-        return x.Line(seq, 0, "Alice", text, "user_2")
+        return Line(seq, 0, "Alice", text, "user_2")
 
     burst = [line(1, "j'ai été licenciée"), line(2, "Paul m'a quittée, je l'ai encore dit à personne"),
              line(3, "je suis enceinte, dis-le à personne"), line(4, "et j'ai adopté un chat")]
@@ -324,7 +326,7 @@ def test_a_secret_the_model_spreads_is_kept_as_a_confidence():
         x.XCroyance(texte="Alice est enceinte", secret=False, sensibilite="confidence", messages=[3]),
         x.XCroyance(texte="Alice a adopté un chat", secret=True, sensibilite="anodin", messages=[4]),
         x.XCroyance(texte="Alice traverse beaucoup", secret=True, sensibilite="confidence", messages=[])])
-    assert x.scoped_secrets(ex, burst) == ["Alice a été licenciée", "Alice a adopté un chat"]
+    assert cues.scoped_secrets(ex, burst) == ["Alice a été licenciée", "Alice a adopté un chat"]
     got = {b.texte: (b.secret, x.sensitivity(b.sensibilite, has_person=True)) for b in ex.croyances}
     assert got["Alice a été licenciée"] == (False, 3)  # dans le doute : une confidence
     assert got["Alice et Paul se sont séparés"][0]  # « je l'ai encore dit à personne » : le modèle a raison
@@ -332,7 +334,7 @@ def test_a_secret_the_model_spreads_is_kept_as_a_confidence():
     assert got["Alice a adopté un chat"] == (False, 3)
     assert got["Alice traverse beaucoup"][0]  # rien de cité : la règle d'avant
     quiet = x.Extraction(croyances=[x.XCroyance(texte="Alice a été licenciée", secret=True, messages=[1])])
-    assert x.scoped_secrets(quiet, burst[:1]) == [] and quiet.croyances[0].secret  # sans demande : le modèle juge
+    assert cues.scoped_secrets(quiet, burst[:1]) == [] and quiet.croyances[0].secret  # sans demande : le modèle juge
 
 
 def test_the_whole_burst_is_not_a_secret_end_to_end(tmp_path):
@@ -593,12 +595,13 @@ def test_asking_not_to_tell_someone_in_particular_is_a_secret():
     """Vu sur un vrai modèle : « ne lui dis surtout pas que je t'en ai parlé »
     n'était pas marqué secret. La demande se lit dans le message, quoi qu'en
     dise le modèle."""
-    assert x.says_secret(["je m'inquiète pour Alice, ne lui dis surtout pas que je t'en ai parlé"])
-    assert x.says_secret(["c'est entre nous hein"]) and x.says_secret(["N'en parle à personne !"])
-    assert not x.says_secret(["je t'ai dit que j'avais adoré le film"])
-    assert x.echoes("Alice respire depuis qu'elle a décidé de quitter son mari", ["Alice va quitter son mari"],
-                    {"alice"})
-    assert not x.echoes("Alice a fait des crêpes", ["Alice va quitter son mari"], {"alice"}), "un prénom ne suffit pas"
+    assert cues.says_secret(["je m'inquiète pour Alice, ne lui dis surtout pas que je t'en ai parlé"])
+    assert cues.says_secret(["c'est entre nous hein"]) and cues.says_secret(["N'en parle à personne !"])
+    assert not cues.says_secret(["je t'ai dit que j'avais adoré le film"])
+    assert cues.echoes("Alice respire depuis qu'elle a décidé de quitter son mari", ["Alice va quitter son mari"],
+                       {"alice"})
+    assert not cues.echoes("Alice a fait des crêpes", ["Alice va quitter son mari"], {"alice"}), \
+        "un prénom ne suffit pas"
 
 
 def test_what_lets_an_older_secret_be_guessed_is_secret_too(tmp_path):
@@ -933,9 +936,9 @@ def test_a_room_reread_sees_only_the_promises_the_room_heard():
         s = _promised(s, e, CX)
     speaker = (Speaker("P1", alice, "Alice"),)
     line = (Line(10000, FRAME.now, "Alice [P1]", "coucou tout le monde", alice),)
-    in_room = cons._promises(FRAME, db, s, Conversation("room:salon", speaker, line, "salon"))
+    in_room = _promises(FRAME, db, s, Conversation("room:salon", speaker, line, "salon"))
     assert [i for i, _to, _t in in_room] == [2]  # le salon a entendu la playlist, pas l'avocate
-    in_private = cons._promises(FRAME, db, s, Conversation(f"private:{alice}", speaker, line))
+    in_private = _promises(FRAME, db, s, Conversation(f"private:{alice}", speaker, line))
     assert [i for i, _to, _t in in_private] == [1, 2]  # contrôle : en privé, tout
     db.conn.close()
 
@@ -966,7 +969,7 @@ def test_a_discretion_reaches_a_souvenir_the_night_merged_into_another():
                                    heard_by=(alice,), sensitivity=2, sources=(501,)), 4, FRAME.now - DAY)
     conv = Conversation(f"private:{alice}", (Speaker("P1", alice, "Alice"),),
                         (Line(10000, FRAME.now, "Alice [P1]", "garde ce que je t'ai dit hier pour toi", alice),))
-    assert [d.data.item for d in cons._closed_souvenirs(FRAME, db, conv, [4])] == [1]
+    assert [d.data.item for d in _closed_memories(FRAME, db, conv, [4])] == [1]
     db.conn.close()
 
 
@@ -982,7 +985,7 @@ def test_a_discretion_closes_a_souvenir_without_making_it_last_longer():
                                    heard_by=(alice,), sensitivity=2, sources=(500,)), 2, born)
     conv = Conversation(f"private:{alice}", (Speaker("P1", alice, "Alice"),),
                         (Line(10000, FRAME.now, "Alice [P1]", "garde-le pour toi", alice),))
-    for n, draft in enumerate(cons._closed_souvenirs(FRAME, db, conv, [2]), start=3):
+    for n, draft in enumerate(_closed_memories(FRAME, db, conv, [2]), start=3):
         db.put(draft, n, FRAME.now)
     row = db.query(f"SELECT importance, touched_at, secret, sensitivity FROM {memory_c.ITEMS_TABLE} WHERE id=1")
     assert row == [(0.5, born, 1, int(Sensitivity.CONFIDENCE))]  # fermé, sans durer davantage

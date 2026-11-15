@@ -5,7 +5,8 @@ fonction ``(tranche, frame, args, ctx) -> Done`` (ou sa coroutine). Elle ne
 fait rien elle-même : elle rend des **brouillons** d'événements (les siens),
 que le runtime ajoute au journal avec l'origine « extérieure », sous garde,
 dédoublonnés, suivis d'un événement d'audit. Refuser se dit par
-``Refused(message, champs)``.
+``Refused(message, champs)`` ; une action qui attend qu'on coche « Je
+confirme » refuse par ``confirm_first(ce qu'elle changera)``.
 
 Ce sont des actions d'exploitation (lier une adresse, confier un projet,
 recharger une app) — jamais une réécriture de ses souvenirs, de ses pensées ou
@@ -30,6 +31,18 @@ class Refused(Exception):
         super().__init__(message)
         self.message = message
         self.fields = dict(fields or {})
+
+
+#: le bandeau d'une action à confirmer ; ce qu'elle changera s'écrit sous la case, pas deux fois
+CONFIRM_FIRST = "À confirmer : lis ce que cela change, puis coche « Je confirme »."
+
+
+def confirm_first(outcome: str) -> Refused:
+    """Le refus d'une action qui exige qu'on coche « Je confirme » (ADR 0035),
+    tant qu'on ne l'a pas fait : le bandeau ``CONFIRM_FIRST`` ; sous la case —
+    le champ ``confirmed`` de son formulaire —, ce que l'action changera
+    (``outcome``, une phrase entière)."""
+    return Refused(CONFIRM_FIRST, {"confirmed": f"{outcome} Coche « Je confirme »."})
 
 
 @dataclass(frozen=True, slots=True)

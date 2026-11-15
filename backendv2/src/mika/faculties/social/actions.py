@@ -23,15 +23,13 @@ from mika.faculties.social.inspect import AUTO, CLOSENESS_FR, settable
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard
-from mika.kernel.operate import ActionContext, Done, Refused
+from mika.kernel.operate import ActionContext, Done, Refused, confirm_first
 
 CHOICES = ((AUTO, "automatique (née de leur histoire)"), *((k, CLOSENESS_FR[k]) for k in c.CLOSENESS_LEVELS))
 _RANK = {level: i for i, level in enumerate(c.CLOSENESS_LEVELS)}
 #: Ce que chaque proximité ouvre de ce que d'autres lui ont confié.
 OPENS = {c.FRIEND: "ce que d'autres lui ont dit de personnel pourra lui être raconté",
          c.CLOSE: "même les confidences d'autres personnes pourront lui être dites"}
-#: le bandeau d'une action à confirmer ; ce qu'elle changera s'écrit sous la case, pas deux fois
-TO_CONFIRM = "À confirmer : lis ce que cela change, puis coche « Je confirme »."
 
 
 class ClosenessArgs(BaseModel):
@@ -79,7 +77,7 @@ def _set_closeness(s: SocialState, frame: Frame, args: ClosenessArgs, ctx: Actio
     if level and _RANK[level] > _RANK[now] and level in OPENS and not args.confirmed:
         name = frame.get(identity_c.IDENTITY(person)).name or person
         outcome = f"« {name} » passera de « {CLOSENESS_FR[now]} » à « {CLOSENESS_FR[level]} » : {OPENS[level]}."
-        raise Refused(TO_CONFIRM, {"confirmed": f"{outcome} Coche « Je confirme »."})
+        raise confirm_first(outcome)
     draft = c.CLOSENESS_SET.draft(person=person, closeness=level, by=ctx.by)
     message = ("Proximité rendue à leur histoire." if not level
                else f"Proximité déclarée : {CLOSENESS_FR[level]}.")

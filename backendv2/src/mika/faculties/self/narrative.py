@@ -19,8 +19,8 @@ from mika.contracts import memory as memory_c
 from mika.contracts import self_ as c
 from mika.contracts import social as social_c
 from mika.faculties.self.faculty import SELF, SelfState
-from mika.faculties.self.knobs import SelfParams, params
 from mika.faculties.self.lines import KNOWN_LINES, passion_lines
+from mika.faculties.self.params import SelfParams, params
 from mika.faculties.self.persona import persona_for
 from mika.kernel.builtin import SUBJECT_FORGOTTEN
 from mika.kernel.clock import HOUR

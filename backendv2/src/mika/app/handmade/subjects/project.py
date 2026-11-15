@@ -1,5 +1,5 @@
-"""La fiche d'un projet : sa vue d'ensemble, ses onglets Objectifs, Décisions et « Accès » dessinés (ADR 0121, 0133,
-0177).
+"""La fiche d'un projet : sa vue d'ensemble, ses onglets Objectifs, Décisions techniques et « Accès » dessinés
+(ADR 0121, 0133, 0177).
 
 - La vue d'ensemble suit la vue d'un objet de la maquette (ADR 0176) : un seul bandeau (ce qui attend ton accord —
   « Les décider » ouvre la file des validations —, sinon sa pause ou ce qui le retient), une bande de chiffres (la
@@ -10,10 +10,12 @@
   son rythme, qui l'a posé, son dernier compte rendu (long, il tient en quatre lignes que « lire la suite » déplie)
   et ce qu'elle en a tiré ; ses boutons sur sa ligne, pas sous un détail (deux en vue, « Modifier l'objectif », le
   reste sous « ⋯ »). « Ajouter un objectif » est une colonne à côté de la liste, sur un grand écran.
-- Décisions : une entrée par décision, comme une décision d'architecture — la question tranchée et son statut, ce
-  qui est choisi, pourquoi (cité), le contexte et les options repliés, qui l'a posée et quand, ce qu'elle remplace ;
-  ses boutons sur sa ligne (la retirer ou la remettre en vigueur, « Remplacer cette décision »). « Consigner une
-  décision » est une colonne à côté, comme « Ajouter un objectif ».
+- Décisions techniques : une entrée par décision, comme une décision d'architecture — la question tranchée et son
+  statut, ce qui est choisi, pourquoi (cité), le contexte et les options repliés, qui l'a posée et quand, ce qu'elle
+  remplace ; ses boutons sur sa ligne (la retirer ou la remettre en vigueur, « Remplacer cette décision »).
+  « Consigner une décision » est une colonne à côté, comme « Ajouter un objectif ». Son titre les dit techniques :
+  « Décisions », sur la fiche d'un but, ce sont les pesées de l'arbitre, comme la colonne « décision » de ses
+  Exécutions ; la clé de l'onglet reste ``decisions``.
 - Ses onglets disent combien ils en comptent (objectifs, exécutions, décisions) ; les plus rares (Accès, Carnet) sont
   rangés sous « Plus ».
 - Accès : qui peut le voir, le piloter, se servir de ses apps, et quand — un tableau de lignes lues de haut en bas,
@@ -213,7 +215,7 @@ def _decision(line: Line) -> dict[str, Any]:
 
 
 def decisions(got: Got) -> Markup | None:
-    """Projet › Décisions : une entrée par décision, et « Consigner une décision » à côté."""
+    """Projet › Décisions techniques : une entrée par décision, et « Consigner une décision » à côté."""
     t = got.table("Ses décisions")
     if t is None:
         return None

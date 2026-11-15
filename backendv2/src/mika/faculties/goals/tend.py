@@ -214,10 +214,6 @@ def _sources(frame: Frame) -> tuple[str, ...]:
     return (*(("rss",) if headlines else ()), *((mcp_c.WEB_BUNDLE,) if web else ()))
 
 
-def _name(frame: Frame, person: str | None) -> str:
-    return frame.get(identity_c.IDENTITY(person)).name if person else ""
-
-
 def explored_title(t: attention_c.ThoughtReading, name: str) -> str:
     """Le titre d'une exploration née d'une pensée : **ses** mots, jamais ceux qu'on lui a dits ou qu'elle a lus
     (ceux-là sont gardés à part, et cités)."""
@@ -276,7 +272,7 @@ class Seed:
             self.unreadable.add(pr.id)
             return False
         owner = frame.get(identity_c.PERSON(pr.to)) or pr.to
-        name = _name(frame, owner)
+        name = identity_c.person_name(frame, owner)
         level = max(int(Sensitivity.PERSONAL), pr.sensitivity)
         source = f"{PROMISE_SOURCE}{pr.id}"
         title = phrase("goals.title.promised", name=name) if name else phrase("goals.title.promised_unnamed")
@@ -393,7 +389,7 @@ class Seed:
             owner = t.about[0] if t.about else None
             await ctx.emit(c.GOAL_OPENED.draft(
                 kind=c.EXPLORATION, authority=c.SELF,
-                title=Content.of(explored_title(t, _name(frame, owner)), level=t.sensitivity),
+                title=Content.of(explored_title(t, identity_c.person_name(frame, owner or "")), level=t.sensitivity),
                 details=Content.of(text, level=t.sensitivity), owner=owner, about=t.about,
                 bundles=REFLECT_BUNDLES if reflecting else inherited(t.bundle),
                 max_steps=p.reflection_steps if reflecting else p.exploration_steps, source=source,
@@ -528,7 +524,7 @@ def talk_subjects(s: GoalsState, frame: Frame, store: Any, p: Any) -> list[Talk]
 def _talk_musing(frame: Frame, talk: Talk, p: Any) -> Any:
     """Rêvasser à ce dont on lui a parlé : le titre est le sien, ce qu'on lui a dit est gardé à part (cité au
     travail) ; ce que la personne a dit la concerne — un message privé est personnel."""
-    name = _name(frame, talk.person)
+    name = identity_c.person_name(frame, talk.person)
     level = int(Sensitivity.ANODYNE if talk.public else Sensitivity.PERSONAL)
     title = phrase("goals.title.talk", name=name) if name else phrase("goals.title.talk_unnamed")
     return c.GOAL_OPENED.draft(
@@ -574,8 +570,7 @@ def answered(s: GoalsState, frame: Frame) -> list[Goal]:
     for g in sorted(s.goals.values(), key=lambda g: g.id):
         if g.status != c.WAITING or g.paused_at or not g.wait_for or g.waiting_until <= frame.now:
             continue
-        handles = frame.get(identity_c.HANDLES(g.wait_for)) or (g.wait_for,)
-        if max(frame.get(transcript_c.LAST_FROM(h)) for h in handles) > g.waiting_since:
+        if identity_c.last_heard(frame, g.wait_for) > g.waiting_since:
             out.append(g)
     return out
 

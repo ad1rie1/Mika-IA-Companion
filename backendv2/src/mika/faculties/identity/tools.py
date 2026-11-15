@@ -5,10 +5,10 @@ liaison. Aucun ne fait monter la confiance — un modèle se laisse conter
 - douter et défaire un lien ne sont offerts que là où il y a quelque chose à
   mettre en doute : jamais devant une session authentifiée (elle prouve qui
   écrit ; personne n'y est « lié » — une propriétaire connectée non plus) ;
-- douter et défaire un lien ne font que resserrer ce qu'elle croit de qui est
-  en face : rien que la personne obtienne. Pour ses droits (ADR 0134), ils
-  lisent — le plafond d'une inconnue, qui ferme toute action, ne les ferme pas :
-  c'est contre elle qu'ils servent ;
+- douter et défaire un lien écrivent une preuve, mais ne font que resserrer ce
+  qu'elle croit de qui est en face : rien que la personne obtienne. Pour ses
+  droits (ADR 0134, 0226), ils lisent — le plafond d'une inconnue, qui ferme
+  toute action, ne les ferme pas : c'est contre elle qu'ils servent ;
 - relire « qui t'écrit » redit une section déjà sous ses yeux : il n'est pas
   chargé d'emblée (lot ``social``, à la demande), et ne sert que si elle manque.
 """
@@ -71,6 +71,8 @@ async def whoami_with(args: NoArgs, ctx: Any) -> str:
     return "\n".join(lines)
 
 
+# Il écrit une preuve, mais ne fait que baisser la confiance : au regard des droits, il lit (``acts`` faux), pour
+# rester offert devant une inconnue et à plusieurs, là où une usurpation se tente (ADR 0012, 0226).
 @IDENTITY.tool("identity_doubt", description=phrase("identity.tools.doubt.description"),
                label=phrase("identity.tools.doubt.label"), args=DoubtArgs, bundle=BUNDLE,
                episodes=CONVERSATIONAL, max_calls_per_episode=1, when=something_to_doubt)
@@ -86,6 +88,8 @@ async def doubt(args: DoubtArgs, ctx: Any) -> str:
     return phrase("identity.tools.doubt.done")
 
 
+# Comme douter : il écrit une preuve, mais ne fait que baisser la confiance ; au regard des droits, il lit (``acts``
+# faux), pour rester offert devant une inconnue et à plusieurs, là où une usurpation se tente (ADR 0012, 0226).
 @IDENTITY.tool("identity_forget_binding", description=phrase("identity.tools.forget.description"),
                label=phrase("identity.tools.forget.label"), args=NoArgs,
                bundle=BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=1, when=something_to_doubt)

@@ -96,11 +96,7 @@ def _address(frame: Frame, j: Job) -> str:
     """Où le montrer : là où la personne est maintenant (connectée, sinon joignable), sinon d'où venait la
     demande."""
     handles = frame.get(identity_c.HANDLES(j.person)) or (j.target,)
-    present = [h for h in frame.get(presence_c.PRESENT) if h in handles]
-    if present:
-        return present[0]
-    reachable = frame.get(identity_c.REACHABLE(j.person))
-    return reachable[0] if reachable else j.target
+    return identity_c.reach_now(frame, j.person, handles=handles) or j.target
 
 
 def _who(frame: Frame, j: Job) -> str:

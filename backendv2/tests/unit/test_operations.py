@@ -3,7 +3,8 @@ fait rien et dit pourquoi, champ par champ ; une action valide journalise ses
 événements avec l'origine « extérieure » et un audit qui nomme l'opérateur ;
 un double envoi ne refait rien ; une garde changée supplante ; une action
 irréversible exige qu'on retape la clé ; une action qui émettrait ce qu'elle
-n'a pas déclaré est refusée."""
+n'a pas déclaré est refusée ; une action à confirmer refuse partout de la même
+façon."""
 
 from __future__ import annotations
 
@@ -16,7 +17,7 @@ from mika.kernel.events import Content, Origin, Payload
 from mika.kernel.facts import FactKey
 from mika.kernel.faculty import Faculty
 from mika.kernel.guards import Guard
-from mika.kernel.operate import Decision, Done, Refused
+from mika.kernel.operate import CONFIRM_FIRST, Decision, Done, Refused, confirm_first
 from mika.runtime import decisions
 from mika.runtime.operations import perform
 from mika.sim.clock import run_virtual
@@ -241,6 +242,15 @@ def test_a_guard_checks_what_the_action_read(tmp_path):
         assert notes == ("intrus", "il y en avait 1")
     finally:
         BOARD.actions[:] = [a for a in BOARD.actions if a.name not in ("compter", "compter_seul")]
+
+
+def test_an_action_to_confirm_says_it_one_way():
+    """Une action qui attend « Je confirme » (identités, liens) : le même
+    bandeau partout, et sous la case ce que l'action changera, une seule fois."""
+    refused = confirm_first("Ce lien s'ouvre.")
+    assert isinstance(refused, Refused)
+    assert refused.message == CONFIRM_FIRST
+    assert refused.fields == {"confirmed": "Ce lien s'ouvre. Coche « Je confirme »."}
 
 
 def test_a_failed_action_gives_its_form_back(tmp_path):

@@ -25,7 +25,7 @@ from mika.contracts import runtime as rt
 from mika.faculties.projects.access import allowance, reads, sees, steering
 from mika.faculties.projects.faculty import ACCESS_SET, AMENDED, PAUSED
 from mika.faculties.projects.prompt import _live_section
-from mika.faculties.projects.tools import SteerArgs, may_steer, project_steer
+from mika.faculties.projects.steer import SteerArgs, may_steer, project_steer
 from mika.kernel.frame import Audience, EpisodeRef, Frame
 from mika.runtime.operations import perform
 from mika.runtime.tool_offer import offer

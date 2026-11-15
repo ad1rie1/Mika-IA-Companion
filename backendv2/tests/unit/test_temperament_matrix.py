@@ -38,7 +38,7 @@ from mika.faculties.others.faculty import derive as others_derive
 from mika.faculties.self.character import told
 from mika.faculties.self.esteem import esteem
 from mika.faculties.self.faculty import SelfState
-from mika.faculties.self.knobs import derive as self_derive
+from mika.faculties.self.params import derive as self_derive
 from mika.faculties.social.faculty import derive as social_derive
 from mika.faculties.social.reciprocity import _one_sided_felt
 from mika.kernel import forms

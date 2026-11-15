@@ -32,39 +32,53 @@ reprend déjà — sinon, le lendemain, elle lui demandait comment ça s'était 
 au début de sa journée, pour l'une comme pour l'autre : ses vœux (« joyeux
 anniversaire ! ») le reprennent. Une date qui revient chaque année se juge à
 son occurrence de cette année : ses vœux de l'an dernier ne la reprennent pas.
+
+**Comment un moment a tourné.** ``resolution`` l'écrit d'une seule façon,
+avec ce qu'elle en attendait et de qui elle l'apprend (ADR 0086) : la
+consolidation et la relecture de la nuit le disent pareil.
+
+**Laisser filer.** Une promesse que rien n'a réglée bien après son échéance
+s'abandonne (``memory.promises``) : rien ne reste dû pour toujours.
 """
 
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from datetime import datetime, time
 from typing import Any
 
 from sqlalchemy import select
 
+from mika.contracts import goals as goals_c
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
 from mika.contracts import presence as presence_c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.contracts import transcript as transcript_c
+from mika.faculties.memory import likelihood as lk
+from mika.faculties.memory import tables as tb
 from mika.faculties.memory.faculty import (
     MEMORY,
     PROMISE_SUBJECT,
     Keeping,
     MemoryParams,
     MemoryState,
+    day_of,
     events_at,
     params,
 )
+from mika.faculties.memory.tables import batches
 from mika.kernel.arbitration import Candidate
 from mika.kernel.clock import DAY, instant
 from mika.kernel.events import Draft
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
-from mika.kernel.guards import Guard, floor
+from mika.kernel.guards import floor
 from mika.kernel.state import FrozenDict
+from mika.vocab.affect import facets_valence
 from mika.vocab.episodes import Kind
 from mika.vocab.people import is_identifiable
 from mika.vocab.phrasebook import phrase
@@ -107,11 +121,6 @@ def same_task(a: str, b: str) -> bool:
     return bool((stems(a) - _TASK_STEMS) & (stems(b) - _TASK_STEMS))
 
 
-def day_start(t: int, frame: Frame) -> int:
-    """Minuit (heure locale) du jour de cet instant."""
-    return instant(datetime.combine(frame.local(t).date(), time(0, 0), tzinfo=frame.env.tz_of(frame.root)))
-
-
 def opens_at(ev: c.LifeEvent, frame: Frame, *, theirs: bool) -> int:
     """Depuis quand un moment passé peut être repris en mots. Une situation : depuis qu'elle dure. Un moment qui
     se fête : dès le début de sa journée (ses vœux le reprennent). Un moment « jour entier », par ce que la
@@ -120,7 +129,7 @@ def opens_at(ev: c.LifeEvent, frame: Frame, *, theirs: bool) -> int:
     if ev.ongoing:
         return ev.when
     if ev.festive or (theirs and ev.all_day):
-        return min(ev.when, day_start(ev.when, frame))
+        return min(ev.when, day_of(ev.when, frame.env.tz_of(frame.root)))
     return ev.when
 
 
@@ -228,6 +237,20 @@ class Follow:
             await ctx.emit(*drafts)
 
 
+# ── Comment un moment a tourné ────────────────────────────────────────────
+
+
+def resolution(ev: c.LifeEvent, outcome: str, by: str, sources: Sequence[int], call_id: str) -> Draft[Any]:
+    """Comment ce moment a tourné, avec ce qu'elle en attendait et de qui elle en apprend (ADR 0086) — une seule
+    façon, pour la consolidation et la relecture de la nuit."""
+    return c.RESOLVED.draft(
+        event=ev.id, thread=ev.key, outcome=outcome, by=by, likelihood=ev.likelihood, importance=ev.importance,
+        surprise=lk.surprise(outcome, ev.likelihood, ev.importance) if outcome != c.UNKNOWN else 0.0,
+        nature=lk.nature_of(ev), teller=ev.told_by[0] if ev.told_by else "", shared=ev.shared,
+        valence=round(facets_valence(ev.empathy or ev.felt), 3), about=ev.about, sources=tuple(sources),
+        call_id=call_id, dedupe_key=f"issue:{ev.key}:{ev.when}")
+
+
 # ── Tenir parole au moment dit ────────────────────────────────────────────
 
 
@@ -257,7 +280,7 @@ def due_now(pr: c.PendingPromise, frame: Frame, p: MemoryParams) -> bool:
         return False
     start, _full, end = window
     if pr.all_day:
-        start = min(start, day_start(pr.due, frame))
+        start = min(start, day_of(pr.due, frame.env.tz_of(frame.root)))
     return start <= frame.now <= end
 
 
@@ -268,20 +291,6 @@ def kept_too_early(pr: c.PendingPromise, at: int, frame: Frame) -> bool:
     if pr.due is None or pr.implicit_due:
         return False
     return frame.local(at).date() < frame.local(pr.due).date()
-
-
-def _address(frame: Frame, person: str) -> str | None:
-    handles = frame.get(identity_c.HANDLES(person))
-    present = [h for h in frame.get(presence_c.PRESENT) if h in handles]
-    if present:
-        return present[0]
-    reachable = frame.get(identity_c.REACHABLE(person))
-    return reachable[0] if reachable else None
-
-
-def _last_from(frame: Frame, person: str) -> int:
-    handles = frame.get(identity_c.HANDLES(person)) or (person,)
-    return max(frame.get(transcript_c.LAST_FROM(h)) for h in handles)
 
 
 @MEMORY.propose(kinds=[Kind.INITIATIVE], reasons={c.KEEP_PROMISE: (0.0, 12.0)},
@@ -302,9 +311,9 @@ def _keep(s: MemoryState, frame: Frame) -> list[Candidate]:
         if not start <= now <= end or tries.retry_at > now or tries.attempts >= p.keep_attempts:
             continue
         to = frame.get(identity_c.PERSON(pr.to)) or pr.to  # une adresse reliée depuis à quelqu'un parle pour lui
-        if _last_from(frame, to) >= max(start, pr.at):
+        if identity_c.last_heard(frame, to) >= max(start, pr.at):
             continue  # elles se sont parlé depuis : c'était l'occasion, le prompt le lui montrait
-        address = _address(frame, to)
+        address = identity_c.reach_now(frame, to)
         if address is None:
             continue
         ramp = min(1.0, max(0.0, (now - start) / (full - start)))
@@ -313,9 +322,98 @@ def _keep(s: MemoryState, frame: Frame) -> list[Candidate]:
         who = f"« {name} »" if name else phrase("memory.keep.someone")
         when = phrase("memory.keep.today") if pr.all_day else phrase("memory.keep.now")
         brief = phrase("memory.keep.brief", who=who, when=when, id=pr.id)
-        handles = frame.get(identity_c.HANDLES(to)) or (to,)
-        guard = Guard("pas de nouvelles", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))
         out.append(Candidate(Kind.INITIATIVE, address, c.KEEP_PROMISE, round(evidence, 3),
-                             resources=frozenset({floor(address)}), guards=(guard,),
+                             resources=frozenset({floor(address)}), guards=(identity_c.heard_since_guard(frame, to),),
                              args=FrozenDict({"brief:memory": brief, "subject": f"{PROMISE_SUBJECT}{pr.id}"})))
     return out
+
+
+# ── Laisser filer ─────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class Reminder:
+    """Un rappel programmé (un but ``goals`` vivant, de la sorte ``reminder``) : à qui, quoi, pour quand."""
+
+    id: int
+    owner: str
+    title: str
+    due: int | None
+    opened_at: int
+
+
+def reminders_of(frame: Frame, store: Any) -> list[Reminder]:
+    """Les rappels programmés en cours (``goals.LIVE``), avec leur texte."""
+    live = [g for g in frame.get(goals_c.LIVE) if g.kind == goals_c.REMINDER and g.owner and g.title_ref]
+    if not live or store is None:
+        return []
+    texts = store.content([g.title_ref for g in live])
+    return [Reminder(g.id, g.owner, texts.get(g.title_ref) or "", g.due, g.opened_at) for g in live
+            if texts.get(g.title_ref)]
+
+
+def same_day(frame: Frame, a: int | None, b: int | None) -> bool:
+    """Le même jour (heure locale) — ou l'un des deux sans date : rien ne les distingue."""
+    return a is None or b is None or frame.local(a).date() == frame.local(b).date()
+
+
+@MEMORY.process("memory.promises", wake_on=[c.PROMISE_NOTICED, c.PROMISE_RESOLVED, rt.UTTERANCE,
+                                             goals_c.GOAL_OPENED],
+                catch_up=CatchUp.ONCE, max_quantum_s=3600)
+class LetGo:
+    """Une promesse qu'elle vient de tenir en le disant (l'initiative qui la tenait a parlé) est réglée : tenue.
+    Une promesse ni tenue ni abandonnée s'abandonne quelques jours après son
+    échéance : elle y a repensé (l'attention le lui a rappelé), puis elle laisse filer. Un rappel programmé
+    ensuite pour la même chose (« à 9 h, stp » : l'outil ``goal_remind``) la porte désormais : la promesse lui
+    laisse la place (un rappel demandé existe une fois et une seule)."""
+
+    def __init__(self) -> None:
+        #: les rappels programmés déjà confrontés aux promesses
+        self.seen: set[int] = set()
+
+    def _due(self, state: MemoryState, p: MemoryParams) -> list[tuple[int, int]]:
+        grace = round(p.promise_drop_days * DAY)
+        return sorted((pr.due + grace, pr.id) for pr in state.promises.values() if pr.due is not None)
+
+    def _fresh_reminders(self, state: MemoryState, frame: Frame) -> bool:
+        owners = {frame.get(identity_c.PERSON(pr.to)) or pr.to for pr in state.promises.values()}
+        return any(g.kind == goals_c.REMINDER and g.owner in owners and g.id not in self.seen
+                   for g in frame.get(goals_c.LIVE))
+
+    def next_due(self, state: MemoryState, frame: Frame, last_run: int | None) -> int | None:
+        if any(k in state.promises for k in state.kept) or self._fresh_reminders(state, frame):
+            return frame.now
+        due = self._due(state, params(frame.env.params_of("memory", frame.root)))
+        return max(frame.now, due[0][0]) if due else None
+
+    async def run(self, ctx: Any) -> None:
+        frame: Frame = ctx.frame
+        state: MemoryState = ctx.state
+        p = params(frame.env.params_of("memory", frame.root))
+        kept = [k for k in state.kept if k in state.promises]
+        drafts = [c.PROMISE_RESOLVED.draft(promise=pid, status=c.HONORED, by=c.KEPT_BY,
+                                           dedupe_key=f"promesse-tenue:{pid}") for pid in kept]
+        drafts += [c.PROMISE_RESOLVED.draft(promise=pid, status=c.DROPPED, by=c.EXPIRED_BY,
+                                            dedupe_key=f"promesse-abandonnée:{pid}")
+                   for at, pid in self._due(state, p) if at <= frame.now and pid not in kept]
+        done = {d.data.promise for d in drafts}
+        drafts += [c.PROMISE_RESOLVED.draft(promise=pid, status=c.DROPPED, by=c.REMINDER_BY,
+                                            dedupe_key=f"promesse-rappel:{pid}")
+                   for pid in self._carried(ctx.ports.get("store"), state, frame) if pid not in done]
+        if drafts:
+            await ctx.emit(*drafts)
+
+    def _carried(self, store: Any, state: MemoryState, frame: Frame) -> list[int]:
+        """Les promesses qu'un rappel programmé après elles porte désormais : la même chose, pour la même
+        personne, le même jour."""
+        self.seen = {g.id for g in frame.get(goals_c.LIVE) if g.kind == goals_c.REMINDER}
+        reminders = reminders_of(frame, store)
+        pending = [pr for pr in state.promises.values() if pr.id not in state.kept]
+        if not reminders or not pending or store is None:
+            return []
+        t = tb.items()
+        texts = {int(i): said for chunk in batches(sorted({pr.id for pr in pending}))
+                 for i, said in store.query_mind(select(t.c.id, t.c.text).where(t.c.id.in_(chunk)))}
+        return sorted(pr.id for pr in pending if any(
+            r.owner == (frame.get(identity_c.PERSON(pr.to)) or pr.to) and r.opened_at >= pr.at and same_task(texts.get(pr.id) or "", r.title)
+            and same_day(frame, None if pr.implicit_due else pr.due, r.due) for r in reminders))

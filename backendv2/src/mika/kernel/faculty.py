@@ -216,7 +216,11 @@ class ToolSpec:
     #: 0131), celles d'un projet, lues dans son journal (ADR 0133). Le dernier champ : le décorateur ``tool``
     #: construit les outils du code par position.
     fits: Callable[[Any, str, Any], bool] | None = None
-    #: il change quelque chose (sa colonne « action » dans un tableau de droits) ; sinon il lit
+    #: sa colonne dans un tableau de droits : « un outil qui agit » s'il change quelque chose, sinon « un outil qui
+    #: lit » — et le plafond qui s'y applique (une inconnue, un salon : aucune action). C'est ce que la console et
+    #: Outils disent de lui (« elle agit », « elle lit »). Un outil qui n'écrit que pour baisser la confiance (douter
+    #: de qui écrit) se range avec ceux qui lisent ; ce qu'un outil qui lit exige de plus de qui est en face, ``when``
+    #: le déclare (ADR 0148, 0226)
     acts: bool = False
     #: le port sans lequel il ne fait rien (« imaging ») : pas offert tant que ce port n'est pas configuré — un
     #: outil qui répondrait « je ne peux pas » ferait croire qu'elle sait le faire (ADR 0160)

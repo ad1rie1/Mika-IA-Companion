@@ -337,11 +337,7 @@ def _stances_view(s: AffectState, frame: Frame, ctx: InspectContext) -> list[Blo
 # ── Sur la fiche d'une personne ───────────────────────────────────────────
 
 
-#: le type d'objet « personne », déclaré par l'identité
-PERSON_KIND = "person"
-
-
-@AFFECT.inspect("affect", title="Affect", subject=PERSON_KIND, order=60,
+@AFFECT.inspect("affect", title="Affect", subject="person", order=60,
                 description="Ce qu'elle ressent envers cette personne, sur tous ses moyens de communication.")
 def _person_view(s: AffectState, frame: Frame, ctx: InspectContext) -> list[Block]:
     person = ctx.subject

@@ -25,13 +25,16 @@ sur un tel canal — jamais dans un salon public.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from mika.contracts import presence as presence_c
+from mika.contracts import transcript as transcript_c
 from mika.kernel.events import Content, Payload, event_type
 from mika.kernel.facts import FactFamily, FactKey
 from mika.kernel.frame import Frame
+from mika.kernel.guards import Guard
 from mika.vocab.people import clean_display_name
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import ChannelTrust, Disclosure
@@ -240,7 +243,8 @@ OWNERS = FactKey("identity.owners", type=tuple)
 
 
 # ── Qui s'occupe d'elle, comme elle le dirait ─────────────────────────────
-# Une fois pour le courrier, Teams, la Forge et les projets. Qui les appelle doit déclarer ``IDENTITY`` et ``OWNERS``.
+# Une fois pour le courrier, Teams, la Forge, les buts, les projets, ses initiatives et ses envois. Qui les appelle
+# doit déclarer ``IDENTITY`` et ``OWNERS``.
 
 
 def person_name(frame: Frame, handle: str) -> str:
@@ -274,3 +278,53 @@ def keepers(frame: Frame, *, quoted: bool = False) -> str:
     if not names:
         return keeper()
     return phrase("identity.keeper.either").join(map(_quoted, names) if quoted else names)
+
+
+# ── Où la joindre ─────────────────────────────────────────────────────────
+# Une fois pour les buts et les projets (un rappel, un récit, une demande) et pour les initiatives des autres
+# facultés et plugins : où la joindre maintenant (``reach_now``), quand elle lui a écrit pour la dernière fois
+# (``last_heard``) et la garde qui devance une initiative si elle écrit entre-temps (``heard_since_guard``), toutes
+# sur ses adresses (``HANDLES``, à défaut sa clé : une adresse reliée depuis à quelqu'un d'autre quitte les siennes,
+# et l'état ouvert sous elle y reste). Les initiatives d'attention, de social, de memory et d'others les lisent telles
+# quelles. Les autres copies gardent ce qui leur est propre : leurs adresses (``handles=``, avec le repli de la
+# demande), la cible de la demande en dernier recours, un filtre d'heures entre la présente et la joignable (il lit
+# ``present_address`` seule). Qui les appelle déclare ``HANDLES``, ``REACHABLE``, ``presence.PRESENT`` et, pour les
+# deux dernières, ``transcript.LAST_FROM`` dans ses ``reads=``.
+
+
+def _handles(frame: Frame, person: str) -> tuple[str, ...]:
+    """Ses adresses (``HANDLES``) ; à défaut, sa clé elle-même (une adresse jamais reliée, ou reliée depuis à une
+    autre personne)."""
+    return tuple(frame.get(HANDLES(person)) or (person,))
+
+
+def present_address(frame: Frame, handles: Iterable[str]) -> str | None:
+    """La première de ces adresses qui est là maintenant, dans l'ordre de ``presence.PRESENT`` ; ``None`` si aucune."""
+    wanted = frozenset(handles)
+    return next((h for h in frame.get(presence_c.PRESENT) if h in wanted), None)
+
+
+def reach_now(frame: Frame, person: str, *, handles: Sequence[str] | None = None) -> str | None:
+    """Où joindre cette personne maintenant : une de ses adresses qui est là (``present_address``), sinon la première
+    où l'on peut lui écrire d'elle-même (``REACHABLE``), sinon ``None``. Ses adresses sont ``handles`` s'il est
+    donné, sinon ``HANDLES`` (à défaut, sa clé elle-même). Qui l'appelle déclare ``HANDLES``, ``REACHABLE`` et
+    ``presence.PRESENT`` dans ses ``reads=``."""
+    present = present_address(frame, handles if handles is not None else _handles(frame, person))
+    if present is not None:
+        return present
+    reachable = frame.get(REACHABLE(person))
+    return reachable[0] if reachable else None
+
+
+def last_heard(frame: Frame, person: str) -> int:
+    """Quand cette personne lui a écrit pour la dernière fois : le plus récent des ``transcript.LAST_FROM`` sur ses
+    adresses (``HANDLES``, à défaut sa clé) ; 0 si jamais. Qui l'appelle déclare ``HANDLES`` et
+    ``transcript.LAST_FROM`` dans ses ``reads=``."""
+    return max((frame.get(transcript_c.LAST_FROM(h)) for h in _handles(frame, person)), default=0)
+
+
+def heard_since_guard(frame: Frame, person: str) -> Guard:
+    """La garde d'une initiative vers cette personne : si elle écrit entre-temps, sur n'importe laquelle de ses
+    adresses (``HANDLES``, à défaut sa clé), l'initiative est devancée — on lui répond, on ne la relance pas. Qui
+    l'appelle déclare ``HANDLES`` et ``transcript.LAST_FROM`` dans ses ``reads=``."""
+    return Guard("pas de nouvelles", reads=tuple(transcript_c.LAST_FROM(h) for h in _handles(frame, person)))

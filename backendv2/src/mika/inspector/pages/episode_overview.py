@@ -34,6 +34,7 @@ from mika.kernel.inspect import (
     When,
 )
 from mika.ports.journal import JournalEvent
+from mika.vocab.episodes import outcome_words
 
 PREVIEW_SPEECHES = 3
 #: un épisode sans fin au journal
@@ -75,7 +76,7 @@ def summary(ui: Any, corr: str, info: dict[str, Any]) -> Summary:
     timed = bool(started and ended)
     span = max(0, ended.at - started.at) if timed else 0
     duration = ("< 1 s" if span < US else show_duration(span)) if timed else "—"
-    label, tone = names.outcome(ended.data.outcome, ended.data.kind) if ended else ("ouvert", "warn")
+    label, tone = outcome_words(ended.data.outcome, ended.data.kind) if ended else ("ouvert", "warn")
     detail = names.detail(ended.data.detail or ended.data.guard) if ended else OPEN
     latest = ui.inspection.context().events([rt.UTTERANCE], PREVIEW_SPEECHES, correlations=[corr])
     return Summary(counts=counts, speeches=counts.get(rt.UTTERANCE.name, 0), duration=duration, timed=timed,

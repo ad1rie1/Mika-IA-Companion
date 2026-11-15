@@ -34,7 +34,9 @@ de modèle de langage :
   doux ce jour-là ;
 - **la contagion** : le ton du moment de quelqu'un la colore un peu, selon
   leur proximité — elle s'allège avec quelqu'un de joyeux, se tend avec
-  quelqu'un de stressé.
+  quelqu'un de stressé ;
+- **un message bref** (``few_words``) : la règle de « répondre à peine »,
+  qu'``attention`` lit aussi sur l'échange d'où naît une pensée.
 
 Chaque lecture d'un message est un jugement enregistré (``others.read``) :
 le rejeu retombe exactement sur le même modèle.
@@ -42,10 +44,12 @@ le rejeu retombe exactement sur le même modèle.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from mika.kernel.events import Payload, event_type
 from mika.kernel.facts import FactFamily
+from mika.vocab.words import SALUTATIONS, fold
 
 OWNER = "others"
 
@@ -66,9 +70,9 @@ CHEER = "cheer"
 #: elle l'a souhaité (ADR 0052)
 CELEBRATE = "celebrate"
 #: le jour où revient une date lourde qu'une proche lui a confiée elle-même (la date d'un deuil,
-#: ``memory.heavy_date``) : un mot doux, d'elle-même, une fois — « je pense à toi aujourd'hui », rien de festif,
-#: aucune question. Seulement envers une proche : une amie, ce jour-là, n'en reçoit rien d'elle-même (si elles se
-#: parlent, la conversation le sait)
+#: ``contracts.memory.heavy_date``) : un mot doux, d'elle-même, une fois — « je pense à toi aujourd'hui »,
+#: rien de festif, aucune question. Seulement envers une proche : une amie, ce jour-là, n'en reçoit rien
+#: d'elle-même (si elles se parlent, la conversation le sait)
 REMEMBRANCE = "remembrance"
 #: Un vœu n'attend pas de réponse : ni attente déçue, ni « sans réponse », et un mot pour encourager n'empêche pas
 #: de demander le lendemain comment ça s'est passé (la retenue envers qui ne répond pas ne le compte pas). Un mot
@@ -192,3 +196,21 @@ class HoursReading:
 
 #: ``HOURS(personne)`` : les heures où elle écrit — on n'est pas ignorée par quelqu'un qui dort.
 HOURS = FactFamily("others.hours", arg=str, type=HoursReading)
+
+
+# ── Un message bref ───────────────────────────────────────────────────────
+
+#: au-delà de ce nombre de mots, un message n'est plus « quelques mots »
+FEW_WORDS = 3
+
+
+def few_words(text: str) -> bool:
+    """Un message bref : trois mots au plus (``FEW_WORDS``, comptés sur le texte replié), ni une question ni un
+    bonjour — un bonjour est court par nature, une question n'est pas répondre à peine (« ouais », « bof », « je sais
+    pas » sont brefs ; « salut », « ça va ? » ne le sont pas). Sa forme, pas son sens.
+
+    La seule règle d'un message bref, pour les deux fenêtres qui la lisent : la conversation en cours
+    (``faculties/others/faculty.py::curt_run``) et l'échange passé d'où naît une pensée
+    (``faculties/attention/watch.py::mostly_curt``)."""
+    tokens = re.findall(r"\w+", fold(text))
+    return bool(tokens) and len(tokens) <= FEW_WORDS and not text.strip().endswith("?") and tokens[0] not in SALUTATIONS

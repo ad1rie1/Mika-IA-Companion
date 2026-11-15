@@ -9,6 +9,12 @@
   confié et entendu par les mêmes**, s'y fond (sans modèle) : un seul
   souvenir, qui garde la plus haute des deux importances et des deux
   sensibilités (la projection).
+- **Joindre** : au même passage que le tri, les croyances notées deux fois
+  parce que deux personnes les ont dites (d'avant les témoignages, ADR 0080)
+  — les mêmes mots, sur les mêmes personnes, de même nature (un avis ou une
+  hypothèse, du même porteur), et pas un de ses mensonges — se réunissent
+  sans modèle (``memory.joined``) : la plus ancienne garde ; chaque autre
+  devient un de ses témoignages.
 """
 
 from __future__ import annotations
@@ -27,12 +33,12 @@ from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
-from mika.faculties.memory import extraction as x
-from mika.faculties.memory.consolidation import kept_secrets
-from mika.faculties.memory.faculty import MEMORY, MemoryState, Reflection, params
+from mika.faculties.memory import cues
+from mika.faculties.memory.faculty import MEMORY, REFLECTION_MARK, MemoryState, Reflection, params
+from mika.faculties.memory.kept import kept_secrets
 from mika.faculties.memory.projections import ITEM_COLUMNS
 from mika.faculties.memory.salience import Item
-from mika.faculties.memory.tables import items
+from mika.faculties.memory.tables import items, keys_of
 from mika.kernel.clock import instant, local_date_of_night
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp
@@ -65,7 +71,7 @@ class Reflect:
             if not text:
                 self.skipped.add(r.thought)  # effacée (oubli) : rien à repenser
                 continue
-            mark = f"réflexion:{r.thought}"
+            mark = f"{REFLECTION_MARK}:{r.thought}"
             constraints, internal = _disclosure(frame, store, r.thought)
             secret = self._secret(frame, store, r, text) or any(rule.secret for rule in constraints)
             # L'auteur est Mika ; les restrictions des sources restent des restrictions, pas des auteurs.
@@ -84,11 +90,11 @@ class Reflect:
         """Comme à la consolidation : la pensée cite qu'on lui a demandé de le taire, ou laisse deviner un secret
         qu'elle garde déjà sur ces personnes (une confidence du soir cite le message même que la consolidation a
         rangé en secret — repensée la nuit, elle ne doit pas devenir un souvenir dicible aux amies)."""
-        if x.says_secret([text]):
+        if cues.says_secret([text]):
             return True
         names = {st for person in r.about for st in stems(frame.get(identity_c.IDENTITY(person)).name or "")}
         names |= stems(self_c.name_of(frame.get(self_c.PERSONA)))
-        return x.echoes(text, kept_secrets(store, r.about), names)
+        return cues.echoes(text, kept_secrets(store, r.about), names)
 
 
 def _disclosure(frame: Frame, store: Any, thought: int) -> tuple[tuple[c.Disclosure, ...], bool]:
@@ -140,7 +146,7 @@ def _disclosure(frame: Frame, store: Any, thought: int) -> tuple[tuple[c.Disclos
                 continue
             rules.append(c.Disclosure(about=(person,), told_by=(person,), heard_by=(person,),
                                       sensitivity=int(Sensitivity.ANODYNE if data.get("public") else Sensitivity.PERSONAL),
-                                      secret=x.says_secret([text])))
+                                      secret=cues.says_secret([text])))
         elif event.type == rt.UTTERANCE.name:
             floor = int(data.get("floor") or 0)
             if data.get("unkept") or floor:
@@ -256,14 +262,6 @@ def joinable_pairs(store: Any, p: Any) -> tuple[tuple[int, int], ...]:
     return tuple(out)
 
 
-def _people(raw: Any) -> frozenset[str]:
-    try:
-        got = json.loads(raw or "[]")
-    except (TypeError, ValueError):
-        return frozenset()
-    return frozenset(str(k) for k in got) if isinstance(got, list) else frozenset()
-
-
 def _same_people(a: Sequence[Any], b: Sequence[Any]) -> bool:
     """Mêmes personnes concernées, mêmes confidents, mêmes témoins (``about``, ``told_by``, ``heard_by``)."""
-    return all(_people(x) == _people(y) for x, y in zip(a, b, strict=True))
+    return all(frozenset(keys_of(x)) == frozenset(keys_of(y)) for x, y in zip(a, b, strict=True))

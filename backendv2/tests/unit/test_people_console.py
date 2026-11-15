@@ -7,7 +7,9 @@
 - oublier une personne oublie aussi les noms qui ne désignent qu'elle
   (« name:alice », ce que d'autres ont dit d'elle) — pas ceux d'un homonyme ;
 - les libellés ne forcent pas le féminin, et une adresse qui ne parle que pour
-  elle-même n'est jamais dite « liée ».
+  elle-même n'est jamais dite « liée » ;
+- le poids d'une preuve s'écrit comme tout nombre de la console (``num_fr``) :
+  « − » pour un démenti, rien devant un poids nul.
 """
 
 from __future__ import annotations
@@ -19,8 +21,9 @@ from mika.app.composition import faculties
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import social as social_c
-from mika.faculties.identity import Handle, _apply
-from mika.faculties.identity.inspect import FORGOTTEN, MAX_LEDGER, certainty_fr
+from mika.faculties.identity import Handle
+from mika.faculties.identity.faculty import IdentityState, _apply
+from mika.faculties.identity.inspect import FORGOTTEN, MAX_LEDGER, _describe_event, certainty_fr
 from mika.kernel.events import Content, Origin
 from mika.kernel.inspect import Table
 from mika.kernel.registry import Registry
@@ -150,6 +153,28 @@ def test_labels_do_not_force_the_feminine_nor_call_an_unbound_handle_bound(tmp_p
     badges = {b.text for b in handle.badges}
     assert "certitude 0,85 (sûre du compte)" in badges and "non lié" in badges
     assert certainty_fr(privacy.BOUND) == "0,85 (liée)"  # contrôle : une vraie liaison se dit liée
+
+
+def test_the_ledger_signs_a_proof_like_every_number_of_the_console():
+    """Avant, le registre écrivait « (-0,50) » pour un démenti et « (+0,00) » pour une première preuve."""
+    def detail(kind: str) -> str:
+        proof = SimpleNamespace(type=identity_c.EVIDENCE, data=identity_c.Evidence(handle="ext_5", kind=kind))
+        return _describe_event(proof, IdentityState())[1]
+
+    assert detail(identity_c.DENIED) == "démenti (−0,50)"
+    assert detail(identity_c.SHARED_MEMORY).endswith("(+0,50)")
+    assert detail(identity_c.SHARED_HINT).endswith("(0,00)")
+
+
+def test_the_weight_of_proofs_against_reads_with_a_minus_sign(tmp_path):
+    async def scenario(kernel):
+        return show(kernel, "identity", "politique")
+
+    table = next(b for b in run(tmp_path, scenario) if isinstance(b, Table) and b.title == "Le poids des preuves")
+    weights = {str(row[1].text): (row[2], row[3]) for row in table.rows}
+    assert weights[identity_c.DENIED] == ("−0,50", "contre")  # avant : « -0,50 »
+    assert weights[identity_c.REVOKED] == ("−1,00", "contre")
+    assert weights[identity_c.VOUCHED] == ("+0,35", "pour")
 
 
 # ── Le journal existant se rejoue ─────────────────────────────────────────

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import Float, Integer, inspect, select
@@ -123,6 +124,25 @@ def test_every_key_is_bounded_and_every_index_fits_mariadb():
             assert ix.name.startswith(table.name) and len(ix.name) <= 64, ix.name
 
 
+def test_the_queue_says_where_its_messages_come_from_and_an_older_entry_comes_from_the_thread():
+    """La file des reprises dit d'où viennent les messages de chaque entrée (ADR 0224) : un événement d'avant ce champ
+    vient du fil, et l'entrée reprise garde sa source ; l'oubli d'une de ses personnes l'efface."""
+    db = DB()
+    detail = Content.of('{"issues": ["RuntimeError"], "output": ""}', level=3)
+    older = mc.ExtractionDeferred.model_validate({"key": 3, "messages": [3], "about": [ALICE], "detail": detail})
+    first = mc.EXTRACTION_DEFERRED.draft(key=8, source=mc.FROM_RELAYED, messages=(8, 9), about=("phone:ab:Léa",),
+                                         failure_code="provider_error", detail=detail)
+    again = mc.EXTRACTION_DEFERRED.draft(key=8, source=mc.FROM_RELAYED, messages=(8, 9), about=("phone:ab:Léa",),
+                                         attempts=2, failure_code="provider_error", detail=detail)
+    ExtractionQueue().apply(db, [SimpleNamespace(type=mc.EXTRACTION_DEFERRED, data=older, seq=4, at=DAY),
+                                 event(first, 10), event(again, 11)], "")
+    q = tb.deferred()
+    assert [tuple(r) for r in db.query(select(q.c.key, q.c.source, q.c.attempts).order_by(q.c.key))] == [
+        (3, mc.FROM_THREAD, 1), (8, mc.FROM_RELAYED, 2)]
+    ExtractionQueue().forget(db, "phone:ab:Léa", "")
+    assert [tuple(r) for r in db.query(select(q.c.key))] == [(3,)]
+
+
 def test_a_mention_too_long_for_its_key_is_kept_and_forgotten_by_its_bound():
     """Un « nom » démesuré venu d'une extraction : l'élément entre quand même (la clé est ramenée à sa borne), et
     l'oubli de ce sujet l'atteint."""
@@ -197,3 +217,18 @@ def test_a_projection_not_yet_created_is_said_not_raised():
     assert not tb.has_table(db, tb.items())
     Items().create(db, "")
     assert tb.has_table(db, tb.items())
+
+
+def test_a_key_list_is_read_tolerantly_and_written_one_way():
+    """Une liste de clés se lit et s'écrit à un seul endroit (``tables``) : lue, une valeur absente, illisible ou qui
+    n'est pas une liste ne donne rien (jamais une erreur) ; écrite, triée, sans doublon ni clé vide, telle que la
+    projection la range — un doublon exact se trouve en comparant la colonne telle quelle."""
+    assert tb.keys_of('["user_3", "name:élodie", 7]') == ("user_3", "name:élodie", "7")
+    for raw in (None, "", "pas du json", '{"user_2": 1}', '"user_2"', ["user_2"], 3):
+        assert tb.keys_of(raw) == ()
+    assert tb.keys_json(["user_3", "", "name:élodie", "user_3"]) == '["name:élodie", "user_3"]'
+    assert tb.keys_json(()) == "[]"
+    db = DB()
+    Items().apply(db, [event(believed("aime le jazz", (ALICE, ""), (BOB, BOB)), 5)], "")
+    t = tb.items()
+    assert db.query(select(t.c.about, t.c.told_by)) == [(tb.keys_json((ALICE,)), tb.keys_json((BOB,)))]

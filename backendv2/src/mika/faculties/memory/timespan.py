@@ -16,7 +16,8 @@ from zoneinfo import ZoneInfo
 
 from mika.contracts.memory import DAY, MONTH, RANGE, SEASON, YEAR
 from mika.kernel.clock import instant
-from mika.vocab.phrasebook import phrase, phrases
+from mika.vocab.circadian import MONTHS_FR, day_month_fr
+from mika.vocab.phrasebook import phrase
 from mika.vocab.words import fold
 
 #: les saisons (météorologiques : un mois plein de plus ou de moins ne change pas ce qu'on attend) — le premier mois,
@@ -125,15 +126,6 @@ def parse(value: str | None, tz: ZoneInfo) -> Timespan | None:
 # ── en mots ─────────────────────────────────────────────────────────────────
 
 
-def _month(n: int) -> str:
-    return phrases("memory.dates.months")[n - 1]
-
-
-def _day_month(d: date) -> str:
-    day = phrase("memory.dates.first") if d.day == 1 else str(d.day)
-    return phrase("memory.dates.date", day=day, month=_month(d.month))
-
-
 def words(span: Timespan, now: int, tz: ZoneInfo) -> str:
     """Une période comme on la dit : « en novembre », « au printemps 2027 », « l'an prochain », « du 3 au 10
     novembre ». Un jour n'est pas son affaire (le rappel dit « jeudi », « demain »)."""
@@ -147,8 +139,8 @@ def period_words(start_us: int, end_us: int, precision: str, now: int, tz: ZoneI
     this_year = datetime.fromtimestamp(now / 1e6, tz).year
     if precision == MONTH:
         if start.year == this_year:
-            return phrase("timespan.month", month=_month(start.month))
-        return phrase("timespan.month_year", month=_month(start.month), year=start.year)
+            return phrase("timespan.month", month=MONTHS_FR[start.month - 1])
+        return phrase("timespan.month_year", month=MONTHS_FR[start.month - 1], year=start.year)
     if precision == SEASON:
         season = next(name for name, first in SEASONS.items() if first == start.month)
         said = phrase(f"timespan.seasons.{season}")
@@ -160,9 +152,9 @@ def period_words(start_us: int, end_us: int, precision: str, now: int, tz: ZoneI
             return phrase("timespan.next_year")
         return phrase("timespan.year", year=start.year)
     if precision == RANGE:
-        first = str(start.day) if start.month == end.month and start.year == end.year else _day_month(start)
+        first = str(start.day) if start.month == end.month and start.year == end.year else day_month_fr(start)
         if start.day == 1 and first == "1":
-            first = phrase("memory.dates.first")
-        said = phrase("timespan.range", start=first, end=_day_month(end))
+            first = phrase("circadian.date.first")
+        said = phrase("timespan.range", start=first, end=day_month_fr(end))
         return said if end.year == this_year else phrase("timespan.with_year", what=said, year=end.year)
-    return _day_month(start)
+    return day_month_fr(start)

@@ -202,7 +202,10 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
   pièce) efface ses octets ; sa ligne reste, estompée, « retiré(e) par un opérateur », et ce qu'elle en a lu reste.
   Voir venir : ses attentes sur une échelle de « toujours juste » à « pile ou face », et qui tient ce qu'il annonce.
   La consolidation dit où en est la relecture en une phrase et une bande de chiffres, puis en sous-onglets les
-  passages à reprendre (leur reprise sur leur ligne), ses relectures, les tris de la nuit et l'état détaillé.
+  passages à reprendre (ses conversations et celles reçues sur le téléphone, ADR 0224 ; leur reprise sur leur
+  ligne), ses relectures, les tris de la nuit, ses lectures relues la nuit (`memory.reread` : combien de lectures et
+  de paires, ce qu'elle en a retenu, et en détail les croyances que la même nuit a réunies ou confrontées) et l'état
+  détaillé de la consolidation (dont la dernière nuit relue).
 - **Constellation** (`/inspecteur/constellation`, `app/constellation.py`, ADR 0103) : sa mémoire en une boule de
   points, chacun près de ses voisins de sens, et ce qui la parcourt en direct (une parole et sa provenance, un
   élément qui naît, la nuit, un rêve et ses sources).
@@ -341,17 +344,21 @@ Ses onglets sont dans `app/handmade/tabs/projects.py` (ADR 0177).
   vue d'un objet de la maquette — un seul bandeau : ce qui attend ton accord, « Les décider » ouvrant la file des
   validations, sinon sa pause ou ce qui le retient ; une bande de chiffres « Où il en est », ses dernières exécutions
   en barres ; son plan et sa réponse ; puis des tuiles qui mènent à leurs onglets : ses objectifs, ses dernières
-  exécutions, ses décisions en vigueur, son cadre, sa prochaine exécution, son dépôt) · *Objectifs* (dessiné,
+  exécutions, ses décisions en vigueur, son cadre, sa prochaine exécution, son dépôt ; la prochaine exécution se dit
+  comme la prochaine séance d'un but, `projects.inspect._next_words` : « dès que possible », sa date puis pourquoi
+  pas avant — son agenda ou l'espacement, sa plage de travail, la cadence de ses objectifs —, ou ce qui la retient)
+  · *Objectifs* (dessiné,
   `app/handmade/subjects/project.py` : ses chiffres, puis une entrée par objectif — son numéro, ce qu'il vise, sa sorte et son
   état, son rythme et qui l'a posé, son dernier compte rendu en citation (long, quatre lignes que « lire la suite »
   déplie) et ce qu'elle en a tiré ; ses boutons sur sa ligne, deux en vue (le lancer, le premier statut), « Modifier
   l'objectif » en panneau, le reste sous « ⋯ » ; un constant ne se coche pas ; « Ajouter un objectif » en colonne à
   côté de la liste sur un grand écran) · *Exécutions* (issue, verdict, preuve, commit,
-  durée) · *Décisions* (dessiné, comme *Objectifs* et sur les mêmes pièces, `handmade/projets/_fiche.html` : une entrée par
-  décision — la question tranchée et son statut, ce qui est choisi, pourquoi en citation, le contexte et les options
-  envisagées repliés, qui l'a posée, quand, ce qu'elle remplace ; sur sa ligne, la retirer ou la remettre en vigueur
-  et « Remplacer cette décision » en panneau ; remplacée ou retirée, elle s'estompe ; « Consigner une décision » en
-  colonne à côté) · *Fichiers* (dossiers à parcourir, lire,
+  durée) · *Décisions techniques* (dessiné, comme *Objectifs* et sur les mêmes pièces, `handmade/projets/_fiche.html` :
+  une entrée par décision — la question tranchée et son statut, ce qui est choisi, pourquoi en citation, le contexte
+  et les options envisagées repliés, qui l'a posée, quand, ce qu'elle remplace ; sur sa ligne, la retirer ou la
+  remettre en vigueur et « Remplacer cette décision » en panneau ; remplacée ou retirée, elle s'estompe ; « Consigner
+  une décision » en colonne à côté ; sur la fiche d'un but, « Décisions » sont les pesées de l'arbitre) · *Fichiers*
+  (dossiers à parcourir, lire,
   télécharger, déposer) · *Dépôt git* (dessiné, `app/handmade/subjects/project_git.py`, ADR 0183 : un seul bandeau — un
   envoi qui attend ton accord, GitHub qui ne répond pas, ou les deux histoires qui ont divergé ; l'atelier et son
   dépôt distant face à face, l'atelier avec sa branche, son dernier commit et ce qui n'est pas enregistré, le distant
@@ -368,14 +375,17 @@ Ses onglets sont dans `app/handmade/tabs/projects.py` (ADR 0177).
   ses notes, ce qu'on en a fait, ce qui sort de la machine). En tête : lancer maintenant, pause, reprendre, consigne, archiver, restaurer — les formulaires
   d'onglet (`inline`) et les actions de ligne n'y sont jamais.
 
-**Buts et rappels** (`app/handmade/tabs/goals.py`) : les buts vivants, leurs chiffres, puis côte à côte ses
-explorations (séances sur leur plafond, envie qui s'use) et ses rappels (chacun à sa date, le plus proche d'abord) ;
-les buts clos, leur issue en marque et ce qu'ils ont donné, en deux colonnes. La fiche d'un but : Résumé, Cadre
-et réglages, Séances, Carnet, Décisions, Épisodes et prompts ; elle pilote (ADR 0030) : modifier le cadre,
-avancer maintenant, rouvrir, priorité, plan de travail. Sa prochaine séance (quand, ou ce qui la retient : la nuit,
-le plafond de l'heure, une séance en cours ; rien pour un rappel, un but clos ou en pause) se dit d'une seule règle
-(`goals.inspect.next_session`), la même dans l'en-tête, la liste et la fiche ; la fiche dessinée la lit dans
-l'en-tête de la faculté.
+**Buts et rappels** (`app/handmade/tabs/goals.py`) : les buts vivants (filtrables par sorte, rappel ou exploration,
+et par autorité), leurs chiffres, puis côte à côte ses explorations (séances sur leur plafond, envie qui s'use) et ses
+rappels (chacun à sa date, le plus proche d'abord) ; les buts clos (les mêmes filtres, et l'ancien projet qu'un vieux
+journal y garde), leur issue en marque et ce qu'ils ont donné, en deux colonnes. La fiche d'un but : Résumé, Cadre
+et réglages, Séances (chaque séance et chaque fois qu'elle en a parlé : son compte rendu, et de quoi relire son
+prompt), Carnet, Décisions ; elle pilote (ADR 0030) : modifier le cadre, avancer maintenant, rouvrir, priorité, plan
+de travail. Sa prochaine séance (quand, et pourquoi pas avant, ou ce qui
+la retient : la nuit, le plafond de l'heure, une séance en cours ; rien pour un rappel, un but clos ou en pause) se dit
+d'une seule règle (`goals.inspect.next_session`), la même dans l'en-tête, la liste et la fiche ; la fiche dessinée la
+lit dans l'en-tête de la faculté. Ce qui la retient est un code (`goals.work.why_not_now`), que la console dit dans
+ses mots, sous la même forme que la prochaine exécution d'un projet.
 
 **Décisions** (`app/handmade/tabs/decisions.py`) : une ligne de l'arbitre se lit partout de la même façon — ce qui
 pousse face à ce qui retient sur une barre, l'équilibre au milieu, le score ; ce qui l'en empêche ; combien de fois

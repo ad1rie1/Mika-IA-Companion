@@ -14,7 +14,7 @@ from mika.contracts import goals as goals_c
 from mika.kernel.events import Content, Origin
 from tests.protocol.test_web import WS, bootstrap, world  # noqa: F401 — fixture
 
-TABS = ("resume", "politique", "seances", "carnet", "decisions", "episodes")
+TABS = ("resume", "politique", "seances", "carnet", "decisions")
 
 
 def _explore(client, live) -> int:
@@ -56,6 +56,11 @@ def test_the_goals_menu_and_an_exploration_fiche_are_driven_over_http(world):  #
     for tab in TABS:
         r = client.get(f"/inspecteur/fiche/goal/{gid}?onglet={tab}")
         assert r.status_code == 200 and "a échoué" not in r.text and "Action non déclarée" not in r.text, tab
+    # un seul onglet pour ses séances (audit K5-12) ; l'adresse de l'ancien « Épisodes et prompts » ouvre la fiche
+    assert "Épisodes et prompts" not in fiche
+    old = client.get(f"/inspecteur/fiche/goal/{gid}?onglet=episodes")
+    assert old.status_code == 200 and "a échoué" not in old.text
+    assert "Ses dernières séances" in html.unescape(old.text)  # son Résumé, qui mène à toutes ses séances
     policy = html.unescape(client.get(f"/inspecteur/fiche/goal/{gid}?onglet=politique").text)
     assert "ne se réécrit pas" in policy
     assert act("goals.clore", "x1").status_code == 303

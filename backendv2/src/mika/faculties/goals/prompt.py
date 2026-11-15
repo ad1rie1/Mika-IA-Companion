@@ -31,13 +31,14 @@ from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
 from mika.faculties.goals.faculty import GOALS, Goal, GoalsState, audible, kept_before, live, musing, status
 from mika.faculties.goals.tools import by_reflecting, date_time, titled
-from mika.faculties.goals.work import FULL, MENTION, worry_of
+from mika.faculties.goals.work import worry_of
 from mika.kernel.clock import DAY, HOUR, MINUTE, local
 from mika.kernel.faculty import Zone
 from mika.kernel.frame import Frame
 from mika.kernel.prompt import SectionBody, cited
+from mika.kernel.text import clipped
 from mika.vocab.days import when_fr
-from mika.vocab.episodes import CONVERSATIONAL, Kind, goal_of
+from mika.vocab.episodes import CONVERSATIONAL, Kind, goal_of, goal_target
 from mika.vocab.knowledge import knowns, lineage_of
 from mika.vocab.lineage import Lineage, admits
 from mika.vocab.phrasebook import family, phrase
@@ -95,7 +96,7 @@ async def _texts(s: GoalsState, frame: Frame, ports: Mapping[str, Any]) -> dict[
 
 
 def _who(frame: Frame, key: str | None) -> str:
-    name = frame.get(identity_c.IDENTITY(key)).name if key else ""
+    name = identity_c.person_name(frame, key or "")
     return f"« {name} »" if name else phrase("expression.person.someone")
 
 
@@ -152,7 +153,7 @@ def _last_time(before: tuple[int, str, int] | None, frame: Frame, texts: Mapping
     if before is None or not text:
         return ""
     return phrase("goals.step.last_time", when=when_words(before[0], frame.now, frame),
-                  kept=_clip(text, KEPT_SHOWN))
+                  kept=clipped(text, KEPT_SHOWN))
 
 
 def _what(g: Goal, frame: Frame, texts: Mapping[str, str],
@@ -162,7 +163,7 @@ def _what(g: Goal, frame: Frame, texts: Mapping[str, str],
     title = titled(g, texts)[0] or phrase("goals.step.no_title")
     lines = [phrase("goals.step.goal", title=title)]
     person = g.owner or (g.about[0] if g.about else None)
-    name = frame.get(identity_c.IDENTITY(person)).name if person else ""
+    name = identity_c.person_name(frame, person or "")
     when = f" {when_words(g.origin_at, frame.now, frame)}" if g.origin_at else ""
     quoted = phrase("goals.step.quoted") if _origin(g, texts) else ""
     if g.kind != c.EXPLORATION:
@@ -235,7 +236,7 @@ def _step(s: GoalsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody
     if notes:
         lines.append(phrase("goals.step.notebook") + "\n" + "\n".join(f"- {n}" for n in notes[-3:]))
     lines.append(phrase("goals.step.rules"))
-    return SectionBody("\n".join(lines), level=level, provenance=(f"goal:{g.id}",))
+    return SectionBody("\n".join(lines), level=level, provenance=(goal_target(g.id),))
 
 
 #: ce qui a fait naître une exploration est la matière même de la séance : cité, coupé en premier, mais jamais
@@ -252,7 +253,7 @@ def _step_origin(s: GoalsState, frame: Frame, enrich: Mapping[str, Any]) -> Sect
     if g is None or g.kind != c.EXPLORATION:
         return None
     text = _origin(g, (enrich.get("goals") or {}).get("texts") or {})
-    return SectionBody(text, level=g.sensitivity, provenance=(f"goal:{g.id}",)) if text else None
+    return SectionBody(text, level=g.sensitivity, provenance=(goal_target(g.id),)) if text else None
 
 
 #: l'échange d'où vient une réflexion : cherché dans les heures qui précèdent sa naissance, depuis le dernier silence
@@ -282,7 +283,7 @@ def exchange_of(store: Any, frame: Frame, person: str, until: int, public: bool)
     for i in range(1, len(rows)):
         if rows[i][0] - rows[i - 1][0] > EXCHANGE_GAP:
             start = i
-    return [(role == "user", _clip(str(text), THEIR_CLIP if role == "user" else MINE_CLIP))
+    return [(role == "user", clipped(str(text), THEIR_CLIP if role == "user" else MINE_CLIP))
             for _at, role, text in rows[start:][-EXCHANGE_LINES:] if str(text or "").strip()]
 
 
@@ -329,12 +330,7 @@ def life_of(store: Any, frame: Frame, person: str) -> list[tuple[str, int]]:
 
 def _names(frame: Frame, people: list[str]) -> str:
     someone = phrase("expression.person.someone")
-    return ", ".join(f"« {n} »" if (n := frame.get(identity_c.IDENTITY(p)).name) else someone for p in people)
-
-
-def _clip(text: str, n: int) -> str:
-    text = " ".join(text.split())
-    return text if len(text) <= n else text[: n - 1].rstrip() + "…"
+    return ", ".join(f"« {n} »" if (n := identity_c.person_name(frame, p)) else someone for p in people)
 
 
 @GOALS.enricher("goals_context", episodes=[Kind.STEP], deadline_ms=1500,
@@ -364,11 +360,11 @@ def _step_exchange(s: GoalsState, frame: Frame, enrich: Mapping[str, Any]) -> Se
     lines = (enrich.get("goals_context") or {}).get("exchange") or []
     if g is None or not lines:
         return None
-    name = frame.get(identity_c.IDENTITY(g.owner)).name if g.owner else ""
+    name = identity_c.person_name(frame, g.owner or "")
     who = name or phrase("goals.exchange.other")
     body = "\n".join(phrase("goals.exchange.theirs", who=who, text=text) if theirs else
                      phrase("goals.exchange.mine", text=text) for theirs, text in lines)
-    return SectionBody(body, level=g.sensitivity, provenance=(f"goal:{g.id}",))
+    return SectionBody(body, level=g.sensitivity, provenance=(goal_target(g.id),))
 
 
 @GOALS.section("step_life", zone=Zone.VOLATILE, episodes=[Kind.STEP], trim_rank=60,
@@ -380,10 +376,10 @@ def _step_life(s: GoalsState, frame: Frame, enrich: Mapping[str, Any]) -> Sectio
     items = (enrich.get("goals_context") or {}).get("life") or []
     if g is None or not items:
         return None
-    name = frame.get(identity_c.IDENTITY(g.owner)).name if g.owner else ""
+    name = identity_c.person_name(frame, g.owner or "")
     head = phrase("goals.life.head", name=name) if name else phrase("goals.life.head_unnamed")
     body = head + "\n" + "\n".join(f"- {text}" for text, _ in items)
-    return SectionBody(body, level=max([g.sensitivity, *(sv for _, sv in items)]), provenance=(f"goal:{g.id}",))
+    return SectionBody(body, level=max([g.sensitivity, *(sv for _, sv in items)]), provenance=(goal_target(g.id),))
 
 
 def _origin(g: Goal, texts: Mapping[str, str]) -> str:
@@ -422,30 +418,30 @@ def _subject_section(s: GoalsState, frame: Frame, enrich: Mapping[str, Any]) -> 
     person = frame.get(identity_c.PERSON(ep.target)) if ep is not None and ep.target else None
     got = _levels(g, person, frame)
     args = ep.attrs.get("args") if ep is not None else None
-    share = str(args.get("share", MENTION)) if args else MENTION
+    share = str(args.get("share", social_c.MENTION)) if args else social_c.MENTION
     if g.kind == c.REMINDER:
         if not title or got is None:
             return None
         when = phrase("goals.subject.due", time=f"{local(g.due, frame.env.tz_of(frame.root)):%H:%M}") \
             if g.due else ""
         return SectionBody(f"{title}{when}", level=got[0], witness=got[1], title=phrase("goals.subject.reminder_title"),
-                           provenance=(f"goal:{g.id}",))
+                           provenance=(goal_target(g.id),))
     # une inquiétude pour la personne à qui elle écrit : pas un exploit, ce à quoi elle a repensé pour elle
     worry = worry_of(g, person)
     heading = phrase("goals.subject.reflected_title") if worry else phrase("goals.subject.achieved_title")
-    if got is None or share == MENTION or not title:
+    if got is None or share == social_c.MENTION or not title:
         # une simple mention : le titre seulement s'il peut s'entendre, sinon rien de précis
         shown = title if title and got is not None and g.sensitivity <= 1 else phrase("goals.subject.something")
         return SectionBody(shown, level=0, title=heading)
     result = texts.get(g.result_ref, "")
-    if share == FULL:
+    if share == social_c.FULL:
         drawn = phrase("goals.subject.drawn_reflection", result=result) if worry else \
             phrase("goals.subject.drawn", result=result)
         body = (f"{title}\n{drawn}" if result else title) + _quoted(g, texts)
     else:
         first = result.split(". ")[0].strip() if result else ""
         body = title + (phrase("goals.subject.in_short", first=first) if first else "")
-    return SectionBody(body, level=got[0], witness=got[1], title=heading, provenance=(f"goal:{g.id}",))
+    return SectionBody(body, level=got[0], witness=got[1], title=heading, provenance=(goal_target(g.id),))
 
 
 @GOALS.section("goals", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=45,

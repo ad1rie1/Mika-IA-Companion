@@ -16,7 +16,8 @@
 - Voir venir : ses attentes par sorte d'annonce, sur une échelle de « toujours juste » à « pile ou face » ; et qui
   tient ce qu'il annonce, tenus et manqués sur une même barre.
 - Consolidation : où en est la relecture, en une phrase et une bande de chiffres ; puis en sous-onglets les passages
-  à reprendre (leur action sur leur ligne), ses relectures, les tris de la nuit et l'état détaillé.
+  à reprendre (leur action sur leur ligne), ses relectures, les tris de la nuit, ses lectures relues la nuit (ce
+  qu'elle en a retenu, et en détail les croyances que la même nuit a réunies ou confrontées) et l'état détaillé.
 
 Souvenirs, croyances, promesses et moments viennent de la même liste de la faculté (``memory``) : leurs filtres, leur
 pagination et leur bascule « Tableau » restent les siens ; ce qui distingue chacun se lit dans ses colonnes, et pour
@@ -335,7 +336,8 @@ def voir_venir(got: Got) -> Markup | None:
 #: les chiffres de « Ce qu'elle garde », et l'onglet où ils mènent
 KEPT_TABS = {"Souvenirs": "souvenirs", "Croyances": "croyances", "Promesses en cours": "promesses"}
 #: les curseurs de ses listes au journal (``faculties/memory/inspect.py``) : leur sous-onglet
-CURSORS = (("avant", "consol-runs"), ("avant_nuits", "consol-nights"), ("reprises", "consol-queue"))
+CURSORS = (("avant", "consol-runs"), ("avant_nuits", "consol-nights"), ("avant_lectures", "consol-rereads"),
+           ("reprises", "consol-queue"))
 
 
 def _passage(line: Line) -> dict[str, Any]:
@@ -357,13 +359,19 @@ def _night(line: Line) -> dict[str, Any]:
             "when": line.get("quand"), "href": line.href, "detail": line.rest}
 
 
+def _reread(line: Line) -> dict[str, Any]:
+    return {"night": day_label(line.text("nuit")), "readings": line.text("lectures"), "pairs": line.text("paires"),
+            "kept": line.text("retenus"), "upto": line.get("relues jusqu'au"), "model": line.text("modèle"),
+            "when": line.get("quand"), "href": line.href, "detail": line.rest}
+
+
 def consolidation(got: Got) -> Markup | None:
     """Mémoire › Consolidation : où en est la relecture, puis ses sous-onglets."""
-    rereading, runs, nights = got.fields("La relecture"), got.table("Les dernières relectures"), got.table(
-        "Les tris de la nuit")
-    if rereading is None or runs is None or nights is None:
+    state, runs = got.fields("La consolidation"), got.table("Les dernières relectures")
+    nights, rereads = got.table("Les tris de la nuit"), got.table("Ses lectures relues la nuit")
+    if state is None or runs is None or nights is None or rereads is None:
         return None
-    f = pairs(rereading)
+    f = pairs(state)
     queue = got.table("Passages à reprendre")
     kept = tiles(got.stats("Ce qu'elle garde"))
     band = [{**s, "href": f"{PREFIX}/memoire/{KEPT_TABS[label]}"} for label, s in kept.items() if label in KEPT_TABS]
@@ -376,12 +384,13 @@ def consolidation(got: Got) -> Markup | None:
                      "sub": "passages que la relecture n'a pas pu traiter", "tone": "warn" if queue["count"] else "",
                      "href": "#consol-queue"})
     first = next((pane for param, pane in CURSORS if got.query.get(param)), "")
-    panes = subpanes([{"id": "consol-queue"}, {"id": "consol-runs"}, {"id": "consol-nights"}, {"id": "consol-state"}],
-                     first)
+    panes = subpanes([{"id": "consol-queue"}, {"id": "consol-runs"}, {"id": "consol-nights"},
+                      {"id": "consol-rereads"}, {"id": "consol-state"}], first)
     return got.draw("handmade/memoire/consolidation.html", f=f, band={"t": "stats", "title": "", "items": band},
-                    rereading=rereading, queue=queue, passages=[_passage(x) for x in got.lines("Passages à reprendre")],
+                    state=state, queue=queue, passages=[_passage(x) for x in got.lines("Passages à reprendre")],
                     runs=runs, run_items=[_run(x) for x in got.lines("Les dernières relectures")],
                     nights=nights, night_items=[_night(x) for x in got.lines("Les tris de la nuit")],
+                    rereads=rereads, reread_items=[_reread(x) for x in got.lines("Ses lectures relues la nuit")],
                     panes=[p["id"] for p in panes], notes=got.notes())
 
 

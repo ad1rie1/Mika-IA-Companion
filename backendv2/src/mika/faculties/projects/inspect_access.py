@@ -176,7 +176,7 @@ def _project_grants(s: ProjectsState, frame: Frame, ctx: Any, audience: Any, kin
 
 @PROJECTS.rights("projets", title="Projets et leurs apps", order=30, grants=_project_grants,
                  description="Qui peut voir chaque projet, le piloter, en recevoir les fichiers et se servir de ses "
-                             "apps, par où et quand (ADR 0133, 0134).")
+                             "apps, par où et quand.")
 def _project_tables(s: ProjectsState, frame: Frame, ctx: Any) -> list[RuleTable]:
     out = []
     for pid, title in sorted(_titles(ctx, s).items()):

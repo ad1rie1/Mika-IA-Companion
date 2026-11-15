@@ -57,8 +57,8 @@ from mika.contracts import self_ as c
 from mika.contracts import transcript as transcript_c
 from mika.contracts import world as world_c
 from mika.faculties.self import days as d_
-from mika.faculties.self.faculty import SELF, SelfState
-from mika.faculties.self.knobs import params
+from mika.faculties.self.faculty import SELF, SelfState, day_of, lived_date, night_of, starts_of
+from mika.faculties.self.params import params
 from mika.faculties.self.persona import persona_for
 from mika.faculties.self.records import (
     ABANDONED,
@@ -81,6 +81,7 @@ from mika.kernel.prompt import SectionBody, readable
 from mika.ports.llm import LLMRequest, Message
 from mika.vocab import affect as A
 from mika.vocab import causes, circadian, privacy
+from mika.vocab.access import ROOM, STRANGER, situation
 from mika.vocab.affect import Appraisal
 from mika.vocab.episodes import CONVERSATIONAL, Kind, Tag
 from mika.vocab.knowledge import knowns
@@ -99,19 +100,6 @@ DREAM_LINGERS = 7 * HOUR
 YESTERDAY_DAYS = 2
 #: les rêves puisent dans ce qu'elle a vécu ou revécu depuis tant de temps
 DREAM_LOOKBACK = 3 * DAY
-
-
-def _starts(frame: Frame) -> int:
-    return d_.day_starts(frame.get(body_c.RHYTHM))
-
-
-def lived_day(frame: Frame, t: int | None = None) -> date:
-    return d_.lived_day(frame.now if t is None else t, frame.env.tz_of(frame.root), _starts(frame))
-
-
-def night_of(frame: Frame, asleep_since: int) -> str:
-    """La journée qu'un endormissement vient clore."""
-    return d_.night_of(asleep_since, frame.env.tz_of(frame.root), _starts(frame)).isoformat()
 
 
 # ── Réducteurs ────────────────────────────────────────────────────────────
@@ -174,7 +162,7 @@ def _woke(s: SelfState, e, cx) -> SelfState:
 
 @SELF.fact(c.YESTERDAY, reads=[body_c.RHYTHM])
 def _yesterday(s: SelfState, cx) -> c.JournalReading | None:
-    today = d_.lived_day(cx.now, cx.tz, d_.day_starts(cx.facts.get(body_c.RHYTHM))).isoformat()
+    today = day_of(cx, cx.now)
     past = sorted(day for day in s.journals.keys() if day < today)
     if not past:
         return None
@@ -320,7 +308,7 @@ class Write:
             if j is None:
                 return None if self.tries.get(day, 0) >= JOURNAL_TRIES else day
             # une nuit coupée : elle a parlé, dans cette journée, depuis qu'elle l'a écrit
-            if state.spoke_at > j.at and lived_day(frame, state.spoke_at).isoformat() == day \
+            if state.spoke_at > j.at and lived_date(frame, state.spoke_at).isoformat() == day \
                     and self.tries.get(f"{day}#{j.rev + 1}", 0) < JOURNAL_TRIES:
                 return day
             return None
@@ -328,9 +316,9 @@ class Write:
         # matin où un message l'a tirée du sommeil
         local = frame.local()
         minute = local.hour * 60 + local.minute
-        if frame.get(body_c.NIGHT_WAKING) or not _starts(frame) <= minute < 12 * 60:
+        if frame.get(body_c.NIGHT_WAKING) or not starts_of(frame) <= minute < 12 * 60:
             return None
-        yesterday = (lived_day(frame) - timedelta(days=1)).isoformat()
+        yesterday = (lived_date(frame) - timedelta(days=1)).isoformat()
         if yesterday not in state.journals and state.journals and self.tries.get(yesterday, 0) < JOURNAL_TRIES:
             return yesterday
         return None
@@ -392,7 +380,7 @@ def notes_of(frame: Frame, store: Any, state: SelfState,
     qui la travaille, comment son humeur a tourné. Et leur filiation : son journal intime ne se montre que là où tout
     ce qu'il reprend peut se dire (une note secrète à elle, sans personne, ne se lit pas dans un salon)."""
     tz = frame.env.tz_of(frame.root)
-    start, end = d_.day_window(day, tz, _starts(frame))
+    start, end = d_.day_window(day, tz, starts_of(frame))
     t = transcript_c.thread_table()
     rows = store.query_mind(select(t.c.at, t.c.person, t.c.role, t.c.kind, t.c.text, t.c.emotion)
                             .where(t.c.at >= start, t.c.at < end).order_by(t.c.id))
@@ -501,7 +489,7 @@ def told_day(frame: Frame, store: Any, state: SelfState, day: date) -> str:
     journée — vague mais vrai (« une journée un peu lourde »), jamais pourquoi. Le modèle de la conversation le dit
     avec ses mots quand on le lui demande."""
     tz = frame.env.tz_of(frame.root)
-    start, end = d_.day_window(day, tz, _starts(frame))
+    start, end = d_.day_window(day, tz, starts_of(frame))
     t = transcript_c.thread_table()
     rows = store.query_mind(select(t.c.at, t.c.person, t.c.role, t.c.kind, t.c.emotion, t.c.emotion_intensity)
                             .where(t.c.at >= start, t.c.at < end).order_by(t.c.id))
@@ -879,7 +867,7 @@ async def _night_texts(s: SelfState, frame: Frame, ports: Mapping[str, Any]) -> 
 
 def _when_written(frame: Frame, day: str) -> tuple[str, str] | None:
     """(« sur ta journée d'hier », « d'hier ») ; d'avant-hier ; au-delà, ce n'est plus son fil d'hier."""
-    gap = (lived_day(frame) - date.fromisoformat(day)).days
+    gap = (lived_date(frame) - date.fromisoformat(day)).days
     if gap == 1:
         return phrase("self.night.yesterday.on_yesterday"), phrase("self.night.yesterday.of_yesterday")
     if gap == YESTERDAY_DAYS:
@@ -953,17 +941,28 @@ class JournalArgs(BaseModel):
     days_ago: int = Field(ge=2, le=KEEP_JOURNALS, description=phrase("self.night.journal_tool.days_ago"))
 
 
-@SELF.tool("self_journal", acts=True, description=phrase("self.night.journal_tool.description"),
+def in_known_company(audience: Any) -> bool:
+    """Ni à une inconnue, ni dans un salon : son journal ne se relit que devant toi ou quelqu'un de reconnu.
+
+    La condition déclarée de ``self_journal`` (ADR 0148, 0226) : relire son journal est un outil qui lit, et le
+    plafond d'une inconnue et d'un salon, qui ferme toute action, ne le fermerait pas : elle le ferme. Toi, un compte
+    et le travail restent ouverts, comme leur plafond ; l'offre et le gestionnaire la jugent tous deux."""
+    return situation(audience) not in (STRANGER, ROOM)
+
+
+# Il ne fait que relire : la colonne « lecture » de ses droits (ADR 0226) ; sa condition le garde d'une inconnue et
+# d'un salon, et ce qu'il rend passe par la version « à raconter » pour qui n'est pas seul concerné.
+@SELF.tool("self_journal", description=phrase("self.night.journal_tool.description"),
            label=phrase("self.night.journal_tool.label"), args=JournalArgs,
-           bundle="self", episodes=CONVERSATIONAL)
+           bundle="self", episodes=CONVERSATIONAL, when=in_known_company)
 async def self_journal(args: JournalArgs, ctx: Any) -> str:
     frame: Frame = ctx.frame
     s: SelfState = ctx.state
-    day = (lived_day(frame) - timedelta(days=args.days_ago)).isoformat()
+    day = (lived_date(frame) - timedelta(days=args.days_ago)).isoformat()
     j = s.journals.get(day)
     store = ctx.ports.get("store")
     nothing = phrase("self.night.journal_tool.nothing", day=circadian.day_fr(date.fromisoformat(day)))
-    if j is None or store is None or not j.text_ref:
+    if not in_known_company(frame.audience) or j is None or store is None or not j.text_ref:
         return nothing
     reading = c.JournalReading(j.day, j.text_ref, j.about, j.dominant, j.shareable_ref, j.lineage, j.masked)
     text = _journal_text(frame, reading, store.content([r for r in (j.text_ref, j.shareable_ref) if r]))

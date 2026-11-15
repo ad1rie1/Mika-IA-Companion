@@ -21,7 +21,7 @@ from mika.contracts import social as social_c
 from mika.faculties.attention.faculty import _birth_felt
 from mika.faculties.expression import parse
 from mika.faculties.memory import consolidation as cons
-from mika.faculties.memory.extraction import Conversation, Line, Speaker, render
+from mika.faculties.memory.conversation import Conversation, Line, Speaker, render
 from mika.faculties.memory.lies import false_part
 from mika.kernel.clock import HOUR, US
 from mika.kernel.events import Content

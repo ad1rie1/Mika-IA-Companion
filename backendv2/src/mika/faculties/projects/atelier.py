@@ -35,7 +35,16 @@ from pydantic import BaseModel, Field, field_validator
 
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
-from mika.faculties.projects.faculty import NETWORK_QUEUED, NETWORKED, PROJECTS, Project, busy, params
+from mika.faculties.projects.faculty import (
+    NETWORK_QUEUED,
+    NETWORKED_CAPABILITY,
+    PROJECTS,
+    PULL_CAPABILITY,
+    PUSH_CAPABILITY,
+    Project,
+    busy,
+    params,
+)
 from mika.faculties.projects.tools import (
     current,
     gone,
@@ -218,7 +227,7 @@ def _already(frame: Any, p: Project, argv: list[str]) -> bool:
         return True
     state = frame.state("projects")
     for v in frame.get(rt.PENDING_EFFECTS):
-        if v.capability != NETWORKED or project_of(v.context) != p.id:
+        if v.capability != NETWORKED_CAPABILITY or project_of(v.context) != p.id:
             continue
         try:
             if [str(a) for a in json.loads(state.awaiting.get(v.proposal, "{}")).get("argv") or []] == wanted:
@@ -246,7 +255,8 @@ async def ws_network(args: NetworkArgs, ctx: Any) -> Any:
                                             owner=p.owner, about=p.about))
         return phrase("projects.workshop.queued")
     await ctx.propose(rt.EFFECT_PROPOSED.draft(
-        capability=NETWORKED, owner=PROJECTS.name, args_json=json.dumps({"project": p.id, "argv": args.argv}),
+        capability=NETWORKED_CAPABILITY, owner=PROJECTS.name,
+        args_json=json.dumps({"project": p.id, "argv": args.argv}),
         summary=Content.of(network_summary(p, args.argv, args.why), level=p.sensitivity), approval=True,
         context=project_target(p.id), about=about))
     return phrase("projects.workshop.proposed")
@@ -328,7 +338,8 @@ async def networked_preview(args: Mapping[str, Any], ports: Mapping[str, Any]) -
     return Preview(text, _digest(argv, head, dirty), blocked)
 
 
-@PROJECTS.capability("networked", description="Lancer une commande avec le réseau dans l'atelier d'un projet.",
+@PROJECTS.capability(NETWORKED_CAPABILITY,
+                     description="Lancer une commande avec le réseau dans l'atelier d'un projet.",
                      preview=networked_preview)
 async def networked(args: Mapping[str, Any], context: str, ports: Mapping[str, Any]) -> tuple[bool, str]:
     port = ports.get("workshop")
@@ -456,7 +467,8 @@ async def pull_preview(args: Mapping[str, Any], ports: Mapping[str, Any]) -> Pre
                         remote=hosted.head if hosted else None), blocked)
 
 
-@PROJECTS.capability("push", description="Envoyer l'atelier d'un projet vers son dépôt distant (git push).",
+@PROJECTS.capability(PUSH_CAPABILITY,
+                     description="Envoyer l'atelier d'un projet vers son dépôt distant (git push).",
                      preview=push_preview)
 async def push(args: Mapping[str, Any], context: str, ports: Mapping[str, Any]) -> tuple[bool, str]:
     port = ports.get("workshop")
@@ -470,7 +482,8 @@ async def push(args: Mapping[str, Any], context: str, ports: Mapping[str, Any]) 
     return result.ok, describe(result, 3000)
 
 
-@PROJECTS.capability("pull", description="Récupérer l'histoire du dépôt distant dans l'atelier (en ligne droite).",
+@PROJECTS.capability(PULL_CAPABILITY,
+                     description="Récupérer l'histoire du dépôt distant dans l'atelier (en ligne droite).",
                      preview=pull_preview)
 async def pull(args: Mapping[str, Any], context: str, ports: Mapping[str, Any]) -> tuple[bool, str]:
     port = ports.get("workshop")
@@ -506,7 +519,7 @@ def network_proposal(p: Project, request: int, argv: tuple[str, ...], why: str) 
     """Sa commande réseau mise en file (un projet sans accord requis), proposée maintenant que l'exécution qui
     l'a demandée a fini — avec l'accord si l'opératrice l'a exigé depuis : le réglage du projet est relu ici."""
     return rt.EFFECT_PROPOSED.draft(
-        capability=NETWORKED, owner=PROJECTS.name, context=project_target(p.id), approval=p.approval,
+        capability=NETWORKED_CAPABILITY, owner=PROJECTS.name, context=project_target(p.id), approval=p.approval,
         args_json=json.dumps({"project": p.id, "argv": list(argv), "request": request}),
         summary=Content.of(network_summary(p, argv, why or "(sans raison donnée)"), level=p.sensitivity),
         about=tuple(x for x in (p.owner, *p.about) if x), dedupe_key=f"reseau:{p.id}:{request}")

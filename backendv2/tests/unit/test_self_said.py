@@ -15,23 +15,23 @@ from dataclasses import replace
 import pytest
 
 from mika.contracts import memory as mc
-from mika.faculties.memory import consolidation as cons
+from mika.faculties.memory import kept
+from mika.faculties.memory.conversation import Speaker
+from mika.faculties.memory.cues import gist_of
 from mika.faculties.memory.extraction import (
     IMPORTANCE,
     Extraction,
-    People,
-    Speaker,
     XConstat,
     XCroyance,
     XPrevision,
     XSouvenir,
-    gist_of,
     kind_of_genre,
 )
 from mika.faculties.memory.faculty import MemoryParams
 from mika.faculties.memory.inspect import Kept, _detail
 from mika.faculties.memory.projections import ITEM_COLUMNS
 from mika.faculties.memory.salience import Item, salience
+from mika.faculties.memory.speakers import People
 from mika.kernel.clock import DAY
 from mika.kernel.events import Content
 from mika.vocab.lineage import Lineage, Requirement, Restriction, requirement, without_whom
@@ -47,7 +47,7 @@ JAZZ, NO_JAZZ = "J'aime le jazz", "Je n'aime plus le jazz"
 def said_of_herself(db: Store, text: str, genre: str | None = None, *, remplace: int | None = None,
                     known: tuple[int, ...] = ()) -> list:
     """Ce que la relecture garde d'une de ses répliques sur elle-même."""
-    return cons._about_self(XCroyance(texte=text, genre=genre, sur_elle=True, remplace=remplace), db,
+    return kept._about_self(XCroyance(texte=text, genre=genre, sur_elle=True, remplace=remplace), db,
                             lambda _: ((1,), (), []), "self", set(known))
 
 

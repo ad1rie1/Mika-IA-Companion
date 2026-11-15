@@ -28,10 +28,8 @@ from pydantic import BaseModel, Field
 from mika.contracts import attachments as c
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
-from mika.faculties.attachments.faculty import (
-    ATTACHMENTS,
-    PORT,
-    VECTOR_KIND,
+from mika.faculties.attachments.faculty import ATTACHMENTS, PORT, VECTOR_KIND
+from mika.faculties.attachments.tables import (
     FileRow,
     by_prefix,
     by_seqs,

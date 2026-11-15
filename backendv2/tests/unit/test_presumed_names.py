@@ -20,18 +20,10 @@ from __future__ import annotations
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as mc
 from mika.faculties.memory import consolidation as cons
-from mika.faculties.memory.consolidation import Consolidate, known_beliefs
-from mika.faculties.memory.extraction import (
-    CONFIDENCE_CAP,
-    Conversation,
-    Extraction,
-    Line,
-    People,
-    Speaker,
-    XCroyance,
-    born_confidence,
-    mention_scope,
-)
+from mika.faculties.memory.consolidation import Consolidate
+from mika.faculties.memory.conversation import Conversation, Line, Speaker
+from mika.faculties.memory.delicate import sensitivity_of
+from mika.faculties.memory.extraction import CONFIDENCE_CAP, Extraction, XCroyance, born_confidence
 from mika.faculties.memory.projections import Items
 from mika.faculties.memory.recall import (
     canon,
@@ -39,9 +31,10 @@ from mika.faculties.memory.recall import (
     items_by_id,
     named_people,
     presumed_of,
-    sensitivity_of,
 )
 from mika.faculties.memory.salience import admissible
+from mika.faculties.memory.shown import known_beliefs
+from mika.faculties.memory.speakers import People, mention_scope
 from mika.kernel.events import Content, Origin
 from mika.kernel.frame import Audience
 from mika.ports.vectors import VectorItem

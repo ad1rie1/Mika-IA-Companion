@@ -41,6 +41,7 @@ from mika.kernel.clock import US
 from mika.kernel.inspect import Ref, money_fr, num_fr
 from mika.runtime.boundary import Failed, call
 from mika.runtime.traces import TRUNCATION_MARK
+from mika.vocab.episodes import outcome_words
 
 EPISODE_TEMPLATE = "handmade/episode/episode.html"
 EPISODE_STYLES = ("handmade/parole.css", "handmade/episode.css")
@@ -195,7 +196,7 @@ def _prompt(ui: Any, corr: str, info: Mapping[str, Any], query: Mapping[str, str
                   ("audience", str(audience)),
                   ("enrichissements", ", ".join(trace.get("enrichments") or ()) or "aucun"),
                   ("empreinte du préfixe", str(trace.get("system_stable_hash") or "—")[:16]),
-                  ("issue", names.outcome(outcome)[0] if outcome != "running" else "en cours")],
+                  ("issue", outcome_words(outcome)[0] if outcome != "running" else "en cours")],
         "prompt": prompt_view(ui, trace), "context": [{"title": t, "text": x} for t, x in context_parts(trace)],
         "tools": tools_view(trace, utterance.data.tools if utterance is not None else ()),
         "steps": answer_steps(trace, utterance),

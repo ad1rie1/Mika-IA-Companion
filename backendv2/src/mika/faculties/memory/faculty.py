@@ -584,6 +584,10 @@ def _hard(s: MemoryState, person: str, at: int) -> MemoryState:
 
 #: au plus tant de mensonges en attente d'être retenus ; la marque de leur souvenir (``call_id`` : ``mensonge:<seq>``)
 LIES_KEPT, LIE_MARK = 20, "mensonge"
+#: la marque du souvenir qu'une réflexion devient la nuit (``call_id`` : ``réflexion:<pensée>``), posée par
+#: ``night.Reflect`` et relue ici : à son retour, la réflexion n'est plus à écrire. La valeur ne change pas, les
+#: souvenirs déjà au journal la portent
+REFLECTION_MARK = "réflexion"
 
 
 @MEMORY.reducer(rt.UTTERANCE, reads=[identity_c.PERSON])
@@ -853,7 +857,7 @@ def _retained(s: MemoryState, e, cx) -> MemoryState:
     avec quelqu'un, un proche à l'hôpital) dit aussi que quelque chose de grave touche les personnes qu'il
     concerne."""
     d = e.data
-    reflections = tuple(r for r in s.reflections if d.call_id != f"réflexion:{r.thought}")
+    reflections = tuple(r for r in s.reflections if d.call_id != f"{REFLECTION_MARK}:{r.thought}")
     lies = tuple(seq for seq in s.lies if d.call_id != f"{LIE_MARK}:{seq}")
     s = replace(s, items=s.items + 1, reflections=reflections, lies=lies)
     if d.importance >= params(cx.params).landmark_importance:

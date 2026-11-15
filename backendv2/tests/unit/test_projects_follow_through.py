@@ -28,18 +28,17 @@ from mika.faculties.projects.faculty import (
     _paused,
     _started,
     frame_subject,
-    pick,
 )
 from mika.faculties.projects.faculty import params as projects_params
 from mika.faculties.projects.prompt import _refs, _run_section, job_brief, work_brief
+from mika.faculties.projects.rhythm import pick
+from mika.faculties.projects.steer import SteerArgs, project_steer
 from mika.faculties.projects.tend import finished_at, pause_reason, unframed
 from mika.faculties.projects.tools import (
     PlanArgs,
     ReportArgs,
     StartArgs,
-    SteerArgs,
     project_plan,
-    project_steer,
     report_run,
     start_project,
 )

@@ -1,5 +1,6 @@
 """Ses partages (ADR 0188) : ce qu'elle partage — ses boîtes, ses comptes Teams, ses services — avec qui et à quel
-niveau ; ce qu'on lui partage ; les personnes à qui elle peut partager.
+niveau ; ce qu'on lui partage ; les personnes à qui elle peut partager. À ne pas confondre avec la faculté ``shares``
+(``faculties/shares``), les fichiers que Mika envoie à qui elle parle.
 
 Seul le propriétaire partage, et seulement avec une personne qui a un compte — jamais un salon, une inconnue, « tout
 le monde ». Une boîte ou un compte Teams partagé est rangé avec sa ressource et journalisé avec ses paramètres

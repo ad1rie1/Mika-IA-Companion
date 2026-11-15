@@ -20,6 +20,7 @@ from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.faculties.goals import work
 from mika.faculties.goals.faculty import GOAL_REOPENED, TASK_ADDED, TASK_CHANGED, TASK_REMOVED, params
+from mika.faculties.goals.inspect import WHY_WORDS
 from mika.inspector.pages.actions import per_row
 from mika.kernel.clock import MINUTE, US
 from mika.kernel.events import Content, Origin
@@ -159,10 +160,15 @@ def test_advance_now_skips_the_spacing_but_never_the_hourly_cap(tmp_path):
         return first, why, capped, got, again, len(steps_of(kernel, gid))
 
     first, why, capped, got, again, after = live(tmp_path, scenario, mode="plan")
-    assert first == 1 and why.startswith("pas encore")  # l'espacement la fixe plus tard, et la fiche le dit
-    assert capped.startswith("plafond atteint")
+    assert first == 1 and why[0] is work.Why.LATER  # l'espacement la fixe plus tard, et la fiche le dit
+    assert capped[0] is work.Why.HOUR_CAP
     assert got.ok and not again  # demandé une fois : plus offert jusqu'au pas
     assert after > first  # une séance, sans attendre l'espacement
+
+
+def test_every_reason_held_has_its_words():
+    """Ce qui retient une séance est un code de la faculté ; la console a les mots de chacun."""
+    assert set(WHY_WORDS) == set(work.Why)
 
 
 # ── Le plan de travail ────────────────────────────────────────────────────

@@ -33,16 +33,17 @@ from mika.contracts import body as body_c
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
 from mika.contracts import self_ as self_c
+from mika.faculties.memory import cues, timespan
 from mika.faculties.memory import extraction as x
 from mika.faculties.memory import likelihood as lk
 from mika.faculties.memory import tables as tb
-from mika.faculties.memory import timespan
 from mika.faculties.memory.archive import decode
-from mika.faculties.memory.consolidation import resolution, target_of, testimonies_of, twin_of
 from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState, over, params
 from mika.faculties.memory.knowledge import CONTEST, SUPERSEDE, Testimony, judge
+from mika.faculties.memory.life import resolution
 from mika.faculties.memory.recall import items_by_id, names_of, verdict_of
 from mika.faculties.memory.salience import Item, age_words
+from mika.faculties.memory.testimonies import target_of, testimonies_of, twin_of
 from mika.kernel.clock import DAY, local_date_of_night
 from mika.kernel.events import Content, Draft
 from mika.kernel.faculty import CatchUp, Zone, schema_of
@@ -50,6 +51,7 @@ from mika.kernel.frame import Frame
 from mika.kernel.prompt import PromptBudgetError, SectionBody
 from mika.ports.llm import LLMRequest, Message, ToolDecl
 from mika.ports.sql import json_field
+from mika.vocab.circadian import day_fr
 from mika.vocab.episodes import Kind
 from mika.vocab.people import clean_tokens, read_source
 from mika.vocab.phrasebook import phrase
@@ -117,6 +119,9 @@ class XConstatLu(_Lenient):
     issue: str = Field(min_length=2, max_length=40, description=phrase("memory.extraction.fields.constat_issue"))
 
 
+# les noms de ces classes (``Relecture``, ``XLu``, ``XMonde``, ``XAvis``, ``XLien``, ``XConstatLu``) et de leurs
+# champs restent en français, à l'écart de la règle des identifiants anglais : le schéma de l'outil les montre au
+# modèle (``schema_of(Relecture)``, son titre et ses ``$defs``), ils sont du prompt. Ne pas les renommer.
 class Relecture(_Lenient):
     croyances: list[XLu] = Field(default_factory=list)
     moments: list[XMonde] = Field(default_factory=list)
@@ -174,7 +179,7 @@ def tool(name: str) -> ToolDecl:
 
 
 @dataclass(frozen=True, slots=True)
-class Lu:
+class ReadItem:
     """Une lecture : son numéro dans le journal, sa source, son titre et son extrait ; ``asked_by`` : lue en
     conversation pour cette adresse (ADR 0110)."""
 
@@ -186,7 +191,7 @@ class Lu:
 
 
 @dataclass(frozen=True, slots=True)
-class Paire:
+class Pair:
     """Deux croyances sur la même personne, de témoins différents : l'ancienne d'abord."""
 
     old: int
@@ -211,7 +216,7 @@ def cut(text: str, limit: int) -> str:
     return (head.rsplit(" ", 1)[0] if " " in head else head) + "…"
 
 
-def readings(store: Any, p: MemoryParams, limit: int | None = None) -> tuple[list[Lu], int]:
+def readings(store: Any, p: MemoryParams, limit: int | None = None) -> tuple[list[ReadItem], int]:
     """Ses lectures en attente (les plus anciennes d'abord), et jusqu'où elles vont : une lecture dont le texte a été
     oublié depuis est relue sans rien en garder. Le lot est borné en nombre (``limit``, à défaut
     ``reread_max_readings``) **et en taille** : chaque extrait coupé à ``reread_excerpt_chars``, le tout à
@@ -221,21 +226,21 @@ def readings(store: Any, p: MemoryParams, limit: int | None = None) -> tuple[lis
     rows = store.query_mind(select(t.c.seq, t.c.source, t.c.title_ref, t.c.excerpt_ref, t.c.asked_by)
                             .order_by(t.c.seq).limit(limit or p.reread_max_readings))
     texts = store.content([r for row in rows for r in row[2:4] if r])
-    lus: list[Lu] = []
+    read_items: list[ReadItem] = []
     upto, spent = 0, 0
     for seq, source, title, excerpt, asked in rows:
         if not texts.get(title):
             upto = int(seq)  # oubliée depuis : relue sans rien en garder
             continue
-        lu = Lu(int(seq), str(source), cut(texts[title], p.reread_excerpt_chars),
-                cut(texts.get(excerpt) or "", p.reread_excerpt_chars), str(asked or ""))
-        size = len(lu.title) + len(lu.excerpt)
-        if lus and spent + size > p.reread_max_chars:
+        read_item = ReadItem(int(seq), str(source), cut(texts[title], p.reread_excerpt_chars),
+                             cut(texts.get(excerpt) or "", p.reread_excerpt_chars), str(asked or ""))
+        size = len(read_item.title) + len(read_item.excerpt)
+        if read_items and spent + size > p.reread_max_chars:
             break
-        lus.append(lu)
+        read_items.append(read_item)
         spent += size
         upto = int(seq)
-    return lus, upto
+    return read_items, upto
 
 
 def _persons(frame: Frame, keys: Sequence[str]) -> set[str]:
@@ -250,7 +255,7 @@ def _persons(frame: Frame, keys: Sequence[str]) -> set[str]:
     return out
 
 
-async def pairs(frame: Frame, store: Any, vectors: Any, p: MemoryParams) -> list[Paire]:
+async def pairs(frame: Frame, store: Any, vectors: Any, p: MemoryParams) -> list[Pair]:
     """Les paires à confronter : une croyance née depuis ``confront_days`` sur une personne, et ce qu'elle savait
     déjà d'elle — proche par le sens —, de témoins différents (un même témoin qui se corrige, la relecture du jour
     l'a déjà jugé), pas déjà en doute l'une de l'autre."""
@@ -262,10 +267,10 @@ async def pairs(frame: Frame, store: Any, vectors: Any, p: MemoryParams) -> list
         .where(t.c.kind == c.BELIEF, t.c.status == "active", t.c.about_self == 0, t.c.about != "[]",
                t.c.knowledge_kind == "claim", t.c.born_at >= frame.now - round(p.confront_days * DAY))
         .order_by(t.c.id.desc()).limit(40))
-    out: list[Paire] = []
+    out: list[Pair] = []
     seen: set[tuple[int, int]] = set()
     for item, text, about in rows:
-        mine = _persons(frame, _keys(about))
+        mine = _persons(frame, tb.keys_of(about))
         hits = await vectors.search(str(text), 8, kinds={c.BELIEF}, document=True)
         others = items_by_id(store, [k for k, sim in hits if k != item and sim >= p.recall_floor])
         for other in others.values():
@@ -281,8 +286,8 @@ async def pairs(frame: Frame, store: Any, vectors: Any, p: MemoryParams) -> list
             seen.add(pair)
             texts = {int(i): said for i, said in store.query_mind(select(t.c.id, t.c.text)
                                                                   .where(t.c.id.in_(pair)))}
-            out.append(Paire(pair[0], pair[1], str(texts.get(pair[0], "")), str(texts.get(pair[1], "")),
-                             tuple(sorted(first)), tuple(sorted(second))))
+            out.append(Pair(pair[0], pair[1], str(texts.get(pair[0], "")), str(texts.get(pair[1], "")),
+                            tuple(sorted(first)), tuple(sorted(second))))
             if len(out) >= p.confront_max_pairs:
                 return out
     return out
@@ -323,28 +328,20 @@ def expired(frame: Frame, store: Any, p: MemoryParams) -> list[c.LifeEvent]:
     return [decode(raw) for (raw,) in rows]
 
 
-def _keys(raw: Any) -> list[str]:
-    try:
-        got = json.loads(raw or "[]")
-    except (TypeError, ValueError):
-        return []
-    return [str(k) for k in got] if isinstance(got, list) else []
-
-
 def _told(store: Any, item: int) -> set[str]:
     """Qui le lui a dit : les témoins de tous ses témoignages."""
     tt = tb.testimonies()
-    return {k for (told,) in store.query_mind(select(tt.c.told_by).where(tt.c.item == item)) for k in _keys(told)}
+    return {k for (told,) in store.query_mind(select(tt.c.told_by).where(tt.c.item == item)) for k in tb.keys_of(told)}
 
 
-async def _known(store: Any, vectors: Any, lus: Sequence[Lu], *, mine: bool) -> list[tuple[int, str]]:
+async def _known(store: Any, vectors: Any, read_items: Sequence[ReadItem], *, mine: bool) -> list[tuple[int, str]]:
     """Ce qu'elle sait déjà qui touche ses lectures (anodin, jamais un secret — le modèle pourrait le recopier), ou
     ses avis à elle (``mine``)."""
-    if vectors is None or not lus:
+    if vectors is None or not read_items:
         return []
     found: dict[int, float] = {}
-    for lu in lus:
-        for k, sim in await vectors.search(f"{lu.title} {lu.excerpt[:300]}", 6, kinds={c.BELIEF}):
+    for read_item in read_items:
+        for k, sim in await vectors.search(f"{read_item.title} {read_item.excerpt[:300]}", 6, kinds={c.BELIEF}):
             found[k] = max(sim, found.get(k, 0.0))
     items = items_by_id(store, sorted(found))
     chosen = [it for it in items.values() if it.status == "active" and not it.secret and (
@@ -353,73 +350,75 @@ async def _known(store: Any, vectors: Any, lus: Sequence[Lu], *, mine: bool) -> 
     return [(it.id, it.text) for it in chosen[:OPINIONS_SHOWN if mine else KNOWN_SHOWN]]
 
 
-def render(frame: Frame, lus: Sequence[Lu], known: Sequence[tuple[int, str]], opinions: Sequence[tuple[int, str]],
-           paires: Sequence[Paire], names: Mapping[str, str],
+def render(frame: Frame, read_items: Sequence[ReadItem], known: Sequence[tuple[int, str]],
+           opinions: Sequence[tuple[int, str]], to_confront: Sequence[Pair], names: Mapping[str, str],
            world: Mapping[int, tuple[c.LifeEvent, str]] | None = None) -> str:
-    out = [phrase("memory.extraction.render.today", day=x.day_words(frame.local().date()), year=frame.local().year,
+    out = [phrase("memory.extraction.render.today", day=day_fr(frame.local().date()), year=frame.local().year,
                   hour=f"{frame.local():%H}", minute=f"{frame.local():%M}")]
-    if lus:
+    if read_items:
         out += ["", phrase("memory.reread.render.readings")]
-        for n, lu in enumerate(lus, start=1):
-            source = source_label(lu.source)
-            out.append(phrase("memory.reread.render.reading_asked", n=n, source=source, title=lu.title) if lu.asked_by
-                       else phrase("memory.reread.render.reading", n=n, source=source, title=lu.title))
-            if lu.excerpt.strip():
-                out.append(phrase("memory.reread.render.excerpt", excerpt=lu.excerpt))
+        for n, read_item in enumerate(read_items, start=1):
+            source = source_label(read_item.source)
+            out.append(phrase("memory.reread.render.reading_asked", n=n, source=source, title=read_item.title)
+                       if read_item.asked_by
+                       else phrase("memory.reread.render.reading", n=n, source=source, title=read_item.title))
+            if read_item.excerpt.strip():
+                out.append(phrase("memory.reread.render.excerpt", excerpt=read_item.excerpt))
     if known:
         out += ["", phrase("memory.reread.render.known")] + [f"[#{i}] {t}" for i, t in known]
     if opinions:
         out += ["", phrase("memory.reread.render.opinions")] + [f"[#{i}] {t}" for i, t in opinions]
-    if world and lus:
+    if world and read_items:
         out += ["", phrase("memory.reread.render.world")]
         out += [phrase("memory.reread.render.world_moment", id=i, when=frame.local(ev.when).date().isoformat(),
                        text=text) for i, (ev, text) in world.items()]
-    if paires:
+    if to_confront:
         out += ["", phrase("memory.reread.render.pairs")]
 
         def by(keys: Sequence[str]) -> str:
             return ", ".join(names.get(k, k) for k in keys) or phrase("memory.reread.someone")
 
         out += [phrase("memory.reread.render.pair", n=n, old=pr.old_text, old_by=by(pr.old_by), new=pr.new_text,
-                       new_by=by(pr.new_by)) for n, pr in enumerate(paires, start=1)]
+                       new_by=by(pr.new_by)) for n, pr in enumerate(to_confront, start=1)]
     return "\n".join(out)
 
 
 # ── Ce qu'elle en garde ─────────────────────────────────────────────────────
 
 
-def grounded(text: str, lu: Lu) -> bool:
+def grounded(text: str, read_item: ReadItem) -> bool:
     """Ce que le modèle dit avoir lu là y est : au moins un mot de sujet en commun avec la lecture (un fait sorti de
     nulle part, ou d'une autre ligne du prompt, n'est pas une lecture)."""
-    return bool(stems(text) & stems(f"{lu.title} {lu.excerpt}"))
+    return bool(stems(text) & stems(f"{read_item.title} {read_item.excerpt}"))
 
 
-async def drafts_of(rel: Relecture, frame: Frame, state: MemoryState, store: Any, vectors: Any, p: MemoryParams,
-                    lus: Sequence[Lu], known: Sequence[tuple[int, str]], opinions: Sequence[tuple[int, str]],
-                    paires: Sequence[Paire], night: str, call_id: str,
-                    world: Mapping[int, tuple[c.LifeEvent, str]] | None = None) -> list[Draft[Any]]:
+def drafts_of(rel: Relecture, frame: Frame, state: MemoryState, store: Any, p: MemoryParams,
+              read_items: Sequence[ReadItem], known: Sequence[tuple[int, str]], opinions: Sequence[tuple[int, str]],
+              to_confront: Sequence[Pair], night: str, call_id: str,
+              world: Mapping[int, tuple[c.LifeEvent, str]] | None = None) -> list[Draft[Any]]:
     """Ce que la nuit garde de ce que le modèle a proposé, jugé par le code (voir le module)."""
     tz = frame.env.tz_of(frame.root)
-    by_n = dict(enumerate(lus, start=1))
+    by_n = dict(enumerate(read_items, start=1))
     known_ids, opinion_ids = {i for i, _ in known}, {i for i, _ in opinions}
     # ce qu'on a montré d'une paire ne devient jamais le texte d'une lecture (un secret ne se blanchit pas)
-    shown = [t for pr in paires for t in (pr.old_text, pr.new_text)]
+    shown = [t for pr in to_confront for t in (pr.old_text, pr.new_text)]
     out: list[Draft[Any]] = []
     born = 0
     for b in rel.croyances:
-        lu = by_n.get(b.lecture)
-        if lu is None or born >= p.reread_max_items or not grounded(b.texte, lu) or x.echoes(b.texte, shown, set()):
+        read_item = by_n.get(b.lecture)
+        if read_item is None or born >= p.reread_max_items or not grounded(b.texte, read_item) \
+                or cues.echoes(b.texte, shown, set()):
             continue
         born += 1
-        source, nature = lu.source, "prediction" if fold(b.genre or "").startswith("prev") else "claim"
-        heard = (lu.asked_by,) if lu.asked_by else ()  # lu pour quelqu'un : il l'a entendu sur le moment
-        twin = await twin_of(store, vectors, b.texte, c.BELIEF, (), p, told_by=(source,), knowledge_kind=nature,
-                             holder=source if nature == "prediction" else None)
+        source, nature = read_item.source, "prediction" if fold(b.genre or "").startswith("prev") else "claim"
+        heard = (read_item.asked_by,) if read_item.asked_by else ()  # lu pour quelqu'un : il l'a entendu sur le moment
+        twin = twin_of(store, b.texte, c.BELIEF, (), told_by=(source,), knowledge_kind=nature,
+                       holder=source if nature == "prediction" else None)
         confidence = x.born_confidence(0.7, c.READ, nature)
         if twin is not None:
             out.append(c.ATTESTED.draft(item=twin, told_by=(source,), heard_by=heard, source=source, origin=c.READ,
                                         confidence=confidence, sensitivity=int(Sensitivity.ANODYNE),
-                                        sources=(lu.seq,), call_id=call_id))
+                                        sources=(read_item.seq,), call_id=call_id))
             continue
         target = target_of(store, b.remplace if b.remplace in known_ids else None, nature, None)
         verdict = judge(testimonies_of(store, target), Testimony(0, (source,), (), 0, False, 0.0,
@@ -432,44 +431,45 @@ async def drafts_of(rel: Relecture, frame: Frame, state: MemoryState, store: Any
             text=Content.of(b.texte, level=int(Sensitivity.ANODYNE)), about=(), sensitivity=int(Sensitivity.ANODYNE),
             importance=x.IMPORTANCE[2], confidence=confidence, origin=c.READ, source=source,
             replaces=target if verdict == SUPERSEDE else None, contests=target if verdict == CONTEST else None,
-            sources=(lu.seq,), call_id=call_id, told_by=(source,), heard_by=heard, knowledge_kind=nature,
+            sources=(read_item.seq,), call_id=call_id, told_by=(source,), heard_by=heard, knowledge_kind=nature,
             holder=source if nature == "prediction" else None,
             likelihood=lk.likelihood(lk.PREDICTION, b.probabilite, p) if nature == "prediction" else None,
             **predicted))
     noted = [ev for ev in state.events.values() if ev.scope == c.WORLD and ev.text_ref]
     world_texts = store.content([ev.text_ref for ev in noted]) if noted else {}
     for m in rel.moments:
-        lu, span = by_n.get(m.lecture), timespan.parse(m.quand, tz)
-        if lu is None or span is None or span.end < frame.now or born >= p.reread_max_items \
-                or not grounded(m.texte, lu) or x.echoes(m.texte, shown, set()):
+        read_item, span = by_n.get(m.lecture), timespan.parse(m.quand, tz)
+        if read_item is None or span is None or span.end < frame.now or born >= p.reread_max_items \
+                or not grounded(m.texte, read_item) or cues.echoes(m.texte, shown, set()):
             continue
-        if any(ev.when <= span.end and span.start <= ev.ends and x.same_moment(m.texte, world_texts.get(ev.text_ref)
-                                                                           or "", []) for ev in noted):
+        if any(ev.when <= span.end and span.start <= ev.ends and cues.same_moment(m.texte, world_texts.get(ev.text_ref)
+                                                                              or "", []) for ev in noted):
             continue  # déjà vu venir
         born += 1
         out.append(c.EVENT_NOTED.draft(
             text=Content.of(m.texte, level=int(Sensitivity.ANODYNE)), when=span.point, about=(),
-            all_day=span.all_day, sensitivity=int(Sensitivity.ANODYNE), sources=(lu.seq,), told_by=(lu.source,),
-            heard_by=(lu.asked_by,) if lu.asked_by else (), call_id=call_id, until=span.end if span.vague else None, precision=span.precision,
+            all_day=span.all_day, sensitivity=int(Sensitivity.ANODYNE), sources=(read_item.seq,),
+            told_by=(read_item.source,), heard_by=(read_item.asked_by,) if read_item.asked_by else (),
+            call_id=call_id, until=span.end if span.vague else None, precision=span.precision,
             scope=c.WORLD, official=m.date_officielle,
             likelihood=lk.likelihood(lk.OFFICIAL if m.date_officielle else lk.REPORTED, m.probabilite, p)))
-    for a in [a for a in rel.avis if not x.echoes(a.texte, shown, set())][:p.opinions_from_reading]:
-        if await twin_of(store, vectors, a.texte, c.BELIEF, (), p, knowledge_kind="opinion",
-                         about_self=True) is not None:
+    for a in [a for a in rel.avis if not cues.echoes(a.texte, shown, set())][:p.opinions_from_reading]:
+        if twin_of(store, a.texte, c.BELIEF, (), knowledge_kind="opinion", about_self=True) is not None:
             continue  # elle le pense déjà
         target = target_of(store, a.remplace if a.remplace in opinion_ids else None, "opinion", None,
                            about_self=True)
         out.append(c.BELIEVED.draft(
             text=Content.of(a.texte, level=int(Sensitivity.ANODYNE)), about=(), sensitivity=int(Sensitivity.ANODYNE),
             importance=x.IMPORTANCE[3], confidence=x.born_confidence(0.9, c.OBSERVED, "opinion"), origin=c.OBSERVED,
-            sources=tuple(by_n[n].seq for n in a.lectures if n in by_n) or tuple(lu.seq for lu in lus),
+            sources=tuple(by_n[n].seq for n in a.lectures if n in by_n)
+            or tuple(read_item.seq for read_item in read_items),
             call_id=call_id, about_self=True, durable=True,
             knowledge_kind="opinion", replaces=target))
     joined: list[tuple[int, int]] = []
     supersedes: list[tuple[int, int]] = []
     contests: list[tuple[int, int]] = []
     touched: set[int] = set()
-    by_pair = dict(enumerate(paires, start=1))
+    by_pair = dict(enumerate(to_confront, start=1))
     for link in rel.liens:
         pr = by_pair.get(link.paire)
         relation = fold(link.relation)
@@ -491,14 +491,14 @@ async def drafts_of(rel: Relecture, frame: Frame, state: MemoryState, store: Any
         touched |= {pr.old, pr.new}
     done: set[int] = set()
     for k in rel.constats:
-        lu, got, outcome = by_n.get(k.lecture), (world or {}).get(k.moment), x.outcome_of(k.issue)
-        if lu is None or got is None or outcome is None or got[0].id in done:
+        read_item, got, outcome = by_n.get(k.lecture), (world or {}).get(k.moment), x.outcome_of(k.issue)
+        if read_item is None or got is None or outcome is None or got[0].id in done:
             continue
         ev, text = got
-        if not x.echoes(text, [f"{lu.title} {lu.excerpt}"], set()):
+        if not cues.echoes(text, [f"{read_item.title} {read_item.excerpt}"], set()):
             continue  # la lecture doit parler de ce moment-là (des mots du sujet en commun)
         done.add(ev.id)
-        out.append(resolution(ev, outcome, lu.source, (lu.seq,), call_id))
+        out.append(resolution(ev, outcome, read_item.source, (read_item.seq,), call_id))
     if joined:
         # d'autres mots, jugés la même chose : ses témoins comptent, sans parler pour les mots de la gardée
         out.append(c.JOINED.draft(night=night, pairs=tuple(joined), mute=True, dedupe_key=f"confrontee:{night}"))
@@ -543,20 +543,21 @@ class Reread:
         if night is None or store is None:
             return
         p = params(frame.env.params_of("memory", frame.root))
-        lus, upto = readings(store, p, self.limit or None)
-        paires = await pairs(frame, store, vectors, p)
+        read_items, upto = readings(store, p, self.limit or None)
+        to_confront = await pairs(frame, store, vectors, p)
         # ce qui est passé depuis longtemps sans nouvelles : elle ne saura pas (aucun appel)
         gone = [resolution(ev, c.UNKNOWN, "", (), f"{ctx.run_id}#expiré") for ev in expired(frame, store, p)]
-        if not lus and not paires:
-            await ctx.emit(*gone, c.REREAD.draft(night=night, upto=upto, dedupe_key=f"relecture:{night}"))
+        if not read_items and not to_confront:
+            await ctx.emit(*gone, c.REREAD.draft(night=night, upto=upto, produced=0,
+                                                 dedupe_key=f"relecture:{night}"))
             return
-        world = world_moments(frame, store, state, p) if lus else {}
-        known = await _known(store, vectors, lus, mine=False)
-        opinions = await _known(store, vectors, lus, mine=True) if p.opinions_from_reading else []
+        world = world_moments(frame, store, state, p) if read_items else {}
+        known = await _known(store, vectors, read_items, mine=False)
+        opinions = await _known(store, vectors, read_items, mine=True) if p.opinions_from_reading else []
         her = self_c.name_of(frame.get(self_c.PERSONA))
-        tellers = {k for pr in paires for k in (*pr.old_by, *pr.new_by)}
+        tellers = {k for pr in to_confront for k in (*pr.old_by, *pr.new_by)}
         names = names_of(frame, tellers)
-        prompt = render(frame, lus, known, opinions, paires, names, world)
+        prompt = render(frame, read_items, known, opinions, to_confront, names, world)
         call_id = f"{ctx.run_id}#0"
         # ses avis se forment à ce qu'elle est : son portrait dit ses goûts et sa façon de lire (ADR 0153)
         system = phrase("memory.reread.system", name=her, opinions=p.opinions_from_reading) + "\n\n" + phrase(
@@ -567,8 +568,8 @@ class Reread:
         try:
             response = await ctx.llm.call(request)
         except PromptBudgetError:
-            if len(lus) > 1:  # trop long : moitié moins, tout de suite
-                self.limit = len(lus) // 2
+            if len(read_items) > 1:  # trop long : moitié moins, tout de suite
+                self.limit = len(read_items) // 2
                 log.warning("relecture de la nuit %s : trop longue pour le modèle, %d lectures au prochain essai",
                             night, self.limit)
                 return
@@ -591,12 +592,13 @@ class Reread:
                 await ctx.emit(*gone)
             return
         rel = parse(raw)
-        drafts = gone + await drafts_of(rel, frame, state, store, vectors, p, lus, known, opinions, paires, night,
-                                        call_id, world)
+        kept = drafts_of(rel, frame, state, store, p, read_items, known, opinions, to_confront, night, call_id, world)
         self.limit = 0
-        drafts.append(c.REREAD.draft(night=night, upto=upto, readings=len(lus), pairs=len(paires), call_id=call_id,
-                                     model=response.model, dedupe_key=f"relecture:{night}"))
-        await ctx.emit(*drafts)
+        # ce qu'elle en a retenu : les paires réunies ou confrontées se disent à part (``JOINED``, ``CONFRONTED``)
+        produced = sum(d.type.name not in (c.JOINED.name, c.CONFRONTED.name) for d in kept)
+        await ctx.emit(*gone, *kept, c.REREAD.draft(night=night, upto=upto, readings=len(read_items),
+                                                    pairs=len(to_confront), produced=produced, call_id=call_id,
+                                                    model=response.model, dedupe_key=f"relecture:{night}"))
 
 
 # ── Ce qu'elle a appris en lisant ───────────────────────────────────────────
@@ -637,7 +639,7 @@ async def _learned(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> li
                             .order_by(last.c.at.desc(), last.c.item).limit(40))
     if not rows:
         return None
-    read = {int(i): (_keys(told), int(at)) for i, told, at in rows}
+    read = {int(i): (tb.keys_of(told), int(at)) for i, told, at in rows}
     person = frame.get(identity_c.PERSON(ep.target)) if ep.target else None
     told: set[int] = set()
     if person:
@@ -674,7 +676,7 @@ def _learned_section(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) ->
     raconté est noté, ``memory_told``). Ce que le rappel remonte déjà (« CE QUI TE REVIENT », avec sa lecture) ne se
     redit pas ici."""
     recall = enrich.get("recall")
-    recalled = {r.item.id for r in (*recall.souvenirs, *recall.beliefs)} if recall is not None else set()
+    recalled = {r.item.id for r in (*recall.memories, *recall.beliefs)} if recall is not None else set()
     got = [lr for lr in enrich.get("learned") or () if lr.item.id not in recalled]
     if not got:
         return None
@@ -684,5 +686,5 @@ def _learned_section(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) ->
                        provenance=tuple(f"memory:{lr.item.id}" for lr in got))
 
 
-__all__ = ["Learned", "Lu", "Paire", "Relecture", "Reread", "drafts_of", "pairs", "parse", "readings", "render",
+__all__ = ["Learned", "Pair", "ReadItem", "Relecture", "Reread", "drafts_of", "pairs", "parse", "readings", "render",
            "source_label"]

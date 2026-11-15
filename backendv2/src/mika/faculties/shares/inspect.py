@@ -91,7 +91,7 @@ def _who(frame: Frame, handle: str) -> Cell:
     if not handle or is_internal(handle):
         return Text("personne", "muted")
     person = frame.get(identity_c.PERSON(handle))
-    name = frame.get(identity_c.IDENTITY(person)).name or frame.get(identity_c.IDENTITY(handle)).name
+    name = identity_c.person_name(frame, person) or identity_c.person_name(frame, handle)
     return Ref.subject("person", person, f"{name} ({handle})" if name else handle)
 
 

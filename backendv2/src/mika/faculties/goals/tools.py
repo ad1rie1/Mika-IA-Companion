@@ -65,6 +65,9 @@ from mika.vocab.words import stems
 
 REPORT, NOTE, DROP, REFLECT = "report_step", "goal_note", "goal_drop", "goal_reflect"
 TASK_ADD, TASK_UPDATE = "goal_task_add", "goal_task_update"
+#: les comptes rendus d'une séance, au plus : un « fini » sans preuve est noté (``STEP_REPORTED``) sans clore la
+#: séance, qui peut en rendre un autre ; la fiche d'un but les lit tous, page par page
+REPORTS_PER_EPISODE = 3
 #: ce qui n'est pas du travail : dire où on en est, renoncer, tenir son plan, noter, fouiller sa mémoire, ouvrir
 #: un projet (l'exploration continue alors là-bas)
 NOT_WORK = frozenset({REPORT, DROP, TASK_ADD, TASK_UPDATE, NOTE, REFLECT, "memory_search", "start_project"})
@@ -169,7 +172,7 @@ def _gone() -> ToolResult:
     return ToolResult(ok=False, content=phrase("goals.tools.gone"))
 
 
-@GOALS.tool(REPORT, acts=True, description=phrase("goals.tools.report.description"), label=phrase("goals.tools.report.label"), args=ReportArgs, bundle="goals", episodes=[Kind.STEP], max_calls_per_episode=3, ends_loop=True)
+@GOALS.tool(REPORT, acts=True, description=phrase("goals.tools.report.description"), label=phrase("goals.tools.report.label"), args=ReportArgs, bundle="goals", episodes=[Kind.STEP], max_calls_per_episode=REPORTS_PER_EPISODE, ends_loop=True)
 async def report_step(args: ReportArgs, ctx: Any) -> Any:
     g = _goal(ctx)
     if g is None:

@@ -8,8 +8,11 @@ une phrase française. Les clés techniques (``user_1``, ``memory.consolidate``,
 
 Ce que déclarent les facultés est nommé par la composition (``Labels``,
 ``app/console.py``) ; ce qui appartient au noyau et au runtime (sortes,
-issues, voies, rôles, événements du noyau) est nommé ici. Une clé sans
-libellé reste lisible sous une forme générique, jamais un trou.
+voies, rôles, événements du noyau) est nommé ici. L'issue d'un épisode se dit
+à l'étage du vocabulaire (``vocab/episodes.py``, ``outcome_words``) : les
+onglets d'un but ou d'un projet, que les facultés dessinent, la disent avec
+les mêmes mots que la page Épisodes. Une clé sans libellé reste lisible sous
+une forme générique, jamais un trou.
 """
 
 from __future__ import annotations
@@ -33,13 +36,6 @@ KINDS: dict[str, str] = {
     Kind.REPLY: "réponse", Kind.INITIATIVE: "initiative", Kind.STEP: "séance de travail", Kind.MURMUR: "murmure",
     Kind.TASK: "tâche silencieuse", Kind.WORK: "travail sur un projet", Kind.JOB: "exécution impersonnelle",
     Kind.WAKE: "réveil extérieur", Kind.WAKE_JOB: "réveil extérieur impersonnel",
-}
-#: comment un épisode s'est terminé : (libellé, ton)
-OUTCOMES: dict[str, tuple[str, str]] = {
-    "done": ("terminé", "ok"), "abstained": ("s'est tue", "muted"), "superseded": ("supplanté", "warn"),
-    "timeout": ("trop long", "danger"), "failed": ("échec", "danger"),
-    "preempted": ("a cédé la place", "warn"), "interrupted": ("interrompu par un arrêt", "warn"),
-    "cancelled": ("annulé", "muted"),
 }
 #: les voies d'exécution
 LANES: dict[str, str] = {"conversation": "conversation", "background": "fond", "night": "nuit"}
@@ -95,17 +91,6 @@ GESTURE_FAMILIES: dict[str, str] = {"reglages": "Réglages", "parametres": "Para
 
 def kind(value: str | None) -> str:
     return KINDS.get(str(value or ""), str(value or "épisode").lower())
-
-
-#: les sortes d'épisodes qui, menées à bien, ont parlé (les autres ont travaillé)
-SPEAKING: frozenset[str] = frozenset({Kind.REPLY, Kind.INITIATIVE, Kind.MURMUR})
-
-
-def outcome(value: str | None, kind_: str | None = None) -> tuple[str, str]:
-    """L'issue d'un épisode ; ``kind_`` donné, une parole menée à bien se dit « a parlé »."""
-    if value == "done" and kind_ in SPEAKING:
-        return "a parlé", "ok"
-    return OUTCOMES.get(str(value or ""), (str(value or "—"), ""))
 
 
 def role(value: str | None) -> str:

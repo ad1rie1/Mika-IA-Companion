@@ -327,12 +327,7 @@ def _still_untold(proposal: int) -> Guard:
 def _address(frame: Frame, r: AppCall) -> str:
     """Où le dire : là où la personne est maintenant (connectée, sinon joignable), sinon d'où venait la demande."""
     person = frame.get(identity_c.PERSON(r.target)) or r.target
-    handles = frame.get(identity_c.HANDLES(person)) or (r.target,)
-    present = [h for h in frame.get(presence_c.PRESENT) if h in handles]
-    if present:
-        return present[0]
-    reachable = frame.get(identity_c.REACHABLE(person))
-    return reachable[0] if reachable else r.target
+    return identity_c.reach_now(frame, person, handles=frame.get(identity_c.HANDLES(person)) or (r.target,)) or r.target
 
 
 def _brief(status: str, app: str) -> str:

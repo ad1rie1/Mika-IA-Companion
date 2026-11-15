@@ -52,7 +52,7 @@ VETO_FR = {c.DAILY_CAP: "le plafond du jour est atteint", c.UNANSWERED: "une ini
 def _name(frame: Frame, handle: str) -> str:
     if not handle:
         return "quiconque était là"
-    return frame.get(identity_c.IDENTITY(handle)).name or handle  # la clé, au survol ou dans le lien
+    return identity_c.person_name(frame, handle) or handle  # la clé, au survol ou dans le lien
 
 
 def _restraint_fr(frame: Frame) -> str:

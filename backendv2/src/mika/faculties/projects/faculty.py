@@ -25,11 +25,8 @@ ses événements font ressentir (ADR 0031).
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timedelta
 from typing import Annotated, Any
-from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict
 
@@ -40,11 +37,12 @@ from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.contracts import wakeup as wakeup_c
 from mika.kernel import schedule
-from mika.kernel.clock import DAY, HOUR, MINUTE, instant, local
-from mika.kernel.events import Content, Payload
+from mika.kernel.clock import DAY, HOUR, MINUTE
+from mika.kernel.events import Content, Draft, Payload
 from mika.kernel.faculty import Faculty
 from mika.kernel.forms import Knob
 from mika.kernel.state import FrozenDict
+from mika.ports.workshop import EXITED, REFUSED, TIMED_OUT, run_status
 from mika.vocab import causes
 from mika.vocab.access import PERSON
 from mika.vocab.affect import Appraisal, Emotion
@@ -83,6 +81,12 @@ ASAP, ON_DEMAND = "manual", "demand"
 OUTGOING_STALE = 30 * MINUTE
 #: ce qu'une exécution garde de ce que le réseau lui a rendu (une donnée, citée dans le prompt)
 NETWORK_OUT_KEPT = 2000
+#: ses capacités se déclarent sous ces noms complets (``atelier.py``, ``tools.py``), que le journal porte : ils ne
+#: changent pas. Pousser vers le dépôt distant, en récupérer l'histoire, lancer une commande avec le réseau
+PUSH_CAPABILITY, PULL_CAPABILITY = f"{c.OWNER}.push", f"{c.OWNER}.pull"
+NETWORKED_CAPABILITY = f"{c.OWNER}.networked"
+#: piloter un projet sur ton accord (ADR 0133) : rien ne sort de la machine, le geste s'écrit une fois accepté
+STEER_CAPABILITY = f"{c.OWNER}.steer"
 
 
 def check_schedule(text: str) -> str:
@@ -699,6 +703,40 @@ OPERATIONS = (REFRAMED, PAUSED, RESUMED, ARCHIVED, RESTORED, NUDGED, OBJECTIVE_A
               DECISION_CHANGED, DEPOSITED, REMOTE_REQUESTED, PLAN_PROPOSED, PLAN_ANSWERED)
 
 
+def opened(*, title: str, description: str, authority: str, mode: str, owner: str | None, address: str | None,
+           about: tuple[str, ...], level: int, source: str, schedule_rule: str = "", approval: bool = True,
+           priority: str = c.NORMAL, bundles: tuple[str, ...] = DEFAULT_BUNDLES, days: str = c.EVERY_DAY,
+           start_min: int = 0, end_min: int = 24 * 60, runs_per_day: int = 0, remote: str = "",
+           branch: str = "main", auto_push: bool = False, request: str = "", asked_by: str | None = None,
+           framing: bool = False) -> Draft[Any]:
+    """L'ouverture d'un projet (par une propriétaire, un opérateur, ou elle) ; né en conversation, il garde les mots
+    de qui l'a demandé et naît à cadrer (ADR 0145)."""
+    return c.PROJECT_CREATED.draft(
+        title=Content.of(title.strip(), level=level),
+        description=Content.of(description.strip(), level=level) if description.strip() else None,
+        authority=authority, mode=mode, owner=owner, address=address, about=about, bundles=bundles,
+        schedule=schedule_rule.strip(), days=days, start_min=start_min, end_min=end_min, runs_per_day=runs_per_day,
+        approval=approval, priority=priority, remote=remote.strip(), branch=branch.strip() or "main",
+        auto_push=auto_push, source=source, sensitivity=level,
+        request=Content.of(request, level=level) if request.strip() else None, asked_by=asked_by, framing=framing)
+
+
+def objectives_of(project: int, lines: list[str], constants: list[str | tuple[str, int]], *, author: str,
+                  by: str = "", owner: str | None, about: tuple[str, ...], level: int,
+                  cadence_us: int = 0) -> list[Draft[Any]]:
+    """Les objectifs d'un projet qui vient d'être créé : les ponctuels, puis les constants — un texte, ou un texte et
+    sa cadence en µs (0 : celle par défaut) ; chacun à sa cadence, sinon à ``cadence_us`` (0 : celle des
+    réglages)."""
+    out: list[Draft[Any]] = []
+    rows = [(t, c.ONCE, 0) for t in lines] + [
+        (x[0], c.CONSTANT, x[1] or cadence_us) if isinstance(x, tuple)
+        else (x, c.CONSTANT, cadence_us) for x in constants]
+    for i, (text, kind, every) in enumerate(((t.strip(), k, e) for t, k, e in rows if t.strip()), start=1):
+        out.append(OBJECTIVE_ADDED.draft(project=project, objective=i, text=Content.of(text[:500], level=level),
+                                         kind=kind, cadence_us=every, author=author, by=by, owner=owner, about=about))
+    return out
+
+
 # ── Lectures ──────────────────────────────────────────────────────────────
 
 
@@ -757,152 +795,8 @@ def rank(p: Project) -> int:
     return PRIORITY_RANK.get(p.priority, 0)
 
 
-def daily_cap(p: Project, pm: ProjectsParams) -> int:
-    return p.runs_per_day or pm.runs_per_day
-
-
-def cadence(o: Objective, pm: ProjectsParams) -> int:
-    return o.cadence_us or pm.constant_cadence_us
-
-
-def runs_today(p: Project, now: int) -> int:
-    return sum(1 for t in p.runs_at if now - t < DAY)
-
-
 def busy(s: ProjectsState, project: int) -> bool:
     return any(r.project == project and r.purpose == "run" for r in s.running.values())
-
-
-def workable(o: Objective, now: int) -> bool:
-    """Un objectif sur lequel une exécution peut porter (ouvert, pas en attente)."""
-    return o.status == c.OPEN and o.waiting_until <= now
-
-
-def due_at(p: Project, o: Objective, pm: ProjectsParams) -> int:
-    """Quand un objectif peut être repris : un ponctuel tout de suite ; un constant une cadence après son dernier
-    passage — et son premier, une cadence après qu'il a pu commencer (l'étape dont il dépend faite, sinon sa
-    naissance) : un bilan de la semaine ne tombe pas le jour où l'app vient d'être écrite (ADR 0161)."""
-    if o.kind != c.CONSTANT:
-        return o.waiting_until
-    if o.passed_at:
-        return max(o.passed_at + cadence(o, pm), o.waiting_until)
-    dep = objective_at(p, o.after) if o.after else None
-    began = max(o.at, dep.closed_at if dep is not None else 0)
-    return max(began + cadence(o, pm), o.waiting_until)
-
-
-def framing(p: Project) -> bool:
-    """Il n'a pas encore de plan qui vaille (ADR 0145) : à cadrer, ou un plan proposé qui attend sa réponse."""
-    return p.plan_state in (c.TO_FRAME, c.PROPOSED)
-
-
-def ready(p: Project, o: Objective) -> bool:
-    """Ce dont il dépend dans son plan est fait (ou retiré, ou oublié) : il peut être travaillé (ADR 0145)."""
-    dep = objective_at(p, o.after) if o.after else None
-    return dep is None or dep.status in (c.DONE, c.DROPPED)
-
-
-#: un objectif de son plan passe par son rang ; un objectif à elle hors plan, après eux
-_UNRANKED = 10_000
-
-
-def _order(o: Objective) -> tuple[int, int, int]:
-    """L'ordre des ponctuels : ce qu'on a ajouté hors de son plan d'abord (l'opérateur, la personne), puis les
-    étapes de son plan à leur rang — une idée de départ qu'il garde a le sien (ADR 0161) —, puis ce qu'elle a ajouté
-    d'elle-même."""
-    if o.rank:
-        return 1, o.rank, o.id
-    return (2 if o.author == "self" else 0), _UNRANKED, o.id
-
-
-def pick(p: Project, now: int, pm: ProjectsParams) -> Objective | None:
-    """L'objectif de la prochaine exécution : celui qu'on a demandé, sinon le constant le plus en retard,
-    sinon le premier ponctuel ouvert (``_order``). Un objectif attend celui dont il dépend ; sans plan qui vaille,
-    aucun (ADR 0145). Rien de dû : rien."""
-    if framing(p):
-        return None
-    if nudged(p) and p.nudged_objective:
-        wanted = objective_at(p, p.nudged_objective)
-        if wanted is not None and wanted.status == c.OPEN:
-            return wanted
-    opened = [o for o in p.objectives if o.status == c.OPEN and ready(p, o)]
-    constants = sorted((due_at(p, o, pm), o.id, o) for o in opened
-                       if o.kind == c.CONSTANT and o.waiting_until <= now)
-    due = [o for at, _, o in constants if at <= now]
-    if due:
-        return due[0]
-    once = [o for o in opened if o.kind == c.ONCE and o.waiting_until <= now]
-    once.sort(key=_order)
-    if once:
-        return once[0]
-    # « lancer maintenant » sans rien de dû : le constant le plus proche de sa cadence, en avance
-    return constants[0][2] if constants and nudged(p) else None
-
-
-def next_due(p: Project, pm: ProjectsParams) -> int | None:
-    """Le prochain instant où un objectif de ce projet sera dû (sans tenir compte de la plage) — aucun tant qu'il n'a
-    pas de plan qui vaille."""
-    if framing(p):
-        return None
-    times = [due_at(p, o, pm) for o in p.objectives if o.status == c.OPEN and ready(p, o)]
-    return min(times) if times else None
-
-
-# ── La plage de travail ───────────────────────────────────────────────────
-
-
-def _day_ok(days: str, weekday: int) -> bool:
-    if days == c.WEEKDAYS:
-        return weekday < 5
-    if days == c.WEEKEND:
-        return weekday >= 5
-    return True
-
-
-def always(p: Project) -> bool:
-    return p.days == c.EVERY_DAY and p.start_min <= 0 and p.end_min >= 24 * 60
-
-
-def in_window(p: Project, t: int, tz: ZoneInfo) -> bool:
-    """``t`` tombe-t-il dans sa plage de travail (jours, heures locales ; une plage dont la fin précède le
-    début passe minuit et appartient au jour où elle commence) ?"""
-    if always(p):
-        return True
-    dt = local(t, tz)
-    minute = dt.hour * 60 + dt.minute
-    start, end = p.start_min, p.end_min
-    if start < end:
-        return _day_ok(p.days, dt.weekday()) and start <= minute < end
-    if minute >= start:
-        return _day_ok(p.days, dt.weekday())
-    return minute < end and _day_ok(p.days, (dt.weekday() - 1) % 7)
-
-
-def window_opens(p: Project, after: int, tz: ZoneInfo) -> int | None:
-    """Le premier instant à partir de ``after`` qui tombe dans sa plage (``None`` : jamais, sur huit jours)."""
-    if in_window(p, after, tz):
-        return after
-    base = local(after, tz)
-    for d in range(0, 9):
-        day = (base + timedelta(days=d)).date()
-        start = datetime(day.year, day.month, day.day, tzinfo=tz) + timedelta(minutes=p.start_min)
-        at = instant(start)
-        if at >= after and in_window(p, at, tz):
-            return at
-    return None
-
-
-def window_words(p: Project) -> str:
-    """La plage en mots (« les jours ouvrés, de 9 h à 18 h »)."""
-    if always(p):
-        return "à toute heure"
-    days = {c.EVERY_DAY: "tous les jours", c.WEEKDAYS: "les jours ouvrés", c.WEEKEND: "le week-end"}.get(p.days, p.days)
-    return f"{days}, de {hhmm(p.start_min)} à {hhmm(p.end_min)}"
-
-
-def hhmm(minutes: int) -> str:
-    h, m = divmod(max(0, min(24 * 60, minutes)), 60)
-    return f"{h} h" if not m else f"{h} h {m:02d}"
 
 
 # ── Réducteurs ────────────────────────────────────────────────────────────
@@ -1269,10 +1163,7 @@ def stall_subject(project: int) -> str:
 
 def stall_of(subject: str | None) -> int | None:
     """Le projet d'un sujet ``stall_subject``, sinon ``None``."""
-    if not subject or not subject.startswith("stalled:"):
-        return None
-    tail = subject[len("stalled:"):]
-    return int(tail) if tail.isdigit() else None
+    return _numbered(subject, "stalled:")
 
 
 def frame_subject(project: int) -> str:
@@ -1583,16 +1474,11 @@ def _proposed(s: ProjectsState, e, cx) -> ProjectsState:
         p = replace(p, outgoing=(*p.outgoing, (e.seq, e.at))[-8:])
     awaiting = s.awaiting.set(e.seq, e.data.args_json) if e.data.approval else s.awaiting
     s = replace(_set(s, p), proposals=s.proposals.set(e.seq, (pid, e.data.capability)), awaiting=awaiting)
-    if e.data.capability == STEER:
+    if e.data.capability == STEER_CAPABILITY:
         asked = _asked_of(e.data.args_json)
         if asked in s.steers:
             s = replace(s, steer_proposals=_kept(s.steer_proposals.set(e.seq, asked)))
     return s
-
-
-PUSH, PULL, NETWORKED = f"{c.OWNER}.push", f"{c.OWNER}.pull", f"{c.OWNER}.networked"
-#: piloter un projet sur ton accord (ADR 0133) : rien ne sort de la machine, le geste s'écrit une fois accepté
-STEER = f"{c.OWNER}.steer"
 
 
 def _asked_of(args_json: str) -> str:
@@ -1613,13 +1499,13 @@ def _kept(items: FrozenDict[int, str]) -> FrozenDict[int, str]:
 
 def effect_words(capability: str, default: str) -> str:
     """Ce qu'est une demande, en mots (« pousser vers le dépôt distant ») — ``default`` pour une autre capacité."""
-    if capability == PUSH:
+    if capability == PUSH_CAPABILITY:
         return phrase("projects.effect.push")
-    if capability == PULL:
+    if capability == PULL_CAPABILITY:
         return phrase("projects.effect.pull")
-    if capability == NETWORKED:
+    if capability == NETWORKED_CAPABILITY:
         return phrase("projects.effect.networked")
-    if capability == STEER:
+    if capability == STEER_CAPABILITY:
         return phrase("projects.effect.steer")
     return default
 
@@ -1642,11 +1528,11 @@ def _resolved(s: ProjectsState, e, cx) -> ProjectsState:
     if got is None or got[0] not in s.projects:
         return s
     p = s.projects[got[0]]
-    if got[1] == STEER and not e.data.approved:  # refusée : elle ne s'appliquera jamais
+    if got[1] == STEER_CAPABILITY and not e.data.approved:  # refusée : elle ne s'appliquera jamais
         asked = s.steer_proposals.get(e.data.proposal, "")
         s = replace(s, steers=s.steers.delete(asked) if asked in s.steers else s.steers,
                     steer_proposals=s.steer_proposals.delete(e.data.proposal))
-    if e.data.approved and got[1] != STEER:  # elle part : l'atelier est occupé jusqu'à ce qu'elle revienne
+    if e.data.approved and got[1] != STEER_CAPABILITY:  # elle part : l'atelier est occupé jusqu'à ce qu'elle revienne
         return _set(s, replace(p, outgoing=(*p.outgoing, (e.data.proposal, e.at))[-8:]))
     if e.data.approved:
         return s
@@ -1669,31 +1555,26 @@ def _executed(s: ProjectsState, e, cx) -> ProjectsState:
     state = phrase("projects.effect.done") if e.data.ok else phrase("projects.effect.failed")
     p = _effect_line(p, f"#{e.data.proposal} {effect_words(got[1], phrase('projects.effect.other'))}"
                         + phrase("projects.effect.result", state=state, code=_code_of(result)))
-    if got[1] == NETWORKED:
+    if got[1] == NETWORKED_CAPABILITY:
         p = replace(p, network_out=result[:NETWORK_OUT_KEPT], network_out_at=e.at)
-    if got[1] in (PUSH, PULL):
+    if got[1] in (PUSH_CAPABILITY, PULL_CAPABILITY):
         p = replace(p, remote_at=e.at, remote_ok=e.data.ok,
                     remote_line=f"{effect_words(got[1], '')} : {result[:400]}")
-    asked = s.steer_proposals.get(e.data.proposal, "") if got[1] == STEER else ""
-    if asked in s.steers:  # acceptée : son geste s'écrit (l'effet ``tools._steer_accepted``)
+    asked = s.steer_proposals.get(e.data.proposal, "") if got[1] == STEER_CAPABILITY else ""
+    if asked in s.steers:  # acceptée : son geste s'écrit (l'effet ``steer._steer_accepted``)
         s = replace(s, steers=s.steers.set(asked, replace(s.steers[asked], applied=True)))
     return _set(s, p)
 
 
-#: ce que l'atelier dit d'une commande finie (``RunResult.summary``) : « … — code 0 (12 ms) »
-_CODE = re.compile(r"— code (-?\d+) \(\d+ ms\)")
-
-
 def _code_of(result: str) -> str:
-    """Le code de sortie d'une commande, lu dans son résumé — avant ce qu'elle a écrit (``sortie :``,
-    ``erreurs :``), qu'une sortie ne puisse pas le contrefaire ; une commande peut tenir sur plusieurs lignes."""
-    head = re.split(r"\n(?:sortie|erreurs) :\n", result, maxsplit=1)[0]
-    codes = _CODE.findall(head)
-    if codes:
-        return phrase("projects.effect.code", code=codes[-1])
-    if "délai dépassé" in head:
+    """Le code de sortie d'une commande, en mots : son statut, relu par ``run_status`` dans ce que l'atelier en a
+    écrit (``ports/workshop.py``) ; rien pour un texte d'une autre forme."""
+    status, code = run_status(result)
+    if status == EXITED:
+        return phrase("projects.effect.code", code=code)
+    if status == TIMED_OUT:
         return phrase("projects.effect.timeout")
-    if head.startswith(("Refusé", "refusé")):
+    if status == REFUSED:
         return phrase("projects.effect.refused_code")
     return ""
 

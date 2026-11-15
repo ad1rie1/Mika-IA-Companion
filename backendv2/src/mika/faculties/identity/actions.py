@@ -37,7 +37,7 @@ from mika.kernel.events import Content
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard
-from mika.kernel.operate import ActionContext, Done, Refused
+from mika.kernel.operate import ActionContext, Done, Refused, confirm_first
 from mika.vocab import privacy
 from mika.vocab.people import (
     clean_display_name,
@@ -58,8 +58,6 @@ OPERATOR_EVIDENCE = (
 NOTE_MAX = 200
 CONFIRM_HELP = ("Exigé quand l'action change qui elle reconnaît ici : ce que la personne lui a confié s'ouvre (ou se "
                 "referme), et parfois ses droits de propriétaire.")
-#: le bandeau d'une action à confirmer ; ce qu'elle changera s'écrit sous la case, pas deux fois
-TO_CONFIRM = "À confirmer : lis ce que cela change, puis coche « Je confirme »."
 
 
 def _handle(s: IdentityState, key: str) -> Handle | None:
@@ -165,7 +163,7 @@ def _link(s: IdentityState, frame: Frame, args: LinkArgs, ctx: ActionContext) ->
     outcome = f"« {handle} » parlera pour {known_as(s, person)} : ce que cette personne lui a confié s'y ouvre." + \
         _rights(s, frame, handle, h, person)
     if not args.confirmed:
-        raise Refused(TO_CONFIRM, {"confirmed": f"{outcome} Coche « Je confirme »."})
+        raise confirm_first(outcome)
     done = f"« {handle} » parle désormais pour {known_as(s, person)}."
     if owner_person(s, person, _declared(frame)) and h.trust is privacy.ChannelTrust.ACCOUNT:
         done += " Qui écrit d'ici en a les droits de propriétaire."
@@ -201,7 +199,7 @@ def _confirm(s: IdentityState, frame: Frame, args: ConfirmArgs, ctx: ActionConte
     outcome = (f"« {handle} » est bien {known_as(s, h.person)} : son fil des autres moyens de communication s'y "
                "ouvre, et elle pourra lui écrire d'elle-même par ici." + _rights(s, frame, handle, h, h.person))
     if not args.confirmed:
-        raise Refused(TO_CONFIRM, {"confirmed": f"{outcome} Coche « Je confirme »."})
+        raise confirm_first(outcome)
     return Done(drafts=(c.LINKED.draft(handle=handle, person=h.person, by="operator"),),
                 message=f"Liaison confirmée : « {handle} » parle pour {known_as(s, h.person)}.", guard=_seen(handle))
 
@@ -353,7 +351,7 @@ def _testify(s: IdentityState, frame: Frame, args: EvidenceArgs, ctx: ActionCont
     after = _apply(h, SimpleNamespace(data=draft.data, at=frame.now))
     heavy = _heavy(s, h, after, handle)
     if heavy and not args.confirmed:
-        raise Refused(TO_CONFIRM, {"confirmed": f"{heavy} Coche « Je confirme »."})
+        raise confirm_first(heavy)
     return Done(drafts=(draft,), message=f"Preuve versée : {_outcome(s, h, after)}.", guard=_seen(handle))
 
 
@@ -413,7 +411,7 @@ def _bind_name(s: IdentityState, frame: Frame, args: NameArgs, ctx: ActionContex
     outcome = (f"Ce qu'on lui a dit de « {args.name} » sera su de {known_as(s, person)}{taken} — chacun garde qui "
                "le lui a confié.")
     if not args.confirmed:
-        raise Refused(TO_CONFIRM, {"confirmed": f"{outcome} Coche « Je confirme »."})
+        raise confirm_first(outcome)
     return Done(drafts=(c.NAME_BOUND.draft(name=key, person=person, by="operator"),),
                 message=f"« {args.name} », c'était {known_as(s, person)}.",
                 guard=Guard("nom inchangé", reads=(c.PERSON(key),)))

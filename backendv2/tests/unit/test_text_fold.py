@@ -1,13 +1,16 @@
-"""Un seul repli du texte (ADR 0212) et les petites aides du socle.
+"""Un seul repli du texte (ADR 0212), une seule coupe, et les petites aides du socle.
 
 - ``kernel.text.fold`` : ni casse ni accents, les ligatures dépliées ; ses copies du socle s'y ramènent ;
+- ``kernel.text.clipped`` : ce qu'on montre d'un texte en une ligne, coupé par « … » ; les facultés n'en gardent pas
+  de copie ;
 - ce qui est écrit replié suit : les colonnes de ``mail``, ``teams`` et ``feeds`` passent par une révision, les tables
   du journal se reconstruisent ; une recherche trouve « sœur » pour « soeur », sur ce qui était déjà là aussi ;
 - une clé ``name:…`` est écrite au journal : son repli à elle ne bouge pas, comparer deux noms suit le repli commun, et
   la tranche d'``identity``, dont les réducteurs décident par cette comparaison, se reconstruit ;
 - ``size_fr`` ; ``why_words`` n'est plus dans le noyau.
-- la console suit : ses recherches replient comme le noyau, ses tailles se lisent pareil, ``tabs.number`` relit un
-  nombre à la française dans une cellule ou un texte.
+- la console suit : ses recherches replient comme le noyau, ses tailles se lisent pareil, ses nombres s'écrivent
+  par ``num_fr`` (les fiches des facultés n'ont plus de ``number`` à elles), ``tabs.number`` relit un nombre à la
+  française dans une cellule ou un texte.
 """
 
 from __future__ import annotations
@@ -27,20 +30,27 @@ from mika.app.handmade.tabs import number
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import transcript as transcript_c
+from mika.faculties.attention import inspect as attention_inspect
+from mika.faculties.attention import watch as attention_watch
+from mika.faculties.goals import prompt as goals_prompt
+from mika.faculties.identity import inspect as identity_inspect
 from mika.faculties.identity.actions import _named_key
 from mika.faculties.identity.faculty import IDENTITY, Handle, IdentityState, _claimed, denial_target
+from mika.faculties.memory import inspect as memory_inspect
 from mika.faculties.memory.faculty import MEMORY
-from mika.faculties.projects import inspect as projects_inspect
+from mika.faculties.projects import inspect_files as projects_files
+from mika.faculties.projects import prompt as projects_prompt
+from mika.faculties.self import inspect as self_inspect
 from mika.faculties.transcript import TRANSCRIPT
 from mika.inspector.pages import params, settings_directory, subjects
 from mika.inspector.pages import rights as rights_page
 from mika.inspector.pages import system as system_page
 from mika.inspector.pages import tools as tools_page
 from mika.kernel import rights as kernel_rights
-from mika.kernel.inspect import Param, read_params, size_fr
+from mika.kernel.inspect import Param, num_fr, read_params, size_fr
 from mika.kernel.prompt import unveiled
 from mika.kernel.state import FrozenDict
-from mika.kernel.text import fold, unaccented
+from mika.kernel.text import clipped, fold, unaccented
 from mika.plugins.email.inspect import common as email_inspect
 from mika.plugins.forge import inspect as forge_inspect
 from mika.plugins.forge import views as forge_views
@@ -102,6 +112,37 @@ def test_an_emotion_written_with_its_ligature_is_understood() -> None:
 def test_a_git_identity_keeps_the_letters_of_a_ligature() -> None:
     assert "user.email=coeur.de.lion@atelier.local" in author_identity("Cœur de Lion")
     assert "user.email=lea.martin@atelier.local" in author_identity("Léa Martin")
+
+
+# ── une coupe ─────────────────────────────────────────────────────────────
+
+
+def test_a_clipped_text_has_its_blanks_folded() -> None:
+    assert clipped("  une\n ligne\t  seule ", 40) == "une ligne seule"
+
+
+def test_a_short_text_is_shown_as_it_is() -> None:
+    assert clipped("douze lettres", 13) == "douze lettres"
+
+
+def test_a_long_text_is_cut_at_its_limit_ellipsis_included() -> None:
+    cut = clipped("abcdefghij", 6)
+    assert cut == "abcde…" and len(cut) == 6
+
+
+def test_no_blank_comes_before_the_ellipsis() -> None:
+    assert clipped("Elle a dit oui puis non", 12) == "Elle a dit…"  # la coupe tombe sur un blanc
+
+
+@pytest.mark.parametrize(("module", "copy"), [
+    (self_inspect, "clip"), (attention_watch, "_clip"), (goals_prompt, "_clip"), (projects_prompt, "_clip"),
+])
+def test_the_faculties_cut_a_text_one_way(module, copy: str) -> None:
+    assert not hasattr(module, copy) and module.clipped is clipped
+
+
+def test_the_dead_cut_of_the_memory_console_is_gone() -> None:
+    assert not hasattr(memory_inspect, "clip")
 
 
 # ── une clé de nom ne bouge pas ───────────────────────────────────────────
@@ -244,7 +285,7 @@ def test_a_settings_group_keeps_the_word_its_ligature_is_in() -> None:
 
 
 @pytest.mark.parametrize(("module", "copy"), [
-    (forge_inspect, "_octets"), (projects_inspect, "_size"), (system_page, "_bytes"), (system_page, "_size"),
+    (forge_inspect, "_octets"), (projects_files, "_size"), (system_page, "_bytes"), (system_page, "_size"),
 ])
 def test_the_pages_of_the_console_have_no_size_of_their_own(module, copy: str) -> None:
     assert not hasattr(module, copy) and module.size_fr is size_fr
@@ -261,6 +302,14 @@ def test_the_size_of_a_forged_base_reads_like_any_other_size() -> None:
     ctx = SimpleNamespace(subject="essai", ports={"forge": Port()}, param=lambda _name: "")
     facts = dict(asyncio.run(forge_inspect._tab_base(SimpleNamespace(apps={}), None, ctx))[0].pairs)
     assert facts["taille"] == size_fr(0) and facts["plafond"] == size_fr(1024 ** 3)  # c'était « 1 Ko » et « 1073,7 Mo »
+
+
+@pytest.mark.parametrize(("module", "copies"), [
+    (self_inspect, ("number", "signed")), (attention_inspect, ("number",)), (identity_inspect, ("number",)),
+    (memory_inspect, ("number",)),
+])
+def test_the_consoles_of_the_faculties_write_a_number_one_way(module, copies: tuple[str, ...]) -> None:
+    assert not any(hasattr(module, name) for name in copies) and module.num_fr is num_fr
 
 
 @pytest.mark.parametrize(("said", "read"), [

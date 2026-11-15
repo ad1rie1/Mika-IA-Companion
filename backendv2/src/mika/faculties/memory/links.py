@@ -36,7 +36,8 @@ def handles_of(frame: Frame, person: str) -> tuple[str, ...]:
     return tuple(sorted({person, *frame.get(identity_c.HANDLES(person))}))
 
 
-def _keys(values: tuple[str, ...]) -> list[str]:
+def _handle_keys(values: tuple[str, ...]) -> list[str]:
+    """Ces adresses telles que les colonnes indexées les rangent (``handle_key``), triées, sans doublon."""
     return sorted({handle_key(v) for v in values})
 
 
@@ -49,7 +50,7 @@ def _named_in(store: Any, writers: tuple[str, ...], name: str) -> bool:
     if not parts or len(parts[0]) < 3:
         return False
     t = transcript_c.thread_table()
-    rows = store.query_mind(select(t.c.text).where(t.c.role == "user", t.c.person.in_(_keys(writers)),
+    rows = store.query_mind(select(t.c.text).where(t.c.role == "user", t.c.person.in_(_handle_keys(writers)),
                                                    t.c.folded.contains(fold_text(raw[0] if raw else parts[0]),
                                                                        autoescape=True)))
     first, full = f" {parts[0]} ", f" {' '.join(parts)} "
@@ -69,7 +70,7 @@ def written(store: Any, writers: tuple[str, ...], names: tuple[str, ...]) -> boo
 def _related(store: Any, a: tuple[str, ...], b: tuple[str, ...], depth: int) -> bool:
     """Le graphe social les relie-t-il — directement, ou (``depth`` 2) par quelqu'un qui connaît les deux ? Une
     relation dans un sens ou dans l'autre, quel qu'en soit l'état : un lien qui ferme n'a pas à être prouvé."""
-    ka, kb = _keys(a), _keys(b)
+    ka, kb = _handle_keys(a), _handle_keys(b)
     r = social_c.relations_table()
     edges = union(select(r.c.subject.label("x"), r.c.other.label("y")),
                   select(r.c.other.label("x"), r.c.subject.label("y")))
@@ -87,7 +88,7 @@ def _related(store: Any, a: tuple[str, ...], b: tuple[str, ...], depth: int) -> 
 def _rooms(store: Any, handles: tuple[str, ...]) -> set[str]:
     t = transcript_c.thread_table()
     return {str(r) for (r,) in store.query_mind(
-        select(t.c.room).distinct().where(t.c.room.is_not(None), t.c.person.in_(_keys(handles))))}
+        select(t.c.room).distinct().where(t.c.room.is_not(None), t.c.person.in_(_handle_keys(handles))))}
 
 
 def _told_about(store: Any, tellers: tuple[str, ...], about_: tuple[str, ...]) -> bool:
@@ -97,7 +98,7 @@ def _told_about(store: Any, tellers: tuple[str, ...], about_: tuple[str, ...]) -
     a, i = alias_of(about(), "a"), alias_of(items(), "i")
     return bool(store.query_mind(
         select(literal(1)).select_from(a.join(i, i.c.id == a.c.item))
-        .where(a.c.person.in_(_keys(about_)), or_(*(json_has(i.c.told_by, t) for t in sorted(set(tellers)))))
+        .where(a.c.person.in_(_handle_keys(about_)), or_(*(json_has(i.c.told_by, t) for t in sorted(set(tellers)))))
         .limit(1)))
 
 
@@ -105,7 +106,7 @@ def _named_together(store: Any, a: tuple[str, ...], b: tuple[str, ...]) -> bool:
     x, y = alias_of(about(), "x"), alias_of(about(), "y")
     return bool(store.query_mind(
         select(literal(1)).select_from(x.join(y, x.c.item == y.c.item))
-        .where(x.c.person.in_(_keys(a)), y.c.person.in_(_keys(b))).limit(1)))
+        .where(x.c.person.in_(_handle_keys(a)), y.c.person.in_(_handle_keys(b))).limit(1)))
 
 
 def _told_named(store: Any, listener: tuple[str, ...], about_: tuple[str, ...]) -> bool:
@@ -113,7 +114,7 @@ def _told_named(store: Any, listener: tuple[str, ...], about_: tuple[str, ...]) 
     t, a = alias_of(told(), "t"), alias_of(about(), "a")
     return bool(store.query_mind(
         select(literal(1)).select_from(t.join(a, a.c.item == t.c.item))
-        .where(t.c.veiled == 0, t.c.handle.in_(_keys(listener)), a.c.person.in_(_keys(about_))).limit(1)))
+        .where(t.c.veiled == 0, t.c.handle.in_(_handle_keys(listener)), a.c.person.in_(_handle_keys(about_))).limit(1)))
 
 
 def _presumed_keys(store: Any, frame: Frame, person: str) -> tuple[str, ...]:

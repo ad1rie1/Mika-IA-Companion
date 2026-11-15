@@ -118,7 +118,8 @@ def _guessed(s: OthersState, frame: Frame, ctx: InspectContext) -> list[Block]:
                            _duration(max(samples))))
     blocks.append(Table((Column("canal"), Column("réponses mesurées", "num"), Column("délai habituel", "num"),
                          Column("le plus long", "num")), tuple(delays), title="Ses délais de réponse",
-                        empty="aucune mesure : elle ne lui a encore jamais écrit d'elle-même"))
+                        empty="aucune mesure : rien de ce qu'elle lui a écrit d'elle-même n'a encore reçu de réponse "
+                              "à temps (un bonjour, une promesse tenue ou un vœu n'en attendent pas)"))
     now_band = band_of(frame.local().hour)
     rows: list[tuple[Cell, ...]] = []
     for band in c.BANDS:

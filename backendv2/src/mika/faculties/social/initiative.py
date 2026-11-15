@@ -83,22 +83,9 @@ def _habit_words(days: float) -> str:
     return phrase("social.initiative.habit_daily") if n <= 1 else phrase("social.initiative.habit_days", days=n)
 
 
-def _address(frame: Frame, person: str) -> str | None:
-    """Où lui écrire : une adresse présente d'abord, sinon une conversation
-    privée où l'on peut lui écrire d'elle-même."""
-    handles = frame.get(identity_c.HANDLES(person))
-    present = [h for h in frame.get(presence_c.PRESENT) if h in handles]
-    if present:
-        return present[0]
-    reachable = frame.get(identity_c.REACHABLE(person))
-    return reachable[0] if reachable else None
-
-
-def _guard(frame: Frame, person: str) -> Guard:
-    """Si la personne écrit entre-temps (sur n'importe laquelle de ses adresses),
-    l'initiative est devancée : on lui répond, on ne la relance pas."""
-    handles = frame.get(identity_c.HANDLES(person)) or (person,)
-    return Guard("silence", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))
+# Aller vers quelqu'un : où lui écrire, ``identity.reach_now`` (une adresse présente d'abord, sinon une conversation
+# privée où l'on peut lui écrire d'elle-même) ; si elle écrit entre-temps, sur n'importe laquelle de ses adresses,
+# l'initiative est devancée — on lui répond, on ne la relance pas : ``identity.heard_since_guard``.
 
 
 @SOCIAL.propose(kinds=[Kind.INITIATIVE], reasons={c.GREETING: (0.0, GREETING_MAX), c.PRESENT_PERSON: (0.0, 0.0)},
@@ -173,7 +160,7 @@ def _reach_out(s: SocialState, frame: Frame) -> list[Candidate]:
         reading = frame.get(c.CONTACT(person))
         if not reading.last_in:
             continue  # sans réponse, une relance douce au plus, après un long délai : c'est la retenue d'``agency``
-        address = _address(frame, person)
+        address = identity_c.reach_now(frame, person)
         if address is None:
             continue
         name = frame.get(identity_c.IDENTITY(person)).name or frame.get(identity_c.IDENTITY(address)).name
@@ -184,7 +171,8 @@ def _reach_out(s: SocialState, frame: Frame) -> list[Candidate]:
                      if reading.measured else "")
             brief = phrase("social.initiative.recontact.brief", silence=_silence_words(silent), habit=habit, who=who)
             out.append(Candidate(Kind.INITIATIVE, address, c.RECONTACT, round(p.recontact_evidence * share, 3),
-                                 resources=frozenset({floor(address)}), guards=(_guard(frame, person),),
+                                 resources=frozenset({floor(address)}),
+                                 guards=(identity_c.heard_since_guard(frame, person),),
                                  args=FrozenDict({"brief:social": brief})))
         elif distressed and frame.now - reading.last_out >= p.comfort_spacing_us:
             warmth = frame.get(affect_c.WARMTH(person))
@@ -196,14 +184,16 @@ def _reach_out(s: SocialState, frame: Frame) -> list[Candidate]:
             evidence = ((p.chat_close if level == c.CLOSE else p.chat_friend) + p.chat_warmth * warmth) * share
             brief = phrase("social.initiative.chat.brief", who=who)
             out.append(Candidate(Kind.INITIATIVE, address, c.CHAT, evidence, resources=frozenset({floor(address)}),
-                                 guards=(_guard(frame, person),), args=FrozenDict({"brief:social": brief})))
+                                 guards=(identity_c.heard_since_guard(frame, person),),
+                                 args=FrozenDict({"brief:social": brief})))
     if comfort:
         _score, person, address, share = max(comfort)
         name = frame.get(identity_c.IDENTITY(person)).name or frame.get(identity_c.IDENTITY(address)).name
         who = f"« {name} »" if name else phrase("social.initiative.comfort.someone")
         brief = phrase("social.initiative.comfort.brief", mood=A.FR[mood.felt], who=who)
         out.append(Candidate(Kind.INITIATIVE, address, c.COMFORT, round(p.comfort_evidence * share, 3),
-                             resources=frozenset({floor(address)}), guards=(_guard(frame, person),),
+                             resources=frozenset({floor(address)}),
+                             guards=(identity_c.heard_since_guard(frame, person),),
                              args=FrozenDict({"brief:social": brief})))
     return out
 
@@ -261,7 +251,7 @@ def _rekindle(s: SocialState, frame: Frame) -> list[Candidate]:
         if not been_friends(view, person, p, frame.get(affect_c.HOSTILITY(person)),
                             bool(frame.get(identity_c.IS_OWNER(person)))):
             continue
-        address = _address(frame, person)
+        address = identity_c.reach_now(frame, person)
         if address is None:
             continue
         name = frame.get(identity_c.IDENTITY(person)).name or frame.get(identity_c.IDENTITY(address)).name
@@ -272,7 +262,8 @@ def _rekindle(s: SocialState, frame: Frame) -> list[Candidate]:
                phrase("social.initiative.rekindle.months", who=who))
         brief = phrase("social.initiative.rekindle.brief", who=who, why=why)
         out.append(Candidate(Kind.INITIATIVE, address, c.REKINDLE, p.rekindle_evidence,
-                             resources=frozenset({floor(address)}), guards=(_guard(frame, person),),
+                             resources=frozenset({floor(address)}),
+                             guards=(identity_c.heard_since_guard(frame, person),),
                              args=FrozenDict({"brief:social": brief})))
     return out
 

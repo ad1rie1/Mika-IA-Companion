@@ -22,14 +22,16 @@ from mika.faculties.attachments.faculty import (
     MISSING,
     PORT,
     AttachmentsState,
+    holder,
+    params_of,
+)
+from mika.faculties.attachments.tables import (
     FileRow,
     by_prefix,
     carriers,
     count,
-    holder,
     linked_knowledge,
     links,
-    params_of,
     recent,
     row,
     usage,

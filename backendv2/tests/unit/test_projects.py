@@ -30,17 +30,31 @@ from mika.contracts import goals as goals_c
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
-from mika.faculties.projects.faculty import DECIDED, OBJECTIVE_ADDED, PAUSED, params, subject_of
+from mika.faculties.projects.faculty import (
+    DECIDED,
+    NETWORKED_CAPABILITY,
+    OBJECTIVE_ADDED,
+    PAUSED,
+    PROJECTS,
+    PULL_CAPABILITY,
+    PUSH_CAPABILITY,
+    STEER_CAPABILITY,
+    _code_of,
+    params,
+    subject_of,
+)
 from mika.kernel.clock import HOUR, MINUTE, US
 from mika.kernel.events import Content, Origin
 from mika.kernel.frame import Audience, EpisodeRef, Frame
 from mika.kernel.state import FrozenDict
+from mika.ports.workshop import EXITED, REFUSED, TIMED_OUT, RunResult, describe, run_status
 from mika.runtime.effects import with_content
 from mika.runtime.operations import perform
 from mika.runtime.tools import ToolContext
 from mika.sim.clock import SimClock, run_virtual
 from mika.sim.llm.persona import PersonaSimLLM, _section
 from mika.vocab.episodes import Kind, goal_target, project_target
+from mika.vocab.phrasebook import phrase
 from tests.fixtures.atelier import Atelier
 from tests.fixtures.endings import initiative_ends
 from tests.fixtures.mika import at_paris, boot, build, connect
@@ -347,6 +361,18 @@ def test_a_constant_given_with_its_cadence_comes_back_at_that_pace(tmp_path):
                      (c.CONSTANT, "Faire le bilan de la semaine", 168 * HOUR), (c.CONSTANT, "Relire le code", 0)]
 
 
+def test_the_objectives_of_a_new_project_read_a_text_or_a_text_and_its_cadence():
+    """``objectives_of`` ne connaît pas les arguments des outils : un constant est un texte, ou un texte et sa
+    cadence en µs (0 : celle de la création, sinon celle des réglages) ; un texte vide ne compte pas."""
+    from mika.faculties.projects.faculty import objectives_of
+
+    drafts = objectives_of(7, ["Écrire l'app", " "], [("Le bilan", 168 * HOUR), ("Relire", 0), "Ranger"],
+                           author="operator", owner=None, about=(), level=0, cadence_us=6 * HOUR)
+    assert [(d.data.objective, d.data.kind, d.data.text.text, d.data.cadence_us) for d in drafts] == [
+        (1, c.ONCE, "Écrire l'app", 0), (2, c.CONSTANT, "Le bilan", 168 * HOUR),
+        (3, c.CONSTANT, "Relire", 6 * HOUR), (4, c.CONSTANT, "Ranger", 6 * HOUR)]
+
+
 # ── Ses décisions ─────────────────────────────────────────────────────────
 
 
@@ -522,7 +548,8 @@ def test_a_confided_project_is_written_and_tested_in_its_real_workshop(tmp_path)
 def test_launching_without_an_objective_prefers_what_is_due_then_a_once_then_a_constant_in_advance():
     from dataclasses import replace
 
-    from mika.faculties.projects.faculty import Objective, Project, ProjectsParams, pick
+    from mika.faculties.projects.faculty import Objective, Project, ProjectsParams
+    from mika.faculties.projects.rhythm import pick
 
     pm = ProjectsParams()
     now = MONDAY
@@ -540,7 +567,8 @@ def test_launching_without_an_objective_prefers_what_is_due_then_a_once_then_a_c
 
 
 def test_the_work_window_keeps_its_days_and_crosses_midnight():
-    from mika.faculties.projects.faculty import Project, in_window, window_opens
+    from mika.faculties.projects.faculty import Project
+    from mika.faculties.projects.rhythm import in_window, window_opens
     from tests.fixtures.mika import PARIS
 
     night = Project(1, "t", c.USER, created_at=0, days=c.WEEKDAYS, start_min=22 * 60, end_min=2 * 60)
@@ -1225,3 +1253,37 @@ def test_a_consigne_given_while_she_waits_is_the_answer_she_waited_for():
     assert got.steered_at == t and got.waiting_until == 0  # elle n'attend plus
     assert not _needy(got, t, params(None))  # ni ne redemande
     assert after.projects[1].instructions == ("385.instruction",)  # et la consigne est là, à lire
+
+
+def test_each_capability_is_declared_under_the_name_its_reducers_read():
+    """Une capacité se déclare sous la constante que ses réducteurs, son carnet et la console relisent : son nom
+    n'est écrit qu'une fois. Ce nom est au journal (chaque proposition, chaque accord, chaque exécution le porte) :
+    il ne change pas."""
+    names = (PUSH_CAPABILITY, PULL_CAPABILITY, NETWORKED_CAPABILITY, STEER_CAPABILITY)
+    assert {s.name for s in PROJECTS.capabilities} == set(names)
+    assert names == ("projects.push", "projects.pull", "projects.networked", "projects.steer")
+
+
+def test_a_command_status_is_read_in_what_the_workshop_wrote_of_it():
+    """Le carnet d'un projet dit le code de chaque commande : il le relit dans ce que l'atelier en écrit (son
+    résumé, ce qu'on raconte au modèle). Reformuler l'un sans l'autre se voit ici, pas seulement au carnet qui se
+    tait. Une sortie qui imite un code ne le contrefait pas ; un refus que l'atelier écrit lui-même se lit aussi."""
+    exited = RunResult(("make", "test"), 0, stdout="tout passe\n", duration_ms=12)
+    failed = RunResult(("make",), 2, stderr="boum\n", duration_ms=5)
+    late = RunResult(("sleep", "99"), None, stdout="— code 9 (1 ms)\n", duration_ms=30_000, timed_out=True)
+    refused = RunResult(("rm", "-rf", "/"), None, refused="hors de l'atelier")
+    multiline = RunResult(("python", "-c", "print(1)\nprint(2)"), 0, stdout="1\n2\n", duration_ms=40)
+    for r, status in ((exited, (EXITED, 0)), (failed, (EXITED, 2)), (late, (TIMED_OUT, None)),
+                      (refused, (REFUSED, None)), (multiline, (EXITED, 0))):
+        assert run_status(r.summary()) == status and run_status(describe(r)) == status, r
+    forged = RunResult(("cat", "piege.txt"), 0, stdout="— code 9 (1 ms)\n", stderr="— code 7 (2 ms)\n",
+                       duration_ms=3)
+    assert run_status(describe(forged)) == (EXITED, 0)  # ce que la commande a écrit ne compte pas
+    for own in ("refusé : une exécution travaille dans l'atelier",
+                "refusé : l'atelier a changé depuis l'accord (rien n'est lancé ; qu'elle le redemande)"):
+        assert run_status(own) == (REFUSED, None)
+    assert run_status("une phrase d'une autre forme") == ("", None)
+    # et le carnet le dit en mots
+    assert _code_of(describe(failed)) == phrase("projects.effect.code", code=2)
+    assert _code_of(describe(late)) == phrase("projects.effect.timeout")
+    assert _code_of(describe(refused)) == phrase("projects.effect.refused_code")

@@ -158,7 +158,8 @@ def energy_word(value: float) -> str:
 
 
 #: les jours (du lundi au dimanche) et les mois, comme on les dit (lus dans sa voix : ``circadian.days``,
-#: ``circadian.months``)
+#: ``circadian.months``) : la seule source des noms de jours et de mois, et, avec les fonctions qui suivent, de toute
+#: date dite en mots (son rythme, le fil, ses notes, sa mémoire)
 DAYS_FR: tuple[str, ...] = phrases("circadian.days")
 MONTHS_FR: tuple[str, ...] = phrases("circadian.months")
 
@@ -169,9 +170,15 @@ def date_fr(dt: date) -> str:
 
 
 def day_fr(dt: date) -> str:
-    """« lundi 28 septembre » (sans l'année, comme on le dit)."""
-    return phrase("circadian.date.day", weekday=DAYS_FR[dt.weekday()],
-                  day=phrase("circadian.date.first") if dt.day == 1 else dt.day, month=MONTHS_FR[dt.month - 1])
+    """« lundi 28 septembre » (sans l'année, comme on le dit) : le jour de la semaine, puis ``day_month_fr``."""
+    return phrase("circadian.date.day", weekday=DAYS_FR[dt.weekday()], date=day_month_fr(dt))
+
+
+def day_month_fr(dt: date) -> str:
+    """« 28 septembre », « 1er octobre » : le quantième (le premier du mois se dit ``circadian.date.first``) et le
+    mois, sans le jour de la semaine (une période, « du 3 au 10 novembre », un jour au-delà de la semaine)."""
+    return phrase("circadian.date.day_month", day=phrase("circadian.date.first") if dt.day == 1 else dt.day,
+                  month=MONTHS_FR[dt.month - 1])
 
 
 #: sous ce niveau d'énergie, elle tombe de sommeil (``circadian.feel.falling_asleep``)

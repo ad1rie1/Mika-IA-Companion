@@ -58,7 +58,7 @@ from mika.runtime import operations as ops
 from mika.runtime.boundary import Failed, call
 from mika.runtime.tool_offer import declare
 from mika.runtime.traces import STABLE_KEY, TRUNCATION_MARK
-from mika.vocab.episodes import TRIAL_ROLE
+from mika.vocab.episodes import TRIAL_ROLE, outcome_words
 
 EPISODE_TABS = (("resume", "Résumé"), ("deroule", "Déroulé"), ("dit", "Ce qu'elle a dit"), ("prompt", "Prompt"), ("outils", "Outils"),
                 ("appels", "Appels de modèle"), ("decision", "Décision"))
@@ -161,7 +161,7 @@ def episode_tab(ui: Any, corr: str, tab: str, info: dict[str, Any], query=None) 
                  ("enrichissements", ", ".join(trace.get("enrichments") or ()) or "aucun"),
                  ("empreinte du préfixe", Text(str(trace.get("system_stable_hash") or "—")[:16], "mono",
                                                hint="la même d'un épisode à l'autre : le cache sert")),
-                 ("issue", names.outcome(trace.get("outcome"))[0] if trace.get("outcome") != "running" else "en cours")]
+                 ("issue", outcome_words(trace.get("outcome"))[0] if trace.get("outcome") != "running" else "en cours")]
         out.append(Fields(tuple(facts)))
         out += context_blocks(trace)
         if trace.get("reply"):
@@ -303,7 +303,7 @@ def event_page(ui: Any, seq: int, query=None) -> dict[str, Any] | None:
                         if s.startswith("user_") else ""} for s in subjects],
             "triggered": [{"kind": names.kind(t.data.kind), "to": ui.names.who(t.data.target),
                            "when": ui.when_long(t.at), "href": render.href(Ref("episode", t.correlation, "")),
-                           "outcome": names.outcome(ends[t.correlation].data.outcome, ends[t.correlation].data.kind)
+                           "outcome": outcome_words(ends[t.correlation].data.outcome, ends[t.correlation].data.kind)
                            if ends.get(t.correlation) is not None else ("en cours", "warn")} for t in triggered],
             "pager": render.pager_ctx(pager, q or {}), "raw": raw,
         }

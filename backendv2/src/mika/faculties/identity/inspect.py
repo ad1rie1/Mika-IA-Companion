@@ -65,6 +65,7 @@ from mika.kernel.inspect import (
     Toolbar,
     When,
     agree,
+    num_fr,
     paginate,
 )
 from mika.vocab import privacy
@@ -113,17 +114,13 @@ BY_FR = {"kernel": "le noyau", "tool": "elle (outil)", "operator": "un opérateu
 FORGOTTEN = "(oublié)"
 
 
-def number(value: float) -> str:
-    return f"{value:.2f}".replace(".", ",")
-
-
 def certainty_fr(value: float, *, bound: bool = True) -> str:
     """Une certitude et son degré. Pour une adresse qui parle pour elle-même, le
     degré dit ce que prouve son canal — jamais « liée » : elle n'est liée à personne."""
     name = privacy.certainty_name(value)
     if not bound and name in ("bound", "corroborated"):
-        return f"{number(value)} (sûre du compte)"
-    return f"{number(value)} ({CERTAINTY_FR.get(name, '?')})"
+        return f"{num_fr(value, 2)} (sûre du compte)"
+    return f"{num_fr(value, 2)} ({CERTAINTY_FR.get(name, '?')})"
 
 
 def view_certainty(view: c.IdentityView) -> str:
@@ -551,16 +548,17 @@ def verdict_steps(h: Handle, effective: float) -> list[tuple[str, str, str]]:
     capped = min(raised, ceiling)
     bound = bool(h.person)
     steps = [("certitude enregistrée", certainty_fr(stored, bound=bound), why),
-             ("plancher du canal", number(floor),
-              f"relevée de {number(stored)} à {number(raised)}" if raised > stored else "déjà au-dessus : inchangée"),
-             ("plafond du canal", number(ceiling),
-              f"le plafond mord : {number(raised)} ramenée à {number(capped)}" if capped < raised
+             ("plancher du canal", num_fr(floor, 2),
+              f"relevée de {num_fr(stored, 2)} à {num_fr(raised, 2)}" if raised > stored
+              else "déjà au-dessus : inchangée"),
+             ("plafond du canal", num_fr(ceiling, 2),
+              f"le plafond mord : {num_fr(raised, 2)} ramenée à {num_fr(capped, 2)}" if capped < raised
               else "sous le plafond : inchangée"),
              ("certitude effective", certainty_fr(effective, bound=bound), "celle qui vaut sur ce canal")]
     if abs(capped - effective) > 1e-9:
-        steps.append(("écart", number(capped), "le calcul pas à pas ne retombe pas sur la lecture de la faculté"))
+        steps.append(("écart", num_fr(capped, 2), "le calcul pas à pas ne retombe pas sur la lecture de la faculté"))
     bar = privacy.POLICY.private_threshold
-    steps.append(("barre de divulgation", number(bar),
+    steps.append(("barre de divulgation", num_fr(bar, 2),
                   "atteinte" if effective >= bar else "pas atteinte : rien de personnel sur autrui"))
     return steps
 
@@ -575,21 +573,21 @@ def why_level(certainty: float, trust: ChannelTrust, *, closeness: str, warmth: 
     if public:
         return "audience publique : d'autres lisent, donc jamais plus qu'anodin, à aucune certitude"
     if certainty < pol.private_threshold:
-        return (f"certitude {number(certainty)} sous la barre ({number(pol.private_threshold)}) : "
+        return (f"certitude {num_fr(certainty, 2)} sous la barre ({num_fr(pol.private_threshold, 2)}) : "
                 "anodin seulement")
     rank = privacy.closeness_rank(closeness)
     link = (f"pour elle, {CLOSENESS_FR.get(closeness, closeness or CLOSENESS_FR[social_c.STRANGER])} ; "
-            f"chaleur {number(warmth)}")
+            f"chaleur {num_fr(warmth, 2)}")
     warm = warmth >= pol.warmth_min and rank >= privacy.CLOSENESS_RANK[social_c.ACQUAINTANCE]
     if not (rank >= privacy.CLOSENESS_RANK[social_c.FRIEND] or warm):
         return (f"aucun lien assez fort ({link}) : anodin — une amitié, un lien proche, ou une connaissance pour "
-                f"qui elle a une chaleur d'au moins {number(pol.warmth_min)} ouvrirait le personnel")
+                f"qui elle a une chaleur d'au moins {num_fr(pol.warmth_min, 2)} ouvrirait le personnel")
     if certainty >= pol.confidence_threshold and rank >= privacy.CLOSENESS_RANK[social_c.CLOSE]:
-        return (f"un lien proche, et une certitude d'au moins {number(pol.confidence_threshold)} ({link}) : le "
+        return (f"un lien proche, et une certitude d'au moins {num_fr(pol.confidence_threshold, 2)} ({link}) : le "
                 "personnel sur autrui ; jusqu'aux confidences d'une personne qu'elle connaît (elles se sont parlé "
                 "ensemble, ou cette personne l'a nommée) — être proche d'elle ne suffit pas")
     return (f"un lien ({link}) ouvre le personnel ; les confidences demandent un lien proche et une certitude d'au "
-            f"moins {number(pol.confidence_threshold)}")
+            f"moins {num_fr(pol.confidence_threshold, 2)}")
 
 
 def why_file(certainty: float, trust: ChannelTrust, *, public: bool) -> str:
@@ -616,10 +614,10 @@ def _opens(frame: Frame, handle: str, h: Handle, view: c.IdentityView) -> Table:
                      why_file(view.certainty, h.trust, public=audience_public)))
     return Table(("audience", "sur autrui", "pourquoi", "si la personne est concernée",
                   "sur quelqu'un qu'elle connaît",
+                  # ce qui se dit sans lien prouvé (ADR 0092), et sans nommer personne (ADR 0091)
                   Column("sa vie, sans lien", hint="ce qu'elle sait de la vie de quelqu'un, dit nommément à qui n'a "
-                                                   "aucun lien prouvé avec lui (ADR 0092) : l'anodin"),
-                  Column("sans nommer personne", hint="à qui n'a aucun lien connu avec la personne (ADR 0091) : "
-                                                     "jamais un secret"),
+                                                   "aucun lien prouvé avec lui : l'anodin"),
+                  Column("sans nommer personne", hint="à qui n'a aucun lien connu avec la personne : jamais un secret"),
                   "sa propre fiche"), tuple(rows), title="Ce que ça ouvre")
 
 
@@ -673,7 +671,7 @@ def _claim(s: IdentityState, h: Handle, view: c.IdentityView, ctx: InspectContex
     blocks: list[Block] = [Fields((
         ("nom revendiqué", f"« {claim.name} »"), ("personne visée", target),
         ("certitude de la revendication", certainty_fr(certainty)),
-        ("vers la barre", Meter(certainty / bar if bar else 0.0, f"{number(certainty)} / {number(bar)}",
+        ("vers la barre", Meter(certainty / bar if bar else 0.0, f"{num_fr(certainty, 2)} / {num_fr(bar, 2)}",
                                 "ok" if certainty >= bar else "")),
         ("preuves déjà comptées", ", ".join(_used(u) for u in claim.used) or "—"),
         ("premières preuves de recoupement",
@@ -685,12 +683,13 @@ def _claim(s: IdentityState, h: Handle, view: c.IdentityView, ctx: InspectContex
     if view.claim and claim.target and claim.target != view.handle:
         missing = max(0.0, bar - certainty)
         blocks.append(Note(
-            f"Il manque {number(missing)} pour atteindre la barre. Ce qui peut la confirmer : ce que seule "
+            f"Il manque {num_fr(missing, 2)} pour atteindre la barre. Ce qui peut la confirmer : ce que seule "
             f"{known_as(s, claim.target)} pouvait savoir, recoupé sur deux messages différents (jamais celui où "
             f"la personne se présente), dont un avec un détail rare — un nom propre, un nombre, une date "
-            f"(+{number(privacy.EVIDENCE[c.SHARED_MEMORY])}) ; un opérateur qui s'en porte garant "
-            f"(+{number(privacy.EVIDENCE[c.VOUCHED])}) ; ou qui relie directement ce moyen de communication (certitude "
-            f"{number(privacy.BOUND)}). Le plafond du canal reste {number(privacy.CEILINGS[h.trust])}. Une liaison "
+            f"(+{num_fr(privacy.EVIDENCE[c.SHARED_MEMORY], 2)}) ; un opérateur qui s'en porte garant "
+            f"(+{num_fr(privacy.EVIDENCE[c.VOUCHED], 2)}) ; ou qui relie directement ce moyen de communication "
+            f"(certitude {num_fr(privacy.BOUND, 2)}). Le plafond du canal reste "
+            f"{num_fr(privacy.CEILINGS[h.trust], 2)}. Une liaison "
             "par recoupement reste « à confirmer » : le fil de ses autres moyens de communication lui reste fermé tant qu'un opérateur "
             "ne l'a pas confirmée.", title="Pour la confirmer"))
     elif view.claim and claim.target == view.handle:
@@ -715,7 +714,7 @@ def _describe_event(e: Event[Any], s: IdentityState) -> tuple[str, str]:
     if e.type.name == c.EVIDENCE.name:
         kind = str(data.kind)
         weight = privacy.EVIDENCE.get(kind, privacy.COUNTER_EVIDENCE.get(kind, 0.0))
-        detail = f"{EVIDENCE_FR.get(kind, kind)} ({'+' if weight >= 0 else ''}{number(weight)})"
+        detail = f"{EVIDENCE_FR.get(kind, kind)} ({num_fr(weight, 2, signed=True)})"
         name = _said(data.name, data.legacy_name)
         if name:
             detail += f" — nom « {name} »" if name != FORGOTTEN else f" — nom {FORGOTTEN}"
@@ -897,7 +896,7 @@ def _synthesis(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Bloc
     blocks.append(Section("Ce qu'elle peut lui dire", (
         Fields((("moyen principal", handle_ref(s, main)), ("canal", f"{h.channel or '—'} · {TRUST_FR[h.trust]}"),
                 ("certitude effective", view_certainty(view)),
-                ("barre de divulgation", number(privacy.POLICY.private_threshold))), columns=2),
+                ("barre de divulgation", num_fr(privacy.POLICY.private_threshold, 2))), columns=2),
         _opens(frame, main, h, view),
     ), description="Sur son moyen de communication principal (celui dont le canal prouve le plus). Chacun a son verdict "
                    "pas à pas sur sa fiche."))
@@ -1064,7 +1063,7 @@ def _directory(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Bloc
                Stat("liées à une autre personne", sum(1 for h in s.handles.values() if h.person)),
                Stat("revendications en attente", len(pending_claims(s, frame.now)), href=CLAIMS_QUEUE),
                Stat("propriétaires", owners),
-               Stat("barre de divulgation", number(privacy.POLICY.private_threshold),
+               Stat("barre de divulgation", num_fr(privacy.POLICY.private_threshold, 2),
                     href=Ref.view("identity", "politique", "politique")))),
         Table(("moyen de communication", "canal", "confiance du canal", Column("certitude", detail=True), "parle pour",
                Column("propriétaire", detail=True), "revendique", Column("divulgation en privé", detail=True),
@@ -1105,13 +1104,13 @@ def _claims(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
             handle_ref(s, handle, tab="revendication"), f"« {claim.name} »",
             person_ref(s, claim.target) if claim.target else Text("plusieurs personnes portent ce nom", "muted"),
             Badge(TRUST_SHORT[h.trust], TRUST_TONE[h.trust]),
-            Meter(certainty / bar if bar else 0.0, f"{number(certainty)} / {number(bar)}"),
+            Meter(certainty / bar if bar else 0.0, f"{num_fr(certainty, 2)} / {num_fr(bar, 2)}"),
             ", ".join(_used(u) for u in claim.used) or "—", When(claim.at), When(claim.at + ttl),
         ), href=handle_ref(s, handle, tab="revendication")))
     return [Table(("moyen de communication", "nom revendiqué", "vise", "canal", "vers la barre", "preuves comptées", "depuis",
                    "s'éteint"), tuple(rows), title="Revendications en attente", pager=pager,
                   empty="aucune revendication en attente"),
-            Note(f"Une affirmation seule ne franchit jamais la barre ({number(bar)}) ; une revendication jamais "
+            Note(f"Une affirmation seule ne franchit jamais la barre ({num_fr(bar, 2)}) ; une revendication jamais "
                  f"confirmée s'éteint au bout de {privacy.POLICY.pending_claim_ttl_days} jours.", tone="muted")]
 
 
@@ -1177,14 +1176,14 @@ def _opens_at_best(trust: ChannelTrust) -> str:
                   description="Les barres que la faculté applique : lues dans la politique, jamais recopiées.")
 def _policy(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
     pol = privacy.POLICY
-    channels = tuple((Badge(TRUST_SHORT[t], TRUST_TONE[t]), TRUST_FR[t], number(privacy.FLOORS[t]),
-                      number(privacy.CEILINGS[t]), _opens_at_best(t)) for t in ChannelTrust)
-    levels = tuple((CERTAINTY_FR.get(name, name), number(value),
+    channels = tuple((Badge(TRUST_SHORT[t], TRUST_TONE[t]), TRUST_FR[t], num_fr(privacy.FLOORS[t], 2),
+                      num_fr(privacy.CEILINGS[t], 2), _opens_at_best(t)) for t in ChannelTrust)
+    levels = tuple((CERTAINTY_FR.get(name, name), num_fr(value, 2),
                     "atteint la barre" if value >= pol.private_threshold else "sous la barre")
                    for name, value in privacy.CERTAINTY_NAMES)
-    weights = tuple((EVIDENCE_FR.get(kind, kind), Text(kind, "mono"), f"+{number(w)}", "pour")
+    weights = tuple((EVIDENCE_FR.get(kind, kind), Text(kind, "mono"), num_fr(w, 2, signed=True), "pour")
                     for kind, w in pol.evidence.items()) + \
-        tuple((EVIDENCE_FR.get(kind, kind), Text(kind, "mono"), number(w), "contre")
+        tuple((EVIDENCE_FR.get(kind, kind), Text(kind, "mono"), num_fr(w, 2), "contre")
               for kind, w in pol.counter_evidence.items())
     ranks = tuple((CLOSENESS_FR.get(k, k), Text(k, "mono"), rank) for k, rank in privacy.CLOSENESS_RANK.items())
     problem = pol.check()
@@ -1194,9 +1193,9 @@ def _policy(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
               title="Les canaux",
               caption="Le plancher relève la certitude, le plafond la borne : aucune conversation ne rend une "
                       "affirmation faite en public aussi sûre qu'une connexion."),
-        Fields((("barre de divulgation (personnel sur autrui, sa propre fiche)", number(pol.private_threshold)),
-                ("confidences (proche, en privé)", number(pol.confidence_threshold)),
-                ("chaleur qui ouvre le personnel sans amitié", number(pol.warmth_min)),
+        Fields((("barre de divulgation (personnel sur autrui, sa propre fiche)", num_fr(pol.private_threshold, 2)),
+                ("confidences (proche, en privé)", num_fr(pol.confidence_threshold, 2)),
+                ("chaleur qui ouvre le personnel sans amitié", num_fr(pol.warmth_min, 2)),
                 ("une revendication s'éteint après", f"{pol.pending_claim_ttl_days} jours")),
                title="Les barres", columns=2),
         Table(("degré", "certitude", "barre"), levels, title="Les degrés de certitude"),

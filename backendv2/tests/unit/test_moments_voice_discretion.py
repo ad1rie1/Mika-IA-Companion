@@ -17,19 +17,13 @@ import pytest
 
 from mika.app.server import _warm
 from mika.contracts import memory as mc
-from mika.faculties.memory import consolidation as cons
-from mika.faculties.memory.extraction import (
-    Conversation,
-    Extraction,
-    Line,
-    People,
-    Speaker,
-    XEvenement,
-    XSouvenir,
-    render,
-    voice_of,
-)
+from mika.faculties.memory import kept
+from mika.faculties.memory.conversation import Conversation, Line, Speaker, render
+from mika.faculties.memory.cues import voice_of
+from mika.faculties.memory.extraction import Extraction, XEvenement, XSouvenir
 from mika.faculties.memory.faculty import MemoryParams, MemoryState
+from mika.faculties.memory.shown import _moments
+from mika.faculties.memory.speakers import People
 from mika.kernel.clock import DAY
 from mika.kernel.events import Content
 from mika.vocab.phrasebook import phrase
@@ -52,7 +46,7 @@ def _monday() -> str:
 async def _drafts(db: Store, ex: Extraction, line: str, moments) -> list:
     conv = Conversation("private:user_2", ALICE, (alice_says(line),))
     people = People.of(ALICE, {}, "Mika", scope=conv.key)
-    return await cons._drafts(ex, FRAME, MemoryState(), db, conv, people, [], [], None, MemoryParams(), "audit",
+    return await kept._drafts(ex, FRAME, MemoryState(), db, conv, people, [], [], None, MemoryParams(), "audit",
                               moments=moments)
 
 
@@ -63,7 +57,7 @@ def test_the_extraction_sees_the_upcoming_moments_with_their_numbers():
     db = Store()
     old = _interview(db)
     conv = Conversation("private:user_2", ALICE, (alice_says("finalement il est reporté à lundi"),))
-    shown, upcoming = cons._moments(FRAME, db, MemoryState(), conv, {"user_2": "Alice [P1]"})
+    shown, upcoming = _moments(FRAME, db, MemoryState(), conv, {"user_2": "Alice [P1]"})
     assert [i for i, _w, _t in shown] == [old] and set(upcoming) == {old}
     text = render(conv, now=FRAME.local(), beliefs=(), promises=(), moments=shown)
     assert phrase("memory.extraction.render.moments") in text
@@ -77,7 +71,7 @@ async def test_a_postponed_moment_replaces_the_one_it_moves_and_inherits_its_sec
     db = Store()
     old = _interview(db, secret=True)
     conv = Conversation("private:user_2", ALICE, (alice_says("finalement il est reporté à lundi"),))
-    _shown, upcoming = cons._moments(FRAME, db, MemoryState(), conv, {})
+    _shown, upcoming = _moments(FRAME, db, MemoryState(), conv, {})
     ex = Extraction(evenements=[XEvenement(texte="son entretien chez Ubisoft, reporté à lundi", quand=_monday(),
                                            personnes=["P1"], messages=[10000], remplace=old)])
     events = [d.data for d in await _drafts(db, ex, "finalement il est reporté à lundi", upcoming)
@@ -120,7 +114,7 @@ async def test_the_souvenir_written_in_carols_place_becomes_what_carol_told_her(
     ex = Extraction(souvenirs=[XSouvenir(texte="J'ai eu une petite fille, Jeanne : je suis épuisée mais tellement "
                                                "heureuse.", personnes=["P1"], messages=[10000], importance=3)])
     people = People.of(CAROL, {}, "Mika", scope=conv.key)
-    got = [d.data for d in await cons._drafts(ex, FRAME, MemoryState(), db, conv, people, [], [], None,
+    got = [d.data for d in await kept._drafts(ex, FRAME, MemoryState(), db, conv, people, [], [], None,
                                               MemoryParams(), "audit")
            if d.type.name == mc.REMEMBERED.name]
     assert len(got) == 1 and got[0].text.text.startswith("Carol") and got[0].told_by == ("user_4",)
@@ -201,14 +195,48 @@ def test_a_named_day_is_placed_on_the_calendar_not_guessed():
     (ADR 0099)."""
     from datetime import date
 
-    from mika.faculties.memory.extraction import CALENDAR_MAX, calendar, day_words
+    from mika.faculties.memory.conversation import CALENDAR_MAX, calendar
+    from mika.vocab.circadian import day_fr
 
+    assert day_fr(date(2026, 10, 1)) == "jeudi 1er octobre" and day_fr(date(2026, 10, 12)) == "lundi 12 octobre"
     days = calendar(date(2026, 10, 9), date(2026, 10, 9)).split(", ")  # un vendredi
-    assert day_words(date(2026, 10, 12)) in days  # le lundi qui vient
-    assert day_words(date(2026, 10, 5)) in days  # le lundi d'avant
-    assert days[0] == day_words(date(2026, 10, 2)) and days[-1] == day_words(date(2026, 10, 23))
+    assert day_fr(date(2026, 10, 12)) in days  # le lundi qui vient
+    assert day_fr(date(2026, 10, 5)) in days  # le lundi d'avant
+    assert days[0] == day_fr(date(2026, 10, 2)) and days[-1] == day_fr(date(2026, 10, 23))
     assert len(calendar(date(2026, 1, 1), date(2026, 10, 9)).split(", ")) == CALENDAR_MAX  # une vieille conversation
     conv = Conversation("private:user_2", ALICE, (alice_says("finalement il est reporté à lundi"),))
     text = render(conv, now=FRAME.local(), beliefs=(), promises=())
     assert phrase("memory.extraction.render.calendar", days=calendar(FRAME.local().date(), FRAME.local().date())) \
         in text
+
+
+def test_her_memory_says_a_date_as_the_rest_of_her_does():
+    """« mardi 6 octobre », « le 1er novembre », « du 1er au 10 novembre » : la relecture, le rappel et les périodes
+    disent une date comme le reste de Mika, par une seule source (``vocab.circadian``). Sa mémoire n'a pas sa propre
+    liste des jours ou des mois, ni son propre « 1er » : une retouche de sa voix (« 1er », une casse) prend partout."""
+    from datetime import date
+    from zoneinfo import ZoneInfo
+
+    from mika.faculties.memory import timespan
+    from mika.faculties.memory.recall import when_words
+    from mika.vocab import circadian
+    from mika.vocab.phrasebook import catalog
+
+    voice = catalog()
+    twins = (circadian.DAYS_FR, circadian.MONTHS_FR, voice["circadian.date.first"])
+    assert [k for k, v in voice.items() if k.startswith("memory.") and v in twins] == []
+    first_nov = date(2026, 11, 1)
+    assert circadian.day_month_fr(first_nov) == "1er novembre"
+    assert circadian.day_fr(first_nov) == f"{circadian.DAYS_FR[first_nov.weekday()]} {circadian.day_month_fr(first_nov)}"
+    later = FRAME.now + 24 * DAY  # FRAME : jeudi 8 octobre 2026 ; au-delà de la semaine, le jour et le mois
+    assert FRAME.local(later).date() == first_nov
+    assert when_words(later, FRAME) == phrase("memory.when.date", date=circadian.day_month_fr(first_nov), at="")
+    soon = FRAME.now + 3 * DAY  # dans la semaine : le nom du jour
+    assert when_words(soon, FRAME) == phrase("memory.when.soon", weekday=circadian.DAYS_FR[FRAME.local(soon).weekday()],
+                                             at="", days=3)
+    utc = ZoneInfo("UTC")
+    assert timespan.words(timespan.parse("2026-11-01", utc), FRAME.now, utc) == circadian.day_month_fr(first_nov)
+    assert timespan.words(timespan.parse("2026-11-01/2026-11-10", utc), FRAME.now, utc) == phrase(
+        "timespan.range", start=voice["circadian.date.first"], end=circadian.day_month_fr(date(2026, 11, 10)))
+    assert timespan.words(timespan.parse("2026-11", utc), FRAME.now, utc) == phrase(
+        "timespan.month", month=circadian.MONTHS_FR[10])

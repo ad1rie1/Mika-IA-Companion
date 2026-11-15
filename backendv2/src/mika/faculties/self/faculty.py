@@ -1,16 +1,17 @@
-"""La faculté ``self`` : sa tranche d'état et ce qu'elle déclare. Ses contributions vivent chacune dans son module
-(``narrative``, ``esteem``, ``model``, ``interests``, ``absence``, ``persona``, ``greeting``, ``night``,
-``inspect``)."""
+"""La faculté ``self`` : sa tranche d'état, ce qu'elle déclare et son jour vécu (``day_of``, ``lived_date``,
+``night_of``). Ses contributions vivent chacune dans son module (``narrative``, ``esteem``, ``model``, ``interests``,
+``absence``, ``persona``, ``greeting``, ``night``, ``inspect``)."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any
 
 from mika.contracts import body as body_c
 from mika.contracts import self_ as c
 from mika.faculties.self import days
-from mika.faculties.self.knobs import SelfParams, derive
+from mika.faculties.self.params import SelfParams, derive
 from mika.faculties.self.records import Deed, Dream, Effort, Interest, Journal, Knock, Lead, Mark
 from mika.kernel.faculty import Faculty
 from mika.kernel.frame import Frame
@@ -105,11 +106,31 @@ SELF.declare(c.PERSONA_REVISED, c.NARRATED, c.JOURNALED, c.DREAMT, c.WOKE_WITH, 
              c.REFLECTED, c.CHARACTER_WRITTEN)
 
 
+# Le jour vécu, à un seul endroit : ``days`` est le calendrier, ces enveloppes le lisent selon son rythme (lu chez
+# ``body``), dans un réducteur (``day_of``) ou depuis un cadre (les autres). Une journée sert de clé en chaîne ISO
+# (``day_of``, ``lived_day_of``, ``night_of``) ; ``lived_date`` la rend en date, pour compter des jours.
+
+
 def day_of(cx: Any, at: int) -> str:
     """La journée vécue d'un instant, selon son rythme (lu chez ``body``), dans un réducteur."""
     return days.lived_day(at, cx.tz, days.day_starts(cx.facts.get(body_c.RHYTHM))).isoformat()
 
 
+def starts_of(frame: Frame) -> int:
+    """La minute où commence sa journée, selon son rythme, depuis un cadre."""
+    return days.day_starts(frame.get(body_c.RHYTHM))
+
+
+def lived_date(frame: Frame, t: int | None = None) -> date:
+    """La journée vécue d'un instant (maintenant, sans instant), depuis un cadre (un interprète, un processus)."""
+    return days.lived_day(frame.now if t is None else t, frame.env.tz_of(frame.root), starts_of(frame))
+
+
 def lived_day_of(frame: Frame, at: int) -> str:
-    """La même, depuis un cadre (un interprète, un processus)."""
-    return days.lived_day(at, frame.env.tz_of(frame.root), days.day_starts(frame.get(body_c.RHYTHM))).isoformat()
+    """La même, en clé (chaîne ISO)."""
+    return lived_date(frame, at).isoformat()
+
+
+def night_of(frame: Frame, asleep_since: int) -> str:
+    """La journée qu'un endormissement vient clore."""
+    return days.night_of(asleep_since, frame.env.tz_of(frame.root), starts_of(frame)).isoformat()

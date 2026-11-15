@@ -190,6 +190,22 @@ def test_consolidation_says_where_rereading_is_and_a_page_opens_its_subtab(world
     assert panes.index('id="consol-runs"') < panes.index('id="consol-queue"')
 
 
+def test_a_conversation_received_on_the_phone_waits_in_the_queue_with_its_action(world):  # noqa: F811
+    """Une relecture du téléphone empêchée attend dans la même file que les siennes (ADR 0224) : elle dit d'où elle
+    vient, sa cause et son détail, et se reprend du même geste."""
+    client, live, _ = world
+    kernel, _ = _life(client, live)
+    seq = append(client, kernel, [rt.PERCEPTION_RECEIVED.draft(handle="alice", channel="web", addressed=False,
+                                                               text=Content.of("Un repère."))]).seqs[0]
+    detail = Content.of('{"issues": ["croyances[1]: missing"], "output": "[{\\"croyances\\": []}]"}', level=3)
+    append(client, kernel, [memory.EXTRACTION_DEFERRED.draft(key=seq, source=memory.FROM_RELAYED, messages=(seq,),
+        about=("alice",), status="review", failure_code="invalid_items", detail=detail)], "memory")
+    queue = _between(drawn(client, "/inspecteur/memoire/consolidation"), 'id="consol-queue"', 'id="consol-runs"')
+    assert f"conversation reçue sur le téléphone, message n° {seq}" in queue
+    assert "Éléments extraits invalides" in queue and "à examiner" in queue and "Détail du passage" in queue
+    assert "Reprendre cette extraction" in queue and f'name="key" value="{seq}"' in queue
+
+
 def test_a_new_memory_says_each_tab_is_empty(world):  # noqa: F811
     client, live, _ = world
     _life(client, live)
@@ -197,6 +213,45 @@ def test_a_new_memory_says_each_tab_is_empty(world):  # noqa: F811
                       ("moments", "pas encore de moment noté."), ("recues", "aucune pièce reçue."),
                       ("recues", "aucune pièce gardée."), ("envoyes", "elle n'a encore envoyé aucun fichier."),
                       ("voir-venir", "aucun moment constaté encore."),
-                      ("consolidation", "pas encore de relecture.")):
+                      ("consolidation", "pas encore de relecture."), ("consolidation", "pas encore de nuit relue.")):
         page = drawn(client, f"/inspecteur/memoire/{tab}")
         assert f'data-tab="memoire/{tab}"' in page and says in page, tab
+
+
+def test_a_night_reread_shows_what_she_kept_and_what_the_night_joined_or_confronted(world):  # noqa: F811
+    client, live, _ = world
+    kernel, _ = _life(client, live)
+    said = ("Alice aime le jazz.", "Alice adore le jazz.", "Alice vit à Lyon.", "Alice a quitté Lyon.",
+            "Alice joue du piano.", "Alice fait du piano.")
+    b = append(client, kernel, [memory.BELIEVED.draft(text=Content.of(t), about=("alice",), origin=memory.TOLD,
+                                                      source="alice", confidence=0.8) for t in said], "memory").seqs
+    append(client, kernel, [
+        memory.REREAD.draft(night="2026-11-10", upto=0, readings=0, pairs=0),  # d'avant ``produced`` : rien n'en dit
+        memory.JOINED.draft(night="2026-11-10", pairs=((b[4], b[5]),)),
+        memory.JOINED.draft(night="2026-11-12", pairs=((b[0], b[1]),), mute=True),
+        memory.CONFRONTED.draft(night="2026-11-12", supersedes=((b[3], b[2]),)),
+    ], "memory")
+    done = append(client, kernel, [memory.REREAD.draft(night="2026-11-12", upto=b[0], readings=3, pairs=2,
+                                                       produced=4, call_id="nuit#0", model="haiku")],
+                  "memory").seqs[0]
+    page = drawn(client, "/inspecteur/memoire/consolidation")
+    assert 'href="#consol-rereads">Lectures de la nuit<' in page
+    rereads = _between(page, 'id="consol-rereads"', 'id="consol-state"')
+    night, before = _between(rereads, "12 nov.", "</li>"), _between(rereads, "10 nov.", "</li>")
+    assert 'now-num">3</span> lectures relues' in night and 'now-num">2</span> paires confrontées' in night
+    assert 'now-num">4</span> éléments retenus' in night and "haiku" in night
+    assert f"/inspecteur/evenement/{done}" in night
+    # en détail, ce que la même nuit a réuni (jugé la même chose par la relecture) ou confronté, vers les croyances
+    detail = _between(night, "Ce que la nuit a réuni ou confronté")
+    assert "jugées la même chose par la relecture, sans être les mêmes mots" in detail and "emporte sur" in detail
+    assert all(f"/inspecteur/evenement/{n}" in detail for n in b[:4])
+    assert f"/inspecteur/evenement/{b[4]}" not in detail  # la jointure d'une autre nuit reste à sa nuit
+    # une nuit relue avant ``produced`` ne dit pas ce qu'elle a retenu, et sans appel, pas de modèle
+    assert "retenu" not in before and "sans appel au modèle" in before
+    assert f"/inspecteur/evenement/{b[4]}" in before
+    state = _between(page, 'id="consol-state"')
+    assert "dernière nuit relue" in state and "2026-11-12" in state
+    # une page plus ancienne de la liste ouvre son sous-onglet
+    panes = drawn(client, f"/inspecteur/memoire/consolidation?avant_lectures={done}").split(
+        'class="hm-subpanes"')[1]
+    assert panes.index('id="consol-rereads"') < panes.index('id="consol-queue"')

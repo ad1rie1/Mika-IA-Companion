@@ -71,7 +71,7 @@ from mika.runtime.boundary import Failed, call
 from mika.vocab import affect as A
 from mika.vocab import causes
 from mika.vocab.circadian import PHASE_FR
-from mika.vocab.episodes import Kind
+from mika.vocab.episodes import Kind, outcome_words
 from mika.vocab.people import is_identifiable
 
 #: l'adresse de la page, et celle du fragment qu'elle relit
@@ -460,7 +460,7 @@ def lanes(look: Look, episodes: Sequence[Any], thoughts: Sequence[Any]) -> dict[
         if kind not in (Kind.REPLY, Kind.INITIATIVE, Kind.MURMUR):
             continue
         failed = e.data.outcome in FAILED
-        outcome, _tone = names.outcome(e.data.outcome, kind)
+        outcome, _tone = outcome_words(e.data.outcome, kind)
         who = _target(look, e)
         marks.append({"pct": axis.pct(e.at), "kind": "failed" if failed else kind.lower(),
                       "r": 4.5 if kind == Kind.INITIATIVE else 3.5,
@@ -519,7 +519,7 @@ def _said(look: Look, e: Any) -> tuple[str, str]:
             (f"S'est retenue d'écrire{to}", "muted")
     if kind == Kind.MURMUR:
         return "A murmuré", ""
-    text, tone = names.outcome(outcome, kind)
+    text, tone = outcome_words(outcome, kind)
     return f"{names.kind(kind).capitalize()}{' pour ' + who if who else ''} · {text}", tone if tone == "warn" else ""
 
 

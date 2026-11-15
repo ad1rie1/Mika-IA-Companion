@@ -15,12 +15,14 @@ from types import SimpleNamespace as NS
 from mika.contracts import attention as attention_c
 from mika.contracts import memory as mc
 from mika.faculties.attention.faculty import AttentionParams, AttentionState, _revised
-from mika.faculties.memory import consolidation as cons
+from mika.faculties.memory import kept
 from mika.faculties.memory import knowledge as kn
-from mika.faculties.memory.extraction import Conversation, Extraction, Line, People, Speaker, XCroyance
+from mika.faculties.memory.conversation import Conversation, Line, Speaker
+from mika.faculties.memory.extraction import Extraction, XCroyance
 from mika.faculties.memory.faculty import MemoryParams, MemoryState
 from mika.faculties.memory.knowledge import CONTEST, SUPERSEDE, judge
 from mika.faculties.memory.recall import contested_line, items_by_id
+from mika.faculties.memory.speakers import People
 from mika.kernel.events import Content
 from mika.kernel.frame import Audience
 from mika.vocab.privacy import Sensitivity
@@ -49,7 +51,7 @@ async def said_by(db, who, text, *, personnes=(), remplace=None, genre=None, pre
                                          remplace=remplace, genre=genre, de_premiere_main=premiere_main,
                                          point_de_vue=point_de_vue)])
     known = [(i, t) for i, t in db.query(f"SELECT id, text FROM {mc.KNOWLEDGE_VIEW} WHERE kind='belief'")]
-    return await cons._drafts(ex, FRAME, MemoryState(), db, conv, people, known, [], None, MemoryParams(),
+    return await kept._drafts(ex, FRAME, MemoryState(), db, conv, people, known, [], None, MemoryParams(),
                               "verite")
 
 

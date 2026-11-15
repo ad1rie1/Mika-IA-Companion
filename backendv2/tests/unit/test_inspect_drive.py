@@ -492,8 +492,7 @@ def test_an_exploration_and_its_step_read_in_the_list_and_the_detail(tmp_path):
             step = reported()[0]
             await kernel.lanes.join()
             gid = str(step.data.goal)
-            detail = [*show(kernel, "goals", "resume", subject=gid), *show(kernel, "goals", "seances", subject=gid),
-                      *show(kernel, "goals", "episodes", subject=gid)]
+            detail = [*show(kernel, "goals", "resume", subject=gid), *show(kernel, "goals", "seances", subject=gid)]
             after = {
                 "vivants": show(kernel, "goals", "vivants"),
                 "exploration": show(kernel, "goals", "clos", sorte="exploration"),
@@ -520,22 +519,21 @@ def test_an_exploration_and_its_step_read_in_the_list_and_the_detail(tmp_path):
     assert _cell(row["statut"]) == "en cours"
     assert isinstance(row["envie"], Meter) and 0.5 <= row["envie"].ratio <= 1  # l'envie de départ, à peine usée
     assert field(opened, "vivants") == 1
-    # le détail : ses champs, ses pas, ses épisodes
+    # le détail : ses champs, ses séances (chaque épisode du but, et le compte rendu de chaque séance)
     assert field(detail, "sorte") == "exploration" and "Adrien" in field(detail, "titre")
     assert _cell(field(detail, "personne concernée")) == "Adrien"  # son nom, pas sa clé
     opening = field(detail, "ouvert")
     assert isinstance(opening, Ref) and opening.kind == "event" and opening.key == str(gid)
     steps = table(detail, "Ses séances")
-    first = dict(zip([c.label for c in steps.columns], _cells(steps.rows[-1]), strict=True))
+    row = next(r for r in steps.rows if r.href == Ref("episode", step.correlation, ""))
+    first = dict(zip([c.label for c in steps.columns], _cells(row), strict=True))
     verdict = {"continue": "continuer", "done": "fini", "blocked": "bloquée", "wait": "attendre"}[step.data.verdict]
     assert _cell(first["verdict"]).startswith(verdict)
     assert _cell(first["résumé"]) == step.data.summary.text
     assert set(step.data.tools) == set(first["outils utilisés"].split(", ")) and step.data.tools == ("goal_reflect",)
-    assert first[""] == Ref("episode", step.correlation, "épisode")
-    episodes = table(detail, "Ses épisodes")
-    assert "séance de travail" in column(episodes, "épisode")
-    assert step.correlation in [r.key for r in column(episodes, "Prompt")]
-    assert all(isinstance(r, Ref) and r.kind == "episode" for r in column(episodes, "Prompt"))
+    assert first["épisode"] == "séance de travail"
+    assert first["prompt"] == Ref("episode", step.correlation, "prompt", (("onglet", "prompt"),))
+    assert all(isinstance(r, Ref) and r.kind == "episode" for r in column(steps, "prompt"))
     assert _cell(field(detail, "statut")) == "abouti"
     # les filtres : par sorte (code ou libellé)
     assert not table(after["vivants"], "Buts vivants").rows
@@ -545,8 +543,10 @@ def test_an_exploration_and_its_step_read_in_the_list_and_the_detail(tmp_path):
     # oublié : ce qui la concernait se lit « (oublié) », la vue tient
     assert field(forgotten, "titre") == "(oublié)" and field(forgotten, "résultat") == "(oublié)"
     assert field(detail, "titre") != "(oublié)"
-    # le résumé du pas pouvait citer ses mots : l'oubli l'atteint aussi
-    summaries = column(table(forgotten, "Ses séances"), "résumé")
+    # le résumé du pas pouvait citer ses mots : l'oubli l'atteint aussi (les lignes qui ont un compte rendu)
+    sessions = table(forgotten, "Ses séances")
+    summaries = [said for said, verdict in zip(column(sessions, "résumé"), column(sessions, "verdict"), strict=True)
+                 if verdict != "—"]
     assert summaries and all(_cell(s) == "(oublié)" for s in summaries)
     assert "examen" not in flat(forgotten)
 

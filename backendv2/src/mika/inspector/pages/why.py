@@ -73,7 +73,7 @@ from mika.ports.journal import JournalEvent
 from mika.runtime.boundary import Failed, call
 from mika.runtime.traces import STABLE_KEY
 from mika.vocab import affect as A
-from mika.vocab.episodes import Tag
+from mika.vocab.episodes import Tag, outcome_words
 from mika.vocab.reading import Reading
 
 #: au-delà, l'arbitre a pu choisir plus tôt : le choix d'un départ se cherche dans ces événements-ci
@@ -530,7 +530,7 @@ def why_page(ui: Any, seq: int) -> dict[str, Any] | None:
     started, ended = episode_events(ui, corr)
     trace = trace_of(ui, corr)
     text = d.text.text
-    issue = names.outcome(ended.data.outcome, ended.data.kind) if ended is not None else ("en cours", "warn")
+    issue = outcome_words(ended.data.outcome, ended.data.kind) if ended is not None else ("en cours", "warn")
     facts = [("à", ui.names.who_cell(d.target)), ("quand", When(utterance.at)),
              ("épisode", Ref("episode", corr, names.kind(d.kind))), ("issue", Badge(*issue)),
              ("voix", f"{names.role(d.voice.role)} · {d.voice.model or '—'}"),
@@ -773,7 +773,7 @@ def _silence_note(e: Any) -> Note:
         cause = detail or ("délai dépassé" if e.outcome == "timeout" else "échec sans détail")
         return Note(f"Une panne : {cause}. Ce n'est pas un choix : elle n'a pas pu répondre.", "danger",
                     title="Une panne")
-    return Note(f"{names.outcome(e.outcome)[0].capitalize()}, et ses tentatives de réponse étaient épuisées : la "
+    return Note(f"{outcome_words(e.outcome)[0].capitalize()}, et ses tentatives de réponse étaient épuisées : la "
                 "question n'a pas été reprise.", "warn", title="Abandonnée")
 
 
@@ -832,7 +832,7 @@ def silence_page(ui: Any, seq: int) -> dict[str, Any] | None:
     # une fin écrite sans épisode (une question abandonnée, trop vieille ou sans place) n'a ni prompt ni appel
     started, _end = episode_events(ui, corr)
     trace = trace_of(ui, corr)
-    facts.append(("issue", Badge(*names.outcome(e.outcome, e.kind))))
+    facts.append(("issue", Badge(*outcome_words(e.outcome, e.kind))))
     if started is not None:
         facts.append(("épisode", Ref("episode", corr, names.kind(e.kind))))
     state = _silence_note(e)
@@ -874,7 +874,7 @@ def silence_page(ui: Any, seq: int) -> dict[str, Any] | None:
     def rendered(items: Sequence[Any]) -> Any:
         return lambda env, query: render.blocks(list(items), env, query, namespace="silence")
 
-    outcome = names.outcome(e.outcome, e.kind)
+    outcome = outcome_words(e.outcome, e.kind)
     more: dict[str, Any] = {
         "outcome": {"text": outcome[0], "tone": outcome[1]}, "burst": burst,
         "ended": {"href": render.href(Ref("event", str(ended.seq), "")), "number": ended.seq,

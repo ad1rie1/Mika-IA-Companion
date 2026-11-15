@@ -49,14 +49,10 @@ from mika.faculties.memory.extraction import IMPORTANCE
 from mika.faculties.memory.faculty import MEMORY
 from mika.faculties.memory.knowledge import Testimony, pooled
 from mika.faculties.memory.tables import (
-    CHANGES_TABLE,
-    CONTESTS_TABLE,
     DEFERRED_TABLE,
     EMOTION,
     READING_COLUMNS,
     READINGS_TABLE,
-    REFS_TABLE,
-    TESTIMONIES_TABLE,
     TESTIMONY_COLUMNS,
     about,
     batches,
@@ -67,6 +63,8 @@ from mika.faculties.memory.tables import (
     forgets,
     handle_key,
     items,
+    keys_json,
+    keys_of,
     readings,
     refs,
     testimonies,
@@ -89,25 +87,10 @@ ITEM_COLUMNS = ("id", "kind", "text", "about", "sensitivity", "importance", "con
                 "knowledge_kind", "holder", "constraints", "internal_only", "superseded_by", "as_of", "valid_until",
                 "felt", "empathy", "until", "precision", "likelihood", "gist", "veiled", "felt_from")
 CHUNK_TEXT_MAX = 600
-#: un élément → ses émotions, de qui (``theirs`` : la personne concernée ; ``hers`` : elle) et à quelle intensité
-#: (ADR 0083)
-FEELINGS_TABLE = c.FEELINGS_TABLE
 #: les événements qui créent un élément (et portent son texte)
 _CREATES = frozenset({c.REMEMBERED.name, c.BELIEVED.name, c.PROMISE_NOTICED.name, c.EVENT_NOTED.name})
 #: deux radicaux en commun entre ce qu'elle a dit et un élément montré : elle s'en est servie
 USED_STEMS = 2
-
-
-def _keys(values: Iterable[str]) -> str:
-    return json.dumps(sorted({v for v in values if v}), ensure_ascii=False)
-
-
-def _loads(raw: str | None) -> list[str]:
-    try:
-        got = json.loads(raw or "[]")
-    except ValueError:
-        return []
-    return [str(x) for x in got] if isinstance(got, list) else []
 
 
 def informants_of(source: str | None, told_by: Sequence[str]) -> tuple[str, ...]:
@@ -119,8 +102,8 @@ def informants_of(source: str | None, told_by: Sequence[str]) -> tuple[str, ...]
 def _testify(sql: Sql, sfx: str, item: int, seq: int, *, told_by: Sequence[str], informants: Sequence[str],
              origin: str | None, confidence: float | None, heard_by: Sequence[str], sensitivity: int, secret: bool,
              between_us: bool, sources: Sequence[int], at: int, speaks: bool = True, first_hand: bool = False) -> None:
-    values = (item, seq, _keys(told_by), _keys(informants), origin or c.TOLD,
-              0.5 if confidence is None else float(confidence), _keys(heard_by), int(sensitivity), int(secret),
+    values = (item, seq, keys_json(told_by), keys_json(informants), origin or c.TOLD,
+              0.5 if confidence is None else float(confidence), keys_json(heard_by), int(sensitivity), int(secret),
               int(between_us), json.dumps(sorted(set(sources))), at, int(speaks), int(first_hand))
     upsert(sql, testimonies(sfx), dict(zip(TESTIMONY_COLUMNS, values, strict=True)), keys=["item", "seq"])
 
@@ -141,8 +124,8 @@ def _contest(sql: Sql, sfx: str, item: int, other: int, at: int) -> None:
 def testimony_of(row: Sequence[Any]) -> Testimony:
     """Une ligne de ``memory_testimonies`` (``TESTIMONY_COLUMNS``)."""
     r = dict(zip(TESTIMONY_COLUMNS, row, strict=True))
-    return Testimony(int(r["seq"]), tuple(_loads(r["told_by"])), tuple(_loads(r["heard_by"])), int(r["sensitivity"]),
-                     bool(r["secret"]), float(r["confidence"]), tuple(_loads(r["informants"])), str(r["origin"]),
+    return Testimony(int(r["seq"]), keys_of(r["told_by"]), keys_of(r["heard_by"]), int(r["sensitivity"]),
+                     bool(r["secret"]), float(r["confidence"]), keys_of(r["informants"]), str(r["origin"]),
                      int(r["at"]), bool(r["between_us"]), bool(r["speaks"]), bool(r["first_hand"]))
 
 
@@ -166,7 +149,7 @@ def _settle(sql: Sql, sfx: str, item: int) -> None:
         return
     t, tt = items(sfx), testimonies(sfx)
     row = sql.query(select(t.c.about).where(t.c.id == item))
-    concerned = set(_loads(row[0][0])) if row else set()
+    concerned = set(keys_of(row[0][0])) if row else set()
     if any(x.secret and set(x.told_by) & concerned for x in got) and not all(x.secret for x in got):
         # la discrétion demandée par la personne concernée ferme tout — ce qui était déjà dit, et ce qu'un autre en
         # dira ensuite (ADR 0080) : Bob qui le redit après « garde-le pour toi » d'Alice ne l'ouvre pas
@@ -175,7 +158,7 @@ def _settle(sql: Sql, sfx: str, item: int) -> None:
         got = _testimonies(sql, sfx, item)
     informants = sorted({k for x in got for k in (x.informants or x.told_by)})
     sql.execute(update(t).where(t.c.id == item)
-                .values(informants=json.dumps(informants, ensure_ascii=False), confidence=pooled(got)))
+                .values(informants=keys_json(informants), confidence=pooled(got)))
 
 
 def forgotten(text: Any) -> bool:
@@ -286,7 +269,7 @@ class Items:
             full["fingerprint"] = fingerprint(full["text"])
             full["folded"] = fold_text(full["text"])
             upsert(sql, t, {k: full[k] for k in columns}, keys=["id"])
-            _about_rows(sql, sfx, int(full["id"]), _loads(full["about"]))
+            _about_rows(sql, sfx, int(full["id"]), keys_of(full["about"]))
             _feel(sql, sfx, int(full["id"]), json.loads(full["felt"]), json.loads(full["empathy"]), full["emotion"])
 
         for e in events:
@@ -311,22 +294,22 @@ class Items:
                 # la référence de son texte : l'oubli d'une personne rattachée depuis (un renfort) l'atteint aussi
                 upsert(sql, refs(sfx), {"item": e.seq, "ref": d.text.ref}, keys=["item"])
             if name == c.REMEMBERED.name:
-                insert({"id": e.seq, "kind": c.EPISODE_MEMORY, "text": d.text.text or "", "about": _keys(d.about),
+                insert({"id": e.seq, "kind": c.EPISODE_MEMORY, "text": d.text.text or "", "about": keys_json(d.about),
                         "sensitivity": d.sensitivity, "importance": d.importance,
                         "born_at": e.at, "touched_at": e.at, "status": "active", "sources": json.dumps(list(d.sources)),
-                        "told_by": _keys(d.told_by), "heard_by": _keys(d.heard_by), "secret": int(d.secret),
+                        "told_by": keys_json(d.told_by), "heard_by": keys_json(d.heard_by), "secret": int(d.secret),
                         "constraints": json.dumps([rule.model_dump() for rule in d.constraints]),
                         "internal_only": int(d.internal_only), "origin": c.LIED if d.lie else None,
                         "emotion": d.emotion or dominant(d.empathy), "felt": _facets_json(d.felt),
                         "empathy": _facets_json(d.empathy), "gist": (d.gist.text or "") if d.gist else "",
                         "veiled": (d.veiled.text or "") if d.veiled else ""})
             elif name == c.BELIEVED.name:
-                insert({"id": e.seq, "kind": c.BELIEF, "text": d.text.text or "", "about": _keys(d.about),
+                insert({"id": e.seq, "kind": c.BELIEF, "text": d.text.text or "", "about": keys_json(d.about),
                         "sensitivity": d.sensitivity, "importance": d.importance, "confidence": d.confidence,
                         "origin": d.origin, "source": d.source, "born_at": e.at, "touched_at": e.at,
                         "status": "active", "replaces": d.replaces, "sources": json.dumps(list(d.sources)),
-                        "told_by": _keys(d.told_by), "heard_by": _keys(d.heard_by), "secret": int(d.secret),
-                        "informants": _keys(informants_of(d.source, d.told_by)),
+                        "told_by": keys_json(d.told_by), "heard_by": keys_json(d.heard_by), "secret": int(d.secret),
+                        "informants": keys_json(informants_of(d.source, d.told_by)),
                         # 1 : ce qu'elle raconte d'elle, qui s'efface ; 2 : ce qui la définit (un goût, un avis), qui tient
                         "about_self": 2 if d.durable else int(d.about_self), "between_us": int(d.between_us),
                         "knowledge_kind": d.knowledge_kind, "holder": d.holder,
@@ -347,15 +330,15 @@ class Items:
                 if d.contests is not None:
                     _contest(sql, sfx, e.seq, d.contests, e.at)
             elif name == c.PROMISE_NOTICED.name:
-                insert({"id": e.seq, "kind": c.PROMISE, "text": d.text.text or "", "about": _keys([d.to]),
+                insert({"id": e.seq, "kind": c.PROMISE, "text": d.text.text or "", "about": keys_json([d.to]),
                         "sensitivity": d.sensitivity, "importance": 0.6, "born_at": e.at, "touched_at": e.at,
                         "status": "pending", "recipient": d.to, "due": d.due, "sources": json.dumps(list(d.sources))})
             elif name == c.EVENT_NOTED.name:
-                insert({"id": e.seq, "kind": c.EVENT, "text": d.text.text or "", "about": _keys(d.about),
+                insert({"id": e.seq, "kind": c.EVENT, "text": d.text.text or "", "about": keys_json(d.about),
                         "sensitivity": d.sensitivity, "importance": d.importance, "born_at": e.at, "touched_at": e.at,
                         "status": "active", "due": d.when, "replaces": d.replaces,
-                        "sources": json.dumps(list(d.sources)), "told_by": _keys(d.told_by),
-                        "heard_by": _keys(d.heard_by), "secret": int(d.secret), "emotion": dominant(d.empathy),
+                        "sources": json.dumps(list(d.sources)), "told_by": keys_json(d.told_by),
+                        "heard_by": keys_json(d.heard_by), "secret": int(d.secret), "emotion": dominant(d.empathy),
                         "felt": _facets_json(d.felt), "empathy": _facets_json(d.empathy), "until": d.until,
                         "precision": d.precision, "likelihood": d.likelihood})
                 if d.replaces is not None:
@@ -414,15 +397,15 @@ class Items:
             return
         t = items(sfx)
         sens = max(int(row["sensitivity"]), int(d.sensitivity)) if d.sensitivity is not None else int(row["sensitivity"])
-        informants = _loads(row["informants"])
+        informants = list(keys_of(row["informants"]))
         if d.source or d.told_by:
             informants = [*informants, *informants_of(d.source, d.told_by)]
         sql.execute(update(t).where(t.c.id == d.item).values(
             # Un ancien renfort peut avoir été fondé sur une simple similarité. En rejouant le journal,
             # il ne doit pas élargir les permissions du texte conservé.
-            sensitivity=sens, about=_keys([*_loads(row["about"]), *d.about]), told_by=row["told_by"],
-            heard_by=row["heard_by"], secret=int(bool(row["secret"]) or d.secret), informants=_keys(informants),
-            sources=json.dumps(sorted({*map(int, _loads(row["sources"])), *d.sources}))))
+            sensitivity=sens, about=keys_json([*keys_of(row["about"]), *d.about]), told_by=row["told_by"],
+            heard_by=row["heard_by"], secret=int(bool(row["secret"]) or d.secret), informants=keys_json(informants),
+            sources=json.dumps(sorted({*map(int, keys_of(row["sources"])), *d.sources}))))
         if not d.restricts:
             # ce qui revient dure plus longtemps — une discrétion demandée ferme sans rien redire : ni plus
             # d'importance, ni un oubli remis à zéro
@@ -464,7 +447,7 @@ class Items:
         if row is None:
             return  # oubliée entre-temps
         t, tt = items(sfx), testimonies(sfx)
-        mine = _keys(d.told_by)
+        mine = keys_json(d.told_by)
         if d.restricts:
             for got in _testimonies(sql, sfx, d.item):
                 if d.everyone or set(got.told_by) & set(d.told_by) or (not got.told_by and not d.told_by):
@@ -473,11 +456,11 @@ class Items:
             sql.execute(update(t).where(t.c.id == d.item)
                         .values(secret=1, sensitivity=greatest(t.c.sensitivity, int(d.sensitivity))))
         else:
-            informants = _keys(informants_of(d.source, d.told_by))
+            informants = keys_json(informants_of(d.source, d.told_by))
             # le plus ancien d'abord : deux témoignages identiques ne se départagent pas au hasard du moteur
             same = sql.query(select(tt.c.seq, tt.c.sources)
                              .where(tt.c.item == d.item, tt.c.told_by == mine, tt.c.informants == informants,
-                                    tt.c.heard_by == _keys(d.heard_by), tt.c.secret == int(d.secret),
+                                    tt.c.heard_by == keys_json(d.heard_by), tt.c.secret == int(d.secret),
                                     tt.c.between_us == int(d.between_us), tt.c.speaks == 1)
                              .order_by(tt.c.seq))
             testimony = seq
@@ -487,7 +470,7 @@ class Items:
                 kept_seq, kept_sources = same[0]
                 testimony = int(kept_seq)
                 sql.execute(update(tt).where(tt.c.item == d.item, tt.c.seq == kept_seq).values(
-                    at=at, sources=json.dumps(sorted({*map(int, _loads(kept_sources)), *d.sources})),
+                    at=at, sources=json.dumps(sorted({*map(int, keys_of(kept_sources)), *d.sources})),
                     confidence=greatest(tt.c.confidence, d.confidence),
                     sensitivity=greatest(tt.c.sensitivity, int(d.sensitivity))))
             else:
@@ -506,11 +489,11 @@ class Items:
             sql.execute(update(t).where(t.c.id == d.item).values(
                 touched_at=at, importance=least(1.0, t.c.importance + 0.05),
                 sensitivity=greatest(t.c.sensitivity, int(d.sensitivity)), secret=greatest(t.c.secret, int(d.secret)),
-                about=_keys([*_loads(row["about"]), *d.about]),
-                sources=json.dumps(sorted({*map(int, _loads(row["sources"])), *d.sources})),
+                about=keys_json([*keys_of(row["about"]), *d.about]),
+                sources=json.dumps(sorted({*map(int, keys_of(row["sources"])), *d.sources})),
                 between_us=greatest(t.c.between_us, int(d.between_us))))
             _about_rows(sql, sfx, d.item, d.about)
-            if d.felt and (not json.loads(row["felt"] or "[]") or set(d.told_by) & set(_loads(row["about"]))):
+            if d.felt and (not json.loads(row["felt"] or "[]") or set(d.told_by) & set(keys_of(row["about"]))):
                 # ce que la personne en ressent : son mot à elle l'emporte sur celui d'un autre (ADR 0083) — et l'on
                 # sait de quel témoignage il vient : il ne se dit que là où ce témoignage peut s'entendre
                 sql.execute(update(t).where(t.c.id == d.item).values(felt=_facets_json(d.felt), felt_from=testimony))
@@ -536,13 +519,14 @@ class Items:
         sql.execute(update(t).where(t.c.id == keep).values(
             importance=max(float(a["importance"]), float(b["importance"])),
             sensitivity=max(int(a["sensitivity"]), int(b["sensitivity"])),
-            secret=int(bool(a["secret"]) or bool(b["secret"])), about=_keys([*_loads(a["about"]), *_loads(b["about"])]),
-            sources=json.dumps(sorted({*map(int, _loads(a["sources"])), *map(int, _loads(b["sources"]))})),
+            secret=int(bool(a["secret"]) or bool(b["secret"])),
+            about=keys_json([*keys_of(a["about"]), *keys_of(b["about"])]),
+            sources=json.dumps(sorted({*map(int, keys_of(a["sources"])), *map(int, keys_of(b["sources"]))})),
             touched_at=greatest(t.c.touched_at, at),
             # ce qui n'appartenait qu'à elles dans la jointe le reste dans la gardée (lu avant : MariaDB refuse une
             # sous-requête sur la table qu'on met à jour)
             between_us=greatest(t.c.between_us, int(b["between_us"]))))
-        _about_rows(sql, sfx, keep, _loads(b["about"]))
+        _about_rows(sql, sfx, keep, keys_of(b["about"]))
         sql.execute(update(t).where(t.c.id == drop).values(status="joined"))
         _settle(sql, sfx, keep)
 
@@ -572,12 +556,12 @@ class Items:
         sql.execute(update(t).where(t.c.id == keep).values(
             importance=max(float(a["importance"]), float(b["importance"])),
             sensitivity=max(int(a["sensitivity"]), int(b["sensitivity"])),
-            about=_keys([*_loads(a["about"]), *_loads(b["about"])]),
-            told_by=_keys([*_loads(a["told_by"]), *_loads(b["told_by"])]),
-            heard_by=_keys([*_loads(a["heard_by"]), *_loads(b["heard_by"])]),
+            about=keys_json([*keys_of(a["about"]), *keys_of(b["about"])]),
+            told_by=keys_json([*keys_of(a["told_by"]), *keys_of(b["told_by"])]),
+            heard_by=keys_json([*keys_of(a["heard_by"]), *keys_of(b["heard_by"])]),
             secret=int(bool(a["secret"]) or bool(b["secret"])), touched_at=at,
-            sources=json.dumps(sorted({*map(int, _loads(a["sources"])), *map(int, _loads(b["sources"]))}))))
-        _about_rows(sql, sfx, keep, _loads(b["about"]))
+            sources=json.dumps(sorted({*map(int, keys_of(a["sources"])), *map(int, keys_of(b["sources"]))}))))
+        _about_rows(sql, sfx, keep, keys_of(b["about"]))
         sql.execute(update(t).where(t.c.id == drop).values(status="merged"))
 
     @staticmethod
@@ -622,7 +606,7 @@ class Items:
             for item, raw in sql.query(select(t.c.id, t.c[column]).where(json_has(t.c[column], subject))
                                        .order_by(t.c.id)):
                 sql.execute(update(t).where(t.c.id == item)
-                            .values({column: _keys(k for k in _loads(raw) if k != subject)}))
+                            .values({column: keys_json(k for k in keys_of(raw) if k != subject)}))
         sql.execute(update(t).where(t.c.source == subject).values(source=None))
         # un élément qu'on lui a rattaché par un renfort ne nomme pas toujours ce sujet dans son texte : le magasin
         # efface ces textes-là aussi (sinon une reconstruction le ferait revenir — audit du lot L2 du 2026-10-03)
@@ -785,7 +769,8 @@ MEMORY.projector(c.TOLD_TABLE, version=6, tier=Tier.T0,
 
 
 #: ce qu'une extraction remise à plus tard réécrit (``since`` : la première fois, gardée)
-_DEFERRED_UPDATE = ("messages", "about", "attempts", "retry_at", "status", "reason", "detail_ref", "aside")
+_DEFERRED_UPDATE = ("source", "messages", "about", "attempts", "retry_at", "status", "reason", "detail_ref",
+                    "aside")
 
 
 class ExtractionQueue:
@@ -802,9 +787,9 @@ class ExtractionQueue:
             if d.status == "resolved" or forgotten(d.detail):
                 sql.execute(delete(t).where(t.c.key == d.key))
                 continue
-            upsert(sql, t, {"key": d.key, "messages": json.dumps(d.messages), "about": _keys(d.about),
-                            "attempts": d.attempts, "retry_at": d.retry_at, "status": d.status,
-                            "reason": d.failure_code, "detail_ref": d.detail.ref or "", "since": e.at,
+            upsert(sql, t, {"key": d.key, "source": d.source, "messages": json.dumps(d.messages),
+                            "about": keys_json(d.about), "attempts": d.attempts, "retry_at": d.retry_at,
+                            "status": d.status, "reason": d.failure_code, "detail_ref": d.detail.ref or "", "since": e.at,
                             "aside": json.dumps(sorted(d.aside))}, keys=["key"], update=_DEFERRED_UPDATE)
 
     def forget(self, sql: Sql, subject: str, sfx: str) -> list[str]:
@@ -817,7 +802,8 @@ class ExtractionQueue:
 
 # v2 : ``aside`` (ce qui, dans un salon, ne lui était pas adressé), relu tel quel à la reprise
 # v3 : la table déclarée pour les deux moteurs (ADR 0101)
-MEMORY.projector(DEFERRED_TABLE, version=3, tier=Tier.T0, types=[c.EXTRACTION_DEFERRED])(ExtractionQueue)
+# v4 : ``source`` — la file sert aussi aux conversations reçues ailleurs (ADR 0224)
+MEMORY.projector(DEFERRED_TABLE, version=4, tier=Tier.T0, types=[c.EXTRACTION_DEFERRED])(ExtractionQueue)
 
 
 class Readings:
@@ -851,8 +837,6 @@ MEMORY.projector(READINGS_TABLE, version=3, tier=Tier.T0,
                  types=[rss_c.READ, mcp_c.CONSULTED, c.REREAD])(Readings)
 
 __all__ = [
-    "CHANGES_TABLE", "CONTESTS_TABLE", "DEFERRED_TABLE", "FEELINGS_TABLE", "ITEM_COLUMNS", "READINGS_TABLE",
-    "READING_COLUMNS", "REFS_TABLE", "TESTIMONIES_TABLE", "TESTIMONY_COLUMNS", "Chunks", "ExtractionQueue", "Items",
-    "Readings", "Told", "create_views", "fingerprint", "forgotten", "informants_of", "testimony_columns",
-    "testimony_of", "used",
+    "ITEM_COLUMNS", "Chunks", "ExtractionQueue", "Items", "Readings", "Told", "create_views", "fingerprint",
+    "forgotten", "informants_of", "testimony_columns", "testimony_of", "used",
 ]

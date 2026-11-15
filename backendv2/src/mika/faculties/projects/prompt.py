@@ -30,6 +30,7 @@ from mika.contracts import forge as forge_c
 from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
+from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
 from mika.faculties.projects.access import reads, sees
 from mika.faculties.projects.faculty import (
@@ -43,23 +44,25 @@ from mika.faculties.projects.faculty import (
     ProjectsState,
     answered,
     asking,
-    cadence,
     effect_words,
     frame_of,
     live,
     objective_of,
     params,
-    pick,
     plan_of,
     run_bundles,
     stall_of,
+    written,
 )
-from mika.faculties.projects.tools import RUNS, steerable, written
-from mika.faculties.projects.work import FULL, MENTION, unplanned_stall, untold
+from mika.faculties.projects.rhythm import cadence, pick
+from mika.faculties.projects.steer import steerable
+from mika.faculties.projects.tools import RUNS
+from mika.faculties.projects.work import unplanned_stall, untold
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.faculty import Zone
 from mika.kernel.frame import Frame
 from mika.kernel.prompt import SectionBody
+from mika.kernel.text import clipped
 from mika.ports.errors import describe_error
 from mika.vocab.days import ago_words
 from mika.vocab.episodes import CONVERSATIONAL, Kind, project_of
@@ -186,13 +189,8 @@ async def _answer(s: ProjectsState, frame: Frame, ports: Mapping[str, Any]) -> d
     t = transcript_c.thread_table()
     rows = store.query_mind(select(t.c.text).where(t.c.person.in_(handles), t.c.role == "user", t.c.room.is_(None),
                                                    t.c.at > o.asked_at).order_by(t.c.id).limit(ANSWER_LINES))
-    lines = [_clip(str(text), ANSWER_CLIP) for (text,) in rows if str(text or "").strip()]
+    lines = [clipped(str(text), ANSWER_CLIP) for (text,) in rows if str(text or "").strip()]
     return {"lines": lines} if lines else None
-
-
-def _clip(text: str, n: int) -> str:
-    text = " ".join(text.split())
-    return text if len(text) <= n else text[: n - 1].rstrip() + "…"
 
 
 def _recent(s: ProjectsState) -> list[Project]:
@@ -219,7 +217,7 @@ def _talked(s: ProjectsState, person: str | None) -> list[Project]:
 
 
 def _who(frame: Frame, key: str | None) -> str:
-    name = frame.get(identity_c.IDENTITY(key)).name if key else ""
+    name = identity_c.person_name(frame, key or "")
     return f"« {name} »" if name else phrase("expression.person.someone")
 
 
@@ -236,7 +234,7 @@ def _objective_line(o: Objective, texts: Mapping[str, str], pm: Any, now: int) -
         state = phrase("projects.objective.once", status=status)
     line = "- " + phrase("projects.objective.line", id=o.id, state=state, text=text)
     if o.status == c.DONE and texts.get(o.result_ref):  # ce qu'il a donné : la suite s'appuie dessus (ADR 0145)
-        line += phrase("projects.objective.result", result=_clip(texts[o.result_ref], 240))
+        line += phrase("projects.objective.result", result=clipped(texts[o.result_ref], 240))
     return line
 
 
@@ -365,7 +363,7 @@ def _run_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> S
         verdicts = family("projects.run.verdicts")
         lines.append(phrase("projects.run.reports") + "\n" + "\n".join(
             "- " + phrase("projects.run.report_line", ago=ago_words(frame.now - at), objective=oid,
-                          verdict=verdicts.get(verdict, verdict), summary=_clip(summary, REPORT_CLIP))
+                          verdict=verdicts.get(verdict, verdict), summary=clipped(summary, REPORT_CLIP))
             for at, oid, verdict, summary in reports))
     elif p.summary_ref and texts.get(p.summary_ref):
         lines.append(phrase("projects.run.summary", summary=texts[p.summary_ref]))
@@ -423,7 +421,7 @@ def _instruction_lines(p: Project, texts: Mapping[str, str]) -> list[str]:
         line = f"- {texts[ref]}"
         words = texts.get(said.get(ref, ""), "")
         if words and words.strip() != texts[ref].strip():
-            line += "\n  " + phrase("projects.run.their_words", words=_clip(words, 600))
+            line += "\n  " + phrase("projects.run.their_words", words=clipped(words, 600))
         out.append(line)
     return out
 
@@ -526,12 +524,12 @@ def _share_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) ->
     store = (enrich.get("projects") or {}).get("texts") or {}
     title, objective = store.get(p.title_ref), store.get(o.text_ref)
     args = ep.attrs.get("args") if ep is not None else None
-    share = str(args.get("share", MENTION)) if args else MENTION
+    share = str(args.get("share", social_c.MENTION)) if args else social_c.MENTION
     need = asking(o)  # le sujet le dit, pas les raisons de la ligne (un récit peut y côtoyer une demande)
     aud = frame.audience
     person = frame.get(identity_c.PERSON(ep.target)) if ep is not None and ep.target else None
     if aud is None or not hearable(p.about, written(p), person, aud.level, aud.witness_level, aud.private_ok) \
-            or (share == MENTION and not need) or not title:
+            or (share == social_c.MENTION and not need) or not title:
         return SectionBody(phrase("projects.share.something"), level=0)
     level = written(p) if any(a != person for a in p.about) else 0
     if need:
@@ -551,7 +549,7 @@ def _share_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) ->
         for x in told[-TOLD_SHOWN:]:
             result = store.get(_result_ref(x), "")
             line = f"- {store.get(x.text_ref) or phrase('projects.share.an_objective')}"
-            if share == FULL and result:
+            if share == social_c.FULL and result:
                 line += "\n  " + phrase("projects.share.drawn_item", result=result)
             elif result:
                 line += phrase("projects.share.in_short", first=result.split(". ")[0].strip())
@@ -561,7 +559,7 @@ def _share_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) ->
         return SectionBody("\n".join(lines), level=level, provenance=(f"project:{p.id}",))
     result = store.get(_result_ref(o), "")
     body = phrase("projects.share.one", title=title, objective=objective or phrase("projects.share.an_objective"))
-    if share == FULL and result:
+    if share == social_c.FULL and result:
         body += "\n" + phrase("projects.share.drawn", result=result)
     elif result:
         body += phrase("projects.share.in_short", first=result.split(". ")[0].strip())
@@ -705,9 +703,9 @@ def _live_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> 
             if nxt:
                 line += f"\n  {nxt}"
             if p.plan_state == c.PROPOSED and texts.get(p.plan_ref):  # son plan, tant qu'il attend (ADR 0145)
-                line += "\n  " + phrase("projects.live.plan", plan=_clip(texts[p.plan_ref], 700))
+                line += "\n  " + phrase("projects.live.plan", plan=clipped(texts[p.plan_ref], 700))
                 if texts.get(p.questions_ref):
-                    line += "\n  " + phrase("projects.live.questions", questions=_clip(texts[p.questions_ref], 700))
+                    line += "\n  " + phrase("projects.live.questions", questions=clipped(texts[p.questions_ref], 700))
                 answering = answering or person == p.asked_by or bool(frame.get(identity_c.IS_OWNER(person)))
             if any(a != person for a in p.about):
                 level = max(level, written(p))

@@ -16,9 +16,10 @@ from mika.contracts import memory as mc
 from mika.contracts import rss as rss_c
 from mika.contracts import runtime as rt
 from mika.faculties.memory.faculty import MemoryParams, MemoryState, _reread
-from mika.faculties.memory.projections import READINGS_TABLE, TESTIMONIES_TABLE, Readings, Told
+from mika.faculties.memory.projections import Readings, Told
 from mika.faculties.memory.recall import items_by_id, verdict_of
 from mika.faculties.memory.reread import Reread, _learned, _learned_section
+from mika.faculties.memory.tables import READINGS_TABLE, TESTIMONIES_TABLE
 from mika.kernel.clock import DAY, HOUR, local_date_of_night
 from mika.kernel.events import Content
 from mika.kernel.frame import Audience
@@ -125,6 +126,7 @@ async def test_what_she_reads_alone_becomes_knowledge():
     assert (ev.scope, ev.about, ev.told_by, ev.official) == ("world", (), (FEED,), True)  # le monde, vu venir
     (done,) = of(out, mc.REREAD)
     assert (done.night, done.upto, done.readings, done.model) == (NIGHT, 7, 1, "haiku")
+    assert done.produced == 2  # ce qu'elle en a retenu : la croyance et le moment, pas ce qui a été écarté
     db.conn.close()
 
 
@@ -132,7 +134,7 @@ async def test_relecture_is_bounded():
     db = store()
     llm = LLM()
     out = await night(db, llm)
-    assert llm.calls == [] and [(d.night, d.upto) for d in of(out, mc.REREAD)] == [(NIGHT, 0)]  # rien à relire
+    assert llm.calls == [] and [(d.night, d.upto, d.produced) for d in of(out, mc.REREAD)] == [(NIGHT, 0, 0)]  # rien à relire
     for seq in range(1, 6):
         read(db, seq, f"Article {seq} sur les comètes", f"La comète numéro {seq} passera bientôt.")
     llm = LLM({"croyances": [{"texte": f"La comète numéro {n} passera bientôt", "lecture": n} for n in range(1, 6)]})
@@ -391,6 +393,8 @@ async def test_the_night_confronts_two_tellers():
         out = await night(db, llm, vectors=vectors, p=p)
         assert "Carol travaille toujours chez Ubisoft" in llm.calls[0].messages[0].content  # rien à lire, une paire
         (conf,) = of(out, mc.CONFRONTED)
+        # la paire confrontée se dit par ``memory.confronted`` : ce n'est pas un élément retenu
+        assert [(d.pairs, d.produced) for d in of(out, mc.REREAD)] == [(1, 0)]
         if verdict == "contests":
             assert (conf.contests, conf.supersedes) == (((20, 30),), ())  # Bob contre Alice : elle doute
         else:

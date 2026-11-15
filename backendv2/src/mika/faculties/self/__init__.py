@@ -3,8 +3,9 @@ leurs paramètres, l'estime de soi, le récit qu'elle fait d'elle-même et ses n
 
 Carte des modules (l'ordre de ses sections dans le prompt est celui de la composition, ``READING``) :
 
-- ``faculty`` : l'état (``SelfState``), la faculté (``SELF``), le jour vécu ;
-- ``knobs`` : ses réglages (``SelfParams``) ;
+- ``faculty`` : l'état (``SelfState``), la faculté (``SELF``), le jour vécu (``day_of``, ``lived_date``,
+  ``night_of``) ;
+- ``params`` : ses réglages (``SelfParams``) ;
 - ``records`` : ce que l'état garde (coups, efforts, actes, marques, intérêts, pistes, journaux, rêves) et les codes
   d'actes ;
 - ``persona`` : le document de persona et son rendu (``load``, ``render``, ``persona_for``, le fait
@@ -21,7 +22,8 @@ Carte des modules (l'ordre de ses sections dans le prompt est celui de la compos
 - ``night`` : la nuit — journal, rêves, réveil (sections ``yesterday``, ``dream``) ;
 - ``inspect`` : ce que la console montre d'elle ;
 - ``lines`` : ce qui se dit pareil dans le récit et dans son prompt (sans section ni réducteur) ;
-- ``days`` : le calendrier vécu (ce qui la touche dans ce qu'on lui dit, le modèle le lit : ``esteem``, ADR 0093).
+- ``days`` : le calendrier vécu : où commence une journée, à quelle journée appartient une nuit, le moment de la
+  journée, un instant dit en mots.
 """
 
 from __future__ import annotations
@@ -38,7 +40,7 @@ from mika.faculties.self import night as _night  # noqa: F401
 from mika.faculties.self import inspect as _inspect  # noqa: F401
 # isort: on
 from mika.faculties.self.faculty import SELF, SelfState
-from mika.faculties.self.knobs import SelfParams, params
+from mika.faculties.self.params import SelfParams
 from mika.faculties.self.persona import load, persona_for, render
 
-__all__ = ["SELF", "SelfParams", "SelfState", "load", "params", "persona_for", "render"]
+__all__ = ["SELF", "SelfParams", "SelfState", "load", "persona_for", "render"]

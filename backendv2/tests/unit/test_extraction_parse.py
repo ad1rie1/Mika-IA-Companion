@@ -9,7 +9,9 @@ from dataclasses import replace
 
 import pytest
 
-from mika.faculties.memory.extraction import Extraction, People, Speaker, parse
+from mika.faculties.memory.conversation import Speaker
+from mika.faculties.memory.extraction import Extraction, parse
+from mika.faculties.memory.speakers import People
 from mika.ports.llm import LLMResponse, ToolCall
 
 

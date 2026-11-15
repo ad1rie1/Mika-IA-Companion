@@ -1,4 +1,5 @@
-"""Replier un texte pour le comparer : une seule façon de le faire, importable par tous (ADR 0212)."""
+"""Une seule façon de traiter un texte, importable par tous : le replier pour le comparer (ADR 0212), le couper
+pour le montrer."""
 
 from __future__ import annotations
 
@@ -15,3 +16,10 @@ def fold(text: str) -> str:
     décompose pas). Replier ce qui l'est déjà ne change rien. Un texte qu'on garde replié, dans une base, change
     avec cette fonction : la changer, c'est le réécrire aussi."""
     return unaccented(text).casefold().replace("œ", "oe").replace("æ", "ae")
+
+
+def clipped(text: str, limit: int) -> str:
+    """Ce qu'on montre d'un texte en une ligne : ses blancs repliés en une espace ; au-delà de ``limit`` caractères,
+    coupé et fini par « … », sans blanc devant, ellipse comprise dans ``limit``."""
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"

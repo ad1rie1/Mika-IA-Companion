@@ -651,12 +651,7 @@ def _ended(s: ForgeState, e, cx) -> ForgeState:
 
 def _address(frame: Frame, person: str) -> str | None:
     """Où la joindre : là où elle est, sinon une adresse qui la joint (sa messagerie)."""
-    handles = frame.get(identity_c.HANDLES(person)) or (person,)
-    here = [h for h in frame.get(presence_c.PRESENT) if h in handles]
-    if here:
-        return here[0]
-    reachable = frame.get(identity_c.REACHABLE(person))
-    return reachable[0] if reachable else None
+    return identity_c.reach_now(frame, person)
 
 
 @FORGE.propose(kinds=[Kind.INITIATIVE], reasons={c.APP_NEWS: (0.0, 10.0), c.APP_ALERT: (0.0, 10.0)},

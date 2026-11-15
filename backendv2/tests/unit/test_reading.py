@@ -25,6 +25,7 @@ from mika.contracts import social as social_c
 from mika.faculties.affect import physics as ph
 from mika.faculties.affect.params import AffectParams
 from mika.faculties.expression import emotion_view, parse
+from mika.faculties.memory import cues
 from mika.faculties.memory import extraction as x
 from mika.kernel.clock import MINUTE, US
 from mika.ports.llm import LLMResponse
@@ -336,9 +337,9 @@ def test_a_painful_date_is_heavy_by_what_is_felt_and_a_death_never_festive():
     death = x.XEvenement(texte="l'anniversaire de la mort de son père", quand="2026-11-02", chaque_annee=True,
                          a_feter=True)
     birthday = x.XEvenement(texte="son anniversaire de 30 ans", quand="2026-11-02", chaque_annee=True, a_feter=True)
-    assert x.moment_importance(split) >= x.IMPORTANCE[4] and not x.festive(split)
-    assert x.moment_importance(death) >= x.IMPORTANCE[4] and not x.festive(death)
-    assert x.festive(birthday) and x.moment_importance(birthday) < x.IMPORTANCE[4]
+    assert cues.moment_importance(split) >= x.IMPORTANCE[4] and not cues.festive(split)
+    assert cues.moment_importance(death) >= x.IMPORTANCE[4] and not cues.festive(death)
+    assert cues.festive(birthday) and cues.moment_importance(birthday) < x.IMPORTANCE[4]
 
 
 # ── Aucun mot ne devine une émotion ───────────────────────────────────────

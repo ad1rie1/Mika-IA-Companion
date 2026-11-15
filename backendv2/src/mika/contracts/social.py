@@ -49,10 +49,12 @@ from typing import Annotated, Any
 
 from sqlalchemy import BigInteger, Column, Index, Table
 
+from mika.contracts import identity as identity_c
 from mika.contracts.attention import Signal
 from mika.kernel.events import Content, Payload, event_type
 from mika.kernel.facts import FactFamily, FactKey
 from mika.kernel.forms import Knob
+from mika.kernel.frame import Frame
 from mika.ports.sql import HANDLE_MAX, Key, LongText, projection_table
 
 OWNER = "social"
@@ -202,6 +204,33 @@ def is_close(frame: Any) -> Callable[[str], bool]:
     """Qui est proche d'elle maintenant (le lien « proche » ; un long silence le fait descendre) : ce que lit la source
     « tes proches » d'une ligne d'accès (ADR 0133)."""
     return lambda person: frame.get(CLOSENESS(person)) == CLOSE
+
+
+# ── À qui raconter ce qu'elle a mené à bout ───────────────────────────────
+# Une fois pour les buts et les projets (ADR 0031 : aucun des deux n'importe l'autre).
+
+#: Combien elle en raconte : tout, l'essentiel, une mention. Ces valeurs sont gardées dans les ``args`` des récits
+#: (``share``) : ne pas les changer.
+FULL, SUMMARY, MENTION = "full", "summary", "mention"
+_RANK = {level: i for i, level in enumerate(CLOSENESS_LEVELS)}
+
+
+def retelling(frame: Frame, person: str, *, concerned: bool, owner_hears: bool) -> str | None:
+    """Combien raconter à cette personne ce qu'elle a mené à bout : une propriétaire entend tout, une proche
+    l'essentiel, une amie une mention ; jamais quelqu'un qui n'est ni l'un ni l'autre. ``concerned`` : ça la regarde
+    (elle l'a confié, ou ça parle d'elle) — sans quoi seule une propriétaire l'entend ; ``owner_hears`` : une
+    propriétaire l'entend-elle (un but qui ne regarde que d'autres personnes, non). ``None`` : rien, à elle. Qui
+    l'appelle déclare ``identity.IS_OWNER`` et ``CLOSENESS`` dans ses ``reads=``."""
+    if frame.get(identity_c.IS_OWNER(person)) and owner_hears:
+        return FULL
+    if not concerned:
+        return None
+    closeness = frame.get(CLOSENESS(person))
+    if _RANK.get(closeness, 0) < _RANK[FRIEND]:
+        return None
+    return SUMMARY if closeness == CLOSE else MENTION
+
+
 #: Les sujets délicats avec cette personne (repliés), d'après un profil d'avant
 #: la version 2, gardés en clair. Les profils récents gardent les leurs à part :
 #: ``SENSITIVE_REF``.

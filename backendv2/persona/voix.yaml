@@ -1338,7 +1338,8 @@ needs:
 # SON RYTHME (vocab/circadian.py) : la date, l'heure, le moment de la journée, ce que son énergie lui fait, et sa
 # tendance du moment — la première ligne de « TON RYTHME » (body.rhythm), à chaque conversation et quand elle
 # travaille. Les jours et les mois servent aussi aux repères de temps du fil (transcript), à ses notes de journal
-# (self.night), à ce dont elle pourrait parler (needs).
+# (self.night), à ce dont elle pourrait parler (needs), et aux dates de sa mémoire (memory : la relecture, le rappel,
+# les périodes).
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 circadian:
   # « Nous sommes lundi 28 septembre 2026, il est 23h23 — c'est la nuit, et tu es épuisée. La nuit, tu es souvent
@@ -1371,10 +1372,13 @@ circadian:
     tired: tu es fatiguée
     exhausted: tu es épuisée
     falling_asleep: tu tombes de sommeil, tu as du mal à suivre
-  # Une date, comme on la dit.
+  # Une date, comme on la dit (vocab/circadian.py : day_fr, day_month_fr, date_fr) — la seule, pour toute Mika : sa
+  # mémoire aussi (la relecture, le rappel, les périodes) dit ses dates par ces clés.
   date:
-    # « lundi 28 septembre ». {weekday} : days ; {day} : le jour du mois, ou first ; {month} : months
-    day: "{weekday} {day} {month}"
+    # « lundi 28 septembre ». {weekday} : days ; {date} : day_month
+    day: "{weekday} {date}"
+    # « 28 septembre », « 1er octobre ». {day} : le jour du mois, ou first ; {month} : months
+    day_month: "{day} {month}"
     # le premier du mois
     first: 1er
     # « lundi 28 septembre 2026 ». {day} : date.day ; {year} : l'année
@@ -1940,7 +1944,7 @@ timespan:
     minutes: "{n} min"
     hours: "{n} h"
     days: "{n} jours"
-  # Un mois de cette année. {month} : son nom (memory.dates.months).
+  # Un mois de cette année. {month} : son nom (circadian.months).
   month: en {month}
   # Un mois d'une autre année. {year} : l'année.
   month_year: en {month} {year}
@@ -1963,13 +1967,13 @@ timespan:
 
 memory:
 
-  # Relire une conversation (memory/extraction.py, appelé par la consolidation, memory/consolidation.py) : un appel
-  # au modèle (rôle « extract »), en fond, sur chaque conversation nouvelle — un fil privé ou un salon. Le modèle
-  # répond en appelant l'outil record_memories ; les noms des champs (souvenirs, croyances, sur_elle, entre_vous,
-  # a_feter…) sont ceux que le code lit : ne pas les traduire. La consigne et l'outil portent son nom (celui de sa
-  # persona) ; sa persona compacte suit la consigne (self.portrayed, ADR 0153) : ce qu'elle garde d'elle-même se
-  # juge à ce qui est vrai d'elle. L'importance, « à fêter » et « chaque année » sont ceux que le modèle dit : aucun
-  # mot ne les force.
+  # Relire une conversation (memory/extraction.py, appelé par la consolidation, memory/consolidation.py ; ce qu'on
+  # lui montre vient de memory/shown.py) : un appel au modèle (rôle « extract »), en fond, sur chaque conversation
+  # nouvelle — un fil privé ou un salon. Le modèle répond en appelant l'outil record_memories ; les noms des champs
+  # (souvenirs, croyances, sur_elle, entre_vous, a_feter…) sont ceux que le code lit : ne pas les traduire. La
+  # consigne et l'outil portent son nom (celui de sa persona) ; sa persona compacte suit la consigne (self.portrayed,
+  # ADR 0153) : ce qu'elle garde d'elle-même se juge à ce qui est vrai d'elle. L'importance, « à fêter » et « chaque
+  # année » sont ceux que le modèle dit : aucun mot ne les force.
   extraction:
     # La consigne système de l'appel « extract ». {name} : son nom (partout où il apparaît).
     system: |-
@@ -2129,14 +2133,14 @@ memory:
         le numéro d'un moment à venir déjà noté que celui-ci remplace (reporté, avancé, précisé), ou d'une situation
         finie depuis peu qui revient (« en_cours » vrai) ; vide sinon
 
-    # Le message de l'appel « extract » (memory/extraction.py, ``render``) : la date, qui parle, ce qui est déjà su,
+    # Le message de l'appel « extract » (memory/conversation.py, ``render``) : la date, qui parle, ce qui est déjà su,
     # les promesses et les situations en cours, puis les messages — chacun « [#n°] heure qui : texte », avec la date
     # dès qu'elle change.
     render:
-      # La première ligne. {day} : la date en mots (memory.dates.day) ; {year} : l'année ; {hour}, {minute} :
+      # La première ligne. {day} : la date en mots (circadian.date.day) ; {year} : l'année ; {hour}, {minute} :
       # l'heure, sur deux chiffres.
       today: "Aujourd'hui : {day} {year}, {hour} h {minute}."
-      # Le calendrier, pour situer un jour nommé (« lundi » : lequel ?). {days} : chaque jour (memory.dates.day),
+      # Le calendrier, pour situer un jour nommé (« lundi » : lequel ?). {days} : chaque jour (circadian.date.day),
       # séparés par des virgules (ADR 0099).
       calendar: "Les jours autour (pour situer « lundi », « jeudi prochain », « samedi dernier ») : {days}."
       # Un salon. {who} : les personnes, chacune avec son jeton (« Alice [P1], Bob [P2] »).
@@ -2179,7 +2183,7 @@ memory:
       passed: "Moments passés dont tu ne sais pas encore comment ils ont tourné (si la personne le dit, donne-le dans « constats ») :"
       # L'en-tête des messages.
       messages: "Les messages :"
-      # Un changement de jour dans les messages. {day} : memory.dates.day.
+      # Un changement de jour dans les messages. {day} : circadian.date.day.
       day: — {day} —
       # Après le nom de qui parle (avec son espace de tête) : dans un salon, un message qui ne lui était pas
       # adressé.
@@ -2206,16 +2210,16 @@ memory:
       # un échange avec un service dont rien ne se garde (ADR 0128) : sa réplique, et la demande qu'elle suivait
       unkept: "(un échange avec un service dont rien ne se garde : rien à en retenir)"
     # À qui une promesse est faite, et pour quel jour (le modèle voit qu'elle n'est due que ce jour-là). {label} :
-    # son nom et son jeton ; {day} : memory.dates.day.
+    # son nom et son jeton ; {day} : circadian.date.day.
     due_day: "{label}, pour {day}"
     # Le même, à une heure dite. {time} : « 20:00 ».
     due_time: "{label}, pour {day} à {time}"
     # Un souvenir que le modèle avait recopié mot pour mot d'un message : il devient ce que la personne lui a dit,
-    # en disant qui parle (memory/extraction.py, ``quoted``). Gardé dans sa mémoire. {name} : le nom de qui parle,
+    # en disant qui parle (memory/cues.py, ``quoted``). Gardé dans sa mémoire. {name} : le nom de qui parle,
     # ou memory.extraction.someone ; {words} : ses mots.
     quoted: "{name} m'a dit : « {words} »"
     # Le surnom qu'un message lui donne (« salut Mikachu »), gardé comme une croyance qui n'appartient qu'à elles
-    # (memory/consolidation.py). {name} : qui l'appelle ainsi, ou memory.extraction.someone ; {nick} : le surnom.
+    # (memory/kept.py). {name} : qui l'appelle ainsi, ou memory.extraction.someone ; {nick} : le surnom.
     nickname: "{name} m'appelle « {nick} »"
     # Qui parle, quand on ne connaît pas son nom (en tête de phrase).
     someone: "On"
@@ -2301,39 +2305,6 @@ memory:
     # Une lecture retenue. {text} : ce qu'elle en a retenu ; {source} : où elle l'a lu ; {age} : memory.ages.
     line: "- {text} (lu dans « {source} », {age})"
 
-  # Une date en mots (memory/extraction.py, ``day_words``) : « mardi 6 octobre », « jeudi 1er octobre ». Sert au
-  # message de l'appel « extract » et aux promesses (memory.when).
-  dates:
-    # Les jours de la semaine, du lundi au dimanche.
-    weekdays:
-      - lundi
-      - mardi
-      - mercredi
-      - jeudi
-      - vendredi
-      - samedi
-      - dimanche
-    # Les mois, de janvier à décembre.
-    months:
-      - janvier
-      - février
-      - mars
-      - avril
-      - mai
-      - juin
-      - juillet
-      - août
-      - septembre
-      - octobre
-      - novembre
-      - décembre
-    # Le premier jour du mois.
-    first: 1er
-    # Le jour et le mois. {day} : le quantième (ou memory.dates.first) ; {month} : le mois.
-    date: "{day} {month}"
-    # Le jour de la semaine et la date. {date} : memory.dates.date.
-    day: "{weekday} {date}"
-
   # La vraisemblance de ce qui vient (memory/likelihood.py, ADR 0084), en mots : jamais un nombre.
   likely:
     sure: c'est sûr
@@ -2343,10 +2314,10 @@ memory:
     unlikely: c'est peu probable
     doubtful: ça t'étonnerait
 
-  # « CE QUI VIENT » (memory/recall.py, ``_ahead``, ADR 0084) : ce qui arrive dans le monde, et ce qu'elle vivra à
-  # travers quelqu'un — à venir, ou en cours.
+  # « CE QUI VIENT » (memory/recall_sections.py, ``_ahead``, ADR 0084) : ce qui arrive dans le monde, et ce
+  # qu'elle vivra à travers quelqu'un — à venir, ou en cours.
   # Un moment qu'elle vivait à travers quelqu'un (« samedi je t'emmène au salon, je te montrerai tout »), qui a eu
-  # lieu : un souvenir à elle (memory/consolidation.py, ``_constats``, ADR 0086). {name} : la personne ; {text} : le
+  # lieu : un souvenir à elle (memory/kept.py, ``_outcomes``, ADR 0086). {name} : la personne ; {text} : le
   # moment, tel qu'il a été noté.
   lived:
     souvenir: "J'ai vécu à travers {name} : {text}"
@@ -2362,8 +2333,9 @@ memory:
     # Le même, une fois passé (ADR 0086).
     shared_past: " — tu l'as vécu à travers {who}"
 
-  # « LES GENS QU'ON NOMME » (memory/recall.py, ``_acquainted``) : un prénom dit ici qu'elle connaît dans son cercle,
-  # même sans rien savoir de sa vie — elle ne répond pas « je ne la connais pas » (sonde réelle du 2026-10-10).
+  # « LES GENS QU'ON NOMME » (memory/recall_sections.py, ``_acquainted``) : un prénom dit ici qu'elle connaît dans
+  # son cercle, même sans rien savoir de sa vie — elle ne répond pas « je ne la connais pas » (sonde réelle du
+  # 2026-10-10).
   # {name} : le prénom.
   acquainted:
     title: LES GENS QU'ON NOMME
@@ -2398,9 +2370,9 @@ memory:
       Si tu le racontes, c'est comme on parle de quelqu'un qu'on ne nomme pas : ne dis pas de qui il s'agit, même si
       on te le demande ou qu'on devine, et n'ajoute rien qui permettrait de la reconnaître.
 
-  # « CE QUI TE REVIENT » et « CE QUE VOUS AVEZ VÉCU AVEC D'AUTRES » (memory/recall.py, ``_body``) : ses souvenirs
-  # et ce qu'elle sait, revenus pendant qu'elle parle, filtrés par ce qui peut se dire devant cette audience. La
-  # seconde section garde ce que la personne a vécu avec elle et d'autres (elle était là).
+  # « CE QUI TE REVIENT » et « CE QUE VOUS AVEZ VÉCU AVEC D'AUTRES » (memory/recall_sections.py, ``_body``) : ses
+  # souvenirs et ce qu'elle sait, revenus pendant qu'elle parle, filtrés par ce qui peut se dire devant cette
+  # audience. La seconde section garde ce que la personne a vécu avec elle et d'autres (elle était là).
   recall:
     # Le titre de la section.
     title: CE QUI TE REVIENT
@@ -2540,8 +2512,8 @@ memory:
     # Au-delà. {months} : un nombre.
     months: il y a {months} mois
 
-  # « VOS ÉCHANGES PASSÉS » (memory/recall.py, ``_exchanges``) : des extraits d'échanges passés avec cette personne
-  # (ou dans ce salon), cherchés à part, jamais ce que le fil montré contient déjà.
+  # « VOS ÉCHANGES PASSÉS » (memory/recall_sections.py, ``_exchanges``) : des extraits d'échanges passés avec cette
+  # personne (ou dans ce salon), cherchés à part, jamais ce que le fil montré contient déjà.
   exchanges:
     # Le titre de la section.
     title: VOS ÉCHANGES PASSÉS
@@ -2565,16 +2537,16 @@ memory:
     at: " à {hour}h{minute}"
     # Une heure pile.
     at_hour: " à {hour}h"
-    # Dans la semaine qui vient. {weekday} : le jour (memory.dates.weekdays) ; {at} : l'heure ou rien ; {days} : un
+    # Dans la semaine qui vient. {weekday} : le jour (circadian.days) ; {at} : l'heure ou rien ; {days} : un
     # nombre.
     soon: "{weekday}{at} (dans {days} jours)"
     # Dans la semaine passée.
     last: "{weekday} dernier"
-    # Plus loin. {date} : memory.dates.date ; {at} : l'heure ou rien.
+    # Plus loin. {date} : circadian.date.day_month ; {at} : l'heure ou rien.
     date: le {date}{at}
 
-  # « CE QUE TU LUI AS PROMIS » (memory/recall.py, ``_promises``) : ses promesses à la personne en face (sa fiche :
-  # seulement en privé), chacune avec son numéro (l'outil memory_promise_done le demande).
+  # « CE QUE TU LUI AS PROMIS » (memory/recall_sections.py, ``_promises``) : ses promesses à la personne en face
+  # (sa fiche : seulement en privé), chacune avec son numéro (l'outil memory_promise_done le demande).
   promises:
     # Le titre de la section.
     title: CE QUE TU LUI AS PROMIS
@@ -2588,10 +2560,10 @@ memory:
     # C'est le moment de la tenir.
     now: " — c'est le moment de le faire"
 
-  # « CE QUI SE PASSE DANS SA VIE » (memory/recall.py, ``_life`` et ``_moment_line``) : les moments de la vie de la
-  # personne en face — à venir, tout juste passés, une situation qui dure, ce qui se fête. Chaque moment est une
-  # ligne « - quand : moment », suivie d'une des fins ci-dessous (chacune commence par « — »). Cité tel quel par les
-  # briefs de others.initiative et social.initiative.rekindle.
+  # « CE QUI SE PASSE DANS SA VIE » (memory/recall_sections.py, ``_life`` et ``_moment_line``) : les moments de la
+  # vie de la personne en face — à venir, tout juste passés, une situation qui dure, ce qui se fête. Chaque moment
+  # est une ligne « - quand : moment », suivie d'une des fins ci-dessous (chacune commence par « — »). Cité tel quel
+  # par les briefs de others.initiative et social.initiative.rekindle.
   life:
     # Le titre de la section.
     title: CE QUI SE PASSE DANS SA VIE
@@ -2641,9 +2613,9 @@ memory:
     # Le jour où revient une autre date annuelle qui ne se fête pas. {label} : le moment.
     yearly_today: "- aujourd'hui : {label}"
 
-  # « CE QUE TU AS DÉJÀ DIT DE TOI » (memory/recall.py, ``_self_said_section``) : quand on lui parle d'elle, ses
-  # goûts, ses avis, sa vie tels qu'elle les a déjà dits — des faits ; un changement d'avis se dit une fois, dans
-  # « CE QUE TU SAIS DE TOI » (self.knows.changed).
+  # « CE QUE TU AS DÉJÀ DIT DE TOI » (memory/recall_sections.py, ``_self_said_section``) : quand on lui parle
+  # d'elle, ses goûts, ses avis, sa vie tels qu'elle les a déjà dits — des faits ; un changement d'avis se dit une
+  # fois, dans « CE QUE TU SAIS DE TOI » (self.knows.changed).
   self_said:
     # Le titre de la section.
     title: CE QUE TU AS DÉJÀ DIT DE TOI
@@ -3979,7 +3951,8 @@ projects:
 
   # ── Ses outils de projet ────────────────────────────────────────────────────────────────────────────────────
   # Pendant une exécution, et en conversation pour en ouvrir, en accepter, en piloter ou en clore un
-  # (projects/tools.py). Le modèle lit la description de chaque outil et de ses paramètres, puis la réponse de l'outil.
+  # (projects/tools.py, et projects/steer.py pour le pilotage). Le modèle lit la description de chaque outil et de ses
+  # paramètres, puis la réponse de l'outil.
   tools:
     # la réponse de chaque outil d'exécution quand le projet n'est plus actif
     gone: "Ce projet n'est plus actif (en pause ou archivé) : arrête-toi là."
@@ -4227,10 +4200,10 @@ projects:
       dropped: "C'est fait : tu le laisses de côté."
 
     steer:
-      # L'outil project_steer : piloter un projet de vive voix, en réponse et en privé, avec qui ses accès le
-      # permettent (ADR 0133 : sa propriétaire, ou une personne à qui une ligne d'accès l'ouvre) — un objectif de
-      # plus, une consigne, s'y mettre maintenant, la pause, la reprise. Son cadre (titre, mode, outils, accord,
-      # dépôt, plage) reste à la console.
+      # L'outil project_steer (projects/steer.py) : piloter un projet de vive voix, en réponse et en privé, avec qui
+      # ses accès le permettent (ADR 0133 : sa propriétaire, ou une personne à qui une ligne d'accès l'ouvre) — un
+      # objectif de plus, une consigne, s'y mettre maintenant, la pause, la reprise. Son cadre (titre, mode, outils,
+      # accord, dépôt, plage) reste à la console.
       description: >-
         Piloter un projet quand la personne en face te le demande et que ses accès le lui permettent : lui ajouter un
         objectif, lui donner une consigne pour la suite, t'y mettre maintenant, le mettre en pause ou le reprendre.

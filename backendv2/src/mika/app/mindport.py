@@ -34,6 +34,7 @@ from mika.faculties.identity import describe
 from mika.faculties.projects import actions as project_actions
 from mika.faculties.projects import work as projects_work
 from mika.faculties.self import night
+from mika.faculties.self.faculty import lived_date
 from mika.faculties.social.sections import profile_parts, refs_of
 from mika.faculties.world import commands as world_commands
 from mika.kernel import forms, schedule
@@ -360,7 +361,7 @@ class KernelPort:
             if text:
                 # le journal d'une journée passée (il s'écrit la nuit) : son titre le dit, le panneau ne l'invente pas
                 out["today_journal"] = {"date": yesterday.day, "title": journal_title(yesterday.day,
-                                                                                      night.lived_day(frame)),
+                                                                                      lived_date(frame)),
                                         "narrative": text, "dominant_emotion": yesterday.dominant,
                                         "persons_interacted": []}
         if dream is not None and night.dream_hearable(dream, person, audience, frame):

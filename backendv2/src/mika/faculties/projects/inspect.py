@@ -3,10 +3,12 @@
 - **Projets** (menu) : la liste — mode, état, objectifs, prochaine exécution ;
   toutes les exécutions ; toutes les décisions techniques.
 - **La fiche d'un projet** (type d'objet ``project``, clé = son numéro) :
-  Vue d'ensemble, Objectifs, Exécutions, Décisions, Fichiers, Dépôt git,
-  Comportement et outils, Carnet. La fiche **gouverne** : chaque onglet porte
+  Vue d'ensemble, Objectifs, Exécutions, Décisions techniques, Fichiers,
+  Dépôt git, Comportement et outils, Carnet. La fiche **gouverne** : chaque onglet porte
   les formulaires de ce qu'il montre (``ActionSlot``), les actions qui valent
-  pour tout le projet sont en tête.
+  pour tout le projet sont en tête. Les onglets Fichiers (avec le téléchargement)
+  et Dépôt git vivent à part, dans ``inspect_files.py`` et ``inspect_git.py`` :
+  ils lisent les aides communes d'ici.
 - **Sur la fiche d'une personne** : les projets qui la concernent.
 
 Lecture seule : les compteurs viennent de la tranche, l'histoire (exécutions,
@@ -33,36 +35,29 @@ from mika.faculties.projects.actions import (
     OBJECTIVE_STATUS_FR,
     PRIORITY_CHOICES,
     SCHEDULES,
-    _depositable,
     _editable,
-    _remote_ready,
     _runnable,
     pending_of,
 )
 from mika.faculties.projects.faculty import (
     AMENDED,
     EXTRA_BUNDLES,
-    NETWORKED,
+    NETWORKED_CAPABILITY,
     NOTED,
     OPERATIONS,
     PROJECTS,
-    PULL,
-    PUSH,
     Decision,
     Objective,
     Project,
     ProjectsState,
     busy,
-    cadence,
-    daily_cap,
     live,
+    objective_of,
     params,
-    pick,
     project_at,
-    runs_today,
-    window_words,
 )
-from mika.faculties.projects.work import next_run_at, why_not_now
+from mika.faculties.projects.rhythm import always, cadence, daily_cap, pick, runs_today
+from mika.faculties.projects.work import Why, next_run_at, why_not_now
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.events import Content, Event
 from mika.kernel.frame import Frame
@@ -73,7 +68,6 @@ from mika.kernel.inspect import (
     Code,
     Column,
     Disclosure,
-    Download,
     Entry,
     Fields,
     Found,
@@ -81,8 +75,6 @@ from mika.kernel.inspect import (
     Head,
     InspectContext,
     Meter,
-    Nav,
-    NavItem,
     Note,
     Pager,
     Param,
@@ -98,18 +90,13 @@ from mika.kernel.inspect import (
     Toolbar,
     When,
     paginate,
-    size_fr,
 )
-from mika.ports.workshop import Hosted, OutsideWorkshop, argv_lines
-from mika.vocab.episodes import Kind, project_target
+from mika.ports.workshop import argv_lines
+from mika.vocab.episodes import Kind, outcome_words, project_target
 
 PAGE = 25
 FORGOTTEN = "(oublié)"
 SUMMARY_CLAMP = 260
-#: ce qu'on montre d'un fichier ouvert, d'un diff (au-delà : coupé, et dit ; le téléchargement donne tout)
-FILE_SHOWN = 60_000
-DIFF_SHOWN = 40_000
-DOWNLOAD_MAX = 20 * 1024 * 1024
 APPROVALS = Ref.approvals("ouvrir les actions à autoriser")
 
 MODE_FR = {c.PERSONA: "elle-même", c.PLAIN: "impersonnel"}
@@ -117,7 +104,6 @@ MODE_LONG = dict(MODE_CHOICES)
 MODE_TONE = {c.PERSONA: "info", c.PLAIN: "muted"}
 STATUS_FR = {c.ACTIVE: "actif", c.PAUSED: "en pause", c.ARCHIVED: "archivé"}
 STATUS_TONE = {c.ACTIVE: "ok", c.PAUSED: "warn", c.ARCHIVED: "muted"}
-AUTHORITY_FR = {c.USER: "confié", c.SELF: "à elle"}
 KIND_FR = {c.ONCE: "ponctuel", c.CONSTANT: "constant"}
 KIND_TONE = {c.ONCE: "", c.CONSTANT: "info"}
 OBJ_FR = {c.OPEN: "ouvert", c.DONE: "fait", c.BLOCKED: "bloqué", c.DROPPED: "retiré"}
@@ -131,10 +117,6 @@ DECISION_FR = {c.IN_FORCE: "en vigueur", c.SUPERSEDED: "remplacée", c.WITHDRAWN
 DECISION_TONE = {c.IN_FORCE: "ok", c.SUPERSEDED: "muted", c.WITHDRAWN: "muted"}
 PRIORITY_FR = dict(PRIORITY_CHOICES)
 PRIORITY_TONE = {c.LOW: "muted", c.NORMAL: "", c.HIGH: "warn", c.URGENT: "danger"}
-OUTCOME_FR = {"done": "fait", "abstained": "abstenue", "superseded": "supplantée", "timeout": "délai dépassé",
-              "failed": "échec", "preempted": "préemptée", "interrupted": "interrompue", "cancelled": "annulée"}
-OUTCOME_TONE = {"done": "ok", "abstained": "muted", "superseded": "warn", "timeout": "danger", "failed": "danger",
-                "preempted": "warn", "interrupted": "warn", "cancelled": "muted"}
 AUTHOR_FR = {"operator": "toi", "owner": "qui le lui a confié", "self": "elle"}
 
 STATE_PARAM = Param("etat", "État", kind="select", default="vivants",
@@ -179,7 +161,7 @@ def _said(content: Content | None, empty: str = "—") -> str:
 def _who(frame: Frame, key: str | None) -> str:
     if not key:
         return "—"
-    return frame.get(identity_c.IDENTITY(key)).name or key
+    return identity_c.person_name(frame, key) or key
 
 
 def _person(frame: Frame, key: str | None) -> Ref | str:
@@ -218,18 +200,56 @@ def _progress(p: Project) -> Meter:
     return Meter(done / len(once) if once else 0.0, ", ".join(parts) or "aucun objectif", "warn" if blocked else "")
 
 
+#: ce qui retient son exécution (``work.why_not_now``), en mots ; ``{waits}`` : « ou une attente se termine »
+#: quand une échéance est connue (``WAITS_WORDS``)
+WHY_WORDS: dict[Why, str] = {
+    Why.ARCHIVED: "il est archivé",
+    Why.BUSY: "une exécution est en cours",
+    Why.OUTGOING: "une commande, un envoi ou une récupération sont en route : l'atelier les attend",
+    Why.PLAN_PROPOSED: "son plan attend la réponse de qui l'a demandé (« Valider le plan », ou en conversation)",
+    Why.FRAMING: "sa séance de cadrage attend l'espacement ou le plafond du jour",
+    Why.NO_OBJECTIVE: "aucun objectif ouvert : ajoutes-en un",
+    Why.ON_DEMAND: "il avance sur demande : « Lancer maintenant »",
+    Why.NOTHING_DUE: "rien n'est dû : ses objectifs constants attendent leur cadence{waits}",
+    Why.DAY_CAP: "plafond du jour atteint ({cap} exécutions sur 24 h)",
+    Why.HOUR_CAP: "plafond atteint : {cap} exécutions par heure, tous projets confondus",
+    Why.ASLEEP: "elle dort : en mode « elle-même », elle y travaille éveillée",
+    Why.OUT_OF_WINDOW: "hors de sa plage de travail",
+    Why.NO_SLOT: "son agenda ne lui donne plus de créneau",
+    Why.LATER: "pas encore : son agenda ou l'espacement des exécutions la fixe plus tard",
+}
+WAITS_WORDS = " ou une attente se termine"
+#: les raisons qui se datent : la date de l'exécution, puis ces mots entre parenthèses (la forme de la prochaine
+#: séance d'un but, ``goals.inspect.LATER_WORDS``)
+LATER_WORDS: dict[Why, str] = {
+    Why.LATER: "son agenda ou l'espacement des exécutions la fixe plus tard",
+    Why.OUT_OF_WINDOW: "hors de sa plage de travail",
+    Why.NOTHING_DUE: "ses objectifs constants attendent leur cadence{waits}",
+}
+
+
+def _cited(why: Why, said: Mapping[str, Any]) -> dict[str, Any]:
+    """Ce que les mots d'une raison citent : l'attente, en mots."""
+    if why is Why.NOTHING_DUE:
+        return {"waits": WAITS_WORDS if said.get("waits") else ""}
+    return dict(said)
+
+
 def _next_words(p: Project, s: ProjectsState, frame: Frame, ctx: InspectContext) -> str:
-    """La prochaine exécution en mots : quand, ou pourquoi pas. En pause, « à la reprise » : la raison de la pause
-    se dit une fois, dans le bandeau de sa vue d'ensemble (ADR 0176)."""
+    """La prochaine exécution en mots, de la forme de la prochaine séance d'un but (``goals.inspect.next_session``) :
+    « dès que possible », quand (la date, puis pourquoi pas avant : ``LATER_WORDS``), ou ce qui la retient
+    (``WHY_WORDS``). La raison vient de ``work.why_not_now``, en code : rien ne se relit dans une phrase. En pause,
+    « à la reprise » : la raison de la pause se dit une fois, dans le bandeau de sa vue d'ensemble (ADR 0176)."""
     if p.status == c.PAUSED:
         return "à la reprise"
-    why = why_not_now(p, s, frame)
-    if not why:
+    held = why_not_now(p, s, frame)
+    if held is None:
         return "dès que possible"
+    why, said = held
     at = next_run_at(p, s, frame) if p.status == c.ACTIVE else None
-    if at is not None and at > frame.now and why.startswith(("pas encore", "hors de sa plage", "rien n'est dû")):
-        return f"{ctx.when(at)} ({why.split(' : ', 1)[0]})"
-    return why
+    if why in LATER_WORDS and at is not None and at > frame.now:
+        return f"{ctx.when(at)} ({LATER_WORDS[why].format(**_cited(why, said))})"
+    return WHY_WORDS[why].format(**_cited(why, said))
 
 
 def _host(url: str) -> str:
@@ -278,6 +298,19 @@ def _cadence_words(o: Objective, pm: Any) -> str:
     words = f"tous les {every // DAY} jours" if every >= 2 * DAY and every % DAY == 0 else \
         f"toutes les {max(1, round(every / HOUR))} h"
     return words + ("" if o.cadence_us else " (par défaut)")
+
+
+def window_words(p: Project) -> str:
+    """La plage en mots (« les jours ouvrés, de 9 h à 18 h »)."""
+    if always(p):
+        return "à toute heure"
+    days = {c.EVERY_DAY: "tous les jours", c.WEEKDAYS: "les jours ouvrés", c.WEEKEND: "le week-end"}.get(p.days, p.days)
+    return f"{days}, de {hhmm(p.start_min)} à {hhmm(p.end_min)}"
+
+
+def hhmm(minutes: int) -> str:
+    h, m = divmod(max(0, min(24 * 60, minutes)), 60)
+    return f"{h} h" if not m else f"{h} h {m:02d}"
 
 
 # ── L'objet « projet » ────────────────────────────────────────────────────
@@ -517,7 +550,7 @@ def _decisions_view(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list
 
 
 def _decisions_ref(p: Project, text: str) -> Ref:
-    """L'onglet Décisions du projet, toutes montrées (une décision remplacée ou retirée s'y retrouve)."""
+    """L'onglet Décisions techniques du projet, toutes montrées (une décision remplacée ou retirée s'y retrouve)."""
     return Ref("subject", f"project/{p.id}", text, (("onglet", "decisions"), ("statut", "toutes")))
 
 
@@ -539,9 +572,10 @@ def _state_notes(p: Project, s: ProjectsState, frame: Frame, ctx: InspectContext
         why = f" ({p.pause_reason})" if p.pause_reason else ""
         out.append(Note(f"En pause depuis le {ctx.when(p.paused_at)}{why} : aucune exécution jusqu'à ce que tu le "
                         "reprennes (« Reprendre », en haut).", "warn"))
+    # le cadrage (ADR 0145) : à cadrer, puis un plan qui attend sa réponse
     if p.status == c.ACTIVE and p.plan_state == c.TO_FRAME:
         out.append(Note("À cadrer : sa séance de cadrage relira la demande et écrira son plan avant toute autre "
-                        "exécution (ADR 0145).", "info"))
+                        "exécution.", "info"))
     elif p.status == c.ACTIVE and p.plan_state == c.PROPOSED:
         out.append(Note("Son plan attend une réponse : « Valider le plan » le lance, « Demander une révision » le lui "
                         "fait reprendre (ou en conversation, avec elle).", "warn"))
@@ -558,7 +592,7 @@ def exact(s: ProjectsState, proposal: int) -> str:
     Approbations."""
     raw = s.awaiting.get(proposal)
     got = s.proposals.get(proposal)
-    if raw is None or got is None or got[1] != NETWORKED:
+    if raw is None or got is None or got[1] != NETWORKED_CAPABILITY:
         return ""
     try:
         argv = json.loads(raw).get("argv") or []
@@ -826,12 +860,11 @@ def _runs_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block
         end = ended.get(e.correlation)
         report = reports.get(e.correlation)
         outcome = str(end.data.outcome) if end is not None else ""
-        issue = Badge(OUTCOME_FR.get(outcome, outcome), OUTCOME_TONE.get(outcome, "")) if outcome else \
-            Badge("en cours", "info")
+        issue = Badge(*outcome_words(outcome, e.data.kind)) if outcome else Badge("en cours", "info")
         duration = f"{max(1, (end.at - e.at) // 1_000_000)} s" if end is not None else "—"
         verdict: Any = Badge(VERDICT_FR.get(report.verdict, report.verdict), VERDICT_TONE.get(report.verdict, "")) \
             if report is not None else "—"
-        oid = report.objective if report is not None else _objective_id(e.data.subject)
+        oid = report.objective if report is not None else (objective_of(e.data.subject) or (0, 0))[1]
         rows.append(Row((
             When(e.at), MODE_FR[c.PERSONA] if e.data.kind == Kind.WORK else MODE_FR[c.PLAIN], _objective_words(p, oid, texts), issue,
             verdict, _proof(report.verdict, report.proven) if report is not None else "—",
@@ -859,17 +892,10 @@ def _runs_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block
     ]
 
 
-def _objective_id(subject: str | None) -> int:
-    if subject and subject.startswith("objective:"):
-        tail = subject.rsplit(":", 1)[-1]
-        return int(tail) if tail.isdigit() else 0
-    return 0
-
-
 # ── La fiche : décisions ──────────────────────────────────────────────────
 
 
-@PROJECTS.inspect("decisions", title="Décisions", subject="project", order=40, params=[DECISION_PARAM],
+@PROJECTS.inspect("decisions", title="Décisions techniques", subject="project", order=40, params=[DECISION_PARAM],
                   description="Les décisions techniques du projet : ce qui est choisi, pourquoi, et ce que chaque "
                               "décision remplace. Elle relit celles en vigueur à chaque exécution.")
 def _decisions_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:
@@ -916,355 +942,6 @@ def _decisions_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[
                            description="La question tranchée, ce qui est choisi et pourquoi. Pour revenir sur une "
                                        "décision, « Remplacer cette décision » : l'ancienne reste lisible, remplacée."))
     return out
-
-
-# ── La fiche : fichiers ───────────────────────────────────────────────────
-
-
-_TREE_LINE = re.compile(r"^(?P<path>.+) \((?P<size>\d+) o\)$")
-
-
-def _download_link(project: int, path: str) -> Ref:
-    return Ref.download("project", str(project), "télécharger", path)
-
-
-def _folder_ref(p: Project, folder: str, text: str) -> Ref:
-    params: tuple[tuple[str, str], ...] = (("onglet", "fichiers"),) + ((("dossier", folder),) if folder else ())
-    return Ref("subject", f"project/{p.id}", text, params)
-
-
-def _file_ref(p: Project, path: str, text: str) -> Ref:
-    folder = path.rsplit("/", 1)[0] if "/" in path else ""
-    params = (("onglet", "fichiers"), *((("dossier", folder),) if folder else ()), ("fichier", path))
-    return Ref("subject", f"project/{p.id}", text, params)
-
-
-def _listing(tree: list[str], folder: str) -> tuple[list[tuple[str, int, int]], list[tuple[str, int]]]:
-    """Les sous-dossiers (nom, fichiers, octets) et les fichiers (chemin, octets) directement dans ``folder``."""
-    prefix = f"{folder}/" if folder else ""
-    dirs: dict[str, list[int]] = {}
-    files: list[tuple[str, int]] = []
-    for line in tree:
-        m = _TREE_LINE.match(line)
-        if m is None or not m.group("path").startswith(prefix):
-            continue
-        rest = m.group("path")[len(prefix):]
-        size = int(m.group("size"))
-        if "/" in rest:
-            name = rest.split("/", 1)[0]
-            entry = dirs.setdefault(name, [0, 0])
-            entry[0] += 1
-            entry[1] += size
-        else:
-            files.append((m.group("path"), size))
-    return [(n, v[0], v[1]) for n, v in sorted(dirs.items())], sorted(files)
-
-
-@PROJECTS.inspect("fichiers", title="Fichiers", subject="project", order=50,
-                  description="Le dossier du projet, à parcourir : un dossier s'ouvre, un fichier se lit ici ou se "
-                              "télécharge ; tu peux y déposer un fichier pour elle.")
-async def _files_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    p = _subject(s, ctx)
-    if isinstance(p, Note):
-        return [p]
-    port = ctx.ports.get("workshop")
-    if port is None:
-        return [Note("L'atelier n'est pas disponible ici (aucun port d'atelier).", tone="warn")]
-    deposit = [Disclosure("Déposer un fichier dans l'atelier", (
-        ActionSlot("projects.deposer", title="Déposer un fichier", compact=True),))] \
-        if _depositable(s, frame, str(p.id), ctx.ports) else []
-    if not port.exists(p.id):
-        return [Note("L'atelier n'est pas encore ouvert : aucune exécution n'y a encore écrit.", tone="muted"), *deposit]
-    folder = ctx.param("dossier").strip("/")
-    if ".." in folder.split("/"):
-        folder = ""
-    tree = await port.tree(p.id, folder or ".")
-    cut = [line for line in tree if line.startswith("[")]
-    tree = [line for line in tree if not line.startswith("[")]
-    dirs, files = _listing(tree, folder)
-    crumbs = [NavItem("racine", _folder_ref(p, "", "racine"), active=not folder)]
-    acc = ""
-    for part in [x for x in folder.split("/") if x]:
-        acc = f"{acc}/{part}" if acc else part
-        crumbs.append(NavItem(part, _folder_ref(p, acc, part), active=acc == folder))
-    rows: list[Any] = [Row((_folder_ref(p, f"{folder}/{name}" if folder else name, f"{name}/"),
-                            Badge("dossier", "info"), f"{count} fichier(s)", size_fr(size), ""),
-                           href=_folder_ref(p, f"{folder}/{name}" if folder else name, ""))
-                       for name, count, size in dirs]
-    rows += [Row((_file_ref(p, path, path.rsplit("/", 1)[-1]), Badge("fichier"), "", size_fr(size),
-                  _download_link(p.id, path))) for path, size in files]
-    total = sum(int(m.group("size")) for m in (_TREE_LINE.match(x) for x in tree) if m is not None)
-    opened = await _opened_file(p, port, ctx.param("fichier"))
-    where = f"dans /{folder}" if folder else "dans l'atelier"
-    notes = [Note(f"Plus de {len(tree)} fichiers {where} : la liste est coupée — ouvre un sous-dossier pour voir "
-                  "la suite.", "warn")] if cut else []
-    return [
-        *opened,
-        Nav(tuple(crumbs), title="Dossier"),
-        *notes,
-        Table((Column("nom"), Column("sorte", "fit"), Column("contenu", "fit"), Column("taille", "num"),
-               Column("télécharger", "fit")), tuple(rows), title=f"/{folder}" if folder else "Le dossier du projet",
-              empty="ce dossier est vide",
-              caption=f"{len(tree)} fichier(s) {where}, {size_fr(total)} en tout. Un nom ouvre le fichier ici ; "
-                      "« télécharger » le rapatrie tel quel."),
-        *deposit,
-    ]
-
-
-async def _opened_file(p: Project, port: Any, path: str) -> list[Block]:
-    if not path:
-        return []
-    try:
-        text = await port.read(p.id, path)
-    except (OutsideWorkshop, FileNotFoundError, OSError, ValueError) as exc:
-        return [Note(f"« {path} » ne s'ouvre pas : {exc}", "warn")]
-    if "\x00" in text or text.count("�") > max(8, len(text) // 50):
-        return [Note(f"« {path} » n'est pas un texte : télécharge-le.", "muted"),
-                Fields((("télécharger", _download_link(p.id, path)),))]
-    folder = path.rsplit("/", 1)[0] if "/" in path else ""
-    lang = "diff" if path.endswith((".diff", ".patch")) else ""
-    return [Code(_cut(text, FILE_SHOWN), title=path, lang=lang),
-            Fields((("fichier", Text(path, "mono")), ("télécharger", _download_link(p.id, path)),
-                    ("fermer", _folder_ref(p, folder, "revenir au dossier"))), columns=3)]
-
-
-@PROJECTS.download("project")
-async def _download(s: ProjectsState, frame: Frame, ctx: InspectContext, key: str, name: str) -> Download | Note:
-    """Un fichier de l'atelier, tel quel."""
-    p = project_at(s, key)
-    port = ctx.ports.get("workshop")
-    if p is None or port is None or not port.exists(p.id):
-        return Note("Ce fichier n'est pas disponible.", tone="warn")
-    try:
-        data = await port.read_bytes(p.id, name, DOWNLOAD_MAX + 1)
-    except (OutsideWorkshop, FileNotFoundError, OSError, ValueError):
-        return Note("Ce fichier n'est pas (ou plus) dans l'atelier.", tone="warn")
-    if len(data) > DOWNLOAD_MAX:
-        return Note(f"Trop gros pour la console ({DOWNLOAD_MAX // (1024 * 1024)} Mo au plus).", tone="warn")
-    return Download(name.rsplit("/", 1)[-1], data)
-
-
-# ── La fiche : dépôt git ──────────────────────────────────────────────────
-
-#: combien d'échanges avec le distant (pousser, récupérer) on montre
-EXCHANGES_SHOWN = 12
-EXCHANGE_FR = {PUSH: "pousser", PULL: "récupérer"}
-
-
-@PROJECTS.inspect("git", title="Dépôt git", subject="project", order=60,
-                  description="Le dépôt de l'atelier face à son dépôt distant : l'écart entre les deux (à pousser, à "
-                              "récupérer), l'historique de chacun, ce qui n'est pas encore enregistré, les issues et "
-                              "pull requests ouvertes (GitHub), et les envois et récupérations passés.")
-async def _git_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    p = _subject(s, ctx)
-    if isinstance(p, Note):
-        return [p]
-    port = ctx.ports.get("workshop")
-    hosted = await _hosted(p, ctx)
-    there = port is not None and port.exists(p.id)
-    head = await port.head(p.id) if there else ""
-    gap = await _gap(p, ctx, hosted, head) if there else None
-    distant = _distant(p, hosted, gap)
-    exchanges = _exchanges(p, frame, ctx)
-    if not there:
-        return [Note("Pas encore de dépôt : il s'ouvre à la première exécution qui écrit (ou au premier dépôt de "
-                     "fichier, ou en récupérant le dépôt distant).", "muted"),
-                _remote_section(p, s, frame, ctx, hosted, gap), *distant, *exchanges]
-    blocks: list[Block] = []
-    sha = ctx.param("commit")
-    if sha:
-        shown = await port.show(p.id, sha)
-        blocks.append(Section(f"L'enregistrement {sha}", (
-            Code(_cut(shown, DIFF_SHOWN), title="Message et changements", lang="diff") if shown
-            else Note(f"Aucun enregistrement « {sha} » dans ce dépôt.", "warn"),
-            Fields((("fermer", Ref("subject", f"project/{p.id}", "revenir à l'historique", (("onglet", "git"),))),)))))
-    count = await port.count(p.id)
-    pager = ctx.pager("page_commits", size=PAGE, total=count)
-    commits = await port.commits(p.id, pager.size, offset=pager.offset)
-    latest = commits[:1] if pager.offset == 0 else await port.commits(p.id, 1)
-    diff = await port.diff(p.id)
-    changed = len(await port.pending(p.id))
-    branch = await port.branch(p.id)
-    runs = {e.data.commit: e for e in ctx.events([c.RUN_REPORTED], 1000, where=("project", p.id)) if e.data.commit}
-    ahead = gap[0] if gap is not None else -1
-    rows = []
-    for i, k in enumerate(commits, start=pager.offset):
-        run = runs.get(k.sha)
-        rows.append(Row((
-            Ref("subject", f"project/{p.id}", k.sha, (("onglet", "git"), ("commit", k.sha))), Text(k.title, clamp=120),
-            When(k.at) if k.at else "—", k.author or "—", k.files,
-            Text(f"+{k.insertions} −{k.deletions}", "mono"),
-            Ref("episode", run.correlation, "exécution") if run is not None else
-            ("amorce" if k.title == "atelier ouvert" else "—"),
-            Badge("à pousser", "warn") if i < ahead else Text("sur le distant", "muted") if ahead >= 0 else "—"),
-            href=Ref("subject", f"project/{p.id}", "", (("onglet", "git"), ("commit", k.sha)))))
-    blocks += [
-        Stats((Stat("Enregistrements", count, branch), Stat("Le dernier", When(latest[0].at) if latest and latest[0].at
-                                                            else "—", latest[0].sha if latest else ""),
-               Stat("Non enregistré", f"{changed} fichier(s)" if changed else "rien", "",
-                    "warn" if changed else ""),
-               Stat("Dépôt distant", _host(p.remote) or "aucun", p.branch if p.remote else "",
-                    "" if p.remote else "muted"),
-               *([Stat("Avec le distant", *_gap_words(gap, count))] if p.remote else []))),
-        Disclosure(f"Ce qui n'est pas encore enregistré ({changed} fichier(s))", (
-            Code(_cut(diff, DIFF_SHOWN), title="Changements depuis le dernier enregistrement", lang="diff"),),
-            open=bool(changed)) if diff.strip() or changed else
-        Note("Tout est enregistré : rien de changé depuis le dernier commit.", "muted"),
-        Table((Column("commit", "fit"), Column("message"), Column("quand", "fit"), Column("auteur", "fit"),
-               Column("fichiers", "num"), Column("lignes", "fit"), Column("exécution", "fit"),
-               Column("distant", "fit")), tuple(rows),
-              title="Historique", pager=pager, empty="aucun enregistrement encore",
-              caption="Un commit s'ouvre en diff coloré. Chaque exécution qui change quelque chose laisse un commit, "
-                      "qu'on retrouve dans son compte rendu."),
-        _remote_section(p, s, frame, ctx, hosted, gap),
-        *distant,
-        *exchanges,
-    ]
-    return blocks
-
-
-async def _hosted(p: Project, ctx: InspectContext) -> Hosted | None:
-    """Ce que l'hôte du dépôt distant en dit (GitHub), ou rien : pas de dépôt distant, ou un hôte qu'on ne lit pas.
-    Une lecture d'avant le dernier envoi (ou la dernière récupération) se refait ; « relire » (``frais``) aussi."""
-    host = ctx.ports.get("repo_host")
-    if not p.remote or host is None or not host.handles(p.remote):
-        return None
-    return await host.read(p.remote, p.branch, fresh=ctx.param("frais") == "1", since=p.remote_at)
-
-
-async def _gap(p: Project, ctx: InspectContext, hosted: Hosted | None, head: str) -> tuple[int, int] | None:
-    """L'écart entre l'atelier et le distant, (à pousser, à récupérer) ; ``None`` s'il ne se sait pas (l'hôte n'a
-    pas répondu, ou les deux histoires ont divergé). L'atelier compte lui-même quand il connaît la tête du distant ;
-    sinon, l'hôte compare (s'il connaît le dernier commit de l'atelier)."""
-    if hosted is None or hosted.error or not head:
-        return None
-    port = ctx.ports["workshop"]
-    if not hosted.head:  # la branche n'existe pas encore là-bas : tout l'atelier est à pousser
-        return await port.count(p.id), 0
-    known = await port.compare(p.id, hosted.head)
-    if known is not None:
-        return known
-    return await ctx.ports["repo_host"].compare(p.remote, head, hosted.head)
-
-
-def _gap_words(gap: tuple[int, int] | None, count: int) -> tuple[str, str, str]:
-    """L'écart en mots : (ce qu'on en dit, sa précision, son ton)."""
-    if gap is None:
-        return "—", "écart inconnu", "muted"
-    ahead, behind = gap
-    if not ahead and not behind:
-        return "à jour", "rien à pousser ni à récupérer", "ok"
-    said = " · ".join(x for x in (f"{ahead} à pousser" if ahead else "", f"{behind} à récupérer" if behind else "")
-                      if x)
-    if ahead and behind:
-        return said, "les deux histoires ont divergé", "danger"
-    if behind and count <= 1:
-        return said, "l'atelier est vierge : il prendra toute l'histoire", "info"
-    return said, "", "warn"
-
-
-def _remote_section(p: Project, s: ProjectsState, frame: Frame, ctx: InspectContext, hosted: Hosted | None,
-                    gap: tuple[int, int] | None) -> Section:
-    key = str(p.id)
-    pairs: list[tuple[str, Any]] = [
-        ("adresse", _remote_ref(p)), ("branche", p.branch if p.remote else "—"),
-        ("envoi automatique", "après chaque exécution qui enregistre quelque chose" if p.auto_push else "non"),
-        ("ce qui part", "avec ton accord" if p.approval else "sans accord (réglé ainsi)"),
-        ("dernier échange", Text(p.remote_line, tone="ok" if p.remote_ok else "danger", clamp=300)
-         if p.remote_line else "aucun encore"),
-        ("quand", When(p.remote_at) if p.remote_at else "—")]
-    if hosted is not None and not hosted.error:
-        tip = next((k for k in hosted.commits if k.sha == hosted.head), None)
-        said, why, tone = _gap_words(gap, 2)
-        pairs += [
-            ("au bout de la branche", Ref.url(f"{hosted.url}/commit/{hosted.head}",
-                                              f"{hosted.head[:7]} — {tip.title if tip else ''}".rstrip(" —"))
-             if hosted.head else Text(f"la branche « {p.branch} » n'existe pas encore : le premier envoi la crée",
-                                      "muted")),
-            ("avec l'atelier", Text(f"{said} — {why}" if why else said, tone=tone)),
-            ("issues ouvertes", Ref.url(f"{hosted.url}/issues", _more(hosted.open_issues, hosted.more_issues))),
-            ("pull requests ouvertes", Ref.url(f"{hosted.url}/pulls", _more(hosted.open_pulls, hosted.more_pulls))),
-            ("visibilité", "privé" if hosted.private else "public"),
-            ("lu", When(hosted.read_at) if hosted.read_at else "—")]
-    if hosted is not None:
-        pairs.append(("relire", Ref("subject", f"project/{p.id}", f"relire {hosted.host} maintenant",
-                                    (("onglet", "git"), ("frais", "1")))))
-    items: list[Any] = [Fields(tuple(pairs), columns=2)]
-    if hosted is not None and hosted.error:
-        items.append(Note(f"{hosted.error[:1].upper()}{hosted.error[1:]}.", "warn"))
-    if _remote_ready(s, frame, key, ctx.ports):
-        items.append(Toolbar((ActionSlot("projects.pousser", title="Pousser maintenant", presentation="button"),
-                              ActionSlot("projects.recuperer", title="Récupérer", presentation="button")),
-                             title="Maintenant"))
-    if _editable(s, frame, key):
-        items.append(Disclosure("Régler le dépôt distant", (
-            ActionSlot("projects.depot_distant", title="Enregistrer le dépôt distant", compact=True),),
-            open=not p.remote))
-    items.append(Note("Le jeton qui permet de pousser (GitHub ou un autre hôte https) se règle dans Connexions › "
-                      "Dépôts Git : il n'apparaît jamais dans le journal ni dans ce qu'elle lit.", "muted"))
-    return Section("Son dépôt distant", tuple(items),
-                   description="Pousser envoie ce qui est enregistré ; récupérer avance l'atelier en ligne droite (un "
-                               "atelier vierge prend toute l'histoire du dépôt distant).")
-
-
-def _more(n: int, more: bool) -> str:
-    return f"{n}+" if more else str(n)
-
-
-def _distant(p: Project, hosted: Hosted | None, gap: tuple[int, int] | None) -> list[Block]:
-    """Ce que l'hôte montre du dépôt distant : ses derniers commits, ses issues et pull requests ouvertes (rien s'il
-    n'a pas répondu : la section du dépôt distant le dit)."""
-    if hosted is None or hosted.error:
-        return []
-    behind = gap[1] if gap is not None else -1
-    commits = tuple(Row((
-        Ref.url(f"{hosted.url}/commit/{k.sha}", k.sha[:7]), Text(k.title, clamp=120), When(k.at) if k.at else "—",
-        k.author or "—",
-        Badge("à récupérer", "info") if i < behind else Text("dans l'atelier", "muted") if behind >= 0 else "—"))
-        for i, k in enumerate(hosted.commits))
-    issues = tuple(Row((
-        Ref.url(t.url, f"#{t.number}"), Text(t.title, clamp=160), Text(", ".join(t.labels) or "—", "muted"),
-        t.author or "—", t.comments, When(t.at) if t.at else "—")) for t in hosted.issues)
-    pulls = tuple(Row((
-        Ref.url(t.url, f"#{t.number}"), Text(t.title, clamp=160), Text(f"{t.head} → {t.base}", "mono"),
-        Badge("brouillon", "muted") if t.draft else Badge("prête", "ok"), t.author or "—",
-        When(t.at) if t.at else "—")) for t in hosted.pulls)
-    where = f"{hosted.host} · {hosted.name}"
-    return [
-        Table((Column("commit", "fit"), Column("message"), Column("quand", "fit"), Column("auteur", "fit"),
-               Column("atelier", "fit")), commits, title="Sur le distant",
-              empty=f"la branche « {p.branch} » n'existe pas encore sur le distant",
-              caption=f"Les derniers commits de « {p.branch} » sur {where} ; chacun s'ouvre chez l'hôte."),
-        Table((Column("n°", "fit"), Column("titre"), Column("étiquettes", "fit"), Column("auteur", "fit"),
-               Column("commentaires", "num"), Column("mise à jour", "fit")), issues, title="Issues ouvertes",
-              empty="aucune issue ouverte",
-              caption=f"Les plus récemment touchées d'abord, sur {where} ; chacune s'ouvre chez l'hôte."),
-        Table((Column("n°", "fit"), Column("titre"), Column("branches", "fit"), Column("état", "fit"),
-               Column("auteur", "fit"), Column("mise à jour", "fit")), pulls, title="Pull requests ouvertes",
-              empty="aucune pull request ouverte",
-              caption=f"Les plus récemment touchées d'abord, sur {where} ; chacune s'ouvre chez l'hôte."),
-    ]
-
-
-def _exchanges(p: Project, frame: Frame, ctx: InspectContext) -> list[Block]:
-    """Ses envois et récupérations, les plus récents d'abord : quand, lequel, s'il fallait ton accord, ce qu'il en
-    est (et ce que git a répondu, en détail)."""
-    asked = [e for e in ctx.events([rt.EFFECT_PROPOSED], 200, where=("context", project_target(p.id)))
-             if e.data.capability in EXCHANGE_FR][:EXCHANGES_SHOWN]
-    if not asked and not p.remote:
-        return []
-    pending = {v.proposal for v in pending_of(frame, p.id)}
-    rows = []
-    for e in asked:
-        outcomes = () if e.seq in pending else ctx.events([rt.EFFECT_RESOLVED, rt.EFFECT_EXECUTED], 4,
-                                                           where=("proposal", e.seq))
-        state, detail = _effect_state(e, e.seq in pending, outcomes)
-        rows.append(Row((When(e.at), EXCHANGE_FR[e.data.capability], "requis" if e.data.approval else "non requis",
-                         state), tone="warn" if e.seq in pending else "",
-                        detail=(Code(_cut(detail, 4000), title="ce que git a répondu"),) if detail else ()))
-    return [Table((Column("quand", "fit"), Column("quoi", "fit"), Column("accord", "fit"), Column("état", "fit")),
-                  tuple(rows), title="Échanges avec le distant", empty="aucun envoi ni récupération encore",
-                  caption="Les plus récents d'abord ; une demande qui attend ton accord se décide dans « À valider ».")]
 
 
 # ── La fiche : comportement et outils ─────────────────────────────────────

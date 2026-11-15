@@ -17,7 +17,7 @@ from mika.adapters.teams.config import TeamsAccount, TeamsConfig
 from mika.app.handmade.rights import FAMILY_ABOUT
 from mika.contracts import projects as c
 from mika.faculties.identity.faculty import IdentityParams
-from mika.faculties.projects.tools import opened
+from mika.faculties.projects.faculty import opened
 from mika.inspector import ui as console_ui
 from mika.inspector.pages import families, rights_tables
 from mika.kernel.events import Origin

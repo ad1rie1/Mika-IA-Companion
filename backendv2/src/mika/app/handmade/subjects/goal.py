@@ -1,7 +1,7 @@
 """La fiche d'un but, dessinée (ADR 0121) : son en-tête, et son « Résumé » — ce qu'elle cherche et où elle en est, son
 avancement, sa prochaine séance, ses garde-fous, son plan de travail (chaque tâche avec ses boutons), ses dernières
 séances et la dernière consigne reçue ; le détail complet, replié. Un rappel se dit autrement : quoi, quand, à qui,
-s'il a été dit. Ses autres onglets (cadre, séances, carnet, décisions, épisodes) se dessinent bloc par bloc.
+s'il a été dit. Ses autres onglets (cadre, séances, carnet, décisions) se dessinent bloc par bloc.
 
 Les données sont celles de la faculté ``goals``. Ce que sa vue dit déjà se lit dans l'en-tête qu'elle déclare
 (ADR 0218) : sa sorte et son autorité en mots (une rêverie se dit comme telle), son statut à l'instant, sa priorité, la
@@ -44,7 +44,7 @@ from mika.kernel.inspect import Badge, Meter
 
 KIND = "goal"
 #: ses onglets, tous dessinés : « Résumé » à sa façon, les autres bloc par bloc
-TABS = ("resume", "politique", "seances", "carnet", "decisions", "episodes")
+TABS = ("resume", "politique", "seances", "carnet", "decisions")
 #: ses dernières séances, sur le résumé
 RECENT_STEPS = 3
 FORGOTTEN = "(oublié)"

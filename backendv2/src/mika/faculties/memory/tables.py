@@ -5,7 +5,8 @@
 Les types : un entier est un ``BIGINT`` (les instants sont en microsecondes), un réel un ``DOUBLE`` ; une clé ou une
 colonne indexée est une ``Key`` (une adresse de personne ou un sujet ``name:…`` : ``HANDLE_MAX``, que la projection
 garantit par ``fit`` à l'écriture plutôt que de faire échouer l'ajout) ; tout autre texte est un ``LongText`` (les
-listes JSON — ``about``, ``told_by``… — en sont : elles peuvent dépasser toute borne). Les ``id`` reprennent le
+listes JSON — ``about``, ``told_by``… — en sont : elles peuvent dépasser toute borne ; une liste de clés se lit
+par ``keys_of`` et s'écrit par ``keys_json``). Les ``id`` reprennent le
 ``seq`` de l'événement qui a créé la ligne : jamais attribués par la base.
 
 Les index sont nommés d'après la table suffixée. Celui des empreintes (``fingerprint``) ne couvre plus ``about``,
@@ -18,6 +19,7 @@ son statut, suffit à ne relire que ses quasi-doublons.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable, Iterator
 from functools import cache
 from typing import Any
@@ -86,6 +88,24 @@ def handle_key(value: str) -> str:
     """Une adresse ou un sujet tel qu'une ``Key(HANDLE_MAX)`` le range (``fit`` : telle quelle si elle tient) — à
     l'écriture comme à la lecture."""
     return fit(value, HANDLE_MAX)
+
+
+def keys_of(raw: Any) -> tuple[str, ...]:
+    """Les clés d'une colonne JSON (``about``, ``told_by``, ``heard_by``, ``informants`` ; les numéros de ``sources``
+    aussi, en chaînes), dans l'ordre où elles y sont, chacune en chaîne — la lecture tolérante : une valeur absente,
+    illisible ou qui n'est pas une liste n'en donne aucune."""
+    try:
+        got = json.loads(raw or "[]")
+    except (TypeError, ValueError):
+        return ()
+    return tuple(str(k) for k in got) if isinstance(got, list) else ()
+
+
+def keys_json(values: Iterable[str]) -> str:
+    """Des clés telles qu'une colonne JSON les range : triées, sans doublon ni clé vide. Les mêmes personnes
+    s'écrivent toujours de la même façon : la colonne se compare telle quelle (un doublon exact,
+    ``testimonies.twin_of``)."""
+    return json.dumps(sorted({v for v in values if v}), ensure_ascii=False)
 
 
 def _int(name: str, *, nullable: bool = False, default: int | None = None, **kw: object) -> Column[int]:
@@ -283,11 +303,14 @@ def told_lines(sfx: str = "") -> Table:
 
 @cache
 def deferred(sfx: str = "") -> Table:
-    """``memory_extraction_queue`` : les extractions remises à plus tard."""
+    """``memory_extraction_queue`` : les extractions remises à plus tard. ``source`` : d'où viennent leurs messages
+    (``thread``, son fil ; ``relayed``, des messages reçus ailleurs, ADR 0224) — chaque processus ne reprend que les
+    siennes."""
     name = f"{DEFERRED_TABLE}{sfx}"
     return projection_table(
         name,
         Column("key", BigInteger, primary_key=True, autoincrement=False),
+        Column("source", Key(KIND), nullable=False, server_default="thread"),
         _text("messages"),
         _text("about"),
         _int("attempts"),

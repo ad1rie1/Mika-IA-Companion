@@ -74,11 +74,12 @@ class GoalsParams(BaseModel):
         label="Séances par heure au plus", group="Les séances", lo=0, hi=30,
         help="Tous buts confondus : chaque séance est une boucle d'outils du modèle, silencieuse, hors du budget "
              "d'initiatives (0 : plus aucun travail).")] = 4
+    # voir venir, constater (ADR 0086)
     checks_per_week: Annotated[int, Knob(
         label="Vérifications par semaine, au plus", group="Entreprendre d'elle-même", lo=0, hi=7,
         help="Un moment du monde qui lui tient à cœur, passé sans qu'elle sache comment il a tourné (une élection, "
              "une éclipse), peut lui donner envie d'aller vérifier dans ses lectures — au plus tant de fois sur sept "
-             "jours glissants (ADR 0086). 0 : jamais.")] = 2
+             "jours glissants. 0 : jamais.")] = 2
     check_steps: Annotated[int, Knob(
         label="Séances par vérification", group="Les séances", lo=1, hi=10,
         help="Le budget de séances d'une vérification : on regarde, on ne fait pas une enquête.")] = 2
@@ -195,11 +196,12 @@ class GoalsParams(BaseModel):
              "fouiller ses flux — ne dépasse pas ce nombre, étalé sur sa journée (deux : une le matin, une "
              "l'après-midi) : une personne ne rêvasse pas toutes les deux heures (sonde réelle du 2026-10-03 : "
              "quatre à cinq rêveries par jour). 0 : jamais.")] = 2
+    # coupé par défaut (ADR 0160)
     muse_on_interests: Annotated[bool, Knob(
         label="Rêvasser sur ses centres d'intérêt sans source", group="Entreprendre d'elle-même",
         help="Sans flux ni web où chercher du neuf, un centre d'intérêt la fait rêvasser autour de son sujet. Décoché "
              "(par défaut) : elle n'en fait rien — ces rêveries sans contenu tournaient en boucle sur ses centres "
-             "d'intérêt (ADR 0160). Rêvasser à ce dont on lui a parlé reste, et avec des sources elle explore.")] = False
+             "d'intérêt. Rêvasser à ce dont on lui a parlé reste, et avec des sources elle explore.")] = False
     talk_lookback_us: Annotated[int, Knob(
         label="Un sujet de conversation reste une graine pendant", group="Entreprendre d'elle-même", lo=HOUR,
         hi=14 * DAY,
@@ -955,8 +957,7 @@ def _deposited(s: GoalsState, e, cx) -> GoalsState:
 def _became_project(s: GoalsState, e, cx) -> GoalsState:
     """Une exploration qui s'avère plus grosse qu'une envie devient un projet (``start_project`` pendant une de
     ses séances) : elle continue là-bas, et se clôt ici (``goals.tend``)."""
-    source = e.data.source or ""
-    gid = int(source[len("goal:"):]) if source.startswith("goal:") and source[len("goal:"):].isdigit() else None
+    gid = goal_of(e.data.source)
     g = s.goals.get(gid) if gid is not None else None
     if g is None or g.kind != c.EXPLORATION or g.status in c.CLOSED_STATUSES:
         return s

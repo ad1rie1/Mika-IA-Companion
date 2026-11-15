@@ -29,7 +29,6 @@ from mika.contracts import forge as forge_c
 from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
-from mika.contracts import transcript as transcript_c
 from mika.faculties.projects.atelier import network_proposal, remote_proposal
 from mika.faculties.projects.faculty import (
     ANSWERED,
@@ -49,8 +48,9 @@ from mika.faculties.projects.faculty import (
     living,
     params,
     stuck_asking,
+    written,
 )
-from mika.faculties.projects.tools import closing, written
+from mika.faculties.projects.tools import closing
 from mika.kernel.clock import MINUTE
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp
@@ -133,8 +133,7 @@ def replied(s: ProjectsState, frame: Frame) -> list[tuple[Project, Objective]]:
             waits = o.status == c.OPEN and bool(o.need_ref) or stuck_asking(o, frame.now)
             if not waits or not o.asked or not o.asked_to or o.answered_at >= o.asked_at:
                 continue
-            handles = frame.get(identity_c.HANDLES(o.asked_to)) or (o.asked_to,)
-            if max(frame.get(transcript_c.LAST_FROM(h)) for h in handles) > o.asked_at:
+            if identity_c.last_heard(frame, o.asked_to) > o.asked_at:
                 out.append((p, o))
     return out
 

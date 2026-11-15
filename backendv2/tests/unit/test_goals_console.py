@@ -12,7 +12,9 @@
 - un but suspendu ne fait aucun pas, ne se rappelle pas et son envie ne
   s'use pas ; repris, il repart ;
 - une consigne se lit au pas suivant ;
-- clore annule sans rien lui faire ressentir.
+- clore annule sans rien lui faire ressentir ;
+- les buts vivants ne se filtrent que par ce qu'un but vivant peut être ;
+  un ancien projet se cherche parmi les clos.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import re
 from datetime import datetime
+from types import SimpleNamespace
 
 import pytest
 
@@ -27,7 +30,18 @@ from mika.contracts import goals as goals_c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.faculties.goals.actions import parse_due
-from mika.faculties.goals.faculty import GOAL_AMENDED, GOAL_PAUSED, GOAL_RESUMED, desire, params
+from mika.faculties.goals.faculty import (
+    GOAL_AMENDED,
+    GOAL_PAUSED,
+    GOAL_RESUMED,
+    GOALS,
+    Goal,
+    GoalsState,
+    _set,
+    desire,
+    params,
+)
+from mika.faculties.goals.inspect import _steps_tab
 from mika.kernel.clock import HOUR, MINUTE, US, instant, local
 from mika.kernel.events import Content, Origin
 from mika.kernel.inspect import (
@@ -40,6 +54,7 @@ from mika.kernel.inspect import (
     Found,
     Grid,
     Head,
+    InspectContext,
     Meter,
     Note,
     Prose,
@@ -57,6 +72,7 @@ from mika.runtime.inspection import Inspection
 from mika.runtime.operations import offered, perform
 from mika.sim.clock import SimClock, run_virtual
 from mika.sim.llm.persona import PersonaSimLLM
+from mika.vocab.episodes import Kind, goal_target
 from tests.fixtures.mika import PARIS, at_paris, boot, build, connect
 
 MONDAY = at_paris(2026, 9, 28, 14, 0)
@@ -240,6 +256,21 @@ def test_a_due_date_is_read_the_french_way_and_refused_when_unreadable():
             parse_due(text, PARIS, now)
 
 
+# ── Buts vivants, clos : leurs filtres ────────────────────────────────────
+
+
+def kinds_offered(view: str) -> dict[str, str]:
+    spec = next(s for s in GOALS.inspectors if s.name == view)
+    return dict(next(p for p in spec.typed if p.name == "sorte").choices)
+
+
+def test_live_goals_are_filtered_only_by_what_a_live_goal_can_be():
+    # un ancien projet encore vivant est clos à la première passe de tend : parmi les vivants, rien à trouver
+    assert kinds_offered("vivants") == {goals_c.REMINDER: "rappel", goals_c.EXPLORATION: "exploration"}
+    # un vieux journal garde ses anciens projets parmi les clos
+    assert kinds_offered("clos")[goals_c.PROJECT] == "ancien projet"
+
+
 # ── La fiche d'un but ─────────────────────────────────────────────────────
 
 
@@ -275,8 +306,7 @@ def test_the_goal_fiche_fresh_then_after_an_exploration_lived_a_step(tmp_path):
                 break
             await asyncio.sleep(MINUTE / US)
         await kernel.lanes.join()
-        after = {name: await tab(kernel, name, gid) for name in ("resume", "seances", "carnet", "episodes",
-                                                               "decisions")}
+        after = {name: await tab(kernel, name, gid) for name in ("resume", "seances", "carnet", "decisions")}
         after["head"] = ins.head("goal", f"#{gid}")
         after["clos"] = await tab(kernel, "clos", "")
         return fresh, opened, after, gid, events(kernel, goals_c.STEP_REPORTED)
@@ -284,7 +314,8 @@ def test_the_goal_fiche_fresh_then_after_an_exploration_lived_a_step(tmp_path):
     fresh, opened, after, gid, reported = live(tmp_path, scenario, mode="honest")
     # neuve : rien, et le dit
     assert fresh["head"] is None and fresh["search"] == []
-    assert fresh["tabs"] == ["resume", "politique", "seances", "carnet", "decisions", "episodes"]
+    # un seul onglet pour ses séances : chacune, avec son compte rendu et de quoi relire son prompt (audit K5-12)
+    assert fresh["tabs"] == ["resume", "politique", "seances", "carnet", "decisions"]
     assert "buts" in fresh["person_tabs"] and "projets" in fresh["person_tabs"]
     assert "Aucun but « 999 »" in flat(fresh["unknown"]) and fresh["unknown"][0].tone == "warn"
     assert "fiche d'un but" in flat(fresh["nowhere"])
@@ -314,17 +345,160 @@ def test_the_goal_fiche_fresh_then_after_an_exploration_lived_a_step(tmp_path):
     assert field(resume, "titre") == "Explorer : les jeux rétro" and field(resume, "statut").text == "abouti"
     assert field(resume, "d'où il vient") == "genese"
     pas = table(after["seances"], "Ses séances")
-    assert [c.text for c in pas.rows[0].cells[1:3]] == ["fini", "prouvé"]
-    assert "goal_reflect" in pas.rows[0].cells[4] and pas.rows[0].cells[6].kind == "episode"  # ce qui a prouvé
+    assert field(after["seances"], "séances faites")  # « Où il en est », en tête
+    worked = next(r for r in pas.rows if r.cells[1] == "séance de travail")
+    assert [c.text for c in worked.cells[4:6]] == ["fini", "prouvé"]
+    assert "goal_reflect" in worked.cells[7]  # ce qui a prouvé
+    assert worked.href == Ref("episode", reported[0].correlation, "")
+    assert worked.cells[9] == "1" == str(sum(r.correlation == worked.href.key for r in reported))  # « comptes rendus »
+    assert worked.cells[10].params == (("onglet", "prompt"),) and worked.cells[13].params == (("onglet", "decision"),)
+    assert (worked.cells[3].text, worked.cells[3].tone) == ("terminé", "ok")  # les mots de la page Épisodes
     assert "En y repensant" in flat(after["carnet"])
-    assert "séance de travail" in flat(after["episodes"])
-    episode = table(after["episodes"], "Ses épisodes").rows[-1]
-    assert episode.cells[6].params == (("onglet", "prompt"),) and episode.cells[9].params == (("onglet", "decision"),)
-    assert episode.cells[4].text == "fini"
     decided = table(after["decisions"], "Ce que l'arbitre en a pensé").rows
     assert decided and any(r.cells[1].text == "choisi" for r in decided) and decided[0].detail
     closed = table(after["clos"], "Buts clos")
     assert closed.rows[0].cells[0] == Ref.subject("goal", gid, f"#{gid}") and closed.rows[0].cells[4].text == "abouti"
+
+
+def test_the_goal_episodes_say_their_outcome_with_the_words_of_the_episodes_page():
+    """L'onglet des séances d'un but dit l'issue de chaque épisode comme la page Épisodes : une séance trop longue
+    est « trop longue » (pas « délai dépassé »), un récit d'elle mené à bien « a parlé » (pas « fait »), et une séance
+    qui n'a pas fini est « en cours » (audit K5-06)."""
+    done = Goal(id=1, kind=goals_c.EXPLORATION, authority=goals_c.SELF, title_ref="t", opened_at=0,
+                status=goals_c.ACHIEVED, notable=0.9, owner="user_1")
+    started = [  # du plus récent au plus ancien, comme le journal les rend
+        SimpleNamespace(seq=3, correlation="s3", at=MONDAY + 3 * HOUR, data=rt.EpisodeStarted(
+            kind=Kind.STEP, target=goal_target(1), reason=goals_c.WORK)),
+        SimpleNamespace(seq=2, correlation="i2", at=MONDAY + 2 * HOUR, data=rt.EpisodeStarted(
+            kind=Kind.INITIATIVE, target="user_1", reason=goals_c.SHARE, subject=goal_target(1))),
+        SimpleNamespace(seq=1, correlation="s1", at=MONDAY + HOUR, data=rt.EpisodeStarted(
+            kind=Kind.STEP, target=goal_target(1), reason=goals_c.WORK)),
+    ]
+    ended = {"i2": rt.EpisodeEnded(kind=Kind.INITIATIVE, outcome="done", target="user_1"),
+             "s1": rt.EpisodeEnded(kind=Kind.STEP, outcome="timeout", target=goal_target(1))}
+
+    def journal(names, limit, *, where=None, before=None, correlations=None):
+        if names == [rt.EPISODE_STARTED.name]:
+            field_, value = where
+            return [e for e in started if getattr(e.data, field_) == value][:limit]
+        if names == [rt.EPISODE_ENDED.name]:
+            return [SimpleNamespace(correlation=c, data=ended[c]) for c in correlations or () if c in ended]
+        assert names == [goals_c.STEP_REPORTED.name]
+        return []
+
+    frame = SimpleNamespace(get=lambda fact: SimpleNamespace(name="Adrien"))
+    blocks = _steps_tab(_set(GoalsState(), done), frame, InspectContext(store=None, ports={}, journal=journal,
+                                                                        subject="1"))
+    issues = [(r.cells[3].text, r.cells[3].tone) for r in table(blocks, "Ses séances").rows]
+    assert issues == [("en cours", "info"), ("a parlé", "ok"), ("trop long", "danger")]
+
+
+def test_the_goal_sessions_tab_gives_each_episode_its_report():
+    """Un seul onglet « Séances » (audit K5-12) : une ligne par épisode du but, la séance avec son compte rendu
+    (verdict, preuve, résumé, outils, notable), la parole et la séance en cours avec « — » à sa place ; en détail, de
+    quoi relire chacune (prompt, outils, appels, décision)."""
+    done = Goal(id=1, kind=goals_c.EXPLORATION, authority=goals_c.SELF, title_ref="t", opened_at=0,
+                status=goals_c.ACTIVE, notable=0.9, owner="user_1", steps=1, max_steps=8)
+    started = [  # du plus récent au plus ancien, comme le journal les rend
+        SimpleNamespace(seq=3, correlation="s3", at=MONDAY + 3 * HOUR, data=rt.EpisodeStarted(
+            kind=Kind.STEP, target=goal_target(1), reason=goals_c.WORK)),
+        SimpleNamespace(seq=2, correlation="i2", at=MONDAY + 2 * HOUR, data=rt.EpisodeStarted(
+            kind=Kind.INITIATIVE, target="user_1", reason=goals_c.SHARE, subject=goal_target(1))),
+        SimpleNamespace(seq=1, correlation="s1", at=MONDAY + HOUR, data=rt.EpisodeStarted(
+            kind=Kind.STEP, target=goal_target(1), reason=goals_c.WORK)),
+    ]
+    ended = {"i2": rt.EpisodeEnded(kind=Kind.INITIATIVE, outcome="done", target="user_1"),
+             "s1": rt.EpisodeEnded(kind=Kind.STEP, outcome="done", target=goal_target(1))}
+    reported = {"s1": goals_c.StepReported(goal=1, verdict=goals_c.DONE, summary=Content.of("Trois consoles listées"),
+                                           notable=0.7, proven=True, tools=("goal_reflect", "goal_note"))}
+
+    def journal(names, limit, *, where=None, before=None, correlations=None):
+        if names == [rt.EPISODE_STARTED.name]:
+            field_, value = where
+            return [e for e in started if getattr(e.data, field_) == value][:limit]
+        if names == [rt.EPISODE_ENDED.name]:
+            return [SimpleNamespace(correlation=c, data=ended[c]) for c in correlations or () if c in ended]
+        assert names == [goals_c.STEP_REPORTED.name] and where is None  # lu par corrélation, pas à part
+        return [SimpleNamespace(correlation=c, data=reported[c]) for c in correlations or () if c in reported]
+
+    frame = SimpleNamespace(get=lambda fact: SimpleNamespace(name="Adrien"))
+    blocks = _steps_tab(_set(GoalsState(), done), frame, InspectContext(store=None, ports={}, journal=journal,
+                                                                        subject="1"))
+    assert field(blocks, "séances faites") == "1 / 8"  # « Où il en est » d'abord
+    sessions = table(blocks, "Ses séances")
+    assert [c.label for c in sessions.columns] == [
+        "quand", "épisode", "vers", "issue", "verdict", "preuve", "résumé", "outils utilisés", "notable",
+        "comptes rendus", "prompt", "outils", "appels", "décision"]
+    assert [c.label for c in sessions.columns if c.detail] == [
+        "vers", "comptes rendus", "prompt", "outils", "appels", "décision"]
+    current, told, worked = sessions.rows
+    assert [r.cells[1] for r in sessions.rows] == ["séance de travail", "raconter", "séance de travail"]
+    assert told.cells[2] == "Adrien" and worked.cells[2] == "—"  # « vers » : qui elle visait en en parlant
+    # la séance : son compte rendu
+    assert [c.text for c in worked.cells[4:7]] == ["fini", "prouvé", "Trois consoles listées"]
+    assert worked.cells[7] == "goal_reflect, goal_note" and worked.cells[8] == "0,7" and worked.cells[9] == "1"
+    # une parole, une séance en cours : pas de compte rendu
+    assert told.cells[4:10] == ("—",) * 6 and current.cells[4:10] == ("—",) * 6
+    # chaque ligne mène à son épisode, et en détail à de quoi le relire
+    for row in sessions.rows:
+        corr = row.href.key
+        assert row.href == Ref("episode", corr, "")
+        assert [(r.key, r.params) for r in row.cells[10:14]] == [
+            (corr, (("onglet", "prompt"),)), (corr, (("onglet", "outils"),)), (corr, (("onglet", "appels"),)),
+            (corr, (("onglet", "decision"),))]
+    assert sessions.caption.startswith("« prompt »")
+
+
+def test_a_session_that_reported_more_than_once_shows_its_last_report_and_all_of_them():
+    """Relecture de K5-12 : un « fini » sans preuve est noté (``STEP_REPORTED``) sans clore la séance, qui peut rendre
+    compte encore, jusqu'au plafond de l'outil. Le journal les rend du plus récent au plus ancien : la ligne montre le
+    dernier (« fini · prouvé », pas le premier « sans preuve »), le détail les dit tous, et la page lit ceux de tous ses
+    épisodes — une lecture bornée à un compte rendu par épisode coupait ceux des plus anciens, montrés « — »."""
+    g = Goal(id=1, kind=goals_c.EXPLORATION, authority=goals_c.SELF, title_ref="t", opened_at=0,
+             status=goals_c.ACHIEVED, notable=0.9, owner="user_1", steps=3, max_steps=8, unproven=3)
+    step = Kind.STEP
+
+    def started_(seq, corr):
+        return SimpleNamespace(seq=seq, correlation=corr, at=MONDAY + seq * HOUR, data=rt.EpisodeStarted(
+            kind=step, target=goal_target(1), reason=goals_c.WORK))
+
+    started = [started_(3, "s3"), started_(2, "s2"), started_(1, "s1")]
+
+    def report(seq, corr, verdict, proven=False, summary="noté"):
+        return SimpleNamespace(seq=seq, correlation=corr, data=goals_c.StepReported(
+            goal=1, verdict=verdict, summary=Content.of(summary), proven=proven))
+
+    reports = [  # trois pour la plus récente, deux pour la suivante, un pour la plus ancienne
+        report(36, "s3", goals_c.DONE, proven=True, summary="Liste prouvée"),
+        report(35, "s3", goals_c.DONE), report(34, "s3", goals_c.DONE),
+        report(25, "s2", goals_c.CONTINUE), report(24, "s2", goals_c.DONE),
+        report(14, "s1", goals_c.CONTINUE, summary="Un premier tri"),
+    ]
+
+    def journal(names, limit, *, where=None, before=None, correlations=None):
+        if names == [rt.EPISODE_STARTED.name]:
+            field_, value = where
+            return [e for e in started if getattr(e.data, field_) == value][:limit]
+        if names == [rt.EPISODE_ENDED.name]:
+            return [SimpleNamespace(correlation=c, data=rt.EpisodeEnded(kind=step, outcome="done",
+                                                                         target=goal_target(1)))
+                    for c in correlations or ()][:limit]
+        assert names == [goals_c.STEP_REPORTED.name]
+        # comme le journal : du plus récent au plus ancien, toutes corrélations mêlées, et borné
+        return [e for e in reports if e.correlation in (correlations or ())][:limit]
+
+    frame = SimpleNamespace(get=lambda fact: SimpleNamespace(name="Adrien"))
+    sessions = table(_steps_tab(_set(GoalsState(), g), frame,
+                                InspectContext(store=None, ports={}, journal=journal, subject="1")), "Ses séances")
+    last, middle, first = sessions.rows
+    # la dernière séance : « fini » sans preuve deux fois, puis prouvé ; la ligne dit le dernier
+    assert [c.text for c in last.cells[4:7]] == ["fini", "prouvé", "Liste prouvée"]
+    assert last.cells[9] == "3 : fini · sans preuve, puis fini · sans preuve, puis fini · prouvé"
+    # « fini » sans preuve, puis « continuer » : la séance continue, sans preuve à dire
+    assert last.cells[4].tone == "ok" and middle.cells[4].text == "continuer" and middle.cells[5] == "—"
+    assert middle.cells[9] == "2 : fini · sans preuve, puis continuer"
+    # la plus ancienne de la page a bien rendu compte : pas de « — » comme une parole
+    assert [c.text for c in first.cells[4:7:2]] == ["continuer", "Un premier tri"] and first.cells[9] == "1"
 
 
 # ── Les actions de l'opérateur ────────────────────────────────────────────

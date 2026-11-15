@@ -10,7 +10,11 @@
   sans geste à temps, elle expire ;
 - la mémoire relit la conversation une fois posée, comme une des siennes : ce qu'elle en garde est confié par
   l'expéditeur **et** par la personne qui le lui montre, entendu par les deux ; ni note sur elle, ni promesse ;
-- oublier un contact efface ses textes, ce qu'elle en retenait, et son nom des enveloppes.
+- oublier un contact efface ses textes, ce qu'elle en retenait, et son nom des enveloppes ;
+- une relecture qu'une panne qui dure, une réponse illisible ou une sortie en partie invalide empêche attend dans la
+  file des reprises, comme une des siennes (ADR 0224) : sa source dit d'où viennent ses messages, la mémoire du
+  téléphone la reprend (d'elle-même, ou à la demande d'un opérateur), ce qui était valide est gardé, et l'oubli d'un
+  expéditeur l'efface.
 """
 
 from __future__ import annotations
@@ -19,17 +23,22 @@ import asyncio
 import json
 from types import SimpleNamespace
 
+from sqlalchemy import select
+
 from mika.app import composition
 from mika.app.phone import PhoneDesk
 from mika.contracts import memory as mc
 from mika.contracts import phone as c
 from mika.contracts import runtime as rt
 from mika.faculties.identity import audience_for
+from mika.faculties.memory import tables as tb
+from mika.faculties.memory.relayed import ATTEMPTS_MAX
 from mika.kernel.clock import HOUR, MINUTE
 from mika.ports.gate import ACCEPTED, DISABLED, FORBIDDEN
 from mika.ports.llm import LLMResponse, ToolCall
 from mika.ports.phone import IGNORED, SENT
 from mika.runtime.effects import with_content
+from mika.runtime.operations import FIXED_FIELD, perform
 from mika.runtime.pipeline import EpisodeRequest
 from mika.sim.clock import SimClock, run_virtual
 from mika.vocab.episodes import Kind
@@ -251,7 +260,7 @@ def lea_moves(prompt: str) -> dict:
     seq = int(prompt.split("[#", 1)[1].split("]", 1)[0])
     return {"croyances": [{"texte": "Léa déménage à Lyon en novembre", "personnes": ["P1"], "messages": [seq],
                            "sensibilite": "personnel", "origine": "observé"}],
-            "promesses": [{"texte": "aider Léa à porter les cartons", "a": "P1"}],
+            "promesses": [{"texte": "aider Léa à porter les cartons", "envers": "P1"}],
             "souvenirs": [{"texte": "J'adore les déménagements", "sur_elle": True, "personnes": [],
                            "messages": []}]}
 
@@ -306,6 +315,128 @@ def test_forgetting_a_contact_erases_her_texts_and_what_was_kept(tmp_path):
     assert lea not in raw and "Léa" not in raw  # la clé, et le nom qu'elle portait, sortis des enveloppes
     assert not state.messages and not state.contacts
     assert read.content == phrase("phone.tools.messages.none")
+
+
+# ── Une relecture empêchée attend dans la file des reprises (ADR 0224) ─────
+
+
+class Down(Model):
+    """Le fournisseur indisponible pour les ``down`` relectures qui viennent, puis de retour."""
+
+    def __init__(self, extract=None, down: int = 0) -> None:
+        super().__init__(extract)
+        self.down = down
+
+    def __call__(self, req):
+        if req.role == "extract" and self.down > 0:
+            self.down -= 1
+            self.calls.append(req)
+            raise RuntimeError("fournisseur indisponible")
+        return super().__call__(req)
+
+
+QUEUE = ("key", "source", "messages", "about", "attempts", "status", "reason")
+
+
+def queue(kernel) -> list[dict]:
+    t = tb.deferred()
+    rows = kernel.mind.store.query_mind(select(*(t.c[n] for n in QUEUE)).order_by(t.c.key))
+    return [dict(zip(QUEUE, r, strict=True)) for r in rows]
+
+
+def extracts(model) -> list:
+    return [r for r in model.calls if r.role == "extract"]
+
+
+def test_a_reading_the_provider_keeps_failing_waits_in_the_queue_then_is_read(tmp_path):
+    model = Down(lea_moves, down=ATTEMPTS_MAX)
+
+    async def scenario(kernel, desk, phone, model):
+        await desk.inbox("user_1", {"messages": [message(1, "Je déménage à Lyon en novembre !")]})
+        await sleep(55 * MINUTE)  # posée à 20 min ; essais à 20, 30 et 50 min, puis dans la file
+        waiting = (queue(kernel), journal(kernel, mc.RELAYED_READ), journal(kernel, mc.BELIEVED),
+                   len(extracts(model)), kernel.mind.frame().state("memory"))
+        await sleep(20 * MINUTE)  # reprise 10 min après sa mise en file
+        return (waiting, queue(kernel), journal(kernel, mc.BELIEVED), journal(kernel, c.RECEIVED),
+                journal(kernel, mc.EXTRACTION_DEFERRED), extracts(model))
+
+    (rows, read, none, tried, memory), after, believed, received, deferred, calls = live(
+        tmp_path, scenario, model=model)
+    lea = received[0].data.sender
+    [row] = rows
+    assert row["source"] == mc.FROM_RELAYED and row["status"] == "queued" and row["reason"] == "provider_error"
+    assert row["key"] == received[0].seq and json.loads(row["messages"]) == [e.seq for e in received]
+    # ses personnes, la clé du téléphone comprise : l'oubli de l'une l'atteint
+    assert lea.startswith("phone:") and set(json.loads(row["about"])) == {lea, "user_1"}
+    [done] = read
+    assert done.data.failed and done.data.produced == 0 and memory.relayed == ()  # la file porte ses messages
+    assert none == [] and tried == ATTEMPTS_MAX
+    # reprise par la mémoire du téléphone (pas par la consolidation, qui ne lit que le fil) : relue, elle est faite
+    assert after == [] and len(calls) == ATTEMPTS_MAX + 1
+    assert "Je déménage à Lyon en novembre !" in calls[-1].messages[-1].content
+    [b] = believed
+    assert b.data.text.text == "Léa déménage à Lyon en novembre" and lea in b.data.about
+    assert [(d.data.source, d.data.status) for d in deferred] == [(mc.FROM_RELAYED, "queued"),
+                                                                 (mc.FROM_RELAYED, "resolved")]
+
+
+def lea_moves_and_a_broken_belief(prompt: str) -> dict:
+    got = lea_moves(prompt)
+    got["croyances"].append({"personnes": ["P1"], "messages": [1]})  # sans texte : invalide
+    return got
+
+
+def test_a_partial_output_keeps_what_is_valid_and_an_operator_can_have_it_read_again(tmp_path):
+    outputs = [lea_moves_and_a_broken_belief, lea_moves]
+    model = Model(lambda prompt: outputs.pop(0)(prompt))
+
+    async def scenario(kernel, desk, phone, model):
+        await desk.inbox("user_1", {"messages": [message(1, "Je déménage à Lyon en novembre !")]})
+        await sleep(30 * MINUTE)
+        first = (queue(kernel), journal(kernel, mc.BELIEVED), journal(kernel, mc.RELAYED_READ),
+                 journal(kernel, mc.EXTRACTION_DEFERRED))
+        await sleep(2 * HOUR)  # à examiner : rien ne la reprend seul
+        alone = len(extracts(model))
+        key = str(first[0][0]["key"])
+        done = await perform(kernel, "memory.reprendre", {FIXED_FIELD: ["key"], "key": [key]}, by="user_1")
+        await sleep(MINUTE)
+        return first, alone, done, queue(kernel), journal(kernel, mc.EXTRACTION_DEFERRED), extracts(model)
+
+    (rows, believed, read, [deferred]), alone, done, after, history, calls = live(tmp_path, scenario, model=model)
+    [row] = rows
+    assert row["source"] == mc.FROM_RELAYED and row["status"] == "review" and row["reason"] == "invalid_items"
+    detail = json.loads(deferred.data.detail.text)
+    assert detail["issues"] == ["croyances[1]: missing"] and "Léa déménage à Lyon" in detail["output"]
+    [b] = believed  # l'élément valide est gardé
+    assert b.data.text.text == "Léa déménage à Lyon en novembre"
+    [r] = read
+    assert r.data.produced == 1 and not r.data.failed
+    assert alone == 1 and done.ok
+    # la reprise demandée garde sa source : la mémoire du téléphone la relit, puis la résout
+    assert [(d.data.source, d.data.status) for d in history] == [
+        (mc.FROM_RELAYED, "review"), (mc.FROM_RELAYED, "queued"), (mc.FROM_RELAYED, "resolved")]
+    assert history[1].data.failure_code == "operator_retry"
+    assert after == [] and len(calls) == 2
+    assert "Je déménage à Lyon en novembre !" in calls[-1].messages[-1].content
+
+
+def test_forgetting_the_sender_erases_a_reading_waiting_in_the_queue(tmp_path):
+    model = Down(lea_moves, down=99)
+
+    async def scenario(kernel, desk, phone, model):
+        await desk.inbox("user_1", {"messages": [message(1, "Je déménage à Lyon en novembre !")]})
+        await sleep(55 * MINUTE)
+        waiting = queue(kernel)
+        [m] = journal(kernel, c.RECEIVED)
+        await kernel.mind.forget(m.data.sender)
+        tried = len(extracts(model))
+        await sleep(2 * HOUR)
+        return waiting, queue(kernel), journal(kernel, mc.EXTRACTION_DEFERRED), tried, len(extracts(model))
+
+    waiting, after, [deferred], tried, later = live(tmp_path, scenario, model=model)
+    assert [r["source"] for r in waiting] == [mc.FROM_RELAYED]
+    assert after == [] and deferred.data.detail.text is None  # l'entrée et son détail effacés
+    assert later == tried  # plus rien à reprendre
 
 
 def test_the_reply_args_name_only_the_draft(tmp_path):

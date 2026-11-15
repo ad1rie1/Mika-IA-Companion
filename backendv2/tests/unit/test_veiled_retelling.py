@@ -19,22 +19,15 @@ from mika.contracts import memory as mc
 from mika.contracts import runtime as rt
 from mika.contracts.social import relations_table
 from mika.contracts.transcript import thread_table
-from mika.faculties.memory.extraction import (
-    Conversation,
-    Extraction,
-    Line,
-    People,
-    Speaker,
-    XCroyance,
-    render,
-    veiled_of,
-    veiled_refusal,
-)
+from mika.faculties.memory.conversation import Conversation, Line, Speaker, render
+from mika.faculties.memory.extraction import Extraction, XCroyance
 from mika.faculties.memory.faculty import MemoryParams, MemoryState
+from mika.faculties.memory.kept import _veiled as veiled_version
 from mika.faculties.memory.links import links_of
 from mika.faculties.memory.projections import Items, Told
 from mika.faculties.memory.recall import _recall
-from mika.faculties.memory.retelling import retellable
+from mika.faculties.memory.retelling import retellable, veiled_refusal
+from mika.faculties.memory.speakers import People
 from mika.faculties.memory.veiled import _veiled, asks_news, echoed
 from mika.kernel.clock import DAY
 from mika.kernel.events import Content, VoiceProvenance
@@ -366,13 +359,16 @@ def test_never(change, why):
 
 def test_a_veiled_version_that_names_someone_is_dropped():
     people = People.of((Speaker("P1", ALICE, "Alice"),), {}, "Mika", scope="private:user_2")
-    assert veiled_of("  quelqu'un que je connais cherche du travail ", people) == \
+    # gardée, elle s'écrit d'un seul blanc entre les mots ; écartée, il n'en reste rien
+    assert veiled_version("  quelqu'un que je connais cherche du travail ", people, "") == \
         "quelqu'un que je connais cherche du travail"
-    assert veiled_of("Alice cherche du travail", people) is None
-    assert veiled_of("quelqu'un que je connais s'est cassé le poignet le 10 octobre", people) is None  # une date
-    assert veiled_of("quelqu'un que je connais a déménagé en 2025", people) is None
-    assert veiled_of("quelqu'un que je connais est plâtré pour 6 semaines", people)  # une durée ne situe personne
-    assert veiled_of("x" * 241, people) is None
+    assert veiled_version("Alice cherche du travail", people, "") is None
+    assert veiled_version(None, people, "") is None
+    assert veiled_refusal("Alice cherche du travail", people) == "nomme-quelqu-un"
+    assert veiled_refusal("quelqu'un que je connais s'est cassé le poignet le 10 octobre", people) == "datee"
+    assert veiled_refusal("quelqu'un que je connais a déménagé en 2025", people) == "datee"
+    assert veiled_refusal("quelqu'un que je connais est plâtré pour 6 semaines", people) == ""  # une durée ne situe personne
+    assert veiled_refusal("x" * 241, people) == "trop-longue"
     # ce qui se reconnaît (ADR 0092) : un mois, un jour, un nom propre, un sigle, un nom de l'original même en minuscules
     original = "Alice a été licenciée de chez Ubisoft"
     assert veiled_refusal("quelqu'un que je connais reprend des études en janvier", people) == "datee"
@@ -544,7 +540,7 @@ def test_a_date_in_common_does_not_hint_at_a_secret():
     """Sonde réelle du 2026-10-11 : « sa mère hospitalisée, le dimanche 11 octobre 2026 » devenait secret parce qu'un
     secret de la même semaine disait aussi « octobre 2026 » — et rien de ce qu'Alice confiait ensuite ne se racontait
     plus, même sans nom. Une date en commun ne fait rien deviner ; un sujet en commun, si."""
-    from mika.faculties.memory.extraction import echoes
+    from mika.faculties.memory.cues import echoes
 
     secret = ["Alice m'a dit qu'elle s'est séparée de Paul la semaine du 5 octobre 2026"]
     assert not echoes("Alice m'a dit, le dimanche 11 octobre 2026, que sa mère a été hospitalisée", secret, {"alice"})

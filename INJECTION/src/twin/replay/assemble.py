@@ -1,7 +1,7 @@
 """Assembler, pour une fenêtre que la mémoire du noyau consolide, ce que Claude Code a lu hors ligne.
 
 La consolidation du moteur (rôle ``extract``) montre une conversation ainsi
-(``mika.faculties.memory.extraction.render``)::
+(``mika.faculties.memory.conversation.render``)::
 
     Conversation privée avec Julie Martin [P1].
     Les messages :

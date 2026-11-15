@@ -9,7 +9,7 @@ from typing import Any
 from mika.contracts import self_ as c
 from mika.faculties.self import days
 from mika.faculties.self.faculty import SELF, SelfState
-from mika.faculties.self.knobs import params
+from mika.faculties.self.params import params
 from mika.kernel.builtin import ABSENCES
 from mika.kernel.faculty import Zone
 from mika.kernel.frame import Frame

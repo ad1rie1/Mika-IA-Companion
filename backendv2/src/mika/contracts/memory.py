@@ -350,7 +350,9 @@ class Relayed(Payload):
 
 class RelayedRead(Payload):
     """Une conversation reçue ailleurs a été relue (ADR 0120) : ses messages (``seqs``) ne l'attendent plus.
-    ``failed`` : la relecture a échoué trop de fois, on la laisse ; l'appel au modèle qui l'a faite."""
+    ``failed`` : la relecture n'en a rien gardé (une panne qui dure, une réponse illisible…) ; la conversation n'est
+    pas laissée, elle attend dans la file des reprises, qui porte désormais ses messages (``ExtractionDeferred``,
+    ``source`` « relayed », ADR 0224) ; l'appel au modèle qui l'a faite."""
 
     seqs: tuple[int, ...] = ()
     produced: int = 0
@@ -371,12 +373,16 @@ class Confronted(Payload):
 
 class Reread(Payload):
     """La relecture de la nuit est faite (ADR 0085) : ses lectures jusqu'à ``upto`` (le ``seq`` de la dernière),
-    combien de lectures et de paires confrontées ; l'appel au modèle qui l'a faite (aucun : rien à relire)."""
+    combien de lectures et de paires confrontées ; ``produced`` : ce qu'elle en a retenu (croyances, témoignages,
+    moments vus venir ou constatés, avis), sans les paires réunies ou confrontées, que ``memory.joined`` et
+    ``memory.confronted`` disent — ``None`` pour une nuit relue avant ce champ, 0 sans rien à relire ; l'appel au
+    modèle qui l'a faite (aucun : rien à relire)."""
 
     night: str
     upto: int = 0
     readings: int = 0
     pairs: int = 0
+    produced: int | None = None
     call_id: str = ""
     model: str = ""
 
@@ -533,11 +539,19 @@ class Resolved(Payload):
     call_id: str = ""
 
 
+#: d'où viennent les messages d'un passage à reprendre (``ExtractionDeferred.source``) : son fil, ou des messages
+#: reçus ailleurs (ADR 0224)
+FROM_THREAD, FROM_RELAYED = "thread", "relayed"
+
 
 class ExtractionDeferred(Payload):
-    """Un passage à reprendre ; les données du modèle restent effaçables."""
+    """Un passage à reprendre ; les données du modèle restent effaçables. ``source`` dit d'où viennent ses
+    ``messages`` : ``thread``, des messages de son fil (la consolidation les relit) ; ``relayed``, des messages reçus
+    ailleurs, relus par leur ``seq`` au journal (``memory.relayed``, ADR 0224). Un événement d'avant ce champ vient du
+    fil."""
 
     key: int
+    source: Literal["thread", "relayed"] = "thread"
     messages: tuple[int, ...] = ()
     #: parmi eux, ce qui ne lui était pas adressé (un salon) : la reprise le relit pareil
     aside: tuple[int, ...] = ()

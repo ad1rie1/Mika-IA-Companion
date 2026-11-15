@@ -5,6 +5,10 @@ est une confidence, quoi qu'en ait dit la consolidation. Le rappel le recalculai
 (une croyance révisée), ses buts, son journal lisaient la porte de la mémoire et n'en savaient rien. Ce processus le
 pose dans la mémoire même (``memory.delicate``) : les nouveaux éléments à leur arrivée, tous ceux d'une personne quand
 son portrait change. Jamais abaissé : un sujet que le portrait ne dit plus ne rouvre rien.
+
+Ce module porte la règle et le processus : ``sensitivity_of`` (et ce qu'elle lit : ``touches``, ``person_of``,
+``delicate_topics``) dit quand un élément devient une confidence ; le rappel (``recall.py``) la lit à chaque tour,
+``memory.delicate`` la pose dans la mémoire.
 """
 
 from __future__ import annotations
@@ -18,13 +22,55 @@ from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
 from mika.contracts import social as social_c
 from mika.faculties.memory.faculty import MEMORY
-from mika.faculties.memory.recall import delicate_topics, person_of, touches
+from mika.faculties.memory.salience import Item
 from mika.faculties.memory.tables import about, handle_key, items
 from mika.kernel.codec import h64
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
 from mika.ports.sql import Prepared, alias_of
 from mika.vocab.privacy import Sensitivity
+from mika.vocab.words import stems
+
+
+def touches(text: str, topics: tuple[str, ...]) -> bool:
+    """Le texte touche-t-il un de ces sujets (radicaux communs) ?"""
+    if not topics:
+        return False
+    have = stems(text)
+    return any(stems(topic) & have for topic in topics)
+
+
+def person_of(frame: Frame, key: str) -> str:
+    """La personne qu'une clé désigne : elle-même, ou une mention reliée, ou présumée (ADR 0075 : une présomption ne
+    protège pas moins) — vide sinon."""
+    if not key.startswith("name:"):
+        return key
+    key = frame.get(identity_c.PERSON(key)) or key
+    return (frame.get(identity_c.PRESUMED(key)) or "") if key.startswith("name:") else key
+
+
+def delicate_topics(frame: Frame, person: str, store: Any = None) -> tuple[str, ...]:
+    """Les sujets délicats d'une personne (son portrait) ; ceux d'un profil récent sont gardés à part (``store``)."""
+    topics = tuple(frame.get(social_c.SENSITIVE(person)))
+    ref = frame.get(social_c.SENSITIVE_REF(person)) if store is not None else ""
+    if ref:
+        topics += tuple(t.strip() for t in (store.content([ref]).get(ref) or "").splitlines() if t.strip())
+    return topics
+
+
+def sensitivity_of(frame: Frame, item: Item, interlocutor: str | None, store: Any = None) -> int:
+    """Un souvenir qui touche un sujet délicat d'une autre personne concernée
+    devient une confidence, quoi qu'en ait dit la consolidation (la porte le dit aussi aux autres facultés :
+    ``memory.delicate``, ADR 0099). Les sujets délicats d'un profil récent sont gardés à part (``store``)."""
+    level = item.sensitivity
+    for other in item.about:
+        if other == interlocutor:
+            continue
+        other = person_of(frame, other)
+        if other and touches(item.text, delicate_topics(frame, other, store)):
+            return max(level, int(Sensitivity.CONFIDENCE))
+    return level
+
 
 #: les éléments examinés au plus par passage (les plus récents d'abord)
 BATCH = 2000

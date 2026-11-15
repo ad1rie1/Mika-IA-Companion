@@ -20,11 +20,14 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
+from types import SimpleNamespace
 
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.faculties.projects.faculty import DEPOSITED, NUDGED, OBJECTIVE_ADDED, REFRAMED
+from mika.faculties.projects.inspect import WHY_WORDS, _who
+from mika.faculties.projects.work import Why, next_run_at
 from mika.inspector.pages.actions import per_row
 from mika.kernel.clock import MINUTE, US
 from mika.kernel.events import Content, Origin
@@ -194,9 +197,9 @@ def test_every_tab_reads_a_project_that_lived_and_the_forms_stay_in_their_tabs(t
         ins = Inspection(kernel)
         specs = [a for a in ins.actions_for(subject="project")]
         head = [a.key for a in specs if not a.inline and not per_row(a) and offered(kernel, a, str(pid))]
-        return tabs, head, pid
+        return tabs, head, pid, ins.find("projects", "decisions").title
 
-    tabs, head, pid = live(tmp_path, scenario, atelier=atelier)
+    tabs, head, pid, decisions_title = live(tmp_path, scenario, atelier=atelier)
     # en tête : ce qui vaut pour tout le projet (les formulaires des onglets, et les lignes, n'y sont pas)
     # la principale, puis la consigne ; la pause et le reste sous « ⋯ » (la maquette)
     assert head == ["projects.lancer", "projects.consigne", "projects.pause", "projects.archiver"]
@@ -215,9 +218,13 @@ def test_every_tab_reads_a_project_that_lived_and_the_forms_stay_in_their_tabs(t
     assert any(isinstance(b, ActionSlot) and b.action == "projects.objectif_ajouter" for b in nested(tabs["objectifs"]))
     runs = tables(tabs["executions"])["Ses exécutions"]
     assert runs.rows and runs.rows[-1].cells[1] == "elle-même" and runs.rows[-1].cells[4].text == "fait"
+    assert (runs.rows[-1].cells[3].text, runs.rows[-1].cells[3].tone) == ("terminé", "ok")  # les mots de la page Épisodes
     assert runs.rows[-1].cells[10].params == (("onglet", "prompt"),)
     decisions = tables(tabs["decisions"])["Ses décisions (1 en vigueur)"]
     assert decisions.rows[0].cells[0] == "D1" and decisions.rows[0].cells[2].text == "Python"
+    # « Décisions », sur la fiche d'un but, ce sont les pesées de l'arbitre : celles d'un projet se disent techniques,
+    # comme sa vue de section ; la clé de l'onglet reste « decisions » (la fiche dessinée et les liens la lisent)
+    assert decisions_title == "Décisions techniques"
     files = tables(tabs["fichiers"])["Le dossier du projet"]
     assert [r.cells[0].text for r in files.rows] == ["JOURNAL.md"]
     git = tabs["git"]
@@ -239,6 +246,39 @@ def test_every_tab_reads_a_project_that_lived_and_the_forms_stay_in_their_tabs(t
     assert any("ws_write" in r[2].text for r in tools.rows)
     carnet = tabs["carnet"]
     assert "objectif n° 1 ajouté" in flat(carnet) and "attend ton accord" in flat(carnet)
+
+
+def test_the_next_run_says_when_then_why_not_sooner(tmp_path):
+    """La prochaine exécution datée se dit comme la prochaine séance d'un but : la date, puis la raison entre
+    parenthèses — son agenda la fixe plus tard, ou sa plage de travail n'est pas ouverte —, jamais « (pas encore) ».
+    La raison est un code de la faculté ; chacune a ses mots à la console."""
+    async def scenario(kernel, llm):
+        later = await create(kernel, "p1", title="Le bilan", objectives="Écrire le bilan", mode="plain",
+                             schedule="cron:0 9 * * *")  # son agenda : demain à 9 h
+        outside = await create(kernel, "p2", title="Le module", objectives="Écrire le module", mode="plain",
+                               start="3:00", end="4:00")  # hors de sa plage : rien ne part tout seul
+        frame = kernel.mind.frame()
+        s = frame.state("projects")
+        return {pid: (next_run_at(s.projects[pid], s, frame), frame.now,
+                      field(await tab(kernel, "apercu", str(pid)), "quand")) for pid in (later, outside)}, later, outside
+
+    out, later, outside = live(tmp_path, scenario)
+    at, now, said = out[later]
+    assert at > now and said == f"{at} (son agenda ou l'espacement des exécutions la fixe plus tard)"
+    at, now, said = out[outside]
+    assert at > now and said == f"{at} (hors de sa plage de travail)"
+    assert set(WHY_WORDS) == set(Why)  # chaque raison a ses mots
+
+
+def test_who_asked_for_a_project_is_said_by_a_cleaned_name_and_by_the_key_without_one():
+    """« demandé par » et les auteurs des décisions disent le prénom par la règle commune (``identity.person_name``) :
+    blancs repliés, guillemets retirés ; sans prénom, la clé (au survol ou dans le lien)."""
+    def frame(name):
+        return SimpleNamespace(get=lambda key: SimpleNamespace(name=name))
+
+    assert _who(frame(' "Léa"\t\t Dupont '), "user_1") == "Léa Dupont"
+    assert _who(frame(""), "user_1") == "user_1"
+    assert _who(frame("Léa"), None) == "—"
 
 
 # ── Modifier, ses outils ──────────────────────────────────────────────────

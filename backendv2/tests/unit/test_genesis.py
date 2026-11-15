@@ -371,7 +371,8 @@ def test_release_held_does_nothing_before_the_kernel_lives(tmp_path):
 
 def test_her_first_name_alone_is_her_unless_someone_else_bears_it():
     """« Léa » dans une extraction : elle, si personne de connu ne s'appelle ainsi ; sinon, cette personne."""
-    from mika.faculties.memory.extraction import People, Speaker  # noqa: PLC0415
+    from mika.faculties.memory.conversation import Speaker  # noqa: PLC0415
+    from mika.faculties.memory.speakers import People  # noqa: PLC0415
 
     alone = People.of((Speaker("P1", "user_2", "Alice"),), {}, her="Léa Morel")
     assert alone.one("Léa") is None and alone.one("Léa Morel") is None and alone.one("moi") is None

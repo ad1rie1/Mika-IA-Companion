@@ -34,10 +34,11 @@ from mika.faculties.projects.faculty import (
     REMOTE_REQUESTED,
     RESTORED,
     ProjectsParams,
+    objectives_of,
+    opened,
     params,
 )
 from mika.faculties.projects.prompt import _live_section
-from mika.faculties.projects.tools import objectives_of, opened
 from mika.kernel.clock import HOUR, MINUTE, US
 from mika.kernel.events import Content, Origin
 from mika.kernel.faculty import ToolResult

@@ -14,7 +14,7 @@ from starlette.requests import Request
 
 from mika.contracts import runtime as rt
 from mika.inspector import names, render
-from mika.inspector.names import KINDS, OUTCOMES
+from mika.inspector.names import KINDS
 from mika.inspector.pages.home import episode_row
 from mika.inspector.pages.tabs import TABS
 from mika.kernel.clock import DAY, US
@@ -42,6 +42,7 @@ from mika.kernel.inspect import (
     read_params,
 )
 from mika.runtime.health import PROCESS_FAILURES_MAX
+from mika.vocab.episodes import OUTCOME_WORDS, outcome_words
 
 EPISODES_PAGE = 50
 #: un filtre lit le journal par lots de tant d'épisodes, au plus tant de lots par page
@@ -364,7 +365,7 @@ def selection_detail(ui: Any, d: Any, fired: frozenset[str]) -> list[Any]:
 
 EPISODE_PARAMS = (
     Param("sorte", "sorte", "select", tuple(KINDS.items())),
-    Param("issue", "issue", "select", tuple((k, v[0]) for k, v in OUTCOMES.items())),
+    Param("issue", "issue", "select", tuple((k, v[0]) for k, v in OUTCOME_WORDS.items())),
     Param("cible", "vers", "search", placeholder="un nom (Adrien) ou un moyen de communication"),
 )
 
@@ -428,7 +429,7 @@ async def episodes(ui: Any, request: Request) -> Any:
                   kind="bars", title="Épisodes par jour (14 jours)", table=False, since=now - 14 * DAY,
                   until=now) if per_day else None
     counts = Counter(e.data.outcome for e in recent if now - e.at <= DAY)
-    stats = Stats(tuple(Stat(names.outcome(k)[0], n, "dernières 24 h", names.outcome(k)[1])
+    stats = Stats(tuple(Stat(outcome_words(k)[0], n, "dernières 24 h", outcome_words(k)[1])
                         for k, n in counts.most_common()))
     out: list[Any] = [Note(n, "warn") for n in notes]
     if values["cible"] and targets == {values["cible"]} and not ui.names.handles_named(values["cible"],

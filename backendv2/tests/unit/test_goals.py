@@ -31,7 +31,8 @@ from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.faculties.expression import ExpressionParams
-from mika.faculties.goals.faculty import GoalsParams, GoalsState
+from mika.faculties.goals.faculty import Goal, GoalsParams, GoalsState, _set
+from mika.faculties.goals.prompt import _step_exchange, _step_life
 from mika.faculties.goals.tend import Seed, inherited, jitter_min
 from mika.kernel import schedule
 from mika.kernel.clock import DAY, HOUR, MINUTE, US, local
@@ -827,3 +828,16 @@ def test_what_she_tells_herself_from_a_signal_is_not_something_to_look_into():
     frame = SimpleNamespace(now=DAY, get=lambda key: thoughts if key == attention_c.THOUGHTS else None)
     assert [t.id for t in Seed()._thoughts(GoalsState(), frame, GoalsParams())] == [2]
 
+
+def test_a_name_enters_the_instructions_of_a_session_cleaned():
+    """Le prénom entre dans la consigne d'une séance par la règle commune (``identity.person_name``) : blancs
+    repliés, guillemets retirés. Un nom est une donnée citée : il ne peut ni ouvrir une ligne ni fermer la citation
+    qui l'entoure. L'identité nettoie déjà ce qu'elle reçoit ; la règle tient pour toute vue qui arrive au prompt."""
+    goal = Goal(id=1, kind=goals_c.EXPLORATION, authority=goals_c.SELF, title_ref="t", opened_at=0, owner="user_1")
+    s = _set(GoalsState(), goal)
+    frame = SimpleNamespace(episode=SimpleNamespace(target=goal_target(1), attrs={}),
+                            get=lambda key: SimpleNamespace(name="  « Léa »\n\n  Dupont  "))
+    enrich = {"goals_context": {"life": [("Elle déménage", 0)], "exchange": [(True, "Je déménage")]}}
+    assert _step_life(s, frame, enrich).content.startswith(phrase("goals.life.head", name="Léa Dupont"))
+    assert _step_exchange(s, frame, enrich).content == phrase("goals.exchange.theirs", who="Léa Dupont",
+                                                             text="Je déménage")

@@ -22,22 +22,16 @@ from mika.adapters.vectors import HashEmbedder, SqliteVectorIndex
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as mc
 from mika.contracts import social as sc
-from mika.faculties.memory import consolidation as cons
+from mika.faculties.memory import kept
 from mika.faculties.memory.archive import LifeArchive
-from mika.faculties.memory.extraction import (
-    Conversation,
-    Extraction,
-    Line,
-    People,
-    Speaker,
-    XCroyance,
-    XEvenement,
-    mention_scope,
-)
+from mika.faculties.memory.conversation import Conversation, Line, Speaker
+from mika.faculties.memory.extraction import Extraction, XCroyance, XEvenement
 from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState
 from mika.faculties.memory.projections import Chunks, Items
-from mika.faculties.memory.recall import _body, _recall, named_people
+from mika.faculties.memory.recall import _recall, named_people
+from mika.faculties.memory.recall_sections import _body
 from mika.faculties.memory.salience import admissible
+from mika.faculties.memory.speakers import People, mention_scope
 from mika.faculties.memory.tools import SearchArgs, memory_search
 from mika.faculties.social.archive import Relations, recall_relations
 from mika.faculties.social.faculty import SOCIAL, SocialState, _knit, _relations_recalled, _ties
@@ -149,7 +143,7 @@ async def drafts(db: Store, ex: Extraction, lines: tuple[Line, ...], *, people: 
                  speakers=ALICE, key: str = "private:user_2") -> list:
     conv = Conversation(key, speakers, lines)
     people = people or People.of(speakers, {}, "Mika", scope=conv.key)
-    return await cons._drafts(ex, FRAME, MemoryState(), db, conv, people, [], [], None, MemoryParams(),
+    return await kept._drafts(ex, FRAME, MemoryState(), db, conv, people, [], [], None, MemoryParams(),
                               "audit")
 
 

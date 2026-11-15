@@ -1,14 +1,20 @@
-"""Types d'épisodes, rôles de modèle, étiquettes de sections.
+"""Types d'épisodes, rôles de modèle, étiquettes de sections, et l'issue d'un épisode en mots.
 
 Un **rôle voix** est un rôle où c'est elle qui écrit (répondre, prendre la
 parole, travailler, murmurer, écrire son journal, rêver, se raconter) : la
 passerelle exige la persona. Les **rôles utilitaires** (extraire, valider,
 décrire une image…) ne parlent pas en son nom.
+
+L'issue d'un épisode (``kernel.episode.Outcome``) se dit ici, une fois, pour
+toute la console : la page Épisodes de l'inspecteur et les onglets d'un but ou
+d'un projet, que les facultés dessinent et qui ne peuvent pas lire l'inspecteur.
 """
 
 from __future__ import annotations
 
 import enum
+
+from mika.kernel.episode import Outcome
 
 
 class Kind(enum.StrEnum):
@@ -42,6 +48,27 @@ WORKING = frozenset({Kind.STEP, Kind.WORK, Kind.JOB, Kind.WAKE, Kind.WAKE_JOB})
 PROJECT_KINDS = frozenset({Kind.WORK, Kind.JOB})
 #: Les réveils par API sans projet (ses deux modes, ADR 0068) : leurs outils sont ceux que le réveil a choisis.
 WAKE_KINDS = frozenset({Kind.WAKE, Kind.WAKE_JOB})
+
+
+# ── L'issue d'un épisode, en mots (la console) ──────────────────────────
+
+#: comment un épisode s'est terminé : (libellé, ton) ; une issue qui n'y est pas se dit telle quelle, sans ton
+OUTCOME_WORDS: dict[str, tuple[str, str]] = {
+    Outcome.DONE: ("terminé", "ok"), Outcome.ABSTAINED: ("s'est tue", "muted"),
+    Outcome.SUPERSEDED: ("supplanté", "warn"), Outcome.TIMEOUT: ("trop long", "danger"),
+    Outcome.FAILED: ("échec", "danger"), Outcome.PREEMPTED: ("a cédé la place", "warn"),
+    Outcome.INTERRUPTED: ("interrompu par un arrêt", "warn"), Outcome.CANCELLED: ("annulé", "muted"),
+}
+#: les sortes d'épisodes qui, menées à bien, ont parlé (les autres ont travaillé)
+SPEAKING_KINDS = frozenset({Kind.REPLY, Kind.INITIATIVE, Kind.MURMUR})
+
+
+def outcome_words(value: str | None, kind: str | None = None) -> tuple[str, str]:
+    """L'issue d'un épisode, (libellé, ton) ; ``kind`` donné, une parole menée à bien se dit « a parlé »."""
+    if value == Outcome.DONE and kind in SPEAKING_KINDS:
+        return "a parlé", "ok"
+    return OUTCOME_WORDS.get(str(value or ""), (str(value or "—"), ""))
+
 
 #: La cible d'un épisode qui ne s'adresse à personne mais porte sur un but
 #: (un pas de travail) : ``goal:12``. Personne ne l'écoute.

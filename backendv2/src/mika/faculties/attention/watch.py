@@ -50,6 +50,7 @@ from mika.kernel.codec import h64
 from mika.kernel.events import Content, Draft
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
+from mika.kernel.text import clipped
 from mika.vocab.affect import Emotion
 from mika.vocab.days import when_fr
 from mika.vocab.knowledge import Known, knowns
@@ -72,11 +73,6 @@ def _known(store: Any, ids: tuple[int, ...]) -> dict[int, Known]:
     return {k.id: k for k in knowns(rows, memory_c.KNOWN_COLUMNS)}
 
 
-def _clip(text: str, n: int = EXCERPT) -> str:
-    text = " ".join(text.split())
-    return text if len(text) <= n else text[: n - 1].rstrip() + "…"
-
-
 def _name(frame: Frame, person: str) -> str:
     return frame.get(identity_c.IDENTITY(person)).name or phrase("attention.thought.someone")
 
@@ -84,10 +80,13 @@ def _name(frame: Frame, person: str) -> str:
 #: l'échange d'où naît une pensée : dans les heures qui précèdent, depuis le dernier silence de trois quarts d'heure
 GIST_LOOKBACK = 3 * HOUR
 GIST_GAP = 45 * MINUTE
-#: une réponse de si peu de mots (« ouais », « bof », « je sais pas ») : on répond à peine
-CURT_WORDS = 4
+#: un message de plus de mots que cela (comptés entre les blancs) dit quelque chose : l'échange où il se trouve n'est
+#: pas répondre à peine, même entouré de réponses brèves (« je crois que j'ai tout raté à mon entretien »)
+LONG_WORDS = 8
 #: ce qu'on cite de ses autres messages, avec le moment marquant
 ALSO_SHOWN = 2
+#: … seulement ceux qui disent plus que quelques mots (au-delà de ce nombre, comptés entre les blancs)
+ALSO_WORDS = 4
 
 
 def gist(frame: Frame, store: Any, q: Pending) -> tuple[str, list[tuple[int, str]]]:
@@ -118,19 +117,20 @@ def gist(frame: Frame, store: Any, q: Pending) -> tuple[str, list[tuple[int, str
     return said, theirs if any(i == q.source for i, _ in theirs) else [(q.source, said)]
 
 
-def curt(texts: list[str]) -> bool:
-    """La personne répondait à peine : au moins trois messages, presque tous de quelques mots, aucun vraiment
-    long (« je crois que j'ai tout raté à mon entretien » n'est pas répondre à peine)."""
-    words = [len(t.split()) for t in texts]
-    short = sum(1 for n in words if n <= CURT_WORDS)
-    return len(words) >= 3 and 3 * short >= 2 * len(words) and max(words) <= 2 * CURT_WORDS
+def mostly_curt(texts: list[str]) -> bool:
+    """La personne répondait à peine, sur l'échange passé d'où naît la pensée (tous ses messages de l'échange,
+    ``gist``) : au moins trois messages, les deux tiers brefs (``others_c.few_words`` : « ouais », « bof », « je sais
+    pas » — un bonjour ou une question n'en est pas un), aucun au-delà de ``LONG_WORDS`` mots. La même règle d'un
+    message bref que la conversation en cours, sur une autre fenêtre (``others/faculty.py::curt_run``)."""
+    return (len(texts) >= 3 and 3 * sum(1 for t in texts if others_c.few_words(t)) >= 2 * len(texts)
+            and max(len(t.split()) for t in texts) <= LONG_WORDS)
 
 
 def _also(lines: list[tuple[int, str]]) -> str:
     """Ses autres messages de l'échange, les plus nourris (dans l'ordre où ils sont venus) : la matière autour."""
     fuller = sorted(sorted(lines, key=lambda x: (-len(x[1].split()), x[0]))[:ALSO_SHOWN])
-    fuller = [x for x in fuller if len(x[1].split()) > CURT_WORDS]
-    return phrase("attention.thought.also", quotes=", ".join(f"« {_clip(t, 120)} »" for _i, t in fuller)) if fuller \
+    fuller = [x for x in fuller if len(x[1].split()) > ALSO_WORDS]
+    return phrase("attention.thought.also", quotes=", ".join(f"« {clipped(t, 120)} »" for _i, t in fuller)) if fuller \
         else ""
 
 
@@ -141,16 +141,11 @@ def ripe(q: Pending, frame: Frame, p: Any) -> int:
         return NEVER  # une révision d'il y a longtemps (rejouée par une reconstruction) ne naît plus
     if q.origin != c.EXCHANGE or not q.person:
         return q.at
-    return max(q.at, _last_from(frame, q.person)) + p.exchange_settle_us
+    return max(q.at, identity_c.last_heard(frame, q.person)) + p.exchange_settle_us
 
 
 #: jamais (une pensée en attente qui ne naîtra plus)
 NEVER = 2**62
-
-
-def _last_from(frame: Frame, person: str) -> int:
-    handles = frame.get(identity_c.HANDLES(person)) or (person,)
-    return max(frame.get(transcript_c.LAST_FROM(h)) for h in handles)
 
 
 def met(state: AttentionState, frame: Frame) -> list[str]:
@@ -160,9 +155,9 @@ def met(state: AttentionState, frame: Frame) -> list[str]:
     une réponse. Une promesse ne se comble pas quand la personne écrit : quand
     elle est tenue (``memory``)."""
     out = [k for k, x in state.expectations.items()
-           if x.kind in (c.REPLY, c.RETURN) and _last_from(frame, x.person) > x.since]
+           if x.kind in (c.REPLY, c.RETURN) and identity_c.last_heard(frame, x.person) > x.since]
     out += [f"late:{person}" for person, late in state.late.items()
-            if late.since < _last_from(frame, person) <= late.until]
+            if late.since < identity_c.last_heard(frame, person) <= late.until]
     return out
 
 
@@ -170,7 +165,7 @@ def absence_of(x: Expectation, frame: Frame) -> float | None:
     """Ce qu'a duré l'absence de quelqu'un qui revient, en multiples du rythme de leur relation : de son dernier
     message quand l'attente est née à celui qui la ramène — constaté au moment où elle revient. ``None`` quand on
     ne le sait pas (elle n'avait jamais écrit)."""
-    back = _last_from(frame, x.person)
+    back = identity_c.last_heard(frame, x.person)
     if not x.last_in or x.rhythm_days <= 0 or back <= x.last_in:
         return None
     return round((back - x.last_in) / (max(0.5, x.rhythm_days) * DAY), 3)
@@ -277,11 +272,11 @@ def reminiscence(state: AttentionState, frame: Frame, store: Any, p: Any) -> Dra
     if anniversary := [k for k in pool if years[k.id]]:
         k = anniversary[0]
         ago = family("attention.thought.reminisce.years")[{1: "one", 2: "two", 3: "three"}.get(years[k.id], "many")]
-        text = phrase("attention.thought.reminisce.anniversary", years=ago, text=_clip(k.text, 200))
+        text = phrase("attention.thought.reminisce.anniversary", years=ago, text=clipped(k.text, 200))
         weight = 1.0
     elif cued := [k for k in pool if cue & stems(k.text)]:
         k = cued[0]
-        text = phrase("attention.thought.reminisce.cued", what=doing.label, text=_clip(k.text, 200))
+        text = phrase("attention.thought.reminisce.cued", what=doing.label, text=clipped(k.text, 200))
         weight = 1.0
     else:
         options = pool[:REMINISCE_UNCUED]
@@ -293,7 +288,7 @@ def reminiscence(state: AttentionState, frame: Frame, store: Any, p: Any) -> Dra
             if pick <= 0:
                 k = option
                 break
-        text = phrase("attention.thought.reminisce.plain", text=_clip(k.text, 200))
+        text = phrase("attention.thought.reminisce.plain", text=clipped(k.text, 200))
         weight = 0.5 + 0.5 * min(1.0, max(0.0, k.importance))
     emotion = Emotion(k.emotion) if k.emotion in {e.value for e in Emotion} else Emotion.THINKING
     return c.THOUGHT_BORN.draft(text=Content.of(text, level=k.sensitivity), emotion=emotion.value,
@@ -410,7 +405,7 @@ class Watch:
             return self._broken_promise(q, frame, store, mark)
         if q.origin == c.BLOCKED:
             title = store.content([q.ref]).get(q.ref) if store is not None and q.ref else None
-            text = phrase("attention.thought.blocked", title=_clip(title, 200)) if title else \
+            text = phrase("attention.thought.blocked", title=clipped(title, 200)) if title else \
                 phrase("attention.thought.blocked_vague")
             return c.THOUGHT_BORN.draft(text=Content.of(text, level=q.sensitivity), emotion=q.emotion,
                                         intensity=q.intensity, origin=q.origin, about=q.about,
@@ -422,11 +417,11 @@ class Watch:
             if not old or not new:
                 text = phrase("attention.thought.revision_vague")
             elif new.about_self:
-                text = phrase("attention.thought.changed_mind", old=_clip(old.text, 120), new=_clip(new.text, 120))
+                text = phrase("attention.thought.changed_mind", old=clipped(old.text, 120), new=clipped(new.text, 120))
             elif new.id < old.id:
-                text = phrase("attention.thought.revision_back", old=_clip(old.text, 120), new=_clip(new.text, 120))
+                text = phrase("attention.thought.revision_back", old=clipped(old.text, 120), new=clipped(new.text, 120))
             else:
-                text = phrase("attention.thought.revision", old=_clip(old.text, 120), new=_clip(new.text, 120))
+                text = phrase("attention.thought.revision", old=clipped(old.text, 120), new=clipped(new.text, 120))
             about: tuple[str, ...] = tuple(sorted({*old.about, *new.about})) if old and new else ()
             sens = max((x.sensitivity for x in (old, new) if x), default=int(Sensitivity.PERSONAL))
             # les deux croyances y sont, mot pour mot : elle ne se redit que là où l'une et l'autre peuvent se dire
@@ -460,17 +455,17 @@ class Watch:
                                         dedupe_key=mark)
         said, theirs = gist(frame, store, q) if store is not None else ("", [])
         lines = [x for x in theirs if x[0] != q.source]
-        if said and curt([t for _i, t in theirs]):
+        if said and mostly_curt([t for _i, t in theirs]):
             # ce que l'échange voulait dire, pas une réplique isolée (sonde réelle du 2026-10-03 : « Sam m'a dit :
             # « laisse tomber » », d'où une réflexion qui cherchait ce qu'il fallait laisser tomber — il répondait à
             # peine, sans envie de parler)
             text = phrase("attention.thought.curt", who=who,
-                          quotes=", ".join(f"« {_clip(t, 90)} »" for _i, t in theirs[-6:]))
+                          quotes=", ".join(f"« {clipped(t, 90)} »" for _i, t in theirs[-6:]))
         elif q.origin == c.CONCERN:
-            text = (phrase("attention.thought.concern", who=who, said=_clip(said)) if said else
+            text = (phrase("attention.thought.concern", who=who, said=clipped(said, EXCERPT)) if said else
                     phrase("attention.thought.concern_hidden", who=who)) + _also(lines)
         else:
-            text = (phrase("attention.thought.said", who=who, said=_clip(said)) if said else
+            text = (phrase("attention.thought.said", who=who, said=clipped(said, EXCERPT)) if said else
                     phrase("attention.thought.exchange_hidden", who=who)) + _also(lines)
         sens = int(Sensitivity.ANODYNE if q.public else Sensitivity.PERSONAL)
         return c.THOUGHT_BORN.draft(text=Content.of(text, level=sens), emotion=q.emotion, intensity=q.intensity,
@@ -484,7 +479,7 @@ class Watch:
         promise = _known(store, (q.source,)).get(q.source) if q.source is not None else None
         who = _name(frame, q.person) if q.person else phrase("attention.thought.someone")
         sens = max(int(Sensitivity.ANODYNE), promise.sensitivity) if promise else int(Sensitivity.PERSONAL)
-        text = (phrase("attention.thought.promise", who=who, text=_clip(promise.text, 200))
+        text = (phrase("attention.thought.promise", who=who, text=clipped(promise.text, 200))
                 if promise else phrase("attention.thought.promise_vague", who=who))
         return c.THOUGHT_BORN.draft(text=Content.of(text, level=sens), emotion=q.emotion, intensity=q.intensity,
                                     origin=q.origin, about=(q.person,) if q.person else (), sensitivity=sens,
@@ -507,7 +502,7 @@ class Watch:
             if text and x.pertinence * weight >= p.signal_thought_from:
                 level = x.sensitivity
                 out.append(c.THOUGHT_BORN.draft(
-                    text=Content.of(_clip(text, 240), level=level), emotion=x.emotion or Emotion.CURIOUS.value,
+                    text=Content.of(clipped(text, 240), level=level), emotion=x.emotion or Emotion.CURIOUS.value,
                     intensity=round(min(p.signal_thought_max, x.pertinence * weight * p.signal_thought_factor), 3),
                     origin=c.SIGNAL, about=x.about, sensitivity=level, source=x.seq, bundle=x.bundle,
                     foreign=x.foreign, dedupe_key=f"pensée:signal:{x.seq}"))

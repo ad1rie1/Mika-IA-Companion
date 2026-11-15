@@ -29,6 +29,7 @@ pull requests ouvertes (ADR 0183). Il ne lui écrit rien.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
@@ -76,6 +77,33 @@ def describe(r: RunResult, limit: int = 6000) -> str:
     if r.stderr.strip():
         parts.append("erreurs :\n" + r.stderr[-limit:])
     return "\n".join(parts)
+
+
+#: le statut d'une commande, relu par ``run_status`` : sortie avec un code, délai dépassé, refusée
+EXITED, TIMED_OUT, REFUSED = "code", "timeout", "refused"
+#: ce que l'atelier dit d'une commande finie (``RunResult.summary``) : « … — code 0 (12 ms) »
+_CODE = re.compile(r"— code (-?\d+) \(\d+ ms\)")
+#: là où commence ce que la commande a écrit (``describe``)
+_WRITTEN = re.compile(r"\n(?:sortie|erreurs) :\n")
+
+
+def run_status(text: str) -> tuple[str, int | None]:
+    """Le statut d'une commande et son code de sortie, relus dans ce que ``RunResult.summary`` et ``describe``
+    écrivent juste au-dessus : ``(EXITED, N)`` pour le dernier « — code N (… ms) », sinon ``(TIMED_OUT, None)``
+    pour « délai dépassé », sinon ``(REFUSED, None)`` pour un texte qui commence par « refusé » ou « Refusé » (le
+    refus de ``summary``, de ``describe``, et ceux qu'une capacité écrit elle-même) ; ``("", None)`` pour un autre
+    texte. Seule compte la tête, avant ce que la commande a écrit (« sortie : », « erreurs : ») : une sortie ne
+    contrefait pas le code. Une commande peut tenir sur plusieurs lignes. Les textes déjà gardés au journal se
+    relisent ainsi : changer ce que ``summary`` écrit, c'est changer ce qu'on lit ici."""
+    head = _WRITTEN.split(text, maxsplit=1)[0]
+    codes = _CODE.findall(head)
+    if codes:
+        return EXITED, int(codes[-1])
+    if "délai dépassé" in head:
+        return TIMED_OUT, None
+    if head.startswith(("Refusé", "refusé")):
+        return REFUSED, None
+    return "", None
 
 
 def argv_lines(argv: Sequence[str]) -> str:

@@ -355,7 +355,8 @@ def test_the_same_kind_of_proof_counts_once():
     faite en public (plancher nul) n'atteint pas la barre en insistant."""
     from types import SimpleNamespace
 
-    from mika.faculties.identity import Claim, Handle, _apply
+    from mika.faculties.identity import Claim, Handle
+    from mika.faculties.identity.faculty import _apply
 
     h = Handle(channel="external", trust=privacy.ChannelTrust.ACCOUNT, first_seen=0,
                claim=Claim("Alice", "user_1", 0.1, 0, ("self_declared",)))

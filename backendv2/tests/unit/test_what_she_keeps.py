@@ -25,7 +25,7 @@ import pytest
 
 from mika.contracts import memory as memory_c
 from mika.contracts import social as social_c
-from mika.faculties.memory import extraction as x
+from mika.faculties.memory import cues
 from mika.faculties.memory.recall import about_us
 from mika.faculties.social.profile import grounded, note_worthy, tastes
 from mika.kernel.clock import DAY, HOUR, MINUTE, US
@@ -126,7 +126,7 @@ def events(kernel, name):
     ("Alice habite à Lyon", "J'habite à Lyon maintenant", False),
 ])
 def test_what_copies_a_line(text, line, copy):
-    assert x.copied(text, line) is copy
+    assert cues.copied(text, line) is copy
 
 
 @pytest.mark.parametrize("text, is_banal", [
@@ -153,7 +153,7 @@ def test_what_is_a_banality(text, is_banal):
     ("j'ai revu Mikasa dans l'anime", []),  # pas un salut
 ])
 def test_what_is_a_nickname_for_her(text, nicks):
-    assert x.nicknames(text, "Mika") == nicks
+    assert cues.nicknames(text, "Mika") == nicks
 
 
 @pytest.mark.parametrize("text, asked", [
@@ -176,7 +176,7 @@ def test_what_asks_about_what_belongs_to_them(text, asked):
     ("son rendez-vous chez le dentiste", "son rendez-vous chez le véto", False),
 ])
 def test_one_moment_said_two_ways(a, b, same):
-    assert x.same_moment(a, b, ["Sam", "Mika"]) is same
+    assert cues.same_moment(a, b, ["Sam", "Mika"]) is same
 
 
 # ── Constat 1 : une réplique recopiée n'est pas un souvenir ───────────────

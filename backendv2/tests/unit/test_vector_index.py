@@ -8,7 +8,7 @@ import pytest
 
 from mika.adapters.vectors import HashEmbedder, SqliteVectorIndex
 from mika.contracts import memory as mc
-from mika.faculties.memory.consolidation import Index
+from mika.faculties.memory.index import Index
 from mika.faculties.memory.projections import Chunks, Items
 from mika.kernel.events import Content
 from mika.ports.vectors import VectorItem

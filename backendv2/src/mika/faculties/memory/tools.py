@@ -81,7 +81,7 @@ async def memory_search(args: SearchArgs, ctx: Any) -> str:
         if person and ep is not None and is_identifiable(person) else ()
     emotions = [e for e, _x in facets(args.ressenti)]
     if emotions:
-        found += await _by_feeling(args, emotions, ctx, person, own, wanted, memo, found)
+        found += await _by_feeling(args, emotions, ctx, person, wanted, memo, found)
     seen: set[int] = set()
     k = SEARCH_FIRST
     while not emotions:
@@ -117,8 +117,8 @@ async def memory_search(args: SearchArgs, ctx: Any) -> str:
 FEELING_CANDIDATES = 200
 
 
-async def _by_feeling(args: SearchArgs, emotions: list[str], ctx: Any, person: str | None, own: tuple[str, ...],
-                      wanted: set[str], memo: dict[str, str], found: list[Any]) -> list[Any]:
+async def _by_feeling(args: SearchArgs, emotions: list[str], ctx: Any, person: str | None, wanted: set[str],
+                      memo: dict[str, str], found: list[Any]) -> list[Any]:
     """Ce qui lui fait (ou fait à la personne concernée) ressentir ces émotions, le plus fort d'abord, la question
     départageant à intensité proche (ADR 0083) : « qu'est-ce qui t'énerve ? » — c'est le modèle qui choisit de
     chercher par ressenti, et lesquels ; rien ici ne devine une émotion dans les mots. Le verdict de chaque élément,

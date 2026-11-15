@@ -25,7 +25,7 @@ from mika.contracts import rss as rss_c
 from mika.contracts import self_ as c
 from mika.contracts import social as social_c
 from mika.faculties.self.faculty import SELF, SelfState, day_of, lived_day_of
-from mika.faculties.self.knobs import SelfParams, params
+from mika.faculties.self.params import SelfParams, params
 from mika.faculties.self.records import Interest, Lead
 from mika.kernel.builtin import SUBJECT_FORGOTTEN
 from mika.kernel.events import Content

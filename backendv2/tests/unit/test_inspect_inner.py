@@ -27,8 +27,6 @@ from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import rss as rss_c
 from mika.contracts import self_ as self_c
-from mika.faculties.attention import inspect as attention_inspect
-from mika.faculties.memory import inspect as memory_inspect
 from mika.kernel.clock import DAY, US
 from mika.kernel.events import Content, Origin
 from mika.kernel.inspect import (
@@ -257,8 +255,11 @@ def test_on_a_fresh_kernel_every_view_reads_and_says_there_is_nothing(tmp_path):
 
     assert table(shown[("memory", "souvenirs")], "Ses souvenirs").rows == ()
     assert table(shown[("memory", "souvenirs")], "Ses souvenirs").pager.total == 0
-    assert fields(shown[("memory", "consolidation")], "La relecture")["dernière relecture"] == "jamais"
+    state = fields(shown[("memory", "consolidation")], "La consolidation")
+    assert state["dernière relecture"] == "jamais" and state["dernière nuit relue"] == "—"
+    assert state["sa dernière lecture"] == "aucune"
     assert "pas encore de relecture" in text_of(shown[("memory", "consolidation")])
+    assert "pas encore de nuit relue" in text_of(shown[("memory", "consolidation")])
     assert "rien ne lui trotte dans la tête" in text_of(shown[("attention", "pensees")])
     assert "rien de remarqué" in text_of(shown[("attention", "remarque")])
     assert "elle n'attend rien de personne" in text_of(shown[("attention", "attentes")])
@@ -374,7 +375,7 @@ def test_after_a_conversation_she_shows_what_she_kept_and_forgetting_shows(tmp_p
     assert column(belief, "origine")[0].startswith("on le lui a dit") and column(belief, "statut") == ["active"]
     assert column(belief, "sensibilité") == ["personnel"] and isinstance(raw_column(belief, "confiance")[0], Meter)
 
-    relecture = fields(before["consolidation"], "La relecture")
+    relecture = fields(before["consolidation"], "La consolidation")
     assert relecture["dernière relecture"] != "jamais" and relecture["fenêtres avec un passage différé"] == "0"
     assert relecture["relu jusqu'au message"].startswith("n° ")
     runs = table(before["consolidation"], "Les dernières relectures")
@@ -505,7 +506,6 @@ def test_person_tabs_are_placed_on_the_person_fiche(tmp_path):
     assert [(o, n, order) for o, n, order, _ in mine] == [("memory", "memoire", 50),
                                                           ("attention", "pensees_personne", 80)]
     assert not any(hidden for *_, hidden in mine)
-    assert memory_inspect.PERSON_KIND == attention_inspect.PERSON_KIND == "person"
 
 
 # ── L'estime, son récit, ses nuits ────────────────────────────────────────

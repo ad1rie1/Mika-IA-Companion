@@ -32,14 +32,14 @@ from mika.kernel.inspect import (
     plural,
 )
 from mika.runtime import health
-from mika.vocab.episodes import Kind
+from mika.vocab.episodes import Kind, outcome_words
 
 #: les derniers épisodes, par page
 EPISODES_PAGE = 20
 
 
 def outcome_badge(outcome: str, kind: str | None = None) -> Badge:
-    text, tone = names.outcome(outcome, kind)
+    text, tone = outcome_words(outcome, kind)
     return Badge(text, tone)
 
 
@@ -199,7 +199,7 @@ async def today(ui: Any, request: Request) -> list[Any]:
     cards = [Stat("Épisodes", len(day), " · ".join(f"{names.kind(k)} {n}" for k, n in by_kind.most_common(4))
                   or "aucun")]
     for outcome, n in by_outcome.most_common():
-        text, tone = names.outcome(outcome)
+        text, tone = outcome_words(outcome)
         cards.append(Stat(text.capitalize(), n, "depuis minuit", tone if tone in ("warn", "danger") else ""))
     calls = ui.deps.calls
     if calls is not None:

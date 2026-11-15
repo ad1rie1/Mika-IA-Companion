@@ -10,7 +10,8 @@ from __future__ import annotations
 
 from mika.contracts import social as social_c
 from mika.faculties.memory.faculty import MemoryState
-from mika.faculties.memory.recall import Recall, _acquainted, _recall, acquainted
+from mika.faculties.memory.recall import Recall, _recall, acquainted
+from mika.faculties.memory.recall_sections import _acquainted
 from tests.unit.test_knowledge_coherence import NAMES, Frame, Store, ask
 
 ALICE, BOB, CAROL, INES = "user_2", "user_3", "user_4", "user_5"
@@ -62,5 +63,5 @@ async def test_the_recall_finds_her_without_any_note_about_her():
     frame.episode.target = BOB
     recall = await _recall(MemoryState(), frame, {"store": db, "vectors": None})
     assert recall.acquainted == [("Carol", 1, social_c.FRIEND)]
-    assert recall.beliefs == [] and recall.souvenirs == []  # rien d'elle : seulement qu'elle la connaît
+    assert recall.beliefs == [] and recall.memories == []  # rien d'elle : seulement qu'elle la connaît
     db.conn.close()

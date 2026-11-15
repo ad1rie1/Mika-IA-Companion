@@ -28,8 +28,8 @@ from mika.contracts import memory as memory_c
 from mika.contracts import runtime as rt
 from mika.contracts.transcript import thread_table
 from mika.faculties.memory import consolidation as cons
-from mika.faculties.memory.consolidation import floored
-from mika.faculties.memory.extraction import Conversation, Line, Speaker, render
+from mika.faculties.memory.conversation import Conversation, Line, Speaker, render
+from mika.faculties.memory.kept import floored
 from mika.faculties.memory.night import _disclosure
 from mika.faculties.memory.projections import Chunks
 from mika.faculties.transcript import Thread

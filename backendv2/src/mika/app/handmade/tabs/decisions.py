@@ -44,7 +44,7 @@ from mika.inspector.ui import PREFIX, UI, env
 from mika.kernel.arbitration import sigmoid
 from mika.kernel.clock import DAY, HOUR, US
 from mika.kernel.inspect import Chart, Ref, num_fr
-from mika.vocab.episodes import Kind
+from mika.vocab.episodes import Kind, outcome_words
 
 STYLES = ("handmade/decisions.css",)
 #: entre deux segments de la barre d'une ligne, un jour (en centièmes de sa largeur)
@@ -468,7 +468,7 @@ def running(got: Got) -> Markup:
     ended = ui.inspection.context().events([rt.EPISODE_ENDED], RECENT)
     recent = []
     for e in ended:
-        word, tone = names.outcome(e.data.outcome, e.data.kind)
+        word, tone = outcome_words(e.data.outcome, e.data.kind)
         recent.append({"kind": names.kind(e.data.kind), "who": _who(ui, shown, e.data.target), "outcome": word,
                        "tone": tone, "ago": look.ago(e.at), "when": ui.when(e.at),
                        "detail": names.detail(e.data.detail or e.data.guard or "")[:200],

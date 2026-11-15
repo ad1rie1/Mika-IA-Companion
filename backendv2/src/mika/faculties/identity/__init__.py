@@ -31,16 +31,14 @@ from mika.faculties.identity.faculty import (
     Handle,
     IdentityParams,
     IdentityState,
-    _apply,
     handles_of,
     known_as,
     resolve_target,
     view_of,
 )
 from mika.faculties.identity.prompt import acquaintance, audience_for, describe
-from mika.faculties.identity.reading import _candidates
 
 __all__ = [
-    "IDENTITY", "Claim", "Handle", "IdentityParams", "IdentityState", "_apply", "_candidates", "acquaintance",
-    "audience_for", "describe", "handles_of", "known_as", "resolve_target", "view_of",
+    "IDENTITY", "Claim", "Handle", "IdentityParams", "IdentityState", "acquaintance", "audience_for", "describe",
+    "handles_of", "known_as", "resolve_target", "view_of",
 ]

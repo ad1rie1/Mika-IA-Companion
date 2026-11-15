@@ -8,9 +8,11 @@ due, et raconter ce qu'elle a mené à bout (mode Mika seulement).
   et la plage, jamais les plafonds. En mode Mika, son corps la retient
   pendant qu'elle dort (``body``) ; en mode impersonnel, non.
 - **Raconter** : à qui lui a confié le projet (ou à une propriétaire), à la
-  mesure du lien — jamais d'un appel au modèle. Un point quand le travail
-  s'est posé (rien en cours, rien de dû avant un moment), qui dit d'une fois
-  tout ce qui a été mené à bout depuis le précédent.
+  mesure du lien (``contracts.social.retelling``, l'échelle commune aux buts et
+  aux projets ; l'adresse : ``contracts.identity.reach_now``) — jamais d'un
+  appel au modèle. Un point quand le travail s'est posé (rien en cours, rien
+  de dû avant un moment), qui dit d'une fois tout ce qui a été mené à bout
+  depuis le précédent.
 - **Demander** : un objectif qui bloque ou attend quelque chose, à qui l'a confié
   (ou à une propriétaire) ; un projet à elle arrêté par des pannes, à une
   propriétaire, pour qu'on le relance (ADR 0143).
@@ -22,6 +24,7 @@ due, et raconter ce qu'elle a mené à bout (mode Mika seulement).
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Any
 
 from mika.contracts import body as body_c
@@ -37,23 +40,18 @@ from mika.faculties.projects.faculty import (
     ProjectsState,
     achieved_at,
     busy,
-    daily_cap,
     frame_subject,
-    in_window,
-    next_due,
     nudged,
     outgoing,
     params,
     pass_untold,
-    pick,
     plan_subject,
     rank,
     run_bundles,
-    runs_today,
     stall_subject,
     subject_of,
-    window_opens,
 )
+from mika.faculties.projects.rhythm import daily_cap, in_window, next_due, pick, runs_today, window_opens
 from mika.kernel import schedule
 from mika.kernel.arbitration import Candidate, Modulation, RowView
 from mika.kernel.clock import DAY, HOUR
@@ -62,9 +60,6 @@ from mika.kernel.guards import Guard, floor
 from mika.kernel.state import FrozenDict
 from mika.vocab.episodes import Kind, project_of, project_target
 from mika.vocab.phrasebook import phrase
-
-FULL, SUMMARY, MENTION = "full", "summary", "mention"
-_RANK = {level: i for i, level in enumerate(social_c.CLOSENESS_LEVELS)}
 
 
 def kind_of(p: Project) -> str:
@@ -162,78 +157,79 @@ def _hourly(s: ProjectsState, frame: Frame, row: RowView) -> Modulation:
     return Modulation(veto=c.RUN_CAP) if recent >= pm.runs_per_hour else Modulation()
 
 
-def why_not_now(p: Project, s: ProjectsState, frame: Frame) -> str:
-    """Pourquoi ce projet n'a pas d'exécution maintenant, en mots (vide : il peut en avoir une)."""
+class Why(StrEnum):
+    """Ce qui retient l'exécution d'un projet (``why_not_now``) : un code, que la console dit en mots
+    (``inspect.WHY_WORDS``) et date quand il le faut (``inspect.LATER_WORDS``)."""
+
+    ARCHIVED = "archived"  # il est archivé
+    BUSY = "busy"  # une exécution est en cours
+    OUTGOING = "outgoing"  # une commande, un envoi ou une récupération en route
+    PLAN_PROPOSED = "plan_proposed"  # son plan attend la réponse de qui l'a demandé
+    FRAMING = "framing"  # sa séance de cadrage attend l'espacement ou le plafond du jour
+    NO_OBJECTIVE = "no_objective"  # aucun objectif ouvert
+    ON_DEMAND = "on_demand"  # il avance sur demande
+    NOTHING_DUE = "nothing_due"  # rien n'est dû (``waits`` : une échéance est connue)
+    DAY_CAP = "day_cap"  # le plafond du jour du projet (``cap``)
+    HOUR_CAP = "hour_cap"  # le plafond de l'heure, tous projets confondus (``cap``)
+    ASLEEP = "asleep"  # elle dort (en mode « elle-même »)
+    OUT_OF_WINDOW = "out_of_window"  # hors de sa plage de travail
+    NO_SLOT = "no_slot"  # son agenda ne lui donne plus de créneau
+    LATER = "later"  # son agenda ou l'espacement des exécutions la fixe plus tard
+
+
+def why_not_now(p: Project, s: ProjectsState, frame: Frame) -> tuple[Why, dict[str, Any]] | None:
+    """Pourquoi ce projet n'a pas d'exécution maintenant : la raison et ce que ses mots citent (``None`` : il peut en
+    avoir une). Pas pour un projet en pause : la console dit « à la reprise » avant de la demander
+    (``inspect._next_words``). L'ordre des tests est la règle ; les mots sont à la console."""
     pm = params(frame.env.params_of("projects", frame.root))
     now = frame.now
     tz = frame.env.tz_of(frame.root)
     if p.status == c.ARCHIVED:
-        return "il est archivé"
-    if p.status == c.PAUSED:
-        return f"il est en pause{f' ({p.pause_reason})' if p.pause_reason else ''} : reprends-le"
+        return Why.ARCHIVED, {}
     if busy(s, p.id):
-        return "une exécution est en cours"
+        return Why.BUSY, {}
     if outgoing(p, now):
-        return "une commande, un envoi ou une récupération sont en route : l'atelier les attend"
+        return Why.OUTGOING, {}
     if p.plan_state == c.PROPOSED:
-        return "son plan attend la réponse de qui l'a demandé (« Valider le plan », ou en conversation)"
+        return Why.PLAN_PROPOSED, {}
     if p.plan_state == c.TO_FRAME:
         at = frame_at(p, s, frame)
-        return "" if at is not None and at <= now else "sa séance de cadrage attend l'espacement ou le plafond du jour"
+        return None if at is not None and at <= now else (Why.FRAMING, {})
     if not p.objectives or not any(o.status == c.OPEN for o in p.objectives):
-        return "aucun objectif ouvert : ajoutes-en un"
+        return Why.NO_OBJECTIVE, {}
     if p.schedule == ON_DEMAND and not nudged(p):
-        return "il avance sur demande : « Lancer maintenant »"
+        return Why.ON_DEMAND, {}
     if pick(p, now, pm) is None:
-        due = next_due(p, pm)
-        return "rien n'est dû : ses objectifs constants attendent leur cadence" + \
-            (" ou une attente se termine" if due else "")
+        return Why.NOTHING_DUE, {"waits": next_due(p, pm) is not None}
     if runs_today(p, now) >= daily_cap(p, pm):
-        return f"plafond du jour atteint ({daily_cap(p, pm)} exécutions sur 24 h)"
+        return Why.DAY_CAP, {"cap": daily_cap(p, pm)}
     if sum(1 for t in s.runs_at if now - t < HOUR) >= pm.runs_per_hour:
-        return f"plafond atteint : {pm.runs_per_hour} exécutions par heure, tous projets confondus"
+        return Why.HOUR_CAP, {"cap": pm.runs_per_hour}
     if p.mode == c.PERSONA and frame.get(body_c.SLEEP) is not body_c.SleepPhase.AWAKE:
-        return "elle dort : en mode « elle-même », elle y travaille éveillée"
+        return Why.ASLEEP, {}
     if not nudged(p) and not in_window(p, now, tz):
-        return "hors de sa plage de travail"
+        return Why.OUT_OF_WINDOW, {}
     at = next_run_at(p, s, frame)
     if at is None:
-        return "son agenda ne lui donne plus de créneau"
+        return Why.NO_SLOT, {}
     if at > now:
-        return "pas encore : son agenda ou l'espacement des exécutions la fixe plus tard"
-    return ""
+        return Why.LATER, {}
+    return None
 
 
 # ── Raconter ce qu'elle a mené à bout ─────────────────────────────────────
 
 
-def _name(frame: Frame, key: str | None) -> str:
-    return frame.get(identity_c.IDENTITY(key)).name if key else ""
-
-
-def _address(frame: Frame, person: str) -> str | None:
-    handles = frame.get(identity_c.HANDLES(person)) or (person,)
-    present = [h for h in frame.get(presence_c.PRESENT) if h in handles]
-    if present:
-        return present[0]
-    reachable = frame.get(identity_c.REACHABLE(person))
-    return reachable[0] if reachable else None
-
-
 def confidant(p: Project, frame: Frame) -> tuple[str, str, str] | None:
-    """(personne, adresse, niveau de récit) — ou personne : qui lui a confié le projet d'abord (une
-    propriétaire entend tout, une proche l'essentiel, une amie une mention), sinon une propriétaire."""
+    """(personne, adresse, niveau de récit) — ou personne : qui lui a confié le projet d'abord, sinon une
+    propriétaire ; le niveau suit l'échelle de ``contracts.social.retelling`` (une propriétaire entend tout projet)."""
     candidates: list[str] = [p.owner] if p.owner else []
     candidates += [o for o in frame.get(identity_c.OWNERS) if o not in candidates]
     for person in candidates:
-        if frame.get(identity_c.IS_OWNER(person)):
-            level = FULL
-        else:
-            closeness = frame.get(social_c.CLOSENESS(person))
-            if person != p.owner or _RANK.get(closeness, 0) < _RANK[social_c.FRIEND]:
-                continue
-            level = SUMMARY if closeness == social_c.CLOSE else MENTION
-        address = _address(frame, person)
+        level = social_c.retelling(frame, person, concerned=person == p.owner, owner_hears=True)
+        if level is None:
+            continue
+        address = identity_c.reach_now(frame, person)
         if address is not None:
             return person, address, level
     return None
@@ -275,14 +271,14 @@ def _reader(p: Project, frame: Frame) -> tuple[str, str] | None:
     candidates += [o for o in frame.get(identity_c.OWNERS) if o not in candidates]
     for person in candidates:
         if frame.get(identity_c.IS_OWNER(person)) or (person == p.owner and p.authority == c.USER):
-            address = _address(frame, person)
+            address = identity_c.reach_now(frame, person)
             if address is not None:
                 return person, address
     return None
 
 
 def _who_words(frame: Frame, person: str, address: str) -> str:
-    name = _name(frame, person) or _name(frame, address)
+    name = identity_c.person_name(frame, person) or identity_c.person_name(frame, address)
     return f"« {name} »" if name else phrase("expression.person.unnamed")
 
 
@@ -314,7 +310,7 @@ def _share(s: ProjectsState, frame: Frame) -> list[Candidate]:
             if reader is None:
                 continue
             _person, address = reader
-            level = FULL
+            level = social_c.FULL
             brief = phrase("projects.brief.report")
         if address in seen:  # un récit à la fois par personne : les autres projets suivront (une seule envie)
             continue
@@ -331,7 +327,7 @@ def plan_reader(p: Project, frame: Frame) -> tuple[str, str] | None:
     candidates += [o for o in frame.get(identity_c.OWNERS) if o not in candidates]
     for person in candidates:
         if frame.get(identity_c.IS_OWNER(person)):
-            address = _address(frame, person)
+            address = identity_c.reach_now(frame, person)
             if address is not None:
                 return person, address
     return None
@@ -380,7 +376,7 @@ def _plan(s: ProjectsState, frame: Frame) -> list[Candidate]:
             brief = phrase("projects.brief.plan.ask", who=who)
         out.append(Candidate(
             Kind.INITIATIVE, address, c.PLAN, pm.need_evidence, resources=frozenset({floor(address)}),
-            args=FrozenDict({"brief:projects": brief, "subject": plan_subject(p.id), "share": FULL})))
+            args=FrozenDict({"brief:projects": brief, "subject": plan_subject(p.id), "share": social_c.FULL})))
     return out
 
 
@@ -440,5 +436,5 @@ def _need(s: ProjectsState, frame: Frame) -> list[Candidate]:
         seen.add(address)
         out.append(Candidate(
             Kind.INITIATIVE, address, c.NEED, pm.need_evidence, resources=frozenset({floor(address)}),
-            args=FrozenDict({"brief:projects": brief, "subject": subject, "share": FULL})))
+            args=FrozenDict({"brief:projects": brief, "subject": subject, "share": social_c.FULL})))
     return out

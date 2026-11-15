@@ -21,10 +21,10 @@ import pytest
 from mika.app import composition
 from mika.contracts import attention as attention_c
 from mika.contracts import memory as memory_c
-from mika.faculties.memory.consolidation import same_words
 from mika.kernel.clock import DAY, US
 from mika.sim.clock import run_virtual
 from mika.vocab.people import clean_tokens
+from mika.vocab.words import same_words
 from tests.fixtures.memory import SIX, Script, chat, kept, section, seq_of, token
 from tests.fixtures.mika import DOC, at_paris, boot, build, connect, said
 

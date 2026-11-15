@@ -16,18 +16,11 @@ from types import SimpleNamespace as NS
 from mika.contracts import memory as mc
 from mika.contracts import runtime as rt
 from mika.faculties.memory import consolidation as cons
-from mika.faculties.memory.extraction import (
-    Conversation,
-    Extraction,
-    Line,
-    Speaker,
-    XCroyance,
-    XEvenement,
-    XSouvenir,
-    render,
-)
+from mika.faculties.memory.conversation import Conversation, Line, Speaker, render
+from mika.faculties.memory.extraction import Extraction, XCroyance, XEvenement, XSouvenir
 from mika.faculties.memory.faculty import MemoryParams, MemoryState, _retained
-from mika.faculties.memory.recall import _body, _recall
+from mika.faculties.memory.recall import _recall
+from mika.faculties.memory.recall_sections import _body
 from mika.faculties.memory.tools import SearchArgs, memory_search
 from mika.kernel.events import Content
 from mika.kernel.frame import Audience

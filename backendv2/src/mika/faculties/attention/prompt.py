@@ -38,7 +38,7 @@ from mika.faculties.attention.faculty import ATTENTION, AttentionState, params
 from mika.kernel.arbitration import Candidate
 from mika.kernel.faculty import Zone
 from mika.kernel.frame import Audience, Frame
-from mika.kernel.guards import Guard, floor
+from mika.kernel.guards import floor
 from mika.kernel.prompt import UNTRUSTED_NOTE, SectionBody, cited, readable
 from mika.kernel.state import FrozenDict
 from mika.vocab import affect as A
@@ -193,15 +193,6 @@ def _insisting(origin: str, name: str, feeling_: str) -> str:
     return phrase("attention.insist.exchange", feeling=feeling_, name=name)
 
 
-def _address(frame: Frame, person: str) -> str | None:
-    handles = frame.get(identity_c.HANDLES(person))
-    present = [h for h in frame.get(presence_c.PRESENT) if h in handles]
-    if present:
-        return present[0]
-    reachable = frame.get(identity_c.REACHABLE(person))
-    return reachable[0] if reachable else None
-
-
 def _glad(s: AttentionState, frame: Frame, p: Any, seen: set[str]) -> list[Candidate]:
     """Un bel échange avec quelqu'un, le lendemain, sans autre contact depuis : l'envie (faible) de lui en reparler
     — « encore bravo pour le poste, j'y repensais ce matin ! » —, au cran de leur lien (``glad_by_closeness``,
@@ -216,16 +207,15 @@ def _glad(s: AttentionState, frame: Frame, p: Any, seen: set[str]) -> list[Candi
         contact = frame.get(social_c.CONTACT(person))
         if contact.measured and contact.rhythm_days <= p.alone_daily_rhythm_days:
             continue
-        handles = frame.get(identity_c.HANDLES(person)) or (person,)
-        if max(frame.get(transcript_c.LAST_FROM(h)) for h in handles) > born:
+        if identity_c.last_heard(frame, person) > born:
             continue  # elles se sont reparlé depuis
-        address = _address(frame, person)
+        address = identity_c.reach_now(frame, person)
         if address is None:
             continue
         seen.add(person)
         name = frame.get(identity_c.IDENTITY(person)).name or phrase("attention.insist.someone")
         brief = phrase("attention.insist.glad", name=name)
-        guard = Guard("pas de nouvelles", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))
+        guard = identity_c.heard_since_guard(frame, person)
         out.append(Candidate(Kind.INITIATIVE, address, c.THOUGHT, round(p.glad_evidence * share, 3),
                              resources=frozenset({floor(address)}), guards=(guard,),
                              args=FrozenDict({"brief:attention": brief})))
@@ -254,15 +244,14 @@ def _insists(s: AttentionState, frame: Frame) -> list[Candidate]:
         if person in seen or frame.get(social_c.CLOSENESS(person)) == social_c.STRANGER:
             continue
         seen.add(person)
-        address = _address(frame, person)
+        address = identity_c.reach_now(frame, person)
         if address is None:
             continue
         evidence = p.thought_evidence * min(1.0, (t.intensity - p.thought_from) / max(1e-9, 1.0 - p.thought_from) * 2)
         name = frame.get(identity_c.IDENTITY(person)).name or phrase("attention.insist.someone")
         felt = A.FR.get(A.emotion_of(t.emotion) or A.Emotion.THINKING, "")
         brief = _insisting(t.origin, name, felt)
-        handles = frame.get(identity_c.HANDLES(person)) or (person,)
-        guard = Guard("pas de nouvelles", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))
+        guard = identity_c.heard_since_guard(frame, person)
         out.append(Candidate(Kind.INITIATIVE, address, c.THOUGHT, evidence, resources=frozenset({floor(address)}),
                              guards=(guard,), args=FrozenDict({"brief:attention": brief})))
     return out + _glad(s, frame, p, seen)

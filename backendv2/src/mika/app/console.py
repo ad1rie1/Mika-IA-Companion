@@ -367,7 +367,7 @@ EVENT_LABELS: dict[str, str] = {
     "teams.written": "Un message Teams écrit depuis le web, en file pour l'extension",
     "phone.received": "Un message montré par le téléphone", "phone.drafted": "Une réponse préparée pour le téléphone",
     "phone.settled": "Une réponse proposée sur le téléphone : partie, laissée ou expirée",
-    "memory.relayed_read": "Des messages du téléphone relus",
+    "memory.relayed_read": "Des messages du téléphone relus, ou remis à la file des reprises",
 }
 
 #: Les familles d'outils (leurs lots) qui ne se nomment pas comme leur faculté ; « préfixe.* » : les lots qu'une

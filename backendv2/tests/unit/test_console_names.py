@@ -27,6 +27,7 @@ from mika.inspector import names
 from mika.inspector.catalog import Labels
 from mika.kernel import forms
 from mika.kernel import inspect as kernel_inspect
+from mika.kernel.episode import Outcome
 from mika.kernel.faculty import NIGHT_LANE, PROCESS_LANES
 from mika.kernel.inspect import (
     INT_MAX,
@@ -44,7 +45,7 @@ from mika.kernel.registry import Registry
 from mika.ports.errors import OUTSIDE, describe_error
 from mika.ports.llm import MissingPersona
 from mika.runtime.state import RUNTIME
-from mika.vocab.episodes import Kind, Role
+from mika.vocab.episodes import OUTCOME_WORDS, Kind, Role, outcome_words
 
 NNBSP = " "
 
@@ -128,7 +129,7 @@ def test_every_kind_and_role_has_a_french_name():
     assert names.kind("JOB") == "exécution impersonnelle" and names.kind("TASK") == "tâche silencieuse"
     assert all(names.role(r) != str(r) for r in Role)
     # deux issues ne portent jamais le même nom (« interrompu » deux fois rendait le filtre ambigu)
-    labels = [label for label, _ in names.OUTCOMES.values()]
+    labels = [label for label, _ in OUTCOME_WORDS.values()]
     assert len(labels) == len(set(labels))
 
 
@@ -139,10 +140,29 @@ def test_every_episode_kind_can_really_run():
 
 def test_an_episode_that_went_well_has_spoken_only_if_it_was_speech():
     # une réponse menée à bien « a parlé » ; une tâche, un travail de projet sont « terminés »
-    assert names.outcome("done", Kind.REPLY)[0] == "a parlé" and names.outcome("done", Kind.INITIATIVE)[0] == "a parlé"
-    assert names.outcome("done", Kind.TASK)[0] == "terminé" and names.outcome("done", Kind.WORK)[0] == "terminé"
+    assert outcome_words("done", Kind.REPLY)[0] == "a parlé" and outcome_words("done", Kind.INITIATIVE)[0] == "a parlé"
+    assert outcome_words("done", Kind.MURMUR) == ("a parlé", "ok")
+    assert outcome_words("done", Kind.TASK)[0] == "terminé" and outcome_words("done", Kind.WORK)[0] == "terminé"
+    assert outcome_words("done", Kind.STEP)[0] == "terminé" and outcome_words("done")[0] == "terminé"
     # contre-exemple : une réponse qui s'est tue ne « parle » pas
-    assert names.outcome("abstained", Kind.REPLY)[0] == "s'est tue"
+    assert outcome_words("abstained", Kind.REPLY)[0] == "s'est tue"
+
+
+def test_every_outcome_is_said_with_the_words_of_the_episodes_page():
+    """L'issue d'un épisode se dit une fois, pour toute la console : la page Épisodes, l'accueil, et les onglets d'un
+    but ou d'un projet, que les facultés dessinent : « délai dépassé » dans l'onglet d'un but, « trop long » sur la
+    page Épisodes, pour le même épisode (audit K5-06)."""
+    assert set(OUTCOME_WORDS) == set(Outcome)
+    assert {o: outcome_words(o) for o in Outcome} == {
+        Outcome.DONE: ("terminé", "ok"), Outcome.ABSTAINED: ("s'est tue", "muted"),
+        Outcome.SUPERSEDED: ("supplanté", "warn"), Outcome.TIMEOUT: ("trop long", "danger"),
+        Outcome.FAILED: ("échec", "danger"), Outcome.PREEMPTED: ("a cédé la place", "warn"),
+        Outcome.INTERRUPTED: ("interrompu par un arrêt", "warn"), Outcome.CANCELLED: ("annulé", "muted"),
+    }
+    # une issue que la table ne connaît pas se dit telle quelle, sans ton ; rien du tout, un tiret
+    assert outcome_words("expired", Kind.REPLY) == ("expired", "") and outcome_words(None) == ("—", "")
+    # la table ne vit plus dans l'inspecteur : un seul endroit, que les facultés lisent aussi
+    assert not hasattr(names, "OUTCOMES") and not hasattr(names, "outcome")
 
 
 def test_a_process_lane_is_named_only_when_it_says_something():

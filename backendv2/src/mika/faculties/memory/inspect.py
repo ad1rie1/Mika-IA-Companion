@@ -1,6 +1,8 @@
 """Les vues d'inspection de la mémoire : ses souvenirs, ses croyances, ses
-promesses (la projection ``memory_items``), la relecture qui les produit (la
-tranche et le journal), et l'onglet « Mémoire » de la fiche d'une personne.
+promesses (la projection ``memory_items``), la relecture et les nuits qui les
+produisent (la tranche et le journal : la consolidation des conversations, le
+tri de la nuit, ses lectures relues la nuit), et l'onglet « Mémoire » de la
+fiche d'une personne.
 
 Lecture seule, paginée, bornée ; un texte effacé par l'oubli se montre comme
 tel. Les filtres sont typés : une valeur inconnue est dite, jamais devinée.
@@ -50,6 +52,7 @@ from mika.kernel.inspect import (
     Table,
     Text,
     When,
+    num_fr,
 )
 from mika.kernel.operate import ActionContext, Done, Refused
 from mika.vocab.affect import emotion_cell
@@ -66,10 +69,14 @@ PER_KIND = 20
 SOURCES_SHOWN = 20
 #: une personne tapée dans un filtre : au plus tant de clés
 PEOPLE_MAX = 200
-#: l'historique de la relecture et des tris de la nuit, par page (tout le journal) ; chacun son curseur
+#: l'historique de la relecture, des tris de la nuit et de ses lectures relues la nuit, par page (tout le journal) ;
+#: chacun son curseur
 RUNS_PAGE = 25
 RUNS_CURSOR = "avant"
 NIGHTS_CURSOR = "avant_nuits"
+REREADS_CURSOR = "avant_lectures"
+#: ce qu'une nuit a réuni ou confronté, au plus (une jointure du tri, une de la relecture, une confrontation)
+NIGHT_LINKS = 10
 
 KIND_FR = {c.EPISODE_MEMORY: "souvenir", c.BELIEF: "croyance", c.PROMISE: "promesse", c.EVENT: "moment de sa vie"}
 STATUS_FR = {"active": "actif", "superseded": "remplacée", "merged": "fondu dans un autre", "joined": "jointe à une autre", "pending": "en cours",
@@ -101,15 +108,6 @@ READING_HELP = {
                "permettent de comprendre l’engagement.",
     c.EVENT: "Les moments à suivre concernent la vie des autres. Une date annuelle indique sa prochaine occurrence.",
 }
-
-
-def number(value: float | None) -> str:
-    return "—" if value is None else f"{value:.2f}".replace(".", ",")
-
-
-def clip(text: str, n: int = 300) -> str:
-    text = " ".join(text.split())
-    return text if len(text) <= n else text[: n - 1].rstrip() + "…"
 
 
 def _p(frame: Frame) -> MemoryParams:
@@ -232,7 +230,7 @@ def _status(item: Item, frame: Frame, p: MemoryParams) -> Badge:
 
 
 def _meter(value: float | None) -> Cell:
-    return None if value is None else Meter(value, number(value))
+    return None if value is None else Meter(value, num_fr(value, 2))
 
 
 def _detail(k: Kept, frame: Frame, names: dict[str, str], ctx: InspectContext) -> tuple[Block, ...]:
@@ -260,7 +258,7 @@ def _detail(k: Kept, frame: Frame, names: dict[str, str], ctx: InspectContext) -
                   ("rappels", f"{item.recalls}" + (f", le dernier {ctx.when(item.recalled_at)}"
                                                    if item.recalled_at else ""))]
     if item.kind == c.BELIEF:
-        pairs += [("confiance déclarée", number(item.confidence)),
+        pairs += [("confiance déclarée", num_fr(item.confidence, 2)),
                   ("dite par", names.get(item.source, item.source) if item.source else "—")]
         if k.replaces is not None:
             pairs.append(("remplace", Ref("event", str(k.replaces), f"la croyance n° {k.replaces}")))
@@ -419,7 +417,7 @@ def _params(listing: Listing) -> list[Param]:
 @MEMORY.inspect("souvenirs", title="Souvenirs", section="memoire", order=10, params=_params(EPISODE_MEMORIES),
                 description="Ce qu'elle retient de ses échanges. Cherche un souvenir ou une personne, puis "
                             "ouvre ses détails pour lire le texte entier et retrouver les messages d'origine.")
-def _souvenirs(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Block]:
+def _memories(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Block]:
     return _list(EPISODE_MEMORIES, frame, ctx)
 
 
@@ -444,10 +442,13 @@ def _moments(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Block]:
     return _list(_events_of(s), frame, ctx)
 
 
-# ── La relecture ──────────────────────────────────────────────────────────
+# ── La consolidation ──────────────────────────────────────────────────────
 
 
-def _rereading(s: MemoryState, frame: Frame, ctx: InspectContext) -> Fields:
+def _consolidation_state(s: MemoryState, frame: Frame, ctx: InspectContext) -> Fields:
+    """Où en sont la relecture des conversations et la nuit : le point de contrôle, la file, le dernier tri et la
+    dernière nuit où elle a relu ses lectures (``memory.reread``, à ne pas confondre avec la relecture des
+    conversations)."""
     p = _p(frame)
     pending = f"{len(s.pending)} ou plus" if len(s.pending) >= PENDING_CAP else str(len(s.pending))
     pairs: list[tuple[str, Cell]] = [
@@ -466,8 +467,11 @@ def _rereading(s: MemoryState, frame: Frame, ctx: InspectContext) -> Fields:
         ("promesses en cours", len(s.promises)),
         ("réflexions de la nuit à écrire", len(s.reflections)),
         ("dernière nuit triée", s.sorted_night or "—"),
+        ("dernière nuit relue", s.reread_night or "—"),
+        ("sa dernière lecture", Ref("event", str(s.readings_upto), f"n° {s.readings_upto}") if s.readings_upto
+         else "aucune"),
     ]
-    return Fields(tuple(pairs), title="La relecture", columns=2)
+    return Fields(tuple(pairs), title="La consolidation", columns=2)
 
 
 def _volumes(ctx: InspectContext) -> Stats | None:
@@ -526,16 +530,57 @@ def _nights(ctx: InspectContext) -> Table:
                  tuple(rows), title="Les tris de la nuit", empty="pas encore de nuit triée", pager=pager)
 
 
+def _pair(first: int, said: str, second: int) -> tuple[Cell, ...]:
+    return Ref("event", str(first), f"n° {first}"), said, Ref("event", str(second), f"n° {second}")
+
+
+def _linked(ctx: InspectContext, night: str) -> tuple[Block, ...]:
+    """Ce que la nuit a réuni ou confronté (``memory.joined`` : du tri ou de la relecture ; ``memory.confronted``),
+    paire par paire, vers les deux croyances."""
+    rows: list[tuple[Cell, ...]] = []
+    for e in reversed(ctx.events([c.JOINED, c.CONFRONTED], NIGHT_LINKS, where=("night", night))):
+        d = e.data
+        if e.type.name == c.JOINED.name:
+            said = ("gardée, l'autre s'y joint : jugées la même chose par la relecture, sans être les mêmes mots"
+                    if d.mute else "gardée, l'autre s'y joint")
+            rows += [_pair(keep, said, joined) for keep, joined in d.pairs]
+        else:
+            rows += [_pair(new, "l'emporte sur", old) for new, old in d.supersedes]
+            rows += [_pair(old, "elle doute entre les deux", new) for old, new in d.contests]
+    if not rows:
+        return ()
+    return (Table((Column("croyance"), Column("ce que la nuit en fait"), Column("autre croyance")),
+                  tuple(Row(r) for r in rows),
+                  title=f"Les {len(rows)} paires de cette nuit" if len(rows) > 1 else "La paire de cette nuit"),)
+
+
+def _rereads(ctx: InspectContext) -> Table:
+    """La nuit, elle relit ses lectures (``memory.reread``) : une ligne par nuit, et en détail ce que la même nuit a
+    réuni ou confronté."""
+    rows: list[Row] = []
+    found, pager = _history(ctx, c.REREAD, REREADS_CURSOR)
+    for e in found:
+        d = e.data
+        rows.append(Row((d.night, d.readings, d.pairs, "—" if d.produced is None else d.produced,
+                         Ref("event", str(d.upto), f"n° {d.upto}") if d.upto else "—", d.model or "—", When(e.at)),
+                        href=Ref("event", str(e.seq), f"n° {e.seq}"), detail=_linked(ctx, d.night)))
+    return Table((Column("nuit", "fit"), Column("lectures", "num"), Column("paires", "num"),
+                  Column("retenus", "num"), Column("relues jusqu'au"), Column("modèle"), Column("quand", "fit")),
+                 tuple(rows), title="Ses lectures relues la nuit", empty="pas encore de nuit relue", pager=pager)
+
+
 @MEMORY.inspect("consolidation", title="Consolidation", section="memoire", order=40,
-                description="La relecture : ce qui a été relu, ce qui attend, ce qui a échoué ; et les nuits "
-                            "où les souvenirs presque identiques se fondent.")
+                description="La relecture : ce qui a été relu, ce qui attend, ce qui a échoué ; les nuits "
+                            "où les souvenirs presque identiques se fondent ; et ses lectures relues la nuit, avec "
+                            "les croyances qu'elle y réunit ou confronte.")
 def _consolidation(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Block]:
     volumes = _volumes(ctx)
     return [*([volumes] if volumes else []),
             Note("Les passages à reprendre n’ont pas pu être entièrement traités. Ouvre leur détail pour comprendre "
                  "la cause et demander une nouvelle lecture avec le modèle configuré.", "info"),
-            _queue(ctx), Disclosure("État détaillé de la relecture", (_rereading(s, frame, ctx),)),
-            _runs(ctx), Disclosure("Historique des tris de la nuit", (_nights(ctx),))]
+            _queue(ctx), Disclosure("État détaillé de la consolidation", (_consolidation_state(s, frame, ctx),)),
+            _runs(ctx), Disclosure("Historique des tris de la nuit", (_nights(ctx),)),
+            Disclosure("Historique des lectures relues la nuit", (_rereads(ctx),))]
 
 
 #: la sorte d'une annonce (``likelihood.nature_of``), en mots
@@ -543,7 +588,7 @@ NATURE_FR = {c.FIRST_HAND: "de la bouche de la personne", c.REPORTED: "rapporté
              c.OFFICIAL: "une date officielle", c.PREDICTION: "une prévision"}
 
 
-def _calibration(s: MemoryState, frame: Frame, p: MemoryParams) -> Table:
+def _calibration(s: MemoryState, p: MemoryParams) -> Table:
     """Ses attentes, d'une sorte d'annonce à l'autre : combien de moments constatés, l'écart quadratique moyen
     (Brier : 0, toujours juste ; 0,25, comme à pile ou face), et si elle en parle désormais plus prudemment."""
     rows = []
@@ -579,7 +624,7 @@ def _tellers(s: MemoryState, frame: Frame, p: MemoryParams) -> Table:
                             "ici, jamais dans ses phrases.")
 def _seeing_ahead(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Block]:
     p = params(frame.env.params_of("memory", frame.root))
-    return [_calibration(s, frame, p), _tellers(s, frame, p)]
+    return [_calibration(s, p), _tellers(s, frame, p)]
 
 
 class RetryExtractionArgs(BaseModel):
@@ -592,11 +637,13 @@ class RetryExtractionArgs(BaseModel):
                description="Relit les messages sources avec le fournisseur actuellement configuré.")
 def _retry_extraction(s: MemoryState, frame: Frame, args: RetryExtractionArgs, ctx: ActionContext) -> Done:
     q = tb.deferred()
-    rows = ctx.store.query_mind(select(q.c.messages, q.c.about, q.c.attempts, q.c.aside).where(q.c.key == args.key))
+    rows = ctx.store.query_mind(select(q.c.source, q.c.messages, q.c.about, q.c.attempts, q.c.aside)
+                                .where(q.c.key == args.key))
     if not rows:
         raise Refused("Ce passage a déjà été traité ou oublié.")
-    messages, about, attempts, aside = rows[0]
-    draft = c.EXTRACTION_DEFERRED.draft(key=args.key, messages=tuple(json.loads(messages)),
+    source, messages, about, attempts, aside = rows[0]
+    # sa source le suit : une conversation reçue ailleurs se reprend par ``memory.relayed``, pas par la consolidation
+    draft = c.EXTRACTION_DEFERRED.draft(key=args.key, source=source, messages=tuple(json.loads(messages)),
         aside=tuple(json.loads(aside)), about=tuple(json.loads(about)), attempts=attempts, retry_at=frame.now,
         status="queued", failure_code="operator_retry", detail=Content.of("Reprise demandée par l'opérateur", level=3))
     return Done(drafts=(draft,), message="Le passage sera relu.")
@@ -624,6 +671,11 @@ def _deferred_detail(text: str | None) -> Block:
                   title="Détail du passage")
 
 
+#: un passage à reprendre, selon d'où viennent ses messages (ADR 0224)
+PASSAGE_OF = {c.FROM_THREAD: "message n° {key}",
+              c.FROM_RELAYED: "conversation reçue sur le téléphone, message n° {key}"}
+
+
 def _queue(ctx: InspectContext) -> Table | Note:
     q = tb.deferred()
     if not tb.has_table(ctx.store, q):
@@ -631,27 +683,26 @@ def _queue(ctx: InspectContext) -> Table | Note:
     total = int(ctx.store.query_mind(select(func.count()).select_from(q))[0][0])
     pager = ctx.pager("reprises", size=20, total=total)
     rows = ctx.store.query_mind(select(q.c.key, q.c.attempts, q.c.retry_at, q.c.status, q.c.reason, q.c.detail_ref,
-                                       q.c.since).order_by(q.c.since, q.c.key).limit(pager.size).offset(pager.offset))
+                                       q.c.since, q.c.source)
+                                .order_by(q.c.since, q.c.key).limit(pager.size).offset(pager.offset))
     details = ctx.store.content([row[5] for row in rows])
     return Table((Column("passage", role="title"), Column("depuis"), Column("essais"), Column("état", role="badge"),
                   Column("prochaine reprise"), Column("cause", role="body")),
-        tuple(Row((Ref("event", str(key), f"message n° {key}"), When(since), attempts,
+        tuple(Row((Ref("event", str(key), PASSAGE_OF.get(source, PASSAGE_OF[c.FROM_THREAD]).format(key=key)),
+                   When(since), attempts,
                    Badge("à examiner" if status == "review" else "reprise prévue", "warn" if status == "review" else "info"),
                    When(retry) if retry else "manuelle" if status == "review" else "dès que possible",
                    DEFERRAL_REASONS.get(reason, reason)),
                   detail=(_deferred_detail(details.get(ref)),
                           ActionSlot("memory.reprendre", (("key", str(key)),))))
-              for key, attempts, retry, status, reason, ref, since in rows),
+              for key, attempts, retry, status, reason, ref, since, source in rows),
         title=f"Passages à reprendre ({total})", empty="aucun passage en attente", pager=pager, layout="cards")
 
 
 # ── La fiche d'une personne ───────────────────────────────────────────────
 
-#: le type d'objet « personne » (déclaré par l'identité) : l'onglet se range sur sa fiche
-PERSON_KIND = "person"
 
-
-@MEMORY.inspect("memoire", title="Mémoire", subject=PERSON_KIND, hidden=not PERSON_KIND, order=50, params=[SEARCH],
+@MEMORY.inspect("memoire", title="Mémoire", subject="person", order=50, params=[SEARCH],
                 description="Ce qu'elle garde de cette personne : souvenirs, croyances et promesses qui la "
                             "concernent, sous l'un de ses moyens de communication.")
 def _person(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Block]:

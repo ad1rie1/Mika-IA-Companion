@@ -54,7 +54,7 @@ from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp, Faculty, ToolResult, Zone
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
-from mika.kernel.guards import Guard, floor
+from mika.kernel.guards import floor
 from mika.kernel.inspect import (
     Badge,
     Block,
@@ -406,9 +406,8 @@ def _address(frame: Frame, person: str) -> str | None:
     """Où le lui montrer : là où elle est, sinon sur sa messagerie — à une heure où elle écrit d'habitude (pour un
     titre, on ne fait pas sonner le téléphone de quelqu'un qui dort)."""
     handles = frame.get(identity_c.HANDLES(person)) or (person,)
-    present = [h for h in frame.get(presence_c.PRESENT) if h in handles]
-    if present:
-        return present[0]
+    if (here := identity_c.present_address(frame, handles)) is not None:
+        return here
     if not frame.get(others_c.HOURS(person)).active[frame.local().hour]:
         return None
     reachable = frame.get(identity_c.REACHABLE(person))
@@ -433,10 +432,9 @@ def _to_show(s: RssState, frame: Frame) -> list[Candidate]:
         address = _address(frame, person)
         if address is None:
             continue
-        handles = frame.get(identity_c.HANDLES(person)) or (person,)
-        guard = Guard("silence", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))
         out.append(Candidate(Kind.INITIATIVE, address, c.FOR_FRIEND, p.friend_evidence,
-                             resources=frozenset({floor(address)}), guards=(guard,)))
+                             resources=frozenset({floor(address)}),
+                             guards=(identity_c.heard_since_guard(frame, person),)))
     return out
 
 

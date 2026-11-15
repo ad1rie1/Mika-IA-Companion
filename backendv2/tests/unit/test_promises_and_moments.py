@@ -29,6 +29,7 @@ from mika.contracts import needs as needs_c
 from mika.contracts import others as others_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
+from mika.faculties.memory import cues
 from mika.faculties.memory import extraction as x
 from mika.faculties.memory.life import same_task, wishes
 from mika.faculties.needs import NeedsParams, _lead
@@ -148,17 +149,18 @@ def test_what_is_a_task_what_is_festive_and_what_counts():
         return x.XEvenement(texte=text, quand="2026-10-07", importance=importance, a_feter=a_feter,
                             chaque_annee=chaque_annee)
 
-    assert x.task_words("prendre rendez-vous chez le dentiste") and not x.task_words("son rendez-vous chez le dentiste")
-    assert x.task_words("prendre rdv chez le dentiste") and not x.task_words("prendre l'avion pour Tokyo")
+    assert cues.task_words("prendre rendez-vous chez le dentiste") \
+        and not cues.task_words("son rendez-vous chez le dentiste")
+    assert cues.task_words("prendre rdv chez le dentiste") and not cues.task_words("prendre l'avion pour Tokyo")
     assert same_task("lui rappeler de prendre rendez-vous chez le dentiste mercredi", "prendre rdv chez le dentiste")
     assert not same_task("lui rappeler d'appeler sa mère mercredi", "prendre rdv chez le dentiste mercredi"), \
         "le même jour et le même verbe ne font pas la même chose à faire"
     # ce qui se fête, revient chaque année ou compte, c'est la relecture qui le dit : aucun mot ne le force (ADR 0153)
-    assert x.festive(ev("leur pendaison", a_feter=True)) and not x.festive(ev("son anniversaire de 30 ans"))
-    assert not x.festive(ev("l'anniversaire de la mort de son père", a_feter=True)), "un deuil ne se fête pas"
-    assert x.yearly(ev("son anniversaire", chaque_annee=True)) and not x.yearly(ev("son anniversaire"))
-    assert x.moment_importance(ev("son entretien chez Ubisoft", importance=3)) >= memory_c.IMPORTANT_MOMENT
-    assert x.moment_importance(ev("son entretien chez Ubisoft")) < memory_c.IMPORTANT_MOMENT, \
+    assert cues.festive(ev("leur pendaison", a_feter=True)) and not cues.festive(ev("son anniversaire de 30 ans"))
+    assert not cues.festive(ev("l'anniversaire de la mort de son père", a_feter=True)), "un deuil ne se fête pas"
+    assert cues.yearly(ev("son anniversaire", chaque_annee=True)) and not cues.yearly(ev("son anniversaire"))
+    assert cues.moment_importance(ev("son entretien chez Ubisoft", importance=3)) >= memory_c.IMPORTANT_MOMENT
+    assert cues.moment_importance(ev("son entretien chez Ubisoft")) < memory_c.IMPORTANT_MOMENT, \
         "dit ordinaire par la relecture, il l'est"
     assert wishes("Joyeux anniv Sam !! 🎂") and wishes("bon anniversaire") and wishes("Félicitations à vous deux")
     assert not wishes("c'est quand ton anniversaire ?")

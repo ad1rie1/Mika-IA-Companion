@@ -2,7 +2,7 @@
 
 Un message reçu sur le téléphone de quelqu'un (la forme ``Relayed``, qu'apporte un plugin que la mémoire ne connaît
 pas) attend que sa conversation se pose. Elle la relit alors comme une de ses conversations — la même consigne, le
-même outil, ce que le code en garde jugé pareil (``consolidation.kept_from``) —, sous un en-tête qui dit ce que c'est :
+même outil, ce que le code en garde jugé pareil (``kept.kept_from``) —, sous un en-tête qui dit ce que c'est :
 une conversation entre d'autres, lue sur le téléphone de la personne qui l'a reçue, à laquelle elle n'a pas pris
 part. Ce que la conversation de relecture en fait de différent tient à ``Conversation.relayed`` :
 
@@ -10,26 +10,39 @@ part. Ce que la conversation de relecture en fait de différent tient à ``Conve
 - ni note sur elle, ni promesse, ni ce qui n'appartiendrait qu'à elle et quelqu'un ;
 - de ce qu'elle sait déjà, seul l'anodin est montré (comme pour un salon : ``room`` est posé).
 
-Au plus quelques conversations par passage ; un échec est repris plus tard, trois fois au plus, puis laissé.
+Au plus quelques conversations par passage. Une panne du fournisseur est retentée plus tard, trois fois au plus ;
+si elle dure, si la réponse est illisible, ou si une partie de ce qu'elle en tire est invalide (ce qui est valide est
+gardé), la conversation va dans la file durable des reprises, comme une des siennes (``memory.extraction_deferred``,
+``source`` « relayed », ADR 0224) : visible et reprenable dans Mémoire › Consolidation, reprise ici — une par
+passage, de plus en plus espacée —, et ses messages ne l'attendent plus (``memory.relayed_read``).
 """
 
 from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from functools import partial
 from typing import Any
+
+from sqlalchemy import func, select
 
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
 from mika.contracts import self_ as self_c
 from mika.faculties.memory import extraction as x
-from mika.faculties.memory.consolidation import extract_request, kept_from, people_directory, shown_of
+from mika.faculties.memory import tables as tb
+from mika.faculties.memory.consolidation import people_directory
+from mika.faculties.memory.conversation import Conversation, Line, Speaker
 from mika.faculties.memory.faculty import MEMORY, MemoryState, params
-from mika.kernel.clock import MINUTE
-from mika.kernel.events import Draft
+from mika.faculties.memory.kept import kept_from
+from mika.faculties.memory.shown import extract_request, shown_of
+from mika.faculties.memory.speakers import People
+from mika.kernel.clock import DAY, MINUTE
+from mika.kernel.events import Content, Draft
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
+from mika.kernel.prompt import PromptBudgetError
 from mika.ports.llm_budget import fit_by_halving
 from mika.ports.preprocess import inert
 from mika.vocab.people import clean_display_name
@@ -39,10 +52,14 @@ log = logging.getLogger(__name__)
 
 #: une conversation relue d'un coup, au plus (la suite attend le passage d'après)
 LINES_MAX = 60
-#: une relecture qui échoue autant de fois est laissée
+#: une panne du fournisseur est retentée autant de fois (le compte est celui du processus) ; si elle dure, la
+#: conversation va dans la file des reprises (ADR 0224)
 ATTEMPTS_MAX = 3
-#: après un échec, pas de nouvel essai avant
+#: après une panne, pas de nouvel essai avant
 RETRY_US = 10 * MINUTE
+#: pourquoi une relecture va dans la file des reprises (``ExtractionDeferred.failure_code``)
+PROVIDER_ERROR, INVALID_OUTPUT, INVALID_ITEMS, BUDGET_EXCEEDED = (
+    "provider_error", "invalid_output", "invalid_items", "budget_exceeded")
 NAME_MAX = 60
 
 
@@ -78,12 +95,12 @@ def gather(store: Any, seqs: tuple[int, ...]) -> dict[tuple[str, str], list[dict
     return groups
 
 
-def conversation(frame: Frame, recipient: str, thread: str, messages: list[dict[str, Any]]) -> x.Conversation | None:
+def conversation(frame: Frame, recipient: str, thread: str, messages: list[dict[str, Any]]) -> Conversation | None:
     """La conversation telle que la relecture la lit : la personne qui l'a reçue et ceux qui lui ont écrit, chacun
     avec son jeton, sous un en-tête qui dit d'où elle vient. ``None`` : plus rien à lire (tout oublié)."""
     owner = clean_display_name(frame.get(identity_c.IDENTITY(recipient)).name) or phrase("memory.relayed.someone")
-    tokens: dict[str, x.Speaker] = {}
-    lines: list[x.Line] = []
+    tokens: dict[str, Speaker] = {}
+    lines: list[Line] = []
     for m in messages[:LINES_MAX]:
         if not m["text"]:
             continue  # oublié depuis
@@ -91,8 +108,8 @@ def conversation(frame: Frame, recipient: str, thread: str, messages: list[dict[
         if person not in tokens:
             name = owner if person == recipient else (
                 clean_display_name(inert(m["name"] or "", NAME_MAX)) or phrase("memory.relayed.someone"))
-            tokens[person] = x.Speaker(f"P{len(tokens) + 1}", person, name)
-        lines.append(x.Line(int(m["seq"]), int(m["at"]), tokens[person].label, inert(m["text"], 3000), person))
+            tokens[person] = Speaker(f"P{len(tokens) + 1}", person, name)
+        lines.append(Line(int(m["seq"]), int(m["at"]), tokens[person].label, inert(m["text"], 3000), person))
     if not lines or not any(ln.person != recipient for ln in lines):
         return None  # rien qu'on lui ait écrit : seulement ses propres messages, ou tout est oublié
     apps = family("memory.relayed.apps")
@@ -102,44 +119,106 @@ def conversation(frame: Frame, recipient: str, thread: str, messages: list[dict[
     heading = phrase("memory.extraction.render.relayed", owner=owner, app=apps.get(source, apps["other"]), who=who)
     if title and any(m["group"] for m in messages):
         heading += " " + phrase("memory.extraction.render.relayed_group", title=inert(title, 80))
-    return x.Conversation(f"relayed:{recipient}:{thread}", tuple(tokens.values()), tuple(lines),
-                          room=f"relayed:{thread}", relayed=recipient, heading=heading)
+    return Conversation(f"relayed:{recipient}:{thread}", tuple(tokens.values()), tuple(lines),
+                        room=f"relayed:{thread}", relayed=recipient, heading=heading)
 
 
-@MEMORY.process("memory.relayed", wake_on=[c.RELAYED_READ], wake_on_shapes=[c.Relayed],
+@dataclass(frozen=True, slots=True)
+class Reading:
+    """Une relecture : ce que le code en garde, l'appel, le modèle. ``failure`` : pourquoi elle va dans la file des
+    reprises (le ``failure_code`` de ``ExtractionDeferred`` ; vide, elle est menée à bout) ; ``issues`` et ``output``,
+    ce qui n'allait pas et la réponse brute, son détail (le format de la consolidation, que la console lit)."""
+
+    kept: tuple[Draft[Any], ...] = ()
+    call_id: str = ""
+    model: str = ""
+    failure: str = ""
+    issues: tuple[str, ...] = ()
+    output: str = ""
+
+
+def deferral(key: int, conv: Conversation, seqs: tuple[int, ...], attempt: int, got: Reading, frame: Frame,
+             p: Any) -> Draft[Any]:
+    """La conversation dans la file des reprises (ADR 0224), comme une des siennes : une sortie partielle, ou trop
+    longue pour le contexte, attend un opérateur ; le reste revient de lui-même, de plus en plus espacé. Ses
+    personnes (la personne qui l'a reçue, les clés ``phone:`` des expéditeurs) font que l'oubli l'atteint."""
+    review = got.failure in (INVALID_ITEMS, BUDGET_EXCEEDED)
+    delay = min(DAY, p.retry_us * 2 ** min(attempt - 1, 16))
+    about = tuple(sorted({*conv.persons, *([conv.relayed] if conv.relayed else [])}))
+    return c.EXTRACTION_DEFERRED.draft(
+        key=key, source=c.FROM_RELAYED, messages=seqs, about=about, attempts=attempt,
+        retry_at=0 if review else frame.now + delay, status="review" if review else "queued",
+        failure_code=got.failure,
+        detail=Content.of(json.dumps({"issues": list(got.issues), "output": got.output}, ensure_ascii=False),
+                          level=3))
+
+
+@MEMORY.process("memory.relayed", wake_on=[c.RELAYED_READ, c.EXTRACTION_DEFERRED], wake_on_shapes=[c.Relayed],
                 catch_up=CatchUp.ONCE, max_quantum_s=600)
 class Relay:
-    """Relire les conversations reçues ailleurs, une fois posées."""
+    """Relire les conversations reçues ailleurs, une fois posées ; reprendre celles de la file des reprises."""
 
     def __init__(self) -> None:
         self.retry_at = 0
-        #: les relectures qui ont échoué, par conversation (son premier message)
+        #: les pannes de suite du fournisseur, par conversation (son premier message)
         self.failures: dict[int, int] = {}
+        #: la file de reprises telle que relue au dernier passage (``MemoryState.deferred_seq``) et la prochaine de
+        #: ses reprises due (``None`` : rien en attente)
+        self.queue_seq = 0
+        self.next_job_at: int | None = None
 
-    def next_due(self, state: MemoryState, frame: Frame, last_run: int | None) -> int | None:
+    def _settled(self, state: MemoryState, frame: Frame) -> int | None:
+        """Quand les messages en attente se relisent : leur conversation posée, et pas avant le nouvel essai après
+        une panne (``None`` : rien n'attend)."""
         if not state.relayed:
             return None
         p = params(frame.env.params_of("memory", frame.root))
         due = min(state.relayed_at + p.relayed_quiet_us, state.relayed_since + p.relayed_wait_us)
-        return max(frame.now, due, self.retry_at)
+        return max(due, self.retry_at)
+
+    def next_due(self, state: MemoryState, frame: Frame, last_run: int | None) -> int | None:
+        due: list[int] = []
+        settled = self._settled(state, frame)
+        if settled is not None:
+            due.append(max(frame.now, settled))
+        if state.deferred_seq > self.queue_seq:
+            due.append(frame.now)  # la file a changé (une reprise demandée, une conversation mise en file) : la relire
+        elif self.next_job_at is not None:
+            due.append(max(frame.now, self.next_job_at))
+        return min(due) if due else None
 
     async def run(self, ctx: Any) -> None:
         frame: Frame = ctx.frame
         state: MemoryState = ctx.state
         store, vectors = ctx.ports.get("store"), ctx.ports.get("vectors")
-        if store is None or ctx.llm is None or not state.relayed or self.retry_at > frame.now:
+        if store is None or ctx.llm is None:
             return
+        self.queue_seq = state.deferred_seq
         p = params(frame.env.params_of("memory", frame.root))
+        settled = self._settled(state, frame)
+        fresh = settled is not None and settled <= frame.now
+        # Une reprise par passage, comme la consolidation : seulement les siennes (ses messages sont au journal, pas
+        # dans le fil).
+        queue = tb.deferred()
+        jobs = store.query_mind(select(queue.c.key, queue.c.messages, queue.c.attempts, queue.c.about)
+                                .where(queue.c.source == c.FROM_RELAYED, queue.c.status == "queued",
+                                       queue.c.retry_at <= frame.now)
+                                .order_by(queue.c.retry_at, queue.c.key).limit(1))
+        if not fresh and not jobs:
+            self._next_job(store)
+            return
         her = self_c.name_of(frame.get(self_c.PERSONA))
-        groups = gather(store, state.relayed)
-        known_seqs = {m["seq"] for found in groups.values() for m in found}
-        # ce qui n'est plus lisible (un événement d'une autre forme, illisible) ne l'attend plus
+        groups = gather(store, state.relayed) if fresh else {}
         drafts: list[Draft[Any]] = []
-        lost = tuple(q for q in state.relayed if q not in known_seqs)
-        if lost:
-            drafts.append(c.RELAYED_READ.draft(seqs=lost, dedupe_key=f"relu-perdu:{lost[0]}:{lost[-1]}"))
-        directory = people_directory(frame, store) if groups else {}
-        system = x.system(her, frame.get(self_c.PORTRAYED("compact"))) if groups else ""
+        if fresh:
+            # ce qui n'est plus lisible (un événement d'une autre forme, illisible) ne l'attend plus
+            known_seqs = {m["seq"] for found in groups.values() for m in found}
+            lost = tuple(q for q in state.relayed if q not in known_seqs)
+            if lost:
+                drafts.append(c.RELAYED_READ.draft(seqs=lost, dedupe_key=f"relu-perdu:{lost[0]}:{lost[-1]}"))
+        directory = people_directory(frame, store) if groups or jobs else {}
+        system = x.system(her, frame.get(self_c.PORTRAYED("compact"))) if groups or jobs else ""
+        n = 0
         for n, ((recipient, thread), messages) in enumerate(sorted(groups.items(), key=lambda kv: kv[1][0]["at"])):
             if n >= p.relayed_per_run:
                 break
@@ -150,46 +229,83 @@ class Relay:
                 drafts.append(c.RELAYED_READ.draft(seqs=seqs, dedupe_key=f"relu:{seqs[0]}:{seqs[-1]}"))
                 continue
             got = await self._read(ctx, frame, state, store, vectors, directory, conv, her, system, p, n)
-            if got is None:
+            if got.failure == PROVIDER_ERROR:
                 tries = self.failures.get(seqs[0], 0) + 1
                 self.failures[seqs[0]] = tries
                 if tries < ATTEMPTS_MAX:
                     self.retry_at = frame.now + RETRY_US * 2 ** (tries - 1)
                     continue
-                self.failures.pop(seqs[0], None)
-                log.warning("relecture d'une conversation reçue ailleurs : laissée après %d échecs", tries)
-                drafts.append(c.RELAYED_READ.draft(seqs=seqs, failed=True, dedupe_key=f"relu:{seqs[0]}:{seqs[-1]}"))
-                continue
-            kept, call_id, model = got
+                log.warning("relecture d'une conversation reçue ailleurs : %d pannes, mise en file de reprise", tries)
             self.failures.pop(seqs[0], None)
-            drafts += kept
-            drafts.append(c.RELAYED_READ.draft(seqs=seqs, produced=len(kept), call_id=call_id, model=model,
-                                               dedupe_key=f"relu:{seqs[0]}:{seqs[-1]}"))
+            drafts += got.kept
+            if got.failure:
+                # la file porte désormais ses messages : ils ne l'attendent plus
+                drafts.append(deferral(seqs[0], conv, seqs, 1, got, frame, p))
+            failed = bool(got.failure) and not got.kept  # rien n'en est gardé : tout attend la reprise
+            drafts.append(c.RELAYED_READ.draft(seqs=seqs, produced=len(got.kept), failed=failed, call_id=got.call_id,
+                                               model=got.model, dedupe_key=f"relu:{seqs[0]}:{seqs[-1]}"))
+        for key, messages, attempts, about in jobs:
+            drafts.append(c.EXTRACTION_DEFERRED.draft(key=key, source=c.FROM_RELAYED, status="resolved",
+                                                      attempts=attempts, about=tuple(json.loads(about)),
+                                                      detail=Content.of("reprise", level=3)))
+            # une entrée tient une conversation (un lot) ; relue, elle est faite, ou elle revient avec un essai de plus
+            for (recipient, thread), found in sorted(gather(store, tuple(json.loads(messages))).items(),
+                                                     key=lambda kv: kv[1][0]["at"]):
+                seqs = tuple(int(m["seq"]) for m in found[:LINES_MAX])
+                conv = conversation(frame, recipient, thread, found[:LINES_MAX])
+                if conv is None:
+                    continue  # tout oublié depuis, ou plus rien qu'on lui ait écrit : il n'y a plus rien à relire
+                n += 1
+                got = await self._read(ctx, frame, state, store, vectors, directory, conv, her, system, p, n)
+                drafts += got.kept
+                if got.failure:
+                    drafts.append(deferral(seqs[0], conv, seqs, attempts + 1, got, frame, p))
         if drafts:
             await ctx.emit(*drafts)
+        self._next_job(store)
+
+    def _next_job(self, store: Any) -> None:
+        queue = tb.deferred()
+        due = store.query_mind(select(func.min(queue.c.retry_at)).where(queue.c.source == c.FROM_RELAYED,
+                                                                       queue.c.status == "queued"))
+        self.next_job_at = int(due[0][0]) if due and due[0][0] is not None else None
 
     @staticmethod
     async def _read(ctx: Any, frame: Frame, state: MemoryState, store: Any, vectors: Any,
-                    directory: dict[str, tuple[str, ...]], conv: x.Conversation, her: str, system: str, p: Any,
-                    n: int) -> tuple[list[Draft[Any]], str, str] | None:
-        """Une conversation relue : ce que le code en garde, l'appel, le modèle ; ``None`` si l'appel a échoué."""
-        people = x.People.of(conv.speakers, directory, her, scope=conv.key)
+                    directory: dict[str, tuple[str, ...]], conv: Conversation, her: str, system: str, p: Any,
+                    n: int) -> Reading:
+        """Une conversation relue : ce que le code en garde, l'appel, le modèle, et ce qui l'envoie dans la file des
+        reprises — une panne, une réponse illisible, trop longue pour le contexte, une sortie en partie invalide
+        (ce qui en est valide est gardé)."""
+        people = People.of(conv.speakers, directory, her, scope=conv.key)
         shown = await shown_of(frame, store, state, vectors, conv, people, directory, p, promises=False)
         # ce qu'elle sait déjà est facultatif, les messages ne le sont pas
         request, times = fit_by_halving(ctx.llm, partial(extract_request, conv, frame, state, shown, system=system,
                                                          her=her, call_id=f"{ctx.run_id}#{n}", priority=3))
         try:
             response = await ctx.llm.call(request)
-        except Exception as exc:  # noqa: BLE001 — une panne : la conversation attend le passage suivant
+        except PromptBudgetError:
+            log.warning("relecture d'une conversation reçue ailleurs : trop longue pour le contexte")
+            return Reading(failure=BUDGET_EXCEEDED, issues=("PromptBudgetError",))
+        except Exception as exc:  # noqa: BLE001 — une panne : retentée, puis mise en file de reprise
             log.warning("relecture d'une conversation reçue ailleurs : %s", type(exc).__name__)
-            return None
+            return Reading(failure=PROVIDER_ERROR, issues=(type(exc).__name__,))
+        raw = json.dumps([dict(call.args) for call in response.tool_calls], ensure_ascii=False) \
+            if response.tool_calls else response.text
         extraction = x.parse(response)
         if extraction is None:
             log.warning("relecture d'une conversation reçue ailleurs : réponse illisible")
-            return None
+            return Reading(call_id=request.call_id, model=response.model, failure=INVALID_OUTPUT,
+                           issues=(INVALID_OUTPUT,), output=raw)
         kept = await kept_from(extraction, frame, state, store, conv, people, shown.shrunk(times), vectors, p,
                                request.call_id)
-        return kept, request.call_id, response.model
+        if extraction.issues:
+            # leur nombre seulement : leurs textes sont dans le détail de l'entrée, qui s'oublie
+            log.warning("relecture d'une conversation reçue ailleurs : %d éléments invalides écartés",
+                        len(extraction.issues))
+            return Reading(tuple(kept), request.call_id, response.model, INVALID_ITEMS, tuple(extraction.issues),
+                           raw)
+        return Reading(tuple(kept), request.call_id, response.model)
 
 
-__all__ = ["Relay", "conversation", "gather"]
+__all__ = ["Reading", "Relay", "conversation", "deferral", "gather"]

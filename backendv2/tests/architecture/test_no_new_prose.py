@@ -23,7 +23,7 @@ from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "mika"
 ROOTS = ("faculties", "plugins")
-SKIPPED_FILES = re.compile(r"(^|/)((inspect(_\w+)?|actions|params|knobs|reglages)\.py$|inspect/|"
+SKIPPED_FILES = re.compile(r"(^|/)((inspect(_\w+)?|actions|params|reglages)\.py$|inspect/|"
                            r"teams/(?!(triage|voice|tools)\.py$))")
 NOT_FOR_HER = {"debug", "info", "warning", "error", "exception", "critical", "log", "ValueError", "TypeError",
                "RuntimeError", "KeyError", "AssertionError", "Knob", "Setting", "Action", "Panel", "Row", "Column",
@@ -37,7 +37,6 @@ FRENCH = re.compile(r"\b(tu|te|ta|ton|tes|elle|la|le|les|de|des|du|un|une|et|est
 CEILING = {
     "faculties/goals/tend.py": 3,  # raisons de clôture, gardées au journal
     "faculties/goals/tools.py": 1,  # aperçu d'une capacité (console)
-    "faculties/goals/work.py": 6,  # « pourquoi pas maintenant » (console)
     "faculties/identity/detection.py": 2,  # listes de mots (détecteur)
     # liste de mots (``FRAMING`` : les tournures d'un récit sans nom, ADR 0092), pas une phrase ; venue de
     # ``vocab/retelling.py`` le 2026-11-13, qu'un seul propriétaire lisait (audit du 2026-11-05, K0-23)
@@ -47,12 +46,11 @@ CEILING = {
     # récupération (``REMOTE`` : où, quel commit, ce qui partira ou arrivera), lu par l'opératrice dans « À valider »
     # avant son accord, pas par elle (audit du 2026-11-05, C1-07)
     "faculties/projects/atelier.py": 22,
+    # règle de project_steer (console) ; +1 le 2026-10-25 : la description de la capacité projects.steer, piloter sur
+    # ton accord (console, ADR 0133) — venues de tools.py avec le pilotage (audit du 2026-11-05, K5-03)
+    "faculties/projects/steer.py": 2,
     "faculties/projects/tend.py": 4,  # raisons de pause (pannes, cadrage sans plan), gardées au journal
-    # raisons de clôture, gardées au journal ; règle de project_steer (console) ; +1 le 2026-10-25 : la description
-    # de la capacité projects.steer, piloter sur ton accord (console, ADR 0133)
-    "faculties/projects/tools.py": 4,
-    # « pourquoi pas maintenant » (console) ; +2 le 2026-10-27 : un plan qui attend, une séance de cadrage (ADR 0145)
-    "faculties/projects/work.py": 10,
+    "faculties/projects/tools.py": 2,  # raisons de clôture, gardées au journal
     "faculties/world/commands.py": 13,  # refus adressés aux clients du monde, pas à elle
     "plugins/camera/__init__.py": 10,  # panneaux de console
     "plugins/email/tools.py": 2,  # capacité et résumé (console)

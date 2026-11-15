@@ -1,7 +1,9 @@
 {# Elle › Mémoire › Consolidation (app/handmade/tabs/memory.py, ADR 0177) : où en est la relecture, en une phrase et une
    bande de chiffres (ce qu'elle garde mène à ses onglets) ; puis en sous-onglets les passages à reprendre (leur cause,
    leur action sur leur ligne, la réponse du modèle repliée), ses relectures, les tris de la nuit (les souvenirs
-   presque identiques fondus) et l'état détaillé. Une page plus ancienne d'une liste ouvre son sous-onglet. #}
+   presque identiques fondus), ses lectures relues la nuit (combien, ce qu'elle en a retenu, et replié ce que la même
+   nuit a réuni ou confronté) et l'état détaillé de la consolidation. Une page plus ancienne d'une liste ouvre son
+   sous-onglet. #}
 {% import "handmade/shared/tab.html" as tab with context %}
 {% import "handmade/memoire/macros.html" as mem with context %}
 {% from "_forms.html" import action_button %}
@@ -76,9 +78,30 @@
     {{ tab.pager(nights) }}
   </div>
 </section>
+{% elif id == "consol-rereads" %}
+<section id="consol-rereads" data-pane aria-labelledby="consol-rereads-title">
+  <div class="now-card">
+    {{ tab.head(rereads.title, "consol-rereads-title", none, "La nuit, elle relit ce qu’elle a lu dans la journée : ce qu’elle en retient, et les croyances de témoins différents qu’elle réunit ou confronte.") }}
+    {% if reread_items %}
+    <ol class="consol-feed" role="list">
+      {% for r in reread_items %}
+      <li>
+        <span class="consol-feed-when">{{ r.night }}</span>
+        <div class="consol-feed-body">
+          <p><span class="now-num">{{ r.readings }}</span> lecture{{ 's' if r.readings not in ('0', '1') }} relue{{ 's' if r.readings not in ('0', '1') }} · <span class="now-num">{{ r.pairs }}</span> paire{{ 's' if r.pairs not in ('0', '1') }} confrontée{{ 's' if r.pairs not in ('0', '1') }}{% if r.kept and r.kept != '—' %} · <span class="now-num">{{ r.kept }}</span> élément{{ 's' if r.kept not in ('0', '1') }} retenu{{ 's' if r.kept not in ('0', '1') }}{% endif %}</p>
+          <p class="memories-meta">{% if r.model and r.model != '—' %}<span class="consol-model">{{ r.model }}</span>{% else %}<span>sans appel au modèle</span>{% endif %}{% if r.upto and r.upto.t == "link" %}<span>jusqu’au {{ tab.cell(r.upto) }}</span>{% endif %}{% if r.when %}<span>relue {{ tab.cell(r.when) }}</span>{% endif %}{% if r.href %}<a href="{{ r.href }}">Ouvrir l’événement →</a>{% endif %}</p>
+          {% if r.detail %}<details class="person-entry-detail"><summary>Ce que la nuit a réuni ou confronté</summary><div class="stack">{{ tab.inner(r.detail) }}</div></details>{% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}{{ tab.empty(rereads.empty) }}{% endif %}
+    {{ tab.pager(rereads) }}
+  </div>
+</section>
 {% else %}
-<section id="consol-state" data-pane aria-label="État détaillé de la relecture">
-  {{ tab.block(rereading) }}
+<section id="consol-state" data-pane aria-label="La consolidation">
+  {{ tab.block(state) }}
 </section>
 {% endif %}
 {%- endmacro %}
@@ -91,10 +114,11 @@
   </p>
   {{ tab.block(band) }}
   <div class="hm-subtabs" data-subtabs>
-    <nav class="hm-subnav" aria-label="La relecture">
+    <nav class="hm-subnav" aria-label="La consolidation">
       <a href="#consol-queue"{% if queue and queue.count %} class="warn"{% endif %}>À reprendre{% if queue %} <span class="hm-count">{{ queue.count or 0 }}</span>{% endif %}</a>
       <a href="#consol-runs">Ses relectures</a>
       <a href="#consol-nights">Les tris de la nuit</a>
+      <a href="#consol-rereads">Lectures de la nuit</a>
       <div class="hm-subnav-sep"></div>
       <a href="#consol-state">État détaillé</a>
     </nav>

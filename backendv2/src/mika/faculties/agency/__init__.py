@@ -586,7 +586,7 @@ def _crossed(s: AgencyState, frame: Frame, enrich: Mapping[str, Any]) -> str | N
 
 
 def _name(frame: Frame, person: str) -> str:
-    name = frame.get(identity_c.IDENTITY(person)).name
+    name = identity_c.person_name(frame, person)
     return f"« {name} »" if name else phrase("expression.person.unnamed")
 
 

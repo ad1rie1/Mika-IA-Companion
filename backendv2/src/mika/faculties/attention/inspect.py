@@ -58,10 +58,6 @@ SENSITIVITY_FR = {int(Sensitivity.NONE): "rien d'autrui", int(Sensitivity.ANODYN
                   int(Sensitivity.PERSONAL): "personnel", int(Sensitivity.CONFIDENCE): "confidence"}
 
 
-def number(value: float) -> str:
-    return num_fr(value, 2)
-
-
 def _p(frame: Frame) -> Any:
     return params(frame.env.params_of("attention", frame.root))
 
@@ -128,10 +124,10 @@ def _thought_rows(s: AttentionState, frame: Frame, ctx: InspectContext,
                 ("née de", ORIGIN_FR.get(t.origin, t.origin)),
                 *(("concerne", person_ref(frame, a)) for a in t.about),
                 ("sensibilité", SENSITIVITY_FR.get(t.sensitivity, str(t.sensitivity))),
-                ("intensité à la dernière ravivée", number(kept.intensity) if kept is not None else "—"),
+                ("intensité à la dernière ravivée", num_fr(kept.intensity, 2) if kept is not None else "—"),
                 *((("apaisée par des excuses", When(kept.forgiven_at)),)
                   if kept is not None and kept.forgiven_at else ()),
-                ("s'éteint", f"sous {number(p.fade_below)} (demi-vie {num_fr(p.half_life_us / HOUR)} h)"),
+                ("s'éteint", f"sous {num_fr(p.fade_below, 2)} (demi-vie {num_fr(p.half_life_us / HOUR)} h)"),
                 ("outils qui vont avec", t.bundle or "aucun"),
             ), title="Détail"),
             Prose(texts.get(t.text_ref) or FORGOTTEN, title="En entier", reading=True),
@@ -140,7 +136,7 @@ def _thought_rows(s: AttentionState, frame: Frame, ctx: InspectContext,
             Ref("event", str(t.id), f"#{t.id}"),
             _text(texts, t.text_ref),
             emotion_cell(t.emotion, t.intensity),
-            Meter(t.intensity, number(t.intensity)),
+            Meter(t.intensity, num_fr(t.intensity, 2)),
             ORIGIN_FR.get(t.origin, t.origin),
             about_cell(frame, t.about),
             When(t.born_at),
@@ -190,17 +186,17 @@ def _inspect_thoughts(s: AttentionState, frame: Frame, ctx: InspectContext) -> l
         Stat("Pensées à écrire", len(s.pending), "nées, pas encore formulées", "info" if s.pending else ""),
         Stat("Initiatives sans réponse", s.ignored, "d'affilée, toutes personnes", "warn" if s.ignored >= 2 else ""),
         Stat("Y a repensé", When(s.dwelt_at) if s.dwelt_at else "jamais", f"au plus toutes les "
-             f"{p.dwell_every_us // MINUTE} min, dès {number(p.dwell_from)}"),
+             f"{p.dwell_every_us // MINUTE} min, dès {num_fr(p.dwell_from, 2)}"),
     ))
     live = Table(THOUGHT_COLUMNS, rows, title="Ce qui lui trotte dans la tête",
                  empty="rien ne lui trotte dans la tête", layout="cards", link_label="Voir sa naissance",
                  caption="L’intensité indique ce qu’il reste de cette pensée maintenant. Une pensée peut s’estomper "
                          "ou être ravivée ; son état actuel est distinct de l’historique de sa naissance.")
     rules = Fields((
-        ("demi-vie d'une pensée", f"{num_fr(p.half_life_us / HOUR)} h ; s'éteint sous {number(p.fade_below)}"),
-        ("un échange qui marque", f"émotion déclarée ≥ {number(p.marking_intensity)}, ou valence ≤ "
-                                  f"{number(p.marking_valence)} ; au plus {p.exchange_cap} à la fois"),
-        ("des excuses", f"ce qu'un échange blessant lui a laissé garde × {number(p.apology_ease)} de sa force, "
+        ("demi-vie d'une pensée", f"{num_fr(p.half_life_us / HOUR)} h ; s'éteint sous {num_fr(p.fade_below, 2)}"),
+        ("un échange qui marque", f"émotion déclarée ≥ {num_fr(p.marking_intensity, 2)}, ou valence ≤ "
+                                  f"{num_fr(p.marking_valence, 2)} ; au plus {p.exchange_cap} à la fois"),
+        ("des excuses", f"ce qu'un échange blessant lui a laissé garde × {num_fr(p.apology_ease, 2)} de sa force, "
                         "et s'apaise"),
         ("dernière nuit digérée", s.digested_night or "—"),
     ), title="Comment elles vivent")
@@ -225,9 +221,9 @@ def _recent(s: AttentionState, ctx: InspectContext) -> Table:
             When(h.at),
             Ref("event", str(h.signal), h.source) if h.signal else h.source,
             h.kind,
-            Meter(h.pertinence, number(h.pertinence)),
-            Meter(h.weight, number(h.weight)),
-            Meter(h.pertinence * h.weight, number(h.pertinence * h.weight)),
+            Meter(h.pertinence, num_fr(h.pertinence, 2)),
+            Meter(h.weight, num_fr(h.weight, 2)),
+            Meter(h.pertinence * h.weight, num_fr(h.pertinence * h.weight, 2)),
             _dosed(d.emotion if d is not None else "", h.intensity),
         ))
     return Table((Column("quand", "fit"), Column("source", role="title"), Column("sorte"), Column("pertinence annoncée", detail=True),
@@ -244,8 +240,8 @@ def _waiting(s: AttentionState, frame: Frame, ctx: InspectContext) -> Table:
     for x in reversed(s.signals):
         weight, _room = habituation(s, x.source, x.kind, frame.now, p)
         rows.append((When(x.at), Ref("event", str(x.seq), x.source), x.kind, _text(texts, x.summary_ref),
-                     Meter(x.pertinence, number(x.pertinence)),
-                     Meter(x.pertinence * weight, number(x.pertinence * weight))))
+                     Meter(x.pertinence, num_fr(x.pertinence, 2)),
+                     Meter(x.pertinence * weight, num_fr(x.pertinence * weight, 2))))
     return Table((Column("signalé", "fit"), Column("source", role="title"), Column("sorte"), Column("résumé", role="body"),
                   Column("pertinence annoncée"), Column("retenue si remarqué maintenant")), tuple(rows),
                  title="Signalé, pas encore remarqué", empty="rien en attente", layout="cards")
@@ -254,7 +250,7 @@ def _waiting(s: AttentionState, frame: Frame, ctx: InspectContext) -> Table:
 def _noticed_history(ctx: InspectContext) -> Table:
     events, pager = _page(ctx, [c.NOTICED], HISTORY)
     rows = tuple((When(e.at), Ref("event", str(e.data.signal), e.data.source), e.data.kind,
-                  Meter(e.data.weight, number(e.data.weight)), _dosed(e.data.emotion, e.data.intensity))
+                  Meter(e.data.weight, num_fr(e.data.weight, 2)), _dosed(e.data.emotion, e.data.intensity))
                  for e in events)
     return Table((Column("quand", "fit"), Column("source"), Column("sorte"), Column("poids (habituation)"),
                   Column("émotion dosée")), rows, title="Tout ce qu'elle a remarqué",
@@ -269,10 +265,10 @@ def _noticed_history(ctx: InspectContext) -> Table:
 def _inspect_noticed(s: AttentionState, frame: Frame, ctx: InspectContext) -> list[Block]:
     p = _p(frame)
     rules = Fields((
-        ("habituation", f"× {number(p.habituation_factor)} par répétition en {p.habituation_window_us // MINUTE} "
-                        f"min, jamais sous {number(p.habituation_floor)}"),
-        ("dosage", f"au plus {number(p.dose_cap)} d'émotion par source dans cette fenêtre"),
-        ("une pensée naît d'un signal", f"à partir d'une pertinence retenue de {number(p.signal_thought_from)}"),
+        ("habituation", f"× {num_fr(p.habituation_factor, 2)} par répétition en {p.habituation_window_us // MINUTE} "
+                        f"min, jamais sous {num_fr(p.habituation_floor, 2)}"),
+        ("dosage", f"au plus {num_fr(p.dose_cap, 2)} d'émotion par source dans cette fenêtre"),
+        ("une pensée naît d'un signal", f"à partir d'une pertinence retenue de {num_fr(p.signal_thought_from, 2)}"),
     ), title="Comment elle remarque")
     blocks: list[Block] = [_recent(s, ctx)]
     if s.signals:
@@ -379,11 +375,8 @@ def _thread(s: AttentionState, frame: Frame, key: str) -> Fields | None:
                ("la personne a lu sa dernière initiative", "Ce que dit son application (« Lui dire quand j'ai lu »), "
                 "par messagerie : pas encore lue, elle ne compte pas comme ignorée.")))
 
-#: le type d'objet « personne » (déclaré par l'identité) : l'onglet se range sur sa fiche
-PERSON_KIND = "person"
 
-
-@ATTENTION.inspect("pensees_personne", title="Pensées", subject=PERSON_KIND, hidden=not PERSON_KIND, order=80,
+@ATTENTION.inspect("pensees_personne", title="Pensées", subject="person", order=80,
                    description="Ce qui lui trotte dans la tête à propos de cette personne, et ce qu'elle en attend.")
 def _person(s: AttentionState, frame: Frame, ctx: InspectContext) -> list[Block]:
     if not ctx.subject:

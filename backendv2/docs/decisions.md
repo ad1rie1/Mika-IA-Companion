@@ -25,15 +25,15 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 |---|---|
 | Le noyau : journal, arbitrage, pipeline | 0001, 0002, 0003, 0006, 0007, 0008, 0009, 0014, 0015, 0021, 0040, 0059, 0149, 0151, 0221, 0222, 0223 |
 | Le stockage | 0004, 0101, 0212 |
-| Sa mémoire et ce qu'elle sait | 0010, 0011, 0034, 0046, 0052, 0055, 0074, 0076, 0078, 0079, 0080, 0081, 0082, 0083, 0084, 0085, 0086, 0087, 0091, 0099, 0109, 0110, 0111, 0153 |
-| Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134, 0148, 0184, 0185, 0186, 0188, 0207, 0220 |
+| Sa mémoire et ce qu'elle sait | 0010, 0011, 0034, 0046, 0052, 0055, 0074, 0076, 0078, 0079, 0080, 0081, 0082, 0083, 0084, 0085, 0086, 0087, 0091, 0099, 0109, 0110, 0111, 0153, 0224 |
+| Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134, 0148, 0184, 0185, 0186, 0188, 0207, 0220, 0226 |
 | Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137, 0150, 0155, 0160 |
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144, 0145, 0161 |
 | Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163, 0166, 0168, 0171, 0172, 0189, 0190, 0191, 0192, 0193, 0194, 0195, 0196, 0198, 0199, 0211, 0213, 0214 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170, 0187, 0200, 0208, 0209, 0215 |
-| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176, 0177, 0178, 0179, 0180, 0181, 0182, 0183, 0197, 0201, 0202, 0203, 0204, 0205, 0206, 0210, 0216, 0217, 0218, 0219 |
+| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176, 0177, 0178, 0179, 0180, 0181, 0182, 0183, 0197, 0201, 0202, 0203, 0204, 0205, 0206, 0210, 0216, 0217, 0218, 0219, 0225 |
 | Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135 |
 
 ## Le noyau : journal, arbitrage, pipeline
@@ -529,6 +529,14 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Révise 0019 (en partie : la sorte du rêve), 0055 (en partie : la fiche), 0084 (en partie : le corps), 0085 (en partie : ses lectures en réponse).*
 
+### 0224 — Une conversation lue sur un téléphone qui n'a pas pu être relue attend dans la file des reprises
+
+- La relecture d'une conversation reçue ailleurs (`memory.relayed`, ADR 0120) suit la règle des siennes : une panne qui dure (après trois essais), une réponse illisible ou une sortie partielle va dans la file durable des reprises (`memory.extraction_deferred`), visible et reprenable dans Mémoire › Consolidation ; les éléments valides d'une sortie partielle sont gardés, et l'entrée attend un opérateur.
+- Chaque entrée dit sa source (`source` : « thread », le fil ; « relayed », des messages reçus ailleurs, relus par leur numéro au journal) ; un événement d'avant ce champ vient du fil. Chaque processus ne reprend que les siennes, une par passage, et la reprise d'un opérateur garde la source. La file monte de version et se reconstruit depuis le journal, sans migration. Ses personnes, clés `phone:` comprises, la font oublier.
+- Ses messages ne l'attendent plus (`memory.relayed_read`, `failed` quand rien n'en est gardé) : la file les porte.
+
+*Pourquoi :* trois échecs perdaient une conversation du téléphone pour sa mémoire, sans trace visible ni reprise possible, alors que la doc annonçait la file durable (audit du 2026-11-05 : K4-01, décision K4-Q1). Elle complète l'ADR 0120, qui ne disait rien des échecs.
+
 ## Identité et divulgation
 
 ### 0012 — La confiance se prouve ; le modèle ne peut que douter
@@ -612,7 +620,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Pourquoi :* « un salon n'existe pas dans la sélection de qui ? » — « qui » mélangeait la personne et la situation, et cinq règles restaient cachées dans le code ; « il faudrait rajouter canal source » ; « ils doivent aussi avoir leur tableau de droits » (sa boîte mail, Internet, chaque app sans projet) ; ses propres outils sont « le minimum vital : pré-rempli, modifiable, et dépendant du moteur de droits comme le reste ».
 
-*Révise 0122 (en partie), 0131 (en partie), 0132 (en partie), 0133 (en partie). Révisée par 0148, 0184, 0185, 0220.*
+*Révise 0122 (en partie), 0131 (en partie), 0132 (en partie), 0133 (en partie). Révisée par 0148, 0184, 0185, 0220, 0226.*
 
 ### 0148 — Ce qu'un outil exige de qui est en face, il le déclare
 
@@ -694,6 +702,16 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 *Pourquoi :* aucun outil ne posait le champ, et la page gardait une branche qui ne pouvait pas servir ; un champ que personne ne pose fait croire qu'il compte (audit du 2026-11-05, décision K1-Q1).
 
 *Révise 0134 (en partie : un accord ne se règle pour aucun de ses propres outils).*
+
+### 0226 — La colonne d'un outil dit ce qu'il ouvre : son journal lit, douter reste avec ce qui lit
+
+- `ToolSpec.acts` choisit la colonne d'un tableau de droits (« un outil qui lit », « un outil qui agit ») et le plafond qui s'y applique ; c'est ce que disent Réglages › Droits, Outils et `/api/moi/rights` (« elle lit », « elle agit »).
+- Relire son journal (`self_journal`) est un outil qui lit. Une condition déclarée (0148, `in_known_company`) le garde d'une inconnue et d'un salon, et son gestionnaire la revérifie. Par Internet, quelqu'un d'autre que toi compte comme une inconnue, même relié à une personne par un opérateur (rien ne prouve qui écrit) : la condition l'y ferme, comme le plafond d'une action le faisait. Qui peut le lui faire relire en conversation ne change donc nulle part.
+- Douter de qui écrit (`identity_doubt`) et défaire une liaison (`identity_forget_binding`) écrivent une preuve, mais ne font que baisser la confiance (0012) : ils restent dans la colonne « lecture », pour servir devant une inconnue et à plusieurs, là où une usurpation se tente. Aucune garde n'exige qu'un outil qui émet soit marqué `acts`.
+
+*Pourquoi :* l'audit a trouvé deux drapeaux à l'envers de ce que faisaient leurs outils ; les inverser tels quels aurait fermé le doute là où il sert et ouvert son journal aux inconnues (audit du 2026-11-05, K6-01, décision K6-Q1).
+
+*Révise 0134 (en partie : un outil dit s'il lit ou s'il agit au regard des droits ; ce qui ne fait que baisser la confiance se range avec ce qui lit).*
 
 ## Sa vie intérieure : affect, corps, besoins, liens, initiatives
 
@@ -2672,6 +2690,15 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 
 *Révise 0185 (en partie : l'onglet Comptes paraît aussi pour un service ou un partage), 0186 (en partie : de même, et Teams s'y joint alors), 0197 (en partie : une entrée neuve s'intitule « Ajouter un fournisseur »), 0209 (en partie : le service du système a un but écrit pour la personne, et une case d'app redit sa ligne).*
 
+### 0225 — Un texte que la console affiche ne cite pas de numéro d'ADR
+
+- Une description d'action, une note, l'aide d'un réglage, la description d'un droit ou d'une vue disent la règle en clair, sans « (ADR NNNN) » : le numéro est un renvoi de développeur, qui n'aide pas à décider d'un geste.
+- Le renvoi reste dans les docstrings, les commentaires et la doc (`ARCHITECTURE.md`, `docs/console-carte.md`, `docs/decisions.md`).
+- Une raison déjà gardée au journal ne se réécrit pas.
+- Les textes des autres propriétaires suivent quand leur périmètre passe ; une garde viendra quand il n'en restera plus.
+
+*Pourquoi :* l'audit en a retiré à quatre reprises, page par page (les descriptions de section, deux pages de réglages et d'Outils, les buts et les projets), sans que la règle soit écrite (audit du 2026-11-05, L05, C7-13, F4-08, puis K5-13 et la décision K5-Q2).
+
 ## Ce que les sondes et les audits ont fixé
 
 ### 0043 — Ce qu'une semaine avec un vrai modèle a montré
@@ -2703,7 +2730,7 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 - Ses bonjours sont les siens : simple à une inconnue, ses petits mots de persona à qui elle connaît. Jamais une formule tendue au modèle : elle se recopie.
 - Une réponse qui redit mot pour mot son dernier message ne part pas (abstention) ; un petit mot peut se redire.
 - En salon, hors secret, elle ne prétend pas ne rien savoir : ce qui s'est dit en privé ne se raconte pas ici. Un secret ne laisse rien deviner.
-- Face à des réponses de quelques mots, elle fait court, sans question (`others.curt`). Après une abstention ou une panne, chaque hésitation envers la personne double (`agency.HESITATING`).
+- Face à des réponses de quelques mots, elle fait court, sans question (`faculties/others/faculty.py::curt_run` ; sa règle : `contracts/others.py::few_words`). Après une abstention ou une panne, chaque hésitation envers la personne double (`agency.HESITATING`).
 - Un fournisseur qui ne sait pas différer (Ollama, compatibles OpenAI) reçoit ses outils en main ; un outil qui réussit peut clore la boucle (`ToolSpec.ends_loop`).
 
 *Pourquoi :* une seconde semaine (deuil, anniversaire, surnom, salon) a montré des tics, des mensonges par ignorance en salon et des appels inutiles.

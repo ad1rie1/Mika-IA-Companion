@@ -12,13 +12,18 @@ rappel à l'heure, raconter ce qu'elle a mené à bout.
 - **Raconter** : à qui, et combien, dépend du lien — jamais d'un appel au
   modèle. La personne que ça concerne si elle est amie ou proche, sinon sa
   propriétaire ; à la propriétaire tout, à une proche l'essentiel, à une amie
-  une simple mention ; à personne d'autre. Une inquiétude pour quelqu'un n'est
+  une simple mention ; à personne d'autre (``contracts.social.retelling``,
+  l'échelle commune aux buts et aux projets ; l'adresse :
+  ``contracts.identity.reach_now``). Une inquiétude pour quelqu'un n'est
   pas une bonne nouvelle : à cette personne-là, elle prend de ses nouvelles. La
   consigne ne renvoie à aucune section (le murmure qui précède l'entend aussi)
   et ne dit rien du contenu.
 """
 
 from __future__ import annotations
+
+from enum import StrEnum
+from typing import Any
 
 from mika.contracts import body as body_c
 from mika.contracts import goals as c
@@ -50,9 +55,7 @@ from mika.vocab.phrasebook import phrase
 
 #: au-dessus de la barre de réveil : un rappel urgent la réveille
 URGENT_EVIDENCE = body_c.WAKE_BAR + 2.0
-FULL, SUMMARY, MENTION = "full", "summary", "mention"
 STEP_MAY_SEE = (c.ACTIVE, c.WAITING, c.ACHIEVED, c.STUCK)
-_RANK = {level: i for i, level in enumerate(social_c.CLOSENESS_LEVELS)}
 
 
 def _still(goal: int, wanted: tuple[str, ...]) -> Guard:
@@ -93,36 +96,44 @@ def _work(s: GoalsState, frame: Frame) -> list[Candidate]:
     return out
 
 
-def why_not_now(g: Goal, s: GoalsState, frame: Frame) -> str:
-    """Pourquoi ce but n'a pas de séance maintenant, en mots (vide : il peut en avoir une)."""
+class Why(StrEnum):
+    """Ce qui retient la séance d'un but (``why_not_now``) : un code, que la console dit en mots
+    (``inspect.WHY_WORDS``) et date quand il le faut (``inspect.LATER_WORDS``)."""
+
+    OLD_PROJECT = "old_project"  # un ancien projet, d'avant les projets à part
+    WAITING = "waiting"  # elle attend une réponse (``whom``) ou un délai
+    BUSY = "busy"  # une séance est en cours
+    BUDGET = "budget"  # au bout de ses séances (``done`` sur ``most``)
+    ASLEEP = "asleep"  # elle dort
+    NO_SLOT = "no_slot"  # plus de créneau
+    HOUR_CAP = "hour_cap"  # le plafond de l'heure, tous buts confondus (``cap``)
+    LATER = "later"  # l'espacement des séances la fixe plus tard
+
+
+def why_not_now(g: Goal, s: GoalsState, frame: Frame) -> tuple[Why, dict[str, Any]] | None:
+    """Pourquoi ce but n'a pas de séance maintenant : la raison et ce que ses mots citent (``None`` : il peut en
+    avoir une). Pour une exploration active ou en attente : ``inspect.next_session`` écarte avant un rappel, un but
+    clos ou en pause. L'ordre des tests est la règle ; les mots sont à la console."""
     p = params(frame.env.params_of("goals", frame.root))
     now = frame.now
-    st = status(g, now)
-    if g.kind == c.REMINDER:
-        return "un rappel n'a pas de séance de travail : il se dit à l'heure"
     if g.kind != c.EXPLORATION:
-        return "un ancien projet (avant les projets à part) : il n'a plus de séance"
-    if st in c.CLOSED_STATUSES:
-        return "il est clos"
-    if st == c.PAUSED:
-        return "il est en pause : reprends-le"
-    if st == c.WAITING:
-        whom = f"la réponse de {_name(frame, g.wait_for) or g.wait_for}" if g.wait_for else "un délai"
-        return f"elle attend {whom}"
+        return Why.OLD_PROJECT, {}
+    if status(g, now) == c.WAITING:
+        return Why.WAITING, {"whom": g.wait_for or ""}
     if any(r.goal == g.id and r.purpose == "step" for r in s.running.values()):
-        return "une séance est en cours"
+        return Why.BUSY, {}
     if g.steps >= budget(g, p):
-        return f"au bout de ses séances ({g.steps} sur {budget(g, p)})"
+        return Why.BUDGET, {"done": g.steps, "most": budget(g, p)}
     if frame.get(body_c.SLEEP) is not body_c.SleepPhase.AWAKE:
-        return "elle dort : aucune séance la nuit"
+        return Why.ASLEEP, {}
     at = next_step_at(g, s, frame)
     if at is None:
-        return "plus de créneau"
+        return Why.NO_SLOT, {}
     if sum(1 for t in s.steps_at if now - t < HOUR) >= p.steps_per_hour:
-        return f"plafond atteint : {p.steps_per_hour} séances par heure, tous buts confondus"
+        return Why.HOUR_CAP, {"cap": p.steps_per_hour}
     if at > now:
-        return "pas encore : l'espacement des séances la fixe plus tard"
-    return ""
+        return Why.LATER, {}
+    return None
 
 
 @GOALS.modulate(kinds=[Kind.STEP])
@@ -137,25 +148,10 @@ def _hourly(s: GoalsState, frame: Frame, row: RowView) -> Modulation:
     return Modulation(veto=c.STEP_CAP) if recent >= p.steps_per_hour else Modulation()
 
 
-def _name(frame: Frame, key: str | None) -> str:
-    if not key:
-        return ""
-    return frame.get(identity_c.IDENTITY(key)).name
-
-
-def _address(frame: Frame, person: str) -> str | None:
-    handles = frame.get(identity_c.HANDLES(person)) or (person,)
-    present = [h for h in frame.get(presence_c.PRESENT) if h in handles]
-    if present:
-        return present[0]
-    reachable = frame.get(identity_c.REACHABLE(person))
-    return reachable[0] if reachable else None
-
-
 def remind_address(g: Goal, frame: Frame) -> str | None:
     """Où dire un rappel à l'échéance : là où la personne est maintenant (connectée, sinon joignable), sinon
     l'adresse d'où venait la demande."""
-    return (_address(frame, g.owner) if g.owner else None) or g.address
+    return (identity_c.reach_now(frame, g.owner) if g.owner else None) or g.address
 
 
 @GOALS.propose(kinds=[Kind.INITIATIVE], reasons={c.REMIND: (0.0, URGENT_EVIDENCE)},
@@ -173,7 +169,7 @@ def _remind(s: GoalsState, frame: Frame) -> list[Candidate]:
         address = remind_address(g, frame)
         if not address:
             continue
-        who = _name(frame, g.owner) or _name(frame, address)
+        who = identity_c.person_name(frame, g.owner or "") or identity_c.person_name(frame, address)
         brief = phrase("goals.brief.remind", who=f"« {who} »" if who else phrase("expression.person.unnamed"))
         out.append(Candidate(
             Kind.INITIATIVE, address, c.REMIND, URGENT_EVIDENCE if g.urgent else p.remind_evidence,
@@ -185,7 +181,10 @@ def _remind(s: GoalsState, frame: Frame) -> list[Candidate]:
 def confidant(g: Goal, frame: Frame) -> tuple[str, str, str] | None:
     """(personne, adresse, niveau de récit) — ou personne. La personne que ça
     concerne d'abord (si elle est amie, proche ou propriétaire), sinon une
-    propriétaire joignable ; jamais quelqu'un qui n'est ni l'un ni l'autre."""
+    propriétaire joignable ; jamais quelqu'un qui n'est ni l'un ni l'autre. Le
+    niveau suit l'échelle de ``contracts.social.retelling`` ; une propriétaire
+    n'entend un but que s'il la concerne, ou s'il ne parle de personne
+    (``about`` vide)."""
     candidates: list[str] = []
     if g.owner:
         candidates.append(g.owner)
@@ -194,14 +193,10 @@ def confidant(g: Goal, frame: Frame) -> tuple[str, str, str] | None:
         candidates += [o for o in frame.get(identity_c.OWNERS) if o not in candidates]
     for person in candidates:
         concerned = person == g.owner or person in g.about
-        if frame.get(identity_c.IS_OWNER(person)) and (concerned or not g.about):
-            level = FULL
-        else:
-            closeness = frame.get(social_c.CLOSENESS(person))
-            if not concerned or _RANK.get(closeness, 0) < _RANK[social_c.FRIEND]:
-                continue
-            level = SUMMARY if closeness == social_c.CLOSE else MENTION
-        address = _address(frame, person)
+        level = social_c.retelling(frame, person, concerned=concerned, owner_hears=concerned or not g.about)
+        if level is None:
+            continue
+        address = identity_c.reach_now(frame, person)
         if address is not None:
             return person, address, level
     return None
@@ -220,7 +215,7 @@ def share_brief(g: Goal, person: str, address: str, frame: Frame) -> str:
     qu'elle en sait est déjà à la mesure du lien, dans la section du sujet). La consigne ne renvoie à aucune section
     et ne dit rien du contenu (le murmure qui la précède s'entend)."""
     if worry_of(g, person):
-        name = _name(frame, person) or _name(frame, address)
+        name = identity_c.person_name(frame, person) or identity_c.person_name(frame, address)
         return phrase("goals.brief.worry", who=f"« {name} »" if name else phrase("expression.person.unnamed"))
     return phrase("goals.brief.share")
 
@@ -233,7 +228,7 @@ def worry_due(g: Goal, person: str, frame: Frame, p: GoalsParams) -> bool:
     handles = frame.get(identity_c.HANDLES(person)) or (person,)
     if max(frame.get(transcript_c.LAST_TO(h)) for h in handles) > g.closed_at:
         return False
-    heard = max(frame.get(transcript_c.LAST_FROM(h)) for h in handles)
+    heard = identity_c.last_heard(frame, person)
     return frame.now >= max(heard + p.share_worry_after_us, frame.get(others_c.CHECK_IN_AT(person)))
 
 

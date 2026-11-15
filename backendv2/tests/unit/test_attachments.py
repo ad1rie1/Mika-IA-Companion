@@ -33,22 +33,13 @@ from mika.faculties.attachments.faculty import (
     MISSING,
     AttachmentsParams,
     AttachmentsState,
-    carried_table,
     due_expiries,
     file_id,
-    files_table,
-    links_table,
 )
 from mika.faculties.attachments.inspect import REMOVE
-from mika.faculties.memory.extraction import (
-    Extraction,
-    Line,
-    Piece,
-    XCroyance,
-    XSouvenir,
-    pieces_of,
-    pieces_words,
-)
+from mika.faculties.attachments.tables import carried_table, files_table, links_table
+from mika.faculties.memory.conversation import Line, Piece, pieces_of, pieces_words
+from mika.faculties.memory.extraction import Extraction, XCroyance, XSouvenir
 from mika.kernel.events import Content, Origin
 from mika.kernel.state import FrozenDict
 from mika.ports.preprocess import Studied

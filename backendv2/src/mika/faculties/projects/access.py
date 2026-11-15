@@ -81,7 +81,6 @@ def shares_files(p: Project | c.ProjectView, audience: Any, kind: str, frame: Fr
 def who_named(frame: Frame | None, who: str | Sequence[str]) -> str:
     """Qui une ligne désigne, en mots (``vocab.access.who_words``), une personne par son nom."""
     def name(person: str) -> str:
-        view = frame.get(identity_c.IDENTITY(person)) if frame is not None and person else None
-        return str(getattr(view, "name", "") or person)
+        return (identity_c.person_name(frame, person) if frame is not None else "") or person
 
     return who_words(who, name)

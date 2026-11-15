@@ -59,12 +59,13 @@ from mika.faculties.projects.faculty import (
     living,
     nudged,
     objective_at,
+    objectives_of,
+    opened,
     outgoing,
     params,
-    pick,
     project_at,
 )
-from mika.faculties.projects.tools import objectives_of, opened
+from mika.faculties.projects.rhythm import pick
 from mika.kernel.clock import HOUR
 from mika.kernel.events import Content
 from mika.kernel.forms import UPLOAD_MAX, Knob, Upload
@@ -644,6 +645,7 @@ def _resume(s: ProjectsState, frame: Frame, args: NoArgs, ctx: ActionContext) ->
                 message="Projet repris.", guard=_still(p.id, (c.PAUSED,)))
 
 
+# la réponse à son plan (ADR 0145) : le valider, ou lui demander de le reprendre
 def _plan_waits(s: ProjectsState, frame: Frame, key: str) -> bool:
     p = project_at(s, key)
     return p is not None and p.status == c.ACTIVE and p.plan_state == c.PROPOSED
@@ -656,7 +658,7 @@ def _plan_revisable(s: ProjectsState, frame: Frame, key: str) -> bool:
 
 @PROJECTS.action("plan_valider", title="Valider le plan", args=NoArgs, emits=[PLAN_ANSWERED], subject="project",
                  order=3, available=_plan_waits, inline=True,
-                 description="Son plan attend une réponse : validé, le projet le suit et elle s'y met (ADR 0145).")
+                 description="Son plan attend une réponse : validé, le projet le suit et elle s'y met.")
 def _plan_approve(s: ProjectsState, frame: Frame, args: NoArgs, ctx: ActionContext) -> Done:
     p = _target(s, ctx)
     return Done(drafts=(PLAN_ANSWERED.draft(project=p.id, verdict=APPROVE, by=ctx.by, owner=p.owner, about=p.about),),
@@ -671,7 +673,7 @@ class ReviseArgs(BaseModel):
 
 @PROJECTS.action("plan_reviser", title="Demander une révision du plan", args=ReviseArgs, emits=[PLAN_ANSWERED],
                  subject="project", order=4, available=_plan_revisable, inline=True,
-                 description="Elle reprend son plan (une séance de cadrage), avec ce que tu lui dis (ADR 0145).")
+                 description="Elle reprend son plan (une séance de cadrage), avec ce que tu lui dis.")
 def _plan_revise(s: ProjectsState, frame: Frame, args: ReviseArgs, ctx: ActionContext) -> Done:
     p = _target(s, ctx)
     text = args.words.strip()

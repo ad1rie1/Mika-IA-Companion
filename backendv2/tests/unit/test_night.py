@@ -4,6 +4,8 @@
   rattrape au matin ; une nuit blanche appartient encore à la veille ; une
   nuit coupée par une conversation fait réécrire le journal ; « [SILENCE] »
   n'est pas un journal ;
+- le jour vécu se lit à un seul endroit (``self.faculty``), en clé comme en
+  date ;
 - le journal dit ce qu'elle a fait : un jour où elle a écrit sans réponse
   n'est pas « personne ne m'a parlé » ; une date en clair, aucun comptage ;
 - le fil d'hier nomme les autres seulement pour qui peut entendre ce qui les
@@ -40,6 +42,8 @@ from mika.faculties.body import params as body_params
 from mika.faculties.body import sleep as sl
 from mika.faculties.goals.faculty import GoalsParams
 from mika.faculties.self import SelfParams, days
+from mika.faculties.self import night as self_night
+from mika.faculties.self.faculty import day_of, lived_date, lived_day_of, night_of, starts_of
 from mika.faculties.self.night import CYCLE, JournalArgs, dream_of, recall_chance, self_journal, vividness_of
 from mika.faculties.self.records import Dream
 from mika.faculties.world import WorldParams
@@ -51,6 +55,7 @@ from mika.kernel.events import Content, Origin, VoiceProvenance
 from mika.kernel.frame import Audience
 from mika.kernel.inspect import Table
 from mika.ports.llm import LLMResponse, ToolCall
+from mika.runtime.bootstrap import ReadOnlyStore
 from mika.runtime.inspection import Inspection
 from mika.sim.clock import run_virtual
 from mika.vocab import circadian
@@ -595,6 +600,20 @@ def test_a_white_night_belongs_to_the_day_before():
     assert days.night_of(tuesday(23, 10), PARIS, starts).isoformat() == "2026-09-29"
 
 
+def test_her_lived_day_is_read_in_one_place():
+    """Dans un réducteur comme depuis un cadre, la même journée ; la nuit n'en garde pas de copie à elle."""
+    tuesday = lambda h, m=0: instant(datetime(2026, 9, 29, h, m, tzinfo=PARIS))  # noqa: E731
+    rhythm = circadian.DEFAULT
+    frame = SimpleNamespace(now=tuesday(1, 30), root="mika", env=SimpleNamespace(tz_of=lambda _root: PARIS),
+                            get=lambda key: rhythm if key == body_c.RHYTHM else None)
+    cx = SimpleNamespace(tz=PARIS, facts={body_c.RHYTHM: rhythm})
+    assert starts_of(frame) == days.day_starts(rhythm)
+    assert lived_date(frame).isoformat() == lived_day_of(frame, frame.now) == day_of(cx, frame.now) == "2026-09-28"
+    assert lived_date(frame, tuesday(9)).isoformat() == "2026-09-29"
+    assert night_of(frame, tuesday(6, 30)) == "2026-09-28"  # une nuit blanche : la veille
+    assert not any(hasattr(self_night, copy) for copy in ("_starts", "lived_day")) and self_night.night_of is night_of
+
+
 def test_a_night_cut_by_a_conversation_rewrites_the_journal(tmp_path):
     async def scenario(kernel):
         await befriend(kernel, "user_1", "close")
@@ -813,6 +832,36 @@ def test_her_nights_page_only_offers_more_when_there_is_more(tmp_path, written):
     assert bool(history.pager.older) == (written > 14)
 
 
+def test_paging_through_her_nights_reads_no_preview_text(tmp_path, monkeypatch):
+    """En feuilletant « Toutes ses nuits » (``?avant=``), la vue ne rend que
+    l'historique : elle ne va pas chercher au magasin les textes de l'aperçu,
+    qu'elle jetterait. La première page, elle, les lit."""
+    script = Script()
+    script.journal = "[SILENCE]"
+    reads: list[list[str]] = []
+    real = ReadOnlyStore.content
+
+    def counted(self, refs):
+        reads.append(list(refs))
+        return real(self, refs)
+
+    async def scenario(kernel):
+        await kernel.mind.append([_journal(f"2026-08-{d:02d}", f"journal {d}") for d in range(1, 16)],
+                                 emitter="self", correlation="journaux", origin=Origin.GENESIS)
+        ins = Inspection(kernel)
+        monkeypatch.setattr(ReadOnlyStore, "content", counted)
+        first = ins.run(ins.find("self", "nuits"), {})
+        read_first = len(reads)
+        older = dict(next(b for b in first if isinstance(b, Table) and b.title == "Toutes ses nuits").pager.older)
+        page = ins.run(ins.find("self", "nuits"), older)
+        return read_first, len(reads) - read_first, page
+
+    (read_first, read_paging, page), _ = build_run(tmp_path, scenario, script=script)
+    assert read_first  # l'aperçu lit bien ses textes : la mesure n'est pas vide
+    assert read_paging == 0
+    assert [b.title for b in page] == ["Toutes ses nuits"] and len(page[0].rows) == 1
+
+
 def test_she_rereads_an_older_journal_on_demand_not_yesterdays(tmp_path):
     """Les sections présentes ne se relisent pas par un outil (« attends, je
     vérifie ») ; un journal plus ancien, si."""
@@ -825,14 +874,23 @@ def test_she_rereads_an_older_journal_on_demand_not_yesterdays(tmp_path):
                                  emitter="self", correlation="journaux", origin=Origin.GENESIS)
         await until(kernel, at_paris(2026, 9, 29, 10, 0))
         await (await kernel.perceive(said("user_1", "salut"))).reply
-        aud = Audience(persons=("user_1",), channel="web", public=False, level=3, witness_level=3, private_ok=True)
+        # toi, connectée : sa condition (ni une inconnue, ni un salon) tient
+        aud = Audience(persons=("user_1",), channel="web", public=False, level=3, witness_level=3, private_ok=True,
+                       trust="authenticated", owner=True)
         frame = kernel.mind.frame(audience=aud)
         ctx = SimpleNamespace(frame=frame, state=frame.state("self"), ports=kernel.ports)
-        return await self_journal(JournalArgs(days_ago=3), ctx), await self_journal(JournalArgs(days_ago=2), ctx)
+        # une inconnue : son gestionnaire revérifie la condition que l'offre a jugée (ADR 0148, 0226)
+        stranger = kernel.mind.frame(audience=Audience(persons=("web_x",), channel="web", public=False, level=3,
+                                                       witness_level=3, trust="public"))
+        refused = await self_journal(JournalArgs(days_ago=3), SimpleNamespace(
+            frame=stranger, state=stranger.state("self"), ports=kernel.ports))
+        return (await self_journal(JournalArgs(days_ago=3), ctx), await self_journal(JournalArgs(days_ago=2), ctx),
+                refused)
 
-    (saturday, sunday), llm = build_run(tmp_path, scenario, script=script)
+    (saturday, sunday, refused), llm = build_run(tmp_path, scenario, script=script)
     assert "CANARI-SAMEDI" in saturday and "samedi 26 septembre" in saturday
     assert sunday == "Tu n'as rien écrit sur ta journée du dimanche 27 septembre."
+    assert refused == "Tu n'as rien écrit sur ta journée du samedi 26 septembre."
     reply = next(c for c in llm.calls if c.role == "reply")
     offered = {t.name for t in reply.tools}
     assert not offered & {"self_read", "self_yesterday", "self_dream"}  # ils relisaient une section présente

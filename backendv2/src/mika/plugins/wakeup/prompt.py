@@ -82,12 +82,7 @@ def call_of_episode(s: WakeupState, frame: Frame) -> Call | None:
 
 def address_of(frame: Frame, person: str) -> str | None:
     """Où lui écrire : là où la personne est maintenant (connectée), sinon où on peut lui écrire absente."""
-    handles = frame.get(identity_c.HANDLES(person)) or (person,)
-    present = [h for h in frame.get(presence_c.PRESENT) if h in handles]
-    if present:
-        return present[0]
-    reachable = frame.get(identity_c.REACHABLE(person))
-    return reachable[0] if reachable else None
+    return identity_c.reach_now(frame, person)
 
 
 def _hears(frame: Frame, address: str) -> bool:

@@ -73,7 +73,7 @@ from mika.kernel.events import Draft
 from mika.kernel.faculty import Faculty, Zone
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
-from mika.kernel.guards import Guard, floor
+from mika.kernel.guards import floor
 from mika.kernel.prompt import SectionBody
 from mika.kernel.state import FrozenDict
 from mika.vocab import causes, privacy
@@ -857,15 +857,43 @@ def _receptive(s: OthersState, frame: Frame, row: RowView) -> Modulation:
     return Modulation(shift=shift) if shift else Modulation()
 
 
-def _address(frame: Frame, person: str) -> str | None:
-    """Où lui écrire : une adresse présente d'abord, sinon une conversation
-    privée où l'on peut lui écrire d'elle-même."""
-    handles = frame.get(identity_c.HANDLES(person))
-    present = [h for h in frame.get(presence_c.PRESENT) if h in handles]
-    if present:
-        return present[0]
-    reachable = frame.get(identity_c.REACHABLE(person))
-    return reachable[0] if reachable else None
+# Les cinq propositions qui suivent (prendre de ses nouvelles, l'encourager, demander comment ça s'est passé, le lui
+# souhaiter, penser à elle le jour d'une date lourde) partagent leur cadre : où lui écrire
+# (``identity.reach_now`` : une adresse présente d'abord, sinon une conversation privée où l'on peut lui écrire
+# d'elle-même), ses heures, comment le brief la nomme, et la candidate elle-même. Chacune ne garde que sa sélection,
+# son brief et sa preuve.
+
+
+def _in_checkin_hours(frame: Frame, p: OthersParams) -> bool:
+    """Dans ses heures pour prendre des nouvelles (de ``checkin_day_start_min`` à ``checkin_day_end_min``, heure
+    locale). L'encouragement de la veille a sa propre fenêtre (``_cheer_window``)."""
+    local = frame.local()
+    return within_daily_window(local.hour * 60 + local.minute, p.checkin_day_start_min, p.checkin_day_end_min)
+
+
+def _who(frame: Frame, person: str, address: str) -> str:
+    """Comment le brief la nomme : son nom entre guillemets (celui de la personne, sinon celui de l'adresse où elle
+    lui écrit), sinon le repli de sa voix (``others.initiative.someone``)."""
+    name = frame.get(identity_c.IDENTITY(person)).name or frame.get(identity_c.IDENTITY(address)).name
+    return f"« {name} »" if name else phrase("others.initiative.someone")
+
+
+def _capital(text: str) -> str:
+    """En tête de phrase : la première lettre en majuscule, le reste tel quel (un nom entre guillemets ne change pas ;
+    seul le repli de la voix en prend une)."""
+    return text[:1].upper() + text[1:]
+
+
+def _moment_candidate(reason: str, address: str, evidence: float, brief: str, frame: Frame, person: str,
+                      ev: memory_c.LifeEvent | None = None) -> Candidate:
+    """L'initiative vers elle : à cette adresse, la parole avec elle pour ressource, devancée si elle écrit
+    entre-temps sur n'importe laquelle de ses adresses (``identity.heard_since_guard`` : on lui répond, on ne la
+    relance pas), et le moment dont elle parle pour sujet quand il y en a un (la prise de nouvelles n'en a pas)."""
+    args = {"brief:others": brief}
+    if ev is not None:
+        args["subject"] = f"{MOMENT_SUBJECT}{ev.key}"
+    return Candidate(Kind.INITIATIVE, address, reason, round(evidence, 3), resources=frozenset({floor(address)}),
+                     guards=(identity_c.heard_since_guard(frame, person),), args=FrozenDict(args))
 
 
 @OTHERS.propose(kinds=[Kind.INITIATIVE], reasons={c.CHECK_IN: (0.0, 12.0)},
@@ -879,8 +907,7 @@ def _check_in(s: OthersState, frame: Frame) -> list[Candidate]:
     if not s.concerns:
         return []
     p = params(frame.env.params_of("others", frame.root))
-    local = frame.local()
-    if not within_daily_window(local.hour * 60 + local.minute, p.checkin_day_start_min, p.checkin_day_end_min):
+    if not _in_checkin_hours(frame, p):
         return []
     out: list[Candidate] = []
     for person, (_message, at, opens) in sorted(s.concerns.items()):
@@ -889,25 +916,14 @@ def _check_in(s: OthersState, frame: Frame) -> list[Candidate]:
         share = p.concern_by_closeness.get(frame.get(social_c.CLOSENESS(person)), 0.0)
         if share <= 0:
             continue
-        address = _address(frame, person)
+        address = identity_c.reach_now(frame, person)
         if address is None:
             continue
-        name = frame.get(identity_c.IDENTITY(person)).name or frame.get(identity_c.IDENTITY(address)).name
-        who = f"« {name} »" if name else phrase("others.initiative.someone")
-        brief = phrase("others.initiative.check_in", who=f"{who[0].upper()}{who[1:]}")
-        handles = frame.get(identity_c.HANDLES(person)) or (person,)
-        guard = Guard("pas de nouvelles", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))
+        brief = phrase("others.initiative.check_in", who=_capital(_who(frame, person, address)))
         ramp = min(1.0, (frame.now - opens) / p.checkin_ramp_us)
         evidence = (p.checkin_evidence_start + (p.checkin_evidence - p.checkin_evidence_start) * ramp) * share
-        out.append(Candidate(Kind.INITIATIVE, address, c.CHECK_IN, round(evidence, 3),
-                             resources=frozenset({floor(address)}), guards=(guard,),
-                             args=FrozenDict({"brief:others": brief})))
+        out.append(_moment_candidate(c.CHECK_IN, address, evidence, brief, frame, person))
     return out
-
-
-def _last_from(frame: Frame, person: str) -> int:
-    handles = frame.get(identity_c.HANDLES(person)) or (person,)
-    return max(frame.get(transcript_c.LAST_FROM(h)) for h in handles)
 
 
 def _at(day: date, minutes: int, tz: Any) -> int:
@@ -969,29 +985,23 @@ def _cheer(s: OthersState, frame: Frame) -> list[Candidate]:
         share = p.care_by_closeness.get(frame.get(social_c.CLOSENESS(person)), 0.0)
         if share <= 0:
             continue
-        last = _last_from(frame, person)
+        last = identity_c.last_heard(frame, person)
         hard = _hard(frame, person)
         # une fois par date : redit le même soir, il est déjà encouragé ; déplacé, il l'est pour la nouvelle veille
         due = [(ev, w) for ev in frame.get(memory_c.LIFE_EVENTS(person))
                if set(ev.told_by) <= {person} and not (hard and _minor(ev))
                and s.spoke.get(ev.key, 0) < _day_start(ev.when, frame) - DAY
                and (w := _cheer_window(ev, frame, p)) is not None and last < w[1]]
-        address = _address(frame, person) if due else None
+        address = identity_c.reach_now(frame, person) if due else None
         if address is None:
             continue
         ev, (start, _end) = due[0]  # le plus proche
-        name = frame.get(identity_c.IDENTITY(person)).name or frame.get(identity_c.IDENTITY(address)).name
-        who = f"« {name} »" if name else phrase("others.initiative.someone")
         soon = phrase("others.initiative.tomorrow") if frame.local(ev.when).date() > frame.local().date() else \
             phrase("others.initiative.later")
-        brief = phrase("others.initiative.cheer", who=f"{who[0].upper()}{who[1:]}", soon=soon)
-        handles = frame.get(identity_c.HANDLES(person)) or (person,)
-        guard = Guard("pas de nouvelles", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))
+        brief = phrase("others.initiative.cheer", who=_capital(_who(frame, person, address)), soon=soon)
         ramp = min(1.0, (frame.now - start) / p.checkin_ramp_us)
         evidence = (p.checkin_evidence_start + (p.cheer_evidence - p.checkin_evidence_start) * ramp) * share
-        out.append(Candidate(Kind.INITIATIVE, address, c.CHEER, round(evidence, 3),
-                             resources=frozenset({floor(address)}), guards=(guard,),
-                             args=FrozenDict({"brief:others": brief, "subject": f"{MOMENT_SUBJECT}{ev.key}"})))
+        out.append(_moment_candidate(c.CHEER, address, evidence, brief, frame, person, ev))
     return out
 
 
@@ -1030,15 +1040,14 @@ def _follow_up(s: OthersState, frame: Frame) -> list[Candidate]:
     même — sinon, le lendemain, un mot même en retard. Une date qui revient chaque année sans se fêter (la date d'un
     deuil) ne se demande jamais : ce n'est pas quelque chose qui « s'est passé »."""
     p = params(frame.env.params_of("others", frame.root))
-    local = frame.local()
-    if not within_daily_window(local.hour * 60 + local.minute, p.checkin_day_start_min, p.checkin_day_end_min):
+    if not _in_checkin_hours(frame, p):
         return []
     out: list[Candidate] = []
     for person in sorted(set(_reviewed(frame, p.care_by_closeness)).intersection(heard(s))):
         share = p.care_by_closeness.get(frame.get(social_c.CLOSENESS(person)), 0.0)
         if share <= 0:
             continue
-        last = _last_from(frame, person)
+        last = identity_c.last_heard(frame, person)
         hard = _hard(frame, person)
         due = [ev for ev in frame.get(memory_c.LIFE_EVENTS(person))
                if not ev.ongoing and not ev.vague and not ev.followed_at and set(ev.told_by) <= {person}
@@ -1046,24 +1055,19 @@ def _follow_up(s: OthersState, frame: Frame) -> list[Candidate]:
                and not (hard and _minor(ev)) and (ev.festive or not ev.yearly)
                and s.spoke.get(ev.key, 0) < (_day_start(ev.when, frame) if ev.festive else ev.when)
                and last <= ev.when and _follow_from(ev, frame, p) <= frame.now <= ev.when + p.followup_until_us]
-        address = _address(frame, person) if due else None
+        address = identity_c.reach_now(frame, person) if due else None
         if address is None:
             continue
         ev = due[-1]  # le plus récent
-        name = frame.get(identity_c.IDENTITY(person)).name or frame.get(identity_c.IDENTITY(address)).name
-        who = f"« {name} »" if name else phrase("others.initiative.someone")
+        who = _who(frame, person, address)
         if ev.festive:
             brief = phrase("others.initiative.follow_up_festive", who=who)
         else:
-            brief = phrase("others.initiative.follow_up", who=f"{who[0].upper()}{who[1:]}")
-        handles = frame.get(identity_c.HANDLES(person)) or (person,)
-        guard = Guard("pas de nouvelles", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))
+            brief = phrase("others.initiative.follow_up", who=_capital(who))
         full = p.followup_minor_evidence if (_minor(ev) or ev.festive or hard) else p.followup_evidence
         ramp = min(1.0, (frame.now - _follow_from(ev, frame, p)) / p.checkin_ramp_us)
         evidence = (min(full, p.checkin_evidence_start) + (full - min(full, p.checkin_evidence_start)) * ramp) * share
-        out.append(Candidate(Kind.INITIATIVE, address, c.FOLLOW_UP, round(evidence, 3),
-                             resources=frozenset({floor(address)}), guards=(guard,),
-                             args=FrozenDict({"brief:others": brief, "subject": f"{MOMENT_SUBJECT}{ev.key}"})))
+        out.append(_moment_candidate(c.FOLLOW_UP, address, evidence, brief, frame, person, ev))
     return out
 
 
@@ -1079,8 +1083,7 @@ def _celebrate(s: OthersState, frame: Frame) -> list[Candidate]:
     le moment) suffit : rien de plus. Quand quelque chose de grave la touche ces jours-ci, le brief le dit aussi —
     un fait ; ce qu'elle en fait est à elle (ADR 0154)."""
     p = params(frame.env.params_of("others", frame.root))
-    local = frame.local()
-    if not within_daily_window(local.hour * 60 + local.minute, p.checkin_day_start_min, p.checkin_day_end_min):
+    if not _in_checkin_hours(frame, p):
         return []
     today = _day_start(frame.now, frame)
     out: list[Candidate] = []
@@ -1091,21 +1094,15 @@ def _celebrate(s: OthersState, frame: Frame) -> list[Candidate]:
         due = [ev for ev in frame.get(memory_c.LIFE_EVENTS(person))
                if ev.festive and not ev.ongoing and not ev.vague and not ev.followed_at and set(ev.told_by) <= {person}
                and _day_start(ev.when, frame) == today and s.spoke.get(ev.key, 0) < today]
-        address = _address(frame, person) if due else None
+        address = identity_c.reach_now(frame, person) if due else None
         if address is None:
             continue
         ev = due[0]
-        name = frame.get(identity_c.IDENTITY(person)).name or frame.get(identity_c.IDENTITY(address)).name
-        who = f"« {name} »" if name else phrase("others.initiative.someone")
         # ce qui pèse ces jours-ci, la section le dit (« CE QUI SE PASSE DANS SA VIE », en privé) : pas le motif
-        brief = phrase("others.initiative.celebrate", who=who)
+        brief = phrase("others.initiative.celebrate", who=_who(frame, person, address))
         # si la personne écrit entre-temps, c'est sa réponse qui le lui souhaite (« souhaite-le-lui si ce n'est pas
-        # fait »), pas une initiative de plus
-        handles = frame.get(identity_c.HANDLES(person)) or (person,)
-        guard = Guard("pas de nouvelles", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))
-        out.append(Candidate(Kind.INITIATIVE, address, c.CELEBRATE, round(p.celebrate_evidence * share, 3),
-                             resources=frozenset({floor(address)}), guards=(guard,),
-                             args=FrozenDict({"brief:others": brief, "subject": f"{MOMENT_SUBJECT}{ev.key}"})))
+        # fait »), pas une initiative de plus : la garde de ``_moment_candidate``
+        out.append(_moment_candidate(c.CELEBRATE, address, p.celebrate_evidence * share, brief, frame, person, ev))
     return out
 
 
@@ -1119,30 +1116,24 @@ def _remember(s: OthersState, frame: Frame) -> list[Candidate]:
     amie, ce jour-là, n'en reçoit rien d'elle-même (si elles se parlent, « CE QUI SE PASSE DANS SA VIE » le lui dit). Si elles se sont déjà parlé aujourd'hui, la conversation en était
     l'occasion ; ce qu'elle en a repris en mots aussi."""
     p = params(frame.env.params_of("others", frame.root))
-    local = frame.local()
-    if not within_daily_window(local.hour * 60 + local.minute, p.checkin_day_start_min, p.checkin_day_end_min):
+    if not _in_checkin_hours(frame, p):
         return []
     today = _day_start(frame.now, frame)
     out: list[Candidate] = []
     for person in sorted(set(_reviewed(frame, p.remembrance_by_closeness)).intersection(heard(s))):
         share = p.remembrance_by_closeness.get(frame.get(social_c.CLOSENESS(person)), 0.0)
-        if share <= 0 or _last_from(frame, person) >= today:
+        if share <= 0 or identity_c.last_heard(frame, person) >= today:
             continue
         due = [ev for ev in frame.get(memory_c.LIFE_EVENTS(person))
                if memory_c.heavy_date(ev) and not ev.followed_at and set(ev.told_by) <= {person}
                and _day_start(ev.when, frame) == today and s.spoke.get(ev.key, 0) < today]
-        address = _address(frame, person) if due else None
+        address = identity_c.reach_now(frame, person) if due else None
         if address is None:
             continue
         ev = due[0]
-        name = frame.get(identity_c.IDENTITY(person)).name or frame.get(identity_c.IDENTITY(address)).name
-        who = f"« {name} »" if name else phrase("others.initiative.someone")
-        brief = phrase("others.initiative.remembrance", who=who)
-        handles = frame.get(identity_c.HANDLES(person)) or (person,)
-        guard = Guard("pas de nouvelles", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))
-        out.append(Candidate(Kind.INITIATIVE, address, c.REMEMBRANCE, round(p.remembrance_evidence * share, 3),
-                             resources=frozenset({floor(address)}), guards=(guard,),
-                             args=FrozenDict({"brief:others": brief, "subject": f"{MOMENT_SUBJECT}{ev.key}"})))
+        brief = phrase("others.initiative.remembrance", who=_who(frame, person, address))
+        out.append(_moment_candidate(c.REMEMBRANCE, address, p.remembrance_evidence * share, brief, frame, person,
+                                     ev))
     return out
 
 
@@ -1171,16 +1162,12 @@ async def _their_last_words(s: OthersState, frame: Frame, ports: Any) -> tuple[s
     return tuple(str(r[0] or "") for r in reversed(rows))
 
 
-def _few_words(text: str) -> bool:
-    """Trois mots au plus, ni question ni bonjour (un bonjour est court par nature)."""
-    tokens = re.findall(r"\w+", fold(text))
-    return bool(tokens) and len(tokens) <= 3 and not text.strip().endswith("?") and tokens[0] not in SALUTATIONS
-
-
-def curt(words: tuple[str, ...]) -> bool:
-    """Trois messages d'affilée réduits à quelques mots (« ouais », « bof », « je sais pas ») : elle ne dit plus
-    grand-chose."""
-    return len(words) >= CURT_RUN and all(_few_words(w) for w in words[-CURT_RUN:])
+def curt_run(words: tuple[str, ...]) -> bool:
+    """Elle répond à peine, dans la conversation en cours : ses ``CURT_RUN`` derniers messages (l'enrichisseur
+    ``their_last_words``), tous brefs (``c.few_words`` : « ouais », « bof », « je sais pas ») — elle ne dit plus
+    grand-chose. Un bonjour ou une question parmi eux suffit à dire le contraire. L'échange passé d'où naît une pensée
+    a sa propre fenêtre sur la même règle (``attention/watch.py::mostly_curt``)."""
+    return len(words) >= CURT_RUN and all(c.few_words(w) for w in words[-CURT_RUN:])
 
 
 @OTHERS.section("their_state", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=40,
@@ -1206,10 +1193,10 @@ def _their_state(s: OthersState, frame: Frame, enrich: Any) -> SectionBody | Non
         if r.deviation <= -p.notable_deviation:
             lines.append(phrase("others.state.darker", who=who))
         elif r.deviation >= p.notable_deviation:
-            lines.append(phrase("others.state.lighter", who=f"{who[0].upper()}{who[1:]}"))
+            lines.append(phrase("others.state.lighter", who=_capital(who)))
         if r.current_arousal - r.usual_arousal >= p.notable_deviation:
             lines.append(phrase("others.state.livelier"))
-    if ep.kind == Kind.REPLY and curt(enrich.get("their_last_words") or ()):
+    if ep.kind == Kind.REPLY and curt_run(enrich.get("their_last_words") or ()):
         # sonde réelle du 2026-10-03 : à « ouais », « bof », « je sais pas », « laisse tomber », de longs messages
         # pleins de questions et d'idées pour se changer les idées
         name = frame.get(identity_c.IDENTITY(person)).name
