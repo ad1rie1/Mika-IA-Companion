@@ -270,6 +270,26 @@ def test_the_next_run_says_when_then_why_not_sooner(tmp_path):
     assert set(WHY_WORDS) == set(Why)  # chaque raison a ses mots
 
 
+def test_an_agenda_reads_in_words_in_the_list_and_in_the_fiche(tmp_path):
+    """L'agenda d'un projet se dit en mots dans la liste comme dans sa fiche, par la fonction de la faculté que le
+    panneau de frontendv2 lit aussi : une valeur proposée garde son libellé, une règle hors de la liste se traduit —
+    jamais « cron:… » brut à la console."""
+    async def scenario(kernel, llm):
+        proposed = await create(kernel, "p1", title="Le bilan", objectives="Écrire le bilan", mode="plain",
+                                schedule="cron:0 9 * * MON-FRI")  # une des valeurs proposées
+        own = await create(kernel, "p2", title="Le module", objectives="Écrire le module", mode="plain",
+                           schedule="cron:30 8 * * MON-FRI")  # écrite à la main, hors de la liste
+        listed = {r.href.key: r.cells[10] for r in tables(await tab(kernel, "tous"))["Projets"].rows}
+        said = {}
+        for pid in (proposed, own):
+            said[pid] = (listed[f"project/{pid}"], field(await tab(kernel, "comportement", str(pid)), "agenda"))
+        return said, proposed, own
+
+    said, proposed, own = live(tmp_path, scenario)
+    assert said[proposed] == ("les jours ouvrés à 9 h",) * 2
+    assert said[own] == ("les jours ouvrés à 8 h 30",) * 2
+
+
 def test_who_asked_for_a_project_is_said_by_a_cleaned_name_and_by_the_key_without_one():
     """« demandé par » et les auteurs des décisions disent le prénom par la règle commune (``identity.person_name``) :
     blancs repliés, guillemets retirés ; sans prénom, la clé (au survol ou dans le lien)."""

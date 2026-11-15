@@ -1,5 +1,5 @@
 /**
- * Ses partages (ADR 0188 ; `backendv2/src/mika/app/me/shares.py`) : ce qu'elle partage — ses boîtes, ses comptes
+ * Ses partages (ADR 0188 ; `backendv2/src/mika/app/me/sharing.py`) : ce qu'elle partage — ses boîtes, ses comptes
  * Teams, ses services — avec qui et à quel niveau, ce qu'on lui partage, et les personnes à qui elle peut partager
  * (chaque compte actif, sauf elle). Seul le propriétaire partage, et seulement avec une personne qui a un compte.
  */

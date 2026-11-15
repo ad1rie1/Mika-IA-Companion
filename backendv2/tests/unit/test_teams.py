@@ -17,7 +17,9 @@
   ressentir (ADR 0147) ;
 - la personne a répondu elle-même : sa réponse en attente d'accord ne s'approuve plus et se refuse, une réponse
   demandée avant ne se prépare plus, une demandée après tient (ADR 0199) ;
-- sans titre de Teams, seul un tête-à-tête prend le nom de l'autre personne : un groupe n'en a pas, nulle part.
+- sans titre de Teams, seul un tête-à-tête prend le nom de l'autre personne : un groupe n'en a pas, nulle part ;
+- où elle prépare, une réponse en chemin, une demande qui vit encore : dits une fois par le plugin, que l'action, ses
+  tâches, sa voix et ``/api/moi`` lisent.
 """
 
 from __future__ import annotations
@@ -50,12 +52,17 @@ from mika.plugins.teams import (
     AskSeen,
     DraftSeen,
     Seen,
+    TeamsParams,
     TeamsState,
     Written,
     _resolved,
+    asked_still,
+    pending_draft,
+    under_way,
 )
 from mika.plugins.teams import expire as teams_expire
 from mika.plugins.teams import tools as teams_tools
+from mika.plugins.teams.inspect import not_preparing
 from mika.plugins.teams.triage import heuristic, place_of, read_triage, triage_system
 from mika.ports.llm import LLMResponse, ToolCall
 from mika.ports.teams import DEFAULT_ACCOUNT as PRINCIPAL
@@ -771,3 +778,46 @@ def test_only_a_one_to_one_is_named_after_the_other_person(tmp_path):
         assert [(i.title, i.kind) for i in store.outbox(PRINCIPAL, clock.now())] == [("", "group")]
     finally:
         store.close()
+
+
+# ── La demande en cours et le compte où elle prépare, dits une fois (audit du 2026-11-05, K10-03) ──
+
+
+def test_where_she_prepares_is_said_once_by_the_plugin():
+    """Teams coupé ou ce compte décoché, elle n'y prépare rien : le refus de l'action, que « Préremplir » de
+    ``/api/moi`` rend tel quel ; ailleurs, rien à dire."""
+    assert not_preparing(TeamsParams(), PRINCIPAL) == ""
+    assert not_preparing(TeamsParams(accounts_off=("autre",)), PRINCIPAL) == ""
+    assert not_preparing(TeamsParams(enabled=False), PRINCIPAL) == "Teams est désactivé : elle n'y prépare rien."
+    assert not_preparing(TeamsParams(accounts_off=(PRINCIPAL,)), PRINCIPAL) == \
+        "Ce compte Teams est décoché : elle n'y prépare rien."
+    # coupé et décoché : c'est Teams coupé qui le dit
+    assert not_preparing(TeamsParams(enabled=False, accounts_off=(PRINCIPAL,)), PRINCIPAL).startswith("Teams est")
+
+
+def test_a_request_lives_until_its_attempts_are_spent():
+    """Une demande vit tant que ses essais ne sont pas épuisés ; un message qu'on ne lui a pas demandé n'en a pas."""
+    p = TeamsParams(draft_attempts_max=2)
+    asked = TeamsState(asked=FrozenDict({"m1": AskSeen(2, "m1", DM, "user_1", 800, account=PRINCIPAL)}))
+    assert asked_still(asked, "m1", p)
+    assert asked_still(replace(asked, attempts=FrozenDict({"m1": 1})), "m1", p)
+    assert not asked_still(replace(asked, attempts=FrozenDict({"m1": 2})), "m1", p)  # elle y a renoncé
+    assert not asked_still(asked, "m2", p)  # jamais demandée
+    assert not asked_still(TeamsState(attempts=FrozenDict({"m1": 0})), "m1", p)  # essayée d'elle-même, pas demandée
+
+
+def test_the_reply_under_way_is_the_one_still_on_its_way():
+    """La réponse en chemin dans une conversation d'un compte : en attente d'accord, en file, posée — pas une
+    refusée, partie ou laissée, ni celle d'une autre conversation ou d'un autre compte."""
+    def drafts(*states: str) -> TeamsState:
+        return TeamsState(drafts=FrozenDict({i: DraftSeen(i, f"t{i:012d}", DM, f"m{i}", 100, "validation", state,
+                                                            account=PRINCIPAL)
+                                             for i, state in enumerate(states, start=1)}))
+
+    for state in ("attend", "approuve", "en_file", "pose"):
+        found = pending_draft(drafts("refuse", state), PRINCIPAL, DM)
+        assert found is not None and found.state == state and under_way(drafts(state), PRINCIPAL, DM)
+    for state in ("refuse", "expire", "parti", "inutilise", "echec"):
+        assert pending_draft(drafts(state), PRINCIPAL, DM) is None and not under_way(drafts(state), PRINCIPAL, DM)
+    assert pending_draft(drafts("attend"), PRINCIPAL, GROUP) is None  # une autre conversation
+    assert pending_draft(drafts("attend"), "autre", DM) is None  # un autre compte

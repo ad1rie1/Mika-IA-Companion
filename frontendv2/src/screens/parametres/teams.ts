@@ -24,11 +24,11 @@ import {
 import { h } from "../../shell/dom";
 import { closeModal, openModal, toast } from "../../shell/float";
 import { ico } from "../../shell/icons";
-import { area, backLink, readForm, row, section, seg, select, showFieldErrors, subTabs, text, toggle } from "./form";
+import { area, backLink, readForm, row, section, seg, select, showRefusal, subTabs, text, toggle } from "./form";
 import { ago, confirmModal, copyText, dateWords, failureText, newNonce, toastFailure } from "../../shared/kit";
 import type { Host, Page } from "./page";
 import * as store from "../../shared/store";
-import { fieldErrors, ofName, shareWords, type FormValue } from "./words";
+import { ofName, shareWords, type FormValue } from "./words";
 
 const TAB = "#parametres/teams";
 const SUBS = [["compte", "Ton compte Teams"], ["regles", "Comment ça part"], ["extension", "L'extension"]] as const;
@@ -299,8 +299,7 @@ function addModal(host: Host): void {
       await host.reload(store.teamsAccounts, store.rights);
     } catch (err) {
       ok.disabled = false;
-      if (err instanceof ApiError && Object.keys(err.fields).length) showFieldErrors(form, fieldErrors(err.fields));
-      else toastFailure(err);
+      showRefusal(form, err);
     }
   };
   ok.addEventListener("click", () => void submit());
@@ -344,10 +343,7 @@ export const teamsPage: Page = {
       await host.reload(store.teamsAccounts, store.teamsSettings, store.rights);
       return true;
     } catch (err) {
-      if (err instanceof ApiError && Object.keys(err.fields).length) {
-        const fields = showFieldErrors(form, fieldErrors(err.fields));
-        toast(fields.length ? fields.join(" ; ") : err.message, { ico: "alert", duration: 4200 });
-      } else toastFailure(err);
+      showRefusal(form, err);
       // une règle changée ailleurs entre-temps : relue, « Annuler » la remontre telle qu'elle est
       if (err instanceof ApiError && err.status === 409) void host.reload(store.teamsSettings);
       return false;

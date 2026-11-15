@@ -18,9 +18,10 @@ from typing import Any
 from pydantic import ValidationError
 from starlette.routing import Route
 
-from mika.adapters.mcp.config import McpConfig, McpServer
-from mika.app.me.api import OWN_MAX, Call, Denied, MeApiBase, missing, refused
-from mika.app.me.hosts import LOCAL, local_host, url_host
+from mika.adapters.mcp.config import McpServer
+from mika.app.me.api import Call, Denied, MeApiBase, missing, refused
+from mika.app.me.common import own_room
+from mika.app.me.hosts import public_only, url_host
 from mika.contracts import identity as identity_c
 from mika.contracts import self_ as self_c
 from mika.runtime.operations import audit
@@ -65,7 +66,7 @@ def shared(spec: McpServer) -> dict[str, tuple[str, Any]]:
     que son propriétaire — celle qu'un partage ajoute —, par personne : son niveau (lire : ses outils qui lisent ; s'en
     servir : aussi ceux qui agissent) et sa ligne. Un partage n'en écrit qu'une ; s'il y en avait plusieurs, la
     dernière. La seule lecture de cette règle : ce qu'on lui partage (``received``), Paramètres › Partages et la
-    console (``app/me/shares.py``), la fiche d'une personne la lisent ici."""
+    console (``app/me/sharing.py``), la fiche d'une personne la lisent ici."""
     out: dict[str, tuple[str, Any]] = {}
     for line in spec.access:
         if len(line.who) == 1 and line.who[0].startswith(PERSON) and line.who[0] != spec.owner:
@@ -171,8 +172,7 @@ async def plug(call: Call) -> dict[str, Any]:
 
 async def _plug(call: Call) -> dict[str, Any]:
     port = _port(call)
-    if not call.me.operator and len(mine(call)) >= OWN_MAX:
-        raise Denied(409, f"Tu en as déjà {OWN_MAX} : retires-en un avant d'en brancher un autre.")
+    own_room(call, len(mine(call)))
     name = call.arg("name", limit=24).strip().lower()
     if not NAME.fullmatch(name):
         raise Denied(400, "Un nom court : des minuscules, chiffres et _, en commençant par une lettre.",
@@ -181,8 +181,7 @@ async def _plug(call: Call) -> dict[str, Any]:
     if not url.lower().startswith("https://"):
         raise Denied(400, "Une adresse https (l'adresse MCP « streamable HTTP » du service).",
                      {"url": "une adresse https://…"})
-    if not call.me.operator and await local_host(url_host(url)):
-        raise Denied(400, "Un service sur Internet seulement.", {"url": LOCAL})
+    await public_only(call, {"url": url_host(url)})
     person = PERSON + call.me.person
     spec = {"purpose": call.arg("purpose", limit=1024).strip(), "when_to_use": call.arg("when_to_use", limit=1024),
             "transport": "distant", "url": url, "auth": "aucune",
@@ -248,8 +247,8 @@ async def save(call: Call) -> dict[str, Any]:
     changes = {k: v for k, v in raw.items() if not (k == "secret_headers" and not v)}
     if "url" in changes and not str(changes["url"]).lower().startswith("https://"):
         raise Denied(400, "Une adresse https.", {"url": "une adresse https://…"})
-    if "url" in changes and not call.me.operator and await local_host(url_host(str(changes["url"]))):
-        raise Denied(400, "Un service sur Internet seulement.", {"url": LOCAL})
+    if "url" in changes:
+        await public_only(call, {"url": url_host(str(changes["url"]))})
     try:
         await _port(call).settle(name, changes)
     except (ValidationError, ValueError) as exc:
@@ -262,11 +261,10 @@ async def remove(call: Call) -> dict[str, Any]:
     """Retirer un de ses services : il n'est plus joint ni offert ; ce qu'elle y a lu reste dans sa vie."""
     name = call.arg("name", limit=24)
     _service(call, name)
-    settings = call.api.settings
-    async with settings.writing:  # relus puis réécrits d'un seul tenant (``Settings.writing``)
-        cfg = settings.mcp()
-        await settings.save_mcp(McpConfig(servers={n: s for n, s in cfg.servers.items() if n != name}))
-    await _port(call).reconfigure()
+    try:  # sa fiche retirée sous ``Settings.writing`` (``McpSettingsStore.remove``), puis ses sessions fermées
+        await _port(call).unplug(name)
+    except ValueError as exc:
+        raise refused(exc) from None
     await audit(call.kernel, "moi.service_retire", by=call.me.handle, subject_kind="serveur", subject=name)
     return {"ok": True, "message": "Service retiré."}
 

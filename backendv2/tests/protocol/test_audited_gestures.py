@@ -75,8 +75,9 @@ def test_a_gesture_has_a_french_title_never_its_key_twice(tmp_path):
         said = names.Names(kernel)
         out = {key: said.action(key) for key in (
             "console.comptes.creer", "console.comptes.revoquer_jeton", "console.comptes.jeton",
-            "console.comptes.sessions", "console.canaux.regler", "console.outils.familles", "console.mcp.fermer",
-            "console.mcp.jeton", "console.mcp.pret.jeton", "console.mcp.pret.retirer", "console.mcp.servir",
+            "console.comptes.sessions", "console.canaux.regler", "console.outils.familles", "console.outils.place",
+            "console.mcp.fermer", "console.mcp.jeton", "console.mcp.pret.jeton", "console.mcp.pret.retirer",
+            "console.mcp.servir",
             "moi.partage", "moi.service_branche", "moi.board.epingler", "cli.board.epingler", "board.epingler",
             "console.reglages.llm", "console.parametres.board", "console.inconnu.une_chose", "moi.inconnu")}
         await kernel.stop()
@@ -87,6 +88,7 @@ def test_a_gesture_has_a_french_title_never_its_key_twice(tmp_path):
     assert out["console.comptes.revoquer_jeton"] == "Application révoquée"
     assert out["console.comptes.jeton"] == "Jeton créé" and out["console.comptes.sessions"] == "Sessions fermées"
     assert out["moi.partage"] == "Partage modifié" and out["moi.service_branche"] == "Service branché"
+    assert out["console.outils.place"] == "Place d'un outil réglée"
     # une action déclarée garde son titre, d'où qu'elle vienne (la colonne « depuis » dit d'où)
     assert out["moi.board.epingler"] == out["cli.board.epingler"] == out["board.epingler"] == "Épingler"
     assert out["console.reglages.llm"] == "Réglages · llm" and out["console.parametres.board"] == "Paramètres · board"

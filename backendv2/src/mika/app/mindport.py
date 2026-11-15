@@ -37,8 +37,8 @@ from mika.faculties.self import night
 from mika.faculties.self.faculty import lived_date
 from mika.faculties.social.sections import profile_parts, refs_of
 from mika.faculties.world import commands as world_commands
-from mika.kernel import forms, schedule
-from mika.kernel.clock import MINUTE, local
+from mika.kernel import forms
+from mika.kernel.clock import local
 from mika.kernel.events import Content, Event, Origin
 from mika.kernel.frame import Audience, Frame
 from mika.kernel.guards import Superseded
@@ -50,7 +50,7 @@ from mika.runtime import decisions, health, operations
 from mika.runtime.bootstrap import Kernel, ReadOnlyStore
 from mika.runtime.effects import with_content
 from mika.vocab.affect import emotion_of
-from mika.vocab.circadian import DAYS_FR, day_fr
+from mika.vocab.circadian import day_fr
 from mika.vocab.episodes import project_of
 from mika.vocab.privacy import Sensitivity
 
@@ -83,40 +83,6 @@ _OWNER_WORDS = {"email": "Courrier", "forge": "Forge", "teams": "Teams"}
 
 def _owner_words(owner: str) -> str:
     return _OWNER_WORDS.get(owner) or FACULTY_LABELS.get(owner) or owner
-
-
-_DAY_SETS = {frozenset(range(7)): "chaque jour", frozenset(range(5)): "les jours ouvrés",
-             frozenset({5, 6}): "le week-end"}
-
-
-def _at(hour: int, minute: int) -> str:
-    return f"à {hour} h" + (f" {minute:02d}" if minute else "")
-
-
-def schedule_words(rule: str) -> str:
-    """L'agenda d'un projet en mots, comme la console le dit (« dès que possible », « les jours ouvrés à 9 h ») —
-    jamais ``manual`` ni ``cron:0 9 * * MON-FRI`` dans le panneau."""
-    raw = (rule or "manual").strip()
-    known = next((label for value, label in project_actions.SCHEDULES if value == raw), None)
-    if known:
-        return known
-    parsed = schedule.read(raw)
-    if parsed.kind == "interval":
-        minutes = parsed.every_us // MINUTE
-        if minutes % (24 * 60) == 0:
-            n = minutes // (24 * 60)
-            return "tous les jours" if n == 1 else f"tous les {n} jours"
-        if minutes % 60 == 0:
-            return f"toutes les {minutes // 60} h"
-        return f"toutes les {minutes} min"
-    if parsed.kind == "cron" and len(parsed.hours) == 1 and len(parsed.minutes) == 1 and not parsed.dom_restricted \
-            and len(parsed.months) == 12:
-        (hour,), (minute,) = tuple(parsed.hours), tuple(parsed.minutes)
-        days = _DAY_SETS.get(parsed.weekdays)
-        if days is None:
-            days = ", ".join(f"le {DAYS_FR[d]}" for d in sorted(parsed.weekdays))
-        return f"{days} {_at(hour, minute)}"
-    return "selon son agenda" if parsed.kind == "cron" else "dès que possible"
 
 
 def journal_title(day: str, today: date) -> str:
@@ -559,7 +525,7 @@ class KernelPort:
                 # ce que montre le panneau : rien pour son mode à elle, « impersonnel » pour un travail factuel
                 "mode_label": "" if v.mode == projects_c.PERSONA else "impersonnel",
                 "schedule_rule": v.schedule or "manual",
-                "schedule_label": schedule_words(v.schedule),
+                "schedule_label": project_actions.schedule_words(v.schedule),
                 "next_run_at": local(nxt, tz).isoformat() if nxt else None,
                 # ses objectifs ponctuels : faits sur tous (les constants n'ont pas de fin)
                 "tasks_total": v.open_once + v.done_once + v.blocked_once, "tasks_done": v.done_once,

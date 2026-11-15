@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from mika.app.me import mcp as mcp_moi
+from mika.app.me import common as common_me
 from mika.ports.mcp import LiveTool, ToolReview
 from tests.protocol.test_moi_mail import API, login, post, second_person
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
@@ -47,9 +47,11 @@ def test_a_service_she_plugs_is_hers_with_one_access_line(world):  # noqa: F811
     again = servers(client, live)["factures"]
     assert again.when_to_use == "quand on parle d'argent" and again.secret_headers == "Authorization: Bearer abc"
     assert post(client, "/mcp/save", {"name": "factures", "values": {"owner": ""}}).status_code == 400
-    # un réglage refusé se dit en mots : le champ et ce qu'il veut, jamais l'adresse de la documentation de pydantic
+    # un réglage refusé se dit en mots : le champ et ce qu'il veut, jamais l'adresse de la documentation de pydantic ;
+    # sous la forme de toutes les routes : le message par champ, pour le formulaire qui le place, et la phrase
     wrong = post(client, "/mcp/save", {"name": "factures", "values": {"enabled": "peut-être"}})
     assert wrong.status_code == 400 and "enabled" in wrong.json()["error"] and "pydantic" not in wrong.text
+    assert "enabled" in wrong.json()["fields"] and wrong.json()["fields"]["enabled"] in wrong.json()["error"]
 
     login(client, "adrien")  # le service de Léa n'existe pas pour toi ici (la console, elle, les voit tous)
     assert client.get(API + "/mcp/services").json()["items"] == []
@@ -61,13 +63,16 @@ def test_a_service_she_plugs_is_hers_with_one_access_line(world):  # noqa: F811
 
 
 def test_a_person_plugs_a_bounded_number_of_services(world, monkeypatch):  # noqa: F811
-    monkeypatch.setattr(mcp_moi, "OWN_MAX", 1)
+    monkeypatch.setattr(common_me, "OWN_MAX", 1)  # que ``common.own_room`` lit
     client, live, _ = world
     bootstrap(client)
     second_person(client, live)
     login(client, "lea")
     assert post(client, "/mcp/plug", SERVICE).status_code == 200
-    assert post(client, "/mcp/plug", {**SERVICE, "name": "agenda"}).status_code == 409
+    full = post(client, "/mcp/plug", {**SERVICE, "name": "agenda"})
+    # les mots du plafond d'une boîte et d'un compte Teams (``common.own_room``)
+    assert full.status_code == 409
+    assert full.json()["error"] == "Tu en as déjà 1 : retires-en avant d'en brancher d'autres."
     login(client, "adrien")  # une opératrice, comme dans la console
     assert post(client, "/mcp/plug", {**SERVICE, "name": "meteo"}).status_code == 200
     assert post(client, "/mcp/plug", {**SERVICE, "name": "agenda"}).status_code == 200

@@ -17,9 +17,19 @@ from typing import Any
 from starlette.routing import Route
 
 from mika.app.me.api import Call, Denied, MeApiBase, done, form, missing
-from mika.app.me.common import OWN, allows, held_by, millis, only_owner, opened, snippet
+from mika.app.me.common import allows, held_by, millis, only_owner, opened, snippet
 from mika.plugins import teams as teams_p
-from mika.plugins.teams import UNDER_WAY, WAITING, DraftSeen, TeamsState, latest, under_way
+from mika.plugins.teams import (
+    UNDER_WAY,
+    WAITING,
+    DraftSeen,
+    TeamsState,
+    asked_still,
+    latest,
+    pending_draft,
+    under_way,
+)
+from mika.plugins.teams.inspect import not_preparing
 from mika.ports.drafts import to_fill
 from mika.ports.teams import (
     FAILED,
@@ -33,6 +43,7 @@ from mika.ports.teams import (
     split_conversation_key,
 )
 from mika.vocab.access import SHARE_PREPARE, SHARE_READ, SHARE_USE
+from mika.vocab.ownership import OWNED
 
 #: ce que dit un partage qui n'atteint pas le geste demandé
 TOO_LOW = {SHARE_READ: "Ce compte t'est partagé en lecture : tu le lis, sans y écrire.",
@@ -85,7 +96,9 @@ def _message(call: Call, ref: str) -> Message:
     return m
 
 
-def _state(call: Call) -> TeamsState:
+def state(call: Call) -> TeamsState:
+    """Ce que Teams sait de sa vie (``TeamsState``) : ses brouillons, les messages vus, ses demandes. Les réglages de
+    ses comptes le lisent aussi (``settings.py``, les clés qui ont laissé une trace)."""
     return call.frame.state(teams_p.TEAMS.name)
 
 
@@ -101,7 +114,7 @@ def _notes(call: Call, seens: list[DraftSeen]) -> dict[str, str]:
     """Les notes de qui a décidé, relues d'un coup : elles sont gardées à part (l'oubli les atteint). Seulement sur un
     compte à qui est connecté : ce que son propriétaire a dit à Mika en refusant ne se lit pas par un partage."""
     mine = accounts(call)
-    refs = [d.note_ref for d in seens if d.note_ref and mine.get(d.account, (None, ""))[1] == OWN]
+    refs = [d.note_ref for d in seens if d.note_ref and mine.get(d.account, (None, ""))[1] == OWNED]
     store = call.port("store") if refs else None
     return dict(store.content(refs)) if store is not None else {}
 
@@ -127,16 +140,16 @@ def _reply_json(call: Call, seen: DraftSeen, notes: dict[str, str]) -> dict[str,
 def _account_json(call: Call, a: AccountInfo, level: str) -> dict[str, Any]:
     keys = call.port("teams_keys")
     key = keys.key_state(a.key) if keys is not None else None
-    s = _state(call)
+    s = state(call)
     waiting = sum(1 for d in s.drafts.values() if d.account == a.key and d.state == WAITING and not d.answered) \
         if allows(level, SHARE_PREPARE) else 0
     return {"key": a.key, "name": a.name, "level": level, "enabled": a.enabled, "last_batch": millis(a.last_batch),
             "self_name": a.self_name, "extension_key": {"hint": key.hint, "created_at": millis(key.created_at)}
-            if key is not None and level == OWN else None, "drafts_waiting": waiting,
+            if key is not None and level == OWNED else None, "drafts_waiting": waiting,
             # un compte partagé se montre à son nom (ADR 0188)
-            "owner_name": teams_p.writer_of(call.frame, a.key) if level != OWN else "",
+            "owner_name": teams_p.writer_of(call.frame, a.key) if level != OWNED else "",
             # « à toi » : commun à ses propriétaires (on ne le leur partage pas : il est déjà à elles)
-            "common": level == OWN and not teams_p.params_of(call.frame).owners.get(a.key, "")}
+            "common": level == OWNED and not teams_p.params_of(call.frame).owners.get(a.key, "")}
 
 
 # ── lire ──
@@ -161,7 +174,7 @@ async def conversations(call: Call) -> dict[str, Any]:
     # sa réponse en chemin, par conversation (une réponse à laquelle on a répondu autrement n'est plus en chemin : elle
     # va être refusée, ADR 0199)
     pending: dict[tuple[str, str], DraftSeen] = {}
-    for d in _state(call).drafts.values():
+    for d in state(call).drafts.values():
         if d.state in UNDER_WAY and not d.answered:
             pending.setdefault((d.account, d.conversation), d)
     found = port.conversations(call.number("size", 50, high=LIMIT), text=call.arg("q", limit=100), accounts=keys)
@@ -187,7 +200,7 @@ async def thread(call: Call) -> dict[str, Any]:
     found = port.thread(account, conversation, size + 1, before=before)
     more = len(found) > size
     found = found[-size:]
-    s = _state(call)
+    s = state(call)
     level = accounts(call)[account][1]
     # ses réponses ici, en chemin ou demandées : pas pour qui ne fait que lire ce compte (ADR 0188 : elles sont
     # l'affaire de son propriétaire)
@@ -206,11 +219,11 @@ async def thread(call: Call) -> dict[str, Any]:
                and (d.state in (QUEUED, SENDING, PLACED) or (
                    d.state in (UNUSED, FAILED) and now - d.updated < RECENT_US))]
     # une demande en cours : pas une dont ses essais sont épuisés (elle y a renoncé ; « Préremplir » la relance), ni
-    # une qu'elle ne prendra pas (Teams coupé, ce compte décoché : ses tâches l'écartent)
+    # une qu'elle ne prendra pas (Teams coupé, ce compte décoché : ses tâches l'écartent) — les aides du plugin
+    # (``asked_still``, ``not_preparing``), jamais leur règle recopiée (audit du 2026-11-05, K10-03)
     p = teams_p.params_of(call.frame)
-    asked = prepares and p.enabled and account not in p.accounts_off and any(
-        a.account == account and a.conversation == conversation and s.attempts.get(ref, 0) < p.draft_attempts_max
-        for ref, a in s.asked.items())
+    asked = prepares and not not_preparing(p, account) and any(
+        asked_still(s, ref, p) for ref, a in s.asked.items() if a.account == account and a.conversation == conversation)
     conv = port.conversation(account, conversation)
     notes = _notes(call, replies)
     # son nom, comme dans la liste : celui de Teams, sinon (un tête-à-tête) l'autre personne
@@ -225,7 +238,7 @@ async def thread(call: Call) -> dict[str, Any]:
 async def replies(call: Call) -> dict[str, Any]:
     """Ses réponses dans tes comptes (ADR 0191), la plus récente d'abord."""
     mine = accounts(call)
-    s = _state(call)
+    s = state(call)
     shown = [d for d in sorted(s.drafts.values(), key=lambda d: -d.proposal)
              if d.account in mine and allows(mine[d.account][1], SHARE_PREPARE)][:LIMIT]
     notes = _notes(call, shown)
@@ -249,19 +262,22 @@ async def send(call: Call) -> dict[str, Any]:
 
 async def prefill(call: Call) -> dict[str, Any]:
     """« Préremplir avec Mika » : elle prépare une réponse à ce message à son prochain moment de travail ; elle
-    suivra le mode du compte (posée dans Teams, ou à ton accord). Une réponse déjà en chemin se rend telle quelle."""
+    suivra le mode du compte (posée dans Teams, ou à ton accord). Une réponse déjà en chemin se rend telle quelle.
+
+    Les gardes sont celles de l'action ``teams.rediger``, lues par les aides du plugin (``not_preparing``,
+    ``pending_draft``, ``asked_still`` : audit du 2026-11-05, K10-03) ; seul apport d'ici, une réponse « ok » qui dit
+    où en est la demande plutôt que le refus de l'action quand une réponse est en chemin ou déjà demandée."""
     m = _message(call, call.arg("message", limit=400))
     _level(call, m.account, SHARE_PREPARE)
     p = teams_p.params_of(call.frame)
-    if not p.enabled or m.account in p.accounts_off:  # elle ne s'y mettrait jamais : on ne lui demande rien
-        raise Denied(409, "Teams est désactivé : elle n'y prépare rien." if not p.enabled else
-                     "Ce compte Teams est décoché : elle n'y prépare rien.")
-    s = _state(call)
-    pending = next((d for d in s.drafts.values() if d.account == m.account and d.conversation == m.conversation
-                    and d.state in UNDER_WAY), None)
+    said = not_preparing(p, m.account)
+    if said:  # elle ne s'y mettrait jamais : on ne lui demande rien
+        raise Denied(409, said)
+    s = state(call)
+    pending = pending_draft(s, m.account, m.conversation)
     if pending is not None:
         return {"ok": True, "message": "Une réponse est déjà en chemin.", "draft": pending.draft, "asked": False}
-    if m.ref in s.asked and s.attempts.get(m.ref, 0) < p.draft_attempts_max:
+    if asked_still(s, m.ref, p):
         return {"ok": True, "message": "Elle y travaille déjà.", "draft": "", "asked": True}
     got = await call.act("teams.rediger", form(fixed={"message": m.ref}, instruction=call.arg("instruction", limit=4000)),
                          subject=conversation_key(m.account, m.conversation))
@@ -270,7 +286,7 @@ async def prefill(call: Call) -> dict[str, Any]:
 
 def _reply_mine(call: Call, draft_id: str) -> DraftSeen:
     """Une de ses réponses, dans un compte à elle : c'est le propriétaire qui en décide (ADR 0188, 0191)."""
-    seen = latest(_state(call), draft_id) if draft_id else None
+    seen = latest(state(call), draft_id) if draft_id else None
     if seen is None or seen.account not in accounts(call):
         raise missing()
     owned(call, seen.account)
@@ -302,8 +318,8 @@ async def reply_redo(call: Call) -> dict[str, Any]:
 def count(call: Call) -> int:
     """Pour la barre du haut : ses réponses qui attendent ta décision (pas une à laquelle on a répondu autrement)."""
     mine = accounts(call)
-    return sum(1 for d in _state(call).drafts.values()
-               if d.state == WAITING and not d.answered and mine.get(d.account, (None, ""))[1] == OWN)
+    return sum(1 for d in state(call).drafts.values()
+               if d.state == WAITING and not d.answered and mine.get(d.account, (None, ""))[1] == OWNED)
 
 
 def routes(api: MeApiBase) -> list[Route]:

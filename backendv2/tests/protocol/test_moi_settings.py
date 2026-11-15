@@ -5,7 +5,7 @@ montrée une seule fois ; comment part ce que Mika prépare depuis chacun, qu'el
 from __future__ import annotations
 
 from mika.adapters.mail.config import MailAccount, MailConfig
-from mika.app.me import settings as settings_moi
+from mika.app.me import common as common_me
 from mika.plugins import email as email_p
 from mika.vocab.canals import CanalRule, CanalTable, mail_rule, teams_rule
 from tests.protocol.test_moi_mail import API, login, post, second_person
@@ -65,6 +65,9 @@ def test_a_box_she_plugs_is_hers_alone_and_keeps_its_secrets(world):  # noqa: F8
     assert post(client, "/mail/box/save", {"box": key, "values": {"owner": ""}}).status_code == 400
     bad = post(client, "/mail/box/save", {"values": {"label": "x", "imap_port": "beaucoup"}})
     assert bad.status_code == 400 and bad.json()["fields"]
+    # un refus de pydantic dit aussi, dans son message, ce que disent ses champs : pour un client qui ne les place pas
+    said, fields = bad.json()["error"], bad.json()["fields"]
+    assert said.startswith("imap_port : ") and fields["imap_port"] in said and "pydantic" not in bad.text
 
     login(client, "adrien")  # une boîte à Léa n'existe pas pour toi
     assert key not in [b["key"] for b in client.get(API + "/mail/boxes").json()["boxes"]]
@@ -92,6 +95,10 @@ def test_her_teams_account_and_its_extension_key(world):  # noqa: F811
     assert post(client, "/teams/account/key", {"account": "principal"}).status_code == 404  # pas le sien
     assert post(client, "/teams/account/revoke", {"account": account}).status_code == 200
     assert post(client, "/teams/account/revoke", {"account": account}).status_code == 409
+    wrong = post(client, "/teams/account/save", {"account": account, "values": {"enabled": "peut-être"}})
+    assert wrong.status_code == 400 and set(wrong.json()["fields"]) == {"enabled"}
+    # le détail, non une phrase sans champ
+    assert wrong.json()["error"] == f"enabled : {wrong.json()['fields']['enabled']}"
 
 
 def test_a_box_is_checked_against_the_console_bounds(world):  # noqa: F811
@@ -139,8 +146,16 @@ def test_a_person_only_plugs_servers_on_the_internet(world):  # noqa: F811
     for host in ("127.0.0.1", "localhost", "192.168.1.10", "nas.local"):
         r = post(client, "/mail/box/save", {"values": {**BOX, "imap_host": host}})
         assert r.status_code == 400 and "imap_host" in r.json()["fields"], host
+    box = r.json()
     r = post(client, "/mcp/plug", {"name": "nas", "purpose": "Mes fichiers du réseau.", "url": "https://10.0.0.5/mcp"})
     assert r.status_code == 400 and "url" in r.json()["fields"]
+    # une boîte et un service se refusent dans les mêmes mots (``hosts.public_only``), en branchant comme en réglant
+    assert r.json()["error"] == box["error"] == "Un serveur sur Internet seulement."
+    assert r.json()["fields"]["url"] == box["fields"]["imap_host"]
+    service = {"name": "nas", "purpose": "Mes fichiers.", "url": "https://mcp.nas.example.test/mcp"}
+    assert post(client, "/mcp/plug", service).status_code == 200
+    moved = post(client, "/mcp/save", {"name": "nas", "values": {"url": "https://10.0.0.5/mcp"}})
+    assert moved.status_code == 400 and moved.json() == r.json()
     login(client, "adrien")  # un opérateur règle ce qu'il veut, comme dans la console
     assert post(client, "/mail/box/save", {"values": {**BOX, "imap_host": "192.168.1.10"}}).status_code == 200
 
@@ -237,15 +252,17 @@ def test_a_creation_said_twice_makes_one_box(world):  # noqa: F811
 
 
 def test_a_person_plugs_a_bounded_number_of_boxes(world, monkeypatch):  # noqa: F811
-    monkeypatch.setattr(settings_moi, "OWN_MAX", 1)
+    monkeypatch.setattr(common_me, "OWN_MAX", 1)  # que ``common.own_room`` lit
     client, live, _ = world
     bootstrap(client)
     second_person(client, live)
     login(client, "lea")
     assert post(client, "/mail/box/save", {"values": BOX}).status_code == 200
-    assert post(client, "/mail/box/save", {"values": BOX}).status_code == 409
+    full = post(client, "/mail/box/save", {"values": BOX})
+    assert full.status_code == 409
+    assert full.json()["error"] == "Tu en as déjà 1 : retires-en avant d'en brancher d'autres."
     assert post(client, "/teams/account/save", {"values": {"label": "Teams"}}).status_code == 200
-    assert post(client, "/teams/account/save", {"values": {"label": "Teams"}}).status_code == 409
+    assert post(client, "/teams/account/save", {"values": {"label": "Teams"}}).json() == full.json()
     login(client, "adrien")  # un opérateur, comme dans la console
     for _ in range(2):
         assert post(client, "/mail/box/save", {"values": BOX}).status_code == 200

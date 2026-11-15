@@ -3,7 +3,7 @@
 Ce document est pour qui écrit le client de tous les jours, `frontendv2/` : ce qu'il montre à la personne connectée,
 et seulement à elle — ses boîtes, ses comptes Teams, ses téléphones, ses services, ce qu'on lui partage, ses droits, sa
 carte et ses voyages. Les décisions et leurs raisons sont les ADR 0187 à 0192 de [`decisions.md`](decisions.md) (et,
-pour la carte, 0193 à 0196) ; le code fait foi dans
+pour la carte, 0193 à 0196 et 0229) ; le code fait foi dans
 [`app/me/`](../src/mika/app/me/__init__.py). La conversation reste sur `/ws` ([`protocole-chat.md`](protocole-chat.md)) ;
 la console, celle des opérateurs, voit tout et ne passe pas par ici.
 
@@ -28,9 +28,11 @@ la console, celle des opérateurs, voit tout et ne passe pas par ici.
   elle ne revient pas (404).
 - Qui n'est pas opératrice branche au plus dix ressources de chaque sorte (boîtes, comptes Teams, services : 409
   au-delà). Elle teste une boîte ou un service, ou relève ses boîtes, au plus trente fois par minute (429 au-delà).
-- Toute réponse est `Cache-Control: no-store`, sauf les tuiles, polices et icônes de la carte (§ 5). Les instants sont en **millisecondes** depuis l'époque (0 : jamais).
+- Toute réponse est `Cache-Control: no-store`, sauf les tuiles, polices et icônes du fond de carte (§ 10). Les instants sont en **millisecondes** depuis l'époque (0 : jamais).
 
-Les erreurs sont `{"error": "…"}` en français, plus `fields` (un message par champ) quand un formulaire est refusé :
+Les erreurs sont `{"error": "…"}` en français, plus `fields` (un message par champ) quand un formulaire est refusé ;
+un réglage que son modèle refuse (une boîte, un compte Teams, un service, un partage) dit alors aussi dans `error`, en
+une phrase, ce que disent ses champs, pour un client qui ne les place pas :
 
 | Statut | Sens |
 |---|---|
@@ -258,30 +260,7 @@ répond quand on lui en parle dans le chat, et le téléphone demande le geste.
 `copied`, `ignored`, `failed` ou `expired` —, `at`, `expires`, `decided_at`, `reason`, `reply_to`, `text`).
 
 **`GET /api/moi/phone/position`** — sa dernière position : `{"known": false}`, ou `known`, `coords`
-(`{"lat", "lon"}`), `label`, `accuracy_m`, `at`.
-
-**La carte de sa position** (ADR 0193) — servie par ce serveur seul, à qui est connecté (elle n'est à personne) ;
-d'où viennent ses tuiles se règle dans la console (Réglages › Carte et téléphone › Carte de sa position). Ces routes
-sont les seules dont le navigateur garde les réponses (`Cache-Control: private, max-age=86400`).
-
-- **`GET /api/moi/phone/map`** — `ready` (sinon `reason`, en mots, et le client garde son plan dessiné : aucune carte
-  réglée, pour tout le monde ; d'une carte réglée qui ne se lit pas, une personne lit « La carte n'est pas encore
-  prête sur ce serveur. », une opératrice ce qui ne va pas — un fichier absent, un serveur injoignable, une archive à
-  refaire ; un serveur de carte se revérifie au plus une fois par minute), `kind` (`vecteur` : au schéma Protomaps ;
-  `image`),
-  `minzoom`, `maxzoom`, `bounds` (ouest, sud, est, nord ; `null` : partout), `attribution`, et les chemins de l'API
-  à poser sur l'adresse du serveur : `tiles` (`…/tiles/{z}/{x}/{y}?v=<version>`), `glyphs`
-  (`…/fonts/{fontstack}/{range}.pbf?v=<version>`, `null` sans polices : une carte sans noms), `sprite`
-  (`…/sprites/~<version>/v4`, la planche suit : `/light`, `/dark` ; `null` sans icônes). `<version>` (douze chiffres
-  hexadécimaux) change avec la source — le réglage, la date et la taille du fichier, l'en-tête et la version d'une
-  archive distante — : le navigateur, qui garde un jour ce qu'il a lu, ne ressert jamais d'une carte ce qu'il gardait
-  d'une autre ; les routes l'acceptent et l'ignorent.
-- **`GET /api/moi/phone/map/tiles/{z}/{x}/{y}`** — une tuile, telle que l'archive la garde (`Content-Encoding: gzip`
-  pour Protomaps : le navigateur l'ouvre) ; aucune là (hors de la zone, hors des zooms) : 204, une tuile vide ;
-  aucune carte réglée : 404 ; la carte ne se lit pas : 503, dit à chacun comme `reason`.
-- **`GET /api/moi/phone/map/fonts/{pile}/{plage}.pbf`** — une plage de glyphes, de la première police de la pile qui
-  est là ; **`GET /api/moi/phone/map/sprites/v4/{planche}.json|.png`** (`@2x` compris, précédé ou non de `~<version>/`) — les icônes. Rien en dehors
-  de leur dossier : 404.
+(`{"lat", "lon"}`), `label`, `accuracy_m`, `at`. Elle se montre sur le fond de carte, servi avec la carte (§ 10).
 
 **`GET /api/moi/phone/phones`** — ses téléphones (les jetons `mobile` de son compte, révoqués compris, jamais leur
 secret) : `id`, `label` (« Android · fabricant modèle », composé par l'application), `created_at`, `last_used`,
@@ -427,7 +406,7 @@ fermée ; ses outils arrivent coupés, à choisir un par un (ADR 0129). Ce que M
 | `POST /api/moi/mcp/test` | `name` | rouvrir une session et relire ses outils → `{"ok", "message"}` (trente fois par minute au plus : § 1) |
 | `POST /api/moi/mcp/tools` | `name`, `choices` (`{"<outil>": "non" \| "lecture" \| "action"}`) | choisir ses outils : un outil nouveau ou changé, tel que le service le propose maintenant ; un outil déjà choisi change de choix |
 | `POST /api/moi/mcp/save` | `name`, `values` (`purpose`, `when_to_use`, `enabled`, `url`, `secret_headers`) | le régler ; des en-têtes laissés vides restent |
-| `POST /api/moi/mcp/remove` | `name` | le retirer : plus joint ni offert |
+| `POST /api/moi/mcp/remove` | `name` | le retirer : plus joint ni offert ; retiré entre-temps ailleurs : 400 |
 
 ## 9. Ses partages
 
@@ -453,7 +432,7 @@ l'avait retiré. Il n'en donne aucun : seul le propriétaire partage.
 
 ## 10. Carte, lieux, itinéraires et voyages
 
-Ce que l'écran Carte montre (ADR 0194, 0195, 0196). Le navigateur ne parle qu'à ce serveur ; le serveur cherche les
+Ce que l'écran Carte montre (ADR 0194, 0195, 0196), et le fond de toutes les cartes (ADR 0193, 0229). Le navigateur ne parle qu'à ce serveur ; le serveur cherche les
 lieux dans son index local (`cartes/lieux.db` : rien ne sort), demande une adresse à la Géoplateforme de l'IGN (seul
 le texte cherché part, jamais la position de la personne) et un itinéraire au serveur Valhalla réglé (seuls ses points
 partent). Ce qui n'est pas branché répond 503, en mots. Une personne lit ce qui n'est pas prêt (« La recherche de lieux
@@ -486,6 +465,31 @@ propre borne, 60 par minute et par compte (la Géoplateforme en permet bien dava
 | `GET /api/moi/carte/ordre?points=&mode=` | `{"order": [0, 2, 1, 3]}` : le meilleur ordre de ces points, le départ et l'arrivée à leur place (un ordre illisible du serveur : 502) |
 | `GET /api/moi/carte/le-long?points=&cat=&corridor=&limit=&mode=&avoid=` | `{"places": [lieu…], "route"}` : les lieux à moins de `corridor` mètres (200 à 50 000 ; 5 000) du trajet entre ces points, dans l'ordre où on les croise ; `route` faux : sans itinéraires, le long des points reliés à vol d'oiseau |
 | `GET /api/moi/carte/regards/<seq>` | ce qu'elle a cherché (`"kind": "look"`) ou montré (`"kind": "map"`) pour toi, la note d'un de ses messages (`protocole-chat.md`, § 4) : `{"kind", "title", "what", "places": [lieu…], "route", "trip", "at"}` — `what` : `lieux` ou `trajet` (un regard) ; `route` : `{"mode", "distance_m", "duration_s", "shape", "avoid"}` (le trajet résumé, et ce qu'il évitait ; une carte qui relie ses lieux sans tracé calculé : `{"mode"}` seul), sinon `null` ; `trip` : le voyage qu'elle montrait, s'il est encore là. Pour quelqu'un d'autre, oublié, ou ni un regard ni une carte : 404 |
+
+**Le fond de carte** (ADR 0193, 0229) — celui de toutes les cartes (Téléphone › Position, l'écran Carte, les miniatures
+du chat), servi par ce serveur seul, à qui est connecté (il n'est à personne) ; d'où viennent ses tuiles se règle dans
+la console (Réglages › Carte et téléphone › Carte de sa position). Ces routes sont les seules dont le navigateur garde
+les réponses (`Cache-Control: private, max-age=86400`).
+
+- **`GET /api/moi/carte/fond`** — `ready` (sinon `reason`, en mots, et le client garde son plan dessiné : aucune carte
+  réglée, pour tout le monde ; d'une carte réglée qui ne se lit pas, une personne lit « La carte n'est pas encore
+  prête sur ce serveur. », une opératrice ce qui ne va pas — un fichier absent, un serveur injoignable, une archive à
+  refaire ; un serveur de carte se revérifie au plus une fois par minute), `kind` (`vecteur` : au schéma Protomaps ;
+  `image`),
+  `minzoom`, `maxzoom`, `bounds` (ouest, sud, est, nord ; `null` : partout), `attribution`, et les chemins de l'API
+  à poser sur l'adresse du serveur : `tiles` (`…/tiles/{z}/{x}/{y}?v=<version>`), `glyphs`
+  (`…/fonts/{fontstack}/{range}.pbf?v=<version>`, `null` sans polices : une carte sans noms), `sprite`
+  (`…/sprites/~<version>/v4`, la planche suit : `/light`, `/dark` ; `null` sans icônes). `<version>` (douze chiffres
+  hexadécimaux) change avec la source — le réglage, la date et la taille du fichier, l'en-tête et la version d'une
+  archive distante — : le navigateur, qui garde un jour ce qu'il a lu, ne ressert jamais d'une carte ce qu'il gardait
+  d'une autre ; les routes l'acceptent et l'ignorent.
+- **`GET /api/moi/carte/fond/tiles/{z}/{x}/{y}`** — une tuile, telle que l'archive la garde (`Content-Encoding: gzip`
+  pour Protomaps : le navigateur l'ouvre) ; aucune là (hors de la zone, hors des zooms) : 204, une tuile vide ;
+  aucune carte réglée : 404 ; la carte ne se lit pas : 503, dit à chacun comme `reason`.
+- **`GET /api/moi/carte/fond/fonts/{pile}/{plage}.pbf`** — une plage de glyphes, de la première police de la pile qui
+  est là ; **`GET /api/moi/carte/fond/sprites/v4/{planche}.json|.png`** (`@2x` compris, précédé ou non de `~<version>/`) — les icônes. Rien en dehors
+  de leur dossier : 404.
+- L'adresse d'avant, sous le téléphone (`/api/moi/phone/map/…`), n'existe plus : 404.
 
 ### Tes voyages
 

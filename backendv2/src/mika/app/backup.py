@@ -482,24 +482,26 @@ def overview(data: Path) -> dict[str, Any]:
 
 
 #: ce que garde chaque base et chaque dossier connu du dossier de données, en mots (Système › Stockage et
-#: sauvegardes) ; ce que la sauvegarde en fait se lit dans ``SKIPPED`` et ``SKIPPED_DIRS``
+#: sauvegardes) ; ce que la sauvegarde en fait se lit dans ``SKIPPED`` et ``SKIPPED_DIRS``. Textes affichés,
+#: donc sans numéro d'ADR (ADR 0225) ; leurs renvois : ``mail`` ADR 0172, ``pieces`` 0106, ``partages`` 0062,
+#: ``cartes`` 0193, ``PUSH_KEY_FILE`` 0077
 PLACES: dict[str, str] = {
     "mind": "sa vie : le journal, ses contenus, ses instantanés, les comptes, les réglages",
     "views": "les projections et les vecteurs tirés du journal, les traces et les appels de modèle des derniers jours",
-    "mail": "le courrier relevé, avec ses pièces jointes et ses images (ADR 0172)",
+    "mail": "le courrier relevé, avec ses pièces jointes et ses images",
     "teams": "ce que l'extension Teams a apporté, et ce qui doit en repartir",
     "feeds": "les flux suivis et leurs articles",
     "forge": "ses apps forgées, leurs versions et leurs bases",
     "ateliers": "les ateliers de ses projets, avec leur git",
     "mcp": "les services MCP lancés sur cette machine, chacun dans sa cage",
-    "pieces": "les pièces jointes qu'on lui a envoyées (2 Gio par personne, ADR 0106)",
-    "partages": "les fichiers qu'elle a envoyés (ADR 0062)",
+    "pieces": "les pièces jointes qu'on lui a envoyées (2 Gio par personne)",
+    "partages": "les fichiers qu'elle a envoyés",
     "telephone": "l'application Android à installer",
-    "cartes": "la carte de sa position et l'index des lieux (ADR 0193)",
+    "cartes": "la carte de sa position et l'index des lieux",
     "cache": "le modèle de plongements",
     "claude-code": "les appels de Claude Code d'une installation d'avant",
     "secret.key": "la clé qui chiffre les secrets des réglages",
-    PUSH_KEY_FILE: "la clé des notifications du téléphone (ADR 0077)",
+    PUSH_KEY_FILE: "la clé des notifications du téléphone",
     RECORD: "ce qu'ont noté les dernières sauvegardes et vérifications",
 }
 #: pourquoi la sauvegarde laisse un dossier (``SKIPPED_DIRS``)

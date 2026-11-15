@@ -217,6 +217,10 @@ class ExternalTools(Protocol):
 
     async def plug(self, server: str, changes: Mapping[str, Any]) -> None: ...
 
+    async def unplug(self, server: str) -> None:
+        """Retirer un serveur branché : sa fiche retirée des réglages, puis ses sessions fermées."""
+        ...
+
     async def decide(self, server: str, choices: Mapping[str, str], *, by: str) -> dict[str, str]:
         """Les outils nouveaux ou changés, d'un coup (ADR 0129) : ``non`` (coupé), ``lecture`` ou ``action`` (servi,
         tel qu'il est maintenant). Rend ce qui a été appliqué."""

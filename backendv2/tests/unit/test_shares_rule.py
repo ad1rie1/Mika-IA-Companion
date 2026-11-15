@@ -5,7 +5,9 @@
 - jamais dans un salon, jamais à une autre personne, jamais quand rien n'est partagé ;
 - ses outils lui sont offerts dès qu'on lui partage quelque chose, réduits à ce qu'on lui partage ;
 - la règle est dite une fois (``vocab.ownership``) : le courrier et Teams répondent pareil, ce qu'une personne a se lit
-  au même endroit.
+  au même endroit ;
+- ce qu'une personne donne et ce qu'elle reçoit se trient une fois (``app/me/sharing.py::given_and_received``), pour
+  Paramètres › Partages comme pour la fiche d'une personne.
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ from types import SimpleNamespace as NS
 
 import pytest
 
+from mika.app.me.sharing import Shared, given_and_received
 from mika.contracts import identity as identity_c
 from mika.kernel.frame import Audience, EpisodeRef, Frame
 from mika.plugins.email import EmailParams, boxes_here, owns_a_box
@@ -27,6 +30,7 @@ from mika.vocab.ownership import (
     best_handle,
     facing,
     held,
+    holds,
     must_approve,
     owns_one,
     reach,
@@ -237,6 +241,37 @@ def test_what_a_person_holds_and_at_which_level():
     assert held(keys, owners, shares, NADIA_KEY, owner=True) == {"commune": OWNED, "nadia": OWNED,
                                                                  "autre": SHARE_READ}
     assert held(keys, owners, {}, "personne:user_3", owner=False) == {}
+
+
+def test_whether_an_account_is_hers_is_said_once():
+    assert holds("", YOU_KEY, owner=True)  # « à toi » : à chacune de ses propriétaires
+    assert not holds("", NADIA_KEY, owner=False)
+    assert holds(NADIA_KEY, NADIA_KEY, owner=False) and not holds(NADIA_KEY, YOU_KEY, owner=True)  # à son nom
+    assert not holds(SELF, YOU_KEY, owner=True)  # les siens ne sont à personne d'autre
+
+
+#: des partages, comme ``every_share`` les range : à toi (vide), à elle, à Nadia (``user_2``) ; Béa (``user_3``) est
+#: une de ses propriétaires, Léa (``user_4``) non
+YOURS_TO_NADIA = Shared("mail", "perso", "Personnel", "", "user_2", SHARE_READ)
+YOURS_TO_BEA = Shared("mail", "perso", "Personnel", "", "user_3", SHARE_READ)  # un reste d'avant le refus
+NADIAS_TO_YOU = Shared("mail", "pro", "Atelier", NADIA_KEY, "user_1", SHARE_PREPARE)
+HERS_TO_NADIA = Shared("teams", "sien", "Le sien", SELF, "user_2", SHARE_READ)
+NADIAS_SERVICE_TO_LEA = Shared("mcp", "factures", "factures", NADIA_KEY, "user_4", SHARE_USE)
+EVERY = (YOURS_TO_NADIA, YOURS_TO_BEA, NADIAS_TO_YOU, HERS_TO_NADIA, NADIAS_SERVICE_TO_LEA)
+
+
+@pytest.mark.parametrize(("person", "owner", "given", "received"), [
+    # une ressource « à toi » : donnée par chacune de ses propriétaires, reçue par qui on la partage
+    ("user_1", True, [YOURS_TO_NADIA, YOURS_TO_BEA], [NADIAS_TO_YOU]),
+    # partagée à une de ses propriétaires, elle reste à elle : donnée, pas reçue
+    ("user_3", True, [YOURS_TO_NADIA, YOURS_TO_BEA], []),
+    # la boîte d'une personne, et son service : donnés par elle ; ce qui est à toi ou à elle, reçu
+    ("user_2", False, [NADIAS_TO_YOU, NADIAS_SERVICE_TO_LEA], [YOURS_TO_NADIA, HERS_TO_NADIA]),
+    ("user_4", False, [], [NADIAS_SERVICE_TO_LEA]),  # un service qu'on lui partage
+    ("user_5", False, [], []),  # rien à elle, rien pour elle
+])
+def test_what_a_person_gives_and_receives_is_sorted_once(person, owner, given, received):
+    assert given_and_received(EVERY, person, owner=owner) == (given, received)  # dans l'ordre des partages
 
 
 def test_who_decides_is_found_where_she_is():

@@ -1,7 +1,7 @@
 /**
  * L'écran « Paramètres » (ADR 0187) : ce que la personne connectée règle pour elle-même — son compte, ses boîtes, ses
  * comptes Teams, ses téléphones, ses partages et ses services MCP —, par l'API par personne (`protocole-moi.md`
- * § 5, 7, 8 ; `app/me/shares.py`). La forme : `maquette/ecrans/parametres.js`. Chaque onglet est une page
+ * § 5, 7, 8 ; `app/me/sharing.py`). La forme : `maquette/ecrans/parametres.js`. Chaque onglet est une page
  * (`account.ts`, `mail.ts`…) ; ici, la lecture, le dessin, la barre d'enregistrement, les sous-onglets et les routes
  * d'action (`#parametres/mcp/+brancher` : l'onglet, puis la fenêtre que son bouton ouvre).
  */

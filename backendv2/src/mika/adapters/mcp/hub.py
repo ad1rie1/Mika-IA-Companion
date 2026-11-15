@@ -88,12 +88,15 @@ class McpHub:
                  save_reviews: Callable[[Reviews], Awaitable[Any]], *, connect: Connect | None = None,
                  now_us: Callable[[], int] | None = None, local_root: Path | None = None,
                  sandbox: Sandbox | None = None,
-                 settle: Callable[..., Awaitable[Any]] | None = None) -> None:
+                 settle: Callable[..., Awaitable[Any]] | None = None,
+                 remove: Callable[[str], Awaitable[None]] | None = None) -> None:
         self._config = config
         self._reviews = reviews
         self._save_reviews = save_reviews
-        #: enregistrer ce qu'un serveur de l'opérateur fait d'elle (ADR 0128) ; rien : ça ne s'enregistre pas d'ici
+        #: enregistrer ce qu'un serveur de l'opérateur fait d'elle (ADR 0128), et retirer un serveur de ses réglages ;
+        #: rien : ça ne s'enregistre pas d'ici
         self._settle = settle
+        self._remove = remove
         #: les serveurs lancés ici : leur dossier (``<données>/mcp/<nom>``) et leur cage
         self.launcher = Launcher(local_root, sandbox) if local_root is not None else None
         self._connect = connect or self.open_transport
@@ -380,6 +383,15 @@ class McpHub:
         await self._settle(server, dict(changes), create=True)
         await self.reconfigure()
         self._changed()
+
+    async def unplug(self, server: str) -> None:
+        """Retirer un serveur branché (ADR 0192) : sa fiche ôtée de ses réglages, puis ses sessions fermées et ses
+        outils retirés de l'offre (``reconfigure``, qui prévient aussi qui écoute). Ce que les réglages refusent (un
+        serveur du système, un nom inconnu) lève ``ValueError``, et rien n'est fermé."""
+        if self._remove is None:
+            raise ValueError("les réglages des serveurs ne s'enregistrent pas d'ici")
+        await self._remove(server)
+        await self.reconfigure()
 
     async def decide(self, server: str, choices: Mapping[str, str], *, by: str) -> dict[str, str]:
         """Les outils nouveaux ou changés, d'un coup (ADR 0129) : coupé (``non``), ou servi tel qu'il est maintenant,

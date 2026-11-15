@@ -65,7 +65,7 @@ from mika.app.handmade.person.voyages import gpx as trip_gpx
 from mika.app.handmade.person.voyages import voyages
 from mika.app.handmade.tabs import anchored
 from mika.app.me import OUTBOUND
-from mika.app.me.shares import service_shares
+from mika.app.me.sharing import Shared, every_share, given_and_received, service_shares, sharer
 from mika.contracts import affect as affect_c
 from mika.contracts import attention as attention_c
 from mika.contracts import goals as goals_c
@@ -87,8 +87,6 @@ from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import PREFIX, UI, Overview, env, secure
 from mika.kernel.clock import DAY, US
 from mika.kernel.inspect import Fields, Head, Note, Section, Table, num_fr, pct_fr
-from mika.plugins import email as email_p
-from mika.plugins import teams as teams_p
 from mika.plugins.teams.inspect import ACCOUNT as TEAMS_ACCOUNT
 from mika.plugins.teams.inspect import SECTION as TEAMS_SECTION
 from mika.plugins.teams.inspect import WHOSE as TEAMS_WHOSE
@@ -520,7 +518,7 @@ LEVEL_FR = {level: label.lower() for level, label in SHARES}
 
 
 def _with(look: Look, who: str, level: str) -> dict[str, str]:
-    """Une personne d'un partage (``personne:<clé>``) et son niveau, pour la fiche."""
+    """Une personne d'un partage (``personne:<clé>``, ou sa clé) et son niveau, pour la fiche."""
     person = who.removeprefix(PERSON)
     return {"name": look.name(person), "person_href": look.href(person), "level": LEVEL_FR.get(level, level)}
 
@@ -538,41 +536,30 @@ def services(look: Look, who: Who) -> list[dict[str, Any]]:
             for name, spec in sorted(settings.mcp().servers.items()) if spec.owner == mine]
 
 
+def _resource(s: Shared) -> dict[str, str]:
+    """La ressource d'un partage, pour la fiche : sa sorte en mots, son nom, où elle mène."""
+    if s.kind == "mail":
+        href = subject_url("compte", s.key)
+    elif s.kind == "teams":
+        href = f"{PREFIX}/{TEAMS_SECTION}/extension?" + urlencode({TEAMS_WHOSE: s.owner or YOURS, TEAMS_ACCOUNT: s.key})
+    else:
+        href = subject_url("serveur", s.key)
+    return {"kind": SHARED_KINDS[s.kind], "title": s.title, "href": href}
+
+
 def shares(look: Look, who: Who) -> dict[str, list[dict[str, Any]]]:
-    """Ce qu'elle partage et ce qu'on lui partage (ADR 0188) : ses boîtes et ses comptes Teams (les partages
-    journalisés, ``EmailParams.shares``, ``TeamsParams.shares`` ; une boîte « à toi » est à chacune de ses
-    propriétaires), ses services (une ligne d'accès à une seule personne, ``app/me/shares.py``). Lecture seule."""
-    frame, mine = look.frame, PERSON + who.person
-    owner = bool(frame.get(identity_c.IS_OWNER(who.person)))
-    given: list[dict[str, Any]] = []
-    received: list[dict[str, Any]] = []
-
-    def teams_href(key: str, whose: str) -> str:
-        return f"{PREFIX}/{TEAMS_SECTION}/extension?" + urlencode({TEAMS_WHOSE: whose or YOURS, TEAMS_ACCOUNT: key})
-
-    for kind, of, href, holder in (
-            ("mail", email_p.params_of, lambda key, _whose: subject_url("compte", key), email_p.approver_name),
-            ("teams", teams_p.params_of, teams_href, teams_p.writer_of)):
-        port = look.ui.kernel.ports.get(kind)
-        if port is None:
-            continue
-        p = of(frame)
-        for a in port.accounts():
-            whose, shared = p.owners.get(a.key, ""), p.shares.get(a.key, {})
-            resource = {"kind": SHARED_KINDS[kind], "title": a.name, "href": href(a.key, whose)}
-            if (not whose and owner) or whose == mine:
-                given += [{**resource, **_with(look, x, level)} for x, level in sorted(shared.items())]
-            elif level := shared.get(mine, ""):
-                received.append({**resource, "owner": holder(frame, a.key), "level": LEVEL_FR.get(level, level)})
+    """Ce qu'elle partage et ce qu'on lui partage (ADR 0188) : ses boîtes, ses comptes Teams et ses services, lus dans
+    les réglages comme Réglages › Droits › Partages et Paramètres › Partages (``every_share``, ADR 0210), et triés par
+    la même règle (``given_and_received`` : une ressource « à toi » est à chacune de ses propriétaires). Lecture
+    seule ; sans réglages joignables, rien."""
     settings = look.ui.deps.settings
-    for name, spec in sorted(settings.mcp().servers.items()) if settings is not None else ():
-        resource = {"kind": SHARED_KINDS["mcp"], "title": name, "href": subject_url("serveur", name)}
-        if spec.owner == mine:
-            given += [{**resource, **_with(look, x, level)} for x, level in sorted(service_shares(spec).items())]
-        elif spec.owner and (level := service_shares(spec).get(mine, "")):
-            received.append({**resource, "owner": look.name(spec.owner.removeprefix(PERSON)),
-                             "level": LEVEL_FR.get(level, level)})
-    return {"given": given, "received": received}
+    if settings is None:
+        return {"given": [], "received": []}
+    owner = bool(look.frame.get(identity_c.IS_OWNER(who.person)))
+    given, received = given_and_received(every_share(settings), who.person, owner=owner)
+    return {"given": [{**_resource(s), **_with(look, s.person, s.level)} for s in given],
+            "received": [{**_resource(s), "owner": sharer(look.frame, s, look.name), "level": LEVEL_FR.get(s.level, s.level)}
+                         for s in received]}
 
 
 def owned(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str]) -> Markup | None:

@@ -18,8 +18,9 @@ from urllib.parse import quote
 from starlette.responses import Response
 from starlette.routing import Route
 
+from mika.adapters.web.app import safe_mime
 from mika.app.me.api import Call, Denied, MeApiBase, done, form, missing
-from mika.app.me.common import OWN, allows, held_by, millis, only_owner, opened, snippet
+from mika.app.me.common import allows, held_by, millis, only_owner, opened, snippet
 from mika.inspector.framed import FRAME_CSP, FRAME_CSP_REMOTE, framed_html
 from mika.plugins import email as email_p
 from mika.plugins.email import WAITING, EmailState, Seen, exhausted, name_of
@@ -28,6 +29,7 @@ from mika.ports.drafts import to_fill
 from mika.ports.mail import AccountInfo, Contact, Mail, MailQuery, Sent, addresses, split_ref
 from mika.runtime.operations import SPACE, perform
 from mika.vocab.access import SHARE_PREPARE, SHARE_READ, SHARE_USE
+from mika.vocab.ownership import OWNED
 
 #: ce que dit une liste : au plus tant de lignes par page
 PAGE_MAX = 100
@@ -43,9 +45,6 @@ GESTURES = {"read": "lu", "unread": "non_lu", "archive": "archiver", "flag": "su
 MOVE = "move"
 #: une image distante dans un mail HTML : ce que le cadre masque tant qu'on ne les permet pas (ADR 0175)
 REMOTE_IMAGE = re.compile(r"""<img\b[^>]*\bsrc\s*=\s*["']?\s*https?:|url\(\s*["']?\s*https?:""", re.I)
-#: les sortes qu'une pièce peut annoncer telles quelles ; les autres partent en ``application/octet-stream``
-SAFE_MIMES = frozenset({"text/plain", "text/csv", "application/json", "image/png", "image/jpeg", "image/webp",
-                        "image/gif", "application/pdf"})
 
 
 # ── à qui ──
@@ -114,7 +113,9 @@ async def _mail(call: Call, ref: str, need: str = SHARE_READ) -> Mail:
     return found
 
 
-def _state(call: Call) -> EmailState:
+def state(call: Call) -> EmailState:
+    """Ce que le courrier sait de sa vie (``EmailState``) : ses mails remarqués, ses envois, ses brouillons, ses
+    demandes. Les réglages de ses boîtes le lisent aussi (``settings.py``, les clés qui ont laissé une trace)."""
     return call.frame.state(email_p.EMAIL.name)
 
 
@@ -154,7 +155,7 @@ def _keys(mine: dict[str, tuple[AccountInfo, str]], box: str) -> tuple[str, ...]
     return tuple(key for key, (_, level) in mine.items() if level != SHARE_READ)
 
 
-def _her(s: EmailState, ref: str, p: Any, level: str = OWN) -> dict[str, Any] | None:
+def _her(s: EmailState, ref: str, p: Any, level: str = OWNED) -> dict[str, Any] | None:
     """Ce qu'elle a fait de ce mail : remarqué, jugé important, lu de son côté (à part de ton non-lu, ADR 0175), une
     réponse qu'elle prépare ou qu'on lui a demandée — sauf pour qui ne fait que lire la boîte (ADR 0188) : les réponses
     en préparation sont l'affaire de son propriétaire."""
@@ -171,7 +172,7 @@ def _her(s: EmailState, ref: str, p: Any, level: str = OWN) -> dict[str, Any] | 
             "draft": waiting.draft if waiting is not None else "", "asked": asked}
 
 
-def row(m: Mail, s: EmailState, p: Any, level: str = OWN) -> dict[str, Any]:
+def row(m: Mail, s: EmailState, p: Any, level: str = OWNED) -> dict[str, Any]:
     return {"ref": m.ref, "box": m.account, "folder": m.folder,
             "from": {"name": name_of(m.sender) or m.address, "address": m.address}, "to": _people(m.to),
             "subject": m.subject, "snippet": snippet(m.body, SNIPPET), "date": millis(m.date), "seen": m.seen,
@@ -184,7 +185,7 @@ def _box_json(call: Call, a: AccountInfo, level: str) -> dict[str, Any]:
     status = port.status(a.key)
     folders = [{"name": f.name, "label": f.label, "role": f.role, "polled": f.polled, "total": f.total,
                 "unseen": f.unseen} for f in port.folders(a.key)]
-    s = _state(call)
+    s = state(call)
     waiting = sum(1 for d in s.drafts.values() if d.account == a.key and d.state == WAITING) \
         if allows(level, SHARE_PREPARE) else 0
     return {"key": a.key, "name": a.name, "address": a.address, "level": level, "ready": a.ready,
@@ -192,9 +193,9 @@ def _box_json(call: Call, a: AccountInfo, level: str) -> dict[str, Any]:
             "can_send": a.can_send, "enabled": a.enabled, "signature": a.signature,
             "last_poll": millis(status.last_poll), "error": status.error, "folders": folders, "drafts_waiting": waiting,
             # une boîte partagée se montre à son nom (« Boîte de Léa », ADR 0188)
-            "owner_name": email_p.approver_name(call.frame, a.key) if level != OWN else "",
+            "owner_name": email_p.approver_name(call.frame, a.key) if level != OWNED else "",
             # « à toi » : commune à ses propriétaires (on ne la leur partage pas : elle est déjà à elles)
-            "common": level == OWN and not email_p.params_of(call.frame).owners.get(a.key, "")}
+            "common": level == OWNED and not email_p.params_of(call.frame).owners.get(a.key, "")}
 
 
 # ── lire ──
@@ -210,21 +211,21 @@ async def messages(call: Call) -> dict[str, Any]:
     port = _mail_port(call)
     mine = boxes(call)
     keys = _keys(mine, call.arg("box", limit=40))
-    state = call.arg("state", limit=20)
-    if state not in STATES:
+    listed = call.arg("state", limit=20)
+    if listed not in STATES:
         raise Denied(400, "« state » : unread, flagged, noticed ou needs_reply.")
     page, size = call.number("page", 1), call.number("size", 25, high=PAGE_MAX)
-    s, p = _state(call), email_p.params_of(call.frame)
+    s, p = state(call), email_p.params_of(call.frame)
     if not keys:
         return {"items": [], "total": 0, "page": 1, "size": size}
     refs = tuple(k for k, seen in s.mails.items() if seen.account in keys
-                 and (state == "noticed" or (seen.needs_reply and not seen.read))) \
-        if state in ("noticed", "needs_reply") else None
+                 and (listed == "noticed" or (seen.needs_reply and not seen.read))) \
+        if listed in ("noticed", "needs_reply") else None
     query = MailQuery(accounts=keys, folder=call.arg("folder", limit=300), text=call.arg("q", limit=200).strip(),
-                      seen=False if state == "unread" else None, flagged=True if state == "flagged" else None,
+                      seen=False if listed == "unread" else None, flagged=True if listed == "flagged" else None,
                       refs=refs)
     got = port.messages_page(query, page, size)
-    return {"items": [row(m, s, p, mine.get(m.account, (None, OWN))[1]) for m in got.items], "total": got.total,
+    return {"items": [row(m, s, p, mine.get(m.account, (None, OWNED))[1]) for m in got.items], "total": got.total,
             "page": got.number, "size": got.size}
 
 
@@ -233,7 +234,7 @@ async def message(call: Call) -> dict[str, Any]:
     images distantes, et ce qu'elle en sait."""
     m = await _mail(call, call.arg("ref"))
     port = call.port("mail")
-    s, p = _state(call), email_p.params_of(call.frame)
+    s, p = state(call), email_p.params_of(call.frame)
     level = boxes(call)[m.account][1]
     her = _her(s, m.ref, p, level)
     seen = s.mails.get(m.ref)
@@ -285,9 +286,9 @@ async def file(call: Call) -> Response:
         raise missing() from None
     except (OSError, RuntimeError, ValueError):
         raise Denied(502, "Cette pièce n'a pas pu être récupérée : vérifie la connexion de la boîte.") from None
-    base = str(got.mime or "").split(";", 1)[0].strip().lower()
     name = "".join(ch for ch in got.name.replace("\\", "/").rsplit("/", 1)[-1] if ch.isprintable())[:200]
-    return Response(got.data, media_type=base if base in SAFE_MIMES else "application/octet-stream", headers={
+    # la sorte qu'elle annonce, si elle est sûre (la liste du serveur web, ``safe_mime``) ; toujours en pièce jointe
+    return Response(got.data, media_type=safe_mime(got.mime), headers={
         "Content-Disposition": "attachment; filename*=UTF-8''" + quote(name or "piece", safe=""),
         "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store",
         "Content-Security-Policy": "sandbox; default-src 'none'"})
@@ -299,14 +300,14 @@ async def drafts(call: Call) -> dict[str, Any]:
     ils attendent alors l'accord de son propriétaire."""
     port = _mail_port(call)
     mine = boxes(call)
-    s = _state(call)
+    s = state(call)
     out = []
     names: dict[str, dict[str, str]] = {}
     # la note de qui a décidé est gardée à part (l'oubli l'atteint) : relue d'un coup, et seulement sur une boîte à
     # qui est connecté — ce que son propriétaire a dit à Mika en refusant ne se lit pas par un partage (comme Teams)
     listed = [d for d in sorted(s.drafts.values(), key=lambda d: (-d.at, -d.proposal))
               if d.account in mine and allows(mine[d.account][1], SHARE_PREPARE)][:PAGE_MAX]
-    refs = [d.note_ref for d in listed if d.note_ref and mine[d.account][1] == OWN]
+    refs = [d.note_ref for d in listed if d.note_ref and mine[d.account][1] == OWNED]
     store = call.port("store") if refs else None
     notes = dict(store.content(refs)) if store is not None else {}
     for d in listed:
@@ -319,7 +320,7 @@ async def drafts(call: Call) -> dict[str, Any]:
             "id": d.draft, "box": d.account, "state": d.state, "at": millis(d.at), "decided_at": millis(d.decided_at),
             "by": d.by, "note": (notes.get(d.note_ref) or "") if d.note_ref else d.note, "in_reply_to": d.mail,
             "asked": d.asked,
-            "voice": mine[d.account][0].voice, "decides": mine[d.account][1] == OWN,
+            "voice": mine[d.account][0].voice, "decides": mine[d.account][1] == OWNED,
             "original": {"subject": original.subject, "from": name_of(original.sender) or original.address}
             if original is not None else None,
             "to": kept.to if kept else "", "cc": kept.cc if kept else "", "subject": kept.subject if kept else "",
@@ -473,7 +474,7 @@ async def prefill(call: Call) -> dict[str, Any]:
     m = await _mail(call, call.arg("ref"), SHARE_PREPARE)
     if _copies(call.port("mail"), m)[0]:
         raise Denied(409, "Ce mail est parti de ta boîte : elle n'y prépare pas de réponse.")
-    s, p = _state(call), email_p.params_of(call.frame)
+    s, p = state(call), email_p.params_of(call.frame)
     waiting = next((d for d in s.drafts.values() if d.mail == m.ref and d.state == WAITING), None)
     if waiting is not None:
         return {"ok": True, "message": "Elle a déjà préparé une réponse.", "draft": waiting.draft, "asked": False}
@@ -552,8 +553,8 @@ def count(call: Call) -> int:
     if call.port("mail") is None:
         return 0
     mine = boxes(call)
-    return sum(1 for d in _state(call).drafts.values()
-               if d.state == WAITING and mine.get(d.account, (None, ""))[1] == OWN)
+    return sum(1 for d in state(call).drafts.values()
+               if d.state == WAITING and mine.get(d.account, (None, ""))[1] == OWNED)
 
 
 def routes(api: MeApiBase) -> list[Route]:

@@ -29,7 +29,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 | Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134, 0148, 0184, 0185, 0186, 0188, 0207, 0220, 0226 |
 | Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137, 0150, 0155, 0160, 0227 |
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144, 0145, 0161 |
-| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163, 0166, 0168, 0171, 0172, 0189, 0190, 0191, 0192, 0193, 0194, 0195, 0196, 0198, 0199, 0211, 0213, 0214, 0228 |
+| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163, 0166, 0168, 0171, 0172, 0189, 0190, 0191, 0192, 0193, 0194, 0195, 0196, 0198, 0199, 0211, 0213, 0214, 0228, 0229 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170, 0187, 0200, 0208, 0209, 0215 |
@@ -1618,7 +1618,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Pourquoi :* « peut-être un fournisseur gratuit ? … ou alors sur le pc portable héberger son propre openstreetmap ? » ; « ma carte se charge depuis le backend, et depuis le backend on doit pouvoir configurer le serveur de carte ».
 
-*Révise 0119 (en partie : la position se voit sur une carte). Révisée par 0194 (la même carte sert l'écran Carte), 0197 (en partie : elle se règle sous Réglages › Carte et téléphone).*
+*Révise 0119 (en partie : la position se voit sur une carte). Révisée par 0194 (la même carte sert l'écran Carte), 0197 (en partie : elle se règle sous Réglages › Carte et téléphone), 0229 (en partie : son adresse, avec la carte).*
 
 ### 0194 — Les lieux, les adresses et les itinéraires passent par le serveur
 
@@ -1675,6 +1675,15 @@ trip » ; « Valhalla public d'abord, puis le portable ».
   journal (les lieux, le trajet résumé) ; oublier la personne l'efface, et la carte disparaît de son message.
 
 *Pourquoi :* « proposer des cartes, des parcours et des points d'intérêt ».
+
+### 0229 — Le fond de carte est celui de tous les écrans
+
+- Le fond de carte de 0193 (ses tuiles, ses polices, ses icônes, et ce que le client en sait) sert Téléphone › Position, l'écran Carte (0194) et les miniatures du chat (0196) : il est servi avec la carte, à `/api/moi/carte/fond/…` (`app/me/maps.py`), et non plus sous le téléphone, `/api/moi/phone/map/…`, qui n'existe plus.
+- Rien d'autre ne change : d'où viennent les tuiles (la console), un jour gardé par le navigateur sous une adresse qui porte la version de la source, aucune adresse du dehors donnée au navigateur. Seul `frontendv2` lit ces routes, et il se déploie avec le moteur : il n'écrit que l'adresse de ce que le client sait de la carte, les autres viennent de sa réponse.
+
+*Pourquoi :* né pour Téléphone › Position, le fond de carte sert aussi la Carte et les miniatures du chat. L'adresse fait partie de l'API qu'on lit pour comprendre le système : une carte de tous les écrans servie « sous le téléphone » était le reste d'avant ces ajouts (audit du 2026-11-05, K10-08, décision K10-Q1).
+
+*Révise 0193 (en partie : son adresse).*
 
 ### 0198 — Ce qui vient d'ailleurs : une seule neutralisation, la plus forte
 

@@ -15,7 +15,8 @@ Une ressource qui n'est pas à elle n'existe pas : le même 404 qu'une ressource
 ``docs/protocole-moi.md``.
 
 Ce paquet réunit les modules (``mail``, ``teams``…). Le cadre qu'ils emploient (``Me``, ``Call``, ``Denied``, la
-déclaration d'une route) est dans ``api.py``, leurs petites aides et la règle de partage dans ``common.py``.
+déclaration d'une route) est dans ``api.py`` ; leurs petites aides dans ``common.py`` ; la règle de partage est dans
+``vocab.ownership``, que ``common.py`` lit.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ from typing import Any
 
 from starlette.routing import Route
 
-from mika.app.me import mail, maps, mcp, phone, rights, settings, shares, teams
+from mika.app.me import mail, maps, mcp, phone, rights, settings, sharing, teams
 from mika.app.me.api import OUTBOUND, PROBES, ROUTES_BUSY, Call, Denied, MeApiBase, form, missing, spend
 
 __all__ = ["COUNTERS", "MODULES", "OUTBOUND", "PROBES", "ROUTES_BUSY", "Call", "Denied", "MeApi", "form", "missing",
@@ -33,7 +34,7 @@ __all__ = ["COUNTERS", "MODULES", "OUTBOUND", "PROBES", "ROUTES_BUSY", "Call", "
 
 #: les modules : chacun rend ses routes, et ce qu'il compte pour la barre du haut
 MODULES: tuple[Callable[[MeApiBase], list[Route]], ...] = (mail.routes, teams.routes, phone.routes, rights.routes,
-                                                           settings.routes, mcp.routes, shares.routes, maps.routes)
+                                                           settings.routes, mcp.routes, sharing.routes, maps.routes)
 COUNTERS: tuple[tuple[str, Callable[[Call], int]], ...] = (("mail", mail.count), ("teams", teams.count),
                                                             ("phone", phone.count))
 

@@ -460,7 +460,9 @@ techniques sont dans « Détails techniques ».
   ouvre un tableau ; chaque bouton envoie tout le tableau (`/outils/familles/regler`). Dans un dernier sous-onglet
   (filtrée : dessous, replié), le texte exact que son prompt porte sur ses outils, situation par situation. `?outil=<nom>` ouvre sa fiche : où elle peut s'en
   servir, par ses droits (le tableau de sa famille, ou de son service ou de son app), ses arguments, ses derniers
-  appels. Ce qui vient d'ailleurs (un service, une app) a ses tableaux sur sa propre fiche.
+  appels ; pour un outil de son code qui ne clôt pas sa boucle, offert là où son fournisseur sait différer, « Sa
+  place » sous la liste des situations : ce que prévoit le code, sous la main ou à chercher quand il lui faut
+  (`/outils/place/regler`, audité, ADR 0123), et la liste le dit aussitôt. Ce qui vient d'ailleurs (un service, une app) a ses tableaux sur sa propre fiche.
 - **Venus d'ailleurs** (`outils/serveurs`, l'onglet du plugin MCP) : les services branchés (à qui — elle, ou la
   personne qui l'a branché sous son compte, vers sa fiche, ADR 0192 —, état, outils servis / proposés, à revoir, avec
   qui et ses accès — badge et vitale), « À qui » en bouton à choix quand plusieurs en ont branché (tout le monde, elle,

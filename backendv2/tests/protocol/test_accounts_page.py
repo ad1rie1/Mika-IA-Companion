@@ -8,7 +8,7 @@
 - elle compte les sessions web d'un compte, dit sa dernière connexion, et les ferme d'un geste sans toucher à ses
   applications (C9-06) ;
 - le compte mène à sa fiche, à ses comptes et à ses droits exacts ; la fiche mène au compte, et son onglet Comptes
-  dit ses services et ses partages (C7-08, C9-02).
+  dit ses services et ses partages (C7-08, C9-02), lus dans les réglages comme Paramètres › Partages.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ import json
 import re
 from urllib.parse import parse_qs, urlsplit
 
+from mika.adapters.mail.config import MailAccount, MailConfig
 from mika.contracts import runtime as rt
 from mika.plugins.email import EmailParams
 from tests.fixtures.console_html import ConsoleHTML
@@ -30,6 +31,15 @@ from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture p
 ACCOUNTS = "/inspecteur/reglages/comptes"
 #: un jeton de client natif, tel qu'il se montre (``TOKEN_PREFIX``)
 RAW_TOKEN = re.compile(r"mw_[A-Za-z0-9_-]{20,}")
+
+
+def boxes(client, live, *, perso: dict[str, str] | None = None, pro_owner: str = "",
+          pro: dict[str, str] | None = None) -> None:
+    """Les deux boîtes du courrier simulé (« Personnel », « Atelier »), rangées dans les réglages avec leurs partages :
+    la fiche les y lit, comme Paramètres › Partages et Réglages › Droits › Partages (ADR 0210)."""
+    client.portal.call(live.settings.save_email, MailConfig(accounts={
+        "perso": MailAccount(label="Personnel", address="adrien@example.test", shares=perso or {}),
+        "pro": MailAccount(label="Atelier", address="atelier@example.test", owner=pro_owner, shares=pro or {})}))
 
 
 def page(client, url: str) -> str:
@@ -190,10 +200,11 @@ def test_a_persons_fiche_leads_to_her_account_and_lists_her_services_and_shares(
     bootstrap(client)
     lea = second_person(client, live)
     live.kernel.ports["mail"] = mailbox(1)
-    # « Personnel » est à toi, partagée avec Léa (lire) ; « Atelier » est à Léa, partagée avec toi (lire et préparer)
-    client.portal.call(live.kernel.set_params, "email", EmailParams(
-        owners={"perso": "", "pro": f"personne:{lea}"},
-        shares={"perso": {f"personne:{lea}": "lire"}, "pro": {"personne:user_1": "preparer"}}))
+    # « Personnel » est à toi, partagée avec Léa (lire) ; « Atelier » est à Léa, partagée avec toi (lire et préparer) :
+    # les partages se lisent dans les réglages ; la liste des boîtes du plugin, à qui est chacune dans le journal
+    boxes(client, live, perso={f"personne:{lea}": "lire"}, pro_owner=f"personne:{lea}",
+          pro={"personne:user_1": "preparer"})
+    client.portal.call(live.kernel.set_params, "email", EmailParams(owners={"perso": "", "pro": f"personne:{lea}"}))
     login(client, "lea")
     assert moi_post(client, "/mcp/plug", SERVICE).status_code == 200
     login(client, "adrien")
@@ -233,15 +244,14 @@ def test_a_person_with_only_a_share_or_a_service_has_her_accounts_tab(world):  #
     live.kernel.ports["mail"] = mailbox(1)
     fiche = f"/inspecteur/fiche/person/{lea}"
     assert f"{fiche}?onglet=boites" not in page(client, fiche)  # rien à elle, rien pour elle : pas d'onglet
-    # « Personnel », à toi, partagée avec Léa (lire) : aucune boîte à elle, mais un partage
-    client.portal.call(live.kernel.set_params, "email", EmailParams(
-        owners={"perso": "", "pro": ""}, shares={"perso": {f"personne:{lea}": "lire"}}))
+    # « Personnel », à toi, partagée avec Léa (lire) : aucune boîte à elle, mais un partage (lu dans les réglages)
+    boxes(client, live, perso={f"personne:{lea}": "lire"})
     assert f"{fiche}?onglet=boites" in page(client, fiche)
     tab = page(client, f"{fiche}?onglet=boites")
     assert re.findall(r'<section id="([a-z]+)" class="stack" data-pane', tab) == ["boites", "services", "partages"]
     assert "aucune boîte à son nom" in text(tab) and "Personnel" in text(tab.split('id="partages"', 1)[1])
     # sans partage, un service qu'elle a branché suffit ; son compte mène à l'onglet
-    client.portal.call(live.kernel.set_params, "email", EmailParams(owners={"perso": "", "pro": ""}))
+    boxes(client, live)
     assert f"{fiche}?onglet=boites" not in page(client, fiche)
     login(client, "lea")
     assert moi_post(client, "/mcp/plug", SERVICE).status_code == 200

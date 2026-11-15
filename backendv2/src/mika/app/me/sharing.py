@@ -8,14 +8,17 @@ le monde ». Une boîte ou un compte Teams partagé est rangé avec sa ressource
 partagé reçoit une ligne d'accès pour la personne (ADR 0192) — lire : ses outils qui lisent ; s'en servir : aussi ceux
 qui agissent, sur sa demande à elle ; retirer le partage retire la ligne.
 
-Tous se lisent ici (``every_share``), et une seule écriture range celui d'une boîte ou d'un compte Teams
-(``write_share``) : celle de son propriétaire, et celle de l'opérateur qui le retire dans Réglages › Droits › Partages
-(ADR 0210) — seul le propriétaire le donne, jamais la console.
+Tous se lisent ici, dans les réglages (``every_share``) : Réglages › Droits › Partages les montre tous ; Paramètres ›
+Partages (``list_shares``) et l'onglet Comptes de la fiche d'une personne y lisent ce qu'une personne donne et ce
+qu'elle reçoit, triés une fois par ``given_and_received`` (la règle « à elle » de ``vocab.ownership.holds``). Une
+seule écriture range celui d'une boîte ou d'un compte Teams (``write_share``) : celle de son propriétaire, et celle de
+l'opérateur qui le retire dans Réglages › Droits › Partages (ADR 0210) — seul le propriétaire le donne, jamais la
+console.
 """
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -24,16 +27,17 @@ from starlette.routing import Route
 
 from mika.adapters.mail.config import MailAccount, MailConfig
 from mika.adapters.teams import TeamsAccount
-from mika.app.me import mail as mail_moi
-from mika.app.me import mcp as mcp_moi
-from mika.app.me import teams as teams_moi
+from mika.app.me import mail as mail_me
+from mika.app.me import mcp as mcp_me
+from mika.app.me import teams as teams_me
 from mika.app.me.api import Call, Denied, MeApiBase, missing, person_of, refused
-from mika.app.me.common import OWN
+from mika.app.me.common import settings_of
 from mika.contracts import identity as identity_c
 from mika.plugins import email as email_p
 from mika.plugins import teams as teams_p
 from mika.runtime.operations import audit
 from mika.vocab.access import PERSON, SHARE_PREPARE, SHARE_USE, SHARES
+from mika.vocab.ownership import holds
 
 #: ce qui se partage
 KINDS = ("mail", "teams", "mcp")
@@ -76,7 +80,7 @@ def _name(call: Call, person: str) -> str:
 
 def service_shares(spec: Any) -> dict[str, str]:
     """Les partages d'un service, par personne (« personne:<clé> ») : leur niveau, lu par la règle de ``mcp.shared``."""
-    return {who: level for who, (level, _line) in mcp_moi.shared(spec).items()}
+    return {who: level for who, (level, _line) in mcp_me.shared(spec).items()}
 
 
 def every_share(settings: Any) -> list[Shared]:
@@ -94,6 +98,21 @@ def every_share(settings: Any) -> list[Shared]:
     return out
 
 
+def given_and_received(shares: Iterable[Shared], person: str, *, owner: bool) -> tuple[list[Shared], list[Shared]]:
+    """Ce qu'une personne (sa clé) donne et ce qu'elle reçoit, dans l'ordre de ``shares`` : donnés, les partages d'une
+    ressource à elle (à son nom, ou « à toi » si elle est une de ses propriétaires, ``owner``) ; reçus, ceux qui lui
+    vont d'une ressource qui n'est pas à elle. Une ressource « à toi » partagée à une de ses propriétaires (un reste
+    d'avant ``_not_hers_already``) est à elle : donnée, jamais reçue."""
+    given: list[Shared] = []
+    received: list[Shared] = []
+    for s in shares:
+        if holds(s.owner, PERSON + person, owner=owner):
+            given.append(s)
+        elif s.person == person:
+            received.append(s)
+    return given, received
+
+
 def _not_hers_already(call: Call, owner: str, person: str, level: str) -> None:
     """Une ressource « à toi » (sans propriétaire nommé) est déjà à chacune de ses propriétaires : la leur partager
     ne leur donnerait rien, et un niveau plus bas les brimerait sur ce qui est à elles."""
@@ -106,37 +125,27 @@ async def list_people(call: Call) -> dict[str, Any]:
     return {"items": people(call)}
 
 
+def sharer(frame: Any, s: Shared, name: Callable[[str], str]) -> str:
+    """Qui partage cette ressource, par son nom : qui décide d'une boîte, qui écrit d'un compte Teams, le propriétaire
+    d'un service (``name`` : le nom d'une personne, par sa clé)."""
+    if s.kind == "mail":
+        return email_p.approver_name(frame, s.key)
+    if s.kind == "teams":
+        return teams_p.writer_of(frame, s.key)
+    return name(s.owner.removeprefix(PERSON))
+
+
 async def list_shares(call: Call) -> dict[str, Any]:
-    """Ce qu'elle partage (``given``), et ce qu'on lui partage (``received``)."""
+    """Ce qu'elle partage (``given``), et ce qu'on lui partage (``received``), lus dans les réglages
+    (``given_and_received``) : par sorte, ressource et personne."""
     settings = call.api.settings
-    given: list[dict[str, Any]] = []
-    received: list[dict[str, Any]] = []
-    mine = PERSON + call.me.person
-    if settings is not None:
-        mail_cfg, teams_cfg = settings.email(), settings.teams()
-        for kind, found, cfg in (("mail", mail_moi.boxes(call), mail_cfg.accounts),
-                                 ("teams", teams_moi.accounts(call), teams_cfg.accounts)):
-            for key, (a, level) in found.items():
-                spec = cfg.get(key)
-                if spec is None:
-                    continue
-                if level == OWN:
-                    given += [{"kind": kind, "key": key, "title": a.name, "person": p[len(PERSON):],
-                               "name": _name(call, p[len(PERSON):]), "level": lv} for p, lv in sorted(spec.shares.items())]
-                else:
-                    received.append({"kind": kind, "key": key, "title": a.name, "level": level,
-                                     "owner_name": email_p.approver_name(call.frame, key) if kind == "mail"
-                                     else teams_p.writer_of(call.frame, key)})
-        for name, spec in sorted(settings.mcp().servers.items()):
-            if spec.owner == mine:
-                given += [{"kind": "mcp", "key": name, "title": name, "person": p[len(PERSON):],
-                           "name": _name(call, p[len(PERSON):]), "level": lv}
-                          for p, lv in sorted(service_shares(spec).items())]
-            elif spec.owner and mine in (levels := service_shares(spec)):
-                received.append({"kind": "mcp", "key": name, "title": name,
-                                 "level": levels[mine],
-                                 "owner_name": _name(call, spec.owner[len(PERSON):])})
-    return {"given": given, "received": received}
+    if settings is None:
+        return {"given": [], "received": []}
+    given, received = given_and_received(every_share(settings), call.me.person, owner=call.me.owner)
+    return {"given": [{"kind": s.kind, "key": s.key, "title": s.title, "person": s.person,
+                       "name": _name(call, s.person), "level": s.level} for s in given],
+            "received": [{"kind": s.kind, "key": s.key, "title": s.title, "level": s.level,
+                          "owner_name": sharer(call.frame, s, lambda p: _name(call, p))} for s in received]}
 
 
 def audited_share(kind: str, key: str, person: str) -> dict[str, str]:
@@ -184,9 +193,7 @@ async def set_share(call: Call) -> dict[str, Any]:
         raise Denied(400, "« kind » : mail, teams ou mcp.")
     if level and level not in LEVELS:
         raise Denied(400, "« level » : lire, preparer ou servir (vide : retirer).")
-    settings = call.api.settings
-    if settings is None:
-        raise Denied(503, "Les réglages ne sont pas branchés.")
+    settings = settings_of(call)
     who = PERSON + person
     if not person:
         raise Denied(400, "« person » : la personne avec qui tu partages.", {"person": "valeur requise"})
@@ -199,12 +206,12 @@ async def set_share(call: Call) -> dict[str, Any]:
         raise Denied(400, "Un partage va à une personne qui a un compte (pas à toi).", {"person": "personne inconnue"})
     if kind in ("mail", "teams"):
         def hers(spec: Any) -> None:
-            (mail_moi if kind == "mail" else teams_moi).owned(call, key)
+            (mail_me if kind == "mail" else teams_me).owned(call, key)
             _not_hers_already(call, spec.owner, person, level)
 
         await write_share(settings, call.api.reconfigure, kind, key, person, level, hers)
     else:
-        spec_m = mcp_moi.mine(call).get(key)
+        spec_m = mcp_me.mine(call).get(key)
         if spec_m is None:
             other = settings.mcp().servers.get(key)
             if other is not None and other.owner and PERSON + call.me.person in service_shares(other):

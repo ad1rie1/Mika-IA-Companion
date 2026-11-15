@@ -1,5 +1,8 @@
-"""Carte, lieux, itinéraires et voyages, pour qui est connecté (ADR 0194, 0195, 0196).
+"""Carte, lieux, itinéraires et voyages, pour qui est connecté (ADR 0193 à 0196, 0229).
 
+- **Le fond de carte**, celui de toutes les cartes (Téléphone › Position, l'écran Carte, les miniatures du chat) : ce
+  que le client en sait, ses tuiles, ses polices et ses icônes, tirées des tuiles réglées (``MeApiBase.tiles``) et
+  servies par ce serveur seul, que le navigateur garde un jour sous une adresse qui porte leur version.
 - **La carte** : ce qui est branché (l'index des lieux, les adresses, les itinéraires) ; chercher un lieu dans
   l'index local (rien ne sort), une adresse (seul le texte cherché part), un itinéraire (seuls ses points partent),
   le meilleur ordre de quelques points, les lieux le long d'un trajet ; et ce qu'elle a cherché ou montré pour toi
@@ -24,12 +27,13 @@ from collections.abc import Callable, Mapping
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from starlette.responses import Response
+from starlette.responses import FileResponse, Response
 from starlette.routing import Route
 
-from mika.adapters.maps import gpx
-from mika.app.me.api import Call, Denied, MeApiBase, done, form, missing
-from mika.app.me.common import millis
+from mika.adapters.maps import NONE as NO_MAP
+from mika.adapters.maps import MapUnavailable, gpx
+from mika.app.me.api import PREFIX, Call, Denied, MeApiBase, done, form, missing
+from mika.app.me.common import millis, texts_of
 from mika.contracts import trips as c
 from mika.kernel.events import EventType
 from mika.plugins import trips as trips_p
@@ -40,6 +44,9 @@ from mika.runtime.effects import with_content
 from mika.runtime.operations import SPACE, Outcome, perform
 
 MAP_PATH = "/carte"
+#: le fond de carte (ADR 0193), avec la carte (ADR 0229) : ce que le client en sait, et sous lui ses tuiles, ses
+#: polices et ses icônes
+BASE_MAP = MAP_PATH + "/fond"
 TRIPS_PATH = "/voyages"
 #: un texte cherché ; combien de lieux au plus ; d'un trajet, à quelle distance chercher (en mètres)
 QUERY_MAX = 200
@@ -77,12 +84,6 @@ def _maps(call: Call, need: str = "") -> Any:
 
 def _unavailable(exc: MapsUnavailable) -> Denied:
     return Denied(503, str(exc)[:300] or NOT_PLUGGED)
-
-
-def _texts(call: Call, refs: list[str]) -> dict[str, str]:
-    wanted = [r for r in dict.fromkeys(refs) if r]
-    store = call.port("store")
-    return dict(store.content(wanted)) if wanted and store is not None else {}
 
 
 def _state(call: Call) -> TripsState:
@@ -345,6 +346,94 @@ async def look(call: Call) -> dict[str, Any]:
             "route": route, "trip": trip.id if trip is not None else "", "at": millis(ev.at)}
 
 
+# ── le fond de carte (ADR 0193) ──
+#: ce que le navigateur garde d'une tuile, d'une police ou d'une planche d'icônes : pour lui seul, un jour — sous une
+#: adresse qui porte la version de la source (``?v=``, ou ``~<version>/`` pour les icônes : MapLibre ajoute leur fin
+#: au chemin), qu'une autre source change ; les routes l'acceptent et l'ignorent
+MAP_CACHE = "private, max-age=86400"
+#: le début du segment de version d'une adresse d'icônes (« sprites/~1a2b3c4d5e6f/v4/light.json »)
+VERSION_MARK = "~"
+#: d'une carte réglée qui ne se lit pas, ce qu'une personne lit : ce qui ne va pas (un fichier du serveur, une archive
+#: à refaire, un serveur de carte muet) ne se dit qu'à qui peut y remédier, comme ``NOT_READY``
+MAP_NOT_READY = "La carte n'est pas encore prête sur ce serveur."
+
+
+def _tiles(call: Call) -> Any:
+    """Les tuiles du fond de carte (``MeApiBase.tiles``), et non le port ``maps`` des lieux et des itinéraires
+    (``_maps``) : aucune réglée, 404."""
+    tiles = call.api.tiles
+    if tiles is None or tiles.config().source == NO_MAP:
+        raise Denied(404, "Aucune carte n'est réglée : le plan dessiné.")
+    return tiles
+
+
+def _map_trouble(call: Call, reason: str) -> str:
+    return reason if call.me.operator else MAP_NOT_READY
+
+
+async def map_info(call: Call) -> dict[str, Any]:
+    """Ce que le client sait de la carte : prête ou non (et pourquoi), ses tuiles, sa zone, ses polices et ses icônes
+    — toutes servies par ce serveur, jamais une adresse du dehors."""
+    tiles = call.api.tiles
+    if tiles is None:
+        return {"ready": False, "reason": NOT_PLUGGED}
+    got = await tiles.info()
+    reason = got.reason
+    if reason and tiles.config().source != NO_MAP:  # rien de réglé n'est pas une panne : tout le monde le lit tel quel
+        reason = _map_trouble(call, reason)
+    base = PREFIX + BASE_MAP
+    # la version de la source dans chaque adresse : le navigateur ne ressert pas, d'une carte remplacée (un autre
+    # fichier, des images au lieu de vecteurs), ce qu'il gardait de l'autre
+    query = f"?v={got.version}" if got.version else ""
+    sprites = f"{base}/sprites/{VERSION_MARK}{got.version}/v4" if got.version else f"{base}/sprites/v4"
+    return {"ready": got.ready, "reason": reason, "kind": got.kind, "minzoom": got.minzoom,
+            "maxzoom": got.maxzoom, "bounds": list(got.bounds) if got.bounds is not None else None,
+            "attribution": got.attribution, "tiles": f"{base}/tiles/{{z}}/{{x}}/{{y}}{query}",
+            "glyphs": f"{base}/fonts/{{fontstack}}/{{range}}.pbf{query}" if got.fonts else None,
+            "sprite": sprites if got.sprites else None}
+
+
+async def map_tile(call: Call) -> Response:
+    """Une tuile, telle que l'archive la garde (compressée : le navigateur l'ouvre) ; aucune là : 204, une tuile
+    vide."""
+    p = call.request.path_params
+    try:
+        tile = await _tiles(call).tile(p["z"], p["x"], p["y"])
+    except MapUnavailable as exc:
+        raise Denied(503, _map_trouble(call, str(exc))) from None
+    if tile is None:
+        return Response(status_code=204, headers={"Cache-Control": MAP_CACHE})
+    headers = {"Cache-Control": MAP_CACHE, "X-Content-Type-Options": "nosniff"}
+    if tile.encoding:
+        headers["Content-Encoding"] = tile.encoding
+    return Response(tile.data, media_type=tile.media, headers=headers)
+
+
+def _asset(path: Any, media: str) -> Response:
+    if path is None:
+        raise missing()
+    return FileResponse(path, media_type=media, headers={"Cache-Control": MAP_CACHE, "X-Content-Type-Options": "nosniff"})
+
+
+async def map_font(call: Call) -> Response:
+    """Une plage de glyphes d'une police de la carte : la première de la pile qui est là."""
+    p = call.request.path_params
+    tiles = _tiles(call)
+    found = next((got for font in str(p["fontstack"]).split(",")[:4]
+                  if (got := tiles.asset("fonts", f"{font.strip()}/{p['range']}")) is not None), None)
+    return _asset(found, "application/x-protobuf")
+
+
+async def map_sprite(call: Call) -> Response:
+    """Une planche d'icônes de la carte (son image, ou ce qu'elle range où) ; le segment de version qui la précède
+    (``~<version>/``) est accepté et ignoré."""
+    rel = str(call.request.path_params["path"])
+    if rel.startswith(VERSION_MARK):
+        rel = rel.partition("/")[2]
+    media = "application/json" if rel.endswith(".json") else "image/png" if rel.endswith(".png") else ""
+    return _asset(_tiles(call).asset("sprites", rel) if media else None, media)
+
+
 # ── tes voyages ──
 
 
@@ -376,7 +465,7 @@ def _stop(stop: Stop, texts: dict[str, str]) -> dict[str, Any]:
 
 async def trips_list(call: Call) -> dict[str, Any]:
     mine = trips_p.trips_of(_state(call), call.frame.get, call.me.person)
-    texts = _texts(call, [t.title_ref for t in mine])
+    texts = texts_of(call, [t.title_ref for t in mine])
     return {"trips": [{"id": t.id, "title": texts.get(t.title_ref, ""), "start": t.start, "mode": t.mode,
                        "avoid": list(t.avoid), "days": len(days_of(t)), "stops": len(t.stops),
                        "updated": millis(t.updated_at), "mika": t.mika_touched} for t in mine]}
@@ -384,7 +473,7 @@ async def trips_list(call: Call) -> dict[str, Any]:
 
 async def trip_read(call: Call) -> dict[str, Any]:
     trip = _trip(call)
-    texts = _texts(call, _refs(trip))
+    texts = texts_of(call, _refs(trip))
     first = _start(trip)
     return {"id": trip.id, "title": texts.get(trip.title_ref, ""), "start": trip.start, "mode": trip.mode,
             "avoid": list(trip.avoid), "updated": millis(trip.updated_at), "mika": trip.mika_touched,
@@ -491,7 +580,7 @@ async def stop_remove(call: Call) -> dict[str, Any]:
 
 
 def _stop_points(call: Call, trip: Trip) -> list[Any]:
-    texts = _texts(call, _refs(trip))
+    texts = texts_of(call, _refs(trip))
     return [stop_point(s, texts) for s in trip.stops]
 
 
@@ -535,7 +624,7 @@ async def trip_order(call: Call) -> dict[str, Any]:
                           f"{len(stops)}. Répartis-les sur deux jours.", {"day": f"{ROUTE_POINTS_MAX} arrêts au plus"})
     port = _maps(call, "routing")
     call.outbound()
-    texts = _texts(call, _refs(trip))
+    texts = texts_of(call, _refs(trip))
     points = [stop_point(s, texts) for s in stops]
     if any(p is None for p in points):
         raise Denied(409, "Un arrêt de ce jour n'a plus ses coordonnées.")
@@ -556,7 +645,7 @@ async def trip_along(call: Call) -> dict[str, Any]:
     day = _int(call, "day", 0, 0, c.DAYS_MAX)
     corridor = _int(call, "corridor", CORRIDOR, CORRIDOR_MIN, CORRIDOR_MAX)
     limit = _int(call, "limit", 20, 1, LIMIT_MAX)
-    points = along_points(trip, _texts(call, _refs(trip)), day)
+    points = along_points(trip, texts_of(call, _refs(trip)), day)
     if len(points) < 2:
         return {"places": [], "route": False}
     if port.routing_ready():
@@ -601,7 +690,7 @@ def gpx_response(trip: Trip, body: str) -> Response:
 async def trip_gpx(call: Call) -> Response:
     """Le voyage en GPX : ses arrêts, et le tracé quand les itinéraires le calculent."""
     trip = _trip(call)
-    return gpx_response(trip, await gpx_document(call.port("maps"), trip, lambda refs: _texts(call, refs),
+    return gpx_response(trip, await gpx_document(call.port("maps"), trip, lambda refs: texts_of(call, refs),
                                                  call.outbound))
 
 
@@ -611,6 +700,9 @@ def routes(api: MeApiBase) -> list[Route]:
     return [r(MAP_PATH, info), r(MAP_PATH + "/lieux", places), r(MAP_PATH + "/adresses", addresses),
             r(MAP_PATH + "/itineraire", itinerary), r(MAP_PATH + "/ordre", best_order),
             r(MAP_PATH + "/le-long", along), r(MAP_PATH + "/regards/{seq:int}", look),
+            r(BASE_MAP, map_info), r(BASE_MAP + "/tiles/{z:int}/{x:int}/{y:int}", map_tile, raw=True),
+            r(BASE_MAP + "/fonts/{fontstack}/{range}", map_font, raw=True),
+            r(BASE_MAP + "/sprites/{path:path}", map_sprite, raw=True),
             r(TRIPS_PATH, trips_list), r(TRIPS_PATH, trip_create, write=True),
             r(trip, trip_read), r(trip, trip_change, write=True), r(trip + "/supprimer", trip_remove, write=True),
             r(trip + "/arrets", stop_add, write=True), r(stop, stop_change, write=True),

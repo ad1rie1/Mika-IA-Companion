@@ -167,6 +167,15 @@ def test_an_html_mail_is_served_framed_and_a_file_as_a_download(world):  # noqa:
     assert got.status_code == 200 and got.headers["content-disposition"].startswith("attachment;")
     assert got.headers["x-content-type-options"] == "nosniff" and got.headers["content-type"] == "application/pdf"
     assert client.get(API + f"/mail/file?ref={PROJET}&part=3").status_code == 404
+    # sa sorte est jugée par la liste du serveur web (``safe_mime``) : du Markdown reste du Markdown, une page HTML
+    # devient des octets — l'une et l'autre en pièce jointe
+    for mime, served in (("text/markdown; charset=utf-8", "text/markdown; charset=utf-8"),
+                         ("text/html", "application/octet-stream")):
+        box.files[(PROJET, "0")] = File("maquettes.md", mime, b"# Maquettes")
+        got = client.get(API + f"/mail/file?ref={PROJET}&part=0")
+        assert got.status_code == 200 and got.headers["content-type"] == served, mime
+        assert got.headers["content-disposition"].startswith("attachment;") and "sandbox" in \
+            got.headers["content-security-policy"]
 
 
 def test_contacts_and_sent_mails_are_those_of_her_boxes(world):  # noqa: F811

@@ -1,6 +1,7 @@
 """Téléphone, pour qui est connecté (ADR 0187, 0190) : ses téléphones (les jetons de son application), les messages
 que l'application a lus dans ses notifications, rangés par conversation, les réponses que Mika y a proposées, sa
-dernière position, et l'application elle-même à télécharger.
+dernière position, et l'application elle-même à télécharger. Le fond de carte sur lequel sa position se montre est
+celui de tous les écrans : il est servi avec la carte (``maps.py``, ADR 0229).
 
 Tout est à elle seule : ses messages sont ceux de son adresse ou de sa personne, sa position celle que son téléphone
 a donnée, ses téléphones les jetons ``mobile`` de son compte — qu'elle révoque elle-même. Les textes sont des contenus
@@ -9,17 +10,14 @@ a donnée, ses téléphones les jetons ``mobile`` de son compte — qu'elle rév
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from typing import Any
 
 from starlette.responses import FileResponse, Response
 from starlette.routing import Route
 
-from mika.adapters.maps import NONE as NO_MAP
-from mika.adapters.maps import MapUnavailable
 from mika.adapters.web.accounts import CLIENT_MOBILE
-from mika.app.me.api import PREFIX, Call, Denied, MeApiBase, missing
-from mika.app.me.common import millis, snippet
+from mika.app.me.api import Call, Denied, MeApiBase, missing
+from mika.app.me.common import millis, snippet, texts_of
 from mika.contracts import phone as phone_c
 from mika.plugins import location as location_p
 from mika.plugins import phone as phone_p
@@ -31,9 +29,6 @@ LIMIT = 100
 SNIPPET = 160
 #: le nom sous lequel l'application se télécharge
 APK_NAME = "mika.apk"
-#: d'une carte réglée qui ne se lit pas, ce qu'une personne lit : ce qui ne va pas (un fichier du serveur, une archive
-#: à refaire, un serveur de carte muet) ne se dit qu'à qui peut y remédier, comme ``NOT_READY`` de ``maps.py``
-MAP_NOT_READY = "La carte n'est pas encore prête sur ce serveur."
 
 
 def _state(call: Call) -> PhoneState:
@@ -44,12 +39,6 @@ def _mine(call: Call) -> list[Msg]:
     """Ses messages : ceux de son adresse, ou de sa personne (le téléphone et le navigateur d'une même personne)."""
     me = call.me
     return [m for m in _state(call).messages.values() if m.handle == me.handle or m.person == me.person]
-
-
-def _texts(call: Call, refs: Iterable[str]) -> dict[str, str]:
-    wanted = [r for r in dict.fromkeys(refs) if r]
-    store = call.port("store")
-    return store.content(wanted) if wanted and store is not None else {}
 
 
 def _key(m: Msg) -> str:
@@ -87,7 +76,7 @@ async def conversations(call: Call) -> dict[str, Any]:
     lasts = {k: max(ms, key=lambda m: (m.at, m.seq)) for k, ms in ordered}
     named = {k: next((m for m in sorted(ms, key=lambda m: -m.at) if not m.own and m.name_ref), None)
              for k, ms in ordered}
-    texts = _texts(call, [*(m.text_ref for m in lasts.values()), *(m.title_ref for m in lasts.values()),
+    texts = texts_of(call, [*(m.text_ref for m in lasts.values()), *(m.title_ref for m in lasts.values()),
                           *(m.name_ref for m in named.values() if m is not None)])
     pending = {f"{o.source}|{o.thread}": o for o in _offers(call, set(lasts)) if o.state in UNDER_WAY}
     out = []
@@ -110,7 +99,7 @@ async def thread(call: Call) -> dict[str, Any]:
     size = call.number("size", 50, high=LIMIT)
     shown = found[-size:]
     offers = sorted(_offers(call, {key}), key=lambda o: -o.seq)[:10]
-    texts = _texts(call, [*(m.text_ref for m in shown), *(m.name_ref for m in shown), shown[-1].title_ref,
+    texts = texts_of(call, [*(m.text_ref for m in shown), *(m.name_ref for m in shown), shown[-1].title_ref,
                           *(o.body_ref for o in offers)])
     last = shown[-1]
     return {"key": key, "app": last.source, "app_name": app_name(last.source), "group": last.group,
@@ -134,7 +123,7 @@ async def position(call: Call) -> dict[str, Any]:
     fix = location_p.last_for(call.frame.state(location_p.LOCATION.name), call.frame, call.me.handle)
     if fix is None:
         return {"known": False}
-    texts = _texts(call, [fix.coords_ref, fix.label_ref])
+    texts = texts_of(call, [fix.coords_ref, fix.label_ref])
     lat, _, lon = texts.get(fix.coords_ref, "").partition(",")
     try:
         coords = {"lat": float(lat), "lon": float(lon)}
@@ -152,90 +141,6 @@ async def apk(call: Call) -> Response:
         raise Denied(404, "L'application n'est pas encore déposée sur le serveur.")
     return FileResponse(path, media_type="application/vnd.android.package-archive", filename=APK_NAME,
                         headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
-
-
-# ── la carte de sa position (ADR 0193) ──
-MAP = "/phone/map"
-#: ce que le navigateur garde d'une tuile, d'une police ou d'une planche d'icônes : pour lui seul, un jour — sous une
-#: adresse qui porte la version de la source (``?v=``, ou ``~<version>/`` pour les icônes : MapLibre ajoute leur fin
-#: au chemin), qu'une autre source change ; les routes l'acceptent et l'ignorent
-MAP_CACHE = "private, max-age=86400"
-#: le début du segment de version d'une adresse d'icônes (« sprites/~1a2b3c4d5e6f/v4/light.json »)
-VERSION_MARK = "~"
-
-
-def _maps(call: Call) -> Any:
-    maps = call.api.maps
-    if maps is None or maps.config().source == NO_MAP:
-        raise Denied(404, "Aucune carte n'est réglée : le plan dessiné.")
-    return maps
-
-
-def _map_trouble(call: Call, reason: str) -> str:
-    return reason if call.me.operator else MAP_NOT_READY
-
-
-async def map_info(call: Call) -> dict[str, Any]:
-    """Ce que le client sait de la carte : prête ou non (et pourquoi), ses tuiles, sa zone, ses polices et ses icônes
-    — toutes servies par ce serveur, jamais une adresse du dehors."""
-    maps = call.api.maps
-    if maps is None:
-        return {"ready": False, "reason": "La carte n'est pas branchée sur ce serveur."}
-    got = await maps.info()
-    reason = got.reason
-    if reason and maps.config().source != NO_MAP:  # rien de réglé n'est pas une panne : tout le monde le lit tel quel
-        reason = _map_trouble(call, reason)
-    base = PREFIX + MAP
-    # la version de la source dans chaque adresse : le navigateur ne ressert pas, d'une carte remplacée (un autre
-    # fichier, des images au lieu de vecteurs), ce qu'il gardait de l'autre
-    query = f"?v={got.version}" if got.version else ""
-    sprites = f"{base}/sprites/{VERSION_MARK}{got.version}/v4" if got.version else f"{base}/sprites/v4"
-    return {"ready": got.ready, "reason": reason, "kind": got.kind, "minzoom": got.minzoom,
-            "maxzoom": got.maxzoom, "bounds": list(got.bounds) if got.bounds is not None else None,
-            "attribution": got.attribution, "tiles": f"{base}/tiles/{{z}}/{{x}}/{{y}}{query}",
-            "glyphs": f"{base}/fonts/{{fontstack}}/{{range}}.pbf{query}" if got.fonts else None,
-            "sprite": sprites if got.sprites else None}
-
-
-async def map_tile(call: Call) -> Response:
-    """Une tuile, telle que l'archive la garde (compressée : le navigateur l'ouvre) ; aucune là : 204, une tuile
-    vide."""
-    p = call.request.path_params
-    try:
-        tile = await _maps(call).tile(p["z"], p["x"], p["y"])
-    except MapUnavailable as exc:
-        raise Denied(503, _map_trouble(call, str(exc))) from None
-    if tile is None:
-        return Response(status_code=204, headers={"Cache-Control": MAP_CACHE})
-    headers = {"Cache-Control": MAP_CACHE, "X-Content-Type-Options": "nosniff"}
-    if tile.encoding:
-        headers["Content-Encoding"] = tile.encoding
-    return Response(tile.data, media_type=tile.media, headers=headers)
-
-
-def _asset(path: Any, media: str) -> Response:
-    if path is None:
-        raise missing()
-    return FileResponse(path, media_type=media, headers={"Cache-Control": MAP_CACHE, "X-Content-Type-Options": "nosniff"})
-
-
-async def map_font(call: Call) -> Response:
-    """Une plage de glyphes d'une police de la carte : la première de la pile qui est là."""
-    p = call.request.path_params
-    maps = _maps(call)
-    found = next((got for font in str(p["fontstack"]).split(",")[:4]
-                  if (got := maps.asset("fonts", f"{font.strip()}/{p['range']}")) is not None), None)
-    return _asset(found, "application/x-protobuf")
-
-
-async def map_sprite(call: Call) -> Response:
-    """Une planche d'icônes de la carte (son image, ou ce qu'elle range où) ; le segment de version qui la précède
-    (``~<version>/``) est accepté et ignoré."""
-    rel = str(call.request.path_params["path"])
-    if rel.startswith(VERSION_MARK):
-        rel = rel.partition("/")[2]
-    media = "application/json" if rel.endswith(".json") else "image/png" if rel.endswith(".png") else ""
-    return _asset(_maps(call).asset("sprites", rel) if media else None, media)
 
 
 # ── ses téléphones ──
@@ -264,7 +169,4 @@ def count(call: Call) -> int:
 def routes(api: MeApiBase) -> list[Route]:
     r = api.route
     return [r("/phone/conversations", conversations), r("/phone/thread", thread), r("/phone/phones", phones),
-            r("/phone/position", position), r("/phone/apk", apk, raw=True), r("/phone/revoke", revoke, write=True),
-            r(MAP, map_info), r(MAP + "/tiles/{z:int}/{x:int}/{y:int}", map_tile, raw=True),
-            r(MAP + "/fonts/{fontstack}/{range}", map_font, raw=True),
-            r(MAP + "/sprites/{path:path}", map_sprite, raw=True)]
+            r("/phone/position", position), r("/phone/apk", apk, raw=True), r("/phone/revoke", revoke, write=True)]

@@ -22,11 +22,12 @@ from starlette.routing import Route
 
 from mika.adapters.mail.config import MICROSOFT, MailAccount, MailConfig
 from mika.adapters.teams import TeamsAccount, TeamsConfig
-from mika.app.me import mail as mail_moi
-from mika.app.me import rights as rights_moi
-from mika.app.me import teams as teams_moi
-from mika.app.me.api import OWN_MAX, Call, Denied, MeApiBase, done, form, missing
-from mika.app.me.hosts import LOCAL, local_host
+from mika.app.me import mail as mail_me
+from mika.app.me import rights as rights_me
+from mika.app.me import teams as teams_me
+from mika.app.me.api import Call, Denied, MeApiBase, done, form, missing, refused
+from mika.app.me.common import own_room, settings_of
+from mika.app.me.hosts import public_only
 from mika.contracts import self_ as self_c
 from mika.kernel import forms
 from mika.kernel.text import fold
@@ -68,13 +69,6 @@ def _owner_for(call: Call) -> str:
     return "" if call.me.owner else PERSON + call.me.person
 
 
-def _settings(call: Call) -> Any:
-    settings = call.api.settings
-    if settings is None:
-        raise Denied(503, "Les réglages ne sont pas branchés.")
-    return settings
-
-
 async def _rejournal(call: Call) -> None:
     if call.api.reconfigure is not None:
         await call.api.reconfigure()
@@ -94,31 +88,14 @@ def _slug(text: str, taken: set[str]) -> str:
 
 def _traces(call: Call) -> set[str]:
     """Les clés de boîte dont sa vie garde une trace (ses mails remarqués, ses envois, ses brouillons, ses demandes)."""
-    s = mail_moi._state(call)
+    s = mail_me.state(call)
     return {*(m.account for m in s.mails.values()), *(x.account for x in s.sent.values()),
             *(d.account for d in s.drafts.values()), *(a.account for a in s.asked.values())}
-
-
-async def _public_hosts(call: Call, hosts: dict[str, Any]) -> None:
-    """Une personne qui n'est pas opératrice ne fait joindre que des serveurs sur Internet. Seuls comptent les
-    serveurs qu'elle vise (une boîte neuve ; un serveur, son port ou sa sécurité changés) : une boîte réglée par une
-    opératrice sur la machine (DavMail) ou le réseau local se règle encore, tant qu'on n'en change pas la cible."""
-    if call.me.operator:
-        return
-    bad = {f: LOCAL for f, host in hosts.items() if isinstance(host, str) and await local_host(host)}
-    if bad:
-        raise Denied(400, "Un serveur sur Internet seulement.", bad)
 
 
 def _microsoft_host(host: str) -> bool:
     name = host.strip().rstrip(".").lower()
     return any(name.endswith(suffix) for suffix in MICROSOFT_HOSTS)
-
-
-def _own_room(call: Call, mine: int) -> None:
-    """Une personne qui n'est pas opératrice branche au plus ``OWN_MAX`` ressources de chaque sorte."""
-    if not call.me.operator and mine >= OWN_MAX:
-        raise Denied(409, f"Tu en as déjà {OWN_MAX} : retires-en une avant d'en brancher une autre.")
 
 
 def _changed(before: Any, values: dict[str, Any], fields: tuple[str, ...]) -> bool:
@@ -133,10 +110,6 @@ def _values(call: Call, allowed: tuple[str, ...]) -> dict[str, Any]:
     if unknown:
         raise Denied(400, f"« {unknown[0]} » ne se règle pas ici.")
     return dict(raw)
-
-
-def _refused(exc: ValidationError) -> Denied:
-    return Denied(400, "Le formulaire a des erreurs.", forms.errors_fr(exc))
 
 
 # ── son compte ──
@@ -183,8 +156,8 @@ def _box_settings(key: str, a: MailAccount) -> dict[str, Any]:
 
 async def box_get(call: Call) -> dict[str, Any]:
     key = call.arg("box", limit=40)
-    mail_moi.owned(call, key)
-    found = _settings(call).email().accounts.get(key)
+    mail_me.owned(call, key)
+    found = settings_of(call).email().accounts.get(key)
     if found is None:
         raise missing()
     got = _box_settings(key, found)
@@ -232,13 +205,13 @@ async def box_save(call: Call) -> dict[str, Any]:
 
 
 async def _box_save(call: Call) -> dict[str, Any]:
-    settings = _settings(call)
+    settings = settings_of(call)
     cfg = settings.email()
     values = _values(call, MAIL_FIELDS)
     key = call.arg("box", limit=40)
     before: MailAccount | None = None
     if key:
-        mail_moi.owned(call, key)
+        mail_me.owned(call, key)
         if key not in cfg.accounts:
             raise missing()
         before = cfg.accounts[key]
@@ -249,11 +222,11 @@ async def _box_save(call: Call) -> dict[str, Any]:
         # quand elle le devient
         microsoft = hosts if before.microsoft else {f: merged.get(f) for f in HOSTS}
     else:
-        _own_room(call, sum(1 for a in cfg.accounts.values() if a.owner == _owner_for(call)))
+        own_room(call, sum(1 for a in cfg.accounts.values() if a.owner == _owner_for(call)))
         key = _slug(str(values.get("label") or values.get("address") or ""), set(cfg.accounts) | _traces(call))
         merged = {**values, "owner": _owner_for(call)}
         hosts = microsoft = {f: merged.get(f) for f in HOSTS}
-    await _public_hosts(call, hosts)
+    await public_only(call, hosts)
     if merged.get("auth") == MICROSOFT:
         bad = {f: NOT_MICROSOFT for f, host in microsoft.items() if host and not _microsoft_host(str(host))}
         if bad:
@@ -265,7 +238,7 @@ async def _box_save(call: Call) -> dict[str, Any]:
     try:
         account = MailAccount.model_validate(merged)
     except ValidationError as exc:
-        raise _refused(exc) from None
+        raise refused(exc) from None
     # relues puis réécrites d'un seul tenant : ce qu'une autre personne vient d'enregistrer reste (les serveurs, plus
     # longs à vérifier, l'ont été avant)
     async with settings.writing:
@@ -276,13 +249,13 @@ async def _box_save(call: Call) -> dict[str, Any]:
             if cfg.accounts[key] != before:
                 raise Denied(409, "Cette boîte vient d'être réglée ailleurs : rouvre-la, puis recommence.")
         else:
-            _own_room(call, sum(1 for a in cfg.accounts.values() if a.owner == _owner_for(call)))
+            own_room(call, sum(1 for a in cfg.accounts.values() if a.owner == _owner_for(call)))
             if key in cfg.accounts:
                 key = _slug(str(values.get("label") or values.get("address") or ""), set(cfg.accounts) | _traces(call))
         try:
             new = MailConfig(accounts={**cfg.accounts, key: account})
         except ValidationError as exc:
-            raise _refused(exc) from None
+            raise refused(exc) from None
         await settings.save_email(new)
         await _rejournal(call)
     await audit(call.kernel, "moi.boite", by=call.me.handle, subject_kind="compte", subject=key)
@@ -291,9 +264,9 @@ async def _box_save(call: Call) -> dict[str, Any]:
 
 async def box_remove(call: Call) -> dict[str, Any]:
     """Retirer une de ses boîtes : elle n'est plus relevée ; ce qu'elle en a appris reste dans sa vie."""
-    settings = _settings(call)
+    settings = settings_of(call)
     key = call.arg("box", limit=40)
-    mail_moi.owned(call, key)
+    mail_me.owned(call, key)
     async with settings.writing:
         cfg = settings.email()
         if key not in cfg.accounts:
@@ -306,7 +279,7 @@ async def box_remove(call: Call) -> dict[str, Any]:
 
 async def box_test(call: Call) -> dict[str, Any]:
     key = call.arg("box", limit=40)
-    mail_moi.owned(call, key)
+    mail_me.owned(call, key)
     call.probe()
     return done(await call.act("email.tester", form(), subject=key))
 
@@ -315,7 +288,7 @@ async def box_microsoft(call: Call) -> dict[str, Any]:
     """Connecter une boîte Microsoft (ADR 0166) : un code à entrer chez Microsoft ; ``GET …/mail/box`` dit ensuite
     où en est la connexion."""
     key = call.arg("box", limit=40)
-    mail_moi.owned(call, key)
+    mail_me.owned(call, key)
     return done(await call.act("email.microsoft", form(), subject=key))
 
 
@@ -331,8 +304,8 @@ def _teams_settings(key: str, a: TeamsAccount, call: Call) -> dict[str, Any]:
 
 async def teams_get(call: Call) -> dict[str, Any]:
     key = call.arg("account", limit=40)
-    teams_moi.owned(call, key)
-    found = _settings(call).teams().accounts.get(key)
+    teams_me.owned(call, key)
+    found = settings_of(call).teams().accounts.get(key)
     if found is None:
         raise missing()
     return {**_teams_settings(key, found, call), "rules": _rules_json(call, f"{TEAMS}:{key}")}
@@ -347,7 +320,7 @@ async def teams_save(call: Call) -> dict[str, Any]:
 
 
 async def _teams_save(call: Call) -> dict[str, Any]:
-    settings = _settings(call)
+    settings = settings_of(call)
     async with settings.writing:  # relus puis réécrits d'un seul tenant (``Settings.writing``)
         return await _teams_write(call, settings)
 
@@ -357,14 +330,14 @@ async def _teams_write(call: Call, settings: Any) -> dict[str, Any]:
     values = _values(call, TEAMS_FIELDS)
     key = call.arg("account", limit=40)
     if key:
-        teams_moi.owned(call, key)
+        teams_me.owned(call, key)
         if key not in cfg.accounts:
             raise missing()
         merged = {**cfg.accounts[key].model_dump(), **values, "owner": cfg.accounts[key].owner,
                   "shares": cfg.accounts[key].shares}
     else:
-        _own_room(call, sum(1 for a in cfg.accounts.values() if a.owner == _owner_for(call)))
-        s = teams_moi._state(call)
+        own_room(call, sum(1 for a in cfg.accounts.values() if a.owner == _owner_for(call)))
+        s = teams_me.state(call)
         traces = {*(d.account for d in s.drafts.values()), *(m.account for m in s.messages.values()),
                   *(a.account for a in s.asked.values())}
         key = _slug(str(values.get("label") or call.me.name or "teams"), set(cfg.accounts) | traces)
@@ -377,7 +350,7 @@ async def _teams_write(call: Call, settings: Any) -> dict[str, Any]:
         new = cfg.model_copy(update={"accounts": {**cfg.accounts, key: account}})
         TeamsConfig.model_validate(new.model_dump())
     except ValidationError as exc:
-        raise _refused(exc) from None
+        raise refused(exc) from None
     await settings.save_teams(new)
     await _rejournal(call)
     await audit(call.kernel, "moi.compte_teams", by=call.me.handle, subject_kind="compte_teams", subject=key)
@@ -387,9 +360,9 @@ async def _teams_write(call: Call, settings: Any) -> dict[str, Any]:
 async def teams_remove(call: Call) -> dict[str, Any]:
     """Retirer un de ses comptes Teams (ADR 0186) : sa clé part avec lui, et ce que son extension avait apporté
     (conversations, messages, brouillons) s'efface ; ce qu'elle en a appris reste dans sa vie."""
-    settings = _settings(call)
+    settings = settings_of(call)
     key = call.arg("account", limit=40)
-    teams_moi.owned(call, key)
+    teams_me.owned(call, key)
     async with settings.writing:
         cfg = settings.teams()
         if key not in cfg.accounts:
@@ -408,7 +381,7 @@ async def teams_key(call: Call) -> dict[str, Any]:
     """Une clé neuve pour l'extension d'un de ses comptes, montrée cette fois seulement ; l'ancienne ne vaut plus."""
     key = call.arg("account", limit=40)
     keys = call.port("teams_keys")
-    teams_moi.owned(call, key)
+    teams_me.owned(call, key)
     if keys is None:
         raise missing()
     try:
@@ -424,7 +397,7 @@ async def teams_key(call: Call) -> dict[str, Any]:
 async def teams_revoke(call: Call) -> dict[str, Any]:
     key = call.arg("account", limit=40)
     keys = call.port("teams_keys")
-    teams_moi.owned(call, key)
+    teams_me.owned(call, key)
     if keys is None:
         raise missing()
     if not await keys.revoke_key(key):
@@ -454,13 +427,13 @@ def _version(table: CanalTable) -> str:
 def _rules_json(call: Call, canal: str) -> dict[str, Any]:
     """La règle d'un de ses comptes, en mots comme dans la matrice (``app/me/rights.py``) : ses lignes (qui, quand,
     préparer d'elle-même, comment ça part), sa ligne par défaut, et son empreinte (``version``)."""
-    table, own, common = _canal_table(_settings(call).canals(), canal)
+    table, own, common = _canal_table(settings_of(call).canals(), canal)
     frame = call.frame
-    name, her = rights_moi._person_name(frame), self_c.name_of(frame.get(self_c.PERSONA))
+    name, her = rights_me.person_name(frame), self_c.name_of(frame.get(self_c.PERSONA))
     sources = SOURCE_WORDS if call.me.owner else SOURCE_WORDS_OTHER
     return {"canal": canal, "set": own, "common": common, "version": _version(table),
-            "lines": [rights_moi._rule_json(a, name, her, sources) for a in table.lines],
-            "default": rights_moi._rule_json(table.default, name, her, sources)}
+            "lines": [rights_me.rule_json(a, name, her, sources) for a in table.lines],
+            "default": rights_me.rule_json(table.default, name, her, sources)}
 
 
 def _ruled(kind: str, canal: str, line: CanalRule, sent: Any, n: int) -> CanalRule:
@@ -486,11 +459,11 @@ async def rules_save(call: Call) -> dict[str, Any]:
     kind, key = canal_key(canal)
     if kind not in (MAIL, TEAMS) or not key:
         raise Denied(400, "« canal » : courrier:<ta boîte> ou teams:<ton compte>.")
-    (mail_moi if kind == MAIL else teams_moi).owned(call, key)
+    (mail_me if kind == MAIL else teams_me).owned(call, key)
     lines, default = call.data.get("lines"), call.data.get("default")
     if not isinstance(lines, list) or not isinstance(default, dict):
         raise Denied(400, "« lines » : une entrée par ligne de la règle ; « default » : sa ligne par défaut.")
-    settings = _settings(call)
+    settings = settings_of(call)
     async with settings.writing:  # relue puis réécrite d'un seul tenant, avec ce qui en dérive (``reconfigure``)
         table, _own, _common = _canal_table(settings.canals(), canal)
         if call.arg("version", limit=64) != _version(table) or len(lines) != len(table.lines):

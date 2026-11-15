@@ -6,9 +6,12 @@
  * Un champ porte son nom (`name`, celui du moteur) ; un choix à boutons est un `.seg[data-seg]` (le cadre le règle
  * d'un clic et le dit par « mika:seg ») ; une ligne qui ne vaut que pour un choix porte `data-only="champ:valeur|…"`.
  */
+import { ApiError } from "../../api/moi";
 import { $, $$, h } from "../../shell/dom";
+import { toast } from "../../shell/float";
 import { ico } from "../../shell/icons";
-import { changed, type FormValue } from "./words";
+import { failureText } from "../../shared/kit";
+import { changed, fieldErrors, type FormValue } from "./words";
 
 // ── Les pièces ───────────────────────────────────────────────────────
 
@@ -142,6 +145,21 @@ export function showFieldErrors(root: HTMLElement, errors: Record<string, string
   }
   if (firstSub) root.querySelector<HTMLElement>(`[data-sousv="${CSS.escape(firstSub)}"]`)?.click();
   return unplaced;
+}
+
+/** Un refus du moteur après un envoi, la seule façon de le dire : ses champs (`fields`) sous les leurs, et ce qui n'a
+ *  pas trouvé sa place (un champ que ce formulaire ne montre pas, comme `secret_headers` au branchement d'un service)
+ *  dit par `say` — rien de plus quand tout est placé ; un refus sans champs, dit tel quel. `say` : le toast d'alerte
+ *  par défaut, ou la ligne d'erreur d'une fenêtre qui reste ouverte. */
+export function showRefusal(root: HTMLElement, err: unknown, say: (text: string) => void = alertToast): void {
+  if (err instanceof ApiError && Object.keys(err.fields).length) {
+    const rest = showFieldErrors(root, fieldErrors(err.fields));
+    if (rest.length) say(rest.join(" ; "));
+  } else say(failureText(err));
+}
+
+function alertToast(text: string): void {
+  toast(text, { ico: "alert", duration: 4200 });
 }
 
 export function clearFieldErrors(root: ParentNode): void {

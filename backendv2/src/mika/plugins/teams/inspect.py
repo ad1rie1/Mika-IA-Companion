@@ -62,7 +62,9 @@ from mika.plugins.teams import (
     WAITING,
     WRITTEN,
     DraftSeen,
+    TeamsParams,
     TeamsState,
+    asked_still,
     her,
     latest,
     params_of,
@@ -562,14 +564,23 @@ def _refuse(s: TeamsState, frame: Frame, args: RefuseArgs, ctx: Any) -> Done:
                 go=Ref.subject("reponse_teams", args.draft, ""))
 
 
-def _prepares_here(frame: Frame, account: str) -> None:
-    """Une demande de réponse ne se pose que là où elle prépare : Teams coupé ou ce compte décoché, elle ne s'y
-    mettrait jamais (ses tâches l'écartent) et la demande resterait « en cours » sans fin."""
-    p = params_of(frame)
+def not_preparing(p: TeamsParams, account: str) -> str:
+    """Pourquoi elle ne prépare rien dans ce compte, ou vide : Teams coupé, ce compte décoché — ses tâches l'écartent
+    (``tasks._prepare``). Le refus de l'action, que « Préremplir » de ``/api/moi`` rend tel quel ; un texte de console,
+    gardé ici (audit du 2026-11-05, K10-03)."""
     if not p.enabled:
-        raise Refused("Teams est désactivé : elle n'y prépare rien.")
+        return "Teams est désactivé : elle n'y prépare rien."
     if account in p.accounts_off:
-        raise Refused("Ce compte Teams est décoché : elle n'y prépare rien.")
+        return "Ce compte Teams est décoché : elle n'y prépare rien."
+    return ""
+
+
+def _prepares_here(frame: Frame, account: str) -> None:
+    """Une demande de réponse ne se pose que là où elle prépare (``not_preparing``) : Teams coupé ou ce compte
+    décoché, elle ne s'y mettrait jamais (ses tâches l'écartent) et la demande resterait « en cours » sans fin."""
+    said = not_preparing(params_of(frame), account)
+    if said:
+        raise Refused(said)
 
 
 @TEAMS.action("reprendre", title="Lui demander de la reprendre", args=RedoArgs, emits=[c.DRAFT_ASKED],
@@ -599,8 +610,7 @@ def _ask(s: TeamsState, frame: Frame, args: AskArgs, ctx: Any) -> Done:
     if m is None:
         raise Refused("Ce message n'est plus là.")
     _prepares_here(frame, m.account)
-    asked_still = m.ref in s.asked and s.attempts.get(m.ref, 0) < params_of(frame).draft_attempts_max
-    if under_way(s, m.account, m.conversation) or asked_still:
+    if under_way(s, m.account, m.conversation) or asked_still(s, m.ref, params_of(frame)):
         raise Refused("Une réponse est déjà en chemin dans cette conversation.")
     instruction = args.instruction.strip()
     asked = c.DRAFT_ASKED.draft(message=m.ref, conversation=m.conversation, by=ctx.by,

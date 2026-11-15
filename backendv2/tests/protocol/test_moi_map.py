@@ -1,6 +1,6 @@
-"""La carte de sa position par l'API par personne (ADR 0193) : à travers le vrai serveur. Ses tuiles, ses polices et
-ses icônes viennent de ce serveur seul, à qui est connecté ; sans carte réglée, rien ne se charge (le plan dessiné) ;
-la console règle d'où elles viennent."""
+"""Le fond de carte par l'API par personne (ADR 0193), servi avec la carte (ADR 0229) : à travers le vrai serveur. Ses
+tuiles, ses polices et ses icônes viennent de ce serveur seul, à qui est connecté ; sans carte réglée, rien ne se
+charge (le plan dessiné) ; la console règle d'où elles viennent."""
 
 from __future__ import annotations
 
@@ -10,12 +10,12 @@ import re
 
 from pmtiles.tile import Compression
 
-from mika.adapters.maps import FILE, MapConfig, MapsDesk, PlacesConfig, RoutingConfig
+from mika.adapters.maps import FILE, MapConfig, MapsDesk, MapTiles, PlacesConfig, RoutingConfig
 from tests.protocol.test_moi_mail import API, login, second_person
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 from tests.unit.test_maps import LILLE, TILES, archive
 
-MAP = API + "/phone/map"
+MAP = API + "/carte/fond"
 #: où l'en-tête d'une archive PMTiles (version 3) dit comment ses répertoires sont compressés
 INTERNAL_COMPRESSION = 97
 NOT_READY = "La carte n'est pas encore prête sur ce serveur."
@@ -73,7 +73,7 @@ def test_its_tiles_come_from_this_server_as_the_archive_keeps_them(world):  # no
     client, live = with_map(world)
     got = client.get(MAP).json()
     assert got["ready"] and got["kind"] == "vecteur" and (got["minzoom"], got["maxzoom"]) == (0, 2)
-    assert re.fullmatch(r"/api/moi/phone/map/tiles/\{z\}/\{x\}/\{y\}\?v=[0-9a-f]{12}", got["tiles"])
+    assert re.fullmatch(r"/api/moi/carte/fond/tiles/\{z\}/\{x\}/\{y\}\?v=[0-9a-f]{12}", got["tiles"])
     assert got["attribution"] == "© OpenStreetMap"
     assert [round(v, 4) for v in got["bounds"]] == list(LILLE)
     assert got["glyphs"] is None and got["sprite"] is None  # sans polices ni icônes : une carte sans noms
@@ -101,9 +101,9 @@ def test_its_fonts_and_icons_are_served_from_their_folder_only(world):  # noqa: 
     (sprites / "light.json").write_text('{"poi": {"x": 0, "y": 0, "width": 16, "height": 16, "pixelRatio": 1}}')
     got = client.get(MAP).json()
     version = got["tiles"].rpartition("?v=")[2]
-    assert got["glyphs"] == f"/api/moi/phone/map/fonts/{{fontstack}}/{{range}}.pbf?v={version}"
+    assert got["glyphs"] == f"/api/moi/carte/fond/fonts/{{fontstack}}/{{range}}.pbf?v={version}"
     # MapLibre ajoute « /light.json », « /dark@2x.png »… au chemin des icônes : leur version est un segment
-    assert got["sprite"] == f"/api/moi/phone/map/sprites/~{version}/v4"
+    assert got["sprite"] == f"/api/moi/carte/fond/sprites/~{version}/v4"
     font = client.get(MAP + "/fonts/Noto Sans Medium,Noto Sans Regular/0-255.pbf")  # la première de la pile qui est là
     assert font.status_code == 200 and font.headers["content-type"] == "application/x-protobuf"
     stack = got["glyphs"].replace("{fontstack}", "Noto Sans Regular").replace("{range}", "0-255")
@@ -114,6 +114,21 @@ def test_its_fonts_and_icons_are_served_from_their_folder_only(world):  # noqa: 
     assert client.get(MAP + "/sprites/v4/light.svg").status_code == 404
     assert client.get(MAP + "/fonts/..%2F..%2F..%2Fsecret.key/0-255.pbf").status_code == 404
     assert client.get(MAP + "/sprites/..%2F..%2F..%2Fsecret.key").status_code == 404
+
+
+def test_the_base_map_is_served_with_the_map_and_no_longer_under_the_phone(world):  # noqa: F811
+    """Le fond de carte est celui de tous les écrans (Téléphone, Carte, les miniatures du chat) : il est servi avec la
+    carte, à ``/api/moi/carte/fond`` ; l'adresse d'avant, sous le téléphone, n'existe plus (ADR 0229)."""
+    client, live = with_map(world)
+    fonts = live.data / "cartes" / "assets" / "fonts" / "Noto Sans Regular"
+    fonts.mkdir(parents=True)
+    (fonts / "0-255.pbf").write_bytes(gzip.compress(b"glyphes"))
+    got = client.get(MAP).json()
+    assert got["ready"] and all(got[k].startswith(MAP + "/") for k in ("tiles", "glyphs"))
+    assert client.get(MAP + "/tiles/2/2/1").status_code == 200
+    old = API + "/phone/map"
+    for path in ("", "/tiles/2/2/1", "/fonts/Noto Sans Regular/0-255.pbf", "/sprites/v4/light.json"):
+        assert client.get(old + path).status_code == 404, path
 
 
 def test_the_console_sets_where_the_map_comes_from(world):  # noqa: F811
@@ -147,10 +162,12 @@ def test_a_replaced_map_gets_new_tile_addresses(world):  # noqa: F811
 
 
 def test_the_kernel_has_the_maps_port(world):  # noqa: F811
-    """Le port ``maps`` du noyau : ce que le plugin des voyages et l'API de l'écran Carte lisent (ADR 0194)."""
+    """Le port ``maps`` du noyau : ce que le plugin des voyages et l'API de l'écran Carte lisent (ADR 0194). Les tuiles
+    du fond de carte (ADR 0193) sont un autre objet, sous un autre nom : ``tiles``."""
     _client, live, _ = world
     desk = live.kernel.ports.get("maps")
     assert isinstance(desk, MapsDesk)
+    assert isinstance(live.tiles, MapTiles)
 
 
 def test_the_console_sets_places_addresses_and_routes(world):  # noqa: F811

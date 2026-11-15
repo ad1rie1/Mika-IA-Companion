@@ -39,6 +39,7 @@ from mika.plugins.teams import (
     WAITING,
     TeamsState,
     accounts_here,
+    asked_still,
     keeper,
     keeper_name,
     mode_of,
@@ -112,10 +113,10 @@ def _outcomes(s: TeamsState, frame: Frame, accounts: Any = None) -> list[Any]:
 
 
 def _pending_work(s: TeamsState, frame: Frame, account: str) -> bool:
-    """Elle a de quoi écrire dans ce compte : une demande qui n'a pas épuisé ses essais, une réponse qui attend un
-    accord."""
+    """Elle a de quoi écrire dans ce compte : une demande qui n'a pas épuisé ses essais (``asked_still``), une
+    réponse qui attend un accord."""
     p = params_of(frame)
-    return any(a.account == account and s.attempts.get(ref, 0) < p.draft_attempts_max for ref, a in s.asked.items()) \
+    return any(a.account == account and asked_still(s, ref, p) for ref, a in s.asked.items()) \
         or any(d.account == account and d.state == WAITING for d in s.drafts.values())
 
 

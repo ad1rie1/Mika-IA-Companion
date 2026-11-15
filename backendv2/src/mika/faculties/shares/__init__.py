@@ -1,7 +1,7 @@
 """``shares`` : les fichiers qu'elle envoie à la personne à qui elle parle (ADR 0062).
 
 À ne pas confondre avec les partages d'une ressource à une personne (une boîte, un compte Teams, un service :
-``app/me/shares.py`` et ``vocab.ownership``).
+``app/me/sharing.py`` et ``vocab.ownership``).
 """
 
 from __future__ import annotations

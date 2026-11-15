@@ -77,8 +77,15 @@ def test_an_operator_reads_every_share_and_takes_one_off(world):  # noqa: F811
     assert "Léa Martin" in forms[0][0] and "la boîte « Atelier »" in forms[0][0]
     assert "le compte Teams « Travail »" in forms[1][0]
     assert not re.search(r'name="level"|<select', pane)  # on n'y donne rien
+    # Paramètres › Partages les lit à la même source, dans le même ordre : par sorte, ressource et personne
+    mine = client.get(API + "/shares").json()
+    assert [(g["kind"], g["key"], g["person"]) for g in mine["given"]] == \
+        [("mail", "pro", lea), ("teams", "travail", lea), ("mcp", "factures", lea)] and mine["received"] == []
 
     login(client, "lea")
+    received = client.get(API + "/shares").json()["received"]
+    assert [(r["kind"], r["key"]) for r in received] == [("mail", "pro"), ("teams", "travail"), ("mcp", "factures")]
+    assert client.get(API + "/shares").json()["given"] == []
     assert [b["key"] for b in client.get(API + "/mail/boxes").json()["boxes"]] == ["pro"]
     assert client.get(API + f"/mail/message?ref={PROJET}").status_code == 200
     login(client, "adrien")

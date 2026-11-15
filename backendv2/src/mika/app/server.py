@@ -18,7 +18,7 @@ import contextlib
 import logging
 import secrets
 import shutil
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -44,7 +44,6 @@ from mika.adapters.llm.models import model_limits
 from mika.adapters.mail import ImapSmtpMail
 from mika.adapters.mail.oauth import MicrosoftSignIn
 from mika.adapters.maps import MapsDesk, MapTiles
-from mika.adapters.mcp.config import McpConfig, McpServer
 from mika.adapters.mcp.hub import McpHub
 from mika.adapters.mcp.relay import PREFIX as RELAY_PREFIX
 from mika.adapters.mcp.relay import Relay
@@ -79,12 +78,13 @@ from mika.app.handmade.tabs.people import PeoplePage
 from mika.app.lending import PREFIX as LENT_PREFIX
 from mika.app.lending import Lending
 from mika.app.logs import configure_logging
+from mika.app.mcp_settings import McpSettingsStore
 from mika.app.me import MeApi
 from mika.app.me.phone import APK_NAME
 from mika.app.mindport import KernelPort
 from mika.app.paths import PERSONA
 from mika.app.phone import PhoneDesk
-from mika.app.settings import SYSTEM_ACCESS_FIELDS, SecretBox, Settings, push_key_file
+from mika.app.settings import SecretBox, Settings, push_key_file
 from mika.app.teams import TeamsDesk
 from mika.app.wakeups import WakeupDesk
 from mika.contracts import attachments as attachments_c
@@ -151,8 +151,9 @@ class Live:
     wakeups: WakeupDesk | None = None
     #: Teams (ADR 0069) : la clé de l'extension et la porte de ``/api/teams/…``
     teams: TeamsDesk | None = None
-    #: la carte de sa position (ADR 0193) : ses tuiles, lues ou relayées par ce serveur
-    maps: MapTiles | None = None
+    #: la carte de sa position (ADR 0193) : ses tuiles, lues ou relayées par ce serveur ; le port des lieux, des
+    #: adresses et des itinéraires, lui, est ``maps`` (``MapsDesk``, ADR 0194)
+    tiles: MapTiles | None = None
 
     def trace(self, tr: LLMTrace) -> None:
         self.gateway.traces.append(tr)
@@ -339,45 +340,10 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     # serveurs de ses plugins système, d'après leurs paramètres, approuvés d'office (ADR 0066)
     system = SystemServers(lambda: system_mcp.provided(
         lambda owner: kernel.mind.registry.params_of(owner, kernel.mind.root)), access=settings.mcp_system_access)
-    async def settle_mcp(name: str, changes: Mapping[str, Any] | Callable[[McpServer], Mapping[str, Any]],
-                         create: bool = False) -> None:
-        """Ce qu'un serveur de l'opérateur fait d'elle, réglé depuis sa fiche (ADR 0128) : sa fiche de réglages
-        réécrite ; un serveur du système suit les paramètres de son plugin. ``create`` : un serveur qu'on branche.
-        Relue puis réécrite d'un seul tenant (``Settings.writing``) : la console et l'API par personne qui règlent
-        deux serveurs en même temps ne s'effacent pas. ``changes`` peut se calculer depuis la fiche relue sous le
-        verrou (une fonction de la fiche) : un partage retiré ailleurs entre-temps ne revient pas."""
-        async with settings.writing:
-            await _settle_mcp(name, changes, create)
-
-    async def _settle_mcp(name: str, changes: Mapping[str, Any] | Callable[[McpServer], Mapping[str, Any]],
-                          create: bool) -> None:
-        if callable(changes):
-            servers_now = {**system.config(McpConfig()).servers, **settings.mcp().servers}
-            if create or name not in servers_now:
-                raise ValueError("ce serveur ne se règle pas ici : il n'existe plus")
-            changes = dict(changes(servers_now[name]))
-        if not create and name in system.names():
-            # un serveur du système : ses accès seulement, rangés à part (ADR 0131) ; le reste suit son plugin
-            if set(changes) - set(SYSTEM_ACCESS_FIELDS):
-                raise ValueError("un serveur du système suit les paramètres de son plugin : seuls ses accès se "
-                                 "règlent ici")
-            McpServer.model_validate({**system.config(McpConfig()).servers[name].model_dump(), **changes})
-            await settings.save_mcp_system_access(name, changes)
-            return
-        cfg = settings.mcp()
-        servers = dict(cfg.servers)
-        if create:
-            if name in servers or name in system.names():
-                raise ValueError(f"un serveur s'appelle déjà « {name} »")
-            servers[name] = McpServer.model_validate(dict(changes))
-        elif name not in servers:
-            raise ValueError("ce serveur ne se règle pas ici : un serveur du système suit les paramètres de son plugin")
-        else:
-            servers[name] = McpServer.model_validate({**servers[name].model_dump(), **changes})
-        await settings.save_mcp(McpConfig(servers=servers))
-
+    mcp_settings = McpSettingsStore(settings, system)
     mcp = outside["mcp"] = McpHub(lambda: system.config(settings.mcp()), lambda: system.reviews(settings.mcp_tools()),
-                                system.saving(settings.save_mcp_tools), local_root=data / "mcp", settle=settle_mcp)
+                                system.saving(settings.save_mcp_tools), local_root=data / "mcp",
+                                settle=mcp_settings.settle, remove=mcp_settings.remove)
     kernel = Kernel(composition.deps(store=store, clock=clock, ids=RandomIdGen(), gateway=gateway,
                                      ports={"delivery": hub, "activity": hub, "vectors": vectors, **outside},
                                      access_tables=settings.access_tables, closeness=social_c.is_close,
@@ -406,7 +372,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     live = Live(kernel, hub, port, Accounts(store), settings, gateway, fixed, calls=CallLog(store),
                 persona_file=persona, data=data, imaging=imaging, imaging_fixed=imaging_fixed, mcp=mcp,
                 wakeups=wakeups, teams=teams, read_limits=None if fixed else model_limits,
-                maps=MapTiles(data, settings.map_config))
+                tiles=MapTiles(data, settings.map_config))
     # l'exemple de l'autrice « Message », quand le sien est vide : le fil de référence de sa persona (ADR 0124), lu au
     # journal (lu à chaque épisode : jamais le YAML)
     settings.reference_thread = lambda: kernel.mind.frame().get(self_c.PERSONA).reference_thread
@@ -483,8 +449,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                 await gateway.aclose()
                 await imaging.aclose()
                 await push_sender.aclose()
-                if live.maps is not None:
-                    await live.maps.close()
+                if live.tiles is not None:
+                    await live.tiles.close()
                 await maps_desk.close()
                 await live.calls.flush()
 
@@ -522,7 +488,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     # ce que frontendv2 montre à qui est connecté, et seulement à elle (ADR 0187) ; sa borne des trajets vaut aussi pour
     # le GPX d'un voyage qu'un opérateur tire de la console, sur son compte (ADR 0204)
     moi = MeApi(kernel, live.accounts, origins=web.origins, apk=data / "telephone" / APK_NAME, settings=live.settings,
-                reconfigure=live.reconfigure, maps=live.maps)
+                reconfigure=live.reconfigure, tiles=live.tiles)
     return create_app(port, live.accounts, hub, web, lifespan=lifespan,
                       extra_routes=[Route("/", _root, methods=["GET", "HEAD"]), *constellation.routes(),
                                     *moi.routes(),

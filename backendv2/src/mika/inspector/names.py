@@ -68,6 +68,7 @@ GESTURES: dict[str, str] = {
     "console.comptes.revoquer_jeton": "Application révoquée", "console.comptes.jeton": "Jeton créé",
     "console.comptes.sessions": "Sessions fermées",
     "console.canaux.regler": "Tableau d'un canal réglé", "console.outils.familles": "Familles d'outils réglées",
+    "console.outils.place": "Place d'un outil réglée",
     "console.droits.partage_retire": "Partage retiré",
     "console.mcp.jeton": "Jeton de la console en MCP renouvelé", "console.mcp.fermer": "Console en MCP fermée",
     "console.mcp.reseau.ouvrir": "Console en MCP ouverte au réseau",

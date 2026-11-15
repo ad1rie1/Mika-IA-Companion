@@ -12,10 +12,13 @@ from starlette.applications import Starlette
 from starlette.testclient import TestClient
 
 import mika.app.me as me
-from mika.app.me import settings as settings_moi
+from mika.app.me import common as common_me
+from mika.app.me import maps as maps_me
+from mika.app.me import settings as settings_me
 from mika.app.me.api import PREFIX, Denied, MeApiBase
-from mika.app.me.common import OWN, allows, held_by, millis, only_owner, opened, snippet
+from mika.app.me.common import allows, held_by, millis, only_owner, opened, snippet
 from mika.vocab.access import SHARE_PREPARE, SHARE_READ, SHARE_USE
+from mika.vocab.ownership import OWNED
 
 PACKAGE = Path(me.__file__).parent
 MODULES = sorted(PACKAGE.glob("*.py"))
@@ -48,6 +51,17 @@ def test_each_little_helper_is_written_once():
             assert not defined & once, path.name
 
 
+def test_the_names_follow_the_glossary():
+    """« shares » est la faculté des fichiers qu'elle envoie : le module des partages se nomme ``sharing``. Le niveau « à
+    elle » se prend à sa source (``vocab.ownership.OWNED``), sans second nom ; aucun alias ne garde le nom de l'ancien
+    paquet ``app/moi``."""
+    assert "shares" not in {path.stem for path in MODULES}
+    assert not hasattr(common_me, "OWN")
+    kept = [f"{path.name}:{node.lineno}" for path in MODULES for node in ast.walk(tree(path)) if isinstance(node, IMPORT)
+            for alias in node.names if (alias.asname or "").endswith("_moi")]
+    assert not kept
+
+
 def test_an_instant_and_an_extract():
     assert (millis(0), millis(1_999)) == (0, 1)
     assert snippet(" un  deux\ntrois ", 20) == "un deux trois"
@@ -55,7 +69,7 @@ def test_an_instant_and_an_extract():
 
 
 def test_what_a_level_opens():
-    assert allows(OWN, SHARE_USE) and allows(SHARE_USE, SHARE_PREPARE)
+    assert allows(OWNED, SHARE_USE) and allows(SHARE_USE, SHARE_PREPARE)
     assert not allows(SHARE_READ, SHARE_PREPARE) and not allows("", SHARE_READ)
 
 
@@ -70,8 +84,8 @@ def levels(person: str, owner: bool) -> dict[str, str]:
 
 
 def test_what_a_person_holds_of_a_port():
-    assert levels("lea", False) == {"a_lea": OWN, "partage": SHARE_READ}  # le sien, et ce qu'on lui partage
-    assert levels("adrien", True) == {"a_toi": OWN}  # une propriétaire : ce qui est « à toi »
+    assert levels("lea", False) == {"a_lea": OWNED, "partage": SHARE_READ}  # le sien, et ce qu'on lui partage
+    assert levels("adrien", True) == {"a_toi": OWNED}  # une propriétaire : ce qui est « à toi »
     assert levels("inconnue", False) == {}
 
 
@@ -84,14 +98,14 @@ def test_no_port_holds_nothing_and_reads_no_params():
 
 def test_a_refusal_says_missing_or_too_low():
     too_low = {SHARE_READ: "Partagé en lecture."}
-    assert opened(("compte", OWN), SHARE_USE, too_low, "Non.") == "compte"
+    assert opened(("compte", OWNED), SHARE_USE, too_low, "Non.") == "compte"
     with pytest.raises(Denied) as absent:
         opened(None, SHARE_READ, too_low, "Non.")
     assert absent.value.status == 404
     with pytest.raises(Denied) as low:
         opened(("compte", SHARE_READ), SHARE_USE, too_low, "Non.")
     assert (low.value.status, low.value.message) == (403, "Partagé en lecture.")
-    assert only_owner(("compte", OWN), "Non.") == "compte"
+    assert only_owner(("compte", OWNED), "Non.") == "compte"
     with pytest.raises(Denied) as shared:
         only_owner(("compte", SHARE_USE), "Seul son propriétaire.")
     assert (shared.value.status, shared.value.message) == (403, "Seul son propriétaire.")
@@ -129,5 +143,15 @@ def test_a_session_is_read_once_per_request():
     assert client(sessions).get(PREFIX + "/ping").status_code == 401
 
 
+def test_without_tiles_the_map_says_unplugged_as_the_map_screen_does():
+    """Les tuiles du fond de carte (``MeApiBase.tiles``) ne sont pas le port ``maps`` : sans elles, le fond de carte
+    dit « pas branchée » par la phrase de l'écran Carte (``maps.NOT_PLUGGED``), écrite une fois."""
+    sessions = Sessions(NS(id=1, handle="user_1", operator=False))
+    api = MeApiBase(NS(mind=NS(frame=lambda: NS(get=lambda key: None))), sessions, tiles=None)  # type: ignore[arg-type]
+    app = Starlette(routes=[api.route(maps_me.BASE_MAP, maps_me.map_info)])
+    got = TestClient(app, cookies={"sessionid": "sid"}).get(PREFIX + maps_me.BASE_MAP)
+    assert got.json() == {"ready": False, "reason": maps_me.NOT_PLUGGED}
+
+
 def test_a_new_box_key_folds_accents_and_ligatures():
-    assert settings_moi._slug("Cœur.Été@exemple.fr", set()).startswith("coeur-ete-")
+    assert settings_me._slug("Cœur.Été@exemple.fr", set()).startswith("coeur-ete-")

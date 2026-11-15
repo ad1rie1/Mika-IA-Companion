@@ -33,6 +33,7 @@ import {
   seg,
   select,
   showFieldErrors,
+  showRefusal,
   subTabs,
   text,
   toggle,
@@ -45,7 +46,6 @@ import { rulesEditor, ruleUpdate, withoutRule } from "./teams";
 import {
   authWords,
   boxState,
-  fieldErrors,
   ofName,
   providerPreset,
   PROVIDERS,
@@ -365,10 +365,7 @@ async function addBoxModal(host: Host): Promise<void> {
       void host.reload(store.boxes, store.rights);
     } catch (err) {
       ok.disabled = false;
-      if (err instanceof ApiError && Object.keys(err.fields).length) {
-        const rest = showFieldErrors(step, fieldErrors(err.fields));
-        if (rest.length) toast(rest.join(" ; "), { ico: "alert", duration: 4200 });
-      } else toastFailure(err);
+      showRefusal(step, err);
     }
   };
   ok.addEventListener("click", () => void submit());
@@ -609,10 +606,7 @@ export const mailPage: Page = {
       return true;
     } catch (err) {
       // un champ refusé (un serveur hors d'Internet, un mot de passe à redonner, une borne) : dit sous son champ
-      if (err instanceof ApiError && Object.keys(err.fields).length) {
-        const unplaced = showFieldErrors(form, fieldErrors(err.fields));
-        toast(unplaced.length ? `${err.message} ${unplaced.join(" ; ")}` : err.message, { ico: "alert", duration: 4200 });
-      } else toastFailure(err);
+      showRefusal(form, err);
       // une règle changée ailleurs entre-temps : relue, « Annuler » la remontre telle qu'elle est
       if (err instanceof ApiError && err.status === 409) void host.reload(store.boxSettings);
       return false;

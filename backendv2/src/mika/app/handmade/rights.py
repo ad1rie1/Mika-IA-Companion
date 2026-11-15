@@ -7,9 +7,9 @@ canal** : la règle du moteur, appliquée à cette personne par ce canal (les de
 recopie.
 
 Une lecture, sauf **Partages** (ADR 0210) : qui a reçu la boîte, le compte Teams ou le service de qui. Un opérateur y
-retire le partage d'une boîte ou d'un compte Teams, par l'écriture de son propriétaire (``moi.shares.write_share``),
-confirmé et audité ; celui d'un service se retire sur ses lignes d'accès. Il n'en crée aucun : donner reste au
-propriétaire.
+retire le partage d'une boîte ou d'un compte Teams, par l'écriture de son propriétaire
+(``app/me/sharing.py::write_share``), confirmé et audité ; celui d'un service se retire sur ses lignes d'accès. Il n'en
+crée aucun : donner reste au propriétaire.
 
 Une famille se décrit ici pour l'opératrice, à la troisième personne (``FAMILY_ABOUT``) : la phrase que lit le modèle
 (sa voix, ``persona/voix.yaml``) lui parle à elle (« tes rappels… »), et la console ne la recopie pas.
@@ -30,8 +30,7 @@ from starlette.routing import Route
 
 from mika.app.handmade.access import people_with_accounts
 from mika.app.handmade.subjects.server import KIND as SERVICE
-from mika.app.me import Denied, missing
-from mika.app.me import shares as shares_moi
+from mika.app.me import Denied, missing, sharing
 from mika.contracts import forge as forge_c
 from mika.inspector import render
 from mika.inspector.pages import rights
@@ -298,7 +297,7 @@ def fixed_tools(ui: UI) -> dict[str, Any]:
             "count": sum(len(n) for n in reserved.values()), "guarded_count": sum(len(n) for n in guarded.values())}
 
 
-def _resource(s: shares_moi.Shared) -> str:
+def _resource(s: sharing.Shared) -> str:
     return f"{'la' if s.kind == 'mail' else 'le'} {SHARED_KINDS[s.kind]} « {s.title} »"
 
 
@@ -316,7 +315,7 @@ def shared(ui: UI) -> list[dict[str, Any]]:
     if settings is None:
         return []
     out = []
-    for s in shares_moi.every_share(settings):
+    for s in sharing.every_share(settings):
         name = ui.names.who(s.person)
         out.append({"kind": s.kind, "key": s.key, "person": s.person, "title": s.title, "sort": SHARED_KINDS[s.kind],
                     "owner": _owner(ui, s.owner), "name": name, "level": dict(SHARES).get(s.level, s.level),
@@ -333,7 +332,7 @@ async def _unshared(ui: UI, data: Mapping[str, Any], by: str) -> tuple[str, str]
     kind, key, person = (str(data.get(k, "")) for k in ("kind", "key", "person"))
     if kind not in RETIRED_HERE:
         return "warn", "Un service se retire sur ses lignes d'accès : rien n'a été retiré ici."
-    found = next((s for s in shares_moi.every_share(ui.deps.settings)
+    found = next((s for s in sharing.every_share(ui.deps.settings)
                   if (s.kind, s.key, s.person) == (kind, key, person)), None)
 
     def there(spec: Any) -> None:
@@ -341,11 +340,11 @@ async def _unshared(ui: UI, data: Mapping[str, Any], by: str) -> tuple[str, str]
             raise missing()
 
     try:
-        await shares_moi.write_share(ui.deps.settings, ui.deps.reconfigure, kind, key, person, "", there)
+        await sharing.write_share(ui.deps.settings, ui.deps.reconfigure, kind, key, person, "", there)
     except Denied as exc:
         return "warn", "Ce partage n'est plus là : rien à retirer." if exc.status == 404 else exc.message
     await operations.audit(ui.kernel, "console.droits.partage_retire", by=by,
-                           **shares_moi.audited_share(kind, key, person))
+                           **sharing.audited_share(kind, key, person))
     what = _resource(found) if found is not None else f"« {key} »"
     return "ok", f"Partage retiré : {ui.names.who(person)} n'a plus accès à {what}."
 

@@ -254,6 +254,17 @@ def test_the_cli_tells_the_first_steps_and_never_wants_a_password_in_argument(tm
     assert cli.main(["--data", str(tmp_path / "v2"), "account", "bea"]) == 1  # deux saisies différentes : rien
 
 
+def test_the_first_steps_lead_to_the_everyday_space_and_leave_the_3d_client_optional(capsys):
+    """L'aide mène à l'espace de tous les jours, ``frontendv2`` sur le port 4173 (ADR 0187) ; le client 3D, en
+    option, se lit dans son README (K10-12, audit du 2026-11-05)."""
+    with pytest.raises(SystemExit):
+        cli.main(["--help"])
+    text = capsys.readouterr().out
+    assert "cd frontendv2 && npm install && npm run dev" in text and "http://localhost:4173" in text
+    assert "frontend/Web/README.md" in text
+    assert "cd frontend/Web" not in text and "localhost:3000" not in text
+
+
 # ── Cosmétique de la console ──────────────────────────────────────────────
 
 

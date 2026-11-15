@@ -23,10 +23,9 @@ from starlette.routing import Route
 
 from mika.app import system_mcp
 from mika.app.console import LABELS
-from mika.app.me import mail as mail_moi
-from mika.app.me import teams as teams_moi
+from mika.app.me import mail as mail_me
+from mika.app.me import teams as teams_me
 from mika.app.me.api import Call, Me, MeApiBase
-from mika.app.me.common import OWN
 from mika.contracts import forge as forge_c
 from mika.contracts import identity as identity_c
 from mika.contracts import self_ as self_c
@@ -68,6 +67,7 @@ from mika.vocab.access import (
 from mika.vocab.access import WORK as AT_WORK
 from mika.vocab.canals import Canals
 from mika.vocab.episodes import Kind
+from mika.vocab.ownership import OWNED
 from mika.vocab.privacy import ChannelTrust
 from mika.vocab.rights import Allowance, tool_allowance
 
@@ -88,7 +88,7 @@ KEEP_CODES = {v: k for k, v in KEEP_WORDS.items()}
 #: pourquoi un outil est fermé avant ses lignes
 REASONS = {NEEDS: "son service n'est pas configuré", FITS: "les accès de sa ressource ne te l'ouvrent pas"}
 #: pourquoi un outil s'ouvre quand une de ses ressources est à toi (``owned``, ADR 0185 ; un partage aussi, ADR 0188)
-OWNED = "une boîte ou un compte à ton nom, ou qu'on te partage"
+OWNED_WHY = "une boîte ou un compte à ton nom, ou qu'on te partage"
 #: le canal par où ça arrive a serré ce que la ligne laissait (``Allowance.narrowed``), dit à la personne
 NARROWED = "ce canal le restreint"
 #: une case d'ailleurs dont on ne sait pas redire la ligne (une app) : ses accès, en mots
@@ -135,7 +135,7 @@ def _cell(got: Judged | None, spec: Any, said: str = "", line: str = "") -> dict
         why = condition(spec) if got.reason == WHEN else REASONS.get(got.reason, "")
         return {"level": NO, "keep": "rien", "why": why, "line": "", "reason": got.reason, "owned": False}
     if got.owned:
-        return {"level": ALONE, "keep": got.keep, "why": OWNED, "line": "", "reason": "", "owned": True}
+        return {"level": ALONE, "keep": got.keep, "why": OWNED_WHY, "line": "", "reason": "", "owned": True}
     if spec.fits is not None:  # gardé par sa condition, pas par des lignes : offert, il sert tel qu'il l'a dit
         return {"level": ALONE if got.offered else NO, "keep": "public" if got.offered else "rien",
                 "why": condition(spec), "line": "", "reason": "", "owned": False}
@@ -189,8 +189,9 @@ def _who_for(who: tuple[str, ...], where: str | None, audience: Audience, close:
     return sources[EVERYONE]
 
 
-def _rule_json(line: Any, name: Callable[[str], str], her: str, sources: Mapping[str, str]) -> dict[str, Any]:
-    """Une ligne de la règle d'un de tes comptes, en mots : qui, quand, préparer d'elle-même, comment ça part."""
+def rule_json(line: Any, name: Callable[[str], str], her: str, sources: Mapping[str, str]) -> dict[str, Any]:
+    """Une ligne de la règle d'un de tes comptes, en mots : qui, quand, préparer d'elle-même, comment ça part — ici
+    (``_rules``) comme dans les réglages du compte (``settings._rules_json``)."""
     return {"who": who_words(line.who, name, her, sources) if line.who else "", "when": when_words(line.when),
             "prepare": bool(line.prepare), "reply": line.reply, "reply_words": REPLY_WORDS.get(line.reply, line.reply)}
 
@@ -202,8 +203,8 @@ def _rules(canals: Any, key: str, name: Callable[[str], str], her: str, sources:
     kind, instance = canal_key(key)
     table, used = canals.table_of(Canal(kind, instance))
     return {"canal": key, "set": used == key, "common": used == kind and kind in canals.tables,
-            "lines": [_rule_json(a, name, her, sources) for a in table.lines],
-            "default": _rule_json(table.default, name, her, sources)}
+            "lines": [rule_json(a, name, her, sources) for a in table.lines],
+            "default": rule_json(table.default, name, her, sources)}
 
 
 async def matrix(call_: Call) -> dict[str, Any]:
@@ -275,7 +276,7 @@ async def matrix(call_: Call) -> dict[str, Any]:
                 row["cells"][f"{c}/{m}"] = _grant_cell(g, said, g.why if me.operator else "")
 
     her = self_c.name_of(frame.get(self_c.PERSONA))
-    name = _person_name(frame)
+    name = person_name(frame)
     canals = rights.canals or Canals()
     apps = {a.name: a for a in frame.get(forge_c.APPS) or ()}
     system = system_mcp.shown(frame)
@@ -291,10 +292,10 @@ async def matrix(call_: Call) -> dict[str, Any]:
             *({"key": f"courrier:{key}", "kind": "mail", "title": a.name, "address": a.address,
                "family": "famille:email", "rules": _rules(canals, f"{MAIL}:{key}", name, her, sources)}
               # les siennes seulement : la règle d'une boîte qu'on lui partage est l'affaire de son propriétaire
-              for key, (a, level) in mail_moi.boxes(call_).items() if level == OWN),
+              for key, (a, level) in mail_me.boxes(call_).items() if level == OWNED),
             *({"key": f"teams:{key}", "kind": "teams", "title": a.name, "family": "famille:teams",
                "rules": _rules(canals, f"{TEAMS}:{key}", name, her, sources)}
-              for key, (a, level) in teams_moi.accounts(call_).items() if level == OWN)]},
+              for key, (a, level) in teams_me.accounts(call_).items() if level == OWNED)]},
         *({"key": group, "title": "Services" if group == "services" else "Apps de la Forge", "resources": [
             {"key": resource, "title": _outside_title(resource, apps, system),
              "description": _outside_about(resource, statuses, system), "href": href(resource),
@@ -362,7 +363,9 @@ def _opens(rows: Iterable[Mapping[str, Any]]) -> bool:
     return any(cell is not None and cell["level"] != NO for row in rows for cell in row["cells"].values())
 
 
-def _person_name(frame: Any) -> Callable[[str], str]:
+def person_name(frame: Any) -> Callable[[str], str]:
+    """Le nom d'une personne par sa clé (ce que l'identité en sait, sinon la clé) : la matrice et la règle d'un de ses
+    comptes (``settings._rules_json``) le disent ainsi."""
     def name(key: str) -> str:
         view = frame.get(identity_c.IDENTITY(key))
         return getattr(view, "name", "") or key

@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -301,6 +302,15 @@ def test_the_console_sees_each_base_and_folder_and_what_the_backup_does_with_it(
     served = [r for r in backup.place(data) if r["serveur"]]
     assert [r["nom"] for r in served] == ["mind", "mail", "feeds", "teams", "views"]
     assert all(r["octets"] is None for r in served) and served[-1]["sauvegarde"] == "jetable"
+
+
+def test_what_each_place_keeps_is_said_without_an_adr_number():
+    """La colonne « ce qu'il garde » de Système › Stockage et sauvegardes est lue par une opératrice : la règle en
+    clair, sans numéro d'ADR (ADR 0225) ; les renvois sont dans le commentaire de ``PLACES`` (K10-13, audit du
+    2026-11-05)."""
+    cited = {name: said for name, said in backup.PLACES.items() if re.search(r"ADR\s*\d", said)}
+    assert cited == {}
+    assert "2 Gio par personne" in backup.PLACES["pieces"]
 
 
 def test_a_restore_under_a_running_mika_is_refused_and_touches_nothing(tmp_path, monkeypatch):

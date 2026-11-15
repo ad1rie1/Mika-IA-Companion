@@ -15,9 +15,12 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import socket
+from collections.abc import Mapping
+from typing import Any
 from urllib.parse import urlsplit
 
 from mika.adapters import addresses
+from mika.app.me.api import Call, Denied
 
 #: ce que dit un hôte refusé
 LOCAL = "un serveur sur Internet : ni cette machine, ni le réseau privé où elle tourne"
@@ -50,6 +53,19 @@ async def local_host(host: str) -> bool:
     except (OSError, TimeoutError, UnicodeError):
         return False
     return any(_private(str(info[4][0]), mine) for info in found)
+
+
+async def public_only(call: Call, hosts: Mapping[str, Any]) -> None:
+    """Une personne qui n'est pas opératrice ne fait joindre que des serveurs sur Internet (``hosts`` : champ → hôte ;
+    un champ sans hôte ne compte pas) : sinon 400, chaque hôte refusé sur son champ. Seuls comptent les serveurs
+    qu'elle vise (une boîte neuve ; un serveur, son port ou sa sécurité changés ; l'adresse d'un service) : une boîte
+    réglée par une opératrice sur la machine (DavMail) ou le réseau local se règle encore, tant qu'on n'en change pas
+    la cible. Les boîtes (``settings.py``) et les services (``mcp.py``, brancher et régler) le vérifient ici."""
+    if call.me.operator:
+        return
+    bad = {f: LOCAL for f, host in hosts.items() if isinstance(host, str) and await local_host(host)}
+    if bad:
+        raise Denied(400, "Un serveur sur Internet seulement.", bad)
 
 
 def url_host(url: str) -> str:

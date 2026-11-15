@@ -4,18 +4,15 @@
  * reconnecte) ; le thème de ce navigateur.
  */
 import type { Me } from "../../api/me";
-import { ApiError } from "../../api/moi";
 import { savePassword, saveName } from "../../api/settings";
 import { h } from "../../shell/dom";
 import { closeModal, openModal, toast } from "../../shell/float";
 import { ico } from "../../shell/icons";
 import type { Shell } from "../../shell/shell";
 import { currentChoice } from "../../shell/theme";
-import { readForm, row, section, seg, showFieldErrors, subTabs, text } from "./form";
-import { failureText } from "../../shared/kit";
+import { readForm, row, section, seg, showFieldErrors, showRefusal, subTabs, text } from "./form";
 import type { Page } from "./page";
 import * as store from "../../shared/store";
-import { fieldErrors } from "./words";
 
 const SUBS = [["compte", "Ton compte"], ["securite", "Mot de passe"], ["apparence", "Apparence"]] as const;
 
@@ -103,10 +100,7 @@ function passwordModal(): void {
       window.setTimeout(() => location.reload(), 1600);
     } catch (err) {
       ok.disabled = false;
-      if (err instanceof ApiError && Object.keys(err.fields).length) {
-        const rest = showFieldErrors(form, fieldErrors(err.fields));
-        if (rest.length) say(rest.join(" ; "));
-      } else say(failureText(err));
+      showRefusal(form, err, say);
     }
   };
   ok.addEventListener("click", () => void submit());
@@ -157,8 +151,7 @@ export const accountPage: Page = {
       await host.reload(store.me);
       return true;
     } catch (err) {
-      if (err instanceof ApiError && Object.keys(err.fields).length) showFieldErrors(form, fieldErrors(err.fields));
-      else toast(failureText(err), { ico: "alert" });
+      showRefusal(form, err);
       return false;
     }
   },

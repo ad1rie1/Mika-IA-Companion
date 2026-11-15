@@ -17,11 +17,10 @@ from mika.adapters import addresses
 from mika.adapters.mail.config import MailAccount, MailConfig
 from mika.adapters.mcp.config import AccessRule, McpServer
 from mika.adapters.web.gate import SlidingWindow
-from mika.app.me import Call, Denied, hosts
-from mika.app.me import mail as mail_moi
-from mika.app.me import mcp as mcp_moi
-from mika.app.me import settings as settings_moi
-from mika.app.me import shares as shares_moi
+from mika.app.me import Call, Denied, hosts, sharing
+from mika.app.me import mail as mail_me
+from mika.app.me import mcp as mcp_me
+from mika.app.me import settings as settings_me
 from mika.vocab.access import OWNER, PERSON, SOURCE_WORDS_OTHER, who_words
 
 
@@ -119,7 +118,7 @@ def test_password_tries_launched_together_are_bounded():
         return Call(request, me, None, {"current": f"faux-{i}", "password": "un-autre-long"}, api)  # type: ignore[arg-type]
 
     async def together() -> list:
-        return list(await asyncio.gather(*(settings_moi.account_password(wrong(i)) for i in range(12)),
+        return list(await asyncio.gather(*(settings_me.account_password(wrong(i)) for i in range(12)),
                                          return_exceptions=True))
 
     got = asyncio.run(together())
@@ -131,7 +130,7 @@ def test_a_service_line_naming_her_owners_says_so_to_someone_else():
     line = NS(who=(OWNER,), when=(), read="seule", act="carte", keep="prive", tools=())
     for owner, words in ((True, "Toi"), (False, "Ses propriétaires")):
         asking = NS(frame=NS(get=lambda ref: None), me=NS(owner=owner, name="Léa", person="user_7"))
-        assert mcp_moi._line_json(line, asking)["who"] == words
+        assert mcp_me._line_json(line, asking)["who"] == words
 
 
 class SlowBoxes:
@@ -171,10 +170,10 @@ def quiet(monkeypatch):
     async def nothing(*args: object, **kwargs: object) -> None:
         return None
 
-    monkeypatch.setattr(settings_moi, "local_host", slow_dns)
-    monkeypatch.setattr(settings_moi, "audit", nothing)
-    monkeypatch.setattr(settings_moi, "_traces", lambda call: set())
-    monkeypatch.setattr(mail_moi, "owned", lambda call, key, *more: None)
+    monkeypatch.setattr(hosts, "local_host", slow_dns)  # que ``hosts.public_only`` lit
+    monkeypatch.setattr(settings_me, "audit", nothing)
+    monkeypatch.setattr(settings_me, "_traces", lambda call: set())
+    monkeypatch.setattr(mail_me, "owned", lambda call, key, *more: None)
 
 
 def test_two_people_plugging_a_box_at_once_both_keep_it(quiet):
@@ -182,8 +181,8 @@ def test_two_people_plugging_a_box_at_once_both_keep_it(quiet):
 
     async def together() -> list[dict]:
         return list(await asyncio.gather(
-            settings_moi.box_save(someone(api, 7, {"values": {**BOX, "label": "Léa"}})),
-            settings_moi.box_save(someone(api, 8, {"values": {**BOX, "label": "Bob"}}))))
+            settings_me.box_save(someone(api, 7, {"values": {**BOX, "label": "Léa"}})),
+            settings_me.box_save(someone(api, 8, {"values": {**BOX, "label": "Bob"}}))))
 
     made = asyncio.run(together())
     kept = api.settings.cfg.accounts
@@ -197,8 +196,8 @@ def test_a_box_removed_while_she_changes_it_does_not_come_back(quiet):
     moved = {"box": "rando", "values": {"imap_host": "imap.ailleurs.example.test", "password": "secret-neuf"}}
 
     async def together() -> list:
-        return list(await asyncio.gather(settings_moi.box_save(someone(api, 7, moved)),
-                                         settings_moi.box_remove(someone(api, 7, {"box": "rando"})),
+        return list(await asyncio.gather(settings_me.box_save(someone(api, 7, moved)),
+                                         settings_me.box_remove(someone(api, 7, {"box": "rando"})),
                                          return_exceptions=True))
 
     changed, removed = asyncio.run(together())
@@ -219,7 +218,7 @@ def test_a_box_changed_elsewhere_meanwhile_is_not_overwritten(quiet):
             await api.settings.save_email(MailConfig(accounts={"rando": before.model_copy(update={"label": "Pro"})}))
 
     async def together() -> list:
-        return list(await asyncio.gather(settings_moi.box_save(someone(api, 7, moved)), renamed_meanwhile(),
+        return list(await asyncio.gather(settings_me.box_save(someone(api, 7, moved)), renamed_meanwhile(),
                                          return_exceptions=True))
 
     changed, _ = asyncio.run(together())
@@ -229,8 +228,8 @@ def test_a_box_changed_elsewhere_meanwhile_is_not_overwritten(quiet):
 
 
 class SlowServices:
-    """Des services MCP en mémoire, réglés sous le verrou comme ``settle_mcp`` le fait : une fiche relue sous le verrou,
-    ce qui en dépend calculé dessus, puis une écriture qui attend."""
+    """Des services MCP en mémoire, réglés sous le verrou comme ``McpSettingsStore.settle`` le fait : une fiche relue
+    sous le verrou, ce qui en dépend calculé dessus, puis une écriture qui attend."""
 
     def __init__(self, servers: dict) -> None:
         self.servers = servers
@@ -260,9 +259,9 @@ def test_a_service_share_revoked_meanwhile_does_not_come_back(monkeypatch):
     async def nothing(*args: object, **kwargs: object) -> None:
         return None
 
-    monkeypatch.setattr(shares_moi, "audit", nothing)
-    monkeypatch.setattr(shares_moi, "people", lambda call: [{"person": "p8"}, {"person": "p9"}])
-    monkeypatch.setattr(shares_moi, "_name", lambda call, person: person)
+    monkeypatch.setattr(sharing, "audit", nothing)
+    monkeypatch.setattr(sharing, "people", lambda call: [{"person": "p8"}, {"person": "p9"}])
+    monkeypatch.setattr(sharing, "_name", lambda call, person: person)
     api = NS(settings=services, reconfigure=None)
     owner = Call(NS(headers={}, query_params={}), NS(account=NS(id=7), handle="user_7", person="p7", operator=False,
                                                      owner=False, name="P7"),
@@ -277,7 +276,7 @@ def test_a_service_share_revoked_meanwhile_does_not_come_back(monkeypatch):
                 a for a in now.access if tuple(a.who) != (lea,))})
 
     async def together() -> list:
-        return list(await asyncio.gather(revoked_meanwhile(), shares_moi.set_share(owner), return_exceptions=True))
+        return list(await asyncio.gather(revoked_meanwhile(), sharing.set_share(owner), return_exceptions=True))
 
     _, shared = asyncio.run(together())
     assert shared["ok"], shared

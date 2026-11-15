@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MapOptions, StyleSpecification } from "maplibre-gl";
-import type { MapInfo } from "../api/phone";
+import { fetchMap, type MapInfo } from "../api/phone";
 import { absoluteBase, createBaseMap, FR_LOCALE, mapOptions, TileWatch, transformFor, type MapLib } from "./base";
 import { infoKey } from "./info";
 import { boundsOf, circle, covers, coversAll, meters, widened, zoomFor } from "./mapgeo";
@@ -16,9 +16,9 @@ const LILLE: MapInfo = {
   maxzoom: 15,
   bounds: [-5.2, 41.3, 9.6, 51.1],
   attribution: "© OpenStreetMap",
-  tiles: "/api/moi/phone/map/tiles/{z}/{x}/{y}?v=1a2b3c4d5e6f",
-  glyphs: "/api/moi/phone/map/fonts/{fontstack}/{range}.pbf?v=1a2b3c4d5e6f",
-  sprite: "/api/moi/phone/map/sprites/~1a2b3c4d5e6f/v4",
+  tiles: "/api/moi/carte/fond/tiles/{z}/{x}/{y}?v=1a2b3c4d5e6f",
+  glyphs: "/api/moi/carte/fond/fonts/{fontstack}/{range}.pbf?v=1a2b3c4d5e6f",
+  sprite: "/api/moi/carte/fond/sprites/~1a2b3c4d5e6f/v4",
 };
 
 /** Un faux MapLibre : ce qu'on lui demande (styles posés, commandes), et des événements qu'on déclenche. */
@@ -71,6 +71,21 @@ const fakeLib = { Map: FakeMap, NavigationControl: class { constructor(readonly 
 const host = {} as HTMLElement;
 
 describe("la carte du serveur (ADR 0193)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("se lit avec la carte, et non sous le téléphone (ADR 0229)", async () => {
+    const asked: string[] = [];
+    vi.stubGlobal("fetch", async (url: string) => {
+      asked.push(url);
+      return new Response(JSON.stringify(LILLE), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    expect(await fetchMap()).toEqual(LILLE);
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toMatch(/\/api\/moi\/carte\/fond$/);
+  });
+
   it("ne montre que ce qu'elle couvre", () => {
     expect(covers(LILLE, 50.6365, 3.0635)).toBe(true);
     expect(covers(LILLE, 52.52, 13.4)).toBe(false); // Berlin : hors de la France extraite, le plan dessiné
@@ -107,10 +122,10 @@ describe("la carte du serveur (ADR 0193)", () => {
     const urls = JSON.stringify(style).match(/https?:\/\/[^"\s]+/g) ?? [];
     expect(urls.length).toBeGreaterThan(0);
     expect(urls.every((u) => u.startsWith(ORIGIN))).toBe(true);
-    expect(style.glyphs).toBe(`${ORIGIN}/api/moi/phone/map/fonts/{fontstack}/{range}.pbf?v=1a2b3c4d5e6f`);
-    expect(style.sprite).toBe(`${ORIGIN}/api/moi/phone/map/sprites/~1a2b3c4d5e6f/v4/light`);
-    expect(mapStyle(LILLE, true, ORIGIN).sprite).toBe(`${ORIGIN}/api/moi/phone/map/sprites/~1a2b3c4d5e6f/v4/dark`);
-    expect(style.sources.carte).toMatchObject({ type: "vector", tiles: [`${ORIGIN}/api/moi/phone/map/tiles/{z}/{x}/{y}?v=1a2b3c4d5e6f`], maxzoom: 15 });
+    expect(style.glyphs).toBe(`${ORIGIN}/api/moi/carte/fond/fonts/{fontstack}/{range}.pbf?v=1a2b3c4d5e6f`);
+    expect(style.sprite).toBe(`${ORIGIN}/api/moi/carte/fond/sprites/~1a2b3c4d5e6f/v4/light`);
+    expect(mapStyle(LILLE, true, ORIGIN).sprite).toBe(`${ORIGIN}/api/moi/carte/fond/sprites/~1a2b3c4d5e6f/v4/dark`);
+    expect(style.sources.carte).toMatchObject({ type: "vector", tiles: [`${ORIGIN}/api/moi/carte/fond/tiles/{z}/{x}/{y}?v=1a2b3c4d5e6f`], maxzoom: 15 });
   });
 
   it("sans polices, ses noms s'effacent ; sans icônes, ses symboles aussi", () => {
@@ -141,8 +156,8 @@ describe("une carte sur la même origine que le serveur (client construit sans V
     expect(base).toBe("http://192.168.1.22");
     const style = mapStyle(LILLE, false, base);
     const tiles = (style.sources.carte as { tiles: string[] }).tiles[0];
-    expect(tiles).toBe("http://192.168.1.22/api/moi/phone/map/tiles/{z}/{x}/{y}?v=1a2b3c4d5e6f"); // `{z}` intact
-    expect(style.glyphs).toBe("http://192.168.1.22/api/moi/phone/map/fonts/{fontstack}/{range}.pbf?v=1a2b3c4d5e6f");
+    expect(tiles).toBe("http://192.168.1.22/api/moi/carte/fond/tiles/{z}/{x}/{y}?v=1a2b3c4d5e6f"); // `{z}` intact
+    expect(style.glyphs).toBe("http://192.168.1.22/api/moi/carte/fond/fonts/{fontstack}/{range}.pbf?v=1a2b3c4d5e6f");
     expect(String(style.sprite).startsWith("http://192.168.1.22/api/moi/")).toBe(true);
   });
 
@@ -153,10 +168,10 @@ describe("une carte sur la même origine que le serveur (client construit sans V
 
   it("ne demande avec la session que ce qui va à ce serveur", () => {
     const transform = transformFor("http://192.168.1.22");
-    expect(transform("http://192.168.1.22/api/moi/phone/map/tiles/3/4/2")).toEqual({ url: "http://192.168.1.22/api/moi/phone/map/tiles/3/4/2", credentials: "include" });
+    expect(transform("http://192.168.1.22/api/moi/carte/fond/tiles/3/4/2")).toEqual({ url: "http://192.168.1.22/api/moi/carte/fond/tiles/3/4/2", credentials: "include" });
     expect(transform("http://192.168.1.220/x")).toEqual({ url: "http://192.168.1.220/x" });
     const options = mapOptions(host, LILLE, { dark: false }, "http://192.168.1.22");
-    const asked = options.transformRequest?.("http://192.168.1.22/api/moi/phone/map/fonts/a/0-255.pbf", "Glyphs" as never);
+    const asked = options.transformRequest?.("http://192.168.1.22/api/moi/carte/fond/fonts/a/0-255.pbf", "Glyphs" as never);
     expect(asked).toMatchObject({ credentials: "include" });
   });
 });
@@ -192,7 +207,7 @@ describe("une carte ouverte suit la carte du serveur", () => {
     const map = createBaseMap(fakeLib, host, LILLE, { dark: false, base: ORIGIN });
     const fake = FakeMap.last;
     expect(fake.controls).toHaveLength(1); // les boutons de zoom
-    const wider: MapInfo = { ...LILLE, bounds: [-10, 35, 20, 60], tiles: "/api/moi/phone/map/tiles/{z}/{x}/{y}?v=ffffffffffff" };
+    const wider: MapInfo = { ...LILLE, bounds: [-10, 35, 20, 60], tiles: "/api/moi/carte/fond/tiles/{z}/{x}/{y}?v=ffffffffffff" };
     map.restyle(wider);
     expect(fake.styles).toHaveLength(2);
     expect((fake.styles[1].sources.carte as { bounds: number[] }).bounds).toEqual([-10, 35, 20, 60]);
@@ -223,7 +238,7 @@ describe("une carte ouverte suit la carte du serveur", () => {
 
   it("la clé d'une carte servie change avec ses adresses (sa version)", () => {
     expect(infoKey(LILLE)).toBe(infoKey({ ...LILLE }));
-    expect(infoKey(LILLE)).not.toBe(infoKey({ ...LILLE, tiles: "/api/moi/phone/map/tiles/{z}/{x}/{y}?v=000000000000" }));
+    expect(infoKey(LILLE)).not.toBe(infoKey({ ...LILLE, tiles: "/api/moi/carte/fond/tiles/{z}/{x}/{y}?v=000000000000" }));
   });
 });
 

@@ -80,12 +80,15 @@ def missing() -> Denied:
 
 
 def refused(exc: Exception) -> Denied:
-    """Un réglage refusé (400), dit en mots : pour pydantic, chaque champ et ce qu'il demande — jamais la dernière ligne
-    de son message, l'adresse de sa documentation ; sinon, la première ligne de l'erreur."""
+    """Un réglage refusé (400), dit en mots — la seule forme d'un refus de formulaire, pour toutes les routes. Pour
+    pydantic, ``fields`` (un message par champ, que le client place sous le sien) et un message qui dit la même chose
+    en une phrase, chaque champ et ce qu'il demande, pour un client qui ne les place pas — jamais la dernière ligne du
+    message de pydantic, l'adresse de sa documentation. Sinon, la première ligne de l'erreur, sans champs."""
     if isinstance(exc, ValidationError):
-        said = " ; ".join(f"{path} : {message}" if path else message for path, message in errors_fr(exc).items())
-    else:
-        said = (str(exc).splitlines() or [""])[0]
+        fields = errors_fr(exc)
+        said = " ; ".join(f"{path} : {message}" if path else message for path, message in fields.items())
+        return Denied(400, said[:300] or "Réglage refusé.", fields)
+    said = (str(exc).splitlines() or [""])[0]
     return Denied(400, said[:300] or "Réglage refusé.")
 
 
@@ -254,11 +257,10 @@ class Call:
             return got
 
     def probe(self) -> None:
-        """Un essai qui fait joindre un serveur (tester, relever) : borné par compte (429 au-delà)."""
-        key = f"compte:{self.me.account.id}"
-        if self.api.probes.blocked(key):
+        """Un essai qui fait joindre un serveur (tester, relever) : borné par compte (429 au-delà), compté par
+        ``spend`` comme ce qui sort vers la carte."""
+        if not spend(self.api.probes, self.me.account):
             raise Denied(429, "Trop d'essais d'affilée : attends une minute avant de réessayer.")
-        self.api.probes.fail(key)
 
     def outbound(self, *, addresses: bool = False) -> None:
         """Une demande de la carte qui sort vers un service du dehors : bornée par compte, 429 au-delà — le serveur
@@ -305,7 +307,7 @@ class MeApiBase:
 
     def __init__(self, kernel: Kernel, accounts: Accounts, *, origins: Iterable[str] = (),
                  apk: Path | None = None, settings: Any = None,
-                 reconfigure: Callable[[], Awaitable[list[str]]] | None = None, maps: Any = None) -> None:
+                 reconfigure: Callable[[], Awaitable[list[str]]] | None = None, tiles: Any = None) -> None:
         self.kernel = kernel
         self.accounts = accounts
         #: les réglages du serveur (ses boîtes, ses comptes Teams), et de quoi rejournaliser ce qui en dérive
@@ -328,7 +330,7 @@ class MeApiBase:
         #: de son compte)
         self.apk = apk
         #: la carte de sa position (ADR 0193 : ``adapters.maps.MapTiles``) ; ``None`` : pas de carte, le plan dessiné
-        self.maps = maps
+        self.tiles = tiles
 
     def route(self, path: str, handler: Handler, *, write: bool = False,
               raw: bool = False, upload: bool = False) -> Route:

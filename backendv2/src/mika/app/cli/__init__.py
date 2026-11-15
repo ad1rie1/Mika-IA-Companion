@@ -1,26 +1,13 @@
 """Ligne de commande : ``python -m mika <commande>``.
 
-- ``replay --verify`` : reconstruit tout depuis la genèse et compare à l'état
-  obtenu par instantané + queue ;
-- ``rebuild <propriétaire>…`` : reconstruction par clôture ;
-- ``forget <sujet>`` : oubli (contenus et projections) ;
-- ``sim selftest`` : auto-test du simulateur ;
-- ``serve`` : le serveur ;
-- ``backup DEST`` / ``verify ARCHIVE`` / ``restore ARCHIVE`` : sauvegarde
-  (sans risque serveur en marche), vérification, restauration (serveur
-  arrêté ; l'ancien dossier est mis de côté) ;
-- ``llm show|backend|route|remove|context`` : les modèles (clés chiffrées) ;
-- ``account <nom> [<mot de passe>] [--operator]`` : un compte (sans mot de passe : demandé sans écho) ;
-- ``token create <compte> [--label …] [--client screen|mobile]`` / ``token list [<compte>]`` / ``token revoke <id>`` :
-  les jetons d'un client natif (un moteur de jeu sur ``/ws/world``, ADR 0051 ; l'application du téléphone, ADR
-  0062, qui obtient d'ordinaire le sien par ``POST /auth/token``) — montrés une seule fois, gardés en empreinte ;
-  serveur en marche, une révocation ferme ses connexions au plus tard dix secondes après ;
-- ``serve --origin URL --cookie-secure --behind-proxy`` : derrière un mandataire TLS ;
-- ``console apercu --out DOSSIER`` : chaque page de la console, exportée ;
-- ``identity link|unlink``, ``social closeness`` et ``forge promote|demote`` : ce
-  qu'un opérateur sait mieux qu'elle (serveur arrêté : une seule écriture à la fois
-  dans ``mind.db``). Ce sont les actions de la console, par le même chemin
-  (``runtime/operations.py``) : mêmes refus, même garde, même audit.
+Un module par famille de commandes (``FAMILIES``, dans l'ordre où ``mika --help`` les montre) ; chaque
+sous-analyseur nomme sa fonction par ``set_defaults(run=…)``. La liste des sous-commandes, leurs options et
+leurs codes de sortie sont dans ARCHITECTURE.md › Commandes ; ``FIRST_STEPS`` est l'épilogue de l'aide.
+
+Les commandes d'opérateur, ``identity link|unlink``, ``social closeness`` et ``forge promote|demote``, disent
+ce qu'un opérateur sait mieux qu'elle (serveur arrêté : une seule écriture à la fois dans ``mind.db``). Ce
+sont les actions de la console, par le même chemin (``runtime/operations.py``) : mêmes refus, même garde,
+même audit.
 """
 
 from __future__ import annotations
@@ -41,8 +28,9 @@ FIRST_STEPS = """Premiers pas :
                                 la console : crée le compte opérateur (le premier compte l'est)
   3. Réglages › Modèles de texte › Fournisseurs › Ajouter
                                 un modèle (Claude, Ollama…) : le premier déclaré la fait parler
-  4. le frontend : cd frontend/Web && npm install && npm run dev, puis http://localhost:3000
+  4. l'espace de tous les jours : cd frontendv2 && npm install && npm run dev, puis http://localhost:4173
                                 (il vise :8001 ; VITE_BACKEND_ORIGIN pour une autre adresse)
+                                en option, le client 3D (sa VRM, sa pièce) : frontend/Web/README.md
 
 Tout se règle aussi d'ici : mika llm, mika account, mika token… (mika <commande> --help).
 Démarrage local pas à pas : backendv2/README.md ; en service (systemd) : deploy/README.md."""

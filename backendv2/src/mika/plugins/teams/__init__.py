@@ -450,10 +450,24 @@ def latest(s: TeamsState, draft_id: str) -> DraftSeen | None:
     return max(found, key=lambda d: d.proposal) if found else None
 
 
+def pending_draft(s: TeamsState, account: str, conversation: str) -> DraftSeen | None:
+    """La réponse déjà en chemin dans cette conversation de ce compte (en attente d'accord, en file, posée :
+    ``UNDER_WAY``), ou ``None`` — une réponse refusée, partie ou laissée n'y est plus. Lue par l'action « Lui
+    demander une réponse », ses tâches et « Préremplir » de ``/api/moi`` (audit du 2026-11-05, K10-03)."""
+    return next((d for d in s.drafts.values()
+                 if d.account == account and d.conversation == conversation and d.state in UNDER_WAY), None)
+
+
 def under_way(s: TeamsState, account: str, conversation: str) -> bool:
     """Une réponse est déjà en chemin dans cette conversation de ce compte (en attente d'accord, en file, posée)."""
-    return any(d.account == account and d.conversation == conversation and d.state in UNDER_WAY
-               for d in s.drafts.values())
+    return pending_draft(s, account, conversation) is not None
+
+
+def asked_still(s: TeamsState, ref: str, p: TeamsParams) -> bool:
+    """Une demande de réponse à ce message vit encore : demandée, et ses essais ne sont pas épuisés (au-delà, elle y a
+    renoncé, et une nouvelle demande la relance). Le pendant d'``email.exhausted`` ; lue par l'action « Lui demander
+    une réponse », ses tâches, sa voix et le fil de ``/api/moi`` (audit du 2026-11-05, K10-03)."""
+    return ref in s.asked and s.attempts.get(ref, 0) < p.draft_attempts_max
 
 
 def drafted(s: TeamsState, message: str) -> bool:

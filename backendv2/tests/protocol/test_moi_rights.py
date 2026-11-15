@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 
-from mika.app.me.rights import CANALS, MOMENTS, OWNED, WORK
+from mika.app.me.rights import CANALS, MOMENTS, OWNED_WHY, WORK
 from mika.app.system_mcp import SHOWN
 from mika.app.system_mcp import spec as system_spec
 from mika.plugins import web
@@ -88,7 +88,7 @@ def test_another_person_has_them_only_through_a_box_of_her_own(world):  # noqa: 
     got = client.get(API + "/rights").json()
     cell = tool(got, "famille:email", "email_read")["cells"]["web/reply"]
     assert cell["level"] == "seule" and cell["owned"]  # sa boîte à elle lui ouvre ses outils de courrier
-    assert cell["why"] == OWNED and "ADR" not in cell["why"]  # dit par le moteur, sans numéro d'ADR
+    assert cell["why"] == OWNED_WHY and "ADR" not in cell["why"]  # dit par le moteur, sans numéro d'ADR
     assert tool(got, "famille:email", "email_read")["cells"]["salon/reply"]["level"] == "non"
     assert set(resources(got, "accounts")) == {"courrier:pro"}
 

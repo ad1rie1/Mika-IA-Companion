@@ -45,7 +45,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         return []
 
     def map_facts() -> list[tuple[str, str]]:
-        return live.maps.describe() if live.maps is not None else [("Source", "la carte n'est pas branchée")]
+        return live.tiles.describe() if live.tiles is not None else [("Source", "la carte n'est pas branchée")]
 
     # ── les lieux, les adresses et les itinéraires de l'écran Carte (ADR 0194) : le port ``maps`` ──
     def maps_desk() -> Any:

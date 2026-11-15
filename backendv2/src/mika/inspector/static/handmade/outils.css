@@ -18,8 +18,16 @@
 .can-where-list select { width: 100%; }
 .can-where-no { color: var(--muted); }
 .can-where-off .can-where-sit { color: var(--warn); }
+/* sa place, pour un outil de son code (ADR 0123) : le réglage et son aide à gauche, le choix et « Enregistrer » à droite */
+.can-place { display: grid; grid-template-columns: minmax(0, 1fr) 300px; align-items: start; gap: 12px;
+  margin-top: 6px; padding: 12px 10px 2px; border-top: 1px solid var(--border); font-size: 13.5px; }
+.can-place-text label { font-weight: 550; }
+.can-place-text .help { max-width: 72ch; margin: 4px 0 0; color: var(--muted); font-size: 12.5px; }
+.can-place-value { display: flex; gap: 8px; }
+.can-place-value select { flex: 1 1 auto; min-width: 0; }
 @media (max-width: 640px) {
   .can-where-list li { grid-template-columns: 1fr; gap: 4px; }
+  .can-place { grid-template-columns: 1fr; }
 }
 
 /* Outils › Prêter à un agent (inspector/pages/tools.py, ADR 0122) : la console en lecture, ses points de prêt, le relais. */

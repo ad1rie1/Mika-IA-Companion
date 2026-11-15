@@ -3,11 +3,12 @@
 L'écran lit ce que le moteur exécute : le registre (ses outils, et ceux que des
 sources dynamiques y ajoutent) et la porte d'offre du pipeline
 (``runtime.tool_offer.offer``), appliquée à des audiences de synthèse — jamais une
-recopie de ses règles. « Ce qu'elle peut faire » est une grille : ses familles
-d'outils en lignes, leurs outils dessous, les situations en colonnes. Un
-opérateur y décoche un outil pour le lui retirer dans une situation ; sa fiche
-le règle plus finement (sous la main ou à chercher, quand le fournisseur sait
-différer). Jamais une règle ne l'offre là où le code ne l'offre pas.
+recopie de ses règles. « Ce qu'elle peut faire » range ses outils par famille,
+chacune avec son tableau de droits (``families``, ADR 0134). La fiche d'un outil
+dit où elle peut s'en servir, situation par situation, et en règle la place
+(``place_post``, ADR 0123) : sous la main ou à chercher quand il lui faut, pour
+un outil de son code qui ne clôt pas la boucle, là où son fournisseur sait
+différer. Jamais une règle ne l'offre là où le code ne l'offre pas.
 """
 
 from __future__ import annotations
@@ -53,6 +54,8 @@ from mika.kernel.inspect import (
 from mika.kernel.text import fold
 from mika.runtime import operations as ops
 from mika.runtime.tool_offer import (
+    ASK,
+    HAND,
     acting,
     admitted,
     allowed,
@@ -75,6 +78,11 @@ TOOLS_PAGE = 24
 BASE = f"{PREFIX}/outils"
 #: ce que la fiche d'un outil garde de la grille pour y revenir (plus le choix « Tableau », ``is_table_choice``)
 CATALOG_PARAMS = ("q", "lot", "page")
+#: sa place, réglée sur sa fiche (ADR 0123, 0134 : ``Settings.save_in_hand``) — ce que prévoit le code (vide :
+#: sa famille au socle de la situation, ou l'outil lui-même), sous la main (dans son prompt), à chercher quand il
+#: lui faut ; et où le formulaire l'envoie
+PLACES = (("", "ce que prévoit le code"), (HAND, "sous la main"), (ASK, "à chercher quand il lui faut"))
+PLACE_ACTION = f"{BASE}/place/regler"
 #: les situations rangées par ce qui se passe, en tête de la grille ; les autres : elle travaille seule
 MOMENTS = {Kind.REPLY: "Elle répond à…", Kind.INITIATIVE: "D'elle-même"}
 ALONE = "Elle travaille seule sur…"
@@ -150,6 +158,17 @@ def in_hand(ui: Any, policy: EpisodePolicy) -> frozenset[str] | None:
     if policy.role is None or not defers_tools(ui.kernel.runner.gateway, policy.role):
         return None
     return policy.core_bundles
+
+
+def placeable(ui: Any, spec: ToolSpec | None) -> bool:
+    """Sa place se règle-t-elle sur sa fiche (ADR 0123) ? Pour un outil de son code — pas un outil d'un service ou
+    d'une app (ses lignes se règlent sur leur fiche), pas un outil qui clôt la boucle (``rule_of`` n'y lit rien) —,
+    offert dans une situation au moins où son fournisseur sait différer (``in_hand`` n'y est pas ``None``) :
+    ailleurs, tout est sous la main et le réglage ne changerait rien."""
+    if spec is None or spec.ends_loop or ui.kernel.registry.is_dynamic(spec.name):
+        return False
+    policies = ui.kernel.runner.policies
+    return any(in_hand(ui, policies[s.kind]) is not None and spec.name in offered_in(ui, s) for s in situations(ui))
 
 
 def why_not(spec: ToolSpec, policy: EpisodePolicy, s: Situation, tools: Mapping[str, ToolSpec] | None = None,
@@ -290,6 +309,10 @@ def _tool_page(ui: Any, request: Request, name: str) -> Any:
     reserved = ("à toi et elle seule, par le minimum vital de sa famille (une ligne peut l'ouvrir)"
                 if spec.owner_only else "non")
     dynamic = registry.is_dynamic(spec.name)
+    # sa place se règle ici, et seulement ici (ADR 0123) ; un lecteur sans compte (la console en MCP) ne la règle pas
+    settings = ui.deps.settings
+    place = ({"action": PLACE_ACTION, "choices": PLACES, "value": settings.in_hand().get(spec.name, "")}
+             if settings is not None and ui.operator(request) is not None and placeable(ui, spec) else None)
     pairs: list[tuple[str, Any]] = [
         ("nom", Text(spec.name, "mono")),
         ("d'où il vient", Badge(label, tone)),
@@ -304,6 +327,7 @@ def _tool_page(ui: Any, request: Request, name: str) -> Any:
         ("conclut la boucle", "oui" if spec.ends_loop else "non"),
         ("ce qui se règle", "où elle s'en sert (plus haut) ; il vient d'un service ou d'une app, qui se règle sur sa "
                             "fiche (Venus d'ailleurs)" if dynamic else
+                            "où elle s'en sert et sa place (plus haut) ; son code, non" if place is not None else
                             "où elle s'en sert (plus haut) ; son code, non"),
     ]
     argument_table = Table(("argument", Column("type", "fit"), Column("requis", "fit"), "ce que c'est",
@@ -325,7 +349,7 @@ def _tool_page(ui: Any, request: Request, name: str) -> Any:
         "page_heading": spec.name, "page_subtitle": spec.description,
         "tool_name": spec.name, "tool_origin": label, "tool_tone": tone, "tool_dynamic": dynamic,
         "tool_family": ui.names.bundle(spec.bundle), "tool_bundle": spec.bundle, "tool_reserved": spec.owner_only,
-        "where": where, "context": context,
+        "where": where, "context": context, "place": place,
     })}
 
 
@@ -540,3 +564,35 @@ async def expose_post(ui: Any, request: Request) -> Response:
         await ops.audit(ui.kernel, audit, by=account.handle, subject_kind="mcp", subject=subject)
     query["flash"] = token
     return secure(RedirectResponse(f"{back}?{urlencode(query)}", status_code=303))
+
+
+async def place_post(ui: Any, request: Request) -> Response:
+    """La place d'un outil de son code, réglée sur sa fiche (ADR 0123, 0134) : sous la main, à chercher quand il lui
+    faut, ou ce que prévoit le code (vide : le réglage retiré). Refusée sans rien écrire pour un outil inconnu, venu
+    d'un service ou d'une app, qui clôt la boucle, ou qu'aucun fournisseur ne sait différer (``placeable``), et quand
+    les réglages ne sont pas joignables. Auditée (``console.outils.place``) ; on revient à sa fiche, ses filtres
+    gardés."""
+    got = await ui.form_lists(request)
+    account = ui.operator(request)
+    token = _secrets.token_urlsafe(9)
+    data = got[0] if got is not None else {}
+    name, rule = str(data.get("outil", "")), str(data.get("place", "")).strip()
+    context = {k: str(v) for k, v in data.items() if k in CATALOG_PARAMS or is_table_choice(k, str(v))}
+    settings = ui.deps.settings
+    if got is None or account is None:
+        ui.flash(token, "danger", "Jeton de formulaire invalide : recharge la page.")
+    elif settings is None or not placeable(ui, ui.kernel.registry.tools.get(name)):
+        ui.flash(token, "warn", "Sa place ne se règle pas ici (aucun outil de son code de ce nom, ou il vient d'un "
+                                "service ou d'une app, clôt sa boucle ou est toujours sous la main), ou les réglages "
+                                "ne sont pas joignables : rien n'a été enregistré.")
+    else:
+        try:
+            await settings.save_in_hand(name, rule or None)
+        except ValueError:
+            ui.flash(token, "danger", "Cette place n'existe pas : rien n'a été enregistré.")
+        else:
+            await ops.audit(ui.kernel, "console.outils.place", by=account.handle, subject_kind="outil", subject=name)
+            said = dict(PLACES).get(rule, rule)
+            ui.flash(token, "ok", f"Sa place : {said}. Vaut dès son prochain épisode.")
+    return secure(RedirectResponse(f"{BASE}/tous?" + urlencode({**context, "outil": name, "flash": token}),
+                                   status_code=303))

@@ -4,7 +4,6 @@
  * (coupé, il lit, il agit : ADR 0129 — un outil nouveau ou changé attend son choix), le régler, le retirer ; ses lignes
  * d'accès, en lecture. Ceux qu'on lui partage (ADR 0188), en lecture : « Partagé avec toi ».
  */
-import { ApiError } from "../../api/moi";
 import {
   chooseTools,
   plugService,
@@ -20,12 +19,12 @@ import {
 import { h } from "../../shell/dom";
 import { closeModal, openModal, toast } from "../../shell/float";
 import { ico } from "../../shell/icons";
-import { area, backLink, readForm, row, savedFirst, section, seg, showFieldErrors, subTabs, text, toggle } from "./form";
+import { area, backLink, readForm, row, savedFirst, section, seg, showFieldErrors, showRefusal, subTabs, text, toggle } from "./form";
 import { confirmModal, failureText, newNonce, toastFailure } from "../../shared/kit";
 import type { Host, Page } from "./page";
 import { openShareModal } from "./shares";
 import * as store from "../../shared/store";
-import { CHOICES, fieldErrors, ofName, serviceNameProblem, servedOf, shareWords, stateWords, urlProblem, type FormValue } from "./words";
+import { CHOICES, ofName, serviceNameProblem, servedOf, shareWords, stateWords, urlProblem, type FormValue } from "./words";
 
 const TAB = "#parametres/mcp";
 /** Les bornes de l'API pour brancher un service (`app/me/mcp.py`, en caractères) : au-delà, elle refuse. */
@@ -278,8 +277,7 @@ function plugModal(host: Host): void {
       await host.reload(store.services, store.rights);
     } catch (err) {
       ok.disabled = false;
-      if (err instanceof ApiError && Object.keys(err.fields).length) showFieldErrors(form, fieldErrors(err.fields));
-      else toastFailure(err);
+      showRefusal(form, err);
     }
   };
   ok.addEventListener("click", () => void submit());
@@ -335,8 +333,7 @@ export const mcpPage: Page = {
       await host.reload(store.services, store.rights);
       return true;
     } catch (err) {
-      if (err instanceof ApiError && Object.keys(err.fields).length) showFieldErrors(form, fieldErrors(err.fields));
-      else toastFailure(err);
+      showRefusal(form, err);
       return false;
     }
   },

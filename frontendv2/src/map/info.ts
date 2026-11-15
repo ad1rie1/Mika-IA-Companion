@@ -1,7 +1,7 @@
 /**
- * La carte que le serveur sert (ADR 0193, `GET /api/moi/phone/map`), lue une fois pour toutes les cartes de la page
- * (Téléphone, Carte, les miniatures du chat) et relue toutes les cinq minutes : une source changée dans la console,
- * des polices ajoutées, une autre zone — chaque carte ouverte suit (`restyle`).
+ * Le fond de carte que le serveur sert (ADR 0193, 0229 : `GET /api/moi/carte/fond`), lu une fois pour toutes les
+ * cartes de la page (Téléphone, Carte, les miniatures du chat) et relu toutes les cinq minutes : une source changée
+ * dans la console, des polices ajoutées, une autre zone — chaque carte ouverte suit (`restyle`).
  */
 import { fetchMap, type MapInfo } from "../api/phone";
 import { Cached } from "../shared/kit";

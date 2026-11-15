@@ -28,6 +28,7 @@ from mika.plugins.teams import (
     Seen,
     TeamsParams,
     TeamsState,
+    asked_still,
     drafted,
     keeper_name,
     mode_of,
@@ -79,7 +80,7 @@ def _prepare(s: TeamsState, frame: Frame) -> list[Candidate]:
         return []
     out: list[Candidate] = []
     for ref, ask in sorted(s.asked.items(), key=lambda kv: kv[1].seq):
-        if under_way(s, ask.account, ask.conversation) or s.attempts.get(ref, 0) >= p.draft_attempts_max \
+        if under_way(s, ask.account, ask.conversation) or not asked_still(s, ref, p) \
                 or ask.account in p.accounts_off:
             continue
         asker = keeper_name(frame, ask.by)

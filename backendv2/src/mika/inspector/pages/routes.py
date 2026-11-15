@@ -33,7 +33,7 @@ from mika.inspector.pages.journal import (
 )
 from mika.inspector.pages.subjects import Subjects, subject_url
 from mika.inspector.pages.system import outbox_post
-from mika.inspector.pages.tools import expose_post
+from mika.inspector.pages.tools import expose_post, place_post
 from mika.inspector.pages.why import silence_page, why_page, why_panel
 from mika.inspector.ui import PREFIX, UI, Forms, wants_table
 from mika.kernel.faculty import InspectSpec
@@ -432,6 +432,10 @@ class Pages(Actions):
         """Outils › Prêter à un agent : la console en MCP, ses points de prêt (ADR 0122)."""
         return await expose_post(self.ui, request)
 
+    async def place(self, request: Request) -> Response:
+        """Outils › la fiche d'un outil : sa place, sous la main ou à chercher quand il lui faut (ADR 0123)."""
+        return await place_post(self.ui, request)
+
     async def why(self, request: Request) -> Response:
         """« Pourquoi a-t-elle dit ça ? » : une de ses paroles, expliquée — et, pour un message reçu resté sans
         réponse, « Pourquoi n'a-t-elle pas répondu ? »."""
@@ -556,6 +560,7 @@ class Pages(Actions):
             Route(PREFIX + "/systeme/sorties", g(self.outbox), methods=["POST"]),
             Route(PREFIX + "/outils/exposer", g(self.expose), methods=["POST"]),
             Route(PREFIX + "/outils/familles/regler", g(self.families), methods=["POST"]),
+            Route(PREFIX + "/outils/place/regler", g(self.place), methods=["POST"]),
             Route(PREFIX + "/reglages/canaux/regler", g(self.canals), methods=["POST"]),
             Route(PREFIX + "/facultes/{owner:str}/{name:str}", g(self.view)),
             *Subjects(self).routes(),

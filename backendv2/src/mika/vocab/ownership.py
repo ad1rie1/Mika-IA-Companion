@@ -67,12 +67,18 @@ def owns_one(owners: Mapping[str, str], shares: Mapping[str, Mapping[str, str]],
     return bool(shared) and any(reaches(given.get(shared, ""), need) for given in shares.values())
 
 
+def holds(holder: str, person: str, *, owner: bool) -> bool:
+    """Ce compte est-il à cette personne (``personne:<clé>``) ? À son nom (``holder``), ou sans propriétaire nommé si
+    elle est une de ses propriétaires (``owner``) : un partage n'y ajoute rien."""
+    return (not holder and owner) or holder == person
+
+
 def must_approve(owner: str, given: Mapping[str, str], person: str, owners: Iterable[str]) -> bool:
     """Ce qu'elle prépare dans ce compte attend l'accord de son propriétaire, quoi que dise la règle de son canal : la
     personne pour qui elle l'écrit (``personne:<clé>``) n'atteint le compte que par un partage qui ne s'en sert pas
     (« lire et préparer »). Son compte, ou un compte « à toi » quand elle est une de ses propriétaires (``owners`` : ses
     clés de personne) : un partage n'y retire rien."""
-    if not person or owner == person or (not owner and person.removeprefix(PERSON) in set(owners)):
+    if not person or holds(owner, person, owner=person.removeprefix(PERSON) in set(owners)):
         return False
     level = given.get(person, "")
     return bool(level) and not reaches(level, SHARE_USE)
@@ -85,8 +91,7 @@ def held(keys: Iterable[str], owners: Mapping[str, str], shares: Mapping[str, Ma
     ceux qu'on lui partage. Les autres n'y sont pas."""
     out: dict[str, str] = {}
     for key in keys:
-        holder = owners.get(key, "")
-        if (not holder and owner) or holder == person:
+        if holds(owners.get(key, ""), person, owner=owner):
             out[key] = OWNED
         elif level := shares.get(key, {}).get(person, ""):
             out[key] = level

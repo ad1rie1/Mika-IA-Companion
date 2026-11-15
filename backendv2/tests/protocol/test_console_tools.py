@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import html
+import json
 import re
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
@@ -148,6 +149,80 @@ def test_an_operator_rules_her_tools_by_their_family(world):  # noqa: F811
     refused = client.post(f"{BASE}/familles/regler", data={"csrf": "faux", "cle": "email", "faire": "remettre"},
                           follow_redirects=False)
     assert refused.status_code == 303 and live.settings.families() == {}
+
+
+def _place(client, tool: str, place: str, **fields: str):
+    data = {"csrf": client.cookies.get("csrftoken"), "outil": tool, "place": place, **fields}
+    return client.post(f"{BASE}/place/regler", data=data, follow_redirects=False)
+
+
+def _placed(client, live) -> list[tuple[str, str, str]]:
+    """Les gestes « Place d'un outil réglée » audités : (qui, la sorte de son sujet, son sujet)."""
+    ops = client.portal.call(lambda: live.kernel.mind.store.latest([rt.OPERATED.name], 50))
+    said = [json.loads(o.data) for o in ops]
+    return [(s["by"], s["subject_kind"], s["subject"]) for s in said if s["action"] == "console.outils.place"]
+
+
+def test_an_operator_sets_the_place_of_a_tool_of_her_code_on_its_fiche(world, monkeypatch):  # noqa: F811
+    """Sa place (ADR 0123, 0134) : sur la fiche d'un outil de son code, « à chercher quand il lui faut » le sort de
+    son prompt là où son fournisseur sait différer, « sous la main » l'y met, « ce que prévoit le code » retire le
+    réglage ; chaque geste est audité, et la fiche le dit aussitôt. Un outil qui clôt sa boucle, un outil venu
+    d'ailleurs, un outil inconnu ou un fournisseur qui reçoit tout n'ont pas ce choix : la route le refuse sans rien
+    écrire. Sans jeton, rien."""
+    client, live, backend = world
+    bootstrap(client)
+    owner = "Elle répond à sa propriétaire, en privé"
+
+    def fiche(name: str) -> str:
+        return html_of(client.get(f"{BASE}/tous", params={"outil": name}))
+
+    def in_hand() -> dict[str, str]:
+        return client.portal.call(live.settings.in_hand)
+
+    # par défaut, ce que prévoit le code : la mémoire au socle d'une réponse, le courrier à chercher
+    shown = fiche("memory_search")
+    assert _where(shown, owner) == "oui, sous la main" and 'name="place"' in shown
+    assert '<option value="" selected>ce que prévoit le code</option>' in shown
+    assert _where(fiche("email_read"), owner) == "oui, à chercher quand il lui faut"
+    # « à chercher » : enregistré, audité, la fiche le dit — et l'on y revient, ses filtres gardés
+    saved = _place(client, "memory_search", "ask", q="memory")
+    location = saved.headers["location"]
+    assert saved.status_code == 303 and parse_qs(urlsplit(location).query)["q"] == ["memory"]
+    assert in_hand() == {"memory_search": "ask"}
+    after = html_of(client.get(location))
+    assert "Sa place : à chercher quand il lui faut. Vaut dès son prochain épisode." in after
+    assert _where(after, owner) == "oui, à chercher quand il lui faut"
+    assert '<option value="ask" selected>à chercher quand il lui faut</option>' in after
+    assert _placed(client, live) == [("user_1", "outil", "memory_search")]
+    # « sous la main » : un outil que le code laisse à chercher passe dans son prompt
+    assert _place(client, "email_read", "hand").status_code == 303
+    assert _where(fiche("email_read"), owner) == "oui, sous la main"
+    # « ce que prévoit le code » : le réglage retiré
+    _place(client, "memory_search", "")
+    assert in_hand() == {"email_read": "hand"} and _where(fiche("memory_search"), owner) == "oui, sous la main"
+    assert len(_placed(client, live)) == 3
+    # refusé, rien d'écrit ni d'audité : une place inconnue, un outil inconnu, sans jeton
+    assert "Cette place n'existe pas" in html_of(client.get(_place(client, "memory_search", "off").headers["location"]))
+    assert "ne se règle pas ici" in html_of(client.get(_place(client, "rien_du_tout", "ask").headers["location"]))
+    client.post(f"{BASE}/place/regler", data={"csrf": "faux", "outil": "memory_search", "place": "ask"})
+    assert in_hand() == {"email_read": "hand"} and len(_placed(client, live)) == 3
+    # un outil qui clôt sa boucle (rendre compte d'un pas) : toujours offert, sa place ne se règle pas
+    report = fiche("report_step")
+    assert "oui, toujours (il clôt sa boucle)" in report and 'name="place"' not in report
+    assert "ne se règle pas ici" in html_of(client.get(_place(client, "report_step", "ask").headers["location"]))
+    # un outil venu d'un service ou d'une app : ses lignes se règlent sur leur fiche, pas sa place ici
+    registry = live.kernel.registry
+    static = registry.is_dynamic
+    monkeypatch.setattr(registry, "is_dynamic", lambda name: name == "memory_search" or static(name))
+    assert 'name="place"' not in fiche("memory_search")
+    _place(client, "memory_search", "ask")
+    monkeypatch.undo()
+    # un fournisseur qui ne sait pas différer reçoit tout : le choix ne changerait rien, il n'est pas proposé
+    backend.defers_tools = False
+    shown = fiche("memory_search")
+    assert _where(shown, owner) == "oui, sous la main" and 'name="place"' not in shown
+    _place(client, "memory_search", "ask")
+    assert in_hand() == {"email_read": "hand"} and len(_placed(client, live)) == 3
 
 
 def test_what_mika_serves_is_said(world):  # noqa: F811

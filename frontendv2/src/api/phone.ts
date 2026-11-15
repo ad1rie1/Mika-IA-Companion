@@ -1,7 +1,8 @@
 /**
  * Téléphone, par l'API par personne (`backendv2/docs/protocole-moi.md` § 5) : ce que l'application du téléphone a lu
  * dans ses notifications, rangé par conversation, les réponses que Mika y a proposées, sa dernière position, et ses
- * téléphones (les jetons `mobile` de son compte), qu'elle révoque elle-même (ADR 0190).
+ * téléphones (les jetons `mobile` de son compte), qu'elle révoque elle-même (ADR 0190). Et le fond de carte, que
+ * toutes les cartes lisent, servi avec la carte (§ 10).
  */
 import { apiUrl, getJson, MOI, sendJson, type Done } from "./moi";
 
@@ -97,9 +98,9 @@ export function fetchPosition(): Promise<PhonePosition> {
 }
 
 /**
- * La carte de sa position (ADR 0193), servie par le serveur seul : ses tuiles, ses polices et ses icônes sont des
- * chemins de l'API (jamais une adresse du dehors, qui dirait où tu es). `ready` faux : le plan dessiné, `reason` dit
- * pourquoi.
+ * Le fond de carte (ADR 0193), celui de toutes les cartes, servi par le serveur seul : ses tuiles, ses polices et ses
+ * icônes sont des chemins de l'API (jamais une adresse du dehors, qui dirait où tu es). `ready` faux : le plan
+ * dessiné, `reason` dit pourquoi.
  */
 export interface MapInfo {
   ready: boolean;
@@ -118,8 +119,9 @@ export interface MapInfo {
   sprite?: string | null;
 }
 
+/** Servi avec la carte (ADR 0229), et non sous le téléphone : les autres adresses viennent de sa réponse. */
 export function fetchMap(): Promise<MapInfo> {
-  return getJson(`${MOI}/phone/map`);
+  return getJson(`${MOI}/carte/fond`);
 }
 
 export function fetchPhones(): Promise<Phones> {

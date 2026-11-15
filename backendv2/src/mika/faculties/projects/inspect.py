@@ -34,10 +34,10 @@ from mika.faculties.projects.actions import (
     MODE_CHOICES,
     OBJECTIVE_STATUS_FR,
     PRIORITY_CHOICES,
-    SCHEDULES,
     _editable,
     _runnable,
     pending_of,
+    schedule_words,
 )
 from mika.faculties.projects.faculty import (
     AMENDED,
@@ -383,11 +383,6 @@ LIST_COLUMNS = (Column("projet", role="title"), Column("mode", "fit", role="badg
                 Column("ce qui sort", detail=True))
 
 
-def _agenda(rule: str) -> str:
-    rule = rule or "manual"
-    return next((label for value, label in SCHEDULES if value == rule), rule)
-
-
 def _tools_words(p: Project) -> str:
     extra = [BUNDLE_WORDS.get(b, b) for b in p.bundles if b in EXTRA_BUNDLES]
     return "son atelier" + (", " + ", ".join(extra) if extra else "")
@@ -413,7 +408,7 @@ def _list_view(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Bloc
             "elle" if p.authority == c.SELF and not p.owner else _person(frame, p.owner), _state(p), _progress(p),
             _next_words(p, s, frame, ctx), When(p.last_run_at) if p.last_run_at else "—",
             Text(_text(texts, p.summary_ref, "aucune exécution encore"), clamp=160),
-            _priority(p), window_words(p), _agenda(p.schedule), _tools_words(p), _remote_ref(p),
+            _priority(p), window_words(p), schedule_words(p.schedule), _tools_words(p), _remote_ref(p),
             Badge("avec ton accord", "info") if p.approval else Badge("librement", "warn")),
             href=_link(p), tone="warn" if p.id in waiting else "muted" if p.status == c.ARCHIVED else ""))
     alive = [p for p in every if live(p)]
@@ -975,7 +970,7 @@ def _behaviour_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[
                 ("pendant son sommeil", "elle ne travaille pas" if persona else "il travaille quand même (dans sa "
                                                                                 "plage)")),
                title="Son mode"),
-        Fields((("plage de travail", window_words(p)), ("agenda", _agenda(p.schedule)),
+        Fields((("plage de travail", window_words(p)), ("agenda", schedule_words(p.schedule)),
                 ("exécutions par jour", f"{daily_cap(p, pm)} au plus" + ("" if p.runs_per_day else " (par défaut)")),
                 ("espacement", f"{pm.run_spacing_us // MINUTE} min au moins"),
                 ("par heure, tous projets", f"{pm.runs_per_hour} au plus"),
