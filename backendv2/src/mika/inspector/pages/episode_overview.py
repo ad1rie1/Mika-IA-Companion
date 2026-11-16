@@ -2,7 +2,8 @@
 
 Ce que dit le résumé (ses comptes, son issue, sa durée, ses dernières paroles) se lit une fois, par ``summary`` : ses
 blocs (``overview``, le repli et la bascule « Tableau ») et sa page dessinée (``episode_drawn._resume``) en font chacun
-leur forme, jamais leur propre calcul.
+leur forme, jamais leur propre calcul. Les onglets d'un épisode en tirent leur compte (ses paroles, ses événements) :
+la route le lit avec eux (``episode_drawn.tally``) et le passe au Résumé dessiné, qui ne le relit pas.
 """
 
 from __future__ import annotations

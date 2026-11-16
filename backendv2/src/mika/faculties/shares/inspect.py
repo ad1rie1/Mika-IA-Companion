@@ -55,6 +55,9 @@ REMOVE = "shares.retirer"
 #: ce que dit la ligne d'un fichier qu'un opérateur a retiré
 BY_OPERATOR = "retiré par un opérateur"
 KIND_LABELS = {c.FILE: "document", c.IMAGE: "image"}
+#: l'état d'un fichier envoyé, sous la clé de son étiquette (``Badge.key``, que lisent les onglets dessinés) :
+#: envoyé, pas parti, retiré (par la rétention ou un opérateur)
+SENT_STATE, UNSENT, GONE_STATE = "sent", "unsent", "gone"
 GONE = "Ce fichier n'est plus là : déjà retiré, ou sa personne oubliée."
 CAPTION = ("« pas parti » : un fichier préparé dont le message n'est jamais parti (une réponse supplantée, ou tue) — "
            "la rétention le retirera. « retiré » : trop vieux, ou la place de la personne dépassée ; « retiré par un "
@@ -69,11 +72,18 @@ def removal_question(name: str = "") -> str:
 
 
 def _state(r: FileRow) -> Badge:
+    """Son état, sous sa clé (``SENT_STATE``, ``UNSENT``, ``GONE_STATE``) : un onglet dessiné la lit, jamais
+    ces mots."""
     if r.gone:
-        return Badge(BY_OPERATOR if r.reason == c.OPERATOR else "retiré", "muted")
+        return Badge(BY_OPERATOR if r.reason == c.OPERATOR else "retiré", "muted", key=GONE_STATE)
     if r.sent:
-        return Badge("envoyé", "ok")
-    return Badge("pas parti", "warn")
+        return Badge("envoyé", "ok", key=SENT_STATE)
+    return Badge("pas parti", "warn", key=UNSENT)
+
+
+def _kind(r: FileRow) -> Badge:
+    """Sa sorte en mots (document, image), sous sa clé (``c.FILE``, ``c.IMAGE``)."""
+    return Badge(KIND_LABELS.get(r.kind, r.kind), key=r.kind)
 
 
 def _origin(r: FileRow, store: Any, frame: Frame) -> Cell:
@@ -92,11 +102,11 @@ def _who(frame: Frame, handle: str) -> Cell:
         return Text("personne", "muted")
     person = frame.get(identity_c.PERSON(handle))
     name = identity_c.person_name(frame, person) or identity_c.person_name(frame, handle)
-    return Ref.subject("person", person, f"{name} ({handle})" if name else handle)
+    return Ref.subject("person", person, name or handle)  # le nom seul : la personne, tous ses moyens réunis
 
 
 def _download_link(r: FileRow) -> Ref:
-    return Ref.download(KIND, r.id, "télécharger", r.name)
+    return Ref.download(KIND, r.id, "Télécharger", r.name)
 
 
 def _message(r: FileRow) -> Cell:
@@ -126,7 +136,7 @@ def _files_tab(s: SharesState, frame: Frame, ctx: InspectContext) -> list[Block]
                   pager=pager, empty="elle ne lui a encore envoyé aucun fichier", caption=CAPTION)]
 
 
-@SHARES.inspect("envoyes", title="Fichiers envoyés", section="memoire", order=26,
+@SHARES.inspect("envoyes", title="Fichiers envoyés", section="memoire", order=44,
                 description="Ce qu'elle a envoyé, à tout le monde : quand, à qui, avec quel message, et s'ils sont "
                             "encore disponibles. Un fichier se retire à l'unité, sur sa ligne ou sur sa fiche : ses "
                             "octets s'effacent, sa ligne reste.")
@@ -138,7 +148,7 @@ def _sent(s: SharesState, frame: Frame, ctx: InspectContext) -> list[Block]:
     found = recent(store, pager.offset + pager.size)[pager.offset:]
     rows = tuple(Row((
         When(r.at), Ref.subject(KIND, r.id, r.name or "(sans nom)"), _who(frame, r.person),
-        KIND_LABELS.get(r.kind, r.kind), Text(size_words(r.size), "num"), _origin(r, store, frame), _message(r),
+        _kind(r), Text(size_words(r.size), "num"), _origin(r, store, frame), _message(r),
         _state(r), _download_link(r) if not r.gone else Text("—", "muted"),
     ), href=Ref.subject(KIND, r.id, "")) for r in found)
     return [Table((Column("quand", "fit"), "nom", "pour", Column("sorte", "fit"), Column("taille", "num"), "origine",
@@ -162,7 +172,7 @@ def _head(s: SharesState, frame: Frame, ctx: InspectContext, key: str) -> Head |
     if r.gone:
         facts.append(("retiré", When(r.expired_at or 0)))
     else:
-        facts.append(("télécharger", _download_link(r)))
+        facts.append(("fichier", _download_link(r)))
     person = frame.get(identity_c.PERSON(r.person)) if r.person else ""
     back = Ref.subject("person", person, "Ses fichiers", "fichiers") if person else None
     return Head(r.id, r.name or "(sans nom)", subtitle="Un fichier qu'elle a envoyé", badges=(_state(r),),

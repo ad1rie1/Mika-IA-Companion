@@ -42,7 +42,9 @@ def test_the_home_says_what_waits_how_she_is_and_what_she_did(world):  # noqa: F
     assert " style=" not in text and not re.search(r"<script(?![^>]*\bsrc=)", text)
     assert "À regarder maintenant" in text and ", en ce moment</h2>" in text and "Qui est là" in text
     assert '<a href="/inspecteur/fiche/person/user_1">adrien</a>' in text  # en ligne, sur sa carte
-    assert "réponses" in text and "Derniers épisodes" in text and "Comprendre le résultat" in text
+    # le lien vers un épisode se nomme comme dans Décisions (En cours, Épisodes) : « Comprendre → »
+    assert "réponses" in text and "Derniers épisodes" in text and "Comprendre →" in text
+    assert "Comprendre le résultat" not in text
     assert client.get("/inspecteur/accueil").status_code == 200
     fragment = client.get(home.FRAGMENT)
     assert fragment.status_code == 200 and "<h1" not in fragment.text and "data-now-stamp" in fragment.text

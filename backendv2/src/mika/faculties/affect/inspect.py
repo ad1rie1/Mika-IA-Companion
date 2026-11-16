@@ -30,6 +30,7 @@ from mika.kernel.clock import DAY
 from mika.kernel.dynamics import Vec3
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
+    Badge,
     Block,
     Cell,
     Chart,
@@ -55,6 +56,8 @@ from mika.kernel.inspect import (
     num_fr,
     paginate,
     pct_fr,
+    plural,
+    relative_fr,
 )
 from mika.vocab import affect as A
 from mika.vocab import privacy
@@ -65,6 +68,13 @@ from mika.vocab.people import is_identifiable
 STANCES_PAGE = 50
 #: ses balises déclarées, par page (tout l'historique, du plus récent au plus ancien)
 DECLARED_PAGE = 25
+#: l'hostilité à partir de laquelle elle en veut à quelqu'un (la rancune) : le ton de sa jauge, et ce que l'onglet
+#: Postures (``app/handmade/tabs/life.py``) compare à sa part
+GRUDGE_FROM = 0.3
+#: une posture installée (plusieurs tours concordants) ou non : une étiquette dont la clé (``yes``, ``no``) est ce
+#: que lit l'onglet dessiné, jamais ses mots
+INSTALLED = Badge("oui (plusieurs tours concordants)", "info", key="yes")
+NOT_INSTALLED = Badge("non", "muted", key="no")
 EXCERPT = 160
 
 #: la période des courbes
@@ -219,14 +229,14 @@ def _mood_view(s: AffectState, frame: Frame, ctx: InspectContext) -> list[Block]
     if newest:
         _n, at, handle, name, intensity, _kind, _text = newest[0]
         last = _declared_cell(name, intensity)
-        last_sub = f"{ctx.when(at)}, {_who_text(frame, handle)}"
+        last_sub = f"{relative_fr(at, frame.now)}, {_who_text(frame, handle)}"
     return [
         Stats((
             Stat("ressentie", "au repos" if rest else A.emotion_cell(m.felt, m.felt_intensity),
                  sub="l'écart à son repos"),
             Stat("débordement", Meter(m.overflow, pct_fr(m.overflow),
                                       tone="warn" if m.overflow > p.overflow_floor else ""),
-                 sub=f"pousse à parler au-delà de {pct_fr(p.overflow_floor)}",
+                 sub=f"elle écrit d'elle-même au-delà de {pct_fr(p.overflow_floor)}",
                  tone="warn" if m.overflow > p.overflow_floor else ""),
             Stat("son fond", A.emotion_cell(p.background), sub="ce vers quoi elle revient"),
             Stat("dernière balise", last, sub=last_sub),
@@ -249,7 +259,7 @@ def _mood_view(s: AffectState, frame: Frame, ctx: InspectContext) -> list[Block]
             ("lecture absolue (le visage)", _feeling(m.label, m.intensity)),
             ("position", _vec(m.position)),
             ("repos à cette heure", _vec(m.home)),
-            ("dernière mise à jour", ctx.when(s.mood.at) if s.mood is not None else "jamais (au repos depuis toujours)"),
+            ("dernière mise à jour", When(s.mood.at) if s.mood is not None else "jamais (au repos depuis toujours)"),
         )),)),
     ]
 
@@ -264,11 +274,11 @@ def _warmth_cell(value: float) -> Meter:
 
 
 def _hostility_cell(value: float) -> Meter:
-    return Meter(value, num_fr(value, 2), tone="danger" if value >= 0.3 else "warn" if value > 0.05 else "")
+    return Meter(value, pct_fr(value), tone="danger" if value >= GRUDGE_FROM else "warn" if value > 0.05 else "")
 
 
 def _bond_cell(value: float) -> Meter:
-    return Meter(value, num_fr(value, 2), tone="ok" if value >= 0.35 else "")
+    return Meter(value, pct_fr(value), tone="ok" if value >= 0.35 else "")
 
 
 def _anchor_cell(r: c.StanceReading) -> Cell:
@@ -282,7 +292,7 @@ def _stance_prose(frame: Frame, r: c.StanceReading, p: AffectParams) -> str:
     return prose.stance(r, p, name=frame.get(identity_c.IDENTITY(r.person)).name, now=frame.now)
 
 
-def _stance_row(s: AffectState, frame: Frame, ctx: InspectContext, person: str, p: AffectParams,
+def _stance_row(s: AffectState, frame: Frame, person: str, p: AffectParams,
                 cw: ph.Clockwork) -> Row:
     stored = s.stances[person]
     r = stance_reading(s, person, frame.now, p, cw)
@@ -292,14 +302,14 @@ def _stance_row(s: AffectState, frame: Frame, ctx: InspectContext, person: str, 
     detail = (
         Note(_stance_prose(frame, r, p) or "rien de particulier envers cette personne", title="ce qu'elle se dit"),
         Fields((
-            ("installée", "oui (plusieurs tours concordants)" if r.anchored else "non"),
+            ("installée", INSTALLED if r.anchored else NOT_INSTALLED),
             ("ancre (depuis son repos moyen)", _vec(None if r.anchor is None else A.sub(r.anchor, r.reference))),
             ("jours de contact", str(stored.days)),
-            ("méfiance jusqu'à", ctx.when(stored.wary_until) if stored.wary_until > frame.now else "—"),
-            ("excuses (qui ont compté)", ctx.when(stored.apologized_at) if stored.apologized_at else "—"),
+            ("méfiance jusqu'à", When(stored.wary_until) if stored.wary_until > frame.now else "—"),
+            ("excuses (qui ont compté)", When(stored.apologized_at) if stored.apologized_at else "—"),
             ("position", _vec(r.position)),
             ("son repos envers elle", _vec(r.home)),
-            ("dernier mouvement", ctx.when(stored.at) if stored.at else "—"),
+            ("dernier mouvement", When(stored.at) if stored.at else "—"),
         )),
     )
     return Row((
@@ -317,7 +327,7 @@ def _stance_row(s: AffectState, frame: Frame, ctx: InspectContext, person: str, 
 POSTURE_COLUMNS = (Column("personne"), Column("ressentie envers elle"),
                    Column("chaleur (−1…1)", hint="ce que ses échanges ont installé : > 0 chaleureux, < 0 froid"),
                    Column("hostilité", hint="un écart déplaisant et dominant, amorti par l'attachement : la rancune"),
-                   Column("attachement", hint="ce qui l'attache à cette personne (0…1, jamais négatif)"),
+                   Column("attachement", hint="ce qui l'attache à cette personne (jamais négatif)"),
                    Column("ancre", hint="ce qui s'est installé", detail=True), Column("dernière balise", detail=True),
                    Column("quand", "fit"))
 
@@ -329,7 +339,7 @@ def _stances_view(s: AffectState, frame: Frame, ctx: InspectContext) -> list[Blo
     cw = _clockwork(frame)
     ordered = sorted(s.stances.items(), key=lambda kv: (-max(kv[1].declared_at, kv[1].at), kv[0]))
     page, pager = paginate(ordered, ctx.pager(size=STANCES_PAGE, total=len(ordered)))
-    return [Table(POSTURE_COLUMNS, tuple(_stance_row(s, frame, ctx, person, p, cw) for person, _ in page),
+    return [Table(POSTURE_COLUMNS, tuple(_stance_row(s, frame, person, p, cw) for person, _ in page),
                   title="Postures envers chacun", pager=pager,
                   empty="aucune posture : personne ne l'a encore touchée")]
 
@@ -363,12 +373,12 @@ def _person_view(s: AffectState, frame: Frame, ctx: InspectContext) -> list[Bloc
                 Stat("ressentie", "au repos" if r.at_rest else A.emotion_cell(r.felt, r.felt_intensity),
                      sub="envers elle, à l'instant"),
                 Stat("chaleur", _warmth_cell(warmth), sub="ce que leurs échanges ont installé (−1…1)"),
-                Stat("hostilité", _hostility_cell(hostility(s, key, frame.now, p, cw)), sub="la rancune (0…1)"),
-                Stat("attachement", _bond_cell(r.bond), sub="ce qui l'attache à elle (0…1)"),
+                Stat("hostilité", _hostility_cell(hostility(s, key, frame.now, p, cw)), sub="la rancune"),
+                Stat("attachement", _bond_cell(r.bond), sub="ce qui l'attache à elle"),
                 Stat("ancre", _anchor_cell(r),
-                     sub=f"{stored.days} jour(s) de contact" if r.anchor is not None else ""),
+                     sub=plural(stored.days, "jour de contact", "jours de contact") if r.anchor is not None else ""),
                 Stat("dernière balise", A.emotion_cell(last.emotion, last.intensity) if last else "—",
-                     sub=ctx.when(stored.declared_at) if stored.declared_at else ""),
+                     sub=relative_fr(stored.declared_at, frame.now) if stored.declared_at else ""),
             ), title="Envers elle" if key == person else f"Envers le moyen de communication {key} (avant d'être relié)"),
             Note(_stance_prose(frame, r, p) or "Rien de particulier envers cette personne."),
         ]

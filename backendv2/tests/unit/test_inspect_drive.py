@@ -12,6 +12,9 @@ Ce qu'un opérateur doit pouvoir lire, par ses intentions :
   colère (hostilité, chaleur négative), l'humeur de la barre de vitaux aussi,
   et la valence baisse ; après un échange chaleureux, elle se réchauffe ;
 - sur la fiche d'une personne, l'onglet d'affect ne parle que d'elle ;
+- un instant se lit « il y a 3 min », la date exacte au survol (une cellule
+  ``When``), ou ``relative_fr`` dans une phrase : jamais la date figée de
+  ``ctx.when`` dans un texte (besoins, rythme, humeur, postures, soi, mémoire) ;
 - la nuit, le rythme dit qu'elle dort, quand elle se réveillera, et que ses
   initiatives ordinaires sont retenues ;
 - une initiative restée sans réponse se lit comme telle, puis comme répondue ;
@@ -25,6 +28,7 @@ from __future__ import annotations
 import asyncio
 
 from mika.contracts import goals as goals_c
+from mika.faculties.body import inspect as body_view
 from mika.inspector import render
 from mika.kernel.clock import DAY, HOUR, MINUTE, US, local
 from mika.kernel.inspect import (
@@ -46,6 +50,7 @@ from mika.kernel.inspect import (
     Text,
     Timeline,
     When,
+    pct_fr,
 )
 from mika.ports.llm import LLMResponse
 from mika.runtime.effects import with_content
@@ -244,7 +249,9 @@ def test_every_view_reads_a_fresh_kernel(tmp_path):
     assert stat(body, "sommeil").value == "éveillée" and field(body, "phase du jour") == "après-midi"
     assert str(field(body, "prochaine transition")).startswith("s'endormir — ")
     assert isinstance(stat(body, "prochaine transition").value, When)
-    assert field(body, "initiatives et travail ordinaires") == "libres"
+    gate = field(body, "initiatives et travail ordinaires")  # une étiquette, sa clé lue par l'onglet dessiné
+    assert (gate.text, gate.key) == ("libres", body_view.FREE)
+    assert field(body, "réveillée par un message").key == body_view.NO.key
     assert _cell(stat(body, "énergie").value).endswith(" %")
     assert "aucune transition encore" in flat(body)
     needs = fresh[("needs", "needs")]
@@ -355,7 +362,8 @@ def test_the_stance_toward_someone_reads_anger_then_warmth(tmp_path):
     a = _row(table(angry, "Postures envers chacun"), "Alice")
     w = _row(table(warm, "Postures envers chacun"), "Alice")
     assert a["ressentie envers elle"].key in ANGER and a["dernière balise"].key == "angry"
-    assert isinstance(a["hostilité"], Meter) and _num(a["hostilité"].text) > 0.05
+    assert isinstance(a["hostilité"], Meter) and a["hostilité"].ratio > 0.05
+    assert a["hostilité"].text == pct_fr(a["hostilité"].ratio)  # une part : en %, comme sur En ce moment (C2-03)
     assert _num(a["chaleur (−1…1)"].text) < 0 and a["chaleur (−1…1)"].tone == "danger"
     # la ligne mène à la fiche de la personne, et son détail dit ce qu'elle se dit
     assert a["_row"].href == Ref.subject("person", "user_1", a["personne"].text, "affect")
@@ -363,7 +371,7 @@ def test_the_stance_toward_someone_reads_anger_then_warmth(tmp_path):
     assert isinstance(a["quand"], When)
     assert w["ressentie envers elle"].key not in ANGER and w["dernière balise"].key == "love"
     assert _num(w["chaleur (−1…1)"].text) > _num(a["chaleur (−1…1)"].text)
-    assert _num(w["hostilité"].text) < _num(a["hostilité"].text)
+    assert w["hostilité"].ratio < a["hostilité"].ratio
     # l'humeur générale : la vue et la barre de vitaux se lisent en colère, la valence a baissé
     assert stat(angry_mood, "dernière balise").value.key == "angry"
     assert stat(angry_mood, "ressentie").value.key in ANGER
@@ -410,6 +418,44 @@ def test_the_person_tab_speaks_only_of_that_person(tmp_path):
     assert nobody[0].text == "Cette vue se lit sur la fiche d'une personne."
 
 
+# ── Un instant : relatif, la date exacte au survol ────────────────────────
+
+#: ce qu'écrirait ``ctx.when`` (la date longue, figée à la seconde) : une vue n'en met plus dans un texte
+FROZEN = "⟨date figée⟩"
+#: les vues de sa rubrique qui disent un instant (sur la fiche d'Alice pour l'onglet d'affect)
+DATED = (("needs", "needs", ""), ("body", "rythme", ""), ("affect", "humeur", ""), ("affect", "postures", ""),
+         ("affect", "affect", "user_1"), ("self", "soi", ""), ("memory", "consolidation", ""))
+
+
+def test_a_moment_reads_relative_and_never_frozen_in_a_text(tmp_path):
+    """Une paire de faits qui n'est qu'une date est une cellule ``When`` (« il y a 3 min », la date exacte au
+    survol) ; une date dans une phrase, un sous-titre ou le texte d'un lien passe par ``relative_fr``. Avant, seize
+    appels à ``ctx.when`` écrivaient « 15/11/2026 18:31:21 » à côté de « à l'instant » (C2-04)."""
+    async def scenario(kernel, script):
+        await befriend(kernel, "user_1", "friend")
+        await connect(kernel, "user_1", "Alice")
+        for _ in range(3):
+            await turn(kernel, script, "user_1", "angry", 0.8, "tu m'énerves")
+        ins = Inspection(kernel)
+        return {(owner, name): ins.run(ins.find(owner, name), {}, when=lambda _at: FROZEN, subject=subject)
+                for owner, name, subject in DATED}
+
+    shown = live(tmp_path, scenario)
+    for key, blocks in shown.items():
+        assert FROZEN not in repr(blocks), key
+    needs, rhythm, mood = shown[("needs", "needs")], shown[("body", "rythme")], shown[("affect", "humeur")]
+    assert isinstance(field(needs, "on lui a parlé pour la dernière fois"), When)
+    assert isinstance(field(needs, "rien ne s'est passé depuis"), When)
+    assert isinstance(field(rhythm, "dernière interaction"), When)
+    assert str(field(rhythm, "prochaine transition")).startswith("s'endormir — dans ")
+    assert isinstance(field(mood, "dernière mise à jour"), When)
+    assert isinstance(field(shown[("affect", "postures")], "dernier mouvement"), When)
+    assert "Alice" in stat(mood, "dernière balise").sub
+    for blocks in (mood, shown[("affect", "affect")]):  # l'humeur, et la fiche d'Alice
+        sub = stat(blocks, "dernière balise").sub
+        assert sub.startswith(("il y a ", "à l'instant")), sub
+
+
 # ── Le corps : la nuit ────────────────────────────────────────────────────
 
 
@@ -421,10 +467,11 @@ def test_at_night_the_rhythm_says_she_sleeps_and_when_she_will_wake(tmp_path):
     night, got = live(tmp_path, scenario, start=at_paris(2026, 9, 28, 21, 0))
     assert stat(night, "sommeil").value.startswith("sommeil")
     assert field(night, "phase du jour") == "nuit"
-    assert str(field(night, "prochaine transition")).startswith("se réveiller — 29/09 0")
+    assert str(field(night, "prochaine transition")).startswith("se réveiller — dans ")  # relative (C2-04)
     assert stat(night, "prochaine transition").sub == "se réveiller"
     assert when(stat(night, "prochaine transition").value.at).startswith("29/09 0")
-    assert field(night, "initiatives et travail ordinaires") == "retenues : elle dort"
+    gate = field(night, "initiatives et travail ordinaires")
+    assert (gate.text, gate.tone, gate.key) == ("retenues : elle dort", "warn", body_view.VETOED)
     transitions = timeline(night, "Dernières transitions").entries
     assert transitions[0].title == "s'endort" and transitions[0].href.kind == "event"
     fell = when(transitions[0].at)

@@ -32,6 +32,7 @@ from mika.kernel.inspect import (
     Text,
     Toolbar,
     When,
+    plural,
 )
 from mika.ports.workshop import Hosted
 from mika.vocab.episodes import project_target
@@ -95,12 +96,12 @@ async def _git_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[
     blocks += [
         Stats((Stat("Enregistrements", count, branch), Stat("Le dernier", When(latest[0].at) if latest and latest[0].at
                                                             else "—", latest[0].sha if latest else ""),
-               Stat("Non enregistré", f"{changed} fichier(s)" if changed else "rien", "",
+               Stat("Non enregistré", plural(changed, "fichier", "fichiers") if changed else "rien", "",
                     "warn" if changed else ""),
                Stat("Dépôt distant", _host(p.remote) or "aucun", p.branch if p.remote else "",
                     "" if p.remote else "muted"),
                *([Stat("Avec le distant", *_gap_words(gap, count))] if p.remote else []))),
-        Disclosure(f"Ce qui n'est pas encore enregistré ({changed} fichier(s))", (
+        Disclosure(f"Ce qui n'est pas encore enregistré ({plural(changed, 'fichier', 'fichiers')})", (
             Code(_cut(diff, DIFF_SHOWN), title="Changements depuis le dernier enregistrement", lang="diff"),),
             open=bool(changed)) if diff.strip() or changed else
         Note("Tout est enregistré : rien de changé depuis le dernier commit.", "muted"),

@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 from mika.contracts import presence as presence_c
 from mika.contracts import transcript as transcript_c
@@ -35,6 +35,7 @@ from mika.kernel.events import Content, Payload, event_type
 from mika.kernel.facts import FactFamily, FactKey
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard
+from mika.vocab import privacy
 from mika.vocab.people import clean_display_name
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import ChannelTrust, Disclosure
@@ -278,6 +279,41 @@ def keepers(frame: Frame, *, quoted: bool = False) -> str:
     if not names:
         return keeper()
     return phrase("identity.keeper.either").join(map(_quoted, names) if quoted else names)
+
+
+# ── Comment la console nomme un moyen de communication ────────────────────
+# Une fois pour la fiche d'un moyen de communication (``faculties/identity/inspect``, depuis son état) et pour les
+# facultés qui y mènent (la fiche d'une pièce reçue, depuis les faits) : le nom et, en mots, par où il est venu
+# (« adrien · compte ») ; sa clé (``user_1``) reste sur sa fiche et en colonne de détail, jamais en libellé.
+
+
+class _Reach(Protocol):
+    authenticated: bool
+    operator: bool
+    channel: str
+
+
+def kind_words(h: _Reach) -> str:
+    """Par où, en mots (un compte, un compte extérieur, le web…) : jamais la clé brute."""
+    if h.authenticated:
+        kind = "compte opérateur" if h.operator else "compte"
+        return f"{kind} · téléphone" if h.channel == privacy.MOBILE else kind
+    return "compte extérieur" if h.channel == privacy.EXTERNAL else (h.channel or "inconnu")
+
+
+def address_label(name: str, h: _Reach) -> str:
+    """Un moyen de communication tel qu'on le lit : son nom, et par où (« adrien · compte »)."""
+    return f"{name} · {kind_words(h)}" if name else f"{kind_words(h)}, sans nom"
+
+
+def handle_label(frame: Frame, handle: str) -> str:
+    """``address_label`` depuis les faits : le nom sous lequel elle connaît l'adresse, à défaut celui de sa personne
+    (une adresse qu'elle ne connaît pas garde sa clé, comme sur sa fiche). Qui l'appelle déclare ``IDENTITY``."""
+    view = frame.get(IDENTITY(handle))
+    if not view.known:
+        return handle
+    name = view.name or (frame.get(IDENTITY(view.person)).name if view.bound else "")
+    return address_label(name, view)
 
 
 # ── Où la joindre ─────────────────────────────────────────────────────────

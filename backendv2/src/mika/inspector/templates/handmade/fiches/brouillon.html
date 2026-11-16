@@ -2,7 +2,7 @@
    qui partira (de, à, copie, objet, le texte tel qu'il partira, signature et citation comprises) ; à côté, ce que tu
    peux en faire (les formulaires de la console), d'où il vient et son parcours ; ses deux versions s'il a été
    retouché. Un brouillon que la boîte n'a plus (``gone``) : ce qu'elle en sait — où il en était, d'où il venait, son
-   parcours. #}
+   parcours ; s'il attend encore ton accord, ce que tu peux en faire : le refuser (audit du 2026-11-05, C4-02). #}
 {% from "handmade/shared/drawn.html" import one with context %}
 <div class="now-page draftf">
   {% if blocked %}<p class="obj-alert warn">Il ne peut pas partir tel quel : {{ blocked }}. Retouche-le.</p>{% endif %}
@@ -27,13 +27,15 @@
     </div>
 
     <aside class="now-stack mailf-side" aria-label="Ce que tu peux en faire, d'où il vient, son parcours">
-      <section class="now-card{{ ' draftf-decide' if waiting }}" aria-labelledby="draftf-do">
-        <header class="now-card-head"><h2 id="draftf-do">{{ "Ce que tu peux en faire" if waiting else "Où il en est" }}</h2>{% if waiting %}<p>Rien ne part sans toi.</p>{% endif %}</header>
+      {% set decide = waiting or (gone and was_waiting and actions) %}
+      <section class="now-card{{ ' draftf-decide' if decide }}" aria-labelledby="draftf-do">
+        <header class="now-card-head"><h2 id="draftf-do">{{ "Ce que tu peux en faire" if decide else "Où il en est" }}</h2>{% if waiting %}<p>Rien ne part sans toi.</p>{% endif %}</header>
+        {# disparu : où il en était d'abord, puis le geste qui reste (le refuser) #}
+        {% if state %}<p class="draftf-state"><span class="now-tag {{ state.tone }}">{{ state.text }}</span></p>
+        {% if was_waiting %}<p class="person-tab-note">Il attend encore ton accord ; sans son texte, il ne partira pas.{% if actions %} Le refuser le retire de ce qui attend.{% endif %}</p>{% endif %}{% endif %}
         {% if actions %}<div class="now">{% for b in actions %}{{ one(b, 1) }}{% endfor %}</div>{% endif %}
         {% for b in notes %}{{ one(b, 1) }}{% endfor %}
-        {% if state %}<p class="draftf-state"><span class="now-tag {{ state.tone }}">{{ state.text }}</span></p>
-        {% if was_waiting %}<p class="person-tab-note">Il attendait ton accord ; sans son texte, il ne partira pas.</p>{% endif %}
-        {% elif not actions and not notes %}<p class="now-empty">elle n'attend rien de toi</p>{% endif %}
+        {% if not state and not actions and not notes %}<p class="now-empty">elle n'attend rien de toi</p>{% endif %}
       </section>
       {% for b in why %}{{ one(b) }}{% endfor %}
       {% for b in history %}{{ one(b) }}{% endfor %}

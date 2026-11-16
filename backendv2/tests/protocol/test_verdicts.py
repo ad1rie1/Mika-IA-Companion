@@ -8,6 +8,8 @@ réponses jugées »). Une autre connexion ne peut ni juger ni voir un avis.
 
 from __future__ import annotations
 
+import re
+
 from mika.contracts import runtime as rt
 from mika.contracts import transcript as transcript_c
 from tests.protocol.test_console_operator import BASE, html_of
@@ -57,6 +59,33 @@ def test_her_owner_judges_a_reply_from_the_chat_and_only_she_sees_it(world):  # 
     assert "Ton avis" in why and "pas adaptée" in why and "juste « salut ! »" in why
     listed = html_of(client.get(f"{BASE}/fil/jugees"))
     assert "Ses réponses jugées" in listed and "coucou" in listed and "juste « salut ! »" in listed
+
+
+def test_the_judged_replies_filter_by_verdict_in_one_click(world):  # noqa: F811
+    """L'avis est un filtre de trois choix toujours posé (« toutes » par défaut) : un bouton à choix au bout de la
+    barre d'onglets, pas un sélecteur et « Filtrer » (ADR 0176) ; la personne s'y lit par son nom, sans sa clé."""
+    client, _live, _ = world
+    bootstrap(client)
+    with client.websocket_connect(WS) as a:
+        opening(a)
+        for text, cid, verdict, note in (("coucou", "m1", "ko", "trop long"), ("bonsoir", "m2", "ok", "parfait")):
+            seq = talk(a, text, cid)["message_id"]
+            a.send_json({"type": "verdict", "message_id": seq, "verdict": verdict, "comment": note})
+            assert _result(a)["status"] == "ok"
+    url = f"{BASE}/fil/jugees"
+    listed = html_of(client.get(url))
+    seg = listed.split('<nav class="seg" aria-label="avis">', 1)[1].split("</nav>", 1)[0]
+    assert re.findall(r">([^<]+)</a>", seg) == ["toutes", "pas adaptées", "adaptées"]
+    assert re.search(r'aria-current="true">toutes<', seg) and '<select name="avis"' not in listed
+    shown = listed.split('data-tab="fil/jugees"', 1)[1]
+    assert "trop long" in shown and "parfait" in shown
+    assert ">adrien</a>" in shown and "(user_1)" not in shown
+    ko = html_of(client.get(f"{url}?avis=ko")).split('data-tab="fil/jugees"', 1)[1]
+    assert "trop long" in ko and "parfait" not in ko
+    ok = html_of(client.get(f"{url}?avis=ok")).split('data-tab="fil/jugees"', 1)[1]
+    assert "parfait" in ok and "trop long" not in ok
+    before = html_of(client.get(f"{url}?avis="))  # une adresse d'avant le bouton à choix : toutes
+    assert "trop long" in before and "parfait" in before and re.search(r'aria-current="true">toutes<', before)
 
 
 def test_an_opinion_withdrawn_leaves_the_reply_unjudged(world):  # noqa: F811

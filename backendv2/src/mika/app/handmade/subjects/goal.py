@@ -40,7 +40,7 @@ from mika.faculties.goals.inspect import NEXT_SESSION, TASK_ORDER, TASK_TONE, VE
 from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import UI, Overview
 from mika.kernel.clock import DAY
-from mika.kernel.inspect import Badge, Meter
+from mika.kernel.inspect import Badge, Meter, agree, plural
 
 KIND = "goal"
 #: ses onglets, tous dessinés : « Résumé » à sa façon, les autres bloc par bloc
@@ -99,14 +99,16 @@ def _who(ui: UI, key: str | None) -> dict[str, str] | None:
 
 
 def _progress(g: Goal, p: Any) -> dict[str, Any]:
-    """L'avancement : son plan de travail s'il en a un, sinon ses séances sur son budget."""
+    """L'avancement : son plan de travail s'il en a un, sinon ses séances sur son budget. L'unité s'accorde au total
+    qu'elle suit (« 1 / 1 tâche faite », « 0 / 8 séances »), comme dans la vue de la faculté."""
     if g.tasks:
         done = sum(1 for t in g.tasks if t.status == c.TASK_DONE)
         blocked = sum(1 for t in g.tasks if t.status == c.TASK_BLOCKED)
-        return {"done": done, "of": len(g.tasks), "unit": "tâches faites", "w": unit(done / len(g.tasks)),
-                "note": f"{blocked} bloquée{'s' if blocked > 1 else ''}" if blocked else ""}
+        return {"done": done, "of": len(g.tasks), "unit": agree(len(g.tasks), "tâche faite", "tâches faites"),
+                "w": unit(done / len(g.tasks)), "note": plural(blocked, "bloquée", "bloquées") if blocked else ""}
     most = budget(g, p)
-    return {"done": g.steps, "of": most, "unit": "séances", "w": unit(g.steps / most if most else 0.0), "note": ""}
+    return {"done": g.steps, "of": most, "unit": agree(most, "séance", "séances"),
+            "w": unit(g.steps / most if most else 0.0), "note": ""}
 
 
 def _guard(n: int, limit: int, then: str) -> dict[str, Any]:

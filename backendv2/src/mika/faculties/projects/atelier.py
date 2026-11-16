@@ -55,6 +55,7 @@ from mika.faculties.projects.tools import (
 )
 from mika.kernel.events import Content
 from mika.kernel.faculty import ToolResult
+from mika.kernel.inspect import plural
 from mika.kernel.operate import Preview
 from mika.ports.workshop import Commit, Hosted, OutsideWorkshop, WorkshopFull, argv_lines, describe
 from mika.vocab.episodes import PROJECT_KINDS, project_of, project_target
@@ -331,7 +332,8 @@ async def networked_preview(args: Mapping[str, Any], ports: Mapping[str, Any]) -
     text = (f"La commande, entière, un argument par ligne :\n{argv_lines(argv)}\n\n"
             f"Elle tournerait dans l'atelier du projet n° {pid}, avec Internet seulement (ni la machine, ni le "
             f"réseau local), au commit {head[:12] or '(aucun)'}"
-            + (f", avec {len(dirty)} fichier(s) non enregistré(s) : {shown}" if dirty else "") + ".")
+            + (f", avec {plural(len(dirty), 'fichier non enregistré', 'fichiers non enregistrés')} : {shown}"
+               if dirty else "") + ".")
     blocked = _gone(ports, pid).removeprefix("refusé : ")
     if not blocked and _busy(ports, pid):
         blocked = BUSY

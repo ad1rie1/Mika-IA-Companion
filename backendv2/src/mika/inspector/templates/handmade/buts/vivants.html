@@ -9,7 +9,7 @@
   {{ gl.notes(notes) }}
   {{ tab.block(band) }}
   <section class="now-card" id="{{ t.id }}" aria-labelledby="gl-live-title">
-    {{ tab.head(t.title, "gl-live-title", t.count, "Ce qu’elle se propose de faire ensuite. Ses projets ont leur menu à eux.") }}
+    {{ tab.head(t.title, "gl-live-title", t.count) }}
     {% if explorations or reminders %}
     <div class="gl-columns{{ ' single' if not (explorations and reminders) }}">
       {% if explorations or not filtered %}

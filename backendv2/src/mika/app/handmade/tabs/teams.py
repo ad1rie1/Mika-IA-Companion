@@ -5,9 +5,9 @@ dessinées (``subjects/teams.py`` : le fil en bulles, une réponse en face du me
   dernier message (qui l'a écrit), l'heure ; les questions qui attendent une réponse et une réponse d'elle en
   chemin, dites. Sans extension branchée, comment la brancher.
 - **Réponses** : une file à valider d'abord — celles qui attendent ton accord, chacune avec le message auquel elle
-  répond et, en face, ce qu'elle a écrit, « Examiner et décider » sur sa ligne — puis, en liste, ce que les autres
-  sont devenues ; en pied, le lien de la vue vers le tableau de Teams dans Réglages › Canaux (celui du compte
-  choisi), là où se règle ce qu'elle prépare et comment ça part.
+  répond et, en face, ce qu'elle a écrit (ou qu'elle n'existe plus), « Examiner et décider » sur sa ligne — puis, en
+  liste, ce que les autres sont devenues ; en pied, le lien de la vue vers le tableau de Teams dans Réglages › Canaux
+  (celui du compte choisi), là où se règle ce qu'elle prépare et comment ça part.
 - **Extension** : une extension par compte (ADR 0186). Un compte choisi (ou le seul) : où elle en est (branchée, son
   dernier envoi), une bande de chiffres (ce qu'elle a apporté, ce qui attend ta décision), ce compte Teams et sa clé
   (la créer, la retirer) ; comment la brancher, pas à pas. Plusieurs comptes : un par ligne, chacun mène au sien.
@@ -115,6 +115,8 @@ def _reply(line: Line, port: Any) -> dict[str, Any]:
         "waiting": line.tone == "warn", "href": line.href,
         "answered": {"who": answered.author or "quelqu'un", "text": excerpt(answered.text, CITED)}
         if answered is not None else None,
+        # disparue (son compte retiré des réglages) : sa carte le dit, plutôt qu'« en réponse à rien »
+        "gone": draft is None,
     }
 
 
@@ -165,7 +167,7 @@ def extension(got: Got) -> Markup | None:
                         navs=navs, accounts=None, keys=[])
     port, s = _port(got), _state(got)
     facts = pairs(fields)
-    account = text(facts.get("clé du compte"))  # le compte que la faculté a choisi (``?compte=``, ou le seul)
+    account = text(facts.get("nom court du compte"))  # le compte que la faculté a choisi (``?compte=``, ou le seul)
     plugged = bool(port is not None and account and port.configured(account))
     conversations = len(port.conversations(200, accounts=[account])) if plugged else 0
     waiting = sum(1 for d in s.drafts.values() if d.state == WAITING and d.account == account) if s is not None else 0

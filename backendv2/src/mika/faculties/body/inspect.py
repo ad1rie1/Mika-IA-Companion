@@ -28,6 +28,7 @@ from mika.faculties.body import sleep as sl
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
+    Badge,
     Block,
     Chart,
     Entry,
@@ -46,6 +47,7 @@ from mika.kernel.inspect import (
     Vital,
     When,
     num_fr,
+    relative_fr,
 )
 from mika.vocab import circadian
 from mika.vocab.affect import emotion_cell
@@ -64,6 +66,14 @@ VETO_FR = {
     c.WOKEN_AT_NIGHT: "retenues : tirée du sommeil en pleine nuit, elle va se rendormir",
     c.WAKING: "retenues : elle émerge à peine (inertie du réveil)",
 }
+#: ses initiatives et son travail ordinaires — libres, plus rares, retenus — : la clé de leur étiquette, que lit
+#: l'onglet dessiné (``app/handmade/tabs/life.py``), jamais ses mots
+FREE, SLOWED, VETOED = "free", "slowed", "vetoed"
+#: « réveillée par un message », « veillé tard » : des étiquettes dont la clé (``yes``, ``no``) est ce que lit
+#: l'onglet dessiné
+WOKEN = Badge("oui", "info", key="yes")
+LATE = Badge("oui", "warn", key="yes")
+NO = Badge("non", "muted", key="no")
 
 
 def _hm(minutes: int) -> str:
@@ -78,13 +88,15 @@ def _p(frame: Frame) -> BodyParams:
     return params(frame.env.params_of("body", frame.root))
 
 
-def _gate_fr(s: BodyState, frame: Frame) -> str:
+def _gate_badge(s: BodyState, frame: Frame) -> Badge:
+    """Ses initiatives et son travail ordinaires, en étiquette : ses mots, son ton, sa clé (``FREE``, ``SLOWED``,
+    ``VETOED``)."""
     m = gate(s, frame)
     if m.veto is not None:
-        return VETO_FR.get(m.veto, m.veto)
+        return Badge(VETO_FR.get(m.veto, m.veto), "warn", key=VETOED)
     if m.shift:
-        return f"plus rares (décalage {num_fr(m.shift, 1, signed=True)})"
-    return "libres"
+        return Badge(f"plus rares (décalage {num_fr(m.shift, 1, signed=True)})", key=SLOWED)
+    return Badge("libres", "ok", key=FREE)
 
 
 def _pressure(s: BodyState, frame: Frame) -> float:
@@ -197,7 +209,7 @@ def _nights(s: BodyState, frame: Frame) -> Table:
             When(n.end, relative=False) if n.end else Text("elle dort encore", kind="muted"),
             _duration(slept) if n.end else "—",
             _rousings(frame, n),
-            "oui" if n.late else "non",
+            LATE if n.late else NO,
             ("courte" if told.short else "ordinaire") if told is not None and n is s.nights[-1] else "",
         ))
     return Table(("endormie", "réveillée", "dormi", "tirée du sommeil", "veillé tard", "ce qu'elle en sait ce matin"),
@@ -243,15 +255,16 @@ def _rhythm_view(s: BodyState, frame: Frame, ctx: InspectContext) -> list[Block]
               until=now, empty="pas encore de mesure (une toutes les dix minutes) : la courbe se remplira"),
         Fields((
             ("sommeil", SLEEP_FR[sl.phase(sleep, now, p.sleep)]),
-            ("depuis", ctx.when(sleep.since) if sleep.since else "aucune transition observée"),
-            ("réveillée par un message", "oui" if sleep.woken_by_message and not sleep.asleep else "non"),
+            ("depuis", When(sleep.since) if sleep.since else "aucune transition observée"),
+            ("réveillée par un message", WOKEN if sleep.woken_by_message and not sleep.asleep else NO),
             ("messages qui attendent son réveil", str(len(s.waiting)) if s.waiting else "aucun"),
             ("phase du jour", circadian.PHASE_FR[phase]),
-            ("prochaine transition", f"{what} — {ctx.when(nxt)}" if nxt is not None else f"{what} : pas dans les 48 h"),
-            ("dernière interaction", ctx.when(sleep.active_at) if sleep.active_at else "—"),
+            ("prochaine transition", f"{what} — {relative_fr(nxt, now)}" if nxt is not None
+             else f"{what} : pas dans les 48 h"),
+            ("dernière interaction", When(sleep.active_at) if sleep.active_at else "—"),
             ("sa nuit", f"de {_hm(start)} à {_hm(end)}"),
             ("chronotype", f"décalage de {p.shift_minutes:+d} min"),
-            ("initiatives et travail ordinaires", _gate_fr(s, frame)),
+            ("initiatives et travail ordinaires", _gate_badge(s, frame)),
             ("barre de réveil", f"{c.WAKE_BAR:.0f} (log-odds) : une raison qui la passe à elle seule "
                                 "(un rappel urgent) passe outre"),
         ), title="En détail", columns=2),

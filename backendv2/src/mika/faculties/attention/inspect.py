@@ -38,6 +38,7 @@ from mika.kernel.inspect import (
     Text,
     When,
     num_fr,
+    pct_fr,
 )
 from mika.vocab.affect import emotion_cell
 from mika.vocab.people import named_label
@@ -53,7 +54,15 @@ ORIGIN_FR = {c.EXCHANGE: "un échange", c.REVISION: "une croyance révisée", c.
              c.PROMISE: "une promesse non tenue", c.UNANSWERED: "une initiative sans réponse",
              c.ALONE: "personne ne lui écrit", c.REMORSE: "elle a été dure avec quelqu'un",
              c.LIE: "elle a menti à quelqu'un", c.REMINISCENCE: "un souvenir qui lui revient"}
-EXPECTED_FR = {c.REPLY: "sa réponse", c.RETURN: "son retour", c.PROMISE: "tenir sa promesse"}
+#: ce qu'elle attend, dit devant la personne qui le lui doit (« la réponse d'Alice », « la promesse tenue d'Adrien »)
+EXPECTED_FR = {c.REPLY: "la réponse", c.RETURN: "le retour", c.PROMISE: "la promesse tenue"}
+#: ce qu'est devenue une pensée de l'historique, et l'issue d'une attente close : des étiquettes dont la clé
+#: (``alive``, ``gone`` ; ``met``, ``missed``) est ce que lit l'onglet dessiné (``app/handmade/tabs/thoughts.py``),
+#: jamais leurs mots
+ALIVE = Badge("vivante", "info", key="alive")
+GONE = Badge("éteinte", "muted", key="gone")
+MET = Badge("comblée", "ok", key="met")
+MISSED = Badge("déçue", "danger", key="missed")
 SENSITIVITY_FR = {int(Sensitivity.NONE): "rien d'autrui", int(Sensitivity.ANODYNE): "anodin",
                   int(Sensitivity.PERSONAL): "personnel", int(Sensitivity.CONFIDENCE): "confidence"}
 
@@ -124,10 +133,10 @@ def _thought_rows(s: AttentionState, frame: Frame, ctx: InspectContext,
                 ("née de", ORIGIN_FR.get(t.origin, t.origin)),
                 *(("concerne", person_ref(frame, a)) for a in t.about),
                 ("sensibilité", SENSITIVITY_FR.get(t.sensitivity, str(t.sensitivity))),
-                ("intensité à la dernière ravivée", num_fr(kept.intensity, 2) if kept is not None else "—"),
+                ("intensité à la dernière ravivée", pct_fr(kept.intensity) if kept is not None else "—"),
                 *((("apaisée par des excuses", When(kept.forgiven_at)),)
                   if kept is not None and kept.forgiven_at else ()),
-                ("s'éteint", f"sous {num_fr(p.fade_below, 2)} (demi-vie {num_fr(p.half_life_us / HOUR)} h)"),
+                ("s'éteint", f"sous {pct_fr(p.fade_below)} (demi-vie {num_fr(p.half_life_us / HOUR)} h)"),
                 ("outils qui vont avec", t.bundle or "aucun"),
             ), title="Détail"),
             Prose(texts.get(t.text_ref) or FORGOTTEN, title="En entier", reading=True),
@@ -136,7 +145,7 @@ def _thought_rows(s: AttentionState, frame: Frame, ctx: InspectContext,
             Ref("event", str(t.id), f"#{t.id}"),
             _text(texts, t.text_ref),
             emotion_cell(t.emotion, t.intensity),
-            Meter(t.intensity, num_fr(t.intensity, 2)),
+            Meter(t.intensity, pct_fr(t.intensity)),
             ORIGIN_FR.get(t.origin, t.origin),
             about_cell(frame, t.about),
             When(t.born_at),
@@ -164,7 +173,7 @@ def _history(frame: Frame, ctx: InspectContext) -> Table:
             ORIGIN_FR.get(d.origin, d.origin),
             about_cell(frame, d.about),
             When(e.at),
-            Badge("vivante", "info") if e.seq in alive else Badge("éteinte", "muted"),
+            ALIVE if e.seq in alive else GONE,
         ), href=Ref("event", str(e.seq), ""),
             detail=(Prose(text or FORGOTTEN, title="En entier", reading=True),) if text and len(text) > CLAMP else ()))
     return Table((Column("n°", "fit", detail=True), Column("pensée", role="body"), Column("couleur à la naissance", detail=True), Column("née de", detail=True),
@@ -184,20 +193,20 @@ def _inspect_thoughts(s: AttentionState, frame: Frame, ctx: InspectContext) -> l
     stats = Stats((
         Stat("Pensées vivantes", len(rows), f"au plus {p.max_thoughts}"),
         Stat("Pensées à écrire", len(s.pending), "nées, pas encore formulées", "info" if s.pending else ""),
-        Stat("Initiatives sans réponse", s.ignored, "d'affilée, toutes personnes", "warn" if s.ignored >= 2 else ""),
-        Stat("Y a repensé", When(s.dwelt_at) if s.dwelt_at else "jamais", f"au plus toutes les "
-             f"{p.dwell_every_us // MINUTE} min, dès {num_fr(p.dwell_from, 2)}"),
+        Stat("Y a repensé", When(s.dwelt_at) if s.dwelt_at else "jamais"),
     ))
     live = Table(THOUGHT_COLUMNS, rows, title="Ce qui lui trotte dans la tête",
                  empty="rien ne lui trotte dans la tête", layout="cards", link_label="Voir sa naissance",
                  caption="L’intensité indique ce qu’il reste de cette pensée maintenant. Une pensée peut s’estomper "
                          "ou être ravivée ; son état actuel est distinct de l’historique de sa naissance.")
     rules = Fields((
-        ("demi-vie d'une pensée", f"{num_fr(p.half_life_us / HOUR)} h ; s'éteint sous {num_fr(p.fade_below, 2)}"),
-        ("un échange qui marque", f"émotion déclarée ≥ {num_fr(p.marking_intensity, 2)}, ou valence ≤ "
-                                  f"{num_fr(p.marking_valence, 2)} ; au plus {p.exchange_cap} à la fois"),
+        ("demi-vie d'une pensée", f"{num_fr(p.half_life_us / HOUR)} h ; s'éteint sous {pct_fr(p.fade_below)}"),
+        ("un échange qui marque", f"émotion déclarée ≥ {pct_fr(p.marking_intensity)}, ou valence ≤ "
+                                  f"{num_fr(p.marking_valence, 2, signed=True)} ; au plus {p.exchange_cap} à la fois"),
         ("des excuses", f"ce qu'un échange blessant lui a laissé garde × {num_fr(p.apology_ease, 2)} de sa force, "
                         "et s'apaise"),
+        ("y repenser", f"au plus toutes les {p.dwell_every_us // MINUTE} min, une pensée d'au moins "
+                       f"{pct_fr(p.dwell_from)}"),
         ("dernière nuit digérée", s.digested_night or "—"),
     ), title="Comment elles vivent")
     return [stats, live, Disclosure("Historique des pensées", (_history(frame, ctx),), open=bool(_before(ctx))),
@@ -221,15 +230,15 @@ def _recent(s: AttentionState, ctx: InspectContext) -> Table:
             When(h.at),
             Ref("event", str(h.signal), h.source) if h.signal else h.source,
             h.kind,
-            Meter(h.pertinence, num_fr(h.pertinence, 2)),
-            Meter(h.weight, num_fr(h.weight, 2)),
-            Meter(h.pertinence * h.weight, num_fr(h.pertinence * h.weight, 2)),
+            Meter(h.pertinence, pct_fr(h.pertinence)),
+            Meter(h.weight, pct_fr(h.weight)),
+            Meter(h.pertinence * h.weight, pct_fr(h.pertinence * h.weight)),
             _dosed(d.emotion if d is not None else "", h.intensity),
         ))
     return Table((Column("quand", "fit"), Column("source", role="title"), Column("sorte"), Column("pertinence annoncée", detail=True),
                   Column("poids (habituation)", hint="× facteur par répétition de la même source et sorte, "
                                                      "jamais sous le plancher", detail=True),
-                  Column("pertinence retenue"), Column("émotion dosée")), tuple(rows),
+                  Column("pertinence retenue"), Column("émotion laissée")), tuple(rows),
                  title="Remarqué ces dernières minutes", empty="rien de remarqué ces dernières minutes", layout="list")
 
 
@@ -240,8 +249,8 @@ def _waiting(s: AttentionState, frame: Frame, ctx: InspectContext) -> Table:
     for x in reversed(s.signals):
         weight, _room = habituation(s, x.source, x.kind, frame.now, p)
         rows.append((When(x.at), Ref("event", str(x.seq), x.source), x.kind, _text(texts, x.summary_ref),
-                     Meter(x.pertinence, num_fr(x.pertinence, 2)),
-                     Meter(x.pertinence * weight, num_fr(x.pertinence * weight, 2))))
+                     Meter(x.pertinence, pct_fr(x.pertinence)),
+                     Meter(x.pertinence * weight, pct_fr(x.pertinence * weight))))
     return Table((Column("signalé", "fit"), Column("source", role="title"), Column("sorte"), Column("résumé", role="body"),
                   Column("pertinence annoncée"), Column("retenue si remarqué maintenant")), tuple(rows),
                  title="Signalé, pas encore remarqué", empty="rien en attente", layout="cards")
@@ -250,10 +259,10 @@ def _waiting(s: AttentionState, frame: Frame, ctx: InspectContext) -> Table:
 def _noticed_history(ctx: InspectContext) -> Table:
     events, pager = _page(ctx, [c.NOTICED], HISTORY)
     rows = tuple((When(e.at), Ref("event", str(e.data.signal), e.data.source), e.data.kind,
-                  Meter(e.data.weight, num_fr(e.data.weight, 2)), _dosed(e.data.emotion, e.data.intensity))
+                  Meter(e.data.weight, pct_fr(e.data.weight)), _dosed(e.data.emotion, e.data.intensity))
                  for e in events)
     return Table((Column("quand", "fit"), Column("source"), Column("sorte"), Column("poids (habituation)"),
-                  Column("émotion dosée")), rows, title="Tout ce qu'elle a remarqué",
+                  Column("émotion laissée")), rows, title="Tout ce qu'elle a remarqué",
                  empty="plus rien avant" if _before(ctx) else "rien de remarqué pour l'instant",
                  pager=pager)
 
@@ -266,9 +275,9 @@ def _inspect_noticed(s: AttentionState, frame: Frame, ctx: InspectContext) -> li
     p = _p(frame)
     rules = Fields((
         ("habituation", f"× {num_fr(p.habituation_factor, 2)} par répétition en {p.habituation_window_us // MINUTE} "
-                        f"min, jamais sous {num_fr(p.habituation_floor, 2)}"),
-        ("dosage", f"au plus {num_fr(p.dose_cap, 2)} d'émotion par source dans cette fenêtre"),
-        ("une pensée naît d'un signal", f"à partir d'une pertinence retenue de {num_fr(p.signal_thought_from, 2)}"),
+                        f"min, jamais sous {pct_fr(p.habituation_floor)}"),
+        ("dosage", f"au plus {pct_fr(p.dose_cap)} d'émotion par source dans cette fenêtre"),
+        ("une pensée naît d'un signal", f"à partir d'une pertinence retenue de {pct_fr(p.signal_thought_from)}"),
     ), title="Comment elle remarque")
     blocks: list[Block] = [_recent(s, ctx)]
     if s.signals:
@@ -316,7 +325,7 @@ EXPECTATION_COLUMNS = (Column("elle attend", role="title"), Column("de"), Column
 def _closed(frame: Frame, ctx: InspectContext, events: Sequence[Any]) -> tuple[tuple[Cell, ...], ...]:
     return tuple((When(e.at), EXPECTED_FR.get(e.data.kind, e.data.kind), person_ref(frame, e.data.person),
                   When(e.data.since),
-                  Badge("comblée", "ok") if e.type.name == c.EXPECTATION_MET.name else Badge("déçue", "danger"),
+                  MET if e.type.name == c.EXPECTATION_MET.name else MISSED,
                   Ref("event", str(e.seq), f"n° {e.seq}")) for e in events)
 
 
@@ -336,7 +345,7 @@ def _inspect_expectations(s: AttentionState, frame: Frame, ctx: InspectContext) 
              "warn" if s.late else ""),
         Stat("Initiatives sans réponse", s.ignored, "d'affilée", "warn" if s.ignored >= 2 else ""),
         Stat("Délai d'une réponse", f"{p.reply_window_us // MINUTE} min",
-             f"{p.reply_window_message_us // MINUTE} min par message"),
+             f"{p.reply_window_message_us // MINUTE} min en messagerie"),
     ))
     events, pager = _page(ctx, [c.EXPECTATION_MET, c.EXPECTATION_MISSED], HISTORY)
     return [stats, Table(EXPECTATION_COLUMNS, rows, title="Ce qu'elle attend", empty="elle n'attend rien de personne", layout="cards"),

@@ -278,3 +278,23 @@ def test_a_card_reaches_only_its_person_and_only_she_decides_it(world):  # noqa:
         assert next(f for f in recv_until(a, "approvals") if f["type"] == "approvals")["items"] == []
         b.send_json({"type": "ping", "t": 1})
         assert all(f["type"] != "approvals" or f["items"] == [] for f in recv_until(b, "pong"))
+
+
+def test_the_services_settings_count_in_words(world, monkeypatch):  # noqa: F811
+    """Ses outils › Paramètres des services : « 1 (1 actif et prêt) », « 2 (2 actifs et prêts) » — jamais
+    « actif(s) et prêt(s) » (audit du 2026-11-05, C4-R1)."""
+    from types import SimpleNamespace
+
+    from mika.app.settings_sections.plugins import sections
+
+    _, live, _ = world
+
+    def facts(*ready: bool) -> str:
+        servers = {f"s{i}": SimpleNamespace(enabled=True, ready=r) for i, r in enumerate(ready)}
+        monkeypatch.setattr(live.settings, "mcp", lambda: SimpleNamespace(servers=servers))
+        return dict(next(s for s in sections(live) if s.key == "mcp").facts())["Serveurs"]
+
+    assert facts(True) == "1 (1 actif et prêt)"
+    assert facts(False, False) == "2 (0 actif et prêt)"
+    assert facts(True, True) == "2 (2 actifs et prêts)"
+    assert facts() == "aucun"

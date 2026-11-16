@@ -9,7 +9,9 @@ dite), ``goal_remind_change`` (le décommander ou le déplacer, quand la personn
 qui l'a demandé le lui dit — seulement les siens). Dans un réveil par API
 (ADR 0117) : ``goal_plan_reminder`` (un rappel à l'heure dite, pour qui le
 réveil rend compte) et ``goal_plan_exploration`` (un sujet à creuser plus tard,
-avec les seuls outils du réveil). Les projets sont une faculté à part
+avec les seuls outils du réveil). Un rappel s'y construit d'une seule
+fonction (``reminder``), que la console appelle aussi (« Programmer un
+rappel », ADR 0232). Les projets sont une faculté à part
 (``projects``, ADR 0031).
 
 **« Fini » se prouve** par ce qui touche autre chose que sa tête : lire un
@@ -344,6 +346,17 @@ def _due(when: str, frame: Frame) -> int | str:
     return due
 
 
+def reminder(what: str, person: str, due: int, *, urgent: bool, source: str, address: str | None = None) -> Any:
+    """Un rappel qu'on lui demande : un but confié (``authority`` « user ») à une personne, dit à l'heure ``due``,
+    personnel. Le même événement d'où qu'il vienne — une conversation (``goal_remind`` : ``address`` est d'où venait
+    la demande), un réveil (``goal_plan_reminder``), la console (« Programmer un rappel », ``goals.programmer``,
+    ADR 0232) ; seule sa ``source`` le dit."""
+    level = int(Sensitivity.PERSONAL)
+    return c.GOAL_OPENED.draft(
+        kind=c.REMINDER, authority=c.USER, title=Content.of(what.strip(), level=level), owner=person,
+        address=address, about=(person,), due=due, urgent=urgent, source=source, sensitivity=level)
+
+
 class RemindArgs(BaseModel):
     when: str = Field(description=phrase("goals.tools.remind.when"))
     what: str = Field(min_length=1, max_length=300, description=phrase("goals.tools.remind.what"))
@@ -359,10 +372,7 @@ async def goal_remind(args: RemindArgs, ctx: Any) -> Any:
     due = _due(args.when, ctx.frame)
     if isinstance(due, str):
         return ToolResult(ok=False, content=due)
-    level = int(Sensitivity.PERSONAL)
-    await ctx.emit(c.GOAL_OPENED.draft(
-        kind=c.REMINDER, authority=c.USER, title=Content.of(args.what.strip(), level=level), owner=person,
-        address=handle, about=(person,), due=due, urgent=args.urgent, source="tool", sensitivity=level))
+    await ctx.emit(reminder(args.what, person, due, urgent=args.urgent, source="tool", address=handle))
     when = date_time(local(due, ctx.frame.env.tz_of(ctx.frame.root)))
     return phrase("goals.tools.remind.done_urgent", when=when) if args.urgent else \
         phrase("goals.tools.remind.done", when=when)
@@ -416,12 +426,9 @@ async def goal_plan_reminder(args: PlanReminderArgs, ctx: Any) -> Any:
     due = _due(args.when, ctx.frame)
     if isinstance(due, str):
         return ToolResult(ok=False, content=due)
-    level = int(Sensitivity.PERSONAL)
     # demandé par qui a déclaré le réveil : comme un rappel qu'on lui demande, il se dit à l'heure dite, là où la
     # personne est alors
-    await ctx.emit(c.GOAL_OPENED.draft(
-        kind=c.REMINDER, authority=c.USER, title=Content.of(args.what.strip(), level=level), owner=person,
-        about=(person,), due=due, urgent=args.urgent, source=source, sensitivity=level))
+    await ctx.emit(reminder(args.what, person, due, urgent=args.urgent, source=source))
     when = date_time(local(due, ctx.frame.env.tz_of(ctx.frame.root)))
     return phrase("goals.tools.remind.done_urgent", when=when) if args.urgent else \
         phrase("goals.tools.remind.done", when=when)

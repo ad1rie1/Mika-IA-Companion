@@ -188,6 +188,14 @@ class Sensitivity(enum.IntEnum):
         return cls.__members__.get(aliases.get(name, name), cls.PERSONAL)
 
 
+#: Ce qu'une audience peut entendre d'autrui, en mots (la console) : son niveau (``Audience.level`` et les autres) est
+#: une sensibilité. Lus par la faculté ``identity``, la fiche d'un moyen de communication et la page d'un épisode.
+LEVEL_WORDS: Mapping[Sensitivity, str] = MappingProxyType({
+    Sensitivity.NONE: "rien sur autrui", Sensitivity.ANODYNE: "anodin", Sensitivity.PERSONAL: "personnel",
+    Sensitivity.CONFIDENCE: "confidences",
+})
+
+
 CLOSENESS_RANK: Mapping[str, int] = MappingProxyType({"stranger": 0, "acquaintance": 1, "friend": 2, "close": 3})
 
 

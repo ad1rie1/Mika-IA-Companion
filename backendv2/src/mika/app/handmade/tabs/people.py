@@ -7,8 +7,11 @@ ressent envers elle, sa présence, ce qu'elle est pour elle — et montrent chac
   liens (``social``), les présents (``presence``). « Qui connaît-elle, et où en est-elle avec chacun ? » les traverse :
   cette page les croise, une carte par personne — ce qu'elle est pour elle, ce qu'elle ressent envers elle,
   l'attachement, ce qui se passe entre elles (en ligne, une réponse attendue, un silence qui pèse), ce qu'elle en
-  sait —, avec qui est là en ce moment et qui lui manque. On cherche par nom, on filtre par proximité ou par présence ;
-  les trois onglets restent, sous « Le détail ». Elle se relit seule (``handmade/live.js``).
+  sait —, avec qui est là en ce moment et qui lui manque. C'est ici, et seulement ici, qu'on cherche quelqu'un (par son
+  nom ou un moyen de communication) et qu'on filtre par proximité : l'Annuaire et Liens se parcourent, et le titre
+  « En ligne » de la bande mène à Présents (pas d'onglet qui répète un filtre, ADR 0176 ; un ancien ``?presence=``
+  est ignoré). Les trois onglets des facultés suivent dans la barre, la même sur ses quatre pages (``Destination.lead``).
+  Elle se relit seule (``handmade/live.js``).
 - **Annuaire** : une entrée par personne, en deux colonnes sur un grand écran — par où elle lui écrit (chacun de ses
   moyens de communication et ce que son canal prouve), la certitude, depuis quand elle la connaît, son dernier
   message ; ses échanges et son lien à un clic.
@@ -18,9 +21,11 @@ ressent envers elle, sa présence, ce qu'elle est pour elle — et montrent chac
 - **Présents** : qui est là en ce moment, une entrée par personne (en ligne depuis, en train d'écrire), et sous elle
   chacune de ses connexions — par où, le moyen de communication, l'audience (privée ou publique).
 
-Les données restent celles des facultés (``identity``, ``social``, ``presence``) : leurs filtres, leur pagination et
-la bascule « Tableau » de l'annuaire aussi. Ce que leurs blocs ne disent pas se lit à leurs faits, au même instant
-(``Look``) : les moyens de communication d'une personne, ce qu'elle ressent envers elle, qui écrit en ce moment.
+Les données restent celles des facultés (``identity``, ``social``, ``presence``) : leur pagination et la bascule
+« Tableau » de l'annuaire aussi. Ce que leurs blocs ne disent pas se lit à leurs faits, au même instant
+(``Look``) : les moyens de communication d'une personne, ce qu'elle ressent envers elle, qui écrit en ce moment —
+et, pour un lien, d'où vient sa proximité et si son rythme est mesuré (``closeness_origin``, ``rhythm_of`` de la
+faculté), jamais relus dans le texte d'une cellule.
 """
 
 from __future__ import annotations
@@ -43,7 +48,14 @@ from mika.contracts import transcript as transcript_c
 from mika.faculties.identity.faculty import handles_of
 from mika.faculties.identity.inspect import TRUST_SHORT, TRUST_TONE, handle_label, principal
 from mika.faculties.identity.inspect import people as everyone_of
-from mika.faculties.social.inspect import CLOSENESS_FR
+from mika.faculties.social.inspect import (
+    CLOSENESS_FR,
+    DECLARED,
+    OWNER_FLOOR,
+    closeness_origin,
+    owner_floor,
+    rhythm_of,
+)
 from mika.faculties.social.sections import profile_parts, refs_of
 from mika.inspector.catalog import destinations
 from mika.inspector.pages.subjects import subject_url, subject_url_key
@@ -74,15 +86,13 @@ KEY = "personnes"
 #: les proximités qu'on choisit, dans l'ordre (vide : tout le monde)
 LEVELS = (("", "Tout le monde"), (social_c.CLOSE, "Proches"), (social_c.FRIEND, "Amitiés"),
           (social_c.ACQUAINTANCE, "Connaissances"), (social_c.STRANGER, "Pas encore de lien"))
-#: le filtre « en ligne »
-ONLINE = "en-ligne"
 #: ce qu'elle sait d'une personne, sur sa carte : au plus tant de lettres
 SUMMARY = 180
 
 
 def _href(query: Mapping[str, str], **change: str) -> str:
     """Cette page avec d'autres paramètres (la page repart à la première)."""
-    kept = {k: v for k, v in query.items() if k in ("q", "proximite", "presence") and v}
+    kept = {k: v for k, v in query.items() if k in ("q", "proximite") and v}
     for k, v in change.items():
         if v:
             kept[k] = v
@@ -99,7 +109,7 @@ def _page_href(query: Mapping[str, str], page: int) -> str:
 def directory(look: Look, query: Mapping[str, str]) -> dict[str, Any]:
     frame = look.frame
     online = presences(look)
-    q, level, only_online = fold(query.get("q", "")), query.get("proximite", ""), query.get("presence") == ONLINE
+    q, level = fold(query.get("q", "")), query.get("proximite", "")
     matched = []
     for person, handles in everyone_of(frame.state("identity"), frame).items():
         name = look.name(person)
@@ -109,7 +119,7 @@ def directory(look: Look, query: Mapping[str, str]) -> dict[str, Any]:
         last = max((frame.get(transcript_c.LAST_FROM(h)) for h in handles), default=0)
         matched.append({"person": person, "handles": handles, "closeness": closeness, "last": last})
     levels = Counter(m["closeness"] for m in matched)
-    shown = [m for m in matched if (not level or m["closeness"] == level) and (not only_online or m["person"] in online)]
+    shown = [m for m in matched if not level or m["closeness"] == level]
     # qui est là d'abord, puis qui a écrit le plus récemment
     shown.sort(key=lambda m: (m["person"] not in online, -m["last"], look.name(m["person"]).casefold()))
     pages = max(1, -(-len(shown) // PAGE))
@@ -139,8 +149,7 @@ def directory(look: Look, query: Mapping[str, str]) -> dict[str, Any]:
               for p, r in (frame.get(social_c.MISSED) or ())[:8]]
     return {
         "cards": cards, "chips": chips, "total": len(matched), "count": len(shown), "q": query.get("q", ""),
-        "level": level, "only_online": only_online, "online_key": ONLINE, "online": here, "missed": missed,
-        "online_href": _href(query, presence="" if only_online else ONLINE),
+        "level": level, "online": here, "missed": missed,
         "page": page, "pages": pages,
         "prev": _page_href(query, page - 1) if page > 1 else "",
         "next": _page_href(query, page + 1) if page < pages else "",
@@ -159,7 +168,7 @@ class PeoplePage:
                 **read_parts(look, (("people", lambda lk: directory(lk, query)),), "personnes")}
 
     def _fragment_url(self, query: Mapping[str, str]) -> str:
-        kept = {k: v for k, v in query.items() if k in ("q", "proximite", "presence", "page") and v}
+        kept = {k: v for k, v in query.items() if k in ("q", "proximite", "page") and v}
         return FRAGMENT + ("?" + urlencode(kept) if kept else "")
 
     def tabs(self) -> list[dict[str, Any]]:
@@ -258,19 +267,14 @@ def annuaire(got: Got) -> Markup | None:
 # ── Liens ─────────────────────────────────────────────────────────────────
 
 
-def _origin(said: str) -> str:
-    """« amitié (vécue, plancher « propriétaire ») » : d'où vient ce niveau, en mots."""
-    if "(déclarée)" in said:
+def _origin(look: Look, person: str) -> str:
+    """D'où vient son échelon, en mots : la clé que la faculté rend (``closeness_origin``), à son état."""
+    origin = closeness_origin(look.frame.state("social"), look.frame, person)
+    if origin == DECLARED:
         return "déclarée par un opérateur"
-    if "plancher" in said:
-        return "née de leur histoire · jamais sous « amitié » pour une propriétaire"
-    return "née de leur histoire" if "(vécue)" in said else ""
-
-
-def _rhythm(said: str) -> tuple[str, str]:
-    """« tous les 3 jours — repli selon la proximité » : son rythme, et d'où il vient."""
-    every, _, how = said.partition(" — ")
-    return every.strip(), how.strip()
+    if origin == OWNER_FLOOR:
+        return f"née de leur histoire · au moins « {owner_floor(look.frame)} », car c'est sa propriétaire"
+    return "née de leur histoire"
 
 
 def _bond(look: Look, line: Line, online: Mapping[str, dict[str, Any]]) -> dict[str, Any]:
@@ -279,13 +283,13 @@ def _bond(look: Look, line: Line, online: Mapping[str, dict[str, Any]]) -> dict[
     face = _face(look, person, online, who)
     level = look.frame.get(social_c.CLOSENESS(person)) if person else social_c.STRANGER
     silence = line.get("silence ÷ rythme")
-    every, how = _rhythm(line.text("rythme"))
+    every, measured = rhythm_of(look.frame.get(social_c.CONTACT(person))) if person else ("", False)
     unanswered = line.text("initiatives sans réponse")
     summary = line.get("ce qu'elle en sait") or {}
     return {
         **face, "who": who, "emotion": _emotion(face), "level": level if level in RUNGS else social_c.STRANGER,
         "rung": RUNGS[::-1].index(level) if level in RUNGS else 0, "word": CLOSENESS_FR.get(level, level),
-        "origin": _origin(line.text("proximité")), "every": every, "measured": how == "mesuré",
+        "origin": _origin(look, person) if person else "", "every": every, "measured": measured,
         "silence": {"w": round(100 * float(silence["ratio"]), 1), "text": silence["text"],
                     "missed": silence.get("tone") == "warn"} if silence and silence.get("t") == "meter" else None,
         "quiet": "" if not silence or silence.get("t") == "meter" else text(silence),

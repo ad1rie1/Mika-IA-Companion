@@ -223,7 +223,7 @@ async def running(ui: Any, request: Request) -> list[Any]:
     blocks.append(Section("Les derniers résultats", (Table(
         (Column("Quand", "fit"), Column("Épisode", role="title"), "Vers", Column("Issue", role="badge"), Column("Détail", role="body")),
         tuple(episode_row(ui, e) for e in recent), title="Derniers épisodes terminés", layout="list",
-        empty="Aucun épisode terminé pour l’instant.", link_label="Comprendre le résultat"),)))
+        empty="Aucun épisode terminé pour l’instant.", link_label="Comprendre"),)))
     return blocks
 
 
@@ -248,7 +248,7 @@ async def live(ui: Any, request: Request) -> list[Any]:
             Disclosure("Comprendre les seuils de décision", (policy_fields,))]
 
 
-PERSON_PARAMS = (Param("personne", "personne", "search", placeholder="un nom (Adrien) ou un moyen de communication"),)
+PERSON_PARAMS = (Param("personne", "Personne", "search", placeholder="un nom (Adrien) ou un moyen de communication"),)
 
 
 @TABS.tab("decisions.envers", title="Que ferait-elle ?",
@@ -364,9 +364,9 @@ def selection_detail(ui: Any, d: Any, fired: frozenset[str]) -> list[Any]:
 
 
 EPISODE_PARAMS = (
-    Param("sorte", "sorte", "select", tuple(KINDS.items())),
-    Param("issue", "issue", "select", tuple((k, v[0]) for k, v in OUTCOME_WORDS.items())),
-    Param("cible", "vers", "search", placeholder="un nom (Adrien) ou un moyen de communication"),
+    Param("sorte", "Sorte", "select", tuple(KINDS.items())),
+    Param("issue", "Issue", "select", tuple((k, v[0]) for k, v in OUTCOME_WORDS.items())),
+    Param("cible", "Vers", "search", placeholder="un nom (Adrien) ou un moyen de communication"),
 )
 
 
@@ -439,7 +439,7 @@ async def episodes(ui: Any, request: Request) -> Any:
         out.append(Note("La recherche continue dans les épisodes plus anciens : utilise « Plus anciens ».", "info"))
     out.append(Table((Column("Quand", "fit"), Column("Épisode", role="title"), "Vers", Column("Issue", role="badge"), Column("Détail", role="body")), rows, title="Épisodes",
                      empty="Aucun épisode ne correspond." if where or targets else "Aucun épisode encore.",
-                     pager=pager, layout="list", link_label="Comprendre le résultat"))
+                     pager=pager, layout="list", link_label="Comprendre"))
     activity = ([stats] if counts else []) + ([chart] if chart else [])
     if len(sampled) == 1000:
         activity.append(Note("Indicateurs calculés sur les 1 000 derniers épisodes, avec les filtres actuels. "

@@ -1,6 +1,7 @@
 {# Ce qu'une parole et un épisode montrent de la même façon (parole.html, silence.html, episode.html ; feuille
    parole.css) : sa réponse pas à pas, les sections de son prompt dépliables sur leur texte, le contexte complet, ses
-   outils. Aucun style en ligne (CSP). #}
+   outils. Aucun style en ligne (CSP). Les nombres arrivent accordés de why.py (``prompt.measure``, ``t.held``) : un
+   gabarit n'écrit jamais « (s) ». #}
 {% from "handmade/shared/macros.html" import bar %}
 
 {% macro steps(list, kept=True) -%}
@@ -42,7 +43,7 @@
 {%- endmacro %}
 
 {% macro prompt_head(prompt) -%}
-{% if prompt.kept %}<p>{{ prompt.chars }} caractères, {{ prompt.turns }} tour(s) de conversation. Une section rognée a perdu sa fin faute de place ; une coupée n'a pas été montrée.</p>{% else %}<p>La trace détaillée n'a pas été gardée : seule leur liste est au journal.</p>{% endif %}
+{% if prompt.kept %}<p>{{ prompt.measure }}. Une section rognée a perdu sa fin faute de place ; une coupée n'a pas été montrée.</p>{% else %}<p>La trace détaillée n'a pas été gardée : seule leur liste est au journal.</p>{% endif %}
 {%- endmacro %}
 
 {% macro context(parts, open=False) -%}
@@ -58,7 +59,7 @@
 <ul class="hm-chips parole-tools">{% for x in t["items"] if x.called %}<li class="hm-chip called{{ ' failed' if not x.ok }}">{{ x.name }}<span class="now-tag {{ 'close' if x.ok else 'secret' }}">{{ 'appelé' if x.ok else 'échec' }}</span></li>{% endfor %}</ul>
 {% else %}<p class="now-empty">elle n'a appelé aucun outil pour dire ça</p>{% endif %}
 {% if t.known and t["items"] %}
-<details class="parole-fold parole-offered"><summary>Les {{ t["items"]|length }} outils qu'elle avait en main</summary>
+<details class="parole-fold parole-offered"><summary>{{ t.held }}</summary>
   <ul class="hm-chips parole-tools">{% for x in t["items"] %}<li class="hm-chip{{ ' called' if x.called }}">{{ x.name }}</li>{% endfor %}</ul>
 </details>
 {% elif t.known %}<p class="now-after now-muted">Aucun outil ne lui était offert.</p>{% endif %}

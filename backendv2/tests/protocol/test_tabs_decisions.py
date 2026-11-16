@@ -88,6 +88,9 @@ def test_the_arbiter_table_says_what_pushes_what_holds_back_and_what_comes_out(w
     widths = [float(w) for w in re.findall(r'<rect class="push" x="[\d.]+" y="1" width="([\d.]+)"', under)]
     assert widths and abs(widths[0] - 100 * 8 / 18) < 1
     assert '<line class="mid" x1="50" x2="50"' in under
+    # ce qu'est une ligne se dit une fois, dans l'introduction ; la légende de la carte ne garde que l'équilibre
+    assert page.replace("’", "'").count("une sorte d'épisode envers") == 1
+    assert "le trait du milieu, c’est l’équilibre" in page
     # bloquée : ce qui l'en empêche, et ce qui se passerait sans ce veto
     blocked = _entry(page, "sans cela, ce qui pousse l’emporterait de 3,00")
     assert "Ce qui l’en empêche" in blocked and "le but n° 4" in blocked and 'class="arb-tug vetoed"' in blocked
@@ -113,6 +116,10 @@ def test_what_she_would_do_towards_someone_starts_with_a_choice_then_a_verdict(w
     assert "Il lui manque 2,00" in mine and "Béa" not in mine
     shared = page.split('class="arb-shared"')[1]
     assert "Ce qui vise n’importe qui de présent" in shared and "n'importe qui de présent" not in mine
+    # « lecture seule » se dit une fois, dans l'introduction ; l'encart du verdict ne le redit pas
+    assert page.count("Lecture seule") == 1 and "Lecture seule" not in verdict
+    # le filtre se nomme comme ceux des pages sœurs (« État », « Mode ») : une majuscule ; sa clé reste « personne »
+    assert re.search(r'<label>Personne\s*<input name="personne"', page)
 
 
 def test_her_initiatives_show_her_budget_in_slots_and_whether_she_was_answered(world):  # noqa: F811
@@ -177,7 +184,12 @@ def test_episodes_read_day_by_day_after_her_last_hours(world):  # noqa: F811
     failed = feed.split("Le service n’a pas répondu.")[0].rsplit("<li", 1)[1]
     assert 'class="failed"' in failed and "Tâche silencieuse" in failed
     assert feed.index("Le service n’a pas répondu.") < feed.index("Les supports sont prêts.")  # le plus récent d'abord
-    assert "Comprendre le résultat" in feed and 'href="/inspecteur/episode/' in feed
+    # le lien vers un épisode a un seul nom, sous En cours comme ici (un épisode en cours n'a pas encore de résultat)
+    assert "Comprendre →" in feed and "Comprendre le résultat" not in page and 'href="/inspecteur/episode/' in feed
+    assert "Comprendre →" in drawn(client, "/inspecteur/decisions/en_cours")
+    # ses filtres se nomment avec une majuscule, comme ceux des pages sœurs ; leurs clés ne changent pas
+    labels = re.findall(r'<label>(\w+)\s*<(?:select|input) name="(\w+)"', page)
+    assert ("Sorte", "sorte") in labels and ("Issue", "issue") in labels and ("Vers", "cible") in labels
     none = drawn(client, "/inspecteur/decisions/episodes?issue=cancelled")
     assert "Aucun épisode ne correspond" in none
 

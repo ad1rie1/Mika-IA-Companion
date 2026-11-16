@@ -66,6 +66,7 @@ from mika.kernel.inspect import (
     Text,
     When,
     num_fr,
+    plural,
 )
 from mika.kernel.prompt import HEADER_FMT
 from mika.ports.delivery import TOO_LATE
@@ -196,8 +197,8 @@ def cause_blocks(ui: Any, started: Any | None) -> list[Any]:
         out.append(Note(
             f"{lead} : la ligne « {ui.names.arbiter_row(row.kind, row.target)} » avait un score de "
             f"{num_fr(row.score, 2, signed=True)} — au plus {num_fr(row.hazard * 3600, 2)} fois par heure. Parmi "
-            f"{getattr(d, 'candidates', 0) or len(d.rows)} ligne(s), le tirage ({num_fr(d.draw, 3)}) l'a retenue "
-            f"({how}).", "info", title=f"Décidé par l'arbitre · {names.kind(row.kind)}"))
+            f"{plural(getattr(d, 'candidates', 0) or len(d.rows), 'ligne', 'lignes')}, le tirage "
+            f"({num_fr(d.draw, 3)}) l'a retenue ({how}).", "info", title=f"Décidé par l'arbitre · {names.kind(row.kind)}"))
         out.append(waterfall(ui, row, title="Pourquoi cette ligne : du signal au score"))
         out.append(Fields((("le choix", Ref("event", str(event.seq), f"événement n° {event.seq}")),
                            ("quand", When(event.at)))))
@@ -237,10 +238,15 @@ def prompt_blocks(ui: Any, trace: dict[str, Any] | None, sections: Sequence[str]
              for k, why in compose.get("dropped") or ()]
     return [Table((Column("section"), Column("caractères", "num"), Column("part"), Column("état"),
                    Column("clé", detail=True)), tuple(rows),
-                  title=f"Les sections de son prompt · {num_fr(int(compose.get('chars', 0) or 0))} caractères, "
-                        f"{compose.get('history_turns', 0)} tour(s) de conversation",
+                  title=f"Les sections de son prompt · {prompt_measure(compose)}",
                   caption="Une section rognée a perdu sa fin faute de place ; une coupée n'a pas été montrée. "
                           "Le détail d'une ligne montre ce que la section disait.")]
+
+
+def prompt_measure(compose: Mapping[str, Any]) -> str:
+    """La taille d'un prompt gardé, accordée : « 12 345 caractères, 1 tour de conversation »."""
+    return (f"{plural(int(compose.get('chars', 0) or 0), 'caractère', 'caractères')}, "
+            f"{plural(int(compose.get('history_turns', 0) or 0), 'tour de conversation', 'tours de conversation')}")
 
 
 def section_texts(ui: Any, trace: Mapping[str, Any] | None) -> dict[str, str]:
@@ -299,16 +305,24 @@ def context_blocks(trace: Mapping[str, Any]) -> list[Any]:
 
 def inner_state(ui: Any, trace: Mapping[str, Any] | None, utterance: Any) -> tuple[list[tuple[str, str]], bool]:
     """Ce que son prompt disait de sa vie intérieure : les sections affectives de la zone volatile qu'il montrait, avec
-    leur texte tel qu'envoyé — et s'il en manque un (la trace a expiré, ou a été oubliée)."""
+    leur texte tel qu'envoyé — et s'il en manque un (la trace a expiré, ou a été oubliée). Chaque libellé dit que
+    c'est son prompt (``in_prompt``) : une phrase au « tu » s'y adresse à elle, pas à qui lit la page."""
     inner = {s.key for s in ui.kernel.registry.sections if s.zone is Zone.VOLATILE and Tag.AFFECTIVE in s.tags}
     texts = section_texts(ui, trace)
     shown = [k for k in utterance.data.sections if k in inner]
-    return [(ui.names.section(k), texts[k]) for k in shown if texts.get(k)], any(not texts.get(k) for k in shown)
+    return [(in_prompt(ui.names.section(k)), texts[k]) for k in shown if texts.get(k)], \
+        any(not texts.get(k) for k in shown)
+
+
+def in_prompt(section: str) -> str:
+    """Le libellé d'une section citée de son prompt, précédé de ce qu'elle est : « dans son prompt : son humeur »."""
+    return f"dans son prompt : {section[:1].lower()}{section[1:]}"
 
 
 def mood_blocks(ui: Any, trace: Mapping[str, Any] | None, utterance: Any) -> list[Any]:
     """Son humeur à ce moment-là : ce qu'elle a déclaré ressentir en le disant (sa balise, ADR 0093), ce qu'elle lisait
-    chez l'autre (``[EN_FACE]``), et ce que son prompt disait de sa vie intérieure (``inner_state``)."""
+    chez l'autre (``[EN_FACE]``), et ce que son prompt disait de sa vie intérieure (``inner_state`` : chaque section
+    sous « dans son prompt : … », comme la page dessinée)."""
     pairs: list[tuple[str, Any]] = []
     felt = _felt(utterance)
     if felt is not None:
@@ -436,7 +450,8 @@ def recall_blocks(ui: Any, provenance: Sequence[str]) -> list[Any]:
             rows.append(Row((Badge(kind or "événement", "muted"), "—", Ref("event", str(n), f"n° {n}"))))
         else:
             rows.append(Row((Badge("autre", "muted"), "—", Text(raw, "mono"))))
-    more = [Note(f"… et {len(provenance) - RECALL_MAX} autre(s).", "muted")] if len(provenance) > RECALL_MAX else []
+    more = [Note(f"… et {plural(len(provenance) - RECALL_MAX, 'autre', 'autres')}.", "muted")] \
+        if len(provenance) > RECALL_MAX else []
     return [Table((Column("quoi", "fit"), "ce qu'elle en avait sous les yeux", Column("où", "fit")), tuple(rows),
                   title=f"Ce dont elle s'est souvenue ({len(provenance)})"), *more]
 
@@ -477,7 +492,8 @@ def tools_blocks(ui: Any, trace: dict[str, Any] | None, utterance: Any) -> list[
                                                                "ok" if t.get("ok") else "danger"),
                  f"{num_fr(int(t.get('duration_us') or 0) / 1000, 0)} ms",
                  Text(_args(t.get("args", "")), "mono", clamp=240), Text(str(t.get("result", "")), clamp=400)),
-                tone="" if t.get("ok") else "danger") for t in calls), title=f"Ce qu'elle a fait ({len(calls)} outil(s))")]
+                tone="" if t.get("ok") else "danger") for t in calls),
+            title=f"Ce qu'elle a fait ({plural(len(calls), 'outil', 'outils')})")]
     used = tuple(getattr(utterance.data, "tools", ()) or ())
     if not used:
         return [Note("Elle n'a utilisé aucun outil pour dire ça.", "muted")]
@@ -564,7 +580,7 @@ def why_page(ui: Any, seq: int) -> dict[str, Any] | None:
     ]
     return {"title": "Pourquoi a-t-elle dit ça ?", "subtitle": f"« {(text or '(oublié)')[:160]} »",
             "facts": facts, "blocks": blocks, "correlation": corr,
-            "view": lambda env, query: why_view(ui, env, query, utterance, started, trace, issue, blocks)}
+            "view": lambda env, query: why_view(ui, env, query, utterance, started, trace, blocks)}
 
 
 # ── la page dessinée (ADR 0121) ─────────────────────────────────────────
@@ -591,11 +607,12 @@ def why_panel(got: Mapping[str, Any], env: Any, query: Mapping[str, str], replay
 
 
 def why_view(ui: Any, env: Any, query: Mapping[str, str], utterance: Any, started: Any | None,
-             trace: Mapping[str, Any] | None, issue: tuple[str, str], blocks: Sequence[Any]) -> dict[str, Any]:
+             trace: Mapping[str, Any] | None, blocks: Sequence[Any]) -> dict[str, Any]:
     """Ce que dessine ``handmade/parole/parole.html`` : sa phrase en grand et ce qu'elle ressentait, ce qui l'a fait
     parler, sa réponse pas à pas (le modèle principal, la relecture, l'autrice, ce qui est parti), son état intérieur,
     ce qu'elle avait sous les yeux, ses outils. Ce qui n'a pas de forme à lui (la cascade de l'arbitre, ses souvenirs,
-    ses appels d'outils, ton avis, les détails techniques) reprend ses blocs, rendus."""
+    ses appels d'outils, ton avis, les détails techniques) reprend ses blocs, rendus. L'en-tête de la page (``facts``
+    de ``why_page`` : à qui, quand, l'épisode, l'issue, la voix, le fil, le mode) ne se redit pas sous sa phrase."""
     d = utterance.data
 
     def drawn(items: Sequence[Any]) -> list[dict[str, Any]]:
@@ -605,21 +622,15 @@ def why_view(ui: Any, env: Any, query: Mapping[str, str], utterance: Any, starte
         return [b for b in blocks if isinstance(b, Section | Disclosure) and b.title == title]
 
     felt = _felt(utterance)
-    chips = [{"text": issue[0], "tone": issue[1] if issue[1] in ("warn", "danger") else ""},
-             {"text": f"{names.role(d.voice.role)} · {d.voice.model or '—'}", "tone": ""},
-             {"text": "dans le fil" if d.visible else "pas dans le fil", "tone": ""}]
-    if d.mode:
-        chips.append({"text": f"mode {d.mode}", "tone": ""})
+    # sous sa phrase, seulement ce que l'en-tête ne dit pas : l'autrice qui l'a récrite, retenue ou écartée
     author = (trace or {}).get("naturel")
-    if isinstance(author, dict):
-        chips.append({"text": f"autrice {author.get('autrice') or '—'}" + (" écartée" if author.get("ecartee") else ""),
-                      "tone": "warn" if author.get("ecartee") else ""})
+    chips = [{"text": f"autrice {author.get('autrice') or '—'}" + (" écartée" if author.get("ecartee") else ""),
+              "tone": "warn" if author.get("ecartee") else ""}] if isinstance(author, dict) else []
     state, missing = inner_state(ui, trace, utterance)
     # ton avis : ses champs en carte titrée ; ses souvenirs : leur tableau, ou rien (la carte dit « aucun »)
     verdict = [replace(f, title="Ton avis") for s in titled("Ton avis") for f in s.items if isinstance(f, Fields)]
     return {
-        "text": d.text.text or "(oublié : le texte a été effacé)",
-        "to": ui.names.who(d.target), "when": ui.when_long(utterance.at), "chips": chips,
+        "text": d.text.text or "(oublié : le texte a été effacé)", "chips": chips,
         "felt": _felt_view(felt) if felt is not None else None, "their": _their(utterance),
         "cause": _cause_view(ui, started) or {"blocks": drawn(titled("Ce qui l'a fait parler"))},
         "verdict": drawn(verdict), "steps": answer_steps(trace, utterance), "kept": bool(trace),
@@ -709,11 +720,11 @@ def answer_steps(trace: Mapping[str, Any] | None, utterance: Any | None) -> list
 
 def prompt_view(ui: Any, trace: Mapping[str, Any] | None, sections: Sequence[str] = ()) -> dict[str, Any]:
     """Les sections de son prompt : chacune nommée, sa part, son état, son texte ; ou leur seule liste (``sections``,
-    le journal)."""
+    le journal). ``measure`` : sa taille accordée (``prompt_measure``), que ``prompt_head`` affiche."""
     compose = (trace or {}).get("compose") or {}
     if not compose:
         return {"rows": [{"label": ui.names.section(k), "key": k, "share": 0, "chars": "—", "state": "", "tone": "",
-                          "text": ""} for k in sections], "kept": False, "chars": "", "turns": 0}
+                          "text": ""} for k in sections], "kept": False, "chars": "", "turns": 0, "measure": ""}
     sizes = {k: int(v) for k, v in (compose.get("sizes") or ())}
     total = max(1, sum(sizes.values()))
     trimmed = set(compose.get("trimmed") or ())
@@ -725,18 +736,22 @@ def prompt_view(ui: Any, trace: Mapping[str, Any] | None, sections: Sequence[str
     rows += [{"label": ui.names.section(k), "key": k, "share": 0, "chars": "—", "text": "",
               "state": f"coupée : {why}", "tone": "muted"} for k, why in compose.get("dropped") or ()]
     return {"rows": rows, "kept": True, "chars": num_fr(int(compose.get("chars", 0) or 0)),
-            "turns": int(compose.get("history_turns", 0) or 0)}
+            "turns": int(compose.get("history_turns", 0) or 0), "measure": prompt_measure(compose)}
 
 
 def tools_view(trace: Mapping[str, Any] | None, used: Sequence[Any] = ()) -> dict[str, Any]:
     """Ses outils : ceux qu'elle avait en main (la trace), ceux qu'elle a appelés en tête (la trace, sinon ``used`` :
-    ceux que sa parole nomme au journal)."""
+    ceux que sa parole nomme au journal). Les gabarits n'accordent rien : ``summary`` (« 61 outils en main, 0 appelé. »)
+    et ``held`` (le titre du repli : « Les 61 outils qu'elle avait en main ») le sont déjà."""
     called = {str(t.get("name")): bool(t.get("ok")) for t in (trace or {}).get("tool_calls") or ()
               if isinstance(t, dict)} or {t.name: t.ok for t in used}
     offered = sorted({str(n) for n in (trace or {}).get("tools") or ()} | set(called))
+    held = len(offered)
     return {"known": bool(trace) and "tools" in (trace or {}), "called": len(called),
             "items": sorted(({"name": n, "called": n in called, "ok": called.get(n, True)} for n in offered),
-                            key=lambda t: (not t["called"], t["name"]))}
+                            key=lambda t: (not t["called"], t["name"])),
+            "summary": f"{plural(held, 'outil', 'outils')} en main, {plural(len(called), 'appelé', 'appelés')}.",
+            "held": "L'outil qu'elle avait en main" if held == 1 else f"Les {num_fr(held)} outils qu'elle avait en main"}
 
 
 # ── « Pourquoi n'a-t-elle pas répondu ? » ─────────────────────────────────

@@ -12,12 +12,17 @@
 
 Les données sont celles des onglets en blocs (``journal.episode_tab``), qui restent le repli : un dessin qui échoue
 rend la main aux blocs.
+
+Ses onglets disent leur compte (le gabarit de la vue d'un objet, ADR 0176) : ses paroles, ses événements, ses appels de
+modèle, ses outils appelés. ``tally`` les lit une fois par page, avec le résumé (``episode_overview.summary``) que le
+Résumé dessine ensuite sans le relire ; la route les pose sur la barre d'onglets, au dessin comme au repli.
 """
 
 from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 from urllib.parse import quote
@@ -25,8 +30,16 @@ from urllib.parse import quote
 from mika.contracts import runtime as rt
 from mika.inspector import names, render
 from mika.inspector.catalog import Panel
-from mika.inspector.pages.episode_overview import summary
-from mika.inspector.pages.journal import EPISODE_TABS, _events, episode_tab
+from mika.inspector.pages.episode_overview import Summary, summary
+from mika.inspector.pages.journal import (
+    EPISODE_TABS,
+    FACT_TECHNICAL,
+    _events,
+    episode_tab,
+    prompt_facts,
+    reply_trigger_cell,
+    trigger_cell,
+)
 from mika.inspector.pages.why import (
     _decoded,
     answer_steps,
@@ -38,22 +51,63 @@ from mika.inspector.pages.why import (
 )
 from mika.inspector.ui import PREFIX
 from mika.kernel.clock import US
-from mika.kernel.inspect import Ref, money_fr, num_fr
+from mika.kernel.inspect import Ref, money_fr, num_fr, plural
 from mika.runtime.boundary import Failed, call
 from mika.runtime.traces import TRUNCATION_MARK
-from mika.vocab.episodes import outcome_words
 
 EPISODE_TEMPLATE = "handmade/episode/episode.html"
 EPISODE_STYLES = ("handmade/parole.css", "handmade/episode.css")
-#: au plus tant d'appels de modèle comptés dans le résumé
+#: au plus tant d'appels de modèle lus pour leurs sommes (coût, jetons, durée, échecs) ; leur nombre, lui, est celui
+#: du registre (``Tally.calls``), et une tuile ou une note dit quand ces sommes n'en couvrent qu'une part (``_partial``)
 CALLS_COUNTED = 200
+#: au plus tant de paroles lues pour compter les outils qu'elles nomment, quand la trace ne les dit pas
+SPEECHES_COUNTED = 200
+
+
+@dataclass(frozen=True, slots=True)
+class Tally:
+    """Ce que comptent les onglets d'un épisode, lu une fois par page : son résumé (ses paroles, ses événements), sa
+    trace (``None`` si elle n'est pas gardée), ses appels de modèle, ses outils appelés comptés comme les montre
+    l'onglet Outils (``_tools``) et d'où vient ce compte (``trace`` : les appels de la trace ; ``paroles`` : les outils
+    nommés sur ses paroles ; vide : ni l'une ni les autres n'en disent)."""
+
+    said: Summary
+    trace: dict[str, Any] | None
+    calls: int
+    tools: int
+    tools_from: str
+
+    @property
+    def counts(self) -> dict[str, int]:
+        """Le compte de chaque onglet qui en a un (Résumé, Prompt et Décision n'en ont pas)."""
+        return {"dit": self.said.speeches, "deroule": self.said.events, "appels": self.calls, "outils": self.tools}
+
+
+def tally(ui: Any, corr: str, info: Mapping[str, Any]) -> Tally:
+    """Les comptes d'un épisode : le résumé (une requête groupée sur le journal), le nombre de ses appels de modèle (le
+    registre durable, sinon ceux qu'on a en mémoire, comme l'onglet Appels de modèle), ses outils appelés."""
+    trace = trace_of(ui, corr)
+    called = [t for t in (trace or {}).get("tool_calls") or () if isinstance(t, dict)]
+    if called:
+        tools, source = len(called), "trace"
+    else:  # l'onglet Outils montre alors les outils nommés sur ses paroles
+        said = ui.inspection.context().events([rt.UTTERANCE], SPEECHES_COUNTED, correlations=[corr])
+        tools = sum(len(e.data.tools) for e in said)
+        source = "paroles" if tools else ""
+    registry = ui.deps.calls
+    if registry is not None and hasattr(registry, "for_correlation"):
+        calls = int(registry.count(correlation=corr))
+    else:
+        calls = len([t for t in list(ui.deps.traces) if str(getattr(t, "call_id", "")).startswith(corr)])
+    return Tally(said=summary(ui, corr, dict(info)), trace=trace, calls=calls, tools=tools, tools_from=source)
 
 
 def episode_panel(ui: Any, corr: str, slug: str, info: Mapping[str, Any], query: Mapping[str, str], env: Any,
-                  replay: Panel | None = None) -> Panel | None:
+                  replay: Panel | None = None, counted: Tally | None = None) -> Panel | None:
     """L'onglet ``slug`` d'un épisode, dessiné : son gabarit et ce qu'il dessine (``v``), inclus dans la page commune
-    avec « Rejouer avec… » pour le prompt ; ``None`` si ce qu'il dessine ne se lit pas (ses blocs, alors)."""
-    drawn = call(episode_view, ui, corr, slug, info, query, env, label=f"épisode dessiné ({slug})")
+    avec « Rejouer avec… » pour le prompt ; ``None`` si ce qu'il dessine ne se lit pas (ses blocs, alors). ``counted`` :
+    ses comptes, déjà lus par la route pour la barre d'onglets (lus ici sinon)."""
+    drawn = call(episode_view, ui, corr, slug, info, query, env, counted, label=f"épisode dessiné ({slug})")
     if isinstance(drawn, Failed):
         return None
     shared = {k: v for k, v in (replay.context if replay is not None else {}).items() if k != "panel_after"}
@@ -61,12 +115,12 @@ def episode_panel(ui: Any, corr: str, slug: str, info: Mapping[str, Any], query:
 
 
 def episode_view(ui: Any, corr: str, slug: str, info: Mapping[str, Any], query: Mapping[str, str],
-                 env: Any) -> dict[str, Any]:
+                 env: Any, counted: Tally | None = None) -> dict[str, Any]:
     base = f"{PREFIX}/episode/{quote(corr, safe='')}"
     shapes = {"resume": _resume, "deroule": _flow, "dit": _said, "prompt": _prompt, "outils": _tools,
               "appels": _calls, "decision": _decision}
     return {"tab": slug, "episode": corr, "href": {s: f"{base}?onglet={s}" for s, _t in EPISODE_TABS},
-            **shapes[slug](ui, corr, info, query, env)}
+            **shapes[slug](ui, corr, info, query, env, counted)}
 
 
 def _drawn(items: Sequence[Any], env: Any, query: Mapping[str, str]) -> list[dict[str, Any]]:
@@ -111,30 +165,44 @@ def _speech(ui: Any, e: Any) -> dict[str, Any]:
             "sections": [ui.names.section(k) for k in d.sections]}
 
 
-def _resume(ui: Any, corr: str, info: Mapping[str, Any], query: Mapping[str, str], env: Any) -> dict[str, Any]:
+def _trace(ui: Any, corr: str, counted: Tally | None) -> dict[str, Any] | None:
+    """Sa trace : celle que ses comptes ont déjà lue, sinon lue ici."""
+    return counted.trace if counted is not None else trace_of(ui, corr)
+
+
+def _resume(ui: Any, corr: str, info: Mapping[str, Any], query: Mapping[str, str], env: Any,
+            counted: Tally | None) -> dict[str, Any]:
     """Le résumé dessiné : ce que lit ``episode_overview.summary`` (le même que ses blocs), en tuiles et en bulles,
-    plus ce que seule la page dessinée montre (ses appels de modèle, ses outils)."""
-    started, ended = info["started"], info["ended"]
-    said = summary(ui, corr, dict(info))
+    plus ce que seule la page dessinée montre (ses appels de modèle, ses outils) ; ses chiffres sont ceux que disent
+    les onglets (``counted``, lu une fois par la route)."""
+    started = info["started"]
+    counted = counted if counted is not None else tally(ui, corr, info)
+    said = counted.said
     calls = _llm_calls(ui, corr, CALLS_COUNTED)
-    trace = trace_of(ui, corr)
-    tool_calls = len([t for t in (trace or {}).get("tool_calls") or () if isinstance(t, dict)])
+    cost = money_fr(sum(c.cost_usd for c in calls))
+    # au-delà de CALLS_COUNTED, la tuile dit le nombre du registre (celui de la pastille) et son coût, d'une part
+    calls_sub = ("aucun" if not calls else
+                 f"{cost} pour les {num_fr(len(calls))} premiers" if _partial(counted.calls, calls) else cost)
+    tools_sub = {"trace": "d'après la trace", "paroles": "nommés sur ses paroles"}.get(
+        counted.tools_from, "d'après la trace" if counted.trace is not None else "trace non gardée")
     href = {s: f"{PREFIX}/episode/{quote(corr, safe='')}?onglet={s}" for s, _t in EPISODE_TABS}
+    # ni sa sorte, ni à qui, ni quand : l'en-tête de la page les dit (son titre, ses faits)
     return {
-        "kind": info["kind"], "outcome": {"text": said.outcome, "tone": said.tone}, "detail": said.detail,
-        "to": ui.names.who((started.data.target if started else None) or (ended.data.target if ended else None)),
-        "began": ui.when_long(started.at) if started else "", "open": said.open,
+        "outcome": {"text": said.outcome, "tone": said.tone}, "detail": said.detail, "open": said.open,
         "trigger": _trigger(ui, started),
         "speeches": [_speech(ui, s) for s in reversed(said.latest)], "speech_count": said.speeches,
+        # « Les 3 dernières paroles sur 12. », ou toutes : « 1 parole. » (jamais « Les 1 dernières paroles »)
+        "speeches_said": (f"Les {num_fr(len(said.latest))} dernières paroles sur {num_fr(said.speeches)}."
+                          if len(said.latest) < said.speeches else f"{plural(said.speeches, 'parole', 'paroles')}."),
         "tiles": [
             {"label": "Durée", "value": said.duration, "sub": said.duration_said},
             {"label": "Paroles produites", "value": num_fr(said.speeches), "sub": "dans le journal",
              "href": href["dit"]},
             {"label": "Événements", "value": num_fr(said.events), "sub": "dans cet épisode", "href": href["deroule"]},
-            {"label": "Appels de modèle", "value": num_fr(len(calls)),
-             "sub": money_fr(sum(c.cost_usd for c in calls)) if calls else "aucun", "href": href["appels"]},
-            {"label": "Outils appelés", "value": num_fr(tool_calls) if trace else "—",
-             "sub": "d'après la trace" if trace else "trace non gardée", "href": href["outils"]},
+            {"label": "Appels de modèle", "value": num_fr(counted.calls), "sub": calls_sub, "href": href["appels"]},
+            {"label": "Outils appelés",
+             "value": num_fr(counted.tools) if counted.trace is not None or counted.tools else "—",
+             "sub": tools_sub, "href": href["outils"]},
         ],
     }
 
@@ -144,6 +212,11 @@ def _llm_calls(ui: Any, corr: str, limit: int) -> list[Any]:
     if calls is not None and hasattr(calls, "for_correlation"):
         return list(calls.for_correlation(corr, limit=limit))
     return [t for t in list(ui.deps.traces) if str(getattr(t, "call_id", "")).startswith(corr)][:limit]
+
+
+def _partial(total: int, calls: Sequence[Any]) -> bool:
+    """Les sommes lues sur ``calls`` (au plus ``CALLS_COUNTED``) ne couvrent qu'une part des ``total`` appels."""
+    return bool(calls) and total > len(calls)
 
 
 def _tone(e: Any) -> str:
@@ -158,7 +231,8 @@ def _tone(e: Any) -> str:
     return "muted"
 
 
-def _flow(ui: Any, corr: str, info: Mapping[str, Any], query: Mapping[str, str], env: Any) -> dict[str, Any]:
+def _flow(ui: Any, corr: str, info: Mapping[str, Any], query: Mapping[str, str], env: Any,
+          counted: Tally | None) -> dict[str, Any]:
     events, pager = _events(ui, corr, query)
     return {"events": [{"time": _hms(ui, e.at), "label": ui.names.event(e.type.name), "type": e.type.name,
                         "href": render.href(Ref("event", str(e.seq), "")), "number": e.seq, "tone": _tone(e),
@@ -175,28 +249,30 @@ def _ending(e: Any) -> str:
     return names.detail(e.data.detail or e.data.guard or "")
 
 
-def _said(ui: Any, corr: str, info: Mapping[str, Any], query: Mapping[str, str], env: Any) -> dict[str, Any]:
+def _said(ui: Any, corr: str, info: Mapping[str, Any], query: Mapping[str, str], env: Any,
+          counted: Tally | None) -> dict[str, Any]:
     said, pager = _events(ui, corr, query, speeches=True)
     return {"speeches": [_speech(ui, e) for e in said], "pager": render.pager_ctx(pager, query)}
 
 
-def _prompt(ui: Any, corr: str, info: Mapping[str, Any], query: Mapping[str, str], env: Any) -> dict[str, Any]:
-    trace = trace_of(ui, corr)
+def _prompt(ui: Any, corr: str, info: Mapping[str, Any], query: Mapping[str, str], env: Any,
+            counted: Tally | None) -> dict[str, Any]:
+    trace = _trace(ui, corr, counted)
     if trace is None:
         return {"kept": False}
     latest = ui.inspection.context().events([rt.UTTERANCE], 1, correlations=[corr])
     utterance = latest[0] if latest else None
-    audience = (trace.get("audience") or {}).get("level", "—")
     outcome = trace.get("outcome")
+    # les faits de ses blocs, en cellules : « outils offerts » se tait (la carte « Ses outils » les montre),
+    # l'empreinte du préfixe se replie sous « Détails techniques »
+    facts = prompt_facts(ui, trace, info["started"] or info["ended"])
     texts = [str(trace.get("system_stable") or ""), *(str(m.get("content", "")) for m in trace.get("messages") or ()
                                                      if isinstance(m, dict))]
     return {
         "kept": True, "truncated": bool(trace.get("truncated")) or any(TRUNCATION_MARK in t for t in texts),
-        "facts": [("rôle", names.role(trace.get("role"))), ("déclencheur", str(trace.get("trigger") or "—")),
-                  ("audience", str(audience)),
-                  ("enrichissements", ", ".join(trace.get("enrichments") or ()) or "aucun"),
-                  ("empreinte du préfixe", str(trace.get("system_stable_hash") or "—")[:16]),
-                  ("issue", outcome_words(outcome)[0] if outcome != "running" else "en cours")],
+        "facts": [{"label": f.label, "cell": render.cell(f.value, env)} for f in facts if not f.place],
+        "technical": [{"label": f.label, "cell": render.cell(f.value, env)} for f in facts
+                      if f.place == FACT_TECHNICAL],
         "prompt": prompt_view(ui, trace), "context": [{"title": t, "text": x} for t, x in context_parts(trace)],
         "tools": tools_view(trace, utterance.data.tools if utterance is not None else ()),
         "steps": answer_steps(trace, utterance),
@@ -204,8 +280,9 @@ def _prompt(ui: Any, corr: str, info: Mapping[str, Any], query: Mapping[str, str
     }
 
 
-def _tools(ui: Any, corr: str, info: Mapping[str, Any], query: Mapping[str, str], env: Any) -> dict[str, Any]:
-    trace = trace_of(ui, corr)
+def _tools(ui: Any, corr: str, info: Mapping[str, Any], query: Mapping[str, str], env: Any,
+           counted: Tally | None) -> dict[str, Any]:
+    trace = _trace(ui, corr, counted)
     calls = [t for t in (trace or {}).get("tool_calls") or () if isinstance(t, dict)]
     if calls:
         return {"kept": True, "calls": [
@@ -226,12 +303,17 @@ def _pretty(raw: Any) -> str:
         return str(raw)
 
 
-def _calls(ui: Any, corr: str, info: Mapping[str, Any], query: Mapping[str, str], env: Any) -> dict[str, Any]:
+def _calls(ui: Any, corr: str, info: Mapping[str, Any], query: Mapping[str, str], env: Any,
+           counted: Tally | None) -> dict[str, Any]:
     calls = _llm_calls(ui, corr, CALLS_COUNTED)
     failed = [c for c in calls if c.outcome != "ok"]
+    total = counted.calls if counted is not None else len(calls)
     return {
+        # la tuile Appels dit leur nombre (celui de la pastille) ; les autres sommes, celles des appels lus
+        "partial": (f"Échecs, jetons, coût et durée : les {num_fr(len(calls))} premiers appels sur {num_fr(total)}. "
+                    "Le tableau les montre tous." if _partial(total, calls) else ""),
         "tiles": [
-            {"label": "Appels", "value": num_fr(len(calls)),
+            {"label": "Appels", "value": num_fr(total),
              "sub": f"{len(failed)} en échec" if failed else "tous réussis" if calls else "aucun",
              "tone": "danger" if failed else ""},
             {"label": "Jetons", "value": f"{num_fr(sum(c.input_tokens for c in calls))} → "
@@ -245,17 +327,22 @@ def _calls(ui: Any, corr: str, info: Mapping[str, Any], query: Mapping[str, str]
     }
 
 
-def _decision(ui: Any, corr: str, info: Mapping[str, Any], query: Mapping[str, str], env: Any) -> dict[str, Any]:
+def _decision(ui: Any, corr: str, info: Mapping[str, Any], query: Mapping[str, str], env: Any,
+              counted: Tally | None) -> dict[str, Any]:
     started, ended = info["started"], info["ended"]
     if started is None:
         return {"facts": [], "cause": [], "missing": True}
     d = started.data
     facts = [("sorte", info["kind"]), ("vers", ui.names.who(d.target)),
              ("raison", ", ".join(ui.names.reason("", r) for r in str(d.reason or "").split(",") if r) or "—"),
-             ("objet", d.subject or "—"), ("déclencheur", str(d.trigger or "—"))]
-    if d.reply_to:
-        facts.append(("en réponse à", f"message n° {d.reply_to}"))
+             ("objet", d.subject or "—")]
+    # une réponse : la carte « Ce qui l'a lancé » montre déjà le message, et son lien ; « En bref » ne dit que ce que
+    # son déclencheur y ajoute (une reprise)
+    said = reply_trigger_cell(d.trigger) if d.reply_to else trigger_cell(d.trigger)
+    if said is not None:
+        facts.append(("déclencheur", said))
     guard = (f"Supplanté par la garde « {ended.data.guard} » : a changé {', '.join(ended.data.changed)}."
              if ended is not None and ended.data.guard else "")
-    return {"facts": facts, "guard": guard, "trigger": _trigger(ui, started),
+    return {"facts": [{"label": k, "cell": render.cell(v, env)} for k, v in facts], "guard": guard,
+            "trigger": _trigger(ui, started),
             "cause": _drawn(cause_blocks(ui, started), env, query) if not d.reply_to else [], "missing": False}

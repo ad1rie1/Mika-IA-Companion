@@ -4,8 +4,13 @@ moment, ce qu'elle a lu d'une pièce, où en est la relecture — ; et ce qu'ell
 
 from __future__ import annotations
 
+import re
+from dataclasses import replace
+
 from mika.contracts import attachments, memory
 from mika.contracts import runtime as rt
+from mika.faculties.attachments import inspect as received_view
+from mika.faculties.memory import inspect as memory_view
 from mika.kernel.clock import DAY, HOUR
 from mika.kernel.events import Content
 from tests.fixtures.mika import connect
@@ -40,14 +45,81 @@ def test_a_belief_shows_its_trust_and_origin_and_a_replaced_one_fades(world):  #
     new = _between(page, "Alice préfère le café serré.", "</li>")
     before = page.split("Alice préfère le café serré.")[0].rsplit("<li class=", 1)[1]
     # sa confiance d'abord, en chiffre et en jauge ; son origine et qui la lui a dite ; ce qu'elle remplace
-    assert 'class="belief-trust-value now-num">0,90<' in before and "now-bar confidence" in before
+    assert 'class="belief-trust-value now-num">90\u202f%<' in before and "now-bar confidence" in before
     assert 'belief-origin o-told">on le lui a dit<' in new and "par Alice" in new
     assert f"/inspecteur/evenement/{old}" in _between(new, 'class="belief-replaces"', "</span>")
     replaced = page.split("Alice préfère le thé.")[0].rsplit("<li class=", 1)[1]
-    assert "faded" in replaced and "0,40" in replaced
+    assert "faded" in replaced and "40\u202f%" in replaced
     assert "o-inferred" in _between(page, "Alice préfère le thé.", "</li>")
     # le numéro et l'importance, que la page ne montre pas, restent dans le détail
     assert "Informations complémentaires" in new and "importance" in new
+
+
+def _card(page: str, text: str) -> str:
+    """L'entrée d'une liste qui porte ce texte, de son ``<li`` à sa fin."""
+    return next(li for li in page.split("<li class=")[1:] if text in li).split("</li>", 1)[0]
+
+
+def test_what_she_held_before_fades_and_an_ended_situation_says_so_in_words(world):  # noqa: F811
+    """Une situation finie dit « finie » une fois, jamais sa clé (« ended ») ; un élément d'avant s'estompe, quel
+    qu'il soit (``FORMER_STATUSES`` : remplacé, fondu dans un autre, joint à un autre), et se retrouve par son
+    statut."""
+    client, live, _ = world
+    kernel, now = _life(client, live)
+    situation = append(client, kernel, [
+        memory.EVENT_NOTED.draft(text=Content.of("Le déménagement d'Alice."), when=now - 3 * DAY, about=("alice",),
+                                 ongoing=True),
+        memory.EVENT_NOTED.draft(text=Content.of("Le stage d'Alice."), when=now - 2 * DAY, about=("alice",),
+                                 ongoing=True)], "memory").seqs[0]
+    append(client, kernel, [memory.SITUATION_ENDED.draft(event=situation)], "memory")
+    card = _card(drawn(client, "/inspecteur/memoire/moments"), "Le déménagement d'Alice.")
+    assert card.count(">finie<") == 1 and "ended" not in card and "faded" not in card.split(">", 1)[0]
+    ended = drawn(client, "/inspecteur/memoire/moments?status=ended")
+    assert "Le déménagement d'Alice." in ended and "Le stage d'Alice." not in ended and "inconnu" not in ended
+
+    kept, joined = append(client, kernel, [
+        memory.BELIEVED.draft(text=Content.of("Alice aime la randonnée."), about=("alice",), origin=memory.TOLD,
+                              source="alice", confidence=0.8),
+        memory.BELIEVED.draft(text=Content.of("Alice adore marcher en montagne."), about=("alice",),
+                              origin=memory.TOLD, source="alice", confidence=0.7)], "memory").seqs
+    append(client, kernel, [memory.JOINED.draft(night="2026-11-12", pairs=((kept, joined),), mute=True)], "memory")
+    beliefs = drawn(client, "/inspecteur/memoire/croyances")
+    assert "faded" in _card(beliefs, "Alice adore marcher").split(">", 1)[0]
+    assert "faded" not in _card(beliefs, "Alice aime la randonnée").split(">", 1)[0]
+    found = drawn(client, "/inspecteur/memoire/croyances?status=joined")
+    assert "Alice adore marcher" in found and "Alice aime la randonnée" not in found and "inconnu" not in found
+    assert "jointe à une autre" in _card(found, "Alice adore marcher")
+
+    first, merged = append(client, kernel, [
+        memory.REMEMBERED.draft(text=Content.of("Alice a gagné son tournoi d'échecs."), about=("alice",)),
+        memory.REMEMBERED.draft(text=Content.of("Alice a gagné son tournoi d'échecs !"), about=("alice",))],
+        "memory").seqs
+    append(client, kernel, [memory.NIGHT_SORTED.draft(night="2026-11-12", merges=((first, merged),))], "memory")
+    memories = drawn(client, "/inspecteur/memoire/souvenirs")
+    cards = [li for li in memories.split("<li class=")[1:] if "tournoi d'échecs" in li]
+    assert len(cards) == 2 and sum("faded" in li.split(">", 1)[0] for li in cards) == 1
+    assert "fondu dans un autre" in next(li for li in cards if "faded" in li.split(">", 1)[0])
+
+
+def _select(page: str, name: str) -> str:
+    """Le sélecteur d'un filtre, de son ``<select`` à sa fin."""
+    return page.split(f'<select name="{name}">', 1)[1].split("</select>", 1)[0]
+
+
+def test_a_filter_has_one_empty_choice_that_says_what_it_does(world):  # noqa: F811
+    """Un sélecteur de filtre n'a qu'une option vide : aucune de plus quand ses choix en ont une (« toutes ») ;
+    « Tous » sans défaut ; « Par défaut (…) » quand le filtre en a un."""
+    client, live, _ = world
+    _life(client, live)
+    pieces = _select(drawn(client, "/inspecteur/memoire/recues"), "sorte")
+    assert pieces.count('<option value=""') == 1 and '<option value="" selected>toutes</option>' in pieces
+    beliefs = drawn(client, "/inspecteur/memoire/croyances")
+    assert _select(beliefs, "status").count('<option value=""') == 1
+    assert '<option value="">Tous</option>' in _select(beliefs, "status")
+    assert 'placeholder="un nom"' in beliefs and "par défaut" not in _select(beliefs, "status").casefold()
+    projects = _select(drawn(client, "/inspecteur/projets/tous"), "etat")
+    assert projects.count('<option value=""') == 1 and '<option value="">Par défaut (actifs et en pause)</option>' \
+        in projects and '<option value="vivants" selected>' in projects
 
 
 def test_promises_that_bind_her_come_first_with_their_deadline_then_kept_and_dropped(world):  # noqa: F811
@@ -71,6 +143,42 @@ def test_promises_that_bind_her_come_first_with_their_deadline_then_kept_and_dro
     assert "Rappeler le libraire" in _between(page, 'id="promises-dropped"', "</section>")
     pending = drawn(client, "/inspecteur/memoire/promesses?status=pending")
     assert 'id="promises-open"' in pending and 'id="promises-kept"' not in pending
+
+
+def test_a_label_renamed_in_the_view_files_nothing_elsewhere(world, monkeypatch):  # noqa: F811
+    """L'onglet lit l'état d'un élément dans la clé de son étiquette (``Badge.key``), jamais dans ses mots : un libellé
+    renommé dans la vue — « tenue », les mots d'une origine, la sorte d'une pièce — ne range pas une promesse tenue
+    parmi celles qui l'engagent, ne fait pas perdre à une origine sa sorte, ni à une pièce son icône."""
+    monkeypatch.setitem(memory_view.LISTINGS, memory.PROMISE, replace(memory_view.PROMISES, statuses=(
+        ("pending", "en cours"), (memory.HONORED, "tenue parole"), (memory.DROPPED, "abandonnée"))))
+    monkeypatch.setattr(memory_view, "ORIGIN_FR", {**memory_view.ORIGIN_FR, memory.TOLD: "on le lui a confié"})
+    monkeypatch.setitem(received_view.KIND_LABELS, attachments.IMAGE, "image fixe")
+    client, live, _ = world
+    kernel, _ = _life(client, live)
+    made = append(client, kernel, [memory.PROMISE_NOTICED.draft(text=Content.of("Trouver un titre."), to="alice"),
+                                   memory.PROMISE_NOTICED.draft(text=Content.of("Relire le dossier."), to="alice")],
+                  "memory").seqs
+    append(client, kernel, [memory.PROMISE_RESOLVED.draft(promise=made[0], status=memory.HONORED)], "memory")
+    page = drawn(client, "/inspecteur/memoire/promesses")
+    assert "Trouver un titre" in _between(page, 'id="promises-kept"', "</section>")
+    assert "Trouver un titre" not in _between(page, 'id="promises-open"', 'class="promises-done"')
+    assert "Relire le dossier" in _between(page, 'id="promises-open"', 'class="promises-done"')
+
+    append(client, kernel, [memory.BELIEVED.draft(text=Content.of("Alice joue du violoncelle."), about=("alice",),
+                                                  origin=memory.TOLD, source="alice", confidence=0.8)], "memory")
+    beliefs = drawn(client, "/inspecteur/memoire/croyances")
+    belief = _card(beliefs, "Alice joue du violoncelle.")
+    assert 'belief-origin o-told"' in belief and "par Alice" in belief and "o-other" not in belief
+    table = re.search(r'<a href="([^"]+)"[^>]*>Tableau</a>', beliefs)
+    assert table and "on le lui a confié (Alice)" in drawn(client, "/inspecteur/memoire/croyances" + table[1])
+
+    message = append(client, kernel, [rt.PERCEPTION_RECEIVED.draft(handle="alice", channel="web", addressed=True,
+                                                                   text=Content.of("Tiens."))]).seqs[0]
+    append(client, kernel, [attachments.KEPT.draft(
+        file="c" * 32, message=message, handle="alice", name=Content.of("plan.png"), mime="image/png", size=1_000,
+        kind=attachments.IMAGE, read=True, about=("alice",), seen=Content.of("Un plan."))], "attachments")
+    piece = _card(drawn(client, "/inspecteur/memoire/recues"), "plan.png")
+    assert piece.startswith('"memories-item piece k-image') and 'title="image fixe"' in piece
 
 
 def test_the_lives_of_others_read_as_an_agenda(world):  # noqa: F811
@@ -116,6 +224,23 @@ def test_a_moment_long_past_still_says_how_it_turned_out(world):  # noqa: F811
     assert "annulé" in concert
 
 
+def test_the_pieces_still_being_read_are_counted_in_words(world):  # noqa: F811
+    """La note des pièces qu'elle lit encore s'accorde, sa parenthèse comprise (C2-09)."""
+    client, live, _ = world
+    kernel, _ = _life(client, live)  # une vie à l'arrêt : la lecture de près attend
+
+    def receive(file: str) -> str:
+        append(client, kernel, [rt.PERCEPTION_RECEIVED.draft(
+            handle="alice", channel="web", addressed=True, text=Content.of("Tiens."),
+            attachments=(rt.AttachmentMeta(name=f"{file[:4]}.png", kind="image", mime="image/png", file=file),))])
+        return drawn(client, "/inspecteur/memoire/recues")
+
+    page = receive("d" * 32)
+    assert "1 pièce reçue en cours de lecture (elle apparaît ici une fois lue)." in page and "pièce(s)" not in page
+    page = receive("e" * 32)
+    assert "2 pièces reçues en cours de lecture (elles apparaissent ici une fois lues)." in page
+
+
 def test_received_pieces_show_what_she_read_and_their_place(world):  # noqa: F811
     """Les pièces et la place de chacun sur une même page, en sous-onglets (ADR 0182) ; l'ancienne adresse de la
     place y mène, ouverte sur elle."""
@@ -145,6 +270,7 @@ def test_received_pieces_show_what_she_read_and_their_place(world):  # noqa: F81
     row = _between(place, 'class="place-row', "</li>")
     assert "Alice" in row and "now-bar place" in row and "2 pièces" in row and "onglet=pieces" in row
     assert "Place de chacun" in page and "2,00 Go" in page
+    assert "pour 1 personne" in page and "personne(s)" not in page  # le compte s'accorde (C2-09)
     moved = client.get("/inspecteur/memoire/place", follow_redirects=False)
     assert moved.status_code == 301 and moved.headers["location"] == "/inspecteur/memoire/recues#pieces-place"
 

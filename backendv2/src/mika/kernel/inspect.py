@@ -22,6 +22,7 @@ from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Any
 
+from mika.kernel.clock import US
 from mika.kernel.events import Content
 from mika.kernel.text import fold
 
@@ -128,8 +129,12 @@ class Text:
 
 @dataclass(frozen=True, slots=True)
 class Badge:
+    """Une étiquette : ses mots et son ton ; ``key`` : la clé de ce qu'elle dit — un statut, une sorte —, que lit un
+    onglet dessiné ; jamais affichée."""
+
     text: str
     tone: str = ""
+    key: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,7 +159,7 @@ class Swatch:
 
 @dataclass(frozen=True, slots=True)
 class When:
-    """Un instant : « il y a 3 min », la date exacte au survol."""
+    """Un instant : « il y a 3 min » (``relative_fr``), la date exacte au survol."""
 
     at: int
     relative: bool = True
@@ -705,6 +710,23 @@ def pct_fr(ratio: float | None, digits: int = 0) -> str:
     if ratio is None or not math.isfinite(float(ratio)):
         return "—"
     return f"{num_fr(ratio * 100, digits)}{_NNBSP}%"
+
+
+def relative_fr(at: int, now: int) -> str:
+    """« il y a 3 min », « dans 2 h », « à l'instant » : ce que dit une cellule ``When`` (la date exacte au survol),
+    pour un instant dit dans une phrase, un sous-titre ou le texte d'un lien. ``0`` : « — »."""
+    if not at:
+        return "—"
+    delta = (now - at) / US
+    future = delta < 0
+    delta = abs(delta)
+    if delta < 45:
+        return "à l'instant"
+    for unit, size in (("j", 86_400), ("h", 3_600), ("min", 60)):
+        if delta >= size:
+            n = int(delta // size)
+            return f"dans {n} {unit}" if future else f"il y a {n} {unit}"
+    return "à l'instant"
 
 
 def money_fr(amount: float | None, unit: str = "$") -> str:

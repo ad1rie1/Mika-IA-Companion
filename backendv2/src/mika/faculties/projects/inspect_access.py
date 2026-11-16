@@ -6,7 +6,7 @@ avant d'être réglée — et son type de règles sur la page « Droits »."""
 from __future__ import annotations
 
 import re
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 from pydantic import Field
 
@@ -26,6 +26,7 @@ from mika.vocab.access import (
     POLICY_WORDS,
     STEERS,
     Policy,
+    Steer,
     TableArgs,
     canal_words,
     moved,
@@ -76,8 +77,6 @@ def _tab_access(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Blo
 
 # ── L'action ──────────────────────────────────────────────────────────────
 
-_Steer = Literal["lecture", "accord", "modification", "non"]
-
 
 class AccessArgs(TableArgs):
     """Le tableau « Accès » d'un projet, d'un seul envoi (``vocab.access.TableArgs`` : ses lignes, qui, par où, quand,
@@ -85,7 +84,7 @@ class AccessArgs(TableArgs):
     d'un outil qui agit ; la ligne par défaut à part."""
 
     voir: Annotated[dict[str, bool], Knob(label="Le voir", advanced=False)] = Field(default_factory=dict)
-    piloter: Annotated[dict[str, _Steer], Knob(label="Piloter projet", choices=STEERS, advanced=False)] = \
+    piloter: Annotated[dict[str, Steer], Knob(label="Piloter projet", choices=STEERS, advanced=False)] = \
         Field(default_factory=dict)
     fichiers: Annotated[dict[str, bool], Knob(label="Ses fichiers", advanced=False)] = Field(default_factory=dict)
     lecture: Annotated[dict[str, Policy], Knob(label="Apps : un outil qui lit", choices=POLICIES,
@@ -93,7 +92,7 @@ class AccessArgs(TableArgs):
     action: Annotated[dict[str, Policy], Knob(label="Apps : un outil qui agit", choices=POLICIES,
                                               advanced=False)] = Field(default_factory=dict)
     defaut_voir: Annotated[bool, Knob(label="Par défaut, le voir", advanced=False)] = False
-    defaut_piloter: Annotated[_Steer, Knob(label="Par défaut, piloter projet", choices=STEERS, advanced=False)] = \
+    defaut_piloter: Annotated[Steer, Knob(label="Par défaut, piloter projet", choices=STEERS, advanced=False)] = \
         "non"
     defaut_fichiers: Annotated[bool, Knob(label="Par défaut, ses fichiers", advanced=False)] = False
     defaut_lecture: Annotated[Policy, Knob(label="Par défaut, un outil qui lit", choices=POLICIES,

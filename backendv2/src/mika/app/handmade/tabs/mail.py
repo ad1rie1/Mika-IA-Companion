@@ -6,7 +6,7 @@ actions et ses filtres au-dessus).
   qu'on a coché, et une liseuse, à côté de la liste sur un écran large, dessous sinon (ADR 0175) : le message choisi
   (``?lire=<clé>``), le précédent et le suivant, ce qu'elle en sait, ses actions (répondre, lui demander une
   réponse, ranger…), son texte, ses pièces.
-- **Brouillons** : ce qui attend ton accord en enveloppes (à qui, depuis quelle boîte, en réponse à quoi, d'où il
+- **Ses brouillons** : ce qui attend ton accord en enveloppes (à qui, depuis quelle boîte, en réponse à quoi, d'où il
   vient, ce qu'il faut vérifier), ce qui est décidé en lignes.
 - **Contacts** : une ligne par adresse (combien de mails dans chaque sens, le dernier échange), ses échanges en un
   clic, « Écrire » à côté.
@@ -50,8 +50,9 @@ WHO = ("Expéditeur", "À")
 #: l'action qui range ce qu'on a coché dans la liste
 TIDY = "email.ranger"
 #: ce que « Ce qu'elle en sait » dit en tête de la liseuse, d'après son onglet (ses libellés) ; les autres restent sur
-#: la fiche. Un oui-non ne se dit que oui, en étiquette.
-HER_TAGS = {"important": "important", "réponse attendue": "réponse attendue"}
+#: la fiche. Un oui-non ne se dit que oui, en étiquette, et seulement si l'en-tête du message ne le dit pas déjà
+#: (« important, non lu » ; la réponse attendue, l'en-tête la dit toujours : audit du 2026-11-05, C4-04).
+HER_TAGS = {"important": "important"}
 HER_FACTS = {"ce que ça pourrait lui faire": "ce que ça lui fait", "brouillon de réponse": "sa réponse",
              "où il en est": "où elle en est"}
 
@@ -84,11 +85,18 @@ def lines(table: Mapping[str, Any], query: Mapping[str, str]) -> list[dict[str, 
     return out
 
 
-def _her(ui: UI, key: str) -> dict[str, Any] | None:
+def _said_up(badges: Sequence[str]) -> set[str]:
+    """Ce que disent déjà les étiquettes de l'en-tête, mot par mot (« important, non lu » : « important », « non lu »)."""
+    return {part.strip().casefold() for b in badges for part in b.split(",")}
+
+
+def _her(ui: UI, key: str, badges: Sequence[str] = ()) -> dict[str, Any] | None:
     """Ce qu'elle sait du message ouvert, en tête de la liseuse : ce qu'elle en a retenu, ce que son tri en dit (s'il
-    est important, s'il attend une réponse, ce qu'il lui fait), sa réponse et où elle en est, une demande en cours ;
-    lus à son onglet « Ce qu'elle en sait » (``None`` : elle n'en sait rien de plus que la boîte)."""
+    est important, quand les étiquettes de l'en-tête, ``badges``, ne le disent pas déjà ; ce qu'il lui fait), sa
+    réponse et où elle en est, une demande en cours ; lus à son onglet « Ce qu'elle en sait » (``None`` : elle n'en
+    sait rien de plus que la boîte)."""
     said, facts, notes = "", [], []
+    up = _said_up(badges)
     for d in side_view(ui, "email", "remarque", key, "liseuse"):
         if d["t"] == "prose" and d.get("title") == "Ce qu'elle en a retenu":
             said = excerpt(d.get("text") or "", 420)
@@ -97,7 +105,8 @@ def _her(ui: UI, key: str) -> dict[str, Any] | None:
                 label, value = pair["label"], pair["value"]
                 written = text(value)
                 if label in HER_TAGS and written == "oui":
-                    facts.append((HER_TAGS[label], None))
+                    if HER_TAGS[label].casefold() not in up:
+                        facts.append((HER_TAGS[label], None))
                 elif label in HER_FACTS and written not in ("", "—"):
                     facts.append((HER_FACTS[label], value))
         elif d["t"] == "note" and d.get("tone") in ("info", "warn"):
@@ -126,18 +135,19 @@ def reader(ui: UI, key: str, query: Mapping[str, str], forms: Forms,
     """Le message ouvert : l'en-tête de sa fiche, le précédent et le suivant de la liste (``ordered``), ce qu'elle en
     sait, puis son onglet « Message », ses formulaires à son nom."""
     spec = ui.inspection.find(*MESSAGE)
-    head = ui.inspection.head("mail", key, ui.when_long)
+    head = ui.inspection.head("mail", key, ui.when)  # daté comme sur sa fiche, à la minute
     if spec is None or not isinstance(head, Head):
         return Markup(env.get_template("handmade/courrier/reader.html").render(
             missing=True, close=_here(query), blocks=[], forms={}, read_after=None))
-    got = ui.inspection.run(spec, query, ui.when_long, subject=key)
+    got = ui.inspection.run(spec, query, ui.when, subject=key)
     rendered = render.blocks(got, ui.env(), query, namespace=READ)  # ses listes à part de celles de la boîte
     prev, next_ = _neighbours(ordered, key)
     return Markup(env.get_template("handmade/courrier/reader.html").render(
         head={"title": head.title, "subtitle": head.subtitle, "badges": [render.cell(b, ui.env()) for b in head.badges],
               "facts": [{"label": k, "value": render.cell(v, ui.env())} for k, v in head.facts]},
         blocks=[drawn_blocks.shape_block(d) for d in rendered], forms=forms.of(rendered, key) if isinstance(forms, Forms) else {},
-        fiche=subject_url(KIND, key), close=_here(query), prev=prev, next=next_, her=_her(ui, key),
+        fiche=subject_url(KIND, key), close=_here(query), prev=prev, next=next_,
+        her=_her(ui, key, [b.text for b in head.badges]),
         read_after=_read_after(ui)))
 
 
@@ -188,7 +198,7 @@ def _draft(table: Mapping[str, Any], row: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def drafts(got: Got) -> Any:
-    """Courrier › Brouillons : ce qui attend ton accord en enveloppes, ce qui est décidé en lignes."""
+    """Courrier › Ses brouillons : ce qui attend ton accord en enveloppes, ce qui est décidé en lignes."""
     space, tables = _space(got)
     if space is None or not tables:  # pas de courrier branché : bloc par bloc
         return drawn_blocks.page(got.ui, got.raw, got.query, forms=got.forms, tab="courrier/brouillons")

@@ -1,0 +1,64 @@
+{# Activité › Projets › un projet › Comportement et outils (app/handmade/subjects/project.py, ADR 0121, 0176, 0177) : le
+   gabarit du paramétrage. Le formulaire « Modifier le projet », celui que la console a préparé (``projects.modifier``),
+   par groupes — Le projet, Son mode, Son rythme, Sa liberté —, une ligne par réglage (son nom et son aide à gauche, sa
+   valeur à droite), « Enregistrer » collé en bas ; pas de cadre dans la carte. Ce que la vue dit en cartes (son mode,
+   son rythme, sa liberté) n'est pas redit : leurs faits sont dans l'aide de leur réglage, sa prochaine exécution sur
+   une ligne au-dessus. Un projet archivé n'a pas de formulaire : ses réglages se lisent. Puis ses outils : les lots
+   qu'elle a en main pendant une exécution, et « Choisir ses outils » (``projects.outils``) à côté. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% from "_forms.html" import field %}
+{% macro plumbing(f) -%}
+<input type="hidden" name="csrf" value="{{ f.csrf }}"><input type="hidden" name="_op" value="{{ f.nonce }}">
+<input type="hidden" name="_retour" value="{{ f.back }}"><input type="hidden" name="_sujet" value="{{ f.subject }}">
+{% for k, v in f.fixed or [] %}<input type="hidden" name="_fixes" value="{{ k }}"><input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+{%- endmacro %}
+<div class="now-page prj-fiche prj-behaviour" data-tab="project/comportement">
+  {% for n in notes %}<p class="person-tab-note {{ n.tone }}">{{ n.text }}</p>{% endfor %}
+  {% if next_run and edit %}<p class="person-entry-facts hm-settings-facts"><span><span class="k">prochaine exécution</span> {{ tab.cell(next_run) }}</span></p>{% endif %}
+
+  {% if edit %}
+  <form method="post" action="{{ edit.url }}" class="form hm-form prj-behaviour-form" aria-label="{{ edit.title }}">
+    {{ plumbing(edit) }}
+    {% for g in edit.groups %}
+    <fieldset class="group">
+      {% if g.title %}<legend>{{ g.title }}</legend>{% endif %}
+      {% for f in g.fields %}{{ field(f) }}{% endfor %}
+    </fieldset>
+    {% endfor %}
+    <div class="form-actions"><button class="btn">Enregistrer</button></div>
+  </form>
+  {% elif settings %}
+  <section class="now-card prj-settings-ro" aria-labelledby="prj-settings-title">
+    <header class="now-card-head"><h2 id="prj-settings-title">Ses réglages</h2></header>
+    <div class="prj-settings-groups">
+      {% for g in settings %}
+      <div class="prj-settings-group">
+        <h3 class="now-subhead first">{{ g.title }}</h3>
+        <dl class="prj-ov-dl">{% for p in g.pairs %}<div><dt>{{ p.label }}</dt><dd>{{ tab.cell(p.value) }}</dd></div>{% endfor %}</dl>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="prj-tools" aria-labelledby="prj-tools-title">
+    <header class="prj-tools-head">
+      <h2 id="prj-tools-title">{{ tools.title }}</h2>
+      {% if tools.description %}<p>{{ tools.description }}</p>{% endif %}
+    </header>
+    <div class="prj-split{{ ' with-side' if choose }}">
+      {% if lots %}{{ tab.table(lots) }}{% endif %}
+      {% if choose %}
+      <form method="post" action="{{ choose.url }}" class="form hm-form prj-tools-form" aria-label="Choisir ses outils">
+        {{ plumbing(choose) }}
+        {# une liste à cocher, pas des lignes de réglage : toute la largeur de la colonne #}
+        <fieldset class="prj-tools-checks">
+          <legend>Choisir ses outils</legend>
+          {% for f in choose.fields %}{{ field(f) }}{% endfor %}
+        </fieldset>
+        <div class="form-actions"><button class="btn">{{ choose.button or choose.title }}</button></div>
+      </form>
+      {% endif %}
+    </div>
+  </section>
+</div>

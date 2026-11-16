@@ -30,6 +30,7 @@ from mika.kernel.inspect import (
     Table,
     Text,
     When,
+    plural,
 )
 from mika.kernel.operate import Done, Refused
 from mika.plugins.email import EMAIL, POLL_ASKED, EmailState, params_of
@@ -304,7 +305,7 @@ async def _folders(s: EmailState, frame: Frame, args: AccountArgs, ctx: Any) -> 
         found = await port.refresh_folders(ctx.subject)
     except (OSError, RuntimeError, ValueError) as exc:
         raise Refused(f"Le serveur a refusé : {exc}"[:300]) from None
-    return Done(message=f"{len(found)} dossier(s).")
+    return Done(message=f"{plural(len(found), 'dossier', 'dossiers')}.")
 
 
 @EMAIL.action("relever_compte", title="Relever maintenant", args=AccountArgs, emits=[POLL_ASKED], subject="compte",

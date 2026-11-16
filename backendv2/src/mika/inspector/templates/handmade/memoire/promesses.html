@@ -1,6 +1,7 @@
 {# Elle › Mémoire › Promesses (app/handmade/tabs/memory.py, ADR 0177) : celles qui l'engagent encore d'abord, leur
    échéance à gauche (une promesse en retard le dit) ; puis, côte à côte, celles qu'elle a tenues et celles qu'elle a
-   abandonnées. Un filtre par statut ne garde que sa colonne ; la pagination et la bascule « Tableau » de la faculté. #}
+   abandonnées. Une promesse en cours se marque tenue ou s'abandonne (ADR 0230 : ``mem.foot``). Un filtre par statut
+   ne garde que sa colonne ; la pagination et la bascule « Tableau » de la faculté. #}
 {% import "handmade/shared/tab.html" as tab with context %}
 {% import "handmade/memoire/macros.html" as mem with context %}
 {% macro promise(m, wide) -%}

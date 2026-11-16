@@ -56,6 +56,8 @@ from mika.kernel.inspect import (
     Table,
     Text,
     When,
+    agree,
+    plural,
 )
 from mika.kernel.operate import ActionContext, Done, Refused
 from mika.ports.shares import MAX_SHARE_BYTES, valid_id
@@ -89,6 +91,9 @@ def size_words(n: int) -> str:
         return f"{n / MIB:.1f} Mo".replace(".", ",")
     return f"{n / (1024 * MIB):.2f} Go".replace(".", ",")
 KIND_LABELS = {c.IMAGE: "photo", c.AUDIO: "vocal", c.FILE: "document"}
+#: l'état d'une pièce, sous la clé de son étiquette (``Badge.key``, que lisent les onglets dessinés) : gardée, gardée
+#: sans rien en avoir lu, retirée (par la rétention ou un opérateur)
+KEPT_STATE, UNREAD, GONE_STATE = "kept", "unread", "gone"
 SENSITIVITY_LABELS = {int(Sensitivity.ANODYNE): "anodine", int(Sensitivity.PERSONAL): "personnelle",
                       int(Sensitivity.CONFIDENCE): "confidence"}
 ITEM_LABELS = {"souvenir": "souvenir", "belief": "croyance", "event": "moment", "promise": "promesse"}
@@ -97,27 +102,41 @@ REASON_LABELS = {c.RETENTION: "trop ancienne", c.BUDGET: "place dépassée", MIS
 
 
 def _who(frame: Frame, handle: str) -> Cell:
+    """La personne, par son nom seul (sa clé s'il n'en a pas) : elle réunit tous ses moyens de communication ; celui
+    par lequel une pièce est venue se dit sur la fiche de la pièce (« par »)."""
     if not handle or is_internal(handle):
         return Text("personne", "muted")
     person = frame.get(identity_c.PERSON(handle))
     name = frame.get(identity_c.IDENTITY(person)).name or frame.get(identity_c.IDENTITY(handle)).name
-    return Ref.subject("person", person, f"{name} ({handle})" if name else handle)
+    return Ref.subject("person", person, name or handle)
 
 
 def _state(r: FileRow) -> Badge:
+    """Son état, sous sa clé (``KEPT_STATE``, ``UNREAD``, ``GONE_STATE``) : un onglet dessiné la lit, jamais
+    ces mots."""
     if r.gone and r.reason == c.OPERATOR:
-        return Badge(BY_OPERATOR, "muted")
+        return Badge(BY_OPERATOR, "muted", key=GONE_STATE)
     if r.gone:
-        return Badge(f"retirée ({REASON_LABELS.get(r.reason or '', r.reason or '?')})", "muted")
+        return Badge(f"retirée ({REASON_LABELS.get(r.reason or '', r.reason or '?')})", "muted", key=GONE_STATE)
     if not r.readable:
-        return Badge("gardée, pas lue", "warn")
-    return Badge("gardée", "ok")
+        return Badge("gardée, pas lue", "warn", key=UNREAD)
+    return Badge("gardée", "ok", key=KEPT_STATE)
+
+
+def _kind(r: FileRow) -> Badge:
+    """Sa sorte en mots (photo, vocal, document), sous sa clé (``c.IMAGE``…)."""
+    return Badge(KIND_LABELS.get(r.kind, r.kind), key=r.kind)
+
+
+def _place_of(room: str | None) -> str:
+    """Où une pièce est arrivée : un salon, son nom entre guillemets (la forme du fil et du pourquoi), ou en privé."""
+    return f"salon « {room} »" if room else "en privé"
 
 
 def _download_link(r: FileRow) -> Cell:
     if r.gone:
         return Text("—", "muted")
-    return Ref.download(KIND, r.id, "télécharger", r.name)
+    return Ref.download(KIND, r.id, "Télécharger", r.name)
 
 
 def _rows(frame: Frame, store: Any, found: list[FileRow], with_who: bool = True) -> tuple[Row, ...]:
@@ -127,7 +146,7 @@ def _rows(frame: Frame, store: Any, found: list[FileRow], with_who: bool = True)
         cells: list[Cell] = [When(r.at), Ref.subject(KIND, r.id, r.name or "(sans nom)")]
         if with_who:
             cells.append(_who(frame, r.handle))
-        cells += [KIND_LABELS.get(r.kind, r.kind), Text(size_words(r.size), "num"),
+        cells += [_kind(r), Text(size_words(r.size), "num"),
                   Text(r.seen or "—", "muted" if not r.seen else "text", clamp=140),
                   Text(str(len(tied.get(r.id, ()))), "num"), _state(r), _download_link(r)]
         out.append(Row(tuple(cells), href=Ref.subject(KIND, r.id, "")))
@@ -145,8 +164,8 @@ def _columns(with_who: bool = True) -> tuple[Any, ...]:
 _KINDS = (("", "toutes"), (c.IMAGE, "photos"), (c.FILE, "documents"), (c.AUDIO, "vocaux"))
 
 
-@ATTACHMENTS.inspect("recues", title="Pièces reçues", section="memoire", order=25,
-                     params=(Param("q", "chercher (nom, ce qu'elle y a lu)"),
+@ATTACHMENTS.inspect("recues", title="Pièces reçues", section="memoire", order=42,
+                     params=(Param("q", "chercher", placeholder="nom ou ce qu'elle y a lu"),
                              Param("sorte", "sorte", kind="select", choices=_KINDS)),
                      description="Ce qu'on lui a envoyé dans les conversations — photos, documents, vocaux — : gardé, "
                                  "lu de près, relié à ce qu'elle sait. Ses outils la laissent les retrouver et les "
@@ -163,8 +182,10 @@ def _pieces(s: AttachmentsState, frame: Frame, ctx: InspectContext) -> list[Bloc
     found = recent(store, kind=kind, words=words, limit=pager.offset + pager.size)[pager.offset:]
     blocks: list[Block] = []
     if s.pending:
-        blocks.append(Note(f"{len(s.pending)} pièce(s) reçue(s) en cours de lecture (elles apparaissent ici une fois "
-                           "lues).", tone="info"))
+        n = len(s.pending)
+        blocks.append(Note(f"{plural(n, 'pièce reçue', 'pièces reçues')} en cours de lecture "
+                           f"({agree(n, 'elle apparaît ici une fois lue', 'elles apparaissent ici une fois lues')}).",
+                           tone="info"))
     blocks.append(Table(_columns(), _rows(frame, store, found), title="Pièces reçues", pager=pager,
                         empty="aucune pièce reçue" if not words and not kind else "aucune pièce ne correspond",
                         caption="« liens » : les souvenirs, croyances et moments qui s'appuient sur la pièce — en "
@@ -238,14 +259,18 @@ def _head(s: AttachmentsState, frame: Frame, ctx: InspectContext, key: str) -> H
     r = row(ctx.store, key) if ctx.store is not None else None
     if r is None:
         return None
-    facts: list[tuple[str, Cell]] = [
-        ("de", _who(frame, r.handle)), ("reçue", When(r.at)), ("taille", size_words(r.size)),
-        ("sorte", Text(r.mime, "mono")), ("sensibilité", SENSITIVITY_LABELS.get(r.sensitivity, str(r.sensitivity))),
-        ("où", Text(f"salon {r.room}", "mono") if r.room else "en privé")]
+    facts: list[tuple[str, Cell]] = [("de", _who(frame, r.handle))]
+    if r.handle and not is_internal(r.handle):
+        # le moyen de communication, nommé comme sur sa fiche (« adrien · compte », jamais sa clé), vers elle
+        facts.append(("par", Ref.subject("handle", r.handle, identity_c.handle_label(frame, r.handle))))
+    facts += [
+        ("reçue", When(r.at)), ("taille", size_words(r.size)), ("sorte", KIND_LABELS.get(r.kind, r.kind)),
+        ("format", Text(r.mime, "mono")),
+        ("sensibilité", SENSITIVITY_LABELS.get(r.sensitivity, str(r.sensitivity))), ("où", _place_of(r.room))]
     if r.gone:
         facts.append(("retirée", When(r.expired_at or 0)))
     else:
-        facts.append(("télécharger", _download_link(r)))
+        facts.append(("fichier", _download_link(r)))
     person = frame.get(identity_c.PERSON(r.handle)) if r.handle else ""
     back = Ref.subject("person", person, "Ses pièces", "pieces") if person else None
     return Head(r.id, r.name or "(sans nom)", subtitle="Une pièce qu'on lui a envoyée", badges=(_state(r),),
@@ -278,8 +303,8 @@ def _links_tab(s: AttachmentsState, frame: Frame, ctx: InspectContext) -> list[B
     items = tuple(Row((ITEM_LABELS.get(known[i].kind, known[i].kind) if i in known else "—",
                        Text(known[i].text, clamp=300) if i in known else Text("(plus active, ou oubliée)", "muted"),
                        BY_LABELS.get(by, by), Ref("event", str(i), f"n° {i}"))) for i, by in tied)
-    carried = tuple(Row((When(at), Ref("event", str(seq), f"n° {seq}"), Text(f"salon {room}", "mono") if room
-                         else "en privé")) for seq, at, room in carriers(store, r.id))
+    carried = tuple(Row((When(at), Ref("event", str(seq), f"n° {seq}"), _place_of(room)))
+                    for seq, at, room in carriers(store, r.id))
     return [Table(("ce que c'est", "ce qu'elle sait", Column("relié par", "fit"), Column("élément", "fit")), items,
                   title="Ce qu'elle sait qui va avec", empty="rien n'y est encore relié"),
             Table((Column("quand", "fit"), Column("message", "fit"), "où"), carried, title="Les messages qui l'ont "

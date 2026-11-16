@@ -67,8 +67,9 @@ a.now-tag:hover { color: var(--accent); text-decoration: none; }
 .now-voice { max-width: 68ch; margin: 22px 0 0; padding: 2px 0 2px 18px;
   border-left: 3px solid color-mix(in srgb, var(--sw) 55%, var(--border)); }
 .now-voice p { margin: 0; color: var(--text); font-size: 15px; font-style: italic; line-height: 1.55; }
-.now-voice p::before { content: "« "; }
-.now-voice p::after { content: " »"; }
+/* des espaces insécables : un guillemet ne finit jamais seul sur sa ligne */
+.now-voice p::before { content: "«\00a0"; }
+.now-voice p::after { content: "\00a0»"; }
 .now-voice footer { margin-top: 6px; color: var(--muted); font-size: 12px; }
 .now-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 0; padding: 0; list-style: none; }
 .now-chips li { padding: 4px 11px; border: 1px solid var(--border); border-radius: var(--radius);

@@ -61,17 +61,21 @@
 </div>
 {% endif %}
 {% for m in messages or [] %}<div class="flash {{ {'ko': 'danger', 'ok': 'ok'}.get(m[0], m[0]) }}" role="status">{{ m[1] }}</div>{% endfor %}
-{% if view_description %}<p class="view-description">{{ view_description }}</p>{% endif %}
+{# le badge d'un onglet dit au survol ce qu'il compte, son indice (ADR 0219) #}
 {% if tabs_more %}
 {# des onglets rangés au bout de la barre (ce qu'une vue d'ensemble résume) : hors de la barre qui défile #}
 {% set folded_on = tabs_more|selectattr('on')|list %}
 <div class="tabs-row">
-<nav class="tabs" aria-label="Onglets">{% for t in tabs %}<a class="tab{{ ' on' if t.on }}" href="{{ t.href }}"{% if t.on %} aria-current="page"{% endif %}>{{ t.title }}{% if t.badge %}<span class="count">{{ t.badge }}</span>{% elif t.count %}<span class="tab-n now-num">{{ t.count }}</span>{% endif %}</a>{% endfor %}</nav>
+<nav class="tabs" aria-label="Onglets">{% for t in tabs %}<a class="tab{{ ' on' if t.on }}" href="{{ t.href }}"{% if t.on %} aria-current="page"{% endif %}>{{ t.title }}{% if t.badge %}<span class="count"{% if t.hint %} title="{{ t.hint }}"{% endif %}>{{ t.badge }}</span>{% elif t.count %}<span class="tab-n now-num">{{ t.count }}</span>{% endif %}</a>{% endfor %}</nav>
 <details class="tabs-more{{ ' on' if folded_on }}"><summary class="tab{{ ' on' if folded_on }}">{{ tabs_more_title }}{% if folded_on %} · {{ folded_on[0].title }}{% endif %} <span aria-hidden="true">▾</span></summary><nav class="tabs-more-panel" aria-label="{{ tabs_more_title }}">{% for t in tabs_more %}<a class="{{ 'on' if t.on }}" href="{{ t.href }}"{% if t.on %} aria-current="page"{% endif %}>{{ t.title }}</a>{% endfor %}</nav></details>
 {{ quick_tail() }}
 </div>
-{% elif tabs and tabs|length > 1 %}{% if quick %}<div class="tabs-row">{% endif %}<nav class="tabs" aria-label="Onglets">{% for t in tabs %}<a class="tab{{ ' on' if t.on }}" href="{{ t.href }}"{% if t.on %} aria-current="page"{% endif %}>{{ t.title }}{% if t.badge %}<span class="count">{{ t.badge }}</span>{% elif t.count %}<span class="tab-n now-num">{{ t.count }}</span>{% endif %}</a>{% endfor %}</nav>{% if quick %}{{ quick_tail() }}</div>{% endif %}
+{% elif tabs and tabs|length > 1 %}{% if quick %}<div class="tabs-row">{% endif %}<nav class="tabs" aria-label="Onglets">{% for t in tabs %}<a class="tab{{ ' on' if t.on }}" href="{{ t.href }}"{% if t.on %} aria-current="page"{% endif %}>{{ t.title }}{% if t.badge %}<span class="count"{% if t.hint %} title="{{ t.hint }}"{% endif %}>{{ t.badge }}</span>{% elif t.count %}<span class="tab-n now-num">{{ t.count }}</span>{% endif %}</a>{% endfor %}</nav>{% if quick %}{{ quick_tail() }}</div>{% endif %}
 {% elif quick %}<div class="quick-filters">{{ quick_tail() }}</div>{% endif %}
+{# ce que montre l'onglet d'une fiche que la fiche ne dessine pas (``view_description``, pages/subjects.py) : la
+   première ligne de son contenu, sous la barre d'onglets, qui reste ainsi à la même hauteur d'un onglet à l'autre
+   (ADR 0176 ; audit du 2026-11-05, C5-05) ; un enfant direct de ``.page-view``, que l'espace du courrier tait #}
+{% if view_description %}<p class="view-description">{{ view_description }}</p>{% endif %}
 {{ filters_form(filters or [], keep or [], filtered, reset) }}
 {% if panel and not panel_after and not panel_after_blocks %}{% include panel %}{% endif %}
 <div class="stack">

@@ -39,6 +39,12 @@ def blank(c: Mapping[str, Any] | None) -> bool:
     return text(c).strip() in ("", "—")
 
 
+def key_of(c: Mapping[str, Any] | None) -> str:
+    """La clé d'une étiquette rendue (``Badge.key`` : un statut, une sorte), que lit un onglet plutôt que ses mots ;
+    vide sans étiquette ou sans clé."""
+    return str((c or {}).get("key") or "")
+
+
 @dataclass(slots=True)
 class Line:
     """Une ligne d'une liste de la faculté, rendue : ses cellules par le libellé de leur colonne (``c``), celles

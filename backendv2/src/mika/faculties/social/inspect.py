@@ -7,7 +7,13 @@ calcul même qui fait la proximité (``closeness_trace``), jamais un calcul à
 part ; « Son histoire, cran par cran » lit le journal (``bond_shifted``,
 ``bond_noted``). Un profil dont le texte a été oublié s'affiche comme oublié.
 La seule écriture — fixer la proximité — est une action d'opérateur
-(``actions.py``), posée en place sur l'onglet.
+(``actions.py``), dans la barre de titre de la fiche, ouverte sur la proximité
+en vigueur.
+
+D'où vient une proximité (``closeness_origin``) et le rythme de leurs échanges
+(``rhythm_of``) se lisent ici, à l'état : les cellules les disent en mots, et la
+page Liens (``app/handmade/tabs/people.py``) les lit par ces fonctions, jamais
+dans le texte d'une cellule.
 """
 
 from __future__ import annotations
@@ -36,7 +42,6 @@ from mika.faculties.social.profile import lines_of
 from mika.faculties.social.sections import refs_of
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
-    ActionSlot,
     Badge,
     Block,
     Cell,
@@ -46,7 +51,6 @@ from mika.kernel.inspect import (
     InspectContext,
     Meter,
     Note,
-    Param,
     Prose,
     Ref,
     Row,
@@ -57,8 +61,9 @@ from mika.kernel.inspect import (
     Timeline,
     When,
     paginate,
+    plural,
 )
-from mika.vocab.people import fold, is_identifiable, named_label
+from mika.vocab.people import is_identifiable, named_label
 
 #: Au plus tant de personnes par page ; un résumé replié au-delà de tant de caractères.
 PAGE = 50
@@ -71,8 +76,14 @@ CLOSENESS_FR = {c.STRANGER: "pas encore de lien", c.ACQUAINTANCE: "connaissance"
                 c.CLOSE: "proche"}
 CLOSENESS_TONE = {c.STRANGER: "muted", c.ACQUAINTANCE: "", c.FRIEND: "info", c.CLOSE: "ok"}
 FORGOTTEN = "(oublié)"
-#: les critères d'un niveau, en mots ; ceux que l'affect décide (non lus sans l'histoire d'une amie)
-CRITERION_FR = {DAYS: "jours de contact", MESSAGES: "messages reçus", HISTORY: "histoire vécue (jours)",
+#: d'où vient sa proximité (``closeness_origin``) : fixée par un opérateur, vécue avec le plancher de sa propriétaire,
+#: vécue
+DECLARED, OWNER_FLOOR, LIVED = "declared", "owner_floor", "lived"
+#: … en mots, dans la colonne « proximité » de la vue Liens, après l'échelon (la tuile de Lien : ``_origin_said``)
+ORIGIN_CELL = {DECLARED: "déclarée", OWNER_FLOOR: "vécue, plancher « propriétaire »", LIVED: "vécue"}
+#: les critères d'un niveau, en mots ; ceux que l'affect décide (non lus sans l'histoire d'une amie). Les messages
+#: sont ceux qui lui étaient adressés : un message entendu dans un groupe sans lui être adressé ne compte pas
+CRITERION_FR = {DAYS: "jours de contact", MESSAGES: "messages adressés à elle", HISTORY: "histoire vécue (jours)",
                 REGARD: "chaleur", BOND: "attachement", GRUDGE: "hostilité"}
 _COUNTED = frozenset({DAYS, MESSAGES, HISTORY})
 _AFFECT = frozenset({REGARD, BOND, GRUDGE})
@@ -101,22 +112,48 @@ def _ref(frame: Frame, person: str, tab: str = "") -> Ref:
     return Ref.subject("person", person, _name(frame, person), tab)
 
 
+def owner_floor(frame: Frame) -> str:
+    """Le plancher de sa propriétaire, en mots (« amitié ») : celui que règle la faculté ; vide s'il n'y en a pas
+    (« comme tout le monde »)."""
+    floor = params(frame.env.params_of("social", frame.root)).owner_floor
+    return CLOSENESS_FR[floor] if floor in (c.ACQUAINTANCE, c.FRIEND) else ""
+
+
+def closeness_origin(s: SocialState, frame: Frame, person: str) -> str:
+    """D'où vient sa proximité : ``DECLARED`` (fixée par un opérateur, elle l'emporte), ``OWNER_FLOOR`` (vécue, sa
+    propriétaire, qui a d'office au moins ``owner_floor``), ``LIVED`` (vécue)."""
+    if person in s.declared:
+        return DECLARED
+    return OWNER_FLOOR if frame.get(identity_c.IS_OWNER(person)) and owner_floor(frame) else LIVED
+
+
 def _closeness_text(s: SocialState, frame: Frame, person: str) -> str:
     level = frame.get(c.CLOSENESS(person))
-    text = CLOSENESS_FR.get(level, level)
-    if person in s.declared:
-        return f"{text} (déclarée)"
-    return f"{text} (vécue, plancher « propriétaire »)" if frame.get(identity_c.IS_OWNER(person)) else f"{text} (vécue)"
+    return f"{CLOSENESS_FR.get(level, level)} ({ORIGIN_CELL[closeness_origin(s, frame, person)]})"
 
 
 def _closeness(s: SocialState, frame: Frame, person: str) -> Badge:
     return Badge(_closeness_text(s, frame, person), CLOSENESS_TONE.get(frame.get(c.CLOSENESS(person)), ""))
 
 
-def _rhythm(reading: c.ContactReading) -> str:
+def _origin_said(s: SocialState, frame: Frame, person: str) -> str:
+    """Sous la tuile « proximité » de Lien : d'où elle vient, en mots."""
+    origin = closeness_origin(s, frame, person)
+    if origin == DECLARED:
+        return "déclarée par un opérateur"
+    return f"vécue, au moins « {owner_floor(frame)} » : sa propriétaire" if origin == OWNER_FLOOR else "vécue"
+
+
+def rhythm_of(reading: c.ContactReading) -> tuple[str, bool]:
+    """Le rythme de leurs échanges en mots (« tous les 3 jours »), et s'il est mesuré sur leur histoire (sinon : un
+    repli selon la proximité)."""
     n = round(reading.rhythm_days)
-    every = "tous les jours" if n <= 1 else f"tous les {n} jours"
-    return f"{every} — {'mesuré' if reading.measured else 'repli selon la proximité'}"
+    return ("tous les jours" if n <= 1 else f"tous les {n} jours"), reading.measured
+
+
+def _rhythm(reading: c.ContactReading) -> str:
+    every, measured = rhythm_of(reading)
+    return f"{every} — {'mesuré' if measured else 'repli selon la proximité'}"
 
 
 def _ratio(value: float) -> str:
@@ -189,10 +226,11 @@ def _steps(trace: ClosenessTrace, p: SocialParams) -> list[tuple[str, str, str]]
     else:
         settled = everything.days >= p.friendship_settled_days
         if not trace.affect:
-            steps.append(("affect", "pas lu",
-                          f"pas l'histoire d'une amie ({everything.days} jours de contact pour {p.friend_days}, "
-                          f"{everything.messages} messages pour {p.friend_messages}) : ni la chaleur, ni "
-                          "l'attachement, ni la rancune n'y changeraient rien"))
+            steps.append(("affect", "pas encore compté",
+                          f"pas l'histoire d'une amie ({plural(everything.days, 'jour', 'jours')} de contact pour "
+                          f"{p.friend_days}, {plural(everything.messages, 'message', 'messages')} pour "
+                          f"{p.friend_messages}) : ni la chaleur, ni l'attachement, ni la rancune n'y changeraient "
+                          "rien"))
         for rank in (window.rank, window.rank + 1):
             if 0 < rank < len(c.CLOSENESS_LEVELS):
                 steps.append((CLOSENESS_FR[c.CLOSENESS_LEVELS[rank]],
@@ -201,16 +239,19 @@ def _steps(trace: ClosenessTrace, p: SocialParams) -> list[tuple[str, str, str]]
         ratio = trace.silent / trace.rhythm_days if trace.rhythm_days > 0 else 0.0
         lost = ("un cran perdu" if window.rank > 0 else "rien à perdre") if trace.lost else "aucun cran perdu"
         steps.append(("silence", lost,
-                      f"{trace.silent} jour(s) depuis leur dernier jour de contact, ×{_ratio(ratio)} le rythme "
+                      f"{plural(trace.silent, 'jour', 'jours')} depuis leur dernier jour de contact, "
+                      f"×{_ratio(ratio)} le rythme "
                       f"qu'elles avaient ({_ratio(trace.rhythm_days)} j) ; un cran se perd à "
                       f"{_ratio(trace.silence_bar)} j (×{_ratio(p.closeness_silence_factor)} son rythme, jamais "
                       f"avant {p.closeness_silence_min_days} j)"))
         if trace.floor > 0:
             was = CLOSENESS_FR[c.CLOSENESS_LEVELS[everything.rank]]
-            why = (f"un cran sous ce qu'elles ont été sur toute leur histoire : {was} ({everything.days} jours de "
-                   f"contact, {everything.messages} messages)")
+            why = (f"un cran sous ce qu'elles ont été sur toute leur histoire : {was} "
+                   f"({plural(everything.days, 'jour', 'jours')} de contact, "
+                   f"{plural(everything.messages, 'message', 'messages')})")
             if trace.short and everything.rank - 1 > trace.floor:
-                why = (f"une histoire courte ({everything.days} jours de contact, moins de {p.lasting_days}) que "
+                why = (f"une histoire courte ({plural(everything.days, 'jour', 'jours')} de contact, moins de "
+                       f"{p.lasting_days}) que "
                        f"son silence a dépassée ({trace.silent} j de silence pour {trace.history} j vécus "
                        "ensemble) : connaissance au plus")
             elif everything.days >= p.lasting_days:
@@ -241,11 +282,12 @@ def _why(trace: ClosenessTrace, lived: ClosenessTrace, p: SocialParams) -> Table
     if trace.declared:
         steps.append(("vécue, elle serait", CLOSENESS_FR.get(lived.level, lived.level),
                       "sans la déclaration (« automatique »)"))
-    steps.append(("niveau retenu", CLOSENESS_FR.get(trace.level, trace.level), "celui que lit la faculté"))
+    steps.append(("niveau retenu", CLOSENESS_FR.get(trace.level, trace.level), "celui qui vaut"))
     window = lived.window
-    caption = (f"Jours de contact et messages : ceux des {p.closeness_window_days} derniers jours ({window.days} "
-               f"jours de contact, {window.messages} messages reçus) ; l'histoire vécue va de leur premier à leur "
-               "dernier jour de contact ; l'histoire plus ancienne fait le plancher."
+    caption = (f"Jours de contact et messages : ceux des {p.closeness_window_days} derniers jours "
+               f"({plural(window.days, 'jour', 'jours')} de contact, "
+               f"{plural(window.messages, 'message adressé', 'messages adressés')} à elle) ; l'histoire vécue va "
+               "de leur premier à leur dernier jour de contact ; l'histoire plus ancienne fait le plancher."
                if window is not None else "")
     return Table(("étape", "valeur", "pourquoi"), tuple(steps), title="Pourquoi ce niveau", caption=caption)
 
@@ -328,7 +370,7 @@ def settable(frame: Frame, person: str) -> bool:
 
 def _detail(s: SocialState, frame: Frame, ctx: InspectContext, person: str) -> list[Block]:
     p = params(frame.env.params_of("social", frame.root))
-    reading = frame.get(c.CONTACT(person))
+    reading, level = frame.get(c.CONTACT(person)), frame.get(c.CLOSENESS(person))
     profile = s.profiles.get(person)
     texts = _texts(s, [person], ctx)
     missed = dict(frame.get(c.MISSED))
@@ -340,8 +382,8 @@ def _detail(s: SocialState, frame: Frame, ctx: InspectContext, person: str) -> l
     window = lived.window
     recent = f" sur les {p.closeness_window_days} derniers jours"
     blocks: list[Block] = [
-        Stats((Stat("proximité", _closeness(s, frame, person),
-                    "déclarée par un opérateur" if person in s.declared else "née de leur histoire"),
+        Stats((Stat("proximité", Badge(CLOSENESS_FR.get(level, level), CLOSENESS_TONE.get(level, "")),
+                    _origin_said(s, frame, person)),
                Stat("rythme", _rhythm(reading)),
                Stat("silence ÷ rythme", _silence(reading, p, frame.get(c.WEIGHT(person))),
                     f"lui manque au-delà de ×{_ratio(p.recontact_factor / frame.get(c.WEIGHT(person)))}",
@@ -350,7 +392,8 @@ def _detail(s: SocialState, frame: Frame, ctx: InspectContext, person: str) -> l
                Stat("ses initiatives sans réponse", reading.unanswered))),
         Fields((
             ("jours de contact", f"{reading.days} en tout, {window.days}{recent}" if window else reading.days),
-            ("messages reçus", f"{reading.inbound} en tout, {window.messages}{recent}" if window else reading.inbound),
+            ("messages adressés à elle", f"{reading.inbound} en tout, {window.messages}{recent}" if window
+             else reading.inbound),
             ("qui ouvre leurs conversations",
              f"elle {reading.her_starts} fois, la personne {reading.their_starts} fois"
              + (" — c'est presque toujours elle" if reading.one_sided else "")),
@@ -393,25 +436,18 @@ def _link(s: SocialState, frame: Frame, ctx: InspectContext) -> list[Block]:
                                  "déclaré.", tone="muted")])
     if person in _known(s):
         blocks.append(_history(frame, ctx, person))
-    if settable(frame, person):
-        blocks.append(ActionSlot("social.proximite", initial=(("closeness", s.declared.get(person) or AUTO),),
-                                 title="Fixer la proximité"))
     return blocks
 
 
-SEARCH = Param("q", "nom", placeholder="Alice…")
-LEVEL = Param("proximite", "proximité", kind="select", choices=tuple(CLOSENESS_FR.items()))
-
-
-@SOCIAL.inspect("liens", title="Liens", section="personnes", order=20, params=[SEARCH, LEVEL],
+# Les liens se parcourent, sans filtre : on cherche quelqu'un et on filtre par proximité depuis la vue d'ensemble de
+# Personnes, seule à le faire dans la destination ; le dessin de cet onglet range déjà les liens par proximité
+# (ADR 0176 : pas d'onglet qui répète un filtre).
+@SOCIAL.inspect("liens", title="Liens", section="personnes", order=20, params=[],
                 description="Chaque lien : sa proximité, son rythme, le silence ; une ligne mène à la fiche.")
 def _links(s: SocialState, frame: Frame, ctx: InspectContext) -> list[Block]:
     p = params(frame.env.params_of("social", frame.root))
-    q, level = fold(str(ctx.value("q") or "")), str(ctx.value("proximite") or "")
     people = sorted(_known(s), key=lambda k: (-(s.contacts[k].last_in if k in s.contacts else 0), k))
-    shown = [k for k in people if (not q or q in fold(_name(frame, k)) or q in fold(k))
-             and (not level or frame.get(c.CLOSENESS(k)) == level)]
-    page, pager = paginate(shown, ctx.pager(size=PAGE))
+    page, pager = paginate(people, ctx.pager(size=PAGE))
     texts = _texts(s, list(page), ctx)
     rows: list[Row] = []
     for k in page:
@@ -424,12 +460,12 @@ def _links(s: SocialState, frame: Frame, ctx: InspectContext) -> list[Block]:
         Stats((Stat("personnes", len(people)),
                Stat("qui lui manquent", len(missed),
                     (", ".join(f"{_name(frame, k)} (×{_ratio(r)})" for k, r in missed[:5])
-                     + (f" et {len(missed) - 5} autre(s)" if len(missed) > 5 else "")) or "personne",
+                     + (f" et {plural(len(missed) - 5, 'autre', 'autres')}" if len(missed) > 5 else ""))
+                    or "personne",
                     tone="warn" if missed else ""),
                Stat("dernier réconfort cherché", _when(s.comforted_at)))),
         Table(("personne", "proximité", Column("rythme", detail=True), Column("silence ÷ rythme", hint="la moitié de la jauge : elle "
                                                          "lui manque"), "dernier message reçu",
                Column("initiatives sans réponse", "num", detail=True), "ce qu'elle en sait"), tuple(rows), pager=pager,
-              title="Liens",
-              empty="aucun lien ne correspond" if q or level else "aucun lien pour l'instant"),
+              title="Liens", empty="aucun lien pour l'instant"),
     ]

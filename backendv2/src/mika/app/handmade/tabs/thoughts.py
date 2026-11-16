@@ -7,15 +7,19 @@ passe maintenant, son historique (une page plus ancienne ouvre son sous-onglet),
   en reste en jauge, d'où elle est née, qui elle concerne ; puis toutes ses pensées, en fil ; et comment elles vivent.
 - Ce qu'elle remarque : ce qui attend d'être remarqué, puis ce qu'elle a remarqué ces dernières minutes — la
   pertinence annoncée par la source et celle qu'elle a retenue sur une même barre (l'habituation se voit), l'émotion
-  dosée ; puis tout ce qu'elle a remarqué ; et les règles.
-- Attentes : ce qu'elle attend de qui, le temps écoulé vers l'échéance en jauge (échue : dit) ; puis les attentes
-  closes, comblées ou déçues.
+  que le signal lui a laissée ; puis tout ce qu'elle a remarqué ; et les règles. Chaque signal dit sa source et sa
+  sorte en mots (« Courrier », « un mail ») : l'attention ne connaît aucune source, la console les nomme ici.
+- Attentes : ce qu'elle attend de qui (« la réponse d'Alice »), le temps écoulé vers l'échéance en jauge (échue :
+  dit) ; puis les attentes closes, comblées ou déçues.
 - Journal et rêves : son journal de la nuit en page de carnet, ce qu'elle en raconte à n'importe qui, sa journée en
   cours telle qu'elle pourra la dire demain ; puis ses nuits, une carte par nuit — son journal et ses rêves ensemble,
   ce dont elle s'est souvenue au réveil. Le fil « en bref » de la faculté redisait l'historique : il se tait.
 
 Les données restent celles de la faculté de l'attention (ses blocs, ses curseurs au journal) ; celles de Journal et
-rêves, celles de la faculté de soi (son onglet ``nuits`` : ses textes, son historique paginé au journal).
+rêves, celles de la faculté de soi (son onglet ``nuits`` : ses textes, son historique paginé au journal). L'état d'un
+élément — une pensée vivante, une attente comblée, la sorte d'une entrée de ses nuits, un rêve souvenu au réveil — se
+lit à la clé de son étiquette (``key_of``), jamais à ses mots ; le jour d'un texte de ses nuits est dans son titre, en
+mots, montré tel quel.
 """
 
 from __future__ import annotations
@@ -26,11 +30,31 @@ from typing import Any
 
 from markupsafe import Markup
 
+from mika.app.console import FACULTY_LABELS
 from mika.app.handmade import date_fr
 from mika.app.handmade.lists import listing
-from mika.app.handmade.tabs import Got, Line, Tab, blank, gauge, instant, raw_lines, rest, subpanes, text
+from mika.app.handmade.tabs import (
+    Got,
+    Line,
+    Tab,
+    blank,
+    gauge,
+    instant,
+    key_of,
+    raw_lines,
+    rest,
+    subpanes,
+    text,
+)
+from mika.contracts import camera as camera_c
+from mika.contracts import email as email_c
+from mika.contracts import rss as rss_c
+from mika.contracts import teams as teams_c
+from mika.faculties.attention import inspect as attention_view
+from mika.faculties.self import inspect as self_view
 from mika.inspector.ui import env
 from mika.kernel.inspect import Prose
+from mika.vocab.words import elided
 
 STYLES = ("handmade/pensees.css",)
 #: le curseur de leurs historiques au journal (``faculties/attention/inspect.py``)
@@ -73,7 +97,7 @@ def _past_thought(line: Line) -> dict[str, Any]:
     return {"text": line["pensée"], "emotion": _swatch(line.get("couleur à la naissance")),
             "origin": born_of(line.text("née de")),
             "about": None if line.text("concerne") == "personne" else line.get("concerne"),
-            "born": line.get("née"), "now": line.get("maintenant"), "alive": line.text("maintenant") == "vivante",
+            "born": line.get("née"), "now": line.get("maintenant"), "alive": key_of(line.get("maintenant")) == attention_view.ALIVE.key,
             "href": line.href, "detail": rest(line, ("couleur à la naissance", "née de")), "open": line.open}
 
 
@@ -93,26 +117,59 @@ def pensees(got: Got) -> Markup | None:
 
 # ── Ce qu'elle remarque ───────────────────────────────────────────────────
 
+#: une source qui nomme ce qui la suit (« rss:<flux> », « forge:<app> », « appareil:<appareil> », celle de
+#: ``MindPort.sense``) : ce qu'elle en dit
+SOURCE_PREFIXES = {"rss": "le flux « {} »", "forge": "son app « {} »", "appareil": "l'appareil « {} »"}
+#: la sorte d'un signal, en mots (celles d'une app sont libres : elles restent telles quelles)
+KINDS_FR = {
+    email_c.MAIL: "un mail", email_c.SENT_KIND: "un mail envoyé à sa place",
+    teams_c.MESSAGE: "un message Teams", teams_c.SENT_KIND: "un message Teams envoyé à sa place",
+    rss_c.ENTRY: "un article", camera_c.VIEW: "ce que voit la caméra",
+    # son monde (``faculties/world/notice.py``, ``faculties/world/__init__.py``), ses liens (``faculties/social``)
+    # et ce que lui signale un appareil (``app/mindport.py``, ``sense``)
+    "change": "un changement chez elle", "setback": "un contretemps", "gesture": "un geste",
+    "bond_shifted": "un lien qui change", "one_sided": "un lien à sens unique", "signal": "un signal",
+}
+
+
+def source_name(key: str) -> str:
+    """Le nom d'une source de signaux : « email » → « Courrier », « rss:lemonde » → « le flux « lemonde » » ; une
+    source inconnue reste telle quelle."""
+    head, sep, tail = key.partition(":")
+    if sep and tail and head in SOURCE_PREFIXES:
+        return SOURCE_PREFIXES[head].format(tail)
+    return FACULTY_LABELS.get(key, key)
+
+
+def _source(cell: Mapping[str, Any]) -> dict[str, Any]:
+    """La cellule de la source, son lien gardé, son texte en mots."""
+    return {**cell, "text": source_name(str(cell["text"]))} if cell.get("text") else dict(cell)
+
+
+def _kind(kind: str) -> str:
+    """La sorte d'un signal en mots : « mail » → « un mail » ; une sorte inconnue reste telle quelle."""
+    return KINDS_FR.get(kind, kind)
+
 
 def _heard(line: Line) -> dict[str, Any]:
     announced, kept, weight = gauge(line.get("pertinence annoncée")), gauge(line.get("pertinence retenue")), gauge(
         line.get("poids (habituation)"))
-    return {"when": line.get("quand"), "source": line["source"], "kind": line.text("sorte"), "announced": announced,
-            "kept": kept, "weight": weight, "habituated": weight is not None and weight["w"] < 99.5,
-            "emotion": _swatch(line.get("émotion dosée")),
+    return {"when": line.get("quand"), "source": _source(line["source"]), "kind": _kind(line.text("sorte")),
+            "announced": announced, "kept": kept, "weight": weight,
+            "habituated": weight is not None and weight["w"] < 99.5, "emotion": _swatch(line.get("émotion laissée")),
             "detail": rest(line, ("pertinence annoncée", "poids (habituation)")), "open": line.open}
 
 
 def _waiting(line: Line) -> dict[str, Any]:
-    return {"when": line.get("signalé"), "source": line["source"], "kind": line.text("sorte"),
+    return {"when": line.get("signalé"), "source": _source(line["source"]), "kind": _kind(line.text("sorte")),
             "summary": line["résumé"],
             "announced": gauge(line.get("pertinence annoncée")),
             "kept": gauge(line.get("retenue si remarqué maintenant"))}
 
 
 def _past_heard(line: Line) -> dict[str, Any]:
-    return {"when": line.get("quand"), "source": line["source"], "kind": line.text("sorte"),
-            "weight": gauge(line.get("poids (habituation)")), "emotion": _swatch(line.get("émotion dosée"))}
+    return {"when": line.get("quand"), "source": _source(line["source"]), "kind": _kind(line.text("sorte")),
+            "weight": gauge(line.get("poids (habituation)")), "emotion": _swatch(line.get("émotion laissée"))}
 
 
 def remarque(got: Got) -> Markup | None:
@@ -133,20 +190,27 @@ def remarque(got: Got) -> Markup | None:
 # ── Attentes ──────────────────────────────────────────────────────────────
 
 
+def of_whom(who: Mapping[str, Any] | None) -> str:
+    """La particule, élidée, devant le nom de qui la lui doit : « d' » devant Alice, « de » (et son espace) devant
+    Béa. Le nom reste sa cellule, avec son lien vers sa fiche : « la réponse d'Alice »."""
+    name = text(who).strip()
+    return elided(name, "de").removesuffix(name) if name else ""
+
+
 def _expectation(line: Line, raw: Mapping[str, Any], now: int) -> dict[str, Any]:
     since, due = instant(raw.get("depuis")), instant(raw.get("échéance"))
     state = line.get("état") or {}
     late = bool(due) and due <= now
-    return {"what": line.text("elle attend"), "who": line.get("de"), "since": line.get("depuis"),
-            "due": line.get("échéance") if due else None, "state": state,
+    return {"what": line.text("elle attend"), "who": line.get("de"), "of": of_whom(line.get("de")),
+            "since": line.get("depuis"), "due": line.get("échéance") if due else None, "state": state,
             "progress": round(100 * min(1.0, max(0.0, (now - since) / (due - since))), 1) if due > since > 0 else None,
             "late": late, "tone": state.get("tone") or ""}
 
 
 def _closed(line: Line) -> dict[str, Any]:
     return {"when": line.get("quand"), "what": line.text("elle attendait"), "who": line.get("de"),
-            "since": line.get("depuis"), "outcome": line.get("issue"), "event": line.get("événement"),
-            "met": text(line.get("issue")) == "comblée"}
+            "of": of_whom(line.get("de")), "since": line.get("depuis"), "outcome": line.get("issue"),
+            "event": line.get("événement"), "met": key_of(line.get("issue")) == attention_view.MET.key}
 
 
 def attentes(got: Got) -> Markup | None:
@@ -163,16 +227,17 @@ def attentes(got: Got) -> Markup | None:
 
 # ── Journal et rêves ──────────────────────────────────────────────────────
 
-#: les textes de l'onglet, reconnus au début de leur titre : (le début, sa place dans la page)
+#: les textes de l'onglet, reconnus au début de leur titre : (le début, sa place dans la page). Leur titre, qui dit
+#: leur jour en mots, se montre tel quel
 TEXTS = (("Journal du ", "journal"), ("Ce qu'elle en raconte", "told"), ("Sa journée en cours", "today"))
-#: ce que dit la colonne « souvenu au réveil » d'un rêve
-REMEMBERED = {"oui": "souvenu au réveil", "non": "oublié au réveil"}
+#: ce que dit la colonne « souvenu au réveil » d'un rêve, par la clé de son étiquette (``faculties/self/inspect.py``)
+REMEMBERED = {self_view.KEPT_ON_WAKING.key: "souvenu au réveil", self_view.LOST_ON_WAKING.key: "oublié au réveil"}
 #: ce que dit la colonne « concerne » quand une nuit ne concerne personne : il se tait
 NOBODY = "personne"
 
 
 def day_label(iso: str) -> str:
-    """« 2026-10-20 » : « lundi 20 oct. » (tel quel s'il n'est pas une date)."""
+    """« 2026-10-20 » : « lundi 20 oct. » (tel quel s'il n'est pas une date) — la clé d'une nuit dans une liste."""
     try:
         d = date.fromisoformat(iso.strip())
     except ValueError:
@@ -180,16 +245,9 @@ def day_label(iso: str) -> str:
     return date_fr(d)
 
 
-def _day_in(title: str) -> str:
-    """La journée nommée dans un titre de la faculté : « Journal du 2026-10-20, en entier », « … (2026-10-21) »."""
-    for part in title.replace("(", " ").replace(")", " ").replace(",", " ").split():
-        if len(part) == 10 and part[4] == "-" and part[7] == "-":
-            return part
-    return ""
-
-
 def nights(got: Got) -> Markup | None:
-    """Journal et rêves : le journal, ce qu'elle en raconte, sa journée en cours, puis une carte par nuit."""
+    """Journal et rêves : le journal, ce qu'elle en raconte, sa journée en cours, puis une carte par nuit. La sorte
+    d'une entrée et « souvenu au réveil » se lisent à la clé de leur étiquette, jamais à leurs mots."""
     table = got.raw_table()
     if table is None:
         return None
@@ -199,7 +257,7 @@ def nights(got: Got) -> Markup | None:
             known = next((place for start, place in TEXTS if b.title.startswith(start)), None)
             if known is None:
                 return None  # un texte qu'elle ne connaît pas : les blocs de la faculté
-            texts[known] = {"text": b.text, "day": day_label(_day_in(b.title))}
+            texts[known] = {"text": b.text, "title": b.title}
     history = listing(table, got.env, got.query)
     # l'historique suit l'ordre d'écriture (un rêve s'écrit à part de son journal) : une carte par nuit, la plus
     # récente d'abord, son journal puis ses rêves
@@ -207,13 +265,13 @@ def nights(got: Got) -> Markup | None:
     for row in history["rows"]:
         fields = {f["label"]: f["value"] for f in row["fields"]}
         kind = (row["badges"] or [{}])[0]
-        remembered = text(fields.get("souvenu au réveil")).casefold()
+        remembered = key_of(fields.get("souvenu au réveil"))
         about = fields.get("concerne")
         by_night.setdefault(text(fields.get("nuit")), []).append({
-            "kind": kind, "journal": text(kind).casefold() == "journal",
+            "kind": kind, "journal": key_of(kind) == self_view.JOURNAL_KIND,
             "text": (row["body"] or [{}])[0].get("value"),
             "about": about if text(about) not in ("", NOBODY) else None,
-            "remembered": REMEMBERED.get(remembered, ""), "awake": remembered == "oui",
+            "remembered": REMEMBERED.get(remembered, ""), "awake": remembered == self_view.KEPT_ON_WAKING.key,
             "detail": row.get("detail") or [],
         })
     groups = [{"label": day_label(night), "entries": sorted(entries, key=lambda e: not e["journal"])}

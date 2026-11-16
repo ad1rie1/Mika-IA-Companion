@@ -37,11 +37,12 @@ from mika.faculties.goals.faculty import (
     GOALS,
     Goal,
     GoalsState,
+    Task,
     _set,
     desire,
     params,
 )
-from mika.faculties.goals.inspect import _steps_tab
+from mika.faculties.goals.inspect import _plan_progress, _steps_tab
 from mika.kernel.clock import HOUR, MINUTE, US, instant, local
 from mika.kernel.events import Content, Origin
 from mika.kernel.inspect import (
@@ -272,6 +273,23 @@ def test_live_goals_are_filtered_only_by_what_a_live_goal_can_be():
 
 
 # ── La fiche d'un but ─────────────────────────────────────────────────────
+
+
+def test_the_progress_of_a_goal_is_counted_the_french_way():
+    """L'avancement d'un but se dit accordé : « 0 / 1 tâche », « 1 / 3 tâches, 2 bloquées », « 0 / 1 séance » —
+    jamais « bloquée(s) »."""
+    p = params(None)
+
+    def goal(*statuses, max_steps=8):
+        tasks = tuple(Task(i, f"t{i}", status=st) for i, st in enumerate(statuses, 1))
+        return Goal(1, goals_c.EXPLORATION, goals_c.SELF, "t", 0, max_steps=max_steps, tasks=tasks)
+
+    assert _plan_progress(goal(goals_c.TODO), p).text == "0 / 1 tâche"
+    assert _plan_progress(goal(goals_c.TASK_DONE, goals_c.TASK_BLOCKED), p).text == "1 / 2 tâches, 1 bloquée"
+    blocked = goal(goals_c.TASK_DONE, goals_c.TASK_BLOCKED, goals_c.TASK_BLOCKED)
+    assert _plan_progress(blocked, p).text == "1 / 3 tâches, 2 bloquées"
+    assert _plan_progress(goal(), p).text == "0 / 8 séances"
+    assert _plan_progress(goal(max_steps=1), p).text == "0 / 1 séance"
 
 
 def test_a_goal_is_found_with_or_without_its_ligature(tmp_path):
@@ -566,6 +584,65 @@ def test_every_operator_action_goes_through_the_engine(tmp_path):
     assert all(e.data.subject == out["gid"] for e in ev[rt.OPERATED.name] if e.data.action == "goals.pause")
     assert "Ne regarde que les années 90." in flat(out["carnet"]) and "de Adrien" in flat(out["carnet"])
     assert field(out["resume_tab"], "statut").text == "annulé" and field(out["resume_tab"], "consignes reçues") == 1
+
+
+# ── Programmer un rappel depuis la console ────────────────────────────────
+
+
+def test_the_console_programs_a_reminder_for_someone_and_refuses_field_by_field(tmp_path):
+    """« Programmer un rappel » (ADR 0232) : un but confié, le même événement que ses outils posent, pour une
+    personne (vide : toi), à la date dite ; un formulaire incomplet est refusé champ par champ ; audité."""
+    async def scenario(kernel, llm):
+        await connect(kernel, "user_1", "Adrien", operator=True)
+        await connect(kernel, "user_2", "Béa")
+        out = {"head": [a.key for a in Inspection(kernel).actions_for(section="buts")]}
+        out["bad"] = await perform(kernel, "goals.programmer", form(("urgent",), what="  ", when="demain soir",
+                                                                    owner="personne_x"), by="user_1", nonce="r1")
+        out["empty"] = await perform(kernel, "goals.programmer", form(("urgent",), what="Arroser", when=" "),
+                                     by="user_1", nonce="r2")
+        out["past"] = await perform(kernel, "goals.programmer", form(("urgent",), what="Arroser",
+                                                                     when="2026-09-01 10:00"), by="user_1", nonce="r3")
+        out["bea"] = await perform(kernel, "goals.programmer", form(
+            what="Souhaiter bon courage à Béa", when="2026-09-29T09:00", owner="user_2", urgent="on"),
+            by="user_1", nonce="r4")
+        out["me"] = await perform(kernel, "goals.programmer", form(("urgent",), what="Sortir le linge",
+                                                                   when="30/09 18h"), by="user_1", nonce="r5")
+        out["opened"] = events(kernel, goals_c.GOAL_OPENED)
+        out["audit"] = [e for e in events(kernel, rt.OPERATED) if e.data.action == "goals.programmer"]
+        out["reschedulable"] = [offered(kernel, kernel.registry.actions["goals.reprogrammer"], str(e.seq))
+                                for e in out["opened"]]
+        out["vivants"] = await tab(kernel, "vivants", "", sorte=goals_c.REMINDER)
+        return out
+
+    out = live(tmp_path, scenario)
+    assert out["head"] == ["goals.programmer"]  # l'action de la destination, en haut de Buts et rappels
+    bad = out["bad"]
+    assert not bad.ok and set(bad.errors) == {"what", "when", "owner"}
+    assert bad.errors["what"] == "valeur requise" and "illisible" in bad.errors["when"]
+    assert "personne inconnue" in bad.errors["owner"]
+    assert not out["empty"].ok and out["empty"].errors == {"when": "valeur requise"}
+    assert not out["past"].ok and "déjà passée" in out["past"].errors["when"]
+    assert out["bea"].ok and out["bea"].message == "Rappel programmé : le 29/09/2026 à 09:00, urgent."
+    assert out["me"].ok and out["me"].message == "Rappel programmé : le 30/09/2026 à 18:00."
+    bea, me = out["opened"]
+    level = 2  # personnel, comme un rappel qu'elle pose
+    assert bea.origin is Origin.EXTERNAL and bea.correlation.startswith("opérateur:goals.programmer")
+    assert (bea.data.kind, bea.data.authority, bea.data.owner, bea.data.about, bea.data.address) == \
+        (goals_c.REMINDER, goals_c.USER, "user_2", ("user_2",), None)
+    assert bea.data.due == instant(datetime(2026, 9, 29, 9, 0, tzinfo=PARIS)) and bea.data.urgent
+    assert bea.data.title.text == "Souhaiter bon courage à Béa" and bea.data.title.level == level
+    assert bea.data.source == "operator" and bea.data.sensitivity == level
+    assert not bea.data.bundles and not bea.data.max_steps and not bea.data.desire  # un rappel, pas une exploration
+    # pour toi : à défaut d'où tu es alors, là d'où tu l'as programmé
+    assert (me.data.owner, me.data.about, me.data.address, me.data.urgent) == ("user_1", ("user_1",), "user_1", False)
+    assert me.data.due == instant(datetime(2026, 9, 30, 18, 0, tzinfo=PARIS))
+    assert out["reschedulable"] == [True, True]  # un rappel comme un autre : il se reprogramme
+    audit = [(e.data.outcome, e.data.by, e.data.seqs) for e in out["audit"]]
+    assert audit == [("refused", "user_1", ()), ("refused", "user_1", ()), ("refused", "user_1", ()),
+                     ("done", "user_1", (bea.seq,)), ("done", "user_1", (me.seq,))]
+    shown = flat(out["vivants"])
+    assert "Souhaiter bon courage à Béa" in shown and "Sortir le linge" in shown
+    assert [r.cells[2] for r in table(out["vivants"], "Buts vivants").rows] == ["rappel", "rappel"]
 
 
 # ── Suspendre : ni pas, ni rappel, ni usure ───────────────────────────────

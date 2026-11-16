@@ -3,7 +3,7 @@
 - **Boîte** : ses comptes et leurs dossiers (des puces, les non-lus à côté),
   ce qui y est — filtré par état, expéditeur, recherche ; des gestes rapides
   (lu, suivi, archiver, corbeille, sur le serveur) ; ce qu'elle en a remarqué.
-- **Brouillons** : ce qu'elle a préparé et qui attend ton accord — l'ouvrir
+- **Ses brouillons** : ce qu'elle a préparé et qui attend ton accord — l'ouvrir
   montre exactement ce qui partira ; l'envoyer, le retoucher, le refuser.
 - **Envoyés**, **Contacts**.
 - **Comptes** : chaque boîte, son état, ses dossiers, sa voix ; les réglages

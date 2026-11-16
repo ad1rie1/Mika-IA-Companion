@@ -2,7 +2,9 @@
    maquette (ADR 0176) — un seul bandeau (ce qui attend ton accord, sinon sa pause ou ce qui le retient), ce que la
    faculté dit encore de son état en une ligne, une bande de chiffres (ses dernières exécutions en barres), son plan
    quand il en a un, puis des tuiles qui mènent chacune à son onglet : objectifs, exécutions, décisions en vigueur ;
-   son cadre, sa prochaine exécution, son dépôt. #}
+   son cadre, sa prochaine exécution, son dépôt. Chaque fait une fois : l'avancement des objectifs est dans la bande
+   (pas sur leur tuile), le mode et la plage dans l'en-tête, le dernier commit dans la bande et le distant dans « Son
+   dépôt ». #}
 {% import "handmade/shared/tab.html" as tab with context %}
 <div class="now-page prj-ov">
   {% if banner %}
@@ -39,7 +41,7 @@
 
   <div class="prj-ov-grid">
     <section class="now-card prj-ov-tile" aria-labelledby="prj-ov-obj">
-      <header class="prj-ov-tile-head"><h2 id="prj-ov-obj"><a href="{{ links.objectifs }}">Objectifs →</a></h2>{% if progress %}<span class="now-tag">{{ progress }}</span>{% endif %}</header>
+      <header class="prj-ov-tile-head"><h2 id="prj-ov-obj"><a href="{{ links.objectifs }}">Objectifs →</a></h2></header>
       {% if objectives %}
       <ul class="prj-ov-list" role="list">
         {% for o in objectives %}

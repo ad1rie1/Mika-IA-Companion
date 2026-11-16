@@ -48,18 +48,18 @@ from mika.kernel.inspect import (
 )
 from mika.ports.llm import LLMResponse
 from mika.runtime.inspection import Inspection
-from mika.runtime.operations import offered, perform
+from mika.runtime.operations import initial_values, offered, perform
 from mika.sim.clock import run_virtual
 from mika.vocab.privacy import Sensitivity
 from tests.fixtures.mika import befriend, boot, build, connect, said
 
 #: (propriétaire, nom) → (titre, paramètres, destination)
 OWN_VIEWS = {
-    ("identity", "personnes"): ("Annuaire", ("q",), "personnes"),
+    ("identity", "personnes"): ("Annuaire", (), "personnes"),  # il se parcourt : on cherche sur la vue d'ensemble
     ("identity", "annuaire"): ("Moyens de communication", ("q", "confiance"), "identites"),
     ("identity", "revendications"): ("Identités à confirmer", (), "identites"),
     ("identity", "politique"): ("Règles de divulgation", (), "identites"),
-    ("social", "liens"): ("Liens", ("q", "proximite"), "personnes"),
+    ("social", "liens"): ("Liens", (), "personnes"),  # de même ; ses groupes disent la proximité
     ("presence", "presents"): ("Présents", (), "personnes"),
     ("transcript", "conversations"): ("Par personne", ("handle", "q"), "fil"),
     ("transcript", "messages"): ("Messages", ("handle", "q", "role"), "fil"),
@@ -348,6 +348,14 @@ def test_a_person_has_a_fiche_that_gathers_her_handles(tmp_path):
     assert opens["sur autrui"] == "personnel" and opens["sur quelqu'un qu'elle connaît"] == "confidences"
     others = tabs[("handle", "identity", "autres")]
     assert [row_cells(r)[0].key for r in titled(others, "Les autres moyens de communication").rows] == ["handle/user_1"]
+    assert titled(others, "Les autres moyens de communication").title == "Les autres moyens de communication d'Alice"
+    # ses moyens de communication : des libellés accordés au compte, et un nom à choisir plutôt qu'une clé à taper
+    mine = tabs[("person", "identity", "adresses")]
+    band = next(b for b in mine if isinstance(b, Stats))
+    assert [(x.label, x.value) for x in band.items] == [
+        ("moyens de communication", 2), ("relié à elle", 1), ("revendication en attente", 0)]
+    note = next(b for b in mine if isinstance(b, Note) and "Relier" in b.text)
+    assert note.text.endswith("puis « Relier », et choisis Alice.") and "user_1" not in note.text
 
 
 def test_the_verdict_is_explained_and_differs_between_an_operator_and_an_anonymous_handle(tmp_path):
@@ -405,7 +413,7 @@ def test_the_lists_say_who_is_who_and_what_each_would_hear(tmp_path):
         facts = {h: (frame.get(identity_c.DISCLOSURE((h, "web", False))),
                      frame.get(identity_c.DISCLOSURE((h, "web", True)))) for h in ("user_1", ANON)}
         return (show(kernel, "identity", "annuaire"), show(kernel, "identity", "annuaire", confiance="compte"),
-                show(kernel, "identity", "personnes"), show(kernel, "identity", "personnes", q="alice"),
+                show(kernel, "identity", "personnes"), show(kernel, "identity", "personnes", q="alice"),  # ignoré
                 show(kernel, "identity", "politique"), facts)
 
     directory, accounts, listing, searched, policy, facts = run(tmp_path, scenario)
@@ -436,7 +444,8 @@ def test_the_lists_say_who_is_who_and_what_each_would_hear(tmp_path):
     people = table(listing, "personne")
     assert {row_cells(r)[0].key for r in people.rows} == {"person/user_1", f"person/{ANON}"}
     assert plain(row_of(people, "user_1")["proximité"]) == "proche"
-    assert [row_cells(r)[0].key for r in table(searched, "personne").rows] == ["person/user_1"]
+    # l'annuaire ne filtre plus : on cherche quelqu'un depuis la vue d'ensemble de Personnes
+    assert {row_cells(r)[0].key for r in table(searched, "personne").rows} == {"person/user_1", f"person/{ANON}"}
 
     # la politique est lue, pas recopiée
     channels = titled(policy, "Les canaux")
@@ -513,10 +522,10 @@ def test_linking_and_unlinking_a_handle_is_journaled_and_audited(tmp_path):
     assert ("identity.delier", "done", "user_1", ANON) in audit
     done = next(e for e in out["audit"] if e.data.action == "identity.relier" and e.data.outcome == "done")
     assert done.data.seqs == (linked[0].seq,)
-    # le registre de l'adresse nomme l'opératrice
+    # le registre du moyen de communication nomme l'opératrice
     ledger = titled(out["ledger"], "Registre des preuves")
     by = [as_dict(ledger, r)["par"] for r in ledger.rows if plain(as_dict(ledger, r)["sorte"]) == "liaison"]
-    assert by == ["un opérateur (user_1)", "un opérateur (user_1)"]
+    assert by == ["un opérateur (Alice)", "un opérateur (Alice)"]  # son nom, pas la clé de son compte
 
 
 def test_operator_evidence_is_weighed_like_any_other(tmp_path):
@@ -575,6 +584,7 @@ def test_the_operator_sets_closeness_from_the_person_fiche(tmp_path):
         await live(kernel)
         out = {"tab": show(kernel, "social", "lien", subject="user_1")}
         spec = kernel.registry.actions["social.proximite"]
+        out["initial"] = initial_values(kernel, spec, "user_1")
         out["offered"] = {k: offered(kernel, spec, k) for k in ("user_1", ANON, "anon_1", "name:bob")}
         out["bad"] = await perform(kernel, "social.proximite", form(closeness="meilleure amie"), by="user_1",
                                    subject="user_1", nonce="a")
@@ -586,6 +596,7 @@ def test_the_operator_sets_closeness_from_the_person_fiche(tmp_path):
         out["auto"] = await perform(kernel, "social.proximite", form(closeness="auto"), by="user_1",
                                     subject="user_1", nonce="d")
         out["lived"] = kernel.mind.frame().get(social_c.CLOSENESS("user_1"))
+        out["initial auto"] = initial_values(kernel, spec, "user_1")
         await perform(kernel, "identity.relier", form(person="user_1", confirmed="on"), by="user_1", subject=ANON, nonce="e")
         out["offered bound"] = offered(kernel, spec, ANON)  # une adresse reliée n'est plus une personne à part
         out["set"] = events(kernel, social_c.CLOSENESS_SET.name)
@@ -594,8 +605,10 @@ def test_the_operator_sets_closeness_from_the_person_fiche(tmp_path):
 
     out = run(tmp_path, scenario)
     assert not failed(out["tab"])
-    slot = next(b for b in out["tab"] if isinstance(b, ActionSlot))
-    assert slot.action == "social.proximite" and slot.initial == (("closeness", "close"),)
+    # le geste est dans la barre de titre de la fiche, seul (C3-07) : son formulaire s'ouvre sur la proximité en
+    # vigueur, la déclarée, puis « automatique » quand elle est rendue à leur histoire
+    assert not any(isinstance(b, ActionSlot) for b in out["tab"])
+    assert out["initial"] == {"closeness": "close"} and out["initial auto"] == {"closeness": "auto"}
     assert out["offered"] == {"user_1": True, ANON: True, "anon_1": False, "name:bob": False}
     assert not out["bad"].ok and "choix inconnu" in out["bad"].errors["closeness"]
     assert not out["same"].ok and "déjà déclarée" in out["same"].errors["closeness"]

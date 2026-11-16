@@ -1,5 +1,6 @@
 {# Journal et rêves (app/handmade/tabs/thoughts.py) : son journal en page de carnet, ce qu'elle en raconte à n'importe qui,
-   sa journée en cours ; puis une carte par nuit, son journal et ses rêves ensemble. #}
+   sa journée en cours (chacun sous le titre que lui donne la faculté, son jour en mots) ; puis une carte par nuit, son
+   journal et ses rêves ensemble. #}
 {% from "_cells.html" import cell %}
 {% from "_navigation.html" import pager as pages %}
 {% from "handmade/shared/drawn.html" import inner with context %}
@@ -7,8 +8,7 @@
   {% if journal %}
   <article class="now-card nights-journal" aria-labelledby="nights-journal-title">
     <header class="nights-journal-head">
-      <p class="now-eyebrow">Son journal</p>
-      <h2 id="nights-journal-title">{{ journal.day|capitalize }}</h2>
+      <h2 id="nights-journal-title">{{ journal.title }}</h2>
     </header>
     <div class="nights-page">{{ journal.text }}</div>
     {% if told %}
@@ -22,7 +22,7 @@
 
   {% if today %}
   <section class="now-card nights-today" aria-labelledby="nights-today-title">
-    <header class="now-card-head"><h2 id="nights-today-title">Sa journée en cours</h2><p>{{ today.day }} · ce qu'elle pourra en raconter demain, d'après les faits</p></header>
+    <header class="now-card-head"><h2 id="nights-today-title">{{ today.title }}</h2><p>d'après les faits, sans modèle</p></header>
     <p class="nights-today-text">{{ today.text }}</p>
   </section>
   {% endif %}

@@ -51,6 +51,7 @@ from mika.faculties.projects.faculty import (
     Project,
     ProjectsState,
     busy,
+    in_force,
     live,
     objective_of,
     params,
@@ -89,8 +90,11 @@ from mika.kernel.inspect import (
     Timeline,
     Toolbar,
     When,
+    agree,
     paginate,
+    plural,
 )
+from mika.kernel.text import fold
 from mika.ports.workshop import argv_lines
 from mika.vocab.episodes import Kind, outcome_words, project_target
 
@@ -123,7 +127,8 @@ STATE_PARAM = Param("etat", "État", kind="select", default="vivants",
                     choices=(("vivants", "actifs et en pause"), (c.ACTIVE, "actifs"), (c.PAUSED, "en pause"),
                              (c.ARCHIVED, "archivés"), ("tous", "tous")))
 MODE_PARAM = Param("mode", "Mode", kind="select", choices=tuple(MODE_FR.items()))
-PROJECT_PARAM = Param("projet", "Projet n°", kind="int", lo=1)
+#: un projet par son titre (ou un mot de son titre) ou son n° : la liste les nomme, leur n° ne se lit que sur leur fiche
+PROJECT_PARAM = Param("projet", "Projet", kind="search", placeholder="un titre ou un n°")
 VERDICT_PARAM = Param("verdict", "Verdict", kind="select", choices=tuple(VERDICT_FR.items()))
 OBJECTIVE_PARAM = Param("objectifs", "Objectifs", kind="select", default="vivants",
                         choices=(("vivants", "ouverts et bloqués"), (c.DONE, "faits"), (c.DROPPED, "retirés"),
@@ -186,18 +191,50 @@ def _priority(p: Project) -> Badge:
     return Badge(f"priorité {PRIORITY_FR.get(p.priority, p.priority)}", PRIORITY_TONE.get(p.priority, ""))
 
 
-def _progress(p: Project) -> Meter:
-    """L'avancement : ses objectifs ponctuels faits sur tous, et combien de constants elle entretient."""
+def _tally(p: Project) -> tuple[int, int, int, int]:
+    """Ses objectifs comptés une fois : ses ponctuels (hors retirés), ceux qui sont faits, ses constants ouverts, ses
+    objectifs bloqués."""
     once = [o for o in p.objectives if o.kind == c.ONCE and o.status != c.DROPPED]
-    done = sum(1 for o in once if o.status == c.DONE)
-    blocked = sum(1 for o in p.objectives if o.status == c.BLOCKED)
-    constants = sum(1 for o in p.objectives if o.kind == c.CONSTANT and o.status == c.OPEN)
-    parts = [f"{done} / {len(once)} ponctuel(s)"] if once else []
-    if constants:
-        parts.append(f"{constants} constant(s)")
-    if blocked:
-        parts.append(f"{blocked} bloqué(s)")
-    return Meter(done / len(once) if once else 0.0, ", ".join(parts) or "aucun objectif", "warn" if blocked else "")
+    return (len(once), sum(1 for o in once if o.status == c.DONE),
+            sum(1 for o in p.objectives if o.kind == c.CONSTANT and o.status == c.OPEN),
+            sum(1 for o in p.objectives if o.status == c.BLOCKED))
+
+
+def objectives_progress(p: Project) -> tuple[str, str, str]:
+    """L'avancement de ses objectifs, dit ici seulement : la valeur (« 0/2 » : ses ponctuels faits sur tous ; sans
+    ponctuel, le nombre de ses constants ouverts ; sans l'un ni l'autre, celui de ses objectifs bloqués ; sans rien,
+    « aucun »), la ligne qui la suit, accordée (« ponctuels faits · 1 constant · 1 bloqué »), et son ton (« warn » dès
+    qu'un objectif est bloqué). La Stat « Objectifs » de sa vue d'ensemble les porte (la fiche dessinée les lit tels
+    quels) et la jauge des listes en fait son libellé et son ton (``_progress``)."""
+    once, done, constants, blocked = _tally(p)
+    tone = "warn" if blocked else ""
+    if once:
+        value, parts = f"{done}/{once}", [agree(once, "ponctuel fait", "ponctuels faits")]
+        parts += [plural(constants, "constant", "constants")] if constants else []
+    elif constants:
+        value, parts = str(constants), [agree(constants, "constant", "constants")]
+    elif blocked:  # ses seuls objectifs vivants sont des constants bloqués : leur nombre, pas « 0 constant »
+        return str(blocked), agree(blocked, "bloqué", "bloqués"), tone
+    else:
+        return "aucun", "", tone
+    parts += [plural(blocked, "bloqué", "bloqués")] if blocked else []
+    return value, " · ".join(parts), tone
+
+
+def _progress(p: Project) -> Meter:
+    """L'avancement en jauge (la liste « Ses projets », l'onglet Projets d'une personne) : la part de ses ponctuels
+    faits, et ce que ``objectives_progress`` en dit."""
+    once, done, _, _ = _tally(p)
+    value, line, tone = objectives_progress(p)
+    return Meter(done / once if once else 0.0, f"{value} {line}" if line else "aucun objectif", tone)
+
+
+def tab_counts(p: Project) -> dict[str, int]:
+    """Ce que les onglets de sa fiche comptent, par leur nom (``Overview.counts``) : ses objectifs (hors retirés),
+    ses exécutions et ses décisions en vigueur — la tuile « Décisions en vigueur » de sa vue d'ensemble dessinée dit
+    ce dernier nombre, quand sa vue n'en montre que les dernières."""
+    return {"objectifs": sum(1 for o in p.objectives if o.status != c.DROPPED), "executions": p.runs,
+            "decisions": in_force(p)}
 
 
 #: ce qui retient son exécution (``work.why_not_now``), en mots ; ``{waits}`` : « ou une attente se termine »
@@ -421,7 +458,8 @@ def _list_view(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Bloc
                  f"{sum(1 for p in alive if busy(s, p.id))} au travail en ce moment"),
             Stat("En pause", sum(1 for p in every if p.status == c.PAUSED), "par toi, ou en panne",
                  "warn" if any(p.status == c.PAUSED for p in every) else ""),
-            Stat("Objectifs", open_once, f"ponctuels ouverts · {constants} constant(s)"),
+            Stat("Objectifs", open_once, f"{agree(open_once, 'ponctuel ouvert', 'ponctuels ouverts')} · "
+                                         f"{plural(constants, 'constant', 'constants')}"),
             Stat("Exécutions (24 h)", today, f"{pm.runs_per_hour} par heure au plus, tous projets confondus"),
             Stat("Attendent ton accord", len(waiting), "pour faire sortir quelque chose",
                  "warn" if waiting else "", APPROVALS),
@@ -464,16 +502,44 @@ def _objective_words(p: Project | None, oid: int, texts: Mapping[str, str]) -> A
     return Text(f"n° {o.id} · {_text(texts, o.text_ref)}", clamp=90)
 
 
+_NUMBER = re.compile(r"#?\s*([0-9]{1,12})")
+
+
+def _projects_named(s: ProjectsState, ctx: InspectContext, asked: str) -> tuple[int, ...]:
+    """Les projets que le filtre « Projet » désigne, du plus récent au plus ancien : des chiffres (avec ou sans « # »)
+    → ce projet ; sinon, ou s'il n'y a pas de projet sous ce n°, ceux dont le titre contient le texte, sans tenir
+    compte des accents ni de la casse (``kernel.text.fold``, comme la recherche de la console). Un titre oublié ne
+    se retrouve pas par son texte."""
+    number = _NUMBER.fullmatch(asked.strip())
+    if number and int(number.group(1)) in s.projects:
+        return (int(number.group(1)),)
+    wanted = fold(asked.strip())
+    projects = sorted(s.projects.values(), key=lambda p: -p.id)
+    texts = _texts(ctx, (p.title_ref for p in projects))
+    return tuple(p.id for p in projects if (title := texts.get(p.title_ref)) is not None and wanted in fold(title))
+
+
+def _nothing_named(asked: str) -> Note:
+    """Le filtre « Projet » ne désigne aucun projet : la table reste vide, et la page le dit."""
+    number = _NUMBER.fullmatch(asked.strip())
+    if number:
+        return Note(f"Aucun projet ne porte le n° {int(number.group(1))}.", "info")
+    return Note(f"Aucun projet ne s'appelle « {asked.strip()[:80]} ».", "info")
+
+
 @PROJECTS.inspect("toutes_executions", title="Exécutions", section="projets", order=10,
                   params=[PROJECT_PARAM, VERDICT_PARAM],
                   description="Chaque exécution de travail, tous projets confondus : l'objectif visé, le verdict, sa "
                               "preuve, le compte rendu et le commit qu'elle a laissé dans l'atelier.")
 def _runs_view(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    project, verdict = ctx.value("projet"), str(ctx.value("verdict") or "")
-    if project and verdict:
-        found, pager = _both(ctx, project, verdict)
+    asked, verdict = str(ctx.value("projet") or "").strip(), str(ctx.value("verdict") or "")
+    chosen = _projects_named(s, ctx, asked) if asked else None
+    if chosen == ():
+        found, pager = [], Pager(param="avant", size=PAGE)
+    elif chosen is not None and (len(chosen) > 1 or verdict):
+        found, pager = _both(ctx, chosen, verdict)
     else:
-        where = ("project", project) if project else ("verdict", verdict) if verdict else None
+        where = ("project", chosen[0]) if chosen else ("verdict", verdict) if verdict else None
         found, pager = _page(ctx, [c.RUN_REPORTED], where)
     texts = _texts(ctx, [r for e in found for p in (s.projects.get(e.data.project),) if p is not None
                          for r in (p.title_ref, *(o.text_ref for o in p.objectives if o.id == e.data.objective))])
@@ -489,13 +555,13 @@ def _runs_view(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Bloc
             ", ".join(d.tools) or "—", Ref("episode", e.correlation, "prompt, outils, appels")),
             href=Ref("episode", e.correlation, "")))
     running = [(r, s.projects.get(r.project)) for r in s.running.values() if r.purpose == "run"]
-    blocks: list[Block] = []
+    blocks: list[Block] = [_nothing_named(asked)] if chosen == () else []
     if running:
         names = _texts(ctx, (p.title_ref for _, p in running if p is not None))
         blocks.append(Note("En ce moment : " + ", ".join(
             f"« {_text(names, p.title_ref, '(sans titre)')} »" for _, p in running if p is not None) + ".", "info"))
     blocks.append(Table(RUN_COLUMNS, tuple(rows), title="Les exécutions", pager=pager,
-                        empty="aucune exécution avec ces filtres" if project or verdict else "aucune exécution encore"))
+                        empty="aucune exécution avec ces filtres" if asked or verdict else "aucune exécution encore"))
     return blocks
 
 
@@ -503,15 +569,18 @@ def _runs_view(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Bloc
 SCAN, SCAN_BATCHES = 200, 10
 
 
-def _both(ctx: InspectContext, project: int, verdict: str) -> tuple[list[Event[Any]], Pager]:
-    """Les comptes rendus d'un projet avec ce verdict, une page pleine (ou le journal épuisé, ou dit)."""
+def _both(ctx: InspectContext, projects: tuple[int, ...], verdict: str) -> tuple[list[Event[Any]], Pager]:
+    """Les comptes rendus de ces projets (avec ce verdict s'il est donné), une page pleine (ou le journal épuisé, ou
+    dit) : le journal filtre par le projet quand il n'y en a qu'un, sinon par le verdict ; le reste se trie ici."""
+    where = ("project", projects[0]) if len(projects) == 1 else ("verdict", verdict) if verdict else None
+    wanted = set(projects)
     cursor = ctx.int_param("avant", 0) or None
     shown: list[Event[Any]] = []
     for _ in range(SCAN_BATCHES):
-        batch = ctx.events([c.RUN_REPORTED], SCAN, where=("project", project), before=cursor)
+        batch = ctx.events([c.RUN_REPORTED], SCAN, where=where, before=cursor)
         for e in batch:
             cursor = e.seq
-            if e.data.verdict == verdict:
+            if e.data.project in wanted and (not verdict or e.data.verdict == verdict):
                 shown.append(e)
                 if len(shown) > PAGE:
                     return shown[:PAGE], Pager(param="avant", size=PAGE, older=(("avant", str(shown[PAGE - 1].seq)),))
@@ -530,8 +599,9 @@ DECISION_COLUMNS = (Column("projet"), Column("n°", "fit"), Column("la question"
                   description="Ce qui a été tranché dans ses projets, et pourquoi : elle relit les décisions en "
                               "vigueur à chaque exécution et ne rouvre pas un débat sans remplacer la décision.")
 def _decisions_view(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    project, wanted = ctx.value("projet"), str(ctx.value("statut") or c.IN_FORCE)
-    every = [(p, d) for p in sorted(s.projects.values(), key=lambda p: -p.id) if not project or p.id == project
+    asked, wanted = str(ctx.value("projet") or "").strip(), str(ctx.value("statut") or c.IN_FORCE)
+    chosen = _projects_named(s, ctx, asked) if asked else None
+    every = [(p, d) for p in sorted(s.projects.values(), key=lambda p: -p.id) if chosen is None or p.id in chosen
              for d in reversed(p.decisions) if wanted == "toutes" or d.status == wanted]
     page, pager = paginate(every, ctx.pager(size=PAGE, total=len(every)))
     texts = _texts(ctx, [r for p, d in page for r in (p.title_ref, d.title_ref, d.choice_ref, d.reason_ref)])
@@ -540,7 +610,8 @@ def _decisions_view(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list
                  _decision_badge(d), AUTHOR_FR.get(d.author, d.author), When(d.at),
                  Text(_text(texts, d.reason_ref), clamp=400)), href=_decisions_ref(p, ""))
             for p, d in page]
-    return [Table(DECISION_COLUMNS, tuple(rows), title="Décisions techniques", pager=pager,
+    return [*([_nothing_named(asked)] if chosen == () else []),
+            Table(DECISION_COLUMNS, tuple(rows), title="Décisions techniques", pager=pager,
                   empty="aucune décision avec ces filtres")]
 
 
@@ -596,17 +667,24 @@ def exact(s: ProjectsState, proposal: int) -> str:
     return argv_lines([str(a) for a in argv])
 
 
-def decide_bar(key: str, argv: str) -> list[Any]:
-    """Les boutons d'une demande : la commande exacte d'abord (quand c'en est une), puis approuver ou refuser."""
-    out: list[Any] = [Code(argv, title="La commande, entière, un argument par ligne")] if argv else []
-    out.append(Toolbar((ActionSlot("projects.approuver", (("proposal", key),), title="Approuver",
-                                   presentation="button"),
-                        ActionSlot("projects.refuser", (("proposal", key),), title="Refuser", presentation="button")),
-                       title=f"Décider de la demande n° {key}"))
-    return out
+#: le libellé du lien vers la file, sous chaque demande qui attend ton accord (la section « À décider » de la vue
+#: d'ensemble, le détail d'une ligne du Carnet) : la fiche dessinée compte ces liens pour son bandeau
+DECIDE_LABEL = "ton accord"
+#: le texte de ce lien : une espace fine insécable dans chaque guillemet, une insécable dans « À valider », pour
+#: qu'une colonne étroite (les faits d'un détail du Carnet) passe à la ligne avant le nom de la file, jamais dedans
+DECIDE_TEXT = "La décider dans « À valider »"
+COMMAND_TITLE = "La commande, entière, un argument par ligne"
+
+
+def decide_where(proposal: int) -> tuple[str, Ref]:
+    """Où se décide une demande : la file « À valider », ouverte sur elle — la fiche d'un projet ne décide plus ses
+    demandes sur place (ADR 0177) ; la console rend le lien (ADR 0216)."""
+    return DECIDE_LABEL, Ref.approvals(DECIDE_TEXT, "en_attente", demande=str(proposal))
 
 
 def _approvals(p: Project, s: ProjectsState, frame: Frame, texts: Mapping[str, str]) -> Section | None:
+    """Ce qui attend ton accord : chaque demande, ce que c'est, le lien qui la décide dans « À valider »
+    (``decide_where`` : la fiche dessinée en tire son bandeau) et la commande telle qu'elle partira (``exact``)."""
     pending = pending_of(frame, p.id)
     if not pending:
         return None
@@ -618,8 +696,10 @@ def _approvals(p: Project, s: ProjectsState, frame: Frame, texts: Mapping[str, s
         items.append(Fields(((f"demande n° {key}", Text(summary) if argv else Text(summary, clamp=600)),
                              ("ce que c'est", {f"{c.OWNER}.push": "pousser vers le dépôt distant",
                                                f"{c.OWNER}.pull": "récupérer du dépôt distant"}.get(
-                                 v.capability, "une commande avec le réseau"))), columns=1))
-        items += decide_bar(key, argv)
+                                 v.capability, "une commande avec le réseau")),
+                             decide_where(v.proposal)), columns=1))
+        if argv:
+            items.append(Code(argv, title=COMMAND_TITLE))
     return Section(f"À décider ({len(pending)})", tuple(items),
                    description="Ce qu'elle veut faire sortir de la machine : rien ne part sans ton accord. Ce qui est "
                                "montré est ce qui partira ; ses raisons sont ses mots, pas une description de la "
@@ -681,12 +761,12 @@ def _overview(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block
     target = pick(p, frame.now, pm) if p.status == c.ACTIVE else None
     # Une bande de chiffres, puis des tuiles : ce qui se lit d'un coup ; le détail vit dans les onglets (ADR 0176).
     blocks.append(Stats((
-        Stat("Objectifs", _progress(p), href=_link(p, tab="objectifs")),
+        Stat("Objectifs", *objectives_progress(p), href=_link(p, tab="objectifs")),  # valeur, ligne et ton
         Stat("Exécutions", str(p.runs), f"{runs_today(p, frame.now)} sur 24 h (au plus {daily_cap(p, pm)})",
              href=_link(p, tab="executions")),
         Stat("Pannes d'affilée", str(p.failures) if p.failures else "aucune", tone="danger" if p.failures else ""),
         Stat("Dernier commit", Text(p.last_commit[:7], "mono") if p.last_commit else "aucun encore",
-             f"dépôt distant : {_host(p.remote) or 'aucun'}", href=_link(p, tab="git")),
+             href=_link(p, tab="git")),
     ), title="Où il en est"))
     open_rows = []
     for o in sorted(p.objectives, key=lambda o: (OBJ_ORDER.get((o.kind, o.status), 9), o.id)):
@@ -711,16 +791,15 @@ def _overview(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block
             for e in recent), title="Dernières exécutions", empty="aucune exécution encore"),
     ), columns=2))
     blocks.append(Grid((
+        # son mode et sa plage sont dans les faits de son en-tête ; son dernier commit, dans la bande
         Fields((("quand", _next_words(p, s, frame, ctx)),
                 ("sur quoi", Text(f"n° {target.id} · {_text(texts, target.text_ref)}", clamp=80)
-                 if target is not None else "—"),
-                ("mode", _mode(p)), ("plage de travail", window_words(p))),
+                 if target is not None else "—")),
                title="Prochaine exécution"),
         Prose(_text(texts, p.description_ref), title="Le cadre") if p.description_ref
         else Note("Aucun cadre écrit : elle suit le titre, ses objectifs et les consignes. Il se change dans l'onglet "
                   "Comportement et outils.", "muted", title="Le cadre"),
-        Fields((("dernier commit", _commit_ref(p, p.last_commit) if p.last_commit else "aucun encore"),
-                ("dépôt distant", _remote_ref(p)),
+        Fields((("dépôt distant", _remote_ref(p)),
                 ("dernier échange", Text(p.remote_line, tone="ok" if p.remote_ok else "danger", clamp=90)
                  if p.remote_line else "aucun"),
                 ("l'histoire complète", _link(p, "onglet Dépôt git", "git"))),
@@ -743,7 +822,7 @@ def _last_words(o: Objective, now: int, pm: Any) -> str:
     if o.status == c.DONE and o.closed_at:
         return f"fait il y a {_ago(now - o.closed_at)}"
     if o.last_run_at:
-        return f"{o.runs} exécution(s), la dernière il y a {_ago(now - o.last_run_at)}"
+        return f"{plural(o.runs, 'exécution', 'exécutions')}, la dernière il y a {_ago(now - o.last_run_at)}"
     return "pas encore travaillé"
 
 
@@ -942,11 +1021,19 @@ def _decisions_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[
 # ── La fiche : comportement et outils ─────────────────────────────────────
 
 
+#: le fait de « Son rythme » qui dit quand il travaillera la prochaine fois (la fiche dessinée le met en tête)
+NEXT_RUN_LABEL = "prochaine exécution"
+
+
 @PROJECTS.inspect("comportement", title="Comportement et outils", subject="project", order=70,
                   description="Comment elle y travaille : son mode (elle, avec son humeur et ses avis, ou un travail "
                               "impersonnel), son rythme et sa plage de travail, ce qu'elle a le droit de faire sortir, "
                               "et les outils qu'elle a en main.")
 def _behaviour_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:
+    """Le formulaire « Modifier le projet », puis ses réglages en faits — son mode, son rythme (et sa prochaine
+    exécution), sa liberté — et ses outils. La fiche dessinée (``app/handmade/subjects/project.py``) montre le
+    formulaire et tait ces faits, qu'elle passe en aide de leur réglage ou en une ligne ; ils restent ici pour la
+    console en MCP, le repli, et un projet archivé (sans formulaire), qui les montre en lecture."""
     p = _subject(s, ctx)
     if isinstance(p, Note):
         return [p]
@@ -971,17 +1058,24 @@ def _behaviour_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[
                                                                                 "plage)")),
                title="Son mode"),
         Fields((("plage de travail", window_words(p)), ("agenda", schedule_words(p.schedule)),
-                ("exécutions par jour", f"{daily_cap(p, pm)} au plus" + ("" if p.runs_per_day else " (par défaut)")),
+                # le plafond par défaut se dit toujours : « 0 » dans le formulaire, c'est lui
+                ("exécutions par jour", f"{daily_cap(p, pm)} au plus" + (
+                    f" (par défaut : {pm.runs_per_day})" if p.runs_per_day else " (par défaut)")),
                 ("espacement", f"{pm.run_spacing_us // MINUTE} min au moins"),
                 ("par heure, tous projets", f"{pm.runs_per_hour} au plus"),
-                ("maintenant", _next_words(p, s, frame, ctx))),
+                ("priorité", PRIORITY_FR.get(p.priority, p.priority)),
+                (NEXT_RUN_LABEL, _next_words(p, s, frame, ctx))),
                title="Son rythme"),
+        Fields((("ce qui sort de la machine", "attend ton accord" if p.approval else "part sans ton accord"),),
+               title="Sa liberté"),
     ), columns=2))
     blocks.append(_tools_section(p, frame, editable))
     return blocks
 
 
 def _tools_section(p: Project, frame: Frame, editable: bool) -> Section:
+    """Ses outils : les lots qu'elle a en main pendant une exécution (ce qu'ils permettent, leurs outils nommés), et
+    « Choisir ses outils » (``projects.outils``) tant que le projet se modifie."""
     descriptions: Mapping[str, str] = getattr(frame.env, "bundles", {}) or {}
     tools: Mapping[str, Any] = getattr(frame.env, "tools", {}) or {}
     rows = []
@@ -1060,8 +1154,10 @@ def _notebook_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[B
     for e in proposed:
         state, detail = _effect_state(e, e.seq in pending, outcomes.get(e.seq, ()))
         more: list[Any] = [Code(_cut(detail, 4000), title="ce qu'il en est")] if detail else []
-        if e.seq in pending:
-            more += decide_bar(str(e.seq), exact(s, e.seq))
+        if e.seq in pending:  # ce qui partira, puis où le décider : la fiche ne décide plus sur place (ADR 0177)
+            argv = exact(s, e.seq)
+            more += [Code(argv, title=COMMAND_TITLE)] if argv else []
+            more.append(Fields((decide_where(e.seq),), columns=1))
         effect_rows.append(Row((When(e.at), Text(_said(e.data.summary), clamp=SUMMARY_CLAMP),
                                 "requis" if e.data.approval else "non requis", state),
                                tone="warn" if e.seq in pending else "", detail=tuple(more)))
@@ -1098,6 +1194,14 @@ def _effect_state(proposal: Event[Any], pending: bool, outcomes: Sequence[Event[
 # ── Sur la fiche d'une personne ───────────────────────────────────────────
 
 
+def of_person(s: ProjectsState, handles: Iterable[str]) -> list[Project]:
+    """Les projets qui regardent cette personne (``handles`` : sa clé et ses moyens de communication) : menés pour
+    elle, ou qui la concernent — l'onglet Projets de sa fiche, et son compte dans la barre
+    (``PersonOverview.counts``)."""
+    keys = set(handles)
+    return [p for p in s.projects.values() if p.owner in keys or keys & set(p.about)]
+
+
 @PROJECTS.inspect("projets", title="Projets", subject="person", order=75,
                   description="Les projets qu'elle mène pour cette personne, ou qui la concernent.")
 def _person_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:
@@ -1105,8 +1209,7 @@ def _person_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Blo
     if not person:
         return [Note("Cette vue se lit sur la fiche d'une personne.", tone="muted")]
     handles = {person, *frame.get(identity_c.HANDLES(person))}
-    concerned = sorted((p for p in s.projects.values() if p.owner in handles or handles & set(p.about)),
-                       key=lambda p: (not live(p), -p.id))
+    concerned = sorted(of_person(s, handles), key=lambda p: (not live(p), -p.id))
     page, pager = paginate(concerned, ctx.pager(size=PAGE, total=len(concerned)))
     texts = _texts(ctx, (p.title_ref for p in page))
     rows = [Row((_link(p, _text(texts, p.title_ref, "(sans titre)")), _mode(p), _state(p), _progress(p),
@@ -1114,15 +1217,20 @@ def _person_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Blo
             for p in page]
     out: list[Block] = []
     if concerned:  # l'oubli efface sa vie (contenus, journal) ; un atelier est un dossier : il faut le dire
-        out.append(Note(FORGET_NOTE.format(n=len(concerned)), tone="warn", title="L'oubli et les ateliers"))
+        out.append(Note(forget_note(len(concerned)), tone="warn", title="L'oubli et les ateliers"))
     return [*out, Table((Column("projet"), Column("mode", "fit"), Column("état", "fit"), Column("objectifs"),
                          Column("lien", "fit"), Column("ouvert", "fit")), tuple(rows), title="Ses projets",
                         pager=pager, empty="aucun projet pour cette personne ni à son sujet")]
 
 
-#: ce que l'oubli d'une personne n'atteint pas (PRJ-9) : dit sur sa fiche, avant qu'on l'oublie
-FORGET_NOTE = ("Oublier cette personne efface ce que sa vie garde de ces {n} projet(s) — titres, comptes "
-               "rendus, carnets, décisions —, pas leurs ateliers : les fichiers, l'historique git (dont les messages "
-               "de commit restent neutres) et ce qui est déjà parti vers un dépôt distant. Ouvre chaque projet pour "
-               "faire le ménage dans son atelier, ou archive-le. Le stockage des apps de la Forge n'est pas atteint "
-               "non plus (« Vider le stockage » sur la fiche d'une app).")
+def forget_note(n: int) -> str:
+    """Ce que l'oubli d'une personne n'atteint pas (PRJ-9), dit sur sa fiche avant qu'on l'oublie, accordé au nombre de
+    ses projets (« ce projet », « ces 3 projets »)."""
+    one = n == 1
+    these = "ce projet" if one else f"ces {plural(n, 'projet', 'projets')}"
+    return (f"Oublier cette personne efface ce que sa vie garde de {these} — titres, comptes rendus, carnets, "
+            f"décisions —, pas {'son atelier' if one else 'leurs ateliers'} : les fichiers, l'historique git (dont "
+            "les messages de commit restent neutres) et ce qui est déjà parti vers un dépôt distant. "
+            f"{'Ouvre-le' if one else 'Ouvre chaque projet'} pour faire le ménage dans son atelier, ou archive-le. "
+            "Le stockage des apps de la Forge n'est pas atteint non plus (« Vider le stockage » sur la fiche d'une "
+            "app).")

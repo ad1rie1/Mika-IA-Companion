@@ -9,7 +9,8 @@ recopie.
 Une lecture, sauf **Partages** (ADR 0210) : qui a reçu la boîte, le compte Teams ou le service de qui. Un opérateur y
 retire le partage d'une boîte ou d'un compte Teams, par l'écriture de son propriétaire
 (``app/me/sharing.py::write_share``), confirmé et audité ; celui d'un service se retire sur ses lignes d'accès. Il n'en
-crée aucun : donner reste au propriétaire.
+crée aucun : donner reste au propriétaire. Le même geste est sur la fiche d'une personne (Comptes › Partages,
+``retiring``), qui y revient (``retour``).
 
 Une famille se décrit ici pour l'opératrice, à la troisième personne (``FAMILY_ABOUT``) : la phrase que lit le modèle
 (sa voix, ``persona/voix.yaml``) lui parle à elle (« tes rappels… »), et la console ne la recopie pas.
@@ -35,6 +36,7 @@ from mika.contracts import forge as forge_c
 from mika.inspector import render
 from mika.inspector.pages import rights
 from mika.inspector.pages import tools as catalog
+from mika.inspector.pages.actions import safe_back
 from mika.inspector.ui import PREFIX, UI, secure
 from mika.kernel.frame import Audience
 from mika.kernel.inspect import Pager, Ref
@@ -308,21 +310,30 @@ def _owner(ui: UI, owner: str) -> str:
     return ui.names.who(owner[len(PERSON):]) if owner.startswith(PERSON) else "toi"
 
 
+def retiring(ui: UI, s: sharing.Shared) -> dict[str, Any]:
+    """Comment retirer ce partage, là où il se montre (Partages ici ; Comptes › Partages, sur la fiche d'une personne) :
+    ce que le formulaire « Retirer » envoie (sa sorte, sa clé, la personne qui le reçoit), la question qui le confirme
+    et le nom de cette personne ; un service, lui, mène à ses lignes d'accès (``access``), où il se retire. Écrit une
+    fois, pour que les deux endroits posent le même geste."""
+    name = ui.names.who(s.person)
+    return {"kind": s.kind, "key": s.key, "person": s.person, "name": name,
+            "access": "" if s.kind in RETIRED_HERE else render.href(Ref.subject(SERVICE, s.key, s.title, "fait")),
+            "ask": f"Retirer à {name} son accès à {_resource(s)} ? Il disparaît de son espace ; seul son "
+                   "propriétaire peut le lui redonner."}
+
+
 def shared(ui: UI) -> list[dict[str, Any]]:
     """Partages (ADR 0210) : une ligne chacun, en mots — sa ressource et sa sorte, son propriétaire, qui le reçoit, son
-    niveau. La date n'y est pas : un partage ne la garde pas."""
+    niveau, et comment le retirer (``retiring``). La date n'y est pas : un partage ne la garde pas."""
     settings = ui.deps.settings
     if settings is None:
         return []
     out = []
     for s in sharing.every_share(settings):
-        name = ui.names.who(s.person)
-        out.append({"kind": s.kind, "key": s.key, "person": s.person, "title": s.title, "sort": SHARED_KINDS[s.kind],
-                    "owner": _owner(ui, s.owner), "name": name, "level": dict(SHARES).get(s.level, s.level),
-                    "href": render.href(Ref.subject("person", ui.names.person_of(s.person), name)),
-                    "access": "" if s.kind in RETIRED_HERE else render.href(Ref.subject(SERVICE, s.key, s.title, "fait")),
-                    "ask": f"Retirer à {name} son accès à {_resource(s)} ? Il disparaît de son espace ; seul son "
-                           "propriétaire peut le lui redonner."})
+        row = retiring(ui, s)
+        out.append({**row, "title": s.title, "sort": SHARED_KINDS[s.kind], "owner": _owner(ui, s.owner),
+                    "level": dict(SHARES).get(s.level, s.level),
+                    "href": render.href(Ref.subject("person", ui.names.person_of(s.person), row["name"]))})
     return out
 
 
@@ -349,8 +360,18 @@ async def _unshared(ui: UI, data: Mapping[str, Any], by: str) -> tuple[str, str]
     return "ok", f"Partage retiré : {ui.names.who(person)} n'a plus accès à {what}."
 
 
+def _back(asked: str, token: str) -> str:
+    """Où revenir, le message en tête : ``retour`` s'il est une adresse de la console (``safe_back`` : la fiche d'une
+    personne, son sous-onglet Partages), sinon la liste des partages. Le message se pose avant l'ancre."""
+    target = asked if asked and safe_back(asked) == asked else f"{PAGE}#d-partages"
+    path, _, anchor = target.partition("#")
+    flashed = f"{path}{'&' if '?' in path else '?'}flash={quote(token, safe='')}"
+    return f"{flashed}#{anchor}" if anchor else flashed
+
+
 async def unshare(ui: UI, request: Request) -> Response:
-    """« Retirer », dans Partages : confirmé par la page, audité ; on revient à la liste, le message en tête."""
+    """« Retirer », dans Partages ou sur la fiche d'une personne (Comptes › Partages, ``retour``) : confirmé par la
+    page, audité ; on revient d'où l'on vient (``_back``), le message en tête — même quand le jeton est refusé."""
     data = await ui.form(request)
     account = ui.operator(request)
     token = secrets.token_urlsafe(9)
@@ -360,7 +381,8 @@ async def unshare(ui: UI, request: Request) -> Response:
         ui.flash(token, "warn", "Les réglages ne sont pas joignables : rien n'a été retiré.")
     else:
         ui.flash(token, *await _unshared(ui, data, account.handle))
-    return secure(RedirectResponse(f"{PAGE}?flash={quote(token, safe='')}#d-partages", status_code=303))
+    asked = str((await request.form()).get("retour") or "")  # le formulaire déjà lu (Starlette le garde)
+    return secure(RedirectResponse(_back(asked, token), status_code=303))
 
 
 def routes(ui: UI) -> list[Route]:

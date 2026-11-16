@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from mika.contracts import email as c
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
     ActionSlot,
@@ -42,13 +41,6 @@ from mika.plugins.email.inspect.common import (
 from mika.ports.mail import MailQuery, mail_ref, split_ref
 
 
-def _pending_note(frame: Frame, account: str) -> Note | None:
-    waiting = sum(1 for d in frame.get(c.DRAFTS) if not account or d.account == account)
-    if not waiting:
-        return None
-    return Note(f"{waiting} brouillon(s) d'elle attend(ent) ton accord : voir l'onglet Brouillons.", tone="warn")
-
-
 @EMAIL.inspect("envoyes", title="Envoyés", section=SECTION, order=30,
                description="Ce qui est parti de ses boîtes : écrit par elle (après accord) ou depuis la console.",
                params=[Param("compte", "Boîte", kind="hidden"),
@@ -57,11 +49,8 @@ def _outbox(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = scoped(ctx.ports.get("mail"), ctx)
     blocks: list[Block] = []
     account = account_scope(port, ctx)
-    pending = _pending_note(frame, account)
-    if pending is not None:
-        blocks.append(pending)
     if port is None:
-        return [*blocks, Note(NO_PORT, tone="muted")]
+        return [Note(NO_PORT, tone="muted")]
     query = fold(ctx.value("q") or "")
     request = ctx.pager(size=BOX_PAGE)
     result = port.outgoing_page(MailQuery(account=account, text=query), request.number, request.size)

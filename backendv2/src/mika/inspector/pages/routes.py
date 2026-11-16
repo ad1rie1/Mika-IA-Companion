@@ -20,7 +20,7 @@ from mika.inspector.pages import accounts, params
 from mika.inspector.pages.actions import Actions, safe_back
 from mika.inspector.pages.auth import Auth
 from mika.inspector.pages.canals import canals_post
-from mika.inspector.pages.episode_drawn import episode_panel
+from mika.inspector.pages.episode_drawn import episode_panel, tally
 from mika.inspector.pages.families import families_post
 from mika.inspector.pages.journal import (
     EPISODE_TABS,
@@ -44,6 +44,7 @@ from mika.kernel.inspect import (
     Workspace,
     int_query,
     is_table_choice,
+    num_fr,
     walk_blocks,
 )
 from mika.ports.journal import JournalEvent
@@ -159,11 +160,13 @@ class Pages(Actions):
         return (link.target, *link.also)
 
     # ── utilitaires ──
-    def tab_badge(self, item: Builtin | InspectSpec) -> int:
+    def tab_badge(self, item: Builtin | InspectSpec) -> tuple[int, str]:
+        """Le badge d'un onglet, en couple (n, indice) : ce qu'il compte, que la barre dit au survol du nombre (ADR
+        0219 ; audit du 2026-11-05, C4-11)."""
         if isinstance(item, Builtin):
-            return item.badge_of(self.ui)[0]
+            return item.badge_of(self.ui)
         b = self.ui.inspection.badge(item)
-        return b[0] if b else 0
+        return b if b else (0, "")
 
     async def produce(self, item: Builtin | InspectSpec, request: Request) -> dict[str, Any]:
         """Les blocs (et les filtres, un gabarit à part) d'un onglet."""
@@ -201,11 +204,14 @@ class Pages(Actions):
         keep = [*keep, *((k, v) for k, v in query.items() if is_table_choice(k, v) and k not in dict(keep))]
         env = self.ui.env()
         fctx, active_filter = render.filters_ctx(filters, query)
-        # des filtres faits de petits choix : des boutons à choix au bout de la barre d'onglets, pas un formulaire
-        quick = render.quick_filters(fctx, keep)
+        # des filtres de petits choix : des boutons à choix au bout de la barre d'onglets, même à côté d'une
+        # recherche ; le formulaire qui reste se juge et se réinitialise seul, le choix en vigueur tient
+        quick, fctx = render.quick_filters(fctx, keep)
+        held = {q["name"]: q["value"] for q in quick}
         if quick:
-            fctx, ctx["quick"] = [], quick
-        reset = request.url.path + ("?" + urlencode(dict(keep)) if keep else "")
+            ctx["quick"] = quick
+            active_filter = any(f["changed"] for f in fctx if f["kind"] != "hidden")
+        reset = request.url.path + ("?" + urlencode({**dict(keep), **held}) if keep or held else "")
         panel_ctx = dict(panel.context) if panel else {}
         if panel_ctx.get("page_heading"):
             ctx["heading"] = panel_ctx.pop("page_heading")
@@ -269,8 +275,12 @@ class Pages(Actions):
         drawn = self.drawn(request, f"{d.key}/{slug}", got) if produced is None else {}
         if drawn:
             got = {**got, "blocks": drawn.pop("blocks"), **({} if drawn.pop("panel") else {"panel": None})}
-        tab_list = [{"title": t, "href": f"{dest_url(d.key)}/{s}", "on": s == slug, "badge": self.tab_badge(b),
-                     "group": b.group if isinstance(b, Builtin) else "", "slug": s} for s, t, b in tabs]
+        tab_list: list[dict[str, Any]] = []
+        for tab_slug, tab_title, tab_item in tabs:
+            count, hint = self.tab_badge(tab_item)  # l'indice, dit au survol du nombre (ADR 0219)
+            tab_list.append({"title": tab_title, "href": f"{dest_url(d.key)}/{tab_slug}", "on": tab_slug == slug,
+                             "badge": count, "hint": hint,
+                             "group": tab_item.group if isinstance(tab_item, Builtin) else "", "slug": tab_slug})
         context = {k: request.query_params[k] for k in d.context if request.query_params.get(k)}
         if context:
             for t in tab_list:
@@ -375,11 +385,16 @@ class Pages(Actions):
         if slug not in dict(EPISODE_TABS):
             slug = "resume"
         base = f"{PREFIX}/episode/{quote(corr, safe='')}"
-        tabs = [{"title": t, "href": f"{base}?onglet={s}", "on": s == slug, "badge": 0} for s, t in EPISODE_TABS]
+        # ses onglets disent leur compte (ADR 0176), lus une fois avec le résumé, que le Résumé dessiné reprend
+        counted = call(tally, self.ui, corr, info, label="les comptes d'un épisode")
+        counted = None if isinstance(counted, Failed) else counted
+        counts = {s: num_fr(n) for s, n in counted.counts.items() if n} if counted is not None else {}
+        tabs = [{"title": t, "href": f"{base}?onglet={s}", "on": s == slug, "badge": 0, "count": counts.get(s, "")}
+                for s, t in EPISODE_TABS]
         panel = replay_panel(self.ui, corr, self.back(request)) if slug == "prompt" else None
         # dessinée (ADR 0121) ; ses blocs au repli, ou quand une liste est demandée en tableau
         drawn = None if wants_table(request.query_params) else episode_panel(
-            self.ui, corr, slug, info, dict(request.query_params), self.ui.env(), panel)
+            self.ui, corr, slug, info, dict(request.query_params), self.ui.env(), panel, counted)
         blocks = [] if drawn is not None else episode_tab(self.ui, corr, slug, info, request.query_params)
         return self.render_page(request, title=f"Épisode · {info['kind']}", heading=f"Un épisode : {info['kind']}",
                                 subtitle=dict(EPISODE_TABS)[slug] + " · " + {
@@ -466,18 +481,21 @@ class Pages(Actions):
         if got is None:
             return self.render_page(request, title="Événement introuvable", active="systeme", status=404,
                                     blocks=[Note("Aucun événement à ce numéro.", "warn")])
+        env = self.ui.env()
         # dessinée (ADR 0121) ; ses blocs au repli
-        drawn = None if wants_table(request.query_params) else event_panel(got, self.ui.env(),
-                                                                           dict(request.query_params))
+        drawn = None if wants_table(request.query_params) else event_panel(got, env, dict(request.query_params))
         # un événement par son numéro, sous le journal (« Système / Journaux / Journal d'événements / n° 93 ») : le
-        # menu allume le journal, pas un de ses onglets
+        # menu allume le journal, pas un de ses onglets ; son numéro, le fil le dit (le titre de l'onglet du
+        # navigateur aussi), pas son titre ; ses repères (quand, émis par, origine, son épisode) sur la ligne de faits
+        # de l'en-tête, dessinée ou au repli, comme la vue d'un objet
         crumbs = self.trail(JOURNAL, (f"n° {seq}", ""))
-        where = {"menu_path": f"{PREFIX}/{JOURNAL}", "menu_tab": False}
+        facts = [{"label": k, "cell": render.cell(v, env)} for k, v in got["facts"]]
+        where = {"menu_path": f"{PREFIX}/{JOURNAL}", "menu_tab": False, "heading": got["title"], "facts": facts}
+        title = f"{got['title']} · n° {seq}"
         if drawn is not None:
-            return self.render_page(request, title=got["title"], active="systeme", crumbs=crumbs, blocks=[],
-                                    panel=drawn, **where)
-        return self.render_page(request, title=got["title"], active="systeme", crumbs=crumbs, blocks=got["blocks"],
-                                **where)
+            return self.render_page(request, title=title, active="systeme", crumbs=crumbs, blocks=[], panel=drawn,
+                                    **where)
+        return self.render_page(request, title=title, active="systeme", crumbs=crumbs, blocks=got["blocks"], **where)
 
     # ── vitaux ──
     async def vitals(self, request: Request) -> Response:

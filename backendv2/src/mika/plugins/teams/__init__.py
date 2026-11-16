@@ -249,8 +249,9 @@ class Settled(Payload):
 
 
 class Written(Payload):
-    """La personne du compte a écrit dans cette conversation depuis le web (ADR 0189, 0199) : son message est en file
-    pour l'extension de ce compte. Ni son texte ni son auteur : le monde reste dans l'adaptateur."""
+    """La personne du compte a écrit dans cette conversation depuis le web (ADR 0189, 0199), ou un opérateur depuis la
+    console (ADR 0231) : son message est en file pour l'extension de ce compte. Ni son texte ni son auteur : le monde
+    reste dans l'adaptateur."""
 
     conversation: str
     account: str = DEFAULT_ACCOUNT

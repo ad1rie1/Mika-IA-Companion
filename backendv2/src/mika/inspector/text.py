@@ -12,7 +12,6 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from mika.inspector.render import relative
 from mika.kernel.inspect import (
     ActionSlot,
     Badge,
@@ -40,6 +39,7 @@ from mika.kernel.inspect import (
     Workspace,
     num_fr,
     pct_fr,
+    relative_fr,
 )
 
 MAX_DEPTH = 8
@@ -84,7 +84,7 @@ def cell(value: Any, when: Callable[[int], str], now: int) -> str:
     if isinstance(value, Swatch):
         return value.text
     if isinstance(value, When):
-        return relative(value.at, now) if value.relative else when(value.at)
+        return relative_fr(value.at, now) if value.relative else when(value.at)
     return _clip(str(value))
 
 

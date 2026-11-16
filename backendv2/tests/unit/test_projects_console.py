@@ -25,18 +25,28 @@ from types import SimpleNamespace
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
-from mika.faculties.projects.faculty import DEPOSITED, NUDGED, OBJECTIVE_ADDED, REFRAMED
-from mika.faculties.projects.inspect import WHY_WORDS, _who
+from mika.faculties.projects.actions import OTHER_RULE, CreateArgs, ModifyArgs
+from mika.faculties.projects.faculty import DEPOSITED, NUDGED, OBJECTIVE_ADDED, REFRAMED, Objective, Project
+from mika.faculties.projects.inspect import (
+    WHY_WORDS,
+    _progress,
+    _who,
+    forget_note,
+    objectives_progress,
+    tab_counts,
+)
 from mika.faculties.projects.work import Why, next_run_at
+from mika.inspector.formview import action_view
 from mika.inspector.pages.actions import per_row
 from mika.kernel.clock import MINUTE, US
 from mika.kernel.events import Content, Origin
-from mika.kernel.forms import Upload
+from mika.kernel.forms import Upload, describe
 from mika.kernel.inspect import (
     ActionSlot,
     Code,
     Disclosure,
     Download,
+    Fields,
     Grid,
     Head,
     Nav,
@@ -47,6 +57,7 @@ from mika.kernel.inspect import (
     Toolbar,
 )
 from mika.ports.workshop import Commit, Hosted, Ticket
+from mika.runtime import decisions
 from mika.runtime.inspection import Inspection
 from mika.runtime.operations import initial_values, offered, perform
 from mika.sim.llm.persona import _section
@@ -119,11 +130,14 @@ def test_the_projects_menu_fresh_then_alive(tmp_path):
     row = tables(listing)["Projets"].rows[0]
     assert row.href.key == f"project/{pid}" and row.cells[0].text == "Outils réseau"
     assert row.cells[1].text == "impersonnel"
-    assert row.cells[4].text.endswith(" / 2 ponctuel(s), 1 constant(s)")  # ses deux ponctuels, son constant
+    assert row.cells[4].text.endswith("/2 ponctuels faits · 1 constant")  # ses deux ponctuels, son constant, accordés
     assert row.cells[9] == "les jours ouvrés, de 9 h à 18 h" and "github.com/moi/outils" in row.cells[12].text
     stats = next(b for b in listing if isinstance(b, Stats))
     counts = {st.label: st.value for st in stats.items}
     assert counts["Actifs"] == 1 and counts["Exécutions (24 h)"] >= 1 and counts["Archivés"] == 0
+    # ses ponctuels ouverts et ses constants, accordés à leur nombre — jamais « constant(s) »
+    opened = "ponctuel ouvert" if counts["Objectifs"] < 2 else "ponctuels ouverts"
+    assert {st.label: st.sub for st in stats.items}["Objectifs"] == f"{opened} · 1 constant"
     assert "aucun projet avec ces filtres" in flat(alive["archived"])
     runs = tables(alive["runs"])["Les exécutions"]
     assert runs.rows and runs.rows[0].cells[1].text == "Outils réseau" and runs.rows[0].cells[3].text == "fait"
@@ -137,7 +151,9 @@ def test_the_projects_menu_fresh_then_alive(tmp_path):
     assert [f.key for f in alive["by_title"]] == [str(pid)] == [f.key for f in alive["by_number"]]
     assert "Outils réseau" in flat(alive["person"])
     # avant d'oublier quelqu'un, sa fiche dit ce que l'oubli n'atteint pas : l'atelier de ses projets (PRJ-9)
-    assert "pas leurs ateliers" in flat(alive["person"]) and "Vider le stockage" in flat(alive["person"])
+    # (un seul projet : « ce projet », « son atelier », accordés — jamais « ces 1 projet(s) »)
+    assert "ce que sa vie garde de ce projet" in flat(alive["person"]) and "pas son atelier" in flat(alive["person"])
+    assert "Vider le stockage" in flat(alive["person"])
 
 
 # ── Créer ─────────────────────────────────────────────────────────────────
@@ -146,9 +162,9 @@ def test_the_projects_menu_fresh_then_alive(tmp_path):
 def test_creating_says_what_is_wrong_field_by_field_and_leads_to_the_fiche(tmp_path):
     async def scenario(kernel, llm):
         bad = await perform(kernel, "projects.creer", form(
-            title=" ", schedule="tous les jours", start="25:00", end="midi", owner="personne_x", mode="persona",
-            days="all", remote="http://github.com/x", branch="../main", cadence_hours="0", runs_per_day="0",
-            priority="normal"), by="user_1", nonce="b1")
+            title=" ", schedule="autre", schedule_rule="tous les jours", start="25:00", end="midi", owner="personne_x",
+            mode="persona", days="all", remote="http://github.com/x", branch="../main", cadence_hours="0",
+            runs_per_day="0", priority="normal"), by="user_1", nonce="b1")
         ok = await perform(kernel, "projects.creer", form(
             ("approval", "auto_push"), title="Un module", objectives="Écrire le module\n\n", constants="Le tenir à jour",
             cadence_hours="6", mode="persona", schedule="interval:2h", days="all", start="", end="", runs_per_day="5",
@@ -157,7 +173,8 @@ def test_creating_says_what_is_wrong_field_by_field_and_leads_to_the_fiche(tmp_p
 
     bad, ok, created, objectives, audit = live(tmp_path, scenario)
     assert not bad.ok
-    assert set(bad.errors) == {"title", "objectives", "schedule", "start", "end", "owner", "remote", "branch"}
+    # la règle écrite sous « une autre règle… » : refusée sur son champ
+    assert set(bad.errors) == {"title", "objectives", "schedule_rule", "start", "end", "owner", "remote", "branch"}
     assert "une adresse https" in bad.errors["remote"] and "au moins un objectif" in bad.errors["objectives"]
     assert ok.ok and ok.go is not None and ok.go.key == f"project/{created[0].seq}"  # créé : on arrive sur sa fiche
     [p] = created
@@ -205,11 +222,32 @@ def test_every_tab_reads_a_project_that_lived_and_the_forms_stay_in_their_tabs(t
     assert head == ["projects.lancer", "projects.consigne", "projects.pause", "projects.archiver"]
     overview = tabs["apercu"]
     assert "À décider (1)" in flat(overview) and "installer requests" in flat(overview)
-    # une bande de chiffres, puis des tuiles (ADR 0176)
-    assert next(b for b in overview if isinstance(b, Stats)).title == "Où il en est"
+    # la fiche ne décide plus ses demandes sur place (ADR 0177) : ni la vue d'ensemble (servie en MCP, au repli) ni le
+    # Carnet ne portent Approuver ou Refuser, mais un lien vers la file, ouverte sur la demande
+    pending = next(r for r in tables(tabs["carnet"])["Ce qui sort de la machine"].rows if r.tone == "warn")
+    for where, blocks in (("apercu", overview), ("carnet", pending.detail)):
+        assert not {b.action for b in nested(blocks) if isinstance(b, ActionSlot)} & {
+            "projects.approuver", "projects.refuser"}, where
+        links = [v for b in nested(blocks) if isinstance(b, Fields) for k, v in b.pairs if k == "ton accord"]
+        assert [(v.kind, v.key, dict(v.params)) for v in links] == [("approvals", "en_attente",
+                                                                     {"demande": links[0].params[0][1]})], where
+        assert links[0].params[0][1].isdigit()
+        # ni « » » ni « valider » seul à la ligne : des espaces insécables, fines dans les guillemets
+        assert links[0].text == "La décider dans «\u202fÀ\u00a0valider\u202f»"
+    # une bande de chiffres, puis des tuiles (ADR 0176) ; l'avancement des objectifs, compté et accordé par la vue
+    band = next(b for b in overview if isinstance(b, Stats))
+    assert band.title == "Où il en est"
+    told = {st.label: st for st in band.items}
+    assert (told["Objectifs"].value, told["Objectifs"].sub, told["Objectifs"].tone) == (
+        "1/1", "ponctuel fait · 1 constant", "")
+    assert told["Dernier commit"].sub == ""  # le distant se dit une fois, dans la tuile « Son dépôt »
     grids = [b for b in overview if isinstance(b, Grid)]
     assert [[f.title for f in g.items] for g in grids] == [["Ses objectifs", "Dernières exécutions"],
                                                            ["Prochaine exécution", "Le cadre", "Son dépôt"]]
+    # chaque fait une fois : le mode et la plage sont dans l'en-tête, le dernier commit dans la bande
+    tiles = {f.title: [k for k, _ in f.pairs] for f in grids[1].items if isinstance(f, Fields)}
+    assert tiles == {"Prochaine exécution": ["quand", "sur quoi"],
+                     "Son dépôt": ["dépôt distant", "dernier échange", "l'histoire complète"]}
     assert "Dernières exécutions" in flat(overview) and "Décisions en vigueur (les dernières)" in flat(overview)
     # par défaut, ce qui vit (le ponctuel fait se filtre) ; tous : ce qui revient d'abord
     assert [r.cells[2].text for r in tables(tabs["objectifs"])["Ses objectifs"].rows] == ["constant"]
@@ -278,7 +316,7 @@ def test_an_agenda_reads_in_words_in_the_list_and_in_the_fiche(tmp_path):
         proposed = await create(kernel, "p1", title="Le bilan", objectives="Écrire le bilan", mode="plain",
                                 schedule="cron:0 9 * * MON-FRI")  # une des valeurs proposées
         own = await create(kernel, "p2", title="Le module", objectives="Écrire le module", mode="plain",
-                           schedule="cron:30 8 * * MON-FRI")  # écrite à la main, hors de la liste
+                           schedule="autre", schedule_rule="cron:30 8 * * MON-FRI")  # écrite à la main, hors liste
         listed = {r.href.key: r.cells[10] for r in tables(await tab(kernel, "tous"))["Projets"].rows}
         said = {}
         for pid in (proposed, own):
@@ -288,6 +326,89 @@ def test_an_agenda_reads_in_words_in_the_list_and_in_the_fiche(tmp_path):
     said, proposed, own = live(tmp_path, scenario)
     assert said[proposed] == ("les jours ouvrés à 9 h",) * 2
     assert said[own] == ("les jours ouvrés à 8 h 30",) * 2
+
+
+def test_the_agenda_is_chosen_in_words_and_a_rule_of_her_own_survives_a_change(tmp_path):
+    """L'Agenda se choisit par ses mots (la valeur envoyée reste la règle), dans les deux formulaires ; « une autre
+    règle… » ouvre un champ libre, aidé en mots. Un projet dont l'agenda est hors de la liste se modifie sans le
+    perdre : le formulaire le montre sous « une autre règle… », la règle dans le champ libre — un sélecteur hors de
+    ses choix se poserait sur « dès que possible », et l'enregistrement remettrait l'agenda à zéro."""
+    for args in (CreateArgs, ModifyArgs):
+        fields = {f.path: f for f in describe(args)}
+        agenda, rule = fields["schedule"], fields["schedule_rule"]
+        assert agenda.kind == "select" and dict(agenda.choices)["manual"] == "dès que possible", args
+        assert agenda.choices[-1] == (OTHER_RULE, "une autre règle…") and agenda.default == "manual"
+        assert rule.kind == "text" and rule.only == (("schedule", (OTHER_RULE,)),) and not rule.required
+        assert "manual" not in agenda.help and "manual" not in rule.help and "les jours ouvrés à 8 h 30" in rule.help
+
+    async def scenario(kernel, llm):
+        pid = str(await create(kernel, "p1", title="Le bilan", objectives="Écrire le bilan", schedule="autre",
+                               schedule_rule="cron:30 8 * * MON-FRI"))
+        spec = kernel.registry.actions["projects.modifier"]
+        out = {"initial": initial_values(kernel, spec, pid)}
+        out["view"] = {f["path"]: f for f in action_view(spec, csrf="x", back="/", subject=pid,
+                                                          initial=out["initial"])["fields"]}
+        values = {k: str(v) for k, v in out["initial"].items() if k != "approval"}
+        out["paced"] = await perform(kernel, "projects.modifier", form(("approval",), **{**values, "priority": "high"}),
+                                     by="user_1", subject=pid, nonce="m1")
+        out["kept"] = kernel.mind.frame().state("projects").projects[int(pid)]
+        out["blank"] = await perform(kernel, "projects.modifier", form(("approval",), **{
+            **values, "schedule_rule": " "}), by="user_1", subject=pid, nonce="m2")
+        out["listed"] = await perform(kernel, "projects.modifier", form(("approval",), **{
+            **values, "schedule": "interval:2h", "schedule_rule": "cron:30 8 * * MON-FRI"}), by="user_1", subject=pid,
+            nonce="m3")  # une valeur proposée : le champ libre, masqué, ne compte pas
+        out["again"] = initial_values(kernel, spec, pid)
+        out["raw"] = await perform(kernel, "projects.creer", form(
+            title="Un projet", objectives="Un objectif", schedule="cron:0 7 * * *", mode="persona", days="all",
+            cadence_hours="0", runs_per_day="0", priority="normal", branch="main"), by="user_1", nonce="r1")
+        return out, pid
+
+    out, pid = live(tmp_path, scenario)
+    initial = out["initial"]
+    assert (initial["schedule"], initial["schedule_rule"]) == (OTHER_RULE, "cron:30 8 * * MON-FRI")
+    view = out["view"]
+    assert view["schedule"]["value"] == OTHER_RULE and view["schedule_rule"]["value"] == "cron:30 8 * * MON-FRI"
+    assert view["schedule_rule"]["only"] == f"schedule={OTHER_RULE}"
+    assert out["paced"].ok, out["paced"]
+    assert (out["kept"].schedule, out["kept"].priority) == ("cron:30 8 * * MON-FRI", c.HIGH)  # son agenda, gardé
+    assert not out["blank"].ok and set(out["blank"].errors) == {"schedule_rule"}
+    assert out["listed"].ok and (out["again"]["schedule"], out["again"]["schedule_rule"]) == ("interval:2h", "")
+    # une règle brute dans « Agenda » n'est pas un des choix : le formulaire la refuse, elle passe par le champ libre
+    assert not out["raw"].ok and "choix inconnu" in out["raw"].errors["schedule"]
+
+
+def test_the_progress_of_objectives_is_counted_once_and_agreed():
+    """L'avancement de ses objectifs se compte à un seul endroit (``objectives_progress``) : la Stat de la vue
+    d'ensemble, que la fiche dessinée lit telle quelle, et la jauge des listes — accordé, jamais « ponctuel(s) »."""
+    def project(*objectives: tuple[str, str]) -> Project:
+        return Project(1, "t", "operator", 0, objectives=tuple(
+            Objective(n, f"o{n}", kind, status) for n, (kind, status) in enumerate(objectives, start=1)))
+
+    once, constant = c.ONCE, c.CONSTANT
+    assert objectives_progress(project()) == ("aucun", "", "") and _progress(project()).text == "aucun objectif"
+    assert objectives_progress(project((once, c.DONE), (once, c.OPEN), (constant, c.OPEN))) == (
+        "1/2", "ponctuels faits · 1 constant", "")
+    assert objectives_progress(project((once, c.OPEN), (once, c.DROPPED))) == ("0/1", "ponctuel fait", "")
+    # un objectif bloqué : la Stat « Objectifs » de la vue d'ensemble (MCP, repli, la fiche dessinée) passe en alerte
+    assert objectives_progress(project((constant, c.OPEN), (constant, c.OPEN), (once, c.BLOCKED))) == (
+        "0/1", "ponctuel fait · 2 constants · 1 bloqué", "warn")
+    assert objectives_progress(project((constant, c.OPEN), (constant, c.OPEN))) == ("2", "constants", "")
+    # ses seuls constants sont bloqués : leur nombre, jamais « 0 constant · 1 bloqué »
+    assert objectives_progress(project((constant, c.BLOCKED))) == ("1", "bloqué", "warn")
+    assert objectives_progress(project((constant, c.BLOCKED), (constant, c.BLOCKED), (constant, c.DROPPED))) == (
+        "2", "bloqués", "warn")
+    assert objectives_progress(project((constant, c.OPEN), (constant, c.BLOCKED))) == (
+        "1", "constant · 1 bloqué", "warn")
+    assert (_progress(project((constant, c.BLOCKED))).text, _progress(project((constant, c.BLOCKED))).tone) == (
+        "1 bloqué", "warn")
+    gauge = _progress(project((once, c.DONE), (once, c.BLOCKED), (constant, c.OPEN), (constant, c.OPEN)))
+    assert (gauge.ratio, gauge.text, gauge.tone) == (0.5, "1/2 ponctuels faits · 2 constants · 1 bloqué", "warn")
+    # ce que ses onglets comptent : ses objectifs hors retirés, ses exécutions, ses décisions en vigueur
+    assert tab_counts(project((once, c.DROPPED), (once, c.OPEN))) == {"objectifs": 1, "executions": 0,
+                                                                      "decisions": 0}
+    # l'oubli d'une personne, accordé au nombre de ses projets
+    assert "garde de ce projet" in forget_note(1) and "pas son atelier" in forget_note(1)
+    assert "garde de ces 3 projets" in forget_note(3) and "pas leurs ateliers" in forget_note(3)
 
 
 def test_who_asked_for_a_project_is_said_by_a_cleaned_name_and_by_the_key_without_one():
@@ -399,8 +520,8 @@ def test_objectives_are_kept_from_the_fiche(tmp_path):
         out["nudged"] = events(kernel, NUDGED)
         out["prompt"] = prompt(llm)
         out["per_row"] = {k: per_row(kernel.registry.actions[f"projects.{k}"])
-                          for k in ("objectif_statut", "objectif_modifier", "lancer_objectif", "approuver",
-                                    "objectif_ajouter", "lancer")}
+                          for k in ("objectif_statut", "objectif_modifier", "lancer_objectif", "objectif_ajouter",
+                                    "lancer")}
         return out
 
     out = live(tmp_path, scenario)
@@ -413,13 +534,16 @@ def test_objectives_are_kept_from_the_fiche(tmp_path):
     assert [e.data.objective for e in out["nudged"]] == [2]
     assert "L'objectif de cette exécution :\n- n° 2 [constant" in out["prompt"] and "Durcir la sécurité" in out["prompt"]
     assert out["per_row"] == {"objectif_statut": True, "objectif_modifier": True, "lancer_objectif": True,
-                              "approuver": True, "objectif_ajouter": False, "lancer": False}
+                              "objectif_ajouter": False, "lancer": False}
 
 
 # ── Décider, déposer, pousser ─────────────────────────────────────────────
 
 
-def test_deciding_from_the_fiche_is_the_approvals_decision_once(tmp_path):
+def test_a_project_request_is_decided_once_in_the_queue_and_the_fiche_tells_it(tmp_path):
+    """Une demande d'un projet se décide dans la file « À valider », par ``runtime.decisions.decide`` (ADR 0177) :
+    une seule fois (la seconde est « inconnue »). La fiche n'a aucune action pour le faire ; sa vue d'ensemble compte
+    ce qui attend, puis plus rien, et le Carnet dit le refus."""
     async def scenario(kernel, llm):
         pid = str(await create(kernel, "p1", title="Le module", objectives="Écrire le module", approval="on"))
         await perform(kernel, "projects.pause", form(), by="user_1", subject=pid, nonce="p")
@@ -432,27 +556,31 @@ def test_deciding_from_the_fiche_is_the_approvals_decision_once(tmp_path):
             return got.seqs[-1]
 
         yes, no = await propose("installer requests"), await propose("télécharger un jeu de données")
+        mind, ports = kernel.mind, kernel.ports
         out = {"apercu": await tab(kernel, "apercu", pid),
-               "yes": await perform(kernel, "projects.approuver", row_form({"proposal": str(yes)}), by="user_1",
-                                    subject=pid, nonce="y"),
-               "twice": await perform(kernel, "projects.approuver", row_form({"proposal": str(yes)}), by="user_1",
-                                      subject=pid, nonce="y2"),
-               "no": await perform(kernel, "projects.refuser", row_form({"proposal": str(no)}, note="pas de réseau"),
-                                   by="user_1", subject=pid, nonce="n"),
-               "offered": offered(kernel, kernel.registry.actions["projects.approuver"], pid)}
+               "yes": await decisions.decide(mind, ports, yes, True, by="user_1"),
+               "twice": await decisions.decide(mind, ports, yes, True, by="user_1"),
+               "no": await decisions.decide(mind, ports, no, False, by="user_1", note="pas de réseau"),
+               "no_again": await decisions.decide(mind, ports, no, True, by="user_1"),
+               "actions": set(kernel.registry.actions)}
         await kernel.lanes.join()
         out["resolved"] = [(e.data.proposal, e.data.approved, e.data.by, e.data.said())
                            for e in events(kernel, rt.EFFECT_RESOLVED)]
         out["ids"] = (yes, no)
+        out["apercu_after"] = await tab(kernel, "apercu", pid)
         out["carnet"] = await tab(kernel, "carnet", pid)
         return out
 
     out = live(tmp_path, scenario)
     yes, no = out["ids"]
+    # la file est le seul lieu où elle se décide : la fiche n'a plus d'action pour approuver ni refuser
+    assert not {"projects.approuver", "projects.refuser"} & out["actions"]
     assert "À décider (2)" in flat(out["apercu"]) and "installer requests" in flat(out["apercu"])
-    assert out["yes"].ok and out["no"].ok and not out["twice"].ok  # une décision ne se prend qu'une fois
+    assert (out["yes"].status, out["no"].status) == (decisions.APPROVED, decisions.REJECTED)
+    # une décision ne se prend qu'une fois, dans un sens comme dans l'autre
+    assert out["twice"].status == out["no_again"].status == decisions.UNKNOWN
     assert out["resolved"] == [(yes, True, "user_1", ""), (no, False, "user_1", "pas de réseau")]
-    assert out["offered"] is False
+    assert "À décider" not in flat(out["apercu_after"])  # décidées : la fiche n'en compte plus
     assert "refusé" in flat(out["carnet"])
 
 
@@ -716,10 +844,10 @@ def test_files_git_and_deposits_tell_the_truth(tmp_path):
     assert out["pending"] == ["nouveau.py"]  # le dépôt n'a enregistré que lui-même : le travail en cours reste
     assert [r.cells[0].text for r in tables(out["src"])["/src"].rows] == ["m0.py", "m1.py", "m2.py"]
     stats = next(b for b in out["git"] if isinstance(b, Stats))
-    assert dict((st.label, st.value) for st in stats.items)["Non enregistré"] == "1 fichier(s)"
+    assert dict((st.label, st.value) for st in stats.items)["Non enregistré"] == "1 fichier"
 
 
-def test_stale_pages_cannot_undo_a_replacement_nor_approve_an_archived_project(tmp_path):
+def test_stale_pages_cannot_undo_a_replacement_and_the_queue_cannot_approve_for_an_archived_project(tmp_path):
     async def scenario(kernel, llm):
         pid = str(await create(kernel, "p1", title="Le module", objectives="Écrire le module", approval="on",
                                start="3:00", end="4:00"))
@@ -729,17 +857,21 @@ def test_stale_pages_cannot_undo_a_replacement_nor_approve_an_archived_project(t
                           by="user_1", subject=pid, nonce=f"d{i}")
         stale = await perform(kernel, "projects.decision_statut", row_form({"decision": "1", "status": "withdrawn"}),
                               by="user_1", subject=pid, nonce="s1")
-        await kernel.mind.append([rt.EFFECT_PROPOSED.draft(
+        proposed = await kernel.mind.append([rt.EFFECT_PROPOSED.draft(
             capability="projects.networked", owner="projects", args_json=f'{{"project": {pid}, "argv": ["true"]}}',
             summary=Content.of("installer", level=0), approval=True, context=f"project:{pid}")],
             emitter="runtime", correlation="t", origin=Origin.TOOL)
         await perform(kernel, "projects.archiver", form(), by="user_1", subject=pid, nonce="a1")
-        specs = kernel.registry.actions
-        return stale, offered(kernel, specs["projects.approuver"], pid), offered(kernel, specs["projects.refuser"], pid)
+        proposal = proposed.seqs[-1]
+        approve = await decisions.decide(kernel.mind, kernel.ports, proposal, True, by="user_1")
+        refuse = await decisions.decide(kernel.mind, kernel.ports, proposal, False, by="user_1")
+        return stale, approve, refuse
 
     stale, approve, refuse = live(tmp_path, scenario)
     assert not stale.ok and "remplacée" in stale.message
-    assert approve is False and refuse is True  # un projet archivé ne fait plus rien sortir ; refuser, si
+    # un projet archivé ne fait plus rien sortir : la file ne l'approuve pas (son aperçu le dit) ; refuser, si
+    assert approve.status == decisions.BLOCKED and approve.draft is None and "archivé" in approve.message
+    assert refuse.status == decisions.REJECTED
 
 
 def test_her_project_with_a_forgotten_title_can_still_be_driven(tmp_path):
@@ -762,8 +894,9 @@ def test_her_project_with_a_forgotten_title_can_still_be_driven(tmp_path):
 
 
 def test_what_leaves_the_machine_is_confirmed_guarded_and_said_true(tmp_path):
-    """« Pousser maintenant » et « Approuver » font sortir quelque chose : une confirmation, marquées comme telles ;
-    pousser une amorce seule est refusé. « Déposer » sur le nom d'un dossier est refusé en français, avant d'écrire."""
+    """« Pousser maintenant » fait sortir quelque chose : une confirmation, marquée comme telle (« Approuver » une
+    demande vit dans la file, qui se confirme aussi : tests/protocol/test_console_operator.py) ; pousser une amorce
+    seule est refusé. « Déposer » sur le nom d'un dossier est refusé en français, avant d'écrire."""
     atelier = Atelier(token="ghp_x")
 
     async def scenario(kernel, llm):
@@ -776,12 +909,11 @@ def test_what_leaves_the_machine_is_confirmed_guarded_and_said_true(tmp_path):
         upload = {"_champs": ["file", "folder", "note", "replace"], "folder": [""], "note": [""],
                   "file": [Upload(name="src", data=b"pas un dossier")], "replace": ["on"]}
         out["folder"] = await perform(kernel, "projects.deposer", upload, by="user_1", subject=str(pid), nonce="d1")
-        out["specs"] = {n: kernel.registry.actions[f"projects.{n}"] for n in ("pousser", "approuver")}
+        out["push"] = kernel.registry.actions["projects.pousser"]
         return out
 
     out = live(tmp_path, scenario, atelier=atelier)
-    for name in ("pousser", "approuver"):
-        assert out["specs"][name].confirm and out["specs"][name].danger
+    assert out["push"].confirm and out["push"].danger
     assert not out["seed"].ok and "amorce" in out["seed"].message  # rien d'enregistré : rien ne part
     assert out["pushed"].ok
     assert not out["folder"].ok and "est un dossier" in out["folder"].message

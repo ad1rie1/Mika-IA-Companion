@@ -89,7 +89,7 @@ def episodes(ui: UI, blocks: Sequence[Any], query: Mapping[str, str]) -> dict[st
     if table is None:
         return None
     got = {**listing(table, ui.env(), query, roles=EPISODE_ROLES), "kind": "episodes",
-           "link_label": "Comprendre le résultat", "pager": None, "dense": True}
+           "link_label": "Comprendre", "pager": None, "dense": True}
     got["rows"] = got["rows"][:EPISODES_SHOWN]
     return got
 

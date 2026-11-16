@@ -6,9 +6,10 @@ rythme, plage de travail, accord), choisir ses **outils**, régler son **dépôt
 distant**, le **lancer maintenant** (ou sur un objectif), le **mettre en
 pause**, le **reprendre**, l'**archiver**, le **restaurer**, lui donner une
 **consigne**, tenir ses **objectifs** et ses **décisions techniques**,
-**déposer** un fichier dans l'atelier, **pousser** ou **récupérer**, et
-**décider** de ce qu'il veut faire sortir de la machine. Jamais ce qu'elle en
-pense ou en ressent : un objectif coché par l'opérateur ne la rend pas fière.
+**déposer** un fichier dans l'atelier, **pousser** ou **récupérer**. Ce qu'il
+veut faire sortir de la machine ne se décide pas ici : la file « À valider »
+le décide, avec son aperçu (ADR 0177). Jamais ce qu'elle en pense ou en
+ressent : un objectif coché par l'opérateur ne la rend pas fière.
 
 Sur un projet qu'elle a ouvert d'elle-même, on pilote sans réécrire : ni son
 titre, ni sa description.
@@ -72,7 +73,7 @@ from mika.kernel.events import Content
 from mika.kernel.forms import UPLOAD_MAX, Knob, Upload
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard
-from mika.kernel.operate import ActionContext, Decision, Done, Refused
+from mika.kernel.operate import ActionContext, Done, Refused
 from mika.ports.workshop import OutsideWorkshop, WorkshopFull
 from mika.vocab.circadian import DAYS_FR
 from mika.vocab.episodes import project_of
@@ -80,9 +81,12 @@ from mika.vocab.privacy import Sensitivity
 
 MODE_CHOICES = ((c.PERSONA, "Elle-même : elle y travaille avec son humeur et ses avis"),
                 (c.PLAIN, "Impersonnel : un travail factuel, sans persona ni émotion"))
-MODE_HELP = ("En mode « elle-même », c'est elle qui travaille : sa voix, son humeur, ses avis ; ce qu'elle mène à bout la "
-             "rend fière, ce qui bloque la frustre, et elle le raconte. En mode impersonnel, le travail est factuel, "
-             "sans persona ni émotion, et ne suit pas son sommeil (seulement la plage de travail).")
+#: ce que veut dire chaque mode — l'humeur dans son prompt, ce qu'elle en ressent, son sommeil : la fiche dessinée
+#: d'un projet ne redit pas ces faits à côté du formulaire (la vue les garde, faculties/projects/inspect.py)
+MODE_HELP = ("En mode « elle-même », c'est elle qui travaille : sa voix, ses avis, son humeur et sa fatigue dans son "
+             "prompt ; ce qu'elle mène à bout la rend fière, ce qui bloque la frustre, et elle le raconte ; elle ne "
+             "travaille pas pendant son sommeil. En mode impersonnel, le travail est factuel, sans persona, émotion ni "
+             "récit, et se fait même pendant son sommeil (dans la plage de travail).")
 PRIORITY_CHOICES = ((c.LOW, "basse"), (c.NORMAL, "normale"), (c.HIGH, "haute"), (c.URGENT, "urgente"))
 PRIORITY_HELP = "Entre deux projets qui peuvent avancer, le plus prioritaire passe devant (sans passer les plafonds)."
 DAYS_CHOICES = ((c.EVERY_DAY, "tous les jours"), (c.WEEKDAYS, "les jours ouvrés (lundi–vendredi)"),
@@ -93,6 +97,15 @@ SCHEDULES = (("manual", "dès que possible"), ("demand", "sur demande (seulement
              ("interval:2h", "toutes les 2 h"), ("interval:6h", "toutes les 6 h"),
              ("cron:0 9 * * *", "chaque jour à 9 h"), ("cron:0 9 * * MON-FRI", "les jours ouvrés à 9 h"),
              ("cron:0 18 * * SUN", "le dimanche à 18 h"))
+#: le choix de l'agenda qui ouvre le champ libre ``schedule_rule`` : un intervalle ou des horaires hors de la liste
+OTHER_RULE = "autre"
+#: l'agenda se choisit par ses mots (la valeur envoyée reste la règle), ou s'écrit à la main
+SCHEDULE_CHOICES = (*SCHEDULES, (OTHER_RULE, "une autre règle…"))
+SCHEDULE_HELP = ("Quand elle y travaille d'elle-même, dans sa plage de travail. « Une autre règle… » : un intervalle "
+                 "ou des horaires à toi.")
+RULE_HELP = ("Un intervalle : « interval:45m » (toutes les 45 min ; s, m, h ou d, cinq minutes au moins). Des "
+             "horaires, en cron et à l'heure locale (minute, heure, jour du mois, mois, jour de la semaine) : "
+             "« cron:30 8 * * MON-FRI » (les jours ouvrés à 8 h 30).")
 _DAY_SETS = {frozenset(range(7)): "chaque jour", frozenset(range(5)): "les jours ouvrés",
              frozenset({5, 6}): "le week-end"}
 
@@ -221,11 +234,18 @@ def _bundles(args: Any) -> tuple[str, ...]:
 
 
 def _rhythm(args: Any, errors: dict[str, str]) -> tuple[str, int, int]:
-    rule = args.schedule.strip() or ASAP
-    try:
-        rule = check_schedule(rule)
-    except ValueError as exc:
-        errors["schedule"] = f"règle refusée : {exc}"
+    """Son agenda (la valeur choisie, ou la règle écrite sous « une autre règle… », l'erreur sur le champ qui la
+    porte) et sa plage de travail, en minutes. Une valeur de ``schedule`` hors de ``SCHEDULE_CHOICES`` n'arrive pas
+    par un formulaire (``kernel.forms`` refuse un choix inconnu) : arrivée autrement, elle se lit comme une règle."""
+    other = args.schedule.strip() == OTHER_RULE
+    where, rule = ("schedule_rule", args.schedule_rule.strip()) if other else ("schedule", args.schedule.strip())
+    if other and not rule:
+        errors[where] = "écris la règle, ou choisis un agenda proposé"
+    else:
+        try:
+            rule = check_schedule(rule or ASAP)
+        except ValueError as exc:
+            errors[where] = f"règle refusée : {exc}"
     start = end = 0
     try:
         start = parse_hhmm(args.start)
@@ -286,10 +306,11 @@ class CreateArgs(BaseModel):
                                           group="Son mode et ses outils", advanced=False, order=65)] = False
     tool_camera: Annotated[bool, Knob(label=_label("camera"), group="Son mode et ses outils",
                                       advanced=False, order=66)] = False
-    schedule: Annotated[str, Knob(label="Agenda", widget="suggest", choices=SCHEDULES, group="Son rythme",
-                                  advanced=False, order=70,
-                                  help="« manual » dès que possible, « interval:2h », « cron:0 9 * * MON-FRI ».")
-                        ] = Field(default="manual", max_length=120)
+    schedule: Annotated[str, Knob(label="Agenda", choices=SCHEDULE_CHOICES, group="Son rythme", advanced=False,
+                                  order=70, help=SCHEDULE_HELP)] = Field(default=ASAP, max_length=120)
+    schedule_rule: Annotated[str, Knob(label="Sa règle", group="Son rythme", advanced=False, order=70,
+                                       only=(("schedule", (OTHER_RULE,)),), help=RULE_HELP)
+                             ] = Field(default="", max_length=120)
     days: Annotated[str, Knob(label="Jours de travail", choices=DAYS_CHOICES, group="Son rythme", advanced=False,
                               order=71)] = c.EVERY_DAY
     start: Annotated[str, Knob(label="De", group="Son rythme", advanced=False, order=72,
@@ -378,8 +399,11 @@ class ModifyArgs(BaseModel):
                                advanced=False, order=30, help="Vide : pour toi.")] = Field(default="", max_length=120)
     mode: Annotated[str, Knob(label="Mode de travail", choices=MODE_CHOICES, group="Son mode", advanced=False,
                               order=40, help=MODE_HELP)] = c.PERSONA
-    schedule: Annotated[str, Knob(label="Agenda", widget="suggest", choices=SCHEDULES, group="Son rythme",
-                                  advanced=False, order=50)] = Field(default="manual", max_length=120)
+    schedule: Annotated[str, Knob(label="Agenda", choices=SCHEDULE_CHOICES, group="Son rythme", advanced=False,
+                                  order=50, help=SCHEDULE_HELP)] = Field(default=ASAP, max_length=120)
+    schedule_rule: Annotated[str, Knob(label="Sa règle", group="Son rythme", advanced=False, order=50,
+                                       only=(("schedule", (OTHER_RULE,)),), help=RULE_HELP)
+                             ] = Field(default="", max_length=120)
     days: Annotated[str, Knob(label="Jours de travail", choices=DAYS_CHOICES, group="Son rythme", advanced=False,
                               order=51)] = c.EVERY_DAY
     start: Annotated[str, Knob(label="De", group="Son rythme", advanced=False, order=52,
@@ -407,9 +431,19 @@ def _modify_initial(s: ProjectsState, frame: Frame, key: str, ports: Mapping[str
         return {}
     texts = _texts(ports, (p.title_ref, p.description_ref))
     return {"title": texts.get(p.title_ref, ""), "description": texts.get(p.description_ref, ""),
-            "owner": p.owner or "", "mode": p.mode, "schedule": p.schedule or "manual", "days": p.days,
+            "owner": p.owner or "", "mode": p.mode, **_schedule_initial(p.schedule), "days": p.days,
             "start": _clock(p.start_min) if p.start_min else "", "end": _clock(p.end_min) if p.end_min < 1440 else "",
             "runs_per_day": p.runs_per_day, "priority": p.priority, "approval": p.approval}
+
+
+def _schedule_initial(rule: str) -> dict[str, str]:
+    """Son agenda tel que le formulaire le montre : la valeur proposée quand c'en est une, sinon « une autre
+    règle… » et la règle dans le champ libre. Un sélecteur dont la valeur n'est pas parmi ses choix se poserait sur
+    le premier, et l'enregistrement d'un autre champ remettrait l'agenda à « dès que possible »."""
+    raw = (rule or ASAP).strip()
+    if raw in dict(SCHEDULES):
+        return {"schedule": raw, "schedule_rule": ""}
+    return {"schedule": OTHER_RULE, "schedule_rule": raw}
 
 
 def _clock(minutes: int) -> str:
@@ -485,8 +519,8 @@ def _modify(s: ProjectsState, frame: Frame, args: ModifyArgs, ctx: ActionContext
 
 
 class ToolsArgs(BaseModel):
-    tool_memory: Annotated[bool, Knob(label=_label("memory"), advanced=False, order=1,
-                                      help=TOOL_HELP)] = False
+    # « son atelier et ses outils de projet sont toujours là » : la section « Ses outils » le dit, au-dessus
+    tool_memory: Annotated[bool, Knob(label=_label("memory"), advanced=False, order=1)] = False
     tool_web: Annotated[bool, Knob(label=_label("mcp.web"), advanced=False, order=2)] = False
     tool_email: Annotated[bool, Knob(label=_label("email"), advanced=False, order=2)] = False
     tool_rss: Annotated[bool, Knob(label=_label("rss"), advanced=False, order=3)] = False
@@ -992,57 +1026,10 @@ async def _deposit(s: ProjectsState, frame: Frame, args: DepositArgs, ctx: Actio
                 message=said, tone="ok" if sha else "warn", guard=_still(p.id, LIVE))
 
 
-# ── Décider de ce qui sort de la machine ──────────────────────────────────
-
-
-class ApproveArgs(BaseModel):
-    proposal: Annotated[str, Knob(label="Demande", widget="hidden")] = Field(min_length=1, max_length=20)
-    seen: Annotated[str, Knob(label="Lu", widget="hidden")] = Field(default="", max_length=100)
-
-
-class RefuseArgs(BaseModel):
-    proposal: Annotated[str, Knob(label="Demande", widget="hidden")] = Field(min_length=1, max_length=20)
-    note: Annotated[str, Knob(label="Pourquoi", widget="textarea", advanced=False,
-                              help="Facultatif : elle le lira à sa prochaine exécution.")] = Field(default="",
-                                                                                                 max_length=500)
+# ── Ce qui attend un accord ───────────────────────────────────────────────
 
 
 def pending_of(frame: Frame, project: int) -> list[Any]:
-    """Les demandes de ce projet qui attendent un accord."""
+    """Les demandes de ce projet qui attendent un accord. Elles se décident dans la file « À valider », avec leur
+    aperçu (``runtime/decisions.py``, ADR 0177) : la fiche n'y mène que par un lien."""
     return [v for v in frame.get(rt.PENDING_EFFECTS) if v.owner == c.OWNER and project_of(v.context) == project]
-
-
-def _decidable(s: ProjectsState, frame: Frame, key: str) -> bool:
-    p = project_at(s, key)
-    return p is not None and bool(pending_of(frame, p.id))
-
-
-def _approvable(s: ProjectsState, frame: Frame, key: str) -> bool:
-    """Approuver : seulement un projet vivant (un projet archivé ne fait plus rien sortir ; refuser, si)."""
-    p = project_at(s, key)
-    return _decidable(s, frame, key) and p is not None and p.status != c.ARCHIVED
-
-
-def _proposal_of(frame: Frame, p: Project, raw: str) -> int:
-    wanted = int(raw) if raw.strip().isdigit() else -1
-    if wanted not in {v.proposal for v in pending_of(frame, p.id)}:
-        raise Refused("Cette demande n'attend plus de décision (déjà décidée ?).")
-    return wanted
-
-
-@PROJECTS.action("approuver", title="Approuver", args=ApproveArgs, emits=[], subject="project", order=70,
-                 available=_approvable, danger=True,
-                 confirm="Approuver cette demande ? Ce que montre son aperçu sort aussitôt de la machine.")
-def _approve(s: ProjectsState, frame: Frame, args: ApproveArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
-    proposal = _proposal_of(frame, p, args.proposal)
-    return Done(decide=(Decision(proposal, True, seen=args.seen),), message="Approuvé : elle part dans un instant.")
-
-
-@PROJECTS.action("refuser", title="Refuser", args=RefuseArgs, emits=[], subject="project", order=71,
-                 available=_decidable)
-def _refuse(s: ProjectsState, frame: Frame, args: RefuseArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
-    proposal = _proposal_of(frame, p, args.proposal)
-    return Done(decide=(Decision(proposal, False, note=args.note.strip()),), message="Refusé : elle le saura.")
-

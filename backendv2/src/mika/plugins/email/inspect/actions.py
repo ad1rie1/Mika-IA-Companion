@@ -19,11 +19,12 @@ from mika.kernel import forms
 from mika.kernel.events import Content
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
-from mika.kernel.inspect import Ref
+from mika.kernel.inspect import Ref, plural
 from mika.kernel.operate import Decision, Done, Refused
 from mika.plugins.email import BUNDLE, EMAIL, POLL_ASKED, READ, WAITING, EmailState, keeper_name
 from mika.plugins.email.inspect.common import (
     SECTION,
+    WRITE_TITLE,
     can_send,
     clip,
     mail_key,
@@ -187,7 +188,7 @@ def _write_fields(s: EmailState, frame: Frame, key: str, fixed: Any, ports: Any 
             for f in forms.describe(WriteArgs)]
 
 
-@EMAIL.action("ecrire", title="Écrire un mail", args=WriteArgs, emits=[c.SENT], section=SECTION, order=10,
+@EMAIL.action("ecrire", title=WRITE_TITLE, args=WriteArgs, emits=[c.SENT], section=SECTION, order=10,
               fields=_write_fields, description="Il part de sa boîte tout de suite ; elle le saura.",
               confirm="Envoyer ce mail depuis sa boîte ?")
 async def _write(s: EmailState, frame: Frame, args: Any, ctx: Any) -> Done:
@@ -238,34 +239,7 @@ def _poll(s: EmailState, frame: Frame, args: NoArgs, ctx: Any) -> Done:
                 "dans quelques secondes.")
 
 
-def _unread_keys(s: EmailState) -> list[str]:
-    return [k for k, m in s.mails.items() if not m.read]
-
-
-@EMAIL.action("tout_lu", title="Marquer comme lus les mails qu'elle a remarqués", args=NoArgs, emits=[READ],
-              section=SECTION, order=30,
-              description="Les mails qu'elle a remarqués et pas encore lus (au plus les 100 derniers) quittent « tes "
-                          "mails non lus » et sont marqués lus sur le serveur, en une fois. Les autres mails non lus "
-                          "de la boîte restent tels quels.",
-              confirm="Marquer comme lus, ici et sur le serveur, les mails qu'elle a remarqués et pas encore lus ?",
-              available=lambda s, frame, key: bool(_unread_keys(s)))
-async def _all_read(s: EmailState, frame: Frame, args: NoArgs, ctx: Any) -> Done:
-    """Ceux qu'elle a remarqués sans les lire : sur le serveur **par lot** (une session par compte et par
-    dossier, pas une par mail), et pour elle."""
-    keys = _unread_keys(s)
-    port = ctx.ports.get("mail")
-    failed = 0
-    if port is not None:
-        try:
-            failed = await port.mark_seen(keys)
-        except (OSError, RuntimeError, ValueError):
-            failed = len(keys)
-    note = f" ({failed} n'ont pas pu être marqués sur le serveur)" if failed else ""
-    return Done(drafts=tuple(READ.draft(mail=k, by=ctx.by, how="lu") for k in keys),
-                message=f"{len(keys)} mail(s) qu'elle avait remarqué(s) marqué(s) comme lu(s){note}.")
-
-
-@EMAIL.action("relire", title="Relire ce dossier", args=FolderArgs, emits=[],
+@EMAIL.action("relire", title="Actualiser le dossier", args=FolderArgs, emits=[],
               description="Va chercher ce qui est arrivé dans ce dossier. S'il fait partie des dossiers qu'elle "
                           "relève, elle remarquera quand même les nouveaux mails à sa prochaine relève.")
 async def _reread(s: EmailState, frame: Frame, args: FolderArgs, ctx: Any) -> Done:
@@ -277,7 +251,8 @@ async def _reread(s: EmailState, frame: Frame, args: FolderArgs, ctx: Any) -> Do
         n = await port.sync_folder(args.compte, args.dossier, 50)
     except (OSError, RuntimeError, ValueError) as exc:
         raise Refused(f"Le serveur a refusé : {exc}"[:300]) from None
-    return Done(message=f"{n} nouveau(x) mail(s) dans « {args.dossier} »." if n else "Rien de nouveau.")
+    return Done(message=f"{plural(n, 'nouveau mail', 'nouveaux mails')} dans « {args.dossier} »." if n
+                else "Rien de nouveau.")
 
 
 @EMAIL.action("historique", title="Charger des messages plus anciens", args=FolderArgs, emits=[],
@@ -291,7 +266,8 @@ async def _older(s: EmailState, frame: Frame, args: FolderArgs, ctx: Any) -> Don
         n = await port.older(args.compte, args.dossier, 50)
     except (OSError, RuntimeError, ValueError):
         raise Refused("L'historique n'a pas pu être chargé. Actualise le dossier et vérifie la connexion du compte.") from None
-    return Done(message=f"{n} message(s) ancien(s) ajouté(s)." if n else "Tout l'historique disponible de ce dossier est chargé.",
+    return Done(message=f"{plural(n, 'message ancien ajouté', 'messages anciens ajoutés')}." if n
+                else "Tout l'historique disponible de ce dossier est chargé.",
                 go=view_link("reception", "Retour au dossier", (("compte", args.compte), ("dossier", args.dossier))))
 
 
@@ -314,8 +290,8 @@ async def _tidy(s: EmailState, frame: Frame, args: TidyArgs, ctx: Any) -> Done:
             failed = len(todo)
         drafts = tuple(d for m in todo for d in _read_draft(s, m.ref, ctx.by, "lu"))
         done = len(todo) - failed
-        note = f" ({failed} refusé(s) par le serveur)" if failed else ""
-        said = f"{done} mail(s) marqué(s) comme lu(s){note}." if todo else "Déjà lus."
+        note = f" ({plural(failed, 'refusé', 'refusés')} par le serveur)" if failed else ""
+        said = f"{plural(done, 'mail marqué comme lu', 'mails marqués comme lus')}{note}." if todo else "Déjà lus."
         return Done(drafts=drafts, message=said, tone="info" if not todo else "ok")
     drafts_: list[Any] = []
     refused = 0
@@ -327,7 +303,8 @@ async def _tidy(s: EmailState, frame: Frame, args: TidyArgs, ctx: Any) -> Done:
             continue
         drafts_.extend(got)
     label = dict(GESTURES)[args.geste].lower()
-    note = f" ; {refused} refusé(s) par le serveur" if refused else ""
+    note = f" ; {plural(refused, 'refusé', 'refusés')} par le serveur" if refused else ""
     if refused == len(found):
-        raise Refused(f"Le serveur a refusé : {label}, pour {refused} mail(s).")
-    return Done(drafts=tuple(drafts_), message=f"{label.capitalize()} : {len(found) - refused} mail(s){note}.")
+        raise Refused(f"Le serveur a refusé : {label}, pour {plural(refused, 'mail', 'mails')}.")
+    return Done(drafts=tuple(drafts_),
+                message=f"{label.capitalize()} : {plural(len(found) - refused, 'mail', 'mails')}{note}.")

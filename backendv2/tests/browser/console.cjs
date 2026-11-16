@@ -222,7 +222,9 @@ test('fil : lecture directe, détails et explication accessibles au clavier', as
   await first.locator('.person-number a').focus();
   await page.keyboard.press('Enter');
   await page.waitForURL(/\/inspecteur\/evenement\/\d+$/);
-  assert.match(await page.locator('h1').textContent(), /^Parole · n° \d+$/);
+  // son numéro, le fil d'Ariane le dit, pas son titre
+  assert.equal(await page.locator('h1').textContent(), 'Parole');
+  assert.match(await page.locator('nav.crumbs').textContent(), /n° \d+/);
   assert.ok((await page.locator('main .person-bubble').first().textContent()).includes(body));
   await page.goBack();
   await why.focus();
@@ -407,7 +409,7 @@ test('bouton retirer lisible en clair et sombre, au repos et au survol', async t
     if (!await page.locator('.account-menu').evaluate(el => el.open)) await page.locator('.account-menu > summary').click();
     await page.locator(`[data-theme-set=${theme}]`).click();
     for (const quiet of [true, false]) for (const hover of [false, true]) {
-      const button = page.getByRole('button', { name: 'retirer', exact: true }).first();
+      const button = page.getByRole('button', { name: 'Retirer', exact: true }).first();
       await button.evaluate((el, value) => el.classList.toggle('quiet', value), quiet);
       if (hover) await button.hover(); else await page.locator('h1').hover();
       const colors = await button.evaluate(el => ({ text: getComputedStyle(el).color, bg: getComputedStyle(el).backgroundColor }));
@@ -624,7 +626,8 @@ test('épisode : résumé de l’échec, déroulé, données complètes puis ret
   assert.match(await page.locator('.episode-hero .now-lede').textContent(), /Le service de transcription n’a pas répondu/);
   const tabs = page.getByRole('navigation', { name: 'Onglets', exact: true });
   assert.equal(await tabs.getByRole('link', { name: 'Résumé', exact: true }).getAttribute('aria-current'), 'page');
-  await tabs.getByRole('link', { name: 'Déroulé', exact: true }).click();
+  // l'onglet dit son compte (ses événements) dans sa pastille : son nom le suit
+  await tabs.getByRole('link', { name: /^Déroulé\s*\d+$/ }).click();
   // le déroulé : un événement par ligne, la raison de la fin citée
   const events = page.locator('ol.episode-feed > li');
   assert.ok(await events.count() >= 2);

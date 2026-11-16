@@ -89,6 +89,7 @@ from mika.kernel.inspect import (
     num_fr,
     pct_fr,
     plural,
+    relative_fr,
     short_day_fr,
 )
 from mika.ports.journal import JournalOutbox
@@ -404,7 +405,7 @@ def passerelle(got: Got) -> Markup | None:
             "day": None if profile is None else {
                 "calls": profile.total.calls, "failures": profile.total.failures,
                 "median": num_fr(profile.median_s, 1), "slow": num_fr(profile.slow_s, 1),
-                "last_failure": render.relative(profile.last_failure_at, now) if profile.last_failure_at else "",
+                "last_failure": relative_fr(profile.last_failure_at, now) if profile.last_failure_at else "",
                 "last_role": names.role(profile.last_failure_role) if profile.last_failure_role else ""}})
     served: dict[str, list[dict[str, str]]] = defaultdict(list)
     unserved = []
@@ -746,12 +747,12 @@ def processes(got: Got) -> tuple[Markup, list[Any]] | None:
             "faculty": ui.names.faculty(spec.owner), "lane": names.process_lane(spec.lane),
             "runs": sched.runs.get(spec.name, 0), "failures": sched.failures.get(spec.name, 0),
             "consecutive": sched.consecutive.get(spec.name, 0),
-            "last": render.relative(last, now) if last else "jamais",
+            "last": relative_fr(last, now) if last else "jamais",
             "next": "en cours" if spec.name in running else
-            render.relative(nd, now) if nd is not None and nd > now else "dès que possible" if nd is not None
+            relative_fr(nd, now) if nd is not None and nd > now else "dès que possible" if nd is not None
             else "à un événement" if spec.wake_on else "rien de prévu",
             "error": names.detail(error) if error else "",
-            "error_at": render.relative(error_at, now) if error_at else "",
+            "error_at": relative_fr(error_at, now) if error_at else "",
         })
     order = {key: i for i, (key, _) in enumerate(STATES)}
     said = dict(STATES)
@@ -887,7 +888,7 @@ def outbox(got: Got) -> Markup:
 
     def when(seq: int) -> str:
         ev = events.get(seq)
-        return render.relative(ev.at, now) if ev is not None else ""
+        return relative_fr(ev.at, now) if ev is not None else ""
 
     def named(seq: int, effect: str) -> str:
         name = _kind(ui, effect)[1]

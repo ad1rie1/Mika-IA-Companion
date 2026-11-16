@@ -91,7 +91,7 @@ def test_each_slider_says_what_it_drives():
 
 
 #: les facultés dont l'aide des réglages est déjà en clair ; une autre y entre quand ses textes passent à la règle
-PLAIN_HELP = frozenset({"affect", "body", "expression", "needs", "transcript", "world"})
+PLAIN_HELP = frozenset({"affect", "body", "expression", "memory", "needs", "transcript", "world"})
 
 
 def test_the_help_of_a_setting_says_its_rule_without_an_adr_number():

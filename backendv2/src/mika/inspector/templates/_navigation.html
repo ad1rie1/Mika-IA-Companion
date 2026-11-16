@@ -18,6 +18,15 @@
 {% endif %}
 {%- endmacro %}
 
+{# L'option vide d'un sélecteur de filtre, une seule : aucune quand ses choix en ont déjà une (« toutes ») ;
+   « Tous » sans défaut ; « Par défaut (<libellé du défaut>) » quand le filtre en a un. #}
+{% macro empty_choice(f) -%}
+{% if '' not in f.choices | map('first') | list %}
+{%- if f.default %}{% set named = f.choices | selectattr(0, "equalto", f.default) | map(attribute=1) | first %}<option value="">Par défaut{% if named %} ({{ named }}){% endif %}</option>
+{%- else %}<option value="">Tous</option>{% endif %}
+{%- endif %}
+{%- endmacro %}
+
 {% macro filters_form(fields, keep=(), active=False, reset="?", title="Filtrer") -%}
 {% if fields %}
 <form class="filters" method="get" aria-label="{{ title }}">
@@ -25,7 +34,7 @@
   {% for f in fields if f.kind == "hidden" %}{% if f.value %}<input type="hidden" name="{{ f.name }}" value="{{ f.value }}">{% endif %}{% endfor %}
   {% for f in fields if f.kind != "hidden" %}
   <label>{{ f.label }}
-    {% if f.kind == "select" %}<select name="{{ f.name }}"><option value="">Tous / par défaut</option>{% for v, l in f.choices %}<option value="{{ v }}"{{ ' selected' if v == f.value }}>{{ l }}</option>{% endfor %}</select>
+    {% if f.kind == "select" %}<select name="{{ f.name }}">{{ empty_choice(f) }}{% for v, l in f.choices %}<option value="{{ v }}"{{ ' selected' if v == f.value }}>{{ l }}</option>{% endfor %}</select>
     {% elif f.kind == "bool" %}<select name="{{ f.name }}"><option value="oui"{{ ' selected' if f.value == 'oui' }}>Oui</option><option value="non"{{ ' selected' if f.value == 'non' }}>Non</option></select>
     {% else %}<input name="{{ f.name }}" value="{{ f.value }}" type="{{ 'number' if f.kind == 'int' else 'search' }}"{% if f.kind == "int" %}{% if f.lo is not none %} min="{{ f.lo }}"{% endif %}{% if f.hi is not none %} max="{{ f.hi }}"{% endif %}{% endif %} placeholder="{{ f.placeholder or f.label }}">{% endif %}
   </label>

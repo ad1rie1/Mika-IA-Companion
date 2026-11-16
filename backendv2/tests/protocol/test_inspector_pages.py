@@ -92,10 +92,13 @@ def test_why_did_she_say_that(world):  # noqa: F811
     said = html_of(client.get(f"/inspecteur/episode/{ended.correlation}?onglet=dit"))
     assert "Ce qu'elle a dit" in said and "ce que le prompt lui montrait" in said
     decision = html_of(client.get(f"/inspecteur/episode/{ended.correlation}?onglet=decision"))
-    assert "en réponse à" in decision
+    # le message auquel elle répond est en bulle dans « Ce qui l'a lancé », avec son lien : « En bref » ne le redit pas
+    assert "Message déclencheur" in decision and "en réponse à" not in decision and "perception:" not in decision
     cause = re.search(r'/inspecteur/evenement/(\d+)">message n°', decision)
     event = html_of(client.get(f"/inspecteur/evenement/{cause.group(1)}"))
     assert "réduit par" in event and "Fil des conversations" in event and "Ce qu'il a déclenché" in event
+    # son parcours dit aussi son type et l'état du journal qu'il a lu ; son origine se dit en mots
+    assert "état lu" in event and "lu sur la tête" not in event and "origine : external" not in event
     assert client.get("/inspecteur/evenement/999999").status_code == 404
     # un filtre qui ressemble à du SQL ne casse rien
     assert client.get("/inspecteur/systeme/chronologie?type=%25'%20OR%201=1--&correlation=x").status_code == 200

@@ -56,7 +56,7 @@ VOICES = (("elle", "Elle écrit comme elle-même, sous son nom d'expéditrice ; 
                            "tiens."))
 #: ce que dit « Ce qu'elle en sait » d'un mail : ses mesures, en tuiles (le reste, en lignes)
 TILES = {"pertinence estimée": "Pertinence estimée", "ce que son attention en a gardé": "Ce que son attention en a gardé",
-         "important": "Important", "réponse attendue": "Réponse attendue"}
+         "important": "Important"}
 #: un début de mail, sous le mail auquel répond un brouillon
 OPENING = 420
 
@@ -308,7 +308,7 @@ class DraftFiche(Overview):
         port = _port(ui)
         got = port.draft(key) if port is not None else None
         if got is None:
-            return _gone(ui, key)
+            return _gone(ui, key, blocks, query, forms)
         seen = _seen(ui, key)
         shown = port.preview(got.id)
         answered = port.cached_one(got.reply_to) if got.reply_to else None
@@ -329,16 +329,21 @@ class DraftFiche(Overview):
             history=[d for d in history if d["t"] != "grid"], versions=[d for d in history if d["t"] == "grid"])
 
 
-def _gone(ui: UI, key: str) -> Markup | None:
+def _gone(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str],
+          forms: Mapping[str, Any] | None) -> Markup | None:
     """Un brouillon que la boîte n'a plus (supprimé, la boîte vidée) mais qu'elle a proposé : sa fiche dit ce qu'elle en
-    sait — où il en était, d'où il venait, son parcours ; son texte, lui, n'est plus là."""
+    sait — où il en était, d'où il venait, son parcours ; son texte, lui, n'est plus là. S'il attend encore ton accord,
+    « Le refuser », l'action de la vue, l'en retire (audit du 2026-11-05, C4-02) ; ses notes, le dessin les dit déjà (le
+    bandeau, où il en est), elles se taisent ici."""
     seen = _seen(ui, key)
     if seen is None:
         return None
+    items = [drawn_blocks.shape_block(d) for d in rendered(ui, blocks, query)]
     history = side_view(ui, "email", "historique", key, "historique")
     state, tone = draft_state(seen.state)
-    return draw("brouillon.html", forms={}, tables="cards", gone=True, waiting=False, envelope=None, answered=None,
-                blocked="", text=[], actions=[], notes=[], state={"text": state, "tone": tone},
+    return draw("brouillon.html", forms=forms or {}, tables="cards", gone=True, waiting=False, envelope=None,
+                answered=None, blocked="", text=[], actions=[d for d in items if d["t"] in ("action", "disclosure")],
+                notes=[], state={"text": state, "tone": tone},
                 was_waiting=seen.state == WAITING, why=side_view(ui, "email", "pourquoi", key, "pourquoi"),
                 history=[d for d in history if d["t"] != "grid"], versions=[d for d in history if d["t"] == "grid"])
 

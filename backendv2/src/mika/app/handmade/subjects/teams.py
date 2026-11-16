@@ -1,11 +1,14 @@
 """Les fiches Teams, dessinées (ADR 0069, 0121) : une conversation et une réponse qu'elle a préparée.
 
 - **Une conversation** : son fil en bulles — les autres à gauche, toi à droite, jour par jour —, les questions qui
-  attendent une réponse, et ce qu'elle a préparé dans cette conversation (chaque réponse mène à sa fiche) ; le
-  formulaire « Lui demander de préparer une réponse » reste celui de la console.
+  attendent une réponse, et ce qu'elle a préparé dans cette conversation (chaque réponse mène à sa fiche) ; les
+  formulaires « Écrire dans cette conversation » (avec la note de la vue qui dit sous quel nom il part, ADR 0231 ; ou
+  pourquoi rien ne part de ce compte) et « Lui demander une réponse » restent ceux de la console, chacun sous la carte
+  qui porte son nom (sans le repli de la vue, qui le redirait).
 - **Une réponse** : le message auquel elle répond et, en face, exactement ce qui partira (la signature comprise), son
   parcours (proposée, décidée, posée, partie), et ce que tu peux en faire — l'envoyer, la retoucher, la refuser, la
-  faire reprendre : les formulaires que la console a préparés.
+  faire reprendre : les formulaires que la console a préparés. Disparue (son compte retiré des réglages), elle
+  retombe sur la vue, qui offre de la refuser si elle attend encore ton accord.
 
 Les données sont celles du plugin ``teams`` : son port (les conversations, les messages, les brouillons et leur aperçu)
 et sa tranche (ce qu'elle a remarqué, ce qu'elle a proposé et ce que c'est devenu).
@@ -35,6 +38,8 @@ REPLY = "reponse_teams"
 THREAD = 60
 #: ce qu'elle a préparé dans une conversation : au plus tant de réponses
 DRAFTS_SHOWN = 8
+#: écrire soi-même dans la conversation (``plugins/teams/inspect.py``, ``_write``) : sa carte à elle
+WRITE = "teams.ecrire"
 
 
 def _port(ui: UI) -> Any:
@@ -149,10 +154,25 @@ class ConversationFiche(Overview):
             mine.append({"state": _state_tag(d.state), "when": look.ago(d.at), "asked": d.asked,
                          "text": excerpt(got.body, 220) if got is not None else "(disparue)",
                          "href": subject_url(REPLY, d.draft) if d.draft else ""})
-        items = rendered(ui, blocks, query)
+        # chaque carte porte déjà le nom de son geste : son formulaire, sans le repli de la vue ni son titre, pour ne
+        # pas le dire deux fois l'un sous l'autre (audit du 2026-11-05, C4-06) ; « Écrire dans cette conversation »
+        # garde la note de la vue qui dit sous quel nom il part (ADR 0231), et une note seule de la vue dit pourquoi
+        # rien ne part de ce compte
+        ask: list[dict[str, Any]] = []
+        write: list[dict[str, Any]] = []
+        off: list[dict[str, Any]] = []
+        for d in rendered(ui, blocks, query):
+            inside = d.get("items", []) if d["t"] == "disclosure" else [d]
+            if any(x.get("t") == "action" and x.get("key") == WRITE for x in inside):
+                write = [{**drawn_blocks.shape_block(x), "compact": True} if x["t"] == "action" else x
+                         for x in inside if x["t"] in ("action", "note")]
+            elif d["t"] == "note":
+                off.append(d)
+            else:
+                ask += [{**drawn_blocks.shape_block(x), "compact": True} for x in inside if x.get("t") == "action"]
         return draw("teams_fil.html", forms=forms or {}, tables="cards", days=_days(look, thread, s),
                     count=len(thread), drafts=mine, under_way=s is not None and under_way(s, account, conversation),
-                    ask=[drawn_blocks.shape_block(d) for d in items if d["t"] in ("disclosure", "action")])
+                    ask=ask, write=write, off=off)
 
 
 class ReplyFiche(Overview):

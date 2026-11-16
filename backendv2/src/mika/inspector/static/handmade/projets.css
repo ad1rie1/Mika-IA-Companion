@@ -221,3 +221,46 @@
 .prj-entry.blocked .prj-entry-n { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); color: var(--danger); }
 .prj-side-help { margin: -4px 0 14px; color: var(--text-2); font-size: 12.5px; line-height: 1.5; }
 .prj-side .form > p.muted { margin: 0 0 4px; font-size: 12.5px; }
+
+/* Un projet › Comportement et outils (app/handmade/subjects/project.py, gabarit fiche_comportement.html) : le gabarit du
+   paramétrage (.hm-form de base.css et console.css : une ligne par réglage, « Enregistrer » collé en bas), sans cadre
+   dans la carte ; ses réglages en lecture quand il est archivé ; ses outils — la table des lots, « Choisir ses outils »
+   en colonne à côté sur un grand écran (.prj-split). */
+.prj-behaviour-form { align-content: start; }
+.prj-settings-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 18px 36px; }
+.prj-settings-group { display: grid; align-content: start; gap: 8px; min-width: 0; }
+.prj-tools { display: grid; gap: 12px; min-width: 0; }
+.prj-tools-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.prj-tools-head h2 { margin: 0; font: 600 15px/1.3 var(--display); }
+.prj-tools-head p { flex: 1 1 320px; margin: 0; color: var(--muted); font-size: 12.5px; }
+.prj-tools-form { padding: 16px 18px; }
+/* ses outils, une liste à cocher : toute la largeur de la colonne, une case par ligne à filets (pas de colonne de
+   valeur : la case est dans son libellé) */
+.prj-tools-checks { display: grid; margin: 0; padding: 0; border: 0; background: none; }
+.prj-tools-checks > legend { margin-bottom: 4px; padding: 0; color: var(--text); font-family: var(--display);
+  font-size: 1.1rem; font-weight: 600; }
+.prj-tools-checks > .field { padding: 10px 0; border-top: 1px solid var(--border); }
+
+/* Un projet › Carnet (gabarit fiche_carnet.html) : en sous-onglets (.hm-subtabs de base.css) ; une consigne, une note,
+   son texte d'abord ; ce qui sort de la machine, une entrée par demande — celle qui attend ton accord marquée, sa
+   commande et le lien vers la file sous elle. */
+.prj-notebook-text { color: var(--text); font-size: 13.5px; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-line; }
+.now-feed .prj-notebook-meta { display: flex; flex-wrap: wrap; gap: 2px 14px; margin-top: 2px; color: var(--muted); font-size: 12.5px; }
+.prj-out { display: grid; margin: 0; padding: 0; list-style: none; }
+.prj-out-item { position: relative; display: grid; gap: 8px; min-width: 0; padding: 12px 0; border-top: 1px solid var(--border); }
+.prj-out-item:first-child { padding-top: 2px; border-top: 0; }
+.prj-out-item.waiting::before { content: ""; position: absolute; top: 12px; bottom: 12px; left: -11px; width: 3px;
+  border-radius: var(--radius-sm); background: var(--warn); }
+.prj-out-item.waiting:first-child::before { top: 2px; }
+.prj-out-top { display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; align-items: baseline; gap: 4px 14px; }
+.prj-out-when { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.prj-out-what { margin: 0; font-size: 13.5px; overflow-wrap: anywhere; }
+.prj-out-tags { display: inline-flex; flex-wrap: wrap; align-items: baseline; justify-content: flex-end; gap: 4px 10px;
+  font-size: 12.5px; }
+.prj-out-decide { margin: 0; }
+.prj-out-item > :not(.prj-out-top) { margin-left: 110px; }
+@media (max-width: 640px) {
+  .prj-out-top { grid-template-columns: minmax(0, 1fr) auto; }
+  .prj-out-what { grid-column: 1 / -1; grid-row: 2; }
+  .prj-out-item > :not(.prj-out-top) { margin-left: 0; }
+}

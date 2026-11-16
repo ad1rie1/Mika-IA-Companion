@@ -43,7 +43,7 @@
   </section>
 
   <section class="now-card" id="{{ t.id }}" aria-labelledby="arb-lines-title">
-    {{ tab.head(t.title, "arb-lines-title", t.count, "Chaque ligne : une sorte d’épisode envers quelqu’un. Ce qui pousse face à ce qui retient ; le trait du milieu, c’est l’équilibre.") }}
+    {{ tab.head(t.title, "arb-lines-title", t.count, "Ce qui pousse face à ce qui retient ; le trait du milieu, c’est l’équilibre.") }}
     {% if items %}
     <ul class="arb-lines" role="list">{% for x in items %}{{ dec.line(x) }}{% endfor %}</ul>
     {% else %}{{ tab.empty(t.empty) }}{% endif %}

@@ -12,6 +12,7 @@ from mika.contracts import memory as memory_c
 from mika.contracts import runtime as rt
 from mika.kernel.events import Content
 from mika.runtime.inspection import Inspection
+from mika.runtime.operations import FIXED_FIELD, perform
 from tests.protocol.test_console_diagnostics import stop
 from tests.protocol.test_console_workflows import append
 from tests.protocol.test_drawn_pages import drawn
@@ -162,3 +163,74 @@ def test_a_name_is_decided_in_the_queue_with_both_answers(world):  # noqa: F811
     stranger(client, live, "ext_8", "Max Dupont")
     assert client.portal.call(lambda: Inspection(live.kernel).badge(names)) == (
         2, "noms dont on lui a parlé que porte quelqu'un qu'elle connaît")
+
+
+def _head(page: str) -> str:
+    """La barre de titre d'une fiche : ses actions en vue et celles sous « ⋯ »."""
+    return page.split('class="fiche-head-side"', 1)[1].split('class="tabs', 1)[0]
+
+
+def test_naming_shows_in_the_title_bar_only_while_a_name_waits(world):  # noqa: F811
+    """« C'est la personne dont on lui a parlé » n'est dans la barre de titre d'une fiche que si un nom dont on lui a
+    parlé attend d'être relié (audit du 2026-11-05, C3-08) : sans lui, la barre garde « Fixer la proximité » ; avec
+    lui, l'action revient, et la fiche ouverte depuis la file garde son formulaire pré-rempli."""
+    client, live, _ = world
+    bootstrap(client)
+    alone = _head(drawn(client, "/inspecteur/fiche/person/user_1"))
+    assert "Fixer la proximité" in alone and "C'est la personne dont on lui a parlé" not in alone
+    emit(client, live, "memory", [memory_c.BELIEVED.draft(
+        text=Content.of("Léa, la sœur d'Adrien, prépare un concours."), about=("name:lea",), sensitivity=1,
+        source="user_1", told_by=("user_1",))])
+    stranger(client, live, "ext_7", "Léa Martin")
+    assert "C'est la personne dont on lui a parlé" in _head(drawn(client, "/inspecteur/fiche/person/user_1"))
+    reader = _reader(drawn(client, "/inspecteur/approbations/noms"))
+    href = re.search(r'href="([^"]+)">C\'est elle : relier', reader).group(1)
+    assert parse_qs(urlsplit(href).query) == {"onglet": ["synthese"], "nom": ["name:lea"]}
+    synthesis = drawn(client, href)
+    body = synthesis.split('class="tabs', 1)[1]
+    assert "« Lea », dont on lui a parlé" in body and 'action="/inspecteur/action/identity.nommer' in body
+    # relié, plus rien n'attend : l'action quitte les barres, et ce nom-ci, ouvert sur une autre fiche, dit comment
+    # le libérer au lieu d'un formulaire qui ne serait plus offert
+    done = client.portal.call(lambda: perform(live.kernel, "identity.nommer", {
+        "_champs": ["name", "confirmed"], "name": ["Lea"], "confirmed": ["on"], FIXED_FIELD: ["key"],
+        "key": ["name:lea"]}, by="user_1", subject=urlsplit(href).path.rsplit("/", 1)[1], nonce="lea"))
+    assert done.ok, done
+    elsewhere = drawn(client, "/inspecteur/fiche/person/user_1?onglet=synthese&nom=name%3Alea")
+    assert "C'est la personne dont on lui a parlé" not in _head(elsewhere)
+    body = elsewhere.split('class="tabs', 1)[1]
+    assert "« Détacher un nom », sur sa fiche, le libère" in body and "identity.nommer" not in body
+
+
+def test_a_name_her_memory_keeps_nothing_active_of_no_longer_waits(world):  # noqa: F811
+    """Un nom dont sa mémoire ne garde plus rien d'actif (ici, un moment de sa vie fini) n'attend plus d'être relié,
+    comme la file le compte (``free_names``) : la fiche du nom ne mène plus au formulaire « à décider », et la
+    Synthèse ouverte avec ce nom le dit, au lieu d'un titre de section sans formulaire — qu'un autre nom attende
+    (l'action est alors offerte) ou non."""
+    client, live, _ = world
+    bootstrap(client)
+    now = client.portal.call(live.kernel.mind.clock.now)
+    move = append(client, live.kernel, [memory_c.EVENT_NOTED.draft(
+        text=Content.of("Max, le voisin d'Adrien, déménage."), when=now, about=("name:max",), ongoing=True)],
+        "memory").seqs[0]
+    append(client, live.kernel, [memory_c.SITUATION_ENDED.draft(event=move)], "memory")
+    stranger(client, live, "ext_8", "Max Dupont")
+    sheet = drawn(client, "/inspecteur/fiche/person/name%3Amax").split('class="tabs', 1)[1]
+    assert "Qui porte ce nom" in sheet and "Max Dupont" in sheet and "rien à relier" in sheet
+    assert "à décider" not in sheet and "nom=name" not in sheet
+    opened = "/inspecteur/fiche/person/ext_8?onglet=synthese&nom=name%3Amax"
+
+    def says_nothing_waits(page: str) -> None:
+        body = page.split('class="tabs', 1)[1]
+        assert "« Max », dont on lui a parlé" not in body and "Rien n'est relié tant que" not in body
+        assert "« Max » n'attend plus d'être relié : sa mémoire n'en garde plus rien d'actif." in body
+
+    alone = drawn(client, opened)
+    assert "C'est la personne dont on lui a parlé" not in _head(alone)
+    says_nothing_waits(alone)
+    # un autre nom attend : l'action revient dans la barre, ce nom-ci n'a toujours rien à relier
+    emit(client, live, "memory", [memory_c.BELIEVED.draft(
+        text=Content.of("Léa, la sœur d'Adrien, prépare un concours."), about=("name:lea",), sensitivity=1,
+        source="user_1", told_by=("user_1",))])
+    other = drawn(client, opened)
+    assert "C'est la personne dont on lui a parlé" in _head(other)
+    says_nothing_waits(other)

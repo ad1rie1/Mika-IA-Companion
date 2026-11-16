@@ -8,7 +8,8 @@ reste dans la barre de titre, à droite, sur chacun d'eux (``head_actions``).
   console.
 - Exécutions : ce qui tourne en ce moment, puis le fil de ses exécutions jour par jour — le projet et l'objectif
   visé, le verdict et sa preuve, le compte rendu cité, le commit laissé dans l'atelier, l'épisode (prompt, outils,
-  appels).
+  appels). Une exécution se met en forme par ``run``, que l'onglet Exécutions de la fiche d'un projet partage
+  (``subjects/project.py``), comme le fil de ``handmade/projets/_runs.html``.
 - Décisions techniques : rangées par projet, chacune comme une décision d'architecture — son numéro, la question,
   ce qui est choisi, pourquoi (en clair, c'est ce qui compte), qui l'a posée et quand ; une décision remplacée
   s'estompe.
@@ -65,17 +66,29 @@ def tous(got: Got) -> Markup | None:
 # ── Exécutions ────────────────────────────────────────────────────────────
 
 
-def _run(got: Got, line: Line, raw: Mapping[str, Any]) -> dict[str, Any]:
+#: les onglets de son épisode qu'une exécution lie un à un, quand sa vue les donne (la fiche d'un projet : ses colonnes
+#: repliées « prompt », « outils », « appels », « décision »)
+EPISODE_TABS = ("prompt", "outils", "appels", "décision")
+#: ce qu'une exécution dit sur sa ligne, que son détail ne redit pas
+RUN_SHOWN = ("mode", "outils utilisés", "épisode", *EPISODE_TABS)
+
+
+def run(got: Got, line: Line, raw: Mapping[str, Any]) -> dict[str, Any]:
+    """Une exécution, pour le fil de Projets › Exécutions et pour l'onglet Exécutions de la fiche d'un projet
+    (``handmade/projets/_runs.html``) : ce que sa ligne dit, par le libellé de ses colonnes — le projet (absent sur
+    la fiche : c'est lui), l'issue et la durée (sur la fiche), les onglets de son épisode quand la vue les donne."""
     at = instant(raw.get("quand"))
-    commit = line.get("commit")
     return {"at": at, "when": line.get("quand"),
             "hm": got.ui.kernel.mind.frame().local(at).strftime("%H:%M") if at else "",
-            "project": line["projet"], "objective": _cell(line.get("objectif")),
-            "verdict": _cell(line.get("verdict")), "proof": _cell(line.get("preuve")),
-            "summary": _cell(line.get("compte rendu")), "commit": _cell(commit), "href": line.href,
+            "project": _cell(line.get("projet")), "objective": _cell(line.get("objectif")),
+            "issue": _cell(line.get("issue")), "verdict": _cell(line.get("verdict")), "proof": _cell(line.get("preuve")),
+            "summary": _cell(line.get("compte rendu")), "commit": _cell(line.get("commit")),
+            "duration": _cell(line.get("durée")), "href": line.href,
             "mode": line.text("mode"), "tools": "" if blank(line.get("outils utilisés")) else line.text("outils utilisés"),
-            "episode": _cell(line.get("épisode")), "detail": rest(line, ("mode", "outils utilisés", "épisode")),
-            "blocked": text(line.get("verdict")) == "bloqué"}
+            "episode": _cell(line.get("épisode")),
+            "links": [x for label in EPISODE_TABS if (x := _cell(line.get(label))) is not None],
+            "detail": rest(line, RUN_SHOWN),
+            "blocked": text(line.get("verdict")) == "bloqué" or line.tone == "danger"}
 
 
 def executions(got: Got) -> Markup | None:
@@ -83,7 +96,7 @@ def executions(got: Got) -> Markup | None:
     t = got.table("Les exécutions")
     if t is None:
         return None
-    items = [_run(got, x, r) for x, r in zip(got.lines("Les exécutions"), raw_lines(got, t), strict=False)]
+    items = [run(got, x, r) for x, r in zip(got.lines("Les exécutions"), raw_lines(got, t), strict=False)]
     notes = got.notes()
     live = [n for n in notes if n.get("tone") == "info" and str(n.get("text") or "").startswith("En ce moment")]
     return got.draw("handmade/projets/executions.html", t=t, days=by_day(got, items), live=live,

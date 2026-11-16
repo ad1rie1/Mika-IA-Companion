@@ -70,7 +70,8 @@ from mika.kernel.inspect import (
 )
 from mika.vocab import privacy
 from mika.vocab.people import ACCOUNT_PREFIX, fold, is_identifiable, is_internal
-from mika.vocab.privacy import ChannelTrust, Disclosure, Sensitivity
+from mika.vocab.privacy import LEVEL_WORDS, ChannelTrust, Disclosure, Sensitivity
+from mika.vocab.words import elided
 
 #: Au plus tant de lignes au registre des preuves par page, tant de lignes par page d'une liste.
 MAX_LEDGER = 50
@@ -96,8 +97,6 @@ _TRUST_RANK = {ChannelTrust.INTERNAL: 0, ChannelTrust.PUBLIC: 1, ChannelTrust.AC
                ChannelTrust.AUTHENTICATED: 3}
 CERTAINTY_FR = {"unknown": "inconnue", "suspected": "soupçonnée", "claimed": "affirmée",
                 "corroborated": "recoupée", "bound": "liée", "verified": "vérifiée"}
-LEVEL_FR = {Sensitivity.NONE: "rien sur autrui", Sensitivity.ANODYNE: "anodin", Sensitivity.PERSONAL: "personnel",
-            Sensitivity.CONFIDENCE: "confidences"}
 LEVEL_TONE = {Sensitivity.NONE: "muted", Sensitivity.ANODYNE: "muted", Sensitivity.PERSONAL: "info",
               Sensitivity.CONFIDENCE: "ok"}
 #: Sans genre imposé : la console parle aussi d'Adrien.
@@ -129,7 +128,7 @@ def view_certainty(view: c.IdentityView) -> str:
 
 
 def disclosure_fr(d: Disclosure) -> str:
-    return f"{LEVEL_FR.get(d.level, '?')} · sa fiche {'ouverte' if d.own_file else 'fermée'}"
+    return f"{LEVEL_WORDS.get(d.level, '?')} · sa fiche {'ouverte' if d.own_file else 'fermée'}"
 
 
 def person_ref(s: IdentityState, person: str, tab: str = "") -> Ref:
@@ -148,22 +147,20 @@ def reach_fr(h: Handle) -> str:
 
 
 def kind_of(h: Handle) -> str:
-    """Par où, en mots (un compte, un compte extérieur, le web…) : jamais la clé brute."""
-    if h.authenticated:
-        kind = "compte opérateur" if h.operator else "compte"
-        return f"{kind} · téléphone" if h.channel == privacy.MOBILE else kind
-    return "compte extérieur" if h.channel == privacy.EXTERNAL else (h.channel or "inconnu")
+    """Par où, en mots (un compte, un compte extérieur, le web…) : jamais la clé brute (``c.kind_words``)."""
+    return c.kind_words(h)
 
 
 def handle_label(s: IdentityState, key: str) -> str:
     """Une adresse telle qu'on la lit : le nom sous lequel elle la connaît, et par où
-    (« adrien · compte »). La clé (``user_1``) ne change jamais, même quand le nom change :
-    elle reste sur la fiche et en colonne de détail, pas en titre."""
+    (« adrien · compte », ``c.address_label``, que les autres facultés lisent par ``c.handle_label``). La clé
+    (``user_1``) ne change jamais, même quand le nom change : elle reste sur la fiche et en colonne de détail, pas
+    en titre."""
     h = s.handles.get(key)
     if h is None:
         return key
     name = h.name or (known_as(s, h.person) if h.person else "")
-    return f"{name} · {kind_of(h)}" if name else f"{kind_of(h)}, sans nom"
+    return c.address_label(name, h)
 
 
 def stance(frame: Frame, handle: str, person: str) -> tuple[str, float]:
@@ -299,16 +296,24 @@ class Waiting:
     homonyms: tuple[str, ...] = ()
 
 
-def waiting_names(s: IdentityState, store: Any) -> list[Waiting]:
-    """Les noms dont on lui a parlé, encore libres, qu'une personne connue porte : un couple par personne, sauf
-    ceux qu'un opérateur a écartés ; les arrivées les plus récentes d'abord. Lu dans le magasin, en lecture seule
-    (l'index par personne de la mémoire), jamais dans une autre faculté."""
+def free_names(s: IdentityState, store: Any) -> list[str]:
+    """Les noms dont on lui a parlé (``name:carol``, ``name:<portée>:carol``) qu'aucun opérateur n'a encore reliés,
+    triés : ceux dont sa mémoire garde un souvenir, une croyance ou un moment de sa vie actif. Lu dans le magasin, en
+    lecture seule (l'index par personne de la mémoire), jamais dans une autre faculté ; la file « Noms à relier »
+    (``waiting_names``), l'offre de « C'est la personne dont on lui a parlé » (``actions.py``), le formulaire de la
+    Synthèse (``_naming``) et la fiche d'un nom (``_bearing``) le lisent."""
     a, i = memory_c.KNOWLEDGE_ABOUT, memory_c.KNOWLEDGE
     # un intervalle de clés (``name:`` ≤ clé < ``name;``) : comparé en binaire sur les deux moteurs
     rows = store.query_mind(
         select(a.c.person).distinct().select_from(a.join(i, i.c.id == a.c.item))
         .where(a.c.person >= NAMED, a.c.person < _NAMED_END, i.c.status == "active", i.c.kind.in_(list(NAMED_KINDS))))
-    free = sorted({str(k) for (k,) in rows} - set(s.names))
+    return sorted({str(k) for (k,) in rows} - set(s.names))
+
+
+def waiting_names(s: IdentityState, store: Any) -> list[Waiting]:
+    """Les noms dont on lui a parlé, encore libres (``free_names``), qu'une personne connue porte : un couple par
+    personne, sauf ceux qu'un opérateur a écartés ; les arrivées les plus récentes d'abord."""
+    free = free_names(s, store)
     if not free:
         return []
     worn = worn_names(s)
@@ -428,7 +433,7 @@ def _person_head(s: IdentityState, frame: Frame, ctx: InspectContext, key: str) 
         h = s.handles[main]
         view = view_of(s, main, frame.now)
         private, _public = disclosures(frame, main, h)
-        badges.append(Badge(f"en privé : {LEVEL_FR.get(private.level, '?')}", LEVEL_TONE.get(private.level, "")))
+        badges.append(Badge(f"en privé : {LEVEL_WORDS.get(private.level, '?')}", LEVEL_TONE.get(private.level, "")))
         facts += [("canal principal", f"{h.channel or '—'} · {TRUST_SHORT[h.trust]}"),
                   ("certitude", view_certainty(view))]
     if not is_identifiable(person):
@@ -607,10 +612,10 @@ def _opens(frame: Frame, handle: str, h: Handle, view: c.IdentityView) -> Table:
     for label, d, flag in (("en privé", private, False), ("en public", public, True)):
         # comme le fait : un canal public rend toute audience publique
         audience_public = flag or h.trust is ChannelTrust.PUBLIC
-        rows.append((label, LEVEL_FR.get(d.level, "?"),
+        rows.append((label, LEVEL_WORDS.get(d.level, "?"),
                      why_level(view.certainty, h.trust, closeness=closeness, warmth=warmth, public=audience_public),
-                     LEVEL_FR.get(d.witness_level, "?"), LEVEL_FR.get(d.tied_level, "?"),
-                     LEVEL_FR.get(d.untied_level, "?"), LEVEL_FR.get(d.veiled_level, "?"),
+                     LEVEL_WORDS.get(d.witness_level, "?"), LEVEL_WORDS.get(d.tied_level, "?"),
+                     LEVEL_WORDS.get(d.untied_level, "?"), LEVEL_WORDS.get(d.veiled_level, "?"),
                      why_file(view.certainty, h.trust, public=audience_public)))
     return Table(("audience", "sur autrui", "pourquoi", "si la personne est concernée",
                   "sur quelqu'un qu'elle connaît",
@@ -764,8 +769,8 @@ def _ledger(s: IdentityState, handle: str, ctx: InspectContext) -> Block:
         label, detail = _describe_event(e, s)
         by = str(getattr(e.data, "by", ""))
         who = BY_FR.get(by, by) or "le noyau"
-        if e.seq in operators:
-            who = f"{who} ({operators[e.seq]})"
+        if e.seq in operators:  # l'opératrice par son nom ; sa clé seulement si elle n'en a pas
+            who = f"{who} ({known_as(s, operators[e.seq])})"
         message = getattr(e.data, "message", None)
         rows.append(Row((Ref("event", str(e.seq), str(e.seq)), When(e.at), Badge(label, _KIND_TONE.get(label, "")),
                          detail, who, Ref("event", str(message), f"message {message}") if message is not None
@@ -812,7 +817,12 @@ def _person_of(s: IdentityState, frame: Frame, ctx: InspectContext) -> tuple[str
 
 def _naming(s: IdentityState, ctx: InspectContext, person: str) -> list[Block]:
     """Venue d'une ligne « Noms qui attendent quelqu'un » (``?nom=name:carol``) : le formulaire « C'est la personne
-    dont on lui a parlé », pré-rempli de ce nom, avec la même confirmation ; « Ce n'est pas elle » à côté."""
+    dont on lui a parlé », pré-rempli de ce nom, avec la même confirmation ; « Ce n'est pas elle » à côté.
+
+    Le formulaire n'est posé que là où il est offert : un nom libre attend (``free_names``, comme l'offre de
+    ``actions.py``). Un nom dont sa mémoire ne garde plus rien d'actif (un moment de sa vie fini, une croyance
+    remplacée) n'attend plus personne, et le dit ; un nom déjà relié ailleurs, quand plus rien n'attend, dit comment
+    le libérer — jamais un titre de section sans formulaire (audit du 2026-11-05, C3-08)."""
     key = ctx.param(NAMING_PARAM)
     if not key.startswith(NAMED) or not _named_exists(ctx, key):
         return []
@@ -821,6 +831,16 @@ def _naming(s: IdentityState, ctx: InspectContext, person: str) -> list[Block]:
     if current == person:
         return [Note(f"« {said} », dont on lui avait parlé, c'est {known_as(s, person)} : ce qu'on lui en a dit s'y "
                      "rattache.", tone="ok")]
+    free = free_names(s, ctx.store)
+    if not current and key not in free:
+        # rien d'actif sous ce nom : la file ne le propose plus, et le relier n'y rattacherait rien
+        return [Note(f"« {said} » n'attend plus d'être relié : sa mémoire n'en garde plus rien d'actif.",
+                     tone="muted")]
+    if not free:
+        # « C'est la personne dont on lui a parlé » n'est offerte que si un nom attend encore (``actions.py``) : ce
+        # nom-ci, déjà relié, se libère d'abord sur la fiche de celle qu'il désigne
+        return [Note(f"« {said} » désigne aujourd'hui {known_as(s, current)} : « Détacher un nom », sur sa fiche, le "
+                     "libère ; il pourra alors se relier ici.", tone="muted")]
     items: list[Block] = []
     if current:
         items.append(Note(f"« {said} » désigne aujourd'hui {known_as(s, current)} : le relier ici l'en détache.",
@@ -843,23 +863,28 @@ def _naming(s: IdentityState, ctx: InspectContext, person: str) -> list[Block]:
         "relié tant que tu n'as pas confirmé."))]
 
 
-def _bearing(s: IdentityState, key: str) -> list[Block]:
+def _bearing(s: IdentityState, key: str, store: Any) -> list[Block]:
     """Sur la fiche d'un nom : la personne qu'un opérateur lui a reliée, ou celles qu'elle connaît qui le portent
-    (une suggestion : la fiche de chacune permet de le relier)."""
+    (une suggestion : la fiche de chacune permet de le relier). Un nom dont sa mémoire ne garde plus rien d'actif
+    n'attend plus (``free_names``, comme la file) : ses lignes ne mènent plus au formulaire, qui n'y serait pas."""
     current = s.names.get(key)
     if current:
         return [Fields((("c'était", person_ref(s, current)),), title="Relié par un opérateur")]
+    waits = key in free_names(s, store)
     gone = s.dismissed.get(key, ())
     rows = []
     for p in bearers(s, key):
         first = _first_seen(s, p, 0)
-        rows.append(Row((person_ref(s, p), _where(s, handles_of(s, p)), When(first) if first else "—",
-                         Badge("écartée", "muted") if p in gone else Badge("à décider", "warn")),
-                        href=naming_ref(s, key, p)))
+        badge = (Badge("écartée", "muted") if p in gone else Badge("à décider", "warn") if waits
+                 else Badge("rien à relier", "muted"))
+        rows.append(Row((person_ref(s, p), _where(s, handles_of(s, p)), When(first) if first else "—", badge),
+                        href=naming_ref(s, key, p) if waits else None))
+    caption = ("Jamais relié d'une ressemblance de nom : une ligne mène à la fiche de la personne, où un opérateur le "
+               "relie (ou l'écarte)." if waits else
+               "Jamais relié d'une ressemblance de nom. Sa mémoire ne garde plus rien d'actif sous ce nom : il "
+               "n'attend plus d'être relié.")
     return [Table(("personne", "par où", "vue pour la première fois", "suggestion"), tuple(rows),
-                  title="Qui porte ce nom", empty="personne qu'elle connaisse ne porte ce nom",
-                  caption="Jamais relié d'une ressemblance de nom : une ligne mène à la fiche de la personne, où un "
-                          "opérateur le relie (ou l'écarte).")]
+                  title="Qui porte ce nom", empty="personne qu'elle connaisse ne porte ce nom", caption=caption)]
 
 
 @IDENTITY.inspect("synthese", title="Synthèse", subject="person", order=10,
@@ -871,7 +896,7 @@ def _synthesis(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Bloc
     if person.startswith(NAMED):
         return [Note("Connue seulement de nom : quelqu'un lui a parlé d'elle, mais elle ne lui a jamais écrit. "
                      "Ce qu'elle en sait est dans sa mémoire.", tone="muted"),
-                Fields((("nom", known_as(s, person)), ("clé", Text(person, "mono")))), *_bearing(s, person)]
+                Fields((("nom", known_as(s, person)), ("clé", Text(person, "mono")))), *_bearing(s, person, ctx.store)]
     blocks += _naming(s, ctx, person)
     handles = handles_of(s, person)
     owner = frame.get(c.IS_OWNER(person))
@@ -916,12 +941,15 @@ def _person_handles(s: IdentityState, frame: Frame, ctx: InspectContext) -> list
         return blocks
     handles = handles_of(s, person)
     bound = sum(1 for k in handles if s.handles[k].person)
+    claims = sum(1 for k in handles if view_of(s, k, frame.now).claim)
     blocks += [
-        Stats((Stat("moyens de communication", len(handles)), Stat("reliés à elle", bound, "par recoupement ou par un opérateur"),
-               Stat("revendications en attente", sum(1 for k in handles if view_of(s, k, frame.now).claim)))),
+        Stats((Stat(agree(len(handles), "moyen de communication", "moyens de communication"), len(handles)),
+               Stat(agree(bound, "relié à elle", "reliés à elle"), bound, "par recoupement ou par un opérateur"),
+               Stat(agree(claims, "revendication en attente", "revendications en attente"), claims))),
         _handles_table(s, frame, ctx, handles, title="Ses moyens de communication", empty="aucun moyen de communication connu"),
+        # le champ « Personne » de « Relier » est un choix parmi les personnes connues : on y choisit un nom
         Note(f"Pour relier un autre moyen de communication à cette personne : ouvre sa fiche, puis « Relier », "
-             f"et indique « {person} ».", tone="muted"),
+             f"et choisis {known_as(s, person)}.", tone="muted"),
     ]
     return blocks
 
@@ -985,30 +1013,31 @@ def _handle_others(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[
     view = view_of(s, handle, frame.now)
     others = [k for k in handles_of(s, view.person) if k != handle]
     return [Fields((("personne", person_ref(s, view.person)),)),
-            _handles_table(s, frame, ctx, others, title=f"Les autres moyens de communication de {known_as(s, view.person)}",
+            _handles_table(s, frame, ctx, others, title=f"Les autres moyens de communication {elided(known_as(s, view.person), 'de')}",
                            empty="aucun autre moyen de communication ne parle pour cette personne")]
 
 
 # ── Les destinations ──────────────────────────────────────────────────────
 
-SEARCH = Param("q", "nom ou moyen de communication", placeholder="Alice, user_7…")
-TRUSTS = Param("confiance", "confiance du canal", kind="select",
-               choices=tuple((t.value, TRUST_SHORT[t]) for t in ChannelTrust if t is not ChannelTrust.INTERNAL))
+SEARCH = Param("q", "nom ou moyen de communication", placeholder="Alice…")
+#: la confiance du canal, toujours posée (« toutes » : pas de filtre) : quatre choix, un bouton à choix à côté de la
+#: recherche (ADR 0176)
+ALL_TRUSTS = "toutes"
+TRUSTS = Param("confiance", "confiance du canal", kind="select", default=ALL_TRUSTS,
+               choices=((ALL_TRUSTS, "toutes"),
+                        *((t.value, TRUST_SHORT[t]) for t in ChannelTrust if t is not ChannelTrust.INTERNAL)))
 
 
-@IDENTITY.inspect("personnes", title="Annuaire", section="personnes", order=10, params=[SEARCH],
-                  description="Retrouver une personne, ses moyens de communication, ses échanges et son lien avec elle.")
+# L'annuaire se parcourt, sans filtre : on cherche quelqu'un depuis la vue d'ensemble de Personnes (son nom ou un
+# moyen de communication), seule à chercher dans la destination (ADR 0176 : pas d'onglet qui répète un filtre).
+@IDENTITY.inspect("personnes", title="Annuaire", section="personnes", order=10, params=[],
+                  description="Chaque personne qu'elle connaît : ses moyens de communication, ses échanges et son lien "
+                              "avec elle.")
 def _people(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    q = fold(str(ctx.value("q") or ""))
     everyone = people(s, frame)
-    matched = []
-    for person, handles in everyone.items():
-        name = known_as(s, person)
-        if q and q not in fold(name) and q not in fold(person) and not any(q in fold(k) for k in handles):
-            continue
-        matched.append((_last_from(frame, handles), person, handles))
-    matched.sort(key=lambda x: (-x[0], x[1]))
-    page, pager = paginate(matched, ctx.pager(size=PAGE))
+    listed = sorted(((_last_from(frame, handles), person, handles) for person, handles in everyone.items()),
+                    key=lambda x: (-x[0], x[1]))
+    page, pager = paginate(listed, ctx.pager(size=PAGE))
     rows = []
     for last, person, handles in page:
         main = principal(s, person)
@@ -1031,8 +1060,7 @@ def _people(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
                Stat("avec plusieurs moyens de communication", sum(1 for hs in everyone.values() if len(hs) > 1)))),
         Table((Column("personne", role="title"), Column("moyens de communication", "num"), Column("canal principal", detail=True), Column("certitude", detail=True),
                Column("proximité", role="badge"), Column("propriétaire", role="badge"), "dernier message reçu", Column("vue pour la première fois", detail=True)),
-              tuple(rows), title="Personnes", pager=pager, layout="cards",
-              empty=f"personne ne correspond à « {ctx.value('q')} »" if q else "personne pour l'instant"),
+              tuple(rows), title="Personnes", pager=pager, layout="cards", empty="personne pour l'instant"),
     ]
 
 
@@ -1041,7 +1069,8 @@ def _people(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
                               "fiche.")
 def _directory(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
     q = fold(str(ctx.value("q") or ""))
-    trust = str(ctx.value("confiance") or "")
+    trust = str(ctx.value("confiance") or ALL_TRUSTS)
+    trust = "" if trust == ALL_TRUSTS else trust
     ordered = sorted(s.handles.items(), key=lambda kv: (-kv[1].first_seen, kv[0]))
     matched = [(k, h) for k, h in ordered
                if (not q or q in fold(k) or q in fold(h.name)) and (not trust or h.trust.value == trust)]
@@ -1169,11 +1198,12 @@ def _opens_at_best(trust: ChannelTrust) -> str:
     ceiling = privacy.CEILINGS[trust]
     level = privacy.disclosable(ceiling, trust, closeness=social_c.CLOSE, witness=True)
     own = "peut s'ouvrir" if privacy.may_disclose_private(ceiling, trust) else "jamais ouverte"
-    return f"{LEVEL_FR.get(level, '?')} · sa fiche {own}"
+    return f"{LEVEL_WORDS.get(level, '?')} · sa fiche {own}"
 
 
 @IDENTITY.inspect("politique", title="Règles de divulgation", section="identites", order=30,
-                  description="Les barres que la faculté applique : lues dans la politique, jamais recopiées.")
+                  description="Ce qu'il faut de certitude pour qu'elle dise du personnel ou des confidences, et ce "
+                              "que chaque canal peut prouver.")
 def _policy(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
     pol = privacy.POLICY
     channels = tuple((Badge(TRUST_SHORT[t], TRUST_TONE[t]), TRUST_FR[t], num_fr(privacy.FLOORS[t], 2),

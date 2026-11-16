@@ -10,7 +10,9 @@ confirme » refuse par ``confirm_first(ce qu'elle changera)``.
 
 Ce sont des actions d'exploitation (lier une adresse, confier un projet,
 recharger une app) — jamais une réécriture de ses souvenirs, de ses pensées ou
-de son humeur : une règle d'architecture fige la liste.
+de son humeur. Corriger sa mémoire (une promesse tenue, une situation finie,
+l'issue d'un moment, un démenti) ajoute un événement sans rien réécrire ni
+effacer (ADR 0230).
 """
 
 from __future__ import annotations

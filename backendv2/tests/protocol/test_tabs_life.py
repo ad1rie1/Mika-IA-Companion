@@ -6,12 +6,28 @@ vérifient sans serveur."""
 
 from __future__ import annotations
 
+import html
+import re
+from dataclasses import replace
+from datetime import datetime
+from types import SimpleNamespace
+
 from markupsafe import Markup
 
-from mika.app.handmade.tabs import Line, anchored, life
+from mika.app.handmade import unit
+from mika.app.handmade.tabs import FOLDED, Got, Line, anchored, life
+from mika.contracts import body
 from mika.contracts import self_ as self_c
+from mika.contracts import world as w
+from mika.faculties.affect import inspect as affect_view
+from mika.faculties.body import inspect as body_view
+from mika.faculties.self.params import params as self_params
+from mika.inspector import render
 from mika.inspector.ui import env
+from mika.kernel.inspect import Badge, Fields, Row, Table, When, pct_fr
 from mika.vocab import temperament as T
+from tests.protocol.test_console_diagnostics import stop
+from tests.protocol.test_console_workflows import append
 from tests.protocol.test_drawn_pages import drawn
 from tests.protocol.test_now_page import chat
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
@@ -20,6 +36,11 @@ from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture p
 def _between(page: str, start: str, end: str) -> str:
     """Le morceau de la page entre deux repères (le premier après ``start``)."""
     return page.split(start, 1)[1].split(end, 1)[0]
+
+
+def _words(part: str) -> str:
+    """Ce qu'un morceau de page donne à lire : sans ses balises, ses entités rendues, ses espaces resserrés."""
+    return " ".join(html.unescape(re.sub(r"<[^>]+>", " ", part)).split())
 
 
 def test_her_mood_in_big_then_the_figures_then_her_tags_with_what_she_said(world):  # noqa: F811
@@ -31,9 +52,12 @@ def test_her_mood_in_big_then_the_figures_then_her_tags_with_what_she_said(world
     # son humeur en mots, ce que son prompt lui en dit, le plan plaisir × éveil et sa trace sur la période
     assert 'class="now-word"' in hero and "ce que son prompt lui en dit" in hero and 'class="plane-now"' in hero
     assert "sa trace sur 24 h" in hero
-    band = _between(page, "vie-band", "</section>")
-    assert band.index("Ce qui déborde") < band.index("Son fond") < band.index("Son visage") \
+    band = _words(_between(page, "vie-band", "</section>"))
+    assert band.index("Envie d'en parler") < band.index("Son fond") < band.index("Son visage") \
         < band.index("Dernière balise")
+    # chaque tuile dit ce qu'elle mesure, sans les mots du moteur
+    assert "elle écrit d'elle-même au-delà de" in band and "ce que montre son avatar" in band
+    assert "lecture absolue" not in band and "pousse à parler" not in band and "déborde" not in band
     # sa balise déclarée en lui répondant (la doublure écrit « contente »), et ce qu'elle a dit
     tags = _between(page, 'class="vie-tags"', "</ol>")
     assert "sw-happy" in tags and "J'ai bien lu" in tags and "en répondant" in tags
@@ -61,15 +85,59 @@ def test_a_grudge_is_the_one_banner_and_warmth_leans_to_its_side():
     assert (warm["x1"], warm["x2"], warm["side"]) == (50, 60.0, "warm")
     line = Line({"personne": {"t": "link", "text": "Bea", "href": "/inspecteur/fiche/person/bea"},
                  "chaleur (−1…1)": {"t": "meter", "ratio": 0.4, "text": "−0,40", "tone": "danger"},
-                 "hostilité": {"t": "meter", "ratio": 0.5, "text": "0,50", "tone": "danger"}},
+                 "hostilité": {"t": "meter", "ratio": 0.5, "text": "50\u202f%", "tone": ""}},
                 {}, "", "", [{"t": "note", "text": "Tu lui en veux encore.", "title": "ce qu'elle se dit"}], False, {})
     bea = life._stance(line)
+    # la rancune se lit à la part de la jauge (le seuil de la vue), pas à son ton
     assert bea["grudge"] and bea["says"] == "Tu lui en veux encore." and bea["initial"] == "B"
+    below = affect_view.GRUDGE_FROM - 0.01
+    calm = Line({"hostilité": {"t": "meter", "ratio": below, "text": pct_fr(below), "tone": "danger"}},
+                {}, "", "", [], False, {})
+    assert not life._stance(calm)["grudge"]
     page = str(Markup(env.get_template("handmade/vie/postures.html").render(
         t={"id": "pg1", "count": 1, "empty": ""}, people=[bea], lede="", grudges=[bea["who"]], forms={},
         tables="table")))
     assert page.count('class="person-tab-note danger"') == 1 and page.index("Elle en veut à") < page.index("vie-stances")
     assert 'class="vie-stance grudge"' in page and 'class="vie-signed cold' in page
+
+
+def test_the_anchor_of_a_stance_is_in_the_card_detail_not_on_the_card():
+    """Ses chiffres bruts, dont l'ancre (une colonne repliée de la faculté), sont dans le détail de la carte ; la
+    carte ne garde que sa dernière balise."""
+    folded = {"t": "fields", "title": FOLDED, "pairs": [
+        {"label": "ancre", "value": {"t": "text", "text": "amoureuse 2 %"}},
+        {"label": "dernière balise", "value": {"t": "text", "text": "contente 40 %"}}]}
+    facts = {"t": "fields", "title": "", "pairs": [{"label": "installée", "value": {"t": "text", "text": "non"}}]}
+    line = Line({"personne": {"t": "text", "text": "Bea"}}, {p["label"]: p["value"] for p in folded["pairs"]},
+                "", "", [{"t": "note", "text": "Rien de particulier.", "title": "ce qu'elle se dit"}, facts, folded],
+                False, {})
+    bea = life._stance(line)
+    shown = [p["label"] for d in bea["facts"] for p in d.get("pairs", [])]
+    assert "ancre" in shown and "installée" in shown and "dernière balise" not in shown
+    page = str(Markup(env.get_template("handmade/vie/postures.html").render(
+        t={"id": "pg1", "count": 1, "empty": ""}, people=[bea], lede="", grudges=[], forms={}, tables="table")))
+    meta = _words(_between(page, 'class="vie-meta"', "</p>"))
+    assert "dernière balise" in meta and "contente" in meta and "ancre" not in meta
+    assert "amoureuse 2 %" in _words(_between(page, "<summary>Le détail</summary>", "</details>"))
+
+
+def test_the_installed_postures_are_counted_in_words():
+    """Le chapeau de « Envers chacun » compte les postures que leurs échanges ont installées, accordé (C2-09) ; il
+    les reconnaît à la clé de leur étiquette, jamais à ses mots."""
+    def lede(*installed: bool | Badge) -> str:
+        rows = tuple(Row((f"P{i}", "—", "—", "—", "—", "—", "—", "—"), detail=(Fields((
+            ("installée", x if isinstance(x, Badge) else affect_view.INSTALLED if x else affect_view.NOT_INSTALLED),
+        )),)) for i, x in enumerate(installed))
+        got = Got(SimpleNamespace(env=lambda: render.Env(when=str, now=0)),
+                  [Table(affect_view.POSTURE_COLUMNS, rows, title="Postures envers chacun")], {}, {})
+        return _words(_between(str(life.postures(got)), 'id="vie-stances-title"', "</header>"))
+
+    assert "1 posture installée (plusieurs échanges concordants)" in lede(True, False)
+    assert "2 postures installées (plusieurs échanges concordants)" in lede(True, True)
+    assert "installée" not in lede(False)
+    renamed = replace(affect_view.INSTALLED, text="bien installée")
+    assert "1 posture installée" in lede(renamed)
+    assert "installée" not in lede(Badge("oui, ou presque", "muted", key=affect_view.NOT_INSTALLED.key))
 
 
 def test_her_three_needs_side_by_side_then_their_curve_and_what_happens(world):  # noqa: F811
@@ -120,6 +188,50 @@ def test_her_day_on_24_hours_then_her_nights(world):  # noqa: F811
         < page.index("Dernières transitions") < page.index("En détail")
 
 
+def test_the_messages_waiting_for_her_waking_are_counted_in_words(world):  # noqa: F811
+    """L'étiquette du rythme accorde le verbe et le nom au compte que la faculté donne (C2-09)."""
+    client, live, _ = world
+    bootstrap(client)
+    stop(client, live.kernel)  # une vie à l'arrêt : rien ne répond aux messages pendant la lecture
+    append(client, live.kernel, [body.WAITED.draft(message=901, handle="user_1", person="user_1")], "body")
+    flags = _words(_between(drawn(client, "/inspecteur/vie/rythme"), 'class="now-chips vie-flags"', "</ul>"))
+    assert "1 message attend son réveil" in flags and "message(s)" not in flags
+    append(client, live.kernel, [body.WAITED.draft(message=902, handle="user_1", person="user_1")], "body")
+    flags = _words(_between(drawn(client, "/inspecteur/vie/rythme"), 'class="now-chips vie-flags"', "</ul>"))
+    assert "2 messages attendent son réveil" in flags
+
+
+def test_the_rhythm_reads_the_keys_of_its_facts_not_their_words(world, monkeypatch):  # noqa: F811
+    """Le rythme lit l'état de son corps à la clé de ses étiquettes (``Badge.key``), jamais à leurs mots : un « non »
+    qui dirait « oui » ne la dit pas réveillée par un message ; libres sous d'autres mots, ses initiatives ne se
+    signalent pas ; retenues sous d'autres mots, elles se signalent, de leur ton."""
+    monkeypatch.setattr(body_view, "NO", Badge("oui", "muted", key=body_view.NO.key))
+    monkeypatch.setattr(body_view, "_gate_badge", lambda s, frame: Badge("libres comme l'air", "ok",
+                                                                         key=body_view.FREE))
+    client, live, _ = world
+    bootstrap(client)
+    stop(client, live.kernel)
+    page = drawn(client, "/inspecteur/vie/rythme")
+    assert 'class="now-chips vie-flags"' not in page  # rien à signaler
+    monkeypatch.setattr(body_view, "_gate_badge", lambda s, frame: Badge("tenues : elle dort", "warn",
+                                                                         key=body_view.VETOED))
+    flags = _between(drawn(client, "/inspecteur/vie/rythme"), 'class="now-chips vie-flags"', "</ul>")
+    assert '<li class="warn">initiatives et travail tenues : elle dort</li>' in flags
+    assert "réveillée par un message" not in flags
+
+
+def test_a_night_stayed_up_late_is_read_by_its_key():
+    """Ses dernières nuits : « veillé tard » se lit à la clé de l'étiquette de la vue, pas à son mot."""
+    def late(cell: Badge) -> bool:
+        table = Table(("endormie", "réveillée", "dormi", "tirée du sommeil", "veillé tard", "ce qu'elle en sait"),
+                      ((When(1), When(2), "7 h", "—", cell, ""),), title="Ses dernières nuits")
+        look = SimpleNamespace(frame=SimpleNamespace(local=lambda at: datetime(2026, 11, 15, 23)), hm=lambda at: "23:00")
+        return life._nights(SimpleNamespace(raw_table=lambda title: table), look)[0]["late"]
+
+    assert late(body_view.LATE) and late(replace(body_view.LATE, text="jusqu'à pas d'heure"))
+    assert not late(body_view.NO) and not late(Badge("oui", "muted", key=body_view.NO.key))
+
+
 def _phase(name: str, start: str, tint: str) -> Line:
     return Line({"phase": {"t": "text", "text": name}, "début": {"t": "text", "text": start},
                  "teinte": {"t": "swatch", "key": tint, "text": tint}}, {}, "", "", [], False, {})
@@ -136,10 +248,18 @@ def test_the_night_phase_crosses_midnight_and_says_its_longer_piece():
 
 
 def test_things_are_grouped_where_they_are_and_the_room_is_said_once(world):  # noqa: F811
-    client, _, _ = world
+    client, live, _ = world
     bootstrap(client)
     page = drawn(client, "/inspecteur/vie/monde")
     assert "dans ta chambre, rangées par où elles sont" in page
+    # les mots de son monde sont dits siens ; l'identifiant, celui que nomment ses éditions
+    assert "nommées comme son monde le lui dit" in page and "éditer son monde" not in page
+    band = _words(_between(page, "vie-band", "</section>"))
+    assert "dans les mots de son monde" in band
+    # son monde en nombres, chacun accordé : une seule pièce, plusieurs lieux et objets (C2-09)
+    defn: w.WorldDef = live.kernel.mind.frame().get(w.DEFINITION)
+    assert len(defn.rooms) == 1 and len(defn.places) > 1 and len(defn.objects) > 1
+    assert f"1 pièce, {len(defn.places)} lieux, {len(defn.objects)} objets" in band and "pièce(s)" not in band
     bed = _between(page, "<h3>sur ton lit</h3>", "</section>")
     assert "ton lit" in bed and "bed_frame" in bed and "ta chambre" not in bed
     assert page.index("Ce qui est en route") < page.index("Où sont les choses") \
@@ -156,7 +276,16 @@ def test_herself_in_four_subtabs_her_temperament_by_family(world):  # noqa: F811
         assert f'id="{pane}" data-pane' in page, pane
     assert 'href="#soi-recit"' in _between(page, "vie-band", "</section>")  # la bande mène à son sous-onglet
     assert 'class="vie-scale-now' in page  # son estime sur son échelle
-    persona = live.kernel.mind.frame().get(self_c.PERSONA)
+    # ses seuils et ses bornes lus dans ses paramètres, dits en % comme son estime (C2-03), plus relus dans un texte
+    frame = live.kernel.mind.frame()
+    p = self_params(frame.env.params_of("self", frame.root))
+    scale = _between(page, 'class="vie-scale"', "</figure>")
+    assert f'class="vie-scale-track" x="{unit(p.esteem_min)}%"' in scale
+    assert f'class="vie-scale-sure" x="{unit(p.assured_above)}%"' in scale
+    assert f"elle doute · sous {pct_fr(p.doubt_below)}" in scale and "sur une échelle de 0 à 100 %" in scale
+    assert f'<text class="vie-scale-value" x="{unit(p.esteem_rest)}%" y="11" text-anchor="middle">' \
+           f"{pct_fr(p.esteem_rest)}</text>" in scale  # jamais bousculée : à son repos
+    persona = frame.get(self_c.PERSONA)
     temperament = page.split('id="soi-temperament"', 1)[1]  # le dernier sous-onglet
     assert T.PROFILES[T.profile_of(persona.temperament)].label in temperament
     assert temperament.index(T.FEEL) < temperament.index(T.OTHERS)  # ses curseurs, famille par famille
@@ -189,3 +318,18 @@ def test_a_list_in_a_subtab_pages_back_to_it():
     cursor = {"pager": {"cursor": True, "older": "?avant=9", "newer": "", "first": "?"}}
     anchored(cursor, "devenir-avis")
     assert cursor["pager"]["older"] == "?avant=9#devenir-avis" and cursor["pager"]["first"] == "?#devenir-avis"
+
+
+def test_an_edit_of_her_world_names_what_it_adds_and_removes_in_words(world):  # noqa: F811
+    """« + objet desk_chair », « − lieu window » : la sorte en mots, l'identifiant tel quel (une édition sur une
+    révision dépassée ne s'applique pas, mais se lit)."""
+    client, live, _ = world
+    bootstrap(client)
+    kernel = live.kernel
+    current: w.WorldDef = kernel.mind.frame().get(w.DEFINITION)
+    thing = current.objects[0]
+    append(client, kernel, [w.AUTHORED.draft(base_rev=current.rev + 7, by="user_1", changes=(
+        w.DefPut(item=thing), w.DefRemove(of=w.DefKind.PLACE, id="window")))], "world")
+    edits = _words(_between(drawn(client, "/inspecteur/vie/monde"), 'aria-labelledby="vie-edits-title"', "</section>"))
+    assert f"+ objet {thing.id}" in edits and "− lieu window" in edits
+    assert "+ object" not in edits and "− place" not in edits

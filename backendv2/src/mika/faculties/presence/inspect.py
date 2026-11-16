@@ -20,6 +20,7 @@ from mika.kernel.inspect import (
     Vital,
     When,
     paginate,
+    plural,
 )
 from mika.vocab.privacy import ChannelTrust
 
@@ -73,7 +74,7 @@ def _inspect(s: PresenceState, frame: Frame, ctx: InspectContext) -> list[Block]
 def _present_vital(s: PresenceState, frame: Frame) -> Vital:
     handles = sorted(_handles(s), key=lambda h: (-s.since.get(h, 0), h))
     names = [_who(frame, h)[0] or h for h in handles]
-    hint = ", ".join(names[:VITAL_NAMES]) + (f" et {len(names) - VITAL_NAMES} autre(s)"
+    hint = ", ".join(names[:VITAL_NAMES]) + (f" et {plural(len(names) - VITAL_NAMES, 'autre', 'autres')}"
                                             if len(names) > VITAL_NAMES else "")
     return Vital(str(len(handles)), tone="info" if handles else "", hint=hint or "personne n'est connecté",
                  href=Ref.view("presence", "presents", "Présents"))

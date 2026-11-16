@@ -9,10 +9,25 @@ from mika.contracts import body as body_c
 from mika.contracts import world as w
 from mika.faculties.world import WORLD, WorldState, notice, plan
 from mika.kernel.frame import Frame
-from mika.kernel.inspect import Block, Column, InspectContext, Note, Stat, Stats, Table, Text, When, num_fr
+from mika.kernel.inspect import (
+    Block,
+    Column,
+    InspectContext,
+    Note,
+    Stat,
+    Stats,
+    Table,
+    Text,
+    When,
+    pct_fr,
+    plural,
+)
 
 _OUTCOME_FR = {w.Source.MIKA: "elle", w.Source.REFLEX: "un réflexe", w.Source.PLAYER: "une personne",
                w.Source.HOST: "le moteur", w.Source.CREATOR: "une opératrice", w.Source.KERNEL: "le noyau"}
+#: la sorte d'un élément de son monde qu'une édition ajoute ou retire, en mots (son identifiant reste à côté)
+DEF_KIND_FR = {w.DefKind.ROOM: "pièce", w.DefKind.PLACE: "lieu", w.DefKind.ARCHETYPE: "modèle d'objet",
+               w.DefKind.OBJECT: "objet", w.DefKind.ACTOR: "acteur"}
 
 
 def _location(s: WorldState, loc: w.Location) -> str:
@@ -49,8 +64,8 @@ def _edits(ctx: InspectContext) -> list[tuple[Any, ...]]:
     rows: list[tuple[Any, ...]] = []
     for e in ctx.events([w.AUTHORED], EDITS_SHOWN):
         d = e.data
-        named = [f"+ {ch.item.kind} {ch.item.id}" if isinstance(ch, w.DefPut) else f"− {ch.of.value} {ch.id}"
-                 for ch in d.changes[:CHANGES_NAMED]]
+        named = [f"+ {DEF_KIND_FR.get(ch.item.kind, ch.item.kind)} {ch.item.id}" if isinstance(ch, w.DefPut)
+                 else f"− {DEF_KIND_FR.get(ch.of, ch.of.value)} {ch.id}" for ch in d.changes[:CHANGES_NAMED]]
         more = f" … et {len(d.changes) - CHANGES_NAMED} de plus" if len(d.changes) > CHANGES_NAMED else ""
         rows.append((When(e.at), Text(d.by, kind="mono"), f"{d.base_rev} → {d.base_rev + 1}",
                      Text(", ".join(named) + more, kind="mono")))
@@ -61,12 +76,12 @@ def _remarks(s: WorldState, frame: Frame, ctx: InspectContext) -> list[tuple[Any
     """Ce qu'elle va remarquer (endormie : à son réveil), puis ce qu'elle a remarqué, du plus récent."""
     awake = frame.get(body_c.SLEEP) is body_c.SleepPhase.AWAKE
     rows: list[tuple[Any, ...]] = [
-        (Text("—", kind="muted"), notice.sentence(r), num_fr(notice.pertinence(r), 2),
+        (Text("—", kind="muted"), notice.sentence(r), pct_fr(notice.pertinence(r)),
          Text("tout de suite" if awake else "à son réveil", kind="muted")) for r in s.unnoticed]
     for e in ctx.events([w.NOTICED], NOTICED_SHOWN, where=("kind", notice.KIND)):
         text = e.data.summary.text
         rows.append((When(e.at), text if text is not None else Text("(oublié)", kind="muted"),
-                     num_fr(e.data.pertinence, 2), "remarqué"))
+                     pct_fr(e.data.pertinence), "remarqué"))
     return rows
 
 
@@ -78,6 +93,13 @@ def _world_view(s: WorldState, frame: Frame, ctx: InspectContext) -> list[Block]
     me = s.actors[w.MIKA]
     now = frame.now
     busy = me.activity is not None and (me.activity.until is None or me.activity.until > now)
+    # où elle est et où elle va : les mots de son monde (écrits pour elle : « au milieu de ta chambre »), que la
+    # console cite tels quels et dit siens
+    where_sub = "dans les mots de son monde"
+    if me.moving:
+        to = me.moving.to_place or me.moving.to_room
+        toward = defn.place(to) if me.moving.to_place else defn.room(to)
+        where_sub += f", en chemin vers {toward.label if toward else to}"
     rows_intents: list[tuple[Any, ...]] = [
         (i.actor, _OUTCOME_FR.get(i.cause.source, i.cause.source.value), _steps(i), When(i.eta), When(i.deadline))
         for i in sorted(s.intents.values(), key=lambda i: i.started)]
@@ -88,12 +110,13 @@ def _world_view(s: WorldState, frame: Frame, ctx: InspectContext) -> list[Block]
     return [
         Stats((
             Stat("où", plan.POSTURE_FR[me.posture] + " " + (defn.place(me.place).label if me.place and defn.place(
-                me.place) else "dans la pièce"), sub=(f"en chemin vers {me.moving.to_place}" if me.moving else "")),
+                me.place) else "dans la pièce"), sub=where_sub),
             Stat("ce qu'elle fait", plan.affordance_label(defn, me.activity) if busy and me.activity else "rien de "
                  "particulier"),
             Stat("ce qu'elle tient", ", ".join(plan.label_of(defn, o) for o in me.holding) or "rien"),
             Stat("le monde", f"{defn.label} · révision {defn.rev}",
-                 sub=f"{len(defn.rooms)} pièce(s), {len(defn.places)} lieux, {len(defn.objects)} objets"),
+                 sub=f"{plural(len(defn.rooms), 'pièce', 'pièces')}, {plural(len(defn.places), 'lieu', 'lieux')}, "
+                     f"{plural(len(defn.objects), 'objet', 'objets')}"),
         ), title="Son corps"),
         Table((Column("acteur"), Column("décidé par"), Column("les pas"), Column("fin prévue", "fit"),
                Column("échéance", "fit", hint="sans moteur pour la jouer, l'action se termine là, comme prévue")),

@@ -2,7 +2,10 @@
    ressentait ; ce qui l'a fait parler ; sa réponse pas à pas (le modèle principal, la relecture, l'autrice, ce qui est
    parti) ; son état intérieur ; ses outils ; ses souvenirs ; ce qu'elle avait sous les yeux, section par section, et le
    contexte complet. Ce qui n'a pas de forme à lui reprend ses blocs (``one``), chacun sa carte. Aucun style en ligne
-   (CSP). #}
+   (CSP). Sous sa phrase, rien de ce que dit déjà la ligne de faits de l'en-tête (à qui, quand, l'issue, la voix, le
+   fil, le mode) : seulement l'autrice, s'il y en a une. Son état intérieur est le texte de son prompt, cité sous son
+   libellé « dans son prompt : … » (``why.in_prompt``) : au « tu », il s'adresse à elle. Les nombres arrivent accordés
+   (``tools.summary``, ``prompt.measure``). #}
 {% from "handmade/shared/macros.html" import facets %}
 {% from "handmade/shared/drawn.html" import one with context %}
 {% import "handmade/parole/macros.html" as p %}
@@ -10,9 +13,9 @@
 
   <section class="now-hero parole-hero sw-{{ v.felt.emotion if v.felt else 'neutral' }}" aria-labelledby="parole-said">
     <div>
-      <p class="now-eyebrow">Ce qu'elle a dit · à {{ v.to }} · {{ v.when }}</p>
+      <p class="now-eyebrow">Ce qu'elle a dit</p>
       <blockquote class="now-voice parole-said" id="parole-said"><p>{{ v.text }}</p></blockquote>
-      <ul class="now-chips">{% for c in v.chips %}<li class="{{ c.tone }}">{{ c.text }}</li>{% endfor %}</ul>
+      {% if v.chips %}<ul class="now-chips">{% for c in v.chips %}<li class="{{ c.tone }}">{{ c.text }}</li>{% endfor %}</ul>{% endif %}
     </div>
     <aside class="parole-felt" aria-label="Ce qu'elle ressentait">
       <p class="now-eyebrow">Ce qu'elle ressentait en le disant</p>
@@ -50,13 +53,13 @@
       <section class="now-card" aria-labelledby="parole-inner">
         <header class="now-card-head"><h2 id="parole-inner">Son humeur à ce moment-là</h2><a class="now-more" href="{{ PREFIX }}/vie">aujourd'hui →</a></header>
         {% if v.inner %}
-        <dl class="parole-inner">{% for s in v.inner %}<div><dt>{{ s.label }}</dt><dd>{{ s.text }}</dd></div>{% endfor %}</dl>
+        <dl class="parole-inner">{% for s in v.inner %}<div><dt>{{ s.label }}</dt><dd><blockquote class="now-voice"><p>{{ s.text }}</p></blockquote></dd></div>{% endfor %}</dl>
         {% elif not v.inner_missing %}<p class="now-empty">son prompt ne montrait rien de sa vie intérieure</p>{% endif %}
         {% if v.inner_missing %}<p class="now-after now-muted">Le texte de son état n'est plus gardé (la trace a expiré, ou a été oubliée) : seule la balise de sa réponse reste.</p>{% endif %}
       </section>
 
       <section class="now-card" aria-labelledby="parole-tools">
-        <header class="now-card-head"><h2 id="parole-tools">Ce qu'elle a fait</h2>{% if v.tools.known %}<p>{{ v.tools["items"]|length }} outil(s) en main, {{ v.tools.called }} appelé(s).</p>{% endif %}</header>
+        <header class="now-card-head"><h2 id="parole-tools">Ce qu'elle a fait</h2>{% if v.tools.known %}<p>{{ v.tools.summary }}</p>{% endif %}</header>
         {{ p.tools(v.tools) }}
       </section>
       {% if v.tools.called %}{% for b in v.calls %}{{ one(b) }}{% endfor %}{% endif %}

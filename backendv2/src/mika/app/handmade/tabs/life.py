@@ -4,8 +4,8 @@ sous-onglet.
 
 - **Humeur** : son humeur en grand, comme « En ce moment » la dit (``now.mood``) — le mot, le mélange de ce qu'elle
   ressent, ce que son prompt lui en dit, le plan plaisir × éveil et sa trace sur la période choisie — ; une bande de
-  chiffres (ce qui déborde, son fond, son visage, sa dernière balise) ; sa valence à côté de ses dernières balises,
-  chacune avec ce qu'elle a dit ; les chiffres bruts repliés.
+  chiffres (son envie d'en parler, son fond, son visage, sa dernière balise) ; sa valence à côté de ses dernières
+  balises, chacune avec ce qu'elle a dit ; les chiffres bruts repliés.
 - **Postures** : une carte par personne — ce qu'elle ressent envers elle, la chaleur de part et d'autre du milieu,
   l'hostilité, l'attachement, ce qu'elle s'en dit — ; un bandeau si elle en veut à quelqu'un.
 - **Besoins** : ses trois besoins en tuiles (la tension et son sens sur la dernière heure, ce qui le comble), ce que
@@ -24,7 +24,9 @@ sous-onglet.
 Les données restent celles des facultés (``affect``, ``needs``, ``body``, ``world``, ``self``) : leurs filtres, leurs
 paginations et la bascule « Tableau » des besoins aussi. Ce que leurs blocs ne disent pas se lit à leurs faits, au
 même instant (``Look``) : le mélange et le plan de son humeur, son visage, le sens de ses besoins, ses nuits à
-l'heure près, les familles de son tempérament.
+l'heure près, les familles de son tempérament. L'état d'un élément — une posture installée, réveillée par un message,
+ses initiatives libres ou retenues, une nuit veillée tard — se lit à la clé de son étiquette (``key_of``), jamais à
+ses mots ; la rancune, à la part de la jauge d'hostilité contre le seuil de la vue (``GRUDGE_FROM``).
 """
 
 from __future__ import annotations
@@ -35,19 +37,21 @@ from typing import Any
 
 from markupsafe import Markup
 
-from mika.app.handmade import Look, date_fr
+from mika.app.handmade import Look, date_fr, unit
 from mika.app.handmade.now import mood as mood_of
 from mika.app.handmade.now import needs as needs_of
-from mika.app.handmade.tabs import Got, Line, Tab, anchored, blank, number, pairs, text, tiles
+from mika.app.handmade.tabs import Got, Line, Tab, anchored, blank, key_of, number, pairs, rest, text, tiles
 from mika.contracts import affect as affect_c
 from mika.contracts import needs as needs_c
 from mika.contracts import self_ as self_c
-from mika.faculties.affect.inspect import PERIODS
+from mika.faculties.affect.inspect import GRUDGE_FROM, INSTALLED, PERIODS
+from mika.faculties.body import inspect as body_view
 from mika.faculties.needs import describe as needs_said
 from mika.faculties.needs.inspect import NAMES as NEED_NAMES
+from mika.faculties.self.params import params as self_params
 from mika.kernel import forms
 from mika.kernel.clock import DAY
-from mika.kernel.inspect import When, num_fr, pct_fr
+from mika.kernel.inspect import When, agree, num_fr, pct_fr, plural
 from mika.vocab import affect as A
 from mika.vocab import temperament as T
 
@@ -120,11 +124,11 @@ def humeur(got: Got) -> Markup | None:
     detail = got.disclosure("Détails")
     raw = next((b for b in (detail or {}).get("items", []) if b.get("t") == "fields"), None)
     band = [
-        {"label": "Ce qui déborde", "value": s.get("débordement", {}).get("value"),
+        {"label": "Envie d'en parler", "value": s.get("débordement", {}).get("value"),
          "sub": s.get("débordement", {}).get("sub", ""), "tone": s.get("débordement", {}).get("tone", "")},
         {"label": "Son fond", "value": s.get("son fond", {}).get("value"),
          "sub": s.get("son fond", {}).get("sub", "")},
-        {"label": "Son visage", "value": _face(look), "sub": "ce que montre son avatar : la lecture absolue"},
+        {"label": "Son visage", "value": _face(look), "sub": "ce que montre son avatar"},
         {"label": "Dernière balise", "value": s.get("dernière balise", {}).get("value"),
          "sub": s.get("dernière balise", {}).get("sub", "")},
     ]
@@ -150,17 +154,18 @@ def _stance(line: Line) -> dict[str, Any]:
     who = line.get("personne") or {"t": "text", "text": "?"}
     felt = line.get("ressentie envers elle")
     hostility = _meter(line.get("hostilité"))
-    facts = [d for d in line.rest if d.get("t") != "note"]
-    installed = next((text(p["value"]) for d in facts if d.get("t") == "fields" for p in d.get("pairs", [])
+    # le détail de la carte : ses faits, et ce que les colonnes repliées disent que la carte ne montre pas (l'ancre)
+    facts = [d for d in rest(line, ("dernière balise",)) if d.get("t") != "note"]
+    installed = next((key_of(p["value"]) for d in facts if d.get("t") == "fields" for p in d.get("pairs", [])
                       if p["label"] == "installée"), "")
     return {
         "who": who, "initial": (text(who)[:1] or "?").upper(),
         "felt": felt if felt and felt.get("t") == "swatch" else None,
         "emotion": felt["key"] if felt and felt.get("t") == "swatch" else "neutral",
         "warmth": _signed(line.get("chaleur (−1…1)")), "hostility": hostility,
-        "bond": _meter(line.get("attachement")), "anchor": _cell(line, "ancre"),
-        "last": _cell(line, "dernière balise"), "when": line.get("quand"), "says": _note(line.rest),
-        "installed": installed.startswith("oui"), "grudge": bool(hostility and hostility["tone"] == "danger"),
+        "bond": _meter(line.get("attachement")), "last": _cell(line, "dernière balise"), "when": line.get("quand"),
+        "says": _note(line.rest),
+        "installed": installed == INSTALLED.key, "grudge": bool(hostility and hostility["ratio"] >= GRUDGE_FROM),
         "facts": facts, "open": line.open,
     }
 
@@ -174,8 +179,7 @@ def postures(got: Got) -> Markup | None:
     installed = sum(1 for p in people if p["installed"])
     lede = "ce qu'elle ressent envers chacun, et ce que leurs échanges ont installé"
     if installed:
-        lede = (f"{installed} posture{'s' if installed > 1 else ''} installée{'s' if installed > 1 else ''} "
-                f"(plusieurs échanges concordants) · {lede}")
+        lede = f"{plural(installed, 'posture installée', 'postures installées')} (plusieurs échanges concordants) · " + lede
     return got.draw("handmade/vie/postures.html", t=table, people=people, lede=lede,
                     grudges=[p["who"] for p in people if p["grudge"]])
 
@@ -271,7 +275,7 @@ def _nights(got: Got, look: Look) -> list[dict[str, Any]]:
         out.append({"day": date_fr(look.frame.local(start.at)), "from": look.hm(start.at),
                     "to": look.hm(end.at) if isinstance(end, When) else "", "slept": str(slept or ""),
                     "rousings": "" if str(rousings or "—") == "—" else str(rousings),
-                    "late": str(late) == "oui", "told": str(told or "")})
+                    "late": getattr(late, "key", "") == body_view.LATE.key, "told": str(told or "")})
     return out
 
 
@@ -288,14 +292,15 @@ def rythme(got: Got) -> Markup | None:
     local = look.frame.local(look.now)
     facts = pairs(fields)
     flags = []
-    if text(facts.get("réveillée par un message")) == "oui":
+    if key_of(facts.get("réveillée par un message")) == body_view.WOKEN.key:
         flags.append({"text": "réveillée par un message", "tone": "info"})
-    waiting = text(facts.get("messages qui attendent son réveil"))
-    if waiting and waiting != "aucun":
-        flags.append({"text": f"{waiting} message(s) attendent son réveil", "tone": "warn"})
-    gate = text(facts.get("initiatives et travail ordinaires"))
-    if gate and gate != "libres":
-        flags.append({"text": f"initiatives et travail {gate}", "tone": "warn" if gate.startswith("retenues") else ""})
+    waiting = int(number(facts.get("messages qui attendent son réveil")) or 0)  # « aucun » : 0
+    if waiting:
+        waits = agree(waiting, "message attend", "messages attendent")
+        flags.append({"text": f"{waiting} {waits} son réveil", "tone": "warn"})
+    gate = facts.get("initiatives et travail ordinaires")
+    if key_of(gate) in (body_view.SLOWED, body_view.VETOED):
+        flags.append({"text": f"initiatives et travail {text(gate)}", "tone": (gate or {}).get("tone") or ""})
     return got.draw("handmade/vie/rythme.html", band=stats["items"],
                     voice=next((n["text"] for n in got.notes()), ""), flags=flags,
                     day=_day(got.lines("Son rythme"), text(facts.get("sa nuit")), local.hour * 60 + local.minute),
@@ -359,20 +364,17 @@ PERSONA_IDENTITY = ("nom", "nature", "langue", "fuseau")
 PERSONA_LISTS = ("ce qui est vrai d'elle", "centres d'intérêt", "salutations", "exemples en conversation")
 
 
-def _scale(s: Mapping[str, Any], rules: Mapping[str, dict[str, Any]]) -> dict[str, Any] | None:
-    """Son estime sur son échelle (0–1) : là où elle doute, là où elle est sûre d'elle, ses bornes."""
+def _scale(s: Mapping[str, Any], look: Look) -> dict[str, Any] | None:
+    """Son estime sur son échelle (0–100 %) : là où elle doute, là où elle est sûre d'elle, ses bornes — lues dans les
+    paramètres de self, comme la vue les lit, et dites en % comme elle (plus relues dans son texte)."""
     estime = _meter(s.get("Estime", {}).get("value"))
     if estime is None:
         return None
-    doubt = number(rules.get("elle doute sous"))
-    sure = number(rules.get("sûre d'elle au-dessus de"))
-    bounds = [n for n in map(number, text(rules.get("bornes")).split("–")) if n is not None]
+    p = self_params(look.frame.env.params_of("self", look.frame.root))
     return {"value": estime["w"], "text": estime["text"], "tone": estime["tone"],
-            "doubt": None if doubt is None else round(100 * doubt, 1),
-            "sure": None if sure is None else round(100 * sure, 1),
-            "lo": round(100 * bounds[0], 1) if len(bounds) == 2 else 0.0,
-            "hi": round(100 * bounds[1], 1) if len(bounds) == 2 else 100.0,
-            "doubt_text": text(rules.get("elle doute sous")), "sure_text": text(rules.get("sûre d'elle au-dessus de"))}
+            "doubt": unit(p.doubt_below), "sure": unit(p.assured_above),
+            "lo": unit(p.esteem_min), "hi": unit(p.esteem_max),
+            "doubt_text": pct_fr(p.doubt_below), "sure_text": pct_fr(p.assured_above)}
 
 
 def _knock(line: Line) -> dict[str, Any]:
@@ -430,7 +432,7 @@ def soi(got: Got) -> Markup | None:
     knocks = anchored(got.table("Les derniers coups"), "soi-estime")
     return got.draw("handmade/vie/soi.html", band=stats["items"],
                     doubt=next((n["text"] for n in got.notes() if n.get("tone") == "warn"), ""),
-                    scale=_scale(s, pairs(rules)), chart=got.chart("L'estime"), t_knocks=knocks,
+                    scale=_scale(s, look), chart=got.chart("L'estime"), t_knocks=knocks,
                     knocks=[_knock(x) for x in got.lines("Les derniers coups")], rules=rules.get("pairs", []),
                     story=(story or {}).get("pairs", []), prose=prose,
                     untold=next((n["text"] for n in got.notes() if n.get("tone") == "muted"), ""),

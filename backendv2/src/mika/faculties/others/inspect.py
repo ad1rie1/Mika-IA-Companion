@@ -29,6 +29,7 @@ from mika.kernel.inspect import (
     When,
     num_fr,
     pct_fr,
+    plural,
 )
 from mika.vocab import privacy
 from mika.vocab.affect import FR, emotion_of
@@ -103,7 +104,7 @@ def _guessed(s: OthersState, frame: Frame, ctx: InspectContext) -> list[Block]:
             Stat("ton habituel", tone_words(r.usual_valence), f"valence {num_fr(r.usual_valence, 2, signed=True)}"),
             Stat("en ce moment", tone_words(r.current_valence), f"écart {num_fr(r.deviation, 2, signed=True)}",
                  tone=tone),
-            Stat("la connaît", _ratio(r.confidence), f"{r.observed} message(s) lu(s)"),
+            Stat("la connaît", _ratio(r.confidence), plural(r.observed, "message lu", "messages lus")),
             Stat("dernier message lu", When(r.last_at) if r.last_at else Text("—", kind="muted")),
         )))
         if r.last_felt:

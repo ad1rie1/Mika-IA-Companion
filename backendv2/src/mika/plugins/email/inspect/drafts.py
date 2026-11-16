@@ -17,6 +17,7 @@ from typing import Annotated, Any
 from pydantic import BaseModel, Field
 
 from mika.contracts import email as c
+from mika.contracts import runtime as rt
 from mika.kernel.events import Content
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
@@ -98,7 +99,7 @@ def _seen_for(s: EmailState, draft_id: str) -> DraftSeen | None:
     return max(found, key=lambda d: d.proposal) if found else None
 
 
-@EMAIL.inspect("brouillons", title="Brouillons", section=SECTION, order=20, badge=_waiting_count,
+@EMAIL.inspect("brouillons", title="Ses brouillons", section=SECTION, order=20, badge=_waiting_count,
                description="Relis les propositions avant envoi : approuve, modifie ou refuse chaque brouillon.",
                params=[Param("compte", "Compte", kind="hidden")])
 def _drafts(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
@@ -118,7 +119,7 @@ def _drafts(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
         info = labels.get(d.account)
         box = f"{info.name} · {VOICE_LABEL.get(info.voice, '')}" if info is not None else d.account or "—"
         answered = port.cached_one(d.mail) if d.mail else None
-        return Row((Text(clip(got.subject, 100) if got else "Brouillon indisponible"), Text(clip(got.to, 80) if got else "—"),
+        return Row((Text(clip(got.subject, 100) if got else "Un brouillon disparu"), Text(clip(got.to, 80) if got else "—"),
                     Text(box, "muted"),
                     Ref.subject("mail", mail_key(d.mail), clip(answered.subject, 60)) if answered is not None
                     else ("—" if not d.mail else Text("un mail plus dans la boîte", "muted")),
@@ -131,9 +132,6 @@ def _drafts(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     columns = (Column("Objet", role="title"), "À", Column("Boîte", "fit"), "En réponse à", Column("Origine", "fit"),
                Column("Proposé", "fit"), Column("État", "fit", role="badge"), Column("À vérifier", "fit", role="badge"))
     blocks: list[Block] = []
-    if waiting:
-        blocks.append(Note("Ouvre un brouillon pour lire exactement ce qui partira, le retoucher, l'envoyer ou le "
-                           "refuser. Rien ne part sans toi.", tone="info"))
     shown, pending = paginate(waiting, ctx.pager("page_a_decider", size=PAGE))
     blocks.append(Table(columns, tuple(row(d) for d in shown), title=f"À décider ({len(waiting)})", pager=pending,
                         empty="rien n'attend ton accord", layout="cards", link_label="Relire le brouillon"))
@@ -186,7 +184,7 @@ def _tab_draft(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = ctx.ports.get("mail")
     got = port.draft(ctx.subject) if port is not None else None
     if got is None:
-        return [Note("Ce brouillon n'est plus là.", tone="muted")]
+        return _vanished(_seen_for(s, ctx.subject), ctx.subject)
     seen = _seen_for(s, got.id)
     shown = port.preview(got.id)
     blocks: list[Block] = []
@@ -220,6 +218,18 @@ def _tab_draft(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     return blocks
 
 
+def _vanished(seen: DraftSeen | None, draft_id: str) -> list[Block]:
+    """Un brouillon que la boîte n'a plus : s'il attend encore ton accord, le refuser l'en retire (le refus ne lit que
+    son état : son texte n'y sert pas)."""
+    if seen is None or seen.state != WAITING:
+        return [Note("Ce brouillon n'est plus là.", tone="muted")]
+    return [Note("Ce brouillon n'est plus dans la boîte : il ne partira pas. Le refuser le retire de ce qui attend ton "
+                 "accord.", tone="warn"),
+            Disclosure("Le refuser", (ActionSlot("email.refuser_brouillon", (("draft", draft_id),
+                                                                             ("note", "disparu de la boîte")),
+                                                 title="Refuser"),), open=True)]
+
+
 @EMAIL.inspect("pourquoi", title="Pourquoi", subject="brouillon", order=20,
                description="Le message d'origine et les raisons pour lesquelles elle a préparé cette réponse.")
 def _tab_why(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
@@ -246,7 +256,8 @@ def _tab_why(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     blocks: list[Block] = [Fields(tuple(pairs), title="D'où il vient", columns=1)]
     for e in asks[:3]:
         text = texts.get(e.data.instruction.ref, "") if e.data.instruction and e.data.instruction.ref else ""
-        blocks.append(Prose(text or "(sans consigne)", title=f"Demandé par {e.data.by or '?'} ({ctx.when(e.at)})"))
+        blocks.append(Prose(text or "(sans consigne)",
+                            title=f"Demandé par {operator_label(frame, e.data.by)} ({ctx.when(e.at)})"))
     return blocks
 
 
@@ -257,14 +268,19 @@ def _tab_history(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block
     got = port.draft(ctx.subject) if port is not None else None
     entries: list[Entry] = []
     if got is not None:
-        entries.append(Entry(got.created, "écrit", text="par elle" if not got.author else f"par {got.author}"))
+        entries.append(Entry(got.created, "écrit", text="par elle" if not got.author
+                             else f"par {operator_label(frame, got.author)}"))
         if got.edited_by and got.updated:
-            entries.append(Entry(got.updated, "retouché", text=f"par {got.edited_by}", tone="warn"))
+            entries.append(Entry(got.updated, "retouché", text=f"par {operator_label(frame, got.edited_by)}",
+                                 tone="warn"))
     for d in (d for d in s.drafts.values() if d.draft == ctx.subject):
         entries.append(Entry(d.at, "proposé", text=f"n° {d.proposal}", href=Ref("event", str(d.proposal), "")))
         if d.decided_at:
+            # qui a décidé, par son nom (jamais sa clé) ; un refus faute d'accord à temps n'a personne derrière lui
+            by = "" if d.by == rt.EXPIRER else f"par {operator_label(frame, d.by)}"
+            note = _note(d, ctx)
             entries.append(Entry(d.decided_at, "approuvé" if d.state in (APPROVED, GONE, FAILED) else "refusé",
-                                 text=f"par {d.by}" + (f" — « {note} »" if (note := _note(d, ctx)) else ""),
+                                 text=" — ".join(filter(None, (by, f"« {note} »" if note else ""))),
                                  tone="ok" if d.state != REFUSED else "muted"))
         if d.state in (GONE, FAILED):
             entries.append(Entry(d.decided_at or d.at, "parti" if d.state == GONE else "échec", text=d.result,

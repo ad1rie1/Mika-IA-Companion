@@ -19,18 +19,22 @@ import pytest
 import mika
 from mika.app.handmade import subjects
 from mika.app.handmade.subjects import goal, mail, parts
+from mika.contracts import email as email_c
 from mika.contracts import goals as goals_c
 from mika.contracts import runtime as rt
 from mika.contracts import wakeup as wakeup_c
 from mika.faculties.goals import inspect as goals_inspect
 from mika.kernel.events import Content, Origin
 from mika.kernel.inspect import Badge, Meter
+from mika.plugins.teams import WRITTEN, params_of
 from mika.ports.mail import SIGNIN_NEEDED, SIGNIN_PENDING, SignIn
 from mika.ports.mail import Draft as MailDraft
 from mika.ports.teams import Draft as TeamsDraft
 from mika.sim.outside import FakeMail
 from tests.fixtures.console_html import ConsoleHTML
 from tests.fixtures.courrier import framed, mailbox
+from tests.protocol.test_moi_mail import journal
+from tests.protocol.test_teams_accounts import BEA_DM, two_accounts
 from tests.protocol.test_teams_web import DM, batch, headers, new_key
 from tests.protocol.test_wakeup_web import configure, key_for, send
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
@@ -64,11 +68,13 @@ def append(client, live, drafts, emitter: str, correlation: str = "fiches") -> l
     return list(commit.seqs)
 
 
-def open_goal(client, live, *, kind=goals_c.EXPLORATION, title="Explorer : les jeux rétro", details="", **more) -> str:
+def open_goal(client, live, *, kind=goals_c.EXPLORATION, title="Explorer : les jeux rétro", details="", max_steps=8,
+              **more) -> str:
     seqs = append(client, live, [goals_c.GOAL_OPENED.draft(
         kind=kind, authority=goals_c.SELF if kind == goals_c.EXPLORATION else goals_c.USER,
         title=Content.of(title, level=0), details=Content.of(details, level=0) if details else None,
-        bundles=("goals",), max_steps=8, source="genese", sensitivity=0, desire=0.9, **more)], "goals", "genese")
+        bundles=("goals",), max_steps=max_steps, source="genese", sensitivity=0, desire=0.9, **more)],
+        "goals", "genese")
     return str(seqs[-1])
 
 
@@ -97,7 +103,24 @@ def test_a_goal_opens_on_its_drawn_summary_and_its_plan_keeps_its_buttons(world)
     done = form_of(page, "goals.tache_statut", having=goals_c.TASK_DONE)
     assert client.post("/inspecteur/action/goals.tache_statut", data=done, follow_redirects=False).status_code == 303
     after = drawn(client, url + "?onglet=resume")
-    assert "1 / 1" in after.replace("<b>", "").replace("</b>", "") and "tâches faites" in after
+    assert "1 / 1" in after.replace("<b>", "").replace("</b>", "")
+    assert progress_unit(after) == "tâche faite"  # l'unité s'accorde au total : une seule tâche
+
+
+def progress_unit(page: str) -> str:
+    """Le texte sous le compte de l'avancement (``goal-unit``), sans ses balises."""
+    found = re.search(r'<p class="goal-unit">(.*?)</p>', page, re.S)
+    assert found, "pas d'avancement dessiné"
+    return re.sub(r"<[^>]+>", "", found.group(1)).strip()
+
+
+def test_the_progress_of_a_goal_agrees_with_its_total(world):  # noqa: F811
+    client, live, _ = world
+    bootstrap(client)
+    one = drawn(client, f"/inspecteur/fiche/goal/{open_goal(client, live, max_steps=1)}")
+    assert "0 / 1" in one.replace("<b>", "").replace("</b>", "") and progress_unit(one) == "séance"
+    eight = drawn(client, f"/inspecteur/fiche/goal/{open_goal(client, live, title='Explorer : les cartes')}")
+    assert progress_unit(eight) == "séances"
 
 
 def test_a_reminder_says_what_when_and_to_whom(world):  # noqa: F811
@@ -197,6 +220,56 @@ def test_a_teams_conversation_is_a_thread_of_bubbles_with_its_ask_form(world):  
     assert "On se voit à 14 h ?" in page and "Alice" in page and 'class="person-bubble"' in page
     assert "elle n'a rien préparé dans cette conversation" in page  # l'état vide
     assert "/inspecteur/action/teams.rediger" in page  # le formulaire de la console, dans le dessin
+    assert "/inspecteur/action/teams.ecrire" in page  # écrire soi-même, sur sa carte
+
+
+def card(page: str, heading: str) -> str:
+    """Une carte de la fiche, par l'identifiant de son titre."""
+    return page.split(f'aria-labelledby="{heading}"', 1)[1].split("</section>", 1)[0]
+
+
+def test_a_teams_conversation_offers_to_write_there_and_says_under_which_name(world):  # noqa: F811
+    """C4-05, décision C4-Q1 (ADR 0231) : la console écrit dans toute conversation Teams, comme la personne du compte
+    depuis son espace — une note dit sous quel nom il part (« ton nom » pour un compte à toi, le nom de la personne
+    sinon), la confirmation le redit ; le message entre dans la file de l'extension de ce compte, `teams.written` est
+    journalisé, le geste audité. Teams coupé ou le compte décoché, la fiche ne l'offre pas et dit pourquoi."""
+    client, live, _ = world
+    bootstrap(client)
+    two_accounts(client, live)
+    mine, hers = new_key(client, live), new_key(client, live, "bea_t")
+    assert client.post("/api/teams/inbox", json=batch(), headers=headers(mine)).status_code == 202
+    assert client.post("/api/teams/inbox", json=batch(conv=BEA_DM, text="Tu viens ?"),
+                       headers=headers(hers)).status_code == 202
+    yours = card(drawn(client, f"/inspecteur/fiche/conversation_teams/{quote(DM, safe='')}"), "teams-write")
+    assert "Il part sous ton nom" in yours and "ce compte Teams est à toi" in yours
+    assert "/inspecteur/action/teams.ecrire" in yours and "Lui demander une réponse" not in yours
+    url = f"/inspecteur/fiche/conversation_teams/{quote('bea_t~' + BEA_DM, safe='')}"
+    page = drawn(client, url)
+    bea = card(page, "teams-write")
+    assert "Il part sous le nom de Béa Martin" in bea and "pas sous le tien" in bea  # le garde-fou, par son nom
+    assert ('data-confirm="L\'envoyer dans Teams maintenant, sous le nom de la personne de ce compte, sans sa '
+            'signature ?"') in bea
+    store = live.kernel.ports["teams"]
+    [received] = client.portal.call(store.thread, "bea_t", BEA_DM, 10)
+    data = form_of(page, "teams.ecrire")
+    assert data["conversation"] == [f"bea_t~{BEA_DM}"] and data["reply_to"] == [received.ref]
+    sent = client.post("/inspecteur/action/teams.ecrire", data={**data, "body": "J'arrive dans dix minutes."},
+                       follow_redirects=False)
+    assert sent.status_code == 303
+    [item] = client.get("/api/teams/outbox", headers=headers(hers)).json()["items"]
+    assert item["mode"] == "send" and item["text"] == "J'arrive dans dix minutes."  # sans sa signature
+    assert client.get("/api/teams/outbox", headers=headers(mine)).json()["items"] == []  # par son compte seulement
+    assert client.portal.call(store.draft, item["id"]).author == "user_1"  # qui l'a écrit
+    [written] = journal(live, WRITTEN)
+    assert (written.data.account, written.data.conversation) == ("bea_t", BEA_DM)
+    assert [(e.data.action, e.data.by) for e in journal(live, rt.OPERATED)
+            if e.data.action.endswith("teams.ecrire")] == [("teams.ecrire", "user_1")]  # audité, depuis la console
+    # le compte décoché : rien n'en part, la fiche ne l'offre plus et dit pourquoi
+    off = params_of(live.kernel.mind.frame()).model_copy(update={"accounts_off": ("bea_t",)})
+    client.portal.call(live.kernel.set_params, "teams", off)
+    unchecked = card(drawn(client, url), "teams-write")
+    assert "/inspecteur/action/teams.ecrire" not in unchecked
+    assert "Ce compte Teams est décoché : rien n'en part." in unchecked
 
 
 def test_a_teams_reply_shows_what_will_leave_and_its_decisions(world):  # noqa: F811
@@ -281,6 +354,27 @@ def test_a_mail_reads_with_what_she_knows_beside_it(world):  # noqa: F811
     assert '<li class="mine here">' in gone and "↗ parti" in gone  # parti de sa boîte : à droite
 
 
+def test_what_she_knows_of_a_mail_says_each_fact_once_and_its_shares_in_percent(world):  # noqa: F811
+    """Un mail que son tri a remarqué, important, qui attend une réponse : l'en-tête de la fiche dit son état et la
+    réponse attendue, la carte de côté et « Ce qu'elle en sait » ne les redisent pas ; sa pertinence et ce que son
+    attention en a gardé, des parts, se disent en % (audit du 2026-11-05, C4-04)."""
+    client, live, box = with_mail(world)
+    append(client, live, [email_c.NOTICED.draft(
+        source="email", kind=email_c.MAIL, summary=Content.of("Léa attend ton retour sur les maquettes."),
+        pertinence=0.9, bundle="email", mail="pro:<projet@example.test>", sender="Léa Martin <lea@example.test>",
+        address="lea@example.test", importance=0.85, needs_reply=True, account="pro", folder="INBOX")], "email")
+    base = "/inspecteur/fiche/mail/" + quote("pro:<projet@example.test>", safe="")
+    page, known = drawn(client, base), drawn(client, base + "?onglet=remarque")
+    for shown in (page, known):
+        assert shown.count("important, non lu") == 1, shown  # l'en-tête, pas une ligne « état »
+        assert shown.casefold().count("réponse attendue") == 1  # l'en-tête, ni une ligne ni une tuile
+    assert "Léa attend ton retour sur les maquettes." in page  # la carte de côté, toujours là
+    tiles = re.search(r'<ul class="person-tiles-list".*?</ul>', known, re.S).group()
+    assert "Pertinence estimée" in tiles and "85\u202f%" in tiles and "Important" in tiles
+    said = re.findall(r'<span class="num">([^<]*)</span>', tiles)  # ce que dit chaque jauge, à côté de sa barre
+    assert said and all(n.endswith(" %") for n in said), said  # ni « 0.85 », ni « 1.00 »
+
+
 def test_a_draft_is_an_envelope_with_its_decisions_and_its_journey(world):  # noqa: F811
     client, live, box = with_mail(world)
     draft = box.save_draft(MailDraft(id="", account="pro", to="lea@example.test", subject="Re: Maquettes",
@@ -325,12 +419,28 @@ def test_a_retouched_draft_shows_both_versions_and_a_vanished_one_keeps_its_fich
     propose(client, live, draft.id, mail="pro:<projet@example.test>")
     history = drawn(client, f"/inspecteur/fiche/brouillon/{draft.id}?onglet=historique")
     assert "Sa version" in history and "Merci !" in history and "Merci Léa, je regarde les deux pistes." in history
+    # qui l'a retouché, par son nom, jamais sa clé (audit du 2026-11-05, C4-R4) ; la carte de côté de la fiche aussi
+    assert "Retouché" in history and "par user_1" not in history
+    assert "par user_1" not in drawn(client, f"/inspecteur/fiche/brouillon/{draft.id}")
     propose(client, live, "parti-de-la-boite")
     vanished = drawn(client, "/inspecteur/fiche/brouillon/parti-de-la-boite")
     assert 'class="now-page draftf"' in vanished and "n'est plus dans la boîte" in vanished
     assert "attend ton accord" in vanished and "il ne partira pas" in vanished  # où il en est, sans texte
     assert "email.envoyer_brouillon" not in vanished
     assert 'class="now-page draftwhy"' in drawn(client, "/inspecteur/fiche/brouillon/parti-de-la-boite?onglet=pourquoi")
+    # il attend encore ton accord : sa fiche le refuse (C4-02), comme la file À valider ; la liste le nomme comme elle
+    assert "Ce que tu peux en faire" in vanished and "/inspecteur/action/email.refuser_brouillon" in vanished
+    assert "Il attend encore ton accord" in vanished and "Il attendait" not in vanished
+    assert "Un brouillon disparu" in drawn(client, "/inspecteur/courrier/brouillons")
+    refused = client.post("/inspecteur/action/email.refuser_brouillon",
+                          data={**form_of(vanished, "email.refuser_brouillon"), "note": "disparu de la boîte"},
+                          follow_redirects=False)
+    assert refused.status_code == 303
+    decided = drawn(client, "/inspecteur/fiche/brouillon/parti-de-la-boite")
+    assert "Où il en est" in decided and "refusé" in decided and "email.refuser_brouillon" not in decided
+    assert "Il attend encore" not in decided
+    told = drawn(client, "/inspecteur/fiche/brouillon/parti-de-la-boite?onglet=historique")
+    assert "« disparu de la boîte »" in told and "par user_1" not in told  # qui l'a refusé : un nom, pas sa clé
 
 
 def test_drafts_and_contacts_are_drawn_in_the_mail_space(world):  # noqa: F811
@@ -343,6 +453,11 @@ def test_drafts_and_contacts_are_drawn_in_the_mail_space(world):  # noqa: F811
     assert "À décider" in drafts and "Re: Maquettes" in drafts and "Relire le brouillon" in drafts
     assert f'href="/inspecteur/fiche/brouillon/{draft.id}"' in drafts and "Maquettes du projet" in drafts
     assert "Déjà décidés" in drafts and "aucun encore" in drafts.lower()
+    # la page porte le nom de sa ligne dans la colonne (C4-11) ; l'intro suffit, sans bandeau qui la répète (C4-15)
+    assert "<h1>Ses brouillons</h1>" in drafts and "Rien ne part sans toi" not in drafts
+    # Envoyés ne redit pas ce que la colonne compte déjà, « Ses brouillons 1 », en lien (C4-R2)
+    sent = html.unescape(client.get("/inspecteur/courrier/envoyes").text)
+    assert "Envoyés" in sent and "attend(ent)" not in sent and "brouillon(s)" not in sent
     contacts = drawn(client, "/inspecteur/courrier/contacts")
     assert 'mail-contacts-page' in contacts and "lea@example.test" in contacts and "Ses échanges" in contacts
     assert "/inspecteur/action/email.ecrire" in contacts and 'value="lea@example.test"' in contacts  # « Écrire »
@@ -382,8 +497,6 @@ READS: dict[str, dict[str, str]] = {
     },
     "project.py": {
         "project_at": "le projet lui-même, dans sa tranche",
-        "pending_of": "les demandes qui attendent un accord, que le bandeau compte : à reprendre sur « À décider »",
-        "in_force": "le nombre de ses décisions en vigueur, quand sa vue n'en montre que les dernières",
         "access_of": "ses lignes d'accès, qu'un formulaire édite et que sa vue ne porte pas",
         "who_named": "le nom de qui une ligne d'accès nomme",
     },

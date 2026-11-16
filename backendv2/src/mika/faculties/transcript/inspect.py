@@ -77,12 +77,24 @@ def _internal(r: Mapping[str, Any]) -> bool:
 
 
 def _who(frame: Frame, handle: str) -> Cell:
-    """La personne derrière une adresse, en lien vers sa fiche."""
+    """La personne derrière un moyen de communication, par son nom, en lien vers sa fiche : sa clé seulement quand
+    elle n'a pas de nom (ADR 0042 ; sa clé reste dans le lien)."""
+    return _named(frame, handle, keyed=False)
+
+
+def _who_by(frame: Frame, handle: str) -> Cell:
+    """La personne et le moyen de communication par lequel elle a écrit (« Béa (user_2) »), en lien vers sa fiche :
+    dans le fil et ses résumés, par où chaque message est venu est l'information même."""
+    return _named(frame, handle, keyed=True)
+
+
+def _named(frame: Frame, handle: str, *, keyed: bool) -> Cell:
     if not handle or is_internal(handle):
         return Text("personne", "muted")
     person = frame.get(identity_c.PERSON(handle))
     name = frame.get(identity_c.IDENTITY(person)).name or frame.get(identity_c.IDENTITY(handle)).name
-    return Ref.subject("person", person, f"{name} ({handle})" if name else handle)
+    shown = (f"{name} ({handle})" if keyed else name) if name else handle
+    return Ref.subject("person", person, shown)
 
 
 def _page(store: Any, clauses: Sequence[Any], before: int | None,
@@ -245,7 +257,7 @@ def _messages(frame: Frame, ctx: InspectContext, rows: Sequence[Mapping[str, Any
             corr = silences[int(r["id"])].correlation  # l'épisode qui l'a laissé sans réponse
         out.append(Row((
             Ref("event", str(r["id"]), str(r["id"])), When(r["at"]),
-            Badge("elle", "info") if mine else Badge("la personne"), _who(frame, r["person"]),
+            Badge("elle", "info") if mine else Badge("la personne"), _who_by(frame, r["person"]),
             f"salon « {r['room']} »" if r["room"] else "en privé",
             Text((r["text"] or "")[:TEXT_CAP], clamp=INSPECT_CHARS),
             emotion_cell(r["emotion"], r["emotion_intensity"]) if mine and r["emotion"] else "",
@@ -261,7 +273,7 @@ def _summaries(store: Any, s: TranscriptState, frame: Frame, handles: Sequence[s
     if not folded:
         return None
     texts = store.content([ref for _p, (_upto, ref) in folded if ref])
-    rows = tuple((_who(frame, p), Ref("event", str(upto), str(upto)),
+    rows = tuple((_who_by(frame, p), Ref("event", str(upto), str(upto)),
                   Text(_clip(texts[ref], TEXT_CAP), clamp=INSPECT_CHARS) if texts.get(ref) else FORGOTTEN)
                  for p, (upto, ref) in folded)
     return Disclosure(f"Débuts de fil repliés en résumé ({len(rows)})", (
@@ -272,7 +284,7 @@ def _no_store() -> list[Block]:
     return [Note("Le magasin n'est pas disponible : le fil ne peut pas être relu.", tone="muted")]
 
 
-HANDLE = Param("handle", "Personne ou identifiant", placeholder="Alice, user_7, ext_42…")
+HANDLE = Param("handle", "Personne ou identifiant", placeholder="Alice…")
 QUERY = Param("q", "texte", placeholder="un mot…")
 ROLE = Param("role", "qui parle", kind="select", choices=ROLES)
 
@@ -293,7 +305,8 @@ def _all_messages(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list
         known_handles = sorted({str(r[0]) for r in store.query_mind(select(t.c.person).distinct())} |
                                set(s.summaries))
         exact = [h for h in known_handles if h == handle]
-        matched = exact or [h for h in known_handles if handle.casefold() in _who(frame, h).text.casefold()]
+        # dans le nom et dans la clé (« Béa (user_2) ») : « user_7 » trouve encore user_7
+        matched = exact or [h for h in known_handles if handle.casefold() in _who_by(frame, h).text.casefold()]
         clauses.append(t.c.person.in_(matched) if matched else false())
     if q:
         # le texte replié à l'écriture, comparé en binaire : casse et accents ignorés, pareil sur les deux moteurs
@@ -571,8 +584,11 @@ def _conversations(s: TranscriptState, frame: Frame, ctx: InspectContext) -> lis
 
 # ── Ses réponses jugées ───────────────────────────────────────────────────
 
-VERDICT = Param("avis", "avis", kind="select", choices=(("", "tous"), (c.VERDICT_KO, "pas adaptées"),
-                                                        (c.VERDICT_OK, "adaptées")))
+#: l'avis toujours posé, « toutes » par défaut : un bouton à choix au bout de la barre d'onglets (ADR 0176) ; une
+#: ancienne adresse ``?avis=`` (vide) retombe sur le défaut
+ALL_VERDICTS = "toutes"
+VERDICT = Param("avis", "avis", kind="select", default=ALL_VERDICTS,
+                choices=((ALL_VERDICTS, "toutes"), (c.VERDICT_KO, "pas adaptées"), (c.VERDICT_OK, "adaptées")))
 
 COLUMNS = (Column("quand", "fit"), Column("avis", "fit"), "avec", Column("on lui avait écrit", role="body"),
            Column("sa réponse", role="body"), Column("ce qu'elle aurait dû dire", role="body"),
@@ -597,7 +613,7 @@ def _judged(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list[Block
     t = c.thread_table()
     wanted = str(ctx.value("avis") or "")
     clauses: list[Any] = [t.c.role == "assistant", t.c.verdict.is_not(None)]
-    if wanted:
+    if wanted and wanted != ALL_VERDICTS:
         clauses.append(t.c.verdict == wanted)
     rows, pager = _page(store, clauses, ctx.int_param("avant", 0) or None)
     heard = _heard(store, rows)

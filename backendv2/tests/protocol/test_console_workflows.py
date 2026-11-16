@@ -24,6 +24,16 @@ from tests.protocol.test_inspector_pages import converse
 from tests.protocol.test_web import bootstrap, world  # noqa: F401
 
 
+def tab_count(page: str, slug: str) -> str | None:
+    """Le compte que porte l'onglet ``slug`` d'un épisode sur la barre d'onglets (sa pastille ``tab-n``) ; ``None``
+    s'il n'en porte pas."""
+    bar = page.split('aria-label="Onglets"', 1)[1].split("</nav>", 1)[0]
+    tab = re.search(rf'href="[^"]*\?onglet={slug}"[^>]*>(.*?)</a>', bar)
+    assert tab is not None, slug
+    got = re.search(r'<span class="tab-n now-num">([^<]+)</span>', tab.group(1))
+    return got.group(1) if got else None
+
+
 def page(client, url, out: Path | None = None):
     response = client.get(url)
     assert response.status_code == 200, (url, response.status_code)
@@ -445,7 +455,14 @@ def test_large_episode_keeps_its_outcome_and_every_event_accessible(world, tmp_p
     append(client, live.kernel, drafts)
     url = '/inspecteur/episode/console-review'
     summary = page(client, url, tmp_path / 'review')
-    assert 'FIN ÉPISODE LONG' in summary and 'Résultat de l’épisode' in summary
+    # son issue en grand et son détail ; ni sa sorte, ni à qui, ni quand, que l'en-tête dit déjà
+    hero = summary.split('class="now-card episode-hero', 1)[1].split('</section>', 1)[0]
+    assert 'FIN ÉPISODE LONG' in hero and 'Son issue' in hero and 'class="episode-outcome"' in hero
+    assert 'Résultat de l’épisode' not in hero and 'vers ' not in hero and not re.search(r'\d{2}/\d{2}/\d{4}', hero)
+    # ses onglets disent leur compte : ses 552 événements ; aucune parole, aucun appel, aucun outil
+    assert tab_count(summary, 'deroule') == '552'
+    assert tab_count(summary, 'dit') is None and tab_count(summary, 'appels') is None
+    assert tab_count(summary, 'outils') is None
     first = page(client, url + '?onglet=deroule', tmp_path / 'review')
     assert '552 au total' in first and 'en cours ou interrompu' not in first
     assert 'FIN ÉPISODE LONG' not in first

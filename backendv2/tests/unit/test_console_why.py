@@ -5,6 +5,10 @@ plus récent avant le départ n'est pas forcément le sien. Le numéro exact, qu
 l'épisode le porte (``EpisodeStarted.selected``), fait foi ; sinon, le premier
 choix après la tête notée par le déclencheur (``selected:<tête>``) qui a tiré
 cette sorte envers cette cible.
+
+Son humeur, telle que son prompt la lui disait (« Ton humeur générale est… »),
+se lit comme une citation de son prompt, pas comme une phrase adressée à qui lit
+la page ; ses nombres (lignes, outils, tours de conversation) sont accordés.
 """
 
 from __future__ import annotations
@@ -14,11 +18,24 @@ from types import SimpleNamespace
 from sqlalchemy import insert
 
 from mika.inspector.pages.decisions import ARBITER_COLUMNS
-from mika.inspector.pages.why import cause_blocks, selection_of
+from mika.inspector.pages.why import (
+    cause_blocks,
+    inner_state,
+    mood_blocks,
+    prompt_measure,
+    prompt_view,
+    selection_of,
+    tools_view,
+)
+from mika.inspector.ui import env
 from mika.kernel.builtin import SELECTED
-from mika.kernel.inspect import Disclosure, Note, Table, Text
+from mika.kernel.faculty import Zone
+from mika.kernel.inspect import Disclosure, Fields, Note, Table, Text, num_fr
+from mika.kernel.prompt import HEADER_FMT
 from mika.kernel.registry import ArbitrationPolicy
 from mika.ports.journal import JournalEvent
+from mika.runtime.traces import STABLE_KEY
+from mika.vocab.episodes import Tag
 from tests.fixtures.sqldb import SqlDB
 
 
@@ -138,7 +155,7 @@ def test_the_cause_of_an_initiative_is_the_arbiter_line_in_words():
     spoke = cause_blocks(ui, _started(14, "selected:10", "alice", reply_to=None, reason="need_social"))
     lead = next(b for b in spoke if isinstance(b, Note))
     assert lead.text.startswith("Elle a pris la parole d'elle-même") and "envers Alice" in lead.text
-    assert "0,42" in lead.text and "Parmi 2 ligne(s)" in lead.text  # le tirage et les lignes, à la française
+    assert "0,42" in lead.text and "Parmi 2 lignes" in lead.text  # le tirage et les lignes, à la française
     steps = next(b for b in spoke if isinstance(b, Table))
     assert any("Envie de compagnie" in str(c) for r in steps.rows for c in r.cells)  # la preuve en mots
     # les lignes non retenues se lisent comme la table de l'arbitre : la sorte, la cible et le rythme maximal, repliés,
@@ -152,3 +169,57 @@ def test_the_cause_of_an_initiative_is_the_arbiter_line_in_words():
     # contre-exemple : une réponse ne passe pas par l'arbitre (elle n'est pas « prise d'elle-même »)
     asked = _started(14, "perception:9", "alice", reply_to=9, reason="")
     assert not any(isinstance(b, Note) and "d'elle-même" in b.text for b in cause_blocks(ui, asked))
+
+
+# ── son humeur citée de son prompt, des nombres accordés ─────────────────
+
+
+#: une section affective de la zone volatile (son humeur), et une qui ne l'est pas (qui elle a en face)
+MOOD = SimpleNamespace(key="mood", zone=Zone.VOLATILE, tags=(Tag.AFFECTIVE,), title="SON HUMEUR")
+WHO = SimpleNamespace(key="who", zone=Zone.VOLATILE, tags=(), title="QUI TU AS EN FACE")
+SAID = "Ton humeur générale est contente, comme d'habitude."
+
+
+def _said_with_mood() -> tuple[SimpleNamespace, dict, SimpleNamespace]:
+    """Un noyau qui déclare ces deux sections, la trace d'un prompt qui les a montrées, et la parole qui les cite."""
+    blocks = {k.key: HEADER_FMT.format(title=k.title) + "\n" + text + "\n"
+              for k, text in ((WHO, "Adrien, ton ami."), (MOOD, SAID))}
+    trace = {STABLE_KEY: "", "messages": [{"role": "user", "content": blocks["who"] + blocks["mood"] + "salut"}],
+             "compose": {"sizes": [(k, len(b)) for k, b in blocks.items()], "included": list(blocks),
+                         "anchors": [(k, b.split("\n", 1)[0] + "\n") for k, b in blocks.items()],
+                         "chars": 1, "history_turns": 1}}
+    ui = SimpleNamespace(kernel=SimpleNamespace(registry=SimpleNamespace(sections=(WHO, MOOD))),
+                         names=SimpleNamespace(section={"mood": "Son humeur", "who": "Qui elle a en face"}.get))
+    utterance = SimpleNamespace(data=SimpleNamespace(sections=("who", "mood"), annotation=lambda _key: None))
+    return ui, trace, utterance
+
+
+def test_her_mood_reads_as_a_quote_from_her_prompt_on_both_renderings():
+    ui, trace, utterance = _said_with_mood()
+    # la page dessinée : le libellé dit d'où vient le texte, au « tu » parce qu'il s'adresse à elle
+    state, missing = inner_state(ui, trace, utterance)
+    assert state == [("dans son prompt : son humeur", SAID + "\n")] and not missing
+    # le repli (les blocs de la console) dit le même libellé
+    fields = next(b for b in mood_blocks(ui, trace, utterance) if isinstance(b, Fields))
+    assert [label for label, _cell in fields.pairs] == ["dans son prompt : son humeur"]
+    # contre-exemple : une section qui n'est pas affective (qui elle a en face) n'est pas son humeur
+    assert not any("qui elle a en face" in label for label, _text in state)
+
+
+def test_tools_and_prompt_say_their_numbers_in_agreed_words():
+    one = tools_view({"tools": ["web_search"], "tool_calls": []})
+    assert one["summary"] == "1 outil en main, 0 appelé." and one["held"] == "L'outil qu'elle avait en main"
+    many = tools_view({"tools": ["a", "b", "c"], "tool_calls": [{"name": "a", "ok": True}, {"name": "b", "ok": False}]})
+    assert many["summary"] == "3 outils en main, 2 appelés." and many["held"] == "Les 3 outils qu'elle avait en main"
+    assert prompt_measure({"chars": 1, "history_turns": 1}) == "1 caractère, 1 tour de conversation"
+    assert prompt_measure({"chars": 12345, "history_turns": 0}) == f"{num_fr(12345)} caractères, 0 tour de conversation"
+    ui, trace, _utterance = _said_with_mood()
+    trace["compose"]["history_turns"] = 3
+    shown = prompt_view(ui, trace)
+    assert shown["measure"] == "1 caractère, 3 tours de conversation" and prompt_view(ui, None)["measure"] == ""
+    # les gabarits partagés par la parole, l'épisode et le silence écrivent ces libellés, jamais « (s) »
+    macros = env.from_string('{% import "handmade/parole/macros.html" as p %}{{ p.prompt_head(prompt) }}{{ p.tools(t) }}')
+    html = macros.render(prompt=shown, t=one)
+    assert "1 caractère, 3 tours de conversation." in html and "L&#39;outil qu&#39;elle avait en main" in html
+    assert "(s)" not in html and "Les 1 outils" not in html
+

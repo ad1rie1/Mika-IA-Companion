@@ -1,5 +1,7 @@
 {# Les enregistrements d'un réglage (des fournisseurs, des boîtes, des réveils…), dans le vocabulaire des pages
-   dessinées (ADR 0121) : une carte, une entrée par enregistrement — son nom, ses champs, modifier ou retirer. #}
+   dessinées (ADR 0121) : une carte, une entrée par enregistrement — son nom, ses champs, modifier ou retirer ; et,
+   quand sa carte en donne (``links`` : des paires libellé, adresse), où aller de là — l'extension et les
+   conversations d'un compte Teams, comme « Sa fiche » et « Ses messages » d'une boîte. #}
 {% from "_navigation.html" import pager %}
 {% macro records(r, csrf, section, action) -%}
 <section class="now-card person-list records" aria-label="{{ r.label }}">
@@ -41,10 +43,11 @@
       {% endif %}
       <div class="person-entry-more">
         <a class="btn small" href="{{ row.edit }}">Modifier</a>
+        {% if row.card and row.card.links %}{% for label, href in row.card.links %}<a class="btn small quiet" href="{{ href }}">{{ label }}</a>{% endfor %}{% endif %}
         <form method="post" action="{{ action }}" class="inline" data-confirm="{{ row.confirm or ('Retirer « ' ~ row.key ~ ' » ?') }}">
           <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_section" value="{{ section }}">
           <input type="hidden" name="_supprimer" value="{{ r.path }}"><input type="hidden" name="_cle" value="{{ row.key }}">
-          <button class="btn quiet small danger">retirer</button>
+          <button class="btn quiet small danger">Retirer</button>
         </form>
       </div>
     </article>

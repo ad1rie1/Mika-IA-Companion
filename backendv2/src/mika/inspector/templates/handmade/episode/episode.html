@@ -1,7 +1,9 @@
 {# Un épisode, dessiné (inspector/pages/episode_drawn.py) : une forme par onglet (``v.tab``), sous l'en-tête et la barre
    d'onglets de la console. Ce qui n'a pas de forme à lui (le tableau des appels, le calcul de l'arbitre) reprend ses
-   blocs (``one``). Aucun style en ligne (CSP). #}
+   blocs (``one``). Les faits (Prompt, Décision) sont des cellules (``render.cell``) : un lien reste un lien. Aucun style
+   en ligne (CSP). #}
 {% from "handmade/shared/drawn.html" import one with context %}
+{% from "_cells.html" import cell %}
 {% from "_navigation.html" import pager as pages %}
 {% import "handmade/parole/macros.html" as p %}
 
@@ -10,6 +12,10 @@
   <p class="person-bubble">{{ s.text }}</p>
   <p class="person-meta">à {{ s.to }} · {{ s.when }} · {{ 'dans le fil' if s.visible else 'hors du fil' }} · <a href="{{ s.why }}">pourquoi ?</a></p>
 </li>
+{%- endmacro %}
+
+{% macro facts(items) -%}
+<dl class="person-fields episode-fields">{% for f in items %}<div><dt>{{ f.label }}</dt><dd>{{ cell(f.cell) }}</dd></div>{% endfor %}</dl>
 {%- endmacro %}
 
 {% macro trigger(t) -%}
@@ -24,8 +30,9 @@
 <div class="now-page episode">
 
 {% if v.tab == "resume" %}
-  <section class="now-card episode-hero {{ v.outcome.tone }}" aria-labelledby="episode-outcome">
-    <p class="now-eyebrow">Résultat de l’épisode · {{ v.kind }}{% if v.to and v.to != '—' %} · vers {{ v.to }}{% endif %}{% if v.began %} · {{ v.began }}{% endif %}</p>
+  {# son issue en grand et son détail ; sa sorte, à qui et quand, l'en-tête de la page les dit déjà #}
+  <section class="now-card episode-hero {{ v.outcome.tone }}" aria-labelledby="episode-issue episode-outcome">
+    <p class="now-eyebrow" id="episode-issue">Son issue</p>
     <p class="episode-outcome" id="episode-outcome">{{ v.outcome.text }}</p>
     {% if v.detail %}<p class="now-lede">{{ v.detail }}</p>{% endif %}
     {% if v.open %}<p class="now-after"><a href="{{ PREFIX }}/decisions/en_cours">Vérifier l’activité actuelle →</a></p>{% endif %}
@@ -41,7 +48,7 @@
       {{ trigger(v.trigger) }}
     </section>
     <section class="now-card" aria-labelledby="episode-said">
-      <header class="now-card-head"><h2 id="episode-said">Ce qu'elle a dit</h2>{% if v.speech_count %}<p>Les {{ v.speeches|length }} dernières paroles sur {{ v.speech_count }}.</p><a class="now-more" href="{{ v.href.dit }}">toutes →</a>{% endif %}</header>
+      <header class="now-card-head"><h2 id="episode-said">Ce qu'elle a dit</h2>{% if v.speech_count %}<p>{{ v.speeches_said }}</p><a class="now-more" href="{{ v.href.dit }}">toutes →</a>{% endif %}</header>
       {% if v.speeches %}<ol class="person-thread">{% for s in v.speeches %}{{ bubble(s) }}{% endfor %}</ol>
       {% else %}<p class="now-empty">Aucune parole n’est enregistrée pour cet épisode.</p>{% endif %}
     </section>
@@ -92,7 +99,8 @@
   <div class="now-grid two">
     <section class="now-card" aria-labelledby="episode-decided">
       <header class="now-card-head"><h2 id="episode-decided">Ce qui a décidé du prompt</h2></header>
-      <dl class="person-fields episode-fields">{% for k, x in v.facts %}<div><dt>{{ k }}</dt><dd>{{ x }}</dd></div>{% endfor %}</dl>
+      {{ facts(v.facts) }}
+      {% if v.technical %}<details class="hm-subfold"><summary>Détails techniques</summary>{{ facts(v.technical) }}</details>{% endif %}
     </section>
     <section class="now-card" aria-labelledby="episode-offered">
       <header class="now-card-head"><h2 id="episode-offered">Ses outils</h2></header>
@@ -135,6 +143,8 @@
 
 {% elif v.tab == "appels" %}
   {% if v.tiles %}
+  {# au-delà de CALLS_COUNTED appels, leurs sommes ne portent que sur les premiers : la page le dit #}
+  {% if v.partial %}<p class="person-tab-note muted" role="note">{{ v.partial }}</p>{% endif %}
   <ul class="person-tiles-list episode-tiles">
     {% for t in v.tiles %}<li class="{{ t.tone }}"><span class="person-tile-label">{{ t.label }}</span><span class="person-tile-value now-num">{{ t.value }}</span><span class="person-tile-sub">{{ t.sub }}</span></li>{% endfor %}
   </ul>
@@ -155,7 +165,7 @@
     </section>
     <section class="now-card" aria-labelledby="episode-what">
       <header class="now-card-head"><h2 id="episode-what">En bref</h2></header>
-      <dl class="person-fields episode-fields">{% for k, x in v.facts %}<div><dt>{{ k }}</dt><dd>{{ x }}</dd></div>{% endfor %}</dl>
+      {{ facts(v.facts) }}
     </section>
   </div>
   {% for b in v.cause %}{{ one(b) }}{% endfor %}

@@ -50,7 +50,7 @@
           <h3 id="ids-w-{{ side }}">{{ title }}</h3>
           <ul role="list">
             {% for w in weights.get(side, []) %}
-            <li><span class="ids-w-name">{{ w.name }} <code>{{ w.key }}</code></span>{{ tab.bar(w.w, "ids-w " ~ side) }}<span class="now-num">{{ w.weight }}</span></li>
+            <li><span class="ids-w-name">{{ w.name }}</span>{{ tab.bar(w.w, "ids-w " ~ side) }}<span class="now-num">{{ w.weight }}</span></li>
             {% else %}<li class="now-muted">aucune</li>{% endfor %}
           </ul>
         </section>
@@ -61,7 +61,7 @@
       <section class="now-card" aria-labelledby="ids-ranks-title">
         {{ tab.head("Les rangs de proximité", "ids-ranks-title", none, "du plus lointain au plus proche : ce qu'elle confie grandit avec le rang") }}
         <ol class="ids-ranks" role="list">
-          {% for r in ranks %}<li><span class="ids-rank">{{ r.rank }}</span><span>{{ r.name }}</span><code>{{ r.key }}</code></li>{% endfor %}
+          {% for r in ranks %}<li><span class="ids-rank">{{ r.rank }}</span><span>{{ r.name }}</span></li>{% endfor %}
         </ol>
       </section>
       <section class="now-card" aria-labelledby="ids-owners-title">

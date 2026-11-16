@@ -17,8 +17,10 @@
 .person-head-links { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 0; color: var(--muted); font-size: 13px; }
 
 /* ── La vue d'ensemble (son premier onglet) ───────────────────────────── */
+/* La pastille « À jour » se pose en haut à droite, sur la ligne du titre du lien : sa colonne garde la place des
+   deux (380 px au moins), sinon le titre passerait dessous. */
 .person-live { position: absolute; top: 16px; right: 18px; padding: 3px 10px; font-size: 11.5px; }
-.person-hero { grid-template-columns: minmax(0, 1.2fr) minmax(260px, .8fr); align-items: start; }
+.person-hero { grid-template-columns: minmax(0, 1.2fr) minmax(380px, .8fr); align-items: start; }
 .person-bond { display: grid; gap: 12px; padding-left: 28px; border-left: 1px solid var(--border); }
 .person-hard { margin: 12px 0 0; padding: 10px 12px; border-radius: var(--radius); background: var(--warn-bg); color: var(--warn);
   font-size: 13px; }
@@ -81,13 +83,16 @@
 /* ── Écrans plus étroits ──────────────────────────────────────────────── */
 @media (max-width: 1000px) {
   .person-story { grid-template-columns: minmax(0, 1fr); }
+  /* le héros passe à une colonne avec .now-hero (base.css) : la règle de .person-hero, lue après, le gardait sur
+     deux, la seconde d'au moins 380 px ; le lien vient sous le ressenti, la pastille a sa rangée en tête */
+  .person-hero { grid-template-columns: minmax(0, 1fr); }
+  .person-bond { padding: 18px 0 0; border-top: 1px solid var(--border); border-left: 0; }
+  .person-live { position: static; justify-self: start; }
 }
 @media (max-width: 700px) {
-  .person-bond { padding: 18px 0 0; border-top: 1px solid var(--border); border-left: 0; }
   .person-head { gap: 14px; }
   .person-avatar { width: 60px; height: 60px; font-size: 27px; }
   .person-head-links { flex-direction: column; }
   .person-head-links span[aria-hidden] { display: none; }
-  .person-live { position: static; justify-self: start; }
   .person-life li { grid-template-columns: minmax(0, 1fr); gap: 2px; }
 }

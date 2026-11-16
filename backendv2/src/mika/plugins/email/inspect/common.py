@@ -31,6 +31,7 @@ from mika.kernel.inspect import (
     Workspace,
     agree,
     is_table_choice,
+    pct_fr,
 )
 from mika.kernel.text import fold  # noqa: F401 — réexportée : les vues du courrier la prennent ici
 from mika.plugins.email import (
@@ -67,6 +68,11 @@ UNKNOWN = "Ce mail n'est ni dans la boîte, ni parmi les envoyés, ni dans ce qu
 NO_PORT = "Courrier non configuré : aucune boîte aux lettres n'est branchée."
 #: la réception d'une boîte, quelle que soit sa casse sur le serveur (ADR 0171)
 INBOX = "INBOX"
+#: le nom du geste ``email.ecrire`` (le titre de l'action), que son bouton redit : son formulaire nomme son envoi
+#: (« Envoyer le message »), dont il prendrait sinon le nom
+WRITE_TITLE = "Nouveau message"
+#: les dossiers du serveur qui portent le nom d'une vue de la colonne (« Ses brouillons », « Envoyés ») : « (serveur) »
+SERVER_TWINS = ("drafts", "sent")
 VOICE_LABEL = {"elle": "en son nom", "assistante": "en assistante", "proprietaire": "à ta place"}
 #: où en est un brouillon, en toutes lettres (et son ton) : ce qu'elle en sait (sa proposition)…
 DRAFT_STATES = {WAITING: ("attend ton accord", "warn"), APPROVED: ("approuvé, en partance", "info"),
@@ -163,7 +169,8 @@ def to_answer(seen: Seen | None) -> bool:
 
 
 def pertinence(seen: Seen | None) -> Meter | None:
-    return Meter(seen.importance, f"{seen.importance:.2f}") if seen is not None else None
+    """Ce que son tri estime d'un mail, une part de 0 à 1 : dite en pourcentage, comme toute part de la console."""
+    return Meter(seen.importance, pct_fr(seen.importance)) if seen is not None else None
 
 
 def author(frame: Frame, by: str, *, edited: bool = False) -> Badge:
@@ -335,8 +342,9 @@ def workspace(port: Any, ctx: InspectContext, items: list[Block], *, view: str =
               frame: Frame | None = None) -> Workspace:
     """Le même espace courrier pour réception, brouillons, envoyés et contacts : à côté, à qui sont les boîtes
     montrées (``?qui=``, ADR 0185), ce qu'on lit, les comptes et les dossiers du compte choisi ; au-dessus, écrire et
-    actualiser, puis la recherche. ``folders`` : cette vue montre un dossier (la réception) ; ``port`` : déjà réduit
-    (``scoped``) aux boîtes de qui on a choisi."""
+    relever (ou actualiser le dossier), puis la recherche — dans une vue de la colonne (« À traiter », « Suivis »),
+    son ``?etat=`` en champ caché : la vue est le filtre. ``folders`` : cette vue montre un dossier (la réception) ;
+    ``port`` : déjà réduit (``scoped``) aux boîtes de qui on a choisi."""
     accounts = port.accounts() if port is not None else []
     account = account_scope(port, ctx)
     side: list[Block] = [_owners(port, ctx, view, frame)] if port is not None and (accounts or whose(ctx)) else []
@@ -356,7 +364,7 @@ def workspace(port: Any, ctx: InspectContext, items: list[Block], *, view: str =
         folder = ctx.param("dossier") or INBOX
         # la réception est en tête de ce qu'on lit : les dossiers disent les autres
         known = [f for f in port.folders(account) if f.role != "inbox" and f.name != INBOX] if chosen else []
-        entries = [NavItem(f.label + " (serveur)" if f.role == "drafts" else f.label,
+        entries = [NavItem(f.label + " (serveur)" if f.role in SERVER_TWINS else f.label,
                            box_link(f.label, account=account, folder=f.name, whose=whose(ctx)),
                            count=f.unseen or None, active=listed and folder == f.name) for f in known]
         entries.append(NavItem("Tous les dossiers", box_link("Tous les dossiers", account=account, folder="*",
@@ -366,17 +374,20 @@ def workspace(port: Any, ctx: InspectContext, items: list[Block], *, view: str =
     actions: list[Block] = []
     if can_send(port) and (not account or (chosen is not None and chosen.can_send)):
         initial = ((("account", account),) if chosen and chosen.can_send else ()) + (("_bouton", "Envoyer le message"),)
-        actions.append(ActionSlot("email.ecrire", initial, title="Nouveau message", presentation="button"))
+        actions.append(ActionSlot("email.ecrire", initial, title=WRITE_TITLE, presentation="button"))
+    # leur nom est celui de l'action (« Actualiser le dossier », « Relever maintenant ») : un geste, un nom
     if folders and chosen and chosen.ready and ctx.param("dossier") != "*":
         actions.append(ActionSlot("email.relire", (("compte", account), ("dossier", ctx.param("dossier") or INBOX)),
-                                  title="Actualiser le dossier", presentation="button"))
+                                  presentation="button"))
     elif folders and ready(port):
-        actions.append(ActionSlot("email.relever", title="Actualiser les boîtes", presentation="button"))
+        actions.append(ActionSlot("email.relever", presentation="button"))
     content: list[Block] = [Toolbar(tuple(actions))] if actions else []
     if filters:
         keep = tuple((k, v) for k, v in (("compte", account), ("dossier", ctx.param("dossier") if folders else ""),
                                           (WHOSE, whose(ctx))) if v)
         keep += tuple((k, v) for k, v in ctx.params.items() if is_table_choice(k, v))
+        if folders and ctx.value("etat") in VIEWS and all(p.name != "etat" for p in filters):
+            keep += (("etat", ctx.value("etat")),)  # une vue de la colonne est le filtre : la recherche y reste
         content.append(Filters(filters, tuple(ctx.params.items()), keep=keep, title="Rechercher"))
     if chosen:
         status = port.status(account)

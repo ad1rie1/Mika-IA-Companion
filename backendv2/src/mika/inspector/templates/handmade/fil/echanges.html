@@ -30,7 +30,8 @@
     </ol>
     {% endfor %}
     {% else %}<p class="now-empty">{{ empty }}{{ '' if (empty|string)[-1:] in '.!?…' else '.' }}</p>{% endif %}
-    {{ pages(pager) }}
+    {# la pagination seulement s'il y a une autre page : pas de « Page 1 sur 1 » (comme fil/judged.html) #}
+    {% if pager and (pager.prev or pager.next or pager.older or pager.newer) %}{{ pages(pager) }}{% endif %}
   </section>
   {% if summaries %}
   <section class="now-card" aria-labelledby="person-folded-title">

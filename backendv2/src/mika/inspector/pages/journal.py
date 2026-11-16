@@ -13,7 +13,8 @@ l'épisode) entre au journal."""
 from __future__ import annotations
 
 import json
-from typing import Any
+from collections.abc import Mapping
+from typing import Any, NamedTuple
 
 from sqlalchemy import func, select
 
@@ -34,6 +35,7 @@ from mika.inspector.pages.why import (
 )
 from mika.kernel.inspect import (
     Badge,
+    Cell,
     Code,
     Column,
     Disclosure,
@@ -59,6 +61,7 @@ from mika.runtime.boundary import Failed, call
 from mika.runtime.tool_offer import declare
 from mika.runtime.traces import STABLE_KEY, TRUNCATION_MARK
 from mika.vocab.episodes import TRIAL_ROLE, outcome_words
+from mika.vocab.privacy import LEVEL_WORDS
 
 EPISODE_TABS = (("resume", "Résumé"), ("deroule", "Déroulé"), ("dit", "Ce qu'elle a dit"), ("prompt", "Prompt"), ("outils", "Outils"),
                 ("appels", "Appels de modèle"), ("decision", "Décision"))
@@ -67,6 +70,12 @@ _PROVENANCE = ("memory:", "event:", "goal:", "thought:")
 EPISODE_PAGE = 25
 #: « Rejouer avec… » : au plus tant d'appels de l'épisode lus (où son prompt est déjà allé, ce qu'il a coûté)
 REPLAY_CALLS = 50
+#: où la page dessinée range un fait du prompt (``PromptFact.place``) : sa carte « Ses outils » le dit déjà ; replié
+#: sous « Détails techniques »
+FACT_TOOLS, FACT_TECHNICAL = "outils", "technique"
+#: une réponse reprise (``reprise:<n>``, ``runtime/bootstrap.py``) : au démarrage après un arrêt, après une réponse
+#: supplantée ou préemptée, ou quand elle se réveille — les mots de « Pourquoi a-t-elle parlé ? » (``why.py``)
+RESUMED = "repris après une interruption"
 
 
 def _events(ui: Any, corr: str, query=None, *, speeches: bool = False) -> tuple[list[Any], Pager]:
@@ -153,16 +162,7 @@ def episode_tab(ui: Any, corr: str, tab: str, info: dict[str, Any], query=None) 
             out.append(Note("Cette trace a été tronquée (un texte trop long) : ce qui est montré est incomplet.",
                             "warn"))
         out += prompt_blocks(ui, trace, ())
-        audience = (trace.get("audience") or {}).get("level", "—")
-        facts = [("rôle", names.role(trace.get("role"))),
-                 ("déclencheur", Text(str(trace.get("trigger") or "—"), "mono")),
-                 ("audience", str(audience)),
-                 ("outils offerts", ", ".join(trace.get("tools") or ()) or "aucun"),
-                 ("enrichissements", ", ".join(trace.get("enrichments") or ()) or "aucun"),
-                 ("empreinte du préfixe", Text(str(trace.get("system_stable_hash") or "—")[:16], "mono",
-                                               hint="la même d'un épisode à l'autre : le cache sert")),
-                 ("issue", outcome_words(trace.get("outcome"))[0] if trace.get("outcome") != "running" else "en cours")]
-        out.append(Fields(tuple(facts)))
+        out.append(Fields(tuple((f.label, f.value) for f in prompt_facts(ui, trace, started or ended))))
         out += context_blocks(trace)
         if trace.get("reply"):
             said = trace.get("outcome") in ("done", "abstained")
@@ -213,6 +213,83 @@ def episode_tab(ui: Any, corr: str, tab: str, info: dict[str, Any], query=None) 
                   layout="list", link_label="Ouvrir l’événement")]
 
 
+class PromptFact(NamedTuple):
+    """Un fait de l'onglet Prompt : son libellé, sa cellule, et où la page dessinée le range (``""`` : avec les autres ;
+    ``FACT_TOOLS``, ``FACT_TECHNICAL``). Les blocs les montrent tous, dans l'ordre."""
+
+    label: str
+    value: Cell
+    place: str = ""
+
+
+def prompt_facts(ui: Any, trace: Mapping[str, Any], started: Any | None) -> list[PromptFact]:
+    """Ce qui a décidé du prompt, en mots, pour les deux rendus de l'onglet Prompt (la page dessinée et ses blocs) :
+    son rôle, son déclencheur (``trigger_cell``), ce qu'elle pouvait dire d'autrui (le niveau de son audience), ses
+    outils offerts, ce qui a été rassemblé avant de l'écrire (ses enrichisseurs, ``Names.enricher``), l'empreinte de
+    son préfixe et son issue, dite comme l'étiquette de la page : avec la sorte de l'épisode (« a parlé »), lue sur
+    ``started`` (son début, ou sa fin)."""
+    outcome = trace.get("outcome")
+    kind = getattr(getattr(started, "data", None), "kind", None)
+    enriched = [ui.names.enricher(str(k)) for k in trace.get("enrichments") or ()]
+    return [
+        PromptFact("rôle", names.role(trace.get("role"))),
+        PromptFact("déclencheur", trigger_cell(trace.get("trigger"))),
+        PromptFact("ce qu'elle pouvait dire d'autrui", _level((trace.get("audience") or {}).get("level"))),
+        PromptFact("outils offerts", ", ".join(trace.get("tools") or ()) or "aucun", FACT_TOOLS),
+        PromptFact("enrichissements", " · ".join(enriched) or "aucun"),
+        PromptFact("empreinte du préfixe", Text(str(trace.get("system_stable_hash") or "—")[:16], "mono",
+                                                hint="la même d'un épisode à l'autre : le cache sert"), FACT_TECHNICAL),
+        PromptFact("issue", "en cours" if outcome == "running" else outcome_words(outcome, kind)[0]),
+    ]
+
+
+def _level(level: Any) -> Cell:
+    """Le niveau d'une audience (une ``Sensitivity``) en mots (« personnel ») ; un niveau illisible, tel quel."""
+    if level is None:
+        return Text("—", "muted")
+    said = LEVEL_WORDS.get(level) if isinstance(level, int) and not isinstance(level, bool) else None
+    return said if said is not None else Text(str(level), "mono")
+
+
+def trigger_cell(trigger: str | None) -> Cell:
+    """Le déclencheur d'un épisode (celui de son début, celui de sa trace), en mots : le message auquel elle répond,
+    en lien (``perception:<n>``, ou ``reprise:<n>``, ``RESUMED``) ; un choix de l'arbitre (``selected:<n>``,
+    ``runtime/bootstrap.py``) ; ce qu'un prélude précède (``prélude:<x>``, ``runtime/pipeline.py``). Une autre forme
+    se montre telle quelle. Les onglets Prompt et Décision le disent ainsi."""
+    raw = str(trigger or "")
+    said = _trigger_said(raw)
+    if said is None:
+        return Text(raw, "mono") if raw else Text("—", "muted")
+    text, seq = said
+    return Ref("event", seq, text) if seq else text
+
+
+def reply_trigger_cell(trigger: str | None) -> Cell | None:
+    """Ce que le déclencheur d'une réponse ajoute au message auquel elle répond, quand ce message se montre déjà
+    (« Ce qui l'a lancé », l'onglet Décision dessiné) : rien pour ``perception:<n>`` (c'est ce message) ni pour un
+    déclencheur vide ; ``RESUMED`` pour ``reprise:<n>`` ; une autre forme, en mots (``trigger_cell``)."""
+    raw = str(trigger or "")
+    head, _, tail = raw.partition(":")
+    if not raw or (head == "perception" and tail.isdigit()):
+        return None
+    return RESUMED if head == "reprise" and tail.isdigit() else trigger_cell(raw)
+
+
+def _trigger_said(raw: str, *, before: bool = False) -> tuple[str, str] | None:
+    """(ce que dit un déclencheur, le numéro du message à lier ou « ») ; ``before`` : dit après « avant »."""
+    head, _, tail = raw.partition(":")
+    if head in ("perception", "reprise") and tail.isdigit():
+        if before:
+            return f"la réponse au message n° {tail}", tail
+        return f"message n° {tail}" + (f", {RESUMED}" if head == "reprise" else ""), tail
+    if head == "selected":
+        return ("ce que l'arbitre a choisi" if before else "un choix de l'arbitre"), ""
+    if head == "prélude" and not before:
+        inner = _trigger_said(tail, before=True)
+        return (f"avant {inner[0]}", inner[1]) if inner is not None else None
+    return None
+
+
 def names_outcome_call(outcome: str) -> Badge:
     """L'issue d'un appel de modèle, en mots."""
     return Badge("réussi" if outcome == "ok" else names.detail(outcome), "ok" if outcome == "ok" else "danger")
@@ -224,13 +301,15 @@ def decision_blocks(ui: Any, started: Any, ended: Any, info: dict[str, Any]) -> 
     if started is None:
         return [Note("Début d'épisode introuvable.", "muted")]
     d = started.data
+    # une réponse : le message auquel elle répond, en lien, et son déclencheur en mots quand il en dit plus (une
+    # reprise, ``reprise:<n>``) ; sinon son déclencheur, en mots
+    reply = (("en réponse à", Ref("event", str(d.reply_to), f"message n° {d.reply_to}")),) if d.reply_to else ()
+    trigger = (("déclencheur", trigger_cell(d.trigger)),) \
+        if not d.reply_to or reply_trigger_cell(d.trigger) is not None else ()
     out: list[Any] = [Fields((("sorte", info["kind"]), ("vers", ui.names.who_cell(d.target)),
                               ("raison", ", ".join(ui.names.reason("", r) for r in str(d.reason or "").split(",") if r)
                                or "—"),
-                              ("objet", d.subject or "—"),
-                              ("déclencheur", Text(str(d.trigger or "—"), "mono"))))]
-    if d.reply_to:
-        out.append(Fields((("en réponse à", Ref("event", str(d.reply_to), f"message n° {d.reply_to}")),)))
+                              ("objet", d.subject or "—"), *reply, *trigger))]
     if ended is not None and ended.data.guard:
         out.append(Note(f"Supplanté par la garde « {ended.data.guard} » : a changé {', '.join(ended.data.changed)}.",
                         "warn"))
@@ -245,10 +324,22 @@ def decision_blocks(ui: Any, started: Any, ended: Any, info: dict[str, Any]) -> 
     return out
 
 
+#: l'aide de « état lu » sur la page d'un événement (``Event.basis``)
+BASIS_HINT = ("Le journal tel qu'il était quand l'événement a été décidé : ce qu'il a lu s'arrêtait à ce numéro.")
+
+
+def basis_words(basis: int) -> str:
+    """L'état du journal qu'un événement a lu, en mots : « jusqu'au n° 49 » ; rien avant le premier."""
+    return f"jusqu'au n° {basis}" if basis > 0 else "rien : le journal était vide"
+
+
 def event_page(ui: Any, seq: int, query=None) -> dict[str, Any] | None:
-    """Un événement du journal : son titre, ses blocs, et ce que dessine ``handmade/evenement/evenement.html``
-    (``view``) — ce qui s'est passé en mots, ses textes, son parcours dans la machine (qui le réduit, ce qu'il
-    réveille, qui le projette), qui il concerne, les épisodes qu'il a déclenchés, ses données brutes."""
+    """Un événement du journal : son titre (ce qui s'est passé en mots — son numéro, le fil d'Ariane le dit), ses
+    repères (``facts`` : quand, émis par, son origine en mots, son épisode et, pour une parole, « Pourquoi a-t-elle dit
+    ça ? »), que la route pose sur la ligne de faits de l'en-tête, ses blocs, et ce que dessine
+    ``handmade/evenement/evenement.html`` (``view``) — ses textes titrés en mots (``names.content_field``), son
+    parcours dans la machine (son type, qui le réduit, ce qu'il réveille, qui le projette, l'état du journal qu'il a
+    lu), qui il concerne, les épisodes qu'il a déclenchés, ses données brutes."""
     found = ui.kernel.mind.store.get_events([seq]) if seq > 0 else []
     if not found:
         return None
@@ -265,23 +356,25 @@ def event_page(ui: Any, seq: int, query=None) -> dict[str, Any] | None:
         Ref("local", "/inspecteur/systeme/chronologie", "les événements liés", (("correlation", e.correlation),))
     title = ui.names.event(e.type.name)
     owner = f"{ui.names.faculty(e.type.owner)} · {'public' if e.type.public else 'privé'}"
+    origin = names.event_origin(e.origin.value)
+    spoken = e.type.name == rt.UTTERANCE.name
+    # ses repères, sur la ligne de faits de l'en-tête (dessinée comme au repli) ; « Pourquoi a-t-elle dit ça ? »
+    # n'a pas besoin de libellé
+    facts: list[tuple[str, Any]] = [("quand", ui.when_long(e.at)), ("émis par", owner), ("origine", origin),
+                                    ("lié à" if linked else "", episode)]
+    if spoken:
+        facts.append(("", Ref.why(e.seq, "Pourquoi a-t-elle dit ça ? →")))
     contents = [(f, getattr(getattr(e.data, f, None), "text", None)) for f in sorted(e.type.content_fields)]
-    pairs: list[tuple[str, Any]] = [
-        ("quand", ui.when_long(e.at)), ("ce qui s'est passé", title), ("émis par", owner),
-        ("lié à", episode), ("origine", str(e.origin.value)),
-        ("lu sur la tête", e.basis), ("réduit par", ", ".join(readers) or "—"),
-        ("réveille", ", ".join(processes) or "—"), ("projeté par", ", ".join(projectors) or "—"),
-        ("personnes concernées", ", ".join(ui.names.who(s) for s in subjects) or "—"),
-        ("contenus", ", ".join(f"{f} : {'oublié' if text is None else 'présent'}" for f, text in contents) or "—"),
-    ]
+    basis = Ref("event", str(e.basis), basis_words(e.basis)) if e.basis > 0 else Text(basis_words(e.basis), "muted")
     raw = json.dumps(json.loads(e.data.model_dump_json()), ensure_ascii=False, indent=1)
-    blocks: list[Any] = []
-    if e.type.name == rt.UTTERANCE.name:
-        blocks.append(Note("Une de ses paroles : ce qui l'a fait parler, ce qu'elle avait sous les yeux, ce dont "
-                           "elle s'est souvenue et ce qu'elle a fait sont rassemblés sur une page.", "info",
-                           title="Pourquoi a-t-elle dit ça ?"))
-        blocks.append(Fields((("explication", Ref.why(e.seq, "Pourquoi a-t-elle dit ça ? →")),)))
-    blocks.append(Fields(tuple(pairs)))
+    blocks: list[Any] = [
+        Fields((("type", Text(e.type.name, "mono")), ("réduit par", ", ".join(readers) or "—"),
+                ("réveille", ", ".join(processes) or "—"), ("projeté par", ", ".join(projectors) or "—"),
+                ("état lu", basis)), title="Son parcours dans la machine", hints=(("état lu", BASIS_HINT),)),
+        Fields((("personnes concernées", ", ".join(ui.names.who(s) for s in subjects) or "—"),
+                ("contenus", ", ".join(f"{names.content_field(f)} : {'oublié' if text is None else 'présent'}"
+                                       for f, text in contents) or "—"))),
+    ]
     if triggered:
         blocks.append(Table(("épisode", "vers", "quand"), tuple(
             (Ref("episode", t.correlation, names.kind(t.data.kind)), ui.names.who(t.data.target), When(t.at))
@@ -291,13 +384,12 @@ def event_page(ui: Any, seq: int, query=None) -> dict[str, Any] | None:
     def view(env: Any, q: Any) -> dict[str, Any]:
         ends = {t.correlation: episode_events(ui, t.correlation)[1] for t in triggered}
         return {
-            "title": title, "number": e.seq, "when": ui.when_long(e.at), "type": e.type.name, "owner": owner,
-            "origin": str(e.origin.value), "basis": e.basis,
-            "episode": {"href": render.href(episode), "label": "son épisode" if linked else "les événements liés"},
-            "why": render.href(Ref.why(e.seq)) if e.type.name == rt.UTTERANCE.name else "",
-            "texts": [{"field": f, "text": text} for f, text in contents],
+            "title": title, "type": e.type.name,
+            "basis": {"text": basis_words(e.basis), "href": render.href(basis) if isinstance(basis, Ref) else "",
+                      "hint": BASIS_HINT},
+            "texts": [{"field": names.content_field(f), "text": text} for f, text in contents],
             "speech": e.type.name in (rt.UTTERANCE.name, rt.PERCEPTION_RECEIVED.name),
-            "mine": e.type.name == rt.UTTERANCE.name,
+            "mine": spoken,
             "readers": readers, "processes": processes, "projectors": projectors,
             "people": [{"name": ui.names.who(s), "href": render.href(Ref.subject("person", s, ""))
                         if s.startswith("user_") else ""} for s in subjects],
@@ -308,7 +400,7 @@ def event_page(ui: Any, seq: int, query=None) -> dict[str, Any] | None:
             "pager": render.pager_ctx(pager, q or {}), "raw": raw,
         }
 
-    return {"title": f"{title} · n° {e.seq}", "blocks": blocks, "view": view}
+    return {"title": title, "facts": facts, "blocks": blocks, "view": view}
 
 
 #: la page d'un événement, dessinée, et ses feuilles

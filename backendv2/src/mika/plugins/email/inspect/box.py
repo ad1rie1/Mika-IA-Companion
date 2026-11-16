@@ -3,11 +3,17 @@
 On navigue entre comptes et dossiers par des puces (le nombre de non-lus à
 côté) ; la liste vient du cache de l'adaptateur (jamais un relevé à
 l'affichage). Un dossier qu'elle ne relève pas se relit à la demande
-(« Relire ce dossier »).
+(« Actualiser le dossier »).
+
+Ses filtres sont déclarés une fois (``STATE``, ``SENDER``, ``SEARCH``) : la vue les lit, son formulaire les montre.
+Le sélecteur « Afficher » n'offre pas ce que la colonne porte déjà (« À traiter », « Suivis », ``VIEWS``) ; dans une
+de ces vues, il ne paraît pas (audit du 2026-11-05, C4-10). En Tableau (``?vue_pg<n>=table``), la liste n'a pas de
+cases : « Ranger la sélection » n'y paraît pas (C4-08).
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from mika.kernel.frame import Frame
@@ -55,9 +61,18 @@ from mika.plugins.email.inspect.common import (
 )
 from mika.ports.mail import MailQuery
 
-#: ce qu'on filtre ; « non lus » : par toi (le drapeau du serveur), pas par elle (ADR 0175)
+#: ce qu'on filtre ; « non lus » : par toi (le drapeau du serveur), pas par elle (ADR 0175). Toutes les valeurs
+#: restent comprises : ``?etat=a_traiter`` et ``?etat=suivis`` sont les vues de la colonne (``VIEWS``), que posent ses
+#: liens, une adresse gardée, la console en MCP (une valeur inconnue retomberait sur « tous »)
 STATES = (("non_lus", "non lus"), ("importants", "importants, non lus"), ("a_traiter", "à traiter (réponse attendue)"),
-          ("suivis", "suivis (drapeau)"), ("remarques", "remarqués"), ("pas_remarques", "pas remarqués"))
+          ("suivis", "suivis (drapeau)"), ("remarques", "remarqués par elle"), ("pas_remarques", "pas remarqués par elle"))
+#: les filtres de la réception, une fois : ce que lit la vue (son décorateur) et ce que montre son formulaire ; la
+#: recherche couvre l'objet, l'expéditeur et le corps du mail (``MailQuery.text``)
+STATE = Param("etat", "Afficher", kind="select", choices=STATES)
+SENDER = Param("de", "Expéditeur", placeholder="nom ou adresse")
+SEARCH = Param("q", "Recherche", placeholder="objet, expéditeur, texte")
+#: le sélecteur montré : sans les vues que la colonne porte déjà
+SHOWN_STATE = replace(STATE, choices=tuple((k, label) for k, label in STATES if k not in VIEWS))
 INBOX = "INBOX"
 
 
@@ -126,15 +141,12 @@ def _list(s: EmailState, ctx: InspectContext, p: EmailParams, port: Any, account
 @EMAIL.inspect("reception", title="Réception", section=SECTION, order=10, badge=fresh_important,
                description="Lis et traite les messages de toutes tes boîtes, ou choisis un compte et un dossier.",
                params=[Param("compte", "Boîte", kind="hidden"), Param("dossier", "Dossier", kind="hidden"),
-                       Param("etat", "État", kind="select", choices=STATES),
-                       Param("de", "Expéditeur", placeholder="nom ou adresse"),
-                       Param("q", "Recherche", placeholder="objet, expéditeur, texte")])
+                       STATE, SENDER, SEARCH])
 def _box(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = scoped(ctx.ports.get("mail"), ctx)
     p = params_of(frame)
-    filters = (Param("etat", "Afficher", kind="select", choices=STATES),
-               Param("de", "Expéditeur", placeholder="nom ou adresse"),
-               Param("q", "Recherche", placeholder="objet ou contenu du message"))
+    # dans une vue de la colonne, la vue est le filtre : pas de sélecteur (``workspace`` garde son ``etat``)
+    filters = (SENDER, SEARCH) if ctx.value("etat") in VIEWS else (SHOWN_STATE, SENDER, SEARCH)
     if port is not None and not port.accounts() and whose(ctx):  # personne : rien de ses boîtes, le sélecteur reste
         name = owner_name(frame, "" if whose(ctx) == YOURS else whose(ctx))
         return [workspace(port, ctx, [Note(f"Aucune boîte n'est à {name}. Dans Courrier › Paramètres, une boîte se "
@@ -152,9 +164,11 @@ def _box(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     folder = ctx.param("dossier") or INBOX
     total = _in_box(port, [account] if account else [a.key for a in port.accounts()], folder)
     table, _ = _list(s, ctx, p, port, account, folder, not account and len(port.accounts()) > 1, total)
-    # ranger ce qu'on a coché (la boîte dessinée en fait des cases sur chaque ligne et une barre au-dessus), puis,
-    # au bout de la liste, remonter plus loin dans un dossier
-    items: list[Block] = [ActionSlot("email.ranger", title="Ranger la sélection"), table]
+    # ranger ce qu'on a coché (la boîte dessinée en fait des cases sur chaque ligne et une barre au-dessus) — en
+    # Tableau, la liste n'a pas de cases : pas de formulaire à remplir de clés —, puis, au bout de la liste, remonter
+    # plus loin dans un dossier
+    as_table = any(is_table_choice(k, v) for k, v in ctx.params.items())
+    items: list[Block] = [table] if as_table else [ActionSlot("email.ranger", title="Ranger la sélection"), table]
     chosen = port.account(account) if account else None
     if chosen is not None and chosen.ready and folder != "*" and ctx.value("etat") not in VIEWS:
         items.append(ActionSlot("email.historique", (("compte", account), ("dossier", folder)),

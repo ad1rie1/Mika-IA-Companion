@@ -612,8 +612,10 @@ def test_an_empty_work_window_is_refused(tmp_path):
 
 
 def test_an_approval_sends_what_was_shown_not_what_the_workshop_became(tmp_path):
+    """La file « À valider » décide par ``runtime.decisions.decide`` (ADR 0177) : elle épingle l'aperçu qu'elle a
+    montré ; le commit poussé est celui de l'aperçu, pas celui que l'atelier a pris ensuite."""
     from mika.faculties.projects.atelier import PushArgs, project_push
-    from tests.unit.test_projects_console import row_form
+    from mika.runtime import decisions
 
     atelier = Atelier(token="ghp_secret")
 
@@ -627,14 +629,19 @@ def test_an_approval_sends_what_was_shown_not_what_the_workshop_became(tmp_path)
         [pending] = kernel.mind.frame().get(rt.PENDING_EFFECTS)
         await atelier.write(pid, "outil.py", "print(2)\n")  # l'atelier bouge après la proposition
         await atelier.commit(pid, "après la proposition")
-        approved = await perform(kernel, "projects.approuver", row_form({"proposal": str(pending.proposal)}),
-                                 by="user_1", subject=str(pid), nonce="a1")
+        args_json = kernel.mind.frame().state("runtime").effects[pending.proposal].args_json
+        seen = await decisions.preview(kernel.mind, kernel.ports, pending.capability, args_json)  # ce que la file montre
+        approved = await decisions.decide(kernel.mind, kernel.ports, pending.proposal, True, by="user_1",
+                                          seen=seen.digest)
         await wait(2)
         summary = events(kernel, rt.EFFECT_PROPOSED)[-1].data.summary.text
-        return shown, approved, summary, list(atelier.pushed_shas)
+        [resolved] = events(kernel, rt.EFFECT_RESOLVED)
+        return shown, seen, approved, resolved, summary, list(atelier.pushed_shas)
 
-    shown, approved, summary, pushed = live(tmp_path, scenario, atelier=atelier)
-    assert approved.ok and pushed == [shown]  # le commit montré, pas le suivant
+    shown, seen, approved, resolved, summary, pushed = live(tmp_path, scenario, atelier=atelier)
+    assert approved.status == decisions.APPROVED and pushed == [shown]  # le commit montré, pas le suivant
+    assert shown[:12] in seen.text  # l'aperçu de la file montre ce commit-là
+    assert rt.proposal_args(resolved.data.args_json)[decisions.SEEN_KEY] == seen.digest  # l'aperçu lu, épinglé
     assert shown[:12] in summary and "première version" in summary  # ce qu'on approuve est dit
 
 

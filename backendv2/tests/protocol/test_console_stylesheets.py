@@ -43,7 +43,7 @@ def code() -> str:
 
 
 @pytest.mark.parametrize("name", ["console.css", "handmade/outils.css", "handmade/base.css",
-                                  "handmade/reglages_onglets.css"])
+                                  "handmade/reglages_onglets.css", "handmade/personnes.css"])
 def test_every_class_of_a_cleaned_sheet_is_used(code, name):
     used = set(re.findall(r"[A-Za-z_][\w-]*", code))
     prefixes = tuple(set(BUILT_PREFIX.findall(code)))

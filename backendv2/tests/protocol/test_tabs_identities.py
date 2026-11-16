@@ -96,7 +96,38 @@ def test_the_rules_read_on_one_scale_not_in_tables(world):  # noqa: F811
     assert "0,25 → 0,85" in scale and 'class="ids-bar-line"' in scale
     weights = _between(page, 'class="ids-weights"', "</section>\n    <div")
     assert weights.index("Ce qui la fait croire") < weights.index("Ce qui la fait douter")
-    assert "<code>vouched</code>" in weights.split("Ce qui la fait douter")[0]  # un garant fait croire
-    assert "<code>denied</code>" in weights.split("Ce qui la fait douter")[1]  # un démenti fait douter
+    assert "un opérateur s'en porte garant" in weights.split("Ce qui la fait douter")[0]  # un garant fait croire
+    assert "démenti" in weights.split("Ce qui la fait douter")[1]  # un démenti fait douter
     assert page.index("Les rangs de proximité") < page.index("Propriétaires")
+    # des noms, pas les clés de la politique : ni sous une preuve, ni sous un rang
+    drawn_tab = _between(page, 'data-tab="identites/politique"', "</main>")
+    for key in ("shared_memory", "vouched", "denied", "acquaintance", "<code>"):
+        assert key not in drawn_tab, key
     assert "Calibration vérifiée" in page and 'class="person-tab-note danger"' not in page
+
+
+def test_the_channel_trust_is_a_segmented_button_beside_the_search(world):  # noqa: F811
+    """La confiance du canal, quatre choix et une valeur toujours posée, est un bouton à choix au bout de la barre
+    d'onglets, même à côté de la recherche (ADR 0176, ``.claude/rules/console.md``) : plus de sélecteur ni de
+    « Filtrer » pour elle. La recherche garde le choix en vigueur (un champ caché), chaque bouton la recherche tapée,
+    et « Réinitialiser » vide la recherche sans toucher au choix."""
+    client, _, _ = world
+    bootstrap(client)
+    page = drawn(client, "/inspecteur/identites")
+    assert 'placeholder="Alice…"' in page and "user_7" not in page  # on cherche un nom, pas une clé
+    seg = _between(page, '<nav class="seg" aria-label="confiance du canal">', "</nav>")
+    assert re.findall(r">([^<]+)</a>", seg) == ["toutes", "authentifiée", "compte", "publique"]
+    assert 'aria-current="true">toutes</a>' in seg
+    form = _between(page, '<form class="filters"', "</form>")
+    assert 'name="q"' in form and '<input type="hidden" name="confiance" value="toutes">' in form
+    assert '<select name="confiance">' not in page and "Réinitialiser" not in form
+    chosen = drawn(client, "/inspecteur/identites?q=ali&confiance=compte")
+    seg = _between(chosen, '<nav class="seg" aria-label="confiance du canal">', "</nav>")
+    assert '<a href="?q=ali&confiance=account" aria-current="true">compte</a>' in seg
+    assert '<a href="?q=ali&confiance=public">publique</a>' in seg
+    form = _between(chosen, '<form class="filters"', "</form>")
+    assert 'value="ali"' in form and '<input type="hidden" name="confiance" value="account">' in form
+    assert '<a class="reset" href="/inspecteur/identites?confiance=account">Réinitialiser</a>' in form
+    # le choix seul : la recherche, vide, n'a rien à réinitialiser
+    alone = _between(drawn(client, "/inspecteur/identites?confiance=compte"), '<form class="filters"', "</form>")
+    assert "Réinitialiser" not in alone

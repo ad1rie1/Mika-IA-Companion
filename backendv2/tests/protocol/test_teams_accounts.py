@@ -169,6 +169,38 @@ def test_an_account_belongs_to_you_to_her_or_to_a_person(world):  # noqa: F811
     assert params_of(live.kernel.mind.frame()).owners == {"principal": "", "sien": "elle"}
 
 
+def test_an_account_card_names_its_owner_and_leads_to_its_extension_and_conversations(world):  # noqa: F811
+    """Teams › Paramètres, la carte d'un compte : son propriétaire par son prénom, même quand c'est un opérateur
+    (que la liste des choix écarte : « toi » le dit déjà) — jamais « personne:<clé> » ; comme la carte d'une boîte
+    mène à sa fiche et à ses messages, elle mène à l'extension du compte (où sa clé se crée) et à ses
+    conversations ; « Retirer », avec sa majuscule (audit du 2026-11-05, C4-03 et C4-14)."""
+    client, live, _ = world
+    bootstrap(client)  # adrien, l'opérateur : user_1
+    handle = two_accounts(client, live)
+    client.portal.call(live.settings.save_teams, TeamsConfig(accounts={
+        "principal": {"display_name": "Adrien"}, "equipe": {"label": "Équipe", "owner": "personne:user_1"},
+        "bea_t": {"label": "Teams de Béa", "owner": f"personne:{handle}"}}))
+    client.portal.call(live.reconfigure)
+    page = drawn(client, "/inspecteur/teams/parametres")
+    cards = {m.group(1): m.group(0) for m in re.finditer(
+        r'<article class="settings-record[^"]*" role="listitem" data-href="[^"]*cle=(\w+)".*?</article>', page, re.S)}
+    assert set(cards) == {"principal", "equipe", "bea_t"}
+    assert ">à adrien<" in cards["equipe"] and "personne:" not in cards["equipe"]
+    assert ">à Béa Martin<" in cards["bea_t"]  # le nom de la liste des choix, gardé
+    assert ">à toi<" in cards["principal"]
+    for key, card in cards.items():
+        assert f'href="/inspecteur/teams/extension?compte={key}">Son extension</a>' in card, key
+        assert f'href="/inspecteur/teams/conversations?compte={key}">Ses conversations</a>' in card, key
+        assert ">Retirer</button>" in card and ">retirer<" not in card, key
+    # le fait de la page s'accorde : « 0 branché », jamais « branché(s) »
+    assert "(0 avec une clé, 0 branché)" in page and "branché(s)" not in page
+    # l'onglet Extension : l'identifiant y est le « nom court du compte » (« clé » ne dit que le secret), que
+    # l'onglet dessiné lit toujours — ses chiffres mènent aux onglets du même compte
+    ext = drawn(client, "/inspecteur/teams/extension?compte=equipe")
+    band = ext.split('class="person-tiles teams-band"', 1)[1].split("</section>", 1)[0]
+    assert "Équipe, à adrien" in ext and 'href="/inspecteur/teams/conversations?compte=equipe"' in band
+
+
 def test_a_persons_fiche_has_its_teams_tab_only_when_an_account_is_hers(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)

@@ -29,7 +29,7 @@
         <header class="now-card-head"><h2 id="soi-estime-title">Son estime</h2><p>lente : elle revient vers son repos ; ce qui la bouscule, ce qu'elle mène à bout, ce qu'on lui dit d'elle</p></header>
         {% if scale %}
         <figure class="vie-scale">
-          <svg width="100%" height="58" role="img" aria-label="Son estime : {{ scale.text }} sur une échelle de 0 à 1{% if scale.doubt is not none %} ; elle doute sous {{ scale.doubt_text }}{% endif %}{% if scale.sure is not none %}, sûre d'elle au-dessus de {{ scale.sure_text }}{% endif %}">
+          <svg width="100%" height="58" role="img" aria-label="Son estime : {{ scale.text }} sur une échelle de 0 à 100 %{% if scale.doubt is not none %} ; elle doute sous {{ scale.doubt_text }}{% endif %}{% if scale.sure is not none %}, sûre d'elle au-dessus de {{ scale.sure_text }}{% endif %}">
             <rect class="vie-scale-track" x="{{ scale.lo }}%" y="22" width="{{ scale.hi - scale.lo }}%" height="10" rx="5"/>
             {% if scale.doubt is not none %}<rect class="vie-scale-doubt" x="{{ scale.lo }}%" y="22" width="{{ scale.doubt - scale.lo }}%" height="10"/>{% endif %}
             {% if scale.sure is not none %}<rect class="vie-scale-sure" x="{{ scale.sure }}%" y="22" width="{{ scale.hi - scale.sure }}%" height="10"/>{% endif %}

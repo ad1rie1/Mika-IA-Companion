@@ -149,7 +149,7 @@ def test_the_console_says_what_lasts():
     db.put(anecdote, 6)
 
     def shown(seq: int) -> str:
-        return dict(_detail(Kept(item(db, seq), (), None), FRAME, {}, None)[1].pairs)["sur elle"]
+        return dict(_detail(Kept(item(db, seq), (), None), FRAME, {})[1].pairs)["sur elle"]
 
     assert "tient des mois" in shown(5) and "s'efface en quelques jours" in shown(6)
 

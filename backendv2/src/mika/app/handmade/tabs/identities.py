@@ -184,8 +184,8 @@ def _weights(lines: Sequence[Line]) -> dict[str, list[dict[str, Any]]]:
     out: dict[str, list[dict[str, Any]]] = {"pour": [], "contre": []}
     for x in lines:
         weight = number(x.text("poids")) or 0.0
-        out.setdefault(x.text("sens"), []).append({"name": x.text("preuve"), "key": x.text("clé"),
-                                                  "weight": x.text("poids"), "w": _pct(abs(weight))})
+        out.setdefault(x.text("sens"), []).append({"name": x.text("preuve"), "weight": x.text("poids"),
+                                                  "w": _pct(abs(weight))})
     for side in out.values():
         side.sort(key=lambda w: -w["w"])
     return out
@@ -207,8 +207,7 @@ def politique(got: Got) -> Markup | None:
                      values.get("confidences", (0.85, "0,85"))),
         channels=_channels(got.lines("Les canaux")), channels_help=(channels or {}).get("caption", ""),
         weights=_weights(got.lines("Le poids")), weights_help=(weights or {}).get("caption", ""),
-        ranks=[{"name": x.text("proximité"), "key": x.text("clé"), "rank": x.text("rang")}
-               for x in got.lines("Les rangs")],
+        ranks=[{"name": x.text("proximité"), "rank": x.text("rang")} for x in got.lines("Les rangs")],
         owners=(owners or {}).get("pairs", []), calibration=calibration)
 
 

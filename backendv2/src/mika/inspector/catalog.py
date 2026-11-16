@@ -259,6 +259,9 @@ class Labels:
     #: capacité (« projects.push ») → son nom court, là où sa phrase serait coupée (« Push git ») ; sa phrase entière
     #: reste la description que déclare son propriétaire
     capabilities: Mapping[str, str] = field(default_factory=dict)
+    #: enrichisseur (sa clé, « their_last_words ») → ce qu'il rassemble pour le prompt (« Les derniers messages de la
+    #: personne ») : l'onglet Prompt d'un épisode les nomme
+    enrichers: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

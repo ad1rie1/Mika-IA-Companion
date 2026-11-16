@@ -33,7 +33,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170, 0187, 0200, 0208, 0209, 0215 |
-| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176, 0177, 0178, 0179, 0180, 0181, 0182, 0183, 0197, 0201, 0202, 0203, 0204, 0205, 0206, 0210, 0216, 0217, 0218, 0219, 0225 |
+| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176, 0177, 0178, 0179, 0180, 0181, 0182, 0183, 0197, 0201, 0202, 0203, 0204, 0205, 0206, 0210, 0216, 0217, 0218, 0219, 0225, 0230, 0231, 0232 |
 | Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135 |
 
 ## Le noyau : journal, arbitrage, pipeline
@@ -1574,7 +1574,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Pourquoi :* « on peut y répondre aussi à la place de mika, lui demander de répondre » — et le web vaut le geste.
 
-*Révise 0120 (en partie), 0133 (en partie : le geste peut venir du client web). Révisée par 0199 (en partie : ton message Teams entre dans sa vie dès qu'il part, sans attendre l'extension).*
+*Révise 0120 (en partie), 0133 (en partie : le geste peut venir du client web). Révisée par 0199 (en partie : ton message Teams entre dans sa vie dès qu'il part, sans attendre l'extension), 0231 (en partie : un opérateur écrit aussi, depuis la console, dans le compte d'une autre personne).*
 
 ### 0190 — Le téléphone : les apps qu'on choisit, plusieurs téléphones, l'application derrière la connexion
 
@@ -2322,7 +2322,7 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 
 *Pourquoi :* retrouver l'extensibilité des vues déclarées de la v1 sans que la console connaisse une seule faculté.
 
-*Révise 0024 (en partie). Révisée par 0027, 0029, 0042, 0121, 0169, 0203.*
+*Révise 0024 (en partie). Révisée par 0027, 0029, 0042, 0121, 0169, 0203, 0230.*
 
 ### 0029 — La console refondue : des menus qui répondent à des questions, des pages qui ne montrent qu'un sujet
 
@@ -2727,6 +2727,36 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 - Les textes des autres propriétaires suivent quand leur périmètre passe ; une garde viendra quand il n'en restera plus.
 
 *Pourquoi :* l'audit en a retiré à quatre reprises, page par page (les descriptions de section, deux pages de réglages et d'Outils, les buts et les projets), sans que la règle soit écrite (audit du 2026-11-05, L05, C7-13, F4-08, puis K5-13 et la décision K5-Q2).
+
+### 0230 — L'opératrice corrige sa mémoire, sans réécrire ce qu'elle a vécu
+
+- **Une action de la console peut corriger un élément retenu**, posée sur sa carte, confirmée et auditée comme toute action (`runtime.operated`) : une promesse en cours **tenue** ou **abandonnée** (`memory.tenir`, `memory.abandonner` : `memory.promise_resolved`, `by` « opératrice », `contracts.memory.OPERATOR_BY`) ; une situation qui dure **finie** (`memory.finir` : `memory.situation_ended`, sans `by` : son audit dit qui l'a finie) ; un moment daté sans issue qui **a eu lieu, est annulé ou reporté** (`memory.issue` : `memory.resolved`, `by` « opératrice ») ; un souvenir ou une croyance qu'elle tient encore **démenti** (`memory.dementir` : `memory.retracted`, neuf). Les actions vivent dans `faculties/memory/actions.py`.
+- **Rien ne réécrit ni n'efface un texte**, et rien n'écrit ce qu'elle croit : chaque correction est un événement ajouté au journal, les mêmes que ceux de la relecture sauf le démenti. Un élément démenti prend un statut d'avant (`retracted`, dans `FORMER_STATUSES`) : il sort de ce qu'elle sait (`memory_knowledge`), de son rappel et de l'index des vecteurs ; la liste le montre estompé, « démenti(e) », et son texte reste au journal. Ce qui le reprenait (un portrait, son récit) se réécrit sans le recopier, comme pour une source remplacée (`contracts.memory.withdrawals`, ADR 0082). Il ne se rétablit pas depuis la console.
+- **Une correction n'est pas un moment de sa vie** : une issue posée par l'opératrice ne porte ni attente, ni annonceur, ni surprise, ni valence (ni émotion, ni calibration, ni leçon sur qui annonce, ni marque « voir venir ») ; abandonnée par l'opératrice, une promesse n'est pas « laissée filer » ; tenue, elle compte pour « tenir parole ». Le récit compte le changement, comme tout fait qu'elle sait désormais.
+- Un moment se tranche une fois : une issue dite (« sans nouvelles » compris) ne se corrige pas. Ses pensées et son humeur restent sans prise depuis la console ; aucun oubli par élément : oublier reste l'affaire de toute une personne.
+
+*Pourquoi :* l'espace super-admin doit pouvoir corriger une erreur de la relecture (un modèle qui extrait) ou une promesse qu'elle n'a pas vue tenue autrement qu'en oubliant toute la personne ; des événements qui existent presque tous déjà le font sans réécrire le journal (audit du 2026-11-05, C2-01, décision C2-Q1).
+
+*Révise 0025 (en partie).*
+
+### 0231 — La console écrit dans toute conversation Teams, et dit sous quel nom il part
+
+- **La fiche d'une conversation Teams offre « Écrire dans cette conversation » sur tout compte** : à toi, à elle ou à une personne. C'est l'action de l'espace personnel (`teams.ecrire`), avec la mécanique de 0189 et 0199 : le message entre aussitôt dans la file de l'extension du compte, sans carte d'accord ni sa signature ; `teams.written` est journalisé dès qu'il est en file, et ses réponses qui attendaient un accord dans cette conversation sont refusées (« Répondu autrement »). Le geste est audité comme toute action de la console (`runtime.operated`), et le brouillon garde qui l'a écrit.
+- **Il part sous le nom de la personne connectée à Teams dans le navigateur de ce compte** : le tien pour un compte à toi, sinon celui de son propriétaire (elle, ou la personne). Une note au-dessus du formulaire le dit par son nom, puis par celui que Teams lui donne quand l'extension l'a dit ; la confirmation du formulaire le redit (« sous le nom de la personne de ce compte »). C'est la console seule : l'espace personnel garde la règle de 0189 (le propriétaire, ou qui s'en sert par un partage).
+- Teams coupé ou le compte décoché, rien ne part : la fiche ne l'offre pas et dit pourquoi, l'action le refuse.
+
+*Pourquoi :* la console est l'espace super admin, on doit pouvoir y faire tout ce qui se fait ailleurs (le 5 novembre). Son courrier répond déjà depuis la boîte de n'importe qui, et un opérateur décide déjà dans la console des réponses de Mika qui partent sous le nom de la personne du compte (0186) : Teams n'a pas de raison de diverger. La confirmation qui nomme sous quel nom il part est le garde-fou (audit du 2026-11-05, C4-05, décision C4-Q1).
+
+*Révise 0189 (en partie : un opérateur écrit aussi, depuis la console, dans le compte d'une autre personne).*
+
+### 0232 — La console programme un rappel pour quelqu'un
+
+- **« Programmer un rappel »** est dans la barre de titre de Buts et rappels (`goals.programmer`), sur sa page : quoi, quand (en heure locale), pour qui (vide : toi), urgent. C'est un but confié (`kind` rappel, `authority` « user », `source` « operator »), audité comme toute action de la console (`runtime.operated`).
+- Son événement est celui que posent ses outils (`goal_remind`, `goal_plan_reminder`) : `goals.opened`, personnel, construit par une seule fonction de la faculté (`goals.tools.reminder`). Il se dit à l'heure dite là où la personne est alors ; pour toi, à défaut, là d'où tu l'as programmé. Il rejoint la colonne des rappels et se reprogramme comme un autre.
+- Le formulaire est refusé champ par champ : quoi vide, personne inconnue, date illisible ou passée.
+- La console ne lui confie pas d'exploration : c'est son initiative, dont l'envie s'use (0020), ou celle d'un réveil (0117). Confiée d'en haut, elle deviendrait une tâche.
+
+*Pourquoi :* la console est l'espace super admin : elle doit pouvoir poser ce que Mika pose pour quelqu'un, sans passer par une conversation ni un réveil, comme Projets a « Créer un projet ». Un rappel est un service qu'on lui demande, à une date dite ; le geste s'ajoute sans contredire 0020 (un but a une autorité) ni 0030 (piloter par opérations auditées) (audit du 2026-11-05, C5-16, décision C5-Q1).
 
 ## Ce que les sondes et les audits ont fixé
 

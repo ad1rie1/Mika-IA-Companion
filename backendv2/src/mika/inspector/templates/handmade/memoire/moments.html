@@ -1,7 +1,8 @@
 {# Elle › Mémoire › La vie des autres (app/handmade/tabs/memory.py, ADR 0177) : un agenda de ce qui arrive aux gens
    qu'elle connaît — ce qui dure en ce moment, ce qui vient (le plus proche d'abord), ce qui est passé et comment ça a
    tourné —, chaque moment avec sa date en pavé de calendrier ; une date qui revient chaque année l'est à sa prochaine
-   fois. La pagination et la bascule « Tableau » de la faculté. #}
+   fois. Une situation qui dure se finit (« C'est fini »), un moment daté sans issue reçoit la sienne (« Comment ça a
+   tourné », ADR 0230 : ``mem.foot``). La pagination et la bascule « Tableau » de la faculté. #}
 {% import "handmade/shared/tab.html" as tab with context %}
 {% import "handmade/memoire/macros.html" as mem with context %}
 <div class="now-page memories moments" data-tab="memoire/moments">

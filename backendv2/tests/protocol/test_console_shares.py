@@ -1,7 +1,8 @@
 """Réglages › Droits › Partages (ADR 0210, C9-04 de l'audit du 2026-11-05), par le vrai serveur : l'opératrice voit qui a
 reçu quoi, de qui, en mots ; elle retire le partage d'une boîte ou d'un compte Teams, confirmé et audité, par l'écriture
 de son propriétaire, et la personne ne le voit plus dans son espace ; un service renvoie à ses lignes d'accès ; rien ne
-s'y crée."""
+s'y crée. Le même geste est sur la fiche d'une personne (Comptes › Partages, C3-06), qui y revient — jamais hors de la
+console."""
 
 from __future__ import annotations
 
@@ -9,6 +10,7 @@ import re
 
 from mika.adapters.mail.config import MailAccount, MailConfig
 from mika.adapters.teams import TeamsAccount, TeamsConfig
+from mika.contracts import identity as identity_c
 from mika.contracts import runtime as rt
 from tests.fixtures.courrier import mailbox
 from tests.protocol.test_console_mcp import html_of
@@ -19,6 +21,7 @@ from tests.protocol.test_moi_shares import share
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 
 PAGE = "/inspecteur/reglages/droits"
+FICHE = "/inspecteur/fiche/person"
 RETIRE = PAGE + "/partages"
 GESTURE = "console.droits.partage_retire"
 GESTURES = "/inspecteur/systeme/operations"
@@ -45,6 +48,12 @@ def shared_world(client, live) -> str:
     assert share(client, "teams", "travail", lea, "preparer").status_code == 200
     assert share(client, "mcp", "factures", lea, "servir").status_code == 200
     return lea
+
+
+def partages(client, person: str) -> str:
+    """Comptes › Partages, sur la fiche de cette personne (le sous-onglet ``#partages`` de l'onglet ``boites``)."""
+    page = drawn(client, f"{FICHE}/{person}?onglet=boites")
+    return page.partition('id="partages"')[2]
 
 
 def audited(live) -> list[tuple[str, str, str]]:
@@ -166,5 +175,54 @@ def test_only_an_operator_takes_a_share_off(world):  # noqa: F811
     login(client, "lea")  # elle a reçu le partage, pas la console
     done = client.post(RETIRE, data=box, follow_redirects=False)
     assert done.status_code == 303 and done.headers["location"].endswith("/inspecteur/connexion")
+    assert client.portal.call(live.settings.email).accounts["pro"].shares == {f"personne:{lea}": "lire"}
+    assert audited(live) == []
+
+
+def test_the_fiche_of_a_person_takes_a_share_off_and_comes_back(world):  # noqa: F811
+    """C3-06 : depuis la fiche, « Retirer » est le geste de Droits — la même question, le même audit, la même écriture —
+    et revient sur Comptes › Partages, le message en tête ; un service mène à ses lignes d'accès."""
+    client, live, _ = world
+    lea = shared_world(client, live)
+    pane = partages(client, lea)
+    # ce qu'on partage avec Léa : la boîte et le compte Teams se retirent ici, le service sur ses lignes d'accès
+    forms = forms_on(pane)
+    assert [(f["kind"], f["key"], f["person"]) for _, f in forms] == [("mail", "pro", lea), ("teams", "travail", lea)]
+    assert [ask for ask, _ in forms] == [ask for ask, _ in forms_on(html_of(client.get(PAGE)))]  # la même question
+    assert {f["retour"] for _, f in forms} == {f"{FICHE}/{lea}?onglet=boites#partages"}
+    assert forms[0][1]["csrf"] == client.cookies.get("csrftoken")  # le jeton de la page
+    assert 'href="/inspecteur/fiche/serveur/factures?onglet=fait">ses lignes d\'accès</a>' in pane
+    assert not re.search(r'name="level"|<select', pane)  # on n'y donne rien
+    # ce qu'Adrien partage : les mêmes, sur sa fiche à lui, qui y revient
+    adrien = str(live.kernel.mind.frame().get(identity_c.PERSON("user_1")) or "user_1")
+    given = forms_on(partages(client, adrien))
+    assert [(f["kind"], f["person"], f["retour"]) for _, f in given] == \
+        [("mail", lea, f"{FICHE}/{adrien}?onglet=boites#partages"), ("teams", lea, f"{FICHE}/{adrien}?onglet=boites#partages")]
+
+    done = client.post(RETIRE, data=forms[0][1], follow_redirects=False)
+    assert done.status_code == 303
+    back = done.headers["location"]
+    assert back.startswith(f"{FICHE}/{lea}?onglet=boites&flash=") and back.endswith("#partages")
+    after = html_of(client.get(back))
+    assert "Partage retiré : Léa Martin n'a plus accès à la boîte « Atelier »." in after
+    assert [f["kind"] for _, f in forms_on(after)] == ["teams"]
+    assert client.portal.call(live.settings.email).accounts["pro"].shares == {}
+    assert audited(live) == [("user_1", AUDITED, f"mail:pro:{lea}")]
+
+
+def test_the_way_back_stays_in_the_console(world):  # noqa: F811
+    """Un ``retour`` qui sort de la console ramène à Droits ; un jeton refusé ne retire rien et revient sur la fiche,
+    qui le dit."""
+    client, live, _ = world
+    lea = shared_world(client, live)
+    box = forms_on(partages(client, lea))[0][1]
+    for away in ("https://exemple.test/inspecteur/", "//exemple.test/inspecteur/", "/inspecteur//exemple.test",
+                 "/ailleurs", "javascript:alert(1)"):
+        done = client.post(RETIRE, data={**box, "retour": away, "person": "user_1"}, follow_redirects=False)
+        assert done.status_code == 303
+        assert done.headers["location"].startswith(PAGE + "?flash=") and done.headers["location"].endswith("#d-partages")
+    refused = client.post(RETIRE, data={**box, "csrf": "faux"}, follow_redirects=False)
+    assert refused.headers["location"].startswith(f"{FICHE}/{lea}?onglet=boites&flash=")
+    assert "Jeton de formulaire invalide" in html_of(client.get(refused.headers["location"]))
     assert client.portal.call(live.settings.email).accounts["pro"].shares == {f"personne:{lea}": "lire"}
     assert audited(live) == []

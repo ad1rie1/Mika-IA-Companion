@@ -8,7 +8,11 @@ import pytest
 
 from mika.app.console import NAVIGATION
 from mika.app.console_menu import MENU, SHORTCUT_GROUPS
+from mika.contracts import email as email_c
 from mika.inspector.catalog import menu_place
+from mika.kernel.events import Content, Origin
+from mika.plugins.forge import written_draft
+from mika.plugins.forge.guide import EXAMPLE_CODE, EXAMPLE_MANIFEST
 from tests.fixtures.console_html import ConsoleHTML
 from tests.fixtures.courrier import NOW, mailbox
 from tests.protocol.test_console_operator import converse
@@ -163,7 +167,7 @@ def test_a_menu_tab_leads_to_its_page_and_lights_up(world):  # noqa: F811
     ('sens/camera', 'Connexions extérieures', 'Ses sens', 'Caméra'),
     ('outils/expose', 'Outils', 'Ses outils', 'Prêter à un agent'),
     ('outils/tous?outil=email_read', 'Outils', 'Ses outils', 'Ce qu'),
-    ('courrier/brouillons', 'Relations & échanges', 'Courrier', 'Brouillons'),
+    ('courrier/brouillons', 'Relations & échanges', 'Courrier', 'Ses brouillons'),
     # « À valider » est une seule file (ADR 0177) : chacun de ses onglets allume son lien
     ('approbations/courriers', 'À valider', 'Courriers à envoyer', None),
     ('approbations/noms', 'À valider', 'Noms à relier', None),
@@ -459,6 +463,30 @@ def test_the_gear_of_each_destination_leads_to_its_settings(world):  # noqa: F81
         assert f'<a href="/inspecteur/{new}">{named}</a>' in plugins, named
 
 
+def test_a_tab_badge_says_what_it_counts_on_hover(world):  # noqa: F811
+    """Un badge d'onglet n'a qu'un style : ce qu'il compte (son indice, ADR 0219) se lit au survol du nombre — sur
+    Courrier › Paramètres, « Réception » compte les mails importants pas encore lus, pas les non-lus de la colonne
+    (audit du 2026-11-05, C4-11)."""
+    client, live, _ = world
+    bootstrap(client)
+    live.kernel.ports["mail"] = mailbox(3)
+    important = email_c.NOTICED.draft(source="email", kind=email_c.MAIL, summary=Content.of("Léa attend ton avis."),
+                                      pertinence=0.8, bundle="email", mail="pro:<projet@example.test>",
+                                      sender="Léa Martin", address="lea@example.test", importance=0.95,
+                                      dedupe_key="test-important")
+    client.portal.call(lambda: live.kernel.mind.append([important], emitter="email", origin=Origin.EXTERNAL,
+                                                        correlation="test-badge"))
+    page = client.get('/inspecteur/courrier/parametres')
+    assert page.status_code == 200
+    ConsoleHTML(page.text).check()
+    tabs = re.search(r'<nav class="tabs".*?</nav>', html.unescape(page.text), re.S).group()
+    reception = re.search(r'>Réception<span class="count"([^>]*)>(\d+)</span>', tabs)
+    assert reception is not None and reception.group(2) == "1", tabs
+    assert reception.group(1) == ' title="mail important pas encore lu"', tabs
+    # un badge sans indice ne porte pas de « title » vide
+    assert 'title=""' not in tabs
+
+
 def test_her_menu_section_bears_the_name_of_her_persona(world):  # noqa: F811
     """La rubrique qui la décrit porte son nom, lu dans sa persona : jamais « Mika » écrit en dur (ADR 0070)."""
     client, live, _ = world
@@ -479,22 +507,21 @@ def test_login_has_a_main_heading(world):  # noqa: F811
     ConsoleHTML(page.text).check()
 
 
-def test_people_view_switch_keeps_filter_and_subject_links(world):  # noqa: F811
-    # l'annuaire des identités, onglet de la destination Personnes (dont la page d'entrée est dessinée, ADR 0121)
+def test_people_view_switch_keeps_subject_links(world):  # noqa: F811
+    # l'annuaire des identités, onglet de la destination Personnes (dont la page d'entrée est dessinée, ADR 0121) ; il
+    # se parcourt, sans filtre : on cherche quelqu'un depuis la vue d'ensemble (tests/protocol/test_people_page.py)
     client, _, _ = world
     bootstrap(client)
-    cards = client.get('/inspecteur/personnes/personnes?q=adrien')
-    table = client.get('/inspecteur/personnes/personnes?q=adrien&vue_pg1=table')
+    cards = client.get('/inspecteur/personnes/personnes')
+    table = client.get('/inspecteur/personnes/personnes?vue_pg1=table')
     for response in (cards, table):
         assert response.status_code == 200
         ConsoleHTML(response.text).check()
         assert 'href="/inspecteur/fiche/person/user_1"' in response.text
+        assert '<form class="filters"' not in response.text
     assert 'data-tab="personnes/personnes"' in cards.text  # l'onglet est dessiné dans sa forme (ADR 0177)
     assert 'data-tab="personnes/personnes"' not in table.text
-    assert 'name="vue_pg1" value="table"' in table.text
-    assert '?q=adrien' in table.text
-    empty = client.get('/inspecteur/personnes/personnes?q=personne-inconnue')
-    assert 'personne ne correspond à « personne-inconnue »' in empty.text  # le mot de la faculté
+    assert '<a href="?vue_pg1=table" aria-current=page>Tableau</a>' in table.text  # la bascule dit où l'on est
 
 
 def test_search_finds_settings_without_accents_and_preserves_subject_filter(world):  # noqa: F811
@@ -539,3 +566,43 @@ def test_settings_directory_finds_pages_and_separates_advanced_settings(world): 
     assert 'Aucun réglage ne correspond' in empty.text
     malicious = client.get('/inspecteur/reglages/apercu', params={'q': '<script>alert(1)</script>'})
     assert '<script>alert(1)</script>' not in malicious.text
+
+
+def test_a_fiche_tab_description_comes_under_the_tab_bar_which_stays_put(world):  # noqa: F811
+    """La description d'un onglet que la fiche ne dessine pas est la première ligne de son contenu, sous la barre
+    d'onglets : la barre ne descend plus d'un onglet à l'autre (ADR 0176 ; audit du 2026-11-05, C5-05). Une app de la
+    Forge n'a pas de vue d'ensemble dessinée : chacun de ses onglets reçoit sa description."""
+    client, live, _ = world
+    bootstrap(client)
+    forge, kernel = live.kernel.ports["forge"], live.kernel
+
+    async def write():
+        await forge.write("meteo", EXAMPLE_MANIFEST, EXAMPLE_CODE)
+        await kernel.mind.append([written_draft(forge.info("meteo"))], emitter="forge", correlation="t",
+                                 origin=Origin.GENESIS)
+
+    client.portal.call(write)
+    above = {}
+    # « Accès » est dans la barre, « Vécu » rangé sous la roue des réglages : tous deux ont leur description
+    for tab, said in (("acces", "Pour une app sans projet : qui peut"), ("vecu", "Les exécutions, changements d'état")):
+        page = client.get(f"/inspecteur/fiche/app/meteo?onglet={tab}")
+        assert page.status_code == 200, tab
+        ConsoleHTML(page.text).check()
+        body = html.unescape(page.text)
+        view = body.split('<div class="page-view">', 1)[1]
+        bar = view.index('<nav class="tabs"')
+        bar_end = view.index("</nav>", bar)
+        description = view.index('<p class="view-description">')
+        assert description > bar_end, tab
+        assert view[description:].startswith(f'<p class="view-description">{said}'), tab
+        above[tab] = unlit(view[:bar])
+    # ce qui précède la barre (le fil, l'en-tête de l'app et sa roue) est le même d'un onglet à l'autre, à l'entrée
+    # allumée près : la roue des réglages s'allume sur l'onglet qu'elle range
+    assert above["acces"] == above["vecu"]
+
+
+def unlit(fragment):
+    """Un fragment de page sans ce qui dit l'entrée allumée (la classe ``on``, ``aria-current``)."""
+    fragment = re.sub(r' aria-current="[^"]*"', "", fragment)
+    return re.sub(r'class="([^"]*)"', lambda m: 'class="{}"'.format(" ".join(c for c in m.group(1).split() if c != "on")),
+                  fragment)

@@ -1,4 +1,4 @@
-/* La fiche d'un moyen de communication (app/handmade/subjects/handle.py) : son en-tête, le canal, qui écrit d'ici, ce que ça ouvre. */
+/* La fiche d'un moyen de communication (app/handmade/subjects/handle.py) : son en-tête, qui écrit d'ici, ce que ça ouvre. */
 .handle-head { display: grid; flex: 1 1 520px; gap: 6px; min-width: 0; }
 .handle-head h1 { margin: 0; }
 .handle-head-what { margin: 0; color: var(--text-2); font-size: 14.5px; }
@@ -28,10 +28,6 @@
 .handle-why dt { color: var(--muted); }
 .handle-why dd { margin: 0; color: var(--text-2); }
 
-.handle-steps > summary { cursor: pointer; font-family: var(--display); font-size: 14px; font-weight: 600; }
-.handle-steps-list { display: grid; gap: 6px; margin: 12px 0; padding-left: 20px; font-size: 13.5px; }
-.handle-steps-list li { display: flex; flex-wrap: wrap; gap: 4px 10px; }
-.handle-step { min-width: 170px; color: var(--muted); }
 @media (max-width: 640px) {
   .handle-facts > div, .handle-why > div { grid-template-columns: 1fr; gap: 2px; }
 }
@@ -101,7 +97,6 @@
   padding: 7px 0; border-top: 1px solid var(--border); font-size: 13px; }
 .ids-weights-side li .now-bar { width: 100%; margin: 0; }
 .ids-weights-side li .now-num { text-align: right; }
-.ids-w-name code { display: block; margin-top: 1px; color: var(--muted); font-size: 11px; }
 .now-bar.ids-w.pour .fill { stroke: var(--ok); }
 .now-bar.ids-w.contre .fill { stroke: var(--danger); }
 .ids-ranks { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none; counter-reset: none; }
@@ -111,7 +106,6 @@
 .ids-ranks li:nth-child(3) { border-top-color: color-mix(in srgb, var(--ok) 70%, var(--border)); }
 .ids-ranks li:nth-child(4) { border-top-color: var(--ok); }
 .ids-rank { font: 650 1.2rem/1 var(--display); }
-.ids-ranks code { color: var(--muted); font-size: 11px; }
 .ids-facts { display: grid; gap: 8px; margin: 0; }
 .ids-facts > div { display: grid; grid-template-columns: minmax(140px, 46%) minmax(0, 1fr); gap: 12px; font-size: 13.5px; }
 .ids-facts dt { color: var(--muted); }

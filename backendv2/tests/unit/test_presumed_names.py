@@ -38,7 +38,7 @@ from mika.faculties.memory.speakers import People, mention_scope
 from mika.kernel.events import Content, Origin
 from mika.kernel.frame import Audience
 from mika.ports.vectors import VectorItem
-from mika.runtime.operations import FIXED_FIELD, forget_subject, perform
+from mika.runtime.operations import FIXED_FIELD, forget_subject, offered, perform
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
 from tests.fixtures.memory import event
@@ -118,6 +118,38 @@ def test_an_operator_settles_the_presumption_either_way(tmp_path):
     dismissed, after_no, bound, after_yes, person = run(tmp_path, scenario)
     assert dismissed.ok and after_no == ""
     assert bound.ok and after_yes == "" and person == "user_2"
+
+
+def test_naming_is_offered_only_while_a_name_she_was_told_of_waits(tmp_path):
+    """« C'est la personne dont on lui a parlé » ne se propose que si un nom dont on lui a parlé attend d'être relié
+    (audit du 2026-11-05, C3-08) : aucun, et elle n'est offerte nulle part — la relier quand même est refusé ; Bob
+    parle d'« Alice Martin », et elle l'est sur toute fiche qui s'y prête ; le nom relié, plus rien n'attend, et elle
+    disparaît."""
+    async def scenario(kernel, llm):
+        await connect(kernel, "user_1", "Adrien", operator=True)
+        await connect(kernel, "user_2", "Bob")
+        await connect(kernel, "user_3", "Alice")
+        spec = kernel.registry.actions["identity.nommer"]
+        none = [offered(kernel, spec, p) for p in ("user_1", "user_2", "user_3")]
+        early = await perform(kernel, "identity.nommer", form(name="Alice Martin", confirmed="on"), by="user_1",
+                              subject="user_3", nonce="a")
+        p = await say(kernel, said("user_2", "ma coloc Alice Martin part vivre au Japon en décembre"))
+        await kernel.mind.append([mc.BELIEVED.draft(
+            text=Content.of("Alice Martin, la coloc de Bob, part vivre au Japon", level=1), about=("name:alice martin",),
+            sensitivity=1, source="user_2", told_by=("user_2",), sources=(p.seq,))],
+            emitter="memory", correlation="genese", origin=Origin.GENESIS)
+        waiting = [offered(kernel, spec, p) for p in ("user_1", "user_2", "user_3")]
+        done = await perform(kernel, "identity.nommer", form(name="Alice Martin", confirmed="on"), by="user_1",
+                             subject="user_3", nonce="b")
+        after = [offered(kernel, spec, p) for p in ("user_1", "user_2", "user_3")]
+        return none, early, waiting, done, after
+
+    none, early, waiting, done, after = run(tmp_path, scenario)
+    assert none == [False, False, False]
+    assert not early.ok and early.message == "Cette action n'est pas possible en ce moment."
+    assert waiting == [True, True, True]
+    assert done.ok, done
+    assert after == [False, False, False]
 
 
 def test_forgetting_alice_takes_what_was_presumed_of_her(tmp_path):

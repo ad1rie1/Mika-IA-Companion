@@ -14,8 +14,9 @@ champ par champ. Rien ici ne touche à sa mémoire.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from types import SimpleNamespace
-from typing import Annotated
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -32,7 +33,7 @@ from mika.faculties.identity.faculty import (
     owner_person,
     view_of,
 )
-from mika.faculties.identity.inspect import certainty_fr, people
+from mika.faculties.identity.inspect import certainty_fr, free_names, people
 from mika.kernel.events import Content
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
@@ -389,12 +390,29 @@ def _mention(args: NameArgs) -> str:
     return key
 
 
-def _can_name(s: IdentityState, frame: Frame, key: str) -> bool:
+def _nameable(s: IdentityState, frame: Frame, key: str) -> bool:
+    """Une personne à qui un nom dont on lui a parlé peut se relier : identifiable, une racine (pas une adresse
+    reliée à une autre), et pas elle-même « connue seulement de nom »."""
     return is_identifiable(key) and not key.startswith("name:") and _root(s, key) == key
 
 
+def _can_bind_name(s: IdentityState, frame: Frame, key: str, ports: Mapping[str, Any]) -> bool:
+    """« C'est la personne dont on lui a parlé » n'est offerte que si au moins un nom dont on lui a parlé attend
+    encore d'être relié (``free_names``, l'index de sa mémoire, comme la file « À valider › Noms à relier » le lit) :
+    sans lui, l'action était en vue sur chaque fiche alors qu'elle n'avait rien à rattacher — c'est la file qui
+    propose les noms et ouvre la fiche, le formulaire pré-rempli (ADR 0180 ; audit du 2026-11-05, C3-08). Dès qu'un
+    nom attend, elle revient sur toute fiche qui s'y prête : relier un surnom que la file ne propose pas, ou un nom
+    qu'un opérateur avait écarté, reste possible. Un nom déjà relié à quelqu'un, quand plus aucun n'attend, se libère
+    d'abord (« Détacher un nom », sur la fiche de celle qu'il désigne). Sans magasin, l'offre ne dépend que de la
+    personne, comme avant."""
+    if not _nameable(s, frame, key):
+        return False
+    store = ports.get("store")
+    return store is None or bool(free_names(s, store))
+
+
 @IDENTITY.action("nommer", title="C'est la personne dont on lui a parlé", args=NameArgs, emits=[c.NAME_BOUND],
-                 subject="person", available=_can_name, order=40,
+                 subject="person", available=_can_bind_name, order=40,
                  description="Quelqu'un lui avait parlé d'une « Alice » qu'elle ne connaissait pas : c'était cette "
                              "personne. Ce qu'on lui a dit d'elle s'y rattache (chacun garde qui le lui a confié). "
                              "Jamais deviné d'une ressemblance de nom : deux Alice ne se confondent pas d'elles-mêmes.",
@@ -459,7 +477,7 @@ class DismissArgs(BaseModel):
                  confirm="Ne plus proposer ce nom pour cette personne ?")
 def _dismiss_name(s: IdentityState, frame: Frame, args: DismissArgs, ctx: ActionContext) -> Done:
     key, person = args.name.strip(), args.person.strip()
-    if not key.startswith("name:") or person not in s.by_person or not _can_name(s, frame, person):
+    if not key.startswith("name:") or person not in s.by_person or not _nameable(s, frame, person):
         raise Refused("Suggestion inconnue : ni ce nom ni cette personne ne se proposent ici.")
     if s.names.get(key) == person:
         raise Refused(f"« {known_as(s, key)} » désigne déjà {known_as(s, person)} : « Détacher un nom », sur sa "

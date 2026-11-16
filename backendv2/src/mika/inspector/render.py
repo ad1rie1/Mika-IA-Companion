@@ -19,7 +19,7 @@ from urllib.parse import quote, urlencode, urlsplit
 from mika.inspector.document import readable_html, readable_text
 from mika.inspector.framed import SANDBOX
 from mika.inspector.svg import chart_svg
-from mika.kernel.clock import US, instant
+from mika.kernel.clock import instant
 from mika.kernel.inspect import (
     ActionSlot,
     Badge,
@@ -52,6 +52,7 @@ from mika.kernel.inspect import (
     num_fr,
     pct_fr,
     read_params,
+    relative_fr,
     tone,
 )
 
@@ -156,22 +157,6 @@ def dated(at: int | None) -> int | None:
     return at if at is not None and at < UNDATED_FROM else None
 
 
-def relative(at: int, now: int) -> str:
-    """« il y a 3 min », « dans 2 h », « à l'instant »."""
-    if not at:
-        return "—"
-    delta = (now - at) / US
-    future = delta < 0
-    delta = abs(delta)
-    if delta < 45:
-        return "à l'instant"
-    for unit, size in (("j", 86_400), ("h", 3_600), ("min", 60)):
-        if delta >= size:
-            n = int(delta // size)
-            return f"dans {n} {unit}" if future else f"il y a {n} {unit}"
-    return "à l'instant"
-
-
 @dataclass(frozen=True, slots=True)
 class Env:
     """Ce qu'il faut pour rendre : l'heure (lisible, relative)."""
@@ -201,7 +186,7 @@ def cell(value: Any, env: Env) -> dict[str, Any]:
                 "secondary": value.secondary, "emphasis": value.emphasis,
                 "clamp": value.clamp and len(text) > value.clamp, "short": text[:value.clamp] if value.clamp else ""}
     if isinstance(value, Badge):
-        return {"t": "badge", "text": value.text, "tone": tone(value.tone)}
+        return {"t": "badge", "text": value.text, "tone": tone(value.tone), "key": value.key}
     if isinstance(value, Meter):
         ratio = value.ratio if isinstance(value.ratio, int | float) and math.isfinite(value.ratio) else None
         if ratio is None:
@@ -212,7 +197,7 @@ def cell(value: Any, env: Env) -> dict[str, Any]:
         return {"t": "swatch", "text": value.text, "key": value.key,
                 "weight": None if value.weight is None else pct_fr(value.weight)}
     if isinstance(value, When):
-        return {"t": "when", "text": relative(value.at, env.now) if value.relative else env.when(value.at),
+        return {"t": "when", "text": relative_fr(value.at, env.now) if value.relative else env.when(value.at),
                 "exact": env.when(value.at) if value.at else ""}
     if value is None:
         return {"t": "text", "text": "—", "kind": "muted"}
@@ -393,7 +378,7 @@ def block(b: Any, env: Env, query: Mapping[str, str], depth: int = 0, counter: l
         entries, auto = (b.entries, None) if b.pager is not None else _auto(b.entries, query, f"{namespace}{counter[0]}")
         timeline_pager = _known(b.pager, len(entries), query) if b.pager is not None else auto
         return {"t": "timeline", "title": b.title, "empty": b.empty, "pager": _pager(timeline_pager, query),
-                "entries": [{"at": env.when(e.at) if e.at else "", "rel": relative(e.at, env.now) if e.at else "",
+                "entries": [{"at": env.when(e.at) if e.at else "", "rel": relative_fr(e.at, env.now) if e.at else "",
                              "title": e.title, "text": e.text, "tone": tone(e.tone),
                              "href": href(e.href, env) if e.href else "", "meta": e.meta} for e in entries]}
     if isinstance(b, Chart):
@@ -451,35 +436,52 @@ def _active_page(items: Sequence[Mapping[str, Any]]) -> bool:
 
 
 def filters_ctx(specs: Sequence[Param], raw: Mapping[str, str]) -> tuple[list[dict[str, Any]], bool]:
-    """Le contrôle montre la valeur réellement utilisée, même par défaut ou après validation."""
+    """Le contrôle montre la valeur réellement utilisée, même par défaut ou après validation ; ``default`` dit à un
+    sélecteur ce que veut dire son option vide (« Tous », ou « Par défaut (…) ») ; ``changed``, qu'un champ s'écarte
+    de son défaut (le booléen rendu : l'un d'eux, hors champs cachés)."""
     values, _ = read_params(specs, raw)
     defaults, _ = read_params(specs, {})
     out = []
     for p in specs:
         value = values[p.name]
         shown = ("oui" if value else "non") if p.kind == "bool" else "" if value is None else str(value)
-        out.append({"name": p.name, "label": p.label, "kind": p.kind, "choices": p.choices,
-                    "value": shown, "placeholder": p.placeholder, "lo": p.lo, "hi": p.hi})
-    return out, any(values[p.name] != defaults[p.name] for p in specs if p.kind != "hidden")
+        out.append({"name": p.name, "label": p.label, "kind": p.kind, "choices": p.choices, "default": p.default,
+                    "value": shown, "placeholder": p.placeholder, "lo": p.lo, "hi": p.hi,
+                    "changed": value != defaults[p.name]})
+    return out, any(f["changed"] for f in out if f["kind"] != "hidden")
 
 
-#: un filtre de petits choix — au plus tant, une valeur toujours posée (24 h ou 7 jours) — se règle d'un clic
+#: un filtre de petits choix — de deux à tant, une valeur toujours posée (24 h ou 7 jours ; toutes, authentifiée,
+#: compte ou publique) — se règle d'un clic, même à côté d'une recherche ; au-delà, ou s'il peut rester vide
+#: (« Tous »), il garde son sélecteur
 QUICK_CHOICES = 4
 
 
-def quick_filters(fields: Sequence[Mapping[str, Any]], keep: Sequence[tuple[str, str]]) -> list[dict[str, Any]]:
-    """Des filtres qui ne sont que de petits choix (``filters_ctx``), en boutons à choix (ADR 0176, la maquette) :
-    chacun un lien qui garde les autres filtres et l'affichage des listes, le choix en vigueur marqué ; rien si un
-    filtre demande à taper, ou s'il peut rester vide (« tous »)."""
-    shown = [f for f in fields if f["kind"] != "hidden"]
-    if not shown or not all(f["kind"] == "select" and f["value"] and 1 < len(f["choices"]) <= QUICK_CHOICES
-                            for f in shown):
-        return []
+def _is_quick(f: Mapping[str, Any]) -> bool:
+    """Un sélecteur qui se prête au bouton à choix : un défaut parmi ses choix (sa valeur est toujours posée, un
+    choix est toujours marqué) et de deux à ``QUICK_CHOICES`` choix."""
+    values = [v for v, _ in f["choices"]]
+    return f["kind"] == "select" and bool(f["default"]) and f["default"] in values and 1 < len(values) <= QUICK_CHOICES
+
+
+def quick_filters(fields: Sequence[Mapping[str, Any]],
+                  keep: Sequence[tuple[str, str]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Les filtres de petits choix (``filters_ctx``) en boutons à choix (ADR 0176, la maquette), et ce qui reste au
+    formulaire. Chaque sélecteur qui s'y prête (``_is_quick``) sort en boutons, même à côté d'une recherche : chacun
+    un lien qui garde les autres filtres (la recherche tapée comprise) et l'affichage des listes, le choix en vigueur
+    marqué. Au formulaire, il reste en champ caché : une recherche garde le choix en vigueur. Un formulaire dont tous
+    les champs sont sortis disparaît (aucun champ) ; sans rien à sortir, il reste tel quel."""
+    out = [f for f in fields if _is_quick(f)]
+    if not out:
+        return [], list(fields)
     current = {f["name"]: f["value"] for f in fields if f["value"]}
-    return [{"label": f["label"], "choices": [
+    quick = [{"name": f["name"], "label": f["label"], "value": f["value"], "choices": [
         {"text": label, "on": value == f["value"],
          "href": "?" + urlencode({**dict(keep), **current, f["name"]: value})} for value, label in f["choices"]]}
-        for f in shown]
+        for f in out]
+    moved = {f["name"] for f in out}
+    rest = [{**f, "kind": "hidden"} if f["name"] in moved else dict(f) for f in fields]
+    return quick, rest if any(f["kind"] != "hidden" for f in rest) else []
 
 
 def blocks(items: Sequence[Any], env: Env, query: Mapping[str, str], namespace: str = "pg") -> list[dict[str, Any]]:

@@ -202,3 +202,39 @@ def test_filters_show_the_validated_value_and_default_that_the_view_uses():
     assert not active
     fields, active = render.filters_ctx(specs, {"active": "non"})
     assert fields[1]["value"] == "non" and active
+
+
+TRUST = Param("confiance", "confiance", "select", (("toutes", "toutes"), ("compte", "compte"), ("publique", "publique")),
+              "toutes")
+
+
+def test_a_small_choice_becomes_a_segmented_button_even_beside_a_search():
+    """Un sélecteur toujours posé de deux à quatre choix sort en bouton à choix même à côté d'une recherche (ADR
+    0176) : la recherche reste seule au formulaire, le choix y passe en champ caché, et chaque bouton garde la
+    recherche tapée ; le formulaire ne se dit filtré que par ce qui lui reste."""
+    specs = (Param("q", "chercher"), TRUST)
+    fields, _ = render.filters_ctx(specs, {"q": "ali", "confiance": "compte"})
+    quick, rest = render.quick_filters(fields, [("vue_pg1", "table")])
+    assert [q["label"] for q in quick] == ["confiance"] and quick[0]["value"] == "compte"
+    assert [(c["text"], c["on"]) for c in quick[0]["choices"]] == [("toutes", False), ("compte", True),
+                                                                   ("publique", False)]
+    assert all("q=ali" in c["href"] and "vue_pg1=table" in c["href"] for c in quick[0]["choices"])
+    assert [(f["name"], f["kind"], f["value"]) for f in rest] == [("q", "search", "ali"),
+                                                                  ("confiance", "hidden", "compte")]
+    # le choix seul s'écarte de son défaut : le formulaire qui reste (la recherche, vide) n'a rien à réinitialiser
+    fields, _ = render.filters_ctx(specs, {"confiance": "compte"})
+    assert not any(f["changed"] for f in render.quick_filters(fields, [])[1] if f["kind"] != "hidden")
+    # un formulaire fait seulement de petits choix disparaît, comme la période d'Humeur
+    alone, _ = render.filters_ctx((TRUST,), {})
+    assert render.quick_filters(alone, [])[1] == []
+
+
+def test_a_choice_that_may_stay_empty_keeps_its_selector():
+    """« Tous » : un sélecteur sans défaut garde son sélecteur, même une fois choisi, et même seul (sans quoi le
+    bouton à choix perdrait le retour à « tous ») ; un sélecteur de plus de quatre choix aussi."""
+    loose = Param("role", "qui parle", "select", (("user", "la personne"), ("assistant", "elle")))
+    wide = Param("etat", "État", "select", tuple((str(i), str(i)) for i in range(5)), "0")
+    for specs, raw in (((Param("q", "chercher"), loose), {"role": "user"}), ((loose,), {"role": "user"}),
+                       ((wide,), {})):
+        fields, _ = render.filters_ctx(specs, raw)
+        assert render.quick_filters(fields, []) == ([], fields)

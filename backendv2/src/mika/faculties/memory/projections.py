@@ -347,6 +347,12 @@ class Items:
                 sql.execute(update(t).where(t.c.id == d.promise).values(status=d.status, touched_at=e.at))
             elif name == c.SITUATION_ENDED.name:
                 sql.execute(update(t).where(t.c.id == d.event).values(status="ended", touched_at=e.at))
+            elif name == c.RETRACTED.name:
+                # démenti par l'opératrice (ADR 0230) : un statut d'avant, son texte gardé ; seulement un souvenir ou
+                # une croyance qu'elle tient encore
+                sql.execute(update(t).where(t.c.id == d.item, t.c.kind.in_((c.EPISODE_MEMORY, c.BELIEF)),
+                                            t.c.status == "active")
+                            .values(status=c.RETRACTED_STATUS, touched_at=e.at))
             elif name == c.REINFORCED.name:
                 self._reinforce(sql, sfx, d, e.at)
                 self._reinforce_testimonies(sql, sfx, d, e.seq, e.at)
@@ -753,7 +759,8 @@ class Told:
 # pas (``Reinforced.restricts``) ; un souvenir fondu la nuit garde aussi les messages de l'autre (``sources``)
 # v20 : les tables déclarées pour les deux moteurs (ADR 0101) ; ``folded`` (le texte replié que cherche la console)
 # v21 : ``folded`` déplie les ligatures (ADR 0212)
-MEMORY.projector(c.ITEMS_TABLE, version=21, tier=Tier.T0,
+# v22 : un souvenir ou une croyance démenti par l'opératrice (``memory.retracted``, ADR 0230) : un statut d'avant
+MEMORY.projector(c.ITEMS_TABLE, version=22, tier=Tier.T0,
                  types=[*c.ALL, rt.UTTERANCE, SUBJECT_FORGOTTEN])(Items)
 # v3 : l'échange garde tout le tour (``Utterance.answers``), pas seulement le dernier message d'une rafale
 # v4 : index (personne, instant) et (salon, instant) ; l'oublié ne revient pas (ADR 0059)

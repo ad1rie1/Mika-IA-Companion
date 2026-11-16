@@ -112,14 +112,17 @@ def test_sent_files_have_their_memory_tab_and_a_piece_is_removed_from_received(w
     client, live, _ = world
     bootstrap(client)
     _files(client, live)
-    # Mémoire › Fichiers envoyés : à côté de Pièces reçues, ce qu'elle a envoyé à tout le monde
+    # Mémoire › Fichiers envoyés : à côté de Pièces reçues, après les éléments retenus, avant la consolidation
     sent = drawn(client, "/inspecteur/memoire/envoyes")
     assert 'data-tab="memoire/envoyes"' in sent
     bar = sent.split('class="tabs', 1)[1]
-    assert bar.index("/inspecteur/memoire/recues") < bar.index("/inspecteur/memoire/envoyes") \
-        < bar.index("/inspecteur/memoire/promesses")
+    assert bar.index("/inspecteur/memoire/promesses") < bar.index("/inspecteur/memoire/voir-venir") \
+        < bar.index("/inspecteur/memoire/recues") < bar.index("/inspecteur/memoire/envoyes") \
+        < bar.index("/inspecteur/memoire/consolidation")
     entry = _entry(sent, "secret.txt")
-    assert ">adrien (user_1)</a>" in entry and "/inspecteur/telecharger/partage/" in entry and "pas parti" in entry
+    # pour qui : son nom seul, vers sa fiche (qui réunit tous ses moyens de communication)
+    assert ">adrien</a>" in entry and "(user_1)" not in entry
+    assert "/inspecteur/telecharger/partage/" in entry and "pas parti" in entry
     assert form_of(sent, "shares.retirer", having=SECRET)["_sujet"] == [SECRET]
 
     # une pièce reçue, retirée depuis Mémoire › Pièces reçues : ses octets partent, ce qu'elle y a lu reste
@@ -163,3 +166,25 @@ def test_the_fiche_of_a_file_removes_it_and_then_says_so(world):  # noqa: F811
     # la fiche d'une pièce porte le même geste
     piece = html.unescape(client.get(f"/inspecteur/fiche/piece/{PHOTO}").text)
     assert form_of(piece, "attachments.retirer", having=PHOTO)["_sujet"] == [PHOTO]
+
+
+def test_the_fiche_of_a_piece_says_who_by_name_its_kind_and_one_download(world):  # noqa: F811
+    """La fiche d'une pièce : de qui, par son nom seul, et par quel moyen de communication ; sa sorte en mots, son format
+    à part ; un seul « Télécharger », sous le fait « fichier » (et de même sur la fiche d'un fichier envoyé)."""
+    client, live, _ = world
+    bootstrap(client)
+    _files(client, live)
+    page = client.get(f"/inspecteur/fiche/piece/{PHOTO}")
+    assert page.status_code == 200
+    ConsoleHTML(page.text).check()
+    head = html.unescape(page.text).split('class="tabs', 1)[0]
+    assert ">adrien</a>" in head and "(user_1)" not in head
+    assert f'href="/inspecteur/fiche/handle/{ADRIEN}"' in head  # « par » : le moyen de communication, vers sa fiche
+    # … nommé comme sur sa fiche (le nom, par où il est venu), jamais par sa clé interne
+    assert f">{ADRIEN}</a>" not in head and ">adrien · compte" in head
+    assert ">photo<" in head and ">image/png<" in head  # la sorte en mots, le format à part
+    assert head.count("Télécharger") == 1 and "télécharger télécharger" not in head.casefold()
+    assert ">fichier<" in head and f"/inspecteur/telecharger/piece/{PHOTO}" in head
+    sent = html.unescape(client.get(f"/inspecteur/fiche/partage/{LIST}").text).split('class="tabs', 1)[0]
+    assert sent.count("Télécharger") == 1 and "télécharger télécharger" not in sent.casefold()
+    assert ">adrien</a>" in sent and "(user_1)" not in sent

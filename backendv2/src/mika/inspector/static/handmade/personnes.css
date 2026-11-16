@@ -17,7 +17,6 @@
 .people-find { display: flex; gap: 8px; }
 .people-find input { flex: 1 1 auto; min-width: 0; padding: 10px 14px; border: 1px solid var(--border);
   border-radius: var(--radius); background: var(--surface); color: var(--text); font: inherit; }
-.people-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
 
 /* ── Vue d'ensemble · une carte par personne ──────────────────────────── */
 .people-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--now-gap);
@@ -106,7 +105,6 @@
 .pers-links-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding-left: 12px;
   border-left: 2px solid color-mix(in srgb, var(--ok) 45%, var(--border)); }
 .pers-channel { color: var(--text-2); font-weight: 600; }
-.pers-conn { color: var(--muted); font-size: 11.5px; }
 
 /* ── Écrans étroits ───────────────────────────────────────────────────── */
 @media (max-width: 640px) {

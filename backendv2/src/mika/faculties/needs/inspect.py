@@ -31,6 +31,7 @@ from mika.kernel.inspect import (
     When,
     num_fr,
     pct_fr,
+    relative_fr,
 )
 
 #: son nom en français, et ce qui le comble
@@ -76,14 +77,14 @@ def _now(s: NeedsState, now: int) -> str:
     return "—"
 
 
-def _nourished(s: NeedsState, ctx: InspectContext) -> str:
+def _nourished(s: NeedsState, now: int) -> str:
     """La dernière occupation qui l'a nourrie : laquelle, combien de temps, quel besoin, et quand elle s'est
-    arrêtée (le soulagement date de là)."""
+    arrêtée (le soulagement date de là) : « lecture, 20 min → apprendre, il y a 2 h »."""
     o = s.nourished
     if o is None or o.until is None:
         return "—"
     what = ", ".join(NAMES.get(k, k) for k in o.nourishes)
-    return f"{o.name}, {_lasted(o.until - o.since)} → {what}, " + ctx.when(o.until)
+    return f"{o.name}, {_lasted(o.until - o.since)} → {what}, " + relative_fr(o.until, now)
 
 
 # ── La barre de vitaux, les séries ────────────────────────────────────────
@@ -143,17 +144,17 @@ def _inspect(s: NeedsState, frame: Frame, ctx: InspectContext) -> list[Block]:
               kind="line", title="Ses besoins dans le temps", unit="%", y=(0.0, 1.0), since=since, until=frame.now,
               empty="pas encore de mesure (une toutes les dix minutes) : la courbe se remplira"),
         Fields((
-            ("rien ne s'est passé depuis", ctx.when(s.idle_since) if s.idle_since else "—"),
-            ("on lui a parlé pour la dernière fois", ctx.when(s.heard_at) if s.heard_at else "—"),
+            ("rien ne s'est passé depuis", When(s.idle_since) if s.idle_since else "—"),
+            ("on lui a parlé pour la dernière fois", When(s.heard_at) if s.heard_at else "—"),
             ("dernier vide ressenti", (f"{FELT_FR.get(s.felt, s.felt)} ({pct_fr(s.felt_level)}), "
-                                       if s.felt else "") + ctx.when(s.felt_at) if s.felt_at else "—"),
+                                       if s.felt else "") + relative_fr(s.felt_at, frame.now) if s.felt_at else "—"),
             ("retrouver une amie après le vide", f"lui fait du bien : {num_fr(p.reunited_gain)} × ce que le vide "
                                                  "pesait" if p.reunited_gain else "ne lui fait rien"),
             ("le vide se ressent après", f"{num_fr(p.idle_before_empty_us / HOUR)} h sans rien"),
             ("le vide se creuse", f"de {num_fr(p.empty_intensity)} à {num_fr(p.empty_max)}, {num_fr(p.empty_growth_per_h, signed=True)} par "
                                    "heure"),
             ("en ce moment", _now(s, frame.now)),
-            ("ce qu'elle a fait de ses mains", _nourished(s, ctx)),
+            ("ce qu'elle a fait de ses mains", _nourished(s, frame.now)),
             ("solitude plutôt qu'ennui", f"quand la compagnie dépasse {pct_fr(p.lonely_from)}"),
             ("pousse à parler (compagnie)", f"au-delà de {pct_fr(p.social_floor)}"),
             ("pousse à parler (s'exprimer)", f"au-delà de {pct_fr(p.expression_floor)}"),

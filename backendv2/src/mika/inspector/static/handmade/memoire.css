@@ -15,8 +15,16 @@
 .memories-left { display: grid; grid-template-columns: minmax(0, 160px) auto; align-items: center; gap: 8px; margin: 0;
   color: var(--muted); font-size: 12px; }
 .memories-foot { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin: 0; font-size: 13px; }
-.memories-foot .person-entry-detail[open] { flex: 1 1 100%; }
+.memories-foot .person-entry-detail[open] { flex: 1 1 100%; order: 2; }
 .memories-item:has(.person-entry-detail[open]) { grid-column: 1 / -1; }
+/* ses gestes de correction, à droite du pied (le détail ouvert passe dessous) ; un panneau s'ouvre sous eux, aligné à
+   droite, jamais plus large que l'écran */
+.memories-acts { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; order: 1;
+  margin-left: auto; }
+.memories-acts .form { margin: 0; gap: 0; }
+.memories-acts .action-panel { width: min(380px, calc(100vw - 64px)); }
+.memories-acts .action-overflow-panel { display: grid; justify-items: stretch; width: max-content; padding: 8px; }
+.memories-acts .action-overflow-panel .btn { width: 100%; justify-content: flex-start; }
 
 /* ── Croyances : la confiance à gauche, en chiffre et en jauge ; l'origine en étiquette ── */
 .memories-item.belief { grid-template-columns: 64px minmax(0, 1fr); column-gap: 16px; }

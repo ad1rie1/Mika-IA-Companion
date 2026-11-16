@@ -2,8 +2,9 @@
 
 Une adresse devient le nom de la personne qui parle derrière (« Adrien »),
 une sorte d'épisode un mot (« réponse »), un rôle, un processus, une voie, un
-type d'événement, une raison de l'arbitre, un veto, une section du prompt :
-une phrase française. Les clés techniques (``user_1``, ``memory.consolidate``,
+type d'événement, son origine et ses champs de contenu, une raison de
+l'arbitre, un veto, une section du prompt, un enrichisseur : une phrase
+française. Les clés techniques (``user_1``, ``memory.consolidate``,
 ``woken_at_night``) ne paraissent que dans le détail ou au survol.
 
 Ce que déclarent les facultés est nommé par la composition (``Labels``,
@@ -24,6 +25,7 @@ from typing import Any
 from mika.adapters.llm.config import ROLE_LABELS
 from mika.contracts import identity as identity_c
 from mika.inspector.catalog import Labels
+from mika.kernel.events import Origin
 from mika.kernel.faculty import NIGHT_LANE
 from mika.kernel.inspect import Cell, Ref, Text
 from mika.ports.errors import describe_error
@@ -51,6 +53,28 @@ EVENTS: dict[str, str] = {
     "episode.utterance": "Parole", "episode.ended": "Fin d'épisode", "effect.proposed": "Demande pour sortir",
     "effect.resolved": "Décision d'un opérateur", "effect.executed": "Effet exécuté",
     "runtime.operated": "Action d'opérateur", "runtime.process_failed": "Échec d'un processus",
+}
+#: d'où vient un événement du journal (``kernel.events.Origin``) ; d'où vient un geste d'opérateur se dit à part
+#: (``ORIGINS``)
+EVENT_ORIGINS: dict[str, str] = {
+    Origin.EXTERNAL: "de l'extérieur", Origin.PROCESS: "un processus", Origin.TOOL: "un outil",
+    Origin.KERNEL: "le noyau", Origin.GENESIS: "la genèse",
+}
+#: les champs de contenu d'un événement (``EventType.content_fields``), tels que la page d'un événement les titre ;
+#: un champ sans libellé garde son nom
+CONTENT_FIELDS: dict[str, str] = {
+    "text": "le texte", "summary": "le résumé", "title": "le titre", "note": "la note", "name": "le nom",
+    "instruction": "la consigne", "instructions": "les consignes", "description": "la description",
+    "details": "les précisions", "detail": "le détail", "result": "le résultat", "label": "le libellé",
+    "reason": "la raison", "why": "pourquoi", "excerpt": "l'extrait", "done_when": "fini quand",
+    "words": "les mots", "coords": "les coordonnées", "kind": "la sorte", "seen": "ce qui a été vu",
+    "veiled": "sans qu'on reconnaisse personne", "gist": "l'essentiel", "tell": "ce qu'elle en dira",
+    "keep": "ce qu'elle en garde", "shareable": "ce qu'elle en raconterait", "prompt": "la demande d'image",
+    "caption": "la légende", "path": "le chemin", "tone": "le ton", "interests": "les centres d'intérêt",
+    "sensitive": "les sujets délicats", "request": "la demande", "need": "le besoin", "options": "les options",
+    "context": "le contexte", "choice": "le choix", "plan": "le plan", "questions": "les questions",
+    "comment": "le commentaire", "sender_name": "le nom de l'expéditeur", "body": "le message",
+    "query": "la recherche", "found": "ce qui a été trouvé", "places": "les lieux", "line": "le tracé",
 }
 #: les processus du noyau, sans faculté (ceux des facultés : ``Labels.processes``)
 PROCESSES: dict[str, str] = {"arbitre": "Décider d'agir (l'arbitre)", "séries": "Relever les courbes de sa journée"}
@@ -96,6 +120,16 @@ def kind(value: str | None) -> str:
 
 def role(value: str | None) -> str:
     return ROLE_LABELS.get(str(value or ""), str(value or "—"))
+
+
+def event_origin(value: str) -> str:
+    """D'où vient un événement, en mots (« le noyau ») ; une origine inconnue telle quelle."""
+    return EVENT_ORIGINS.get(str(value), str(value))
+
+
+def content_field(name: str) -> str:
+    """Le champ de contenu d'un événement, en mots (« le texte ») ; un champ sans libellé garde son nom."""
+    return CONTENT_FIELDS.get(name, name)
 
 
 def lane(value: str | None) -> str:
@@ -242,6 +276,14 @@ class Names:
         if title:
             return title[:1] + title[1:].lower()
         return humanize(key)
+
+    def enricher(self, key: str) -> str:
+        """Un enrichisseur : ce qu'il rassemble pour le prompt (« Le fil de la conversation ») ; sans libellé, sa
+        faculté et sa clé (« Courrier · mail draft »), d'après le registre."""
+        if key in self.labels.enrichers:
+            return self.labels.enrichers[key]
+        spec = next((s for s in getattr(self.kernel.registry, "enrichers", ()) if s.key == key), None)
+        return f"{self.faculty(spec.owner)} · {humanize(key)}" if spec is not None else humanize(key)
 
     def reason(self, owner: str, code: str) -> str:
         """Une raison de l'arbitre (une preuve) : ce qui pousse à agir."""

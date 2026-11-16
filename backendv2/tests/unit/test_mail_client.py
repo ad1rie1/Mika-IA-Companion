@@ -190,18 +190,14 @@ def test_poll_now_works_while_she_sleeps_and_filing_quiets_her(tmp_path):
         filed = await perform(kernel, "email.classer", form(), by="user_1", subject="<m1@exemple.fr>", nonce="c1")
         left = sorted(m.mail for m in kernel.mind.frame().get(email_c.UNREAD))
         again = await perform(kernel, "email.classer", form(), by="user_1", subject="<m1@exemple.fr>", nonce="c2")
-        everything = await perform(kernel, "email.tout_lu", form(), by="user_1", nonce="t1")
-        return (before, asked, after, later, unread, filed, left, again, everything,
-                kernel.mind.frame().get(email_c.UNREAD))
+        return before, asked, after, later, unread, filed, left, again
 
-    before, asked, after, later, unread, filed, left, again, everything, final = live(tmp_path, box, scenario,
-                                                                                    start=night)
+    before, asked, after, later, unread, filed, left, again = live(tmp_path, box, scenario, start=night)
     assert asked.ok and after == before + 1  # endormie, une relève quand même : celle qu'on a demandée
     assert later == after  # et aucune autre avant son réveil
     assert unread == ["<m1@exemple.fr>", "<m2@exemple.fr>", "<m3@exemple.fr>"]  # le mail de la nuit est là
     assert filed.ok and left == ["<m2@exemple.fr>", "<m3@exemple.fr>"]
     assert not again.ok  # déjà classé : l'action n'est plus offerte
-    assert everything.ok and final == ()
 
 
 def test_the_reply_form_carries_the_mail_it_answers_without_showing_it():

@@ -10,6 +10,7 @@ un moment vécu à travers quelqu'un (« je te montrerai tout ») ne devenait ja
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from types import SimpleNamespace as NS
 from zoneinfo import ZoneInfo
@@ -23,10 +24,12 @@ from mika.faculties.attention.anticipation import _anticipated_felt, _anticipati
 from mika.faculties.attention.faculty import AttentionParams, AttentionState
 from mika.faculties.goals.faculty import GoalsParams, GoalsState
 from mika.faculties.goals.tend import Seed
+from mika.faculties.memory import inspect as _views  # noqa: F401 — les vues de la mémoire, déclarées à l'import
 from mika.faculties.memory import likelihood as lk
 from mika.faculties.memory.conversation import Conversation, Line, Speaker
 from mika.faculties.memory.extraction import Extraction, XConstat, XEvenement
 from mika.faculties.memory.faculty import (
+    MEMORY,
     MemoryParams,
     MemoryState,
     _ahead,
@@ -514,3 +517,12 @@ def test_a_moved_moment_counts_half_in_her_expectations_as_in_her_surprise():
     s = _moment_resolved(s, event(mc.RESOLVED.draft(event=11, outcome=mc.CANCELLED, nature=lk.FIRST_HAND,
                                                     likelihood=0.9), 21, NOW), CX)
     assert s.calibration[lk.FIRST_HAND][1] == pytest.approx(0.16 + 0.81)  # une annulation, elle, compte pleine
+
+
+def test_the_seeing_ahead_page_says_what_it_shows_without_an_adr_number():
+    """La description de « Voir venir », sous le titre de la page, dit ce qu'elle montre : ni numéro d'ADR (ADR 0225)
+    ni règle de conception (« jamais dans ses phrases »), qui ne servent pas à l'opératrice (C2-10)."""
+    (spec,) = [v for v in MEMORY.inspectors if v.name == "voir-venir"]
+    assert spec.description == ("Ce qu'elle attendait des moments annoncés, et ce qu'elle en apprend : ses attentes "
+                                "tombent-elles juste, et qui tient ce qu'il annonce.")
+    assert [v.name for v in MEMORY.inspectors if re.search(r"ADR\s*\d", v.description)] == []

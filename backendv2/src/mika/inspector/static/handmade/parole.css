@@ -39,11 +39,14 @@
 .parole-fold[open] > summary { margin-bottom: 2px; }
 .parole-context { margin-top: 18px; padding-top: 14px; border-top: 1px dashed var(--border); }
 
-/* ── Son état intérieur : une section, son texte ─────────────────────── */
+/* ── Son état intérieur : « dans son prompt : <la section> », son texte cité (.now-voice, base.css) ── */
 .parole-inner { display: grid; gap: 14px; margin: 0; }
 .parole-inner dt { margin-bottom: 4px; color: var(--muted); font: 600 11.5px var(--font); letter-spacing: .07em;
   text-transform: uppercase; }
 .parole-inner dd { margin: 0; color: var(--text); font-size: 14px; line-height: 1.5; white-space: pre-line; }
+/* une citation de son prompt, pas son émotion : un filet neutre, sans la couleur de sa balise */
+.parole-inner .now-voice { margin: 0; border-left-color: var(--border-strong); }
+.parole-inner .now-voice p { font-size: 14px; }
 
 /* ── Ses outils : ceux qu'elle avait en main, les appelés en tête ────── */
 .parole-tools { margin: 0; padding: 0; list-style: none; }

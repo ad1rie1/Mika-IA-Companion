@@ -8,7 +8,10 @@ import re
 from dataclasses import replace
 from urllib.parse import quote, urlencode
 
+from mika.contracts import email as email_c
 from mika.inspector.framed import FRAME_CSP, FRAME_CSP_REMOTE
+from mika.kernel.events import Content, Origin
+from mika.plugins.email import EMAIL
 from mika.ports.mail import Attachment, File
 from tests.fixtures.console_html import ConsoleHTML
 from tests.fixtures.courrier import framed, mailbox
@@ -60,6 +63,21 @@ def test_account_scope_survives_tabs_search_pagination_and_composing(world, tmp_
         assert head.index("Nouveau message") < head.index("gear-link")
         assert ("Actualiser le dossier" in head) == (tab == "reception")
         assert "Nouveau message</summary>" not in body and "hm-toolbar" not in body
+
+
+def test_a_gesture_has_one_name_its_action_title_that_its_button_repeats(world):  # noqa: F811
+    """Un geste, un nom : le titre de l'action, que son bouton redit tel quel (audit du 2026-11-05, C4-06)."""
+    client, _ = setup(world)
+    titles = {a.name: a.title for a in EMAIL.actions}
+    assert (titles["ecrire"], titles["relever"], titles["relire"], titles["rediger"]) == (
+        "Nouveau message", "Relever maintenant", "Actualiser le dossier", "Lui demander une réponse")
+
+    def head(url):
+        return get(client, url).split('<div class="page-head-side">')[1].split('<div class="stack">', 1)[0]
+
+    every, one = head("/inspecteur/courrier/reception"), head("/inspecteur/courrier/reception?compte=perso")
+    assert "Nouveau message" in every and "Relever maintenant" in every and "Actualiser les boîtes" not in every
+    assert "Actualiser le dossier" in one and "Relever maintenant" not in one
 
 
 def test_reader_displays_html_safely_and_replies_from_the_original_account(world):  # noqa: F811
@@ -234,6 +252,10 @@ def test_inbox_reading_list_and_table_keep_account_filters_and_return_path(world
     assert 'vue_pg1=table' in reader
     next_page = re.search(r'<a href="([^\"]+)" rel="next">', table).group(1)
     assert 'vue_pg1=table' in next_page and 'compte=perso' in next_page
+    # ranger ce qu'on a coché : la liste a ses cases ; le tableau n'en a pas, ni de formulaire « une clé par ligne »
+    # (audit du 2026-11-05, C4-08)
+    assert '/inspecteur/action/email.ranger' in listing and '/inspecteur/action/email.ranger' not in table
+    assert 'une clé par ligne' not in table
     assert not box.sent and not box.actions
 
 
@@ -257,6 +279,45 @@ def test_a_line_opens_the_message_under_the_list_with_its_actions(world):  # noq
     assert 'name="csrf"' in form  # le retour ramène au message ouvert
     assert 'name="_retour" value="/inspecteur/courrier/reception?compte=pro&lire=' in form
     assert not box.sent and not box.actions  # lire ne marque pas lu et n'envoie rien
+    # daté à la minute, comme sur sa fiche : ni l'année ni les secondes (audit du 2026-11-05, C4-12)
+    sub = re.search(r'<p class="now-sub">(.*?)</p>', reader, re.S).group(1)
+    assert re.search(r'reçu</span> \d\d/\d\d \d\d:\d\d', sub) and not re.search(r"\d\d:\d\d:\d\d", sub)
+
+
+def notice(client, live, ref: str) -> None:
+    """Son tri a remarqué ce mail : important, il attend une réponse."""
+    account = ref.split(":", 1)[0]
+    noticed = email_c.NOTICED.draft(source="email", kind=email_c.MAIL, summary=Content.of("Léa attend ton avis."),
+                                    pertinence=0.9, bundle="email", mail=ref, sender="Léa Martin <lea@example.test>",
+                                    address="lea@example.test", importance=0.9, needs_reply=True, account=account,
+                                    folder="INBOX", dedupe_key=f"test-liseuse-{ref}")
+    client.portal.call(lambda: live.kernel.mind.append([noticed], emitter="email", origin=Origin.EXTERNAL,
+                                                        correlation="test-liseuse"))
+
+
+def test_the_reader_says_each_fact_of_her_sorting_once(world):  # noqa: F811
+    """Ce qu'elle sait d'un mail, en tête de la liseuse, ne redit pas l'en-tête : « réponse attendue » et « important,
+    non lu », l'en-tête les dit ; « important » ne revient en étiquette que pour un mail lu, dont l'en-tête dit
+    seulement « lu » (audit du 2026-11-05, C4-04)."""
+    client, box = setup(world)
+    _, live, _ = world
+    fresh, read = "pro:<projet@example.test>", "perso:<perso-0@example.test>"  # le second, déjà lu
+    notice(client, live, fresh)
+    notice(client, live, read)
+
+    def reader(account, ref):
+        page = get(client, f"/inspecteur/courrier/reception?compte={account}&" + urlencode({"lire": ref}))
+        return page.split('class="now-card mail-reader"')[1]
+
+    unread = reader("pro", fresh)
+    her = unread.split('class="mail-her"')[1]
+    assert "Léa attend ton avis." in her  # ce qu'elle en a retenu
+    assert unread.count("réponse attendue") == 1 and "réponse attendue" not in her
+    assert '<span class="now-tag warn">important, non lu</span>' in unread
+    assert '<span class="now-tag warn">important</span>' not in unread
+    seen = reader("perso", read)
+    assert '<span class="now-tag ok">lu</span>' in seen and seen.count("réponse attendue") == 1
+    assert '<span class="now-tag warn">important</span>' in seen.split('class="mail-her"')[1]  # la tête ne le dit pas
 
 
 # ── Le courrier au quotidien (ADR 0175) ───────────────────────────────────
@@ -278,8 +339,41 @@ def test_the_side_names_what_you_read_on_every_mail_page(world):  # noqa: F811
     assert "<h2>À traiter</h2>" in get(client, "/inspecteur/courrier/reception?compte=perso&etat=a_traiter&dossier=*")
     for tab in ("brouillons", "envoyes", "contacts"):
         assert "Dossiers" in get(client, f"/inspecteur/courrier/{tab}?compte=perso")
+    # les dossiers du serveur qui portent le nom d'une vue de la colonne le disent : un « Envoyés », pas deux
+    # (audit du 2026-11-05, C4-09)
+    assert "Brouillons (serveur)" in side and "Envoyés (serveur)" in side
     # remonter plus loin : au bout de la liste, plus dans la barre du haut
     assert page.index("Charger des messages plus anciens") > page.index('class="mail-lines"')
+
+
+def search_form(page):
+    """Le formulaire de recherche de la réception."""
+    return re.search(r'<form class="filters".*?</form>', page, re.S).group()
+
+
+def test_the_inbox_selector_offers_only_what_the_column_does_not_carry(world):  # noqa: F811
+    """« Afficher » ne redit pas la colonne : « À traiter » et « Suivis » y sont des vues, pas des choix du sélecteur ;
+    dans l'une d'elles, la vue est le filtre — pas de sélecteur, son ``etat`` en champ caché, une recherche y reste
+    (audit du 2026-11-05, C4-10)."""
+    client, _ = setup(world)
+    page = get(client, "/inspecteur/courrier/reception?compte=perso")
+    assert page.count('<form class="filters"') == 1  # les filtres, déclarés une fois : un formulaire
+    form = search_form(page)
+    shown = re.search(r'<select name="etat">.*?</select>', form, re.S).group()
+    assert "Afficher" in form and 'placeholder="objet, expéditeur, texte"' in form
+    assert 'value="a_traiter"' not in shown and 'value="suivis"' not in shown
+    assert 'value="non_lus"' in shown and ">remarqués par elle<" in shown and ">pas remarqués par elle<" in shown
+    view = get(client, "/inspecteur/courrier/reception?compte=perso&etat=a_traiter&dossier=*")
+    form = search_form(view)
+    assert '<select name="etat"' not in form and form.count('name="etat"') == 1
+    assert '<input type="hidden" name="etat" value="a_traiter">' in form
+    assert '<input type="hidden" name="dossier" value="*">' in form
+    sent = dict(re.findall(r'<input type="hidden" name="([^"]+)" value="([^"]*)">', form))
+    searched = get(client, "/inspecteur/courrier/reception?" + urlencode({**sent, "q": "message"}))
+    assert "<h2>À traiter</h2>" in searched and '<input type="hidden" name="etat" value="a_traiter">' in searched
+    # une adresse gardée garde sa vue, et un ancien libellé replié se comprend toujours
+    assert "<h2>Suivis</h2>" in get(client, "/inspecteur/courrier/reception?compte=perso&etat=suivis&dossier=*")
+    assert "Filtre « Afficher »" not in get(client, "/inspecteur/courrier/reception?compte=perso&etat=remarqués")
 
 
 def test_checked_lines_are_tidied_at_once_on_the_server(world):  # noqa: F811
@@ -292,6 +386,7 @@ def test_checked_lines_are_tidied_at_once_on_the_server(world):  # noqa: F811
     assert nothing.status_code == 400 and not box.actions  # rien de coché : rien ne part
     done = client.post("/inspecteur/action/email.ranger", data=posted_form(page, "email.ranger", mails=keys, geste="lu"))
     assert done.status_code == 200, done.text
+    assert "2 mails marqués comme lus." in html.unescape(done.text)  # accordé, jamais « mail(s) » (C4-R1)
     assert ("seen_many", tuple(keys)) in box.actions  # par lot, sur le serveur
     after = get(client, url)
     assert all(f'value="{k}" form="mail-bulk"' not in after for k in keys)  # sortis de tes non-lus
@@ -299,6 +394,7 @@ def test_checked_lines_are_tidied_at_once_on_the_server(world):  # noqa: F811
     moved = client.post("/inspecteur/action/email.ranger",
                         data=posted_form(after, "email.ranger", mails=[other], geste="archiver"))
     assert moved.status_code == 200 and any(a[:2] == ("move", other) for a in box.actions)
+    assert "Archiver : 1 mail." in html.unescape(moved.text)
     assert not box.sent
 
 

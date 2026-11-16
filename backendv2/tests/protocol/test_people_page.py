@@ -1,6 +1,7 @@
 """Personnes (``app/handmade/tabs/people.py``), à travers le vrai serveur : la page d'entrée de la destination,
 dessinée — une carte par personne (ce qu'elle est pour elle, ce qu'elle ressent, ce qui se passe entre elles), qui est
-là ; on cherche, on filtre ; les onglets des facultés restent, sous « Le détail »."""
+là ; on y cherche et on y filtre par proximité, seule page de la destination à le faire ; les onglets des facultés
+restent, sous « Le détail »."""
 
 from __future__ import annotations
 
@@ -56,5 +57,13 @@ def test_search_and_filters(world):  # noqa: F811
     # une proximité choisie : la pastille s'allume, la recherche est gardée
     level = html.unescape(client.get(f"{people.BASE}?q=adri&proximite=friend").text)
     assert re.search(r'<a class="hm-chip on" href="/inspecteur/personnes\?q=adri&proximite=friend"', level)
+    # pas de filtre « en ligne » : Présents le dit, le titre de la bande y mène (pas d'onglet qui répète un filtre)
+    chips = re.search(r'<nav class="hm-chips".*?</nav>', level, re.S).group()
+    assert "En ligne" not in chips and "presence=" not in chips
+    assert re.search(r'<h2 class="now-eyebrow"><a href="/inspecteur/personnes/presents">En ligne[^<]*</a></h2>', level)
+    # une ancienne adresse ?presence=en-ligne n'a plus d'effet : Adrien, déconnecté, reste là
+    old = html.unescape(client.get(f"{people.BASE}?presence=en-ligne").text)
+    assert '<a href="/inspecteur/fiche/person/user_1">adrien</a>' in old and "Personne avec ce filtre" not in old
+    assert "presence=" not in old
     fragment = client.get(f"{people.FRAGMENT}?q=adri")
     assert fragment.status_code == 200 and "<h1" not in fragment.text and "data-now-stamp" in fragment.text

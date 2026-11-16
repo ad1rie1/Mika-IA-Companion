@@ -19,10 +19,10 @@
           {% if p.says %}<q class="vie-said">{{ p.says }}</q>{% endif %}
           <dl class="vie-gauges">
             {% if p.warmth %}<div title="ce que ses échanges ont installé : à droite chaleureux, à gauche froid (−1…1)"><dt>Chaleur</dt><dd>{{ vie.signed(p.warmth) }}<span class="now-num">{{ p.warmth.text }}</span></dd></div>{% endif %}
-            {% if p.hostility %}<div title="un écart déplaisant et dominant, amorti par l'attachement : la rancune (0…1)"><dt>Hostilité</dt><dd>{{ tab.bar(p.hostility.w, "hostility") }}<span class="now-num {{ p.hostility.tone }}">{{ p.hostility.text }}</span></dd></div>{% endif %}
-            {% if p.bond %}<div title="ce qui l'attache à cette personne (0…1, jamais négatif)"><dt>Attachement</dt><dd>{{ tab.bar(p.bond.w, "bond") }}<span class="now-num">{{ p.bond.text }}</span></dd></div>{% endif %}
+            {% if p.hostility %}<div title="un écart déplaisant et dominant, amorti par l'attachement : la rancune"><dt>Hostilité</dt><dd>{{ tab.bar(p.hostility.w, "hostility") }}<span class="now-num {{ p.hostility.tone }}">{{ p.hostility.text }}</span></dd></div>{% endif %}
+            {% if p.bond %}<div title="ce qui l'attache à cette personne (jamais négatif)"><dt>Attachement</dt><dd>{{ tab.bar(p.bond.w, "bond") }}<span class="now-num">{{ p.bond.text }}</span></dd></div>{% endif %}
           </dl>
-          {% if p.anchor or p.last %}<p class="vie-meta">{% if p.anchor %}<span><span class="now-muted">ancre</span> {{ tab.cell(p.anchor) }}</span>{% endif %}{% if p.last %}<span><span class="now-muted">dernière balise</span> {{ tab.cell(p.last) }}</span>{% endif %}</p>{% endif %}
+          {% if p.last %}<p class="vie-meta"><span><span class="now-muted">dernière balise</span> {{ tab.cell(p.last) }}</span></p>{% endif %}
           {% if p.facts %}<details class="person-entry-detail"{{ ' open' if p.open }}><summary>Le détail</summary><div class="stack">{{ tab.inner(p.facts) }}</div></details>{% endif %}
         </div>
       </li>

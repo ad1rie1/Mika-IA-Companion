@@ -1,11 +1,13 @@
 """``memory`` : ce qu'elle garde de ce qu'elle vit.
 
 Consolidation (le modèle dit ce qu'elle retient d'une fenêtre), index des
-vecteurs (un cache), rappel filtré par la divulgation, outils. Voir
+vecteurs (un cache), rappel filtré par la divulgation, outils, et ce que
+l'opératrice corrige depuis la console (``actions``, ADR 0230). Voir
 ``contracts/memory.py`` pour ce que les autres peuvent lire.
 """
 
 from mika.faculties.memory import (  # noqa: F401 — contributions
+    actions,
     archive,
     consolidation,
     delicate,

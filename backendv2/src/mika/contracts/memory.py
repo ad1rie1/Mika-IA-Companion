@@ -46,6 +46,11 @@ Une croyance peut n'appartenir qu'à elle et à la personne qu'elle concerne
 blagues) : la colonne ``between_us`` de ``memory_items`` le dit à qui lit le
 lien (``social``, son registre avec une amie). Jamais devant une inconnue ni en
 public quand ça s'est dit en privé (ADR 0055).
+
+L'opératrice **corrige** depuis la console (ADR 0230), par ces mêmes événements : ``by=OPERATOR_BY`` pour une
+promesse tenue ou abandonnée et pour l'issue d'un moment ; une situation finie par le même événement, sans ``by``
+(son audit, ``runtime.operated``, le dit) — et ``retracted`` pour un souvenir ou une croyance qu'elle dément. Rien ne
+se réécrit ni ne s'efface : une correction n'est pas un moment de sa vie.
 """
 
 from __future__ import annotations
@@ -83,6 +88,10 @@ KEPT_BY = "parole"
 #: qui règle une promesse qu'un rappel programmé (``goals``, l'outil ``goal_remind``) porte désormais : un rappel
 #: demandé existe une fois et une seule (ADR 0052)
 REMINDER_BY = "rappel"
+#: qui règle une promesse, ou dit comment un moment a tourné, depuis la console : l'opératrice corrige ce que la
+#: relecture n'a pas vu (ADR 0230) — une correction, pas un moment de sa vie : ni « laissée filer », ni émotion, ni
+#: leçon sur qui annonce
+OPERATOR_BY = "opératrice"
 
 #: À partir de cette importance, un moment de la vie de quelqu'un compte (un entretien, un examen, un départ, une
 #: opération) : envers une amie, c'est la première chose qu'on demande après. En dessous (un rendez-vous de
@@ -499,7 +508,8 @@ class MomentFollowed(Payload):
 class SituationEnded(Payload):
     """Une situation qui durait dans la vie de quelqu'un (``event_noted``, ``ongoing``) est finie, de la bouche de
     la personne : « on a fini le déménagement », « on a dû l'endormir ce matin ». Le jugement de la relecture (comme
-    une croyance qu'elle remplace), jamais des mots-clés : elle n'en parle plus au présent."""
+    une croyance qu'elle remplace), jamais des mots-clés : elle n'en parle plus au présent — ou l'opératrice depuis
+    la console (ADR 0230), par le même événement : sans ``by``, son audit (``runtime.operated``) dit qui l'a finie."""
 
     event: int
     call_id: str = ""
@@ -573,6 +583,17 @@ class Consolidated(Payload):
     model: str = ""
 
 
+class Retracted(Payload):
+    """Un souvenir ou une croyance que l'opératrice dément depuis la console (ADR 0230) : « ce n'est pas vrai ». Il
+    sort de ce qu'elle sait et de son rappel (un statut d'avant, ``RETRACTED_STATUS``) ; son texte reste au journal,
+    rien ne se réécrit. Ce qui le reprenait (un portrait, son récit) se réécrit sans lui, comme pour une source
+    remplacée (``withdrawals``, ADR 0082). Ni texte ni personne : l'oubli d'une personne efface l'élément visé, et
+    rien de plus ici."""
+
+    item: int
+    by: str = OPERATOR_BY
+
+
 class NightSorted(Payload):
     """La nuit, les souvenirs du jour presque identiques à un autre s'y fondent
     (``(gardé, fondu)``) : le gardé prend la plus haute importance et la plus
@@ -606,6 +627,7 @@ JOINED = event_type("memory.joined", OWNER, Joined, public=True)
 CONFRONTED = event_type("memory.confronted", OWNER, Confronted, public=True)
 REREAD = event_type("memory.reread", OWNER, Reread, public=True)
 RELAYED_READ = event_type("memory.relayed_read", OWNER, RelayedRead, public=True)
+RETRACTED = event_type("memory.retracted", OWNER, Retracted, public=True)
 
 
 class Delicate(Payload):
@@ -621,7 +643,7 @@ class Delicate(Payload):
 DELICATE = event_type("memory.delicate", OWNER, Delicate, public=True, subjects=("person",))
 ALL = (REMEMBERED, BELIEVED, REINFORCED, PROMISE_NOTICED, PROMISE_RESOLVED, EVENT_NOTED, MOMENT_FOLLOWED, SITUATION_ENDED,
        CONSOLIDATED, NIGHT_SORTED, EXTRACTION_DEFERRED, ATTESTED, JOINED, CONFRONTED, REREAD, RESOLVED, DELICATE,
-       RELAYED_READ)
+       RELAYED_READ, RETRACTED)
 
 
 @dataclass(frozen=True, slots=True)
@@ -722,9 +744,9 @@ def heavy_date(ev: LifeEvent) -> bool:
 # ── Ce qui se retire (ADR 0082) ────────────────────────────────────────────
 #
 # Un texte tiré de ce qu'elle sait (un portrait, son récit, une pensée, un rêve, son journal) dépend de ses sources.
-# Quand l'une est remplacée, devient secrète, est contestée, jointe à une autre ou finie, ce qui en dérive le sait :
-# **une seule définition**, lue par chaque faculté sur les événements de la mémoire qu'elle réduit déjà — aucun
-# événement de plus à émettre, et le journal d'avant se rejoue avec.
+# Quand l'une est remplacée, démentie (ADR 0230), devient secrète, est contestée, jointe à une autre ou finie, ce qui
+# en dérive le sait : **une seule définition**, lue par chaque faculté sur les événements de la mémoire qu'elle
+# réduit déjà — aucun événement de plus à émettre, et le journal d'avant se rejoue avec.
 
 SUPERSEDED, SECRET, CONTESTED, JOINED_TO, ENDED = "superseded", "secret", "contested", "joined", "ended"
 #: devenu une confidence parce qu'il touche un sujet délicat de la personne (``memory.delicate``, ADR 0099)
@@ -736,8 +758,9 @@ PRIVATE_REASONS = frozenset({SECRET, DELICATE_TOPIC})
 
 @dataclass(frozen=True, slots=True)
 class Withdrawal:
-    """Un élément de sa mémoire qui se retire : remplacé (``by`` : par quoi), devenu secret, devenu une confidence (un
-    sujet délicat), contesté, joint à un autre (``by`` : le gardé), ou une situation finie."""
+    """Un élément de sa mémoire qui se retire : remplacé (``by`` : par quoi ; démenti par l'opératrice, la même
+    raison, sans ``by``), devenu secret, devenu une confidence (un sujet délicat), contesté, joint à un autre
+    (``by`` : le gardé), ou une situation finie."""
 
     item: int
     reason: str
@@ -783,12 +806,16 @@ def withdrawals(name: str, d: Any, seq: int) -> tuple[Withdrawal, ...]:
     elif name == DELICATE.name:
         # devenu une confidence : ce qui le reprenait à la sensibilité d'avant se tait aussi (ADR 0099)
         out += [Withdrawal(item, DELICATE_TOPIC) for item in d.items]
+    elif name == RETRACTED.name:
+        # démenti par l'opératrice (ADR 0230) : ce qui le reprenait se réécrit sans le recopier, comme pour une source
+        # remplacée — par rien
+        out.append(Withdrawal(d.item, SUPERSEDED))
     return tuple(out)
 
 
 #: Les événements de la mémoire qui peuvent retirer quelque chose (``withdrawals``).
 WITHDRAWING = (BELIEVED, ATTESTED, REINFORCED, EVENT_NOTED, JOINED, NIGHT_SORTED, SITUATION_ENDED, CONFRONTED,
-               RESOLVED, DELICATE)
+               RESOLVED, DELICATE, RETRACTED)
 
 
 #: Le dernier message relu par la consolidation.
@@ -875,12 +902,12 @@ TOLD_LINES_TABLE = "memory_told_lines"
 # ``vocab.lineage.admits``) : une faculté qui refait son propre filtre finit par fuir.
 
 #: Ce qu'elle sait et tient encore pour sien : souvenirs, croyances, promesses, moments — ni ce qu'une autre croyance
-#: a remplacé, ni ce que la nuit a fondu dans un autre. Les promesses tenues ou abandonnées, les situations finies y
+#: a remplacé, ni ce que la nuit a fondu dans un autre, ni ce que l'opératrice a démenti. Les promesses tenues ou abandonnées, les situations finies y
 #: restent (c'est de l'histoire, toujours vraie). Colonnes : ``KNOWN_COLUMNS``.
 KNOWLEDGE_VIEW = "memory_knowledge"
 #: Qui concerne ce qu'elle sait (``item``, ``person``), indexé par personne — les mêmes lignes que ``KNOWLEDGE_VIEW``.
 KNOWLEDGE_ABOUT_VIEW = "memory_knowledge_about"
-#: Ce qu'elle a cru et ne croit plus (remplacé, fondu), lu par identifiant : « je croyais que… ».
+#: Ce qu'elle a cru et ne croit plus (remplacé, fondu, démenti), lu par identifiant : « je croyais que… ».
 FORMER_VIEW = "memory_former"
 #: À qui elle a répété quoi (``item``, ``handle``, ``at``, ``veiled``) — ``veiled`` : seulement sans nommer personne
 #: (ADR 0091) ; la personne ne sait pas de qui il s'agit, mais elle le sait, elle.
@@ -907,9 +934,11 @@ HERS = "hers"
 KNOWN_COLUMNS = ("id", "kind", "text", "about", "sensitivity", "importance", "confidence", "origin", "source",
                  "emotion", "born_at", "touched_at", "status", "recipient", "due", "sources", "told_by", "heard_by",
                  "secret", "about_self", "between_us", "knowledge_kind", "holder", "constraints", "internal_only")
+#: un souvenir ou une croyance démenti par l'opératrice (``memory.retracted``, ADR 0230)
+RETRACTED_STATUS = "retracted"
 #: Les statuts qui sortent de ce qu'elle sait (``FORMER_VIEW``) : remplacée, fondue la nuit dans un souvenir, jointe
-#: la nuit à la même croyance dite par un autre (ADR 0080).
-FORMER_STATUSES = ("superseded", "merged", "joined")
+#: la nuit à la même croyance dite par un autre (ADR 0080), démentie par l'opératrice (ADR 0230).
+FORMER_STATUSES = ("superseded", "merged", "joined", RETRACTED_STATUS)
 
 # ── Les colonnes des vues (ADR 0101) : on les lit par des requêtes (``select(KNOWLEDGE.c.text)``), compilées pour le
 # moteur. Les vues elles-mêmes se créent dans la mémoire (``faculties.memory.projections``), sur ses tables.

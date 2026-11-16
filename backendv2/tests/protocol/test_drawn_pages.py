@@ -198,7 +198,7 @@ def test_nights_read_the_journal_then_one_card_per_night(world):  # noqa: F811
     ], "self")
     page = drawn(client, "/inspecteur/pensees/nuits")
     journal = page.split('class="now-card nights-journal"')[1].split("</article>")[0]
-    assert "Lundi 18 oct." in journal and "Une soirée au bureau, sous la lampe." in journal
+    assert "Journal du lun. 18 oct., en entier" in journal and "Une soirée au bureau, sous la lampe." in journal
     assert "Une soirée calme." in journal  # ce qu'elle en raconte à n'importe qui
     assert "Sa journée en cours" in page
     nights = page.split('class="nights-list"')[1]
@@ -258,19 +258,46 @@ def test_what_comes_from_elsewhere_is_drawn_as_cards(world):  # noqa: F811
 
 
 def test_a_means_of_communication_is_drawn(world):  # noqa: F811
-    """La fiche d'un moyen de communication : son en-tête et « En bref » (le canal et ce qu'il prouve, qui écrit
-    d'ici, ce que ça ouvre en privé et en public) ; son fil en bulles ; son verdict sous « Le détail ». Un compte
+    """La fiche d'un moyen de communication : son en-tête et « En bref » (quatre tuiles — dont ce que le canal
+    prouve, et pourquoi —, qui écrit d'ici, ce que ça ouvre en privé et en public) ; son fil en bulles ; son verdict
+    sous « Le détail », et seulement là. En bref ne redit pas l'en-tête : ni « Le canal », ni la certitude. Un compte
     authentifié prouve déjà qui écrit : pas d'onglet « Revendication »."""
     client, _, _ = world
     bootstrap(client)
     chat(client, "salut ! je reviens d'un concert")
     page = drawn(client, "/inspecteur/fiche/handle/user_1")
     assert 'class="handle-head"' in page and "Par le chat, dans un navigateur" in page
-    for part in ("En bref", "Le canal", "Ce qu'il prouve", "Qui écrit d'ici", "Ce que ça ouvre", "En privé",
-                 "En public", "Le verdict, pas à pas"):
+    for part in ("En bref", "Ce que le canal prouve", "session vérifiée", "Qui écrit d'ici", "Vue pour la première fois",
+                 "Sa clé", "Ce que ça ouvre", "En privé", "En public"):
         assert part in page, part
+    brief = page.split('class="now-page handle"')[1].split('aria-labelledby="handle-opens"')[0]
+    for gone in ("Le canal", "Ce qu'il prouve", "Certitude", "certitude", "Le verdict, pas à pas"):
+        assert gone not in brief, gone
+    assert page.count("Dernier message reçu") == 1 and page.count("Elle peut lui écrire d'elle-même") == 1
+    assert "Le verdict, pas à pas" not in page  # replié en bas d'En bref, il redisait l'onglet Verdict
     more = page.split('<details class="tabs-more')[1].split("</details>")[0]
     assert "onglet=verdict" in more and "onglet=autres" in more
     assert "onglet=revendication" not in page
     thread = drawn(client, "/inspecteur/fiche/handle/user_1?onglet=fil")
     assert 'class="person-thread"' in thread and "salut ! je reviens d'un concert" in thread
+
+
+def test_the_other_tabs_of_a_means_of_communication_are_drawn_block_by_block(world):  # noqa: F811
+    """Preuves, Ses autres moyens de communication et Verdict, dessinés bloc par bloc comme le détail d'une personne :
+    l'état vide se dit une fois, sans « aucun » ni « Page 1 sur 1 » d'une pagination d'une seule page ; Verdict dit le
+    verdict pas à pas sans redire les faits du moyen de communication (l'en-tête et En bref les disent)."""
+    client, _, _ = world
+    bootstrap(client)
+    chat(client, "salut ! je reviens d'un concert")
+    proofs = drawn(client, "/inspecteur/fiche/handle/user_1?onglet=preuves")
+    body = proofs.split('class="now-page person-tab"')[1]
+    assert body.lower().count("aucune revendication, preuve ni liaison") == 1  # la majuscule : la feuille de style
+    assert "Page 1 sur 1" not in body and ">aucun<" not in body and 'class="pager"' not in body
+    others = drawn(client, "/inspecteur/fiche/handle/user_1?onglet=autres")
+    body = others.split('class="now-page person-tab"')[1]
+    assert body.lower().count("aucun autre moyen de communication ne parle pour cette personne") == 1
+    assert "Page 1 sur 1" not in body and ">aucun<" not in body
+    verdict = drawn(client, "/inspecteur/fiche/handle/user_1?onglet=verdict")
+    body = verdict.split('class="now-page person-tab"')[1]
+    assert "Le verdict, pas à pas" in body and "Ce que ça ouvre" in body
+    assert "Le moyen de communication" not in body and "Page 1 sur 1" not in body

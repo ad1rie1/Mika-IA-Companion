@@ -9,6 +9,7 @@ from mika.contracts import identity as identity_c
 from mika.contracts import presence as presence_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
+from mika.faculties.social import inspect as social_inspect
 from mika.kernel.events import Content, Origin
 from tests.protocol.test_drawn_pages import drawn
 from tests.protocol.test_now_page import chat
@@ -56,8 +57,10 @@ def test_the_directory_says_each_person_by_her_means_of_communication(world):  #
     assert 'href="/inspecteur/fiche/person/user_1?onglet=echanges"' in entry
     assert "1 avec plusieurs moyens de communication" in page
     assert 'href="?vue_pg1=table"' in page  # la bascule « Tableau » de la faculté
-    none = drawn(client, "/inspecteur/personnes/personnes?q=personne-inconnue")
-    assert "personne ne correspond à « personne-inconnue »" in none and 'class="pers-dir"' not in none
+    # il se parcourt : on cherche quelqu'un depuis la vue d'ensemble, une ancienne recherche n'a plus d'effet
+    assert '<form class="filters"' not in page
+    old = drawn(client, "/inspecteur/personnes/personnes?q=personne-inconnue")
+    assert 'href="/inspecteur/fiche/person/user_1"' in old and "ne correspond" not in old
 
 
 def test_links_go_by_closeness_with_the_silence_on_a_gauge(world):  # noqa: F811
@@ -71,13 +74,37 @@ def test_links_go_by_closeness_with_the_silence_on_a_gauge(world):  # noqa: F811
     groups = _between(page, 'id="pers-bonds-title"', "</section>\n</div>")
     # du plus proche au plus lointain : Léa (déclarée proche) avant Adrien (une amitié, son plancher de propriétaire)
     assert groups.index(">Proches") < groups.index("Léa Martin") < groups.index(">Amitiés") < groups.index("adrien")
-    assert "déclarée par un opérateur" in groups and "jamais sous « amitié » pour une propriétaire" in groups
+    assert "déclarée par un opérateur" in groups and "au moins « amitié », car c'est sa propriétaire" in groups
     assert 'class="pers-gauge"' in groups and 'class="mid"' in groups  # la moitié de la jauge : elle lui manque
     assert 'href="/inspecteur/fiche/person/ext_7?onglet=lien"' in groups
     band = _between(page, 'class="person-tiles pers-band"', "</section>")  # la bande de chiffres, puis la liste
     assert band.index("Personnes") < band.index("Qui lui manquent") < band.index("Dernier réconfort cherché")
     assert page.index('class="person-tiles pers-band"') < page.index('id="pers-bonds-title"')
     assert "Qui lui manque :" not in page  # personne ne lui manque : pas de bandeau
+    # ils se parcourent : ni recherche ni proximité à choisir (ses groupes la disent), une ancienne adresse filtrée
+    # montre tous les liens
+    assert '<form class="filters"' not in page and 'name="proximite"' not in page
+    old = drawn(client, "/inspecteur/personnes/liens?q=lea&proximite=close")
+    assert "Léa Martin" in old and "adrien" in _between(old, 'id="pers-bonds-title"', "</section>\n</div>")
+
+
+def test_links_read_the_state_not_the_words_of_the_cells(world, monkeypatch):  # noqa: F811
+    """Liens lit d'où vient une proximité et si un rythme est mesuré à l'état de la faculté (``closeness_origin``,
+    ``rhythm_of``) : une cellule reformulée — ici, des mots qui n'ont plus rien à voir — ne change ni les groupes, ni
+    l'origine, ni « mesuré » (C3-18)."""
+    client, live, _ = world
+    bootstrap(client)
+    chat(client, "salut ! moi c'est Adrien")
+    stranger(client, live, "ext_7", "Léa Martin")
+    emit(client, live, "social", [social_c.CLOSENESS_SET.draft(person="ext_7", closeness=social_c.CLOSE)])
+    monkeypatch.setattr(social_inspect, "_closeness_text", lambda s, frame, person: "un tout autre libellé")
+    monkeypatch.setattr(social_inspect, "_rhythm", lambda reading: "chaque semaine — mesuré")
+    page = drawn(client, "/inspecteur/personnes/liens")
+    groups = _between(page, 'id="pers-bonds-title"', "</section>\n</div>")
+    assert groups.index(">Proches") < groups.index("Léa Martin") < groups.index(">Amitiés") < groups.index("adrien")
+    assert "déclarée par un opérateur" in groups and "au moins « amitié », car c'est sa propriétaire" in groups
+    # une seule journée : son rythme n'est pas encore mesuré, quoi que dise la cellule
+    assert "chaque semaine" not in groups and groups.count("pas encore mesuré") == 2
 
 
 def test_who_is_here_one_entry_per_person_her_connections_under_her(world):  # noqa: F811
@@ -94,4 +121,6 @@ def test_who_is_here_one_entry_per_person_her_connections_under_her(world):  # n
     assert here.count('class="pers-here-item"') == 1  # une personne, deux connexions
     links = _between(here, 'class="pers-links-list"', "</ul>")
     assert links.count("adrien · compte opérateur") == 2 and "c-1" in links and "c-2" in links
+    # l'identifiant d'une connexion n'est plus écrit : il passe au survol de sa ligne
+    assert 'title="connexion c-1"' in links and "pers-conn" not in links and "<code" not in links
     assert "le chat web" in links and "privée" in links and "en ligne" in here

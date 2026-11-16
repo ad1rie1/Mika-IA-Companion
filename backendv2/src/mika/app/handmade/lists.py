@@ -32,17 +32,19 @@ def row_keys(table: Table, kind: str) -> list[str]:
     return [subject_key(r.href, kind) if isinstance(r, Row) else "" for r in table.rows]
 
 
-def forms_for(ui: UI, forms: Any, action: str, keys: Iterable[str], query: Mapping[str, str],
+def forms_for(ui: UI, forms: Any, action: str, keys: Iterable[str], query: Mapping[str, str], *, fill: str = "",
               **extra: Any) -> dict[str, dict[str, Any]]:
     """Le formulaire d'une action d'objet sur chacun de ces objets (« Retirer » sur la ligne d'un fichier), préparé par
     la console comme ceux de ses blocs — son jeton, son retour —, l'objet pour sujet (``_sujet``) : l'action se fait
     sur sa ligne comme sur sa fiche. Seuls les objets où elle est offerte (``available``) en ont un ; sans formulaires
-    (un rendu hors d'une page), aucun. ``extra`` : ce que la ligne dit autrement (son bouton, sa confirmation)."""
+    (un rendu hors d'une page), aucun. ``fill`` : le champ caché que la clé remplit aussi, pour une action qui dit
+    son élément par un champ plutôt que par un objet déclaré (une promesse, un moment de la Mémoire, ADR 0230).
+    ``extra`` : ce que la ligne dit autrement (son bouton, sa confirmation)."""
     if not isinstance(forms, Forms):
         return {}
     out: dict[str, dict[str, Any]] = {}
     for key in dict.fromkeys(k for k in keys if k):
-        slots = render.blocks([ActionSlot(action)], ui.env(), query)
+        slots = render.blocks([ActionSlot(action, ((fill, key),) if fill else ())], ui.env(), query)
         got = forms.of(slots, key).get(slots[0]["slot"])
         if got is not None:
             out[key] = {**got, **extra}
@@ -139,8 +141,9 @@ def card(got: dict[str, Any], name: str = "", roles: Roles | None = None) -> dic
 
 
 def card_as(got: dict[str, Any], name: str = "", roles: Roles | None = None, *, quiet: bool = False) -> dict[str, Any]:
-    """Une liste déjà rendue par la console, prête pour une carte — sans ce qui ne dit rien sur cette fiche : l'état
-    ordinaire, un champ vide, le nom de la personne dont c'est la fiche, une pagination d'une seule page. Une liste
+    """Une liste déjà rendue par la console, prête pour une carte — sans ce qui ne dit rien : une étiquette ou un champ
+    vide (« — »), et sur la fiche de quelqu'un (``quiet``) l'état ordinaire et le nom de la personne dont c'est la
+    fiche ; ni une pagination d'une seule page. Une liste
     sans rôles déclarés (un tableau simple) prend ceux de ``roles`` (par défaut : sa première cellule qui est un
     lien en titre, le reste en faits)."""
     if roles is None and not got.get("layout"):
@@ -152,7 +155,9 @@ def card_as(got: dict[str, Any], name: str = "", roles: Roles | None = None, *, 
     for row in got["rows"]:
         if roles is not None:
             _roled(row, labels, roles)
-        row["badges"] = [b for b in row.get("badges", []) if not (quiet and text(b).casefold() in ORDINARY)]
+        # une étiquette vide ou « — » (une cellule sans valeur) ne dit jamais rien, sur aucune fiche
+        row["badges"] = [b for b in row.get("badges", []) if text(b, dash=False)
+                         and not (quiet and text(b).casefold() in ORDINARY)]
         row["fields"] = [f for f in row.get("fields", []) if text(f["value"]) not in ("", "—")
                          and not (f["label"] in WHOSE and name and text(f["value"]) == name)]
         _lift_time(row)

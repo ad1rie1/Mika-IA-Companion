@@ -1,6 +1,9 @@
 {# La fiche d'une conversation Teams, son fil dessiné (app/handmade/subjects/teams.py, ADR 0069, 0121) : les messages en
-   bulles, jour par jour — les autres à gauche, toi à droite —, les questions marquées ; ce qu'elle a préparé ici, et
-   le formulaire qui lui demande une réponse (celui de la console). #}
+   bulles, jour par jour — les autres à gauche, toi à droite —, les questions marquées ; écrire soi-même dans la
+   conversation (ADR 0231 : la note de la vue dit sous quel nom il part, la confirmation du formulaire le redit ; ou
+   pourquoi rien ne part de ce compte), ce qu'elle a préparé ici, et le formulaire qui lui demande une réponse. Les
+   formulaires sont ceux de la console, sans le repli de la vue ni leur titre : chaque carte porte déjà le nom de son
+   geste, et sa description dit le reste (audit du 2026-11-05, C4-06). #}
 {% from "handmade/shared/drawn.html" import one with context %}
 <div class="now-page teams-thread">
   <div class="now-grid two">
@@ -24,6 +27,14 @@
     </section>
 
     <div class="now-stack">
+      {% if write or off %}
+      <section class="now-card" aria-labelledby="teams-write">
+        <header class="now-card-head"><h2 id="teams-write">Écrire dans cette conversation</h2></header>
+        {% if write %}{% for b in write %}{{ one(b, 1) }}{% endfor %}
+        {% else %}{% for n in off %}<p class="now-empty">{{ n.text }}</p>{% endfor %}{% endif %}
+      </section>
+      {% endif %}
+
       <section class="now-card" aria-labelledby="teams-hers">
         <header class="now-card-head"><h2 id="teams-hers">Ce qu'elle a préparé ici</h2><a class="now-more" href="{{ PREFIX }}/teams/reponses">toutes ses réponses →</a></header>
         {% if drafts %}
@@ -39,7 +50,7 @@
       </section>
 
       <section class="now-card" aria-labelledby="teams-ask">
-        <header class="now-card-head"><h2 id="teams-ask">Lui demander une réponse</h2><p>Au dernier message reçu, selon le mode réglé pour cette conversation.</p></header>
+        <header class="now-card-head"><h2 id="teams-ask">Lui demander une réponse</h2>{% if not ask %}<p>Au dernier message reçu, selon le mode réglé pour cette conversation.</p>{% endif %}</header>
         {% if ask %}{% for b in ask %}{{ one(b, 1) }}{% endfor %}
         {% elif under_way %}<p class="now-empty">une réponse est déjà en chemin dans cette conversation</p>
         {% else %}<p class="now-empty">aucun message reçu auquel répondre</p>{% endif %}

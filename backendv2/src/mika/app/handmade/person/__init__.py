@@ -16,9 +16,10 @@ Réservée aux opérateurs, comme la console (secrets compris) ; elle se relit s
 la page de sa personne.
 
 Son en-tête dit aussi si un de ses moyens de communication est un compte (utilisateur ou opérateur) et mène à sa page
-(Réglages › Comptes). Son onglet Comptes réunit en sous-onglets ses boîtes et ses comptes Teams (les listes des
-plugins), puis les services qu'elle a branchés et ses partages, lus dans les réglages (``owned``). Son onglet Voyages
-(``voyages.py``) montre ses voyages et sert leur GPX ; un opérateur peut y en supprimer un, rien de plus (ADR 0204).
+(Réglages › Comptes) et à ses droits exacts (Réglages › Droits). Son onglet Comptes réunit en sous-onglets ses boîtes
+et ses comptes Teams (les listes des plugins), puis les services qu'elle a branchés et ses partages, lus dans les
+réglages (``owned``). Son onglet Voyages (``voyages.py``) montre ses voyages et sert leur GPX ; un opérateur peut y en
+supprimer un, rien de plus (ADR 0204). Les onglets de sa barre disent leur compte (``PersonOverview.counts``).
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ from typing import Any
 from urllib.parse import quote, urlencode
 
 from markupsafe import Markup
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 from starlette.routing import Route
@@ -63,6 +64,7 @@ from mika.app.handmade.person.senses import phone_tab, position_tab
 from mika.app.handmade.person.voyages import GPX as TRIP_GPX
 from mika.app.handmade.person.voyages import gpx as trip_gpx
 from mika.app.handmade.person.voyages import voyages
+from mika.app.handmade.rights import UNSHARE, retiring
 from mika.app.handmade.tabs import anchored
 from mika.app.me import OUTBOUND
 from mika.app.me.sharing import Shared, every_share, given_and_received, service_shares, sharer
@@ -79,24 +81,30 @@ from mika.faculties.affect import prose
 from mika.faculties.attention.inspect import ORIGIN_FR as THOUGHT_ORIGIN_FR
 from mika.faculties.goals.inspect import KIND_FR as GOAL_KIND_FR
 from mika.faculties.goals.inspect import STATUS_FR as GOAL_STATUS_FR
+from mika.faculties.goals.inspect import of_person as goals_of
 from mika.faculties.memory.inspect import ORIGIN_SHORT, SENSITIVITY_FR
+from mika.faculties.memory.inspect import person_total as memory_total
+from mika.faculties.projects.inspect import of_person as projects_of
 from mika.faculties.social.inspect import CLOSENESS_FR
 from mika.faculties.social.sections import profile_parts, refs_of
 from mika.inspector import render
+from mika.inspector.pages.accounts import rights_url
 from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import PREFIX, UI, Overview, env, secure
 from mika.kernel.clock import DAY, US
-from mika.kernel.inspect import Fields, Head, Note, Section, Table, num_fr, pct_fr
+from mika.kernel.inspect import Fields, Head, Note, Section, Table, num_fr, pct_fr, plural
 from mika.plugins.teams.inspect import ACCOUNT as TEAMS_ACCOUNT
 from mika.plugins.teams.inspect import SECTION as TEAMS_SECTION
 from mika.plugins.teams.inspect import WHOSE as TEAMS_WHOSE
 from mika.plugins.teams.inspect import YOURS
+from mika.plugins.trips import TRIPS, trips_of
 from mika.runtime.boundary import Failed, call
 from mika.vocab import affect as A
 from mika.vocab import privacy
 from mika.vocab.access import PERSON, SHARES
 from mika.vocab.knowledge import knowns
 from mika.vocab.people import is_identifiable
+from mika.vocab.words import elided
 
 #: la page, et le fragment qu'elle relit
 BASE = PERSON_BASE
@@ -121,13 +129,6 @@ RELATION_FR = {"friend": "amitié", "family": "famille", "partner": "en couple",
                "acquaintance": "connaissance", "hostile": "en froid"}
 RELATION_STATUS_FR = {"ended": "fini", "uncertain": "incertain"}
 WEEKDAY_SHORT = ("lun", "", "mer", "", "ven", "", "")
-#: devant un nom qui commence par une voyelle, « de » et « que » s'élident (« d'Adrien », « qu'Adrien »)
-VOWELS = frozenset("aeiouyàâäéèêëîïôöùûüÿœæ")
-
-
-def elided(word: str, name: str) -> str:
-    """« de Béa », « d'Adrien » ; « que Béa », « qu'Adrien »."""
-    return f"{word[:-1]}'{name}" if name[:1].lower() in VOWELS else f"{word} {name}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,7 +183,9 @@ def heading(look: Look, who: Who) -> dict[str, Any]:
     if contact.days:
         facts.append(f"{contact.days} jour{'s' if contact.days > 1 else ''} de contact")
     if contact.inbound:
-        facts.append(f"{contact.inbound} message{'s' if contact.inbound > 1 else ''} reçu{'s' if contact.inbound > 1 else ''}")
+        # ceux que compte la faculté sociale : un message entendu dans un groupe sans lui être adressé n'y est pas
+        # (Échanges les compte tous, « reçus »)
+        facts.append(plural(contact.inbound, "message adressé à elle", "messages adressés à elle"))
     if contact.last_in:
         facts.append(f"le dernier {look.ago(contact.last_in)}")
     count = len(who.handles)
@@ -199,9 +202,11 @@ def heading(look: Look, who: Who) -> dict[str, Any]:
         "where": f"{count} moyen{'s' if count > 1 else ''} de communication" + (f" · {view.channel}, {how}" if view.channel else ""),
         "where_href": subject_url("person", person, "adresses"),
         "toward": f"{PREFIX}/decisions/envers?personne={quote(person, safe='')}",
-        # un de ses moyens de communication est un compte : lequel, et sa page (Réglages › Comptes)
+        # un de ses moyens de communication est un compte : lequel, sa page (Réglages › Comptes) et ses droits exacts
+        # (Réglages › Droits, par son chat web en privé)
         "account": {"kind": "compte opérateur" if account.operator else "compte utilisateur",
-                    "off": not account.active, "href": f"{ACCOUNTS}?compte={account.id}"} if account else None,
+                    "off": not account.active, "href": f"{ACCOUNTS}?compte={account.id}",
+                    "rights": rights_url(frame, person)} if account else None,
     }
 
 
@@ -550,22 +555,26 @@ def _resource(s: Shared) -> dict[str, str]:
 def shares(look: Look, who: Who) -> dict[str, list[dict[str, Any]]]:
     """Ce qu'elle partage et ce qu'on lui partage (ADR 0188) : ses boîtes, ses comptes Teams et ses services, lus dans
     les réglages comme Réglages › Droits › Partages et Paramètres › Partages (``every_share``, ADR 0210), et triés par
-    la même règle (``given_and_received`` : une ressource « à toi » est à chacune de ses propriétaires). Lecture
-    seule ; sans réglages joignables, rien."""
+    la même règle (``given_and_received`` : une ressource « à toi » est à chacune de ses propriétaires). Chacun porte
+    de quoi le retirer, comme dans Droits (``off`` : ``rights.retiring``, ADR 0210) ; sans réglages joignables, rien."""
     settings = look.ui.deps.settings
     if settings is None:
         return {"given": [], "received": []}
     owner = bool(look.frame.get(identity_c.IS_OWNER(who.person)))
     given, received = given_and_received(every_share(settings), who.person, owner=owner)
-    return {"given": [{**_resource(s), **_with(look, s.person, s.level)} for s in given],
-            "received": [{**_resource(s), "owner": sharer(look.frame, s, look.name), "level": LEVEL_FR.get(s.level, s.level)}
-                         for s in received]}
+    return {"given": [{**_resource(s), **_with(look, s.person, s.level), "off": retiring(look.ui, s)} for s in given],
+            "received": [{**_resource(s), "owner": sharer(look.frame, s, look.name), "level": LEVEL_FR.get(s.level, s.level),
+                          "off": retiring(look.ui, s)} for s in received]}
 
 
-def owned(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str]) -> Markup | None:
+def owned(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str],
+          forms: Mapping[str, Any] | None = None) -> Markup | None:
     """L'onglet Comptes, dessiné : en sous-onglets, ses boîtes et ses comptes Teams (les listes des plugins, réunies
     par ``joined``, ADR 0185, 0186), puis ses services et ses partages, lus dans les réglages (ADR 0188, 0192) — ce
-    que la console voit de tous, en lecture seule (chacun les règle dans son espace)."""
+    que la console voit de tous. Chacun les donne et les règle dans son espace ; la console retire un partage de
+    boîte ou de compte Teams (« Retirer », le geste de Réglages › Droits › Partages, ADR 0210 : confirmé, audité,
+    retour sur ce sous-onglet), et mène aux lignes d'accès d'un service. Le jeton du formulaire est celui de la page
+    (``forms.csrf``) : sans lui (un rendu hors d'une page), pas de « Retirer »."""
     sections = list(blocks) if blocks and all(isinstance(b, Section) for b in blocks) \
         else [Section(OWNED[0][1], tuple(blocks))]
     shown, name, counter = ui.env(), ui.names.name_of(key), [0]
@@ -584,7 +593,8 @@ def owned(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str]) -> 
               {"id": "partages", "label": "Partages", "count": len(shared["given"]) + len(shared["received"]),
                "shares": shared}]
     return Markup(env.get_template("handmade/person/tabs/comptes.html").render(
-        panes=panes, name=who.name, of=elided("de", who.name), that=elided("que", who.name)))
+        panes=panes, name=who.name, of=elided(who.name, "de"), that=elided(who.name, "que"),
+        unshare=UNSHARE, csrf=getattr(forms, "csrf", ""), back=subject_url("person", key, "boites") + "#partages"))
 
 
 # ── la page ──
@@ -614,9 +624,64 @@ TABS: dict[str, Callable[[UI, str, Sequence[Any], Mapping[str, str]], Any]] = {
     "synthese": blocks_tab, "lien": blocks_tab, "devine": blocks_tab, "affect": blocks_tab, "pensees_personne": blocks_tab,
 }
 
-#: les onglets dessinés qui posent aussi les formulaires de la console (``Forms``) : le détail bloc par bloc (« fixer la
-#: proximité »), les voyages (« Supprimer ») et les fichiers (« Retirer ») ; les autres n'en ont pas
-FORMED = (blocks_tab, voyages, files)
+#: les onglets dessinés qui posent aussi les formulaires de la console (``Forms``) : le détail bloc par bloc (la
+#: Synthèse : « C'est la personne dont on lui a parlé »), les voyages (« Supprimer »), les fichiers (« Retirer ») et
+#: Comptes (« Retirer » un partage, par le jeton de la page) ; les autres n'en ont pas
+FORMED = (blocks_tab, voyages, files, owned)
+
+# ── le compte de ses onglets ──
+
+def _count(look: Look, query: Any) -> int:
+    """Un ``COUNT`` ; une lecture en panne rend 0, qui tait le compte (jamais la fiche)."""
+    rows = _query(look, query)
+    return int(rows[0][0]) if rows else 0
+
+
+def _slice(look: Look, name: str) -> Any:
+    """La tranche d'une faculté ou d'un plugin ; ``None`` quand il n'est pas composé ici."""
+    try:
+        return look.frame.state(name)
+    except KeyError:
+        return None
+
+
+def _accounts(look: Look, who: Who) -> tuple[int, int]:
+    """Ses boîtes et ses comptes Teams, lus dans les réglages comme leurs plugins les listent (``owner`` : vide pour
+    ce qui est « à toi », quand elle est une de ses propriétaires ; ``personne:<clé>`` sinon)."""
+    settings = look.ui.deps.settings
+    if settings is None:
+        return 0, 0
+    mine = "" if look.frame.get(identity_c.IS_OWNER(who.person)) else PERSON + who.person
+    return (sum(1 for spec in settings.email().accounts.values() if spec.owner == mine),
+            sum(1 for spec in settings.teams().accounts.values() if spec.owner == mine))
+
+
+def tab_counts(look: Look, who: Who) -> dict[str, int]:
+    """Combien chaque onglet de sa barre en compte, par son nom (``Overview.counts``, la vue d'un objet) : ce qui se
+    lit au frame (ses moyens de communication, ses voyages, ses buts, ses projets) et dans les réglages (Comptes :
+    ses boîtes, ses comptes Teams, ses services, ses partages), et deux ``COUNT`` d'une requête chacun — ses messages
+    (le fil, comme ``_history``) et ce que liste sa Mémoire (compté par la mémoire, aux clauses de son onglet : tous
+    statuts, comme sa bande de chiffres). Fichiers n'en a pas : ses deux listes sont à deux facultés, chacune sa
+    table ; les onglets repliés sous « Le détail » non plus."""
+    frame, person = look.frame, who.person
+    handles = sorted({person, *who.handles})
+    t = transcript_c.thread_table()
+    known = call(memory_total, _store(look), frame, person, label="lecture")
+    boxes, teams = _accounts(look, who)
+    shared = shares(look, who)
+    trips, goals, projects = _slice(look, TRIPS.name), _slice(look, "goals"), _slice(look, "projects")
+    return {
+        "adresses": len(who.handles),
+        "echanges": _count(look, select(func.count()).select_from(t).where(t.c.person.in_(handles))),
+        "memoire": 0 if isinstance(known, Failed) else known,
+        # Comptes réunit Teams (``joined``) ; sans Comptes, Teams est un onglet à lui
+        "boites": boxes + teams + len(services(look, who)) + len(shared["given"]) + len(shared["received"]),
+        "teams": teams,
+        "voyages": len(trips_of(trips, frame.get, person)),
+        "buts": len(goals_of(goals, handles)) if goals is not None else 0,
+        "projets": len(projects_of(projects, handles)) if projects is not None else 0,
+    }
+
 
 #: chaque partie de la page, lue à part
 PARTS: tuple[tuple[str, Callable[[Look, Who], dict[str, Any]]], ...] = (
@@ -652,8 +717,15 @@ class PersonOverview(Overview):
         who = who_of(look, person)
         parts = tuple((key, lambda lk, fn=fn: fn(lk, who)) for key, fn in PARTS)
         return {"name": who.name, "stamp": look.frame.local(look.now).strftime("%H:%M:%S"),
-                "fiche": subject_url("person", who.person), "of": elided("de", who.name), "that": elided("que", who.name),
+                "fiche": subject_url("person", who.person), "of": elided(who.name, "de"), "that": elided(who.name, "que"),
                 **read_parts(look, parts, f"une personne · {person}")}
+
+    def counts(self, ui: UI, key: str) -> Mapping[str, int]:
+        """Le compte de chaque onglet de sa barre (``tab_counts``) ; une personne qu'elle ne connaît pas, aucun."""
+        if not self.known(ui, key):
+            return {}
+        look = Look.of(ui, DAY)
+        return tab_counts(look, who_of(look, key))
 
     @staticmethod
     def known(ui: UI, person: str) -> bool:

@@ -455,7 +455,8 @@ def export(out: Path) -> list[str]:
                      "/inspecteur/reglages/comportement-affect?groupe=repos-et-ancre",
                      "/inspecteur/reglages/comptes?nouveau=utilisateur",
                      "/inspecteur/reglages/comptes?nouveau=operateur", "/inspecteur/recherche?q=a",
-                     "/inspecteur/action/projects.creer?retour=/inspecteur/projets"]
+                     "/inspecteur/action/projects.creer?retour=/inspecteur/projets",
+                     "/inspecteur/action/goals.programmer?retour=/inspecteur/buts/vivants"]
             for url in dict.fromkeys(u for u in urls if u):
                 r = client.get(url, follow_redirects=True)
                 if r.status_code != 200:  # une page en erreur ne s'exporte pas comme si de rien n'était

@@ -8,11 +8,17 @@ from __future__ import annotations
 import html
 import re
 
+from sqlalchemy import func, select
+
 from mika.app.handmade import person
 from mika.contracts import memory as memory_c
+from mika.contracts import others as others_c
+from mika.contracts import transcript as transcript_c
 from mika.kernel.clock import DAY
 from mika.kernel.events import Content, Origin
 from tests.fixtures.console_html import ConsoleHTML
+from tests.protocol.test_moi_mail import post as moi_post
+from tests.protocol.test_moi_mcp import SERVICE
 from tests.protocol.test_now_page import THOUGHT, chat, think
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 
@@ -150,9 +156,67 @@ def test_a_failing_overview_falls_back_on_the_tabs(world, monkeypatch):  # noqa:
     assert '<summary class="tab on">Le détail · Synthèse' in html.unescape(page.text)
 
 
-def test_de_and_que_elide_before_a_vowel():
-    assert person.elided("de", "Adrien") == "d'Adrien" and person.elided("de", "Béa") == "de Béa"
-    assert person.elided("que", "Élise") == "qu'Élise" and person.elided("que", "Sam") == "que Sam"
+def test_the_head_leads_to_her_account_and_her_rights(world):  # noqa: F811
+    """Un de ses moyens de communication est un compte : l'en-tête mène à sa page et à ses droits exacts, par son chat
+    web en privé (C3-05) — sa propriétaire s'y lit « toi »."""
+    client, _, _ = world
+    bootstrap(client)
+    text = html.unescape(client.get(PAGE).text)
+    links = text.split('class="person-head-links"', 1)[1].split("</p>", 1)[0]
+    assert re.search(r'href="/inspecteur/reglages/comptes\?compte=\d+">Modifier le compte</a>'
+                     r'<span aria-hidden="true">·</span>'
+                     r'<a href="/inspecteur/reglages/droits\?qui=toi&canal=web%3Aprive">Ses droits</a>', links)
+
+
+def tab_counts(text: str) -> dict[str, int]:
+    """Le compte que chaque onglet de la barre dit, par son nom (``onglet=…``)."""
+    return {tab: int(n) for tab, n in re.findall(
+        rf'<a class="tab(?: on)?" href="{re.escape(PAGE)}\?onglet=([a-z_]+)"[^>]*>[^<]+<span class="tab-n now-num">(\d+)</span>',
+        text)}
+
+
+def test_each_tab_says_its_count(world):  # noqa: F811
+    """La vue d'un objet dit le compte de ses onglets (C3-16) : ses moyens de communication, ses messages, ce qu'elle
+    sait d'elle — le compte que l'onglet montre, un souvenir démenti compris (il y reste, « démenti ») ; la bande de
+    chiffres de sa Mémoire s'accorde au nombre (C3-17)."""
+    client, live, _ = world
+    bootstrap(client)
+    chat(client)
+    note(client, live)
+    store, t, v = live.kernel.ports["store"], transcript_c.thread_table(), memory_c.LEDGER
+
+    async def retract():  # le dernier souvenir noté, celui de ``note`` (sur le fil du serveur, qui tient la base)
+        item = store.query_mind(select(v.c.id).where(v.c.kind == memory_c.EPISODE_MEMORY).order_by(v.c.id.desc()))[0][0]
+        await live.kernel.mind.append([memory_c.RETRACTED.draft(item=item)], emitter="memory", origin=Origin.GENESIS,
+                                      correlation="test-un-dementi")
+
+    async def count():
+        return store.query_mind(select(func.count()).select_from(t).where(t.c.person == "user_1"))[0][0]
+    client.portal.call(retract)
+    counts = tab_counts(html.unescape(client.get(PAGE).text))
+    assert counts["adresses"] == 1
+    messages = client.portal.call(count)
+    assert messages >= 2 and counts["echanges"] == messages
+    memory = html.unescape(client.get(f"{PAGE}?onglet=memoire").text)
+    said = dict((label, int(n)) for n, label in re.findall(r'<span class="now-num">(\d+)</span> ([^<]+)</li>', memory))
+    assert said["moment de sa vie"] == 1 and "moments de sa vie" not in said
+    kinds = [n for label, n in said.items() if label.startswith(("souvenir", "croyance", "promesse", "moment"))]
+    assert len(kinds) == 4 and counts["memoire"] == sum(kinds) >= 2
+    # un onglet replié sous « Le détail » n'en dit pas ; Fichiers non plus (deux facultés, deux tables)
+    assert "fichiers" not in counts and not {"synthese", "lien", "devine", "affect"} & set(counts)
+
+
+def test_her_accounts_tab_counts_its_panes_and_cites_no_adr(world):  # noqa: F811
+    """Comptes : son compte dans la barre est celui de ses sous-onglets (son compte Teams, le service qu'elle a
+    branché) ; ses phrases élident « que » devant son nom et ne citent aucun numéro d'ADR (C3-19)."""
+    client, _, _ = world
+    bootstrap(client)
+    assert moi_post(client, "/mcp/plug", SERVICE).status_code == 200
+    tab = html.unescape(client.get(f"{PAGE}?onglet=boites").text)
+    panes = [int(n) for n in re.findall(r'<span class="hm-count">(\d+)</span>', tab)]
+    assert sum(panes) >= 2 and tab_counts(tab)["boites"] == sum(panes)
+    assert "Ce qu'adrien a branché depuis son espace" in tab and "Les services d'adrien" in tab
+    assert "(ADR" not in tab
 
 
 def test_exchanges_are_a_conversation(world):  # noqa: F811
@@ -194,6 +258,25 @@ def test_memory_is_four_cards(world):  # noqa: F811
     assert 'name="q"' in text and '<table class="tbl">' not in text
     nothing = html.unescape(client.get(f"{PAGE}?onglet=memoire&q=rien-de-tel").text)
     assert "aucun résultat pour cette recherche" in nothing and SOUVENIR not in nothing
+
+
+def test_the_origin_of_a_belief_stays_a_fact_in_words(world):  # noqa: F811
+    """L'origine d'une croyance est une étiquette dans la vue de la mémoire (sa clé, que lit l'onglet Mémoire de la
+    console) ; sur la fiche, elle reste un fait en mots, comme ses voisins — pas une pastille sans ton."""
+    client, live, _ = world
+    bootstrap(client)
+
+    async def go():
+        await live.kernel.mind.append([memory_c.BELIEVED.draft(
+            text=Content.of("Il préfère le café serré."), about=("user_1",), origin=memory_c.TOLD, source="user_1",
+            confidence=0.8)], emitter="memory", origin=Origin.GENESIS, correlation="test-une-croyance")
+    client.portal.call(go)
+    text = html.unescape(client.get(f"{PAGE}?onglet=memoire").text)
+    beliefs = text[text.index("kind-croyances"):text.index("kind-souvenirs")]
+    assert "Il préfère le café serré." in beliefs
+    fact = re.search(r'<span class="k">origine</span> (.*?)</span>', beliefs)
+    assert fact is not None and fact.group(1).startswith("on le lui a dit (")
+    assert 'class="badge' not in fact.group(1)
 
 
 def test_every_list_tab_is_drawn(world):  # noqa: F811
@@ -239,7 +322,8 @@ def test_files_tab_carries_what_she_received_and_what_she_sent(world):  # noqa: 
 
 def test_folded_tabs_are_drawn_and_keep_their_forms(world):  # noqa: F811
     """Le détail (Synthèse, Lien, Ce qu'elle devine, Affect, Pensées) : bloc par bloc dans le vocabulaire des pages
-    dessinées ; un formulaire de la faculté (fixer la proximité) reste à la console, avec son jeton."""
+    dessinées ; « Fixer la proximité » est dans la barre de titre seule, avec son jeton — plus en bas de Lien
+    (C3-07)."""
     client, live, _ = world
     bootstrap(client)
     chat(client)
@@ -250,5 +334,34 @@ def test_folded_tabs_are_drawn_and_keep_their_forms(world):  # noqa: F811
         ConsoleHTML(page.text).check()
         assert 'class="now-page person-tab"' in page.text, tab
     link = client.get(f"{PAGE}?onglet=lien").text
-    assert 'name="csrf"' in link and link.index('class="now-page person-tab"') < link.rindex("social.proximite")
+    assert 'name="csrf"' in link and "social.proximite" in link
+    assert link.rindex("social.proximite") < link.index('class="now-page person-tab"')
     assert THOUGHT in html.unescape(client.get(f"{PAGE}?onglet=pensees_personne").text)
+
+
+def test_the_head_counts_the_messages_addressed_to_her(world):  # noqa: F811
+    """L'en-tête dit ce que compte la faculté sociale, les messages qui lui étaient adressés — Échanges compte tous
+    ceux qui sont arrivés, « reçus » : deux nombres, jamais sous le même mot (C3-10)."""
+    client, _, _ = world
+    bootstrap(client)
+    chat(client)
+    facts = re.search(r'<p class="person-head-facts">(.*?)</p>', html.unescape(client.get(PAGE).text), re.S).group(1)
+    assert "1 message adressé à elle" in facts and "reçu" not in facts
+
+
+def test_one_message_read_and_one_day_of_contact_are_said_in_the_singular(world):  # noqa: F811
+    """Ce qu'elle devine (les messages lus) et ce qu'elle ressent (les jours de contact de l'ancre) : chaque compte
+    s'accorde à son nombre (C2-09)."""
+    client, live, _ = world
+    bootstrap(client)
+    chat(client)
+
+    async def read():
+        await live.kernel.mind.append([others_c.READ.draft(person="user_1", handle="user_1", message=1, valence=0.3,
+                                                          arousal=0.4)],
+                                      emitter="others", origin=Origin.GENESIS, correlation="test-une-personne")
+    client.portal.call(read)
+    guessed = html.unescape(client.get(f"{PAGE}?onglet=devine").text)
+    assert "1 message lu" in guessed and "message(s)" not in guessed
+    felt = html.unescape(client.get(f"{PAGE}?onglet=affect").text)
+    assert "1 jour de contact" in felt and "jour(s)" not in felt

@@ -39,9 +39,8 @@
 .episode-tool.failed { border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); }
 .episode-tool .hm-code { max-height: 22em; }
 
-/* ── Un événement : ses repères, ses textes, son parcours ───────────── */
-.event-head { padding: 16px 20px; }
-.event-head .now-chips { margin-top: 0; }
+/* ── Un événement : ses textes, son parcours (ses repères sont sur la ligne de faits de l'en-tête) ── */
+.evenement .hm-chips { margin: 0; padding: 0; list-style: none; }
 .event-text { display: grid; gap: 6px; }
 .event-text + .event-text { margin-top: 14px; }
 .event-text p:last-child { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -50,7 +49,7 @@
   text-transform: uppercase; }
 .event-path dd { margin: 0; }
 .event-path .hm-chip { cursor: default; }
-.event-facts { margin-top: 16px; }
+.event-path dt span[title] { cursor: help; }
 
 /* ── La recherche : « Tout » (une carte par sorte, ses premiers liens), puis une section par sorte (ADR 0176) ── */
 .search-groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: var(--now-gap);

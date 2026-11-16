@@ -1,9 +1,20 @@
 {# La fiche d'une personne › Comptes (app/handmade/person, ``owned`` ; ADR 0185, 0186, 0188, 0192) : en sous-onglets
    (ADR 0176), ses boîtes aux lettres et ses comptes Teams (les listes des plugins), puis les services qu'elle a
-   branchés et ses partages — ce qu'elle partage, ce qu'on lui partage —, lus dans les réglages, en lecture seule. Une
-   page plus loin d'une liste rouvre son sous-onglet ; l'ancienne adresse de Teams aussi (``#teams``). La personne se
-   nomme par son nom : « elle », dans la console, c'est Mika. #}
+   branchés et ses partages — ce qu'elle partage, ce qu'on lui partage —, lus dans les réglages. Une page plus loin
+   d'une liste rouvre son sous-onglet ; l'ancienne adresse de Teams aussi (``#teams``). La personne se nomme par son
+   nom : « elle », dans la console, c'est Mika. #}
+{# « Retirer » un partage de boîte ou de compte Teams : le geste de Réglages › Droits › Partages (ADR 0210), le même
+   formulaire (``rights.retiring`` : sa sorte, sa clé, sa personne, sa question), confirmé et audité, qui revient ici
+   (``retour`` : ce sous-onglet). Un service se retire sur ses lignes d'accès : il y mène. Rien ne se donne ici :
+   seul son propriétaire partage, depuis son espace (ADR 0188). #}
 {% from "handmade/shared/list_macros.html" import entries, facts_card %}
+{% macro off(x) -%}
+{% if x.access %}<a href="{{ x.access }}">ses lignes d'accès</a>
+{%- elif csrf %}<form method="post" action="{{ unshare }}" class="inline" data-confirm="{{ x.ask }}">
+  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="kind" value="{{ x.kind }}"><input type="hidden" name="key" value="{{ x.key }}"><input type="hidden" name="person" value="{{ x.person }}"><input type="hidden" name="retour" value="{{ back }}">
+  <button class="btn quiet small danger">Retirer</button>
+</form>{% endif %}
+{%- endmacro %}
 {% macro tags(items) %}<p class="person-entry-tags">{% for t in items if t %}<span class="now-tag {{ t[1] }}">{{ t[0] }}</span>{% endfor %}</p>{% endmacro %}
 <div class="now-page person-tab">
   <div class="hm-subtabs" data-subtabs>
@@ -16,7 +27,7 @@
         {% if p.id == "services" %}
         <section class="now-card person-list" aria-labelledby="person-services-title">
           <header class="now-card-head"><h2 id="person-services-title">Les services {{ of }}</h2><span class="person-count now-num">{{ p.count }}</span>
-            <p>Ce que {{ name }} a branché depuis son espace (ADR 0192) : les outils d'un service ne servent qu'avec cette personne, par sa ligne d'accès. Leurs réglages : la fiche de chacun.</p></header>
+            <p>Ce {{ that }} a branché depuis son espace : les outils d'un service ne servent qu'avec cette personne, par sa ligne d'accès. Leurs réglages : la fiche de chacun.</p></header>
           {% if p.services %}
           <ul class="person-entries">
             {% for s in p.services %}
@@ -32,24 +43,28 @@
         {% elif p.id == "partages" %}
         <section class="now-card person-list" aria-labelledby="person-given-title">
           <header class="now-card-head"><h2 id="person-given-title">Ce {{ that }} partage</h2><span class="person-count now-num">{{ p.shares.given|length }}</span>
-            <p>Ses boîtes, ses comptes Teams et ses services, partagés depuis son espace avec une personne qui a un compte, à un niveau : lire ; lire et préparer ; s'en servir (ADR 0188).</p></header>
+            <p>Ses boîtes, ses comptes Teams et ses services, partagés depuis son espace avec une personne qui a un compte, à un niveau : lire ; lire et préparer ; s'en servir.{% if p.shares.given %} Tu peux en retirer ; donner reste à {{ name }}.{% endif %}</p></header>
           {% if p.shares.given %}
           <ul class="person-entries dense">
             {% for x in p.shares.given %}
             <li><div class="person-entry-top"><div class="person-entry-name"><p class="person-entry-title"><a href="{{ x.href }}">{{ x.title }}</a></p>{{ tags([(x.kind, ""), (x.level, "info")]) }}</div></div>
-              <div class="person-entry-foot"><p class="person-entry-facts"><span><span class="k">avec</span> <a href="{{ x.person_href }}">{{ x.name }}</a></span></p></div></li>
+              <div class="person-entry-foot"><p class="person-entry-facts"><span><span class="k">avec</span> <a href="{{ x.person_href }}">{{ x.name }}</a></span></p>
+{% if x.off.access or csrf %}
+                <div class="person-entry-more">{{ off(x.off) }}</div>{% endif %}</div></li>
             {% endfor %}
           </ul>
           {% else %}<p class="now-empty">{{ name }} ne partage rien.</p>{% endif %}
         </section>
         <section class="now-card person-list" aria-labelledby="person-received-title">
           <header class="now-card-head"><h2 id="person-received-title">Ce qu'on partage avec {{ name }}</h2><span class="person-count now-num">{{ p.shares.received|length }}</span>
-            <p>Ce qu'une autre personne lui ouvre, et à quel niveau ; la ressource reste à qui la partage.</p></header>
+            <p>Ce qu'une autre personne lui ouvre, et à quel niveau ; la ressource reste à qui la partage.{% if p.shares.received %} Tu peux le lui retirer, pas le lui donner.{% endif %}</p></header>
           {% if p.shares.received %}
           <ul class="person-entries dense">
             {% for x in p.shares.received %}
             <li><div class="person-entry-top"><div class="person-entry-name"><p class="person-entry-title"><a href="{{ x.href }}">{{ x.title }}</a></p>{{ tags([(x.kind, ""), (x.level, "info")]) }}</div></div>
-              <div class="person-entry-foot"><p class="person-entry-facts"><span><span class="k">partagé par</span> {{ x.owner }}</span></p></div></li>
+              <div class="person-entry-foot"><p class="person-entry-facts"><span><span class="k">partagé par</span> {{ x.owner }}</span></p>
+{% if x.off.access or csrf %}
+                <div class="person-entry-more">{{ off(x.off) }}</div>{% endif %}</div></li>
             {% endfor %}
           </ul>
           {% else %}<p class="now-empty">personne ne partage rien avec {{ name }}.</p>{% endif %}

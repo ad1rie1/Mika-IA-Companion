@@ -1,15 +1,10 @@
-{# Un événement du journal, dessiné (inspector/pages/journal.py, ``event_page``) : ses repères, ses textes (en bulle
-   pour une parole ou un message), son parcours dans la machine, qui il concerne, ce qu'il a déclenché, ses données
-   brutes. Le titre de la page dit déjà ce qui s'est passé. Aucun style en ligne (CSP). #}
+{# Un événement du journal, dessiné (inspector/pages/journal.py, ``event_page``) : ses textes (en bulle pour une
+   parole ou un message, titrés en mots), son parcours dans la machine (son type, qui le réduit, ce qu'il réveille, qui
+   le projette, l'état du journal qu'il a lu), qui il concerne, ce qu'il a déclenché, ses données brutes. Le titre de
+   la page dit ce qui s'est passé, le fil d'Ariane son numéro, et la ligne de faits de l'en-tête ses repères (quand,
+   émis par, son origine, son épisode). Aucun style en ligne (CSP). #}
 {% from "_navigation.html" import pager as pages %}
 <div class="now-page evenement">
-
-  <section class="now-card event-head" aria-label="Ses repères">
-    <ul class="now-chips">
-      <li>n° {{ v.number }}</li><li>{{ v.when }}</li><li>{{ v.owner }}</li><li>origine : {{ v.origin }}</li>
-    </ul>
-    <p class="now-after"><a href="{{ v.episode.href }}">{{ v.episode.label }} →</a>{% if v.why %} · <a href="{{ v.why }}">Pourquoi a-t-elle dit ça ? →</a>{% endif %}</p>
-  </section>
 
   {% if v.texts %}
   <section class="now-card" aria-labelledby="event-texts">
@@ -29,19 +24,17 @@
     <section class="now-card" aria-labelledby="event-path">
       <header class="now-card-head"><h2 id="event-path">Son parcours dans la machine</h2></header>
       <dl class="event-path">
+        <div><dt>type</dt><dd><code>{{ v.type }}</code></dd></div>
         <div><dt>réduit par</dt><dd>{% if v.readers %}<ul class="hm-chips">{% for x in v.readers %}<li class="hm-chip">{{ x }}</li>{% endfor %}</ul>{% else %}<span class="now-muted">aucune faculté</span>{% endif %}</dd></div>
         <div><dt>réveille</dt><dd>{% if v.processes %}<ul class="hm-chips">{% for x in v.processes %}<li class="hm-chip">{{ x }}</li>{% endfor %}</ul>{% else %}<span class="now-muted">aucun processus</span>{% endif %}</dd></div>
         <div><dt>projeté par</dt><dd>{% if v.projectors %}<ul class="hm-chips">{% for x in v.projectors %}<li class="hm-chip"><code>{{ x }}</code></li>{% endfor %}</ul>{% else %}<span class="now-muted">aucune projection</span>{% endif %}</dd></div>
+        <div><dt><span title="{{ v.basis.hint }}">état lu</span></dt><dd>{% if v.basis.href %}<a href="{{ v.basis.href }}">{{ v.basis.text }}</a>{% else %}<span class="now-muted">{{ v.basis.text }}</span>{% endif %}</dd></div>
       </dl>
     </section>
     <section class="now-card" aria-labelledby="event-who">
       <header class="now-card-head"><h2 id="event-who">Qui il concerne</h2></header>
       {% if v.people %}<ul class="hm-chips">{% for x in v.people %}<li class="hm-chip">{% if x.href %}<a href="{{ x.href }}">{{ x.name }}</a>{% else %}{{ x.name }}{% endif %}</li>{% endfor %}</ul>
       {% else %}<p class="now-empty">personne en particulier</p>{% endif %}
-      <dl class="person-fields episode-fields event-facts">
-        <div><dt>type</dt><dd><code>{{ v.type }}</code></dd></div>
-        <div><dt>lu sur la tête</dt><dd class="now-num">{{ v.basis }}</dd></div>
-      </dl>
     </section>
   </div>
 

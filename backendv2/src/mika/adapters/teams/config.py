@@ -32,7 +32,7 @@ class TeamsAccount(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     label: Annotated[str, Knob(label="Nom affiché", group="Le compte", advanced=False, order=5,
-                               help="Comme la console le montre (vide : la clé du compte).")] = ""
+                               help="Comme la console le montre (vide : son nom court).")] = ""
     enabled: Annotated[bool, Knob(
         label="Actif", group="Le compte", advanced=False, order=12,
         help="Décoché : son extension est refusée — rien n'arrive, rien ne part, elle n'y prépare rien ; ses "
@@ -99,9 +99,10 @@ class TeamsConfig(BaseModel):
              "est déjà reçu reste.")] = True
     accounts: Annotated[dict[str, TeamsAccount], Knob(
         label="Comptes", noun="un compte", advanced=False, order=10, key_pattern=ACCOUNT_KEY, key_rule=ACCOUNT_KEY_RULE,
+        # « clé » ne dit que le secret de son extension ; ce qui le désigne dans les réglages est son nom court
         help=f"Chaque Teams qu'une extension lui apporte : à qui il est, comment elle y écrit. Sa clé d'extension se "
-             f"crée dans l'onglet Extension de Teams. La clé d'un compte est un nom court "
-             f"({ACCOUNT_KEY_RULE}).")] = Field(default_factory=dict)
+             f"crée dans l'onglet Extension de Teams. Son nom court (son identifiant) : "
+             f"{ACCOUNT_KEY_RULE}.")] = Field(default_factory=dict)
 
     @model_validator(mode="before")
     @classmethod

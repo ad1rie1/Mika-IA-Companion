@@ -1,8 +1,8 @@
 """Tout ce que la composition déclare, la console le nomme (ADR 0042).
 
-Une section, une raison, un veto, un processus ou un événement qu'une faculté ajoute
-sans le nommer dans ``app/console.py`` se lit sous une forme générique (« Liens ·
-reciprocity », « step_origin » dans « Pourquoi a-t-elle dit ça ? ») : la promesse
+Une section, une raison, un veto, un processus, un événement ou un enrichisseur qu'une
+faculté ajoute sans le nommer dans ``app/console.py`` se lit sous une forme générique
+(« Liens · reciprocity », « step_origin » dans « Pourquoi a-t-elle dit ça ? ») : la promesse
 de l'ADR 0042 ne tenait que par vigilance. Ce garde confronte le registre de la
 composition réelle aux tables ; il échoue dès qu'une clé manque, ou qu'un libellé
 nomme ce qui n'existe plus.
@@ -28,6 +28,7 @@ from mika.contracts import agency as agency_c
 from mika.contracts import body as body_c
 from mika.contracts import social as social_c
 from mika.faculties.expression import why
+from mika.inspector.names import CONTENT_FIELDS
 from mika.inspector.names import EVENTS as CONSOLE_EVENTS
 from mika.kernel.registry import Registry
 from mika.runtime.state import RUNTIME
@@ -48,10 +49,11 @@ def _registry() -> Registry:
 def _declared() -> dict[str, set[str]]:
     reg = _registry()
     out: dict[str, set[str]] = {"faculties": set(), "sections": set(), "reasons": set(), "processes": set(),
-                                "events": set(), "initiative_reasons": set()}
+                                "events": set(), "initiative_reasons": set(), "enrichers": set()}
     for f in reg.faculties.values():
         out["faculties"].add(f.name)
         out["sections"] |= {s.key for s in f.sections}
+        out["enrichers"] |= {s.key for s in f.enrichers}
         for p in f.proposers:
             out["reasons"] |= set(p.reasons)
             if Kind.INITIATIVE in p.kinds:
@@ -111,6 +113,7 @@ def _vetoes() -> dict[str, str]:
 
 
 def test_every_section_reason_process_event_and_faculty_is_named():
+    """Les enrichisseurs aussi : sans libellé, l'onglet Prompt d'un épisode montrait leur clé (« their_last_words »)."""
     d = _declared()
     named_events = set(console.EVENT_LABELS) | set(CONSOLE_EVENTS)
     missing = {
@@ -119,10 +122,22 @@ def test_every_section_reason_process_event_and_faculty_is_named():
         "processus": sorted(d["processes"] - set(console.PROCESS_LABELS)),
         "événements": sorted(d["events"] - named_events),
         "facultés": sorted(d["faculties"] - set(console.FACULTY_LABELS)),
+        "enrichisseurs": sorted(d["enrichers"] - set(console.ENRICHER_LABELS)),
     }
     assert not any(missing.values()), f"à nommer dans app/console.py : {missing}"
     # la vague en cours en a ajouté : nommés eux aussi
     assert {"habits"} <= set(console.SECTION_LABELS) and {"follow_up"} <= set(console.REASON_LABELS)
+
+
+def test_every_content_field_of_an_event_is_named_and_no_name_is_stale():
+    """La page d'un événement titre ses textes par leur champ : sans libellé, elle montrait « text », « summary »,
+    « coords » (C5-04). Les champs de contenu se nomment dans ``inspector/names.py`` (``CONTENT_FIELDS``) : ce sont
+    des clés génériques, pas une faculté."""
+    reg = _registry()
+    declared = {f for fac in reg.faculties.values() for e in fac.events.values() for f in e.content_fields}
+    missing, stale = sorted(declared - set(CONTENT_FIELDS)), sorted(set(CONTENT_FIELDS) - declared)
+    assert not missing, f"à nommer dans inspector/names.py (CONTENT_FIELDS) : {missing}"
+    assert not stale, f"libellés sans objet dans inspector/names.py (CONTENT_FIELDS) : {stale}"
 
 
 def test_no_label_names_something_that_no_longer_exists():
@@ -133,6 +148,7 @@ def test_no_label_names_something_that_no_longer_exists():
         "raisons": sorted(set(console.REASON_LABELS) - d["reasons"]),
         "processus": sorted(set(console.PROCESS_LABELS) - d["processes"]),
         "événements": sorted(set(console.EVENT_LABELS) - d["events"]),
+        "enrichisseurs": sorted(set(console.ENRICHER_LABELS) - d["enrichers"]),
     }
     assert not any(stale.values()), f"libellés sans objet dans app/console.py : {stale}"
 

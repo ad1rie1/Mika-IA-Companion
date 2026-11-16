@@ -163,9 +163,11 @@ class Subjects:
         if overview is not None and current is not None and current.name in overview.tabs \
                 and not wants_table(request.query_params):
             query = dict(request.query_params)
-            # ses formulaires préparés au nom de l'objet de la fiche, comme ceux d'une destination (ADR 0121)
+            # ses formulaires préparés au nom de l'objet de la fiche, comme ceux d'une destination (ADR 0121), et le
+            # jeton de la page, pour un formulaire que le dessin écrit lui-même (« Retirer » un partage, Comptes)
             forms = Forms(self.pages.slot_forms(request, render.blocks(blocks, self.ui.env(), query), key),
-                          lambda rendered, subject: self.pages.slot_forms(request, rendered, subject))
+                          lambda rendered, subject: self.pages.slot_forms(request, rendered, subject),
+                          self.ui.csrf(request))
             drawn_tab = call(overview.render_tab, self.ui, key, current.name, blocks, query, forms,
                              label=f"onglet dessiné {kind}/{current.name}")
             if isinstance(drawn_tab, tuple):  # ce qu'elle a dessiné, et ce qu'elle laisse à la console

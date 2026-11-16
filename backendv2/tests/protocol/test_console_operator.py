@@ -74,16 +74,31 @@ def test_why_did_she_say_that_is_one_click_from_the_thread(world):  # noqa: F811
     assert "handmade/parole.css" in r.text and 'class="now-page parole"' in r.text
     assert "Son humeur à ce moment-là" in page and "Sa réponse, pas à pas" in page and "Le modèle principal" in page
     assert "Le contexte complet, tel qu'envoyé au modèle" in page and "QUI TU AS EN FACE" in page
-    assert "outil(s) en main" in page
+    # ses nombres accordés, jamais « (s) » (« 61 outils en main, 0 appelé. »)
+    assert re.search(r"\d+ outils? en main, \d+ appelés?\.", page) and "(s)" not in page
+    # le grand encart ne redit pas la ligne de faits de l'en-tête (à qui, quand, l'issue, la voix, le fil) : sa phrase
+    # sous « Ce qu'elle a dit », et seulement l'autrice en puce s'il y en a une
+    hero = html.unescape(r.text.split('class="now-hero parole-hero', 1)[1].split("</section>", 1)[0])
+    assert "Ce qu'elle a dit</p>" in hero and "Ce qu'elle a dit · à" not in hero
+    assert "dans le fil" not in hero and "a parlé" not in hero
+    assert all("autrice" in chip for chip in re.findall(r'<ul class="now-chips">(.*?)</ul>', hero, re.S))
+    assert "dans le fil" in page  # l'en-tête, lui, le dit toujours
+    # son humeur est le texte de son prompt, au « tu » parce qu'il s'adresse à elle : le libellé le dit, le texte est cité
+    inner = r.text.split('class="parole-inner"', 1)[1].split("</dl>", 1)[0]
+    assert "<dt>dans son prompt : son humeur</dt>" in inner and '<blockquote class="now-voice">' in inner
     # au repli (une liste demandée en tableau), les blocs de la console disent la même chose
     fallback = client.get(f"{url}?vue_x=table")
     assert fallback.status_code == 200 and "now-page parole" not in fallback.text
     ConsoleHTML(fallback.text).check()
     assert "Son humeur à ce moment-là" in html_of(fallback) and "Sa réponse, pas à pas" in html_of(fallback)
+    assert "dans son prompt : son humeur" in html_of(fallback)
     # le même lien depuis l'épisode, et depuis l'événement de la parole
     utterance = client.portal.call(lambda: live.kernel.mind.store.get_events([int(seq)]))[0]
     said = client.get(f"{BASE}/episode/{utterance.correlation}?onglet=dit").text
     assert f"/inspecteur/parole/{seq}" in said
+    # l'onglet Prompt de l'épisode reprend les mêmes libellés accordés (why.prompt_view, parole/macros.html)
+    prompt_tab = html.unescape(client.get(f"{BASE}/episode/{utterance.correlation}?onglet=prompt").text)
+    assert re.search(r"caractères?, \d+ tours? de conversation\.", prompt_tab) and "tour(s)" not in prompt_tab
     assert f"/inspecteur/parole/{seq}" in client.get(f"{BASE}/evenement/{seq}").text
     # contre-exemples : un message de la personne n'est pas une de ses paroles
     asked = client.portal.call(lambda: live.kernel.mind.store.latest([rt.PERCEPTION_RECEIVED.name], 1))[0]

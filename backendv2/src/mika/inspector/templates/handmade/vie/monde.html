@@ -1,6 +1,7 @@
 {# Elle › Humeur et corps › Monde et corps (app/handmade/tabs/life.py, ADR 0177) : une bande de chiffres (où elle est,
    ce qu'elle fait, ce qu'elle tient, son monde) ; ce qui est en route, pas à pas ; les choses rangées par où elles
-   sont ; ce qu'elle a remarqué des éditions de son monde à côté des éditions elles-mêmes. #}
+   sont ; ce qu'elle a remarqué des éditions de son monde à côté des éditions elles-mêmes. Les lieux et les choses
+   portent les mots de son monde, écrits pour elle (« ta chambre ») : la page le dit, sans les récrire. #}
 {% import "handmade/shared/tab.html" as tab with context %}
 {% import "handmade/vie/_vie.html" as vie %}
 <div class="now-page vie vie-monde" data-tab="vie/monde">
@@ -23,7 +24,7 @@
   </section>
 
   <section class="now-card" id="{{ t_things.id }}" aria-labelledby="vie-things-title">
-    {{ tab.head("Où sont les choses", "vie-things-title", t_things.count, ("dans " ~ room ~ ", " if room else "") ~ "rangées par où elles sont ; leur identifiant à côté, pour éditer son monde") }}
+    {{ tab.head("Où sont les choses", "vie-things-title", t_things.count, ("dans " ~ room ~ ", " if room else "") ~ "rangées par où elles sont, nommées comme son monde le lui dit ; leur identifiant à côté, celui que nomment ses éditions") }}
     {% if places %}
     <div class="vie-places">
       {% for g in places %}

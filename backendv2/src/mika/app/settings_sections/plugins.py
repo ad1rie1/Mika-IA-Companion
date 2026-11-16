@@ -28,12 +28,17 @@ from mika.inspector.pages.settings_form import RECORD_KEY
 from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import PREFIX
 from mika.kernel.forms import Knob
-from mika.kernel.inspect import Ref
+from mika.kernel.inspect import Ref, plural
 from mika.plugins.email.inspect.common import VOICE_LABEL
+from mika.plugins.email.inspect.common import owner_name as mailbox_owner
+from mika.plugins.teams.inspect import owner_name as teams_account_owner
 from mika.vocab.access import PERSON, SELF
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from mika.app.server import Live
+    from mika.kernel.frame import Frame
 
 log = logging.getLogger("mika.reglages")
 
@@ -128,6 +133,13 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         return [("", "Toi (ses propriétaires)"), (SELF, her),
                 *sorted(people.items(), key=lambda kv: kv[1].casefold())]
 
+    def owner_words(owner: str, name_of: Callable[[Frame, str], str]) -> str:
+        """À qui est une boîte ou un compte Teams, sur sa carte : le nom que lui donne la liste des choix (le nom
+        affiché de son compte), sinon celui que disent ses onglets (``owner_name`` du plugin : son prénom — un
+        opérateur, un compte fermé ne sont pas dans la liste) ; sa clé seulement si rien ne la nomme, jamais
+        « personne:<clé> » (audit du 2026-11-05, C4-03)."""
+        return dict(mail_owners()).get(owner) or name_of(live.kernel.mind.frame(), owner)
+
     async def save_mail(cfg: MailConfig) -> list[str]:
         """Une boîte est à toi, à elle ou à une personne qui a un compte (ADR 0185) — sauf ce qui était déjà là (un
         compte fermé depuis reste affiché, pour qu'on le corrige)."""
@@ -173,7 +185,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
             tags = [("prête", "ok")]
         tags.append((f"elle y écrit {VOICE_LABEL.get(account.voice, account.voice)}", "info"))
         if account.owner:  # à qui elle est, quand ce n'est pas à toi (ADR 0185)
-            tags.append((f"à {dict(mail_owners()).get(account.owner, account.owner)}", "owner"))
+            tags.append((f"à {owner_words(account.owner, mailbox_owner)}", "owner"))
         if account.microsoft:
             tags.append(("compte Microsoft", ""))
         reads = f"{account.imap_host} · {account.user}" if account.imap_host else "pas de serveur IMAP"
@@ -193,7 +205,8 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
     def mail_facts() -> list[tuple[str, Any]]:
         accounts = settings.email().accounts
         ready = sum(1 for a in accounts.values() if a.ready)
-        return [("Comptes", f"{len(accounts)} ({ready} prêt(s) à relever)" if accounts else "aucun"),
+        return [("Comptes", f"{len(accounts)} ({plural(ready, 'prête à relever', 'prêtes à relever')})"
+                 if accounts else "aucun"),
                 ("Lire et envoyer", Ref("local", f"{PREFIX}/courrier/reception", "Courrier › Réception"))]
 
     async def save_mcp(cfg: McpConfig) -> list[str]:
@@ -205,7 +218,8 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
     def mcp_facts() -> list[tuple[str, Any]]:
         servers = settings.mcp().servers
         ready = sum(1 for x in servers.values() if x.enabled and x.ready)
-        return [("Serveurs", f"{len(servers)} ({ready} actif(s) et prêt(s))" if servers else "aucun"),
+        return [("Serveurs", f"{len(servers)} ({plural(ready, 'actif et prêt', 'actifs et prêts')})"
+                 if servers else "aucun"),
                 ("État, outils et qui peut quoi", Ref("local", f"{PREFIX}/outils/serveurs",
                                                       "Outils › Venus d'ailleurs"))]
 
@@ -257,14 +271,14 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         store = live.kernel.ports.get("teams") if live.kernel is not None else None
         plugged = sum(1 for k in accounts if store is not None and store.configured(k))
         keyed = sum(1 for k in accounts if k in keys)
-        return [("Comptes", f"{len(accounts)} ({keyed} avec une clé, {plugged} branché(s))"),
+        return [("Comptes", f"{len(accounts)} ({keyed} avec une clé, {plural(plugged, 'branché', 'branchés')})"),
                 ("La clé de chaque extension", Ref("local", f"{PREFIX}/teams/extension", "Teams › Extension")),
                 ("Ce qu'elle prépare, comment ça part", Ref("local", f"{PREFIX}/reglages/canaux",
                                                             "Canaux, le tableau de Teams ou celui d'un compte"))]
 
     def describe_teams_account(key: str, account: Any) -> dict[str, Any]:
-        """La carte d'un compte Teams (ADR 0186) : à qui il est, sa clé, ce que son extension a apporté — et où la
-        brancher."""
+        """La carte d'un compte Teams (ADR 0186) : à qui il est, sa clé, ce que son extension a apporté — et, comme la
+        carte d'une boîte mène à sa fiche et à ses messages, son extension (où sa clé se crée) et ses conversations."""
         store = live.kernel.ports.get("teams") if live.kernel is not None else None
         info = store.account(key) if store is not None else None
         has_key = key in settings.teams_keys()
@@ -272,7 +286,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         tags = [("branché", "ok")] if plugged else [("clé créée", "info")] if has_key else [("sans clé", "warn")]
         if not account.enabled:  # décoché : son extension est refusée
             tags.insert(0, ("inactif", ""))
-        tags.append((f"à {dict(teams_owners()).get(account.owner, account.owner)}" if account.owner else "à toi",
+        tags.append((f"à {owner_words(account.owner, teams_account_owner)}" if account.owner else "à toi",
                      "owner" if account.owner else ""))
         if account.sign:
             tags.append(("signé", ""))
@@ -284,7 +298,9 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                 "lead": account.display_name or (info.self_name if info is not None and info.self_name else "") or
                 "la personne du compte (le nom que Teams donne)", "lead_plain": True,
                 "facts": [("Ton", account.tone or "—"), ("Consignes", "oui" if account.instructions.strip() else "aucune")],
-                "activity": activity, "activity_tone": "" if plugged else "warn"}
+                "activity": activity, "activity_tone": "" if plugged else "warn",
+                "links": (("Son extension", f"{PREFIX}/teams/extension?" + urlencode({"compte": key})),
+                          ("Ses conversations", f"{PREFIX}/teams/conversations?" + urlencode({"compte": key})))}
 
     # ── réveils par API (ADR 0068) ──
     def wake_tools() -> list[str]:
@@ -394,7 +410,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                         # dans Teams, en haut à droite, comme le courrier (ADR 0173, 0206)
                         pages=(SettingsPage("teams", "Paramètres", home="teams/parametres", description=(
                             "Chaque compte Teams — le tien, le sien, celui d'une personne qui a un compte — a son "
-                            "extension (frontend/Extension), qui lit ce que Teams web reçoit dans le navigateur où il "
+                            "extension, qui lit ce que Teams web reçoit dans le navigateur où il "
                             "est ouvert et l'apporte ici, avec la clé de ce compte (montrée une seule fois). Elle y "
                             "écrit à la place de la personne du compte : un brouillon posé dans Teams, un envoi après "
                             "accord, ou un envoi sans demander — toujours de ce compte, sous son nom.")),)),

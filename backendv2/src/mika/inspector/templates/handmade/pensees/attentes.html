@@ -1,6 +1,7 @@
 {# Elle › Pensées › Attentes (app/handmade/tabs/thoughts.py, ADR 0177) : la bande de chiffres de la faculté, puis en
-   sous-onglets ce qu'elle attend de qui — le temps écoulé vers l'échéance en jauge, une attente échue le dit — et les
-   attentes closes, en fil, comblées ou déçues. Une page plus ancienne du fil ouvre son sous-onglet. #}
+   sous-onglets ce qu'elle attend de qui (« La réponse d'Alice », la particule élidée devant son nom) — le
+   temps écoulé vers l'échéance en jauge, une attente échue le dit — et les attentes closes, en fil, comblées ou
+   déçues. Une page plus ancienne du fil ouvre son sous-onglet. #}
 {% import "handmade/shared/tab.html" as tab with context %}
 {% macro pane(id) -%}
 {% if id == "waits-now" %}
@@ -11,7 +12,7 @@
     <ul class="waits-list" role="list">
       {% for w in waits %}
       <li class="wait-item{{ ' late' if w.late }}{{ ' ' ~ w.tone if w.tone }}">
-        <p class="wait-what"><span class="wait-kind">{{ w.what|capitalize }}</span>{% if w.who %} <span class="now-muted">de</span> {{ tab.cell(w.who) }}{% endif %}</p>
+        <p class="wait-what"><span class="wait-kind">{{ w.what|capitalize }}</span>{% if w.who %} <span class="now-muted">{{ w.of }}</span>{{ tab.cell(w.who) }}{% endif %}</p>
         <div class="wait-clock">
           {% if w.progress is not none %}{{ tab.bar(w.progress, 'wait') }}{% endif %}
           <p class="wait-meta">
@@ -37,7 +38,7 @@
       <li class="{{ 'met' if d.met else 'missed' }}">
         <span class="waits-feed-when">{{ tab.cell(d.when) }}</span>
         <div class="waits-feed-body">
-          <p><span class="wait-kind">{{ d.what|capitalize }}</span>{% if d.who %} <span class="now-muted">de</span> {{ tab.cell(d.who) }}{% endif %} {% if d.outcome %}<span class="now-tag {{ d.outcome.tone }}">{{ d.outcome.text }}</span>{% endif %}</p>
+          <p><span class="wait-kind">{{ d.what|capitalize }}</span>{% if d.who %} <span class="now-muted">{{ d.of }}</span>{{ tab.cell(d.who) }}{% endif %} {% if d.outcome %}<span class="now-tag {{ d.outcome.tone }}">{{ d.outcome.text }}</span>{% endif %}</p>
           <p class="wait-meta">{% if d.since %}<span>attendue depuis {{ tab.cell(d.since) }}</span>{% endif %}{% if d.event %}<span>{{ tab.cell(d.event) }}</span>{% endif %}</p>
         </div>
       </li>

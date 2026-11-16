@@ -24,13 +24,17 @@ from mika.app import console
 from mika.app.composition import arbitration, faculties, policies
 from mika.inspector import names
 from mika.inspector.catalog import Labels
+from mika.inspector.pages.journal import RESUMED, reply_trigger_cell, trigger_cell
 from mika.kernel import forms
 from mika.kernel import inspect as kernel_inspect
 from mika.kernel.episode import Outcome
+from mika.kernel.events import Origin
 from mika.kernel.faculty import NIGHT_LANE, PROCESS_LANES
 from mika.kernel.inspect import (
     INT_MAX,
     InspectContext,
+    Ref,
+    Text,
     agree,
     cursor_page,
     int_query,
@@ -194,6 +198,44 @@ def test_a_capability_without_a_short_name_reads_by_its_sentence():
     assert shown.capability_short("b.autre_geste")
 
 
+def test_an_enricher_is_named_by_what_it_gathers():
+    """L'onglet Prompt d'un épisode nommait ses enrichisseurs par leur clé (« their_last_words ») : son libellé ; sans
+    libellé, sa faculté et sa clé lisible ; inconnu du registre, sa clé lisible — jamais un trou."""
+    kernel = SimpleNamespace(registry=SimpleNamespace(enrichers=[SimpleNamespace(owner="email", key="mail_draft")]))
+    shown = names.Names(kernel, Labels(faculties={"email": "Courrier"},
+                                       enrichers={"their_last_words": "Les derniers messages de la personne"}))
+    assert shown.enricher("their_last_words") == "Les derniers messages de la personne"
+    assert shown.enricher("mail_draft") == "Courrier · mail draft"
+    assert shown.enricher("nulle_part") == "nulle part"
+    # la composition réelle les nomme tous (le garde de tests/architecture/test_console_labels.py)
+    real = names.Names(SimpleNamespace(registry=Registry([RUNTIME, *faculties()], arbitration=arbitration())),
+                       console.LABELS)
+    assert real.enricher("thread") == "Le fil de la conversation"
+
+
+def test_an_episode_trigger_is_said_in_words():
+    """« déclencheur perception:20 » sur les onglets Prompt et Décision d'un épisode : le message, en lien ; un choix de
+    l'arbitre ; ce qu'un prélude précède. Une forme inconnue reste telle quelle, en chasse fixe."""
+    assert trigger_cell("perception:20") == Ref("event", "20", "message n° 20")
+    assert trigger_cell("reprise:7") == Ref("event", "7", "message n° 7, repris après une interruption")
+    assert trigger_cell("selected:31") == "un choix de l'arbitre"
+    assert trigger_cell("prélude:perception:20") == Ref("event", "20", "avant la réponse au message n° 20")
+    assert trigger_cell("prélude:selected:31") == "avant ce que l'arbitre a choisi"
+    assert trigger_cell("webhook:x") == Text("webhook:x", "mono") and trigger_cell("perception:x") == \
+        Text("perception:x", "mono")
+    assert trigger_cell("") == Text("—", "muted") and trigger_cell(None) == Text("—", "muted")
+
+
+def test_a_reply_trigger_says_only_what_the_message_does_not():
+    """Une réponse montre déjà son message (« Ce qui l'a lancé ») : son déclencheur ne s'y ajoute que s'il en dit plus.
+    Une reprise (``reprise:<n>`` : après un arrêt, une réponse supplantée, son réveil) le dit ; ``perception:<n>``,
+    qui est ce message, se tait."""
+    assert reply_trigger_cell("perception:20") is None and reply_trigger_cell("") is None
+    assert reply_trigger_cell(None) is None
+    assert reply_trigger_cell("reprise:7") == RESUMED == "repris après une interruption"
+    assert reply_trigger_cell("webhook:x") == Text("webhook:x", "mono")
+
+
 def test_every_capability_of_the_composition_has_a_short_name():
     declared = set(Registry([RUNTIME, *faculties()], arbitration=arbitration()).capabilities)
     assert declared == set(console.CAPABILITY_LABELS)
@@ -245,3 +287,14 @@ def test_record_names_follow_one_rule():
     assert forms.RECORD_NAME.fullmatch("local-gemma") and forms.RECORD_NAME.fullmatch("Élodie_2")
     for bad in ("<b>x</b> / ? &", "-x", "a b", "", "x" * 61):
         assert not forms.RECORD_NAME.fullmatch(bad), bad
+
+
+def test_an_event_says_where_it_comes_from_and_its_fields_in_words():
+    """La page d'un événement : son origine en mots, jamais « external » (C5-04), et un nom distinct de celui qui dit
+    d'où vient un geste d'opérateur (``ORIGINS``) ; ses champs de contenu en mots, un champ inconnu tel quel."""
+    from_kernel = {o: names.event_origin(o) for o in Origin}
+    assert from_kernel[Origin.EXTERNAL] == "de l'extérieur" and from_kernel[Origin.KERNEL] == "le noyau"
+    assert all(word != o.value for o, word in from_kernel.items()) and names.event_origin("ailleurs") == "ailleurs"
+    assert set(names.EVENT_ORIGINS) == {o.value for o in Origin} and names.EVENT_ORIGINS is not names.ORIGINS
+    assert names.content_field("text") == "le texte" and names.content_field("summary") == "le résumé"
+    assert names.content_field("inconnu") == "inconnu"

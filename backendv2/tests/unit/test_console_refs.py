@@ -14,7 +14,7 @@ from mika.app.handmade.tabs.people import person_of
 from mika.inspector import render, text
 from mika.inspector.pages.families import _tool_href
 from mika.inspector.pages.subjects import subject_url, subject_url_key
-from mika.kernel.inspect import Entry, Nav, NavItem, Ref, Row, Stat, Stats, Table, Timeline
+from mika.kernel.inspect import Badge, Entry, Nav, NavItem, Ref, Row, Stat, Stats, Table, Timeline
 from mika.vocab.people import EPHEMERAL_PREFIX
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 
@@ -136,6 +136,14 @@ def test_a_drawn_page_reads_who_a_cell_names():
     assert person_of({"href": subject_url("person", "user 3") + "?onglet=memoire"}) == "user 3"
     assert handle_of({"href": subject_url("handle", "web:x#1")}) == "web:x#1"
     assert person_of({"href": subject_url("handle", "web:x")}) == "" and person_of(None) == ""
+
+
+def test_a_badge_carries_its_key_for_a_drawn_page():
+    """Une étiquette rendue porte la clé de ce qu'elle dit (``Badge.key``), que lit un onglet dessiné ; sans clé, vide
+    (une étiquette d'une app de la Forge n'en a pas)."""
+    assert render.cell(Badge("tenue", "ok", key="honored"), ENV) == \
+        {"t": "badge", "text": "tenue", "tone": "ok", "key": "honored"}
+    assert render.cell(Badge("vif"), ENV)["key"] == ""
 
 
 def test_only_a_person_has_a_person_link():

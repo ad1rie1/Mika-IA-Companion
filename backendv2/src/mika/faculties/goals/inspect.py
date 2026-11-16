@@ -77,9 +77,11 @@ from mika.kernel.inspect import (
     Timeline,
     Toolbar,
     When,
+    agree,
     num_fr,
     paginate,
     pct_fr,
+    plural,
 )
 from mika.kernel.text import fold
 from mika.vocab.episodes import Kind, goal_target, outcome_words
@@ -444,7 +446,7 @@ def _fields(g: Goal, s: GoalsState, frame: Frame, ctx: InspectContext, texts: Ma
             ("clos", When(g.closed_at)),
             ("résultat", _text(texts, g.result_ref)),
             ("notable", f"{num_fr(g.notable, 1)}"),
-            ("raconté", "oui" if g.shared else f"non ({g.share_attempts} essai(s))"),
+            ("raconté", "oui" if g.shared else f"non ({plural(g.share_attempts, 'essai', 'essais')})"),
         ]
     return Fields(tuple(pairs), title=f"But n°{g.id}", columns=2)
 
@@ -505,10 +507,11 @@ def _plan_progress(g: Goal, p: Any) -> Meter:
     if g.tasks:
         done = sum(1 for t in g.tasks if t.status == c.TASK_DONE)
         blocked = sum(1 for t in g.tasks if t.status == c.TASK_BLOCKED)
-        label = f"{done} / {len(g.tasks)} tâches" + (f", {blocked} bloquée(s)" if blocked else "")
+        label = (f"{done} / {len(g.tasks)} {agree(len(g.tasks), 'tâche', 'tâches')}"
+                 + (f", {plural(blocked, 'bloquée', 'bloquées')}" if blocked else ""))
         return Meter(done / len(g.tasks), label, "warn" if blocked else "")
     most = budget(g, p)
-    return Meter(g.steps / most if most else 0.0, f"{g.steps} / {most} séances")
+    return Meter(g.steps / most if most else 0.0, f"{g.steps} / {most} {agree(most, 'séance', 'séances')}")
 
 
 #: la prochaine séance d'un but, dite par ``next_session`` dans toutes ses vues ; la fiche dessinée la lit dans
@@ -993,6 +996,13 @@ PERSON_COLUMNS = (Column("but", "fit"), Column("titre"), Column("sorte"), Column
                   Column("ouvert"))
 
 
+def of_person(s: GoalsState, handles: Iterable[str]) -> list[Goal]:
+    """Ses buts qui regardent cette personne (``handles`` : sa clé et ses moyens de communication) : pour elle, à lui
+    dire, ou à son sujet — l'onglet Buts de sa fiche, et son compte dans la barre (``PersonOverview.counts``)."""
+    keys = set(handles)
+    return [g for g in s.goals.values() if g.owner in keys or g.address in keys or keys & set(g.about)]
+
+
 @GOALS.inspect("buts", title="Buts", subject="person", order=70,
                description="Ce qu'elle a entrepris pour cette personne, ou à son sujet.")
 def _person_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
@@ -1000,9 +1010,7 @@ def _person_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]
     if not person:
         return [Note("Cette vue se lit sur la fiche d'une personne.", tone="muted")]
     handles = {person, *frame.get(identity_c.HANDLES(person))}
-    concerned = sorted((g for g in s.goals.values()
-                        if g.owner in handles or g.address in handles or handles & set(g.about)),
-                       key=lambda g: (not live(g, frame.now), -g.id))
+    concerned = sorted(of_person(s, handles), key=lambda g: (not live(g, frame.now), -g.id))
     page, pager = paginate(concerned, ctx.pager(size=GOALS_PAGE, total=len(concerned)))
     texts = _texts(ctx, (g.title_ref for g in page))
     rows = []

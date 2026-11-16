@@ -206,15 +206,15 @@ class MemoryParams(BaseModel):
         label="Relecture : lectures relues par nuit", group="Ce qu'elle lit", lo=1, hi=100,
         help="La nuit, elle relit au plus tant de ses lectures (les plus anciennes d'abord) en un seul appel ; le "
              "reste attend la nuit suivante.")] = 30
+    # ADR 0127 : la borne du texte relu par nuit, et celle d'un extrait
     reread_max_chars: Annotated[int, Knob(
         label="Relecture : texte relu par nuit", group="Ce qu'elle lit", lo=2_000, hi=400_000, step=1_000,
         help="Le texte de ses lectures (titres et extraits) qu'une nuit de relecture reprend au plus, en caractères : "
              "au-delà, le reste attend la nuit suivante. Sans cette borne, trente pages lues en entier dépassaient le "
-             "contexte du modèle, et le même lot échouait chaque nuit (ADR 0127).")] = 60_000
+             "contexte du modèle, et le même lot échouait chaque nuit.")] = 60_000
     reread_excerpt_chars: Annotated[int, Knob(
         label="Relecture : extrait d'une lecture", group="Ce qu'elle lit", lo=200, hi=20_000, step=100,
-        help="Ce qu'elle relit au plus d'une seule lecture, en caractères : une page entière se coupe là (ADR 0127).")] \
-        = 3_000
+        help="Ce qu'elle relit au plus d'une seule lecture, en caractères : une page entière se coupe là.")] = 3_000
     reread_max_items: Annotated[int, Knob(
         label="Relecture : ce qu'elle en garde au plus", group="Ce qu'elle lit", lo=1, hi=100,
         help="Ce qu'une relecture peut faire naître au plus (croyances, moments du monde, prévisions).")] = 30
@@ -361,11 +361,12 @@ class MemoryParams(BaseModel):
         help="Un souvenir vécu avec quelqu'un à qui elle tient s'endort moins vite : sa demi-vie est multipliée par "
              "1 + ce gain × l'attachement (une proche compte au moins pour 1, une amie pour ½). 0 : comme avec "
              "n'importe qui.")] = 2.0
+    # ADR 0107 : un ressenti fort fait d'un élément quelque chose qui se garde mieux
     charged_from: Annotated[float, Knob(
         label="Un ressenti fort : à partir de", group="Oubli", lo=0.3, hi=1.0, step=0.05,
         help="Une émotion au moins aussi intense — ce que la personne ressent ou ce qu'elle-même en ressent, jugé "
              "par la relecture — fait d'un souvenir, d'une croyance ou d'un moment quelque chose qui se garde mieux "
-             "(ci-dessous) : un moment chargé reste, comme chez tout le monde (ADR 0107).")] = 0.7
+             "(ci-dessous) : un moment chargé reste, comme chez tout le monde.")] = 0.7
     charged_importance: Annotated[float, Knob(
         label="Un ressenti fort : importance au moins", group="Oubli", lo=0.0, hi=1.0, step=0.05,
         help="L'importance minimale de ce qu'un ressenti fort accompagne (0,7 : « important ») ; l'importance que "
@@ -871,8 +872,11 @@ def _retained(s: MemoryState, e, cx) -> MemoryState:
     return s
 
 
-@MEMORY.reducer(c.REINFORCED, c.NIGHT_SORTED, c.PROMISE_RESOLVED, c.SITUATION_ENDED, c.ATTESTED, c.JOINED)
+@MEMORY.reducer(c.REINFORCED, c.NIGHT_SORTED, c.PROMISE_RESOLVED, c.SITUATION_ENDED, c.ATTESTED, c.JOINED,
+                c.RETRACTED)
 def _index_changed(s: MemoryState, e, cx) -> MemoryState:
+    """Un élément a changé de statut ou de texte : l'index des vecteurs se remet à jour (un élément démenti par
+    l'opératrice en sort, ADR 0230)."""
     return replace(s, index_revision=e.seq)
 
 

@@ -7,7 +7,8 @@
   du journal se reconstruisent ; une recherche trouve « sœur » pour « soeur », sur ce qui était déjà là aussi ;
 - une clé ``name:…`` est écrite au journal : son repli à elle ne bouge pas, comparer deux noms suit le repli commun, et
   la tranche d'``identity``, dont les réducteurs décident par cette comparaison, se reconstruit ;
-- ``size_fr`` ; ``why_words`` n'est plus dans le noyau.
+- ``size_fr`` ; ``relative_fr`` (« il y a 3 min », « dans 2 h », « à l'instant ») est au noyau, plus dans
+  ``inspector.render`` ; ``why_words`` n'est plus dans le noyau.
 - la console suit : ses recherches replient comme le noyau, ses tailles se lisent pareil, ses nombres s'écrivent
   par ``num_fr`` (les fiches des facultés n'ont plus de ``number`` à elles), ``tabs.number`` relit un nombre à la
   française dans une cellule ou un texte.
@@ -27,6 +28,7 @@ from mika.adapters.workshop import author_identity
 from mika.app import schema
 from mika.app.genesis import named
 from mika.app.handmade.tabs import number
+from mika.app.handmade.tabs import system as system_tab
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import transcript as transcript_c
@@ -42,12 +44,16 @@ from mika.faculties.projects import inspect_files as projects_files
 from mika.faculties.projects import prompt as projects_prompt
 from mika.faculties.self import inspect as self_inspect
 from mika.faculties.transcript import TRANSCRIPT
+from mika.inspector import render
+from mika.inspector import text as inspector_text
+from mika.inspector.pages import approvals as approvals_page
 from mika.inspector.pages import params, settings_directory, subjects
 from mika.inspector.pages import rights as rights_page
 from mika.inspector.pages import system as system_page
 from mika.inspector.pages import tools as tools_page
 from mika.kernel import rights as kernel_rights
-from mika.kernel.inspect import Param, num_fr, read_params, size_fr
+from mika.kernel.clock import DAY, HOUR, MINUTE
+from mika.kernel.inspect import Param, num_fr, read_params, relative_fr, size_fr
 from mika.kernel.prompt import unveiled
 from mika.kernel.state import FrozenDict
 from mika.kernel.text import clipped, fold, unaccented
@@ -265,6 +271,31 @@ def test_a_size_reads_in_french_in_base_1024(octets: int, said: str) -> None:
 @pytest.mark.parametrize("nothing", [None, float("nan"), float("inf"), True])
 def test_a_size_that_is_not_one_reads_as_a_dash(nothing) -> None:
     assert size_fr(nothing) == "—"
+
+
+# ── un instant, relatif ───────────────────────────────────────────────────
+
+NOW = 1_800_000_000_000_000
+
+
+@pytest.mark.parametrize(("delta", "said"), [
+    (-3 * MINUTE, "il y a 3 min"), (-2 * HOUR - 59 * MINUTE, "il y a 2 h"), (-4 * DAY, "il y a 4 j"),
+    (2 * HOUR, "dans 2 h"), (3 * DAY + HOUR, "dans 3 j"), (MINUTE, "dans 1 min"),
+    (0, "à l'instant"), (-44 * 1_000_000, "à l'instant"), (44 * 1_000_000, "à l'instant"),
+])
+def test_a_moment_reads_relative_to_now(delta: int, said: str) -> None:
+    assert relative_fr(NOW + delta, NOW) == said
+
+
+def test_no_moment_reads_as_a_dash() -> None:
+    assert relative_fr(0, NOW) == "—"
+
+
+def test_the_relative_moment_is_the_kernels_alone() -> None:
+    """``render.relative`` a déménagé au noyau, sans réexport : ses importeurs le prennent à sa source."""
+    assert not hasattr(render, "relative")
+    for module in (render, inspector_text, approvals_page, system_tab):
+        assert module.relative_fr is relative_fr
 
 
 # ── la console : ses recherches, ses tailles, ses nombres ─────────────────

@@ -28,6 +28,7 @@ from mika.kernel.inspect import (
     Row,
     Table,
     Text,
+    plural,
     size_fr,
 )
 from mika.ports.workshop import OutsideWorkshop
@@ -105,7 +106,7 @@ async def _files_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> lis
         acc = f"{acc}/{part}" if acc else part
         crumbs.append(NavItem(part, _folder_ref(p, acc, part), active=acc == folder))
     rows: list[Any] = [Row((_folder_ref(p, f"{folder}/{name}" if folder else name, f"{name}/"),
-                            Badge("dossier", "info"), f"{count} fichier(s)", size_fr(size), ""),
+                            Badge("dossier", "info"), plural(count, "fichier", "fichiers"), size_fr(size), ""),
                            href=_folder_ref(p, f"{folder}/{name}" if folder else name, ""))
                        for name, count, size in dirs]
     rows += [Row((_file_ref(p, path, path.rsplit("/", 1)[-1]), Badge("fichier"), "", size_fr(size),
@@ -122,8 +123,8 @@ async def _files_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> lis
         Table((Column("nom"), Column("sorte", "fit"), Column("contenu", "fit"), Column("taille", "num"),
                Column("télécharger", "fit")), tuple(rows), title=f"/{folder}" if folder else "Le dossier du projet",
               empty="ce dossier est vide",
-              caption=f"{len(tree)} fichier(s) {where}, {size_fr(total)} en tout. Un nom ouvre le fichier ici ; "
-                      "« télécharger » le rapatrie tel quel."),
+              caption=f"{plural(len(tree), 'fichier', 'fichiers')} {where}, {size_fr(total)} en tout. Un nom ouvre "
+                      "le fichier ici ; « télécharger » le rapatrie tel quel."),
         *deposit,
     ]
 

@@ -1,5 +1,5 @@
 """La fiche d'un mail (reçu ou parti) : le message, le fil, ce qu'elle en sait —
-et ce qu'on peut en faire : répondre, lui faire rédiger une réponse, ranger
+et ce qu'on peut en faire : répondre, lui demander une réponse, ranger
 (lu, suivi, archivé, déplacé, corbeille), sur le serveur."""
 
 from __future__ import annotations
@@ -40,6 +40,8 @@ from mika.kernel.inspect import (
     Timeline,
     Toolbar,
     When,
+    pct_fr,
+    plural,
 )
 from mika.kernel.operate import Done, Refused
 from mika.plugins.email import (
@@ -293,7 +295,7 @@ def _tab_message(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block
             ("original", m.ref), ("subject", forward_subject(m.subject)[:200]), ("_bouton", "Transférer le message")),
             title="Transférer", presentation="button"))
     # ce qu'on fait de chaque mail, à portée ; le reste (déplacer, jeter) dans « Plus d'actions » (ADR 0175)
-    slots.append(ActionSlot("email.rediger", title="Lui demander une réponse", presentation="button"))
+    slots.append(ActionSlot("email.rediger", presentation="button"))  # « Lui demander une réponse » : l'action
     slots.append(ActionSlot("email.archiver", presentation="button"))
     slots.append(ActionSlot("email.classer" if unread(m, s.mails.get(ref)) else "email.non_lu", presentation="button"))
     slots.append(ActionSlot("email.ne_plus_suivre" if m.flagged else "email.suivre", presentation="button"))
@@ -339,7 +341,8 @@ def _tab_thread(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]
                           text=m.who, tone="info" if m.sent else "",
                           href=Ref.subject("mail", mail_key(m.ref), ""), meta="ce mail" if m.ref == ref else "")
                     for m in result.items)
-    return [Timeline(entries, title=f"Le fil ({result.total} mail(s), du plus ancien au plus récent)",
+    count = plural(result.total, "mail", "mails")
+    return [Timeline(entries, title=f"Le fil ({count}, du plus ancien au plus récent)",
                      empty="Aucun message de cette conversation n'est disponible.", pager=pager),
             Note("Tous les messages conservés de ce compte, reçus et envoyés. ↗ : message envoyé.", tone="muted")]
 
@@ -358,7 +361,7 @@ def _tab_noticed(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block
         pairs: list[tuple[str, Any]] = [("écrit par", author(frame, sent.by, edited=sent.edited)),
                                         ("elle l'a su", When(sent.at))]
         if felt is not None:
-            pairs.append(("ce que son attention en a gardé", Meter(felt.data.weight, f"{felt.data.weight:.2f}")))
+            pairs.append(("ce que son attention en a gardé", Meter(felt.data.weight, pct_fr(felt.data.weight))))
         pairs.append(("au journal", Ref("event", str(sent.seq), f"l'événement n° {sent.seq}")))
         return [Fields(tuple(pairs), title="Ce qu'elle en sait", columns=2),
                 Prose(text, title="Ce qu'on lui en a dit") if text else Note(FORGOTTEN, tone="muted")]
@@ -375,7 +378,7 @@ def _tab_noticed(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block
     if ask is not None and exhausted(s, ref, params_of(frame)):
         blocks.append(Note(f"Tu lui as demandé d'y répondre ({ctx.when(ask.at)}), mais elle n'y est pas arrivée "
                            f"({s.attempts.get(ref, 0)} essais) : la demande est close. Tu peux la relancer "
-                           "(« Lui faire préparer une réponse »).", tone="warn"))
+                           "(« Lui demander une réponse »).", tone="warn"))
     elif ask is not None:
         blocks.append(Note(f"Tu lui as demandé d'y répondre ({ctx.when(ask.at)}) : elle le fera à son prochain "
                            "moment de travail (au réveil si elle dort).", tone="info"))
@@ -387,13 +390,14 @@ def _tab_noticed(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block
     felt = next(iter(ctx.events([attention_c.NOTICED], 1, where=("signal", seen.seq))), None)
     pairs = [
         ("remarqué", When(seen.at)), ("pertinence estimée", pertinence(seen)),
+        # son état (lu, non lu) et la réponse attendue : l'en-tête de la fiche les dit ; « important » reste, l'en-tête
+        # d'un mail lu ne le dit plus (audit du 2026-11-05, C4-04)
         ("important", "oui" if important(seen, p) else "non"),
-        ("réponse attendue", "oui" if seen.needs_reply else "non"), ("état", state_badge(seen, None, p)),
     ]
     if signal is not None:
         pairs.append(("ce que ça pourrait lui faire", emotion_cell(signal.data.emotion, signal.data.intensity or None)))
     if felt is not None:
-        pairs.append(("ce que son attention en a gardé", Meter(felt.data.weight, f"{felt.data.weight:.2f}")))
+        pairs.append(("ce que son attention en a gardé", Meter(felt.data.weight, pct_fr(felt.data.weight))))
     pairs.append(("au journal", Ref("event", str(seen.seq), f"l'événement n° {seen.seq}")))
     blocks.append(Fields(tuple(pairs), title="Ce qu'elle en a remarqué", columns=2))
     blocks.append(Prose(text, title="Ce qu'elle en a retenu") if text else
@@ -630,10 +634,10 @@ def _can_ask(s: EmailState, frame: Frame, key: str, ports: Any = None) -> bool:
     return info is not None and info.can_send
 
 
-@EMAIL.action("rediger", title="Lui faire rédiger une réponse", args=AskArgs, emits=[c.DRAFT_ASKED], subject="mail",
+@EMAIL.action("rediger", title="Lui demander une réponse", args=AskArgs, emits=[c.DRAFT_ASKED], subject="mail",
               order=30, available=_can_ask,
               description="Elle l'écrit dans la voix de la boîte, à son prochain moment de travail ; le brouillon "
-                          "attendra ton accord (Courrier › Brouillons).")
+                          "attendra ton accord (Courrier › Ses brouillons).")
 def _ask(s: EmailState, frame: Frame, args: AskArgs, ctx: Any) -> Done:
     port = ctx.ports.get("mail")
     ref = resolve(s, port, ctx.subject) if port is not None else None
@@ -645,4 +649,4 @@ def _ask(s: EmailState, frame: Frame, args: AskArgs, ctx: Any) -> Done:
     draft = c.DRAFT_ASKED.draft(mail=ref, account=m.account if m is not None else "", by=ctx.by,
                                 instruction=instruction, about=(ctx.by,) if ctx.by else ())
     return Done(drafts=(draft,), message="Demandé : elle préparera la réponse à son prochain moment de travail ; "
-                                         "tu la trouveras dans Brouillons.")
+                                         "tu la trouveras dans Ses brouillons.")

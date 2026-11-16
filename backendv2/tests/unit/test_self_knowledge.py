@@ -199,6 +199,7 @@ def test_the_console_shows_marks_thresholds_and_what_the_prompt_says():
     s = apply(SelfState(), kept(1), kept(2), kept(3))
     knowing, _passions, _leads, changes, defining = _inspect_becoming(s, Room(), NS(store=db))
     first = knowing.rows[0]
-    assert first[0] == "tenir parole" and first[1].startswith("3 tenue(s)") and "tu tiens parole" in first[3].text
+    assert first[0] == "tenir parole" and first[1].startswith("3 tenues, 0 laissée filer")
+    assert "tu tiens parole" in first[3].text
     assert changes.rows[0][0].text == JAZZ and changes.rows[0][1].text == NO_JAZZ
     assert [r[0].text for r in defining.rows] == [NO_JAZZ]  # ce qu'elle pense maintenant la définit

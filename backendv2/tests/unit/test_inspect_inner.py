@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from typing import Any
 
 from sqlalchemy.exc import OperationalError
@@ -27,6 +28,8 @@ from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import rss as rss_c
 from mika.contracts import self_ as self_c
+from mika.faculties.self import inspect as self_view
+from mika.faculties.self.params import SelfParams
 from mika.kernel.clock import DAY, US
 from mika.kernel.events import Content, Origin
 from mika.kernel.inspect import (
@@ -57,7 +60,7 @@ from tests.fixtures.mika import at_paris, boot, build, connect, said
 INNER = {
     ("memory", "souvenirs"): ("Souvenirs", "memoire", 10), ("memory", "croyances"): ("Croyances", "memoire", 20),
     ("memory", "promesses"): ("Promesses", "memoire", 30),
-    ("memory", "consolidation"): ("Consolidation", "memoire", 40),
+    ("memory", "consolidation"): ("Consolidation", "memoire", 50),
     ("attention", "pensees"): ("Pensées", "pensees", 10), ("attention", "remarque"): ("Ce qu'elle remarque", "pensees", 20),
     ("attention", "attentes"): ("Attentes", "pensees", 30),
     ("self", "soi"): ("Estime et récit", "vie", 50), ("self", "nuits"): ("Journal et rêves", "pensees", 40),
@@ -260,11 +263,25 @@ def test_on_a_fresh_kernel_every_view_reads_and_says_there_is_nothing(tmp_path):
     assert state["sa dernière lecture"] == "aucune"
     assert "pas encore de relecture" in text_of(shown[("memory", "consolidation")])
     assert "pas encore de nuit relue" in text_of(shown[("memory", "consolidation")])
+    # ses comptes s'accordent, sans « (s) » (C2-09) : zéro et un au singulier, comme en français
+    kept = next(b for b in unfolded(shown[("memory", "consolidation")])
+                if isinstance(b, Stats) and b.title == "Ce qu'elle garde")
+    assert [x.sub for x in kept.items] == ["0 fondu dans un autre", "0 remplacée", "0 tenue, 0 abandonnée"]
+    told = fields(shown[("self", "soi")], "Son récit d'elle-même")["dont"]
+    assert told.startswith("0 souvenir (") and "0 note sur elle qui la définit, 0 changement d'avis, 0 moment vécu" \
+        in told and "(s)" not in told
     assert "rien ne lui trotte dans la tête" in text_of(shown[("attention", "pensees")])
     assert "rien de remarqué" in text_of(shown[("attention", "remarque")])
     assert "elle n'attend rien de personne" in text_of(shown[("attention", "attentes")])
     soi = text_of(shown[("self", "soi")])
-    assert "0,50" in soi and "jamais bousculée" in soi and "réactivité" in soi and "humeur de fond" in soi
+    assert "jamais bousculée" in soi and "réactivité" in soi and "humeur de fond" in soi
+    # son estime et ses seuils, des parts : en %, comme sur En ce moment (C2-03) ; ses coups restent signés
+    estime = next(b for b in shown[("self", "soi")] if isinstance(b, Stats)).items[0]
+    assert (estime.label, estime.value.text) == ("Estime", "50\u202f%")
+    rules = fields(shown[("self", "soi")], "L'estime")
+    assert rules["elle doute sous"] == "35\u202f%" and rules["bornes"] == "5\u202f% – 95\u202f%"
+    assert "une initiative ignorée −0," in rules["ce qui la bouscule"]  # un coup : décimal signé
+    assert rules["ce qu'elle mène à bout"].startswith("+0,")  # un gain aussi
     assert "Elle ne s'est pas encore racontée" in soi
     curve = next(b for b in unfolded(shown[("self", "soi")]) if isinstance(b, Chart))
     assert curve.y == (0.0, 1.0) and curve.series[0].label == "Estime"
@@ -377,6 +394,8 @@ def test_after_a_conversation_she_shows_what_she_kept_and_forgetting_shows(tmp_p
 
     relecture = fields(before["consolidation"], "La consolidation")
     assert relecture["dernière relecture"] != "jamais" and relecture["fenêtres avec un passage différé"] == "0"
+    # le lien dit quand, relatif, plus la date figée de ``ctx.when`` (C2-04)
+    assert relecture["dernière relecture"].startswith(("il y a ", "à l'instant")), relecture["dernière relecture"]
     assert relecture["relu jusqu'au message"].startswith("n° ")
     runs = table(before["consolidation"], "Les dernières relectures")
     assert "faite" in column(runs, "issue")
@@ -405,8 +424,8 @@ def test_after_a_conversation_she_shows_what_she_kept_and_forgetting_shows(tmp_p
     assert len(history.rows) >= 2 and "vivante" in column(history, "maintenant")
     noticed = table(before["noticed"], "Remarqué ces dernières minutes")
     assert column(noticed, "source") == ["rss", "rss"]
-    assert sorted(column(noticed, "poids (habituation)")) == ["0,85", "1,00"]
-    assert sorted(column(noticed, "pertinence retenue")) == ["0,68", "0,80"]
+    assert sorted(column(noticed, "poids (habituation)")) == ["100\u202f%", "85\u202f%"]
+    assert sorted(column(noticed, "pertinence retenue")) == ["68\u202f%", "80\u202f%"]
     assert column(table(before["noticed"], "Tout ce qu'elle a remarqué"), "source") == ["rss", "rss"]
 
     # l'oubli : son souvenir n'est plus là ; la pensée reste, son texte non
@@ -485,7 +504,7 @@ def test_person_tabs_show_only_what_concerns_that_person_on_all_her_handles(tmp_
     thoughts = text_of(alice_att)
     assert "CANARI-MANQUE" in thoughts and "CANARI-VEXEE" not in thoughts
     waits = table(alice_att, "Ce qu'elle en attend")
-    assert column(waits, "elle attend") == ["son retour"] and column(waits, "de") == ["Alice"]
+    assert column(waits, "elle attend") == ["le retour"] and column(waits, "de") == ["Alice"]
 
     bob_mem, bob_att = shown["user_3"]
     assert "CANARI-B" in text_of(bob_mem) and "CANARI-A" not in text_of(bob_mem)
@@ -539,8 +558,22 @@ def test_esteem_is_a_measured_series_and_its_curve_is_drawn(tmp_path):
     assert seen and seen[0] == ("self.estime", 7 * DAY)
     curve = next(b for b in unfolded(blocks) if isinstance(b, Chart))
     assert curve.y == (0.0, 1.0) and len(curve.series[0].points) == 3
+    assert curve.unit == "%" and spec.unit == "%"  # sa courbe graduée en %, comme sa jauge (C2-03)
     stat = next(b for b in blocks if isinstance(b, Stats)).items[0]
-    assert isinstance(stat.value, Meter) and stat.trend is not None and "remonte vers 0,50" in stat.sub
+    assert isinstance(stat.value, Meter) and stat.trend is not None and "remonte vers 50\u202f%" in stat.sub
+    hit = next(b for b in blocks if isinstance(b, Stats)).items[1]
+    assert hit.label == "Au dernier coup" and hit.sub == "à l'instant"  # relatif, plus « le 15/11/2026 … » (C2-04)
+
+
+def test_her_esteem_heads_for_her_own_rest_said_in_percent():
+    """Son estime revient vers son niveau de repos, que son tempérament dérive (``esteem_rest``) : la tendance le dit,
+    en % (C2-03), et pas un 0,50 écrit en dur."""
+    bumped = SimpleNamespace(esteem_at=1)
+    rest = SelfParams(esteem_rest=0.6)
+    assert self_view._trend(bumped, 0.5, rest) == "remonte vers 60\u202f%"
+    assert self_view._trend(bumped, 0.7, rest) == "redescend vers 60\u202f%"
+    assert self_view._trend(bumped, 0.6, rest) == "revenue au repos"
+    assert self_view._trend(SimpleNamespace(esteem_at=0), 0.6, rest) == "au repos : jamais bousculée"
 
 
 def test_her_story_and_her_nights_show_and_a_forgotten_journal_reads_forgotten(tmp_path):
@@ -572,14 +605,21 @@ def test_her_story_and_her_nights_show_and_a_forgotten_journal_reads_forgotten(t
     assert "optimisme" in column(temperament, "curseur")
 
     full = next(b for b in nights if isinstance(b, Prose))
-    assert full.title == "Journal du 2026-09-28, en entier" and full.text == JOURNAL
+    # le jour dit en mots (la console), la clé ISO gardée pour la colonne « nuit » de l'historique
+    assert full.title == "Journal du lun. 28 sept., en entier" and full.text == JOURNAL
     timeline = next(b for b in nights if isinstance(b, Timeline))
-    assert any(e.title == "Journal du 2026-09-28" and "CANARI-JOURNAL" in e.text for e in timeline.entries)
+    assert any(e.title == "Journal du lun. 28 sept." and "CANARI-JOURNAL" in e.text for e in timeline.entries)
     assert sum(1 for e in timeline.entries if e.title.startswith("Rêve")) == min(dreamt, 14)
     history = table(nights, "Toutes ses nuits")
     kinds = column(history, "sorte")
     assert kinds.count("journal") == 1 and sum(1 for k in kinds if k.startswith("rêve")) == dreamt
     journal_row = kinds.index("journal")
+    # la sorte d'une entrée et « souvenu au réveil » portent leur clé, que lit l'onglet dessiné
+    sorts = raw_column(history, "sorte")
+    assert sorts[journal_row].key == self_view.JOURNAL_KIND
+    assert all(b.key == self_view.DREAM_KIND for b in sorts if b.text.startswith("rêve"))
+    assert column(history, "nuit")[journal_row] == "2026-09-28"
+    assert {getattr(b, "key", "") for b in raw_column(history, "souvenu au réveil")} <= {"", "yes", "no"}
     assert "CANARI-JOURNAL" in column(history, "texte")[journal_row]
     assert all(isinstance(v, Meter) for k, v in zip(kinds, raw_column(history, "vivacité"), strict=True)
                if k.startswith("rêve"))

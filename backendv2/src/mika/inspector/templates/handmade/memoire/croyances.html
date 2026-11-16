@@ -1,6 +1,7 @@
 {# Elle › Mémoire › Croyances (app/handmade/tabs/memory.py, ADR 0177) : ce qu'elle tient pour vrai, une entrée par
    croyance — sa confiance en avant (un chiffre, sa jauge), son texte, son origine (on le lui a dit, elle l'a vu, elle
-   le déduit) et qui ; une croyance remplacée s'estompe, celle qui la remplace mène à elle. La pagination et la
+   le déduit) et qui ; une croyance remplacée ou démentie s'estompe, celle qui la remplace mène à elle ; une
+   croyance active se dément (« Ce n'est pas vrai », sous « ⋯ », ADR 0230 : ``mem.foot``). La pagination et la
    bascule « Tableau » de la faculté. #}
 {% import "handmade/shared/tab.html" as tab with context %}
 {% import "handmade/memoire/macros.html" as mem with context %}

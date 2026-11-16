@@ -181,3 +181,42 @@ def test_a_mailbox_belongs_to_you_to_her_or_to_a_person(world):  # noqa: F811
     assert "Les boîtes de" in box and her in box.split("Les boîtes de", 1)[1]
     accounts = box.split("Comptes", 1)[1].split("Dossiers", 1)[0] if "Dossiers" in box else box.split("Comptes", 1)[1]
     assert "La sienne" in accounts and "La tienne" not in accounts
+
+
+def test_a_mailbox_card_names_its_owner_even_an_operator(world):  # noqa: F811
+    """La carte d'une boîte dit son propriétaire par son prénom, même quand c'est un opérateur (que la liste des choix
+    écarte : « toi » le dit déjà) — jamais « personne:<clé> » ; le nom de la liste des choix reste celui d'une
+    personne qui a un compte (audit du 2026-11-05, C4-03)."""
+    from mika.adapters.mail import MailConfig
+
+    client, live, _ = world
+    bootstrap(client)  # adrien, l'opérateur : user_1
+    bea = client.portal.call(lambda: live.accounts.create("bea", "un-mot-de-passe-long", operator=False,
+                                                          full_name="Béa Martin"))
+    box = {"address": "x@exemple.org", "imap_host": "imap.exemple.org", "user": "x"}
+    client.portal.call(live.settings.save_email, MailConfig(accounts={
+        "pro": {**box, "label": "Pro", "owner": "personne:user_1"},
+        "sienne": {**box, "label": "De Béa", "owner": f"personne:{bea.handle}"}}))
+    page = drawn(client, PAGE)
+    cards = {m.group(1): m.group(0) for m in re.finditer(
+        r'<li class="now-card mailset-box">.*?cle=(\w+)".*?</li>\s*(?=<li class="now-card|</ul>)', page, re.S)}
+    assert set(cards) == {"pro", "sienne"}
+    assert ">à adrien<" in cards["pro"] and "personne:" not in cards["pro"]
+    assert ">à Béa Martin<" in cards["sienne"]
+
+
+def test_the_mail_settings_count_ready_boxes_in_words(world, monkeypatch):  # noqa: F811
+    """« 1 prête à relever », « 2 prêtes à relever » : une boîte — jamais « prêt(s) » (audit du 2026-11-05, C4-R1)."""
+    from mika.app.settings_sections.plugins import sections
+
+    _, live, _ = world
+
+    def facts(*ready: bool) -> str:
+        boxes = {f"b{i}": SimpleNamespace(ready=r) for i, r in enumerate(ready)}
+        monkeypatch.setattr(live.settings, "email", lambda: SimpleNamespace(accounts=boxes))
+        return dict(next(s for s in sections(live) if s.key == "courrier").facts())["Comptes"]
+
+    assert facts(True) == "1 (1 prête à relever)"
+    assert facts(True, False) == "2 (1 prête à relever)"
+    assert facts(True, True, True) == "3 (3 prêtes à relever)"
+    assert facts() == "aucun"

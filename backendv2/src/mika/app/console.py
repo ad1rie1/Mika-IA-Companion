@@ -288,6 +288,7 @@ EVENT_LABELS: dict[str, str] = {
     "memory.joined": "Des croyances dites par plusieurs, réunies la nuit",
     "memory.confronted": "Deux témoins confrontés la nuit (l'un l'emporte, ou elle doute)",
     "memory.resolved": "Comment un moment a tourné (a eu lieu, annulé, reporté, ou on ne le saura pas)",
+    "memory.retracted": "Un souvenir ou une croyance démenti par l'opératrice",
     "attention.anticipated": "Un moment qui approche, attendu avec espoir ou inquiétude",
     "attention.envied": "Jalouse : quelqu'un dont elle attend la réponse écrit aux autres",
     "memory.reread": "Ses lectures relues la nuit",
@@ -387,6 +388,28 @@ CAPABILITY_LABELS: dict[str, str] = {
     "projects.steer": "Pilotage de projet",
 }
 
+#: Les enrichisseurs, nommés par ce qu'ils rassemblent pour le prompt avant qu'il s'écrive (l'onglet Prompt d'un
+#: épisode, « enrichissements »).
+ENRICHER_LABELS: dict[str, str] = {
+    "thread": "Le fil de la conversation", "recall": "Ses souvenirs rappelés",
+    "their_last_words": "Les derniers messages de la personne", "last_heard": "Le message auquel elle répond",
+    "own_words": "Ses derniers messages", "own_openings": "Ses dernières entrées en matière",
+    "profile_text": "Ce qu'elle sait de la personne", "between_us": "Ce qui n'est qu'entre elle et la personne",
+    "narrative": "Qui elle est devenue (récit de soi)", "self_changes": "Ses changements d'avis récents",
+    "passions": "Ses intérêts vécus", "night": "Sa nuit (son fil d'hier, son rêve)",
+    "thoughts": "Ce qui lui trotte dans la tête", "matter": "Ce dont elle pourrait parler",
+    "learned": "Ce qu'elle a appris en lisant", "goals": "Ses buts en cours",
+    "goals_context": "D'où vient le but, et la vie de la personne", "projects": "Ses projets",
+    "projects_tree": "L'arbre de l'atelier d'un projet", "projects_apps": "Ce qui n'a pas marché pour ses apps",
+    "projects_answer": "La réponse à sa demande d'aide (un projet)", "sent_files": "Les fichiers qu'elle a envoyés",
+    "mail": "Son courrier", "teams": "Ses conversations Teams", "phone": "Les messages du téléphone",
+    "headlines": "Les titres de ses flux", "views": "Ce que voit la caméra", "dessins": "Ses dessins",
+    "services": "Ses demandes aux outils extérieurs", "apps": "Ses apps forgées",
+    "calls": "Ses demandes à ses apps", "signals": "Ce qu'une app a mis dans sa file",
+    "news": "Ce que ses apps ont trouvé pour la personne", "wakeup": "Ses réveils par API",
+}
+
 #: Tout ce que la console nomme en français, d'un bloc.
 LABELS = Labels(faculties=FACULTY_LABELS, sections=SECTION_LABELS, reasons=REASON_LABELS, vetoes=VETO_LABELS,
-                processes=PROCESS_LABELS, events=EVENT_LABELS, bundles=BUNDLE_LABELS, capabilities=CAPABILITY_LABELS)
+                processes=PROCESS_LABELS, events=EVENT_LABELS, bundles=BUNDLE_LABELS, capabilities=CAPABILITY_LABELS,
+                enrichers=ENRICHER_LABELS)

@@ -2,14 +2,18 @@
 
 Sur la fiche d'une réponse, **exactement ce qui partira** (la signature comprise) ; quand elle attend ton accord
 (mode « après ton accord »), tu peux l'envoyer telle quelle, la retoucher (c'est alors ta version qui part : ce que
-tu as lu), la refuser (elle l'apprend, avec ta note), ou lui demander de la reprendre. Sur la fiche d'une
-conversation, tu peux lui demander de préparer une réponse au dernier message reçu.
+tu as lu), la refuser (elle l'apprend, avec ta note), ou lui demander de la reprendre ; disparue (son compte retiré
+des réglages) mais encore à décider, la refuser. Sur la fiche d'une conversation, « Écrire dans cette conversation »
+— sur tout compte (ADR 0231) : ton message part aussitôt par l'extension du compte, sous le nom de la personne de ce
+compte, ce qu'une note au-dessus du formulaire dit par son nom et que la confirmation redit ; pas quand Teams est coupé
+ou le compte décoché (``not_sending``) — et « Lui demander une réponse » au dernier message reçu.
 
 **Un Teams par personne** (ADR 0186) : chaque onglet se lit par propriétaire (« Les comptes de », ``?qui=`` : tout le
 monde, toi, elle par son nom, chaque personne qui a un compte Teams) puis par compte (``?compte=``) — un affichage,
-pas un droit. L'extension se branche compte par compte : sa clé se crée et se retire sur l'onglet Extension, qui mène
-aussi aux réglages du compte (Teams › Paramètres, la roue en haut à droite, ADR 0206). La fiche d'une personne a
-l'onglet « Teams » (``teams``) quand un compte est à elle.
+pas un droit. Sous « Tout le monde », l'onglet Réponses montre aussi celles d'un compte qui n'est plus réglé (« un
+compte retiré ») : ce que son badge compte. L'extension se branche compte par compte : sa clé se crée et se retire
+sur l'onglet Extension, qui mène aussi aux réglages du compte (Teams › Paramètres, la roue en haut à droite,
+ADR 0206). La fiche d'une personne a l'onglet « Teams » (``teams``) quand un compte est à elle.
 """
 
 from __future__ import annotations
@@ -47,6 +51,7 @@ from mika.kernel.inspect import (
     When,
     agree,
     paginate,
+    plural,
 )
 from mika.kernel.operate import Decision, Done, Refused
 from mika.plugins.teams import (
@@ -88,6 +93,14 @@ HOW_IT_GOES = "comment ses réponses partent"
 #: ses paramètres (« Actif », ses comptes) : une page de réglages, dans Teams, en haut à droite (ADR 0206)
 SETTINGS = "teams"
 NO_PORT = "Teams n'est pas branché ici."
+#: la conversation d'une réponse dont le compte n'est plus réglé (Teams › Réponses, « Tout le monde ») : le port ne la
+#: nomme plus
+RETIRED = "un compte retiré"
+#: le geste qui lui demande une réponse dans une conversation : un seul nom, celui de l'action, que le repli de la
+#: fiche reprend (comme au courrier, ADR 0175)
+ASK_TITLE = "Lui demander une réponse"
+#: le geste qui écrit soi-même dans une conversation (ADR 0189, 0231) : le nom de l'action et du repli de la fiche
+WRITE_TITLE = "Écrire dans cette conversation"
 KIND_LABEL = {"dm": "tête-à-tête", "group": "groupe", "channel": "canal", "meeting": "réunion", "other": "—"}
 STATE_LABEL = {WAITING: ("attend ton accord", "warn"), APPROVED: ("approuvée", "info"), REFUSED: ("refusée", ""),
                EXPIRED: ("pas d'accord à temps", ""),
@@ -107,6 +120,8 @@ def _clip(text: str, n: int) -> str:
 
 
 def _waiting_count(s: TeamsState, frame: Frame) -> tuple[int, str]:
+    """Le badge de l'onglet Réponses : celles qui attendent ton accord, tous comptes — ce que sa liste montre sous
+    « Tout le monde » (``_shown_replies``)."""
     n = sum(1 for d in s.drafts.values() if d.state == WAITING)
     return n, agree(n, "réponse Teams à décider", "réponses Teams à décider")
 
@@ -230,7 +245,7 @@ def _conversations(s: TeamsState, frame: Frame, ctx: InspectContext) -> list[Blo
         title = _clip(port.title(conv.account, conv.id), 80) or "sans nom"
         n = _to_answer(s, conv.account, conv.id)
         cells: tuple[Any, ...] = (Text(title), Text(KIND_LABEL.get(conv.kind, "—"), "muted"), conv.messages,
-                                  Badge(f"{n} question(s)", "warn") if n else "", When(conv.last_at))
+                                  Badge(plural(n, "question", "questions"), "warn") if n else "", When(conv.last_at))
         if several:
             cells += (Text(names.get(conv.account, conv.account), "muted"),)
         return Row(cells, href=Ref.subject("conversation_teams", conversation_key(conv.account, conv.id),
@@ -244,6 +259,19 @@ def _conversations(s: TeamsState, frame: Frame, ctx: InspectContext) -> list[Blo
                          pager=pager, empty="aucune conversation", layout="list", link_label="Lire la conversation")]
 
 
+def _shown_replies(s: TeamsState, port: Any, ctx: InspectContext) -> list[DraftSeen]:
+    """Les réponses que l'onglet Réponses montre, celles qui attendent ton accord d'abord : celles du compte choisi
+    (``?compte=``, parmi ceux qu'on montre) ; sous « Les comptes de » une personne (``?qui=``), celles de ses comptes ;
+    sous « Tout le monde », toutes — celles d'un compte qui n'est plus réglé comprises (``drop_account`` emporte son
+    brouillon, sa proposition reste au journal jusqu'à son échéance) : ce que le badge de l'onglet compte. Le seul
+    compte montré ne réduit pas la liste : ``chosen_account`` ne sert qu'au lien du pied (audit du 2026-11-05, C4-01)."""
+    wanted = ctx.param(ACCOUNT)
+    shown = {a.key for a in port.accounts()}
+    keys = {wanted} if wanted in shown else shown if whose(ctx) else None
+    return sorted((d for d in s.drafts.values() if keys is None or d.account in keys),
+                  key=lambda d: (d.state != WAITING, -d.proposal))
+
+
 @TEAMS.inspect("reponses", title="Réponses", section=SECTION, order=20, badge=_waiting_count,
                description="Ce qu'elle a préparé à la place de la personne de chaque compte, et ce que c'est devenu.")
 def _replies(s: TeamsState, frame: Frame, ctx: InspectContext) -> list[Block]:
@@ -251,21 +279,26 @@ def _replies(s: TeamsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     if port is None:
         return [Note(NO_PORT, tone="muted")]
     navs = _navs(port, ctx, frame, "reponses")
-    if not port.accounts():
+    drafts = _shown_replies(s, port, ctx)
+    if not port.accounts() and not drafts:
         return [*navs, _nothing_for(frame, ctx)]
     account = chosen_account(port, ctx)
-    keys = {account} if account else {a.key for a in port.accounts()}
-    drafts = sorted((d for d in s.drafts.values() if d.account in keys), key=lambda d: (d.state != WAITING, -d.proposal))
+    # les comptes réglés : une réponse d'un autre vient d'un compte retiré, que ``port.title`` ne nomme plus
+    known = {a.key for a in (port.port if isinstance(port, Scope) else port).accounts()}
     page, pager = paginate(drafts, ctx.pager(size=PAGE))
 
     def row(d: DraftSeen) -> Row:
-        got = port.draft(d.draft)
+        got = port.draft(d.draft) if d.draft else None
         title = _clip(port.title(d.account, d.conversation), 60)
-        return Row((Text(title or "—"), Text(_clip(got.body, 120) if got else "(disparue)"),
+        where = Text(title or "—") if d.account in known else Text(RETIRED, "muted")
+        # sa fiche, par son brouillon ; une proposition qui n'en nomme aucun n'a pas de fiche : qui attend encore se
+        # décide dans la file « À valider »
+        href = Ref.subject("reponse_teams", d.draft, title or d.draft) if d.draft else \
+            Ref.approvals("À valider › Réponses Teams", "teams") if d.state == WAITING else None
+        return Row((where, Text(_clip(got.body, 120) if got else "(disparue)"),
                     Badge("demandée" if d.asked else "d'elle-même", "info" if d.asked else ""), When(d.at),
                     _badge(d.state), Badge("retouchée", "warn") if d.edited else ""),
-                   href=Ref.subject("reponse_teams", d.draft, title or d.draft),
-                   tone="warn" if d.state == WAITING else "")
+                   href=href, tone="warn" if d.state == WAITING else "")
 
     # comment ses réponses partent : le tableau de canal du compte choisi (« teams:<clé> »), sinon celui de Teams
     # (ADR 0134 : « Envoyer à ta place » est fondu dans les canaux) ; l'onglet dessiné le met en pied (ADR 0218)
@@ -320,7 +353,8 @@ def _extension(s: TeamsState, frame: Frame, ctx: InspectContext) -> list[Block]:
         ("le compte", f"{info.name}, à {'toi' if not info.owner else owner_name(frame, info.owner)}"
          + ("" if info.enabled else " — inactif : son extension est refusée")
          if info is not None else account),
-        ("clé du compte", Text(account, "mono")),
+        # son nom court (son identifiant dans les réglages) : « clé » ne dit que le secret de son extension
+        ("nom court du compte", Text(account, "mono")),
         ("dernier envoi de l'extension", When(port.last_batch(account)) if plugged else "jamais"),
         ("son nom dans Teams", self_name or "pas encore vu"), ("son identifiant Teams", owner_id or "pas encore vu"),
         ("messages remarqués (en tête)", sum(1 for m in s.messages.values() if m.account == account)),
@@ -334,7 +368,7 @@ def _extension(s: TeamsState, frame: Frame, ctx: InspectContext) -> list[Block]:
                                                              canal=f"teams:{account}")),
     ]
     blocks: list[Block] = [*navs, Fields(tuple(pairs), title="L'extension", columns=1),
-                           Note("L'extension (frontend/Extension) lit ce que Teams web reçoit dans le navigateur où ce "
+                           Note("L'extension lit ce que Teams web reçoit dans le navigateur où ce "
                                 "compte est ouvert et l'apporte ici ; elle relève ce qui doit repartir de lui (un "
                                 "brouillon à poser, un message à envoyer). Rien ne parle à Microsoft depuis ce "
                                 "serveur.", tone="muted")]
@@ -420,10 +454,19 @@ def _thread(s: TeamsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     blocks: list[Block] = [Table((Column("quand", "fit"), Column("qui", "fit", role="title"), Column("message", role="body"), Column("question", "fit", role="badge")), rows,
                                  title="Le fil", empty="aucun message", layout="feed")]
     received = [m for m in thread if not m.own]
+    # écrire soi-même, sur tout compte (ADR 0231) : la note dit sous quel nom il part, la confirmation le redit ;
+    # Teams coupé ou ce compte décoché, rien ne part (``_write`` le refuserait) : la fiche dit pourquoi
+    off = not_sending(params_of(frame), account)
+    if off:
+        blocks.append(Note(off, tone="muted"))
+    else:
+        initial = (("conversation", ctx.subject),) + ((("reply_to", received[-1].ref),) if received else ())
+        blocks.append(Disclosure(WRITE_TITLE, (sent_as(frame, port.account(account)),
+                                               ActionSlot("teams.ecrire", initial))))
     if received and not under_way(s, account, conversation):
         last = received[-1]
-        blocks.append(Disclosure("Lui demander de préparer une réponse", (ActionSlot("teams.rediger", (
-            ("message", last.ref),), title="Préparer une réponse au dernier message"),)))
+        # le nom de l'action, comme au courrier (ADR 0175) : le formulaire prend son titre
+        blocks.append(Disclosure(ASK_TITLE, (ActionSlot("teams.rediger", (("message", last.ref),)),)))
     return blocks
 
 
@@ -452,6 +495,14 @@ def _reply(s: TeamsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = ctx.ports.get("teams")
     got = port.draft(ctx.subject) if port is not None else None
     if got is None:
+        # disparue (son compte retiré des réglages) mais encore à décider : le refus ne lit que l'état (``_refuse``),
+        # et la retire de ce qui attend ton accord (audit du 2026-11-05, C4-R3)
+        gone = latest(s, ctx.subject)
+        if gone is not None and gone.state == WAITING:
+            return [Note("Cette réponse n'existe plus : elle ne partira pas. La refuser la retire de ce qui attend ton "
+                         "accord.", tone="warn"),
+                    Disclosure("La refuser", (ActionSlot("teams.refuser", (("draft", ctx.subject),), title="Refuser"),),
+                               open=True)]
         return [Note("Cette réponse n'est plus là.", tone="muted")]
     seen = latest(s, got.id)
     shown = port.preview(got.id, her=her(frame))
@@ -575,6 +626,30 @@ def not_preparing(p: TeamsParams, account: str) -> str:
     return ""
 
 
+def not_sending(p: TeamsParams, account: str) -> str:
+    """Pourquoi rien ne part de ce compte, ou vide : Teams coupé, ce compte décoché. Le refus d'« Écrire dans cette
+    conversation » (``_write``) ; la fiche d'une conversation ne l'offre pas alors, et le dit."""
+    if not p.enabled:
+        return "Teams est désactivé : rien ne part."
+    if account in p.accounts_off:
+        return "Ce compte Teams est décoché : rien n'en part."
+    return ""
+
+
+def sent_as(frame: Frame, info: Any) -> Note:
+    """Sous quel nom part ce qu'on écrit dans une conversation (ADR 0189, 0231) : celui de la personne connectée à Teams
+    dans le navigateur de ce compte — toi pour un compte à toi ; sinon son propriétaire, nommé, que la note met en
+    garde (le message part sous un autre nom que le tien). ``info`` : le compte (``AccountInfo``), ou ``None``."""
+    if info is None:
+        return Note("Il part sous le nom de la personne connectée à Teams dans le navigateur de ce compte.",
+                    tone="warn")
+    teams = f" (« {info.self_name} » dans Teams)" if info.self_name else ""
+    if not info.owner:
+        return Note(f"Il part sous ton nom{teams} : ce compte Teams est à toi.", tone="info")
+    return Note(f"Il part sous le nom de {owner_name(frame, info.owner)}{teams}, à qui est ce compte Teams, pas sous "
+                "le tien.", tone="warn")
+
+
 def _prepares_here(frame: Frame, account: str) -> None:
     """Une demande de réponse ne se pose que là où elle prépare (``not_preparing``) : Teams coupé ou ce compte
     décoché, elle ne s'y mettrait jamais (ses tâches l'écartent) et la demande resterait « en cours » sans fin."""
@@ -601,7 +676,7 @@ def _redo(s: TeamsState, frame: Frame, args: RedoArgs, ctx: Any) -> Done:
                 go=view_link("reponses"))
 
 
-@TEAMS.action("rediger", title="Lui demander une réponse", args=AskArgs, emits=[c.DRAFT_ASKED],
+@TEAMS.action("rediger", title=ASK_TITLE, args=AskArgs, emits=[c.DRAFT_ASKED],
               subject="conversation_teams",
               description="Elle préparera une réponse au dernier message reçu, selon le mode réglé.")
 def _ask(s: TeamsState, frame: Frame, args: AskArgs, ctx: Any) -> Done:
@@ -629,27 +704,31 @@ class WriteArgs(BaseModel):
     reply_to: Annotated[str, Knob(label="En réponse à", widget="hidden")] = Field(default="", max_length=400)
 
 
-# c'est toi qui l'envoies (ADR 0189) ; ses réponses qui attendaient ton accord n'ont plus lieu (ADR 0199)
-@TEAMS.action("ecrire", title="Écrire dans cette conversation", args=WriteArgs, emits=[WRITTEN],
-              description="Ton message part par l'extension de ce compte, sous ton nom et sans sa signature : c'est "
-                          "toi qui l'envoies. Elle le verra parti, comme tes autres messages ; ses réponses "
-                          "qui attendaient ton accord ici ne partiront plus.")
+# ton geste est l'envoi (ADR 0189), sous le nom de la personne de ce compte — la tienne, ou celle de son
+# propriétaire quand un opérateur écrit depuis la console dans le compte d'un autre (ADR 0231) : la note de la fiche
+# le dit par son nom (``sent_as``), la confirmation le redit ; ses réponses en attente n'ont plus lieu (ADR 0199)
+@TEAMS.action("ecrire", title=WRITE_TITLE, args=WriteArgs, emits=[WRITTEN],
+              description="Ton message part tout de suite par l'extension de ce compte, sous le nom de la personne de "
+                          "ce compte, sans sa signature : ton geste est l'envoi. Elle le verra parti, comme les autres "
+                          "messages ; ses réponses qui attendaient un accord ici ne partiront plus.",
+              confirm="L'envoyer dans Teams maintenant, sous le nom de la personne de ce compte, sans sa signature ?")
 def _write(s: TeamsState, frame: Frame, args: WriteArgs, ctx: Any) -> Done:
     """Ce que la personne écrit elle-même : un brouillon à son nom (``author``), aussitôt en file pour être envoyé —
     son geste est l'envoi, aucun accord n'est à demander. L'extension le relève, l'envoie et l'accuse ; ses messages
     à elle reviennent ensuite dans le fil (``own``), comme ce qu'elle tape dans Teams. Le journal le sait aussitôt
     (``teams.written``, sans texte) : ses réponses qui attendaient un accord dans cette conversation n'ont plus lieu
     d'être (ADR 0199) — refusées par ``teams.answered``, jamais par ce geste, qui ne peut donc pas échouer à cause
-    d'elles une fois le message en file."""
+    d'elles une fois le message en file. Le même geste sert l'espace de la personne (``app/me/teams.py``, après sa
+    garde du niveau « s'en servir ») et la console, où un opérateur écrit aussi dans le compte d'une autre personne
+    (ADR 0231) : le message part sous le nom de celle-ci, le brouillon garde qui l'a écrit, l'audit aussi."""
     port = ctx.ports.get("teams")
     if port is None:
         raise Refused(NO_PORT)
     p = params_of(frame)
     account, conversation = split_conversation_key(args.conversation)
-    if not p.enabled:
-        raise Refused("Teams est désactivé : rien ne part.")
-    if account in p.accounts_off:
-        raise Refused("Ce compte Teams est décoché : rien n'en part.")
+    off = not_sending(p, account)
+    if off:
+        raise Refused(off)
     if port.conversation(account, conversation) is None:
         raise Refused("Cette conversation n'est plus là.")
     body = args.body.strip()

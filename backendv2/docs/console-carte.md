@@ -36,13 +36,15 @@ un clic ailleurs ou Échap le ferme. Sur un écran étroit, les rubriques passen
 d'Ariane (plus bas), le titre et, sur une fiche, son état en étiquettes à côté, ses faits sur une ligne séparés par des filets,
 et ses actions à droite (deux en vue, la principale à droite des autres, le reste et les dangereuses sous « ⋯ »), la roue qui ouvre ses réglages
 (`gear`, ADR 0173, 0206 : les réglages d'un plugin vivent dans sa destination) au bout. Une action est à côté de ce qu'elle touche : celles de la page dans la barre de titre —
-Courrier (Nouveau message, Actualiser), Venus d'ailleurs (Brancher un service), Comptes (Ajouter un
+Courrier (Nouveau message, Relever maintenant ou Actualiser le dossier), Venus d'ailleurs (Brancher un service), Comptes (Ajouter un
 utilisateur, un opérateur) ; un onglet dessiné les y remonte (`Drawn.render` rend un triplet ; `blocks.lift` et
 `blocks.head` dans `app/handmade/blocks.py`), un panneau les y nomme (`page_links`) —, celles d'un objet sur sa ligne,
-sa carte ou sa fiche, Enregistrer dans la barre d'enregistrement. Des filtres qui ne sont que de petits choix
-(quatre au plus, une valeur toujours posée : la période d'Humeur et de Besoins) deviennent des boutons à choix au bout
-de la barre d'onglets, appliqués d'un clic (`render.quick_filters`, `.seg`) ; les autres gardent leur formulaire et son
-bouton « Filtrer ». Le contenu prend toute la largeur de l'écran, comme la barre du haut ; seuls les paragraphes gardent une mesure de lecture. Le style : fond blanc et filets, Inter servie par la console (`static/fonts`, `font-src 'self'`),
+sa carte ou sa fiche, Enregistrer dans la barre d'enregistrement. Un filtre de petits choix
+(quatre au plus, une valeur toujours posée : la période d'Humeur et de Besoins, l'avis des réponses jugées, la confiance
+du canal) devient un bouton à choix au bout de la barre d'onglets, appliqué d'un clic (`render.quick_filters`, `.seg`),
+même à côté d'une recherche, qui garde son formulaire : le choix y reste en champ caché (une recherche le garde,
+« Réinitialiser » ne vide qu'elle), et chaque bouton garde la recherche tapée. Un filtre qui peut rester vide (« Tous ») ou qui a plus de choix garde son
+sélecteur et le bouton « Filtrer ». Le contenu prend toute la largeur de l'écran, comme la barre du haut ; seuls les paragraphes gardent une mesure de lecture. Le style : fond blanc et filets, Inter servie par la console (`static/fonts`, `font-src 'self'`),
 trois arrondis, une ombre seulement pour ce qui flotte (menus, panneaux, la barre d'enregistrement quand une valeur a
 changé).
 
@@ -77,7 +79,7 @@ ses niveaux à elle. Chaque niveau mène à sa page, sauf la page même. Ainsi :
 |---|---|---|
 | **Accueil** | — | « Tout va bien ? Que dois-je faire ? » |
 | **À valider** | Tout ce qui attend · Courriers à envoyer · Réponses Teams · Identités à confirmer · Noms à relier · Historique des autorisations | « Qu'est-ce qui attend ma décision ? » |
-| **Sa rubrique**, à son nom | En ce moment · **Humeur et corps** (Humeur · Postures · Besoins · Sommeil et rythme · Monde et corps · Estime et récit · Qui elle devient) · **Pensées et nuits** (Pensées · Ce qu'elle remarque · Attentes · Journal et rêves) · **Mémoire** (Souvenirs · Croyances · Pièces reçues · Fichiers envoyés · Promesses · La vie des autres · Voir venir · Consolidation) · Constellation | « Comment va-t-elle, à quoi pense-t-elle, que retient-elle ? » |
+| **Sa rubrique**, à son nom | En ce moment · **Humeur et corps** (Humeur · Postures · Besoins · Sommeil et rythme · Monde et corps · Estime et récit · Qui elle devient) · **Pensées et nuits** (Pensées · Ce qu'elle remarque · Attentes · Journal et rêves) · **Mémoire** (Souvenirs · Croyances · Promesses · La vie des autres · Voir venir · Pièces reçues · Fichiers envoyés · Consolidation) · Constellation | « Comment va-t-elle, à quoi pense-t-elle, que retient-elle ? » |
 | **Relations & échanges** | **Personnes** · **Conversations** · **Courrier** · **Teams** · **Identités**, chacune avec ses onglets | « Qui connaît-elle, qu'a-t-on dit ? » |
 | **Activité** | **Projets** (Ses projets · Exécutions · Décisions techniques) · **Buts et rappels** (Buts vivants · Clos) · **Décisions** (Table de l'arbitre · Que ferait-elle ? · En cours · Initiatives · Ses choix · Épisodes · Échéances) | « Que fait-elle, pourquoi parle-t-elle ou se tait-elle ? » |
 | **Outils** | **Ses outils** (Ce qu'elle peut faire · Venus d'ailleurs · Prêter à un agent) · Apps forgées | « Que peut-elle faire, et pour qui ? » |
@@ -155,7 +157,8 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
   contrôle plutôt que le badge), et la santé générale, qui compte ces contrôles, ne la répète pas. Le total de la file dit ce qu'il compte (« courriers à envoyer : 3 · autres
   demandes : 2 ») ; chaque badge, ce qu'il compte (son indice : « de Béa et Léa » pour les questions sans réponse,
   « en échec d'affilée : … » pour les processus), un onglet de la console comme une vue (`Builtin.badge` rend
-  `(n, indice)`, ADR 0219).
+  `(n, indice)`, ADR 0219). Dans une barre d'onglets, cet indice se lit au survol du nombre (celui de Réception :
+  « mails importants pas encore lus »).
 - **Comment elle va** : son humeur en mots, son corps (son état — éveillée ou endormie, depuis quand —, son énergie,
   où elle est, ce qu'elle fait), ses besoins (sous leur titre, avec ce que mesure leur pourcentage : leur tension),
   qui est là (les lectures d'« En ce moment »).
@@ -177,27 +180,37 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
   l'attachement, ce qu'elle s'en dit), un bandeau si elle en veut à quelqu'un. Besoins : ses trois besoins côte à
   côte, leur courbe, ce qui se passe ; ses règles repliées. Sommeil et rythme : sa journée sur 24 heures (ses
   phases et leur teinte, sa nuit, maintenant) à côté de l'énergie et de la pression de sommeil, ses nuits et ses
-  transitions. Monde et corps : ce qui est en route pas à pas, les choses rangées par où elles sont, ce qu'elle a
-  remarqué des éditions. Estime et récit et Qui elle devient passent en sous-onglets (son estime sur son échelle,
-  son récit, sa persona, son tempérament par famille ; ce qu'elle sait d'elle, ce qui la passionne, ce qui la
-  définit, ses changements d'avis) ; persona et tempérament se règlent dans Réglages.
+  transitions. Monde et corps : ce qui est en route pas à pas, les choses rangées par où elles sont (dans les mots
+  de son monde, écrits pour elle, et dits siens), ce qu'elle a remarqué des éditions. Estime et récit et Qui elle
+  devient passent en sous-onglets (son estime sur son échelle, son récit, sa persona, son tempérament par famille ;
+  ce qu'elle sait d'elle, ce qui la passionne, ce qui la définit, ses changements d'avis) ; persona et tempérament
+  se règlent dans Réglages.
 - **Pensées, Ce qu'elle remarque, Attentes, Journal et rêves** (`app/handmade/tabs/thoughts.py`) : une
   bande de chiffres, puis des sous-onglets — maintenant, l'historique (une page plus ancienne ouvre son sous-onglet),
   les règles. Pensées : ce qui lui trotte dans la tête, la plus forte d'abord, chacune de la couleur de son émotion,
-  ce qu'il en reste et d'où elle est née. Ce qu'elle remarque : ce qui attend d'être remarqué, puis chaque signal, la
-  pertinence annoncée et celle retenue sur une même barre (l'habituation se voit). Attentes : de qui, le temps qui
-  court vers l'échéance en jauge, puis les attentes closes en fil. Le journal et les récits de ses nuits se lisent
-  comme des documents.
+  ce qu'il en reste et d'où elle est née. Ce qu'elle remarque : ce qui attend d'être remarqué, puis chaque signal, sa
+  source et sa sorte en mots (« Courrier · un mail » : l'onglet les nomme, l'attention n'en connaît aucune), la
+  pertinence annoncée et celle retenue sur une même barre (l'habituation se voit). Attentes : de qui (« la réponse
+  d'Alice »), le temps qui court vers l'échéance en jauge, puis les attentes closes en fil. Le journal et les récits
+  de ses nuits se lisent comme des documents, sous le titre que leur donne la faculté (leur jour en mots).
 - **Mémoire** (`app/handmade/tabs/memory.py`) : Souvenirs, Croyances, Promesses, La vie des autres, Voir venir,
-  Consolidation, Pièces reçues, Fichiers envoyés. Les éléments retenus se lisent en listes à filets, deux colonnes
-  sur un grand écran, leur détail replié ; chacun met en avant ce qui le distingue : la confiance et l'origine d'une
-  croyance ; l'échéance d'une promesse (en retard : dit ; tenues et abandonnées côte à côte) ; la date d'un moment,
-  en agenda (en ce moment, à venir, passés et comment ça a tourné — lu dans l'archive de la faculté, même pour un
-  moment passé depuis longtemps). Pièces reçues (ADR 0182) : la place en chiffres, puis
-  en sous-onglets les pièces (sa sorte, ce qu'elle y a lu, ce qui s'y relie, la télécharger, la retirer) et leur
-  place, une jauge par personne ; l'ancienne adresse de la place (`memoire/place`) y mène. Fichiers envoyés (ADR 0205,
-  vue `envoyes` de `shares`, à côté) : ce qu'elle a envoyé à tout le monde, du plus récent — sa sorte, pour qui, son
-  origine, le message qui l'a emporté (« pas parti » sinon), son état ; le télécharger, le retirer. « Retirer »
+  Pièces reçues, Fichiers envoyés, Consolidation — les éléments retenus ensemble, les fichiers ensuite, la maintenance
+  en dernier. Les éléments retenus se lisent en listes à filets, deux colonnes sur un grand écran, leur détail
+  replié ; un élément d'avant (remplacé, fondu ou joint à un autre, démenti) s'estompe, une situation finie le dit en
+  mots ; chacun met en avant ce qui le distingue : la confiance et l'origine d'une croyance ; l'échéance d'une
+  promesse (en retard : dit ; tenues et abandonnées côte à côte) ; la date d'un moment, en agenda (en ce moment, à
+  venir, passés et comment ça a tourné — lu dans l'archive de la faculté, même pour un moment passé depuis
+  longtemps). Chaque carte porte ses gestes de correction (ADR 0230, `faculties/memory/actions.py`), à droite de son
+  pied, là seulement où ils ont un sens : une promesse en cours, « Marquer tenue » ou « Abandonner » ; une situation
+  qui dure, « C'est fini » ; un moment daté sans issue, « Comment ça a tourné » (a eu lieu, annulé, reporté, en
+  panneau) ; un souvenir ou une croyance encore actif, « Ce n'est pas vrai », sous « ⋯ ». Confirmés et audités
+  (Système › Gestes audités), ils ajoutent un événement au journal : rien n'efface son texte, l'élément corrigé
+  change de colonne ou s'estompe, et une carte d'un statut d'avant n'en offre aucun. Pièces reçues (ADR 0182) : la
+  place en chiffres, puis en sous-onglets les pièces (sa sorte, ce qu'elle y a lu, ce qui s'y relie, la télécharger,
+  la retirer) et leur place, une jauge par personne ; l'ancienne adresse de la place (`memoire/place`) y mène.
+  Fichiers envoyés (ADR 0205, vue `envoyes` de `shares`, à côté) : ce qu'elle a envoyé à tout le monde, du plus
+  récent — sa sorte, pour qui, son origine, le message qui l'a emporté (« pas parti » sinon), son état ; le
+  télécharger, le retirer. « Retirer »
   (`shares.retirer`, `attachments.retirer` : confirmé, audité ; aussi sous « ⋯ » sur la fiche du fichier ou de la
   pièce) efface ses octets ; sa ligne reste, estompée, « retiré(e) par un opérateur », et ce qu'elle en a lu reste.
   Voir venir : ses attentes sur une échelle de « toujours juste » à « pile ou face », et qui tient ce qu'il annonce.
@@ -213,21 +226,28 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
 ### Relations & échanges
 
 - **Personnes** (`/inspecteur/personnes`, `app/handmade/tabs/people.py`) : une carte par personne — ce qu'elle est pour
-  elle, ce qu'elle ressent, ce qui se passe entre elles, ce qu'elle en sait —, qui est là, qui lui manque, une
-  recherche et des filtres (proximité, en ligne). Ses onglets, les mêmes sur ses quatre pages : Vue d'ensemble
+  elle, ce qu'elle ressent, ce qui se passe entre elles, ce qu'elle en sait —, qui est là (son titre « En ligne · N »
+  mène à Présents), qui lui manque, une recherche (par nom ou par moyen de communication) et un filtre de proximité :
+  la seule recherche de la destination. Ses onglets, les mêmes sur ses quatre pages : Vue d'ensemble
   (cette page), Annuaire, Liens, Présents — la destination déclare ce premier onglet dessiné à part
   (`Destination.lead`), ses autres onglets y ramènent. Ses onglets (dans le même module) disent une
-  personne comme la vue d'ensemble : **Annuaire**, une entrée par personne — ses moyens de communication (le
-  principal d'abord, ce que chaque canal prouve), la certitude, depuis quand, son dernier message, leurs échanges et
-  leur lien ; **Liens**, un bandeau si quelqu'un lui manque, la bande de chiffres, puis les liens par proximité
-  (proches, amitiés, connaissances, pas encore de lien) — l'échelon déclaré ou vécu, le rythme, le silence sur une
-  jauge (à sa moitié, elle lui manque), ce qu'elle en sait ; **Présents**, une entrée par personne présente et, sous
-  elle, chacune de ses connexions (par où, le moyen de communication, l'audience).
+  personne comme la vue d'ensemble, et se parcourent, sans filtre : **Annuaire**, une entrée par personne — ses
+  moyens de communication (le principal d'abord, ce que chaque canal prouve), la certitude, depuis quand, son dernier
+  message, leurs échanges et leur lien ; **Liens**, un bandeau si quelqu'un lui manque, la bande de chiffres, puis les
+  liens par proximité (proches, amitiés, connaissances, pas encore de lien) — l'échelon déclaré ou vécu, le rythme,
+  le silence sur une jauge (à sa moitié, elle lui manque), ce qu'elle en sait ; **Présents**, une entrée par personne
+  présente et, sous elle, chacune de ses connexions (par où, le moyen de communication, l'audience). Dans la console
+  en MCP aussi, l'Annuaire et Liens n'ont pas de recherche : on y cherche quelqu'un par Moyens de communication
+  (`identity/annuaire`) ou par Conversations (`transcript/conversations`).
 - **La fiche d'une personne** s'ouvre sur sa **vue d'ensemble** (`app/handmade/person/`) : ce qu'elle ressent
   envers elle, leur histoire, ce qu'elle sait d'elle, ce qui reste en suspens, leurs derniers mots. Les onglets des
   facultés suivent, dessinés sur leurs données (Échanges en conversation, Mémoire en cartes, les listes en
   cartes) ; ce que la vue d'ensemble résume (Synthèse, Lien, Ce qu'elle devine, Affect, Pensées) est rangé au bout
-  de la barre, sous « Le détail ». L'onglet **Fichiers** (`app/handmade/person/files.py`, ADR 0179) réunit en
+  de la barre, sous « Le détail ». Ses onglets disent leur compte (`PersonOverview.counts`) : ses moyens de
+  communication, ses messages et ce que liste sa Mémoire (un `COUNT` chacun ; la mémoire compte aux clauses de son
+  onglet, tous statuts), ce qu'il y a sous Comptes, ses voyages, ses buts, ses projets ; Fichiers n'en dit pas (deux
+  facultés, deux tables), ni ce qui est rangé sous « Le détail ».
+  L'onglet **Fichiers** (`app/handmade/person/files.py`, ADR 0179) réunit en
   deux sous-onglets ce que la personne lui a envoyé (sa place, chaque pièce et ce qu'elle y a lu, ADR 0106) et ce
   qu'elle lui a envoyé (ADR 0062), une page par fichier, téléchargement opérateur, et « Retirer » sur chaque fichier
   encore là (ADR 0205 : confirmé, audité ; ses octets s'effacent, sa ligne reste et dit « retiré par un opérateur »,
@@ -237,8 +257,10 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
   non-lus, « Ouvrir la boîte » (le Courrier, réduit à ses boîtes), puis ses comptes Teams (leur état, le dernier
   envoi de l'extension, leurs conversations) — réunis (`joined`) —, les services qu'elle a branchés depuis son espace
   (ADR 0192 : à quoi chacun sert, actif ou non, avec qui il est partagé, sa fiche) et ses partages (ADR 0188 : ce
-  qu'elle partage, ce qu'on lui partage — la ressource, la personne, le niveau), lus dans les réglages, en lecture
-  seule. L'onglet paraît aussi pour qui n'a pas de boîte mais a branché un service ou partage quelque chose, dans un
+  qu'elle partage, ce qu'on lui partage — la ressource, la personne, le niveau), lus dans les réglages ; « Retirer »
+  sur un partage de boîte ou de compte Teams (le geste de Réglages › Droits › Partages, ADR 0210 : confirmé, audité,
+  retour sur la fiche, `?onglet=boites#partages`), ses lignes d'accès pour un service ; rien ne s'y donne (ADR 0188).
+  L'onglet paraît aussi pour qui n'a pas de boîte mais a branché un service ou partage quelque chose, dans un
   sens ou dans l'autre (`Overview.shows`, ADR 0219) ; sans rien de tout cela, Teams est un onglet à lui. **Voyages**
   n'apparaît aussi que si elle en a (`app/handmade/person/voyages.py`, ADR 0204) : chacun de ses voyages, du plus
   récemment changé — son titre, comment on s'y déplace, s'il a été préparé avec elle, son départ, ce qu'il évite, ses
@@ -248,7 +270,7 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
   un 429 qui le dit) et « Supprimer » (`trips.supprimer`, confirmé, audité ; le dernier supprimé, la fiche revient sur
   sa vue d'ensemble) ; rien ne s'y modifie : un voyage se prépare à deux. Quand un de ses moyens de communication est un
   compte, l'en-tête le dit (« compte utilisateur » ou « compte opérateur ») et mène à sa page (« Modifier le
-  compte », Réglages › Comptes).
+  compte », Réglages › Comptes) et à ses droits exacts (« Ses droits », Réglages › Droits).
 - **Conversations** (ADR 0181) s'ouvre sur **Par personne** (`app/handmade/tabs/threads.py`), comme une messagerie :
   une ligne par personne, tous ses moyens de communication réunis, la plus récente d'abord, vingt-cinq par page — son
   avatar à la couleur de ce qu'elle ressent envers elle et sa présence, ce qu'elle est pour elle, l'heure, le dernier
@@ -262,19 +284,23 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
   à Par personne, son filtre gardé.
 - **Courrier** : Réception et Envoyés en boîte aux lettres (une ligne par message, douze par page, une case pour la
   cocher ; le message ouvert dans une liseuse, `?lire=`, à côté de la liste dès que la place le permet, dessous
-  sinon, avec le précédent et le suivant — j, k, Échap — et, en tête, ce qu'elle en sait), Brouillons (« À décider »
+  sinon, avec le précédent et le suivant — j, k, Échap — et, en tête, ce qu'elle en sait), Ses brouillons (« À décider »
   en enveloppes : à qui, depuis quelle boîte et dans quelle voix, en réponse à quoi, d'où il vient ; « Déjà décidés »
   en lignes), Contacts (une ligne par adresse, « Ses échanges » et « Écrire »), tous dans le même espace : à côté, ce
   qu'on lit (Réception, À traiter, Suivis, ses brouillons, Envoyés, Contacts — à la place des onglets, que la page
   tait), à qui sont les boîtes montrées (« Les boîtes de » : tout le monde, toi, elle par son nom, chaque personne
-  qui a une boîte — `?qui=`, ADR 0185), les comptes et leurs dossiers ; au-dessus, écrire, actualiser et chercher. La
+  qui a une boîte — `?qui=`, ADR 0185), les comptes et leurs dossiers ; au-dessus, écrire, relever (ou actualiser le
+  dossier ouvert) et chercher — « Afficher » n'offre que ce que la colonne ne porte pas (non lus, importants non lus,
+  remarqués ou pas par elle) ; dans « À traiter » ou « Suivis », la vue est le filtre et la recherche y reste. La
   barre de la liste range ce
-  qu'on a coché, sur le serveur (lu, non lu, archiver, suivre, corbeille) ; « Charger des messages plus anciens » est
+  qu'on a coché, sur le serveur (lu, non lu, archiver, suivre, corbeille) ; en Tableau, la liste n'a pas de cases, ni
+  cette barre ; « Charger des messages plus anciens » est
   au bout de la liste. « Non lu » est le tien (le drapeau du serveur) ; ce qu'elle a lu ou rangé se dit à part
   (« lu par elle »), ADR 0175. Les fiches dessinent aussi leurs onglets secondaires : la boîte › Sa voix (les trois voix, l'expéditeur
   tel qu'il partira, la signature, le texte qu'elle lit), le mail › Fil (en bulles, reçus à gauche, partis à droite)
   et Ce qu'elle en sait, le brouillon › Pourquoi (le mail auquel il répond, les consignes) et Historique (le parcours,
-  les deux versions) ; un brouillon disparu de la boîte garde une fiche qui dit ce qu'elle en sait. Le compte, le dossier et les filtres se
+  les deux versions) ; un brouillon disparu de la boîte garde une fiche qui dit ce qu'elle en sait et, tant qu'il
+  attend ton accord, « Le refuser ». Le compte, le dossier et les filtres se
   gardent dans la pagination et au retour d'un message ; consulter n'envoie rien et ne marque rien comme lu, sauf
   si le réglage « Ouvrir un mail le marque lu » le demande (le script de la console envoie « Marquer comme lu »). Un
   mail HTML se lit tel qu'il a été écrit, avec ses styles, dans un cadre isolé (ADR 0169) : ni script, ni
@@ -282,9 +308,10 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
   « Toujours pour cet expéditeur » (ADR 0175) ; ses images intégrées (`cid:`) s'y montrent (ADR 0172) ; ses liens web et `mailto:` s'ouvrent dans un nouvel onglet ; sa version texte reste accessible ; un
   message long se lit en parties de 50 000 caractères au plus. Ses pièces jointes se téléchargent depuis le cache,
   sans le serveur ; un mail relevé avant qu'elles soient gardées le dit, et « Récupérer ses pièces » le relit. Les brouillons
-  qu'elle propose sont distingués de ceux du serveur. **Paramètres**, le bouton en haut à droite (pas un onglet,
+  qu'elle propose sont distingués de ceux du serveur, et ce qu'on lit de ses dossiers : « Brouillons (serveur) »,
+  « Envoyés (serveur) ». **Paramètres**, le bouton en haut à droite (pas un onglet,
   ADR 0173), une section à la fois (une colonne de sous-onglets à gauche, des ancres ; ce qui est masqué part quand même
-  avec le formulaire, et la section ouverte se retrouve après l'enregistrement, ADR 0176) : ses boîtes en cartes (où chacune en est, comment elle lit et envoie, sa voix, son dernier relevé), une
+  avec le formulaire, et la section ouverte se retrouve après l'enregistrement, ADR 0176) : ses boîtes en cartes (où chacune en est, à qui elle est — un prénom, jamais une clé —, comment elle lit et envoie, sa voix, son dernier relevé), une
   boîte sur sa page (la boîte, la connexion, lire, envoyer, sa voix, chacun à côté de ce qu'il règle ; ce qui ne sert
   pas au choix fait ne paraît pas, et une adresse courante propose ses serveurs, ADR 0174), puis les paramètres
   généraux du courrier (relevé, ce qu'elle en dit, ses brouillons, la lecture). L'ancienne adresse, Réglages › Plugins › Boîtes
@@ -300,15 +327,23 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
   ligne (à qui, clé, dernier envoi), ou le compte choisi — ses chiffres, sa clé (Nouvelle clé, Retirer la clé), le
   pas-à-pas, comment ses réponses partent : le tableau de ce compte (Réglages › Canaux, `?canal=teams:<clé>`), et sa
   voix et sa signature, « Modifier ce compte » (ses réglages, qui ramènent à son extension : son compte et sa clé côte
-  à côte). La fiche d'une conversation d'un autre compte est `conversation_teams/<compte>~<id>`. **Paramètres**, le
+  à côte). La fiche d'une conversation (`app/handmade/subjects/teams.py`) : le fil en bulles, puis « Écrire dans
+  cette conversation », sur tout compte (ADR 0231) — une note dit sous quel nom il part (« ton nom » pour un compte à
+  toi, sinon le nom de la personne du compte ; puis, s'il est connu, celui que Teams lui donne), la confirmation le redit ; il part
+  aussitôt par l'extension de ce compte, sans sa signature, audité ; Teams coupé ou le compte décoché, la carte dit
+  pourquoi rien ne part —, ce qu'elle y a préparé et « Lui demander une réponse ». Celle d'une conversation d'un autre
+  compte est `conversation_teams/<compte>~<id>`. **Paramètres**, le
   bouton en haut à droite (pas un onglet, comme le Courrier, ADR 0206) : « Actif », puis ses comptes en cartes (ADR
-  0186) — à qui, actif ou non (décoché : son extension est refusée), son nom, son ton, sa signature ; la clé de chacun
-  se crée dans l'onglet Extension (un fait de la page y mène, un autre au tableau de Teams dans Réglages › Canaux) ;
+  0186) — à qui (son prénom, jamais une clé), actif ou non (décoché : son extension est refusée), son nom, son ton, sa
+  signature ; comme celle d'une boîte, la carte mène plus loin : « Son extension » et « Ses conversations »
+  (`?compte=<clé>`) ; la clé de chacun se crée dans l'onglet Extension (un fait de la page y mène, un autre au
+  tableau de Teams dans Réglages › Canaux) ;
   supprimer un compte efface ce que son extension avait apporté. L'ancienne adresse, Réglages › Plugins › Teams, y
   mène.
 - **Identités et moyens de communication** (`app/handmade/tabs/identities.py`) : Moyens de communication (un
   bandeau quand une revendication attend, qui mène à la file « À valider », la bande de chiffres, une ligne par moyen
-  en colonnes : par où, ce que le canal prouve, pour qui il parle, ce qu'il ouvre en privé et en public) ; Règles de
+  en colonnes : par où, ce que le canal prouve, pour qui il parle, ce qu'il ouvre en privé et en public ; la
+  recherche, et la confiance du canal en bouton à choix : toutes, authentifiée, compte, publique) ; Règles de
   divulgation, une page de règles : les barres en chiffres, ce que chaque canal peut prouver sur une même échelle de
   certitude, le poids des preuves pour et contre, les rangs de proximité, les propriétaires. Les identités à
   confirmer et les noms à relier n'ont pas d'onglet ici : ils ne se décident que dans la file (ADR 0180), et leurs
@@ -316,11 +351,14 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
 - Dans la console, une *adresse* (une identité qui parle pour une personne : un compte, un téléphone, un compte
   extérieur) se dit **moyen de communication** ; les clés techniques restent (l'onglet `adresses`, le paramètre
   `handle`). La fiche d'un moyen de communication (`fiche/handle/<clé>`) s'ouvre sur **En bref**
-  (`app/handmade/subjects/handle.py`) : quatre tuiles (par où, ce que le canal prouve, si elle peut lui écrire d'elle-même,
-  son dernier message), *Le canal*, *Qui écrit d'ici* (pour qui il parle, ses droits de propriétaire, ses autres
-  moyens), *Ce que ça ouvre* (une ligne par sorte de chose, en privé et en public, et pourquoi), le verdict pas à pas
-  replié. Son *Fil* est en bulles ; *Verdict* et *Ses autres moyens de communication* passent sous « Le détail » ;
-  *Revendication* ne se montre pas pour un compte authentifié.
+  (`app/handmade/subjects/handle.py`), qui ne redit pas son en-tête (par où, ce que le canal prouve et la certitude,
+  pour qui il parle) : quatre tuiles (par où, ce que le canal prouve et pourquoi, si elle peut lui écrire d'elle-même,
+  son dernier message), *Qui écrit d'ici* (pour qui il parle, ses droits de propriétaire, depuis quand, ses autres
+  moyens, sa clé), *Ce que ça ouvre* (une ligne par sorte de chose, en privé et en public, et pourquoi). Son *Fil* est
+  en bulles ; *Preuves*, *Revendication*, *Ses autres moyens de communication* et *Verdict* sont dessinés bloc par
+  bloc, comme le détail d'une personne (ni pagination d'une seule page, ni état vide dit deux fois ; Verdict y tait
+  les faits du moyen de communication, que l'en-tête dit déjà) ; *Verdict* et *Ses autres moyens de communication*
+  passent sous « Le détail » ; *Revendication* ne se montre pas pour un compte authentifié.
 
 ### Activité
 
@@ -336,9 +374,9 @@ Ses onglets sont dans `app/handmade/tabs/projects.py` (ADR 0177).
   par ligne, ponctuels et constants), son mode et ses outils, son rythme et sa plage, sa liberté, son dépôt distant.
 - **Exécutions** : ce qui tourne en ce moment, puis le fil jour par jour (filtrable par projet et par verdict) :
   projet et objectif visé, verdict et preuve, compte rendu, commit ; chacune mène à son épisode (prompt, outils,
-  appels, décision).
-- **Décisions techniques** : rangées par projet (filtrables par projet et par statut), chacune avec sa question, ce
-  qui est choisi, pourquoi, qui l'a posée et quand ; une décision remplacée s'estompe.
+  appels, décision). L'onglet Exécutions de la fiche d'un projet suit le même fil (`handmade/projets/_runs.html`).
+- **Décisions techniques** : rangées par projet (filtrables par projet, et par statut en bouton à choix), chacune
+  avec sa question, ce qui est choisi, pourquoi, qui l'a posée et quand ; une décision remplacée s'estompe.
 - **La fiche** gouverne, onglet par onglet ; ses onglets disent leur compte (objectifs, exécutions, décisions), Accès
   et Carnet sont rangés sous « Plus » ; en tête, la principale (« Lancer maintenant », ou « Reprendre » en pause) et
   « Donner une consigne », le reste sous « ⋯ ». *Vue d'ensemble* (dessinée, `app/handmade/subjects/project.py`, ADR 0177 : la
@@ -353,14 +391,21 @@ Ses onglets sont dans `app/handmade/tabs/projects.py` (ADR 0177).
   état, son rythme et qui l'a posé, son dernier compte rendu en citation (long, quatre lignes que « lire la suite »
   déplie) et ce qu'elle en a tiré ; ses boutons sur sa ligne, deux en vue (le lancer, le premier statut), « Modifier
   l'objectif » en panneau, le reste sous « ⋯ » ; un constant ne se coche pas ; « Ajouter un objectif » en colonne à
-  côté de la liste sur un grand écran) · *Exécutions* (issue, verdict, preuve, commit,
-  durée) · *Décisions techniques* (dessiné, comme *Objectifs* et sur les mêmes pièces, `handmade/projets/_fiche.html` :
+  côté de la liste sur un grand écran) · *Exécutions* (dessiné, `app/handmade/subjects/project.py`, jour par jour comme
+  Projets › Exécutions et sur les mêmes pièces, `handmade/projets/_runs.html` : ses chiffres en tuiles — exécutions,
+  sur 24 h face à son plafond, pannes d'affilée, la dernière —, puis chaque exécution sans le projet, c'est lui :
+  l'heure, l'objectif visé, son issue, le verdict et sa preuve, le compte rendu cité, le commit, la durée, et les
+  onglets de son épisode — prompt, outils, appels, décision — que la légende explique ; sans exécution, il le dit une
+  fois, sans chiffres ; la pagination reste celle de la console) · *Décisions techniques* (dessiné, comme
+  *Objectifs* et sur les mêmes pièces, `handmade/projets/_fiche.html` :
   une entrée par décision — la question tranchée et son statut, ce qui est choisi, pourquoi en citation, le contexte
   et les options envisagées repliés, qui l'a posée, quand, ce qu'elle remplace ; sur sa ligne, la retirer ou la
   remettre en vigueur et « Remplacer cette décision » en panneau ; remplacée ou retirée, elle s'estompe ; « Consigner
   une décision » en colonne à côté ; sur la fiche d'un but, « Décisions » sont les pesées de l'arbitre) · *Fichiers*
-  (dossiers à parcourir, lire,
-  télécharger, déposer) · *Dépôt git* (dessiné, `app/handmade/subjects/project_git.py`, ADR 0183 : un seul bandeau — un
+  (dessiné bloc par bloc, `app/handmade/blocks.py`, comme les autres onglets d'un moyen de communication et ceux d'un
+  but, son arborescence en table d'exploitation : la navigation « Dossier », un fichier ouvert à lire ou à
+  télécharger, la table du dossier, « Déposer un fichier » avec le formulaire de la console) · *Dépôt git*
+  (dessiné, `app/handmade/subjects/project_git.py`, ADR 0183 : un seul bandeau — un
   envoi qui attend ton accord, GitHub qui ne répond pas, ou les deux histoires qui ont divergé ; l'atelier et son
   dépôt distant face à face, l'atelier avec sa branche, son dernier commit et ce qui n'est pas enregistré, le distant
   avec son hôte, le bout de sa branche, ses issues et pull requests et quand il a été lu ; entre eux l'écart (à
@@ -368,18 +413,26 @@ Ses onglets sont dans `app/handmade/tabs/projects.py` (ADR 0177).
   puis des sous-onglets : l'historique paginé, ceux qui restent à pousser marqués, un commit ouvert en diff coloré
   au-dessus ; ce qui n'est pas enregistré ; l'histoire du distant, ceux à récupérer marqués ; ses issues et ses pull
   requests ouvertes, qui s'ouvrent sur GitHub ; les échanges passés et ce que git a répondu ; les réglages du
-  distant) · *Comportement et outils* (modifier le projet, ce que veut dire son
-  mode, son rythme, ses outils et leurs noms) · *Accès* (dessiné, ADR 0133, `app/handmade/subjects/project.py` : un tableau
+  distant) · *Comportement et outils* (dessiné, `handmade/projets/fiche_comportement.html`, dans le gabarit du
+  paramétrage : « Modifier le projet », le formulaire de la console, par groupes — le projet, son mode, son rythme, sa
+  liberté —, une ligne par réglage et « Enregistrer » collé en bas ; ce que veut dire son mode et ses plafonds sont
+  l'aide de leur réglage, sa prochaine exécution une ligne au-dessus ; archivé, ses réglages en lecture ; puis ses
+  outils, les lots et leurs noms, et « Choisir ses outils » à côté) · *Accès* (dessiné, ADR 0133, `app/handmade/subjects/project.py` : un tableau
   de lignes lues de haut en bas — qui et par où (les mêmes cases qu'un service), quand, voir, piloter projet (lecture seule, accord du propriétaire, modification, aucun pilotage), fichiers, ce qu'elle fait d'un outil de ses apps qui lit et d'un
   outil qui agit, à quels outils —, « + Ajouter un accès » (une ligne fermée), chaque ligne montée, descendue ou
-  retirée, la dernière, obligatoire, le comportement par défaut ; jamais réglé, il le dit) · *Carnet* (consignes,
-  ses notes, ce qu'on en a fait, ce qui sort de la machine). En tête : lancer maintenant, pause, reprendre, consigne, archiver, restaurer — les formulaires
+  retirée, la dernière, obligatoire, le comportement par défaut ; jamais réglé, il le dit) · *Carnet* (dessiné, en
+  sous-onglets — consignes, ses notes, ce qu'on en a fait, ce qui sort de la machine —, chacun avec sa pagination ;
+  une demande qui attend ton accord le dit, garde sa commande et mène à la file « À valider »). En tête : lancer maintenant, pause, reprendre, consigne, archiver, restaurer — les formulaires
   d'onglet (`inline`) et les actions de ligne n'y sont jamais.
 
 **Buts et rappels** (`app/handmade/tabs/goals.py`) : les buts vivants (filtrables par sorte, rappel ou exploration,
 et par autorité), leurs chiffres, puis côte à côte ses explorations (séances sur leur plafond, envie qui s'use) et ses
 rappels (chacun à sa date, le plus proche d'abord) ; les buts clos (les mêmes filtres, et l'ancien projet qu'un vieux
-journal y garde), leur issue en marque et ce qu'ils ont donné, en deux colonnes. La fiche d'un but : Résumé, Cadre
+journal y garde), leur issue en marque et ce qu'ils ont donné, en deux colonnes. En tête des deux onglets,
+« Programmer un rappel » (ADR 0232, `goals.programmer`), sur sa page : quoi, quand (en heure locale), pour qui (vide :
+toi), urgent ; un but confié, le même `goals.opened` que ses outils posent (`goals.tools.reminder`), refusé champ par
+champ (quoi vide, personne inconnue, date illisible ou passée), audité ; il rejoint la colonne des rappels. Rien n'y
+confie une exploration : c'est son initiative, ou celle d'un réveil (ADR 0117). La fiche d'un but : Résumé, Cadre
 et réglages, Séances (chaque séance et chaque fois qu'elle en a parlé : son compte rendu, et de quoi relire son
 prompt), Carnet, Décisions ; elle pilote (ADR 0030) : modifier le cadre, avancer maintenant, rouvrir, priorité, plan
 de travail. Sa prochaine séance (quand, et pourquoi pas avant, ou ce qui
@@ -411,16 +464,24 @@ significatifs, pour qu'un taux faible ne se lise pas zéro.
   fil jour par jour. **Échéances** : ce qui échoue d'affilée en tête, puis par horizon (dans l'heure, aujourd'hui,
   plus tard) ; « rien de prévu » replié.
 
-**Un épisode** a sa page, en onglets, chacun dessiné : Résumé (son issue en grand, le message déclencheur en bulle,
-ses dernières paroles, ses chiffres en tuiles — durée, paroles, événements, appels et leur coût, outils —, lu dans le
-journal sans rien lancer, par la même lecture que ses blocs, `episode_overview.summary`), Déroulé (ses événements sur un fil, à la seconde), Ce qu'elle a dit (ses paroles en
+**Un épisode** a sa page, en onglets, chacun dessiné ; ses onglets disent leur compte (ses paroles, ses événements,
+ses appels de modèle, ses outils appelés), lus une fois par page avec le résumé (`episode_drawn.tally`). Résumé (son
+issue en grand et son détail, sans redire sa sorte, à qui ni quand, que l'en-tête dit déjà ; le message déclencheur en
+bulle, ses dernières paroles, ses chiffres en tuiles — durée, paroles, événements, appels et leur coût, outils —, lu
+dans le journal sans rien lancer, par la même lecture que ses blocs, `episode_overview.summary`), Déroulé (ses événements sur un fil, à la seconde), Ce qu'elle a dit (ses paroles en
 bulles, leur voix, leurs outils, leurs sections), Prompt (ce qui l'a décidé, ses sections dépliables sur leur texte,
 le contexte complet, ses outils en main, sa réponse pas à pas jusqu'à l'autrice), Outils (un appel par carte, ses
-arguments à côté de son résultat), Appels de modèle (leurs totaux, puis leur tableau), Décision.
+arguments à côté de son résultat), Appels de modèle (leurs totaux, puis leur tableau ; au-delà de 200 appels, leur
+nombre reste entier, et la page dit que coût, jetons, durée et échecs ne portent que sur les 200 premiers),
+Décision.
 
-**Un événement** (`/inspecteur/evenement/<n>`) : ses repères, ses textes (en bulle pour une parole ou un message), son
-parcours dans la machine (qui le réduit, ce qu'il réveille, qui le projette), qui il concerne, les épisodes qu'il a
-déclenchés et leur issue, ses données brutes repliées.
+**Un événement** (`/inspecteur/evenement/<n>`) : son titre dit ce qui s'est passé, le fil d'Ariane son numéro ; ses
+repères sont sur la ligne de faits de l'en-tête (quand, émis par, son origine en mots — « de l'extérieur », « le
+noyau »… —, son épisode, et pour une parole « Pourquoi a-t-elle dit ça ? »). Puis ses textes, titrés en mots (« le
+texte », « le résumé » : `inspector/names.py`, `CONTENT_FIELDS` ; en bulle pour une parole ou un message), son parcours
+dans la machine (son type, qui le réduit, ce qu'il réveille, qui le projette, l'état du journal qu'il a lu : « état
+lu : jusqu'au n° 49 », expliqué au survol), qui il concerne, les épisodes qu'il a déclenchés et leur issue, ses
+données brutes repliées. Son repli en blocs dit les mêmes mots.
 
 **Pourquoi a-t-elle dit ça ?** (ADR 0042) : une page par parole (`/inspecteur/parole/<seq>`), liée depuis le fil,
 l'onglet « Échanges » d'une personne, chaque épisode et chaque événement de parole. Elle est dessinée
@@ -550,7 +611,7 @@ filtres, puis **Historique des autorisations**. « Tout » et l'historique sont 
 (`inspector/pages/approvals.py`) ; les autres onglets et ce qui n'est pas une demande d'envoi (une identité à
 confirmer, un nom à relier, lus dans les vues de la faculté d'identité) viennent de la composition
 (`app/handmade/waiting.py`, `InspectorDeps.queue`). Ces deux vues sont hors de la navigation : la file est le seul
-endroit où l'on en décide (ADR 0180). Courrier › Brouillons et Teams › Réponses restent dans leur destination pour
+endroit où l'on en décide (ADR 0180). Courrier › Ses brouillons et Teams › Réponses restent dans leur destination pour
 retoucher un texte ; l'accueil ne compte la file qu'une fois (son total, qui dit ce qu'il compte, onglet par
 onglet), pas ses onglets ni ces vues (`UI.attention_items(distinct=True)`). Ce qu'une demande concerne (une personne, « projet n° 61 », « service
 « agenda » », une app, un canal — « Teams », « courrier », « téléphone », jamais une personne) a un seul lecteur,
@@ -637,7 +698,7 @@ rôle par rôle (`CallLog.profile`).
 | | Itinéraires | qui les calcule (aucun, par défaut ; le Valhalla public de FOSSGIS, au plus une demande par seconde pour tout ce serveur, sans garantie ; un Valhalla à toi, son adresse et son débit) ; les trajets demandés depuis le démarrage, ceux repris du cache, la dernière erreur (ADR 0194) |
 | Plugins (menu : Configuration des plugins) | Vue d'ensemble des plugins | dessinée (`handmade/reglages/plugins.html`, ADR 0197) : une ligne par plugin composé — son nom et ce qui s'y règle, ses pages de réglages (nommées par leur destination quand elles y vivent : « Teams › Paramètres », « Ses sens › Flux suivis », ADR 0206), ses paramètres avancés (si sa faculté en a), où s'en servir —, tirée d'`app/settings_sections/plugins.py` (`PLUGINS`, une entrée par paquet de `plugins/`, `tests/protocol/test_settings_pages.py` les compare) ; puis ce qui se branche sans être un plugin (Transcription vocale, Notifications du téléphone) ; sans pagination ; les réglages d'une app restent sur sa fiche, dans la Forge |
 | | Courrier | ses boîtes et ses paramètres généraux vivent dans Courrier › Paramètres, en haut à droite du courrier (ADR 0173) ; ce qu'elle prépare d'elle-même : le tableau de chaque boîte, Réglages › Canaux |
-| | Teams | vivent dans Teams › Paramètres, en haut à droite de Teams (ADR 0206) : « Actif », puis ses comptes en cartes (ADR 0186) — voir Relations & échanges ; la clé de chacun se crée dans Teams › Extension |
+| | Teams | vivent dans Teams › Paramètres, en haut à droite de Teams (ADR 0206) : « Actif », puis ses comptes en cartes (ADR 0186) — voir Relations & échanges ; la clé de chacun se crée dans Teams › Extension, où sa carte mène (« Son extension ») |
 | | Outils extérieurs (MCP) | vivent dans Ses outils › Paramètres des services, en haut à droite de Ses outils (ADR 0206) : chaque serveur a sa page — voir Outils |
 | | Flux | vivent dans Ses sens › Flux suivis (ADR 0206) : les adresses suivies |
 | | Transcription | vit dans Ses sens › Transcription vocale (ADR 0206) : service, modèle, clé |
@@ -647,7 +708,7 @@ rôle par rôle (`CallLog.profile`).
 | Paramètres avancés | Vue d'ensemble | la bande de chiffres, d'où vient une valeur (les quatre sources en étiquettes) ; en sous-onglets les facultés rangées par famille (dérivés du tempérament, surcharges, réglés ailleurs, refus), et ce que pilote chaque curseur du tempérament (`app/handmade/tabs/settings.py`) |
 | | une page par faculté | son fil, « Réglages / Paramètres avancés / sa famille », « Paramètres avancés » menant à la vue d'ensemble, sa famille à la sienne sur cette vue (une ancre) ; ses chiffres en bande (ce que le tempérament dérive mène au tempérament), d'où vient une valeur, ses groupes en colonne à gauche, ses paramètres **rangés par groupe** (un groupe = une page, une ligne par paramètre : son nom et son aide, d'où il vient et ses bornes, sa valeur), chacun avec sa valeur, sa provenance, ses bornes et son sens — valeur et bornes en notation décimale française (« 0,00000556 », « 0,00000001 – 0,0005 »), six chiffres dans le champ, renvoyés tels quels sans rien changer ; une surcharge se pose en changeant la valeur ; **Voir l'effet** : avant d'enregistrer, les lignes de l'arbitre et les faits partagés qui changeraient maintenant avec les valeurs tapées (avant → après) — rien n'est écrit ni journalisé, ce qui s'est accumulé n'est pas rejoué |
 | Comptes | Comptes | qui se connecte (son espace, le téléphone, un écran) et qui pilote la console : un compte par entrée (nom, identifiant, rôle, désactivé, sa dernière connexion — l'ouverture de sa session web la plus récente encore gardée ou le dernier usage d'une de ses applications, `Accounts.last_seen` —, sa fiche, ses droits exacts), paginée, bascule « Tableau » ; deux boutons dans la barre de titre, « Ajouter un utilisateur » (le chat, sans la console) et « Ajouter un opérateur » (la console aussi), chaque compte une personne dès l'ajout. La page d'un compte est la vue d'un objet : le fil « Réglages / Comptes / son nom », son nom affiché avec ses étiquettes (opérateur ou utilisateur, actif ou désactivé), ce qu'il ouvre, ses faits (son identifiant, sa fiche, l'onglet Comptes de sa fiche s'il en a un, ses droits exacts — Réglages › Droits, `?qui=` et le chat web en privé —, sa dernière connexion) ; modifier (nom affiché, opérateur, actif, mot de passe) — audité ; ses connexions web (combien de sessions ouvertes, la plus récente) et « Fermer ses sessions » (confirmé, audité ; ses applications restent) ; ses applications connectées (téléphone, moteur : sorte, origine, dernier usage, jamais le secret), douze par page, « révoquer » — audité (ADR 0062) — et « Nouveau jeton » (un nom, ce qu'il ouvre : un écran ou un moteur, ou le téléphone), donné par la console : il ne tombe pas avec le mot de passe, il est audité et montré une seule fois, à l'opératrice qui l'a créé, avec « Copier le jeton » (`data-copy` dans `console.js` : le presse-papiers, ou, servie en HTTP, le jeton sélectionné puis copié ; caché sans script) |
-| Droits | Droits | dessiné (`reglages/droits`, ADR 0133, 0134, `app/handmade/tabs/settings.py`, `app/handmade/rights.py`) : ce qu'elle a, ressource par ressource, une sorte par sous-onglet (ADR 0176) — *Vie interne* (ses familles d'outils), *Apps de la Forge*, *Services MCP*, *Projets*, *Canaux*, *Partages*, *Ce que le code fixe* —, chaque ressource sur sa ligne, avec sa description (celle d'une famille écrite pour l'opératrice, à la troisième personne, `FAMILY_ABOUT` : jamais la phrase de sa voix, qui parle au modèle) et le nombre de ses outils, ses outils décrits en la dépliant (lit ou agit, le lien de sa fiche), et « détail des accès » (`?detail=<ressource>`) : son tableau de règles lu tel qu'il est écrit, ses planchers, « Modifier » vers la page qui le règle, « ← Retour » vers sa ligne. Qui et par quel canal se choisissent sur une ligne, en tête. Les droits exacts, outil par outil, seulement quand on a choisi qui (`?qui=` : toi quand elle te répond ou te parle d'elle-même, chaque personne qui a un compte, un autre compte, une inconnue, elle seule) et par quel canal (`?canal=` : le chat web en privé ou en salon, l'app Android, Internet, elle seule) : une étiquette par outil vient alors sur la ligne de sa ressource et dit s'il est ouvert, une colonne « Droits exacts » dit ce qu'elle en fait et les lignes qui en décident (la ressource ; le canal ou le plafond s'ils ont serré), et ce que le canal laisse au plus. Une lecture, sauf *Partages* (ADR 0210) : une ligne par partage (la ressource et sa sorte — boîte, compte Teams, service —, son propriétaire, qui le reçoit et le lien de sa fiche, le niveau en mots), « Retirer » sur chaque boîte et chaque compte Teams (confirmé, audité, `POST /reglages/droits/partages`, la même écriture que son propriétaire : la personne ne le voit plus dans son espace), « ses lignes d'accès » sur un service (sa fiche, où il se retire). Rien ne s'y crée : donner reste au propriétaire |
+| Droits | Droits | dessiné (`reglages/droits`, ADR 0133, 0134, `app/handmade/tabs/settings.py`, `app/handmade/rights.py`) : ce qu'elle a, ressource par ressource, une sorte par sous-onglet (ADR 0176) — *Vie interne* (ses familles d'outils), *Apps de la Forge*, *Services MCP*, *Projets*, *Canaux*, *Partages*, *Ce que le code fixe* —, chaque ressource sur sa ligne, avec sa description (celle d'une famille écrite pour l'opératrice, à la troisième personne, `FAMILY_ABOUT` : jamais la phrase de sa voix, qui parle au modèle) et le nombre de ses outils, ses outils décrits en la dépliant (lit ou agit, le lien de sa fiche), et « détail des accès » (`?detail=<ressource>`) : son tableau de règles lu tel qu'il est écrit, ses planchers, « Modifier » vers la page qui le règle, « ← Retour » vers sa ligne. Qui et par quel canal se choisissent sur une ligne, en tête. Les droits exacts, outil par outil, seulement quand on a choisi qui (`?qui=` : toi quand elle te répond ou te parle d'elle-même, chaque personne qui a un compte, un autre compte, une inconnue, elle seule) et par quel canal (`?canal=` : le chat web en privé ou en salon, l'app Android, Internet, elle seule) : une étiquette par outil vient alors sur la ligne de sa ressource et dit s'il est ouvert, une colonne « Droits exacts » dit ce qu'elle en fait et les lignes qui en décident (la ressource ; le canal ou le plafond s'ils ont serré), et ce que le canal laisse au plus. Une lecture, sauf *Partages* (ADR 0210) : une ligne par partage (la ressource et sa sorte — boîte, compte Teams, service —, son propriétaire, qui le reçoit et le lien de sa fiche, le niveau en mots), « Retirer » sur chaque boîte et chaque compte Teams (confirmé, audité, `POST /reglages/droits/partages`, la même écriture que son propriétaire : la personne ne le voit plus dans son espace), « ses lignes d'accès » sur un service (sa fiche, où il se retire) ; le même geste est sur la fiche d'une personne (Comptes › Partages), qui y revient. Rien ne s'y crée : donner reste au propriétaire |
 | Droits | Canaux | dessiné (`reglages/canaux`, `inspector/pages/canals.py`, ADR 0134) : par où ça lui arrive — un sous-onglet par type (le chat web, l'app Android, Teams, le courrier, Internet, elle seule, ADR 0176), et dedans ses instances, repliées (le chat web en privé ou en salon, chaque boîte, chaque compte Teams, un réseau), chacun avec son tableau (`handmade/droits/tableau.html`) : ce qu'il laisse passer au plus (répondre, outils qui lisent et qui agissent, projets, fichiers, garde) ; sur tes comptes, préparer d'elle-même et comment ça part (l'ADR 0132 s'y fond : qui écrit, c'est tout le monde ou une adresse). Un canal qu'on n'a pas réglé montre son minimum vital ; « Revenir au minimum vital ». `?canal=` ouvre un tableau et son sous-onglet ; chaque bouton envoie tout le tableau (`/reglages/canaux/regler`) et rejournalise le courrier et Teams |
 | Historique des réglages | Journal des modifications | jour par jour, chaque réglage enregistré (qui, quoi, sur quoi) et chaque journalisation des paramètres — celles d'un même moment et d'une même origine (le démarrage) réunies en une ligne |
 
@@ -689,6 +750,20 @@ rubrique.
 - **Fiches** (`Fields`) : libellé à gauche, valeur à droite, deux colonnes au
   plus en largeur. Une fiche de collection ou de réglage mène à sa page sur toute
   sa surface.
+- **Nombres** : une même mesure se dit pareil d'une page à l'autre. Une part de 0 à 1 se dit en %
+  (`pct_fr`, `kernel/inspect.py` : « 42 % ») — l'intensité d'une pensée, l'estime, l'hostilité, l'attachement, la
+  vivacité d'une passion ou d'un rêve, ce qu'il reste d'un souvenir, son importance, la confiance d'une croyance,
+  une pertinence, un poids d'habituation, ce que vaut une annonce, une balise, un besoin, l'énergie. Une grandeur
+  signée (la chaleur, la valence, le plaisir, l'éveil, un coup ou un gain sur l'estime) se dit en décimal signé
+  (`num_fr(x, 2, signed=True)` : « −0,03 ») ; un facteur, « × 0,85 » ; un curseur du tempérament reste un curseur
+  (0,5 : comme la plupart des gens) et un écart moyen (Brier), un décimal. Les seuils suivent leur grandeur (« elle
+  doute sous 35 % », « s'éteint sous 10 % »).
+- **Dates** : un instant se lit « il y a 3 min », « dans 2 h », « à l'instant » — une cellule `When`, la date
+  exacte au survol (`When(at, relative=False)` pour une date qui se lit telle quelle : une échéance, une nuit, un
+  mail). Dans une phrase, un sous-titre ou le texte d'un lien, `relative_fr(at, frame.now)` (`kernel/inspect.py`) :
+  « ennui (45 %), il y a 2 h », « s'endormir — dans 2 h », « 3, le dernier il y a 2 j ». Jamais la date longue à
+  la seconde (`ctx.when`) dans le texte d'une vue de sa rubrique ; seules les bornes d'une courbe et sa table de
+  valeurs la gardent (c'est leur échelle).
 - **Listes** : une liste sans long texte (des lignes serrées) passe en colonnes sur un
   écran large ; une entrée dont on ouvre le détail prend toute la largeur. Une suite de
   replis se range sur trois colonnes.
@@ -707,6 +782,9 @@ rubrique.
   rester vide n'offre pas de « — » ; une seule barre « Enregistrer » par page, collée en bas,
   qui passe au premier plan dès qu'une valeur change. Une saisie non enregistrée se
   signale et la sortie est protégée ; les erreurs ont un résumé navigable au clavier.
+- **Filtres** (`filters_form`, `inspector/templates/_navigation.html`) : un sélecteur de filtre n'a qu'une option
+  vide — aucune de plus quand ses choix en ont déjà une (« toutes »), « Tous » sinon, « Par défaut (…) » quand le
+  filtre a un défaut (le libellé du choix par défaut). Les filtres de petits choix toujours posés : « Le cadre ».
 - **Actions d'en-tête** : une barre de boutons, à droite de la barre de titre (celles
   de la page, voir « Le cadre ») ; le formulaire s'ouvre en panneau sous l'en-tête, un
   seul à la fois.
@@ -718,6 +796,14 @@ rubrique.
 - `inspector/render.py` prépare les cellules, liens, filtres, tableaux,
   graphiques et paginations ; les valeurs des graphiques utilisent le même
   composant de table que les autres vues.
+- Une étiquette (`Badge`) peut porter sa clé (`key`) : ce qu'elle dit, un
+  statut ou une sorte (`honored`, `told`, `image`…), rendue avec ses mots et
+  jamais affichée. Un onglet dessiné lit l'état d'un élément dans cette clé
+  (`key_of`, `app/handmade/tabs/__init__.py`), jamais dans le mot affiché : un
+  libellé renommé dans une vue ne range rien ailleurs. Une app de la Forge n'en
+  a pas besoin : l'enveloppe ne la porte pas. Un seuil qu'un onglet partage avec
+  la vue (la rancune d'une posture, `GRUDGE_FROM` de `faculties/affect/inspect.py`)
+  se lit de même à la part de la jauge, jamais à son ton.
 - Une faculté ou un plugin nomme ce qu'il vise par un lien (`Ref`), sans écrire
   d'adresse (ADR 0216, `tests/architecture/test_console_paths.py`) : une vue, la
   fiche d'un objet, une page de réglages (`Ref.settings`), la file « À valider »

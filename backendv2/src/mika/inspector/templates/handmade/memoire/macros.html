@@ -1,10 +1,24 @@
 {# Ce que partagent les onglets de Mémoire (app/handmade/tabs/memory.py, ADR 0177) : les notes de la faculté, le pied
-   d'un élément retenu (vers son origine, son détail replié), l'aide d'une liste, l'icône d'un fichier. À importer
-   « with context » (le détail d'un élément dessine ses formulaires). #}
+   d'un élément retenu (vers son origine, son détail replié, ses gestes de correction), l'aide d'une liste, l'icône
+   d'un fichier. À importer « with context » (le détail d'un élément dessine ses formulaires). #}
 {% import "handmade/shared/tab.html" as tab with context %}
+{% from "_forms.html" import action_button %}
 
 {% macro notes(list) -%}
 {% for n in list %}<p class="person-tab-note {{ n.tone }}">{{ n.text }}</p>{% endfor %}
+{%- endmacro %}
+
+{# Les gestes de correction d'un élément (ADR 0230), à droite de son pied : ceux qui ont un sens pour lui, chacun un
+   formulaire de la console (son jeton, l'élément dans un champ caché, sa question de confirmation) ; un geste à
+   choix (comment un moment a tourné) s'ouvre en panneau ; un geste dangereux (démentir) sous « ⋯ ». Rien sur un
+   élément d'avant. #}
+{% macro fixes(m) -%}
+{% if m.acts or m.more %}
+<div class="memories-acts" role="group" aria-label="Corriger">
+  {% for a in m.acts %}{{ action_button(a) }}{% endfor %}
+  {% if m.more %}<details class="action-overflow"><summary class="btn quiet icon" title="Autres gestes" aria-label="Autres gestes"><span aria-hidden="true">⋯</span></summary><div class="toolbar action-overflow-panel">{% for a in m.more %}{{ action_button(a) }}{% endfor %}</div></details>{% endif %}
+</div>
+{% endif %}
 {%- endmacro %}
 
 {% macro foot(m, t, extra="") -%}
@@ -12,6 +26,7 @@
   {% if m.href %}<a href="{{ m.href }}">{{ (t.link_label if t else '') or 'Voir l’origine' }} →</a>{% endif %}
   {{ extra }}
   {% if m.detail %}<details class="person-entry-detail"{{ ' open' if m.open }}><summary>Le détail</summary><div class="stack">{{ tab.inner(m.detail) }}</div></details>{% endif %}
+  {{ fixes(m) }}
 </div>
 {%- endmacro %}
 

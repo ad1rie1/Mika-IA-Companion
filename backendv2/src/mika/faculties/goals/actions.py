@@ -1,9 +1,12 @@
 """Ce qu'un opérateur peut faire de ses buts depuis la console.
 
-Des opérations seulement : **reprogrammer** un rappel, **suspendre** un but
+Des opérations seulement : **programmer** un rappel pour quelqu'un (un but
+confié, le même événement que ses outils posent, ADR 0232), le
+**reprogrammer**, **suspendre** un but
 puis le **reprendre**, le faire **avancer maintenant**, lui donner une
 **consigne** ou une **priorité**, tenir avec elle son **plan de travail** (des
-tâches), le **clore**, le **rouvrir**. Sur ce qu'elle a entrepris d'elle-même,
+tâches), le **clore**, le **rouvrir**. Jamais lui confier une exploration :
+c'est son initiative, ou celle d'un réveil (ADR 0117). Sur ce qu'elle a entrepris d'elle-même,
 on pilote sans réécrire : ni son titre, ni son envie. Les projets se pilotent
 dans leur propre faculté (``projects``, ADR 0031). Jamais ce qu'elle en pense ni ce
 qu'elle en ressent : un but annulé ou rouvert ne la rend ni fière ni
@@ -25,6 +28,7 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, Field
 
 from mika.contracts import goals as c
+from mika.contracts import identity as identity_c
 from mika.faculties.goals.faculty import (
     GOAL_AMENDED,
     GOAL_NUDGED,
@@ -48,7 +52,7 @@ from mika.faculties.goals.faculty import (
     task_at,
     workable,
 )
-from mika.faculties.goals.tools import closing
+from mika.faculties.goals.tools import closing, reminder
 from mika.kernel.clock import DAY, instant, local
 from mika.kernel.events import Content
 from mika.kernel.forms import Knob
@@ -209,15 +213,81 @@ def _due_text(frame: Frame, due: int | None) -> str:
     return local(due, frame.env.tz_of(frame.root)).strftime("%Y-%m-%dT%H:%M") if due is not None else ""
 
 
+# ── Programmer un rappel ──────────────────────────────────────────────────
+
+#: les champs d'un rappel, les mêmes pour le programmer et pour le reprogrammer
+WHAT_KNOB = Knob(label="Ce qu'il faudra rappeler", advanced=False, order=10)
+WHEN_KNOB = Knob(label="Quand", widget="datetime", advanced=False, order=20, help="En heure locale.")
+URGENT_KNOB = Knob(label="Urgent (même la nuit)", advanced=False, order=30,
+                   help="Un rappel urgent la réveille ; l'ordinaire attend son réveil.")
+#: d'où vient un rappel programmé depuis la console (``GoalOpened.source``), comme un projet qu'on y crée
+FROM_CONSOLE = "operator"
+
+
+class ProgramArgs(BaseModel):
+    what: Annotated[str, WHAT_KNOB] = Field(default="", max_length=300)
+    when: Annotated[str, WHEN_KNOB] = Field(default="", max_length=40)
+    # « — » en tête de la liste des personnes (un champ qui peut rester vide) : toi
+    owner: Annotated[str | None, Knob(label="Pour qui", widget="subject", subject="person", advanced=False, order=25,
+                                      help="La personne à qui elle le rappellera. Vide : toi.")
+                     ] = Field(default=None, max_length=120)
+    urgent: Annotated[bool, URGENT_KNOB] = False
+
+
+def _known_person(frame: Frame, key: str, me: str | None) -> str | None:
+    """La clé de personne de ``key`` si l'identité la connaît (une adresse vue, une propriétaire) ou si c'est
+    l'opérateur lui-même, sinon rien : la règle du « Pour qui » d'un projet."""
+    person = frame.get(identity_c.PERSON(key))
+    if frame.get(identity_c.HANDLES(person)) or person in frame.get(identity_c.OWNERS):
+        return person
+    return person if me and me in (person, key) else None
+
+
+@GOALS.action("programmer", title="Programmer un rappel", args=ProgramArgs, emits=[c.GOAL_OPENED], section="buts",
+              order=10,
+              description="Elle le dira à la personne à l'heure dite, là où elle la trouvera alors. Un rappel "
+                          "ordinaire attend qu'elle soit réveillée ; un rappel urgent passe même la nuit.")
+def _program(s: GoalsState, frame: Frame, args: ProgramArgs, ctx: ActionContext) -> Done:
+    """Un rappel confié, comme ceux que ses outils posent (``tools.reminder``, ADR 0232) : la console le demande
+    pour quelqu'un, à une date dite. Pour toi, il se dit à défaut là d'où tu l'as programmé, comme un rappel demandé
+    en conversation."""
+    errors: dict[str, str] = {}
+    what = args.what.strip()
+    if not what:
+        errors["what"] = "valeur requise"
+    tz = frame.env.tz_of(frame.root)
+    due = 0
+    if not args.when.strip():
+        errors["when"] = "valeur requise"
+    else:
+        try:
+            due = parse_due(args.when, tz, frame.now)
+        except ValueError as exc:
+            errors["when"] = str(exc)
+    me = frame.get(identity_c.PERSON(ctx.by)) if ctx.by else None
+    owner, asked = me, (args.owner or "").strip()
+    if asked:
+        owner = _known_person(frame, asked, me)
+        if owner is None:
+            errors["owner"] = f"personne inconnue : « {asked[:60]} »"
+    elif owner is None:
+        errors["owner"] = "valeur requise"
+    if errors or owner is None:
+        raise Refused("Le rappel n'a pas été programmé : vérifie le formulaire.", errors)
+    draft = reminder(what, owner, due, urgent=args.urgent, source=FROM_CONSOLE,
+                     address=ctx.by if owner == me else None)
+    at = local(due, tz)
+    return Done(drafts=(draft,), message=f"Rappel programmé : le {at:%d/%m/%Y} à {at:%H:%M}"
+                                         f"{', urgent' if args.urgent else ''}.")
+
+
 # ── Reprogrammer un rappel ────────────────────────────────────────────────
 
 
 class RescheduleArgs(BaseModel):
-    what: Annotated[str, Knob(label="Ce qu'il faudra rappeler", advanced=False, order=10)] = Field(max_length=300)
-    when: Annotated[str, Knob(label="Quand", widget="datetime", advanced=False, order=20,
-                              help="En heure locale.")] = Field(max_length=40)
-    urgent: Annotated[bool, Knob(label="Urgent (même la nuit)", advanced=False, order=30,
-                                 help="Un rappel urgent la réveille ; l'ordinaire attend son réveil.")] = False
+    what: Annotated[str, WHAT_KNOB] = Field(max_length=300)
+    when: Annotated[str, WHEN_KNOB] = Field(max_length=40)
+    urgent: Annotated[bool, URGENT_KNOB] = False
 
 
 def _reschedulable(s: GoalsState, frame: Frame, key: str) -> bool:

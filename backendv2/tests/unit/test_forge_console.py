@@ -457,7 +457,7 @@ def test_regler_saves_what_the_app_reads_and_seals_its_secrets(tmp_path):
     assert SECRET not in json.dumps(stored) and stored["cle"].startswith("gAAAA")  # scellé au repos
     assert stored["villes"] == "Nice\nBrest" and stored["n"] == 7
     shown = repr(got["onglet"])
-    assert SECRET not in shown and "Badge(text='défini', tone='ok')" in shown
+    assert SECRET not in shown and "Badge(text='défini', tone='ok', key='')" in shown
     [slot] = [b for b in got["onglet"] if isinstance(b, ActionSlot)]
     assert slot.action == "forge.regler" and dict(slot.initial)["cle"] == "1"  # « défini », jamais la valeur
     assert got["hors bornes"].errors == {"n": "doit être entre 1 et 9"}

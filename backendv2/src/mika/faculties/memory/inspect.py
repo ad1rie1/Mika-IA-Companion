@@ -52,7 +52,11 @@ from mika.kernel.inspect import (
     Table,
     Text,
     When,
+    agree,
     num_fr,
+    pct_fr,
+    plural,
+    relative_fr,
 )
 from mika.kernel.operate import ActionContext, Done, Refused
 from mika.vocab.affect import emotion_cell
@@ -79,10 +83,14 @@ REREADS_CURSOR = "avant_lectures"
 NIGHT_LINKS = 10
 
 KIND_FR = {c.EPISODE_MEMORY: "souvenir", c.BELIEF: "croyance", c.PROMISE: "promesse", c.EVENT: "moment de sa vie"}
+#: chaque statut que la projection écrit (``projections.py``), en mots, et son ton ; une situation finie
+#: (``ended``) et une prévision constatée (``resolved``) ont une étiquette discrète, mais ne sont pas des statuts
+#: d'avant (``c.FORMER_STATUSES``, dont la liste estompe toute la ligne)
 STATUS_FR = {"active": "actif", "superseded": "remplacée", "merged": "fondu dans un autre", "joined": "jointe à une autre", "pending": "en cours",
-             c.HONORED: "tenue", c.DROPPED: "abandonnée"}
+             c.HONORED: "tenue", c.DROPPED: "abandonnée", "ended": "finie", "resolved": "constatée",
+             c.RETRACTED_STATUS: "démenti(e) par l'opératrice"}
 STATUS_TONE = {"active": "ok", "superseded": "muted", "merged": "muted", "joined": "muted", "pending": "info", c.HONORED: "ok",
-               c.DROPPED: "muted"}
+               c.DROPPED: "muted", "ended": "muted", "resolved": "muted", c.RETRACTED_STATUS: "muted"}
 #: d'où elle tient une croyance (``Item.origin``), en une phrase (la colonne « origine ») ; la seule table de ces
 #: mots — ``ORIGIN_SHORT`` en est la forme courte (la fiche d'une personne). Un souvenir né d'un mensonge
 #: (``LIED``) n'est pas une croyance : il a sa mention à lui (``_text``)
@@ -96,9 +104,14 @@ SENSITIVITY_FR = {int(Sensitivity.NONE): "rien d'autrui", int(Sensitivity.ANODYN
                   int(Sensitivity.PERSONAL): "personnel", int(Sensitivity.CONFIDENCE): "confidence"}
 SENSITIVITY_TONE = {int(Sensitivity.NONE): "muted", int(Sensitivity.ANODYNE): "",
                     int(Sensitivity.PERSONAL): "info", int(Sensitivity.CONFIDENCE): "warn"}
+#: les clés d'étiquettes (``Badge.key``, que lisent les onglets dessinés) qui ne sont ni un statut gardé, ni une
+#: sensibilité, ni une origine, ni une issue : un élément actif qui dort, un secret ; une situation qui dure encore,
+#: ou finie de la bouche de la personne
+DORMANT, SECRET = "dormant", "secret"
+ONGOING, ENDED = "ongoing", "ended"
 
 SEARCH = Param("q", "recherche", placeholder="un mot du texte")
-PERSON = Param("person", "personne", placeholder="un nom ou un moyen de communication")
+PERSON = Param("person", "personne", placeholder="un nom")
 READING_HELP = {
     c.EPISODE_MEMORY: "Un souvenir raconte ce qu’elle a retenu. Sa sensibilité et son état restent visibles ; "
                 "les détails donnent le texte complet et les messages d’origine.",
@@ -212,28 +225,31 @@ def _text(item: Item) -> Text:
 
 
 def _sensitivity(item: Item) -> Badge:
-    if item.origin == c.LIED:
-        return Badge("mensonge", "danger")  # ce qu'elle a affirmé de faux : il ne ressort que devant la personne
+    """Sa sensibilité, sous sa clé (le niveau, en chiffre ; un mensonge et un secret, les leurs)."""
+    if item.origin == c.LIED:  # ce qu'elle a affirmé de faux : il ne ressort que devant la personne
+        return Badge("mensonge", "danger", key=c.LIED)
     if item.secret:
-        return Badge("secret", "danger")  # on lui a demandé de ne pas le répéter
+        return Badge("secret", "danger", key=SECRET)  # on lui a demandé de ne pas le répéter
     return Badge(SENSITIVITY_FR.get(item.sensitivity, str(item.sensitivity)),
-                 SENSITIVITY_TONE.get(item.sensitivity, ""))
+                 SENSITIVITY_TONE.get(item.sensitivity, ""), key=str(item.sensitivity))
 
 
 def _status(item: Item, frame: Frame, p: MemoryParams) -> Badge:
+    """Son statut en mots, sous sa clé (le statut gardé) ; un élément actif qui dort, sous ``DORMANT`` : un onglet qui
+    tait l'état ordinaire le dit encore."""
     listing = LISTINGS.get(item.kind)
     label = dict(listing.statuses).get(item.status) if listing else None
     label = label or STATUS_FR.get(item.status, item.status)
     if item.status == "active" and item.kind in (c.EPISODE_MEMORY, c.BELIEF) and dormant(item, frame.now, p):
-        return Badge(f"{label} (dort)", "muted")
-    return Badge(label, STATUS_TONE.get(item.status, ""))
+        return Badge(f"{label} (dort)", "muted", key=DORMANT)
+    return Badge(label, STATUS_TONE.get(item.status, ""), key=item.status)
 
 
 def _meter(value: float | None) -> Cell:
-    return None if value is None else Meter(value, num_fr(value, 2))
+    return None if value is None else Meter(value, pct_fr(value))
 
 
-def _detail(k: Kept, frame: Frame, names: dict[str, str], ctx: InspectContext) -> tuple[Block, ...]:
+def _detail(k: Kept, frame: Frame, names: dict[str, str]) -> tuple[Block, ...]:
     item = k.item
     pairs: list[tuple[str, Cell]] = [("sorte", KIND_FR.get(item.kind, item.kind))]
     pairs += [("concerne", _person_ref(frame, a, names)) for a in item.about] or [("concerne", "personne")]
@@ -255,10 +271,10 @@ def _detail(k: Kept, frame: Frame, names: dict[str, str], ctx: InspectContext) -
                                        "revient quand on lui en parle et, avec une amie, dans leur ton"))
     if item.kind != c.PROMISE:
         pairs += [("touché pour la dernière fois", When(item.touched_at)),
-                  ("rappels", f"{item.recalls}" + (f", le dernier {ctx.when(item.recalled_at)}"
+                  ("rappels", f"{item.recalls}" + (f", le dernier {relative_fr(item.recalled_at, frame.now)}"
                                                    if item.recalled_at else ""))]
     if item.kind == c.BELIEF:
-        pairs += [("confiance déclarée", num_fr(item.confidence, 2)),
+        pairs += [("confiance déclarée", pct_fr(item.confidence)),
                   ("dite par", names.get(item.source, item.source) if item.source else "—")]
         if k.replaces is not None:
             pairs.append(("remplace", Ref("event", str(k.replaces), f"la croyance n° {k.replaces}")))
@@ -298,9 +314,11 @@ def _episode_memory(k: Kept, frame: Frame, names: dict[str, str], p: MemoryParam
 
 def _belief(k: Kept, frame: Frame, names: dict[str, str], p: MemoryParams) -> tuple[Cell, ...]:
     it = k.item
-    origin = ORIGIN_FR.get(it.origin or "", it.origin or "—")
+    said = ORIGIN_FR.get(it.origin or "", it.origin or "—")
     if it.source:
-        origin += f" ({names.get(it.source, it.source)})"
+        said += f" ({names.get(it.source, it.source)})"
+    # sous sa clé (``told``…) : qui l'a dite, l'onglet dessiné la lit au détail (« dite par »), jamais dans ces mots
+    origin: Cell = Badge(said, key=it.origin) if it.origin else said
     return (_n(k), _text(it), _about(frame, it.about, names), _sensitivity(it), _meter(salience(it, frame.now, p)),
             _meter(it.importance), origin, _status(it, frame, p), When(it.born_at))
 
@@ -322,7 +340,7 @@ def _lasting(ev: c.LifeEvent | None) -> Badge | None:
     """Une situation qui dure (depuis « quand »), ou finie de la bouche de la personne ; rien pour un moment daté."""
     if ev is None or not ev.ongoing:
         return None
-    return Badge("finie", "muted") if ev.ended_at else Badge("dure encore", "info")
+    return Badge("finie", "muted", key=ENDED) if ev.ended_at else Badge("dure encore", "info", key=ONGOING)
 
 
 def _outcome(ev: c.LifeEvent | None) -> Badge | None:
@@ -330,7 +348,7 @@ def _outcome(ev: c.LifeEvent | None) -> Badge | None:
     if ev is None or not ev.outcome:
         return None
     word, tone = OUTCOME_FR.get(ev.outcome, (ev.outcome, ""))
-    return Badge(word, tone)
+    return Badge(word, tone, key=ev.outcome)
 
 
 def _promise(k: Kept, frame: Frame, names: dict[str, str], p: MemoryParams) -> tuple[Cell, ...]:
@@ -342,13 +360,14 @@ def _promise(k: Kept, frame: Frame, names: dict[str, str], p: MemoryParams) -> t
 
 N = Column("n°", "fit", detail=True)
 EPISODE_MEMORIES = Listing(c.EPISODE_MEMORY, "Ses souvenirs", "pas encore de souvenir",
-                           (("active", "actif"), ("merged", "fondu dans un autre")),
+                           (("active", "actif"), ("merged", "fondu dans un autre"), (c.RETRACTED_STATUS, "démenti")),
                            (N, Column("souvenir", role="body"), Column("concerne"), Column("sensibilité", "fit", role="badge"), Column("importance", detail=True),
                             Column("ce qu'il en reste", hint="l'importance, estompée depuis la dernière fois qu'il a été "
                                                              "touché ; sous le seuil, il dort", detail=True),
                             Column("émotion", detail=True), Column("statut", "fit", role="badge"), Column("né", "fit")), _episode_memory)
 BELIEFS = Listing(c.BELIEF, "Ses croyances", "pas encore de croyance",
-                  (("active", "active"), ("superseded", "remplacée")),
+                  (("active", "active"), ("superseded", "remplacée"), ("joined", "jointe à une autre"),
+                   ("resolved", "constatée"), (c.RETRACTED_STATUS, "démentie")),
                   (N, Column("croyance", role="body"), Column("concerne"), Column("sensibilité", "fit", role="badge"),
                    Column("confiance", hint="effective : elle baisse lentement avec le temps"), Column("importance", detail=True),
                    Column("origine"), Column("statut", "fit", role="badge"), Column("née", "fit", detail=True)), _belief)
@@ -357,7 +376,7 @@ PROMISES = Listing(c.PROMISE, "Ses promesses", "pas encore de promesse",
                    (N, Column("promesse", role="body"), Column("à qui"), Column("sensibilité", "fit", role="badge"), Column("échéance", "fit"),
                     Column("statut", "fit", role="badge"), Column("faite", "fit", detail=True)), _promise)
 EVENTS = Listing(c.EVENT, "Ce qui se passe dans la vie des autres", "pas encore de moment noté",
-                 (("active", "à suivre"), ("superseded", "remplacé")),
+                 (("active", "à suivre"), ("superseded", "remplacé"), ("ended", "finie")),
                  (N, Column("moment", role="body"), Column("de qui"), Column("sensibilité", "fit", role="badge"), Column("quand", "fit"),
                   Column("chaque année", "fit", hint="une date qui revient chaque année (un anniversaire, la date "
                                                      "d'un deuil) : « quand » est sa prochaine occurrence"),
@@ -376,12 +395,13 @@ def _events_of(s: MemoryState) -> Listing:
     return replace(EVENTS, cells=lambda k, frame, names, p: _event(k, frame, names, p, s))
 
 
-def _rows(listing: Listing, kept: Sequence[Kept], frame: Frame, ctx: InspectContext) -> tuple[Row, ...]:
+def _rows(listing: Listing, kept: Sequence[Kept], frame: Frame) -> tuple[Row, ...]:
     p = _p(frame)
     names = names_of(frame, {a for k in kept for a in (*k.item.about, *k.item.told_by, *k.item.heard_by)}
                      | {k.item.source for k in kept if k.item.source})
-    return tuple(Row(listing.cells(k, frame, names, p), detail=_detail(k, frame, names, ctx), href=_n(k),
-                     tone="muted" if not k.item.text else "") for k in kept)
+    # estompée : une ligne que l'oubli a vidée, ou un élément d'avant (remplacé, fondu, joint, démenti)
+    return tuple(Row(listing.cells(k, frame, names, p), detail=_detail(k, frame, names), href=_n(k),
+                     tone="muted" if not k.item.text or k.item.status in c.FORMER_STATUSES else "") for k in kept)
 
 
 def _list(listing: Listing, frame: Frame, ctx: InspectContext) -> list[Block]:
@@ -405,7 +425,7 @@ def _list(listing: Listing, frame: Frame, ctx: InspectContext) -> list[Block]:
     pager = ctx.pager(size=PAGE, total=total)
     kept = _select(ctx.store, where, pager.size, pager.offset)
     filtered = bool(q or status or person)
-    return [*notes, Table(listing.columns, _rows(listing, kept, frame, ctx), title=f"{listing.title} ({total})",
+    return [*notes, Table(listing.columns, _rows(listing, kept, frame), title=f"{listing.title} ({total})",
                           empty="aucun résultat pour ces filtres" if filtered else listing.nothing, pager=pager,
                           layout="list", link_label="Voir l’origine", caption=READING_HELP[listing.kind])]
 
@@ -445,7 +465,7 @@ def _moments(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Block]:
 # ── La consolidation ──────────────────────────────────────────────────────
 
 
-def _consolidation_state(s: MemoryState, frame: Frame, ctx: InspectContext) -> Fields:
+def _consolidation_state(s: MemoryState, frame: Frame) -> Fields:
     """Où en sont la relecture des conversations et la nuit : le point de contrôle, la file, le dernier tri et la
     dernière nuit où elle a relu ses lectures (``memory.reread``, à ne pas confondre avec la relecture des
     conversations)."""
@@ -456,7 +476,7 @@ def _consolidation_state(s: MemoryState, frame: Frame, ctx: InspectContext) -> F
         ("messages pas encore relus", pending),
         ("le plus ancien en attente", Ref("event", str(s.pending[0]), f"n° {s.pending[0]}") if s.pending else "—"),
         ("dernier message", When(s.last_message_at) if s.last_message_at else "—"),
-        ("dernière relecture", Ref("event", str(s.consolidated_seq), ctx.when(s.consolidated_at))
+        ("dernière relecture", Ref("event", str(s.consolidated_seq), relative_fr(s.consolidated_at, frame.now))
          if s.consolidated_seq else "jamais"),
         ("fenêtres avec un passage différé", s.given_up),
         ("la dernière différée", Ref("event", str(s.given_up_seq), f"n° {s.given_up_seq}") if s.given_up_seq
@@ -485,10 +505,12 @@ def _volumes(ctx: InspectContext) -> Stats | None:
         return sum(n for (k, st), n in counts.items() if k == kind and (not statuses or st in statuses))
 
     return Stats((
-        Stat("Souvenirs", of(c.EPISODE_MEMORY), f"{of(c.EPISODE_MEMORY, 'merged')} fondus dans un autre"),
-        Stat("Croyances", of(c.BELIEF), f"{of(c.BELIEF, 'superseded')} remplacées"),
+        Stat("Souvenirs", of(c.EPISODE_MEMORY),
+             plural(of(c.EPISODE_MEMORY, "merged"), "fondu dans un autre", "fondus dans un autre")),
+        Stat("Croyances", of(c.BELIEF), plural(of(c.BELIEF, "superseded"), "remplacée", "remplacées")),
         Stat("Promesses en cours", of(c.PROMISE, "pending"),
-             f"{of(c.PROMISE, c.HONORED)} tenues, {of(c.PROMISE, c.DROPPED)} abandonnées"),
+             f"{plural(of(c.PROMISE, c.HONORED), 'tenue', 'tenues')}, "
+             f"{plural(of(c.PROMISE, c.DROPPED), 'abandonnée', 'abandonnées')}"),
     ), title="Ce qu'elle garde")
 
 
@@ -569,7 +591,7 @@ def _rereads(ctx: InspectContext) -> Table:
                  tuple(rows), title="Ses lectures relues la nuit", empty="pas encore de nuit relue", pager=pager)
 
 
-@MEMORY.inspect("consolidation", title="Consolidation", section="memoire", order=40,
+@MEMORY.inspect("consolidation", title="Consolidation", section="memoire", order=50,
                 description="La relecture : ce qui a été relu, ce qui attend, ce qui a échoué ; les nuits "
                             "où les souvenirs presque identiques se fondent ; et ses lectures relues la nuit, avec "
                             "les croyances qu'elle y réunit ou confronte.")
@@ -578,7 +600,7 @@ def _consolidation(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Bl
     return [*([volumes] if volumes else []),
             Note("Les passages à reprendre n’ont pas pu être entièrement traités. Ouvre leur détail pour comprendre "
                  "la cause et demander une nouvelle lecture avec le modèle configuré.", "info"),
-            _queue(ctx), Disclosure("État détaillé de la consolidation", (_consolidation_state(s, frame, ctx),)),
+            _queue(ctx), Disclosure("État détaillé de la consolidation", (_consolidation_state(s, frame),)),
             _runs(ctx), Disclosure("Historique des tris de la nuit", (_nights(ctx),)),
             Disclosure("Historique des lectures relues la nuit", (_rereads(ctx),))]
 
@@ -594,7 +616,7 @@ def _calibration(s: MemoryState, p: MemoryParams) -> Table:
     rows = []
     for nature, cal in sorted(s.calibration.items()):
         b = lk.brier(cal)
-        rows.append(Row((NATURE_FR.get(nature, nature), cal[0], "—" if b is None else f"{b:.3f}".replace(".", ","),
+        rows.append(Row((NATURE_FR.get(nature, nature), cal[0], "—" if b is None else num_fr(b, 3),
                          Badge("plus prudente", "warn") if lk.cautious(cal, p) else
                          Badge("assez de cas", "ok") if cal[0] >= p.calibration_min else
                          Badge(f"{cal[0]}/{p.calibration_min} cas", "muted"))))
@@ -612,7 +634,7 @@ def _tellers(s: MemoryState, frame: Frame, p: MemoryParams) -> Table:
     for teller, (kept, missed) in sorted(s.track.items(), key=lambda kv: (-sum(kv[1]), kv[0])):
         worth = lk.learned(prior, (kept, missed), p)
         rows.append(Row((names.get(teller) or teller, kept, missed,
-                         Meter(worth, text=f"{worth:.2f} (a priori {prior:.2f})".replace(".", ",")))))
+                         Meter(worth, text=f"{pct_fr(worth)} (a priori {pct_fr(prior)})"))))
     return Table((Column("qui annonce"), Column("tenus", "num"), Column("reportés ou annulés", "num"),
                   Column("ce que vaut son annonce")), tuple(rows), title="Ce qu'elle apprend de qui annonce",
                  empty="personne encore")
@@ -620,9 +642,9 @@ def _tellers(s: MemoryState, frame: Frame, p: MemoryParams) -> Table:
 
 @MEMORY.inspect("voir-venir", title="Voir venir", section="memoire", order=38,
                 description="Ce qu'elle attendait des moments annoncés, et ce qu'elle en apprend : ses attentes "
-                            "tombent-elles juste, et qui tient ce qu'il annonce (ADR 0086). Les chiffres se lisent "
-                            "ici, jamais dans ses phrases.")
+                            "tombent-elles juste, et qui tient ce qu'il annonce.")
 def _seeing_ahead(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Block]:
+    """Ses attentes sur les moments annoncés et qui tient ce qu'il annonce (ADR 0086)."""
     p = params(frame.env.params_of("memory", frame.root))
     return [_calibration(s, p), _tellers(s, frame, p)]
 
@@ -702,6 +724,22 @@ def _queue(ctx: InspectContext) -> Table | Note:
 # ── La fiche d'une personne ───────────────────────────────────────────────
 
 
+#: ce que l'onglet Mémoire de la fiche d'une personne liste (``_person``) : une carte par sorte
+PERSON_KINDS = tuple(LISTINGS)
+
+
+def _about_person(frame: Frame, key: str) -> Any:
+    """L'élément concerne cette personne, sous l'une de ses clés (``person_keys``, bornées)."""
+    return _about_clause(sorted(person_keys(frame, key))[:PEOPLE_MAX])
+
+
+def person_total(store: Any, frame: Frame, key: str) -> int:
+    """Combien l'onglet Mémoire de sa fiche liste en tout, sans recherche (``_person`` : ses quatre sortes, tous
+    statuts) — un seul ``COUNT``, le compte de l'onglet dans la barre de sa fiche (``PersonOverview.counts``) ; sans
+    table, il échoue (l'appelant le tait)."""
+    return _count(store, [_about_person(frame, key), tb.items().c.kind.in_(PERSON_KINDS)])
+
+
 @MEMORY.inspect("memoire", title="Mémoire", subject="person", order=50, params=[SEARCH],
                 description="Ce qu'elle garde de cette personne : souvenirs, croyances et promesses qui la "
                             "concernent, sous l'un de ses moyens de communication.")
@@ -712,7 +750,7 @@ def _person(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Block]:
         return [Note("Rien n'est encore rangé : la table des éléments retenus n'existe pas.", tone="muted")]
     keys = sorted(person_keys(frame, ctx.subject))[:PEOPLE_MAX]
     t, said = tb.items(), tb.told()
-    base = [_about_clause(keys)]
+    base = [_about_person(frame, ctx.subject)]
     q = ctx.value("q") or ""
     if q:
         base.append(tb.searched(t.c.folded, q))
@@ -727,14 +765,16 @@ def _person(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Block]:
         totals[listing.kind] = total
         pager = ctx.pager(f"page_{listing.kind}", size=PER_KIND, total=total)
         kept = _select(ctx.store, where, pager.size, pager.offset)
-        sections.append(Table(listing.columns, _rows(listing, kept, frame, ctx), title=f"{listing.title} ({total})",
+        sections.append(Table(listing.columns, _rows(listing, kept, frame), title=f"{listing.title} ({total})",
                               empty="aucun résultat pour cette recherche" if q else listing.nothing, pager=pager,
                               layout="list", link_label="Voir l’origine", caption=READING_HELP[listing.kind]))
     stats = Stats((
-        Stat("Souvenirs", totals[c.EPISODE_MEMORY]),
-        Stat("Croyances", totals[c.BELIEF]),
-        Stat("Promesses", totals[c.PROMISE], f"{sum(1 for x in s.promises.values() if x.to in keys)} en cours"),
-        Stat("Moments de sa vie", totals[c.EVENT]),
+        # chaque libellé s'accorde à sa valeur, qui dit déjà le nombre (« 1 moment de sa vie »)
+        Stat(agree(totals[c.EPISODE_MEMORY], "Souvenir", "Souvenirs"), totals[c.EPISODE_MEMORY]),
+        Stat(agree(totals[c.BELIEF], "Croyance", "Croyances"), totals[c.BELIEF]),
+        Stat(agree(totals[c.PROMISE], "Promesse", "Promesses"), totals[c.PROMISE],
+             f"{sum(1 for x in s.promises.values() if x.to in keys)} en cours"),
+        Stat(agree(totals[c.EVENT], "Moment de sa vie", "Moments de sa vie"), totals[c.EVENT]),
         Stat("Ce qu'elle avait en tête en lui parlant", told,
              "éléments de sa mémoire que son prompt lui montrait pour parler à cette personne (pas forcément dits)"),
     ))

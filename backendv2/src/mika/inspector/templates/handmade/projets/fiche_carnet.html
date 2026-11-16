@@ -1,0 +1,66 @@
+{# Activité › Projets › un projet › Carnet (app/handmade/subjects/project.py, ADR 0176, 0177) : en sous-onglets —
+   les consignes que tu lui as données (la plus récente prime), les notes qu'elle garde pour la suite, ce qu'on a fait
+   du projet, ce qu'il a voulu faire sortir de la machine —, chacun avec sa pagination, qui revient à son ancre ; celui
+   qu'on feuillette s'ouvre. Une demande qui attend ton accord le dit, garde sa commande exacte et mène à la file
+   « À valider » : la fiche ne la décide pas sur place. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% macro feed(t, said=False) -%}
+{% if t.entries %}
+<ol class="now-feed person-timeline prj-notebook-feed" role="list">
+  {% for e in t.entries %}
+  <li class="tone-{{ e.tone or 'plain' }}"><time title="{{ e.at }}">{{ e.rel }}</time>
+    <div>
+      {% if said %}
+      {# une consigne, une note : son texte d'abord (son titre, « consigne » ou « note », est celui du sous-onglet) #}
+      <p class="prj-notebook-text">{{ e.text }}</p>
+      {% if e.meta or e.href %}<p class="prj-notebook-meta">{% if e.meta %}<span>{{ e.meta }}</span>{% endif %}{% if e.href %}<a href="{{ e.href }}">son épisode →</a>{% endif %}</p>{% endif %}
+      {% else %}
+      <p>{% if e.href %}<a href="{{ e.href }}">{{ e.title }}</a>{% else %}{{ e.title }}{% endif %}{% if e.meta %} <span class="now-muted">· {{ e.meta }}</span>{% endif %}</p>
+      {% if e.text %}<p class="person-timeline-text">{{ e.text }}</p>{% endif %}
+      {% endif %}
+    </div>
+  </li>
+  {% endfor %}
+</ol>
+{% else %}{{ tab.empty(t.empty) }}{% endif %}
+{{ tab.pager(t) }}
+{%- endmacro %}
+{% macro pane(id) -%}
+{% set t = lists[id] %}
+<section id="{{ id }}" class="now-card" data-pane aria-labelledby="{{ id }}-t">
+  {{ tab.head(t.title, id ~ "-t") }}
+  {% if id == "carnet-sorties" %}
+  {% if requests %}
+  <ul class="prj-out" role="list">
+    {% for r in requests %}
+    <li class="prj-out-item{{ ' waiting' if r.waiting }}">
+      <div class="prj-out-top">
+        <span class="prj-out-when">{{ tab.cell(r.when) }}</span>
+        <p class="prj-out-what">{{ r.what }}</p>
+        <span class="prj-out-tags">{% if not r.waiting %}<span class="now-muted">accord {{ r.approval }}</span>{% endif %}{% if r.state %} <span class="now-tag {{ r.state.tone }}">{{ r.state.text }}</span>{% endif %}</span>
+      </div>
+      {% if r.waiting %}
+      {{ tab.inner(r.codes) }}
+      {% if r.decide %}<p class="prj-out-decide"><a class="btn quiet small" href="{{ r.decide.href }}">{{ r.decide.text }}</a></p>{% endif %}
+      {% elif r.codes %}
+      <details class="hm-subfold prj-out-more"><summary>Ce qu’il en est</summary>{{ tab.inner(r.codes) }}</details>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}{{ tab.empty(t.empty) }}{% endif %}
+  {{ tab.pager(t) }}
+  {% else %}
+  {{ feed(t, id in ("carnet-consignes", "carnet-notes")) }}
+  {% endif %}
+</section>
+{%- endmacro %}
+<div class="now-page prj-fiche prj-notebook" data-tab="project/carnet">
+  {% for n in notes %}<p class="person-tab-note {{ n.tone }}">{{ n.text }}</p>{% endfor %}
+  <div class="hm-subtabs" data-subtabs>
+    <nav class="hm-subnav" aria-label="Son carnet">
+      {% for p in panes %}<a href="#{{ p.id }}"{% if p.warn %} class="warn"{% endif %}>{{ p.label }}</a>{% endfor %}
+    </nav>
+    <div class="hm-subpanes">{% for id in order %}{{ pane(id) }}{% endfor %}</div>
+  </div>
+</div>

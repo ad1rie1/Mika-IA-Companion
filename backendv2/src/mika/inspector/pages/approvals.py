@@ -40,6 +40,7 @@ from mika.kernel.inspect import (
     When,
     paginate,
     read_params,
+    relative_fr,
 )
 from mika.runtime import decisions
 from mika.runtime.boundary import Failed, acall, call
@@ -115,14 +116,14 @@ def _history(ui: Any, ctx: Any, current: Any, now: int) -> dict[str, Any]:
         e = ended[0]
         origin = {"text": f"{names.kind(e.data.kind)} · {ui.names.who(e.data.target)}" if e.data.target
                   not in (None, "", "none") else names.kind(e.data.kind),
-                  "href": render.href(Ref("episode", corr, "")), "ago": render.relative(e.at, now)}
+                  "href": render.href(Ref("episode", corr, "")), "ago": relative_fr(e.at, now)}
     elif corr in ui.kernel.mind.frame().state("runtime").open:
         origin = {"text": "un épisode en cours", "href": render.href(Ref("episode", corr, "")), "ago": ""}
     past = []
     for d in ctx.events([rt.EFFECT_RESOLVED], PRECEDENTS, where=("capability", current.capability)):
         ran = ctx.events([rt.EFFECT_EXECUTED], 1, where=("proposal", d.data.proposal))
         past.append({"approved": d.data.approved, "by": ui.names.who(d.data.by) if d.data.by else "",
-                     "note": d.data.said(), "ago": render.relative(d.at, now), "exact": ui.when_long(d.at),
+                     "note": d.data.said(), "ago": relative_fr(d.at, now), "exact": ui.when_long(d.at),
                      "href": render.href(Ref("event", str(d.data.proposal), "")), "proposal": d.data.proposal,
                      "ran": None if not ran else {"ok": ran[0].data.ok, "result": names.detail(ran[0].data.result)
                                                   if ran[0].data.result else ""}})
@@ -202,7 +203,7 @@ def _item_view(ui: Any, request: Request, x: QueueItem, back: str) -> dict[str, 
         forms.append(view)
     env = ui.env()
     return {"label": x.label, "summary": x.summary, "context": x.context, "note": x.note, "warn": x.warn,
-            "ago": render.relative(x.at, ui.kernel.mind.frame().now) if x.at else "",
+            "ago": relative_fr(x.at, ui.kernel.mind.frame().now) if x.at else "",
             "when": ui.when_long(x.at) if x.at else "",
             "facts": [{"label": k, "cell": v if isinstance(v, dict) else render.cell(v, env)} for k, v in x.facts],
             "sources": [{"text": t, "href": h} for t, h in x.sources],
@@ -244,7 +245,7 @@ async def _queue(ui: Any, request: Request, tab: QueueTab | None) -> Any:
                      "described": ui.names.capability(p.capability) if p is not None else "",
                      "context": _concerns(ui, p.context)[0] if p is not None else x.context,
                      "summary": " ".join((_summary(texts, p) if p is not None else x.summary).split())[:LINE_TEXT],
-                     "ago": render.relative(e["at"], now) if e["at"] else "",
+                     "ago": relative_fr(e["at"], now) if e["at"] else "",
                      "exact": ui.when_long(e["at"]) if e["at"] else "", "href": href(e),
                      "on": current is not None and e["id"] == current["id"]})
     opened = None
@@ -272,7 +273,7 @@ async def _queue(ui: Any, request: Request, tab: QueueTab | None) -> Any:
                       "described": ui.names.capability(p.capability), "capability_key": p.capability,
                       "owner": p.owner, "context": _concerns(ui, p.context)[0], "summary": _summary(texts, p),
                       "args": args, "arguments": _arguments(full.args_json) if full else [],
-                      "when": ui.when_long(p.at), "ago": render.relative(p.at, now),
+                      "when": ui.when_long(p.at), "ago": relative_fr(p.at, now),
                       "event": render.href(Ref("event", str(p.proposal), "")),
                       "preview": preview.text if preview is not None else "",
                       "seen": preview.digest if preview is not None else "",

@@ -1,6 +1,7 @@
 """Ce qu'un opérateur peut faire des liens depuis la console : déclarer la
 proximité d'une personne (genèse, correction), ou la rendre à ce que leur
-histoire a installé.
+histoire a installé. Le geste est dans la barre de titre de sa fiche, sur tous
+ses onglets ; son formulaire s'ouvre sur la proximité en vigueur (``_initial``).
 
 L'action rend un brouillon de ``social.closeness_set`` qui nomme l'opérateur ;
 le moteur le journalise comme venant de l'extérieur, avec son audit, sous
@@ -55,13 +56,18 @@ def _available(s: SocialState, frame: Frame, key: str) -> bool:
     return settable(frame, key)
 
 
+def _initial(s: SocialState, frame: Frame, key: str) -> dict[str, str]:
+    """Le formulaire s'ouvre sur la proximité en vigueur : celle qu'un opérateur a déclarée, sinon « automatique »."""
+    return {"closeness": s.declared.get(key) or AUTO}
+
+
 def _seen(person: str, level: str) -> Guard:
     """L'opération ne vaut que si sa proximité est toujours celle que l'opérateur a vue."""
     return Guard("proximité inchangée", predicate=lambda view, p=person, lv=level: view.get(c.CLOSENESS(p)) == lv)
 
 
 @SOCIAL.action("proximite", title="Fixer la proximité", args=ClosenessArgs, emits=[c.CLOSENESS_SET],
-               subject="person", available=_available, order=10,
+               subject="person", available=_available, initial=_initial, order=10,
                confirm="Changer sa proximité ? Ce qu'elle peut lui confier d'autres personnes en dépend.",
                description="Pas encore de lien, connaissance, amitié ou proche : ce qu'elle peut lui confier en "
                            "dépend.")
