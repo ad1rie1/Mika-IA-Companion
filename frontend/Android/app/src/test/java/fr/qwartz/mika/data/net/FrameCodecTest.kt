@@ -97,7 +97,7 @@ class FrameCodecTest {
         val a = decode<ServerFrame.Ack>("ack_no_reply.json")
         assertEquals("no_reply", a.status)
         assertEquals("no_model", a.reason)
-        assertEquals("/inspecteur/reglages/fournisseurs", a.href)
+        assertEquals("/admin/reglages/fournisseurs", a.href)
         assertNotNull(a.detail)
     }
 

@@ -22,7 +22,7 @@ from tests.protocol.test_moi_mcp import SERVICE
 from tests.protocol.test_now_page import THOUGHT, chat, think
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 
-PAGE = "/inspecteur/fiche/person/user_1"
+PAGE = "/admin/fiche/person/user_1"
 MOMENT = "Son concert de guitare, jeudi soir"
 SOUVENIR = "Il a calé l'intro du concert après trois répétitions"
 
@@ -42,7 +42,7 @@ def note(client, live) -> None:
 def test_only_an_operator_sees_a_person(world):  # noqa: F811
     client, live, _ = world
     page = client.get(PAGE, follow_redirects=False)
-    assert page.status_code == 303 and page.headers["location"].endswith("/inspecteur/connexion")
+    assert page.status_code == 303 and page.headers["location"].endswith("/admin/connexion")
     assert client.get(f"{person.FRAGMENT}/user_1").status_code == 401
     assert client.get(f"{person.BASE}/user_1", follow_redirects=False).headers["location"].endswith("/connexion")
     async def guest():
@@ -78,7 +78,7 @@ def test_the_page_crosses_what_she_lives_with_a_person(world):  # noqa: F811
     assert 'class="person-head' in text and 'class="person-avatar"' in text
     assert "1 moyen de communication · web, vérifiée" in text and "Que ferait-elle envers adrien maintenant ?" in text
     assert "canal principal" not in text and "vue pour la première fois" not in text
-    assert re.search(r'<a class="nav-item on nav-head" href="/inspecteur/personnes"', text)
+    assert re.search(r'<a class="nav-item on nav-head" href="/admin/personnes"', text)
     assert " style=" not in text and not re.search(r"<script(?![^>]*\bsrc=)", text)
     assert "/static/handmade/person.css" in text
     assert f'data-now-live="{person.FRAGMENT}/user_1"' in text
@@ -92,7 +92,7 @@ def test_the_page_crosses_what_she_lives_with_a_person(world):  # noqa: F811
     # « de », « que » s'élident devant son nom
     assert "Ce qu'elle sait d'adrien" in text
     # leurs derniers mots, dans l'ordre, et le pourquoi de sa réponse
-    assert text.index("salut ! je reviens d'un concert") < text.index('href="/inspecteur/parole/')
+    assert text.index("salut ! je reviens d'un concert") < text.index('href="/admin/parole/')
     assert "Impossible de lire" not in text
 
 
@@ -163,9 +163,9 @@ def test_the_head_leads_to_her_account_and_her_rights(world):  # noqa: F811
     bootstrap(client)
     text = html.unescape(client.get(PAGE).text)
     links = text.split('class="person-head-links"', 1)[1].split("</p>", 1)[0]
-    assert re.search(r'href="/inspecteur/reglages/comptes\?compte=\d+">Modifier le compte</a>'
+    assert re.search(r'href="/admin/reglages/comptes\?compte=\d+">Modifier le compte</a>'
                      r'<span aria-hidden="true">·</span>'
-                     r'<a href="/inspecteur/reglages/droits\?qui=toi&canal=web%3Aprive">Ses droits</a>', links)
+                     r'<a href="/admin/reglages/droits\?qui=toi&canal=web%3Aprive">Ses droits</a>', links)
 
 
 def tab_counts(text: str) -> dict[str, int]:
@@ -229,13 +229,13 @@ def test_exchanges_are_a_conversation(world):  # noqa: F811
     assert tab.status_code == 200
     ConsoleHTML(tab.text).check()
     text = html.unescape(tab.text)
-    assert 'class="tab on" href="/inspecteur/fiche/person/user_1?onglet=echanges"' in text
+    assert 'class="tab on" href="/admin/fiche/person/user_1?onglet=echanges"' in text
     assert 'class="now-card person-chat"' in text and 'class="person-day"' in text
     theirs = text.index('<li class="theirs')
     mine = text.index('<li class="mine')
     assert mine < theirs  # les plus récents en premier (ADR 0181) : sa réponse, puis son message
     assert "salut ! je reviens d'un concert" in text[theirs:] and "répondue → n°" in text[theirs:]
-    assert re.search(r'href="/inspecteur/parole/\d+">pourquoi \?</a>', text[mine:theirs])
+    assert re.search(r'href="/admin/parole/\d+">pourquoi \?</a>', text[mine:theirs])
     # rien de la table d'origine : la même donnée, une autre forme
     assert '<table class="tbl">' not in text
 
@@ -296,7 +296,7 @@ def test_every_list_tab_is_drawn(world):  # noqa: F811
         assert expected in text, tab
     # une adresse : son nom mène à sa fiche, sa confiance est une étiquette
     addresses = html.unescape(client.get(f"{PAGE}?onglet=adresses").text)
-    assert re.search(r'<p class="person-entry-title"><a href="/inspecteur/fiche/handle/user_1">', addresses)
+    assert re.search(r'<p class="person-entry-title"><a href="/admin/fiche/handle/user_1">', addresses)
 
 
 def test_files_tab_carries_what_she_received_and_what_she_sent(world):  # noqa: F811

@@ -24,7 +24,7 @@ __all__ = ["FIRST_STEPS", "main"]
 #: ce que ``mika --help`` dit à qui la lance pour la première fois
 FIRST_STEPS = """Premiers pas :
   1. mika serve                 la lance (http://127.0.0.1:8001), ses données dans ./data/v2
-  2. http://127.0.0.1:8001/inspecteur/
+  2. http://127.0.0.1:8001/admin/
                                 la console : crée le compte opérateur (le premier compte l'est)
   3. Réglages › Modèles de texte › Fournisseurs › Ajouter
                                 un modèle (Claude, Ollama…) : le premier déclaré la fait parler

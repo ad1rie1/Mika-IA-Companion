@@ -13,6 +13,7 @@ from mika.adapters.llm.config import KIND_LABELS, REPLY, ROLE_LABELS, BackendSpe
 from mika.adapters.llm.models import list_models, settle_limits
 from mika.app.handmade import ago
 from mika.inspector.catalog import SettingsPage, SettingsSection
+from mika.inspector.render import PREFIX
 from mika.kernel import forms
 from mika.kernel.clock import DAY
 from mika.kernel.inspect import Note
@@ -254,7 +255,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                            "failures": _count(u.failures), "avg": _seconds(u.latency_avg_s),
                            "tokens": f"{_count(u.input_tokens)} / {_count(u.output_tokens)}", "cost": _cost(u.cost_usd)}
                           for u in week.by_role],
-                "failure": failure, "href": "/inspecteur/systeme/appels"}
+                "failure": failure, "href": f"{PREFIX}/systeme/appels"}
 
     def who_replies() -> list[Any]:
         """Qui la fait parler : le premier fournisseur déclaré sert « répondre » d'office — la page le dit,

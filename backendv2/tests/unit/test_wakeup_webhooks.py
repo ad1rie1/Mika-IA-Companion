@@ -152,11 +152,11 @@ def test_an_unsigned_endpoint_refuses_signatures_and_drops_the_sealed_key(world)
     fiche = client.portal.call(live_.wakeups.endpoint, "serre")
     assert fiche.signed and fiche.key is not None and not fiche.key.signs
     bootstrap(client)
-    page = html_of(client.get("/inspecteur/fiche/reveil/serre"))
+    page = html_of(client.get("/admin/fiche/reveil/serre"))
     assert "aucune signature ne passe" in page and "Un webhook GitHub, Gitea ou Forgejo" in page
     fresh = key_for(client, live_)
     assert client.post(ROUTE, content=body, headers={"X-Hub-Signature-256": signed(fresh, body)}).status_code == 202
-    assert "aucune signature ne passe" not in html_of(client.get("/inspecteur/fiche/reveil/serre"))
+    assert "aucune signature ne passe" not in html_of(client.get("/admin/fiche/reveil/serre"))
     # une copie qui ne s'ouvre plus (``secret.key`` changée) ne vérifie rien : jamais une signature par une clé vide
     client.portal.call(live_.settings.save_wakeup_key, "serre", "0" * 64, "mwk_xxxx", 0, "test", "illisible")
     other = json.dumps({"text": "forgé"}).encode()

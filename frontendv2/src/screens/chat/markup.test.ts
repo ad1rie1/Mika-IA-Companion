@@ -173,7 +173,7 @@ describe("threadMarkup", () => {
     expect(threadMarkup(view(conversation))).not.toContain("data-verdict");
     const html = threadMarkup(view(conversation, { operator: true }));
     expect(html).toContain('data-verdict="ok" data-mid="11"');
-    expect(html).toContain("/inspecteur/parole/11");
+    expect(html).toContain("/admin/parole/11");
   });
 
   it("une réponse pro forme une seule bulle en Markdown, ses outils relus repliés au-dessus", () => {

@@ -92,12 +92,12 @@ class ToolsApiTest {
     @Test fun `une opératrice reçoit la ligne même et la page de la console, une forme vide a ses défauts`() = runBlocking {
         ok(
             """{"canals":[],"moments":[],"groups":[{"key":"families","title":"Ses propres outils","resources":[
-               {"key":"famille:email","title":"Courrier","href":"/inspecteur/reglages/droits?detail=famille%3Aemail","tools":[
+               {"key":"famille:email","title":"Courrier","href":"/admin/reglages/droits?detail=famille%3Aemail","tools":[
                  {"name":"email_read","label":"Ouvrir un de tes mails","cells":{"web/reply":{"level":"toi","keep":"prive",
                   "why":"toi, quand elle répond","line":"ligne 2 — serré par le canal","reason":"","owned":true}}}]}]}]}""",
         )
         val res = (api.rights() as MoiApi.Result.Ok).value.groups.single().resources.single()
-        assertEquals("/inspecteur/reglages/droits?detail=famille%3Aemail", res.href)
+        assertEquals("/admin/reglages/droits?detail=famille%3Aemail", res.href)
         val c = res.tools.single().cells["web/reply"]!!
         assertEquals("ligne 2 — serré par le canal", c.line)
         assertTrue(c.owned)

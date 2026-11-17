@@ -116,7 +116,7 @@ LIES = {  # l'article n° → son lien, tel que le flux le donne
     9: "http://[64:ff9b::7f00:1]/secret",  # la boucle locale, derrière le préfixe NAT64
     10: "http://[64:ff9b::a00:1]/admin",  # le réseau local (10.0.0.1), derrière le préfixe NAT64
     11: "https://maison.example/admin",  # un nom public qui pointe vers la machine elle-même
-    12: f"https://journal.example:{HER_PORT}/inspecteur",  # une machine publique, sur le port où Mika écoute
+    12: f"https://journal.example:{HER_PORT}/admin",  # une machine publique, sur le port où Mika écoute
 }
 
 

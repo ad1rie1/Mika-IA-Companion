@@ -235,21 +235,21 @@ class ToolsRulesTest {
         assertEquals("ligne 2 — serré par le canal", lineFor(c, operator = true))
         assertEquals("", lineFor(c, operator = false))
         assertEquals("", lineFor(null, operator = true))
-        val res = resourcesOf(rights.copy(groups = listOf(RightsGroup("families", "Ses propres outils", listOf(email.copy(href = "/inspecteur/reglages/droits?detail=famille%3Aemail")))))).single()
-        assertEquals("/inspecteur/reglages/droits?detail=famille%3Aemail", consoleFor(res, operator = true))
+        val res = resourcesOf(rights.copy(groups = listOf(RightsGroup("families", "Ses propres outils", listOf(email.copy(href = "/admin/reglages/droits?detail=famille%3Aemail")))))).single()
+        assertEquals("/admin/reglages/droits?detail=famille%3Aemail", consoleFor(res, operator = true))
         assertNull(consoleFor(res, operator = false))
-        assertNull(consoleHref("https://ailleurs.test/inspecteur/x"))
-        assertNull(consoleHref("/inspecteur/x?y=<script>"))
+        assertNull(consoleHref("https://ailleurs.test/admin/x"))
+        assertNull(consoleHref("/admin/x?y=<script>"))
         assertNull(consoleHref("/api/moi/rights"))
-        assertEquals("/inspecteur/reglages/droits", consoleHref("/inspecteur/reglages/droits"))
+        assertEquals("/admin/reglages/droits", consoleHref("/admin/reglages/droits"))
     }
 
     @Test fun `la page de la console s'ouvre sur le serveur de la session, sa requête gardée telle quelle`() {
         val base = (ServerBase.parse("http://192.168.1.22:8001/mika") as ServerBase.Parsed.Ok).base
-        assertEquals("http://192.168.1.22:8001/mika/inspecteur/reglages/droits?detail=famille%3Aemail",
-            consoleUrl(base, "/inspecteur/reglages/droits?detail=famille%3Aemail").toString())
-        assertEquals("http://192.168.1.22:8001/mika/inspecteur/reglages/droits", consoleUrl(base, "/inspecteur/reglages/droits").toString())
-        assertNull(consoleUrl(base, "//ailleurs.test/inspecteur"))
+        assertEquals("http://192.168.1.22:8001/mika/admin/reglages/droits?detail=famille%3Aemail",
+            consoleUrl(base, "/admin/reglages/droits?detail=famille%3Aemail").toString())
+        assertEquals("http://192.168.1.22:8001/mika/admin/reglages/droits", consoleUrl(base, "/admin/reglages/droits").toString())
+        assertNull(consoleUrl(base, "//ailleurs.test/admin"))
     }
 
     // ── les services ──

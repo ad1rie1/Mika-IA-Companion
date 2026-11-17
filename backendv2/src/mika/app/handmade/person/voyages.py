@@ -31,7 +31,7 @@ from mika.kernel.inspect import ActionSlot
 from mika.plugins.trips import TRIPS, TripsState
 from mika.plugins.trips.inspect import REMOVE, TripSeen, avoid_words, day_words, mode_words, read
 
-#: où la console sert le GPX d'un voyage : ``/inspecteur/voyages/<id>/gpx``
+#: où la console sert le GPX d'un voyage : ``/admin/voyages/<id>/gpx``
 GPX = f"{PREFIX}/voyages"
 GONE = "Ce voyage n'existe plus : supprimé, ou sa personne oubliée."
 

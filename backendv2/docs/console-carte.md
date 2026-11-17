@@ -1,6 +1,6 @@
 # La carte de la console
 
-Ce que chaque entrée du menu de `/inspecteur/` montre, et sous quelle forme. Le menu visible vit dans
+Ce que chaque entrée du menu de `/admin/` montre, et sous quelle forme. Le menu visible vit dans
 `app/console_menu.py` ; les destinations (adresses, onglets, libellés) dans `app/console.py` ; les réglages dans
 `app/settings_sections/` (un module par rubrique) ; les pages dessinées à la main dans `app/handmade/` (gabarits `inspector/templates/handmade/`,
 feuilles `inspector/static/handmade/`, la table `app/handmade/pages.py::DRAWN`, les onglets de chaque destination dans
@@ -150,7 +150,7 @@ a-t-elle dit ça ? » et « pourquoi n'a-t-elle pas répondu ? » (`parole/`), l
 ### Accueil
 
 Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et se relit seul (le fragment
-`/inspecteur/_accueil`, `handmade/live.js`) :
+`/admin/_accueil`, `handmade/live.js`) :
 
 - **Ce qui t'attend** : une ligne par page où décider (chaque onglet qui demande une action : accords en attente,
   brouillons, revendications…), puis les réponses en échec, *aucun modèle configuré*, les processus en échec
@@ -174,7 +174,7 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
 
 ### Sa rubrique
 
-- **En ce moment** (`/inspecteur/maintenant`, `app/handmade/now.py`) répond à « comment va-t-elle, et pourquoi ? »
+- **En ce moment** (`/admin/maintenant`, `app/handmade/now.py`) répond à « comment va-t-elle, et pourquoi ? »
   en croisant ses facultés au même instant que son prompt : son humeur en mots et sur le plan plaisir × éveil, ses
   24 dernières heures sur un seul axe (humeur, énergie, sommeil, besoins, paroles et pensées), son corps, ses
   besoins, ses pensées, les gens, le fil de sa journée, ce qu'elle entreprend et la journée en chiffres. Elle se
@@ -200,7 +200,7 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
   pertinence annoncée et celle retenue sur une même barre (l'habituation se voit). Attentes : de qui (« la réponse
   d'Alice »), le temps qui court vers l'échéance en jauge, puis les attentes closes en fil. Le journal et les récits
   de ses nuits se lisent comme des documents, sous le titre que leur donne la faculté (leur jour en mots).
-- **Mémoire** (`app/handmade/tabs/memory.py`) : Souvenirs, Croyances, Promesses, La vie des autres, Voir venir,
+- **Mémoire** (`app/handmade/tabs/memory.py`, adresse courte des souvenirs : `/admin/souvenirs`) : Souvenirs, Croyances, Promesses, La vie des autres, Voir venir,
   Pièces reçues, Fichiers envoyés, Consolidation — les éléments retenus ensemble, les fichiers ensuite, la maintenance
   en dernier. Les éléments retenus se lisent en listes à filets, deux colonnes sur un grand écran, leur détail
   replié ; un élément d'avant (remplacé, fondu ou joint à un autre, démenti) s'estompe, une situation finie le dit en
@@ -226,13 +226,13 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
   ligne), ses relectures, les tris de la nuit, ses lectures relues la nuit (`memory.reread` : combien de lectures et
   de paires, ce qu'elle en a retenu, et en détail les croyances que la même nuit a réunies ou confrontées) et l'état
   détaillé de la consolidation (dont la dernière nuit relue).
-- **Constellation** (`/inspecteur/constellation`, `app/constellation.py`, ADR 0103) : sa mémoire en une boule de
+- **Constellation** (`/admin/constellation`, `app/constellation.py`, ADR 0103) : sa mémoire en une boule de
   points, chacun près de ses voisins de sens, et ce qui la parcourt en direct (une parole et sa provenance, un
   élément qui naît, la nuit, un rêve et ses sources).
 
 ### Relations & échanges
 
-- **Personnes** (`/inspecteur/personnes`, `app/handmade/tabs/people.py`) : une carte par personne — ce qu'elle est pour
+- **Personnes** (`/admin/personnes`, `app/handmade/tabs/people.py`) : une carte par personne — ce qu'elle est pour
   elle, ce qu'elle ressent, ce qui se passe entre elles, ce qu'elle en sait —, qui est là (son titre « En ligne · N »
   mène à Présents), qui lui manque, une recherche (par nom ou par moyen de communication) et un filtre de proximité :
   la seule recherche de la destination. Ses onglets, les mêmes sur ses quatre pages : Vue d'ensemble
@@ -272,7 +272,7 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
   n'apparaît aussi que si elle en a (`app/handmade/person/voyages.py`, ADR 0204) : chacun de ses voyages, du plus
   récemment changé — son titre, comment on s'y déplace, s'il a été préparé avec elle, son départ, ce qu'il évite, ses
   jours et ses arrêts, sa création au journal —, ses arrêts jour par jour, repliés (sorte, note, coordonnées,
-  « ajouté par » elle sous son nom), son GPX (servi par la console aux opérateurs, `/inspecteur/voyages/<id>/gpx` ;
+  « ajouté par » elle sous son nom), son GPX (servi par la console aux opérateurs, `/admin/voyages/<id>/gpx` ;
   son tracé compte dans la borne des trajets de l'écran Carte, sur le compte de l'opérateur : 20 par minute, puis
   un 429 qui le dit) et « Supprimer » (`trips.supprimer`, confirmé, audité ; le dernier supprimé, la fiche revient sur
   sa vue d'ensemble) ; rien ne s'y modifie : un voyage se prépare à deux. Quand un de ses moyens de communication est un
@@ -482,7 +482,7 @@ arguments à côté de son résultat), Appels de modèle (leurs totaux, puis leu
 nombre reste entier, et la page dit que coût, jetons, durée et échecs ne portent que sur les 200 premiers),
 Décision.
 
-**Un événement** (`/inspecteur/evenement/<n>`) : son titre dit ce qui s'est passé, le fil d'Ariane son numéro ; ses
+**Un événement** (`/admin/evenement/<n>`) : son titre dit ce qui s'est passé, le fil d'Ariane son numéro ; ses
 repères sont sur la ligne de faits de l'en-tête (quand, émis par, son origine en mots — « de l'extérieur », « le
 noyau »… —, son épisode, et pour une parole « Pourquoi a-t-elle dit ça ? »). Puis ses textes, titrés en mots (« le
 texte », « le résumé » : `inspector/names.py`, `CONTENT_FIELDS` ; en bulle pour une parole ou un message), son parcours
@@ -494,7 +494,7 @@ l'effet en mots, à qui, son état, ses essais et sa dernière erreur, dits comm
 de sortie, qui revient à la page de l'événement ; un départ parti dit « parti ». Son repli en blocs dit les mêmes mots
 (le tableau « Ses départs »).
 
-**Pourquoi a-t-elle dit ça ?** (ADR 0042) : une page par parole (`/inspecteur/parole/<seq>`), liée depuis le fil,
+**Pourquoi a-t-elle dit ça ?** (ADR 0042) : une page par parole (`/admin/parole/<seq>`), liée depuis le fil,
 l'onglet « Échanges » d'une personne, chaque épisode et chaque événement de parole. Elle est dessinée
 (`handmade/parole/parole.html`, ADR 0121 ; ses blocs au repli) : ce qu'elle a dit, en grand, avec ce qu'elle
 ressentait en le disant (sa balise) et ce qu'elle lisait chez l'autre ; ce qui l'a fait parler (le message, ou la
@@ -715,7 +715,7 @@ rôle par rôle (`CallLog.profile`).
 | Personnage | Identité | nom, nature, description (une phrase), langue, fuseau |
 | | Portrait | son portrait en prose — le seul texte qui la décrit, lu partout (ADR 0138) —, ce qui est vrai d'elle, ses centres d'intérêt |
 | | Sa parole | ses exemples de voix en chat, ses salutations (seuls leurs premiers mots lui sont montrés), son fil de référence pour l'autrice |
-| | Tempérament | une **table de mixage** (ADR 0176, `SettingsSection.aside`) : à gauche, tous ses curseurs d'un coup, famille par famille en colonnes, le milieu (0,5) marqué, ceux qui s'en écartent nettement en couleur ; l'aide du curseur qu'on survole, atteint au clavier ou déplace se lit à droite (« Ce qu'il règle »). À droite aussi, **son caractère, écrit** par le modèle d'après ses curseurs (ADR 0139) : le texte, le modèle, quand — ou « en cours d'écriture » ; après « Enregistrer », une modale suit l'écriture (`/inspecteur/reglages/temperament/etat`, JSON) et montre le texte quand il est là. Puis **la forme de son caractère** : une figure de tous ses curseurs (les 28 du caractère et son chronotype), rangés par famille ; la forme proposée pleine, celle d'aujourd'hui en pointillé, la valeur de chaque sommet dans une bulle au survol, au clavier ou au toucher ; ses traits les plus marqués en mots. Puis **partir d'un profil** : changer le sélecteur dessine la différence sur la figure sans rien remplir (`static/handmade/temperament.js`) ; « Pré-remplir » (`?profil=<clé>`) ouvre le formulaire sur ses valeurs, rien n'est enregistré avant « Enregistrer » ; ses 18 profils repliés, chacun avec sa silhouette. Puis ses curseurs, l'humeur de fond, sa réaction, sa défense, ses précisions (celles qui sont écrites ; les autres repliées sous « Écrire d'autres précisions »), ce que pilote chaque curseur (replié) ; **Voir l'effet** (`app/handmade/temperament.py`, `SettingsSection.prefill`) |
+| | Tempérament | une **table de mixage** (ADR 0176, `SettingsSection.aside`) : à gauche, tous ses curseurs d'un coup, famille par famille en colonnes, le milieu (0,5) marqué, ceux qui s'en écartent nettement en couleur ; l'aide du curseur qu'on survole, atteint au clavier ou déplace se lit à droite (« Ce qu'il règle »). À droite aussi, **son caractère, écrit** par le modèle d'après ses curseurs (ADR 0139) : le texte, le modèle, quand — ou « en cours d'écriture » ; après « Enregistrer », une modale suit l'écriture (`/admin/reglages/temperament/etat`, JSON) et montre le texte quand il est là. Puis **la forme de son caractère** : une figure de tous ses curseurs (les 28 du caractère et son chronotype), rangés par famille ; la forme proposée pleine, celle d'aujourd'hui en pointillé, la valeur de chaque sommet dans une bulle au survol, au clavier ou au toucher ; ses traits les plus marqués en mots. Puis **partir d'un profil** : changer le sélecteur dessine la différence sur la figure sans rien remplir (`static/handmade/temperament.js`) ; « Pré-remplir » (`?profil=<clé>`) ouvre le formulaire sur ses valeurs, rien n'est enregistré avant « Enregistrer » ; ses 18 profils repliés, chacun avec sa silhouette. Puis ses curseurs, l'humeur de fond, sa réaction, sa défense, ses précisions (celles qui sont écrites ; les autres repliées sous « Écrire d'autres précisions »), ce que pilote chaque curseur (replié) ; **Voir l'effet** (`app/handmade/temperament.py`, `SettingsSection.prefill`) |
 | | Autrices | en faits, combien de flux ont une autrice et le modèle qui les fait écrire ; en tête, un seul bandeau quand aucun modèle ne sert le rôle « rendre naturel ». Puis **ses autrices** en cartes, sous leur nom (où elles écrivent, leurs codes en bref, les premiers mots de leur exemple ; ajouter, modifier, retirer), et **où elles écrivent**, le formulaire de la page : flux par flux (le chat, chaque boîte mail, Teams, le téléphone), sa liste dans la colonne « Autrice » (« — » : le premier jet part), ce qu'elle récrit et ce qui l'en empêcherait (Teams désactivé) (`app/authors.py`, `app/handmade/authors.py`, ADR 0124). Les codes portent toute la forme du flux — longueur, registre, émojis, mise en forme (ADR 0140) : lus par l'autrice, ou par le premier jet quand aucune seconde passe ne suit |
 | | Import / export | le document YAML, l'historique des révisions ; « Revenir au fichier » est une action de la barre de titre, sous « ⋯ », confirmée |
 | Carte et téléphone (ADR 0197 ; menu : Carte et téléphone, ses quatre pages en une barre d'onglets) | Notifications du téléphone | la clé Firebase (collée ici ou posée en fichier), d'où elle vient, les téléphones notifiables, ce qui est parti, le dernier échec (ADR 0077) |
@@ -748,8 +748,8 @@ rubrique.
 | Colonne | Page | Contenu |
 |---|---|---|
 | Surveiller | Santé générale | le verdict ; ses tuiles, celles en panne d'abord, chacune avec son constat, son détail et un lien vers son diagnostic : les dix contrôles, puis deux qui n'en sont pas (la sonde publique `/health` ne les voit pas ; le bilan les compte comme les autres, et dit, quand rien ne va mal, « Aucun problème sur les 12 points vérifiés »), **Sauvegardes** (à jour, à faire, en échec ; vers leur carte sur Stockage et sauvegardes) et **Anomalies depuis le démarrage** (ses évaluations, réductions et l'arbitre ; vers Anomalies). Le contrôle du journal mène à Stockage et sauvegardes, où se lit son dernier instantané ; celui des boucles du noyau, qu'aucune page ne montre mieux, reste sur la santé générale, et son constat dit le geste (redémarrer le serveur) ; celui de la file de sortie compte ce que sa page dit « à traiter », tout et sans limite de temps, par état, en mots ; il se dégrade si l'un a moins de 24 h, ou si un effet attend depuis plus de 5 min ; plus vieux, les départs à traiter restent dits dans son constat, le contrôle restant ok. **Ses projections** : une jauge en demi-cercle (combien sont à jour), une ligne par projection (son nom en clair — chaque projection du registre composé en a un —, sa faculté, son niveau, une barre : où elle en est du journal), la quarantaine, les vues lentes en barres (la pire fois, un trait pour la dernière) (`app/handmade/tabs/system.py::projections`). La page dessinée lit tout dans les blocs de sa vue (`inspector/pages/diagnostics.py::health_page`) : le rapport de santé ne s'y calcule qu'une fois |
-| | Processus | ceux qui échouent d'abord : passages, échecs, dernière erreur, en cours ; un processus en échec (« en échec », « a trébuché »), s'il n'est pas en cours, a **Réessayer maintenant** (`POST /inspecteur/systeme/processus`, ADR 0234 : son recul effacé, une passe demandée, `Scheduler.retry_now` ; il repart à sa prochaine échéance, tout de suite s'il était dû), geste audité `console.systeme.reessayer` ; jamais un processus retenu pour une rafale, même en échec (sa ligne dit pourquoi il n'a pas le bouton) |
-| | Anomalies | (`app/handmade/tabs/system.py`, ADR 0177) un bandeau (tranches corrompues — chacune et l'événement où son réducteur a levé, quand la reconstruction sert — une fois le réducteur corrigé — et ses deux façons : « Reconstruire » en ligne, le serveur relancé sur ce code, ou la commande exacte, `mika rebuild` et leurs clés, serveur arrêté —, anomalies, ou rien depuis le démarrage), les chiffres ; les tranches corrompues, une ligne chacune (la faculté, l'événement), avec **Reconstruire** (`POST /inspecteur/systeme/etat`, ADR 0234 : `Mind.rebuild`, sans arrêter les ajouts ; sa confirmation dit qu'elle relit tout le journal et ne sert qu'avec un réducteur corrigé ; le message dit le résultat, saine ou encore corrompue au n° N, et les tranches qu'elle lit qui ne rejouent pas à l'identique), geste audité `console.systeme.reconstruire` ; pas pour une tranche volatile, qui ne se rejoue pas ; côte à côte ce qui a échoué dans ses facultés et à l'arbitre — la faculté, l'événement, l'erreur en clair et telle quelle ; les traces du journal (supplanté, oubli…) jour par jour, en mots, celles qui disent un problème marquées |
+| | Processus | ceux qui échouent d'abord : passages, échecs, dernière erreur, en cours ; un processus en échec (« en échec », « a trébuché »), s'il n'est pas en cours, a **Réessayer maintenant** (`POST /admin/systeme/processus`, ADR 0234 : son recul effacé, une passe demandée, `Scheduler.retry_now` ; il repart à sa prochaine échéance, tout de suite s'il était dû), geste audité `console.systeme.reessayer` ; jamais un processus retenu pour une rafale, même en échec (sa ligne dit pourquoi il n'a pas le bouton) |
+| | Anomalies | (`app/handmade/tabs/system.py`, ADR 0177) un bandeau (tranches corrompues — chacune et l'événement où son réducteur a levé, quand la reconstruction sert — une fois le réducteur corrigé — et ses deux façons : « Reconstruire » en ligne, le serveur relancé sur ce code, ou la commande exacte, `mika rebuild` et leurs clés, serveur arrêté —, anomalies, ou rien depuis le démarrage), les chiffres ; les tranches corrompues, une ligne chacune (la faculté, l'événement), avec **Reconstruire** (`POST /admin/systeme/etat`, ADR 0234 : `Mind.rebuild`, sans arrêter les ajouts ; sa confirmation dit qu'elle relit tout le journal et ne sert qu'avec un réducteur corrigé ; le message dit le résultat, saine ou encore corrompue au n° N, et les tranches qu'elle lit qui ne rejouent pas à l'identique), geste audité `console.systeme.reconstruire` ; pas pour une tranche volatile, qui ne se rejoue pas ; côte à côte ce qui a échoué dans ses facultés et à l'arbitre — la faculté, l'événement, l'erreur en clair et telle quelle ; les traces du journal (supplanté, oubli…) jour par jour, en mots, celles qui disent un problème marquées |
 | | File de sortie | (`app/handmade/tabs/system.py::outbox`) à quoi elle sert et le chemin de ce qui part (écrit au journal → en route → parti, et ce qui est à traiter) ; **À traiter** (le filtre d'état le suit, 8 par page, Relancer / Marquer comme vu, l'erreur ; chaque départ dit ce qui n'est pas parti et à qui — une parole, son destinataire et le début de son texte, « texte oublié » si l'oubli l'a effacé ; une réponse qui ne viendra pas, à qui ; une action, l'action nommée et son résumé —, et que faire selon sa sorte : « Ce message n'est pas parti… » pour une parole échouée, « Ce message est périmé : elle ne le dira plus. », les actions gardant les leurs) ; **ce qui part, par sorte**, en mots (ses messages, ce que montrent ses écrans, ce qu'elle fait au dehors — l'action nommée —, le ménage ; les mots de chaque effet, sa famille, son nom et ce que c'est, viennent de la composition : `EFFECT_LABELS` et `EFFECT_FAMILIES` de `app/console.py`, lus par `Names.effect`, et un test d'architecture veut un nom pour chaque effet du registre composé), une barre empilée parti / en route / à traiter / vu ; **les derniers départs**, filtrés par état, 20 par page, avec leur heure et leur événement. Tout est lu dans les blocs de la vue (`inspector/pages/system.py::sorties`, ADR 0177) : ses comptes par état, sa page de départs, et, repliés, les lignes à traiter et le tableau « Par sorte » — un seul calcul, les mêmes pages pour la page dessinée, son repli et la console en MCP. « À traiter » (échoué, orphelin, périmé, interrompu) a une seule définition, dans `runtime/effects.py`, que le badge et le contrôle de santé comptent aussi |
 | | Moteur des modèles | un bandeau (un vrai rôle sans fournisseur, des appels qui attendent un créneau) ; chaque fournisseur : ses créneaux en cases, son quota en jauges, ses 24 dernières heures (appels, échecs, médiane) ; qui sert quoi, en vrai : les rôles par fournisseur, ceux que personne ne sert d'abord, et à part, sans alarme, la seconde passe sans modèle (« rendre naturel », un rôle facultatif, `OPTIONAL_ROLES`) : coupée par choix, elle ne compte pas parmi les rôles sans fournisseur |
 | | Écrans du monde | un bandeau (ce qui manque à un hôte connecté) ; côte à côte les clients de `/ws/world` (client, moteur, qui, rôles, qui tient le bail d'hôte et qui l'attend) et, par hôte, la révision chargée et ce qui lui manque (ancres, assets en puces, révision dépassée). ADR 0051 |

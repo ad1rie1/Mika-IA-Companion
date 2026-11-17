@@ -53,7 +53,7 @@ def drawn(client, url: str) -> str:
 def form_of(page: str, action: str, having: str = "") -> dict[str, list[str]]:
     """Les champs cachés du formulaire d'une action, tel que la page le montre (son jeton compris) ; ``having`` : le
     premier dont un champ caché vaut cela (le bouton « fait » d'une tâche)."""
-    forms = re.findall(r'<form[^>]+action="/inspecteur/action/' + re.escape(action) + r'".*?</form>', page, re.S)
+    forms = re.findall(r'<form[^>]+action="/admin/action/' + re.escape(action) + r'".*?</form>', page, re.S)
     form = next((f for f in forms if not having or f'value="{having}"' in f), None)
     assert form is not None, f"pas de formulaire {action} {having}"
     data: dict[str, list[str]] = {}
@@ -85,23 +85,23 @@ def test_a_goal_opens_on_its_drawn_summary_and_its_plan_keeps_its_buttons(world)
     client, live, _ = world
     bootstrap(client)
     gid = open_goal(client, live, details="Retrouver les consoles des années 90 et ce qui les rendait si attachantes.")
-    url = f"/inspecteur/fiche/goal/{gid}"
+    url = f"/admin/fiche/goal/{gid}"
     empty = drawn(client, url)
     assert 'class="now-page goal"' in empty and f"But n° {gid} · exploration · à elle" in empty
     assert "<h1>Explorer : les jeux rétro</h1>" in empty
     assert "Retrouver les consoles des années 90" in empty  # ce qu'elle cherche, en grand
     assert "aucune tâche écrite" in empty and "aucune séance rapportée encore" in empty  # l'état vide
     assert "Son envie" in empty and "0 / 8" in empty.replace("<b>", "").replace("</b>", "")
-    assert "/inspecteur/action/goals.tache_ajouter" in empty and "Tout le détail" in empty
+    assert "/admin/action/goals.tache_ajouter" in empty and "Tout le détail" in empty
     # une tâche ajoutée par le formulaire du dessin, puis cochée par le bouton de sa ligne
     data = form_of(empty, "goals.tache_ajouter")
-    added = client.post("/inspecteur/action/goals.tache_ajouter", data={**data, "text": "Lister les consoles"},
+    added = client.post("/admin/action/goals.tache_ajouter", data={**data, "text": "Lister les consoles"},
                         follow_redirects=False)
     assert added.status_code == 303
     page = drawn(client, url)
     assert "Lister les consoles" in page and "posée par toi" in page and "Changer cette tâche" in page
     done = form_of(page, "goals.tache_statut", having=goals_c.TASK_DONE)
-    assert client.post("/inspecteur/action/goals.tache_statut", data=done, follow_redirects=False).status_code == 303
+    assert client.post("/admin/action/goals.tache_statut", data=done, follow_redirects=False).status_code == 303
     after = drawn(client, url + "?onglet=resume")
     assert "1 / 1" in after.replace("<b>", "").replace("</b>", "")
     assert progress_unit(after) == "tâche faite"  # l'unité s'accorde au total : une seule tâche
@@ -117,9 +117,9 @@ def progress_unit(page: str) -> str:
 def test_the_progress_of_a_goal_agrees_with_its_total(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
-    one = drawn(client, f"/inspecteur/fiche/goal/{open_goal(client, live, max_steps=1)}")
+    one = drawn(client, f"/admin/fiche/goal/{open_goal(client, live, max_steps=1)}")
     assert "0 / 1" in one.replace("<b>", "").replace("</b>", "") and progress_unit(one) == "séance"
-    eight = drawn(client, f"/inspecteur/fiche/goal/{open_goal(client, live, title='Explorer : les cartes')}")
+    eight = drawn(client, f"/admin/fiche/goal/{open_goal(client, live, title='Explorer : les cartes')}")
     assert progress_unit(eight) == "séances"
 
 
@@ -129,7 +129,7 @@ def test_a_reminder_says_what_when_and_to_whom(world):  # noqa: F811
     now = live.kernel.mind.clock.now()
     gid = open_goal(client, live, kind=goals_c.REMINDER, title="Rappeler d'arroser les plantes",
                     due=now + 3_600_000_000)
-    page = drawn(client, f"/inspecteur/fiche/goal/{gid}")
+    page = drawn(client, f"/admin/fiche/goal/{gid}")
     assert "À rappeler" in page and "Rappeler d'arroser les plantes" in page and "pas encore" in page
     assert "Plan de travail" not in page  # un rappel n'a ni plan ni séances
 
@@ -138,10 +138,10 @@ def test_a_paused_goal_says_so_first(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
     gid = open_goal(client, live)
-    page = drawn(client, f"/inspecteur/fiche/goal/{gid}")
-    paused_at = client.post("/inspecteur/action/goals.pause", data=form_of(page, "goals.pause"), follow_redirects=False)
+    page = drawn(client, f"/admin/fiche/goal/{gid}")
+    paused_at = client.post("/admin/action/goals.pause", data=form_of(page, "goals.pause"), follow_redirects=False)
     assert paused_at.status_code == 303
-    paused = drawn(client, f"/inspecteur/fiche/goal/{gid}")
+    paused = drawn(client, f"/admin/fiche/goal/{gid}")
     assert 'class="obj-alert warn"' in paused and "En pause depuis" in paused
 
 
@@ -150,7 +150,7 @@ def test_every_other_goal_tab_is_drawn_block_by_block(world, tab):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
     gid = open_goal(client, live)
-    page = drawn(client, f"/inspecteur/fiche/goal/{gid}?onglet={tab}")
+    page = drawn(client, f"/admin/fiche/goal/{gid}?onglet={tab}")
     assert 'class="now-page person-tab"' in page and f"But n° {gid}" in page  # l'en-tête dessiné, sur tous ses onglets
 
 
@@ -163,7 +163,7 @@ def test_a_failing_drawing_gives_back_the_faculty_blocks(world, monkeypatch):  #
         raise RuntimeError("dessin cassé")
 
     monkeypatch.setattr(goal.GoalFiche, "_summary", staticmethod(broken))
-    page = client.get(f"/inspecteur/fiche/goal/{gid}")
+    page = client.get(f"/admin/fiche/goal/{gid}")
     assert page.status_code == 200 and 'class="now-page goal"' not in page.text
     assert "Plan de travail" in html.unescape(page.text)  # les blocs de la faculté
 
@@ -177,7 +177,7 @@ def test_a_goal_fiche_says_what_its_faculty_head_says(world, monkeypatch):  # no
     monkeypatch.setattr(goals_inspect, "_kind_fr", lambda g: "sorte de la vue")
     monkeypatch.setattr(goals_inspect, "_status", lambda g, now: Badge("statut de la vue", "danger"))
     monkeypatch.setattr(goals_inspect, "_desire", lambda g, now, frame: Meter(0.42, "42 %"))
-    page = drawn(client, f"/inspecteur/fiche/goal/{gid}")
+    page = drawn(client, f"/admin/fiche/goal/{gid}")
     assert f"But n° {gid} · sorte de la vue · à elle" in page  # l'en-tête
     assert "statut de la vue" in page and "42 %" in page  # le résumé
     assert ">exploration<" not in page and "en cours" not in page
@@ -190,20 +190,20 @@ def test_a_wakeup_shows_what_it_does_its_key_and_its_last_calls(world):  # noqa:
     client, live, _ = world
     bootstrap(client)
     configure(client, live, tools=("memory",), notify=wakeup_c.NOBODY)
-    bare = drawn(client, "/inspecteur/fiche/reveil/serre")
+    bare = drawn(client, "/admin/fiche/reveil/serre")
     assert 'class="now-page wake"' in bare and "Réveil par API" in bare and "<h1>serre</h1>" in bare
     assert "l'alerte de la serre" in bare and "Résume-la." in bare  # à quoi il sert, ses consignes
     assert "Sans clé, il ne reçoit rien" in bare and "aucun appel pour l'instant" in bare  # l'état vide
-    assert "/inspecteur/action/wakeup.nouvelle_cle" in bare and "/inspecteur/action/wakeup.retirer_cle" not in bare
+    assert "/admin/action/wakeup.nouvelle_cle" in bare and "/admin/action/wakeup.retirer_cle" not in bare
     assert "POST /api/wake/serre" in bare and "curl -X POST" in bare
     assert "Modifier ses réglages" in bare  # ses réglages, en bouton dans l'en-tête
     key = key_for(client, live)
     assert send(client, key).status_code == 202
-    page = drawn(client, "/inspecteur/fiche/reveil/serre")
+    page = drawn(client, "/admin/fiche/reveil/serre")
     assert "Il fait 41 °C dans la serre." in page and "en attente" in page  # ce qu'il apportait, où il en est
     assert "clé définie" in page and "générée" in page
-    assert "/inspecteur/action/wakeup.retirer_cle" in page and "Sans clé" not in page
-    calls = drawn(client, "/inspecteur/fiche/reveil/serre?onglet=appels")
+    assert "/admin/action/wakeup.retirer_cle" in page and "Sans clé" not in page
+    calls = drawn(client, "/admin/fiche/reveil/serre?onglet=appels")
     assert 'class="now-page person-tab"' in calls and "Il fait 41 °C dans la serre." in calls
 
 
@@ -215,12 +215,12 @@ def test_a_teams_conversation_is_a_thread_of_bubbles_with_its_ask_form(world):  
     bootstrap(client)
     key = new_key(client, live)
     assert client.post("/api/teams/inbox", json=batch(), headers=headers(key)).status_code == 202
-    page = drawn(client, f"/inspecteur/fiche/conversation_teams/{quote(DM, safe='')}")
+    page = drawn(client, f"/admin/fiche/conversation_teams/{quote(DM, safe='')}")
     assert 'class="now-page teams-thread"' in page and "Conversation Teams · tête-à-tête" in page
     assert "On se voit à 14 h ?" in page and "Alice" in page and 'class="person-bubble"' in page
     assert "elle n'a rien préparé dans cette conversation" in page  # l'état vide
-    assert "/inspecteur/action/teams.rediger" in page  # le formulaire de la console, dans le dessin
-    assert "/inspecteur/action/teams.ecrire" in page  # écrire soi-même, sur sa carte
+    assert "/admin/action/teams.rediger" in page  # le formulaire de la console, dans le dessin
+    assert "/admin/action/teams.ecrire" in page  # écrire soi-même, sur sa carte
 
 
 def card(page: str, heading: str) -> str:
@@ -240,10 +240,10 @@ def test_a_teams_conversation_offers_to_write_there_and_says_under_which_name(wo
     assert client.post("/api/teams/inbox", json=batch(), headers=headers(mine)).status_code == 202
     assert client.post("/api/teams/inbox", json=batch(conv=BEA_DM, text="Tu viens ?"),
                        headers=headers(hers)).status_code == 202
-    yours = card(drawn(client, f"/inspecteur/fiche/conversation_teams/{quote(DM, safe='')}"), "teams-write")
+    yours = card(drawn(client, f"/admin/fiche/conversation_teams/{quote(DM, safe='')}"), "teams-write")
     assert "Il part sous ton nom" in yours and "ce compte Teams est à toi" in yours
-    assert "/inspecteur/action/teams.ecrire" in yours and "Lui demander une réponse" not in yours
-    url = f"/inspecteur/fiche/conversation_teams/{quote('bea_t~' + BEA_DM, safe='')}"
+    assert "/admin/action/teams.ecrire" in yours and "Lui demander une réponse" not in yours
+    url = f"/admin/fiche/conversation_teams/{quote('bea_t~' + BEA_DM, safe='')}"
     page = drawn(client, url)
     bea = card(page, "teams-write")
     assert "Il part sous le nom de Béa Martin" in bea and "pas sous le tien" in bea  # le garde-fou, par son nom
@@ -253,7 +253,7 @@ def test_a_teams_conversation_offers_to_write_there_and_says_under_which_name(wo
     [received] = client.portal.call(store.thread, "bea_t", BEA_DM, 10)
     data = form_of(page, "teams.ecrire")
     assert data["conversation"] == [f"bea_t~{BEA_DM}"] and data["reply_to"] == [received.ref]
-    sent = client.post("/inspecteur/action/teams.ecrire", data={**data, "body": "J'arrive dans dix minutes."},
+    sent = client.post("/admin/action/teams.ecrire", data={**data, "body": "J'arrive dans dix minutes."},
                        follow_redirects=False)
     assert sent.status_code == 303
     [item] = client.get("/api/teams/outbox", headers=headers(hers)).json()["items"]
@@ -268,7 +268,7 @@ def test_a_teams_conversation_offers_to_write_there_and_says_under_which_name(wo
     off = params_of(live.kernel.mind.frame()).model_copy(update={"accounts_off": ("bea_t",)})
     client.portal.call(live.kernel.set_params, "teams", off)
     unchecked = card(drawn(client, url), "teams-write")
-    assert "/inspecteur/action/teams.ecrire" not in unchecked
+    assert "/admin/action/teams.ecrire" not in unchecked
     assert "Ce compte Teams est décoché : rien n'en part." in unchecked
 
 
@@ -285,14 +285,14 @@ def test_a_teams_reply_shows_what_will_leave_and_its_decisions(world):  # noqa: 
         capability="teams.send", owner="teams", summary=Content.of("Répondre à Alice dans Teams"), context="teams",
         args_json=json.dumps({"draft": draft.id, "conversation": DM, "message": message.ref, "mode": "validation"}))],
         "runtime")
-    page = drawn(client, f"/inspecteur/fiche/reponse_teams/{draft.id}")
+    page = drawn(client, f"/admin/fiche/reponse_teams/{draft.id}")
     assert 'class="now-page teams-reply"' in page and "Réponse Teams · d'elle-même" in page
     assert "On se voit à 14 h ?" in page and "Oui, 14 h me va." in page  # en face du message, ce qui partira
     assert "attend ton accord" in page and "proposée" in page  # son parcours
     for action in ("teams.envoyer", "teams.retoucher", "teams.refuser", "teams.reprendre"):
-        assert f"/inspecteur/action/{action}" in page, action
-    conversation = drawn(client, f"/inspecteur/fiche/conversation_teams/{quote(DM, safe='')}")
-    assert "Oui, 14 h me va." in conversation and f"/inspecteur/fiche/reponse_teams/{draft.id}" in conversation
+        assert f"/admin/action/{action}" in page, action
+    conversation = drawn(client, f"/admin/fiche/conversation_teams/{quote(DM, safe='')}")
+    assert "Oui, 14 h me va." in conversation and f"/admin/fiche/reponse_teams/{draft.id}" in conversation
 
 
 # ── le courrier ──
@@ -308,49 +308,49 @@ def with_mail(world):  # noqa: F811
 
 def test_a_mailbox_shows_its_state_folders_and_how_she_writes_there(world):  # noqa: F811
     client, _, box = with_mail(world)
-    page = drawn(client, "/inspecteur/fiche/compte/pro")
+    page = drawn(client, "/admin/fiche/compte/pro")
     assert 'class="now-page mailbox"' in page and "Boîte aux lettres" in page and "<h1>Atelier</h1>" in page
-    assert "Ses dossiers" in page and "Archives" in page and "/inspecteur/courrier/reception?compte=pro" in page
-    assert "Comment elle y écrit" in page and "/inspecteur/action/email.ecrire" in page
-    voice = drawn(client, "/inspecteur/fiche/compte/pro?onglet=voix")
+    assert "Ses dossiers" in page and "Archives" in page and "/admin/courrier/reception?compte=pro" in page
+    assert "Comment elle y écrit" in page and "/admin/action/email.ecrire" in page
+    voice = drawn(client, "/admin/fiche/compte/pro?onglet=voix")
     assert 'class="now-page mailvoice"' in voice and "Ce qu'elle lit avant d'écrire" in voice
     assert "Comment elle y écrit" in voice and "en assistante" in voice and "à ta place" in voice  # les trois voix
     assert "<atelier@example.test>" in voice  # l'expéditeur tel qu'il partira
-    assert "pas de signature" in voice and "/inspecteur/reglages/canaux?canal=courrier%3Apro" in voice
+    assert "pas de signature" in voice and "/admin/reglages/canaux?canal=courrier%3Apro" in voice
 
 
 def test_a_microsoft_mailbox_says_how_to_connect_it(world, monkeypatch):  # noqa: F811
     client, _, box = with_mail(world)
-    assert "/inspecteur/action/email.microsoft" not in drawn(client, "/inspecteur/fiche/compte/pro")  # un mot de passe
+    assert "/admin/action/email.microsoft" not in drawn(client, "/admin/fiche/compte/pro")  # un mot de passe
     monkeypatch.setattr(FakeMail, "signin", lambda self, key: SignIn(
         SIGNIN_PENDING, code="ABCD-EFGH", url="https://microsoft.com/devicelogin", until=1_793_000_000_000_000))
-    page = drawn(client, "/inspecteur/fiche/compte/pro")
-    assert "/inspecteur/action/email.microsoft" in page and "Se connecter à Microsoft" in page
+    page = drawn(client, "/admin/fiche/compte/pro")
+    assert "/admin/action/email.microsoft" in page and "Se connecter à Microsoft" in page
     assert "https://microsoft.com/devicelogin" in page and "ABCD-EFGH" in page  # le code à entrer, sur la fiche
     monkeypatch.setattr(FakeMail, "signin", lambda self, key: SignIn(SIGNIN_NEEDED, error="Microsoft ne renouvelle "
                                                                                          "plus sa connexion"))
     assert "n'est pas connectée : Microsoft ne renouvelle plus sa connexion" in drawn(
-        client, "/inspecteur/fiche/compte/pro")
+        client, "/admin/fiche/compte/pro")
 
 
 def test_a_mail_reads_with_what_she_knows_beside_it(world):  # noqa: F811
     client, _, box = with_mail(world)
-    page = drawn(client, "/inspecteur/fiche/mail/" + quote("pro:<projet@example.test>", safe=""))
+    page = drawn(client, "/admin/fiche/mail/" + quote("pro:<projet@example.test>", safe=""))
     assert 'class="now-page mailf"' in page and "Mail reçu" in page
     assert "Maquettes du projet" in page and "maquettes.pdf" in page
     assert "<strong>Ton retour jeudi</strong>" in framed(client, page)  # dans son cadre (ADR 0169)
-    assert "/inspecteur/action/email.repondre" in page  # ses actions, celles de la console
+    assert "/admin/action/email.repondre" in page  # ses actions, celles de la console
     assert "Elle ne l'a pas (ou plus) remarqué" in page  # ce qu'elle en sait : rien de plus que la boîte
     assert not box.actions and not box.sent  # consulter ne range rien
-    sent = drawn(client, "/inspecteur/fiche/mail/" + quote(box.outgoing[0].ref, safe=""))
+    sent = drawn(client, "/admin/fiche/mail/" + quote(box.outgoing[0].ref, safe=""))
     assert "Mail parti de sa boîte" in sent and "Bien reçu !" in sent
-    base = "/inspecteur/fiche/mail/" + quote("pro:<projet@example.test>", safe="")
+    base = "/admin/fiche/mail/" + quote("pro:<projet@example.test>", safe="")
     thread = drawn(client, base + "?onglet=fil")
     assert 'class="now-page mailthread"' in thread and "La conversation" in thread
     assert '<li class=" here">' in thread and "ce mail" in thread  # reçu : à gauche, en évidence
     known = drawn(client, base + "?onglet=remarque")
     assert 'class="now-page mailknown"' in known and "Elle ne l'a pas (ou plus) remarqué" in known  # l'état vide
-    gone = drawn(client, "/inspecteur/fiche/mail/" + quote(box.outgoing[0].ref, safe="") + "?onglet=fil")
+    gone = drawn(client, "/admin/fiche/mail/" + quote(box.outgoing[0].ref, safe="") + "?onglet=fil")
     assert '<li class="mine here">' in gone and "↗ parti" in gone  # parti de sa boîte : à droite
 
 
@@ -363,7 +363,7 @@ def test_what_she_knows_of_a_mail_says_each_fact_once_and_its_shares_in_percent(
         source="email", kind=email_c.MAIL, summary=Content.of("Léa attend ton retour sur les maquettes."),
         pertinence=0.9, bundle="email", mail="pro:<projet@example.test>", sender="Léa Martin <lea@example.test>",
         address="lea@example.test", importance=0.85, needs_reply=True, account="pro", folder="INBOX")], "email")
-    base = "/inspecteur/fiche/mail/" + quote("pro:<projet@example.test>", safe="")
+    base = "/admin/fiche/mail/" + quote("pro:<projet@example.test>", safe="")
     page, known = drawn(client, base), drawn(client, base + "?onglet=remarque")
     for shown in (page, known):
         assert shown.count("important, non lu") == 1, shown  # l'en-tête, pas une ligne « état »
@@ -383,26 +383,26 @@ def test_a_draft_is_an_envelope_with_its_decisions_and_its_journey(world):  # no
         capability="email.send", owner="email", summary=Content.of("Répondre à Léa"), context="email",
         args_json=json.dumps({"draft": draft.id, "account": "pro", "mail": "pro:<projet@example.test>"}))],
         "runtime")
-    page = drawn(client, f"/inspecteur/fiche/brouillon/{draft.id}")
+    page = drawn(client, f"/admin/fiche/brouillon/{draft.id}")
     assert 'class="now-page draftf"' in page and "Brouillon · d'elle-même" in page
     assert "Ce qui partira" in page and "lea@example.test" in page and "Merci Léa, retour jeudi." in page
     assert "Maquettes du projet" in page  # le mail auquel il répond, en lien
     for action in ("email.envoyer_brouillon", "email.retoucher", "email.refuser_brouillon", "email.reprendre"):
-        assert f"/inspecteur/action/{action}" in page, action
+        assert f"/admin/action/{action}" in page, action
     assert "D'où il vient" in page and "Ce qui lui est arrivé" in page  # à côté : son origine, son parcours
-    why = drawn(client, f"/inspecteur/fiche/brouillon/{draft.id}?onglet=pourquoi")
+    why = drawn(client, f"/admin/fiche/brouillon/{draft.id}?onglet=pourquoi")
     assert 'class="now-page draftwhy"' in why and "Le mail auquel il répond" in why
     assert "Maquettes du projet" in why and "de Léa Martin <lea@example.test>" in why  # le mail, lu dans la boîte
     assert "Voici les maquettes." in why and "Elle l'a préparé d'elle-même" in why
-    history = drawn(client, f"/inspecteur/fiche/brouillon/{draft.id}?onglet=historique")
+    history = drawn(client, f"/admin/fiche/brouillon/{draft.id}?onglet=historique")
     assert 'class="now-page drafthist"' in history and "Ce qui lui est arrivé" in history and "Proposé" in history
     assert "Sa version" not in history  # jamais retouché : une seule version
-    refused = client.post("/inspecteur/action/email.refuser_brouillon",
+    refused = client.post("/admin/action/email.refuser_brouillon",
                           data={**form_of(page, "email.refuser_brouillon"), "note": "trop sec"}, follow_redirects=False)
     assert refused.status_code == 303
-    decided = drawn(client, f"/inspecteur/fiche/brouillon/{draft.id}")
+    decided = drawn(client, f"/admin/fiche/brouillon/{draft.id}")
     assert "Où il en est" in decided and "refusé" in decided and "email.envoyer_brouillon" not in decided
-    assert "Refusé" in drawn(client, f"/inspecteur/fiche/brouillon/{draft.id}?onglet=historique")
+    assert "Refusé" in drawn(client, f"/admin/fiche/brouillon/{draft.id}?onglet=historique")
 
 
 def propose(client, live, draft_id: str, **more) -> None:
@@ -417,29 +417,29 @@ def test_a_retouched_draft_shows_both_versions_and_a_vanished_one_keeps_its_fich
                                      body="Merci Léa, je regarde les deux pistes.", reply_to="pro:<projet@example.test>",
                                      edited_by="user_1", original_body="Merci !"))
     propose(client, live, draft.id, mail="pro:<projet@example.test>")
-    history = drawn(client, f"/inspecteur/fiche/brouillon/{draft.id}?onglet=historique")
+    history = drawn(client, f"/admin/fiche/brouillon/{draft.id}?onglet=historique")
     assert "Sa version" in history and "Merci !" in history and "Merci Léa, je regarde les deux pistes." in history
     # qui l'a retouché, par son nom, jamais sa clé (audit du 2026-11-05, C4-R4) ; la carte de côté de la fiche aussi
     assert "Retouché" in history and "par user_1" not in history
-    assert "par user_1" not in drawn(client, f"/inspecteur/fiche/brouillon/{draft.id}")
+    assert "par user_1" not in drawn(client, f"/admin/fiche/brouillon/{draft.id}")
     propose(client, live, "parti-de-la-boite")
-    vanished = drawn(client, "/inspecteur/fiche/brouillon/parti-de-la-boite")
+    vanished = drawn(client, "/admin/fiche/brouillon/parti-de-la-boite")
     assert 'class="now-page draftf"' in vanished and "n'est plus dans la boîte" in vanished
     assert "attend ton accord" in vanished and "il ne partira pas" in vanished  # où il en est, sans texte
     assert "email.envoyer_brouillon" not in vanished
-    assert 'class="now-page draftwhy"' in drawn(client, "/inspecteur/fiche/brouillon/parti-de-la-boite?onglet=pourquoi")
+    assert 'class="now-page draftwhy"' in drawn(client, "/admin/fiche/brouillon/parti-de-la-boite?onglet=pourquoi")
     # il attend encore ton accord : sa fiche le refuse (C4-02), comme la file À valider ; la liste le nomme comme elle
-    assert "Ce que tu peux en faire" in vanished and "/inspecteur/action/email.refuser_brouillon" in vanished
+    assert "Ce que tu peux en faire" in vanished and "/admin/action/email.refuser_brouillon" in vanished
     assert "Il attend encore ton accord" in vanished and "Il attendait" not in vanished
-    assert "Un brouillon disparu" in drawn(client, "/inspecteur/courrier/brouillons")
-    refused = client.post("/inspecteur/action/email.refuser_brouillon",
+    assert "Un brouillon disparu" in drawn(client, "/admin/courrier/brouillons")
+    refused = client.post("/admin/action/email.refuser_brouillon",
                           data={**form_of(vanished, "email.refuser_brouillon"), "note": "disparu de la boîte"},
                           follow_redirects=False)
     assert refused.status_code == 303
-    decided = drawn(client, "/inspecteur/fiche/brouillon/parti-de-la-boite")
+    decided = drawn(client, "/admin/fiche/brouillon/parti-de-la-boite")
     assert "Où il en est" in decided and "refusé" in decided and "email.refuser_brouillon" not in decided
     assert "Il attend encore" not in decided
-    told = drawn(client, "/inspecteur/fiche/brouillon/parti-de-la-boite?onglet=historique")
+    told = drawn(client, "/admin/fiche/brouillon/parti-de-la-boite?onglet=historique")
     assert "« disparu de la boîte »" in told and "par user_1" not in told  # qui l'a refusé : un nom, pas sa clé
 
 
@@ -448,21 +448,21 @@ def test_drafts_and_contacts_are_drawn_in_the_mail_space(world):  # noqa: F811
     draft = box.save_draft(MailDraft(id="", account="pro", to="lea@example.test", subject="Re: Maquettes",
                                      body="Merci Léa, retour jeudi.", reply_to="pro:<projet@example.test>"))
     propose(client, live, draft.id, mail="pro:<projet@example.test>")
-    drafts = drawn(client, "/inspecteur/courrier/brouillons")
+    drafts = drawn(client, "/admin/courrier/brouillons")
     assert 'mail-drafts-page' in drafts and 'class="hm-workspace mail-views"' in drafts  # l'espace du courrier
     assert "À décider" in drafts and "Re: Maquettes" in drafts and "Relire le brouillon" in drafts
-    assert f'href="/inspecteur/fiche/brouillon/{draft.id}"' in drafts and "Maquettes du projet" in drafts
+    assert f'href="/admin/fiche/brouillon/{draft.id}"' in drafts and "Maquettes du projet" in drafts
     assert "Déjà décidés" in drafts and "aucun encore" in drafts.lower()
     # la page porte le nom de sa ligne dans la colonne (C4-11) ; l'intro suffit, sans bandeau qui la répète (C4-15)
     assert "<h1>Ses brouillons</h1>" in drafts and "Rien ne part sans toi" not in drafts
     # Envoyés ne redit pas ce que la colonne compte déjà, « Ses brouillons 1 », en lien (C4-R2)
-    sent = html.unescape(client.get("/inspecteur/courrier/envoyes").text)
+    sent = html.unescape(client.get("/admin/courrier/envoyes").text)
     assert "Envoyés" in sent and "attend(ent)" not in sent and "brouillon(s)" not in sent
-    contacts = drawn(client, "/inspecteur/courrier/contacts")
+    contacts = drawn(client, "/admin/courrier/contacts")
     assert 'mail-contacts-page' in contacts and "lea@example.test" in contacts and "Ses échanges" in contacts
-    assert "/inspecteur/action/email.ecrire" in contacts and 'value="lea@example.test"' in contacts  # « Écrire »
+    assert "/admin/action/email.ecrire" in contacts and 'value="lea@example.test"' in contacts  # « Écrire »
     assert "reception?dossier=%2A&de=lea%40example.test" in contacts  # ses échanges, dans la réception
-    empty = drawn(client, "/inspecteur/courrier/contacts?q=personne-inconnue")
+    empty = drawn(client, "/admin/courrier/contacts?q=personne-inconnue")
     assert "aucun contact ne correspond" in empty.lower()
 
 

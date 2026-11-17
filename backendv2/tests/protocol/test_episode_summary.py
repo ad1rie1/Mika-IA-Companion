@@ -14,7 +14,7 @@ from mika.kernel.events import Origin
 from tests.protocol.test_console_diagnostics import stop
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 
-URL = "/inspecteur/episode/un-episode"
+URL = "/admin/episode/un-episode"
 
 
 def _both(client) -> tuple[str, str]:

@@ -690,9 +690,9 @@ PARTS: tuple[tuple[str, Callable[[Look, Who], dict[str, Any]]], ...] = (
 
 
 class PersonOverview(Overview):
-    """La vue d'ensemble de la fiche d'une personne (``/inspecteur/fiche/person/<clé>`` : son premier onglet, ouvert
+    """La vue d'ensemble de la fiche d'une personne (``/admin/fiche/person/<clé>`` : son premier onglet, ouvert
     par défaut ; le détail de chaque faculté reste dans les suivants), et son fragment qui se relit seul.
-    L'adresse ``/inspecteur/personne/<clé>`` mène à la fiche."""
+    L'adresse ``/admin/personne/<clé>`` mène à la fiche."""
 
     slug = "ensemble"
     title = "Vue d'ensemble"

@@ -123,7 +123,7 @@ export type Provider = "microsoft" | "gmail" | "davmail" | "imap";
 
 /** Les fournisseurs de « Ajouter un compte mail » : [clé, titre, ce que c'est, icône]. */
 export const PROVIDERS: readonly [Provider, string, string, "globe" | "server" | "mail" | "settings"][] = [
-  ["microsoft", "Microsoft", "Outlook.com, Hotmail, Live : connexion par code d'appareil (OAuth2)", "globe"],
+  ["microsoft", "Microsoft", "Outlook.com, Hotmail, Live : tu te connectes chez Microsoft, par un code", "globe"],
   ["davmail", "Exchange pro", "Ta boîte de travail par la passerelle DavMail (O365Graph) sur la machine de Mika", "server"],
   ["gmail", "Gmail", "Avec un mot de passe d'application", "mail"],
   ["imap", "Autre", "N'importe quelle boîte IMAP et SMTP, par mot de passe", "settings"],

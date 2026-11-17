@@ -54,14 +54,14 @@ def test_a_teams_reply_links_its_draft_and_its_conversation_never_a_person() -> 
 
 def test_a_mail_links_its_draft_and_its_box() -> None:
     assert sources(UI, "email.send", "email", {"draft": "d-1", "account": "perso"}) == [
-        ("Le brouillon", "/inspecteur/fiche/brouillon/d-1"),
-        ("La boîte « perso »", "/inspecteur/courrier/reception?compte=perso")]
+        ("Le brouillon", "/admin/fiche/brouillon/d-1"),
+        ("La boîte « perso »", "/admin/courrier/reception?compte=perso")]
 
 
 @pytest.mark.parametrize(("context", "said", "href", "label"), [
-    ("mcp:agenda", "service « agenda »", "/inspecteur/fiche/serveur/agenda", "Le service « agenda »"),
-    ("forge:meteo", "app « meteo »", "/inspecteur/fiche/app/meteo", "L'app « meteo »"),
-    ("project:61", "projet n° 61", "/inspecteur/fiche/project/61", "Le projet n° 61"),
+    ("mcp:agenda", "service « agenda »", "/admin/fiche/serveur/agenda", "Le service « agenda »"),
+    ("forge:meteo", "app « meteo »", "/admin/fiche/app/meteo", "L'app « meteo »"),
+    ("project:61", "projet n° 61", "/admin/fiche/project/61", "Le projet n° 61"),
 ])
 def test_a_service_an_app_and_a_project_lead_to_their_fiche(context: str, said: str, href: str, label: str) -> None:
     assert about(UI, context) == (said, href)
@@ -69,11 +69,11 @@ def test_a_service_an_app_and_a_project_lead_to_their_fiche(context: str, said: 
 
 
 def test_a_person_leads_to_their_fiche_and_their_conversation() -> None:
-    assert about(UI, "user_1") == ("Adrien", "/inspecteur/fiche/person/user_1")
+    assert about(UI, "user_1") == ("Adrien", "/admin/fiche/person/user_1")
     assert sources(UI, "demo.envoyer", "user_1", {}) == [
-        ("La fiche d'Adrien", "/inspecteur/fiche/person/user_1"),  # « de » élidé devant une voyelle
-        ("Leur conversation", "/inspecteur/fiche/person/user_1?onglet=echanges")]
-    assert sources(UI, "demo.envoyer", "ext_2", {})[0] == ("La fiche de Béa", "/inspecteur/fiche/person/p_bea")
+        ("La fiche d'Adrien", "/admin/fiche/person/user_1"),  # « de » élidé devant une voyelle
+        ("Leur conversation", "/admin/fiche/person/user_1?onglet=echanges")]
+    assert sources(UI, "demo.envoyer", "ext_2", {})[0] == ("La fiche de Béa", "/admin/fiche/person/p_bea")
 
 
 def test_nothing_is_said_without_a_context() -> None:

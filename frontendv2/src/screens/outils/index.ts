@@ -39,7 +39,7 @@ import {
 
 const ID = "outils";
 /** Une page de la console, telle que le moteur la donne à une opératrice : rien d'autre ne s'ouvre d'ici. */
-const CONSOLE_PAGE = /^\/inspecteur\/[\w\-/]*(\?[\w=%.\-&]*)?$/;
+const CONSOLE_PAGE = /^\/admin\/[\w\-/]*(\?[\w=%.\-&]*)?$/;
 
 class OutilsScreen {
   private readonly tabs: ScreenTab[] = [

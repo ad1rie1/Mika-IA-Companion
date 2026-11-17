@@ -23,7 +23,7 @@ from tests.protocol.test_drawn_fiches import append, drawn, form_of
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 
 ADRIEN = "user_1"
-FICHE = f"/inspecteur/fiche/person/{ADRIEN}"
+FICHE = f"/admin/fiche/person/{ADRIEN}"
 SECRET, LIST, PHOTO = "a" * 32, "b" * 32, "c" * 32
 BYTES = {SECRET: b"un code a ne pas garder", LIST: b"- pain\n- lait\n", PHOTO: b"\x89PNG\r\n\x1a\n" + b"x" * 64}
 SEEN = "Une ordonnance au nom d'Adrien."
@@ -82,13 +82,13 @@ def test_an_operator_removes_a_sent_file_from_the_person_s_files_tab(world):  # 
     assert form_of(page, "attachments.retirer", having=PHOTO)["_sujet"] == [PHOTO]
     assert "Retirer « secret.txt » ? Ses octets sont effacés" in page  # data-confirm
 
-    done = client.post("/inspecteur/action/shares.retirer", data=sent, follow_redirects=False)
+    done = client.post("/admin/action/shares.retirer", data=sent, follow_redirects=False)
     assert done.status_code == 303 and done.headers["location"].startswith(f"{FICHE}?onglet=fichiers")
     after = drawn(client, done.headers["location"])
     assert "« secret.txt » retiré : ses octets sont effacés." in after
     # la ligne reste, et le dit ; plus de « Retirer » ni de téléchargement pour elle
     gone = _entry(after, "secret.txt")
-    assert SENT_GONE in gone and "/inspecteur/telecharger/partage/" not in gone
+    assert SENT_GONE in gone and "/admin/telecharger/partage/" not in gone
     assert f'value="{SECRET}"' not in after
     assert SENT_GONE not in _entry(after, "courses.md")
     # les octets partent, la ligne reste avec sa raison ; l'autre fichier ne bouge pas
@@ -101,9 +101,9 @@ def test_an_operator_removes_a_sent_file_from_the_person_s_files_tab(world):  # 
     audit = [e.data for e in _events(client, live, rt.OPERATED)]
     assert [(a.action, a.by, a.subject, a.outcome, a.seqs) for a in audit] == \
         [("shares.retirer", ADRIEN, SECRET, "done", (expired.seq,))]
-    assert "n'est plus disponible" in html.unescape(client.get(f"/inspecteur/telecharger/partage/{SECRET}").text)
+    assert "n'est plus disponible" in html.unescape(client.get(f"/admin/telecharger/partage/{SECRET}").text)
     # le renvoi du même formulaire ne refait rien
-    again = client.post("/inspecteur/action/shares.retirer", data=sent, follow_redirects=False)
+    again = client.post("/admin/action/shares.retirer", data=sent, follow_redirects=False)
     assert again.status_code == 303
     assert len(_events(client, live, shares_c.EXPIRED)) == 1
 
@@ -113,24 +113,24 @@ def test_sent_files_have_their_memory_tab_and_a_piece_is_removed_from_received(w
     bootstrap(client)
     _files(client, live)
     # Mémoire › Fichiers envoyés : à côté de Pièces reçues, après les éléments retenus, avant la consolidation
-    sent = drawn(client, "/inspecteur/memoire/envoyes")
+    sent = drawn(client, "/admin/memoire/envoyes")
     assert 'data-tab="memoire/envoyes"' in sent
     bar = sent.split('class="tabs', 1)[1]
-    assert bar.index("/inspecteur/memoire/promesses") < bar.index("/inspecteur/memoire/voir-venir") \
-        < bar.index("/inspecteur/memoire/recues") < bar.index("/inspecteur/memoire/envoyes") \
-        < bar.index("/inspecteur/memoire/consolidation")
+    assert bar.index("/admin/memoire/promesses") < bar.index("/admin/memoire/voir-venir") \
+        < bar.index("/admin/memoire/recues") < bar.index("/admin/memoire/envoyes") \
+        < bar.index("/admin/memoire/consolidation")
     entry = _entry(sent, "secret.txt")
     # pour qui : son nom seul, vers sa fiche (qui réunit tous ses moyens de communication)
     assert ">adrien</a>" in entry and "(user_1)" not in entry
-    assert "/inspecteur/telecharger/partage/" in entry and "pas parti" in entry
+    assert "/admin/telecharger/partage/" in entry and "pas parti" in entry
     assert form_of(sent, "shares.retirer", having=SECRET)["_sujet"] == [SECRET]
 
     # une pièce reçue, retirée depuis Mémoire › Pièces reçues : ses octets partent, ce qu'elle y a lu reste
-    received = drawn(client, "/inspecteur/memoire/recues")
+    received = drawn(client, "/admin/memoire/recues")
     form = form_of(received, "attachments.retirer", having=PHOTO)
     assert "Retirer « ordonnance.png » ?" in received
-    done = client.post("/inspecteur/action/attachments.retirer", data=form, follow_redirects=False)
-    assert done.status_code == 303 and done.headers["location"].startswith("/inspecteur/memoire/recues")
+    done = client.post("/admin/action/attachments.retirer", data=form, follow_redirects=False)
+    assert done.status_code == 303 and done.headers["location"].startswith("/admin/memoire/recues")
     after = drawn(client, done.headers["location"])
     piece = _entry(after, "ordonnance.png")
     assert PIECE_GONE in piece and SEEN in piece and "Télécharger" not in piece
@@ -141,30 +141,30 @@ def test_sent_files_have_their_memory_tab_and_a_piece_is_removed_from_received(w
     # l'onglet Fichiers de la personne le dit aussi
     files = drawn(client, f"{FICHE}?onglet=fichiers")
     assert PIECE_GONE in _entry(files, "ordonnance.png")
-    assert 'action="/inspecteur/action/attachments.retirer"' not in files
+    assert 'action="/admin/action/attachments.retirer"' not in files
 
 
 def test_the_fiche_of_a_file_removes_it_and_then_says_so(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
     _files(client, live)
-    url = f"/inspecteur/fiche/partage/{LIST}"
+    url = f"/admin/fiche/partage/{LIST}"
     page = client.get(url)
     assert page.status_code == 200
     ConsoleHTML(page.text).check()
     text = html.unescape(page.text)
     form = form_of(text, "shares.retirer", having=LIST)  # sous « ⋯ », comme toute action dangereuse
     assert "Retirer ce fichier ? Ses octets sont effacés" in text
-    done = client.post("/inspecteur/action/shares.retirer", data=form, follow_redirects=False)
+    done = client.post("/admin/action/shares.retirer", data=form, follow_redirects=False)
     assert done.status_code == 303 and done.headers["location"].startswith(url)
     after = client.get(done.headers["location"])
     ConsoleHTML(after.text).check()
     said = html.unescape(after.text)
-    assert "retiré par un opérateur" in said and 'action="/inspecteur/action/shares.retirer"' not in said
-    assert "/inspecteur/telecharger/partage/" not in said
+    assert "retiré par un opérateur" in said and 'action="/admin/action/shares.retirer"' not in said
+    assert "/admin/telecharger/partage/" not in said
     assert _erased(client, live.kernel.ports["shares"], LIST)
     # la fiche d'une pièce porte le même geste
-    piece = html.unescape(client.get(f"/inspecteur/fiche/piece/{PHOTO}").text)
+    piece = html.unescape(client.get(f"/admin/fiche/piece/{PHOTO}").text)
     assert form_of(piece, "attachments.retirer", having=PHOTO)["_sujet"] == [PHOTO]
 
 
@@ -174,17 +174,17 @@ def test_the_fiche_of_a_piece_says_who_by_name_its_kind_and_one_download(world):
     client, live, _ = world
     bootstrap(client)
     _files(client, live)
-    page = client.get(f"/inspecteur/fiche/piece/{PHOTO}")
+    page = client.get(f"/admin/fiche/piece/{PHOTO}")
     assert page.status_code == 200
     ConsoleHTML(page.text).check()
     head = html.unescape(page.text).split('class="tabs', 1)[0]
     assert ">adrien</a>" in head and "(user_1)" not in head
-    assert f'href="/inspecteur/fiche/handle/{ADRIEN}"' in head  # « par » : le moyen de communication, vers sa fiche
+    assert f'href="/admin/fiche/handle/{ADRIEN}"' in head  # « par » : le moyen de communication, vers sa fiche
     # … nommé comme sur sa fiche (le nom, par où il est venu), jamais par sa clé interne
     assert f">{ADRIEN}</a>" not in head and ">adrien · compte" in head
     assert ">photo<" in head and ">image/png<" in head  # la sorte en mots, le format à part
     assert head.count("Télécharger") == 1 and "télécharger télécharger" not in head.casefold()
-    assert ">fichier<" in head and f"/inspecteur/telecharger/piece/{PHOTO}" in head
-    sent = html.unescape(client.get(f"/inspecteur/fiche/partage/{LIST}").text).split('class="tabs', 1)[0]
+    assert ">fichier<" in head and f"/admin/telecharger/piece/{PHOTO}" in head
+    sent = html.unescape(client.get(f"/admin/fiche/partage/{LIST}").text).split('class="tabs', 1)[0]
     assert sent.count("Télécharger") == 1 and "télécharger télécharger" not in sent.casefold()
     assert ">adrien</a>" in sent and "(user_1)" not in sent

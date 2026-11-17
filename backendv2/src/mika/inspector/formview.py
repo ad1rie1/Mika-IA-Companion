@@ -11,6 +11,7 @@ from collections.abc import Callable, Mapping, Sequence
 from decimal import Decimal
 from typing import Any
 
+from mika.inspector.render import PREFIX
 from mika.kernel import forms
 from mika.kernel.faculty import ActionSpec
 
@@ -122,7 +123,7 @@ def action_view(spec: ActionSpec, *, csrf: str, back: str, subject: str = "", in
     paths = {f.path for f in fields if f.kind != "hidden"}
     fixed = [(k, str(v)) for k, v in dict(initial or {}).items() if k not in paths and not k.startswith("_")]
     button = str(dict(initial or {}).get("_bouton", "") or spec.title)
-    return {"url": f"/inspecteur/action/{spec.key}", "csrf": csrf, "nonce": _secrets.token_urlsafe(12),
+    return {"url": f"{PREFIX}/action/{spec.key}", "csrf": csrf, "nonce": _secrets.token_urlsafe(12),
             "back": back, "title": button, "description": spec.description, "fields": views,
             "retype": spec.retype, "subject": subject, "confirm": spec.confirm, "danger": spec.danger,
             "button": button, "errors": errors, "id": prefix, "key": spec.key, "fixed": fixed,

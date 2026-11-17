@@ -207,6 +207,9 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         ready = sum(1 for a in accounts.values() if a.ready)
         return [("Comptes", f"{len(accounts)} ({plural(ready, 'prête à relever', 'prêtes à relever')})"
                  if accounts else "aucun"),
+                # ADR 0238 : une boîte Microsoft entre par elle, sans donner la sienne
+                ("Application Microsoft", settings.mail_application()
+                 or "aucune : chaque boîte Microsoft déclare la sienne (« mika mail application »)"),
                 ("Lire et envoyer", Ref("local", f"{PREFIX}/courrier/reception", "Courrier › Réception"))]
 
     async def save_mcp(cfg: McpConfig) -> list[str]:

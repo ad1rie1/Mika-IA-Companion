@@ -40,6 +40,12 @@
 .provider b { font-weight: 650; }
 .provider span { font-size: 12px; color: var(--muted); }
 .prov-step { margin-top: 14px; }
+.prov-more { margin-top: 10px; }
+.prov-more summary { display: inline-flex; align-items: center; gap: 6px; padding: 4px 0; font-size: 12px; font-weight: 550; color: var(--text-2); cursor: pointer; list-style: none; }
+.prov-more summary::-webkit-details-marker { display: none; }
+.prov-more[open] summary .ico { transform: rotate(90deg); }
+.prov-more .set-grid { margin-top: 6px; }
+.prov-next { display: flex; align-items: center; gap: 6px; margin-top: 12px; }
 .device { display: flex; align-items: center; gap: 12px; margin-top: 12px; padding: 12px 14px; border: 1px solid var(--accent-line); border-radius: 10px; background: var(--accent-soft); }
 .device > .ico { color: var(--accent); }
 .device .code { font: 700 22px var(--mono); letter-spacing: .12em; margin: 4px 0; }

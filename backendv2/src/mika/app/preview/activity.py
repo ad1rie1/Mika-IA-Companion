@@ -3,6 +3,7 @@
 from sqlalchemy import select
 
 from mika.contracts import runtime as rt
+from mika.inspector.render import PREFIX
 from mika.kernel.events import Content, Origin
 from mika.ports.journal import JournalEvent, JournalOutbox
 from mika.vocab.episodes import Kind
@@ -41,13 +42,13 @@ async def activity(kernel) -> list[str]:
         rt.EPISODE_STARTED.draft(kind=Kind.REPLY, target="user_1", reply_to=question.seqs[0],
                                  reason="Préparer une réponse sur le programme du stream"),
     ], emitter="runtime", origin=Origin.GENESIS, correlation=corr)
-    urls = [f"/inspecteur/episode/{corr}", f"/inspecteur/evenement/{question.seqs[0]}"]
+    urls = [f"{PREFIX}/episode/{corr}", f"{PREFIX}/evenement/{question.seqs[0]}"]
     cases = (("failed", "TimeoutError()"), ("interrupted", "Action interrompue pendant un redémarrage."),
              ("stale", "La réponse a dépassé son délai d’envoi."))
     o, e = JournalOutbox, JournalEvent
     for (key, seq), (status, error) in zip(kernel.mind.store.query_mind(
             select(o.key, o.seq).join(e, e.seq == o.seq).where(e.type == rt.UTTERANCE.name)
             .order_by(o.seq.desc(), o.key).limit(3)), cases, strict=False):
-        urls.append(f"/inspecteur/evenement/{seq}")
+        urls.append(f"{PREFIX}/evenement/{seq}")
         await kernel.mind.store.mark_outbox(key, status, error)
     return urls

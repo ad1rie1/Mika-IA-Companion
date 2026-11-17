@@ -409,9 +409,9 @@ def test_the_story_links_the_views_of_apps_that_work_and_only_for_who_has_the_co
         return _apps_where(p, frame)
 
     mine = told(True)
-    assert "/inspecteur/fiche/app/cours?onglet=vues" in mine and "Muette" not in mine and "Cassee" not in mine
+    assert "/admin/fiche/app/cours?onglet=vues" in mine and "Muette" not in mine and "Cassee" not in mine
     other = told(False)
-    assert "« Cours »" in other and "/inspecteur" not in other and "pas ouverte" in other
+    assert "« Cours »" in other and "/admin" not in other and "pas ouverte" in other
 
 
 def test_her_app_settings_say_what_is_in_force_and_never_a_secret():

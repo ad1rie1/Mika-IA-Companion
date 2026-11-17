@@ -308,10 +308,10 @@ class ChatSyncTest {
             history, "c1", "no_reply",
             reason = "no_model",
             detail = "aucun modèle ne sert encore à répondre : déclare un fournisseur dans la console",
-            href = "/inspecteur/reglages/fournisseurs",
+            href = "/admin/reglages/fournisseurs",
         )
         assertTrue(history[0].replyNote!!.contains("aucun modèle"))
-        assertEquals("/inspecteur/reglages/fournisseurs", history[0].replyHref)
+        assertEquals("/admin/reglages/fournisseurs", history[0].replyHref)
         // un lien d'ailleurs n'est jamais posé sous une bulle
         val other = listOf(local("salut", USER, cid = "c2", status = MessageStatus.SENT))
         applyAck(other, "c2", "no_reply", reason = "error", href = "https://ailleurs.test/x")

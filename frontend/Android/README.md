@@ -306,7 +306,7 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
     pour chaque moment du canal, pourquoi (`why`, sa condition comprise), ce qu'elle garde (`keep`), et pour une
     opératrice la ligne même (`line`) ; où elle s'en sert par les autres canaux ; son nom de code en petit ; « Voir
     dans la console » (une opératrice : `href`, ouvert dans le navigateur sur le serveur de la session, seulement une
-    page `/inspecteur/…`) et « Lui demander » (la question posée dans le champ du chat, à relire). Un compte (une boîte,
+    page `/admin/…`) et « Lui demander » (la question posée dans le champ du chat, à relire). Un compte (une boîte,
     un compte Teams à toi) ne recopie pas les outils de sa famille — une phrase et « Voir ses outils » y mènent —, il
     dit la règle d'envoi qui vaut pour lui (`rules` : qui, préparer d'elle-même, comment ça part, lue de haut en bas, et
     d'où elle vient) et mène à sa page de Paramètres. Tirer relit ; la matrice se relit à chaque retour sur l'écran.
@@ -348,6 +348,8 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
     son code d'appareil et l'adresse où l'entrer, relue toutes les trois secondes jusqu'à la connexion. « Ajouter »
     (bouton flottant) : Microsoft, Exchange pro (pour une opératrice seulement : DavMail vit sur la machine de Mika),
     Gmail ou une autre ; créée, une boîte Microsoft demande son code, une autre se teste, puis sa page s'ouvre.
+    Quand le serveur a son application Microsoft (`microsoft_app`, ADR 0238), une boîte Microsoft ne demande que
+    son adresse et son nom : l'application et l'annuaire sont sous « Avancé ».
     **Comptes Teams** : les tiens (leur extension, ses réponses à relire), ceux qu'on te partage ; un compte : ses
     réglages, sa règle d'envoi, la clé de son extension (« Nouvelle clé » la montre **une seule fois**, à copier — marquée
     sensible pour le presse-papiers —, jamais gardée sur le téléphone ; « Retirer la clé »), l'adresse de Mika à coller

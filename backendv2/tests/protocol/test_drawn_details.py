@@ -77,22 +77,22 @@ def test_the_tools_tab_counts_the_calls_it_shows_from_the_trace_or_else_from_her
              {"name": "email_read", "ok": False, "args": "{}", "result": "refusé"}]
     _episode(client, kernel, "tools-traced", tools=(("web_search", True),), trace={"tool_calls": calls,
                                                                                    "outcome": "done"})
-    resume = drawn(client, "/inspecteur/episode/tools-traced")
+    resume = drawn(client, "/admin/episode/tools-traced")
     assert tile(resume, "Outils appelés") == "3" and tab_count(resume, "outils") == "3"
     assert tile_sub(resume, "Outils appelés") == "d'après la trace"
-    shown = drawn(client, "/inspecteur/episode/tools-traced?onglet=outils")
+    shown = drawn(client, "/admin/episode/tools-traced?onglet=outils")
     assert tab_count(shown, "outils") == "3" and all(c["name"] in shown for c in calls)
 
     _episode(client, kernel, "tools-said", tools=(("web_search", True), ("email_read", False)))
-    resume = drawn(client, "/inspecteur/episode/tools-said")
+    resume = drawn(client, "/admin/episode/tools-said")
     assert tile(resume, "Outils appelés") == "2" and tab_count(resume, "outils") == "2"
     assert tile_sub(resume, "Outils appelés") == "nommés sur ses paroles"
-    shown = drawn(client, "/inspecteur/episode/tools-said?onglet=outils")
+    shown = drawn(client, "/admin/episode/tools-said?onglet=outils")
     assert tab_count(shown, "outils") == "2" and "web_search" in shown and "email_read" in shown
 
     # ni trace ni outil nommé : pas de pastille, la tuile dit « — »
     _episode(client, kernel, "tools-none")
-    resume = drawn(client, "/inspecteur/episode/tools-none")
+    resume = drawn(client, "/admin/episode/tools-none")
     assert tile(resume, "Outils appelés") == "—" and tab_count(resume, "outils") is None
     assert tile_sub(resume, "Outils appelés") == "trace non gardée"
 
@@ -117,7 +117,7 @@ def test_beyond_the_calls_it_reads_an_episode_says_its_sums_cover_only_the_first
         await live.calls.flush()
 
     client.portal.call(seed)
-    url = "/inspecteur/episode/many-calls"
+    url = "/admin/episode/many-calls"
     resume, shown = drawn(client, url), drawn(client, f"{url}?onglet=appels")
     assert tile(resume, "Appels de modèle") == "3" == tab_count(resume, "appels") == tile(shown, "Appels")
     assert "premiers" not in tile_sub(resume, "Appels de modèle") and "premiers appels" not in shown
@@ -135,7 +135,7 @@ def test_an_episode_is_drawn_tab_by_tab(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
     converse(client, "coucou, tu fais quoi ce soir ?")
-    base = f"/inspecteur/episode/{latest(client, live, rt.UTTERANCE).correlation}"
+    base = f"/admin/episode/{latest(client, live, rt.UTTERANCE).correlation}"
     shapes = {"resume": "Ce qui l'a déclenché", "deroule": "Ce qui s'est passé, dans l'ordre", "dit": "Ses paroles",
               "prompt": "Ce qui a décidé du prompt", "outils": "aucun outil", "appels": 'class="now-page episode"',
               "decision": "Ce qui l'a lancé"}
@@ -146,7 +146,7 @@ def test_an_episode_is_drawn_tab_by_tab(world):  # noqa: F811
         assert "/static/handmade/episode.css" in pages[tab], tab
     # le résumé : son issue, le message qui l'a déclenché, ce qu'elle a dit, ses chiffres
     assert "coucou, tu fais quoi ce soir ?" in pages["resume"] and "Ce qu'elle a dit" in pages["resume"]
-    assert "Appels de modèle" in pages["resume"] and "/inspecteur/parole/" in pages["resume"]
+    assert "Appels de modèle" in pages["resume"] and "/admin/parole/" in pages["resume"]
     # ses onglets disent leur compte, celui que dit le Résumé : ses paroles, ses événements, ses appels de modèle ;
     # Outils (elle n'en a appelé aucun) n'a pas de pastille, ni Résumé, Prompt et Décision, qui ne comptent rien
     resume = pages["resume"]
@@ -168,7 +168,7 @@ def test_an_episode_is_drawn_tab_by_tab(world):  # noqa: F811
     said = resume.split('id="episode-said"', 1)[1].split("</header>", 1)[0]
     assert f"<p>{tile(resume, 'Paroles produites')} parole" in said and "dernières" not in said
     # le déroulé : chaque événement sur le fil, avec son lien et, pour une parole, son « pourquoi »
-    assert 'class="now-feed episode-feed"' in pages["deroule"] and "/inspecteur/evenement/" in pages["deroule"]
+    assert 'class="now-feed episode-feed"' in pages["deroule"] and "/admin/evenement/" in pages["deroule"]
     # le prompt : ses sections dépliables, le contexte complet ouvert, sa réponse pas à pas, « Rejouer avec… »
     prompt = pages["prompt"]
     assert "Le contexte complet, tel qu'envoyé au modèle" in prompt and "QUI TU AS EN FACE" in prompt
@@ -177,7 +177,7 @@ def test_an_episode_is_drawn_tab_by_tab(world):  # noqa: F811
     # ce qu'elle a rassemblé par ses libellés, l'issue de l'étiquette (« a parlé ») ; l'empreinte du préfixe repliée
     decided = prompt.split('id="episode-decided"', 1)[1].split('id="episode-offered"', 1)[0]
     assert "perception:" not in decided and "their_last_words" not in decided and "own_words" not in decided
-    assert re.search(r'/inspecteur/evenement/\d+">message n° \d+</a>', decided)
+    assert re.search(r'/admin/evenement/\d+">message n° \d+</a>', decided)
     assert ENRICHER_LABELS["thread"] in decided and "Détails techniques" in decided
     assert "a parlé" in decided and "terminé" not in decided
     assert re.search(r"<dt>ce qu'elle pouvait dire d'autrui</dt><dd>(" + "|".join(LEVEL_WORDS.values()) + ")</dd>",
@@ -185,7 +185,7 @@ def test_an_episode_is_drawn_tab_by_tab(world):  # noqa: F811
     # ses blocs, au repli, disent les mêmes faits par la même fonction (``journal.prompt_facts``)
     blocks = drawn(client, f"{base}?onglet=prompt&vue_x=table")
     assert "now-page episode" not in blocks and "their_last_words" not in blocks and "terminé" not in blocks
-    assert re.search(r'/inspecteur/evenement/\d+">message n° \d+</a>', blocks)
+    assert re.search(r'/admin/evenement/\d+">message n° \d+</a>', blocks)
     assert ENRICHER_LABELS["thread"] in blocks and "empreinte du préfixe" in blocks and "outils offerts" in blocks
     # « En bref » d'une réponse ne redit pas le message que montre « Ce qui l'a lancé »
     brief = pages["decision"].split('id="episode-what"', 1)[1].split("</section>", 1)[0]
@@ -221,12 +221,12 @@ def test_a_resumed_reply_says_so_on_its_decision_tab(world):  # noqa: F811
         return seq
 
     seq = client.portal.call(seed)
-    page = drawn(client, "/inspecteur/episode/resumed-reply?onglet=decision")
-    assert "tu es revenue ?" in page and f'/inspecteur/evenement/{seq}">message n° {seq}</a>' in page
+    page = drawn(client, "/admin/episode/resumed-reply?onglet=decision")
+    assert "tu es revenue ?" in page and f'/admin/evenement/{seq}">message n° {seq}</a>' in page
     brief = page.split('id="episode-what"', 1)[1].split("</section>", 1)[0]
     assert "<dt>déclencheur</dt>" in brief and "repris après une interruption" in brief
     assert "en réponse à" not in brief and "message n°" not in brief and "reprise:" not in brief
-    blocks = drawn(client, "/inspecteur/episode/resumed-reply?onglet=decision&vue_x=table")
+    blocks = drawn(client, "/admin/episode/resumed-reply?onglet=decision&vue_x=table")
     assert "now-page episode" not in blocks and "<dt>en réponse à</dt>" in blocks and "<dt>déclencheur</dt>" in blocks
     assert f"message n° {seq}, repris après une interruption" in blocks and "reprise:" not in blocks
 
@@ -235,13 +235,13 @@ def test_an_event_is_drawn_with_its_text_its_path_and_what_it_started(world):  #
     bootstrap(client)
     converse(client, "tu as vu la pluie ?")
     asked = latest(client, live, rt.PERCEPTION_RECEIVED)
-    page = drawn(client, f"/inspecteur/evenement/{asked.seq}")
+    page = drawn(client, f"/admin/evenement/{asked.seq}")
     assert 'class="now-page evenement"' in page and "/static/handmade/episode.css" in page
     assert "tu as vu la pluie ?" in page and "Son parcours dans la machine" in page
-    assert "Ce qu'il a déclenché" in page and "/inspecteur/episode/" in page and "Ses données brutes" in page
-    said = drawn(client, f"/inspecteur/evenement/{latest(client, live, rt.UTTERANCE).seq}")
+    assert "Ce qu'il a déclenché" in page and "/admin/episode/" in page and "Ses données brutes" in page
+    said = drawn(client, f"/admin/evenement/{latest(client, live, rt.UTTERANCE).seq}")
     assert "Pourquoi a-t-elle dit ça ? →" in said and 'class="mine"' in said
-    blocks = drawn(client, f"/inspecteur/evenement/{asked.seq}?vue_x=table")
+    blocks = drawn(client, f"/admin/evenement/{asked.seq}?vue_x=table")
     assert "now-page evenement" not in blocks and "Données (techniques)" in blocks
 
 
@@ -264,33 +264,33 @@ def test_an_event_shows_its_departures_and_a_stuck_one_is_handled_from_it(world)
             break
         time.sleep(0.02)
     assert [st for _k, st in rows()] == ["done"]
-    page = drawn(client, f"/inspecteur/evenement/{said.seq}")
+    page = drawn(client, f"/admin/evenement/{said.seq}")
     gone = page[page.index('id="event-departures"'):page.index('id="event-path"')]
     assert "Ses départs" in gone and "Ses messages" in gone and "à adrien" in gone and ">parti<" in gone
     assert "Relancer" not in gone and "Marquer comme vu" not in gone
     key = rows()[0][0]
     client.portal.call(store.mark_outbox, key, "failed", "TimeoutError()")
-    page = drawn(client, f"/inspecteur/evenement/{said.seq}")
+    page = drawn(client, f"/admin/evenement/{said.seq}")
     gone = page[page.index('id="event-departures"'):page.index('id="event-path"')]
     assert "échoué" in gone and "délai dépassé" in gone and "TimeoutError" not in gone
     assert "Ce message n'est pas parti." in gone and ">Relancer</button>" in gone and "Marquer comme vu" in gone
-    assert f'name="cle" value="{key}"' in gone and f'name="_retour" value="/inspecteur/evenement/{said.seq}"' in gone
+    assert f'name="cle" value="{key}"' in gone and f'name="_retour" value="/admin/evenement/{said.seq}"' in gone
     token = re.search(r'name="csrf" value="([^"]+)"', gone)
     assert token and token.group(1) == client.cookies.get("csrftoken")
-    back = client.post("/inspecteur/systeme/sorties", data={"csrf": token.group(1), "cle": key, "faire": "relancer",
-                                                             "_retour": f"/inspecteur/evenement/{said.seq}"},
+    back = client.post("/admin/systeme/sorties", data={"csrf": token.group(1), "cle": key, "faire": "relancer",
+                                                             "_retour": f"/admin/evenement/{said.seq}"},
                        follow_redirects=False)
-    assert back.status_code == 303 and back.headers["location"].startswith(f"/inspecteur/evenement/{said.seq}?flash=")
+    assert back.status_code == 303 and back.headers["location"].startswith(f"/admin/evenement/{said.seq}?flash=")
     landed = drawn(client, back.headers["location"])
     assert "Relancé" in landed and "Ses départs" in landed
     # au repli, en tableau
     client.portal.call(store.mark_outbox, key, "failed", "TimeoutError()")
-    blocks = drawn(client, f"/inspecteur/evenement/{said.seq}?vue_x=table")
+    blocks = drawn(client, f"/admin/evenement/{said.seq}?vue_x=table")
     assert "now-page evenement" not in blocks and "Ses départs" in blocks and "échoué" in blocks
     assert "Ce message n'est pas parti." in blocks and "délai dépassé" in blocks
     # un événement sans départ n'en dit rien
     asked = latest(client, live, rt.PERCEPTION_RECEIVED)
-    assert "Ses départs" not in drawn(client, f"/inspecteur/evenement/{asked.seq}")
+    assert "Ses départs" not in drawn(client, f"/admin/evenement/{asked.seq}")
 
 
 def _head_facts(page: str) -> str:
@@ -308,7 +308,7 @@ def test_an_event_says_its_landmarks_on_the_line_of_facts_and_its_fields_and_ori
     bootstrap(client)
     converse(client, "tu as vu la pluie ?")
     asked = latest(client, live, rt.PERCEPTION_RECEIVED)
-    page = drawn(client, f"/inspecteur/evenement/{asked.seq}")
+    page = drawn(client, f"/admin/evenement/{asked.seq}")
     facts = _head_facts(page)
     assert "origine</span>de l'extérieur" in facts and "émis par" in facts and "quand" in facts
     assert "origine : " not in page and "external" not in facts and "now-chips" not in page
@@ -316,9 +316,9 @@ def test_an_event_says_its_landmarks_on_the_line_of_facts_and_its_fields_and_ori
     assert page.count(f"n° {asked.seq}<") == 1  # le fil d'Ariane, seulement
     path = page[page.index('id="event-path"'):page.index('id="event-who"')]
     assert "<code>perception.received</code>" in path and "état lu" in path and "lu sur la tête" not in page
-    assert f'/inspecteur/evenement/{asked.basis}">jusqu\'au n° {asked.basis}</a>' in path
+    assert f'/admin/evenement/{asked.basis}">jusqu\'au n° {asked.basis}</a>' in path
     assert "<code>perception.received</code>" not in page[page.index('id="event-who"'):]
-    blocks = drawn(client, f"/inspecteur/evenement/{asked.seq}?vue_x=table")
+    blocks = drawn(client, f"/admin/evenement/{asked.seq}?vue_x=table")
     assert "origine</span>de l'extérieur" in _head_facts(blocks) and "<h1>Message ou signal reçu</h1>" in blocks
     assert "le texte : présent" in blocks and "text : présent" not in blocks and "lu sur la tête" not in blocks
     assert f"jusqu'au n° {asked.basis}" in blocks and "Son parcours dans la machine" in blocks
@@ -331,7 +331,7 @@ def test_an_event_says_its_landmarks_on_the_line_of_facts_and_its_fields_and_ori
             emitter="runtime", origin=Origin.PROCESS, correlation="effect-words")
 
     proposed = client.portal.call(seed).seqs[0]
-    effect = drawn(client, f"/inspecteur/evenement/{proposed}")
+    effect = drawn(client, f"/admin/evenement/{proposed}")
     assert '<p class="now-eyebrow">le résumé</p>' in effect and ">summary<" not in effect
     assert "Écrire à Léa pour samedi." in effect and "origine</span>un processus" in _head_facts(effect)
     assert "Pourquoi a-t-elle dit ça ?" not in effect
@@ -348,11 +348,11 @@ def test_a_message_left_unanswered_says_why_drawn(world):  # noqa: F811
     backend.complete = silent
     converse(client, "tu m'en veux ?")
     asked = latest(client, live, rt.PERCEPTION_RECEIVED)
-    page = drawn(client, f"/inspecteur/parole/{asked.seq}")
+    page = drawn(client, f"/admin/parole/{asked.seq}")
     assert 'class="now-page parole silence"' in page and "tu m'en veux ?" in page
     assert "Pourquoi elle n'a pas répondu" in page and "Un silence choisi" in page
     assert "Comment ça s'est réglé" in page and "Ce qu'elle avait sous les yeux" in page
-    blocks = drawn(client, f"/inspecteur/parole/{asked.seq}?vue_x=table")
+    blocks = drawn(client, f"/admin/parole/{asked.seq}?vue_x=table")
     assert "now-page parole" not in blocks and "Un silence choisi" in blocks
 
 
@@ -360,12 +360,12 @@ def test_search_is_drawn_one_card_per_kind_of_result(world):  # noqa: F811
     client, _live, _ = world
     bootstrap(client)
     converse(client, "salut")
-    page = drawn(client, "/inspecteur/recherche?q=adrien")
+    page = drawn(client, "/admin/recherche?q=adrien")
     assert 'class="now-page recherche"' in page and 'class="now-card search-group"' in page
-    assert "/inspecteur/fiche/person/" in page
-    pages = drawn(client, "/inspecteur/recherche?q=humeur")
+    assert "/admin/fiche/person/" in page
+    pages = drawn(client, "/admin/recherche?q=humeur")
     assert "Pages de la console" in pages
-    everything = drawn(client, "/inspecteur/recherche")  # sans rien tapé : tout, sorte par sorte
-    assert 'class="now-page recherche"' in everything and "/inspecteur/fiche/person/" in everything
-    blocks = drawn(client, "/inspecteur/recherche?q=adrien&vue_x=table")
-    assert "now-page recherche" not in blocks and "/inspecteur/fiche/person/" in blocks
+    everything = drawn(client, "/admin/recherche")  # sans rien tapé : tout, sorte par sorte
+    assert 'class="now-page recherche"' in everything and "/admin/fiche/person/" in everything
+    blocks = drawn(client, "/admin/recherche?q=adrien&vue_x=table")
+    assert "now-page recherche" not in blocks and "/admin/fiche/person/" in blocks

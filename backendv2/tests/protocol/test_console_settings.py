@@ -30,7 +30,7 @@ from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture p
 CANARY_KEY = "sk-ant-api-CANARI-7f3e"
 CANARY_MAIL = "mot-de-passe-CANARI"
 CANARY_STT = "sk-CANARI-whisper"
-BASE = "/inspecteur/reglages"
+BASE = "/admin/reglages"
 
 
 def html_of(r) -> str:
@@ -217,10 +217,10 @@ def test_senses_mail_feeds_transcription_and_a_device_token_shown_once(world):  
                "address": "mika@exemple.fr", "imap_host": "imap.exemple.fr", "user": "mika",
                "smtp_host": "smtp.exemple.fr",
                "password": CANARY_MAIL, "imap_port": "993", "voice": "proprietaire", "tone": "sobre",
-               "_retour": "/inspecteur/courrier/comptes"}
+               "_retour": "/admin/courrier/comptes"}
     mail = post(client, url, account)
     assert mail.status_code == 200 and CANARY_MAIL not in mail.text
-    assert "/inspecteur/courrier/parametres" in str(mail.url)  # ancien onglet : les paramètres du courrier
+    assert "/admin/courrier/parametres" in str(mail.url)  # ancien onglet : les paramètres du courrier
     saved = client.portal.call(live.settings.email).accounts["perso"]
     assert saved.password == CANARY_MAIL and saved.voice == "proprietaire" and saved.tone == "sobre"
     # modifier sans retaper le mot de passe le garde ; un retour hors de la console est ignoré
@@ -229,8 +229,8 @@ def test_senses_mail_feeds_transcription_and_a_device_token_shown_once(world):  
     assert again.status_code == 200 and "ailleurs.example" not in str(again.url)
     saved = client.portal.call(live.settings.email).accounts["perso"]
     assert saved.password == CANARY_MAIL and saved.tone == "chaleureux"
-    assert CANARY_MAIL not in html_of(client.get("/inspecteur/courrier/comptes"))
-    assert CANARY_MAIL not in html_of(client.get("/inspecteur/fiche/compte/perso"))
+    assert CANARY_MAIL not in html_of(client.get("/admin/courrier/comptes"))
+    assert CANARY_MAIL not in html_of(client.get("/admin/fiche/compte/perso"))
     bad = post(client, url, {**account, "_cle": "Mon Compte"})
     assert bad.status_code == 400 and "Nom refusé : des minuscules, chiffres, - ou _" in html_of(bad)
     feeds = f"{BASE}/flux"
@@ -302,17 +302,17 @@ def test_every_settings_change_lands_in_the_configuration_journal_without_conten
     raw = " ".join(o.data for o in ops)
     assert CANARY_KEY not in raw and CANARY_STT not in raw
     # canari : aucun secret dans aucune page de la console (chaque destination, chaque sous-page)
-    urls: set[str] = {"/inspecteur/"}  # l'accueil, dessiné à la main hors de la carte
+    urls: set[str] = {"/admin/"}  # l'accueil, dessiné à la main hors de la carte
     for group in NAVIGATION:
         for d in group.items:
-            base = f"/inspecteur/{d.key}"
+            base = f"/admin/{d.key}"
             urls.add(base)
             first = client.get(base, follow_redirects=True)
-            urls |= links(html_of(first), f"/inspecteur/{d.key}")
+            urls |= links(html_of(first), f"/admin/{d.key}")
     urls |= {f"{BASE}/fournisseurs?enregistrement=backends&cle=claude", f"{BASE}/comportement-identity",
-             "/inspecteur/systeme/operations"}
+             "/admin/systeme/operations"}
     # la transcription vit dans Ses sens, derrière sa roue (ADR 0206) : sa page y est relue aussi
-    assert "/inspecteur/sens/parametres-transcription" in urls and "/inspecteur/systeme/sorties" in urls
+    assert "/admin/sens/parametres-transcription" in urls and "/admin/systeme/sorties" in urls
     for u in sorted(urls):
         r = client.get(u, follow_redirects=True)
         assert r.status_code == 200, u

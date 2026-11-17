@@ -276,6 +276,59 @@ def test_the_connection_is_kept_sealed_and_leaves_with_its_box(tmp_path):
     assert after == (kept, None) and gone is None and stored == {}
 
 
+INSTANCE = "11111111-2222-4333-8444-555555555555"
+
+
+def test_a_box_without_an_application_enters_by_the_one_of_the_instance():
+    """ADR 0238 : l'application est celle de l'instance ; celle qu'une boîte déclare passe devant."""
+    vault, microsoft, application = Vault(), Microsoft(pending=0), [INSTANCE]
+    oauth = MicrosoftSignIn(vault, now=lambda: NOW, transport=httpx.MockTransport(microsoft), sleep=_no_wait,
+                            application=lambda: application[0])
+    bare = hotmail(oauth_client_id="")
+    assert oauth.state("hotmail", bare) == oauth.state("hotmail", hotmail())  # à connecter, sans reproche
+
+    async def scenario():
+        await oauth.start("hotmail", bare)
+        for _ in range(200):
+            if oauth.state("hotmail", bare).state != SIGNIN_PENDING:
+                break
+            await asyncio.sleep(0)
+        return await oauth.token("hotmail", bare)
+
+    assert asyncio.run(scenario()) == "acces-1"
+    assert {c[2]["client_id"] for c in microsoft.calls} == {INSTANCE}
+    assert vault.grants["hotmail"] == Grant("renouv-1", INSTANCE, "consumers")
+    # la sienne passe devant : la connexion délivrée à celle de l'instance ne lui vaut pas
+    assert oauth.state("hotmail", hotmail()).state == SIGNIN_NEEDED
+    # l'instance change d'application : la boîte se reconnecte ; elle n'en a plus : c'est dit
+    application[0] = CLIENT
+    assert oauth.state("hotmail", bare) == oauth.state("hotmail", hotmail())
+    application[0] = ""
+    assert oauth.state("hotmail", bare).error.startswith("aucune application")
+    with pytest.raises(OAuthError, match="aucune application"):
+        asyncio.run(oauth.start("hotmail", bare))
+
+
+def test_the_application_of_the_instance_is_kept_in_the_settings(tmp_path):
+    async def scenario():
+        store = SqlStore(tmp_path / "mind.db", tmp_path / "views.db", threaded=False)
+        await store.open()
+        try:
+            settings = Settings(store, SecretBox.for_data(tmp_path))
+            await settings.open()
+            none = settings.mail_application()
+            with pytest.raises(ValueError):
+                await settings.save_mail_application("pas-un-guid")
+            await settings.save_mail_application(f"  {INSTANCE.upper()} ")
+            kept = settings.mail_application()
+            await settings.save_mail_application("")
+            return none, kept, settings.mail_application()
+        finally:
+            await store.close()
+
+    assert asyncio.run(scenario()) == ("", INSTANCE, "")
+
+
 def test_the_application_and_the_directory_are_checked():
     assert hotmail(oauth_client_id=CLIENT.upper()).oauth_client_id == CLIENT
     assert hotmail(oauth_tenant="  ").oauth_tenant == "consumers"

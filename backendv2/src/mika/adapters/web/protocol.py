@@ -543,7 +543,7 @@ TOO_LATE_REASON = "too_late"  # une question reprise trop tard (au démarrage, d
 ERROR = "error"  # autre chose
 UNCONFIGURED = "UnconfiguredRole"
 #: où une opératrice répare un modèle absent ou injoignable (la console, pas la ligne de commande)
-PROVIDERS_HREF = "/inspecteur/reglages/fournisseurs"
+PROVIDERS_HREF = "/admin/reglages/fournisseurs"  # la console (ADR 0237) : un adaptateur ne voit pas sa constante
 _OPERATOR_DETAIL = {
     NO_MODEL: "aucun modèle ne sert encore à répondre : déclare un fournisseur dans la console",
     UNREACHABLE: "le fournisseur du modèle ne répond pas (connexion impossible)",

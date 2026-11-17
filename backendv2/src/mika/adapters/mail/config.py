@@ -45,6 +45,16 @@ _TENANT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.-]{0,99}$")
 _NO_SMTP = (("smtp_host", ("",)),)
 
 
+def application_id(client_id: str) -> str:
+    """L'identifiant d'une application Microsoft (client ID), mis en forme ; vide : aucune. ``ValueError`` s'il n'en
+    a pas la forme."""
+    client_id = client_id.strip()
+    if client_id and not _CLIENT_ID.match(client_id):
+        raise ValueError("l'application Microsoft se donne par son identifiant (client ID), de la forme "
+                         "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")
+    return client_id.lower()
+
+
 class MailAccount(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -102,10 +112,10 @@ class MailAccount(BaseModel):
     oauth_client_id: Annotated[str, Knob(
         label="Application Microsoft (client ID)", group="Connexion", advanced=False, order=18,
         only=(("auth", (MICROSOFT,)),),
-        help="L'identifiant de l'application inscrite dans Microsoft Entra (portail Azure › Inscriptions "
-             "d'applications) — comptes Microsoft personnels acceptés, « Autoriser les flux de clients publics » "
-             "activé. La boîte enregistrée, « Se connecter à Microsoft » sur sa fiche. Changer d'application demande "
-             "de se reconnecter.")] = ""
+        help="Vide : l'application de l'instance (`mika mail application`). Sinon, l'identifiant d'une application "
+             "inscrite dans Microsoft Entra (portail Azure › Inscriptions d'applications) — comptes Microsoft "
+             "personnels acceptés, « Autoriser les flux de clients publics » activé. La boîte enregistrée, « Se "
+             "connecter à Microsoft » sur sa fiche. Changer d'application demande de se reconnecter.")] = ""
     oauth_tenant: Annotated[str, Knob(
         label="Annuaire Microsoft", group="Connexion", advanced=False, order=19, only=(("auth", (MICROSOFT,)),),
         help="« consumers » pour un compte personnel (Hotmail, Outlook.com, Live) ; pour un compte Microsoft 365, "
@@ -175,11 +185,7 @@ class MailAccount(BaseModel):
     @field_validator("oauth_client_id")
     @classmethod
     def _client_id(cls, client_id: str) -> str:
-        client_id = client_id.strip()
-        if client_id and not _CLIENT_ID.match(client_id):
-            raise ValueError("l'application Microsoft se donne par son identifiant (client ID), de la forme "
-                             "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")
-        return client_id.lower()
+        return application_id(client_id)
 
     @field_validator("oauth_tenant")
     @classmethod
@@ -217,7 +223,7 @@ class MailAccount(BaseModel):
         """Ses réglages, sans aucun secret (le mot de passe : « défini » ou non)."""
         read = f"{self.imap_host}:{self.imap_port}{' (SSL)' if self.imap_ssl else ''}" if self.imap_host else "—"
         send = f"{self.smtp_host}:{self.smtp_port} ({self.smtp_security})" if self.smtp_host else "—"
-        secret = (("connexion", f"compte Microsoft (application {self.oauth_client_id or 'non déclarée'}, annuaire "
+        secret = (("connexion", f"compte Microsoft (application {self.oauth_client_id or 'de l’instance'}, annuaire "
                                 f"{self.oauth_tenant})"),) if self.microsoft else \
             (("mot de passe", "défini" if self.password else "aucun"),)
         return (("lire", read), ("utilisateur", self.user or "—"), *secret,

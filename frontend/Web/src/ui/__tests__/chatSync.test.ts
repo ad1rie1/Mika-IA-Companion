@@ -454,10 +454,10 @@ describe("applyAck", () => {
     applyAck(history, "c1", "no_reply", undefined, {
       reason: "no_model",
       detail: "aucun modèle ne sert encore à répondre : déclare un fournisseur dans la console",
-      href: "/inspecteur/reglages/fournisseurs",
+      href: "/admin/reglages/fournisseurs",
     });
     expect(history[0].replyNote).toContain("aucun modèle");
-    expect(history[0].replyHref).toBe("/inspecteur/reglages/fournisseurs");
+    expect(history[0].replyHref).toBe("/admin/reglages/fournisseurs");
     // un lien d'ailleurs n'est jamais posé sous une bulle
     const other = [local("salut", "user", { cid: "c2", status: "sent" })];
     applyAck(other, "c2", "no_reply", undefined, { reason: "error", href: "https://ailleurs.test/x" });
@@ -694,13 +694,13 @@ describe("stripProsody", () => {
 describe("operatorLinks", () => {
   it("mène une opératrice aux réglages et à sa mémoire en 3D", () => {
     expect(operatorLinks(true)).toEqual([
-      { href: "/inspecteur/reglages/apercu", label: "Réglages" },
-      { href: "/inspecteur/constellation", label: "Sa mémoire en 3D" },
+      { href: "/admin/reglages/apercu", label: "Réglages" },
+      { href: "/admin/constellation", label: "Sa mémoire en 3D" },
     ]);
   });
 
   it("ne garde que des pages de la console", () => {
-    for (const { href } of operatorLinks(true)) expect(href).toMatch(/^\/inspecteur\//);
+    for (const { href } of operatorLinks(true)) expect(href).toMatch(/^\/admin\//);
     expect(operatorLinks(true)).toHaveLength(OPERATOR_PAGES.length);
   });
 

@@ -311,9 +311,10 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
         d'atelier — un adaptateur ne lit pas sa persona lui-même (ADR 0070)."""
         return name_of(kernel.mind.root.slices["self"].persona)
 
-    # une boîte Microsoft garde sa connexion (son jeton de renouvellement) scellée dans les réglages (ADR 0166)
-    outside = {"mail": ImapSmtpMail(settings.email, bases["mail"], her=her, microsoft=MicrosoftSignIn(settings),
-                                 images=settings),
+    # une boîte Microsoft garde sa connexion (son jeton de renouvellement) scellée dans les réglages
+    # (ADR 0166), et entre par l'application de l'instance quand elle n'en déclare pas (ADR 0238)
+    microsoft = MicrosoftSignIn(settings, application=settings.mail_application)
+    outside = {"mail": ImapSmtpMail(settings.email, bases["mail"], her=her, microsoft=microsoft, images=settings),
              "feeds": HttpFeeds(settings.feeds, bases["feeds"]),
              "workshop": BwrapWorkshop(data / "ateliers", credentials=settings.git, author=her), "camera": camera,
              # l'hôte GitHub d'un dépôt distant, lu par la console seulement (ADR 0183)

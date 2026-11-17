@@ -51,14 +51,14 @@ def test_point_refs_read_what_the_prompt_showed():
 def test_only_an_operator_sees_her_memory(world):  # noqa: F811
     client, live, _ = world
     page = client.get(BASE, follow_redirects=False)
-    assert page.status_code == 303 and page.headers["location"].endswith("/inspecteur/connexion")
+    assert page.status_code == 303 and page.headers["location"].endswith("/admin/connexion")
     for path in ("/carte", "/flux", "/rejeu", "/point/1", "/cherche?q=chat"):
         assert client.get(BASE + path).status_code == 401, path
     bootstrap(client)
     page = client.get(BASE)
     assert page.status_code == 200 and "script-src 'self'" in page.headers["content-security-policy"]
     ConsoleHTML(page.text).check()
-    assert 'data-base="/inspecteur/constellation"' in page.text and "<script>" not in page.text
+    assert 'data-base="/admin/constellation"' in page.text and "<script>" not in page.text
     # un compte qui n'est pas opérateur ne la voit pas non plus : elle montre tout, secrets compris
     async def guest():
         account = await live.accounts.create("bea", "un-autre-mot-de-passe", operator=False)
@@ -91,7 +91,7 @@ def test_the_map_is_drawn_from_the_index_and_says_nothing_of_texts(world):  # no
     assert all(0 <= a < n and 0 <= b < n for a, b in zip(got["edges"][::2], got["edges"][1::2], strict=True))
     assert "Moustache" not in str(got)  # les textes ne partent qu'à la demande
     one = client.get(f"{BASE}/point/{keys[0]}").json()
-    assert one["text"] == SEEDS[0] and one["kind"] == "souvenir" and one["href"] == f"/inspecteur/evenement/{keys[0]}"
+    assert one["text"] == SEEDS[0] and one["kind"] == "souvenir" and one["href"] == f"/admin/evenement/{keys[0]}"
     assert client.get(f"{BASE}/point/999999").status_code == 404
 
 

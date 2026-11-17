@@ -528,7 +528,7 @@ export interface AckMessage {
   /** Avec `no_reply`, aux seules connexions opératrices : la cause en clair. */
   detail?: string;
   /** Avec `no_reply`, aux seules opératrices : où la réparer, une page de la
-   * console (`/inspecteur/…`, relative au serveur). */
+   * console (`/admin/…`, relative au serveur). */
   href?: string;
 }
 

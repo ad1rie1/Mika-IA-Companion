@@ -71,10 +71,10 @@ def test_without_a_configured_code_nothing_changes(tmp_path):
 def test_the_console_asks_the_code_from_another_machine_only(tmp_path):
     far = _client(tmp_path, CODE, "192.168.1.42")
     try:
-        page = far.get("/inspecteur/connexion")
+        page = far.get("/admin/connexion")
         assert page.status_code == 200 and 'name="code"' in page.text
         token = far.cookies.get("csrftoken") or ""
-        refused = far.post("/inspecteur/connexion", data={"csrf": token, "username": "adrien",
+        refused = far.post("/admin/connexion", data={"csrf": token, "username": "adrien",
                                                            "password": "un-long-mot-de-passe",
                                                            "password2": "un-long-mot-de-passe", "code": "non"})
         assert refused.status_code == 400 and "code de premier démarrage" in refused.text
@@ -82,6 +82,6 @@ def test_the_console_asks_the_code_from_another_machine_only(tmp_path):
         far.__exit__(None, None, None)
     near = _client(tmp_path / "ici", CODE, "127.0.0.1")
     try:
-        assert 'name="code"' not in near.get("/inspecteur/connexion").text
+        assert 'name="code"' not in near.get("/admin/connexion").text
     finally:
         near.__exit__(None, None, None)

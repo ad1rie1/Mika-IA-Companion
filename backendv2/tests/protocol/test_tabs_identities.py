@@ -29,8 +29,8 @@ def claim(client, live) -> None:
 
 
 def test_a_cell_names_the_means_of_communication_and_a_label_splits_from_its_reason():
-    assert identities.handle_of({"href": "/inspecteur/fiche/handle/ext_9?onglet=revendication"}) == "ext_9"
-    assert identities.handle_of({"href": "/inspecteur/fiche/person/user_1"}) == ""
+    assert identities.handle_of({"href": "/admin/fiche/handle/ext_9?onglet=revendication"}) == "ext_9"
+    assert identities.handle_of({"href": "/admin/fiche/person/user_1"}) == ""
     assert identities._split("authentifiée (session vérifiée)") == ("authentifiée", "session vérifiée")
     assert identities._split("compte") == ("compte", "")
 
@@ -38,17 +38,17 @@ def test_a_cell_names_the_means_of_communication_and_a_label_splits_from_its_rea
 def test_one_line_per_means_of_communication_and_a_banner_while_a_claim_waits(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
-    calm = drawn(client, "/inspecteur/identites/annuaire")
+    calm = drawn(client, "/admin/identites/annuaire")
     assert 'data-tab="identites/annuaire"' in calm and 'class="person-tab-note warn"' not in calm
     claim(client, live)
-    page = drawn(client, "/inspecteur/identites/annuaire")
+    page = drawn(client, "/admin/identites/annuaire")
     banner = _between(page, 'class="person-tab-note warn"', "</p>")
-    assert "1 revendication attend ta décision" in banner and 'href="/inspecteur/approbations/identites"' in banner
+    assert "1 revendication attend ta décision" in banner and 'href="/admin/approbations/identites"' in banner
     assert page.count('class="person-tab-note warn"') == 1 and page.index(banner) < page.index('class="ids-means"')
     head = _between(page, 'class="ids-grid-head"', "</div>")
     assert head.index("Moyen de communication") < head.index("Ce que le canal prouve") < head.index("Parle pour") \
         < head.index("Ce qu'il ouvre")
-    line = _between(page, 'href="/inspecteur/fiche/handle/ext_9"', "</li>")
+    line = _between(page, 'href="/admin/fiche/handle/ext_9"', "</li>")
     assert "par un canal extérieur" in line and "se présente comme « Adrien »" in line
     assert "en privé" in line and "en public" in line and "compte" in line
     assert "<table" not in _between(page, 'class="ids-means"', "</section>")
@@ -59,12 +59,12 @@ def test_what_waits_a_decision_has_no_page_here_but_the_queue(world):  # noqa: F
     d'Identités n'en a plus d'onglet, et leurs anciennes adresses y mènent, la requête avec elles."""
     client, _, _ = world
     bootstrap(client)
-    page = drawn(client, "/inspecteur/identites/annuaire")
+    page = drawn(client, "/admin/identites/annuaire")
     bar = _between(page, '<nav class="tabs"', "</nav>")
-    assert re.findall(r'href="/inspecteur/identites/(\w+)"', bar) == ["annuaire", "politique"]
+    assert re.findall(r'href="/admin/identites/(\w+)"', bar) == ["annuaire", "politique"]
     for old, new in (("revendications", "identites"), ("noms", "noms")):
-        moved = client.get(f"/inspecteur/identites/{old}?page=2", follow_redirects=False)
-        assert moved.status_code == 301 and moved.headers["location"] == f"/inspecteur/approbations/{new}?page=2"
+        moved = client.get(f"/admin/identites/{old}?page=2", follow_redirects=False)
+        assert moved.status_code == 301 and moved.headers["location"] == f"/admin/approbations/{new}?page=2"
 
 
 def test_an_action_page_takes_only_safe_values_from_its_address(world):  # noqa: F811
@@ -73,7 +73,7 @@ def test_an_action_page_takes_only_safe_values_from_its_address(world):  # noqa:
     client, live, _ = world
     bootstrap(client)
     claim(client, live)
-    base = "/inspecteur/action/identity.preuve?sujet=ext_9"
+    base = "/admin/action/identity.preuve?sujet=ext_9"
     page = html.unescape(client.get(base + "&valeur.kind=contradicted&valeur.note=vu+en+vrai").text)
     assert '<option value="contradicted" selected' in page and "vu en vrai" in page
     forced = html.unescape(client.get(base + "&valeur.confirmed=on&valeur.kind=inconnue").text)
@@ -85,7 +85,7 @@ def test_an_action_page_takes_only_safe_values_from_its_address(world):  # noqa:
 def test_the_rules_read_on_one_scale_not_in_tables(world):  # noqa: F811
     client, _, _ = world
     bootstrap(client)
-    page = drawn(client, "/inspecteur/identites/politique")
+    page = drawn(client, "/admin/identites/politique")
     assert 'data-tab="identites/politique"' in page and "<table" not in _between(page, 'data-tab=', "</main>")
     band = _between(page, 'class="person-tiles ids-band"', "</section>")
     assert band.index("Barre de divulgation") < band.index("Confidences") < band.index("7 jours")
@@ -113,7 +113,7 @@ def test_the_channel_trust_is_a_segmented_button_beside_the_search(world):  # no
     et « Réinitialiser » vide la recherche sans toucher au choix."""
     client, _, _ = world
     bootstrap(client)
-    page = drawn(client, "/inspecteur/identites")
+    page = drawn(client, "/admin/identites")
     assert 'placeholder="Alice…"' in page and "user_7" not in page  # on cherche un nom, pas une clé
     seg = _between(page, '<nav class="seg" aria-label="confiance du canal">', "</nav>")
     assert re.findall(r">([^<]+)</a>", seg) == ["toutes", "authentifiée", "compte", "publique"]
@@ -121,13 +121,13 @@ def test_the_channel_trust_is_a_segmented_button_beside_the_search(world):  # no
     form = _between(page, '<form class="filters"', "</form>")
     assert 'name="q"' in form and '<input type="hidden" name="confiance" value="toutes">' in form
     assert '<select name="confiance">' not in page and "Réinitialiser" not in form
-    chosen = drawn(client, "/inspecteur/identites?q=ali&confiance=compte")
+    chosen = drawn(client, "/admin/identites?q=ali&confiance=compte")
     seg = _between(chosen, '<nav class="seg" aria-label="confiance du canal">', "</nav>")
     assert '<a href="?q=ali&confiance=account" aria-current="true">compte</a>' in seg
     assert '<a href="?q=ali&confiance=public">publique</a>' in seg
     form = _between(chosen, '<form class="filters"', "</form>")
     assert 'value="ali"' in form and '<input type="hidden" name="confiance" value="account">' in form
-    assert '<a class="reset" href="/inspecteur/identites?confiance=account">Réinitialiser</a>' in form
+    assert '<a class="reset" href="/admin/identites?confiance=account">Réinitialiser</a>' in form
     # le choix seul : la recherche, vide, n'a rien à réinitialiser
-    alone = _between(drawn(client, "/inspecteur/identites?confiance=compte"), '<form class="filters"', "</form>")
+    alone = _between(drawn(client, "/admin/identites?confiance=compte"), '<form class="filters"', "</form>")
     assert "Réinitialiser" not in alone

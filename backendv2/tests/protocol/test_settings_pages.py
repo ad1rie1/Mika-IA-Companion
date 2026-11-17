@@ -25,7 +25,7 @@ import mika.plugins
 from mika.app import settings_sections
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 
-BASE = "/inspecteur/reglages"
+BASE = "/admin/reglages"
 #: un réel écrit en notation scientifique (« 5.55975e-06 », « 1e-08 »)
 SCIENTIFIC = re.compile(r"\d[eE][-+]?\d")
 #: les pages de réglages que le code cite par leur chemin, et leur adresse ; le chemin écrit, jusqu'à leur nom
@@ -239,11 +239,11 @@ def test_the_directory_lists_every_settings_page_in_a_rubric_named_after_what_it
     for slug in ("notifications", "carte", "lieux", "itineraires"):
         assert f'href="{BASE}/{slug}"' in groups["Carte et téléphone"], slug
     assert f'href="{BASE}/depots"' in groups["Connexions extérieures"] and "Dépôts Git" in directory
-    assert 'href="/inspecteur/courrier/parametres"' in groups["Plugins"] and "Courrier › Paramètres" in directory
+    assert 'href="/admin/courrier/parametres"' in groups["Plugins"] and "Courrier › Paramètres" in directory
     descriptions = re.findall(r'<span class="hm-dir-desc">([^<]+)</span>', directory)
     assert descriptions and not [d for d in descriptions if d.endswith("…")]
     boxes = html.unescape(page_of(client, f"{BASE}/apercu?q=boîte"))
-    assert 'href="/inspecteur/courrier/parametres"' in boxes
+    assert 'href="/admin/courrier/parametres"' in boxes
     zone = html.unescape(page_of(client, f"{BASE}/apercu?q=fuseau"))
     assert f'href="{BASE}/identite"' in zone and "Trouvé dans : Fuseau horaire" in zone
 
@@ -264,7 +264,7 @@ def test_the_plugins_overview_has_a_line_for_every_plugin(world):  # noqa: F811
     for slug in ("carte", "lieux", "itineraires", "notifications"):
         assert f'href="{BASE}/{slug}"' in page, slug
     # la transcription vit dans Ses sens (ADR 0206) : la vue d'ensemble y mène, sous ce nom
-    assert '<a href="/inspecteur/sens/parametres-transcription">Ses sens › Transcription vocale</a>' in page
+    assert '<a href="/admin/sens/parametres-transcription">Ses sens › Transcription vocale</a>' in page
     assert "Messages du téléphone" in page and "Recherche web" in page and "Carte et voyages" in page
     assert "Configurer la transcription vocale" not in page  # plus de bouton à part
 
@@ -309,12 +309,12 @@ def test_a_page_says_where_the_rest_is_done_once_and_as_a_link(world):  # noqa: 
     page = html.unescape(main_of(page_of(client, f"{BASE}/teams")))
     # la page vit dans Teams (ADR 0206) : Extension est l'onglet d'à côté, et un fait, une fois, dit que la clé y est
     facts = page.split('class="person-entry-facts hm-settings-facts"', 1)[1].split("</p>", 1)[0]
-    assert facts.count('href="/inspecteur/teams/extension"') == 1 and 'href="/inspecteur/teams"' not in facts
-    assert 'href="/inspecteur/reglages/canaux"' in facts
+    assert facts.count('href="/admin/teams/extension"') == 1 and 'href="/admin/teams"' not in facts
+    assert 'href="/admin/reglages/canaux"' in facts
     subtitle = page.split("<h1>", 1)[1].split("</p>", 1)[0]
     assert "Relations & échanges" not in subtitle
-    for path, target in (("flux", "/inspecteur/sens/flux"), ("reveils", "/inspecteur/reveils"),
-                         ("serveurs-mcp", "/inspecteur/outils/serveurs"), ("depots", "/inspecteur/projets")):
+    for path, target in (("flux", "/admin/sens/flux"), ("reveils", "/admin/reveils"),
+                         ("serveurs-mcp", "/admin/outils/serveurs"), ("depots", "/admin/projets")):
         assert f'href="{target}"' in main_of(page_of(client, f"{BASE}/{path}")), path
 
 

@@ -11,8 +11,9 @@ présente le mécanisme SASL ``XOAUTH2`` (``answer``) ; Microsoft 365 aussi, si 
   scellé dans les réglages par le ``GrantStore`` que l'application fournit. Changer d'application ou d'annuaire
   demande de se reconnecter. Microsoft renouvelle souvent ce jeton : le nouveau remplace l'ancien. Le jeton
   d'accès (une heure) reste en mémoire, renouvelé avant d'expirer.
-- **L'application** : Microsoft ne délivre un jeton qu'à une application inscrite, dont on donne l'identifiant
-  (``oauth_client_id``) : un client public, inscrit par la personne elle-même dans Microsoft Entra.
+- **L'application** : Microsoft ne délivre un jeton qu'à une application inscrite, un client public de Microsoft
+  Entra. C'est celle de l'instance (``application``, inscrite une fois par qui tient le serveur, ADR 0238), ou
+  celle que la boîte déclare elle-même (``oauth_client_id``), qui passe devant.
 - Une panne (réseau, refus de Microsoft) est une ``OAuthError``, dite en français. Un jeton que Microsoft ne
   renouvelle plus (``invalid_grant``) n'est plus présenté : la boîte attend qu'on la reconnecte. Aucun jeton
   n'entre jamais dans un journal ni dans un message.
@@ -47,8 +48,8 @@ TIMEOUT_S = 20.0
 SLOWER_S = 5.0
 
 NOT_SIGNED_IN = "pas encore connectée à Microsoft : « Se connecter à Microsoft » sur la fiche de la boîte"
-NO_APPLICATION = ("aucune application Microsoft déclarée (son identifiant, le client ID, se donne dans les réglages "
-                  "de la boîte)")
+NO_APPLICATION = ("aucune application Microsoft déclarée (son identifiant, le client ID, se donne pour toute "
+                  "l'instance par « mika mail application », ou dans les réglages de la boîte)")
 NO_STORE = "la connexion Microsoft n'a pas où garder son jeton"
 EXPIRED = "le code a expiré avant d'être entré chez Microsoft"
 #: ce que Microsoft répond quand le jeton de renouvellement ne vaut plus
@@ -71,8 +72,8 @@ class Grant:
     client_id: str
     tenant: str
 
-    def fits(self, account: MailAccount) -> bool:
-        return self.client_id == account.oauth_client_id and self.tenant == account.oauth_tenant
+    def fits(self, client_id: str, tenant: str) -> bool:
+        return self.client_id == client_id and self.tenant == tenant
 
 
 class GrantStore(Protocol):
@@ -130,8 +131,11 @@ class MicrosoftSignIn:
 
     def __init__(self, grants: GrantStore | None = None, *, now: Callable[[], datetime] = lambda: datetime.now(UTC),
                  transport: httpx.AsyncBaseTransport | None = None,
-                 sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep) -> None:
+                 sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep,
+                 application: Callable[[], str] = lambda: "") -> None:
         self._grants = grants
+        #: l'application de l'instance (son client ID ; vide : aucune), relue à chaque fois
+        self._application = application
         self._now = now
         self._transport = transport
         self._sleep = sleep
@@ -148,9 +152,15 @@ class MicrosoftSignIn:
     def _t(self) -> float:
         return self._now().timestamp()
 
+    def _client_id(self, account: MailAccount) -> str:
+        """L'application par laquelle cette boîte entre : la sienne si elle en déclare une, sinon celle de
+        l'instance (ADR 0238) ; vide : aucune."""
+        return account.oauth_client_id or self._application()
+
     def _grant(self, key: str, account: MailAccount) -> Grant | None:
         grant = self._grants.mail_grant(key) if self._grants is not None else None
-        return grant if grant is not None and grant.fits(account) else None
+        fits = grant is not None and grant.fits(self._client_id(account), account.oauth_tenant)
+        return grant if fits else None
 
     # ── où elle en est ──
     def state(self, key: str, account: MailAccount) -> SignIn:
@@ -161,7 +171,7 @@ class MicrosoftSignIn:
         revoked = self._revoked.get(key)
         if grant is not None and (revoked is None or revoked[0] != grant):
             return SignIn(SIGNED_IN)
-        if grant is None and not account.oauth_client_id:
+        if grant is None and not self._client_id(account):
             return SignIn(SIGNIN_NEEDED, error=NO_APPLICATION)
         stale = revoked[1] if grant is not None and revoked is not None else ""
         return SignIn(SIGNIN_NEEDED, error=self._failed.get(key) or stale)
@@ -175,7 +185,7 @@ class MicrosoftSignIn:
                 raise OAuthError(NO_STORE)
             grant = self._grant(key, account)
             if grant is None:
-                raise OAuthError(NOT_SIGNED_IN if account.oauth_client_id else NO_APPLICATION)
+                raise OAuthError(NOT_SIGNED_IN if self._client_id(account) else NO_APPLICATION)
             revoked = self._revoked.get(key)
             # Microsoft ne la renouvelle plus : on ne la lui représente pas à chaque relevé
             if revoked is not None and revoked[0] == grant:
@@ -220,12 +230,12 @@ class MicrosoftSignIn:
     async def start(self, key: str, account: MailAccount) -> SignIn:
         """Demande un code à Microsoft et attend, en tâche de fond, que la personne l'entre ; rend le code à
         montrer. Une connexion en attente pour la même boîte est remplacée."""
-        if not account.oauth_client_id:
+        client_id = self._client_id(account)
+        if not client_id:
             raise OAuthError(NO_APPLICATION)
         if self._grants is None:
             raise OAuthError(NO_STORE)
-        got = await self._post(account.oauth_tenant, "devicecode", {"client_id": account.oauth_client_id,
-                                                                    "scope": SCOPES})
+        got = await self._post(account.oauth_tenant, "devicecode", {"client_id": client_id, "scope": SCOPES})
         if got.get("error"):
             raise OAuthError(_refused(got))
         device, code = str(got.get("device_code") or ""), str(got.get("user_code") or "")
@@ -241,8 +251,8 @@ class MicrosoftSignIn:
         pending = _Pending(code[:40], str(got.get("verification_uri") or DEVICE_PAGE)[:200], self._t() + lasts)
         self._pending[key] = pending
         self._failed.pop(key, None)
-        pending.task = asyncio.create_task(self._wait(key, account.oauth_client_id, account.oauth_tenant, device,
-                                                      interval, pending), name=f"mail-oauth-{key}")
+        pending.task = asyncio.create_task(self._wait(key, client_id, account.oauth_tenant, device, interval,
+                                                      pending), name=f"mail-oauth-{key}")
         return self.state(key, account)
 
     async def _wait(self, key: str, client_id: str, tenant: str, device: str, interval: float,

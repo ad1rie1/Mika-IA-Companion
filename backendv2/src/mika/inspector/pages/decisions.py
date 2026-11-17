@@ -17,6 +17,7 @@ from mika.inspector import names, render
 from mika.inspector.names import KINDS
 from mika.inspector.pages.home import episode_row
 from mika.inspector.pages.tabs import TABS
+from mika.inspector.render import PREFIX
 from mika.kernel.clock import DAY, US
 from mika.kernel.inspect import (
     Badge,
@@ -187,14 +188,14 @@ async def running(ui: Any, request: Request) -> list[Any]:
         Stat("En file", sum(lanes.pending(x) for x in lanes.capacities),
              " · ".join(f"{names.lane(x)} {lanes.pending(x)}/{c}" for x, c in lanes.capacities.items())),
         Stat("Processus en cours", len(procs), ", ".join(ui.names.process(p) for p in procs)[:90] or "aucun",
-             href=Ref("local", "/inspecteur/systeme/processus", "processus")),
+             href=Ref("local", f"{PREFIX}/systeme/processus", "processus")),
         Stat("Questions sans réponse", len(rt_state.pending), "attendent qu'elle réponde",
-             "warn" if rt_state.pending else "", Ref("local", "/inspecteur/fil/questions", "questions")),
+             "warn" if rt_state.pending else "", Ref("local", f"{PREFIX}/fil/questions", "questions")),
     ))]
     blocks.extend((
-        Nav((NavItem("Actualiser cet écran", Ref("local", "/inspecteur/decisions/en_cours", "")),
-             NavItem("Historique des épisodes", Ref("local", "/inspecteur/decisions/episodes", "")),
-             NavItem("Sorties à vérifier", Ref("local", "/inspecteur/systeme/sorties", ""))),
+        Nav((NavItem("Actualiser cet écran", Ref("local", f"{PREFIX}/decisions/en_cours", "")),
+             NavItem("Historique des épisodes", Ref("local", f"{PREFIX}/decisions/episodes", "")),
+             NavItem("Sorties à vérifier", Ref("local", f"{PREFIX}/systeme/sorties", ""))),
             title=f"Relevé à {ui.when_long(now)}"),
     ))
     blocks.append(Section("Le travail en cours", (Table((Column("Depuis", "fit"), Column("Épisode", role="title"), "Vers", Column("Durée", "num"), "En réponse à", Column("État", role="badge")), tuple(
@@ -212,7 +213,7 @@ async def running(ui: Any, request: Request) -> list[Any]:
         Note("Une question attend une réponse." if len(rt_state.pending) == 1 else
              f"{len(rt_state.pending)} questions attendent une réponse." if rt_state.pending else "Aucune question en attente.",
              "warn" if rt_state.pending else "muted"),
-        Nav((NavItem("Ouvrir les questions sans réponse", Ref("local", "/inspecteur/fil/questions", "")),)),
+        Nav((NavItem("Ouvrir les questions sans réponse", Ref("local", f"{PREFIX}/fil/questions", "")),)),
     )))
     blocks.append(Disclosure("Ressources réservées pendant le travail", (Table(("ce qui est réservé", "par", "jusqu'à"), tuple(
         (Text(ui.names.resource(res), hint=res), Ref("episode", lease.holder, "l'épisode qui le tient"),
@@ -263,7 +264,7 @@ async def towards(ui: Any, request: Request) -> Any:
     people = sorted({r.target for r in rows if r.target not in ("", "none", "any") and ":" not in r.target})
     out: list[Any] = [Note(n, "warn") for n in notes]
     if not wanted:
-        chips = tuple(Ref("local", "/inspecteur/decisions/envers", ui.names.who(h), (("personne", h),))
+        chips = tuple(Ref("local", f"{PREFIX}/decisions/envers", ui.names.who(h), (("personne", h),))
                       for h in people)
         out.append(Note("Choisis une personne (son nom ou un moyen de communication) : la console montre les lignes de l'arbitre "
                         "qui la concernent, et celles qui visent « n'importe qui de présent ».", "info"))

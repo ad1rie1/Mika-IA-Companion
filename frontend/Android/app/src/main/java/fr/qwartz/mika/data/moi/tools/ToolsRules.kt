@@ -321,7 +321,7 @@ fun replyTone(reply: String): Tone = when (reply) {
 // ── Ce qu'une opératrice voit de plus (ADR 0209) ────────────────────────
 
 /** Une page de la console, telle que le moteur la donne à une opératrice : rien d'autre ne s'ouvre d'ici. */
-private val CONSOLE_PAGE = Regex("""^/inspecteur/[\w\-/]*(\?[\w=%.\-&]*)?$""")
+private val CONSOLE_PAGE = Regex("""^/admin/[\w\-/]*(\?[\w=%.\-&]*)?$""")
 
 fun consoleHref(href: String): String? = href.trim().takeIf { CONSOLE_PAGE.matches(it) }
 

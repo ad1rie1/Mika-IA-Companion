@@ -106,13 +106,13 @@ def test_the_console_shows_each_phone_conversation_by_conversation(ctx) -> None:
               "sender": "b2" * 16, "name": "Maman", "text": "On mange à 20 h", "time": 1_760_950_000_100}
     r = inbox(ctx, adrien, {"messages": [*lot("Tu viens samedi ?", "On sera chez Inès")["messages"], family]})
     assert r.status_code == 200, r.text
-    page = html.unescape(ctx.client.get("/inspecteur/sens/messages").text)
+    page = html.unescape(ctx.client.get("/admin/sens/messages").text)
     assert "Le téléphone de" in page and page.count('<details class="senses-conv">') == 2
     assert all(part in page for part in ("Léa", "Tu viens samedi ?", "Famille", "groupe", "On mange à 20 h"))
-    fiche = ctx.client.get(f"/inspecteur/fiche/person/{adrien.handle}")
+    fiche = ctx.client.get(f"/admin/fiche/person/{adrien.handle}")
     assert fiche.status_code == 200 and "onglet=telephone" in fiche.text
     tab = html.unescape(ctx.client.get(f"{fiche.url.path}?onglet=telephone").text)
     assert "Ses conversations" in tab and "On sera chez Inès" in tab and "Ses réponses proposées" in tab
     bea = ctx.phone("bea")
-    other = ctx.client.get(f"/inspecteur/fiche/person/{bea.handle}")
+    other = ctx.client.get(f"/admin/fiche/person/{bea.handle}")
     assert other.status_code == 200 and "onglet=telephone" not in other.text

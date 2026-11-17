@@ -57,7 +57,7 @@ def test_the_drawn_fiche_reads_the_next_session_in_the_faculty_head(world):  # n
     stop(client, kernel)  # aucune séance ne part pendant qu'on lit
     gid = str(client.portal.call(explore, kernel))
     said = client.portal.call(lambda: dict(Inspection(kernel).head("goal", gid).facts)[NEXT_SESSION])
-    page = drawn(client, f"/inspecteur/fiche/goal/{gid}")
+    page = drawn(client, f"/admin/fiche/goal/{gid}")
     head = page[page.index('class="obj-head-facts"'):]
     head = head[:head.index("</p>")]
     shown = re.search(rf'<span class="now-muted">{NEXT_SESSION}</span> ([^<]+)</span>', head)
@@ -66,6 +66,6 @@ def test_the_drawn_fiche_reads_the_next_session_in_the_faculty_head(world):  # n
     assert resume.startswith(f"<dt>Prochaine séance</dt><dd>{said}</dd>")
     got = client.portal.call(lambda: perform(kernel, "goals.pause", form(), by="user_1", subject=gid, nonce="p"))
     assert got.ok, got
-    paused = drawn(client, f"/inspecteur/fiche/goal/{gid}")
+    paused = drawn(client, f"/admin/fiche/goal/{gid}")
     assert NEXT_SESSION not in paused[paused.index('class="obj-head-facts"'):].split("</p>", 1)[0]
     assert "<dt>Prochaine séance</dt>" not in paused

@@ -47,7 +47,7 @@ def _pane(page: str, pane: str) -> str:
 def test_anomalies_name_the_faculty_the_event_and_the_error(world, monkeypatch):  # noqa: F811
     client, live, _ = world
     kernel = _life(client, live)
-    calm = drawn(client, "/inspecteur/systeme/anomalies")
+    calm = drawn(client, "/admin/systeme/anomalies")
     assert 'class="sys-band tone-ok"' in calm and "Aucune anomalie enregistrée depuis le démarrage" in calm
     assert "sys-an-list" not in calm and "Aucune trace depuis le démarrage" in calm
     monkeypatch.setattr(kernel.mind, "anomalies", ["affect@42: ValueError('intensité hors bornes')",
@@ -55,7 +55,7 @@ def test_anomalies_name_the_faculty_the_event_and_the_error(world, monkeypatch):
     monkeypatch.setattr(kernel.arbiter, "anomalies", ["attention : raison ou type non déclaré (INITIATIVE/x)"])
     kernel.mind.trace("forget", subject="user_2", events=3)
     kernel.mind.trace("rebuild_mismatch", owners=["memory"])
-    page = drawn(client, "/inspecteur/systeme/anomalies")
+    page = drawn(client, "/admin/systeme/anomalies")
     # un seul bandeau, avant les chiffres : trois anomalies, rien d'arrêté
     band = page.index('class="sys-band tone-warn"')
     assert "3 anomalies depuis le démarrage" in page and band < page.index("person-tiles")
@@ -63,7 +63,7 @@ def test_anomalies_name_the_faculty_the_event_and_the_error(world, monkeypatch):
     # la faculté par son nom, l'événement où c'est né, l'erreur en clair et telle quelle
     entry = page[page.rfind("<li>", 0, page.index("Humeur et postures")):]
     entry = entry[:entry.index("</li>")]
-    assert "Humeur et postures" in entry and 'href="/inspecteur/evenement/42"' in entry
+    assert "Humeur et postures" in entry and 'href="/admin/evenement/42"' in entry
     assert "intensité hors bornes" in entry and "ValueError(" in entry
     assert "Erreur de réduction à examiner" in page  # ce qui ne se lit pas : tel quel
     assert "Anomalies de l'arbitre" in page and "raison ou type non déclaré" in page
@@ -77,11 +77,11 @@ def test_the_journal_reads_day_by_day_and_says_an_episode_once(world):  # noqa: 
     chat(client, "raconte-moi ta journée")
     client.portal.call(lambda: operations.audit(kernel, "console.comptes.creer", by="user_1", subject_kind="compte",
                                                 subject="user_2"))
-    page = drawn(client, "/inspecteur/systeme/chronologie")
+    page = drawn(client, "/admin/systeme/chronologie")
     assert "Aujourd'hui" in page
     feed = page[page.index('class="sys-jr-feed"'):]
     ended = client.portal.call(lambda: live.kernel.mind.store.latest(["episode.ended"], 1))[0]
-    link = f'href="/inspecteur/episode/{ended.correlation}"'
+    link = f'href="/admin/episode/{ended.correlation}"'
     events = client.portal.call(lambda: list(live.kernel.mind.store.read(types={"episode.started", "episode.utterance",
                                                                                 "episode.ended"})))
     mine = [e for e in events if e.correlation == ended.correlation]
@@ -99,9 +99,9 @@ def test_the_journal_reads_day_by_day_and_says_an_episode_once(world):  # noqa: 
     # un geste audité dit lequel, et qui l'a fait ; son lien, « un geste audité » (C8-08, C8-R1)
     assert re.search(r">Geste audité : Compte créé, par [^<]+</a>", feed) and "lié à <a" in feed
     assert "un geste audité" in feed and "action d'opérateur" not in feed.lower()
-    filtered = drawn(client, "/inspecteur/systeme/chronologie?type=episode.")
+    filtered = drawn(client, "/admin/systeme/chronologie?type=episode.")
     assert "perception.received" not in filtered and 'class="hm-chip on"' in filtered and "tous les types" in filtered
-    table = drawn(client, "/inspecteur/systeme/chronologie?vue_pg1=table")
+    table = drawn(client, "/admin/systeme/chronologie?vue_pg1=table")
     assert '<table class="hm-table">' in table and "sys-jr-feed" not in table
     # la vue le dit elle-même (le repli, la console en MCP) : le geste, sa faculté en colonne repliée
     assert "Geste audité : Compte créé, par " in table and "faculté" in table
@@ -110,7 +110,7 @@ def test_the_journal_reads_day_by_day_and_says_an_episode_once(world):  # noqa: 
 def test_world_screens_say_what_a_connected_host_lacks(world, monkeypatch):  # noqa: F811
     client, live, _ = world
     _life(client, live)
-    empty = drawn(client, "/inspecteur/systeme/monde")
+    empty = drawn(client, "/admin/systeme/monde")
     assert "Aucun client du monde connecté" in empty and "sys-band" not in empty
     now = live.kernel.mind.clock.now()
     view = {"sessions": [
@@ -124,7 +124,7 @@ def test_world_screens_say_what_a_connected_host_lacks(world, monkeypatch):  # n
                    {"session": "gone", "client": "Unity 2023", "rev": 7, "at": now - DAY, "missing_assets": [],
                     "missing_anchors": []}]}
     monkeypatch.setattr(live.world, "overview", lambda: view)
-    page = drawn(client, "/inspecteur/systeme/monde")
+    page = drawn(client, "/admin/systeme/monde")
     assert page.count('<p class="sys-band tone-') == 1 and "ancres manquantes : fenetre_salon" in page
     lacks = page[page.index('class="sys-wd-lacks"'):]
     lacks = lacks[:lacks.index("</dl>")]
@@ -136,7 +136,7 @@ def test_world_screens_say_what_a_connected_host_lacks(world, monkeypatch):  # n
 def test_contributions_give_the_whole_then_one_faculty_per_subtab(world):  # noqa: F811
     client, live, _ = world
     _life(client, live)
-    page = drawn(client, "/inspecteur/systeme/contributions")
+    page = drawn(client, "/admin/systeme/contributions")
     faculties = live.kernel.registry.faculties
     assert page.index('id="ct-all"') < page.index('id="ct-memory"')
     matrix = page[page.index('class="sys-ct-matrix"'):page.index("</ul>", page.index('class="sys-ct-matrix"'))]
@@ -145,13 +145,13 @@ def test_contributions_give_the_whole_then_one_faculty_per_subtab(world):  # noq
     assert "Publie" in memory and "memory.believed" in memory and "Fournit" in memory and "sys-ct-to" in memory
     # ses vues ne s'y relistent pas : un lien vers Toutes les vues › Par faculté, ouverte sur elle (C8-12)
     own = [v for v in live.kernel.registry.inspectors if v.owner == "memory"]
-    assert f'<a href="/inspecteur/systeme/vues#vues-de-memory">Ses vues ({len(own)}) →</a>' in memory
-    assert 'href="/inspecteur/memoire/souvenirs"' not in memory and "/facultes/memory/souvenirs" not in memory
+    assert f'<a href="/admin/systeme/vues#vues-de-memory">Ses vues ({len(own)}) →</a>' in memory
+    assert 'href="/admin/memoire/souvenirs"' not in memory and "/facultes/memory/souvenirs" not in memory
     # l'ancre est là, dans « Par faculté » : son groupe a toutes ses vues, chacune vers elle
-    group = _pane(drawn(client, "/inspecteur/systeme/vues"), "views-faculty")
+    group = _pane(drawn(client, "/admin/systeme/vues"), "views-faculty")
     group = group[group.index('id="vues-de-memory"'):]
     group = group[:group.index("</section>")]
-    assert group.count("<li>") == len(own) and 'href="/inspecteur/memoire/souvenirs"' in group
+    assert group.count("<li>") == len(own) and 'href="/admin/memoire/souvenirs"' in group
 
 
 def test_contributions_count_the_processes_of_the_scheduler_the_kernel_included(world):  # noqa: F811
@@ -161,7 +161,7 @@ def test_contributions_count_the_processes_of_the_scheduler_the_kernel_included(
     kernel = _life(client, live)
     specs = kernel.scheduler.specs
     assert {s.name for s in specs if s.owner == "kernel"} >= {"arbitre", "séries"}
-    page = drawn(client, "/inspecteur/systeme/contributions")
+    page = drawn(client, "/admin/systeme/contributions")
     tile = page[page.index('person-tile-label">Processus<'):]
     assert re.match(r'person-tile-label">Processus</span><span class="person-tile-value"><span class="num">(\d+)<',
                     tile).group(1) == str(len(specs))
@@ -182,12 +182,12 @@ def test_simulations_put_the_reports_left_and_the_one_read_right(tmp_path):
     app, _ = build(tmp_path / "data", web=WebConfig(), gateway=LiveGateway(), embedder=HashEmbedder(), reports=reports)
     with TestClient(app, base_url="http://localhost:8001", headers={"Origin": ORIGIN}) as client:
         bootstrap(client)
-        listing = drawn(client, "/inspecteur/systeme/simulations")
+        listing = drawn(client, "/admin/systeme/simulations")
         assert "rapide.md" in listing and "semaine-1/" in listing and "Choisis un rapport" in listing
-        read = drawn(client, "/inspecteur/systeme/simulations?fichier=rapide.md")
+        read = drawn(client, "/admin/systeme/simulations?fichier=rapide.md")
         reader = read[read.index('class="now-card sys-sim-reader"'):]
         assert "S01" in reader and 'aria-current="page"' in read[:read.index('class="now-card sys-sim-reader"')]
-        unknown = drawn(client, "/inspecteur/systeme/simulations?fichier=../secret.txt")
+        unknown = drawn(client, "/admin/systeme/simulations?fichier=../secret.txt")
         assert "Fichier inconnu" in unknown
 
 
@@ -197,7 +197,7 @@ def test_simulations_without_a_reports_folder_say_once_how_to_make_one(world):  
     console en MCP)."""
     client, live, _ = world
     _life(client, live)
-    page = drawn(client, "/inspecteur/systeme/simulations")
+    page = drawn(client, "/admin/systeme/simulations")
     tab = page[page.index('data-tab="systeme/simulations"'):]
     assert "sys-band" not in tab and tab.count("Faire un rapport") == 1
     assert tab.count("--report DOSSIER") == 1 and tab.count("--reports DOSSIER") == 1
@@ -215,7 +215,7 @@ def test_the_gateway_says_which_role_nobody_serves_and_how_full_each_provider_is
         {"name": "claude", "slots": 3, "busy": 2, "waiting": 1, "preempt": False, "extra": {"quota": {"5 h": 0.92}}}])
     # un vrai rôle que personne ne sert (« retenir ») : l'alarme ; la seconde passe sans modèle n'en est pas une
     monkeypatch.setattr(gateway, "resolution", lambda: {"reply": "claude", "extract": "", "polish": ""})
-    page = drawn(client, "/inspecteur/systeme/passerelle")
+    page = drawn(client, "/admin/systeme/passerelle")
     assert page.count('<p class="sys-band tone-') == 1 and 'class="sys-band tone-danger"' in page
     band = page[page.index('class="sys-band tone-danger"'):]
     band = band[:band.index("</p>")]
@@ -239,7 +239,7 @@ def test_the_second_pass_without_a_model_is_cut_by_choice_not_a_red_alarm(world,
     monkeypatch.setattr(gateway, "status", lambda: [
         {"name": "claude", "slots": 3, "busy": 0, "waiting": 0, "preempt": False, "extra": {}}])
     monkeypatch.setattr(gateway, "resolution", lambda: {"reply": "claude", "extract": "claude", "polish": ""})
-    page = drawn(client, "/inspecteur/systeme/passerelle")
+    page = drawn(client, "/admin/systeme/passerelle")
     assert "tone-danger" not in page and "sys-band" not in page and "chaque appel" not in page.lower()
     assert "<h3>Personne" not in page and "sans fournisseur :" not in page
     at = page.index("Rôles sans fournisseur")
@@ -285,7 +285,7 @@ def test_the_gateway_says_how_many_calls_wait_with_the_word_agreed(world, monkey
     for waiting, said in ((1, "1 appel attend un créneau libre."), (2, "2 appels attendent un créneau libre.")):
         monkeypatch.setattr(gateway, "status", lambda w=waiting: [
             {"name": "claude", "slots": 3, "busy": 3, "waiting": w, "preempt": False, "extra": {}}])
-        page = drawn(client, "/inspecteur/systeme/passerelle")
+        page = drawn(client, "/admin/systeme/passerelle")
         assert page.count('<p class="sys-band tone-') == 1 and 'class="sys-band tone-warn"' in page
         band = page[page.index('class="sys-band tone-warn"'):]
         assert band[:band.index("</p>")].count(said) == 1
@@ -312,7 +312,7 @@ def test_calls_show_cost_and_failures_per_day_role_and_model(world):  # noqa: F8
     client, live, _ = world
     _life(client, live)
     _calls(client, live)
-    page = drawn(client, "/inspecteur/systeme/appels")
+    page = drawn(client, "/admin/systeme/appels")
     # le bandeau des échecs, les rôles qui échouent surtout, avant les chiffres
     assert page.count('<p class="sys-band tone-') == 1 and "appels ont échoué en 14 jours" in page
     assert "surtout : retenir (mémoire)" in page and page.index("sys-band") < page.index("person-tiles")
@@ -325,7 +325,7 @@ def test_calls_show_cost_and_failures_per_day_role_and_model(world):  # noqa: F8
     assert "Par rôle" in split and "Par modèle" in split and "claude · claude-opus-5" in split
     assert re.search(r"retenir \(mémoire\).*?échecs", split, re.S)
     # une autre page de la liste ouvre la sienne, et ses liens y reviennent
-    second = drawn(client, "/inspecteur/systeme/appels?page=2")
+    second = drawn(client, "/admin/systeme/appels?page=2")
     assert second.index('id="calls-all"') < second.index('id="calls-split"')
     assert "#calls-all" in second[second.index('id="calls-all"'):] and "51–" in second
     assert '<li class="failed">' in second and "timeout" in second
@@ -365,7 +365,7 @@ def test_calls_apply_one_chosen_period_to_the_whole_page(world):  # noqa: F811
         roles = page[page.index('aria-labelledby="calls-roles"'):]
         return roles[roles.index("tenir son journal (voix)"):roles.index("</li>", roles.index("tenir son journal"))]
 
-    page = drawn(client, "/inspecteur/systeme/appels")
+    page = drawn(client, "/admin/systeme/appels")
     # le bouton à choix au bout de la barre d'onglets : trois choix, 14 jours posé
     seg = page[page.index('<nav class="seg" aria-label="période">'):]
     seg = seg[:seg.index("</nav>")]
@@ -376,7 +376,7 @@ def test_calls_apply_one_chosen_period_to_the_whole_page(world):  # noqa: F811
     assert "appels ont échoué en 14 jours" in page and "Par rôle <span class=\"now-muted\">· 14 jours" in page
     assert '<span class="now-num">24</span> appels' in journal(page)
     # sept jours : les chiffres, le graphe, où va le coût, le bandeau, d'un seul choix
-    week = drawn(client, "/inspecteur/systeme/appels?periode=7")
+    week = drawn(client, "/admin/systeme/appels?periode=7")
     seg = week[week.index('<nav class="seg" aria-label="période">'):]
     assert re.search(r'aria-current="true">7 jours<', seg[:seg.index("</nav>")])
     assert "Sur 7 jours" in week and "Échecs (7 jours)" in week and "Part du cache (7 jours)" in week
@@ -385,16 +385,16 @@ def test_calls_apply_one_chosen_period_to_the_whole_page(world):  # noqa: F811
     assert "appels ont échoué en 7 jours" in week and "Par rôle <span class=\"now-muted\">· 7 jours" in week
     assert '<span class="now-num">20</span> appels' in journal(week)
     # trente jours : tout ce que le registre garde, une barre par jour, resserrée
-    month = drawn(client, "/inspecteur/systeme/appels?periode=30")
+    month = drawn(client, "/admin/systeme/appels?periode=30")
     assert _bars(month) == days(30) and '<span class="now-num">66</span> appels' in month
     assert 'class="sys-calls-days-axis dense"' in month and 'class="sys-calls-days-axis dense"' not in week
     # la liste de tous les appels ne suit pas la période ; une autre de ses pages garde le choix
-    second = drawn(client, "/inspecteur/systeme/appels?periode=7&page=2")
+    second = drawn(client, "/admin/systeme/appels?periode=7&page=2")
     pager = second[second.index('id="calls-all"'):]
     assert "51–" in pager and "periode=7" in pager and "page=1" in pager
     assert '<span class="now-num">60</span> appels' in second
     # le repli sur les blocs de la vue (que lit aussi la console en MCP) : la même période, dite dans ses titres
-    blocks = drawn(client, "/inspecteur/systeme/appels?periode=7&vue_pg1=table")
+    blocks = drawn(client, "/admin/systeme/appels?periode=7&vue_pg1=table")
     assert 'class="sys-calls-svg' not in blocks and '<nav class="seg" aria-label="période">' in blocks
     assert all(f"{t} (7 jours)" in blocks for t in ("Coût par jour", "Par jour", "Par rôle", "Par fournisseur",
                                                       "Par modèle", "Échecs", "Part du cache"))
@@ -414,7 +414,7 @@ def test_calls_page_computes_each_aggregate_once_over_one_period(world, monkeypa
         return usage(since, **kw)
 
     monkeypatch.setattr(live.calls, "usage", counted)
-    page = drawn(client, "/inspecteur/systeme/appels?periode=30")
+    page = drawn(client, "/admin/systeme/appels?periode=30")
     assert 'class="sys-calls-svg' in page and "Par modèle" in page
     assert sorted(by for _since, by in seen) == ["backend", "day", "model", "role"]
     assert len({since for since, _by in seen}) == 1
@@ -423,7 +423,7 @@ def test_calls_page_computes_each_aggregate_once_over_one_period(world, monkeypa
 def test_storage_flags_a_missing_backup_and_draws_a_bar_per_table(world):  # noqa: F811
     client, live, _ = world
     _life(client, live)
-    page = drawn(client, "/inspecteur/systeme/stockage")
+    page = drawn(client, "/admin/systeme/stockage")
     # une phrase, un point : jamais « aucune sauvegarde notée : « mika backup ». » (audit du 2026-11-05, C8-14)
     assert page.count('<p class="sys-band tone-') == 1 and "Sauvegardes : aucune sauvegarde notée.</span>" in page
     tables = page[page.index('class="sys-store-tables"'):page.index("</ul>", page.index("sys-store-tables"))]
@@ -459,7 +459,7 @@ def test_storage_gives_backup_commands_one_can_type(world, tmp_path):  # noqa: F
     # la page : les dossiers de ce serveur, la vérification nomme la dernière archive
     archives = tmp_path / "archives"
     backup.backup(live.data, archives, keep=3)  # sans risque serveur en marche, comme la ligne de commande
-    page = drawn(client, "/inspecteur/systeme/stockage")
+    page = drawn(client, "/admin/systeme/stockage")
     made = next(archives.glob("mika-*.tar.gz"))
     assert f"backup {shlex.quote(str(archives.resolve()))} --keep 3 »" in page
     assert f"verify {shlex.quote(str(made.resolve()))} »" in page
@@ -469,24 +469,24 @@ def test_storage_gives_backup_commands_one_can_type(world, tmp_path):  # noqa: F
 def test_operator_actions_read_day_by_day(world):  # noqa: F811
     client, live, _ = world
     kernel = _life(client, live)
-    assert "Aucun geste audité encore" in drawn(client, "/inspecteur/systeme/operations")
+    assert "Aucun geste audité encore" in drawn(client, "/admin/systeme/operations")
     client.portal.call(lambda: operations.audit(kernel, "console.reglages.essai", by="user_1"))
-    page = drawn(client, "/inspecteur/systeme/operations")
+    page = drawn(client, "/admin/systeme/operations")
     feed = page[page.index('class="sys-ops-feed"'):]
-    assert "console.reglages.essai" in feed and "faite" in feed and 'href="/inspecteur/evenement/' in feed
+    assert "console.reglages.essai" in feed and "faite" in feed and 'href="/admin/evenement/' in feed
     assert "Sur cette page : <span class=\"now-num\">1</span> geste" in page and "depuis la console" in feed
 
 
 def test_every_view_has_its_place(world):  # noqa: F811
     client, live, _ = world
     _life(client, live)
-    page = drawn(client, "/inspecteur/systeme/vues")
+    page = drawn(client, "/admin/systeme/vues")
     views = live.kernel.registry.inspectors
     by_faculty = _pane(page, "views-faculty")
     assert all(v.title in by_faculty for v in views)
     assert by_faculty.count("<li>") == len(views)
     dest = _pane(page, "views-dest")
-    assert '<a href="/inspecteur/memoire">' in dest and "Souvenirs" in dest
+    assert '<a href="/admin/memoire">' in dest and "Souvenirs" in dest
     if any(v.hidden for v in views):
         assert 'id="views-hidden"' in page
 
@@ -501,7 +501,7 @@ def test_a_tainted_slice_says_its_event_and_the_exact_command_that_rebuilds_it(w
     kernel = _life(client, live)
     mind = kernel.mind
     monkeypatch.setattr(mind, "_root", replace(mind.root, tainted=FrozenDict({"memory": 42, "social": 58})))
-    for url in ("/inspecteur/systeme/anomalies", "/inspecteur/systeme/etat"):
+    for url in ("/admin/systeme/anomalies", "/admin/systeme/etat"):
         page = drawn(client, url)
         band = page[page.index('class="sys-band tone-danger"'):]
         band = band[:band.index("</p>")]
@@ -512,7 +512,7 @@ def test_a_tainted_slice_says_its_event_and_the_exact_command_that_rebuilds_it(w
         assert "seq" not in band and "(« mika rebuild »)" not in page
     assert 'id="st-all"' in page and 'class="now-tag danger">corrompue au n° 42' in page  # dessinée
     # le titre des replis, relu par ``SLICE_TITLE`` : chaque tranche dit l'événement qui l'a modifiée en dernier
-    assert re.search(r'modifiée au <a href="/inspecteur/evenement/(\d+)">n° \1</a>', page)
+    assert re.search(r'modifiée au <a href="/admin/evenement/(\d+)">n° \1</a>', page)
     one = system_pages.tainted_said({"memory": 42})
     assert one.startswith("Tranche corrompue") and "Son état est figé" in one and "« mika rebuild memory »" in one
 
@@ -520,7 +520,7 @@ def test_a_tainted_slice_says_its_event_and_the_exact_command_that_rebuilds_it(w
 def test_the_state_gives_each_faculty_its_facts_and_its_slice_in_json(world):  # noqa: F811
     client, live, _ = world
     _life(client, live)
-    page = drawn(client, "/inspecteur/systeme/etat")
+    page = drawn(client, "/admin/systeme/etat")
     assert page.index('id="st-all"') < page.index('id="st-affect"')
     affect = _pane(page, "st-affect")
     assert "Des familles, qui dépendent de leur argument" in affect and "affect.mood" in affect
@@ -540,7 +540,7 @@ def test_processes_read_the_deadline_the_scheduler_kept_and_never_draw_for_the_a
     sched, arbiter = kernel.scheduler, kernel.arbiter
     arbiter.invalidate()
     draws = arbiter.draws
-    drawn(client, "/inspecteur/systeme/processus")
+    drawn(client, "/admin/systeme/processus")
     assert (arbiter.draws, arbiter.next_at) == (draws, None), "une page de lecture ne tire rien"
     # un processus qui a échoué deux fois et attend son recul : la page dit son prochain essai, retenu par l'ordonnanceur
     # (et un processus retenu à jamais, ``2**62``, comme l'aperçu les retient : ce n'est pas une date)
@@ -548,7 +548,7 @@ def test_processes_read_the_deadline_the_scheduler_kept_and_never_draw_for_the_a
     at = kernel.mind.clock.now() + 20 * MINUTE + 30 * US
     monkeypatch.setattr(sched, "due", {late: at, held: 2**62}.get)
     monkeypatch.setitem(sched.consecutive, late, 2)
-    page = drawn(client, "/inspecteur/systeme/processus")
+    page = drawn(client, "/admin/systeme/processus")
     trouble = page.split('class="now-card sys-trouble"')[1].split("Par faculté")[0]
     entry = trouble[trouble.rfind("<li", 0, trouble.index(f"<code>{late}</code>")):]
     assert "prochain essai dans 20 min" in entry[:entry.index("</li>")]
@@ -571,7 +571,7 @@ def test_processes_show_a_lane_only_when_it_says_something(world, monkeypatch): 
     plain = next(s.name for s in sched.specs if not s.lane or s.lane == "background")
     for name in (night, plain):  # deux processus en échec : leurs cartes montrent leurs faits
         monkeypatch.setitem(sched.consecutive, name, 2)
-    page = drawn(client, "/inspecteur/systeme/processus")
+    page = drawn(client, "/admin/systeme/processus")
     assert "voie fond" not in page and "voie arbitre" not in page and "voie</span> fond" not in page
     assert " · voie nuit (une à la fois) · " in _title(page, night)
     assert "voie" not in _title(page, plain) and "voie" not in _title(page, "arbitre")
@@ -584,7 +584,7 @@ def test_processes_show_a_lane_only_when_it_says_something(world, monkeypatch): 
     assert '<span class="k">voie</span> nuit (une à la fois)' in card(night)
     assert '<span class="k">voie</span>' not in card(plain)
     # la vue en tableau : la voie, repliée dans le détail, ne dit « fond » pour personne
-    table = drawn(client, "/inspecteur/systeme/processus?vue_pg1=table")
+    table = drawn(client, "/admin/systeme/processus?vue_pg1=table")
     assert "nuit (une à la fois)" in table and not re.search(r"<dt>voie</dt><dd>(<[^>]+>)*(fond|arbitre)<", table)
     # son état, accordé : « 2 échecs d’affilée », jamais « échec(s) » (audit du 2026-11-05, C8-14)
     assert "2 échecs d’affilée" in table and "échec(s)" not in table

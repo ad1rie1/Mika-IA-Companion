@@ -49,8 +49,8 @@ def test_no_faculty_or_plugin_writes_an_address_of_the_console(find):
 
 
 @pytest.mark.parametrize(("source", "find"), [
-    ('x = "/inspecteur/reglages/teams"', written_addresses),
-    ('x = f"/inspecteur/{section}/parametres"', written_addresses),
+    ('x = "/admin/reglages/teams"', written_addresses),
+    ('x = f"/admin/{section}/parametres"', written_addresses),
     ('Ref("local", PAGE, "Retour")', local_links),
 ], ids=["chaîne", "f-string", "lien local"])
 def test_the_guard_sees_what_it_forbids(source, find):
@@ -58,7 +58,7 @@ def test_the_guard_sees_what_it_forbids(source, find):
 
 
 def test_a_comment_or_a_sentence_about_the_console_is_not_an_address():
-    source = '# voir /inspecteur/reglages\nx = "pour l\'inspecteur : /inspecteur/reglages"\n'
+    source = '# voir /admin/reglages\nx = "pour l\'inspecteur : /admin/reglages"\n'
     assert not list(written_addresses(ast.parse(source)))
 
 

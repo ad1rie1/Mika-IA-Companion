@@ -36,7 +36,7 @@ def think(client, live, text: str = THOUGHT) -> None:
 def test_only_an_operator_sees_her_now(world):  # noqa: F811
     client, live, _ = world
     page = client.get(now.BASE, follow_redirects=False)
-    assert page.status_code == 303 and page.headers["location"].endswith("/inspecteur/connexion")
+    assert page.status_code == 303 and page.headers["location"].endswith("/admin/connexion")
     assert client.get(now.FRAGMENT).status_code == 401
     async def guest():
         account = await live.accounts.create("bea", "un-autre-mot-de-passe", operator=False)
@@ -57,7 +57,7 @@ def test_the_page_crosses_her_faculties(world):  # noqa: F811
     ConsoleHTML(page.text).check()
     text = html.unescape(page.text)
     # dans le cadre de la console : son menu allume « En ce moment », le titre porte son nom (sa persona)
-    assert re.search(r'<a class="nav-item on" href="/inspecteur/maintenant"', text)
+    assert re.search(r'<a class="nav-item on" href="/admin/maintenant"', text)
     assert "<h1>Mika, en ce moment</h1>" in text
     # ni style ni script en ligne (CSP stricte) : les longueurs sont des attributs SVG
     assert " style=" not in text and not re.search(r"<script(?![^>]*\bsrc=)", text)
@@ -65,7 +65,7 @@ def test_the_page_crosses_her_faculties(world):  # noqa: F811
     # son humeur en mots, ce que son prompt lui en dit, le plan plaisir × éveil
     assert 'class="now-word"' in text and "ce que son prompt lui en dit" in text and 'class="plane-now"' in text
     # les gens : celle qui vient de lui écrire, et sa fiche (ouverte sur ce qu'elle vit avec elle)
-    assert 'href="/inspecteur/fiche/person/user_1"' in text and "lui a écrit à l'instant" in text
+    assert 'href="/admin/fiche/person/user_1"' in text and "lui a écrit à l'instant" in text
     # sa pensée, et le fil de sa journée (une réponse, la pensée)
     assert THOUGHT in text
     assert "A répondu à adrien" in text and "Une pensée lui vient" in text

@@ -32,7 +32,7 @@ from mika.runtime import health, operations
 from tests.fixtures.console_html import ConsoleHTML
 from tests.protocol.test_web import WS, bootstrap, recv_until, world  # noqa: F401 — fixture partagée
 
-BASE = "/inspecteur"
+BASE = "/admin"
 HOSTILE = '<script>alert("x")</script>'
 
 
@@ -60,7 +60,7 @@ def test_why_did_she_say_that_is_one_click_from_the_thread(world):  # noqa: F811
     converse(client, f"salut {HOSTILE}")
     thread = client.get(f"{BASE}/fiche/person/user_1?onglet=echanges").text
     # un lien « pourquoi ? » sous chacune de ses bulles (la conversation est dessinée, ADR 0121)
-    links = re.findall(r'href="(/inspecteur/parole/(\d+))"', thread)
+    links = re.findall(r'href="(/admin/parole/(\d+))"', thread)
     assert links, "chaque parole d'elle mène à son « pourquoi »"
     url, seq = links[0]
     r = client.get(url)
@@ -100,11 +100,11 @@ def test_why_did_she_say_that_is_one_click_from_the_thread(world):  # noqa: F811
     # le même lien depuis l'épisode, et depuis l'événement de la parole
     utterance = client.portal.call(lambda: live.kernel.mind.store.get_events([int(seq)]))[0]
     said = client.get(f"{BASE}/episode/{utterance.correlation}?onglet=dit").text
-    assert f"/inspecteur/parole/{seq}" in said
+    assert f"/admin/parole/{seq}" in said
     # l'onglet Prompt de l'épisode reprend les mêmes libellés accordés (why.prompt_view, parole/macros.html)
     prompt_tab = html.unescape(client.get(f"{BASE}/episode/{utterance.correlation}?onglet=prompt").text)
     assert re.search(r"caractères?, \d+ tours? de conversation\.", prompt_tab) and "tour(s)" not in prompt_tab
-    assert f"/inspecteur/parole/{seq}" in client.get(f"{BASE}/evenement/{seq}").text
+    assert f"/admin/parole/{seq}" in client.get(f"{BASE}/evenement/{seq}").text
     # contre-exemples : un message de la personne n'est pas une de ses paroles
     asked = client.portal.call(lambda: live.kernel.mind.store.latest([rt.PERCEPTION_RECEIVED.name], 1))[0]
     assert client.get(f"{BASE}/parole/{asked.seq}").status_code == 404
@@ -127,9 +127,9 @@ def test_episodes_name_people_and_the_filter_understands_a_name(world):  # noqa:
     # depuis sa fiche : « que ferait-elle envers elle ? » (par sa clé), et chaque parole de ses échanges mène à
     # son « pourquoi » (un lien sous sa bulle : l'onglet est dessiné, ADR 0121)
     fiche = client.get(f"{BASE}/fiche/person/user_1").text
-    link = re.search(r'href="(/inspecteur/decisions/envers\?personne=[^"]+)"', fiche)
+    link = re.search(r'href="(/admin/decisions/envers\?personne=[^"]+)"', fiche)
     assert link and "Envers adrien" in html_of(client.get(html.unescape(link.group(1))))
-    assert re.search(r'href="/inspecteur/parole/\d+"',
+    assert re.search(r'href="/admin/parole/\d+"',
                      client.get(f"{BASE}/fiche/person/user_1?onglet=echanges").text)
 
 
@@ -402,7 +402,7 @@ def test_operator_actions_are_not_presented_as_episodes(world):  # noqa: F811
     # un geste audité, fait depuis la console ou depuis l'espace d'une personne (C8-R1) : sa clé de corrélation
     # « opérateur:… » ne change pas
     assert op.correlation.startswith("opérateur:")
-    assert f"/inspecteur/episode/{op.correlation}" not in timeline and "un geste audité" in timeline
+    assert f"/admin/episode/{op.correlation}" not in timeline and "un geste audité" in timeline
     assert "Geste audité : " in timeline and "action d'opérateur" not in timeline.lower()
     gone = client.get(f"{BASE}/episode/{op.correlation}", follow_redirects=False)
     assert gone.status_code == 303 and "/systeme/chronologie?correlation=" in gone.headers["location"]

@@ -94,7 +94,7 @@ def test_her_operator_asks_in_pro_mode_and_watches_her_tools_live(world):
         assert mine["mode"] == "pro" and "tools" not in mine
         assert hers["mode"] == "pro" and hers["tools"] == [{"name": "memory_search", "ok": True}]
     assert [c.role for c in backend.calls if c.role in ("pro", "reply")] == ["pro", "pro"]
-    assert "un travail demandé" in html_of(client.get(f"/inspecteur/parole/{speech['message_id']}"))
+    assert "un travail demandé" in html_of(client.get(f"/admin/parole/{speech['message_id']}"))
 
 
 def test_only_an_operator_can_ask_in_pro_mode(world):

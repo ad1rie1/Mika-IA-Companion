@@ -137,10 +137,10 @@ def _create(client, token: str, op: str, **values: str):
     fields = ["title", "description", "owner", "objectives", "constants", "cadence_hours", "mode", "tool_memory",
               "tool_email", "tool_rss", "tool_forge", "tool_forge_apps", "tool_camera", "schedule", "days", "start",
               "end", "runs_per_day", "priority", "approval", "remote", "branch", "auto_push"]
-    data = {"csrf": token, "_op": op, "_retour": "/inspecteur/projets", "_sujet": "", "schedule": "manual",
+    data = {"csrf": token, "_op": op, "_retour": "/admin/projets", "_sujet": "", "schedule": "manual",
             "cadence_hours": "0", "runs_per_day": "0", "priority": "normal", "mode": "persona", "days": "all",
             "branch": "main", "_champs": fields, **values}
-    return client.post("/inspecteur/action/projects.creer", data=data, follow_redirects=False)
+    return client.post("/admin/action/projects.creer", data=data, follow_redirects=False)
 
 
 def test_a_project_is_created_on_its_own_page_and_lands_on_its_fiche(world):  # noqa: F811
@@ -148,11 +148,11 @@ def test_a_project_is_created_on_its_own_page_and_lands_on_its_fiche(world):  # 
     bootstrap(client)
     with client.websocket_connect(WS) as ws:  # qu'elle la connaisse : son adresse, sa personne
         ws.receive_json(), ws.receive_json()
-    menu = html.unescape(client.get("/inspecteur/").text)
-    assert ">Projets<" in menu and "/inspecteur/projets" in menu  # un menu à lui, à côté des buts
-    listing = html.unescape(client.get("/inspecteur/projets").text)
+    menu = html.unescape(client.get("/admin/").text)
+    assert ">Projets<" in menu and "/admin/projets" in menu  # un menu à lui, à côté des buts
+    listing = html.unescape(client.get("/admin/projets").text)
     assert "aucun projet" in listing and "Exécutions" in listing and "Décisions techniques" in listing
-    link = re.search(r'href="(/inspecteur/action/projects\.creer\?[^"]+)">Créer un projet', listing)
+    link = re.search(r'href="(/admin/action/projects\.creer\?[^"]+)">Créer un projet', listing)
     assert link, "l'action à plusieurs champs mène à sa page"
     page = html.unescape(client.get(link.group(1).replace("&amp;", "&")).text)
     for legend in ("Le projet", "Ses objectifs", "Son mode et ses outils", "Son rythme", "Sa liberté",
@@ -168,7 +168,7 @@ def test_a_project_is_created_on_its_own_page_and_lands_on_its_fiche(world):  # 
                    objectives="Créer un module RDP\nÉcrire sa documentation", constants="Améliorer la sécurité",
                    mode="plain", tool_memory="on", days="weekdays", start="9:00", end="18h", approval="on",
                    remote="https://github.com/moi/outils.git", auto_push="on")
-    assert done.status_code == 303 and done.headers["location"].startswith("/inspecteur/fiche/project/")
+    assert done.status_code == 303 and done.headers["location"].startswith("/admin/fiche/project/")
     pid = done.headers["location"].split("/fiche/project/", 1)[1].split("?", 1)[0]
     created = _events(client, live, projects_c.PROJECT_CREATED.name)[-1]
     assert str(created.seq) == pid and created.data.mode == projects_c.PLAIN and created.data.days == "weekdays"
@@ -178,9 +178,9 @@ def test_a_project_is_created_on_its_own_page_and_lands_on_its_fiche(world):  # 
         (int(pid), 1, "once", "Créer un module RDP"), (int(pid), 2, "once", "Écrire sa documentation"),
         (int(pid), 3, "constant", "Améliorer la sécurité")]
     for tab in TABS:
-        r = client.get(f"/inspecteur/fiche/project/{pid}?onglet={tab}")
+        r = client.get(f"/admin/fiche/project/{pid}?onglet={tab}")
         assert r.status_code == 200 and "a échoué" not in r.text and "Action non déclarée" not in r.text, tab
-    fiche = html.unescape(client.get(f"/inspecteur/fiche/project/{pid}").text)
+    fiche = html.unescape(client.get(f"/admin/fiche/project/{pid}").text)
     assert "Outils réseau" in fiche and "impersonnel" in fiche and "Créer un module RDP" in fiche
     assert "les jours ouvrés, de 9 h à 18 h" in fiche and "github.com/moi/outils" in fiche
 
@@ -197,22 +197,22 @@ def test_the_project_fiche_is_driven_over_http(world):  # noqa: F811
     pid = done.headers["location"].split("/fiche/project/", 1)[1].split("?", 1)[0]
 
     def act(key: str, op: str, fixed: dict[str, str] | None = None, **values: str):
-        data = {"csrf": token, "_op": op, "_retour": f"/inspecteur/fiche/project/{pid}", "_sujet": pid,
+        data = {"csrf": token, "_op": op, "_retour": f"/admin/fiche/project/{pid}", "_sujet": pid,
                 "_champs": list(values), **values}
         if fixed:
             data |= {"_fixes": list(fixed), **fixed}
-        return client.post(f"/inspecteur/action/{key}", data=data, follow_redirects=False)
+        return client.post(f"/admin/action/{key}", data=data, follow_redirects=False)
 
-    fiche = html.unescape(client.get(f"/inspecteur/fiche/project/{pid}").text)
+    fiche = html.unescape(client.get(f"/admin/fiche/project/{pid}").text)
     # en tête : ce qui vaut pour tout le projet ; les formulaires des onglets restent dans leurs onglets
     assert "Lancer maintenant" in fiche and "Mettre en pause" in fiche and "Archiver" in fiche
     for inline in ("Ajouter un objectif", "Consigner une décision", "Modifier le projet", "Enregistrer ses outils",
                    "Pousser maintenant", "Changer le statut", "Approuver"):
         assert inline not in fiche, inline
-    assert "Ajouter un objectif" in html.unescape(client.get(f"/inspecteur/fiche/project/{pid}?onglet=objectifs").text)
+    assert "Ajouter un objectif" in html.unescape(client.get(f"/admin/fiche/project/{pid}?onglet=objectifs").text)
     assert act("projects.objectif_ajouter", "o1", text="Améliorer la sécurité", kind="constant",
                cadence_hours="12").status_code == 303
-    objectifs = html.unescape(client.get(f"/inspecteur/fiche/project/{pid}?onglet=objectifs").text)
+    objectifs = html.unescape(client.get(f"/admin/fiche/project/{pid}?onglet=objectifs").text)
     assert "Améliorer la sécurité" in objectifs and "toutes les 12 h" in objectifs and "constant" in objectifs
     assert act("projects.objectif_statut", "s1", {"objective": "1", "status": "done"}).status_code == 303
     refused = act("projects.objectif_statut", "s2", {"objective": "2", "status": "done"})
@@ -220,44 +220,44 @@ def test_the_project_fiche_is_driven_over_http(world):  # noqa: F811
     assert "Un objectif constant ne se coche pas" in shown  # il revient : on le retire, on ne le coche pas
     assert act("projects.decision_ajouter", "d1", title="Langage", choice="Python", reason="l'atelier le lance",
                context="", options="", replaces="0").status_code == 303
-    decisions = html.unescape(client.get(f"/inspecteur/fiche/project/{pid}?onglet=decisions").text)
+    decisions = html.unescape(client.get(f"/admin/fiche/project/{pid}?onglet=decisions").text)
     assert "Langage" in decisions and "Python" in decisions and "en vigueur" in decisions
     assert act("projects.decision_ajouter", "d2", title="Langage", choice="Rust", reason="plus sûr", context="",
                options="", replaces="1").status_code == 303
-    decisions = html.unescape(client.get(f"/inspecteur/fiche/project/{pid}?onglet=decisions&statut=toutes").text)
+    decisions = html.unescape(client.get(f"/admin/fiche/project/{pid}?onglet=decisions&statut=toutes").text)
     assert "remplacée par D2" in decisions and "Rust" in decisions
-    deposit = client.post("/inspecteur/action/projects.deposer", data={
-        "csrf": token, "_op": "f1", "_retour": f"/inspecteur/fiche/project/{pid}?onglet=fichiers", "_sujet": pid,
+    deposit = client.post("/admin/action/projects.deposer", data={
+        "csrf": token, "_op": "f1", "_retour": f"/admin/fiche/project/{pid}?onglet=fichiers", "_sujet": pid,
         "folder": "donnees", "note": "Les mesures.", "_champs": ["file", "folder", "note"]},
         files={"file": ("mesures.csv", b"a,b\n1,2\n", "text/csv")}, follow_redirects=False)
     assert deposit.status_code == 303, deposit.text[:500]
     assert (live.data / "ateliers" / f"projet-{pid}" / "donnees" / "mesures.csv").read_bytes() == b"a,b\n1,2\n"
-    files = html.unescape(client.get(f"/inspecteur/fiche/project/{pid}?onglet=fichiers").text)
+    files = html.unescape(client.get(f"/admin/fiche/project/{pid}?onglet=fichiers").text)
     assert "donnees/" in files and 'enctype="multipart/form-data"' in files
-    inside = html.unescape(client.get(f"/inspecteur/fiche/project/{pid}?onglet=fichiers&dossier=donnees"
+    inside = html.unescape(client.get(f"/admin/fiche/project/{pid}?onglet=fichiers&dossier=donnees"
                                       f"&fichier=donnees/mesures.csv").text)
     assert "1,2" in inside and "mesures.csv" in inside
-    got = client.get(f"/inspecteur/telecharger/project/{pid}?fichier=donnees/mesures.csv")
+    got = client.get(f"/admin/telecharger/project/{pid}?fichier=donnees/mesures.csv")
     assert got.status_code == 200 and got.content == b"a,b\n1,2\n"
-    assert client.get(f"/inspecteur/telecharger/project/{pid}?fichier=../../mind.db").status_code == 404
-    git = html.unescape(client.get(f"/inspecteur/fiche/project/{pid}?onglet=git").text)
+    assert client.get(f"/admin/telecharger/project/{pid}?fichier=../../mind.db").status_code == 404
+    git = html.unescape(client.get(f"/admin/fiche/project/{pid}?onglet=git").text)
     assert "apport de l'opérateur : donnees/mesures.csv" in git and "atelier ouvert" in git
     sha = re.search(r"commit=([0-9a-f]{7,40})", git).group(1)
-    shown = client.get(f"/inspecteur/fiche/project/{pid}?onglet=git&commit={sha}").text
+    shown = client.get(f"/admin/fiche/project/{pid}?onglet=git&commit={sha}").text
     assert 'class="hm-code diff"' in shown and "d-line d-add" in shown and "+1,2" in html.unescape(shown)
     block = shown.split('class="hm-code diff"', 1)[1].split("</pre>", 1)[0]
     assert "</span>\n<span" not in block  # une ligne de diff par ligne, sans ligne vide entre deux
     assert act("projects.outils", "t1", tool_memory="on", tool_rss="on").status_code == 303
-    behaviour = html.unescape(client.get(f"/inspecteur/fiche/project/{pid}?onglet=comportement").text)
+    behaviour = html.unescape(client.get(f"/admin/fiche/project/{pid}?onglet=comportement").text)
     assert "ses flux RSS" in behaviour and "rss_" in behaviour  # le lot, et ses outils nommés
     assert act("projects.archiver", "a1").status_code == 303
-    archived = html.unescape(client.get(f"/inspecteur/fiche/project/{pid}").text)
+    archived = html.unescape(client.get(f"/admin/fiche/project/{pid}").text)
     assert "Restaurer" in archived and "Lancer maintenant" not in archived
     assert act("projects.restaurer", "r1").status_code == 303
     for tab in TABS:
-        r = client.get(f"/inspecteur/fiche/project/{pid}?onglet={tab}")
+        r = client.get(f"/admin/fiche/project/{pid}?onglet={tab}")
         assert r.status_code == 200 and "a échoué" not in r.text, tab
-    carnet = html.unescape(client.get(f"/inspecteur/fiche/project/{pid}?onglet=carnet").text)
+    carnet = html.unescape(client.get(f"/admin/fiche/project/{pid}?onglet=carnet").text)
     assert "archivé" in carnet and "restauré" in carnet and "objectif n° 1 : fait" in carnet
 
 
@@ -286,12 +286,12 @@ def test_the_git_tab_faces_the_workshop_with_github_and_offers_its_gestures(worl
         issues=(Ticket(7, "Un bogue <b>gras</b>", f"{page}/issues/7", "bea", 0, ("bug",), 2),),
         pulls=(Ticket(8, "Une PR", f"{page}/pull/8", "bea", 0, head="essai", base="main", draft=True),),
         open_issues=1, open_pulls=1))
-    got = client.get(f"/inspecteur/fiche/project/{pid}?onglet=git")
+    got = client.get(f"/admin/fiche/project/{pid}?onglet=git")
     assert got.status_code == 200 and 'data-tab="project/git"' in got.text
     shown = html.unescape(got.text)
     assert "L’atelier" in shown and "GitHub" in shown and "moi/outils" in shown
     assert "1 à pousser" in shown and "0 à récupérer" in shown and "pas 1" in shown
-    assert "/inspecteur/action/projects.pousser" in got.text and "/inspecteur/action/projects.recuperer" in got.text
+    assert "/admin/action/projects.pousser" in got.text and "/admin/action/projects.recuperer" in got.text
     assert "frais=1" in got.text  # « Relire »
     for pane in ("git-historique", "git-encours", "git-distant", "git-issues", "git-pr", "git-echanges",
                  "git-reglages"):
@@ -299,5 +299,5 @@ def test_the_git_tab_faces_the_workshop_with_github_and_offers_its_gestures(worl
     assert "Un bogue &lt;b&gt;gras&lt;/b&gt;" in got.text  # ce que GitHub dit est une donnée
     assert f'href="{page}/issues/7"' in got.text and "essai → main" in shown and "brouillon" in shown
     sha = re.search(r"commit=([0-9a-f]{7,40})", got.text).group(1)
-    opened = client.get(f"/inspecteur/fiche/project/{pid}?onglet=git&commit={sha}").text
+    opened = client.get(f"/admin/fiche/project/{pid}?onglet=git&commit={sha}").text
     assert 'class="hm-code diff"' in opened and "L'enregistrement" in html.unescape(opened)

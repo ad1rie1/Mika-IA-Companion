@@ -67,7 +67,7 @@ def _entry(page: str, marker: str) -> str:
 def test_the_arbiter_table_says_what_pushes_what_holds_back_and_what_comes_out(world, monkeypatch):  # noqa: F811
     client, live, _ = world
     _life(client, live, monkeypatch)
-    page = drawn(client, "/inspecteur/decisions/maintenant")
+    page = drawn(client, "/admin/decisions/maintenant")
     # d'abord la phrase : elle agirait, sur la ligne la plus probable (Béa : 12 points, 3 au-dessus du seuil)
     outlook = page.split('class="now-card arb-outlook"')[1].split("</section>")[0]
     assert "Elle agirait d’elle-même en moyenne dans" in outlook and "initiative envers Béa" in outlook
@@ -101,13 +101,13 @@ def test_the_arbiter_table_says_what_pushes_what_holds_back_and_what_comes_out(w
 def test_what_she_would_do_towards_someone_starts_with_a_choice_then_a_verdict(world, monkeypatch):  # noqa: F811
     client, live, _ = world
     _life(client, live, monkeypatch)
-    empty = drawn(client, "/inspecteur/decisions/envers")
+    empty = drawn(client, "/admin/decisions/envers")
     pick = empty.split('class="now-card arb-pick"')[1]
     assert "Envers qui ?" in pick and "Choisis une personne" in pick
-    assert re.search(r'class="hm-chip" href="/inspecteur/decisions/envers\?personne=user_1">adrien<', pick)
-    nobody = drawn(client, "/inspecteur/decisions/envers?personne=Personne-de-ce-nom")
+    assert re.search(r'class="hm-chip" href="/admin/decisions/envers\?personne=user_1">adrien<', pick)
+    nobody = drawn(client, "/admin/decisions/envers?personne=Personne-de-ce-nom")
     assert "Personne ne correspond à « Personne-de-ce-nom »" in nobody and "arb-pick" in nobody
-    page = drawn(client, "/inspecteur/decisions/envers?personne=adrien")
+    page = drawn(client, "/admin/decisions/envers?personne=adrien")
     verdict = page.split('class="now-card arb-verdict')[1].split("</section>")[0]
     assert "Envers adrien" in verdict and "Elle pourrait prendre la parole envers adrien" in verdict
     # ce qui pousse le plus (la preuve à +8), pas la première de la ligne (une raison sans poids)
@@ -132,7 +132,7 @@ def test_her_initiatives_show_her_budget_in_slots_and_whether_she_was_answered(w
                                                text=Content.of("Tu as avancé sur l'écran titre ?"))])
     append(client, kernel, [rt.PERCEPTION_RECEIVED.draft(handle="user_1", channel="web",
                                                          text=Content.of("oui, presque fini !"))])
-    page = drawn(client, "/inspecteur/decisions/initiatives")
+    page = drawn(client, "/admin/decisions/initiatives")
     done, cap = (int(x) for x in re.search(r'class="now-num">(\d+) / (\d+)<', page).groups())
     assert page.count('class="ini-slot"') + page.count('class="ini-slot on"') == cap
     assert page.count('class="ini-slot on"') == done
@@ -147,7 +147,7 @@ def test_her_initiatives_show_her_budget_in_slots_and_whether_she_was_answered(w
 def test_her_choices_show_the_wheel_of_lines_and_the_chosen_one(world):  # noqa: F811
     client, live, _ = world
     kernel, _ = _life(client, live)
-    empty = drawn(client, "/inspecteur/decisions/selections")
+    empty = drawn(client, "/admin/decisions/selections")
     assert "Elle n'a encore rien décidé d'elle-même" in empty
     rows = (
         RowRecord(kind=Kind.INITIATIVE, target="user_1", parts=(("attention", "mail_to_tell", 8.0),), shift=0.0,
@@ -159,7 +159,7 @@ def test_her_choices_show_the_wheel_of_lines_and_the_chosen_one(world):  # noqa:
     )
     append(client, kernel, [SELECTED.draft(rows=rows, fired=("INITIATIVE:user_1",), draw=0.3, candidates=3,
                                            bound=0.001, total=0.0004)], "kernel")
-    page = drawn(client, "/inspecteur/decisions/selections")
+    page = drawn(client, "/admin/decisions/selections")
     item = page.split('class="sel-item"')[1]
     assert "Elle a choisi :" in item.split('class="sel-draw"')[0] and "adrien" in item.split('class="sel-draw"')[0]
     assert "l’occurrence est acceptée" in item or "l'occurrence est acceptée" in item  # les mots de la console
@@ -176,7 +176,7 @@ def test_episodes_read_day_by_day_after_her_last_hours(world):  # noqa: F811
     for kind, outcome, detail in ((Kind.STEP, "done", "Les supports sont prêts."),
                                   (Kind.TASK, "failed", "Le service n’a pas répondu.")):
         append(client, kernel, [rt.EPISODE_ENDED.draft(kind=kind, outcome=outcome, detail=detail)])
-    page = drawn(client, "/inspecteur/decisions/episodes")
+    page = drawn(client, "/admin/decisions/episodes")
     activity = page.split('class="now-card eps-activity"')[1].split("</section>")[0]
     assert "Ces dernières 24 heures" in activity and "échec" in activity and "Ses quatorze jours" in activity
     assert activity.count("<rect") == 14  # une barre par jour
@@ -185,12 +185,12 @@ def test_episodes_read_day_by_day_after_her_last_hours(world):  # noqa: F811
     assert 'class="failed"' in failed and "Tâche silencieuse" in failed
     assert feed.index("Le service n’a pas répondu.") < feed.index("Les supports sont prêts.")  # le plus récent d'abord
     # le lien vers un épisode a un seul nom, sous En cours comme ici (un épisode en cours n'a pas encore de résultat)
-    assert "Comprendre →" in feed and "Comprendre le résultat" not in page and 'href="/inspecteur/episode/' in feed
-    assert "Comprendre →" in drawn(client, "/inspecteur/decisions/en_cours")
+    assert "Comprendre →" in feed and "Comprendre le résultat" not in page and 'href="/admin/episode/' in feed
+    assert "Comprendre →" in drawn(client, "/admin/decisions/en_cours")
     # ses filtres se nomment avec une majuscule, comme ceux des pages sœurs ; leurs clés ne changent pas
     labels = re.findall(r'<label>(\w+)\s*<(?:select|input) name="(\w+)"', page)
     assert ("Sorte", "sorte") in labels and ("Issue", "issue") in labels and ("Vers", "cible") in labels
-    none = drawn(client, "/inspecteur/decisions/episodes?issue=cancelled")
+    none = drawn(client, "/admin/decisions/episodes?issue=cancelled")
     assert "Aucun épisode ne correspond" in none
 
 
@@ -200,7 +200,7 @@ def test_deadlines_are_ranged_by_horizon_and_what_fails_comes_first(world):  # n
     sched = kernel.scheduler
     name = sched.specs[0].name
     sched.consecutive[name] = PROCESS_FAILURES_MAX
-    page = drawn(client, "/inspecteur/decisions/echeances")
+    page = drawn(client, "/admin/decisions/echeances")
     assert re.search(r'class="now-num">\d+</span> processus', page) and "aucun ne tourne en ce moment" in page
     failing = page.split('class="now-card due-failing"')[1].split("</section>")[0]
     assert "Échouent d’affilée" in failing and f"{PROCESS_FAILURES_MAX} d'affilée" in failing
@@ -221,14 +221,14 @@ def test_deadlines_read_the_deadline_the_scheduler_kept_and_never_draw_for_the_a
     sched, arbiter = kernel.scheduler, kernel.arbiter
     arbiter.invalidate()
     draws = arbiter.draws
-    drawn(client, "/inspecteur/decisions/echeances")
+    drawn(client, "/admin/decisions/echeances")
     assert (arbiter.draws, arbiter.next_at) == (draws, None), "une page de lecture ne tire rien"
     # une seule échéance retenue, dans vingt minutes : elle seule est « dans l'heure », à son heure ; le reste, rien —
     # y compris un processus retenu à jamais (``2**62``, comme l'aperçu les retient), qu'aucune date ne dit
     soon, held = sched.specs[-1].name, sched.specs[0].name
     at = now + 20 * MINUTE + 30 * US
     monkeypatch.setattr(sched, "due", {soon: at, held: 2**62}.get)
-    page = drawn(client, "/inspecteur/decisions/echeances")
+    page = drawn(client, "/admin/decisions/echeances")
     groups = [g.strip() for g in re.findall(r'class="due-group-head">([^<]+)<', page)]
     assert groups == ["Dans l'heure", "Rien de prévu"]
     head = page.index('class="due-group h-soon"')
@@ -245,13 +245,13 @@ def test_deadlines_show_a_lane_only_when_it_says_something(world):  # noqa: F811
     client, live, _ = world
     kernel, _ = _life(client, live)
     sched = kernel.scheduler
-    page = drawn(client, "/inspecteur/decisions/echeances")  # sa première page : 25 processus
+    page = drawn(client, "/admin/decisions/echeances")  # sa première page : 25 processus
     shown = [s for s in sched.specs if _items(page, s.name)]
     night = next(s.name for s in shown if s.lane == NIGHT_LANE)
     plain = [s.name for s in shown if s.lane != NIGHT_LANE]
     assert len(plain) > 1
     sched.consecutive[night] = PROCESS_FAILURES_MAX  # en tête, parmi ce qui échoue : la même ligne, deux fois
-    page = drawn(client, "/inspecteur/decisions/echeances")
+    page = drawn(client, "/admin/decisions/echeances")
     assert "voie fond" not in page and "voie arbitre" not in page
     assert len(_items(page, night)) == 2 and all("· voie nuit (une à la fois)" in x for x in _items(page, night))
     assert all("voie" not in x for name in plain for x in _items(page, name))

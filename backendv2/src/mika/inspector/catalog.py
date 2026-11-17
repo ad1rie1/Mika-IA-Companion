@@ -55,7 +55,7 @@ class NavGroup:
 
 @dataclass(frozen=True, slots=True)
 class MenuLink:
-    """Une entrée visible, vers une page existante (chemin relatif à /inspecteur/)."""
+    """Une entrée visible, vers une page existante (chemin relatif à /admin/)."""
 
     label: str
     target: str
@@ -314,7 +314,7 @@ def destinations(nav: Sequence[NavGroup]) -> dict[str, Destination]:
 
 
 def menu_place(menu: Sequence[MenuGroup], nav: Sequence[NavGroup], target: str) -> tuple[int, int, str] | None:
-    """Le lien du menu qui mène à une page (``target`` : « destination/onglet », relatif à /inspecteur/) :
+    """Le lien du menu qui mène à une page (``target`` : « destination/onglet », relatif à /admin/) :
     ``(rubrique, lien, route)``, ``route`` étant l'adresse du lien qui la couvre. Le plus précis gagne (une page dont
     l'adresse prolonge celle du lien, par « / » ou par « - », lui appartient) ; à précision égale, le lien de la
     rubrique où sa destination est rangée — Système › Journaux mène à l'historique des réglages, qui reste dans

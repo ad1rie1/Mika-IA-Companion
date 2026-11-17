@@ -52,12 +52,18 @@ from mika.runtime.boundary import Failed, call
 
 __all__ = ["Pages"]
 
+#: l'ancienne adresse de toute la console (ADR 0237) : ce qui est dessous mène à la même page sous ``PREFIX``
+OLD_PREFIX = "/inspecteur"
+OLD_METHODS = ["GET", "HEAD", "POST"]
+
 #: les anciennes adresses de l'inspecteur → la console
 MOVED = {"chronologie": "systeme/chronologie", "etat": "systeme/etat", "contributions": "systeme/contributions",
          "sante": "systeme/sante", "appels": "systeme/appels", "rapports": "systeme/simulations",
          "facultes": "systeme/vues", "modeles": "reglages/fournisseurs", "persona": "reglages/identite",
          "parametres": "reglages/comportement", "forge": "apps",
-         "comptes": "reglages/comptes"}
+         "comptes": "reglages/comptes",
+         # l'adresse courte de ses souvenirs (ADR 0237)
+         "souvenirs": "memoire/souvenirs"}
 
 
 #: les anciens onglets qui ont pris leur propre place (la requête suit)
@@ -97,6 +103,14 @@ JOURNAL = "systeme/chronologie"
 
 def dest_url(key: str) -> str:
     return f"{PREFIX}/{key}"
+
+
+async def old_prefix(request: Request) -> Response:
+    """Une adresse sous l'ancien préfixe (ADR 0237) : la même sous ``PREFIX``. 308 : la méthode et le corps suivent
+    (un formulaire resté ouvert s'enregistre encore), la requête aussi."""
+    query = request.url.query
+    return RedirectResponse(f"{PREFIX}/{request.path_params.get('rest', '')}" + (f"?{query}" if query else ""),
+                            status_code=308)
 
 
 class Pages(Actions):
@@ -596,6 +610,9 @@ class Pages(Actions):
             Route(PREFIX + "/reglages/canaux/regler", g(self.canals), methods=["POST"]),
             Route(PREFIX + "/facultes/{owner:str}/{name:str}", g(self.view)),
             *Subjects(self).routes(),
+            # sans garde : la page d'arrivée a la sienne
+            Route(OLD_PREFIX, old_prefix, methods=OLD_METHODS),
+            Route(OLD_PREFIX + "/{rest:path}", old_prefix, methods=OLD_METHODS),
         ]
 
     def catchall(self) -> list[Route]:

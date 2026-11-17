@@ -41,13 +41,13 @@ def test_a_belief_shows_its_trust_and_origin_and_a_replaced_one_fades(world):  #
     append(client, kernel, [memory.BELIEVED.draft(text=Content.of("Alice préfère le café serré."), about=("alice",),
                                                   origin=memory.TOLD, source="alice", confidence=0.9, replaces=old)],
            "memory")
-    page = drawn(client, "/inspecteur/memoire/croyances")
+    page = drawn(client, "/admin/memoire/croyances")
     new = _between(page, "Alice préfère le café serré.", "</li>")
     before = page.split("Alice préfère le café serré.")[0].rsplit("<li class=", 1)[1]
     # sa confiance d'abord, en chiffre et en jauge ; son origine et qui la lui a dite ; ce qu'elle remplace
     assert 'class="belief-trust-value now-num">90\u202f%<' in before and "now-bar confidence" in before
     assert 'belief-origin o-told">on le lui a dit<' in new and "par Alice" in new
-    assert f"/inspecteur/evenement/{old}" in _between(new, 'class="belief-replaces"', "</span>")
+    assert f"/admin/evenement/{old}" in _between(new, 'class="belief-replaces"', "</span>")
     replaced = page.split("Alice préfère le thé.")[0].rsplit("<li class=", 1)[1]
     assert "faded" in replaced and "40\u202f%" in replaced
     assert "o-inferred" in _between(page, "Alice préfère le thé.", "</li>")
@@ -72,9 +72,9 @@ def test_what_she_held_before_fades_and_an_ended_situation_says_so_in_words(worl
         memory.EVENT_NOTED.draft(text=Content.of("Le stage d'Alice."), when=now - 2 * DAY, about=("alice",),
                                  ongoing=True)], "memory").seqs[0]
     append(client, kernel, [memory.SITUATION_ENDED.draft(event=situation)], "memory")
-    card = _card(drawn(client, "/inspecteur/memoire/moments"), "Le déménagement d'Alice.")
+    card = _card(drawn(client, "/admin/memoire/moments"), "Le déménagement d'Alice.")
     assert card.count(">finie<") == 1 and "ended" not in card and "faded" not in card.split(">", 1)[0]
-    ended = drawn(client, "/inspecteur/memoire/moments?status=ended")
+    ended = drawn(client, "/admin/memoire/moments?status=ended")
     assert "Le déménagement d'Alice." in ended and "Le stage d'Alice." not in ended and "inconnu" not in ended
 
     kept, joined = append(client, kernel, [
@@ -83,10 +83,10 @@ def test_what_she_held_before_fades_and_an_ended_situation_says_so_in_words(worl
         memory.BELIEVED.draft(text=Content.of("Alice adore marcher en montagne."), about=("alice",),
                               origin=memory.TOLD, source="alice", confidence=0.7)], "memory").seqs
     append(client, kernel, [memory.JOINED.draft(night="2026-11-12", pairs=((kept, joined),), mute=True)], "memory")
-    beliefs = drawn(client, "/inspecteur/memoire/croyances")
+    beliefs = drawn(client, "/admin/memoire/croyances")
     assert "faded" in _card(beliefs, "Alice adore marcher").split(">", 1)[0]
     assert "faded" not in _card(beliefs, "Alice aime la randonnée").split(">", 1)[0]
-    found = drawn(client, "/inspecteur/memoire/croyances?status=joined")
+    found = drawn(client, "/admin/memoire/croyances?status=joined")
     assert "Alice adore marcher" in found and "Alice aime la randonnée" not in found and "inconnu" not in found
     assert "jointe à une autre" in _card(found, "Alice adore marcher")
 
@@ -95,7 +95,7 @@ def test_what_she_held_before_fades_and_an_ended_situation_says_so_in_words(worl
         memory.REMEMBERED.draft(text=Content.of("Alice a gagné son tournoi d'échecs !"), about=("alice",))],
         "memory").seqs
     append(client, kernel, [memory.NIGHT_SORTED.draft(night="2026-11-12", merges=((first, merged),))], "memory")
-    memories = drawn(client, "/inspecteur/memoire/souvenirs")
+    memories = drawn(client, "/admin/memoire/souvenirs")
     cards = [li for li in memories.split("<li class=")[1:] if "tournoi d'échecs" in li]
     assert len(cards) == 2 and sum("faded" in li.split(">", 1)[0] for li in cards) == 1
     assert "fondu dans un autre" in next(li for li in cards if "faded" in li.split(">", 1)[0])
@@ -111,13 +111,13 @@ def test_a_filter_has_one_empty_choice_that_says_what_it_does(world):  # noqa: F
     « Tous » sans défaut ; « Par défaut (…) » quand le filtre en a un."""
     client, live, _ = world
     _life(client, live)
-    pieces = _select(drawn(client, "/inspecteur/memoire/recues"), "sorte")
+    pieces = _select(drawn(client, "/admin/memoire/recues"), "sorte")
     assert pieces.count('<option value=""') == 1 and '<option value="" selected>toutes</option>' in pieces
-    beliefs = drawn(client, "/inspecteur/memoire/croyances")
+    beliefs = drawn(client, "/admin/memoire/croyances")
     assert _select(beliefs, "status").count('<option value=""') == 1
     assert '<option value="">Tous</option>' in _select(beliefs, "status")
     assert 'placeholder="un nom"' in beliefs and "par défaut" not in _select(beliefs, "status").casefold()
-    projects = _select(drawn(client, "/inspecteur/projets/tous"), "etat")
+    projects = _select(drawn(client, "/admin/projets/tous"), "etat")
     assert projects.count('<option value=""') == 1 and '<option value="">Par défaut (actifs et en pause)</option>' \
         in projects and '<option value="vivants" selected>' in projects
 
@@ -133,7 +133,7 @@ def test_promises_that_bind_her_come_first_with_their_deadline_then_kept_and_dro
     ], "memory").seqs
     append(client, kernel, [memory.PROMISE_RESOLVED.draft(promise=made[2], status=memory.HONORED),
                             memory.PROMISE_RESOLVED.draft(promise=made[3], status=memory.DROPPED)], "memory")
-    page = drawn(client, "/inspecteur/memoire/promesses")
+    page = drawn(client, "/admin/memoire/promesses")
     engaged = _between(page, 'id="promises-open"', 'class="promises-done"')
     assert "Envoyer la recette" in engaged and "Relire le dossier" in engaged and "Trouver un titre" not in engaged
     late = engaged.split("Envoyer la recette")[0].rsplit("<li class=", 1)[1]
@@ -141,7 +141,7 @@ def test_promises_that_bind_her_come_first_with_their_deadline_then_kept_and_dro
     assert "en retard" not in engaged.split("Relire le dossier")[0].rsplit("<li class=", 1)[1]
     assert "Trouver un titre" in _between(page, 'id="promises-kept"', "</section>")
     assert "Rappeler le libraire" in _between(page, 'id="promises-dropped"', "</section>")
-    pending = drawn(client, "/inspecteur/memoire/promesses?status=pending")
+    pending = drawn(client, "/admin/memoire/promesses?status=pending")
     assert 'id="promises-open"' in pending and 'id="promises-kept"' not in pending
 
 
@@ -159,25 +159,25 @@ def test_a_label_renamed_in_the_view_files_nothing_elsewhere(world, monkeypatch)
                                    memory.PROMISE_NOTICED.draft(text=Content.of("Relire le dossier."), to="alice")],
                   "memory").seqs
     append(client, kernel, [memory.PROMISE_RESOLVED.draft(promise=made[0], status=memory.HONORED)], "memory")
-    page = drawn(client, "/inspecteur/memoire/promesses")
+    page = drawn(client, "/admin/memoire/promesses")
     assert "Trouver un titre" in _between(page, 'id="promises-kept"', "</section>")
     assert "Trouver un titre" not in _between(page, 'id="promises-open"', 'class="promises-done"')
     assert "Relire le dossier" in _between(page, 'id="promises-open"', 'class="promises-done"')
 
     append(client, kernel, [memory.BELIEVED.draft(text=Content.of("Alice joue du violoncelle."), about=("alice",),
                                                   origin=memory.TOLD, source="alice", confidence=0.8)], "memory")
-    beliefs = drawn(client, "/inspecteur/memoire/croyances")
+    beliefs = drawn(client, "/admin/memoire/croyances")
     belief = _card(beliefs, "Alice joue du violoncelle.")
     assert 'belief-origin o-told"' in belief and "par Alice" in belief and "o-other" not in belief
     table = re.search(r'<a href="([^"]+)"[^>]*>Tableau</a>', beliefs)
-    assert table and "on le lui a confié (Alice)" in drawn(client, "/inspecteur/memoire/croyances" + table[1])
+    assert table and "on le lui a confié (Alice)" in drawn(client, "/admin/memoire/croyances" + table[1])
 
     message = append(client, kernel, [rt.PERCEPTION_RECEIVED.draft(handle="alice", channel="web", addressed=True,
                                                                    text=Content.of("Tiens."))]).seqs[0]
     append(client, kernel, [attachments.KEPT.draft(
         file="c" * 32, message=message, handle="alice", name=Content.of("plan.png"), mime="image/png", size=1_000,
         kind=attachments.IMAGE, read=True, about=("alice",), seen=Content.of("Un plan."))], "attachments")
-    piece = _card(drawn(client, "/inspecteur/memoire/recues"), "plan.png")
+    piece = _card(drawn(client, "/admin/memoire/recues"), "plan.png")
     assert piece.startswith('"memories-item piece k-image') and 'title="image fixe"' in piece
 
 
@@ -194,7 +194,7 @@ def test_the_lives_of_others_read_as_an_agenda(world):  # noqa: F811
                                  yearly=True, festive=True),
     ], "memory").seqs
     append(client, kernel, [memory.RESOLVED.draft(event=noted[3], outcome=memory.HAPPENED, by="alice")], "memory")
-    page = drawn(client, "/inspecteur/memoire/moments")
+    page = drawn(client, "/admin/memoire/moments")
     assert page.index('id="moments-current"') < page.index('id="moments-ahead"') < page.index('id="moments-past"')
     assert "Le chat d'Alice" in _between(page, 'id="moments-current"', 'id="moments-ahead"')
     ahead = _between(page, 'id="moments-ahead"', 'id="moments-past"')
@@ -219,7 +219,7 @@ def test_a_moment_long_past_still_says_how_it_turned_out(world):  # noqa: F811
     append(client, kernel, [memory.EVENT_NOTED.draft(text=Content.of("Le déménagement d'Alice."), when=now + DAY,
                                                      about=("alice",))], "memory")
     assert old not in kernel.mind.frame().state("memory").events  # hors de la tranche : seule l'archive le sait
-    past = _between(drawn(client, "/inspecteur/memoire/moments"), 'id="moments-past"')
+    past = _between(drawn(client, "/admin/memoire/moments"), 'id="moments-past"')
     concert = next(li for li in past.split("<li class=") if "Le concert d'Alice" in li)
     assert "annulé" in concert
 
@@ -233,7 +233,7 @@ def test_the_pieces_still_being_read_are_counted_in_words(world):  # noqa: F811
         append(client, kernel, [rt.PERCEPTION_RECEIVED.draft(
             handle="alice", channel="web", addressed=True, text=Content.of("Tiens."),
             attachments=(rt.AttachmentMeta(name=f"{file[:4]}.png", kind="image", mime="image/png", file=file),))])
-        return drawn(client, "/inspecteur/memoire/recues")
+        return drawn(client, "/admin/memoire/recues")
 
     page = receive("d" * 32)
     assert "1 pièce reçue en cours de lecture (elle apparaît ici une fois lue)." in page and "pièce(s)" not in page
@@ -258,10 +258,10 @@ def test_received_pieces_show_what_she_read_and_their_place(world):  # noqa: F81
                                mime="audio/ogg", size=80_000, kind=attachments.AUDIO, about=("alice",)),
     ], "attachments")
     append(client, kernel, [attachments.LINKED.draft(file="a" * 32, item=known)], "attachments")
-    page = drawn(client, "/inspecteur/memoire/recues")
+    page = drawn(client, "/admin/memoire/recues")
     poster = _between(page, "affiche.png", "</li>")
     assert "Une affiche violette pour une exposition." in _between(poster, "piece-seen", "</div></div>")
-    assert "relié à 1 élément" in poster and "onglet=liens" in poster and "/inspecteur/telecharger/piece/" in poster
+    assert "relié à 1 élément" in poster and "onglet=liens" in poster and "/admin/telecharger/piece/" in poster
     voice = _between(page, "vocal.ogg", "</li>")
     assert "gardée, pas lue" in voice and "Rien n’a pu en être lu" in voice
     assert 'class="memories-item piece k-image' in page and 'class="memories-item piece k-audio' in page
@@ -271,8 +271,8 @@ def test_received_pieces_show_what_she_read_and_their_place(world):  # noqa: F81
     assert "Alice" in row and "now-bar place" in row and "2 pièces" in row and "onglet=pieces" in row
     assert "Place de chacun" in page and "2,00 Go" in page
     assert "pour 1 personne" in page and "personne(s)" not in page  # le compte s'accorde (C2-09)
-    moved = client.get("/inspecteur/memoire/place", follow_redirects=False)
-    assert moved.status_code == 301 and moved.headers["location"] == "/inspecteur/memoire/recues#pieces-place"
+    moved = client.get("/admin/memoire/place", follow_redirects=False)
+    assert moved.status_code == 301 and moved.headers["location"] == "/admin/memoire/recues#pieces-place"
 
 
 def test_seeing_ahead_scales_her_expectations_and_who_keeps_their_word(world):  # noqa: F811
@@ -288,7 +288,7 @@ def test_seeing_ahead_scales_her_expectations_and_who_keeps_their_word(world):  
         memory.RESOLVED.draft(event=noted[1], outcome=memory.CANCELLED, by="alice", likelihood=0.9,
                               nature=memory.FIRST_HAND, teller="alice"),
     ], "memory")
-    page = drawn(client, "/inspecteur/memoire/voir-venir")
+    page = drawn(client, "/admin/memoire/voir-venir")
     expected = _between(page, 'id="ahead-expected"', 'id="ahead-tellers"')
     # (0,9 − 1)² et (0,9 − 0)² : 0,41 en moyenne, au-delà de pile ou face
     assert "de la bouche de la personne" in expected and "0,410" in expected and 'ahead-scale danger' in expected
@@ -304,15 +304,15 @@ def test_consolidation_says_where_rereading_is_and_a_page_opens_its_subtab(world
                                                                   text=Content.of("Un message à relire."))]).seqs[0]
     append(client, kernel, [memory.EXTRACTION_DEFERRED.draft(key=source, messages=(source,), status="review",
         attempts=3, failure_code="provider_error", detail=Content.of("Le modèle n'a pas répondu."))], "memory")
-    page = drawn(client, "/inspecteur/memoire/consolidation")
+    page = drawn(client, "/admin/memoire/consolidation")
     assert "Rien n’est encore relu" in _between(page, 'class="consol-lede"', "</p>")
     band = _between(page, 'class="person-tiles-list"', "</ul>")
-    assert 'href="/inspecteur/memoire/souvenirs"' in band and "À reprendre" in band
+    assert 'href="/admin/memoire/souvenirs"' in band and "À reprendre" in band
     assert '<li class="warn">' in band  # un passage à reprendre : la bande le signale
     queue = _between(page, 'id="consol-queue"', 'id="consol-runs"')
     assert "Erreur du fournisseur" in queue and "3 essais" in queue and "Reprendre cette extraction" in queue
     assert 'href="#consol-queue" class="warn"' in page
-    panes = drawn(client, "/inspecteur/memoire/consolidation?avant=1").split('class="hm-subpanes"')[1]
+    panes = drawn(client, "/admin/memoire/consolidation?avant=1").split('class="hm-subpanes"')[1]
     assert panes.index('id="consol-runs"') < panes.index('id="consol-queue"')
 
 
@@ -326,7 +326,7 @@ def test_a_conversation_received_on_the_phone_waits_in_the_queue_with_its_action
     detail = Content.of('{"issues": ["croyances[1]: missing"], "output": "[{\\"croyances\\": []}]"}', level=3)
     append(client, kernel, [memory.EXTRACTION_DEFERRED.draft(key=seq, source=memory.FROM_RELAYED, messages=(seq,),
         about=("alice",), status="review", failure_code="invalid_items", detail=detail)], "memory")
-    queue = _between(drawn(client, "/inspecteur/memoire/consolidation"), 'id="consol-queue"', 'id="consol-runs"')
+    queue = _between(drawn(client, "/admin/memoire/consolidation"), 'id="consol-queue"', 'id="consol-runs"')
     assert f"conversation reçue sur le téléphone, message n° {seq}" in queue
     assert "Éléments extraits invalides" in queue and "à examiner" in queue and "Détail du passage" in queue
     assert "Reprendre cette extraction" in queue and f'name="key" value="{seq}"' in queue
@@ -340,7 +340,7 @@ def test_a_new_memory_says_each_tab_is_empty(world):  # noqa: F811
                       ("recues", "aucune pièce gardée."), ("envoyes", "elle n'a encore envoyé aucun fichier."),
                       ("voir-venir", "aucun moment constaté encore."),
                       ("consolidation", "pas encore de relecture."), ("consolidation", "pas encore de nuit relue.")):
-        page = drawn(client, f"/inspecteur/memoire/{tab}")
+        page = drawn(client, f"/admin/memoire/{tab}")
         assert f'data-tab="memoire/{tab}"' in page and says in page, tab
 
 
@@ -360,24 +360,24 @@ def test_a_night_reread_shows_what_she_kept_and_what_the_night_joined_or_confron
     done = append(client, kernel, [memory.REREAD.draft(night="2026-11-12", upto=b[0], readings=3, pairs=2,
                                                        produced=4, call_id="nuit#0", model="haiku")],
                   "memory").seqs[0]
-    page = drawn(client, "/inspecteur/memoire/consolidation")
+    page = drawn(client, "/admin/memoire/consolidation")
     assert 'href="#consol-rereads">Lectures de la nuit<' in page
     rereads = _between(page, 'id="consol-rereads"', 'id="consol-state"')
     night, before = _between(rereads, "12 nov.", "</li>"), _between(rereads, "10 nov.", "</li>")
     assert 'now-num">3</span> lectures relues' in night and 'now-num">2</span> paires confrontées' in night
     assert 'now-num">4</span> éléments retenus' in night and "haiku" in night
-    assert f"/inspecteur/evenement/{done}" in night
+    assert f"/admin/evenement/{done}" in night
     # en détail, ce que la même nuit a réuni (jugé la même chose par la relecture) ou confronté, vers les croyances
     detail = _between(night, "Ce que la nuit a réuni ou confronté")
     assert "jugées la même chose par la relecture, sans être les mêmes mots" in detail and "emporte sur" in detail
-    assert all(f"/inspecteur/evenement/{n}" in detail for n in b[:4])
-    assert f"/inspecteur/evenement/{b[4]}" not in detail  # la jointure d'une autre nuit reste à sa nuit
+    assert all(f"/admin/evenement/{n}" in detail for n in b[:4])
+    assert f"/admin/evenement/{b[4]}" not in detail  # la jointure d'une autre nuit reste à sa nuit
     # une nuit relue avant ``produced`` ne dit pas ce qu'elle a retenu, et sans appel, pas de modèle
     assert "retenu" not in before and "sans appel au modèle" in before
-    assert f"/inspecteur/evenement/{b[4]}" in before
+    assert f"/admin/evenement/{b[4]}" in before
     state = _between(page, 'id="consol-state"')
     assert "dernière nuit relue" in state and "2026-11-12" in state
     # une page plus ancienne de la liste ouvre son sous-onglet
-    panes = drawn(client, f"/inspecteur/memoire/consolidation?avant_lectures={done}").split(
+    panes = drawn(client, f"/admin/memoire/consolidation?avant_lectures={done}").split(
         'class="hm-subpanes"')[1]
     assert panes.index('id="consol-rereads"') < panes.index('id="consol-queue"')

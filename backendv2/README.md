@@ -32,7 +32,7 @@ serveur par dossier : un second est refusé.
 
 ## 3. La console : ton compte, puis un modèle
 
-Ouvre `http://127.0.0.1:8001/` (qui mène à `/inspecteur/`).
+Ouvre `http://127.0.0.1:8001/` (qui mène à `/admin/`).
 
 1. **Le compte opérateur.** Sans aucun compte, la page de connexion le crée :
    le premier compte est opérateur — il ouvre la console et le chat. Depuis
@@ -116,7 +116,7 @@ Connecte-toi avec le compte créé à l'étape 3, et parle-lui.
   › Teams ; ou `python -m mika teams key`) et colle-la dans
   l'extension. Ses réponses sont posées dans Teams pour que tu les envoies, ou
   partent après ton accord, ou seules — selon le mode (ADR 0069).
-- **L'accueil de la console** (`/inspecteur/`) dit ce qui attend ton attention ;
+- **L'accueil de la console** (`/admin/`) dit ce qui attend ton attention ;
   « Pourquoi a-t-elle dit ça ? » s'ouvre depuis chacune de ses paroles. La carte
   de la console est dans `docs/console-carte.md`.
 - **Tout se règle aussi en ligne de commande** : `python -m mika --help`.

@@ -26,9 +26,9 @@ from mika.vocab.canals import CanalRule, CanalTable
 from tests.protocol.test_console_mcp import html_of, submit
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 
-PAGE = "/inspecteur/reglages/droits"
-CANALS = "/inspecteur/reglages/canaux"
-FAMILIES = "/inspecteur/outils/tous"
+PAGE = "/admin/reglages/droits"
+CANALS = "/admin/reglages/canaux"
+FAMILIES = "/admin/outils/tous"
 
 
 class _Sent(HTMLParser):
@@ -94,8 +94,8 @@ def test_the_rights_page_and_a_projects_access_tab(world):  # noqa: F811
     for pane in ("d-vie", "d-forge", "d-services", "d-projets", "d-canaux", "d-code"):
         assert f'href="#{pane}"' in page and f'id="{pane}" data-pane' in page, pane
     assert 'id="r-memory"' in page and 'id="r-project-' in page
-    home = html_of(client.get("/inspecteur"))
-    assert 'href="/inspecteur/reglages/droits"' in home and "/inspecteur/outils/droits" not in home  # menu Réglages
+    home = html_of(client.get("/admin"))
+    assert 'href="/admin/reglages/droits"' in home and "/admin/outils/droits" not in home  # menu Réglages
     # les droits exacts : toi par le chat web — jamais réglé : toi, tout, par sa ligne
     mine = html_of(client.get(PAGE, params={"qui": "toi", "canal": "web:prive"}))
     assert "Droits exacts" in mine and "piloter projet : modification" in mine and "ligne 1" in mine
@@ -107,11 +107,11 @@ def test_the_rights_page_and_a_projects_access_tab(world):  # noqa: F811
     # le détail des accès d'un projet : son tableau, « Modifier » vers sa fiche, « Retour »
     shown = html_of(client.get(PAGE, params={"detail": f"project:{pid}"}))
     assert "Le projet « Le site »" in shown and "Comportement par défaut" in shown and "← Retour" in shown
-    assert f'href="/inspecteur/fiche/project/{pid}?onglet=acces"' in shown and "Modifier" in shown
+    assert f'href="/admin/fiche/project/{pid}?onglet=acces"' in shown and "Modifier" in shown
     assert f'href="?#r-project-{pid}"' in shown  # « Retour » ramène à sa ligne, dans son sous-onglet
     # l'onglet « Accès » du projet, dessiné, sa ligne d'avant réglage cochée comme elle vaut ; ajouter : une ligne
     # fermée, enregistrée (le navigateur envoie ce qui est coché, le test le dit)
-    tab = html_of(client.get(f"/inspecteur/fiche/project/{pid}", params={"onglet": "acces"}))
+    tab = html_of(client.get(f"/admin/fiche/project/{pid}", params={"onglet": "acces"}))
     assert "Accès au projet" in tab and "+ Ajouter un accès" in tab and "Jamais réglés" in tab
     assert 'name="qui.1|proprietaire" checked' in tab and 'name="canal.2|interne" checked' in tab
     assert 'name="qui.2|elle" checked' in tab  # elle seule : elle, cochée par son nom (ADR 0184), plus un « qui » caché
@@ -126,7 +126,7 @@ def test_the_rights_page_and_a_projects_access_tab(world):  # noqa: F811
     view = next(v for v in live.kernel.mind.frame().get(c.LIVE) if v.id == pid)
     assert view.access == (*c.UNSET, c.ProjectAccess(who=(OWNER,))) and view.default_access == c.CLOSED
     # retirer la première : restent elle seule, et la ligne fermée
-    tab = html_of(client.get(f"/inspecteur/fiche/project/{pid}", params={"onglet": "acces"}))
+    tab = html_of(client.get(f"/admin/fiche/project/{pid}", params={"onglet": "acces"}))
     closed_row = {"qui.3|proprietaire": "on", "toujours.3": "on", "piloter.3": "non", "lecture.3": "non",
                   "action.3": "non", "tous.3": "on"}
     removed = submit(client, tab, "projects.acces", faire="retirer:1", **shown, **closed_row)
@@ -176,7 +176,7 @@ def test_a_rights_table_shows_what_is_saved_and_saving_it_unchanged_keeps_it(wor
     client.portal.call(live.settings.save_family, "memory", memory)
     page = html_of(client.get(FAMILIES, params={"famille": "memory"}))
     assert '<option value="non" selected>' in form_of(page, "t-memory")
-    assert client.post("/inspecteur/outils/familles/regler", data=sent(page, "t-memory")).status_code == 200
+    assert client.post("/admin/outils/familles/regler", data=sent(page, "t-memory")).status_code == 200
     assert client.portal.call(live.settings.families)["memory"] == memory
 
 
@@ -269,8 +269,8 @@ def test_the_composition_gives_the_tables_what_they_show(world, monkeypatch):  #
     monkeypatch.setattr(registry, "tools", {
         **registry.tools, **{bundle: replace(model, name=bundle, bundle=bundle)
                              for bundle in ("mcp.meteo", "forge_apps.recettes", "ailleurs.rien")}})
-    for lot, href in (("mcp.meteo", "/inspecteur/fiche/serveur/meteo?onglet=fait"),
-                      ("forge_apps.recettes", "/inspecteur/fiche/app/recettes?onglet=acces")):
+    for lot, href in (("mcp.meteo", "/admin/fiche/serveur/meteo?onglet=fait"),
+                      ("forge_apps.recettes", "/admin/fiche/app/recettes?onglet=acces")):
         assert f'<a href="{href}">' in html_of(client.get(FAMILIES, params={"lot": lot})), lot
     assert "ses droits se règlent sur sa fiche —" in html_of(client.get(FAMILIES, params={"lot": "ailleurs.rien"}))
 

@@ -20,26 +20,26 @@ from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture p
 
 APP = Path(handmade.__file__).parents[1]
 PLACES = {"rss/flux": "sens/flux"}
-ENV = render.Env(when=str, now=0, views=PLACES, settings={"teams": "/inspecteur/teams/parametres"}.get)
+ENV = render.Env(when=str, now=0, views=PLACES, settings={"teams": "/admin/teams/parametres"}.get)
 
 
 # ── une vue : son onglet, tout droit ──
 
 
 def test_a_view_goes_straight_to_its_tab():
-    assert render.href(Ref.view("rss", "flux", "Flux", flux="a b"), ENV) == "/inspecteur/sens/flux?flux=a+b"
+    assert render.href(Ref.view("rss", "flux", "Flux", flux="a b"), ENV) == "/admin/sens/flux?flux=a+b"
 
 
 def test_a_view_keeps_a_parameter_named_like_an_argument():
     """Une vue relaie ce qu'il y a dans l'adresse : « ?name= » ne doit pas faire tomber la page."""
     got = render.href(Ref.view("rss", "flux", "Flux", **{"owner": "a", "name": "b", "text": "c"}), ENV)
-    assert got == "/inspecteur/sens/flux?owner=a&name=b&text=c"
+    assert got == "/admin/sens/flux?owner=a&name=b&text=c"
 
 
 def test_a_link_says_where_to_come_back_and_the_console_writes_it():
     back = Ref.view("rss", "flux", "", flux="a b")
     got = Ref.settings("teams", "Modifier", cle="k").back_to(back)
-    assert render.href(got, ENV) == "/inspecteur/teams/parametres?cle=k&retour=%2Finspecteur%2Fsens%2Fflux%3Fflux%3Da%2Bb"
+    assert render.href(got, ENV) == "/admin/teams/parametres?cle=k&retour=%2Fadmin%2Fsens%2Fflux%3Fflux%3Da%2Bb"
 
 
 def test_a_link_without_a_way_back_says_none():
@@ -48,7 +48,7 @@ def test_a_link_without_a_way_back_says_none():
 
 @pytest.mark.parametrize("env", [ENV, None], ids=["cachée", "sans carte"])
 def test_a_view_without_a_place_stays_under_its_general_address(env):
-    assert render.href(Ref.view("rss", "cachee", "x"), env) == "/inspecteur/facultes/rss/cachee"
+    assert render.href(Ref.view("rss", "cachee", "x"), env) == "/admin/facultes/rss/cachee"
 
 
 def test_every_block_finds_the_place_of_a_view():
@@ -65,11 +65,11 @@ def test_every_block_finds_the_place_of_a_view():
 def test_a_view_link_is_what_its_general_address_led_to(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
-    page = html.unescape(client.get("/inspecteur/systeme/vues").text)
+    page = html.unescape(client.get("/admin/systeme/vues").text)
     placed = [v for v in live.kernel.registry.inspectors if v.section and not v.hidden]
     assert placed
     for v in placed:
-        old = f"/inspecteur/facultes/{v.owner}/{v.name}"
+        old = f"/admin/facultes/{v.owner}/{v.name}"
         moved = client.get(old, follow_redirects=False)
         assert moved.status_code == 303, old
         assert f'href="{moved.headers["location"]}"' in page, old
@@ -79,29 +79,29 @@ def test_a_view_link_is_what_its_general_address_led_to(world):  # noqa: F811
 def test_the_vitals_of_every_page_take_no_detour(world):  # noqa: F811
     client, _, _ = world
     bootstrap(client)
-    assert "/inspecteur/facultes/" not in client.get("/inspecteur/").text
+    assert "/admin/facultes/" not in client.get("/admin/").text
 
 
 # ── ce qui n'est ni une vue ni une fiche ──
 
 
 def test_a_settings_page_is_named_and_the_console_knows_where_it_lives():
-    assert render.href(Ref.settings("teams", "x", compte="b c"), ENV) == "/inspecteur/teams/parametres?compte=b+c"
+    assert render.href(Ref.settings("teams", "x", compte="b c"), ENV) == "/admin/teams/parametres?compte=b+c"
 
 
 def test_a_settings_page_without_the_map_goes_under_settings_which_redirects():
-    assert render.href(Ref.settings("appareils", "x")) == "/inspecteur/reglages/appareils"
+    assert render.href(Ref.settings("appareils", "x")) == "/admin/reglages/appareils"
 
 
 def test_the_queue_of_approvals_and_one_of_its_tabs():
-    assert render.href(Ref.approvals("x")) == "/inspecteur/approbations"
-    assert render.href(Ref.approvals("x", "identites", tri="age")) == "/inspecteur/approbations/identites?tri=age"
+    assert render.href(Ref.approvals("x")) == "/admin/approbations"
+    assert render.href(Ref.approvals("x", "identites", tri="age")) == "/admin/approbations/identites?tri=age"
 
 
 def test_a_download_encodes_its_key_and_says_which_file():
     got = render.href(Ref.download("mail", "INBOX/12 #3", "x", "pièce 1.pdf"))
-    assert got == "/inspecteur/telecharger/mail/INBOX%2F12%20%233?fichier=pi%C3%A8ce+1.pdf"
-    assert render.href(Ref.download("project", "7", "x")) == "/inspecteur/telecharger/project/7"
+    assert got == "/admin/telecharger/mail/INBOX%2F12%20%233?fichier=pi%C3%A8ce+1.pdf"
+    assert render.href(Ref.download("project", "7", "x")) == "/admin/telecharger/project/7"
 
 
 @pytest.mark.parametrize(("ref", "said"), [
@@ -124,10 +124,10 @@ def test_a_key_is_read_back_from_its_fiche(key):
 
 def test_a_fiche_is_written_as_every_link_writes_it():
     assert subject_url("compte", "a b/c", "etat") == render.href(Ref.subject("compte", "a b/c", "", "etat"))
-    assert subject_url("compte", "a b/c") == "/inspecteur/fiche/compte/a%20b%2Fc"
+    assert subject_url("compte", "a b/c") == "/admin/fiche/compte/a%20b%2Fc"
 
 
-@pytest.mark.parametrize("href", ["", "/inspecteur/fiche/handle/x", "/inspecteur/sens/flux", "https://x.fr/fiche/mail/k"])
+@pytest.mark.parametrize("href", ["", "/admin/fiche/handle/x", "/admin/sens/flux", "https://x.fr/fiche/mail/k"])
 def test_another_address_has_no_key_of_this_kind(href):
     assert subject_url_key(href, "mail") == ""
 
@@ -147,12 +147,12 @@ def test_a_badge_carries_its_key_for_a_drawn_page():
 
 
 def test_only_a_person_has_a_person_link():
-    assert handmade.person_href("user 3") == "/inspecteur/fiche/person/user%203"
+    assert handmade.person_href("user 3") == "/admin/fiche/person/user%203"
     assert handmade.person_href(EPHEMERAL_PREFIX + "x") == ""
 
 
 def test_a_tool_name_is_encoded_in_its_link():
-    assert _tool_href("a&b") == "/inspecteur/outils/tous?outil=a%26b"
+    assert _tool_href("a&b") == "/admin/outils/tous?outil=a%26b"
 
 
 def _strings(path: Path) -> list[tuple[int, str]]:

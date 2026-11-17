@@ -59,12 +59,12 @@ def test_the_console_shows_where_each_person_is(ctx) -> None:  # noqa: F811
         ws.send_json(HOME)
         pong(ws, 1)
     [home] = located(ctx)
-    page = html.unescape(ctx.client.get("/inspecteur/sens/positions").text)
+    page = html.unescape(ctx.client.get("/admin/sens/positions").text)
     assert "Dernière position connue" in page and HOME["label"] in page and "à 12 m près" in page
     assert "Ce que les téléphones lui ont dit" in page
-    fiche = ctx.client.get(f"/inspecteur/fiche/person/{home.data.person}")
+    fiche = ctx.client.get(f"/admin/fiche/person/{home.data.person}")
     assert fiche.status_code == 200 and "onglet=position" in fiche.text
     tab = html.unescape(ctx.client.get(f"{fiche.url.path}?onglet=position").text)
     assert "Sa dernière position" in tab and HOME["label"] in tab and "45.764043,4.835659" in tab
-    owner = ctx.client.get("/inspecteur/fiche/person/user_1")
+    owner = ctx.client.get("/admin/fiche/person/user_1")
     assert owner.status_code == 200 and "onglet=position" not in owner.text

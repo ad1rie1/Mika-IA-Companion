@@ -58,7 +58,7 @@ def test_cards_and_table_keep_the_same_rows_details_and_filtered_pagination():
     assert cards["layout"] == "cards" and table["layout"] == ""
     assert cards["rows"] == table["rows"] and cards["count"] == 31
     row = cards["rows"][0]
-    assert row["heading"]["href"] == "/inspecteur/evenement/25"
+    assert row["heading"]["href"] == "/admin/evenement/25"
     assert row["body"][0]["value"]["text"] == "résumé 25"
     assert row["fields"][0]["value"]["text"] == "25"
     assert row["detail"][0]["pairs"][0]["value"]["text"] == "25"
@@ -99,7 +99,7 @@ def test_secondary_columns_keep_their_values_and_links_on_every_page():
     fields = page["rows"][0]["detail"][0]["pairs"]
     assert fields[0]["value"]["text"] == "25"
     assert fields[0]["hint"] == "Identifiant du message"
-    assert fields[1]["value"]["href"] == "/inspecteur/evenement/25"
+    assert fields[1]["value"]["href"] == "/admin/evenement/25"
     assert page["pager"]["total"] == 31
     # Même une déclaration entièrement secondaire laisse une colonne lisible.
     fallback = render.blocks([Table((Column("clé", detail=True),), (("a",),))], env(), {})[0]

@@ -133,7 +133,7 @@ def test_the_base_map_is_served_with_the_map_and_no_longer_under_the_phone(world
 
 def test_the_console_sets_where_the_map_comes_from(world):  # noqa: F811
     client, live = with_map(world)
-    url = "/inspecteur/reglages/carte"
+    url = "/admin/reglages/carte"
     page = client.get(url)
     assert page.status_code == 200 and "Carte de sa position" in page.text and "0 à 2" in page.text
     saved = client.post(url, data={"csrf": client.cookies.get("csrftoken"), "_section": "carte",
@@ -175,27 +175,27 @@ def test_the_console_sets_places_addresses_and_routes(world):  # noqa: F811
     Valhalla à soi demande son adresse."""
     client, live, _ = world
     bootstrap(client)
-    places = client.get("/inspecteur/reglages/lieux")
+    places = client.get("/admin/reglages/lieux")
     assert places.status_code == 200 and "Lieux et adresses" in places.text
     assert "mika carte lieux" in places.text and "aucune : rien ne sort" in places.text
-    saved = client.post("/inspecteur/reglages/lieux", data={
+    saved = client.post("/admin/reglages/lieux", data={
         "csrf": client.cookies.get("csrftoken"), "_section": "lieux", "_champs": ["index", "addresses"],
         "index": "cartes/lieux.db", "addresses": "geoplateforme"})
     assert saved.status_code in (200, 303), saved.text[:300]
     assert client.portal.call(live.settings.places_config) == PlacesConfig(addresses="geoplateforme")
     desk = live.kernel.ports.get("maps")
     assert client.portal.call(desk.addresses_ready)  # relu à chaque usage : sans redémarrer
-    routes = client.get("/inspecteur/reglages/itineraires")
+    routes = client.get("/admin/reglages/itineraires")
     assert routes.status_code == 200 and "Itinéraires" in routes.text and "aucun" in routes.text
-    refused = client.post("/inspecteur/reglages/itineraires", data={
+    refused = client.post("/admin/reglages/itineraires", data={
         "csrf": client.cookies.get("csrftoken"), "_section": "itineraires", "_champs": ["source", "url"],
         "source": "valhalla", "url": ""})
     assert refused.status_code == 400 and client.portal.call(live.settings.routing_config).source == "aucun"
-    saved = client.post("/inspecteur/reglages/itineraires", data={
+    saved = client.post("/admin/reglages/itineraires", data={
         "csrf": client.cookies.get("csrftoken"), "_section": "itineraires", "_champs": ["source", "url"],
         "source": "fossgis", "url": ""})
     assert saved.status_code in (200, 303), saved.text[:300]
     assert client.portal.call(live.settings.routing_config) == RoutingConfig(source="fossgis")
     assert client.portal.call(desk.routing_ready)
     assert client.portal.call(desk.routing_provider) == "Valhalla, serveur public de FOSSGIS"
-    assert "une demande par seconde" in client.get("/inspecteur/reglages/itineraires").text
+    assert "une demande par seconde" in client.get("/admin/reglages/itineraires").text

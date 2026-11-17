@@ -98,7 +98,7 @@ export interface StoredMessage {
    * disait l'inverse de ce qui s'était passé.
    */
   replyNote?: string;
-  /** Pour une opératrice : où réparer (une page de la console, `/inspecteur/…`). */
+  /** Pour une opératrice : où réparer (une page de la console, `/admin/…`). */
   replyHref?: string;
   /**
    * Elle dort : la réponse attend son réveil (`speech` sans texte,
@@ -389,17 +389,17 @@ export function noReplyNote(reason?: string, detail?: string): string {
 }
 
 /** Une page de la console, et rien d'autre : le lien posé sous une bulle ne
- * mène jamais hors de `/inspecteur/`. */
+ * mène jamais hors de `/admin/`. */
 export function consoleHref(href: unknown): string | undefined {
-  return typeof href === "string" && /^\/inspecteur\/[\w\-/]*$/.test(href)
+  return typeof href === "string" && /^\/admin\/[\w\-/]*$/.test(href)
     ? href
     : undefined;
 }
 
 /** Les pages de la console qu'ouvre le menu ⚙️ du chat, dans l'ordre. */
 export const OPERATOR_PAGES: readonly { href: string; label: string }[] = [
-  { href: "/inspecteur/reglages/apercu", label: "Réglages" },
-  { href: "/inspecteur/constellation", label: "Sa mémoire en 3D" },
+  { href: "/admin/reglages/apercu", label: "Réglages" },
+  { href: "/admin/constellation", label: "Sa mémoire en 3D" },
 ];
 
 /**
@@ -418,7 +418,7 @@ export function operatorLinks(operator: boolean): { href: string; label: string 
 
 /**
  * « Pourquoi a-t-elle dit ça ? », pour une opératrice : la page de la console
- * qui explique une bulle (`/inspecteur/parole/<seq>`), ou `undefined`.
+ * qui explique une bulle (`/admin/parole/<seq>`), ou `undefined`.
  *
  * L'identifiant serveur d'une bulle est le `seq` du journal, celui que la
  * console sait expliquer. Une de ses paroles (réponse ou initiative) y mène ;
@@ -433,7 +433,7 @@ export function whyLink(msg: StoredMessage): { href: string; label: string } | u
   if (msg.sender === "vtuber" && !msg.inner) label = "pourquoi ?";
   else if (msg.sender === "user" && msg.replyNote) label = "pourquoi pas de réponse ?";
   else return undefined;
-  const href = consoleHref(`/inspecteur/parole/${msg.id}`);
+  const href = consoleHref(`/admin/parole/${msg.id}`);
   return href ? { href, label } : undefined;
 }
 

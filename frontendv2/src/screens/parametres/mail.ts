@@ -215,7 +215,7 @@ function ficheView(key: string, host: Host, now: number): string {
     row("Connexion", "Hotmail, Outlook.com et Live refusent les mots de passe : choisis alors ton compte Microsoft.", select("auth", AUTHS, v.auth)) +
       row("Utilisateur", "Souvent l'adresse elle-même.", text("user", v.user, 'autocomplete="off"')) +
       row("Mot de passe", "Un mot de passe d'application de préférence. Chiffré, jamais réaffiché.", password("password", s.secrets.password), { only: "auth:password" }) +
-      row("Application Microsoft", "L'identifiant (client ID) de l'application inscrite dans Microsoft Entra, flux de clients publics autorisé.", text("oauth_client_id", v.oauth_client_id, 'class="mono" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" spellcheck="false"'), { only: "auth:microsoft" }) +
+      row("Application Microsoft", store.boxes.value?.microsoft_app ? "Vide : celle de ce serveur. Sinon l'identifiant (client ID) d'une application à toi, inscrite dans Microsoft Entra." : "L'identifiant (client ID) de l'application inscrite dans Microsoft Entra, flux de clients publics autorisé.", text("oauth_client_id", v.oauth_client_id, 'class="mono" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" spellcheck="false"'), { only: "auth:microsoft" }) +
       row("Annuaire Microsoft", "« consumers » pour un compte personnel ; « organizations » ou son identifiant pour Microsoft 365.", text("oauth_tenant", v.oauth_tenant, 'spellcheck="false"'), { only: "auth:microsoft" }) +
       row("Compte Microsoft", s.microsoft ? "La connexion se fait par un code à entrer chez Microsoft." : "Enregistre d'abord la connexion par Microsoft.", `${msTag(s.signin)}${s.microsoft ? `<button class="btn xs" type="button" data-act="box-ms" data-box="${h(key)}">${ico("key", "xs")}Se connecter à Microsoft</button>` : ""}`, { only: "auth:microsoft" }) +
       row("Lire (IMAP)", "Donné par ton fournisseur de mail (imap.gmail.com, outlook.office365.com…).", `${text("imap_host", v.imap_host, 'class="w-host" spellcheck="false"')}${number("imap_port", v.imap_port, 'class="w-port" min="1" max="65535"')}<label class="row small">${toggle("imap_ssl", v.imap_ssl)}SSL</label>`) +
@@ -258,14 +258,22 @@ function ficheView(key: string, host: Host, now: number): string {
 
 // ── Ajouter une boîte ────────────────────────────────────────────────
 
-function stepMarkup(p: Provider): string {
+/** Ce qu'on demande pour une boîte nouvelle. Une boîte Microsoft, quand l'instance a son application (ADR 0238) :
+ *  son adresse et son nom ; l'application et l'annuaire se rangent sous « Avancé ». Sinon, l'application se donne. */
+export function stepMarkup(p: Provider, instanceApp = false): string {
   const preset = providerPreset(p);
   const address = row("Adresse", "", text("address", "", 'type="email" placeholder="toi@exemple.fr" autocomplete="email"'));
   const label = row("Nom court", "Comme elle l'appellera : « ta boîte Pro ».", text("label", "", 'placeholder="Pro, Perso…"'));
   if (p === "microsoft") {
-    return `<div class="set-grid">${address}${label}
-      ${row("Application Microsoft", "L'identifiant (client ID) de l'application inscrite dans Microsoft Entra — comptes personnels acceptés, flux de clients publics autorisé.", text("oauth_client_id", "", 'class="mono" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" spellcheck="false"'))}
-      ${row("Annuaire Microsoft", "« consumers » pour Hotmail, Outlook.com, Live.", text("oauth_tenant", preset.oauth_tenant ?? "consumers", 'spellcheck="false"'))}</div>
+    const app = row("Application Microsoft", instanceApp
+      ? "Vide : celle de ce serveur. Sinon l'identifiant (client ID) d'une application à toi, inscrite dans Microsoft Entra."
+      : "L'identifiant (client ID) de l'application inscrite dans Microsoft Entra — comptes personnels acceptés, flux de clients publics autorisé.", text("oauth_client_id", "", 'class="mono" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" spellcheck="false"'));
+    const tenant = row("Annuaire Microsoft", "« consumers » pour Hotmail, Outlook.com, Live ; « organizations » ou son identifiant pour Microsoft 365.", text("oauth_tenant", preset.oauth_tenant ?? "consumers", 'spellcheck="false"'));
+    const more = instanceApp
+      ? `<details class="prov-more"><summary>${ico("chev-right", "xs")}Avancé</summary><div class="set-grid">${app}${tenant}</div></details>`
+      : "";
+    return `<div class="set-grid">${address}${label}${instanceApp ? "" : app + tenant}</div>${more}
+      ${instanceApp ? `<p class="small muted prov-next">${ico("key", "xs")}Ensuite, Microsoft te donne un code à entrer sur sa page : ton mot de passe reste chez lui.</p>` : ""}
       <div class="device" data-device hidden></div>`;
   }
   return `<div class="set-grid">${address}${label}
@@ -323,7 +331,7 @@ async function addBoxModal(host: Host): Promise<void> {
     provider = b.dataset.prov as Provider;
     el.querySelectorAll(".provider").forEach((x) => x.classList.toggle("on", x === b));
     step.hidden = false;
-    step.innerHTML = stepMarkup(provider);
+    step.innerHTML = stepMarkup(provider, store.boxes.value?.microsoft_app === true);
     ok.disabled = false;
     step.querySelector<HTMLInputElement>("input")?.focus();
   });

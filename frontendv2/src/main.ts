@@ -67,7 +67,7 @@ function startApp(state: AuthState, loginRoot: HTMLElement, appRoot: HTMLElement
   loginRoot.innerHTML = "";
   const store = new MikaStore();
   let leaving = false;
-  const page = consoleHref("/inspecteur/");
+  const page = consoleHref("/admin/");
   const shell = new Shell(appRoot, store, account, {
     console: page ? `${API_BASE}${page}` : undefined,
     logout: async () => {

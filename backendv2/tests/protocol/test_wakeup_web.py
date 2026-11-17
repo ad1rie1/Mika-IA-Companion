@@ -125,7 +125,7 @@ def test_the_key_is_shown_once_and_kept_nowhere(world):  # noqa: F811
 
     trail = client.portal.call(audits)
     assert trail and all(key not in t for t in trail)
-    page = html_of(client.get("/inspecteur/fiche/reveil/serre"))
+    page = html_of(client.get("/admin/fiche/reveil/serre"))
     assert key not in page and key[:8] in page  # un indice pour la reconnaître, jamais la clé
 
 
@@ -147,9 +147,9 @@ def test_the_settings_page_offers_projects_and_recipients_and_refuses_an_unknown
     got = client.portal.call(live.settings.wakeup).endpoints["serre"]
     assert got.project == "aucun" and got.tools == ("memory",) and got.notify == c.OWNERS
     assert post(client, url, {**record, "project": "aucun", "_cle": "Serre Nord"}).status_code == 400  # le nom = l'URL
-    fiche = html_of(client.get("/inspecteur/fiche/reveil/serre"))
+    fiche = html_of(client.get("/admin/fiche/reveil/serre"))
     assert "POST /api/wake/serre" in fiche and "sans clé" in fiche
-    listing = html_of(client.get("/inspecteur/reveils"))
+    listing = html_of(client.get("/admin/reveils"))
     assert "serre" in listing and "Déclarer un réveil" in listing
 
 

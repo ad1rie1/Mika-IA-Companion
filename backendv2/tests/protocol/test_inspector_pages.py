@@ -60,7 +60,7 @@ def test_every_page_and_every_faculty_view_opens(world):  # noqa: F811
     assert len(views) >= 20  # chaque faculté déclare les siennes
     for group in NAVIGATION:
         for d in group.items:
-            base = f"/inspecteur/{d.key}"
+            base = f"/admin/{d.key}"
             r = client.get(base)
             assert r.status_code == 200 and d.label in html_of(r), (d.key, r.status_code)
             ConsoleHTML(r.text).check()
@@ -76,12 +76,12 @@ def test_every_page_and_every_faculty_view_opens(world):  # noqa: F811
                 assert r.status_code == 200 and "Cette vue a échoué" not in page, (d.key, slug, r.status_code)
                 ConsoleHTML(r.text).check()
     for v in views:
-        r = client.get(f"/inspecteur/facultes/{v.owner}/{v.name}")
+        r = client.get(f"/admin/facultes/{v.owner}/{v.name}")
         assert r.status_code == 200 and "Cette vue a échoué" not in html_of(r), (v.owner, v.name)
-    listed = every_page(client, "/inspecteur/systeme/vues")
+    listed = every_page(client, "/admin/systeme/vues")
     assert all(v.title in listed for v in views), [v.title for v in views if v.title not in listed]
-    assert client.get("/inspecteur/facultes/nobody/nothing").status_code == 404
-    assert client.get("/inspecteur/nulle-part").status_code == 404
+    assert client.get("/admin/facultes/nobody/nothing").status_code == 404
+    assert client.get("/admin/nulle-part").status_code == 404
 
 
 def test_why_did_she_say_that(world):  # noqa: F811
@@ -89,19 +89,19 @@ def test_why_did_she_say_that(world):  # noqa: F811
     bootstrap(client)
     converse(client)
     ended = client.portal.call(lambda: live.kernel.mind.store.latest([rt.EPISODE_ENDED.name], 1))[0]
-    said = html_of(client.get(f"/inspecteur/episode/{ended.correlation}?onglet=dit"))
+    said = html_of(client.get(f"/admin/episode/{ended.correlation}?onglet=dit"))
     assert "Ce qu'elle a dit" in said and "ce que le prompt lui montrait" in said
-    decision = html_of(client.get(f"/inspecteur/episode/{ended.correlation}?onglet=decision"))
+    decision = html_of(client.get(f"/admin/episode/{ended.correlation}?onglet=decision"))
     # le message auquel elle répond est en bulle dans « Ce qui l'a lancé », avec son lien : « En bref » ne le redit pas
     assert "Message déclencheur" in decision and "en réponse à" not in decision and "perception:" not in decision
-    cause = re.search(r'/inspecteur/evenement/(\d+)">message n°', decision)
-    event = html_of(client.get(f"/inspecteur/evenement/{cause.group(1)}"))
+    cause = re.search(r'/admin/evenement/(\d+)">message n°', decision)
+    event = html_of(client.get(f"/admin/evenement/{cause.group(1)}"))
     assert "réduit par" in event and "Fil des conversations" in event and "Ce qu'il a déclenché" in event
     # son parcours dit aussi son type et l'état du journal qu'il a lu ; son origine se dit en mots
     assert "état lu" in event and "lu sur la tête" not in event and "origine : external" not in event
-    assert client.get("/inspecteur/evenement/999999").status_code == 404
+    assert client.get("/admin/evenement/999999").status_code == 404
     # un filtre qui ressemble à du SQL ne casse rien
-    assert client.get("/inspecteur/systeme/chronologie?type=%25'%20OR%201=1--&correlation=x").status_code == 200
+    assert client.get("/admin/systeme/chronologie?type=%25'%20OR%201=1--&correlation=x").status_code == 200
 
 
 def test_health_is_public_but_says_only_names_and_states(world):  # noqa: F811
@@ -113,7 +113,7 @@ def test_health_is_public_but_says_only_names_and_states(world):  # noqa: F811
     assert set(body["checks"].values()) <= {"ok", "degraded", "ko"}
     assert r.headers["cache-control"] == "no-store"
     bootstrap(client)
-    detail = html_of(client.get("/inspecteur/systeme/sante"))
+    detail = html_of(client.get("/admin/systeme/sante"))
     assert "Processus" in detail and "Sonde publique" in detail
 
 
@@ -129,10 +129,10 @@ def test_every_form_needs_its_token(world):  # noqa: F811
     bootstrap(client)
     head = client.portal.call(lambda: live.kernel.mind.head)
     for path in ("modeles", "personnalite", "parametres", "canaux", "sens", "comptes"):
-        r = client.post(f"/inspecteur/reglages/{path}", data={"_section": "personnage", "_champs": "name",
+        r = client.post(f"/admin/reglages/{path}", data={"_section": "personnage", "_champs": "name",
                                                               "name": "Pirate", "action": "create"})
         assert r.status_code in (200, 403) and "Jeton de formulaire invalide" in html_of(r), path
-    refused = client.post("/inspecteur/approbations", data={"proposal": "1", "decision": "approve"})
+    refused = client.post("/admin/approbations", data={"proposal": "1", "decision": "approve"})
     assert "Jeton de formulaire invalide" in html_of(refused)
     assert client.portal.call(lambda: live.kernel.mind.head) == head  # rien n'a été écrit
     assert client.portal.call(live.settings.persona_yaml) is None
@@ -141,25 +141,25 @@ def test_every_form_needs_its_token(world):  # noqa: F811
 def test_accounts_are_managed_without_ever_locking_out(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
-    client.get("/inspecteur/reglages/comptes")
-    weak = post(client, "/inspecteur/reglages/comptes", action="create", username="bea", password="12345678")
+    client.get("/admin/reglages/comptes")
+    weak = post(client, "/admin/reglages/comptes", action="create", username="bea", password="12345678")
     assert "numérique" in html_of(weak)
-    created = post(client, "/inspecteur/reglages/comptes", action="create", username="bea", password="longue-phrase-secrete")
+    created = post(client, "/admin/reglages/comptes", action="create", username="bea", password="longue-phrase-secrete")
     assert "Utilisateur ajouté" in html_of(created) and "user_2" in html_of(created)
-    alone = post(client, "/inspecteur/reglages/comptes", action="update", account="1", active="on")  # sans « opérateur »
+    alone = post(client, "/admin/reglages/comptes", action="update", account="1", active="on")  # sans « opérateur »
     assert "dernier opérateur actif" in html_of(alone)
     accounts = client.portal.call(live.accounts.all)
     assert accounts[0].operator and not accounts[1].operator
     # créer et modifier un compte sont audités (sans contenu) et paraissent dans le journal des modifications
-    post(client, "/inspecteur/reglages/comptes", action="update", account="2", active="on", operator="on")
+    post(client, "/admin/reglages/comptes", action="update", account="2", active="on", operator="on")
     ops = client.portal.call(lambda: live.kernel.mind.store.latest([rt.OPERATED.name], 20))
     actions = [json.loads(o.data)["action"] for o in ops]
     assert "console.comptes.creer" in actions and "console.comptes.modifier" in actions
-    journal = html_of(client.get("/inspecteur/reglages/journal"))
+    journal = html_of(client.get("/admin/reglages/journal"))
     assert "comptes.creer" in journal and "longue-phrase-secrete" not in journal
     # une page par geste : la liste, créer, modifier
-    assert "Ajouter un utilisateur" in html_of(client.get("/inspecteur/reglages/comptes?nouveau=1"))
-    assert "Nouveau mot de passe" in html_of(client.get("/inspecteur/reglages/comptes?compte=2"))
+    assert "Ajouter un utilisateur" in html_of(client.get("/admin/reglages/comptes?nouveau=1"))
+    assert "Nouveau mot de passe" in html_of(client.get("/admin/reglages/comptes?compte=2"))
 
 
 def test_connected_apps_are_listed_without_secret_and_revocable(world):  # noqa: F811
@@ -171,16 +171,16 @@ def test_connected_apps_are_listed_without_secret_and_revocable(world):  # noqa:
     info, raw = client.portal.call(lambda: live.accounts.create_token(1, "Pixel d'Adrien", client="mobile",
                                                                       source="login"))
     token_id = info.id
-    page = html_of(client.get("/inspecteur/reglages/comptes?compte=1"))
+    page = html_of(client.get("/admin/reglages/comptes?compte=1"))
     assert "Applications connectées" in page and "Pixel d'Adrien" in page and "Téléphone" in page
     assert raw not in page and raw[3:20] not in page  # le secret ne paraît jamais
-    forged = client.post("/inspecteur/reglages/comptes", data={"action": "revoke_token", "account": "1",
+    forged = client.post("/admin/reglages/comptes", data={"action": "revoke_token", "account": "1",
                                                               "token": str(token_id)})
     assert "Jeton de formulaire invalide" in html_of(forged)
     assert [t.revoked for t in client.portal.call(live.accounts.tokens, 1)] == [False]
-    elsewhere = post(client, "/inspecteur/reglages/comptes", action="revoke_token", account="2", token=str(token_id))
+    elsewhere = post(client, "/admin/reglages/comptes", action="revoke_token", account="2", token=str(token_id))
     assert "pas à ce compte" in html_of(elsewhere)
-    done = post(client, "/inspecteur/reglages/comptes", action="revoke_token", account="1", token=str(token_id))
+    done = post(client, "/admin/reglages/comptes", action="revoke_token", account="1", token=str(token_id))
     assert "Application révoquée" in html_of(done)
     assert [t.revoked for t in client.portal.call(live.accounts.tokens, 1)] == [True]
     ops = client.portal.call(lambda: live.kernel.mind.store.latest([rt.OPERATED.name], 20))
@@ -204,17 +204,17 @@ def test_an_operator_approves_from_the_inspector(world):  # noqa: F811
                                                              origin=Origin.EXTERNAL)).seqs[-1]
 
     legacy = propose({"to": "alice@exemple.fr", "subject": "Coucou"})
-    blocked = post(client, "/inspecteur/approbations", proposal=str(legacy), decision="approve")
+    blocked = post(client, "/admin/approbations", proposal=str(legacy), decision="approve")
     assert "Ça ne peut pas partir tel quel" in html_of(blocked) and box.sent == []
-    post(client, "/inspecteur/approbations", proposal=str(legacy), decision="reject")
+    post(client, "/admin/approbations", proposal=str(legacy), decision="reject")
     proposal = propose({"draft": mail.id, "_apercu": box.preview(mail.id).digest})
-    page = html_of(client.get("/inspecteur/approbations"))
+    page = html_of(client.get("/admin/approbations"))
     assert "alice@exemple.fr" in page and "Approuver" in page  # ce qui partira, tel quel
-    r = post(client, "/inspecteur/approbations", proposal=str(proposal), decision="approve", note="ok")
+    r = post(client, "/admin/approbations", proposal=str(proposal), decision="approve", note="ok")
     assert r.status_code == 200 and "Approuvé" in html_of(r) and "Rien n'attend ta décision" in html_of(r)
     resolved = client.portal.call(lambda: kernel.mind.store.latest([rt.EFFECT_RESOLVED.name], 5))
     assert resolved and json.loads(resolved[0].data)["by"] == "user_1"
-    again = post(client, "/inspecteur/approbations", proposal=str(proposal), decision="reject")
+    again = post(client, "/admin/approbations", proposal=str(proposal), decision="reject")
     assert "déjà décidée" in html_of(again)
 
 
@@ -235,10 +235,10 @@ def test_reports_are_listed_and_never_escape_their_folder(tmp_path):
                    reports=reports)
     with TestClient(app, base_url="http://localhost:8001", headers={"Origin": ORIGIN}) as client:
         bootstrap(client)
-        listing = html_of(client.get("/inspecteur/systeme/simulations"))
+        listing = html_of(client.get("/admin/systeme/simulations"))
         assert "rapide.md" in listing
-        assert "S01" in html_of(client.get("/inspecteur/systeme/simulations?fichier=rapide.md"))
-        escaped = html_of(client.get("/inspecteur/systeme/simulations?fichier=../secret.txt"))
+        assert "S01" in html_of(client.get("/admin/systeme/simulations?fichier=rapide.md"))
+        escaped = html_of(client.get("/admin/systeme/simulations?fichier=../secret.txt"))
         assert "à ne pas lire" not in escaped and "Fichier inconnu" in escaped
         # sans modèle : la santé le dit, elle répond quand même
         health = client.get("/health").json()
@@ -248,29 +248,29 @@ def test_reports_are_listed_and_never_escape_their_folder(tmp_path):
 def test_the_old_forge_settings_address_leads_to_the_apps(world):  # noqa: F811
     client, _, _ = world
     bootstrap(client)
-    r = client.get("/inspecteur/reglages/apps", follow_redirects=False)
-    assert r.status_code == 301 and r.headers["location"] == "/inspecteur/apps"
-    assert client.get("/inspecteur/forge", follow_redirects=False).headers["location"] == "/inspecteur/apps"
+    r = client.get("/admin/reglages/apps", follow_redirects=False)
+    assert r.status_code == 301 and r.headers["location"] == "/admin/apps"
+    assert client.get("/admin/forge", follow_redirects=False).headers["location"] == "/admin/apps"
 
 
 def test_the_old_page_of_an_object_leads_to_its_fiche(world):  # noqa: F811
     """Les vues cachées gardées pour d'anciens liens sont devenues des redirections, dans la table centrale (ADR 0217)."""
     client, _, _ = world
     bootstrap(client)
-    moved = {"/inspecteur/facultes/identity/personne?handle=ext_5": "/inspecteur/fiche/handle/ext_5",
-             "/inspecteur/facultes/identity/personne": "/inspecteur/identites/annuaire",
-             "/inspecteur/facultes/forge/app?app=cafe": "/inspecteur/fiche/app/cafe",
-             "/inspecteur/facultes/forge/app": "/inspecteur/apps",
-             "/inspecteur/personnes/liens?person=user_2": "/inspecteur/fiche/person/user_2?onglet=lien",
+    moved = {"/admin/facultes/identity/personne?handle=ext_5": "/admin/fiche/handle/ext_5",
+             "/admin/facultes/identity/personne": "/admin/identites/annuaire",
+             "/admin/facultes/forge/app?app=cafe": "/admin/fiche/app/cafe",
+             "/admin/facultes/forge/app": "/admin/apps",
+             "/admin/personnes/liens?person=user_2": "/admin/fiche/person/user_2?onglet=lien",
              # une clé qui ressemble à un chemin reste une clé
-             "/inspecteur/facultes/forge/app?app=../../etc": "/inspecteur/fiche/app/..%2F..%2Fetc"}
+             "/admin/facultes/forge/app?app=../../etc": "/admin/fiche/app/..%2F..%2Fetc"}
     for old, new in moved.items():
         r = client.get(old, follow_redirects=False)
         assert r.status_code == 301 and r.headers["location"] == new, old
     # l'adresse d'avant la vue : l'onglet de la destination, puis la fiche
-    via_view = client.get("/inspecteur/facultes/social/liens?person=user_2", follow_redirects=False)
-    assert via_view.status_code == 303 and via_view.headers["location"] == "/inspecteur/personnes/liens?person=user_2"
-    assert client.get("/inspecteur/personnes/liens", follow_redirects=False).status_code == 200  # la liste reste
+    via_view = client.get("/admin/facultes/social/liens?person=user_2", follow_redirects=False)
+    assert via_view.status_code == 303 and via_view.headers["location"] == "/admin/personnes/liens?person=user_2"
+    assert client.get("/admin/personnes/liens", follow_redirects=False).status_code == 200  # la liste reste
 
 
 @pytest.mark.slow

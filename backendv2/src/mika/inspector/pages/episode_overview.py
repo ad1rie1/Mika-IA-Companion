@@ -15,6 +15,7 @@ from sqlalchemy import func, select
 
 from mika.contracts import runtime as rt
 from mika.inspector import names
+from mika.inspector.render import PREFIX
 from mika.kernel.clock import US
 from mika.kernel.forms import show_duration
 from mika.kernel.inspect import (
@@ -41,7 +42,7 @@ PREVIEW_SPEECHES = 3
 #: un épisode sans fin au journal
 OPEN = "Aucune fin n’est enregistrée : il peut être encore en cours, ou avoir été coupé."
 #: où vérifier ce qui tourne
-RUNNING = "/inspecteur/decisions/en_cours"
+RUNNING = f"{PREFIX}/decisions/en_cours"
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,7 +135,7 @@ def overview(ui: Any, corr: str, info: dict[str, Any]) -> list[Any]:
                          caption=f"Les {min(speeches, PREVIEW_SPEECHES)} dernières paroles sur {speeches}. "
                                  "Le journal décrit leur production ; leur livraison se vérifie dans la file de sortie."))
         out.append(Nav((NavItem("Lire toutes les paroles", tab("dit", "Paroles")),
-                        NavItem("Vérifier les sorties", Ref("local", "/inspecteur/systeme/sorties", "")))))
+                        NavItem("Vérifier les sorties", Ref("local", f"{PREFIX}/systeme/sorties", "")))))
     else:
         out.append(Note("Aucune parole n’est enregistrée pour cet épisode.", "muted", title="Paroles produites"))
     out.append(Nav((NavItem("Outils utilisés", tab("outils", "Outils")),

@@ -67,6 +67,8 @@ data class MailBox(
 data class MailBoxes(
     val plugged: Boolean = true,
     @SerialName("read_on_open") val readOnOpen: String = ReadOnOpen.NEVER,
+    /** L'instance a son application Microsoft (ADR 0238) : une boîte Microsoft s'ajoute sans donner la sienne. */
+    @SerialName("microsoft_app") val microsoftApp: Boolean = false,
     val boxes: List<MailBox> = emptyList(),
 )
 

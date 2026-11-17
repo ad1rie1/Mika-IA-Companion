@@ -359,7 +359,7 @@ def event_page(ui: Any, seq: int, query=None) -> dict[str, Any] | None:
     triggered, pager = ctx.older([rt.EPISODE_STARTED], 25, where=("reply_to", seq))
     linked = is_episode(ui, e.correlation)
     episode = Ref("episode", e.correlation, "son épisode") if linked else \
-        Ref("local", "/inspecteur/systeme/chronologie", "les événements liés", (("correlation", e.correlation),))
+        Ref("local", f"{PREFIX}/systeme/chronologie", "les événements liés", (("correlation", e.correlation),))
     title = ui.names.event(e.type.name)
     owner = f"{ui.names.faculty(e.type.owner)} · {'public' if e.type.public else 'privé'}"
     origin = names.event_origin(e.origin.value)

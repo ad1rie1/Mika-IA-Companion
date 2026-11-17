@@ -53,7 +53,7 @@ def test_the_matrix_says_each_canal_and_moment(world):  # noqa: F811
     # une opératrice lit aussi la ligne même, et où la console la montre
     assert web["line"] == "ligne 1"
     assert resources(got, "families")["famille:memory"]["href"] == \
-        "/inspecteur/reglages/droits?detail=famille%3Amemory"
+        "/admin/reglages/droits?detail=famille%3Amemory"
     assert memory["cells"]["seule/work"]["why"] == "elle seule, quand elle travaille"
 
 

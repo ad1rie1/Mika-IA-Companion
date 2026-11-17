@@ -22,6 +22,7 @@ from mika.inspector.pages.diagnostics import (
 )
 from mika.inspector.pages.system import backup_state
 from mika.inspector.pages.tabs import TABS
+from mika.inspector.render import PREFIX
 from mika.kernel.clock import DAY, MINUTE, US
 from mika.kernel.forms import show_duration
 from mika.kernel.inspect import (
@@ -64,15 +65,15 @@ def episode_row(ui: Any, e: Any) -> Row:
 
 
 def _local(href: str, text: str) -> Ref:
-    """Un lien interne déjà construit (``/inspecteur/…``) : passé tel quel au rendu."""
+    """Un lien interne déjà construit (``/admin/…``) : passé tel quel au rendu."""
     return Ref("local", href, text)
 
 
 #: les épisodes (Activité › Épisodes)
-EPISODES_HREF = "/inspecteur/decisions/episodes"
+EPISODES_HREF = f"{PREFIX}/decisions/episodes"
 #: la santé générale : son badge compte les contrôles qui ne vont pas, que « À traiter » montre un à un, chacun vers
 #: sa page — l'accueil ne la compte pas une seconde fois
-HEALTH_HREF = "/inspecteur/" + HEALTH
+HEALTH_HREF = f"{PREFIX}/" + HEALTH
 #: ce que dit un badge qui ne dit pas ce qu'il compte
 VAGUE = "à regarder"
 #: les réponses relues pour savoir si elles échouent (les plus récentes d'abord)
@@ -128,7 +129,7 @@ async def attention(ui: Any, request: Request) -> list[Any]:
     told: set[str] = set()  # les contrôles de santé qu'un cadre dit déjà
     if not getattr(gateway, "configured", gateway is not None):
         cards.insert(0, Stat("Modèles", "aucun", "rien ne sert « répondre » : chaque tour échoue — déclare un "
-                             "fournisseur", "danger", _local("/inspecteur/reglages/fournisseurs", "Modèles")))
+                             "fournisseur", "danger", _local(f"{PREFIX}/reglages/fournisseurs", "Modèles")))
         told.add("llm")  # « aucun modèle ne sert « répondre » » : la même panne
     else:
         failed = failed_replies(ui, ui.inspection.context(request.query_params))
@@ -140,15 +141,15 @@ async def attention(ui: Any, request: Request) -> list[Any]:
     failing = [ui.names.process(s.name) for s in sched.specs if sched.consecutive.get(s.name, 0) >= health.PROCESS_FAILURES_MAX]
     if failing:
         cards.append(Stat("Processus en échec", len(failing), ", ".join(failing)[:90], "danger",
-                          _local("/inspecteur/systeme/processus", "Processus")))
+                          _local(f"{PREFIX}/systeme/processus", "Processus")))
     anomalies = len(getattr(ui.kernel.mind, "anomalies", ()) or ())
     if anomalies:
         cards.append(Stat("Anomalies", anomalies, "évaluations ou réductions qui ont échoué", "warn",
-                          _local("/inspecteur/systeme/anomalies", "Anomalies")))
+                          _local(f"{PREFIX}/systeme/anomalies", "Anomalies")))
     tone, text = backup_state(ui)
     if tone in ("warn", "danger"):  # vers leur carte : une autre ligne que le journal, qui mène à la même page
         cards.append(Stat("Sauvegarde", "à faire" if tone == "warn" else "en échec", text, tone,
-                          _local("/inspecteur/" + BACKUPS_PAGE, "Stockage et sauvegardes")))
+                          _local(f"{PREFIX}/" + BACKUPS_PAGE, "Stockage et sauvegardes")))
     for c in report.checks:
         if c.state == health.OK or c.name in told:
             continue
@@ -190,7 +191,7 @@ async def now_tab(ui: Any, request: Request) -> list[Any]:
     cards += [
         Stat("Épisodes en cours", len(open_), f"{sum(waiting.values())} en attente · " + (
              ", ".join(names.kind(o.kind) for o in open_.values())[:80] or "aucun travail en cours"),
-             "info" if open_ else "", _local("/inspecteur/decisions/en_cours", "en cours")),
+             "info" if open_ else "", _local(f"{PREFIX}/decisions/en_cours", "en cours")),
     ]
     return [Stats(tuple(cards))]
 
@@ -217,7 +218,7 @@ async def today(ui: Any, request: Request) -> list[Any]:
         failed = sum(u.failures for u in spent)
         cards.append(Stat("Appels de modèle", sum(u.calls for u in spent),
                           f"{money_fr(cost)} · {plural(failed, 'échec', 'échecs')}",
-                          "danger" if failed else "", _local("/inspecteur/systeme/appels", "Appels et coûts")))
+                          "danger" if failed else "", _local(f"{PREFIX}/systeme/appels", "Appels et coûts")))
     ended, pager = ctx.older([rt.EPISODE_ENDED], EPISODES_PAGE)
     rows = tuple(episode_row(ui, e) for e in ended)
     scope = [Note("Ces indicateurs portent sur les 1 000 derniers épisodes : la journée peut en contenir davantage.",

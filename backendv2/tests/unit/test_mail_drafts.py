@@ -402,13 +402,13 @@ def test_a_faculty_decides_only_its_own_proposals_and_what_changed_is_reread(tmp
 
 
 def test_a_navigation_row_stays_text_and_encodes_its_links():
-    block = Nav((NavItem('<b onclick="x">Réception</b>', Ref("local", "/inspecteur/courrier/reception", "",
+    block = Nav((NavItem('<b onclick="x">Réception</b>', Ref("local", "/admin/courrier/reception", "",
                                                               (("dossier", "R&D / Été"), ("compte", "perso"))),
                          count=3, active=True),
                  NavItem("Ailleurs", Ref("local", "https://ailleurs.example/", "")),), title="Dossiers")
     shown = render.block(block, render.Env(when=str, now=0), {})
     first, second = shown["items"]
-    assert first["href"] == "/inspecteur/courrier/reception?dossier=R%26D+%2F+%C3%89t%C3%A9&compte=perso"
+    assert first["href"] == "/admin/courrier/reception?dossier=R%26D+%2F+%C3%89t%C3%A9&compte=perso"
     assert first["text"] == '<b onclick="x">Réception</b>' and first["active"] and first["count"] == "3"
     assert second["href"] == ""  # jamais une autre adresse
     from mika.inspector.ui import env as jinja

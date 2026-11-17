@@ -56,7 +56,7 @@ from mika.kernel.inspect import (
     tone,
 )
 
-PREFIX = "/inspecteur"
+PREFIX = "/admin"
 #: au-delà, un texte long se replie (« lire la suite »)
 CLAMP_DEFAULT = 600
 #: jamais plus que ceci n'est envoyé au navigateur pour une cellule ou un texte

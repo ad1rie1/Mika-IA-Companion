@@ -3867,7 +3867,7 @@ projects:
     # leurs titres entre guillemets — à qui s'occupe d'elle, chacun suivi du lien de ses vues dans la console
     apps: "Ce qu'en montrent tes apps se voit dans leurs vues, dans la console : {apps}."
     # une app et le lien de ses vues (tests/architecture/test_console_paths.py confronte cette adresse à celle de la console)
-    app_link: "« {title} » (/inspecteur/fiche/app/{app}?onglet=vues)"
+    app_link: "« {title} » (/admin/fiche/app/{app}?onglet=vues)"
     # à une personne qui n'a pas la console
     apps_closed: "Tes apps en montrent des vues ({apps}), dans une console qui n'est pas ouverte à cette personne."
 

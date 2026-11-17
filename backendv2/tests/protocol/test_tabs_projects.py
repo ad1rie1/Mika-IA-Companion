@@ -42,21 +42,21 @@ def _life(client, live):
 def test_each_project_says_where_it_stands_and_creating_one_stays_in_the_title_bar(world):  # noqa: F811
     client, live, _ = world
     kernel = _life(client, live)
-    empty = drawn(client, "/inspecteur/projets/tous")
+    empty = drawn(client, "/admin/projets/tous")
     assert "aucun projet : « Créer un projet » (en haut) en ouvre un" in empty
     assert "Créer un projet" in empty.split('data-tab="projets/tous"')[0]  # l'action de la destination, en haut
     pid = _create(client, kernel, "Outils réseau", "Créer un module RDP\nÉcrire sa documentation")
     append(client, kernel, [c.RUN_REPORTED.draft(project=pid, objective=1, verdict=c.CONTINUE,
                                                  summary=Content.of("Le squelette est posé.", level=0))], "projects")
-    page = drawn(client, "/inspecteur/projets/tous")
+    page = drawn(client, "/admin/projets/tous")
     item = page.split('class="prj-item')[1].split("</li>")[0]
-    assert f'href="/inspecteur/fiche/project/{pid}"' in item and "Outils réseau" in item
+    assert f'href="/admin/fiche/project/{pid}"' in item and "Outils réseau" in item
     assert "elle-même" in item and "actif" in item  # son mode, son état
     assert "Le squelette est posé." in item.split('class="prj-where"')[1]  # où il en est
     assert "0/2 ponctuels faits · 1 constant" in item and 'class="now-bar goal' in item  # en jauge, accordés
     assert "Prochaine exécution" in item and "Son rythme, ses outils, son dépôt" in item  # le reste, replié
     assert "Plage de travail" in item.split("Son rythme, ses outils, son dépôt")[-1]  # replié sous la rangée
-    table = drawn(client, "/inspecteur/projets/tous?vue_pg1=table")  # en tableau : la liste de la console
+    table = drawn(client, "/admin/projets/tous?vue_pg1=table")  # en tableau : la liste de la console
     assert 'class="hm-table"' in table and "prj-item" not in table and "Outils réseau" in table
 
 
@@ -67,7 +67,7 @@ def test_each_objective_reads_in_clear_with_its_buttons_on_its_line(world):  # n
     said = "Dates recoupées entre deux sources. " * 20  # assez long pour se replier en quatre lignes
     append(client, kernel, [c.RUN_REPORTED.draft(project=pid, objective=1, verdict=c.CONTINUE,
                                                  summary=Content.of(said, level=0))], "projects")
-    page = drawn(client, f"/inspecteur/fiche/project/{pid}?onglet=objectifs")
+    page = drawn(client, f"/admin/fiche/project/{pid}?onglet=objectifs")
     assert 'data-tab="project/objectifs"' in page and "Ponctuels faits" in page  # dessiné, ses chiffres en tête
     items = page.split('<li class="prj-entry')[1:]
     assert len(items) == 3 and "Garder les tests verts" in items[0]  # le constant d'abord, comme la faculté les range
@@ -97,7 +97,7 @@ def test_each_decision_reads_like_an_adr_with_its_buttons_on_its_line(world):  #
     _decide(client, kernel, pid, "d1", title="Les sources des dates", choice="Une seule source", reason="plus simple")
     _decide(client, kernel, pid, "d2", title="Les sources des dates", choice="L'IMO et un magazine d'astronomie",
             reason="Deux sources se recoupent.", context="Une date fausse dans le carnet.", replaces="1")
-    page = drawn(client, f"/inspecteur/fiche/project/{pid}?onglet=decisions&statut=toutes")
+    page = drawn(client, f"/admin/fiche/project/{pid}?onglet=decisions&statut=toutes")
     assert 'data-tab="project/decisions"' in page and "Elle relit celles en vigueur" in page
     live_one, old = (x.split("</li>")[0] for x in page.split('<li class="prj-entry')[1:])
     assert "L'IMO et un magazine d'astronomie" in live_one and "en vigueur" in live_one  # la plus récente d'abord
@@ -120,7 +120,7 @@ def test_a_projects_runs_read_day_by_day_and_its_files_are_drawn(world):  # noqa
     client, live, _ = world
     kernel = _life(client, live)
     pid = _create(client, kernel, "Préparer le stream", "Écrire le programme")
-    empty = drawn(client, f"/inspecteur/fiche/project/{pid}?onglet=executions")
+    empty = drawn(client, f"/admin/fiche/project/{pid}?onglet=executions")
     assert 'class="now-page prj-fiche" data-tab="project/executions"' in empty
     body = empty.split('data-tab="project/executions"', 1)[1]
     assert body.lower().count("aucune exécution encore") == 1  # la majuscule : la feuille de style
@@ -136,7 +136,7 @@ def test_a_projects_runs_read_day_by_day_and_its_files_are_drawn(world):  # noqa
     episode([c.RUN_REPORTED.draft(project=pid, objective=1, verdict=c.DONE, proof="commit", proven=True,
                                   summary=Content.of("Programme écrit.", level=0), commit="3f9a2c1e8b7d")], "projects")
     episode([rt.EPISODE_ENDED.draft(kind=Kind.WORK, outcome="done", target=project_target(pid))], "runtime")
-    page = drawn(client, f"/inspecteur/fiche/project/{pid}?onglet=executions")
+    page = drawn(client, f"/admin/fiche/project/{pid}?onglet=executions")
     body = page.split('data-tab="project/executions"', 1)[1]
     assert "Pannes d'affilée" in body and "Sur 24 h" in body  # ses chiffres, en tuiles
     assert "« prompt » : ce qu'elle a vraiment reçu" in body  # la légende de la faculté, lisible
@@ -145,15 +145,15 @@ def test_a_projects_runs_read_day_by_day_and_its_files_are_drawn(world):  # noqa
     assert "terminé" in run and ">fait<" in run and "prouvé" in run and "Programme écrit." in run
     assert "commit=3f9a2c1e8b7d" in run and "en 1 s" in run
     for tab in ("prompt", "outils", "appels", "decision"):  # les onglets de son épisode, un à un
-        assert f'href="/inspecteur/episode/run-1?onglet={tab}"' in run, tab
+        assert f'href="/admin/episode/run-1?onglet={tab}"' in run, tab
     assert 'class="hm-table"' not in body and 'class="pager"' not in body  # le fil, pas le tableau générique
     # Fichiers : l'atelier pas encore ouvert le dit, et l'on peut y déposer un fichier
-    closed = drawn(client, f"/inspecteur/fiche/project/{pid}?onglet=fichiers")
+    closed = drawn(client, f"/admin/fiche/project/{pid}?onglet=fichiers")
     root = closed.split('class="now-page person-tab" data-tab="project/fichiers"', 1)[1]
     assert "L'atelier n'est pas encore ouvert" in root and "Déposer un fichier" in root
     assert 'enctype="multipart/form-data"' in root  # le formulaire que la console a préparé
     client.portal.call(kernel.ports["workshop"].write, pid, "notes/plan.md", "# Le plan")
-    files = drawn(client, f"/inspecteur/fiche/project/{pid}?onglet=fichiers")
+    files = drawn(client, f"/admin/fiche/project/{pid}?onglet=fichiers")
     root = files.split('class="now-page person-tab" data-tab="project/fichiers"', 1)[1]
     assert 'class="hm-chips"' in root and "Dossier" in root  # la navigation dans ses dossiers
     table = root.split('<table class="hm-table">', 1)[1].split("</table>", 1)[0]  # une table d'exploitation
@@ -163,7 +163,7 @@ def test_a_projects_runs_read_day_by_day_and_its_files_are_drawn(world):  # noqa
 def test_runs_read_day_by_day_with_their_verdict_proof_and_commit(world):  # noqa: F811
     client, live, _ = world
     kernel = _life(client, live)
-    assert "aucune exécution encore" in drawn(client, "/inspecteur/projets/toutes_executions")
+    assert "aucune exécution encore" in drawn(client, "/admin/projets/toutes_executions")
     pid = _create(client, kernel, "Préparer le stream", "Écrire le programme\nPréparer les visuels")
     append(client, kernel, [
         c.RUN_REPORTED.draft(project=pid, objective=1, verdict=c.DONE, proof="commit", proven=True,
@@ -171,7 +171,7 @@ def test_runs_read_day_by_day_with_their_verdict_proof_and_commit(world):  # noq
         c.RUN_REPORTED.draft(project=pid, objective=2, verdict=c.BLOCKED,
                              summary=Content.of("Le dépôt distant refuse la poussée.", level=0)),
     ], "projects")
-    page = drawn(client, "/inspecteur/projets/toutes_executions")
+    page = drawn(client, "/admin/projets/toutes_executions")
     feed = page.split("class=\"prj-day\">Aujourd'hui</h3>")[1]
     assert feed.index("Le dépôt distant refuse") < feed.index("Programme écrit.")  # la plus récente d'abord
     blocked = feed.split("Le dépôt distant refuse")[0].rsplit("<li", 1)[1]
@@ -180,7 +180,7 @@ def test_runs_read_day_by_day_with_their_verdict_proof_and_commit(world):  # noq
     assert "prouvé" in done and "commit=3f9a2c1e8b7d" in done and "L’épisode : prompt, outils, appels" in done
     # un objectif bloqué : la figure « Objectifs » de la bande de sa fiche passe en alerte (le ton de sa Stat)
     append(client, kernel, [OBJECTIVE_CHANGED.draft(project=pid, objective=2, status=c.BLOCKED)], "projects")
-    band = drawn(client, f"/inspecteur/fiche/project/{pid}").split('class="prj-ov-band"', 1)[1].split("</ul>")[0]
+    band = drawn(client, f"/admin/fiche/project/{pid}").split('class="prj-ov-band"', 1)[1].split("</ul>")[0]
     objectives = band.split("<li", 2)[1]
     assert objectives.startswith(' class="warn"') and "Objectifs" in objectives and "1 bloqué" in objectives
 
@@ -188,7 +188,7 @@ def test_runs_read_day_by_day_with_their_verdict_proof_and_commit(world):  # noq
 def test_technical_decisions_are_grouped_by_project_with_what_and_why(world):  # noqa: F811
     client, live, _ = world
     kernel = _life(client, live)
-    assert "aucune décision avec ces filtres" in drawn(client, "/inspecteur/projets/toutes_decisions")
+    assert "aucune décision avec ces filtres" in drawn(client, "/admin/projets/toutes_decisions")
     first = _create(client, kernel, "Outils réseau", "Créer un module RDP")
     second = _create(client, kernel, "Préparer le stream", "Écrire le programme")
     for d in (DECIDED.draft(project=first, decision=1, title=Content.of("Quel langage ?", level=0),
@@ -199,7 +199,7 @@ def test_technical_decisions_are_grouped_by_project_with_what_and_why(world):  #
               DECIDED.draft(project=second, decision=1, title=Content.of("Durée du stream", level=0),
                             choice=Content.of("Une heure et demie", level=0), author="operator")):
         append(client, kernel, [d], "projects")
-    page = drawn(client, "/inspecteur/projets/toutes_decisions")
+    page = drawn(client, "/admin/projets/toutes_decisions")
     groups = page.split('class="prj-dec-group"')[1:]
     assert len(groups) == 2 and "Préparer le stream" in groups[0] and "Outils réseau" in groups[1]
     network = groups[1]
@@ -207,7 +207,7 @@ def test_technical_decisions_are_grouped_by_project_with_what_and_why(world):  #
     assert "asyncio suffit pour les connexions." in network.split('class="prj-dec-why"')[1]
     assert "Quel langage ?" not in network  # remplacée : hors des décisions en vigueur
     assert "posée par toi" in groups[0]
-    every = drawn(client, "/inspecteur/projets/toutes_decisions?statut=toutes")
+    every = drawn(client, "/admin/projets/toutes_decisions?statut=toutes")
     replaced = every.split("Quel langage ?")[0].rsplit("<li", 1)[1]
     assert 'class="faded"' in replaced and "remplacée par D2" in every
     # le statut, quatre choix toujours posés, en bouton à choix ; le projet (un titre ou un n°) garde son formulaire
@@ -236,7 +236,7 @@ def test_runs_and_decisions_filter_by_a_word_of_the_title_or_by_the_number(world
         c.RUN_REPORTED.draft(project=network, objective=1, verdict=c.CONTINUE,
                              summary=Content.of("Le module démarre.", level=0)),
     ], "projects")
-    runs = "/inspecteur/projets/toutes_executions"
+    runs = "/admin/projets/toutes_executions"
     said = ("Programme esquissé.", "Le lecteur refuse le fichier.", "Le module démarre.")
 
     def shown(url: str) -> tuple[bool, ...]:
@@ -252,7 +252,7 @@ def test_runs_and_decisions_filter_by_a_word_of_the_title_or_by_the_number(world
     assert not any(s in nobody for s in said)
     _decide(client, kernel, network, "d1", title="Le protocole", choice="RDP d'abord", reason="le plus demandé")
     _decide(client, kernel, stream, "d2", title="La durée", choice="Une heure et demie", reason="assez pour tout")
-    decisions = "/inspecteur/projets/toutes_decisions"
+    decisions = "/admin/projets/toutes_decisions"
     one = drawn(client, f"{decisions}?projet=réseau")
     assert "RDP d'abord" in one and "Une heure et demie" not in one
     absent = network + 1000  # aucun projet sous ce n°, ni dans un titre
@@ -272,7 +272,7 @@ def test_a_project_page_reads_like_the_mockup(world):  # noqa: F811
                                                      args_json='{"argv": ["pip", "install", "requests"]}',
                                                      summary=Content.of("Installer requests avec le réseau"),
                                                      context=f"project:{pid}")])
-    page = drawn(client, f"/inspecteur/fiche/project/{pid}")
+    page = drawn(client, f"/admin/fiche/project/{pid}")
     crumbs = page.split('<nav class="crumbs"', 1)[1].split("</nav>", 1)[0]
     assert crumbs.index("Activité") < crumbs.index(">Projets</a>") < crumbs.index(f"n° {pid}")
     title = page.split('class="page-title-row"', 1)[1].split("</div>", 1)[0]
@@ -291,7 +291,7 @@ def test_a_project_page_reads_like_the_mockup(world):  # noqa: F811
     assert page.count('<p class="prj-ov-banner ') == 1 and "À décider" not in page
     band = page.split('class="prj-ov-band"', 1)[1].split("</ul>", 1)[0]
     assert ">0/2<" in band and "ponctuels faits · 1 constant" in band
-    assert f'href="/inspecteur/fiche/project/{pid}?onglet=objectifs">Objectifs →' in page
+    assert f'href="/admin/fiche/project/{pid}?onglet=objectifs">Objectifs →' in page
 
 
 def test_a_project_page_sends_its_requests_to_the_approvals_queue(world):  # noqa: F811
@@ -310,21 +310,21 @@ def test_a_project_page_sends_its_requests_to_the_approvals_queue(world):  # noq
                                                          summary=Content.of(said), context=f"project:{pid}")])
     pending = [p.proposal for p in kernel.mind.frame().get(rt.PENDING_EFFECTS)]
     assert len(pending) == 2
-    page = drawn(client, f"/inspecteur/fiche/project/{pid}")
+    page = drawn(client, f"/admin/fiche/project/{pid}")
     banner = page.split('class="prj-ov-banner', 1)[1].split("</p>", 1)[0]
     assert "2 demandes attendent ton accord" in banner
-    assert f'href="/inspecteur/approbations/en_attente?demande={pending[0]}"' in banner  # la première
+    assert f'href="/admin/approbations/en_attente?demande={pending[0]}"' in banner  # la première
     tiles = page.split('class="prj-ov-grid"', 1)[1]
     shown = [t.split("</dt>", 1)[0] for t in tiles.split("<dt>")[1:]]
     assert shown == ["quand", "sur quoi", "dépôt distant", "dernier échange"]  # l'en-tête, la bande disent le reste
     band = page.split('class="prj-ov-band"', 1)[1].split("</ul>", 1)[0]
     assert "Dernier commit" in band and "dépôt distant" not in band  # le distant, dans « Son dépôt » seulement
-    carnet = drawn(client, f"/inspecteur/fiche/project/{pid}?onglet=carnet")
+    carnet = drawn(client, f"/admin/fiche/project/{pid}?onglet=carnet")
     for action in ("projects.approuver", "projects.refuser"):
-        assert f'action="/inspecteur/action/{action}"' not in carnet and f'action="/inspecteur/action/{action}"' \
+        assert f'action="/admin/action/{action}"' not in carnet and f'action="/admin/action/{action}"' \
             not in page
     for n in pending:
-        assert f'href="/inspecteur/approbations/en_attente?demande={n}"' in carnet
+        assert f'href="/admin/approbations/en_attente?demande={n}"' in carnet
     # ni « » » ni « valider » seul à la ligne : des espaces insécables, fines dans les guillemets
     assert carnet.count("La décider dans «\u202fÀ\u00a0valider\u202f»") == 2
     assert "attend ton accord" in carnet and "https://example.test/donnees.csv" in carnet  # l'état, la commande
@@ -339,10 +339,10 @@ def test_a_projects_behaviour_is_a_settings_form_without_redoing_its_cards(world
     client, live, _ = world
     kernel = _life(client, live)
     pid = _create(client, kernel, "Outils réseau", "Créer un module RDP")
-    page = drawn(client, f"/inspecteur/fiche/project/{pid}?onglet=comportement")
+    page = drawn(client, f"/admin/fiche/project/{pid}?onglet=comportement")
     assert 'data-tab="project/comportement"' in page
     body = page.split('data-tab="project/comportement"', 1)[1]
-    form = body.split('action="/inspecteur/action/projects.modifier"', 1)[1].split("</form>", 1)[0]
+    form = body.split('action="/admin/action/projects.modifier"', 1)[1].split("</form>", 1)[0]
     assert 'class="form hm-form prj-behaviour-form"' in body  # le paramétrage, pas la carte générique d'une action
     assert 'class="form action-card' not in body and "now-card" not in form  # ni carte ni cadre dans la carte
     legends = [x.split("</legend>", 1)[0] for x in form.split("<legend>")[1:]]
@@ -364,12 +364,12 @@ def test_a_projects_behaviour_is_a_settings_form_without_redoing_its_cards(world
     tools = body.split('id="prj-tools-title"', 1)[1]
     assert ">Ses outils</h2>" in tools and "son atelier" in tools and "ws_write" in tools  # les lots, leurs outils
     assert '<div class="hm-pager single">' in tools  # une page : ni « 1–4 sur 4 » ni « Page 1 sur 1 » en vue
-    chooser = tools.split('action="/inspecteur/action/projects.outils"', 1)[1].split("</form>", 1)[0]
+    chooser = tools.split('action="/admin/action/projects.outils"', 1)[1].split("</form>", 1)[0]
     assert "Choisir ses outils" in chooser and 'name="tool_memory"' in chooser and "Enregistrer ses outils" in chooser
     archived = client.portal.call(lambda: perform(kernel, "projects.archiver", {"_champs": []}, by="user_1",
                                                   subject=str(pid), nonce="a1"))
     assert archived.ok, archived
-    shown = drawn(client, f"/inspecteur/fiche/project/{pid}?onglet=comportement")
+    shown = drawn(client, f"/admin/fiche/project/{pid}?onglet=comportement")
     body = shown.split('data-tab="project/comportement"', 1)[1]
     assert "projects.modifier" not in body and "projects.outils" not in body  # le formulaire n'est plus offert
     assert "archivé ne se modifie plus" in body
@@ -396,7 +396,7 @@ def test_a_projects_notebook_reads_in_subtabs_and_sends_requests_to_the_queue(wo
                                                      summary=Content.of("Installer requests avec le réseau"),
                                                      context=f"project:{pid}")])
     pending = [p.proposal for p in kernel.mind.frame().get(rt.PENDING_EFFECTS)]
-    page = drawn(client, f"/inspecteur/fiche/project/{pid}?onglet=carnet")
+    page = drawn(client, f"/admin/fiche/project/{pid}?onglet=carnet")
     body = page.split('data-tab="project/carnet"', 1)[1]
     nav = body.split('<div class="hm-subtabs" data-subtabs>', 1)[1].split("</nav>", 1)[0]
     assert [x.split("</a>", 1)[0].rsplit(">", 1)[1] for x in nav.split("<a ")[1:]] == [
@@ -414,9 +414,9 @@ def test_a_projects_notebook_reads_in_subtabs_and_sends_requests_to_the_queue(wo
     assert link.endswith("#carnet-notes")  # la page suivante revient à son sous-onglet
     out = body.split('id="carnet-sorties"', 1)[1]  # le dernier sous-onglet (sa commande est une section à elle)
     assert "attend ton accord" in out and "Installer requests avec le réseau" in out and "requests" in out
-    assert f'href="/inspecteur/approbations/en_attente?demande={pending[0]}"' in out  # mène à la file
+    assert f'href="/admin/approbations/en_attente?demande={pending[0]}"' in out  # mène à la file
     assert "projects.approuver" not in body and "projects.refuser" not in body and "<form" not in out
-    paged = drawn(client, f"/inspecteur/fiche/project/{pid}{link.split('#', 1)[0]}")
+    paged = drawn(client, f"/admin/fiche/project/{pid}{link.split('#', 1)[0]}")
     body = paged.split('data-tab="project/carnet"', 1)[1]
     first = body.split('<section id="', 1)[1].split('"', 1)[0]
     assert first == "carnet-notes" and "Note n° 2." in body  # le sous-onglet qu'on feuillette s'ouvre

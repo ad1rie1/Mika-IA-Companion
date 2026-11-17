@@ -79,7 +79,7 @@ sont à la boîte qu'ils désignent. Une boîte qu'on ne lui partage qu'en lectu
 **`GET /api/moi/mail/boxes`** — ses boîtes :
 
 ```json
-{"plugged": true, "read_on_open": "3s",
+{"plugged": true, "read_on_open": "3s", "microsoft_app": true,
  "boxes": [{"key": "pro", "name": "Atelier", "address": "atelier@example.test", "level": "proprietaire",
             "ready": true, "can_send": true, "enabled": true, "voice": "elle", "signature": "",
             "last_poll": 1790790000000, "error": "", "drafts_waiting": 1, "owner_name": "",
@@ -87,7 +87,8 @@ sont à la boîte qu'ils désignent. Une boîte qu'on ne lui partage qu'en lectu
                          "unseen": 3}]}]}
 ```
 
-`read_on_open` : quand un mail ouvert devient lu (`jamais`, `aussitot`, `3s`, `10s`, ADR 0175) — le client pose le
+`microsoft_app` : l'instance a son application Microsoft (ADR 0238) — une boîte Microsoft s'ajoute alors sans
+`oauth_client_id`, que le client ne demande plus. `read_on_open` : quand un mail ouvert devient lu (`jamais`, `aussitot`, `3s`, `10s`, ADR 0175) — le client pose le
 geste `read` lui-même. `level` : `proprietaire`, ou le niveau d'un partage (`lire`, `preparer`, `servir`) avec le nom
 de son propriétaire (`owner_name`, vide pour une boîte à toi). `common` : une boîte « à toi », commune à ses
 propriétaires (elle ne se partage pas à l'une d'elles, § 9). `voice` : comment elle y écrit (`elle`, `assistante`,
@@ -332,7 +333,7 @@ la part de la ligne qui te concerne (ADR 0209).
   ressource de l'outil est à toi (une boîte à ton nom, ADR 0185, ou qu'on te partage : `why` le dit).
 - Pour une opératrice seulement (vides sinon) : `line`, la ligne même, telle que la console la dit (« ligne 2 —
   serré par le canal … ») ; `href` d'une famille, d'un service ou d'une app, la page de la console où se lit son
-  tableau (`/inspecteur/reglages/droits?detail=…`).
+  tableau (`/admin/reglages/droits?detail=…`).
 - `accounts` : chaque boîte et chaque compte Teams à toi (pas ceux qu'on te partage : leur règle est l'affaire de
   leur propriétaire), avec sa famille d'outils (`family` : ses outils sont les siens, les mêmes pour tous tes comptes
   de cette sorte, et ses cases sont dans `families`) et la règle qui vaut pour son canal, telle que le courrier et

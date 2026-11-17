@@ -16,20 +16,20 @@ def test_wakeups_are_tiles_then_their_calls_with_what_they_brought(world):  # no
     client, live, _ = world
     bootstrap(client)
     stop(client, live.kernel)
-    empty = drawn(client, "/inspecteur/reveils")
+    empty = drawn(client, "/admin/reveils")
     assert 'data-tab="reveils/reveils"' in empty and "Aucun réveil déclaré." in empty
     assert "Aucun appel pour l'instant." in empty
     head = empty.split('class="page-head', 1)[1].split('data-tab=', 1)[0]
     assert ">Déclarer un réveil</a>" in head and "nouveau=1" in head and "gear-link" in head  # l'action, puis la roue
     # la roue est celle de la destination (ses réglages y vivent, ADR 0206), une seule fois
-    assert head.count('href="/inspecteur/reveils/parametres"') == 1
+    assert head.count('href="/admin/reveils/parametres"') == 1
     client.portal.call(live.settings.save_wakeup, WakeupConfig(endpoints={
         "serre": WakeEndpoint(label="L'alerte de la serre", instructions="Résume-la.", notify=c.NOBODY),
         "cave": WakeEndpoint(label="La sonde de la cave", enabled=False)}))
     key = client.portal.call(live.wakeups.new_key, "serre", "test")
     assert client.post("/api/wake/serre", json={"text": "Il fait 41 °C dans la serre."},
                        headers={"Authorization": f"Bearer {key}"}).status_code == 202
-    page = drawn(client, "/inspecteur/reveils")
+    page = drawn(client, "/admin/reveils")
     tiles = page.split('class="wk-tiles"', 1)[1].split("</ul>", 1)[0]
     cave = tiles.split("La sonde de la cave", 1)[0].rsplit("<li", 1)[1]
     assert "off" in cave and "keyless" in cave  # désactivé, sans clé : le trait le dit
@@ -47,7 +47,7 @@ def test_wakeups_are_tiles_then_their_calls_with_what_they_brought(world):  # no
     assert page.count("POST /api/wake/") == 1 and "se règlent dans Paramètres" not in page
     # pas de champ « nom exact » suivi de « Filtrer » : la tuile d'un réveil mène à sa fiche, qui a tous ses appels
     assert '<form class="filters"' not in page and "nom exact" not in page
-    one = drawn(client, "/inspecteur/reveils?reveil=serre")  # l'adresse garde son titre et son filtre
+    one = drawn(client, "/admin/reveils?reveil=serre")  # l'adresse garde son titre et son filtre
     assert "Les appels de « serre »" in one and "Il fait 41 °C dans la serre." in one
     assert '<form class="filters"' not in one
-    assert "Il fait 41 °C" not in drawn(client, "/inspecteur/reveils?reveil=cave")
+    assert "Il fait 41 °C" not in drawn(client, "/admin/reveils?reveil=cave")

@@ -31,12 +31,12 @@ def _life(client, live):
 def test_living_goals_put_explorations_and_reminders_side_by_side(world):  # noqa: F811
     client, live, _ = world
     kernel, now = _life(client, live)
-    empty = drawn(client, "/inspecteur/buts/vivants")
+    empty = drawn(client, "/admin/buts/vivants")
     assert "aucun but en cours" in empty and 'class="person-tiles"' in empty  # ses chiffres, même vides
     _open(client, kernel, c.EXPLORATION, "Explorer : les jeux rétro", bundles=("goals",), max_steps=8, desire=0.9)
     _open(client, kernel, c.REMINDER, "Souhaiter bon courage à Béa", owner="user_1", due=now + 2 * DAY)
     _open(client, kernel, c.REMINDER, "Arroser les plantes", owner="user_1", due=now + 2 * HOUR)
-    page = drawn(client, "/inspecteur/buts/vivants")
+    page = drawn(client, "/admin/buts/vivants")
     explore = page.split('id="gl-explore-title"')[1].split('id="gl-remind-title"')[0]
     assert "Explorer : les jeux rétro" in explore and "Arroser" not in explore
     assert "Séances" in explore and "0 / 8" in explore and "Envie" in explore  # son plafond et son envie qui s'use
@@ -47,14 +47,14 @@ def test_living_goals_put_explorations_and_reminders_side_by_side(world):  # noq
     # ce que l'onglet est se dit une fois, dans son introduction : la carte ne le redit pas en légende
     assert page.count("Ses projets ont leur menu à eux") == 1 and page.count("se propose de faire ensuite") == 1
     # un filtre qui écarte une sorte : sa colonne se tait
-    only = drawn(client, f"/inspecteur/buts/vivants?sorte={c.REMINDER}")
+    only = drawn(client, f"/admin/buts/vivants?sorte={c.REMINDER}")
     assert "Arroser les plantes" in only and 'id="gl-explore-title"' not in only
 
 
 def test_closed_goals_show_their_issue_and_what_they_gave(world):  # noqa: F811
     client, live, _ = world
     kernel, _ = _life(client, live)
-    assert "aucun but clos" in drawn(client, "/inspecteur/buts/clos")
+    assert "aucun but clos" in drawn(client, "/admin/buts/clos")
     done = _open(client, kernel, c.EXPLORATION, "Lire sur la typographie", max_steps=4, desire=0.6)
     stuck = _open(client, kernel, c.EXPLORATION, "Trouver un hébergeur", max_steps=4, desire=0.5, authority=c.USER,
                   owner="user_1")
@@ -68,7 +68,7 @@ def test_closed_goals_show_their_issue_and_what_they_gave(world):  # noqa: F811
         c.GOAL_CLOSED.draft(goal=dropped, status=c.ABANDONED, kind=c.EXPLORATION, authority=c.SELF,
                             title=Content.of("Apprendre le solfège", level=0), reason="son envie s'est usée"),
     ], "goals")
-    page = drawn(client, "/inspecteur/buts/clos")
+    page = drawn(client, "/admin/buts/clos")
 
     def entry(title):
         return page.split(title)[0].rsplit("<li", 1)[1] + page.split(title)[1].split("</li>")[0]
@@ -81,18 +81,18 @@ def test_closed_goals_show_their_issue_and_what_they_gave(world):  # noqa: F811
     assert "1</span> abouti" in tally and "1</span> bloqué" in tally and "sur cette page" in tally
     assert "Un but clos depuis plus de sept jours n'a plus de fiche" in page
     # sa fiche dit, accordé, s'il l'a raconté : « non (0 essai) », jamais « essai(s) »
-    fiche = drawn(client, f"/inspecteur/fiche/goal/{dropped}")
+    fiche = drawn(client, f"/admin/fiche/goal/{dropped}")
     assert "non (0 essai)" in fiche and "essai(s)" not in fiche
 
 
 def test_a_reminder_is_programmed_from_the_title_bar_and_joins_the_reminders(world):  # noqa: F811
     client, live, _ = world
     kernel, now = _life(client, live)
-    for url in ("/inspecteur/buts/vivants", "/inspecteur/buts/clos"):  # l'action de la destination, en haut
+    for url in ("/admin/buts/vivants", "/admin/buts/clos"):  # l'action de la destination, en haut
         bar = drawn(client, url).split('class="page-head-side"')[1].split('data-tab="')[0]
         assert "Programmer un rappel" in bar, url
-    page = drawn(client, "/inspecteur/buts/vivants")
-    link = re.search(r'href="(/inspecteur/action/goals\.programmer\?[^"]+)"', page)
+    page = drawn(client, "/admin/buts/vivants")
+    link = re.search(r'href="(/admin/action/goals\.programmer\?[^"]+)"', page)
     assert link, "quatre champs : l'action a sa page"
     form = drawn(client, link.group(1))
     for label in ("Ce qu'il faudra rappeler", "Quand", "Pour qui", "Vide : toi.", "Urgent (même la nuit)"):
@@ -103,9 +103,9 @@ def test_a_reminder_is_programmed_from_the_title_bar_and_joins_the_reminders(wor
     assert owner.group(2).strip().startswith('<option value="">—</option>') and " selected" not in owner.group(2)
     frame = kernel.mind.frame()
     when = f"{local(now + 2 * DAY, frame.env.tz_of(frame.root)):%Y-%m-%dT%H:%M}"
-    base = {"csrf": client.cookies.get("csrftoken"), "_retour": "/inspecteur/buts/vivants", "_sujet": "",
+    base = {"csrf": client.cookies.get("csrftoken"), "_retour": "/admin/buts/vivants", "_sujet": "",
             "_champs": ["what", "when", "owner", "urgent"]}
-    refused = client.post("/inspecteur/action/goals.programmer", follow_redirects=False,
+    refused = client.post("/admin/action/goals.programmer", follow_redirects=False,
                           data={**base, "_op": "g1", "what": " ", "when": "hier", "owner": "personne_x"})
     assert refused.status_code == 400
     assert "valeur requise" in refused.text and "date illisible" in refused.text and "personne inconnue" in refused.text
@@ -114,11 +114,11 @@ def test_a_reminder_is_programmed_from_the_title_bar_and_joins_the_reminders(wor
         return [g for g in kernel.mind.frame().state("goals").goals.values() if g.kind == c.REMINDER]
 
     assert not reminders()
-    done = client.post("/inspecteur/action/goals.programmer", follow_redirects=False,
+    done = client.post("/admin/action/goals.programmer", follow_redirects=False,
                        data={**base, "_op": "g2", "what": "Arroser les plantes du balcon", "when": when, "owner": "",
                              "urgent": "on"})
-    assert done.status_code == 303 and done.headers["location"].startswith("/inspecteur/buts/vivants")
+    assert done.status_code == 303 and done.headers["location"].startswith("/admin/buts/vivants")
     [g] = reminders()
     assert (g.authority, g.source, g.urgent) == (c.USER, "operator", True) and g.owner
-    remind = drawn(client, "/inspecteur/buts/vivants").split('id="gl-remind-title"')[1]
+    remind = drawn(client, "/admin/buts/vivants").split('id="gl-remind-title"')[1]
     assert "Arroser les plantes du balcon" in remind

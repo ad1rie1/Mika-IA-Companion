@@ -361,7 +361,7 @@
     <string name="settings_box_auth_help">Hotmail, Outlook.com et Live refusent les mots de passe : choisis alors ton compte Microsoft.</string>
     <string name="settings_box_user_help">Souvent l\'adresse elle-même.</string>
     <string name="settings_box_password_help">Un mot de passe d\'application de préférence. Chiffré, jamais réaffiché.</string>
-    <string name="settings_box_client_help">L\'identifiant (client ID) de l\'application inscrite dans Microsoft Entra, flux de clients publics autorisé.</string>
+    <string name="settings_box_client_help">Vide : l\'application de ce serveur, s\'il a la sienne. Sinon l\'identifiant (client ID) d\'une application à toi, inscrite dans Microsoft Entra, flux de clients publics autorisé.</string>
     <string name="settings_box_tenant_help">« consumers » pour un compte personnel ; « organizations » ou son identifiant pour Microsoft 365.</string>
     <string name="settings_ms_save_first">Enregistre d\'abord la connexion par Microsoft : le code à entrer chez Microsoft viendra ensuite.</string>
     <string name="settings_box_imap_help">Donné par ton fournisseur de mail (imap.gmail.com, outlook.office365.com…).</string>
@@ -405,6 +405,8 @@
     <string name="settings_box_label_new_help">Comme elle l\'appellera : « ta boîte Pro ». Vide : le début de l\'adresse.</string>
     <string name="settings_box_client_new_help">L\'identifiant (client ID) de l\'application inscrite dans Microsoft Entra — comptes personnels acceptés, flux de clients publics autorisé.</string>
     <string name="settings_box_tenant_new_help">« consumers » pour Hotmail, Outlook.com, Live.</string>
+    <string name="settings_box_advanced">Avancé</string>
+    <string name="settings_box_advanced_help">Une application Microsoft à toi, un annuaire Microsoft 365</string>
     <string name="settings_box_ms_next">Une fois la boîte ajoutée, Microsoft donne un code à entrer sur sa page : sa page de réglages te le montre.</string>
     <string name="settings_box_user_new_help">Vide : l\'adresse.</string>
     <string name="settings_box_gmail_password">Un mot de passe d\'application, pas celui de ton compte.</string>

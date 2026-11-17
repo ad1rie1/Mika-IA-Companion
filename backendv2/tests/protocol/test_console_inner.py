@@ -23,11 +23,11 @@ def test_memory_reads_keep_privacy_status_source_filters_and_no_side_effects(wor
     remembered = append(client, kernel, [memory.REMEMBERED.draft(text=Content.of("Lancement <script>secret</script>"),
                         about=("user_1",), sensitivity=3, secret=True, sources=(source,))], "memory").seqs[0]
     before, calls = kernel.mind.head, len(backend.calls)
-    url = "/inspecteur/memoire/souvenirs?person=adrien"
+    url = "/admin/memoire/souvenirs?person=adrien"
     body = page(client, url)
     # la liste a sa forme (ADR 0177) : chaque souvenir garde son secret ; son statut ordinaire se tait, le tableau le dit
     assert 'data-tab="memoire/souvenirs"' in body and 'class="memories-item' in body and "secret" in body
-    assert f'/inspecteur/evenement/{remembered}' in body and f'/inspecteur/evenement/{source}' in body
+    assert f'/admin/evenement/{remembered}' in body and f'/admin/evenement/{source}' in body
     assert '<script>secret</script>' not in client.get(url).text
     assert 'name="person"' in body and "adrien" in body
     table = page(client, url + "&vue_pg1=table")
@@ -46,26 +46,26 @@ def test_retry_is_bound_to_its_passage_and_requires_a_valid_explicit_post(world)
     append(client, kernel, [memory.EXTRACTION_DEFERRED.draft(key=source, messages=(source,), status="review",
         attempts=3, failure_code="provider_error", detail=Content.of("Détail <script>indisponible</script>"))], "memory")
     before, calls = kernel.mind.head, len(backend.calls)
-    body = page(client, "/inspecteur/memoire/consolidation")
+    body = page(client, "/admin/memoire/consolidation")
     # le passage dans son sous-onglet (ADR 0177) : son état, sa cause repliée, son action sur sa ligne
     queue = body.split('id="consol-queue"')[1].split('id="consol-runs"')[0]
     assert 'class="consol-passage"' in queue and "à examiner" in queue and "Détail du passage" in queue
-    assert "/inspecteur/action/memory.reprendre" in queue.split("Ce que le modèle a répondu")[0]
-    raw = client.get("/inspecteur/memoire/consolidation").text
+    assert "/admin/action/memory.reprendre" in queue.split("Ce que le modèle a répondu")[0]
+    raw = client.get("/admin/memoire/consolidation").text
     assert "<script>indisponible</script>" not in raw
-    form = re.search(r'<form[^>]+action="/inspecteur/action/memory.reprendre".*?</form>', raw, re.S).group()
+    form = re.search(r'<form[^>]+action="/admin/action/memory.reprendre".*?</form>', raw, re.S).group()
     assert f'type="hidden" name="key" value="{source}"' in form
     assert 'data-confirm="Relire ce passage' in form
     assert '<label for=' not in form
     assert kernel.mind.head == before and len(backend.calls) == calls
     values = {k: html.unescape(v) for k, v in re.findall(r'<input[^>]+name="([^"]+)" value="([^"]*)"', form)}
-    rejected = client.post("/inspecteur/action/memory.reprendre", data={**values, "csrf": "invalid"})
+    rejected = client.post("/admin/action/memory.reprendre", data={**values, "csrf": "invalid"})
     assert rejected.status_code == 403 and kernel.mind.head == before
-    sent = post(client, "/inspecteur/action/memory.reprendre", values)
+    sent = post(client, "/admin/action/memory.reprendre", values)
     assert sent.status_code == 200
     kept = client.portal.call(lambda: kernel.mind.store.latest([memory.EXTRACTION_DEFERRED.name], 10))
     assert len(kept) == 2 and json.loads(kept[0].data)["status"] == "queued"
-    post(client, "/inspecteur/action/memory.reprendre", values)
+    post(client, "/admin/action/memory.reprendre", values)
     assert len(client.portal.call(lambda: kernel.mind.store.latest([memory.EXTRACTION_DEFERRED.name], 10))) == 2
     assert len(backend.calls) == calls
 
@@ -77,12 +77,12 @@ def test_thoughts_distinguish_live_content_from_history_and_keep_cursor_return(w
     append(client, live.kernel, [attention.THOUGHT_BORN.draft(text=Content.of(text), emotion="curious",
         intensity=intensity, origin="exchange", about=("user_1",))
         for text, intensity in (("Idée encore présente", 0.8), ("Idée qui s’est dissipée", 0.001))], "attention")
-    body = page(client, "/inspecteur/pensees/pensees")
+    body = page(client, "/admin/pensees/pensees")
     # la page a sa forme (ADR 0177) : l'historique est un sous-onglet à part, après les pensées vivantes
     panes = body.split('class="hm-subpanes"')[1]
     live = panes.split('id="thoughts-history"')[0]
     assert 'id="thoughts-now"' in live and "Idée encore présente" in live and "Idée qui s’est dissipée" not in live
     assert "Idée qui s’est dissipée" in panes.split('id="thoughts-history"')[1]
     # une page plus ancienne de l'historique ouvre son sous-onglet : le premier, que la console montre sans ancre
-    older = page(client, "/inspecteur/pensees/pensees?avant=1&pile=0,90").split('class="hm-subpanes"')[1]
+    older = page(client, "/admin/pensees/pensees?avant=1&pile=0,90").split('class="hm-subpanes"')[1]
     assert older.index('id="thoughts-history"') < older.index('id="thoughts-now"') and "Plus récents" in older

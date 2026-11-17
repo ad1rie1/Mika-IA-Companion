@@ -28,9 +28,9 @@ from tests.protocol.test_drawn_pages import drawn
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 
 OPERATOR = "user_1"
-PROMISES, BELIEFS, MEMORIES, MOMENTS = ("/inspecteur/memoire/promesses", "/inspecteur/memoire/croyances",
-                                        "/inspecteur/memoire/souvenirs", "/inspecteur/memoire/moments")
-AUDITED = "/inspecteur/systeme/operations"
+PROMISES, BELIEFS, MEMORIES, MOMENTS = ("/admin/memoire/promesses", "/admin/memoire/croyances",
+                                        "/admin/memoire/souvenirs", "/admin/memoire/moments")
+AUDITED = "/admin/systeme/operations"
 #: chaque geste de correction et sa clé d'action
 GESTURES = ("memory.tenir", "memory.abandonner", "memory.finir", "memory.issue", "memory.dementir")
 
@@ -57,11 +57,11 @@ def _card(page: str, text: str) -> str:
 
 def _gestures(card: str) -> set[str]:
     """Les actions de correction dont la carte porte un formulaire."""
-    return set(re.findall(r'action="/inspecteur/action/(memory\.[a-z]+)"', card))
+    return set(re.findall(r'action="/admin/action/(memory\.[a-z]+)"', card))
 
 
 def _post(client, action: str, form: dict[str, list[str]]):
-    sent = client.post(f"/inspecteur/action/{action}", data=form, follow_redirects=False)
+    sent = client.post(f"/admin/action/{action}", data=form, follow_redirects=False)
     assert sent.status_code == 303, sent.text
     return sent
 
@@ -222,7 +222,7 @@ def test_a_form_replayed_on_an_item_already_corrected_is_refused_without_writing
     denied = _post(client, "memory.dementir", second)
     assert "Elle ne le tient déjà plus pour sien" in drawn(client, denied.headers["location"])
     # « a eu lieu » avant qu'il commence : refusé, le formulaire remontré avec son erreur
-    early = client.post("/inspecteur/action/memory.issue", follow_redirects=False,
+    early = client.post("/admin/action/memory.issue", follow_redirects=False,
                         data={**form_of(drawn(client, MOMENTS), "memory.issue", having=str(trip)),
                               "outcome": ["happened"]})
     assert early.status_code == 400 and "Annulé ou reporté seulement" in early.text

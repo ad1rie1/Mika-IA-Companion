@@ -34,7 +34,7 @@ from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture p
 from tests.unit.test_operations import BOARD, events, form
 
 SRC = Path(operations.__file__).resolve().parents[1]
-PAGE = "/inspecteur/systeme/operations"
+PAGE = "/admin/systeme/operations"
 #: Adrien (``bootstrap``) pilote aussi la console : un geste de son espace sous une clé nue s'y lirait « la console »
 OPERATORS = frozenset({"user_1"})
 
@@ -205,10 +205,10 @@ def test_a_gesture_links_only_a_sheet_that_opens(world):  # noqa: F811
     page = drawn(client, PAGE)
     feed = page[page.index('class="sys-ops-feed"'):]
     feed = feed[:feed.index("</ol>")]
-    links = re.findall(r'href="(/inspecteur/fiche/[^"]+)"', feed)
-    assert links == ["/inspecteur/fiche/compte/pro"] and client.get(links[0]).status_code == 200
+    links = re.findall(r'href="(/admin/fiche/[^"]+)"', feed)
+    assert links == ["/admin/fiche/compte/pro"] and client.get(links[0]).status_code == 200
     # sous le titre de sa fiche (la boîte « pro » s'appelle « Atelier »), sa clé au survol (C8-07)
-    assert '<span title="pro"><a href="/inspecteur/fiche/compte/pro">Compte « Atelier »</a></span>' in feed
+    assert '<span title="pro"><a href="/admin/fiche/compte/pro">Compte « Atelier »</a></span>' in feed
     assert ">Compte pro</a>" not in feed
     # le reste dit sa clé, en texte, sa sorte en bulle
     assert all(f'title="{kind}">{key}</span>' in feed for kind, key in (("compte", "partie"), ("compte", "bea"),
@@ -228,7 +228,7 @@ def test_a_gesture_on_a_project_says_its_title_not_its_number(world):  # noqa: F
     feed = drawn(client, PAGE)
     feed = feed[feed.index('class="sys-ops-feed"'):]
     feed = feed[:feed.index("</ol>")]
-    assert (f'<span title="{pid}"><a href="/inspecteur/fiche/project/{pid}">Projet « Labo de trading »</a></span>'
+    assert (f'<span title="{pid}"><a href="/admin/fiche/project/{pid}">Projet « Labo de trading »</a></span>'
             in feed)
     assert f">Projet {pid}<" not in feed
     # la vue le dit aussi (le repli, la console en MCP) : le titre sur la ligne, la clé dans sa colonne repliée

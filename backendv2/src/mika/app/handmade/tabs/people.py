@@ -2,7 +2,7 @@
 forme (ADR 0177). Ses onglets disent une personne comme la vue d'ensemble — son initiale de la couleur de ce qu'elle
 ressent envers elle, sa présence, ce qu'elle est pour elle — et montrent chacun ce que sa faculté sait de plus.
 
-- **Vue d'ensemble** (``/inspecteur/personnes``, ``PeoplePage``, une page à part, dans le cadre de la console) : les
+- **Vue d'ensemble** (``/admin/personnes``, ``PeoplePage``, une page à part, dans le cadre de la console) : les
   gens qu'elle connaît. La destination Personnes avait trois onglets, un par faculté : l'annuaire (``identity``), les
   liens (``social``), les présents (``presence``). « Qui connaît-elle, et où en est-elle avec chacun ? » les traverse :
   cette page les croise, une carte par personne — ce qu'elle est pour elle, ce qu'elle ressent envers elle,

@@ -17,7 +17,7 @@ def test_apps_are_tiles_and_a_broken_one_says_why(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
     stop(client, live.kernel)
-    empty = drawn(client, "/inspecteur/apps")
+    empty = drawn(client, "/admin/apps")
     assert 'data-tab="apps/apps"' in empty and "Elle n’a encore écrit aucune app." in empty
     # l'introduction est dite une fois, par la description de la vue ; l'encart ne la redit pas
     assert empty.count("Ouvre une app pour l") == 1 and "régler ses réglages" not in empty
@@ -33,14 +33,14 @@ def test_apps_are_tiles_and_a_broken_one_says_why(world):  # noqa: F811
     append(client, kernel, [SWITCHED.draft(app="meteo", state="promoted"),
                             TICKED.draft(app="prix", ok=False, error="KeyError: 'prix'"),
                             SWITCHED.draft(app="prix", state="broken", reason="trois tours ratés")], "forge")
-    page = drawn(client, "/inspecteur/apps")
+    page = drawn(client, "/admin/apps")
     tiles = page.split('class="apx-tiles"', 1)[1].split("</ul>", 1)[0]
     meteo = tiles.split("Carnet météo", 1)[0].rsplit("<li", 1)[1] + tiles.split("Carnet météo", 1)[1].split("</li>")[0]
-    assert "/inspecteur/fiche/app/meteo" in meteo and ">promue<" in meteo and ">active<" in meteo
+    assert "/admin/fiche/app/meteo" in meteo and ">promue<" in meteo and ">active<" in meteo
     prix = tiles.split("Veille des prix", 1)[0].rsplit("<li", 1)[1] + tiles.split("Veille des prix", 1)[1].split("</li>")[0]
     assert "apx-app danger" in prix and ">cassée<" in prix and "trois tours ratés" in prix
     assert "apx-last failed" in prix and "KeyError" in prix
     assert "1 cassée : elle ne s'en sert plus tant qu'on ne l'a pas relancée." in page
     assert page.count("Ouvre une app pour l") == 1  # l'encart ne dit que la panne, sans redire l'introduction
-    table = drawn(client, "/inspecteur/apps?vue_pg1=table")
+    table = drawn(client, "/admin/apps?vue_pg1=table")
     assert "<table" in table and "apx-tiles" not in table  # la liste de la console (son rendu à elle)

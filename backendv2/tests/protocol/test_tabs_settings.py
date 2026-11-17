@@ -9,7 +9,7 @@ from tests.protocol.test_console_settings import post
 from tests.protocol.test_drawn_pages import drawn
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 
-BASE = "/inspecteur/reglages"
+BASE = "/admin/reglages"
 
 
 def test_the_overview_groups_faculties_by_family_and_says_where_a_value_comes_from(world):  # noqa: F811
@@ -69,4 +69,4 @@ def test_the_journal_reads_day_by_day_and_gathers_one_moment(world):  # noqa: F8
     operator = page.split(">opérateur<", 1)[1].split("</li>", 1)[0]
     assert "Paramètres · Caméra" in operator and "par " in operator
     gathered = page.split("Paramètres journalisés pour ", 1)[1].split("</li>", 1)[0]
-    assert gathered.count('href="/inspecteur/reglages/comportement-') > 1  # le démarrage, en une ligne
+    assert gathered.count('href="/admin/reglages/comportement-') > 1  # le démarrage, en une ligne

@@ -9,8 +9,8 @@ import html
 from mika.vocab.canals import CanalRule, Canals
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 
-PAGE = "/inspecteur/reglages/canaux"
-POST = "/inspecteur/reglages/canaux/regler"
+PAGE = "/admin/reglages/canaux"
+POST = "/admin/reglages/canaux/regler"
 
 
 def send(client, cle: str, faire: str = "", **fields: str) -> str:
@@ -25,7 +25,7 @@ def test_an_operator_rules_a_canal_and_her_mail_follows(world):  # noqa: F811
     page = html.unescape(client.get(PAGE).text)
     for part in ("Par où ça lui arrive", "Chat web", "Courrier", "Elle seule", "minimum vital", "Comportement par défaut"):
         assert part in page, part
-    assert 'href="/inspecteur/reglages/canaux"' in html.unescape(client.get("/inspecteur").text)  # dans le menu
+    assert 'href="/admin/reglages/canaux"' in html.unescape(client.get("/admin").text)  # dans le menu
     # un type de canal par sous-onglet (ADR 0176), ses exceptions dedans ; le canal demandé a sa section en premier
     assert 'href="#canal-web"' in page and 'id="canal-web" data-pane' in page and 'id="c-web-salon"' in page
     asked = html.unescape(client.get(PAGE, params={"canal": "courrier"}).text)

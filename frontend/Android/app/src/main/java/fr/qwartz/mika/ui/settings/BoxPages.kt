@@ -811,6 +811,8 @@ private fun SigninCard(s: SignIn?, onConnect: () -> Unit) {
  * Ajouter une boîte : son fournisseur (Microsoft, Exchange pro pour une opératrice, Gmail, une autre), puis ce qu'il
  * demande. Une clé d'envoi par création : redite (le réseau a coupé), elle ne fait pas de doublon. Créée, une boîte
  * Microsoft demande son code tout de suite, une autre se teste ; puis sa page s'ouvre à la place de celle-ci.
+ * Quand l'instance a son application Microsoft (ADR 0238), une boîte Microsoft ne demande que son adresse et son
+ * nom : l'application et l'annuaire se rangent sous « Avancé ».
  */
 class NewBoxViewModel(graph: AppGraph) : SettingsModel(graph) {
     var provider by mutableStateOf<Provider?>(null)
@@ -821,6 +823,14 @@ class NewBoxViewModel(graph: AppGraph) : SettingsModel(graph) {
         private set
     var busy by mutableStateOf(false)
         private set
+
+    /** L'instance a son application Microsoft : l'application et l'annuaire d'une boîte se rangent sous « Avancé ». */
+    var instanceApp by mutableStateOf(false)
+        private set
+
+    /** « Avancé » est ouvert. */
+    var advanced by mutableStateOf(false)
+        private set
     private var createKey = MoiApi.newKey()
 
     fun open(entry: String) {
@@ -828,7 +838,17 @@ class NewBoxViewModel(graph: AppGraph) : SettingsModel(graph) {
         provider = null
         typed = NewBox()
         errors = emptyMap()
+        advanced = false
         createKey = MoiApi.newKey()
+        val from = opening
+        viewModelScope.launch {
+            val got = api.boxes()
+            if (opening == from && got is MoiApi.Result.Ok) instanceApp = got.value.microsoftApp
+        }
+    }
+
+    fun toggleAdvanced() {
+        advanced = !advanced
     }
 
     fun choose(p: Provider) {
@@ -876,7 +896,11 @@ class NewBoxViewModel(graph: AppGraph) : SettingsModel(graph) {
                     move(if (made.isNotBlank()) Move.Replace(settingsPage(SettingsPages.BOX, made)) else Move.Back, from)
                 }
                 // une coupure du réseau garde la clé : redit, l'envoi ne fera pas de doublon
-                is MoiApi.Result.Failed -> errors = refused(got.error, shown(p), BOX_LABELS)
+                is MoiApi.Result.Failed -> {
+                    errors = refused(got.error, shown(p), BOX_LABELS)
+                    // un refus qui porte sur un champ rangé sous « Avancé » l'ouvre : il se voit
+                    if ("oauth_client_id" in errors || "oauth_tenant" in errors) advanced = true
+                }
             }
             busy = false
         }
@@ -922,8 +946,15 @@ internal fun NewBoxPage(graph: AppGraph) {
                     SetField(BOX_LABELS.getValue("address"), t.address, { x -> vm.edit("address") { it.copy(address = x) } }, error = e["address"], placeholder = "toi@exemple.fr", keyboard = KeyboardType.Email, max = 300)
                     SetField(BOX_LABELS.getValue("label"), t.label, { x -> vm.edit("label") { it.copy(label = x) } }, help = stringResource(R.string.settings_box_label_new_help), error = e["label"], placeholder = "Pro, Perso…", max = 120)
                     if (p == Provider.MICROSOFT) {
-                        SetField(BOX_LABELS.getValue("oauth_client_id"), t.oauthClientId, { x -> vm.edit("oauth_client_id") { it.copy(oauthClientId = x) } }, help = stringResource(R.string.settings_box_client_new_help), error = e["oauth_client_id"], mono = true, placeholder = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", max = 200)
-                        SetField(BOX_LABELS.getValue("oauth_tenant"), t.oauthTenant, { x -> vm.edit("oauth_tenant") { it.copy(oauthTenant = x) } }, help = stringResource(R.string.settings_box_tenant_new_help), error = e["oauth_tenant"], mono = true, max = 200)
+                        if (vm.instanceApp) {
+                            SetItem(null, stringResource(R.string.settings_box_advanced), stringResource(R.string.settings_box_advanced_help), onClick = vm::toggleAdvanced, boxed = false) {
+                                MIcon(if (vm.advanced) R.drawable.ic_m_chev_up else R.drawable.ic_m_chev_down, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        if (!vm.instanceApp || vm.advanced) {
+                            SetField(BOX_LABELS.getValue("oauth_client_id"), t.oauthClientId, { x -> vm.edit("oauth_client_id") { it.copy(oauthClientId = x) } }, help = stringResource(if (vm.instanceApp) R.string.settings_box_client_help else R.string.settings_box_client_new_help), error = e["oauth_client_id"], mono = true, placeholder = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", max = 200)
+                            SetField(BOX_LABELS.getValue("oauth_tenant"), t.oauthTenant, { x -> vm.edit("oauth_tenant") { it.copy(oauthTenant = x) } }, help = stringResource(R.string.settings_box_tenant_new_help), error = e["oauth_tenant"], mono = true, max = 200)
+                        }
                         SetNote(stringResource(R.string.settings_box_ms_next))
                     } else {
                         SetField(BOX_LABELS.getValue("user"), t.user, { x -> vm.edit("user") { it.copy(user = x) } }, help = stringResource(R.string.settings_box_user_new_help), error = e["user"], mono = true, max = 300)

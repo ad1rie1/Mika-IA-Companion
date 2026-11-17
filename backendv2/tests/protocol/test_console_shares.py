@@ -20,11 +20,11 @@ from tests.protocol.test_moi_mcp import SERVICE, servers
 from tests.protocol.test_moi_shares import share
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 
-PAGE = "/inspecteur/reglages/droits"
-FICHE = "/inspecteur/fiche/person"
+PAGE = "/admin/reglages/droits"
+FICHE = "/admin/fiche/person"
 RETIRE = PAGE + "/partages"
 GESTURE = "console.droits.partage_retire"
-GESTURES = "/inspecteur/systeme/operations"
+GESTURES = "/admin/systeme/operations"
 #: la sorte d'un partage audité
 AUDITED = "ressource_partagee"
 
@@ -79,8 +79,8 @@ def test_an_operator_reads_every_share_and_takes_one_off(world):  # noqa: F811
     assert said == ["Atelier boîte toi Léa Martin Lire", "Travail compte Teams toi Léa Martin Lire et préparer",
                     "factures service adrien Léa Martin S'en servir ses lignes d'accès"]
     assert "personne:" not in pane  # jamais la clé brute
-    assert f'href="/inspecteur/fiche/person/{lea}"' in pane  # qui le reçoit mène à sa fiche
-    assert 'href="/inspecteur/fiche/serveur/factures?onglet=fait"' in rows[2]  # un service : ses lignes d'accès
+    assert f'href="/admin/fiche/person/{lea}"' in pane  # qui le reçoit mène à sa fiche
+    assert 'href="/admin/fiche/serveur/factures?onglet=fait"' in rows[2]  # un service : ses lignes d'accès
     forms = forms_on(page)
     assert [(f["kind"], f["key"], f["person"]) for _, f in forms] == [("mail", "pro", lea), ("teams", "travail", lea)]
     assert "Léa Martin" in forms[0][0] and "la boîte « Atelier »" in forms[0][0]
@@ -165,7 +165,7 @@ def test_a_share_is_audited_as_a_share_never_as_a_mail(world):  # noqa: F811
     page = drawn(client, GESTURES)
     feed = page[page.index('class="sys-ops-feed"'):]
     assert "Partage retiré" in feed and "Partage modifié" in feed and f'title="{AUDITED}">mail:pro:{lea}</span>' in feed
-    assert "/inspecteur/fiche/mail/" not in feed and "Mail pro" not in feed
+    assert "/admin/fiche/mail/" not in feed and "Mail pro" not in feed
 
 
 def test_only_an_operator_takes_a_share_off(world):  # noqa: F811
@@ -174,7 +174,7 @@ def test_only_an_operator_takes_a_share_off(world):  # noqa: F811
     box = forms_on(html_of(client.get(PAGE)))[0][1]
     login(client, "lea")  # elle a reçu le partage, pas la console
     done = client.post(RETIRE, data=box, follow_redirects=False)
-    assert done.status_code == 303 and done.headers["location"].endswith("/inspecteur/connexion")
+    assert done.status_code == 303 and done.headers["location"].endswith("/admin/connexion")
     assert client.portal.call(live.settings.email).accounts["pro"].shares == {f"personne:{lea}": "lire"}
     assert audited(live) == []
 
@@ -191,7 +191,7 @@ def test_the_fiche_of_a_person_takes_a_share_off_and_comes_back(world):  # noqa:
     assert [ask for ask, _ in forms] == [ask for ask, _ in forms_on(html_of(client.get(PAGE)))]  # la même question
     assert {f["retour"] for _, f in forms} == {f"{FICHE}/{lea}?onglet=boites#partages"}
     assert forms[0][1]["csrf"] == client.cookies.get("csrftoken")  # le jeton de la page
-    assert 'href="/inspecteur/fiche/serveur/factures?onglet=fait">ses lignes d\'accès</a>' in pane
+    assert 'href="/admin/fiche/serveur/factures?onglet=fait">ses lignes d\'accès</a>' in pane
     assert not re.search(r'name="level"|<select', pane)  # on n'y donne rien
     # ce qu'Adrien partage : les mêmes, sur sa fiche à lui, qui y revient
     adrien = str(live.kernel.mind.frame().get(identity_c.PERSON("user_1")) or "user_1")
@@ -216,7 +216,7 @@ def test_the_way_back_stays_in_the_console(world):  # noqa: F811
     client, live, _ = world
     lea = shared_world(client, live)
     box = forms_on(partages(client, lea))[0][1]
-    for away in ("https://exemple.test/inspecteur/", "//exemple.test/inspecteur/", "/inspecteur//exemple.test",
+    for away in ("https://exemple.test/admin/", "//exemple.test/admin/", "/admin//exemple.test",
                  "/ailleurs", "javascript:alert(1)"):
         done = client.post(RETIRE, data={**box, "retour": away, "person": "user_1"}, follow_redirects=False)
         assert done.status_code == 303

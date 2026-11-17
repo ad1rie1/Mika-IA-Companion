@@ -24,7 +24,7 @@ describe("les fichiers qu'elle envoie (backendv2, ADR 0062–0063)", () => {
 
   it("ignore une adresse vers une autre page ou un autre hôte, un identifiant douteux", () => {
     expect(sentFiles([{ ...IMAGE, url: "https://evil.example/files/" + ID }])).toEqual([]);
-    expect(sentFiles([{ ...IMAGE, url: "/inspecteur/reglages" }])).toEqual([]);
+    expect(sentFiles([{ ...IMAGE, url: "/admin/reglages" }])).toEqual([]);
     expect(sentFiles([{ ...IMAGE, id: "../../etc", url: "/files/../../etc" }])).toEqual([]);
     expect(sentFiles([{ ...IMAGE, url: `/files/${ID.replace("0", "f")}` }])).toEqual([]); // pas le sien
     expect(sentFiles(null)).toEqual([]);

@@ -56,6 +56,8 @@ export interface Box {
 export interface Boxes {
   plugged: boolean;
   read_on_open: string;
+  /** L'instance a son application Microsoft (ADR 0238) : une boîte Microsoft s'ajoute sans donner la sienne. */
+  microsoft_app?: boolean;
   boxes: Box[];
 }
 

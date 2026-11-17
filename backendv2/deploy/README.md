@@ -324,7 +324,7 @@ mika.example:8443 {
         root * /opt/mika/frontend/Web/public/models
         file_server
     }
-    @server path /api/* /auth/* /ws /ws/* /files/* /inspecteur /inspecteur/* /health
+    @server path /api/* /auth/* /ws /ws/* /files/* /admin /admin/* /inspecteur /inspecteur/* /health
     handle @server {
         reverse_proxy 127.0.0.1:8001
     }
@@ -336,7 +336,7 @@ mika.example:8443 {
 ```
 
 Seuls les chemins de `@server` vont au serveur : `/mcp/` n'y passe pas, et
-`/inspecteur/` y est relayé pour une opératrice, que le client mène à la console
+`/admin/` y est relayé pour une opératrice, que le client mène à la console
 (« Pourquoi a-t-elle dit ça ? »). Son adresse s'ajoute aux origines admises :
 `--origin https://mika.example:8443`, à côté des autres (l'option se répète). Le
 client 3D (`frontend/Web/`, son `README.md`) se construit et se sert de même, sur
@@ -349,7 +349,7 @@ son propre site.
    que le serveur (derrière Caddy, avec `--behind-proxy`), la page demande le **code de premier démarrage** :
    `journalctl -u mika | grep "code de premier démarrage"` — tiré à chaque démarrage tant qu'aucun compte
    n'existe, pour que le premier arrivé sur le réseau ne devienne pas opérateur.
-2. **Réglages › Modèles de texte** (`/inspecteur/reglages/fournisseurs`) : ajoute un fournisseur (sa clé est
+2. **Réglages › Modèles de texte** (`/admin/reglages/fournisseurs`) : ajoute un fournisseur (sa clé est
    chiffrée et jamais réaffichée ; « Charger la liste » propose ses modèles ; à l'enregistrement, la fenêtre du
    modèle est lue chez le fournisseur et borne le contexte, ADR 0136). Le premier déclaré sert « répondre »
    d'office, et les autres rôles y retombent — sauf la seconde passe (`polish`, l'autrice qui récrit ses messages),
@@ -364,7 +364,7 @@ son propre site.
    l'application Android), avec un compte : il n'y a pas de robot de messagerie (ADR 0060). Un client natif
    s'authentifie par un jeton de son compte (`mika token create <compte>`).
 4. Ses boîtes aux lettres : **Courrier › Paramètres**, le bouton en haut à droite du courrier
-   (`/inspecteur/courrier/parametres`) — un
+   (`/admin/courrier/parametres`) — un
    enregistrement par boîte : serveurs IMAP/SMTP, dossiers relevés, et sa voix (en son nom, en assistante, ou à ta
    place ; ton, consignes, signature ; préparer des réponses d'elle-même). « Tester la connexion » sur la fiche de
    la boîte. Une fois la boîte enregistrée, « Charger la liste », sous « Dossiers relevés », lit ses dossiers sur
@@ -374,14 +374,17 @@ son propre site.
    `mika mail remove --compte perso`). Rien de ce qu'elle rédige ne part sans ton accord (À valider › Courriers à
    envoyer).
    Une boîte **Hotmail ou Outlook.com** refuse les mots de passe : elle entre par ton compte Microsoft (ADR 0166).
-   Inscris d'abord une application dans Microsoft Entra (portail Azure › Inscriptions d'applications : comptes
-   Microsoft personnels acceptés, « Autoriser les flux de clients publics » activé) et note son identifiant (client
-   ID). Puis, dans les réglages de la boîte : Connexion « par un compte Microsoft », serveur IMAP
+   Une fois pour toute l'instance (ADR 0238), inscris une application dans Microsoft Entra — il faut un annuaire,
+   donc un compte Azure ; Inscriptions d'applications › Nouvelle inscription : comptes Microsoft personnels
+   acceptés, aucune URI de redirection, puis Authentification › « Autoriser les flux de clients publics » — et
+   donne son identifiant (client ID) à Mika : `mika mail application <client ID>` (`mika mail application` la
+   montre, `--aucune` la retire). Ajouter une boîte ne demande alors que son adresse et son nom (frontendv2,
+   l'application Android) ; dans la console : Connexion « par un compte Microsoft », serveur IMAP
    `outlook.office365.com` (993, SSL), SMTP `smtp-mail.outlook.com` (587, STARTTLS), utilisateur = l'adresse,
-   l'identifiant de l'application. Enfin, sur la fiche de la boîte, « Se connecter à Microsoft » : un code à
+   l'application laissée vide. Enfin, sur la fiche de la boîte, « Se connecter à Microsoft » : un code à
    entrer sur la page de Microsoft qu'elle indique. En ligne de commande : `mika mail set --compte hotmail --auth
-   microsoft --client-id … --imap-host outlook.office365.com --smtp-host smtp-mail.outlook.com …`, puis la
-   connexion depuis la console.
+   microsoft --imap-host outlook.office365.com --smtp-host smtp-mail.outlook.com …`, puis la connexion depuis la
+   console. Une boîte peut encore déclarer sa propre application (`--client-id`), qui passe devant.
 
 Les pièces jointes qu'on lui envoie prennent au plus 2 Gio par personne par défaut (Réglages › Paramètres avancés,
 page des pièces reçues, « Place par personne »).

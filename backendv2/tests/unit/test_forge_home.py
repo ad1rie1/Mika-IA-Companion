@@ -736,16 +736,16 @@ def test_an_apps_pages_are_its_tabs_and_its_settings_sit_behind_the_gear(world):
     client.portal.call(forge.write, "deux", TWO_PAGES, TWO_PAGES_CODE)
     draft = written_draft(forge.info("deux"))
     client.portal.call(lambda: kernel.mind.append([draft], emitter="forge", correlation="t", origin=Origin.GENESIS))
-    first = html.unescape(client.get("/inspecteur/fiche/app/deux").text)
+    first = html.unescape(client.get("/admin/fiche/app/deux").text)
     assert _tabs(first) == ["Le cours", "Son histoire", "Accès"]  # ses pages sont ses onglets…
     assert "page du cours" in first
     assert _gear(first) == ["Réglages", "État", "Code", "Base", "Journal", "Vécu"]  # …le reste derrière la roue
-    second = html.unescape(client.get("/inspecteur/fiche/app/deux?onglet=vues&vue=histoire").text)
-    assert "page de l'histoire" in second and 'class="tab on" href="/inspecteur/fiche/app/deux?onglet=vues&vue=histoire"' \
+    second = html.unescape(client.get("/admin/fiche/app/deux?onglet=vues&vue=histoire").text)
+    assert "page de l'histoire" in second and 'class="tab on" href="/admin/fiche/app/deux?onglet=vues&vue=histoire"' \
         in second.replace("&amp;", "&")
-    settings = html.unescape(client.get("/inspecteur/fiche/app/deux?onglet=reglages").text)
+    settings = html.unescape(client.get("/admin/fiche/app/deux?onglet=reglages").text)
     assert 'class="gear-menu on"' in settings and 'class="tab on"' not in settings and "Ville" in settings
-    ConsoleHTML(client.get("/inspecteur/fiche/app/deux").text).check()
+    ConsoleHTML(client.get("/admin/fiche/app/deux").text).check()
 
 
 # ── Une preuve par version (ADR 0161) ─────────────────────────────────────

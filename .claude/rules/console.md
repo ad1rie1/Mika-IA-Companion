@@ -14,7 +14,7 @@ paths:
 
 # La console : thème et disposition
 
-Ces règles valent pour toute page de la console (`/inspecteur/`), nouvelle ou retouchée. Le pourquoi est dans l'ADR 0176
+Ces règles valent pour toute page de la console (`/admin/`), nouvelle ou retouchée. Le pourquoi est dans l'ADR 0176
 (`backendv2/docs/decisions.md`). Ce que fait chaque page est dans `backendv2/docs/console-carte.md`, qu'on met à jour
 dans le même lot.
 

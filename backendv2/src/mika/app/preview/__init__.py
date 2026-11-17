@@ -52,6 +52,7 @@ from mika.contracts import shares as shares_c
 from mika.contracts import trips as trips_c
 from mika.faculties.attachments import file_id
 from mika.inspector.pages.journal import EPISODE_TABS
+from mika.inspector.render import PREFIX
 from mika.kernel.events import Content, Origin
 from mika.ports.journal import JournalEvent
 from mika.ports.llm import LLMRequest, LLMResponse, Usage
@@ -70,7 +71,7 @@ HOST = "http://localhost:8001"
 PASSWORD = "une-phrase-de-passe-longue"
 STATIC = Path(__file__).resolve().parents[2] / "inspector" / "static"
 #: le cadre d'un document HTML natif dans une page (ADR 0169)
-FRAME = re.compile(r'src="/inspecteur/document/([0-9a-f]{40})"')
+FRAME = re.compile(r'src="' + re.escape(PREFIX) + r'/document/([0-9a-f]{40})"')
 REPLIES = itertools.cycle([
     ("Oh, ça me fait plaisir de te lire ! Raconte-moi tout.", "happy", 0.6),
     ("Hmm, attends… c'est une vraie question, ça.", "thinking", 0.5),
@@ -232,8 +233,8 @@ async def _files(kernel, operator: str, bea: str) -> list[str]:
     gone_sent, gone_piece = shared[1].data.file, kept[1].data.file
     await perform(kernel, "shares.retirer", {}, by=operator, subject=gone_sent, nonce="apercu-retirer-partage")
     await perform(kernel, "attachments.retirer", {}, by=operator, subject=gone_piece, nonce="apercu-retirer-piece")
-    return [*(f"/inspecteur/fiche/partage/{d.data.file}" for d in shared),
-            *(f"/inspecteur/fiche/piece/{d.data.file}" for d in kept)]
+    return [*(f"{PREFIX}/fiche/partage/{d.data.file}" for d in shared),
+            *(f"{PREFIX}/fiche/piece/{d.data.file}" for d in kept)]
 
 
 async def _shares(settings, bea: str, owner: str) -> None:
@@ -274,14 +275,14 @@ class _Model(PersonaSimLLM):
 
 def _page(text: str, theme: str, depth: int) -> str:
     prefix = "../" * depth
-    text = text.replace("/inspecteur/static/", f"{prefix}static/")
+    text = text.replace(f"{PREFIX}/static/", f"{prefix}static/")
     text = FRAME.sub(lambda m: f'src="{prefix}cadres/{m.group(1)}.html"', text)
     text = re.sub(r"<script[^>]*(?:console|live)\.js[^>]*></script>", "", text)  # une copie ne relit rien
     return text.replace('<html lang="fr">', f'<html lang="fr" data-theme="{theme}">', 1)
 
 
 def _name(url: str) -> str:
-    slug = url.removeprefix("/inspecteur").strip("/") or "accueil"
+    slug = url.removeprefix(PREFIX).strip("/") or "accueil"
     return re.sub(r"[^A-Za-z0-9._-]+", "_", slug)[:120] + ".html"
 
 
@@ -346,10 +347,10 @@ def export(out: Path) -> list[str]:
                     break
                 time.sleep(0.1)
             client.post("/auth/login", json=operator, headers=token())
-            urls: list[str] = ["/inspecteur/"]  # l'accueil, dessiné à la main hors de la carte
+            urls: list[str] = [f"{PREFIX}/"]  # l'accueil, dessiné à la main hors de la carte
             for group in NAVIGATION:
                 for d in group.items:
-                    base = f"/inspecteur/{d.key}"
+                    base = f"{PREFIX}/{d.key}"
                     urls.append(base)
                     if d.layout == "tabs":
                         urls += [f"{base}/{k.split('.', 1)[1]}" for k in d.builtin]
@@ -366,7 +367,7 @@ def export(out: Path) -> list[str]:
             inspection = Inspection(live.kernel)
             for kind in ("person", "handle"):
                 for obj in client.portal.call(lambda k=kind: inspection.search(k, "", 10)):
-                    base = f"/inspecteur/fiche/{kind}/{quote(obj.key, safe='')}"
+                    base = f"{PREFIX}/fiche/{kind}/{quote(obj.key, safe='')}"
                     urls.append(base)
                     urls += [f"{base}?onglet={quote(v.name)}" for v in live.kernel.registry.inspectors if v.subject == kind]
             project = client.portal.call(lambda: _project(live.kernel))  # un projet, et chaque onglet de sa fiche
@@ -376,8 +377,8 @@ def export(out: Path) -> list[str]:
                 objectives="Choisir les sujets\nPréparer les supports\nRelire le programme", nonce="apercu-stream"))
             for key in (project, second):
                 if key:
-                    urls.append(f"/inspecteur/fiche/project/{key}")
-                    urls += [f"/inspecteur/fiche/project/{key}?onglet={quote(v.name)}"
+                    urls.append(f"{PREFIX}/fiche/project/{key}")
+                    urls += [f"{PREFIX}/fiche/project/{key}?onglet={quote(v.name)}"
                              for v in live.kernel.registry.inspectors if v.subject == "project"]
             demo_mail = mailbox(clock.now)
             live.kernel.ports["mail"] = demo_mail
@@ -386,7 +387,7 @@ def export(out: Path) -> list[str]:
             for kind, keys in (("mail", [m.ref for m in demo_mail.inbox] + [m.ref for m in demo_mail.outgoing]),
                                ("brouillon", ["stream", "brouillon-demo-supprime"])):
                 for key in keys:
-                    base = f"/inspecteur/fiche/{kind}/{quote(key, safe='')}"
+                    base = f"{PREFIX}/fiche/{kind}/{quote(key, safe='')}"
                     urls.append(base)
                     urls += [f"{base}?onglet={quote(v.name)}" for v in live.kernel.registry.inspectors if v.subject == kind]
             urls += client.portal.call(lambda: activity(live.kernel))
@@ -399,66 +400,66 @@ def export(out: Path) -> list[str]:
                 urls += client.portal.call(lambda: _files(live.kernel, adrien, bea))
                 client.portal.call(lambda: _shares(live.settings, bea, adrien))
             for account in client.portal.call(live.accounts.all):
-                urls.append(f"/inspecteur/reglages/comptes?compte={account.id}")
+                urls.append(f"{PREFIX}/reglages/comptes?compte={account.id}")
                 client.portal.call(lambda a=account: live.accounts.create_token(a.id, "Écran de démonstration"))
-            urls += [f"/inspecteur/outils/tous?outil={quote(name, safe='')}" for name in sorted(live.kernel.registry.tools)]
+            urls += [f"{PREFIX}/outils/tous?outil={quote(name, safe='')}" for name in sorted(live.kernel.registry.tools)]
             mcp = live.kernel.ports.get("mcp")  # la fiche de chaque service branché, et ses onglets
             for st in (mcp.statuses() if mcp is not None else ()):
-                base = f"/inspecteur/fiche/serveur/{quote(st.name, safe='')}"
+                base = f"{PREFIX}/fiche/serveur/{quote(st.name, safe='')}"
                 urls += [base, *(f"{base}?onglet={v.name}" for v in live.kernel.registry.inspectors
                                  if v.subject == "serveur")]
             ended = client.portal.call(lambda: live.kernel.mind.store.latest(["episode.ended"], 20))
             for episode in ended:
                 corr = quote(episode.correlation, safe="")
-                urls.append(f"/inspecteur/episode/{corr}")
-                urls += [f"/inspecteur/episode/{corr}?onglet={t}" for t, _ in EPISODE_TABS]
+                urls.append(f"{PREFIX}/episode/{corr}")
+                urls += [f"{PREFIX}/episode/{corr}?onglet={t}" for t, _ in EPISODE_TABS]
             said = client.portal.call(lambda: live.kernel.mind.store.latest(["episode.utterance"], 20))
-            urls += [f"/inspecteur/parole/{utterance.seq}" for utterance in said]
+            urls += [f"{PREFIX}/parole/{utterance.seq}" for utterance in said]
             # Les liens du résumé et du déroulé doivent aussi pouvoir s'ouvrir dans l'aperçu statique.
             event_ids = client.portal.call(lambda: live.kernel.mind.store.query_mind(
                 select(JournalEvent.seq).order_by(JournalEvent.seq)))
-            urls += [f"/inspecteur/evenement/{seq}" for seq, in event_ids]
-            urls.append("/inspecteur/decisions/envers?personne=adrien")
+            urls += [f"{PREFIX}/evenement/{seq}" for seq, in event_ids]
+            urls.append(f"{PREFIX}/decisions/envers?personne=adrien")
             # chaque demande en attente, ouverte (la file des validations, ADR 0177)
-            urls += [f"/inspecteur/approbations/en_attente?demande={p.proposal}"
+            urls += [f"{PREFIX}/approbations/en_attente?demande={p.proposal}"
                      for p in live.kernel.mind.frame().get(rt.PENDING_EFFECTS)]
-            urls += ["/inspecteur/approbations/en_attente?sorte=projects.networked"]
-            urls.append("/inspecteur/maintenant")  # elle, en ce moment : la page qui croise ses facultés
-            urls += ["/inspecteur/reglages/fournisseurs?enregistrement=backends&cle=",
-                     "/inspecteur/projets?vue_pg1=table", "/inspecteur/personnes?vue_pg1=table",
-                     "/inspecteur/fil/conversations?vue_pg1=table", "/inspecteur/projets?etat=archive",
-                     "/inspecteur/personnes?q=personne-inconnue", "/inspecteur/fil/conversations?handle=user_1",
-                     "/inspecteur/courrier/reception?compte=atelier",
-                     "/inspecteur/courrier/reception?compte=atelier&vue_pg1=table",
+            urls += [f"{PREFIX}/approbations/en_attente?sorte=projects.networked"]
+            urls.append(f"{PREFIX}/maintenant")  # elle, en ce moment : la page qui croise ses facultés
+            urls += [f"{PREFIX}/reglages/fournisseurs?enregistrement=backends&cle=",
+                     f"{PREFIX}/projets?vue_pg1=table", f"{PREFIX}/personnes?vue_pg1=table",
+                     f"{PREFIX}/fil/conversations?vue_pg1=table", f"{PREFIX}/projets?etat=archive",
+                     f"{PREFIX}/personnes?q=personne-inconnue", f"{PREFIX}/fil/conversations?handle=user_1",
+                     f"{PREFIX}/courrier/reception?compte=atelier",
+                     f"{PREFIX}/courrier/reception?compte=atelier&vue_pg1=table",
                      # un message ouvert dans la liseuse, et une vue de la barre de côté (ADR 0175)
-                     "/inspecteur/courrier/reception?compte=atelier&lire=atelier%3A%3Cmaquettes%40example.net%3E",
-                     "/inspecteur/courrier/reception?etat=a_traiter&dossier=%2A",
-                     "/inspecteur/courrier/reception?compte=perso&dossier=Archives",
-                     "/inspecteur/courrier/reception?q=aucun-resultat",
-                     "/inspecteur/reglages/apercu?q=modele", "/inspecteur/reglages/apercu?q=memoire",
-                     "/inspecteur/reglages/apercu?q=aucun-resultat", "/inspecteur/reglages/temperament?profil=anxieuse",
-                     "/inspecteur/outils/tous?lot=email", "/inspecteur/outils/tous?lot=email&vue_pg1=table",
-                     "/inspecteur/outils/tous?lot=email&outil=email_read", "/inspecteur/outils/tous?q=aucun-resultat",
-                     "/inspecteur/systeme/sorties?etat=failed", "/inspecteur/systeme/sorties?etat=done",
+                     f"{PREFIX}/courrier/reception?compte=atelier&lire=atelier%3A%3Cmaquettes%40example.net%3E",
+                     f"{PREFIX}/courrier/reception?etat=a_traiter&dossier=%2A",
+                     f"{PREFIX}/courrier/reception?compte=perso&dossier=Archives",
+                     f"{PREFIX}/courrier/reception?q=aucun-resultat",
+                     f"{PREFIX}/reglages/apercu?q=modele", f"{PREFIX}/reglages/apercu?q=memoire",
+                     f"{PREFIX}/reglages/apercu?q=aucun-resultat", f"{PREFIX}/reglages/temperament?profil=anxieuse",
+                     f"{PREFIX}/outils/tous?lot=email", f"{PREFIX}/outils/tous?lot=email&vue_pg1=table",
+                     f"{PREFIX}/outils/tous?lot=email&outil=email_read", f"{PREFIX}/outils/tous?q=aucun-resultat",
+                     f"{PREFIX}/systeme/sorties?etat=failed", f"{PREFIX}/systeme/sorties?etat=done",
                      # hors du menu sans dossier de rapports (``menu_for``), comme en service : sa page vide
-                     "/inspecteur/systeme/simulations",
-                     "/inspecteur/decisions/episodes?issue=failed", "/inspecteur/decisions/episodes?vue_pg1=table",
-                     "/inspecteur/memoire/souvenirs?person=Adrien", "/inspecteur/memoire/souvenirs?person=Adrien&vue_pg1=table",
-                     "/inspecteur/memoire/souvenirs?q=aucun-resultat", "/inspecteur/memoire/croyances?status=superseded",
-                     "/inspecteur/memoire/promesses?status=pending", "/inspecteur/pensees/pensees?vue_pg1=table",
-                     "/inspecteur/memoire/consolidation?vue_pg1=table", "/inspecteur/pensees/attentes?vue_pg1=table",
-                     "/inspecteur/memoire/souvenirs?vue_pg1=table", "/inspecteur/memoire/croyances?vue_pg1=table",
-                     "/inspecteur/memoire/promesses?vue_pg1=table", "/inspecteur/vie/needs?vue_pg1=table",
-                     "/inspecteur/vie/needs?periode=24h&vue_pg1=table", "/inspecteur/vie/needs?periode=24h",
-                     "/inspecteur/pensees/nuits?vue_pg2=table", "/inspecteur/teams/reponses?vue_pg1=table",
-                     "/inspecteur/reglages/comptes?vue_pg1=table", "/inspecteur/systeme/chronologie?vue_pg1=table",
-                     "/inspecteur/systeme/processus?vue_pg1=table", "/inspecteur/systeme/processus?pg1=2",
-                     "/inspecteur/systeme/processus?pg1=2&vue_pg1=table",
-                     "/inspecteur/reglages/comportement-affect?groupe=repos-et-ancre",
-                     "/inspecteur/reglages/comptes?nouveau=utilisateur",
-                     "/inspecteur/reglages/comptes?nouveau=operateur", "/inspecteur/recherche?q=a",
-                     "/inspecteur/action/projects.creer?retour=/inspecteur/projets",
-                     "/inspecteur/action/goals.programmer?retour=/inspecteur/buts/vivants"]
+                     f"{PREFIX}/systeme/simulations",
+                     f"{PREFIX}/decisions/episodes?issue=failed", f"{PREFIX}/decisions/episodes?vue_pg1=table",
+                     f"{PREFIX}/memoire/souvenirs?person=Adrien", f"{PREFIX}/memoire/souvenirs?person=Adrien&vue_pg1=table",
+                     f"{PREFIX}/memoire/souvenirs?q=aucun-resultat", f"{PREFIX}/memoire/croyances?status=superseded",
+                     f"{PREFIX}/memoire/promesses?status=pending", f"{PREFIX}/pensees/pensees?vue_pg1=table",
+                     f"{PREFIX}/memoire/consolidation?vue_pg1=table", f"{PREFIX}/pensees/attentes?vue_pg1=table",
+                     f"{PREFIX}/memoire/souvenirs?vue_pg1=table", f"{PREFIX}/memoire/croyances?vue_pg1=table",
+                     f"{PREFIX}/memoire/promesses?vue_pg1=table", f"{PREFIX}/vie/needs?vue_pg1=table",
+                     f"{PREFIX}/vie/needs?periode=24h&vue_pg1=table", f"{PREFIX}/vie/needs?periode=24h",
+                     f"{PREFIX}/pensees/nuits?vue_pg2=table", f"{PREFIX}/teams/reponses?vue_pg1=table",
+                     f"{PREFIX}/reglages/comptes?vue_pg1=table", f"{PREFIX}/systeme/chronologie?vue_pg1=table",
+                     f"{PREFIX}/systeme/processus?vue_pg1=table", f"{PREFIX}/systeme/processus?pg1=2",
+                     f"{PREFIX}/systeme/processus?pg1=2&vue_pg1=table",
+                     f"{PREFIX}/reglages/comportement-affect?groupe=repos-et-ancre",
+                     f"{PREFIX}/reglages/comptes?nouveau=utilisateur",
+                     f"{PREFIX}/reglages/comptes?nouveau=operateur", f"{PREFIX}/recherche?q=a",
+                     f"{PREFIX}/action/projects.creer?retour={PREFIX}/projets",
+                     f"{PREFIX}/action/goals.programmer?retour={PREFIX}/buts/vivants"]
             for url in dict.fromkeys(u for u in urls if u):
                 r = client.get(url, follow_redirects=True)
                 if r.status_code != 200:  # une page en erreur ne s'exporte pas comme si de rien n'était
@@ -466,7 +467,7 @@ def export(out: Path) -> list[str]:
                     continue
                 name = _name(url)
                 for digest in dict.fromkeys(FRAME.findall(r.text)):  # le cadre, tant que la page le garde
-                    framed = client.get(f"/inspecteur/document/{digest}")
+                    framed = client.get(f"{PREFIX}/document/{digest}")
                     (out / "cadres").mkdir(parents=True, exist_ok=True)
                     (out / "cadres" / f"{digest}.html").write_text(framed.text, encoding="utf-8")
                 for theme in ("clair", "sombre"):

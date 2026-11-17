@@ -19,11 +19,11 @@ PAYLOAD = '<script>alert("xss")</script><img src=x onerror=alert(1)>'
 
 
 def pages(client, live) -> list[str]:
-    urls = ["/inspecteur/"]  # l'accueil, dessiné à la main hors de la carte
+    urls = ["/admin/"]  # l'accueil, dessiné à la main hors de la carte
     views = client.portal.call(Inspection(live.kernel).views)
     for group in NAVIGATION:
         for d in group.items:
-            base = f"/inspecteur/{d.key}"
+            base = f"/admin/{d.key}"
             urls.append(base)
             if d.layout == "tabs":
                 urls += [f"{base}/{k.split('.', 1)[1]}" for k in d.builtin]
@@ -39,7 +39,7 @@ def test_hostile_text_is_escaped_and_no_page_runs_inline_code(world):  # noqa: F
         ws.send_json({"type": "chat", "message": PAYLOAD, "client_msg_id": "x1"})
         recv_until(ws, "speech")
     ended = client.portal.call(lambda: live.kernel.mind.store.latest(["episode.ended"], 1))[0]
-    urls = pages(client, live) + [f"/inspecteur/episode/{ended.correlation}?onglet={t}"
+    urls = pages(client, live) + [f"/admin/episode/{ended.correlation}?onglet={t}"
                                   for t in ("resume", "deroule", "dit", "prompt", "outils", "appels", "decision")]
     seen_payload = False
     for url in urls:

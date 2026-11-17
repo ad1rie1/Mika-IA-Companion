@@ -34,7 +34,7 @@ def test_each_request_reads_with_its_decision_then_its_execution(world):  # noqa
     bootstrap(client)
     stop(client, live.kernel)
     kernel = live.kernel
-    empty = drawn(client, "/inspecteur/approbations/historique")
+    empty = drawn(client, "/admin/approbations/historique")
     assert 'data-tab="approbations/historique"' in empty and "Rien n'a encore été décidé." in empty
     asked = append(client, kernel, [
         rt.EFFECT_PROPOSED.draft(capability="demo.envoyer", owner="email", args_json="{}",
@@ -47,9 +47,9 @@ def test_each_request_reads_with_its_decision_then_its_execution(world):  # noqa
         rt.EFFECT_RESOLVED.draft(proposal=asked[1], approved=False, by="user_1", capability="demo.installer",
                                  owner="projects")])
     append(client, kernel, [rt.EFFECT_EXECUTED.draft(proposal=asked[0], ok=False, result="serveur injoignable")])
-    page = drawn(client, "/inspecteur/approbations/historique")
+    page = drawn(client, "/admin/approbations/historique")
     sent = _entry(page, "Répondre à Léa au sujet des maquettes")
-    assert "m-danger" in sent and f"/inspecteur/evenement/{asked[0]}" in sent
+    assert "m-danger" in sent and f"/admin/evenement/{asked[0]}" in sent
     assert sent.index(">approuvé<") < sent.index("Vas-y.") < sent.index(">en échec<") < sent.index("serveur injoignable")
     refused = _entry(page, "Installer les dépendances du projet")
     assert "m-refused" in refused and ">refusé<" in refused and "exécut" not in refused
@@ -66,24 +66,24 @@ def test_everything_to_decide_is_one_queue_with_one_tab_bar(world):  # noqa: F81
     append(client, live.kernel, [rt.EFFECT_PROPOSED.draft(capability="email.send", owner="email",
         args_json='{"draft": "d-1", "account": "perso"}', summary=Content.of("Répondre au libraire"),
         context="user_1")])
-    everything = drawn(client, "/inspecteur/approbations")
+    everything = drawn(client, "/admin/approbations")
     bar = everything.split('<nav class="tabs"', 1)[1].split("</nav>", 1)[0]
-    titles = re.findall(r'class="tab[^"]*" href="/inspecteur/approbations/(\w+)"', bar)
+    titles = re.findall(r'class="tab[^"]*" href="/admin/approbations/(\w+)"', bar)
     assert titles == ["en_attente", "courriers", "teams", "identites", "noms", "historique"]
     rows = everything.split('class="apv-list"', 1)[1].split("</ol>", 1)[0]
     assert "Identité à confirmer" in rows and "Répondre au libraire" in rows
-    mails = drawn(client, "/inspecteur/approbations/courriers")
+    mails = drawn(client, "/admin/approbations/courriers")
     assert "Répondre au libraire" in mails and "Identité à confirmer" not in mails
-    page = drawn(client, "/inspecteur/approbations/identites")
+    page = drawn(client, "/admin/approbations/identites")
     reader = page.split('class="now-card hm-approval apv-reader', 1)[1].split("</article>", 1)[0]
     assert "se présente comme « Adrien »" in reader and "Ta décision est attendue" in reader
     assert "<dt>vise</dt>" in reader and "Le moyen de communication" in reader
     links = re.findall(r'class="btn[^"]*" href="([^"]+)">([^<]+)<', reader)
     assert [t for _, t in links] == ["S'en porter garant", "La démentir", "Relier à une personne"]
     for href, _ in links:  # chacune ramène à la file, pas à l'onglet d'Identités
-        assert "retour=%2Finspecteur%2Fapprobations%2Fidentites" in href
+        assert "retour=%2Fadmin%2Fapprobations%2Fidentites" in href
     # l'accueil compte chaque chose une fois : la file par son total, pas ses onglets ni les vues qui la répètent
-    home = drawn(client, "/inspecteur/")
+    home = drawn(client, "/admin/")
     assert "À valider › Tout ce qui attend" in home
     assert "À valider › Courriers à envoyer" not in home and "Identités › Identités à confirmer" not in home
 
@@ -101,7 +101,7 @@ def test_each_sort_reads_by_its_short_name_its_sentence_stays_at_hand(world):  #
                                  summary=Content.of("Installer les dépendances")),
         rt.EFFECT_PROPOSED.draft(capability="projects.push", owner="projects", args_json="{}",
                                  summary=Content.of("Pousser la branche"))]).seqs
-    page = drawn(client, "/inspecteur/approbations")
+    page = drawn(client, "/admin/approbations")
     queue = page.split('class="apv-list"', 1)[1].split("</ol>", 1)[0]
     assert f'<span class="apv-kind" title="{sentence}">Commande réseau</span>' in queue
     assert ">Push git</span>" in queue
@@ -111,7 +111,7 @@ def test_each_sort_reads_by_its_short_name_its_sentence_stays_at_hand(world):  #
 
     append(client, kernel, [rt.EFFECT_RESOLVED.draft(proposal=asked[0], approved=False, by="user_1",
                                                      capability="projects.networked", owner="projects")])
-    entry = _entry(drawn(client, "/inspecteur/approbations/historique"), "Installer les dépendances")
+    entry = _entry(drawn(client, "/admin/approbations/historique"), "Installer les dépendances")
     assert 'title="projects.networked">Commande réseau</span>' in entry
 
 
@@ -122,12 +122,12 @@ def test_a_claim_is_decided_in_the_queue_its_actions_already_oriented(world):  #
     client, live, _ = world
     bootstrap(client)
     claim(client, live)
-    reader = _reader(drawn(client, "/inspecteur/approbations/identites"))
+    reader = _reader(drawn(client, "/admin/approbations/identites"))
     assert "0,45 / 0,70" in reader  # vers la barre
     links = {t: h for h, t in re.findall(r'class="btn[^"]*" href="([^"]+)">([^<]+)<', reader)}
     for label, key in (("S'en porter garant", "identity.preuve"), ("La démentir", "identity.preuve"),
                        ("Relier à une personne", "identity.relier")):
-        assert urlsplit(links[label]).path == f"/inspecteur/action/{key}"
+        assert urlsplit(links[label]).path == f"/admin/action/{key}"
         assert parse_qs(urlsplit(links[label]).query)["sujet"] == ["ext_9"]
     assert '<option value="vouched" selected' in drawn(client, links["S'en porter garant"])
     deny = drawn(client, links["La démentir"])
@@ -142,17 +142,17 @@ def test_a_name_is_decided_in_the_queue_with_both_answers(world):  # noqa: F811
     faculté)."""
     client, live, _ = world
     bootstrap(client)
-    assert "Aucun nom dont on lui a parlé n'attend quelqu'un." in drawn(client, "/inspecteur/approbations/noms")
+    assert "Aucun nom dont on lui a parlé n'attend quelqu'un." in drawn(client, "/admin/approbations/noms")
     emit(client, live, "memory", [memory_c.BELIEVED.draft(
         text=Content.of("Léa, la sœur d'Adrien, prépare un concours."), about=("name:lea",), sensitivity=1,
         source="user_1", told_by=("user_1",))])
     stranger(client, live, "ext_7", "Léa Martin")
-    reader = _reader(drawn(client, "/inspecteur/approbations/noms"))
+    reader = _reader(drawn(client, "/admin/approbations/noms"))
     assert "On lui a parlé de « Lea »" in reader and "porté par Léa Martin" in reader
     assert "<dt>qui lui en a parlé</dt>" in reader
     actions = reader.split('class="apv-do"', 1)[1]
     assert "C'est elle : relier" in actions and "onglet=synthese" in actions
-    assert "/inspecteur/action/identity.ecarter_nom" in actions and "Ce n'est pas elle" in actions
+    assert "/admin/action/identity.ecarter_nom" in actions and "Ce n'est pas elle" in actions
     # son badge accorde son nom à son nombre, jamais « nom(s) » (ADR 0219)
     names = Inspection(live.kernel).find("identity", "noms")
     assert client.portal.call(lambda: Inspection(live.kernel).badge(names)) == (
@@ -176,26 +176,26 @@ def test_naming_shows_in_the_title_bar_only_while_a_name_waits(world):  # noqa: 
     lui, l'action revient, et la fiche ouverte depuis la file garde son formulaire pré-rempli."""
     client, live, _ = world
     bootstrap(client)
-    alone = _head(drawn(client, "/inspecteur/fiche/person/user_1"))
+    alone = _head(drawn(client, "/admin/fiche/person/user_1"))
     assert "Fixer la proximité" in alone and "C'est la personne dont on lui a parlé" not in alone
     emit(client, live, "memory", [memory_c.BELIEVED.draft(
         text=Content.of("Léa, la sœur d'Adrien, prépare un concours."), about=("name:lea",), sensitivity=1,
         source="user_1", told_by=("user_1",))])
     stranger(client, live, "ext_7", "Léa Martin")
-    assert "C'est la personne dont on lui a parlé" in _head(drawn(client, "/inspecteur/fiche/person/user_1"))
-    reader = _reader(drawn(client, "/inspecteur/approbations/noms"))
+    assert "C'est la personne dont on lui a parlé" in _head(drawn(client, "/admin/fiche/person/user_1"))
+    reader = _reader(drawn(client, "/admin/approbations/noms"))
     href = re.search(r'href="([^"]+)">C\'est elle : relier', reader).group(1)
     assert parse_qs(urlsplit(href).query) == {"onglet": ["synthese"], "nom": ["name:lea"]}
     synthesis = drawn(client, href)
     body = synthesis.split('class="tabs', 1)[1]
-    assert "« Lea », dont on lui a parlé" in body and 'action="/inspecteur/action/identity.nommer' in body
+    assert "« Lea », dont on lui a parlé" in body and 'action="/admin/action/identity.nommer' in body
     # relié, plus rien n'attend : l'action quitte les barres, et ce nom-ci, ouvert sur une autre fiche, dit comment
     # le libérer au lieu d'un formulaire qui ne serait plus offert
     done = client.portal.call(lambda: perform(live.kernel, "identity.nommer", {
         "_champs": ["name", "confirmed"], "name": ["Lea"], "confirmed": ["on"], FIXED_FIELD: ["key"],
         "key": ["name:lea"]}, by="user_1", subject=urlsplit(href).path.rsplit("/", 1)[1], nonce="lea"))
     assert done.ok, done
-    elsewhere = drawn(client, "/inspecteur/fiche/person/user_1?onglet=synthese&nom=name%3Alea")
+    elsewhere = drawn(client, "/admin/fiche/person/user_1?onglet=synthese&nom=name%3Alea")
     assert "C'est la personne dont on lui a parlé" not in _head(elsewhere)
     body = elsewhere.split('class="tabs', 1)[1]
     assert "« Détacher un nom », sur sa fiche, le libère" in body and "identity.nommer" not in body
@@ -214,10 +214,10 @@ def test_a_name_her_memory_keeps_nothing_active_of_no_longer_waits(world):  # no
         "memory").seqs[0]
     append(client, live.kernel, [memory_c.SITUATION_ENDED.draft(event=move)], "memory")
     stranger(client, live, "ext_8", "Max Dupont")
-    sheet = drawn(client, "/inspecteur/fiche/person/name%3Amax").split('class="tabs', 1)[1]
+    sheet = drawn(client, "/admin/fiche/person/name%3Amax").split('class="tabs', 1)[1]
     assert "Qui porte ce nom" in sheet and "Max Dupont" in sheet and "rien à relier" in sheet
     assert "à décider" not in sheet and "nom=name" not in sheet
-    opened = "/inspecteur/fiche/person/ext_8?onglet=synthese&nom=name%3Amax"
+    opened = "/admin/fiche/person/ext_8?onglet=synthese&nom=name%3Amax"
 
     def says_nothing_waits(page: str) -> None:
         body = page.split('class="tabs', 1)[1]

@@ -55,7 +55,7 @@ def test_her_owner_judges_a_reply_from_the_chat_and_only_she_sees_it(world):  # 
     audited = client.portal.call(lambda: live.kernel.mind.store.latest([rt.OPERATED.name], 5))
     assert any("transcript.juger" in live.kernel.mind.decode(e).data.action for e in audited)
 
-    why = html_of(client.get(f"/inspecteur/parole/{seq}"))
+    why = html_of(client.get(f"/admin/parole/{seq}"))
     assert "Ton avis" in why and "pas adaptée" in why and "juste « salut ! »" in why
     listed = html_of(client.get(f"{BASE}/fil/jugees"))
     assert "Ses réponses jugées" in listed and "coucou" in listed and "juste « salut ! »" in listed
@@ -101,4 +101,4 @@ def test_an_opinion_withdrawn_leaves_the_reply_unjudged(world):  # noqa: F811
         a.send_json({"type": "sync", "after_id": 0})
         rows = {m["id"]: m for m in recv_until(a, "history")[-1]["messages"]}
         assert "verdict" not in rows[seq]
-    assert "Ton avis" not in html_of(client.get(f"/inspecteur/parole/{seq}"))
+    assert "Ton avis" not in html_of(client.get(f"/admin/parole/{seq}"))

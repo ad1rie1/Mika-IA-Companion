@@ -29,11 +29,11 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 | Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134, 0148, 0184, 0185, 0186, 0188, 0207, 0220, 0226 |
 | Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137, 0150, 0155, 0160, 0227 |
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144, 0145, 0161 |
-| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163, 0166, 0168, 0171, 0172, 0189, 0190, 0191, 0192, 0193, 0194, 0195, 0196, 0198, 0199, 0211, 0213, 0214, 0228, 0229, 0236 |
+| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163, 0166, 0168, 0171, 0172, 0189, 0190, 0191, 0192, 0193, 0194, 0195, 0196, 0198, 0199, 0211, 0213, 0214, 0228, 0229, 0236, 0238 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170, 0187, 0200, 0208, 0209, 0215, 0233, 0235 |
-| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176, 0177, 0178, 0179, 0180, 0181, 0182, 0183, 0197, 0201, 0202, 0203, 0204, 0205, 0206, 0210, 0216, 0217, 0218, 0219, 0225, 0230, 0231, 0232, 0234 |
+| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176, 0177, 0178, 0179, 0180, 0181, 0182, 0183, 0197, 0201, 0202, 0203, 0204, 0205, 0206, 0210, 0216, 0217, 0218, 0219, 0225, 0230, 0231, 0232, 0234, 0237 |
 | Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135 |
 
 ## Le noyau : journal, arbitrage, pipeline
@@ -1519,14 +1519,14 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 - Hotmail, Outlook.com et Live refusent le mot de passe en IMAP et en SMTP. Une boîte peut donc entrer par un compte Microsoft (`auth: microsoft`) : un jeton d'accès, présenté par `XOAUTH2`, à la lecture comme à l'envoi. Microsoft 365 aussi, si son administrateur le permet (`oauth_tenant`).
 - On se connecte par le flux « code d'appareil » : « Se connecter à Microsoft », sur la fiche de la boîte, donne un code à entrer sur une page de Microsoft. Le mot de passe et la double authentification restent chez Microsoft. Le serveur attend le feu vert en tâche de fond, au rythme que Microsoft fixe, un quart d'heure au plus ; un redémarrage oublie un code en attente. Le flux par redirection est écarté : la console tourne sur une adresse locale en http, que Microsoft refuse comme retour.
-- L'application est celle de la personne : son identifiant (`oauth_client_id`), qu'elle inscrit elle-même dans Microsoft Entra, en client public. Mika ne livre l'identifiant d'aucune autre application.
+- L'application est celle de la personne : son identifiant (`oauth_client_id`), qu'elle inscrit elle-même dans Microsoft Entra, en client public. Mika ne livre l'identifiant d'aucune autre application. (Revu par l'ADR 0238 : l'application est d'abord celle de l'instance.)
 - Le jeton de renouvellement est scellé dans les réglages, à part des comptes (`mail_oauth`), avec l'application et l'annuaire qui l'ont délivré. Le formulaire de la console ne le réécrit jamais ; changer d'application ou d'annuaire demande de se reconnecter ; il part avec sa boîte, ou quand elle reprend un mot de passe. Quand Microsoft le remplace, le nouveau est gardé. Le jeton d'accès vit en mémoire, renouvelé cinq minutes avant sa fin.
 - Une connexion que Microsoft ne renouvelle plus (`invalid_grant`) ne lui est plus présentée : la boîte échoue comme un serveur qui refuse, et sa fiche dit de se reconnecter. Aucun jeton n'entre dans un journal ni dans un message.
 - La règle de l'ADR 0038 sur les jetons OAuth vaut pour le login de Claude Code, pas pour le courrier.
 
 *Pourquoi :* Microsoft a coupé l'authentification par mot de passe de ses comptes personnels en IMAP et en SMTP en 2024 : une boîte Hotmail ne pouvait plus être relevée.
 
-*Révise 0027 (en partie).*
+*Révise 0027 (en partie). Révisée par 0238.*
 
 ### 0168 — Ses outils de courrier datent chaque mail, disent son tri et jusqu'où remonte ce qu'elle a relevé
 
@@ -1761,6 +1761,18 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 *Pourquoi :* la relecture de l'app Android du 2026-11-17 (R3-02) : changer l'adresse d'un service en laissant ses en-têtes vides, comme l'aide le conseillait, les envoyait au nouvel hôte dès le premier essai. Depuis un téléphone perdu pas encore révoqué, c'était une façon d'emporter le jeton d'un service tiers.
 
 *Révise 0192 (en partie : ses en-têtes suivent son adresse).*
+
+### 0238 — L'application Microsoft est celle de l'instance
+
+- Une instance a son application Microsoft : un client public inscrit une fois dans Microsoft Entra par qui tient le serveur, dont l'identifiant (client ID) se garde dans les réglages (`mika mail application <client ID>`, `--aucune` pour la retirer). Ce n'est pas un secret.
+- Une boîte Microsoft qui ne déclare pas d'application entre par celle de l'instance. Ajouter une boîte Hotmail ou Outlook.com ne demande donc plus que son adresse et son nom, puis « Se connecter à Microsoft ». L'annuaire reste `consumers` par défaut.
+- Une boîte peut encore déclarer la sienne (`oauth_client_id`), qui passe devant : pour un annuaire Microsoft 365 qui n'admet que ses propres applications. frontendv2 et l'application Android rangent ce champ et l'annuaire sous « Avancé » ; sans application d'instance, ils les demandent comme avant (`microsoft_app` dans `GET /api/moi/mail/boxes`).
+- La connexion gardée dit toujours quelle application l'a délivrée : changer celle de l'instance demande de reconnecter les boîtes qui entraient par elle.
+- Mika ne livre toujours l'identifiant d'aucune application, ni la sienne ni celle d'un autre logiciel : chaque instance inscrit la sienne.
+
+*Pourquoi :* demander à chaque personne d'inscrire une application dans Microsoft Entra rendait l'ajout d'une boîte Hotmail impraticable : l'inscription exige un annuaire et un compte Azure. Un logiciel de courrier l'inscrit une fois pour tous ses utilisateurs ; une instance fait de même pour les siens.
+
+*Révise 0166 (en partie : l'application n'est plus celle de la personne).*
 
 ## Les fournisseurs de modèles
 
@@ -2359,7 +2371,7 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 
 *Pourquoi :* retrouver l'extensibilité des vues déclarées de la v1 sans que la console connaisse une seule faculté.
 
-*Révise 0024 (en partie). Révisée par 0027, 0029, 0042, 0121, 0169, 0203, 0230.*
+*Révise 0024 (en partie). Révisée par 0027, 0029, 0042, 0121, 0169, 0203, 0230, 0237.*
 
 ### 0029 — La console refondue : des menus qui répondent à des questions, des pages qui ne montrent qu'un sujet
 
@@ -2803,6 +2815,17 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 - La sauvegarde reste à son unité : le serveur n'écrit pas le dossier des archives (`ReadWritePaths=/var/lib/mika`), et Stockage et sauvegardes dit la commande exacte. Pas de geste sur la quarantaine des projections : aucune n'est différée en service.
 
 *Pourquoi :* la console est l'espace super admin : elle voyait la panne et renvoyait au terminal, avec une commande qui exigeait d'arrêter Mika alors que le moteur sait reconstruire en ligne ; sans ce geste, une tranche réparée par le code restait figée jusqu'à un arrêt du serveur, et un processus en panne attendait son recul, jusqu'à une heure, sans prise. Les deux gestes sont sûrs : la reconstruction en ligne sert déjà à l'oubli, et effacer un recul ne fait que devancer un essai que l'ordonnanceur ferait de toute façon (audit du 2026-11-05, C8-04, décision C8-Q1).
+
+### 0237 — La console vit sous `/admin`
+
+- La console est servie sous `/admin` (`inspector/render.PREFIX`), et non plus sous `/inspecteur` : elle règle les droits, les comptes et les réglages, ce n'est plus seulement un inspecteur. La console et l'app écrivent ses adresses par cette constante (`f"{PREFIX}/…"`). Seul un adaptateur, qui ne la voit pas (`adapters/web/protocol.py`), l'écrit en clair.
+- L'ancienne adresse redirige : `/inspecteur` et tout ce qui est dessous mènent à la même page sous `/admin`, en 308 (la méthode, le corps et la requête suivent), depuis la table des anciennes adresses (`inspector/pages/routes.py`, ADR 0217). Les favoris et les liens d'avant mènent donc quelque part. Les clients (le web, `frontendv2`, Android) n'ouvrent plus que `/admin/…`.
+- `/admin/souvenirs` est l'adresse courte de Mémoire › Souvenirs (`memoire/souvenirs`). La constellation suit le préfixe (`/admin/constellation`).
+- Un mandataire relaie `/admin`, et `/inspecteur` le temps que les anciens liens s'éteignent (`deploy/README.md`).
+
+*Pourquoi :* « inspecteur » nommait la console du début, qui regardait. Elle administre maintenant : une adresse qui dit ce qu'elle est, et une courte pour ses souvenirs, qu'on vient consulter.
+
+*Révise 0025 (en partie).*
 
 ## Ce que les sondes et les audits ont fixé
 

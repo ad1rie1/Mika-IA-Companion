@@ -1,6 +1,6 @@
 """Un document HTML natif tel qu'il a été écrit (ADR 0169) : ses styles, sa mise en page, dans un cadre isolé.
 
-La page de la console ne reçoit jamais ce HTML : elle pose un ``<iframe sandbox>`` vers ``/inspecteur/document/…``,
+La page de la console ne reçoit jamais ce HTML : elle pose un ``<iframe sandbox>`` vers ``/admin/document/…``,
 servi avec sa propre politique (``FRAME_CSP``). Le cadre n'exécute rien (ni script, ni formulaire), ne charge rien
 du dehors (ni image distante, ni police, ni feuille de style), n'ouvre ses liens que dans un nouvel onglet et ne
 peut ni toucher la console ni la remplacer. Ce que la politique interdit déjà, on le retire aussi de la source

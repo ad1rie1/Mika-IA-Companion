@@ -49,15 +49,15 @@ def _pane(page: str, pane: str) -> str:
 def test_feeds_say_how_she_reads_then_a_broken_feed_then_articles_with_their_pertinence(world):  # noqa: F811
     client, live, _ = world
     kernel, now = _life(client, live)
-    empty = drawn(client, "/inspecteur/sens/flux")
+    empty = drawn(client, "/admin/sens/flux")
     assert 'data-tab="sens/flux"' in empty and "Aucun flux n'est suivi" in empty
     # ses réglages : la roue de Ses sens (ADR 0206), qui les liste tous, pas un lien de plus dans la barre de titre
     head = _head(empty)
     assert "Configurer le plugin" not in head and 'class="gear-panel"' in head
     gear = head.split('class="gear-panel"', 1)[1]
-    assert gear.index('href="/inspecteur/sens/parametres-flux"') < gear.index(
-        'href="/inspecteur/sens/parametres-appareils"') < gear.index('href="/inspecteur/sens/parametres-transcription"')
-    assert head.count('href="/inspecteur/sens/parametres-flux"') == 1 and "Flux suivis" in gear
+    assert gear.index('href="/admin/sens/parametres-flux"') < gear.index(
+        'href="/admin/sens/parametres-appareils"') < gear.index('href="/admin/sens/parametres-transcription"')
+    assert head.count('href="/admin/sens/parametres-flux"') == 1 and "Flux suivis" in gear
     assert "Connexions › Ses sens › Flux suivis, en haut à droite" in empty  # l'état vide dit où les ajouter
     feeds = Feeds()
     feeds.publish(Entry(id="e1", feed="Sciences", title="Une exoplanète habitable", link="https://example.net/1",
@@ -68,7 +68,7 @@ def test_feeds_say_how_she_reads_then_a_broken_feed_then_articles_with_their_per
     append(client, kernel, [rss.NOTICED.draft(source="rss", kind="entry", entry="e1", feed="Sciences",
                                               summary=Content.of("Une exoplanète habitable"), pertinence=0.72)],
            "rss")
-    page = drawn(client, "/inspecteur/sens/flux")
+    page = drawn(client, "/admin/sens/flux")
     # la phrase d'état ouvre la page ; le flux en panne, en un seul bandeau, mène à ses flux
     assert page.index("Relevés toutes les") < page.index('role="alert"') < page.index('class="person-tiles"')
     alert = page.split('role="alert"', 1)[1].split("</p>", 1)[0]
@@ -91,17 +91,17 @@ def test_feeds_say_how_she_reads_then_a_broken_feed_then_articles_with_their_per
 def test_camera_shows_what_she_sees_beside_her_devices_and_never_an_image(world):  # noqa: F811
     client, live, _ = world
     kernel, _ = _life(client, live)
-    empty = drawn(client, "/inspecteur/sens/camera")
+    empty = drawn(client, "/admin/sens/camera")
     assert 'data-tab="sens/camera"' in empty and "Aucun appareil ne s'est encore connecté" in empty
     assert "elle n'a encore rien vu" in empty and "Connecter une caméra" in _head(empty)
     # une tâche reste dans la barre de titre, vers la page de la roue qui la sert (ADR 0206)
     link = _head(empty).split("Connecter une caméra", 1)[0].rsplit("<a ", 1)[1]
-    assert 'href="/inspecteur/sens/parametres-appareils"' in link
+    assert 'href="/admin/sens/parametres-appareils"' in link
     kernel.ports["camera"].put("salon", "image/jpeg", b"\xff" * 4096)
     append(client, kernel, [cam.SEEN.draft(source="camera", kind="view", device="salon", digest="d1", notable=True,
                                            summary=Content.of("Adrien est rentré et pose son sac."), pertinence=0.8)],
            "camera")
-    page = drawn(client, "/inspecteur/sens/camera")
+    page = drawn(client, "/admin/sens/camera")
     views, devices = page.split('id="cam-views-title"', 1)[1], page.split('id="cam-devices-title"', 1)[1]
     seen = views.split("Adrien est rentré", 1)[0].rsplit("<li", 1)[1]
     assert "cam-view notable" in seen and "quelque chose se passe" in seen and ">salon<" in seen
@@ -116,7 +116,7 @@ def test_camera_shows_what_she_sees_beside_her_devices_and_never_an_image(world)
 def test_a_drawing_says_for_whom_by_name_and_what_she_sees_in_it(world):  # noqa: F811
     client, live, _ = world
     kernel, _ = _life(client, live)
-    empty = drawn(client, "/inspecteur/sens/dessins")
+    empty = drawn(client, "/admin/sens/dessins")
     assert 'data-tab="sens/dessins"' in empty and "aucun dessin pour l'instant" in empty
     client.portal.call(connect, kernel, "alice", "Alice")
     append(client, kernel, [img.REQUESTED.draft(job="j1", target="alice", person="alice", quality="normal",
@@ -127,10 +127,10 @@ def test_a_drawing_says_for_whom_by_name_and_what_she_sees_in_it(world):  # noqa
                                             caption=Content.of("Un chat roulé en boule."), backend="local",
                                             cost_usd=0.003)],
            "imaging")
-    page = drawn(client, "/inspecteur/sens/dessins")
+    page = drawn(client, "/admin/sens/dessins")
     item = page.split("Un chat roux endormi", 1)[0].rsplit("<li", 1)[1] + page.split("Un chat roux endormi", 1)[1]
     item = item.split("</li>", 1)[0]
-    assert "prêt, pas encore montré" in item and ">Alice</a>" in item and "/inspecteur/fiche/person/alice" in item
+    assert "prêt, pas encore montré" in item and ">Alice</a>" in item and "/admin/fiche/person/alice" in item
     assert "Ce qu'elle y voit" in item and "Un chat roulé en boule." in item and ">alice<" not in item
     assert "Brancher un fournisseur" in _head(page) and "Régler ses dessins" in _head(page)
     # ce qu'ils ont coûté : un dessin sous le centime se lit (« 0,0030 $ »), jamais « 0.00 $ »
@@ -140,14 +140,14 @@ def test_a_drawing_says_for_whom_by_name_and_what_she_sees_in_it(world):  # noqa
 def test_devices_on_the_left_filter_the_page_and_their_signals_read_on_the_right(world):  # noqa: F811
     client, live, _ = world
     kernel, _ = _life(client, live)
-    empty = drawn(client, "/inspecteur/sens/appareils")
+    empty = drawn(client, "/admin/sens/appareils")
     assert 'data-tab="sens/appareils"' in empty and "Aucun appareil n’a encore rien signalé" in empty
     append(client, kernel, [
         sen.SENSED.draft(source="sensors", kind="signal", device="sonnette", summary=Content.of("On a sonné."),
                          pertinence=0.7, emotion="surprised", intensity=0.4),
         sen.SENSED.draft(source="sensors", kind="signal", device="thermostat", summary=Content.of("Il fait 17 °C."),
                          pertinence=0.3)], "sensors")
-    page = drawn(client, "/inspecteur/sens/appareils")
+    page = drawn(client, "/admin/sens/appareils")
     left, right = page.split('id="dev-devices-title"', 1)[1], page.split('id="dev-signals-title"', 1)[1]
     assert page.index('id="dev-devices-title"') < page.index('id="dev-signals-title"')
     assert "sonnette" in left.split('id="dev-signals-title"', 1)[0] and "appareil=sonnette" in left
@@ -156,6 +156,6 @@ def test_devices_on_the_left_filter_the_page_and_their_signals_read_on_the_right
     assert "70\u202f%" in right.split("On a sonné.", 1)[1].split("</li>", 1)[0]  # sa pertinence, en pourcentage
     # pas de champ « nom exact » suivi de « Filtrer » : un clic sur l'appareil filtre déjà la page
     assert '<form class="filters"' not in page and "nom exact" not in page
-    one = drawn(client, "/inspecteur/sens/appareils?appareil=sonnette")
+    one = drawn(client, "/admin/sens/appareils?appareil=sonnette")
     assert "dev-one on" in one and "Tous les appareils" in one and "Il fait 17 °C." not in one
     assert '<form class="filters"' not in one

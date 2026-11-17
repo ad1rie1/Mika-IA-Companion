@@ -102,8 +102,8 @@ describe("les cases", () => {
     expect(person).toContain("Elle attend ton accord");
     expect(person).toContain("<b>Ouvrir un de tes mails</b>");
     expect(person).not.toContain("console");
-    const operator = whyMarkup(t, cell("toi", { line: "ligne 2" }), "Chat web", "quand elle te répond", "http://h/inspecteur/reglages/droits?detail=famille%3Aemail");
-    expect(operator).toContain('Dans la console : <a href="http://h/inspecteur/reglages/droits?detail=famille%3Aemail" target="_blank" rel="noopener">ligne 2</a>');
+    const operator = whyMarkup(t, cell("toi", { line: "ligne 2" }), "Chat web", "quand elle te répond", "http://h/admin/reglages/droits?detail=famille%3Aemail");
+    expect(operator).toContain('Dans la console : <a href="http://h/admin/reglages/droits?detail=famille%3Aemail" target="_blank" rel="noopener">ligne 2</a>');
   });
 });
 

@@ -16,10 +16,10 @@ from mika.kernel.registry import CompositionError
 from tests.fixtures.console_html import ConsoleHTML
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 
-PAGE = "/inspecteur/courrier/parametres"
+PAGE = "/admin/courrier/parametres"
 #: où s'enregistrent ses boîtes et ses paramètres (les réglages, les paramètres internes)
-SAVE = "/inspecteur/reglages/boites"
-PARAMS = "/inspecteur/reglages/comportement-email"
+SAVE = "/admin/reglages/boites"
+PARAMS = "/admin/reglages/comportement-email"
 ACCOUNT = {"_section": "courrier", "_enregistrement": "accounts", "_ancienne": "", "_cle": "perso",
            "_champs": ["label", "address", "imap_host", "user"], "label": "Personnel", "address": "moi@exemple.org",
            "imap_host": "imap.exemple.org", "user": "moi"}
@@ -40,17 +40,17 @@ def drawn(client, url: str) -> str:
 def test_the_mail_settings_open_from_the_top_right_and_stay_in_the_mail(world):  # noqa: F811
     client, _, _ = world
     bootstrap(client)
-    box = drawn(client, "/inspecteur/courrier")
+    box = drawn(client, "/admin/courrier")
     assert "<h1>Réception</h1>" in box  # le premier onglet de la barre, pas celui du bouton
     tabs = re.search(r'<nav class="tabs".*?</nav>', box, re.S).group()
     assert "Paramètres" not in tabs and "Gérer les comptes" not in box
-    assert re.search(r'<a class="btn quiet gear-link" href="/inspecteur/courrier/parametres"', box)
+    assert re.search(r'<a class="btn quiet gear-link" href="/admin/courrier/parametres"', box)
     old = client.get(f"{SAVE}?enregistrement=accounts&cle=perso", follow_redirects=False)
     assert old.status_code == 301 and old.headers["location"] == f"{PAGE}?enregistrement=accounts&cle=perso"
-    assert client.get("/inspecteur/courrier/comptes", follow_redirects=False).headers["location"].startswith(PAGE)
+    assert client.get("/admin/courrier/comptes", follow_redirects=False).headers["location"].startswith(PAGE)
     page = drawn(client, PAGE)
     assert 'class="now-page mailset"' in page and "<h1>Paramètres</h1>" in page
-    assert re.search(r'<a class="btn quiet gear-link on" href="/inspecteur/courrier/parametres" aria-current="page"',
+    assert re.search(r'<a class="btn quiet gear-link on" href="/admin/courrier/parametres" aria-current="page"',
                      page)
     assert "Aucune boîte encore" in page  # l'état vide, dessiné
     # ses paramètres généraux, sur la même page : ils s'enregistrent comme ailleurs, et reviennent ici
@@ -71,7 +71,7 @@ def test_a_mailbox_is_added_and_kept_on_the_mail_settings(world):  # noqa: F811
     assert added.status_code == 200 and PAGE in str(added.url)
     page = html.unescape(added.text)
     assert "Personnel" in page and "moi@exemple.org" in page and "imap.exemple.org · moi" in page
-    assert "/inspecteur/fiche/compte/perso" in page and f"{PAGE}?enregistrement=accounts&cle=perso" in page
+    assert "/admin/fiche/compte/perso" in page and f"{PAGE}?enregistrement=accounts&cle=perso" in page
     edit = drawn(client, f"{PAGE}?enregistrement=accounts&cle=perso")
     assert "La boîte" in edit and 'value="imap.exemple.org"' in edit
     refused = post(client, SAVE, {**ACCOUNT, "_ancienne": "perso", "_cle": "pro"})
@@ -174,10 +174,10 @@ def test_a_mailbox_belongs_to_you_to_her_or_to_a_person(world):  # noqa: F811
     from mika.plugins.email import params_of
     assert params_of(live.kernel.mind.frame()).owners == {"sienne": "elle", "tienne": ""}
     # ta fiche : l'onglet de tes comptes, ta boîte seulement
-    fiche = " ".join(re.sub(r"<[^>]+>", " ", drawn(client, "/inspecteur/fiche/person/user_1?onglet=boites")).split())
+    fiche = " ".join(re.sub(r"<[^>]+>", " ", drawn(client, "/admin/fiche/person/user_1?onglet=boites")).split())
     assert "La tienne" in fiche and "La sienne" not in fiche and "Courrier 1" in fiche
     # le courrier, par propriétaire : elle a son nom dans le choix, et sa boîte seulement quand on la choisit
-    box = drawn(client, "/inspecteur/courrier/reception?qui=elle")
+    box = drawn(client, "/admin/courrier/reception?qui=elle")
     assert "Les boîtes de" in box and her in box.split("Les boîtes de", 1)[1]
     accounts = box.split("Comptes", 1)[1].split("Dossiers", 1)[0] if "Dossiers" in box else box.split("Comptes", 1)[1]
     assert "La sienne" in accounts and "La tienne" not in accounts

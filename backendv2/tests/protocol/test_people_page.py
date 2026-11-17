@@ -17,7 +17,7 @@ from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture p
 def test_only_an_operator_sees_the_people(world):  # noqa: F811
     client, _, _ = world
     page = client.get(people.BASE, follow_redirects=False)
-    assert page.status_code == 303 and page.headers["location"].endswith("/inspecteur/connexion")
+    assert page.status_code == 303 and page.headers["location"].endswith("/admin/connexion")
     assert client.get(people.FRAGMENT).status_code == 401
 
 
@@ -29,18 +29,18 @@ def test_a_card_per_person(world):  # noqa: F811
     assert page.status_code == 200
     ConsoleHTML(page.text).check()
     text = html.unescape(page.text)
-    assert "<h1>Personnes</h1>" in text and re.search(r'<a class="nav-item on nav-head" href="/inspecteur/personnes"', text)
+    assert "<h1>Personnes</h1>" in text and re.search(r'<a class="nav-item on nav-head" href="/admin/personnes"', text)
     assert " style=" not in text and not re.search(r"<script(?![^>]*\bsrc=)", text)
     card = re.search(r'<li class="people-card.*?</li>\s*</ul>', text, re.S).group()
-    assert '<a href="/inspecteur/fiche/person/user_1">adrien</a>' in card
+    assert '<a href="/admin/fiche/person/user_1">adrien</a>' in card
     assert '<span class="now-tag owner">propriétaire</span>' in card and "lui a écrit à l'instant" in card
     # une seule barre d'onglets, la même sur les quatre pages : cette page, puis les onglets des facultés (ADR 0176)
     bar = r'<nav class="tabs" aria-label="Onglets">(.*?)</nav>'
-    expected = [("/inspecteur/personnes", "Vue d'ensemble"), ("/inspecteur/personnes/personnes", "Annuaire"),
-                ("/inspecteur/personnes/liens", "Liens"), ("/inspecteur/personnes/presents", "Présents")]
+    expected = [("/admin/personnes", "Vue d'ensemble"), ("/admin/personnes/personnes", "Annuaire"),
+                ("/admin/personnes/liens", "Liens"), ("/admin/personnes/presents", "Présents")]
     assert re.findall(r'href="([^"]+)"[^>]*>([^<]+)</a>', re.search(bar, text, re.S).group(1)) == expected
     for tab in ("personnes", "liens", "presents"):
-        page = client.get(f"/inspecteur/personnes/{tab}")
+        page = client.get(f"/admin/personnes/{tab}")
         assert page.status_code == 200, tab
         tabs = re.search(bar, html.unescape(page.text), re.S).group(1)
         assert re.findall(r'href="([^"?]+)[^"]*"[^>]*>([^<]+)</a>', tabs) == expected, tab
@@ -51,19 +51,19 @@ def test_search_and_filters(world):  # noqa: F811
     bootstrap(client)
     chat(client)
     found = html.unescape(client.get(f"{people.BASE}?q=adri").text)
-    assert 'href="/inspecteur/fiche/person/user_1"' in found and 'value="adri"' in found
+    assert 'href="/admin/fiche/person/user_1"' in found and 'value="adri"' in found
     nobody = html.unescape(client.get(f"{people.BASE}?q=personne-inconnue").text)
     assert "Personne ne correspond à « personne-inconnue »" in nobody and "people-card" not in nobody
     # une proximité choisie : la pastille s'allume, la recherche est gardée
     level = html.unescape(client.get(f"{people.BASE}?q=adri&proximite=friend").text)
-    assert re.search(r'<a class="hm-chip on" href="/inspecteur/personnes\?q=adri&proximite=friend"', level)
+    assert re.search(r'<a class="hm-chip on" href="/admin/personnes\?q=adri&proximite=friend"', level)
     # pas de filtre « en ligne » : Présents le dit, le titre de la bande y mène (pas d'onglet qui répète un filtre)
     chips = re.search(r'<nav class="hm-chips".*?</nav>', level, re.S).group()
     assert "En ligne" not in chips and "presence=" not in chips
-    assert re.search(r'<h2 class="now-eyebrow"><a href="/inspecteur/personnes/presents">En ligne[^<]*</a></h2>', level)
+    assert re.search(r'<h2 class="now-eyebrow"><a href="/admin/personnes/presents">En ligne[^<]*</a></h2>', level)
     # une ancienne adresse ?presence=en-ligne n'a plus d'effet : Adrien, déconnecté, reste là
     old = html.unescape(client.get(f"{people.BASE}?presence=en-ligne").text)
-    assert '<a href="/inspecteur/fiche/person/user_1">adrien</a>' in old and "Personne avec ce filtre" not in old
+    assert '<a href="/admin/fiche/person/user_1">adrien</a>' in old and "Personne avec ce filtre" not in old
     assert "presence=" not in old
     fragment = client.get(f"{people.FRAGMENT}?q=adri")
     assert fragment.status_code == 200 and "<h1" not in fragment.text and "data-now-stamp" in fragment.text

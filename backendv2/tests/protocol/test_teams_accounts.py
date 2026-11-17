@@ -29,7 +29,7 @@ from tests.protocol.test_teams_web import DM, batch, headers, new_key
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 
 BEA_DM = "19:bea_bob@unq.gbl.spaces"
-SAVE = "/inspecteur/reglages/teams"
+SAVE = "/admin/reglages/teams"
 
 
 def post(client, path: str, data: dict):
@@ -113,23 +113,23 @@ def test_the_console_reads_by_owner_then_by_account(world):  # noqa: F811
     mine, hers = new_key(client, live), new_key(client, live, "bea_t")
     client.post("/api/teams/inbox", json=batch(), headers=headers(mine))
     client.post("/api/teams/inbox", json=batch(conv=BEA_DM, text="Tu viens ?"), headers=headers(hers))
-    every = drawn(client, "/inspecteur/teams/conversations")
+    every = drawn(client, "/admin/teams/conversations")
     chooser = every.split("Les comptes de", 1)[1].split("</nav>", 1)[0]
     assert "Tout le monde" in chooser and "Toi" in chooser and her in chooser and "Béa Martin" in chooser
     assert "On se voit à 14 h ?" in every and "Tu viens ?" in every and "Teams de Béa" in every  # deux comptes
-    bea = drawn(client, f"/inspecteur/teams/conversations?qui=personne:{handle}")
+    bea = drawn(client, f"/admin/teams/conversations?qui=personne:{handle}")
     assert "Tu viens ?" in bea and "On se voit à 14 h ?" not in bea
-    yours = drawn(client, "/inspecteur/teams/conversations?qui=toi")
+    yours = drawn(client, "/admin/teams/conversations?qui=toi")
     assert "On se voit à 14 h ?" in yours and "Tu viens ?" not in yours
-    assert "Aucun compte Teams n'est à" in drawn(client, "/inspecteur/teams/conversations?qui=elle")
-    one = drawn(client, "/inspecteur/teams/conversations?compte=bea_t")
+    assert "Aucun compte Teams n'est à" in drawn(client, "/admin/teams/conversations?qui=elle")
+    one = drawn(client, "/admin/teams/conversations?compte=bea_t")
     assert "Tu viens ?" in one and "On se voit à 14 h ?" not in one
     # l'extension : un compte par ligne, puis chacun la sienne, avec sa clé
-    listing = drawn(client, "/inspecteur/teams/extension")
+    listing = drawn(client, "/admin/teams/extension")
     assert "Comptes Teams" in listing and "?compte=bea_t" in listing
-    page = drawn(client, f"/inspecteur/teams/extension?qui=personne:{handle}")
+    page = drawn(client, f"/admin/teams/extension?qui=personne:{handle}")
     assert "Ce compte Teams" in page and "Teams de Béa" in page
-    assert "/inspecteur/action/teams.cle" in page and "/inspecteur/action/teams.retirer_cle" in page
+    assert "/admin/action/teams.cle" in page and "/admin/action/teams.retirer_cle" in page
     done = client.portal.call(lambda: perform(live.kernel, "teams.cle", {"_fixes": ["compte"], "compte": ["bea_t"]},
                                               by="user_1", nonce="cle-bea"))
     key = re.search(r"mtk_[\w-]+", done.message).group()
@@ -143,7 +143,7 @@ def test_the_console_reads_by_owner_then_by_account(world):  # noqa: F811
     # adresse sous Réglages, que le menu n'a plus (la même phrase répond à ``mika teams key``)
     assert "Teams › Paramètres" in refused.message and "Réglages" not in refused.message
     # une conversation de Béa a sa fiche, sous son compte
-    fiche = drawn(client, f"/inspecteur/fiche/conversation_teams/bea_t~{BEA_DM}")
+    fiche = drawn(client, f"/admin/fiche/conversation_teams/bea_t~{BEA_DM}")
     assert "Tu viens ?" in fiche and "On se voit à 14 h ?" not in fiche
 
 
@@ -181,7 +181,7 @@ def test_an_account_card_names_its_owner_and_leads_to_its_extension_and_conversa
         "principal": {"display_name": "Adrien"}, "equipe": {"label": "Équipe", "owner": "personne:user_1"},
         "bea_t": {"label": "Teams de Béa", "owner": f"personne:{handle}"}}))
     client.portal.call(live.reconfigure)
-    page = drawn(client, "/inspecteur/teams/parametres")
+    page = drawn(client, "/admin/teams/parametres")
     cards = {m.group(1): m.group(0) for m in re.finditer(
         r'<article class="settings-record[^"]*" role="listitem" data-href="[^"]*cle=(\w+)".*?</article>', page, re.S)}
     assert set(cards) == {"principal", "equipe", "bea_t"}
@@ -189,16 +189,16 @@ def test_an_account_card_names_its_owner_and_leads_to_its_extension_and_conversa
     assert ">à Béa Martin<" in cards["bea_t"]  # le nom de la liste des choix, gardé
     assert ">à toi<" in cards["principal"]
     for key, card in cards.items():
-        assert f'href="/inspecteur/teams/extension?compte={key}">Son extension</a>' in card, key
-        assert f'href="/inspecteur/teams/conversations?compte={key}">Ses conversations</a>' in card, key
+        assert f'href="/admin/teams/extension?compte={key}">Son extension</a>' in card, key
+        assert f'href="/admin/teams/conversations?compte={key}">Ses conversations</a>' in card, key
         assert ">Retirer</button>" in card and ">retirer<" not in card, key
     # le fait de la page s'accorde : « 0 branché », jamais « branché(s) »
     assert "(0 avec une clé, 0 branché)" in page and "branché(s)" not in page
     # l'onglet Extension : l'identifiant y est le « nom court du compte » (« clé » ne dit que le secret), que
     # l'onglet dessiné lit toujours — ses chiffres mènent aux onglets du même compte
-    ext = drawn(client, "/inspecteur/teams/extension?compte=equipe")
+    ext = drawn(client, "/admin/teams/extension?compte=equipe")
     band = ext.split('class="person-tiles teams-band"', 1)[1].split("</section>", 1)[0]
-    assert "Équipe, à adrien" in ext and 'href="/inspecteur/teams/conversations?compte=equipe"' in band
+    assert "Équipe, à adrien" in ext and 'href="/admin/teams/conversations?compte=equipe"' in band
 
 
 def test_a_persons_fiche_has_its_teams_tab_only_when_an_account_is_hers(world):  # noqa: F811
@@ -211,11 +211,11 @@ def test_a_persons_fiche_has_its_teams_tab_only_when_an_account_is_hers(world): 
     def text(url: str) -> str:
         return " ".join(re.sub(r"<[^>]+>", " ", drawn(client, url)).split())
 
-    bea = text(f"/inspecteur/fiche/person/{handle}?onglet=teams")
+    bea = text(f"/admin/fiche/person/{handle}?onglet=teams")
     assert "Teams de Béa" in bea and "principal" not in bea and "Ses conversations" in bea
-    you = drawn(client, "/inspecteur/fiche/person/user_1?onglet=teams")
+    you = drawn(client, "/admin/fiche/person/user_1?onglet=teams")
     assert "principal" in you and "Teams de Béa" not in you
-    assert "onglet=teams" not in drawn(client, f"/inspecteur/fiche/person/{cam.handle}")
+    assert "onglet=teams" not in drawn(client, f"/admin/fiche/person/{cam.handle}")
 
 
 def test_the_console_takes_a_key_back_and_its_audit_says_who(world):  # noqa: F811

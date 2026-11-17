@@ -23,7 +23,7 @@ from mika.app.server import register_accounts
 from mika.contracts import identity as identity_c
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture
 
-ACCOUNTS = "/inspecteur/reglages/comptes"
+ACCOUNTS = "/admin/reglages/comptes"
 
 
 def _identity(client, live, handle: str):
@@ -49,7 +49,7 @@ def test_an_account_is_a_named_person_from_its_creation(world):  # noqa: F811
     assert me.known and me.authenticated and me.operator and me.name == "adrien"
     owners = client.portal.call(lambda: _async(live.kernel.mind.frame().get(identity_c.OWNERS)))
     assert "user_1" in owners
-    person = client.get("/inspecteur/fiche/person/user_1")
+    person = client.get("/admin/fiche/person/user_1")
     assert person.status_code == 200 and "adrien" in html.unescape(person.text)
 
     async def edit():
@@ -60,7 +60,7 @@ def test_an_account_is_a_named_person_from_its_creation(world):  # noqa: F811
     bea = client.portal.call(edit)
     assert _identity(client, live, "user_1").name == "Adrien Dupont"
     assert _identity(client, live, bea.handle).name == "Béa Martin"
-    listing = html.unescape(client.get("/inspecteur/reglages/comptes").text)
+    listing = html.unescape(client.get("/admin/reglages/comptes").text)
     assert "Adrien Dupont" in listing
 
     async def back_and_off():
@@ -96,14 +96,14 @@ def test_the_console_adds_a_user_or_an_operator_each_a_person_at_once(world):  #
     assert weak.status_code == 400 and 'name="role" value="operateur"' in html.unescape(weak.text)  # le rôle reste
     added = add("utilisateur", "bea", "Béa Martin")
     assert "Utilisateur ajouté" in html.unescape(added.text)
-    assert "/inspecteur/fiche/person/user_2" in added.text  # la page du compte mène à sa fiche
+    assert "/admin/fiche/person/user_2" in added.text  # la page du compte mène à sa fiche
     add("operateur", "dan", "")
     by_name = {a.username: a for a in client.portal.call(live.accounts.all)}
     assert not by_name["bea"].operator and by_name["dan"].operator
     bea, dan = _identity(client, live, by_name["bea"].handle), _identity(client, live, by_name["dan"].handle)
     assert bea.known and bea.authenticated and bea.name == "Béa Martin" and not bea.operator
     assert dan.known and dan.authenticated and dan.operator  # un opérateur est aussi propriétaire
-    assert client.get(f"/inspecteur/fiche/person/{by_name['bea'].handle}").status_code == 200
+    assert client.get(f"/admin/fiche/person/{by_name['bea'].handle}").status_code == 200
 
 
 def test_a_confided_project_names_its_person_and_can_be_modified_by_an_operator_who_never_chatted(world):  # noqa: F811
@@ -115,16 +115,16 @@ def test_a_confided_project_names_its_person_and_can_be_modified_by_an_operator_
     token = client.cookies.get("csrftoken")
     fields = ["title", "description", "owner", "objectives", "constants", "cadence_hours", "mode", "schedule", "days",
               "start", "end", "runs_per_day", "priority", "approval", "remote", "branch"]
-    done = client.post("/inspecteur/action/projects.creer", data={
-        "csrf": token, "_op": "c1", "_retour": "/inspecteur/projets", "_sujet": "", "title": "Un projet",
+    done = client.post("/admin/action/projects.creer", data={
+        "csrf": token, "_op": "c1", "_retour": "/admin/projets", "_sujet": "", "title": "Un projet",
         "description": "", "owner": "", "objectives": "Le premier pas", "constants": "", "cadence_hours": "0",
         "mode": "persona", "schedule": "manual", "days": "all", "start": "", "end": "", "runs_per_day": "0",
         "priority": "normal", "approval": "on", "remote": "", "branch": "main", "_champs": fields},
         follow_redirects=False)
     pid = done.headers["location"].split("/fiche/project/", 1)[1].split("?", 1)[0]
-    behaviour = html.unescape(client.get(f"/inspecteur/fiche/project/{pid}?onglet=comportement").text)
+    behaviour = html.unescape(client.get(f"/admin/fiche/project/{pid}?onglet=comportement").text)
     assert "Adrien Dupont" in behaviour and "user_1" not in re.sub(r'(value|href|name)="[^"]*"', "", behaviour)
-    form = behaviour[behaviour.find('action="/inspecteur/action/projects.modifier"') - 200:]
+    form = behaviour[behaviour.find('action="/admin/action/projects.modifier"') - 200:]
     form = form[:form.find("</form>")]
     posted: dict[str, list[str]] = {}
     for m in re.finditer(r'<input type="hidden" name="([^"]+)" value="([^"]*)"', form):
@@ -132,7 +132,7 @@ def test_a_confided_project_names_its_person_and_can_be_modified_by_an_operator_
     posted |= {"csrf": [token], "title": ["Un projet mieux nommé"], "description": ["Le faire bien."],
                "owner": ["user_1"], "mode": ["persona"], "schedule": ["manual"], "days": ["all"], "start": [""],
                "end": [""], "runs_per_day": ["0"], "priority": ["high"], "approval": ["on"]}
-    saved = client.post("/inspecteur/action/projects.modifier", data=posted, follow_redirects=False)
+    saved = client.post("/admin/action/projects.modifier", data=posted, follow_redirects=False)
     assert saved.status_code == 303, re.findall(r'class="error"[^>]*>([^<]+)', saved.text)
-    overview = html.unescape(client.get(f"/inspecteur/fiche/project/{pid}").text)
+    overview = html.unescape(client.get(f"/admin/fiche/project/{pid}").text)
     assert "Un projet mieux nommé" in overview and "Le faire bien." in overview

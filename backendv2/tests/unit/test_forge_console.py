@@ -654,7 +654,7 @@ def test_the_app_fiche_renders_and_its_forms_post_through_the_console(world, tmp
         draft = written_draft(forge.info(app))
         client.portal.call(lambda d=draft: kernel.mind.append([d], emitter="forge", correlation="t",
                                                                origin=Origin.GENESIS))
-    fiche = "/inspecteur/fiche/app/meteo?onglet=vues&vue=releves&ville=Paris"
+    fiche = "/admin/fiche/app/meteo?onglet=vues&vue=releves&ville=Paris"
     page = client.get(fiche)
     body = html.unescape(page.text)
     assert page.status_code == 200 and "Température à Paris" in body and "Carnet météo" in body
@@ -667,41 +667,41 @@ def test_the_app_fiche_renders_and_its_forms_post_through_the_console(world, tmp
     searched = html.unescape(client.get(fiche.replace("ville=Paris", "ville=Lyon&froid=oui")).text)
     assert 'value="Lyon" type="search"' in searched and 'value="oui" selected' in searched
     assert "Relevés à Lyon" in searched
-    assert 'action="/inspecteur/action/forge.agir"' in body and "Ajouter un relevé" in body
-    assert "/inspecteur/action/forge.effacer" not in body and "/inspecteur/action/forge.tester" not in body
-    management = html.unescape(client.get("/inspecteur/fiche/app/meteo?onglet=etat").text)
+    assert 'action="/admin/action/forge.agir"' in body and "Ajouter un relevé" in body
+    assert "/admin/action/forge.effacer" not in body and "/admin/action/forge.tester" not in body
+    management = html.unescape(client.get("/admin/fiche/app/meteo?onglet=etat").text)
     assert "Arrêter" in management and "Effacer" in management and "Tester" in management
     token = client.cookies.get("csrftoken")
     add = {"csrf": token, "_op": "p1", "_retour": fiche, "_sujet": "meteo", "_fixes": ["app", "vue", "action"],
            "app": "meteo", "vue": "releves", "action": "ajouter", "_champs": ["ville", "temperature", "note"],
            "ville": "Paris", "temperature": "-3", "note": "brume"}
-    done = client.post("/inspecteur/action/forge.agir", data=add)
+    done = client.post("/admin/action/forge.agir", data=add)
     assert done.status_code == 200 and "Relevé ajouté pour Paris." in html.unescape(done.text)
     assert "brume" in html.unescape(client.get(fiche).text)
-    bad = client.post("/inspecteur/action/forge.agir", data={**add, "_op": "p2", "temperature": "99"})
+    bad = client.post("/admin/action/forge.agir", data={**add, "_op": "p2", "temperature": "99"})
     assert bad.status_code == 400 and "doit être entre -60 et 60" in html.unescape(bad.text)
     for tab_name in ("etat", "reglages", "code", "journal", "vecu"):
-        r = client.get(f"/inspecteur/fiche/app/meteo?onglet={tab_name}")
+        r = client.get(f"/admin/fiche/app/meteo?onglet={tab_name}")
         assert r.status_code == 200 and "a échoué" not in html.unescape(r.text), tab_name
         ConsoleHTML(r.text).check()
-    assert "/inspecteur/fiche/app/meteo" in html.unescape(client.get("/inspecteur/apps").text)
+    assert "/admin/fiche/app/meteo" in html.unescape(client.get("/admin/apps").text)
     # régler : le secret part scellé au repos, l'app le lit, la console n'en dit que « défini »
-    settle = {"csrf": token, "_op": "p3", "_retour": "/inspecteur/fiche/app/reglee?onglet=reglages",
+    settle = {"csrf": token, "_op": "p3", "_retour": "/admin/fiche/app/reglee?onglet=reglages",
               "_sujet": "reglee", "_champs": ["ville", "cle", "n"], "ville": "Lyon", "cle": SECRET, "n": "4"}
-    saved = client.post("/inspecteur/action/forge.regler", data=settle)
+    saved = client.post("/admin/action/forge.regler", data=settle)
     assert saved.status_code == 200 and "Réglages enregistrés" in html.unescape(saved.text)
     stored = client.portal.call(live.settings.forge_config, "reglee")
     assert stored["ville"] == "Lyon" and stored["n"] == 4 and SECRET not in json.dumps(stored)
     read = client.portal.call(forge.call, "reglee", "view_lire", {"page": 1})
     assert read.ok and f"('cle', '{SECRET}')" in read.value["blocks"][0]["text"]
-    settings_page = html.unescape(client.get("/inspecteur/fiche/app/reglee?onglet=reglages").text)
+    settings_page = html.unescape(client.get("/admin/fiche/app/reglee?onglet=reglages").text)
     assert SECRET not in settings_page and "défini" in settings_page
     # Documents en lecture seule pour la revue visuelle, avec les seules données fictives du test.
     out = tmp_path / "review"
     out.mkdir()
-    for name, url in (("forge-vues", fiche), ("forge-reglages", "/inspecteur/fiche/app/reglee?onglet=reglages")):
-        rendered = client.get(url).text.replace('/inspecteur/static/', 'static/')
-        rendered = rendered.replace('method="post"', 'method="dialog"').replace(' data-vitals="/inspecteur/_vitals"', '')
+    for name, url in (("forge-vues", fiche), ("forge-reglages", "/admin/fiche/app/reglee?onglet=reglages")):
+        rendered = client.get(url).text.replace('/admin/static/', 'static/')
+        rendered = rendered.replace('method="post"', 'method="dialog"').replace(' data-vitals="/admin/_vitals"', '')
         (out / (name + ".html")).write_text(rendered)
 
 

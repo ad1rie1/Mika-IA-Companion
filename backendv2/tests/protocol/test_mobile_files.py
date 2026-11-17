@@ -182,13 +182,13 @@ def test_the_console_shows_what_she_sent_and_an_operator_downloads_it(ctx) -> No
     r = console.post("/auth/login", json={"username": "adrien", "password": PASSWORD},
                      headers={"X-CSRFToken": console.cookies.get("csrftoken")})
     assert r.status_code == 200, r.text
-    tab = console.get(f"/inspecteur/fiche/person/{person}?onglet=fichiers")
+    tab = console.get(f"/admin/fiche/person/{person}?onglet=fichiers")
     assert tab.status_code == 200 and "courses.md" in tab.text and "envoyé" in tab.text
-    fiche = console.get(f"/inspecteur/fiche/partage/{file}")
+    fiche = console.get(f"/admin/fiche/partage/{file}")
     assert fiche.status_code == 200 and "courses.md" in fiche.text and "Fichier envoyé" in fiche.text
-    got = console.get(f"/inspecteur/telecharger/partage/{file}", params={"fichier": "courses.md"})
+    got = console.get(f"/admin/telecharger/partage/{file}", params={"fichier": "courses.md"})
     assert got.status_code == 200 and got.content == LIST.encode()
-    assert console.get("/inspecteur/fiche/partage/" + "0" * 32).status_code == 404
+    assert console.get("/admin/fiche/partage/" + "0" * 32).status_code == 404
 
 
 def test_every_speech_frame_says_its_attachments() -> None:

@@ -412,7 +412,7 @@ def _correlation_cell(corr: str, episodes: set[str]) -> Any:
         label = "un effet"
     else:
         label = "les événements liés"
-    return Ref("local", "/inspecteur/systeme/chronologie", label, (("correlation", corr),))
+    return Ref("local", f"{PREFIX}/systeme/chronologie", label, (("correlation", corr),))
 
 
 @TABS.tab("systeme.etat", title="Diagnostic avancé", group="Anatomie",
@@ -694,7 +694,7 @@ async def simulations(ui: Any, request: Request) -> list[Any]:
                    key=lambda f: f.stat().st_mtime, reverse=True)
     chosen = request.query_params.get("fichier", "")
     out: list[Any] = [Table(("fichier", "modifié"), tuple(
-        (Ref("local", f"/inspecteur/systeme/simulations?fichier={_q(str(f.relative_to(folder)))}",
+        (Ref("local", f"{PREFIX}/systeme/simulations?fichier={_q(str(f.relative_to(folder)))}",
              str(f.relative_to(folder))), When(int(f.stat().st_mtime * US))) for f in files),
         title="Rapports", empty="aucun rapport")]
     if chosen:
@@ -788,7 +788,7 @@ async def sorties(ui: Any, request: Request) -> Any:
         return Text(said) if said else "—"
 
     tones = OUTBOX_TONES
-    chips = tuple(NavItem(f"{labels.get(k, k)}", Ref("local", "/inspecteur/systeme/sorties", k, (("etat", k),)),
+    chips = tuple(NavItem(f"{labels.get(k, k)}", Ref("local", f"{PREFIX}/systeme/sorties", k, (("etat", k),)),
                           count=n, active=k == status, tone=tones.get(k, "")) for k, n in sorted(counts.items()))
     back = request.url.path + (f"?{urlencode(_without(request.query_params, 'flash'))}"
                                if _without(request.query_params, "flash") else "")
@@ -801,7 +801,7 @@ async def sorties(ui: Any, request: Request) -> Any:
         *([Note("État inconnu : affichage de tous les effets.", "warn")] if invalid else []),
         Stats(tuple(Stat(labels.get(k, k).capitalize(), n, "", tones.get(k, "") if k not in ("done", "seen") else "")
                     for k, n in sorted(counts.items())) or (Stat("File", 0, "vide"),)),
-        Nav((NavItem("tout", Ref("local", "/inspecteur/systeme/sorties", "tout"), count=sum(counts.values()),
+        Nav((NavItem("tout", Ref("local", f"{PREFIX}/systeme/sorties", "tout"), count=sum(counts.values()),
                      active=not status), *chips), title="État"),
         Table((Column("n°", "fit", hint="l'événement qui l'a fait partir"), Column("quand", "fit"), "effet", "état",
                Column("essais", "num"), "dernière erreur", Column("effet (clé)", detail=True),

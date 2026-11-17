@@ -42,16 +42,16 @@ def test_conversations_are_drawn(world):  # noqa: F811
     bootstrap(client)
     chat(client, "salut ! je reviens d'un concert")
     # l'onglet par défaut de la destination : avec qui elle parle, une ligne par personne (ADR 0181)
-    people = drawn(client, "/inspecteur/fil")
+    people = drawn(client, "/admin/fil")
     assert 'data-tab="fil/conversations"' in people and "/static/handmade/base.css" in people
     assert '<table class="tbl">' not in people
-    messages = drawn(client, "/inspecteur/fiche/person/user_1?onglet=echanges")  # leur conversation
+    messages = drawn(client, "/admin/fiche/person/user_1?onglet=echanges")  # leur conversation
     assert 'class="now-card person-chat"' in messages and "salut ! je reviens d'un concert" in messages
-    table = drawn(client, "/inspecteur/fil/conversations?vue_pg1=table")
+    table = drawn(client, "/admin/fil/conversations?vue_pg1=table")
     assert '<table class="hm-table">' in table and "fil-inbox" not in table
-    judged = drawn(client, "/inspecteur/fil/jugees")
+    judged = drawn(client, "/admin/fil/jugees")
     assert 'class="now-page person-tab"' in judged and "aucune réponse jugée" in judged
-    questions = drawn(client, "/inspecteur/fil/questions")
+    questions = drawn(client, "/admin/fil/questions")
     assert 'class="now-page fil-questions" data-tab="fil/questions"' in questions  # sa forme (tabs/threads.py)
 
 
@@ -60,7 +60,7 @@ def test_every_drawn_tab_opens(world, where):  # noqa: F811
     client, _, _ = world
     bootstrap(client)
     url = where.replace("*", "affect")  # « destination/préfixe-* » : un de ses onglets
-    page = client.get(f"/inspecteur/{url}", follow_redirects=False)
+    page = client.get(f"/admin/{url}", follow_redirects=False)
     assert page.status_code == 200, where
     ConsoleHTML(page.text).check()
     assert 'class="now-page' in page.text, where  # le dessin, pas le repli sur les blocs
@@ -156,18 +156,18 @@ def test_processes_put_what_fails_first_with_its_error(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
     sched = live.kernel.scheduler
-    calm = drawn(client, "/inspecteur/systeme/processus")
+    calm = drawn(client, "/admin/systeme/processus")
     assert "Tous ses processus passent" in calm and "Ce qui ne va pas" not in calm
     name = sched.specs[0].name
     sched.consecutive[name], sched.failures[name] = 4, 4
     sched.last_error[name] = (live.kernel.mind.clock.now(), "RuntimeError('le relevé a cassé')")
-    page = drawn(client, "/inspecteur/systeme/processus")
+    page = drawn(client, "/admin/systeme/processus")
     trouble = page.index("Ce qui ne va pas")
     assert "4 échecs d'affilée" in page and page.index("le relevé a cassé") > trouble
     assert page.index("Par faculté") > page.index("le relevé a cassé")
     assert page.count('class="now-card sys-faculty"') == len({s.owner for s in sched.specs})
     assert "Historique des échecs" in page  # l'historique au journal reste celui de la console
-    table = drawn(client, "/inspecteur/systeme/processus?vue_pg1=table")
+    table = drawn(client, "/admin/systeme/processus?vue_pg1=table")
     assert "sys-faculty" not in table and '<table class="hm-table">' in table
 
 
@@ -179,7 +179,7 @@ def test_a_failing_drawing_gives_back_the_blocks(world, monkeypatch):  # noqa: F
         raise RuntimeError("dessin cassé")
 
     monkeypatch.setattr(pages.DRAWN["fil/jugees"], "draw", broken)
-    page = drawn(client, "/inspecteur/fil/jugees")
+    page = drawn(client, "/admin/fil/jugees")
     assert "judged-list" not in page and 'class="now-card person-list' in page  # la liste de la faculté
 
 
@@ -197,7 +197,7 @@ def test_nights_read_the_journal_then_one_card_per_night(world):  # noqa: F811
         self_.JOURNALED.draft(day="2027-10-18", voice=voice, text=Content.of("Une soirée au bureau, sous la lampe."),
                               shareable=Content.of("Une soirée calme.")),
     ], "self")
-    page = drawn(client, "/inspecteur/pensees/nuits")
+    page = drawn(client, "/admin/pensees/nuits")
     journal = page.split('class="now-card nights-journal"')[1].split("</article>")[0]
     assert "Journal du lun. 18 oct., en entier" in journal and "Une soirée au bureau, sous la lampe." in journal
     assert "Une soirée calme." in journal  # ce qu'elle en raconte à n'importe qui
@@ -215,7 +215,7 @@ def test_what_she_can_do_is_her_families_and_their_tables(world):  # noqa: F811
     l'une sous l'autre ; un tableau s'enregistre d'un envoi, et « remettre » revient au minimum vital."""
     client, live, _ = world
     bootstrap(client)
-    page = drawn(client, "/inspecteur/outils/tous")
+    page = drawn(client, "/admin/outils/tous")
     for part in ("Ses propres outils", 'id="f-memory-title">Mémoire', "minimum vital", "Comportement par défaut",
                  "Régler les droits", "Ce que son prompt dit de ses outils"):
         assert part in page, part
@@ -229,21 +229,21 @@ def test_what_she_can_do_is_her_families_and_their_tables(world):  # noqa: F811
         assert f'<span class="access-tool-desc">{spec.label}</span>' in listed, spec.name
         assert spec.description not in listed, spec.name
     # la famille demandée a sa section en premier : sans ancre, c'est elle que les sous-onglets montrent
-    panes = drawn(client, "/inspecteur/outils/tous?famille=memory").split('class="hm-subpanes"', 1)[1]
+    panes = drawn(client, "/admin/outils/tous?famille=memory").split('class="hm-subpanes"', 1)[1]
     assert panes.index('id="f-memory"') < panes.index("data-pane")
-    only = drawn(client, "/inspecteur/outils/tous?q=memory_search")
+    only = drawn(client, "/admin/outils/tous?q=memory_search")
     assert 'id="f-memory-title"' in only and 'id="f-email-title"' not in only and "tout voir" in only
     assert "data-subtabs" not in only  # filtrée : tout ce qui répond se lit d'un coup
     # régler la mémoire : toi seule ; puis revenir au minimum vital
     csrf = client.cookies.get("csrftoken")
-    done = client.post("/inspecteur/outils/familles/regler", data={
+    done = client.post("/admin/outils/familles/regler", data={
         "csrf": csrf, "cle": "memory", "faire": "", "ligne.1": "1", "qui.1|proprietaire": "on", "toujours.1": "on",
         "lecture.1": "seule", "action.1": "seule", "garde.1": "public", "tous.1": "on",
         "defaut_lecture": "non", "defaut_action": "non", "defaut_garde": "rien"})
     assert done.status_code == 200 and "enregistrés" in html.unescape(done.text)
     table = client.portal.call(live.settings.families)["memory"]
     assert [(a.who, a.read) for a in table.lines] == [(("proprietaire",), "seule")] and table.default.read == "non"
-    back = client.post("/inspecteur/outils/familles/regler", data={"csrf": csrf, "cle": "memory", "faire": "remettre"})
+    back = client.post("/admin/outils/familles/regler", data={"csrf": csrf, "cle": "memory", "faire": "remettre"})
     assert "minimum vital" in html.unescape(back.text) and "memory" not in client.portal.call(live.settings.families)
 
 
@@ -254,12 +254,12 @@ def test_what_comes_from_elsewhere_is_drawn_as_lines(world):  # noqa: F811
     du service mène à sa fiche, une fois : plus de « Ouvrir sa fiche → » qui la redise."""
     client, _, _ = world
     bootstrap(client)
-    page = drawn(client, "/inspecteur/outils/serveurs")
+    page = drawn(client, "/admin/outils/serveurs")
     head, body = page.split('<div class="page-head-side">')[1].split('<div class="stack">', 1)
     actions = head.split('<div class="action-bar" role="group" aria-label="Actions">')[1].split("</div>")[0]
     assert "Brancher un service" in actions and "Leurs réglages" not in actions
     gear = head.split('class="action-bar"', 1)[1]
-    assert 'href="/inspecteur/outils/parametres"' in gear and "Paramètres</a>" in gear
+    assert 'href="/admin/outils/parametres"' in gear and "Paramètres</a>" in gear
     assert "Paramètres des services" not in gear  # le nom de la roue à une page, partout (audit du 2026-11-05, C6-Q3)
     assert "Brancher un service</a>" not in body
     assert "Les services branchés" in page and "Les outils de ses apps" in page
@@ -268,8 +268,8 @@ def test_what_comes_from_elsewhere_is_drawn_as_lines(world):  # noqa: F811
     services = page.split('aria-labelledby="elsewhere-services"')[1].split("</section>", 1)[0]
     assert '<ul class="person-entries" role="list">' in services
     web = next(li for li in services.split("<li>")[1:] if '>web</a>' in li)
-    assert web.count('href="/inspecteur/fiche/serveur/web"') == 1, web
-    assert services.count('href="/inspecteur/fiche/serveur/web"') == 1
+    assert web.count('href="/admin/fiche/serveur/web"') == 1, web
+    assert services.count('href="/admin/fiche/serveur/web"') == 1
 
 
 def test_an_app_and_a_service_to_review_from_elsewhere_are_lines_too():
@@ -278,27 +278,27 @@ def test_an_app_and_a_service_to_review_from_elsewhere_are_lines_too():
     mène aussi à la fiche) ; chaque ligne dit encore tout ce qu'elle disait."""
     page = html.unescape(env.get_template("handmade/outils/ailleurs.html").render(
         owners=[], services_empty="", apps_empty="",
-        services=[{"name": "meteo", "href": "/inspecteur/fiche/serveur/meteo", "owner": "Adrien",
-                   "owner_href": "/inspecteur/fiche/person/user_1", "state": "connecté", "tone": "ok",
+        services=[{"name": "meteo", "href": "/admin/fiche/serveur/meteo", "owner": "Adrien",
+                   "owner_href": "/admin/fiche/person/user_1", "state": "connecté", "tone": "ok",
                    "purpose": "la météo du jour", "where": "sur cette machine", "served": "1", "offered": "2",
                    "review": 2, "joined": "hier", "notes": ["Il a mis du temps à répondre."], "who": "toi",
                    "access": "1 ligne · par défaut : fermé"}],
-        apps=[{"title": "Factures", "href": "/inspecteur/apps?app=factures", "state": "sert avec toi", "tone": "ok",
+        apps=[{"title": "Factures", "href": "/admin/apps?app=factures", "state": "sert avec toi", "tone": "ok",
                "tools": [{"name": "app_factures_lire", "what": "lire une facture", "args": "numero"}]}]))
     assert not ConsoleHTML(page).errors
     assert "elsewhere-item" not in page and "Ouvrir" not in page
     assert page.count('<ul class="person-entries" role="list">') == 2
     service, app = page.split('aria-labelledby="elsewhere-apps"')
-    for said in ('<a href="/inspecteur/fiche/serveur/meteo">meteo</a>', "connecté", "La météo du jour",
-                 "Avec toi", "1 ligne · par défaut : fermé", '<a href="/inspecteur/fiche/person/user_1">Adrien</a>',
+    for said in ('<a href="/admin/fiche/serveur/meteo">meteo</a>', "connecté", "La météo du jour",
+                 "Avec toi", "1 ligne · par défaut : fermé", '<a href="/admin/fiche/person/user_1">Adrien</a>',
                  "<b>1</b> outil servi sur 2 proposés", "sur cette machine", "joint hier",
                  "2 outils à revoir : nouveaux ou changés depuis ton accord.", "Il a mis du temps à répondre."):
         assert said in service, said
-    assert service.count('href="/inspecteur/fiche/serveur/meteo"') == 2  # son nom, et « Les regarder »
-    for said in ('<a href="/inspecteur/apps?app=factures">Factures</a>', "sert avec toi", "Lire une facture",
+    assert service.count('href="/admin/fiche/serveur/meteo"') == 2  # son nom, et « Les regarder »
+    for said in ('<a href="/admin/apps?app=factures">Factures</a>', "sert avec toi", "Lire une facture",
                  "<code>app_factures_lire</code>", "arguments <code>numero</code>"):
         assert said in app, said
-    assert app.count('href="/inspecteur/apps?app=factures"') == 1
+    assert app.count('href="/admin/apps?app=factures"') == 1
 
 
 def test_a_means_of_communication_is_drawn(world):  # noqa: F811
@@ -309,7 +309,7 @@ def test_a_means_of_communication_is_drawn(world):  # noqa: F811
     client, _, _ = world
     bootstrap(client)
     chat(client, "salut ! je reviens d'un concert")
-    page = drawn(client, "/inspecteur/fiche/handle/user_1")
+    page = drawn(client, "/admin/fiche/handle/user_1")
     assert 'class="handle-head"' in page and "Par le chat, dans un navigateur" in page
     for part in ("En bref", "Ce que le canal prouve", "session vérifiée", "Qui écrit d'ici", "Vue pour la première fois",
                  "Sa clé", "Ce que ça ouvre", "En privé", "En public"):
@@ -322,7 +322,7 @@ def test_a_means_of_communication_is_drawn(world):  # noqa: F811
     more = page.split('<details class="tabs-more')[1].split("</details>")[0]
     assert "onglet=verdict" in more and "onglet=autres" in more
     assert "onglet=revendication" not in page
-    thread = drawn(client, "/inspecteur/fiche/handle/user_1?onglet=fil")
+    thread = drawn(client, "/admin/fiche/handle/user_1?onglet=fil")
     assert 'class="person-thread"' in thread and "salut ! je reviens d'un concert" in thread
 
 
@@ -333,15 +333,15 @@ def test_the_other_tabs_of_a_means_of_communication_are_drawn_block_by_block(wor
     client, _, _ = world
     bootstrap(client)
     chat(client, "salut ! je reviens d'un concert")
-    proofs = drawn(client, "/inspecteur/fiche/handle/user_1?onglet=preuves")
+    proofs = drawn(client, "/admin/fiche/handle/user_1?onglet=preuves")
     body = proofs.split('class="now-page person-tab"')[1]
     assert body.lower().count("aucune revendication, preuve ni liaison") == 1  # la majuscule : la feuille de style
     assert "Page 1 sur 1" not in body and ">aucun<" not in body and 'class="pager"' not in body
-    others = drawn(client, "/inspecteur/fiche/handle/user_1?onglet=autres")
+    others = drawn(client, "/admin/fiche/handle/user_1?onglet=autres")
     body = others.split('class="now-page person-tab"')[1]
     assert body.lower().count("aucun autre moyen de communication ne parle pour cette personne") == 1
     assert "Page 1 sur 1" not in body and ">aucun<" not in body
-    verdict = drawn(client, "/inspecteur/fiche/handle/user_1?onglet=verdict")
+    verdict = drawn(client, "/admin/fiche/handle/user_1?onglet=verdict")
     body = verdict.split('class="now-page person-tab"')[1]
     assert "Le verdict, pas à pas" in body and "Ce que ça ouvre" in body
     assert "Le moyen de communication" not in body and "Page 1 sur 1" not in body

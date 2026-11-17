@@ -29,7 +29,7 @@ from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture p
 
 ACTING = phrase("runtime.tools.acting")
 
-BASE = "/inspecteur/outils"
+BASE = "/admin/outils"
 
 
 def _shown(body: str) -> set[str]:
@@ -137,7 +137,7 @@ def test_a_tool_from_elsewhere_has_no_subtitle_and_quotes_what_its_service_says(
     listed = html_of(client.get(f"{BASE}/tous", params={"lot": "mcp.meteo"}))
     assert '<span class="access-tool-desc">Prévisions d\'une ville (consigne du serveur).</span>' in listed
     # Réglages › Droits, Services MCP : un outil sans libellé s'y dit aussi par sa description
-    rights = html_of(client.get("/inspecteur/reglages/droits"))
+    rights = html_of(client.get("/admin/reglages/droits"))
     services = rights.split('id="d-services" data-pane', 1)[1].split("data-pane", 1)[0]
     assert re.search(r"<code>mcp_meteo_prevision</code>.*?</td>\s*<td>Prévisions d'une ville \(consigne du serveur\)\."
                      r"</td>", services, re.S)
@@ -208,13 +208,13 @@ def test_a_tool_waiting_for_its_port_says_what_is_missing_and_where_to_set_it(wo
     assert _where(fiche, account) == "non — aucun fournisseur d'images n'est configuré"
     assert "« imaging »" not in fiche
     assert fiche.count("Pour l'offrir") == 1
-    assert re.search(r"Pour l'offrir : <a href=\"/inspecteur/reglages/images-fournisseurs\">Fournisseurs d'images</a>",
+    assert re.search(r"Pour l'offrir : <a href=\"/admin/reglages/images-fournisseurs\">Fournisseurs d'images</a>",
                      fiche)
     maps = ports.pop("maps")
     try:
         places = html_of(client.get(f"{BASE}/tous", params={"outil": "places_search"}))
         assert _where(places, account) == "non — les lieux, les adresses et les itinéraires ne sont pas branchés"
-        assert 'Pour l\'offrir : <a href="/inspecteur/reglages/lieux">Lieux et adresses</a>' in places
+        assert 'Pour l\'offrir : <a href="/admin/reglages/lieux">Lieux et adresses</a>' in places
     finally:
         ports["maps"] = maps
     assert "Pour l'offrir" not in html_of(client.get(f"{BASE}/tous", params={"outil": "places_search"}))

@@ -7,9 +7,9 @@ from tests.protocol.test_web import WS, bootstrap, recv_until, world  # noqa: F4
 
 def test_the_inspector_is_for_operators_only(world):  # noqa: F811
     client, live, _ = world
-    r = client.get("/inspecteur/", follow_redirects=False)
-    assert r.status_code == 303 and r.headers["location"].endswith("/inspecteur/connexion")
-    assert client.get("/inspecteur/connexion").status_code == 200
+    r = client.get("/admin/", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].endswith("/admin/connexion")
+    assert client.get("/admin/connexion").status_code == 200
 
 
 def test_an_operator_follows_a_reply_from_message_to_episode(world):  # noqa: F811
@@ -19,24 +19,24 @@ def test_an_operator_follows_a_reply_from_message_to_episode(world):  # noqa: F8
         ws.receive_json(), ws.receive_json()
         ws.send_json({"type": "chat", "message": "raconte-moi ta journée", "client_msg_id": "i1"})
         recv_until(ws, "speech")
-    home = client.get("/inspecteur/")
+    home = client.get("/admin/")
     assert home.status_code == 200 and "Derniers épisodes" in home.text and "réponse" in home.text
-    timeline = client.get("/inspecteur/systeme/chronologie?type=episode.")
+    timeline = client.get("/admin/systeme/chronologie?type=episode.")
     assert "episode.utterance" in timeline.text
     ended = client.portal.call(lambda: list(live.kernel.mind.store.read(types={"episode.ended"})))
-    summary = client.get(f"/inspecteur/episode/{ended[-1].correlation}")
+    summary = client.get(f"/admin/episode/{ended[-1].correlation}")
     assert "Message déclencheur" in summary.text and "Déroulé" in summary.text
-    chain = client.get(f"/inspecteur/episode/{ended[-1].correlation}?onglet=deroule")
+    chain = client.get(f"/admin/episode/{ended[-1].correlation}?onglet=deroule")
     assert "episode.started" in chain.text and "episode.utterance" in chain.text
-    assert client.get("/inspecteur/decisions").status_code == 200
-    state = client.get("/inspecteur/systeme/etat")
+    assert client.get("/admin/decisions").status_code == 200
+    state = client.get("/admin/systeme/etat")
     assert "affect" in state.text and "identity" in state.text
 
 
 def test_model_settings_form_needs_its_token_and_never_shows_a_key(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
-    url = "/inspecteur/reglages/fournisseurs"
+    url = "/admin/reglages/fournisseurs"
     client.get(url)
     record = {"_section": "modeles", "_enregistrement": "backends", "_ancienne": "", "_cle": "claude",
               "_champs": ["kind", "model", "api_key"], "kind": "claude", "model": "claude-sonnet-5",
@@ -50,7 +50,7 @@ def test_model_settings_form_needs_its_token_and_never_shows_a_key(world):  # no
     assert "sk-secret-123" not in edit.text and "défini — vide : inchangé" in edit.text
     # le premier fournisseur déclaré sert « répondre » d'office : la page le dit, rien n'est à router en plus
     assert "sert « répondre »" in client.get(url).text
-    routed = client.post("/inspecteur/reglages/roles", data={
+    routed = client.post("/admin/reglages/roles", data={
         "csrf": token, "_section": "modeles", "_champs": ["routes"], "routes.reply": "claude",
         "routes.murmur": "claude"})
     assert routed.status_code == 200 and "Qui sert quoi : enregistré" in routed.text

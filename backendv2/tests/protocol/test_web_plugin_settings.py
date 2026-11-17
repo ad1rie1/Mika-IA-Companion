@@ -42,7 +42,7 @@ def test_its_settings_have_a_page_and_changing_them_reconfigures_the_mcp_client(
     app, live = build(tmp_path / "data", web=WebConfig(), gateway=LiveGateway(), embedder=HashEmbedder())
     with TestClient(app, base_url="http://localhost:8001", headers={"Origin": ORIGIN}) as client:
         bootstrap(client)
-        page = "/inspecteur/reglages/comportement-web"
+        page = "/admin/reglages/comportement-web"
         assert "Recherche web" in html_of(client.get(page)) and "Actif" in html_of(client.get(page))
         assert "Pages chargées en même temps" in html_of(client.get(f"{page}?groupe=lire-des-pages"))
         assert "Entre deux recherches" in html_of(client.get(f"{page}?groupe=menager-duckduckgo"))

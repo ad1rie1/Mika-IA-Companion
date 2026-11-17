@@ -243,7 +243,7 @@ object ChatSync {
         return if (cause.isNotEmpty()) "$base ($cause)" else base
     }
 
-    private val CONSOLE_HREF = Regex("""^/inspecteur/[\w\-/]*$""")
+    private val CONSOLE_HREF = Regex("""^/admin/[\w\-/]*$""")
 
     /** Une page de la console, et rien d'autre : un lien sous une bulle ne mène jamais ailleurs. */
     fun consoleHref(href: String?): String? = href?.takeIf { CONSOLE_HREF.matches(it) }

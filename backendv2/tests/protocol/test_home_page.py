@@ -27,7 +27,7 @@ def test_only_an_operator_opens_the_home(world):  # noqa: F811
     client, _, _ = world
     for url in home.BASES:
         page = client.get(url, follow_redirects=False)
-        assert page.status_code == 303 and page.headers["location"].endswith("/inspecteur/connexion"), url
+        assert page.status_code == 303 and page.headers["location"].endswith("/admin/connexion"), url
     assert client.get(home.FRAGMENT).status_code == 401
 
 
@@ -35,18 +35,18 @@ def test_the_home_says_what_waits_how_she_is_and_what_she_did(world):  # noqa: F
     client, _, _ = world
     bootstrap(client)
     chat(client, "salut, tu vas bien ?")
-    page = client.get("/inspecteur/")
+    page = client.get("/admin/")
     assert page.status_code == 200
     ConsoleHTML(page.text).check()
     text = html.unescape(page.text)
-    assert "<h1>Vue d'ensemble</h1>" in text and re.search(r'<a class="nav-item on" href="/inspecteur/"', text)
+    assert "<h1>Vue d'ensemble</h1>" in text and re.search(r'<a class="nav-item on" href="/admin/"', text)
     assert " style=" not in text and not re.search(r"<script(?![^>]*\bsrc=)", text)
     assert "À regarder maintenant" in text and ", en ce moment</h2>" in text and "Qui est là" in text
-    assert '<a href="/inspecteur/fiche/person/user_1">adrien</a>' in text  # en ligne, sur sa carte
+    assert '<a href="/admin/fiche/person/user_1">adrien</a>' in text  # en ligne, sur sa carte
     # le lien vers un épisode se nomme comme dans Décisions (En cours, Épisodes) : « Comprendre → »
     assert "réponses" in text and "Derniers épisodes" in text and "Comprendre →" in text
     assert "Comprendre le résultat" not in text
-    assert client.get("/inspecteur/accueil").status_code == 200
+    assert client.get("/admin/accueil").status_code == 200
     fragment = client.get(home.FRAGMENT)
     assert fragment.status_code == 200 and "<h1" not in fragment.text and "data-now-stamp" in fragment.text
 
@@ -56,7 +56,7 @@ def test_her_state_and_her_needs_say_what_they_are(world):  # noqa: F811
     titre et disent ce que mesure leur pourcentage (audit du 2026-11-05, C1-11)."""
     client, _, _ = world
     bootstrap(client)
-    text = html.unescape(client.get("/inspecteur/").text)
+    text = html.unescape(client.get("/admin/").text)
     assert re.search(r"<dt>État</dt><dd>(éveillée|endormie)\b", text)
     assert "<dt>Éveillée</dt>" not in text and "<dt>Endormie</dt>" not in text
     needs = text.index('id="home-needs-title">Ses besoins</h3>')
@@ -68,7 +68,7 @@ def test_the_attention_card_has_no_link_that_repeats_one_of_its_lines(world):  #
     """« Tout ce qui attend ta décision » doublait la ligne « À valider › Tout ce qui attend » (C1-10)."""
     client, _, _ = world
     bootstrap(client)
-    text = html.unescape(client.get("/inspecteur/").text)
+    text = html.unescape(client.get("/admin/").text)
     card = text[text.index('<section class="now-card home-attention"'):]
     card = card[:card.index("</section>")]
     assert "Tout ce qui attend ta décision" not in card and 'class="now-more"' not in card
@@ -98,24 +98,24 @@ def test_a_failing_check_and_the_badge_of_its_page_make_one_line(world, monkeypa
     report = health.Health("ready", (*checks, health.Check("outbox", health.DEGRADED, "2 abandonnés en 24 h")))
     monkeypatch.setattr(health, "report", lambda kernel: report)
     monkeypatch.setattr(system_pages, "_outbox_problems", lambda ui: 3)
-    health_or_outbox = ("/inspecteur/systeme/sante", "/inspecteur/systeme/sorties")
-    rows = priorities_of(client.get("/inspecteur/").text)
+    health_or_outbox = ("/admin/systeme/sante", "/admin/systeme/sorties")
+    rows = priorities_of(client.get("/admin/").text)
     assert [r for r in rows if r[0] in health_or_outbox] == [
-        ("/inspecteur/systeme/sorties", "!", "Système › File de sortie", "2 abandonnés en 24 h")]
+        ("/admin/systeme/sorties", "!", "Système › File de sortie", "2 abandonnés en 24 h")]
     # un contrôle qui n'a pas de page à lui mène à la santé générale, et dit lequel
     report = health.Health("ready", (*checks[:3], health.Check("projections", health.DEGRADED, "2 en retard"),
                                      *checks[4:]))
     monkeypatch.setattr(system_pages, "_outbox_problems", lambda ui: 0)
-    rows = priorities_of(client.get("/inspecteur/").text)
+    rows = priorities_of(client.get("/admin/").text)
     assert [r for r in rows if r[0] in health_or_outbox] == [
-        ("/inspecteur/systeme/sante", "!", "Système › Santé générale", "Projections : 2 en retard")]
+        ("/admin/systeme/sante", "!", "Système › Santé générale", "Projections : 2 en retard")]
 
 
 def test_a_backup_to_make_and_a_late_journal_stay_two_lines(world, monkeypatch):  # noqa: F811
     """Deux pannes distinctes sur la même page, deux lignes : la sauvegarde à faire mène à sa carte sur Stockage et
     sauvegardes, le journal en retard au haut de cette page, où se lisent ses événements et son dernier instantané —
     et il se nomme, la page portant un autre nom que le sien. Avant (relecture de C8-L4) : les deux menaient à
-    ``/inspecteur/systeme/stockage``, et l'accueil n'en gardait qu'une, le journal, sans le nommer."""
+    ``/admin/systeme/stockage``, et l'accueil n'en gardait qu'une, le journal, sans le nommer."""
     client, _, _ = world
     bootstrap(client)
     checks = tuple(health.Check(name, health.OK, "ok") for name in
@@ -124,8 +124,8 @@ def test_a_backup_to_make_and_a_late_journal_stay_two_lines(world, monkeypatch):
     report = health.Health("ready", (health.Check("journal", health.DEGRADED, late), *checks))
     monkeypatch.setattr(health, "report", lambda kernel: report)
     monkeypatch.setattr(home_tabs, "backup_state", lambda ui: ("warn", "aucune sauvegarde notée"))
-    store = "/inspecteur/systeme/stockage"
-    rows = priorities_of(client.get("/inspecteur/").text)
+    store = "/admin/systeme/stockage"
+    rows = priorities_of(client.get("/admin/").text)
     assert [r for r in rows if r[0].startswith(store)] == [
         (f"{store}#sys-store-saves", "à faire", "Sauvegarde", "aucune sauvegarde notée"),
         (store, "!", "Système › Stockage et sauvegardes", f"Journal d’événements : {late}")]
@@ -133,7 +133,7 @@ def test_a_backup_to_make_and_a_late_journal_stay_two_lines(world, monkeypatch):
     holes = "2 trous de séquence dans le journal relu"
     report = health.Health("ready", (health.Check("journal", health.KO, holes), *checks))
     monkeypatch.setattr(home_tabs, "backup_state", lambda ui: ("danger", "la dernière a échoué"))
-    rows = priorities_of(client.get("/inspecteur/").text)
+    rows = priorities_of(client.get("/admin/").text)
     assert [r for r in rows if r[0].startswith(store)] == [
         (f"{store}#sys-store-saves", "en échec", "Sauvegarde", "la dernière a échoué"),
         (store, "!", "Système › Stockage et sauvegardes", f"Journal d’événements : {holes}")]
@@ -148,10 +148,10 @@ def test_the_total_of_the_queue_says_what_it_counts(world, monkeypatch):  # noqa
     bootstrap(client)
     counts = {"": 6, "courriers": 3, "identites": 1}
     monkeypatch.setattr(approvals_pages, "_count", lambda ui, tab: counts.get(getattr(tab, "slug", ""), 0))
-    rows = priorities_of(client.get("/inspecteur/").text)
-    assert ("/inspecteur/approbations/en_attente", "6", "À valider › Tout ce qui attend",
+    rows = priorities_of(client.get("/admin/").text)
+    assert ("/admin/approbations/en_attente", "6", "À valider › Tout ce qui attend",
             "courriers à envoyer : 3 · identités à confirmer : 1 · autres demandes : 2") in rows
-    assert not [r for r in rows if r[0].startswith("/inspecteur/approbations/") and "en_attente" not in r[0]]
+    assert not [r for r in rows if r[0].startswith("/admin/approbations/") and "en_attente" not in r[0]]
     assert UI._made_of([("Réponses Teams", 2)], 2) == "réponses Teams : 2"
 
 
@@ -165,17 +165,17 @@ def test_a_builtin_badge_says_what_it_counts(world, monkeypatch):  # noqa: F811
                     "outbox"))
     monkeypatch.setattr(health, "report", lambda kernel: health.Health("ready", checks))
     monkeypatch.setattr(system_pages, "_outbox_problems", lambda ui: (3, "effets qui n'ont pas pu partir"))
-    rows = priorities_of(client.get("/inspecteur/").text)
-    assert ("/inspecteur/systeme/sorties", "3", "Système › File de sortie", "effets qui n'ont pas pu partir") in rows
+    rows = priorities_of(client.get("/admin/").text)
+    assert ("/admin/systeme/sorties", "3", "Système › File de sortie", "effets qui n'ont pas pu partir") in rows
     # son contrôle au rouge : une seule ligne, son constat, qui dit depuis quand (le badge ne fait que compter)
     report = health.Health("ready", (*checks[:-1], health.Check("outbox", health.DEGRADED, "2 abandonnés en 24 h")))
     monkeypatch.setattr(health, "report", lambda kernel: report)
-    rows = priorities_of(client.get("/inspecteur/").text)
-    assert [r for r in rows if r[0] == "/inspecteur/systeme/sorties"] == [
-        ("/inspecteur/systeme/sorties", "!", "Système › File de sortie", "2 abandonnés en 24 h")]
+    rows = priorities_of(client.get("/admin/").text)
+    assert [r for r in rows if r[0] == "/admin/systeme/sorties"] == [
+        ("/admin/systeme/sorties", "!", "Système › File de sortie", "2 abandonnés en 24 h")]
     # son onglet garde son nombre
-    menu = html.unescape(client.get("/inspecteur/systeme/sorties").text)
-    assert client.get("/inspecteur/systeme/sorties").status_code == 200 and "File de sortie" in menu
+    menu = html.unescape(client.get("/admin/systeme/sorties").text)
+    assert client.get("/admin/systeme/sorties").status_code == 200 and "File de sortie" in menu
 
 
 def test_today_in_figures_agrees_with_its_numbers(world):  # noqa: F811
@@ -184,7 +184,7 @@ def test_today_in_figures_agrees_with_its_numbers(world):  # noqa: F811
     client, _, _ = world
     bootstrap(client)
     figures = re.findall(r'<span class="now-today-value now-num">([^<]*)</span><span class="now-today-label">'
-                         r"([^<·]*)", html.unescape(client.get("/inspecteur/").text))
+                         r"([^<·]*)", html.unescape(client.get("/admin/").text))
     labels = {label.strip() for _value, label in figures}
     assert {"initiative", "silence choisi", "échec"} <= labels, labels  # rien de tout ça aujourd'hui : zéro
     for value, label in figures:  # le premier mot au pluriel au-delà de 1 seulement
@@ -234,8 +234,8 @@ def test_counts_agree_and_durations_are_read_not_in_seconds():
 def test_one_line_per_page_where_to_decide():
     """Un badge, son cadre et un contrôle de santé qui mènent à la même page font une seule ligne : la plus grave, et
     à gravité égale la plus précise ; « tout va bien » ne se dit que s'il n'y a rien."""
-    processes = Ref("local", "/inspecteur/systeme/processus", "Processus")
-    outbox = Ref("local", "/inspecteur/systeme/sorties", "File de sortie")
+    processes = Ref("local", "/admin/systeme/processus", "Processus")
+    outbox = Ref("local", "/admin/systeme/sorties", "File de sortie")
     got = home.priorities([
         Stats((Stat("Système › Processus", 1, "à regarder", "warn", processes),
                Stat("Processus en échec", 1, "Retenir (souvenirs, croyances)", "danger", processes),
@@ -258,10 +258,10 @@ def test_the_status_pill_says_her_feeling_and_names_her_energy(world):  # noqa: 
     bootstrap(client)
     felt = UI._vital("Humeur", Vital("curieuse (20 %)", ratio=0.2, swatch=Swatch("curieuse", "emotion", "curious", 0.2)))
     assert felt["short"] == "curieuse" and felt["text"] == "curieuse (20 %)"
-    text = html.unescape(client.get("/inspecteur/").text)
+    text = html.unescape(client.get("/admin/").text)
     digest = re.search(r"data-status-digest>(.*?)</span>", text).group(1)
     assert re.fullmatch(r"(humeur au repos|[^·()]+) · énergie \d+ %", digest.replace(" ", " ")), digest
-    vitals = html.unescape(client.get("/inspecteur/_vitals").text)
+    vitals = html.unescape(client.get("/admin/_vitals").text)
     assert f'data-digest="{digest}"' in vitals
 
 
@@ -270,11 +270,11 @@ def test_the_account_menu_leads_to_her_own_account(world):  # noqa: F811
     thème et à la déconnexion (C1-15)."""
     client, _, _ = world
     bootstrap(client)
-    text = html.unescape(client.get("/inspecteur/").text)
+    text = html.unescape(client.get("/admin/").text)
     menu = text[text.index('<div class="pop account-pop">'):]
     menu = menu[:menu.index("</details>")]
     mine = re.search(r'<a class="pop-row" href="([^"]+)">Mon compte</a>', menu)
-    assert mine is not None and mine.group(1) == "/inspecteur/reglages/comptes?compte=1"
+    assert mine is not None and mine.group(1) == "/admin/reglages/comptes?compte=1"
     assert menu.index("Mon compte") < menu.index('data-theme-set="auto"') < menu.index("Déconnexion")
     sheet = client.get(mine.group(1))
     assert sheet.status_code == 200 and "adrien" in sheet.text

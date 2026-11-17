@@ -109,6 +109,15 @@ async def outside_command(data: Path, args: argparse.Namespace) -> dict[str, obj
                     sync_all=None if args.tous_les_dossiers is None else args.tous_les_dossiers == "oui",
                     voice=args.voix,
                     display_name=args.nom, auth=args.auth, oauth_client_id=args.client_id, oauth_tenant=args.tenant)
+            elif args.mail_cmd == "application":
+                if args.aucune:
+                    await settings.save_mail_application("")
+                elif args.client_id is not None:
+                    try:
+                        await settings.save_mail_application(args.client_id)
+                    except ValueError as exc:
+                        raise SystemExit(str(exc)) from None
+                return {"application": settings.mail_application()}
             elif args.mail_cmd == "remove":
                 cfg = settings.email()
                 if args.compte not in cfg.accounts:
@@ -191,7 +200,8 @@ def add_plugins(sub) -> None:  # type: ignore[no-untyped-def]
     ms.add_argument("--auth", choices=["password", "microsoft"],
                     help="microsoft : Hotmail, Outlook.com (OAuth2, ADR 0166) ; on se connecte ensuite depuis la "
                          "fiche de la boîte, dans la console")
-    ms.add_argument("--client-id", help="l'application Microsoft (client ID), avec --auth microsoft")
+    ms.add_argument("--client-id", help="une application Microsoft propre à cette boîte (client ID), avec --auth "
+                                        "microsoft ; sans elle, celle de l'instance (mika mail application)")
     ms.add_argument("--tenant", help="l'annuaire Microsoft (défaut : consumers, les comptes personnels)")
     ms.add_argument("--user")
     ms.add_argument("--password")
@@ -204,6 +214,11 @@ def add_plugins(sub) -> None:  # type: ignore[no-untyped-def]
                     help="tenir aussi les autres dossiers à jour à chaque relève (elle ne remarque que les relevés)")
     ms.add_argument("--voix", choices=["elle", "assistante", "proprietaire"])
     ms.add_argument("--nom", help="ton nom (pour écrire en assistante ou à ta place)")
+    ma = msub.add_parser("application", help="l'application Microsoft de l'instance (ADR 0238) : celle par laquelle "
+                                             "entrent les boîtes Microsoft qui n'en déclarent pas ; sans "
+                                             "argument, la montre")
+    ma.add_argument("client_id", nargs="?", help="son identifiant (client ID), inscrit une fois dans Microsoft Entra")
+    ma.add_argument("--aucune", action="store_true", help="la retire : chaque boîte déclare alors la sienne")
     mr = msub.add_parser("remove", help="retire un compte")
     mr.add_argument("--compte", required=True)
     rs = sub.add_parser("rss", help="les flux qu'elle suit")

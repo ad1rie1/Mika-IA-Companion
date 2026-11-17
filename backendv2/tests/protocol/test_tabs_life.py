@@ -47,7 +47,7 @@ def test_her_mood_in_big_then_the_figures_then_her_tags_with_what_she_said(world
     client, _, _ = world
     bootstrap(client)
     chat(client, "salut ! je reviens d'un concert")
-    page = drawn(client, "/inspecteur/vie/humeur")
+    page = drawn(client, "/admin/vie/humeur")
     hero = _between(page, 'class="now-hero', "</section>")
     # son humeur en mots, ce que son prompt lui en dit, le plan plaisir × éveil et sa trace sur la période
     assert 'class="now-word"' in hero and "ce que son prompt lui en dit" in hero and 'class="plane-now"' in hero
@@ -63,16 +63,16 @@ def test_her_mood_in_big_then_the_figures_then_her_tags_with_what_she_said(world
     assert "sw-happy" in tags and "J'ai bien lu" in tags and "en répondant" in tags
     assert page.index("Sa valence") < page.index("Ses dernières balises") < page.index("Les chiffres bruts")
     # la période est celle du filtre de la console
-    assert "sa trace sur 7 jours" in drawn(client, "/inspecteur/vie/humeur?periode=7j")
+    assert "sa trace sur 7 jours" in drawn(client, "/admin/vie/humeur?periode=7j")
 
 
 def test_one_card_per_person_with_what_she_tells_herself(world):  # noqa: F811
     client, _, _ = world
     bootstrap(client)
     chat(client)
-    page = drawn(client, "/inspecteur/vie/postures")
+    page = drawn(client, "/admin/vie/postures")
     cards = _between(page, 'class="vie-stances"', "</section>")
-    assert 'href="/inspecteur/fiche/person/user_1?onglet=affect"' in cards  # sa fiche, sur ce qu'elle ressent
+    assert 'href="/admin/fiche/person/user_1?onglet=affect"' in cards  # sa fiche, sur ce qu'elle ressent
     assert 'class="vie-said"' in cards  # ce qu'elle se dit envers elle
     assert cards.index("Chaleur") < cards.index("Hostilité") < cards.index("Attachement")
     assert "Le détail" in cards and "Elle en veut à" not in page
@@ -83,7 +83,7 @@ def test_a_grudge_is_the_one_banner_and_warmth_leans_to_its_side():
     assert (cold["x1"], cold["x2"], cold["side"]) == (30.0, 50, "cold")
     warm = life._signed({"t": "meter", "ratio": 0.2, "text": "+0,20", "tone": "ok"})
     assert (warm["x1"], warm["x2"], warm["side"]) == (50, 60.0, "warm")
-    line = Line({"personne": {"t": "link", "text": "Bea", "href": "/inspecteur/fiche/person/bea"},
+    line = Line({"personne": {"t": "link", "text": "Bea", "href": "/admin/fiche/person/bea"},
                  "chaleur (−1…1)": {"t": "meter", "ratio": 0.4, "text": "−0,40", "tone": "danger"},
                  "hostilité": {"t": "meter", "ratio": 0.5, "text": "50\u202f%", "tone": ""}},
                 {}, "", "", [{"t": "note", "text": "Tu lui en veux encore.", "title": "ce qu'elle se dit"}], False, {})
@@ -144,7 +144,7 @@ def test_her_three_needs_side_by_side_then_their_curve_and_what_happens(world): 
     client, _, _ = world
     bootstrap(client)
     chat(client)
-    page = drawn(client, "/inspecteur/vie/needs")
+    page = drawn(client, "/admin/vie/needs")
     needs = _between(page, 'class="vie-needs"', "</ul>")
     assert needs.index("Compagnie") < needs.index("S'exprimer") < needs.index("Apprendre")
     assert "n-social" in needs and "n-expression" in needs and "n-curiosity" in needs  # chacun sa couleur
@@ -160,11 +160,11 @@ def test_the_page_says_its_rubric_and_its_period_is_a_choice_not_a_form(world): 
     « Filtrer »."""
     client, live, _ = world
     bootstrap(client)
-    page = drawn(client, "/inspecteur/vie/needs")
+    page = drawn(client, "/admin/vie/needs")
     crumbs = page.split('<nav class="crumbs"', 1)[1].split("</nav>", 1)[0]
     her = self_c.name_of(live.kernel.mind.frame().get(self_c.PERSONA))
     assert f"<span>{her}</span>" in crumbs and '<span aria-hidden="true">/</span>' in crumbs
-    assert '<a href="/inspecteur/vie">Humeur et corps</a>' in crumbs and "<h1>Besoins</h1>" in page
+    assert '<a href="/admin/vie">Humeur et corps</a>' in crumbs and "<h1>Besoins</h1>" in page
     assert 'class="eyebrow"' not in page
     row = page.split('class="tabs-row"', 1)[1].split('class="tabs-tail"', 1)
     assert 'aria-current="page">Besoins' in row[0]  # les onglets, puis au bout la période
@@ -172,14 +172,14 @@ def test_the_page_says_its_rubric_and_its_period_is_a_choice_not_a_form(world): 
     assert '<nav class="seg" aria-label="Période">' in period
     assert 'href="?periode=24h" aria-current="true">24 h<' in period and 'href="?periode=7j">7 jours<' in period
     assert '<form class="filters"' not in page and ">Filtrer<" not in page
-    week = drawn(client, "/inspecteur/vie/needs?periode=7j")
+    week = drawn(client, "/admin/vie/needs?periode=7j")
     assert 'href="?periode=7j" aria-current="true">7 jours<' in week
 
 
 def test_her_day_on_24_hours_then_her_nights(world):  # noqa: F811
     client, _, _ = world
     bootstrap(client)
-    page = drawn(client, "/inspecteur/vie/rythme")
+    page = drawn(client, "/admin/vie/rythme")
     day = _between(page, 'class="vie-day"', "</figure>")
     for phase in ("matin", "après-midi", "soir", "nuit"):
         assert f">{phase}</text>" in day, phase
@@ -194,10 +194,10 @@ def test_the_messages_waiting_for_her_waking_are_counted_in_words(world):  # noq
     bootstrap(client)
     stop(client, live.kernel)  # une vie à l'arrêt : rien ne répond aux messages pendant la lecture
     append(client, live.kernel, [body.WAITED.draft(message=901, handle="user_1", person="user_1")], "body")
-    flags = _words(_between(drawn(client, "/inspecteur/vie/rythme"), 'class="now-chips vie-flags"', "</ul>"))
+    flags = _words(_between(drawn(client, "/admin/vie/rythme"), 'class="now-chips vie-flags"', "</ul>"))
     assert "1 message attend son réveil" in flags and "message(s)" not in flags
     append(client, live.kernel, [body.WAITED.draft(message=902, handle="user_1", person="user_1")], "body")
-    flags = _words(_between(drawn(client, "/inspecteur/vie/rythme"), 'class="now-chips vie-flags"', "</ul>"))
+    flags = _words(_between(drawn(client, "/admin/vie/rythme"), 'class="now-chips vie-flags"', "</ul>"))
     assert "2 messages attendent son réveil" in flags
 
 
@@ -211,11 +211,11 @@ def test_the_rhythm_reads_the_keys_of_its_facts_not_their_words(world, monkeypat
     client, live, _ = world
     bootstrap(client)
     stop(client, live.kernel)
-    page = drawn(client, "/inspecteur/vie/rythme")
+    page = drawn(client, "/admin/vie/rythme")
     assert 'class="now-chips vie-flags"' not in page  # rien à signaler
     monkeypatch.setattr(body_view, "_gate_badge", lambda s, frame: Badge("tenues : elle dort", "warn",
                                                                          key=body_view.VETOED))
-    flags = _between(drawn(client, "/inspecteur/vie/rythme"), 'class="now-chips vie-flags"', "</ul>")
+    flags = _between(drawn(client, "/admin/vie/rythme"), 'class="now-chips vie-flags"', "</ul>")
     assert '<li class="warn">initiatives et travail tenues : elle dort</li>' in flags
     assert "réveillée par un message" not in flags
 
@@ -250,7 +250,7 @@ def test_the_night_phase_crosses_midnight_and_says_its_longer_piece():
 def test_things_are_grouped_where_they_are_and_the_room_is_said_once(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
-    page = drawn(client, "/inspecteur/vie/monde")
+    page = drawn(client, "/admin/vie/monde")
     assert "dans ta chambre, rangées par où elles sont" in page
     # les mots de son monde sont dits siens ; l'identifiant, celui que nomment ses éditions
     assert "nommées comme son monde le lui dit" in page and "éditer son monde" not in page
@@ -269,7 +269,7 @@ def test_things_are_grouped_where_they_are_and_the_room_is_said_once(world):  # 
 def test_herself_in_four_subtabs_her_temperament_by_family(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
-    page = drawn(client, "/inspecteur/vie/soi")
+    page = drawn(client, "/admin/vie/soi")
     nav = _between(page, 'class="hm-subnav"', "</nav>")
     assert nav.index("Son estime") < nav.index("Son récit") < nav.index("Sa persona") < nav.index("Son tempérament")
     for pane in ("soi-estime", "soi-recit", "soi-persona", "soi-temperament"):
@@ -297,7 +297,7 @@ def test_herself_in_four_subtabs_her_temperament_by_family(world):  # noqa: F811
 def test_who_she_becomes_in_subtabs(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
-    page = drawn(client, "/inspecteur/vie/devenir")
+    page = drawn(client, "/admin/vie/devenir")
     nav = _between(page, 'class="hm-subnav"', "</nav>")
     assert nav.index("Ce qu'elle sait d'elle") < nav.index("Ce qui la passionne") < nav.index("Ce qui la définit") \
         < nav.index("Ses changements d'avis")
@@ -330,6 +330,6 @@ def test_an_edit_of_her_world_names_what_it_adds_and_removes_in_words(world):  #
     thing = current.objects[0]
     append(client, kernel, [w.AUTHORED.draft(base_rev=current.rev + 7, by="user_1", changes=(
         w.DefPut(item=thing), w.DefRemove(of=w.DefKind.PLACE, id="window")))], "world")
-    edits = _words(_between(drawn(client, "/inspecteur/vie/monde"), 'aria-labelledby="vie-edits-title"', "</section>"))
+    edits = _words(_between(drawn(client, "/admin/vie/monde"), 'aria-labelledby="vie-edits-title"', "</section>"))
     assert f"+ objet {thing.id}" in edits and "− lieu window" in edits
     assert "+ object" not in edits and "− place" not in edits

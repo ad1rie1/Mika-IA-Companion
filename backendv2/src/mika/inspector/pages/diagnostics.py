@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from mika.inspector.catalog import Panel
+from mika.inspector.render import PREFIX
 from mika.kernel.faculty import Tier
 from mika.kernel.inspect import Badge, Code, Column, Disclosure, Ref, Row, Table, Text, plural
 from mika.runtime import health
@@ -71,7 +72,7 @@ class Tile:
 
 def check_href(name: str) -> str:
     """L'adresse de la page où regarder ce que dit un contrôle (``DESTINATIONS``), la santé générale à défaut."""
-    return "/inspecteur/" + DESTINATIONS.get(name, HEALTH)
+    return f"{PREFIX}/" + DESTINATIONS.get(name, HEALTH)
 
 
 def console_tiles(ui: Any, backups: tuple[str, str]) -> list[Tile]:
@@ -140,7 +141,7 @@ def health_page(ui: Any, backups: tuple[str, str] = ("", "")) -> dict[str, Any]:
                       Column("clé", detail=True)), tuple(
             Row((t.name, Badge(t.said, TONES.get(t.state, "warn"), key=t.state), t.summary, Text(t.key, "mono")),
                 tone=TONES.get(t.state, "warn"),
-                href=Ref("local", "/inspecteur/" + t.page, "") if t.page else None,
+                href=Ref("local", f"{PREFIX}/" + t.page, "") if t.page else None,
                 detail=(Code("\n".join(t.detail), "Détail du contrôle"),) if t.detail else ()) for t in items),
             title=title, layout=layout, link_label="Ouvrir le diagnostic")
 

@@ -119,7 +119,7 @@ def test_a_provider_that_stopped_answering_shows_on_health_and_the_dashboard(tmp
     with client_of(app) as client:
         bootstrap(client)
         assert client.get("/health").json()["checks"]["llm"] == "ok"
-        assert "Réponses en échec" not in client.get("/inspecteur/").text
+        assert "Réponses en échec" not in client.get("/admin/").text
         with client.websocket_connect(WS) as ws:
             opening(ws)
             ws.send_json({"type": "chat", "message": "coucou", "client_msg_id": "c1"})
@@ -127,7 +127,7 @@ def test_a_provider_that_stopped_answering_shows_on_health_and_the_dashboard(tmp
             assert until(ws, "ack")[-1]["status"] == "no_reply"
         health = client.get("/health").json()
         assert health["checks"]["llm"] == "degraded" and health["status"] == "degraded"
-        page = client.get("/inspecteur/").text
+        page = client.get("/admin/").text
         assert "Réponses en échec" in page
         assert "le fournisseur « local » ne répond pas (connexion impossible)" in page
 
@@ -142,38 +142,38 @@ def test_the_root_leads_to_the_console_which_creates_the_first_account(tmp_path)
     app, _live = server(tmp_path, Fake())
     with client_of(app) as client:
         root = client.get("/", follow_redirects=False)
-        assert root.status_code in (302, 303, 307) and root.headers["location"] == "/inspecteur/"
-        door = client.get("/inspecteur/connexion")
+        assert root.status_code in (302, 303, 307) and root.headers["location"] == "/admin/"
+        door = client.get("/admin/connexion")
         assert "Créer le compte opérateur" in door.text
         token = client.cookies.get("csrftoken")
-        weak = client.post("/inspecteur/connexion", data={"csrf": token, "username": "adrien", "password": "12345678",
+        weak = client.post("/admin/connexion", data={"csrf": token, "username": "adrien", "password": "12345678",
                                                          "password2": "12345678"})
         assert weak.status_code == 400 and "Créer le compte opérateur" in weak.text
-        typo = client.post("/inspecteur/connexion", data={"csrf": token, "username": "adrien",
+        typo = client.post("/admin/connexion", data={"csrf": token, "username": "adrien",
                                                          "password": "un-mot-de-passe-long",
                                                          "password2": "un-mot-de-passe-lonG"})
         assert typo.status_code == 400 and "pas les mêmes" in typo.text
-        made = client.post("/inspecteur/connexion", data={"csrf": token, "username": "adrien",
+        made = client.post("/admin/connexion", data={"csrf": token, "username": "adrien",
                                                          "password": "un-mot-de-passe-long",
                                                          "password2": "un-mot-de-passe-long"},
                            follow_redirects=False)
-        assert made.status_code == 303 and made.headers["location"] == "/inspecteur/"
-        assert client.get("/inspecteur/").status_code == 200  # connectée, opératrice
+        assert made.status_code == 303 and made.headers["location"] == "/admin/"
+        assert client.get("/admin/").status_code == 200  # connectée, opératrice
         assert client.get("/auth/whoami").json()["operator"] is True  # le même compte ouvre le chat
         client.cookies.clear()
-        again = client.get("/inspecteur/connexion")
+        again = client.get("/admin/connexion")
         assert "Créer le compte opérateur" not in again.text and "Se connecter" in again.text
 
 
 def test_a_chat_account_is_told_it_does_not_open_the_console(tmp_path):
-    """Un compte du chat qui ouvre ``/inspecteur/`` était renvoyé à la connexion sans un mot."""
+    """Un compte du chat qui ouvre ``/admin/`` était renvoyé à la connexion sans un mot."""
     app, live = server(tmp_path, Fake())
     with client_of(app) as client:
         bootstrap(client)
         key = second_session(client, live, "bea")
         client.cookies.clear()
         client.cookies.set("sessionid", key)
-        door = client.get("/inspecteur/", follow_redirects=True)
+        door = client.get("/admin/", follow_redirects=True)
         assert "Ce compte (bea) n'ouvre pas la console" in html.unescape(door.text)
 
 
@@ -227,7 +227,7 @@ def test_with_an_invalid_persona_file_she_starts_on_the_last_persona_kept_in_her
         assert client.portal.call(live.persona).name == "Mika"
         assert "guillemets" in live.persona_problem
         bootstrap(client)
-        page = client.get("/inspecteur/reglages/identite").text
+        page = client.get("/admin/reglages/identite").text
         assert "le fichier ne se lit pas" in page and "guillemets" in page
     assert any("dernière persona gardée au journal" in r.getMessage() for r in caplog.records)
 
@@ -239,7 +239,7 @@ def test_the_cli_tells_the_first_steps_and_never_wants_a_password_in_argument(tm
     with pytest.raises(SystemExit):
         cli.main(["--help"])
     text = capsys.readouterr().out
-    assert "Premiers pas" in text and "/inspecteur/" in text and "la lancer : le serveur du chat" in text
+    assert "Premiers pas" in text and "/admin/" in text and "la lancer : le serveur du chat" in text
     asked: list[str] = []
 
     def ask(prompt: str) -> str:
@@ -295,14 +295,14 @@ def test_the_console_answers_what_an_operator_asks(tmp_path):
             assert [f for f in until(ws, "speech") if f["type"] == "speech"][-1]["text"]
             ws.send_json({"type": "chat", "message": "bon, à plus", "client_msg_id": "c2"})
             assert not [f for f in until(ws, "speech") if f["type"] == "speech"][-1]["text"]  # elle s'est tue
-        messages = html.unescape(client.get("/inspecteur/fiche/person/user_1?onglet=echanges").text)
+        messages = html.unescape(client.get("/admin/fiche/person/user_1?onglet=echanges").text)
         assert "répondue → n°" in messages and "sans réponse" in messages
         client.portal.call(lambda: live.settings.save_llm(LLMConfig(backends={"local": OLLAMA})))
-        providers = html.unescape(client.get("/inspecteur/reglages/fournisseurs").text)
+        providers = html.unescape(client.get("/admin/reglages/fournisseurs").text)
         assert "gemma4:12b" in providers and "login de la CLI" not in providers
-        processes = html.unescape(client.get("/inspecteur/systeme/processus").text)
+        processes = html.unescape(client.get("/admin/systeme/processus").text)
         assert "arbitre · arbitre" not in processes and "Décider d'agir" in processes
-        search = html.unescape(client.get("/inspecteur/recherche?q=salut").text)
+        search = html.unescape(client.get("/admin/recherche?q=salut").text)
         assert "« salut » dans par personne" in search and "fil/conversations?q=salut" in search
 
 
@@ -316,7 +316,7 @@ def test_the_veto_after_her_answer_says_she_is_the_one_waiting(tmp_path):
             opening(ws)
             ws.send_json({"type": "chat", "message": "coucou, tu vas bien ?", "client_msg_id": "c1"})
             assert [f for f in until(ws, "speech") if f["type"] == "speech"][-1]["text"]
-        envers = html.unescape(client.get("/inspecteur/decisions/envers?personne=user_1").text)
+        envers = html.unescape(client.get("/admin/decisions/envers?personne=user_1").text)
         assert "Elle attend sa réponse (elle a écrit en dernier)" in envers
         assert "son dernier message attend" not in envers.lower()
 

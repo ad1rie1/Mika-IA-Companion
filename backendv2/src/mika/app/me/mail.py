@@ -204,7 +204,10 @@ def _box_json(call: Call, a: AccountInfo, level: str) -> dict[str, Any]:
 async def list_boxes(call: Call) -> dict[str, Any]:
     p = email_p.params_of(call.frame)
     found = [_box_json(call, a, level) for a, level in boxes(call).values()]
-    return {"boxes": found, "read_on_open": p.read_on_open, "plugged": call.port("mail") is not None}
+    # l'instance a son application Microsoft : une boîte Microsoft n'a pas à donner la sienne (ADR 0238)
+    settings = call.api.settings
+    return {"boxes": found, "read_on_open": p.read_on_open, "plugged": call.port("mail") is not None,
+            "microsoft_app": settings is not None and bool(settings.mail_application())}
 
 
 async def messages(call: Call) -> dict[str, Any]:

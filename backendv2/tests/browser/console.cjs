@@ -26,7 +26,7 @@ async function open(t, { file = 'accueil.html', width = 1440, html, vitalsStatus
   await page.route('http://console.test/**', async route => {
     const url = new URL(route.request().url());
     // les fichiers de la console (feuilles des pages dessinées, scripts, polices), depuis les sources
-    // (l'export les appelle « ../static/… », le cadre « /inspecteur/static/… »)
+    // (l'export les appelle « ../static/… », le cadre « /admin/static/… »)
     const at = url.pathname.indexOf('/static/');
     if (at !== -1) {
       const rel = url.pathname.slice(at + '/static/'.length);
@@ -35,9 +35,9 @@ async function open(t, { file = 'accueil.html', width = 1440, html, vitalsStatus
     }
     if (url.pathname.endsWith('/_vitals')) return route.fulfill({ status: vitalsStatus, body: '<span>État actualisé</span>', contentType: 'text/html' });
     if (url.pathname.startsWith('/cadres/')) return route.fulfill({ path: path.join(preview, 'cadres', path.basename(url.pathname)), contentType: 'text/html' });
-    const appPath = url.pathname.startsWith('/inspecteur/');
+    const appPath = url.pathname.startsWith('/admin/');
     if (!url.pathname.startsWith('/preview/') && !appPath) return route.fulfill({ status: 404, body: 'Route hors aperçu' });
-    let filename = appPath ? (url.pathname.slice('/inspecteur/'.length) || 'accueil').replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 120) + '.html' : path.basename(url.pathname);
+    let filename = appPath ? (url.pathname.slice('/admin/'.length) || 'accueil').replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 120) + '.html' : path.basename(url.pathname);
     if (!html && url.search) {
       // l'export nomme une page « chemin_requête », ses paramètres dans l'ordre où il l'a demandée, qui n'est pas
       // toujours celui du lien ; un lien relatif « ?… » remplace la requête : depuis une page déjà filtrée, on retire
@@ -52,7 +52,7 @@ async function open(t, { file = 'accueil.html', width = 1440, html, vitalsStatus
       }
     }
     const body = html || await fs.readFile(path.join(preview, 'clair', filename), 'utf8');
-    return route.fulfill({ body: body.replace('</head>', '<script src="/inspecteur/static/console.js"></script></head>'), contentType: 'text/html' });
+    return route.fulfill({ body: body.replace('</head>', '<script src="/admin/static/console.js"></script></head>'), contentType: 'text/html' });
   });
   // Toute tentative vers un autre serveur est interdite pendant cette vérification.
   await context.route(/^(?!http:\/\/console\.test\/)/, route => route.abort());
@@ -60,7 +60,7 @@ async function open(t, { file = 'accueil.html', width = 1440, html, vitalsStatus
   return page;
 }
 
-const fixture = body => `<!doctype html><html lang="fr"><head><meta charset="utf-8"><link rel="stylesheet" href="/inspecteur/static/console.css"></head><body>${body}</body></html>`;
+const fixture = body => `<!doctype html><html lang="fr"><head><meta charset="utf-8"><link rel="stylesheet" href="/admin/static/console.css"></head><body>${body}</body></html>`;
 
 test('formulaire : erreurs annoncées, lien au champ avancé et saisie préservée', async t => {
   const page = await open(t, { html: fixture(`<main><h1>Réglages</h1><form class="form">
@@ -130,7 +130,7 @@ test('relecture mémoire : détail lisible, clé liée au passage et confirmatio
   assert.equal(await key.getAttribute('type'), 'hidden');
   // la clé est celle du passage affiché (« message n° 85 » → 85)
   const passage = await item.locator('.consol-passage-title a').getAttribute('href');
-  assert.equal(passage, `/inspecteur/evenement/${await key.getAttribute('value')}`);
+  assert.equal(passage, `/admin/evenement/${await key.getAttribute('value')}`);
   let posts = 0, confirmed = false;
   page.on('request', req => { if (req.method() === 'POST') posts += 1; });
   page.once('dialog', async dialog => { confirmed = true; await dialog.dismiss(); });
@@ -164,7 +164,7 @@ test('compte mobile : les applications ont leur état et une révocation annulab
 });
 
 test('jeton montré une fois : « Copier » le copie, même sur une console servie en HTTP', async t => {
-  const shown = fixture('<link rel="stylesheet" href="/inspecteur/static/handmade/base.css"><main><pre class="hm-code" id="jeton">mw_abcdefghijklmnopqrstuv</pre><div class="form-actions-inline hm-copy"><button type="button" class="btn small" data-copy="jeton" aria-live="polite" hidden>Copier le jeton</button></div></main>');
+  const shown = fixture('<link rel="stylesheet" href="/admin/static/handmade/base.css"><main><pre class="hm-code" id="jeton">mw_abcdefghijklmnopqrstuv</pre><div class="form-actions-inline hm-copy"><button type="button" class="btn small" data-copy="jeton" aria-live="polite" hidden>Copier le jeton</button></div></main>');
   const page = await open(t, { html: shown });
   const copy = page.getByRole('button', { name: 'Copier le jeton', exact: true });
   assert.equal(await copy.isVisible(), true);
@@ -218,10 +218,10 @@ test('fil : lecture directe, détails et explication accessibles au clavier', as
   const body = (await bubble.textContent()).trim();
   assert.ok(body.length > 10);
   const why = first.getByRole('link', { name: 'pourquoi ?', exact: true });
-  assert.match(await why.getAttribute('href'), /^\/inspecteur\/parole\/\d+$/);
+  assert.match(await why.getAttribute('href'), /^\/admin\/parole\/\d+$/);
   await first.locator('.person-number a').focus();
   await page.keyboard.press('Enter');
-  await page.waitForURL(/\/inspecteur\/evenement\/\d+$/);
+  await page.waitForURL(/\/admin\/evenement\/\d+$/);
   // son numéro, le fil d'Ariane le dit, pas son titre
   assert.equal(await page.locator('h1').textContent(), 'Parole');
   assert.match(await page.locator('nav.crumbs').textContent(), /n° \d+/);
@@ -229,7 +229,7 @@ test('fil : lecture directe, détails et explication accessibles au clavier', as
   await page.goBack();
   await why.focus();
   await page.keyboard.press('Enter');
-  await page.waitForURL(/\/inspecteur\/parole\/\d+$/);
+  await page.waitForURL(/\/admin\/parole\/\d+$/);
   assert.equal(await page.locator('h1').textContent(), 'Pourquoi a-t-elle dit ça ?');
   assert.ok((await page.locator('main').textContent()).includes(body));
 });
@@ -393,7 +393,7 @@ test('session expirée : état conservé, lien de reconnexion et arrêt des tent
   await page.clock.fastForward(10001);
   await page.getByRole('link', { name: 'Session expirée · Se reconnecter' }).waitFor();
   assert.equal(await page.locator('[data-vitals-items]').innerHTML(), before);
-  assert.equal(await page.getByRole('link', { name: 'Session expirée · Se reconnecter' }).getAttribute('href'), '/inspecteur/connexion');
+  assert.equal(await page.getByRole('link', { name: 'Session expirée · Se reconnecter' }).getAttribute('href'), '/admin/connexion');
   await page.clock.fastForward(120000);
   assert.equal(polls, 1);
 });
@@ -465,8 +465,8 @@ test('réglages : catégories accessibles sans JavaScript et recherche des param
   await page.locator('main .filters input[name=q]').fill('memoire');
   await page.locator('main .filters button').click();
   assert.equal(await page.locator('#reglages-avances').evaluate(el => el.open), true);
-  assert.equal(await page.locator('.settings-directory a[href="/inspecteur/reglages/comportement-memory"]').isVisible(), true);
-  assert.equal(await page.locator('.settings-directory a[href="/inspecteur/reglages/comptes"]').count(), 0);
+  assert.equal(await page.locator('.settings-directory a[href="/admin/reglages/comportement-memory"]').isVisible(), true);
+  assert.equal(await page.locator('.settings-directory a[href="/admin/reglages/comptes"]').count(), 0);
 });
 
 test('paramétrage : la même ligne de réglage aux Réglages, aux Paramètres avancés et au courrier', async t => {
@@ -476,7 +476,7 @@ test('paramétrage : la même ligne de réglage aux Réglages, aux Paramètres a
     <div class="field" data-row="liste"><span class="label">Liste</span><div class="check-list"><label class="check"><input type="checkbox"> un</label></div></div>
     <div class="field" data-row="releve"><span class="label">Relevé</span><span class="value-ro">a : 1 · b : 2</span></div>`;
   const sheets = ['console.css', 'handmade/base.css', 'handmade/courrier_reglages.css']
-    .map(sheet => `<link rel="stylesheet" href="/inspecteur/static/${sheet}">`).join('');
+    .map(sheet => `<link rel="stylesheet" href="/admin/static/${sheet}">`).join('');
   const page = await open(t, { html: `<!doctype html><html lang="fr"><head><meta charset="utf-8">${sheets}</head><body><main><h1>Réglages</h1>
     <form class="settings"><fieldset class="group">${rows('r')}</fieldset></form>
     <form class="params-form"><div class="param"><div class="param-main">${rows('p')}</div><div class="param-meta">bornes</div></div></form>
@@ -539,8 +539,8 @@ test('courrier mobile : déplier les dossiers au clavier, ouvrir un message et l
   // (ADR 0178 : le menu montre les onglets de chaque destination)
   const group = page.locator('[data-nav-group="Relations & échanges"]');
   assert.equal(await group.evaluate(el => el.classList.contains('active')), true);
-  assert.equal(await group.locator('a.nav-item.on').getAttribute('href'), '/inspecteur/courrier');
-  assert.equal(await group.locator('a[aria-current=page]').getAttribute('href'), '/inspecteur/courrier/reception');
+  assert.equal(await group.locator('a.nav-item.on').getAttribute('href'), '/admin/courrier');
+  assert.equal(await group.locator('a[aria-current=page]').getAttribute('href'), '/admin/courrier/reception');
 });
 
 test('outils : ouvrir une fiche au clavier puis retrouver sa grille filtrée', async t => {
@@ -615,7 +615,7 @@ test('santé : problèmes prioritaires, contrôles repliables et diagnostic acce
   assert.equal(await detail.locator('pre').isVisible(), true);
   await outbox.getByRole('link', { name: 'Ouvrir le diagnostic →', exact: true }).focus();
   await page.keyboard.press('Enter');
-  await page.waitForURL(/\/inspecteur\/systeme\/sorties$/);
+  await page.waitForURL(/\/admin\/systeme\/sorties$/);
   assert.equal(await page.locator('h1').textContent(), 'File de sortie');
 });
 
@@ -636,7 +636,7 @@ test('épisode : résumé de l’échec, déroulé, données complètes puis ret
   // les données complètes : sur la fiche de l'événement, ouverte puis dépliée au clavier
   await event.getByRole('link', { name: /^Fin d’épisode$|^Fin d'épisode$/ }).focus();
   await page.keyboard.press('Enter');
-  await page.waitForURL(/\/inspecteur\/evenement\/\d+$/);
+  await page.waitForURL(/\/admin\/evenement\/\d+$/);
   assert.match(await page.locator('h1').textContent(), /Fin d’épisode|Fin d'épisode/);
   const raw = page.locator('details.person-fold').filter({ has: page.locator(':scope > summary', { hasText: /^Ses données brutes$/ }) });
   assert.equal(await raw.evaluate(el => el.open), false);

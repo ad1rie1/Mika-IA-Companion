@@ -28,7 +28,7 @@ from tests.protocol.test_moi_mail import post as moi_post
 from tests.protocol.test_moi_mcp import SERVICE
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 
-ACCOUNTS = "/inspecteur/reglages/comptes"
+ACCOUNTS = "/admin/reglages/comptes"
 #: un jeton de client natif, tel qu'il se montre (``TOKEN_PREFIX``)
 RAW_TOKEN = re.compile(r"mw_[A-Za-z0-9_-]{20,}")
 
@@ -90,7 +90,7 @@ def test_the_accounts_page_says_comptes_and_an_account_is_an_object_view(world):
     # Comptes / bea ») ; le titre : son nom et ses étiquettes, jamais « Modifier · » ni l'identifiant interne
     assert crumbs(shown) == ["Réglages", "Comptes", "Béa Martin"]
     # le niveau de la liste y ramène (C1-04)
-    assert '<a href="/inspecteur/reglages/comptes">Comptes</a>' in shown.split('<nav class="crumbs"', 1)[1].split("</nav>", 1)[0]
+    assert '<a href="/admin/reglages/comptes">Comptes</a>' in shown.split('<nav class="crumbs"', 1)[1].split("</nav>", 1)[0]
     title = shown.split('<div class="page-title-row">', 1)[1].split("</div>", 1)[0]
     assert "<h1>Béa Martin</h1>" in title and ">utilisateur<" in title and ">actif<" in title
     assert "Modifier ·" not in shown and bea.handle not in text(shown)
@@ -177,22 +177,22 @@ def test_an_account_leads_to_her_fiche_her_accounts_and_her_exact_rights(world):
     bea = bea_account(client, live)
     shown = page(client, f"{ACCOUNTS}?compte={bea.id}")
     facts = shown.split('<div class="head-facts">', 1)[1].split("</div>", 1)[0]
-    assert f'href="/inspecteur/fiche/person/{bea.handle}"' in facts
-    rights = f"/inspecteur/reglages/droits?qui=p%3A{bea.handle}&amp;canal=web%3Aprive"
+    assert f'href="/admin/fiche/person/{bea.handle}"' in facts
+    rights = f"/admin/reglages/droits?qui=p%3A{bea.handle}&amp;canal=web%3Aprive"
     assert html.unescape(rights) in facts and "ses droits exacts" in facts
     assert "onglet=boites" not in facts  # pas de boîte à elle : pas d'onglet Comptes sur sa fiche
     exact = page(client, html.unescape(rights))
     chosen = exact.split('class="rights-chosen">', 1)[1].split("</p>", 1)[0]
     assert "Béa" in chosen and "par <b>le chat web, en privé</b>" in chosen
     # une de ses propriétaires se lit « toi » dans Droits
-    assert "/inspecteur/reglages/droits?qui=toi&canal=web%3Aprive" in page(client, f"{ACCOUNTS}?compte=1")
+    assert "/admin/reglages/droits?qui=toi&canal=web%3Aprive" in page(client, f"{ACCOUNTS}?compte=1")
     # chaque ligne de la liste mène aussi à ses droits exacts
     assert "Ses droits exacts" in page(client, ACCOUNTS)
     # une boîte à elle : sa fiche a l'onglet Comptes, le compte y mène
     live.kernel.ports["mail"] = mailbox(1)
     client.portal.call(live.kernel.set_params, "email", EmailParams(owners={"perso": "", "pro": f"personne:{bea.handle}"}))
     facts = page(client, f"{ACCOUNTS}?compte={bea.id}").split('<div class="head-facts">', 1)[1].split("</div>", 1)[0]
-    assert f"/inspecteur/fiche/person/{bea.handle}?onglet=boites" in facts
+    assert f"/admin/fiche/person/{bea.handle}?onglet=boites" in facts
 
 
 def test_a_persons_fiche_leads_to_her_account_and_lists_her_services_and_shares(world):  # noqa: F811
@@ -209,29 +209,29 @@ def test_a_persons_fiche_leads_to_her_account_and_lists_her_services_and_shares(
     assert moi_post(client, "/mcp/plug", SERVICE).status_code == 200
     login(client, "adrien")
     # l'en-tête de sa fiche dit son compte et mène à sa page
-    head = page(client, f"/inspecteur/fiche/person/{lea}")
+    head = page(client, f"/admin/fiche/person/{lea}")
     head = head.split('class="person-head-links"', 1)[1].split("</p>", 1)[0]
-    assert "compte utilisateur" in head and 'href="/inspecteur/reglages/comptes?compte=2">Modifier le compte<' in head
-    assert "compte opérateur" in page(client, "/inspecteur/fiche/person/user_1")
-    tab = page(client, f"/inspecteur/fiche/person/{lea}?onglet=boites")
+    assert "compte utilisateur" in head and 'href="/admin/reglages/comptes?compte=2">Modifier le compte<' in head
+    assert "compte opérateur" in page(client, "/admin/fiche/person/user_1")
+    tab = page(client, f"/admin/fiche/person/{lea}?onglet=boites")
     panes = re.findall(r'<section id="([a-z]+)" class="stack" data-pane', tab)
     assert panes == ["boites", "services", "partages"]
     services = text(tab.split('id="services"', 1)[1].split('id="partages"', 1)[0])
     assert "factures" in services and "Ses factures et ses devis" in services and "actif" in services
-    assert 'href="/inspecteur/fiche/serveur/factures"' in tab
+    assert 'href="/admin/fiche/serveur/factures"' in tab
     shares = text(tab.split('id="partages"', 1)[1])
     given, received = shares.split("Ce qu'on partage avec", 1)
     assert "Atelier" in given and "lire et préparer" in given and "adrien" in given
     assert "Personnel" in received and "lire" in received and "partagé par adrien" in received
     # de l'autre côté, ta fiche : ton compte Teams (« principal », à toi) réuni sous Comptes, ce que tu partages avec
     # Léa, ce qu'elle partage avec toi
-    yours = page(client, "/inspecteur/fiche/person/user_1?onglet=boites")
+    yours = page(client, "/admin/fiche/person/user_1?onglet=boites")
     assert re.findall(r'<section id="([a-z]+)" class="stack" data-pane', yours) == \
         ["boites", "teams", "services", "partages"]
     given, received = text(yours.split('id="partages"', 1)[1]).split("Ce qu'on partage avec", 1)
     assert "Personnel" in given and "Léa Martin" in given and "Atelier" in received and "Léa Martin" in received
     # l'ancienne adresse de Teams rouvre son sous-onglet
-    moved = client.get("/inspecteur/fiche/person/user_1?onglet=teams", follow_redirects=False)
+    moved = client.get("/admin/fiche/person/user_1?onglet=teams", follow_redirects=False)
     assert moved.status_code == 303 and moved.headers["location"].endswith("#teams")
 
 
@@ -242,7 +242,7 @@ def test_a_person_with_only_a_share_or_a_service_has_her_accounts_tab(world):  #
     bootstrap(client)
     lea = second_person(client, live)
     live.kernel.ports["mail"] = mailbox(1)
-    fiche = f"/inspecteur/fiche/person/{lea}"
+    fiche = f"/admin/fiche/person/{lea}"
     assert f"{fiche}?onglet=boites" not in page(client, fiche)  # rien à elle, rien pour elle : pas d'onglet
     # « Personnel », à toi, partagée avec Léa (lire) : aucune boîte à elle, mais un partage (lu dans les réglages)
     boxes(client, live, perso={f"personne:{lea}": "lire"})

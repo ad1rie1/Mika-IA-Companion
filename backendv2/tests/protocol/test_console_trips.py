@@ -31,7 +31,7 @@ GPX = {"g": "http://www.topografix.com/GPX/1/1"}
 
 
 def fiche(person: str, tab: str = "") -> str:
-    return f"/inspecteur/fiche/person/{person}" + (f"?onglet={tab}" if tab else "")
+    return f"/admin/fiche/person/{person}" + (f"?onglet={tab}" if tab else "")
 
 
 def _trip(page: str, trip: str) -> str:
@@ -63,7 +63,7 @@ def test_her_trips_are_on_her_fiche_and_an_operator_removes_one(world):  # noqa:
     for said in ("Les Alpes", "en voiture", "péages, ferries", "sam. 3 avr. 2027", "2 jours", "3 arrêts",
                  f"préparé avec {her}", "Jour 1 · sam. 3 avr. 2027", "Jour 2 · dim. 4 avr. 2027", "Annecy", "Ville",
                  "45.899200,6.129400", "Se baigner au lever du jour", "Monastère royal de Brou", "ça vaut le détour",
-                 f"/inspecteur/evenement/{alpes}"):
+                 f"/admin/evenement/{alpes}"):
         assert said in trip, said
     assert trip.count(f"ajouté par {her}") == 1  # le sien seulement
     assert trip.index("Annecy") < trip.index("Talloires") < trip.index("Monastère royal de Brou")
@@ -71,7 +71,7 @@ def test_her_trips_are_on_her_fiche_and_an_operator_removes_one(world):  # noqa:
     assert "à vélo" in other and "sans date" in other and "évite</span> rien" in other and "aucun arrêt" in other
     assert "/gpx" not in other and "Ses arrêts, jour par jour" not in other  # rien à suivre, rien à déplier
     # pas d'édition : le seul geste de la console sur un voyage est de le supprimer
-    assert not re.search(r'action="/inspecteur/action/trips\.(?!supprimer")', page)
+    assert not re.search(r'action="/admin/action/trips\.(?!supprimer")', page)
     # le repli (et ce que lit la console en MCP) : la vue du plugin, ses arrêts au détail, son « Supprimer »
     raw = client.get(fiche(lea, "voyages") + "&vue_pg1=table")
     assert raw.status_code == 200
@@ -80,11 +80,11 @@ def test_her_trips_are_on_her_fiche_and_an_operator_removes_one(world):  # noqa:
     assert "Ses voyages" in plain and "Monastère royal de Brou" in plain and "Cette vue a échoué" not in plain
     assert 'class="now-page person-tab"' not in plain  # bien les blocs, pas le dessin
     assert form_of(plain, "trips.supprimer", having=alpes)["_sujet"] == [lea]
-    assert not re.search(r'action="/inspecteur/action/trips\.(?!supprimer")', plain)
+    assert not re.search(r'action="/admin/action/trips\.(?!supprimer")', plain)
 
     # le GPX, servi par la console : ses arrêts dans l'ordre, et son tracé
-    gpx = client.get(f"/inspecteur/voyages/{alpes}/gpx")
-    assert f'href="/inspecteur/voyages/{alpes}/gpx"' in trip
+    gpx = client.get(f"/admin/voyages/{alpes}/gpx")
+    assert f'href="/admin/voyages/{alpes}/gpx"' in trip
     assert gpx.status_code == 200 and gpx.headers["content-type"].startswith("application/gpx+xml")
     assert gpx.headers["content-disposition"] == f'attachment; filename="voyage-{alpes}.gpx"'
     root = ET.fromstring(gpx.content)
@@ -96,7 +96,7 @@ def test_her_trips_are_on_her_fiche_and_an_operator_removes_one(world):  # noqa:
     sent = form_of(page, "trips.supprimer", having=alpes)
     assert sent["trip"] == [alpes] and sent["_sujet"] == [lea]
     assert "Supprimer « Les Alpes » (3 arrêts) ? Léa Martin ne le retrouvera plus." in trip  # data-confirm
-    done = client.post("/inspecteur/action/trips.supprimer", data=sent, follow_redirects=False)
+    done = client.post("/admin/action/trips.supprimer", data=sent, follow_redirects=False)
     assert done.status_code == 303 and done.headers["location"].startswith(fiche(lea, "voyages"))
     after = drawn(client, done.headers["location"])
     assert "Voyage supprimé." in after and f'id="voyage-{alpes}"' not in after and f'id="voyage-{lyon}"' in after
@@ -105,18 +105,18 @@ def test_her_trips_are_on_her_fiche_and_an_operator_removes_one(world):  # noqa:
     audit = [e.data for e in journal(live, rt.OPERATED) if e.data.action == "trips.supprimer"]
     assert [(a.by, a.subject, a.outcome, a.seqs) for a in audit] == [(ADRIEN, lea, "done", (removed.seq,))]
     # Système › Gestes audités dit sur qui par son nom, jamais par sa clé (C9-01)
-    gestures = html.unescape(client.get("/inspecteur/systeme/operations").text)
+    gestures = html.unescape(client.get("/admin/systeme/operations").text)
     line = next(li for li in gestures.split("<li ") if "Supprimer un voyage" in li).split("</li>", 1)[0]
     assert "Léa Martin" in line and f">{lea}<" not in line, line
-    assert client.get(f"/inspecteur/voyages/{alpes}/gpx").status_code == 404
+    assert client.get(f"/admin/voyages/{alpes}/gpx").status_code == 404
 
     # elle ne le retrouve plus
     login(client, "lea")
     assert [t["id"] for t in client.get(VOYAGES).json()["trips"]] == [lyon]
     assert client.get(f"{VOYAGES}/{alpes}").status_code == 404
     # la console reste aux opérateurs : son GPX aussi
-    refused = client.get(f"/inspecteur/voyages/{lyon}/gpx", follow_redirects=False)
-    assert refused.status_code == 303 and refused.headers["location"] == "/inspecteur/connexion"
+    refused = client.get(f"/admin/voyages/{lyon}/gpx", follow_redirects=False)
+    assert refused.status_code == 303 and refused.headers["location"] == "/admin/connexion"
 
 
 def test_the_last_trip_removed_the_fiche_opens_on_its_overview(world):  # noqa: F811
@@ -128,7 +128,7 @@ def test_the_last_trip_removed_the_fiche_opens_on_its_overview(world):  # noqa: 
     page = drawn(client, fiche(lea, "voyages"))
     sent = form_of(page, "trips.supprimer", having=only)
     assert sent["_retour"] == [fiche(lea)]  # l'onglet n'aura plus lieu d'être
-    done = client.post("/inspecteur/action/trips.supprimer", data=sent, follow_redirects=False)
+    done = client.post("/admin/action/trips.supprimer", data=sent, follow_redirects=False)
     assert done.status_code == 303 and done.headers["location"].startswith(fiche(lea) + "?flash=")
     after = drawn(client, done.headers["location"])
     assert "Voyage supprimé." in after and "onglet=voyages" not in after
@@ -150,23 +150,23 @@ def test_the_gpx_of_the_console_counts_in_the_operator_s_carte_budget(world):  #
     lyon = new_trip(client, "Week-end à Lyon")
     stop(client, lyon, "Fourvière", 45.7623, 4.8228)
     login(client, "adrien")
-    link = re.search(rf'<a [^>]*href="/inspecteur/voyages/{alpes}/gpx"[^>]*>', drawn(client, fiche(lea, "voyages")))
+    link = re.search(rf'<a [^>]*href="/admin/voyages/{alpes}/gpx"[^>]*>', drawn(client, fiche(lea, "voyages")))
     assert link is not None and " download" not in link.group(0)
 
     def routed() -> int:
         return sum(1 for call in maps.calls if call[0] == "route")
 
-    served = [client.get(f"/inspecteur/voyages/{alpes}/gpx").status_code for _ in range(OUTBOUND[0])]
+    served = [client.get(f"/admin/voyages/{alpes}/gpx").status_code for _ in range(OUTBOUND[0])]
     assert served == [200] * OUTBOUND[0] and routed() >= OUTBOUND[0]
     asked = routed()
-    refused = client.get(f"/inspecteur/voyages/{alpes}/gpx")
+    refused = client.get(f"/admin/voyages/{alpes}/gpx")
     assert (refused.status_code, refused.text) == (429, ROUTES_BUSY)
     assert routed() == asked  # rien n'est parti
     # la même borne que son écran Carte : celle de son compte
     assert client.get(CARTE + f"/itineraire?points={LAC}").status_code == 429
     assert routed() == asked
     # un seul arrêt, pas de tracé à demander : rien ne compte, le GPX reste servi
-    assert client.get(f"/inspecteur/voyages/{lyon}/gpx").status_code == 200
+    assert client.get(f"/admin/voyages/{lyon}/gpx").status_code == 200
     # la borne est par compte : celle de Léa reste entière
     login(client, "lea")
     assert client.get(f"{VOYAGES}/{alpes}/gpx").status_code == 200

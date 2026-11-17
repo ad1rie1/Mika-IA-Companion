@@ -588,7 +588,7 @@ class Constellation:
         return secure(JSONResponse({"events": await self.replay(n)}))
 
     def routes(self) -> list[Route]:
-        """À poser avant celles de la console (son adresse attrape tout ``/inspecteur/<clé>``)."""
+        """À poser avant celles de la console (son adresse attrape tout ``/admin/<clé>``)."""
         return [Route(BASE, self.page, methods=["GET"]),
                 Route(f"{BASE}/carte", self.map_json, methods=["GET"]),
                 Route(f"{BASE}/flux", self.feed_json, methods=["GET"]),

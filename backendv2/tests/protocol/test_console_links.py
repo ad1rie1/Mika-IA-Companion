@@ -1,5 +1,5 @@
 """Les adresses de la console mènent quelque part (K11-01, audit du 2026-11-05) : la fiche d'un compte Teams envoyait
-vers « /inspecteur/envoi », une page fondue dans les canaux depuis l'ADR 0134 — « Page inconnue », 404. Chaque lien
+vers « /admin/envoi », une page fondue dans les canaux depuis l'ADR 0134 — « Page inconnue », 404. Chaque lien
 d'une fiche se suit, et chaque adresse de la console écrite en toutes lettres dans le code répond autre chose que 404."""
 
 from __future__ import annotations
@@ -18,35 +18,35 @@ from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture p
 
 SRC = Path(operations.__file__).resolve().parents[1]
 #: une adresse de la console écrite en entier (sans paramètre ni morceau calculé)
-ADDRESS = re.compile(r"/inspecteur(/[a-z0-9_-]+)+")
+ADDRESS = re.compile(r"/admin(/[a-z0-9_-]+)+")
 
 
 def _content_links(page: str) -> set[str]:
     """Les liens de la console dans le contenu de la page (le menu, commun à toutes, est à part)."""
     main = page[page.index("<main"):]
-    return {href for href in re.findall(r'href="(/inspecteur/[^"#]*)"', main)}
+    return {href for href in re.findall(r'href="(/admin/[^"#]*)"', main)}
 
 
 def test_every_link_of_a_teams_account_fiche_leads_somewhere(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
     plugged(client, live)
-    links = _content_links(drawn(client, "/inspecteur/teams/extension?compte=principal"))
+    links = _content_links(drawn(client, "/admin/teams/extension?compte=principal"))
     # comment partent ses réponses : le tableau de canal de ce compte (« teams:<clé> »), comme pour une boîte
-    assert "/inspecteur/reglages/canaux?canal=teams%3Aprincipal" in links
+    assert "/admin/reglages/canaux?canal=teams%3Aprincipal" in links
     dead = sorted(href for href in links if client.get(href, follow_redirects=False).status_code == 404)
     assert not dead, dead
 
 
 def test_every_link_of_the_teams_replies_tab_leads_somewhere(world):  # noqa: F811
-    """L'onglet Réponses de Teams menait en pied à « /inspecteur/envoi » (K8-02), écrit en morceaux dans son gabarit :
+    """L'onglet Réponses de Teams menait en pied à « /admin/envoi » (K8-02), écrit en morceaux dans son gabarit :
     il mène au tableau de Teams dans Réglages › Canaux, celui du compte choisi."""
     client, live, _ = world
     bootstrap(client)
     plugged(client, live)
-    for where in ("/inspecteur/teams/reponses", "/inspecteur/teams/reponses?compte=principal"):
+    for where in ("/admin/teams/reponses", "/admin/teams/reponses?compte=principal"):
         links = _content_links(drawn(client, where))
-        assert "/inspecteur/reglages/canaux?canal=teams%3Aprincipal" in links, where  # le seul compte, ou le choisi
+        assert "/admin/reglages/canaux?canal=teams%3Aprincipal" in links, where  # le seul compte, ou le choisi
         dead = sorted(href for href in links if client.get(href, follow_redirects=False).status_code == 404)
         assert not dead, (where, dead)
 
@@ -57,28 +57,43 @@ def test_with_several_teams_accounts_the_replies_tab_leads_to_the_teams_table(wo
     client, live, _ = world
     bootstrap(client)
     two_accounts(client, live)
-    every = _content_links(drawn(client, "/inspecteur/teams/reponses"))
-    assert "/inspecteur/reglages/canaux?canal=teams" in every
-    assert not any(href.startswith("/inspecteur/reglages/canaux?canal=teams%3A") for href in every), every
-    one = _content_links(drawn(client, "/inspecteur/teams/reponses?compte=bea_t"))
-    assert "/inspecteur/reglages/canaux?canal=teams%3Abea_t" in one
+    every = _content_links(drawn(client, "/admin/teams/reponses"))
+    assert "/admin/reglages/canaux?canal=teams" in every
+    assert not any(href.startswith("/admin/reglages/canaux?canal=teams%3A") for href in every), every
+    one = _content_links(drawn(client, "/admin/teams/reponses?compte=bea_t"))
+    assert "/admin/reglages/canaux?canal=teams%3Abea_t" in one
     # « canal=teams » ouvre bien la page des canaux sur Teams : sa section vient en premier
-    canals = drawn(client, "/inspecteur/reglages/canaux?canal=teams")
+    canals = drawn(client, "/admin/reglages/canaux?canal=teams")
     first = canals.split('class="access-canal-pane"', 1)[1].split(">", 1)[0]
     assert 'id="canal-teams"' in first, first
 
 
 def _written_addresses() -> dict[str, str]:
-    """Les adresses de la console écrites en toutes lettres dans le code (hors des f-strings), et où."""
+    """Les adresses de la console écrites en toutes lettres dans le code, et où : en clair, ou derrière le seul préfixe
+    (``f"{PREFIX}/systeme/processus"``, ADR 0237) ; une f-string qui y ajoute une variable n'en écrit pas une."""
     found: dict[str, str] = {}
     for path in sorted(SRC.rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         parts = {id(v) for n in ast.walk(tree) if isinstance(n, ast.JoinedStr) for v in n.values}
         for node in ast.walk(tree):
-            if (isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in parts
-                    and ADDRESS.fullmatch(node.value)):
-                found.setdefault(node.value, f"{path.relative_to(SRC)}:{node.lineno}")
+            if isinstance(node, ast.JoinedStr):
+                text = _prefixed(node)
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in parts:
+                text = node.value
+            else:
+                continue
+            if text is not None and ADDRESS.fullmatch(text):
+                found.setdefault(text, f"{path.relative_to(SRC)}:{node.lineno}")
     return found
+
+
+def _prefixed(node: ast.JoinedStr) -> str | None:
+    """L'adresse qu'écrit ``f"{PREFIX}/…"`` quand le préfixe est sa seule variable ; sinon rien."""
+    match node.values:
+        case [ast.FormattedValue(value=ast.Name(id="PREFIX"), conversion=-1, format_spec=None),
+              ast.Constant(value=str() as tail)]:
+            return render.PREFIX + tail
+    return None
 
 
 def _literal(node: ast.expr, constants: dict[str, object]) -> object:
@@ -190,6 +205,13 @@ def test_every_written_console_address_leads_somewhere(world):  # noqa: F811
     bootstrap(client)
     written = _written_addresses()
     assert len(written) > 8  # la recherche trouve bien les adresses du code (celles de la console seule : ADR 0216)
-    dead = sorted(f"{address} ({where})" for address, where in written.items()
-                  if client.get(address, follow_redirects=False).status_code == 404)
+    # une base qu'on complète avant de la suivre (``/admin/personne`` → ``/admin/personne/<clé>``) répond 404 nue :
+    # elle vit si une route du serveur est écrite à cette adresse ou dessous
+    routes = {path for r in client.app.routes if (path := getattr(r, "path", ""))}
+
+    def dead_end(address: str) -> bool:
+        return client.get(address, follow_redirects=False).status_code == 404 \
+            and not any(p == address or p.startswith(address + "/") for p in routes)
+
+    dead = sorted(f"{address} ({where})" for address, where in written.items() if dead_end(address))
     assert not dead, dead

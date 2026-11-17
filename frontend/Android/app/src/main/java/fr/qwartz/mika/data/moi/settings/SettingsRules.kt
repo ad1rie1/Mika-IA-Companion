@@ -182,7 +182,7 @@ fun sharedBoxTitle(b: MailBox): String =
 
 /** Les fournisseurs d'« Ajouter une boîte ». */
 enum class Provider(val title: String, val description: String) {
-    MICROSOFT("Microsoft", "Outlook.com, Hotmail, Live : connexion par code d'appareil (OAuth2)"),
+    MICROSOFT("Microsoft", "Outlook.com, Hotmail, Live : tu te connectes chez Microsoft, par un code"),
     DAVMAIL("Exchange pro", "Ta boîte de travail par la passerelle DavMail (O365Graph) sur la machine de Mika"),
     GMAIL("Gmail", "Avec un mot de passe d'application"),
     IMAP("Autre", "N'importe quelle boîte IMAP et SMTP, par mot de passe"),
