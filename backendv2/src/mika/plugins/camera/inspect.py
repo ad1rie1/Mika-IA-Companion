@@ -28,8 +28,12 @@ from mika.kernel.inspect import (
     Text,
     Timeline,
     When,
+    agree,
     content_text,
     paginate,
+    pct_fr,
+    plural,
+    size_fr,
 )
 from mika.plugins.camera import CAMERA, CameraParams, CameraState, params
 
@@ -54,10 +58,11 @@ def _devices(port: Any, frame: Frame, ctx: InspectContext, p: CameraParams) -> l
     # jamais l'image elle-même : sa taille et son empreinte suffisent
     rows = tuple((device, "oui" if fresh[device] else "non", When(snap.at) if snap is not None else None,
                   snap.mime if snap is not None else "—",
-                  f"{max(1, len(snap.data) // 1024)} Ko" if snap is not None else "—",
+                  size_fr(len(snap.data)) if snap is not None else "—",
                   Text(snap.digest, kind="mono") if snap is not None else "—")
                  for device, snap in ((d, snaps[d]) for d in page))
-    note = (Note(f"{live} appareil(s) envoie(nt) des images en ce moment.", tone="ok") if live
+    sending = f"{plural(live, 'appareil', 'appareils')} {agree(live, 'envoie', 'envoient')}"
+    note = (Note(f"{sending} des images en ce moment.", tone="ok") if live
             else Note("Aucun appareil n'envoie d'image en ce moment.", tone="muted"))
     more = len(names) > TILES_SHOWN
     title = f"Appareils (les {TILES_SHOWN} premiers sur {len(names)} : tous dans le détail)" if more else "Appareils"
@@ -100,7 +105,7 @@ def _inspect(s: CameraState, frame: Frame, ctx: InspectContext) -> list[Block]:
         tuple(Entry(e.at, str(e.data.device or "—") + (" — quelque chose se passe" if e.data.notable else ""),
                     content_text(e.data.summary), tone="warn" if e.data.notable else "",
                     href=Ref("event", str(e.seq), f"#{e.seq}"),
-                    meta=f"pertinence {float(e.data.pertinence or 0.0):.2f}"
+                    meta=f"pertinence {pct_fr(float(e.data.pertinence or 0.0))}"
                          + (" · encore frais" if frame.now - e.at <= p.shown_for_us else ""))
               for e in looks),
         title="Ses regards, du plus récent au plus ancien" + (" (plus anciens)" if before else ""),

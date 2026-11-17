@@ -11,8 +11,7 @@
  * miniature reparaît, et une liste qui dit un changement plus récent (`updated`) la fait relire aussi.
  */
 import { ApiError } from "../api/moi";
-import { fetchRegard, fetchTrip } from "../api/carte";
-import type { MapInfo } from "../api/phone";
+import { fetchRegard, fetchTrip, type MapInfo } from "../api/carte";
 import { $$ } from "../shell/dom";
 import { isDark } from "../shell/theme";
 import { goneMini, miniPlan, regardMini, tripMini, type MiniData } from "./cards";

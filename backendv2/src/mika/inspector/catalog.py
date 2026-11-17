@@ -253,6 +253,10 @@ class Labels:
     processes: Mapping[str, str] = field(default_factory=dict)
     #: type d'événement d'une faculté → ce qui s'est passé (« Un souvenir retenu »)
     events: Mapping[str, str] = field(default_factory=dict)
+    #: effet de la file de sortie (« propriétaire:type », la clé de ses lignes : « expression:episode.utterance ») →
+    #: (sa famille, son nom, ce que c'est) : (« dit », « Ses messages », « ce qu'elle répond ou lance… »). Système ›
+    #: File de sortie le range par famille ; sa vue et la page d'un événement disent son nom (``Names.effect``)
+    effects: Mapping[str, tuple[str, str, str]] = field(default_factory=dict)
     #: lot d'outils → sa famille pour un opérateur, quand ce n'est pas le nom de sa faculté (« L'atelier d'un
     #: projet ») ; « préfixe.* » nomme les lots qu'une source ajoute, par ce qui suit le préfixe (« Service « {} » »)
     bundles: Mapping[str, str] = field(default_factory=dict)
@@ -262,6 +266,10 @@ class Labels:
     #: enrichisseur (sa clé, « their_last_words ») → ce qu'il rassemble pour le prompt (« Les derniers messages de la
     #: personne ») : l'onglet Prompt d'un épisode les nomme
     enrichers: Mapping[str, str] = field(default_factory=dict)
+    #: port qu'un outil attend (``ToolSpec.needs``, « imaging ») → (pourquoi il n'est pas offert tant que ce port n'est
+    #: pas prêt, « aucun fournisseur d'images n'est configuré » ; la clé de la page de réglages où il se règle,
+    #: « images-fournisseurs ») : la fiche d'un outil dit l'un et mène à l'autre
+    needs: Mapping[str, tuple[str, str]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

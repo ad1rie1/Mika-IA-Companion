@@ -1,6 +1,8 @@
 {# Système › Toutes les vues (app/handmade/tabs/system.py, ADR 0177) : chaque vue que les facultés déclarent, et où elle
    est rangée — en une phrase, puis en sous-onglets : par destination (vers la destination), sur les fiches, par faculté
-   (avec où chacune se trouve), et celles qui sont cachées. Chaque groupe en colonnes ; chaque vue mène à elle. #}
+   (avec où chacune se trouve), et celles qui sont cachées. Chaque groupe en colonnes ; chaque vue mène à elle. Par
+   faculté, chaque groupe a son ancre (vues-de-<faculté>) : son adresse ouvre ce sous-onglet sur elle — le lien
+   « Ses vues » de Contributions y mène (audit du 2026-11-05, C8-12). #}
 {% import "handmade/shared/tab.html" as tab with context %}
 <div class="now-page sys sys-views" data-tab="systeme/vues">
   <p class="sys-lede"><span class="now-num">{{ total }}</span> vues, déclarées par <span class="now-num">{{ faculties }}</span> facultés : rangées dans <span class="now-num">{{ places }}</span> destinations, sur <span class="now-num">{{ subjects }}</span> sortes de fiches{% if hidden %}, et <span class="now-num">{{ hidden }}</span> cachée{{ 's' if hidden > 1 }}{% endif %}.</p>
@@ -16,7 +18,7 @@
           {{ tab.head(p.title, p.id ~ "-title", p.n, p.lede) }}
           <div class="sys-views-groups">
             {% for g in p.groups %}
-            <section class="sys-views-group" aria-label="{{ g.label }}">
+            <section class="sys-views-group"{% if g.id %} id="{{ g.id }}"{% endif %} aria-label="{{ g.label }}">
               <h3>{% if g.href %}<a href="{{ g.href }}">{{ g.label }}</a>{% else %}{{ g.label }}{% endif %} <span class="now-muted now-num">{{ g.views|length }}</span></h3>
               <ul role="list">
                 {% for v in g.views %}<li><a href="{{ v.href }}">{{ v.title }}</a> <span class="now-muted">· {% if p.where %}{{ v.where or v.nowhere or '—' }}{% else %}{{ v.faculty }}{% endif %}</span></li>{% endfor %}

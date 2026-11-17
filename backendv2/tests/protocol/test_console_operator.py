@@ -18,10 +18,15 @@ import html
 import logging
 import re
 
+from sqlalchemy import func, insert, select
+
 from mika.contracts import runtime as rt
+from mika.inspector.pages.system import OUTBOX_PAGE
 from mika.inspector.ui import env as templates
 from mika.kernel.builtin import KernelParams
+from mika.kernel.events import Content, Origin, VoiceProvenance
 from mika.kernel.registry import _zone
+from mika.ports.journal import JournalOutbox
 from mika.ports.mail import Folder
 from mika.runtime import health, operations
 from tests.fixtures.console_html import ConsoleHTML
@@ -141,6 +146,8 @@ def test_forgetting_someone_is_confirmed_by_retyping_the_name_shown(world):  # n
     # l'accueil, où l'oubli ramène, le confirme (son gabarit ne montrait pas les messages)
     home = client.get(done.headers["location"])
     assert home.status_code == 200 and "est oublié·e" in html_of(home)
+    # le compte accordé, jamais « contenu(s) effacé(s) » (audit du 2026-11-05, C8-14)
+    assert re.search(r"est oublié·e \(\d+ contenus? effacés?\)", html_of(home)) and "contenu(s)" not in html_of(home)
 
 
 # ── accès ─────────────────────────────────────────────────────────────────
@@ -392,7 +399,11 @@ def test_operator_actions_are_not_presented_as_episodes(world):  # noqa: F811
     client.portal.call(lambda: operations.audit(live.kernel, "console.reglages.essai", by="user_1"))
     op = client.portal.call(lambda: live.kernel.mind.store.latest([rt.OPERATED.name], 1))[0]
     timeline = html_of(client.get(f"{BASE}/systeme/chronologie"))
-    assert f"/inspecteur/episode/{op.correlation}" not in timeline and "une action d'opérateur" in timeline
+    # un geste audité, fait depuis la console ou depuis l'espace d'une personne (C8-R1) : sa clé de corrélation
+    # « opérateur:… » ne change pas
+    assert op.correlation.startswith("opérateur:")
+    assert f"/inspecteur/episode/{op.correlation}" not in timeline and "un geste audité" in timeline
+    assert "Geste audité : " in timeline and "action d'opérateur" not in timeline.lower()
     gone = client.get(f"{BASE}/episode/{op.correlation}", follow_redirects=False)
     assert gone.status_code == 303 and "/systeme/chronologie?correlation=" in gone.headers["location"]
     assert "Un épisode" not in html_of(client.get(f"{BASE}/episode/{op.correlation}"))
@@ -497,3 +508,97 @@ def test_outbox_action_cards_follow_filter_and_paginate_without_deciding(world):
     done = html_of(client.get(f'{BASE}/systeme/sorties?etat=done'))
     assert not shown(done)
     assert all(client.portal.call(store.outbox_status, key) == 'failed' for key in keys[:9])
+
+
+def test_the_drawn_outbox_and_its_table_show_the_same_page_of_departures(world):  # noqa: F811
+    """La page dessinée de la File de sortie lit la page de départs de sa vue, sans la relire à côté (ADR 0177) : la
+    même taille de page que sa vue en tableau (et que la console en MCP), le même total. Avant, la vue en montrait
+    50 et la page dessinée 20, chacune de ses propres requêtes."""
+    client, live, _ = world
+    bootstrap(client)
+    converse(client)
+    store, seq = live.kernel.mind.store, live.kernel.mind.head
+    client.portal.call(store.run_mind, lambda sql: sql.execute(insert(JournalOutbox), [
+        {"key": f"essai:{i}", "seq": seq, "effect": "expression:episode.utterance", "status": "done", "attempts": 1,
+         "last_error": None} for i in range(OUTBOX_PAGE + 5)]))
+    total = client.portal.call(lambda: store.query_mind(select(func.count()).select_from(JournalOutbox)))[0][0]
+    assert total > OUTBOX_PAGE
+    drawn = html_of(client.get(f"{BASE}/systeme/sorties"))
+    table = html_of(client.get(f"{BASE}/systeme/sorties?vue_pg1=table"))
+    assert 'data-tab="systeme/sorties"' in drawn and 'data-tab="systeme/sorties"' not in table  # le repli
+    ConsoleHTML(drawn).check()
+    ConsoleHTML(table).check()
+    assert drawn.count('class="sys-out-ev"') == OUTBOX_PAGE
+    assert f"1–{OUTBOX_PAGE} sur {total}" in drawn and f"1–{OUTBOX_PAGE} sur {total}" in table
+    second = html_of(client.get(f"{BASE}/systeme/sorties?page=2"))
+    assert second.count('class="sys-out-ev"') == min(OUTBOX_PAGE, total - OUTBOX_PAGE)
+
+
+def _card(page: str, key: str) -> str:
+    """La carte « À traiter » d'une ligne de la file (par sa clé), dans une page."""
+    cards = [c for c in re.findall(r'<li class="st-[a-z]*">(.*?)</li>', page, re.S) if f'value="{key}"' in c]
+    assert len(cards) == 1, key
+    return cards[0]
+
+
+def test_a_departure_to_handle_says_what_did_not_leave_and_to_whom(world):  # noqa: F811
+    """Avant de relancer un départ ou de le marquer comme vu, l'opératrice devait ouvrir son événement pour savoir à
+    qui la parole n'était pas partie : la carte disait « Ses messages » et « L'action a échoué » pour une parole
+    (audit du 2026-11-05, C8-06). Chaque carte dit maintenant ce qui n'est pas parti (une parole : à qui et le début de
+    son texte, sur une ligne ; une action : l'action et son résumé, celui de sa proposition pour une action autorisée)
+    et que faire selon sa sorte — dessinée comme au repli."""
+    client, live, _ = world
+    bootstrap(client)
+    converse(client)
+    long = "Je voulais te dire que " + "la pluie tombe encore sur les toits de la ville, " * 6 + "et je pense à toi."
+    voice = VoiceProvenance(call_id="coince#0", persona_hash="fictive", role="reply", model="fake")
+
+    async def seed():
+        said = await live.kernel.mind.append([rt.UTTERANCE.draft(
+            kind="REPLY", target="user_1", voice=voice, text=Content.of(long))],
+            emitter="runtime", origin=Origin.GENESIS, correlation="parole-coincee")
+        asked = await live.kernel.mind.append([rt.EFFECT_PROPOSED.draft(
+            capability="email.send", owner="email", args_json="{}", summary=Content.of("Écrire à Léa pour samedi."))],
+            emitter="runtime", origin=Origin.PROCESS, correlation="action-coincee")
+        refused = await live.kernel.mind.append([rt.EFFECT_RESOLVED.draft(
+            proposal=asked.seqs[0], approved=False, capability="email.send", owner="email")],
+            emitter="runtime", origin=Origin.PROCESS, correlation="action-coincee")
+        return said.seqs[0], asked.seqs[0], refused.seqs[0]
+
+    said, asked, refused = client.portal.call(seed)
+    store = live.kernel.mind.store
+    client.portal.call(store.run_mind, lambda sql: sql.execute(insert(JournalOutbox), [
+        {"key": "essai:parole", "seq": said, "effect": "expression:episode.utterance", "status": "failed",
+         "attempts": 8, "last_error": "TimeoutError()"},
+        {"key": "essai:perimee", "seq": said, "effect": "expression:episode.utterance", "status": "stale",
+         "attempts": 1, "last_error": "trop tard : elle ne le dit plus"},
+        {"key": "essai:action", "seq": asked, "effect": "runtime:effect.proposed", "status": "failed",
+         "attempts": 8, "last_error": "boom"},
+        {"key": "essai:autorisee", "seq": refused, "effect": "runtime:effect.resolved", "status": "failed",
+         "attempts": 8, "last_error": "boom"}]))
+    drawn = html_of(client.get(f"{BASE}/systeme/sorties"))
+    folded = html_of(client.get(f"{BASE}/systeme/sorties?vue_pg1=table"))
+    assert 'data-tab="systeme/sorties"' in drawn and 'data-tab="systeme/sorties"' not in folded
+    for page in (drawn, folded):
+        ConsoleHTML(page).check()
+        speech = _card(page, "essai:parole")
+        assert "Ses messages" in speech and "à adrien" in speech  # à qui, par son nom
+        assert "« Je voulais te dire que la pluie tombe encore" in speech and "…" in speech and long not in speech
+        assert "Ce message n'est pas parti. Tu peux le relancer ou le marquer comme vu." in speech
+        assert "action a échoué" not in speech and "délai dépassé" in speech
+        stale = _card(page, "essai:perimee")
+        assert "Ce message est périmé : elle ne le dira plus." in stale and ">Relancer</button>" not in stale
+        action = _card(page, "essai:action")
+        assert "Une action, tout de suite : Envoyer un mail" in action and "Écrire à Léa pour samedi." in action
+        assert "L'action a échoué. Tu peux la relancer ou la marquer comme vue." in action and "à adrien" not in action
+        # une action autorisée (ici refusée, pour qu'elle ne parte pas) : le résumé de sa proposition
+        resolved = _card(page, "essai:autorisee")
+        assert "Une action que tu as autorisée : Envoyer un mail" in resolved
+        assert "Écrire à Léa pour samedi." in resolved
+    # la vue le dit aussi en tableau (la console en MCP) : à qui, quoi
+    table = folded[folded.index("À traiter, ligne par ligne"):]
+    assert "<th" in table and "à qui" in table and "« Je voulais te dire que" in table
+    # la parole y est déjà coupée sur une ligne (guillemets en plus) : sa cellule ne se replie pas en « lire la suite »,
+    # qui n'aurait révélé que la fin « … »
+    rows = table[:table.index("</table>")]
+    assert "… »" in rows and '<details class="more">' not in rows and "lire la suite" not in rows

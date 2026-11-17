@@ -37,8 +37,8 @@ Comportement et outils, « Accès » et Carnet dessinés (ADR 0121, 0133, 0176, 
   rangés sous « Plus ».
 - Accès : qui peut le voir, le piloter, se servir de ses apps, et quand — un tableau de lignes lues de haut en bas,
   comme les règles d'un pare-feu, puis la ligne par défaut, obligatoire. Les outils qu'une ligne peut cocher sont ceux
-  des apps du projet, lus dans la Forge (une app vit dans un projet, ADR 0104) ; chaque bouton envoie tout le tableau
-  (``projects.acces``).
+  des apps du projet, lus dans la Forge (une app vit dans un projet, ADR 0104), et ce qu'elle en fait se choisit dans
+  les mots des familles (``vocab.access.POLICIES``) ; chaque bouton envoie tout le tableau (``projects.acces``).
 - Carnet : en sous-onglets — Consignes, Ses notes, Ce qu'on en a fait, Ce qui sort —, chacun avec sa pagination (le
   curseur de sa liste : ``avant``, ``avant_notes``, ``avant_ops``, ``avant_effets`` ; celui qu'on feuillette s'ouvre).
   Une demande qui attend ton accord le dit, garde sa commande exacte et mène à la file « À valider » (le lien que
@@ -60,7 +60,13 @@ from typing import Any
 from markupsafe import Markup
 
 from mika.app.handmade import blocks as drawn_blocks
-from mika.app.handmade.access import canal_choices, canal_instances, people_with_accounts, who_choices
+from mika.app.handmade.access import (
+    POLICY_CHOICES,
+    canal_choices,
+    canal_instances,
+    people_with_accounts,
+    who_choices,
+)
 from mika.app.handmade.subjects.project_git import git_page
 from mika.app.handmade.tabs import Got, Line, anchored, blank, lines, paged, pairs, raw_lines, subpanes, text
 from mika.app.handmade.tabs.decisions import by_day
@@ -84,8 +90,6 @@ from mika.plugins.forge.access import app_tool_names
 from mika.vocab.access import MOMENTS, PERSON, when_words
 
 KIND = "project"
-#: ce qu'une ligne fait, dans un sélecteur du tableau
-POLICY_CHOICES = (("seule", "Seule"), ("carte", "Demande à la personne"), ("toi", "Ton accord"), ("non", "Non"))
 MOMENT_CHOICES = tuple((k, label[:1].upper() + label[1:]) for k, label in MOMENTS)
 
 

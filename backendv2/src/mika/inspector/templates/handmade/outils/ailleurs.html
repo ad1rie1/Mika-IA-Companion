@@ -1,8 +1,8 @@
 {# Outils › Venus d'ailleurs (app/handmade/tabs/tools.py::elsewhere) : ce qu'on y fait, en boutons de la barre de titre (la
-   console les y porte) ; une carte par service
-   branché (à qui il est, son état, à quoi il lui sert, ses outils servis, ce qui attend ton regard), et « À qui » en
-   bouton à choix quand plusieurs personnes en ont branché (ADR 0192) ; une carte par app et les outils qu'elle lui
-   donne. #}
+   console les y porte) ; une ligne par service branché, séparée par un filet (`person-entries` de base.css : pas de
+   carte dans la carte, ADR 0176) — son nom mène à sa fiche ; à qui il est, son état, à quoi il lui sert, ses outils
+   servis, ce qui attend ton regard —, et « À qui » en bouton à choix quand plusieurs personnes en ont branché
+   (ADR 0192) ; une ligne par app, son nom menant à l'app, et les outils qu'elle lui donne. #}
 <div class="now-page elsewhere" data-tab="outils/serveurs">
   {% if services is not none %}
   <section class="now-card" aria-labelledby="elsewhere-services">
@@ -13,24 +13,22 @@
       {% if owners %}<nav class="seg" aria-label="À qui">{% for o in owners %}<a href="{{ o.href }}"{% if o.on %} aria-current="true"{% endif %}>{{ o.text }}</a>{% endfor %}</nav>{% endif %}
     </header>
     {% if services %}
-    <ul class="elsewhere-list" role="list">
+    <ul class="person-entries" role="list">
       {% for s in services %}
-      <li class="elsewhere-item">
-        <div class="elsewhere-top">
-          <p class="elsewhere-name">{% if s.href %}<a href="{{ s.href }}">{{ s.name }}</a>{% else %}{{ s.name }}{% endif %}</p>
-          <span class="now-tag {{ s.tone }}">{{ s.state }}</span>
+      <li>
+        <div class="person-entry-top"><div class="person-entry-name"><p class="person-entry-title">{% if s.href %}<a href="{{ s.href }}">{{ s.name }}</a>{% else %}{{ s.name }}{% endif %}</p>{% if s.state %}<p class="person-entry-tags"><span class="now-tag {{ s.tone }}">{{ s.state }}</span></p>{% endif %}</div></div>
+        {% if s.purpose %}<div class="person-entry-text">{{ s.purpose[:1]|upper }}{{ s.purpose[1:] }}</div>{% endif %}
+        <div class="person-entry-foot">
+          {% if s.who %}<p class="person-entry-facts"><span>Avec {{ s.who }}</span><span>{{ s.access[:1]|upper }}{{ s.access[1:] }}</span></p>{% endif %}
+          <p class="person-entry-facts">
+            {% if s.owner %}<span>à {% if s.owner_href %}<a href="{{ s.owner_href }}">{{ s.owner }}</a>{% else %}{{ s.owner }}{% endif %}</span>{% endif %}
+            <span><b>{{ s.served }}</b> outil{{ 's' if s.served not in ('0', '1') }} servi{{ 's' if s.served not in ('0', '1') }} sur {{ s.offered }} proposé{{ 's' if s.offered not in ('0', '1') }}</span>
+            {% if s.where %}<span>{{ s.where }}</span>{% endif %}
+            {% if s.joined %}<span>joint {{ s.joined }}</span>{% endif %}
+          </p>
+          {% if s.review %}<p class="elsewhere-alert">{{ s.review }} outil{{ 's' if s.review > 1 }} à revoir : nouveau{{ 'x' if s.review > 1 }} ou changé{{ 's' if s.review > 1 }} depuis ton accord. <a href="{{ s.href }}">Les regarder</a></p>{% endif %}
+          {% for n in s.notes %}<p class="elsewhere-alert">{{ n }}</p>{% endfor %}
         </div>
-        {% if s.purpose %}<p class="elsewhere-what">{{ s.purpose[:1]|upper }}{{ s.purpose[1:] }}</p>{% endif %}
-        {% if s.who %}<p class="elsewhere-three"><span>Avec {{ s.who }}</span><span>{{ s.access[:1]|upper }}{{ s.access[1:] }}</span></p>{% endif %}
-        <p class="elsewhere-facts">
-          {% if s.owner %}<span>à {% if s.owner_href %}<a href="{{ s.owner_href }}">{{ s.owner }}</a>{% else %}{{ s.owner }}{% endif %}</span>{% endif %}
-          <span><b>{{ s.served }}</b> outil{{ 's' if s.served not in ('0', '1') }} servi{{ 's' if s.served not in ('0', '1') }} sur {{ s.offered }} proposé{{ 's' if s.offered not in ('0', '1') }}</span>
-          {% if s.where %}<span>{{ s.where }}</span>{% endif %}
-          {% if s.joined %}<span>joint {{ s.joined }}</span>{% endif %}
-        </p>
-        {% if s.review %}<p class="elsewhere-alert">{{ s.review }} outil{{ 's' if s.review > 1 }} à revoir : nouveau{{ 'x' if s.review > 1 }} ou changé{{ 's' if s.review > 1 }} depuis ton accord. <a href="{{ s.href }}">Les regarder</a></p>{% endif %}
-        {% for n in s.notes %}<p class="elsewhere-alert">{{ n }}</p>{% endfor %}
-        {% if s.href %}<p class="elsewhere-open"><a href="{{ s.href }}">Ouvrir sa fiche →</a></p>{% endif %}
       </li>
       {% endfor %}
     </ul>
@@ -48,17 +46,13 @@
       <p>Les apps qu'elle s'est écrites lui donnent des outils : ce qu'une app déclare, et de quoi lire ses pages. Une app qui a des secrets ne lui sert avec toi qu'une fois promue, depuis sa fiche.</p>
     </header>
     {% if apps %}
-    <ul class="elsewhere-list" role="list">
+    <ul class="person-entries" role="list">
       {% for a in apps %}
-      <li class="elsewhere-item">
-        <div class="elsewhere-top">
-          <p class="elsewhere-name">{% if a.href %}<a href="{{ a.href }}">{{ a.title }}</a>{% else %}{{ a.title }}{% endif %}</p>
-          <span class="now-tag {{ a.tone }}">{{ a.state }}</span>
-        </div>
+      <li>
+        <div class="person-entry-top"><div class="person-entry-name"><p class="person-entry-title">{% if a.href %}<a href="{{ a.href }}">{{ a.title }}</a>{% else %}{{ a.title }}{% endif %}</p>{% if a.state %}<p class="person-entry-tags"><span class="now-tag {{ a.tone }}">{{ a.state }}</span></p>{% endif %}</div></div>
         <ul class="elsewhere-tools" role="list">
           {% for t in a.tools %}<li><span class="elsewhere-what">{{ t.what[:1]|upper }}{{ t.what[1:] }}</span><span class="elsewhere-id"><code>{{ t.name }}</code>{% if t.args and t.args != 'aucun' %} · arguments <code>{{ t.args }}</code>{% endif %}</span></li>{% endfor %}
         </ul>
-        {% if a.href %}<p class="elsewhere-open"><a href="{{ a.href }}">Ouvrir l'app →</a></p>{% endif %}
       </li>
       {% endfor %}
     </ul>

@@ -1,8 +1,9 @@
 {# Système › Moteur des modèles (app/handmade/tabs/system.py, ADR 0177) : un bandeau (un rôle sans fournisseur, des
    appels qui attendent un créneau), la bande de chiffres ; puis côte à côte chaque fournisseur — ses créneaux en cases
    (occupés en couleur), qui attend, s'il préempte, son quota en jauges, ce qu'il a fait ces dernières 24 heures — et
-   qui sert quoi, en vrai : les rôles par fournisseur, ceux que personne ne sert d'abord. Aucun modèle configuré : le
-   bandeau seul. #}
+   qui sert quoi, en vrai : les rôles par fournisseur, ceux que personne ne sert d'abord. Un rôle facultatif sans modèle
+   (rendre naturel, ADR 0140) n'est pas « sans fournisseur » : coupé par choix, il se range à part, en dernier, sans
+   alarme — sa passe ne se fait pas, aucun appel n'échoue. Aucun modèle configuré : le bandeau seul. #}
 {% import "handmade/shared/tab.html" as tab with context %}
 {% import "handmade/systeme/tab_macros.html" as sx %}
 <div class="now-page sys sys-gw" data-tab="systeme/passerelle">
@@ -49,7 +50,13 @@
         <p class="sys-ct-chips">{% for r in roles %}<span class="now-tag sys-chip" title="{{ r.tech }}">{{ r.label }}</span>{% endfor %}</p>
       </div>
       {% endfor %}
-      {% if not unserved and not served %}{{ tab.empty(roles_t.empty or "aucun rôle") }}{% endif %}
+      {% if cut %}
+      <div class="sys-gw-group">
+        <h3>Sans modèle, par choix <span class="now-muted">· sa passe ne se fait pas, aucun appel n'échoue</span></h3>
+        {% for r in cut %}<p class="sys-row-meta"><span class="now-tag sys-chip" title="{{ r.tech }}">{{ r.label }}</span><span class="now-muted">{{ r.said }}</span></p>{% endfor %}
+      </div>
+      {% endif %}
+      {% if not unserved and not served and not cut %}{{ tab.empty(roles_t.empty or "aucun rôle") }}{% endif %}
       <p class="person-tab-note sys-foot">{{ roles_t.caption }} <a href="{{ PREFIX }}/reglages/roles">Qui sert quoi →</a></p>
     </section>
   </div>

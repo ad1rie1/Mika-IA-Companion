@@ -24,6 +24,7 @@ from mika.inspector.catalog import Panel
 from mika.inspector.pages.decisions import selection_detail, waterfall
 from mika.inspector.pages.episode_overview import overview
 from mika.inspector.pages.home import outcome_badge
+from mika.inspector.pages.system import OUTBOX_TONES, departures, guidance, outbox_card
 from mika.inspector.pages.why import (
     author_blocks,
     context_blocks,
@@ -33,6 +34,7 @@ from mika.inspector.pages.why import (
     tools_blocks,
     trace_of,
 )
+from mika.inspector.ui import PREFIX
 from mika.kernel.inspect import (
     Badge,
     Cell,
@@ -53,11 +55,13 @@ from mika.kernel.inspect import (
     int_query,
     money_fr,
     num_fr,
+    plural,
 )
-from mika.ports.journal import JournalEvent
+from mika.ports.journal import JournalEvent, JournalOutbox
 from mika.ports.llm import LLMRequest, Message
 from mika.runtime import operations as ops
 from mika.runtime.boundary import Failed, call
+from mika.runtime.effects import OUTBOX_LABELS, OUTBOX_PROBLEMS
 from mika.runtime.tool_offer import declare
 from mika.runtime.traces import STABLE_KEY, TRUNCATION_MARK
 from mika.vocab.episodes import TRIAL_ROLE, outcome_words
@@ -337,9 +341,11 @@ def event_page(ui: Any, seq: int, query=None) -> dict[str, Any] | None:
     """Un événement du journal : son titre (ce qui s'est passé en mots — son numéro, le fil d'Ariane le dit), ses
     repères (``facts`` : quand, émis par, son origine en mots, son épisode et, pour une parole, « Pourquoi a-t-elle dit
     ça ? »), que la route pose sur la ligne de faits de l'en-tête, ses blocs, et ce que dessine
-    ``handmade/evenement/evenement.html`` (``view``) — ses textes titrés en mots (``names.content_field``), son
-    parcours dans la machine (son type, qui le réduit, ce qu'il réveille, qui le projette, l'état du journal qu'il a
-    lu), qui il concerne, les épisodes qu'il a déclenchés, ses données brutes."""
+    ``handmade/evenement/evenement.html`` (``view``) — ses textes titrés en mots (``names.content_field``), ses départs
+    (ses lignes de la file de sortie, dites par ``system.departures`` comme la File de sortie les dit : l'effet en mots,
+    à qui, l'état, les essais, la dernière erreur ; un départ à traiter porte Relancer / Marquer comme vu, qui
+    reviennent à cette page), son parcours dans la machine (son type, qui le réduit, ce qu'il réveille, qui le
+    projette, l'état du journal qu'il a lu), qui il concerne, les épisodes qu'il a déclenchés, ses données brutes."""
     found = ui.kernel.mind.store.get_events([seq]) if seq > 0 else []
     if not found:
         return None
@@ -379,7 +385,27 @@ def event_page(ui: Any, seq: int, query=None) -> dict[str, Any] | None:
         blocks.append(Table(("épisode", "vers", "quand"), tuple(
             (Ref("episode", t.correlation, names.kind(t.data.kind)), ui.names.who(t.data.target), When(t.at))
             for t in triggered), title="A déclenché", pager=pager))
+    # ses départs : ce que la file de sortie a fait partir de lui (ou n'a pas pu), dit comme la File de sortie
+    o = JournalOutbox
+    left = ui.kernel.mind.store.query_mind(select(o.key, o.effect, o.status, o.attempts, o.last_error)
+                                           .where(o.seq == e.seq).order_by(o.key))
+    told = departures(ui, ((e.seq, effect) for _key, effect, *_ in left), {e.seq: found[0]})
+    gone = [(key, effect, st, int(attempts or 0), err, told[(e.seq, effect)])
+            for key, effect, st, attempts, err in left]
+    if gone:
+        blocks.append(Table(
+            ("effet", "état", Column("essais", "num"), "dernière erreur", "à qui", "quoi", "que faire",
+             Column("effet (clé)", detail=True), Column("clé", detail=True)),
+            tuple(Row((Text(d.title, hint=effect), Badge(OUTBOX_LABELS.get(st, st), OUTBOX_TONES.get(st, ""), key=st),
+                       attempts, Text(names.detail(err) if err else "—", "muted", clamp=200), d.to or "—",
+                       d.text or "—", guidance(st, d.sort) or "—", Text(effect, "mono"), Text(key, "mono")),
+                      tone="danger" if st in ("failed", "orphan") else "warn" if st in OUTBOX_PROBLEMS else "")
+                  for key, effect, st, attempts, err, d in gone),
+            title=DEPARTURES_TITLE,
+            caption="Ce que la file de sortie a fait partir de cet événement. Un départ à traiter se relance ou se "
+                    "marque comme vu dans Système › File de sortie, ou sur la page dessinée de l'événement."))
     blocks.append(Code(raw, "Données (techniques)"))
+    back = f"{PREFIX}/evenement/{e.seq}"
 
     def view(env: Any, q: Any) -> dict[str, Any]:
         ends = {t.correlation: episode_events(ui, t.correlation)[1] for t in triggered}
@@ -398,11 +424,21 @@ def event_page(ui: Any, seq: int, query=None) -> dict[str, Any] | None:
                            "outcome": outcome_words(ends[t.correlation].data.outcome, ends[t.correlation].data.kind)
                            if ends.get(t.correlation) is not None else ("en cours", "warn")} for t in triggered],
             "pager": render.pager_ctx(pager, q or {}), "raw": raw,
+            # ses départs : à traiter, avec Relancer / Marquer comme vu (qui reviennent ici) ; les autres, leur état
+            "back": back,
+            "todo": [outbox_card(key, "", d, st, err, attempts=plural(attempts, "essai", "essais"))
+                     for key, effect, st, attempts, err, d in gone if st in OUTBOX_PROBLEMS],
+            "departures": [{"name": d.title, "to": d.to, "state": OUTBOX_LABELS.get(st, st),
+                            "tone": OUTBOX_TONES.get(st, ""), "attempts": plural(attempts, "essai", "essais"),
+                            "error": names.detail(err) if err and st != "done" else ""}
+                           for key, effect, st, attempts, err, d in gone if st not in OUTBOX_PROBLEMS],
         }
 
     return {"title": title, "facts": facts, "blocks": blocks, "view": view}
 
 
+#: le titre du bloc des départs d'un événement (sa vue en tableau, la console en MCP)
+DEPARTURES_TITLE = "Ses départs"
 #: la page d'un événement, dessinée, et ses feuilles
 EVENT_TEMPLATE = "handmade/evenement/evenement.html"
 EVENT_STYLES = ("handmade/episode.css",)

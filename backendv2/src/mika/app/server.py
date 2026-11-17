@@ -66,7 +66,7 @@ from mika.adapters.world.server import WorldHub
 from mika.app import backup, composition, datadir, embeddings, schema, settings_sections, system_mcp
 from mika.app import persona as persona_file
 from mika.app.console import FACULTY_LABELS, LABELS, NAVIGATION, PARAM_FAMILIES
-from mika.app.console_menu import MENU
+from mika.app.console_menu import menu_for
 from mika.app.constellation import Constellation
 from mika.app.forge_settings import ForgeSettingsStore
 from mika.app.handmade import access, approval_sources, rights, subjects, waiting
@@ -343,7 +343,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     mcp_settings = McpSettingsStore(settings, system)
     mcp = outside["mcp"] = McpHub(lambda: system.config(settings.mcp()), lambda: system.reviews(settings.mcp_tools()),
                                 system.saving(settings.save_mcp_tools), local_root=data / "mcp",
-                                settle=mcp_settings.settle, remove=mcp_settings.remove)
+                                settle=mcp_settings.settle, remove=mcp_settings.remove, system=system.plugins)
     kernel = Kernel(composition.deps(store=store, clock=clock, ids=RandomIdGen(), gateway=gateway,
                                      ports={"delivery": hub, "activity": hub, "vectors": vectors, **outside},
                                      access_tables=settings.access_tables, closeness=social_c.is_close,
@@ -465,7 +465,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
         InspectorDeps(kernel, live.accounts, live.settings, gateway.traces, port=port, calls=live.calls,
                       bootstrap_code=web.bootstrap_code,
                       after_decision=hub.refresh_panels, reconfigure=live.reconfigure,
-                      reports=reports, navigation=NAVIGATION, menu=MENU,
+                      reports=reports, navigation=NAVIGATION, menu=menu_for(reports),
                       sections=settings_sections.sections(live), settings_tabs=settings_sections.RUBRICS,
                       parameters=settings_sections.parameters(live), param_families=PARAM_FAMILIES,
                       faculty_labels=FACULTY_LABELS, labels=LABELS,

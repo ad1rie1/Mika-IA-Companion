@@ -122,7 +122,7 @@ async def test_a_local_server_lives_in_its_cage(tmp_path, monkeypatch):
     writable.mkdir()
     hub, _ = _local(tmp_path, shared=(str(shared), f"{writable}:rw"))
     ok, message = await hub.test("ici")
-    assert ok and "local 0.1" in message and "5 outil(s)" in message, message
+    assert ok and "local 0.1" in message and "5 outils" in message, message
     seen = await hub.call("ici", "voir", {})
     home = str(tmp_path / "mcp" / "ici")
     assert seen.ok and f'"home": "{home}"' in seen.text and f'"cwd": "{home}"' in seen.text

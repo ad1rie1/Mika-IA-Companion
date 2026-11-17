@@ -2,7 +2,7 @@
  * Les calculs d'une carte, sans aucune dépendance (ADR 0193, 0194) : ce que la carte du serveur couvre, le cercle d'une
  * précision et le zoom qui le montre, la zone qui tient des points, une distance à vol d'oiseau.
  */
-import type { MapInfo } from "../api/phone";
+import type { MapInfo } from "../api/carte";
 import type { LatLon } from "./polyline";
 
 /** Le rayon moyen de la Terre, en mètres. */

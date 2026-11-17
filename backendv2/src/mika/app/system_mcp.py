@@ -26,7 +26,7 @@ def provided(params_of: Callable[[str], Any]) -> dict[str, Provided]:
     out: dict[str, Provided] = {}
     s = web.system_server(params_of(web.WEB.name))
     if s is not None:
-        out[s.name] = Provided(spec(s), s.tools)
+        out[s.name] = Provided(spec(s), s.tools, plugin=web.WEB.name)
     return out
 
 

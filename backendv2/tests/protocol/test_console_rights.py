@@ -202,6 +202,23 @@ def test_her_inner_life_is_described_to_the_operator_and_tool_names_wait_for_som
     assert '<span class="rights-chip on">memory_search</span>' in mine.split('id="d-vie" data-pane', 1)[1]
 
 
+def test_her_tools_are_said_by_their_label_under_their_family(world):  # noqa: F811
+    """Droits › Vie interne, une famille dépliée : chaque outil par son libellé (« Ce qu'il fait », ``ToolSpec.label``,
+    ADR 0208), à la troisième personne — jamais sa description, la consigne au modèle où « tu » la désigne (« Ouvrir
+    un mail de ta boîte. ») ; comme la liste d'une famille dans Outils (audit du 2026-11-05, C6-10)."""
+    client, live, _ = world
+    bootstrap(client)
+    registry = live.kernel.registry
+    page = html_of(client.get(PAGE))
+    vie = page.split('id="d-vie" data-pane', 1)[1].split("data-pane", 1)[0]
+    said = dict(re.findall(r'<code>(\w+)</code></a> <span class="now-tag [^"]+">\w+</span></td>\s*<td>([^<]*)</td>', vie))
+    inner = [s for s in registry.tools.values() if not registry.is_dynamic(s.name)]
+    assert inner and set(said) == {s.name for s in inner}
+    assert {s.name: said[s.name] for s in inner} == {s.name: s.label for s in inner}
+    assert said["email_read"] == "Ouvrir un de tes mails" and "Ouvrir un mail de ta boîte." not in vie
+    assert '<th scope="col">Ce qu\'il fait</th>' in vie and '<th scope="col">Description</th>' not in vie
+
+
 def test_none_of_her_own_tools_waits_for_an_approval(world):  # noqa: F811
     """Un outil du code ne se diffère pas (ADR 0220) : dans chaque famille de ses propres outils, « demande à la
     personne » et « ton accord » sont grisées, pour un outil qui lit comme pour un outil qui agit, et le titre de la
@@ -277,14 +294,15 @@ def test_the_console_does_not_write_the_session_cookies_again() -> None:
 
 
 def test_a_search_among_her_tools_unfolds_a_ligature(world, monkeypatch):  # noqa: F811
-    """« soeur » trouve « sœur » : la recherche des outils replie comme les autres (``kernel.text.fold``, K0-15)."""
+    """« soeur » trouve « sœur » : la recherche des outils replie comme les autres (``kernel.text.fold``, K0-15). La
+    liste dit un outil par son libellé (audit du 2026-11-05, C6-10) : c'est lui qu'on y lit, et qu'on retrouve."""
     client, _, _ = world
     bootstrap(client)
     real = families.entries
 
     def with_a_ligature(ui):
         out = real(ui)
-        out[0]["tools"][0]["description"] = "Écrire à sa sœur"
+        out[0]["tools"][0]["label"] = "Écrire à sa sœur"
         return out
 
     monkeypatch.setattr(families, "entries", with_a_ligature)

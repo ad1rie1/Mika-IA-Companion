@@ -4,8 +4,7 @@
  * `frontendv2/maquette/ecrans/chat.js`, `.msg-map`). Rien n'y appelle le serveur d'itinéraires : un voyage s'y dessine
  * en reliant ses arrêts, un regard avec le tracé résumé qu'elle a gardé.
  */
-import type { Regard, Trip } from "../api/carte";
-import type { MapInfo } from "../api/phone";
+import type { MapInfo, Regard, Trip } from "../api/carte";
 import { h } from "../shell/dom";
 import { ico } from "../shell/icons";
 import { drawnScene } from "./drawn";

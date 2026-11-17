@@ -1,8 +1,9 @@
 """Tout ce que la composition déclare, la console le nomme (ADR 0042).
 
-Une section, une raison, un veto, un processus, un événement ou un enrichisseur qu'une
-faculté ajoute sans le nommer dans ``app/console.py`` se lit sous une forme générique
-(« Liens · reciprocity », « step_origin » dans « Pourquoi a-t-elle dit ça ? ») : la promesse
+Une section, une raison, un veto, un processus, un événement, un effet de la file de sortie, un
+enrichisseur ou un port qu'un outil attend, qu'une faculté ajoute sans le nommer dans ``app/console.py``, se lit sous
+une forme générique (« Liens · reciprocity », « step_origin » dans « Pourquoi a-t-elle dit
+ça ? », « « imaging » n'est pas configuré ») : la promesse
 de l'ADR 0042 ne tenait que par vigilance. Ce garde confronte le registre de la
 composition réelle aux tables ; il échoue dès qu'une clé manque, ou qu'un libellé
 nomme ce qui n'existe plus.
@@ -23,12 +24,13 @@ import importlib
 from pathlib import Path
 
 from mika.app import console
-from mika.app.composition import arbitration, faculties
+from mika.app.composition import READING, arbitration, faculties
+from mika.app.handmade.tabs.system import PROJECTIONS
 from mika.contracts import agency as agency_c
 from mika.contracts import body as body_c
 from mika.contracts import social as social_c
 from mika.faculties.expression import why
-from mika.inspector.names import CONTENT_FIELDS
+from mika.inspector.names import CONTENT_FIELDS, OTHER_EFFECTS
 from mika.inspector.names import EVENTS as CONSOLE_EVENTS
 from mika.kernel.registry import Registry
 from mika.runtime.state import RUNTIME
@@ -129,6 +131,38 @@ def test_every_section_reason_process_event_and_faculty_is_named():
     assert {"habits"} <= set(console.SECTION_LABELS) and {"follow_up"} <= set(console.REASON_LABELS)
 
 
+def test_every_projection_is_named_and_no_name_is_stale():
+    """Santé générale montre chaque projection sous un nom en clair (``PROJECTIONS`` de ``app/handmade/tabs/system.py``) :
+    sans lui, celle des fils de travail du mode pro se lisait « strands · v1 » (audit du 2026-11-05, C8-09). Les noms
+    viennent de la composition, pas de la déclaration de la projection : un mot de console n'a rien à faire dans une
+    faculté."""
+    declared = set(Registry([RUNTIME, *faculties()], reading=READING).projectors)
+    missing, stale = sorted(declared - set(PROJECTIONS)), sorted(set(PROJECTIONS) - declared)
+    assert not missing, f"à nommer dans app/handmade/tabs/system.py (PROJECTIONS) : {missing}"
+    assert not stale, f"noms sans objet dans app/handmade/tabs/system.py (PROJECTIONS) : {stale}"
+
+
+def test_every_effect_of_the_outbox_is_named_and_no_name_is_stale():
+    """Système › File de sortie, sa vue et la page d'un événement nomment chaque effet par les mots de la composition
+    (``EFFECT_LABELS`` de ``app/console.py``, lus par ``Names.effect``). Ils étaient tenus à la main en deux endroits
+    (la page dessinée et la vue), et la demande de pilotage acceptée (``projects:effect.executed``) n'en avait pas :
+    elle tombait dans « Le reste » sous un nom générique (audit du 2026-11-05, C8-R3). Chaque effet du registre composé
+    (« propriétaire:type », la clé des lignes de la file) a son nom, aucun nom ne vise un effet qui n'existe plus, et
+    chaque famille est l'une de celles que la page range."""
+    declared = {f"{s.owner}:{s.type.name}" for specs in _registry().effects.values() for s in specs}
+    assert {"projects:effect.executed", "expression:episode.utterance"} <= declared  # le garde voit les facultés
+    missing = sorted(declared - set(console.EFFECT_LABELS))
+    stale = sorted(set(console.EFFECT_LABELS) - declared)
+    assert not missing, f"effets à nommer dans app/console.py (EFFECT_LABELS) : {missing}"
+    assert not stale, f"noms sans objet dans app/console.py (EFFECT_LABELS) : {stale}"
+    families = [key for key, _title in console.EFFECT_FAMILIES]
+    assert len(families) == len(set(families)) and OTHER_EFFECTS in families
+    strays = {k: f for k, (f, _name, _what) in console.EFFECT_LABELS.items() if f not in families}
+    assert not strays, f"familles inconnues de EFFECT_FAMILIES : {strays}"
+    assert all(name and what for _f, name, what in console.EFFECT_LABELS.values())
+    assert console.LABELS.effects is console.EFFECT_LABELS
+
+
 def test_every_content_field_of_an_event_is_named_and_no_name_is_stale():
     """La page d'un événement titre ses textes par leur champ : sans libellé, elle montrait « text », « summary »,
     « coords » (C5-04). Les champs de contenu se nomment dans ``inspector/names.py`` (``CONTENT_FIELDS``) : ce sont
@@ -151,6 +185,21 @@ def test_no_label_names_something_that_no_longer_exists():
         "enrichisseurs": sorted(set(console.ENRICHER_LABELS) - d["enrichers"]),
     }
     assert not any(stale.values()), f"libellés sans objet dans app/console.py : {stale}"
+
+
+def test_every_port_a_tool_needs_is_named_with_its_settings_page():
+    """La fiche d'un outil qui attend un port pas prêt disait « non — « imaging » n'est pas configuré » : la clé du
+    port, sans dire où le régler (C6-04). Chaque port qu'un outil du registre composé déclare (``needs=``) a sa phrase
+    et la page de réglages qui le règle dans ``app/console.py`` (``NEED_LABELS``) ; aucun libellé ne nomme un port
+    qu'aucun outil n'attend plus."""
+    declared = {spec.needs for spec in _registry().tools.values() if spec.needs}
+    assert {"imaging", "maps"} <= declared  # le garde voit les outils des plugins
+    missing, stale = sorted(declared - set(console.LABELS.needs)), sorted(set(console.LABELS.needs) - declared)
+    assert not missing, f"ports à nommer dans app/console.py (NEED_LABELS) : {missing}"
+    assert not stale, f"libellés sans objet dans app/console.py (NEED_LABELS) : {stale}"
+    for port, (said, page) in console.LABELS.needs.items():
+        # une phrase, pas la clé du port, et une page où le régler (qu'elle existe : tests/protocol/test_console_tools.py)
+        assert said and port not in said and page, port
 
 
 def test_every_veto_the_code_can_set_is_named():

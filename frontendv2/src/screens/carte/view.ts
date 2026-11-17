@@ -1,18 +1,33 @@
 /**
  * Carte : ce qui se montre, sans DOM ni réseau — Explorer (la recherche, les catégories, « Autour de moi » / « Dans
  * cette zone », les lieux, la fiche d'un lieu), Itinéraire (ses points, son mode, ce qu'il évite, le résultat et ses
- * consignes), Voyages (les cartes de la liste, l'éditeur jour par jour, « Sur la route »), et le cadre de la carte. Le
- * balisage et les mots sont ceux de la maquette (`frontendv2/maquette/ecrans/carte.js`) ; tout texte venu du serveur
- * (les noms d'OpenStreetMap compris) passe par `h()`.
+ * consignes), Voyages (les cartes de la liste, l'éditeur jour par jour — la note d'un arrêt, qu'on corrige en place —,
+ * « Sur la route » et ses épingles secondaires sur la carte, les actions d'un voyage dans la barre de titre, les
+ * fenêtres « Nouveau voyage » et « Le voyage »), et le cadre de la carte. Le balisage et les mots sont ceux de la
+ * maquette (`frontendv2/maquette/ecrans/carte.js`) ; tout texte venu du serveur (les noms d'OpenStreetMap compris) passe
+ * par `h()`.
  */
-import type { CarteInfo, Place, Route, Trip, TripRoute, TripSummary } from "../../api/carte";
+import {
+  CARTE_LIMITS,
+  MODES,
+  tripGpxUrl,
+  type CarteInfo,
+  type Place,
+  type Route,
+  type Trip,
+  type TripRoute,
+  type TripStop,
+  type TripSummary,
+} from "../../api/carte";
 import { miniPlan, type MiniData } from "../../map/cards";
 import { drawnScene } from "../../map/drawn";
+import { validPoint } from "../../map/mapgeo";
 import { slotKey } from "../../map/minis";
-import type { Scene } from "../../map/scene";
-import { avoidWords, dayLabel, duration, km, MODE_LABELS, modeWords, placeWhat, plural, tripDates, tripPast } from "../../map/words";
+import type { Scene, ScenePin } from "../../map/scene";
+import { AVOID_LABELS, avoidWords, dayLabel, duration, km, MODE_LABELS, modeWords, placeWhat, plural, tripDates, tripPast } from "../../map/words";
 import { h } from "../../shell/dom";
 import { ico } from "../../shell/icons";
+import { errorBlock } from "../../shared/kit";
 import { alongPlace, categoryIcon, dayTitle, hersCount, legsByStop } from "./format";
 
 // ── Le cadre de la carte ─────────────────────────────────────────────
@@ -61,8 +76,10 @@ export interface ExplorerView {
   addresses: Place[];
   /** Le refus de l'index (503 : pas construit), de la recherche d'adresses, en mots. */
   error: string;
-  /** Ce que Mika avait cherché ne se lit plus (oublié, pas à toi : 404), en mots. */
-  regardError?: string;
+  /** Le refus de la lecture de ce que Mika avait cherché (rien : lu, ou pas encore). */
+  regardError?: unknown;
+  /** Ce refus dit qu'il n'est plus là (oublié, pas à toi : 404) ; un autre (une panne, 503, 429) se réessaie. */
+  regardGone?: boolean;
   addrError: string;
   loading: boolean;
   searched: boolean;
@@ -118,7 +135,12 @@ export function searchTitle(info: CarteInfo | null, q: string, cat: string): str
 function resultsMarkup(v: ExplorerView): string {
   const out: string[] = [];
   if (v.hint) out.push(`<p class="small muted cs-hint">${ico("info", "xs")}${h(v.hint)}</p>`);
-  if (v.regardError) return failedBlock("Ce que Mika avait cherché n'est plus là", v.regardError);
+  if (v.regardError) {
+    // oublié (404) : « Introuvable. » du serveur redirait le titre, la phrase dit plutôt pourquoi ; une panne se réessaie
+    return v.regardGone
+      ? failedBlock("Ce que Mika avait cherché n'est plus là", "Elle l'a peut-être oublié, ou c'était pour quelqu'un d'autre.")
+      : errorBlock(v.regardError, "Ce que Mika avait cherché ne se lit pas");
+  }
   if (v.regard) {
     out.push(`<div class="group-label mika-label">${ico("sparkle", "xs")}Ce que Mika a ${v.regard.route ? "montré" : "cherché"} <span class="cnt">${v.places.length}</span></div>`);
     if (!v.places.length) out.push(`<div class="empty">${ico("map")}<p>Elle n'a gardé aucun lieu de ce regard.</p></div>`);
@@ -291,8 +313,9 @@ export function itineraryMarkup(v: ItineraryView): string {
     .map(([id, label]) => `<button type="button" aria-pressed="${v.mode === id}" data-mode="${id}">${h(label)}</button>`)
     .join("");
   const car = v.mode === "voiture";
-  const opt = (id: string, label: string) =>
-    `<label class="check"><input type="checkbox" data-avoid="${id}"${v.avoid.includes(id) ? " checked" : ""}${car ? "" : " disabled"}><span>${label}</span></label>`;
+  const opts = Object.entries(AVOID_LABELS)
+    .map(([id, label]) => `<label class="check"><input type="checkbox" data-avoid="${id}"${v.avoid.includes(id) ? " checked" : ""}${car ? "" : " disabled"}><span>${h(`Éviter ${label}`)}</span></label>`)
+    .join("");
   const steps = v.stale ? [] : (v.route?.legs ?? []).flatMap((l) => l.steps);
   return `<div class="split carte-split">
     <aside class="pane carte-side"><div class="pane-scroll iti">
@@ -301,7 +324,7 @@ export function itineraryMarkup(v: ItineraryView): string {
           <button class="btn sm ghost" type="button" data-iti-swap>${ico("sort", "sm")}Inverser</button></div>
       </div>
       <div class="seg" role="group" aria-label="Comment">${modes}</div>
-      <div class="iti-opts">${opt("peages", "Éviter les péages")}${opt("autoroutes", "Éviter les autoroutes")}${opt("ferries", "Éviter les ferries")}
+      <div class="iti-opts">${opts}
         ${car ? "" : `<span class="small muted">${h(v.mode === "velo" ? "À vélo, le trajet évite d'office péages et autoroutes." : "À pied, rien à éviter.")}</span>`}</div>
       ${resultMarkup(v)}
       ${steps.length ? `<h2 class="section-title">Consignes <span class="cnt">${steps.length}</span></h2>
@@ -326,6 +349,17 @@ export function tripCard(t: TripSummary, data: MiniData | null, now: number): st
       ${t.mika ? `<span class="tag mika">${ico("sparkle")}préparé avec Mika</span>` : ""}${past ? '<span class="tag">passé</span>' : ""}</span></div></a>`;
 }
 
+/**
+ * Les actions d'un voyage, dans la barre de titre : « Optimiser l'ordre », son GPX, « Demander à Mika » — seulement une
+ * fois le voyage lu (`found`) ; pendant sa lecture, ou s'il n'existe pas (404), aucune ne mènerait à rien.
+ */
+export function tripActions(id: string, found: boolean): string {
+  if (!found) return "";
+  return `<button class="btn sm" type="button" data-optimize title="Le meilleur ordre des arrêts de chaque jour ; le départ et la nuit ne bougent pas">${ico("refresh", "sm")}<span class="lbl">Optimiser l'ordre</span></button>
+        <a class="btn sm" href="${h(tripGpxUrl(id))}" download title="Le tracé et les arrêts, pour un GPS ou une app de navigation">${ico("download", "sm")}<span class="lbl">GPX</span></a>
+        <button class="btn sm mika" type="button" data-ask-trip>${ico("sparkle", "sm")}<span class="lbl">Demander à Mika</span></button>`;
+}
+
 /** `full` : ce qu'on sait déjà de la miniature d'un voyage (sa carte de la liste dit son dernier changement). */
 export function tripsMarkup(trips: readonly TripSummary[], full: (t: TripSummary) => MiniData | null, now: number): string {
   return `<div class="trips">${trips.map((t) => tripCard(t, full(t), now)).join("")}
@@ -342,6 +376,8 @@ export interface TripView {
   routeError: string;
   /** « Sur la route » ; `sending` : le lieu qui s'ajoute (son bouton attend). */
   onRoute: { cat: string; places: Place[]; error: string; loading: boolean; routed: boolean; sending?: number | null };
+  /** L'arrêt dont on écrit la note (un seul à la fois), et ce qu'on a tapé ; aucun : `null`. */
+  noting?: { stop: string; draft: string } | null;
   info: CarteInfo | null;
   now: number;
   map: string;
@@ -350,6 +386,66 @@ export interface TripView {
 function legMarkup(leg: { distance_m: number; duration_s: number } | undefined): string {
   if (!leg) return "";
   return `<li class="leg">${ico("chev-down", "xs")}${h([duration(leg.duration_s), km(leg.distance_m)].filter(Boolean).join(" · "))}</li>`;
+}
+
+/**
+ * La note d'un arrêt, à part (de qui qu'il soit : « ajouté par Mika » n'est qu'une marque, la note n'est pas sa phrase
+ * — la personne a pu l'écrire ou la corriger) ; l'arrêt qu'on note : son champ en place, prérempli.
+ */
+function stopNoteMarkup(s: TripStop, noting: TripView["noting"]): string {
+  if (noting?.stop !== s.id) return s.note ? `<span class="small stop-note">${h(s.note)}</span>` : "";
+  const label = `La note de ${s.name || "cet arrêt"}`;
+  return `<span class="stop-note-edit" role="group" aria-label="${h(label)}">
+                <input type="text" class="stop-note-input" data-note-input="${h(s.id)}" value="${h(noting.draft)}" maxlength="${CARTE_LIMITS.note}" placeholder="Réserver avant le 15, arriver avant 17 h…" aria-label="${h(label)}" autocomplete="off">
+                <span class="row wrap"><button class="btn sm primary" type="button" data-note-save="${h(s.id)}">${ico("check", "sm")}Enregistrer</button>
+                  <button class="btn sm ghost" type="button" data-note-cancel="${h(s.id)}">Annuler</button></span>
+                <span class="small muted">Vidée, la note s'efface. Entrée enregistre, Échap annule.</span></span>`;
+}
+
+/** Les actions d'un arrêt : le noter (le crayon : un champ en place), le retirer. */
+function stopActions(s: TripStop, editing: boolean): string {
+  const noteTitle = s.note ? "Corriger ou effacer sa note" : "Noter cet arrêt";
+  return `<span class="stop-acts"><button class="btn icon ghost sm" type="button" title="${noteTitle}" aria-label="${h(`Noter ${s.name || "cet arrêt"}`)}" aria-expanded="${editing}" data-note-stop="${h(s.id)}">${ico("pen", "sm")}</button>
+                <button class="btn icon ghost sm stop-x" type="button" title="Retirer cet arrêt" data-retirer="${h(s.id)}">${ico("x", "sm")}</button></span>`;
+}
+
+// ── « Sur la route », sur la carte ───────────────────────────────────
+
+const ALONG_PIN = /^along:(\d+)$/;
+
+/** L'épingle d'un lieu de « Sur la route » : un identifiant à part de ceux des arrêts (`along:<sa place dans la liste>`). */
+export function alongPinId(i: number): string {
+  return `along:${i}`;
+}
+
+/** La place dans la liste du lieu de « Sur la route » qu'une épingle vise ; un arrêt : `null`. */
+export function alongIndexOf(pinId: string): number | null {
+  const m = ALONG_PIN.exec(pinId);
+  return m ? Number(m[1]) : null;
+}
+
+/** La ligne d'un lieu de « Sur la route » : « jour 1 · Camping · Sévrier · à 3 km de la route » — le jour d'abord. */
+export function alongFacts(trip: Trip, route: TripRoute | null, p: Place): string {
+  const far = typeof p.distance_m === "number" ? (p.distance_m < 150 ? "sur la route" : `à ${km(p.distance_m)} de la route`) : "";
+  return [`jour ${alongPlace(trip, route, p.along_m)[0]}`, placeWhat(p), far].filter(Boolean).join(" · ");
+}
+
+/** La liste de « Sur la route » montre ses lieux (deux arrêts au moins, une catégorie, ni en recherche ni refusée). */
+function alongShown(v: Pick<TripView, "trip" | "onRoute">): boolean {
+  const stops = v.trip.days.reduce((a, d) => a + d.stops.length, 0);
+  const along = v.onRoute;
+  return stops >= 2 && !along.error && !along.loading && !!along.cat && along.places.length > 0;
+}
+
+/**
+ * Les lieux que montre « Sur la route », en épingles secondaires (plus petites, sans numéro) : sur la carte du voyage, à
+ * côté de ses arrêts ; un clic sur l'une retrouve sa ligne (`alongIndexOf`). La liste cachée, aucune.
+ */
+export function alongPins(v: Pick<TripView, "trip" | "route" | "onRoute">): ScenePin[] {
+  if (!alongShown(v)) return [];
+  return v.onRoute.places.flatMap((p, i): ScenePin[] => (validPoint(p.lat, p.lon)
+    ? [{ id: alongPinId(i), lat: p.lat, lon: p.lon, minor: true, title: `${p.name || "—"} · ${alongFacts(v.trip, v.route, p)}` }]
+    : []));
 }
 
 export function tripEditorMarkup(v: TripView): string {
@@ -372,13 +468,15 @@ export function tripEditorMarkup(v: TripView): string {
           n += 1;
           const mika = s.by === "mika";
           const what = [s.kind].filter(Boolean).join(" · ");
+          const editing = v.noting?.stop === s.id;
           return `${legMarkup(legs.get(s.id))}
-            <li class="stop${mika ? " by-mika" : ""}" data-stop="${h(s.id)}" data-day="${d.n}">
+            <li class="stop${mika ? " by-mika" : ""}${editing ? " noting" : ""}" data-stop="${h(s.id)}" data-day="${d.n}">
               <button class="grip" type="button" data-grip="${h(s.id)}" title="Glisser pour changer l'ordre (ou les flèches du clavier)" aria-label="Déplacer ${h(s.name)}">${ico("grip", "sm")}</button>
               <span class="stop-n">${n}</span><span class="stop-main"><b>${h(s.name || "—")}</b>
               ${what ? `<span class="small muted">${h(what)}</span>` : ""}
-              ${mika ? `<span class="stop-mika">${ico("sparkle", "xs")}ajouté par Mika${s.note ? ` : « ${h(s.note)} »` : ""}</span>` : s.note ? `<span class="small stop-note">${h(s.note)}</span>` : ""}</span>
-              <button class="btn icon ghost sm stop-x" type="button" title="Retirer cet arrêt" data-retirer="${h(s.id)}">${ico("x", "sm")}</button></li>`;
+              ${mika ? `<span class="stop-mika">${ico("sparkle", "xs")}ajouté par Mika</span>` : ""}
+              ${stopNoteMarkup(s, v.noting)}</span>
+              ${stopActions(s, editing)}</li>`;
         })
         .join("");
       return `<section class="trip-day" data-day-box="${d.n}">
@@ -395,9 +493,8 @@ export function tripEditorMarkup(v: TripView): string {
       ${along.error ? failedBlock("Les lieux du trajet ne se cherchent pas", along.error)
         : along.loading ? `<p class="small muted">${ico("refresh", "xs")} Recherche le long du trajet…</p>`
         : !along.cat ? `<p class="small muted">Choisis ce que tu cherches le long du trajet.</p>`
-        : along.places.length ? `<ul class="onroute-list">${along.places.map((p, i) => `<li><span class="li-main"><b>${h(p.name || "—")}</b>
-            <span class="small muted">${h([placeWhat(p), typeof p.distance_m === "number" ? (p.distance_m < 150 ? "sur la route" : `à ${km(p.distance_m)} de la route`) : "",
-              `jour ${alongPlace(t, v.route, p.along_m)[0]}`].filter(Boolean).join(" · "))}</span></span>
+        : along.places.length ? `<ul class="onroute-list">${along.places.map((p, i) => `<li data-along-place="${i}"><span class="li-main"><b>${h(p.name || "—")}</b>
+            <span class="small muted">${h(alongFacts(t, v.route, p))}</span></span>
             <button class="btn sm" type="button" data-add-along="${i}"${along.sending === i ? " disabled" : ""}>${ico("plus", "sm")}Ajouter</button></li>`).join("")}</ul>${along.routed ? "" : `<p class="small muted">Sans itinéraires : le long des arrêts reliés à vol d'oiseau.</p>`}`
         : `<p class="small muted">Rien de tel le long du trajet.</p>`}</section>`;
   return `<div class="split carte-split voyage">
@@ -414,4 +511,55 @@ export function tripEditorMarkup(v: TripView): string {
       ${onRoute}
     </div></aside>
     ${v.map}</div>`;
+}
+
+// ── Les fenêtres d'un voyage ─────────────────────────────────────────
+
+export interface TripFormView {
+  /** « Le voyage » (un voyage qu'on modifie) ; sinon « Nouveau voyage ». */
+  edit: boolean;
+  title: string;
+  start: string;
+  mode: string;
+  avoid: readonly string[];
+  /** « Nouveau voyage » depuis un lieu (« Ajouter au voyage ») : son premier arrêt. */
+  first?: Pick<Place, "name" | "town"> | null;
+}
+
+/**
+ * Ce qu'un voyage en voiture évite : les cases d'`AVOID_LABELS`, cachées hors voiture (le `select` du mode les montre
+ * ou les cache : `[data-trip-mode]`, `[data-trip-avoid]`).
+ */
+export function tripAvoidField(mode: string, avoid: readonly string[]): string {
+  const checks = Object.entries(AVOID_LABELS)
+    .map(([id, label]) => `<label class="check"><input type="checkbox" name="avoid" value="${id}"${avoid.includes(id) ? " checked" : ""}><span>${h(label)}</span></label>`)
+    .join("");
+  return `<div class="field" role="group" aria-label="En voiture, éviter" data-trip-avoid${mode === "voiture" ? "" : " hidden"}><span>En voiture, éviter</span>${checks}</div>`;
+}
+
+/** Le corps de « Nouveau voyage » et de « Le voyage » : un titre, une date, un mode, ce qu'il évite en voiture. */
+export function tripFormMarkup(v: TripFormView): string {
+  const modes = MODES.map((m) => `<option value="${m}"${v.mode === m ? " selected" : ""}>${h(modeWords(m))}</option>`).join("");
+  const first = v.first ? `<p class="small muted">${h(`Premier arrêt : ${v.first.name}${v.first.town ? `, ${v.first.town}` : ""}.`)}</p>` : "";
+  return `<form class="stack trip-form" data-trip-form>
+        <label class="field"><span>Titre</span><input name="title" maxlength="${CARTE_LIMITS.title}"${v.edit ? "" : ' required placeholder="Les Alpes en cinq jours"'} value="${h(v.title)}"></label>
+        <label class="field"><span>Départ <span class="muted">${v.edit ? "(vide : sans date)" : "(facultatif)"}</span></span><input name="start" type="date" value="${h(v.start)}"></label>
+        <label class="field"><span>Comment</span><select name="mode" data-trip-mode>${modes}</select></label>
+        ${tripAvoidField(v.mode, v.avoid)}
+        ${first}
+        <p class="small cf-error" data-erreur hidden></p></form>`;
+}
+
+/**
+ * Le pied de ces fenêtres. « Le voyage » : « Supprimer le voyage » à gauche, « Annuler » et « Enregistrer » à droite —
+ * sur un téléphone, la suppression passe seule sur sa ligne (`.trip-delete`, carte.css) et les deux autres restent
+ * entiers.
+ */
+export function tripFormFoot(edit: boolean): string {
+  if (!edit) {
+    return `<span class="grow"></span><button class="btn" type="button" data-close>Annuler</button>
+        <button class="btn primary" type="button" data-ok>${ico("plus", "sm")}Créer</button>`;
+  }
+  return `<button class="btn danger trip-delete" type="button" data-delete>${ico("trash", "sm")}Supprimer le voyage</button><span class="grow"></span>
+        <button class="btn" type="button" data-close>Annuler</button><button class="btn primary" type="button" data-ok>${ico("check", "sm")}Enregistrer</button>`;
 }

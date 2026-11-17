@@ -3,9 +3,9 @@
 - Ce qu'elle peut faire : la page des tableaux de droits de ses familles, que la console porte dans son panneau
   (``droits/familles.html``, ``inspector/pages/families.py``, ADR 0134) ; ses blocs ne servent qu'à qui lit sans panneau
   (la console en MCP). La fiche d'un outil (``?outil=``), elle, se dessine bloc par bloc.
-- Venus d'ailleurs : ce qui ne vient pas d'elle — les services branchés (la vue du plugin MCP, son onglet), une carte
-  par service, et les outils que ses apps lui donnent (la vue de la Forge, lue ici sans onglet à elle), une carte par
-  app. Ce qu'on y fait (brancher un service), en bouton de la barre de titre ; leurs réglages sont derrière la roue de
+- Venus d'ailleurs : ce qui ne vient pas d'elle — les services branchés (la vue du plugin MCP, son onglet), une ligne
+  par service, et les outils que ses apps lui donnent (la vue de la Forge, lue ici sans onglet à elle), une ligne par
+  app ; des lignes séparées par un filet, pas des cartes dans la carte de leur section (ADR 0176). Ce qu'on y fait (brancher un service), en bouton de la barre de titre ; leurs réglages sont derrière la roue de
   Ses outils (ADR 0206). Lus dans leurs tableaux déclarés ; un tableau qu'il ne reconnaît pas reste tel quel.
 - Prêter à un agent : la page est son panneau, déjà dessiné (``handmade/outils/expose.html`` : la console en lecture,
   ses points de prêt, le relais du moteur Claude Code) ; la vue n'a pas de blocs. L'onglet garde ce panneau, charge sa
@@ -54,8 +54,8 @@ def catalogue(got: Got) -> Markup | None:
 
 def elsewhere(got: Got) -> Any:
     """Outils › Venus d'ailleurs : ce qu'on y fait (brancher un service) en bouton de la barre de titre — leurs
-    réglages sont derrière la roue de Ses outils (ADR 0206) —, une carte par service branché (l'onglet du plugin MCP),
-    une carte par app et les outils qu'elle lui donne (la vue de la Forge). Lus dans leurs tableaux ; un tableau qu'il ne
+    réglages sont derrière la roue de Ses outils (ADR 0206) —, une ligne par service branché (l'onglet du plugin MCP),
+    une ligne par app et les outils qu'elle lui donne (la vue de la Forge). Lus dans leurs tableaux ; un tableau qu'il ne
     reconnaît pas reste tel quel."""
     ui, query, forms = got.ui, got.query, got.forms
     shown = ui.env(ui.when)
@@ -95,8 +95,8 @@ def _buttons(items: Sequence[Any], shown: render.Env) -> tuple[list[tuple[str, s
 
 
 def _services(table: Table, shown: render.Env) -> list[dict[str, Any]]:
-    """Une carte par service : son nom, son état, à quoi il lui sert, ses outils servis, ce qui attend ton
-    regard, et sa fiche."""
+    """Une ligne par service : son nom (le lien de sa fiche), son état, à quoi il lui sert, ses outils servis, ce qui
+    attend ton regard."""
     out = []
     for row, cell in raw_rows(table):
         state, served, review = cell.get("état"), plain(cell.get(SERVED)), plain(cell.get("à revoir"))
@@ -117,7 +117,7 @@ def _services(table: Table, shown: render.Env) -> list[dict[str, Any]]:
 
 
 def _apps(table: Table, shown: render.Env) -> list[dict[str, Any]]:
-    """Une carte par app : son titre, quand elle sert, et chacun des outils qu'elle lui donne."""
+    """Une ligne par app : son titre (le lien de l'app), quand elle sert, et chacun des outils qu'elle lui donne."""
     apps: dict[str, dict[str, Any]] = {}
     for _row, cell in raw_rows(table):
         name, state = cell.get("app"), cell.get(GIVEN)

@@ -56,6 +56,8 @@ from mika.kernel.inspect import (
     Text,
     When,
     paginate,
+    pct_fr,
+    plural,
     size_fr,
 )
 from mika.kernel.operate import ActionContext, Done, Refused
@@ -218,10 +220,10 @@ def _subject(s: ForgeState, ctx: InspectContext) -> tuple[str, App | None, AppIn
 def _queue_words(app: App, now: int) -> str:
     """Sa file de signaux en une ligne : ce qui attend, ce que l'app déclare, ses lectures du jour, ses pertes."""
     r = rules_of(app)
-    text = (f"{len(app.queue)} en attente sur {r.queue} ; lue par {r.per_call}, {calls_today(app, now)} lecture(s) "
-            f"sur {r.quota} aujourd'hui")
+    text = (f"{len(app.queue)} en attente sur {r.queue} ; lue par {r.per_call}, "
+            f"{plural(calls_today(app, now), 'lecture', 'lectures')} sur {r.quota} aujourd'hui")
     if app.dropped:
-        text += f" ; {app.dropped} parti(s) sans être lus (file pleine)"
+        text += f" ; {plural(app.dropped, 'parti sans être lu', 'partis sans être lus')} (file pleine)"
     return text + (f" — consigne : {_clip(r.instructions, 200)}" if r.instructions else "")
 
 
@@ -379,7 +381,7 @@ def _inspect(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
         version = app.version if app is not None else info.version if info is not None else 0
         rule = app.schedule if app is not None else info.schedule if info is not None else ""
         count, last = signals.get(name, (0, 0))
-        failures = f" ({app.failures} échec(s) d'affilée)" if app is not None and app.failures else ""
+        failures = f" ({plural(app.failures, 'échec', 'échecs')} d'affilée)" if app is not None and app.failures else ""
         text, tone = _state(app, info, port)
         link = _app_ref(name)
         out.append(Row((link, _clip(title, 80), version, rule or "manual", Badge(text, tone),
@@ -622,7 +624,7 @@ async def _tab_base(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Bl
     columns = tuple(dict.fromkeys(k for r in found for k in r)) or ("(aucune colonne)",)
     page, pager = paginate(found, ctx.pager(size=LOGS_PAGE))
     return [*blocks, Table(columns, tuple(tuple(_shown(r.get(c)) for c in columns) for r in page),
-                           title=f"{len(found)} ligne(s)", pager=pager, empty="aucune ligne")]
+                           title=plural(len(found), "ligne", "lignes"), pager=pager, empty="aucune ligne")]
 
 
 @FORGE.inspect("journal", title="Journal", subject="app", order=50,
@@ -887,7 +889,7 @@ def _facts(r: CallResult, *, sent: bool = False) -> Fields:
                                      ("durée", f"{r.duration_ms} ms"), ("tuée", "oui" if r.killed else "non")]
     if r.signals:
         pairs.append(("signaux (dans sa file)" if sent else "signaux (non journalisés)",
-                      "; ".join(f"{t} ({p:.1f})" for t, p, _ in r.signals)))
+                      "; ".join(f"{t} ({pct_fr(p)})" for t, p, _ in r.signals)))
     if r.emits:
         pairs.append(("émissions (journalisées)" if sent else "émissions (non journalisées)",
                       "; ".join(t for t, _ in r.emits)))

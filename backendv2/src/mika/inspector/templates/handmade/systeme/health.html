@@ -1,13 +1,14 @@
-{# Système › Santé générale, dessinée (app/handmade/tabs/system.py) : le verdict, les dix contrôles en tuiles — ce qui ne va pas
-   d'abord, chacun avec son constat, son détail et la page de son diagnostic —, ses projections (une jauge : combien
-   sont à jour ; une ligne par projection, où elle en est du journal ; la quarantaine ; les vues lentes), puis les
-   replis techniques. #}
+{# Système › Santé générale, dessinée (app/handmade/tabs/system.py) sur les blocs de sa vue (inspector/pages/diagnostics.py) :
+   le verdict, puis ses tuiles — les dix contrôles du rapport de santé, puis les sauvegardes et les anomalies depuis le
+   démarrage, qui n'en sont pas (la sonde publique ne les voit pas) ; ce qui ne va pas d'abord, chacune avec son
+   constat, son détail et la page de son diagnostic —, ses projections (une jauge : combien sont à jour ; une ligne par
+   projection, où elle en est du journal ; la quarantaine ; les vues lentes), puis les replis techniques. #}
 <div class="now-page person-tab sys" data-tab="systeme/sante">
   <section class="now-card sys-health tone-{{ tone }}" aria-labelledby="sys-health-title">
     <div class="sys-health-main">
       <p class="now-eyebrow">Bilan de santé</p>
       <h2 id="sys-health-title">{{ title }}</h2>
-      <p class="now-sub">{% if not ready %}Les contrôles complets seront disponibles lorsque {{ her }} sera prête.{% elif problems %}Commence par {{ 'le point signalé' if problems == 1 else 'les ' ~ problems ~ ' points signalés' }} : chaque tuile dit son constat et mène à son diagnostic.{% else %}Aucun problème sur les {{ checks|length }} contrôles.{% endif %}</p>
+      <p class="now-sub">{% if not ready %}Les contrôles complets seront disponibles lorsque {{ her }} sera prête.{% elif problems %}Commence par {{ 'le point signalé' if problems == 1 else 'les ' ~ problems ~ ' points signalés' }} : chaque tuile dit son constat et mène à son diagnostic.{% else %}{{ all_clear }}{% endif %}</p>
       <p class="sys-health-stamp">Relevé à {{ snapshot }} · <a href="{{ PREFIX }}/systeme/sante">Actualiser</a></p>
     </div>
     {% if ready %}
@@ -38,16 +39,16 @@
   <section class="now-card sys-proj" id="sys-projections" aria-labelledby="sys-proj-title">
     <header class="now-card-head">
       <h2 id="sys-proj-title">Ses projections</h2>
-      <p>Les tables que sa mémoire et la console lisent, tenues à jour depuis le journal ({{ p.head }} événements). Une projection « dans la transaction » s'écrit avec l'événement et ne prend jamais de retard ; une différée rattrape le journal en fond.</p>
+      <p>Les tables que sa mémoire et la console lisent, tenues à jour depuis le journal ({{ p.head }}). Une projection « dans la transaction » s'écrit avec l'événement et ne prend jamais de retard ; une différée rattrape le journal en fond.</p>
     </header>
     <div class="sys-proj-body">
       <figure class="sys-gauge tone-{{ p.tone }}">
-        <svg viewBox="0 0 120 66" role="img" aria-label="{{ p.up }} projections à jour sur {{ p.total }}">
+        <svg viewBox="0 0 120 66" role="img" aria-label="{{ p.up_said }}">
           <path class="sys-gauge-track" d="M10,60 A50,50 0 0 1 110,60"/>
           {% if p.arc %}<path class="sys-gauge-fill" d="{{ p.arc }}"/>{% endif %}
           <text class="sys-gauge-num" x="60" y="54" text-anchor="middle">{{ p.up }}/{{ p.total }}</text>
         </svg>
-        <figcaption><b>{{ 'toutes à jour' if p.up == p.total else (p.total - p.up) ~ ' en retard' }}</b>{% if p.behind %}<br>{{ p.behind }} événement{{ 's' if p.behind > 1 }} à rattraper{% endif %}{% if p.quarantine %}<br>{{ p.quarantine|length }} en quarantaine{% endif %}<br><span class="now-muted">{% if not p.deferred %}toutes dans la transaction{% elif p.deferred == p.total %}toutes différées{% else %}{{ p.deferred }} différée{{ 's' if p.deferred > 1 }}, {{ p.total - p.deferred }} dans la transaction{% endif %}</span></figcaption>
+        <figcaption><b>{{ 'toutes à jour' if p.up == p.total else (p.total - p.up) ~ ' en retard' }}</b>{% if p.behind %}<br>{{ p.behind_said }}{% endif %}{% if p.quarantine %}<br>{{ p.quarantine|length }} en quarantaine{% endif %}<br><span class="now-muted">{% if not p.deferred %}toutes dans la transaction{% elif p.deferred == p.total %}toutes différées{% else %}{{ p.deferred_said }}{% endif %}</span></figcaption>
       </figure>
       <ul class="sys-proj-list" role="list">
         {% for r in p.rows %}
@@ -75,7 +76,7 @@
         <li>
           <span class="mono">{{ v.name }}</span>
           <svg class="sys-slow-bar" viewBox="0 0 100 8" preserveAspectRatio="none" aria-hidden="true"><rect class="worst" width="{{ v.share }}" height="8"/><rect class="last" x="{{ [v.last_share - 0.6, 0]|max }}" width="1.2" height="8"/></svg>
-          <span class="now-muted">pire {{ v.worst }} ms · dernière {{ v.last }} ms · {{ v.runs }} passage{{ 's' if v.runs > 1 }}</span>
+          <span class="now-muted">pire {{ v.worst }} ms · dernière {{ v.last }} ms · {{ v.runs }}</span>
         </li>
         {% endfor %}
       </ul>

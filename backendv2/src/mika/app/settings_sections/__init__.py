@@ -7,9 +7,9 @@ rechargement est défait : on ne laisse pas une configuration à moitié prise.
 
 Les réglages d'un plugin vivent là où l'on s'en sert, derrière la roue de sa
 destination (``SettingsPage.home``, ADR 0173, 0206) : Courrier, Teams, Réveils
-par API › Paramètres, Ses outils › Paramètres des services, et dans Ses sens les
-flux suivis, l'accès des appareils, la transcription ; ils s'enregistrent
-toujours sous Réglages. « Configuration des plugins » en est la vue d'ensemble.
+par API et Ses outils › Paramètres, et dans Ses sens les flux suivis, l'accès
+des appareils, la transcription ; ils s'enregistrent toujours sous Réglages.
+« Configuration des plugins » en est la vue d'ensemble.
 """
 
 from __future__ import annotations

@@ -17,7 +17,6 @@ from mika.kernel.inspect import (
     Meter,
     Note,
     Pager,
-    Param,
     Ref,
     Row,
     Stat,
@@ -27,6 +26,7 @@ from mika.kernel.inspect import (
     When,
     content_text,
     paginate,
+    pct_fr,
 )
 from mika.plugins.sensors import SENSORS, SensorsState
 from mika.vocab.affect import emotion_cell
@@ -56,20 +56,20 @@ def _signal(e: Any) -> Row:
     d = e.data
     pertinence = float(d.pertinence or 0.0)
     return Row((When(e.at), Text(str(d.device or "—")), Text(content_text(d.summary), clamp=300),
-                Meter(pertinence, f"{pertinence:.2f}"), emotion_cell(d.emotion, d.intensity or None),
+                Meter(pertinence, pct_fr(pertinence)), emotion_cell(d.emotion, d.intensity or None),
                 Ref("event", str(e.seq), f"#{e.seq}")))
 
 
 @SENSORS.inspect("appareils", title="Appareils", section="sens", order=40,
-                 description="Ce que lui signalent des appareils (une sonnette, une domotique, un script).",
-                 params=[Param("appareil", "Appareil", placeholder="nom exact d'un appareil")])
+                 description="Ce que lui signalent des appareils (une sonnette, une domotique, un script).")
 def _inspect(s: SensorsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     # leur jeton : derrière la roue de Ses sens, en haut à droite (ADR 0206)
     devices = ctx.tally(c.SENSED, "device")
     if not devices:
         return [Note("Aucun appareil n’a encore rien signalé : donne-leur le jeton de Connexions › Ses sens › "
                      "Accès des appareils, en haut à droite.", tone="muted")]
-    device = ctx.value("appareil") or ""
+    # pas de champ à remplir : chaque appareil (tuile, ligne du tableau) est le lien qui filtre la page (``_filter``)
+    device = ctx.param("appareil")
     before = ctx.int_param("avant", 0) or None
     sensed = ctx.events([c.SENSED], SHOWN, where=("device", device) if device else None, before=before)
     more = f" (les {TILES_SHOWN} plus récents sur {len(devices)} : tous dans le tableau)" \

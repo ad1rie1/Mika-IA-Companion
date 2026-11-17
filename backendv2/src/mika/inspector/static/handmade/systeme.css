@@ -306,7 +306,7 @@ a.sys-chip { color: var(--accent); }
 .sys-gw-group h3 { margin: 0 0 6px; font-size: 13.5px; font-weight: 600; }
 .sys-gw-group.none h3 { color: var(--danger); }
 
-/* Appels et coûts : quatorze jours, où va le coût, tous les appels */
+/* Appels et coûts : la période choisie (7, 14 ou 30 jours) en barres, où va le coût, tous les appels */
 .sys-calls-legend { display: flex; gap: 14px; margin: 0 0 0 auto; padding: 0; list-style: none; color: var(--muted); font-size: 12px; }
 .sys-calls-legend i { display: inline-block; width: 10px; height: 10px; margin-right: 5px; border-radius: 2px; vertical-align: -1px; }
 .sys-calls-legend i.cost { background: var(--accent); }
@@ -321,9 +321,9 @@ a.sys-chip { color: var(--accent); }
 .sys-calls-svg .fail { fill: var(--danger); }
 .sys-calls-svg .today .cost { fill: var(--accent-2); }
 .sys-calls-split-line { stroke: var(--border); stroke-width: 1px; }
-.sys-calls-days-axis { display: grid; grid-template-columns: repeat(15, minmax(0, 1fr)); margin: 0; padding: 0; list-style: none;
-  color: var(--muted); font-size: 11px; text-align: center; }
-.sys-calls-days-axis.n14 { grid-template-columns: repeat(14, minmax(0, 1fr)); }
+/* une colonne par jour de la période (8, 15 ou 31), autant que de barres au-dessus */
+.sys-calls-days-axis { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); margin: 0; padding: 0;
+  list-style: none; color: var(--muted); font-size: 11px; text-align: center; }
 .sys-calls-days-axis li { display: grid; }
 .sys-calls-days-axis li.monday span { color: var(--text-2); font-weight: 600; }
 .sys-calls-days-axis li.today span { color: var(--accent); font-weight: 700; }
@@ -378,7 +378,9 @@ a.sys-chip { color: var(--accent); }
 
 /* Toutes les vues */
 .sys-views-groups { columns: 3 250px; column-gap: 32px; }
-.sys-views-group { break-inside: avoid; margin-bottom: 16px; }
+.sys-views-group { break-inside: avoid; margin-bottom: 16px; scroll-margin-top: 72px; }
+/* le groupe d'une faculté, ouvert par son ancre (« Ses vues » de Contributions) : son nom se marque */
+.sys-views-group:target h3 { color: var(--accent); }
 .sys-views-group h3 { margin: 0 0 4px; font-size: 13.5px; font-weight: 600; }
 .sys-views-group h3 a { color: var(--text); }
 .sys-views-group h3 a:hover { color: var(--accent); }
@@ -439,6 +441,12 @@ a.sys-chip { color: var(--accent); }
   .sys-calls-tokens { display: none; }
   .sys-calls-go { text-align: left; }
   .sys-calls-go:empty { display: none; }
+  /* trente et un jours sur un téléphone : les lundis et aujourd'hui gardent leur date (un lundi collé à aujourd'hui
+     la lui laisse) ; les échecs se voient en rouge sur leur barre, leur nombre au survol */
+  .sys-calls-days-axis.dense li:not(.monday):not(.today) span,
+  .sys-calls-days-axis.dense li.monday:has(+ li.today) span { visibility: hidden; }
+  .sys-calls-days-axis.dense li b { display: none; }
+  .sys-calls-days-axis.dense { font-size: 10px; }
   .sys-wd-lacks > div, .sys-store-saves > div { grid-template-columns: minmax(0, 1fr); }
   .sys-store-tables > li { grid-template-columns: minmax(0, 1fr) 56px; }
   .sys-store-tables > li > .now-bar { grid-column: 1 / -1; grid-row: 2; }

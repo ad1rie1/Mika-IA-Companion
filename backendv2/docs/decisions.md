@@ -32,8 +32,8 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 | Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163, 0166, 0168, 0171, 0172, 0189, 0190, 0191, 0192, 0193, 0194, 0195, 0196, 0198, 0199, 0211, 0213, 0214, 0228, 0229 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159 |
-| Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170, 0187, 0200, 0208, 0209, 0215 |
-| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176, 0177, 0178, 0179, 0180, 0181, 0182, 0183, 0197, 0201, 0202, 0203, 0204, 0205, 0206, 0210, 0216, 0217, 0218, 0219, 0225, 0230, 0231, 0232 |
+| Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170, 0187, 0200, 0208, 0209, 0215, 0233 |
+| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176, 0177, 0178, 0179, 0180, 0181, 0182, 0183, 0197, 0201, 0202, 0203, 0204, 0205, 0206, 0210, 0216, 0217, 0218, 0219, 0225, 0230, 0231, 0232, 0234 |
 | Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135 |
 
 ## Le noyau : journal, arbitrage, pipeline
@@ -1585,7 +1585,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Pourquoi :* « toutes les notifications des app, la dernière position du tel » ; « pour y télécharger l'apk de téléphone et y gérer les téléphones connectés ».
 
-*Révise 0062 (en partie), 0120 (en partie : les apps lues).*
+*Révise 0062 (en partie), 0120 (en partie : les apps lues). Révisée par 0233 (en partie : l'onglet Notifications de frontendv2 attend les notifications des autres apps, et le choix d'un téléphone que chaque message dise le sien).*
 
 ### 0191 — Ses brouillons se relisent là où ils partiront
 
@@ -2296,6 +2296,17 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 
 *Révise 0062 (en partie : `/files/<id>` sert aussi les pièces de la personne), 0164 (en partie : `strand_history` lit aussi le fil avec elle).*
 
+### 0233 — Le Téléphone ne montre que ce que le serveur sait
+
+- Le Téléphone de frontendv2 n'a pas d'onglet Notifications tant que l'application ne lit que les messageries : rangé par appli, il redisait Messages. Il reviendra sous la forme de la maquette, un fil de vraies notifications (un colis, un rendez-vous), quand l'application lira d'autres apps (ADR 0190, *À venir*).
+- D'ici là, Messages porte toutes les conversations lues ; le menu « Plus » d'un fil ne garde que « Lui en parler dans le chat » ; une adresse `#telephone/notifications` gardée retombe sur Messages.
+- Ce que l'application lit se dit dans Paramètres › Téléphones (« Ce que ton téléphone lui montre »), pas dans un onglet de plus.
+- Pas de choix de téléphone tant que chaque message ne dit pas le sien (0190, *À venir*) : la barre de titre du Téléphone dit un état, pas un menu — le nom du téléphone (« 2 téléphones » s'il y en a plusieurs), quand on l'a vu, et un point dont le sens se dit en mots (« ne reçoit pas les notifications ») —, et mène à Paramètres › Téléphones, qui les détaille. Partent avec le menu la note « tu vois ceux de tous tes téléphones », l'icône de réglages qui doublait ce lien et le nom du téléphone dans l'en-tête d'un fil. Le choix reviendra quand le serveur dira quel téléphone a reçu quel message.
+
+*Pourquoi :* un onglet qui redit Messages et un menu qui y renvoie n'aident à rien ; rien ne se perd, la note est dans Paramètres et l'ancienne adresse retombe sur Messages ; l'onglet reviendra avec ce qui le justifie, comme 0190 le dit « à venir ». De même, un sélecteur qui promet un choix sans rien en faire trompe : choisir un téléphone ne triait rien et n'ajoutait qu'une note, il affichait « Tous tes téléphones 1 » pour un seul, et son point orange ne disait pas qu'il manquait les notifications ; l'état utile (quel téléphone, vu quand, notifiable ou non) tient dans la barre (audit du 2026-11-05, F3-03 et F3-04, décisions F3-Q1 et F3-Q2).
+
+*Révise 0190 (en partie : l'onglet Notifications attend les notifications des autres apps, et le choix d'un téléphone que chaque message dise le sien).*
+
 ## La console et l'exploitation
 
 ### 0024 — L'exploitation : voir, sonder, sauvegarder, oublier pour de bon
@@ -2757,6 +2768,15 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 - La console ne lui confie pas d'exploration : c'est son initiative, dont l'envie s'use (0020), ou celle d'un réveil (0117). Confiée d'en haut, elle deviendrait une tâche.
 
 *Pourquoi :* la console est l'espace super admin : elle doit pouvoir poser ce que Mika pose pour quelqu'un, sans passer par une conversation ni un réveil, comme Projets a « Créer un projet ». Un rappel est un service qu'on lui demande, à une date dite ; le geste s'ajoute sans contredire 0020 (un but a une autorité) ni 0030 (piloter par opérations auditées) (audit du 2026-11-05, C5-16, décision C5-Q1).
+
+### 0234 — La console répare là où la panne se voit
+
+- **« Reconstruire »** est sur chaque tranche corrompue, dans Anomalies et dans le sous-onglet de sa faculté de Diagnostic avancé : `Mind.rebuild([faculté])`, en ligne, sans arrêter les ajouts, puis la bascule — la reconstruction dont l'oubli d'un nom se sert déjà. Sa confirmation dit qu'elle relit tout le journal et qu'elle ne sert qu'une fois le réducteur corrigé (le serveur relancé sur ce code) : avec le même code, le rejeu lève au même événement. Le message dit le résultat — saine, ou encore corrompue au n° N — et les tranches qu'elle lit qui ne rejouent pas à l'identique. Une tranche saine ou volatile (qui ne se rejoue pas) est refusée. La commande `mika rebuild`, serveur arrêté, reste dite à côté.
+- **« Réessayer maintenant »** est sur chaque processus en échec de Processus (« en échec », « a trébuché »), s'il n'est pas en cours : son recul est effacé et une passe demandée (`Scheduler.retry_now`) ; il repart à sa prochaine échéance, tout de suite s'il était dû. Un processus retenu pour une rafale ne se force pas, même s'il est aussi en échec : la garde est là pour ça. La fin de la retenue est gardée à part du recul (`held_until`) ; sa ligne dit pourquoi elle n'a pas le bouton.
+- Les deux gestes sont des formulaires de la console (jeton, opérateur), audités `console.systeme.reconstruire` (sur la tranche, « échouée » si elle reste corrompue) et `console.systeme.reessayer` (sur le processus), comme Relancer un effet de la file de sortie.
+- La sauvegarde reste à son unité : le serveur n'écrit pas le dossier des archives (`ReadWritePaths=/var/lib/mika`), et Stockage et sauvegardes dit la commande exacte. Pas de geste sur la quarantaine des projections : aucune n'est différée en service.
+
+*Pourquoi :* la console est l'espace super admin : elle voyait la panne et renvoyait au terminal, avec une commande qui exigeait d'arrêter Mika alors que le moteur sait reconstruire en ligne ; sans ce geste, une tranche réparée par le code restait figée jusqu'à un arrêt du serveur, et un processus en panne attendait son recul, jusqu'à une heure, sans prise. Les deux gestes sont sûrs : la reconstruction en ligne sert déjà à l'oubli, et effacer un recul ne fait que devancer un essai que l'ordonnanceur ferait de toute façon (audit du 2026-11-05, C8-04, décision C8-Q1).
 
 ## Ce que les sondes et les audits ont fixé
 

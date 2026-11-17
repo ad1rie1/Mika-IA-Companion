@@ -1,6 +1,6 @@
 /**
- * Les mots d'une carte, en français : distances, durées, modes, ce qu'un trajet évite, les jours d'un voyage. Purs : le
- * chat (ses miniatures) et l'écran Carte les partagent.
+ * Les mots d'une carte, en français : distances, durées, modes, ce qu'un trajet peut éviter et ce qu'il évite, les
+ * jours d'un voyage (en long, et en court pour un menu). Purs : le chat (ses miniatures) et l'écran Carte les partagent.
  */
 /** « 14:05 » (comme `screens/chat/markup.ts::clock`). */
 function clock(ms: number): string {
@@ -37,6 +37,12 @@ const MODE_WORDS: Record<string, string> = { voiture: "en voiture", velo: "à v�
 export function modeWords(mode: string): string {
   return MODE_WORDS[mode] ?? mode;
 }
+
+/**
+ * Ce qu'un trajet en voiture peut éviter, dans l'ordre de l'écran (`AVOIDS`, `api/carte.ts`) : une seule table, que
+ * lisent Itinéraire (« Éviter les péages ») et les fenêtres d'un voyage (« En voiture, éviter » : « les péages »).
+ */
+export const AVOID_LABELS: Readonly<Record<string, string>> = { peages: "les péages", autoroutes: "les autoroutes", ferries: "les ferries" };
 
 /** Ce qu'un trajet évite, en mots : « sans péage ni autoroute », ou « péages acceptés » en voiture. */
 export function avoidWords(avoid: readonly string[], mode = "voiture"): string {
@@ -95,6 +101,24 @@ export function tripDates(start: string, days: number, now: number): string {
   const today = new Date(now);
   const past = last.getTime() < new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
   return past ? `${text} · passé` : text;
+}
+
+const MONTHS_SHORT = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."];
+
+/**
+ * Les dates d'un voyage en court, là où la place manque (le menu « Ajouter au voyage », sur un téléphone) : « 3 avr. »,
+ * « 3–7 avr. », « 30 mars–2 avr. 2027 » (l'année, si ce n'est pas celle de `now`). Sans date de départ : vide.
+ */
+export function tripSpan(start: string, days: number, now: number): string {
+  const first = isoDay(start);
+  if (!first) return "";
+  const n = Math.max(1, days);
+  const last = new Date(first.getFullYear(), first.getMonth(), first.getDate() + n - 1);
+  const year = last.getFullYear() !== new Date(now).getFullYear() ? ` ${last.getFullYear()}` : "";
+  const end = `${dayNumber(last)} ${MONTHS_SHORT[last.getMonth()]}${year}`;
+  if (n === 1) return end;
+  const sameMonth = first.getMonth() === last.getMonth() && first.getFullYear() === last.getFullYear();
+  return `${dayNumber(first)}${sameMonth ? "" : ` ${MONTHS_SHORT[first.getMonth()]}`}–${end}`;
 }
 
 /** Le dernier jour d'un voyage est-il passé ? */

@@ -5,12 +5,16 @@ sont ; demandée en tableau, elle revient aux blocs de la console."""
 from __future__ import annotations
 
 import re
+import time
+
+from sqlalchemy import select
 
 from mika.adapters.llm.gateway import LLMTrace
 from mika.app.console import ENRICHER_LABELS
 from mika.contracts import runtime as rt
 from mika.inspector.pages import episode_drawn
 from mika.kernel.events import Content, Origin, VoiceProvenance
+from mika.ports.journal import JournalOutbox
 from mika.ports.llm import LLMResponse
 from mika.vocab.privacy import LEVEL_WORDS
 from tests.protocol.test_console_diagnostics import stop
@@ -239,6 +243,54 @@ def test_an_event_is_drawn_with_its_text_its_path_and_what_it_started(world):  #
     assert "Pourquoi a-t-elle dit ça ? →" in said and 'class="mine"' in said
     blocks = drawn(client, f"/inspecteur/evenement/{asked.seq}?vue_x=table")
     assert "now-page evenement" not in blocks and "Données (techniques)" in blocks
+
+
+def test_an_event_shows_its_departures_and_a_stuck_one_is_handled_from_it(world):  # noqa: F811
+    """Sur la page d'un événement, où l'on arrive depuis le Journal ou une fiche, rien ne disait que sa parole n'était
+    jamais partie (audit du 2026-11-05, C8-06). « Ses départs » dit chacune de ses lignes de la file de sortie (l'effet
+    en mots, à qui, l'état, les essais, la dernière erreur) ; un départ à traiter porte Relancer / Marquer comme vu,
+    qui reviennent à cette page ; un départ parti dit « parti ». Le repli le dit en tableau."""
+    client, live, _ = world
+    bootstrap(client)
+    converse(client, "tu as vu la pluie ?")
+    said = latest(client, live, rt.UTTERANCE)
+    store = live.kernel.mind.store
+    def rows():
+        return client.portal.call(lambda: store.query_mind(select(JournalOutbox.key, JournalOutbox.status)
+                                                           .where(JournalOutbox.seq == said.seq)))
+
+    for _ in range(100):  # la livraison se clôt juste après la trame « speech »
+        if [st for _k, st in rows()] == ["done"]:
+            break
+        time.sleep(0.02)
+    assert [st for _k, st in rows()] == ["done"]
+    page = drawn(client, f"/inspecteur/evenement/{said.seq}")
+    gone = page[page.index('id="event-departures"'):page.index('id="event-path"')]
+    assert "Ses départs" in gone and "Ses messages" in gone and "à adrien" in gone and ">parti<" in gone
+    assert "Relancer" not in gone and "Marquer comme vu" not in gone
+    key = rows()[0][0]
+    client.portal.call(store.mark_outbox, key, "failed", "TimeoutError()")
+    page = drawn(client, f"/inspecteur/evenement/{said.seq}")
+    gone = page[page.index('id="event-departures"'):page.index('id="event-path"')]
+    assert "échoué" in gone and "délai dépassé" in gone and "TimeoutError" not in gone
+    assert "Ce message n'est pas parti." in gone and ">Relancer</button>" in gone and "Marquer comme vu" in gone
+    assert f'name="cle" value="{key}"' in gone and f'name="_retour" value="/inspecteur/evenement/{said.seq}"' in gone
+    token = re.search(r'name="csrf" value="([^"]+)"', gone)
+    assert token and token.group(1) == client.cookies.get("csrftoken")
+    back = client.post("/inspecteur/systeme/sorties", data={"csrf": token.group(1), "cle": key, "faire": "relancer",
+                                                             "_retour": f"/inspecteur/evenement/{said.seq}"},
+                       follow_redirects=False)
+    assert back.status_code == 303 and back.headers["location"].startswith(f"/inspecteur/evenement/{said.seq}?flash=")
+    landed = drawn(client, back.headers["location"])
+    assert "Relancé" in landed and "Ses départs" in landed
+    # au repli, en tableau
+    client.portal.call(store.mark_outbox, key, "failed", "TimeoutError()")
+    blocks = drawn(client, f"/inspecteur/evenement/{said.seq}?vue_x=table")
+    assert "now-page evenement" not in blocks and "Ses départs" in blocks and "échoué" in blocks
+    assert "Ce message n'est pas parti." in blocks and "délai dépassé" in blocks
+    # un événement sans départ n'en dit rien
+    asked = latest(client, live, rt.PERCEPTION_RECEIVED)
+    assert "Ses départs" not in drawn(client, f"/inspecteur/evenement/{asked.seq}")
 
 
 def _head_facts(page: str) -> str:

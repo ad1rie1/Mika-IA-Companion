@@ -7,6 +7,7 @@ import {
   fetchOnRoute,
   fetchRoute,
   moveStop,
+  noteStop,
   pointsText,
   removeStop,
   searchAddresses,
@@ -101,6 +102,18 @@ describe("l'API de la carte (protocole-moi.md § 10)", () => {
     expect(JSON.parse(String(calls[1].init.body))).toEqual({ day: 3, index: 0, nonce: "k2" });
     await removeStop("640", "650");
     expect(calls[2].url).toBe(`${API}/api/moi/voyages/640/arrets/650/retirer`);
+  });
+
+  it("noter un arrêt : sa note seule, avec sa clé d'envoi ; vide, elle s'efface (F3-14)", async () => {
+    answer.body = { ok: true, message: "Note changée." };
+    await noteStop("640", "650", "Réserver avant le 15", "cle-note");
+    expect(calls[0].url).toBe(`${API}/api/moi/voyages/640/arrets/650`);
+    expect(calls[0].init.method).toBe("POST");
+    expect((calls[0].init.headers as Record<string, string>)["X-CSRFToken"]).toBe("le-jeton");
+    // ni `day` ni `index` : le moteur ne le déplace pas (`stop_change`, app/me/maps.py)
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({ note: "Réserver avant le 15", nonce: "cle-note" });
+    await noteStop("640", "650", "", "cle-vide");
+    expect(JSON.parse(String(calls[1].init.body))).toEqual({ note: "", nonce: "cle-vide" });
   });
 
   it("le long du trajet d'un voyage, et son GPX sur le serveur", async () => {

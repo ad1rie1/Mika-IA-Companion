@@ -1,13 +1,30 @@
 {# Système › Anomalies (app/handmade/tabs/system.py, ADR 0177) : un bandeau (des tranches corrompues, des anomalies, ou
-   rien depuis le démarrage), la bande de chiffres ; côte à côte ce qui a échoué dans ses facultés et à l'arbitre — la
-   faculté, l'événement où c'est né, l'erreur en clair et telle quelle ; puis les traces du journal en fil, chacune en
-   mots, ses détails à la suite. La pagination et la bascule « Tableau » de la console. #}
+   rien depuis le démarrage), la bande de chiffres ; les tranches corrompues, chacune avec l'événement où son réducteur
+   a levé et « Reconstruire » (ADR 0234) ; côte à côte ce qui a échoué dans ses facultés et à l'arbitre — la faculté,
+   l'événement où c'est né, l'erreur en clair et telle quelle ; puis les traces du journal en fil, chacune en mots, ses
+   détails à la suite. La pagination et la bascule « Tableau » de la console. #}
 {% import "handmade/shared/tab.html" as tab with context %}
 {% import "handmade/systeme/tab_macros.html" as sx %}
 <div class="now-page sys sys-an" data-tab="systeme/anomalies">
   {{ sx.band(band) }}
   {{ tab.block(stats) }}
   {{ sx.notes(notes) }}
+  {% if tainted %}
+  <section class="now-card" aria-labelledby="sys-an-tainted-title">
+    {{ tab.head("Tranches corrompues", "sys-an-tainted-title", tainted|length, "Reconstruire relit tout le journal, en ligne, sans arrêter le serveur, puis bascule. Cela ne sert qu'une fois le réducteur corrigé et le serveur relancé sur ce code : avec le même code, le rejeu lève au même événement.") }}
+    <ul class="sys-an-list" role="list">
+      {% for c in tainted %}
+      <li>
+        <div class="sys-an-top">
+          <b>{{ c.faculty }}</b>{% if c.owner and c.owner != c.faculty %} <span class="mono now-muted">{{ c.owner }}</span>{% endif %}
+          {% if c.href %}<a class="sys-an-ev" href="{{ c.href }}">corrompue au n° {{ c.seq }} →</a>{% endif %}
+        </div>
+        {% if c.rebuild %}{{ sx.rebuild(c.owner, c.faculty, journal, csrf, back) }}{% else %}<p class="sys-an-said now-muted">Elle ne se rejoue pas depuis le journal : elle ne garde que le présent.</p>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
   {% if lists %}
   <div class="sys-cols{{ ' two' if lists|length > 1 }}">
     {% for l in lists %}

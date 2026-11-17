@@ -1,12 +1,13 @@
 """La console des serveurs MCP (ADR 0064) : dans « Outils › Venus d'ailleurs », la liste des serveurs branchés, puis la fiche de
 chacun — son état, ce qu'il propose, ce que l'opérateur en a approuvé, ses appels.
 
-Les connexions (adresse, jeton, commande) se règlent dans Ses outils › Paramètres des services, la roue en haut à
-droite (ADR 0206) ; « Modifier ses réglages » y mène et l'enregistrement ramène ici. Ce qui se décide ici : qui peut
-quoi, en lignes d'accès lues de haut en bas comme les règles d'un pare-feu, et la ligne par défaut (ADR 0131) ; ce
-qu'il propose de neuf, regardé d'un coup (ADR 0129) ;
-outil par outil : l'activer, sa nature (il lit ou il agit), la description qu'elle lit. « Qui peut quoi » se calcule
-par la règle du moteur (``access_for``), jamais par une recopie. Ce que le serveur dit de lui-même et de ses outils
+Les connexions (adresse, jeton, commande) se règlent dans Ses outils › Paramètres, la roue en haut à droite
+(ADR 0206) ; « Modifier ses réglages » y mène et l'enregistrement ramène ici. Un serveur du système
+(``ServerStatus.plugin``, ADR 0066) n'y est pas : ses réglages mènent aux paramètres de son plugin. Ce qui se décide
+ici : qui peut quoi, en lignes d'accès lues de haut en bas comme les règles d'un pare-feu, et la ligne par défaut
+(ADR 0131), dites dans les mots des familles (``vocab.access.POLICY_WORDS``, ``KEEP_WORDS``, ADR 0134) ; ce qu'il
+propose de neuf, regardé d'un coup (ADR 0129) ; outil par outil : l'activer, sa nature (il lit ou il agit), la
+description qu'elle lit. « Qui peut quoi » se calcule par la règle du moteur (``access_for``), jamais par une recopie. Ce que le serveur dit de lui-même et de ses outils
 est une donnée venue d'ailleurs : montrée à l'opérateur, jamais obéie.
 """
 
@@ -45,6 +46,8 @@ from mika.kernel.inspect import (
     Text,
     Vital,
     When,
+    agree,
+    plural,
 )
 from mika.kernel.operate import Done, Refused
 from mika.kernel.rights import Grant, RuleTable
@@ -70,9 +73,11 @@ from mika.ports.mcp import (
 from mika.vocab.access import (
     ALONE,
     CARD,
+    KEEP_WORDS,
     NO,
     OWNER,
     PERSON,
+    POLICY_WORDS,
     SELF,
     SOURCE_WORDS,
     Keep,
@@ -82,7 +87,6 @@ from mika.vocab.access import (
     when_words,
     who_words,
 )
-from mika.vocab.access import POLICY_WORDS as POLICY_WORDS
 from mika.vocab.episodes import Kind, is_work_target
 from mika.vocab.privacy import ChannelTrust
 from mika.vocab.rights import closeness_of, rights_of, tool_allowance
@@ -95,8 +99,6 @@ NO_PORT = "Les outils extérieurs ne sont pas branchés sur ce serveur."
 FAILED_SEE_SUBJECT = "Le test a échoué : l'erreur est sur sa fiche."
 STATE_TONES = {"inactif": "muted", "incomplet": "warn", "jamais": "muted", "connecte": "ok", "erreur": "warn",
                "panne": "danger"}
-#: ce qu'elle garde, en mots courts
-KEEP_WORDS = {"public": "ce qu'elle sait", "perso": "un souvenir", "prive": "une confidence", "rien": "rien"}
 #: la ligne qu'on ajoute : toi, tout le temps, fermée — enregistrée dès le clic, elle n'ouvre rien de plus tant qu'on
 #: ne l'a pas réglée (un pare-feu, ADR 0131)
 NEW_ROW: dict[str, Any] = {"who": [OWNER], "canal": [], "when": [], "read": "non", "act": "non", "keep": "rien",
@@ -269,6 +271,14 @@ def edit_server(name: str, back: Ref = LIST) -> Ref:
                         cle=name).back_to(back)
 
 
+def server_settings(st: Any, back: Ref = LIST) -> Ref:
+    """Où se règle un serveur : sa page dans Ses outils › Paramètres ; un serveur du système, les paramètres du plugin
+    qui l'apporte (ADR 0066) — un formulaire du même nom y déclarerait un serveur neuf, qui s'effacerait devant lui."""
+    if st.plugin:
+        return Ref.settings(f"comportement-{st.plugin}", "Les paramètres de son plugin")
+    return edit_server(st.name, back)
+
+
 def add_server() -> Ref:
     """Brancher un service : la page dessinée en trois questions (ADR 0128), dans « Venus d'ailleurs »."""
     return Ref.view(*SERVERS, "Brancher un service", brancher="1")
@@ -317,7 +327,7 @@ def _servers(s: McpState, frame: Frame, ctx: InspectContext) -> list[Block]:
                          When(st.last_ok_at) if st.last_ok_at else "jamais", who_said(st, frame), access_said(st)),
                         href=_server_ref(st.name), tone="danger" if st.state == "panne" else "",
                         detail=((Note(st.detail, tone="warn"),) if st.detail else ())
-                        + (Fields((("réglages", edit_server(st.name)), ("adresse", Text(st.address or "—", "mono")))),)))
+                        + (Fields((("réglages", server_settings(st)), ("adresse", Text(st.address or "—", "mono")))),)))
     # brancher un service : trois questions, que la console dessinée met en page (ADR 0128)
     plug = [ActionSlot("mcp.brancher", title="Brancher")] if ctx.params.get("brancher") else []
     # un lien seul : la console dessinée en fait un bouton (``app/handmade/tabs/tools.py::elsewhere``) ; leurs réglages
@@ -344,9 +354,9 @@ def _head(s: McpState, frame: Frame, ctx: InspectContext, key: str) -> Head | No
         badges.insert(0, Badge(f"à {owner_name(st, frame)}", "info"))
     review = len(st.new) + len(st.changed)
     if review:
-        badges.append(Badge(f"{review} outil(s) à revoir", "warn"))
+        badges.append(Badge(f"{plural(review, 'outil', 'outils')} à revoir", "warn"))
     return Head(key=key, title=key, subtitle=st.purpose[:1].upper() + st.purpose[1:], badges=tuple(badges),
-                facts=(("réglages", edit_server(key, _server_ref(key))),),
+                facts=(("réglages", server_settings(st, _server_ref(key))),),
                 back=LIST)
 
 
@@ -379,7 +389,7 @@ def _tab_state(s: McpState, frame: Frame, ctx: InspectContext) -> list[Block]:
         ("avec qui", f"{who_said(st, frame)} — jamais dans un salon ni avec une inconnue"),
         ("accès", access_said(st)),
         ("ses outils", "en main" if st.in_hand else "à la demande (elle les cherche par ce qu'ils font)"),
-        ("réglages", edit_server(st.name, _server_ref(st.name))),
+        ("réglages", server_settings(st, _server_ref(st.name))),
     ), title="Ce que tu as déclaré", columns=2))
     blocks.append(Fields((
         ("serveur", f"{st.server_name} {st.server_version}".strip() or "—"),
@@ -441,9 +451,10 @@ def _tab_tools(s: McpState, frame: Frame, ctx: InspectContext) -> list[Block]:
     if st.new or st.changed:
         blocks.append(ActionSlot("mcp.revoir", title="Enregistrer ces choix"))
     if st.changed:
+        held = agree(len(st.changed), "suspendu jusqu'à ce que tu le relises",
+                     "suspendus jusqu'à ce que tu les relises")
         blocks.append(Note("Le serveur a changé la description, le schéma ou les annotations de "
-                           f"{', '.join(st.changed)} depuis ton accord : suspendu(s) jusqu'à ce que tu les relises.",
-                           tone="danger"))
+                           f"{', '.join(st.changed)} depuis ton accord : {held}.", tone="danger"))
     rows = []
     remotes = [t.remote for t in st.live] + [r for r in st.reviews if r not in {t.remote for t in st.live}]
     live = {t.remote: t for t in st.live}

@@ -65,9 +65,9 @@ VAGUE = tabs.VAGUE
 
 def _merged(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Une ligne par page où décider : un badge (« Système › File de sortie »), son cadre (« Processus en échec ») et
-    un contrôle de santé, qui mène à la même page (« 2 abandonnés en 24 h »), disent souvent la même panne ; la plus
-    grave reste, et à gravité égale, la plus précise — à précision égale, le constat du contrôle (« ! »), qui dit
-    depuis quand, plutôt que le badge de sa page qui ne fait que compter (ADR 0219)."""
+    un contrôle de santé, qui mène à la même page (« 2 départs à traiter : 2 échoués »), disent souvent la même
+    panne ; la plus grave reste, et à gravité égale, la plus précise — à précision égale, le constat du contrôle
+    (« ! »), qui dit depuis quand, plutôt que le badge de sa page qui ne fait que compter (ADR 0219)."""
     best: dict[str, dict[str, Any]] = {}
     order: list[str] = []
     for r in rows:

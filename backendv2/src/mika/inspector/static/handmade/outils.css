@@ -29,6 +29,9 @@
   .can-where-list li { grid-template-columns: 1fr; gap: 4px; }
   .can-place { grid-template-columns: 1fr; }
 }
+/* ce qu'elle lit de lui : sa description citée telle quelle (la consigne au modèle), sous « Où elle peut s'en servir » */
+.tool-read { max-width: 96ch; margin: 0; padding: 4px 0 4px 16px; border-left: 3px solid var(--accent-soft);
+  color: var(--text); font-size: 14px; line-height: 1.6; white-space: pre-line; overflow-wrap: anywhere; }
 
 /* Outils › Prêter à un agent (inspector/pages/tools.py, ADR 0122) : la console en lecture, ses points de prêt, le relais. */
 .expose { display: grid; gap: 18px; }
@@ -69,17 +72,11 @@
   .expose-facts > div, .expose-list li { grid-template-columns: 1fr; gap: 2px; }
 }
 
-/* Outils › Venus d'ailleurs (app/handmade/tabs/tools.py) : ce qu'on y fait, en boutons ; une carte par service, par app. */
+/* Outils › Venus d'ailleurs (app/handmade/tabs/tools.py) : ce qu'on y fait, en boutons ; une ligne par service, par app,
+   séparée par un filet (`person-entries` de base.css, pas de carte dans la carte, ADR 0176). */
 .elsewhere { display: grid; gap: 18px; }
-.elsewhere-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
-.elsewhere-item { display: grid; gap: 6px; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius); }
-.elsewhere-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; }
-.elsewhere-name { margin: 0; font-size: 15px; font-weight: 600; }
-.elsewhere-name a { color: var(--text); text-decoration: none; }
-.elsewhere-name a:hover { color: var(--accent); }
+.elsewhere .person-entry-facts b { color: var(--text); }
 .elsewhere-what { margin: 0; color: var(--text); font-size: 13.5px; }
-.elsewhere-facts { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0; color: var(--muted); font-size: 12.5px; }
-.elsewhere-facts b { color: var(--text); }
 .elsewhere-alert { margin: 2px 0 0; padding: 8px 10px; border-radius: var(--radius); background: var(--warn-bg); color: var(--warn);
   font-size: 13px; }
 .elsewhere-alert a { color: inherit; font-weight: 600; }
@@ -87,9 +84,9 @@
 .elsewhere-tools li { display: grid; gap: 2px; padding-left: 12px; border-left: 2px solid var(--border); }
 .elsewhere-id { color: var(--muted); font-size: 11.5px; }
 .elsewhere-id code { font-size: 11px; }
-.elsewhere-open { margin: 2px 0 0; font-size: 13px; }
 
-/* La fiche d'un service branché, « En bref » (app/handmade/subjects/server.py) : ses tuiles, ce qu'elle en lit, ses outils. */
+/* La fiche d'un service branché, « En bref » (app/handmade/subjects/server.py) : ses tuiles et ses outils non servis, ses
+   accès, ce qu'elle en lit, pour qui et quand. */
 .server { display: grid; gap: 18px; }
 .server-alert { margin: 0; padding: 10px 14px; border-radius: var(--radius); font-size: 13.5px; }
 .server-alert.warn { background: var(--warn-bg); color: var(--warn); }
@@ -98,22 +95,13 @@
 .server-read { display: grid; gap: 14px; margin: 0; }
 .server-read dt { margin-bottom: 4px; color: var(--muted); font-size: 12.5px; font-weight: 600; }
 .server-read dd { margin: 0; font-size: 14px; line-height: 1.5; }
-/* Qui peut quoi (ADR 0129) : ses outils servis × les personnes que le service ouvre */
-.server-matrix tbody th[scope="row"] { padding-left: 10px; white-space: normal; }
-.server-matrix th[scope="row"] a { color: inherit; }
-.server-matrix th[scope="row"] code { font-size: 13px; font-weight: 600; }
-.server-matrix-what { display: block; max-width: 360px; color: var(--muted); font-size: 12.5px; }
-.server-matrix td, .server-matrix td:nth-child(2) { width: auto; white-space: nowrap; }
-.server-matrix-note { display: block; color: var(--muted); font-size: 12px; }
-.server-matrix-legend { margin: 10px 0 0; font-size: 12.5px; }
-.server-matrix-rest { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 10px 0 0; color: var(--text-2); font-size: 13px; }
+/* Ses outils non servis, sous la bande de chiffres (« Pas servis : 1 à regarder ») ; qui peut quoi est dans « Ses outils » */
+.server-tools-rest { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: -6px 0 0; color: var(--text-2); font-size: 13px; }
 .server-facts { display: grid; gap: 8px; margin: 0; }
 .server-facts > div { display: grid; grid-template-columns: minmax(130px, 180px) minmax(0, 1fr); gap: 12px; font-size: 13.5px; }
 .server-facts dt { color: var(--muted); }
 .server-facts dd { margin: 0; }
 .server-address { font-size: 12px; overflow-wrap: anywhere; }
-.server-who-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 0 0 12px; }
-.server-who-actions p { flex-basis: 100%; margin: 2px 0 0; font-size: 12.5px; }
 .server-who { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .server-who th, .server-who td { padding: 7px 10px; border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
   text-align: left; vertical-align: middle; }
@@ -147,7 +135,6 @@
 .service-check span { display: grid; }
 .service-check span span { color: var(--text-2); font-size: 12.5px; }
 .service-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.elsewhere-three { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0; color: var(--text-2); font-size: 13px; }
 /* Brancher un service (handmade/outils/brancher.html, ADR 0128) */
 .plug-field { display: grid; gap: 4px; }
 .plug-field label { color: var(--text-2); font-size: 13px; font-weight: 600; }

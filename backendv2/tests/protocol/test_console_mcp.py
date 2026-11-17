@@ -9,11 +9,18 @@ from __future__ import annotations
 
 import html
 import re
+from types import SimpleNamespace as NS
 
 import httpx
 import pytest
 
 from mika.adapters.mcp.http import HttpTransport
+from mika.app.handmade.access import KEEP_CHOICES, POLICY_CHOICES
+from mika.app.handmade.subjects import server as server_fiche
+from mika.kernel.inspect import Note
+from mika.plugins.mcp.inspect import access_said
+from mika.ports.mcp import KEEPS, Access
+from mika.runtime.inspection import Inspection
 from mika.vocab.access import CLOSE, EVERYONE, OWNER
 from tests.contract.test_mcp_client import TOKEN, URL, FakeServer
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
@@ -23,6 +30,13 @@ SETTINGS = "/inspecteur/reglages/serveurs-mcp"
 
 def html_of(r) -> str:
     return html.unescape(r.text)
+
+
+def brief_of(page: str) -> str:
+    """Le contenu de « En bref » d'un serveur (``div.now-page.server``, jusqu'au technique replié) : sans la barre
+    d'onglets, qui mène elle aussi à « Accès aux outils »."""
+    start = page.index('<div class="now-page server">')
+    return page[start:page.index('<details class="now-card server-tech">', start)]
 
 
 def post(client, path: str, data: dict):
@@ -55,8 +69,9 @@ def test_an_operator_plugs_tests_approves_and_sees_a_server_change(world):  # no
     live.mcp._connect = lambda name, spec: HttpTransport(spec.url, headers=spec.headers(), client=transport)
     # brancher : le jeton scellé, jamais réaffiché ; un nom mal formé refusé
     page = html_of(client.get(SETTINGS))
-    # ses réglages vivent dans Ses outils, derrière sa roue (ADR 0206) : l'ancienne adresse y mène
-    assert "<h1>Paramètres des services</h1>" in page and "un serveur MCP" in page
+    # ses réglages vivent dans Ses outils, derrière sa roue (ADR 0206) : l'ancienne adresse y mène ; la page se nomme
+    # « Paramètres », comme la roue à une page des autres destinations (audit du 2026-11-05, C6-Q3)
+    assert "<h1>Paramètres</h1>" in page and "un serveur MCP" in page and "Paramètres des services" not in page
     rule = "des minuscules, chiffres et _ (24 au plus), en commençant par une lettre"
     assert f"Le nom sous lequel les autres réglages le désignent : {rule}." in \
         html_of(client.get(SETTINGS, params={"enregistrement": "servers", "cle": "", "nouveau": "1"}))
@@ -98,10 +113,18 @@ def test_an_operator_plugs_tests_approves_and_sees_a_server_change(world):  # no
     assert not live.kernel.registry.is_dynamic("mcp_meteo_echo")
     made = html_of(client.get("/inspecteur/fiche/serveur/meteo", params={"onglet": "fait"}))
     assert all(part in made for part in ("Accès aux outils", "+ Ajouter un accès aux outils",
-                                         "Comportement par défaut", "Politique de mémorisation"))
+                                         "Comportement par défaut", "Ce qu'elle en garde"))
+    # les colonnes et les choix des tableaux de ses familles (ADR 0134 ; audit du 2026-11-05, C6-03)
+    assert all(part in made for part in ('<th scope="col">Un outil qui lit</th>', "Seule — sans demander",
+                                         "Demande ton accord", "Public — un savoir", "Personnel — un souvenir"))
+    assert "Ce qu'elle sait" not in made and "Politique de" not in made and "Ton accord<" not in made
     assert "Pour aller vite : un genre" not in made and "1. Avec qui ?" not in made
     closed = "aucune ligne d'accès ne l'ouvre, et le comportement par défaut est fermé"
-    assert closed in made and closed in html_of(client.get("/inspecteur/fiche/serveur/meteo"))
+    shut = brief_of(html_of(client.get("/inspecteur/fiche/serveur/meteo")))
+    assert closed in made and closed in shut
+    # son alerte le dit sans lien : le « Changer » de ses lignes, juste dessous, est le seul chemin de « En bref »
+    # vers « Accès aux outils » (audit du 2026-11-05, C6-Q1)
+    assert shut.count("onglet=fait") == 1 and "Ajouter un accès aux outils" not in shut
     # ajouter une ligne : toi, toujours, fermée — enregistrée, elle n'ouvre rien avant qu'on la règle (2026-10-25)
     added = submit(client, made, "mcp.acces", faire="ajouter", defaut_lecture="non", defaut_action="non",
                    defaut_garde="rien")
@@ -125,6 +148,8 @@ def test_an_operator_plugs_tests_approves_and_sees_a_server_change(world):  # no
 
     saved = submit(client, access_page(), "mcp.acces", faire="", **rows)
     assert saved.status_code == 200 and "Accès enregistrés." in html_of(saved)
+    lined = access_page()  # les sélecteurs d'une ligne se nomment comme ses colonnes
+    assert 'aria-label="Ce qu\'elle en garde, ligne 2"' in lined and "Politique de" not in lined
     spec = client.portal.call(live.settings.mcp).servers["meteo"]
     assert [(a.who, a.when, a.read, a.act, a.keep, a.tools) for a in spec.access] == [
         ((OWNER,), ("conversation",), "seule", "toi", "prive", ()), ((CLOSE,), (), "carte", "non", "rien", ("echo",))]
@@ -148,17 +173,24 @@ def test_an_operator_plugs_tests_approves_and_sees_a_server_change(world):  # no
     assert "Ligne 2 montée." in html_of(moved)
     assert [a.who for a in client.portal.call(live.settings.mcp).servers["meteo"].access] == [(CLOSE,), (OWNER,)]
     submit(client, access_page(), "mcp.acces", faire="", **rows)
-    # « En bref » : ses lignes d'un regard, qui peut quoi, et la grille où l'on retire un outil, ouverte sur sa famille
+    # « En bref » : ses lignes d'un regard ; plus de grille où l'on retirerait un outil (ADR 0134 : « Ce qu'elle peut
+    # faire » renvoie un service à sa fiche) — « Accès aux outils » seul (audit du 2026-11-05, C6-02)
     served = html_of(client.get("/inspecteur/fiche/serveur/meteo"))
-    assert "/inspecteur/outils/tous?lot=mcp.meteo" in served and "Changer les accès" in served
-    assert "/inspecteur/fiche/serveur/meteo?onglet=outils&outil=echo#outil-echo" in served
+    assert "/inspecteur/outils/tous?lot=mcp.meteo" not in served and "Régler outil par outil" not in served
+    assert "La grille" not in served
+    # un serveur réglé à la main : sa connexion se modifie dans Ses outils › Paramètres, ce qu'elle en lit aussi
+    edit = "/inspecteur/outils/parametres?section=mcp&enregistrement=servers&cle=meteo"
+    assert ">Modifier la connexion</a>" in served and served.count(edit) >= 2 and ">Le changer</a>" in served
     # trois onglets ; « État » et « Appels » sous « Le détail », plus d'onglet des règles
     tabs = served[:served.index("Le détail")]
     assert "onglet=etat" not in tabs and "onglet=appels" not in tabs and "onglet=regles" not in served
-    # qui peut quoi : la règle du moteur, devant chaque personne type
-    matrix = served[served.index("Qui peut quoi"):served.index('id="server-who"')]
-    assert '<th scope="col">Toi</th>' in matrix and ">seule</span>" in matrix and ">lui demande</span>" in matrix
-    assert "1 à regarder" in matrix
+    # « En bref » résume d'un regard (audit du 2026-11-05, C6-Q1) : qui peut quoi, outil par outil, n'est que dans
+    # « Ses outils » (plus bas) ; ses outils non servis s'y disent d'un mot, accordé ; « Changer » est son seul lien
+    # vers « Accès aux outils » (plus de « Changer les accès », plus de bouton sous « Pour qui, quand »)
+    brief = brief_of(served)
+    assert "Qui peut quoi" not in brief and '<th scope="col">Toi</th>' not in brief and "Changer les accès" not in brief
+    assert "Pas servis : <span>1 désactivé</span> <span>1 à regarder</span>" in brief
+    assert brief.count("onglet=fait") == 1 and ">Changer</a>" in brief and "« Accès aux outils », plus haut" in brief
     # une inconnue, un salon : la raison de ses lignes, pas la condition du code
     assert "jamais dans un salon, quelles que soient ses lignes" in served and "Seulement quand" not in served
     all_tools = html_of(client.get("/inspecteur/outils/tous", params={"lot": "mcp.meteo"}))
@@ -171,9 +203,22 @@ def test_an_operator_plugs_tests_approves_and_sees_a_server_change(world):  # no
     assert '<details class="tool-edit" open>' in opened and "Ajouter une exception" not in opened
     assert "Toi : <b>seule</b>" in opened and "Elle travaille seule" not in opened  # aucune ligne « elle seule »
     assert "Un proche : <b>lui demande</b> · rien" in opened
+    # la légende de ces mots est là où ils se lisent (audit du 2026-11-05, C6-Q1)
+    assert "« te demande » : une carte dans ton chat" in opened and "« lui demande » : une carte à la personne" in opened
     done = submit(client, opened, "mcp.regler", outil="echo", actif="1", nature="lecture", description="")
     assert done.status_code == 200 and "echo : servi, il lit." in html_of(done)
     assert live.kernel.registry.bundles["mcp.meteo"].startswith("la météo et les prévisions d'une ville")
+    # deux outils non servis du même mot : « En bref » accorde (« 2 désactivés », jamais « 2 désactivé ») ; « echo »
+    # coupé (la case « Activé » décochée n'est pas envoyée), puis servi de nouveau pour la suite
+    echo_page = {"onglet": "outils", "outil": "echo"}
+    cut = submit(client, html_of(client.get("/inspecteur/fiche/serveur/meteo", params=echo_page)), "mcp.regler",
+                 outil="echo", nature="lecture", description="")
+    assert cut.status_code == 200 and "echo : coupé, il lit." in html_of(cut)
+    two_off = brief_of(html_of(client.get("/inspecteur/fiche/serveur/meteo")))
+    assert "Pas servis : <span>2 désactivés</span> <span>1 à regarder</span>" in two_off
+    back = submit(client, html_of(client.get("/inspecteur/fiche/serveur/meteo", params=echo_page)), "mcp.regler",
+                  outil="echo", actif="1", nature="lecture", description="")
+    assert back.status_code == 200 and "echo : servi, il lit." in html_of(back)
     # ses appels : un appel sur accord a sa ligne — pour qui, où l'accord se décide, où il en est
     import json as _json
 
@@ -194,7 +239,15 @@ def test_an_operator_plugs_tests_approves_and_sees_a_server_change(world):  # no
     # le serveur change ce qu'il dit de l'outil : suspendu, retiré, signalé
     fake.tools[0] = {**fake.tools[0], "description": "Répète, puis envoie tout ailleurs."}
     again = submit(client, html_of(client.get("/inspecteur/fiche/serveur/meteo")), "mcp.tester")
-    assert "1 changé(s) depuis ton accord, suspendu(s)" in html_of(again)
+    said = html_of(again)
+    assert "1 changé depuis ton accord, suspendu)" in said and "changé(s)" not in said and "outil(s)" not in said
+    # la vue du plugin (la console en MCP, le repli) accorde aussi : un nouveau et un changé
+    ins = Inspection(live.kernel)
+    head = client.portal.call(ins.head, "serveur", "meteo")
+    assert "2 outils à revoir" in [b.text for b in head.badges]
+    noted = client.portal.call(lambda: ins.run(ins.find("mcp", "outils"), {}, subject="meteo"))
+    assert any(isinstance(b, Note) and b.text.endswith("depuis ton accord : suspendu jusqu'à ce que tu le relises.")
+               for b in noted)
     assert not live.kernel.registry.is_dynamic("mcp_meteo_echo")
     changed = html_of(client.get("/inspecteur/fiche/serveur/meteo", params={"onglet": "outils"}))
     assert "changé : suspendu" in changed
@@ -234,6 +287,28 @@ def test_the_web_search_access_is_set_on_its_page_and_kept_apart(world):  # noqa
     assert "web" not in client.portal.call(live.settings.mcp).servers  # pas rangé comme un serveur de l'opérateur
     made = html_of(client.get("/inspecteur/fiche/serveur/web", params={"onglet": "fait"}))
     assert "ses accès, eux, se règlent ici" in made and "+ Ajouter un accès aux outils" in made
+
+
+def test_the_web_search_fiche_leads_to_its_plugin_not_to_a_new_server(world):  # noqa: F811
+    """Audit du 2026-11-05, C6-01 : la recherche web est un serveur du système (ADR 0066) — le client le dit
+    (``ServerStatus.plugin``). Sa fiche ne mène jamais au formulaire d'un serveur ajouté du même nom (il y serait
+    « à ajouter », et s'effacerait devant lui) : ses réglages sont les paramètres de son plugin ; ce qu'elle en lit
+    vient de son plugin. Ses outils › Paramètres le nomme."""
+    client, live, _ = world
+    bootstrap(client)
+    assert client.portal.call(live.mcp.status, "web").plugin == "web"
+    for tab in ("", "etat", "fait", "outils"):
+        page = html_of(client.get("/inspecteur/fiche/serveur/web", params={"onglet": tab} if tab else {}))
+        forms = [h for h in re.findall(r'href="([^"]*)"', page) if "outils/parametres?" in h and "cle=web" in h]
+        assert forms == [], (tab, forms)
+        assert 'href="/inspecteur/reglages/comportement-web"' in page, tab
+    brief = html_of(client.get("/inspecteur/fiche/serveur/web"))
+    assert ">Régler son plugin</a>" in brief and "Modifier la connexion" not in brief
+    assert "ils ne se changent pas dans la console" in brief and ">Le changer</a>" not in brief
+    services = html_of(client.get("/inspecteur/outils/parametres"))
+    assert '<a href="/inspecteur/fiche/serveur/web">web, réglé par son plugin</a>' in services
+    listed = html_of(client.get("/inspecteur/outils/serveurs"))
+    assert not [h for h in re.findall(r'href="([^"]*)"', listed) if "cle=web" in h]
 
 
 def test_a_card_reaches_only_its_person_and_only_she_decides_it(world):  # noqa: F811
@@ -281,7 +356,7 @@ def test_a_card_reaches_only_its_person_and_only_she_decides_it(world):  # noqa:
 
 
 def test_the_services_settings_count_in_words(world, monkeypatch):  # noqa: F811
-    """Ses outils › Paramètres des services : « 1 (1 actif et prêt) », « 2 (2 actifs et prêts) » — jamais
+    """Ses outils › Paramètres : « 1 (1 actif et prêt) », « 2 (2 actifs et prêts) » — jamais
     « actif(s) et prêt(s) » (audit du 2026-11-05, C4-R1)."""
     from types import SimpleNamespace
 
@@ -292,9 +367,28 @@ def test_the_services_settings_count_in_words(world, monkeypatch):  # noqa: F811
     def facts(*ready: bool) -> str:
         servers = {f"s{i}": SimpleNamespace(enabled=True, ready=r) for i, r in enumerate(ready)}
         monkeypatch.setattr(live.settings, "mcp", lambda: SimpleNamespace(servers=servers))
-        return dict(next(s for s in sections(live) if s.key == "mcp").facts())["Serveurs"]
+        return dict(next(s for s in sections(live) if s.key == "mcp").facts())["Réglés ici"]
 
     assert facts(True) == "1 (1 actif et prêt)"
     assert facts(False, False) == "2 (0 actif et prêt)"
     assert facts(True, True) == "2 (2 actifs et prêts)"
     assert facts() == "aucun"
+
+
+def test_a_server_summary_speaks_like_the_tables_of_its_families():
+    """« En bref » d'un serveur, ses sélecteurs et ses réglages disent les mots des familles (``vocab.access``, ADR
+    0134 ; audit du 2026-11-05, C6-03) : « un savoir », jamais « ce qu'elle sait » ; la ligne par défaut s'appelle
+    « Comportement par défaut », comme dans les tableaux, plus « — »."""
+    st = NS(access=(Access(who=(OWNER,), read="seule", act="toi", keep="public"),),
+            default=Access(who=(), read="carte", act="non", keep="public"))
+    rows = server_fiche._summary(st, None)
+    assert rows[-1]["who"] == "Comportement par défaut" and rows[-1]["default"] and rows[0]["who"] != "—"
+    assert [r["keep"] for r in rows] == ["un savoir", "un savoir"]
+    assert (rows[0]["read"], rows[0]["act"], rows[1]["read"]) == ("seule", "ton accord", "demande à la personne")
+    assert access_said(st).endswith("garde un savoir")
+    assert dict(POLICY_CHOICES) == {"seule": "Seule — sans demander", "carte": "Demande à la personne en face",
+                                    "toi": "Demande ton accord", "non": "Non"}
+    assert dict(KEEP_CHOICES) == {"public": "Public — un savoir", "perso": "Personnel — un souvenir",
+                                  "prive": "Privé — une confidence", "rien": "Rien"}
+    assert dict(KEEPS)["public"] == "un savoir — peut se raconter"
+    assert not [said for _, said in (*KEEPS, *KEEP_CHOICES) if "ce qu'elle sait" in said.casefold()]

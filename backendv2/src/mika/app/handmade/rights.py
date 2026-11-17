@@ -1,6 +1,6 @@
 """Réglages › Droits (ADR 0133, 0134 ; son onglet est dans ``tabs/settings.py``) : ce qu'elle a, ressource par ressource — sa vie interne (ses
 familles d'outils), les apps de la Forge, les services MCP, ses projets, ses canaux, ce que le code fixe —, une
-ressource par sous-onglet (ADR 0176), chaque outil avec sa description, et pour chaque ressource un lien vers **le
+ressource par sous-onglet (ADR 0176), chaque outil par son libellé, et pour chaque ressource un lien vers **le
 détail de ses accès** : son tableau de règles, lu tel qu'il est écrit, avec « Modifier » vers la page qui le règle et
 « Retour » (vers sa ligne). Les droits exacts, outil par outil, seulement quand on a choisi **qui** et **par quel
 canal** : la règle du moteur, appliquée à cette personne par ce canal (les deux portes, le plafond) — jamais une
@@ -170,7 +170,11 @@ def what_of(g: Grant | None) -> str:
 
 
 def _tool_row(ui: UI, spec: Any, got: Mapping[str, Grant] | None) -> dict[str, Any]:
-    return {"name": spec.name, "description": spec.description, "nature": "agit" if spec.acts else "lit",
+    """Un outil sous sa ressource : ce qu'il fait par son libellé (``ToolSpec.label``, ADR 0208), dit à qui lit —
+    sa description, écrite pour le modèle (« tu » la désigne), seulement pour un outil venu d'ailleurs, qui n'a pas de
+    libellé (comme la liste d'une famille, ``inspector/pages/families.py`` ; audit du 2026-11-05, C6-10)."""
+    return {"name": spec.name, "label": spec.label, "description": spec.description,
+            "nature": "agit" if spec.acts else "lit",
             "href": f"{catalog.BASE}/tous?outil={spec.name}",
             "exact": what_of(got.get(spec.name)) if got is not None else "",
             "closed": got is not None and (got.get(spec.name) is None or got[spec.name].closed)}

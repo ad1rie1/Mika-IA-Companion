@@ -1,6 +1,7 @@
 {# Système › File de sortie, dessinée (app/handmade/tabs/system.py::outbox) : à quoi elle sert et le chemin de ce qui part
-   (du journal au départ), ce qui est à traiter (relancer, marquer comme vu), ce qui part par sorte, les derniers
-   départs (filtrés par état). #}
+   (du journal au départ), ce qui est à traiter (ce qui n'est pas parti et à qui ; relancer, marquer comme vu), ce qui
+   part par sorte, les derniers départs (filtrés par état). Tout vient des blocs de la vue (pages/system.py::sorties),
+   ses pages comprises (ADR 0177). #}
 {% from "_navigation.html" import pager as pages %}
 {% from "handmade/systeme/macros.html" import outbox_item %}
 <div class="now-page person-tab sys" data-tab="systeme/sorties">

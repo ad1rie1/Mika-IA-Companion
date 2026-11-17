@@ -13,12 +13,12 @@ let lib: Promise<MapLib> | null = null;
 let views: Promise<typeof import("./view")> | null = null;
 let noWebgl = false;
 
-export function loadMapLibre(): Promise<MapLib> {
+function loadMapLibre(): Promise<MapLib> {
   lib ??= import("./maplibre").then((m) => m.maplibre);
   return lib;
 }
 
-/** MapLibre et la vue d'une carte de l'écran Carte ou d'une miniature. */
+/** MapLibre et la vue d'une carte : celle de l'écran Carte, de la Position du Téléphone, d'une miniature. */
 export async function loadMapView(): Promise<{ lib: MapLib; MapView: typeof import("./view").MapView }> {
   views ??= import("./view");
   const [got, mod] = await Promise.all([loadMapLibre(), views]);

@@ -1,6 +1,7 @@
 {# Système › Journal d'événements (app/handmade/tabs/system.py, ADR 0177) : les familles d'événements de la page en
-   puces (elles filtrent par type) ; puis un fil jour par jour, en deux colonnes sur un grand écran — l'heure, ce qui
-   s'est passé (vers l'événement), son type et son numéro ; les événements d'un même épisode se suivent sans répéter
+   puces, chacune sous le nom de la faculté qui possède ses types (celles du moteur sous leur sens), son préfixe au
+   survol (elles filtrent par type) ; puis un fil jour par jour, en deux colonnes sur un grand écran — l'heure, ce qui
+   s'est passé (vers l'événement ; un geste audité dit lequel et qui l'a fait), son type et son numéro ; les événements d'un même épisode se suivent sans répéter
    leur lien ; les données de chacun repliées. Les filtres, la pagination et la bascule « Tableau » de la console. #}
 {% import "handmade/shared/tab.html" as tab with context %}
 {% import "handmade/systeme/tab_macros.html" as sx %}
@@ -12,7 +13,7 @@
     <nav class="hm-chips sys-jr-families" aria-label="Les familles d'événements de cette page">
       <span class="hm-chips-title">Sur cette page</span>
       {% if everything %}<a class="hm-chip" href="{{ everything.href }}">tous les types</a>{% endif %}
-      {% for f in families %}<a class="hm-chip{{ ' on' if f.on }}" href="{{ f.href }}"{% if f.on %} aria-current="page"{% endif %}>{{ f.name }} <span class="hm-count">{{ f.n }}</span></a>{% endfor %}
+      {% for f in families %}<a class="hm-chip{{ ' on' if f.on }}" href="{{ f.href }}" title="{{ f.prefix }}"{% if f.on %} aria-current="page"{% endif %}>{{ f.name }} <span class="hm-count">{{ f.n }}</span></a>{% endfor %}
     </nav>
     {% endif %}
     {% if days %}

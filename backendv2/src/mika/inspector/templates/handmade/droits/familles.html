@@ -3,7 +3,11 @@
    vital ». Une case grisée (🔒) dit ce que l'outil ne sait pas faire (attendre un accord) ou ce qui n'a pas de sens
    pour lui (garder ce qui est déjà à elle). Une famille par sous-onglet (ADR 0176), son tableau ouvert ; la famille
    demandée (``?famille=``) a sa section en premier. Filtrée (``?q=``, ``?lot=``), la page montre d'un coup les familles
-   qui répondent, l'une sous l'autre. #}
+   qui répondent, l'une sous l'autre. Ce qu'est la page se dit une fois, dans l'introduction de l'onglet (sa
+   description, inspector/pages/tools.py) : la carte « Ses propres outils » ne porte que son titre, le filtre et « Lire
+   un tableau ». Chaque outil se dit par son libellé (ce qu'il fait, dit à qui lit, ADR 0208) ; un outil venu
+   d'ailleurs, qui n'en a pas, par ce que son service ou son app en dit. La consigne au modèle, où « tu » la désigne,
+   est citée sur sa fiche (audit du 2026-11-05, C6-10). #}
 {% from "handmade/droits/tableau.html" import tableau %}
 {% macro family(f, pane) -%}
 <section class="now-card access-family" id="f-{{ f.id }}"{{ ' data-pane' if pane }} aria-labelledby="f-{{ f.id }}-title">
@@ -15,7 +19,7 @@
   </header>
   <ul class="access-tool-list" role="list">
     {% for x in f.tools %}
-    <li><a href="{{ x.href }}"><code>{{ x.name }}</code></a> <span class="now-tag {{ 'warn' if x.nature == 'agit' else 'info' }}">{{ x.nature }}</span> <span class="access-tool-desc">{{ x.description }}</span></li>
+    <li><a href="{{ x.href }}"><code>{{ x.name }}</code></a> <span class="now-tag {{ 'warn' if x.nature == 'agit' else 'info' }}">{{ x.nature }}</span> <span class="access-tool-desc">{{ x.label or x.description }}</span></li>
     {% endfor %}
   </ul>
   {% if not f.external %}
@@ -40,7 +44,6 @@
   <section class="now-card access-legend" aria-labelledby="families-title">
     <h2 id="families-title">Ses propres outils</h2>
     {% if lot or query %}<p class="server-alert info">{% if lot %}Seulement la famille « {{ lot }} »{% else %}Seulement les familles dont un outil répond à « {{ query }} »{% endif %} · <a href="{{ all_url }}">tout voir</a></p>{% endif %}
-    <p>Ce qu'elle sait faire par elle-même — sa mémoire, ses fichiers, ses dessins, ton courrier, Teams, la caméra, ses flux, la Forge, ses projets… — rangé par famille. Chaque famille naît avec le <b>minimum vital</b> que le code déclare : sans lui, elle ne fonctionne pas. Tu peux le changer ; la page te prévient si tu descends en dessous.</p>
     <details class="access-legend-more">
       <summary>Lire un tableau : lecture, action, garde, elle seule</summary>
       <dl>

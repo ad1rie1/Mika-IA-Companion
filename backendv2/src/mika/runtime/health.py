@@ -11,15 +11,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 
 from mika.kernel.clock import DAY, MINUTE, US
 from mika.kernel.forms import show_duration
 from mika.kernel.inspect import plural
 from mika.kernel.registry import zone_known
 from mika.ports.errors import describe_error
-from mika.ports.journal import JournalOutbox
+from mika.ports.journal import JournalEvent, JournalOutbox
 from mika.runtime.boundary import Failed, call
+from mika.runtime.effects import OUTBOX_LABELS, OUTBOX_LABELS_MANY, OUTBOX_PROBLEMS
 from mika.vocab.episodes import Role
 
 if TYPE_CHECKING:
@@ -78,12 +79,12 @@ def _journal(kernel: Kernel) -> Check:
     snap = mind.store.latest_snapshot()
     behind = mind.head - (snap.seq if snap else 0)
     limit = 4 * max(1, kernel.deps.snapshot_every)
-    detail: tuple[str, ...] = (f"instantané au seq {snap.seq}" if snap else "aucun instantané",)
+    detail: tuple[str, ...] = (f"dernier instantané : n° {snap.seq}" if snap else "aucun instantané",)
     if mind.gaps:
         # des événements ont disparu du journal : l'état relu n'est plus celui vécu (audit du 2026-10-26)
         holes = ", ".join(f"{a}–{b - 1}" if b - 1 > a else str(a) for a, b in mind.gaps[:10])
         return Check("journal", KO, f"{plural(len(mind.gaps), 'trou', 'trous')} de séquence dans le journal relu",
-                     (*detail, f"seq manquants : {holes}{'…' if len(mind.gaps) > 10 else ''} — "
+                     (*detail, f"numéros manquants : {holes}{'…' if len(mind.gaps) > 10 else ''} — "
                                "`mika replay --verify` les liste tous"))
     state = DEGRADED if behind > limit else OK
     # des lectures qui ont retenu la boucle d'événements (le magasin les mesure, s'il sait le faire)
@@ -95,21 +96,35 @@ def _journal(kernel: Kernel) -> Check:
                    f"la plus longue {worst_ms:.0f} ms : {sql[:100]}",)
         if worst_ms >= SLOW_READ_STALL_MS:
             state = DEGRADED
-    return Check("journal", state, f"{mind.head} événements, dernier instantané {behind} derrière", detail)
+    said = f"{plural(mind.head, 'événement', 'événements')} ; {_snapshot_age(snap is not None, behind)}"
+    return Check("journal", state, said, detail)
+
+
+def _snapshot_age(taken: bool, behind: int) -> str:
+    """De combien d'événements date le dernier instantané (ce que rejoue un démarrage), en mots."""
+    if not taken:
+        return "aucun instantané"
+    if behind <= 0:
+        return "le dernier instantané est à jour"
+    return f"le dernier instantané date de {plural(behind, 'événement', 'événements')}"
 
 
 def _slices(kernel: Kernel) -> Check:
     tainted = dict(kernel.mind.root.tainted.items())
     if tainted:
         return Check("slices", KO, plural(len(tainted), "tranche corrompue", "tranches corrompues"),
-                     tuple(f"{o} : un réducteur a levé au seq {seq}" for o, seq in sorted(tainted.items())))
+                     tuple(f"{o} : un réducteur a levé à l'événement n° {seq}"
+                           for o, seq in sorted(tainted.items())))
     return Check("slices", OK, "toutes les tranches saines")
 
 
 def _loops(kernel: Kernel) -> Check:
+    """Les boucles du noyau (ordonnanceur, file de sortie, projections) : une boucle morte en marche ne se relance
+    pas d'elle-même, et aucune page ne la montre mieux que ce constat — il dit le geste (redémarrer le serveur)."""
     dead = kernel.dead_loops()
     if dead:
-        return Check("loops", KO, plural(len(dead), "boucle arrêtée", "boucles arrêtées") + " : " + ", ".join(dead))
+        what, them = plural(len(dead), "boucle arrêtée", "boucles arrêtées"), "les" if len(dead) > 1 else "la"
+        return Check("loops", KO, f"{what} ({', '.join(dead)}) : rien ne {them} relance — redémarre le serveur")
     return Check("loops", OK, "ordonnanceur, file de sortie et projections tournent")
 
 
@@ -118,7 +133,8 @@ def _projections(kernel: Kernel) -> Check:
     late = {name: n for name, n in lag.items() if n > PROJECTION_LAG_MAX}
     quarantined = kernel.projections.quarantined
     detail = tuple(f"{name} : {plural(n, 'événement', 'événements')} de retard" for name, n in sorted(lag.items()))
-    detail += tuple(f"{name} : seq {seq} en quarantaine ({error[:120]})" for name, seq, error in quarantined[-10:])
+    detail += tuple(f"{name} : événement n° {seq} en quarantaine ({error[:120]})"
+                    for name, seq, error in quarantined[-10:])
     if late or quarantined:
         return Check("projections", DEGRADED, f"{len(late)} en retard, {len(quarantined)} en quarantaine", detail)
     return Check("projections", OK, "à jour", detail)
@@ -140,31 +156,50 @@ def _processes(kernel: Kernel) -> Check:
 
 
 def _outbox(kernel: Kernel) -> Check:
-    """En attente depuis trop longtemps, ou abandonné dans les dernières 24 h
-    (un message qui n'est jamais parti ne doit pas disparaître en silence)."""
+    """Ce qui attend depuis trop longtemps, et ce qui est à traiter — les états de ``OUTBOX_PROBLEMS``, comptés
+    comme la File de sortie les compte, tous et sans limite de temps (un message qui n'est jamais parti ne doit pas
+    disparaître en silence). La fenêtre de 24 h ne décide que du ton : un départ à traiter de moins de 24 h dégrade
+    le contrôle ; plus vieux, il reste ``ok`` (la sonde publique ne reste pas dégradée pour un vieux départ que
+    personne n'a marqué), mais son constat les dit, et le badge de la File de sortie les compte. Le détail garde la
+    clé de chaque effet : le runtime ne sait pas les nommer, la File de sortie les dit en mots."""
     store = kernel.mind.store
     now = kernel.mind.clock.now()
-    # abandonné après ses réessais, ou capacité interrompue par une panne et pas relancée (à décider)
-    o = JournalOutbox
-    # départagés par la clé : un événement fait partir plusieurs effets (les mêmes 50 sur les deux moteurs)
-    rows = store.query_mind(select(o.seq, o.effect, o.last_error).where(o.status.in_(("failed", "interrupted")))
-                            .order_by(o.seq.desc(), o.key).limit(50))
-    at = {e.seq: e.at for e in store.get_events([r[0] for r in rows])}
-    failed = [(seq, effect, error) for seq, effect, error in rows if now - at.get(seq, 0) < DAY]
+    o, e = JournalOutbox, JournalEvent
+    # un compte exact par état, et combien sont nés dans les dernières 24 h (l'événement qui les a fait partir)
+    recent = func.sum(case((e.at >= int(now) - DAY, 1), else_=0))
+    counts: dict[str, tuple[int, int]] = {
+        str(status): (int(n), int(fresh or 0)) for status, n, fresh in store.query_mind(
+            select(o.status, func.count(), recent).select_from(o).outerjoin(e, e.seq == o.seq)
+            .where(o.status.in_(OUTBOX_PROBLEMS)).group_by(o.status))}
+    total = sum(n for n, _fresh in counts.values())
+    young = sum(fresh for _n, fresh in counts.values())
+    # les plus récents, départagés par la clé : un événement fait partir plusieurs effets (les mêmes sur les deux
+    # moteurs)
+    stuck = store.query_mind(select(o.seq, o.effect, o.status, o.last_error).where(o.status.in_(OUTBOX_PROBLEMS))
+                             .order_by(o.seq.desc(), o.key).limit(10)) if total else []
     pending = store.pending_outbox()
     oldest = store.get_events([pending[0].seq]) if pending else []
     age = now - oldest[0].at if oldest else 0
-    detail = tuple(f"{r.effect} (seq {r.seq}) : {plural(r.attempts, 'tentative', 'tentatives')} "
-                   f"{describe_error(r.last_error or '')}" for r in pending[:10])
-    detail += tuple(f"abandonné : {effect} (seq {seq}) — {describe_error(error or '')}"
-                    for seq, effect, error in failed[:10])
+    detail = tuple(f"{r.effect} (événement n° {r.seq}) : {OUTBOX_LABELS['pending']}, "
+                   f"{plural(r.attempts, 'tentative', 'tentatives')}{_error(r.last_error)}" for r in pending[:10])
+    detail += tuple(f"{effect} (événement n° {seq}) : {OUTBOX_LABELS.get(status, status)}{_error(error)}"
+                    for seq, effect, status, error in stuck)
     parts = []
     if pending:
         parts.append(f"{plural(len(pending), 'effet', 'effets')} en attente, le plus vieux depuis {_span(age)}")
-    if failed:
-        parts.append(f"{plural(len(failed), 'abandonné', 'abandonnés')} en 24 h")
-    state = DEGRADED if failed or age > OUTBOX_AGE_MAX_US else OK
+    if total:
+        old = total - young
+        since = "" if not old else " depuis plus de 24 h" if not young else f", dont {old} depuis plus de 24 h"
+        parts.append(f"{plural(total, 'départ à traiter', 'départs à traiter')}{since} : " + ", ".join(
+            plural(counts[s][0], OUTBOX_LABELS[s], OUTBOX_LABELS_MANY[s]) for s in sorted(counts)))
+    state = DEGRADED if young or age > OUTBOX_AGE_MAX_US else OK
     return Check("outbox", state, " ; ".join(parts) or "rien en attente", detail)
+
+
+def _error(error: str | None) -> str:
+    """La dernière erreur d'un effet, en clair, après un tiret ; rien s'il n'en a pas."""
+    said = describe_error(error or "")
+    return f" — {said}" if said else ""
 
 
 def _llm(kernel: Kernel) -> Check:

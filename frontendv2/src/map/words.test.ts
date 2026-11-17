@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { avoidWords, dayLabel, duration, isoDay, isoOf, km, modeWords, placeWhat, plural, tripDates, tripPast } from "./words";
+import { AVOIDS } from "../api/carte";
+import { AVOID_LABELS, avoidWords, dayLabel, duration, isoDay, isoOf, km, modeWords, placeWhat, plural, tripDates, tripPast, tripSpan } from "./words";
 
 const NOW = new Date(2026, 10, 5, 14, 0).getTime();
 
@@ -30,6 +31,12 @@ describe("les mots d'une carte", () => {
     expect(avoidWords(["peages", "autoroutes", "ferries"])).toBe("sans péage, autoroute ni ferry");
   });
 
+  it("une seule table des options d'un trajet en voiture, dans l'ordre de l'API (F3-16)", () => {
+    // Itinéraire et les deux fenêtres d'un voyage la lisent : aucune ne réécrit ses libellés
+    expect(Object.keys(AVOID_LABELS)).toEqual([...AVOIDS]);
+    expect(AVOID_LABELS).toEqual({ peages: "les péages", autoroutes: "les autoroutes", ferries: "les ferries" });
+  });
+
   it("les jours d'un voyage", () => {
     expect(isoDay("2027-04-03")?.getDay()).toBe(6); // un samedi
     expect(isoDay("2027-02-30")).toBeNull();
@@ -42,6 +49,19 @@ describe("les mots d'une carte", () => {
     expect(tripPast("2026-10-31", 2, NOW)).toBe(true);
     expect(tripDates("2026-11-30", 3, NOW)).toBe("du lun. 30 novembre au mer. 2 décembre");
     expect(tripDates("", 3, NOW)).toBe("");
+  });
+
+  it("les jours d'un voyage en court, pour le menu « Ajouter au voyage » d'un téléphone (F3-17)", () => {
+    expect(tripSpan("2027-04-03", 5, NOW)).toBe("3–7 avr. 2027"); // l'année, si ce n'est pas celle d'aujourd'hui
+    expect(tripSpan("2027-04-03", 5, new Date(2027, 0, 10).getTime())).toBe("3–7 avr.");
+    expect(tripSpan("2027-03-30", 4, NOW)).toBe("30 mars–2 avr. 2027");
+    expect(tripSpan("2026-11-21", 2, NOW)).toBe("21–22 nov.");
+    expect(tripSpan("2026-11-21", 1, NOW)).toBe("21 nov.");
+    expect(tripSpan("2026-11-21", 0, NOW)).toBe("21 nov.");
+    expect(tripSpan("2026-11-30", 3, NOW)).toBe("30 nov.–2 déc.");
+    expect(tripSpan("2026-12-30", 4, NOW)).toBe("30 déc.–2 janv. 2027");
+    expect(tripSpan("2026-10-31", 2, NOW)).toBe("31 oct.–1er nov."); // passé : le menu ne le dit pas
+    expect(tripSpan("", 3, NOW)).toBe("");
   });
 
   it("le pluriel et ce qu'est un lieu", () => {

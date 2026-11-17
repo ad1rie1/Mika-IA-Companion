@@ -1,6 +1,11 @@
-{# La fiche d'un outil (inspector/pages/tools.py, ADR 0121, 0122, 0134) : d'où il vient, et où elle peut s'en
-   servir, par ses droits (le tableau de sa famille, ou de son service ou de son app) ; pour un outil de son code,
-   sa place, sous la main ou à chercher, là où son fournisseur sait différer (``place``, ADR 0123). #}
+{# La fiche d'un outil (inspector/pages/tools.py, ADR 0121, 0122, 0134) : sous son nom, ce qu'il fait par son
+   libellé (le sous-titre de la page, ADR 0208) ; d'où il vient, et où elle peut s'en servir, par ses droits (le
+   tableau de sa famille, ou de son service ou de son app) — quand le port qu'il attend n'est pas prêt, le lien vers
+   la page qui le règle (``setup``) ; pour un outil de son code, sa place, sous la main ou à chercher, là où son
+   fournisseur sait différer (``place``, ADR 0123) ; puis ce qu'elle lit de lui, sa description citée telle quelle
+   (``tool_read``) : la consigne au modèle, où « tu » la désigne, ou ce qu'en dit son service ou son app — pour un
+   service, la phrase que l'opératrice lui a donnée à la place, s'il y en a une (« Régler l'outil » sur la fiche du
+   serveur, ``hub.offered`` ; audit du 2026-11-05, C6-10). #}
 <div class="hm-tool-intro">
   <p class="person-entry-tags"><span class="now-tag">{{ tool_family }}</span>{% if tool_dynamic %}<span class="now-tag {{ tool_tone }}">{{ tool_origin }}</span>{% endif %}{% if tool_reserved %}<span class="now-tag warn">réservé à sa propriétaire</span>{% endif %}</p>
 </div>
@@ -20,6 +25,8 @@
     </li>
     {% endfor %}
   </ul>
+  {# le port qu'il attend n'est pas prêt (``setup``, Labels.needs) : où le régler, une fois sous ses situations #}
+  {% if setup %}<p class="now-muted">Pour l'offrir : <a href="{{ setup.href }}">{{ setup.text }}</a>.</p>{% endif %}
   {% if place %}
   <form method="post" action="{{ place.action }}" class="can-place">
     <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="outil" value="{{ tool_name }}">
@@ -36,4 +43,13 @@
     </div>
   </form>
   {% endif %}
+</section>
+{# sa description, citée telle quelle : ce qu'elle lit de lui pour décider de s'en servir (comme « Ce qu'elle en lit »
+   sur la fiche d'un serveur) ; la console, elle, le dit par son libellé, plus haut #}
+<section class="now-card" aria-labelledby="tool-read-title">
+  <header class="now-card-head">
+    <h2 id="tool-read-title">Ce qu'elle lit de lui</h2>
+    <p>{% if tool_dynamic %}Ce que son service ou son app en dit, ou, pour un service, la phrase que tu lui as donnée à la place : c'est ce qu'elle lit pour décider de s'en servir. Elle ne se change pas ici ; celle d'un service se règle sur sa fiche (« Régler », sur sa ligne de « Ses outils »).{% else %}La consigne exacte que reçoit le modèle avec cet outil, où « tu » la désigne, elle. Elle vient de son code : elle ne se change pas dans la console.{% endif %}</p>
+  </header>
+  <blockquote class="tool-read">{{ tool_read }}</blockquote>
 </section>

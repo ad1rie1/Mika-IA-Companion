@@ -1,15 +1,24 @@
 /**
- * Une carte de l'écran Carte, ou une miniature du chat (ADR 0194, 0196) : le fond du serveur (`base.ts`), et par-dessus
- * une scène (`scene.ts`) — des épingles numérotées (roses pour ce que Mika a fait), des tracés, la position de la
- * personne — que la vue cadre (`fitBounds`). Le thème et une autre carte du serveur se reposent sans la refaire.
+ * Une carte de l'écran Carte, de la Position du Téléphone, ou une miniature du chat (ADR 0194, 0196) : le fond du
+ * serveur (`base.ts`), et par-dessus une scène (`scene.ts`) — des épingles numérotées (roses pour ce que Mika a fait),
+ * des secondaires plus petites, des tracés, la position de la personne et le cercle de sa précision — que la vue cadre
+ * (`fitBounds`, comme le dit `sceneFraming` : serrée sur l'écran Carte, un quartier autour sur une miniature). Une scène
+ * qui n'a que la position et sa précision s'ouvre centrée sur elle, au zoom qui montre son cercle (`hereFocus`), et se
+ * recentre quand on le lui demande, au zoom où on l'a laissée. Un cadrage demandé se fait même sur une scène inchangée ;
+ * une scène vide garde la vue, sauf quand l'écran demande le fond de carte (un regard en échec). Le thème et une autre
+ * carte du serveur se reposent sans la refaire. Son cycle de vie dans un écran (la monter, la reposer, ses échecs) :
+ * `live.ts`.
  */
+import type { FeatureCollection } from "geojson";
 import type { GeoJSONSource, LngLatBoundsLike, Map as MapLibre, Marker } from "maplibre-gl";
-import type { MapInfo } from "../api/phone";
+import type { MapInfo } from "../api/carte";
 import { createBaseMap, type BaseMap, type MapLib } from "./base";
-import type { Bounds } from "./mapgeo";
-import { cleanScene, EMPTY_SCENE, linesGeoJson, sceneBounds, sceneKey, type Scene } from "./scene";
+import { circle, zoomFor, type Bounds } from "./mapgeo";
+import { cleanScene, EMPTY_SCENE, framingFor, hereRadius, hereSpan, linesGeoJson, sceneFraming, sceneKey, type Scene, type ScenePin } from "./scene";
 
 const LINES = "lignes";
+/** La source du cercle de la précision de la position. */
+const HERE = "ici";
 
 export interface MapViewOptions {
   dark: boolean;
@@ -53,11 +62,62 @@ function addLines(map: MapLibre, scene: Scene): void {
     paint: { "line-color": color as never, "line-width": 2.5, "line-opacity": 0.75, "line-dasharray": [1.4, 2] } });
 }
 
+/** Le cercle de la précision de la position, en GeoJSON (lon, lat) ; sans position ou sans rayon : vide. */
+export function hereGeoJson(scene: Scene): FeatureCollection {
+  const here = scene.here;
+  const r = hereRadius(here);
+  return {
+    type: "FeatureCollection",
+    features: here && r ? [{ type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [circle(here.lat, here.lon, r)] } }] : [],
+  };
+}
+
+/** Le cercle d'une scène sur une carte dont le style est là : sa source se met à jour (sinon : rien encore). */
+function setHere(map: MapLibre, scene: Scene): boolean {
+  const source = map.getSource(HERE) as GeoJSONSource | undefined;
+  if (!source) return false;
+  source.setData(hereGeoJson(scene));
+  return true;
+}
+
+/** Le cercle de la précision : rempli et bordé, aux couleurs du thème (lues à chaque style), sous les tracés. */
+function addHere(map: MapLibre, scene: Scene): void {
+  if (setHere(map, scene)) return;
+  map.addSource(HERE, { type: "geojson", data: hereGeoJson(scene) });
+  const accent = token("--accent", "#4f46e5");
+  map.addLayer({ id: "ici-zone", type: "fill", source: HERE, paint: { "fill-color": accent, "fill-opacity": 0.14 } });
+  map.addLayer({ id: "ici-bord", type: "line", source: HERE, paint: { "line-color": accent, "line-opacity": 0.5, "line-width": 1.5 } });
+}
+
+/**
+ * Une scène qui n'a que la position et sa précision (la Position du Téléphone) : son centre et le zoom qui montre son
+ * cercle en entier (`zoomFor`), comme elle s'est toujours ouverte, et non par `fitBounds`. Toute autre scène : `null`.
+ */
+export function hereFocus(scene: Scene): { center: [number, number]; zoom: number } | null {
+  const here = scene.here;
+  if (!here || hereSpan(scene) === undefined) return null;
+  return { center: [here.lon, here.lat], zoom: zoomFor(hereRadius(here)) };
+}
+
+/**
+ * Les classes d'une épingle (`carte.css`) : numérotée, rose pour ce que Mika a fait, choisie ; un point sans numéro ;
+ * secondaire (`minor`, un lieu de « Sur la route ») : plus petite, sans numéro, d'un autre style que les arrêts.
+ */
+export function pinClass(pin: ScenePin): string {
+  if (pin.minor) return `cm-pin-el minor${pin.selected ? " sel" : ""}`;
+  return `cm-pin-el${pin.mika ? " mika" : ""}${pin.selected ? " sel" : ""}${pin.label ? "" : " dot"}`;
+}
+
+/** Ce qui se pose au-dessus de quoi : les secondaires dessous, puis les autres, les siennes, et la choisie en haut. */
+export function pinRank(pin: ScenePin): number {
+  return pin.selected ? 3 : pin.minor ? 0 : pin.mika ? 2 : 1;
+}
+
 /** L'élément d'une épingle : un bouton sur une carte qu'on touche, une pastille sur une miniature. */
-function pinElement(pin: Scene["pins"][number], interactive: boolean): HTMLElement {
+function pinElement(pin: ScenePin, interactive: boolean): HTMLElement {
   const el = document.createElement(interactive ? "button" : "span");
-  el.className = `cm-pin-el${pin.mika ? " mika" : ""}${pin.selected ? " sel" : ""}${pin.label ? "" : " dot"}`;
-  if (pin.label) el.textContent = pin.label;
+  el.className = pinClass(pin);
+  if (pin.label && !pin.minor) el.textContent = pin.label;
   if (pin.title) {
     el.title = pin.title;
     el.setAttribute("aria-label", pin.title);
@@ -95,14 +155,21 @@ export class MapView {
   ) {
     this.lib = lib;
     this.scene = cleanScene(scene);
-    const bounds = sceneBounds(this.scene);
+    const focus = hereFocus(this.scene);
+    const framed = focus ? null : sceneFraming(this.scene, opts.interactive);
+    const { padding, maxZoom } = framingFor(opts.interactive);
     this.base = createBaseMap(lib, host, info, {
       dark: opts.dark,
       interactive: opts.interactive,
       attribution: opts.interactive,
-      ...(bounds ? { bounds } : boundsFromInfo(info)),
-      ...this.framing(),
-      overlay: (map) => addLines(map, this.scene),
+      ...(focus ?? (framed ? { bounds: framed.bounds } : boundsFromInfo(info))),
+      padding,
+      fitMaxZoom: maxZoom,
+      // le cercle d'abord : les tracés passent par-dessus
+      overlay: (map) => {
+        addHere(map, this.scene);
+        addLines(map, this.scene);
+      },
       onFail: opts.onFail,
     });
     this.key = sceneKey(this.scene);
@@ -129,31 +196,47 @@ export class MapView {
     return this.base.info;
   }
 
-  /** Une autre scène : ses épingles et ses tracés, reposés ; `fit` : cadrée sur elle. Rien de changé : rien. */
-  show(scene: Scene, fit = true): void {
+  /**
+   * Une autre scène : ses épingles et ses tracés, reposés (rien de changé : rien à reposer). `fit` : cadrée sur elle,
+   * même inchangée, car un cadrage demandé (une recherche relancée qui rend les mêmes lieux) ne se perd pas ; vide, la
+   * vue reste, sauf `orBase` : le fond de carte.
+   */
+  show(scene: Scene, fit = true, orBase = false): void {
     const next = cleanScene(scene);
     const key = sceneKey(next);
-    if (key === this.key) return;
-    this.key = key;
-    this.scene = next;
-    // jamais par `isStyleLoaded()`, faux tant que des tuiles arrivent : la source, si elle est là ; sinon
-    // « style.load » posera la scène d'aujourd'hui
-    setLines(this.base.map, next);
-    this.placeMarkers();
-    if (fit) this.fit();
+    if (key !== this.key) {
+      this.key = key;
+      this.scene = next;
+      // jamais par `isStyleLoaded()`, faux tant que des tuiles arrivent : la source, si elle est là ; sinon
+      // « style.load » posera la scène d'aujourd'hui
+      setHere(this.base.map, next);
+      setLines(this.base.map, next);
+      this.placeMarkers();
+    }
+    if (fit) this.fit(true, orBase);
   }
 
-  /** Les marges et le zoom le plus serré d'un cadrage : larges sur l'écran Carte, étroites sur une miniature. */
-  private framing(): { padding: number; fitMaxZoom: number } {
-    return this.opts.interactive ? { padding: 56, fitMaxZoom: 14 } : { padding: 18, fitMaxZoom: 12.5 };
-  }
-
-  /** Cadrer la scène (rien à montrer : la vue reste). */
-  fit(animate = true): void {
-    const b = sceneBounds(this.scene);
-    if (!b) return;
-    const { padding, fitMaxZoom } = this.framing();
-    this.base.map.fitBounds(b as LngLatBoundsLike, { padding, maxZoom: fitMaxZoom, duration: animate && this.opts.interactive ? 600 : 0 });
+  /**
+   * Cadrer la scène. Une position seule et sa précision : recentrée, au zoom où on l'a laissée. Rien à montrer : la vue
+   * reste (un regard qui se lit encore attend ses lieux), sauf `orBase` (un regard en échec) : la zone de la carte du
+   * serveur, sinon la France.
+   */
+  fit(animate = true, orBase = false): void {
+    const duration = animate && this.opts.interactive ? 600 : 0;
+    const focus = hereFocus(this.scene);
+    if (focus) {
+      this.base.map.easeTo({ center: focus.center, duration });
+      return;
+    }
+    const framed = sceneFraming(this.scene, this.opts.interactive);
+    if (framed) {
+      this.base.map.fitBounds(framed.bounds as LngLatBoundsLike, { padding: framed.padding, maxZoom: framed.maxZoom, duration });
+      return;
+    }
+    if (!orBase) return;
+    const home = boundsFromInfo(this.base.info);
+    if ("bounds" in home) this.base.map.fitBounds(home.bounds as LngLatBoundsLike, { padding: framingFor(this.opts.interactive).padding, duration });
+    else this.base.map.easeTo({ center: home.center, zoom: home.zoom, duration });
   }
 
   /** Ce que la carte montre en ce moment (ouest, sud, est, nord), dans les bornes de la Terre. */
@@ -185,12 +268,11 @@ export class MapView {
     const map = this.base.map;
     const interactive = this.opts.interactive;
     this.markers = [];
-    // sa position d'abord, sous les épingles (posées après, elles passent par-dessus) ; puis les siennes au-dessus
-    // des autres, et l'épingle choisie au-dessus de tout
+    // sa position d'abord, sous les épingles (posées après, elles passent par-dessus) ; puis les secondaires sous les
+    // arrêts, les siennes au-dessus des autres, et l'épingle choisie au-dessus de tout
     const here = this.scene.here;
     if (here) this.markers.push(new this.lib.Marker({ element: hereElement(), anchor: "center" }).setLngLat([here.lon, here.lat]).addTo(map));
-    const rank = (p: Scene["pins"][number]) => (p.selected ? 2 : p.mika ? 1 : 0);
-    const pins = [...this.scene.pins].sort((a, b) => rank(a) - rank(b));
+    const pins = [...this.scene.pins].sort((a, b) => pinRank(a) - pinRank(b));
     for (const p of pins) {
       this.markers.push(new this.lib.Marker({ element: pinElement(p, interactive), anchor: "center" }).setLngLat([p.lon, p.lat]).addTo(map));
     }

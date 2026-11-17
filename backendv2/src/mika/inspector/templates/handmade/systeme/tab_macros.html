@@ -1,5 +1,6 @@
 {# Ce que partagent les onglets de Système dans leur forme (app/handmade/tabs/system.py, ADR 0177) : le bandeau d'une
-   page (ce qui ne va pas, en une phrase ; un lien vers où le régler), ses notes, l'en-tête d'un jour d'un fil. #}
+   page (ce qui ne va pas, en une phrase ; un lien vers où le régler), ses notes, l'en-tête d'un jour d'un fil, le
+   geste « Reconstruire » d'une tranche corrompue (Anomalies, Diagnostic avancé ; ADR 0234). #}
 {% macro band(b) -%}
 {% if b %}<p class="sys-band tone-{{ b.tone }}" role="status"><span class="sys-dot" aria-hidden="true"></span><span class="sys-band-text">{{ b.text }}</span>{% if b.href %}<a href="{{ b.href }}">{{ b.link }} →</a>{% endif %}</p>{% endif %}
 {%- endmacro %}
@@ -10,4 +11,14 @@
 
 {% macro day(d, n=none) -%}
 <h3 class="sys-day">{{ d.name }}{% if n is not none %} <span class="now-muted now-num">{{ n }}</span>{% endif %}</h3>
+{%- endmacro %}
+
+{# « Reconstruire » une tranche corrompue (``inspector/pages/system.py::rebuild_post``) : sa confirmation dit qu'elle
+   relit tout le journal, en ligne, et qu'elle ne sert qu'une fois le réducteur corrigé ; puis revenir à ``back``. #}
+{% macro rebuild(owner, label, journal, csrf, back) -%}
+<form method="post" action="{{ PREFIX }}/systeme/etat">
+  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="faculte" value="{{ owner }}">
+  <input type="hidden" name="_retour" value="{{ back }}">
+  <button class="btn small" data-confirm="Reconstruire « {{ label }} » : elle relit tout le journal depuis le début ({{ journal }}), en ligne, sans arrêter le serveur, puis bascule. Cela ne sert qu'une fois son réducteur corrigé et le serveur relancé sur ce code : sinon, elle repasse corrompue au même événement. Reconstruire ?">Reconstruire</button>
+</form>
 {%- endmacro %}

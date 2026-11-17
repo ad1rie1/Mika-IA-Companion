@@ -101,7 +101,9 @@ def _below(specs: list[Any], lines: tuple[ToolRule, ...], default: ToolRule, rig
 
 def entries(ui: Any) -> list[dict[str, Any]]:
     """Chaque famille de ses propres outils (les outils du code, pas ceux d'un service ou d'une app) : ses outils,
-    son tableau — réglé, ou son minimum vital."""
+    son tableau — réglé, ou son minimum vital. Chaque outil porte son libellé (``label``, ce qu'il fait, dit à qui
+    lit, ADR 0208), que la liste montre, et sa description (la consigne au modèle, citée sur sa fiche), que la
+    recherche lit aussi (audit du 2026-11-05, C6-10)."""
     registry = ui.kernel.registry
     rights, _close = gate_of(registry)
     families: dict[str, list[Any]] = {}
@@ -116,8 +118,8 @@ def entries(ui: Any) -> list[dict[str, Any]]:
         out.append({
             "key": bundle, "id": bundle.replace(".", "-"), "label": ui.names.bundle(bundle), "set": table is not None,
             "reserved": any(s.owner_only for s in specs),
-            "tools": [{"name": s.name, "nature": "agit" if s.acts else "lit", "description": s.description,
-                       "href": _tool_href(s.name)} for s in specs],
+            "tools": [{"name": s.name, "nature": "agit" if s.acts else "lit", "label": s.label,
+                       "description": s.description, "href": _tool_href(s.name)} for s in specs],
             "lines": lines, "default": default,
             "columns": [
                 {"key": "lecture", "label": "Un outil qui lit", "kind": "pick", "choices": choices(POLICIES, UNDEFERRED),
@@ -144,8 +146,8 @@ def panel(ui: Any, request: Request, query: str = "", lot: str = "", prompts: An
     for e in entries(ui):
         if lot and e["key"] != lot:
             continue
-        if terms and not any(all(x in fold(f"{t['name']} {t['description']} {e['label']}") for x in terms)
-                             for t in e["tools"]):
+        if terms and not any(all(x in fold(f"{t['name']} {t['label']} {t['description']} {e['label']}")
+                                 for x in terms) for t in e["tools"]):
             continue
         for x in e["tools"]:
             x["href"] = _tool_href(x["name"]) + (f"&{context}" if context else "")
@@ -166,7 +168,7 @@ def panel(ui: Any, request: Request, query: str = "", lot: str = "", prompts: An
         href = ui.deps.family_href(lot) if ui.deps.family_href is not None else ""
         shown.append({"key": lot, "id": lot.replace(".", "-"), "label": ui.names.bundle(lot), "external": True,
                       "href": href, "set": False, "below": "", "reserved": False, "open": True,
-                      "tools": [{"name": s.name, "nature": "agit" if s.acts else "lit",
+                      "tools": [{"name": s.name, "nature": "agit" if s.acts else "lit", "label": s.label,
                                  "description": s.description, "href": _tool_href(s.name)}
                                 for s in sorted(registry.tools.values(), key=lambda t: t.name) if s.bundle == lot]})
     return Panel("handmade/droits/familles.html", {

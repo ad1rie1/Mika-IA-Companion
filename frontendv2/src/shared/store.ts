@@ -1,11 +1,12 @@
 /**
- * Les lectures que Téléphone, Outils et Paramètres partagent : une seule copie de chaque ressource de l'API par
+ * Les lectures que Téléphone, Carte, Outils et Paramètres partagent : une seule copie de chaque ressource de l'API par
  * personne, que chaque écran relit à son ouverture et qu'un geste invalide (une boîte ajoutée se voit aussi dans
- * Outils, un téléphone révoqué dans Téléphone).
+ * Outils, un téléphone révoqué dans Téléphone). Ta dernière position est la même pour la Position du Téléphone et pour
+ * la Carte (« Autour de moi », « Ma position » d'un itinéraire).
  */
 import { fetchMe } from "../api/me";
 import { fetchServices } from "../api/mcp";
-import { fetchPhones } from "../api/phone";
+import { fetchPhones, fetchPosition } from "../api/phone";
 import { fetchRights } from "../api/rights";
 import { fetchBox, fetchBoxes, fetchTeamsAccount, fetchTeamsAccounts } from "../api/settings";
 import { fetchPeople, fetchShares } from "../api/shares";
@@ -17,6 +18,7 @@ export const boxSettings = new CachedMap(fetchBox, 10_000);
 export const teamsAccounts = new Cached(fetchTeamsAccounts, 15_000);
 export const teamsSettings = new CachedMap(fetchTeamsAccount, 10_000);
 export const phones = new Cached(fetchPhones, 15_000);
+export const position = new Cached(fetchPosition, 15_000);
 export const services = new Cached(fetchServices, 10_000);
 export const shares = new Cached(fetchShares, 15_000);
 export const people = new Cached(fetchPeople, 60_000);

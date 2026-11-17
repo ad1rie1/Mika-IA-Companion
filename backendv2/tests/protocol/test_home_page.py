@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from mika.app.handmade import home
 from mika.inspector.names import Names
 from mika.inspector.pages import approvals as approvals_pages
+from mika.inspector.pages import diagnostics
 from mika.inspector.pages import home as home_tabs
 from mika.inspector.pages import system as system_pages
 from mika.inspector.ui import UI
@@ -110,6 +111,36 @@ def test_a_failing_check_and_the_badge_of_its_page_make_one_line(world, monkeypa
         ("/inspecteur/systeme/sante", "!", "Système › Santé générale", "Projections : 2 en retard")]
 
 
+def test_a_backup_to_make_and_a_late_journal_stay_two_lines(world, monkeypatch):  # noqa: F811
+    """Deux pannes distinctes sur la même page, deux lignes : la sauvegarde à faire mène à sa carte sur Stockage et
+    sauvegardes, le journal en retard au haut de cette page, où se lisent ses événements et son dernier instantané —
+    et il se nomme, la page portant un autre nom que le sien. Avant (relecture de C8-L4) : les deux menaient à
+    ``/inspecteur/systeme/stockage``, et l'accueil n'en gardait qu'une, le journal, sans le nommer."""
+    client, _, _ = world
+    bootstrap(client)
+    checks = tuple(health.Check(name, health.OK, "ok") for name in
+                   ("slices", "loops", "projections", "processes", "outbox", "llm", "lanes", "config", "ports"))
+    late = "135 événements ; le dernier instantané date de 134 événements"
+    report = health.Health("ready", (health.Check("journal", health.DEGRADED, late), *checks))
+    monkeypatch.setattr(health, "report", lambda kernel: report)
+    monkeypatch.setattr(home_tabs, "backup_state", lambda ui: ("warn", "aucune sauvegarde notée"))
+    store = "/inspecteur/systeme/stockage"
+    rows = priorities_of(client.get("/inspecteur/").text)
+    assert [r for r in rows if r[0].startswith(store)] == [
+        (f"{store}#sys-store-saves", "à faire", "Sauvegarde", "aucune sauvegarde notée"),
+        (store, "!", "Système › Stockage et sauvegardes", f"Journal d’événements : {late}")]
+    # en panne tous les deux (des trous de séquence, une sauvegarde en échec) : aucun ne saute
+    holes = "2 trous de séquence dans le journal relu"
+    report = health.Health("ready", (health.Check("journal", health.KO, holes), *checks))
+    monkeypatch.setattr(home_tabs, "backup_state", lambda ui: ("danger", "la dernière a échoué"))
+    rows = priorities_of(client.get("/inspecteur/").text)
+    assert [r for r in rows if r[0].startswith(store)] == [
+        (f"{store}#sys-store-saves", "en échec", "Sauvegarde", "la dernière a échoué"),
+        (store, "!", "Système › Stockage et sauvegardes", f"Journal d’événements : {holes}")]
+    # l'ancre est celle de la carte Sauvegardes de la page dessinée
+    assert f'id="{diagnostics.BACKUPS_PAGE.partition("#")[2]}"' in client.get(store).text
+
+
 def test_the_total_of_the_queue_says_what_it_counts(world, monkeypatch):  # noqa: F811
     """« À valider › Tout ce qui attend » ne dit plus « à regarder » : ses onglets disent ce qu'il compte, et ce
     qu'aucun ne garde passe en « autres demandes » (C1-10)."""
@@ -178,12 +209,14 @@ def test_counts_agree_and_durations_are_read_not_in_seconds():
     """Plus de « (s) » ni de secondes brutes (C1-10) : le nom s'accorde au compte (le singulier jusqu'à 1), une
     attente se dit en minutes."""
     assert plural(0, "échec", "échecs") == "0 échec" and plural(1, "mail lu", "mails lus") == "1 mail lu"
-    assert plural(2, "abandonné", "abandonnés") == "2 abandonnés" and plural(1200, "an", "ans") == "1 200 ans"
+    assert plural(2, "échoué", "échoués") == "2 échoués" and plural(1200, "an", "ans") == "1 200 ans"
     now = 100 * MINUTE
 
     class Store:
         def query_mind(self, query):
-            return [(7, "say", "boom"), (8, "say", "boom")]
+            if len(query.selected_columns) == 3:  # le compte par état, et combien ont moins de 24 h
+                return [("failed", 2, 2)]
+            return [(8, "say", "failed", "boom"), (7, "say", "failed", "boom")]  # les plus récents, pour le détail
 
         def get_events(self, seqs):
             return [SimpleNamespace(seq=s, at=now - (7 * MINUTE if s == 9 else MINUTE)) for s in seqs]
@@ -193,8 +226,9 @@ def test_counts_agree_and_durations_are_read_not_in_seconds():
 
     kernel = SimpleNamespace(mind=SimpleNamespace(store=Store(), clock=SimpleNamespace(now=lambda: now)))
     check = health._outbox(kernel)
-    assert check.summary == "1 effet en attente, le plus vieux depuis 7 min ; 2 abandonnés en 24 h"
-    assert check.detail[0].startswith("say (seq 9) : 1 tentative ")
+    assert check.summary == "1 effet en attente, le plus vieux depuis 7 min ; 2 départs à traiter : 2 échoués"
+    assert check.detail[0] == "say (événement n° 9) : en attente, 1 tentative"
+    assert check.detail[1] == "say (événement n° 8) : échoué — boom"
 
 
 def test_one_line_per_page_where_to_decide():

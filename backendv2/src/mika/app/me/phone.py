@@ -21,7 +21,7 @@ from mika.app.me.common import millis, snippet, texts_of
 from mika.contracts import phone as phone_c
 from mika.plugins import location as location_p
 from mika.plugins import phone as phone_p
-from mika.plugins.phone import UNDER_WAY, Msg, Offer, PhoneState, app_name
+from mika.plugins.phone import SETTLED_STATES, UNDER_WAY, Msg, Offer, PhoneState, app_name
 from mika.runtime.operations import audit
 
 #: au plus tant de conversations, de messages d'un fil
@@ -63,12 +63,29 @@ def _offers(call: Call, keys: set[str]) -> list[Offer]:
             and f"{o.source}|{o.thread}" in keys]
 
 
+def _her(offers: list[Offer], received: Msg | None) -> dict[str, Any] | None:
+    """La réponse de Mika qui compte pour une conversation : sa réponse en chemin (la plus récente), même si un message
+    est arrivé depuis — elle attend ton geste ; sinon sa dernière réponse réglée, si elle a été proposée après le
+    dernier message reçu (``received``) — une réponse à un message d'avant n'est plus une nouvelle ; sinon rien."""
+    latest = sorted(offers, key=lambda o: -o.seq)
+    chosen = next((o for o in latest if o.state in UNDER_WAY), None)
+    if chosen is None:
+        settled = next((o for o in latest if o.state in SETTLED_STATES), None)
+        if settled is not None and (received is None or settled.at > received.at):
+            chosen = settled
+    if chosen is None:
+        return None
+    return {"state": chosen.state, "id": chosen.seq, "decided_at": millis(chosen.decided_at)}
+
+
 # ── lire ──
 
 
 async def conversations(call: Call) -> dict[str, Any]:
     """Ses conversations, la plus récente d'abord : l'appli, le titre (le groupe, sinon qui écrit), le dernier
-    message, et une réponse de Mika en chemin."""
+    message, et la réponse de Mika qui y compte (``her`` : son sort, son ``seq``, quand il s'est réglé) — sa réponse
+    en chemin, toujours, même si un message est arrivé depuis ; sinon sa dernière réponse réglée (partie, copiée,
+    laissée, en échec, expirée…), seulement si elle a été proposée après le dernier message reçu ; sinon ``None``."""
     by: dict[str, list[Msg]] = {}
     for m in _mine(call):
         by.setdefault(_key(m), []).append(m)
@@ -78,7 +95,10 @@ async def conversations(call: Call) -> dict[str, Any]:
              for k, ms in ordered}
     texts = texts_of(call, [*(m.text_ref for m in lasts.values()), *(m.title_ref for m in lasts.values()),
                           *(m.name_ref for m in named.values() if m is not None)])
-    pending = {f"{o.source}|{o.thread}": o for o in _offers(call, set(lasts)) if o.state in UNDER_WAY}
+    offers: dict[str, list[Offer]] = {}
+    for o in _offers(call, set(lasts)):
+        offers.setdefault(f"{o.source}|{o.thread}", []).append(o)
+    received = {k: max((m for m in ms if not m.own), key=lambda m: (m.at, m.seq), default=None) for k, ms in ordered}
     out = []
     for key, ms in ordered:
         last, who = lasts[key], named[key]
@@ -87,7 +107,7 @@ async def conversations(call: Call) -> dict[str, Any]:
                     "title": title or (texts.get(who.name_ref, "") if who is not None else ""),
                     "count": len(ms), "last_at": millis(last.at),
                     "last": {**_message_json(last, texts), "text": snippet(texts.get(last.text_ref, ""), SNIPPET)},
-                    "her": {"state": pending[key].state, "id": pending[key].seq} if key in pending else None})
+                    "her": _her(offers.get(key, []), received[key])})
     return {"items": out}
 
 

@@ -18,6 +18,7 @@ Réveils par API) : des onglets de la console, que ``app/settings_sections/`` y 
 from __future__ import annotations
 
 from mika.inspector.catalog import Destination, Labels, NavGroup
+from mika.inspector.names import OTHER_EFFECTS
 
 NAVIGATION: tuple[NavGroup, ...] = (
     NavGroup("Elle", (
@@ -371,6 +372,43 @@ EVENT_LABELS: dict[str, str] = {
     "memory.relayed_read": "Des messages du téléphone relus, ou remis à la file des reprises",
 }
 
+#: Ce que la file de sortie fait partir, effet par effet (« propriétaire:type », la clé de ses lignes) : sa famille
+#: (``EFFECT_FAMILIES``), son nom, ce que c'est. Système › File de sortie les range par famille ; sa vue, la page
+#: dessinée et la page d'un événement disent leur nom (``Names.effect``). Un test d'architecture veut un nom pour chaque
+#: effet du registre composé.
+EFFECT_LABELS: dict[str, tuple[str, str, str]] = {
+    "expression:episode.utterance": ("dit", "Ses messages",
+                                     "ce qu'elle répond ou lance, livré aux écrans et au téléphone de la personne"),
+    "runtime:episode.ended": ("dit", "Une réponse qui ne viendra pas",
+                              "les écrans apprennent qu'aucune réponse ne viendra (une panne, un silence choisi)"),
+    "body:body.fell_asleep": ("montre", "Elle s'endort", "ses écrans la montrent se coucher"),
+    "body:body.woke": ("montre", "Elle se réveille", "ses écrans la montrent se lever"),
+    "body:body.roused": ("montre", "On la réveille", "un réveil par API la tire du sommeil"),
+    "world:world.intended": ("montre", "Un geste commence", "dans son monde : elle va quelque part, prend un objet"),
+    "world:episode.started": ("montre", "Elle se met au travail", "son monde la montre occupée pendant qu'elle travaille"),
+    "world:world.ended": ("montre", "Un geste s'achève", "son monde montre comment il a fini"),
+    "world:world.changed": ("montre", "Ce qui l'occupe change", "ses écrans redessinent son monde"),
+    "world:world.authored": ("montre", "Son monde, réécrit", "une opératrice l'a édité : les écrans le redessinent"),
+    "runtime:effect.proposed": ("agit", "Une action, tout de suite",
+                                "une action qui ne demande pas d'accord : elle part dès qu'elle est décidée"),
+    "runtime:effect.resolved": ("agit", "Une action que tu as autorisée",
+                                "elle part après ton accord : un mail, une réponse Teams, un git push…"),
+    "email:effect.executed": ("agit", "Un mail parti", "elle apprend qu'il est parti, retouché ou non"),
+    "teams:teams.settled": ("agit", "Une réponse Teams partie", "elle apprend qu'elle est partie, retouchée ou non"),
+    "mcp:effect.executed": ("agit", "Ce qu'un service a rendu", "le résultat d'un appel à un service branché"),
+    "forge:effect.executed": ("agit", "Une app installée", "une version de ses apps forgées, après ton accord"),
+    "forge:effect.resolved": ("agit", "Une version d'app refusée", "mise de côté puis refusée : elle ne traîne plus"),
+    "projects:effect.executed": ("agit", "Un pilotage de projet accepté",
+                                 "la demande de quelqu'un sur un projet s'écrit, à son nom, après ton accord"),
+    "shares:shares.expired": ("range", "Un fichier envoyé expire", "ses octets sont effacés"),
+    "attachments:attachments.expired": ("range", "Une pièce reçue expire", "ses octets sont effacés"),
+}
+#: Les familles des effets, dans l'ordre de la page ; un effet sans libellé se range avec le reste
+#: (``names.OTHER_EFFECTS``).
+EFFECT_FAMILIES: tuple[tuple[str, str], ...] = (
+    ("dit", "Ce qu'elle dit"), ("montre", "Ce que montrent ses écrans"), ("agit", "Ce qu'elle fait au dehors"),
+    ("range", "Le ménage"), (OTHER_EFFECTS, "Le reste"))
+
 #: Les familles d'outils (leurs lots) qui ne se nomment pas comme leur faculté ; « préfixe.* » : les lots qu'une
 #: source ajoute (un par serveur MCP branché, un par app), nommés par ce qui suit le préfixe.
 BUNDLE_LABELS: dict[str, str] = {
@@ -409,7 +447,17 @@ ENRICHER_LABELS: dict[str, str] = {
     "news": "Ce que ses apps ont trouvé pour la personne", "wakeup": "Ses réveils par API",
 }
 
+#: Les ports que des outils attendent (``needs=``) : pourquoi la porte ne les offre pas tant que le port n'est pas prêt
+#: (``runtime.tool_offer.ready``), et la page de réglages où il se règle — la fiche d'un outil dit l'un et mène à
+#: l'autre. Le port des cartes (``adapters/maps/desk.py``, ``MapsDesk``) ne déclare pas ``configured`` : il n'est pas
+#: prêt seulement quand la composition ne le branche pas ; le serveur le branche toujours, et chaque appel dit alors ce
+#: qui manque (rien de réglé, un serveur qui ne répond pas).
+NEED_LABELS: dict[str, tuple[str, str]] = {
+    "imaging": ("aucun fournisseur d'images n'est configuré", "images-fournisseurs"),
+    "maps": ("les lieux, les adresses et les itinéraires ne sont pas branchés", "lieux"),
+}
+
 #: Tout ce que la console nomme en français, d'un bloc.
 LABELS = Labels(faculties=FACULTY_LABELS, sections=SECTION_LABELS, reasons=REASON_LABELS, vetoes=VETO_LABELS,
-                processes=PROCESS_LABELS, events=EVENT_LABELS, bundles=BUNDLE_LABELS, capabilities=CAPABILITY_LABELS,
-                enrichers=ENRICHER_LABELS)
+                processes=PROCESS_LABELS, events=EVENT_LABELS, effects=EFFECT_LABELS, bundles=BUNDLE_LABELS,
+                capabilities=CAPABILITY_LABELS, enrichers=ENRICHER_LABELS, needs=NEED_LABELS)

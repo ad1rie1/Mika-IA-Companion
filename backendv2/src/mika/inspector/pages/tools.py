@@ -24,9 +24,10 @@ from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
 from mika.inspector import mcp as console_mcp
-from mika.inspector import names
+from mika.inspector import names, render
 from mika.inspector.catalog import Panel
 from mika.inspector.mcp import TOOLS as CONSOLE_TOOLS
+from mika.inspector.names import unready
 from mika.inspector.pages import families
 from mika.inspector.pages.tabs import TABS
 from mika.inspector.ui import PREFIX, secure
@@ -172,15 +173,16 @@ def placeable(ui: Any, spec: ToolSpec | None) -> bool:
 
 
 def why_not(spec: ToolSpec, policy: EpisodePolicy, s: Situation, tools: Mapping[str, ToolSpec] | None = None,
-            rights: Any = None, close: Any = None, ports: Mapping[str, Any] | None = None) -> str:
+            rights: Any = None, close: Any = None, ports: Mapping[str, Any] | None = None, names: Any = None) -> str:
     """Pourquoi la porte ne l'offre pas ici, en mots (vide : elle l'offre). Un test vérifie que ce récit et la
-    porte disent la même chose, situation par situation."""
+    porte disent la même chose, situation par situation. Le port qu'il attend et qui n'est pas prêt se dit par
+    ``names.need`` (« aucun fournisseur d'images n'est configuré ») ; sans ``names``, par sa clé."""
     if s.kind not in spec.episodes:
         return "pas prévu dans cette situation"
     if not admitted(policy.tool_bundles, spec.bundle):
         return "sa famille n'est pas prévue dans cette situation"
     if spec.needs and ports is not None and not ready(ports.get(spec.needs)):
-        return f"« {spec.needs} » n'est pas configuré"
+        return names.need(spec.needs)[0] if names is not None else unready(spec.needs)
     if spec.when is not None or spec.fits is not None:
         try:
             ok = (spec.when is None or spec.when(s.audience) is True) and (
@@ -246,8 +248,10 @@ def _prompt(ui: Any, s: Situation) -> str:
 @TABS.tab("outils.tous", title="Ce qu'elle peut faire",
           description="Ses propres outils, famille par famille, chacune avec son tableau de droits : qui, par où, "
                       "quand, ce qu'elle fait d'un outil qui lit et d'un outil qui agit, ce qu'elle en garde — né du "
-                      "minimum vital, modifiable (ADR 0134). Un outil ouvre sa fiche.")
+                      "minimum vital que le code déclare, modifiable, la page prévenant quand il descend en dessous. "
+                      "Un outil ouvre sa fiche.")
 async def all_tools(ui: Any, request: Request) -> Any:
+    """Ses familles et leurs tableaux de droits (ADR 0134), ou la fiche d'un outil (``?outil=``)."""
     name = str(request.query_params.get("outil", "") or "")
     if name:
         return _tool_page(ui, request, name)
@@ -258,7 +262,8 @@ async def all_tools(ui: Any, request: Request) -> Any:
     terms = fold(query).split()
     specs = [spec for spec in sorted(registry.tools.values(), key=lambda x: x.name)
              if (not lot or spec.bundle == lot)
-             and all(x in fold(f"{spec.name} {spec.description} {ui.names.bundle(spec.bundle)}") for x in terms)]
+             and all(x in fold(f"{spec.name} {spec.label} {spec.description} {ui.names.bundle(spec.bundle)}")
+                     for x in terms)]
     where = {}
     for spec in specs:
         sits = [s for s in situations(ui) if spec.name in offered_in(ui, s)]
@@ -285,6 +290,11 @@ async def all_tools(ui: Any, request: Request) -> Any:
 
 
 def _tool_page(ui: Any, request: Request, name: str) -> Any:
+    """La fiche d'un outil : sous son nom, ce qu'il fait par son libellé (``ToolSpec.label``, ADR 0208), dit à qui
+    lit ; puis où elle peut s'en servir, et ce qu'elle lit de lui, sa description citée telle quelle — pour un outil
+    du code, la consigne exacte au modèle, où « tu » la désigne ; pour un outil venu d'un service ou d'une app (sans
+    libellé, sans sous-titre), ce qu'ils en disent, ou, pour un service, la phrase que l'opératrice lui a donnée à la
+    place (« Régler l'outil », sur la fiche du serveur) (audit du 2026-11-05, C6-10)."""
     registry = ui.kernel.registry
     context = {k: v for k, v in request.query_params.items() if k in CATALOG_PARAMS or is_table_choice(k, v)}
     # le fil d'Ariane (ADR 0202) : « Outils / Ses outils / <l'outil> », la destination menant à la liste d'où l'on
@@ -300,7 +310,8 @@ def _tool_page(ui: Any, request: Request, name: str) -> Any:
     for s in situations(ui):
         policy = policies[s.kind]
         if spec.name not in offered_in(ui, s):
-            why = why_not(spec, policy, s, registry.tools, *gate_of(registry, s.frame), ports=ui.kernel.runner.ports)
+            why = why_not(spec, policy, s, registry.tools, *gate_of(registry, s.frame), ports=ui.kernel.runner.ports,
+                          names=ui.names)
             where.append({"key": s.key, "label": s.label, "state": "none", "why": why})
             continue
         core = in_hand(ui, policy)
@@ -318,7 +329,8 @@ def _tool_page(ui: Any, request: Request, name: str) -> Any:
         ("d'où il vient", Badge(label, tone)),
         ("faculté", ui.names.faculty(spec.owner)),
         ("famille", Text(ui.names.bundle(spec.bundle), secondary=registry.bundles.get(spec.bundle, ""))),
-        ("ce qu'il fait", Text(spec.description)),
+        # son libellé, dit à qui lit (ADR 0208) ; un outil venu d'ailleurs n'en a pas : sa description
+        ("ce qu'il fait", Text(spec.label or spec.description)),
         ("sortes d'épisodes", _kinds(spec)),
         ("réservé", reserved),
         ("condition d'offre", condition(spec) or "—"),
@@ -346,11 +358,28 @@ def _tool_page(ui: Any, request: Request, name: str) -> Any:
                                                                                columns=2))),
     ]
     return {"blocks": blocks, "crumbs": [(spec.name, "")], "back": back, "panel": Panel("handmade/outils/outil.html", {
-        "page_heading": spec.name, "page_subtitle": spec.description,
+        # sous son nom, son libellé ; un outil venu d'ailleurs n'en a pas : une chaîne vide, qui tait la description
+        # de l'onglet sans laisser de paragraphe — sa description, elle, est citée dans « Ce qu'elle lit de lui »
+        "page_heading": spec.name, "page_subtitle": spec.label, "tool_read": spec.description,
         "tool_name": spec.name, "tool_origin": label, "tool_tone": tone, "tool_dynamic": dynamic,
         "tool_family": ui.names.bundle(spec.bundle), "tool_bundle": spec.bundle, "tool_reserved": spec.owner_only,
-        "where": where, "context": context, "place": place,
+        "where": where, "context": context, "place": place, "setup": _setup(ui, spec),
     })}
+
+
+def _setup(ui: Any, spec: ToolSpec) -> dict[str, str] | None:
+    """Où se règle le port qu'il attend (``needs``), quand ce port n'est pas prêt : le lien vers sa page de réglages
+    (``names.need``), que la fiche montre sous ses situations ; rien quand le port est prêt, quand il n'a pas de page,
+    ou quand cette page n'existe pas dans cette console."""
+    if not spec.needs or ready(ui.kernel.runner.ports.get(spec.needs)):
+        return None
+    key = ui.names.need(spec.needs)[1]
+    forms = getattr(ui, "settings_forms", None)
+    found = forms.pages.get(key) if forms is not None and key else None
+    if found is None:
+        return None
+    title = found[1].title
+    return {"href": render.href(Ref.settings(key, title), ui.env()), "text": title}
 
 
 def schema_of(spec: ToolSpec) -> Mapping[str, Any]:

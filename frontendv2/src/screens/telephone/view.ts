@@ -1,16 +1,30 @@
 /**
- * Téléphone : ce qui se montre, sans DOM — les mots d'une proposition de Mika, l'icône d'une appli, le fil (repères
- * de jour, messages, propositions), les conversations rangées par appli, la position et son lien OpenStreetMap. Le
- * balisage est celui de la maquette (`frontendv2/maquette/ecrans/telephone.js`).
+ * Téléphone : ce qui se montre, sans DOM — ses onglets, les mots d'une proposition de Mika, l'icône d'une appli, le fil
+ * (repères de jour, messages, propositions), ce que dit un téléphone d'où rien ne vient, la phrase qui en parle à Mika
+ * dans le chat, la position, son plan dessiné et son lien OpenStreetMap, l'état de ses téléphones dans la barre de
+ * titre. Le balisage est celui de la maquette (`frontendv2/maquette/ecrans/telephone.js`), sauf son onglet
+ * Notifications, qui attend que l'application lise d'autres apps que les messageries, son sélecteur de téléphones, qui
+ * attend que chaque message dise le sien (ADR 0190, 0233), et le plan de la position : celui de la Carte
+ * (`map/drawn.ts`), le point et sa précision sans les rues ni la rivière, inventées, de la maquette.
  */
-import type { MapInfo, Phone, PhoneConversation, PhoneMessage, PhoneOffer, PhonePosition, PhoneThread } from "../../api/phone";
-import { infoKey } from "../../map/info";
-import { covers } from "../../map/mapgeo";
+import type { Phone, PhoneConversation, PhoneMessage, PhoneOffer, PhonePosition, PhoneThread } from "../../api/phone";
+import { drawnScene } from "../../map/drawn";
+import type { Scene } from "../../map/scene";
 import { mikaAvatar } from "../../mika/face";
 import { h, initials, norm } from "../../shell/dom";
 import { ico, type IconName } from "../../shell/icons";
+import type { ScreenTab } from "../../shell/shell";
 import { plainHtml } from "../chat/markup";
 import { ago, clock, dayWords, personAvatar, remaining, shortWhen } from "../../shared/kit";
+
+/**
+ * Les onglets de l'écran. Pas de Notifications tant que l'application ne lit que les messageries : il ne ferait que
+ * redire Messages ; une ancienne adresse `#telephone/notifications` retombe sur Messages (ADR 0233).
+ */
+export const TELEPHONE_TABS: readonly Readonly<ScreenTab>[] = [
+  { id: "messages", title: "Messages" },
+  { id: "position", title: "Position" },
+];
 
 // ── Les mots ─────────────────────────────────────────────────────────
 
@@ -42,9 +56,9 @@ export function appBadge(app: string, appName: string): { cls: string; letter: s
   return { cls: "other", letter: (appName.trim()[0] ?? "?").toUpperCase() };
 }
 
-export function appIcon(app: string, appName: string, large = false): string {
+export function appIcon(app: string, appName: string): string {
   const b = appBadge(app, appName);
-  return `<span class="app-ico ${b.cls}${large ? " lg" : ""}" title="${h(appName)}">${h(b.letter)}</span>`;
+  return `<span class="app-ico ${b.cls}" title="${h(appName)}">${h(b.letter)}</span>`;
 }
 
 /** Le nom court d'un téléphone : « samsung SM-S931B » pour « Android · samsung SM-S931B ». */
@@ -58,8 +72,9 @@ export function activePhones(phones: readonly Phone[]): Phone[] {
 }
 
 /**
- * Le téléphone d'où viennent ses messages, quand on peut le dire : un seul téléphone a jamais servi à son compte
- * (le serveur ne note pas encore quel téléphone a reçu quoi : un moyen de communication par compte).
+ * Le téléphone d'où vient ce qu'on lit (« Envoyée par », sous sa position), quand on peut le dire : un seul téléphone
+ * a jamais servi à son compte (le serveur ne note pas encore quel téléphone a reçu quoi : un moyen de communication par
+ * compte).
  */
 export function onlyPhone(phones: readonly Phone[]): Phone | null {
   return phones.length === 1 ? phones[0] : null;
@@ -97,26 +112,31 @@ export function snippetOf(c: PhoneConversation): string {
   return `${who}${c.last.text}`;
 }
 
-/** Ses conversations rangées par appli, dans l'ordre où elles arrivent (la plus récente d'abord). */
-export function byApp(items: readonly PhoneConversation[]): { app: string; name: string; items: PhoneConversation[] }[] {
-  const out: { app: string; name: string; items: PhoneConversation[] }[] = [];
-  for (const c of items) {
-    const name = c.app_name || c.app;
-    let group = out.find((g) => g.name === name);
-    if (!group) {
-      group = { app: c.app, name, items: [] };
-      out.push(group);
-    }
-    group.items.push(c);
-  }
-  return out;
+/**
+ * La marque d'une conversation d'après la réponse de Mika qui y compte (`her`) : [ton de l'étiquette, mots], ou rien.
+ * En chemin, elle attend ton geste ; partie, copiée ou en échec, c'est une nouvelle ; laissée, remplacée par ce que tu
+ * as écrit ou expirée, non.
+ */
+export function herMark(c: Pick<PhoneConversation, "her">): [string, string] | null {
+  const state = c.her?.state ?? "";
+  if (underWay(state)) return ["warn", "réponse proposée"];
+  if (state === "sent") return ["ok", "Mika a répondu"];
+  if (state === "copied") return ["info", "copiée"];
+  if (state === "failed") return ["danger", "échec"];
+  return null;
 }
 
-/** L'étiquette d'une conversation dans « Notifications » : sa réponse en chemin, ta réponse, ou reçue. */
-export function conversationTag(c: PhoneConversation): [string, string] {
-  if (c.her) return c.her.state === "offered" ? ["warn", "réponse proposée"] : offerWords(c.her.state);
-  if (c.last.own) return ["ok", "répondu par toi"];
-  return ["", "reçue"];
+/**
+ * Cette marque dans la liste : ce que fait Mika garde son rose (ADR 0187), plus discret une fois réglé ; un échec se
+ * dit en rouge.
+ */
+function herBadge(c: PhoneConversation): string {
+  const mark = herMark(c);
+  if (!mark || !c.her) return "";
+  const [tone, words] = mark;
+  if (tone === "danger") return `<span class="tag danger">${ico("alert")}${h(words)}</span>`;
+  if (underWay(c.her.state)) return `<span class="mk">${ico("pen")}${h(words)}</span>`;
+  return `<span class="mk quiet">${ico(c.her.state === "copied" ? "copy" : "check")}${h(words)}</span>`;
 }
 
 function avatarOf(title: string, group: boolean, size?: "lg"): string {
@@ -129,12 +149,63 @@ function avatarOf(title: string, group: boolean, size?: "lg"): string {
 
 export function conversationItem(c: PhoneConversation, selected: boolean, now: number): string {
   const title = conversationTitle(c);
-  const her = c.her && underWay(c.her.state) ? `<span class="mk">${ico("pen")}réponse proposée</span>` : "";
+  const her = herBadge(c);
   return `<button class="li conv" type="button" data-conv="${h(c.key)}" aria-selected="${selected}">
     <span class="conv-av">${avatarOf(title, c.group)}${appIcon(c.app, c.app_name)}</span>
     <span class="li-main"><span class="li-top"><span class="li-title">${h(title)}</span><time>${h(shortWhen(c.last_at, now))}</time></span>
       <span class="li-snip">${h(snippetOf(c))}</span>
       ${her ? `<span class="li-marks">${her}</span>` : ""}</span></button>`;
+}
+
+/** La phrase qui ouvre le chat depuis un fil (« Lui en parler dans le chat ») : elle nomme la conversation, à compléter. */
+export function askAboutConversation(c: Pick<PhoneConversation, "title" | "app_name" | "group">): string {
+  const app = c.app_name.trim();
+  const on = app ? ` ${app}` : "";
+  const title = c.title.trim();
+  if (!title) return `À propos d'une de mes conversations${on} : `;
+  return `À propos de ma conversation${on} avec ${c.group ? "le groupe " : ""}${title} : `;
+}
+
+// ── Quand rien ne vient du téléphone ─────────────────────────────────
+
+/** Ce que dit un compte qui n'est pas propriétaire : Mika ne lit pas ses messages, et ce n'est pas un réglage. */
+export const NOT_OWNER_NOTE =
+  "Mika ne lit les messages du téléphone que pour une de ses propriétaires. Ta position, elle, se voit dans l'onglet Position.";
+
+/** Le pourquoi d'un téléphone d'où rien ne vient, et le lien qui mène où l'on peut quelque chose. */
+export interface EmptyPhone {
+  text: string;
+  href: string;
+  icon: IconName;
+  label: string;
+}
+
+/**
+ * Pourquoi aucun message ne vient de son téléphone. La porte du téléphone refuse tout lot d'un compte qui n'est pas
+ * propriétaire (`backendv2/src/mika/app/phone.py`) : à lui, la vraie raison et sa position, qui se voit — pas un réglage
+ * qui ne peut rien pour lui. `owner` : celui de `GET /api/moi` ; pas encore lu (`undefined`), le conseil d'une
+ * propriétaire. `phones` : combien de téléphones son compte a connus.
+ */
+export function emptyPhone(owner: boolean | undefined, phones: number): EmptyPhone {
+  if (owner === false) return { text: NOT_OWNER_NOTE, href: "#telephone/position", icon: "pin", label: "Ta position" };
+  return {
+    text: phones
+      ? "Sur ton téléphone, allume « Lui montrer mes messages » : Mika lira tes conversations WhatsApp et Messages."
+      : "Installe Mika sur ton téléphone et connecte-toi : elle lira tes conversations WhatsApp et Messages, si tu le lui permets.",
+    href: "#parametres/telephones",
+    icon: "settings",
+    label: "Tes téléphones",
+  };
+}
+
+function emptyBlock(icon: IconName, title: string, e: EmptyPhone): string {
+  return `<div class="empty">${ico(icon)}<b>${h(title)}</b><p>${h(e.text)}</p>
+    <a class="btn sm" href="${h(e.href)}">${ico(e.icon, "sm")}${h(e.label)}</a></div>`;
+}
+
+/** L'onglet Messages sans aucune conversation. */
+export function emptyMessagesMarkup(owner: boolean | undefined, phones: number): string {
+  return `<div class="fill-scroll">${emptyBlock("phone", "Aucun message de ton téléphone", emptyPhone(owner, phones))}</div>`;
 }
 
 // ── Le fil ───────────────────────────────────────────────────────────
@@ -172,18 +243,34 @@ function messageMarkup(m: PhoneMessage, group: boolean): string {
     <div class="bubble">${plainHtml(m.text)}</div><div class="msg-meta">${h(clock(m.at))}</div></div></div>`;
 }
 
-/** Une réponse que Mika a proposée, et ce qu'elle est devenue (rien ne se décide d'ici : le geste est au téléphone). */
+/** « expire dans 1 h 52 » ; passée, « échue ». */
+function expiry(until: number, now: number): string {
+  const left = remaining(until, now);
+  return left === "échue" ? left : `expire ${left}`;
+}
+
+/** Le titre d'une réponse de Mika dans le fil : proposée tant qu'elle est en chemin, puis partie ou non. */
+export function offerTitle(state: string): string {
+  if (underWay(state)) return "Réponse proposée par Mika";
+  return state === "sent" || state === "copied" ? "Réponse de Mika" : "Réponse de Mika, non partie";
+}
+
+/**
+ * Une réponse que Mika a proposée, et ce qu'elle est devenue (rien ne se décide d'ici : le geste est au téléphone).
+ * Réglée, sa carte garde le rose de Mika, atténué (`settled`) : ce n'est pas une bulle à toi.
+ */
 export function offerMarkup(o: PhoneOffer, thread: Pick<PhoneThread, "app_name">, title: string, now: number): string {
   const [cls, words] = offerWords(o.state);
-  const extra = o.state === "offered" && o.expires ? ` · expire ${remaining(o.expires, now)}` : o.decided_at && !underWay(o.state) ? ` · ${ago(o.decided_at, now)}` : "";
+  // à côté de l'étiquette, pas dedans : sur un téléphone, l'une et l'autre passent à la ligne sans sortir de la carte
+  const when = o.state === "offered" && o.expires ? expiry(o.expires, now) : o.decided_at && !underWay(o.state) ? ago(o.decided_at, now) : "";
   const icon: IconName = o.state === "offered" || o.state === "prepared" ? "phone" : o.state === "sent" ? "check" : o.state === "failed" ? "alert" : "x";
   const help = o.state === "offered"
     ? `<p class="prop-help">Ton téléphone affiche « Répondre à ${h(title)} (${h(thread.app_name)}) ? » avec Envoyer, Écrire autre chose et Ignorer : ton geste vaut accord.</p>`
     : o.state === "prepared" ? `<p class="prop-help">Elle part à ton téléphone, qui te demandera ton geste.</p>` : "";
-  return `<div class="prop"${o.reason ? ` title="${h(o.reason)}"` : ""}>
-    <div class="prop-head">${mikaAvatar("xs")}<b>Réponse proposée par Mika</b><span class="muted small">${h(clock(o.at))}</span></div>
+  return `<div class="prop${underWay(o.state) ? "" : " settled"}"${o.reason ? ` title="${h(o.reason)}"` : ""}>
+    <div class="prop-head">${mikaAvatar("xs")}<b>${h(offerTitle(o.state))}</b><span class="muted small">${h(clock(o.at))}</span></div>
     <div class="prop-txt">« ${plainHtml(o.text)} »</div>
-    <div class="prop-foot"><span class="tag ${cls}">${ico(icon)}${h(words + extra)}</span></div>${help}
+    <div class="prop-foot"><span class="tag ${cls}">${ico(icon)}${h(words)}</span>${when ? `<span class="small muted">${h(when)}</span>` : ""}</div>${help}
   </div>`;
 }
 
@@ -200,10 +287,15 @@ export function threadMarkup(t: PhoneThread, title: string, now: number): string
   return more + body;
 }
 
-export const COMPOSER_NOTE =
-  "Répondre d'ici arrive bientôt : pour l'instant, Mika prépare ses réponses quand tu lui en parles dans le chat, et ton téléphone te demande le geste.";
+/** Ce que dit la saisie coupée : son début seul sur un téléphone (une ligne), la suite sur un écran plus large. */
+export const COMPOSER_NOTE = "Répondre d'ici arrive bientôt";
+export const COMPOSER_NOTE_MORE =
+  "pour l'instant, Mika prépare ses réponses quand tu lui en parles dans le chat, et ton téléphone te demande le geste";
 
-/** La saisie, coupée tant que l'API ne sait pas envoyer depuis le web (ADR 0189) ni préremplir (ADR 0191). */
+/**
+ * La saisie, coupée tant que l'API ne sait pas envoyer depuis le web (ADR 0189) ni préremplir (ADR 0191). Sur un
+ * téléphone, elle se réduit à sa note (`telephone.css`) : ni cadre ni boutons qui ne font rien.
+ */
 export function composerMarkup(title: string): string {
   return `<div class="tel-dock">
     <div class="composer tel-cmp" aria-disabled="true">
@@ -212,91 +304,46 @@ export function composerMarkup(title: string): string {
         <span class="grow"></span>
         <button class="btn sm primary" type="button" disabled>${ico("send", "sm")}<span class="lbl">Envoyer</span></button></div>
     </div>
-    <p class="tel-soon small muted">${ico("info", "xs")}${h(COMPOSER_NOTE)}</p></div>`;
+    <p class="tel-soon small muted">${ico("info", "xs")}<span>${h(COMPOSER_NOTE)}<span class="tel-soon-more"> : ${h(COMPOSER_NOTE_MORE)}</span>.</span></p></div>`;
 }
 
-export function threadHead(c: PhoneConversation, phone: Phone | null): string {
+/**
+ * L'en-tête d'un fil : la conversation, son appli, ses messages. Il ne nomme pas de téléphone : le serveur ne dit pas
+ * lequel a reçu quel message, et la barre de titre dit déjà les tiens (`phoneState`).
+ */
+export function threadHead(c: PhoneConversation): string {
   const title = conversationTitle(c);
   const parts = [c.group ? `Groupe ${c.app_name}` : c.app_name, `${c.count} message${c.count > 1 ? "s" : ""}`];
-  const where = phone ? ` · ${ico("phone", "xs")} ${h(shortPhone(phone.label))}` : "";
   return `<div class="pane-head thread-head"><button class="btn sm icon ghost mobile-back" type="button" data-retour title="Les conversations">${ico("chev-left", "sm")}</button>
     ${avatarOf(title, c.group, "lg")}
-    <div class="grow"><h2>${h(title)} ${appIcon(c.app, c.app_name)}</h2><p class="small muted">${h(parts.join(" · "))}${where}</p></div>
+    <div class="grow"><h2>${h(title)} ${appIcon(c.app, c.app_name)}</h2><p class="small muted">${h(parts.join(" · "))}</p></div>
     <button class="btn icon ghost sm" type="button" title="Plus" data-more>${ico("more")}</button></div>`;
-}
-
-// ── Notifications ────────────────────────────────────────────────────
-
-/** `top` : du HTML posé en tête de la page (la note du sélecteur de téléphones). */
-export function notificationsMarkup(items: readonly PhoneConversation[], now: number, top = ""): string {
-  const note = `${top}<div class="mika-note info-note">${ico("info")}<div class="mn-body"><div class="mn-title">Ce que ton téléphone lui montre</div>
-    <span class="small">Aujourd'hui, l'application ne lui montre que tes messageries : WhatsApp, WhatsApp Business et Messages, si « Lui montrer mes messages » est allumé sur le téléphone. Les autres apps (un colis, un rendez-vous), choisies une à une, arrivent bientôt (ADR 0190). <a href="#parametres/telephones">Tes téléphones</a></span></div></div>`;
-  if (!items.length) {
-    return `<div class="fill-scroll"><div class="page-pad notifs">${note}
-      <div class="empty">${ico("bell")}<b>Rien de ton téléphone</b><p>Aucun message lu sur ton téléphone pour l'instant.</p></div></div></div>`;
-  }
-  const groups = byApp(items)
-    .map((g) => {
-      const rows = g.items
-        .map((c) => {
-          const [cls, words] = conversationTag(c);
-          return `<a href="#telephone/messages/${encodeURIComponent(c.key)}" class="notif">${appIcon(c.app, c.app_name, true)}
-            <span class="notif-main"><span class="li-top"><b>${h(conversationTitle(c))}</b><span class="muted small">${h(g.name)}${c.group ? " · groupe" : ""} · ${c.count} message${c.count > 1 ? "s" : ""}</span><time>${h(shortWhen(c.last_at, now))}</time></span>
-              <span class="notif-txt">${h(snippetOf(c))}</span></span>
-            <span class="tag ${cls}">${h(words)}</span></a>`;
-        })
-        .join("");
-      return `<div class="day"><span>${h(g.name)} · ${g.items.length} conversation${g.items.length > 1 ? "s" : ""}</span></div>${rows}`;
-    })
-    .join("");
-  return `<div class="fill-scroll"><div class="page-pad notifs">${note}<div class="notif-list">${groups}</div></div></div>`;
 }
 
 // ── La position ──────────────────────────────────────────────────────
 
-/** Un plan dessiné, le même partout (aucune tuile chargée du dehors) : la position au centre, sa précision autour. */
-export function mapMarkup(accuracy: number, label: string): string {
-  // la position sur la grande rue, comme dans la maquette ; la rivière et les parcs plus loin
-  const x = 400;
-  const y = 190;
-  const r = Math.max(16, Math.min(230, (accuracy || 6) * 2.8));
-  const blocks: [number, number, number, number][] = [
-    [90, 70, 150, 100], [280, 60, 120, 90], [440, 50, 140, 100], [640, 60, 110, 80], [90, 240, 130, 60],
-    [470, 250, 140, 70], [300, 420, 140, 90], [640, 420, 120, 100], [380, 240, 70, 60], [650, 240, 110, 50],
-  ];
-  return `<svg class="map" viewBox="0 0 800 560" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Plan dessiné autour de ${h(label || "ta position")}">
-    <rect class="m-bg" width="800" height="560"/>
-    <path class="m-park" d="M40 390 L210 360 L240 480 L60 530 Z"/><path class="m-park" d="M600 20 L760 0 L780 110 L640 130 Z"/>
-    <path class="m-water" d="M0 360 C 120 320, 180 390, 260 360 S 380 290, 470 320 S 640 395, 800 345"/>
-    ${blocks.map(([bx, by, w, hh]) => `<rect class="m-block" x="${bx}" y="${by}" width="${w}" height="${hh}" rx="6"/>`).join("")}
-    <path class="m-road big" d="M0 205 L800 175"/><path class="m-road" d="M255 0 L330 560"/><path class="m-road" d="M600 0 L565 560"/>
-    <path class="m-road" d="M0 490 L800 450"/><path class="m-road big" d="M120 560 C 260 430, 420 360, 800 395"/>
-    <circle class="m-acc" cx="${x}" cy="${y}" r="${r.toFixed(1)}"/><circle class="m-pulse" cx="${x}" cy="${y}" r="12" style="transform-origin:${x}px ${y}px"/><circle class="m-dot" cx="${x}" cy="${y}" r="8"/>
-  </svg>`;
-}
-
 /**
- * La vraie carte se montre-t-elle ? Elle couvre la position, et elle ne s'est pas déjà refusée ici pour cette carte du
- * serveur (`failed` : la clé de celle qui n'a pas pu se dessiner — pas de WebGL, MapLibre absent, ses tuiles en échec de
- * suite). Sinon, le plan dessiné et sa note, sans réessayer à chaque dessin ; une autre carte servie se réessaie.
+ * Ce que la carte de la position montre, vraie carte ou plan : son point et le cercle de sa précision, rien d'autre ;
+ * sans coordonnées, rien. La vraie carte s'ouvre centrée sur elle, au zoom qui montre son cercle (`map/view.ts`).
  */
-export function liveWanted(info: MapInfo | null, at: { lat: number; lon: number } | null, failed: string | null): boolean {
-  return !!at && covers(info, at.lat, at.lon) && failed !== infoKey(info);
-}
-
-/** Ce que l'onglet fait de sa carte à ce dessin : le plan, la monter, la garder, ou reposer son style (une autre
- *  carte du serveur, relue pendant qu'elle était ouverte). `liveKey` : la carte servie qu'elle dessine (`null` : aucune). */
-export type MapStep = "plan" | "mount" | "keep" | "restyle";
-
-export function mapStep(liveKey: string | null, wanted: boolean, key: string): MapStep {
-  if (!wanted) return "plan";
-  if (liveKey === null) return "mount";
-  return liveKey === key ? "keep" : "restyle";
+export function positionScene(coords: { lat: number; lon: number } | null, accuracy: number): Scene {
+  return { pins: [], lines: [], here: coords ? { lat: coords.lat, lon: coords.lon, accuracy_m: accuracy } : null };
 }
 
 /**
- * La position : sa carte (`live` : la vraie, servie par ce serveur et dessinée par MapLibre dans `[data-map]`), sinon
- * le plan dessiné et sa note ; à côté, ce qu'on en sait.
+ * Le plan dessiné de la position, quand sa vraie carte ne se dessine pas : le point et le cercle de sa précision, à
+ * l'échelle, sur le fond quadrillé du plan de la Carte (`map/drawn.ts`) — un plan, pas une carte : aucune rue, aucune
+ * rivière n'y est inventée autour de la vraie position. Sans coordonnées, le plan vide (sa note dit pourquoi).
+ */
+export function positionPlan(coords: { lat: number; lon: number } | null, accuracy: number, label: string): string {
+  const title = coords ? `Plan autour de ${label || "ta position"}` : "Plan vide : le serveur n'a pas les coordonnées de ta position";
+  return drawnScene(positionScene(coords, accuracy), { width: 800, height: 560, title, pad: 48 });
+}
+
+/**
+ * La position : sa carte (`live` : la vraie, servie par ce serveur et dessinée par MapLibre dans `[data-map]` ; si elle
+ * se montre, et sa vie, c'est `map/live.ts`), sinon son plan dessiné (`positionPlan`) et sa note ; à côté, ce qu'on en
+ * sait.
  */
 export function positionMarkup(p: PhonePosition, phone: Phone | null, now: number, live = false): string {
   if (!p.known) {
@@ -315,7 +362,7 @@ export function positionMarkup(p: PhonePosition, phone: Phone | null, now: numbe
   return `<div class="split pos-split">
     <section class="pane map-pane">${live
       ? `<div class="map-live" data-map role="region" aria-label="Carte autour de ${h(label || "ta position")}"></div>`
-      : mapMarkup(p.accuracy_m, label)}<div class="map-legend">${ico("pin", "sm")}<b>${h(label || "Ta position")}</b>${legend ? `<span class="muted">${h(legend)}</span>` : ""}</div>
+      : positionPlan(coords, p.accuracy_m, label)}<div class="map-legend">${ico("pin", "sm")}<b>${h(label || "Ta position")}</b>${legend ? `<span class="muted">${h(legend)}</span>` : ""}</div>
       ${live ? "" : `<p class="map-note small muted">Un plan dessiné, pas une carte : ${coords ? "le lien ouvre la vraie, sur OpenStreetMap." : "le serveur n'a pas ses coordonnées."}</p>`}</section>
     <aside class="pane"><div class="pane-scroll pos-side">
       <h2 class="section-title">Ta dernière position</h2>
@@ -333,18 +380,75 @@ export function positionMarkup(p: PhonePosition, phone: Phone | null, now: numbe
 
 // ── Les téléphones, dans la barre de titre ───────────────────────────
 
-export function phoneSwitch(phones: readonly Phone[], chosen: number | null, now: number): string {
-  const active = activePhones(phones);
-  const one = chosen === null ? null : active.find((p) => p.id === chosen) ?? null;
-  if (one) {
-    const seen = one.last_used ? `vu ${ago(one.last_used, now)}` : "";
-    return `<button class="phone-switch" type="button" data-tel-switch title="Changer de téléphone">${ico("phone", "sm")}<b>${h(shortPhone(one.label))}</b>
-      <span class="dot ${one.push ? "ok" : "warn"}"></span>${seen ? `<span class="muted">${h(seen)}</span>` : ""}${ico("chev-down", "sm")}</button>`;
-  }
-  const label = active.length ? "Tous tes téléphones" : "Aucun téléphone";
-  return `<button class="phone-switch" type="button" data-tel-switch title="Changer de téléphone">${ico("phone", "sm")}<b>${label}</b>
-    ${active.length ? `<span class="muted">${active.length}</span>` : ""}${ico("chev-down", "sm")}</button>`;
+/**
+ * Ce que dit le point d'un téléphone : s'il reçoit les notifications de Mika, même application fermée (`push` : il a
+ * donné où le notifier, ADR 0077).
+ */
+export function pushNote(push: boolean): string {
+  return push ? "reçoit les notifications" : "ne reçoit pas les notifications";
 }
 
-export const SWITCH_NOTE =
-  "Le serveur ne dit pas encore quel téléphone a reçu quel message : tu vois ceux de tous tes téléphones.";
+/** Ce que dit le point de plusieurs téléphones. */
+function pushNotes(phones: readonly Phone[]): string {
+  const without = phones.filter((p) => !p.push).length;
+  if (!without) return `les ${phones.length} reçoivent les notifications`;
+  if (without === phones.length) return "aucun ne reçoit les notifications";
+  return `${without} sur ${phones.length} ne ${without > 1 ? "reçoivent" : "reçoit"} pas les notifications`;
+}
+
+/** « vu il y a 4 min » ; rien pour un téléphone qui n'a jamais servi. */
+function seenWords(lastUsed: number, now: number): string {
+  const when = ago(lastUsed, now);
+  return when ? `vu ${when}` : "";
+}
+
+/** L'état de ses téléphones, tel que la barre de titre le dit. */
+export interface PhoneState {
+  /** « Google Pixel 8 » (un seul actif), « 2 téléphones », « Aucun téléphone ». */
+  label: string;
+  /** « vu il y a 4 min » : le dernier usage, du plus récent de ses téléphones ; rien s'il n'a jamais servi. */
+  seen: string;
+  /** Le ton du point : `ok`, tous reçoivent les notifications ; `warn`, pas tous ; `null`, aucun téléphone, pas de point. */
+  dot: "ok" | "warn" | null;
+  /** Le sens du point, en mots (« ne reçoit pas les notifications »). */
+  push: string;
+  /** Tout ce qu'il dit, téléphone par téléphone, et où il mène : l'infobulle et le nom que lit un lecteur d'écran. */
+  title: string;
+}
+
+/** Où mène l'état : Paramètres › Téléphones, qui les détaille, en connecte un ou en révoque un. */
+export const PHONES_HREF = "#parametres/telephones";
+
+/**
+ * L'état de ses téléphones (les actifs ; un révoqué ne reçoit plus rien) : un état, pas un choix. Le serveur ne dit pas
+ * encore quel téléphone a reçu quel message (ADR 0190, *À venir*) : choisir l'un d'eux ne trierait rien (ADR 0233).
+ */
+export function phoneState(phones: readonly Phone[], now: number): PhoneState {
+  const active = activePhones(phones);
+  if (!active.length) {
+    return { label: "Aucun téléphone", seen: "", dot: null, push: "", title: "Aucun téléphone : en connecter un, dans Paramètres › Téléphones" };
+  }
+  const seen = seenWords(Math.max(...active.map((p) => p.last_used)), now);
+  const dot = active.every((p) => p.push) ? "ok" : "warn";
+  const sentence = (p: Phone) => [seenWords(p.last_used, now), pushNote(p.push)].filter(Boolean).join(", ");
+  if (active.length === 1) {
+    const one = active[0];
+    const label = shortPhone(one.label);
+    return { label, seen, dot, push: pushNote(one.push), title: `${label}, ${sentence(one)} — Paramètres › Téléphones` };
+  }
+  const label = `${active.length} téléphones`;
+  const each = active.map((p) => `${shortPhone(p.label)} : ${sentence(p)}`).join(" ; ");
+  return { label, seen, dot, push: pushNotes(active), title: `${label} — ${each} — Paramètres › Téléphones` };
+}
+
+/**
+ * L'état dans la barre de titre : un lien vers Paramètres › Téléphones. Le sens du point se lit au survol et par un
+ * lecteur d'écran (`title`, `aria-label`) ; quand tous ne reçoivent pas les notifications, aussi en clair sur un grand
+ * écran (`tel-push`). Sur un téléphone, le nom et le point restent (`telephone.css`).
+ */
+export function phoneStateMarkup(s: PhoneState): string {
+  const dot = s.dot ? `<span class="dot ${s.dot}" title="${h(s.push)}"></span>` : "";
+  const push = s.dot === "warn" ? `<span class="tel-push">${h(s.push)}</span>` : "";
+  const seen = s.seen ? `<span class="muted tel-seen">${h(s.seen)}</span>` : "";
+  return `<a class="phone-state" href="${PHONES_HREF}" data-tel-state title="${h(s.title)}" aria-label="${h(s.title)}">${ico("phone", "sm")}<b>${h(s.label)}</b>${dot}${push}${seen}</a>`;
+}

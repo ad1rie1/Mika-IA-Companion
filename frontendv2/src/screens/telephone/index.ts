@@ -1,38 +1,43 @@
 /**
  * L'écran « Téléphone » (ADR 0120, 0190) : ce que l'application de ton téléphone montre à Mika — tes conversations
- * WhatsApp et Messages, et les réponses qu'elle y a proposées —, tes messageries rangées par appli, ta dernière
- * position. Les données : `protocole-moi.md` § 5 ; la forme : la maquette (`maquette/ecrans/telephone.js`).
+ * WhatsApp et Messages, et les réponses qu'elle y a proposées —, et ta dernière position. Les données :
+ * `protocole-moi.md` § 5 ; la forme : la maquette (`maquette/ecrans/telephone.js`). Les autres apps (un colis, un
+ * rendez-vous) viendront avec leur onglet, Notifications, quand l'application les lira (ADR 0190, 0233) : d'ici là, il
+ * ne ferait que redire Messages.
  *
  * Ce que l'API ne sait pas encore, l'écran le dit au lieu de le feindre : répondre d'ici et « Préremplir avec Mika »
- * (ADR 0189, 0191), quel téléphone a reçu quel message, les apps autres que les messageries.
+ * (ADR 0189, 0191). Il ne propose pas non plus de choisir un téléphone, tant que le serveur ne dit pas lequel a reçu
+ * quel message : la barre de titre dit l'état de tes téléphones (lequel, vu quand, s'il reçoit les notifications) et
+ * mène à Paramètres › Téléphones (ADR 0233). À un compte qui n'est pas propriétaire, Messages dit que Mika ne lit pas
+ * ses messages (`owner` de `GET /api/moi`). « Lui en parler dans le chat » ouvre le chat avec une phrase qui nomme la
+ * conversation (`TelephoneHooks.ask`).
  */
-import { fetchConversations, fetchPosition, fetchThread, type MapInfo, type Phone, type PhoneThread } from "../../api/phone";
-import { infoKey, mapInfo } from "../../map/info";
-import { loadMapLibre, noteWebglMissing, webglMissing } from "../../map/load";
-import { isDark, onTheme } from "../../shell/theme";
-import type { At, LiveMap } from "./livemap";
+import { fetchConversations, fetchThread, type Phone, type PhoneThread } from "../../api/phone";
+import { mapInfo } from "../../map/info";
+import { LiveMap } from "../../map/live";
+import { EMPTY_SCENE, type Scene } from "../../map/scene";
+import { onTheme } from "../../shell/theme";
 import { countOf } from "../../shell/counts";
 import { $, h, isMobile, on } from "../../shell/dom";
-import { openMenu, type MenuItem } from "../../shell/float";
+import { openMenu } from "../../shell/float";
 import { ico } from "../../shell/icons";
 import type { PaletteEntry } from "../../shell/palette";
 import type { ScreenContext, ScreenDef, ScreenTab, Shell } from "../../shell/shell";
-import { Cached, CachedMap, ago, errorBlock, loadingBlock } from "../../shared/kit";
+import { Cached, CachedMap, errorBlock, loadingBlock } from "../../shared/kit";
 import * as store from "../../shared/store";
 import {
-  activePhones,
+  askAboutConversation,
   composerMarkup,
   conversationItem,
   conversationTitle,
+  emptyMessagesMarkup,
   matches,
-  notificationsMarkup,
   onlyPhone,
-  phoneSwitch,
-  liveWanted,
-  mapStep,
+  phoneState,
+  phoneStateMarkup,
   positionMarkup,
-  shortPhone,
-  SWITCH_NOTE,
+  positionScene,
+  TELEPHONE_TABS,
   threadHead,
   threadMarkup,
 } from "./view";
@@ -41,44 +46,53 @@ const ID = "telephone";
 /** Relire ce qui arrive tant que l'écran est ouvert. */
 const EVERY_MS = 30_000;
 
+export interface TelephoneHooks {
+  /** Ouvrir le chat avec une phrase préremplie (« Lui en parler dans le chat », depuis un fil). */
+  ask: (text: string) => void;
+}
+
 class TelephoneScreen {
   private readonly conversations = new Cached(() => fetchConversations(), 10_000);
   private readonly phones = store.phones;
-  private readonly position = new Cached(() => fetchPosition(), 15_000);
+  /** Son compte : `owner` dit si Mika peut lire ses messages (la porte du téléphone refuse les autres). */
+  private readonly me = store.me;
+  /** Ta dernière position : la même lecture que la Carte. */
+  private readonly position = store.position;
   /** La carte réglée sur le serveur (ADR 0193), partagée par toutes les cartes de la page : relue toutes les cinq
    *  minutes. */
   private readonly mapInfo = mapInfo;
-  /** La vraie carte, dessinée : elle survit aux redessins de l'onglet, retirée quand on le quitte. */
-  private live: LiveMap | null = null;
-  private liveAt: At | null = null;
-  /** La carte du serveur qu'elle dessine (`infoKey`) : une autre, relue, se repose sur elle (`restyle`). */
-  private liveKey: string | null = null;
-  /** La carte du serveur qui ne s'est pas dessinée ici (pas de WebGL, MapLibre absent, ses tuiles en échec de suite) :
-   *  le plan dessiné et sa note, sans réessayer à chaque dessin — jusqu'à ce qu'une autre carte soit servie. */
-  private failedKey: string | null = null;
-  /** Le dernier montage demandé (MapLibre se charge à part : seul le plus récent se pose). */
-  private mapToken = 0;
+  /** Ce que la carte de la position montre (son point et sa précision), au dernier dessin. */
+  private scene: Scene = EMPTY_SCENE;
+  /**
+   * La vraie carte de la position (`map/live.ts`, comme la Carte) : gardée d'un dessin à l'autre, rendue quand on quitte
+   * l'onglet ; une autre carte servie se repose sur elle ; une qui ne se dessine pas ici (pas de WebGL, MapLibre absent,
+   * ses tuiles en échec de suite) laisse le plan dessiné et sa note, sans réessayer — jusqu'à une autre carte servie.
+   */
+  private readonly map = new LiveMap({
+    slot: () => (this.body ? $<HTMLElement>("[data-map]", this.body) : null),
+    showing: () => this.open() && this.ctx?.tab === "position",
+    repaint: () => this.paint(),
+    scene: () => this.scene,
+    options: { interactive: true },
+    needsHere: true,
+  });
   private readonly threads = new CachedMap<PhoneThread>((key) => fetchThread(key), 10_000);
-  private readonly tabs: ScreenTab[] = [
-    { id: "messages", title: "Messages" },
-    { id: "notifications", title: "Notifications" },
-    { id: "position", title: "Position" },
-  ];
+  /** Ses onglets (une copie : Messages y porte son nombre). */
+  private readonly tabs: ScreenTab[] = TELEPHONE_TABS.map((t) => ({ ...t }));
   private body: HTMLElement | null = null;
   private ctx: ScreenContext | null = null;
   private query = "";
-  /** Le téléphone choisi dans la barre de titre (`null` : tous). */
-  private chosen: number | null = null;
   /** Ce qui a été dessiné : on ne redessine que si une lecture a changé. */
   private painted = "";
   private timer = 0;
 
-  constructor(private readonly shell: Shell) {
+  constructor(
+    private readonly shell: Shell,
+    private readonly hooks: TelephoneHooks,
+  ) {
     // la palette (Ctrl K) cherche aussi ses conversations : une lecture, un peu après le démarrage
     window.setTimeout(() => void this.conversations.load(), 2500);
-    onTheme((dark) => {
-      if (this.live && this.liveAt) this.live.show(this.liveAt, dark);
-    });
+    onTheme((dark) => this.map.view?.theme(dark));
   }
 
   def(): ScreenDef {
@@ -106,14 +120,14 @@ class TelephoneScreen {
   private stamp(): string {
     const key = this.selectedKey();
     const thread = key ? this.threads.get(key).version : 0;
-    return [this.ctx?.tab, key, this.conversations.version, this.phones.version, this.position.version,
+    return [this.ctx?.tab, key, this.conversations.version, this.phones.version, this.me.version, this.position.version,
       this.mapInfo.version, thread].join("|");
   }
 
   /** Lire ce que l'onglet montre ; redessiner si ça a changé et qu'on y est encore. */
   private async ensure(force = false): Promise<void> {
     const tab = this.ctx?.tab;
-    const reads: Promise<unknown>[] = [this.conversations.load(force), this.phones.load(force)];
+    const reads: Promise<unknown>[] = [this.conversations.load(force), this.phones.load(force), this.me.load()];
     if (tab === "position") reads.push(this.position.load(force), this.mapInfo.load());
     await Promise.all(reads);
     if (tab === "messages") {
@@ -134,7 +148,7 @@ class TelephoneScreen {
     this.timer = window.setInterval(() => {
       if (!this.open()) {
         window.clearInterval(this.timer);
-        this.dropMap();
+        this.map.drop();
         return;
       }
       if (document.visibilityState === "visible") void this.ensure(true);
@@ -169,14 +183,10 @@ class TelephoneScreen {
       this.paintPosition(body, now);
       return;
     }
-    this.dropMap();
+    this.map.drop();
     const convs = this.conversations;
     if (!convs.value) {
       body.innerHTML = convs.error ? errorBlock(convs.error, "Impossible de lire ton téléphone") : loadingBlock();
-      return;
-    }
-    if (ctx.tab === "notifications") {
-      body.innerHTML = notificationsMarkup(convs.value.items, now, this.switchNote());
       return;
     }
     this.paintMessages(body, now);
@@ -186,84 +196,25 @@ class TelephoneScreen {
   private paintPosition(body: HTMLElement, now: number): void {
     const p = this.position.value;
     if (!p) {
-      this.dropMap();
+      this.map.drop();
       body.innerHTML = this.position.error ? errorBlock(this.position.error, "Impossible de lire ta position") : loadingBlock();
       return;
     }
     const info = this.mapInfo.value;
-    const at: At | null = p.known && p.coords ? { lat: p.coords.lat, lon: p.coords.lon, accuracy: p.accuracy_m } : null;
-    const key = infoKey(info);
-    // une autre carte servie depuis l'échec (le serveur l'a dite injoignable, puis de nouveau prête) : on réessaie
-    if (this.failedKey !== null && this.failedKey !== key) this.failedKey = null;
-    const live = liveWanted(info, at, webglMissing() ? key : this.failedKey);
-    body.innerHTML = positionMarkup(p, this.phoneOfAll(), now, live);
-    const step = mapStep(this.live ? this.liveKey : null, live, key);
-    if (step === "plan" || !at || !info) {
-      this.dropMap();
-      return;
-    }
-    this.liveAt = at;
-    const slot = $<HTMLElement>("[data-map]", body);
-    if (!slot) return;
-    if (this.live) {
-      slot.replaceWith(this.live.host);
-      // une autre carte du serveur (relue) : son style se repose sur la carte ouverte
-      if (step === "restyle") this.live.restyle(info);
-      this.liveKey = key;
-      this.live.resize();
-      this.live.show(at, isDark());
-      return;
-    }
-    void this.startMap(info);
-  }
-
-  private async startMap(info: MapInfo): Promise<void> {
-    const token = ++this.mapToken;
-    const key = infoKey(info);
-    let lib: Awaited<ReturnType<typeof loadMapLibre>>;
-    let mod: typeof import("./livemap");
-    try {
-      [lib, mod] = await Promise.all([loadMapLibre(), import("./livemap")]);
-    } catch {
-      this.mapFailed(key); // le morceau de MapLibre ne vient pas (un nouveau déploiement) : le plan dessiné
-      return;
-    }
-    if (token !== this.mapToken || this.live || !this.open() || this.ctx?.tab !== "position") return;
-    const slot = this.body ? $<HTMLElement>("[data-map]", this.body) : null;
-    if (!slot || !this.liveAt) return;
-    try {
-      // ses tuiles en échec : pour la carte servie qu'elle dessine alors (elle a pu se reposer sur une autre)
-      this.live = mod.mountMap(lib, slot, info, this.liveAt, isDark(), () => this.mapFailed(this.liveKey ?? key));
-      this.liveKey = key;
-    } catch {
-      noteWebglMissing(); // pas de WebGL : ni ici ni ailleurs, on ne réessaie pas
-      this.mapFailed(key);
-    }
-  }
-
-  /** La carte ne se dessine pas ici : le plan dessiné reprend sa place, avec sa note, pour cette carte du serveur. */
-  private mapFailed(key: string): void {
-    this.failedKey = key;
-    this.dropMap();
-    if (this.open() && this.ctx?.tab === "position") this.paint();
-  }
-
-  private dropMap(): void {
-    this.mapToken += 1;
-    this.live?.remove();
-    this.live = null;
-    this.liveKey = null;
+    const scene = p.known ? positionScene(p.coords, p.accuracy_m) : EMPTY_SCENE;
+    const before = this.scene.here;
+    const here = scene.here;
+    this.scene = scene;
+    body.innerHTML = positionMarkup(p, this.phoneOfAll(), now, this.map.wanted(info, scene));
+    // la carte ouverte suit la position ; elle ne se recentre que si tu as bougé (son zoom reste le tien)
+    const moved = !!before && !!here && (before.lat !== here.lat || before.lon !== here.lon);
+    this.map.lodge(info)?.show(scene, moved);
   }
 
   private paintMessages(body: HTMLElement, now: number): void {
     const items = this.conversations.value?.items ?? [];
     if (!items.length) {
-      const phones = this.phones.value?.items ?? [];
-      body.innerHTML = `<div class="fill-scroll"><div class="empty">${ico("phone")}<b>Aucun message de ton téléphone</b>
-        <p>${phones.length
-          ? "Sur ton téléphone, allume « Lui montrer mes messages » : Mika lira tes conversations WhatsApp et Messages."
-          : "Installe Mika sur ton téléphone et connecte-toi : elle lira tes conversations WhatsApp et Messages, si tu le lui permets."}</p>
-        <a class="btn sm" href="#parametres/telephones">${ico("settings", "sm")}Tes téléphones</a></div></div>`;
+      body.innerHTML = emptyMessagesMarkup(this.owner(), this.phones.value?.items.length ?? 0);
       return;
     }
     const key = this.selectedKey();
@@ -278,7 +229,7 @@ class TelephoneScreen {
     const typing = search !== null && document.activeElement === search ? search.selectionStart : null;
     body.innerHTML = `<div class="split tel-split${reading ? " lire" : ""}">
       <aside class="pane"><div class="pane-head"><label class="search grow">${ico("search", "sm")}<input type="search" data-cq placeholder="Chercher une conversation" value="${h(this.query)}" aria-label="Chercher une conversation"></label></div>
-        ${this.switchNote()}<div class="pane-scroll" data-convs>${list}</div></aside>
+        <div class="pane-scroll" data-convs>${list}</div></aside>
       <section class="pane tel-thread">${this.threadPane(key, now)}</section></div>`;
     body.dataset.thread = key ?? "";
     const fresh = $<HTMLElement>("[data-scroll]", body);
@@ -311,9 +262,14 @@ class TelephoneScreen {
     const thread = cached.value
       ? `<div class="tel-msgs">${threadMarkup(cached.value, title, now)}</div>`
       : cached.error ? errorBlock(cached.error, "Impossible de lire cette conversation") : loadingBlock();
-    return `${threadHead(conv, this.phoneOfAll())}
+    return `${threadHead(conv)}
       <div class="chat-scroll" data-scroll>${thread}</div>
       ${composerMarkup(title)}`;
+  }
+
+  /** Une de ses propriétaires ? `undefined` tant que son compte n'est pas lu. */
+  private owner(): boolean | undefined {
+    return this.me.value?.owner;
   }
 
   /** Le téléphone d'où vient tout, quand un seul a jamais servi ; sinon on ne sait pas. */
@@ -321,48 +277,19 @@ class TelephoneScreen {
     return onlyPhone(this.phones.value?.items ?? []);
   }
 
-  /** Un téléphone choisi parmi plusieurs : le dire, plutôt que feindre un tri. */
-  private switchNote(): string {
-    const active = activePhones(this.phones.value?.items ?? []);
-    if (this.chosen === null || (this.phones.value?.items.length ?? 0) < 2 || !active.length) return "";
-    return `<p class="tel-switch-note small muted">${ico("info", "xs")}${h(SWITCH_NOTE)}</p>`;
-  }
-
   // ── La barre de titre ──────────────────────────────────────────────
 
+  /** L'état de ses téléphones : un lien vers Paramètres › Téléphones, pas un choix (le serveur ne dit pas lequel a reçu
+   *  quel message). */
   private actions(): string {
-    return `${phoneSwitch(this.phones.value?.items ?? [], this.chosen, Date.now())}
-      <a class="btn icon ghost" href="#parametres/telephones" title="Régler tes téléphones">${ico("settings")}</a>`;
+    return phoneStateMarkup(phoneState(this.phones.value?.items ?? [], Date.now()));
   }
 
-  /** Le sélecteur suit la liste des téléphones sans redessiner tout l'en-tête (ni perdre une saisie). */
+  /** L'état suit la liste des téléphones sans redessiner tout l'en-tête (ni perdre une saisie). */
   private paintHead(): void {
-    const btn = this.ctx?.el.querySelector<HTMLElement>("[data-tel-switch]");
-    if (!btn) return;
-    btn.outerHTML = phoneSwitch(this.phones.value?.items ?? [], this.chosen, Date.now());
-  }
-
-  private switchMenu(anchor: HTMLElement): void {
-    const now = Date.now();
-    const active = activePhones(this.phones.value?.items ?? []);
-    const pick = (id: number | null) => () => {
-      this.chosen = id;
-      this.paintHead();
-      this.paint();
-    };
-    const items: MenuItem[] = [
-      { header: "Tes téléphones" },
-      { label: "Tous tes téléphones", icon: "phone", checked: this.chosen === null, action: pick(null) },
-      ...active.map((p): MenuItem => ({
-        label: `${shortPhone(p.label)}${p.last_used ? ` — vu ${ago(p.last_used, now)}` : ""}`,
-        icon: "phone",
-        checked: this.chosen === p.id,
-        action: pick(p.id),
-      })),
-      "sep",
-      { label: "Gérer tes téléphones", icon: "settings", action: () => this.shell.go("#parametres/telephones") },
-    ];
-    openMenu(anchor, items);
+    const link = this.ctx?.el.querySelector<HTMLElement>("[data-tel-state]");
+    if (!link) return;
+    link.outerHTML = this.actions();
   }
 
   // ── Les gestes ─────────────────────────────────────────────────────
@@ -372,16 +299,9 @@ class TelephoneScreen {
       this.shell.go(`#${ID}/messages/${encodeURIComponent(b.dataset.conv ?? "")}`);
     });
     on(section, "[data-retour]", "click", () => this.shell.go(`#${ID}/messages`));
-    on(section, "[data-tel-switch]", "click", (e, b) => {
-      e.stopPropagation();
-      this.switchMenu(b);
-    });
     on(section, "[data-more]", "click", (e, b) => {
       e.stopPropagation();
-      openMenu(b, [
-        { label: "Voir dans Notifications", icon: "bell", action: () => this.shell.go(`#${ID}/notifications`) },
-        { label: "Lui en parler dans le chat", icon: "sparkle", action: () => this.shell.go("#chat") },
-      ]);
+      openMenu(b, [{ label: "Lui en parler dans le chat", icon: "sparkle", action: () => this.askAbout() }]);
     });
     on(section, "[data-retry]", "click", () => void this.ensure(true));
     on(section, "[data-relogin]", "click", () => location.reload());
@@ -392,6 +312,14 @@ class TelephoneScreen {
       const list = $<HTMLElement>("[data-convs]", section);
       if (list) list.innerHTML = this.listMarkup(this.selectedKey(), Date.now());
     });
+  }
+
+  /** « Lui en parler dans le chat » : le chat s'ouvre avec une phrase qui nomme la conversation ouverte. */
+  private askAbout(): void {
+    const key = this.selectedKey();
+    const conv = key ? this.conversations.value?.items.find((c) => c.key === key) : null;
+    if (conv) this.hooks.ask(askAboutConversation(conv));
+    else this.shell.go("#chat");
   }
 
   private searchEntries(): PaletteEntry[] {
@@ -405,6 +333,6 @@ class TelephoneScreen {
   }
 }
 
-export function telephoneScreen(shell: Shell): ScreenDef {
-  return new TelephoneScreen(shell).def();
+export function telephoneScreen(shell: Shell, hooks: TelephoneHooks): ScreenDef {
+  return new TelephoneScreen(shell, hooks).def();
 }

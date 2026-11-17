@@ -1,8 +1,8 @@
 """Ce que la composition donne aux tableaux de droits (ADR 0131, 0133, 0134) — ceux de l'inspecteur (Réglages › Canaux,
 Outils › Ce qu'elle peut faire, par ``InspectorDeps``), d'un service (``subjects/server.py``), d'un projet
 (``subjects/project.py``) — et à la page « Droits » (``rights.py``) : les personnes qu'une ligne peut nommer, les
-instances de chaque canal, la fiche d'une famille d'outils venue d'ailleurs. Une seule liste, une seule règle pour
-tous."""
+instances de chaque canal, la fiche d'une famille d'outils venue d'ailleurs, les choix de leurs sélecteurs (ceux du
+cadre commun, ``vocab.access``). Une seule liste, une seule règle pour tous."""
 
 from __future__ import annotations
 
@@ -12,11 +12,23 @@ from mika.faculties.identity.inspect import people as people_of
 from mika.inspector.pages.rights_tables import Instances, canal_choices, canal_instances, who_choices
 from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import UI
-from mika.vocab.access import MAIL, PRIVATE, TEAMS, TOGETHER, WEB, canal_key
+from mika.vocab.access import KEEPS, MAIL, POLICIES, PRIVATE, TEAMS, TOGETHER, WEB, canal_key
 from mika.vocab.people import ACCOUNT_PREFIX
 
 #: la fiche qui règle une famille d'outils venue d'ailleurs, par le début de son lot : sa sorte, son onglet des droits
 FAMILY_FICHES = {"mcp": ("serveur", "fait"), "forge_apps": ("app", "acces")}
+
+
+def capitalized(options: tuple[tuple[str, str], ...]) -> tuple[tuple[str, str], ...]:
+    """Des choix (clé, libellé), le libellé avec une majuscule en tête, pour un sélecteur."""
+    return tuple((k, label[:1].upper() + label[1:]) for k, label in options)
+
+
+#: ce qu'une ligne fait d'un outil, dans un sélecteur d'un tableau dessiné (un service, un projet) : les mots des
+#: familles (``vocab.access.POLICIES``, ADR 0134), jamais une recopie
+POLICY_CHOICES = capitalized(POLICIES)
+#: ce qu'elle garde de ce qu'un outil rend, dans un sélecteur (``vocab.access.KEEPS``)
+KEEP_CHOICES = capitalized(KEEPS)
 
 
 def people_with_accounts(ui: UI) -> list[dict[str, str]]:

@@ -1,6 +1,6 @@
 """Outils › Apps forgées dans sa forme (``app/handmade/tabs/apps.py``, ADR 0177), à travers le vrai serveur : ses apps
 en tuiles vers leur fiche, une app cassée en rouge avec sa raison, une promue le dit ; la bascule « Tableau » rend la
-liste de la console ; et ce que la page dit, vide."""
+liste de la console ; et ce que la page dit, vide. Son introduction n'est dite qu'une fois (celle de la vue)."""
 
 from __future__ import annotations
 
@@ -19,6 +19,8 @@ def test_apps_are_tiles_and_a_broken_one_says_why(world):  # noqa: F811
     stop(client, live.kernel)
     empty = drawn(client, "/inspecteur/apps")
     assert 'data-tab="apps/apps"' in empty and "Elle n’a encore écrit aucune app." in empty
+    # l'introduction est dite une fois, par la description de la vue ; l'encart ne la redit pas
+    assert empty.count("Ouvre une app pour l") == 1 and "régler ses réglages" not in empty
     kernel, forge = live.kernel, live.kernel.ports["forge"]
 
     async def write():
@@ -38,6 +40,7 @@ def test_apps_are_tiles_and_a_broken_one_says_why(world):  # noqa: F811
     prix = tiles.split("Veille des prix", 1)[0].rsplit("<li", 1)[1] + tiles.split("Veille des prix", 1)[1].split("</li>")[0]
     assert "apx-app danger" in prix and ">cassée<" in prix and "trois tours ratés" in prix
     assert "apx-last failed" in prix and "KeyError" in prix
-    assert "1 cassée" in page
+    assert "1 cassée : elle ne s'en sert plus tant qu'on ne l'a pas relancée." in page
+    assert page.count("Ouvre une app pour l") == 1  # l'encart ne dit que la panne, sans redire l'introduction
     table = drawn(client, "/inspecteur/apps?vue_pg1=table")
     assert "<table" in table and "apx-tiles" not in table  # la liste de la console (son rendu à elle)

@@ -21,6 +21,7 @@ from mika.app.handmade.tabs import Tab
 from mika.app.handmade.tabs import text as tabs_text
 from mika.contracts import self_
 from mika.inspector.catalog import destinations
+from mika.inspector.ui import env
 from mika.kernel.events import Content, VoiceProvenance
 from mika.kernel.inspect import Badge, Ref, Text
 from tests.fixtures.console_html import ConsoleHTML
@@ -221,6 +222,12 @@ def test_what_she_can_do_is_her_families_and_their_tables(world):  # noqa: F811
     assert 'name="qui.1|proprietaire" checked' in page and 'name="canal.2|interne" checked' in page
     assert 'type="checkbox" name="o"' not in page  # plus de grille à cocher
     assert 'href="#f-memory">Mémoire <span class="hm-count">2</span>' in page and 'id="f-memory" data-pane' in page
+    # chaque outil se dit par son libellé, à qui lit ; sa description, la consigne au modèle où « tu » la désigne, est
+    # citée sur sa fiche (audit du 2026-11-05, C6-10)
+    listed = page.split('id="f-memory" data-pane', 1)[1].split("</ul>", 1)[0]
+    for spec in (s for s in live.kernel.registry.tools.values() if s.bundle == "memory"):
+        assert f'<span class="access-tool-desc">{spec.label}</span>' in listed, spec.name
+        assert spec.description not in listed, spec.name
     # la famille demandée a sa section en premier : sans ancre, c'est elle que les sous-onglets montrent
     panes = drawn(client, "/inspecteur/outils/tous?famille=memory").split('class="hm-subpanes"', 1)[1]
     assert panes.index('id="f-memory"') < panes.index("data-pane")
@@ -240,10 +247,11 @@ def test_what_she_can_do_is_her_families_and_their_tables(world):  # noqa: F811
     assert "minimum vital" in html.unescape(back.text) and "memory" not in client.portal.call(live.settings.families)
 
 
-def test_what_comes_from_elsewhere_is_drawn_as_cards(world):  # noqa: F811
+def test_what_comes_from_elsewhere_is_drawn_as_lines(world):  # noqa: F811
     """Outils › Venus d'ailleurs : brancher un service en bouton de la barre de titre (ADR 0176), leurs réglages
-    derrière la roue de Ses outils (ADR 0206) ; une carte par service branché, une par app — pas les listes
-    génériques de la console."""
+    derrière la roue de Ses outils (ADR 0206) ; une ligne par service branché, une par app, séparées par un filet
+    (``person-entries``) — ni les listes génériques de la console, ni une carte dans la carte de leur section. Le nom
+    du service mène à sa fiche, une fois : plus de « Ouvrir sa fiche → » qui la redise."""
     client, _, _ = world
     bootstrap(client)
     page = drawn(client, "/inspecteur/outils/serveurs")
@@ -251,10 +259,46 @@ def test_what_comes_from_elsewhere_is_drawn_as_cards(world):  # noqa: F811
     actions = head.split('<div class="action-bar" role="group" aria-label="Actions">')[1].split("</div>")[0]
     assert "Brancher un service" in actions and "Leurs réglages" not in actions
     gear = head.split('class="action-bar"', 1)[1]
-    assert 'href="/inspecteur/outils/parametres"' in gear and "Paramètres des services" in gear
+    assert 'href="/inspecteur/outils/parametres"' in gear and "Paramètres</a>" in gear
+    assert "Paramètres des services" not in gear  # le nom de la roue à une page, partout (audit du 2026-11-05, C6-Q3)
     assert "Brancher un service</a>" not in body
     assert "Les services branchés" in page and "Les outils de ses apps" in page
     assert "Comprendre cette liste" not in page and "un nouveau service" not in page
+    assert "elsewhere-item" not in page and "Ouvrir sa fiche" not in page
+    services = page.split('aria-labelledby="elsewhere-services"')[1].split("</section>", 1)[0]
+    assert '<ul class="person-entries" role="list">' in services
+    web = next(li for li in services.split("<li>")[1:] if '>web</a>' in li)
+    assert web.count('href="/inspecteur/fiche/serveur/web"') == 1, web
+    assert services.count('href="/inspecteur/fiche/serveur/web"') == 1
+
+
+def test_an_app_and_a_service_to_review_from_elsewhere_are_lines_too():
+    """Venus d'ailleurs, ce que le monde de test n'a pas : un service à revoir, avec sa note, et une app et ses
+    outils. Chacun est une ligne de ``person-entries``, dont le nom est le lien (seule « Les regarder », dans l'alerte,
+    mène aussi à la fiche) ; chaque ligne dit encore tout ce qu'elle disait."""
+    page = html.unescape(env.get_template("handmade/outils/ailleurs.html").render(
+        owners=[], services_empty="", apps_empty="",
+        services=[{"name": "meteo", "href": "/inspecteur/fiche/serveur/meteo", "owner": "Adrien",
+                   "owner_href": "/inspecteur/fiche/person/user_1", "state": "connecté", "tone": "ok",
+                   "purpose": "la météo du jour", "where": "sur cette machine", "served": "1", "offered": "2",
+                   "review": 2, "joined": "hier", "notes": ["Il a mis du temps à répondre."], "who": "toi",
+                   "access": "1 ligne · par défaut : fermé"}],
+        apps=[{"title": "Factures", "href": "/inspecteur/apps?app=factures", "state": "sert avec toi", "tone": "ok",
+               "tools": [{"name": "app_factures_lire", "what": "lire une facture", "args": "numero"}]}]))
+    assert not ConsoleHTML(page).errors
+    assert "elsewhere-item" not in page and "Ouvrir" not in page
+    assert page.count('<ul class="person-entries" role="list">') == 2
+    service, app = page.split('aria-labelledby="elsewhere-apps"')
+    for said in ('<a href="/inspecteur/fiche/serveur/meteo">meteo</a>', "connecté", "La météo du jour",
+                 "Avec toi", "1 ligne · par défaut : fermé", '<a href="/inspecteur/fiche/person/user_1">Adrien</a>',
+                 "<b>1</b> outil servi sur 2 proposés", "sur cette machine", "joint hier",
+                 "2 outils à revoir : nouveaux ou changés depuis ton accord.", "Il a mis du temps à répondre."):
+        assert said in service, said
+    assert service.count('href="/inspecteur/fiche/serveur/meteo"') == 2  # son nom, et « Les regarder »
+    for said in ('<a href="/inspecteur/apps?app=factures">Factures</a>', "sert avec toi", "Lire une facture",
+                 "<code>app_factures_lire</code>", "arguments <code>numero</code>"):
+        assert said in app, said
+    assert app.count('href="/inspecteur/apps?app=factures"') == 1
 
 
 def test_a_means_of_communication_is_drawn(world):  # noqa: F811

@@ -1,11 +1,12 @@
 {# Réglages › Droits (app/handmade/rights.py, ADR 0133, 0134) : ce qu'elle a, ressource par ressource — sa vie
    interne, les apps de la Forge, les services MCP, ses projets, ses canaux, ce que le code fixe —, une sorte par
-   sous-onglet (ADR 0176) ; une ressource tient sur sa ligne (sa description, son nombre d'outils), ses outils
-   décrits se déplient dessous, et le lien du détail de ses accès (son tableau, « Modifier », « Retour »). Les droits
-   exacts, outil par outil, seulement quand on a choisi qui et par quel canal : une étiquette par outil vient alors
-   sur la ligne et dit ce qui est ouvert, la ligne dépliée dit comment. Sans ce choix, les noms des outils ne sont
-   que dans le repli : ils allongeaient chaque ligne sans rien dire de plus. « Partages » (ADR 0210) : qui a reçu quoi,
-   de qui ; seul sous-onglet où l'on agit, et seulement pour retirer. #}
+   sous-onglet (ADR 0176) ; une ressource tient sur sa ligne (sa description, son nombre d'outils), ses outils se
+   déplient dessous, chacun par son libellé (ADR 0208 ; sa description, ce qu'elle lit de lui, seulement pour un outil
+   venu d'ailleurs, qui n'en a pas : audit du 2026-11-05, C6-10), et le lien du détail de ses accès (son tableau,
+   « Modifier », « Retour »). Les droits exacts, outil par outil, seulement quand on a choisi qui et par quel canal :
+   une étiquette par outil vient alors sur la ligne et dit ce qui est ouvert, la ligne dépliée dit comment. Sans ce
+   choix, les noms des outils ne sont que dans le repli : ils allongeaient chaque ligne sans rien dire de plus.
+   « Partages » (ADR 0210) : qui a reçu quoi, de qui ; seul sous-onglet où l'on agit, et seulement pour retirer. #}
 {% from "_navigation.html" import pager as pages %}
 <div class="now-page service rights-page" data-tab="reglages/droits">
   {% if detail %}
@@ -99,12 +100,12 @@
               </summary>
               <div class="hm-table-wrap" tabindex="0" role="region" aria-label="{{ r.label }} : ses outils">
                 <table class="access-table rights-list">
-                  <thead><tr><th scope="col">Outil</th><th scope="col">Description</th>{% if got %}<th scope="col">Droits exacts</th>{% endif %}</tr></thead>
+                  <thead><tr><th scope="col">Outil</th><th scope="col">Ce qu'il fait</th>{% if got %}<th scope="col">Droits exacts</th>{% endif %}</tr></thead>
                   <tbody>
                     {% for x in r.tools %}
                     <tr class="rights-tool{{ ' shut' if x.closed }}">
                       <td class="rights-tool-name"><a href="{{ x.href }}"><code>{{ x.name }}</code></a> <span class="now-tag {{ 'warn' if x.nature == 'agit' else 'info' }}">{{ x.nature }}</span></td>
-                      <td>{{ x.description }}</td>
+                      <td>{{ x.label or x.description }}</td>
                       {% if got %}<td>{{ x.exact }}</td>{% endif %}
                     </tr>
                     {% endfor %}

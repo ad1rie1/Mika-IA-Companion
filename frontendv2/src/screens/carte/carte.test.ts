@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CarteInfo, Place, Trip, TripRoute } from "../../api/carte";
+import { ApiError } from "../../api/moi";
 import { encodePolyline6 } from "../../map/polyline";
 import {
   alongPlace,
@@ -12,23 +13,37 @@ import {
   focusSelector,
   movedTrip,
   movedWords,
+  newTripValues,
+  notedTrip,
   noopMove,
   orderedStops,
   removedTrip,
   routableStops,
+  routeChoices,
   routeGpx,
+  searchReach,
   stepMove,
+  tripChanges,
   tripLines,
   tripRouteKey,
+  withChoice,
 } from "./format";
 import {
+  alongFacts,
+  alongIndexOf,
+  alongPinId,
+  alongPins,
   explorerMarkup,
   itiKey,
   itineraryMarkup,
   mapPane,
   selectedPlace,
   typedPoint,
+  tripActions,
+  tripAvoidField,
   tripEditorMarkup,
+  tripFormFoot,
+  tripFormMarkup,
   tripsMarkup,
   type ExplorerView,
   type ItineraryView,
@@ -159,6 +174,9 @@ describe("la main d'un dessin à l'autre", () => {
     expect(focusSelector({ itiSwap: "" })).toBe("[data-iti-swap]");
     expect(focusSelector({ avoid: "peages" })).toBe('[data-avoid="peages"]');
     expect(focusSelector({ onroute: 'a"b\\c' })).toBe('[data-onroute="a\\"b\\\\c"]');
+    // la note d'un arrêt qu'on écrit, son crayon (F3-14)
+    expect(focusSelector({ noteInput: "2" })).toBe('[data-note-input="2"]');
+    expect(focusSelector({ noteStop: "2" })).toBe('[data-note-stop="2"]');
     expect(focusSelector({ stop: "3" })).toBeNull(); // pas un contrôle
     expect(focusSelector({})).toBeNull();
   });
@@ -216,6 +234,9 @@ describe("Explorer", () => {
     expect(html).toContain("Ajouter au voyage");
     expect(html).toContain("En parler à Mika");
     expect(html).toContain("à 5,8 km de toi");
+    // le pied de l'aside, après la liste : sur un téléphone, `.carte-side > .pane-foot` le colle en bas de l'écran
+    // (carte.css, vérifié par tools/styles.test.ts)
+    expect(html).toMatch(/<aside class="pane carte-side">[\s\S]*data-results>[\s\S]*<\/div>\s*<div class="pane-foot place-card" data-place-card>[\s\S]*<\/aside>/);
   });
 
   it("sans index : le message du serveur, et les adresses restent", () => {
@@ -224,6 +245,32 @@ describe("Explorer", () => {
     expect(html).toContain("La recherche de lieux n&#39;est pas encore prête sur ce serveur.");
     expect(html).toContain("12 Rue Royale 74000 Annecy");
     expect(html).toContain("Géoplateforme (IGN), seul le texte part");
+  });
+
+  it("la légende dit jusqu'où la recherche est allée : autour de toi jusqu'à 20 km, au-delà les plus proches qu'il connaisse", () => {
+    expect(searchReach(true, [{ distance_m: 40 }, { distance_m: 19_000 }])).toBe("autour de ta position");
+    expect(searchReach(true, [{ distance_m: 20_000 }])).toBe("autour de ta position");
+    // « zzz » : un lieu en Belgique, un hôtel près de Turin — l'index s'est élargi jusqu'à chercher partout
+    expect(searchReach(true, [{ distance_m: 1_200 }, { distance_m: 695_400 }, { distance_m: 90 }]))
+      .toBe("les plus proches que l'index connaisse · jusqu'à 695 km");
+    expect(searchReach(true, [])).toBe("autour de ta position");
+    expect(searchReach(true, [{ distance_m: null }])).toBe("autour de ta position");
+    // une zone ne s'élargit pas ; ta position inconnue, elle a cherché dans la zone de la carte
+    expect(searchReach(false, [{ distance_m: 695_400 }])).toBe("dans cette zone");
+  });
+
+  it("ce que Mika avait cherché, oublié (404) : le titre et pourquoi ; une panne : de quoi réessayer", () => {
+    const forgotten = explorerMarkup(explorer({ regardError: new ApiError(404, "Introuvable."), regardGone: true }));
+    expect(forgotten).toContain("Ce que Mika avait cherché n&#39;est plus là");
+    expect(forgotten).toContain("Elle l&#39;a peut-être oublié, ou c&#39;était pour quelqu&#39;un d&#39;autre.");
+    expect(forgotten).not.toContain("Introuvable.");
+    expect(forgotten).not.toContain("data-retry");
+    const down = explorerMarkup(explorer({ regardError: new ApiError(503, "Trop de monde en même temps : réessaie dans un instant."), regardGone: false }));
+    expect(down).toContain("Trop de monde en même temps : réessaie dans un instant.");
+    expect(down).toContain("data-retry");
+    expect(down).toContain("Réessayer");
+    expect(down).not.toContain("n&#39;est plus là");
+    expect(down).not.toContain("Camping de l&#39;Horizon"); // rien de la recherche d'avant
   });
 
   it("ce que Mika a cherché : ses lieux en rose, « Mika te l'a proposé »", () => {
@@ -314,6 +361,42 @@ describe("Itinéraire", () => {
     expect(alone).not.toContain('role="listbox"');
   });
 
+  it("le trajet de Mika montre son mode et ses cases sans les faire tiens : un trajet que tu commences reprend les tiens", () => {
+    const own = { mode: "voiture", avoid: [] as string[] };
+    const hers = routeChoices(own, { mode: "voiture", avoid: ["peages"] });
+    expect(hers).toEqual({ mode: "voiture", avoid: ["peages"] });
+    expect(itineraryMarkup(iti(hers))).toContain('data-avoid="peages" checked');
+    expect(own).toEqual({ mode: "voiture", avoid: [] });
+    // « Itinéraire jusqu'ici » depuis Explorer, juste après : la case est décochée
+    const started = routeChoices(own, null);
+    expect(started).toEqual({ mode: "voiture", avoid: [] });
+    expect(itineraryMarkup(iti(started))).not.toContain('data-avoid="peages" checked');
+    // à vélo, son mode de même
+    expect(routeChoices(own, { mode: "velo" }).mode).toBe("velo");
+    expect(routeChoices(own, null).mode).toBe("voiture");
+  });
+
+  it("un regard qui ne dit pas ce qu'il évitait, ou un mode inconnu : tes choix", () => {
+    const own = { mode: "velo", avoid: ["ferries"] };
+    expect(routeChoices(own, { mode: "voiture" })).toEqual({ mode: "voiture", avoid: ["ferries"] });
+    expect(routeChoices(own, { mode: "fusee", avoid: ["peages", "inconnu"] })).toEqual({ mode: "velo", avoid: ["peages"] });
+    expect(routeChoices(own, { mode: null, avoid: null })).toEqual(own);
+  });
+
+  it("ton geste (un mode, une case) : seul ce qu'il touche change, sur le trajet montré comme dans tes choix", () => {
+    let own = { mode: "voiture", avoid: [] as string[] };
+    // tu coches « autoroutes » sur le trajet de Mika, qui évitait les péages
+    const shown = withChoice({ mode: "voiture", avoid: ["peages"] }, { avoid: "autoroutes", on: true });
+    own = withChoice(own, { avoid: "autoroutes", on: true });
+    expect(shown.avoid).toEqual(["peages", "autoroutes"]);
+    expect(own.avoid).toEqual(["autoroutes"]); // ses péages évités ne deviennent pas ton choix
+    own = withChoice(own, { mode: "velo" });
+    expect(own).toEqual({ mode: "velo", avoid: ["autoroutes"] });
+    expect(withChoice(own, { avoid: "autoroutes", on: false }).avoid).toEqual([]);
+    expect(withChoice(own, { mode: "fusee" })).toEqual(own);
+    expect(withChoice(own, { avoid: "inconnu", on: true })).toEqual(own);
+  });
+
   it("à vélo, les options de la voiture ne se cochent pas", () => {
     const html = itineraryMarkup(iti({ mode: "velo" }));
     expect(html).toContain('data-avoid="peages" disabled');
@@ -338,13 +421,25 @@ describe("Voyages", () => {
     expect(html).toContain("ou demande-le à Mika dans le chat");
   });
 
+  it("les actions d'un voyage, dans la barre de titre : une fois lu seulement — ni pendant sa lecture, ni introuvable", () => {
+    expect(tripActions("999999", false)).toBe("");
+    const html = tripActions("640", true);
+    expect(html).toContain("data-optimize");
+    expect(html).toContain("Optimiser l'ordre");
+    expect(html).toMatch(/href="[^"]*\/voyages\/640\/gpx" download/);
+    expect(html).toContain("data-ask-trip");
+  });
+
   it("l'éditeur : jour par jour, les tronçons, ses arrêts en rose et retirables, glisser pour réordonner", () => {
     const html = tripEditorMarkup(tripView());
     expect(html).toContain("Jour 1 · Lille → Dijon");
     expect(html).toContain("sam. 3 avril 2027 · 502 km · 4 h 50");
     expect(html).toContain("2 h 15 · 207 km"); // le tronçon qui arrive à Reims
     expect(html).toContain('class="stop by-mika" data-stop="2" data-day="1"');
-    expect(html).toContain("ajouté par Mika : « le portail de l&#39;ange »");
+    // « ajouté par Mika » est une marque ; sa note se lit à part, comme celle de tout arrêt (F3-14)
+    expect(html).toContain("ajouté par Mika</span>");
+    expect(html).toContain('<span class="small stop-note">le portail de l&#39;ange</span>');
+    expect(html).not.toContain("« le portail");
     expect(html).toContain('data-retirer="2"');
     expect(html).toContain('data-grip="1"');
     expect(html).toContain("Glisser pour changer l'ordre");
@@ -386,6 +481,69 @@ describe("Voyages", () => {
     expect(html).not.toContain('data-add-along="1" disabled');
   });
 
+  it("sur chaque arrêt, « Noter » : le crayon, à côté de Retirer ; la note se montre à part, sur tout arrêt (F3-14)", () => {
+    const trip: Trip = { ...TRIP, days: [{ ...TRIP.days[0], stops: TRIP.days[0].stops.map((s) => (s.id === "1" ? { ...s, note: "Partir avant 8 h <tôt>" } : s)) }, TRIP.days[1]] };
+    const html = tripEditorMarkup(tripView({ trip }));
+    for (const id of ["1", "2", "3", "4", "5"]) {
+      expect(html).toMatch(new RegExp(`data-note-stop="${id}">[\\s\\S]*?data-retirer="${id}"`)); // le crayon, puis Retirer
+    }
+    expect(html).toContain('title="Corriger ou effacer sa note" aria-label="Noter Lille"'); // une note à corriger
+    expect(html).toContain('title="Noter cet arrêt" aria-label="Noter Dijon"');
+    expect(html).toContain('<span class="small stop-note">Partir avant 8 h &lt;tôt&gt;</span>'); // un arrêt à toi
+    expect(html).toContain('<span class="small stop-note">le portail de l&#39;ange</span>'); // un arrêt de Mika
+    expect(html).not.toContain("data-note-input"); // aucun champ ouvert
+  });
+
+  it("noter un arrêt : un champ en place, prérempli, borné, avec Enregistrer et Annuler — un seul à la fois (F3-14)", () => {
+    const html = tripEditorMarkup(tripView({ noting: { stop: "2", draft: "le portail de l'ange, puis <la crypte>" } }));
+    expect(html.match(/data-note-input=/g)).toHaveLength(1);
+    expect(html).toContain('class="stop by-mika noting" data-stop="2"');
+    expect(html).toMatch(/<input type="text" class="stop-note-input" data-note-input="2" value="le portail de l&#39;ange, puis &lt;la crypte&gt;" maxlength="500"/);
+    expect(html).toContain('aria-label="La note de Reims"');
+    expect(html).toContain('data-note-save="2"');
+    expect(html).toContain('data-note-cancel="2"');
+    expect(html).toContain("Vidée, la note s'efface.");
+    expect(html).toContain('aria-expanded="true" data-note-stop="2"');
+    expect(html).toContain('aria-expanded="false" data-note-stop="1"');
+    // la note d'avant ne se montre pas sous le champ qui la corrige
+    expect(html).not.toContain('<span class="small stop-note">le portail de l&#39;ange</span>');
+  });
+
+  it("une note changée se montre de suite ; vidée, elle s'efface (F3-14)", () => {
+    expect(notedTrip(TRIP, "2", "").days[0].stops[1].note).toBe("");
+    const noted = notedTrip(TRIP, "3", "Réserver avant le 15");
+    expect(noted.days[0].stops.map((s) => s.note)).toEqual(["", "le portail de l'ange", "Réserver avant le 15"]);
+    expect(TRIP.days[0].stops[2].note).toBe(""); // le voyage lu ne change pas
+    expect(tripRouteKey(noted)).toBe(tripRouteKey(TRIP)); // son trajet ne se relit pas pour une note
+  });
+
+  it("« Sur la route » : ses lieux en épingles secondaires, à part des arrêts, sans numéro (F3-13)", () => {
+    const onRoute = { cat: "dormir", places: [place({ along_m: 100_000, distance_m: 3000 }), place({ id: "l9", name: "Gîte", lat: NaN, along_m: 600_000 })],
+      error: "", loading: false, routed: true };
+    const pins = alongPins({ trip: TRIP, route: ROUTE, onRoute });
+    expect(pins).toEqual([{ id: "along:0", lat: 45.856, lon: 6.169, minor: true, title: "Camping de l'Horizon · jour 1 · Camping · Sévrier · à 3 km de la route" }]);
+    expect(pins[0]).not.toHaveProperty("label");
+    // un clic sur l'une retrouve sa ligne ; celui d'un arrêt, non
+    expect(alongPinId(4)).toBe("along:4");
+    expect(alongIndexOf("along:4")).toBe(4);
+    expect(alongIndexOf("4")).toBeNull();
+    expect(alongIndexOf("l3")).toBeNull();
+    const html = tripEditorMarkup(tripView({ onRoute }));
+    expect(html).toContain('<li data-along-place="0">');
+    expect(html).toContain('<li data-along-place="1">');
+    // la liste ne les montre pas (en recherche, refusée, moins de deux arrêts) : la carte non plus
+    expect(alongPins({ trip: TRIP, route: ROUTE, onRoute: { ...onRoute, loading: true } })).toEqual([]);
+    expect(alongPins({ trip: TRIP, route: ROUTE, onRoute: { ...onRoute, error: "Trop de demandes." } })).toEqual([]);
+    expect(alongPins({ trip: { ...TRIP, days: [{ n: 1, date: "", stops: [TRIP.days[0].stops[0]] }] }, route: ROUTE, onRoute })).toEqual([]);
+  });
+
+  it("« Sur la route » : « jour N » en tête de la ligne, où il ne se coupe pas (F3-13)", () => {
+    expect(alongFacts(TRIP, ROUTE, place({ along_m: 100_000, distance_m: 3000 }))).toBe("jour 1 · Camping · Sévrier · à 3 km de la route");
+    expect(alongFacts(TRIP, ROUTE, place({ along_m: 600_000, distance_m: 90, kind_fr: "", town: "" }))).toBe("jour 2 · sur la route");
+    const html = tripEditorMarkup(tripView({ onRoute: { cat: "dormir", places: [place({ along_m: 100_000, distance_m: 3000 })], error: "", loading: false, routed: true } }));
+    expect(html).toContain('<span class="small muted">jour 1 · Camping · Sévrier · à 3 km de la route</span>');
+  });
+
   it("sur la route : les lieux du trajet, à ajouter", () => {
     const html = tripEditorMarkup(tripView({ onRoute: { cat: "voir", places: [place({ name: "Monastère royal de Brou", kind_fr: "Monument", distance_m: 2500, along_m: 600_000 })], error: "", loading: false, routed: true } }));
     expect(html).toContain('class="cat on" data-onroute="voir"');
@@ -402,5 +560,62 @@ describe("le cadre de la carte", () => {
     expect(drawn).not.toContain("data-carte-map");
     expect(drawn).toContain("drawn-map");
     expect(drawn).toContain("Un plan dessiné, pas une carte : aucune carte n&#39;est réglée.");
+  });
+});
+
+describe("les fenêtres d'un voyage (F3-16)", () => {
+  it("« En voiture, éviter » : les libellés de la table unique, cachés hors voiture", () => {
+    const car = tripAvoidField("voiture", ["autoroutes"]);
+    expect(car).toContain("data-trip-avoid>");
+    expect(car).not.toContain("hidden");
+    expect(car).toContain('<label class="check"><input type="checkbox" name="avoid" value="peages"><span>les péages</span></label>');
+    expect(car).toContain('value="autoroutes" checked');
+    expect(car).toContain("<span>les ferries</span>");
+    expect(tripAvoidField("velo", [])).toContain("data-trip-avoid hidden");
+    expect(tripAvoidField("pied", ["peages"])).toContain("data-trip-avoid hidden");
+  });
+
+  it("« Nouveau voyage » et « Le voyage » : le même formulaire, ses cases sous `.trip-form`, et ce qu'il évite en voiture", () => {
+    const made = tripFormMarkup({ edit: false, title: "", start: "", mode: "voiture", avoid: [], first: { name: "Annecy", town: "" } });
+    expect(made).toContain('<form class="stack trip-form" data-trip-form>');
+    expect(made).toContain('required placeholder="Les Alpes en cinq jours"');
+    expect(made).toContain("(facultatif)");
+    expect(made).toContain('<select name="mode" data-trip-mode><option value="voiture" selected>en voiture</option>');
+    expect(made).toContain("data-trip-avoid>"); // un voyage neuf part en voiture : ses options se montrent
+    expect(made).toContain("Premier arrêt : Annecy.");
+    const edit = tripFormMarkup({ edit: true, title: "À vélo <vite>", start: "2027-04-03", mode: "velo", avoid: ["peages"] });
+    expect(edit).toContain('value="À vélo &lt;vite&gt;"');
+    expect(edit).toContain("(vide : sans date)");
+    expect(edit).toContain('<option value="velo" selected>à vélo</option>');
+    expect(edit).toContain("data-trip-avoid hidden");
+  });
+
+  it("le pied de « Le voyage » : la suppression se distingue (seule sur sa ligne sur un téléphone, carte.css)", () => {
+    const foot = tripFormFoot(true);
+    expect(foot).toContain('<button class="btn danger trip-delete" type="button" data-delete>');
+    expect(foot).toMatch(/data-close>Annuler<\/button><button class="btn primary" type="button" data-ok>[\s\S]*Enregistrer/);
+    expect(tripFormFoot(false)).not.toContain("trip-delete");
+    expect(tripFormFoot(false)).toContain("Créer");
+  });
+
+  it("un voyage qui quitte la voiture n'envoie plus ce qu'il évite ; en voiture, seulement s'il a changé", () => {
+    const trip = { title: "Les Alpes", start: "2027-04-03", mode: "voiture", avoid: ["peages"] };
+    // à vélo : les cases (cachées, mais toujours cochées) ne partent pas
+    expect(tripChanges(trip, { ...trip, mode: "velo", avoid: ["peages", "ferries"] })).toEqual({ mode: "velo" });
+    expect(tripChanges({ ...trip, mode: "velo" }, { ...trip, mode: "velo", avoid: [] })).toEqual({});
+    // en voiture : ce qu'il évite, dans l'ordre de l'API, s'il a changé
+    expect(tripChanges(trip, { ...trip, avoid: ["ferries", "peages"] })).toEqual({ avoid: ["peages", "ferries"] });
+    expect(tripChanges({ ...trip, avoid: ["ferries", "peages"] }, { ...trip, avoid: ["peages", "ferries"] })).toEqual({});
+    expect(tripChanges(trip, { ...trip, avoid: [] })).toEqual({ avoid: [] });
+    // revenu à la voiture : ce qu'on coche part avec le mode
+    expect(tripChanges({ ...trip, mode: "pied", avoid: [] }, { ...trip, mode: "voiture", avoid: ["autoroutes"] })).toEqual({ mode: "voiture", avoid: ["autoroutes"] });
+    expect(tripChanges(trip, { ...trip, title: "  Les Alpes  ", start: "" })).toEqual({ start: "" });
+  });
+
+  it("« Nouveau voyage » : ce qu'il évite, pour un voyage en voiture seulement", () => {
+    expect(newTripValues({ title: " Les Alpes ", start: "", mode: "voiture", avoid: ["ferries", "peages"] }))
+      .toEqual({ title: "Les Alpes", start: "", mode: "voiture", avoid: ["peages", "ferries"] });
+    expect(newTripValues({ title: "La Loire", start: "2027-05-01", mode: "velo", avoid: ["peages"] }))
+      .toEqual({ title: "La Loire", start: "2027-05-01", mode: "velo" });
   });
 });

@@ -173,6 +173,11 @@ FALLBACKS = {
     # un seul modèle déclaré suffit : les utilitaires retombent sur celui qui répond
     Role.EXTRACT: Role.REPLY, Role.CAPTION: Role.REPLY,
 }
+#: Les rôles facultatifs : sans repli (hors de ``FALLBACKS``), ils ne servent que si l'opératrice leur donne un modèle.
+#: Sans modèle, la passe qu'ils servent ne se fait pas, et aucun appel n'échoue : chacun est gardé par
+#: ``serving(rôle)`` (``runtime/second_pass.py``), et la parole part telle quelle (ADR 0140). Seule la console les
+#: lit, pour dire un tel rôle « coupé », par choix, et non « sans fournisseur » en rouge.
+OPTIONAL_ROLES = frozenset({Role.POLISH})
 
 #: Le rôle d'un essai de la console (« Rejouer avec… ») : le prompt gardé d'un épisode renvoyé à un fournisseur
 #: nommé. Hors de ``Role`` : il ne se route pas (le fournisseur est choisi à l'appel), ne parle pas en son nom (pas

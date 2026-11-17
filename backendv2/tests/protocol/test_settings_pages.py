@@ -173,6 +173,23 @@ def test_who_serves_what_is_one_table_where_each_role_is_chosen_beside_what_real
     assert "Où elles écrivent" in authors and "caractères" not in authors and "(ADR" not in authors
 
 
+def test_who_serves_what_says_the_second_pass_without_a_model_is_cut_not_failing(world):  # noqa: F811
+    """C8-02 : « rendre naturel » n'a pas de repli ; sans modèle, la seconde passe ne se fait pas et aucun appel n'est
+    fait (ADR 0140). Sa ligne disait « chaque appel échoue », en rouge, sur toute installation qui n'en voulait pas."""
+    client, _live, _ = world
+    bootstrap(client)
+    post(client, f"{BASE}/fournisseurs", {"_section": "modeles", "_enregistrement": "backends", "_ancienne": "",
+                                          "_cle": "local", "_champs": ["kind", "model", "host"], "kind": "ollama",
+                                          "model": "gemma", "host": "http://127.0.0.1:9"})
+    page = html.unescape(page_of(client, f"{BASE}/roles"))
+    table = page.split("<table", 1)[1].split("</table>", 1)[0]
+    at = table.index('name="routes.polish"')
+    row = table[table.rfind("<tr", 0, at):table.index("</tr>", at)]
+    assert "coupée : la seconde passe ne se fait pas" in row and "danger" not in row
+    # tout autre rôle retombe sur « répondre » : aucune ligne en rouge, rien qui « échoue »
+    assert "t-danger" not in table and "chaque appel échoue" not in table
+
+
 def written_paths() -> set[str]:
     """Les chemins vers ces pages, dans toutes les chaînes du code : par l'AST, qui recolle une chaîne coupée sur deux
     lignes et ne lit pas les commentaires."""

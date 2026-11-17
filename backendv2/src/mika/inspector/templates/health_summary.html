@@ -2,7 +2,7 @@
   <div>
     <span class="eyebrow">État actuel</span>
     <h2>{{ health_title }}</h2>
-    <p>{% if not health_ready %}Les contrôles complets seront disponibles lorsque {{ her }} sera prête.{% elif health_problems %}Commence par les points signalés ci-dessous. Chaque contrôle indique le constat et ses détails.{% else %}Aucun problème signalé par les {{ health_checked }} contrôles de santé.{% endif %}</p>
+    <p>{% if not health_ready %}Les contrôles complets seront disponibles lorsque {{ her }} sera prête.{% elif health_problems %}Commence par les points signalés ci-dessous. Chaque contrôle indique le constat et ses détails.{% else %}{{ health_all_clear }}{% endif %}</p>
     <div class="health-refresh"><span>Relevé à {{ health_snapshot }}</span><a class="btn quiet small" href="{{ PREFIX }}/systeme/sante">Actualiser le bilan</a></div>
   </div>
   {% if health_ready %}<dl class="health-counts">

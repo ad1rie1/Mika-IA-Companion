@@ -1,14 +1,19 @@
-{# Un effet qui n'a pas pu partir (Système › File de sortie, dessinée, et le panneau de leur repli : pages/system.py) :
-   ce qu'il faisait partir, son état, son erreur, ce qu'il faut vérifier ; le relancer, le marquer comme vu. #}
+{# Un départ qui n'a pas pu partir (Système › File de sortie, dessinée, et le panneau de leur repli : pages/system.py ;
+   « Ses départs » de la page d'un événement : pages/journal.py) : ce qu'il faisait partir et à qui (``departures`` :
+   une parole, son destinataire et son début ; une action, son résumé), son état, ce qu'il faut faire pour sa sorte
+   (``guidance``), son erreur ; le relancer, le marquer comme vu, puis revenir à ``back``. Sans ``p.seq`` (la page de
+   l'événement même), pas de lien vers l'événement. #}
 {% macro outbox_item(p, csrf, back) -%}
+{% set meta = [p.when, p.attempts]|select|list %}
 <li class="st-{{ p.tone }}">
-  <div class="person-entry-top"><div class="person-entry-name"><p class="person-entry-title">{{ p.name }}</p><span class="now-tag {{ p.tone }}">{{ p.state }}</span></div><span class="person-entry-time">{% if p.when %}{{ p.when }} · {% endif %}<a href="{{ PREFIX }}/evenement/{{ p.seq }}">événement n° {{ p.seq }}</a></span></div>
+  <div class="person-entry-top"><div class="person-entry-name"><p class="person-entry-title">{{ p.name }}{% if p.to %} <span class="now-muted">à {{ p.to }}</span>{% endif %}</p><span class="now-tag {{ p.tone }}">{{ p.state }}</span></div><span class="person-entry-time">{{ meta|join(' · ') }}{% if p.seq %}{{ ' · ' if meta }}<a href="{{ PREFIX }}/evenement/{{ p.seq }}">événement n° {{ p.seq }}</a>{% endif %}</span></div>
+  {% if p.text %}<p class="now-sub">{{ p.text }}</p>{% endif %}
   <p class="now-sub">{{ p.hint }}</p>
   {% if p.error %}<pre class="hm-error">{{ p.error }}</pre>{% endif %}
   <form method="post" action="{{ PREFIX }}/systeme/sorties" class="outbox-actions">
     <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="cle" value="{{ p.key }}">
     <input type="hidden" name="_retour" value="{{ back }}">
-    {% if p.retry %}<button class="btn small" name="faire" value="relancer" data-confirm="Relancer « {{ p.name }} » (n° {{ p.seq }}) : un essai de plus, tout de suite ?">Relancer</button>{% endif %}
+    {% if p.retry %}<button class="btn small" name="faire" value="relancer" data-confirm="Relancer « {{ p.name }} »{% if p.seq %} (n° {{ p.seq }}){% endif %} : un essai de plus, tout de suite ?">Relancer</button>{% endif %}
     <button class="btn quiet small" name="faire" value="vu">Marquer comme vu</button>
   </form>
 </li>

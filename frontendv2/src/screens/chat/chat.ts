@@ -862,9 +862,10 @@ export class ChatScreen {
   }
 
   /**
-   * Ouvrir le chat avec une phrase préremplie (l'écran Carte : « Demander à Mika », « En parler à Mika ») : elle ne part
-   * pas d'elle-même, on la complète et on l'envoie. Ses outils de carte servent dans la conversation : le mode pro, s'il
-   * était choisi, cède la place.
+   * Ouvrir le chat avec une phrase préremplie : elle ne part pas d'elle-même, on la complète et on l'envoie. La Carte
+   * s'en sert (« Demander à Mika », « En parler à Mika »), le Téléphone aussi (« Lui en parler dans le chat », depuis un
+   * fil). La phrase s'adresse à Mika, dans le fil avec elle, où elle s'aide de ses outils (la carte, le téléphone) : le
+   * mode pro, qui cache ce fil, cède la place s'il était choisi.
    */
   prefill(text: string): void {
     if (this.proMode) this.setPro(false);

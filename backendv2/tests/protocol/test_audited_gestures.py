@@ -20,13 +20,14 @@ import pytest
 from mika.app.cli import common as cli_common
 from mika.contracts import runtime as rt
 from mika.inspector import names
-from mika.inspector.pages.system import gesture_origin
+from mika.inspector.pages.system import gesture_origin, on_title
 from mika.runtime import operations
 from mika.runtime.operations import CLI, CLI_BY, CONSOLE, SPACE, origin, perform
 from mika.sim.clock import run_virtual
 from tests.fixtures.harness import build
 from tests.protocol import test_moi_carte as on_map
 from tests.protocol import test_moi_mail as on_mail
+from tests.protocol import test_tabs_projects as on_projects
 from tests.protocol.test_console_diagnostics import stop
 from tests.protocol.test_drawn_pages import drawn
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
@@ -206,10 +207,41 @@ def test_a_gesture_links_only_a_sheet_that_opens(world):  # noqa: F811
     feed = feed[:feed.index("</ol>")]
     links = re.findall(r'href="(/inspecteur/fiche/[^"]+)"', feed)
     assert links == ["/inspecteur/fiche/compte/pro"] and client.get(links[0]).status_code == 200
-    assert ">Compte pro</a>" in feed
+    # sous le titre de sa fiche (la boîte « pro » s'appelle « Atelier »), sa clé au survol (C8-07)
+    assert '<span title="pro"><a href="/inspecteur/fiche/compte/pro">Compte « Atelier »</a></span>' in feed
+    assert ">Compte pro</a>" not in feed
     # le reste dit sa clé, en texte, sa sorte en bulle
     assert all(f'title="{kind}">{key}</span>' in feed for kind, key in (("compte", "partie"), ("compte", "bea"),
                                                                         ("mail", "pro")))
+
+
+def test_a_gesture_on_a_project_says_its_title_not_its_number(world):  # noqa: F811
+    """« Sur quoi » dit l'objet par le titre de sa fiche, jamais par son identifiant (C8-07, audit du 2026-11-05 :
+    « Enregistrer le dépôt distant sur Projet 61 ») ; sa clé reste au détail de la vue et au survol de la page."""
+    client, live, _ = world
+    bootstrap(client)
+    kernel = live.kernel
+    stop(client, kernel)
+    pid = on_projects._create(client, kernel, "Labo de trading", "Une stratégie qui tient")
+    client.portal.call(lambda: operations.audit(kernel, "projects.depot_distant", by="user_1", subject_kind="project",
+                                                subject=str(pid)))
+    feed = drawn(client, PAGE)
+    feed = feed[feed.index('class="sys-ops-feed"'):]
+    feed = feed[:feed.index("</ol>")]
+    assert (f'<span title="{pid}"><a href="/inspecteur/fiche/project/{pid}">Projet « Labo de trading »</a></span>'
+            in feed)
+    assert f">Projet {pid}<" not in feed
+    # la vue le dit aussi (le repli, la console en MCP) : le titre sur la ligne, la clé dans sa colonne repliée
+    table = drawn(client, f"{PAGE}?vue_pg1=table")
+    assert "Projet « Labo de trading »" in table and "sur (clé)" in table
+
+
+def test_the_title_of_a_sheet_says_its_kind_once():
+    assert on_title("Pièce reçue", "facture.pdf", "4f63b0a7") == "Pièce reçue « facture.pdf »"
+    assert on_title("Projet", "Projet Atlas", "61") == "Projet Atlas"  # le titre dit déjà la sorte
+    assert on_title("Projet", "Projets d'été", "62") == "Projet « Projets d'été »"  # un autre mot
+    assert on_title("Compte", "  ", "pro") == "Compte pro"  # rien à dire : sa clé
+    assert on_title("Mail", "x" * 300, "m1") == f"Mail « {'x' * 79}… »"  # un titre long, coupé
 
 
 # ── l'espace d'une personne : chaque geste y dit d'où il vient, même fait par une opératrice ──

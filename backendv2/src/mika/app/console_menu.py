@@ -15,7 +15,15 @@ Le menu fait foi (ADR 0202) : une destination porte le nom de son lien (``Destin
 ``app/console.py``), et le fil d'Ariane d'une page part de la rubrique du lien qui y mène (``catalog.menu_place``).
 Les rubriques sont dans la barre du haut (ADR 0176) : chacune y a son nom court, et son menu commence par la question
 à laquelle elle répond ; chaque lien, ou chaque colonne, y dit en quelques mots ce qu'on trouve derrière.
+
+``MENU`` est le menu entier ; un serveur sert ``menu_for(reports)`` : Système › Anatomie › Simulations n'y est que s'il a
+un dossier de rapports (``serve --reports``) : l'unité de service n'en passe pas, et sans lui la page reste vide.
+Son adresse reste, comme son ancienne (``rapports``, ``MOVED``), et la recherche la trouve (audit du 2026-11-05,
+C8-12).
 """
+
+from dataclasses import replace
+from pathlib import Path
 
 from mika.inspector.catalog import MenuGroup, MenuLink
 
@@ -105,3 +113,16 @@ MENU = (
         ("Anatomie", "Le mécanisme, de près"),
     )),
 )
+
+#: la page des rapports de simulation : au menu seulement si le serveur a un dossier de rapports (``menu_for``)
+REPORTS_PAGE = "systeme/simulations"
+
+
+def menu_for(reports: Path | None) -> tuple[MenuGroup, ...]:
+    """Le menu d'un serveur : ``MENU``, sans le lien de Simulations s'il n'a pas de dossier de rapports (``reports``,
+    ``serve --reports``) — une page toujours vide n'aide à rien ; le développeur qui lance le serveur avec un dossier
+    la retrouve au menu (C8-12)."""
+    if reports is not None:
+        return MENU
+    return tuple(replace(group, items=tuple(link for link in group.items if link.target != REPORTS_PAGE))
+                 for group in MENU)

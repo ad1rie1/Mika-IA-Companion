@@ -37,6 +37,7 @@ from mika.kernel.inspect import (
     Table,
     Text,
     When,
+    num_fr,
     paginate,
 )
 from mika.kernel.state import FrozenDict
@@ -78,7 +79,7 @@ def _feeds_note(port: Any, p: RssParams) -> Note:
                     "en haut à droite.", tone="muted")
     return Note(f"Relevés toutes les {p.poll_every_us // MINUTE} min quand elle est éveillée ; elle ne remarque "
                 f"que ce qui touche ses centres d'intérêt ({p.noticed_per_poll} titres au plus par relevé, "
-                f"à partir d'une pertinence de {p.notice_from:.2f}).", tone="ok")
+                f"à partir d'une pertinence de {num_fr(p.notice_from, 2)}).", tone="ok")
 
 
 def _days(frame: Frame) -> list[tuple[date, int]]:
@@ -181,7 +182,7 @@ def _entries(s: RssState, ctx: InspectContext, port: Any, words: frozenset[str])
             Ref.url(e.link, title) if _web(e.link) else Text(title), Text(_clip(feed_name(e.feed), 60)),
             When(e.published) if e.published else None,
             Badge("remarqué", "ok") if seen else Badge("laissé passer", "muted"),
-            Meter(score, f"{score:.2f}") if seen else Meter(score, f"{score:.2f} (estimée)", tone="muted"),
+            Meter(score, num_fr(score, 2)) if seen else Meter(score, f"{num_fr(score, 2)} (estimée)", tone="muted"),
         ), detail=(Prose(e.summary, title="Résumé de l'article", reading=True),) if e.summary else ()))
     return Table(("titre", "flux", Column("paru", "fit"), Column("remarqué", "fit"), Column("pertinence", "fit", detail=True)),
                  tuple(rows), title="Derniers articles relevés", pager=pager,
@@ -197,7 +198,7 @@ def _noticed(s: RssState, ctx: InspectContext, feed: str) -> Table:
         (Column("remarqué", "fit"), "flux", "ce qu'elle a remarqué", Column("pertinence", "fit"),
          Column("journal", "fit")),
         tuple((When(v.at), Text(_clip(feed_name(v.feed), 60)), Text(tokenless(texts.get(v.summary_ref, FORGOTTEN)), clamp=300),
-               Meter(v.pertinence, f"{v.pertinence:.2f}"), Ref("event", str(v.seq), f"#{v.seq}")) for v in noticed),
+               Meter(v.pertinence, num_fr(v.pertinence, 2)), Ref("event", str(v.seq), f"#{v.seq}")) for v in noticed),
         title="Ce qu'elle a remarqué", empty="elle n'a encore remarqué aucun titre" if not feed else
         "rien de remarqué dans ce flux", pager=pager,
         caption=f"Elle garde les {KEEP} derniers titres remarqués, du plus récent au plus ancien.")
@@ -218,7 +219,7 @@ def _thoughts(s: RssState, frame: Frame, ctx: InspectContext, feed: str) -> Tabl
         (Column("quand", "fit"), "pensé à", "le titre", Column("pertinence", "fit"), Column("dit", "fit"),
          Column("journal", "fit")),
         tuple((When(v.at), _person(frame, who), Text(tokenless(texts.get(v.summary_ref, FORGOTTEN)), clamp=300),
-               Meter(v.pertinence, f"{v.pertinence:.2f}"),
+               Meter(v.pertinence, num_fr(v.pertinence, 2)),
                Badge("dit", "ok") if who in s.told.get(k, FrozenDict()) else Badge("pas encore", "muted"),
                Ref("event", str(v.seq), f"#{v.seq}")) for k, who, v in page),
         title="Ce qui lui a fait penser à ses amies", pager=pager,

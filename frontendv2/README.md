@@ -12,7 +12,8 @@ partage (ADR 0188).
 npm install
 npm run dev        # http://localhost:4173 (port fixe, admis d'office par le moteur), vise http://localhost:8001
 npm run build      # tsc (l'application, puis vite.config.ts et tools/) puis vite build : la vraie barrière
-npm test           # vitest (src/ ; tools/ : extAssets, et les règles des feuilles lues sur le disque, styles.test.ts)
+npm test           # vitest (src/ ; tools/ : extAssets, les règles des feuilles lues sur le disque, styles.test.ts,
+                   # et chaque paquet qu'importe src/ déclaré dans package.json, dependencies.test.ts)
 npm run preview    # le résultat de build, sur le même port
 ```
 
@@ -61,13 +62,13 @@ Les modules purs du client web sont réutilisés sans copie par l'alias `@web` (
 | `screens/chat/` | le chat : `chat.ts` (les trames, l'état du fil, l'orchestration des gestes), `approvals.ts` (les cartes d'accord et « Tout accepter »), `strands.ts` (les fils de travail et leurs commandes), `composer.ts` (le champ : pièces jointes, emojis, compteur, phrase préremplie, envoi), `older.ts` (« Messages plus anciens » : d'où repartir, comment ce qui revient se recoud au fil chargé, pur), `markup.ts` (le balisage de la maquette, pur) |
 | `screens/mail/` | Mail : `index.ts` (l'écran et sa pastille), `mail.ts` (l'état, les gestes), `markup.ts` (le rendu de la maquette, pur), `compose.ts` (les destinataires proposés, la fenêtre d'un mail), `format.ts` (niveaux de partage, adresses, texte d'un mail, « [À COMPLÉTER », pur) |
 | `screens/teams/` | Teams : `index.ts`, `teams.ts` (l'état, les gestes), `markup.ts`, `format.ts` (états, modes, jours, mentions, qui a écrit — « Toi » sur un compte à toi seulement —, les cartes du fil, l'adresse d'une réponse) |
-| `screens/telephone/` | Téléphone : `index.ts`, `view.ts` (le rendu, pur ; si la vraie carte se montre, et ce que l'onglet en fait : `liveWanted`, `mapStep`), `livemap.ts` (la carte de sa position sur `map/base.ts` : le point et le cercle de sa précision) |
-| `screens/carte/` | Carte (ADR 0194 à 0196) : `index.ts` (les onglets, les lectures, les gestes, la carte gardée d'un dessin à l'autre), `view.ts` (Explorer, Itinéraire, Voyages et l'éditeur d'un voyage, le cadre de la carte : pur), `format.ts` (l'ordre des arrêts et où un geste les met, ce dont le trajet d'un voyage dépend, le jour d'un lieu croisé le long du trajet, le GPX d'un itinéraire, les phrases préparées pour Mika, le contrôle qui garde la main d'un dessin à l'autre : pur), `requests.ts` (ménager ce qui sort du serveur : les adresses gardées par texte, le trajet d'un voyage gardé pour ses arrêts et relu après le dernier geste, les gestes l'un après l'autre : sans DOM) |
-| `map/` | Ce qui sert à toute carte (Téléphone, Carte, les miniatures du chat) : `info.ts` (le fond de carte servi, `GET /api/moi/carte/fond`, lu une fois pour la page et relu toutes les cinq minutes), `mapgeo.ts` (ce qu'elle couvre, une précision en cercle, le zoom, une zone, une distance), `polyline.ts` (`decodePolyline6`, la même que `backendv2/src/mika/ports/maps.py`), `mapstyle.ts` (le style Protomaps, clair ou sombre), `base.ts` (une carte MapLibre : adresses absolues, la session, les commandes en français, le nord toujours en haut, le thème, `restyle`, des tuiles en échec de suite qui font revenir le plan), `view.ts` (`MapView` : épingles numérotées, roses pour ce que Mika a fait, tracés, `fitBounds`), `scene.ts` et `drawn.ts` (ce qu'une carte montre, et son plan dessiné sans tuile), `notes.ts` et `cards.ts` (ses notes de carte et leur miniature), `minis.ts` (les miniatures d'une liste : créées quand elles paraissent, quatre vivantes au plus ; ce qu'elles montrent, lu une fois pour la page et relu quand il a changé), `words.ts` (distances, durées, dates d'un voyage), `load.ts` (MapLibre et la vue, chargés une fois et à part) |
+| `screens/telephone/` | Téléphone : `index.ts`, `view.ts` (le rendu, pur ; la scène de la position, `positionScene` : son point et sa précision, que la vraie carte — `map/view.ts` et `map/live.ts`, comme la Carte — et le plan montrent) |
+| `screens/carte/` | Carte (ADR 0194 à 0196) : `index.ts` (le cadre : les onglets, les lectures communes, la carte gardée d'un dessin à l'autre et son cadrage, ce qui garde la main d'un dessin à l'autre, la palette ; il délègue le dessin et les gestes à l'onglet montré, et chaque contrôleur reçoit de lui ce qu'il lui faut, jamais l'état d'un autre onglet), `explorer.ts` (Explorer : la recherche, les adresses, le regard de Mika, la fiche, « Itinéraire jusqu'ici », « Ajouter au voyage »), `itinerary.ts` (Itinéraire : les points et leurs propositions, le calcul, le regard de Mika, tes choix, le GPX, « En faire un voyage »), `trip.ts` (Voyages : la liste et le voyage ouvert, ses gestes — l'un après l'autre, montrés avant que le serveur les dise —, « Sur la route », la note d'un arrêt, optimiser, un lieu ajouté à un voyage), `modals.ts` (les fenêtres « Nouveau voyage », « Le voyage », « Ajouter un arrêt »), `drag.ts` (glisser un arrêt : la cible, l'indice, le suivi du pointeur), `view.ts` (Explorer, Itinéraire, Voyages et l'éditeur d'un voyage — la note d'un arrêt en place, les épingles de « Sur la route » —, les fenêtres d'un voyage, les actions d'un voyage dans la barre de titre, le cadre de la carte : pur), `format.ts` (l'ordre des arrêts et où un geste les met, une note changée, ce dont le trajet d'un voyage dépend, ce que la fenêtre d'un voyage envoie, le jour d'un lieu croisé le long du trajet, tes choix d'itinéraire face à ceux d'un trajet de Mika, jusqu'où une recherche est allée, le GPX d'un itinéraire, les phrases préparées pour Mika, le contrôle qui garde la main d'un dessin à l'autre : pur), `requests.ts` (ménager ce qui sort du serveur : les adresses gardées par texte, le trajet d'un voyage gardé pour ses arrêts et relu après le dernier geste, les gestes l'un après l'autre, ce qui n'est plus là (404) : sans DOM) |
+| `map/` | Ce qui sert à toute carte (Téléphone, Carte, les miniatures du chat) : `info.ts` (le fond de carte servi, `GET /api/moi/carte/fond`, lu une fois pour la page et relu toutes les cinq minutes), `mapgeo.ts` (ce qu'elle couvre, une précision en cercle, le zoom, une zone, une distance), `polyline.ts` (`decodePolyline6`, la même que `backendv2/src/mika/ports/maps.py`), `mapstyle.ts` (le style Protomaps, clair ou sombre, sans les points d'intérêt qui n'apprennent rien : une attraction sans nom, ou nommée « Immeuble », « Maison »…), `base.ts` (une carte MapLibre : adresses absolues, la session, les commandes en français, le nord toujours en haut, le thème, `restyle`, des tuiles en échec de suite qui font revenir le plan, une image vide pour une icône que la planche n'a pas), `view.ts` (`MapView` : épingles numérotées, roses pour ce que Mika a fait, secondaires — plus petites, sans numéro : les lieux de « Sur la route » —, tracés, la position et le cercle de sa précision, `fitBounds` ; une position seule s'ouvre centrée, au zoom de sa précision ; un cadrage demandé se fait même sur une scène inchangée, et une scène vide garde la vue, sauf quand l'écran demande le fond de carte), `live.ts` (le cycle de vie d'une carte vivante, le même pour la Carte et la Position du Téléphone : si elle se montre, la monter, la reposer d'un dessin à l'autre, une autre carte servie qui se repose sur elle, seul le dernier montage qui se pose, ses échecs — tuiles, chargement, WebGL — qui laissent le plan sans réessayer, et les mots de sa note), `scene.ts` et `drawn.ts` (ce qu'une carte montre, comment une vue la cadre — `sceneFraming` : sur l'écran Carte, une zone d'au moins ~200 m et jusqu'au zoom 17, sur une miniature, ~2 km et 12,5 au plus —, et son plan dessiné sans tuile ; la position peut porter sa précision, un cercle que la zone tient), `notes.ts` et `cards.ts` (ses notes de carte et leur miniature), `minis.ts` (les miniatures d'une liste : créées quand elles paraissent, quatre vivantes au plus ; ce qu'elles montrent, lu une fois pour la page et relu quand il a changé), `words.ts` (distances, durées, ce qu'un trajet en voiture peut éviter — la seule table de ces libellés —, dates d'un voyage, en long et en court), `load.ts` (MapLibre et la vue, chargés une fois et à part) |
 | `screens/outils/` | Outils : `index.ts`, `matrix.ts` (la matrice des droits et les lignes de « Services », pur) |
 | `screens/parametres/` | Paramètres : `index.ts` (routes, routes d'action, gestes délégués, sous-onglets), `page.ts` (ce qu'une page et son hôte se doivent), `form.ts` (lignes et barre d'enregistrement), `words.ts` (les mots des niveaux et des états), une page par sous-onglet (`account`, `mail`, `teams`, `phones`, `shares`, `mcp`) |
-| `api/` | `moi.ts` (`getJson`, `sendJson`, `sendForm`, `apiUrl`), `me.ts` (`GET /api/moi`), et un client typé par domaine : `mail`, `teams`, `phone`, `rights`, `settings`, `shares`, `mcp`, `carte` (lieux, adresses, itinéraires, regards, voyages : `protocole-moi.md` § 10) |
-| `shared/` | ce que plusieurs écrans partagent : `kit.ts` (lectures en cache — une relecture forcée suit celle en cours, un 404 efface ce qu'on avait lu —, erreurs, dates, copier, confirmer), `store.ts` (les lectures partagées), `storage.ts` (le stockage du navigateur, sans jamais lever), `names.ts` (« de Léa », « d'Adrien » : `ofName`, que `screens/mail/format.ts` réexporte) |
+| `api/` | `moi.ts` (`getJson`, `sendJson`, `sendForm`, `apiUrl`), `me.ts` (`GET /api/moi`), et un client typé par domaine : `mail`, `teams`, `phone`, `rights`, `settings`, `shares`, `mcp`, `carte` (lieux, adresses, itinéraires, regards, voyages, et le fond de carte : `protocole-moi.md` § 10) |
+| `shared/` | ce que plusieurs écrans partagent : `kit.ts` (lectures en cache — une relecture forcée suit celle en cours, un 404 efface ce qu'on avait lu —, erreurs, dates, copier, confirmer), `store.ts` (les lectures partagées, dont ta dernière position, celle du Téléphone et de la Carte), `storage.ts` (le stockage du navigateur, sans jamais lever), `names.ts` (« de Léa », « d'Adrien » : `ofName`, que `screens/mail/format.ts` réexporte) |
 | `shell/counts.ts` | les pastilles de la barre du haut, relues dans `GET /api/moi` (au démarrage, chaque minute, au retour sur l'onglet, après un geste) ; la même lecture donne le nom du compte, que le menu du compte suit quand on l'a changé ailleurs (un autre appareil, la console) |
 | `styles/` | `base.css` et `chat.css` portés de la maquette, `ecrans/` pour chaque écran, `app.css` pour ce qu'elle ne montrait pas |
 
@@ -122,27 +123,46 @@ Mika n'a qu'un élément (`#mika-corner`) : son visage dans la pastille du haut,
 - **Téléphone** : ses téléphones, les conversations que l'application a lues, leurs fils, ses propositions et leur
   sort, sa dernière position — sur une vraie carte quand le serveur en sert une qui la couvre (ADR 0193 : ses tuiles,
   polices et icônes viennent du serveur seul, `GET /api/moi/carte/fond` ; MapLibre se charge avec l'onglet), sinon sur
-  le plan dessiné. Répondre d'ici et « Préremplir » (ADR 0189, 0191) n'ont pas encore de route dans l'API
-  (et l'application Android devra envoyer sans redemander le geste) : le champ le dit.
-  Une autre carte servie, relue pendant que l'onglet est ouvert (des polices ajoutées, une autre source, une autre
-  zone), se repose sur la carte ouverte. Une carte qui ne se dessine pas (pas de WebGL, MapLibre qui ne vient pas, ses
-  tuiles en échec de suite) laisse le plan dessiné et sa note, sans réessayer à chaque dessin — jusqu'à une autre carte
-  servie.
+  le plan dessiné de la Carte : le point et le cercle de sa précision, à l'échelle (~300 m autour au moins), aucune rue
+  inventée. Répondre d'ici et « Préremplir » (ADR 0189, 0191) n'ont pas encore de route dans l'API
+  (et l'application Android devra envoyer sans redemander le geste) : le champ le dit (sur un téléphone, sa note seule).
+  « Lui en parler dans le chat », dans le menu d'un fil, ouvre le chat avec une phrase qui nomme la conversation. Pas
+  d'onglet Notifications tant que l'application ne lit que les messageries (ADR 0233) : il ne ferait que redire
+  Messages ; `#telephone/notifications` retombe sur Messages, et Paramètres › Téléphones dit ce que l'application lit.
+  Mika ne lit les messages du téléphone que pour ses propriétaires : à un autre compte (`owner` de `GET /api/moi`),
+  Messages le dit et mène à Position. Une autre carte servie, relue pendant que l'onglet est ouvert (des
+  polices ajoutées, une autre source, une autre zone), se repose sur la carte ouverte. Une carte qui ne se dessine pas
+  (pas de WebGL, MapLibre qui ne vient pas, ses tuiles en échec de suite) laisse le plan dessiné et sa note, sans
+  réessayer à chaque dessin — jusqu'à une autre carte servie.
 - **Carte** (ADR 0194 à 0196) : sur la carte du serveur (la même que Téléphone), ou sur le plan dessiné de ce qu'elle
   montre quand elle ne se dessine pas. **Explorer** cherche dans l'index des lieux du serveur (rien ne sort) : un nom,
   une catégorie, « Autour de moi » (la dernière position de son téléphone) ou « Dans cette zone » (le cadre de la carte,
-  recherché de nouveau quand on la déplace), et une adresse (Géoplateforme, relayée : seul le texte part) ; la fiche d'un
-  lieu mène à « Itinéraire jusqu'ici », « Ajouter au voyage » et « En parler à Mika ». **Itinéraire** : ses points
+  recherché de nouveau quand on la déplace), et une adresse (Géoplateforme, relayée : seul le texte part). Autour de toi,
+  l'index élargit ses cercles jusqu'à trouver : au-delà de 20 km, la légende ne dit plus « autour de ta position » mais
+  « les plus proches que l'index connaisse · jusqu'à … km » (le classement mêle pertinence et distance). La carte se
+  cadre sur ce que dit la colonne : des lieux à quelques mètres les uns des autres se départagent (jusqu'au zoom 17), une
+  recherche relancée se recadre même quand elle rend les mêmes lieux, et ce que Mika avait cherché, s'il ne se lit pas
+  (oublié ou en panne), ramène la carte sur le fond de carte (tant qu'il se lit, elle attend). La fiche d'un
+  lieu mène à « Itinéraire jusqu'ici », « Ajouter au voyage » (ses voyages, les dates en court : « 3–7 avr. ») et « En
+  parler à Mika » ; sur un téléphone, où la carte et la liste défilent ensemble, elle reste collée en bas de l'écran, et
+  un lieu choisi sur la carte la ramène en vue. **Itinéraire** : ses points
   (un lieu, une adresse, « Ma position »), voiture, vélo ou à pied, péages, autoroutes ou ferries évités, la durée, la
   distance et l'heure d'arrivée, les consignes, un GPX fait dans le navigateur, « En faire un voyage », « Envoyer à
-  Mika ». **Voyages** : la liste en cartes (leurs miniatures), « Nouveau voyage », et l'éditeur jour par jour — les
-  tronçons, ses arrêts en rose (retirables, comme les tiens), glisser une poignée (ou ses flèches au clavier) pour
-  réordonner d'un jour à l'autre, « Ajouter un arrêt », « Sur la route » (les lieux le long du trajet, ajoutés au bon
-  jour), « Optimiser l'ordre », le GPX du serveur, « Demander à Mika », qui ouvre le chat avec une phrase préremplie
-  (le mode pro, s'il était choisi, cède la place). Ce qu'elle a cherché ou montré s'ouvre ici (`#carte/explorer/regard-<n>`,
-  `#carte/itineraire/regard-<n>`), ses lieux en rose ; son trajet s'y montre tel qu'elle l'a gardé (son mode, ce qu'il
-  évitait), et ne se recalcule qu'au premier changement (ou « Recalculer »). Sans index, sans adresses ou sans
-  itinéraires, l'endroit qui en a besoin dit le message du serveur (503) et le reste marche.
+  Mika ». **Voyages** : la liste en cartes (leurs miniatures), « Nouveau voyage » (en voiture, ce qu'il évite), et
+  l'éditeur jour par jour — les tronçons, ses arrêts en rose (retirables, comme les tiens), glisser une poignée (ou ses
+  flèches au clavier) pour réordonner d'un jour à l'autre, « Noter » (le crayon : la note d'un arrêt se corrige ou
+  s'efface en place, Entrée l'enregistre, Échap annule ; elle se lit à part, « ajouté par Mika » n'est qu'une marque),
+  « Ajouter un arrêt », « Sur la route » (les lieux le long du trajet, « jour N » en tête de leur ligne, ajoutés au bon
+  jour ; sur la carte, en épingles secondaires — plus petites, sans numéro — qui ne la recadrent pas, et qu'on touche
+  pour retrouver leur ligne), « Le voyage » (le crayon du titre : ses cases « En voiture, éviter » ne se montrent qu'en
+  voiture, et un voyage qui la quitte ne les envoie plus), et dans la barre de titre, une fois le voyage lu (ni pendant
+  sa lecture, ni introuvable), « Optimiser l'ordre », le GPX du serveur, « Demander à Mika », qui ouvre le chat avec une
+  phrase préremplie (le mode pro, s'il était choisi, cède la place). Ce qu'elle a cherché ou montré s'ouvre ici
+  (`#carte/explorer/regard-<n>`, `#carte/itineraire/regard-<n>`), ses lieux en rose ; oublié (404), l'écran le dit, et
+  une autre panne se réessaie. Son trajet s'y montre tel qu'elle l'a gardé (son mode, ce qu'il évitait), et ne se recalcule qu'au premier changement (ou
+  « Recalculer ») ; son mode et ses cases ne deviennent pas les tiens : tes choix ne viennent que de tes gestes, et un
+  trajet que tu commences (« Itinéraire jusqu'ici ») les reprend, quand modifier le sien garde les siens. Sans index,
+  sans adresses ou sans itinéraires, l'endroit qui en a besoin dit le message du serveur (503) et le reste marche.
   Ce qui sort du serveur est borné par compte (`protocole-moi.md` § 10 ; un 429 se dit à l'endroit qui l'a reçu) :
   une adresse ne se demande que si le texte en a l'air (un chiffre, ou cinq caractères), après 0,7 s sans frappe, une
   fois par texte (la carte qu'on bouge ne la redemande pas) ; le trajet d'un voyage se garde pour ses arrêts (un autre

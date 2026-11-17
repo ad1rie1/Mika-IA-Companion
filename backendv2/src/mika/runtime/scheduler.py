@@ -37,7 +37,9 @@ minute est retenu une minute, puis deux, quatre… (une rafale, que la santé
 montre) : même un passage qui écrit à chaque fois sans jamais finir ne
 remplit pas le journal.
 Un passage a une échéance (``deadline_s``) : au-delà il est coupé et compte
-comme un échec.
+comme un échec. La console peut devancer la fin d'un recul (``retry_now``) :
+jamais celle d'une rafale retenue (``held_until``), même si le processus est
+aussi en échec.
 
 **Les voies selon la nature du travail.** Le calcul pur ne prend aucune place :
 un processus ne tient la voie ``model`` (bornée) que le temps de ses appels de
@@ -240,6 +242,9 @@ class Scheduler:
         #: les débuts des derniers passages (une rafale se voit à leur densité) ; les rafales retenues
         self._recent: dict[str, deque[int]] = {}
         self.storms: dict[str, int] = {}
+        #: la fin de la retenue de sa dernière rafale, à part du recul (``not_before`` porte les deux) : aucun geste
+        #: ne la devance (``retry_now``), et la console la montre (« retenu »)
+        self.held_until: dict[str, int] = {}
         mind.subscribe(self._on_events)
 
     def _on_events(self, events: Sequence[Event[Any]], root: Root) -> None:
@@ -257,6 +262,25 @@ class Scheduler:
         (un saut d'horloge, un cache vidé) est revu."""
         self._asked.clear()
         self._wake.set()
+
+    def retry_now(self, name: str) -> bool:
+        """Réessayer tout de suite un processus en échec (le geste « Réessayer maintenant » de la console, ADR 0234) :
+        son recul est effacé et une passe demandée (``poke``) ; il repart à sa prochaine échéance, c'est-à-dire tout
+        de suite s'il était dû. Ce n'est que devancer l'essai que la fin du recul aurait fait : la cadence ne change
+        pas, et un nouvel échec recule plus loin, comme le suivant l'aurait fait. Faux, sans rien toucher, pour un nom
+        inconnu, un processus en cours, qui n'est pas en échec, ou retenu pour une rafale (``held``) — même en échec
+        (une rafale qui suit un échec, une échéance qui lève pendant la retenue) : la retenue d'une rafale ne se
+        force pas, la garde est là pour ça."""
+        if (name not in self.instances or name in self._running or not self.consecutive.get(name, 0)
+                or self.held(name)):
+            return False
+        self.not_before.pop(name, None)
+        self.poke()
+        return True
+
+    def held(self, name: str, now: int | None = None) -> bool:
+        """Retenu pour une rafale (``_storming``) : la fin de sa retenue n'est pas venue (à ``now``, ou maintenant)."""
+        return self.held_until.get(name, 0) > (self.mind.clock.now() if now is None else now)
 
     def stop(self) -> None:
         self._stopping = True
@@ -436,6 +460,7 @@ class Scheduler:
             recent.clear()
             k = self.storms[name] = self.storms.get(name, 0) + 1
             hold = min(BACKOFF_MAX_US, STORM_WINDOW_US * 2 ** min(k - 1, 20))
+            self.held_until[name] = now + hold  # à part : un geste qui efface le recul ne la lève pas
             self.not_before[name] = max(self.not_before.get(name, 0), now + hold)
             self.last_error[name] = (now, f"rafale : plus de {STORM_RUNS} passages en une minute — retenu")
             self._wake.set()  # la boucle recalcule son réveil (la fin de la retenue)

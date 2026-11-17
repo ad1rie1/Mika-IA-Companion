@@ -6,6 +6,7 @@
   client) : en lecture, seule ; un outil qui ne se dit pas en lecture attendrait l'accord de sa propriétaire ;
 - avec sa propriétaire seulement (par défaut), et ce qu'elle y lit est public : un savoir (ADR 0128) ;
 - l'opérateur ne range rien pour eux, et un serveur à lui du même nom s'efface ;
+- le client dit quel plugin apporte chacun (sa fiche mène à ses paramètres) ;
 - des paramètres illisibles : aucun serveur système, rien d'offert ;
 - le plugin est une faculté de la composition, avec ses paramètres dans la console.
 """
@@ -118,6 +119,19 @@ def test_the_operator_stores_nothing_for_it_and_its_name_wins():
     assert saved == [{"meteo": {"prevoir": mine}}]  # rien de ce qui est calculé n'est rangé
     clash = system.config(McpConfig(servers={"web": OPERATOR}))
     assert clash.servers["web"].local  # le serveur de l'opérateur du même nom s'efface
+
+
+def test_the_client_says_which_plugin_brings_each_system_server():
+    """Audit du 2026-11-05, C6-01 : la fiche d'un serveur du système mène aux paramètres de son plugin — le client le
+    dit (``plugins``, d'où ``ServerStatus.plugin``) ; un serveur de l'opérateur n'en a pas, des paramètres illisibles
+    n'en donnent aucun."""
+    assert _system(web.WebParams()).plugins() == {web.SERVER: web.WEB.name}
+    assert _system(web.WebParams(enabled=False)).plugins() == {}
+
+    def broken():
+        raise KeyError("paramètres")
+
+    assert SystemServers(broken).plugins() == {}
 
 
 def test_unreadable_parameters_mean_no_system_server():

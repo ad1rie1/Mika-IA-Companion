@@ -2,8 +2,9 @@
    lignes d'accès, réglées dans « Accès aux outils ») ; ce qui attend ton regard (nouveau ou changé), chacun avec sa
    description entière et ce que le serveur en dit, un choix par outil — rien ne se sert sans lui (le formulaire de
    l'action ``mcp.revoir``) ; puis ce qui lit et ce qui agit, un outil par ligne — son état, ce qu'il fait devant
-   chacun d'après ses lignes d'accès. La ligne se déplie sur son réglage : servi, il lit ou il agit, ce qu'elle lit de
-   lui (le formulaire de l'action ``mcp.regler``, dessiné ici). #}
+   chacun d'après ses lignes d'accès (qui peut quoi : « En bref » ne le redit plus, audit du 2026-11-05, C6-Q1), et
+   au pied, la légende de « te demande » et « lui demande ». La ligne se déplie sur son réglage : servi, il lit ou il
+   agit, ce qu'elle lit de lui (le formulaire de l'action ``mcp.regler``, dessiné ici). #}
 {% macro plumbing(f) -%}
 <input type="hidden" name="csrf" value="{{ f.csrf }}"><input type="hidden" name="_op" value="{{ f.nonce }}">
 <input type="hidden" name="_retour" value="{{ f.back }}"><input type="hidden" name="_sujet" value="{{ f.subject }}">
@@ -109,5 +110,5 @@
     {% endif %}
   </section>
   {% endfor %}
-  <p class="now-muted">Sur chaque ligne, ce qu'elle en fait devant chacun et ce qu'elle en garde, d'après ses lignes d'accès (au survol, où se décide l'accord). Un outil que son serveur change est suspendu jusqu'à ton nouvel accord.</p>
+  <p class="now-muted">Sur chaque ligne, ce qu'elle en fait devant chacun et ce qu'elle en garde, d'après ses lignes d'accès (au survol, où se décide l'accord). « te demande » : une carte dans ton chat quand c'est toi en face ; sans toi en face, la demande t'attend dans la console (« À valider »), un jour au plus. « lui demande » : une carte à la personne en face. Un outil que son serveur change est suspendu jusqu'à ton nouvel accord.</p>
 </div>

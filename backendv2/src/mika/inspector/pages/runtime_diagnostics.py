@@ -1,13 +1,29 @@
-"""Lecture des processus et anomalies, sans intervenir dans leur exécution."""
+"""Les processus et les anomalies : leur lecture, et ce que la console y répare (ADR 0234) — une tranche corrompue
+se reconstruit en ligne (``rebuildable`` dit laquelle), un processus en échec se réessaie tout de suite. Les gestes
+eux-mêmes sont dans ``inspector/pages/system.py`` (``rebuild_post``, ``retry_post``)."""
 
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from typing import Any
 
 from mika.contracts import runtime as rt
 from mika.inspector import names
-from mika.kernel.inspect import Badge, Column, Disclosure, Note, Ref, Row, Stat, Stats, Table, Text, When
+from mika.kernel.inspect import (
+    Badge,
+    Column,
+    Disclosure,
+    Note,
+    Ref,
+    Row,
+    Stat,
+    Stats,
+    Table,
+    Text,
+    When,
+    plural,
+)
 from mika.runtime.health import PROCESS_FAILURES_MAX
 
 
@@ -19,7 +35,8 @@ def process_blocks(ui: Any, query: Any) -> list[Any]:
     def state(name: str) -> Badge:
         consecutive = sched.consecutive.get(name, 0)
         if consecutive:
-            return Badge(f"{consecutive} échec(s) d’affilée", "danger" if consecutive >= PROCESS_FAILURES_MAX else "warn")
+            return Badge(f"{plural(consecutive, 'échec', 'échecs')} d’affilée",
+                         "danger" if consecutive >= PROCESS_FAILURES_MAX else "warn")
         if name in running:
             return Badge("en cours", "info")
         return Badge("en attente" if sched.runs.get(name, 0) else "pas encore exécuté", "muted")
@@ -58,6 +75,34 @@ def process_blocks(ui: Any, query: Any) -> list[Any]:
             Disclosure("Historique des échecs", (history,), open=bool(query.get("avant")))]
 
 
+def tainted_said(tainted: Mapping[str, int]) -> str:
+    """Ce que disent Anomalies et Diagnostic avancé d'une tranche corrompue : chacune et l'événement où son réducteur a
+    levé, quand la reconstruction sert — une fois le réducteur corrigé : avec le même code, le rejeu lève au même
+    événement et la tranche repasse corrompue (audit du 2026-11-05, C8-14) —, puis les deux façons de la faire : en
+    ligne, par le geste « Reconstruire » de la console, le serveur relancé sur ce code (ADR 0234) ; ou serveur arrêté,
+    par la commande exacte (``rebuild`` et leurs clés, ``app/cli/journal.py`` : elle tient le dossier de données)."""
+    many = len(tainted) > 1
+    return (("Tranches corrompues" if many else "Tranche corrompue") + " (un réducteur a levé) : "
+            + ", ".join(f"{o} (au n° {s})" for o, s in tainted.items())
+            + (". Leur état est figé jusqu'à leur reconstruction" if many else
+               ". Son état est figé jusqu'à sa reconstruction")
+            + " : corriger d'abord le réducteur — avec le même code, le rejeu lève au même événement et la tranche "
+              "repasse corrompue —, puis, le serveur relancé sur ce code, « Reconstruire » dans la console (en "
+              f"ligne, sans l'arrêter), ou, serveur arrêté, « mika rebuild {' '.join(tainted)} ».")
+
+
+#: le tableau des tranches corrompues d'Anomalies, une ligne par faculté (la page dessinée y pose « Reconstruire »)
+TAINTED_TITLE = "Tranches corrompues"
+
+
+def rebuildable(kernel: Any, owner: str) -> bool:
+    """Une tranche que la reconstruction en ligne rejoue (``Mind.rebuild``) : celle d'une faculté composée, pas
+    volatile — une tranche volatile ne se rejoue pas, ni au démarrage ni à une reconstruction : le geste la laisserait
+    corrompue en disant le contraire."""
+    faculty = kernel.registry.faculties.get(owner)
+    return faculty is not None and not getattr(faculty, "volatile", False)
+
+
 def anomaly_blocks(ui: Any) -> list[Any]:
     mind = ui.kernel.mind
     items = list(reversed(list(getattr(mind, "anomalies", ()) or ())))
@@ -71,9 +116,14 @@ def anomaly_blocks(ui: Any) -> list[Any]:
         Stat("Tranches corrompues", len(tainted), ", ".join(tainted) or "aucune", "danger" if tainted else ""),
     ))]
     if tainted:
-        out.append(Note("Tranches corrompues (leur réducteur a levé) : " + ", ".join(
-            f"{o} (au seq {s})" for o, s in tainted.items()) + ". Leur état est figé jusqu'à reconstruction "
-            "(« mika rebuild »).", "danger"))
+        out.append(Note(tainted_said(tainted), "danger"))
+        out.append(Table((Column("faculté", role="title"), Column("corrompue au", "fit"),
+                          Column("faculté (clé)", detail=True)),
+                         tuple(Row((ui.names.faculty(o), Ref("event", str(s), f"n° {s}"), Text(o, "mono")),
+                                   href=Ref("event", str(s), ""), tone="danger") for o, s in tainted.items()),
+                         title=TAINTED_TITLE, layout="list",
+                         caption="Chacune et l'événement où son réducteur a levé. La reconstruction relit tout le "
+                                 "journal ; elle ne sert qu'une fois le réducteur corrigé."))
     if not (items or arbiter or tainted):
         out.append(Note("Aucune anomalie enregistrée depuis le démarrage. Les traces du journal ci-dessous "
                         "décrivent aussi des opérations normales, comme un oubli ou une reconstruction.", "ok"))

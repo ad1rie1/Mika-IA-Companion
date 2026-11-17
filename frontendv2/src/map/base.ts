@@ -2,14 +2,15 @@
  * Ce que toute carte dessinée par MapLibre partage (ADR 0193, 0194) : l'adresse absolue du serveur, ses tuiles, polices
  * et icônes demandées avec la session (et rien d'autre), les commandes en français, le nord toujours en haut (ni
  * rotation ni inclinaison), le thème qui suit, une autre carte du serveur qui se repose sans se refaire, et des tuiles
- * qui échouent de suite qui font revenir le plan dessiné.
+ * qui échouent de suite qui font revenir le plan dessiné. Une icône que la planche n'a pas reçoit une image vide : le nom
+ * reste, sans avertissement dans la console.
  *
  * MapLibre n'est pas importé ici (seulement ses types) : il se charge à part (`load.ts`), et chaque carte le reçoit —
  * ce qui laisse aussi les tests lui en donner un faux.
  */
 import { API_BASE } from "@web/network/api";
 import type { Map as MapLibre, MapOptions, RequestParameters } from "maplibre-gl";
-import type { MapInfo } from "../api/phone";
+import type { MapInfo } from "../api/carte";
 import { infoKey } from "./info";
 import type { Bounds } from "./mapgeo";
 import { mapStyle, SOURCE } from "./mapstyle";
@@ -100,6 +101,25 @@ export class TileWatch {
   }
 }
 
+/**
+ * Une image vide et transparente (1×1), pour une icône que la planche n'a pas : le style la demande pour une sorte de
+ * lieu (« townhall », absente de la planche v4), et MapLibre en écrirait l'absence dans la console à chaque ouverture.
+ */
+export function blankImage(): { width: number; height: number; data: Uint8Array } {
+  return { width: 1, height: 1, data: new Uint8Array(4) };
+}
+
+/** Ce que `fillMissingImage` demande à la carte. */
+export interface ImageHost {
+  hasImage(id: string): boolean;
+  addImage(id: string, image: ReturnType<typeof blankImage>): unknown;
+}
+
+/** Une icône manquante : une image vide, posée une seule fois pour ce style (un autre style la redemande). */
+export function fillMissingImage(map: ImageHost, id: string): void {
+  if (id && !map.hasImage(id)) map.addImage(id, blankImage());
+}
+
 export interface BaseMapOptions {
   dark: boolean;
   /** Où regarder d'abord : un centre (lon, lat) et un zoom, ou une zone. */
@@ -185,6 +205,7 @@ export function createBaseMap(lib: MapLib, host: HTMLElement, info: MapInfo, opt
   map.on("sourcedata", (e: { sourceId?: string; tile?: unknown }) => {
     if (e.sourceId === SOURCE && e.tile) watch.ok();
   });
+  map.on("styleimagemissing", (e: { id: string }) => fillMissingImage(map, e.id));
   const apply = () => map.setStyle(mapStyle(current, dark, base), { diff: false }); // « style.load » repose le dessus
   return {
     map,

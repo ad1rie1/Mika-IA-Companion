@@ -1,7 +1,7 @@
 {# Système › Diagnostic avancé (app/handmade/tabs/system.py, ADR 0177) : un bandeau si des tranches sont corrompues ;
    puis en sous-onglets l'ensemble — ses tranches, la plus récemment modifiée d'abord (à quel événement, combien de
-   faits) — et une faculté par sous-onglet : ses faits lus maintenant (leur nom, leur sens, leur valeur, repliée si
-   elle est longue), puis sa tranche en JSON, repliée. #}
+   faits) — et une faculté par sous-onglet : corrompue, « Reconstruire » dans son en-tête (ADR 0234) ; ses faits lus
+   maintenant (leur nom, leur sens, leur valeur, repliée si elle est longue), puis sa tranche en JSON, repliée. #}
 {% import "handmade/shared/tab.html" as tab with context %}
 {% import "handmade/systeme/tab_macros.html" as sx %}
 <div class="now-page sys sys-state" data-tab="systeme/etat">
@@ -32,7 +32,7 @@
       {% for p in panes %}
       <section id="{{ p.id }}" data-pane aria-labelledby="{{ p.id }}-title">
         <div class="now-card">
-          <header class="now-card-head"><h2 id="{{ p.id }}-title">{{ p.label }}</h2>{% if p.label != p.owner %}<span class="mono now-muted">{{ p.owner }}</span>{% endif %}<p>{% if p.tainted %}<span class="danger">Tranche corrompue au n° {{ p.tainted }} : son état est figé.</span>{% elif p.href %}Tranche modifiée au <a href="{{ p.href }}">n° {{ p.seq }}</a>.{% else %}Tranche jamais modifiée.{% endif %}</p></header>
+          <header class="now-card-head"><h2 id="{{ p.id }}-title">{{ p.label }}</h2>{% if p.label != p.owner %}<span class="mono now-muted">{{ p.owner }}</span>{% endif %}<p>{% if p.tainted %}<span class="danger">Tranche corrompue au n° {{ p.tainted }} : son état est figé.</span>{% elif p.href %}Tranche modifiée au <a href="{{ p.href }}">n° {{ p.seq }}</a>.{% else %}Tranche jamais modifiée.{% endif %}</p>{% if p.rebuild %}{{ sx.rebuild(p.owner, p.label, journal, csrf, back) }}{% endif %}</header>
           {% if p.read %}
           <ul class="sys-state-facts" role="list">
             {% for f in p.read %}

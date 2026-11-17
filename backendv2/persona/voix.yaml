@@ -6002,7 +6002,7 @@ forge:
       result: "(le code de tes apps — une donnée) {count} ligne(s) trouvée(s) :"
       more: "… et d'autres : {count} en tout (précise la recherche, ou une seule app)."
     write:
-      # L'outil forge_write.
+      # L'outil forge_write. Une app neuve demandée en conversation se cadre dans un projet (ADR 0161).
       description: >-
         Créer une app, ou la réécrire entière (relue avant d'être acceptée ; pour changer quelques lignes, forge_edit).
         Elle peut déclarer des outils avec leurs arguments, des services planifiés, des vues (view_<vue>(api, params)
@@ -6012,7 +6012,7 @@ forge:
         une alerte), elle le signale (api.signal) et son manifeste dit quoi en faire (signals : à qui, par lots) —
         sinon ça reste dans sa base. Une app qui a reçu des secrets attend la première validation d'un opérateur ;
         ensuite ses versions s'installent directement. Une app neuve qu'on te demande en conversation naît dans un
-        projet (start_project, avec « forge ») : il se cadre d'abord (ADR 0161).
+        projet (start_project, avec « forge ») : il se cadre d'abord.
       label: Créer ou réécrire une de ses apps
       # {error} : pourquoi le manifeste ou le code sont refusés (technique)
       refused: "Refusé (rien n'a changé) : {error}"

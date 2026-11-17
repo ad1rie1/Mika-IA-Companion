@@ -76,7 +76,8 @@ def test_feeds_say_how_she_reads_then_a_broken_feed_then_articles_with_their_per
     # les articles : celui qu'elle a remarqué, sa pertinence en chiffre et en jauge, son résumé à lire
     articles = _pane(page, "flux-articles")
     noticed = articles.split("Une exoplanète habitable", 1)[1].split("</li>", 1)[0]
-    assert ">remarqué<" in noticed and "0.72" in noticed and "sens-score-bar" in noticed
+    # sa pertinence à l'échelle du réglage « Pertinence minimale » (de 0 à 1), à la française
+    assert ">remarqué<" in noticed and "0,72" in noticed and "0.72" not in noticed and "sens-score-bar" in noticed
     assert "Une planète rocheuse" in noticed
     passed = articles.split("La carte du ciel profond", 1)[1].split("</li>", 1)[0]
     assert ">laissé passer<" in passed and "(estimée)" in passed
@@ -107,6 +108,9 @@ def test_camera_shows_what_she_sees_beside_her_devices_and_never_an_image(world)
     assert page.index('id="cam-views-title"') < page.index('id="cam-devices-title"') < page.index('id="cam-looks-title"')
     assert "cam-dev live" in devices and "en direct" in devices and "image/jpeg" in devices
     assert "<img" not in page.split('data-tab="sens/camera"', 1)[1]
+    # la pertinence d'un regard, de 0 à 1, se dit en pourcentage ; la taille de l'image, à la française
+    assert "pertinence 80\u202f%" in page and "pertinence 0.80" not in page
+    assert "4\u202fKo" in devices and "1 appareil envoie des images" in page and "appareil(s)" not in page
 
 
 def test_a_drawing_says_for_whom_by_name_and_what_she_sees_in_it(world):  # noqa: F811
@@ -120,7 +124,8 @@ def test_a_drawing_says_for_whom_by_name_and_what_she_sees_in_it(world):  # noqa
            "imaging")
     append(client, kernel, [img.DRAWN.draft(job="j1", person="alice", file="f1", target="alice",
                                             name=Content.of("chat.png"), mime="image/png", size=1000, digest="x",
-                                            caption=Content.of("Un chat roulé en boule."), backend="local")],
+                                            caption=Content.of("Un chat roulé en boule."), backend="local",
+                                            cost_usd=0.003)],
            "imaging")
     page = drawn(client, "/inspecteur/sens/dessins")
     item = page.split("Un chat roux endormi", 1)[0].rsplit("<li", 1)[1] + page.split("Un chat roux endormi", 1)[1]
@@ -128,6 +133,8 @@ def test_a_drawing_says_for_whom_by_name_and_what_she_sees_in_it(world):  # noqa
     assert "prêt, pas encore montré" in item and ">Alice</a>" in item and "/inspecteur/fiche/person/alice" in item
     assert "Ce qu'elle y voit" in item and "Un chat roulé en boule." in item and ">alice<" not in item
     assert "Brancher un fournisseur" in _head(page) and "Régler ses dessins" in _head(page)
+    # ce qu'ils ont coûté : un dessin sous le centime se lit (« 0,0030 $ »), jamais « 0.00 $ »
+    assert "0,0030\u202f$" in page and "0.00" not in page.split('data-tab="sens/dessins"', 1)[1]
 
 
 def test_devices_on_the_left_filter_the_page_and_their_signals_read_on_the_right(world):  # noqa: F811
@@ -146,5 +153,9 @@ def test_devices_on_the_left_filter_the_page_and_their_signals_read_on_the_right
     assert "sonnette" in left.split('id="dev-signals-title"', 1)[0] and "appareil=sonnette" in left
     rang = right.split("On a sonné.", 1)[0].rsplit("<li", 1)[1]
     assert "sw-surprised" in rang  # ce que ça pourrait lui faire, en couleur
+    assert "70\u202f%" in right.split("On a sonné.", 1)[1].split("</li>", 1)[0]  # sa pertinence, en pourcentage
+    # pas de champ « nom exact » suivi de « Filtrer » : un clic sur l'appareil filtre déjà la page
+    assert '<form class="filters"' not in page and "nom exact" not in page
     one = drawn(client, "/inspecteur/sens/appareils?appareil=sonnette")
     assert "dev-one on" in one and "Tous les appareils" in one and "Il fait 17 °C." not in one
+    assert '<form class="filters"' not in one

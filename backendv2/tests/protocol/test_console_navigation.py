@@ -5,9 +5,14 @@ import html
 import re
 
 import pytest
+from starlette.testclient import TestClient
 
+from mika.adapters.llm.config import LiveGateway
+from mika.adapters.vectors import HashEmbedder
+from mika.adapters.web.app import WebConfig
 from mika.app.console import NAVIGATION
-from mika.app.console_menu import MENU, SHORTCUT_GROUPS
+from mika.app.console_menu import MENU, SHORTCUT_GROUPS, menu_for
+from mika.app.server import build
 from mika.contracts import email as email_c
 from mika.inspector.catalog import menu_place
 from mika.kernel.events import Content, Origin
@@ -17,7 +22,7 @@ from tests.fixtures.console_html import ConsoleHTML
 from tests.fixtures.courrier import NOW, mailbox
 from tests.protocol.test_console_operator import converse
 from tests.protocol.test_wakeup_web import configure as declare_wakeup
-from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
+from tests.protocol.test_web import ORIGIN, bootstrap, world  # noqa: F401 — fixture partagée
 
 #: le nom de chaque rubrique dans la barre du haut ; la sienne porte le nom de sa persona (Mika dans ces essais)
 RUBRICS = {"Mika"} | {g.short or g.label for g in MENU if g.label and not g.her}
@@ -65,10 +70,12 @@ def test_operator_menu_links_open_real_pages(world):  # noqa: F811
     ConsoleHTML(page.text).check()
     menu = primary_nav(page.text)
     assert menu.count('data-nav-group=') == 8  # et l'accueil, directement accessible
+    served = {link.target for group in menu_for(None) for link in group.items}
     for group in MENU:
         for link in group.items:
             url = '/inspecteur/' + link.target
-            assert f'href="{url}"' in menu
+            # sans dossier de rapports, Simulations n'est pas au menu, mais son adresse répond (C8-12)
+            assert (f'href="{url}"' in menu) == (link.target in served), link.label
             response = client.get(url, follow_redirects=False)
             assert response.status_code == 200, (link.label, url, response.status_code)
             ConsoleHTML(response.text).check()
@@ -255,13 +262,48 @@ def test_system_reads_in_three_columns_and_its_journals_lead_to_the_histories(wo
         "Journal d’événements", "Gestes audités", "Historique des réglages", "Historique des autorisations"]
     assert ('/inspecteur/reglages/journal', 'Historique des réglages') in shown["Journaux"]
     assert ('/inspecteur/approbations/historique', 'Historique des autorisations') in shown["Journaux"]
-    assert len(shown["Surveiller"]) == 8 and [t for _h, t in shown["Anatomie"]][-1] == "Simulations"
+    # sans dossier de rapports (le monde de ces essais, l'unité de service), Simulations n'est pas au menu (C8-12)
+    assert len(shown["Surveiller"]) == 8
+    assert [t for _h, t in shown["Anatomie"]] == ["Diagnostic avancé", "Contributions", "Toutes les vues"]
     for name, tabs in columns:
         for href, _title in tabs:
             if href.startswith('/inspecteur/systeme/'):
                 assert texts(trail_of(client.get(href).text)) == ["Système", name], href
     assert texts(trail_of(client.get('/inspecteur/reglages/journal').text)) == ["Réglages", "Historique des réglages"]
     assert texts(trail_of(client.get('/inspecteur/approbations/historique').text)) == ["À valider"]
+
+
+def test_without_a_reports_folder_simulations_leave_the_menu_but_keep_their_address(world):  # noqa: F811
+    """C8-12 (décision C8-Q2) : sans dossier de rapports (``serve --reports``, que l'unité de service ne passe pas),
+    Simulations n'est pas au menu — la page serait toujours vide —, mais son adresse et l'ancienne répondent, son fil
+    dit sa colonne, sa rubrique s'allume sans qu'une autre page prenne sa place, et la recherche la trouve."""
+    client, _, _ = world
+    bootstrap(client)
+    page = client.get('/inspecteur/systeme/simulations')
+    assert page.status_code == 200
+    menu = primary_nav(page.text)
+    assert '/inspecteur/systeme/simulations' not in menu
+    assert '<details class="nav-group active" data-nav-group="Système">' in menu
+    assert 'aria-current="page"' not in menu and 'class="nav-item on' not in menu and 'nav-tab on' not in menu
+    assert texts(trail_of(page.text)) == ["Système", "Anatomie"]
+    moved = client.get('/inspecteur/rapports', follow_redirects=False)
+    assert moved.status_code == 301 and moved.headers['location'] == '/inspecteur/systeme/simulations'
+    found = html.unescape(client.get('/inspecteur/recherche?q=simulations').text)
+    assert 'href="/inspecteur/systeme/simulations"' in found
+
+
+def test_with_a_reports_folder_simulations_close_the_anatomy(tmp_path):
+    """Le contre-exemple (C8-12) : un serveur lancé avec un dossier de rapports montre Simulations au menu, en
+    dernier de l'Anatomie, et l'allume quand on y est."""
+    reports = tmp_path / "rapports"
+    reports.mkdir()
+    app, _ = build(tmp_path / "data", web=WebConfig(), gateway=LiveGateway(), embedder=HashEmbedder(), reports=reports)
+    with TestClient(app, base_url="http://localhost:8001", headers={"Origin": ORIGIN}) as client:
+        bootstrap(client)
+        shown = dict(system_columns(client.get('/inspecteur/').text))
+        assert shown["Anatomie"][-1] == ('/inspecteur/systeme/simulations', "Simulations")
+        lit = primary_nav(client.get('/inspecteur/systeme/simulations').text)
+        assert re.findall(r'<a class="nav-tab on"[^>]*><span>(.*?)</span>', lit) == ["Simulations"]
 
 
 def test_every_trail_starts_from_its_menu_rubric(world):  # noqa: F811
@@ -401,7 +443,7 @@ def test_each_settings_page_belongs_to_one_menu_link_and_its_bar_follows_it(worl
 GEARED = (
     ("boites", "courrier/parametres", "Paramètres", ["Échanges", "Courrier"]),
     ("teams", "teams/parametres", "Paramètres", ["Échanges", "Teams"]),
-    ("serveurs-mcp", "outils/parametres", "Paramètres des services", ["Outils", "Ses outils"]),
+    ("serveurs-mcp", "outils/parametres", "Paramètres", ["Outils", "Ses outils"]),
     ("flux", "sens/parametres-flux", "Flux suivis", ["Connexions", "Ses sens"]),
     ("appareils", "sens/parametres-appareils", "Accès des appareils", ["Connexions", "Ses sens"]),
     ("transcription", "sens/parametres-transcription", "Transcription vocale", ["Connexions", "Ses sens"]),
@@ -461,6 +503,22 @@ def test_the_gear_of_each_destination_leads_to_its_settings(world):  # noqa: F81
         named = f'{labels[new.split("/", 1)[0]]} › {title}'
         assert f'<a href="/inspecteur/{new}"><span class="hm-dir-title">{named}</span>' in directory, named
         assert f'<a href="/inspecteur/{new}">{named}</a>' in plugins, named
+
+
+def test_a_gear_of_one_page_is_named_parametres_everywhere(world):  # noqa: F811
+    """Le même geste porte le même nom : la roue d'une destination qui ne porte qu'une page s'appelle « Paramètres »
+    sur tous ses onglets — Courrier, Teams, Réveils par API, et Ses outils, dont la fiche d'un outil du code et
+    « Prêter à un agent » ne parlent d'aucun service. Ses sens, qui en porte plusieurs, garde son menu (ADR 0206 ;
+    audit du 2026-11-05, C6-12, C6-Q3)."""
+    client, _, _ = world
+    bootstrap(client)
+    single = [d.key for group in NAVIGATION for d in group.items if len(d.gear) == 1]
+    assert {"courrier", "teams", "reveils", "outils"} <= set(single)
+    tool_fiche = '/inspecteur/outils/tous?outil=email_read'  # la fiche d'un outil du code, sous Ses outils
+    for key in single:
+        tabs = bar_of(client.get(f'/inspecteur/{key}').text) or [(f'/inspecteur/{key}', '')]
+        for href in [h for h, _title in tabs] + ([tool_fiche] if key == "outils" else []):
+            assert [title for _h, title, _on in gear_of(client.get(href).text)] == ["Paramètres"], href
 
 
 def test_a_tab_badge_says_what_it_counts_on_hover(world):  # noqa: F811

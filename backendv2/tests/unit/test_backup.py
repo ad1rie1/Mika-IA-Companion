@@ -254,10 +254,13 @@ def test_each_backup_and_verification_is_noted_for_the_console(tmp_path, monkeyp
     from datetime import UTC, datetime
 
     monkeypatch.delenv("MIKA_SECRET_KEY", raising=False)
+    monkeypatch.setattr(backup, "UNIT_DIRS", (tmp_path / "systemd",))  # un poste de travail : aucune unité
     data, dest = tmp_path / "data", tmp_path / "archives"
     live(data, talk=False)
     fresh = backup.overview(data)
-    assert {k: v for k, v in fresh.items() if k != "place"} == {"archives": []}  # jamais sauvegardée
+    # jamais sauvegardée ; le dossier de données en chemin absolu, pour les commandes de la page (C8-04)
+    assert {k: v for k, v in fresh.items() if k != "place"} == {"archives": [], "donnees": str(data.resolve()),
+                                                                 "unite": ""}
     assert callable(fresh["place"])  # la place se mesure à la demande : jamais pour l'accueil
     made = backup.backup(data, dest, keep=3, now=datetime(2026, 9, 30, 3, 0, tzinfo=UTC))
     seen = backup.overview(data)
@@ -275,6 +278,24 @@ def test_each_backup_and_verification_is_noted_for_the_console(tmp_path, monkeyp
         backup.verify(forged, record=data)
     failed = backup.recorded(data)["verification"]
     assert failed["ok"] is False and failed["erreur"] and backup.recorded(data)["sauvegarde"] == last
+
+
+def test_the_backup_unit_counts_only_when_installed_for_this_data_folder(tmp_path, monkeypatch):
+    """La page Stockage et sauvegardes dit « sudo systemctl start mika-backup.service » là où l'unité de sauvegarde
+    est installée pour ce dossier de données (son ``--data``), la commande complète ailleurs (audit du 2026-11-05,
+    C8-04) : l'unité livrée (``deploy/mika-backup.service``) se reconnaît ; une unité qui sauvegarde un autre dossier,
+    non."""
+    units = tmp_path / "systemd"
+    units.mkdir()
+    monkeypatch.setattr(backup, "UNIT_DIRS", (tmp_path / "absent", units))
+    data = tmp_path / "var-lib-mika"
+    assert backup.backup_unit(data) == ""  # pas installée
+    shipped = (Path(__file__).parents[2] / "deploy" / backup.BACKUP_UNIT).read_text(encoding="utf-8")
+    assert "--data /var/lib/mika backup" in shipped
+    (units / backup.BACKUP_UNIT).write_text(shipped.replace("/var/lib/mika ", f"{data} "), encoding="utf-8")
+    assert backup.backup_unit(data) == backup.BACKUP_UNIT == "mika-backup.service"
+    assert backup.backup_unit(tmp_path / "data") == ""  # installée, mais pour un autre dossier
+    assert backup.overview(data)["unite"] == backup.BACKUP_UNIT
 
 
 def test_the_console_sees_each_base_and_folder_and_what_the_backup_does_with_it(tmp_path, monkeypatch):

@@ -20,10 +20,16 @@ réponse de quelqu'un. Chaque gestionnaire a son échéance.
 **Réessais datés.** Une livraison qui échoue (le gestionnaire lève, dépasse
 son échéance, ou le transport répond ``False``) est réessayée plus tard, avec
 un recul (5 s, 10 s, 20 s… jusqu'à dix minutes), jusqu'à ``max_attempts`` ;
-puis la ligne est abandonnée (``failed``), ce que la santé montre. Une parole
-qui n'a pas pu partir dans les dix minutes ne part plus (``stale``) : répondre
-des heures plus tard serait pire que se taire (ADR 0009) — elle reste dans le
-fil, où l'historique la rattrape.
+puis la ligne échoue (``failed``). Une parole qui n'a pas pu partir dans les
+dix minutes ne part plus (``stale``) : répondre des heures plus tard serait
+pire que se taire (ADR 0009) — elle reste dans le fil, où l'historique la
+rattrape.
+
+**Ce qui est à traiter** (``OUTBOX_PROBLEMS``) : un effet échoué, orphelin
+(aucun gestionnaire), périmé ou interrompu. C'est une seule définition, ici où
+les états s'écrivent : la santé (``runtime/health.py``) et la File de sortie de
+la console les comptent de la même façon, jusqu'à ce qu'un opérateur relance
+l'effet ou le marque comme vu (``seen``).
 
 **Rien n'est rejoué à l'aveugle.** Une capacité qui ne se rejoue pas sans
 risque est marquée « en cours » avant de partir : si le processus meurt
@@ -58,6 +64,24 @@ RETRY_MAX_S = 600.0
 MAX_ATTEMPTS = 8
 #: capacités qui s'exécutent en même temps
 CAPABILITY_SLOTS = 2
+
+#: les états d'une ligne de la file, tels que ``_mark`` les écrit, en mots (au singulier, puis accordés au pluriel).
+#: « seen » : un échec qu'un opérateur a vu et laissé. « stale » : une parole qui n'a pas pu partir dans les dix
+#: minutes (elle ne la dira plus, et personne n'en a rien su) ; « interrupted » : une action coupée en cours (un
+#: arrêt, son délai) dont on ne sait pas si elle a eu lieu
+OUTBOX_LABELS = {"pending": "en attente", "running": "en cours", "done": "parti", "failed": "échoué",
+                 "orphan": "orphelin", "stale": "périmé (pas dit)", "interrupted": "interrompu (à vérifier)",
+                 "seen": "vu, laissé"}
+OUTBOX_LABELS_MANY = {"pending": "en attente", "running": "en cours", "done": "partis", "failed": "échoués",
+                      "orphan": "orphelins", "stale": "périmés (pas dits)", "interrupted": "interrompus (à vérifier)",
+                      "seen": "vus, laissés"}
+#: ce qui est « à traiter » : ce qui n'a pas pu partir et qu'aucun opérateur n'a encore vu — le badge de la File de
+#: sortie et le contrôle ``outbox`` de la santé comptent ces états-là, et eux seuls
+OUTBOX_PROBLEMS = ("failed", "orphan", "stale", "interrupted")
+#: ce qu'on ne relance pas, on le marque seulement comme vu : une parole périmée repasserait « périmée » (elle
+#: ne part plus), une action interrompue a déjà dit son échec à qui l'avait voulue (la rejouer referait
+#: peut-être ce qui a eu lieu)
+OUTBOX_SEEN_ONLY = ("stale", "interrupted")
 
 
 class _Watched:

@@ -60,6 +60,7 @@
   .tm-split, .tm-split.with-info { grid-template-columns: 280px minmax(0, 1fr); position: relative; }
   .tm-split.with-info .tm-info { position: absolute; top: 0; right: 0; bottom: 0; width: 320px; z-index: 6; box-shadow: var(--shadow-pop); border-left: 1px solid var(--border); }
 }
+.cmp-hint { display: inline-flex; align-items: center; gap: 5px; padding-left: 6px; }
 @media (max-width: 1400px) { .tm-cmp .cmp-hint { display: none !important; } }
 @media (max-width: 760px) {
   .tm-split, .tm-split.with-info { grid-template-columns: 1fr; }

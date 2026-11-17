@@ -31,7 +31,7 @@ class Plugin:
 
     def provided(self) -> dict[str, Provided]:
         out = system_mcp.provided(lambda owner: self.params)
-        return {k: Provided(v.spec.model_copy(update={"network": "aucun"}), v.tools) for k, v in out.items()}
+        return {k: Provided(v.spec.model_copy(update={"network": "aucun"}), v.tools, v.plugin) for k, v in out.items()}
 
     async def save(self, reviews) -> None:
         self.reviews = reviews
@@ -41,10 +41,11 @@ async def test_the_web_plugin_serves_her_through_the_mcp_client_when_active(tmp_
     plugin = Plugin()
     system = SystemServers(plugin.provided)
     hub = McpHub(lambda: system.config(McpConfig()), lambda: system.reviews(plugin.reviews),
-                 system.saving(plugin.save), local_root=tmp_path / "mcp")
+                 system.saving(plugin.save), local_root=tmp_path / "mcp", system=system.plugins)
     try:
         ok, message = await hub.test("web")
-        assert ok and "mika-web" in message and "3 outil(s)" in message and "à regarder" not in message, message
+        assert ok and "mika-web" in message and "3 outils" in message and "à regarder" not in message, message
+        assert hub.status("web").plugin == "web"  # le client dit qui l'apporte : sa fiche mène à ses paramètres
         offered = {t.name: t for t in hub.offered()}  # aucun accord de l'opérateur : ce sont des outils système
         assert set(offered) == {"mcp_web_search", "mcp_web_read", "mcp_web_read_pages"}
         assert all(t.nature == "lecture" and t.access[0].read == "seule" for t in offered.values())
@@ -66,7 +67,7 @@ async def test_the_web_plugin_serves_her_through_the_mcp_client_when_active(tmp_
         plugin.params = web.WebParams(parallel_pages=1)
         await hub.reconfigure()
         ok, message = await hub.test("web")
-        assert ok and "2 outil(s)" in message, message
+        assert ok and "2 outils" in message, message
         assert {t.name for t in hub.offered()} == {"mcp_web_search", "mcp_web_read"}
     finally:
         await hub.aclose()

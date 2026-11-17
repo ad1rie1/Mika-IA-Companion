@@ -32,7 +32,7 @@ from mika.inspector.pages.journal import (
     replay_panel,
 )
 from mika.inspector.pages.subjects import Subjects, subject_url
-from mika.inspector.pages.system import outbox_post
+from mika.inspector.pages.system import outbox_post, rebuild_post, retry_post
 from mika.inspector.pages.tools import expose_post, place_post
 from mika.inspector.pages.why import silence_page, why_page, why_panel
 from mika.inspector.ui import PREFIX, UI, Forms, wants_table
@@ -112,7 +112,8 @@ class Pages(Actions):
         """Le fil d'Ariane d'une page (ADR 0177, 0202), le seul : il part de la rubrique du menu dont un lien mène à
         ``target`` — la page du menu où elle vit (« destination/onglet » : son onglet, la liste d'une fiche) —, puis
         dit sa destination ; pour Réglages et Système, le lien de menu qui couvre la page (sa colonne, s'il en a une),
-        ``group`` en repli quand seul l'annuaire la couvre. La page n'y ajoute que ses niveaux à elle (``levels`` :
+        ``group`` en repli quand seul l'annuaire la couvre, ou quand aucun lien ne la couvre (une page de Système que
+        le menu ne montre pas : Simulations sans dossier de rapports). La page n'y ajoute que ses niveaux à elle (``levels`` :
         un compte par son nom, un événement par son numéro). Chaque niveau mène à sa page, sauf la page même
         (``title`` : son titre quand c'est une page du menu, vide pour une fiche). ``link`` : où mène le niveau de la
         destination quand on y revient ailleurs qu'à sa racine (la liste filtrée d'où vient la fiche)."""
@@ -121,7 +122,10 @@ class Pages(Actions):
         own = list(levels)
         place = menu_place(menu, self.ui.deps.navigation, target)
         if place is None:
-            return ([(dest.label, link or dest_url(dest.key))] if dest is not None else []) + own
+            # une page de Système que le menu ne montre pas (Simulations sans dossier de rapports) : sa colonne, comme
+            # si elle y était (``group``)
+            column = [(group, "")] if dest is not None and dest.layout == "menu" and group else []
+            return ([(dest.label, link or dest_url(dest.key))] if dest is not None else []) + column + own
         rubric_of, entry, route = menu[place[0]], menu[place[0]].items[place[1]], place[2]
         rubric = self.ui.her_name() if rubric_of.her else (rubric_of.short or rubric_of.label)
         # la page même du lien : son niveau se dit sans lien
@@ -435,6 +439,14 @@ class Pages(Actions):
         """Système › File de sortie : relancer un effet en échec, ou le marquer comme vu."""
         return await outbox_post(self.ui, request)
 
+    async def rebuild(self, request: Request) -> Response:
+        """Système › Anomalies et Diagnostic avancé : reconstruire en ligne une tranche corrompue (ADR 0234)."""
+        return await rebuild_post(self.ui, request)
+
+    async def retry(self, request: Request) -> Response:
+        """Système › Processus : réessayer maintenant un processus en échec (ADR 0234)."""
+        return await retry_post(self.ui, request)
+
     async def canals(self, request: Request) -> Response:
         """Réglages › Canaux : le tableau d'un canal, enregistré d'un coup (ADR 0134)."""
         return await canals_post(self.ui, request)
@@ -576,6 +588,8 @@ class Pages(Actions):
             Route(PREFIX + "/parole/{seq:str}", g(self.why)),
             Route(PREFIX + "/evenement/{seq:str}", g(self.event)),
             Route(PREFIX + "/systeme/sorties", g(self.outbox), methods=["POST"]),
+            Route(PREFIX + "/systeme/etat", g(self.rebuild), methods=["POST"]),
+            Route(PREFIX + "/systeme/processus", g(self.retry), methods=["POST"]),
             Route(PREFIX + "/outils/exposer", g(self.expose), methods=["POST"]),
             Route(PREFIX + "/outils/familles/regler", g(self.families), methods=["POST"]),
             Route(PREFIX + "/outils/place/regler", g(self.place), methods=["POST"]),

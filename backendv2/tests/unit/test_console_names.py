@@ -213,6 +213,18 @@ def test_an_enricher_is_named_by_what_it_gathers():
     assert real.enricher("thread") == "Le fil de la conversation"
 
 
+def test_a_port_a_tool_needs_says_why_and_where_it_is_set():
+    """Un port qu'un outil attend et qui n'est pas prêt : la phrase et la page de réglages que la composition lui
+    donne ; sans libellé, sa clé dans une phrase qui garde « configuré », et aucune page — jamais un trou."""
+    shown = names.Names(SimpleNamespace(), Labels(needs={"imaging": ("aucun fournisseur d'images n'est configuré",
+                                                                     "images-fournisseurs")}))
+    assert shown.need("imaging") == ("aucun fournisseur d'images n'est configuré", "images-fournisseurs")
+    assert shown.need("meteo") == ("« meteo » n'est pas configuré", "") == (names.unready("meteo"), "")
+    assert names.Names(SimpleNamespace()).need("imaging") == ("« imaging » n'est pas configuré", "")
+    # la composition réelle nomme ceux de ses outils (le garde de tests/architecture/test_console_labels.py)
+    assert names.Names(SimpleNamespace(), console.LABELS).need("imaging")[1] == "images-fournisseurs"
+
+
 def test_an_episode_trigger_is_said_in_words():
     """« déclencheur perception:20 » sur les onglets Prompt et Décision d'un épisode : le message, en lien ; un choix de
     l'arbitre ; ce qu'un prélude précède. Une forme inconnue reste telle quelle, en chasse fixe."""

@@ -8,8 +8,14 @@
 - T1/T2 : tables dans ``views.db``, rattrapées par lots ; le point de contrôle
   est écrit dans la même transaction que les lignes (exactement une fois). Un
   événement qui échoue est réessayé puis mis en quarantaine — la projection
-  continue. Une nouvelle version est construite à côté puis basculée
-  (bleu/vert). T2 : la partie coûteuse (``prepare``) tourne hors de l'écrivain.
+  continue, l'événement sauté pour de bon. La quarantaine garde la cause du
+  dernier essai (``quarantine_cause`` : sa nature, jamais les données de
+  l'événement, que l'oubli n'atteindrait pas là) dans ``projector_quarantine`` et
+  se relit au premier rattrapage : un redémarrage ne la fait pas oublier (audit
+  du 2026-11-05, C8-03). Une nouvelle version est construite à côté (sous ``nom@version``) puis
+  basculée (bleu/vert) ; la bascule efface la quarantaine de l'ancienne version
+  et donne son nom à celle de la construction. T2 : la partie coûteuse
+  (``prepare``) tourne hors de l'écrivain.
 
 Protocole d'une projection : ``create(sql, suffixe)``, ``drop(sql, suffixe)``,
 ``apply(sql, événements, suffixe[, préparé])``, et en option ``prepare(événements)``
@@ -25,10 +31,13 @@ from itertools import islice
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import delete, select, update
+from sqlalchemy.exc import StatementError
 
 from mika.kernel.events import Event
 from mika.kernel.faculty import ProjectorSpec, Tier
+from mika.kernel.inspect import plural
 from mika.kernel.state import Root
+from mika.ports.errors import describe_error
 from mika.ports.journal import MindMeta, ProjectorQuarantine, ProjectorState
 from mika.ports.sql import upsert
 from mika.ports.store import Sql
@@ -45,6 +54,29 @@ def suffix(version: int) -> str:
 
 #: une reconstruction T0 relit le journal par lots de tant d'événements (jamais tout le fil en mémoire)
 T0_BATCH = 256
+
+#: la cause gardée d'une quarantaine, bornée (la santé et Système › Santé générale la montrent)
+CAUSE_MAX = 300
+
+
+def quarantine_cause(error: BaseException) -> str:
+    """La cause d'un échec, pour la quarantaine, sans les données de l'événement : ce texte se garde sans limite de
+    durée dans ``projector_quarantine``, que l'oubli ne parcourt pas. Une erreur de la base porte la requête et ses
+    paramètres liés, c'est-à-dire le texte même de l'événement, et le message du pilote peut citer la valeur
+    refusée (MariaDB : « Duplicate entry '…' ») : on n'en garde que la nature, sa classe et le code du pilote. Une
+    autre erreur, levée par le code de la projection, se dit par ``describe_error`` : sa première ligne, bornée."""
+    if isinstance(error, StatementError):
+        driver = error.orig
+        name = getattr(driver, "sqlite_errorname", None)
+        if isinstance(name, str):
+            code = f", {name}"
+        elif driver is not None and driver.args and isinstance(driver.args[0], int):
+            code = f", code {driver.args[0]}"
+        else:
+            code = ""
+        return f"erreur de la base ({type(error).__name__}{code})"
+    text = describe_error(error).strip()
+    return text.splitlines()[0][:CAUSE_MAX] if text else f"erreur inattendue ({type(error).__name__})"
 
 
 async def ensure_t0(mind: Mind) -> list[str]:
@@ -91,7 +123,9 @@ class ProjectionWorker:
         self._wake = asyncio.Event()
         self._stopping = False
         self._pool: concurrent.futures.ProcessPoolExecutor | None = None
+        #: (projection, n° de l'événement sauté, cause) : relue de ``projector_quarantine`` au premier rattrapage
         self.quarantined: list[tuple[str, int, str]] = []
+        self._restored = False
         mind.subscribe(self._on_events)
 
     @property
@@ -107,7 +141,23 @@ class ProjectionWorker:
         self._stopping = True
         self._wake.set()
 
+    def _restore(self) -> None:
+        """Recharge la quarantaine gardée, une fois : celle des projections du registre et de leur construction en
+        cours (``nom@version``), par n° d'événement. La ligne d'une projection disparue n'y revient pas."""
+        if self._restored:
+            return
+        self._restored = True
+        names = {n for s in self.specs for n in (s.name, f"{s.name}@{s.version}")}
+        if not names:
+            return
+        rows = self.mind.store.query_views(
+            select(ProjectorQuarantine.name, ProjectorQuarantine.seq, ProjectorQuarantine.error)
+            .where(ProjectorQuarantine.name.in_(sorted(names)))
+            .order_by(ProjectorQuarantine.seq, ProjectorQuarantine.name))
+        self.quarantined = [(str(name), int(seq), str(error or "")) for name, seq, error in rows]
+
     async def run(self) -> None:
+        self._restore()
         try:
             while not self._stopping:
                 self._wake.clear()
@@ -127,6 +177,7 @@ class ProjectionWorker:
         return out
 
     async def catch_up(self, spec: ProjectorSpec) -> None:
+        self._restore()
         st = self.mind.store.projector_state(spec.name)
         if st is None:
             await self.mind.store.run_views(lambda sql: self._create(sql, spec.name, spec, spec.version))
@@ -147,8 +198,7 @@ class ProjectionWorker:
                 return
             events = [with_content(self.mind, self.mind.decode(s)) for s in stored]
             last = stored[-1].seq
-            ok = await self._apply(spec, name, sfx, events, last)
-            if not ok:
+            if await self._apply(spec, name, sfx, events, last) is not None:
                 for ev in events:
                     await self._apply_one(spec, name, sfx, ev)
             await asyncio.sleep(0)
@@ -179,10 +229,13 @@ class ProjectionWorker:
             self._pool.shutdown(wait=False, cancel_futures=True)
             self._pool = None
 
-    async def _apply(self, spec: ProjectorSpec, name: str, sfx: str, events: Sequence[Event[Any]], last: int) -> bool:
+    async def _apply(self, spec: ProjectorSpec, name: str, sfx: str, events: Sequence[Event[Any]],
+                     last: int) -> Failed | None:
+        """Applique un lot et avance le point de contrôle : ``None`` si tout est passé, sinon l'échec (de la
+        préparation ou de l'écriture), pour que la quarantaine en garde la cause."""
         prep = await acall(self._prepared, spec, events, label=f"préparation {name}")
         if isinstance(prep, Failed):
-            return False
+            return prep
 
         def fn(sql: Sql) -> None:
             if prep is None:
@@ -192,14 +245,21 @@ class ProjectionWorker:
             sql.execute(update(ProjectorState).where(ProjectorState.name == name).values(applied_seq=last))
 
         out = await acall(self.mind.store.run_views, fn, label=f"projection {name}")
-        return not isinstance(out, Failed)
+        return out if isinstance(out, Failed) else None
 
     async def _apply_one(self, spec: ProjectorSpec, name: str, sfx: str, ev: Event[Any]) -> None:
-        for attempt in range(self.retries):
-            if await self._apply(spec, name, sfx, [ev], ev.seq):
+        tries = max(1, self.retries)
+        failed = await self._apply(spec, name, sfx, [ev], ev.seq)
+        for attempt in range(1, tries):
+            if failed is None:
                 return
-            await asyncio.sleep(0.01 * (attempt + 1))
-        error = f"échec après {self.retries} essais"
+            await asyncio.sleep(0.01 * attempt)
+            failed = await self._apply(spec, name, sfx, [ev], ev.seq)
+        if failed is None:
+            return
+        # la cause du dernier essai, dite pour l'opératrice (la santé et Système › Santé générale la montrent),
+        # sans les données de l'événement
+        error = f"après {plural(tries, 'essai', 'essais')} : {quarantine_cause(failed.error)}"
         self.quarantined.append((name, ev.seq, error))
 
         def fn(sql: Sql) -> None:
@@ -219,6 +279,13 @@ class ProjectionWorker:
             sql.execute(update(ProjectorState).where(ProjectorState.name == spec.name)
                         .values(version=spec.version, applied_seq=applied))
             sql.execute(delete(ProjectorState).where(ProjectorState.name == building))
+            # la quarantaine suit la bascule : celle de l'ancienne version ne vaut plus, celle de la construction
+            # prend le nom que la santé et la console lisent
+            sql.execute(delete(ProjectorQuarantine).where(ProjectorQuarantine.name == spec.name))
+            sql.execute(update(ProjectorQuarantine).where(ProjectorQuarantine.name == building)
+                        .values(name=spec.name))
             call(spec.projector.drop, sql, suffix(old_version), label="abandon de l'ancienne version")
 
         await self.mind.store.run_views(switch)
+        self.quarantined = [(spec.name if name == building else name, seq, error)
+                            for name, seq, error in self.quarantined if name != spec.name]

@@ -1,6 +1,11 @@
-{# La fiche d'un service branché, « En bref » (app/handmade/subjects/server.py, ADR 0123, 0129, 0130, 0131) : s'il marche et ce
-   qui attend ton regard, ses lignes d'accès, ce qu'elle en lit, qui peut quoi outil par outil (la règle du moteur
-   devant chaque personne type), pour qui et quand ; le côté technique replié. #}
+{# La fiche d'un service branché, « En bref » (app/handmade/subjects/server.py, ADR 0123, 0129, 0130, 0131) : d'un regard,
+   s'il marche et ce qui attend ton regard (la bande de chiffres, puis ses outils non servis, vers « Ses outils »), ses
+   lignes d'accès (leur « Changer » est le seul lien de la page vers l'onglet « Accès aux outils »), ce qu'elle en lit,
+   pour qui et quand ; le côté technique replié. Qui peut quoi, outil par outil (la règle du moteur devant chaque
+   personne type), n'est que dans « Ses outils », sur la ligne de chaque outil (audit du 2026-11-05, C6-Q1). Un serveur
+   du système (``system``, ADR 0066) tient de son plugin ce qu'elle en lit : rien ne s'en change ici. Le résumé de ses
+   accès parle comme les tableaux des familles (``vocab.access``, ADR 0134) : leurs colonnes, leurs mots, la ligne
+   « Comportement par défaut ». #}
 {% from "_navigation.html" import pager as pages %}
 <div class="now-page server">
   {% for a in alerts %}<p class="server-alert {{ a.tone }}">{{ a.text }}{% if a.href %} <a href="{{ a.href }}">{{ a.link }}</a>{% endif %}</p>{% endfor %}
@@ -11,6 +16,8 @@
     <li class="{{ 'warn' if review }}"><a href="{{ tools_tab }}"><span class="person-tile-label">À revoir</span><span class="person-tile-value">{{ review }}</span><span class="person-tile-sub">nouveaux ou changés</span></a></li>
     <li class="{{ 'danger' if failures }}"><a href="{{ calls_tab }}"><span class="person-tile-label">Appels</span><span class="person-tile-value">{{ calls }}</span><span class="person-tile-sub">{{ failures }} en échec</span></a></li>
   </ul>
+  {% if not known %}<p class="server-tools-rest">La liste de ses outils n'est pas connue : « Tester la connexion » la charge.</p>
+  {% elif states %}<p class="server-tools-rest">Pas servis :{% for said in states %} <span>{{ said }}</span>{% endfor %} <a href="{{ tools_tab }}">Ses outils</a></p>{% endif %}
 
   <section class="now-card table-block" aria-labelledby="server-access">
     <header class="now-card-head">
@@ -19,7 +26,7 @@
     </header>
     <div class="hm-table-wrap" tabindex="0" role="region" aria-label="Accès aux outils">
       <table class="server-who access-summary">
-        <thead><tr><th scope="col">Qui</th><th scope="col">Quand</th><th scope="col">Lecture</th><th scope="col">Action</th><th scope="col">Mémorisation</th><th scope="col">Outils</th></tr></thead>
+        <thead><tr><th scope="col">Qui</th><th scope="col">Quand</th><th scope="col">Un outil qui lit</th><th scope="col">Un outil qui agit</th><th scope="col">Ce qu'elle en garde</th><th scope="col">Outils</th></tr></thead>
         <tbody>
           {% for a in access %}
           <tr class="{{ 'access-default' if a.default }}">
@@ -36,7 +43,8 @@
   <section class="now-card" aria-labelledby="server-read">
     <header class="now-card-head">
       <h2 id="server-read">Ce qu'elle en lit</h2>
-      <p>Ce que tu as écrit pour elle : c'est ce qu'elle lit pour décider de s'en servir. <a href="{{ settings }}">Le changer</a></p>
+      {% if system %}<p>Ce que son plugin lui en dit : c'est ce qu'elle lit pour décider de s'en servir. Ces deux textes viennent de son plugin, ils ne se changent pas dans la console.</p>
+      {% else %}<p>Ce que tu as écrit pour elle : c'est ce qu'elle lit pour décider de s'en servir. <a href="{{ settings }}">Le changer</a></p>{% endif %}
     </header>
     <dl class="server-read">
       <div><dt>À quoi il lui sert</dt><dd>{{ purpose or '—' }}</dd></div>
@@ -44,48 +52,11 @@
     </dl>
   </section>
 
-  <section class="now-card table-block" aria-labelledby="server-tools">
-    <header class="now-card-head">
-      <h2 id="server-tools">Qui peut quoi</h2>
-      <span class="person-count now-num">{{ matrix|length }}</span>
-      <p>Ses outils servis, devant chaque personne type : ce qu'elle fait et ce qu'elle en garde, d'après ses lignes d'accès (une colonne où tout est « non » se tait). <a href="{{ access_tab }}">Changer les accès</a></p>
-    </header>
-    {% if matrix and columns %}
-    <div class="hm-table-wrap" tabindex="0" role="region" aria-label="Qui peut quoi">
-      <table class="server-who server-matrix">
-        <thead><tr><th scope="col">Outil</th>{% for c in columns %}<th scope="col">{{ c }}</th>{% endfor %}</tr></thead>
-        <tbody>
-          {% for t in matrix %}
-          <tr>
-            <th scope="row"><a href="{{ t.rules }}"><code>{{ t.name }}</code></a> <span class="now-tag {{ 'info' if t.nature == 'lit' else 'warn' }}">{{ t.nature }}</span><span class="server-matrix-what">{{ t.what }}</span></th>
-            {% for c in t.cells %}<td><span class="now-tag {{ c.tone }}"{% if c.note %} title="{{ c.note }}"{% endif %}>{{ c.word }}</span>{% if c.keep %}<span class="server-matrix-note">garde : {{ c.keep }}</span>{% endif %}{% if c.note %}<span class="server-matrix-note">{{ c.note }}</span>{% endif %}</td>{% endfor %}
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    <div class="hm-pager single">{{ pages(matrix_pager) }}</div>
-    <p class="now-muted server-matrix-legend">« te demande » : une carte dans ton chat quand c'est toi en face ; sans toi en face, la demande t'attend dans la console (« À valider »), un jour au plus. « lui demande » : une carte à la personne en face. La grille « Ce qu'elle peut faire » peut encore retirer un outil dans une situation : « Pour qui, quand », plus bas, en tient compte.</p>
-    {% elif matrix %}
-    <p class="now-muted">Aucune ligne d'accès ne l'ouvre, et le comportement par défaut est fermé : « Accès aux outils ».</p>
-    {% elif known %}
-    <p class="now-muted">Aucun outil servi.</p>
-    {% else %}
-    <p class="now-muted">La liste de ses outils n'est pas connue : « Tester la connexion » la charge.</p>
-    {% endif %}
-    {% if states %}<p class="server-matrix-rest">{% for word, n in states %}<span>{{ n }} {{ word }}</span>{% endfor %} <a href="{{ tools_tab }}">Ses outils</a></p>{% endif %}
-  </section>
-
   <section class="now-card table-block" aria-labelledby="server-who">
     <header class="now-card-head">
       <h2 id="server-who">Pour qui, quand</h2>
-      <p>Situation par situation, si elle peut se servir de ce service : ce que donnent ses lignes d'accès.</p>
+      <p>Situation par situation, si elle peut se servir de ce service : ce que donnent ses lignes d'accès. Pour l'ouvrir à d'autres personnes ou à d'autres moments, c'est dans « Accès aux outils », plus haut.</p>
     </header>
-    <div class="server-who-actions">
-      {% if grid %}<a class="btn" href="{{ grid }}">Régler outil par outil</a>{% endif %}
-      <a class="btn quiet" href="{{ access_tab }}">Accès aux outils</a>
-      <p class="now-muted">{% if grid %}La grille retire un outil dans une situation ; elle n'en ouvre pas. {% endif %}Pour l'ouvrir à d'autres personnes ou à d'autres moments, c'est dans « Accès aux outils ».</p>
-    </div>
     <div class="hm-table-wrap" tabindex="0" role="region" aria-label="Pour qui, quand">
       <table class="server-who">
         <thead><tr><th scope="col">Situation</th><th scope="col">Elle peut s'en servir</th><th scope="col">Comment, ou pourquoi pas</th></tr></thead>

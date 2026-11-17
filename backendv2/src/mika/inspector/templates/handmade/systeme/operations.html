@@ -1,7 +1,7 @@
 {# Système › Gestes audités (app/handmade/tabs/system.py, ADR 0177) : ce que la page montre en une ligne (qui,
    combien, avec quelle issue) ; puis un fil jour par jour — l'heure, qui, le geste (vers son événement), d'où (la
-   console, son espace, la ligne de commande), sur quoi, l'issue, sa clé et les événements qu'il a écrits. Jamais un
-   contenu. La pagination de la console ; d'où, en bouton à choix au bout de la barre d'onglets. #}
+   console, son espace, la ligne de commande), sur quoi (le titre de sa fiche, sa clé au survol), l'issue, sa clé et
+   les événements qu'il a écrits. Jamais un contenu. La pagination de la console ; d'où, en bouton à choix au bout de la barre d'onglets. #}
 {% import "handmade/shared/tab.html" as tab with context %}
 {% import "handmade/systeme/tab_macros.html" as sx %}
 <div class="now-page sys sys-ops" data-tab="systeme/operations">
@@ -21,7 +21,7 @@
           <li class="is-{{ o.outcome.tone or 'plain' }}">
             <span class="sys-feed-when" title="{{ o.when.exact if o.when else '' }}">{{ o.hm or tab.cell(o.when) }}</span>
             <div class="sys-jr-body">
-              <p class="sys-jr-what"><b>{{ o.by }}</b> · {% if o.href %}<a href="{{ o.href }}">{{ o.action }}</a>{% else %}{{ o.action }}{% endif %}{% if o.on %} <span class="now-muted">sur</span> {{ tab.cell(o.on) }}{% endif %}</p>
+              <p class="sys-jr-what"><b>{{ o.by }}</b> · {% if o.href %}<a href="{{ o.href }}">{{ o.action }}</a>{% else %}{{ o.action }}{% endif %}{% if o.on %} <span class="now-muted">sur</span> {% if o.subject and o.on.t == "link" %}<span title="{{ o.subject }}">{{ tab.cell(o.on) }}</span>{% else %}{{ tab.cell(o.on) }}{% endif %}{% endif %}</p>
               <p class="sys-jr-meta">{% if o["from"] %}<span>depuis {{ o["from"] }}</span>{% endif %}<span class="mono">{{ o.key }}</span>{% if o.events %}<span>événement{{ 's' if o.events|length > 1 }} {% for e in o.events %}<a class="now-num" href="{{ e.href }}">{{ e.n }}</a>{{ ', ' if not loop.last }}{% endfor %}</span>{% endif %}</p>
             </div>
             {% if o.outcome.text %}<span class="now-tag {{ o.outcome.tone }}">{{ o.outcome.text }}</span>{% endif %}

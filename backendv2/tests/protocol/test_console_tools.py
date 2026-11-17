@@ -18,6 +18,9 @@ from urllib.parse import parse_qs, urlsplit
 from mika.contracts import runtime as rt
 from mika.inspector.mcp import TOOLS as CONSOLE_TOOLS
 from mika.inspector.pages import tools as page
+from mika.kernel.text import fold
+from mika.plugins.mcp import specs_of
+from mika.ports.mcp import CLOSED, Access, OfferedTool, ServerStatus
 from mika.runtime.tool_offer import gate_of
 from mika.vocab.phrasebook import phrase
 from tests.fixtures.console_html import ConsoleHTML
@@ -40,6 +43,20 @@ def _where(body: str, situation: str) -> str:
     return found.group(1).strip() if found else ""
 
 
+def _subtitle(body: str, name: str) -> str | None:
+    """Le sous-titre de la fiche d'un outil, sous son nom (``page.html``) ; ``None`` quand elle n'en a pas."""
+    found = re.search(rf"<h1>{re.escape(name)}</h1>\s*(?:<p>(.*?)</p>)?", body, re.S)
+    assert found is not None, name
+    return found.group(1)
+
+
+def _read_of(body: str) -> str:
+    """Ce que « Ce qu'elle lit de lui » cite d'un outil, tel quel."""
+    found = re.search(r'<h2 id="tool-read-title">Ce qu\'elle lit de lui</h2>.*?<blockquote class="tool-read">(.*?)'
+                      r"</blockquote>", body, re.S)
+    return found.group(1) if found else ""
+
+
 def test_every_tool_is_in_the_grid_with_its_fiche(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
@@ -59,8 +76,86 @@ def test_every_tool_is_in_the_grid_with_its_fiche(world):  # noqa: F811
         assert r.status_code == 200 and name in text and "Où elle peut s'en servir" in text, name
         assert ("il vient d'un service ou d'une app" in text) == (name in dynamic), name
         assert registry.bundles[spec.bundle] in text, name
+        # ce qu'il fait par son libellé, sous son nom ; ce qu'elle lit de lui, cité tel quel (C6-10)
+        assert _subtitle(text, name) == (spec.label or None), name
+        assert _read_of(text) == spec.description, name
         ConsoleHTML(r.text).check()
     assert "Aucun outil ne s'appelle" in html_of(client.get(f"{BASE}/tous", params={"outil": "rien_du_tout"}))
+
+
+def test_a_tool_of_her_code_says_what_it_does_by_its_label_and_quotes_what_she_reads(world):  # noqa: F811
+    """Sous « email_read », la fiche mettait sa description, une consigne au modèle où « tu » la désigne (« Ouvrir un
+    mail de ta boîte. ») ; la console tutoie l'opératrice : elle s'y lisait. Le sous-titre est son libellé, dit à qui
+    lit (ADR 0208) ; la consigne est citée telle quelle dans « Ce qu'elle lit de lui », et dite pour ce qu'elle est
+    (audit du 2026-11-05, C6-10)."""
+    client, live, _ = world
+    bootstrap(client)
+    spec = live.kernel.registry.tools["email_read"]
+    raw = client.get(f"{BASE}/tous", params={"outil": "email_read"}).text
+    ConsoleHTML(raw).check()
+    fiche = html.unescape(raw)
+    assert spec.label and spec.label != spec.description
+    assert _subtitle(fiche, "email_read") == spec.label
+    assert spec.description not in fiche.split("<h1>email_read</h1>", 1)[1].split("</div>", 1)[0]
+    assert _read_of(fiche) == spec.description
+    assert "La consigne exacte que reçoit le modèle avec cet outil, où « tu » la désigne, elle." in fiche
+    assert "Ce que son service ou son app en dit" not in fiche
+    # la section vient après « Où elle peut s'en servir », avant ses derniers appels
+    assert fiche.index("Où elle peut s'en servir") < fiche.index("Ce qu'elle lit de lui") < fiche.index(
+        "Ses derniers appels")
+
+
+def test_a_tool_from_elsewhere_has_no_subtitle_and_quotes_what_its_service_says(world, monkeypatch):  # noqa: F811
+    """Un outil venu d'un service n'a pas de libellé : sa fiche n'a pas de sous-titre — ni sa description, ni
+    l'introduction de l'onglet à sa place —, et « Ce qu'elle lit de lui » cite ce que son service en dit, ou la phrase
+    que l'opératrice lui a donnée à la place, qui se règle sur la fiche du serveur ; la liste de sa famille, et celle
+    de son service dans Réglages › Droits, le disent par sa description (C6-10)."""
+    client, live, _ = world
+    bootstrap(client)
+    port = live.kernel.ports["mcp"]
+    line = Access(who=("tous",), when=("conversation",), read="seule", act="carte", keep="public")
+    offered = OfferedTool("meteo", "prevision", "mcp_meteo_prevision", "Prévisions d'une ville (consigne du serveur).",
+                          {}, "lecture", frozenset({"conversation"}), False, 3, "La météo d'une ville.", "", False,
+                          access=(line,), default=CLOSED)
+    status = ServerStatus("meteo", "distant", True, True, "connecte", purpose="La météo d'une ville.", access=(line,),
+                          default=CLOSED)
+    monkeypatch.setattr(port, "offered", lambda: (offered,))
+    monkeypatch.setattr(port, "statuses", lambda: (status,))
+    specs, bundles = specs_of((offered,))
+    assert live.kernel.registry.set_dynamic("mcp", specs, bundles) == []
+    raw = client.get(f"{BASE}/tous", params={"outil": "mcp_meteo_prevision"}).text
+    ConsoleHTML(raw).check()
+    fiche = html.unescape(raw)
+    assert _subtitle(fiche, "mcp_meteo_prevision") is None
+    assert "Ses propres outils, famille par famille" not in fiche
+    assert _read_of(fiche) == "Prévisions d'une ville (consigne du serveur)."
+    assert "Ce que son service ou son app en dit" in fiche and "La consigne exacte" not in fiche
+    # ce qu'elle lit peut être la phrase que l'opératrice lui a donnée : elle se règle sur la fiche du serveur
+    assert "ou, pour un service, la phrase que tu lui as donnée à la place" in fiche
+    assert "celle d'un service se règle sur sa fiche (« Régler », sur sa ligne de « Ses outils »)" in fiche
+    assert "se relit sur sa fiche" not in fiche
+    listed = html_of(client.get(f"{BASE}/tous", params={"lot": "mcp.meteo"}))
+    assert '<span class="access-tool-desc">Prévisions d\'une ville (consigne du serveur).</span>' in listed
+    # Réglages › Droits, Services MCP : un outil sans libellé s'y dit aussi par sa description
+    rights = html_of(client.get("/inspecteur/reglages/droits"))
+    services = rights.split('id="d-services" data-pane', 1)[1].split("data-pane", 1)[0]
+    assert re.search(r"<code>mcp_meteo_prevision</code>.*?</td>\s*<td>Prévisions d'une ville \(consigne du serveur\)\."
+                     r"</td>", services, re.S)
+
+
+def test_a_search_finds_a_tool_by_the_label_its_family_shows(world):  # noqa: F811
+    """La liste d'une famille dit chaque outil par son libellé : la recherche (``?q=``) le lit aussi, sinon un mot lu
+    dans la liste ne retrouverait pas son outil (C6-10)."""
+    client, live, _ = world
+    bootstrap(client)
+    registry = live.kernel.registry
+    specs = sorted((s for s in registry.tools.values() if not registry.is_dynamic(s.name)), key=lambda s: s.name)
+    families = re.findall(r'id="f-[\w-]+-title">([^<]+)<', html_of(client.get(f"{BASE}/tous")))
+    elsewhere = " ".join([*(fold(f"{s.name} {s.description}") for s in specs), *map(fold, families)])
+    word, spec = next((w, s) for s in specs for w in fold(s.label).split() if len(w) >= 5 and w not in elsewhere)
+    found = html_of(client.get(f"{BASE}/tous", params={"q": word}))
+    assert f'id="f-{spec.bundle.replace(".", "-")}-title"' in found, word
+    assert f"?outil={spec.name}" in found, word
 
 
 def test_the_grid_and_its_reasons_say_what_the_pipeline_offers(world):  # noqa: F811
@@ -96,6 +191,36 @@ def test_the_grid_and_its_reasons_say_what_the_pipeline_offers(world):  # noqa: 
     fiche = html_of(client.get(f"{BASE}/tous", params={"outil": "email_read"}))
     assert _where(fiche, "Elle répond à sa propriétaire, en privé").startswith("oui")
     assert _where(fiche, "Elle répond dans un salon, devant plusieurs personnes").startswith("non — fermé par ses droits")
+
+
+def test_a_tool_waiting_for_its_port_says_what_is_missing_and_where_to_set_it(world):  # noqa: F811
+    """La fiche de draw sans fournisseur d'images disait « non — « imaging » n'est pas configuré » : la clé d'un port,
+    sans dire où le régler. Elle dit ce qui manque en mots, et mène une fois, sous ses situations, à la page qui le
+    règle ; un outil des cartes dont la composition ne branche pas le port mène à « Lieux et adresses ». Le port
+    prêt, plus de lien."""
+    client, live, _ = world
+    bootstrap(client)
+    ports = live.kernel.runner.ports
+    account = next(s.label for s in page.situations(SimpleNamespace(kernel=live.kernel)) if s.key == "compte")
+    raw = client.get(f"{BASE}/tous", params={"outil": "draw"}).text
+    ConsoleHTML(raw).check()
+    fiche = html.unescape(raw)
+    assert _where(fiche, account) == "non — aucun fournisseur d'images n'est configuré"
+    assert "« imaging »" not in fiche
+    assert fiche.count("Pour l'offrir") == 1
+    assert re.search(r"Pour l'offrir : <a href=\"/inspecteur/reglages/images-fournisseurs\">Fournisseurs d'images</a>",
+                     fiche)
+    maps = ports.pop("maps")
+    try:
+        places = html_of(client.get(f"{BASE}/tous", params={"outil": "places_search"}))
+        assert _where(places, account) == "non — les lieux, les adresses et les itinéraires ne sont pas branchés"
+        assert 'Pour l\'offrir : <a href="/inspecteur/reglages/lieux">Lieux et adresses</a>' in places
+    finally:
+        ports["maps"] = maps
+    assert "Pour l'offrir" not in html_of(client.get(f"{BASE}/tous", params={"outil": "places_search"}))
+    ports["imaging"] = SimpleNamespace(configured=True)
+    ready = html_of(client.get(f"{BASE}/tous", params={"outil": "draw"}))
+    assert _where(ready, account).startswith("oui") and "Pour l'offrir" not in ready
 
 
 def test_what_she_reads_is_her_prompt(world):  # noqa: F811

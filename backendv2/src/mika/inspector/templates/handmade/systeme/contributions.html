@@ -1,7 +1,11 @@
-{# Système › Contributions (app/handmade/tabs/system.py, ADR 0177) : ce que chaque faculté apporte, lu dans le registre.
+{# Système › Contributions (app/handmade/tabs/system.py, ADR 0177) : ce que chaque faculté apporte, lu dans le registre
+   par contributions_of (inspector/pages/system.py), que la vue joint en texte ; ses processus sont ceux de
+   l'ordonnanceur, comme ceux de Système › Processus (le Noyau a l'arbitre et le relevé des courbes).
    En sous-onglets : l'ensemble — une bande de chiffres, puis une ligne par faculté, ce qu'elle apporte en nombres (un
    point : rien) — et une faculté par sous-onglet : ce qu'elle publie, écoute, fournit (et qui le lit), ses sections,
-   ses preuves, ses processus, ses outils, ses capacités, ses vues, ses fiches, ses actions. #}
+   ses preuves, ses processus, ses outils, ses capacités, ses fiches, ses actions ; ses vues, un lien « Ses vues (N) »
+   vers Toutes les vues › Par faculté, ouverte sur elle — l'index des vues est là, pas ici (audit du 2026-11-05,
+   C8-12). #}
 {% import "handmade/shared/tab.html" as tab with context %}
 <div class="now-page sys sys-ct" data-tab="systeme/contributions">
   <div class="hm-subtabs sys-many" data-subtabs>
@@ -36,9 +40,11 @@
           <div class="sys-ct-kinds">
             {% for k, title, what in kinds if f.lists[k] %}
             <section class="sys-ct-kind{{ ' wide' if k in ('facts', 'publishes', 'listens') and f.lists[k]|length > 6 }}" aria-label="{{ title }}">
-              <h3>{{ title }} <span class="now-num now-muted">{{ f.lists[k]|length }}</span></h3>
+              <h3>{{ title }}{% if k != "views" %} <span class="now-num now-muted">{{ f.lists[k]|length }}</span>{% endif %}</h3>
               <p class="now-muted sys-ct-what">{{ what }}</p>
-              {% if k == "facts" %}
+              {% if k == "views" %}
+              <p class="sys-ct-chips"><a href="{{ f.views_href }}">Ses vues ({{ f.lists[k]|length }}) →</a></p>
+              {% elif k == "facts" %}
               <ul class="sys-ct-facts" role="list">
                 {% for x in f.lists[k] %}<li><span class="mono" title="{{ x.hint }}">{{ x.text }}</span> <span class="sys-ct-to">→ {% if x.readers %}{{ x.readers|join(', ') }}{% else %}<span class="now-muted">aucun autre lecteur déclaré</span>{% endif %}</span></li>{% endfor %}
               </ul>
@@ -47,7 +53,7 @@
                 {% for x in f.lists[k] %}<li><span class="mono">{{ x.text }}</span> <span class="now-muted">{{ x.where }}</span></li>{% endfor %}
               </ul>
               {% else %}
-              <p class="sys-ct-chips">{% for x in f.lists[k] %}{% if x.href %}<a class="now-tag sys-chip" href="{{ x.href }}">{{ x.text }}</a>{% else %}<span class="now-tag sys-chip{{ ' mono' if k in technical }}"{% if x.hint %} title="{{ x.hint }}"{% endif %}>{{ x.text }}</span>{% endif %}{% endfor %}</p>
+              <p class="sys-ct-chips">{% for x in f.lists[k] %}<span class="now-tag sys-chip{{ ' mono' if k in technical }}"{% if x.hint %} title="{{ x.hint }}"{% endif %}>{{ x.text }}</span>{% endfor %}</p>
               {% endif %}
             </section>
             {% endfor %}

@@ -1,10 +1,14 @@
 /**
  * Le plan dessiné d'une scène (`scene.ts`), sans tuile ni MapLibre : ce qu'une miniature montre en attendant sa carte,
- * au-delà des quatre cartes vivantes du chat, sans WebGL ou sans carte servie. Ses tracés et ses épingles, à leur
- * place (Mercator), sur un fond quadrillé — un plan, pas une carte : aucune rue n'y est inventée.
+ * au-delà des quatre cartes vivantes du chat, sans WebGL ou sans carte servie — sur la Carte comme pour la Position du
+ * Téléphone. Ses tracés, ses épingles (les secondaires plus petites, sans numéro) et la position avec le cercle de sa
+ * précision, à l'échelle du plan, à leur place (Mercator), sur un fond quadrillé — un plan, pas une carte : aucune rue
+ * n'y est inventée. Il tient toute sa scène, secondaires et cercle compris ; une position seule se montre sur quelques
+ * fois son rayon (~300 m au moins, `hereSpan`), pas sur le quartier d'une scène à épingles, où son cercle ne serait
+ * qu'un point.
  */
 import { h } from "../shell/dom";
-import { cleanScene, sceneBounds, type Scene } from "./scene";
+import { cleanScene, hereRadiusDeg, hereSpan, sceneBounds, type Scene } from "./scene";
 
 const mx = (lon: number) => (lon + 180) / 360;
 const my = (lat: number) => {
@@ -26,7 +30,7 @@ export function drawnScene(raw: Scene, opts: DrawnOptions): string {
   const scene = cleanScene(raw);
   const { width: W, height: H } = opts;
   const pad = opts.pad ?? 18;
-  const b = sceneBounds(scene);
+  const b = sceneBounds(scene, hereSpan(scene));
   const grid = Array.from({ length: 7 }, (_, i) => `<path class="dm-grid" d="M${((i + 1) * W) / 8} 0V${H}"/>`).join("")
     + Array.from({ length: 3 }, (_, i) => `<path class="dm-grid" d="M0 ${((i + 1) * H) / 4}H${W}"/>`).join("");
   let body = "";
@@ -48,22 +52,29 @@ export function drawnScene(raw: Scene, opts: DrawnOptions): string {
         return `<path class="dm-line${l.mika ? " mika" : ""}${l.straight ? " straight" : ""}" d="${d}"/>`;
       })
       .join("");
+    // les secondaires (un lieu de « Sur la route ») dessous, petites et sans numéro ; l'épingle choisie par-dessus tout
+    const rank = (p: Scene["pins"][number]) => (p.selected ? 2 : p.minor ? 0 : 1);
     const pins = [...scene.pins]
-      .sort((p, q) => Number(!!p.selected) - Number(!!q.selected))
+      .sort((p, q) => rank(p) - rank(q))
       .map((p) => {
         const [x, y] = at(p.lat, p.lon);
-        const r = p.label ? 7.5 : 5;
-        return `<g class="dm-pin${p.mika ? " mika" : ""}${p.selected ? " sel" : ""}"><circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r}"/>${
-          p.label ? `<text x="${x.toFixed(1)}" y="${(y + 3.3).toFixed(1)}">${h(p.label.slice(0, 3))}</text>` : ""}</g>`;
+        const label = p.minor ? "" : p.label ?? "";
+        const r = p.minor ? 3.5 : label ? 7.5 : 5;
+        const cls = p.minor ? " minor" : p.mika ? " mika" : "";
+        return `<g class="dm-pin${cls}${p.selected ? " sel" : ""}"><circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r}"/>${
+          label ? `<text x="${x.toFixed(1)}" y="${(y + 3.3).toFixed(1)}">${h(label.slice(0, 3))}</text>` : ""}</g>`;
       })
       .join("");
-    const here = scene.here
-      ? (() => {
-          const [x, y] = at(scene.here.lat, scene.here.lon);
-          return `<circle class="dm-here-halo" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="10"/><circle class="dm-here" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4.5"/>`;
-        })()
-      : "";
-    body = lines + here + pins;
+    let acc = "";
+    let here = "";
+    if (scene.here) {
+      const [x, y] = at(scene.here.lat, scene.here.lon);
+      const dLat = hereRadiusDeg(scene.here);
+      // sa précision, à l'échelle du plan : du point au bord nord de son cercle ; sous les tracés et les épingles
+      if (dLat) acc = `<circle class="dm-here-acc" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${Math.abs(y - at(scene.here.lat + dLat, scene.here.lon)[1]).toFixed(1)}"/>`;
+      here = `<circle class="dm-here-halo" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="10"/><circle class="dm-here" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4.5"/>`;
+    }
+    body = acc + lines + here + pins;
   }
   return `<svg class="drawn-map" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${h(opts.title)}">
     <rect class="dm-bg" width="${W}" height="${H}"/>${grid}${body}</svg>`;

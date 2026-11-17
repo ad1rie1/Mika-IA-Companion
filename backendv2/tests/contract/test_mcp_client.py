@@ -155,7 +155,7 @@ async def test_a_tool_is_offered_only_once_approved_and_then_answers():
     fake, store = FakeServer(), Store(meteo=_server())
     hub, client = _hub(fake, store)
     ok, message = await hub.test("meteo")
-    assert ok and "faux 1.2" in message and "3 outil(s)" in message and "3 à regarder" in message
+    assert ok and "faux 1.2" in message and "3 outils (3 à regarder)" in message
     status = hub.status("meteo")
     assert status.state == "connecte" and set(status.new) == {"echo", "boom", "slow"}
     assert status.instructions and "ETAT INTERNE" not in hub.offered().__repr__()
@@ -195,6 +195,9 @@ async def test_a_tool_the_server_changes_is_suspended_until_approved_again():
     fake.tools.pop(0)
     await hub.refresh("meteo")
     assert hub.status("meteo").missing == ("echo",) and hub.offered() == []
+    # « Tester la connexion » le dit, accordé (audit du 2026-11-05, C6-R1)
+    ok, said = await hub.test("meteo")
+    assert ok and "2 outils (2 à regarder, 1 approuvé qu'il ne propose plus)." in said and "(s)" not in said, said
     await hub.aclose()
     await client.aclose()
 

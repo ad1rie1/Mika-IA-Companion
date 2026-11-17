@@ -71,7 +71,7 @@ export interface ComposerHost {
 export class ChatComposer {
   private pending: PendingAttachment[] = [];
   private notices: string[] = [];
-  /** Une phrase à poser dans le champ au prochain dessin (l'écran Carte : « Demander à Mika »). */
+  /** Une phrase à poser dans le champ au prochain dessin (`ChatScreen.prefill` : depuis la Carte ou le Téléphone). */
   private pendingDraft: string | null = null;
 
   constructor(private readonly host: ComposerHost) {}

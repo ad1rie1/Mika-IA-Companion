@@ -1,5 +1,7 @@
-{# Système › Processus, dessiné (app/handmade/tabs/system.py) : ce qui échoue, avec sa dernière erreur, puis une carte
-   par faculté, une ligne par processus. #}
+{# Système › Processus, dessiné (app/handmade/tabs/system.py) : ce qui échoue, avec sa dernière erreur et, s'il est en
+   échec et pas en cours, « Réessayer maintenant » (``inspector/pages/system.py::retry_post``, ADR 0234 : son recul
+   effacé ; jamais sur un processus retenu pour une rafale, même en échec : la ligne le dit) ; puis une carte par
+   faculté, une ligne par processus. #}
 <div class="now-page person-tab sys" data-tab="systeme/processus">
   <section class="now-card sys-summary" aria-label="Ses processus en un regard">
     <div class="sys-summary-head">
@@ -27,6 +29,11 @@
         </div>
         {% if r.error %}<pre class="hm-error">{{ r.error }}</pre>{% endif %}
         <p class="person-entry-facts"><span><span class="k">faculté</span> {{ r.faculty }}</span>{% if r.lane %}<span><span class="k">voie</span> {{ r.lane }}</span>{% endif %}<span><span class="k">passages</span> {{ r.runs }}</span><span><span class="k">échecs</span> {{ r.failures }}</span><span><span class="k">dernier passage</span> {{ r.last }}</span>{% if r.error_at %}<span><span class="k">erreur</span> {{ r.error_at }}</span>{% endif %}<span><span class="k">nom technique</span> <code>{{ r.tech }}</code></span></p>
+        {% if r.retry %}<form method="post" action="{{ PREFIX }}/systeme/processus">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="processus" value="{{ r.tech }}">
+          <input type="hidden" name="_retour" value="{{ back }}">
+          <button class="btn small" data-confirm="Réessayer « {{ r.name }} » maintenant, sans attendre la fin de son recul ? Il repart à sa prochaine échéance, tout de suite s'il était dû.">Réessayer maintenant</button>
+        </form>{% elif r.held and r.state != 'held' %}<span class="now-muted">Retenu pour une rafale : il ne se réessaie pas avant la fin de sa retenue.</span>{% endif %}
       </li>
       {% endfor %}
     </ul>

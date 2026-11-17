@@ -47,7 +47,8 @@
 .iti-dot { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: var(--on-accent);
   font: 700 11px var(--font); flex: none; }
 .iti-opts { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
-.iti-opts .check { display: flex; align-items: center; gap: 8px; }
+/* une case et son texte, partout sur l'écran Carte et dans les fenêtres qu'il ouvre (« Nouveau voyage », « Le voyage ») */
+[data-screen="carte"] .check, .trip-form .check { display: flex; align-items: center; gap: 8px; cursor: pointer; }
 .iti-res { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius);
   border-left: 3px solid var(--accent); }
 .iti-big { display: flex; align-items: baseline; gap: 10px; }
@@ -94,6 +95,9 @@
 .onroute-list { list-style: none; margin: 0; padding: 0; }
 .onroute-list li { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
 .onroute-list .li-main { display: flex; flex-direction: column; flex: 1; min-width: 0; font-size: 13px; }
+/* sa ligne, quand on touche son épingle sur la carte */
+.onroute-list li { transition: background .3s, box-shadow .3s; }
+.onroute-list li.flash { background: var(--accent-soft); box-shadow: -8px 0 0 var(--accent-soft), 8px 0 0 var(--accent-soft); }
 
 /* Sa carte, dans le chat */
 .msg-map { display: flex; flex-direction: column; width: min(340px, 100%); border: 1px solid var(--border); border-left: 3px solid var(--mika);
@@ -111,6 +115,9 @@
   .carte-split .map-pane { order: -1; border-bottom: 1px solid var(--border); }
   .carte-side { border-right: 0; }
   .carte-side .pane-scroll { flex: none; overflow: visible; }
+  /* la fiche du lieu choisi (ou les liens d'un regard) reste collée en bas de l'écran : la liste défile sous elle, et sa
+     place, gardée à la fin de la liste, laisse lire la dernière ligne */
+  .carte-side > .pane-foot { position: sticky; bottom: 0; z-index: 1; background: var(--bg); box-shadow: 0 -4px 10px rgb(22 20 52 / 8%); }
   .carte-split .map-legend { display: none; }
   .trips { grid-template-columns: 1fr; padding: 12px; }
 }
@@ -124,11 +131,18 @@ span.cm-pin-el { cursor: default; pointer-events: none; }
 .cm-pin-el.mika { background: var(--mika); color: var(--on-mika); }
 .cm-pin-el.sel { width: 30px; height: 30px; font-size: 12.5px; box-shadow: 0 0 0 3px var(--text), 0 2px 6px rgb(22 20 52 / 35%); z-index: 2; }
 .cm-pin-el.dot.sel { width: 20px; height: 20px; }
+/* une épingle secondaire (un lieu de « Sur la route ») : un petit anneau, sans numéro, sous les arrêts ; on la touche
+   d'un peu plus loin que son dessin (MapLibre la pose en `position: absolute` : son ::before s'y range) */
+.cm-pin-el.minor { width: 12px; height: 12px; border: 2.5px solid var(--accent-fill); background: var(--raised);
+  box-shadow: 0 1px 2px rgb(22 20 52 / 30%); }
+.cm-pin-el.minor::before { content: ""; position: absolute; inset: -7px; border-radius: 50%; }
+.cm-pin-el.minor.sel { width: 16px; height: 16px; box-shadow: 0 0 0 2px var(--text); }
 .cm-pin-el:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .cm-here-el { display: block; width: 14px; height: 14px; border-radius: 50%; background: var(--accent-fill); border: 3px solid var(--raised);
   box-shadow: 0 0 0 9px color-mix(in srgb, var(--accent) 18%, transparent); pointer-events: none; }
 
-/* Le plan dessiné d'une scène (sans carte servie, sans WebGL, au-delà des quatre miniatures vivantes). */
+/* Le plan dessiné d'une scène (sans carte servie, sans WebGL, au-delà des quatre miniatures vivantes) : celui de la
+   Carte, des miniatures et de la Position du Téléphone. */
 .drawn-map { display: block; width: 100%; height: 100%; background: color-mix(in srgb, var(--info) 6%, var(--bg)); }
 .dm-bg { fill: color-mix(in srgb, var(--info) 6%, var(--bg)); }
 .dm-grid { stroke: color-mix(in srgb, var(--border) 70%, transparent); stroke-width: 1; vector-effect: non-scaling-stroke; }
@@ -139,8 +153,12 @@ span.cm-pin-el { cursor: default; pointer-events: none; }
 .dm-pin.mika circle { fill: var(--mika); }
 .dm-pin.sel circle { stroke: var(--text); stroke-width: 2.5; }
 .dm-pin text { fill: var(--on-fill, #fff); font: 700 9.5px var(--font); text-anchor: middle; }
+.dm-pin.minor circle { fill: var(--bg); stroke: var(--accent-fill); stroke-width: 2; }
 .dm-here { fill: var(--accent-fill); stroke: var(--bg); stroke-width: 2; }
 .dm-here-halo { fill: color-mix(in srgb, var(--accent) 18%, transparent); }
+/* le cercle de sa précision, à l'échelle du plan */
+.dm-here-acc { fill: color-mix(in srgb, var(--accent) 12%, transparent); stroke: color-mix(in srgb, var(--accent) 45%, transparent);
+  stroke-width: 1.5; vector-effect: non-scaling-stroke; }
 .map-pane > .drawn-map { position: absolute; inset: 0; }
 
 /* La miniature : son plan, puis sa carte par-dessus quand elle paraît ; la mention de la carte, en texte. */
@@ -181,16 +199,26 @@ span.cm-pin-el { cursor: default; pointer-events: none; }
 .carte-live { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%);
   white-space: nowrap; border: 0; }
 
-/* Un voyage : glisser un arrêt (la poignée), le retirer, l'endroit où il tombera ; un jour vide ; ajouter un jour. */
+/* Un voyage : glisser un arrêt (la poignée), le noter, le retirer, l'endroit où il tombera ; un jour vide ; ajouter un
+   jour. */
 .stop .grip { display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: var(--radius-sm); background: none;
   touch-action: none; flex: none; }
 .stop .grip:hover, .stop .grip:focus-visible { background: var(--tint); color: var(--text); }
 .stop.dragging { opacity: .45; }
 .stop.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
 .stops.drop-end { box-shadow: inset 0 -2px 0 var(--accent); }
-.stop-x { margin-left: auto; opacity: 0; }
-.stop.by-mika .stop-x, .stop:hover .stop-x, .stop:focus-within .stop-x { opacity: 1; }
-.stop-note { color: var(--text-2); }
+/* « Noter » et « Retirer » : à droite, montrés au survol ou au clavier (sur un arrêt de Mika, et au toucher, toujours) */
+.stop-acts { display: flex; gap: 2px; margin-left: auto; flex: none; }
+.stop-acts .btn { opacity: 0; }
+.stop.by-mika .stop-acts .btn, .stop:hover .stop-acts .btn, .stop:focus-within .stop-acts .btn, .stop.noting .stop-acts .btn { opacity: 1; }
+.stop-acts [aria-expanded="true"] { background: var(--tint); color: var(--text); }
+.stop-note { color: var(--text-2); overflow-wrap: anywhere; }
+/* sa note qu'on écrit, en place sous son nom */
+.stop-note-edit { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.stop-note-input { width: 100%; min-width: 0; height: 32px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius);
+  background: var(--raised); color: var(--text); font: inherit; font-size: 13px; }
+.stop-note-input:focus { outline: 0; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+.stop-note-edit .small { font-size: 11.5px; }
 .stop-empty { padding: 4px 12px; }
 .stop.flash { box-shadow: inset 3px 0 0 var(--accent); }
 .add-day { align-self: flex-start; }
@@ -199,4 +227,11 @@ span.cm-pin-el { cursor: default; pointer-events: none; }
 .add-stop-modal .add-stop-list .li.place:last-child { border-bottom: 0; }
 .add-stop-modal .add-stop-list > p { padding: 8px 12px; }
 
-@media (hover: none) { .stop-x { opacity: 1; } }
+@media (hover: none) { .stop-acts .btn { opacity: 1; } }
+
+/* La fenêtre « Le voyage », sur un téléphone : « Supprimer le voyage » seul sur sa ligne, « Annuler » et « Enregistrer »
+   entiers sur la suivante (les trois côte à côte débordaient de la fenêtre jusqu'à 422 px) */
+@media (max-width: 760px) {
+  .modal-foot:has(> .trip-delete) { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; }
+  .modal-foot > .trip-delete { grid-column: 1 / -1; justify-self: start; }
+}

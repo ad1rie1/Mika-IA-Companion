@@ -38,6 +38,7 @@ from mika.adapters.mcp.config import (
 )
 from mika.adapters.mcp.http import HttpTransport
 from mika.adapters.mcp.stdio import Launcher, Sandbox, StdioTransport
+from mika.kernel.inspect import plural
 from mika.ports.mcp import (
     NATURES,
     Access,
@@ -89,10 +90,14 @@ class McpHub:
                  now_us: Callable[[], int] | None = None, local_root: Path | None = None,
                  sandbox: Sandbox | None = None,
                  settle: Callable[..., Awaitable[Any]] | None = None,
-                 remove: Callable[[str], Awaitable[None]] | None = None) -> None:
+                 remove: Callable[[str], Awaitable[None]] | None = None,
+                 system: Callable[[], Mapping[str, str]] | None = None) -> None:
         self._config = config
         self._reviews = reviews
         self._save_reviews = save_reviews
+        #: les serveurs qu'un plugin système apporte : nom → ce plugin (``SystemServers.plugins``, ADR 0066) ; rien :
+        #: tous sont réglés à la main
+        self._system = system
         #: enregistrer ce qu'un serveur de l'opérateur fait d'elle (ADR 0128), et retirer un serveur de ses réglages ;
         #: rien : ça ne s'enregistre pas d'ici
         self._settle = settle
@@ -190,7 +195,8 @@ class McpHub:
             server_name=info.name if info else "", server_version=info.version if info else "",
             protocol=info.protocol if info else "", instructions=info.instructions if info else "",
             live=st.live, reviews=reviews, last_ok_at=st.last_ok_at, last_error_at=st.last_error_at,
-            calls=st.calls, failures=st.failures, consecutive=st.consecutive, log=st.log)
+            calls=st.calls, failures=st.failures, consecutive=st.consecutive, log=st.log,
+            plugin=self._plugin_of(server))
 
     def keep(self, request: str, text: str) -> None:
         self._kept[request] = text
@@ -247,12 +253,13 @@ class McpHub:
         if s is not None and s.new:
             extra.append(f"{len(s.new)} à regarder")
         if s is not None and s.changed:
-            extra.append(f"{len(s.changed)} changé(s) depuis ton accord, suspendu(s)")
+            extra.append(plural(len(s.changed), "changé depuis ton accord, suspendu",
+                                "changés depuis ton accord, suspendus"))
         if s is not None and s.missing:
-            extra.append(f"{len(s.missing)} approuvé(s) qu'il ne propose plus")
+            extra.append(plural(len(s.missing), "approuvé qu'il ne propose plus", "approuvés qu'il ne propose plus"))
         more = f" ({', '.join(extra)})" if extra else ""
         return True, (f"Joint en {took:.0f} ms : {who} (protocole {info.protocol if info else '?'}), "
-                      f"{len(tools)} outil(s){more}.")
+                      f"{plural(len(tools), 'outil', 'outils')}{more}.")
 
     async def reconfigure(self) -> None:
         """Après un changement de réglages : fermer les sessions dont la connexion a changé (ou dont le serveur
@@ -506,6 +513,16 @@ class McpHub:
         except Exception:  # noqa: BLE001
             log.exception("mcp : décisions illisibles")
             return {}
+
+    def _plugin_of(self, server: str) -> str:
+        """Le plugin système qui apporte ce serveur ; vide : un serveur réglé à la main (ou rien de lisible)."""
+        if self._system is None:
+            return ""
+        try:
+            return str(self._system().get(server, ""))
+        except Exception:  # noqa: BLE001 — illisible : on ne le dit pas du système
+            log.exception("mcp : serveurs système illisibles")
+            return ""
 
 
 

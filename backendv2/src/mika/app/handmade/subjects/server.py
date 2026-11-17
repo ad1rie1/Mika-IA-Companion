@@ -1,32 +1,43 @@
 """La fiche d'un service branché, dessinée (ADR 0121, 0123, 0129, 0130, 0131) : trois onglets — « En bref », puis
 deux du plugin dessinés ici, « Accès aux outils » et « Ses outils » ; « État » et « Appels » sous « Le détail ».
 
-S'il marche (et ce qui attend ton regard), ses lignes d'accès, ce qu'elle en lit pour décider de s'en servir, qui peut
-quoi outil par outil, pour qui et quand ; le côté technique replié. Qui peut quoi se règle en un tableau de lignes lues
-de haut en bas, comme les règles d'un pare-feu, puis la ligne par défaut (ADR 0131) ; un outil se règle sur sa ligne
-(servi, il lit ou il agit, ce qu'elle lit de lui). Ce qu'un outil fait devant quelqu'un se calcule par la règle du
-moteur (``access_for``) sur des personnes types (``console.faces``), jamais par une recopie.
+« En bref » résume d'un regard : s'il marche (et ce qui attend ton regard, ses outils non servis compris), ses lignes
+d'accès (leur « Changer » est le seul lien de l'onglet vers « Accès aux outils »), ce qu'elle en lit pour décider de
+s'en servir, pour qui et quand ; le côté technique replié. Qui peut quoi se règle en un tableau de lignes lues de haut
+en bas, comme les règles d'un pare-feu, puis la ligne par défaut (ADR 0131), dans les colonnes et les mots des tableaux
+de ses familles (``vocab.access``, ADR 0134 : « Un outil qui lit », « Ce qu'elle en garde », « un savoir »…) ; un
+outil se règle sur sa ligne de « Ses outils » (servi, il lit ou il agit, ce qu'elle lit de lui), qui dit aussi ce
+qu'il fait devant chacun : la règle du moteur (``access_for``) sur des personnes types (``console.faces``), jamais une
+recopie — « En bref » ne le redit plus (audit du 2026-11-05, C6-Q1).
+
+Un serveur réglé à la main a « Modifier la connexion » (sa page dans Ses outils › Paramètres). Celui qu'un plugin
+système apporte (``ServerStatus.plugin``, ADR 0066) suit les paramètres de ce plugin : sa fiche y mène (« Régler son
+plugin ») ; seuls ses accès se règlent ici (ADR 0131).
 """
 
 from __future__ import annotations
 
 import json
 from typing import Any
-from urllib.parse import quote, urlencode
 
 from markupsafe import Markup
 
-from mika.adapters.mcp.system import BY as SYSTEM_BY
-from mika.app.handmade.access import canal_choices, canal_instances, people_with_accounts, who_choices
+from mika.app.handmade.access import (
+    KEEP_CHOICES,
+    POLICY_CHOICES,
+    canal_choices,
+    canal_instances,
+    people_with_accounts,
+    who_choices,
+)
 from mika.inspector import render
 from mika.inspector.pages import tools as catalog
+from mika.inspector.pages.params import faculty_url
 from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import UI, Overview, env
-from mika.kernel.inspect import Pager, Ref, When
+from mika.kernel.inspect import Pager, Ref, When, plural
 from mika.plugins.mcp import access_for
 from mika.plugins.mcp.inspect import (
-    KEEP_WORDS,
-    POLICY_WORDS,
     STATE_TONES,
     access_said,
     closeness,
@@ -43,14 +54,12 @@ from mika.plugins.mcp.inspect import (
 )
 from mika.ports.mcp import STATES
 from mika.runtime.tool_offer import deferred, gate_of
-from mika.vocab.access import MOMENTS, NO, PERSON
+from mika.vocab.access import KEEP_WORDS, MOMENTS, NO, PERSON, POLICY_WORDS
 from mika.vocab.episodes import Kind
 
 KIND = "serveur"
-#: ce qu'une ligne fait d'un outil, dans un sélecteur du tableau
-POLICY_CHOICES = (("seule", "Seule"), ("carte", "Demande à la personne"), ("toi", "Ton accord"), ("non", "Non"))
-#: ce qu'elle garde, dans un sélecteur du tableau
-KEEP_CHOICES = (("public", "Ce qu'elle sait"), ("perso", "Un souvenir"), ("prive", "Une confidence"), ("rien", "Rien"))
+#: la ligne par défaut, dans la colonne « Qui » du résumé : comme dans les tableaux
+DEFAULT_WHO = "Comportement par défaut"
 #: les moments d'une ligne, dans sa liste à cocher
 MOMENT_CHOICES = tuple((k, label[:1].upper() + label[1:]) for k, label in MOMENTS)
 #: ce qu'un outil laisse voir de sa description dans une liste ; la suite se déplie
@@ -59,6 +68,10 @@ SHORT = 220
 HINTS = (("readOnlyHint", True, "le serveur dit : lecture seule", "info"),
          ("destructiveHint", True, "le serveur dit : peut détruire", "danger"),
          ("openWorldHint", True, "le serveur dit : touche le monde extérieur", "warn"))
+#: le pluriel du mot d'un outil non servi (``tool_state``), dans « En bref » : « 2 désactivés » ; un mot absent ne
+#: change pas (« à regarder »)
+STATE_PLURALS = {"désactivé": "désactivés", "disparu": "disparus", "approuvé, disparu": "approuvés, disparus",
+                 "changé : suspendu": "changés : suspendus"}
 
 
 def _capital(text: str) -> str:
@@ -80,7 +93,7 @@ def _form(forms: Any, action: str) -> Any:
 
 
 def _refused(key: str) -> str:
-    """Pourquoi ses outils sont refusés dans une situation de la grille, en mots de ses lignes d'accès."""
+    """Pourquoi ses outils sont refusés dans une situation, en mots de ses lignes d'accès."""
     if key == "inconnue":
         return "jamais avec une inconnue, quelles que soient ses lignes"
     if key == "salon":
@@ -143,11 +156,6 @@ def _nature_of(st: Any, remote: str) -> str:
     return "lecture" if tool is not None and tool.read_only_hint else "action"
 
 
-def _tool_url(server: str, remote: str) -> str:
-    """Un outil ouvert sur sa ligne, dans « Ses outils »."""
-    return subject_url(KIND, server, "outils") + "&" + urlencode({"outil": remote}) + "#" + quote(f"outil-{remote}")
-
-
 def _alerts(st: Any, access_tab: str) -> list[dict[str, str]]:
     """Ce que ses lignes ne disent pas d'elles-mêmes : il ne sert à personne."""
     if not serves_nobody(st):
@@ -157,21 +165,29 @@ def _alerts(st: Any, access_tab: str) -> list[dict[str, str]]:
                      "fermé."}]
 
 
+def _plugin_settings(ui: UI, plugin: str) -> str:
+    """Les paramètres du plugin qui apporte un serveur du système ; rien s'il n'en a pas (ou n'est pas composé)."""
+    faculty = ui.kernel.registry.faculties.get(plugin)
+    return faculty_url(plugin) if faculty is not None and faculty.params is not None else ""
+
+
 def _summary(st: Any, frame: Any) -> list[dict[str, str]]:
-    """Ses lignes d'accès, lisibles d'un regard (« En bref ») : la dernière est le comportement par défaut."""
-    return [{"who": who_label(a.who, frame), "when": _capital(when_label(a.when)),
+    """Ses lignes d'accès, lisibles d'un regard (« En bref »), dans les mots des familles (``vocab.access``) : la
+    dernière est le comportement par défaut, nommé ainsi."""
+    return [{"who": who_label(a.who, frame) if a.who else DEFAULT_WHO, "when": _capital(when_label(a.when)),
              "read": POLICY_WORDS[a.read], "act": POLICY_WORDS[a.act], "keep": KEEP_WORDS[a.keep],
              "tools": "tous" if not a.tools else ", ".join(a.tools), "default": not a.who}
             for a in (*st.access, st.default)]
 
 
 class ServerOverview(Overview):
-    """« En bref » : le premier onglet de la fiche d'un service branché ; « État », qu'il résume, et « Appels »
-    passent au bout de la barre, sous « Le détail »."""
+    """« En bref » : le premier onglet de la fiche d'un service branché, d'un regard — qui peut quoi, outil par
+    outil, est dans « Ses outils » (audit du 2026-11-05, C6-Q1) ; « État », qu'il résume, et « Appels » passent au
+    bout de la barre, sous « Le détail »."""
 
     slug = "ensemble"
     title = "En bref"
-    description = "S'il marche, ses accès, ce qu'elle en lit, qui peut quoi, pour qui et quand."
+    description = "S'il marche, ses accès, ce qu'elle en lit, pour qui et quand."
     styles = ("handmade/outils.css",)
     folded = ("etat", "appels")
 
@@ -195,10 +211,15 @@ class ServerOverview(Overview):
             name=st.name, purpose=_capital(st.purpose.strip()), tags=tags))
 
     def links(self, ui: UI, key: str) -> list[tuple[str, str]]:
-        """« Modifier la connexion » (comment le joindre), à côté de « Tester la connexion »."""
+        """« Modifier la connexion » (comment le joindre), à côté de « Tester la connexion » ; pour un serveur du
+        système, « Régler son plugin » (s'il a des paramètres) : rien de lui ne se règle comme un serveur ajouté."""
         port = ui.kernel.ports.get("mcp")
-        if port is None or port.status(key) is None:
+        st = port.status(key) if port is not None else None
+        if st is None:
             return []
+        if st.plugin:
+            plugin = _plugin_settings(ui, st.plugin)
+            return [("Régler son plugin", plugin)] if plugin else []
         return [("Modifier la connexion", render.href(edit_server(key, Ref.subject(KIND, key, "")), ui.env()))]
 
     def render(self, ui: UI, key: str) -> Markup | None:
@@ -213,11 +234,8 @@ class ServerOverview(Overview):
             return render.cell(When(at), shown)["text"] if at else ""
 
         tools_tab, access_tab = subject_url(KIND, key, "outils"), subject_url(KIND, key, "fait")
-        settings = render.href(edit_server(key, Ref.subject(KIND, key, "")), shown)
-        # la grille de « Ce qu'elle peut faire », ouverte sur la famille de ses outils : là où l'on en retire
-        bundles = {ui.kernel.registry.tools[t.name].bundle for t in port.offered()
-                   if t.server == key and t.name in ui.kernel.registry.tools}
-        grid = f"{catalog.BASE}/tous?" + urlencode({"lot": next(iter(bundles))}) if len(bundles) == 1 else ""
+        # ce qu'elle en lit : écrit à la main pour un serveur ajouté ; un serveur du système le tient de son plugin
+        settings = "" if st.plugin else render.href(edit_server(key, Ref.subject(KIND, key, "")), shown)
         served = sum(1 for t in port.offered() if t.server == key)
         review = len(st.new) + len(st.changed)
         alerts = []
@@ -231,18 +249,10 @@ class ServerOverview(Overview):
                            "text": f"{review} outil{'s' if review > 1 else ''} à revoir : "
                                    f"nouveau{'x' if review > 1 else ''} ou changé{'s' if review > 1 else ''} "
                                    "depuis ton accord."})
-        alerts += _alerts(st, access_tab)
-        # qui peut quoi : ses outils servis, devant chaque personne type (une colonne où tout est « non » se tait)
-        live = {t.remote: t for t in st.live}
-        served_tools = [(r, v) for r, v in st.reviews.items() if tool_state(st, r)[0] == "servi"]
-        columns = faces(st, frame)
-        grid_cells = {r: _cells(st, r, v.nature, columns, frame) for r, v in served_tools}
-        kept = [i for i in range(len(columns)) if any(cells[i]["word"] != "non" for cells in grid_cells.values())]
-        matrix = []
-        for remote, decided in served_tools:
-            what, _ = _short(decided.description or decided.server_description or live[remote].description, 120)
-            matrix.append({"name": remote, "what": what, "nature": "lit" if decided.nature == "lecture" else "agit",
-                           "cells": [grid_cells[remote][i] for i in kept], "rules": _tool_url(key, remote)})
+        # le « Changer » de ses lignes d'accès, juste dessous, est le seul lien de l'onglet vers « Accès aux outils »
+        alerts += _alerts(st, "")
+        # ses outils non servis, d'un mot (« 1 à regarder ») ; qui peut quoi, outil par outil, est dans « Ses outils »
+        live = {t.remote for t in st.live}
         states: dict[str, int] = {}
         for remote in [t.remote for t in st.live] + [r for r in st.reviews if r not in live]:
             word = tool_state(st, remote)[0]
@@ -264,13 +274,12 @@ class ServerOverview(Overview):
             access_pager=render._pager(Pager(size=len(st.access) + 1, total=len(st.access) + 1), {}),
             access_said=access_said(st), access_tab=access_tab,
             purpose=_capital(st.purpose.strip()), when_to_use=_capital(st.when_to_use.strip()),
-            columns=[columns[i].label for i in kept], matrix=matrix, states=sorted(states.items()),
+            states=[plural(n, word, STATE_PLURALS.get(word, word)) for word, n in sorted(states.items())],
             known=bool(st.live),
-            matrix_pager=render._pager(Pager(size=max(1, len(matrix)), total=max(1, len(matrix))), {}),
             situations=situations, who_pager=render._pager(Pager(size=rows, total=rows), {}),
             technical=technical, log=list(st.log), instructions=st.instructions,
-            local=st.kind == "local", address=st.address, settings=settings, tools_tab=tools_tab,
-            calls_tab=subject_url(KIND, key, "appels"), grid=grid))
+            local=st.kind == "local", address=st.address, settings=settings, system=bool(st.plugin),
+            tools_tab=tools_tab, calls_tab=subject_url(KIND, key, "appels")))
 
     tabs = ("fait", "outils")
 
@@ -344,7 +353,8 @@ class ServerOverview(Overview):
     def _access(ui: UI, st: Any, forms: Any) -> Markup:
         """« Accès aux outils » (ADR 0131) : un tableau de lignes lues de haut en bas — qui, quand, ce qu'elle fait
         d'un outil qui lit et d'un outil qui agit, ce qu'elle en garde, à quels outils —, puis le comportement par
-        défaut, obligatoire. Chaque bouton envoie tout le tableau (rien de ce qu'on a changé ne se perd)."""
+        défaut, obligatoire ; ses choix sont ceux des familles (``vocab.access``). Chaque bouton envoie tout le tableau
+        (rien de ce qu'on a changé ne se perd)."""
         frame = ui.kernel.mind.frame()
         people, instances = people_with_accounts(ui), canal_instances(ui)
         known = list(dict.fromkeys([*(t.remote for t in st.live), *st.reviews]))
@@ -360,9 +370,8 @@ class ServerOverview(Overview):
                 "tools": [{"name": r, "nature": "lit" if _nature_of(st, r) == "lecture" else "agit",
                            "on": r in chosen, "state": tool_state(st, r)[0]} for r in known],
                 "first": n == 1, "last": n == len(st.access)})
-        system = bool(st.reviews) and all(v.by == SYSTEM_BY for v in st.reviews.values())
         return Markup(env.get_template("handmade/outils/fait.html").render(
             rows=rows, default=st.default, policies=POLICY_CHOICES, keeps=KEEP_CHOICES,
             pager=render._pager(Pager(size=len(rows) + 1, total=len(rows) + 1), {}),
-            form=_form(forms, "mcp.acces"), system=system, known=bool(known),
+            form=_form(forms, "mcp.acces"), system=bool(st.plugin), known=bool(known),
             alerts=_alerts(st, ""), tools_tab=subject_url(KIND, st.name, "outils")))

@@ -440,6 +440,8 @@ def export(out: Path) -> list[str]:
                      "/inspecteur/outils/tous?lot=email", "/inspecteur/outils/tous?lot=email&vue_pg1=table",
                      "/inspecteur/outils/tous?lot=email&outil=email_read", "/inspecteur/outils/tous?q=aucun-resultat",
                      "/inspecteur/systeme/sorties?etat=failed", "/inspecteur/systeme/sorties?etat=done",
+                     # hors du menu sans dossier de rapports (``menu_for``), comme en service : sa page vide
+                     "/inspecteur/systeme/simulations",
                      "/inspecteur/decisions/episodes?issue=failed", "/inspecteur/decisions/episodes?vue_pg1=table",
                      "/inspecteur/memoire/souvenirs?person=Adrien", "/inspecteur/memoire/souvenirs?person=Adrien&vue_pg1=table",
                      "/inspecteur/memoire/souvenirs?q=aucun-resultat", "/inspecteur/memoire/croyances?status=superseded",

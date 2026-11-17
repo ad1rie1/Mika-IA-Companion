@@ -5,7 +5,8 @@ une carte jouée en mémoire (``tests/fixtures/fake_maps.py``).
 - un paramètre faux est refusé (400), jamais ramené dans ses bornes ;
 - un voyage est à qui l'a créé : une autre personne ne le voit ni ne le touche (le même 404) ; ce qu'on en fait passe
   par les actions de la console, dédoublonné par la clé d'envoi ; ce qu'elle y a ajouté se dit ``"by": "mika"`` ;
-- un jour se réordonne au meilleur ordre, un voyage a ses tronçons, ses lieux sur la route, son GPX ;
+- un jour se réordonne au meilleur ordre, un voyage a ses tronçons, ses lieux sur la route, son GPX — l'ordre et les
+  lieux le long d'un trajet ne se demandent que sur un voyage ;
 - ce qu'elle a cherché ou montré s'ouvre pour toi seule, et plus une fois oublié.
 """
 
@@ -133,20 +134,30 @@ def test_places_addresses_routes_and_orders_come_from_this_server(world):  # noq
                 f"points={LAC}&avoid=metro"):
         assert client.get(CARTE + "/itineraire?" + bad).status_code == 400, bad
 
-    four = "45.0,6.0;45.3,6.3;45.1,6.1;45.4,6.4"
-    assert client.get(CARTE + f"/ordre?points={four}").json() == {"order": [0, 2, 1, 3]}
-    maps.order = [1, 0, 2, 3]  # le départ n'est plus à sa place : illisible
-    assert client.get(CARTE + f"/ordre?points={four}").status_code == 502
+    # le meilleur ordre et les lieux le long d'un trajet se demandent sur un voyage, seulement : les routes de points
+    # quelconques, qu'aucun écran ne lisait, sont retirées et ne reviennent pas en silence
+    four, asked = "45.0,6.0;45.3,6.3;45.1,6.1;45.4,6.4", len(maps.calls)
+    for gone in (f"/ordre?points={four}", f"/le-long?points={four}&cat=voir"):
+        assert client.get(CARTE + gone).status_code == 404, gone
+    assert len(maps.calls) == asked  # rien n'est parti pour elles
 
-    along = client.get(CARTE + f"/le-long?points={HORIZON.lat},{HORIZON.lon};{TALLOIRES.lat},{TALLOIRES.lon}"
-                               "&cat=voir").json()
+    trip = new_trip(client)
+    stops = [stop(client, trip, name, lat, lon) for name, lat, lon in
+             (("Annecy", 45.0, 6.0), ("Belvédère", 45.3, 6.3), ("Sévrier", 45.1, 6.1), ("Talloires", 45.4, 6.4))]
+    maps.order = [1, 0, 2, 3]  # le départ n'est plus à sa place : illisible
+    assert post(client, f"{VOYAGES}/{trip}/ordre", {"day": 1}).status_code == 502
+    assert [s["id"] for s in client.get(f"{VOYAGES}/{trip}").json()["days"][0]["stops"]] == stops  # rien d'appliqué
+
+    road = new_trip(client, "Le tour du lac")
+    stop(client, road, HORIZON.name, HORIZON.lat, HORIZON.lon)
+    stop(client, road, TALLOIRES.name, TALLOIRES.lat, TALLOIRES.lon)
+    along = client.get(f"{VOYAGES}/{road}/sur-la-route?cat=voir").json()
     assert along["route"] is True and [p["id"] for p in along["places"]] == ["l5"]
     assert along["places"][0]["along_m"] is not None and along["places"][0]["distance_m"] <= 5_000
     maps.routing_on = False
-    line = f"points={HORIZON.lat},{HORIZON.lon};{TALLOIRES.lat},{TALLOIRES.lon}&cat=voir"
-    straight = client.get(CARTE + f"/le-long?{line}&corridor=200").json()
+    straight = client.get(f"{VOYAGES}/{road}/sur-la-route?cat=voir&corridor=200").json()
     assert straight["route"] is False and straight["places"] == []  # à vol d'oiseau, et un couloir étroit
-    narrow = client.get(CARTE + f"/le-long?{line}&corridor=100")
+    narrow = client.get(f"{VOYAGES}/{road}/sur-la-route?cat=voir&corridor=100")
     assert narrow.status_code == 400 and "corridor" in narrow.json()["fields"]  # refusé, jamais ramené à 200
 
 

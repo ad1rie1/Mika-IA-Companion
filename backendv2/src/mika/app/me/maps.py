@@ -4,14 +4,14 @@
   que le client en sait, ses tuiles, ses polices et ses icônes, tirées des tuiles réglées (``MeApiBase.tiles``) et
   servies par ce serveur seul, que le navigateur garde un jour sous une adresse qui porte leur version.
 - **La carte** : ce qui est branché (l'index des lieux, les adresses, les itinéraires) ; chercher un lieu dans
-  l'index local (rien ne sort), une adresse (seul le texte cherché part), un itinéraire (seuls ses points partent),
-  le meilleur ordre de quelques points, les lieux le long d'un trajet ; et ce qu'elle a cherché ou montré pour toi
-  (un regard, une carte, par leur ``seq``). Tout passe par le port de la carte (``kernel.ports["maps"]``,
-  ``mika.ports.maps``) : le navigateur ne joint jamais un autre hôte que ce serveur.
+  l'index local (rien ne sort), une adresse (seul le texte cherché part), un itinéraire (seuls ses points partent) ;
+  et ce qu'elle a cherché ou montré pour toi (un regard, une carte, par leur ``seq``). Tout passe par le port de la
+  carte (``kernel.ports["maps"]``, ``mika.ports.maps``) : le navigateur ne joint jamais un autre hôte que ce serveur.
 - **Tes voyages** : les tiens seulement — un voyage d'une autre personne n'existe pas (le même 404). Ce qu'on y fait
   passe par les actions du plugin ``trips`` (``call.act``), au nom de qui est connecté : journalisées, dédoublonnées
   (``Idempotency-Key``) comme dans la console, auditées depuis son espace (``moi.<action>``). Ce qu'elle y a ajouté
-  porte ``"by": "mika"``, ce que tu y as fait ``"toi"``.
+  porte ``"by": "mika"``, ce que tu y as fait ``"toi"``. Le meilleur ordre des arrêts (d'un jour) et les lieux le
+  long d'un trajet (ADR 0194) se demandent sur un voyage, seulement : un itinéraire en devient un d'un clic.
 
 Le contrat, route par route : ``docs/protocole-moi.md``, § 10.
 """
@@ -270,35 +270,6 @@ async def itinerary(call: Call) -> dict[str, Any]:
     except MapsUnavailable as exc:
         raise _unavailable(exc) from None
     return _route(route)
-
-
-async def best_order(call: Call) -> dict[str, Any]:
-    """Le meilleur ordre de ces points, le départ et l'arrivée fixes."""
-    port = _maps(call, "routing")
-    points, mode = _points(call), _mode(call)
-    call.outbound()
-    try:
-        got = await port.optimize(points, mode=mode)
-    except MapsUnavailable as exc:
-        raise _unavailable(exc) from None
-    return {"order": _order(got, len(points))}
-
-
-async def along(call: Call) -> dict[str, Any]:
-    """Les lieux le long d'un trajet entre ces points (à vol d'oiseau sans itinéraires : ``route`` faux)."""
-    port = _maps(call, "places")
-    points, category = _points(call), _category(call, port)
-    corridor = _int(call, "corridor", CORRIDOR, CORRIDOR_MIN, CORRIDOR_MAX)
-    limit = _int(call, "limit", 20, 1, LIMIT_MAX)
-    mode, avoid = _mode(call), frozenset(_avoid(call))
-    if port.routing_ready():
-        call.outbound()
-    line, routed = await geo.follow(port, points, mode=mode, avoid=avoid)
-    try:
-        hits = await port.along(line, corridor_m=corridor, category=category, limit=limit)
-    except MapsUnavailable as exc:
-        raise _unavailable(exc) from None
-    return {"places": [_hit(h) for h in hits[:limit]], "route": routed}
 
 
 def _json(text: str | None) -> Any:
@@ -698,8 +669,7 @@ def routes(api: MeApiBase) -> list[Route]:
     r = api.route
     trip, stop = TRIPS_PATH + "/{trip}", TRIPS_PATH + "/{trip}/arrets/{stop}"
     return [r(MAP_PATH, info), r(MAP_PATH + "/lieux", places), r(MAP_PATH + "/adresses", addresses),
-            r(MAP_PATH + "/itineraire", itinerary), r(MAP_PATH + "/ordre", best_order),
-            r(MAP_PATH + "/le-long", along), r(MAP_PATH + "/regards/{seq:int}", look),
+            r(MAP_PATH + "/itineraire", itinerary), r(MAP_PATH + "/regards/{seq:int}", look),
             r(BASE_MAP, map_info), r(BASE_MAP + "/tiles/{z:int}/{x:int}/{y:int}", map_tile, raw=True),
             r(BASE_MAP + "/fonts/{fontstack}/{range}", map_font, raw=True),
             r(BASE_MAP + "/sprites/{path:path}", map_sprite, raw=True),

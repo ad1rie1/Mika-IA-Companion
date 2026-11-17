@@ -12,7 +12,14 @@ from starlette.requests import Request
 from mika.contracts import runtime as rt
 from mika.inspector import names
 from mika.inspector.catalog import destinations
-from mika.inspector.pages.diagnostics import CHECKS, DESTINATIONS, HEALTH, check_href
+from mika.inspector.pages.diagnostics import (
+    BACKUPS_PAGE,
+    CHECKS,
+    DESTINATIONS,
+    HEALTH,
+    UNNAMED_BY_PAGE,
+    check_href,
+)
 from mika.inspector.pages.system import backup_state
 from mika.inspector.pages.tabs import TABS
 from mika.kernel.clock import DAY, MINUTE, US
@@ -139,13 +146,15 @@ async def attention(ui: Any, request: Request) -> list[Any]:
         cards.append(Stat("Anomalies", anomalies, "évaluations ou réductions qui ont échoué", "warn",
                           _local("/inspecteur/systeme/anomalies", "Anomalies")))
     tone, text = backup_state(ui)
-    if tone in ("warn", "danger"):
+    if tone in ("warn", "danger"):  # vers leur carte : une autre ligne que le journal, qui mène à la même page
         cards.append(Stat("Sauvegarde", "à faire" if tone == "warn" else "en échec", text, tone,
-                          _local("/inspecteur/systeme/stockage", "Stockage et sauvegardes")))
+                          _local("/inspecteur/" + BACKUPS_PAGE, "Stockage et sauvegardes")))
     for c in report.checks:
         if c.state == health.OK or c.name in told:
             continue
-        own = c.name in DESTINATIONS  # sinon : la santé générale, qui dit lequel
+        # son constat seul quand sa page dit son sujet ; son nom devant quand il mène à la santé générale, ou à une
+        # page qui le montre sous un autre nom (le journal, sur Stockage et sauvegardes)
+        own = c.name in DESTINATIONS and c.name not in UNNAMED_BY_PAGE
         label = page_label(ui, DESTINATIONS.get(c.name, HEALTH))
         cards.append(Stat(label, "!", c.summary if own else f"{CHECKS.get(c.name, c.name)} : {c.summary}",
                           "danger" if c.state == health.KO else "warn", _local(check_href(c.name), label)))

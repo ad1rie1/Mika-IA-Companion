@@ -1,10 +1,11 @@
 /**
  * Carte : ce qui se calcule sans DOM ni réseau — l'ordre des arrêts d'un voyage et où un geste les met (un geste qui ne
- * change rien, ce qu'en dit un lecteur d'écran), ce dont son trajet dépend, le jour et la place d'un lieu croisé le
- * long du trajet, un itinéraire en GPX, les phrases qu'on prépare pour Mika, le contrôle qui garde la main d'un dessin à
- * l'autre, les icônes des catégories.
+ * change rien, ce qu'en dit un lecteur d'écran), une note changée, ce dont son trajet dépend, le jour et la place d'un
+ * lieu croisé le long du trajet, ce que la fenêtre d'un voyage envoie, tes choix d'itinéraire face à ceux d'un trajet
+ * de Mika, jusqu'où une recherche est allée, un itinéraire en GPX, les phrases qu'on prépare pour Mika, le contrôle qui
+ * garde la main d'un dessin à l'autre, les icônes des catégories.
  */
-import type { Place, Route, Trip, TripRoute, TripStop } from "../../api/carte";
+import { AVOIDS, MODES, type Place, type Route, type Trip, type TripRoute, type TripStop, type TripValues } from "../../api/carte";
 import { meters, validPoint } from "../../map/mapgeo";
 import { safeDecode, type LatLon } from "../../map/polyline";
 import type { IconName } from "../../shell/icons";
@@ -58,6 +59,11 @@ export function removedTrip(trip: Trip, stopId: string): Trip {
   const days = trip.days.map((d) => ({ ...d, stops: d.stops.filter((s) => s.id !== stopId) }));
   while (days.length > 1 && !days[days.length - 1].stops.length) days.pop();
   return { ...trip, days };
+}
+
+/** Le voyage avec cette note sur cet arrêt (vide : sans note), pour la montrer avant que le serveur le dise. */
+export function notedTrip(trip: Trip, stopId: string, note: string): Trip {
+  return { ...trip, days: trip.days.map((d) => ({ ...d, stops: d.stops.map((s) => (s.id === stopId ? { ...s, note } : s)) })) };
 }
 
 /** Un geste qui ne change rien (une poignée lâchée où elle était, un tremblement) : rien à envoyer. */
@@ -149,12 +155,105 @@ export function alongPlace(trip: Trip, route: TripRoute | null, along: number | 
   return [lastDay, -1];
 }
 
+// ── Les choix d'un itinéraire ────────────────────────────────────────
+
+/** Le mode d'un itinéraire et ce qu'il évite (en voiture seulement). */
+export interface RouteChoices {
+  mode: string;
+  avoid: string[];
+}
+
+/** Un geste de la personne : un mode, ou une case cochée ou décochée. */
+export type RouteChoice = { mode: string } | { avoid: string; on: boolean };
+
+/**
+ * Le mode et ce qu'évite le trajet montré : ceux du trajet de Mika qu'on ouvre (`regard`, tel qu'elle l'a gardé), sinon
+ * les tiens (`own`). Ce qu'un regard ne dit pas (un regard d'avant ne dit pas ce qu'il évitait), ce sont les tiens. Rien
+ * n'écrit `own` ici : son trajet se montre sans devenir ton choix (un trajet que tu commences reprend `own`).
+ */
+export function routeChoices(own: RouteChoices, regard: { mode?: string | null; avoid?: readonly string[] | null } | null): RouteChoices {
+  const mode = regard?.mode && (MODES as readonly string[]).includes(regard.mode) ? regard.mode : own.mode;
+  const said = regard?.avoid;
+  const avoid = Array.isArray(said) ? AVOIDS.filter((a) => said.includes(a)) : [...own.avoid];
+  return { mode, avoid };
+}
+
+/**
+ * Des choix après un geste (un mode, une case) : seul ce que le geste touche change. Il s'applique au trajet montré
+ * comme à tes choix — un clic sur une case du trajet de Mika ne fait pas tiennes les autres cases qu'il avait cochées.
+ */
+export function withChoice(choices: RouteChoices, choice: RouteChoice): RouteChoices {
+  if ("mode" in choice) {
+    return (MODES as readonly string[]).includes(choice.mode) ? { mode: choice.mode, avoid: [...choices.avoid] } : choices;
+  }
+  if (!(AVOIDS as readonly string[]).includes(choice.avoid)) return choices;
+  return { mode: choices.mode, avoid: AVOIDS.filter((a) => (a === choice.avoid ? choice.on : choices.avoid.includes(a))) };
+}
+
+// ── Ce que la fenêtre d'un voyage envoie ─────────────────────────────
+
+/** Ce que disent les fenêtres « Nouveau voyage » et « Le voyage » (`avoid` : les cases cochées, cachées ou non). */
+export interface TripForm {
+  title: string;
+  start: string;
+  mode: string;
+  avoid: readonly string[];
+}
+
+/** Ce qu'un trajet évite pour ce mode : en voiture, les cases cochées (dans l'ordre de l'API) ; à vélo, à pied, rien. */
+function avoidFor(mode: string, avoid: readonly string[]): string[] {
+  return mode === "voiture" ? AVOIDS.filter((a) => avoid.includes(a)) : [];
+}
+
+/** « Nouveau voyage » : son titre, sa date, son mode, et ce qu'il évite s'il se fait en voiture (sinon rien). */
+export function newTripValues(form: TripForm): TripValues & { title: string } {
+  return { title: form.title.trim(), start: form.start, mode: form.mode, ...(form.mode === "voiture" ? { avoid: avoidFor(form.mode, form.avoid) } : {}) };
+}
+
+/**
+ * « Le voyage » : ce qui a changé, seulement (un corps vide : rien à envoyer). Ce qu'il évite ne part qu'en voiture
+ * — les cases, cachées hors voiture, ne disent rien d'un voyage qui la quitte —, et seulement s'il a changé.
+ */
+export function tripChanges(trip: Pick<Trip, "title" | "start" | "mode" | "avoid">, form: TripForm): TripValues {
+  const values: TripValues = {};
+  const title = form.title.trim();
+  if (title !== trip.title) values.title = title;
+  if (form.start !== trip.start) values.start = form.start;
+  if (form.mode !== trip.mode) values.mode = form.mode;
+  if (form.mode === "voiture") {
+    const avoid = avoidFor(form.mode, form.avoid);
+    if (avoid.join(",") !== AVOIDS.filter((a) => trip.avoid.includes(a)).join(",")) values.avoid = avoid;
+  }
+  return values;
+}
+
+// ── Jusqu'où une recherche est allée ─────────────────────────────────
+
+/**
+ * Le rayon (en mètres) jusqu'où une recherche autour de toi se dit « autour de ta position » : le deuxième cercle où
+ * l'index cherche un texte (`TEXT_RADII_KM`, `backendv2/src/mika/adapters/maps/places.py`). Au-delà, il s'est élargi.
+ */
+export const NEARBY_M = 20_000;
+
+/**
+ * Ce que la légende dit de la portée d'une recherche, depuis ses lieux reçus (`distance_m`). Autour de toi, l'index
+ * élargit ses cercles jusqu'à trouver, puis cherche partout : tant que le plus loin est à `NEARBY_M` au plus, c'est
+ * « autour de ta position » ; sinon, ce sont les plus proches qu'il connaisse, jusqu'où ils vont. Le classement mêle
+ * pertinence et distance : la phrase ne promet pas un ordre par distance. Une zone ne s'élargit pas : « dans cette
+ * zone ». `near` : la recherche est partie de ta position (inconnue, elle cherche dans la zone de la carte).
+ */
+export function searchReach(near: boolean, places: readonly Pick<Place, "distance_m">[]): string {
+  if (!near) return "dans cette zone";
+  const far = Math.max(0, ...places.map((p) => (typeof p.distance_m === "number" && Number.isFinite(p.distance_m) ? p.distance_m : 0)));
+  return far <= NEARBY_M ? "autour de ta position" : `les plus proches que l'index connaisse · jusqu'à ${km(far)}`;
+}
+
 // ── La main d'un dessin à l'autre ────────────────────────────────────
 
 /** Les attributs qui désignent un contrôle de l'écran d'un dessin à l'autre, du plus sûr au moins sûr. */
 const FOCUS_KEYS = ["q", "pt", "cat", "where", "lieu", "mode", "avoid", "itiAdd", "itiSwap", "itiRemove", "itiCompute", "itiTrip",
-  "itiGpx", "itiAsk", "pick", "goRoute", "addTrip", "askPlace", "grip", "retirer", "addStop", "onroute", "addAlong", "editTrip",
-  "newTrip", "retry"] as const;
+  "itiGpx", "itiAsk", "pick", "goRoute", "addTrip", "askPlace", "grip", "noteInput", "noteSave", "noteCancel", "noteStop", "retirer",
+  "addStop", "onroute", "addAlong", "editTrip", "newTrip", "retry"] as const;
 
 /**
  * Le sélecteur qui retrouve, après un dessin, le contrôle qui avait la main (ses `data-*`, tels que `dataset` les

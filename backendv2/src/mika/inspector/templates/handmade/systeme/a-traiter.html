@@ -1,5 +1,8 @@
 {# Système › File de sortie : ce qui est à traiter (pages/system.py), dans le vocabulaire des pages dessinées (ADR 0121) —
-   chaque effet qui n'a pas pu partir, son erreur, ce qu'il faut vérifier ; le relancer, le marquer comme vu. #}
+   chaque effet qui n'a pas pu partir, ce qu'il faisait partir et à qui (``departures``), son erreur, ce qu'il faut
+   faire pour sa sorte ; le relancer, le marquer comme vu. Le panneau du repli : la page dessinée (sorties.html) dit la
+   même chose, lue dans le tableau « À traiter » de la vue, qui calcule une seule fois ces lignes pour les deux
+   (ADR 0177). #}
 {% from "_navigation.html" import pager %}
 {% from "handmade/systeme/macros.html" import outbox_item %}
 {% if problems %}

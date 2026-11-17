@@ -1,6 +1,7 @@
 """Connexions extérieures › Réveils par API dans sa forme (``app/handmade/tabs/wakeups.py``, ADR 0177), à travers le
 vrai serveur : « Déclarer un réveil » dans la barre de titre ; ses réveils en tuiles (un réveil sans clé le dit, en
-avant) ; ses appels en fil, ce qu'ils apportaient et pourquoi ils attendent ; et ce que la page dit, vide."""
+avant) ; ses appels en fil, ce qu'ils apportaient et pourquoi ils attendent ; ce que la page dit, vide ; son
+introduction dite une fois ; et pas de champ « nom exact » : ``?reveil=`` filtre encore, sous son titre."""
 
 from __future__ import annotations
 
@@ -39,3 +40,14 @@ def test_wakeups_are_tiles_then_their_calls_with_what_they_brought(world):  # no
     # pourquoi il attend en clair, le reste replié — la nuit son réveil, le jour d'être choisi : à toute heure
     assert ("Il attend :" in call or "Il peut partir" in call) and "Le détail" in call
     assert page.index('id="wk-endpoints-title"') < page.index('id="wk-calls-title"')
+    # son détail replié compte ses essais accordés, sans « (s) »
+    assert "0 panne, 0 départ" in call and "(s)" not in call
+    # l'introduction dit l'adresse une fois (l'encart ne la redit pas) et ne renvoie pas à Paramètres : « Déclarer un
+    # réveil » est dans la barre de titre, la roue la ferme
+    assert page.count("POST /api/wake/") == 1 and "se règlent dans Paramètres" not in page
+    # pas de champ « nom exact » suivi de « Filtrer » : la tuile d'un réveil mène à sa fiche, qui a tous ses appels
+    assert '<form class="filters"' not in page and "nom exact" not in page
+    one = drawn(client, "/inspecteur/reveils?reveil=serre")  # l'adresse garde son titre et son filtre
+    assert "Les appels de « serre »" in one and "Il fait 41 °C dans la serre." in one
+    assert '<form class="filters"' not in one
+    assert "Il fait 41 °C" not in drawn(client, "/inspecteur/reveils?reveil=cave")

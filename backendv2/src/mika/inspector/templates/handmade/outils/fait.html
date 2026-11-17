@@ -2,7 +2,9 @@
    bas, comme les règles d'un pare-feu — qui, quand, ce qu'elle fait d'un outil qui lit et d'un outil qui agit, ce
    qu'elle en garde, à quels outils —, puis le comportement par défaut, obligatoire. Pour un outil, la première ligne qui
    le concerne décide. Le formulaire est celui de l'action ``mcp.acces`` : chaque bouton (ajouter, monter, descendre,
-   retirer, enregistrer) envoie tout le tableau, rien de ce qu'on a changé ne se perd. #}
+   retirer, enregistrer) envoie tout le tableau, rien de ce qu'on a changé ne se perd. Ses colonnes et ses choix sont ceux
+   des tableaux des familles (``vocab.access``, ADR 0134 : « Un outil qui lit », « Seule — sans demander »,
+   « Public — un savoir »…). #}
 {% from "_navigation.html" import pager as pages %}
 {% macro plumbing(f) -%}
 <input type="hidden" name="csrf" value="{{ f.csrf }}"><input type="hidden" name="_op" value="{{ f.nonce }}">
@@ -38,8 +40,8 @@
           <thead>
             <tr>
               <th scope="col" class="access-n">#</th><th scope="col">Qui</th><th scope="col">Par où</th><th scope="col">Quand</th>
-              <th scope="col">Politique de lecture</th><th scope="col">Politique d'action</th>
-              <th scope="col">Politique de mémorisation</th><th scope="col">Outils</th>
+              <th scope="col">Un outil qui lit</th><th scope="col">Un outil qui agit</th>
+              <th scope="col">Ce qu'elle en garde</th><th scope="col">Outils</th>
               {% if not locked %}<th scope="col"><span class="service-hidden">Ordre</span></th>{% endif %}
             </tr>
           </thead>
@@ -75,9 +77,9 @@
                   </div>
                 </details>
               </td>
-              <td>{{ pick("lecture." ~ r.n, policies, r.read, "Politique de lecture, ligne " ~ r.n, locked) }}</td>
-              <td>{{ pick("action." ~ r.n, policies, r.act, "Politique d'action, ligne " ~ r.n, locked) }}</td>
-              <td>{{ pick("garde." ~ r.n, keeps, r.keep, "Politique de mémorisation, ligne " ~ r.n, locked) }}</td>
+              <td>{{ pick("lecture." ~ r.n, policies, r.read, "Un outil qui lit, ligne " ~ r.n, locked) }}</td>
+              <td>{{ pick("action." ~ r.n, policies, r.act, "Un outil qui agit, ligne " ~ r.n, locked) }}</td>
+              <td>{{ pick("garde." ~ r.n, keeps, r.keep, "Ce qu'elle en garde, ligne " ~ r.n, locked) }}</td>
               <td>
                 <details class="access-tools" data-exclusive data-all="Tous" data-none="Aucun outil">
                   <summary>{% if r.all %}Tous{% else %}{% for t in r.tools if t.on %}<code class="access-chip">{{ t.name }}</code>{% else %}Aucun outil{% endfor %}{% endif %}</summary>
@@ -101,9 +103,9 @@
             <tr class="access-default">
               <td class="access-n"></td>
               <th scope="row" colspan="3">Comportement par défaut<span>obligatoire : vaut quand aucune ligne au-dessus ne correspond</span></th>
-              <td>{{ pick("defaut_lecture", policies, default.read, "Par défaut, politique de lecture", locked) }}</td>
-              <td>{{ pick("defaut_action", policies, default.act, "Par défaut, politique d'action", locked) }}</td>
-              <td>{{ pick("defaut_garde", keeps, default.keep, "Par défaut, politique de mémorisation", locked) }}</td>
+              <td>{{ pick("defaut_lecture", policies, default.read, "Par défaut, un outil qui lit", locked) }}</td>
+              <td>{{ pick("defaut_action", policies, default.act, "Par défaut, un outil qui agit", locked) }}</td>
+              <td>{{ pick("defaut_garde", keeps, default.keep, "Par défaut, ce qu'elle en garde", locked) }}</td>
               <td class="access-all">Tous</td>
               {% if not locked %}<td></td>{% endif %}
             </tr>
@@ -121,12 +123,12 @@
     <h2 id="access-legend" class="service-hidden">Ce que veulent dire les colonnes</h2>
     <dl>
       <div><dt>Qui</dt><dd>Une ou plusieurs sources : <b>Toi</b> : en tête-à-tête. <b>Elle, quand elle travaille seule</b> : pour toi. <b>Tes proches</b> : un lien « proche », en privé, reconnu seulement connecté (un long silence le fait descendre). <b>Tout le monde</b> : toute personne connectée, en tête-à-tête (pas elle quand elle travaille). <b>Une personne</b>, par son nom : reconnue seulement connectée. Un outil, jamais dans un salon ni avec une inconnue, même pour « tout le monde ».</dd></div>
-      <div><dt>Lecture, action</dt><dd>Un outil qui lit prend la politique de lecture, un outil qui agit (créer, envoyer, exécuter, supprimer) celle d'action — c'est réglé outil par outil dans <a href="{{ tools_tab }}">« Ses outils »</a>.</dd></div>
-      <div><dt>Seule</dt><dd>Elle s'en sert sans demander : l'appel part aussitôt.</dd></div>
-      <div><dt>Demande à la personne</dt><dd>Une carte dans le chat de la personne en face ; quand elle travaille seule, la demande t'attend dans la console.</dd></div>
-      <div><dt>Ton accord</dt><dd>Une carte dans ton chat quand c'est toi en face ; sinon la demande t'attend dans la console (« À valider »).</dd></div>
+      <div><dt>Un outil qui lit, un outil qui agit</dt><dd>Chaque outil prend la colonne de sa nature : il lit, ou il agit (créer, envoyer, exécuter, supprimer) — c'est réglé outil par outil dans <a href="{{ tools_tab }}">« Ses outils »</a>.</dd></div>
+      <div><dt>Seule — sans demander</dt><dd>Elle s'en sert sans demander : l'appel part aussitôt.</dd></div>
+      <div><dt>Demande à la personne en face</dt><dd>Une carte dans le chat de la personne en face ; quand elle travaille seule, la demande t'attend dans la console.</dd></div>
+      <div><dt>Demande ton accord</dt><dd>Une carte dans ton chat quand c'est toi en face ; sinon la demande t'attend dans la console (« À valider »).</dd></div>
       <div><dt>Non</dt><dd>L'outil ne lui est pas offert.</dd></div>
-      <div><dt>Mémorisation</dt><dd><b>Ce qu'elle sait</b> : peut devenir un savoir et se raconter · <b>un souvenir</b> : comme ce qu'on lui raconte · <b>une confidence</b> : elle en reparle avec la personne, jamais à quelqu'un d'autre · <b>rien</b> : elle s'en sert sur le moment, puis l'oublie.</dd></div>
+      <div><dt>Ce qu'elle en garde</dt><dd><b>Public — un savoir</b> : peut se raconter · <b>Personnel — un souvenir</b> : comme ce qu'on lui raconte · <b>Privé — une confidence</b> : elle en reparle avec la personne, jamais à quelqu'un d'autre · <b>Rien</b> : elle s'en sert sur le moment, puis l'oublie.</dd></div>
     </dl>
   </section>
 </div>

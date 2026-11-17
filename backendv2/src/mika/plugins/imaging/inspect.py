@@ -19,6 +19,7 @@ from mika.kernel.inspect import (
     Table,
     Text,
     When,
+    money_fr,
     paginate,
 )
 from mika.plugins.imaging.faculty import IMAGING, ImagingState, params_of
@@ -46,7 +47,7 @@ def _inspect(s: ImagingState, frame: Frame, ctx: InspectContext) -> list[Block]:
                                                       tone="warn" if count[c.READY] else ""),
         Stat("Montrés", str(count[c.SHOWN]), tone="ok"),
         Stat("Ratés", str(count[c.MISSED] + count[c.TOLD]), tone="danger" if count[c.MISSED] else ""),
-        Stat("Coût", f"{sum(j.cost_usd for j in jobs):.2f} $", sub="les dessins gardés en mémoire")),
+        Stat("Coût", money_fr(sum(j.cost_usd for j in jobs)), sub="les dessins gardés en mémoire")),
         title=f"Ses dessins (qualité par défaut : {QUALITY_FR.get(p.default_quality, p.default_quality)})"))
     page, pager = paginate(jobs, ctx.pager("page", size=PAGE))
     texts = ctx.store.content([r for j in page for r in (j.prompt_ref, j.caption_ref, j.reason_ref) if r])

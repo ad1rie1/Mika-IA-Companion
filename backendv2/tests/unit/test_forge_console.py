@@ -905,6 +905,7 @@ def test_she_reads_and_writes_the_base_of_her_app_and_the_console_only_reads_it(
     tables = of(got["onglet"], Table)
     assert tables[0].title == "Ses tables" and {r[0].text for r in tables[0].rows} == {"_kv", "notes"}
     assert [r for t in of(got["lecture"], Table) for r in t.rows if r == ("lait",)]
+    assert of(got["lecture"], Table)[-1].title == "1 ligne"  # le résultat de la requête, accordé : pas « ligne(s) »
     assert any("lecture" in n.text for n in of(got["écriture"], Note)) and got["après"] == [{"n": 1}]
 
 

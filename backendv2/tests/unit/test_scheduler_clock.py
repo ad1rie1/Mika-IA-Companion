@@ -18,7 +18,7 @@ from mika.kernel.builtin import KernelParams
 from mika.kernel.clock import HOUR, MINUTE, instant, local, local_date_of_night, next_local
 from mika.kernel.events import Origin, Payload
 from mika.kernel.faculty import CatchUp, Faculty
-from mika.runtime.scheduler import IDLE_GUARD_US
+from mika.runtime.scheduler import IDLE_GUARD_US, STORM_RUNS, US
 from mika.sim.clock import SimClock, run_virtual
 from tests.fixtures.harness import build, events_of
 
@@ -295,6 +295,96 @@ def test_a_deadline_skipped_again_and_again_does_not_spin_the_loop(tmp_path):
     toujours d'un peu entre deux passes)."""
     process, _ = _kept(tmp_path, DRIFTING, "recule", 1)
     assert process.asked < 10
+
+
+def test_retry_now_clears_the_back_off_and_wakes_the_loop(tmp_path):
+    """« Réessayer maintenant » (ADR 0234) : ``retry_now`` efface le recul d'un processus en échec et réveille la
+    boucle — il repasse tout de suite, sans attendre la fin de ses 5 s de recul. Il refuse, sans rien toucher, un nom
+    inconnu, un processus qui n'est pas en échec (retenu pour une rafale, il ne se force pas) et un processus en cours."""
+    kernel, clock, _ = build(tmp_path, [STUMBLING, WAITING])
+    sched = kernel.scheduler
+
+    async def main():
+        await kernel.start()
+        await asyncio.sleep(1)
+        process = sched.instances["trebuche"]
+        before = (len(process.runs), sched.not_before.get("trebuche"), clock.now())
+        refused = [sched.retry_now("inconnu"), sched.retry_now("attend")]
+        sched._running["trebuche"] = asyncio.current_task()  # en cours : retiré aussitôt, sans rien attendre
+        refused.append(sched.retry_now("trebuche"))
+        del sched._running["trebuche"]
+        kept = sched.not_before.get("trebuche")
+        accepted = sched.retry_now("trebuche")
+        cleared = "trebuche" not in sched.not_before
+        await asyncio.sleep(0.5)
+        after = (len(process.runs), clock.now())
+        await kernel.stop()
+        return before, refused, kept, accepted, cleared, after
+
+    (runs, floor, now), refused, kept, accepted, cleared, (again, later) = run_virtual(clock, main)
+    assert runs == 1 and floor is not None and floor > later > now  # le recul courait encore
+    assert refused == [False, False, False] and kept == floor
+    assert accepted and cleared
+    assert again == 2  # repassé avant la fin de son recul : la boucle a été réveillée
+
+
+STORMY = Faculty("stormy", state=Nothing, init=lambda p: Nothing())
+SPUN = STORMY.event("spun", Called)
+
+
+@STORMY.process("tourbillon", wake_on=[])
+class Storms:
+    """Se croit dû sur-le-champ et écrit à chaque passage (la garde des passages à vide ne le retient pas) ; à partir
+    de son ``STORM_RUNS``-ième passage, il échoue : une rafale tombe sur un processus en échec."""
+
+    def __init__(self) -> None:
+        self.runs: list[int] = []
+
+    def next_due(self, state, frame, last_run):
+        return frame.now if len(self.runs) < STORM_RUNS + 3 else None
+
+    async def run(self, ctx):
+        self.runs.append(ctx.now)
+        if len(self.runs) >= STORM_RUNS:
+            raise RuntimeError("port indisponible")
+        await ctx.emit(SPUN.draft(n=len(self.runs)))
+
+
+def test_retry_now_never_lifts_a_storm_hold_even_on_a_failing_process(tmp_path):
+    """119 passages réussis en un instant, puis un échec (recul de 5 s) ; à la fin du recul, le 121ᵉ départ fait une
+    rafale, qui le retient une minute sans remettre ses échecs à zéro. ``retry_now`` le refuse alors sans rien toucher :
+    la retenue d'une rafale ne se force pas. Avant, il effaçait ``not_before`` — la retenue avec le recul — et le
+    processus repartait aussitôt. Une fois la retenue finie, il se réessaie comme un autre."""
+    kernel, clock, _ = build(tmp_path, [STORMY])
+    sched = kernel.scheduler
+
+    async def main():
+        await kernel.start()
+        await asyncio.sleep(1)
+        process = sched.instances["tourbillon"]
+        failed = (len(process.runs), sched.consecutive.get("tourbillon"), sched.storms.get("tourbillon"))
+        await asyncio.sleep(6)  # la fin du recul : la rafale
+        held = (sched.storms.get("tourbillon"), sched.consecutive.get("tourbillon"), sched.held("tourbillon"))
+        floor = sched.not_before.get("tourbillon")
+        refused = sched.retry_now("tourbillon")
+        kept = (sched.not_before.get("tourbillon"), floor == sched.held_until.get("tourbillon"))
+        await asyncio.sleep(1)
+        during = len(process.runs)
+        await asyncio.sleep(floor / US - clock.now() / US + 1)  # la retenue finie : il repasse, et échoue encore
+        after = (len(process.runs), sched.held("tourbillon"))
+        accepted = sched.retry_now("tourbillon")
+        await asyncio.sleep(0.5)
+        again = len(process.runs)
+        await kernel.stop()
+        return failed, held, floor, refused, kept, during, after, accepted, again
+
+    failed, held, floor, refused, kept, during, after, accepted, again = run_virtual(clock, main)
+    assert failed == (STORM_RUNS, 1, None)
+    assert held == (1, 1, True) and floor is not None
+    assert refused is False and kept == (floor, True)
+    assert during == STORM_RUNS  # rien n'a tourné pendant la retenue
+    assert after == (STORM_RUNS + 1, False)
+    assert accepted and again == STORM_RUNS + 2
 
 
 # ── Chaque processus à son quantum (ADR 0223) ────────────────────────────

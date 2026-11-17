@@ -2,9 +2,9 @@
 
 Une adresse devient le nom de la personne qui parle derrière (« Adrien »),
 une sorte d'épisode un mot (« réponse »), un rôle, un processus, une voie, un
-type d'événement, son origine et ses champs de contenu, une raison de
-l'arbitre, un veto, une section du prompt, un enrichisseur : une phrase
-française. Les clés techniques (``user_1``, ``memory.consolidate``,
+type d'événement, son origine et ses champs de contenu, un effet de la file de sortie, une raison de
+l'arbitre, un veto, une section du prompt, un enrichisseur, un port qu'un outil
+attend : une phrase française. Les clés techniques (``user_1``, ``memory.consolidate``,
 ``woken_at_night``) ne paraissent que dans le détail ou au survol.
 
 Ce que déclarent les facultés est nommé par la composition (``Labels``,
@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Sequence
-from typing import Any
+from typing import Any, NamedTuple
 
 from mika.adapters.llm.config import ROLE_LABELS
 from mika.contracts import identity as identity_c
@@ -52,7 +52,7 @@ EVENTS: dict[str, str] = {
     "perception.received": "Message ou signal reçu", "episode.started": "Début d'épisode",
     "episode.utterance": "Parole", "episode.ended": "Fin d'épisode", "effect.proposed": "Demande pour sortir",
     "effect.resolved": "Décision d'un opérateur", "effect.executed": "Effet exécuté",
-    "runtime.operated": "Action d'opérateur", "runtime.process_failed": "Échec d'un processus",
+    "runtime.operated": "Geste audité", "runtime.process_failed": "Échec d'un processus",
 }
 #: d'où vient un événement du journal (``kernel.events.Origin``) ; d'où vient un geste d'opérateur se dit à part
 #: (``ORIGINS``)
@@ -76,9 +76,22 @@ CONTENT_FIELDS: dict[str, str] = {
     "comment": "le commentaire", "sender_name": "le nom de l'expéditeur", "body": "le message",
     "query": "la recherche", "found": "ce qui a été trouvé", "places": "les lieux", "line": "le tracé",
 }
+#: la famille d'un effet de la file de sortie sans libellé (``Labels.effects``) : Système › File de sortie le range avec
+#: le reste
+OTHER_EFFECTS = "autre"
+
+
+class EffectWords(NamedTuple):
+    """Un effet de la file de sortie en mots (``Names.effect``) : sa famille, son nom, ce que c'est."""
+
+    family: str
+    name: str
+    what: str
+
+
 #: les processus du noyau, sans faculté (ceux des facultés : ``Labels.processes``)
 PROCESSES: dict[str, str] = {"arbitre": "Décider d'agir (l'arbitre)", "séries": "Relever les courbes de sa journée"}
-#: issues d'une action d'opérateur
+#: issues d'un geste audité (``runtime.operated``)
 OPERATED: dict[str, tuple[str, str]] = {"done": ("faite", "ok"), "refused": ("refusée", "warn"),
                                         "superseded": ("la situation avait changé", "warn"),
                                         "failed": ("échouée", "danger")}
@@ -101,6 +114,7 @@ GESTURES: dict[str, str] = {
     "console.mcp.pret.declarer": "Point de prêt déclaré", "console.mcp.pret.regler": "Point de prêt réglé",
     "console.mcp.pret.jeton": "Jeton d'un point de prêt renouvelé", "console.mcp.pret.retirer": "Point de prêt retiré",
     "console.sorties.relancer": "Effet relancé", "console.sorties.vu": "Effet marqué comme vu",
+    "console.systeme.reconstruire": "Tranche reconstruite", "console.systeme.reessayer": "Processus relancé",
     "console.rejouer": "Rejoué avec un autre modèle",
     "moi.nom": "Nom changé", "moi.mot_de_passe": "Mot de passe changé",
     "moi.boite": "Boîte branchée ou réglée", "moi.boite_retiree": "Boîte retirée",
@@ -161,6 +175,12 @@ def _role_word(key: str) -> str:
 def humanize(key: str) -> str:
     """``mail_draft`` → « mail draft » : la forme générique d'une clé sans libellé."""
     return key.replace("_", " ").replace(".", " · ").strip() or key
+
+
+def unready(port: str) -> str:
+    """Pourquoi un outil n'est pas offert quand le port qu'il attend n'est pas prêt, pour un port sans libellé
+    (``Labels.needs``) : « « imaging » n'est pas configuré »."""
+    return f"« {port} » n'est pas configuré"
 
 
 class Names:
@@ -285,6 +305,12 @@ class Names:
         spec = next((s for s in getattr(self.kernel.registry, "enrichers", ()) if s.key == key), None)
         return f"{self.faculty(spec.owner)} · {humanize(key)}" if spec is not None else humanize(key)
 
+    def need(self, port: str) -> tuple[str, str]:
+        """Un port qu'un outil attend (``ToolSpec.needs``) et qui n'est pas prêt : (pourquoi l'outil n'est pas offert,
+        « aucun fournisseur d'images n'est configuré » ; la clé de la page de réglages où il se règle). Sans libellé,
+        « « imaging » n'est pas configuré » et aucune page."""
+        return self.labels.needs.get(port) or (unready(port), "")
+
     def reason(self, owner: str, code: str) -> str:
         """Une raison de l'arbitre (une preuve) : ce qui pousse à agir."""
         return self.labels.reasons.get(code) or f"{self.faculty(owner)} · {humanize(code)}"
@@ -308,6 +334,15 @@ class Names:
             return self.labels.events[type_name]
         owner, _, rest = type_name.partition(".")
         return f"{self.faculty(owner)} · {humanize(rest or type_name)}"
+
+    def effect(self, key: str) -> EffectWords:
+        """Un effet de la file de sortie (« expression:episode.utterance » : qui le fait partir, et le type de
+        l'événement) en mots, que la composition lui donne : sa famille, son nom (« Ses messages »), ce que c'est.
+        Sans libellé, le nom de son type (``event``), rangé avec le reste, sa clé pour ce que c'est."""
+        if key in self.labels.effects:
+            return EffectWords(*self.labels.effects[key])
+        owner, _, type_name = key.partition(":")
+        return EffectWords(OTHER_EFFECTS, self.event(type_name or owner), key)
 
     def action(self, key: str) -> str:
         """Le titre d'un geste audité (``runtime.operated``) : celui de l'action déclarée qu'il a faite (« projects.creer »,

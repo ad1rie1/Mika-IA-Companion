@@ -1,8 +1,7 @@
 /**
  * Téléphone, par l'API par personne (`backendv2/docs/protocole-moi.md` § 5) : ce que l'application du téléphone a lu
  * dans ses notifications, rangé par conversation, les réponses que Mika y a proposées, sa dernière position, et ses
- * téléphones (les jetons `mobile` de son compte), qu'elle révoque elle-même (ADR 0190). Et le fond de carte, que
- * toutes les cartes lisent, servi avec la carte (§ 10).
+ * téléphones (les jetons `mobile` de son compte), qu'elle révoque elle-même (ADR 0190).
  */
 import { apiUrl, getJson, MOI, sendJson, type Done } from "./moi";
 
@@ -44,8 +43,11 @@ export interface PhoneConversation {
   count: number;
   last_at: number;
   last: PhoneMessage;
-  /** Une réponse de Mika en chemin. */
-  her: { state: string; id: number } | null;
+  /**
+   * Sa réponse en chemin, sinon sa dernière si elle suit le dernier message reçu (une réponse à un message d'avant
+   * n'est plus une nouvelle) ; `decided_at` : quand son sort s'est réglé, 0 tant qu'elle est en chemin.
+   */
+  her: { state: OfferState | string; id: number; decided_at: number } | null;
 }
 
 export interface PhoneThread {
@@ -95,33 +97,6 @@ export function fetchThread(conversation: string, size = 100): Promise<PhoneThre
 
 export function fetchPosition(): Promise<PhonePosition> {
   return getJson(`${MOI}/phone/position`);
-}
-
-/**
- * Le fond de carte (ADR 0193), celui de toutes les cartes, servi par le serveur seul : ses tuiles, ses polices et ses
- * icônes sont des chemins de l'API (jamais une adresse du dehors, qui dirait où tu es). `ready` faux : le plan
- * dessiné, `reason` dit pourquoi.
- */
-export interface MapInfo {
-  ready: boolean;
-  reason: string;
-  kind?: "vecteur" | "image";
-  minzoom?: number;
-  maxzoom?: number;
-  /** Ouest, sud, est, nord ; `null` : partout. */
-  bounds?: [number, number, number, number] | null;
-  attribution?: string;
-  /** `…/tiles/{z}/{x}/{y}` */
-  tiles?: string;
-  /** `…/fonts/{fontstack}/{range}.pbf` ; `null` : pas de polices (une carte sans noms). */
-  glyphs?: string | null;
-  /** `…/sprites/v4` (la planche suit : `/light`, `/dark`) ; `null` : pas d'icônes. */
-  sprite?: string | null;
-}
-
-/** Servi avec la carte (ADR 0229), et non sous le téléphone : les autres adresses viennent de sa réponse. */
-export function fetchMap(): Promise<MapInfo> {
-  return getJson(`${MOI}/carte/fond`);
 }
 
 export function fetchPhones(): Promise<Phones> {

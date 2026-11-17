@@ -109,6 +109,9 @@ _SQLITE_SIDECARS = ("-wal", "-shm", "-journal")
 ARCHIVE_PREFIX = "mika-"
 #: ce que la console lit des sauvegardes : la dernière, la dernière vérification (dans le dossier de données)
 RECORD = "sauvegardes.json"
+#: l'unité systemd qui sauvegarde en service (``deploy/mika-backup.service``) et où ``deploy/README.md`` l'installe
+BACKUP_UNIT = "mika-backup.service"
+UNIT_DIRS: tuple[Path, ...] = (Path("/etc/systemd/system"),)
 
 
 class BackupError(RuntimeError):
@@ -465,9 +468,11 @@ def note(data: Path, kind: str, fields: dict[str, Any]) -> None:
 
 def overview(data: Path) -> dict[str, Any]:
     """Pour la console : la dernière sauvegarde, la dernière vérification, et les archives présentes
-    dans le dossier de la dernière sauvegarde (nom, octets, date) ; ``place`` : de quoi mesurer ce que porte le dossier
-    de données (``place``), appelé par la seule page Stockage et sauvegardes — un parcours du dossier, jamais pour
-    l'accueil."""
+    dans le dossier de la dernière sauvegarde (nom, octets, date) ; ``donnees`` : le dossier de données, en chemin
+    absolu, et ``unite`` : l'unité de sauvegarde installée pour lui (``backup_unit``, vide sinon), qui donnent à la page
+    Stockage et sauvegardes ses commandes telles qu'on les tape (audit du 2026-11-05, C8-04) ; ``place`` : de quoi
+    mesurer ce que porte le dossier de données (``place``), appelé par la seule page Stockage et sauvegardes — un
+    parcours du dossier, jamais pour l'accueil."""
     got = recorded(data)
     folder = Path(str((got.get("sauvegarde") or {}).get("dossier") or ""))
     archives: list[dict[str, Any]] = []
@@ -478,7 +483,24 @@ def overview(data: Path) -> dict[str, Any]:
             except OSError:
                 continue
             archives.append({"nom": f.name, "octets": st.st_size, "at": int(st.st_mtime * 1_000_000)})
-    return {**got, "archives": archives, "place": lambda: place(data)}
+    return {**got, "archives": archives, "donnees": str(Path(data).resolve()), "unite": backup_unit(data),
+            "place": lambda: place(data)}
+
+
+def backup_unit(data: Path) -> str:
+    """Le nom de l'unité de sauvegarde (``BACKUP_UNIT``) quand elle est installée (``UNIT_DIRS``) pour ce dossier de
+    données — son ``--data`` est lui : une unité qui sauvegarde un autre dossier ne compte pas ; vide sinon (un poste de
+    travail, une unité illisible). Son fichier seul, sans ce qu'un ``systemctl edit`` y ajouterait."""
+    here = Path(data).resolve()
+    for folder in UNIT_DIRS:
+        try:
+            text = (folder / BACKUP_UNIT).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        said = re.search(r"^ExecStart=.*?\s--data[=\s]+(\S+)", text, re.M)
+        if said is not None and Path(said[1]).resolve() == here:
+            return BACKUP_UNIT
+    return ""
 
 
 #: ce que garde chaque base et chaque dossier connu du dossier de données, en mots (Système › Stockage et

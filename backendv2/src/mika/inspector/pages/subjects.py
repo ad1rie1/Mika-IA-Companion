@@ -17,7 +17,20 @@ from mika.inspector.catalog import Builtin, Panel
 from mika.inspector.framed import FRAME_CSP, FRAME_CSP_REMOTE, framed_html
 from mika.inspector.pages import settings_directory
 from mika.inspector.ui import PREFIX, Forms, secure, wants_table
-from mika.kernel.inspect import Download, Head, Note, Pager, Ref, Row, Section, Table, Text, is_page_param
+from mika.kernel.inspect import (
+    Download,
+    Head,
+    Note,
+    Pager,
+    Ref,
+    Row,
+    Section,
+    Table,
+    Text,
+    agree,
+    is_page_param,
+    plural,
+)
 from mika.kernel.text import fold
 from mika.runtime import operations
 from mika.runtime.boundary import Failed, call
@@ -405,7 +418,8 @@ class Subjects:
         # le même oubli que la ligne de commande : la clé et ses alias (ses adresses, ses noms)
         gone = await operations.forget_subject(self.ui.kernel, kind, key, by=account.handle,
                                                action=f"console.oublier.{kind}")
-        self.ui.flash(f"oubli-{key}", "ok", f"« {shown} » est oublié·e ({gone.total} contenu(s) effacé(s)).")
+        self.ui.flash(f"oubli-{key}", "ok", f"« {shown} » est oublié·e ({plural(gone.total, 'contenu', 'contenus')} "
+                                            f"{agree(gone.total, 'effacé', 'effacés')}).")
         return secure(RedirectResponse(f"{PREFIX}/?flash={quote('oubli-' + key, safe='')}", status_code=303))
 
     async def download(self, request: Request) -> Response:

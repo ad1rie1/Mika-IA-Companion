@@ -216,10 +216,15 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         return []
 
     def mcp_facts() -> list[tuple[str, Any]]:
+        """Les serveurs réglés ici, puis ceux qu'un plugin système apporte (ADR 0066) : ils ne se règlent pas sur
+        cette page, mais ils sont là — leur fiche dit où se règlent leurs bornes."""
         servers = settings.mcp().servers
         ready = sum(1 for x in servers.values() if x.enabled and x.ready)
-        return [("Serveurs", f"{len(servers)} ({plural(ready, 'actif et prêt', 'actifs et prêts')})"
+        system = [st.name for st in (live.mcp.statuses() if live.mcp is not None else ()) if st.plugin]
+        return [("Réglés ici", f"{len(servers)} ({plural(ready, 'actif et prêt', 'actifs et prêts')})"
                  if servers else "aucun"),
+                *(("Du système", Ref("local", subject_url("serveur", name), f"{name}, réglé par son plugin"))
+                  for name in system),
                 ("État, outils et qui peut quoi", Ref("local", f"{PREFIX}/outils/serveurs",
                                                       "Outils › Venus d'ailleurs"))]
 
@@ -370,8 +375,9 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                         # — ici, la connexion seulement
                         exclude=tuple(f"servers.{k}" for k in ("access", "default_read", "default_act",
                                                                "default_keep")),
-                        # dans Ses outils, en haut à droite, à côté de Venus d'ailleurs (ADR 0206)
-                        pages=(SettingsPage("serveurs-mcp", "Paramètres des services", ("servers",), description=(
+                        # dans Ses outils, en haut à droite, à côté de Venus d'ailleurs (ADR 0206) ; « Paramètres »,
+                        # comme la roue à une page de Courrier, Teams et Réveils (audit du 2026-11-05, C6-Q3)
+                        pages=(SettingsPage("serveurs-mcp", "Paramètres", ("servers",), description=(
                             "Chaque service branché (un serveur MCP) a sa page : à quoi il sert, pour elle — la ligne "
                             "de son catalogue —, puis "
                             "où le joindre (une adresse, ou une commande lancée ici, isolée) et ses bornes. Qui peut "

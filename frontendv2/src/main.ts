@@ -85,11 +85,14 @@ function startApp(state: AuthState, loginRoot: HTMLElement, appRoot: HTMLElement
   const chat = new ChatScreen(shell, store, account);
   shell.register(chat.screen());
   // dans l'ordre de la barre du haut, celui de la maquette
-  for (const make of [outilsScreen, mailScreen, teamsScreen, telephoneScreen]) {
+  for (const make of [outilsScreen, mailScreen, teamsScreen]) {
     shell.register(make(shell));
   }
-  // la carte : « Demander à Mika » ouvre le chat avec une phrase préremplie
-  shell.register(carteScreen(shell, { ask: (text) => chat.prefill(text) }));
+  // le téléphone et la carte : « Lui en parler dans le chat », « Demander à Mika » ouvrent le chat avec une phrase
+  // préremplie
+  const ask = (text: string) => chat.prefill(text);
+  shell.register(telephoneScreen(shell, { ask }));
+  shell.register(carteScreen(shell, { ask }));
   shell.register(parametresScreen(shell));
   shell.start();
   // les pastilles, et le nom du compte relu avec elles : renommé ailleurs (un autre appareil, la console), le menu suit

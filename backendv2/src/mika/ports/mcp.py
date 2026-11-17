@@ -14,16 +14,19 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from mika.vocab.access import KEEP_WORDS
 from mika.vocab.access import alone as _alone
 
 #: la nature d'un outil : lire, ou changer quelque chose ailleurs
 NATURES = (("lecture", "lecture — elle lit, rien ne change ailleurs"),
            ("action", "action — ça change quelque chose ailleurs"))
-#: ce qu'elle garde de ce qu'un serveur lui rend (ADR 0128), du plus ouvert au plus serré
-KEEPS = (("public", "ce qu'elle sait — peut devenir un savoir, et se raconter"),
-         ("perso", "un souvenir — comme ce qu'on lui raconte"),
-         ("prive", "une confidence — elle en reparle avec la personne, jamais à quelqu'un d'autre"),
-         ("rien", "rien — elle s'en sert sur le moment, puis l'oublie"))
+#: ce qu'elle garde de ce qu'un serveur lui rend (ADR 0128), du plus ouvert au plus serré : les mots des familles
+#: (``vocab.access.KEEP_WORDS``, ADR 0134), puis ce qu'ils veulent dire
+KEEPS = tuple((k, f"{KEEP_WORDS[k]} — {said}") for k, said in (
+    ("public", "peut se raconter"),
+    ("perso", "comme ce qu'on lui raconte"),
+    ("prive", "elle en reparle avec la personne, jamais à quelqu'un d'autre"),
+    ("rien", "elle s'en sert sur le moment, puis l'oublie")))
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,6 +170,9 @@ class ServerStatus:
     consecutive: int = 0
     #: la fin de la sortie d'erreur d'un serveur lancé ici, quand il est tombé (secrets masqués)
     log: tuple[str, ...] = ()
+    #: le plugin système qui l'apporte (ADR 0066) : ses bornes se règlent dans ses paramètres ; vide : un serveur réglé
+    #: à la main, de l'opérateur ou d'une personne
+    plugin: str = ""
 
     @property
     def new(self) -> tuple[str, ...]:

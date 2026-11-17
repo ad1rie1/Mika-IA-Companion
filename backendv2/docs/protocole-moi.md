@@ -253,7 +253,9 @@ répond quand on lui en parle dans le chat, et le téléphone demande le geste.
 
 **`GET /api/moi/phone/conversations[?size=]`** — ses conversations, la plus récente d'abord : `key`
 (`<appli>|<fil>`), `app`, `app_name`, `group`, `title` (le groupe, sinon qui écrit), `count`, `last_at`, `last`
-(`id`, `at`, `own`, `sender`, `text` coupé), `her` (`{"state", "id"}` : une réponse de Mika en chemin, sinon `null`).
+(`id`, `at`, `own`, `sender`, `text` coupé), `her` (`{"state", "id", "decided_at"}` : sa réponse en chemin, sinon
+sa dernière réponse si elle suit le dernier message reçu, sinon `null` ; `decided_at` en ms, 0 tant qu'elle n'est pas
+réglée).
 
 **`GET /api/moi/phone/thread?conversation=[&size=]`** — le fil : `messages` (`id`, `at`, `own`, `sender`, `text`),
 `more`, `offers` (les réponses de Mika : `id`, `state` — `prepared`, `offered` au téléphone, puis `sent`, `other`,
@@ -462,8 +464,6 @@ propre borne, 60 par minute et par compte (la Géoplateforme en permet bien dava
 | `GET /api/moi/carte/lieux?q=&cat=&near=&bbox=&limit=` | `{"places": [lieu…]}` : dans l'index, par le nom (`q`, 200 caractères), d'une catégorie (`cat`), près d'un point (`near`, les plus proches d'abord), dans une zone (`bbox`) — au moins un de `q`, `near`, `bbox` ; `limit` : 1 à 50 (20) |
 | `GET /api/moi/carte/adresses?q=&limit=` | `{"places": [lieu…]}` : une adresse (`q` : 3 à 200 caractères ; `limit` : 1 à 10, 5) |
 | `GET /api/moi/carte/itineraire?points=&mode=&avoid=` | `{"distance_m", "duration_s", "legs": [{"distance_m", "duration_s", "shape", "steps": [{"text", "distance_m", "duration_s"}]}], "has_toll", "has_highway", "has_ferry", "provider"}` : de 2 à 20 points ; `shape`, le tracé d'un tronçon en polyline à six décimales ; `steps`, ses consignes en français ; `avoid` : `peages,autoroutes` |
-| `GET /api/moi/carte/ordre?points=&mode=` | `{"order": [0, 2, 1, 3]}` : le meilleur ordre de ces points, le départ et l'arrivée à leur place (un ordre illisible du serveur : 502) |
-| `GET /api/moi/carte/le-long?points=&cat=&corridor=&limit=&mode=&avoid=` | `{"places": [lieu…], "route"}` : les lieux à moins de `corridor` mètres (200 à 50 000 ; 5 000) du trajet entre ces points, dans l'ordre où on les croise ; `route` faux : sans itinéraires, le long des points reliés à vol d'oiseau |
 | `GET /api/moi/carte/regards/<seq>` | ce qu'elle a cherché (`"kind": "look"`) ou montré (`"kind": "map"`) pour toi, la note d'un de ses messages (`protocole-chat.md`, § 4) : `{"kind", "title", "what", "places": [lieu…], "route", "trip", "at"}` — `what` : `lieux` ou `trajet` (un regard) ; `route` : `{"mode", "distance_m", "duration_s", "shape", "avoid"}` (le trajet résumé, et ce qu'il évitait ; une carte qui relie ses lieux sans tracé calculé : `{"mode"}` seul), sinon `null` ; `trip` : le voyage qu'elle montrait, s'il est encore là. Pour quelqu'un d'autre, oublié, ou ni un regard ni une carte : 404 |
 
 **Le fond de carte** (ADR 0193, 0229) — celui de toutes les cartes (Téléphone › Position, l'écran Carte, les miniatures
@@ -511,6 +511,6 @@ console (ta fiche, onglet Voyages, ADR 0204) : il disparaît de ta liste, et le 
 | `POST /api/moi/voyages/<id>/arrets/<arrêt>` | `day` et `index?`, et/ou `note` | le déplacer, le noter (`note` vide : plus de note), ou les deux |
 | `POST /api/moi/voyages/<id>/arrets/<arrêt>/retirer` | — | le retirer |
 | `GET /api/moi/voyages/<id>/trajet` | — | `{"days": [{"n", "distance_m", "duration_s", "legs": [{"from", "to", "distance_m", "duration_s", "shape", "steps"}]}], "distance_m", "duration_s", "has_toll", "has_highway", "has_ferry", "provider"}` : les tronçons d'un arrêt au suivant, rangés au jour de leur arrivée (`from`, `to` : les arrêts) ; sans itinéraires : 503 |
-| `POST /api/moi/voyages/<id>/ordre` | `day` | le meilleur ordre de ce jour, appliqué (son premier et son dernier arrêt restent à leur place) → `{"ok", "message", "order"}` ; moins de trois arrêts : rien à faire ; plus de 20 : refusé (400), le serveur d'itinéraires n'en range pas plus d'un coup |
-| `GET /api/moi/voyages/<id>/sur-la-route?cat=&day=&corridor=&limit=` | — | `{"places": [lieu…], "route"}` : les lieux le long du trajet de tout le voyage (`day` 0, par défaut) ou d'un jour (depuis le dernier arrêt de la veille) |
+| `POST /api/moi/voyages/<id>/ordre` | `day` | le meilleur ordre de ce jour, appliqué (son premier et son dernier arrêt restent à leur place) → `{"ok", "message", "order"}` ; moins de trois arrêts : rien à faire ; plus de 20 : refusé (400), le serveur d'itinéraires n'en range pas plus d'un coup ; un ordre illisible du serveur : 502, rien n'est appliqué |
+| `GET /api/moi/voyages/<id>/sur-la-route?cat=&day=&corridor=&limit=` | — | `{"places": [lieu…], "route"}` : les lieux à moins de `corridor` mètres (200 à 50 000 ; 5 000) du trajet de tout le voyage (`day` 0, par défaut) ou d'un jour (depuis le dernier arrêt de la veille), dans l'ordre où on les croise ; `limit` : 1 à 50 (20) ; `route` faux : sans itinéraires, le long des arrêts reliés à vol d'oiseau |
 | `GET /api/moi/voyages/<id>/gpx` | — | le voyage en GPX 1.1 (`application/gpx+xml`, en pièce jointe `voyage-<id>.gpx`) : ses arrêts dans l'ordre, et le tracé quand les itinéraires le calculent |

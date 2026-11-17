@@ -3,7 +3,7 @@
  * cartes de la page (Téléphone, Carte, les miniatures du chat) et relu toutes les cinq minutes : une source changée
  * dans la console, des polices ajoutées, une autre zone — chaque carte ouverte suit (`restyle`).
  */
-import { fetchMap, type MapInfo } from "../api/phone";
+import { fetchMap, type MapInfo } from "../api/carte";
 import { Cached } from "../shared/kit";
 
 export const MAP_INFO_TTL = 5 * 60_000;

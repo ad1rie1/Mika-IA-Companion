@@ -1,9 +1,12 @@
 {# Un événement du journal, dessiné (inspector/pages/journal.py, ``event_page``) : ses textes (en bulle pour une
-   parole ou un message, titrés en mots), son parcours dans la machine (son type, qui le réduit, ce qu'il réveille, qui
-   le projette, l'état du journal qu'il a lu), qui il concerne, ce qu'il a déclenché, ses données brutes. Le titre de
-   la page dit ce qui s'est passé, le fil d'Ariane son numéro, et la ligne de faits de l'en-tête ses repères (quand,
-   émis par, son origine, son épisode). Aucun style en ligne (CSP). #}
+   parole ou un message, titrés en mots), ses départs (ce que la file de sortie a fait partir de lui : un départ à
+   traiter avec Relancer / Marquer comme vu, la macro de la File de sortie, qui revient ici ; les autres, leur état —
+   « parti »), son parcours dans la machine (son type, qui le réduit, ce qu'il réveille, qui le projette, l'état du
+   journal qu'il a lu), qui il concerne, ce qu'il a déclenché, ses données brutes. Le titre de la page dit ce qui s'est
+   passé, le fil d'Ariane son numéro, et la ligne de faits de l'en-tête ses repères (quand, émis par, son origine, son
+   épisode). Le jeton des formulaires (``csrf``) est celui de la page. Aucun style en ligne (CSP). #}
 {% from "_navigation.html" import pager as pages %}
+{% from "handmade/systeme/macros.html" import outbox_item %}
 <div class="now-page evenement">
 
   {% if v.texts %}
@@ -17,6 +20,25 @@
     <div class="event-text"><p class="now-eyebrow">{{ t.field }}</p><p>{{ t.text }}</p></div>
     {% endif %}
     {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if v.todo or v.departures %}
+  <section class="now-card outbox-review hm-outbox" aria-labelledby="event-departures">
+    <header class="now-card-head"><h2 id="event-departures">Ses départs</h2><span class="person-count now-num">{{ v.todo|length + v.departures|length }}</span><p>Ce que la file de sortie a fait partir de cet événement, vers les écrans et les services.</p></header>
+    {% if v.todo %}
+    <ul class="hm-outbox-list" role="list">
+      {% for p in v.todo %}{{ outbox_item(p, csrf, v.back) }}{% endfor %}
+    </ul>
+    {% endif %}
+    {% if v.departures %}
+    <ul class="person-entries">
+      {% for d in v.departures %}
+      <li><div class="person-entry-top"><p class="person-entry-title">{{ d.name }}{% if d.to %} <span class="now-muted">à {{ d.to }}</span>{% endif %}</p><span class="person-entry-time">{{ d.attempts }}</span></div>
+        <p class="person-entry-tags"><span class="now-tag {{ d.tone }}">{{ d.state }}</span></p>{% if d.error %}<pre class="hm-error">{{ d.error }}</pre>{% endif %}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
   </section>
   {% endif %}
 

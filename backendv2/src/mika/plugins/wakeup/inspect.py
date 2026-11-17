@@ -30,7 +30,6 @@ from mika.kernel.inspect import (
     Head,
     InspectContext,
     Note,
-    Param,
     Prose,
     Ref,
     Row,
@@ -38,6 +37,7 @@ from mika.kernel.inspect import (
     Text,
     When,
     paginate,
+    plural,
 )
 from mika.kernel.operate import Done, Refused
 from mika.plugins.wakeup import (
@@ -137,9 +137,8 @@ def risks(endpoint: Any) -> list[str]:
 
 
 @WAKEUP.inspect("reveils", title="Réveils par API", section="reveils", order=10,
-                params=[Param("reveil", "Réveil", placeholder="nom exact d'un réveil")],
                 description="Les réveils que des systèmes extérieurs appellent (POST /api/wake/<nom>), et ce que "
-                            "leurs appels ont donné. Ils se déclarent et se règlent dans Paramètres, en haut à droite.")
+                            "leurs appels ont donné.")
 def _list(s: WakeupState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = ctx.ports.get("wakeup")
     # leurs réglages : la roue de la page (ADR 0206) ; ici, la tâche — en déclarer un
@@ -160,7 +159,9 @@ def _list(s: WakeupState, frame: Frame, ctx: InspectContext) -> list[Block]:
                              Column("en attente", "num"), Column("dernier appel", "fit")), tuple(rows),
                             title="Réveils", empty="Aucun réveil déclaré : « Déclarer un réveil ».",
                             caption="Un réveil sans clé ne reçoit rien : génère-la sur sa fiche (montrée une fois)."))
-    name = ctx.value("reveil") or ""
+    # pas de champ à remplir : la fiche d'un réveil (sa tuile, sa ligne) montre tous ses appels ;
+    # ``?reveil=`` filtre encore la liste, sous son titre
+    name = ctx.param("reveil")
     calls = sorted((x for x in s.calls.values() if not name or x.endpoint == name), key=lambda x: -x.seq)
     page, pager = paginate(calls, ctx.pager("page", size=CALLS_PAGE))
     blocks.append(_calls_table(page, s, frame, ctx, pager, with_endpoint=True,
@@ -197,7 +198,8 @@ def _calls_table(calls: Any, s: WakeupState, frame: Frame, ctx: InspectContext, 
                                         ("outils", ", ".join(x.bundles) or "aucun"),
                                         ("passe outre son sommeil", "oui" if x.rouse else "non"),
                                         ("rend compte à", notify_words(frame, x.notify)),
-                                        ("essais", f"{x.tries} panne(s), {x.starts} départ(s)")]
+                                        ("essais", f"{plural(x.tries, 'panne', 'pannes')}, "
+                                                  f"{plural(x.starts, 'départ', 'départs')}")]
         if x.expires_at and x.status == WAITING:
             facts.append(("expire", ctx.when(x.expires_at)))
         if x.by:

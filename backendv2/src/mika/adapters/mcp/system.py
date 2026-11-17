@@ -8,8 +8,9 @@ comme un serveur local de l'opérateur, mais dont les outils sont **approuvés d
   proposerait autre chose verrait l'outil suspendu, comme chez n'importe quel serveur. Un outil qui se dit en
   lecture seule part sans accord ; un autre attendrait celui de l'opérateur.
 - L'opérateur ne range rien de leurs outils (``saving`` retire leurs entrées avant d'écrire) : on les règle dans
-  les paramètres de leur plugin. Seules leurs lignes d'accès se règlent sur leur fiche (ADR 0131), rangées à part
-  (``access``) : elles remplacent celles que le plugin donne par défaut.
+  les paramètres de leur plugin. Le client dit lequel (``plugins``, d'où ``ServerStatus.plugin``) : leur fiche y
+  mène, jamais au formulaire d'un serveur réglé à la main. Seules leurs lignes d'accès se règlent sur leur fiche
+  (ADR 0131), rangées à part (``access``) : elles remplacent celles que le plugin donne par défaut.
 - Si ce qui les donne échoue (des paramètres illisibles), il n'y en a aucun : rien d'offert plutôt qu'un outil
   faux.
 """
@@ -34,10 +35,12 @@ Reviews = dict[str, dict[str, StoredReview]]
 
 @dataclass(frozen=True, slots=True)
 class Provided:
-    """Un serveur système : comment le joindre, et ce qu'il proposera (son ``tools/list``)."""
+    """Un serveur système : comment le joindre, ce qu'il proposera (son ``tools/list``), et le plugin qui l'apporte
+    (sa fiche dit que ses bornes se règlent dans les paramètres de celui-ci)."""
 
     spec: McpServer
     tools: tuple[Mapping[str, Any], ...]
+    plugin: str = ""
 
 
 class SystemServers:
@@ -56,6 +59,10 @@ class SystemServers:
 
     def names(self) -> frozenset[str]:
         return frozenset(self.current())
+
+    def plugins(self) -> dict[str, str]:
+        """Le plugin qui apporte chaque serveur système, par son nom (``McpHub`` en remplit ``ServerStatus.plugin``)."""
+        return {name: p.plugin for name, p in self.current().items()}
 
     def config(self, base: McpConfig) -> McpConfig:
         mine = self.current()

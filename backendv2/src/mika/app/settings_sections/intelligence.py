@@ -17,7 +17,7 @@ from mika.kernel import forms
 from mika.kernel.clock import DAY
 from mika.kernel.inspect import Note
 from mika.ports.imaging import DRAW
-from mika.vocab.episodes import FALLBACKS, VOICE_ROLES, Role
+from mika.vocab.episodes import FALLBACKS, OPTIONAL_ROLES, VOICE_ROLES, Role
 
 if TYPE_CHECKING:
     from mika.app.server import Live
@@ -87,7 +87,8 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
     def route(role: str, _chosen: Any) -> dict[str, Any]:
         """La ligne d'un rôle dans Qui sert quoi (la correspondance rôle → fournisseur, en table) : sa famille, puis
         ce qui le sert vraiment — le fournisseur déclaré, sinon celui de son rôle de repli, ou rien (chaque appel
-        échoue) —, son type et son modèle, et comment il y est arrivé."""
+        échoue ; un rôle facultatif, ``OPTIONAL_ROLES``, est coupé : sa passe ne se fait pas, ADR 0140) —, son type
+        et son modèle, et comment il y est arrivé."""
         cfg = settings.llm()
         chain, seen, cur, served = [], set(), role, ""
         while cur and cur not in seen:
@@ -102,14 +103,20 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         spec = cfg.backends.get(served)
         how = "déclaré" if cfg.routes.get(role) == served and served else \
             (f"par repli ({' → '.join(chain[1:] + [ROLE_LABELS.get(cur, cur)])})" if served else "")
+        # personne ne le sert : chaque appel échoue — sauf un rôle facultatif (rendre naturel), coupé par choix, sans
+        # alarme : sa passe ne se fait pas, aucun appel n'est fait
+        cut = not served and role in OPTIONAL_ROLES
         return {"title": "Ce qui sert vraiment chaque rôle", "key_head": "Rôle", "choice_head": "Son fournisseur",
-                "tone": "" if served else "danger",
+                "tone": "" if served or cut else "danger",
                 "cells": [{"head": "Famille", "text": ROLE_FAMILIES.get(role, "—"), "tag": True, "before": True},
                           {"head": "Ce qui le sert vraiment", "text": served or "aucun", "mono": bool(served),
                            "tone": "" if served else "muted", "sub": f"{spec.kind} · {spec.model}" if spec else ""},
-                          # une étiquette pour ce qui se lit d'un coup (déclaré, rien) ; la chaîne d'un repli, en texte
-                          {"head": "Comment", "text": how or "chaque appel échoue", "tag": how in ("déclaré", ""),
-                           "tone": "ok" if how == "déclaré" else "muted" if served else "danger"}]}
+                          # une étiquette pour ce qui se lit d'un coup (déclaré, rien) ; la chaîne d'un repli et un
+                          # rôle coupé, en texte
+                          {"head": "Comment", "text": how or ("coupée : la seconde passe ne se fait pas" if cut
+                                                              else "chaque appel échoue"),
+                           "tag": how in ("déclaré", "") and not cut,
+                           "tone": "ok" if how == "déclaré" else "muted" if served or cut else "danger"}]}
 
     # ── images ──
     async def save_images(cfg: ImagingConfig) -> list[str]:

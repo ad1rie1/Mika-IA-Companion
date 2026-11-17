@@ -3,7 +3,8 @@
  * les bornes du serveur (`protocole-moi.md` § 10 : 60 adresses et 20 trajets par minute et par compte, 429 au-delà ; le
  * serveur d'itinéraires public ne répond qu'une fois par seconde, pour tous). Ici : les adresses gardées par texte
  * (`AddressBook`), le trajet d'un voyage gardé pour ses arrêts et relu un moment après le dernier geste (`TripRoutes`),
- * les gestes sur un voyage faits l'un après l'autre (`GestureQueue`), et quand un envoi refusé a usé sa clé.
+ * les gestes sur un voyage faits l'un après l'autre (`GestureQueue`), quand un envoi refusé a usé sa clé, et quand ce
+ * qu'une lecture cherchait n'est plus là (`gone`) — ce que les onglets de la Carte partagent.
  */
 import type { Place, Trip, TripRoute } from "../../api/carte";
 import { ApiError } from "../../api/moi";
@@ -15,6 +16,8 @@ import { routableStops, tripRouteKey } from "./format";
 export const ADDRESS_LIMIT = 5;
 /** Combien de temps la saisie doit s'arrêter avant qu'une adresse se demande. */
 export const ADDRESS_WAIT_MS = 700;
+/** Combien d'adresses une liste de propositions montre (un point d'itinéraire, un arrêt). */
+export const ADDRESSES_SUGGESTED = 4;
 
 /** Un texte qui vaut d'être cherché en adresse : trois caractères au moins, et un chiffre ou cinq caractères. */
 export function wantsAddress(q: string): boolean {
@@ -224,4 +227,9 @@ export class GestureQueue {
  */
 export function refused(err: unknown): boolean {
   return err instanceof ApiError && (err.status === 400 || err.status === 404 || err.status === 409);
+}
+
+/** Ce qu'une lecture cherchait n'est plus là (404) : un regard oublié, un voyage supprimé ou qui n'est pas à toi. */
+export function gone(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 404;
 }

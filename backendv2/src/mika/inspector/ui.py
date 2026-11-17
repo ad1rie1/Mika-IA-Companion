@@ -55,7 +55,7 @@ from mika.runtime.inspection import Inspection
 PREFIX = render.PREFIX
 TEMPLATES = Path(__file__).parent / "templates"
 STATIC = Path(__file__).parent / "static"
-ASSET_VERSION = "71"
+ASSET_VERSION = "76"
 
 log = logging.getLogger("mika.console")
 
@@ -107,7 +107,8 @@ class InspectorDeps:
     settings_tabs: Sequence[SettingsTab] = field(default_factory=tuple)
     #: les paramètres internes des facultés (``runtime/params.Parameters``)
     parameters: Any = None
-    #: les sauvegardes : ``fn() -> {sauvegarde, tentative, verification, archives}`` (``app/backup.overview``)
+    #: les sauvegardes : ``fn() -> {sauvegarde, tentative, verification, archives, donnees, unite, place}``
+    #: (``app/backup.overview``)
     backups: Callable[[], Mapping[str, Any]] | None = None
     #: Réglages › Paramètres avancés : (famille, facultés) et le nom lisible de chacune
     param_families: Sequence[tuple[str, Sequence[str]]] = field(default_factory=tuple)
@@ -490,12 +491,19 @@ class UI:
             got = menu_place(self.deps.menu, self.deps.navigation, target)
             return (got[0], got[1]) if got is not None else None
 
+        dests = destinations(self.deps.navigation)
         here = path.split("?", 1)[0].rstrip("/")
         current = locate(here.removeprefix(PREFIX).strip("/"))
         if current is None and active:
             current = locate("" if active == "accueil" else active)
         if current is None and active:
             current = next(((gi, li) for gi, li, link in links if link.target.split("/")[0] == active), None)
+            home = dests.get(active)
+            if current is not None and home is not None and home.layout == "menu" \
+                    and here.startswith(f"{PREFIX}/{active}/"):
+                # une page de Système que le menu ne montre pas (Simulations sans dossier de rapports,
+                # ``app/console_menu.py::menu_for``) : sa rubrique s'allume, aucune autre page à sa place
+                current = (current[0], -1)
         badges: dict[tuple[int, int], int] = {}
         counts: dict[str, int] = {}
         for item in self.attention_items():
@@ -503,7 +511,6 @@ class UI:
             key = locate(item["href"].removeprefix(PREFIX).strip("/"))
             if key is not None:
                 badges[key] = badges.get(key, 0) + item["count"]
-        dests = destinations(self.deps.navigation)
         groups = []
         for gi, group in enumerate(self.deps.menu):
             items = []

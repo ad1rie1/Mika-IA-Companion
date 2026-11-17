@@ -58,8 +58,10 @@ from mika.plugins.email.inspect import accounts as inspect_accounts
 from mika.plugins.email.inspect import actions as inspect_actions
 from mika.plugins.email.inspect import mail as inspect_mail
 from mika.plugins.email.inspect import mail_key
-from mika.plugins.forge import WRITTEN
+from mika.plugins.forge import WRITTEN, App
+from mika.plugins.forge.inspect import _facts, _queue_words
 from mika.ports.feeds import Entry
+from mika.ports.forge import CallResult
 from mika.ports.llm import LLMResponse
 from mika.ports.mail import Mail
 from mika.runtime.inspection import Inspection
@@ -525,7 +527,9 @@ def test_the_feeds_view_counts_by_day_filters_by_feed_and_links_articles(tmp_pat
 
     got = live(tmp_path, scenario, start=at_paris(2026, 9, 28, 14, 0), ports={"feeds": feeds}, persona_llm=False)
     blocks = clean(got["flux"])
-    assert [n for n in notes(blocks) if n.tone == "ok" and "Relevés toutes les 30 min" in n.text]
+    [state] = [n for n in notes(blocks) if n.tone == "ok" and "Relevés toutes les 30 min" in n.text]
+    # le seuil, à l'échelle du réglage « Pertinence minimale » (de 0 à 1) : deux décimales à la française
+    assert re.search(r"à partir d'une pertinence de \d,\d\d\)", state.text)
     assert "astronomie" in shown(fields(blocks, "")["les mots qui la touchent"])
     tiles = stats(blocks)
     assert tiles["flux suivis"].value == 2 and tiles["remarqués aujourd'hui"].value == 1
@@ -552,6 +556,8 @@ def test_the_feeds_view_counts_by_day_filters_by_feed_and_links_articles(tmp_pat
     assert oil.cells[3] == Badge("laissé passer", "muted") and oil.cells[4].text.endswith("(estimée)")
     retro = recent["Astronomie, physique, sciences : le retour des comètes"]
     assert retro.cells[3] == Badge("remarqué", "ok") and "estimée" not in retro.cells[4].text
+    assert re.fullmatch(r"\d,\d\d \(estimée\)", oil.cells[4].text) and re.fullmatch(r"\d,\d\d", retro.cells[4].text)
+    assert all(re.fullmatch(r"\d,\d\d", r[3].text) for r in table(blocks, "Ce qu'elle a remarqué").rows)
     assert retro.cells[2] == When(retro.cells[2].at) and retro.cells[2].at > 0
     noticed = table(blocks, "Ce qu'elle a remarqué").rows
     assert len(noticed) == 3 and "« Les télescopes d'astronomie oubliés » (Le Journal)" in shown(noticed[0][2])
@@ -634,11 +640,12 @@ def test_the_camera_view_shows_devices_and_looks_never_the_image(tmp_path):
     now, later = run_virtual(clock, main)
     clean(now)
     clean(later)
-    assert [n for n in notes(now) if n.tone == "ok" and "1 appareil(s) envoie(nt)" in n.text]
+    assert [n for n in notes(now) if n.tone == "ok" and n.text == "1 appareil envoie des images en ce moment."]
     tile = stats(now)["bureau"]
     assert tile.value == Badge("en direct", "ok") and tile.sub.startswith("dernière image : @")
     [device] = table(now, "Appareils").rows  # le détail, replié
-    assert device[:2] == ("bureau", "oui") and device[3] == "image/jpeg" and device[4].endswith("Ko")
+    # 1 900 octets : sa taille à la française, pas « 1 Ko » arrondi à la main
+    assert device[:2] == ("bureau", "oui") and device[3] == "image/jpeg" and device[4] == "1,86\u202fKo"
     assert "OCTETS-DE-L-IMAGE" not in text(now) and "\\xff" not in text(now)
     assert "OCTETS-DE-L-IMAGE" not in html(now)
     [seen] = table(now, "Ce qu'elle a vu en dernier").rows
@@ -647,6 +654,7 @@ def test_the_camera_view_shows_devices_and_looks_never_the_image(tmp_path):
     [look] = next(b for b in walk(now) if isinstance(b, Timeline)).entries
     assert look.title == "bureau — quelque chose se passe" and "Adrien fait coucou" in look.text
     assert look.href.kind == "event" and look.tone == "warn" and "encore frais" in look.meta
+    assert re.fullmatch(r"pertinence \d{1,3}\u202f% · encore frais", look.meta)  # de 0 à 1 : en pourcentage
     # l'image a vieilli : plus rien n'arrive, et ce qu'elle a vu n'est plus frais
     assert "Aucun appareil n'envoie" in text(later)
     assert stats(later)["bureau"].value == Badge("silencieux", "muted")
@@ -720,7 +728,7 @@ def test_the_forge_views_show_each_app_its_code_logs_and_life_without_running_it
     assert rows["cafe"][7].startswith("1 (le dernier")  # un signal, espacé
     broken = rows["meteo"][4]
     assert broken.tone == "danger" and broken.text.startswith("cassée : ") and "la page a changé" in broken.text
-    assert rows["meteo"][6].startswith("échec, ") and "5 échec(s) d'affilée" in rows["meteo"][6]
+    assert rows["meteo"][6].startswith("échec, ") and "(5 échecs d'affilée)" in rows["meteo"][6]  # accordé
     assert rows["meteo"][7].startswith("1 (le dernier")  # « mon app ne marche plus » est un signal
     assert link == Ref.subject("app", "cafe", "cafe")  # chaque ligne mène à la fiche de l'app
     about = fields(cafe["etat"], "L'app")
@@ -737,6 +745,20 @@ def test_the_forge_views_show_each_app_its_code_logs_and_life_without_running_it
     assert ("changement d'état", "broken") in {(r[1], r[2]) for r in meteo_lived}
     assert [r[2] for r in meteo_lived if r[1] == "tour"] == ["échec"] * 5
     assert fields(broken_state, "L'app")["prochain tour"] == "aucun"  # cassée : elle ne tourne plus
+
+
+def test_the_fiche_of_an_app_says_its_numbers_in_french_and_agreed():
+    """La fiche d'une app : la pertinence d'un signal (de 0 à 1) se dit en pourcentage, comme les autres pertinences
+    de la console, et les comptes de sa file s'accordent (« 1 lecture », « 2 partis sans être lus »), sans « (s) »."""
+    call = CallResult(ok=True, signals=(("le café est en promo", 0.8, "happy"), ("rien de neuf", 0.05, "")))
+    assert dict(_facts(call, sent=True).pairs)["signaux (dans sa file)"] == \
+        "le café est en promo (80\u202f%); rien de neuf (5\u202f%)"  # et non « (0.8) »
+    now = 3 * DAY
+    one = _queue_words(App(title="Veille café", version=1, dropped=1, calls_at=(now - HOUR,)), now)
+    assert ", 1 lecture sur " in one and one.endswith(" ; 1 parti sans être lu (file pleine)")
+    many = _queue_words(App(title="Veille café", version=1, dropped=2, calls_at=(now - 2 * HOUR, now - HOUR)), now)
+    assert ", 2 lectures sur " in many and many.endswith(" ; 2 partis sans être lus (file pleine)")
+    assert "(s)" not in one + many
 
 
 # ── Les appareils ─────────────────────────────────────────────────────────
@@ -766,7 +788,7 @@ def test_the_devices_view_shows_what_they_signaled(tmp_path):
     assert [shown(r.cells[2]) for r in recent] == ["On a encore sonné", "Il fait 17 °C dans le salon",
                                                    "On a sonné à la porte"]
     newest = recent[0].cells
-    assert newest[3] == Meter(0.7, "0.70") and isinstance(newest[4], Swatch) and newest[4].key == "surprised"
+    assert newest[3] == Meter(0.7, "70\u202f%") and isinstance(newest[4], Swatch) and newest[4].key == "surprised"
     assert recent[1].cells[4] == "—" and newest[-1].kind == "event" and table(blocks, "Ce qu'ils").pager is None
     # le filtre par appareil, et le curseur des plus anciens
     assert [shown(r.cells[1]) for r in table(clean(only), "Ce que « sonnette »").rows] == ["sonnette"] * 2

@@ -1,13 +1,14 @@
 {# Système › Simulations (app/handmade/tabs/system.py, ADR 0177), le gabarit « client » : les rapports à gauche (leur
-   nom, leur dossier, leur sorte, quand ils ont changé), celui qu'on lit à droite, tel quel. Sans dossier de rapports :
-   sa note, et comment en faire. #}
+   nom, leur dossier, leur sorte, quand ils ont changé), celui qu'on lit à droite, tel quel. Sans dossier de rapports
+   (le menu ne la montre alors pas, app/console_menu.py::menu_for) : une seule fois comment en faire, la carte « Faire
+   un rapport » ; la note de la vue, qui dit la même chose, se tait ici — elle reste au repli et à la console en MCP
+   (audit du 2026-11-05, C8-12). #}
 {% import "handmade/shared/tab.html" as tab with context %}
 {% import "handmade/systeme/tab_macros.html" as sx %}
 <div class="now-page sys sys-sim" data-tab="systeme/simulations">
   {% if not t %}
-  {% for n in notes %}{{ sx.band({"tone": "info" if n.tone == "muted" else n.tone, "text": n.text}) }}{% endfor %}
   <section class="now-card" aria-labelledby="sys-sim-how">
-    {{ tab.head("Faire un rapport", "sys-sim-how", none, "Le simulateur fait vivre des scénarios au noyau et écrit son rapport dans un dossier ; la console le lit si le serveur connaît ce dossier.") }}
+    {{ tab.head("Faire un rapport", "sys-sim-how", none, "Ce serveur n'a pas de dossier de rapports. Le simulateur fait vivre des scénarios au noyau et écrit son rapport dans un dossier : lance-le avec ce dossier, puis le serveur avec le même ; la console lira ses rapports ici.") }}
     <pre class="hm-code">mika sim run --report DOSSIER
 mika serve --reports DOSSIER</pre>
   </section>

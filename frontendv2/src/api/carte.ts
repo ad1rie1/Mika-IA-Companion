@@ -1,8 +1,9 @@
 /**
- * Carte, lieux, itinéraires et voyages, par l'API par personne (`backendv2/docs/protocole-moi.md` § 10 ; le code :
- * `backendv2/src/mika/app/me/maps.py`, ADR 0194 à 0196). Le navigateur ne parle qu'à ce serveur : il cherche les
- * lieux dans son index (rien ne sort), une adresse à la Géoplateforme (seul le texte part), un itinéraire au serveur
- * réglé (seuls ses points partent). Ce qui n'est pas branché répond 503, en mots (`ApiError.message`).
+ * Carte, fond de carte (celui de toutes les cartes), lieux, itinéraires et voyages, par l'API par personne
+ * (`backendv2/docs/protocole-moi.md` § 10 ; le code : `backendv2/src/mika/app/me/maps.py`, ADR 0194 à 0196). Le
+ * navigateur ne parle qu'à ce serveur : il cherche les lieux dans son index (rien ne sort), une adresse à la
+ * Géoplateforme (seul le texte part), un itinéraire au serveur réglé (seuls ses points partent). Ce qui n'est pas
+ * branché répond 503, en mots (`ApiError.message`).
  *
  * Les lectures sont des `GET` ; les écritures, des `POST` avec le jeton CSRF et une clé d'envoi (`sendJson` : un
  * double clic ne refait rien, une création redite rend le même `id`).
@@ -162,7 +163,7 @@ export interface TripRoute {
 
 export interface Along {
   places: Place[];
-  /** Faux : sans itinéraires, le long des points reliés à vol d'oiseau. */
+  /** Faux : sans itinéraires, le long des arrêts reliés à vol d'oiseau. */
   route: boolean;
 }
 
@@ -201,6 +202,33 @@ export function fetchCarte(): Promise<CarteInfo> {
   return getJson(C);
 }
 
+/**
+ * Le fond de carte (ADR 0193), celui de toutes les cartes, servi par le serveur seul : ses tuiles, ses polices et ses
+ * icônes sont des chemins de l'API (jamais une adresse du dehors, qui dirait où tu es). `ready` faux : le plan
+ * dessiné, `reason` dit pourquoi.
+ */
+export interface MapInfo {
+  ready: boolean;
+  reason: string;
+  kind?: "vecteur" | "image";
+  minzoom?: number;
+  maxzoom?: number;
+  /** Ouest, sud, est, nord ; `null` : partout. */
+  bounds?: [number, number, number, number] | null;
+  attribution?: string;
+  /** `…/tiles/{z}/{x}/{y}` */
+  tiles?: string;
+  /** `…/fonts/{fontstack}/{range}.pbf` ; `null` : pas de polices (une carte sans noms). */
+  glyphs?: string | null;
+  /** `…/sprites/v4` (la planche suit : `/light`, `/dark`) ; `null` : pas d'icônes. */
+  sprite?: string | null;
+}
+
+/** Servi avec la carte (ADR 0229), et non sous le téléphone : les autres adresses viennent de sa réponse. */
+export function fetchMap(): Promise<MapInfo> {
+  return getJson(`${MOI}/carte/fond`);
+}
+
 export interface PlacesQuery {
   q?: string;
   cat?: string;
@@ -229,18 +257,6 @@ export async function searchAddresses(q: string, limit = 5): Promise<Place[]> {
 
 export function fetchRoute(points: readonly { lat: number; lon: number }[], mode: string, avoid: readonly string[] = []): Promise<Route> {
   return getJson(`${C}/itineraire${params({ points: pointsText(points), mode, avoid: avoid.join(",") })}`);
-}
-
-/** Le meilleur ordre de ces points, le départ et l'arrivée à leur place. */
-export async function fetchOrder(points: readonly { lat: number; lon: number }[], mode: string): Promise<number[]> {
-  const got = await getJson<{ order: number[] }>(`${C}/ordre${params({ points: pointsText(points), mode })}`);
-  return got.order ?? [];
-}
-
-export function fetchAlong(points: readonly { lat: number; lon: number }[],
-  opts: { cat?: string; corridor?: number; limit?: number; mode?: string; avoid?: readonly string[] } = {}): Promise<Along> {
-  return getJson(`${C}/le-long${params({ points: pointsText(points), cat: opts.cat, corridor: opts.corridor,
-    limit: opts.limit, mode: opts.mode, avoid: opts.avoid?.join(",") })}`);
 }
 
 /** Ce qu'elle a cherché ou montré pour toi (`ref` d'une note `look` ou `map`). */

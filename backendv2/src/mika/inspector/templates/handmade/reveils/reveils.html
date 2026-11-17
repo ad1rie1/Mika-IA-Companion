@@ -8,7 +8,7 @@
   {{ sx.state(state) }}
   {% if endpoints %}
   <section class="now-card" id="{{ endpoints.id }}" aria-labelledby="wk-endpoints-title">
-    {{ tab.head("Ses réveils", "wk-endpoints-title", endpoints.count, "Ce que des systèmes extérieurs peuvent lui envoyer (POST /api/wake/<nom>). Ouvre un réveil pour sa clé, ses consignes et tous ses appels.") }}
+    {{ tab.head("Ses réveils", "wk-endpoints-title", endpoints.count, "Ouvre un réveil pour sa clé, ses consignes et tous ses appels.") }}
     {% if items %}
     <ul class="wk-tiles" role="list">
       {% for e in items %}
