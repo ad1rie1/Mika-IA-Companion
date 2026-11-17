@@ -29,6 +29,11 @@ import fr.qwartz.mika.data.net.ApprovalDecision
 import fr.qwartz.mika.data.net.LinkState
 import fr.qwartz.mika.data.net.MikaProtocol
 import fr.qwartz.mika.data.net.StrandInfo
+import fr.qwartz.mika.data.moi.MoiApi
+import fr.qwartz.mika.data.moi.mail.MailDraft
+import fr.qwartz.mika.data.moi.teams.TeamsReply
+import fr.qwartz.mika.ui.mail.mailApi
+import fr.qwartz.mika.ui.teams.teamsApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
@@ -51,6 +56,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -182,6 +188,131 @@ class ChatViewModel(
 
     /** Le sort d'une décision, à dire une fois (un Snackbar). */
     val approvalMessages: SharedFlow<String> = graph.approvals.messages
+
+    // ── Ce qui attend ta décision, au-dessus du champ (ADR 0235, point 4) ──
+
+    /**
+     * La ligne au-dessus du champ, dépliée. Repliée par défaut ; elle se déplie toute seule quand un accord arrive pour
+     * la première fois (sur ce téléphone, pour cette session) — une liste redite à la reconnexion ne la rouvre pas.
+     */
+    var trayOpen by mutableStateOf(false)
+        private set
+    private val seenAccords = HashSet<Long>()
+
+    /** Ses brouillons de mail et ses réponses Teams lus pour la ligne ; `null` : pas lus (les pastilles suffisent). */
+    var trayMail by mutableStateOf<List<MailDraft>?>(null)
+        private set
+    var trayTeams by mutableStateOf<List<TeamsReply>?>(null)
+        private set
+    private var trayLoad: Job? = null
+
+    /** « Tout accepter » envoie ses accords, un à un. */
+    var acceptingAll by mutableStateOf(false)
+        private set
+
+    init {
+        viewModelScope.launch {
+            graph.approvals.state.collect { state ->
+                val fresh = ChatTray.newAccords(state.cards, seenAccords)
+                if (fresh.isNotEmpty()) {
+                    seenAccords += fresh
+                    trayOpen = true
+                }
+            }
+        }
+    }
+
+    fun toggleTray() {
+        trayOpen = !trayOpen
+    }
+
+    /** Plus rien n'attend : la ligne repart repliée. */
+    fun foldTray() {
+        trayOpen = false
+    }
+
+    /**
+     * Relire ses brouillons qui attendent, pour les nommer dans la ligne dépliée : seulement là où les pastilles ou une
+     * carte en disent ([mail], [teams]). Une lecture qui échoue garde ce qu'on avait (au pire, les pastilles et les
+     * cartes disent combien, et un lien mène à la liste).
+     */
+    fun loadTrayDrafts(mail: Boolean, teams: Boolean) {
+        trayLoad?.cancel()
+        trayLoad = viewModelScope.launch {
+            trayMail = if (!mail) emptyList() else (graph.mailApi().drafts() as? MoiApi.Result.Ok)?.value ?: trayMail
+            trayTeams = if (!teams) emptyList() else (graph.teamsApi().replies() as? MoiApi.Result.Ok)?.value ?: trayTeams
+        }
+    }
+
+    /**
+     * « Tout accepter » (ADR 0170), en mode pro, pour une opératrice : chaque accord montré ([shown]) que le bouton
+     * « Accepter » permettrait, un à la fois — chacun attend sa réponse (ou la liste qui suit) avant le suivant, car le
+     * serveur jette ce qui dépasse son débit. Au moment de partir, une carte qui a changé (une autre empreinte), n'est
+     * plus acceptable ou a disparu reste à la personne ; jamais un brouillon (il se décide dans Mail ou Teams). Hors
+     * ligne, rien ne part et c'est dit.
+     */
+    fun acceptAll(shown: List<ApprovalView>) {
+        if (acceptingAll || !operator.value || !proMode.value) return
+        val targets = ChatTray.acceptAllTargets(shown)
+        if (targets.isEmpty()) return
+        acceptingAll = true
+        viewModelScope.launch {
+            try {
+                for (target in targets) {
+                    val card = ChatTray.stillAcceptable(target, currentApprovals()) ?: continue
+                    if (!graph.connection.decide(card.id, ApprovalDecision.ACCEPT, card.digest)) {
+                        graph.approvals.say(Approvals.NOT_SENT)
+                        break
+                    }
+                    withTimeoutOrNull(Approvals.PENDING_TIMEOUT_MS) {
+                        graph.approvals.state.first { card.id !in it.pending }
+                    }
+                }
+            } finally {
+                acceptingAll = false
+            }
+        }
+    }
+
+    /** Les cartes telles qu'elles sont à cet instant (et non telles que l'écran les a dessinées). */
+    private fun currentApprovals(): List<ApprovalView> = Approvals.views(
+        graph.approvals.state.value,
+        graph.connection.link.value == LinkState.Online,
+        graph.clock.wallMs(),
+        graph.clock.elapsedMs(),
+    )
+
+    // ── Montrer un message (la recherche, « Fichiers échangés ») ──
+
+    /** Le message à montrer dans le fil (la clé de sa première bulle), surligné un instant ; `null` : rien. */
+    var focus by mutableStateOf<String?>(null)
+        private set
+
+    /**
+     * Ramener le fil sur ce message : le fil avec elle, ou son fil de travail (une opératrice, en mode pro) ; l'écran le
+     * montre au milieu, surligné, puis [focusDone].
+     */
+    fun showMessage(m: StoredMessage) {
+        val strand = m.strand
+        if (strand != null && operator.value) {
+            if (!proMode.value) setProMode(true)
+            openStrand(strand)
+        } else if (strand == null && proMode.value) {
+            setProMode(false)
+        }
+        focus = ChatItems.keyOf(m)
+    }
+
+    /** Ouvrir un de ses fils de travail (la recherche) : le mode pro, ce fil. */
+    fun showStrand(id: String) {
+        if (!operator.value) return
+        if (!proMode.value) setProMode(true)
+        openStrand(id)
+    }
+
+    fun focusDone() {
+        focus = null
+    }
 
     /** Le salut de retrouvailles, le temps d'un geste (voir [onShown]). */
     private val greeting = MutableStateFlow(AvatarDirector.Greeting.NONE)

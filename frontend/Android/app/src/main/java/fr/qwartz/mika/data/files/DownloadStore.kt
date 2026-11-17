@@ -13,11 +13,13 @@ import fr.qwartz.mika.data.chat.MessageAttachment
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import java.io.File
 import java.io.IOException
+import java.security.MessageDigest
 
 /**
  * Les fichiers que Mika envoie : les télécharger avec le jeton (le client [http] ne le pose que vers
@@ -40,11 +42,22 @@ class DownloadStore(
         data class Failed(val message: String, val sessionExpired: Boolean = false) : Outcome
     }
 
+    /**
+     * Un fichier de l'API par personne (une pièce jointe d'un mail, ADR 0235) : son adresse, qui doit être sur le
+     * serveur de la session, son nom, son type annoncé, et [key], ce qui le désigne de façon stable (sa copie à ouvrir
+     * se réutilise).
+     */
+    data class ServedFile(val url: HttpUrl, val name: String, val mime: String?, val key: String)
+
     /** Le dossier des copies à ouvrir ; vidé à la déconnexion. */
     val sharedDir: File get() = File(context.cacheDir, "shared")
 
-    suspend fun saveToDownloads(att: MessageAttachment): Outcome = withContext(io) {
-        val request = request(att) ?: return@withContext Outcome.Failed(DownloadErrors.NOT_A_FILE)
+    suspend fun saveToDownloads(att: MessageAttachment): Outcome = save(request(att), att)
+
+    suspend fun saveToDownloads(file: ServedFile): Outcome = save(request(file), file.asAttachment())
+
+    private suspend fun save(request: Request?, att: MessageAttachment): Outcome = withContext(io) {
+        if (request == null) return@withContext Outcome.Failed(DownloadErrors.NOT_A_FILE)
         try {
             http.newCall(request).execute().use { response ->
                 failure(response)?.let { return@withContext it }
@@ -59,9 +72,12 @@ class DownloadStore(
     }
 
     /** Pour « Ouvrir avec… » : réutilise une copie déjà faite, sinon la télécharge. */
-    suspend fun prepareOpen(att: MessageAttachment): Outcome = withContext(io) {
-        val request = request(att) ?: return@withContext Outcome.Failed(DownloadErrors.NOT_A_FILE)
-        val id = att.id!!.lowercase()
+    suspend fun prepareOpen(att: MessageAttachment): Outcome = open(request(att), att, att.id?.lowercase().orEmpty())
+
+    suspend fun prepareOpen(file: ServedFile): Outcome = open(request(file), file.asAttachment(), "moi-" + digest(file.key))
+
+    private suspend fun open(request: Request?, att: MessageAttachment, id: String): Outcome = withContext(io) {
+        if (request == null || id.isEmpty()) return@withContext Outcome.Failed(DownloadErrors.NOT_A_FILE)
         val dir = File(sharedDir, id)
         val target = File(dir, MikaFileRefs.localName(att))
         if (target.isFile && target.length() > 0) return@withContext ready(target, att, null)
@@ -99,6 +115,19 @@ class DownloadStore(
         val url = absoluteUrl(att) ?: return null
         return Request.Builder().url(url).get().build()
     }
+
+    /** Seulement vers le serveur de la session : le jeton ne part pas ailleurs, et un lien ne choisit pas où. */
+    private fun request(file: ServedFile): Request? {
+        val base = credentials()?.base ?: return null
+        if (!base.sameOrigin(file.url)) return null
+        return Request.Builder().url(file.url).get().build()
+    }
+
+    /** Ce que les règles des fichiers de Mika savent nommer et typer (le nom, le type annoncé). */
+    private fun ServedFile.asAttachment() = MessageAttachment(name = name, mime = mime, id = digest(key).take(8))
+
+    private fun digest(text: String): String =
+        MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }.take(32)
 
     private fun failure(response: Response): Outcome.Failed? {
         if (response.isSuccessful) return null

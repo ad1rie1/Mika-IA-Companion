@@ -18,8 +18,11 @@ object NotificationPolicy {
 
     /** L'état au moment de décider. */
     data class Context(
-        /** L'app est au premier plan : la personne voit déjà la conversation. */
-        val foreground: Boolean,
+        /**
+         * La conversation est à l'écran (`AppForeground.chatOnScreen`) : la personne la voit déjà. Pas l'app au premier
+         * plan seule — dans Mail, Teams ou la Carte, sa réponse ne se voit pas.
+         */
+        val chatOnScreen: Boolean,
         /** Le plus haut message lu (conversation ouverte) et le plus haut déjà notifié. */
         val lastReadId: Long,
         val lastNotifiedId: Long,
@@ -28,13 +31,13 @@ object NotificationPolicy {
     )
 
     /**
-     * Notifier ce message ? Seulement hors premier plan ; une parole de Mika, pas un murmure, avec du
-     * texte et un identifiant au-delà du lu et du notifié ; jamais à la toute première synchronisation
-     * (l'historique d'une installation neuve n'est pas du courrier) ; et pour une parole en direct,
-     * pas la réponse à une question posée depuis un autre appareil ([replyToOtherDevice]).
+     * Notifier ce message ? Seulement quand la conversation n'est pas à l'écran (l'app fermée, ou ouverte ailleurs que
+     * sur le chat) ; une parole de Mika, pas un murmure, avec du texte et un identifiant au-delà du lu et du notifié ;
+     * jamais à la toute première synchronisation (l'historique d'une installation neuve n'est pas du courrier) ; et pour
+     * une parole en direct, pas la réponse à une question posée depuis un autre appareil ([replyToOtherDevice]).
      */
     fun shouldNotify(message: StoredMessage, ctx: Context, replyToOtherDevice: Boolean = false): Boolean {
-        if (ctx.foreground) return false
+        if (ctx.chatOnScreen) return false
         if (message.sender != Sender.MIKA || message.inner) return false
         if (message.text.isBlank()) return false
         val id = message.id ?: return false
@@ -66,7 +69,7 @@ object NotificationPolicy {
     /**
      * Ce qu'une annonce du fil devient. [notify] : les messages à ajouter à la notification ;
      * [lastNotifiedId] : le nouveau « dernier notifié » — il avance sur tout ce que l'annonce portait,
-     * notifié ou non (premier plan, première synchronisation, réponse à un autre appareil) : un message
+     * notifié ou non (conversation à l'écran, première synchronisation, réponse à un autre appareil) : un message
      * écarté une fois l'est pour de bon, il ne ressurgira pas au prochain rattrapage. [alertOnce] : un
      * rattrapage met à jour la notification sans resonner ; une parole en direct sonne.
      */
@@ -103,6 +106,7 @@ object NotificationPolicy {
 
     /** L'état au moment de décider d'une parole venue par Firebase. */
     data class PushContext(
+        /** L'app est au premier plan (quel que soit l'écran) : sa connexion, si elle est ouverte, apporte la parole. */
         val foreground: Boolean,
         /** La connexion est ouverte : elle apporte elle-même ce que Mika dit. */
         val online: Boolean,

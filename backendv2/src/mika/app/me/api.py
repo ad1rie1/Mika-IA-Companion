@@ -21,7 +21,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
-from mika.adapters.web.accounts import Account, Accounts
+from mika.adapters.web.accounts import CLIENT_MOBILE, Account, Accounts
 from mika.adapters.web.body import BODY_MAX_BYTES, PayloadTooLarge, bounded_stream, json_object
 from mika.adapters.web.gate import SlidingWindow
 from mika.adapters.web.session import account_of, csrf_header_ok, native_token
@@ -332,11 +332,17 @@ class MeApiBase:
         #: la carte de sa position (ADR 0193 : ``adapters.maps.MapTiles``) ; ``None`` : pas de carte, le plan dessiné
         self.tiles = tiles
 
+    def _writes(self, token: str) -> bool:
+        """Un jeton porteur qui peut écrire : celui d'un téléphone (client ``mobile``, ADR 0235), valide."""
+        found = self.accounts.token(token)
+        return found is not None and self.accounts.token_client(found[1]) == CLIENT_MOBILE
+
     def route(self, path: str, handler: Handler, *, write: bool = False,
               raw: bool = False, upload: bool = False) -> Route:
-        """Une route : ``write`` — un POST, qui exige le jeton CSRF et lit un corps JSON ; ``upload`` — ce corps peut
-        aussi être un ``multipart/form-data`` : ses champs valent ceux du JSON, ses fichiers vont à ``Call.files``
-        (ADR 0214) ; ``raw`` — le gestionnaire rend lui-même sa réponse (un fichier, un cadre)."""
+        """Une route : ``write`` — un POST, qui exige le jeton CSRF (ou le jeton d'un téléphone, ADR 0235 : un écran ne
+        fait que lire) et lit un corps JSON ; ``upload`` — ce corps peut aussi être un ``multipart/form-data`` : ses
+        champs valent ceux du JSON, ses fichiers vont à ``Call.files`` (ADR 0214) ; ``raw`` — le gestionnaire rend
+        lui-même sa réponse (un fichier, un cadre)."""
 
         async def endpoint(request: Request) -> Response:
             account = account_of(request, self.accounts)
@@ -345,12 +351,15 @@ class MeApiBase:
             data: dict[str, Any] = {}
             files: tuple[File, ...] = ()
             if write:
-                if native_token(request.headers):
-                    # un client natif ne fait que lire : son jeton porteur et un CSRF qu'il poserait lui-même ne
-                    # prouvent pas une session de navigateur
-                    return JSONResponse({"error": "Un client natif ne fait que lire ici : écris depuis le navigateur."},
-                                        status_code=403, headers=NO_STORE)
-                if not csrf_header_ok(request):
+                token = native_token(request.headers)
+                if token:
+                    # le jeton d'un téléphone écrit comme une session (ADR 0235) : un en-tête Authorization ne part
+                    # jamais tout seul d'une autre page, il n'y a pas de CSRF à craindre ; un autre client natif ne
+                    # fait que lire, et un CSRF qu'il poserait lui-même ne prouve rien
+                    if not self._writes(token):
+                        return JSONResponse({"error": "Ce client ne fait que lire ici : écris depuis le navigateur ou "
+                                                      "l'application du téléphone."}, status_code=403, headers=NO_STORE)
+                elif not csrf_header_ok(request):
                     return JSONResponse({"error": "Requête refusée (CSRF)."}, status_code=403, headers=NO_STORE)
                 if upload and _is_multipart(request):
                     try:

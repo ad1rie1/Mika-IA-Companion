@@ -26,7 +26,6 @@ import fr.qwartz.mika.ui.DeepLinks
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -35,7 +34,7 @@ import kotlinx.serialization.builtins.serializer
 
 /**
  * Les notifications des messages de Mika. Les décisions sont dans [NotificationPolicy] (pur) ; ici on
- * lit l'état (premier plan, lu, notifié), on écrit le « dernier notifié », et on affiche une seule
+ * lit l'état (la conversation à l'écran, lu, notifié), on écrit le « dernier notifié », et on affiche une seule
  * notification de conversation (`MessagingStyle`, raccourci `mika`) avec « Répondre » et « Marquer
  * comme lu ». Ses lignes sont gardées en base : un processus tué ne vide pas la notification au
  * message suivant.
@@ -47,7 +46,10 @@ import kotlinx.serialization.builtins.serializer
 class MessageNotifier(
     private val context: Context,
     private val store: ChatStore,
-    private val foreground: StateFlow<Boolean>,
+    /** L'app est au premier plan, quel que soit l'écran (`AppForeground.visible`). */
+    private val appVisible: () -> Boolean,
+    /** La conversation est à l'écran (`AppForeground.chatOnScreen`) : c'est elle qui retient une notification. */
+    private val chatOnScreen: () -> Boolean,
     /** Le curseur du fil : « lu » jusque-là. */
     private val cursor: () -> Long,
     private val clock: () -> Long,
@@ -78,13 +80,13 @@ class MessageNotifier(
         }
         val lastRead = kvLong(Kv.LAST_READ_ID)
         val lastNotified = kvLong(Kv.LAST_NOTIFIED_ID)
-        val ctx = NotificationPolicy.Context(foreground.value, lastRead, lastNotified, event.cursorBefore)
+        val ctx = NotificationPolicy.Context(chatOnScreen(), lastRead, lastNotified, event.cursorBefore)
         // Les identifiants de nos bulles ne sont lus que s'il y a une corrélation à vérifier.
         val own = if (event.live && event.replyToClientMsgId != null) store.ownClientMsgIds() else emptySet()
         val plan = NotificationPolicy.plan(event, ctx) { it in own }
         if (plan.lastNotifiedId > lastNotified) store.kvPut(Kv.LAST_NOTIFIED_ID, plan.lastNotifiedId.toString())
         // Sous les yeux, le fil vient de rattraper ce que Firebase avait apporté : la notification n'en a plus besoin.
-        if (ctx.foreground) pruneSeen()
+        if (ctx.chatOnScreen) pruneSeen()
         if (plan.notify.isEmpty()) return@withLock
         val lines = NotificationPolicy.merge(readLines(), plan.notify, lastRead)
         writeLines(lines)
@@ -98,7 +100,7 @@ class MessageNotifier(
     suspend fun onPushed(message: PushPayload.Message, online: Boolean) = lock.withLock {
         val lastRead = kvLong(Kv.LAST_READ_ID)
         val pushed = readPushed()
-        val ctx = NotificationPolicy.PushContext(foreground.value, online, lastRead, cursor(), pushed.toSet())
+        val ctx = NotificationPolicy.PushContext(appVisible(), online, lastRead, cursor(), pushed.toSet())
         if (!NotificationPolicy.shouldNotifyPush(message.id, ctx)) return@withLock
         writePushed(NotificationPolicy.rememberPushed(pushed, message.id))
         // La connexion qui reviendrait app fermée (une réponse depuis la notification) ne le renotifie pas.

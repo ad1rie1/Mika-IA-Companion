@@ -138,4 +138,26 @@ class PhoneReadingTest {
         r.clear()
         assertEquals(0, r.size())
     }
+
+    @Test fun `la notification nomme la conversation à qui son action répond (R3-06)`() {
+        // en tête-à-tête : qui écrit (le dernier qui n'est pas la personne)
+        assertEquals("Léa", PhoneReading.read(notification(), on)!!.name)
+        val mom = PostedPerson(key = "key-maman", name = "Maman")
+        val mine = PostedStyle(me, null, false, listOf(PostedMessage("Bisous", 1, mom), PostedMessage("À ce soir", 2, me)))
+        assertEquals("Maman", PhoneReading.read(notification(style = mine), on)!!.name)
+        // un groupe : son nom
+        val group = PostedStyle(me, "Rando dimanche", true, listOf(PostedMessage("On part à 9h", 1, lea)))
+        assertEquals("Rando dimanche", PhoneReading.read(notification(style = group), on.copy(groups = true))!!.name)
+    }
+
+    @Test fun `le registre garde à qui répond chaque action, et le nom d'avant quand une notification ne le dit pas`() {
+        val r = ReplyRegistry<String>()
+        r.put("a", "a1", "Maman")
+        assertEquals(ReplyRegistry.Kept("a1", "Maman"), r.kept("a"))
+        r.put("a", "a2", "")
+        assertEquals(ReplyRegistry.Kept("a2", "Maman"), r.kept("a"))
+        r.put("a", "a3", "Plombier")
+        assertEquals("Plombier", r.kept("a")?.name)
+        assertNull(r.kept("b"))
+    }
 }

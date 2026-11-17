@@ -94,6 +94,10 @@ export class TripsTab {
   private optimistic: Trip | null = null;
   /** Les gestes sur le voyage, l'un après l'autre. */
   private readonly gestures = new GestureQueue();
+  /** Combien de gestes ont fini : la relecture d'un geste laisse faire celle d'un geste fini après lui. */
+  private finished = 0;
+  /** Un geste refusé (ou annulé derrière un refus) depuis la dernière relecture : ce qu'on montrait de lui n'a pas eu lieu. */
+  private refusedSince = false;
   private optimizing = false;
   /** L'arrêt dont on écrit la note (un seul à la fois) et ce qu'on a tapé, gardé d'un dessin à l'autre. */
   private noting: { stop: string; draft: string } | null = null;
@@ -105,6 +109,7 @@ export class TripsTab {
   /** Ce que la route ouvre : un voyage (« Sur la route » repart à vide pour un autre). */
   applyItem(item: string | null): void {
     this.optimistic = null;
+    this.refusedSince = false;
     this.host.fitNext();
     if (this.along.trip !== item) this.along = emptyAlong(item ?? "");
     this.noting = null;
@@ -228,16 +233,38 @@ export class TripsTab {
       error = err;
       if (!quiet) toastFailure(err);
     }
-    if (!this.gestures.busy) void this.reloadTrip(id);
+    this.finished += 1;
+    if (!ok) this.refusedSince = true;
+    if (!this.gestures.busy) void this.reloadTrip(id, this.finished);
     return { ok, error };
   }
 
-  /** Après les gestes : le voyage relu (c'est local), redessiné ; son trajet, `ROUTE_WAIT_MS` après le dernier. */
-  private async reloadTrip(id: string): Promise<void> {
+  /**
+   * Après les gestes (`seen` : combien avaient fini) : le voyage relu — après une lecture qui était partie avant eux
+   * (`Cached.load`) —, redessiné ; son trajet, `ROUTE_WAIT_MS` après le dernier. Relu, il remplace ce qu'on montrait
+   * d'eux. Pas relu (une panne) : l'échec se dit ; si tous ont abouti, ce qu'ils ont posé reste montré (le serveur l'a
+   * écrit : le voyage d'avant eux serait faux), sinon le dernier lu fait foi.
+   */
+  private async reloadTrip(id: string, seen: number): Promise<void> {
     this.invalidateTrip(id);
-    await this.host.tripCache.get(id).load(true);
-    if (this.gestures.busy) return; // un autre geste est parti : il relira après lui
+    const cache = this.host.tripCache.get(id);
+    await cache.load(true);
+    // un autre geste est parti, ou a fini depuis : sa relecture, partie après lui, fera foi
+    if (this.gestures.busy || this.finished !== seen) return;
+    const failed = cache.error !== null && !gone(cache.error) ? cache.error : null;
+    if (failed) {
+      const kept = this.optimistic?.id === id && !this.refusedSince ? this.optimistic : null;
+      toast(kept
+        ? `C'est enregistré, mais le voyage ne s'est pas relu : ${failureText(failed)} L'écran garde ce que tu as fait.`
+        : `Le voyage ne s'est pas relu : ${failureText(failed)}`, { ico: "alert", duration: 4200 });
+      if (kept) {
+        this.routes.want(kept);
+        if (this.host.open()) this.host.paint();
+        return;
+      }
+    }
     this.optimistic = null;
+    this.refusedSince = false;
     if (this.host.tripId() === id) this.host.syncTripHead(); // supprimé ailleurs (404) : ses actions partent
     const trip = this.host.tripCache.get(id).value;
     if (trip) this.routes.want(trip);

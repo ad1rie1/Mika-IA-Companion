@@ -17,16 +17,20 @@ import fr.qwartz.mika.R
 import fr.qwartz.mika.core.Logger
 import fr.qwartz.mika.core.MikaJson
 import fr.qwartz.mika.data.db.Kv
+import fr.qwartz.mika.data.phone.HereOutcome
 import fr.qwartz.mika.data.phone.PhoneApp
 import fr.qwartz.mika.data.phone.PhoneDraft
 import fr.qwartz.mika.data.phone.PhoneDraftBook
 import fr.qwartz.mika.data.phone.PhoneDrafts
+import fr.qwartz.mika.data.phone.PhoneHere
+import fr.qwartz.mika.data.phone.PhoneHereGestures
 import fr.qwartz.mika.data.phone.PhoneKv
 import fr.qwartz.mika.data.phone.PhoneOutbox
 import fr.qwartz.mika.data.phone.ReplyRegistry
 import fr.qwartz.mika.data.phone.SettleReason
 import fr.qwartz.mika.data.phone.Settlement
 import fr.qwartz.mika.ui.DeepLinks
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -39,6 +43,11 @@ import kotlinx.coroutines.sync.withLock
  * ([ReplyRegistry]) ; si elle n'existe plus, le texte est copié et une notification ouvre l'appli pour le coller. Le sort
  * repart au serveur par la file des messages ([PhoneOutbox.settle]). La proposition en attente est gardée sur disque le
  * temps de son échéance, pour que le geste marche après la mort du processus.
+ *
+ * Les mêmes gestes se font depuis l'écran Téléphone de l'app (ADR 0235 : [sendHere], [ignoreHere]), et ton propre
+ * message d'une conversation part par la même action ([replyHere]) ; le repli y copie le texte et l'écran ouvre l'appli.
+ * Depuis l'écran, l'action ne sert que si elle répond au fil montré (le nom que sa notification donnait, R3-06) : sinon
+ * le texte est copié, et l'écran l'a dit sous le champ avant le geste.
  */
 class PhoneDraftNotifier(
     private val context: Context,
@@ -49,7 +58,7 @@ class PhoneDraftNotifier(
     private val enabled: suspend () -> Boolean,
     private val clock: () -> Long,
     private val logger: Logger = Logger.NONE,
-) {
+) : PhoneHereGestures {
     private val lock = Mutex()
 
     /** Une proposition arrivée par Firebase : montrée, sauf expirée, déjà vue, ou la lecture coupée. */
@@ -88,29 +97,116 @@ class PhoneDraftNotifier(
             post(draft, now, alert = false)
             return@withLock
         }
+        settleSend(book, draft, typed, here = false, to = null)
+        outbox.flushSoon()
+    }
+
+    /**
+     * Le geste « Envoyer » sur [draft] ([typed] : ton texte, sinon le sien), par l'action « Répondre » de sa
+     * conversation ; sans elle, ou refusée par l'appli, le texte est copié. Réglée sur le disque, son sort en file.
+     * [here] : depuis l'écran de l'app, qui ouvre lui-même l'appli — aucune notification « Copié » ne se pose ; [to] :
+     * le nom du fil montré, que l'action gardée doit viser (`null` : depuis sa notification).
+     */
+    private suspend fun settleSend(book: PhoneDraftBook, draft: PhoneDraft, typed: String?, here: Boolean, to: String?): HereOutcome {
+        val id = draft.id
         val text = typed ?: draft.text
-        val action = replies.get(draft.thread)
-        val failure = when {
-            action == null -> SettleReason.NO_ACTION
-            deliver(action, text) -> null
-            else -> SettleReason.SEND_ERROR
-        }
+        val failure = reply(draft.thread, text, to)
         save(PhoneDrafts.settled(book, id))
-        when {
+        return when {
             failure == null -> {
                 cancel(id)
                 outbox.settle(id, if (typed == null) Settlement.SENT else Settlement.OTHER)
+                HereOutcome.SENT
             }
             copy(text) -> {
-                postCopied(draft, text)
+                if (here) cancel(id) else postCopied(draft, text)
                 outbox.settle(id, Settlement.COPIED, failure)
+                HereOutcome.COPIED
             }
             else -> {
                 cancel(id)
                 outbox.settle(id, Settlement.FAILED, failure)
+                HereOutcome.FAILED
             }
         }
-        outbox.flushSoon()
+    }
+
+    /**
+     * [text] dans la saisie de l'action « Répondre » gardée pour [thread] : `null` s'il est parti, sinon pourquoi pas.
+     * [to] : à qui l'écran dit qu'il part ; une action gardée pour une autre conversation (une clé que deux téléphones
+     * partagent) ne sert pas — pour cette conversation-là, il n'y a pas d'action.
+     */
+    private fun reply(thread: String, text: String, to: String? = null): SettleReason? {
+        val kept = replies.kept(thread)
+        return when {
+            kept == null || !PhoneHere.canDeliver(kept.name, to) -> SettleReason.NO_ACTION
+            deliver(kept.action, text) -> null
+            else -> SettleReason.SEND_ERROR
+        }
+    }
+
+    // ── Depuis l'écran Téléphone de l'app (ADR 0235) : les mêmes gestes, le même accord ──
+
+    /** Les propositions qui attendent un geste sur ce téléphone — celles qui se décident aussi depuis l'écran. */
+    override suspend fun waiting(): List<PhoneDraft> = lock.withLock { PhoneDrafts.prune(load(), clock()).pending }
+
+    /** À qui répond l'action « Répondre » gardée pour cette conversation ; `null` sans elle (ce qui part d'ici est copié). */
+    override fun replyTo(thread: String): String? = replies.kept(thread)?.name
+
+    /**
+     * « Envoyer » sa proposition depuis l'écran ([typed] : ce que tu as tapé après « Écrire autre chose » ; inchangé,
+     * c'est la sienne). Le même geste que dans sa notification, qui disparaît ; le repli copie sans notification.
+     */
+    override suspend fun sendHere(id: Long, typed: String?, to: String): HereOutcome = lock.withLock {
+        val now = clock()
+        val book = load()
+        val draft = PhoneDrafts.pending(book, id, now)
+        if (draft == null) {
+            cancel(id)
+            save(PhoneDrafts.prune(book, now))
+            return@withLock HereOutcome.GONE
+        }
+        if (typed != null && typed.isBlank()) return@withLock HereOutcome.NOTHING
+        settleSend(book, draft, PhoneHere.typedOrNull(typed, draft), here = true, to = to)
+    }
+
+    /** « Ignorer » depuis l'écran : comme dans sa notification, qui disparaît ; [HereOutcome.GONE] si elle n'attendait plus. */
+    override suspend fun ignoreHere(id: Long): HereOutcome = lock.withLock {
+        cancel(id)
+        val now = clock()
+        if (PhoneDrafts.pending(load(), id, now) == null) {
+            HereOutcome.GONE
+        } else {
+            settleIgnored(id, now)
+            HereOutcome.IGNORED
+        }
+    }
+
+    /**
+     * Ton propre message, écrit dans le fil d'une conversation sur l'écran : par l'action « Répondre » gardée pour
+     * [thread], comme si tu l'avais tapé dans la notification de l'appli ; sinon copié. Rien ne passe par le serveur :
+     * l'appli le montre, et le téléphone le lira avec les autres. [to] : le nom du fil montré ; une action gardée qui
+     * répond à quelqu'un d'autre ne sert pas, le texte est copié.
+     */
+    override suspend fun replyHere(thread: String, text: String, to: String): HereOutcome {
+        val body = text.trim()
+        if (body.isEmpty()) return HereOutcome.NOTHING
+        return when {
+            reply(thread, body, to) == null -> HereOutcome.SENT
+            copy(body) -> HereOutcome.COPIED
+            else -> HereOutcome.FAILED
+        }
+    }
+
+    /** Ce qui attend part tout de suite (l'écran ouvert, après un geste) ; un échec ne remonte pas, la file le garde. */
+    override suspend fun flushNow() {
+        try {
+            outbox.flush(PhoneOutbox.Trigger.FOREGROUND)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logger.w(TAG, "envoi des sorts depuis l'écran en échec", e)
+        }
     }
 
     /** « Ignorer » : rien ne part, et Mika le saura. */

@@ -510,20 +510,48 @@ object ChatSync {
     /**
      * Le mode, les outils, les petites bulles et le fil de travail d'une ligne déjà montrée, tels que le serveur les
      * dit (il est la référence : un message qu'il n'a pas reçu en mode pro ne l'est pas, ni dans un fil qu'il a
-     * ignoré ; le lieu d'une position oubliée s'efface). Des outils ou des bulles absents de la ligne ne retirent pas
-     * ceux qu'on connaît déjà. `true` si quelque chose a changé.
+     * ignoré ; le lieu d'une position oubliée s'efface, une note de carte aussi). Des outils ou des bulles absents de la
+     * ligne ne retirent pas ceux qu'on connaît déjà. Tes pièces apprennent de quoi les reprendre ([ownPieces]). `true`
+     * si quelque chose a changé.
      */
     private fun rework(shown: StoredMessage?, entry: HistoryEntry): Boolean {
         if (shown == null) return false
         val mode = modeOf(entry.mode)
         val tools = toolsOf(entry, shown.sender) ?: shown.tools.takeIf { mode != null }
         val notes = notesOf(entry, shown.sender) ?: shown.notes
-        if (shown.mode == mode && shown.tools == tools && shown.notes == notes && shown.strand == entry.strand) return false
+        val pieces = if (shown.sender == Sender.USER) ownPieces(shown.attachments, entry.attachments) else shown.attachments
+        if (shown.mode == mode && shown.tools == tools && shown.notes == notes && shown.strand == entry.strand &&
+            shown.attachments == pieces
+        ) {
+            return false
+        }
         shown.mode = mode
         shown.tools = tools
         shown.notes = notes
         shown.strand = entry.strand
+        shown.attachments = pieces
         return true
+    }
+
+    /**
+     * Tes pièces telles que le fil relu les dit (ADR 0215) : une fois lues, le serveur leur donne de quoi les reprendre
+     * (`id`, `url`, `available`). Une bulle envoyée d'ici garde son fichier sur le téléphone
+     * ([MessageAttachment.local]) et apprend le reste, pièce par pièce, dans l'ordre et au même nom ; une ligne qui
+     * n'en dit rien ne retire rien.
+     */
+    fun ownPieces(shown: List<MessageAttachment>, refs: List<AttachmentRef>): List<MessageAttachment> {
+        if (refs.isEmpty()) return shown
+        if (shown.isEmpty()) return refs.map(MessageAttachment::of)
+        return shown.mapIndexed { i, att ->
+            val ref = refs.getOrNull(i)?.takeIf { it.name == att.name } ?: return@mapIndexed att
+            att.copy(
+                id = ref.id ?: att.id,
+                url = ref.url ?: att.url,
+                available = ref.available ?: att.available,
+                mime = att.mime ?: ref.mime,
+                size = att.size ?: ref.size,
+            )
+        }
     }
 
     // ── Le fil d'une autre vie (ADR 0056) ──

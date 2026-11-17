@@ -154,3 +154,42 @@ def test_a_shared_service_only_shows_the_tools_its_owner_serves(world, monkeypat
     assert shared["state"] == "connecte" and shared["level"] == "lire"
     assert shared["tools"] == [{"remote": "lister", "name": "mcp_factures_lister", "description": "Liste ses factures.",
                                 "choice": "lecture"}]
+
+
+def test_headers_never_follow_an_address_that_leads_elsewhere(world):  # noqa: F811
+    """ADR 0236 : des en-têtes gardés ne partent jamais vers un autre serveur. Une adresse qui mène ailleurs (un autre
+    hôte, ou port) les redemande — 400 sur leur champ, en mots, rien d'enregistré — tant qu'on ne les redonne pas ou
+    qu'on ne les retire pas ; le chemin seul ne compte pas, et un service sans en-têtes ne redemande rien."""
+    client, live, _ = world
+    bootstrap(client)
+    second_person(client, live)
+    login(client, "lea")
+    assert post(client, "/mcp/plug", SERVICE).status_code == 200
+
+    def save(values: dict):
+        return post(client, "/mcp/save", {"name": "factures", "values": values})
+
+    for elsewhere in ("https://autre.example.test/mcp", "https://mcp.factures.example.test:8443/mcp"):
+        moved = save({"url": elsewhere, "secret_headers": ""})
+        assert moved.status_code == 400, elsewhere
+        assert moved.json()["fields"] == {"secret_headers": "à redonner : l'adresse a changé (ou à retirer)"}
+        assert "redonne ses en-têtes" in moved.json()["error"]
+        kept = servers(client, live)["factures"]
+        assert kept.url == SERVICE["url"] and kept.secret_headers == "Authorization: Bearer abc"
+    # le même serveur, un autre chemin (ou le port qu'il avait déjà) : ils restent
+    assert save({"url": "https://MCP.factures.example.test:443/v2/mcp"}).status_code == 200
+    assert servers(client, live)["factures"].secret_headers == "Authorization: Bearer abc"
+    # redonnés : ils partent avec la nouvelle adresse
+    given = save({"url": "https://autre.example.test/mcp", "secret_headers": "Authorization: Bearer xyz"})
+    assert given.status_code == 200, given.text
+    now = servers(client, live)["factures"]
+    assert now.url == "https://autre.example.test/mcp" and now.secret_headers == "Authorization: Bearer xyz"
+    # retirés : rien ne se redemande, rien ne part
+    cleared = save({"url": "https://encore.example.test/mcp", "clear_headers": True})
+    assert cleared.status_code == 200, cleared.text
+    now = servers(client, live)["factures"]
+    assert now.url == "https://encore.example.test/mcp" and now.secret_headers == ""
+    assert client.get(API + "/mcp/services").json()["items"][0]["headers"] is False
+    # sans en-têtes gardés, une adresse qui change ne redemande rien
+    assert save({"url": "https://ailleurs.example.test/mcp"}).status_code == 200
+    assert save({"clear_headers": "oui"}).status_code == 400  # un booléen, pas un mot

@@ -47,7 +47,7 @@ import type { ScreenContext, ScreenDef, ScreenTab, Shell } from "../../shell/she
 import { dayAndClock } from "../chat/markup";
 import * as store from "../../shared/store";
 import { bindCounts, bindPieces, bindRecipients, errorText, openAsk, openCompose, paintPieces, readRecipients, type ComposeValues } from "./compose";
-import { answerable, caps, clip, forwardSubject, newNonce, outgoingText, parseAddresses, personName, replySubject, replyTargets, toFill, type Caps } from "./format";
+import { answerable, caps, clip, draftNotWaiting, draftReply, forwardSubject, newNonce, outgoingText, parseAddresses, personName, replySubject, replyTargets, toFill, type Caps } from "./format";
 import {
   boxesPane,
   boxViews,
@@ -1009,16 +1009,20 @@ export class MailScreen {
     }
   }
 
-  /** Ta réponse, partie de son brouillon : ta version d'abord (elle l'apprendra), puis l'envoi tel qu'il se lit. */
+  /** Ta réponse, partie de son brouillon : ta version d'abord (elle l'apprendra), puis l'envoi tel qu'il se lit. Son
+   *  brouillon se relit tel qu'il est : refusé ou plus là, ta réponse part comme une autre ; parti, approuvé ou en
+   *  échec, rien de plus ne part ; une lecture en panne lève, et rien ne part. */
   private async sendThroughDraft(id: string, mail: Outgoing & { quote: boolean }, m: MailFull): Promise<Done> {
-    const d = (await fetchDrafts()).find((x) => x.id === id);
-    if (!d || d.state !== "attend") return replyMail(m.ref, mail, newNonce());
+    const w = draftReply(await fetchDrafts(), id);
+    if (w.via === "reply") return replyMail(m.ref, mail, newNonce());
+    if (w.via === "stop") throw new Error(w.why);
+    const d = w.draft;
     const same = (a: string, b: string) =>
       parseAddresses(a).map((p) => p.address).join(",") === parseAddresses(b).map((p) => p.address).join(",");
     const changed = !same(d.to, mail.to) || !same(d.cc, mail.cc ?? "") || d.subject !== mail.subject || d.body !== mail.body || d.quote !== mail.quote;
     if (changed) await editDraft(id, mail);
     const now = (await fetchDrafts()).find((x) => x.id === id);
-    if (!now?.preview || now.state !== "attend") throw new Error("Son brouillon n'attend plus de décision : rien n'est parti.");
+    if (!now?.preview || now.state !== "attend") throw new Error(draftNotWaiting(now?.state ?? ""));
     if (now.preview.blocked) throw new Error(`Il ne peut pas partir tel quel : ${now.preview.blocked}.`);
     return sendDraft(id, now.preview.digest, newNonce());
   }

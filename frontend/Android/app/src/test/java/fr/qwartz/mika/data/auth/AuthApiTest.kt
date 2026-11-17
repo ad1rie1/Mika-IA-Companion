@@ -50,7 +50,8 @@ class AuthApiTest {
         assertTrue(r is AuthApi.Result.Ok)
         val grant = (r as AuthApi.Result.Ok).value
         assertEquals("mw_xyz", grant.token)
-        assertEquals(Profile("adrien", "Adrien", "user_3", true), grant.profile)
+        // l'identifiant du jeton reste avec le profil : il dit lequel de tes téléphones est celui-ci (R3-03)
+        assertEquals(Profile("adrien", "Adrien", "user_3", true, tokenId = 12), grant.profile)
         assertFalse(grant.toString().contains("mw_xyz"))
 
         val request = server.takeRequest(5, TimeUnit.SECONDS)!!

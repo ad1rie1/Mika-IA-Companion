@@ -43,6 +43,9 @@ class ChatRepository(
 
     fun observeLastReadId(): Flow<Long> = store.observeKv(Kv.LAST_READ_ID).map { it?.toLongOrNull() ?: 0L }
 
+    /** L'identifiant de sa dernière parole : au-delà du lu, elle a écrit depuis (la pastille hors du chat). */
+    fun observeLastFromMika(): Flow<Long> = store.observeLastFromMika()
+
     /**
      * Envoyer ce qui a été tapé, avec des fichiers déjà préparés (copiés dans l'espace de l'app). [mode] : `pro`
      * pour un message de travail (ADR 0116), gardé avec la bulle et sa ligne de file d'envoi — un renvoi le garde.

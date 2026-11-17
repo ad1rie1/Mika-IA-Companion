@@ -24,7 +24,7 @@ import { confirmModal, failureText, newNonce, toastFailure } from "../../shared/
 import type { Host, Page } from "./page";
 import { openShareModal } from "./shares";
 import * as store from "../../shared/store";
-import { CHOICES, ofName, serviceNameProblem, servedOf, shareWords, stateWords, urlProblem, type FormValue } from "./words";
+import { CHOICES, headersToRetype, ofName, serviceNameProblem, servedOf, shareWords, stateWords, urlProblem, type FormValue } from "./words";
 
 const TAB = "#parametres/mcp";
 /** Les bornes de l'API pour brancher un service (`app/me/mcp.py`, en caractères) : au-delà, elle refuse. */
@@ -188,7 +188,8 @@ function ficheView(name: string, host: Host): string {
     row("À quoi il lui sert", "Ce qu'elle lit pour savoir quand s'en servir.", text("purpose", s.purpose, `maxlength="${MCP_LIMITS.purpose}"`)) +
       row("Quand y penser", "Facultatif : quand elle devrait y penser d'elle-même.", area("when_to_use", s.when_to_use, 2, `maxlength="${MCP_LIMITS.purpose}"`)) +
       row("Adresse", "L'adresse MCP « streamable HTTP » du service, en https.", text("url", s.url, `class="mono" spellcheck="false" maxlength="${MCP_LIMITS.url}"`)) +
-      row("En-têtes secrets", s.headers ? "Gardés, jamais réaffichés : laisse vide pour ne pas les changer." : "Un par ligne (Authorization: Bearer …), s'il en demande.", area("secret_headers", "", 2, `class="mono" spellcheck="false" maxlength="${MCP_LIMITS.headers}" placeholder="${s.headers ? "gardés — vide : inchangés" : "Authorization: Bearer …"}"`)) +
+      row("En-têtes secrets", s.headers ? "Gardés, jamais réaffichés : laisse vide pour ne pas les changer. Une adresse qui mène à un autre serveur les redemande : ils ne le suivent pas." : "Un par ligne (Authorization: Bearer …), s'il en demande.", area("secret_headers", "", 2, `class="mono" spellcheck="false" maxlength="${MCP_LIMITS.headers}" placeholder="${s.headers ? "gardés — vide : inchangés" : "Authorization: Bearer …"}"`)) +
+      (s.headers ? row("Retirer ses en-têtes", "Coché : ils sont effacés à l'enregistrement, rien ne partira plus.", toggle("clear_headers", false)) : "") +
       row("Actif", "Décoché : plus joint ni offert ; ses réglages restent.", toggle("enabled", s.enabled)) +
       row("Retirer ce service", "Il n'est plus joint ni offert ; ce qu'elle y a lu reste dans sa vie.", `<button class="btn sm danger" type="button" data-act="mcp-remove" data-name="${h(s.name)}">${ico("trash", "sm")}Retirer</button>`),
     sub("service"),
@@ -325,6 +326,14 @@ export const mcpPage: Page = {
   async save(form, changes, _values, item, host) {
     const name = form.dataset.name ?? item ?? "";
     const { choices, values } = splitChanges(changes);
+    // une adresse qui mène ailleurs : ses en-têtes gardés se redonnent ou se retirent (le serveur refuserait sinon)
+    const before = list().find((x) => x.name === name);
+    const retype = before ? headersToRetype(changes, before.headers, before.url) : {};
+    if (Object.keys(retype).length) {
+      const rest = showFieldErrors(form, retype);
+      toast(rest.length ? `L'adresse a changé : ${rest.join(" ; ")}` : "L'adresse a changé : redonne ses en-têtes secrets, ou retire-les (ils ne partent pas vers un autre serveur).", { ico: "alert", duration: 5200 });
+      return false;
+    }
     try {
       const said: string[] = [];
       if (Object.keys(values).length) said.push((await saveService(name, values)).message);

@@ -5,6 +5,7 @@
 import { h, norm } from "../../shell/dom";
 import type { ConversationKind, OwnPending, Reply, ReplyMode, ReplyState, TeamsAccount, TeamsMessage, Thread } from "../../api/teams";
 import { clock } from "../chat/markup";
+import { ofName } from "../../shared/names";
 
 /** Une réponse encore en chemin (une autre ne se prépare pas dans la même conversation). */
 export const UNDER_WAY: ReadonlySet<ReplyState> = new Set<ReplyState>(["attend", "approuve", "en_file", "pose"]);
@@ -24,6 +25,21 @@ export type AccountWho = Pick<TeamsAccount, "level" | "self_name" | "owner_name"
  *  l'est pas : on ne t'attribue jamais un message sans le savoir. */
 export function ownAccount(a: Pick<TeamsAccount, "level"> | null | undefined): boolean {
   return a?.level === "proprietaire";
+}
+
+/** Sous quel nom part ce qui part de ce compte, en mots : « sous ton nom » sur un compte à toi ; sur un compte qu'on
+ *  te partage, sous celui de sa personne (son nom dans Teams, à défaut son propriétaire) — jamais le tien. Un compte
+ *  qu'on ne connaît pas (pas encore lu) : « sous le nom du compte ». */
+export function sentUnder(a: AccountWho | null | undefined): string {
+  if (!a) return "sous le nom du compte";
+  if (ownAccount(a)) return "sous ton nom";
+  return `sous le nom ${ofName(a.self_name || a.owner_name || "son propriétaire")}`;
+}
+
+/** Ce que dit une réponse qui attend : ton accord, ou celui du propriétaire du compte quand ce n'est pas toi qui
+ *  décides (un compte qu'on te partage). */
+export function awaits(decides: boolean): string {
+  return decides ? "attend ton accord" : "attend l'accord de son propriétaire";
 }
 
 /** Un message de toi : écrit par la personne du compte, sur un compte à toi (à droite, comme dans Teams). Sur un
@@ -63,14 +79,15 @@ export function retouched(r: Pick<Reply, "edited" | "sent_text" | "body">): bool
   return !!r.sent_text && !!r.body && !plain(r.sent_text).includes(plain(r.body));
 }
 
-/** L'état d'une réponse, en mots, et son ton ; `now` pour le délai d'un accord. Une réponse à laquelle on a répondu
- *  autrement n'attend plus rien, même avant que le moteur ne l'ait refusée, et son refus le dit (ADR 0199). */
-export function replyState(r: Pick<Reply, "state" | "edited" | "sent_text" | "body" | "expires" | "answered">): [string, string] {
+/** L'état d'une réponse, en mots, et son ton ; `decides` : tu décides sur son compte (sinon elle attend son
+ *  propriétaire). Une réponse à laquelle on a répondu autrement n'attend plus rien, même avant que le moteur ne l'ait
+ *  refusée, et son refus le dit (ADR 0199). */
+export function replyState(r: Pick<Reply, "state" | "edited" | "sent_text" | "body" | "expires" | "answered">, decides = true): [string, string] {
   if (r.answered && r.state === "attend") return ["", "répondu autrement"];
   if (r.answered && r.state === "refuse") return ["", "refusée · répondu autrement"];
   switch (r.state) {
     case "attend":
-      return ["warn", r.expires ? `attend ton accord · jusqu'à ${clock(r.expires)}` : "attend ton accord"];
+      return ["warn", r.expires ? `${awaits(decides)} · jusqu'à ${clock(r.expires)}` : awaits(decides)];
     case "approuve":
       return ["info", "approuvée, en partance"];
     case "en_file":
@@ -92,14 +109,17 @@ export function replyState(r: Pick<Reply, "state" | "edited" | "sent_text" | "bo
   }
 }
 
-/** Ce que dit la carte d'une réponse en chemin, dans sa conversation (comme la maquette). */
-export function cardState(r: Pick<Reply, "state" | "expires">): [string, string] {
+/** Ce que dit la carte d'une réponse en chemin, dans sa conversation (comme la maquette) ; `under` : sous quel nom
+ *  part ce qui part du compte (`sentUnder`), `decides` : tu décides sur ce compte (sinon son propriétaire). */
+export function cardState(r: Pick<Reply, "state" | "expires">, under = "sous ton nom", decides = true): [string, string] {
   switch (r.state) {
-    case "attend":
-      return ["warn", r.expires ? `Ton accord : elle part quand tu l'acceptes, ici · jusqu'à ${clock(r.expires)}` : "Ton accord : elle part quand tu l'acceptes, ici"];
+    case "attend": {
+      const who = decides ? "Ton accord : elle part quand tu l'acceptes, ici" : "L'accord de son propriétaire : elle part quand il l'accepte";
+      return ["warn", r.expires ? `${who} · jusqu'à ${clock(r.expires)}` : who];
+    }
     case "approuve":
     case "en_file":
-      return ["info", "En file : l'extension l'envoie dans Teams, sous ton nom"];
+      return ["info", `En file : l'extension l'envoie dans Teams, ${under}`];
     case "pose":
       return ["info", "Posée dans la zone de saisie de Teams : tu l'envoies là-bas"];
     default:
@@ -191,11 +211,12 @@ export interface OwnBubble {
   failed: boolean;
 }
 
-/** Ce que dit l'état d'un de tes messages en attente ; `failed` : il ne partira pas. */
-export function pendingNote(state: string, reason = ""): { note: string; failed: boolean } {
+/** Ce que dit l'état d'un de tes messages en attente ; `failed` : il ne partira pas ; `under` : sous quel nom il part
+ *  (`sentUnder` : sur un compte qu'on te partage, celui de sa personne). */
+export function pendingNote(state: string, reason = "", under = "sous ton nom"): { note: string; failed: boolean } {
   switch (state) {
     case "en_file":
-      return { note: "en file : l'extension l'envoie dans Teams, sous ton nom", failed: false };
+      return { note: `en file : l'extension l'envoie dans Teams, ${under}`, failed: false };
     case "envoi":
       return { note: "en cours d'envoi par l'extension", failed: false };
     case "pose":
@@ -224,12 +245,12 @@ export function stillSentHere(local: readonly SentHere[], t: Pick<Thread, "key" 
 }
 
 /** Les bulles de toi au bas du fil : ce que le moteur dit de tes messages en attente, du plus ancien au plus récent,
- *  puis tes envois d'ici qu'il n'a pas encore pu dire. */
-export function ownBubbles(pending: readonly OwnPending[] | undefined, local: readonly SentHere[]): OwnBubble[] {
+ *  puis tes envois d'ici qu'il n'a pas encore pu dire ; `under` : sous quel nom ils partent (`sentUnder`). */
+export function ownBubbles(pending: readonly OwnPending[] | undefined, local: readonly SentHere[], under = "sous ton nom"): OwnBubble[] {
   const fromEngine = [...(pending ?? [])]
     .sort((a, b) => a.at - b.at)
-    .map((p) => ({ id: p.id, text: p.body, at: p.at, ...pendingNote(p.state, p.reason ?? "") }));
-  const here = local.map((p) => ({ id: "", text: p.text, at: p.at, ...pendingNote("en_file") }));
+    .map((p) => ({ id: p.id, text: p.body, at: p.at, ...pendingNote(p.state, p.reason ?? "", under) }));
+  const here = local.map((p) => ({ id: "", text: p.text, at: p.at, ...pendingNote("en_file", "", under) }));
   return [...fromEngine, ...here];
 }
 

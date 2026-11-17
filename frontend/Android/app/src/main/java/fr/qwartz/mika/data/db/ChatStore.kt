@@ -59,6 +59,9 @@ class ChatStore(private val db: MikaDatabase) : ThreadStore {
 
     fun observeKv(key: String): Flow<String?> = kv.observe(key).distinctUntilChanged()
 
+    /** L'identifiant de sa dernière parole gardée, à chaque écriture (0 : aucune). */
+    fun observeLastFromMika(): Flow<Long> = messages.observeLastFromMika().distinctUntilChanged()
+
     override suspend fun kvGet(key: String): String? = kv.get(key)
     override suspend fun kvPut(key: String, value: String?) {
         if (value == null) kv.delete(key) else kv.put(KvEntity(key, value))

@@ -140,6 +140,30 @@ def test_nothing_is_shared_with_yourself_nor_with_one_who_owns_it_already(world)
     assert share(client, "mcp", "inconnu", "user_1", "lire").status_code == 404
 
 
+def test_a_phone_token_writes_without_csrf(world):  # noqa: F811
+    """ADR 0235 : le jeton d'un téléphone (client ``mobile``) écrit comme une session, sans cookie ni CSRF."""
+    client, live, _ = world
+    bootstrap(client)
+    origin = client.headers.pop("origin")  # sans Origin : un client natif
+    try:
+        r = client.post("/auth/token", json={"username": "adrien", "password": "un-mot-de-passe-long",
+                                             "client": "mobile"})
+        token = r.json().get("token")
+        assert token, r.text
+        client.cookies.clear()  # ni session ni CSRF : le jeton seul
+        w = client.post(API + "/account/name", json={"name": "Adrien du téléphone"},
+                        headers={"Authorization": f"Bearer {token}"})
+        assert w.status_code == 200, w.text
+        assert client.get(API, headers={"Authorization": f"Bearer {token}"}).json()["name"] == "Adrien du téléphone"
+        live_token = client.portal.call(lambda: live.accounts.use_token(token))
+        assert live_token is not None
+        client.portal.call(lambda: live.accounts.revoke_token(live_token[1]))
+        gone = client.post(API + "/account/name", json={"name": "Après"}, headers={"Authorization": f"Bearer {token}"})
+        assert gone.status_code == 401  # révoqué : plus personne
+    finally:
+        client.headers["origin"] = origin
+
+
 def test_a_writing_native_token_is_refused(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
@@ -153,7 +177,7 @@ def test_a_writing_native_token_is_refused(world):  # noqa: F811
         assert client.get(API, headers=bearer).status_code == 200  # il lit
         client.cookies.set("csrftoken", "forge")
         w = client.post(API + "/account/name", json={"name": "Pirate"}, headers={**bearer, "X-CSRFToken": "forge"})
-        assert w.status_code == 403  # mais n'écrit pas, même avec un CSRF qu'il pose lui-même
+        assert w.status_code == 403  # un écran (pas un téléphone) n'écrit pas, même avec un CSRF qu'il pose lui-même
     finally:
         client.headers["origin"] = origin
     assert client.get(API).json()["name"] != "Pirate"

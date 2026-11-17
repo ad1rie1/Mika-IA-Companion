@@ -36,6 +36,11 @@ data class ApprovalView(
     val canRefuse: Boolean,
     /** Ce qui se passe, ou pourquoi « Accepter » est éteint ; `null` quand tout est possible. */
     val hint: String?,
+    /** L'échéance (époque en millisecondes), pour le compte à rebours de la ligne repliée ; `null` : sans échéance. */
+    val expiresAt: Long? = null,
+    /** Ce qu'elle veut faire et son brouillon (une carte qui se décide ailleurs, ADR 0191 : `ui/chat/ChatTray`). */
+    val capability: String = "",
+    val draft: String = "",
 )
 
 /**
@@ -110,6 +115,9 @@ object Approvals {
             canAccept = acceptable && online && waiting == null,
             canRefuse = online && waiting == null,
             hint = hint,
+            expiresAt = card.expiresAt,
+            capability = card.capability,
+            draft = card.draft,
         )
     }
 

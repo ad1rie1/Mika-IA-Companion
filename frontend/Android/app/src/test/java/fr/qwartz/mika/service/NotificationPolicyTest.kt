@@ -9,7 +9,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NotificationPolicyTest {
-    private val background = NotificationPolicy.Context(foreground = false, lastReadId = 10, lastNotifiedId = 12, cursorBefore = 12)
+    private val background = NotificationPolicy.Context(chatOnScreen = false, lastReadId = 10, lastNotifiedId = 12, cursorBefore = 12)
     private fun mika(id: Long?, text: String = "coucou", inner: Boolean = false) =
         StoredMessage(text, Sender.MIKA, 0, id = id, inner = inner)
 
@@ -17,8 +17,8 @@ class NotificationPolicyTest {
         assertTrue(NotificationPolicy.shouldNotify(mika(13), background))
     }
 
-    @Test fun `jamais au premier plan`() {
-        assertFalse(NotificationPolicy.shouldNotify(mika(13), background.copy(foreground = true)))
+    @Test fun `jamais la conversation à l'écran`() {
+        assertFalse(NotificationPolicy.shouldNotify(mika(13), background.copy(chatOnScreen = true)))
     }
 
     @Test fun `ni un murmure, ni un message vide, ni ses propres messages`() {
@@ -63,8 +63,8 @@ class NotificationPolicyTest {
     }
 
     @Test fun `le dernier notifié avance même quand rien n'est notifié`() {
-        // Au premier plan, à la première synchronisation, en réponse à un autre appareil : écarté pour de bon.
-        val foreground = NotificationPolicy.plan(spoke(20), background.copy(foreground = true)) { false }
+        // La conversation à l'écran, à la première synchronisation, en réponse à un autre appareil : écarté pour de bon.
+        val foreground = NotificationPolicy.plan(spoke(20), background.copy(chatOnScreen = true)) { false }
         assertTrue(foreground.notify.isEmpty())
         assertEquals(20L, foreground.lastNotifiedId)
         val first = NotificationPolicy.plan(spoke(30, 31, before = 0), background.copy(lastNotifiedId = 0)) { false }

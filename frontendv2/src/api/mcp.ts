@@ -93,8 +93,10 @@ export interface ServiceValues {
   when_to_use: string;
   enabled: boolean;
   url: string;
-  /** Laissés vides, les en-têtes gardés restent. */
+  /** Laissés vides, les en-têtes gardés restent ; une adresse qui mène ailleurs les redemande (ADR 0236). */
   secret_headers: string;
+  /** Vrai : les en-têtes gardés sont retirés. */
+  clear_headers: boolean;
 }
 
 export function fetchServices(): Promise<Services> {

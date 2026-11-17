@@ -28,7 +28,7 @@ En cas de désaccord entre une doc et le code, le code fait foi : corriger la do
 | `frontend/Web/` | Client web : Vite, Three.js, VRM, TypeScript. Contient `src/`, `public/`, `assets-src/` (sources Blender et scripts, partagés avec Unity) et `studio.html`. |
 | `frontendv2/` | Le client web de tous les jours (Vite, TypeScript, ADR 0187) : chat et mode pro, Outils, Mail, Teams, Téléphone, Paramètres, pour chaque personne qui a un compte, sur l'API par personne (`/api/moi`, `backendv2/docs/protocole-moi.md`). Il réutilise sans copie les modules purs de `frontend/Web/src` ; `maquette/` est la maquette validée. Commencer par son `README.md`. |
 | `frontend/Unity/` | Client Unity : `Mika/` (le projet), `ArtSource/` (mocap, atelier), `tools/gen_world_protocol.py`. |
-| `frontend/Android/` | Messagerie Android (Kotlin, Compose, paquet `fr.qwartz.mika`). Commencer par son `README.md`. Côté serveur, voir les ADR 0062, 0067 et 0077. |
+| `frontend/Android/` | L'app Android (Kotlin, Compose, paquet `fr.qwartz.mika`) : le chat, puis par un tiroir ce que fait `frontendv2/` (ADR 0235), sur la même API par personne. Commencer par son `README.md` ; `maquette/` est la maquette validée. Côté serveur, voir les ADR 0062, 0067, 0077 et 0235. |
 | `frontend/Extension/` | Extension Chrome MV3 « Mika · Teams » (JS sans build). Elle lit ce que Teams web reçoit déjà et pose dans Teams ce que Mika a écrit (ADR 0069). Tests : `npm test`. |
 | `INJECTION/` | Jumeau numérique (paquet `twin`, CLI `jumeau`). Des archives personnelles sont lues par Claude Code puis revécues en accéléré par le vrai noyau. `brut/`, `travail/` et `sortie/` contiennent des données privées et ne sont jamais commités. Il a son propre `CLAUDE.md`. |
 | `scripts/ai_pipeline/` | Des agents auditent le dépôt, ouvrent des issues et les corrigent en PR, sur `backendv2/` et les trois clients. |
@@ -221,6 +221,8 @@ ou ajouter une faculté : ARCHITECTURE.md, « Écrire une faculté ».
   le schéma du noyau par `backendv2/.venv/bin/python frontend/Unity/tools/gen_world_protocol.py` ; avec `--check`, la
   commande échoue si le fichier a vieilli : régénérer après tout changement du protocole côté noyau (de même pour
   `frontend/Web/tools/gen_world_protocol.py`).
-- **Android** (`frontend/Android/`) : messagerie à une seule conversation, fichiers dans les deux sens, Mika en 3D native
-  (Filament), portraits pré-rendus en repli. Lire son `README.md`.
+- **Android** (`frontend/Android/`) : la conversation (fichiers dans les deux sens, Mika en 3D native avec Filament,
+  portraits pré-rendus en repli), puis par le tiroir Mail, Teams, Carte (MapLibre), Téléphone, Outils et Paramètres
+  (ADR 0235). Lire son `README.md` ; les icônes et le style de la carte se tirent de la maquette et du web par
+  `frontend/Android/tools/icones.py` et `frontend/Android/tools/carte_style.mjs` (`--check`).
 - **Extension** (`frontend/Extension/`) : lire son `README.md`.

@@ -152,24 +152,38 @@ object FrameCodec {
     }
 
     /**
-     * Les petites bulles d'un de ses messages (ADR 0119) : `null` quand ce n'est pas une liste, ou qu'il n'y en a
-     * aucune de connue. Seules les sortes que cette version sait montrer passent (`location`) ; un texte qui n'est
-     * pas une chaîne vaut vide (la bulle se montre sans lieu), un instant illisible vaut 0 (sans heure). Bornées
-     * en nombre et en longueur.
+     * Les petites bulles d'un de ses messages (ADR 0119, 0196) : `null` quand ce n'est pas une liste, ou qu'il n'y en a
+     * aucune de connue. Seules les sortes que cette version sait montrer passent (`location`, et ses notes de carte
+     * `look`, `map`, `trip`) ; un texte qui n'est pas une chaîne vaut vide (la bulle se montre sans lieu, une note de
+     * carte vidée ne montre rien), un instant illisible vaut 0 (sans heure) ; `ref` : une chaîne ou un entier, en texte
+     * (autre chose, ou trop long : vide — rien à ouvrir). Une note vidée est gardée : elle remplace celle d'avant (un
+     * regard oublié, un voyage supprimé). Bornées en nombre et en longueur ; ce qui se montre est validé à l'affichage.
      */
     private fun messageNotes(element: JsonElement?): List<MessageNote>? {
         val items = element as? JsonArray ?: return null
         return items.asSequence()
             .mapNotNull { item ->
                 val o = item as? JsonObject ?: return@mapNotNull null
-                val kind = (o["kind"] as? JsonPrimitive)?.takeIf { it.isString }?.content
-                if (kind != MikaProtocol.NOTE_LOCATION) return@mapNotNull null
+                val kind = (o["kind"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return@mapNotNull null
+                if (kind !in NOTE_KINDS) return@mapNotNull null
                 val text = (o["text"] as? JsonPrimitive)?.takeIf { it.isString }?.content?.trim().orEmpty()
-                MessageNote(kind, clip(text, MikaProtocol.MAX_NOTE_TEXT_CHARS), o["at"]?.let { timestampMs(it) } ?: 0L)
+                val ref = if (kind == MikaProtocol.NOTE_LOCATION) "" else noteRef(o["ref"])
+                MessageNote(kind, clip(text, MikaProtocol.MAX_NOTE_TEXT_CHARS), o["at"]?.let { timestampMs(it) } ?: 0L, ref)
             }
             .take(MikaProtocol.MAX_MESSAGE_NOTES)
             .toList()
             .ifEmpty { null }
+    }
+
+    private val NOTE_KINDS = setOf(
+        MikaProtocol.NOTE_LOCATION, MikaProtocol.NOTE_LOOK, MikaProtocol.NOTE_MAP, MikaProtocol.NOTE_TRIP,
+    )
+
+    /** Ce qu'une note de carte ouvre : une chaîne, ou un entier, en texte ; autre chose, ou trop long : vide. */
+    private fun noteRef(element: JsonElement?): String {
+        val p = element as? JsonPrimitive ?: return ""
+        val raw = if (p.isString) p.content.trim() else p.longOrNull?.toString().orEmpty()
+        return raw.takeIf { it.length <= MikaProtocol.MAX_NOTE_REF_CHARS }.orEmpty()
     }
 
     /**
@@ -269,8 +283,17 @@ object FrameCodec {
             blocked = clip(blocked, MikaProtocol.MAX_APPROVAL_BLOCKED_CHARS),
             expiresAt = expiresAt,
             complete = complete,
+            capability = optionalText(o["capability"], MikaProtocol.MAX_APPROVAL_CAPABILITY_CHARS),
+            draft = optionalText(o["draft"], MikaProtocol.MAX_APPROVAL_DRAFT_CHARS),
         )
     }
+
+    /**
+     * Ce qu'une carte dit en plus d'elle-même (sa capacité, son brouillon) : une chaîne, sinon vide — jamais ce qui
+     * l'écarte ; trop longue, vide aussi (un identifiant coupé ne désigne rien).
+     */
+    private fun optionalText(element: JsonElement?, max: Int): String =
+        (element as? JsonPrimitive)?.takeIf { it.isString }?.content?.trim()?.takeIf { it.length <= max }.orEmpty()
 
     private fun decodeApprovalResult(obj: JsonObject): ServerFrame {
         val unknown = ServerFrame.Unknown(MikaProtocol.TYPE_APPROVAL_RESULT)

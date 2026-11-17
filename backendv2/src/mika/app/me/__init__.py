@@ -1,10 +1,11 @@
 """L'API par personne (ADR 0187) : ce que ``frontendv2`` montre à qui est connecté, et seulement à elle.
 
 Chaque route lit la session du navigateur, ou le jeton d'un client natif présenté **sans** ``Origin`` (la règle de
-``/auth/whoami``) ; une route qui écrit exige en plus le jeton CSRF (cookie ``csrftoken``, en-tête ``X-CSRFToken``),
-qu'un client natif n'a pas : rien n'est élargi. Qui est connecté est une **personne** (``Me``) : son compte, la clé de
-sa personne (``identity.person``), et si elle est une de ses propriétaires — les boîtes « à toi » (sans propriétaire
-nommé, ADR 0185) sont alors les siennes.
+``/auth/whoami``). Une route qui écrit exige en plus, d'un navigateur, le jeton CSRF (cookie ``csrftoken``, en-tête
+``X-CSRFToken``) ; d'un client natif, que son jeton soit celui d'un téléphone (client ``mobile``, ADR 0235) : un
+téléphone écrit, un écran (``screen``) ne fait que lire. Qui est connecté est une **personne** (``Me``) : son compte,
+la clé de sa personne (``identity.person``), et si elle est une de ses propriétaires — les boîtes « à toi » (sans
+propriétaire nommé, ADR 0185) sont alors les siennes.
 
 Rien ici ne recopie une règle. Une ressource est à quelqu'un selon ses paramètres journalisés (``owners``) ; ce qu'on y
 fait passe par les actions que la console déclare (``runtime.operations.perform``), au nom de la personne (``by``) :

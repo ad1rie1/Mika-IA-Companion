@@ -51,6 +51,11 @@ android {
         resValues = true
     }
 
+    lint {
+        // Timber n'arrive qu'avec MapLibre (sa dépendance) : l'app écrit par `core/Logger`, la remarque n'a pas d'objet.
+        disable += "LogNotTimber"
+    }
+
     testOptions {
         unitTests {
             // Le cœur est du Kotlin pur ; ce filet évite qu'un Log oublié fasse échouer un test JVM.
@@ -151,6 +156,9 @@ dependencies {
     // Les notifications app fermée (ADR 0077) : des messages de données Firebase, chiffrés par le serveur.
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.messaging)
+    // La vraie carte (ADR 0193, 0235) : MapLibre Native sur le fond, les polices et les icônes de ce serveur seul (le
+    // client HTTP de l'app, `MapKit` dans `ui/map/MapBase.kt`) ; sans télémétrie, sans tuiles par défaut.
+    implementation(libs.maplibre.android)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

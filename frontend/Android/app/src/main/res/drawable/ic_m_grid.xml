@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Généré par frontend/Android/tools/icones.py depuis la maquette (« i-grid ») : ne pas retoucher à la main. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path android:strokeColor="#FF000000" android:strokeWidth="1.7" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M5.5,4h3.5a1.5,1.5 0 0,1 1.5,1.5v3.5a1.5,1.5 0 0,1 -1.5,1.5h-3.5a1.5,1.5 0 0,1 -1.5,-1.5v-3.5a1.5,1.5 0 0,1 1.5,-1.5Z" />
+    <path android:strokeColor="#FF000000" android:strokeWidth="1.7" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M15,4h3.5a1.5,1.5 0 0,1 1.5,1.5v3.5a1.5,1.5 0 0,1 -1.5,1.5h-3.5a1.5,1.5 0 0,1 -1.5,-1.5v-3.5a1.5,1.5 0 0,1 1.5,-1.5Z" />
+    <path android:strokeColor="#FF000000" android:strokeWidth="1.7" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M5.5,13.5h3.5a1.5,1.5 0 0,1 1.5,1.5v3.5a1.5,1.5 0 0,1 -1.5,1.5h-3.5a1.5,1.5 0 0,1 -1.5,-1.5v-3.5a1.5,1.5 0 0,1 1.5,-1.5Z" />
+    <path android:strokeColor="#FF000000" android:strokeWidth="1.7" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M15,13.5h3.5a1.5,1.5 0 0,1 1.5,1.5v3.5a1.5,1.5 0 0,1 -1.5,1.5h-3.5a1.5,1.5 0 0,1 -1.5,-1.5v-3.5a1.5,1.5 0 0,1 1.5,-1.5Z" />
+</vector>

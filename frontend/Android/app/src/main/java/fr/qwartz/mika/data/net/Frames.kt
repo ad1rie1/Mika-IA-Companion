@@ -199,6 +199,13 @@ data class ApprovalCard(
     val expiresAt: Long? = null,
     /** Faux quand [text] a été coupé à la lecture : on n'accepte pas ce qu'on n'a pas lu en entier. */
     val complete: Boolean = true,
+    /** Ce qu'elle veut faire (`mcp.call`, `email.send`, `teams.send`…) ; vide : non dit. */
+    val capability: String = "",
+    /**
+     * Le brouillon qu'elle a écrit, pour un mail (`email.send`) ou une réponse Teams (`teams.send`) ; vide sinon. Une
+     * telle carte se relit et se décide là où elle partira (ADR 0191) : le chat n'en montre qu'un lien.
+     */
+    val draft: String = "",
 )
 
 /** Ce que la personne décide d'une carte, tel que la trame `approval` l'écrit. */
@@ -247,13 +254,17 @@ data class HistoryEntry(
 data class ToolUse(val name: String, val ok: Boolean)
 
 /**
- * Une petite bulle jointe à un de ses messages (ADR 0119, `protocol.py::note_item`) : ce qu'elle a fait en
- * l'écrivant. [kind] : `location` (elle a regardé où tu es), la seule sorte que `FrameCodec` laisse passer ;
- * [text] : ce qu'elle a vu (le lieu, sinon des coordonnées), vide une fois oublié ; [at] : de quand datait ce
- * qu'elle a vu, en millisecondes Unix (0 : inconnu). L'app compose le texte de la bulle.
+ * Une petite bulle jointe à un de ses messages (ADR 0119, 0196, `protocol.py::note_item`) : ce qu'elle a fait en
+ * l'écrivant. [kind] : `location` (elle a regardé où tu es), `look` (elle a cherché des lieux ou calculé un trajet),
+ * `map` (elle a montré une carte), `trip` (elle a créé ou changé un voyage) — les seules sortes que `FrameCodec`
+ * laisse passer ; [text] : ce qu'elle a vu (le lieu, ce qu'elle a cherché, le titre de la carte ou du voyage), vide une
+ * fois oublié ; [at] : de quand datait ce qu'elle a vu (le dernier changement d'un voyage), en millisecondes Unix (0 :
+ * inconnu) ; [ref] : ce qu'une note de carte ouvre (le `seq` d'un regard, l'identifiant d'un voyage), vide sinon ou
+ * une fois oublié. Gardée telle quelle, une note vidée comprise (elle remplace celle d'avant) ; ce qui se montre est
+ * validé à l'affichage (`ui/chat/MapNotes`). L'app compose le texte de la bulle.
  */
 @Serializable
-data class MessageNote(val kind: String, val text: String = "", val at: Long = 0)
+data class MessageNote(val kind: String, val text: String = "", val at: Long = 0, val ref: String = "")
 
 // ── L'état intérieur (`inner_state`), lu section par section ─────────────────────────────
 

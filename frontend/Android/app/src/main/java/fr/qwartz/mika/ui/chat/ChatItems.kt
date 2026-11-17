@@ -63,6 +63,13 @@ sealed interface ChatItem {
      */
     data class Looked(override val key: String, val note: MessageNote, val messageTs: Long) : ChatItem
 
+    /**
+     * Une de ses notes de carte (ADR 0196), sous ses bulles : une carte miniature de ce qu'elle a cherché, montré ou
+     * préparé, qui s'ouvre dans l'écran Carte. [owner] : la clé du message qui la porte (deux messages qui montrent le
+     * même voyage ont chacun leur place) ; [after] : la clé de sa dernière bulle — la carte attend qu'elle soit là.
+     */
+    data class MapCard(override val key: String, val note: MapNote, val owner: String, val after: String) : ChatItem
+
     /** Une pensée à voix haute : éphémère, en italique. */
     data class Thought(override val key: String, val message: StoredMessage) : ChatItem
 
@@ -76,8 +83,8 @@ sealed interface ChatItem {
 
 /**
  * Construire la liste à dessiner, du plus ancien au plus récent : séparateurs de date, note de
- * troncature, bulles et leurs notes, ses petites bulles, pensées, cartes de travail, « Mika écrit… ». Pur : l'heure et le
- * fuseau sont passés, pour que les tests ne dépendent pas de l'horloge.
+ * troncature, bulles et leurs notes, ses petites bulles et ses cartes miniatures, pensées, cartes de travail,
+ * « Mika écrit… ». Pur : l'heure et le fuseau sont passés, pour que les tests ne dépendent pas de l'horloge.
  */
 object ChatItems {
     private val DAY = DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.FRENCH)
@@ -153,6 +160,13 @@ object ChatItems {
                         (answeredAfter[i] || m.waiting == ChatSync.SEEN),
                 )
             }
+            // ses notes de carte (ADR 0196) : une miniature chacune, sous sa dernière bulle
+            if (m.sender == Sender.MIKA && !m.inner && !isSystemNote(m)) {
+                val last = (out.lastOrNull() as? ChatItem.Bubble)?.key ?: key
+                MapNotes.read(m.notes).forEachIndexed { n, note ->
+                    out += ChatItem.MapCard("g$key.$n", note, owner = key, after = last)
+                }
+            }
             m.note?.let { out += ChatItem.Note("n$key", it) }
             val replyNote = m.replyNote
             if (replyNote != null) {
@@ -227,7 +241,8 @@ object ChatItems {
     private fun isSystemNote(m: StoredMessage) =
         m.sender == Sender.MIKA && m.id == null && m.source == MikaProtocol.SOURCE_ERROR
 
-    private fun keyOf(m: StoredMessage): String = when {
+    /** La clé de la première bulle d'un message (les suivantes : `<clé>.1`, `<clé>.2`…) : ce que la recherche montre. */
+    fun keyOf(m: StoredMessage): String = when {
         m.localId != 0L -> "m${m.localId}"
         m.id != null -> "s${m.id}"
         m.cid != null -> "c${m.cid}"

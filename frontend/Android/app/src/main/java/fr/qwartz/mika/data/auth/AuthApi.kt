@@ -20,13 +20,18 @@ import okhttp3.Response
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
-/** Qui est connecté (`/auth/whoami`), tel que l'app le garde. */
+/**
+ * Qui est connecté (`/auth/whoami`), tel que l'app le garde. [tokenId] : l'identifiant du jeton de cette session
+ * (rendu à la connexion), qui dit lequel de ses téléphones est celui-ci (R3-03) ; `null` pour une session ouverte
+ * avant que l'app le garde.
+ */
 @Serializable
 data class Profile(
     val username: String = "",
     @SerialName("display_name") val displayName: String = "",
     @SerialName("person_id") val personId: String = "",
     val operator: Boolean = false,
+    @SerialName("token_id") val tokenId: Long? = null,
 )
 
 /**
@@ -56,7 +61,7 @@ class AuthApi(
         @SerialName("person_id") val personId: String = "",
         val operator: Boolean = false,
     ) {
-        val profile: Profile get() = Profile(username, displayName, personId, operator)
+        val profile: Profile get() = Profile(username, displayName, personId, operator, tokenId)
         override fun toString() = "TokenGrant(tokenId=$tokenId, client=$client, personId=$personId)"
     }
 
@@ -70,7 +75,7 @@ class AuthApi(
         val client: String? = null,
         @SerialName("token_id") val tokenId: Long? = null,
     ) {
-        val profile: Profile get() = Profile(username, displayName, personId, operator)
+        val profile: Profile get() = Profile(username, displayName, personId, operator, tokenId)
     }
 
     suspend fun login(base: ServerBase, username: String, password: String, label: String): Result<TokenGrant> {

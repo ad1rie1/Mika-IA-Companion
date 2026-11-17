@@ -169,7 +169,9 @@ Mika n'a qu'un élément (`#mika-corner`) : son visage dans la pastille du haut,
   ordre, un autre mode : il se relit 1,5 s après le dernier geste, et le trajet d'avant ne se montre pas en attendant),
   et « Sur la route » ne se recherche que si le trajet a changé. Les gestes sur un voyage se font l'un après l'autre ; un
   arrêt lâché à sa place n'envoie rien ; chaque ajout a sa clé d'envoi (un double clic, un réessai ne l'ajoutent qu'une
-  fois). Un point d'itinéraire retapé rend le trajet montré passé : ni consignes, ni GPX, ni « En faire un voyage »
+  fois). Le voyage se relit après le dernier geste fini (une lecture partie avant lui est suivie d'une autre) ; une
+  relecture en panne après des gestes tous aboutis garde ce qu'ils ont posé (le serveur l'a écrit) et le dit, après
+  un refus le dernier voyage lu fait foi. Un point d'itinéraire retapé rend le trajet montré passé : ni consignes, ni GPX, ni « En faire un voyage »
   avant de le choisir. La carte ne tourne pas (pas de boussole pour revenir au nord) ; la main reste sur le contrôle
   qu'on touchait d'un dessin à l'autre, et un arrêt déplacé au clavier se dit à un lecteur d'écran.
 - **Outils** : la matrice de ses droits, ressource par ressource — chaque outil, nommé pour elle (son libellé, ADR
@@ -185,8 +187,9 @@ Mika n'a qu'un élément (`#mika-corner`) : son visage dans la pastille du haut,
   régler, la clé de leur extension, montrée une fois, les retirer), et pour chacun comment part ce que Mika y prépare
   (ADR 0207 : préparer d'elle-même et comment ça part, ligne par ligne et par défaut ; qui écrit et l'ordre des lignes
   restent à la console), ses téléphones (révoquer, télécharger l'application), ses partages, ses services MCP
-  (brancher un service distant, régler chacun de ses outils — coupé, il lit, il agit —, le retirer ; ceux qu'on lui
-  partage, en lecture, sous « Partagé avec toi »). Une route d'action ouvre la fenêtre qu'un bouton promet, depuis un
+  (brancher un service distant, régler chacun de ses outils — coupé, il lit, il agit —, le retirer ; ses en-têtes
+  secrets gardés ne suivent pas une adresse qui mène à un autre serveur : la fiche les redemande sous leur champ avant
+  l'envoi, ou « Retirer ses en-têtes », ADR 0236 ; ceux qu'on lui partage, en lecture, sous « Partagé avec toi »). Une route d'action ouvre la fenêtre qu'un bouton promet, depuis un
   autre écran ou la palette : `#parametres/mcp/+brancher`, `#parametres/compte/+mot-de-passe`,
   `#parametres/partages/+partager` (l'adresse redevient celle de l'onglet).
 - **Partout** : la pastille de Mika (ce qu'elle fait, son humeur) ouvre « Ce qu'elle fait » ; Ctrl K cherche un écran,

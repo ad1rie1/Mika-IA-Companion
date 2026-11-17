@@ -16,6 +16,8 @@ import {
   boxState,
   changed,
   fieldErrors,
+  headersToRetype,
+  HEADERS_TO_RETYPE,
   ofName,
   providerPreset,
   rangeProblems,
@@ -30,6 +32,7 @@ import {
   shareWords,
   stateWords,
   unseenOf,
+  urlOrigin,
   urlProblem,
 } from "./words";
 
@@ -167,6 +170,21 @@ describe("les services MCP", () => {
     expect(splitChanges({ "tool:devis_list": "lecture", "tool:bad": "", purpose: "Devis", secret_headers: "" })).toEqual({
       choices: { devis_list: "lecture" }, values: { purpose: "Devis" },
     });
+  });
+  it("redemande ses en-têtes gardés quand l'adresse mène à un autre serveur (ADR 0236)", () => {
+    const before = "https://agenda.exemple.fr/mcp";
+    const ask = { secret_headers: HEADERS_TO_RETYPE };
+    // un autre hôte, un autre port : à redonner ou à retirer, le serveur refuserait sinon
+    expect(headersToRetype({ url: "https://autre.example/mcp", secret_headers: "" }, true, before)).toEqual(ask);
+    expect(headersToRetype({ url: "https://agenda.exemple.fr:8443/mcp" }, true, before)).toEqual(ask);
+    // redonnés, ou retirés : ils partent avec l'adresse, ou plus rien ne part
+    expect(headersToRetype({ url: "https://autre.example/mcp", secret_headers: "Authorization: Bearer x" }, true, before)).toEqual({});
+    expect(headersToRetype({ url: "https://autre.example/mcp", clear_headers: true }, true, before)).toEqual({});
+    // le même serveur (un autre chemin, le port du schéma, des majuscules) ; aucun en-tête gardé ; l'adresse pas touchée
+    expect(headersToRetype({ url: "https://AGENDA.exemple.fr:443/v2/mcp" }, true, before)).toEqual({});
+    expect(headersToRetype({ url: "https://autre.example/mcp" }, false, before)).toEqual({});
+    expect(headersToRetype({ purpose: "Agenda" }, true, before)).toEqual({});
+    expect(urlOrigin("https://Agenda.exemple.fr/mcp")).toBe(urlOrigin("https://agenda.exemple.fr:443/x"));
   });
 });
 

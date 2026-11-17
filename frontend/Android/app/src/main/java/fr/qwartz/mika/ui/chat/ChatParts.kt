@@ -125,6 +125,11 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import fr.qwartz.mika.avatar3d.Utterance
 import fr.qwartz.mika.ui.avatar.rememberReducedMotion
+import fr.qwartz.mika.ui.shell.MIcon
+import fr.qwartz.mika.ui.shell.MenuEntry
+import androidx.compose.foundation.background
+import androidx.compose.material3.HorizontalDivider
+import kotlinx.coroutines.delay
 import kotlin.math.PI
 import kotlin.math.sin
 
@@ -143,6 +148,11 @@ class ChatActions(
     val judge: (messageId: Long, verdict: String, comment: String) -> Unit = { _, _, _ -> },
 )
 
+/**
+ * La barre du chat : ☰ (le tiroir), son visage et sa ligne d'état (« Ce qu'elle fait »), la loupe ([onSearch] : la
+ * recherche, la conversation d'abord) et ⋮ — en mode pro ses fils ([extra]), puis Ce qu'elle fait, Fichiers échangés
+ * ([onFiles]), Paramètres.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ChatTopBar(
@@ -152,6 +162,10 @@ internal fun ChatTopBar(
     face: LoadedPortrait? = null,
     faceTint: Color = MaterialTheme.colorScheme.primaryContainer,
     transparent: Boolean = false,
+    onMenu: (() -> Unit)? = null,
+    onSearch: (() -> Unit)? = null,
+    onFiles: (() -> Unit)? = null,
+    extra: List<MenuEntry> = emptyList(),
 ) {
     var menu by remember { mutableStateOf(false) }
     val openMindLabel = stringResource(R.string.chat_open_mind)
@@ -161,6 +175,14 @@ internal fun ChatTopBar(
             TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent, scrolledContainerColor = Color.Transparent)
         } else {
             TopAppBarDefaults.topAppBarColors()
+        },
+        // le tiroir des rubriques (ADR 0235) : le chat reste en plein écran, ☰ à gauche de son visage
+        navigationIcon = {
+            if (onMenu != null) {
+                IconButton(onClick = onMenu) {
+                    Icon(painterResource(R.drawable.ic_m_menu), stringResource(R.string.shell_menu))
+                }
+            }
         },
         title = {
             Row(
@@ -188,24 +210,54 @@ internal fun ChatTopBar(
             }
         },
         actions = {
-            IconButton(onClick = { menu = true }) {
-                Icon(painterResource(R.drawable.ic_more_vert), stringResource(R.string.chat_more))
+            if (onSearch != null) {
+                IconButton(onClick = onSearch) {
+                    MIcon(R.drawable.ic_m_search, stringResource(R.string.chat_search))
+                }
             }
-            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.menu_status)) },
-                    onClick = {
-                        menu = false
-                        onOpenMind()
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.menu_settings)) },
-                    onClick = {
-                        menu = false
-                        onOpenSettings()
-                    },
-                )
+            Box {
+                IconButton(onClick = { menu = true }) {
+                    Icon(painterResource(R.drawable.ic_more_vert), stringResource(R.string.chat_more))
+                }
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    for (e in extra) {
+                        DropdownMenuItem(
+                            text = { Text(e.label) },
+                            leadingIcon = { MIcon(e.icon, null, size = 20.dp) },
+                            onClick = {
+                                menu = false
+                                e.onClick()
+                            },
+                        )
+                    }
+                    if (extra.isNotEmpty()) HorizontalDivider()
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.menu_status)) },
+                        leadingIcon = { MIcon(R.drawable.ic_m_sparkle, null, size = 20.dp) },
+                        onClick = {
+                            menu = false
+                            onOpenMind()
+                        },
+                    )
+                    if (onFiles != null) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.chat_menu_files)) },
+                            leadingIcon = { MIcon(R.drawable.ic_m_folder, null, size = 20.dp) },
+                            onClick = {
+                                menu = false
+                                onFiles()
+                            },
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.menu_settings)) },
+                        leadingIcon = { MIcon(R.drawable.ic_m_settings, null, size = 20.dp) },
+                        onClick = {
+                            menu = false
+                            onOpenSettings()
+                        },
+                    )
+                }
             }
         },
     )
@@ -282,6 +334,14 @@ internal fun ChatConversation(
     wide: Boolean = false,
     /** Ce que dit un fil vide ; `null` : l'invitation du fil avec elle. Un fil de travail neuf (ADR 0164) dit le sien. */
     emptyText: String? = null,
+    /**
+     * Le message à montrer (la clé de sa première bulle : la recherche, « Fichiers échangés ») : le fil s'y porte et le
+     * surligne un instant, puis [onFocused]. Pas encore dans le fil, il attend.
+     */
+    focus: String? = null,
+    onFocused: () -> Unit = {},
+    /** Une de ses notes de carte (ADR 0196) ; `null` : elles ne se montrent pas (les tests d'écran, sans graphe). */
+    mapCard: (@Composable (ChatItem.MapCard) -> Unit)? = null,
 ) {
     if (items.isEmpty()) {
         // Sur son portrait, l'invitation se met sous elle plutôt qu'en travers.
@@ -319,6 +379,22 @@ internal fun ChatConversation(
         }
     }
     LaunchedEffect(atBottom) { if (atBottom) unseen = 0 }
+    // le message que la recherche demande : le fil s'y porte, puis il se surligne un instant
+    var highlighted by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(focus, reversed) {
+        val key = focus ?: return@LaunchedEffect
+        val index = reversed.indexOfFirst { it.key == key }
+        if (index < 0) return@LaunchedEffect
+        listState.scrollToItem(index)
+        highlighted = key
+        onFocused()
+    }
+    LaunchedEffect(highlighted) {
+        if (highlighted != null) {
+            delay(FOUND_MS)
+            highlighted = null
+        }
+    }
     // Sa carte de travail qui apparaît en bas du fil (ADR 0116) : on la suit, si l'on y était.
     val workAtBottom = (items.lastOrNull() as? ChatItem.Work)?.key
     LaunchedEffect(workAtBottom) { if (workAtBottom != null && atBottom) listState.animateScrollToItem(0) }
@@ -358,7 +434,12 @@ internal fun ChatConversation(
                 .then(if (stage != null) Modifier.fadeTop(FADE_HEIGHT) else Modifier),
         ) {
             items(reversed, key = { it.key }) { item ->
-                Box(Modifier.animateItem(fadeInSpec = tween(220), fadeOutSpec = tween(160))) {
+                val lit = highlighted?.let { h -> item.key == h || item.key.startsWith("$h.") } == true
+                Box(
+                    Modifier
+                        .animateItem(fadeInSpec = tween(220), fadeOutSpec = tween(160))
+                        .then(if (lit) Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f), RoundedCornerShape(14.dp)) else Modifier),
+                ) {
                     when (item) {
                         is ChatItem.DateSeparator -> Centered(item.label, overPortrait, heading = true)
                         ChatItem.TruncatedNote -> Centered(stringResource(R.string.chat_truncated), overPortrait)
@@ -375,6 +456,7 @@ internal fun ChatConversation(
                         )
                         is ChatItem.Note -> Backed(overPortrait) { Note(item, operator, actions) }
                         is ChatItem.Looked -> LookedChip(item, zone, overPortrait)
+                        is ChatItem.MapCard -> if (mapCard != null) MapCardSlot(item, stage, mapCard)
                         is ChatItem.Thought -> Backed(overPortrait) { Thought(item.message) }
                         is ChatItem.SystemNote -> Centered(item.text, overPortrait)
                         is ChatItem.Work -> WorkCardView(item, overPortrait, wide)
@@ -402,6 +484,25 @@ internal fun ChatConversation(
 
 /** Au-delà de ce défilement depuis le bas, on relit l'historique. */
 private val HISTORY_THRESHOLD = 24.dp
+
+/** Le temps qu'un message trouvé reste surligné. */
+private const val FOUND_MS = 2_500L
+
+/**
+ * Une de ses notes de carte, sous ses bulles (ADR 0196) : elle attend que sa dernière bulle soit là — ses bulles
+ * arrivent l'une après l'autre, au rythme de ce qu'elle dit —, puis prend la largeur d'une bulle.
+ */
+@Composable
+private fun MapCardSlot(item: ChatItem.MapCard, stage: StageLink?, content: @Composable (ChatItem.MapCard) -> Unit) {
+    val utterance = stage?.track?.of(item.after)
+    if (utterance != null) {
+        val turn = rememberTurn(utterance)
+        if (turn == Turn.AWAITING || turn == Turn.TYPING) return
+    }
+    Row(Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 2.dp)) {
+        Box(Modifier.fillMaxWidth(0.85f)) { content(item) }
+    }
+}
 
 /** La bande du fil, quand elle est là : jamais moins, quoi que demande son visage. */
 private val MIN_BAND = 168.dp

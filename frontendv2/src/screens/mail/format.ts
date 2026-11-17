@@ -5,7 +5,7 @@
  */
 import { h, hue, initials } from "../../shell/dom";
 import type { IconName } from "../../shell/icons";
-import { MAIL_LIMITS, PIECE_LIMITS, type MailBox, type MailFull, type Person } from "../../api/mail";
+import { MAIL_LIMITS, PIECE_LIMITS, type MailBox, type MailDraft, type MailFull, type Person } from "../../api/mail";
 import { ofName } from "../../shared/names";
 
 /** « de Léa », « d'Adrien » : commun à Mail et à Teams (`shared/names.ts`), réexporté pour l'écran Mail. */
@@ -359,6 +359,31 @@ export function ago(ms: number, now: number): string {
   const hours = Math.round(min / 60);
   if (hours < 24) return `il y a ${hours} h`;
   return `il y a ${Math.round(hours / 24)} j`;
+}
+
+// ── Ta réponse partie de son brouillon ────────────────────────────────
+
+/** Ce que devient ta réponse partie de son brouillon : il attend, elle passe par lui ; refusé ou plus là, elle part
+ *  comme une réponse ordinaire ; parti, approuvé ou en échec, rien de plus ne part (`why` dit pourquoi). */
+export type DraftReply<D> = { via: "draft"; draft: D } | { via: "reply" } | { via: "stop"; why: string };
+
+/**
+ * Ta réponse partie de son brouillon `id`, d'après ses brouillons relus tels qu'ils sont (pas seulement ceux qui
+ * attendent). Seul un brouillon refusé ou absent laisse partir une réponse ordinaire : parti (une réponse du serveur
+ * perdue, puis ta retouche ; ou envoyé d'ailleurs), approuvé ou en échec, une seconde réponse partirait.
+ */
+export function draftReply<D extends { id: string; state: MailDraft["state"] }>(drafts: readonly D[], id: string): DraftReply<D> {
+  const d = drafts.find((x) => x.id === id);
+  if (!d || d.state === "refuse") return { via: "reply" };
+  if (d.state === "attend") return { via: "draft", draft: d };
+  return { via: "stop", why: draftNotWaiting(d.state) };
+}
+
+/** Pourquoi rien ne part par un de ses brouillons qui n'attend plus (`state` : ce qu'il est devenu). */
+export function draftNotWaiting(state: string): string {
+  if (state === "parti" || state === "approuve") return "Son brouillon est déjà parti.";
+  if (state === "echec") return "L'envoi de son brouillon a échoué : regarde « Ses brouillons ».";
+  return "Son brouillon n'attend plus de décision : rien n'est parti.";
 }
 
 /** On y répond (l'API aussi) : un mail reçu, ou une copie reçue d'un mail parti de ta boîte ; un mail parti sans

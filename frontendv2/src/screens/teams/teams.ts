@@ -34,7 +34,7 @@ import type { PaletteEntry } from "../../shell/palette";
 import type { ScreenContext, ScreenDef, ScreenTab, Shell } from "../../shell/shell";
 import { bindCounts, errorText, openAsk, paintCount } from "../mail/compose";
 import { ago, chars, newNonce, thousands, toFill } from "../mail/format";
-import { authorLabel, kindLabel, ownAccount, ownBubbles, stillSentHere, UNDER_WAY, withoutSent, type SentHere } from "./format";
+import { authorLabel, kindLabel, ownAccount, ownBubbles, sentUnder, stillSentHere, UNDER_WAY, withoutSent, type SentHere } from "./format";
 import {
   capsOf,
   conversationRow,
@@ -483,7 +483,7 @@ export class TeamsScreen {
       account: a,
       editing: this.editing,
       // ce que le moteur dit de tes messages en attente (en file, posé, pas parti), puis tes envois d'ici pas encore dits
-      pending: ownBubbles(t.pending, this.sent.filter((p) => p.conversation === t.key)),
+      pending: ownBubbles(t.pending, this.sent.filter((p) => p.conversation === t.key), sentUnder(a)),
     };
   }
 

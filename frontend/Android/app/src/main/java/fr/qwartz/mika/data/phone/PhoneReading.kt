@@ -33,8 +33,18 @@ data class PostedNotification(
     val style: PostedStyle?,
 )
 
-/** Ce qu'une notification apporte : sa conversation (pour garder son action « Répondre ») et ses messages. */
-data class PhoneReadingResult(val app: PhoneApp, val thread: String, val group: Boolean, val messages: List<PhoneMessage>)
+/**
+ * Ce qu'une notification apporte : sa conversation (pour garder son action « Répondre ») et ses messages ; [name] : le
+ * nom qu'elle donne à la conversation, à qui son action répond — le groupe, sinon qui y écrit (le dernier qui n'est pas
+ * la personne), comme le titre du fil sur le serveur ; vide si rien ne la nomme.
+ */
+data class PhoneReadingResult(
+    val app: PhoneApp,
+    val thread: String,
+    val group: Boolean,
+    val messages: List<PhoneMessage>,
+    val name: String = "",
+)
 
 /** La forme d'une action de notification, pour choisir celle qui répond ([PhoneReading.pickReply]). */
 data class ActionShape(val semanticAction: Int, val freeFormInputs: Int)
@@ -88,8 +98,17 @@ object PhoneReading {
                 own = own,
             )
         }
-        return PhoneReadingResult(app, thread, style.group, messages)
+        return PhoneReadingResult(app, thread, style.group, messages, nameOf(style))
     }
+
+    /** Le nom de la conversation, tel que le serveur l'écrira en tête du fil : le groupe, sinon le dernier qui y écrit. */
+    private fun nameOf(style: PostedStyle): String =
+        if (style.group) {
+            style.conversationTitle.nonBlank().orEmpty()
+        } else {
+            style.messages.lastOrNull { !isUser(it.person, style.user) }?.person?.name.nonBlank()
+                ?: style.conversationTitle.nonBlank().orEmpty()
+        }
 
     /**
      * L'action « Répondre » parmi celles d'une notification : une saisie libre (`RemoteInput` qui l'accepte), de

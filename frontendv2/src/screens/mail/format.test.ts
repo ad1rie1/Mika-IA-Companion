@@ -10,6 +10,7 @@ import {
   chars,
   clip,
   countLabel,
+  draftReply,
   forwardSubject,
   howLabel,
   markToFill,
@@ -243,5 +244,23 @@ describe("les bornes d'un envoi : refusé plutôt que coupé (protocole-moi.md �
     expect(refusalText("Le formulaire a des erreurs.", { to: "adresse invalide" })).toBe("Le formulaire a des erreurs. (À : adresse invalide)");
     expect(refusalText("Introuvable.", {})).toBe("Introuvable.");
     expect(errorText(new ApiError(400, "« to » : 300 caractères au plus.", { to: "300 caractères au plus" }))).toBe("À : 300 caractères au plus");
+  });
+});
+
+describe("ta réponse partie de son brouillon (R2-02)", () => {
+  const d = (state: "attend" | "approuve" | "parti" | "refuse" | "echec", id = "d1") => ({ id, state });
+  it("il attend : elle passe par lui", () => {
+    expect(draftReply([d("attend")], "d1")).toEqual({ via: "draft", draft: d("attend") });
+  });
+  it("refusé ou plus là : une réponse ordinaire", () => {
+    expect(draftReply([d("refuse")], "d1")).toEqual({ via: "reply" });
+    expect(draftReply([d("attend", "d2")], "d1")).toEqual({ via: "reply" });
+    expect(draftReply([], "d1")).toEqual({ via: "reply" });
+  });
+  it("parti, approuvé ou en échec : rien de plus ne part, et pourquoi", () => {
+    // envoyé une première fois (la réponse du serveur perdue), puis retouché : la clé est neuve, le serveur ne dédoublonne pas
+    expect(draftReply([d("parti")], "d1")).toEqual({ via: "stop", why: "Son brouillon est déjà parti." });
+    expect(draftReply([d("approuve")], "d1")).toEqual({ via: "stop", why: "Son brouillon est déjà parti." });
+    expect(draftReply([d("echec")], "d1")).toMatchObject({ via: "stop" });
   });
 });

@@ -29,10 +29,10 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 | Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134, 0148, 0184, 0185, 0186, 0188, 0207, 0220, 0226 |
 | Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137, 0150, 0155, 0160, 0227 |
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144, 0145, 0161 |
-| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163, 0166, 0168, 0171, 0172, 0189, 0190, 0191, 0192, 0193, 0194, 0195, 0196, 0198, 0199, 0211, 0213, 0214, 0228, 0229 |
+| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163, 0166, 0168, 0171, 0172, 0189, 0190, 0191, 0192, 0193, 0194, 0195, 0196, 0198, 0199, 0211, 0213, 0214, 0228, 0229, 0236 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159 |
-| Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170, 0187, 0200, 0208, 0209, 0215, 0233 |
+| Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170, 0187, 0200, 0208, 0209, 0215, 0233, 0235 |
 | La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176, 0177, 0178, 0179, 0180, 0181, 0182, 0183, 0197, 0201, 0202, 0203, 0204, 0205, 0206, 0210, 0216, 0217, 0218, 0219, 0225, 0230, 0231, 0232, 0234 |
 | Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135 |
 
@@ -1607,7 +1607,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Pourquoi :* « chacun pour soi, ça crée un service MCP qui n'a que les droits avec la personne, dans inspection on peut voir tous les mcp, s'il veut partager son mcp, ça ajoute une règle d'accès … les mcp disponibles sont calculés en fonction des droits ».
 
-*Révise 0128 (en partie : un service a un propriétaire), 0131 (en partie).*
+*Révise 0128 (en partie : un service a un propriétaire), 0131 (en partie). Révisée par 0236.*
 
 ### 0193 — La carte de sa position passe par le serveur
 
@@ -1749,6 +1749,18 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 - **Gardent leur règle à part** : le serveur de recherche du plugin web, un programme lancé dans sa cage (0066) ; et la règle inverse des services MCP en http (`mcp/config.py`, `private_host` : du http seulement vers la machine ou le réseau local, pour que le jeton ne passe pas en clair ailleurs).
 
 *Pourquoi :* trois copies de la règle divergeaient. Les flux et `/api/moi` laissaient passer une adresse NAT64 de la boucle locale ou d'un réseau privé (`64:ff9b::7f00:1`, `64:ff9b::a00:1`), et ne refusaient ni la machine elle-même ni le port de Mika, que la Forge refusait déjà (audit du 2026-11-05, K9-02).
+
+### 0236 — Les en-têtes d'un service ne suivent pas une adresse qui mène ailleurs
+
+- Les en-têtes secrets d'un service qu'une personne a branché (0192) restent scellés, jamais rendus ; laissés vides, ils restent. Mais quand son adresse mène ailleurs — un autre hôte, un autre schéma ou un autre port —, `POST /api/moi/mcp/save` les redemande : 400 sur `secret_headers`, en mots, et rien n'est enregistré, tant qu'on ne les redonne pas ou qu'on ne les retire pas (`clear_headers`).
+- Un autre chemin sur le même serveur, ou le port que le schéma sous-entend, ne redemande rien ; un service sans en-têtes non plus. Les retirer ne redemande rien : rien ne part plus.
+- La règle se juge sur la fiche relue sous le verrou des réglages (`McpSettingsStore.settle`) : une adresse changée ailleurs entre-temps compte. C'est celle des mots de passe d'une boîte (`_kept_secrets`) : un secret ne part jamais vers un autre serveur.
+- L'application Android et frontendv2 le disent sous le champ des en-têtes avant d'envoyer, et offrent de les retirer.
+- La console n'est pas ce chemin : une opératrice y règle la fiche entière d'un service par le formulaire des réglages, où un secret vide reste aussi. Elle garde sa règle pour l'instant.
+
+*Pourquoi :* la relecture de l'app Android du 2026-11-17 (R3-02) : changer l'adresse d'un service en laissant ses en-têtes vides, comme l'aide le conseillait, les envoyait au nouvel hôte dès le premier essai. Depuis un téléphone perdu pas encore révoqué, c'était une façon d'emporter le jeton d'un service tiers.
+
+*Révise 0192 (en partie : ses en-têtes suivent son adresse).*
 
 ## Les fournisseurs de modèles
 
@@ -2249,6 +2261,8 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 
 *Pourquoi :* « un nouveau frontend web qui est plus comme la version android (pas de 3d) … le tout bien sûr limité à l'utilisateur », « il est pour des utilisateurs de mika » ; pour elle, « place-la juste bien de base », et « dans le chat elle doit être visible en gros ».
 
+*Révisée par 0235.*
+
 ### 0200 — Mail dans frontendv2 : une pastille, un nom par vue, tes vues à toi, ranger dans un dossier
 
 - **Une pastille dit ce qui attend ta décision**, partout : pour Mail, ses brouillons qui attendent, dans tes boîtes, comme Teams et Téléphone ; plus les non-lus, qui ont leurs compteurs dossier par dossier (`counts.mail`).
@@ -2306,6 +2320,18 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 *Pourquoi :* un onglet qui redit Messages et un menu qui y renvoie n'aident à rien ; rien ne se perd, la note est dans Paramètres et l'ancienne adresse retombe sur Messages ; l'onglet reviendra avec ce qui le justifie, comme 0190 le dit « à venir ». De même, un sélecteur qui promet un choix sans rien en faire trompe : choisir un téléphone ne triait rien et n'ajoutait qu'une note, il affichait « Tous tes téléphones 1 » pour un seul, et son point orange ne disait pas qu'il manquait les notifications ; l'état utile (quel téléphone, vu quand, notifiable ou non) tient dans la barre (audit du 2026-11-05, F3-03 et F3-04, décisions F3-Q1 et F3-Q2).
 
 *Révise 0190 (en partie : l'onglet Notifications attend les notifications des autres apps, et le choix d'un téléphone que chaque message dise le sien).*
+
+### 0235 — L'app Android, client de tous les jours
+
+- L'application Android reprend ce que fait le frontendv2 (0187) : le chat et le mode pro, Mail, Teams, Carte, Téléphone, Outils et Paramètres, pour la personne connectée, sur la même API par personne (`/api/moi`). Sa maquette validée est dans `frontend/Android/maquette/`.
+- On y navigue par un tiroir : le chat reste en plein écran, Mika en fond, comme avant. Sur chaque autre écran, son visage est au bout de la barre du haut et ouvre « Ce qu'elle fait ».
+- Le jeton d'un téléphone (client `mobile`) écrit sur l'API par personne comme une session de navigateur, sans jeton CSRF : l'en-tête `Authorization` ne part jamais tout seul d'une autre page, et l'application ne présente pas d'`Origin`. Le jeton d'un autre client natif (`screen`) ne fait toujours que lire.
+- Au-dessus du champ du chat, ce qui attend ta décision se replie sur une ligne (combien d'accords, combien de brouillons, le compte à rebours) ; dépliée, la carte d'accord dit exactement ce qui partira, et ses brouillons de mail et de Teams sont des liens vers l'écran où ils se décident (0191).
+- La carte de l'application est MapLibre Native (sa version OpenGL ES), sur le seul fond que sert ce serveur (0193) : son style est tiré de celui du web par un outil (`frontend/Android/tools/carte_style.mjs`), ses requêtes passent par un client qui pose le jeton et refuse toute autre adresse ; ni télémétrie, ni tuiles par défaut, ni lien vers un tiers. Elle replie sur le plan dessiné quand le fond ne se lit pas.
+
+*Pourquoi :* « peux-tu améliorer mon appli Android en reprenant les fonctionnalités de frontendv2 », puis, devant la maquette : « en mode tiroir je préfère ». Une API qui refusait l'écriture à un client natif laissait l'application en lecture seule, alors que le téléphone a déjà son jeton, révocable, et décide déjà des accords sur la socket.
+
+*Révise 0187 (en partie : un client natif ne faisait que lire l'API).*
 
 ## La console et l'exploitation
 

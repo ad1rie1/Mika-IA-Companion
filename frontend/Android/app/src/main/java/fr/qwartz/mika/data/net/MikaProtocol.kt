@@ -122,6 +122,12 @@ object MikaProtocol {
     const val MAX_WHERE_LABEL_CHARS = 200
     /** La sorte d'une petite bulle (`notes` d'une `speech` ou d'une ligne d'`history`) : elle a regardé où tu es. */
     const val NOTE_LOCATION = "location"
+    /** Ses notes de carte (ADR 0196) : elle a cherché des lieux ou un trajet, montré une carte, créé ou changé un voyage. */
+    const val NOTE_LOOK = "look"
+    const val NOTE_MAP = "map"
+    const val NOTE_TRIP = "trip"
+    /** Ce qu'une note de carte ouvre : un `seq` ou un identifiant de voyage, des chiffres (borne de lecture large). */
+    const val MAX_NOTE_REF_CHARS = 40
     /** Bornes de lecture des petites bulles, au-dessus de celles du serveur (le lieu, 200 caractères). */
     const val MAX_NOTE_TEXT_CHARS = 400
     const val MAX_MESSAGE_NOTES = 8
@@ -205,6 +211,12 @@ object MikaProtocol {
     const val MAX_APPROVAL_TEXT_CHARS = 16_000
     const val MAX_APPROVAL_BLOCKED_CHARS = 1_000
     const val MAX_APPROVAL_CARDS = 50
+    /** La capacité d'une carte et son brouillon (le serveur coupe le brouillon à 100). */
+    const val MAX_APPROVAL_CAPABILITY_CHARS = 100
+    const val MAX_APPROVAL_DRAFT_CHARS = 200
+    /** Les capacités dont la carte se relit là où elle partira (ADR 0191) : un mail de sa boîte, une réponse Teams. */
+    const val CAPABILITY_EMAIL_SEND = "email.send"
+    const val CAPABILITY_TEAMS_SEND = "teams.send"
 
     // ── Voix et sources (protocol.py) ──
     const val VOICE_REASON_ASLEEP = "asleep"

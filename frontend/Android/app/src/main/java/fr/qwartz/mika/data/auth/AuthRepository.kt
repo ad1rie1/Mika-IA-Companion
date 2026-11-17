@@ -3,11 +3,13 @@ package fr.qwartz.mika.data.auth
 import fr.qwartz.mika.core.Clock
 import fr.qwartz.mika.data.net.ServerBase
 import fr.qwartz.mika.data.settings.SettingsStore
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 /** Le serveur et le jeton d'une session ; le jeton n'apparaît jamais dans `toString`. */
 class Credentials(val base: ServerBase, val token: String) {
@@ -63,6 +65,10 @@ class AuthRepository(
     private val lock = Mutex()
 
     fun credentials(): Credentials? = credentials
+
+    /** L'identifiant du jeton de cette session, qui reconnaît ce téléphone parmi les tiens ; `null` hors session, ou
+     *  pour une session ouverte avant que l'app le garde. */
+    fun tokenId(): Long? = (session.value as? Session.LoggedIn)?.profile?.tokenId
 
     /** Au démarrage : rouvrir la session gardée, sans réseau. */
     suspend fun restore() = lock.withLock {
@@ -148,6 +154,14 @@ class AuthRepository(
      */
     suspend fun logout() = signOut(revoke = true, reason = null)
 
+    /**
+     * Le serveur vient de fermer les sessions de ce compte (le mot de passe a changé, Paramètres › Compte) : la même
+     * déconnexion, et [reason] sur l'écran de connexion. Le jeton lui est rendu quand même : il ne fait tomber que ceux
+     * obtenus par mot de passe, pas un jeton de débogage (`mika token create`) — déjà révoqué, la demande échoue en
+     * moins de 5 s, sans rien changer.
+     */
+    suspend fun closeSession(reason: String) = signOut(revoke = true, reason = reason)
+
     /** Après un 4401 : `whoami` avec le jeton dit si la session est finie ou si c'était autre chose. */
     suspend fun checkAfterUnauthorized(): Check {
         val c = credentials ?: return Check.EXPIRED
@@ -168,16 +182,22 @@ class AuthRepository(
         }
     }
 
+    /**
+     * Fermer la session jusqu'au bout, même si la portée qui l'a demandée s'en va entre-temps (un écran quitté pendant
+     * le contrôle d'un 401) : à moitié faite, elle laissait le jeton au coffre et les messages sur le téléphone.
+     */
     private suspend fun signOut(revoke: Boolean, reason: String?) = lock.withLock {
-        val c = credentials
-        hooks.beforeSignOut()
-        if (revoke && c != null) api.revoke(c.base, c.token)
-        credentials = null
-        vault.clear()
-        settings.clearProfile()
-        // Un téléphone dont la session a été révoquée (perdu, prêté) ne garde rien non plus.
-        hooks.wipeLocalData(keepDraft = false)
-        _session.value = Session.LoggedOut(reason)
+        withContext(NonCancellable) {
+            val c = credentials
+            hooks.beforeSignOut()
+            if (revoke && c != null) api.revoke(c.base, c.token)
+            credentials = null
+            vault.clear()
+            settings.clearProfile()
+            // Un téléphone dont la session a été révoquée (perdu, prêté) ne garde rien non plus.
+            hooks.wipeLocalData(keepDraft = false)
+            _session.value = Session.LoggedOut(reason)
+        }
     }
 
     private companion object {

@@ -13,6 +13,7 @@ import { countSpan } from "../mail/markup";
 import { ofName } from "../../shared/names";
 import {
   authorLabel,
+  awaits,
   cardState,
   fromHer,
   fromYou,
@@ -23,6 +24,7 @@ import {
   ownAccount,
   replyState,
   retouched,
+  sentUnder,
   threadCards,
   threadMarks,
   type AccountWho,
@@ -45,9 +47,9 @@ export function convAvatar(c: Pick<Conversation, "title" | "kind" | "key">, size
   return `<span class="av sq grp${size ? ` ${size}` : ""}" title="${h(c.title)}">${inner}</span>`;
 }
 
-/** Ce que dit une ligne d'une réponse d'elle en chemin. */
-function herMark(state: string): string {
-  const label = state === "attend" ? "attend ton accord" : state === "pose" ? "posée dans Teams" : state === "en_file" || state === "approuve" ? "en file" : "brouillon de Mika";
+/** Ce que dit une ligne d'une réponse d'elle en chemin ; `decides` : tu décides sur son compte. */
+function herMark(state: string, decides: boolean): string {
+  const label = state === "attend" ? awaits(decides) : state === "pose" ? "posée dans Teams" : state === "en_file" || state === "approuve" ? "en file" : "brouillon de Mika";
   return `<span class="mk">${ico("pen")}${h(label)}</span>`;
 }
 
@@ -59,7 +61,7 @@ export function conversationRow(c: Conversation, selected: string, now: number, 
   const who = last ? (last.own ? `${firstName(authorLabel(last, account))} : ` : c.kind !== "dm" ? `${firstName(last.author)} : ` : "") : "";
   const marks = [
     many ? `<span class="box-mark">${ico("teams", "xs")}${h(account?.name ?? c.account)}</span>` : "",
-    c.her ? herMark(c.her.state) : "",
+    c.her ? herMark(c.her.state, caps(account?.level ?? "lire").decide) : "",
     last?.mentions_me ? '<span class="badge soft" title="On t\'a mentionné">@</span>' : "",
   ].join("");
   return `<button class="li tm-li" type="button" data-disc="${h(c.key)}" aria-selected="${c.key === selected}">
@@ -128,7 +130,8 @@ function answeredCard(r: Reply): string {
 /** Une réponse d'elle en chemin, dans sa conversation. */
 export function replyCard(r: Reply, v: ThreadView): string {
   if (r.answered) return answeredCard(r);
-  const [tone, label] = cardState(r);
+  // sur un compte qu'on te partage, ce qui part part sous le nom de sa personne, et son propriétaire décide
+  const [tone, label] = cardState(r, sentUnder(v.account), v.caps.decide);
   const waiting = r.state === "attend";
   const text = r.preview?.text ?? r.body;
   const blocked = r.preview?.blocked || (waiting && r.to_fill ? "il reste des passages à compléter" : "");
@@ -237,7 +240,7 @@ export function infoPane(v: InfoView): string {
   const a = v.account;
   const level = a ? levelTag(a.level) : "";
   const states = v.replies.reduce<Record<string, number>>((acc, r) => {
-    const label = replyState(r)[1].split(" · ")[0];
+    const label = replyState(r, caps(a?.level ?? "lire").decide)[1].split(" · ")[0];
     acc[label] = (acc[label] ?? 0) + 1;
     return acc;
   }, {});
@@ -283,7 +286,7 @@ export function repliesTable(items: readonly Reply[], v: RepliesView): string {
     .map((r) => {
       const c = v.convs.get(r.conversation);
       const conv = { title: r.title || c?.title || "(discussion)", kind: c?.kind ?? "dm", key: r.conversation };
-      const [tone, label] = replyState(r);
+      const [tone, label] = replyState(r, v.decide(r));
       const shown = r.state === "parti" && r.sent_text ? r.sent_text : r.preview?.text ?? r.body;
       const notes = [
         r.asked ? "demandée" : "d'elle-même",

@@ -205,6 +205,22 @@ class FrameCodecTest {
         assertEquals("", bare.blocked)
     }
 
+    @Test fun `une carte dit ce qu'elle veut faire et son brouillon, sans jamais s'en faire écarter (ADR 0191)`() {
+        val a = FrameCodec.decode(
+            """{"type":"approvals","items":[""" +
+                """{"id":1,"digest":"ab","capability":"email.send","draft":"d-42"},""" +
+                """{"id":2,"digest":"ab","capability":"teams.send","draft":7},""" +
+                """{"id":3,"digest":"ab","capability":{"x":1},"draft":"${"z".repeat(MikaProtocol.MAX_APPROVAL_DRAFT_CHARS + 1)}"},""" +
+                """{"id":4,"digest":"ab"}]}""",
+        ) as ServerFrame.Approvals
+        assertEquals(listOf(1L, 2L, 3L, 4L), a.items.map { it.id })
+        assertEquals("email.send" to "d-42", a.items[0].capability to a.items[0].draft)
+        // un brouillon qui n'est pas une chaîne, ou coupé, ne désigne rien : vide
+        assertEquals("teams.send" to "", a.items[1].capability to a.items[1].draft)
+        assertEquals("" to "", a.items[2].capability to a.items[2].draft)
+        assertEquals("" to "", a.items[3].capability to a.items[3].draft)
+    }
+
     @Test fun `une liste vide est une liste — elle efface ce qui était montré`() {
         assertEquals(ServerFrame.Approvals(emptyList()), FrameCodec.decode("""{"type":"approvals","items":[]}"""))
     }
@@ -399,6 +415,30 @@ class FrameCodecTest {
         )
         assertNull((FrameCodec.decode("""{"type":"speech","text":"coucou"}""") as ServerFrame.Speech).notes)
         assertNull((FrameCodec.decode("""{"type":"speech","text":"coucou","notes":[{"kind":"weather"}]}""") as ServerFrame.Speech).notes)
+    }
+
+    @Test fun `ses notes de carte passent avec ce qu'elles ouvrent, une note vidée aussi (ADR 0196)`() {
+        val s = FrameCodec.decode(
+            """{"type":"speech","text":"Voilà","message_id":9,"notes":[""" +
+                """{"kind":"look","text":"Dormir · près de Talloires","at":1790601500000,"ref":"812"},""" +
+                """{"kind":"trip","text":"Les Alpes","at":1790601520000,"ref":640},""" +
+                """{"kind":"map","text":"Le lac","ref":{"x":1}},""" +
+                """{"kind":"trip","text":"","at":0},""" +
+                """{"kind":"location","text":"Lyon","at":1,"ref":"99"},""" +
+                """{"kind":"meteo","text":"Soleil","ref":"9"}]}""",
+        ) as ServerFrame.Speech
+        assertEquals(
+            listOf(
+                MessageNote("look", "Dormir · près de Talloires", 1_790_601_500_000, "812"),
+                MessageNote("trip", "Les Alpes", 1_790_601_520_000, "640"),
+                // ce qui n'est ni une chaîne ni un entier n'ouvre rien ; une note vidée reste (elle remplace l'ancienne)
+                MessageNote("map", "Le lac", 0, ""),
+                MessageNote("trip", "", 0, ""),
+                // la bulle 📍 n'ouvre rien
+                MessageNote("location", "Lyon", 1, ""),
+            ),
+            s.notes,
+        )
     }
 
     @Test fun `des petites bulles cassées n'emportent ni la parole ni la ligne d'historique`() {

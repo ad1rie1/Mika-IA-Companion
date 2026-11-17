@@ -4,6 +4,7 @@ import { ofName } from "../../shared/names";
 import { caps, ofName as mailOfName } from "../mail/format";
 import {
   authorLabel,
+  cardState,
   dayLabel,
   fromHer,
   fromYou,
@@ -14,6 +15,7 @@ import {
   replyHash,
   replyState,
   retouched,
+  sentUnder,
   stillSentHere,
   threadCards,
   threadMarks,
@@ -377,3 +379,37 @@ describe("répondu autrement (ADR 0199)", () => {
   });
 });
 
+describe("un compte qu'on te partage : sous le nom de sa personne, et son propriétaire décide (R2-08)", () => {
+  // « Atelier » d'Adrien, partagé avec Léa pour s'en servir : ce qu'elle y écrit part sous le nom d'Adrien
+  const servir = shared("servir");
+  it("ce qui part, part sous le nom de la personne du compte, jamais le tien", () => {
+    expect(sentUnder(servir)).toBe("sous le nom d'Adrien Moreau");
+    expect(sentUnder(shared("servir", { self_name: "" }))).toBe("sous le nom d'Adrien Moreau");
+    expect(sentUnder(account())).toBe("sous ton nom");
+    expect(sentUnder(null)).toBe("sous le nom du compte");
+    expect(pendingNote("en_file", "", sentUnder(servir)).note).toBe("en file : l'extension l'envoie dans Teams, sous le nom d'Adrien Moreau");
+    expect(cardState(reply({ state: "en_file" }), sentUnder(servir))[1]).toBe("En file : l'extension l'envoie dans Teams, sous le nom d'Adrien Moreau");
+  });
+  it("dans le fil : ta bulle en file et sa carte le disent", () => {
+    const t: Thread = {
+      key: "19:marc", account: "principal", title: "Marc Delmas", kind: "dm", messages: [msg({ ref: "t1" })], more: false,
+      replies: [reply({ state: "en_file", preview: null })], under_way: true, asked: false,
+      pending: [{ id: "p1", body: "ok pour jeudi", at: NOW - MIN, state: "en_file", by: "user_2" }],
+    };
+    const v = view("servir", { pending: ownBubbles(t.pending, [], sentUnder(servir)) });
+    const html = threadBody(t, [], v, false);
+    // la bulle et la carte, échappées
+    expect(html.match(/sous le nom d&#39;Adrien Moreau/g)?.length).toBe(2);
+    expect(html).not.toContain("sous ton nom");
+  });
+  it("partagé pour préparer : sa réponse attend son propriétaire, pas toi", () => {
+    expect(replyState(reply(), false)).toEqual(["warn", "attend l'accord de son propriétaire"]);
+    expect(replyState(reply())).toEqual(["warn", "attend ton accord"]);
+    const table = repliesTable([reply()], { now: NOW, convs: new Map(), decide: () => false });
+    expect(table).toContain("attend l&#39;accord de son propriétaire");
+    expect(table).not.toContain("attend ton accord");
+    const card = replyCard(reply(), view("preparer"));
+    expect(card).not.toContain("Ton accord");
+    expect(card).toContain("Adrien Moreau");
+  });
+});

@@ -31,6 +31,8 @@ import fr.qwartz.mika.data.files.OutboxFiles
 import fr.qwartz.mika.data.files.ShareInbox
 import fr.qwartz.mika.data.location.WhereShare
 import fr.qwartz.mika.data.mind.MindStateRepository
+import fr.qwartz.mika.data.moi.MeRepository
+import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.net.BearerInterceptor
 import fr.qwartz.mika.data.net.LinkState
 import fr.qwartz.mika.data.net.OkHttpWsTransport
@@ -53,6 +55,8 @@ import fr.qwartz.mika.service.ReplySender
 import fr.qwartz.mika.service.ServiceController
 import fr.qwartz.mika.share.Shortcuts
 import fr.qwartz.mika.ui.avatar.AvatarAssets
+import fr.qwartz.mika.ui.mail.MailNotices
+import fr.qwartz.mika.ui.mail.UnsentMails
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
@@ -224,7 +228,10 @@ class AppGraph(context: Context) {
     /** Le service au premier plan (`MikaConnectionService`), le temps d'une réponse partie d'une notification. */
     @Volatile var serviceController: ServiceController = AndroidServiceController(this.context, logger)
 
-    val notifier = MessageNotifier(this.context, store, foreground.visible, { chatEngine.cursor }, clock::wallMs, logger)
+    /** Les notifications de ses messages : retenues seulement quand la conversation est à l'écran, pas l'app seule. */
+    val notifier = MessageNotifier(
+        this.context, store, { foreground.visible.value }, { foreground.chatOnScreen }, { chatEngine.cursor }, clock::wallMs, logger,
+    )
     val replies = ReplySender(scope, chat, connection, notifier, { serviceController }, logger)
 
     /** Les notifications app fermée (ADR 0077) : où les recevoir, dit au serveur, et la clé qui les ouvre. */
@@ -305,15 +312,35 @@ class AppGraph(context: Context) {
     suspend fun onPhoneNotification(posted: PostedNotification, reply: Notification.Action?) {
         if (auth.credentials() == null) return
         val reading = PhoneReading.read(posted, settings.current().phone) ?: return
-        if (reply != null) phoneReplies.put(reading.thread, reply)
+        if (reply != null) phoneReplies.put(reading.thread, reply, reading.name)
         if (phone.add(reading.messages) > 0) phone.flushSoon()
     }
+
+    /**
+     * L'API par personne (`/api/moi`, ADR 0235) : Mail, Teams, Carte, Téléphone, Outils, Paramètres. Un 401 fait
+     * vérifier la session, qui se ferme si le jeton ne vaut plus.
+     */
+    val moi: MoiApi = MoiApi(http, { auth.credentials() }, { auth.checkAfterUnauthorized() })
+
+    /** Qui est connecté, et ce qui attend sa décision (les pastilles du tiroir). */
+    val me: MeRepository = MeRepository(moi, scope)
+
+    /** Les mails commencés et pas envoyés, en mémoire le temps de la session : un lien profond ne les jette plus. */
+    val unsentMail = UnsentMails()
+
+    /** Le sort d'un envoi de Mail fini après qu'on a quitté son écran : le cadre le dit en toast. */
+    val mailNotices = MailNotices()
 
     /** Les photos prises pour Mika, avant leur réduction (exposées par le FileProvider). */
     val cameraDir: File get() = File(context.cacheDir, "camera")
 
     init {
         onWipe += { notifier.wipe() }
+        onWipe += { me.clear() }
+        onWipe += {
+            unsentMail.clear()
+            mailNotices.clear()
+        }
         // La file des messages du téléphone et les propositions partent avec la session (la table kv est déjà vide) :
         // un autre compte n'en hérite jamais, et aucune réponse ne part plus par une action gardée d'avant.
         onWipe += {

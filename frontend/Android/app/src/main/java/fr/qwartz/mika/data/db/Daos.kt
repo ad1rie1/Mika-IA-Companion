@@ -21,6 +21,10 @@ interface MessageDao {
     @Query("SELECT COALESCE(MAX(server_id), 0) FROM messages")
     suspend fun maxServerId(): Long
 
+    /** Sa dernière parole gardée (son identifiant serveur ; 0 : aucune). */
+    @Query("SELECT COALESCE(MAX(server_id), 0) FROM messages WHERE sender = 'mika'")
+    fun observeLastFromMika(): Flow<Long>
+
     @Query("SELECT client_msg_id FROM messages WHERE client_msg_id IS NOT NULL")
     suspend fun clientMsgIds(): List<String>
 

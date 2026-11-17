@@ -1,6 +1,6 @@
 # L'API par personne — `/api/moi`
 
-Ce document est pour qui écrit le client de tous les jours, `frontendv2/` : ce qu'il montre à la personne connectée,
+Ce document est pour qui écrit un client de tous les jours, `frontendv2/` ou l'application Android (ADR 0235) : ce qu'il montre à la personne connectée,
 et seulement à elle — ses boîtes, ses comptes Teams, ses téléphones, ses services, ce qu'on lui partage, ses droits, sa
 carte et ses voyages. Les décisions et leurs raisons sont les ADR 0187 à 0192 de [`decisions.md`](decisions.md) (et,
 pour la carte, 0193 à 0196 et 0229) ; le code fait foi dans
@@ -13,8 +13,10 @@ la console, celle des opérateurs, voit tout et ne passe pas par ici.
   `csrftoken`, `POST /auth/login` ouvre la session. Un client natif présente son jeton `Authorization: Bearer mw_…`,
   **sans** `Origin`.
 - Une lecture est un `GET`. Une écriture est un `POST` au corps JSON (64 Kio au plus : 413 au-delà ; les envois de Mail
-  acceptent aussi un `multipart/form-data`, § 3), avec l'en-tête `X-CSRFToken` (la valeur du cookie). Un client natif ne fait que lire : une écriture qui présente un jeton porteur
-  est refusée (403), même avec un cookie et un en-tête CSRF qu'il poserait lui-même.
+  acceptent aussi un `multipart/form-data`, § 3), avec l'en-tête `X-CSRFToken` (la valeur du cookie). L'application du
+  téléphone (un jeton de client `mobile`) écrit sous son seul jeton, sans cookie ni CSRF (ADR 0235). Un autre client
+  natif (`screen`) ne fait que lire : son écriture est refusée (403), même avec un cookie et un en-tête CSRF qu'il
+  poserait lui-même.
 - Un paramètre texte a sa borne (un destinataire 300 caractères, un objet 200, un mail 20 000…) : au-delà, il est
   **refusé** (400, `fields: {"<nom>": "N caractères au plus"}`), jamais coupé.
 - Une écriture peut porter une clé d'envoi, `Idempotency-Key` (ou `nonce` dans le corps). Le même envoi, rejoué,
@@ -38,7 +40,7 @@ une phrase, ce que disent ses champs, pour un client qui ne les place pas :
 |---|---|
 | 400 | une requête illisible, un paramètre faux, un champ refusé (`fields`) |
 | 401 | pas de session (ou un jeton révoqué) |
-| 403 | le jeton CSRF manque ou ne correspond pas ; un client natif qui écrit ; ce que ton partage n'ouvre pas, ou ce qui reste à son propriétaire (une ressource qu'on te partage) |
+| 403 | le jeton CSRF manque ou ne correspond pas ; un client natif qui n'est pas un téléphone et qui écrit ; ce que ton partage n'ouvre pas, ou ce qui reste à son propriétaire (une ressource qu'on te partage) |
 | 404 | introuvable — **ou pas à toi** : une ressource d'une autre personne n'existe pas, la réponse est la même |
 | 409 | l'action n'est pas possible en ce moment (déjà décidée, une boîte qui ne peut pas envoyer, dix ressources déjà branchées…) |
 | 429 | trop d'essais (changer son mot de passe ; tester, relever) |
@@ -399,7 +401,8 @@ Un service qu'elle branche ici est à elle (`McpServer.owner`, ADR 0192), **dist
 local, qui lance une commande sur la machine, reste aux opérateurs). Il naît avec une seule ligne d'accès, la sienne
 (un outil qui lit : `seule` ; qui agit : `carte`, elle lui demande ; ce qu'elle y lit : `prive`), la ligne par défaut
 fermée ; ses outils arrivent coupés, à choisir un par un (ADR 0129). Ce que Mika en offre reste dans la matrice
-(§ 6).
+(§ 6). Ses en-têtes secrets ne partent jamais vers un autre serveur que celui de son adresse (ADR 0236),
+comme le mot de passe d'une boîte (§ 7).
 
 | Route | Corps | Ce que ça fait |
 |---|---|---|
@@ -407,7 +410,7 @@ fermée ; ses outils arrivent coupés, à choisir un par un (ADR 0129). Ce que M
 | `POST /api/moi/mcp/plug` | `name`, `purpose`, `url`, `headers?`, `when_to_use?` | le brancher ; un nom déjà pris : 400 ; une adresse sur la machine ou le réseau privé, pour une personne qui n'est pas opératrice : 400 ; dix services déjà à elle : 409 |
 | `POST /api/moi/mcp/test` | `name` | rouvrir une session et relire ses outils → `{"ok", "message"}` (trente fois par minute au plus : § 1) |
 | `POST /api/moi/mcp/tools` | `name`, `choices` (`{"<outil>": "non" \| "lecture" \| "action"}`) | choisir ses outils : un outil nouveau ou changé, tel que le service le propose maintenant ; un outil déjà choisi change de choix |
-| `POST /api/moi/mcp/save` | `name`, `values` (`purpose`, `when_to_use`, `enabled`, `url`, `secret_headers`) | le régler ; des en-têtes laissés vides restent |
+| `POST /api/moi/mcp/save` | `name`, `values` (`purpose`, `when_to_use`, `enabled`, `url`, `secret_headers`, `clear_headers`) | le régler ; des en-têtes laissés vides restent, `clear_headers: true` les retire. Une adresse qui mène ailleurs (un autre hôte, schéma ou port) redemande les en-têtes gardés (ADR 0236) : 400 sur `secret_headers` tant qu'ils ne sont ni redonnés ni retirés ; un autre chemin sur le même serveur, non |
 | `POST /api/moi/mcp/remove` | `name` | le retirer : plus joint ni offert ; retiré entre-temps ailleurs : 400 |
 
 ## 9. Ses partages

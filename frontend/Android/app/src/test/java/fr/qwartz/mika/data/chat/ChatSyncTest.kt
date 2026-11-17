@@ -621,4 +621,26 @@ class ChatSyncTest {
         assertEquals(listOf(looked.copy(text = "")), refreshed.history.single().notes)
         assertEquals(0, mergeHistory(refreshed.history, listOf(forgotten), MAX, nowMs = 1_000).reworked)
     }
+
+    // ── Tes pièces, une fois gardées (ADR 0215) ──
+
+    @Test fun `ta pièce envoyée d'ici apprend du fil relu de quoi la reprendre, et garde son fichier`() {
+        val photo = MessageAttachment("photo.jpg", "image", "image/jpeg", 1_200, local = "photo.jpg")
+        val sent = local("regarde [photo.jpg]", USER, id = 30, cid = "c30", status = MessageStatus.SENT, matchText = "regarde")
+            .apply { attachments = listOf(photo) }
+        val kept = AttachmentRef(id = "9f".repeat(16), name = "photo.jpg", kind = "image", mime = "image/jpeg", size = 1_150, url = "/files/" + "9f".repeat(16), available = true)
+        val got = mergeHistory(mutableListOf(sent), listOf(entry(30, "user", "regarde", attachments = listOf(kept))), MAX, nowMs = 1_000)
+        assertEquals(1, got.reworked)
+        val att = got.history.single().attachments.single()
+        assertEquals("9f".repeat(16), att.id)
+        assertEquals("/files/" + "9f".repeat(16), att.url)
+        assertEquals(true, att.available)
+        assertEquals("photo.jpg", att.local)
+        assertEquals(1_200L, att.size) // ce qu'on savait d'ici reste
+        // redit à l'identique : rien ne change ; une ligne qui ne dit rien de ses pièces ne retire rien
+        assertEquals(0, mergeHistory(got.history, listOf(entry(30, "user", "regarde", attachments = listOf(kept))), MAX, nowMs = 1_000).reworked)
+        assertEquals(0, mergeHistory(got.history, listOf(entry(30, "user", "regarde")), MAX, nowMs = 1_000).reworked)
+        // un autre nom n'est pas la même pièce
+        assertEquals(listOf(photo), ChatSync.ownPieces(listOf(photo), listOf(kept.copy(name = "autre.jpg"))))
+    }
 }

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Généré par frontend/Android/tools/icones.py depuis la maquette (« i-thumb-down ») : ne pas retoucher à la main. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path android:strokeColor="#FF000000" android:strokeWidth="1.7" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M7.5 13.5v-9h-3v9ZM7.5 13.5 11 20.5a2.2 2.2 0 0 0 2.5-2.5l-.7-3.5h5.4a2 2 0 0 0 2-2.4l-1.4-6a2 2 0 0 0-2-1.6H7.5" />
+</vector>

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 from typing import Any
+from urllib.parse import urlsplit
 
 from pydantic import ValidationError
 from starlette.routing import Route
@@ -42,8 +43,16 @@ from mika.vocab.access import (
 NAME = re.compile(r"^[a-z][a-z0-9_]{0,23}$")
 #: ce qu'une personne règle d'un de ses services
 FIELDS = ("purpose", "when_to_use", "enabled", "url", "secret_headers")
+#: retirer ses en-têtes gardés (``values.clear_headers``) : vide, un champ secret les garde (ADR 0236)
+CLEAR_HEADERS = "clear_headers"
 #: ce qu'on choisit pour un outil (ADR 0129) : coupé, servi en lecture, servi en action
 CHOICES = ("non", "lecture", "action")
+#: le port d'une adresse qui n'en dit pas
+DEFAULT_PORTS = {"https": 443, "http": 80}
+#: ce que dit le refus d'une adresse changée sans ses en-têtes (ADR 0236)
+HEADERS_FOLLOW = ("L'adresse a changé : redonne ses en-têtes secrets, ou retire-les. Ils ne partent pas vers un "
+                  "autre serveur.")
+HEADERS_FIELD = "à redonner : l'adresse a changé (ou à retirer)"
 
 
 def _port(call: Call) -> Any:
@@ -236,21 +245,48 @@ async def tools(call: Call) -> dict[str, Any]:
     return {"ok": True, "message": "Ses outils sont choisis.", "decided": done}
 
 
+def _origin(url: str) -> tuple[str, str, int | None]:
+    """Où une adresse mène : son schéma, son hôte, son port (celui du schéma s'il n'en dit pas)."""
+    try:
+        parts = urlsplit(url.strip())
+        scheme = parts.scheme.lower()
+        return scheme, (parts.hostname or "").lower(), parts.port or DEFAULT_PORTS.get(scheme)
+    except ValueError:  # un port illisible : l'adresse entière tient lieu d'hôte, comparée telle quelle
+        return "", url.strip().lower(), None
+
+
+def _headers_follow(spec: McpServer, changes: dict[str, Any]) -> dict[str, Any]:
+    """Des en-têtes gardés ne partent jamais vers un autre serveur (ADR 0236) : une adresse qui mène ailleurs (un autre
+    hôte, schéma ou port) les redemande — redonnés, ou retirés — ; sinon 400 sur leur champ, comme le mot de passe
+    d'une boîte (``settings._kept_secrets``). Sans en-têtes gardés, rien ne se redemande. Jugé sur la fiche relue sous
+    le verrou des réglages (``McpSettingsStore.settle``)."""
+    moved = "url" in changes and _origin(str(changes["url"])) != _origin(spec.url)
+    if moved and spec.secret_headers.strip() and "secret_headers" not in changes:
+        raise Denied(400, HEADERS_FOLLOW, {"secret_headers": HEADERS_FIELD})
+    return changes
+
+
 async def save(call: Call) -> dict[str, Any]:
     """Régler un de ses services : à quoi il sert, quand y penser, actif, son adresse, ses en-têtes (laissés vides,
-    ils restent)."""
+    ils restent ; ``clear_headers`` les retire). Une adresse qui mène ailleurs redemande ses en-têtes gardés
+    (ADR 0236)."""
     name = call.arg("name", limit=24)
     _service(call, name)
     raw = call.data.get("values")
-    if not isinstance(raw, dict) or set(raw) - set(FIELDS):
-        raise Denied(400, f"« values » : {', '.join(FIELDS)}.")
-    changes = {k: v for k, v in raw.items() if not (k == "secret_headers" and not v)}
+    if not isinstance(raw, dict) or set(raw) - {*FIELDS, CLEAR_HEADERS}:
+        raise Denied(400, f"« values » : {', '.join((*FIELDS, CLEAR_HEADERS))}.")
+    clear = raw.get(CLEAR_HEADERS, False)
+    if not isinstance(clear, bool):
+        raise Denied(400, "« clear_headers » : vrai ou faux.", {CLEAR_HEADERS: "vrai ou faux"})
+    changes = {k: v for k, v in raw.items() if k != CLEAR_HEADERS and not (k == "secret_headers" and not v)}
+    if clear and "secret_headers" not in changes:
+        changes["secret_headers"] = ""  # retirés : rien ne partira plus, ni ici ni ailleurs
     if "url" in changes and not str(changes["url"]).lower().startswith("https://"):
         raise Denied(400, "Une adresse https.", {"url": "une adresse https://…"})
     if "url" in changes:
         await public_only(call, {"url": url_host(str(changes["url"]))})
     try:
-        await _port(call).settle(name, changes)
+        await _port(call).settle(name, lambda spec: _headers_follow(spec, changes))
     except (ValidationError, ValueError) as exc:
         raise refused(exc) from None
     await audit(call.kernel, "moi.service", by=call.me.handle, subject_kind="serveur", subject=name)
