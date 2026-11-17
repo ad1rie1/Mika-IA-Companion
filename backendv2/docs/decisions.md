@@ -30,7 +30,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 | Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137, 0150, 0155, 0160, 0227 |
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144, 0145, 0161 |
 | Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163, 0166, 0168, 0171, 0172, 0189, 0190, 0191, 0192, 0193, 0194, 0195, 0196, 0198, 0199, 0211, 0213, 0214, 0228, 0229, 0236, 0238 |
-| Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158 |
+| Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158, 0239 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170, 0187, 0200, 0208, 0209, 0215, 0233, 0235 |
 | La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176, 0177, 0178, 0179, 0180, 0181, 0182, 0183, 0197, 0201, 0202, 0203, 0204, 0205, 0206, 0210, 0216, 0217, 0218, 0219, 0225, 0230, 0231, 0232, 0234, 0237 |
@@ -1861,6 +1861,15 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 *Pourquoi :* le caractère tronqué qui a motivé 0157 n'avait aucun outil : c'était une reprise. Recollée comme une phrase reprise après un outil, la réponse prenait une espace dans un mot (« la ch asse », 44 fois sur 1 064 longues réponses de la seconde passe et du caractère dans les traces des bancs) ; coupée après un point, elle perdait un début court ou gagnait une bulle. Recollée telle quelle, elle soudait deux mots (« j'aipas », « piquesrestent », 21 fois en trois semaines du banc du profil) et montrait des lignes en double (« il a corrigMika : donc il a corrigé ») ou collées (« dispoMika : »), jusque dans ses messages (2026-10-28 et 29) ; la règle de l'espace redonne la leur aux 21. Ces coupures suivent la charge : 30 rejeux au calme n'en ont donné aucune.
 
 *Révise 0157.*
+
+### 0239 — Un outil à la demande ne pèse pas dans le budget, un défaut laissé n'est pas dit
+
+- Le budget ne compte que les déclarations d'outils qui partent avec la requête. Un outil à la demande (`ToolDecl.deferred`) n'y pèse pas, ni dans la réserve du composeur (`runtime/pipeline.py::_reserved`) ni dans la mesure du fournisseur (`LLMLimits.size`) : le catalogue le nomme, et sa déclaration ne se charge que s'il est cherché. Un fournisseur qui ne sait pas différer n'en a aucun : tout lui est déclaré en main, donc compté.
+- Dans la console, un champ d'une entrée neuve laissé à la valeur que le formulaire proposait n'est pas « dit » : le modèle des réglages choisit son défaut d'après le reste. Un fournisseur Claude ajouté sans toucher au contexte reçoit donc 40 000 jetons, pas les 24 000 communs pré-remplis. Une valeur changée est gardée, et la même valeur retapée sur l'entrée déjà faite aussi.
+- `mika llm backend` suit la même règle : sans `--context-tokens`, le contexte d'un fournisseur neuf est celui de son type.
+- Le refus du composeur, quand il ne reste aucune place, dit quoi faire : relever le contexte déclaré du fournisseur.
+
+*Pourquoi :* le 2026-11-17, sur le portable, un fil du mode pro a refusé « test », fil vide : « la zone stable (0 car.) et ce qui part hors du composeur (53 701 car.) remplissent le budget (43 200 car.) ». Sur les 61 outils du mode pro, 54 sont à la demande et ne partent pas ; ils étaient pourtant réservés en entier. Et les deux fournisseurs Claude venaient d'être déclarés par le formulaire, au contexte de 24 000 qu'il pré-remplit, dont la moitié va à la sortie réservée. Le même piège avait déjà pris le 2026-10-26 et le 2026-10-29.
 
 ## Sa voix, sa persona, la genèse
 

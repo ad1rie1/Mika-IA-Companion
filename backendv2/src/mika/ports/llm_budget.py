@@ -78,8 +78,9 @@ class LLMLimits:
             len(m.images) for m in req.messages)) * self.chars_per_token)
 
     def size(self, req: LLMRequest) -> int:
+        # un outil à la demande ne part pas avec la requête : sa déclaration ne se charge que s'il est cherché
         tools = sum(len(t.name) + len(t.description) + len(json.dumps(t.schema, ensure_ascii=False))
-                    for t in req.tools)
+                    for t in req.tools if not t.deferred)
         calls = sum(len(c.id) + len(c.name) + len(json.dumps(dict(c.args), ensure_ascii=False))
                     for m in req.messages for c in m.tool_calls)
         return (len(req.system_stable) + len(req.system_volatile) + tools + calls + self.overhead(req)

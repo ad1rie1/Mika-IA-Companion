@@ -13,7 +13,7 @@ from collections.abc import Iterator
 import pytest
 from starlette.testclient import TestClient
 
-from mika.adapters.llm.config import THINKING_CONTEXT_TOKENS, LiveGateway
+from mika.adapters.llm.config import LiveGateway
 from mika.adapters.llm.gateway import Gateway
 from mika.adapters.system import RealClock
 from mika.adapters.vectors import HashEmbedder
@@ -38,12 +38,12 @@ class Worker:
         return LLMResponse("Voilà le travail." if req.role == "pro" else "Coucou ! [EMOTION:happy:0.4]")
 
 
-#: le mode pro est le « mode Claude Code » (ADR 0116) : son fournisseur a la fenêtre d'un fournisseur Claude sans
-#: contexte déclaré (``THINKING_CONTEXT_TOKENS``, 40 000), pas le défaut commun de 24 000. Mesuré le 2026-11-13 : la
-#: requête pro pèse 57 006 caractères, dont 49 250 pour ses 61 outils déclarés (54 à la demande) ; le défaut ne lui en
-#: laisse que 56 908 (sortie réservée : 8 192 jetons), la fenêtre d'un fournisseur Claude 114 508 (audit du
-#: 2026-11-05, LR2)
-PRO_WINDOW = LLMLimits(context_tokens=THINKING_CONTEXT_TOKENS)
+#: le mode pro est le « mode Claude Code » (ADR 0116), et il tient dans le plus petit budget qu'un fournisseur Claude
+#: ait eu en service : 43 200 caractères (un contexte déclaré de 24 000 jetons, dont la moitié réservée à la sortie).
+#: Sur ses 61 outils déclarés, 54 sont à la demande et ne partent pas avec la requête : comptés quand même, ils
+#: remplissaient ce budget à eux seuls (53 701 caractères, ``PromptBudgetError`` sur un fil vide, 2026-11-17 ;
+#: ADR 0239)
+PRO_WINDOW = LLMLimits(context_tokens=8_192 + 12_000)
 
 
 @pytest.fixture

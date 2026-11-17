@@ -932,10 +932,12 @@ def _results(loop: LoopResult) -> dict[str, Any]:
 
 def _reserved(persona: PersonaRender | None, more: str, tools: Sequence[ToolDecl]) -> int:
     """Les caractères qui partent au modèle hors du composeur : la persona, le
-    catalogue, les déclarations d'outils — toutes, un fournisseur qui ne sait
-    pas différer les envoie."""
+    catalogue, les déclarations d'outils — celles qui partent vraiment. Un outil
+    à la demande (``ToolDecl.deferred``) ne part pas : le catalogue le nomme, sa
+    déclaration ne se charge que s'il est cherché ; un fournisseur qui ne sait
+    pas différer n'en a aucun (tout lui est déclaré en main, ``_compose``)."""
     return (len(persona.text) + 2 if persona else 0) + (len(more) + 2 if more else 0) + sum(
-        len(d.name) + len(d.description) + len(canonical_json(d.schema)) for d in tools)
+        len(d.name) + len(d.description) + len(canonical_json(d.schema)) for d in tools if not d.deferred)
 
 
 def _failed(error: BaseException) -> Outcome:
