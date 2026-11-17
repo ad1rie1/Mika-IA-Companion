@@ -87,8 +87,8 @@ sont à la boîte qu'ils désignent. Une boîte qu'on ne lui partage qu'en lectu
                          "unseen": 3}]}]}
 ```
 
-`microsoft_app` : l'instance a son application Microsoft (ADR 0238) — une boîte Microsoft s'ajoute alors sans
-`oauth_client_id`, que le client ne demande plus. `read_on_open` : quand un mail ouvert devient lu (`jamais`, `aussitot`, `3s`, `10s`, ADR 0175) — le client pose le
+`microsoft_app` : le serveur a une application Microsoft, celle que Mika livre ou celle de l'instance (ADR 0238) —
+une boîte Microsoft s'ajoute sans `oauth_client_id`, que le client ne demande plus. `read_on_open` : quand un mail ouvert devient lu (`jamais`, `aussitot`, `3s`, `10s`, ADR 0175) — le client pose le
 geste `read` lui-même. `level` : `proprietaire`, ou le niveau d'un partage (`lire`, `preparer`, `servir`) avec le nom
 de son propriétaire (`owner_name`, vide pour une boîte à toi). `common` : une boîte « à toi », commune à ses
 propriétaires (elle ne se partage pas à l'une d'elles, § 9). `voice` : comment elle y écrit (`elle`, `assistante`,

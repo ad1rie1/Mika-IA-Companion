@@ -21,6 +21,7 @@ import httpx
 import pytest
 
 from mika.adapters.mail import ImapSmtpMail, MailAccount, MailConfig
+from mika.adapters.mail.config import DEFAULT_APPLICATION
 from mika.adapters.mail.oauth import DEVICE_GRANT, EXPIRED, REVOKED, Grant, MicrosoftSignIn, OAuthError
 from mika.adapters.store_sql import SqlStore
 from mika.app.settings import MAIL_GRANTS_KEY, SecretBox, Settings
@@ -316,17 +317,18 @@ def test_the_application_of_the_instance_is_kept_in_the_settings(tmp_path):
         try:
             settings = Settings(store, SecretBox.for_data(tmp_path))
             await settings.open()
-            none = settings.mail_application()
+            none = settings.own_mail_application(), settings.mail_application()
             with pytest.raises(ValueError):
                 await settings.save_mail_application("pas-un-guid")
             await settings.save_mail_application(f"  {INSTANCE.upper()} ")
-            kept = settings.mail_application()
+            kept = settings.own_mail_application(), settings.mail_application()
             await settings.save_mail_application("")
             return none, kept, settings.mail_application()
         finally:
             await store.close()
 
-    assert asyncio.run(scenario()) == ("", INSTANCE, "")
+    # sans application à elle, l'instance se sert de celle que Mika livre
+    assert asyncio.run(scenario()) == (("", DEFAULT_APPLICATION), (INSTANCE, INSTANCE), DEFAULT_APPLICATION)
 
 
 def test_the_application_and_the_directory_are_checked():

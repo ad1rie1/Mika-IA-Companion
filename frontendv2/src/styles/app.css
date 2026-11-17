@@ -37,7 +37,7 @@
 /* ── Le fil : ce que la machine dit sous une bulle ────────────────────── */
 .msg-sys { display: flex; align-items: flex-start; gap: 6px; max-width: min(72%, 860px); margin-top: -2px; padding: 0 4px;
   font-size: 12px; line-height: 1.45; color: var(--muted); }
-.msg-sys.me { align-self: flex-end; text-align: right; }
+.msg-sys.me { align-self: flex-end; }
 .msg-sys.her { align-self: flex-start; margin-left: 34px; }
 .msg-sys .ico { margin-top: 2px; color: var(--warn); }
 .msg-sys a { white-space: nowrap; }

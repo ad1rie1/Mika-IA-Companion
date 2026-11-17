@@ -12,8 +12,8 @@ présente le mécanisme SASL ``XOAUTH2`` (``answer``) ; Microsoft 365 aussi, si 
   demande de se reconnecter. Microsoft renouvelle souvent ce jeton : le nouveau remplace l'ancien. Le jeton
   d'accès (une heure) reste en mémoire, renouvelé avant d'expirer.
 - **L'application** : Microsoft ne délivre un jeton qu'à une application inscrite, un client public de Microsoft
-  Entra. C'est celle de l'instance (``application``, inscrite une fois par qui tient le serveur, ADR 0238), ou
-  celle que la boîte déclare elle-même (``oauth_client_id``), qui passe devant.
+  Entra. C'est celle que Mika livre, ou celle que l'instance s'est donnée (``application``, ADR 0238) ; celle
+  que la boîte déclare elle-même (``oauth_client_id``) passe devant.
 - Une panne (réseau, refus de Microsoft) est une ``OAuthError``, dite en français. Un jeton que Microsoft ne
   renouvelle plus (``invalid_grant``) n'est plus présenté : la boîte attend qu'on la reconnecte. Aucun jeton
   n'entre jamais dans un journal ni dans un message.
@@ -49,7 +49,7 @@ SLOWER_S = 5.0
 
 NOT_SIGNED_IN = "pas encore connectée à Microsoft : « Se connecter à Microsoft » sur la fiche de la boîte"
 NO_APPLICATION = ("aucune application Microsoft déclarée (son identifiant, le client ID, se donne pour toute "
-                  "l'instance par « mika mail application », ou dans les réglages de la boîte)")
+                  "l'instance dans Courrier › Paramètres › Compte Microsoft, ou dans les réglages de la boîte)")
 NO_STORE = "la connexion Microsoft n'a pas où garder son jeton"
 EXPIRED = "le code a expiré avant d'être entré chez Microsoft"
 #: ce que Microsoft répond quand le jeton de renouvellement ne vaut plus

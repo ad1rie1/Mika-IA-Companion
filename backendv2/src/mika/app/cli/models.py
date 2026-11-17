@@ -41,14 +41,17 @@ async def llm_command(data: Path, args: argparse.Namespace) -> dict[str, object]
 
             # une option omise garde la valeur déclarée, l'adresse comprise : la remettre à vide en gardant
             # la clé enverrait celle-ci à l'hôte par défaut, chez un tiers qui ne l'a pas émise
+            # un contexte ni donné ni déjà déclaré n'est pas dit : le modèle choisit le défaut du type (un
+            # fournisseur Claude en reçoit 40 000, pas les 24 000 communs)
+            context = kept(getattr(args, "context_tokens", None), "context_tokens", None)
             backends[args.name] = BackendSpec(
+                **({} if context is None else {"context_tokens": context}),
                 kind=args.kind, model=args.model, api_key=kept(args.api_key, "api_key", ""),
                 base_url=kept(args.base_url, "base_url", ""), host=kept(args.host, "host", ""),
                 slots=kept(args.slots, "slots", 0), temperature=kept(args.temperature, "temperature", None),
                 think=kept(args.think, "think", False),
                 cache_ttl=previous.cache_ttl if previous else "5m",
                 max_reply_tokens=previous.max_reply_tokens if previous else 0,
-                context_tokens=kept(getattr(args, "context_tokens", None), "context_tokens", 24_000),
                 max_output_tokens=kept(getattr(args, "max_output_tokens", None), "max_output_tokens", 0),
                 chars_per_token=previous.chars_per_token if previous else 3.6,
                 quota_ceiling=previous.quota_ceiling if previous else 0.8,

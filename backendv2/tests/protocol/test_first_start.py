@@ -106,6 +106,15 @@ def test_the_cli_routes_only_roles_that_exist_and_says_who_replies(tmp_path, cap
     assert refused.value.code == 2  # un rôle qui n'existe pas : refusé, rien n'est gardé
     assert cli.main(["--data", str(data), "llm", "route", "local", "dream"]) == 0
     assert json.loads(capsys.readouterr().out)["routes"] == {"reply": "local", "dream": "local"}
+    # un contexte non dit suit le type : un fournisseur Claude a de quoi réfléchir, et le garde quand on le redéclare
+    assert shown["backends"]["local"]["context_tokens"] == 24_000
+    line = ["--data", str(data), "llm", "backend", "cc", "--kind", "claude_code", "--model", "sonnet"]
+    assert cli.main(line) == 0
+    assert json.loads(capsys.readouterr().out)["backends"]["cc"]["context_tokens"] == 40_000
+    assert cli.main([*line, "--context-tokens", "80000"]) == 0
+    capsys.readouterr()
+    assert cli.main(line) == 0
+    assert json.loads(capsys.readouterr().out)["backends"]["cc"]["context_tokens"] == 80_000
 
 
 # ── G-2 : un fournisseur qui ne répond plus se voit ───────────────────────

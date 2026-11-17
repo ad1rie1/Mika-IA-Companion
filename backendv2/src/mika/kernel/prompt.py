@@ -486,7 +486,8 @@ class Composer:
         if spare <= len(prefix):
             raise PromptBudgetError(
                 f"la zone stable ({len(stable_text)} car.) et ce qui part hors du composeur ({max(0, reserved)} car.) "
-                f"remplissent le budget ({budget.max_chars} car.) : plus de place pour le message")
+                f"remplissent le budget ({budget.max_chars} car.) : plus de place pour le message — le contexte "
+                "déclaré du fournisseur est trop petit, le relever")
         body = neutral(message)
         if len(prefix) + len(body) > spare:
             # le message déborde : ce que ses fichiers ont donné est coupé d'abord, ce qu'elle a tapé ensuite

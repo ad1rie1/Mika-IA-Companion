@@ -112,6 +112,7 @@
 .mailset-tabs:not(:has(.mailset-row:target)) .mailset-nav a[data-mailset-tab="boites"],
 .mailset-tabs:has(#boites:target) .mailset-nav a[data-mailset-tab="boites"],
 .mailset-tabs:has(#ailleurs:target) .mailset-nav a[data-mailset-tab="ailleurs"],
+.mailset-tabs:has(#microsoft:target) .mailset-nav a[data-mailset-tab="microsoft"],
 .mailset-tabs:has(#courrier-1:target) .mailset-nav a[data-mailset-tab="courrier-1"],
 .mailset-tabs:has(#courrier-2:target) .mailset-nav a[data-mailset-tab="courrier-2"],
 .mailset-tabs:has(#courrier-3:target) .mailset-nav a[data-mailset-tab="courrier-3"],
@@ -131,6 +132,8 @@
 /* la barre d'enregistrement des paramètres généraux : seulement sur l'une de leurs sections */
 .mailset-tabs:not(:has(.mailset-params .mailset-row:not(#ailleurs):target)) .mailset-params > .mailset-actions { display: none; }
 .mailset-panes .mailset-params { display: grid; gap: 16px; }
+/* le formulaire de l'application Microsoft ne compte pas dans la grille : son volet s'y pose à sa place */
+.mailset-panes .mailset-instance { display: contents; }
 /* une ligne par réglage, en colonnes quand la place le permet : la ligne elle-même est celle de console.css */
 .mailset-panes .mailset-params-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); gap: 0 36px; }
 .mailset-panes .mailset-param { padding: 10px 0; border-top: 1px solid var(--border); }

@@ -94,10 +94,8 @@ def test_an_owner_sees_your_boxes_and_a_person_only_hers(world):  # noqa: F811
     client, live, box = with_mail(world)
     got = client.get(API + "/mail/boxes").json()
     assert [b["key"] for b in got["boxes"]] == ["perso", "pro"] and got["read_on_open"]
-    # ADR 0238 : l'instance dit si elle a son application Microsoft (le client ne la demande alors plus)
-    assert got["microsoft_app"] is False
-    client.portal.call(live.settings.save_mail_application, "11111111-2222-4333-8444-555555555555")
-    assert client.get(API + "/mail/boxes").json()["microsoft_app"] is True
+    # ADR 0238 : Mika livre son application Microsoft (le client ne la demande donc pas)
+    assert got["microsoft_app"] is True
     pro = next(b for b in got["boxes"] if b["key"] == "pro")
     assert pro["level"] == "proprietaire" and pro["can_send"] and "Archives" in {f["name"] for f in pro["folders"]}
 

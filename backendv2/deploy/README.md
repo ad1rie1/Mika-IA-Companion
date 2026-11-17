@@ -374,11 +374,11 @@ son propre site.
    `mika mail remove --compte perso`). Rien de ce qu'elle rédige ne part sans ton accord (À valider › Courriers à
    envoyer).
    Une boîte **Hotmail ou Outlook.com** refuse les mots de passe : elle entre par ton compte Microsoft (ADR 0166).
-   Une fois pour toute l'instance (ADR 0238), inscris une application dans Microsoft Entra — il faut un annuaire,
-   donc un compte Azure ; Inscriptions d'applications › Nouvelle inscription : comptes Microsoft personnels
-   acceptés, aucune URI de redirection, puis Authentification › « Autoriser les flux de clients publics » — et
-   donne son identifiant (client ID) à Mika : `mika mail application <client ID>` (`mika mail application` la
-   montre, `--aucune` la retire). Ajouter une boîte ne demande alors que son adresse et son nom (frontendv2,
+   Mika livre l'application Microsoft par laquelle elle entre (ADR 0238) : rien à inscrire. Pour la remplacer par
+   celle de ton instance (inscrite dans Microsoft Entra : comptes Microsoft personnels acceptés, aucune URI de
+   redirection, « Autoriser les flux de clients publics »), donne son identifiant (client ID) dans la console,
+   Courrier › Paramètres › Compte Microsoft, ou par `mika mail application <client ID>` (`mika mail application`
+   la montre, `--defaut` revient à celle livrée). Ajouter une boîte ne demande que son adresse et son nom (frontendv2,
    l'application Android) ; dans la console : Connexion « par un compte Microsoft », serveur IMAP
    `outlook.office365.com` (993, SSL), SMTP `smtp-mail.outlook.com` (587, STARTTLS), utilisateur = l'adresse,
    l'application laissée vide. Enfin, sur la fiche de la boîte, « Se connecter à Microsoft » : un code à

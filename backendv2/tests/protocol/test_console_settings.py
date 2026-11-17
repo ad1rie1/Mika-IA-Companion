@@ -50,6 +50,24 @@ def links(page: str, prefix: str) -> set[str]:
     return set(re.findall(rf'href="({re.escape(prefix)}/[\w-]+)"', page))
 
 
+def test_a_new_claude_backend_left_at_the_prefilled_context_gets_room_to_think(world):  # noqa: F811
+    """Le formulaire pré-remplit le contexte commun (24 000) : laissé tel quel sur une entrée neuve, il n'est pas
+    « dit », et un fournisseur Claude reçoit le sien (40 000) — redit, il lui prenait la moitié de son prompt
+    (``PromptBudgetError`` en mode pro). Une valeur changée est gardée, et retaper 24 000 sur l'entrée faite aussi."""
+    client, live, _ = world
+    bootstrap(client)
+    url = f"{BASE}/fournisseurs"
+    assert 'value="24000"' in html_of(client.get(f"{url}?enregistrement=backends&cle=")).replace("24 000", "24000")
+    post(client, url, backend("opus", kind="claude_code", model="claude-opus-5-5", context_tokens="24000"))
+    post(client, url, backend("local", kind="ollama", model="gemma", context_tokens="24000"))
+    post(client, url, backend("large", kind="claude_code", model="claude-opus-5-5", context_tokens="80000"))
+    got = client.portal.call(live.settings.llm).backends
+    assert (got["opus"].context_tokens, got["local"].context_tokens, got["large"].context_tokens) == \
+        (40_000, 24_000, 80_000)
+    post(client, url, {**backend("opus", context_tokens="24000"), "_ancienne": "opus"})
+    assert client.portal.call(live.settings.llm).backends["opus"].context_tokens == 24_000
+
+
 def test_models_are_records_with_sealed_keys_roles_and_a_loader_that_degrades(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)

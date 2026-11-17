@@ -29,7 +29,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from mika.adapters.imaging.config import ImageBackendSpec, ImagingConfig
 from mika.adapters.llm.config import ROLES, BackendSpec, LLMConfig
 from mika.adapters.mail import MailAccount, MailConfig, from_stored
-from mika.adapters.mail.config import application_id
+from mika.adapters.mail.config import DEFAULT_APPLICATION, application_id
 from mika.adapters.mail.oauth import Grant
 from mika.adapters.maps import MapConfig, PlacesConfig, RoutingConfig
 from mika.adapters.mcp.config import McpConfig, McpServer, StoredReview
@@ -60,7 +60,7 @@ EMAIL_KEY = "email"
 MAIL_GRANTS_KEY = "mail_oauth"
 #: les expéditeurs dont la console affiche les images distantes (ADR 0175) : des adresses, les plus récentes d'abord
 MAIL_IMAGES_KEY = "mail_images"
-#: l'application Microsoft de l'instance (son client ID, ADR 0238) : pas un secret, un client public
+#: l'application Microsoft propre à l'instance, à la place de celle que Mika livre (son client ID, ADR 0238)
 MAIL_APPLICATION_KEY = "mail_application"
 FEEDS_KEY = "feeds"
 STT_KEY = "stt"
@@ -354,17 +354,23 @@ class Settings:
                                "tenant": grant.tenant}
             await self._put(MAIL_GRANTS_KEY, grants)
 
-    def mail_application(self) -> str:
-        """L'application Microsoft de l'instance (son client ID, ADR 0238) : celle par laquelle entre une boîte
-        Microsoft qui n'en déclare pas ; vide : aucune."""
+    def own_mail_application(self) -> str:
+        """L'application Microsoft que cette instance s'est donnée (son client ID, ADR 0238) ; vide : aucune, elle
+        se sert de celle que Mika livre."""
         got = self._get(MAIL_APPLICATION_KEY)
         try:
             return application_id(got) if isinstance(got, str) else ""
         except ValueError:
             return ""
 
+    def mail_application(self) -> str:
+        """L'application par laquelle entre une boîte Microsoft qui n'en déclare pas (ADR 0238) : celle de
+        l'instance si elle s'en est donné une, sinon celle que Mika livre."""
+        return self.own_mail_application() or DEFAULT_APPLICATION
+
     async def save_mail_application(self, client_id: str) -> str:
-        """Garde l'application de l'instance (vide : la retire) ; ``ValueError`` si ce n'est pas un client ID."""
+        """Garde l'application propre à l'instance (vide : revient à celle que Mika livre) ; ``ValueError`` si ce
+        n'est pas un client ID."""
         client_id = application_id(client_id)
         await self._put(MAIL_APPLICATION_KEY, client_id)
         return client_id

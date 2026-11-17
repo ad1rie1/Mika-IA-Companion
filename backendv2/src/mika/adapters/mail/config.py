@@ -45,6 +45,11 @@ _TENANT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.-]{0,99}$")
 _NO_SMTP = (("smtp_host", ("",)),)
 
 
+#: l'application Microsoft que Mika livre (ADR 0238) : un client public inscrit dans Microsoft Entra (comptes
+#: personnels, flux de clients publics), dont l'identifiant n'est pas un secret. Une instance peut donner la sienne.
+DEFAULT_APPLICATION = "ed7003c6-4cc5-4af8-91a9-724a66281d58"
+
+
 def application_id(client_id: str) -> str:
     """L'identifiant d'une application Microsoft (client ID), mis en forme ; vide : aucune. ``ValueError`` s'il n'en
     a pas la forme."""
@@ -112,7 +117,7 @@ class MailAccount(BaseModel):
     oauth_client_id: Annotated[str, Knob(
         label="Application Microsoft (client ID)", group="Connexion", advanced=False, order=18,
         only=(("auth", (MICROSOFT,)),),
-        help="Vide : l'application de l'instance (`mika mail application`). Sinon, l'identifiant d'une application "
+        help="Vide : l'application de l'instance (Courrier › Paramètres › Compte Microsoft). Sinon, l'identifiant d'une application "
              "inscrite dans Microsoft Entra (portail Azure › Inscriptions d'applications) — comptes Microsoft "
              "personnels acceptés, « Autoriser les flux de clients publics » activé. La boîte enregistrée, « Se "
              "connecter à Microsoft » sur sa fiche. Changer d'application demande de se reconnecter.")] = ""
@@ -241,6 +246,21 @@ class MailConfig(BaseModel):
         label="Comptes", noun="un compte", help=f"Chaque boîte qu'elle relève, avec sa façon d'y écrire. La clé est un nom court "
                               f"({ACCOUNT_KEY_RULE}).", advanced=False, order=10,
         key_pattern=ACCOUNT_KEY, key_rule=ACCOUNT_KEY_RULE)] = Field(default_factory=dict)
+    #: l'application Microsoft propre à l'instance (ADR 0238 ; vide : celle que Mika livre), telle que la console la
+    #: règle à côté des boîtes. Elle se
+    #: garde à part des comptes (``Settings.mail_application``) : ``Settings.email`` ne la lit pas et
+    #: ``Settings.save_email`` ne l'écrit pas, pour qu'un ``MailConfig(accounts=…)`` rebâti ne l'efface jamais.
+    microsoft_app: Annotated[str, Knob(
+        label="Application Microsoft (client ID)", group="Compte Microsoft", advanced=False, order=20,
+        help="Vide : l'application livrée d'origine, par laquelle entrent les boîtes Hotmail, Outlook.com et Live "
+             "sans donner la leur. Pour la remplacer par celle de cette instance : l'identifiant d'une application "
+             "inscrite dans Microsoft Entra — comptes Microsoft personnels acceptés, « Autoriser les flux de "
+             "clients publics » activé. La changer demande de reconnecter les boîtes qui entraient par elle.")] = ""
+
+    @field_validator("microsoft_app")
+    @classmethod
+    def _microsoft_app(cls, client_id: str) -> str:
+        return application_id(client_id)
 
     @model_validator(mode="after")
     def _keys(self) -> MailConfig:

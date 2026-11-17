@@ -1,5 +1,6 @@
 {# Courrier › Paramètres (ADR 0173), ouvert par le bouton en haut à droite du courrier : ses boîtes en cartes (où chacune
-   en est, comment elle lit et envoie, sa voix, son dernier relevé), puis les paramètres généraux du courrier (son
+   en est, comment elle lit et envoie, sa voix, son dernier relevé), l'application Microsoft propre à l'instance, à la place de celle que Mika livre (ADR 0238),
+   puis les paramètres généraux du courrier (son
    relevé, ce qu'elle t'en dit, les réponses qu'elle prépare) ; une boîte se modifie sur cette même page, ses réglages
    rangés par sujet — chacun à côté de ce qu'il règle. Les champs, leurs noms et leurs jetons sont ceux des réglages
    (pages/settings_form.py, app/settings_sections/plugins.py) : rien ne s'enregistre autrement qu'ailleurs. #}
@@ -78,7 +79,7 @@
 {% else %}
   {# Une section à la fois (ADR 0176) : la colonne de gauche mène à chacune (``:target``) ; sans cible, ses boîtes. Un seul
      formulaire porte les paramètres généraux : ce qui est masqué part avec lui à l'enregistrement. #}
-  {% set navs = namespace(items=[("boites", "Ses boîtes")], elsewhere=False) %}
+  {% set navs = namespace(items=[("boites", "Ses boîtes")] + ([("microsoft", "Compte Microsoft")] if s.form else []), elsewhere=False) %}
   {% if params %}{% for g in params.groups %}
     {% if g["items"]|selectattr("field")|rejectattr("field.readonly")|list %}{% set navs.items = navs.items + [("courrier-" ~ loop.index, g.title)] %}{% endif %}
     {% if (g["items"]|rejectattr("field")|list) or (g["items"]|selectattr("field")|selectattr("field.readonly")|list) %}{% set navs.elsewhere = True %}{% endif %}
@@ -135,6 +136,26 @@
     </div>
   </section>
   {% endfor %}
+
+  {# ── l'application Microsoft de l'instance (ADR 0238) : un réglage de la section, à côté de ses boîtes ── #}
+  {% if s.form %}
+  <form method="post" action="{{ action }}#microsoft" class="form mailset-instance">
+    <button type="submit" class="default-submit" hidden tabindex="-1">Enregistrer</button>
+    <input type="hidden" name="csrf" value="{{ s.csrf }}"><input type="hidden" name="_section" value="{{ s.key }}">
+    {% if s.form.stash %}<input type="hidden" name="_reserve" value="{{ s.form.stash }}">{% endif %}
+    <section class="mailset-row" id="microsoft" data-pane aria-labelledby="mailset-ms">
+      <div class="mailset-row-about">
+        <h3 id="mailset-ms">Compte Microsoft</h3>
+        <p>Hotmail, Outlook.com et Live refusent les mots de passe : une boîte y entre par ton compte Microsoft, au nom d'une application inscrite chez Microsoft. Une application est livrée d'origine : ajouter une boîte ne demande que son adresse. Tu peux la remplacer ici par une application à toi, pour toutes les boîtes de cette instance.</p>
+      </div>
+      {% for e in s.form.general %}<div class="flash danger">{{ e }}</div>{% endfor %}
+      <div class="now-card mailset-row-fields">
+        <div class="mailset-fields">{% for g in s.form.groups + s.form.advanced %}{% for f in g.fields %}{{ field(f) }}{% endfor %}{% endfor %}</div>
+      </div>
+      <div class="form-actions mailset-actions"><button class="btn">Enregistrer</button></div>
+    </section>
+  </form>
+  {% endif %}
 
   {# ── les paramètres généraux du courrier ── #}
   {% if params %}{% set p = params %}

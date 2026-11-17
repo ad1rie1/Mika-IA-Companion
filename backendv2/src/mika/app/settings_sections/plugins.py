@@ -140,6 +140,10 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         « personne:<clé> » (audit du 2026-11-05, C4-03)."""
         return dict(mail_owners()).get(owner) or name_of(live.kernel.mind.frame(), owner)
 
+    def mail() -> MailConfig:
+        """Ses boîtes, et l'application Microsoft propre à l'instance, gardée à part d'elles (ADR 0238)."""
+        return settings.email().model_copy(update={"microsoft_app": settings.own_mail_application()})
+
     async def save_mail(cfg: MailConfig) -> list[str]:
         """Une boîte est à toi, à elle ou à une personne qui a un compte (ADR 0185) — sauf ce qui était déjà là (un
         compte fermé depuis reste affiché, pour qu'on le corrige)."""
@@ -150,6 +154,9 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         if problems:
             return problems
         await settings.save_email(cfg)
+        # l'application Microsoft de l'instance se garde à part des comptes (ADR 0238)
+        if cfg.microsoft_app != settings.own_mail_application():
+            await settings.save_mail_application(cfg.microsoft_app)
         # ce que ses proposeurs lisent (les comptes où elle prépare des réponses) est un réglage journalisé
         problems = await live.reconfigure()
         if problems:  # le courrier est enregistré ; seuls ses paramètres attendent la prochaine reconfiguration
@@ -208,8 +215,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         return [("Comptes", f"{len(accounts)} ({plural(ready, 'prête à relever', 'prêtes à relever')})"
                  if accounts else "aucun"),
                 # ADR 0238 : une boîte Microsoft entre par elle, sans donner la sienne
-                ("Application Microsoft", settings.mail_application()
-                 or "aucune : chaque boîte Microsoft déclare la sienne (« mika mail application »)"),
+                ("Application Microsoft", settings.own_mail_application() or "celle livrée d'origine"),
                 ("Lire et envoyer", Ref("local", f"{PREFIX}/courrier/reception", "Courrier › Réception"))]
 
     async def save_mcp(cfg: McpConfig) -> list[str]:
@@ -356,7 +362,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                 ("Clés, appels et ce qu'ils ont donné", Ref("local", f"{PREFIX}/reveils", "Réveils par API"))]
 
     return (
-        SettingsSection("courrier", "Courrier", "plugins", MailConfig, settings.email, save_mail, lock=settings.writing,
+        SettingsSection("courrier", "Courrier", "plugins", MailConfig, mail, save_mail, lock=settings.writing,
                         description="Ses boîtes aux lettres (IMAP pour lire et ranger, SMTP pour envoyer) et, pour "
                                     "chacune, sa façon d'y écrire. Relues à chaque relève.", order=10,
                         facts=mail_facts, fixed_names=("accounts",), describe={"accounts": describe_mailbox},
@@ -364,8 +370,9 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                         choices={"accounts.owner": mail_owners},
                         # ses paramètres vivent dans le Courrier, en haut à droite : ses boîtes et ses paramètres
                         # généraux (relevé, ce qu'elle en dit, ses brouillons), sur une seule page (ADR 0173)
-                        pages=(SettingsPage("boites", "Paramètres", ("accounts",), description=(
-                            "Ses boîtes aux lettres — lire (IMAP), envoyer (SMTP), sa voix dans chacune — et ce que "
+                        pages=(SettingsPage("boites", "Paramètres", ("accounts", "microsoft_app"), description=(
+                            "Ses boîtes aux lettres — lire (IMAP), envoyer (SMTP), sa voix dans chacune —, l'application "
+                            "Microsoft par laquelle entrent les boîtes Hotmail et Outlook.com, et ce que "
                             "fait le courrier de toutes : son relevé, ce qu'elle en dit, les réponses qu'elle "
                             "prépare."), home="courrier/parametres", params="email",
                             template="handmade/courrier/parametres.html", styles=("handmade/courrier_reglages.css",)),)),

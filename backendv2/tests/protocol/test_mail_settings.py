@@ -11,6 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from mika.adapters.mail.config import DEFAULT_APPLICATION
 from mika.inspector.catalog import Builtin, Destination, NavGroup, check
 from mika.kernel.registry import CompositionError
 from tests.fixtures.console_html import ConsoleHTML
@@ -220,3 +221,30 @@ def test_the_mail_settings_count_ready_boxes_in_words(world, monkeypatch):  # no
     assert facts(True, False) == "2 (1 prête à relever)"
     assert facts(True, True, True) == "3 (3 prêtes à relever)"
     assert facts() == "aucun"
+
+
+def test_the_microsoft_application_of_the_instance_is_set_beside_the_boxes(world):  # noqa: F811
+    """ADR 0238 : l'application propre à l'instance, à la place de celle que Mika livre, se règle dans le Courrier ;
+    elle se garde à part des comptes, qu'un enregistrement ne touche pas."""
+    client, live, _ = world
+    bootstrap(client)
+    assert post(client, SAVE, ACCOUNT).status_code == 200
+    page = drawn(client, PAGE)
+    assert 'data-mailset-tab="microsoft"' in page and 'id="microsoft"' in page and ">Compte Microsoft</h3>" in page
+    assert f'action="{SAVE}#microsoft"' in page and 'name="microsoft_app"' in page
+    app = "11111111-2222-4333-8444-555555555555"
+    field = {"_section": "courrier", "_champs": ["microsoft_app"]}
+    refused = post(client, SAVE, {**field, "microsoft_app": "pas-un-guid"})
+    assert refused.status_code == 400 and "client ID" in html.unescape(refused.text)
+    assert client.portal.call(live.settings.own_mail_application) == ""
+    saved = post(client, SAVE, {**field, "microsoft_app": app.upper()})
+    assert saved.status_code == 200 and PAGE in str(saved.url) and f'value="{app}"' in html.unescape(saved.text)
+    assert client.portal.call(live.settings.mail_application) == app
+    assert set(client.portal.call(live.settings.email).accounts) == {"perso"}  # ses boîtes restent
+    # une boîte enregistrée ensuite ne l'efface pas
+    assert post(client, SAVE, {**ACCOUNT, "_ancienne": "perso", "label": "Perso"}).status_code == 200
+    assert client.portal.call(live.settings.mail_application) == app
+    # vidée, l'instance revient à celle que Mika livre
+    assert post(client, SAVE, {**field, "microsoft_app": ""}).status_code == 200
+    assert client.portal.call(live.settings.own_mail_application) == ""
+    assert client.portal.call(live.settings.mail_application) == DEFAULT_APPLICATION

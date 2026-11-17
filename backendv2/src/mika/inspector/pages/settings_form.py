@@ -960,8 +960,12 @@ def _record_from(model: type[BaseModel], entry: BaseModel | None, flat: Mapping[
                  values: Mapping[str, Any]) -> tuple[BaseModel | None, dict[str, str]]:
     if entry is not None:
         return forms.validate(model, entry, values)
+    # une entrée neuve : un champ laissé à la valeur que le formulaire proposait n'est pas « dit » — le modèle
+    # choisit son défaut d'après le reste (un fournisseur Claude reçoit 40 000 jetons de contexte, pas les 24 000
+    # communs que le formulaire pré-remplit ; redit tel quel, ce défaut lui prenait la moitié de son prompt)
+    said = {path: value for path, value in values.items() if path not in flat or value != flat[path]}
     try:
-        return model.model_validate(forms.nest({**flat, **values})), {}
+        return model.model_validate(forms.nest(said)), {}
     except ValidationError as exc:
         return None, forms.errors_fr(exc)
 

@@ -1519,7 +1519,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 - Hotmail, Outlook.com et Live refusent le mot de passe en IMAP et en SMTP. Une boîte peut donc entrer par un compte Microsoft (`auth: microsoft`) : un jeton d'accès, présenté par `XOAUTH2`, à la lecture comme à l'envoi. Microsoft 365 aussi, si son administrateur le permet (`oauth_tenant`).
 - On se connecte par le flux « code d'appareil » : « Se connecter à Microsoft », sur la fiche de la boîte, donne un code à entrer sur une page de Microsoft. Le mot de passe et la double authentification restent chez Microsoft. Le serveur attend le feu vert en tâche de fond, au rythme que Microsoft fixe, un quart d'heure au plus ; un redémarrage oublie un code en attente. Le flux par redirection est écarté : la console tourne sur une adresse locale en http, que Microsoft refuse comme retour.
-- L'application est celle de la personne : son identifiant (`oauth_client_id`), qu'elle inscrit elle-même dans Microsoft Entra, en client public. Mika ne livre l'identifiant d'aucune autre application. (Revu par l'ADR 0238 : l'application est d'abord celle de l'instance.)
+- L'application est celle de la personne : son identifiant (`oauth_client_id`), qu'elle inscrit elle-même dans Microsoft Entra, en client public. Mika ne livre l'identifiant d'aucune autre application. (Revu par l'ADR 0238 : Mika livre la sienne.)
 - Le jeton de renouvellement est scellé dans les réglages, à part des comptes (`mail_oauth`), avec l'application et l'annuaire qui l'ont délivré. Le formulaire de la console ne le réécrit jamais ; changer d'application ou d'annuaire demande de se reconnecter ; il part avec sa boîte, ou quand elle reprend un mot de passe. Quand Microsoft le remplace, le nouveau est gardé. Le jeton d'accès vit en mémoire, renouvelé cinq minutes avant sa fin.
 - Une connexion que Microsoft ne renouvelle plus (`invalid_grant`) ne lui est plus présentée : la boîte échoue comme un serveur qui refuse, et sa fiche dit de se reconnecter. Aucun jeton n'entre dans un journal ni dans un message.
 - La règle de l'ADR 0038 sur les jetons OAuth vaut pour le login de Claude Code, pas pour le courrier.
@@ -1762,17 +1762,18 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 
 *Révise 0192 (en partie : ses en-têtes suivent son adresse).*
 
-### 0238 — L'application Microsoft est celle de l'instance
+### 0238 — Mika livre son application Microsoft
 
-- Une instance a son application Microsoft : un client public inscrit une fois dans Microsoft Entra par qui tient le serveur, dont l'identifiant (client ID) se garde dans les réglages (`mika mail application <client ID>`, `--aucune` pour la retirer). Ce n'est pas un secret.
-- Une boîte Microsoft qui ne déclare pas d'application entre par celle de l'instance. Ajouter une boîte Hotmail ou Outlook.com ne demande donc plus que son adresse et son nom, puis « Se connecter à Microsoft ». L'annuaire reste `consumers` par défaut.
-- Une boîte peut encore déclarer la sienne (`oauth_client_id`), qui passe devant : pour un annuaire Microsoft 365 qui n'admet que ses propres applications. frontendv2 et l'application Android rangent ce champ et l'annuaire sous « Avancé » ; sans application d'instance, ils les demandent comme avant (`microsoft_app` dans `GET /api/moi/mail/boxes`).
-- La connexion gardée dit toujours quelle application l'a délivrée : changer celle de l'instance demande de reconnecter les boîtes qui entraient par elle.
-- Mika ne livre toujours l'identifiant d'aucune application, ni la sienne ni celle d'un autre logiciel : chaque instance inscrit la sienne.
+- Mika livre l'identifiant (client ID) d'une application Microsoft : un client public inscrit dans Microsoft Entra, comptes personnels acceptés (`adapters/mail/config.DEFAULT_APPLICATION`). Ce n'est pas un secret : un client public n'en a pas, et tout logiciel de courrier livre le sien.
+- Une boîte Microsoft qui ne déclare pas d'application entre par elle. Ajouter une boîte Hotmail ou Outlook.com ne demande donc que son adresse et son nom, puis « Se connecter à Microsoft ». L'annuaire reste `consumers` par défaut.
+- Une instance peut la remplacer par la sienne, gardée dans les réglages, à part des comptes : dans la console, Courrier › Paramètres › Compte Microsoft ; en ligne de commande, `mika mail application <client ID>` (`--defaut` revient à celle livrée).
+- Une boîte peut encore déclarer la sienne (`oauth_client_id`), qui passe devant les deux : pour un annuaire Microsoft 365 qui n'admet que ses propres applications. frontendv2 et l'application Android rangent ce champ et l'annuaire sous « Avancé » (`microsoft_app` dans `GET /api/moi/mail/boxes` ; un serveur d'avant, qui ne le dit pas, les fait demander comme avant).
+- La connexion gardée dit toujours quelle application l'a délivrée : en changer demande de reconnecter les boîtes qui entraient par elle.
+- Mika ne livre toujours l'identifiant d'aucun autre logiciel.
 
-*Pourquoi :* demander à chaque personne d'inscrire une application dans Microsoft Entra rendait l'ajout d'une boîte Hotmail impraticable : l'inscription exige un annuaire et un compte Azure. Un logiciel de courrier l'inscrit une fois pour tous ses utilisateurs ; une instance fait de même pour les siens.
+*Pourquoi :* demander à chaque personne, puis à chaque instance, d'inscrire une application dans Microsoft Entra rendait l'ajout d'une boîte Hotmail impraticable : l'inscription exige un annuaire et un compte Azure. Un logiciel de courrier l'inscrit une fois pour tous ses utilisateurs ; Mika fait de même.
 
-*Révise 0166 (en partie : l'application n'est plus celle de la personne).*
+*Révise 0166 (en partie : l'application n'est plus celle de la personne, et Mika livre la sienne).*
 
 ## Les fournisseurs de modèles
 
