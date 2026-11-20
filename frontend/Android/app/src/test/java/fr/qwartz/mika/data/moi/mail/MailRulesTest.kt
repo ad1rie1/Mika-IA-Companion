@@ -354,6 +354,96 @@ class MailRulesTest {
         assertEquals(1, nextPage(read = 2, drift = 5, size = 25))
     }
 
+    // ── glisser vers la corbeille ──
+
+    @Test fun `une ligne se glisse là où la barre la rangerait, pas dans la corbeille`() {
+        val folders = listOf(MailFolder("INBOX", "Réception", "inbox", true), MailFolder("Trash", "Corbeille", "trash", true))
+        val inbox = MailRow(ref = "r1", box = "pro", folder = "INBOX")
+        assertTrue(swipeTrashable(inbox, box("pro", folders = folders)))
+        assertTrue(swipeTrashable(inbox, box("pro", Levels.USE, "Léa", folders = folders)))
+        assertFalse(swipeTrashable(inbox, box("pro", Levels.PREPARE, "Léa", folders = folders)))
+        assertFalse(swipeTrashable(inbox, box("pro", Levels.READ, "Léa", folders = folders)))
+        assertFalse(swipeTrashable(inbox, null))
+        assertFalse(swipeTrashable(inbox.copy(folder = "Trash"), box("pro", folders = folders)))
+        // un dossier que la boîte ne dit pas : il se range comme les autres
+        assertTrue(swipeTrashable(inbox.copy(folder = "Projets"), box("pro", folders = folders)))
+    }
+
+    @Test fun `« Annuler » la remet à sa place par sa date, pas dans une page pas encore lue`() {
+        val rows = listOf(MailRow(ref = "a", date = 50), MailRow(ref = "b", date = 30), MailRow(ref = "c", date = 10))
+        assertEquals(listOf("a", "x", "b", "c"), restoredRows(rows, MailRow(ref = "x", date = 40), complete = false).map { it.ref })
+        assertEquals(listOf("x", "a", "b", "c"), restoredRows(rows, MailRow(ref = "x", date = 60), complete = false).map { it.ref })
+        assertEquals(listOf("a", "b", "c", "x"), restoredRows(rows, MailRow(ref = "x", date = 5), complete = true).map { it.ref })
+        assertEquals(rows, restoredRows(rows, MailRow(ref = "x", date = 5), complete = false))
+        assertEquals(rows, restoredRows(rows, MailRow(ref = "b", date = 30), complete = true))
+    }
+
+    // ── son tri ──
+
+    @Test fun `où en est son tri, et ce qui ne dit rien`() {
+        assertEquals(Triage.READ, Triage.of("read"))
+        assertEquals(Triage.GUESSED, Triage.of("guessed"))
+        assertEquals(Triage.BULK, Triage.of("bulk"))
+        assertEquals(Triage.WAITING, Triage.of("waiting"))
+        assertNull(Triage.of(""))
+        assertNull(Triage.of("futur"))
+        assertEquals("", MailRow().triage)
+        assertEquals("", MailFull().triage)
+    }
+
+    @Test fun `la marque d'une ligne - lu, en attente, deviné, mais ni l'envoi en masse ni le vide`() {
+        assertEquals(Triage.READ, triageMark("read"))
+        assertEquals(Triage.WAITING, triageMark("waiting"))
+        assertEquals(Triage.GUESSED, triageMark("guessed"))
+        assertNull(triageMark("bulk"))
+        assertNull(triageMark(""))
+    }
+
+    @Test fun `le cadre de la liseuse paraît en attente de son tri, même sans rien de remarqué`() {
+        assertTrue(knowsShown(null, "waiting", asked = false))
+        assertTrue(knowsShown(null, "guessed", asked = false))
+        assertFalse(knowsShown(null, "read", asked = false))
+        assertFalse(knowsShown(null, "", asked = true))
+        assertFalse(knowsShown(HerMark(), "bulk", asked = false))
+        assertTrue(knowsShown(HerMark(noticed = true), "", asked = false))
+        assertTrue(knowsShown(HerMark(), "", asked = true))
+        assertTrue(knowsShown(HerMark(summary = "Un devis à signer."), "read", asked = false))
+    }
+
+    @Test fun `le titre du cadre dit son tri à la place de « remarqué », après ce qu'elle en a fait`() {
+        assertEquals(KnowsState.Sorted(Triage.READ), knowsState(HerMark(noticed = true), "read"))
+        assertEquals(KnowsState.Sorted(Triage.WAITING), knowsState(null, "waiting"))
+        assertEquals(KnowsState.Sorted(Triage.GUESSED), knowsState(HerMark(noticed = true), "guessed"))
+        assertEquals(KnowsState.Sorted(Triage.BULK), knowsState(HerMark(noticed = true), "bulk"))
+        assertEquals(KnowsState.Noticed, knowsState(HerMark(noticed = true), ""))
+        assertEquals(KnowsState.None, knowsState(null, ""))
+        assertEquals(KnowsState.Did("archivé"), knowsState(HerMark(noticed = true, read = true, how = "archivé"), "read"))
+    }
+
+    @Test fun `ce que tes consignes de tri en ont fait, le dossier nommé comme sa boîte le montre`() {
+        val folders = listOf(MailFolder("INBOX", "Réception", "inbox", true), MailFolder("INBOX.Pub", "Publicités", "", true))
+        val pro = box("pro", folders = folders)
+        assertNull(byRules(null, pro))
+        assertNull(byRules(HerMark(noticed = true), pro))
+        assertEquals(ByRules(alert = true, filed = ""), byRules(HerMark(alert = true), pro))
+        assertEquals(ByRules(alert = false, filed = "Publicités"), byRules(HerMark(filed = "INBOX.Pub"), pro))
+        // un dossier que la boîte ne dit pas (ou sans boîte) : son nom
+        assertEquals(ByRules(alert = true, filed = "Banque"), byRules(HerMark(alert = true, filed = " Banque "), pro))
+        assertEquals("INBOX.Pub", byRules(HerMark(filed = "INBOX.Pub"))!!.filed)
+        // le cadre paraît pour elles, même sans rien de remarqué
+        assertTrue(knowsShown(HerMark(alert = true), "", asked = false))
+        assertTrue(knowsShown(HerMark(filed = "INBOX.Pub"), "", asked = false))
+        assertEquals(HerMark(), HerMark(alert = false, filed = ""))
+    }
+
+    @Test fun `ce que le cadre en dit de plus - pas encore lu, ou deviné`() {
+        assertEquals(Triage.WAITING, triageNote("waiting"))
+        assertEquals(Triage.GUESSED, triageNote("guessed"))
+        assertNull(triageNote("read"))
+        assertNull(triageNote("bulk"))
+        assertNull(triageNote(""))
+    }
+
     // ── la clé d'envoi ──
 
     @Test fun `un double appui garde la clé, une réponse du serveur en donne une neuve`() {

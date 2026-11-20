@@ -28,12 +28,12 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 | Sa mémoire et ce qu'elle sait | 0010, 0011, 0034, 0046, 0052, 0055, 0074, 0076, 0078, 0079, 0080, 0081, 0082, 0083, 0084, 0085, 0086, 0087, 0091, 0099, 0109, 0110, 0111, 0153, 0224 |
 | Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134, 0148, 0184, 0185, 0186, 0188, 0207, 0220, 0226 |
 | Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137, 0150, 0155, 0160, 0227 |
-| Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144, 0145, 0161 |
-| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163, 0166, 0168, 0171, 0172, 0189, 0190, 0191, 0192, 0193, 0194, 0195, 0196, 0198, 0199, 0211, 0213, 0214, 0228, 0229, 0236, 0238 |
+| Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144, 0145, 0161, 0253, 0254, 0257, 0260 |
+| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163, 0166, 0168, 0171, 0172, 0189, 0190, 0191, 0192, 0193, 0194, 0195, 0196, 0198, 0199, 0211, 0213, 0214, 0228, 0229, 0236, 0238, 0240, 0243, 0244, 0245, 0246, 0247, 0248, 0249, 0250, 0251, 0255, 0256, 0258, 0259 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158, 0239 |
-| Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159 |
-| Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170, 0187, 0200, 0208, 0209, 0215, 0233, 0235 |
-| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176, 0177, 0178, 0179, 0180, 0181, 0182, 0183, 0197, 0201, 0202, 0203, 0204, 0205, 0206, 0210, 0216, 0217, 0218, 0219, 0225, 0230, 0231, 0232, 0234, 0237 |
+| Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159, 0261 |
+| Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170, 0187, 0200, 0208, 0209, 0215, 0233, 0235, 0242, 0252 |
+| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176, 0177, 0178, 0179, 0180, 0181, 0182, 0183, 0197, 0201, 0202, 0203, 0204, 0205, 0206, 0210, 0216, 0217, 0218, 0219, 0225, 0230, 0231, 0232, 0234, 0237, 0241 |
 | Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135 |
 
 ## Le noyau : journal, arbitrage, pipeline
@@ -606,7 +606,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Pourquoi :* « est-il possible d'unifier le moteur de règles ? … une consultation globale des droits sur une page dédiée, et un point d'entrée unique pour vérifier si on a le droit » ; trois tableaux de lignes (services, envoi, projets) appliquaient chacun la même idée à sa façon, et ce qu'une personne pouvait faire ne se lisait qu'en ouvrant chaque page. Puis « pour la source il y a normalement : tout le monde, propriétaire, en privé (amis proches), elle qui travaille, personne (liste des personnes) », cinq vérifications « propriétaire » écrites chacune à sa façon, et « Piloter projet : lecture seule, accord du propriétaire, modification, aucun pilotage ».
 
-*Révise 0104 (en partie), 0122 (en partie), 0131 (en partie), 0132 (en partie). Révisée par 0134, 0148, 0189.*
+*Révise 0104 (en partie), 0122 (en partie), 0131 (en partie), 0132 (en partie). Révisée par 0134, 0148, 0189, 0257.*
 
 ### 0134 — Qui, par où, quand : deux portes, six sortes de tableaux
 
@@ -622,7 +622,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Pourquoi :* « un salon n'existe pas dans la sélection de qui ? » — « qui » mélangeait la personne et la situation, et cinq règles restaient cachées dans le code ; « il faudrait rajouter canal source » ; « ils doivent aussi avoir leur tableau de droits » (sa boîte mail, Internet, chaque app sans projet) ; ses propres outils sont « le minimum vital : pré-rempli, modifiable, et dépendant du moteur de droits comme le reste ».
 
-*Révise 0122 (en partie), 0131 (en partie), 0132 (en partie), 0133 (en partie). Révisée par 0148, 0184, 0185, 0220, 0226.*
+*Révise 0122 (en partie), 0131 (en partie), 0132 (en partie), 0133 (en partie). Révisée par 0148, 0184, 0185, 0220, 0226, 0257.*
 
 ### 0148 — Ce qu'un outil exige de qui est en face, il le déclare
 
@@ -1123,7 +1123,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Pourquoi :* un but est une envie qui s'use ; un projet est un espace de travail durable qu'on pilote.
 
-*Révise 0020 (en partie), 0030 (en partie). Révisée par 0039, 0145, 0161.*
+*Révise 0020 (en partie), 0030 (en partie). Révisée par 0039, 0145, 0161, 0254, 0257.*
 
 ### 0039 — Agir dans le monde : un bac à sable qui tient, un accord qui porte sur ce qui part, une preuve qui veut dire quelque chose
 
@@ -1137,7 +1137,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Pourquoi :* l'atelier n'avait aucune limite, son réseau « approuvé » était celui de la machine, et « fini » se prouvait avec `ls`.
 
-*Révise 0020 (en partie), 0023 (en partie), 0031 (en partie).*
+*Révise 0020 (en partie), 0023 (en partie), 0031 (en partie). Révisée par 0260.*
 
 ### 0104 — Une app a un foyer : tous les chemins de son travail autour de la Forge
 
@@ -1211,7 +1211,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Pourquoi :* l'audit du 2026-10-27 (`docs/audit-2026-10-27-projets.md`) est parti du projet n° 257. Ce jour-là, le cadre du projet s'était écrit dans sa réponse, au milieu d'une conversation, sous la consigne « ouvre le projet maintenant ». La demande d'Adrien (« du trading par IA ») s'était perdue dans une paraphrase. La première exécution était partie dans la minute, sur un objectif constant. Et aucune exécution ne pouvait revoir un cadre fait à la hâte. Adrien voulait « une réflexion pour définir ses objectifs correctement, un plan, quitte à demander l'avis de l'utilisateur ».
 
-*Révise 0031 (en partie), 0104 (en partie). Révisée par 0161, 0162.*
+*Révise 0031 (en partie), 0104 (en partie). Révisée par 0161, 0162, 0253, 0257.*
 
 ### 0161 — De la demande au livrable : les jointures du cadrage
 
@@ -1252,6 +1252,53 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 - Une app survivait, sans réparation, au projet clos autour d'elle.
 
 *Révise 0031 (en partie), 0104 (en partie), 0143 (en partie), 0145 (en partie).*
+
+### 0253 — Chaque objectif garde sa mémoire de travail
+
+- **Ses comptes rendus à lui.** Un objectif garde ses trois derniers comptes rendus (`Objective.reports`), en plus des cinq derniers du projet. L'exécution qui le vise lit le dernier en entier (« où tu en étais »), puis ceux d'avant (800 caractères chacun), puis ceux du reste du projet : cinq lignes en tout, les siennes d'abord.
+- **Ses notes à lui.** Une note de carnet écrite pendant une exécution garde l'objectif qu'elle visait (`Noted.objective`). L'objectif garde ses trois dernières ; le carnet du projet les garde toutes, comme avant. L'exécution lit celles de son objectif, puis au plus trois du reste du carnet, cinq en tout.
+- **Une exécution sans objectif visé** (un réveil par API) lit, comme avant, les cinq derniers comptes rendus et les trois dernières notes du projet.
+- **Rien à convertir.** L'état se reconstruit du journal (`state_version` 12) : les comptes rendus d'avant retrouvent leur objectif ; une note d'avant, qui ne le disait pas, reste au carnet du projet.
+
+*Pourquoi :* la mémoire de travail était celle du projet entier. Dès que trois objectifs constants alternent — un audit, des articles, un suivi —, chacun ne retrouvait qu'un ou deux de ses propres comptes rendus parmi les cinq, et reprenait sans savoir ce qu'il avait déjà couvert. C'est le premier lot des chaînes de travail entre projets (plusieurs projets liés, tenus dans la durée).
+
+*Révise 0145 (en partie).*
+
+### 0254 — Un service branché se donne à un projet
+
+- **Une case par service.** « Ses outils », sur la fiche d'un projet, propose une case par service MCP branché par l'opérateur, à côté des cases des lots du code. Cochée, le lot du service (`mcp.<serveur>`) entre dans les lots du projet, et ses outils sont offerts à ses exécutions. Le web garde sa case à lui : il n'est pas un service branché (`contracts.mcp.is_service`).
+- **Les droits ne changent pas.** Cocher un service ne l'ouvre pas : ses lignes d'accès décident toujours, par la source « elle qui travaille » (ADR 0131). Un service coché que ses lignes ferment au travail n'offre rien.
+- **C'est le cadre du projet.** Seul un opérateur coche un service, dans la console. Elle ne s'en donne pas elle-même (`project_equip`), et un projet ouvert en conversation n'en reçoit pas à sa naissance.
+- **Un service débranché** garde son lot sur le projet, sans outil. Sa case reste, dite « débranché », jusqu'à ce qu'on la décoche.
+- **Un outil sur accord.** Un outil qui demande un accord est proposé à l'opérateur ; ce que le service rend alors revient à l'exécution suivante du projet (ADR 0255).
+
+*Pourquoi :* un réveil par API pouvait recevoir un service branché, un projet non. Ses outils étaient une liste fixe de sept cases, alors que la politique de ses exécutions admettait déjà la famille `mcp.*`. Un projet qui suit un site ou un produit a besoin de ses services : la mesure du référencement, un outil de publication. C'est le deuxième lot des chaînes de travail entre projets (ADR 0253).
+
+*Révise 0031 (en partie). Révisée par 0255.*
+
+### 0257 — Un projet en lit d'autres : les liens de lecture
+
+- **Le lien.** Un projet en lit d'autres, quatre au plus, sans jamais y écrire (`projects.links_set`, `Project.reads`). Il peut lire un projet du même propriétaire, et celui qu'un autre propriétaire lui partage par une ligne d'accès. Les liens ne forment jamais de boucle : l'action le refuse, et le réducteur ignore un lien qui en fermerait une.
+- **Qui le pose.** Le propriétaire du projet lecteur ; pour un projet à elle, quelqu'un qui s'occupe d'elle. Il le pose sur la fiche du projet (« Enregistrer ce qu'il lit »), ou en le lui confiant (`create_project`, `reads`). Un plan peut le demander (`project_plan`, `reads`) : la séance de cadrage voit les projets qu'elle peut demander à lire — ceux que la personne qui a demandé le projet peut voir elle aussi —, le plan attend alors la réponse de son propriétaire, et le lien se pose quand il le valide (`project_steer approve`, « Valider le plan »). Validé par quelqu'un d'autre, ou d'office, le lien ne se pose pas : la réponse le dit, et la fiche montre ce que le plan demande.
+- **Ce qu'il donne se relit dans les lignes d'accès du projet lu**, à chaque exécution, pour le propriétaire du projet lecteur (`faculties/projects/links.py`). Le voir donne son titre et son état. Le piloter, au moins en lecture seule, donne ses deux derniers comptes rendus, ses décisions en vigueur, ses objectifs ouverts et la date de sa dernière exécution (la section `project_links` du prompt). Ses fichiers donnent la vue de son atelier (ADR 0260). Le piloter sur accord ou en modification donne de lui adresser une demande : la règle dit déjà ce droit (`Grant.ask`), un lot suivant le sert. Un projet archivé, ou que ses lignes ne laissent plus voir, suspend le lien : il reste posé, il ne donne plus rien, et l'exécution le lit en une ligne.
+- **Hors de toute conversation, une ligne se juge au plus serré.** Une exécution n'a ni canal ni personne en face. Seule une ligne qui désigne le propriétaire du projet lecteur ouvre un lien : la ligne par défaut, faite pour qui n'est pas nommé, n'en ouvre pas. Et il n'a que ce que les lignes lui donnent par tous les canaux et à tout moment : parmi celles qui le désignent, jusqu'à la première qui vaut partout et toujours, la plus serrée décide de chaque colonne ; sans une telle ligne, rien. Un projet à elle se juge comme elle seule au travail. Le tableau du canal « elle seule » serre encore le pilotage et les fichiers (les deux portes, ADR 0134).
+- **La confidentialité suit le lien.** Ce que le lecteur écrit prend au moins le niveau de ce qu'écrit le projet lu (`written`, `read_level`). Ses sujets reçoivent le propriétaire et les sujets du projet lu (`about`) : l'oubli d'une personne du projet lu atteint ce que le lecteur écrit ensuite. Les deux passent de lecteur en lecteur, et retirer un lien ne retire rien. L'état se reconstruit du journal (`state_version` 13).
+
+*Pourquoi :* une exécution ne voyait que son projet. Une chaîne de travail — le code d'un produit, son site, et un projet qui les fait connaître en veillant à leur cohérence — demande qu'un projet lise les autres sans y écrire, et que ce qu'il en lit reste dans la main de leur propriétaire : un droit retiré dans la matrice coupe la lecture à l'exécution suivante. C'est le troisième lot des chaînes de travail entre projets (ADR 0253) ; la vue de l'atelier du projet lu en est la suite.
+
+*Révise 0031 (en partie), 0133 (en partie), 0134 (en partie), 0145 (en partie). Révisée par 0260.*
+
+### 0260 — Un projet lit les fichiers d'un autre : la vue de son atelier
+
+- **La vue.** Un projet qui en lit un autre, et à qui ses lignes d'accès donnent ses fichiers (`Grant.view`, ADR 0257), voit le dernier commit de sa branche de base (`main`, celle où naît tout atelier : pas la branche où l'atelier se trouve), jamais son dossier en cours de travail. La vue est un dossier à part (`ateliers/.vues/projet-<lecteur>/projet-<lu>/<commit>/`), posé par l'adaptateur de l'atelier (`Workshop.view`) : un git en cage lit le dépôt du projet lu, monté en lecture seule, et n'écrit que dans ce dossier. Rien ne s'écrit chez le projet lu, aucun bail n'est commun, les deux projets ne s'attendent pas. Elle se pose au départ de chaque exécution du lecteur, se repose si la tête a bougé, et ne bouge plus jusqu'à l'exécution suivante. Sans commit, pas de vue ; au-delà de 512 Mio (`Limits.view_bytes`, un plafond à elle, qui ne prend rien à l'atelier du lecteur), pas de vue non plus ; le prompt le dit.
+- **Un seul chemin : `liens/<n>/…`**, n étant le numéro du projet lu (`ports/workshop.py`, `VIEWS_DIR`). `ws_list` et `ws_read` le lisent dans la vue ; `ws_run` la monte en lecture seule à cet endroit de la cage (`cage.read_only`), sur un dossier vide que l'adaptateur pose dans l'atelier du lecteur — bubblewrap ne monte que sur un dossier qui existe ; `ws_write` et `ws_edit` le refusent. Un chemin qui sort de la vue (`..`, un lien symbolique) est refusé comme dans l'atelier. Une commande réseau ne la voit pas.
+- **Le droit se relit à chaque appel d'outil** (`links.views`), comme au départ de l'exécution : un droit retiré coupe la lecture dès l'appel suivant et supprime la vue (`Workshop.drop_views`). Un lien retiré ou suspendu, un projet archivé (le lecteur ou le projet lu), un « pour qui » changé font le ménage après le commit (`projects.links_set`, `access_set`, `archived`, `reframed`), sans attendre que le lecteur retravaille.
+- **Rien n'en sort par un autre chemin.** La vue n'est pas dans l'atelier du lecteur : son arbre, son git, ses commits et sa taille ne la comptent pas ; `share_project_file`, `project_files` et l'onglet Fichiers ne la voient pas. Ce que le lecteur en recopie chez lui est à lui, au niveau de ce qu'il lit (ADR 0257).
+- **Le prompt et l'oubli.** La section `project_links` dit, pour chaque projet lu dont la vue est ouverte, où elle est, l'empreinte courte et l'âge du commit vu, et un aperçu borné de son arbre (enrichisseur `projects_views`) ; sinon, pourquoi il n'y en a pas. L'oubli n'atteint pas plus une vue que les fichiers d'un atelier (ADR 0039) ; mais une vue ne garde que le dernier commit de sa source, et ne survit ni au lien, ni au droit, ni au projet lu.
+
+*Pourquoi :* un lien de lecture donnait les comptes rendus, les décisions et les objectifs d'un projet, pas ses fichiers. Un projet qui fait connaître un produit doit pouvoir citer son code et son site tels qu'ils sont, sans jamais y écrire, et sans lire un travail à moitié fait : le dernier commit est le seul état que le projet lu a lui-même déclaré fini. C'est la fin du troisième lot des chaînes de travail entre projets (ADR 0253).
+
+*Révise 0039 (en partie : la cage monte une vue en lecture seule ; ce que l'oubli fait d'une vue), 0257 (en partie : la vue de l'atelier est servie).*
 
 ## Les sens et les plugins
 
@@ -1339,7 +1386,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Pourquoi :* rien ne permettait de lui brancher un serveur MCP, ni de voir au même endroit tout ce qu'elle peut faire.
 
-*Révisée par 0066, 0128, 0163, 0165, 0170.*
+*Révisée par 0066, 0128, 0163, 0165, 0170, 0255.*
 
 ### 0066 — Chercher sur le web : un plugin système qui apporte son serveur MCP
 
@@ -1380,7 +1427,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Pourquoi :* lire et répondre dans Teams sans les API de Microsoft, que l'organisation ne consentira pas.
 
-*Révisée par 0132, 0186.*
+*Révisée par 0132, 0186, 0251.*
 
 ### 0106 — Ce qu'on lui envoie : gardé, lu de près, relié à ce qu'elle sait
 
@@ -1503,6 +1550,8 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Pourquoi :* le modèle lisait chaque message mais ne pouvait dire que six émotions, toutes tenues sous 0,2 par le code, et le repli du courrier posait « curieuse » sur tout mail ; une insulte ne pouvait pas la fâcher (audit des garde-fous du 2026-10-27).
 
+*Révisée par 0240.*
+
 ### 0163 — Ce qu'un service rend, elle le lit entier : seule la borne de l'épisode le coupe
 
 - « Réponse lue », le réglage de chaque serveur MCP (4 000 caractères par défaut, 20 000 au plus) et celui du serveur web (8 000), est retiré. Une configuration gardée qui le porte se lit sans lui (`RETIRED` dans `adapters/mcp/config.py`, `retired_params` du plugin `web`).
@@ -1514,6 +1563,18 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 *Pourquoi :* quatre devis en JSON dépassaient déjà 4 000 caractères, coupés au milieu d'un mot, même en mode pro qui devait en lire 120 000 ; la réponse était aussi citée deux fois, ce qui cassait les tableaux. Claude Code laisse 25 000 jetons à un outil MCP.
 
 *Révise 0064 (en partie), 0066 (en partie).*
+
+### 0255 — Ce qu'un service rend après un accord revient au travail d'où la demande est partie
+
+- **La demande garde d'où elle vient.** Au travail, personne n'est en face : un appel sur accord est proposé à l'opérateur, et sa demande garde la cible de l'épisode (`Request.origin` : `project:12`, `goal:7`, une tâche). `target` reste l'adresse d'une personne, vide au travail.
+- **Son issue revient au travail suivant, au même endroit.** Le prochain épisode de travail sur cette cible lit « CE QUE TES SERVICES ONT RENDU À CE TRAVAIL » (section `work_services`, à côté de ce que le réseau a rendu) : ce que le service a rendu, un échec avec sa raison, un refus, une expiration ; et ce qui attend encore un accord, ou vient de partir, pour qu'elle ne le redemande pas. Rien ne passe d'une cible à une autre.
+- **Lue une fois, quand le travail aboutit.** Le départ de l'épisode (`episode.started`) lui remet les issues déjà là, quatre au plus, les plus anciennes d'abord (`Request.shown_in`) ; sa fin les marque lues (`Request.seen`) s'il a abouti (`done`). En panne, devancé, interrompu ou muet, rien n'est marqué : le travail suivant les relit. L'état se reconstruit du journal (`state_version` 2).
+- **Ses demandes sont à elle, la réponse du service est citée.** Comme en conversation (ADR 0154, 0163) : une ligne à elle par demande, puis ce que le service a répondu, cité une seule fois, autant qu'on en garde (8 000 caractères), avec ce qu'elle en garde (`keep` : son plancher, `unkept`). La section n'est donc pas une section citée en bloc ; elle est coupée la première parmi les siennes, jamais sous son plancher.
+- **L'outil le lui dit.** Au travail, la réponse de l'outil qui propose l'appel dit que l'issue sera sous ses yeux à la reprise de ce travail (`mcp.work.asked`).
+
+*Pourquoi :* un service coché sur un projet (ADR 0254) ne servait que par les outils qu'elle appelle seule. Un outil qui agit — publier une page — se règle sur l'accord de l'opérateur ; l'appel partait, et ce qu'il rendait n'arrivait à aucune exécution : elle ne savait ni s'il avait réussi, ni qu'il avait été refusé, et pouvait le redemander. La sortie d'une commande réseau de l'atelier revenait déjà à l'exécution suivante ; un service fait de même. C'est le lot L2b des chaînes de travail entre projets.
+
+*Révise 0064 (en partie), 0254 (en partie).*
 
 ### 0166 — Une boîte Microsoft entre par OAuth2, sans mot de passe
 
@@ -1538,7 +1599,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Pourquoi :* ses listes ne disaient ni la date ni son propre tri : pour trier, elle rouvrait chaque mail, cinq au plus par épisode. « facture EDF » ne trouvait pas « Facture de votre contrat EDF ». Une recherche au-delà des deux jours relevés répondait « Rien ne correspond », et elle concluait que le mail n'existait pas.
 
-*Révisée par 0175.*
+*Révisée par 0175, 0249.*
 
 ### 0171 — Les dossiers d'une boîte : cochés dans la liste du serveur, tous synchronisés si on le veut
 
@@ -1586,6 +1647,39 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 *Pourquoi :* « toutes les notifications des app, la dernière position du tel » ; « pour y télécharger l'apk de téléphone et y gérer les téléphones connectés ».
 
 *Révise 0062 (en partie), 0120 (en partie : les apps lues). Révisée par 0233 (en partie : l'onglet Notifications de frontendv2 attend les notifications des autres apps, et le choix d'un téléphone que chaque message dise le sien).*
+
+### 0246 — L'extension de Teams se télécharge dans Paramètres, telle que le serveur l'a à côté de lui
+
+- L'extension (0069) se télécharge dans Paramètres › Teams, onglet « L'extension », derrière la connexion (`/api/moi/teams/extension` : sa session, ou un jeton de son compte) : jamais par un lien public, comme l'APK (0190).
+- Le serveur fait le zip à la demande, depuis le dossier `frontend/Extension` du dépôt où il tourne. La version qu'on charge est celle du code déployé : rien à déposer à la main. Le zip crée un dossier `mika-teams/`, sans les tests de l'extension, ce qui les lance ni sa doc ; jamais un fichier caché ni un lien. Sans ce dossier, ou avec un manifeste illisible, `extension` vaut `null` et la fiche dit de la demander à son opérateur.
+- Elle se charge « non empaquetée », comme avant : ni le Chrome Web Store ni un paquet signé. La mettre à jour, c'est décompresser la nouvelle par-dessus et la recharger.
+
+*Pourquoi :* « permet le téléchargement de l'extension dans frontendv2 » (2026-11-18). Contrairement à l'APK, elle n'a rien à construire : déposée à la main, elle aurait vieilli à chaque mise à jour du serveur.
+
+### 0251 — L'extension de Teams en direct : un cache, des synchros ciblées, l'historique, et une WebSocket
+
+- Le Teams d'aujourd'hui fait vivre son service de chat, sa connexion en direct et sa base locale dans un worker. L'extension écoute ce que ce worker passe à la page : un message y passe dès qu'il arrive. Le réseau de la page n'en voit plus rien.
+- Le cache est un curseur par conversation (le plus tard livré qu'on y ait lu, la marque de sa fiche), gardé par le service de l'extension : il survit à l'onglet. À chaque signe (le worker parle d'un message, le titre de l'onglet change, toutes les 5 s sinon), les fiches de conversation sont relues, et seules celles qui ont bougé voient leurs fils relus, depuis leur curseur, par l'index de Teams. Une conversation inconnue est relue sur 24 h. La relecture complète de la base, qui ne passait jamais les 4 000 premiers fils, est retirée. Un curseur ne part qu'avec le dernier lot qu'il couvre.
+- Les 24 h restent la règle du direct : ce qui est plus vieux reste chez Mika, qui garde les conversations. Pour une mise en service, un bouton « Charger tout l'historique » : l'onglet lit toute sa base et l'envoie par paquets, chacun attendu par le service avant le suivant. Les exclusions et toutes les pauses gardées (les 50 dernières, quel que soit leur âge) valent toujours ; une pause prise en route l'arrête. Marqué `history`, ce qui a plus de 24 h se range chez Mika déjà lu : elle ne le remarque pas comme du neuf, rien n'en est journalisé, il ne règle aucun brouillon. Ce qui a moins de 24 h se range comme du direct, quel que soit le chemin par lequel il arrive d'abord. Il reste borné à 1 000 messages par conversation, comme le reste.
+- Les doublons. Un message se reconnaît à son identifiant, ou à son alias. Le même message sous un autre identifiant est un jumeau : même conversation, même auteur, même texte aux espaces près, à moins de 2 min, et des identifiants de sortes différentes (celui du service, celui du client tant qu'il attend, une empreinte de l'extension). Il n'est pas rangé une seconde fois : sa référence devient l'alias de la ligne (`messages.alias`), et une retouche ou une suppression qui arrive sous elle la retrouve. Une ligne qui a déjà son alias n'en prend pas un second : un « ok » redit depuis le téléphone reste un message. Deux identifiants de la même sorte, deux empreintes comprises, sont deux messages. Rejouer l'historique ne range rien deux fois.
+- Ce que Mika écrit arrive par `/api/teams/live`, une WebSocket ouverte tant qu'un onglet Teams l'est. La clé part dans le premier message, jamais dans l'adresse. Admise comme un relevé, la connexion reçoit la boîte d'envoi tout de suite, puis à chaque changement ; la boîte est relue chaque seconde hors de la boucle, la clé revérifiée toutes les 10 s. Un signe de vie toutes les 20 s garde éveillé le service de l'extension. Une trame se lit avant toute clé : les connexions pas encore présentées sont plafonnées par adresse (2) et au total (16). Au-delà de 4 connexions d'une clé, la plus ancienne cède sa place (4409). Chaque refus accepte d'abord la connexion, pour que son code arrive au navigateur. Les accusés restent en HTTP, et le relevé toutes les 30 s reste le filet.
+- Ce que la page capte part au serveur en moins d'une seconde, au lieu de 3 s environ.
+
+*Pourquoi :* « rendre l'extension plus temps réel » : « un cache, voir les trucs nouveaux, synchroniser, puis connecter en direct toutes les nouvelles arrivées par des synchronisations ciblées, et pour les messages du backend un service WebSocket » ; « un bouton pour charger tout l'historique pour une première mise en service » ; « côté backend, faire très attention aux doublons » (2026-11-18). La relecture de la base toutes les 45 s faisait attendre, et le relevé de la boîte d'envoi toutes les 30 s aussi.
+
+*Révise 0069 (en partie : la boîte d'envoi poussée en direct, l'historique rangé déjà lu). Révisée par 0258 (en partie : les images).*
+
+### 0258 — Les images de Teams : téléchargées par l'extension, gardées avec leur message, regardées par Mika
+
+- L'extension télécharge l'image de chaque message Teams par son adresse d'origine, avec les cookies du navigateur, comme Teams lui-même : affichée ou non, en direct (les messages des dernières 24 h) comme dans l'historique (après chaque paquet). Elle n'ouvre jamais que le service d'images de Microsoft (`https://….asm.skype.com/v1/objects/…`), jamais une autre adresse lue dans un message. 8 images par message au plus, 8 Mo chacune, PNG, JPEG, GIF ou WebP. Les exclusions et les pauses valent pour elles comme pour leur message.
+- Le message part avec le nombre de ses images ; elles suivent à `POST /api/teams/image`, sous la clé du compte, une fois le message chez Mika (son message pas encore arrivé : 404, l'extension la retente). Le serveur vérifie le type et les premiers octets, et la garde avec son message dans `teams.db`, à son rang parmi les « [image] » du texte (500 Mo par compte : les plus anciennes partent au-delà) ; la même image redite n'en fait qu'une.
+- Mika la regarde de près, comme une photo reçue dans le chat (le port `preprocess`, ADR 0106), par le processus `teams.images` : ce qu'elle y voit remplace la « [image] » de son rang dans le texte du message (« [image : … ] »), et une retouche du message le garde. Un échec passager est retenté trois fois ; au-delà, l'image reste gardée sans rien dire d'elle. Un message dont les images ne sont pas arrivées ou pas encore lues attend qu'elles le soient (3 min au plus) avant qu'elle le remarque : elle le remarque déjà décrit.
+- frontendv2 montre les images dans le fil Teams, derrière la connexion (`/api/moi/teams/image`).
+- Oublier une personne, retirer un compte ou tailler une conversation efface aussi ses images.
+
+*Pourquoi :* « implémente les images » ; « il faut trouver un moyen, comme pour les messages, d'intercepter les photos » ; gardées et lues, et aussi celles de l'historique (2026-11-20). Une sonde a montré que le service d'images répond aux cookies du navigateur (200 ; 401 sans eux) : toute image d'un message est atteignable, pas seulement celles qu'on affiche.
+
+*Révise 0251 (en partie : « [image] » n'est plus le dernier mot d'une image).*
 
 ### 0191 — Ses brouillons se relisent là où ils partiront
 
@@ -1642,7 +1736,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 *Pourquoi :* « ajouter des recherches de point d'intérêt, des itinéraires, des fonctions de programmation de road
 trip » ; « Valhalla public d'abord, puis le portable ».
 
-*Révise 0193 (en partie : la même carte sert l'écran Carte). Révisée par 0197 (en partie : ils se règlent sous Réglages › Carte et téléphone).*
+*Révise 0193 (en partie : la même carte sert l'écran Carte). Révisée par 0197 (en partie : ils se règlent sous Réglages › Carte et téléphone), 0244 (en partie : l'index des lieux se tire de l'extrait OpenStreetMap, avec ce qu'en dit une fiche).*
 
 ### 0195 — Les voyages se préparent à deux et restent dans sa vie
 
@@ -1663,7 +1757,7 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 
 *Pourquoi :* « pour que l'IA puisse interagir avec la carte » ; la maquette validée le 2026-11-04 (« nikel ça »).
 
-*Révisée par 0204 (en partie : la console montre les voyages d'une personne, et un opérateur peut en supprimer un).*
+*Révisée par 0204 (en partie : la console montre les voyages d'une personne, et un opérateur peut en supprimer un), 0259 (en partie : ses outils lisent la fiche d'un lieu et les événements).*
 
 ### 0196 — Elle propose une carte dans la conversation
 
@@ -1676,6 +1770,8 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 
 *Pourquoi :* « proposer des cartes, des parcours et des points d'intérêt ».
 
+*Révisée par 0259 (en partie : un regard peut être des événements).*
+
 ### 0229 — Le fond de carte est celui de tous les écrans
 
 - Le fond de carte de 0193 (ses tuiles, ses polices, ses icônes, et ce que le client en sait) sert Téléphone › Position, l'écran Carte (0194) et les miniatures du chat (0196) : il est servi avec la carte, à `/api/moi/carte/fond/…` (`app/me/maps.py`), et non plus sous le téléphone, `/api/moi/phone/map/…`, qui n'existe plus.
@@ -1684,6 +1780,211 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 *Pourquoi :* né pour Téléphone › Position, le fond de carte sert aussi la Carte et les miniatures du chat. L'adresse fait partie de l'API qu'on lit pour comprendre le système : une carte de tous les écrans servie « sous le téléphone » était le reste d'avant ces ajouts (audit du 2026-11-05, K10-08, décision K10-Q1).
 
 *Révise 0193 (en partie : son adresse).*
+
+### 0244 — L'index des lieux se tire de l'extrait OpenStreetMap, avec ce qu'en dit une fiche
+
+- `mika carte lieux --depuis cartes/france-latest.osm.pbf` construit `cartes/lieux.db` depuis l'extrait de Geofabrik,
+  lu par pyosmium (l'extra `cartes`) : les mêmes catégories et les mêmes sortes qu'avant (une table des clés
+  d'OpenStreetMap vers elles), et pour chaque lieu son objet d'OpenStreetMap (`n123`, `w45`, `r6`, stable d'une
+  reconstruction à l'autre) et ce qu'en dit une fiche — cuisine, horaires, téléphone, site, terrasse, végétarien,
+  vegan, accessibilité, à emporter, livraison, étoiles, enseigne, adresse, Wikidata : le schéma 2. Les tuiles restent
+  possibles (`.pmtiles` : le schéma 1, sans détails) ; un index de schéma 1 se lit jusqu'à sa reconstruction, on y
+  cherche comme avant, un filtre n'y trouve rien.
+- La mémoire reste bornée sur la France entière (530 millions de nœuds, qu'aucun index complet des positions ne tient
+  en 3 Go) : l'extrait se lit en passes que pyosmium filtre avant Python, et seule la position des nœuds des voies
+  gardées se garde, par tranches d'identifiants (1 Go au plus). Une voie fermée se place au centre de ses nœuds, une
+  voie ouverte sur son nœud du milieu, un multipolygone au centre de ses contours ; un lieu cartographié deux fois
+  (son point et son bâtiment) ne compte qu'une ; ce qui déborde de la zone de l'extrait est laissé.
+- Ouvert ou fermé se juge à l'instant de la requête, à l'heure de Paris, par un analyseur pur du sous-ensemble courant
+  d'`opening_hours` (jours, plages, après minuit, `off`, `24/7`, fériés de France, mois et dates), qui dit aussi la
+  semaine en français ; ce qu'il ne comprend pas reste inconnu et se montre tel quel, jamais deviné.
+- Le port s'étend sans rien casser : un lieu trouvé porte des champs facultatifs (son objet, ouvert ou fermé en une
+  phrase, sa cuisine, ses filtres ; sa note, ses avis, son prix, sa photo quand une source d'avis les donnera), la
+  recherche prend des filtres (ouvert maintenant, terrasse, végétarien, vegan, accessible, à emporter, livraison,
+  cuisine, une note minimale, l'ordre) et `place(id)` rend sa fiche, une partie par source : OpenStreetMap, puis les
+  données touristiques, les avis et les événements proches, vides tant que leur source n'est pas branchée. Sans
+  source de notes, la note minimale n'écarte rien et l'ordre par note garde celui de la distance.
+- Un regard qu'elle garde au journal emporte ce qu'on savait du lieu, jamais s'il était ouvert : cela ne valait qu'à
+  l'instant où elle a regardé.
+
+*Pourquoi :* « OpenStreetMap complet (l'extrait France de Geofabrik) : l'index des lieux porte désormais cuisine,
+horaires, téléphone, site, terrasse, végétarien/vegan, accessibilité, étoiles… Oui » (2026-11-17) ; les tuiles de
+Protomaps ne gardent presque aucun de ces attributs.
+
+*Révise 0194 (en partie : l'index des lieux se tire de l'extrait OpenStreetMap, avec ce qu'en dit une fiche). Révisée par 0245 (en partie : la fiche d'un lieu prend sa partie DATAtourisme et les événements proches ; un lieu des données touristiques se trouve avec ceux de l'index), 0250 (en partie : la note vient du cache des avis ; la note minimale écarte les lieux sans note, l'ordre par note les met à la fin ; la fiche prend sa partie « avis »).*
+
+### 0245 — Les lieux touristiques et les événements de DATAtourisme, en cache par cases autour des personnes
+
+- Une base `cartes/tourisme.db` (SQLite, jamais sauvegardée : elle se refait) garde les lieux touristiques et les
+  événements à venir de DATAtourisme (Licence Ouverte 2.0) **case par case** : une case de la grille (une dizaine de
+  kilomètres) s'interroge par ses bords, jamais sur la position de la personne, et se garde avec sa date — sept jours
+  pour ses lieux, un pour ses événements (ils changent plus vite), réglables ; relue, ce qu'elle ne rend plus
+  s'efface. Une case jamais vue qu'une personne ouvre (les événements autour d'elle, la fiche d'un lieu) se lit en
+  direct, quelques pages, si le quota le permet ; sinon on montre ce qu'on a, en disant pourquoi. La clé de
+  l'opérateur est scellée dans les réglages (à défaut, `MIKA_DATATOURISME_API_KEY`) : elle ne part que dans un
+  en-tête, et ne s'écrit jamais au journal.
+- **Un limiteur partagé** par les services de la carte, une instance par service, ses bornes réglées dans sa section
+  et relues à chaque demande : par seconde, par heure et par jour (glissantes), par mois (le coût réel d'un appel) ;
+  une réserve que le travail de fond laisse au direct ; un recul quand le service dit d'attendre ; ses compteurs sous
+  `cartes/` (ils survivent à un redémarrage, le serveur et la commande les partagent) ; ce qui bloque se dit en mots,
+  avec l'heure où il revient. DATAtourisme : 900 demandes par heure, 8 par seconde, 20 % de réserve (au plus 1 000 et
+  10, ses limites).
+- **Un réchauffage partagé** : chaque soir (22:00 de Paris, réglable), autour de la dernière position connue de chaque
+  personne (`location.fix`, ADR 0119, que la composition lui passe : l'adaptateur n'importe ni plugin ni faculté) et
+  de points fixes réglés, chaque source dans son ordre — DATAtourisme : les cases des points puis celles d'à côté, les
+  événements avant les lieux, les plus vieilles d'abord —, sur son budget de fond ; un quota qui revient avant le
+  matin s'attend, sinon la source s'arrête en le disant. Copier des départements entiers (une complète par semaine,
+  reprise là où elle s'est arrêtée, ce qui a changé chaque nuit d'après `lastUpdate`, `mika carte tourisme`) reste une
+  option, vide par défaut.
+- Le rapprochement : une fiche est le lieu d'OpenStreetMap à moins de 150 m au nom qui se ressemble, dont elle
+  enrichit la fiche (description, labels, tarifs, contacts, auteur et date, photos) ; sans pendant sûr, elle se trouve
+  comme `t:<uuid>`, jamais en double d'un lieu de l'index. Un événement se tient au lieu nommé le plus proche (à moins
+  de 60 m), sinon à son adresse ; les copies d'un même événement (même nom, même endroit, une fiche par date) n'en
+  font qu'un, toutes leurs dates ensemble. Une fiche ne garde jamais le nom d'une personne de contact.
+- Le port `maps` y gagne `events` (thèmes tirés du nom puis des classes, « gratuit » deviné du prix, jamais
+  inventé), `event` (ses dates en clair, à l'heure de Paris, la prochaine d'abord), `tourism_coverage` et
+  `tourism_summary` ; `place` remplit sa partie DATAtourisme et les événements proches. Les photos passent par le
+  serveur (`photo`, `p:<hash>`) : seule une adresse venue des données se relève, jamais une adresse d'un client ni du
+  réseau local ; une image vérifiée à ses octets, bornée, gardée sous `cartes/photos` (borné), son crédit et sa licence
+  montrés, plus servie après la fin de ses droits. Les avis (Tripadvisor) se brancheront au limiteur, au réchauffage
+  et aux photos.
+
+*Pourquoi :* « DATAtourisme : une base locale des lieux et des événements autour, plus des outils pour Mika »
+(2026-11-17) ; « les limiteurs de DATAtourisme réglables dans la console, avec la clé » ; « DATAtourisme devient un
+cache autour des personnes, réchauffé chaque soir, avec un limiteur et un service de réchauffage partagés avec
+Tripadvisor » (2026-11-18). Avec 1 000 demandes par heure pour 585 098 fiches, copier toute la France prend des heures
+pour servir surtout là où personne ne va.
+
+*Révise 0244 (en partie : la fiche d'un lieu prend sa partie DATAtourisme et les événements proches ; un lieu des données touristiques se trouve avec ceux de l'index). Révisée par 0250 (en partie : Tripadvisor est la seconde source du limiteur, du réchauffage et des photos ; un débit changé dans la console garde le tour déjà pris), 0256 (en partie : le limiteur compte le mois d'un service à son heure, et l'appel dès qu'il part ; une source donne l'adresse d'une photo au moment de la relève, sur ses seuls hôtes), 0259 (en partie : le lieu d'un événement n'est qu'un lieu qui accueille du public ; les cases d'un rayon se lisent en direct, bornées).*
+
+### 0250 — Les avis de Tripadvisor, en cache autour des personnes, que Mika lit : le choix de l'opérateur
+
+- **Le choix de l'opérateur, écrit tel quel.** Les conditions de l'API Terra interdisent de garder leurs données (seul
+  l'identifiant d'un lieu peut l'être) et de les faire lire par une IA (§3.1.2). Il le sait, et a décidé le 2026-11-17 :
+  « fait quand même, c'est ma responsabilité ». Ce serveur garde donc un **cache** des notes, des avis et des photos, et
+  Mika les lira et les analysera (ses outils). On garde ce qui ne coûte rien : la mention « Tripadvisor », le lien vers
+  leur page du lieu, l'icône de note qu'ils fournissent, toujours montrés avec. La console le redit sur sa page.
+- **Un cache par cases**, `cartes/avis.db` (SQLite, jamais sauvegardé : il se relit) : une case de la grille (3 km par
+  défaut) se demande par ses bords, jamais sur la position d'une personne, et par sorte (restaurants, à voir, hôtels)
+  Terra en rend au plus 60, les mieux notés (trois pages de vingt) ; la fiche d'un lieu de l'index pas encore rapproché
+  le cherche à 100 m de lui (cinq au plus, les plus proches), puis ses avis récents en français et ses photos ; tout se
+  garde sept jours (réglable) avant de se relire, et s'efface après quatre fois cette durée sans relecture. Une liste
+  (`search`, `around`) ne lit que le cache : elle n'appelle jamais Tripadvisor. `place_refresh` relit tout ;
+  `preload` met en file, en fond, la case d'une position et ses huit voisines.
+- **La facture tient au cache et au limiteur.** Chaque lieu rendu est une entité facturée (une recherche de vingt en
+  coûte vingt, les avis ou les photos d'un lieu une) : le limiteur partagé (0245) compte les entités du mois au coût
+  réel, et retient une demande qui dépasserait le plafond avant qu'elle parte. Ses bornes, réglées dans la console et
+  relues à chaque demande : 8 demandes par seconde, 9 000 sur 24 heures glissantes, une recherche à proximité par
+  seconde (un second limiteur, pris en plus), 1 000 entités par mois, 20 % gardés au direct. La clé est scellée dans
+  les réglages, sinon `MIKA_TRIPADVISOR_API_KEY` ; la commande `mika` lit le `.env` du dossier courant sans rien
+  écraser (`app/envfile.py`), jamais les tests (`MIKA_ENV_FILE` vide).
+- **Le rapprochement** suit la règle des données touristiques (`tourism.likeness`) : le lieu de l'index à moins de 100 m
+  dont le nom se ressemble, sinon le lieu DATAtourisme sans pendant (`t:<uuid>`). Un lieu de Tripadvisor sans pendant
+  ne se montre nulle part : jamais un lieu de plus, jamais un double. Un lieu rapproché porte sa note, ses avis, son prix
+  en euros et sa photo dans les listes ; la note minimale écarte les lieux sans note, l'ordre par note les met à la fin,
+  et les mieux notés du cache dans la zone rejoignent les plus proches.
+- **Le soir**, Tripadvisor est une source du réchauffage partagé : les restaurants d'abord, puis ce qui est à voir,
+  puis les hôtels ; pour chacun, les cases des points puis leurs voisines, les plus vieilles d'abord ; ensuite les avis
+  et les photos des lieux les plus regardés et les mieux notés — sur ce qui reste du jour et du mois, la réserve gardée.
+  Ses photos et l'icône de sa note passent par le relais (0245), depuis les seules adresses que Tripadvisor a données,
+  chez lui.
+
+*Pourquoi :* « Tripadvisor (Terra) : notes, avis, photos, avec un cache des alentours de la personne, gardé un temps,
+et Mika les lit et les analyse » ; à l'objection des conditions, « fait quand même, c'est ma responsabilité »
+(2026-11-17) ; « un limiteur de requêtes », « le cache Tripadvisor : 7 jours par défaut », « un service qui réchauffe
+le cache… les restaurants d'abord » (2026-11-18). Autour de la Grand-Place de Lille, 882 restaurants tiennent dans un
+kilomètre : aucune case ne les tient tous, et sans cache chaque écran rouvert repaierait les mêmes lieux.
+
+*Révise 0244 (en partie : la note vient du cache des avis ; la note minimale écarte les lieux sans note, l'ordre par note les met à la fin ; la fiche prend sa partie « avis »), 0245 (en partie : Tripadvisor est la seconde source du limiteur, du réchauffage et des photos ; un débit changé dans la console garde le tour déjà pris). Révisée par 0256 (en partie : Google Places remplace Tripadvisor ; les cases, les bornes, la fiche et les photos suivent Google).*
+
+### 0256 — Les avis de Google Places, par son API officielle, à la place de Tripadvisor : le choix de l'opérateur
+
+- **Google Places remplace Tripadvisor**, par son API officielle Places (New) seule (aucune page de Google n'est lue,
+  aucun scrapeur), avec la clé de l'opérateur, scellée dans les réglages (sinon `MIKA_GOOGLE_PLACES_API_KEY`), qui ne
+  part que dans l'en-tête `X-Goog-Api-Key`. Le client de Terra, ses tests et ses données s'en vont ; `cartes/avis.db`
+  passe au schéma 2 et se relit, sans conversion. **Le choix de l'opérateur, écrit tel quel** : les conditions de
+  Google ne permettent de garder que l'identifiant d'un lieu (`place_id`), et ses coordonnées trente jours ; il a
+  décidé le 2026-11-20 de garder ce cache sept jours (effacé après vingt-huit sans relecture) et de le faire lire par
+  Mika, sous sa responsabilité, comme pour Tripadvisor. On garde ce que Google demande d'afficher et qui ne coûte
+  rien : la mention « Google Maps », le lien `googleMapsUri`, le nom et le lien de l'auteur de chaque avis et de
+  chaque photo.
+- **Le masque fait le prix** (`X-Goog-FieldMask`, en constantes) : une recherche à proximité pour une liste au niveau
+  « Nearby Search Enterprise » (note, nombre d'avis, prix, horaires, photos ; jamais un champ « Atmosphere »), les avis
+  à la fiche d'un lieu seulement (« Place Details Enterprise + Atmosphere » : avis, résumé, ce qu'il sert), une photo
+  (« Place Details Photos »). Grille de Google vérifiée le 2026-11-20 : 1 000 offerts chaque mois et par SKU, puis
+  35 $, 25 $ et 7 $ les 1 000 ; Text Search n'est pas employé. Le limiteur partagé compte en appels : 5 par seconde,
+  500 sur 24 heures, un plafond par mois et par SKU au mois de Google (minuit, heure du Pacifique), compté dès que
+  l'appel part, même en erreur — par défaut le quota offert : sans rien toucher, rien n'est facturé ; 20 % au direct.
+- **Les cases** (3 km) se demandent par sorte — restaurants, à voir, hébergements, en types premiers de Google
+  (`includedPrimaryTypes`, cinquante au plus : un centre commercial typé aussi « restaurant » ne remonte pas) — par le
+  cercle qui les couvre (leur centre, la moitié de leur diagonale), jamais à la position d'une personne : les vingt
+  plus connus (`POPULARITY` ; Google n'en rend pas plus, sans page suivante). Un cercle plein fait demander ses quatre
+  quarts (un niveau par défaut, deux au plus) : une case coûte de 1 à 5 recherches par sorte, un réchauffage autour
+  d'une personne (neuf cases, trois sortes) de 27 à 135, une fois par semaine. Un lieu pas encore rapproché se cherche
+  à 100 m de lui par la distance, puis sa fiche se lit ; le soir, après les cases, la fiche des lieux ouverts depuis
+  un mois.
+- **La fiche** dit sa source (`google`), son résumé, sa fourchette de prix ; chaque avis, son auteur, son lien et sa
+  date en mots ; chaque photo, son auteur et son lien. Google ne donne ni répartition, ni sous-notes, ni classement :
+  ils restent vides. Ce qu'il dit et qu'OpenStreetMap ne dit pas (terrasse, végétarien, à emporter, livraison,
+  réservation, horaires) complète la fiche en le citant (« oui (selon Google) »), jamais à la place d'OpenStreetMap.
+- **Les photos** : leur adresse ne se garde pas, elle se demande à Google quand le relais va chercher l'image, sur ses
+  hôtes d'images seulement, une fois (le relais la garde) ; une photo garde sa référence d'une lecture à l'autre (son
+  lieu, son auteur, ses dimensions), et son nom expiré (400 ou 404) fait relire la fiche, qui lui en donne un neuf.
+
+*Pourquoi :* Terra facture chaque lieu rendu et n'offre ses 1 000 entités qu'une fois (« c'est pas des crédits par
+heure ») ; Google facture à l'appel, avec un quota offert qui revient chaque mois. Un scrapeur de Google Maps a été
+proposé puis refusé (extraction interdite, protections contournées, avis aspirés) ; l'API officielle, « go pour ça »
+(2026-11-20). Par popularité, la recherche rend les lieux connus, là où Tripadvisor rendait des 5,0 à un avis.
+
+*Révise 0245 (en partie : le limiteur compte le mois d'un service à son heure, et l'appel dès qu'il part ; une source donne l'adresse d'une photo au moment de la relève, sur ses seuls hôtes), 0250 (en partie : Google Places remplace Tripadvisor ; les cases, les bornes, la fiche et les photos suivent Google).*
+
+### 0259 — L'écran Carte lit les fiches, les événements et les photos ; elle les lit aussi, en données
+
+- **L'API par personne** (`app/me/maps.py`, `protocole-moi.md` § 10) sert ce que les lots 0244, 0245 et 0256 ont
+  réuni : une liste filtrée (ouvert maintenant, terrasse, végétarien, vegan, accessible, à emporter, livraison, une
+  cuisine, une note minimale) et rangée (la distance, la note), avec ce que le cache des avis sait de l'endroit ; la
+  fiche entière d'un lieu et « Actualiser » ; les événements autour d'un point ou dans une zone, d'une période, de
+  thèmes, et la fiche de l'un d'eux ; une photo relayée par sa référence. Un lieu ne porte que ce qu'on en sait.
+- **Ce qu'il faut citer va avec chaque source**, et les clients le montrent : « Google Maps » et le lien de sa page,
+  l'auteur et le lien de chaque avis et de chaque photo (0256) ; l'auteur et la date d'une fiche de l'office de
+  tourisme, Licence Ouverte 2.0 (0245) ; « © les contributeurs d'OpenStreetMap » (0244). Une photo n'est jamais une
+  adresse du dehors : une référence `p:<hash>`, servie par `…/carte/photo/<ref>` ; une référence inconnue, ou dont les
+  droits ont pris fin, donne 404 (`MapsNotFound`) sans que rien parte ; seules des images JPEG, PNG, WebP et GIF se
+  servent, gardées un jour par le navigateur de qui la regarde.
+- **« Ici »** (`near=ici`) est la dernière position que ton téléphone a donnée (0119), la tienne seule, jamais celle
+  d'une autre ; sans elle, 409. **Le préchargement des avis** (0250, 0256) part de deux gestes seulement : le
+  téléphone qui donne sa position (`KernelPort.locate`, `app/mindport.py`, là où l'application l'écrit), et chercher
+  autour de soi (`near=ici`, ou `here=1` avec sa propre position) — une mise en file de cases, qui ne retient pas la
+  réponse. Un point de la carte qu'on regarde n'est pas soi : il ne précharge rien.
+- **Ce qui peut faire appeler un service compté est borné par compte** : soixante fiches ou recherches d'événements
+  par minute, cent vingt photos, dix « Actualiser », dix préchargements par dix minutes (au-delà, rien, sans le dire).
+  Une liste ne lit que les caches : elle ne compte pas.
+- **Ses outils** (0195, 0196) : `places_search` prend les mêmes filtres, et sa ligne dit la note Google, le nombre
+  d'avis, le prix, la cuisine et « ouvert, ferme à … » quand on les sait ; `place_read` lit la fiche d'un lieu (un
+  identifiant qu'elle a trouvé, « ici », des coordonnées, un nom) ou d'un événement (`e:…`) — un seul outil, parce que
+  l'identifiant dit déjà lequel, et que la boucle d'outils a une description de moins à porter ; `events_search`
+  cherche autour d'un endroit, à une période (« ce_weekend », « samedi », des dates), par thème, gratuit ou non. Tout
+  texte venu du dehors (un avis et son auteur, quand il a été écrit, un résumé, une description, ce que Google
+  ajoute, un nom) passe par `inert`, borné, sous la ligne « données » ; un avis qui donne des ordres reste un avis. Son
+  regard (`trips.looked`, `look:` ; `evenements` pour des événements) ne garde que le lieu ou l'événement, comme une
+  liste les garde : **jamais le texte d'un avis, d'un résumé ni d'une description au journal**.
+- **Le lieu d'un événement** n'est qu'un lieu qui accueille du public — une salle, un théâtre, un cinéma, un musée, une
+  galerie, un centre culturel, une bibliothèque, un stade, un château ; une église pour un concert ou une visite —,
+  jamais une place, un parc, un monument ni une « attraction » ; aucun pour un marché ni pour une fête qui n'est que
+  cela. Une adresse sans numéro qui nomme une place ou une rue (« Place du Concert ») dit où il a lieu : un lieu n'y est
+  retenu que si l'événement ou l'adresse le nomme (« l'opéra », place du Théâtre).
+- **Les cases d'un rayon** : chercher des événements à douze kilomètres lit en direct les cases que le rayon touche, la
+  sienne d'abord puis les plus proches — au plus douze lectures par demande, trois à la fois —, et la couverture dit
+  quand la zone n'est lue qu'en partie, ou trop grande pour être lue d'un coup. Une liste de lieux (`search`,
+  `around`) ne lit toujours que les caches, même sur un grand rayon ; sa couverture (`tourism_coverage(…,
+  places=True)`) dit ce qui manque.
+
+*Pourquoi :* le contrat du chantier « carte, avis, événements » (2026-11-17) : l'écran Carte et ses outils lisent les
+fiches, les avis et les événements, avec les attributions que les sources demandent. La sonde réelle du 2026-11-18 a
+montré « Marché du Vieux-Lille » rapproché de « La chapelle Notre-Dame d'Annay », et une recherche à douze kilomètres
+de Lille qui ne lisait que la case du point : Roubaix, Tourcoing et le LaM manquaient.
+
+*Révise 0195 (en partie : ses outils lisent la fiche d'un lieu et les événements), 0196 (en partie : un regard peut être des événements), 0245 (en partie : le lieu d'un événement n'est qu'un lieu qui accueille du public ; les cases d'un rayon se lisent en direct, bornées).*
 
 ### 0198 — Ce qui vient d'ailleurs : une seule neutralisation, la plus forte
 
@@ -1774,6 +2075,54 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 *Pourquoi :* demander à chaque personne, puis à chaque instance, d'inscrire une application dans Microsoft Entra rendait l'ajout d'une boîte Hotmail impraticable : l'inscription exige un annuaire et un compte Azure. Un logiciel de courrier l'inscrit une fois pour tous ses utilisateurs ; Mika fait de même.
 
 *Révise 0166 (en partie : l'application n'est plus celle de la personne, et Mika livre la sienne).*
+
+### 0240 — Son tri lit ce qu'il peut, le reste attend ; le repli ne devine jamais une réponse attendue
+
+- Un relevé fait trier par le modèle au plus `triage_per_poll` mails (« Mails triés par le modèle », 5) ; seuls les appels faits comptent : un envoi en masse n'y prend plus de place.
+- Au-delà, un mail n'est ni deviné ni remarqué : il reste sans accusé (`MailPort.waiting`), et le relevé suivant vient deux minutes après au plus, tant qu'il en reste. À 0, le tri par le modèle est coupé : tout se devine, rien n'attend.
+- Le repli (un tri en panne, retenu par le quota, une réponse illisible, ou coupé) devine l'importance, jamais une réponse attendue ni une émotion.
+- Qui a jugé chaque mail est au journal (`MailNoticed.triage` : le modèle, le repli, un envoi en masse). L'API par personne le dit (`triage` : `read`, `guessed`, `bulk`, et `waiting` pour un mail relevé qui attend son tri) ; frontendv2, l'application Android et la fiche de la console le montrent.
+
+*Pourquoi :* le 2026-11-17, le premier relevé d'une boîte Hotmail a rendu dix mails ; le modèle a trié les cinq premiers, dont un envoi en masse qui prenait une place sans appel, et le repli a jugé les cinq autres. Trois notifications Qonto sont sorties « réponse attendue » : un « Une question ? » en pied de page suffisait au repli. Le modèle, lui, avait jugé la quatrième « notification automatique », sans réponse. Le même arriéré revient à chaque réveil et après chaque coupure.
+
+*Révise 0147 (le repli ne devine plus la réponse attendue).*
+
+### 0243 — Les consignes de tri d'une boîte : ranger, prévenir, juger
+
+- Chaque boîte a ses « Consignes de tri » (`MailAccount.triage_instructions`), à côté des consignes d'écriture : du texte libre de qui la règle (Paramètres › Mail, la console, l'application). Son tri les lit, avec les dossiers de la boîte, pour chaque mail qui arrive dans un dossier relevé ; un mail reçu n'en est jamais une.
+- Le modèle rend alors deux champs de plus : `dossier` (où ranger) et `prevenir`. Ces consignes guident aussi l'importance et la réponse attendue. Une boîte qui en a fait lire ses envois en masse au modèle : ce sont eux qu'on range le plus souvent.
+- Ranger : un dossier qui existe dans la boîte, jamais ses brouillons ni ses envoyés. Le geste suit l'événement (`MailNoticed.file_to`), sur le serveur, comme `email_tidy` : réversible, jamais une suppression. Elle n'en parle plus (« déplacé par elle »). Un refus du serveur laisse le mail où il est.
+- Prévenir : le mail devient important (au moins « Important à partir de »), et elle l'annonce comme tout mail important d'une de tes boîtes (`MailNoticed.alert`). Un mail dont elle doit prévenir et qu'elle range reste à dire.
+- Seul le modèle les applique : le repli (panne, quota) ne range ni ne prévient. L'API par personne dit `her.alert` et `her.filed` (le dossier, tant que le mail y est) ; la liseuse de frontendv2 et de l'application, et la fiche de la console, le disent.
+
+*Pourquoi :* « trie les pubs dans PUB, prépare les réponses si nécessaire, avertis-moi des notifications liées à XXX » (2026-11-17) : les consignes d'une boîte ne servaient qu'à écrire, et son tri ne connaissait ni tes critères ni tes dossiers. Préparer les réponses existait déjà (la règle de la boîte, « Préparer d'elle-même »).
+
+### 0247 — Elle relève ses boîtes quand elle veut
+
+- Un outil, `email_fetch` (« Relever tes boîtes maintenant »), va chercher sur le serveur ce qui vient d'arriver dans les dossiers relevés des boîtes de qui est en face, ou dans un dossier qu'elle nomme, et le lui montre aussitôt.
+- Ce qui arrive dans un dossier relevé est trié et remarqué comme à chaque relève : l'outil demande la relève (`email.poll_asked`, `by` vide : c'est elle), qui suit tout de suite. Un dossier seulement consulté ne lui rend rien à remarquer.
+- C'est un outil de lecture, offert comme `email_list` à qui a une boîte ici. Sans rien de nouveau, rien ne s'écrit au journal.
+
+*Pourquoi :* « regarde si le mail de Paul est arrivé » : elle ne voyait que le dernier relevé, jusqu'à dix minutes plus tôt, et un dossier jamais synchronisé restait vide pour elle.
+
+### 0248 — Elle crée un dossier en rangeant
+
+- `email_tidy` déplace aussi vers un dossier qui n'existe pas encore quand elle le dit (`create`) : il est créé sur le serveur, sous la racine des dossiers de la boîte (celle que dit `NAMESPACE`), « / » séparant un sous-dossier, puis abonné pour que les autres clients le montrent. Elle y range sous le nom que le serveur lui a donné (« INBOX.Factures.EDF »).
+- Sans `create`, un dossier inconnu reste refusé, avec la liste des dossiers de la boîte : une faute de frappe ne crée rien.
+- Ses consignes de tri (ADR 0243) ne créent jamais de dossier : seul un geste d'elle, sous les droits de `email_tidy`, en crée un. Supprimer ou renommer un dossier ne lui est pas donné.
+
+*Pourquoi :* « range ces factures dans un dossier Factures » échouait quand le dossier n'existait pas : il fallait le créer dans un autre client.
+
+### 0249 — Tout garder en local, sinon chercher sur le serveur
+
+- Chaque boîte a une case « Tout garder en local » (`MailAccount.keep_all`, décochée par défaut). Cochée, ses dossiers, sauf les indésirables et la corbeille (`ports.mail.ASIDE`), sont tenus à jour à chaque relève, et leur historique se télécharge petit à petit, les plus récents d'abord, qu'elle dorme ou non (le processus `email.keep`, par passages de quelques secondes : le verrou de la boîte se rend vite). L'historique, c'est chaque UID du serveur qui n'est pas ici, sous le plancher de la lecture précédente (`folders.floor`) ; un dossier allé jusqu'au bout est complet (`Folder.complete`).
+- Ce qui se télécharge ainsi, et ce qu'une recherche ramène, n'est jamais trié ni remarqué : son tri ne lit que ce qui arrive dans les dossiers relevés, et au premier relevé d'un dossier seulement la fenêtre de relève (deux jours). Ce qui vient d'avant n'est marqué « rendu » que dans un dossier relevé, sous ce que la relève a atteint : au-dessus, ou dans sa copie d'un autre dossier (Gmail), un mail qui vient d'arriver reste à trier.
+- Un correspondant oublié n'en revient pas : l'oubli retient l'empreinte de son adresse et son instant (`forgotten_people`, jamais l'adresse), et ce qu'il avait écrit avant, ou ce qu'on lui avait écrit, ne se garde plus, ni ne se compte dans une recherche.
+- Décochée, tant que le téléchargement n'est pas fini, ou pour un dossier nommé qui ne l'est pas (la corbeille), `email_search` cherche aussi sur le serveur (pas une recherche des non-lus, qui viennent d'arriver) : chaque mot dans l'objet, l'expéditeur ou le texte, dans le dossier nommé ou dans tous sauf `ASIDE`. Il ramène les plus récents qui manquent ici jusqu'à la page demandée, dit combien attendent encore, et les dossiers où il n'a pas pu chercher. Une liste dit le plus ancien mail gardé ici, ou que tout l'est.
+
+*Pourquoi :* une recherche ne voyait que ce qui avait été relevé, deux jours au premier relevé : « la facture d'EDF de l'an dernier » n'existait pas pour elle, et seule la console chargeait plus ancien. Trier ce qui vient d'avant ferait juger par le modèle des milliers d'anciens mails, et les lui ferait remarquer comme s'ils arrivaient (2026-11-18).
+
+*Révise 0168 (elle cherche aussi sur le serveur).*
 
 ## Les fournisseurs de modèles
 
@@ -1920,7 +2269,7 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 
 *Pourquoi :* tour par tour, le modèle reste une assistante ; autrice d'une scène, il fait parler deux personnes.
 
-*Révise 0112 (en partie). Révisée par 0115, 0124, 0140.*
+*Révise 0112 (en partie). Révisée par 0115, 0124, 0140, 0261.*
 
 ### 0115 — L'autrice écrit aussi ce qu'elle lance, et elle attend qu'on lui réponde
 
@@ -2069,6 +2418,17 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 *Révise 0138 (en partie : le portrait), 0156 (en partie : les exemples).*
 
 *Révisée par 0160.*
+
+### 0261 — L'autrice s'arrête où l'autre répond
+
+- L'appel de la seconde passe porte des séquences d'arrêt (`LLMRequest.stop_sequences`) : le début d'une ligne de l'autre, tel que le fil le montre (`expression.polish.them` : « L'autre : », avec ou sans espace, l'apostrophe droite ou typographique). Le modèle s'arrête après ses messages à elle ; la suite, que `authored` jetait, n'est plus écrite.
+- La consigne demande toujours les quatre échanges : c'est elle qui fait l'autrice (0114). Ce qu'on garde est le début de ce qu'elle écrit, et s'arrêter plus tôt ne le change pas. Ne pas raccourcir la consigne parce que la suite ne s'écrit plus.
+- Une économie, jamais une garantie : `authored` coupe toujours. La CLI de Claude Code ignore les séquences ; un serveur compatible OpenAI qui refuse `stop` est rejoué sans, le refus mémorisé par modèle ; une forme que les séquences ne prévoient pas (un prénom, du gras) laisse l'appel aller au bout, comme avant.
+- Arrêtée avant son premier mot, la passe est redemandée une fois sans séquence, et sa trace le dit (`reprise`) : la documentation de l'API ne dit pas si une séquence peut tomber dans la réflexion du modèle.
+
+*Pourquoi :* sur 14 jours en service (novembre 2026), la seconde passe écrivait 1 390 jetons par appel pour 305 à la réponse elle-même, en 15,8 s en moyenne : sept des huit messages demandés étaient jetés.
+
+*Révise 0114 (en partie).*
 
 ## Les clients, le fil, le monde
 
@@ -2355,6 +2715,29 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 
 *Révise 0187 (en partie : un client natif ne faisait que lire l'API).*
 
+### 0242 — L'app Android montre un mail HTML dans sa mise en page, dans une WebView qui ne fait qu'afficher
+
+- La liseuse de l'application montre un mail HTML comme le client web : le document isolé du serveur (`/mail/frame`, 0169), ses images intégrées comprises. Un mail sans HTML garde son texte.
+- Le document se lit sous le jeton puis se pose dans une WebView par `loadDataWithBaseURL`, sans adresse d'origine. La politique du cadre, qu'une page posée ainsi ne reçoit pas du serveur, s'écrit en tête du document (`<meta http-equiv>`), avant tout ce que le mail contient, avec « aucun référent ».
+- La WebView n'exécute aucun script, ne lit ni fichier ni contenu de l'appareil et ne charge rien du réseau, sauf les images distantes quand elles sont permises. Elle ne navigue jamais : un lien web ou `mailto:` touché s'ouvre hors de l'application, tout autre lien ne fait rien.
+- Les images distantes suivent 0175 : masquées, un bandeau propose de les afficher cette fois (`images=1`) et, pour une propriétaire qui écrit dans la boîte, toujours pour cet expéditeur, ou plus jamais.
+- La WebView prend la hauteur de son contenu, et c'est la liseuse qui défile. Un mail plus large que l'écran s'y réduit et se zoome à deux doigts ; le texte suit la taille de police du téléphone. Un cadre qui ne se charge pas, ou un moteur de rendu perdu, rend le texte du mail et propose de réessayer.
+
+*Pourquoi :* « les email html ne marche pas sur android » (2026-11-17). La liseuse ne montrait que le texte, et un mail sans version texte s'y réduisait à une note.
+
+### 0252 — Un modèle libre par défaut ; le sien, s'il est là
+
+- Le dépôt porte un VRM libre, `frontend/Web/public/models/mika-libre.vrm`, fait dans VRoid Studio : VRM 1.0, licence
+  publique VRM 1.0 (redistribution et modification permises). Le modèle qu'on a acheté reste `default.vrm`, jamais
+  versionné : sa licence (VN3) ne permet pas de le redistribuer.
+- Les clients web essaient `default.vrm`, puis `mika-libre.vrm` : le client 3D (`vtuber/VTuberModel.ts::MODEL_URLS`)
+  comme frontendv2 (`mika/vrm.ts::vrmUrls`, sous `/ext/models/`). `VITE_MIKA_VRM_URL` remplace les deux.
+- Ce qui se publie (le README du dépôt, ses images) montre le modèle libre, jamais le modèle acheté.
+- Le téléphone : *pas encore fait*. `frontend/Android/tools/vrm_mobile.py` ne lit qu'un VRM 0.x.
+
+*Pourquoi :* le dépôt est public, et le modèle acheté ne peut pas y être. Un modèle libre « deviendra le modèle VRM par
+défaut si on le remplace pas » (2026-11-20).
+
 ## La console et l'exploitation
 
 ### 0024 — L'exploitation : voir, sonder, sauvegarder, oublier pour de bon
@@ -2621,7 +3004,7 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 
 *Pourquoi :* toutes les conversations entremêlées dans un seul fil ne se suivaient plus dès qu'il y avait du monde. Une réponse tombait entre les messages de deux autres personnes, une page ne couvrait plus que quelques heures, et rien ne disait avec qui elle parle ni qui attend.
 
-*Révise 0121 (en partie : la page d'entrée de Conversations, l'ordre des échanges).*
+*Révise 0121 (en partie : la page d'entrée de Conversations, l'ordre des échanges). Révisée par 0241.*
 
 ### 0182 — Mémoire › Pièces reçues dit aussi la place de chacun
 
@@ -2836,6 +3219,18 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 *Pourquoi :* « inspecteur » nommait la console du début, qui regardait. Elle administre maintenant : une adresse qui dit ce qu'elle est, et une courte pour ses souvenirs, qu'on vient consulter.
 
 *Révise 0025 (en partie).*
+
+### 0241 — Les échanges d'une personne, une conversation à la fois, lus comme dans le chat
+
+- L'onglet Échanges d'une fiche (et Fil, celui d'un moyen de communication) montre une conversation à la fois : par défaut « Leur conversation », le fil avec elle (tout ce qui n'est pas d'un fil de travail, salons compris) ; `?travail=<fil>` choisit un fil de travail du mode pro (ADR 0164), son seul contexte.
+- Dès qu'il y a un fil de travail, une navigation à côté les liste (`transcript`, un `Workspace`) : le fil avec elle, puis chaque fil de travail sous son titre (sinon le début de son premier message, comme le chat), son nombre de messages, archivé à la fin. Un fil choisi dit sa description en tête. Sans fil de travail, pas de navigation.
+- Les chiffres en tête et le compte de l'onglet comptent tous les messages. Les débuts de fil repliés en résumé ne se montrent qu'avec le fil avec elle, le seul qu'on résume.
+- Ses réponses se lisent comme le chat les montre (`inspector/document.readable_markdown`, `markdown-it-py`) : en Markdown complet en mode pro (titres, listes, tableaux, code), gras et code ailleurs. La sortie repasse par l'assainisseur des mails : son HTML brut reste du texte, seuls les liens `http(s)` et `mailto` restent. Ce que la personne a écrit reste son texte.
+- Un message du mode pro hors fil de travail dit « mode pro » (colonne `mode` de la faculté).
+
+*Pourquoi :* l'onglet mêlait le fil ordinaire et les fils de travail sans dire d'où venait chaque message. Les réponses de travail, longues et en Markdown, s'y lisaient astérisques, dièses et barres de tableau compris.
+
+*Révise 0181 (en partie : l'onglet Échanges d'une fiche).*
 
 ## Ce que les sondes et les audits ont fixé
 

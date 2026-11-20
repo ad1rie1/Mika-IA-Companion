@@ -163,16 +163,35 @@ def test_every_cited_adr_has_its_entry():
 
 # ── les trames du chat ──
 
+#: les portes (ADR 0213) parlent leurs propres protocoles, pas celui du chat : la boîte d'envoi de Teams en direct
+#: (``/api/teams/live``, ADR 0251) se décrit dans le README de l'extension
+DOORS = PACKAGE / "adapters" / "web" / "doors.py"
+EXTENSION_README = REPO / "frontend" / "Extension" / "README.md"
+
+
+def _types(path: Path) -> set[str]:
+    """Les trames qu'un fichier construit : chaque dict littéral qui porte un ``"type"``."""
+    out: set[str] = set()
+    for node in ast.walk(ast.parse(_text(path))):
+        if isinstance(node, ast.Dict):
+            out |= {v.value for k, v in zip(node.keys, node.values, strict=True)
+                    if isinstance(k, ast.Constant) and k.value == "type"
+                    and isinstance(v, ast.Constant) and isinstance(v.value, str)}
+    return out
+
+
 def _emitted() -> set[str]:
-    """Les trames que le serveur du chat construit : chaque dict littéral qui porte un ``"type"``."""
+    """Les trames que le serveur du chat construit (hors des portes)."""
     out: set[str] = set()
     for path in sorted((PACKAGE / "adapters" / "web").glob("*.py")):
-        for node in ast.walk(ast.parse(_text(path))):
-            if isinstance(node, ast.Dict):
-                out |= {v.value for k, v in zip(node.keys, node.values, strict=True)
-                        if isinstance(k, ast.Constant) and k.value == "type"
-                        and isinstance(v, ast.Constant) and isinstance(v.value, str)}
+        if path != DOORS:
+            out |= _types(path)
     return out
+
+
+def test_the_live_teams_frames_are_those_the_extension_readme_describes():
+    said = set(re.findall(r'`\{"type": "(\w+)"', _text(EXTENSION_README)))
+    assert said == _types(DOORS), "frontend/Extension/README.md contre ce qu'émet adapters/web/doors.py"
 
 
 def _read() -> set[str]:

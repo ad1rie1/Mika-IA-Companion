@@ -81,12 +81,14 @@ from mika.app.logs import configure_logging
 from mika.app.mcp_settings import McpSettingsStore
 from mika.app.me import MeApi
 from mika.app.me.phone import APK_NAME
+from mika.app.me.teams_extension import EXTENSION_DIR
 from mika.app.mindport import KernelPort
 from mika.app.paths import PERSONA
 from mika.app.phone import PhoneDesk
 from mika.app.settings import SecretBox, Settings, push_key_file
 from mika.app.teams import TeamsDesk
 from mika.app.wakeups import WakeupDesk
+from mika.app.warm_points import last_positions
 from mika.contracts import attachments as attachments_c
 from mika.contracts import identity as identity_c
 from mika.contracts import self_ as self_c
@@ -335,8 +337,14 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     # les messages du téléphone (ADR 0120) : la porte de ``/api/phone/…``, et l'envoi d'une réponse proposée
     phone = outside["phone"] = PhoneDesk()
     # les lieux, les adresses et les itinéraires de l'écran Carte et de ses outils (ADR 0194) : l'index des lieux de
-    # ``cartes/``, la Géoplateforme, Valhalla — réglés dans la console, relus à chaque usage
-    maps_desk = outside["maps"] = MapsDesk(data, settings.places_config, settings.routing_config)
+    # ``cartes/``, la Géoplateforme, Valhalla ; les données touristiques et les événements de DATAtourisme, dans
+    # ``cartes/tourisme.db`` (ADR 0245) ; les avis de Google Places, dans ``cartes/avis.db`` (ADR 0256) — réglés dans la
+    # console, relus à chaque usage ; chaque soir, leurs caches se réchauffent autour de la dernière position de chacun
+    # (``warm_points``)
+    maps_desk = outside["maps"] = MapsDesk(data, settings.places_config, settings.routing_config,
+                                           tourism=settings.tourism_config, reviews=settings.reviews_config,
+                                           warm=settings.warm_config,
+                                           warm_points=lambda: last_positions(kernel, store, clock.now))
     # les outils venus d'ailleurs (ADR 0064) : la configuration relue à chaque usage, les décisions aussi — plus les
     # serveurs de ses plugins système, d'après leurs paramètres, approuvés d'office (ADR 0066)
     system = SystemServers(lambda: system_mcp.provided(
@@ -430,6 +438,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
         hub.start()
         world_hub.start()
         constellation.start()
+        maps_desk.start()  # le réchauffage des caches de la carte, les départements tenus en entier (ADR 0245)
         # sa mémoire prête avant sa première réponse : un message qui attendait au démarrage, une reprise, ne passent
         # pas sans souvenirs parce que le modèle de plongements finissait de se charger (borné : ``WARM_WAIT_S``)
         with contextlib.suppress(TimeoutError):
@@ -439,6 +448,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
             yield
         finally:
             warming.cancel()
+            await maps_desk.stop()
             await constellation.stop()
             await world_hub.stop()
             await hub.stop()
@@ -488,8 +498,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     lent = Mount(LENT_PREFIX, app=lending.app())
     # ce que frontendv2 montre à qui est connecté, et seulement à elle (ADR 0187) ; sa borne des trajets vaut aussi pour
     # le GPX d'un voyage qu'un opérateur tire de la console, sur son compte (ADR 0204)
-    moi = MeApi(kernel, live.accounts, origins=web.origins, apk=data / "telephone" / APK_NAME, settings=live.settings,
-                reconfigure=live.reconfigure, tiles=live.tiles)
+    moi = MeApi(kernel, live.accounts, origins=web.origins, apk=data / "telephone" / APK_NAME, extension=EXTENSION_DIR,
+                settings=live.settings, reconfigure=live.reconfigure, tiles=live.tiles)
     return create_app(port, live.accounts, hub, web, lifespan=lifespan,
                       extra_routes=[Route("/", _root, methods=["GET", "HEAD"]), *constellation.routes(),
                                     *moi.routes(),

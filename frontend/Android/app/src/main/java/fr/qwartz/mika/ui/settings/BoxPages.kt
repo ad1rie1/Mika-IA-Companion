@@ -703,7 +703,9 @@ private fun BoxForm(vm: BoxViewModel, box: MailBox, s: BoxSettings, modifier: Mo
                 SetField(BOX_LABELS.getValue("folders"), vm.foldersText, vm::onFoldersText, help = stringResource(R.string.settings_box_folders_typed), error = e["folders"], placeholder = "INBOX")
             }
             SetSwitch(BOX_LABELS.getValue("sync_all"), stringResource(R.string.settings_box_sync_all_help), v.syncAll, { x -> vm.edit("sync_all") { it.copy(syncAll = x) } }, error = e["sync_all"])
+            SetSwitch(BOX_LABELS.getValue("keep_all"), stringResource(R.string.settings_box_keep_all_help), v.keepAll, { x -> vm.edit("keep_all") { it.copy(keepAll = x) } }, error = e["keep_all"])
             SetField(BOX_LABELS.getValue("since_days"), vm.sinceDays, vm::onSinceDays, help = stringResource(R.string.settings_box_since_help), error = e["since_days"], number = true)
+            SetField(BOX_LABELS.getValue("triage_instructions"), v.triageInstructions, { x -> vm.edit("triage_instructions") { it.copy(triageInstructions = x) } }, help = stringResource(R.string.settings_box_triage_instructions_help), error = e["triage_instructions"], singleLine = false, minLines = 3, max = 4000)
             SetDivider()
             SetRow(BOX_LABELS.getValue("voice"), stringResource(R.string.settings_box_voice_help))
             ChoiceSeg(VOICES, v.voice, { x -> vm.edit("voice") { it.copy(voice = x) } })

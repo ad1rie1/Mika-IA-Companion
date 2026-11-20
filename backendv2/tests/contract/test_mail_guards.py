@@ -119,9 +119,12 @@ def test_a_mail_reusing_another_ones_message_id_never_takes_its_place(tmp_path, 
     Imap.reset({3: legit})
     box = box_for(tmp_path, account(*servers))
     [first] = go(box.fetch_new(10))
+    assert box.waiting() == {first.ref}  # rendu, pas encore accusé : son tri ne l'a pas lu (ADR 0240)
     box.ack([first.ref])
+    assert box.waiting() == frozenset()
     Imap.boxes["INBOX"].add(spoof, uid=4)
     [second] = go(box.fetch_new(10))  # le faux est remarqué (il n'est pas avalé par le vrai)…
+    assert box.waiting() == {second.ref}
     assert first.ref == "perso:<CAF-facture-42@banque.example>"  # la forme historique : les journaux restent valables
     assert second.ref != first.ref and second.twin
     # … mais la référence du vrai désigne toujours le vrai, malgré une date dans le futur

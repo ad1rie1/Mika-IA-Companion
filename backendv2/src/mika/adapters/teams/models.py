@@ -33,7 +33,7 @@ from sqlalchemy import Index, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, validates
 
 from mika.ports.paging import fold_text
-from mika.ports.sql import Id, Key, LongText, TeamsBase, fit, table_args
+from mika.ports.sql import Id, Key, LongBlob, LongText, TeamsBase, fit, table_args
 from mika.ports.teams import DEFAULT_ACCOUNT
 
 #: la clé d'un compte (``ports.teams.ACCOUNT_KEY`` : 40 au plus)
@@ -46,6 +46,10 @@ REF_MAX = 32
 AUTHOR_MAX = 200
 #: l'état d'un brouillon (``ports.teams`` : ``brouillon``, ``en_file``…)
 STATE_MAX = 16
+#: l'identifiant d'une image (l'objet du service d'images de Teams, ``0-weu-d1-…`` ; la porte en admet 200)
+IMAGE_MAX = 200
+#: le type d'une image (``image/jpeg``…)
+MIME_MAX = 40
 
 
 
@@ -99,10 +103,15 @@ class MessageRow(TeamsBase):
         Index("ix_messages_conversation_at", "account", "conversation", "at"),
         Index("ix_messages_pending", "acked", "own", "at"),
         Index("ix_messages_author_key", "author_key"),
+        Index("ix_messages_alias", "alias"),
     )
 
     id: Mapped[int] = mapped_column(Id, primary_key=True)
     ref: Mapped[str] = mapped_column(Key(REF_MAX))
+    #: la référence du même message sous son autre identifiant (ADR 0251 : sa version en attente puis celle du service,
+    #: ou une empreinte de l'extension) ; vide tant qu'on ne lui en connaît pas. Une retouche ou une suppression qui
+    #: arrive sous l'autre identifiant le retrouve par elle.
+    alias: Mapped[str] = mapped_column(Key(REF_MAX), default="", server_default="")
     account: Mapped[str] = _account()
     conversation: Mapped[str] = mapped_column(Key(CONVERSATION_MAX))
     #: l'identifiant que Teams lui donne (gardé, jamais une clé : la référence l'est)
@@ -119,6 +128,37 @@ class MessageRow(TeamsBase):
     received: Mapped[int] = mapped_column(default=0)
     #: déjà remarqué (ou à elle : jamais rendu comme reçu)
     acked: Mapped[bool] = mapped_column(default=False)
+    #: ses images que l'extension a annoncées et qui ne sont pas encore arrivées (ADR 0258) : il attend (``HOLD``)
+    images_pending: Mapped[int] = mapped_column(default=0, server_default="0")
+
+
+class ImageRow(TeamsBase):
+    """Une image d'un message (ADR 0258) : ses octets, tels que l'extension les a téléchargés du service d'images
+    de Teams, et ce que Mika y a vu (``seen``) en la regardant de près ; ``read`` : regardée (ou abandonnée)."""
+
+    __tablename__ = "images"
+    __table_args__ = table_args(
+        UniqueConstraint("ref", "image", name="uq_images_ref_image"),
+        Index("ix_images_unread", "read", "at"),
+        Index("ix_images_account_at", "account", "at"),
+    )
+
+    id: Mapped[int] = mapped_column(Id, primary_key=True)
+    #: la référence de son message (``MessageRow.ref``)
+    ref: Mapped[str] = mapped_column(Key(REF_MAX))
+    account: Mapped[str] = _account()
+    image: Mapped[str] = mapped_column(Key(IMAGE_MAX))
+    #: son rang parmi les images du message : la n-ième « [image] » de son texte
+    position: Mapped[int] = mapped_column(default=0)
+    mime: Mapped[str] = mapped_column(Key(MIME_MAX), default="")
+    size: Mapped[int] = mapped_column(default=0)
+    data: Mapped[bytes] = mapped_column(LongBlob)
+    #: quand elle est arrivée (µs, l'horloge du serveur)
+    at: Mapped[int] = mapped_column(default=0)
+    seen: Mapped[str] = mapped_column(LongText, default="")
+    read: Mapped[bool] = mapped_column(default=False)
+    sensitive: Mapped[bool] = mapped_column(default=False)
+    tries: Mapped[int] = mapped_column(default=0)
 
 
 class DraftRow(TeamsBase):
@@ -153,6 +193,6 @@ class DraftRow(TeamsBase):
 
 
 __all__ = [
-    "ACCOUNT_MAX", "AUTHOR_MAX", "CONVERSATION_MAX", "REF_MAX", "STATE_MAX",
-    "AccountRow", "ConversationRow", "DraftRow", "MessageRow", "fit",
+    "ACCOUNT_MAX", "AUTHOR_MAX", "CONVERSATION_MAX", "IMAGE_MAX", "MIME_MAX", "REF_MAX", "STATE_MAX",
+    "AccountRow", "ConversationRow", "DraftRow", "ImageRow", "MessageRow", "fit",
 ]

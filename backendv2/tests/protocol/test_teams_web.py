@@ -45,7 +45,7 @@ def test_the_extension_gets_in_only_with_its_key_and_from_an_extension(world):  
     key = new_key(client, live)
     ok = client.post("/api/teams/inbox", json=batch(2), headers=headers(key))
     assert ok.status_code == 202 and ok.headers["cache-control"] == "no-store"
-    assert ok.json() == {"ok": True, "accepted": 2, "known": 0, "dropped": 0}
+    assert ok.json() == {"ok": True, "accepted": 2, "known": 0, "twins": 0, "dropped": 0}
     again = client.post("/api/teams/inbox", json=batch(2), headers=headers(key, origin=None))  # aucune origine : passe
     assert again.status_code == 202 and again.json()["known"] == 2
     missing = client.post("/api/teams/inbox", json=batch(), headers={"Origin": EXTENSION})

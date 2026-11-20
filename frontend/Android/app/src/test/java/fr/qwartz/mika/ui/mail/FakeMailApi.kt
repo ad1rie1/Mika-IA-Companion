@@ -35,10 +35,12 @@ class FakeMailApi : MailApi(MoiApi(OkHttpClient(), { null }, {})) {
 
     /** Ce qu'une lecture ou une écriture rend, si le test l'impose (sinon ce que le faux serveur sait). */
     var draftsFail: MoiError? = null
+    /** Un rangement refusé par le serveur : rien ne bouge. */
+    var tidyFail: MoiError? = null
     var sendResult: MoiApi.Result<MailDone> = MoiApi.Result.Ok(MailDone(ok = true, message = "Parti."))
     var prefillResult: MoiApi.Result<MailDone> = MoiApi.Result.Ok(MailDone(ok = true, asked = true))
 
-    /** Les appels, dans l'ordre (« reply », « draftSend:d1 », « messages:1:50 »…). */
+    /** Les appels, dans l'ordre (« reply », « draftSend:d1 », « messages:1:50 », « tidy:move:INBOX »…). */
     val calls = mutableListOf<String>()
 
     private val gates = HashMap<String, CompletableDeferred<Unit>>()
@@ -100,7 +102,8 @@ class FakeMailApi : MailApi(MoiApi(OkHttpClient(), { null }, {})) {
     }
 
     override suspend fun tidy(refs: List<String>, gesture: String, folder: String, key: String?): MoiApi.Result<MailDone> {
-        calls += "tidy:$gesture"
+        calls += if (folder.isEmpty()) "tidy:$gesture" else "tidy:$gesture:$folder"
+        tidyFail?.let { return answer("tidy", MoiApi.Result.Failed(it)) }
         if (gesture == "archive" || gesture == "trash" || gesture == "move") inbox.removeAll { it.ref in refs }
         return answer("tidy", MoiApi.Result.Ok(MailDone(ok = true, message = "C'est fait.")))
     }
@@ -108,5 +111,21 @@ class FakeMailApi : MailApi(MoiApi(OkHttpClient(), { null }, {})) {
     override suspend fun prefill(ref: String, instruction: String, key: String?): MoiApi.Result<MailDone> {
         calls += "prefill:$ref"
         return answer("prefill", prefillResult)
+    }
+
+    /** Un cadre refusé par le serveur (sinon : le HTML du mail s'il en a, 404 sans). */
+    var frameFail: MoiError? = null
+
+    override suspend fun frame(ref: String, images: Boolean): MoiApi.Result<String> {
+        calls += if (images) "frame:$ref:images" else "frame:$ref"
+        val m = mails[ref]
+        val got = frameFail?.let { MoiApi.Result.Failed(it) }
+            ?: if (m != null && m.html) MoiApi.Result.Ok("<!doctype html><meta charset=\"utf-8\"><p>${m.subject}</p>") else MoiApi.Result.Failed(MoiError(404, "Introuvable : ce n'est plus là."))
+        return answer("frame", got)
+    }
+
+    override suspend fun images(ref: String, shown: Boolean, key: String?): MoiApi.Result<MailDone> {
+        calls += "images:$ref:$shown"
+        return answer("images", MoiApi.Result.Ok(MailDone(ok = true)))
     }
 }

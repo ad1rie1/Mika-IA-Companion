@@ -40,14 +40,14 @@ import {
 import { ApiError, type Done } from "../../api/moi";
 import { refreshCounts } from "../../shell/counts";
 import { $, $$, h, isMobile, norm, on } from "../../shell/dom";
-import { openMenu, toast, type MenuItem } from "../../shell/float";
+import { modalOpen, openMenu, toast, type MenuItem } from "../../shell/float";
 import { ico, type IconName } from "../../shell/icons";
 import type { PaletteEntry } from "../../shell/palette";
 import type { ScreenContext, ScreenDef, ScreenTab, Shell } from "../../shell/shell";
 import { dayAndClock } from "../chat/markup";
 import * as store from "../../shared/store";
 import { bindCounts, bindPieces, bindRecipients, errorText, openAsk, openCompose, paintPieces, readRecipients, type ComposeValues } from "./compose";
-import { answerable, caps, clip, draftNotWaiting, draftReply, forwardSubject, newNonce, outgoingText, parseAddresses, personName, replySubject, replyTargets, toFill, type Caps } from "./format";
+import { answerable, caps, clip, deleteTargets, draftNotWaiting, draftReply, forwardSubject, newNonce, outgoingText, parseAddresses, personName, replySubject, replyTargets, toFill, type Caps } from "./format";
 import {
   boxesPane,
   boxViews,
@@ -1372,6 +1372,22 @@ export class MailScreen {
       if (t.closest("input, textarea, select, [contenteditable]") || e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.key !== "j" && e.key !== "k") return;
       this.step(e.key === "j" ? 1 : -1);
+    });
+    // Suppr : à la corbeille. Écoutée sur la page : après un clic dans la liseuse ou une liste repeinte, le focus
+    // n'est plus dans l'écran, mais la touche vaut tant qu'il est affiché.
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "Delete" || e.defaultPrevented || !this.visible() || !this.onMessages() || modalOpen()) return;
+      const t = e.target as HTMLElement;
+      const m = this.mail;
+      const open = m && this.open?.kind === "mail" && this.open.ref === m.ref ? { ref: m.ref, tidy: this.capsOf(m.box).write } : null;
+      const refs = deleteTargets(
+        { key: e.key, ctrl: e.ctrlKey || e.metaKey || e.altKey || e.shiftKey, target: { tag: t.tagName, type: (t as HTMLInputElement).type, editable: !!t.closest("[contenteditable]") } },
+        this.view.kind === "drafts" || this.view.kind === "sent" ? [] : [...this.checked],
+        open,
+      );
+      if (!refs.length) return;
+      e.preventDefault();
+      void this.gesture(refs, "trash");
     });
   }
 

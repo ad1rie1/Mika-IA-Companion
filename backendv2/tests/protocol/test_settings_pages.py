@@ -228,7 +228,7 @@ def test_a_path_written_in_the_code_is_the_breadcrumb_of_its_page(world):  # noq
 def test_the_directory_lists_every_settings_page_in_a_rubric_named_after_what_it_holds(world):  # noqa: F811
     """C7-07, C1-09, Q01 : Courrier › Paramètres est dans l'annuaire (sous Plugins) ; chaque page s'y dit en une
     phrase entière ; un réglage se trouve par le nom de son champ ; « Canaux » n'y est plus une rubrique — Carte et
-    téléphone en a les quatre pages, Dépôts Git est sous Connexions extérieures."""
+    téléphone en a les sept pages, Dépôts Git est sous Connexions extérieures."""
     client, _live, _ = world
     bootstrap(client)
     page = html.unescape(page_of(client, f"{BASE}/apercu"))
@@ -236,7 +236,7 @@ def test_the_directory_lists_every_settings_page_in_a_rubric_named_after_what_it
     groups = {m.group(1): m.group(2) for m in re.finditer(
         r'<h2 id="[^"]+">([^<]+)</h2>.*?<ul class="hm-dir-links">(.*?)</ul>', directory, re.S)}
     assert "Canaux" not in groups and "Carte et téléphone" in groups and "Connexions extérieures" in groups
-    for slug in ("notifications", "carte", "lieux", "itineraires"):
+    for slug in ("notifications", "carte", "lieux", "itineraires", "tourisme", "avis", "rechauffage"):
         assert f'href="{BASE}/{slug}"' in groups["Carte et téléphone"], slug
     assert f'href="{BASE}/depots"' in groups["Connexions extérieures"] and "Dépôts Git" in directory
     assert 'href="/admin/courrier/parametres"' in groups["Plugins"] and "Courrier › Paramètres" in directory

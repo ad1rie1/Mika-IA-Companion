@@ -16,7 +16,10 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import re
+import time
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -33,7 +36,7 @@ from mika.adapters.web.gate import (
 )
 from mika.adapters.web.gate import token_digest as digest
 from mika.kernel.events import Origin
-from mika.plugins.teams import RECEIVED, SETTLED
+from mika.plugins.teams import IMAGES, RECEIVED, SETTLED
 from mika.ports.gate import (
     ACCEPTED,
     BUSY,
@@ -47,8 +50,12 @@ from mika.ports.gate import (
 )
 from mika.ports.teams import (
     CONVERSATION_ID,
+    IMAGE_KEPT,
+    IMAGE_MAX_BYTES,
+    IMAGE_NO_MESSAGE,
     KEY_PREFIX,
     RESULTS,
+    ImageIn,
     InboxBatch,
     InboxConversation,
     InboxMessage,
@@ -56,6 +63,14 @@ from mika.ports.teams import (
 
 #: requêtes par minute, au plus (l'extension pousse quand Teams reçoit, relève toutes les 30 s)
 PER_MINUTE = 240
+#: une connexion en direct revérifie sa clé et l'état de Teams au plus tant de secondes après (ADR 0251)
+LIVE_RECHECK_S = 10.0
+#: les images (ADR 0258) : les types admis et ce par quoi leurs octets commencent ; leur taille, au plus
+IMAGE_TYPES: dict[str, tuple[bytes, ...]] = {
+    "image/png": (b"\x89PNG\r\n\x1a\n",), "image/jpeg": (b"\xff\xd8\xff",),
+    "image/gif": (b"GIF87a", b"GIF89a"), "image/webp": (b"RIFF",),
+}
+IMAGE_B64_MAX = (IMAGE_MAX_BYTES * 4) // 3 + 8
 #: au journal, ce que devient une réponse que l'extension n'a pas pu faire partir (son détail reste dans le cache)
 FAILED_BY_EXTENSION = "l'extension n'a pas pu la faire partir"
 KINDS = frozenset({"dm", "group", "channel", "meeting", "other", "system"})
@@ -74,6 +89,20 @@ class _InMessage(BaseModel):
     own: bool = False
     mentions_me: bool = False
     deleted: bool = False
+    #: ses images, envoyées à part (ADR 0258) : il attend qu'elles soient lues
+    images: int = Field(default=0, ge=0, le=8)
+
+
+class _InImage(BaseModel):
+    """Une image d'un message (ADR 0258) : son message, son identifiant, son rang, son type, ses octets en base64."""
+
+    model_config = ConfigDict(extra="ignore")
+    conv: str = Field(min_length=3, max_length=320)
+    id: str = Field(min_length=1, max_length=200)
+    image: str = Field(min_length=1, max_length=200)
+    position: int = Field(default=0, ge=0, le=7)
+    type: str = Field(max_length=40)
+    data: str = Field(min_length=8, max_length=IMAGE_B64_MAX)
 
 
 class _InConversation(BaseModel):
@@ -97,6 +126,8 @@ class _Inbox(BaseModel):
     self: _InSelf = Field(default_factory=_InSelf)
     conversations: list[Any] = Field(default_factory=list, max_length=200)
     messages: list[Any] = Field(default_factory=list, max_length=200)
+    #: l'historique chargé à la mise en service (ADR 0251) : rangé déjà lu, rien n'est journalisé
+    history: bool = False
 
 
 def _message(raw: Any, now_ms: int) -> InboxMessage | None:
@@ -112,7 +143,32 @@ def _message(raw: Any, now_ms: int) -> InboxMessage | None:
     if not text.strip() and not m.deleted:
         return None
     return InboxMessage(m.id, m.conv, one_line(m.author, 120), one_line(m.author_id, 200), m.time, text, m.own,
-                        m.mentions_me, m.deleted)
+                        m.mentions_me, m.deleted, images=m.images)
+
+
+def image_of(data: dict[str, Any]) -> ImageIn:
+    """Une image envoyée, validée : son message (des identifiants tels que Teams les écrit), un type d'image admis,
+    des octets lisibles, sous la borne, qui commencent comme ce type le veut. Lève ``ValueError`` sinon."""
+    try:
+        got = _InImage.model_validate(clean_fields(data))
+    except ValidationError as exc:
+        first = exc.errors()[0] if exc.errors() else {}
+        raise ValueError(f"image illisible ({'.'.join(str(x) for x in first.get('loc', ())) or 'forme'})") from None
+    if not CONVERSATION_ID.fullmatch(got.conv) or not _MESSAGE_ID.fullmatch(got.id) \
+            or not _MESSAGE_ID.fullmatch(got.image):
+        raise ValueError("image illisible (identifiants)")
+    magics = IMAGE_TYPES.get(got.type.lower())
+    if magics is None:
+        raise ValueError("un type d'image admis : " + ", ".join(sorted(IMAGE_TYPES)))
+    try:
+        raw = base64.b64decode(got.data, validate=True)
+    except (binascii.Error, ValueError):
+        raise ValueError("image illisible (base64)") from None
+    if not raw or len(raw) > IMAGE_MAX_BYTES:
+        raise ValueError(f"une image de {IMAGE_MAX_BYTES // (1024 * 1024)} Mo au plus")
+    if not any(raw.startswith(m) for m in magics) or (got.type.lower() == "image/webp" and raw[8:12] != b"WEBP"):
+        raise ValueError("ces octets ne sont pas une image de ce type")
+    return ImageIn(got.conv, got.id, got.image, got.position, got.type.lower(), raw)
 
 
 def batch_of(data: dict[str, Any], now_ms: int) -> tuple[InboxBatch, int]:
@@ -144,7 +200,7 @@ def batch_of(data: dict[str, Any], now_ms: int) -> tuple[InboxBatch, int]:
             continue
         messages.append(m)
     return (InboxBatch(one_line(got.self.id, 200), one_line(got.self.name, 120), tuple(conversations),
-                       tuple(messages)), dropped)
+                       tuple(messages), history=got.history), dropped)
 
 
 class TeamsDesk:
@@ -160,6 +216,8 @@ class TeamsDesk:
         self._minute = SlidingWindow(PER_MINUTE, 60.0)
         #: un lot se range et se journalise d'un tenant : deux lots simultanés ne s'entremêlent pas
         self._lock = asyncio.Lock()
+        #: les connexions en direct (ADR 0251) : la clé reconnue, son compte, et quand on l'a vérifiée
+        self._live_checked: dict[str, tuple[str, float]] = {}
 
     # ── les clés ──
     def key_state(self, account: str) -> KeyState | None:
@@ -190,8 +248,8 @@ class TeamsDesk:
                 found = name
         return found
 
-    def _admit(self, key: str) -> tuple[str, GateResult | None]:
-        """La clé, l'état, la cadence : (le compte, un refus ou rien — admis)."""
+    def _check(self, key: str) -> tuple[str, GateResult | None]:
+        """La clé et l'état, sans compter la requête : (le compte, un refus ou rien)."""
         account = self._recognized(key)
         cfg = self.settings.teams()
         if not account or cfg.account(account) is None:  # une clé d'un compte retiré depuis ne vaut plus
@@ -200,6 +258,13 @@ class TeamsDesk:
             return account, GateResult(DISABLED, "Teams est désactivé dans ses réglages.")
         if account in cfg.accounts and not cfg.accounts[account].enabled:
             return account, GateResult(DISABLED, "Ce compte Teams est désactivé dans ses réglages.")
+        return account, None
+
+    def _admit(self, key: str) -> tuple[str, GateResult | None]:
+        """La clé, l'état, la cadence : (le compte, un refus ou rien — admis)."""
+        account, refused = self._check(key)
+        if refused is not None:
+            return account, refused
         if not self._minute.allow(key=account):
             return account, GateResult(BUSY, "Trop de requêtes.", retry_after=self._minute.wait_s(account))
         return account, None
@@ -216,25 +281,75 @@ class TeamsDesk:
         except ValueError as exc:
             return GateResult(INVALID, str(exc))
         async with self._lock:
-            stored = self.store.store_batch(account, batch, now)
+            # hors de la boucle : un paquet d'historique, c'est jusqu'à 200 messages cherchés, comparés, rangés
+            stored = await asyncio.to_thread(self.store.store_batch, account, batch, now)
             drafts = [SETTLED.draft(draft=s.draft, state=s.state, edited=s.edited, reason=s.reason,
                                     dedupe_key=f"teams-regle:{s.draft}:{s.state}") for s in stored.settled]
-            if stored.new or stored.replied:
-                drafts.insert(0, RECEIVED.draft(new=stored.new, replied=stored.replied, account=account))
+            # ce qu'elle remarque : ce qui s'est rangé comme du direct — l'historique plus vieux que 24 h se range
+            # déjà lu, rien n'en est journalisé (ADR 0251)
+            if stored.recent or stored.replied:
+                drafts.insert(0, RECEIVED.draft(new=stored.recent, replied=stored.replied, account=account))
             if drafts:
                 await self.port.kernel.mind.append(drafts, emitter="teams", correlation="teams:inbox",
                                                    origin=Origin.EXTERNAL)
-        return GateResult(ACCEPTED, "Reçu.", data={"accepted": stored.new, "known": stored.known, "dropped": dropped})
+        return GateResult(ACCEPTED, "Reçu.", data={"accepted": stored.new, "known": stored.known, "twins": stored.twins,
+                                                  "dropped": dropped})
+
+    def _items(self, account: str) -> list[dict[str, Any]]:
+        """La boîte d'envoi d'un compte, telle que l'extension la lit (le relevé comme la connexion en direct)."""
+        return [{"id": i.id, "conversation": i.conversation, "title": i.title, "kind": i.kind, "mode": i.mode,
+                 "status": i.status, "text": i.text, "created_at": i.created_at, "expires_at": i.expires_at}
+                for i in self.store.outbox(account, self.clock())]
 
     async def outbox(self, key: str) -> GateResult:
         account, refused = self._admit(key)
         if refused is not None:
             return refused
-        items = self.store.outbox(account, self.clock())
-        return GateResult(ACCEPTED, "", data={"items": [
-            {"id": i.id, "conversation": i.conversation, "title": i.title, "kind": i.kind, "mode": i.mode,
-             "status": i.status, "text": i.text, "created_at": i.created_at, "expires_at": i.expires_at}
-            for i in items]})
+        return GateResult(ACCEPTED, "", data={"items": self._items(account)})
+
+    # ── en direct (ADR 0251) ──
+    async def live(self, key: str) -> GateResult:
+        """Ouvrir la boîte d'envoi en direct (``/api/teams/live``) : admise comme un relevé — la clé, l'état, la
+        minute —, avec la boîte telle qu'elle est."""
+        return await self.outbox(key)
+
+    async def live_items(self, key: str) -> GateResult:
+        """La boîte d'une connexion ouverte, relue chaque seconde hors de la boucle, sans compter dans la minute ; la
+        clé et l'état revérifiés toutes les ``LIVE_RECHECK_S`` secondes (une clé retirée, un compte ou Teams coupés
+        ferment la connexion), pas à chaque relecture : ce sont deux lectures des réglages."""
+        now = time.monotonic()
+        known = self._live_checked.get(key)
+        if known is None or now - known[1] >= LIVE_RECHECK_S:
+            account, refused = self._check(key)
+            if refused is not None:
+                self._live_checked.pop(key, None)
+                return refused
+            known = (account, now)
+            self._live_checked[key] = known
+            if len(self._live_checked) > 64:  # des clés d'avant (retirées, remplacées) : on oublie la plus vieille
+                self._live_checked.pop(min(self._live_checked, key=lambda k: self._live_checked[k][1]))
+        return GateResult(ACCEPTED, "", data={"items": await asyncio.to_thread(self._items, known[0])})
+
+    async def image(self, key: str, data: Any) -> GateResult:
+        """Une image d'un message (ADR 0258) : admise comme un lot (la clé, l'état, la minute), validée avant que rien
+        ne soit rangé ; gardée avec son message — inconnu : 404, l'extension la renverra quand il sera arrivé. Une
+        image neuve journalise ``teams.images`` (rien d'elle) : la lecture la regardera."""
+        account, refused = self._admit(key)
+        if refused is not None:
+            return refused
+        if self.port is None:
+            return GateResult(BUSY, "Elle n'est pas prête.", retry_after=10)
+        try:
+            image = image_of(data if isinstance(data, dict) else {})
+        except ValueError as exc:
+            return GateResult(INVALID, str(exc))
+        outcome = await asyncio.to_thread(self.store.keep_image, account, image, self.clock())
+        if outcome == IMAGE_NO_MESSAGE:
+            return GateResult(MISSING, "Son message n'est pas encore arrivé.")
+        if outcome == IMAGE_KEPT:
+            await self.port.kernel.mind.append([IMAGES.draft(account=account)], emitter="teams",
+                                               correlation="teams:image", origin=Origin.EXTERNAL)
+        return GateResult(ACCEPTED, "Reçue.", data={"kept": outcome == IMAGE_KEPT})
 
     async def ack(self, key: str, item: str, data: Any) -> GateResult:
         account, refused = self._admit(key)

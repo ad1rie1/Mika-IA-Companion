@@ -51,6 +51,14 @@ ROUTES_BUSY = "Trop de trajets demandés d'affilée : attends une minute."
 #: une adresse cherchée, à la Géoplateforme (qui en permet 50 par seconde) : au plus tant par compte dans la fenêtre —
 #: une saisie en cours en demande plusieurs, sans priver qui que ce soit du serveur d'itinéraires
 ADDRESSES = (60, 60.0)
+#: l'écran Carte (ADR 0259) : ce qui peut faire appeler un service compté (DATAtourisme, Google Places) — ouvrir une
+#: fiche ou chercher des événements (une case jamais vue se lit en direct, un lieu se lit chez Google), relever une
+#: photo la première fois, « Actualiser » une fiche, précharger autour de soi —, au plus tant par compte dans la
+#: fenêtre : une personne n'use pas seule les quotas de tout le serveur
+MAP_READS = (60, 60.0)
+PHOTO_READS = (120, 60.0)
+REFRESHES = (10, 60.0)
+PRELOADS = (10, 600.0)
 #: ce qu'une personne qui n'est pas opératrice branche à elle : au plus tant de boîtes, de comptes Teams, de services
 OWN_MAX = 10
 #: les créations dont on garde la réponse, pour qu'une création redite avec la même clé ne refasse rien
@@ -306,7 +314,7 @@ class MeApiBase:
     par compte). Les routes elles-mêmes viennent des modules, que le paquet réunit (``mika.app.me.MeApi``)."""
 
     def __init__(self, kernel: Kernel, accounts: Accounts, *, origins: Iterable[str] = (),
-                 apk: Path | None = None, settings: Any = None,
+                 apk: Path | None = None, extension: Path | None = None, settings: Any = None,
                  reconfigure: Callable[[], Awaitable[list[str]]] | None = None, tiles: Any = None) -> None:
         self.kernel = kernel
         self.accounts = accounts
@@ -321,6 +329,11 @@ class MeApiBase:
         self.outbound = SlidingWindow(*OUTBOUND)
         #: les adresses cherchées, par compte (``ADDRESSES``)
         self.address_tries = SlidingWindow(*ADDRESSES)
+        #: l'écran Carte, par compte : les fiches et les événements lus, les photos, « Actualiser », les préchargements
+        self.map_reads = SlidingWindow(*MAP_READS)
+        self.photo_reads = SlidingWindow(*PHOTO_READS)
+        self.refreshes = SlidingWindow(*REFRESHES)
+        self.preloads = SlidingWindow(*PRELOADS)
         #: les créations faites, par clé d'envoi (``Call.once``), et ce qui fait celles d'un compte l'une après l'autre
         self.created: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self.creating: dict[int, asyncio.Lock] = {}
@@ -329,6 +342,8 @@ class MeApiBase:
         #: l'application du téléphone qu'on y dépose (ADR 0190), servie à qui est connecté (sa session, ou un jeton
         #: de son compte)
         self.apk = apk
+        #: le dossier de l'extension de Teams (ADR 0246), servi en zip à qui est connecté ; ``None`` : pas d'extension
+        self.extension = extension
         #: la carte de sa position (ADR 0193 : ``adapters.maps.MapTiles``) ; ``None`` : pas de carte, le plan dessiné
         self.tiles = tiles
 

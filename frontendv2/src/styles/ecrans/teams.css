@@ -134,3 +134,9 @@
   .tm-replies .tm-r-when { grid-column: 1; grid-row: 3; color: var(--muted); }
   .tm-replies td.actions { grid-column: 2; grid-row: 3; }
 }
+
+/* les images d'un message (ADR 0258) : une vignette, ce que Mika y a vu en légende */
+.tm-imgs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.tm-img { margin: 0; max-width: min(360px, 100%); }
+.tm-img img { display: block; max-width: 100%; max-height: 280px; border-radius: 8px; border: 1px solid var(--border); object-fit: contain; background: var(--tint); }
+.tm-img figcaption { display: flex; gap: 4px; align-items: flex-start; margin-top: 4px; font-size: 12px; line-height: 1.4; color: var(--text-2); }

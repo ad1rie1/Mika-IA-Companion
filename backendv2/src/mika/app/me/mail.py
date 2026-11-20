@@ -21,6 +21,7 @@ from starlette.routing import Route
 from mika.adapters.web.app import safe_mime
 from mika.app.me.api import Call, Denied, MeApiBase, done, form, missing
 from mika.app.me.common import allows, held_by, millis, only_owner, opened, snippet
+from mika.contracts import email as email_c
 from mika.inspector.framed import FRAME_CSP, FRAME_CSP_REMOTE, framed_html
 from mika.plugins import email as email_p
 from mika.plugins.email import WAITING, EmailState, Seen, exhausted, name_of
@@ -155,10 +156,11 @@ def _keys(mine: dict[str, tuple[AccountInfo, str]], box: str) -> tuple[str, ...]
     return tuple(key for key, (_, level) in mine.items() if level != SHARE_READ)
 
 
-def _her(s: EmailState, ref: str, p: Any, level: str = OWNED) -> dict[str, Any] | None:
+def _her(s: EmailState, ref: str, p: Any, level: str = OWNED, folder: str = "") -> dict[str, Any] | None:
     """Ce qu'elle a fait de ce mail : remarqué, jugé important, lu de son côté (à part de ton non-lu, ADR 0175), une
     réponse qu'elle prépare ou qu'on lui a demandée — sauf pour qui ne fait que lire la boîte (ADR 0188) : les réponses
-    en préparation sont l'affaire de son propriétaire."""
+    en préparation sont l'affaire de son propriétaire ; ce que tes consignes de tri en ont fait (ADR 0243) : prévenir,
+    et le dossier où elles l'ont rangé, tant qu'il y est (``folder`` : là où il est)."""
     seen: Seen | None = s.mails.get(ref)
     prepares = allows(level, SHARE_PREPARE)
     waiting = next((d for d in s.drafts.values() if d.mail == ref and d.state == WAITING), None) if prepares else None
@@ -169,15 +171,31 @@ def _her(s: EmailState, ref: str, p: Any, level: str = OWNED) -> dict[str, Any] 
             "needs_reply": bool(seen is not None and seen.needs_reply),
             "read": bool(seen is not None and seen.read and seen.by_her),
             "how": seen.how if seen is not None and seen.by_her else "",
-            "draft": waiting.draft if waiting is not None else "", "asked": asked}
+            "draft": waiting.draft if waiting is not None else "", "asked": asked,
+            "alert": bool(seen is not None and seen.alert),
+            "filed": seen.file_to if seen is not None and seen.file_to and seen.file_to == folder else ""}
 
 
-def row(m: Mail, s: EmailState, p: Any, level: str = OWNED) -> dict[str, Any]:
+#: ce que son tri a fait d'un mail remarqué, dit aux clients (ADR 0240)
+TRIAGE_SHOWN = {email_c.TRIAGE_MODEL: "read", email_c.TRIAGE_FALLBACK: "guessed", email_c.TRIAGE_BULK: "bulk"}
+
+
+def triage_of(s: EmailState, ref: str, waiting: frozenset[str]) -> str:
+    """Son tri et ce mail : ``read`` (le modèle l'a lu), ``guessed`` (le repli seul), ``bulk`` (un envoi en masse,
+    jamais montré au modèle), ``waiting`` (relevé, pas encore trié : au relevé suivant) ; vide sinon (un mail d'avant
+    sa boîte, d'un dossier qu'elle ne relève pas, ou remarqué avant que le journal le dise)."""
+    seen = s.mails.get(ref)
+    if seen is not None:
+        return TRIAGE_SHOWN.get(seen.triage, "")
+    return "waiting" if ref in waiting else ""
+
+
+def row(m: Mail, s: EmailState, p: Any, level: str = OWNED, waiting: frozenset[str] = frozenset()) -> dict[str, Any]:
     return {"ref": m.ref, "box": m.account, "folder": m.folder,
             "from": {"name": name_of(m.sender) or m.address, "address": m.address}, "to": _people(m.to),
             "subject": m.subject, "snippet": snippet(m.body, SNIPPET), "date": millis(m.date), "seen": m.seen,
             "flagged": m.flagged, "answered": m.answered, "attachments": len(m.attachments), "html": m.has_html,
-            "bulk": m.bulk, "her": _her(s, m.ref, p, level)}
+            "bulk": m.bulk, "her": _her(s, m.ref, p, level, m.folder), "triage": triage_of(s, m.ref, waiting)}
 
 
 def _box_json(call: Call, a: AccountInfo, level: str) -> dict[str, Any]:
@@ -228,7 +246,9 @@ async def messages(call: Call) -> dict[str, Any]:
                       seen=False if listed == "unread" else None, flagged=True if listed == "flagged" else None,
                       refs=refs)
     got = port.messages_page(query, page, size)
-    return {"items": [row(m, s, p, mine.get(m.account, (None, OWNED))[1]) for m in got.items], "total": got.total,
+    waiting = port.waiting()
+    return {"items": [row(m, s, p, mine.get(m.account, (None, OWNED))[1], waiting) for m in got.items],
+            "total": got.total,
             "page": got.number, "size": got.size}
 
 
@@ -239,14 +259,14 @@ async def message(call: Call) -> dict[str, Any]:
     port = call.port("mail")
     s, p = state(call), email_p.params_of(call.frame)
     level = boxes(call)[m.account][1]
-    her = _her(s, m.ref, p, level)
+    her = _her(s, m.ref, p, level, m.folder)
     seen = s.mails.get(m.ref)
     if her is not None and seen is not None and seen.summary_ref:
         store = call.port("store")
         her["summary"] = store.content([seen.summary_ref]).get(seen.summary_ref, "") if store is not None else ""
     remote = bool(m.html) and bool(REMOTE_IMAGE.search(m.html[:400_000]))
     sent, received = _copies(port, m)
-    return {**row(m, s, p, level), "her": her, "cc": _people(m.cc), "reply_to": m.reply_to, "in_reply_to": m.in_reply_to,
+    return {**row(m, s, p, level, port.waiting()), "her": her, "cc": _people(m.cc), "reply_to": m.reply_to, "in_reply_to": m.in_reply_to,
             "body": m.body, "complete": m.complete, "sent": sent, "received": received,
             "attachments": [{"part": str(i), "name": a.name, "mime": a.mime, "size": a.size}
                             for i, a in enumerate(m.attachments)],

@@ -12,7 +12,18 @@ from collections.abc import Iterable, Sequence
 from dataclasses import replace
 from typing import Any
 
-from mika.ports.mail import AccountInfo, Contact, Draft, Folder, Mail, MailQuery, Preview, Sent, split_ref
+from mika.ports.mail import (
+    AccountInfo,
+    Contact,
+    Draft,
+    Folder,
+    Found,
+    Mail,
+    MailQuery,
+    Preview,
+    Sent,
+    split_ref,
+)
 from mika.ports.paging import Page
 
 
@@ -42,6 +53,14 @@ class Boxes:
 
     def status(self, account: str) -> Any:
         return self.port.status(account)
+
+    # ── aller au serveur (ADR 0247, 0249) ──
+
+    async def sync_folder(self, account: str, folder: str, limit: int) -> int:
+        return await self.port.sync_folder(account, folder, limit) if self._mine(account) else 0
+
+    async def search_server(self, query: MailQuery, want: int) -> Found:
+        return await self.port.search_server(query, want) if self._mine(query.account) else Found()
 
     # ── lire ──
 
@@ -95,6 +114,11 @@ class Boxes:
 
     async def trash(self, ref: str) -> str:
         return await self.port.trash(ref) if self._ref(ref) else ""
+
+    async def create_folder(self, account: str, name: str) -> str:
+        if not self._mine(account):
+            raise ValueError("cette boîte n'est pas à qui est en face")
+        return await self.port.create_folder(account, name)
 
     # ── écrire ──
 

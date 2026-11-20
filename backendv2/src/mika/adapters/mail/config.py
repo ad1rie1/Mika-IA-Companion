@@ -112,8 +112,20 @@ class MailAccount(BaseModel):
         label="Synchroniser tous les dossiers", group="Lire", advanced=False, order=26,
         help="À chaque relève, tous les dossiers du serveur sont tenus à jour dans la console. Elle ne remarque "
              "toujours que les dossiers relevés.")] = False
-    since_days: Annotated[int, Knob(label="Fenêtre de relève (jours)", group="Lire", lo=1, hi=60, order=27,
+    # ADR 0249 : tout garder ici, ou chercher sur le serveur
+    keep_all: Annotated[bool, Knob(
+        label="Tout garder en local", group="Lire", advanced=False, order=27,
+        help="Tous les dossiers (sauf les indésirables et la corbeille) sont tenus à jour, et tout leur historique "
+             "se télécharge petit à petit, les plus récents d'abord : elle cherche alors dans tout ton courrier sans "
+             "demander au serveur. Cela prend de la place. Décoché, une recherche interroge aussi le serveur pour "
+             "ce qui n'est pas ici.")] = False
+    since_days: Annotated[int, Knob(label="Fenêtre de relève (jours)", group="Lire", lo=1, hi=60, order=28,
                                     help="Au premier relevé d'un dossier, on ne remonte pas plus loin.")] = 2
+    triage_instructions: Annotated[str, Knob(
+        label="Consignes de tri", group="Lire", widget="textarea", advanced=False, order=29,
+        help="Ce que son tri fait de chaque mail qui arrive dans un dossier relevé : où le ranger (un dossier qui "
+             "existe), de quoi te prévenir, ce qui appelle une réponse. Par exemple : « range les publicités dans "
+             "PUB ; préviens-moi de tout mail de la banque ». Un mail reçu, lui, n'est jamais une consigne.")] = ""
     oauth_client_id: Annotated[str, Knob(
         label="Application Microsoft (client ID)", group="Connexion", advanced=False, order=18,
         only=(("auth", (MICROSOFT,)),),
@@ -221,7 +233,8 @@ class MailAccount(BaseModel):
         return AccountInfo(
             key=key, label=self.label, address=self.from_address.lower(), display_name=self.display_name,
             voice=self.voice, sender_name=self.sender_name, tone=self.tone, instructions=self.instructions, signature=self.signature,
-            folders=self.folders, ready=self.ready, can_send=self.can_send, enabled=self.enabled,
+            triage_instructions=self.triage_instructions, folders=self.folders, keep_all=self.keep_all,
+            ready=self.ready, can_send=self.can_send, enabled=self.enabled,
             details=self.details(), owner=self.owner)
 
     def details(self) -> tuple[tuple[str, str], ...]:
@@ -233,7 +246,10 @@ class MailAccount(BaseModel):
             (("mot de passe", "défini" if self.password else "aucun"),)
         return (("lire", read), ("utilisateur", self.user or "—"), *secret,
                 ("dossiers relevés", ", ".join(self.folders)),
-                ("autres dossiers", "synchronisés à chaque relève" if self.sync_all else "relus à la demande"),
+                ("autres dossiers", "synchronisés à chaque relève" if self.sync_all or self.keep_all
+                 else "relus à la demande"),
+                ("tout en local", "oui, historique compris" if self.keep_all else "non : la recherche demande au "
+                                                                                  "serveur"),
                 ("fenêtre du premier relevé", f"{self.since_days} j"),
                 ("envoyer", send), ("utilisateur d'envoi", self.smtp_user or "le même"),
                 ("copie dans « Envoyés »", "oui" if self.save_sent else "non"))

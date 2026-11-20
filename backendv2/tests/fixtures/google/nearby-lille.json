@@ -1,0 +1,540 @@
+{
+ "places": [
+  {
+   "id": "ChIJf4-ExorVwkcRumZKrEYj17w",
+   "types": [
+    "shopping_mall",
+    "gym",
+    "hypermarket",
+    "beautician",
+    "supermarket",
+    "travel_agency",
+    "grocery_store",
+    "food_store",
+    "sports_activity_location",
+    "health",
+    "restaurant",
+    "food",
+    "store",
+    "point_of_interest",
+    "service",
+    "establishment"
+   ],
+   "formattedAddress": "100 Av. Willy Brandt, 59777 Lille, France",
+   "location": {
+    "latitude": 50.6372213,
+    "longitude": 3.0742947999999997
+   },
+   "rating": 4.2,
+   "googleMapsUri": "https://maps.google.com/?cid=13607383585568483002",
+   "regularOpeningHours": {
+    "openNow": false,
+    "periods": [
+     {
+      "open": {
+       "day": 1,
+       "hour": 9,
+       "minute": 30
+      },
+      "close": {
+       "day": 1,
+       "hour": 20,
+       "minute": 0
+      }
+     },
+     {
+      "open": {
+       "day": 2,
+       "hour": 9,
+       "minute": 30
+      },
+      "close": {
+       "day": 2,
+       "hour": 20,
+       "minute": 0
+      }
+     },
+     {
+      "open": {
+       "day": 3,
+       "hour": 9,
+       "minute": 30
+      },
+      "close": {
+       "day": 3,
+       "hour": 20,
+       "minute": 0
+      }
+     },
+     {
+      "open": {
+       "day": 4,
+       "hour": 9,
+       "minute": 30
+      },
+      "close": {
+       "day": 4,
+       "hour": 20,
+       "minute": 0
+      }
+     },
+     {
+      "open": {
+       "day": 5,
+       "hour": 9,
+       "minute": 30
+      },
+      "close": {
+       "day": 5,
+       "hour": 20,
+       "minute": 0
+      }
+     },
+     {
+      "open": {
+       "day": 6,
+       "hour": 9,
+       "minute": 30
+      },
+      "close": {
+       "day": 6,
+       "hour": 20,
+       "minute": 0
+      }
+     }
+    ],
+    "weekdayDescriptions": [
+     "lundi: 09:30 – 20:00",
+     "mardi: 09:30 – 20:00",
+     "mercredi: 09:30 – 20:00",
+     "jeudi: 09:30 – 20:00",
+     "vendredi: 09:30 – 20:00",
+     "samedi: 09:30 – 20:00",
+     "dimanche: Fermé"
+    ],
+    "nextOpenTime": "2026-11-21T08:30:00Z"
+   },
+   "businessStatus": "OPERATIONAL",
+   "userRatingCount": 31914,
+   "displayName": {
+    "text": "Westfield Euralille",
+    "languageCode": "fr"
+   },
+   "primaryType": "shopping_mall",
+   "photos": [
+    {
+     "name": "places/ChIJf4-ExorVwkcRumZKrEYj17w/photos/AV-photo-fictive-01",
+     "widthPx": 1172,
+     "heightPx": 864,
+     "authorAttributions": [
+      {
+       "displayName": "Photographe fictif 11",
+       "uri": "https://maps.google.com/maps/contrib/100000000000000000011"
+      }
+     ]
+    },
+    {
+     "name": "places/ChIJf4-ExorVwkcRumZKrEYj17w/photos/AV-photo-fictive-02",
+     "widthPx": 3280,
+     "heightPx": 2464,
+     "authorAttributions": [
+      {
+       "displayName": "Photographe fictif 12",
+       "uri": "https://maps.google.com/maps/contrib/100000000000000000012"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "ChIJCZfCw4fVwkcRqvwNk2JOxks",
+   "types": [
+    "pastry_shop",
+    "dessert_shop",
+    "bakery",
+    "tea_house",
+    "confectionery",
+    "food_store",
+    "restaurant",
+    "food",
+    "store",
+    "point_of_interest",
+    "establishment"
+   ],
+   "formattedAddress": "25-27 Rue Esquermoise, 59000 Lille, France",
+   "location": {
+    "latitude": 50.6377202,
+    "longitude": 3.0619916999999996
+   },
+   "rating": 4.3,
+   "googleMapsUri": "https://maps.google.com/?cid=5460137783514234026",
+   "regularOpeningHours": {
+    "openNow": false,
+    "periods": [
+     {
+      "open": {
+       "day": 0,
+       "hour": 9,
+       "minute": 0
+      },
+      "close": {
+       "day": 0,
+       "hour": 19,
+       "minute": 0
+      }
+     },
+     {
+      "open": {
+       "day": 1,
+       "hour": 14,
+       "minute": 0
+      },
+      "close": {
+       "day": 1,
+       "hour": 19,
+       "minute": 0
+      }
+     },
+     {
+      "open": {
+       "day": 2,
+       "hour": 10,
+       "minute": 0
+      },
+      "close": {
+       "day": 2,
+       "hour": 19,
+       "minute": 30
+      }
+     },
+     {
+      "open": {
+       "day": 3,
+       "hour": 10,
+       "minute": 0
+      },
+      "close": {
+       "day": 3,
+       "hour": 19,
+       "minute": 30
+      }
+     },
+     {
+      "open": {
+       "day": 4,
+       "hour": 10,
+       "minute": 0
+      },
+      "close": {
+       "day": 4,
+       "hour": 19,
+       "minute": 30
+      }
+     },
+     {
+      "open": {
+       "day": 5,
+       "hour": 10,
+       "minute": 0
+      },
+      "close": {
+       "day": 5,
+       "hour": 19,
+       "minute": 30
+      }
+     },
+     {
+      "open": {
+       "day": 6,
+       "hour": 10,
+       "minute": 0
+      },
+      "close": {
+       "day": 6,
+       "hour": 19,
+       "minute": 30
+      }
+     }
+    ],
+    "weekdayDescriptions": [
+     "lundi: 14:00 – 19:00",
+     "mardi: 10:00 – 19:30",
+     "mercredi: 10:00 – 19:30",
+     "jeudi: 10:00 – 19:30",
+     "vendredi: 10:00 – 19:30",
+     "samedi: 10:00 – 19:30",
+     "dimanche: 09:00 – 19:00"
+    ],
+    "nextOpenTime": "2026-11-21T09:00:00Z"
+   },
+   "businessStatus": "OPERATIONAL",
+   "userRatingCount": 8581,
+   "displayName": {
+    "text": "Maison Méert",
+    "languageCode": "fr"
+   },
+   "primaryType": "pastry_shop",
+   "photos": [
+    {
+     "name": "places/ChIJCZfCw4fVwkcRqvwNk2JOxks/photos/AV-photo-fictive-01",
+     "widthPx": 2500,
+     "heightPx": 1875,
+     "authorAttributions": [
+      {
+       "displayName": "Photographe fictif 13",
+       "uri": "https://maps.google.com/maps/contrib/100000000000000000013"
+      }
+     ]
+    },
+    {
+     "name": "places/ChIJCZfCw4fVwkcRqvwNk2JOxks/photos/AV-photo-fictive-02",
+     "widthPx": 4800,
+     "heightPx": 3600,
+     "authorAttributions": [
+      {
+       "displayName": "Photographe fictif 14",
+       "uri": "https://maps.google.com/maps/contrib/100000000000000000014"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "ChIJ-QA9R-vVwkcRvkZx8mgJpss",
+   "types": [
+    "italian_restaurant",
+    "mediterranean_restaurant",
+    "pizza_restaurant",
+    "meal_takeaway",
+    "european_restaurant",
+    "family_restaurant",
+    "restaurant",
+    "food",
+    "point_of_interest",
+    "establishment"
+   ],
+   "formattedAddress": "126 Rue Esquermoise, 59800 Lille, France",
+   "location": {
+    "latitude": 50.638975599999995,
+    "longitude": 3.058805
+   },
+   "rating": 4.8,
+   "googleMapsUri": "https://maps.google.com/?cid=14674426782182098622",
+   "regularOpeningHours": {
+    "openNow": true,
+    "periods": [
+     {
+      "open": {
+       "day": 0,
+       "hour": 11,
+       "minute": 45
+      },
+      "close": {
+       "day": 0,
+       "hour": 15,
+       "minute": 30
+      }
+     },
+     {
+      "open": {
+       "day": 0,
+       "hour": 18,
+       "minute": 15
+      },
+      "close": {
+       "day": 0,
+       "hour": 22,
+       "minute": 30
+      }
+     },
+     {
+      "open": {
+       "day": 1,
+       "hour": 11,
+       "minute": 45
+      },
+      "close": {
+       "day": 1,
+       "hour": 14,
+       "minute": 30
+      }
+     },
+     {
+      "open": {
+       "day": 1,
+       "hour": 18,
+       "minute": 15
+      },
+      "close": {
+       "day": 1,
+       "hour": 22,
+       "minute": 30
+      }
+     },
+     {
+      "open": {
+       "day": 2,
+       "hour": 11,
+       "minute": 45
+      },
+      "close": {
+       "day": 2,
+       "hour": 14,
+       "minute": 30
+      }
+     },
+     {
+      "open": {
+       "day": 2,
+       "hour": 18,
+       "minute": 15
+      },
+      "close": {
+       "day": 2,
+       "hour": 22,
+       "minute": 30
+      }
+     },
+     {
+      "open": {
+       "day": 3,
+       "hour": 11,
+       "minute": 45
+      },
+      "close": {
+       "day": 3,
+       "hour": 14,
+       "minute": 30
+      }
+     },
+     {
+      "open": {
+       "day": 3,
+       "hour": 18,
+       "minute": 15
+      },
+      "close": {
+       "day": 3,
+       "hour": 22,
+       "minute": 30
+      }
+     },
+     {
+      "open": {
+       "day": 4,
+       "hour": 11,
+       "minute": 45
+      },
+      "close": {
+       "day": 4,
+       "hour": 14,
+       "minute": 30
+      }
+     },
+     {
+      "open": {
+       "day": 4,
+       "hour": 18,
+       "minute": 15
+      },
+      "close": {
+       "day": 4,
+       "hour": 22,
+       "minute": 30
+      }
+     },
+     {
+      "open": {
+       "day": 5,
+       "hour": 11,
+       "minute": 45
+      },
+      "close": {
+       "day": 5,
+       "hour": 14,
+       "minute": 45
+      }
+     },
+     {
+      "open": {
+       "day": 5,
+       "hour": 18,
+       "minute": 0
+      },
+      "close": {
+       "day": 5,
+       "hour": 23,
+       "minute": 0
+      }
+     },
+     {
+      "open": {
+       "day": 6,
+       "hour": 11,
+       "minute": 45
+      },
+      "close": {
+       "day": 6,
+       "hour": 15,
+       "minute": 30
+      }
+     },
+     {
+      "open": {
+       "day": 6,
+       "hour": 17,
+       "minute": 30
+      },
+      "close": {
+       "day": 6,
+       "hour": 23,
+       "minute": 0
+      }
+     }
+    ],
+    "weekdayDescriptions": [
+     "lundi: 11:45 – 14:30, 18:15 – 22:30",
+     "mardi: 11:45 – 14:30, 18:15 – 22:30",
+     "mercredi: 11:45 – 14:30, 18:15 – 22:30",
+     "jeudi: 11:45 – 14:30, 18:15 – 22:30",
+     "vendredi: 11:45 – 14:45, 18:00 – 23:00",
+     "samedi: 11:45 – 15:30, 17:30 – 23:00",
+     "dimanche: 11:45 – 15:30, 18:15 – 22:30"
+    ],
+    "nextCloseTime": "2026-11-20T22:00:00Z"
+   },
+   "businessStatus": "OPERATIONAL",
+   "priceLevel": "PRICE_LEVEL_MODERATE",
+   "userRatingCount": 29867,
+   "displayName": {
+    "text": "La Bellezza Lille",
+    "languageCode": "fr"
+   },
+   "primaryType": "italian_restaurant",
+   "photos": [
+    {
+     "name": "places/ChIJ-QA9R-vVwkcRvkZx8mgJpss/photos/AV-photo-fictive-01",
+     "widthPx": 1920,
+     "heightPx": 1080,
+     "authorAttributions": [
+      {
+       "displayName": "Photographe fictif 15",
+       "uri": "https://maps.google.com/maps/contrib/100000000000000000015"
+      }
+     ]
+    },
+    {
+     "name": "places/ChIJ-QA9R-vVwkcRvkZx8mgJpss/photos/AV-photo-fictive-02",
+     "widthPx": 4032,
+     "heightPx": 3024,
+     "authorAttributions": [
+      {
+       "displayName": "Photographe fictif 16",
+       "uri": "https://maps.google.com/maps/contrib/100000000000000000016"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

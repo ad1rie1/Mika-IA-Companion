@@ -107,6 +107,13 @@ describe("la liste", () => {
     expect(html).toContain("Re: Présentation &lt;jeudi&gt;");
     expect(html).toContain("data-coche");
   });
+  it("dit si son tri l'a lu (ADR 0240)", () => {
+    const rv: RowView = { now: NOW, selected: "", checked: new Set(), many: false, boxes: new Map() };
+    expect(mailRow({ ...row, triage: "read" }, rv, true)).toContain("lu par son tri");
+    expect(mailRow({ ...row, her: null, triage: "waiting" }, rv, true)).toContain("en attente de son tri");
+    expect(mailRow({ ...row, triage: "guessed" }, rv, true)).toContain("tri deviné");
+    expect(mailRow({ ...row, triage: "bulk" }, rv, true)).not.toContain("son tri");
+  });
   it("sans droit de ranger, pas de case à cocher", () => {
     const html = mailRow(row, { now: NOW, selected: "", checked: new Set(), many: false, boxes: new Map() }, false);
     expect(html).not.toContain("data-coche");
@@ -118,6 +125,21 @@ describe("la liste", () => {
 });
 
 describe("la liseuse respecte le niveau (ADR 0188)", () => {
+  it("« Ce qu'elle en sait » dit son tri, puis sa lecture à elle (ADR 0240)", () => {
+    const read = readerMail({ ...full, triage: "read" }, view("proprietaire"), (p) => p);
+    expect(read).toContain("Ce qu'elle en sait · lu par son tri · lu par elle");
+    const waiting = readerMail({ ...full, her: null, triage: "waiting" }, view("proprietaire"), (p) => p);
+    expect(waiting).toContain("Ce qu'elle en sait · en attente de son tri");
+    expect(waiting).toContain("il le lira au prochain relevé");
+    expect(readerMail({ ...full, triage: "guessed" }, view("proprietaire"), (p) => p)).toContain("son importance est devinée");
+    expect(readerMail({ ...full, her: null, triage: "" }, view("proprietaire"), (p) => p)).not.toContain("Ce qu'elle en sait");
+  });
+  it("dit ce que tes consignes de tri en ont fait (ADR 0243)", () => {
+    const ruled = readerMail({ ...full, her: { ...full.her!, alert: true, filed: "PUB" } }, view("proprietaire"), (p) => p);
+    expect(ruled).toContain("Tes consignes de tri demandent de te prévenir de ce mail.");
+    expect(ruled).toContain("Rangé dans « PUB » selon tes consignes de tri.");
+    expect(readerMail(full, view("proprietaire"), (p) => p)).not.toContain("consignes de tri");
+  });
   it("la sienne : répondre, transférer, préremplir, ranger, et la réponse en place", () => {
     const html = readerMail(full, view("proprietaire"), (p) => `f${p}`);
     for (const act of ["repondre", "tous", "transferer", "preremplir", "archiver", "lu", "suivre", "corbeille"]) expect(html).toContain(`data-act="${act}"`);

@@ -1,0 +1,308 @@
+{
+ "id": "ChIJ-QA9R-vVwkcRvkZx8mgJpss",
+ "rating": 4.8,
+ "googleMapsUri": "https://maps.google.com/?cid=14674426782182098622",
+ "priceLevel": "PRICE_LEVEL_MODERATE",
+ "userRatingCount": 29867,
+ "displayName": {
+  "text": "La Bellezza Lille",
+  "languageCode": "fr"
+ },
+ "servesVegetarianFood": true,
+ "editorialSummary": {
+  "text": "Spécialités italiennes maison dans un écrin théâtral avec cuisine ouverte, bibliothèque et bar sublime.",
+  "languageCode": "fr"
+ },
+ "reviews": [
+  {
+   "name": "places/ChIJ-QA9R-vVwkcRvkZx8mgJpss/reviews/avis-fictif-1",
+   "relativePublishTimeDescription": "il y a moins d'une semaine",
+   "rating": 5,
+   "text": {
+    "text": "Cadre magnifique\nVue sur les cuisines c’est sympa de voir les pizzas se faire en direct. La qualité est au rdv, les portions généreuses, personnel sympathique\nLe seul petit bémol est que nous avons été placé à côté des W",
+    "languageCode": "fr"
+   },
+   "originalText": {
+    "text": "Cadre magnifique\nVue sur les cuisines c’est sympa de voir les pizzas se faire en direct. La qualité est au rdv, les portions généreuses, personnel sympathique\nLe seul petit bémol est que nous avons été placé à côté des W",
+    "languageCode": "fr"
+   },
+   "authorAttribution": {
+    "displayName": "Autrice fictive 1",
+    "uri": "https://www.google.com/maps/contrib/100000000000000000001/reviews"
+   },
+   "publishTime": "2026-11-15T13:19:24.118494378Z"
+  },
+  {
+   "name": "places/ChIJ-QA9R-vVwkcRvkZx8mgJpss/reviews/avis-fictif-2",
+   "relativePublishTimeDescription": "il y a un mois",
+   "rating": 5,
+   "text": {
+    "text": "🇮🇹 Quand l’Italie toute entière s’invite dans notre assiette… 🇮🇹\nUne véritable parenthèse italienne au cœur de Lille ! 🍝✨\nJ’ai eu le plaisir de découvrir le restaurant La Bellezza, et quelle belle expérience culinaire ! ",
+    "languageCode": "fr"
+   },
+   "originalText": {
+    "text": "🇮🇹 Quand l’Italie toute entière s’invite dans notre assiette… 🇮🇹\nUne véritable parenthèse italienne au cœur de Lille ! 🍝✨\nJ’ai eu le plaisir de découvrir le restaurant La Bellezza, et quelle belle expérience culinaire ! ",
+    "languageCode": "fr"
+   },
+   "authorAttribution": {
+    "displayName": "Autrice fictive 2",
+    "uri": "https://www.google.com/maps/contrib/100000000000000000002/reviews"
+   },
+   "publishTime": "2026-10-03T15:26:27.024380040Z"
+  },
+  {
+   "name": "places/ChIJ-QA9R-vVwkcRvkZx8mgJpss/reviews/avis-fictif-3",
+   "relativePublishTimeDescription": "il y a un mois",
+   "rating": 5,
+   "text": {
+    "text": "Superbe expérience ! 🥰\n\nUn service aux petits soins, une équipe adorable et des plats absolument délicieux. Nous nous sommes régalés du début à la fin !\n\nUne très belle adresse où nous reviendrons avec grand plaisir. Gra",
+    "languageCode": "fr"
+   },
+   "originalText": {
+    "text": "Superbe expérience ! 🥰\n\nUn service aux petits soins, une équipe adorable et des plats absolument délicieux. Nous nous sommes régalés du début à la fin !\n\nUne très belle adresse où nous reviendrons avec grand plaisir. Gra",
+    "languageCode": "fr"
+   },
+   "authorAttribution": {
+    "displayName": "Autrice fictive 3",
+    "uri": "https://www.google.com/maps/contrib/100000000000000000003/reviews"
+   },
+   "publishTime": "2026-10-05T12:07:53.873541707Z"
+  }
+ ],
+ "photos": [
+  {
+   "name": "places/ChIJ-QA9R-vVwkcRvkZx8mgJpss/photos/AV-photo-fictive-01",
+   "widthPx": 1920,
+   "heightPx": 1080,
+   "authorAttributions": [
+    {
+     "displayName": "Photographe fictif 17",
+     "uri": "https://maps.google.com/maps/contrib/100000000000000000017"
+    }
+   ]
+  },
+  {
+   "name": "places/ChIJ-QA9R-vVwkcRvkZx8mgJpss/photos/AV-photo-fictive-02",
+   "widthPx": 4032,
+   "heightPx": 3024,
+   "authorAttributions": [
+    {
+     "displayName": "Photographe fictif 18",
+     "uri": "https://maps.google.com/maps/contrib/100000000000000000018"
+    }
+   ]
+  },
+  {
+   "name": "places/ChIJ-QA9R-vVwkcRvkZx8mgJpss/photos/AV-photo-fictive-03",
+   "widthPx": 4800,
+   "heightPx": 3600,
+   "authorAttributions": [
+    {
+     "displayName": "Photographe fictif 19",
+     "uri": "https://maps.google.com/maps/contrib/100000000000000000019"
+    }
+   ]
+  }
+ ],
+ "outdoorSeating": false,
+ "priceRange": {
+  "startPrice": {
+   "currencyCode": "EUR",
+   "units": "20"
+  },
+  "endPrice": {
+   "currencyCode": "EUR",
+   "units": "40"
+  }
+ },
+ "location": {
+  "latitude": 50.638975599999995,
+  "longitude": 3.058805
+ },
+ "primaryType": "italian_restaurant",
+ "formattedAddress": "126 Rue Esquermoise, 59800 Lille, France",
+ "businessStatus": "OPERATIONAL",
+ "regularOpeningHours": {
+  "openNow": true,
+  "periods": [
+   {
+    "open": {
+     "day": 0,
+     "hour": 11,
+     "minute": 45
+    },
+    "close": {
+     "day": 0,
+     "hour": 15,
+     "minute": 30
+    }
+   },
+   {
+    "open": {
+     "day": 0,
+     "hour": 18,
+     "minute": 15
+    },
+    "close": {
+     "day": 0,
+     "hour": 22,
+     "minute": 30
+    }
+   },
+   {
+    "open": {
+     "day": 1,
+     "hour": 11,
+     "minute": 45
+    },
+    "close": {
+     "day": 1,
+     "hour": 14,
+     "minute": 30
+    }
+   },
+   {
+    "open": {
+     "day": 1,
+     "hour": 18,
+     "minute": 15
+    },
+    "close": {
+     "day": 1,
+     "hour": 22,
+     "minute": 30
+    }
+   },
+   {
+    "open": {
+     "day": 2,
+     "hour": 11,
+     "minute": 45
+    },
+    "close": {
+     "day": 2,
+     "hour": 14,
+     "minute": 30
+    }
+   },
+   {
+    "open": {
+     "day": 2,
+     "hour": 18,
+     "minute": 15
+    },
+    "close": {
+     "day": 2,
+     "hour": 22,
+     "minute": 30
+    }
+   },
+   {
+    "open": {
+     "day": 3,
+     "hour": 11,
+     "minute": 45
+    },
+    "close": {
+     "day": 3,
+     "hour": 14,
+     "minute": 30
+    }
+   },
+   {
+    "open": {
+     "day": 3,
+     "hour": 18,
+     "minute": 15
+    },
+    "close": {
+     "day": 3,
+     "hour": 22,
+     "minute": 30
+    }
+   },
+   {
+    "open": {
+     "day": 4,
+     "hour": 11,
+     "minute": 45
+    },
+    "close": {
+     "day": 4,
+     "hour": 14,
+     "minute": 30
+    }
+   },
+   {
+    "open": {
+     "day": 4,
+     "hour": 18,
+     "minute": 15
+    },
+    "close": {
+     "day": 4,
+     "hour": 22,
+     "minute": 30
+    }
+   },
+   {
+    "open": {
+     "day": 5,
+     "hour": 11,
+     "minute": 45
+    },
+    "close": {
+     "day": 5,
+     "hour": 14,
+     "minute": 45
+    }
+   },
+   {
+    "open": {
+     "day": 5,
+     "hour": 18,
+     "minute": 0
+    },
+    "close": {
+     "day": 5,
+     "hour": 23,
+     "minute": 0
+    }
+   },
+   {
+    "open": {
+     "day": 6,
+     "hour": 11,
+     "minute": 45
+    },
+    "close": {
+     "day": 6,
+     "hour": 15,
+     "minute": 30
+    }
+   },
+   {
+    "open": {
+     "day": 6,
+     "hour": 17,
+     "minute": 30
+    },
+    "close": {
+     "day": 6,
+     "hour": 23,
+     "minute": 0
+    }
+   }
+  ],
+  "weekdayDescriptions": [
+   "lundi: 11:45 – 14:30, 18:15 – 22:30",
+   "mardi: 11:45 – 14:30, 18:15 – 22:30",
+   "mercredi: 11:45 – 14:30, 18:15 – 22:30",
+   "jeudi: 11:45 – 14:30, 18:15 – 22:30",
+   "vendredi: 11:45 – 14:45, 18:00 – 23:00",
+   "samedi: 11:45 – 15:30, 17:30 – 23:00",
+   "dimanche: 11:45 – 15:30, 18:15 – 22:30"
+  ],
+  "nextCloseTime": "2026-11-20T22:00:00Z"
+ }
+}

@@ -19,6 +19,9 @@
   const MAX_NODES = 40000;
   const MAX_JSON_STRING = 4 * 1024 * 1024;
   const MAX_TEXT = 4000;
+  // une image du service d'images de Teams : son hôte (gardé tel quel) et son identifiant d'objet ; 8 par message
+  const AMS_IMAGE = /^(https:\/\/[a-z0-9-]{1,40}\.asm\.skype\.com)\/v1\/objects\/([A-Za-z0-9._:-]{1,200})\/views\/[A-Za-z0-9_]{1,40}(?:[?#].*)?$/;
+  const MAX_IMAGES = 8;
 
   const ID_KEYS = ["id", "clientmessageid", "clientMessageId", "messageId"];
   const CONV_KEYS = ["conversationid", "conversationId", "threadId"];
@@ -119,13 +122,73 @@
    * Le texte d'un contenu HTML de Teams, sans DOMParser (la page impose les Trusted Types, qui l'interdisent).
    * Une réponse citée devient « … », un emoji en image garde son texte alternatif, les retours à la ligne restent.
    */
+  /** Le texte d'une cellule de tableau, sur une ligne (ses paragraphes et ses sauts de ligne deviennent des espaces). */
+  function cellText(html) {
+    return html.replace(/<br\s*\/?>/gi, " ").replace(/<\/(p|div|li)>/gi, " ").replace(/<[^>]+>/g, "")
+      .replace(/\s+/g, " ").trim();
+  }
+
+  /**
+   * Un tableau, une ligne par rangée, ses cellules séparées par « | » : chaque cellule de Teams porte son propre
+   * paragraphe, et le tableau devenait une colonne de lignes isolées (« AP Antibes », « 103 », « AP Castellane »…).
+   */
+  function tableText(inner) {
+    const rows = [];
+    inner.replace(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi, function (_, row) {
+      const cells = [];
+      row.replace(/<t[dh]\b[^>]*>([\s\S]*?)<\/t[dh]>/gi, function (_c, cell) {
+        cells.push(cellText(cell));
+        return "";
+      });
+      if (cells.some(Boolean)) rows.push(cells.join(" | "));
+      return "";
+    });
+    return rows.join("\n");
+  }
+
+  /**
+   * Une image du message : un emoji garde son texte (`alt`) ; une image collée ou jointe devient « [image] » — son
+   * contenu ne part pas, mais on sait qu'il y en avait une (un message fait d'une seule image ne disparaît plus).
+   */
+  function imageText(tag) {
+    const alt = (/\balt=["']([^"']{0,40})["']/i.exec(tag) || [])[1] || "";
+    const item = (/\bitemtype=["']([^"']*)["']/i.exec(tag) || [])[1] || "";
+    if (/emoji|emoticon/i.test(item)) return alt;
+    const picture = /AMSImage|Giphy/i.test(item) || /\/views\/imgo|\/objects\//i.test(tag) || /^\s*(image|img)\s*$/i.test(alt);
+    if (picture || !alt.trim()) return picture ? " [image] " : "";
+    return alt;
+  }
+
+  /**
+   * Les images d'un message à télécharger (ADR 0258) : celles du service d'images de Teams seulement
+   * (`https://….asm.skype.com/v1/objects/<id>/views/…`) — jamais une autre adresse, qu'on ouvrirait avec les cookies du
+   * navigateur —, leur identifiant, leur adresse d'origine (la vue `imgo`) et leur rang parmi les « [image] » du texte
+   * (une image d'ailleurs a sa marque sans être téléchargée : les rangs suivent les marques, pas cette liste).
+   */
+  function imagesOf(html) {
+    const out = [];
+    let rank = 0;
+    String(html || "").replace(/<img\b[^>]*>/gi, function (tag) {
+      if (imageText(tag).indexOf("[image]") < 0) return ""; // un emoji, une image décorative : pas de marque
+      const src = decodeEntities((/\bsrc=["']([^"']+)["']/i.exec(tag) || [])[1] || "");
+      const found = AMS_IMAGE.exec(src);
+      if (found && out.length < MAX_IMAGES) {
+        out.push({ id: found[2], url: found[1] + "/v1/objects/" + found[2] + "/views/imgo", position: rank });
+      }
+      rank++;
+      return "";
+    });
+    return out;
+  }
+
   function htmlToText(html) {
     let s = String(html || "");
     if (s.indexOf("<") < 0 && s.indexOf("&") < 0) return s.trim();
     s = s
       .replace(/<(script|style)\b[\s\S]*?<\/\1>/gi, "")
       .replace(/<span[^>]*itemprop=["']?time["']?[^>]*>[\s\S]*?<\/span>/gi, "")
-      .replace(/<img\b[^>]*\balt=["']([^"']{0,40})["'][^>]*>/gi, "$1")
+      .replace(/<img\b[^>]*>/gi, imageText)
+      .replace(/<table\b[^>]*>([\s\S]*?)<\/table>/gi, function (_, inner) { return "\n" + tableText(inner) + "\n\n"; })
       // une réponse citée tient sur une ligne : « Bob on part à 9h ? »
       .replace(/<blockquote\b[^>]*>([\s\S]*?)<\/blockquote>/gi, function (_, inner) {
         return "« " + inner.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() + " » ";
@@ -221,8 +284,11 @@
     if (!text) return null;
     text = T.clip(text, MAX_TEXT);
     if (!id) id = "h" + T.hash(conv + "|" + time + "|" + authorId + "|" + text);
-    return { id: id, conv: conv, author: author, authorId: authorId, time: time, type: type, text: text,
+    const out = { id: id, conv: conv, author: author, authorId: authorId, time: time, type: type, text: text,
       version: versionOf(o), mentions: mentionsOf(o) };
+    const images = /^richtext\/media/i.test(type) ? [] : imagesOf(o.content);
+    if (images.length) out.images = images;
+    return out;
   }
 
   /** Une conversation dont on apprend le nom ou la nature (une liste de conversations, une fiche de fil). */
@@ -315,5 +381,6 @@
 
   return { extract: extract, normalizeMessage: normalizeMessage, normalizeConversation: normalizeConversation,
     conversationKind: conversationKind, conversationFromUrl: conversationFromUrl, htmlToText: htmlToText,
+    imagesOf: imagesOf,
     parseEmbedded: parseEmbedded, toMillis: toMillis };
 });

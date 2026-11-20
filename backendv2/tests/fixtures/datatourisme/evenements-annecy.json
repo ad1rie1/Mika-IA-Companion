@@ -1,0 +1,557 @@
+{
+ "objects": [
+  {
+   "hasBeenCreatedBy": {
+    "legalName": "Office de Tourisme du Lac d'Annecy",
+    "identifier": "42",
+    "homepage": [
+     "https://www.lac-annecy.com/"
+    ]
+   },
+   "isLocatedAt": [
+    {
+     "geo": {
+      "elevation": 482,
+      "latitude": 45.90435,
+      "longitude": 6.101291
+     },
+     "address": [
+      {
+       "hasAddressCity": {
+        "insee": "74010",
+        "isPartOfDepartment": {
+         "isPartOfRegion": {
+          "isPartOfCountry": {
+           "label": {
+            "@fr": "France"
+           }
+          },
+          "insee": "84",
+          "label": {
+           "@fr": "Auvergne-Rhône-Alpes"
+          }
+         },
+         "insee": "74",
+         "label": {
+          "@fr": "Haute-Savoie"
+         }
+        },
+        "label": {
+         "@fr": "Annecy"
+        }
+       },
+       "streetAddress": [
+        "Cran-Gevrier",
+        "Place Jean Moulin"
+       ],
+       "postalCode": "74960",
+       "addressLocality": "Annecy"
+      }
+     ]
+    }
+   ],
+   "lastUpdate": "2024-01-04",
+   "hasDescription": [
+    {
+     "shortDescription": {
+      "@fr": "Marché alimentaire et produits divers."
+     }
+    }
+   ],
+   "label": {
+    "@fr": "Marché du quartier du Vallon"
+   },
+   "type": [
+    "PointOfInterest",
+    "SaleEvent",
+    "Market",
+    "EntertainmentAndEvent",
+    "Event"
+   ],
+   "hasContact": [
+    {
+     "telephone": [
+      "+33 4 85 46 70 02"
+     ],
+     "homepage": [
+      "https://www.annecy.fr/"
+     ]
+    }
+   ],
+   "takesPlaceAt": [
+    {
+     "endDate": "2026-12-31",
+     "appliesOnDay": [
+      {
+       "label": {
+        "@fr": "Dimanche"
+       },
+       "key": "Sunday"
+      }
+     ],
+     "startTime": "08:00",
+     "endTime": "12:00",
+     "startDate": "2026-01-01"
+    }
+   ],
+   "uuid": "1982b799-b64b-3345-ad22-b2b1395ad066"
+  },
+  {
+   "hasBeenCreatedBy": {
+    "legalName": "Office de Tourisme du Lac d'Annecy",
+    "identifier": "42",
+    "homepage": [
+     "https://www.lac-annecy.com/"
+    ]
+   },
+   "isLocatedAt": [
+    {
+     "geo": {
+      "latitude": 45.961,
+      "longitude": 6.0407
+     },
+     "address": [
+      {
+       "hasAddressCity": {
+        "insee": "74026",
+        "isPartOfDepartment": {
+         "isPartOfRegion": {
+          "isPartOfCountry": {
+           "label": {
+            "@fr": "France"
+           }
+          },
+          "insee": "84",
+          "label": {
+           "@fr": "Auvergne-Rhône-Alpes"
+          }
+         },
+         "insee": "74",
+         "label": {
+          "@fr": "Haute-Savoie"
+         }
+        },
+        "label": {
+         "@fr": "La Balme-de-Sillingy"
+        }
+       },
+       "postalCode": "74330",
+       "addressLocality": "La Balme-de-Sillingy"
+      }
+     ]
+    }
+   ],
+   "lastUpdate": "2024-10-18",
+   "hasDescription": [
+    {
+     "shortDescription": {
+      "@fr": "Marché en plein air\r\nType de produits : Alimentation, boisson, etc."
+     }
+    }
+   ],
+   "label": {
+    "@fr": "Marché"
+   },
+   "type": [
+    "EntertainmentAndEvent",
+    "SaleEvent",
+    "Market",
+    "PointOfInterest",
+    "Event"
+   ],
+   "hasContact": [
+    {
+     "telephone": [
+      "+33 4 50 68 89 02"
+     ]
+    }
+   ],
+   "takesPlaceAt": [
+    {
+     "endDate": "2026-12-31",
+     "appliesOnDay": [
+      {
+       "label": {
+        "@fr": "Dimanche"
+       },
+       "key": "Sunday"
+      }
+     ],
+     "startTime": "08:00",
+     "endTime": "13:00",
+     "startDate": "2026-01-01"
+    }
+   ],
+   "uuid": "1cfde585-e015-3fd4-8786-a142713df2c9"
+  },
+  {
+   "hasBeenCreatedBy": {
+    "legalName": "Office de Tourisme Rumilly - Albanais",
+    "identifier": "33",
+    "homepage": [
+     "http://www.rumilly-tourisme.com/"
+    ]
+   },
+   "isLocatedAt": [
+    {
+     "geo": {
+      "latitude": 45.873492,
+      "longitude": 5.960855
+     },
+     "address": [
+      {
+       "hasAddressCity": {
+        "insee": "74255",
+        "isPartOfDepartment": {
+         "isPartOfRegion": {
+          "isPartOfCountry": {
+           "label": {
+            "@fr": "France"
+           }
+          },
+          "insee": "84",
+          "label": {
+           "@fr": "Auvergne-Rhône-Alpes"
+          }
+         },
+         "insee": "74",
+         "label": {
+          "@fr": "Haute-Savoie"
+         }
+        },
+        "label": {
+         "@fr": "Sales"
+        }
+       },
+       "streetAddress": [
+        "Chef-lieu",
+        "Place de la Mairie"
+       ],
+       "postalCode": "74150",
+       "addressLocality": "Sales"
+      }
+     ]
+    }
+   ],
+   "lastUpdate": "2026-03-13",
+   "hasDescription": [
+    {
+     "shortDescription": {
+      "@fr": "Marché alimentaire avec des producteurs et commerçants locaux. \r\nUne dizaine de stands vous accueillent et vous proposent leurs produits : fromage, fruits et légumes, volailles, charcuterie, plats cuisinés, pâtisseries, miel, vin..."
+     }
+    }
+   ],
+   "label": {
+    "@fr": "Marché de Sâles"
+   },
+   "type": [
+    "EntertainmentAndEvent",
+    "Event",
+    "Market",
+    "SaleEvent",
+    "PointOfInterest"
+   ],
+   "hasContact": [
+    {
+     "telephone": [
+      "+33 4 50 01 22 46"
+     ]
+    }
+   ],
+   "takesPlaceAt": [
+    {
+     "endDate": "2026-12-31",
+     "appliesOnDay": [
+      {
+       "label": {
+        "@fr": "Mardi"
+       },
+       "key": "Tuesday"
+      }
+     ],
+     "startTime": "16:00",
+     "endTime": "19:00",
+     "startDate": "2026-01-01"
+    }
+   ],
+   "uuid": "214d5517-3149-370f-a089-1bc2662ae44d"
+  },
+  {
+   "hasBeenCreatedBy": {
+    "legalName": "Office de Tourisme des Monts du Genevois",
+    "identifier": "44",
+    "homepage": [
+     "https://www.montsdugenevois.com/"
+    ]
+   },
+   "isLocatedAt": [
+    {
+     "geo": {
+      "latitude": 46.000239,
+      "longitude": 6.132585
+     },
+     "address": [
+      {
+       "hasAddressCity": {
+        "insee": "74307",
+        "isPartOfDepartment": {
+         "isPartOfRegion": {
+          "isPartOfCountry": {
+           "label": {
+            "@fr": "France"
+           }
+          },
+          "insee": "84",
+          "label": {
+           "@fr": "Auvergne-Rhône-Alpes"
+          }
+         },
+         "insee": "74",
+         "label": {
+          "@fr": "Haute-Savoie"
+         }
+        },
+        "label": {
+         "@fr": "Villy-le-Pelloux"
+        }
+       },
+       "streetAddress": [
+        "Chef-lieu"
+       ],
+       "postalCode": "74350",
+       "addressLocality": "Villy-le-Pelloux"
+      }
+     ]
+    }
+   ],
+   "lastUpdate": "2025-06-24",
+   "hasDescription": [
+    {
+     "shortDescription": {
+      "@fr": "Le marché des producteurs a lieu tous les mardis sur la place du village de 18h00 à 20h00."
+     }
+    }
+   ],
+   "label": {
+    "@fr": "Marché"
+   },
+   "type": [
+    "SaleEvent",
+    "Market",
+    "Event",
+    "EntertainmentAndEvent",
+    "PointOfInterest"
+   ],
+   "hasContact": [
+    {
+     "telephone": [
+      "+33 4 50 46 86 42"
+     ],
+     "homepage": [
+      "https://www.villy-le-pelloux.fr/page/marche-de-producteurs"
+     ]
+    }
+   ],
+   "takesPlaceAt": [
+    {
+     "endDate": "2026-12-31",
+     "appliesOnDay": [
+      {
+       "label": {
+        "@fr": "Mardi"
+       },
+       "key": "Tuesday"
+      }
+     ],
+     "startTime": "16:00",
+     "endTime": "19:00",
+     "startDate": "2026-01-01"
+    }
+   ],
+   "uuid": "2cf46c73-4384-3f6b-b53a-855be1a46020"
+  },
+  {
+   "hasBeenCreatedBy": {
+    "legalName": "Office de Tourisme du Lac d'Annecy",
+    "identifier": "42",
+    "homepage": [
+     "https://www.lac-annecy.com/"
+    ]
+   },
+   "isLocatedAt": [
+    {
+     "geo": {
+      "latitude": 45.842754,
+      "longitude": 6.17163
+     },
+     "address": [
+      {
+       "hasAddressCity": {
+        "insee": "74242",
+        "isPartOfDepartment": {
+         "isPartOfRegion": {
+          "isPartOfCountry": {
+           "label": {
+            "@fr": "France"
+           }
+          },
+          "insee": "84",
+          "label": {
+           "@fr": "Auvergne-Rhône-Alpes"
+          }
+         },
+         "insee": "74",
+         "label": {
+          "@fr": "Haute-Savoie"
+         }
+        },
+        "label": {
+         "@fr": "Saint-Jorioz"
+        }
+       },
+       "streetAddress": [
+        "Plage de Saint-Jorioz",
+        "Base UCPA",
+        "Route du Port"
+       ],
+       "postalCode": "74410",
+       "addressLocality": "Saint-Jorioz"
+      }
+     ]
+    }
+   ],
+   "lastUpdate": "2026-09-29",
+   "hasDescription": [
+    {
+     "shortDescription": {
+      "@fr": "Entrez dans la légende en participant à la course qui bouscule le monde du sport outdoor, dans un site exceptionnel autour du lac d’Annecy. L’AlpsMan est une invitation au rêve et une expérience intense & unique."
+     }
+    }
+   ],
+   "label": {
+    "@ru": "AlpsMan",
+    "@fr": "AlpsMan",
+    "@zh": "AlpsMan"
+   },
+   "type": [
+    "Event",
+    "SportsCompetition",
+    "EntertainmentAndEvent",
+    "SportsEvent",
+    "PointOfInterest"
+   ],
+   "hasContact": [
+    {
+     "homepage": [
+      "http://alps-man.com/"
+     ]
+    }
+   ],
+   "takesPlaceAt": [
+    {
+     "endDate": "2026-06-06",
+     "startDate": "2026-06-05"
+    }
+   ],
+   "uuid": "2e3fa046-9fa7-38fe-9280-11e18037b26e"
+  },
+  {
+   "hasBeenCreatedBy": {
+    "legalName": "Ville d'Annecy",
+    "identifier": "1823",
+    "homepage": [
+     "https://www.annecy.fr/"
+    ]
+   },
+   "isLocatedAt": [
+    {
+     "geo": {
+      "latitude": 45.937968,
+      "longitude": 6.12214
+     },
+     "address": [
+      {
+       "hasAddressCity": {
+        "insee": "74010",
+        "isPartOfDepartment": {
+         "isPartOfRegion": {
+          "isPartOfCountry": {
+           "label": {
+            "@fr": "France"
+           }
+          },
+          "insee": "84",
+          "label": {
+           "@fr": "Auvergne-Rhône-Alpes"
+          }
+         },
+         "insee": "74",
+         "label": {
+          "@fr": "Haute-Savoie"
+         }
+        },
+        "label": {
+         "@fr": "Annecy"
+        }
+       },
+       "streetAddress": [
+        "Parking La Salle",
+        "Pringy"
+       ],
+       "postalCode": "74370",
+       "addressLocality": "Annecy"
+      }
+     ]
+    }
+   ],
+   "lastUpdate": "2026-10-30",
+   "hasDescription": [
+    {
+     "shortDescription": {
+      "@fr": "Un marché de producteurs locaux est présent tous les dimanches matin à Pringy."
+     }
+    }
+   ],
+   "label": {
+    "@fr": "Marché de Pringy"
+   },
+   "type": [
+    "SaleEvent",
+    "EntertainmentAndEvent",
+    "Market",
+    "PointOfInterest",
+    "Event"
+   ],
+   "hasContact": [
+    {
+     "homepage": [
+      "https://www.annecy.fr/"
+     ]
+    }
+   ],
+   "takesPlaceAt": [
+    {
+     "endDate": "2026-12-31",
+     "appliesOnDay": [
+      {
+       "label": {
+        "@fr": "Dimanche"
+       },
+       "key": "Sunday"
+      }
+     ],
+     "startTime": "07:00",
+     "endTime": "13:00",
+     "startDate": "2026-01-01"
+    }
+   ],
+   "uuid": "464d0afc-85a0-3edb-84d7-45d97700c001"
+  }
+ ],
+ "meta": {
+  "total": 6,
+  "page": 1,
+  "page_size": 100,
+  "total_pages": 1
+ }
+}

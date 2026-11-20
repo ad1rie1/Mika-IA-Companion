@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 
 import pytest
@@ -41,7 +42,7 @@ from mika.ports.mail import Draft, Mail
 from mika.runtime.effects import with_content
 from mika.sim.clock import SimClock, run_virtual
 from mika.sim.llm.persona import PersonaSimLLM
-from mika.sim.outside import FakeFeeds, FakeMail
+from mika.sim.outside import DEFAULT_ACCOUNT, FakeFeeds, FakeMail
 from mika.vocab.affect import Emotion
 from tests.fixtures.endings import ENDINGS, initiative_ends
 from tests.fixtures.mika import at_paris, boot, build, connect, disconnect, said
@@ -255,23 +256,158 @@ def test_a_burst_of_urgent_mails_is_one_small_emotion_not_ten(tmp_path):
         await asyncio.sleep(30 * MINUTE / US)
 
     r = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 10, 0), mail=box, model=Worried)
-    # le modèle trie les cinq premiers (« Mails triés par le modèle ») et dit ce que chacun lui fait ; le repli ne lui
-    # fait rien ressentir (ADR 0147)
+    # le modèle trie les cinq premiers (« Mails triés par le modèle »), les cinq autres au relevé suivant, deux
+    # minutes après (ADR 0240) ; il dit ce que chacun lui fait (ADR 0147)
     told = [(n.data.emotion, n.data.intensity) for n in r.of(email_c.NOTICED)]
-    assert told.count(("anxious", 0.5)) == 5 and told.count(("", 0.0)) == 5
+    assert told.count(("anxious", 0.5)) == 10
     heard = [h.data for h in r.of(attention_c.NOTICED) if h.data.source == "email"]
     moved = [h for h in heard if h.emotion]
-    assert len(heard) == 10 and len(moved) == 5
+    assert len(heard) == 10 and len(moved) == 10
     assert moved[0].intensity == 0.5  # ce que le modèle a dit, pas une intensité fixée par le code
     assert sum(h.intensity for h in heard) <= 0.6 + 1e-9  # le dosage : une source, une petite émotion
     assert moved[-1].intensity == 0.0  # au-delà, plus rien
 
 
+class Calm(PersonaSimLLM):
+    """Le tri lit chaque mail : un avis, rien à répondre."""
+
+    async def complete(self, req):
+        if req.role == "triage":
+            self.calls.append(req)
+            return LLMResponse('{"importance": 0.1, "resume": "Un avis automatique.", "reponse": false, '
+                               '"emotion": "", "intensite": 0}')
+        return await super().complete(req)
+
+
+class Garbled(PersonaSimLLM):
+    """Le tri ne rend rien de lisible (une panne, un quota) : le repli juge."""
+
+    async def complete(self, req):
+        if req.role == "triage":
+            self.calls.append(req)
+            return LLMResponse("pas de JSON")
+        return await super().complete(req)
+
+
+def noticed_triage(evs):
+    return {e.data.mail: e.data.triage for e in evs if e.type.name == email_c.NOTICED.name}
+
+
+def test_her_triage_reads_up_to_its_budget_and_the_rest_waits_for_the_next_poll(tmp_path):
+    """« Mails triés par le modèle » ne compte que les appels : un envoi en masse n'y prend pas de place. Au-delà, un
+    mail n'est ni deviné ni remarqué : sans accusé, il attend le relevé suivant, qui vient deux minutes après — le
+    premier relevé d'une boîte neuve ne devine plus la moitié de ses mails (ADR 0240)."""
+    box = FakeMail()
+    box.deliver(mail(0, "Promo", sender="Boutique <noreply@shop.fr>", bulk=True))
+    for i in range(1, 8):
+        box.deliver(mail(i, f"Avis n°{i}", "Une question ? Merci de ne pas répondre à ce mail."))
+
+    async def scenario(kernel, llm, mail_, feeds):
+        await asyncio.sleep(MINUTE / US)
+        first, waiting = noticed_triage(events(kernel)), mail_.waiting()
+        await asyncio.sleep(10 * MINUTE / US)
+        return first, waiting
+
+    r = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 10, 0), mail=box, model=Calm)
+    first, waiting = r.result
+    assert first == {"<m0@exemple.fr>": email_c.TRIAGE_BULK,
+                     **{f"<m{i}@exemple.fr>": email_c.TRIAGE_MODEL for i in range(1, 6)}}
+    assert waiting == {"<m6@exemple.fr>", "<m7@exemple.fr>"}  # rendus, pas accusés : son tri ne les a pas lus
+    noticed = r.of(email_c.NOTICED)
+    assert noticed_triage(r.events) == {**first, "<m6@exemple.fr>": email_c.TRIAGE_MODEL,
+                                        "<m7@exemple.fr>": email_c.TRIAGE_MODEL}
+    assert len([c for c in r.llm.calls if c.role == "triage"]) == 7 and not r.mail.waiting()
+    assert not any(n.data.needs_reply for n in noticed)
+    late = next(n for n in noticed if n.data.mail == "<m6@exemple.fr>")
+    assert late.at - noticed[0].at <= 3 * MINUTE  # le relevé suivant est venu vite, pas dix minutes après
+
+
+def test_a_triage_that_fails_is_guessed_and_never_awaits_a_reply(tmp_path):
+    """Le tri ne répond rien de lisible : le mail est remarqué quand même, jugé par le repli — son importance
+    devinée, jamais une réponse attendue, même devant un « ? » de pied de page (ADR 0240)."""
+    box = FakeMail()
+    box.deliver(mail(1, "Vous avez effectué un paiement", "Une question ? Trouvez la réponse dans notre aide."))
+
+    async def scenario(kernel, llm, mail_, feeds):
+        await asyncio.sleep(5 * MINUTE / US)
+
+    r = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 10, 0), mail=box, model=Garbled)
+    (n,) = r.of(email_c.NOTICED)
+    assert (n.data.triage, n.data.importance, n.data.needs_reply) == (email_c.TRIAGE_FALLBACK, 0.45, False)
+    assert not r.mail.waiting()
+
+
+def test_with_her_triage_off_every_mail_is_guessed_none_waits(tmp_path):
+    """« Mails triés par le modèle » à 0 : aucun appel, tout se devine, et rien n'attend un tri qui ne viendra pas."""
+    async def scenario(kernel, llm, mail_, feeds):
+        await kernel.set_params("email", EmailParams(triage_per_poll=0))
+        for i in range(3):
+            mail_.deliver(mail(i, f"Avis n°{i}", "Bonjour ?"))
+        await asyncio.sleep(15 * MINUTE / US)
+
+    r = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 10, 0), model=Calm)
+    assert set(noticed_triage(r.events).values()) == {email_c.TRIAGE_FALLBACK} and len(r.of(email_c.NOTICED)) == 3
+    assert not [c for c in r.llm.calls if c.role == "triage"] and not r.mail.waiting()
+
+
+class Sorter(PersonaSimLLM):
+    """Le tri suit les consignes de la boîte : les promos aux Archives, la banque à signaler, un dossier inventé."""
+
+    async def complete(self, req):
+        if req.role != "triage":
+            return await super().complete(req)
+        self.calls.append(req)
+        text = req.messages[-1].content
+        out = {"importance": 0.2, "resume": "", "reponse": False, "emotion": "", "intensite": 0,
+               "dossier": "", "prevenir": False}
+        if "Promo" in text:
+            out["dossier"] = "archives"  # son libellé, sans la casse : le dossier « Archives »
+        if "Banque" in text:
+            out["prevenir"] = True
+        if "Inventé" in text:
+            out["dossier"] = "Nulle part"
+        if "Brouillon" in text:
+            out["dossier"] = "Brouillons"  # jamais là
+        return LLMResponse(json.dumps(out))
+
+
+def test_her_triage_follows_the_sort_rules_of_a_box(tmp_path):
+    """Les consignes de tri d'une boîte vont au tri, avec ses dossiers où ranger : le mail qu'elles rangent part
+    dans son dossier sur le serveur (elle n'en parlera plus), celui dont il faut prévenir devient important, un
+    dossier qui n'existe pas, ses brouillons ou ses envoyés ne rangent rien ; une boîte qui a des consignes fait lire
+    ses envois en masse au modèle (ADR 0243)."""
+    rules = "Range les promos aux archives. Préviens-moi de tout mail de la banque."
+    box = FakeMail(boxes=[dataclasses.replace(DEFAULT_ACCOUNT, triage_instructions=rules)])
+    box.deliver(mail(1, "Promo de la semaine", sender="Boutique <promo@shop.fr>", bulk=True))
+    box.deliver(mail(2, "Banque : votre relevé", "Votre relevé est disponible."))
+    box.deliver(mail(3, "Inventé", "Rien."))
+    box.deliver(mail(4, "Brouillon", "Rien."))
+
+    async def scenario(kernel, llm, mail_, feeds):
+        await asyncio.sleep(5 * MINUTE / US)
+
+    r = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 10, 0), mail=box, model=Sorter)
+    calls = [c for c in r.llm.calls if c.role == "triage"]
+    assert len(calls) == 4  # l'envoi en masse aussi
+    said = calls[0].system_stable.split("CONSIGNES DE TRI", 1)[1]
+    assert rules in said and "Archives" in said and "Brouillons" not in said and "Envoyés" not in said
+    noticed = {n.data.mail: n.data for n in r.of(email_c.NOTICED)}
+    promo, bank = noticed["<m1@exemple.fr>"], noticed["<m2@exemple.fr>"]
+    assert (promo.file_to, promo.alert, promo.triage) == ("Archives", False, email_c.TRIAGE_MODEL)
+    assert bank.alert and bank.importance >= EmailParams().mention_from and not bank.file_to
+    assert noticed["<m3@exemple.fr>"].file_to == "" and noticed["<m4@exemple.fr>"].file_to == ""
+    assert r.mail.actions == [("move", "<m1@exemple.fr>", "Archives")]  # sur le serveur, après l'événement
+    quiet = [(e.data.mail, e.data.how) for e in r.events if e.type.name == "email.read"]
+    assert ("<m1@exemple.fr>", "déplacé") in quiet and all(m != "<m2@exemple.fr>" for m, _ in quiet)
+
+
 def test_the_triage_says_what_a_mail_does_to_her_among_all_her_emotions():
     """Le tri rend une émotion de tout son vocabulaire et son intensité ; sans intensité, rien ; le repli devine
-    l'importance et la réponse attendue, jamais une émotion (ADR 0147)."""
+    l'importance, jamais une émotion (ADR 0147) ni une réponse attendue (ADR 0240)."""
     guess = heuristic(mail(1, "URGENT", "Tu peux me répondre ?"))
-    assert (guess["importance"], guess["reponse"], guess["emotion"], guess["intensite"]) == (0.8, True, "", 0.0)
+    assert (guess["importance"], guess["reponse"], guess["emotion"], guess["intensite"]) == (0.8, False, "", 0.0)
+    footer = heuristic(mail(2, "Vous avez effectué un paiement", "Une question ? Merci de ne pas répondre."))
+    assert (footer["importance"], footer["reponse"]) == (0.45, False)
     told = read_triage('{"importance": 0.7, "resume": "Une insulte.", "reponse": false, "emotion": "angry", '
                        '"intensite": 0.6}', guess)
     assert (told["importance"], told["emotion"], told["intensite"]) == (0.7, "angry", 0.6)

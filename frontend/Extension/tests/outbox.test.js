@@ -366,3 +366,14 @@ test("le lien d'une conversation : tête-à-tête et groupe seulement", () => {
   assert.equal(O.deepLink({ kind: "channel", conversation: "19:c@thread.tacv2" }), "");
   assert.equal(O.deepLink({ kind: "meeting", conversation: "19:meeting_x@thread.v2" }), "");
 });
+
+test("le journal dit par où un envoi est parti, sans le redire au serveur", () => {
+  const box = boxWith([item({ id: "s1", mode: "send" })]);
+  claimed(box, "s1");
+  O.beginSend(box, "s1", NOW);
+  O.sendOutcome(box, "s1", { result: "sent", via: "zone de saisie" }, NOW);
+  assert.deepEqual(O.pendingAcks(box), [{ id: "s1", body: { result: "sent" } }], "le chemin reste dans ce navigateur");
+  O.ackResponse(box, "s1", "sent", 200, NOW + 1000);
+  assert.equal(box.log[0].result, "sent");
+  assert.equal(box.log[0].reason, "par la zone de saisie");
+});

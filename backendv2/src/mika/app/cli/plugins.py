@@ -107,6 +107,7 @@ async def outside_command(data: Path, args: argparse.Namespace) -> dict[str, obj
                     smtp_security=args.smtp_security, since_days=args.since_days,
                     folders=tuple(args.dossiers) if args.dossiers else None,
                     sync_all=None if args.tous_les_dossiers is None else args.tous_les_dossiers == "oui",
+                    keep_all=None if args.tout_en_local is None else args.tout_en_local == "oui",
                     voice=args.voix,
                     display_name=args.nom, auth=args.auth, oauth_client_id=args.client_id, oauth_tenant=args.tenant)
             elif args.mail_cmd == "application":
@@ -213,6 +214,8 @@ def add_plugins(sub) -> None:  # type: ignore[no-untyped-def]
     ms.add_argument("--dossiers", nargs="+", help="les dossiers relevés (défaut : INBOX)")
     ms.add_argument("--tous-les-dossiers", choices=["oui", "non"],
                     help="tenir aussi les autres dossiers à jour à chaque relève (elle ne remarque que les relevés)")
+    ms.add_argument("--tout-en-local", choices=["oui", "non"],
+                    help="tout garder ici, historique compris (ADR 0249) ; non : une recherche demande au serveur")
     ms.add_argument("--voix", choices=["elle", "assistante", "proprietaire"])
     ms.add_argument("--nom", help="ton nom (pour écrire en assistante ou à ta place)")
     ma = msub.add_parser("application", help="l'application Microsoft par laquelle entrent les boîtes Microsoft qui "

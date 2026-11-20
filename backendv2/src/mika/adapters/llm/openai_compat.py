@@ -19,6 +19,10 @@ Contrat :
   renvoie au modèle comme une erreur ;
 - ``tool_choice="none"`` (le tour de clôture) → ``tool_choice: "none"``, les
   outils restant déclarés ;
+- les séquences d'arrêt (``LLMRequest.stop_sequences``) → ``stop``, les
+  ``STOP_MAX`` premières (la limite de l'API) ; un 400 qui refuse ce nom (un
+  modèle à raisonnement) est rejoué une fois sans elles, et le refus mémorisé
+  par modèle — l'appelant coupe lui-même ce qu'il garde ;
 - ``input_tokens`` exclut les jetons lus (``cache_read``) ou écrits
   (``cache_write``) en cache, comptés à part.
 
@@ -158,6 +162,8 @@ def rejects_name(exc: BaseException, param: str) -> bool:
 
 #: tentatives du SDK pour un appel au premier plan (sa valeur par défaut : 2)
 FOREGROUND_RETRIES = 1
+#: combien de séquences d'arrêt ``/chat/completions`` accepte
+STOP_MAX = 4
 
 
 def count(obj: Any, attr: str) -> int:
@@ -169,13 +175,15 @@ def count(obj: Any, attr: str) -> int:
 
 
 class ParamMemo:
-    """Ce que chaque modèle a refusé : le nom de son plafond de sortie, ``temperature``."""
+    """Ce que chaque modèle a refusé : le nom de son plafond de sortie, ``temperature``, ``stop``."""
 
     def __init__(self) -> None:
         #: modèle → paramètre de plafond accepté (absent = ``max_tokens``)
         self.token_param: dict[str, str] = {}
         #: modèles qui refusent ``temperature``
         self.no_temperature: set[str] = set()
+        #: modèles qui refusent ``stop`` (les séquences d'arrêt)
+        self.no_stop: set[str] = set()
 
 
 def chat_messages(req: LLMRequest) -> list[dict[str, Any]]:
@@ -243,6 +251,8 @@ class OpenAICompatBackend:
                 # le tour de clôture : aucun appel d'outil, les outils restant déclarés (les tours ``tool`` du fil les
                 # supposent)
                 body["tool_choice"] = "none"
+        if req.stop_sequences:
+            body["stop"] = list(req.stop_sequences[:STOP_MAX])
         return body
 
     async def complete(self, req: LLMRequest) -> LLMResponse:
@@ -257,9 +267,12 @@ class OpenAICompatBackend:
         memo = self.memo
         token_param = memo.token_param.get(self.model, "max_tokens")
         send_temperature = self.temperature is not None and self.model not in memo.no_temperature
-        renamed = dropped = False
+        send_stop = "stop" in body and self.model not in memo.no_stop
+        renamed = dropped = unstopped = False
         while True:
             kwargs = {**body, token_param: max_tokens}
+            if not send_stop:
+                kwargs.pop("stop", None)
             if send_temperature:
                 kwargs["temperature"] = self.temperature
             try:
@@ -274,6 +287,12 @@ class OpenAICompatBackend:
                     dropped, send_temperature = True, False
                     memo.no_temperature.add(self.model)
                     log.info("%s refuse « temperature » : mémorisé, plus jamais envoyée", self.model)
+                    continue
+                if send_stop and not unstopped and rejects_name(exc, "stop"):
+                    unstopped, send_stop = True, False
+                    memo.no_stop.add(self.model)
+                    log.info("%s refuse « stop » : mémorisé, plus jamais envoyé (la réponse s'écrit jusqu'au bout)",
+                             self.model)
                     continue
                 raise
 

@@ -122,6 +122,34 @@ def test_an_owner_sees_your_boxes_and_a_person_only_hers(world):  # noqa: F811
 # ── lire ──
 
 
+def test_a_mail_says_whether_her_triage_has_read_it(world):  # noqa: F811
+    """Chaque mail dit ce que son tri en a fait (ADR 0240) : lu par le modèle, deviné par le repli, un envoi en
+    masse, en attente du relevé suivant (rendu, pas encore accusé), ou rien (un mail qu'elle n'a pas relevé)."""
+    client, live, box = with_mail(world)
+    refs = [m["ref"] for m in client.get(API + "/mail/messages?size=50").json()["items"]]
+    others = [r for r in refs if r != PROJET]
+    box.offered.add(others[0])
+
+    def seen(ref: str, triage: str, **rule):
+        return email_c.NOTICED.draft(
+            source="email", kind="mail", summary=Content.of("Un mail."), pertinence=0.3, sensitivity=1, bundle="email",
+            mail=ref, sender="Léa Martin <lea@example.test>", address="lea@example.test", importance=0.3,
+            account=ref.split(":", 1)[0], folder="INBOX", triage=triage, **rule)
+
+    # ses consignes de tri (ADR 0243) : prévenir ; le rangement se dit tant que le mail est dans ce dossier
+    append(client, live, [seen(PROJET, email_c.TRIAGE_MODEL, alert=True, file_to="INBOX"),
+                          seen(others[1], email_c.TRIAGE_FALLBACK, file_to="Archives"),
+                          seen(others[2], email_c.TRIAGE_BULK)], "email")
+    items = {m["ref"]: m for m in client.get(API + "/mail/messages?size=50").json()["items"]}
+    got = {ref: m["triage"] for ref, m in items.items()}
+    assert (got[PROJET], got[others[1]], got[others[2]]) == ("read", "guessed", "bulk")
+    assert (got[others[0]], got[others[3]]) == ("waiting", "")
+    assert (items[PROJET]["her"]["alert"], items[PROJET]["her"]["filed"]) == (True, "INBOX")
+    assert (items[others[1]]["her"]["alert"], items[others[1]]["her"]["filed"]) == (False, "")  # pas (ou plus) là
+    assert client.get(API + f"/mail/message?ref={PROJET}").json()["triage"] == "read"
+    assert client.get(API + f"/mail/message?ref={others[0]}").json()["triage"] == "waiting"
+
+
 def test_a_list_pages_filters_and_says_what_she_did(world):  # noqa: F811
     client, live, box = with_mail(world)
     page = client.get(API + "/mail/messages?box=perso&folder=INBOX&size=2").json()

@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -57,21 +58,28 @@ import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.MoiDates
 import fr.qwartz.mika.data.moi.Tone
 import fr.qwartz.mika.data.moi.caps
+import fr.qwartz.mika.data.moi.map
+import fr.qwartz.mika.data.moi.mail.KnowsState
 import fr.qwartz.mika.data.moi.mail.MailBox
 import fr.qwartz.mika.data.moi.mail.MailBoxes
 import fr.qwartz.mika.data.moi.mail.MailDraft
+import fr.qwartz.mika.data.moi.mail.MailFramePage
 import fr.qwartz.mika.data.moi.mail.MailFull
 import fr.qwartz.mika.data.moi.mail.MailPiece
 import fr.qwartz.mika.data.moi.mail.ReadOnOpen
 import fr.qwartz.mika.data.moi.mail.answerable
 import fr.qwartz.mika.data.moi.mail.attachmentKind
 import fr.qwartz.mika.data.moi.mail.boxTitle
+import fr.qwartz.mika.data.moi.mail.byRules
 import fr.qwartz.mika.data.moi.mail.draftState
 import fr.qwartz.mika.data.moi.mail.howLabel
+import fr.qwartz.mika.data.moi.mail.knowsShown
+import fr.qwartz.mika.data.moi.mail.knowsState
 import fr.qwartz.mika.data.moi.mail.moveTargets
 import fr.qwartz.mika.data.moi.mail.shareSentence
 import fr.qwartz.mika.data.moi.mail.sizeLabel
 import fr.qwartz.mika.data.moi.mail.toLine
+import fr.qwartz.mika.data.moi.mail.triageNote
 import fr.qwartz.mika.data.moi.mail.voiceLabel
 import fr.qwartz.mika.data.moi.ofName
 import fr.qwartz.mika.ui.Route
@@ -131,6 +139,12 @@ class MailReaderViewModel(deps: MailDeps) : MailScreenModel(deps) {
         private set
     var busy by mutableStateOf(false)
         private set
+    /** Sa mise en page (`/mail/frame`), pour un mail HTML ; `null` : pas de HTML, ou pas encore demandée. */
+    var frame by mutableStateOf<Load<MailHtml>?>(null)
+        private set
+    /** Les mails dont on a montré les images distantes « cette fois » (rien n'est décidé pour leur expéditeur). */
+    var imagesOnce by mutableStateOf(emptySet<String>())
+        private set
 
     private val orders = VisitOrders<ReaderOrder>()
 
@@ -150,6 +164,8 @@ class MailReaderViewModel(deps: MailDeps) : MailScreenModel(deps) {
         mail = Load.Loading
         draft = null
         asked = false
+        frameJob?.cancel()
+        frame = null
         load(quiet = false)
     }
 
@@ -168,6 +184,7 @@ class MailReaderViewModel(deps: MailDeps) : MailScreenModel(deps) {
             if (got is MoiApi.Result.Failed && quiet && mail is Load.Ready) return@launch
             mail = Load.of(got)
             val m = (got as? MoiApi.Result.Ok)?.value ?: return@launch
+            loadFrame(m)
             val her = m.her
             asked = her?.asked == true && her.draft.isBlank()
             draft = her?.draft?.takeIf { it.isNotBlank() }?.let { findDraft(it) }
@@ -176,6 +193,65 @@ class MailReaderViewModel(deps: MailDeps) : MailScreenModel(deps) {
 
     private suspend fun findDraft(id: String): MailDraft? =
         (api.drafts() as? MoiApi.Result.Ok)?.value?.firstOrNull { it.id == id && it.waiting }
+
+    private var frameJob: Job? = null
+
+    /** Ses images distantes se chargent : montrées cette fois, ou toujours pour son expéditeur. */
+    private fun remoteShown(m: MailFull): Boolean = m.ref in imagesOnce || m.images.shown
+
+    /** Sa mise en page, pour un mail HTML ; déjà là sous la même règle d'images, elle ne se relit pas ([force] :
+     *  si, « Réessayer »). */
+    private fun loadFrame(m: MailFull, force: Boolean = false) {
+        if (!m.html) {
+            frameJob?.cancel()
+            frame = null
+            return
+        }
+        val remote = remoteShown(m)
+        val had = frame?.valueOrNull
+        if (!force && had != null && had.ref == m.ref && had.remote == remote) return
+        frameJob?.cancel()
+        frame = Load.Loading
+        frameJob = viewModelScope.launch {
+            val got = api.frame(m.ref, images = m.ref in imagesOnce)
+            if (m.ref != ref) return@launch
+            frame = Load.of(got.map { MailHtml(m.ref, MailFramePage.of(it, remote), remote) })
+        }
+    }
+
+    fun retryFrame() {
+        full?.let { loadFrame(it, force = true) }
+    }
+
+    /** Ses images distantes : cette fois (rien ne se décide), ou toujours / plus jamais pour son expéditeur (une
+     *  propriétaire seulement : le serveur le règle pour tous ses lecteurs). */
+    fun images(gesture: ImagesGesture, done: (Boolean) -> String) {
+        val m = full ?: return
+        if (gesture == ImagesGesture.ONCE) {
+            imagesOnce = imagesOnce + m.ref
+            loadFrame(m)
+            return
+        }
+        if (busy) return
+        busy = true
+        val shown = gesture == ImagesGesture.ALWAYS
+        viewModelScope.launch {
+            when (val got = api.images(m.ref, shown)) {
+                is MoiApi.Result.Ok -> {
+                    say(got.value.message.ifBlank { done(shown) })
+                    if (!shown) imagesOnce = imagesOnce - m.ref
+                    val now = full
+                    if (now?.ref == m.ref) {
+                        val changed = now.copy(images = now.images.copy(shown = shown))
+                        mail = Load.Ready(changed)
+                        loadFrame(changed)
+                    }
+                }
+                is MoiApi.Result.Failed -> say(got.error)
+            }
+            busy = false
+        }
+    }
 
     val full: MailFull? get() = mail.valueOrNull?.takeIf { it.ref == ref }
 
@@ -274,8 +350,8 @@ class MailReaderViewModel(deps: MailDeps) : MailScreenModel(deps) {
 }
 
 /** La liseuse (la maquette, `vueLire`) : objet, marques, expéditeur, « Ce qu'elle en sait », le texte, ses pièces, son
- *  brouillon ; en haut, ranger ; en bas, répondre, transférer, et « Préremplir avec Mika ». Le HTML du mail
- *  (`/mail/frame`) n'est pas montré : son texte l'est. */
+ *  brouillon ; en haut, ranger ; en bas, répondre, transférer, et « Préremplir avec Mika ». Un mail HTML se montre
+ *  dans sa mise en page (`/mail/frame`, [MailHtmlBody]), les autres par leur texte. */
 @Composable
 fun MailReaderScreen(graph: AppGraph, ref: String) {
     val shell = LocalShell.current
@@ -322,6 +398,10 @@ fun MailReaderScreen(graph: AppGraph, ref: String) {
     val c = vm.caps
     val canAnswer = m != null && c.write && answerable(m)
     val askedText = stringResource(R.string.mail_prefill_asked)
+    // « toujours pour cet expéditeur » vaut pour tout le serveur : une de ses propriétaires seulement (sinon 403)
+    val me by graph.me.me.collectAsStateWithLifecycle()
+    val imagesAlways = stringResource(R.string.mail_images_always_done)
+    val imagesNever = stringResource(R.string.mail_images_never_done)
     SectionScaffold(
         topBar = {
             MikaTopBar(title = "", nav = BarNav.BACK, face = false) {
@@ -366,6 +446,14 @@ fun MailReaderScreen(graph: AppGraph, ref: String) {
                 asked = vm.asked,
                 canAnswer = canAnswer,
                 graph = graph,
+                html = ReaderHtml(
+                    frame = vm.frame,
+                    imagesOnce = mail.ref in vm.imagesOnce,
+                    always = c.write && me?.owner == true,
+                    busy = vm.busy,
+                    onImages = { vm.images(it) { shown -> if (shown) imagesAlways else imagesNever } },
+                    onRetry = vm::retryFrame,
+                ),
                 modifier = modifier,
                 onReply = { shell.navigate(Route.MailCompose("reply", ref = mail.ref)) },
                 onDraft = { shell.navigate(Route.MailDraft(it)) },
@@ -433,6 +521,7 @@ private fun ReaderBody(
     asked: Boolean,
     canAnswer: Boolean,
     graph: AppGraph,
+    html: ReaderHtml,
     modifier: Modifier,
     onReply: () -> Unit,
     onDraft: (String) -> Unit,
@@ -493,9 +582,8 @@ private fun ReaderBody(
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
             )
         }
-        // ce qu'elle en sait (en rose)
-        val knows = her != null && (her.summary.isNotBlank() || her.noticed || her.read || asked)
-        if (knows) {
+        // ce qu'elle en sait (en rose), et où en est son tri
+        if (knowsShown(her, m.triage, asked)) {
             Surface(
                 shape = RoundedCornerShape(16.dp),
                 color = mika.soft,
@@ -503,19 +591,35 @@ private fun ReaderBody(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
             ) {
                 Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
-                    val state = when {
-                        her.read -> " · " + howLabel(her.how).first
-                        her.noticed -> " · " + stringResource(R.string.mail_her_noticed)
-                        else -> ""
+                    val state = when (val k = knowsState(her, m.triage)) {
+                        is KnowsState.Did -> " · " + howLabel(k.how).first
+                        is KnowsState.Sorted -> " · " + stringResource(triageLabel(k.triage))
+                        KnowsState.Noticed -> " · " + stringResource(R.string.mail_her_noticed)
+                        KnowsState.None -> ""
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         MIcon(R.drawable.ic_m_sparkle, null, size = 14.dp, tint = mika.accent)
                         Spacer(Modifier.width(6.dp))
                         Text(stringResource(R.string.mail_her_knows) + state, style = MaterialTheme.typography.labelLarge, color = mika.accent)
                     }
-                    if (her.summary.isNotBlank()) {
+                    if (her != null && her.summary.isNotBlank()) {
                         Gap(6.dp)
                         Text(her.summary, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    // ce que tes consignes de tri en ont fait (ADR 0243)
+                    val rules = byRules(her, box)
+                    if (rules?.alert == true) {
+                        Gap(6.dp)
+                        Text(stringResource(R.string.mail_rules_alert), style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (rules != null && rules.filed.isNotEmpty()) {
+                        Gap(6.dp)
+                        Text(stringResource(R.string.mail_rules_filed, rules.filed), style = MaterialTheme.typography.bodySmall)
+                    }
+                    val note = triageNote(m.triage)
+                    if (note != null) {
+                        Gap(6.dp)
+                        Text(stringResource(triageNoteText(note)), style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
                     }
                     if (asked && draft == null) {
                         Gap(6.dp)
@@ -524,11 +628,20 @@ private fun ReaderBody(
                 }
             }
         }
-        // le texte du mail
+        // le mail : sa mise en page s'il en a une (comme le web), sinon son texte
         Gap(8.dp)
         when {
+            m.html -> MailHtmlBody(
+                m = m,
+                frame = html.frame,
+                imagesOnce = html.imagesOnce,
+                always = html.always,
+                busy = html.busy,
+                onImages = html.onImages,
+                onRetry = html.onRetry,
+                modifier = Modifier.padding(vertical = 6.dp),
+            )
             m.body.isNotBlank() -> MailBodyText(m.body, Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
-            m.html -> NoteBox(stringResource(R.string.mail_html_only), R.drawable.ic_m_info, Modifier.padding(horizontal = 16.dp))
             else -> Text(stringResource(R.string.mail_no_text), color = scheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp))
         }
         if (!m.complete) {

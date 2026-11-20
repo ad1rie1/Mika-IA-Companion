@@ -13,9 +13,23 @@ from mika.kernel.events import Content, Payload, event_type
 from mika.kernel.facts import FactFamily
 
 OWNER = "mcp"
+#: la famille des lots de ses services branchés : un lot par serveur (« mcp.meteo »)
+FAMILY = "mcp"
 #: le lot de ses outils du web (le serveur système « web » du plugin ``web``, ADR 0066) : chercher, lire une page. Ses
 #: projets et ses explorations l'ont en main comme ses autres outils (ADR 0105)
 WEB_BUNDLE = "mcp.web"
+
+
+def is_service(bundle: str) -> bool:
+    """Ce lot est-il celui d'un service branché par l'opérateur ? Pas le web : celui-là est à elle (ADR 0066)."""
+    return bundle.startswith(FAMILY + ".") and bundle != WEB_BUNDLE
+
+
+def service_of(bundle: str) -> str:
+    """Le nom du serveur d'un lot de service (« mcp.meteo » → « meteo »)."""
+    return bundle.removeprefix(FAMILY + ".")
+
+
 #: la capacité : appeler un outil d'un serveur, après accord
 CALL = "mcp.call"
 #: la raison de l'initiative due : ce qu'un service a rendu (ou un accord refusé, expiré) est à dire

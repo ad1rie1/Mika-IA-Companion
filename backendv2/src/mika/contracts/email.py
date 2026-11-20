@@ -31,6 +31,11 @@ DRAFT = "mail_draft"
 SEND = "email.send"
 #: l'adresse (au sens d'identity) d'un courriel : ce qui concerne quelqu'un qu'on ne connaît que par son courriel
 HANDLE_PREFIX = "mail:"
+#: qui a jugé un mail remarqué (``MailNoticed.triage``, ADR 0240) : son tri l'a lu (le modèle) ; le repli, le modèle
+#: n'ayant pas répondu (panne, quota, réponse illisible) ; un envoi en masse, jamais montré au modèle
+TRIAGE_MODEL = "model"
+TRIAGE_FALLBACK = "fallback"
+TRIAGE_BULK = "bulk"
 
 
 def address_handle(address: str) -> str:
@@ -46,6 +51,12 @@ class MailNoticed(Signal):
     needs_reply: bool = False
     account: str = ""
     folder: str = ""
+    #: qui l'a jugé : ``TRIAGE_MODEL``, ``TRIAGE_FALLBACK`` ou ``TRIAGE_BULK`` (ADR 0240) ; vide dans les journaux d'avant
+    triage: str = ""
+    #: ce que les consignes de tri de sa boîte en font (ADR 0243) : prévenir sa propriétaire ; le ranger dans ce
+    #: dossier (son nom sur le serveur ; le geste suit l'événement)
+    alert: bool = False
+    file_to: str = ""
 
 
 class MailSent(Signal):

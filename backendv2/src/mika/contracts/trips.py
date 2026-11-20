@@ -40,10 +40,11 @@ KIND_MAX = 60
 #: ce qu'un regard ou une carte garde de lieux (``Looked.found``, ``Shown.places``)
 FOUND_MAX = 20
 
-#: ce qu'elle a regardé (``Looked.what``) : des lieux (un nom, une catégorie, autour d'un point, le long d'un trajet)
-#: ou un trajet
+#: ce qu'elle a regardé (``Looked.what``) : des lieux (un nom, une catégorie, autour d'un point, le long d'un trajet,
+#: la fiche d'un lieu), un trajet, des événements (une recherche, la fiche de l'un d'eux : ADR 0259)
 LOOK_PLACES = "lieux"
 LOOK_ROUTE = "trajet"
+LOOK_EVENTS = "evenements"
 
 # ── les notes de ses messages (``MessageNote.kind``, ``ToolResult.attach``) ──
 NOTE_TRIP = "trip"
@@ -131,8 +132,12 @@ class Looked(Payload):
     """Elle a regardé la carte pour la personne qui lui parle (par ``handle``) : ``query``, ce qu'elle a cherché, en
     mots ; ``found``, ce qu'elle a vu, en JSON — pour des lieux (``LOOK_PLACES``), une liste d'au plus ``FOUND_MAX``
     lieux (``id``, ``name``, ``kind``, ``kind_fr``, ``category``, ``lat``, ``lon``, ``town``, ``distance_m``,
-    ``along_m``) ; pour un trajet (``LOOK_ROUTE``), ``{distance_m, duration_s, mode, points, shape}`` (ses points
-    nommés, son tracé résumé en polyline à six décimales)."""
+    ``along_m`` ; et quand on les sait, ADR 0244 : ``osm``, ``cuisine``, ``rating``, ``reviews``, ``price``, ``photo``,
+    ``tags`` — jamais s'il était ouvert, qui ne valait qu'à l'instant) ; pour un trajet (``LOOK_ROUTE``), ``{distance_m, duration_s, mode, points, shape}`` (ses points
+    nommés, son tracé résumé en polyline à six décimales) ; pour des événements (``LOOK_EVENTS``, ADR 0259), une liste
+    d'au plus ``FOUND_MAX`` (``id``, ``name``, ``start``, ``end``, ``when_text``, ``place``, ``lat``, ``lon``). La fiche
+    d'un lieu ou d'un événement qu'elle a lue ne garde que lui, comme une liste le garde : jamais le texte de ses
+    avis, de son résumé ni de sa description."""
 
     person: str
     handle: str

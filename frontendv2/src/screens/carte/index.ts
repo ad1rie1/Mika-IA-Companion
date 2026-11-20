@@ -1,7 +1,7 @@
 /**
- * L'écran « Carte » (ADR 0194, 0195, 0196) : chercher un lieu ou une adresse (Explorer), calculer un itinéraire,
- * préparer un voyage jour par jour (Voyages) — à deux : ce que Mika a cherché, proposé ou ajouté se voit en rose, et
- * se retire d'un geste. Les données : `protocole-moi.md` § 10 ; la forme : la maquette (`maquette/ecrans/carte.js`) ;
+ * L'écran « Carte » (ADR 0194, 0195, 0196, 0259) : chercher un lieu ou une adresse et ouvrir sa fiche (Explorer), voir
+ * ce qui se passe autour (Événements), calculer un itinéraire, préparer un voyage jour par jour (Voyages) — à deux : ce
+ * que Mika a cherché, proposé ou ajouté se voit en rose, et se retire d'un geste. Les données : `protocole-moi.md` § 10 ; la forme : la maquette (`maquette/ecrans/carte.js`) ;
  * la carte : celle du serveur (`map/`), dessinée par MapLibre, ou son plan dessiné quand elle ne se dessine pas.
  *
  * Le navigateur ne parle qu'au serveur de Mika. Ce qui n'y est pas branché (l'index des lieux, les adresses, les
@@ -10,9 +10,10 @@
  * se demande après une pause de la saisie et une fois par texte, le trajet d'un voyage une fois ses arrêts immobiles.
  *
  * Ce fichier est le cadre : les onglets, les lectures communes, la carte gardée d'un dessin à l'autre et son cadrage
- * (`fitNext`), ce qui garde la main d'un dessin à l'autre, la palette. Chaque onglet a son contrôleur, qui porte son
- * état et ses gestes — `explorer.ts`, `itinerary.ts`, `trip.ts` (la liste des voyages et le voyage ouvert) —, avec
- * les fenêtres d'un voyage (`modals.ts`) et le glisser d'un arrêt (`drag.ts`). Le cadre délègue le dessin et les
+ * (`fitNext`), ce qui garde la main d'un dessin à l'autre, les photos (`photos.ts` : chargées quand elles paraissent, la
+ * visionneuse), la palette. Chaque onglet a son contrôleur, qui porte son état et ses gestes — `explorer.ts` (et la
+ * fiche d'un lieu), `events.ts`, `itinerary.ts`, `trip.ts` (la liste des voyages et le voyage ouvert) —, avec les
+ * fenêtres d'un voyage (`modals.ts`) et le glisser d'un arrêt (`drag.ts`). Le cadre délègue le dessin et les
  * gestes à l'onglet montré ; un contrôleur reçoit du cadre ce qu'il lui faut (`CarteFrame`, et son hôte), jamais
  * l'état d'un autre onglet.
  */
@@ -42,13 +43,15 @@ import { onTheme } from "../../shell/theme";
 import { Cached, CachedMap } from "../../shared/kit";
 import * as store from "../../shared/store";
 import { StopDrag } from "./drag";
+import { EventsTab } from "./events";
 import { ExplorerTab } from "./explorer";
 import { focusSelector } from "./format";
 import { ItineraryTab } from "./itinerary";
 import { TripModals } from "./modals";
+import { attachPhotos, openViewer } from "./photos";
 import { AddressBook } from "./requests";
 import { TripsTab } from "./trip";
-import { mapPane, placeId, tripActions } from "./view";
+import { mapPane, tripActions } from "./view";
 
 const ID = "carte";
 
@@ -58,7 +61,7 @@ export interface CarteHooks {
 }
 
 /** Ce que l'écran montre : un onglet, et dans Voyages la liste ou un voyage ouvert. */
-export type View = "explorer" | "itineraire" | "voyages" | "voyage";
+export type View = "explorer" | "evenements" | "itineraire" | "voyages" | "voyage";
 
 /**
  * Ce que le cadre donne à chaque onglet : les lectures communes, redessiner, savoir si l'écran est ouvert et sur quoi,
@@ -94,6 +97,7 @@ export interface CarteFrame {
 class CarteScreen {
   private readonly tabs: ScreenTab[] = [
     { id: "explorer", title: "Explorer", icon: "search" },
+    { id: "evenements", title: "Événements", icon: "calendar" },
     { id: "itineraire", title: "Itinéraire", icon: "map" },
     { id: "voyages", title: "Voyages" },
   ];
@@ -139,7 +143,10 @@ class CarteScreen {
     options: {
       interactive: true,
       onPin: (id) => this.pinClicked(id),
-      onMove: () => this.explorer.mapMoved(),
+      onMove: () => {
+        this.explorer.mapMoved();
+        this.events.mapMoved();
+      },
     },
     // une scène vide se pose sur le fond de carte : le cadrage d'un regard en échec est fait
     mounted: () => {
@@ -154,6 +161,7 @@ class CarteScreen {
 
   // ── Les onglets ──
   private readonly explorer: ExplorerTab;
+  private readonly events: EventsTab;
   private readonly itinerary: ItineraryTab;
   /** La liste des voyages et le voyage ouvert. */
   private readonly tripsTab: TripsTab;
@@ -191,6 +199,19 @@ class CarteScreen {
       dropItem: () => {
         this.applied = "explorer/";
         history.replaceState(null, "", "#carte/explorer");
+        if (this.ctx) this.ctx.item = null;
+      },
+      routeTo: (p) => this.itinerary.routeTo(p),
+      addPlace: (trip, title, p, day, index, nonce) => this.tripsTab.addPlace(trip, title, p, day, index, nonce),
+      newTripModal: (opts) => this.modals.newTripModal(opts),
+    });
+    this.events = new EventsTab({
+      ...frame,
+      view: () => this.map.view,
+      scene: () => this.scene,
+      dropItem: () => {
+        this.applied = "evenements/";
+        history.replaceState(null, "", "#carte/evenements");
         if (this.ctx) this.ctx.item = null;
       },
       routeTo: (p) => this.itinerary.routeTo(p),
@@ -257,6 +278,7 @@ class CarteScreen {
   }
 
   private which(ctx: ScreenContext): View {
+    if (ctx.tab === "evenements") return "evenements";
     if (ctx.tab === "itineraire") return "itineraire";
     if (ctx.tab === "voyages") return ctx.item ? "voyage" : "voyages";
     return "explorer";
@@ -293,7 +315,8 @@ class CarteScreen {
     if (key === this.applied) return;
     this.applied = key;
     const seq = regardOf(ctx.item);
-    if (this.current === "explorer") this.explorer.applyItem(seq);
+    if (this.current === "explorer") this.explorer.applyItem(ctx.item);
+    if (this.current === "evenements") this.events.applyItem(ctx.item);
     if (this.current === "itineraire" && seq) this.itinerary.applyItem(seq);
     if (this.current === "voyage") this.tripsTab.applyItem(ctx.item);
   }
@@ -303,27 +326,36 @@ class CarteScreen {
   private async ensure(force = false): Promise<void> {
     const view = this.current;
     const reads: Promise<unknown>[] = [this.carte.load(force), mapInfo.load()];
-    if (view === "explorer" || view === "itineraire") reads.push(this.position.load(force));
+    if (view === "explorer" || view === "evenements" || view === "itineraire") reads.push(this.position.load(force));
     if (view === "voyages" || view === "voyage") reads.push(this.trips.load(force));
     const seq = regardOf(this.ctx?.item);
-    if (seq && (view === "explorer" || view === "itineraire")) reads.push(this.regards.get(seq).load(force));
+    if (seq && (view === "explorer" || view === "evenements" || view === "itineraire")) reads.push(this.regards.get(seq).load(force));
     const id = this.tripId();
     if (id) reads.push(this.tripCache.get(id).load(force));
     await Promise.all(reads);
     this.tripsTab.opened(id, force);
     if (!this.open() || this.current !== view) return;
+    // ce que Mika a trouvé, quand ce sont des événements : il se montre dans leur onglet
+    const regard = seq ? this.regards.get(seq).value : null;
+    if (view === "explorer" && seq && regard?.what === "evenements") {
+      this.shell.go(`#carte/evenements/regard-${seq}`);
+      return;
+    }
     this.syncTabs();
     this.syncTripHead();
     if (view === "explorer") this.explorer.loaded();
+    if (view === "evenements") this.events.loaded();
     if (view === "itineraire") this.itinerary.loaded(seq);
     this.paint();
   }
 
   private syncTabs(): void {
     const n = this.trips.value?.length;
-    const before = this.tabs[2].count;
-    this.tabs[2].count = n ? n : undefined;
-    if (before !== this.tabs[2].count) this.shell.refreshHead();
+    const tab = this.tabs.find((t) => t.id === "voyages");
+    if (!tab) return;
+    const before = tab.count;
+    tab.count = n ? n : undefined;
+    if (before !== tab.count) this.shell.refreshHead();
   }
 
   /** Le voyage ouvert vient d'être lu, ou ne l'est plus (404) : ses actions arrivent ou partent avec lui. */
@@ -369,6 +401,9 @@ class CarteScreen {
       case "voyage":
         html = this.tripsTab.tripHtml();
         break;
+      case "evenements":
+        html = this.events.eventsHtml();
+        break;
       default:
         html = this.explorer.explorerHtml();
     }
@@ -388,6 +423,7 @@ class CarteScreen {
     }
     this.lodgeView();
     if (this.current === "voyages") this.minis.attach(body);
+    attachPhotos(body);
   }
 
   /** Dire à un lecteur d'écran ce qui vient de se passer (sans bouger la main). */
@@ -421,6 +457,7 @@ class CarteScreen {
   /** Une épingle touchée : à l'onglet montré (un lieu d'Explorer, un arrêt ou un lieu de « Sur la route »). */
   private pinClicked(id: string): void {
     if (this.current === "explorer") this.explorer.pinClicked(id);
+    else if (this.current === "evenements") this.events.pinClicked(id);
     else if (this.current === "voyage") this.tripsTab.pinClicked(id);
   }
 
@@ -433,10 +470,20 @@ class CarteScreen {
     section.append(this.live);
     // chaque onglet branche les siens : leurs éléments ne sont dans le corps que quand il est montré
     this.explorer.mount(section);
+    this.events.mount(section);
     this.itinerary.mount(section);
     this.tripsTab.mount(section);
     this.stopDrag.mount(section);
     on(section, "[data-retry]", "click", () => void this.ensure(true));
+    // une photo d'une fiche : la visionneuse, sur les photos de cette fiche ; la tuile du plan recadre la carte
+    on(section, "[data-photo]", "click", (_e, b) => {
+      const photos = this.current === "evenements" ? this.events.photos() : this.current === "explorer" ? this.explorer.photos() : [];
+      openViewer(photos, Number(b.dataset.photo) || 0);
+    });
+    on(section, "[data-plan]", "click", () => {
+      this.fitNext = true;
+      this.paint();
+    });
     on(section, "[data-relogin]", "click", () => location.reload());
   }
 
@@ -454,10 +501,7 @@ class CarteScreen {
       title: p.name,
       sub: placeWhat(p),
       icon: "pin",
-      action: () => {
-        this.explorer.sel = placeId(p, i);
-        this.shell.go("#carte/explorer");
-      },
+      action: () => this.explorer.choose(p, i),
     }));
     return [...trips, ...places];
   }

@@ -51,8 +51,10 @@ export async function getJson<T = unknown>(path: string): Promise<T> {
   }
   const body: unknown = await resp.json().catch(() => null);
   if (!resp.ok) {
-    const said = body && typeof body === "object" ? (body as { error?: unknown }).error : undefined;
-    throw new ApiError(resp.status, typeof said === "string" && said ? said : statusMessage(resp.status));
+    const o = body && typeof body === "object" ? (body as { error?: unknown; fields?: unknown }) : {};
+    // ce que chaque paramètre refusé demande (un 400, un 409 de `near=ici`)
+    const fields = o.fields && typeof o.fields === "object" ? (o.fields as Record<string, string>) : {};
+    throw new ApiError(resp.status, typeof o.error === "string" && o.error ? o.error : statusMessage(resp.status), fields);
   }
   return body as T;
 }

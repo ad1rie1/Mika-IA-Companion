@@ -3,6 +3,14 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { VRM, VRMLoaderPlugin, VRMUtils } from "@pixiv/three-vrm";
 import { isVRM0 } from "./vrmVersion";
 
+/**
+ * Where her model is looked for, in order (ADR 0252): the one you put there
+ * yourself (`public/models/default.vrm`, never versioned — a bought model
+ * can't be redistributed), then the free one the repository ships
+ * (`public/models/mika-libre.vrm`).
+ */
+export const MODEL_URLS = ["/models/default.vrm", "/models/mika-libre.vrm"] as const;
+
 export class VTuberModel {
   public vrm: VRM | null = null;
 
@@ -67,6 +75,20 @@ export class VTuberModel {
         }
       );
     });
+  }
+
+  /** The first of `urls` that loads; rejects with the last error if none does. */
+  async loadFirst(urls: readonly string[]): Promise<VRM> {
+    let last: unknown = new Error("no model URL");
+    for (const url of urls) {
+      try {
+        return await this.load(url);
+      } catch (err) {
+        last = err;
+        console.info(`No VRM model at ${url}`);
+      }
+    }
+    throw last;
   }
 
   /** The avatar's placement group — camera follow target, and the v2

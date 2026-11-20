@@ -23,6 +23,11 @@ EXEMPT = {
     "adapters/maps/places.py": "l'index des lieux de l'écran Carte (ADR 0194) : un fichier SQLite à lui sous cartes/, "
                                "tiré des tuiles et refait à la demande (texte intégral FTS5, arbre R), lu par sqlite3 "
                                "seul — jamais une base de sa vie, ni sur MariaDB ni dans le schéma",
+    "adapters/maps/osm.py": "le même index des lieux, tiré de l'extrait OpenStreetMap (ADR 0244) : le même fichier "
+                            "SQLite à lui sous cartes/, écrit par sqlite3 seul",
+    "adapters/maps/tourism.py": "la base des données touristiques (ADR 0245) : un fichier SQLite à elle sous cartes/, "
+                                "tenu à jour depuis DATAtourisme et refait s'il le faut (texte intégral FTS5 et ses "
+                                "déclencheurs, arbre R), lu et écrit par sqlite3 seul — jamais une base de sa vie",
 }
 
 #: un texte précis permis dans un module, et pourquoi (le reste du module reste relu)

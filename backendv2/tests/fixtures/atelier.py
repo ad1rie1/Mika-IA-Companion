@@ -3,13 +3,27 @@
 Des fichiers par projet, un historique à la git (un commit d'amorce, puis un par
 enregistrement qui a changé quelque chose, titré comme l'adaptateur le forme),
 des envois et des récupérations qui ne sortent de nulle part : on y lit ce qui
-a été demandé (``pushed``, ``pulled``)."""
+a été demandé (``pushed``, ``pulled``).
+
+Les vues des ateliers lus (ADR 0260) y sont des copies de ce qui était
+enregistré au dernier commit (``committed``), gardées par (lecteur, lu) : on y
+lit ce qui est posé (``views``), ce qui a été retiré (``dropped``) et les vues
+qu'un programme a reçues (``ran``)."""
 
 from __future__ import annotations
 
 import re
 
-from mika.ports.workshop import Commit, Hosted, OutsideWorkshop, RunResult
+from mika.ports.workshop import (
+    NO_COMMIT,
+    TOO_BIG,
+    Commit,
+    Hosted,
+    OutsideWorkshop,
+    RunResult,
+    View,
+    view_place,
+)
 
 #: l'instant d'un commit en mémoire (il n'a pas d'horloge : il compte)
 STAMP = 1_790_000_000_000_000
@@ -24,6 +38,16 @@ class Atelier:
         self.pushed: list[tuple[int, str, str]] = []
         self.pushed_shas: list[str] = []
         self.pulled: list[tuple[int, str, str]] = []
+        #: ce que chaque atelier a d'enregistré (le dernier commit), fichier par fichier
+        self.committed: dict[int, dict[str, str]] = {}
+        #: les vues posées, par (lecteur, lu) : la vue et les fichiers du commit vu
+        self.views: dict[tuple[int, int], tuple[View, dict[str, str]]] = {}
+        #: les ménages demandés : (lecteur, ce qu'il garde)
+        self.dropped: list[tuple[int, tuple[int, ...]]] = []
+        #: les programmes lancés : (projet, commande, les vues montées)
+        self.ran: list[tuple[int, tuple[str, ...], tuple[int, ...]]] = []
+        #: la place d'une vue (octets) ; ``None`` : sans limite
+        self.view_bytes: int | None = None
 
     def exists(self, project: int) -> bool:
         return project in self.files
@@ -62,7 +86,8 @@ class Atelier:
             raise FileNotFoundError(path)
         return self.files[project][path].encode("latin-1")[:limit]
 
-    async def run(self, project: int, argv, *, timeout_s=None, network: bool = False) -> RunResult:
+    async def run(self, project: int, argv, *, timeout_s=None, network: bool = False, views=()) -> RunResult:
+        self.ran.append((project, tuple(argv), () if network else tuple(views)))
         return RunResult(tuple(argv), 0, stdout="tests : ok\n")
 
     async def commit(self, project: int, message: str, paths=()) -> str:
@@ -73,6 +98,7 @@ class Atelier:
         sha = f"c{len(self.commits_[project]):06d}"
         self.commits_[project].append((sha, re.sub(r"\s+", " ", message).strip()[:72]))
         self.dirty[project] = [d for d in dirty if d not in taken]
+        self.committed.setdefault(project, {}).update({d: self.files[project][d] for d in taken})
         return sha
 
     async def pending(self, project: int) -> list[str]:
@@ -121,7 +147,50 @@ class Atelier:
         self.pulled.append((project, url, branch))
         self.files.setdefault(project, {})["README.md"] = "# Récupéré\n"
         self.commits_.setdefault(project, [("a000000", "atelier ouvert")]).append(("r000001", "depuis le distant"))
+        self.committed.setdefault(project, {})["README.md"] = "# Récupéré\n"
         return RunResult(("git", "pull", url, branch), 0, stdout="Fast-forward\n")
+
+    # ── les vues des ateliers lus (ADR 0260) ──
+    async def view(self, reader: int, target: int, *, fresh: bool = False) -> View:
+        key = (reader, target)
+        if key in self.views and not fresh:
+            return self.views[key][0]
+        commits = self.commits_.get(target, [])
+        files = dict(self.committed.get(target, {}))
+        if not commits or reader == target:
+            view = View(target, why=NO_COMMIT)
+        elif self.view_bytes is not None and sum(len(t.encode()) for t in files.values()) > self.view_bytes:
+            view = View(target, why=TOO_BIG)
+        else:
+            view = View(target, commits[-1][0], STAMP + (len(commits) - 1) * 60_000_000)
+        self.views[key] = (view, files if view.sha else {})
+        return view
+
+    def _viewed(self, reader: int, target: int) -> dict[str, str]:
+        view, files = self.views.get((reader, target), (View(target), {}))
+        if not view.sha:
+            raise FileNotFoundError(f"aucune vue de l'atelier du projet n° {target} n'est posée")
+        return files
+
+    async def view_tree(self, reader: int, target: int, path: str = ".") -> list[str]:
+        files = self._viewed(reader, target)
+        self._check(path)
+        prefix = "" if path in (".", "") else path.strip("/") + "/"
+        return [f"{view_place(target, p)} ({len(t.encode())} o)" for p, t in sorted(files.items())
+                if not prefix or p.startswith(prefix) or p == path.strip("/")]
+
+    async def view_read(self, reader: int, target: int, path: str) -> str:
+        files = self._viewed(reader, target)
+        self._check(path)
+        if path not in files:
+            raise FileNotFoundError(f"{view_place(target, path)} n'existe pas dans la vue du projet n° {target}")
+        return files[path]
+
+    async def drop_views(self, reader: int, keep=()) -> None:
+        kept = tuple(int(t) for t in keep)
+        self.dropped.append((reader, kept))
+        for key in [k for k in self.views if k[0] == reader and k[1] not in kept]:
+            del self.views[key]
 
 
 class Host:

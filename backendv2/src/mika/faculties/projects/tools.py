@@ -13,6 +13,12 @@ vive voix (``project_steer`` : un objectif de plus, une consigne, s'y mettre
 maintenant, la pause, la reprise — jamais son cadre) vit dans ``steer.py``,
 qui lit les aides d'ici (``speaker``, ``their_words``, ``contents_of``…).
 
+**Ce qu'un projet lit des autres** (ADR 0257) se demande ici de deux façons :
+``create_project`` le pose d'emblée (``reads`` : qui le confie en est le
+propriétaire), et ``project_plan`` le demande (``reads``) — le lien se pose
+alors quand le propriétaire du projet valide le plan. Les règles sont dans
+``links.py``.
+
 **« Fait » se prouve** : pour un objectif ponctuel, un commit non vide pendant
 l'objectif (ce qu'elle a écrit dans l'atelier), ou un brouillon de mail, une
 app forgée. Lancer ``ls``, lire, noter ou décider ne prouvent rien. Un « fait »
@@ -35,11 +41,14 @@ from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.contracts import transcript as transcript_c
+from mika.faculties.projects import links
 from mika.faculties.projects.faculty import (
     ARCHIVED,
     DECIDED,
     DECISIONS_KEPT,
     DEFAULT_BUNDLES,
+    LINKS_MAX,
+    LINKS_SET,
     NOTED,
     OBJECTIVE_ADDED,
     OBJECTIVE_CHANGED,
@@ -74,6 +83,7 @@ from mika.kernel.guards import Guard, Superseded
 from mika.vocab.episodes import PROJECT_KINDS, Kind, goal_of, goal_target, project_of, project_target
 from mika.vocab.phrasebook import family, phrase
 from mika.vocab.privacy import Sensitivity
+from mika.vocab.words import stems
 
 REPORT, NOTE, DECIDE, OBJECTIVE_ADD = "report_run", "project_note", "project_decide", "project_objective_add"
 EQUIP = "project_equip"
@@ -197,6 +207,20 @@ def contents_of(ctx: Any, refs: list[str]) -> Mapping[str, str]:
     store = ctx.ports.get("store")
     wanted = [r for r in refs if r]
     return store.content(wanted) if store is not None and wanted else {}
+
+
+def named_projects(ctx: Any, s: ProjectsState, ids: tuple[int, ...]) -> str:
+    """Des projets nommés à la suite (« n° 3 « Le produit », n° 5 « Le site » ») : ce qu'un lien pose (ADR 0257)."""
+    found = [s.projects[i] for i in ids if i in s.projects]
+    texts = contents_of(ctx, [t.title_ref for t in found])
+    return ", ".join(phrase("projects.links.named", id=t.id,
+                            title=texts.get(t.title_ref) or phrase("projects.run.no_title")) for t in found)
+
+
+def refused_lines(refused: tuple[tuple[int, str], ...]) -> str:
+    """Les projets qu'un lien ne peut pas viser, un par ligne, chacun avec sa raison (``links.refusal``)."""
+    words = family("projects.links.refused")
+    return "\n".join(phrase("projects.links.refused_line", id=t, why=words[why]) for t, why in refused)
 
 
 def caretaker(frame: Frame) -> str:
@@ -339,11 +363,13 @@ async def report_run(args: ReportArgs, ctx: Any) -> Any:
 
 
 def closing(ctx: Any, p: Project, o: Objective, status: str, result: str, notable: float) -> Draft[Any]:
+    # ce qu'il en reste se dit au niveau du projet — et au moins à celui de ce qu'il a lu des autres (ADR 0257)
+    level = max(p.sensitivity, p.read_level)
     return c.OBJECTIVE_CLOSED.draft(
         project=p.id, objective=o.id, status=status, mode=p.mode, authority=p.authority,
-        title=text_of(ctx, o.text_ref, p.sensitivity, phrase("projects.tools.report.forgotten")),
+        title=text_of(ctx, o.text_ref, level, phrase("projects.tools.report.forgotten")),
         result=Content.of(result, level=written(p)) if result else None, notable=notable if status == c.DONE
-        else 0.0, owner=p.owner, about=p.about, sensitivity=p.sensitivity)
+        else 0.0, owner=p.owner, about=p.about, sensitivity=level)
 
 
 async def pinned(port: Any, project: int) -> tuple[str, str]:
@@ -389,9 +415,9 @@ async def project_note(args: NoteArgs, ctx: Any) -> Any:
     got = current(ctx)
     if got is None:
         return gone()
-    p, _ = got
+    p, o = got
     await ctx.emit(NOTED.draft(project=p.id, text=Content.of(args.text.strip(), level=written(p)), owner=p.owner,
-                               about=p.about))
+                               about=p.about, objective=o.id if o is not None else 0))
     return phrase("projects.tools.note.done")
 
 
@@ -490,6 +516,9 @@ class PlanArgs(BaseModel):
     questions: list[PlanQuestion] = Field(default_factory=list, max_length=PLAN_QUESTIONS,
                                           description=phrase("projects.tools.plan.questions"))
     tell: bool = Field(default=False, description=phrase("projects.tools.plan.tell"))
+    #: les projets que ce plan demande à lire (ADR 0257) : le lien se pose quand le propriétaire le valide
+    reads: list[int] = Field(default_factory=list, max_length=LINKS_MAX,
+                             description=phrase("projects.tools.plan.reads"))
 
 
 def plan_text(args: PlanArgs) -> str:
@@ -523,6 +552,22 @@ def _plan_problems(p: Project, steps: list[PlanStep]) -> list[str]:
     return problems
 
 
+def _read_problems(s: ProjectsState, p: Project, wanted: tuple[int, ...], world: links.World) -> list[str]:
+    """Ce que son plan ne peut pas demander à lire, en mots (ADR 0257) : un projet que le sien ne peut pas lire
+    (``links.refusal``), ou que la personne qui a demandé le projet ne peut pas voir — son plan le nommerait
+    devant elle."""
+    _, refused = links.chosen(s, p, (*p.reads, *wanted), world)
+    why = dict(refused)
+    askable = {t.id for t in links.askable(s, p, world)}
+    words = family("projects.links.refused")
+    problems = []
+    for target in wanted:
+        reason = why.get(target) or ("" if target in p.reads or target in askable else links.HIDDEN)
+        if reason:
+            problems.append(phrase("projects.tools.plan.bad_read", id=target, why=words[reason]))
+    return problems
+
+
 @PROJECTS.tool(PLAN_TOOL, acts=True, description=phrase("projects.tools.plan.description"),
                label=phrase("projects.tools.plan.label"), args=PlanArgs,
                bundle="projects", episodes=RUNS, max_calls_per_episode=2)
@@ -530,12 +575,16 @@ async def project_plan(args: PlanArgs, ctx: Any) -> Any:
     """Écrire son plan (une séance de cadrage), ou le revoir en cours de route (ADR 0145) : ses objectifs vivants
     deviennent ceux du plan — gardés, réécrits ou nouveaux, dans son ordre, chacun avec son critère et ce dont il
     dépend ; ceux qu'il ne garde pas sont retirés (sauf une réparation d'app). Un plan qui pose des questions sur un
-    projet qu'on lui a demandé attend sa réponse ; sinon il vaut d'office."""
+    projet qu'on lui a demandé attend sa réponse ; sinon il vaut d'office. Ce qu'il demande à lire (``reads``, ADR
+    0257) attend de même, quand qui répondra au plan en est le propriétaire : le lien se pose à sa validation."""
     got = current(ctx)
     if got is None:
         return gone()
     p, _ = got
-    problems = _plan_problems(p, args.steps)
+    s: ProjectsState = ctx.frame.state("projects")
+    world = links.world_of(ctx.frame)
+    wanted = tuple(dict.fromkeys(args.reads))
+    problems = [*_plan_problems(p, args.steps), *_read_problems(s, p, wanted, world)]
     if problems:
         return ToolResult(ok=False, content=phrase("projects.tools.plan.refused", problems="\n".join(problems)))
     kept = {s.keep for s in args.steps if s.keep}
@@ -571,19 +620,25 @@ async def project_plan(args: PlanArgs, ctx: Any) -> Any:
                                                 author="self", **who))
     framing_now = p.plan_state in (c.TO_FRAME, c.PROPOSED)
     asked = bool(p.asked_by)
-    approved = not framing_now or not args.questions or not asked
+    # ce qu'il demande à lire de nouveau attend, comme une question, quand qui répondra peut poser le lien
+    new_links = tuple(t for t in wanted if t not in p.reads)
+    linking = bool(new_links) and links.may_link(p, p.asked_by or "", world)
+    approved = not framing_now or not asked or not (args.questions or linking)
     tell = asked if framing_now else args.tell
     questions = questions_text(args)
     drafts.append(PLAN_PROPOSED.draft(project=p.id, plan=Content.of(plan_text(args), level=level),
                                       questions=Content.of(questions, level=level) if questions else None,
-                                      approved=approved, tell=tell, **who))
+                                      approved=approved, tell=tell, reads=wanted, **who))
     await ctx.emit(*drafts)
+    # ce qu'il demande à lire : lié à la validation de son propriétaire, sinon à poser dans la console
+    reading = "" if not new_links else phrase("projects.tools.plan.reads_wait") if linking and not approved \
+        else phrase("projects.tools.plan.reads_later")
     if not framing_now:
-        return phrase("projects.tools.plan.revised", steps=len(args.steps), dropped=len(dropped))
+        return phrase("projects.tools.plan.revised", steps=len(args.steps), dropped=len(dropped)) + reading
     # le plan conclut sa séance de cadrage : la boucle s'arrête là (ADR 0161)
     if not approved:
-        return ToolResult(content=phrase("projects.tools.plan.waits", steps=len(args.steps)), ends=True)
-    return ToolResult(content=phrase("projects.tools.plan.starts", steps=len(args.steps)), ends=True)
+        return ToolResult(content=phrase("projects.tools.plan.waits", steps=len(args.steps)) + reading, ends=True)
+    return ToolResult(content=phrase("projects.tools.plan.starts", steps=len(args.steps)) + reading, ends=True)
 
 
 class EquipArgs(BaseModel):
@@ -664,6 +719,52 @@ class CreateArgs(BaseModel):
     schedule: str = Field(default="asap", description=phrase("projects.tools.create.schedule"))
     #: ce qu'il aura en main, choisi avec qui le confie — la Forge pour une app (ADR 0161)
     tools: list[SelfBundle] = Field(default_factory=list, max_length=4, description=phrase("projects.tools.create.tools"))
+    #: ses autres projets que celui-ci lira (ADR 0257) : qui le confie en est le propriétaire, c'est lui qui pose le lien
+    reads: list[int | str] = Field(default_factory=list, max_length=LINKS_MAX,
+                                   description=phrase("projects.tools.create.reads"))
+
+
+def _pointed(said: str, rows: list[tuple[int, str]]) -> int | None:
+    """Le projet qu'elle nomme pour un lien : son numéro tel quel, sinon le seul dont le titre partage le plus de
+    mots avec ce qu'elle en dit — jamais « le seul qu'il y a » : un lien ne se devine pas."""
+    raw = said.strip().lower().removeprefix("n°").removeprefix("#").strip()
+    if raw.isdigit():
+        return int(raw)
+    said_stems = stems(said)
+    scored = [(len(said_stems & stems(text)), i) for i, text in rows]
+    best = max((n for n, _ in scored), default=0)
+    top = [i for n, i in scored if n == best]
+    return top[0] if best and len(top) == 1 else None
+
+
+async def _read_from_birth(ctx: Any, project: int, person: str, asked: list[int | str]) -> str:
+    """Ce qu'un projet confié lit dès sa naissance (ADR 0257) : qui le confie en est le propriétaire, et le demande
+    en face. Un projet qu'on ne reconnaît pas, ou qui ne peut pas être lu, n'empêche pas le projet de naître : la
+    réponse le dit, et le lien se pose plus tard sur sa fiche."""
+    s: ProjectsState = ctx.frame.state("projects")
+    p = s.projects.get(project)
+    world = links.world_of(ctx.frame)
+    if p is None or not links.may_link(p, person, world):
+        return ""
+    options = links.candidates(s, p, world)
+    texts = contents_of(ctx, [t.title_ref for t in options])
+    rows = [(t.id, texts.get(t.title_ref, "")) for t in options]
+    found: list[int] = []
+    unknown = ""
+    for words in map(str, asked):
+        target = _pointed(words, rows)
+        if target is None:
+            unknown += phrase("projects.tools.create.link_unknown", said=words.strip()[:80])
+        else:
+            found.append(target)
+    kept, refused = links.chosen(s, p, found, world)
+    said = ""
+    if kept:
+        await ctx.emit(LINKS_SET.draft(project=p.id, reads=kept, by=person))
+        said = phrase("projects.tools.create.linked", projects=named_projects(ctx, s, kept))
+    if refused:
+        said += phrase("projects.tools.create.link_refused", refused=refused_lines(refused))
+    return said + unknown
 
 
 @PROJECTS.tool("create_project", acts=True, description=phrase("projects.tools.create.description"), label=phrase("projects.tools.create.label"), args=CreateArgs, bundle="projects", episodes=[Kind.REPLY], max_calls_per_episode=1, owner_only=True)
@@ -687,7 +788,8 @@ async def create_project(args: CreateArgs, ctx: Any) -> Any:
     goals = args.objectives or ([] if args.constants else [args.title])
     await ctx.emit(*objectives_of(pid, goals, _constants(args.constants), author="owner", owner=person,
                                   about=(person,), level=level))
-    return phrase("projects.tools.create.done", id=pid)
+    reading = await _read_from_birth(ctx, pid, person, args.reads) if args.reads else ""
+    return phrase("projects.tools.create.done", id=pid) + reading
 
 
 class StartArgs(BaseModel):

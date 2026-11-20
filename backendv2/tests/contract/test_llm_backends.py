@@ -899,6 +899,48 @@ async def test_openai_and_ollama_closing_turns_forbid_tool_calls_their_own_way()
     assert "tools" not in fake_l.chat.calls[0]
 
 
+async def test_stop_sequences_reach_each_provider_its_own_way():
+    """Une sortie dont on ne garde que le début s'arrête là (ADR 0261) : ``stop_sequences`` pour Claude, ``stop`` pour
+    un serveur compatible OpenAI (quatre au plus, la limite de l'API), ``options.stop`` pour Ollama ; sans séquence,
+    rien ne part. Arrêtée là, la réponse est une fin comme une autre."""
+    stops = ("\nL'autre :", "\nL'autre:", "\nL’autre :", "\nL’autre:", "\nLui :")
+    stopped = replace(request(Message("user", "x"), tools=()), stop_sequences=stops)
+    plain = request(Message("user", "x"), tools=())
+    fake_c = FakeAnthropic(claude_reply(text("Mika : ok"), stop="stop_sequence"), claude_reply(text("ok")))
+    claude = ClaudeBackend("k", "claude-opus-5-5", client=fake_c)
+    resp = await claude.complete(stopped)
+    await claude.complete(plain)
+    assert fake_c.create.calls[0]["stop_sequences"] == list(stops) and "stop_sequences" not in fake_c.create.calls[1]
+    assert (resp.text, resp.stop) == ("Mika : ok", "end")
+    fake_o = FakeOpenAI(openai_reply("Mika : ok"), openai_reply("ok"))
+    compat = OpenAICompatBackend("k", "gpt-4.1", client=fake_o)
+    await compat.complete(stopped)
+    await compat.complete(plain)
+    assert fake_o.create.calls[0]["stop"] == list(stops[:4]) and "stop" not in fake_o.create.calls[1]
+    fake_l = FakeOllama(ollama_reply("Mika : ok"), ollama_reply("ok"))
+    local = OllamaBackend("gemma4:12b", client=fake_l)
+    await local.complete(stopped)
+    await local.complete(plain)
+    assert fake_l.chat.calls[0]["options"]["stop"] == list(stops) and "stop" not in fake_l.chat.calls[1]["options"]
+
+
+async def test_openai_stop_dropped_on_400_and_memoized():
+    """Un modèle à raisonnement refuse ``stop`` : rejoué une fois sans, et mémorisé — la réponse s'écrit jusqu'au
+    bout et l'appelant coupe ce qu'il garde, au lieu d'un 400 à chaque seconde passe."""
+    fake = FakeOpenAI(
+        bad_request(openai, "Unsupported parameter: 'stop' is not supported with this model."),
+        openai_reply("un"), openai_reply("deux"),
+    )
+    backend = OpenAICompatBackend("k", "o3-mini", client=fake)
+    stopped = replace(request(Message("user", "x"), tools=()), stop_sequences=("\nL'autre :",))
+    await backend.complete(stopped)
+    await backend.complete(stopped)
+    calls = fake.create.calls
+    assert len(calls) == 3 and calls[0]["stop"] == ["\nL'autre :"]
+    assert "stop" not in calls[1] and "stop" not in calls[2]
+    assert backend.memo.no_stop == {"o3-mini"}
+
+
 async def test_ollama_sends_its_context_window_and_caps_only_her_voice():
     """``num_ctx`` : sans lui, le serveur applique sa fenêtre par défaut (souvent 4 096) et tronque le prompt en
     silence. ``max_reply_tokens`` ne plafonne que les rôles voix : une extraction demande 6 000 jetons et les a —

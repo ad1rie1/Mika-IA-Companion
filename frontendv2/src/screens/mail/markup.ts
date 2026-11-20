@@ -18,6 +18,7 @@ import {
   countLabel,
   firstName,
   howLabel,
+  triageLabel,
   levelTag,
   markToFill,
   ofName,
@@ -294,9 +295,11 @@ function boxMark(b: BoxView | undefined): string {
 }
 
 /** Ce qu'elle a fait d'un mail, en marques roses (et ce que le serveur en dit). */
-export function herMarks(r: Pick<MailRow, "her" | "answered">): string {
+export function herMarks(r: Pick<MailRow, "her" | "answered" | "triage">): string {
   const her = r.her;
   const out: string[] = [];
+  const triage = triageLabel(r.triage);
+  if (triage?.row) out.push(`<span class="mk${triage.quiet ? " quiet" : ""}" title="${h(triage.note || triage.text)}">${ico(triage.icon)}${h(triage.text)}</span>`);
   if (her?.important) out.push('<span class="tag danger">important</span>');
   if (her?.needs_reply) out.push('<span class="tag warn">réponse attendue</span>');
   if (her?.read) {
@@ -475,10 +478,19 @@ export function readerMail(m: MailFull, v: ReaderView, fileUrl: (part: string) =
         ${c.decide && v.draft.in_reply_to ? '<button class="btn xs ghost" type="button" data-act="autre-version">Lui demander une autre version</button>' : ""}</div>`
     : "";
   const asked = !v.draft && v.asked ? `<span class="rd-asked">${ico("sparkle", "xs")}Elle s'y met… sa réponse arrivera dans « Ses brouillons », et ici.</span>` : "";
-  const knows = her?.noticed || her?.read || summary || v.draft || v.asked;
+  // son tri (ADR 0240), puis sa lecture à elle : « lu par son tri · archivé par elle »
+  const triage = triageLabel(m.triage);
+  const seenBy = [triage?.text ?? "", her?.read ? howLabel(her.how).text : ""].filter(Boolean).join(" · ") || (her?.noticed ? "remarqué" : "");
+  const triageNote = triage?.note ? `<span class="small muted">${h(triage.note)}</span>` : "";
+  // ce que tes consignes de tri en ont fait (ADR 0243)
+  const rules = [
+    her?.alert ? "Tes consignes de tri demandent de te prévenir de ce mail." : "",
+    her?.filed ? `Rangé dans « ${her.filed} » selon tes consignes de tri.` : "",
+  ].filter(Boolean).map((line) => `<span class="small">${h(line)}</span>`).join("");
+  const knows = her?.noticed || her?.read || summary || v.draft || v.asked || triage?.note || rules;
   const note = knows
-    ? `<div class="mika-note rd-note">${mikaAvatar("sm")}<div class="mn-body"><div class="mn-title">${ico("eye", "xs")}Ce qu'elle en sait${her?.read ? ` · ${h(howLabel(her.how).text)}` : her?.noticed ? " · remarqué" : ""}</div>
-        ${summary}${asked}${draftActions}</div></div>`
+    ? `<div class="mika-note rd-note">${mikaAvatar("sm")}<div class="mn-body"><div class="mn-title">${ico("eye", "xs")}Ce qu'elle en sait${seenBy ? ` · ${h(seenBy)}` : ""}</div>
+        ${summary}${triageNote}${rules}${asked}${draftActions}</div></div>`
     : "";
   const masked = m.html && m.images.remote && !m.images.shown && !v.imagesOnce;
   // « toujours pour cet expéditeur » vaut pour tout le serveur : une de ses propriétaires seulement (l'API : 403 sinon)

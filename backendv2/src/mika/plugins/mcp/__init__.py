@@ -17,7 +17,9 @@ l'appel :
   une initiative due (``calls``, ``prompt``). Refusé ou expiré, elle le sait aussi. En mode pro, la personne regarde
   son travail : une carte dans la conversation s'attend dans la boucle (ADR 0165) — l'outil rend la décision et ce
   que le service a rendu, et elle continue avec ; passé le délai de la carte, ou trop près de la fin de l'épisode,
-  elle reprend comme ailleurs.
+  elle reprend comme ailleurs. Au travail, personne n'est en face (ADR 0255) : la demande garde d'où elle vient, la
+  cible de l'épisode (``origin`` : un projet, un but, une tâche), et son issue revient au travail suivant sur cette
+  cible — remise à son départ, lue quand il aboutit (``episode.started``, ``episode.ended``), puis plus.
 
 Ce qu'elle garde de ce qu'un service rend (``keep``) suit tout ce qui en sort : la réponse porte son plancher
 (``ToolResult.floor``, ``unkept``), et la mémoire le respecte.
@@ -50,6 +52,7 @@ from mika.contracts.runtime import (
     WAITING,
 )
 from mika.kernel.clock import HOUR, MINUTE, US
+from mika.kernel.episode import Outcome
 from mika.kernel.events import Content, Payload
 from mika.kernel.faculty import Faculty, ToolResult, ToolSpec
 from mika.kernel.frame import Frame
@@ -60,12 +63,12 @@ from mika.vocab.access import ALONE, KEEP_FLOORS, KINDS_OF, NO
 # où elle s'en servirait, qui une ligne désigne, quand elle vaut : la règle partagée (ADR 0131, 0133)
 from mika.vocab.access import moment as moment
 from mika.vocab.access import situation as situation
-from mika.vocab.episodes import CONVERSATIONAL, PRO, WORKING
+from mika.vocab.episodes import CONVERSATIONAL, PRO, WORKING, is_work_target
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
 from mika.vocab.rights import Rights, grants_of, rights_of, tool_allowance
 
-FAMILY = "mcp"
+FAMILY = c.FAMILY
 #: quand une famille d'épisodes d'un serveur sert (``vocab.access``) ; une tâche prend les lots qu'elle choisit — un
 #: brouillon de mail ou de Teams n'en prend aucun
 EPISODES: Mapping[str, frozenset[str]] = KINDS_OF
@@ -85,6 +88,9 @@ REQUESTS_KEPT = 100
 #: ce qu'on garde d'une réponse (le contenu journalisé)
 ANSWER_KEPT = 8000
 PROVENANCE = "mcp:"
+#: au travail, un épisode reçoit au plus tant d'issues de ses demandes d'avant (les plus anciennes d'abord : les
+#: autres attendent le travail suivant, ADR 0255)
+BACK_MAX = 4
 
 
 class ServerSeen(Payload):
@@ -126,6 +132,14 @@ class Request:
     done_at: int = 0
     text_ref: str = ""
     told: bool = False
+    #: d'où vient une demande faite au travail : la cible de l'épisode (``project:12``, ``goal:7``, une tâche) — là
+    #: où son issue reviendra (ADR 0255) ; vide en conversation
+    origin: str = ""
+    #: l'épisode de travail, parti sur cette cible après l'issue, dont le prompt la montre ; vide tant qu'aucun n'est
+    #: parti, et de nouveau s'il n'a pas abouti
+    shown_in: str = ""
+    #: cet épisode a abouti : l'issue est lue, elle ne se remontre plus
+    seen: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,7 +148,10 @@ class McpState:
     requests: FrozenDict[int, Request] = field(default_factory=FrozenDict)
 
 
-MCP = Faculty("mcp", state=McpState, init=lambda p: McpState())
+#: v2 : une demande faite au travail garde d'où elle vient, l'épisode qui montre son issue et si elle est lue
+#:     (``origin``, ``shown_in``, ``seen`` : ADR 0255). L'état se reconstruit du journal ; une demande d'avant, qui
+#:     ne disait pas d'où elle venait, ne revient à aucun travail.
+MCP = Faculty("mcp", state=McpState, init=lambda p: McpState(), state_version=2)
 MCP.declare(*c.ALL)
 STATUS = MCP.event("status", Status)
 
@@ -160,7 +177,7 @@ def _proposed(s: McpState, e: Any, cx: Any) -> McpState:
                   target=str(args.get("target") or ""), approval=str(args.get("approval") or ""), at=e.at,
                   expires=rt.arg_int(args, rt.EXPIRES), request=str(args.get("request") or ""),
                   args_json=d.args_json, context=d.context, keep=str(args.get("keep") or ""),
-                  status=WAITING if d.approval else APPROVED)
+                  status=WAITING if d.approval else APPROVED, origin=str(args.get("origin") or ""))
     return replace(s, requests=_keep(s.requests.set(e.seq, req)))
 
 
@@ -211,6 +228,45 @@ def _uttered(s: McpState, e: Any, cx: Any) -> McpState:
         req = requests.get(n)
         if req is not None and req.status in FINAL and not req.told:
             requests = requests.set(n, replace(req, told=True))
+    return s if requests is s.requests else replace(s, requests=requests)
+
+
+def origin_of(episode: Any) -> str:
+    """D'où vient une demande faite au travail : la cible de l'épisode quand ce n'est pas quelqu'un (un projet, un
+    but, une tâche) — c'est là que son issue reviendra (ADR 0255). Vide quand une personne est en face : c'est à elle
+    qu'elle le dira."""
+    target = (episode.target if episode is not None else None) or ""
+    return target if is_work_target(target) else ""
+
+
+@MCP.reducer(rt.EPISODE_STARTED)
+def _work_started(s: McpState, e: Any, cx: Any) -> McpState:
+    """Un travail part sur une cible où elle avait fait des demandes : leurs issues déjà là, pas encore lues, sont
+    pour lui — ``BACK_MAX`` au plus, les plus anciennes d'abord ; les autres attendent le suivant. Une issue remise à
+    un épisode d'avant qui n'a rien réglé passe à celui-ci."""
+    origin = e.data.target or ""
+    if not is_work_target(origin):
+        return s
+    due = sorted((r for r in s.requests.values() if r.origin == origin and r.status in FINAL and not r.seen),
+                 key=lambda r: r.proposal)[:BACK_MAX]
+    requests = s.requests
+    for r in due:
+        if r.shown_in != e.correlation:
+            requests = requests.set(r.proposal, replace(r, shown_in=e.correlation))
+    return s if requests is s.requests else replace(s, requests=requests)
+
+
+@MCP.reducer(rt.EPISODE_ENDED)
+def _work_ended(s: McpState, e: Any, cx: Any) -> McpState:
+    """Ce travail a abouti : les issues que son prompt montrait sont lues, elles ne se remontrent plus. En panne,
+    devancé, interrompu ou muet, il n'a rien réglé : elles restent à lire, le travail suivant les reprend."""
+    if not is_work_target(e.data.target):
+        return s
+    done = e.data.outcome == Outcome.DONE
+    requests = s.requests
+    for n, r in s.requests.items():
+        if r.shown_in == e.correlation and not r.seen:
+            requests = requests.set(n, replace(r, seen=True) if done else replace(r, shown_in=""))
     return s if requests is s.requests else replace(s, requests=requests)
 
 
@@ -305,12 +361,16 @@ async def _call(t: Any, args: ExternalArgs, ctx: Any, keep: str) -> ToolResult:
 
 async def _ask(t: Any, level: str, args: ExternalArgs, ctx: Any, keep: str) -> ToolResult:
     """Un appel qui demande un accord : il propose l'appel (rien ne part) et le dit. La carte va à la personne en
-    face (``carte``), ou à sa propriétaire quand c'est elle en face (``toi``) ; sinon, l'opérateur décide."""
+    face (``carte``), ou à sa propriétaire quand c'est elle en face (``toi``) ; sinon, l'opérateur décide. Au
+    travail, la demande garde d'où elle vient (``origin``) : son issue reviendra au travail suivant, au même endroit."""
     ep = ctx.frame.episode
     target, in_chat = rt.approval_route(ep, ctx.frame.audience, level)
+    origin = origin_of(ep)
     data = args.model_dump()
-    payload = rt.call_request({"server": t.server, "remote": t.remote, "args": data, "fingerprint": t.fingerprint,
-                               "keep": keep}, PINNED, request=f"{ctx.episode_id}:{ctx.call_key or ctx.call_id}",
+    call = {"server": t.server, "remote": t.remote, "args": data, "fingerprint": t.fingerprint, "keep": keep}
+    if origin:
+        call["origin"] = origin
+    payload = rt.call_request(call, PINNED, request=f"{ctx.episode_id}:{ctx.call_key or ctx.call_id}",
                               target=target, in_chat=in_chat, now=ctx.frame.now)
     shown = inert(json.dumps(data, ensure_ascii=False, sort_keys=True), 300)
     commit = await ctx.propose(rt.EFFECT_PROPOSED.draft(
@@ -325,6 +385,8 @@ async def _ask(t: Any, level: str, args: ExternalArgs, ctx: Any, keep: str) -> T
                                   (payload[rt.EXPIRES] - ctx.frame.now) / US + EXPIRY_GRACE_S)
         if decided is not None:
             return _decided(decided.state(MCP.name).requests[proposal], ctx)
+    if origin:  # au travail, c'est l'opérateur qui décide ; l'issue reviendra ici, au travail suivant
+        return ToolResult(content=phrase("mcp.work.asked", who=phrase("approvals.operator")))
     who = phrase("approvals.in_chat") if in_chat else phrase("approvals.operator")
     return ToolResult(content=phrase("approvals.asked", who=who))
 

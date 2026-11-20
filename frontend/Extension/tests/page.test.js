@@ -150,3 +150,34 @@ test("deux identifiants de la même conversation", () => {
   assert.equal(P.sameConversation(GROUP, DM), false);
   assert.equal(P.sameConversation("", ""), false);
 });
+
+// ── La synchro ciblée (ADR 0251) ─────────────────────────────────────────────
+
+test("la marque d'une fiche de conversation change quand un message y arrive, y est retouché ou retiré", () => {
+  const r = { id: GROUP, version: 7, threadVersion: 3, lastUpdatedMessageVersion: 100, lastMessageTimeUtc: 1759737600000 };
+  const m = P.conversationMarker(r);
+  assert.equal(P.conversationMarker({ ...r }), m, "la même fiche, la même marque");
+  assert.notEqual(P.conversationMarker({ ...r, lastMessageTimeUtc: 1759737600001 }), m);
+  assert.notEqual(P.conversationMarker({ ...r, lastUpdatedMessageVersion: 101 }), m, "une retouche");
+  assert.equal(P.conversationMarker(null), "");
+});
+
+test("ce qu'il faut relire : rien si la fiche n'a pas bougé, depuis le curseur, la fenêtre, ou tout", () => {
+  const opts = { windowMs: 86_400_000, overlapMs: 60_000 };
+  const now = 1_800_000_000_000;
+  assert.equal(P.syncSince("m1", { w: 1_799_000_000_000, m: "m1" }, now, opts), null);
+  assert.equal(P.syncSince("m2", { w: 1_799_000_000_000, m: "m1" }, now, opts), 1_799_000_000_000 - 60_000);
+  assert.equal(P.syncSince("m2", undefined, now, opts), now - 86_400_000, "une conversation inconnue : la fenêtre");
+  assert.equal(P.syncSince("m2", { w: 0, m: "" }, now, opts), now - 86_400_000);
+  assert.equal(P.syncSince("m1", { w: 1_799_000_000_000, m: "m1" }, now, { ...opts, history: true }), 0);
+  assert.equal(P.syncSince("", { w: 5, m: "" }, now, opts), 0, "sans marque, on relit toujours (du curseur)");
+});
+
+test("le curseur n'avance jamais en arrière, et ne prend la marque que si les fils ont suivi la fiche", () => {
+  assert.deepEqual(P.advanceCursor({ w: 500, m: "a" }, 440, 0, "b"), { w: 500, m: "b" });
+  assert.deepEqual(P.advanceCursor({ w: 500, m: "a" }, 440, 900, "b"), { w: 900, m: "b" });
+  assert.deepEqual(P.advanceCursor(undefined, 300, 0, "b"), { w: 300, m: "b" }, "une inconnue part de la fenêtre lue");
+  assert.equal(P.caughtUp({ lastMessageTimeUtc: 10_000 }, 9_000, 5_000), true);
+  assert.equal(P.caughtUp({ lastMessageTimeUtc: 10_000 }, 4_000, 5_000), false, "la fiche est en avance sur ses fils");
+  assert.equal(P.caughtUp({}, 0, 5_000), true);
+});

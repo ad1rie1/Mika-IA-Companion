@@ -1,0 +1,2523 @@
+{
+ "objects": [
+  {
+   "offers": [
+    {
+     "priceSpecification": [
+      {
+       "additionalInformation": {
+        "@fr": "Entrée libre"
+       },
+       "priceCurrency": "EUR"
+      }
+     ]
+    }
+   ],
+   "hasBookingContact": [
+    {
+     "telephone": [
+      "+33 3 59 73 96 00"
+     ]
+    }
+   ],
+   "hasBeenCreatedBy": {
+    "legalName": "Hauts-de-France Tourisme",
+    "identifier": "d078e000-5ccd-4efd-8ad5-ab188b8e57f7"
+   },
+   "isLocatedAt": [
+    {
+     "geo": {
+      "latitude": 50.620688,
+      "longitude": 3.132087
+     },
+     "address": [
+      {
+       "hasAddressCity": {
+        "insee": "59009",
+        "isPartOfDepartment": {
+         "isPartOfRegion": {
+          "isPartOfCountry": {
+           "label": {
+            "@fr": "France"
+           }
+          },
+          "insee": "32",
+          "label": {
+           "@fr": "Hauts-de-France"
+          }
+         },
+         "insee": "59",
+         "label": {
+          "@fr": "Nord"
+         }
+        },
+        "label": {
+         "@fr": "Villeneuve-d'Ascq"
+        }
+       },
+       "streetAddress": [
+        "1 Place de l'hôtel de ville"
+       ],
+       "postalCode": "59491",
+       "addressLocality": "Villeneuve-d'Ascq"
+      }
+     ]
+    }
+   ],
+   "lastUpdate": "2026-09-05",
+   "hasDescription": [
+    {
+     "description": {
+      "@fr": "L’exposition « Ça capte ! » vous invite à explorer l’histoire des télécommunications et les grandes transformations du numérique. Entre objets emblématiques, dispositifs interactifs et manipulations, découvrez comment les technologies ont changé notre façon de communiquer, d’apprendre, de travailler et de vivre ensemble.  \nUne exposition qui interroge notre rapport au numérique et ouvre la réflexion : quel numérique souhaitons-nous pour demain ?  \nExposition conçue avec Orange, l’association Proscitec qui valorise le patrimoine des métiers et des industries en Hauts-de-France et le Musée régional des télécommunications et de la radio à Marcq-en-Barœul."
+     },
+     "shortDescription": {
+      "@fr": "L’exposition « Ça capte ! » vous invite à explorer l’histoire des télécommunications et les grandes transformations du numérique. Entre objets emblématiques, dispositifs interactifs et manipulations, découvrez comment les technologies ont changé notre façon de communiquer, d’apprendre, de travailler et de vivre ensemble.  \nUne exposition qui interroge notre rapport au numérique et ouvre la réflexion : quel numérique souhaitons-nous pour demain ?  \nExposition conçue avec Orange, l’association Proscitec qui valorise le patrimoine des métiers et des industries en Hauts-de-France et le Musée régional des télécommunications et de la radio à Marcq-en-Barœul."
+     }
+    }
+   ],
+   "label": {
+    "@fr": "Ça capte !"
+   },
+   "type": [
+    "FairOrShow",
+    "Event",
+    "EntertainmentAndEvent",
+    "PointOfInterest",
+    "SaleEvent"
+   ],
+   "hasContact": [
+    {
+     "telephone": [
+      "+33 3 59 73 96 00"
+     ]
+    }
+   ],
+   "takesPlaceAt": [
+    {
+     "endDate": "2026-11-18",
+     "startTime": "14:00",
+     "endTime": "18:00",
+     "startDate": "2026-11-18"
+    },
+    {
+     "endDate": "2026-11-21",
+     "startTime": "14:00",
+     "endTime": "18:00",
+     "startDate": "2026-11-21"
+    },
+    {
+     "endDate": "2026-11-22",
+     "startTime": "14:00",
+     "endTime": "18:00",
+     "startDate": "2026-11-22"
+    },
+    {
+     "endDate": "2026-11-25",
+     "startTime": "14:00",
+     "endTime": "18:00",
+     "startDate": "2026-11-25"
+    },
+    {
+     "endDate": "2026-11-28",
+     "startTime": "14:00",
+     "endTime": "18:00",
+     "startDate": "2026-11-28"
+    },
+    {
+     "endDate": "2026-11-29",
+     "startTime": "14:00",
+     "endTime": "18:00",
+     "startDate": "2026-11-29"
+    },
+    {
+     "endDate": "2026-12-02",
+     "startTime": "14:00",
+     "endTime": "18:00",
+     "startDate": "2026-12-02"
+    },
+    {
+     "endDate": "2026-12-05",
+     "startTime": "14:00",
+     "endTime": "18:00",
+     "startDate": "2026-12-05"
+    },
+    {
+     "endDate": "2026-12-06",
+     "startTime": "14:00",
+     "endTime": "18:00",
+     "startDate": "2026-12-06"
+    },
+    {
+     "endDate": "2026-12-09",
+     "startTime": "14:00",
+     "endTime": "18:00",
+     "startDate": "2026-12-09"
+    },
+    {
+     "endDate": "2026-12-12",
+     "startTime": "14:00",
+     "endTime": "18:00",
+     "startDate": "2026-12-12"
+    },
+    {
+     "endDate": "2026-12-13",
+     "startTime": "14:00",
+     "endTime": "18:00",
+     "startDate": "2026-12-13"
+    }
+   ],
+   "uuid": "00853d74-3851-3046-98e1-c8152031c93d"
+  },
+  {
+   "offers": [
+    {
+     "priceSpecification": [
+      {
+       "additionalInformation": {
+        "@fr": "De 65€ à 45€"
+       },
+       "priceCurrency": "EUR"
+      }
+     ]
+    }
+   ],
+   "hasBookingContact": [
+    {
+     "telephone": [
+      "+33 3 20 24 07 07"
+     ]
+    }
+   ],
+   "hasBeenCreatedBy": {
+    "legalName": "Hauts-de-France Tourisme",
+    "identifier": "d078e000-5ccd-4efd-8ad5-ab188b8e57f7"
+   },
+   "isLocatedAt": [
+    {
+     "geo": {
+      "latitude": 50.69069,
+      "longitude": 3.163479
+     },
+     "address": [
+      {
+       "hasAddressCity": {
+        "insee": "59512",
+        "isPartOfDepartment": {
+         "isPartOfRegion": {
+          "isPartOfCountry": {
+           "label": {
+            "@fr": "France"
+           }
+          },
+          "insee": "32",
+          "label": {
+           "@fr": "Hauts-de-France"
+          }
+         },
+         "insee": "59",
+         "label": {
+          "@fr": "Nord"
+         }
+        },
+        "label": {
+         "@fr": "Roubaix"
+        }
+       },
+       "streetAddress": [
+        "31 rue de l'Epeule Roubaix"
+       ],
+       "postalCode": "59100",
+       "addressLocality": "Roubaix"
+      }
+     ]
+    }
+   ],
+   "lastUpdate": "2026-06-11",
+   "hasDescription": [
+    {
+     "description": {
+      "@fr": "Révélé en 1968 avec _La Cavalerie_, il n'a jamais vraiment quitté nos radios, nos salons, ni nos mémoires.  \n_Ce n'est rien, Ma préférence, Femmes je vous aime, Fais-moi une place_… Ces chansons ne sont pas seulement des tubes : elles sont les bandes-son d'instants que l'on n'oublie pas. Cinquante ans de carrière, et cette façon unique de chanter l'amour comme si c'était toujours la première fois.  \nAvec _Une Vie_, son 28e album réalisé par **Benjamin Biolay**, Julien Clerc se dévoile comme rarement. Il confie ses mots à **Carla Bruni, Serge Lama**, **Gaëtan Roussel, Didier Barbelivien** ou **David McNeil** pour mieux dire l'essentiel : l'amour, le temps qui passe, ce qu'on transmet, ce qu'on garde. Un disque qui ne ressemble qu'à lui, intime, élégant, profondément humain.  \nIl y a quarante ans, il devenait le premier artiste français à remplir le Palais Omnisports de Bercy. Le 9 octobre 2027, il y fêtera ses 80 ans. Entre ces deux dates, toute une vie et des millions de gens qui l'ont chanté avec lui. Avant ce rendez-vous, dès février 2026, il reprend la route : d'abord dans les théâtres, pour des soirées au plus proche du public, puis dans les Zéniths et les Arenas de France.  \nCe soir au Colisée de Roubaix, avec son répertoire culte et ses nouvelles chansons portées par une énergie de scène intacte, Julien Clerc ne donnera pas simplement un concert.  \nCe sera un rendez-vous."
+     },
+     "shortDescription": {
+      "@fr": "Révélé en 1968 avec _La Cavalerie_, il n'a jamais vraiment quitté nos radios, nos salons, ni nos mémoires.  \n_Ce n'est rien, Ma préférence, Femmes je vous aime, Fais-moi une place_… Ces chansons ne sont pas seulement des tubes : elles sont les bandes-son d'instants que l'on n'oublie pas. Cinquante ans de carrière, et cette façon unique de chanter l'amour comme si c'était toujours la première fois.  \nAvec _Une Vie_, son 28e album réalisé par **Benjamin Biolay**, Julien Clerc se dévoile comme rarement. Il confie ses mots à **Carla Bruni, Serge Lama**, **Gaëtan Roussel, Didier Barbelivien** ou **David McNeil** pour mieux dire l'essentiel : l'amour, le temps qui passe, ce qu'on transmet, ce qu'on garde. Un disque qui ne ressemble qu'à lui, intime, élégant, profondément humain.  \nIl y a quarante ans, il devenait le premier artiste français à remplir le Palais Omnisports de Bercy. Le 9 octobre 2027, il y fêtera ses 80 ans. Entre ces deux dates, toute une vie et des millions de gens qui l'ont chanté avec lui. Avant ce rendez-vous, dès février 2026, il reprend la route : d'abord dans les théâtres, pour des soirées au plus proche du public, puis dans les Zéniths et les Arenas de France.  \nCe soir au Colisée de Roubaix, avec son répertoire culte et ses nouvelles chansons portées par une énergie de scène intacte, Julien Clerc ne donnera pas simplement un concert.  \nCe sera un rendez-vous."
+     }
+    }
+   ],
+   "label": {
+    "@fr": "Julien Clerc"
+   },
+   "type": [
+    "PointOfInterest",
+    "MusicEvent",
+    "EntertainmentAndEvent",
+    "Concert",
+    "ShowEvent",
+    "Event",
+    "CulturalEvent"
+   ],
+   "hasContact": [
+    {
+     "telephone": [
+      "+33 3 20 24 07 07"
+     ]
+    }
+   ],
+   "takesPlaceAt": [
+    {
+     "endDate": "2026-11-22",
+     "startTime": "17:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-22"
+    }
+   ],
+   "uuid": "04c86f1e-6878-3d44-b732-1b8703baf69d"
+  },
+  {
+   "offers": [
+    {
+     "priceSpecification": [
+      {
+       "priceCurrency": "EUR"
+      }
+     ]
+    }
+   ],
+   "hasBookingContact": [
+    {
+     "telephone": [
+      "+33 3 20 19 68 68"
+     ]
+    }
+   ],
+   "hasBeenCreatedBy": {
+    "legalName": "Hauts-de-France Tourisme",
+    "identifier": "d078e000-5ccd-4efd-8ad5-ab188b8e57f7"
+   },
+   "isLocatedAt": [
+    {
+     "geo": {
+      "latitude": 50.637583,
+      "longitude": 3.148595
+     },
+     "address": [
+      {
+       "hasAddressCity": {
+        "insee": "59009",
+        "isPartOfDepartment": {
+         "isPartOfRegion": {
+          "isPartOfCountry": {
+           "label": {
+            "@fr": "France"
+           }
+          },
+          "insee": "32",
+          "label": {
+           "@fr": "Hauts-de-France"
+          }
+         },
+         "insee": "59",
+         "label": {
+          "@fr": "Nord"
+         }
+        },
+        "label": {
+         "@fr": "Villeneuve-d'Ascq"
+        }
+       },
+       "streetAddress": [
+        "1 allée du Musée VIlleneuve-d'Ascq"
+       ],
+       "postalCode": "59650",
+       "addressLocality": "Villeneuve-d'Ascq"
+      }
+     ]
+    }
+   ],
+   "lastUpdate": "2026-10-20",
+   "hasDescription": [
+    {
+     "description": {
+      "@fr": "**Le LaM repense l'accrochage de sa collection avec un nouveau parcours thématique et original intitulé** _**Obsession**_**.** \n\nPensé comme une exposition, il explore la répétition, la permanence et l'intensité créatrice tout au long des XXe et XXIe siècles à travers un dialogue inédit entre art moderne, art brut et art contemporain. \n\nCertaines salles monographiques dédiées à de grandes figures de l'art telles que Amedeo Modigliani, Henry Darger ou Miriam Cahn alternent avec des espaces thématiques offrant une relecture vivante et renouvelée de la collection. \n\nPour enrichir cette expérience, des pièces exceptionnelles du Centre national des arts plastiques (Cnap), et de récentes acquisitions, comme un rare dessin d'Amedeo Modigliani, viennent ponctuer le parcours, créant de nouveaux rapprochements et des dialogues inattendus.\n\n**Deuxième partie**\n\nLe second volet de ce parcours, présenté dans le bâtiment réalisé par Manuelle Gautrand est principalement consacré à l’art brut, il développera la thématique de l’obsession à travers plusieurs axes, tels que le rituel, l’écriture automatique, le spiritisme, l’arpentage, le jardin ou encore les inventeurs. Vous pourrez y retrouver un ensemble monographique d’oeuvres d’Auguste Forestier, les artistes Spirites, les totems de Théo Wiesen, mais aussi d’autres œuvres majeures de la collection du musée.\n\n**Commissariat**   \n**Sébastien Faucon**, Directeur du LaM  \n**Marie-Amélie Senot**, Responsable du fonds d'art contemporain\n\n![](/sites/default/files/inline-images/CNAP_logo%20double%20ligne%20fond%20transparent%20300%20dpi.png)  \n \n\nVictor Simon, _La toile judéo-chrétienne_(détail) 1937. Huile sur toile ; 196 x300,2 x 3cm. Collection du LaM. Achat en 2019 avec le soutien du Fonds Régional d’Acquisition des Musées (État et Région Hauts-de- France) © Droits réservés. Photo : N. Dewitte/LaM"
+     },
+     "shortDescription": {
+      "@fr": "**Le LaM repense l'accrochage de sa collection avec un nouveau parcours thématique et original intitulé** _**Obsession**_**.** \n\nPensé comme une exposition, il explore la répétition, la permanence et l'intensité créatrice tout au long des XXe et XXIe siècles à travers un dialogue inédit entre art moderne, art brut et art contemporain. \n\nCertaines salles monographiques dédiées à de grandes figures de l'art telles que Amedeo Modigliani, Henry Darger ou Miriam Cahn alternent avec des espaces thématiques offrant une relecture vivante et renouvelée de la collection. \n\nPour enrichir cette expérience, des pièces exceptionnelles du Centre national des arts plastiques (Cnap), et de récentes acquisitions, comme un rare dessin d'Amedeo Modigliani, viennent ponctuer le parcours, créant de nouveaux rapprochements et des dialogues inattendus.\n\n**Deuxième partie**\n\nLe second volet de ce parcours, présenté dans le bâtiment réalisé par Manuelle Gautrand est principalement consacré à l’art brut, il développera la thématique de l’obsession à travers plusieurs axes, tels que le rituel, l’écriture automatique, le spiritisme, l’arpentage, le jardin ou encore les inventeurs. Vous pourrez y retrouver un ensemble monographique d’oeuvres d’Auguste Forestier, les artistes Spirites, les totems de Théo Wiesen, mais aussi d’autres œuvres majeures de la collection du musée.\n\n**Commissariat**   \n**Sébastien Faucon**, Directeur du LaM  \n**Marie-Amélie Senot**, Responsable du fonds d'art contemporain\n\n![](/sites/default/files/inline-images/CNAP_logo%20double%20ligne%20fond%20transparent%20300%20dpi.png)  \n \n\nVictor Simon, _La toile judéo-chrétienne_(détail) 1937. Huile sur toile ; 196 x300,2 x 3cm. Collection du LaM. Achat en 2019 avec le soutien du Fonds Régional d’Acquisition des Musées (État et Région Hauts-de- France) © Droits réservés. Photo : N. Dewitte/LaM"
+     }
+    }
+   ],
+   "label": {
+    "@fr": "Obsession"
+   },
+   "type": [
+    "SaleEvent",
+    "Event",
+    "FairOrShow",
+    "PointOfInterest",
+    "EntertainmentAndEvent"
+   ],
+   "hasContact": [
+    {
+     "telephone": [
+      "+33 3 20 19 68 68"
+     ]
+    }
+   ],
+   "takesPlaceAt": [
+    {
+     "endDate": "2026-11-17",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-17"
+    },
+    {
+     "endDate": "2026-11-18",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-18"
+    },
+    {
+     "endDate": "2026-11-19",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-19"
+    },
+    {
+     "endDate": "2026-11-20",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-20"
+    },
+    {
+     "endDate": "2026-11-21",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-21"
+    },
+    {
+     "endDate": "2026-11-22",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-22"
+    },
+    {
+     "endDate": "2026-11-24",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-24"
+    },
+    {
+     "endDate": "2026-11-25",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-25"
+    },
+    {
+     "endDate": "2026-11-26",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-26"
+    },
+    {
+     "endDate": "2026-11-27",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-27"
+    },
+    {
+     "endDate": "2026-11-28",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-28"
+    },
+    {
+     "endDate": "2026-11-29",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-29"
+    }
+   ],
+   "uuid": "05b31009-501b-36e0-a24a-cbb1f7144b61"
+  },
+  {
+   "offers": [
+    {
+     "priceSpecification": [
+      {
+       "additionalInformation": {
+        "@fr": "Gratuit pour tous, sur réservation"
+       },
+       "priceCurrency": "EUR"
+      }
+     ]
+    }
+   ],
+   "hasBookingContact": [
+    {
+     "telephone": [
+      "+33 7 84 07 82 41"
+     ]
+    }
+   ],
+   "hasBeenCreatedBy": {
+    "legalName": "Hauts-de-France Tourisme",
+    "identifier": "d078e000-5ccd-4efd-8ad5-ab188b8e57f7"
+   },
+   "isLocatedAt": [
+    {
+     "geo": {
+      "latitude": 50.631017,
+      "longitude": 3.070932
+     },
+     "address": [
+      {
+       "hasAddressCity": {
+        "insee": "59350",
+        "isPartOfDepartment": {
+         "isPartOfRegion": {
+          "isPartOfCountry": {
+           "label": {
+            "@fr": "France"
+           }
+          },
+          "insee": "32",
+          "label": {
+           "@fr": "Hauts-de-France"
+          }
+         },
+         "insee": "59",
+         "label": {
+          "@fr": "Nord"
+         }
+        },
+        "label": {
+         "@fr": "Lille"
+        }
+       },
+       "streetAddress": [
+        "Place Augustin Laurent Lille"
+       ],
+       "postalCode": "59000",
+       "addressLocality": "Lille"
+      }
+     ]
+    }
+   ],
+   "lastUpdate": "2026-10-10",
+   "hasDescription": [
+    {
+     "description": {
+      "@fr": "Roger Salengro appartient à la catégorie des maires bâtisseurs qui ont marqué l’entre-deux-guerres. Il s’engage pour le développement de la ville et du bien-être de la classe ouvrière et fait entrer Lille dans la modernité urbanistique et sociale du 20e siècle.  \nAvec Thibault Tellier, professeur d’université à Sciences Po Rennes"
+     },
+     "shortDescription": {
+      "@fr": "Roger Salengro appartient à la catégorie des maires bâtisseurs qui ont marqué l’entre-deux-guerres. Il s’engage pour le développement de la ville et du bien-être de la classe ouvrière et fait entrer Lille dans la modernité urbanistique et sociale du 20e siècle.  \nAvec Thibault Tellier, professeur d’université à Sciences Po Rennes"
+     }
+    }
+   ],
+   "label": {
+    "@fr": "Roger Salengro, maire bâtisseur"
+   },
+   "type": [
+    "BusinessEvent",
+    "Congress",
+    "Event",
+    "PointOfInterest",
+    "EntertainmentAndEvent"
+   ],
+   "hasContact": [
+    {
+     "telephone": [
+      "+33 7 84 07 82 41"
+     ]
+    }
+   ],
+   "takesPlaceAt": [
+    {
+     "endDate": "2026-11-20",
+     "startTime": "18:00",
+     "endTime": "19:30",
+     "startDate": "2026-11-20"
+    }
+   ],
+   "uuid": "0da4a8b2-0136-3a52-9686-d1f879c8168b"
+  },
+  {
+   "offers": [
+    {
+     "priceSpecification": [
+      {
+       "priceCurrency": "EUR"
+      }
+     ]
+    }
+   ],
+   "hasBookingContact": [
+    {
+     "telephone": [
+      "+33 3 20 19 68 68"
+     ]
+    }
+   ],
+   "hasBeenCreatedBy": {
+    "legalName": "Hauts-de-France Tourisme",
+    "identifier": "d078e000-5ccd-4efd-8ad5-ab188b8e57f7"
+   },
+   "isLocatedAt": [
+    {
+     "geo": {
+      "latitude": 50.637583,
+      "longitude": 3.148595
+     },
+     "address": [
+      {
+       "hasAddressCity": {
+        "insee": "59009",
+        "isPartOfDepartment": {
+         "isPartOfRegion": {
+          "isPartOfCountry": {
+           "label": {
+            "@fr": "France"
+           }
+          },
+          "insee": "32",
+          "label": {
+           "@fr": "Hauts-de-France"
+          }
+         },
+         "insee": "59",
+         "label": {
+          "@fr": "Nord"
+         }
+        },
+        "label": {
+         "@fr": "Villeneuve-d'Ascq"
+        }
+       },
+       "streetAddress": [
+        "1 allée du Musée VIlleneuve-d'Ascq"
+       ],
+       "postalCode": "59650",
+       "addressLocality": "Villeneuve-d'Ascq"
+      }
+     ]
+    }
+   ],
+   "lastUpdate": "2026-08-06",
+   "hasDescription": [
+    {
+     "description": {
+      "@fr": "Une fois par mois, le musée se transforme en terrain de jeu où la collection se découvre en famille et de manière décalée. \n\nLes enfants se déguisent, jouent et sont invités à participer à des activités artistiques. À chaque rendez-vous, son thème et ses surprises associées !"
+     },
+     "shortDescription": {
+      "@fr": "Une fois par mois, le musée se transforme en terrain de jeu où la collection se découvre en famille et de manière décalée. \n\nLes enfants se déguisent, jouent et sont invités à participer à des activités artistiques. À chaque rendez-vous, son thème et ses surprises associées !"
+     }
+    }
+   ],
+   "label": {
+    "@fr": "Mercredi tout est permis"
+   },
+   "type": [
+    "Event",
+    "Traineeship",
+    "Festival",
+    "ShowEvent",
+    "Product",
+    "SocialEvent",
+    "EntertainmentAndEvent",
+    "CulturalEvent",
+    "PointOfInterest",
+    "IntroductionCourse",
+    "Carnival",
+    "Parade",
+    "Visit",
+    "Practice"
+   ],
+   "hasContact": [
+    {
+     "telephone": [
+      "+33 3 20 19 68 68"
+     ]
+    }
+   ],
+   "takesPlaceAt": [
+    {
+     "endDate": "2026-12-09",
+     "startTime": "15:00",
+     "endTime": "17:30",
+     "startDate": "2026-12-09"
+    },
+    {
+     "endDate": "2027-01-13",
+     "startTime": "15:00",
+     "endTime": "17:30",
+     "startDate": "2027-01-13"
+    }
+   ],
+   "uuid": "19cd4802-0323-3491-9fa2-0cf439f10b6c"
+  },
+  {
+   "offers": [
+    {
+     "priceSpecification": [
+      {
+       "priceCurrency": "EUR"
+      }
+     ]
+    }
+   ],
+   "hasBookingContact": [
+    {
+     "telephone": [
+      "+33 3 20 19 68 68"
+     ]
+    }
+   ],
+   "hasBeenCreatedBy": {
+    "legalName": "Hauts-de-France Tourisme",
+    "identifier": "d078e000-5ccd-4efd-8ad5-ab188b8e57f7"
+   },
+   "isLocatedAt": [
+    {
+     "geo": {
+      "latitude": 50.637583,
+      "longitude": 3.148595
+     },
+     "address": [
+      {
+       "hasAddressCity": {
+        "insee": "59009",
+        "isPartOfDepartment": {
+         "isPartOfRegion": {
+          "isPartOfCountry": {
+           "label": {
+            "@fr": "France"
+           }
+          },
+          "insee": "32",
+          "label": {
+           "@fr": "Hauts-de-France"
+          }
+         },
+         "insee": "59",
+         "label": {
+          "@fr": "Nord"
+         }
+        },
+        "label": {
+         "@fr": "Villeneuve-d'Ascq"
+        }
+       },
+       "streetAddress": [
+        "1 allée du Musée VIlleneuve-d'Ascq"
+       ],
+       "postalCode": "59650",
+       "addressLocality": "Villeneuve-d'Ascq"
+      }
+     ]
+    }
+   ],
+   "lastUpdate": "2026-08-19",
+   "hasDescription": [
+    {
+     "description": {
+      "@fr": "**Le LaM repense l'accrochage de sa collection avec un nouveau parcours thématique et original intitulé** _**Obsession**_**.** \n\nPensé comme une exposition, il explore la répétition, la permanence et l'intensité créatrice tout au long des XXe et XXIe siècles à travers un dialogue inédit entre art moderne, art brut et art contemporain. \n\nCertaines salles monographiques dédiées à de grandes figures de l'art telles que Amedeo Modigliani, Henry Darger ou Miriam Cahn alternent avec des espaces thématiques offrant une relecture vivante et renouvelée de la collection. \n\nPour enrichir cette expérience, des pièces exceptionnelles du Centre national des arts plastiques (Cnap), et de récentes acquisitions, comme un rare dessin d'Amedeo Modigliani, viennent ponctuer le parcours, créant de nouveaux rapprochements et des dialogues inattendus.\n\n**Deuxième partie**\n\nLe second volet de ce parcours, présenté dans le bâtiment réalisé par Manuelle Gautrand est principalement consacré à l’art brut, il développera la thématique de l’obsession à travers plusieurs axes, tels que le rituel, l’écriture automatique, le spiritisme, l’arpentage, le jardin ou encore les inventeurs. Vous pourrez y retrouver un ensemble monographique d’oeuvres d’Auguste Forestier, les artistes Spirites, les totems de Théo Wiesen, mais aussi d’autres œuvres majeures de la collection du musée.\n\n**Commissariat**   \n**Sébastien Faucon**, Directeur du LaM  \n**Marie-Amélie Senot**, Responsable du fonds d'art contemporain\n\n![](/sites/default/files/inline-images/CNAP_logo%20double%20ligne%20fond%20transparent%20300%20dpi.png)  \n \n\nVictor Simon, _La toile judéo-chrétienne_(détail) 1937. Huile sur toile ; 196 x300,2 x 3cm. Collection du LaM. Achat en 2019 avec le soutien du Fonds Régional d’Acquisition des Musées (État et Région Hauts-de- France) © Droits réservés. Photo : N. Dewitte/LaM"
+     },
+     "shortDescription": {
+      "@fr": "**Le LaM repense l'accrochage de sa collection avec un nouveau parcours thématique et original intitulé** _**Obsession**_**.** \n\nPensé comme une exposition, il explore la répétition, la permanence et l'intensité créatrice tout au long des XXe et XXIe siècles à travers un dialogue inédit entre art moderne, art brut et art contemporain. \n\nCertaines salles monographiques dédiées à de grandes figures de l'art telles que Amedeo Modigliani, Henry Darger ou Miriam Cahn alternent avec des espaces thématiques offrant une relecture vivante et renouvelée de la collection. \n\nPour enrichir cette expérience, des pièces exceptionnelles du Centre national des arts plastiques (Cnap), et de récentes acquisitions, comme un rare dessin d'Amedeo Modigliani, viennent ponctuer le parcours, créant de nouveaux rapprochements et des dialogues inattendus.\n\n**Deuxième partie**\n\nLe second volet de ce parcours, présenté dans le bâtiment réalisé par Manuelle Gautrand est principalement consacré à l’art brut, il développera la thématique de l’obsession à travers plusieurs axes, tels que le rituel, l’écriture automatique, le spiritisme, l’arpentage, le jardin ou encore les inventeurs. Vous pourrez y retrouver un ensemble monographique d’oeuvres d’Auguste Forestier, les artistes Spirites, les totems de Théo Wiesen, mais aussi d’autres œuvres majeures de la collection du musée.\n\n**Commissariat**   \n**Sébastien Faucon**, Directeur du LaM  \n**Marie-Amélie Senot**, Responsable du fonds d'art contemporain\n\n![](/sites/default/files/inline-images/CNAP_logo%20double%20ligne%20fond%20transparent%20300%20dpi.png)  \n \n\nVictor Simon, _La toile judéo-chrétienne_(détail) 1937. Huile sur toile ; 196 x300,2 x 3cm. Collection du LaM. Achat en 2019 avec le soutien du Fonds Régional d’Acquisition des Musées (État et Région Hauts-de- France) © Droits réservés. Photo : N. Dewitte/LaM"
+     }
+    }
+   ],
+   "label": {
+    "@fr": "Obsession"
+   },
+   "type": [
+    "FairOrShow",
+    "PointOfInterest",
+    "SaleEvent",
+    "Event",
+    "EntertainmentAndEvent"
+   ],
+   "hasContact": [
+    {
+     "telephone": [
+      "+33 3 20 19 68 68"
+     ]
+    }
+   ],
+   "takesPlaceAt": [
+    {
+     "endDate": "2026-11-17",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-17"
+    },
+    {
+     "endDate": "2026-11-18",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-18"
+    },
+    {
+     "endDate": "2026-11-19",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-19"
+    },
+    {
+     "endDate": "2026-11-20",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-20"
+    },
+    {
+     "endDate": "2026-11-21",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-21"
+    },
+    {
+     "endDate": "2026-11-22",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-22"
+    },
+    {
+     "endDate": "2026-11-24",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-24"
+    },
+    {
+     "endDate": "2026-11-25",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-25"
+    },
+    {
+     "endDate": "2026-11-26",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-26"
+    },
+    {
+     "endDate": "2026-11-27",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-27"
+    },
+    {
+     "endDate": "2026-11-28",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-28"
+    },
+    {
+     "endDate": "2026-11-29",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-29"
+    }
+   ],
+   "uuid": "2bf5e5f0-e514-35eb-a378-eefeeeb78539"
+  },
+  {
+   "offers": [
+    {
+     "priceSpecification": [
+      {
+       "additionalInformation": {
+        "@fr": "Entrée 10€/7€/5€"
+       },
+       "priceCurrency": "EUR"
+      }
+     ]
+    }
+   ],
+   "hasBookingContact": [],
+   "hasBeenCreatedBy": {
+    "legalName": "Hauts-de-France Tourisme",
+    "identifier": "d078e000-5ccd-4efd-8ad5-ab188b8e57f7"
+   },
+   "isLocatedAt": [
+    {
+     "geo": {
+      "latitude": 50.683695,
+      "longitude": 3.162866
+     },
+     "address": [
+      {
+       "hasAddressCity": {
+        "insee": "59512",
+        "isPartOfDepartment": {
+         "isPartOfRegion": {
+          "isPartOfCountry": {
+           "label": {
+            "@fr": "France"
+           }
+          },
+          "insee": "32",
+          "label": {
+           "@fr": "Hauts-de-France"
+          }
+         },
+         "insee": "59",
+         "label": {
+          "@fr": "Nord"
+         }
+        },
+        "label": {
+         "@fr": "Roubaix"
+        }
+       },
+       "streetAddress": [
+        "80 rue de Lille"
+       ],
+       "postalCode": "59100",
+       "addressLocality": "Roubaix"
+      }
+     ]
+    }
+   ],
+   "lastUpdate": "2026-09-12",
+   "hasDescription": [
+    {
+     "description": {
+      "@fr": "Ce concert réunit quatre musiciens dont les parcours se rejoignent au sein de l’Orchestre National de Lille, et qui partagent une même envie : faire entendre la richesse, la souplesse et l’expressivité des cuivres dans un programme où se mêlent esprit français et virtuosité.\n\nLa soirée s’ouvre avec le Trio pour trompette, cor et trombone de Francis Poulenc, une œuvre rare et savoureuse, où l’humour, l’élégance mélodique et la vivacité rythmique du compositeur se déploient dans un dialogue aussi brillant qu’inattendu. Poulenc y joue avec les couleurs des cuivres, les opposant, les réunissant, les faisant danser dans une écriture à la fois raffinée et pleine de caractère.\n\nChacun des trois cuivres rejoint ensuite la pianiste pour une œuvre soliste, permettant d’explorer des univers contrastés : lyrisme, poésie ou virtuosité, ces moments mettent en lumière la personnalité musicale de chaque interprète et la diversité expressive de leurs instruments.\n\nLe programme se referme sur une pièce pétillante et jubilatoire : Récréation du compositeur français Pierre Gabaye, écrite pour trompette, cor, trombone et piano. Fidèle à son style élégant et malicieusement rythmé, Gabaye y déploie une musique pleine d’esprit, de clins d’œil et d’énergie communicative. Une véritable célébration de la musique de chambre pour cuivres, où technique et plaisir de jouer se rejoignent dans un final lumineux.\n\nAvec Yves Bauer au trombone, Clément Formatché à la trompette,  \nFrédéric Hazebrouck au cor et Mireille Méraud au piano."
+     },
+     "shortDescription": {
+      "@fr": "Ce concert réunit quatre musiciens dont les parcours se rejoignent au sein de l’Orchestre National de Lille, et qui partagent une même envie : faire entendre la richesse, la souplesse et l’expressivité des cuivres dans un programme où se mêlent esprit français et virtuosité.\n\nLa soirée s’ouvre avec le Trio pour trompette, cor et trombone de Francis Poulenc, une œuvre rare et savoureuse, où l’humour, l’élégance mélodique et la vivacité rythmique du compositeur se déploient dans un dialogue aussi brillant qu’inattendu. Poulenc y joue avec les couleurs des cuivres, les opposant, les réunissant, les faisant danser dans une écriture à la fois raffinée et pleine de caractère.\n\nChacun des trois cuivres rejoint ensuite la pianiste pour une œuvre soliste, permettant d’explorer des univers contrastés : lyrisme, poésie ou virtuosité, ces moments mettent en lumière la personnalité musicale de chaque interprète et la diversité expressive de leurs instruments.\n\nLe programme se referme sur une pièce pétillante et jubilatoire : Récréation du compositeur français Pierre Gabaye, écrite pour trompette, cor, trombone et piano. Fidèle à son style élégant et malicieusement rythmé, Gabaye y déploie une musique pleine d’esprit, de clins d’œil et d’énergie communicative. Une véritable célébration de la musique de chambre pour cuivres, où technique et plaisir de jouer se rejoignent dans un final lumineux.\n\nAvec Yves Bauer au trombone, Clément Formatché à la trompette,  \nFrédéric Hazebrouck au cor et Mireille Méraud au piano."
+     }
+    }
+   ],
+   "label": {
+    "@fr": "Quatuor Poulenc"
+   },
+   "type": [
+    "EntertainmentAndEvent",
+    "Concert",
+    "CulturalEvent",
+    "PointOfInterest",
+    "Event",
+    "MusicEvent"
+   ],
+   "hasContact": [],
+   "takesPlaceAt": [
+    {
+     "endDate": "2026-11-20",
+     "startTime": "19:00",
+     "endTime": "20:30",
+     "startDate": "2026-11-20"
+    }
+   ],
+   "uuid": "2feb11ea-5038-35cf-bbe6-7646ef3c4f9e"
+  },
+  {
+   "offers": [
+    {
+     "priceSpecification": [
+      {
+       "additionalInformation": {
+        "@fr": "52€ ou 46€"
+       },
+       "priceCurrency": "EUR"
+      }
+     ]
+    }
+   ],
+   "hasBookingContact": [
+    {
+     "telephone": [
+      "+33 3 20 24 07 07"
+     ]
+    }
+   ],
+   "hasBeenCreatedBy": {
+    "legalName": "Hauts-de-France Tourisme",
+    "identifier": "d078e000-5ccd-4efd-8ad5-ab188b8e57f7"
+   },
+   "isLocatedAt": [
+    {
+     "geo": {
+      "latitude": 50.69069,
+      "longitude": 3.163479
+     },
+     "address": [
+      {
+       "hasAddressCity": {
+        "insee": "59512",
+        "isPartOfDepartment": {
+         "isPartOfRegion": {
+          "isPartOfCountry": {
+           "label": {
+            "@fr": "France"
+           }
+          },
+          "insee": "32",
+          "label": {
+           "@fr": "Hauts-de-France"
+          }
+         },
+         "insee": "59",
+         "label": {
+          "@fr": "Nord"
+         }
+        },
+        "label": {
+         "@fr": "Roubaix"
+        }
+       },
+       "streetAddress": [
+        "31 rue de l'Epeule Roubaix"
+       ],
+       "postalCode": "59100",
+       "addressLocality": "Roubaix"
+      }
+     ]
+    }
+   ],
+   "lastUpdate": "2026-06-11",
+   "hasDescription": [
+    {
+     "description": {
+      "@fr": "Après le succès retentissant de _Adieu Hier_, Fabrice Éboué revient sur scène avec son tout nouveau spectacle _SolitudeS_.  \nDans ce one-man-show inédit, l’humoriste à l’humour noir et au regard acéré s’attaque à l’un des grands paradoxes de notre époque : n’avoir jamais été aussi connectés… et pourtant si seuls. À travers des observations incisives sur nos relations, les réseaux sociaux, le couple, la société et ses contradictions, Fabrice Éboué livre un stand-up percutant, sans concession, mais toujours d’une redoutable intelligence.  \nHumoriste, acteur, réalisateur, auteur… Fabrice Éboué est de ces rares artistes qui refusent de rentrer dans une case. Depuis ses débuts, il s'est construit une place à part dans le paysage comique français : celle d'un homme qui ose dire ce que beaucoup pensent tout bas, avec une liberté de ton qui dérange autant qu'elle fascine. Derrière la provocation, il y a une vraie plume, un regard acéré sur l'époque, et une sincérité parfois déroutante. On rit avec lui, on rit de lui, on rit de nous et c'est souvent là que ça fait le plus mal.  \nSur scène, pas d’artifice : un micro, une écriture précise et une liberté de ton qui font sa signature. Provocateur, lucide et irrésistiblement drôle, Éboué interroge notre quotidien avec une efficacité redoutable.  \nUn spectacle mordant, actuel et jubilatoire, à découvrir dans l'écrin parfait du Colisée.  \nSpectacle déconseillé aux moins de 16 ans."
+     },
+     "shortDescription": {
+      "@fr": "Après le succès retentissant de _Adieu Hier_, Fabrice Éboué revient sur scène avec son tout nouveau spectacle _SolitudeS_.  \nDans ce one-man-show inédit, l’humoriste à l’humour noir et au regard acéré s’attaque à l’un des grands paradoxes de notre époque : n’avoir jamais été aussi connectés… et pourtant si seuls. À travers des observations incisives sur nos relations, les réseaux sociaux, le couple, la société et ses contradictions, Fabrice Éboué livre un stand-up percutant, sans concession, mais toujours d’une redoutable intelligence.  \nHumoriste, acteur, réalisateur, auteur… Fabrice Éboué est de ces rares artistes qui refusent de rentrer dans une case. Depuis ses débuts, il s'est construit une place à part dans le paysage comique français : celle d'un homme qui ose dire ce que beaucoup pensent tout bas, avec une liberté de ton qui dérange autant qu'elle fascine. Derrière la provocation, il y a une vraie plume, un regard acéré sur l'époque, et une sincérité parfois déroutante. On rit avec lui, on rit de lui, on rit de nous et c'est souvent là que ça fait le plus mal.  \nSur scène, pas d’artifice : un micro, une écriture précise et une liberté de ton qui font sa signature. Provocateur, lucide et irrésistiblement drôle, Éboué interroge notre quotidien avec une efficacité redoutable.  \nUn spectacle mordant, actuel et jubilatoire, à découvrir dans l'écrin parfait du Colisée.  \nSpectacle déconseillé aux moins de 16 ans."
+     }
+    }
+   ],
+   "label": {
+    "@fr": "Fabrice Éboué"
+   },
+   "type": [
+    "ShowEvent",
+    "CulturalEvent",
+    "EntertainmentAndEvent",
+    "PointOfInterest",
+    "Event"
+   ],
+   "hasContact": [
+    {
+     "telephone": [
+      "+33 3 20 24 07 07"
+     ]
+    }
+   ],
+   "takesPlaceAt": [
+    {
+     "endDate": "2026-11-19",
+     "startTime": "20:00",
+     "endTime": "21:30",
+     "startDate": "2026-11-19"
+    }
+   ],
+   "uuid": "3f621d98-4aae-3923-b06d-d6d966e3fdc8"
+  },
+  {
+   "offers": [
+    {
+     "priceSpecification": [
+      {
+       "additionalInformation": {
+        "@fr": "12/8€ - Gratuit moins de 18 ans"
+       },
+       "priceCurrency": "EUR"
+      }
+     ]
+    }
+   ],
+   "hasBookingContact": [
+    {
+     "telephone": [
+      "+33 3 20 14 57 60"
+     ]
+    }
+   ],
+   "hasBeenCreatedBy": {
+    "legalName": "Hauts-de-France Tourisme",
+    "identifier": "d078e000-5ccd-4efd-8ad5-ab188b8e57f7"
+   },
+   "isLocatedAt": [
+    {
+     "geo": {
+      "latitude": 50.636554,
+      "longitude": 3.074244
+     },
+     "address": [
+      {
+       "hasAddressCity": {
+        "insee": "59350",
+        "isPartOfDepartment": {
+         "isPartOfRegion": {
+          "isPartOfCountry": {
+           "label": {
+            "@fr": "France"
+           }
+          },
+          "insee": "32",
+          "label": {
+           "@fr": "Hauts-de-France"
+          }
+         },
+         "insee": "59",
+         "label": {
+          "@fr": "Nord"
+         }
+        },
+        "label": {
+         "@fr": "Lille"
+        }
+       },
+       "streetAddress": [
+        "22 avenue Willy Brandt"
+       ],
+       "postalCode": "59777",
+       "addressLocality": "Lille"
+      }
+     ]
+    }
+   ],
+   "lastUpdate": "2026-08-21",
+   "hasDescription": [
+    {
+     "description": {
+      "@fr": "**Cet automne, Lille devient la capitale de l’humour et de l’audace. Pour la première fois de leur histoire, les 22 Fonds régionaux d’art contemporain (Frac) s’unissent dans un unique lieu pour un événement hors norme : l’exposition** _**Éclats du rire**_ **!**\n\n**« L’art est un jeu, et le rire en est une règle très sérieuse »**  \n\n### **Une réunion historique pour un patrimoine unique**\n\nFruit d’une collaboration inédite entre lille3000 et le réseau Platform, cette exposition célèbre 40 ans de passion et de décentralisation culturelle. Cette réunion historique valorisera la richesse de la scène française – des talents émergents aux artistes confirmés – en dialogue avec des créateurs internationaux. En investissant les trois étages du Tripostal (5 000 m2), les 22 Frac dévoilent la richesse de leurs collections à travers le prisme de l’ironie, de la dérision, du détournement et de la fantaisie.\n\n### **L’humour comme outil critique**\n\nLoin de l’image d’un art élitiste ou austère, Éclats du rire ! propose un parcours effervescent où le rire devient une arme de réflexion. Des jeux de langages aux détournements, les œuvres sélectionnées bousculent nos certitudes avec jubilation. De l’humour le plus léger au plus sarcastique, du plus absurde au plus satirique, l’exposition invitera le spectateur à devenir acteur de sa propre visite par le biais de l’émotion et de l’esprit.\n\n### **Un événement pour tous les publics**\n\nSous le commissariat de Caroline David, cette exposition a été conçue comme une expérience généreuse et accessible. Elle s’adresse à toutes les générations, prouvant que l’art contemporain peut être aussi profond qu’irrésistiblement drôle.\n\n**Avec : Carlos Aires, Ivan Argote, Basserode, Glen Baxter, Ben, Jurgen Bey, Diego Bianchi, Marcel Broodthaers, Maurizio Cattelan, Jacques Charlier, Jean-Jules Chasse-pot, Claude Closky, Mathis Collins, Tony Cragg, François Curlet, Brice Dellsperger, Hélène Delprat, Wim Delvoye, John Deneuve, Hervé Di Rosa, Erik Dietman, Robert Doisneau, Jean Dupuy, Eric Duyckaerts, Ernest T., Erró, Esther Ferrer, Robert Filliou, Daniel Firman, Peter Fischli & David Weiss, Thierry Fontaine, Samuel Fosso, Michel François, Jean-François Gavoty, General Idea, Pauline Ghersi, Piero Gilardi, John Giorno, Michel Gouéry, Raymond Hains, Jean Hélion, Hans Hemmert, Joël Hubaut, Rodolphe Huguet, Fabrice Hyber, Valerie Jouve, Arnaud Labelle-Rojoux, Stéphane Lallemand, Bertrand Lavier, Ange Leccia, Aurore Le Duc, Lou Le Forban, Natacha Lesueur, Guy Limone, Jacques Lizène, Clémentine Margheriti, Philippe Mayaux, Paul McCarthy, Tony Matelli, Annette Messager, François Morellet, Manuel Ocampo, Orlan, Laurina Paperina, Présence Panchounette, Bruno Peinado, Régis Perray, Guillaume Pinard, Julien Prévieux, Laure Prouvost, Radi Designers, Philippe Ramette, Guy Rottier, Batoul S’Himi, Peter Saul, Franck Scurti, Alain Séchas, David Shrigley, Roman Signer, Pierrick Sorin, Taroop & Glabel, Roland Topor, Endre Tót, Béatrice Utrilla et Bertrand Arnaud, Jean-Luc Verna, Martha Wilson, Nancy Wilson-Pajic, Erwin Wurm…**\n\n### **Une programmation événementielle sera proposée au Tripostal autour de l’exposition**\n\nElle mettra en avant une forme de spectacle humoristique qui rencontre un beau succès auprès du public : le stand-up.  \nCette rencontre transdisciplinaire entre arts visuels et arts de la scène ouvrira un dialogue entre deux formes créatives qui partagent le même goût pour la provocation, la réflexion et le rire et favorisera la rencontre entre différents publics.  \nLa scène de stand-up lilloise et métropolitaine, forte de plusieurs comedy clubs et festivals autour de ce type de forme artistique, est un terreau idéal permettant de prolonger et d’incarner les thèmes présentés dans l’exposition. Plusieurs partenaires culturels proposant différentes formes de performances seront associés à la programmation.\n\n_Commissariat : Caroline David, lille3000_  \n_En collaboration avec Platform, le réseau des Fonds régionaux d’art contemporain_  \n_Crédit image : Daniel Firman, Gravité, 2000 © Adagp, Paris © photographe Freddy Le Saux – Frac-Artothèque Nouvelle-Aquitaine_  \n  \n_Cycle des invitations de lille3000 aux grandes collections d’art contemporain au Tripostal – 2007 : François Pinault Foundation, 2010 : Saatchi Gallery, 2011 : Centre National des Arts Plastiques, 2013 : Galerie Emmanuel Perrotin, 2014 : Collectionneurs privés Flamands, 2017 : Centre Pompidou, 2020 : Design Museum Gent, 2022 : Fondation Cartier pour l’art contemporain, 2023 : Vanhaerents Art Collection, 2025 : Centre Pompidou._"
+     },
+     "shortDescription": {
+      "@fr": "**Cet automne, Lille devient la capitale de l’humour et de l’audace. Pour la première fois de leur histoire, les 22 Fonds régionaux d’art contemporain (Frac) s’unissent dans un unique lieu pour un événement hors norme : l’exposition** _**Éclats du rire**_ **!**\n\n**« L’art est un jeu, et le rire en est une règle très sérieuse »**  \n\n### **Une réunion historique pour un patrimoine unique**\n\nFruit d’une collaboration inédite entre lille3000 et le réseau Platform, cette exposition célèbre 40 ans de passion et de décentralisation culturelle. Cette réunion historique valorisera la richesse de la scène française – des talents émergents aux artistes confirmés – en dialogue avec des créateurs internationaux. En investissant les trois étages du Tripostal (5 000 m2), les 22 Frac dévoilent la richesse de leurs collections à travers le prisme de l’ironie, de la dérision, du détournement et de la fantaisie.\n\n### **L’humour comme outil critique**\n\nLoin de l’image d’un art élitiste ou austère, Éclats du rire ! propose un parcours effervescent où le rire devient une arme de réflexion. Des jeux de langages aux détournements, les œuvres sélectionnées bousculent nos certitudes avec jubilation. De l’humour le plus léger au plus sarcastique, du plus absurde au plus satirique, l’exposition invitera le spectateur à devenir acteur de sa propre visite par le biais de l’émotion et de l’esprit.\n\n### **Un événement pour tous les publics**\n\nSous le commissariat de Caroline David, cette exposition a été conçue comme une expérience généreuse et accessible. Elle s’adresse à toutes les générations, prouvant que l’art contemporain peut être aussi profond qu’irrésistiblement drôle.\n\n**Avec : Carlos Aires, Ivan Argote, Basserode, Glen Baxter, Ben, Jurgen Bey, Diego Bianchi, Marcel Broodthaers, Maurizio Cattelan, Jacques Charlier, Jean-Jules Chasse-pot, Claude Closky, Mathis Collins, Tony Cragg, François Curlet, Brice Dellsperger, Hélène Delprat, Wim Delvoye, John Deneuve, Hervé Di Rosa, Erik Dietman, Robert Doisneau, Jean Dupuy, Eric Duyckaerts, Ernest T., Erró, Esther Ferrer, Robert Filliou, Daniel Firman, Peter Fischli & David Weiss, Thierry Fontaine, Samuel Fosso, Michel François, Jean-François Gavoty, General Idea, Pauline Ghersi, Piero Gilardi, John Giorno, Michel Gouéry, Raymond Hains, Jean Hélion, Hans Hemmert, Joël Hubaut, Rodolphe Huguet, Fabrice Hyber, Valerie Jouve, Arnaud Labelle-Rojoux, Stéphane Lallemand, Bertrand Lavier, Ange Leccia, Aurore Le Duc, Lou Le Forban, Natacha Lesueur, Guy Limone, Jacques Lizène, Clémentine Margheriti, Philippe Mayaux, Paul McCarthy, Tony Matelli, Annette Messager, François Morellet, Manuel Ocampo, Orlan, Laurina Paperina, Présence Panchounette, Bruno Peinado, Régis Perray, Guillaume Pinard, Julien Prévieux, Laure Prouvost, Radi Designers, Philippe Ramette, Guy Rottier, Batoul S’Himi, Peter Saul, Franck Scurti, Alain Séchas, David Shrigley, Roman Signer, Pierrick Sorin, Taroop & Glabel, Roland Topor, Endre Tót, Béatrice Utrilla et Bertrand Arnaud, Jean-Luc Verna, Martha Wilson, Nancy Wilson-Pajic, Erwin Wurm…**\n\n### **Une programmation événementielle sera proposée au Tripostal autour de l’exposition**\n\nElle mettra en avant une forme de spectacle humoristique qui rencontre un beau succès auprès du public : le stand-up.  \nCette rencontre transdisciplinaire entre arts visuels et arts de la scène ouvrira un dialogue entre deux formes créatives qui partagent le même goût pour la provocation, la réflexion et le rire et favorisera la rencontre entre différents publics.  \nLa scène de stand-up lilloise et métropolitaine, forte de plusieurs comedy clubs et festivals autour de ce type de forme artistique, est un terreau idéal permettant de prolonger et d’incarner les thèmes présentés dans l’exposition. Plusieurs partenaires culturels proposant différentes formes de performances seront associés à la programmation.\n\n_Commissariat : Caroline David, lille3000_  \n_En collaboration avec Platform, le réseau des Fonds régionaux d’art contemporain_  \n_Crédit image : Daniel Firman, Gravité, 2000 © Adagp, Paris © photographe Freddy Le Saux – Frac-Artothèque Nouvelle-Aquitaine_  \n  \n_Cycle des invitations de lille3000 aux grandes collections d’art contemporain au Tripostal – 2007 : François Pinault Foundation, 2010 : Saatchi Gallery, 2011 : Centre National des Arts Plastiques, 2013 : Galerie Emmanuel Perrotin, 2014 : Collectionneurs privés Flamands, 2017 : Centre Pompidou, 2020 : Design Museum Gent, 2022 : Fondation Cartier pour l’art contemporain, 2023 : Vanhaerents Art Collection, 2025 : Centre Pompidou._"
+     }
+    }
+   ],
+   "label": {
+    "@fr": "Éclats du rire !"
+   },
+   "type": [
+    "EntertainmentAndEvent",
+    "SaleEvent",
+    "PointOfInterest",
+    "Event",
+    "FairOrShow"
+   ],
+   "hasContact": [
+    {
+     "telephone": [
+      "+33 3 20 14 57 60"
+     ]
+    }
+   ],
+   "takesPlaceAt": [
+    {
+     "endDate": "2026-11-18",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-18"
+    },
+    {
+     "endDate": "2026-11-19",
+     "startTime": "11:00",
+     "endTime": "20:00",
+     "startDate": "2026-11-19"
+    },
+    {
+     "endDate": "2026-11-20",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-20"
+    },
+    {
+     "endDate": "2026-11-21",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-21"
+    },
+    {
+     "endDate": "2026-11-22",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-22"
+    },
+    {
+     "endDate": "2026-11-25",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-25"
+    },
+    {
+     "endDate": "2026-11-26",
+     "startTime": "11:00",
+     "endTime": "20:00",
+     "startDate": "2026-11-26"
+    },
+    {
+     "endDate": "2026-11-27",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-27"
+    },
+    {
+     "endDate": "2026-11-28",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-28"
+    },
+    {
+     "endDate": "2026-11-29",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-29"
+    },
+    {
+     "endDate": "2026-12-02",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-12-02"
+    },
+    {
+     "endDate": "2026-12-03",
+     "startTime": "11:00",
+     "endTime": "20:00",
+     "startDate": "2026-12-03"
+    }
+   ],
+   "uuid": "450c81b3-6ff7-3e8b-8237-009b2bf1538b"
+  },
+  {
+   "offers": [
+    {
+     "priceSpecification": [
+      {
+       "additionalInformation": {
+        "@fr": "Entrée libre"
+       },
+       "priceCurrency": "EUR"
+      }
+     ]
+    }
+   ],
+   "hasBookingContact": [],
+   "hasBeenCreatedBy": {
+    "legalName": "Hauts-de-France Tourisme",
+    "identifier": "d078e000-5ccd-4efd-8ad5-ab188b8e57f7"
+   },
+   "isLocatedAt": [
+    {
+     "geo": {
+      "latitude": 50.683695,
+      "longitude": 3.162866
+     },
+     "address": [
+      {
+       "hasAddressCity": {
+        "insee": "59512",
+        "isPartOfDepartment": {
+         "isPartOfRegion": {
+          "isPartOfCountry": {
+           "label": {
+            "@fr": "France"
+           }
+          },
+          "insee": "32",
+          "label": {
+           "@fr": "Hauts-de-France"
+          }
+         },
+         "insee": "59",
+         "label": {
+          "@fr": "Nord"
+         }
+        },
+        "label": {
+         "@fr": "Roubaix"
+        }
+       },
+       "streetAddress": [
+        "80 rue de Lille"
+       ],
+       "postalCode": "59100",
+       "addressLocality": "Roubaix"
+      }
+     ]
+    }
+   ],
+   "lastUpdate": "2026-10-02",
+   "hasDescription": [
+    {
+     "description": {
+      "@fr": "Pour la cinquième année, le pôle d’art vocal de la Chapelle des Flandres, présent à Roubaix depuis 35 ans, vous invite dans les murs du Conservatoire pour vous présenter les Tout Petits concerts. \n\nL’association musicale roubaisienne développe le chant dans toutes ses activités  : pédagogiques, ateliers de création, masterclass, conférences, répétitions publiques, productions de concerts, stages et échanges.  \nCette année, la Chapelle des Flandres célébrera le travail de deux compositeurs, à commencer par Giovanni Grabrieli et les Fastes de Venise de la fin de la Renaissance et début de période baroque. L’association défendra également un répertoire qui a pris ses racines dans notre région à la Renaissance en interprétant des chefs-d’œuvre du fameux Toms Luis de Victoria. L’art vocal est alors au sommet de la virtuosité de composition.\n\n**Christophe Gautier,**  \nDirecteur artistique de la Chapelle des Flandres  \nTrompettiste et chef d’orchestre, il se spécialise en chant et participe à de nombreuses productions lyriques ou d’oratio au sein d’ensembles prestigieux comme A Sei Voci, Le Concert Spirituel, les Arts Florissants, ou encore le Parlement de Musique. Son répertoire de soliste s’étend du grégorien aux créations contemporaines en passant par Mozart, Brahms, Duruflé et Fauré pour leurs Requiem, Lully, Rameau, Haendel et Bach."
+     },
+     "shortDescription": {
+      "@fr": "Pour la cinquième année, le pôle d’art vocal de la Chapelle des Flandres, présent à Roubaix depuis 35 ans, vous invite dans les murs du Conservatoire pour vous présenter les Tout Petits concerts. \n\nL’association musicale roubaisienne développe le chant dans toutes ses activités  : pédagogiques, ateliers de création, masterclass, conférences, répétitions publiques, productions de concerts, stages et échanges.  \nCette année, la Chapelle des Flandres célébrera le travail de deux compositeurs, à commencer par Giovanni Grabrieli et les Fastes de Venise de la fin de la Renaissance et début de période baroque. L’association défendra également un répertoire qui a pris ses racines dans notre région à la Renaissance en interprétant des chefs-d’œuvre du fameux Toms Luis de Victoria. L’art vocal est alors au sommet de la virtuosité de composition.\n\n**Christophe Gautier,**  \nDirecteur artistique de la Chapelle des Flandres  \nTrompettiste et chef d’orchestre, il se spécialise en chant et participe à de nombreuses productions lyriques ou d’oratio au sein d’ensembles prestigieux comme A Sei Voci, Le Concert Spirituel, les Arts Florissants, ou encore le Parlement de Musique. Son répertoire de soliste s’étend du grégorien aux créations contemporaines en passant par Mozart, Brahms, Duruflé et Fauré pour leurs Requiem, Lully, Rameau, Haendel et Bach."
+     }
+    }
+   ],
+   "label": {
+    "@fr": "Les Tout Petits Concerts"
+   },
+   "type": [
+    "Concert",
+    "Event",
+    "Congress",
+    "EntertainmentAndEvent",
+    "MusicEvent",
+    "BusinessEvent",
+    "PointOfInterest",
+    "CulturalEvent"
+   ],
+   "hasContact": [],
+   "takesPlaceAt": [
+    {
+     "endDate": "2026-12-07",
+     "startTime": "18:30",
+     "endTime": "19:00",
+     "startDate": "2026-12-07"
+    },
+    {
+     "endDate": "2027-01-18",
+     "startTime": "18:30",
+     "endTime": "19:00",
+     "startDate": "2027-01-18"
+    }
+   ],
+   "uuid": "4fb6af31-17da-37f5-b9f0-cfb7a632e903"
+  },
+  {
+   "offers": [
+    {
+     "priceSpecification": [
+      {
+       "priceCurrency": "EUR"
+      }
+     ]
+    }
+   ],
+   "hasBookingContact": [
+    {
+     "telephone": [
+      "+33 3 20 19 68 68"
+     ]
+    }
+   ],
+   "hasBeenCreatedBy": {
+    "legalName": "Hauts-de-France Tourisme",
+    "identifier": "d078e000-5ccd-4efd-8ad5-ab188b8e57f7"
+   },
+   "isLocatedAt": [
+    {
+     "geo": {
+      "latitude": 50.637583,
+      "longitude": 3.148595
+     },
+     "address": [
+      {
+       "hasAddressCity": {
+        "insee": "59009",
+        "isPartOfDepartment": {
+         "isPartOfRegion": {
+          "isPartOfCountry": {
+           "label": {
+            "@fr": "France"
+           }
+          },
+          "insee": "32",
+          "label": {
+           "@fr": "Hauts-de-France"
+          }
+         },
+         "insee": "59",
+         "label": {
+          "@fr": "Nord"
+         }
+        },
+        "label": {
+         "@fr": "Villeneuve-d'Ascq"
+        }
+       },
+       "streetAddress": [
+        "1 allée du Musée VIlleneuve-d'Ascq"
+       ],
+       "postalCode": "59650",
+       "addressLocality": "Villeneuve-d'Ascq"
+      }
+     ]
+    }
+   ],
+   "lastUpdate": "2026-10-21",
+   "hasDescription": [
+    {
+     "description": {
+      "@fr": "**Le LaM repense l'accrochage de sa collection avec un nouveau parcours thématique et original intitulé** _**Obsession**_**.** \n\nPensé comme une exposition, il explore la répétition, la permanence et l'intensité créatrice tout au long des XXe et XXIe siècles à travers un dialogue inédit entre art moderne, art brut et art contemporain. \n\nCertaines salles monographiques dédiées à de grandes figures de l'art telles que Amedeo Modigliani, Henry Darger ou Miriam Cahn alternent avec des espaces thématiques offrant une relecture vivante et renouvelée de la collection. \n\nPour enrichir cette expérience, des pièces exceptionnelles du Centre national des arts plastiques (Cnap), et de récentes acquisitions, comme un rare dessin d'Amedeo Modigliani, viennent ponctuer le parcours, créant de nouveaux rapprochements et des dialogues inattendus.\n\n**Deuxième partie**\n\nLe second volet de ce parcours, présenté dans le bâtiment réalisé par Manuelle Gautrand est principalement consacré à l’art brut, il développera la thématique de l’obsession à travers plusieurs axes, tels que le rituel, l’écriture automatique, le spiritisme, l’arpentage, le jardin ou encore les inventeurs. Vous pourrez y retrouver un ensemble monographique d’oeuvres d’Auguste Forestier, les artistes Spirites, les totems de Théo Wiesen, mais aussi d’autres œuvres majeures de la collection du musée.\n\n**Commissariat**   \n**Sébastien Faucon**, Directeur du LaM  \n**Marie-Amélie Senot**, Responsable du fonds d'art contemporain\n\n![](/sites/default/files/inline-images/CNAP_logo%20double%20ligne%20fond%20transparent%20300%20dpi.png)  \n \n\nVictor Simon, _La toile judéo-chrétienne_(détail) 1937. Huile sur toile ; 196 x300,2 x 3cm. Collection du LaM. Achat en 2019 avec le soutien du Fonds Régional d’Acquisition des Musées (État et Région Hauts-de- France) © Droits réservés. Photo : N. Dewitte/LaM"
+     },
+     "shortDescription": {
+      "@fr": "**Le LaM repense l'accrochage de sa collection avec un nouveau parcours thématique et original intitulé** _**Obsession**_**.** \n\nPensé comme une exposition, il explore la répétition, la permanence et l'intensité créatrice tout au long des XXe et XXIe siècles à travers un dialogue inédit entre art moderne, art brut et art contemporain. \n\nCertaines salles monographiques dédiées à de grandes figures de l'art telles que Amedeo Modigliani, Henry Darger ou Miriam Cahn alternent avec des espaces thématiques offrant une relecture vivante et renouvelée de la collection. \n\nPour enrichir cette expérience, des pièces exceptionnelles du Centre national des arts plastiques (Cnap), et de récentes acquisitions, comme un rare dessin d'Amedeo Modigliani, viennent ponctuer le parcours, créant de nouveaux rapprochements et des dialogues inattendus.\n\n**Deuxième partie**\n\nLe second volet de ce parcours, présenté dans le bâtiment réalisé par Manuelle Gautrand est principalement consacré à l’art brut, il développera la thématique de l’obsession à travers plusieurs axes, tels que le rituel, l’écriture automatique, le spiritisme, l’arpentage, le jardin ou encore les inventeurs. Vous pourrez y retrouver un ensemble monographique d’oeuvres d’Auguste Forestier, les artistes Spirites, les totems de Théo Wiesen, mais aussi d’autres œuvres majeures de la collection du musée.\n\n**Commissariat**   \n**Sébastien Faucon**, Directeur du LaM  \n**Marie-Amélie Senot**, Responsable du fonds d'art contemporain\n\n![](/sites/default/files/inline-images/CNAP_logo%20double%20ligne%20fond%20transparent%20300%20dpi.png)  \n \n\nVictor Simon, _La toile judéo-chrétienne_(détail) 1937. Huile sur toile ; 196 x300,2 x 3cm. Collection du LaM. Achat en 2019 avec le soutien du Fonds Régional d’Acquisition des Musées (État et Région Hauts-de- France) © Droits réservés. Photo : N. Dewitte/LaM"
+     }
+    }
+   ],
+   "label": {
+    "@fr": "Obsession"
+   },
+   "type": [
+    "PointOfInterest",
+    "FairOrShow",
+    "SaleEvent",
+    "EntertainmentAndEvent",
+    "Event"
+   ],
+   "hasContact": [
+    {
+     "telephone": [
+      "+33 3 20 19 68 68"
+     ]
+    }
+   ],
+   "takesPlaceAt": [
+    {
+     "endDate": "2026-11-17",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-17"
+    },
+    {
+     "endDate": "2026-11-18",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-18"
+    },
+    {
+     "endDate": "2026-11-19",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-19"
+    },
+    {
+     "endDate": "2026-11-20",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-20"
+    },
+    {
+     "endDate": "2026-11-21",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-21"
+    },
+    {
+     "endDate": "2026-11-22",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-22"
+    },
+    {
+     "endDate": "2026-11-24",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-24"
+    },
+    {
+     "endDate": "2026-11-25",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-25"
+    },
+    {
+     "endDate": "2026-11-26",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-26"
+    },
+    {
+     "endDate": "2026-11-27",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-27"
+    },
+    {
+     "endDate": "2026-11-28",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-28"
+    },
+    {
+     "endDate": "2026-11-29",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-29"
+    }
+   ],
+   "uuid": "63e5d569-d0fa-3f53-bcf4-84d410893512"
+  },
+  {
+   "offers": [
+    {
+     "priceSpecification": [
+      {
+       "additionalInformation": {
+        "@fr": "Entrée libre"
+       },
+       "priceCurrency": "EUR"
+      }
+     ]
+    }
+   ],
+   "hasBookingContact": [],
+   "hasBeenCreatedBy": {
+    "legalName": "Hauts-de-France Tourisme",
+    "identifier": "d078e000-5ccd-4efd-8ad5-ab188b8e57f7"
+   },
+   "isLocatedAt": [
+    {
+     "geo": {
+      "latitude": 50.683695,
+      "longitude": 3.162866
+     },
+     "address": [
+      {
+       "hasAddressCity": {
+        "insee": "59512",
+        "isPartOfDepartment": {
+         "isPartOfRegion": {
+          "isPartOfCountry": {
+           "label": {
+            "@fr": "France"
+           }
+          },
+          "insee": "32",
+          "label": {
+           "@fr": "Hauts-de-France"
+          }
+         },
+         "insee": "59",
+         "label": {
+          "@fr": "Nord"
+         }
+        },
+        "label": {
+         "@fr": "Roubaix"
+        }
+       },
+       "streetAddress": [
+        "80 rue de Lille"
+       ],
+       "postalCode": "59100",
+       "addressLocality": "Roubaix"
+      }
+     ]
+    }
+   ],
+   "lastUpdate": "2026-10-27",
+   "hasDescription": [
+    {
+     "description": {
+      "@fr": "Pour la cinquième année, le pôle d’art vocal de la Chapelle des Flandres, présent à Roubaix depuis 35 ans, vous invite dans les murs du Conservatoire pour vous présenter les Tout Petits concerts. \n\nL’association musicale roubaisienne développe le chant dans toutes ses activités  : pédagogiques, ateliers de création, masterclass, conférences, répétitions publiques, productions de concerts, stages et échanges.  \nCette année, la Chapelle des Flandres célébrera le travail de deux compositeurs, à commencer par Giovanni Grabrieli et les Fastes de Venise de la fin de la Renaissance et début de période baroque. L’association défendra également un répertoire qui a pris ses racines dans notre région à la Renaissance en interprétant des chefs-d’œuvre du fameux Toms Luis de Victoria. L’art vocal est alors au sommet de la virtuosité de composition.\n\nChristophe Gautier,  \n_Directeur artistique de la Chapelle des Flandres_  \nTrompettiste et chef d’orchestre, il se spécialise en chant et participe à de nombreuses productions lyriques ou d’oratio au sein d’ensembles prestigieux comme A Sei Voci, Le Concert Spirituel, les Arts Florissants, ou encore le Parlement de Musique. Son répertoire de soliste s’étend du grégorien aux créations contemporaines en passant par Mozart, Brahms, Duruflé et Fauré pour leurs Requiem, Lully, Rameau, Haendel et Bach."
+     },
+     "shortDescription": {
+      "@fr": "Pour la cinquième année, le pôle d’art vocal de la Chapelle des Flandres, présent à Roubaix depuis 35 ans, vous invite dans les murs du Conservatoire pour vous présenter les Tout Petits concerts. \n\nL’association musicale roubaisienne développe le chant dans toutes ses activités  : pédagogiques, ateliers de création, masterclass, conférences, répétitions publiques, productions de concerts, stages et échanges.  \nCette année, la Chapelle des Flandres célébrera le travail de deux compositeurs, à commencer par Giovanni Grabrieli et les Fastes de Venise de la fin de la Renaissance et début de période baroque. L’association défendra également un répertoire qui a pris ses racines dans notre région à la Renaissance en interprétant des chefs-d’œuvre du fameux Toms Luis de Victoria. L’art vocal est alors au sommet de la virtuosité de composition.\n\nChristophe Gautier,  \n_Directeur artistique de la Chapelle des Flandres_  \nTrompettiste et chef d’orchestre, il se spécialise en chant et participe à de nombreuses productions lyriques ou d’oratio au sein d’ensembles prestigieux comme A Sei Voci, Le Concert Spirituel, les Arts Florissants, ou encore le Parlement de Musique. Son répertoire de soliste s’étend du grégorien aux créations contemporaines en passant par Mozart, Brahms, Duruflé et Fauré pour leurs Requiem, Lully, Rameau, Haendel et Bach."
+     }
+    }
+   ],
+   "label": {
+    "@fr": "Les Tout Petits Concerts"
+   },
+   "type": [
+    "BusinessEvent",
+    "PointOfInterest",
+    "Congress",
+    "EntertainmentAndEvent",
+    "CulturalEvent",
+    "MusicEvent",
+    "Event",
+    "Concert"
+   ],
+   "hasContact": [],
+   "takesPlaceAt": [
+    {
+     "endDate": "2026-12-07",
+     "startTime": "18:30",
+     "endTime": "19:00",
+     "startDate": "2026-12-07"
+    },
+    {
+     "endDate": "2027-01-18",
+     "startTime": "18:30",
+     "endTime": "19:00",
+     "startDate": "2027-01-18"
+    }
+   ],
+   "uuid": "75c60e66-0c6f-3ebe-89a5-3859b394d87e"
+  },
+  {
+   "offers": [
+    {
+     "priceSpecification": [
+      {
+       "priceCurrency": "EUR"
+      }
+     ]
+    }
+   ],
+   "hasBookingContact": [
+    {
+     "telephone": [
+      "+33 3 20 19 68 68"
+     ]
+    }
+   ],
+   "hasBeenCreatedBy": {
+    "legalName": "Hauts-de-France Tourisme",
+    "identifier": "d078e000-5ccd-4efd-8ad5-ab188b8e57f7"
+   },
+   "isLocatedAt": [
+    {
+     "geo": {
+      "latitude": 50.637583,
+      "longitude": 3.148595
+     },
+     "address": [
+      {
+       "hasAddressCity": {
+        "insee": "59009",
+        "isPartOfDepartment": {
+         "isPartOfRegion": {
+          "isPartOfCountry": {
+           "label": {
+            "@fr": "France"
+           }
+          },
+          "insee": "32",
+          "label": {
+           "@fr": "Hauts-de-France"
+          }
+         },
+         "insee": "59",
+         "label": {
+          "@fr": "Nord"
+         }
+        },
+        "label": {
+         "@fr": "Villeneuve-d'Ascq"
+        }
+       },
+       "streetAddress": [
+        "1 allée du Musée VIlleneuve-d'Ascq"
+       ],
+       "postalCode": "59650",
+       "addressLocality": "Villeneuve-d'Ascq"
+      }
+     ]
+    }
+   ],
+   "lastUpdate": "2026-09-16",
+   "hasDescription": [
+    {
+     "description": {
+      "@fr": "Une fois par mois, le musée se transforme en terrain de jeu où la collection se découvre en famille et de manière décalée. \n\nLes enfants se déguisent, jouent et sont invités à participer à des activités artistiques. À chaque rendez-vous, son thème et ses surprises associées !"
+     },
+     "shortDescription": {
+      "@fr": "Une fois par mois, le musée se transforme en terrain de jeu où la collection se découvre en famille et de manière décalée. \n\nLes enfants se déguisent, jouent et sont invités à participer à des activités artistiques. À chaque rendez-vous, son thème et ses surprises associées !"
+     }
+    }
+   ],
+   "label": {
+    "@fr": "Mercredi tout est permis"
+   },
+   "type": [
+    "Event",
+    "Product",
+    "Visit",
+    "Traineeship",
+    "SocialEvent",
+    "IntroductionCourse",
+    "ShowEvent",
+    "CulturalEvent",
+    "Festival",
+    "Practice",
+    "Carnival",
+    "Parade",
+    "EntertainmentAndEvent",
+    "PointOfInterest"
+   ],
+   "hasContact": [
+    {
+     "telephone": [
+      "+33 3 20 19 68 68"
+     ]
+    }
+   ],
+   "takesPlaceAt": [
+    {
+     "endDate": "2026-12-09",
+     "startTime": "15:00",
+     "endTime": "17:30",
+     "startDate": "2026-12-09"
+    },
+    {
+     "endDate": "2027-01-13",
+     "startTime": "15:00",
+     "endTime": "17:30",
+     "startDate": "2027-01-13"
+    }
+   ],
+   "uuid": "7fcf1991-f41b-3ab7-9642-a44fbbb77d97"
+  },
+  {
+   "offers": [
+    {
+     "priceSpecification": [
+      {
+       "priceCurrency": "EUR"
+      }
+     ]
+    }
+   ],
+   "hasBookingContact": [
+    {
+     "familyName": [
+      "EXEMPLE"
+     ],
+     "telephone": [
+      "+33 3 20 49 50 00"
+     ],
+     "title": [
+      "Madame"
+     ],
+     "givenName": [
+      "Jeanne"
+     ]
+    }
+   ],
+   "hasBeenCreatedBy": {
+    "legalName": "Hello Lille",
+    "identifier": "2df411fa-c868-4f2d-9975-6717d51b7886",
+    "address": [
+     {
+      "streetAddress": [
+       "87, BOULEVARD DE LA LIBERTE"
+      ],
+      "postalCode": "59000"
+     }
+    ],
+    "telephone": [
+     "+33 6 33 72 34 17"
+    ],
+    "homepage": [
+     "https://hellolille.eu/"
+    ]
+   },
+   "isLocatedAt": [
+    {
+     "geo": {
+      "latitude": 50.62652,
+      "longitude": 3.04996
+     },
+     "address": [
+      {
+       "hasAddressCity": {
+        "insee": "59350",
+        "isPartOfDepartment": {
+         "isPartOfRegion": {
+          "isPartOfCountry": {
+           "label": {
+            "@fr": "France"
+           }
+          },
+          "insee": "32",
+          "label": {
+           "@fr": "Hauts-de-France"
+          }
+         },
+         "insee": "59",
+         "label": {
+          "@fr": "Nord"
+         }
+        },
+        "label": {
+         "@fr": "Lille"
+        }
+       },
+       "streetAddress": [
+        "Place de la Nouvelle Aventure"
+       ],
+       "postalCode": "59000",
+       "addressLocality": "Lille"
+      }
+     ]
+    }
+   ],
+   "lastUpdate": "2023-12-05",
+   "hasDescription": [
+    {
+     "description": {
+      "@fr": "Impossible de ne pas se rendre au marché de Wazemmes un dimanche ! Réputé pour son ampleur et ses prix défiant toute concurrence, ce dernier rassemble les producteurs locaux et revendeurs de produits exotiques, les marchands de tissus, d’électro-ménagers et les artisans du quartier. Son ambiance conviviale et populaire vous donne un bel exemple de la chaleur lilloise."
+     },
+     "shortDescription": {
+      "@fr": "Impossible de ne pas se rendre au marché de Wazemmes un dimanche ! Réputé pour son ampleur et ses prix défiant toute concurrence, ce dernier rassemble les producteurs locaux et revendeurs de produits exotiques, les marchands de tissus, d’électro-ménagers et les artisans du quartier. Son ambiance conviviale et populaire vous donne un bel exemple de la chaleur lilloise."
+     }
+    }
+   ],
+   "label": {
+    "@fr": "Marché de Wazemmes"
+   },
+   "type": [
+    "EntertainmentAndEvent",
+    "SaleEvent",
+    "Market",
+    "Event",
+    "PointOfInterest"
+   ],
+   "hasContact": [
+    {
+     "familyName": [
+      "EXEMPLE"
+     ],
+     "telephone": [
+      "+33 3 20 49 50 00"
+     ],
+     "title": [
+      "Madame"
+     ],
+     "givenName": [
+      "Jeanne"
+     ]
+    }
+   ],
+   "takesPlaceAt": [
+    {
+     "endDate": "2026-12-31",
+     "startTime": "07:00",
+     "endTime": "14:00",
+     "startDate": "2026-01-01"
+    }
+   ],
+   "uuid": "978e8490-d4e0-3122-a8d2-d503b3886040"
+  },
+  {
+   "offers": [
+    {
+     "priceSpecification": [
+      {
+       "priceCurrency": "EUR"
+      }
+     ]
+    }
+   ],
+   "hasBookingContact": [
+    {
+     "telephone": [
+      "+33 3 20 19 68 68"
+     ]
+    }
+   ],
+   "hasBeenCreatedBy": {
+    "legalName": "Hauts-de-France Tourisme",
+    "identifier": "d078e000-5ccd-4efd-8ad5-ab188b8e57f7"
+   },
+   "isLocatedAt": [
+    {
+     "geo": {
+      "latitude": 50.637583,
+      "longitude": 3.148595
+     },
+     "address": [
+      {
+       "hasAddressCity": {
+        "insee": "59009",
+        "isPartOfDepartment": {
+         "isPartOfRegion": {
+          "isPartOfCountry": {
+           "label": {
+            "@fr": "France"
+           }
+          },
+          "insee": "32",
+          "label": {
+           "@fr": "Hauts-de-France"
+          }
+         },
+         "insee": "59",
+         "label": {
+          "@fr": "Nord"
+         }
+        },
+        "label": {
+         "@fr": "Villeneuve-d'Ascq"
+        }
+       },
+       "streetAddress": [
+        "1 allée du Musée VIlleneuve-d'Ascq"
+       ],
+       "postalCode": "59650",
+       "addressLocality": "Villeneuve-d'Ascq"
+      }
+     ]
+    }
+   ],
+   "lastUpdate": "2026-09-11",
+   "hasDescription": [
+    {
+     "description": {
+      "@fr": "**Le LaM repense l'accrochage de sa collection avec un nouveau parcours thématique et original intitulé** _**Obsession**_**.** \n\nPensé comme une exposition, il explore la répétition, la permanence et l'intensité créatrice tout au long des XXe et XXIe siècles à travers un dialogue inédit entre art moderne, art brut et art contemporain. \n\nCertaines salles monographiques dédiées à de grandes figures de l'art telles que Amedeo Modigliani, Henry Darger ou Miriam Cahn alternent avec des espaces thématiques offrant une relecture vivante et renouvelée de la collection. \n\nPour enrichir cette expérience, des pièces exceptionnelles du Centre national des arts plastiques (Cnap), et de récentes acquisitions, comme un rare dessin d'Amedeo Modigliani, viennent ponctuer le parcours, créant de nouveaux rapprochements et des dialogues inattendus.\n\n**Deuxième partie**\n\nLe second volet de ce parcours, présenté dans le bâtiment réalisé par Manuelle Gautrand est principalement consacré à l’art brut, il développera la thématique de l’obsession à travers plusieurs axes, tels que le rituel, l’écriture automatique, le spiritisme, l’arpentage, le jardin ou encore les inventeurs. Vous pourrez y retrouver un ensemble monographique d’oeuvres d’Auguste Forestier, les artistes Spirites, les totems de Théo Wiesen, mais aussi d’autres œuvres majeures de la collection du musée.\n\n**Commissariat**   \n**Sébastien Faucon**, Directeur du LaM  \n**Marie-Amélie Senot**, Responsable du fonds d'art contemporain\n\n![](/sites/default/files/inline-images/CNAP_logo%20double%20ligne%20fond%20transparent%20300%20dpi.png)  \n \n\nVictor Simon, _La toile judéo-chrétienne_(détail) 1937. Huile sur toile ; 196 x300,2 x 3cm. Collection du LaM. Achat en 2019 avec le soutien du Fonds Régional d’Acquisition des Musées (État et Région Hauts-de- France) © Droits réservés. Photo : N. Dewitte/LaM"
+     },
+     "shortDescription": {
+      "@fr": "**Le LaM repense l'accrochage de sa collection avec un nouveau parcours thématique et original intitulé** _**Obsession**_**.** \n\nPensé comme une exposition, il explore la répétition, la permanence et l'intensité créatrice tout au long des XXe et XXIe siècles à travers un dialogue inédit entre art moderne, art brut et art contemporain. \n\nCertaines salles monographiques dédiées à de grandes figures de l'art telles que Amedeo Modigliani, Henry Darger ou Miriam Cahn alternent avec des espaces thématiques offrant une relecture vivante et renouvelée de la collection. \n\nPour enrichir cette expérience, des pièces exceptionnelles du Centre national des arts plastiques (Cnap), et de récentes acquisitions, comme un rare dessin d'Amedeo Modigliani, viennent ponctuer le parcours, créant de nouveaux rapprochements et des dialogues inattendus.\n\n**Deuxième partie**\n\nLe second volet de ce parcours, présenté dans le bâtiment réalisé par Manuelle Gautrand est principalement consacré à l’art brut, il développera la thématique de l’obsession à travers plusieurs axes, tels que le rituel, l’écriture automatique, le spiritisme, l’arpentage, le jardin ou encore les inventeurs. Vous pourrez y retrouver un ensemble monographique d’oeuvres d’Auguste Forestier, les artistes Spirites, les totems de Théo Wiesen, mais aussi d’autres œuvres majeures de la collection du musée.\n\n**Commissariat**   \n**Sébastien Faucon**, Directeur du LaM  \n**Marie-Amélie Senot**, Responsable du fonds d'art contemporain\n\n![](/sites/default/files/inline-images/CNAP_logo%20double%20ligne%20fond%20transparent%20300%20dpi.png)  \n \n\nVictor Simon, _La toile judéo-chrétienne_(détail) 1937. Huile sur toile ; 196 x300,2 x 3cm. Collection du LaM. Achat en 2019 avec le soutien du Fonds Régional d’Acquisition des Musées (État et Région Hauts-de- France) © Droits réservés. Photo : N. Dewitte/LaM"
+     }
+    }
+   ],
+   "label": {
+    "@fr": "Obsession"
+   },
+   "type": [
+    "FairOrShow",
+    "SaleEvent",
+    "EntertainmentAndEvent",
+    "PointOfInterest",
+    "Event"
+   ],
+   "hasContact": [
+    {
+     "telephone": [
+      "+33 3 20 19 68 68"
+     ]
+    }
+   ],
+   "takesPlaceAt": [
+    {
+     "endDate": "2026-11-17",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-17"
+    },
+    {
+     "endDate": "2026-11-18",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-18"
+    },
+    {
+     "endDate": "2026-11-19",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-19"
+    },
+    {
+     "endDate": "2026-11-20",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-20"
+    },
+    {
+     "endDate": "2026-11-21",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-21"
+    },
+    {
+     "endDate": "2026-11-22",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-22"
+    },
+    {
+     "endDate": "2026-11-24",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-24"
+    },
+    {
+     "endDate": "2026-11-25",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-25"
+    },
+    {
+     "endDate": "2026-11-26",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-26"
+    },
+    {
+     "endDate": "2026-11-27",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-27"
+    },
+    {
+     "endDate": "2026-11-28",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-28"
+    },
+    {
+     "endDate": "2026-11-29",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-29"
+    }
+   ],
+   "uuid": "b5b247c7-7aec-3bfa-9bcb-a4e180d28dcc"
+  },
+  {
+   "offers": [
+    {
+     "priceSpecification": [
+      {
+       "priceCurrency": "EUR"
+      }
+     ]
+    }
+   ],
+   "hasBookingContact": [
+    {
+     "telephone": [
+      "+33 3 20 19 68 68"
+     ]
+    }
+   ],
+   "hasBeenCreatedBy": {
+    "legalName": "Hauts-de-France Tourisme",
+    "identifier": "d078e000-5ccd-4efd-8ad5-ab188b8e57f7"
+   },
+   "isLocatedAt": [
+    {
+     "geo": {
+      "latitude": 50.637583,
+      "longitude": 3.148595
+     },
+     "address": [
+      {
+       "hasAddressCity": {
+        "insee": "59009",
+        "isPartOfDepartment": {
+         "isPartOfRegion": {
+          "isPartOfCountry": {
+           "label": {
+            "@fr": "France"
+           }
+          },
+          "insee": "32",
+          "label": {
+           "@fr": "Hauts-de-France"
+          }
+         },
+         "insee": "59",
+         "label": {
+          "@fr": "Nord"
+         }
+        },
+        "label": {
+         "@fr": "Villeneuve-d'Ascq"
+        }
+       },
+       "streetAddress": [
+        "1 allée du Musée VIlleneuve-d'Ascq"
+       ],
+       "postalCode": "59650",
+       "addressLocality": "Villeneuve-d'Ascq"
+      }
+     ]
+    }
+   ],
+   "lastUpdate": "2026-10-21",
+   "hasDescription": [
+    {
+     "description": {
+      "@fr": "Une fois par mois, le musée se transforme en terrain de jeu où la collection se découvre en famille et de manière décalée. \n\nLes enfants se déguisent, jouent et sont invités à participer à des activités artistiques. À chaque rendez-vous, son thème et ses surprises associées !\n\n**Mercredi 9 décembre**  \n**Mercredi tout est permis - Bientôt les vacances de Noël**  \n15h - 18h, 3 à 12 ans  \nLe froid s’installe, les paysages se transforment et les fêtes de fin d’année approchent ! En décembre, le LaM invite petits et grands à venir fêter la fin de l’année. À l’occasion du dernier mercredi avant les vacances de Noël, découvrez Flocon, un spectacle de la compagnie **On disait que.**  \nAu programme : atelier et visites en continu et deux représentations du spectacle à 16h et 17h30 !  \n  \nspectacle accessible dans la limite des places disponibles"
+     },
+     "shortDescription": {
+      "@fr": "Une fois par mois, le musée se transforme en terrain de jeu où la collection se découvre en famille et de manière décalée. \n\nLes enfants se déguisent, jouent et sont invités à participer à des activités artistiques. À chaque rendez-vous, son thème et ses surprises associées !\n\n**Mercredi 9 décembre**  \n**Mercredi tout est permis - Bientôt les vacances de Noël**  \n15h - 18h, 3 à 12 ans  \nLe froid s’installe, les paysages se transforment et les fêtes de fin d’année approchent ! En décembre, le LaM invite petits et grands à venir fêter la fin de l’année. À l’occasion du dernier mercredi avant les vacances de Noël, découvrez Flocon, un spectacle de la compagnie **On disait que.**  \nAu programme : atelier et visites en continu et deux représentations du spectacle à 16h et 17h30 !  \n  \nspectacle accessible dans la limite des places disponibles"
+     }
+    }
+   ],
+   "label": {
+    "@fr": "Mercredi tout est permis"
+   },
+   "type": [
+    "SocialEvent",
+    "Visit",
+    "Carnival",
+    "IntroductionCourse",
+    "ShowEvent",
+    "Parade",
+    "Traineeship",
+    "Festival",
+    "Product",
+    "Practice",
+    "EntertainmentAndEvent",
+    "CulturalEvent",
+    "PointOfInterest",
+    "Event"
+   ],
+   "hasContact": [
+    {
+     "telephone": [
+      "+33 3 20 19 68 68"
+     ]
+    }
+   ],
+   "takesPlaceAt": [
+    {
+     "endDate": "2026-12-09",
+     "startTime": "15:00",
+     "endTime": "18:00",
+     "startDate": "2026-12-09"
+    },
+    {
+     "endDate": "2027-01-13",
+     "startTime": "15:00",
+     "endTime": "17:30",
+     "startDate": "2027-01-13"
+    }
+   ],
+   "uuid": "d1b42f3d-cf24-3878-8e7c-00f3bd0bf8c2"
+  },
+  {
+   "offers": [
+    {
+     "priceSpecification": [
+      {
+       "priceCurrency": "EUR"
+      }
+     ]
+    }
+   ],
+   "hasBookingContact": [
+    {
+     "telephone": [
+      "+33 3 20 19 68 68"
+     ]
+    }
+   ],
+   "hasBeenCreatedBy": {
+    "legalName": "Hauts-de-France Tourisme",
+    "identifier": "d078e000-5ccd-4efd-8ad5-ab188b8e57f7"
+   },
+   "isLocatedAt": [
+    {
+     "geo": {
+      "latitude": 50.637583,
+      "longitude": 3.148595
+     },
+     "address": [
+      {
+       "hasAddressCity": {
+        "insee": "59009",
+        "isPartOfDepartment": {
+         "isPartOfRegion": {
+          "isPartOfCountry": {
+           "label": {
+            "@fr": "France"
+           }
+          },
+          "insee": "32",
+          "label": {
+           "@fr": "Hauts-de-France"
+          }
+         },
+         "insee": "59",
+         "label": {
+          "@fr": "Nord"
+         }
+        },
+        "label": {
+         "@fr": "Villeneuve-d'Ascq"
+        }
+       },
+       "streetAddress": [
+        "1 allée du Musée VIlleneuve-d'Ascq"
+       ],
+       "postalCode": "59650",
+       "addressLocality": "Villeneuve-d'Ascq"
+      }
+     ]
+    }
+   ],
+   "lastUpdate": "2026-10-20",
+   "hasDescription": [
+    {
+     "description": {
+      "@fr": "Une fois par mois, le musée se transforme en terrain de jeu où la collection se découvre en famille et de manière décalée. \n\nLes enfants se déguisent, jouent et sont invités à participer à des activités artistiques. À chaque rendez-vous, son thème et ses surprises associées !"
+     },
+     "shortDescription": {
+      "@fr": "Une fois par mois, le musée se transforme en terrain de jeu où la collection se découvre en famille et de manière décalée. \n\nLes enfants se déguisent, jouent et sont invités à participer à des activités artistiques. À chaque rendez-vous, son thème et ses surprises associées !"
+     }
+    }
+   ],
+   "label": {
+    "@fr": "Mercredi tout est permis"
+   },
+   "type": [
+    "Traineeship",
+    "Product",
+    "Visit",
+    "Practice",
+    "PointOfInterest",
+    "ShowEvent",
+    "Carnival",
+    "IntroductionCourse",
+    "Festival",
+    "EntertainmentAndEvent",
+    "SocialEvent",
+    "CulturalEvent",
+    "Parade",
+    "Event"
+   ],
+   "hasContact": [
+    {
+     "telephone": [
+      "+33 3 20 19 68 68"
+     ]
+    }
+   ],
+   "takesPlaceAt": [
+    {
+     "endDate": "2026-12-09",
+     "startTime": "15:00",
+     "endTime": "17:30",
+     "startDate": "2026-12-09"
+    },
+    {
+     "endDate": "2027-01-13",
+     "startTime": "15:00",
+     "endTime": "17:30",
+     "startDate": "2027-01-13"
+    }
+   ],
+   "uuid": "d6529276-2c62-37c3-bb2c-102a4b7f5766"
+  },
+  {
+   "offers": [
+    {
+     "priceSpecification": [
+      {
+       "priceCurrency": "EUR"
+      }
+     ]
+    }
+   ],
+   "hasBookingContact": [
+    {
+     "telephone": [
+      "+33 3 20 19 68 68"
+     ]
+    }
+   ],
+   "hasBeenCreatedBy": {
+    "legalName": "Hauts-de-France Tourisme",
+    "identifier": "d078e000-5ccd-4efd-8ad5-ab188b8e57f7"
+   },
+   "isLocatedAt": [
+    {
+     "geo": {
+      "latitude": 50.637583,
+      "longitude": 3.148595
+     },
+     "address": [
+      {
+       "hasAddressCity": {
+        "insee": "59009",
+        "isPartOfDepartment": {
+         "isPartOfRegion": {
+          "isPartOfCountry": {
+           "label": {
+            "@fr": "France"
+           }
+          },
+          "insee": "32",
+          "label": {
+           "@fr": "Hauts-de-France"
+          }
+         },
+         "insee": "59",
+         "label": {
+          "@fr": "Nord"
+         }
+        },
+        "label": {
+         "@fr": "Villeneuve-d'Ascq"
+        }
+       },
+       "streetAddress": [
+        "1 allée du Musée VIlleneuve-d'Ascq"
+       ],
+       "postalCode": "59650",
+       "addressLocality": "Villeneuve-d'Ascq"
+      }
+     ]
+    }
+   ],
+   "lastUpdate": "2026-09-11",
+   "hasDescription": [
+    {
+     "description": {
+      "@fr": "**Le LaM repense l'accrochage de sa collection avec un nouveau parcours thématique et original intitulé** _**Obsession**_**.** \n\nPensé comme une exposition, il explore la répétition, la permanence et l'intensité créatrice tout au long des XXe et XXIe siècles à travers un dialogue inédit entre art moderne, art brut et art contemporain. \n\nCertaines salles monographiques dédiées à de grandes figures de l'art telles que Amedeo Modigliani, Henry Darger ou Miriam Cahn alternent avec des espaces thématiques offrant une relecture vivante et renouvelée de la collection. \n\nPour enrichir cette expérience, des pièces exceptionnelles du Centre national des arts plastiques (Cnap), et de récentes acquisitions, comme un rare dessin d'Amedeo Modigliani, viennent ponctuer le parcours, créant de nouveaux rapprochements et des dialogues inattendus.\n\n**Deuxième partie**\n\nLe second volet de ce parcours, présenté dans le bâtiment réalisé par Manuelle Gautrand est principalement consacré à l’art brut, il développera la thématique de l’obsession à travers plusieurs axes, tels que le rituel, l’écriture automatique, le spiritisme, l’arpentage, le jardin ou encore les inventeurs. Vous pourrez y retrouver un ensemble monographique d’oeuvres d’Auguste Forestier, les artistes Spirites, les totems de Théo Wiesen, mais aussi d’autres œuvres majeures de la collection du musée.\n\n**Commissariat**   \n**Sébastien Faucon**, Directeur du LaM  \n**Marie-Amélie Senot**, Responsable du fonds d'art contemporain\n\n![](/sites/default/files/inline-images/CNAP_logo%20double%20ligne%20fond%20transparent%20300%20dpi.png)  \n \n\nVictor Simon, _La toile judéo-chrétienne_(détail) 1937. Huile sur toile ; 196 x300,2 x 3cm. Collection du LaM. Achat en 2019 avec le soutien du Fonds Régional d’Acquisition des Musées (État et Région Hauts-de- France) © Droits réservés. Photo : N. Dewitte/LaM"
+     },
+     "shortDescription": {
+      "@fr": "**Le LaM repense l'accrochage de sa collection avec un nouveau parcours thématique et original intitulé** _**Obsession**_**.** \n\nPensé comme une exposition, il explore la répétition, la permanence et l'intensité créatrice tout au long des XXe et XXIe siècles à travers un dialogue inédit entre art moderne, art brut et art contemporain. \n\nCertaines salles monographiques dédiées à de grandes figures de l'art telles que Amedeo Modigliani, Henry Darger ou Miriam Cahn alternent avec des espaces thématiques offrant une relecture vivante et renouvelée de la collection. \n\nPour enrichir cette expérience, des pièces exceptionnelles du Centre national des arts plastiques (Cnap), et de récentes acquisitions, comme un rare dessin d'Amedeo Modigliani, viennent ponctuer le parcours, créant de nouveaux rapprochements et des dialogues inattendus.\n\n**Deuxième partie**\n\nLe second volet de ce parcours, présenté dans le bâtiment réalisé par Manuelle Gautrand est principalement consacré à l’art brut, il développera la thématique de l’obsession à travers plusieurs axes, tels que le rituel, l’écriture automatique, le spiritisme, l’arpentage, le jardin ou encore les inventeurs. Vous pourrez y retrouver un ensemble monographique d’oeuvres d’Auguste Forestier, les artistes Spirites, les totems de Théo Wiesen, mais aussi d’autres œuvres majeures de la collection du musée.\n\n**Commissariat**   \n**Sébastien Faucon**, Directeur du LaM  \n**Marie-Amélie Senot**, Responsable du fonds d'art contemporain\n\n![](/sites/default/files/inline-images/CNAP_logo%20double%20ligne%20fond%20transparent%20300%20dpi.png)  \n \n\nVictor Simon, _La toile judéo-chrétienne_(détail) 1937. Huile sur toile ; 196 x300,2 x 3cm. Collection du LaM. Achat en 2019 avec le soutien du Fonds Régional d’Acquisition des Musées (État et Région Hauts-de- France) © Droits réservés. Photo : N. Dewitte/LaM"
+     }
+    }
+   ],
+   "label": {
+    "@fr": "Obsession"
+   },
+   "type": [
+    "FairOrShow",
+    "Event",
+    "PointOfInterest",
+    "SaleEvent",
+    "EntertainmentAndEvent"
+   ],
+   "hasContact": [
+    {
+     "telephone": [
+      "+33 3 20 19 68 68"
+     ]
+    }
+   ],
+   "takesPlaceAt": [
+    {
+     "endDate": "2026-11-17",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-17"
+    },
+    {
+     "endDate": "2026-11-18",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-18"
+    },
+    {
+     "endDate": "2026-11-19",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-19"
+    },
+    {
+     "endDate": "2026-11-20",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-20"
+    },
+    {
+     "endDate": "2026-11-21",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-21"
+    },
+    {
+     "endDate": "2026-11-22",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-22"
+    },
+    {
+     "endDate": "2026-11-24",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-24"
+    },
+    {
+     "endDate": "2026-11-25",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-25"
+    },
+    {
+     "endDate": "2026-11-26",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-26"
+    },
+    {
+     "endDate": "2026-11-27",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-27"
+    },
+    {
+     "endDate": "2026-11-28",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-28"
+    },
+    {
+     "endDate": "2026-11-29",
+     "startTime": "11:00",
+     "endTime": "19:00",
+     "startDate": "2026-11-29"
+    }
+   ],
+   "uuid": "e8185770-bfa8-339d-b835-25df465b4773"
+  },
+  {
+   "offers": [
+    {
+     "priceSpecification": [
+      {
+       "additionalInformation": {
+        "@fr": "Tarif 8 € / Réduit 6 €"
+       },
+       "priceCurrency": "EUR"
+      }
+     ]
+    }
+   ],
+   "hasBookingContact": [
+    {
+     "telephone": [
+      "+33 3 59 73 00 30"
+     ]
+    }
+   ],
+   "hasBeenCreatedBy": {
+    "legalName": "Hauts-de-France Tourisme",
+    "identifier": "d078e000-5ccd-4efd-8ad5-ab188b8e57f7"
+   },
+   "isLocatedAt": [
+    {
+     "geo": {
+      "latitude": 50.645994,
+      "longitude": 3.058752
+     },
+     "address": [
+      {
+       "hasAddressCity": {
+        "insee": "59350",
+        "isPartOfDepartment": {
+         "isPartOfRegion": {
+          "isPartOfCountry": {
+           "label": {
+            "@fr": "France"
+           }
+          },
+          "insee": "32",
+          "label": {
+           "@fr": "Hauts-de-France"
+          }
+         },
+         "insee": "59",
+         "label": {
+          "@fr": "Nord"
+         }
+        },
+        "label": {
+         "@fr": "Lille"
+        }
+       },
+       "streetAddress": [
+        "9 rue Princesse"
+       ],
+       "postalCode": "59043",
+       "addressLocality": "Lille"
+      }
+     ]
+    }
+   ],
+   "lastUpdate": "2026-05-13",
+   "hasDescription": [
+    {
+     "description": {
+      "@fr": "Au 19ᵉ siècle, une rupture historique se produit. L’Homme se lance dans cette entreprise alors considérée comme insensée : abolir la nuit !\n\n« Fiat lux ! » vous invite à revivre cette épopée fascinante, de la lueur vacillante des bougies et des lampes à huile à l'éclat révolutionnaire du gaz puis de l'électricité.\n\nDes premiers becs de gaz parisiens aux défis de l'électrification lilloise, plongez dans l'effervescence d'un siècle en quête de confort et de progrès. Découvrez comment ces énergies nouvelles ont transformé nos villes et nos foyers, sécurisé les rues et redessiné nos manières de vivre, de travailler et de nous divertir.\n\nGrâce à une multitude d’objets historiques prêtés entre autres par le musée Carnavalet, explorez l’une des aventures humaines qui a fait basculer notre société dans la modernité.\n\n**Commissariat d’exposition :** Thomas DESCHAMPS, Marie LEFEBVRE, Camille ROUSSEL  \n_Avec le soutien de Ara KEBAPÇIOǦLU, Lumière de l’œil_  \n_Cette exposition bénéficie de prêts importants du musée Carnavalet-Histoire de Paris_"
+     },
+     "shortDescription": {
+      "@fr": "Au 19ᵉ siècle, une rupture historique se produit. L’Homme se lance dans cette entreprise alors considérée comme insensée : abolir la nuit !\n\n« Fiat lux ! » vous invite à revivre cette épopée fascinante, de la lueur vacillante des bougies et des lampes à huile à l'éclat révolutionnaire du gaz puis de l'électricité.\n\nDes premiers becs de gaz parisiens aux défis de l'électrification lilloise, plongez dans l'effervescence d'un siècle en quête de confort et de progrès. Découvrez comment ces énergies nouvelles ont transformé nos villes et nos foyers, sécurisé les rues et redessiné nos manières de vivre, de travailler et de nous divertir.\n\nGrâce à une multitude d’objets historiques prêtés entre autres par le musée Carnavalet, explorez l’une des aventures humaines qui a fait basculer notre société dans la modernité.\n\n**Commissariat d’exposition :** Thomas DESCHAMPS, Marie LEFEBVRE, Camille ROUSSEL  \n_Avec le soutien de Ara KEBAPÇIOǦLU, Lumière de l’œil_  \n_Cette exposition bénéficie de prêts importants du musée Carnavalet-Histoire de Paris_"
+     }
+    }
+   ],
+   "label": {
+    "@fr": "Exposition « Fiat lux ! Une quête effrénée de lumière au XIXᵉ siècle »"
+   },
+   "type": [
+    "Event",
+    "SaleEvent",
+    "EntertainmentAndEvent",
+    "FairOrShow",
+    "PointOfInterest"
+   ],
+   "hasContact": [
+    {
+     "telephone": [
+      "+33 3 59 73 00 30"
+     ]
+    }
+   ],
+   "takesPlaceAt": [
+    {
+     "endDate": "2026-11-16",
+     "startTime": "10:00",
+     "endTime": "18:00",
+     "startDate": "2026-11-16"
+    },
+    {
+     "endDate": "2026-11-18",
+     "startTime": "10:00",
+     "endTime": "18:00",
+     "startDate": "2026-11-18"
+    },
+    {
+     "endDate": "2026-11-19",
+     "startTime": "10:00",
+     "endTime": "18:00",
+     "startDate": "2026-11-19"
+    },
+    {
+     "endDate": "2026-11-20",
+     "startTime": "10:00",
+     "endTime": "18:00",
+     "startDate": "2026-11-20"
+    },
+    {
+     "endDate": "2026-11-21",
+     "startTime": "10:00",
+     "endTime": "18:00",
+     "startDate": "2026-11-21"
+    },
+    {
+     "endDate": "2026-11-22",
+     "startTime": "10:00",
+     "endTime": "18:00",
+     "startDate": "2026-11-22"
+    },
+    {
+     "endDate": "2026-11-23",
+     "startTime": "10:00",
+     "endTime": "18:00",
+     "startDate": "2026-11-23"
+    },
+    {
+     "endDate": "2026-11-25",
+     "startTime": "10:00",
+     "endTime": "18:00",
+     "startDate": "2026-11-25"
+    },
+    {
+     "endDate": "2026-11-26",
+     "startTime": "10:00",
+     "endTime": "18:00",
+     "startDate": "2026-11-26"
+    },
+    {
+     "endDate": "2026-11-27",
+     "startTime": "10:00",
+     "endTime": "18:00",
+     "startDate": "2026-11-27"
+    },
+    {
+     "endDate": "2026-11-28",
+     "startTime": "10:00",
+     "endTime": "18:00",
+     "startDate": "2026-11-28"
+    },
+    {
+     "endDate": "2026-11-29",
+     "startTime": "10:00",
+     "endTime": "18:00",
+     "startDate": "2026-11-29"
+    }
+   ],
+   "uuid": "9a03e72c-35c2-3926-9280-da97a7f735e8"
+  }
+ ],
+ "meta": {
+  "total": 19,
+  "page": 1,
+  "page_size": 100,
+  "total_pages": 1
+ }
+}

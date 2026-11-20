@@ -3,10 +3,12 @@
 
 L'IMAP tient des dossiers (noms en UTF-7 modifié, attributs special-use), des
 UID par dossier avec UIDVALIDITY et UIDNEXT, des drapeaux ; il répond à LIST,
-SELECT/EXAMINE, UID SEARCH (SINCE, UID n:*, HEADER Message-ID), UID FETCH
-(BODY.PEEK[] et FLAGS), UID STORE, UID MOVE (si annoncé), UID COPY,
-EXPUNGE / UID EXPUNGE et APPEND. Un SELECT en lecture seule qui tenterait
-d'écrire est refusé : on sait ainsi qu'un relevé ne touche à rien.
+SELECT/EXAMINE, UID SEARCH (SINCE, UID n:*, HEADER Message-ID, et SUBJECT, FROM,
+BODY, TEXT, OR, CHARSET avec un littéral UTF-8, comme un vrai serveur : sans
+casse), UID FETCH (BODY.PEEK[], FLAGS, et INTERNALDATE avec l'en-tête Message-ID),
+UID STORE, UID MOVE (si annoncé), UID COPY, EXPUNGE / UID EXPUNGE, APPEND,
+CREATE, SUBSCRIBE et NAMESPACE (si annoncé). Un SELECT en lecture seule qui
+tenterait d'écrire est refusé : on sait ainsi qu'un relevé ne touche à rien.
 
 Les deux acceptent aussi ``XOAUTH2`` (une boîte Microsoft, ADR 0166) : le jeton
 « refuse » est refusé comme Microsoft le fait (un défi JSON, puis un refus).
@@ -15,18 +17,24 @@ Les deux acceptent aussi ``XOAUTH2`` (une boîte Microsoft, ADR 0166) : le jeton
 from __future__ import annotations
 
 import base64
+import email
+import email.utils
 import json
 import re
 import socketserver
 import threading
 import time
 from dataclasses import dataclass, field
+from email import policy
 from email.message import EmailMessage
+
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
 
 def raw_mail(uid: int, subject: str, body: str, *, html: bool = False, bulk: bool = False,
              sender: str = "Alice <Alice@Exemple.fr>", to: str = "mika@exemple.fr", cc: str = "",
-             reply_to: str = "", in_reply_to: str = "", message_id: str = "") -> bytes:
+             reply_to: str = "", in_reply_to: str = "", message_id: str = "",
+             date: str = "Mon, 28 Sep 2026 10:00:00 +0200") -> bytes:
     m = EmailMessage()
     m["From"] = sender
     m["To"] = to
@@ -36,7 +44,7 @@ def raw_mail(uid: int, subject: str, body: str, *, html: bool = False, bulk: boo
         m["Reply-To"] = reply_to
     m["Subject"] = subject
     m["Message-ID"] = message_id or f"<mail-{uid}@exemple.fr>"
-    m["Date"] = "Mon, 28 Sep 2026 10:00:00 +0200"
+    m["Date"] = date
     if in_reply_to:
         m["In-Reply-To"] = in_reply_to
     if bulk:
@@ -76,6 +84,10 @@ class Imap(socketserver.StreamRequestHandler):
     commands: list[str] = []
     #: ce qu'il laisse passer avant de lire un littéral : un débit lent, vu du client
     stall = 0.0
+    #: la racine des dossiers personnels et le séparateur (``NAMESPACE``, s'il est annoncé)
+    namespace: tuple[str, str] = ("", "/")
+    #: les dossiers auxquels on s'est abonné
+    subscribed: list[str] = []
 
     @classmethod
     def reset(cls, inbox: dict[int, bytes] | None = None, *, caps: str = "IMAP4rev1 MOVE UIDPLUS") -> None:
@@ -84,6 +96,7 @@ class Imap(socketserver.StreamRequestHandler):
         for uid, raw in (inbox or {}).items():
             cls.boxes["INBOX"].add(raw, uid=uid)
         cls.logins, cls.bearers, cls.commands, cls.caps = [], [], [], caps
+        cls.namespace, cls.subscribed = ("", "/"), []
 
     @classmethod
     def set_mailbox(cls, mailbox: dict[int, bytes]) -> None:
@@ -160,7 +173,24 @@ class Imap(socketserver.StreamRequestHandler):
         elif cmd.startswith("LIST"):
             for name, b in cls.boxes.items():
                 attrs = f"\\HasNoChildren {b.attrs}".strip()
-                self.say(f'* LIST ({attrs}) "/" "{utf7.encode(name)}"')
+                self.say(f'* LIST ({attrs}) "{cls.namespace[1]}" "{utf7.encode(name)}"')
+        elif cmd.startswith("NAMESPACE"):
+            if "NAMESPACE" not in cls.caps:
+                self.say(f"{tag} BAD inconnu")
+                return True
+            self.say(f'* NAMESPACE (("{cls.namespace[0]}" "{cls.namespace[1]}")) NIL NIL')
+        elif cmd.startswith("CREATE"):
+            name = self._name(rest.split(" ", 1)[1], utf7)
+            if name in cls.boxes:
+                self.say(f"{tag} NO [ALREADYEXISTS] il existe")
+                return True
+            prefix = cls.namespace[0]
+            if prefix and not name.startswith(prefix) and name.upper() != "INBOX":
+                self.say(f"{tag} NO [CANNOT] un dossier commence par {prefix}")
+                return True
+            cls.boxes[name] = Box()
+        elif cmd.startswith("SUBSCRIBE"):
+            cls.subscribed.append(self._name(rest.split(" ", 1)[1], utf7))
         elif cmd.startswith(("SELECT", "EXAMINE")):
             name = self._name(rest.split(" ", 1)[1], utf7)
             if name not in cls.boxes:
@@ -181,6 +211,9 @@ class Imap(socketserver.StreamRequestHandler):
             elif crit.upper().startswith("HEADER MESSAGE-ID"):
                 wanted = crit.split(" ", 2)[2].strip('"')
                 found = [u for u, (_, raw_) in box.mails.items() if wanted.encode() in raw_]
+            elif re.search(r"\b(SUBJECT|FROM|BODY|TEXT|OR|CHARSET)\b", crit, re.I):
+                tokens = _tokens(crit, data)
+                found = sorted(u for u, (_, raw_) in box.mails.items() if _all_match(tokens, _fields(raw_)))
             else:
                 found = sorted(box.mails)
             self.say("* SEARCH " + " ".join(str(u) for u in found))
@@ -190,7 +223,11 @@ class Imap(socketserver.StreamRequestHandler):
             for i, uid in enumerate(self._uids(spec, box), start=1):
                 flags, raw_ = box.mails[uid]
                 shown = " ".join(sorted(flags))
-                if "BODY.PEEK[]" in what.upper():
+                if "INTERNALDATE" in what.upper():  # sa date d'arrivée (celle de son en-tête) et son Message-ID
+                    head = _message_id_header(raw_)
+                    self.say(f"* {i} FETCH (UID {uid} INTERNALDATE \"{_internaldate(raw_)}\" "
+                             f"BODY[HEADER.FIELDS (MESSAGE-ID)] {{{len(head)}}}".encode() + b"\r\n" + head + b")\r\n")
+                elif "BODY.PEEK[]" in what.upper():
                     self.say(f"* {i} FETCH (UID {uid} FLAGS ({shown}) BODY[] {{{len(raw_)}}}".encode() + b"\r\n"
                              + raw_ + b")\r\n")
                 elif "RFC822" in what.upper():  # l'ancienne lecture : pose \Seen, comme un vrai serveur
@@ -237,6 +274,76 @@ class Imap(socketserver.StreamRequestHandler):
         self.say(f"{tag} OK fait")
         return True
 
+
+def _tokens(text: str, literal: bytes) -> list[str]:
+    """Les mots d'un critère de recherche : un mot, une chaîne entre guillemets, ou le littéral (``{n}``)."""
+    out, i = [], 0
+    while i < len(text):
+        if text[i] == " ":
+            i += 1
+        elif text[i] == '"':
+            j, buf = i + 1, []
+            while text[j] != '"':
+                if text[j] == "\\":
+                    j += 1
+                buf.append(text[j])
+                j += 1
+            out.append("\x00" + "".join(buf))
+            i = j + 1
+        elif text[i] == "{":
+            out.append("\x00" + literal.decode("utf-8"))
+            i = text.index("}", i) + 1
+        else:
+            j = text.find(" ", i)
+            j = len(text) if j < 0 else j
+            out.append(text[i:j])
+            i = j
+    return out
+
+
+def _fields(raw: bytes) -> dict[str, str]:
+    msg = email.message_from_bytes(raw, policy=policy.default)
+    body = msg.get_body(("plain", "html"))
+    return {"SUBJECT": str(msg["Subject"] or ""), "FROM": str(msg["From"] or ""),
+            "BODY": body.get_content() if body is not None else "", "TEXT": raw.decode("utf-8", "replace")}
+
+
+def _one(tokens: list[str], at: int, fields: dict[str, str]) -> tuple[bool, int]:
+    key = tokens[at].upper()
+    if key == "OR":
+        first, at = _one(tokens, at + 1, fields)
+        second, at = _one(tokens, at, fields)
+        return first or second, at
+    if key == "CHARSET":
+        return True, at + 2
+    if key in fields:
+        return tokens[at + 1].lstrip("\x00").casefold() in fields[key].casefold(), at + 2
+    if key == "SINCE":
+        return True, at + 2
+    return True, at + 1  # ALL, ce que ce faux serveur ne juge pas
+
+
+def _all_match(tokens: list[str], fields: dict[str, str]) -> bool:
+    at, ok = 0, True
+    while at < len(tokens):
+        matched, at = _one(tokens, at, fields)
+        ok = ok and matched
+    return ok
+
+
+def _internaldate(raw: bytes) -> str:
+    msg = email.message_from_bytes(raw, policy=policy.default)
+    when = email.utils.parsedate_to_datetime(str(msg["Date"]))
+    offset = when.utcoffset()
+    minutes = int(offset.total_seconds() // 60) if offset is not None else 0
+    sign = "+" if minutes >= 0 else "-"
+    return (f"{when.day:02d}-{_MONTHS[when.month - 1]}-{when.year} {when:%H:%M:%S} "
+            f"{sign}{abs(minutes) // 60:02d}{abs(minutes) % 60:02d}")
+
+
+def _message_id_header(raw: bytes) -> bytes:
+    msg = email.message_from_bytes(raw, policy=policy.default)
+    return f"Message-ID: {msg['Message-ID']}\r\n\r\n".encode() if msg["Message-ID"] else b"\r\n"
 
 
 class Smtp(socketserver.StreamRequestHandler):

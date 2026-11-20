@@ -25,8 +25,8 @@
       <h2>Connexion à Mika</h2>
       <label>Adresse du serveur
         <input type="url" id="base" placeholder="http://127.0.0.1:8001" spellcheck="false">
-        <small>En <code>http://</code> seulement sur cette machine (127.0.0.1, localhost) ; ailleurs, une adresse
-          <code>https://</code>.</small>
+        <small>En <code>http://</code> seulement sur cette machine (127.0.0.1, localhost, [::1]) ; ailleurs, une
+          adresse <code>https://</code>. Une IPv6 s'écrit entre crochets.</small>
       </label>
       <label>Clé Teams
         <input type="password" id="key" autocomplete="off" spellcheck="false">
@@ -52,6 +52,18 @@
           attend jusqu'à 2 minutes qu'on l'apprenne.</small>
       </label>
       <div class="row"><button id="save2" class="primary">Enregistrer</button></div>
+    </section>
+
+    <section class="card">
+      <h2>L'historique</h2>
+      <p class="note">Pour une première mise en service : tout ce que Teams garde dans ce navigateur (toutes tes
+        conversations, aussi loin qu'il remonte) part chez Mika, qui le range déjà lu — elle ne le prend pas pour du
+        neuf. Les conversations exclues et les pauses valent toujours. Il faut un onglet Teams ouvert ; le relancer ne
+        crée pas de doublons.</p>
+      <div class="row">
+        <button id="history">Charger tout l'historique</button>
+        <span id="historyResult" class="note"></span>
+      </div>
     </section>
 
     <section class="card">

@@ -31,7 +31,7 @@ def test_the_author_reads_her_portrait_the_thread_and_the_draft_but_not_her_tags
     messages = [Message("user", "journée pourrie"), Message("assistant", "Ah merde.\n\nRaconte. [EMOTION: sad 0.5]"),
                 Message("user", state)]
     bodies = {"about_person": "Adrien adore plaisanter, sauf au boulot.", "answer": phrase("expression.answer.react")}
-    system, message, keep = polish(DRAFT, messages, "bah personne voit le taf que je fais", PERSONA, None, bodies)
+    system, message, keep, _stop = polish(DRAFT, messages, "bah personne voit le taf que je fais", PERSONA, None, bodies)
     assert "Tu es Mika. Tu lis beaucoup." in system and "Léa : Coucouuu" in system  # son portrait, le registre
     # qui est l'autre (sa fiche) : l'autrice écrit aussi ses réponses à venir ; le reste de son état ne passe pas
     assert "Adrien adore plaisanter, sauf au boulot." in system and "Réagis d'abord" not in system
@@ -80,7 +80,7 @@ def test_the_author_reads_when_each_message_came():
                ChatTurn("assistant", "Aïe.\n\nBonne nuit quand même", mark="le surlendemain, jeudi 19h06 — c'est toi "
                                                                        "qui lui as écrit"))
     now = label(ChatTurn("user", "", mark="le lendemain, vendredi 8h02")) + "coucou"
-    _system, message, _keep = polish("Coucou ! Bien dormi ?", _as_sent(ChatPrompt("s", "--- QUI ---\nAdrien",
+    _system, message, _keep, _stop = polish("Coucou ! Bien dormi ?", _as_sent(ChatPrompt("s", "--- QUI ---\nAdrien",
                                                                                   history, now)), "coucou", PERSONA)
     assert ("[mardi 21h10]\nL'autre : t'as vu le match ?\nMika : Non, raconte !\n"
             "[plus tard, vers 23h]\nL'autre : on a perdu 3-0\n"
@@ -88,10 +88,15 @@ def test_the_author_reads_when_each_message_came():
             "[le lendemain, vendredi 8h02]\nL'autre : coucou\nMika (brouillon) : Coucou ! Bien dormi ?") in message
     # seize messages du fil, leurs repères en plus : un repère seul (avant un des siens) ne compte pas pour un message
     turns = tuple(ChatTurn("assistant" if i % 2 else "user", f"message {i}", mark=f"jour {i}") for i in range(30))
-    _system, message, _keep = polish("Bah rien.", _as_sent(ChatPrompt("s", "", turns, "et alors")), "et alors",
+    _system, message, _keep, _stop = polish("Bah rien.", _as_sent(ChatPrompt("s", "", turns, "et alors")), "et alors",
                                      PERSONA)
     lines = message.split("\n")
     assert "[jour 14]" in lines and "Mika : message 15" in lines and "[jour 13]" not in lines
+
+
+def _written(polished_text, req) -> str:
+    """Ce que l'autrice rend : un texte, ou ce qu'une fonction en décide d'après l'appel."""
+    return polished_text(req) if callable(polished_text) else polished_text
 
 
 def _polished_life(tmp_path, polished_text, *, routed=True):
@@ -100,7 +105,7 @@ def _polished_life(tmp_path, polished_text, *, routed=True):
     def respond(req):
         calls.append(req)
         if req.role == "polish":
-            return LLMResponse(polished_text)
+            return LLMResponse(_written(polished_text, req))
         if req.role != "reply":
             return LLMResponse("{}" if req.role in ("extract", "profile") else "[SILENCE]")
         return LLMResponse(DRAFT)
@@ -131,7 +136,7 @@ def test_the_rewrite_is_said_with_the_feelings_of_the_first_draft(tmp_path):
 def _authored_trace(tmp_path, polished_text):
     def respond(req):
         if req.role == "polish":
-            return LLMResponse(polished_text)
+            return LLMResponse(_written(polished_text, req))
         if req.role != "reply":
             return LLMResponse("{}" if req.role in ("extract", "profile") else "[SILENCE]")
         return LLMResponse(DRAFT)
@@ -162,6 +167,40 @@ def test_the_trace_keeps_what_the_author_read_and_wrote_kept_or_not(tmp_path):
     assert "ecartee" not in author
     dropped = _authored_trace(tmp_path / "b", "Bla bla. " * 80)["naturel"]
     assert dropped["ecartee"] == "plus longue que le premier jet" and dropped["reponse"].startswith("Bla bla.")
+
+
+def test_the_author_stops_writing_where_the_other_answers(tmp_path):
+    """ADR 0261. Sur 14 jours en service (novembre 2026), la seconde passe écrivait 1 390 jetons par appel pour 305 à
+    la réponse elle-même, en 15,8 s : sept des huit messages que la consigne demande étaient jetés. L'appel s'arrête
+    à la première ligne de l'autre ; ce qu'on garde n'en change pas, et la consigne non plus — c'est elle qui fait
+    l'autrice."""
+    _system, message, keep, stop = polish(DRAFT, [Message("user", "journée pourrie")], "journée pourrie", PERSONA)
+    assert stop == ("\nL'autre :", "\nL'autre:", "\nL’autre :", "\nL’autre:")
+    assert "quatre prochains échanges" in message  # elle écrit toujours un fil entier
+    # arrêtée là ou allée au bout, les mêmes messages partent
+    whole = "Mika : c'est vache.\nMika : tout le monde voit le bug\nL'autre : ouais\nMika : voilà\nL'autre : bon"
+    assert keep(whole.split(stop[0])[0]) == keep(whole) == "c'est vache.\n\ntout le monde voit le bug"
+    report, _said, polishes = _polished_life(tmp_path, "Mika : C'est vache, ça.")
+    assert len(polishes) == 1 and polishes[0].stop_sequences == stop and report.text == "C'est vache, ça."
+
+
+def test_stopped_before_her_first_word_the_author_is_asked_again_whole(tmp_path):
+    """Rien ne dit qu'une séquence d'arrêt ne tombe jamais dans la réflexion d'un modèle : une réponse arrêtée avant
+    son premier mot est redemandée une fois, sans séquence, plutôt que de perdre la seconde passe en silence — et la
+    trace le dit."""
+    def stopped_empty(req):
+        return "" if req.stop_sequences else "Mika : C'est vache, ça.\nL'autre : ouais"
+
+    report, _said, polishes = _polished_life(tmp_path / "a", stopped_empty)
+    assert report.text == "C'est vache, ça."
+    assert [bool(p.stop_sequences) for p in polishes] == [True, False]
+    assert polishes[0].call_id != polishes[1].call_id  # deux appels, deux traces
+    author = _authored_trace(tmp_path / "b", stopped_empty)["naturel"]
+    assert "redemandée" in author["reprise"] and author["reponse"].startswith("Mika : C'est vache") \
+        and "ecartee" not in author
+    # vide encore sans séquence : le premier jet part, comme toujours
+    report, _said, polishes = _polished_life(tmp_path / "c", "")
+    assert len(polishes) == 2 and report.text.startswith("C'est le piège du métier")
 
 
 def test_without_a_model_for_it_or_with_a_longer_rewrite_the_first_draft_is_said(tmp_path):
@@ -210,5 +249,5 @@ def test_what_she_starts_herself_is_authored_too(tmp_path):
 def test_her_bubbles_go_through_the_second_pass_one_line_each():
     # en chat, une ligne vide envoie la suite dans une autre bulle (les clients découpent) : ce n'est pas une longueur
     burst = "C'est quoi comme réunion ?\n\nEn tout cas, j'espère que ça va bien se passer pour toi. [EMOTION: calm 0.3]"
-    _system, message, _keep = polish(burst + " Vraiment.", [Message("user", "réunion à 9h")], "réunion à 9h", PERSONA)
+    _system, message, _keep, _stop = polish(burst + " Vraiment.", [Message("user", "réunion à 9h")], "réunion à 9h", PERSONA)
     assert "Mika (brouillon) : C'est quoi comme réunion ? / En tout cas" in message

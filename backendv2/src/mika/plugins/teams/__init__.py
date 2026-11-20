@@ -227,6 +227,8 @@ class TeamsState:
     #: le dernier lot reçu de l'extension (µs), et combien de lots en tout : le tri a de quoi lire
     received: int = 0
     receipts: int = 0
+    #: les images arrivées (ADR 0258) : la lecture a de quoi regarder
+    images: int = 0
 
 
 class Received(Payload):
@@ -236,6 +238,20 @@ class Received(Payload):
 
     new: int
     replied: tuple[tuple[str, int], ...] = ()
+    account: str = DEFAULT_ACCOUNT
+
+
+class ImagesArrived(Payload):
+    """L'extension d'un compte a envoyé une image d'un message (ADR 0258) : rien d'elle ni du message, le monde reste
+    dans l'adaptateur ; la lecture la regardera."""
+
+    count: int = 1
+    account: str = DEFAULT_ACCOUNT
+
+
+class ImageSeen(Payload):
+    """Mika a regardé une image (ou y a renoncé) : son message, s'il l'attendait, peut être remarqué."""
+
     account: str = DEFAULT_ACCOUNT
 
 
@@ -259,13 +275,15 @@ class Written(Payload):
 
 #: v2 : un message remarqué garde ce que sa règle d'envoi en disait (``Seen.prepare``, ``send``) ; v3 : chaque message,
 #: réponse et demande garde son compte (ADR 0186) ; v4 : une réponse sait qu'on a répondu autrement dans sa
-#: conversation (``DraftSeen.answered``, ADR 0199)
-TEAMS = Faculty("teams", state=TeamsState, init=lambda p: TeamsState(), params=TeamsParams, state_version=4)
+#: conversation (``DraftSeen.answered``, ADR 0199) ; v5 : les images arrivées (``TeamsState.images``, ADR 0258)
+TEAMS = Faculty("teams", state=TeamsState, init=lambda p: TeamsState(), params=TeamsParams, state_version=5)
 TEAMS.declare(*c.ALL)
 TEAMS.bundle(BUNDLE, phrase("teams.bundle"))
 RECEIVED = TEAMS.event("received", Received)
 SETTLED = TEAMS.event("settled", Settled)
 WRITTEN = TEAMS.event("written", Written)
+IMAGES = TEAMS.event("images", ImagesArrived)
+IMAGE_SEEN = TEAMS.event("image_seen", ImageSeen)
 
 
 def params(p: TeamsParams | None) -> TeamsParams:
@@ -353,6 +371,17 @@ def _received(s: TeamsState, e, cx) -> TeamsState:
     for conv, at in e.data.replied:
         s = _wrote(s, e.data.account, conv, at, e.at)
     return replace(_kept_replied(s), received=e.at, receipts=s.receipts + 1)
+
+
+@TEAMS.reducer(IMAGES)
+def _images(s: TeamsState, e, cx) -> TeamsState:
+    return replace(s, images=s.images + max(0, e.data.count))
+
+
+@TEAMS.reducer(IMAGE_SEEN)
+def _image_seen(s: TeamsState, e, cx) -> TeamsState:
+    """Une image regardée : un message qui l'attendait peut être remarqué — le tri relit (comme après un lot)."""
+    return replace(s, receipts=s.receipts + 1)
 
 
 @TEAMS.reducer(WRITTEN)
@@ -586,6 +615,7 @@ def task_message(frame: Frame) -> str:
 
 # les contributions : le tri, ses tâches, ses outils, sa voix, l'échéance, la console
 from mika.plugins.teams import expire as expire  # noqa: E402
+from mika.plugins.teams import images as images  # noqa: E402
 from mika.plugins.teams import inspect as inspect  # noqa: E402
 from mika.plugins.teams import tasks as tasks  # noqa: E402
 from mika.plugins.teams import tools as tools  # noqa: E402

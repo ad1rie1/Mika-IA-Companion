@@ -5,11 +5,13 @@ import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import androidx.annotation.DrawableRes
+import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -22,10 +24,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -35,7 +39,9 @@ import fr.qwartz.mika.data.files.DownloadStore
 import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.mail.MailApi
 import fr.qwartz.mika.data.moi.mail.MailPiece
+import fr.qwartz.mika.data.moi.mail.Triage
 import fr.qwartz.mika.data.moi.mail.bodyBlocks
+import fr.qwartz.mika.ui.shell.MIcon
 import fr.qwartz.mika.ui.shell.linked
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
@@ -130,6 +136,41 @@ internal class VisitOrders<T> {
 @Composable
 internal fun UnreadDot() {
     Box(Modifier.size(8.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary))
+}
+
+/** Où en est son tri, en mots : la marque d'une ligne, et le titre du cadre « Ce qu'elle en sait ». */
+@StringRes
+internal fun triageLabel(t: Triage): Int = when (t) {
+    Triage.READ -> R.string.mail_triage_read
+    Triage.WAITING -> R.string.mail_triage_waiting
+    Triage.GUESSED -> R.string.mail_triage_guessed
+    Triage.BULK -> R.string.mail_triage_bulk
+}
+
+/** Ce que le cadre « Ce qu'elle en sait » en dit de plus ([triageNote] : pas encore lu, ou deviné). */
+@StringRes
+internal fun triageNoteText(t: Triage): Int = when (t) {
+    Triage.WAITING -> R.string.mail_triage_waiting_note
+    else -> R.string.mail_triage_guessed_note
+}
+
+/** L'icône de la marque de son tri : l'œil quand il l'a lu. */
+@DrawableRes
+internal fun triageIcon(t: Triage): Int = when (t) {
+    Triage.READ -> R.drawable.ic_m_eye
+    Triage.WAITING -> R.drawable.ic_m_clock
+    else -> R.drawable.ic_m_alert
+}
+
+/** La marque discrète de son tri, sur une ligne (sans fond, en gris : presque toutes en ont une). */
+@Composable
+internal fun TriageMark(t: Triage) {
+    val tint = MaterialTheme.colorScheme.onSurfaceVariant
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        MIcon(triageIcon(t), null, size = 13.dp, tint = tint)
+        Spacer(Modifier.width(3.dp))
+        Text(stringResource(triageLabel(t)), color = tint, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+    }
 }
 
 /** L'icône d'un dossier, d'après son rôle. */

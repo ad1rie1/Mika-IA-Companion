@@ -118,7 +118,7 @@
     ici: at, halo: 0.12, villes: [{ k: 'lille', nom: 'Lille' }], titre: 'Sa dernière position' });
 
   // ── Les écrans ────────────────────────────────────────────────────────
-  const ONGLETS = [['#carte', 'Explorer'], ['#carte/itineraire', 'Itinéraire'], ['#carte/voyages', 'Voyages']];
+  const ONGLETS = [['#carte', 'Explorer'], ['#carte/evenements', 'Événements'], ['#carte/itineraire', 'Itinéraire'], ['#carte/voyages', 'Voyages']];
   const haut = (cur) => `${A.top({ racine: true, title: 'Carte', small: true })}${A.tabs(ONGLETS, cur)}`;
   const attrib = (bottom) => `<div class="cm-attrib" style="bottom:${bottom}px">© OpenStreetMap · fond simplifié pour la maquette</div>`;
 
@@ -132,6 +132,7 @@
     const liste = `<div class="row" style="padding:2px 16px 6px"><span class="grow"><b style="font-weight:500">6 campings</b> <span class="muted">· dans cette zone</span></span><button class="btn text sm" type="button" data-snack="Trié par distance">${ico('sort', 'xs')}Distance</button></div>
       ${LIEUX.map((l) => `<button class="li" type="button" data-go="#carte/lieu/${l.id}"><span class="lead box"${l.mika ? ' style="background:var(--mc);color:var(--on-mc)"' : ''}>${ico('pin')}</span><span class="txt"><b>${h(l.nom)}</b><small>${h(l.sorte)} · ${h(l.ville)}${l.mika ? ' · <span class="mk-txt">trouvé par Mika</span>' : ''}</small></span><span class="trail">${h(l.dist)}</span></button>`).join('')}`;
     const fiche = sel ? `<div class="place-card"><div class="row"><span class="grow"><h2>${h(sel.nom)}</h2><span class="muted">${h(sel.sorte)} · ${h(sel.ville)} · ${h(sel.dist)}</span></span>${A.act('x', 'Fermer', 'data-go="#carte"')}</div>
+        ${sel.note ? `<div class="row" style="margin-top:6px;gap:6px"><span class="tag">${ico('star', 'xs')}${h(sel.note)} · 312 avis Tripadvisor</span><span class="grow"></span><button class="btn text sm" type="button" data-go="#carte/fiche/atelier" data-snack="Maquette : la fiche complète est montrée sur un restaurant">Tout voir${ico('chev-right', 'xs')}</button></div>` : ''}
         ${sel.dit ? `<div class="mika-said">${ico('sparkle')}<span>${h(sel.dit)}</span></div>` : ''}
         <div class="btns three"><button class="btn filled" type="button" data-go="#carte/itineraire">${ico('route')}Itinéraire</button><button class="btn tonal" type="button" data-sheet="ajouter-voyage">${ico('plus')}Au voyage</button>
           <button class="btn mk outlined" type="button" data-go="#chat" data-snack="Le chat s'ouvre avec ce lieu" title="En parler à Mika">${ico('chat')}En parler</button></div></div>` : '';
@@ -204,7 +205,11 @@
     };
   }
 
+  // Les écrans des avis, des infos pratiques et des événements (ecrans/carte-avis.js) dessinent avec les mêmes outils.
+  A.carteKit = { V, LAC, SEMNOZ, TOURNETTE, ROUTES_LAC, LIEUX, VOYAGES, carte, boite, haut, attrib };
+  A.carteVues = {};
   A.ecran('carte', (args) => {
+    if (A.carteVues[args[0]]) return A.carteVues[args[0]](args[1]);
     if (args[0] === 'lieu') return vueExplorer(args[1]);
     if (args[0] === 'itineraire') return vueItineraire();
     if (args[0] === 'voyages') return vueVoyages();

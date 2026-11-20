@@ -6,7 +6,8 @@
 - *La capacité* ``mcp.call`` appelle, garde la réponse en mémoire le temps qu'elle soit journalisée, et ne rend au
   runtime qu'un résumé (le résultat d'un effet n'est pas effaçable ; ce que rend un service peut parler de quelqu'un).
 - *Le retour* : quand l'appel a été exécuté, ``mcp.answered`` journalise ce qu'il a rendu comme un contenu (l'oubli
-  l'atteint) — la section et l'initiative due (``prompt``) le lui disent.
+  l'atteint) — la section et l'initiative due (``prompt``) le lui disent ; au travail, la section du travail suivant
+  sur la même cible (ADR 0255).
 - *L'expiration* : une carte sans réponse à temps (10 min dans le chat, un jour pour l'opérateur) est refusée au nom
   du délai — elle le saura comme un refus.
 """

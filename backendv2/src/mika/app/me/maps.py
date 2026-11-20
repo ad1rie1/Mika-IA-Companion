@@ -7,6 +7,14 @@
   l'index local (rien ne sort), une adresse (seul le texte cherché part), un itinéraire (seuls ses points partent) ;
   et ce qu'elle a cherché ou montré pour toi (un regard, une carte, par leur ``seq``). Tout passe par le port de la
   carte (``kernel.ports["maps"]``, ``mika.ports.maps``) : le navigateur ne joint jamais un autre hôte que ce serveur.
+- **Les fiches, les événements, les photos** (ADR 0259) : une liste filtrée et notée (ouvert, terrasse, cuisine, note,
+  tri), la fiche entière d'un lieu (OpenStreetMap, l'office de tourisme, Google, les événements tout près) et
+  « Actualiser », les événements autour d'un point ou dans une zone et la fiche de l'un d'eux, une photo relayée par sa
+  référence — chacune avec ce qu'il faut citer (« Google Maps », l'auteur et le lien de chaque avis et de chaque
+  photo, l'auteur et la date d'une fiche DATAtourisme, OpenStreetMap). « Ici » (``near=ici``) est ta dernière position,
+  celle que ton téléphone a donnée, jamais celle d'une autre ; chercher autour de toi précharge les avis de ta case
+  (``preload`` : une mise en file, qui ne retient pas la réponse). Ce qui peut faire appeler un service compté est
+  borné par compte (``MAP_READS``, ``PHOTO_READS``, ``REFRESHES``, ``PRELOADS``).
 - **Tes voyages** : les tiens seulement — un voyage d'une autre personne n'existe pas (le même 404). Ce qu'on y fait
   passe par les actions du plugin ``trips`` (``call.act``), au nom de qui est connecté : journalisées, dédoublonnées
   (``Idempotency-Key``) comme dans la console, auditées depuis son espace (``moi.<action>``). Ce qu'elle y a ajouté
@@ -19,7 +27,6 @@ Le contrat, route par route : ``docs/protocole-moi.md``, § 10.
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 import json
 import math
 import re
@@ -32,14 +39,42 @@ from starlette.routing import Route
 
 from mika.adapters.maps import NONE as NO_MAP
 from mika.adapters.maps import MapUnavailable, gpx
-from mika.app.me.api import PREFIX, Call, Denied, MeApiBase, done, form, missing
+from mika.app.me.api import PREFIX, Call, Denied, MeApiBase, done, form, missing, spend
 from mika.app.me.common import millis, texts_of
 from mika.contracts import trips as c
 from mika.kernel.events import EventType
+from mika.plugins import location as location_p
 from mika.plugins import trips as trips_p
 from mika.plugins.trips import Stop, Trip, TripsState, days_of, geo
 from mika.plugins.trips.tools import along_points, place_items, stop_point
-from mika.ports.maps import AVOIDS, MODES, ROUTE_POINTS_MAX, MapsUnavailable, PlaceHit, RouteLeg, RouteResult
+from mika.ports.maps import (
+    AVOIDS,
+    EVENT_REF,
+    EVENTS_LIMIT_MAX,
+    EVENTS_SPAN_MAX_DAYS,
+    FEATURES,
+    HIT_FIELDS,
+    MODES,
+    PHOTO_REF,
+    PLACE_REF,
+    ROUTE_POINTS_MAX,
+    SORTS,
+    THEMES,
+    EventDetail,
+    EventHit,
+    MapsNotFound,
+    MapsUnavailable,
+    OsmFacts,
+    Photo,
+    PlaceDetail,
+    PlaceHit,
+    Review,
+    ReviewFacts,
+    RouteLeg,
+    RouteResult,
+    TourismFacts,
+    extras,
+)
 from mika.runtime.effects import with_content
 from mika.runtime.operations import SPACE, Outcome, perform
 
@@ -56,6 +91,34 @@ CORRIDOR_MIN, CORRIDOR_MAX, CORRIDOR = 200, 50_000, 5_000
 HERS, YOURS = c.BY_HER, "toi"
 
 NOT_PLUGGED = "La carte n'est pas branchée sur ce serveur."
+
+# ── les fiches, les événements, les photos (ADR 0259) ──
+PLACE_PATH, EVENTS_PATH, EVENT_PATH, PHOTO_PATH = (MAP_PATH + "/lieu", MAP_PATH + "/evenements",
+                                                   MAP_PATH + "/evenement", MAP_PATH + "/photo")
+#: « ici » : ta dernière position, celle que ton téléphone a donnée
+HERE = "ici"
+#: les filtres d'un lieu, dans l'ordre de l'écran (``ports.maps.FEATURES``), en mots
+FEATURE_LABELS = {"terrasse": "Terrasse", "vegetarien": "Végétarien", "vegan": "Vegan", "accessible": "Accessible",
+                  "emporter": "À emporter", "livraison": "Livraison"}
+SORT_LABELS = {"distance": "Les plus proches", "rating": "Les mieux notés"}
+#: une cuisine cherchée ; une note minimale (sur 5) ; le rayon des événements autour d'un point (en mètres)
+CUISINE_MAX = 40
+RADIUS_MIN, RADIUS_MAX, RADIUS = 500, 100_000, 20_000
+#: ce qu'il faut citer avec chaque source (les clients le montrent tel quel)
+OSM_CREDIT, OSM_LICENCE = "© les contributeurs d'OpenStreetMap", "https://www.openstreetmap.org/copyright"
+TOURISM_SOURCE, TOURISM_LICENCE = "DATAtourisme", "Licence Ouverte 2.0"
+TOURISM_LICENCE_URL = "https://www.etalab.gouv.fr/licence-ouverte-open-licence/"
+SOURCE_LABELS = {"google": "Google Maps"}
+#: ce que le navigateur garde d'une photo relayée : pour lui seul, un jour (sa référence ne change pas d'image) ; les
+#: seules sortes qu'on sert (des images qui ne portent rien d'actif : ni SVG, ni page)
+PHOTO_CACHE = "private, max-age=86400"
+PHOTO_MEDIA = frozenset({"image/jpeg", "image/png", "image/webp", "image/gif"})
+PHOTO_HEADERS = {"Cache-Control": PHOTO_CACHE, "X-Content-Type-Options": "nosniff",
+                 "Content-Security-Policy": "default-src 'none'; sandbox"}
+NO_HERE = ("Ta position n'est pas connue ici : ton téléphone ne l'a pas donnée (Téléphone › Position, l'application "
+           "ouverte), ou tu as cessé de la partager.")
+MONTHS = ("janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre",
+          "décembre")
 #: ce qui n'est pas prêt : ce que la personne en lit, puis ce qu'une opératrice en lit. Une personne n'a pas la
 #: console : ce qui manque et où le régler ne se dit qu'à qui peut le faire
 NOT_READY = {
@@ -167,7 +230,9 @@ def _bbox(text: str) -> tuple[float, float, float, float]:
 
 
 def _hit(hit: PlaceHit) -> dict[str, Any]:
-    return dataclasses.asdict(hit)
+    """Un lieu trouvé : ses champs de toujours, et ce qu'on en sait en plus (ADR 0244 : son objet d'OpenStreetMap,
+    ouvert ou fermé, sa cuisine, ses filtres…) seulement quand on le sait."""
+    return {**{name: getattr(hit, name) for name in HIT_FIELDS}, **extras(hit)}
 
 
 def _leg(leg: RouteLeg) -> dict[str, Any]:
@@ -212,38 +277,369 @@ def _index(port: Any) -> tuple[int, int]:
     return count, max(0, built)
 
 
+def _tourism_summary(port: Any) -> dict[str, Any]:
+    """La base des données touristiques : prête, combien de lieux et d'événements, sa dernière lecture (ms)."""
+    got = port.tourism_summary() if hasattr(port, "tourism_summary") else {}
+    if not isinstance(got, Mapping):
+        got = {}
+    try:
+        counts = max(0, int(got.get("places") or 0)), max(0, int(got.get("events") or 0))
+    except (TypeError, ValueError):
+        counts = 0, 0
+    return {"ready": bool(got.get("ready")), "places": counts[0], "events": counts[1],
+            "synced": _when_ms(str(got.get("synced") or ""))}
+
+
 async def info(call: Call) -> dict[str, Any]:
-    """Ce qui est branché : l'index des lieux, les adresses, les itinéraires (qui les calcule), les catégories."""
+    """Ce qui est branché : l'index des lieux, les adresses, les itinéraires (qui les calcule), les données
+    touristiques ; les catégories, les filtres et les ordres d'une liste, les thèmes des événements."""
     port = call.port("maps")
     routing = {"modes": list(MODES), "avoid": list(AVOIDS)}
+    lists = {"features": [{"id": k, "label": FEATURE_LABELS[k]} for k in FEATURES],
+             "sorts": [{"id": k, "label": SORT_LABELS[k]} for k in SORTS],
+             "themes": [{"id": k, "label": v} for k, v in THEMES]}
     if port is None:
         return {"places": {"ready": False, "count": 0, "built": 0}, "addresses": {"ready": False},
-                "routing": {"ready": False, "provider": "", **routing}, "categories": []}
+                "routing": {"ready": False, "provider": "", **routing}, "categories": [],
+                "tourism": {"ready": False, "places": 0, "events": 0, "synced": 0}, **lists}
     count, built = _index(port)
     ready = port.routing_ready()
     return {"places": {"ready": port.places_ready(), "count": count, "built": built},
             "addresses": {"ready": port.addresses_ready()},
             "routing": {"ready": ready, "provider": port.routing_provider() if ready else "", **routing},
-            "categories": [{"id": k, "label": v} for k, v in port.categories()]}
+            "categories": [{"id": k, "label": v} for k, v in port.categories()],
+            "tourism": _tourism_summary(port), **lists}
+
+
+def _here(call: Call) -> dict[str, Any]:
+    """« Ici » : ta dernière position, celle que ton téléphone a donnée (``location``, ADR 0119) — la tienne, jamais
+    celle d'une autre (``last_for``) ; aucune (jamais donnée, effacée, oubliée) : 409, dit."""
+    fix = location_p.last_for(call.frame.state(location_p.LOCATION.name), call.frame, call.me.handle)
+    texts = texts_of(call, [fix.coords_ref, fix.label_ref]) if fix is not None else {}
+    at = geo.parse_coords(texts.get(fix.coords_ref)) if fix is not None else None
+    if fix is None or at is None:
+        raise Denied(409, NO_HERE, {"near": "ta position n'est pas connue"})
+    return {"lat": at[0], "lon": at[1], "label": texts.get(fix.label_ref, ""), "at": millis(fix.fixed_at)}
+
+
+def _near(call: Call) -> tuple[geo.Point | None, dict[str, Any] | None]:
+    """``near`` : « latitude,longitude », ou « ici » (ta dernière position : ``_here``) ; et ce qu'« ici » était."""
+    text = call.arg("near", limit=60).strip()
+    if not text:
+        return None, None
+    if text.lower() == HERE:
+        here = _here(call)
+        return (here["lat"], here["lon"]), here
+    return _coords(text, "near"), None
+
+
+def _features(call: Call) -> frozenset[str]:
+    got = [f.strip() for f in call.arg("features", limit=120).split(",") if f.strip()]
+    if any(f not in FEATURES for f in got):
+        raise Denied(400, f"« features » : {', '.join(FEATURES)}.", {"features": ", ".join(FEATURES)})
+    return frozenset(got)
+
+
+def _rating(call: Call) -> float | None:
+    """``min_rating`` : une note de 0 à 5 (« 4.5 ») ; absente : aucune."""
+    raw = call.arg("min_rating", limit=10).strip()
+    if not raw:
+        return None
+    try:
+        value = float(raw.replace(",", "."))
+    except ValueError:
+        value = math.nan
+    if not math.isfinite(value) or not 0.0 <= value <= 5.0:
+        raise Denied(400, "« min_rating » : une note de 0 à 5.", {"min_rating": "de 0 à 5"})
+    return value
+
+
+def _sort(call: Call) -> str:
+    got = call.arg("sort", limit=20).strip() or SORTS[0]
+    if got not in SORTS:
+        raise Denied(400, f"« sort » : {', '.join(SORTS)}.", {"sort": ", ".join(SORTS)})
+    return got
+
+
+def _map_read(call: Call) -> None:
+    """Une fiche, des événements : ce qui peut faire appeler un service compté, borné par compte (429 au-delà)."""
+    if not spend(call.api.map_reads, call.me.account):
+        raise Denied(429, "Trop de fiches et d'événements demandés d'affilée : attends une minute.")
+
+
+def _preload(call: Call, port: Any, at: geo.Point) -> None:
+    """Chercher autour de soi précharge les avis de sa case (``preload`` : une mise en file, sur le budget de fond, qui
+    ne retient pas la réponse) — au plus ``PRELOADS`` fois par compte ; au-delà, rien, sans le dire."""
+    preload = getattr(port, "preload", None)
+    if preload is not None and spend(call.api.preloads, call.me.account):
+        preload(at[0], at[1])
+
+
+def _when_ms(iso: str) -> int:
+    """Un instant en ISO 8601 (« 2026-11-18T08:00:00Z »), en ms ; vide ou illisible : 0."""
+    try:
+        return int(datetime.fromisoformat(str(iso or "").replace("Z", "+00:00")).timestamp() * 1000)
+    except ValueError:
+        return 0
+
+
+def _coverage(got: Any) -> dict[str, Any]:
+    """Ce qu'un cache sait d'un endroit (``ReviewsCoverage``, ``TourismCoverage``) : prêt, ses cases lues, la lecture
+    la plus ancienne (ms), et ce qu'il faut en dire, en mots."""
+    return {"ready": bool(got.ready), "cells": got.cells, "loaded": got.loaded, "oldest": _when_ms(got.oldest),
+            "note": got.note}
 
 
 async def places(call: Call) -> dict[str, Any]:
-    """Des lieux de l'index local : par le nom (``q``), d'une catégorie (``cat``), près d'un point (``near``), dans une
-    zone (``bbox``)."""
+    """Des lieux de l'index local : par le nom (``q``), d'une catégorie (``cat``), près d'un point (``near``, ou
+    « ici »), dans une zone (``bbox``) ; filtrés (ouvert, ce qu'ils offrent, leur cuisine, leur note) et rangés (la
+    distance, la note) ; avec ce que le cache des avis sait de l'endroit (``reviews``)."""
     port = _maps(call, "places")
     text = " ".join(call.arg("q", limit=QUERY_MAX).split())
     category = _category(call, port)
-    near_text, bbox_text = call.arg("near", limit=60), call.arg("bbox", limit=120)
-    near = _coords(near_text, "near") if near_text.strip() else None
+    near, here = _near(call)
+    bbox_text = call.arg("bbox", limit=120)
     bbox = _bbox(bbox_text) if bbox_text.strip() else None
     if not text and near is None and bbox is None:
         raise Denied(400, "Cherche un nom (q), ou autour d'un point (near), ou dans une zone (bbox).")
     limit = _int(call, "limit", 20, 1, LIMIT_MAX)
+    open_now, features, sort = call.flag("open_now"), _features(call), _sort(call)
+    cuisine, min_rating = " ".join(call.arg("cuisine", limit=CUISINE_MAX).split()), _rating(call)
+    if near is not None and (here is not None or call.flag("here")):
+        _preload(call, port, near)  # « autour de moi »
     try:
-        hits = await port.search(text, near=near, bbox=bbox, category=category, limit=limit)
+        hits = await port.search(text, near=near, bbox=bbox, category=category, limit=limit, open_now=open_now,
+                                 features=features, cuisine=cuisine, min_rating=min_rating, sort=sort)
+    except ValueError as exc:
+        raise Denied(400, str(exc)[:300]) from None
     except MapsUnavailable as exc:
         raise _unavailable(exc) from None
-    return {"places": [_hit(h) for h in hits[:limit]]}
+    out: dict[str, Any] = {"places": [_hit(h) for h in hits[:limit]]}
+    if (near is not None or bbox is not None) and hasattr(port, "reviews_coverage"):
+        out["reviews"] = _coverage(port.reviews_coverage(near=near if bbox is None else None, bbox=bbox))
+    if here is not None:
+        out["here"] = here
+    return out
+
+
+# ── une fiche (ADR 0259) ──
+
+
+def _pairs(pairs: Any) -> list[dict[str, str]]:
+    return [{"label": a, "value": b} for a, b in pairs]
+
+
+def _photo(p: Photo) -> dict[str, Any]:
+    """Une photo : sa référence et le chemin qui la sert (``…/carte/photo/<ref>``, sur ce serveur seul), sa source, son
+    crédit et son lien (à montrer avec elle), sa licence, sa légende, ses dimensions."""
+    return {"ref": p.ref, "path": f"{PREFIX}{PHOTO_PATH}/{p.ref}", "source": p.source, "credit": p.credit,
+            "credit_url": p.credit_url, "licence": p.licence, "caption": p.caption, "width": p.width,
+            "height": p.height}
+
+
+def _date_fr(iso: str) -> str:
+    """« 5 décembre 2023 » ; illisible : tel quel."""
+    try:
+        d = date.fromisoformat(str(iso or "")[:10])
+    except ValueError:
+        return iso or ""
+    return f"{'1er' if d.day == 1 else d.day} {MONTHS[d.month - 1]} {d.year}"
+
+
+def _credit(author: str, updated: str) -> str:
+    """Ce que la Licence Ouverte demande de citer : « DATAtourisme · Hello Lille, mis à jour le 5 décembre 2023 »."""
+    who = f"{TOURISM_SOURCE} · {author}" if author else TOURISM_SOURCE
+    return f"{who}, mis à jour le {_date_fr(updated)}" if updated else who
+
+
+def _osm(o: OsmFacts | None) -> dict[str, Any] | None:
+    if o is None:
+        return None
+    return {"id": o.id, "url": o.url, "address": o.address, "phone": o.phone, "website": o.website, "email": o.email,
+            "hours": o.hours, "hours_text": o.hours_text, "facts": _pairs(o.facts), "wikidata": o.wikidata,
+            "wikipedia": o.wikipedia, "extract": o.extract, "attribution": OSM_CREDIT, "licence_url": OSM_LICENCE}
+
+
+def _tourism(t: TourismFacts | None) -> dict[str, Any] | None:
+    if t is None:
+        return None
+    return {"id": t.id, "description": t.description, "labels": list(t.labels), "prices": t.prices,
+            "contacts": _pairs(t.contacts), "author": t.author, "updated": t.updated, "url": t.url,
+            "photos": [_photo(p) for p in t.photos], "attribution": _credit(t.author, t.updated),
+            "licence": TOURISM_LICENCE, "licence_url": TOURISM_LICENCE_URL}
+
+
+def _review(r: Review) -> dict[str, Any]:
+    return {"rating": r.rating, "text": r.text, "author": r.author, "author_url": r.author_url, "at": _when_ms(r.date),
+            "relative": r.relative, "language": r.language}
+
+
+def _reviews(f: ReviewFacts | None) -> dict[str, Any] | None:
+    if f is None:
+        return None
+    return {"source": f.source, "source_label": SOURCE_LABELS.get(f.source, f.source), "found": bool(f.id),
+            "id": f.id, "rating": f.rating, "count": f.count, "price": f.price, "price_range": f.price_range,
+            "summary": f.summary, "facts": _pairs(f.facts), "reviews": [_review(r) for r in f.reviews],
+            "photos": [_photo(p) for p in f.photos], "url": f.url, "cached": _when_ms(f.cached), "note": f.note}
+
+
+def _event_hit(e: EventHit) -> dict[str, Any]:
+    """Un événement trouvé : tous ses champs, toujours (``free`` : ``null`` quand on ne sait pas ; ``photo`` : vide
+    sans photo)."""
+    return {"id": e.id, "name": e.name, "start": e.start, "end": e.end, "when_text": e.when_text, "place": e.place,
+            "lat": e.lat, "lon": e.lon, "distance_m": e.distance_m, "themes": list(e.themes), "free": e.free,
+            "price": e.price, "photo": e.photo}
+
+
+def _fiche(d: PlaceDetail) -> dict[str, Any]:
+    return {"place": _hit(d.hit), "osm": _osm(d.osm), "tourism": _tourism(d.tourism), "reviews": _reviews(d.reviews),
+            "events": [_event_hit(e) for e in d.events]}
+
+
+def _place_id(call: Call) -> str:
+    """L'identifiant d'un lieu (``l<n>``, ``n123``/``w45``/``r6``, ``t:<uuid>``) ; une autre forme n'existe pas
+    (404), sans rien demander au port."""
+    ident = str(call.request.path_params["place"])
+    if not PLACE_REF.match(ident):
+        raise missing()
+    return ident
+
+
+async def place_read(call: Call) -> dict[str, Any]:
+    """La fiche d'un lieu : sa ligne (``place``), puis ce qu'en dit chaque source — OpenStreetMap, l'office de
+    tourisme (DATAtourisme), Google — et les événements tout près."""
+    ident = _place_id(call)
+    port = _maps(call, "places")
+    _map_read(call)
+    try:
+        got = await port.place(ident)
+    except MapsUnavailable as exc:
+        raise _unavailable(exc) from None
+    if got is None:
+        raise missing()
+    return _fiche(got)
+
+
+async def place_refresh(call: Call) -> dict[str, Any]:
+    """« Actualiser » : sa fiche relue tout de suite chez Google et à l'office de tourisme — au plus ``REFRESHES`` par
+    compte. Ce qui n'a pas pu se relire : 503, en mots (ce qui l'a pu est gardé : relis la fiche)."""
+    ident = _place_id(call)
+    port = _maps(call, "places")
+    if not spend(call.api.refreshes, call.me.account):
+        raise Denied(429, "Trop de fiches actualisées d'affilée : attends une minute.")
+    try:
+        got = await port.place_refresh(ident)
+    except MapsUnavailable as exc:
+        raise _unavailable(exc) from None
+    if got is None:
+        raise missing()
+    return {"ok": True, "message": "Fiche relue.", **_fiche(got)}
+
+
+# ── les événements (ADR 0259) ──
+
+
+def _day(call: Call, name: str) -> date | None:
+    raw = call.arg(name, limit=10).strip()
+    if not raw:
+        return None
+    try:
+        got = date.fromisoformat(raw)
+    except ValueError:
+        got = None
+    if got is None or got.year not in c.YEARS:
+        raise Denied(400, f"« {name} » : une date AAAA-MM-JJ.", {name: "AAAA-MM-JJ"})
+    return got
+
+
+def _themes(call: Call) -> frozenset[str]:
+    known = [k for k, _ in THEMES]
+    got = [t.strip() for t in call.arg("themes", limit=200).split(",") if t.strip()]
+    if any(t not in known for t in got):
+        raise Denied(400, f"« themes » : {', '.join(known)}.", {"themes": ", ".join(known)})
+    return frozenset(got)
+
+
+async def events(call: Call) -> dict[str, Any]:
+    """Les événements à venir (DATAtourisme) : près d'un point (``near``, ou « ici » ; dans ``radius`` mètres) ou dans
+    une zone (``bbox``), du ``start`` au ``end``, de ces thèmes, dont le nom dit ``q``, gratuits seulement ; avec ce que
+    la base sait de l'endroit (``coverage``)."""
+    port = _maps(call)
+    text = " ".join(call.arg("q", limit=QUERY_MAX).split())
+    near, here = _near(call)
+    bbox_text = call.arg("bbox", limit=120)
+    bbox = _bbox(bbox_text) if bbox_text.strip() else None
+    if not text and near is None and bbox is None:
+        raise Denied(400, "Cherche autour d'un point (near), dans une zone (bbox), ou un nom (q).")
+    radius = _int(call, "radius", RADIUS, RADIUS_MIN, RADIUS_MAX)
+    start, end = _day(call, "start"), _day(call, "end")
+    if start is not None and end is not None and end < start:
+        raise Denied(400, "« end » : après « start ».", {"end": "après start"})
+    if start is not None and end is not None and (end - start).days > EVENTS_SPAN_MAX_DAYS:
+        raise Denied(400, f"Une période d'au plus {EVENTS_SPAN_MAX_DAYS} jours.", {"end": "trop loin de start"})
+    themes, free = _themes(call), call.flag("free")
+    limit = _int(call, "limit", 30, 1, EVENTS_LIMIT_MAX)
+    _map_read(call)
+    try:
+        hits = await port.events(near=near, bbox=bbox, radius_m=radius, start=start, end=end, themes=themes,
+                                 text=text, free=free, limit=limit)
+    except ValueError as exc:
+        raise Denied(400, str(exc)[:300]) from None
+    except MapsUnavailable as exc:
+        raise _unavailable(exc) from None
+    out: dict[str, Any] = {"events": [_event_hit(e) for e in hits[:limit]],
+                           "coverage": _coverage(port.tourism_coverage(near=near if bbox is None else None,
+                                                                       bbox=bbox, radius_m=radius))}
+    if here is not None:
+        out["here"] = here
+    return out
+
+
+async def event_read(call: Call) -> dict[str, Any]:
+    """La fiche d'un événement : ce qu'en dit une liste (``event``), son texte, toutes ses dates à venir, ses tarifs,
+    ses contacts, où (son lieu, son adresse), ses photos, et ce qu'il faut citer (son auteur et sa date)."""
+    ident = str(call.request.path_params["event"])
+    if not EVENT_REF.match(ident):
+        raise missing()
+    port = _maps(call)
+    _map_read(call)
+    try:
+        got: EventDetail | None = await port.event(ident)
+    except MapsUnavailable as exc:
+        raise _unavailable(exc) from None
+    if got is None:
+        raise missing()
+    return {"event": _event_hit(got.hit), "description": got.description,
+            "dates": [{"start": d.start, "end": d.end, "text": d.text, "days": list(d.days)} for d in got.dates],
+            "more_dates": got.more_dates, "prices": got.prices, "contacts": _pairs(got.contacts),
+            "address": got.address, "town": got.town, "venue": got.venue, "venue_place": got.venue_place,
+            "author": got.author, "updated": got.updated, "url": got.url, "photos": [_photo(p) for p in got.photos],
+            "merged": got.merged, "attribution": _credit(got.author, got.updated), "licence": TOURISM_LICENCE,
+            "licence_url": TOURISM_LICENCE_URL}
+
+
+# ── une photo relayée (ADR 0259) ──
+
+
+async def photo(call: Call) -> Response:
+    """Une photo relayée, par sa référence (``p:<hash>``) : ses octets et son type, gardés un jour par le navigateur.
+    Une référence qu'aucune source ne connaît (ou dont les droits ont pris fin) : 404 ; rien ne part jamais vers une
+    adresse donnée par un client — une référence n'en est pas une."""
+    ref = str(call.request.path_params["ref"])
+    if not PHOTO_REF.match(ref):
+        raise missing()
+    port = _maps(call)
+    if not spend(call.api.photo_reads, call.me.account):
+        raise Denied(429, "Trop de photos demandées d'affilée : attends une minute.")
+    try:
+        data, media = await port.photo(ref)
+    except MapsNotFound:
+        raise missing() from None
+    except MapsUnavailable as exc:
+        raise _unavailable(exc) from None
+    if media not in PHOTO_MEDIA:
+        raise Denied(502, "La source de cette photo n'a pas rendu une image qu'on sert.")
+    return Response(data, media_type=media, headers=PHOTO_HEADERS)
 
 
 async def addresses(call: Call) -> dict[str, Any]:
@@ -280,8 +676,8 @@ def _json(text: str | None) -> Any:
 
 
 async def look(call: Call) -> dict[str, Any]:
-    """Ce qu'elle a cherché (``look``) ou montré (``map``) pour toi, par son ``seq`` : la note d'un de ses messages.
-    Oublié, ou pour quelqu'un d'autre : 404."""
+    """Ce qu'elle a cherché (``look`` : des lieux, un trajet, des événements) ou montré (``map``) pour toi, par son
+    ``seq`` : la note d'un de ses messages. Oublié, ou pour quelqu'un d'autre : 404."""
     seq = int(call.request.path_params["seq"])
     if not 0 < seq < 2 ** 63:  # au-delà, la base ne lit rien : ce n'est pas une de ses notes
         raise missing()
@@ -305,6 +701,9 @@ async def look(call: Call) -> dict[str, Any]:
             return {"kind": c.NOTE_LOOK, "title": d.query.text, "what": d.what, "route": route, "trip": "",
                     "places": [x for x in points if isinstance(x, dict)] if isinstance(points, list) else [],
                     "at": millis(ev.at)}
+        if d.what == c.LOOK_EVENTS:  # des événements (ADR 0259) : ce que le regard en a gardé
+            return {"kind": c.NOTE_LOOK, "title": d.query.text, "what": d.what, "places": [],
+                    "events": place_items(d.found.text), "route": None, "trip": "", "at": millis(ev.at)}
         return {"kind": c.NOTE_LOOK, "title": d.query.text, "what": d.what, "places": place_items(d.found.text),
                 "route": None, "trip": "", "at": millis(ev.at)}
     if d.title.text is None or d.places.text is None:
@@ -670,6 +1069,9 @@ def routes(api: MeApiBase) -> list[Route]:
     trip, stop = TRIPS_PATH + "/{trip}", TRIPS_PATH + "/{trip}/arrets/{stop}"
     return [r(MAP_PATH, info), r(MAP_PATH + "/lieux", places), r(MAP_PATH + "/adresses", addresses),
             r(MAP_PATH + "/itineraire", itinerary), r(MAP_PATH + "/regards/{seq:int}", look),
+            r(PLACE_PATH + "/{place}", place_read), r(PLACE_PATH + "/{place}/actualiser", place_refresh, write=True),
+            r(EVENTS_PATH, events), r(EVENT_PATH + "/{event}", event_read),
+            r(PHOTO_PATH + "/{ref}", photo, raw=True),
             r(BASE_MAP, map_info), r(BASE_MAP + "/tiles/{z:int}/{x:int}/{y:int}", map_tile, raw=True),
             r(BASE_MAP + "/fonts/{fontstack}/{range}", map_font, raw=True),
             r(BASE_MAP + "/sprites/{path:path}", map_sprite, raw=True),

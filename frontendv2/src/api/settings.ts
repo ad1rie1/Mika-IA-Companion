@@ -6,7 +6,7 @@
  * Les listes des boîtes et des comptes sont lues ici, telles quelles, pour Paramètres et Outils : les écrans Mail et
  * Teams ont leurs propres clients.
  */
-import { getJson, MOI, sendJson, type Done } from "./moi";
+import { apiUrl, getJson, MOI, sendJson, type Done } from "./moi";
 import type { Rules } from "./rights";
 
 // ── Son compte ───────────────────────────────────────────────────────
@@ -74,6 +74,9 @@ export interface BoxValues {
   password?: string;
   folders: string[];
   sync_all: boolean;
+  /** Tout garder en local : tous les dossiers (sauf indésirables et corbeille) et leur historique ; décoché, une
+   *  recherche demande au serveur (ADR 0249 ; absent d'un serveur d'avant). */
+  keep_all?: boolean;
   since_days: number;
   oauth_client_id: string;
   oauth_tenant: string;
@@ -89,6 +92,9 @@ export interface BoxValues {
   tone: string;
   instructions: string;
   signature: string;
+  /** Ses consignes de tri : où ranger, de quoi prévenir, ce qui appelle une réponse (ADR 0243 ; absent d'un serveur
+   *  d'avant). */
+  triage_instructions?: string;
 }
 
 /** Où en est la connexion Microsoft d'une boîte (ADR 0166). */
@@ -174,6 +180,8 @@ export interface TeamsAccounts {
   plugged: boolean;
   /** Teams actif. */
   enabled: boolean;
+  /** L'extension à télécharger (ADR 0246) ; `null` : elle n'est pas à côté du serveur. */
+  extension: { version: string } | null;
   accounts: TeamsAccount[];
 }
 
@@ -198,6 +206,9 @@ export interface TeamsSettings {
 export function fetchTeamsAccounts(): Promise<TeamsAccounts> {
   return getJson(`${MOI}/teams/accounts`);
 }
+
+/** L'extension de Teams en zip (ADR 0246), derrière la connexion (sa session) : un lien à ouvrir tel quel. */
+export const EXTENSION_URL = apiUrl(`${MOI}/teams/extension`);
 
 export function fetchTeamsAccount(account: string): Promise<TeamsSettings> {
   return getJson(`${MOI}/teams/account?account=${encodeURIComponent(account)}`);

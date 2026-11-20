@@ -26,6 +26,8 @@ Contrat :
 - ``tool_choice="none"`` (le tour de clôture d'une boucle) → ``tool_choice: none``,
   les outils restant déclarés : l'API refuse une conversation qui porte des
   ``tool_use`` ou ``tool_result`` sans leurs outils ;
+- les séquences d'arrêt (``LLMRequest.stop_sequences``) → ``stop_sequences`` ;
+  une réponse arrêtée là (``stop_sequence``) est une fin comme une autre ;
 - ``tool_use`` coupé par ``max_tokens`` → ``truncated_tool_call`` ; refus →
   ``stop="refusal"`` **sans aucun appel d'outil** (un ``tool_use`` porté par un
   refus n'est jamais exécuté), la catégorie de ``stop_details`` dans
@@ -197,6 +199,8 @@ class ClaudeBackend:
         if self.effort:
             body["thinking"] = {"type": "adaptive"}
             body["output_config"] = {"effort": self.effort}
+        if req.stop_sequences:
+            body["stop_sequences"] = list(req.stop_sequences)
         if system:
             body["system"] = system
         if tools:

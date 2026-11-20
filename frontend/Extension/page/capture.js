@@ -3,11 +3,14 @@
  * ce qu'il range dans sa base locale, et on en tire les messages. Pour les lire, on ne fait aucune requête à
  * Microsoft et on ne touche à rien dans la page.
  *
- * Deux sources, dédoublonnées par version de message (son identifiant et un condensé de son texte : un message
- * modifié repasse, un message supprimé passe une fois comme suppression) :
- *   - le réseau : les réponses JSON (fetch, XHR) et les trames du WebSocket (l'arrivée d'un message en direct) ;
- *   - la base IndexedDB du client, relue à intervalles : elle rattrape ce que le réseau ne montre pas (une requête
- *     faite par un worker, un message arrivé avant l'ouverture de l'onglet).
+ * Trois sources (ADR 0251), dédoublonnées par version de message (son identifiant et un condensé de son texte : un
+ * message modifié repasse, un message supprimé passe une fois comme suppression) :
+ *   - le worker de Teams : ce qu'il passe à la page (le Teams d'aujourd'hui y fait vivre son service de chat, sa
+ *     connexion en direct et sa base) — un message y passe dès qu'il arrive ;
+ *   - la base IndexedDB du client, par synchro ciblée : les fiches de conversation relues à chaque signe (et toutes
+ *     les 5 s), les fils d'une conversation qui a bougé relus depuis son curseur ; le bouton de l'historique la lit
+ *     en entier ;
+ *   - le réseau de la page : les réponses JSON (fetch, XHR) et les trames des WebSockets.
  *
  * L'autre sens, ce que Mika écrit, ne passe que par deux gestes :
  *   - un brouillon se place dans la zone de saisie, et seulement quand la conversation ouverte est la sienne, que la
@@ -35,11 +38,42 @@
   const MAX_RESPONSE_BYTES = 6 * 1024 * 1024;
   const MAX_FRAME_CHARS = 2 * 1024 * 1024;
   const FRAMES_PENDING_MAX = 500;
-  const SWEEP_FIRST_MS = 8000;
-  const SWEEP_EVERY_MS = 45000;
-  const SWEEP_BUDGET_MS = 1500;
-  const SWEEP_RECORDS_PER_STORE = 4000;
-  const DB_OF_INTEREST = /replychain|conversation|message|chat/i;
+  // la synchro ciblée de la base locale (ADR 0251) : la première après l'ouverture, puis un contrôle des fiches de
+  // conversation à cadence fixe, et plus tôt sur un signe (le worker de Teams parle, le titre change) ; un tour borné
+  // en temps (le reste au tour suivant) ; une conversation inconnue relue sur la fenêtre, une connue depuis son curseur
+  // moins un recouvrement ; une fiche en avance sur ses fils retentée quelques fois avant d'en prendre la marque
+  const SYNC_FIRST_MS = 2500;
+  const SYNC_EVERY_MS = 5000;
+  const SYNC_NUDGE_MS = 700;
+  const SYNC_BUDGET_MS = 1500;
+  const SYNC_WINDOW_MS = 24 * 3600 * 1000;
+  const SYNC_OVERLAP_MS = 60 * 1000;
+  const CATCHUP_SLACK_MS = 5000;
+  const CATCHUP_MS = 45000; // une fiche en avance sur ses fils : retentée tant de temps, puis sa marque est prise
+  const CONVERSATIONS_DB = /conversation-manager/i;
+  const CHAINS_DB = /replychain-manager/i;
+  const NOT_CHAINS_DB = /metadata|streams|folder/i;
+  const CHAIN_STORES = ["replychains", "replychains-2"];
+  const CHAIN_INDEX = "latestDeliveryTimeByConversationId";
+  // l'historique (le bouton de la mise en service) : par paquets, chacun attendu par le service avant le suivant
+  const HISTORY_CHUNK = 150;
+  const HISTORY_ASK_MS = 180000; // au-dessus du temps que le service se donne pour un paquet (120 s)
+  const HISTORY_PAGE = 200; // les fils lus par pages, une transaction chacune : Teams écrit entre deux
+  const HISTORY_KEEP = 1000; // Mika n'en garde pas plus par conversation : inutile d'envoyer les plus vieux
+  // le worker de Teams (où vivent son service de chat et sa connexion en direct) : ce qu'il passe à la page
+  const MAX_WORKER_CHARS = 2 * 1024 * 1024;
+  const WORKER_PENDING_MAX = 200;
+  // les images (ADR 0258) : téléchargées une à une du service d'images de Teams (avec les cookies du navigateur, comme
+  // Teams lui-même), 8 Mo au plus, de ces types ; une image dont le message n'est pas encore chez Mika est retentée
+  const IMAGE_HOST = /^https:\/\/[a-z0-9-]{1,40}\.asm\.skype\.com\/v1\/objects\/[A-Za-z0-9._:-]{1,200}\/views\/imgo$/;
+  const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+  const IMAGE_MAX_BYTES = 8 * 1024 * 1024;
+  const IMAGE_QUEUE_MAX = 500;
+  const IMAGE_RETRY_MS = 30000;
+  const IMAGE_TRIES = 3;
+  const IMAGE_ASK_MS = 120000;
+  const WORKER_PER_TASK = 5;
+  const FLUSH_MS = 300;
   const SENT_IN_PAGE_MAX = 20000;
   const DRAFT_CHECK_MS = 2000;
   const DRAFT_TRIES = 3;
@@ -49,14 +83,18 @@
   const CHAT_SEND_TIMEOUT_MS = 20000;
   const EDITORS = ['[data-tid="ckeditor"][contenteditable="true"]', '[data-tid*="ckeditor"][contenteditable="true"]',
     'div[role="textbox"][contenteditable="true"]'];
-  const SEND_BUTTONS = ['[data-tid="newMessageCommands-send"]', 'button[name="send"]'];
+  const SEND_BUTTONS = ['[data-tid="sendMessageCommands-send"]', '[data-tid="newMessageCommands-send"]',
+    'button[name="send"]'];
   const TYPING_INPUTS = /^(text|search|email|url|tel|password|number|)$/i;
 
   const stats = {
     startedAt: Date.now(),
     network: { responses: 0, frames: 0, messages: 0, errors: 0 },
     idb: { available: typeof indexedDB !== "undefined" && typeof indexedDB.databases === "function",
-      sweeps: 0, lastSweepMs: 0, messages: 0, errors: 0, databases: [] },
+      syncs: 0, lastSyncMs: 0, conversations: 0, read: 0, messages: 0, errors: 0 },
+    worker: { hooked: 0, received: 0, kept: 0, messages: 0, errors: 0 },
+    history: { running: false, done: 0, total: 0, messages: 0, images: 0, error: "" },
+    images: { downloaded: 0, sent: 0, skipped: 0, failed: 0 },
     conversations: 0,
     sent: 0,
     compose: { placed: 0, sentByService: 0, sentByComposeBox: 0, uncertain: 0, errors: 0 },
@@ -68,6 +106,7 @@
   const titles = new Map();
   let pendingMessages = [];
   let pendingConversations = [];
+  const pendingCursors = new Map(); // conversation → curseur à garder par le service (avec le dernier lot)
   let flushTimer = 0;
 
   function readSelf() {
@@ -104,16 +143,23 @@
 
   function flush() {
     flushTimer = 0;
-    if (!pendingMessages.length && !pendingConversations.length) return;
+    if (!pendingMessages.length && !pendingConversations.length && !pendingCursors.size) return;
     const messages = pendingMessages.splice(0, 300);
     const conversations = pendingConversations.splice(0, 300);
+    // les curseurs ne partent qu'avec le dernier lot : un curseur dit « tout ce qui précède est passé », jamais avant
+    // que ce soit vrai (un onglet fermé entre deux lots ne perd rien)
+    let cursors = [];
+    if (!pendingMessages.length) {
+      cursors = Array.from(pendingCursors, function (e) { return { conv: e[0], w: e[1].w, m: e[1].m }; }).slice(0, 300);
+      for (const c of cursors) pendingCursors.delete(c.conv);
+    }
     stats.sent += messages.length;
-    post("captured", { messages: messages, conversations: conversations, self: selfId() });
-    if (pendingMessages.length || pendingConversations.length) schedule();
+    post("captured", { messages: messages, conversations: conversations, self: selfId(), cursors: cursors });
+    if (pendingMessages.length || pendingConversations.length || pendingCursors.size) schedule();
   }
 
   function schedule() {
-    if (!flushTimer) flushTimer = setTimeout(flush, 600);
+    if (!flushTimer) flushTimer = setTimeout(flush, FLUSH_MS);
   }
 
   function take(result, source) {
@@ -134,6 +180,8 @@
       m.source = source;
       pendingMessages.push(m);
       stats[source].messages++;
+      // ses images, en direct : celles des messages de la fenêtre (l'historique envoie les siennes lui-même)
+      if (m.images && !m.deleted && m.time >= Date.now() - SYNC_WINDOW_MS) queueImages(m, false);
     }
     if (pendingMessages.length || pendingConversations.length) schedule();
   }
@@ -267,6 +315,60 @@
     }
   }
 
+  // ── Le worker de Teams ──────────────────────────────────────────────────────
+  //
+  // Le Teams d'aujourd'hui fait vivre son service de chat, sa connexion en direct et sa base locale dans un worker : la
+  // page n'en voit que ce qu'il lui passe — des réponses JSON en texte, où passent les messages dès qu'ils arrivent.
+  // On les lit comme une trame, et chaque fois que le worker parle d'un message, une synchro ciblée suit (ADR 0251).
+
+  const workerFrames = [];
+  let workerTimer = 0;
+
+  function readWorkerFrames() {
+    workerTimer = 0;
+    // quelques-unes par tâche : au démarrage de Teams, des dizaines de réponses de 2 Mo feraient saccader la page
+    for (const data of workerFrames.splice(0, WORKER_PER_TASK)) inspect(data, "worker", "");
+    if (workerFrames.length) workerTimer = setTimeout(readWorkerFrames, 0);
+  }
+
+  function onWorkerMessage(event) {
+    try {
+      stats.worker.received++;
+      const data = event.data;
+      if (typeof data !== "string" || data.length > MAX_WORKER_CHARS || data.indexOf('"content"') < 0) return;
+      if (data.indexOf('"messagetype"') < 0 && data.indexOf('"messageType"') < 0) return;
+      stats.worker.kept++;
+      if (workerFrames.length < WORKER_PENDING_MAX) workerFrames.push(data);
+      if (!workerTimer) workerTimer = setTimeout(readWorkerFrames, 0);
+      nudge();
+    } catch (_) {
+      stats.worker.errors++;
+    }
+  }
+
+  const NativeWorker = window.Worker;
+  if (typeof NativeWorker === "function" && typeof Proxy === "function") {
+    try {
+      window.Worker = new Proxy(NativeWorker, {
+        construct: function (target, args, newTarget) {
+          const worker = Reflect.construct(target, args, newTarget);
+          try {
+            const url = String(args[0] && args[0].href ? args[0].href : args[0] || "");
+            if (!/telemetry/i.test(url)) {
+              worker.addEventListener("message", onWorkerMessage);
+              stats.worker.hooked++;
+            }
+          } catch (_) {
+            stats.worker.errors++;
+          }
+          return worker;
+        },
+      });
+    } catch (_) {
+      stats.worker.errors++;
+    }
+  }
+
   const NativeWebSocket = window.WebSocket;
   if (typeof NativeWebSocket === "function" && typeof Proxy === "function") {
     const HookedWebSocket = new Proxy(NativeWebSocket, {
@@ -324,84 +426,485 @@
     });
   }
 
-  function readStore(db, storeName, deadline, report) {
+  /** Tous les enregistrements d'un magasin (les fiches de conversation : quelques centaines). */
+  function getAll(db, storeName) {
     return new Promise(function (resolve) {
-      let tx;
       try {
-        tx = db.transaction(storeName, "readonly");
+        const request = db.transaction(storeName, "readonly").objectStore(storeName).getAll();
+        request.onsuccess = function () { resolve(Array.isArray(request.result) ? request.result : []); };
+        request.onerror = function () { resolve([]); };
       } catch (_) {
-        resolve();
-        return;
+        resolve([]);
       }
-      let n = 0;
+    });
+  }
+
+  /**
+   * Les fils d'une conversation livrés depuis `since` (ms ; 0 : tous), dans chaque magasin de fils, par l'index
+   * [conversation, heure de dernière livraison] — sans lui (une autre version de Teams), par la clé de la conversation,
+   * filtrés à la main. `onValue` reçoit chaque fil ; rend le plus tard livré qu'on ait lu (0 : aucun).
+   */
+  async function readChains(db, conversation, since, onValue) {
+    let latest = 0;
+    for (const storeName of CHAIN_STORES) {
+      if (!db.objectStoreNames.contains(storeName)) continue;
+      latest = Math.max(latest, await new Promise(function (resolve) {
+        let most = 0;
+        let request;
+        try {
+          const store = db.transaction(storeName, "readonly").objectStore(storeName);
+          const indexed = store.indexNames.contains(CHAIN_INDEX);
+          const range = indexed ? IDBKeyRange.bound([conversation, since || 0], [conversation, []])
+            : IDBKeyRange.bound([conversation], [conversation, []]);
+          request = (indexed ? store.index(CHAIN_INDEX) : store).openCursor(range);
+        } catch (_) {
+          stats.idb.errors++;
+          resolve(0);
+          return;
+        }
+        request.onsuccess = function () {
+          const cursor = request.result;
+          if (!cursor) {
+            resolve(most);
+            return;
+          }
+          const value = cursor.value;
+          const delivered = value && typeof value === "object" ? Number(value.latestDeliveryTime) || 0 : 0;
+          if (!since || delivered >= since) {
+            most = Math.max(most, delivered);
+            try {
+              onValue(value);
+            } catch (_) {
+              stats.idb.errors++;
+            }
+          }
+          cursor.continue();
+        };
+        request.onerror = function () { resolve(most); };
+      }));
+    }
+    return latest;
+  }
+
+  /**
+   * Les bases de Teams qui comptent, d'un même compte : celle des fiches de conversation et celle des fils portent la
+   * même fin de nom (le client, le locataire, la personne, la langue). Plusieurs comptes dans ce navigateur : celui
+   * dont la fin de nom porte l'identité de la page, sinon le premier complet.
+   */
+  async function databases() {
+    const byTail = new Map();
+    for (const info of await indexedDB.databases()) {
+      const name = info && info.name ? String(info.name) : "";
+      if (!name || NOT_CHAINS_DB.test(name)) continue;
+      const kind = CONVERSATIONS_DB.test(name) ? "conversations" : CHAINS_DB.test(name) ? "chains" : "";
+      if (!kind) continue;
+      const at = name.indexOf("react-web-client");
+      const tail = (at >= 0 ? name.slice(at) : name.replace(/^[^:]*:[^:]*:/, "")).replace(/8:orgid:/g, "");
+      const pair = byTail.get(tail) || { conversations: "", chains: "", tail: tail };
+      if (!pair[kind]) pair[kind] = name;
+      byTail.set(tail, pair);
+    }
+    const pairs = Array.from(byTail.values()).filter(function (p) { return p.conversations; });
+    const me = selfId();
+    const mine = me ? pairs.filter(function (p) { return p.tail.toLowerCase().indexOf(me) >= 0; }) : [];
+    const best = (mine.length ? mine : pairs).sort(function (a, b) { return (b.chains ? 1 : 0) - (a.chains ? 1 : 0); })[0];
+    return best || { conversations: "", chains: "" };
+  }
+
+  /** Les fiches de conversation, et la base des fils ouverte (à fermer) ; `null` sans base de Teams. */
+  async function openTeamsData() {
+    const names = await databases();
+    if (!names.conversations) return null;
+    const convDb = await openExisting(names.conversations);
+    if (!convDb) return null;
+    let records;
+    try {
+      records = await getAll(convDb, "conversations");
+    } finally {
+      convDb.close();
+    }
+    const chainsDb = names.chains ? await openExisting(names.chains) : null;
+    return { records: records, chains: chainsDb };
+  }
+
+  // Les curseurs de chaque conversation : gardés par le service de l'extension (ils survivent à la page), lus à la
+  // première synchro ; tant qu'il ne les a pas rendus, on ne relit rien (sinon tout repartirait de la fenêtre).
+  const cursors = new Map();
+  const catchup = new Map(); // conversation → depuis quand sa fiche est en avance sur ses fils
+  let cursorsLoaded = false;
+  let lastSyncAt = 0; // la fin de la dernière synchro allée au bout
+
+  async function loadCursors() {
+    const answer = await askService("cursors", {}, ASK_TIMEOUT_MS);
+    if (!answer || !answer.ok) return false;
+    const got = answer.data && typeof answer.data === "object" ? answer.data : {};
+    cursors.clear();
+    for (const conv of Object.keys(got)) {
+      const c = got[conv];
+      if (c && typeof c === "object") cursors.set(conv, { w: Number(c.w) || 0, m: String(c.m || "") });
+    }
+    cursorsLoaded = true;
+    return true;
+  }
+
+  /** Un lot n'a pas atteint le service : nos curseurs ont pu passer devant ; on reprend les siens (ADR 0251). */
+  function cursorsLost() {
+    cursors.clear();
+    pendingCursors.clear();
+    catchup.clear();
+    cursorsLoaded = false;
+    nudge();
+  }
+
+  let syncing = false;
+  let syncAgain = false;
+  let firstSync = true;
+
+  /**
+   * La synchro ciblée (ADR 0251) : les fiches de conversation relues (quelques centaines, à peine quelques ms), la
+   * plus active d'abord ; pour chacune qui a bougé depuis son curseur, ses fils livrés depuis lui (moins un
+   * recouvrement qui grandit avec le temps écoulé depuis la dernière synchro : une veille, des fils remplis après coup),
+   * et rien d'autre. Bornée en temps — au moins une fiche par tour — : ce qui reste passe au tour suivant, aussitôt
+   * relancé.
+   */
+  async function sync() {
+    if (!stats.idb.available || historyRunning) return;
+    if (syncing) {
+      syncAgain = true;
+      return;
+    }
+    syncing = true;
+    const begun = Date.now();
+    let data = null;
+    let finished = false;
+    try {
+      if (!cursorsLoaded && !(await loadCursors())) return; // le service dort ou l'extension a été rechargée
+      data = await openTeamsData();
+      if (!data) return;
+      stats.idb.conversations = data.records.length;
+      const started = Date.now(); // le budget compte la lecture, pas l'ouverture des bases
+      const overlapMs = Math.min(SYNC_WINDOW_MS, Math.max(SYNC_OVERLAP_MS,
+        lastSyncAt ? started - lastSyncAt + SYNC_OVERLAP_MS : SYNC_WINDOW_MS));
+      const records = data.records.filter(function (r) { return r && typeof r.id === "string"; })
+        .sort(function (a, b) { return (Number(b.lastMessageTimeUtc) || 0) - (Number(a.lastMessageTimeUtc) || 0); });
+      let processed = 0;
+      finished = true;
+      for (const record of records) {
+        const marker = P.conversationMarker(record);
+        const cursor = cursors.get(record.id);
+        const since = P.syncSince(marker, cursor, started, { windowMs: SYNC_WINDOW_MS, overlapMs: overlapMs });
+        if (firstSync || since !== null) take(X.extract(record, { parseStrings: false }), "idb"); // son nom, son dernier message
+        if (since === null) continue;
+        if (processed && Date.now() - started > SYNC_BUDGET_MS) {
+          syncAgain = true;
+          finished = false;
+          break;
+        }
+        processed++;
+        const latest = data.chains ? await readChains(data.chains, record.id, since, function (value) {
+          take(X.extract(value, { parseStrings: false }), "idb");
+        }) : 0;
+        stats.idb.read++;
+        // une fiche en avance sur ses fils (Teams range l'une puis les autres) : retentée pendant `CATCHUP_MS`, au
+        // temps et non au nombre d'essais (les signes en rafale les épuiseraient en une seconde)
+        const ahead = catchup.get(record.id) || started;
+        const settled = P.caughtUp(record, latest, CATCHUP_SLACK_MS) || started - ahead >= CATCHUP_MS;
+        if (settled) catchup.delete(record.id);
+        else catchup.set(record.id, ahead);
+        const next = P.advanceCursor(cursor, since, latest, settled ? marker : (cursor ? cursor.m : ""));
+        cursors.set(record.id, next);
+        pendingCursors.set(record.id, next);
+      }
+      if (finished) {
+        firstSync = false;
+        lastSyncAt = Date.now();
+      }
+      if (pendingCursors.size) schedule();
+    } catch (_) {
+      stats.idb.errors++;
+    } finally {
+      if (data && data.chains) data.chains.close();
+      stats.idb.syncs++;
+      stats.idb.lastSyncMs = Date.now() - begun;
+      syncing = false;
+      if (syncAgain) {
+        syncAgain = false;
+        nudge(50);
+      }
+    }
+  }
+
+  let nudgeTimer = 0;
+  /** Un signe que quelque chose a bougé : une synchro bientôt (une seule pour une rafale de signes). */
+  function nudge(ms) {
+    if (nudgeTimer) return;
+    nudgeTimer = setTimeout(function () {
+      nudgeTimer = 0;
+      sync();
+    }, ms === undefined ? SYNC_NUDGE_MS : ms);
+  }
+
+  setTimeout(function loop() {
+    sync().finally(function () { setTimeout(loop, SYNC_EVERY_MS); });
+  }, SYNC_FIRST_MS);
+
+  // le titre de l'onglet compte les non-lus : il change quand un message arrive ailleurs
+  let titleWatched = false;
+  function watchTitle() {
+    const title = document.querySelector("title");
+    if (!title || titleWatched) return;
+    titleWatched = true;
+    try {
+      new MutationObserver(function () { nudge(); }).observe(title, { childList: true, characterData: true, subtree: true });
+    } catch (_) { /* rien */ }
+  }
+  document.addEventListener("DOMContentLoaded", watchTitle);
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible") nudge();
+  });
+
+  // ── Les images (ADR 0258) ──────────────────────────────────────────────────
+  //
+  // Chaque image d'un message (`X.imagesOf` : seulement celles du service d'images de Teams) est téléchargée ici,
+  // par son adresse d'origine, puis passée au service, qui la trie comme son message (exclusions, pauses) et l'envoie
+  // à Mika une fois le message chez elle. Une à la fois : une image de 8 Mo à la fois en mémoire, pas plus.
+
+  const imageQueue = [];
+  const imagesSeen = new Set(); // message|image déjà mis en file dans cette page
+  let imagesPumping = false;
+
+  function queueImages(m, history) {
+    for (const i of m.images || []) {
+      const key = m.id + "|" + i.id;
+      if (imagesSeen.has(key) || imageQueue.length >= IMAGE_QUEUE_MAX) continue;
+      imagesSeen.add(key);
+      imageQueue.push({ conv: m.conv, id: m.id, image: i.id, position: i.position, url: i.url, time: m.time,
+        author: m.author, authorId: m.authorId, history: history, tries: 0, notBefore: 0 });
+    }
+    pumpImages();
+  }
+
+  /** Les octets d'une image, en base64, et son type ; `null` : pas une image admise, ou pas téléchargée. */
+  async function download(url) {
+    if (!IMAGE_HOST.test(url)) return null; // jamais une autre adresse avec les cookies du navigateur
+    const response = await nativeFetch.call(window, url, { credentials: "include", cache: "force-cache" });
+    if (!response.ok) return null;
+    const blob = await response.blob();
+    if (!blob.size || blob.size > IMAGE_MAX_BYTES || IMAGE_TYPES.indexOf(blob.type) < 0) return null;
+    const data = await new Promise(function (resolve) {
+      const reader = new FileReader();
+      reader.onload = function () { resolve(String(reader.result || "").split(",")[1] || ""); };
+      reader.onerror = function () { resolve(""); };
+      reader.readAsDataURL(blob);
+    });
+    return data ? { type: blob.type, data: data } : null;
+  }
+
+  /** Télécharger et passer une image ; rend vrai si elle est réglée (envoyée, écartée ou perdue), faux : à retenter. */
+  async function sendImage(job) {
+    let got = null;
+    try {
+      got = await download(job.url);
+    } catch (_) {
+      got = null;
+    }
+    if (!got) {
+      stats.images.failed++;
+      return true;
+    }
+    stats.images.downloaded++;
+    const answer = await askService("image", { conv: job.conv, id: job.id, image: job.image, position: job.position,
+      type: got.type, data: got.data, time: job.time, author: job.author, authorId: job.authorId,
+      history: job.history }, IMAGE_ASK_MS);
+    const d = answer && answer.data ? answer.data : {};
+    if (answer && answer.ok) {
+      if (d.skipped) stats.images.skipped++;
+      else stats.images.sent++;
+      return true;
+    }
+    if (d.retry && job.tries + 1 < IMAGE_TRIES) return false;
+    stats.images.failed++;
+    return true;
+  }
+
+  async function pumpImages() {
+    if (imagesPumping) return;
+    imagesPumping = true;
+    try {
+      while (imageQueue.length) {
+        const now = Date.now();
+        const index = imageQueue.findIndex(function (j) { return j.notBefore <= now; });
+        if (index < 0) {
+          setTimeout(pumpImages, IMAGE_RETRY_MS);
+          break;
+        }
+        const job = imageQueue.splice(index, 1)[0];
+        if (!(await sendImage(job))) {
+          job.tries++;
+          job.notBefore = Date.now() + IMAGE_RETRY_MS;
+          imageQueue.push(job);
+        }
+        await pause(200);
+      }
+    } finally {
+      imagesPumping = false;
+    }
+  }
+
+  // ── L'historique (le bouton de la mise en service) ─────────────────────────
+  //
+  // Toute la base locale, conversation par conversation, par paquets que le service range un à un (chacun attendu
+  // avant le suivant) ; marqués historiques, ils se rangent chez Mika déjà lus. La synchro se tait pendant ce temps.
+
+  let historyRunning = false;
+
+  /** Les conversations qui ont des fils (la clé d'un fil commence par elle), sautées de l'une à l'autre. */
+  function chainConversations(db, storeName) {
+    return new Promise(function (resolve) {
+      const out = [];
       let request;
       try {
-        request = tx.objectStore(storeName).openCursor();
+        request = db.transaction(storeName, "readonly").objectStore(storeName).openKeyCursor();
       } catch (_) {
-        resolve();
+        resolve(out);
         return;
       }
       request.onsuccess = function () {
         const cursor = request.result;
-        if (!cursor || n >= SWEEP_RECORDS_PER_STORE || Date.now() > deadline) {
-          report.records += n;
-          resolve();
+        if (!cursor) {
+          resolve(out);
           return;
         }
-        n++;
-        try {
-          const before = stats.idb.messages;
-          take(X.extract(cursor.value, { parseStrings: false }), "idb");
-          report.messages += stats.idb.messages - before;
-        } catch (_) {
-          stats.idb.errors++;
+        const conv = Array.isArray(cursor.key) ? cursor.key[0] : null;
+        if (typeof conv === "string" && out.length < 20000) {
+          out.push(conv);
+          cursor.continue([conv, []]); // après tous les fils de cette conversation
+        } else {
+          cursor.continue();
         }
-        cursor.continue();
       };
-      request.onerror = function () { resolve(); };
-      tx.onabort = function () { resolve(); };
+      request.onerror = function () { resolve(out); };
     });
   }
 
-  let sweeping = false;
-  async function sweep() {
-    if (sweeping || !stats.idb.available) return;
-    sweeping = true;
-    const started = Date.now();
-    const deadline = started + SWEEP_BUDGET_MS;
-    const reports = [];
-    try {
-      const list = await indexedDB.databases();
-      for (const info of list) {
-        if (!info || !info.name || !DB_OF_INTEREST.test(info.name)) continue;
-        const report = { name: info.name, stores: [], records: 0, messages: 0 };
-        reports.push(report);
-        if (Date.now() > deadline) continue;
-        const db = await openExisting(info.name);
-        if (!db) continue;
-        try {
-          for (const storeName of Array.from(db.objectStoreNames)) {
-            report.stores.push(storeName);
-            if (Date.now() > deadline) break;
-            await readStore(db, storeName, deadline, report);
+  /**
+   * Tous les fils d'une conversation, par sa clé (pas par l'index : un fil sans heure de livraison n'y est pas), par
+   * pages de `HISTORY_PAGE`, une transaction chacune : Teams écrit entre deux pages.
+   */
+  async function readAllChains(db, conversation, onValue) {
+    for (const storeName of CHAIN_STORES) {
+      if (!db.objectStoreNames.contains(storeName)) continue;
+      let lower = [conversation];
+      let open = false;
+      for (;;) {
+        const page = await new Promise(function (resolve) {
+          try {
+            const request = db.transaction(storeName, "readonly").objectStore(storeName)
+              .getAll(IDBKeyRange.bound(lower, [conversation, []], open, false), HISTORY_PAGE);
+            request.onsuccess = function () { resolve(Array.isArray(request.result) ? request.result : []); };
+            request.onerror = function () { resolve([]); };
+          } catch (_) {
+            stats.idb.errors++;
+            resolve([]);
           }
-        } finally {
-          db.close();
+        });
+        for (const value of page) {
+          try {
+            onValue(value);
+          } catch (_) {
+            stats.idb.errors++;
+          }
         }
+        const last = page[page.length - 1];
+        if (page.length < HISTORY_PAGE || !last || last.replyChainId === undefined) break;
+        lower = [conversation, last.replyChainId];
+        open = true;
+        await pause(0);
       }
-    } catch (_) {
-      stats.idb.errors++;
-    } finally {
-      stats.idb.sweeps++;
-      stats.idb.lastSweepMs = Date.now() - started;
-      stats.idb.databases = reports;
-      sweeping = false;
     }
   }
 
-  setTimeout(function loop() {
-    sweep().finally(function () { setTimeout(loop, SWEEP_EVERY_MS); });
-  }, SWEEP_FIRST_MS);
+  /**
+   * L'historique (ADR 0251) : chaque conversation — celles des fiches et celles qui n'ont que des fils —, ses
+   * `HISTORY_KEEP` messages les plus récents (Mika n'en garde pas plus), par paquets que le service range un à un. `run`
+   * : l'identifiant de ce chargement, que portent ses paquets (un chargement relancé ignore les paquets d'avant).
+   */
+  async function historyRun(run) {
+    if (historyRunning) return;
+    historyRunning = true;
+    const h = stats.history;
+    h.running = true;
+    h.done = h.total = h.messages = h.images = 0;
+    h.error = "";
+    let data = null;
+    try {
+      data = await openTeamsData();
+      if (!data) throw new Error("pas de base de Teams lisible dans cet onglet");
+      const records = new Map();
+      for (const r of data.records) if (r && typeof r.id === "string") records.set(r.id, r);
+      const ids = new Set(records.keys());
+      if (data.chains) {
+        for (const storeName of CHAIN_STORES) {
+          if (!data.chains.objectStoreNames.contains(storeName)) continue;
+          for (const conv of await chainConversations(data.chains, storeName)) ids.add(conv);
+        }
+      }
+      h.total = ids.size;
+      askService("historyProgress", { run: run, done: 0, total: h.total, messages: 0 }, 2000);
+      for (const id of ids) {
+        const messages = [];
+        const conversations = [];
+        const seen = new Set();
+        const add = function (got) {
+          for (const c of got.conversations) conversations.push(c);
+          for (const m of got.messages) {
+            const key = T.versionKey(m);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            m.source = "idb";
+            messages.push(m);
+          }
+        };
+        if (records.has(id)) add(X.extract(records.get(id), { parseStrings: false }));
+        if (data.chains) await readAllChains(data.chains, id, function (value) {
+          add(X.extract(value, { parseStrings: false }));
+        });
+        // les plus récents d'abord retenus, puis envoyés du plus ancien au plus récent
+        const kept = messages.sort(function (a, b) { return b.time - a.time; }).slice(0, HISTORY_KEEP).reverse();
+        for (let i = 0; i === 0 || i < kept.length; i += HISTORY_CHUNK) {
+          const part = kept.slice(i, i + HISTORY_CHUNK);
+          if (!part.length && !conversations.length) break;
+          const answer = await askService("historyChunk", { run: run, messages: part,
+            conversations: i === 0 ? conversations.slice(0, 50) : [], self: selfId() }, HISTORY_ASK_MS);
+          if (!answer || !answer.ok) {
+            throw new Error((answer && answer.data && answer.data.error) || "le service de l'extension ne répond pas");
+          }
+          h.messages += part.length;
+          // ses images, juste après lui (le message est chez Mika) : une à une, attendues
+          for (const m of part) {
+            for (const i of (m.deleted ? [] : m.images || [])) {
+              const key = m.id + "|" + i.id;
+              if (imagesSeen.has(key)) continue;
+              imagesSeen.add(key);
+              await sendImage({ conv: m.conv, id: m.id, image: i.id, position: i.position, url: i.url, time: m.time,
+                author: m.author, authorId: m.authorId, history: true, tries: 0, notBefore: 0 });
+              h.images++;
+            }
+          }
+        }
+        h.done++;
+        askService("historyProgress", { run: run, done: h.done, total: h.total, messages: h.messages }, 2000);
+      }
+    } catch (e) {
+      h.error = T.cut(String(e && e.message ? e.message : e), 200);
+    } finally {
+      if (data && data.chains) data.chains.close();
+      h.running = false;
+      historyRunning = false;
+      askService("historyDone", { run: run, done: h.done, total: h.total, messages: h.messages, error: h.error }, 5000);
+      nudge();
+    }
+  }
 
   // ── La conversation ouverte et la zone de saisie ────────────────────────────
 
@@ -430,7 +933,39 @@
     return null;
   }
 
+  /**
+   * L'éditeur de la zone de saisie de Teams (CKEditor 5), que la page pose sur son élément (`ckeditorInstance`) ;
+   * `null` si ce n'en est pas un. C'est son modèle que Teams envoie, pas ce que montre le DOM.
+   */
+  function editorModel(editor) {
+    const ck = editor && editor.ckeditorInstance;
+    return ck && ck.model && typeof ck.model.change === "function" && typeof ck.getData === "function"
+      && typeof ck.execute === "function" && ck.commands ? ck : null;
+  }
+
+  const ENTITIES = { amp: "&", lt: "<", gt: ">", quot: "\"", "#39": "'", apos: "'", nbsp: " " };
+
+  /** Le texte du modèle de l'éditeur : ses sauts de ligne et ses paragraphes en retours, ses entités décodées. */
+  function modelText(ck) {
+    return String(ck.getData() || "").replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>\s*<p[^>]*>/gi, "\n")
+      .replace(/<[^>]*>/g, "").replace(/&(#39|[a-z]+);/gi, function (all, name) {
+        return Object.prototype.hasOwnProperty.call(ENTITIES, name.toLowerCase()) ? ENTITIES[name.toLowerCase()] : all;
+      });
+  }
+
+  /** Un texte comparable : ses blancs (espaces insécables compris) ramenés à un seul. */
+  function squeeze(text) {
+    return String(text).replace(/[\s\u00a0]+/g, " ").trim();
+  }
+
+  /** La zone est vide pour Teams : rien dans le modèle de l'éditeur (le DOM seul, sans éditeur connu). */
   function isEmpty(editor) {
+    const ck = editorModel(editor);
+    if (ck) {
+      try {
+        return String(ck.getData() || "").replace(/<[^>]*>/g, "").replace(/&nbsp;| /g, " ").trim() === "";
+      } catch (_) { /* un éditeur dans un état inattendu : le DOM tranche */ }
+    }
     return String(editor.innerText || "").trim() === "";
   }
 
@@ -443,13 +978,45 @@
   }
 
   /**
-   * Le texte dans la zone de saisie, comme si on le tapait : `insertText` ligne à ligne, un saut de ligne simple
-   * (Maj+Entrée) entre deux lignes — jamais un paragraphe, qu'un éditeur de Teams peut prendre pour « Envoyer ».
-   * Les Trusted Types de la page interdisent `innerHTML` : rien ici n'en passe par là.
+   * Le texte dans la zone de saisie, ligne à ligne, un saut de ligne simple (Maj+Entrée) entre deux lignes — jamais un
+   * paragraphe, qu'un éditeur de Teams peut prendre pour « Envoyer ». Les Trusted Types de la page interdisent
+   * `innerHTML` : rien ici n'en passe par là.
+   *
+   * Avec l'éditeur de Teams, le texte entre dans son modèle, par ses propres commandes. Une frappe simulée
+   * (`execCommand`) n'y entre pas toujours — un onglet sans le focus : le texte s'affiche, l'éditeur le redessine vide
+   * au clic, rien ne part, et la zone vidée passait pour un envoi. La frappe simulée ne sert plus qu'à un éditeur
+   * qu'on ne connaît pas.
    */
   function insertText(editor, text) {
-    editor.focus();
     const lines = String(text).replace(/\r\n?/g, "\n").split("\n");
+    const ck = editorModel(editor);
+    if (ck) {
+      if (ck.isReadOnly) return false;
+      const typing = ck.commands.get("insertText") ? "insertText" : "input";
+      try {
+        // la sélection en fin de texte, puis une commande à la fois : groupées dans un seul `model.change`, la
+        // sélection n'avance pas entre deux commandes et les lignes se mêlent (« <br>xy » pour « x », « y »)
+        ck.model.change(function (writer) {
+          const root = ck.model.document.getRoot();
+          if (root && root.childCount) writer.setSelection(root.getChild(root.childCount - 1), "end");
+        });
+        lines.forEach(function (line, i) {
+          if (i > 0) ck.execute("shiftEnter");
+          if (line) ck.execute(typing, { text: line });
+        });
+      } catch (_) {
+        // une moitié de texte ne part jamais : la zone est remise à vide, rien n'est parti
+        try { ck.setData(""); } catch (_e) { /* rien */ }
+        return false;
+      }
+      // ce qui est dans le modèle est-il bien tout le texte ? une commande désactivée n'y met rien, sans erreur
+      if (squeeze(modelText(ck)) !== squeeze(lines.join("\n"))) {
+        try { ck.setData(""); } catch (_e) { /* rien */ }
+        return false;
+      }
+      return true;
+    }
+    editor.focus();
     lines.forEach(function (line, i) {
       if (i > 0 && !document.execCommand("insertLineBreak")) document.execCommand("insertText", false, "\n");
       if (line) document.execCommand("insertText", false, line);
@@ -476,7 +1043,7 @@
   // ── Demandes au service d'arrière-plan (par le relais) ─────────────────────
 
   const answers = new Map();
-  function askExtension(kind, payload) {
+  function askExtension(kind, payload, timeoutMs) {
     return new Promise(function (resolve) {
       const nonce = Math.random().toString(36).slice(2) + Date.now().toString(36);
       answers.set(nonce, resolve);
@@ -486,8 +1053,13 @@
           answers.delete(nonce);
           resolve(null);
         }
-      }, ASK_TIMEOUT_MS);
+      }, timeoutMs || ASK_TIMEOUT_MS);
     });
+  }
+
+  /** Une demande au service, qui rend `{ok, data}` (null : pas de réponse à temps) : ses curseurs, l'historique. */
+  function askService(what, payload, timeoutMs) {
+    return askExtension("ask", { what: what, payload: payload || {} }, timeoutMs);
   }
 
   // ── Les brouillons de Mika ──────────────────────────────────────────────────
@@ -682,7 +1254,11 @@
     } else if (data.kind === "answer" && answers.has(data.nonce)) {
       const resolve = answers.get(data.nonce);
       answers.delete(data.nonce);
-      resolve({ ok: data.ok === true });
+      resolve({ ok: data.ok === true, data: data.data });
+    } else if (data.kind === "history") {
+      historyRun(typeof data.run === "string" ? data.run.slice(0, 40) : "");
+    } else if (data.kind === "cursorsLost") {
+      cursorsLost();
     } else if (data.kind === "send" && data.item && typeof data.item.text === "string"
       && typeof data.item.id === "string") {
       // arrivée après que le relais a cessé de l'attendre : il a déjà dit « rien n'est parti », on ne commence pas

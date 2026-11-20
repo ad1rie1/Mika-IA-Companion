@@ -29,6 +29,10 @@ import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxDefaults
+import androidx.compose.material3.SwipeToDismissBoxState
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -39,6 +43,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -48,6 +53,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -70,6 +78,8 @@ import fr.qwartz.mika.data.moi.mail.boxTitle
 import fr.qwartz.mika.data.moi.mail.howLabel
 import fr.qwartz.mika.data.moi.mail.inboxOf
 import fr.qwartz.mika.data.moi.mail.manyBoxes
+import fr.qwartz.mika.data.moi.mail.swipeTrashable
+import fr.qwartz.mika.data.moi.mail.triageMark
 import fr.qwartz.mika.data.moi.mail.viewTitle
 import fr.qwartz.mika.data.moi.mail.waitingYours
 import fr.qwartz.mika.data.moi.mail.writableBoxes
@@ -97,6 +107,7 @@ import fr.qwartz.mika.ui.theme.states
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.launch
 
 /** La liste se relit à ce rythme tant qu'elle est à l'écran (comme le client web). */
 private const val REFRESH_MS = 60_000L
@@ -116,6 +127,14 @@ fun MailListScreen(graph: AppGraph) {
     var sheet by rememberSaveable { mutableStateOf(false) }
     var moving by remember { mutableStateOf(false) }
     LaunchedEffect(vm) { vm.said.collect { shell.toast(it) } }
+    // une ligne glissée à la corbeille : « Annuler » la remet dans son dossier, le temps du message
+    val trashedText = stringResource(R.string.mail_trashed)
+    val undoText = stringResource(R.string.mail_trash_undo)
+    LaunchedEffect(vm) {
+        vm.trashed.collect { t ->
+            if (t.row.folder.isBlank()) shell.toast(trashedText) else shell.offer(trashedText, undoText) { vm.untrash(t) }
+        }
+    }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(vm, lifecycle) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
@@ -351,14 +370,21 @@ private fun MailList(
         items(items, key = { it.key }) { item ->
             when (item) {
                 is Item.Head -> ListHead(item.text, muted = true)
-                is Item.Mail -> MailRowItem(
-                    row = item.row,
-                    now = now,
-                    boxName = if (many) vm.boxOf(item.row.box)?.let { boxTitle(it, boxes) } else null,
-                    selected = item.row.ref in vm.selected,
-                    onClick = { if (vm.selected.isNotEmpty()) onLong(item.row) else onOpen(item.row.ref) },
-                    onLong = { onLong(item.row) },
-                )
+                is Item.Mail -> SwipeToTrash(
+                    allowed = swipeTrashable(item.row, vm.boxOf(item.row.box)),
+                    enabled = vm.selected.isEmpty(),
+                    pending = item.row.ref in vm.trashing,
+                    onTrash = { vm.swipeTrash(item.row) },
+                ) {
+                    MailRowItem(
+                        row = item.row,
+                        now = now,
+                        boxName = if (many) vm.boxOf(item.row.box)?.let { boxTitle(it, boxes) } else null,
+                        selected = item.row.ref in vm.selected,
+                        onClick = { if (vm.selected.isNotEmpty()) onLong(item.row) else onOpen(item.row.ref) },
+                        onLong = { onLong(item.row) },
+                    )
+                }
                 is Item.Out -> SentRowItem(item.sent, now, onClick = { onOpen(item.sent.ref) })
             }
         }
@@ -451,7 +477,8 @@ private fun MailRowItem(
                 Text(row.snippet, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             val her = row.her
-            val marks = boxName != null || her?.needsReply == true || her?.draft?.isNotBlank() == true || her?.asked == true || her?.read == true || row.answered
+            val sorted = triageMark(row.triage)
+            val marks = boxName != null || her?.needsReply == true || her?.draft?.isNotBlank() == true || her?.asked == true || her?.read == true || row.answered || sorted != null
             if (marks) {
                 FlowRow(
                     Modifier.padding(top = 4.dp),
@@ -469,10 +496,66 @@ private fun MailRowItem(
                         val (text, kind) = howLabel(her.how)
                         MikaMark(text, howIcon(kind))
                     }
+                    if (sorted != null) TriageMark(sorted)
                     if (row.answered) Tag(stringResource(R.string.mail_answered), Tone.NEUTRAL)
                 }
             }
         }
+    }
+}
+
+/**
+ * Une ligne qui se glisse d'un côté ou de l'autre vers la corbeille : un fond rouge, la corbeille du côté où l'on
+ * glisse. [allowed] : là où la barre de rangement la rangerait ([swipeTrashable]) ; [enabled] : pas pendant une
+ * sélection ; [pending] : le serveur n'a pas encore répondu — elle reste écartée, puis s'en va ; refusée, elle revient.
+ * [onTrash] faux : rien n'est parti, elle revient aussitôt.
+ * Un lecteur d'écran a la même chose en action (« Corbeille »).
+ */
+@Composable
+private fun SwipeToTrash(allowed: Boolean, enabled: Boolean, pending: Boolean, onTrash: () -> Boolean, content: @Composable () -> Unit) {
+    if (!allowed) {
+        content()
+        return
+    }
+    val threshold = SwipeToDismissBoxDefaults.positionalThreshold
+    // pas `rememberSwipeToDismissBoxState`, qui se garde : une ligne refusée hors de l'écran reviendrait écartée, et
+    // repartirait d'elle-même à la corbeille
+    val state = remember { SwipeToDismissBoxState(SwipeToDismissBoxValue.Settled, threshold) }
+    val scope = rememberCoroutineScope()
+    // parti au serveur d'ici : sa réponse arrivée (la ligne encore là, donc refusée), elle revient — même si un serveur
+    // proche a répondu avant l'image suivante, sans que [pending] ait jamais paru vrai
+    var sent by remember { mutableStateOf(false) }
+    LaunchedEffect(sent, pending) {
+        if (sent && !pending) {
+            state.reset()
+            sent = false
+        }
+    }
+    val label = stringResource(R.string.mail_trash)
+    SwipeToDismissBox(
+        state = state,
+        backgroundContent = { TrashBehind(state.dismissDirection) },
+        modifier = Modifier.semantics {
+            if (enabled) customActions = listOf(CustomAccessibilityAction(label) { onTrash() })
+        },
+        gesturesEnabled = enabled,
+        onDismiss = { if (onTrash()) sent = true else scope.launch { state.reset() } },
+    ) {
+        // la ligne est opaque : le rouge ne paraît que là où elle s'est écartée
+        Box(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background)) { content() }
+    }
+}
+
+/** Le fond d'une ligne qu'on glisse : rouge, la corbeille du côté où elle s'écarte. */
+@Composable
+private fun TrashBehind(direction: SwipeToDismissBoxValue) {
+    if (direction == SwipeToDismissBoxValue.Settled) return
+    val scheme = MaterialTheme.colorScheme
+    Box(
+        Modifier.fillMaxSize().background(scheme.error).padding(horizontal = 24.dp),
+        contentAlignment = if (direction == SwipeToDismissBoxValue.StartToEnd) Alignment.CenterStart else Alignment.CenterEnd,
+    ) {
+        MIcon(R.drawable.ic_m_trash, null, tint = scheme.onError)
     }
 }
 

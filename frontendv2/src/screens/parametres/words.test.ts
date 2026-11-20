@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AccessLine, ReceivedService, Service, ServiceTool } from "../../api/mcp";
 import { ApiError } from "../../api/moi";
-import type { BoxSettings, SendRules, TeamsSettings } from "../../api/settings";
+import { EXTENSION_URL, type BoxSettings, type SendRules, type TeamsSettings } from "../../api/settings";
 import { ASK_ME } from "./account";
 import { ACTION_ROUTES, routeAction } from "./index";
 import { ago, Cached, dateWords, dayWords, remaining } from "../../shared/kit";
@@ -409,7 +409,7 @@ const TEAMS_SETTINGS: TeamsSettings = {
 describe("Teams : retirer un compte, régler comment ça part, des mots pour la personne (F4-04, F4-08)", () => {
   it("la fiche d'un compte offre « Retirer ce compte » et le tableau à régler, sans clé technique", () => {
     store.teamsAccounts.value = {
-      plugged: true, enabled: true,
+      plugged: true, enabled: true, extension: { version: "0.3.2" },
       accounts: [{ key: "lea", name: "lea", level: "proprietaire", enabled: true, last_batch: 0, self_name: "", extension_key: null, drafts_waiting: 0 }],
     };
     store.teamsSettings.get("lea").value = TEAMS_SETTINGS;
@@ -418,6 +418,22 @@ describe("Teams : retirer un compte, régler comment ça part, des mots pour la 
     expect(html).toContain('name="rule.1.reply"');
     expect(html).not.toContain("clé du compte");
     expect(html).not.toContain("par un opérateur");
+  });
+
+  it("l'extension se télécharge depuis la fiche quand le serveur l'a à côté de lui, sinon on dit à qui la demander", () => {
+    store.teamsAccounts.value = {
+      plugged: true, enabled: true, extension: { version: "0.3.2" },
+      accounts: [{ key: "lea", name: "lea", level: "proprietaire", enabled: true, last_batch: 0, self_name: "", extension_key: null, drafts_waiting: 0 }],
+    };
+    store.teamsSettings.get("lea").value = TEAMS_SETTINGS;
+    const html = teamsPage.view("lea", HOST);
+    expect(html).toContain('href="' + EXTENSION_URL + '"');
+    expect(html).toContain('download="mika-teams-0.3.2.zip"');
+    expect(html).not.toContain("demande-la à ton opérateur");
+    store.teamsAccounts.value = { ...store.teamsAccounts.value!, extension: null };
+    const without = teamsPage.view("lea", HOST);
+    expect(without).not.toContain(EXTENSION_URL);
+    expect(without).toContain("demande-la à ton opérateur");
   });
 });
 

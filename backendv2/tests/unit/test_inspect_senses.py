@@ -410,7 +410,7 @@ def test_a_closed_reply_request_names_the_gesture_that_asks_again():
         s = episode_reducer(s, NS(seq=3 + i, at=20, data=NS(kind=Kind.TASK, target=task_target("email", ref),
                                                               reason="")), None)
     mail = Mail("<m1@ex>", "A <a@ex>", "a@ex", "Une question", 0, "?", account="pro")
-    port = NS(cached_one=lambda r: mail if r == ref else None, sent_mail=lambda r: None)
+    port = NS(cached_one=lambda r: mail if r == ref else None, sent_mail=lambda r: None, waiting=frozenset)
     frame = NS(now=30, env=NS(params_of=lambda n, r: EmailParams()), root=None)
     ctx = NS(ports={"mail": port}, subject=ref, param=lambda name, default="": default, when=lambda at: "hier")
     closed = next(b for b in inspect_mail._tab_noticed(s, frame, ctx)

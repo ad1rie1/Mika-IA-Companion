@@ -19,6 +19,10 @@ from tests.fixtures import backend
 
 START = 1_790_000_000 * US  # 2026-09-21, un instant fixe
 
+# Aucun test ne lit le ``.env`` de qui les lance (ADR 0250, ``app/envfile.py``) : posé dès l'import, avant toute
+# fixture et pour tout sous-processus ; ``_google_offline`` le repose à chaque test.
+os.environ["MIKA_ENV_FILE"] = ""
+
 
 # ── Les tests longs : à la demande ────────────────────────────────────────
 # Marqués ``@pytest.mark.slow`` (scénarios complets, vies de plusieurs semaines, performances), ils sont
@@ -77,6 +81,24 @@ def _github_offline(monkeypatch: pytest.MonkeyPatch):
     projet au dépôt distant GitHub) reçoit un 503, sans réseau. Ses tests à lui injectent leur GitHub simulé."""
     offline = httpx.MockTransport(lambda request: httpx.Response(503))
     monkeypatch.setattr(GitHubRepos, "_open", lambda self: self._client or httpx.AsyncClient(transport=offline))
+
+
+@pytest.fixture(autouse=True)
+def _datatourisme_offline(monkeypatch: pytest.MonkeyPatch):
+    """Aucun test ne joint DATAtourisme (ADR 0245) : la clé posée dans l'environnement de qui lance les tests
+    (``MIKA_DATATOURISME_API_KEY``) ne leur parvient pas — un serveur de test ne synchronise rien. Les tests de la
+    synchronisation posent la leur, et leur faux transport."""
+    monkeypatch.delenv("MIKA_DATATOURISME_API_KEY", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _google_offline(monkeypatch: pytest.MonkeyPatch):
+    """Aucun test ne joint Google Places (ADR 0256) : la clé de qui lance les tests (``MIKA_GOOGLE_PLACES_API_KEY``,
+    dans son environnement ou son ``backendv2/.env``) ne leur parvient pas — ``MIKA_ENV_FILE`` vide : la commande
+    ``mika`` ne lit aucun ``.env``, même lancée en sous-processus. Les tests du client posent leur clé et leur faux
+    transport ; ceux du ``.env`` retirent ``MIKA_ENV_FILE`` eux-mêmes, dans un dossier à eux."""
+    monkeypatch.delenv("MIKA_GOOGLE_PLACES_API_KEY", raising=False)
+    monkeypatch.setenv("MIKA_ENV_FILE", "")
 
 
 def _targeted(config: pytest.Config) -> set[Path]:

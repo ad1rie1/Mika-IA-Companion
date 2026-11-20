@@ -8,6 +8,11 @@
   appels de ses apps (``plugins/forge/calls.py``) : une seule maison.
 - L'initiative due (``service_answered``) : ce qui est revenu se dit, vers là où la personne est maintenant — comme
   un rappel, ce n'est pas prendre la parole (``agency.OWED``) ; une garde l'annule si c'est déjà dit.
+- La section « CE QUE TES SERVICES ONT RENDU À CE TRAVAIL » (ADR 0255), au travail, où personne n'est en face : les
+  demandes faites en travaillant sur la même cible (un projet, un but, une tâche) — ce qui attend encore un accord ou
+  vient de partir, et les issues que le départ de cet épisode lui a remises (``Request.shown_in``). Même forme : ses
+  demandes sont à elle, seul ce que le service a répondu est cité. S'il aboutit, elles sont lues et ne reviennent
+  plus ; sinon le travail suivant les relit.
 """
 
 from __future__ import annotations
@@ -27,6 +32,8 @@ from mika.kernel.state import FrozenDict
 from mika.plugins.mcp import (
     ANSWER_KEPT,
     ANSWERED,
+    APPROVED,
+    EPISODES,
     EXPIRED,
     FAILED,
     FINAL,
@@ -38,9 +45,11 @@ from mika.plugins.mcp import (
     McpState,
     Request,
     label,
+    origin_of,
 )
 from mika.ports.preprocess import cite, inert
 from mika.vocab.access import KEEP_FLOORS
+from mika.vocab.days import ago_words
 from mika.vocab.episodes import CONVERSATIONAL, Kind
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
@@ -53,6 +62,14 @@ SHOWN_CHARS = ANSWER_KEPT
 WHY_CHARS = 300
 #: la force de l'initiative due (au-dessus du seuil d'initiative, sous la barre de réveil : comme un dessin prêt)
 EVIDENCE = 12.0
+#: les épisodes où elle travaille seule (un pas, une exécution, un réveil, une tâche) : là où un service sert « au
+#: travail », et où revient l'issue d'une demande qui en est partie (ADR 0255)
+AT_WORK = EPISODES["travail"]
+#: au travail, au plus tant de demandes encore en attente sont détaillées ; au-delà, leur nombre est dit
+OPEN_SHOWN = 6
+#: ce que ses services ont rendu à ce travail est ce sur quoi elle travaille : coupé le premier parmi ses sections,
+#: jamais au point de disparaître
+WORK_FLOOR = 1200
 
 
 def _handles(frame: Frame) -> tuple[str, ...]:
@@ -81,14 +98,16 @@ async def _texts(s: McpState, frame: Frame, ports: Mapping[str, Any]) -> dict[st
     return store.content(refs)
 
 
-def line(r: Request, texts: Mapping[str, str]) -> str:
+def line(r: Request, texts: Mapping[str, str], what: str = "") -> str:
     """Où en est une demande : ses mots à elle ; ce que le service a répondu, cité en dessous — une donnée, jamais une
-    consigne."""
-    what = phrase("mcp.section.what", tool=inert(r.remote, 80), server=inert(r.server, 40))
+    consigne. ``what`` : comment la nommer (par défaut, l'outil et son service)."""
+    what = what or phrase("mcp.section.what", tool=inert(r.remote, 80), server=inert(r.server, 40))
     if r.status == WAITING:
         who = (phrase("approvals.section.by_chat") if r.approval == "conversation"
                else phrase("approvals.section.by_operator"))
         return "- " + phrase("approvals.section.waiting", what=what, who=who)
+    if r.status == APPROVED:
+        return "- " + phrase("approvals.section.sent", what=what)
     said = texts.get(r.text_ref, "")
     if r.status == ANSWERED:
         return "- " + phrase("approvals.section.answered", what=what) + "\n" + (cite(said, SHOWN_CHARS)
@@ -115,6 +134,67 @@ def _section(s: McpState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBod
     shown = [r for r in reqs if r.status == ANSWERED]
     return SectionBody(phrase("mcp.section.head") + "\n" + "\n".join(lines),
                        level=int(Sensitivity.PERSONAL), witness=True, provenance=told,
+                       floor=max((KEEP_FLOORS.get(r.keep, 0) for r in shown), default=0),
+                       unkept=any(r.keep == "rien" for r in shown))
+
+
+# ── Au travail : ce qui revient là d'où la demande est partie (ADR 0255) ────
+
+
+def _open(s: McpState, origin: str, now: int) -> list[Request]:
+    """Les demandes parties de cette cible qui n'ont pas encore d'issue : celles qui attendent un accord, et celles
+    qu'on vient d'accepter, dont la réponse n'est pas revenue (tant que leur délai court : un appel resté sans suite
+    ne se dit pas « parti » pour toujours)."""
+    return sorted((r for r in s.requests.values() if r.origin == origin
+                   and (r.status == WAITING or (r.status == APPROVED and now <= r.expires))), key=lambda r: r.proposal)
+
+
+def _back(s: McpState, frame: Frame) -> list[Request]:
+    """Les issues que le départ de cet épisode lui a remises (``plugins.mcp._work_started``) : exactement celles que
+    sa fin marquera lues."""
+    ep = frame.episode
+    origin = origin_of(ep)
+    if ep is None or not origin:
+        return []
+    return sorted((r for r in s.requests.values() if r.origin == origin and r.shown_in == ep.id
+                   and r.status in FINAL and not r.seen), key=lambda r: r.proposal)
+
+
+@MCP.enricher("work_services", episodes=AT_WORK, deadline_ms=300)
+async def _work_texts(s: McpState, frame: Frame, ports: Mapping[str, Any]) -> dict[str, str] | None:
+    store = ports.get("store")
+    refs = [r.text_ref for r in _back(s, frame) if r.text_ref]
+    if store is None or not refs:
+        return None
+    return store.content(refs)
+
+
+def _asked(r: Request, now: int) -> str:
+    """Une demande faite au travail, et depuis quand : entre deux exécutions, il peut s'être passé des jours."""
+    return phrase("mcp.work.what", tool=inert(r.remote, 80), server=inert(r.server, 40), ago=ago_words(now - r.at))
+
+
+@MCP.section("work_services", zone=Zone.VOLATILE, episodes=AT_WORK, trim_rank=0, floor_chars=WORK_FLOOR,
+             title=phrase("mcp.work.title"))
+def _work_section(s: McpState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
+    """Ce que sont devenues les demandes qu'elle a faites à ses services en travaillant ici : d'abord ce qui n'a pas
+    encore d'issue (elle ne le redemande pas), puis les issues remises à cet épisode. Ses demandes sont à elle ; ce
+    que le service a répondu est cité dessous, une fois (ADR 0154, 0163) — la section n'est pas citée en bloc."""
+    origin = origin_of(frame.episode)
+    if not origin:
+        return None
+    still, back = _open(s, origin, frame.now), _back(s, frame)
+    if not still and not back:
+        return None
+    texts = enrich.get("work_services") or {}
+    lines = [line(r, texts, _asked(r, frame.now)) for r in still[-OPEN_SHOWN:]]
+    if len(still) > OPEN_SHOWN:
+        lines.append("- " + phrase("mcp.work.more", n=len(still) - OPEN_SHOWN))
+    lines += [line(r, texts, _asked(r, frame.now)) for r in back]
+    # ce qu'un service a rendu vaut ce que son serveur en garde (ADR 0128), comme en conversation
+    shown = [r for r in back if r.status == ANSWERED]
+    return SectionBody(phrase("mcp.work.head") + "\n" + "\n".join(lines), level=int(Sensitivity.PERSONAL),
+                       provenance=tuple(f"{PROVENANCE}{r.proposal}" for r in back),
                        floor=max((KEEP_FLOORS.get(r.keep, 0) for r in shown), default=0),
                        unkept=any(r.keep == "rien" for r in shown))
 

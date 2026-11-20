@@ -77,7 +77,7 @@ class MailApiTest {
         ok(
             """{"total":32,"page":2,"size":25,"items":[{"ref":"pro:<a@x>","box":"pro","folder":"INBOX",
                "from":{"name":"Léa","address":"lea@x.fr"},"subject":"Devis","date":1790790060000,"seen":false,
-               "attachments":1,"her":{"noticed":true,"needs_reply":true,"draft":"d1"}},
+               "attachments":1,"her":{"noticed":true,"needs_reply":true,"draft":"d1"},"triage":"read"},
                {"ref":"pro:<b@x>","box":"pro","her":null}]}""",
         )
         val page = (api.messages(messagesQuery(MailView.Folder("pro", "INBOX"), MailStates.NEEDS_REPLY, "devis", 2, 25)) as MoiApi.Result.Ok).value
@@ -86,7 +86,13 @@ class MailApiTest {
         assertFalse(first.seen)
         assertEquals("d1", first.her?.draft)
         assertTrue(first.her!!.needsReply)
+        // ses consignes de tri : absentes, ni alerte ni dossier
+        assertFalse(first.her!!.alert)
+        assertEquals("", first.her!!.filed)
         assertNull(page.items[1].her)
+        // son tri, au niveau du mail ; absent, rien à dire
+        assertEquals("read", first.triage)
+        assertEquals("", page.items[1].triage)
         val q = server.takeRequest().url
         assertEquals("/api/moi/mail/messages", q.encodedPath)
         assertEquals("pro", q.queryParameter("box"))
@@ -100,10 +106,13 @@ class MailApiTest {
         ok(
             """{"ref":"pro:<a+b@x>","box":"pro","body":"Bonjour\n> cité","sent":true,"received":true,"complete":false,
                "attachments":[{"part":"0","name":"devis.pdf","mime":"application/pdf","size":217088}],
-               "her":{"summary":"Un devis au-dessus du budget."},"images":{"remote":true}}""",
+               "her":{"summary":"Un devis au-dessus du budget.","alert":true,"filed":"INBOX.Devis"},"triage":"waiting","images":{"remote":true}}""",
         )
         val m = (api.message("pro:<a+b@x>") as MoiApi.Result.Ok).value
         assertEquals("Un devis au-dessus du budget.", m.her?.summary)
+        assertEquals("waiting", m.triage)
+        assertTrue(m.her!!.alert)
+        assertEquals("INBOX.Devis", m.her!!.filed)
         assertEquals("0", m.attachments.single().part)
         assertTrue(answerable(m))
         assertFalse(m.complete)

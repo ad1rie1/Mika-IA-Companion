@@ -1,8 +1,14 @@
 package fr.qwartz.mika.ui.mail
 
+import fr.qwartz.mika.data.moi.Levels
+import fr.qwartz.mika.data.moi.MoiError
+import fr.qwartz.mika.data.moi.mail.MailBox
+import fr.qwartz.mika.data.moi.mail.MailBoxes
 import fr.qwartz.mika.data.moi.mail.MailRow
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -13,7 +19,8 @@ import org.junit.Test
 
 /**
  * La liste de Mail et sa page suivante (R2-06) : après un rangement, rien ne tombe entre deux pages ni ne revient en
- * double ; une page reçue ne défait pas un rangement fait pendant qu'elle se lisait.
+ * double ; une page reçue ne défait pas un rangement fait pendant qu'elle se lisait. Une ligne glissée part à la
+ * corbeille par le même geste, revient si le serveur refuse, et « Annuler » la remet à sa place.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class MailListModelTest {
@@ -25,7 +32,19 @@ class MailListModelTest {
     private fun ref(n: Int) = "pro:<$n@x>"
 
     private fun inbox(n: Int) {
-        api.inbox = (1..n).map { MailRow(ref = ref(it), box = "pro", folder = "INBOX", subject = "Mail $it", seen = false) }.toMutableList()
+        // les plus récents d'abord, comme le serveur
+        api.inbox = (1..n).map { MailRow(ref = ref(it), box = "pro", folder = "INBOX", subject = "Mail $it", seen = false, date = 1_000L * (n - it + 1)) }.toMutableList()
+    }
+
+    private fun shown(n: Int): MailRow = list.listing.valueOrNull!!.rows.first { it.ref == ref(n) }
+
+    /** Ce que la liste dit (ses toasts) et ce qu'elle offre d'annuler, entendus dès maintenant. */
+    private fun TestScope.listen(): Pair<MutableList<String>, MutableList<MailListViewModel.Trashed>> {
+        val said = mutableListOf<String>()
+        val trashed = mutableListOf<MailListViewModel.Trashed>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { list.said.collect { said += it } }
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { list.trashed.collect { trashed += it } }
+        return said to trashed
     }
 
     private val rows: List<String> get() = list.listing.valueOrNull!!.rows.map { it.ref }
@@ -101,5 +120,65 @@ class MailListModelTest {
         list.loadMore()
         advanceUntilIdle()
         assertEquals(api.inbox.map { it.ref }, rows)
+    }
+
+    // ── glisser vers la corbeille ──
+
+    @Test fun `glissée, une ligne part à la corbeille et s'offre à « Annuler »`() = runTest {
+        inbox(5)
+        list.resume()
+        advanceUntilIdle()
+        val (_, trashed) = listen()
+        api.hold("tidy")
+        assertTrue(list.swipeTrash(shown(2)))
+        // le serveur n'a pas répondu : elle reste écartée, et un second glissement ne part pas
+        assertTrue(ref(2) in list.trashing)
+        assertFalse(list.swipeTrash(shown(2)))
+        api.release("tidy")
+        advanceUntilIdle()
+        assertEquals(listOf("tidy:trash"), api.calls.filter { it.startsWith("tidy") })
+        assertFalse(ref(2) in rows)
+        assertEquals(4, list.listing.valueOrNull!!.total)
+        assertTrue(list.trashing.isEmpty())
+        assertEquals(listOf(ref(2)), trashed.map { it.row.ref })
+    }
+
+    @Test fun `refusée par le serveur, la ligne revient et le refus se dit`() = runTest {
+        inbox(5)
+        list.resume()
+        advanceUntilIdle()
+        val (said, trashed) = listen()
+        api.tidyFail = MoiError(502, "Le serveur a refusé : boîte injoignable.")
+        assertTrue(list.swipeTrash(shown(3)))
+        advanceUntilIdle()
+        assertTrue(ref(3) in rows)
+        assertTrue(list.trashing.isEmpty())
+        assertTrue(trashed.isEmpty())
+        assertEquals(listOf("Le serveur a refusé : boîte injoignable."), said)
+    }
+
+    @Test fun `« Annuler » la remet dans son dossier, à sa place`() = runTest {
+        inbox(5)
+        list.resume()
+        advanceUntilIdle()
+        val (_, trashed) = listen()
+        list.swipeTrash(shown(3))
+        advanceUntilIdle()
+        assertEquals(listOf(ref(1), ref(2), ref(4), ref(5)), rows)
+        list.untrash(trashed.single())
+        advanceUntilIdle()
+        assertEquals("tidy:move:INBOX", api.calls.last { it.startsWith("tidy") })
+        assertEquals((1..5).map { ref(it) }, rows)
+        assertEquals(5, list.listing.valueOrNull!!.total)
+    }
+
+    @Test fun `une boîte partagée en lecture ne se glisse pas`() = runTest {
+        api.boxes = MailBoxes(boxes = listOf(MailBox(key = "pro", name = "Atelier", level = Levels.READ)))
+        inbox(3)
+        list.resume()
+        advanceUntilIdle()
+        assertFalse(list.swipeTrash(shown(1)))
+        assertTrue(api.calls.none { it.startsWith("tidy") })
+        assertTrue(ref(1) in rows)
     }
 }

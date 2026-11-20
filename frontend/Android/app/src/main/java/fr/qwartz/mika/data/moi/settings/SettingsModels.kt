@@ -28,7 +28,11 @@ data class BoxValues(
     val user: String = "",
     val folders: List<String> = listOf("INBOX"),
     @SerialName("sync_all") val syncAll: Boolean = false,
+    /** Tout garder en local (ADR 0249) : tous les dossiers, sauf indésirables et corbeille, et leur historique. */
+    @SerialName("keep_all") val keepAll: Boolean = false,
     @SerialName("since_days") val sinceDays: Int = 2,
+    /** Ses consignes de tri (ADR 0243) : ce que son tri fait de chaque mail qui arrive dans un dossier relevé. */
+    @SerialName("triage_instructions") val triageInstructions: String = "",
     @SerialName("oauth_client_id") val oauthClientId: String = "",
     @SerialName("oauth_tenant") val oauthTenant: String = "",
     @SerialName("smtp_host") val smtpHost: String = "",

@@ -77,6 +77,11 @@ def content_print(address: str, subject: str, date: int, body: str) -> str:
     return hashlib.sha256(raw.encode("utf-8", "replace")).hexdigest()
 
 
+def address_print(address: str) -> str:
+    """L'empreinte d'une adresse (sans casse ni blancs) : ce qu'on retient d'un correspondant oublié."""
+    return hashlib.sha256((address or "").strip().lower().encode("utf-8", "replace")).hexdigest()
+
+
 def sent_name(folder: str) -> bool:
     """Le nom dit-il « Envoyés » (quand le serveur n'a pas donné de rôle) ?"""
     return (folder or "").lower() in SENT_NAMES
@@ -190,6 +195,11 @@ class FolderRow(MailBase):
     total: Mapped[int] = mapped_column(default=0)
     unseen: Mapped[int] = mapped_column(default=0)
     last_sync: Mapped[int] = mapped_column(default=0)
+    #: le plus petit UID qu'une lecture de l'historique a lu, en remontant (0 : aucune) : la suivante repart en
+    #: dessous, même si ce qu'elle a lu n'a pas été gardé (un correspondant oublié) — ADR 0249
+    floor: Mapped[int] = mapped_column(default=0, server_default="0")
+    #: tout son historique est ici : ``keep_history`` est allé jusqu'au bout (ADR 0249)
+    complete: Mapped[bool] = mapped_column(default=False, server_default=false())
 
 
 class HandedRow(MailBase):
@@ -292,6 +302,18 @@ class ForgottenRow(MailBase):
 
     account: Mapped[str] = mapped_column(Key(ACCOUNT), primary_key=True)
     fingerprint: Mapped[str] = mapped_column(Key(PRINT), primary_key=True)
+
+
+class ForgottenPersonRow(MailBase):
+    """Un correspondant oublié, par l'empreinte de son adresse (``address_print`` : jamais l'adresse même) et l'instant
+    de l'oubli : ce qu'il a écrit, ou ce qu'on lui a écrit depuis la boîte, daté d'avant, ne se garde plus — ni relu,
+    ni ramené de l'historique ou d'une recherche, même s'il n'avait jamais été gardé (ADR 0249)."""
+
+    __tablename__ = "forgotten_people"
+
+    digest: Mapped[str] = mapped_column(Key(PRINT), primary_key=True)
+    #: l'instant de l'oubli (µs) : ce qui est daté d'après est une correspondance nouvelle
+    until: Mapped[int] = mapped_column(default=0)
 
 
 class RecipientRow(MailBase):

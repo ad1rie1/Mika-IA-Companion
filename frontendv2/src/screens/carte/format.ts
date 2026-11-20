@@ -5,7 +5,7 @@
  * de Mika, jusqu'où une recherche est allée, un itinéraire en GPX, les phrases qu'on prépare pour Mika, le contrôle qui
  * garde la main d'un dessin à l'autre, les icônes des catégories.
  */
-import { AVOIDS, MODES, type Place, type Route, type Trip, type TripRoute, type TripStop, type TripValues } from "../../api/carte";
+import { AVOIDS, MODES, PLACE_REF, type Place, type Route, type Trip, type TripRoute, type TripStop, type TripValues } from "../../api/carte";
 import { meters, validPoint } from "../../map/mapgeo";
 import { safeDecode, type LatLon } from "../../map/polyline";
 import type { IconName } from "../../shell/icons";
@@ -253,7 +253,10 @@ export function searchReach(near: boolean, places: readonly Pick<Place, "distanc
 /** Les attributs qui désignent un contrôle de l'écran d'un dessin à l'autre, du plus sûr au moins sûr. */
 const FOCUS_KEYS = ["q", "pt", "cat", "where", "lieu", "mode", "avoid", "itiAdd", "itiSwap", "itiRemove", "itiCompute", "itiTrip",
   "itiGpx", "itiAsk", "pick", "goRoute", "addTrip", "askPlace", "grip", "noteInput", "noteSave", "noteCancel", "noteStop", "retirer",
-  "addStop", "onroute", "addAlong", "editTrip", "newTrip", "retry"] as const;
+  "addStop", "onroute", "addAlong", "editTrip", "newTrip", "retry",
+  // les filtres et la fiche d'un lieu, l'onglet Événements et la fiche d'un événement
+  "flt", "cuisine", "sort", "refresh", "ficheRetry", "ficheBack", "photo", "plan", "evq", "when", "evStart", "evEnd", "theme", "free",
+  "evWhere", "ev", "evRoute", "evTrip", "evAsk"] as const;
 
 /**
  * Le sélecteur qui retrouve, après un dessin, le contrôle qui avait la main (ses `data-*`, tels que `dataset` les
@@ -267,6 +270,52 @@ export function focusSelector(data: Readonly<Record<string, string | undefined>>
     return value ? `[${attr}="${value.replace(/["\\]/g, "\\$&")}"]` : `[${attr}]`;
   }
   return null;
+}
+
+// ── La fiche d'un lieu, dans la route ────────────────────────────────
+
+/** L'objet d'une route d'Explorer qui ouvre la fiche d'un lieu : `lieu-<id>`. */
+export function lieuItem(id: string): string {
+  return `lieu-${id}`;
+}
+
+/** L'identifiant du lieu dont une route ouvre la fiche (`lieu-n4021153781`), s'il a la forme que l'API lit ; sinon `null`. */
+export function lieuOf(item: string | null | undefined): string | null {
+  const m = /^lieu-(.+)$/.exec(item ?? "");
+  return m && PLACE_REF.test(m[1]) ? m[1] : null;
+}
+
+/**
+ * L'identifiant par lequel ouvrir la fiche d'un lieu : son objet d'OpenStreetMap (stable d'un index à l'autre), sinon sa
+ * ligne de l'index ou son lieu des données touristiques ; une adresse, un point nommé : `null` (pas de fiche).
+ */
+export function ficheId(p: Pick<Place, "id" | "osm">): string | null {
+  if (p.osm && PLACE_REF.test(p.osm)) return p.osm;
+  return p.id && PLACE_REF.test(p.id) ? p.id : null;
+}
+
+// ── Les filtres d'une liste ──────────────────────────────────────────
+
+/**
+ * Les cuisines qu'on propose au filtre : celles de la liste montrée (« Italienne, pizza » en donne deux), les plus
+ * fréquentes d'abord (douze au plus), et celle qu'on a choisie, toujours.
+ */
+export function cuisineChoices(places: readonly Pick<Place, "cuisine">[], current = ""): string[] {
+  const counts = new Map<string, { label: string; n: number }>();
+  for (const p of places) {
+    for (const raw of (p.cuisine ?? "").split(/[,;]/)) {
+      const label = raw.trim();
+      if (!label || label.length > 40) continue;
+      const key = label.toLowerCase();
+      const seen = counts.get(key);
+      if (seen) seen.n += 1;
+      else counts.set(key, { label: label[0].toUpperCase() + label.slice(1), n: 1 });
+    }
+  }
+  const out = [...counts.values()].sort((a, b) => b.n - a.n || a.label.localeCompare(b.label, "fr")).slice(0, 12).map((c) => c.label);
+  const chosen = current.trim();
+  if (chosen && !out.some((c) => c.toLowerCase() === chosen.toLowerCase())) out.unshift(chosen);
+  return out;
 }
 
 // ── Les catégories ───────────────────────────────────────────────────

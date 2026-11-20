@@ -93,6 +93,10 @@ data class HerMark(
     val asked: Boolean = false,
     /** Ce qu'elle en a retenu (le mail entier seulement). */
     val summary: String = "",
+    /** Tes consignes de tri demandent de te prévenir de ce mail (ADR 0243 ; le serveur le dit aussi important). */
+    val alert: Boolean = false,
+    /** Le dossier où tes consignes de tri l'ont rangé, tant qu'il y est ; vide sinon. */
+    val filed: String = "",
 )
 
 @Serializable
@@ -113,6 +117,8 @@ data class MailRow(
     val html: Boolean = false,
     val bulk: Boolean = false,
     val her: HerMark? = null,
+    /** Où en est son tri de ce mail (`read`, `guessed`, `bulk`, `waiting`, voir [Triage]) ; vide : rien à dire. */
+    val triage: String = "",
 )
 
 @Serializable
@@ -149,6 +155,8 @@ data class MailFull(
     val html: Boolean = false,
     val bulk: Boolean = false,
     val her: HerMark? = null,
+    /** Où en est son tri de ce mail, comme sur sa ligne. */
+    val triage: String = "",
     @SerialName("reply_to") val replyTo: String = "",
     @SerialName("in_reply_to") val inReplyTo: String = "",
     val body: String = "",

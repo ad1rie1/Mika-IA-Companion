@@ -8,6 +8,8 @@ opératrice, le fil désigné est ignoré — le message va au fil ordinaire, et
 
 from __future__ import annotations
 
+import html
+import re
 from collections.abc import Iterator
 
 import pytest
@@ -23,6 +25,7 @@ from mika.kernel.registry import ArbitrationPolicy
 from mika.ports.llm import LLMResponse
 from mika.ports.llm_budget import LLMLimits
 from mika.vocab.episodes import VOICE_ROLES
+from tests.fixtures.console_html import ConsoleHTML
 from tests.protocol.test_web import ORIGIN, WS, bootstrap, recv_until
 from tests.protocol.test_web_thread import opening
 
@@ -32,10 +35,11 @@ class Worker:
 
     def __init__(self) -> None:
         self.calls = []
+        self.pro_text = "Voilà le travail."
 
     async def complete(self, req):
         self.calls.append(req)
-        return LLMResponse("Voilà le travail." if req.role == "pro" else "Coucou ! [EMOTION:happy:0.4]")
+        return LLMResponse(self.pro_text if req.role == "pro" else "Coucou ! [EMOTION:happy:0.4]")
 
 
 #: le mode pro est le « mode Claude Code » (ADR 0116), et il tient dans le plus petit budget qu'un fournisseur Claude
@@ -139,3 +143,48 @@ def test_a_thread_is_honoured_only_in_pro_mode_and_for_an_operator(world):
                       "strand": "devis-1"})
         frames = recv_until(ws, "speech", limit=40)
         assert "strand" not in frames[-1] and not [f for f in frames if f["type"] == "strands"]
+
+
+#: une réponse de travail comme le modèle les écrit : du Markdown
+PRO_MARKDOWN = "Voilà **le travail** :\n\n## Les devis\n\n| client | montant |\n|---|---|\n| Paul | 1 200 € |"
+
+
+def test_the_console_shows_each_conversation_apart_and_her_answers_as_the_chat_does(world):
+    """L'onglet Échanges de sa fiche (ADR 0241) : le fil avec elle par défaut, ses fils de travail listés à côté avec
+    leur titre et leur compte, chacun à part avec sa description ; ses réponses du mode pro s'y lisent rendues comme
+    dans le chat, jamais leur Markdown brut."""
+    client, _live, backend = world
+    backend.pro_text = PRO_MARKDOWN
+    bootstrap(client)
+    with client.websocket_connect(WS) as ws:
+        opening(ws)
+        recv_until(ws, "strands", limit=10)
+        ws.send_json({"type": "chat", "message": "salut toi", "client_msg_id": "o1"})
+        recv_until(ws, "speech", limit=40)
+        ws.send_json({"type": "chat", "message": "liste moi les devis", "client_msg_id": "s1", "mode": "pro",
+                      "strand": "devis-1"})
+        _speech_and_strands(ws)
+        ws.send_json({"type": "strand", "id": "devis-1", "title": "Devis IN", "description": "montants HT",
+                      "archived": False})
+        recv_until(ws, "strand_result")
+
+    page = "/admin/fiche/person/user_1?onglet=echanges"
+    ordinary = client.get(page)
+    assert ordinary.status_code == 200
+    ConsoleHTML(ordinary.text).check()
+    text = html.unescape(ordinary.text)
+    assert "salut toi" in text and "liste moi les devis" not in text and "le travail" not in text
+    assert 'class="hm-workspace person-threads"' in text and "Fils du mode pro" in text
+    assert re.search(r'<a class="on" href="/admin/fiche/person/user_1\?onglet=echanges" aria-current="page">'
+                     r'<span>Leur conversation</span><span class="hm-count">2</span>', text)
+    assert re.search(r'href="/admin/fiche/person/user_1\?onglet=echanges&travail=devis-1">'
+                     r'<span>Devis IN</span><span class="hm-count">2</span>', text)
+
+    work = client.get(f"{page}&travail=devis-1")
+    assert work.status_code == 200
+    ConsoleHTML(work.text).check()
+    text = html.unescape(work.text)
+    assert "liste moi les devis" in text and "salut toi" not in text
+    assert "<h2>Devis IN</h2><p>montants HT</p>" in text
+    assert "<strong>le travail</strong>" in text and "<h3>Les devis</h3>" in text and "document-grid" in text
+    assert "**le travail**" not in text and "|---|" not in text

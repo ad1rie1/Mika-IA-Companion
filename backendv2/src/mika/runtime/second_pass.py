@@ -3,6 +3,7 @@
 Un appel de plus sur un texte déjà prêt, par le modèle du rôle ``polish`` seulement, sans outil, en un tour :
 
 - **la seconde passe** (``SecondPass.polish``) récrit sa réponse au vu du fil, rendue naturelle, sans rien y ajouter ;
+  l'appel s'arrête où finit ce qu'on en garde (les séquences d'arrêt que dit le polisseur, ADR 0261) ;
   ``reannotate`` recalcule ce qui décrit la forme du texte récrit ;
 - **l'autrice d'un brouillon** (``SecondPass.author_draft``) récrit un brouillon d'outil (un courriel, un message
   Teams, un SMS) dans les codes de l'autrice de son flux ;
@@ -19,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import replace
 from typing import Any
 
 from mika.kernel.clock import Clock
@@ -34,9 +36,11 @@ from mika.vocab.phrasebook import phrase
 
 #: La seconde passe sur une parole : (sa réponse, les messages de son appel, ce que la personne vient de dire, sa persona
 #: rendue, l'autrice du chat, le texte de chaque section de son prompt par clé) → (consigne, message, ce qu'on garde de
-#: ce que l'appel a écrit) d'un appel qui récrit sa réponse, ou ``None`` : rien à reprendre.
+#: ce que l'appel a écrit, où l'appel s'arrête d'écrire) d'un appel qui récrit sa réponse, ou ``None`` : rien à
+#: reprendre. Le dernier : des séquences d'arrêt (``LLMRequest.stop_sequences``, ADR 0261) qui finissent la réponse là
+#: où finit ce qu'on en garde — ce qui suivrait serait jeté ; vide : l'appel écrit jusqu'au bout.
 Polisher = Callable[[str, Sequence[Message], str, "PersonaRender | None", "Author | None", Mapping[str, str]],
-                    "tuple[str, str, Callable[[str], str]] | None"]
+                    "tuple[str, str, Callable[[str], str], Sequence[str]] | None"]
 #: La passe d'une autrice sur un brouillon d'outil (ADR 0124) : (son flux, le premier jet, ce à quoi il répond,
 #: l'autrice) → (consigne, message) d'un appel qui le récrit, ou ``None`` : cette forme ne se récrit pas.
 DraftPolisher = Callable[[str, str, str, Author], "tuple[str, str] | None"]
@@ -130,8 +134,10 @@ class SecondPass:
         """Sa réponse récrite (``polishers``) par le modèle du rôle ``polish`` — seulement si l'opératrice lui en a
         donné un : sans repli, une installation ne paie pas un second appel de sa voix sans l'avoir choisi. Le
         polisseur dit ce qu'on garde de ce que l'appel a écrit (l'autrice écrit aussi la réponse de l'autre, ADR 0114).
-        ``bodies`` : le texte de chaque section de son prompt, par clé (``ChatPrompt.bodies``). Une panne, rien gardé,
-        un silence, ou une réponse qui dérive en longueur : le premier jet part tel quel. ``seen`` : la trace de
+        ``bodies`` : le texte de chaque section de son prompt, par clé (``ChatPrompt.bodies``). L'appel s'arrête où
+        finit ce qu'on en garde (les séquences d'arrêt du polisseur, ADR 0261) ; arrêté avant son premier mot, il est
+        redemandé une fois sans elles. Une panne, rien gardé, un silence, ou une réponse qui dérive en longueur : le
+        premier jet part tel quel. ``seen`` : la trace de
         l'épisode, où elle laisse la sienne (``naturel``) ; ``deadline`` : l'échéance de l'épisode."""
         gateway = self.gateway
         serving = getattr(gateway, "serving", None)
@@ -150,18 +156,28 @@ class SecondPass:
                 break
         if asked is None:
             return text
-        system, message, keep = asked
+        system, message, keep, stop = asked
         req = LLMRequest(role=str(Role.POLISH), call_id=f"{eid}#naturel", system_stable=system,
                          messages=(Message("user", message),), max_tokens=llm_req.max_tokens, lane=llm_req.lane,
-                         priority=llm_req.priority, deadline_s=llm_req.deadline_s,
+                         priority=llm_req.priority, deadline_s=llm_req.deadline_s, stop_sequences=tuple(stop),
                          meta={**dict(llm_req.meta), "passe": "naturel"})
         # ce qu'elle a lu et ce qu'elle a rendu, gardés dans la trace quelle que soit l'issue (« pourquoi a-t-elle dit
         # ça ? ») ; écartée, la raison dit pourquoi le premier jet est parti
         natural: dict[str, Any] = {"premier_jet": text, "autrice": author.key, "systeme": system, "message": message}
         seen["naturel"] = natural
-        again = await self.extra_pass(
-            deadline, lambda: run_tool_loop(gateway, req, {}, _no_tools, max_turns=1, clock=self.clock.now),
-            label="seconde passe : appel du modèle")
+
+        def ask(request: LLMRequest) -> Awaitable[LoopResult | Failed]:
+            return self.extra_pass(
+                deadline, lambda: run_tool_loop(gateway, request, {}, _no_tools, max_turns=1, clock=self.clock.now),
+                label="seconde passe : appel du modèle")
+
+        again = await ask(req)
+        if not isinstance(again, Failed) and req.stop_sequences and not again.text.strip():
+            # arrêtée avant son premier mot : rien ne dit qu'une séquence d'arrêt ne tombe jamais ailleurs que dans le
+            # texte (la réflexion d'un modèle, qu'aucune documentation n'en exclut) — redemandée une fois, entière,
+            # comme avant l'ADR 0261, plutôt que de perdre la seconde passe en silence ; la trace le dit
+            natural["reprise"] = "arrêtée avant son premier mot : redemandée sans séquence d'arrêt"
+            again = await ask(replace(req, call_id=f"{eid}#naturel-entier", stop_sequences=()))
         if isinstance(again, Failed):
             natural["ecartee"] = f"panne : {describe(again.error)}"
             return text

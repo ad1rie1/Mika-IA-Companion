@@ -168,6 +168,25 @@ fun manyBoxes(view: MailView, boxes: List<MailBox>): Boolean = view == MailView.
 /** Les gestes de « ranger » qui sortent un mail de son dossier. */
 private val LEAVING = setOf("archive", "trash", "move")
 
+/** Une ligne se glisse vers la corbeille là où la barre de rangement la rangerait : dans une boîte où tu écris (pas
+ *  celle qu'on ne te partage qu'en lecture), hors de la corbeille elle-même. */
+fun swipeTrashable(row: MailRow, box: MailBox?): Boolean {
+    if (box == null || !caps(box.level).write) return false
+    return box.folders.firstOrNull { it.name == row.folder }?.role != "trash"
+}
+
+/**
+ * Les lignes montrées avec [row] remise (« Annuler » une corbeille) : à sa place par sa date, la plus récente d'abord.
+ * Déjà là, rien ne change ; plus vieille que toutes et la liste pas lue jusqu'au bout ([complete] faux), elle est dans
+ * une page pas encore lue : elle y reviendra.
+ */
+fun restoredRows(rows: List<MailRow>, row: MailRow, complete: Boolean): List<MailRow> {
+    if (rows.any { it.ref == row.ref }) return rows
+    val at = rows.indexOfFirst { it.date < row.date }
+    if (at < 0) return if (complete) rows + row else rows
+    return rows.take(at) + row + rows.drop(at)
+}
+
 /** Ce qu'un geste de « ranger » change aux lignes montrées, sans tout relire : archivées, à la corbeille ou déplacées,
  *  elles s'en vont ; lues, non lues, suivies ou plus, elles changent. */
 fun tidiedRows(rows: List<MailRow>, refs: Set<String>, gesture: String): List<MailRow> {
@@ -493,6 +512,90 @@ fun howLabel(how: String): Pair<String, String> {
     }
     return (if (verb == "corbeille") "mis à la corbeille par Mika" else "$verb par Mika") to kind
 }
+
+// ── Son tri ─────────────────────────────────────────────────────────────
+
+/** Où en est son tri d'un mail (le champ `triage` d'une ligne et du mail entier). */
+enum class Triage {
+    /** Son tri (le modèle) l'a lu. */
+    READ,
+
+    /** Remarqué, mais jugé par le seul repli (le modèle en panne, ou son quota) : son importance est devinée. */
+    GUESSED,
+
+    /** Un envoi en masse : remarqué sans être lu par le modèle, par choix. */
+    BULK,
+
+    /** Dans un dossier qu'elle relève, pas encore trié : il attend le relevé suivant. */
+    WAITING,
+    ;
+
+    companion object {
+        /** `null` : rien à dire (vide — un mail d'avant sa boîte, un autre dossier, un envoi —, ou une valeur inconnue). */
+        fun of(value: String): Triage? = when (value) {
+            "read" -> READ
+            "guessed" -> GUESSED
+            "bulk" -> BULK
+            "waiting" -> WAITING
+            else -> null
+        }
+    }
+}
+
+/** La marque de son tri sur une ligne de la liste : lu, en attente, deviné ; un envoi en masse n'en porte pas. */
+fun triageMark(triage: String): Triage? = Triage.of(triage)?.takeIf { it != Triage.BULK }
+
+/**
+ * Le cadre « Ce qu'elle en sait » de la liseuse paraît : elle en a retenu, remarqué ou lu quelque chose, ou on lui a
+ * demandé une réponse ([asked]) ; et même sans rien de cela, quand son tri ne l'a pas encore lu ou n'a fait que deviner
+ * (il le dit), ou quand tes consignes de tri en ont fait quelque chose ([byRules]).
+ */
+fun knowsShown(her: HerMark?, triage: String, asked: Boolean): Boolean {
+    val t = Triage.of(triage)
+    if (t == Triage.WAITING || t == Triage.GUESSED || byRules(her) != null) return true
+    return her != null && (her.summary.isNotBlank() || her.noticed || her.read || asked)
+}
+
+/** Ce que tes consignes de tri ont fait d'un mail (ADR 0243) : te prévenir ([alert]), le ranger dans [filed] (vide :
+ *  pas rangé, ou plus là). */
+data class ByRules(val alert: Boolean, val filed: String)
+
+/** Ce que tes consignes de tri en ont fait, à dire dans le cadre « Ce qu'elle en sait » ; le dossier se nomme comme sa
+ *  boîte le montre (son nom, s'il n'est pas connu). `null` : rien. */
+fun byRules(her: HerMark?, box: MailBox? = null): ByRules? {
+    if (her == null) return null
+    val filed = her.filed.trim()
+    if (!her.alert && filed.isEmpty()) return null
+    val shown = if (filed.isEmpty()) "" else box?.folders?.firstOrNull { it.name == filed }?.shown ?: filed
+    return ByRules(her.alert, shown)
+}
+
+/** Ce que dit le titre du cadre « Ce qu'elle en sait », après lui. */
+sealed interface KnowsState {
+    /** Ce qu'elle en a fait (`how` : « lu », « archivé »…). */
+    data class Did(val how: String) : KnowsState
+
+    /** Où en est son tri, à la place de « remarqué ». */
+    data class Sorted(val triage: Triage) : KnowsState
+
+    data object Noticed : KnowsState
+
+    data object None : KnowsState
+}
+
+/** Ce qu'elle en a fait passe d'abord ; sinon où en est son tri ; sinon « remarqué », si elle l'a remarqué. */
+fun knowsState(her: HerMark?, triage: String): KnowsState {
+    if (her?.read == true) return KnowsState.Did(her.how)
+    val t = Triage.of(triage)
+    return when {
+        t != null -> KnowsState.Sorted(t)
+        her?.noticed == true -> KnowsState.Noticed
+        else -> KnowsState.None
+    }
+}
+
+/** Ce que le cadre en dit de plus : pas encore lu par son tri, ou son importance devinée ; `null` : rien. */
+fun triageNote(triage: String): Triage? = Triage.of(triage)?.takeIf { it == Triage.WAITING || it == Triage.GUESSED }
 
 /** Le cœur d'un brouillon en une ligne : le paragraphe après la formule d'appel. */
 fun bodyLead(body: String): String {

@@ -1,7 +1,7 @@
 """Le plugin ``email`` : ses boîtes aux lettres.
 
-- **Relever** (éveillée, toutes les dix minutes) les dossiers relevés de chaque
-  compte : chaque mail neuf est trié (un rôle utilitaire, borné par relevé ; à
+- **Relever** (éveillée, toutes les dix minutes, ou quand elle le veut : ADR 0247)
+  les dossiers relevés de chaque compte : chaque mail neuf est trié (un rôle utilitaire, borné par relevé ; à
   défaut, une heuristique), puis **remarqué** — un signal que l'attention dose
   et habitue. Le monde (les mails) reste dans le cache de l'adaptateur ; le
   journal ne garde que ce qu'elle en a remarqué. Un mail lu ailleurs (dans un
@@ -13,7 +13,9 @@
   devancée, un « finalement non » le laissent à dire (ADR 0033, 0044).
 - **Lire** (outils) : lister, chercher, ouvrir — réservé à ses propriétaires **en
   privé** (jamais devant un salon, même si la propriétaire y parle), ou à
-  elle-même quand elle travaille.
+  elle-même quand elle travaille. Une recherche demande aussi au serveur ce qui
+  n'est pas ici ; une boîte peut tout garder en local, son historique compris,
+  qui se télécharge sans jamais être trié (ADR 0249).
 - **Écrire** : elle rédige un **brouillon** dans la voix du compte (en son nom,
   en assistante, ou à la place de la personne qui s'occupe d'elle ; son ton,
   ses consignes), le propose (capacité ``email.send``) ; il ne part qu'avec
@@ -111,8 +113,9 @@ class EmailParams(BaseModel):
     triage_per_poll: Annotated[int, Knob(
         label="Mails triés par le modèle", group="Relevé", lo=0, hi=50,
         help="Parmi eux, au plus autant (hors envois en masse) sont triés par un appel au modèle (importance, "
-             "ce que le mail lui fait, réponse attendue) ; les autres par une simple heuristique, qui ne lui fait "
-             "rien ressentir.")] = 5
+             "ce que le mail lui fait, réponse attendue) ; les autres attendent le relevé suivant, deux minutes "
+             "plus tard. À 0, aucun n'est lu par le modèle : leur importance se devine, sans réponse attendue ni "
+             "émotion.")] = 5
     mention_from: Annotated[float, Knob(
         label="Important à partir de", group="Le dire", lo=0.0, hi=1.0, step=0.05,
         help="Un mail non lu dont l'importance atteint ce seuil est « important » : elle peut en parler d'elle-même "
@@ -201,6 +204,11 @@ class Seen:
     #: la dernière réponse partie de sa boîte à ce mail (le ``seq`` de son ``email.sent``) ; 0 : aucune — gardée avec
     #: lui, quand ses envois, eux, ne gardent que les plus récents (``SENT_KEPT``)
     replied: int = 0
+    #: qui l'a jugé à son arrivée (``c.TRIAGE_*``, ADR 0240) : son tri l'a lu, le repli l'a deviné, ou un envoi en masse
+    triage: str = ""
+    #: ce que les consignes de tri de sa boîte en ont fait (ADR 0243) : prévenir ; le ranger dans ce dossier
+    alert: bool = False
+    file_to: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -257,7 +265,7 @@ class AskSeen:
 class EmailState:
     mails: FrozenDict[str, Seen] = field(default_factory=FrozenDict)
     sent: FrozenDict[str, SentSeen] = field(default_factory=FrozenDict)
-    #: une relève demandée depuis la console (0 : aucune)
+    #: une relève demandée, depuis la console ou par elle (0 : aucune)
     poll_asked: int = 0
     drafts: FrozenDict[int, DraftSeen] = field(default_factory=FrozenDict)
     asked: FrozenDict[str, AskSeen] = field(default_factory=FrozenDict)
@@ -277,6 +285,7 @@ class MailRead(Payload):
 
 
 class PollAsked(Payload):
+    #: l'opérateur qui l'a demandée depuis la console ; vide : elle, avec ``email_fetch`` (ADR 0247)
     by: str
 
 
@@ -317,7 +326,8 @@ def _pruned(items: FrozenDict[Any, Any], keep: int, key: Any) -> FrozenDict[Any,
 def _noticed(s: EmailState, e, cx) -> EmailState:
     d = e.data
     mails = s.mails.set(d.mail, Seen(e.seq, d.sender, d.address, d.importance, d.needs_reply, e.at,
-                                     d.summary.ref or "", account=d.account, folder=d.folder))
+                                     d.summary.ref or "", account=d.account, folder=d.folder, triage=d.triage,
+                                     alert=d.alert, file_to=d.file_to))
     return replace(s, mails=_pruned(mails, KEEP, lambda kv: kv[1].seq))
 
 
@@ -629,6 +639,7 @@ def announced(frame: Frame) -> tuple[str, ...]:
 
 # les contributions : le relevé, sa voix et ce qu'elle voit, ses outils, ses tâches, la console
 from mika.plugins.email import inspect as inspect  # noqa: E402
+from mika.plugins.email import keep as keep  # noqa: E402
 from mika.plugins.email import poll as poll  # noqa: E402
 from mika.plugins.email import tasks as tasks  # noqa: E402
 from mika.plugins.email import tools as tools  # noqa: E402

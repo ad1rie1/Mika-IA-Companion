@@ -13,6 +13,7 @@ from email.message import EmailMessage
 from mika.adapters.mail import compose
 from mika.ports.feeds import Entry
 from mika.ports.mail import (
+    ASIDE,
     AccountInfo,
     AccountStatus,
     Attachment,
@@ -20,6 +21,7 @@ from mika.ports.mail import (
     Draft,
     File,
     Folder,
+    Found,
     Mail,
     MailHit,
     MailQuery,
@@ -31,7 +33,7 @@ from mika.ports.mail import (
     reference_key,
     split_ref,
 )
-from mika.ports.paging import Page, fold_text, has_words
+from mika.ports.paging import Page, fold_text, has_words, words_of
 
 #: la boîte simulée par défaut : un compte sans clé (les références restent les Message-ID)
 DEFAULT_ACCOUNT = AccountInfo(key="", label="Sa boîte", address="mika@exemple.fr", ready=True, can_send=True)
@@ -47,6 +49,8 @@ class FakeMail:
 
     inbox: list[Mail] = field(default_factory=list)
     handed: set[str] = field(default_factory=set)
+    #: rendus par un relevé, pas encore accusés (son tri ne les a pas encore lus)
+    offered: set[str] = field(default_factory=set)
     sent: list[tuple[str, str, str, str]] = field(default_factory=list)
     #: ce qui est parti, avec qui l'a écrit (la console, « Envoyés »)
     outgoing: list[Sent] = field(default_factory=list)
@@ -68,6 +72,13 @@ class FakeMail:
     inline: dict[str, tuple[tuple[str, str, bytes], ...]] = field(default_factory=dict)
     #: les expéditeurs dont les images distantes s'affichent (ADR 0175)
     images_from: set[str] = field(default_factory=set)
+    #: ce que le serveur a et que la boîte n'a pas encore ramené ici (son historique, ce qui vient d'arriver) : une
+    #: relecture, une recherche ou l'historique le ramènent dans ``inbox`` (ADR 0247, 0249)
+    remote: list[Mail] = field(default_factory=list)
+    #: les dossiers qu'elle a créés, par boîte (ADR 0248)
+    made: dict[str, list[str]] = field(default_factory=dict)
+    #: les dossiers dont tout l'historique est ici
+    complete: set[tuple[str, str]] = field(default_factory=set)
 
     # ── comptes ──
     def configured(self) -> bool:
@@ -109,10 +120,15 @@ class FakeMail:
         polled = {a.key: set(a.folders) for a in self.accounts() if a.ready}
         fresh = [m for m in self.inbox if m.account in polled and m.folder in polled[m.account]
                  and m.ref not in self.handed][:limit]
+        self.offered |= {m.ref for m in fresh}
         return fresh
 
     def ack(self, refs: Sequence[str]) -> None:
         self.handed |= set(refs)
+        self.offered -= set(refs)
+
+    def waiting(self) -> frozenset[str]:
+        return frozenset(self.offered)
 
     def seen_elsewhere(self) -> list[str]:
         out, self.read_elsewhere = self.read_elsewhere, []
@@ -267,22 +283,76 @@ class FakeMail:
                                files=(*carried, *files))
 
     # ── dossiers ──
+    def _names(self, account: str) -> list[tuple[str, str]]:
+        return [*FOLDERS, *((name, "") for name in self.made.get(account, ()))]
+
     def folders(self, account: str) -> list[Folder]:
         info = self.account(account)
         polled = set(info.folders) if info is not None else set()
         return [Folder(account, name, role, name in polled,
                        sum(1 for m in self.inbox if m.account == account and m.folder == name),
-                       sum(1 for m in self.inbox if m.account == account and m.folder == name and not m.seen))
-                for name, role in FOLDERS]
+                       sum(1 for m in self.inbox if m.account == account and m.folder == name and not m.seen),
+                       complete=(account, name) in self.complete)
+                for name, role in self._names(account)]
 
     async def refresh_folders(self, account: str) -> list[Folder]:
         return self.folders(account)
 
+    def _bring(self, found: list[Mail], *, handed: bool) -> int:
+        """Ramène ici ces mails du serveur ; ``handed`` : jamais rendus par ``fetch_new`` (ce qui vient d'avant)."""
+        for m in found:
+            self.remote.remove(m)
+            self.inbox.append(replace(m, folder=m.folder or "INBOX"))
+            if handed:
+                self.handed.add(m.ref)
+        return len(found)
+
     async def sync_folder(self, account: str, folder: str, limit: int) -> int:
-        return 0
+        """Ce qui vient d'arriver dans ce dossier (le plus récent d'abord) ; un dossier relevé le rendra encore."""
+        if self.account(account) is None:
+            raise ValueError(f"compte inconnu : {account}")
+        self.actions.append(("sync", account, folder))
+        fresh = sorted((m for m in self.remote if m.account == account and (m.folder or "INBOX") == folder),
+                       key=lambda m: -m.date)[:limit]
+        return self._bring(fresh, handed=False)
 
     async def older(self, account: str, folder: str, limit: int = 50) -> int:
         return 0
+
+    async def create_folder(self, account: str, name: str) -> str:
+        wanted = name.strip()
+        if not wanted or len(wanted) > 200:
+            raise ValueError("un nom de dossier : des mots, « / » pour un sous-dossier, 200 caractères au plus")
+        if wanted not in {n for n, _ in self._names(account)}:
+            self.made.setdefault(account, []).append(wanted)
+            self.actions.append(("create", account, wanted))
+        return wanted
+
+    async def search_server(self, query: MailQuery, want: int) -> Found:
+        """Ce qui correspond sur le serveur sans être ici : les plus récents ramenés, jamais rendus comme arrivés."""
+        self.actions.append(("search", query.account, query.text, query.sender))
+        if not words_of(query.text) and not words_of(query.sender):
+            return Found()
+        names = {n for n, role in self._names(query.account) if role not in ASIDE}
+        found = sorted((m for m in self.remote if m.account == query.account
+                        and ((m.folder or "INBOX") == query.folder if query.folder else (m.folder or "INBOX") in names)
+                        and has_words(f"{m.subject} {m.sender} {m.body}", query.text)
+                        and has_words(f"{m.sender} {m.address}", query.sender)), key=lambda m: -m.date)
+        chosen = found[:max(0, want)]
+        return Found(kept=self._bring(chosen, handed=True), left=len(found) - len(chosen))
+
+    async def keep_history(self, account: str, limit: int) -> int:
+        info = self.account(account)
+        if info is None or not info.ready or not info.keep_all or limit <= 0:
+            return 0
+        self.actions.append(("history", account))
+        names = [n for n, role in self._names(account) if role not in ASIDE]
+        older = sorted((m for m in self.remote if m.account == account and (m.folder or "INBOX") in names),
+                       key=lambda m: -m.date)
+        chosen = older[:limit]
+        if len(chosen) == len(older):
+            self.complete |= {(account, n) for n in names}
+        return self._bring(chosen, handed=True)
 
     async def set_flags(self, ref: str, *, seen: bool | None = None, flagged: bool | None = None) -> None:
         changes = {k: v for k, v in (("seen", seen), ("flagged", flagged)) if v is not None}
@@ -298,7 +368,8 @@ class FakeMail:
         return len(set(refs)) - len(known)
 
     async def move(self, ref: str, folder: str) -> str:
-        if folder not in dict(FOLDERS):
+        found = self.cached_one(ref)
+        if folder not in dict(self._names(found.account if found is not None else "")):
             raise ValueError(f"dossier inconnu : {folder}")
         self._update(ref, folder=folder)
         self.actions.append(("move", ref, folder))

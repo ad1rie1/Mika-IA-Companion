@@ -4,7 +4,8 @@
   toutes les exécutions ; toutes les décisions techniques.
 - **La fiche d'un projet** (type d'objet ``project``, clé = son numéro) :
   Vue d'ensemble, Objectifs, Exécutions, Décisions techniques, Fichiers,
-  Dépôt git, Comportement et outils, Carnet. La fiche **gouverne** : chaque onglet porte
+  Dépôt git, Comportement et outils (avec ses liens de lecture : ce qu'il lit,
+  qui le lit — ADR 0257), Carnet. La fiche **gouverne** : chaque onglet porte
   les formulaires de ce qu'il montre (``ActionSlot``), les actions qui valent
   pour tout le projet sont en tête. Les onglets Fichiers (avec le téléchargement)
   et Dépôt git vivent à part, dans ``inspect_files.py`` et ``inspect_git.py`` :
@@ -26,8 +27,10 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from mika.contracts import identity as identity_c
+from mika.contracts import mcp as mcp_c
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
+from mika.faculties.projects import links
 from mika.faculties.projects.actions import (
     BUNDLE_WORDS,
     DECISION_STATUS_FR,
@@ -36,8 +39,10 @@ from mika.faculties.projects.actions import (
     PRIORITY_CHOICES,
     _editable,
     _runnable,
+    link_options,
     pending_of,
     schedule_words,
+    service_words,
 )
 from mika.faculties.projects.faculty import (
     AMENDED,
@@ -422,6 +427,7 @@ LIST_COLUMNS = (Column("projet", role="title"), Column("mode", "fit", role="badg
 
 def _tools_words(p: Project) -> str:
     extra = [BUNDLE_WORDS.get(b, b) for b in p.bundles if b in EXTRA_BUNDLES]
+    extra += [service_words(b) for b in p.bundles if mcp_c.is_service(b)]  # ses services branchés (ADR 0254)
     return "son atelier" + (", " + ", ".join(extra) if extra else "")
 
 
@@ -1070,6 +1076,7 @@ def _behaviour_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[
                title="Sa liberté"),
     ), columns=2))
     blocks.append(_tools_section(p, frame, editable))
+    blocks.append(_links_section(p, s, frame, ctx, editable))
     return blocks
 
 
@@ -1082,8 +1089,10 @@ def _tools_section(p: Project, frame: Frame, editable: bool) -> Section:
     for bundle in p.bundles:
         names = sorted(name for name, spec in tools.items() if spec.bundle == bundle
                        and (Kind.WORK in spec.episodes or Kind.JOB in spec.episodes))
-        rows.append((Text(BUNDLE_WORDS.get(bundle, {"projects": "ses outils de projet", "workshop": "son atelier"}.get(
-            bundle, bundle))), Text(descriptions.get(bundle, "—"), clamp=200),
+        gone = mcp_c.is_service(bundle) and bundle not in descriptions  # un service débranché depuis : il le dit
+        words = service_words(bundle) if mcp_c.is_service(bundle) else BUNDLE_WORDS.get(
+            bundle, {"projects": "ses outils de projet", "workshop": "son atelier"}.get(bundle, bundle))
+        rows.append((Text(words), Text("débranché : aucun outil" if gone else descriptions.get(bundle, "—"), clamp=200),
             Text(", ".join(names) or "—", "mono", clamp=300)))
     items: list[Any] = [Table((Column("lot"), Column("ce qu'il permet"), Column("ses outils")), tuple(rows),
                               title="Ce qu'elle a en main pendant une exécution")]
@@ -1093,6 +1102,71 @@ def _tools_section(p: Project, frame: Frame, editable: bool) -> Section:
     return Section("Ses outils", tuple(items), description="Son atelier (lire, écrire, lancer des programmes isolés, "
                                                            "son dépôt git) et ses outils de projet sont toujours là ; "
                                                            "le reste se choisit.")
+
+
+#: ses liens de lecture (ADR 0257), tels que la fiche dessinée les retrouve
+LINKS_TITLE, READS_TITLE, READERS_TITLE = "Ses liens de lecture", "Ce qu'il lit", "Qui le lit"
+
+
+#: ce qu'un lien donne de plus quand les lignes du projet lu donnent ses fichiers (ADR 0260)
+GIVES_FILES = "ses fichiers, par la vue de son atelier (son dernier commit, en lecture seule)"
+
+
+def gives_words(grant: links.Grant) -> str:
+    """Ce qu'un lien donne au projet lecteur, en mots — ce que les lignes d'accès du projet lu laissent à son
+    propriétaire : son titre et son état, le détail de son travail, et ses fichiers par la vue de son atelier (ADR
+    0260)."""
+    if not grant.see:
+        return "rien"
+    words = "son titre, son état, ses comptes rendus, ses décisions en vigueur et ses objectifs ouverts" \
+        if grant.detail else "son titre et son état"
+    return f"{words} ; {GIVES_FILES}" if grant.view else words
+
+
+def _links_section(p: Project, s: ProjectsState, frame: Frame, ctx: InspectContext, editable: bool) -> Section:
+    """Ses liens de lecture (ADR 0257) : « Ce qu'il lit » — chaque projet lu et ce que le lien donne maintenant, un
+    lien suspendu le dit, ce que son plan demande sans être encore lié aussi —, « Choisir ce qu'il lit »
+    (``projects.liens``) tant que le projet se modifie, et « Qui le lit »."""
+    world = links.world_of(frame)
+    read, readers = links.readings(s, p, world), links.readers(s, p, world)
+    asked = [s.projects[t] for t in p.plan_reads if t not in p.reads and t in s.projects]
+    texts = _texts(ctx, [t.title_ref for t in (*(r.project for r in read if r.project is not None), *asked,
+                                               *(reader for reader, _ in readers))])
+
+    def named(t: Project) -> Ref:
+        return _link(t, f"n° {t.id} — {_text(texts, t.title_ref)}", "comportement")
+
+    rows: list[tuple[Any, ...]] = []
+    for r in read:
+        t = r.project
+        if t is None:
+            rows.append((Text(f"n° {r.id}"), Text("—"), Text("rien : ce projet n'existe plus", "muted")))
+        elif r.suspended:
+            why = "il est archivé" if not live(t) else "ses lignes d'accès ne le laissent plus voir"
+            rows.append((named(t), _state(t), Text(f"rien : le lien est suspendu ({why})", tone="warn")))
+        else:
+            rows.append((named(t), _state(t), Text(gives_words(r.grant))))
+    rows += [(named(t), _state(t), Text("rien encore : son plan demande à le lire, le lien n'est pas posé", "muted"))
+             for t in asked]
+    items: list[Any] = [Table((Column("projet"), Column("état", "fit"), Column("ce qu'il en reçoit")), tuple(rows),
+                              title=READS_TITLE, empty="il ne lit aucun projet")]
+    if editable and link_options(s, frame, p):
+        items.append(Disclosure("Choisir ce qu'il lit", (ActionSlot("projects.liens", title="Enregistrer ce qu'il lit",
+                                                                    compact=True),)))
+    items.append(Table((Column("projet"), Column("pour qui"), Column("ce qu'il en reçoit")),
+                       tuple((named(reader), Text(_who(frame, links.owner_of(reader)) if links.owner_of(reader)
+                                                   else "à elle"),
+                              Text(gives_words(grant) if grant.see else "rien : le lien est suspendu",
+                                   tone="" if grant.see else "warn")) for reader, grant in readers),
+                       title=READERS_TITLE, empty="aucun projet ne le lit"))
+    return Section(LINKS_TITLE, tuple(items),
+                   description="Un projet en lit d'autres, quatre au plus, sans jamais y écrire. Ce qu'il en reçoit se "
+                               "relit à chaque exécution dans les lignes d'accès du projet lu (son onglet « Accès »), "
+                               "pour le propriétaire du projet lecteur : le voir donne son titre et son état ; le "
+                               "piloter, au moins en lecture seule, ses comptes rendus, ses décisions et ses "
+                               "objectifs ouverts ; ses fichiers, la vue de son atelier — son dernier commit, sous "
+                               "« liens/<n>/ », jamais son travail en cours. Ce dernier droit se relit à chaque "
+                               "appel d'outil : repris, la vue est supprimée.")
 
 
 # ── La fiche : carnet ─────────────────────────────────────────────────────
@@ -1230,7 +1304,8 @@ def forget_note(n: int) -> str:
     these = "ce projet" if one else f"ces {plural(n, 'projet', 'projets')}"
     return (f"Oublier cette personne efface ce que sa vie garde de {these} — titres, comptes rendus, carnets, "
             f"décisions —, pas {'son atelier' if one else 'leurs ateliers'} : les fichiers, l'historique git (dont "
-            "les messages de commit restent neutres) et ce qui est déjà parti vers un dépôt distant. "
+            "les messages de commit restent neutres), ce qui est déjà parti vers un dépôt distant, et la vue qu'en "
+            "garde un projet qui le lit (son dernier commit, jusqu'à ce que le lien ou le droit soit retiré). "
             f"{'Ouvre-le' if one else 'Ouvre chaque projet'} pour faire le ménage dans son atelier, ou archive-le. "
             "Le stockage des apps de la Forge n'est pas atteint non plus (« Vider le stockage » sur la fiche d'une "
             "app).")

@@ -39,6 +39,17 @@
 - **L'arbre** d'un atelier se lit depuis git (suivis, et nouveaux non ignorés :
   ni ``.venv`` ni ``node_modules``), en largeur d'abord, chaque entrée par
   ``lstat`` (un lien cassé est une entrée, pas une panne), hors de la boucle.
+- **La vue de l'atelier d'un projet lu** (ADR 0260) : le dernier commit de sa
+  branche de base (``BASE_BRANCH``, pas la branche où il se trouve), posé dans
+  un dossier à part (``.vues/projet-<lecteur>/projet-<lu>/<commit>/``, hors de
+  l'atelier du lecteur : ni son arbre, ni son git, ni sa taille ne la comptent).
+  Un git en cage lit le dépôt du projet lu, monté **en lecture seule**, et
+  n'écrit que là où la vue se pose : rien ne s'écrit chez le projet lu, quoi que
+  git veuille. Elle a son propre plafond (``Limits.view_bytes``, mesuré dans le
+  commit avant de rien poser). Ce que le modèle lance la voit en lecture seule
+  sous ``liens/<n>/``, montée sur un dossier vide posé dans l'atelier du
+  lecteur ; jamais une commande réseau. Ses chemins sont résolus puis vérifiés
+  comme ceux de l'atelier, et là où une vue est posée, rien ne s'écrit.
 
 Les commandes tournent dans un fil (``run_in_executor``) : l'attente du
 processus ne bloque pas la boucle ; en simulation, l'exécuteur est en ligne.
@@ -49,6 +60,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import ipaddress
+import itertools
 import os
 import re
 import resource
@@ -69,7 +81,18 @@ from mika.adapters import cage
 from mika.contracts.self_ import DEFAULT_NAME
 from mika.kernel.inspect import size_fr
 from mika.kernel.text import fold
-from mika.ports.workshop import Commit, OutsideWorkshop, RunResult, WorkshopFull
+from mika.ports.workshop import (
+    NO_COMMIT,
+    TOO_BIG,
+    UNREADABLE,
+    VIEWS_DIR,
+    Commit,
+    OutsideWorkshop,
+    RunResult,
+    View,
+    WorkshopFull,
+    view_place,
+)
 
 #: ce qu'on peut lancer sans réseau. Ce n'est **pas** une barrière (``sh`` et ``python`` font tout) : c'est la
 #: palette des outils qu'on sait présents ; la barrière, c'est la cage (bubblewrap, limites, réseau coupé)
@@ -92,7 +115,13 @@ SYSTEM_PATH = "/usr/local/bin:/usr/bin:/bin"
 _SYSTEM_DIRS = cage.SYSTEM_DIRS
 NET_ADDRESS, NET_GATEWAY, NET_DNS = cage.NET_ADDRESS, cage.NET_GATEWAY, cage.NET_DNS
 UNREACHABLE = cage.UNREACHABLE
-_GIT = ("-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "-c", "init.defaultBranch=main")
+#: la branche de base d'un atelier : celle où il naît, et celle que lit la vue qu'un autre projet en a (ADR 0260)
+BASE_BRANCH = "main"
+_GIT = ("-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "-c", f"init.defaultBranch={BASE_BRANCH}")
+#: où se posent les vues des ateliers lus, à côté des ateliers : ``.vues/projet-<lecteur>/projet-<lu>/<commit>/``
+VIEWS_DIRNAME = ".vues"
+#: le délai du git qui pose une vue (il recopie un commit entier)
+VIEW_TIMEOUT_S = 120.0
 #: ce qui ne peut pas entrer dans un nom d'auteur git (une fin de ligne, un chevron d'adresse, un contrôle)
 _AUTHOR_UNSAFE = re.compile(r"[\x00-\x1f\x7f<>]")
 
@@ -103,8 +132,9 @@ def author_identity(name: str) -> tuple[str, ...]:
     shown = " ".join(_AUTHOR_UNSAFE.sub(" ", name).split())[:80] or DEFAULT_NAME
     local = re.sub(r"[^a-z0-9]+", ".", fold(shown)).strip(".") or "atelier"
     return ("-c", f"user.name={shown}", "-c", f"user.email={local}@atelier.local")
-#: un identifiant de commit (abrégé ou complet), une branche
+#: un identifiant de commit (abrégé ou complet), un identifiant complet (le nom du dossier d'une vue), une branche
 _SHA = re.compile(r"^[0-9a-f]{4,40}$")
+_FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 _BRANCH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$")
 #: ce que git dit d'un enregistrement (``--shortstat``)
 _STAT = re.compile(r"(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?")
@@ -141,6 +171,8 @@ class Limits:
     output_bytes: int = 8 * 1024 ** 2
     #: au-delà, l'atelier refuse d'écrire et de lancer autre chose que du ménage
     workshop_bytes: int = 2 * 1024 ** 3
+    #: la place d'une vue (ADR 0260), à part de celle de l'atelier qui la lit : au-delà, le commit n'est pas posé
+    view_bytes: int = 512 * 1024 ** 2
 
 
 def check_remote(url: str) -> str:
@@ -233,6 +265,10 @@ class BwrapWorkshop:
         self.prlimit = which("prlimit")
         #: la dernière taille mesurée de chaque atelier (octets)
         self._sizes: dict[int, int] = {}
+        #: les vues telles qu'on les a posées, par (lecteur, lu) ; une pose à la fois par lecteur
+        self._views: dict[tuple[int, int], View] = {}
+        self._view_locks: dict[int, asyncio.Lock] = {}
+        self._poses = itertools.count(1)
 
     # ── le dossier ──
     def folder(self, project: int) -> Path:
@@ -252,9 +288,10 @@ class BwrapWorkshop:
         (d / HOME_DIRNAME).mkdir(parents=True, exist_ok=True)
         return d
 
-    def path(self, project: int, rel: str, *, write: bool = False) -> Path:
-        """Résout ``rel`` dans l'atelier, ou lève ``OutsideWorkshop`` (une lecture ne crée rien)."""
-        base = (self._open(project) if write else self.folder(project)).resolve()
+    @staticmethod
+    def _confined(base: Path, rel: str, where: str = "l'atelier") -> Path:
+        """Le seul contrôle des chemins : résoudre ``rel`` dans ``base`` (déjà résolu), puis vérifier qu'il y est
+        resté — ``..``, un chemin absolu et le lien symbolique qui sort lèvent ``OutsideWorkshop``."""
         raw = str(rel or "").strip()
         if raw and Path(raw).is_absolute():
             raise OutsideWorkshop(f"chemin absolu refusé : {raw} — écris un chemin relatif au dossier")
@@ -264,13 +301,23 @@ class BwrapWorkshop:
         except (OSError, RuntimeError) as exc:  # une boucle de liens
             raise OutsideWorkshop(f"chemin illisible : {raw} ({exc})") from exc
         if resolved != base and not resolved.is_relative_to(base):
-            raise OutsideWorkshop(f"hors de l'atelier : {raw}")
+            raise OutsideWorkshop(f"hors de {where} : {raw}")
+        return resolved
+
+    def path(self, project: int, rel: str, *, write: bool = False) -> Path:
+        """Résout ``rel`` dans l'atelier, ou lève ``OutsideWorkshop`` (une lecture ne crée rien)."""
+        base = (self._open(project) if write else self.folder(project)).resolve()
+        resolved = self._confined(base, rel)
         if write:
             parts = resolved.relative_to(base).parts if resolved != base else ()
             if not parts:
                 raise OutsideWorkshop("écris un fichier, pas le dossier lui-même")
             if parts[0] in ORGANS:
                 raise OutsideWorkshop(f"« {parts[0]}/ » appartient à l'atelier lui-même : il ne s'écrit pas")
+            if len(parts) > 1 and parts[0] == VIEWS_DIR and parts[1].isdecimal() \
+                    and str(int(parts[1])) == parts[1] and self._view_home(project, int(parts[1])).exists():
+                # là où la vue d'un projet lu est montée, rien ne s'écrit : le fichier serait caché sous elle
+                raise OutsideWorkshop(f"« {VIEWS_DIR}/{parts[1]}/ » est la vue d'un projet lu : elle ne s'écrit pas")
         return resolved
 
     def _rel(self, project: int, p: Path) -> str:
@@ -338,15 +385,21 @@ class BwrapWorkshop:
                 except OSError:  # supprimé depuis (encore dans l'index)
                     continue
         else:
-            rows = self._walk(project, start)
+            rows = self._walk(base, start)
+        return self._listing(rows)
+
+    def _listing(self, rows: list[tuple[int, str, os.stat_result]], prefix: str = "") -> list[str]:
+        """Les lignes d'un arbre, les plus proches de la racine d'abord, coupées à ``max_tree`` ; ``prefix`` : ce
+        sous quoi ces chemins se disent (``liens/<n>/`` pour une vue)."""
         rows.sort(key=lambda r: (r[0], r[1]))
-        out = [_entry(rel, st) for _, rel, st in rows[: self.max_tree]]
+        out = [_entry(prefix + rel, st) for _, rel, st in rows[: self.max_tree]]
         if len(rows) > self.max_tree:
             out.append(f"[… liste coupée à {self.max_tree} entrées sur {len(rows)} …]")
         return out
 
-    def _walk(self, project: int, start: Path) -> list[tuple[int, str, os.stat_result]]:
-        """Un parcours en largeur, borné, qui ne descend ni dans les organes ni dans le bruit."""
+    def _walk(self, base: Path, start: Path) -> list[tuple[int, str, os.stat_result]]:
+        """Un parcours en largeur de ``start``, borné, qui ne descend ni dans les organes ni dans le bruit ; les
+        chemins sont relatifs à ``base`` (l'atelier, ou une vue)."""
         rows: list[tuple[int, str, os.stat_result]] = []
         queue: deque[Path] = deque([start])
         seen = 0
@@ -358,7 +411,7 @@ class BwrapWorkshop:
                 continue
             for e in entries:
                 seen += 1
-                rel = self._rel(project, Path(e.path))
+                rel = str(Path(e.path).relative_to(base))
                 if rel.split("/", 1)[0] in ORGANS:
                     continue
                 try:
@@ -376,7 +429,12 @@ class BwrapWorkshop:
         target = self.path(project, path)
         if not target.is_file():
             raise FileNotFoundError(f"{path} n'existe pas dans l'atelier (un dossier se liste avec ws_list)")
-        raw = target.read_bytes()[: self.max_file + 1]
+        return self._text(target)
+
+    def _text(self, target: Path) -> str:
+        """Le texte d'un fichier, borné (``max_file``) : ce qui dépasse est coupé, et dit."""
+        with target.open("rb") as f:
+            raw = f.read(self.max_file + 1)
         text = raw[: self.max_file].decode("utf-8", errors="replace")
         return text + ("\n\n[… fichier tronqué …]" if len(raw) > self.max_file else "")
 
@@ -443,9 +501,13 @@ class BwrapWorkshop:
         """Le résolveur que voit le réseau à part (celui que relaie pasta), jamais celui de l'hôte."""
         return cage.resolver(self.root / ".reseau")
 
-    def _sandbox(self, root: Path, argv: list[str], network: str, protect_git: bool = False) -> list[str]:
+    def _sandbox(self, root: Path, argv: list[str], network: str, protect_git: bool = False,
+                 read_only: Sequence[tuple[Path, Path]] = ()) -> list[str]:
         """La cage bubblewrap. ``network`` : ``""`` (aucun), ``"isolated"`` (le réseau à part de pasta, posé
-        autour), ``"host"`` (celui de l'hôte : les git de l'atelier seulement, faute de pasta)."""
+        autour), ``"host"`` (celui de l'hôte : les git de l'atelier seulement, faute de pasta). ``read_only`` : des
+        dossiers de plus, chacun (ce qu'il est hors de la cage, où il se lit dedans), que le programme lit sans
+        pouvoir y écrire — la vue d'un projet lu sous ``liens/<n>/``, le dépôt d'un projet lu pour le git qui la
+        pose (ADR 0260)."""
         assert self.bwrap is not None
         args = [*cage.head(self.bwrap, network), *cage.system(network)]
         if network == "isolated":
@@ -455,6 +517,8 @@ class BwrapWorkshop:
         args += ["--bind", str(root), str(root)]
         if protect_git and (root / ".git").is_dir():  # le dépôt est à l'atelier : ce que lance le modèle le lit seulement
             args += ["--ro-bind", str(root / ".git"), str(root / ".git")]
+        for source, at in read_only:  # après l'atelier : une vue se monte dedans, par-dessus son dossier vide
+            args += cage.read_only(source, at)
         args += ["--chdir", str(root), "--"]
         if self.prlimit and Path(self.prlimit).resolve().is_relative_to("/usr"):
             n = self.limits.processes  # compté dans l'espace de la cage, pas parmi les fils de l'hôte
@@ -489,9 +553,11 @@ class BwrapWorkshop:
         resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 
     async def run(self, project: int, argv: Sequence[str], *, timeout_s: float | None = None,
-                  network: bool = False, check_allowed: bool = True,
+                  network: bool = False, views: Sequence[int] = (), check_allowed: bool = True,
                   extra_env: Mapping[str, str] | None = None, secrets: Sequence[str] = (),
                   clip: bool = True) -> RunResult:
+        """``views`` : les projets lus dont la vue se monte, en lecture seule, sous ``liens/<n>/`` (ADR 0260) —
+        seulement pour ce que le modèle lance sans réseau : ni une commande réseau, ni les git de l'atelier."""
         args = [str(a) for a in argv]
         if not args:
             return RunResult((), None, refused="commande vide")
@@ -521,7 +587,8 @@ class BwrapWorkshop:
         if exe is None:
             return RunResult(tuple(args), None, refused=f"« {args[0]} » est absent de l'environnement isolé "
                                                         "(installe-le dans l'atelier : .venv/bin, node_modules/.bin)")
-        cmd = self._sandbox(root, [exe, *args[1:]], mode, protect_git=check_allowed)
+        mounted, unmounted = await self._mounts(project, root, views) if check_allowed and not network else ([], ())
+        cmd = self._sandbox(root, [exe, *args[1:]], mode, protect_git=check_allowed, read_only=mounted)
         if mode == "isolated":
             cmd = self._isolated(cmd)
         limit = timeout_s or self.timeout_s
@@ -537,6 +604,8 @@ class BwrapWorkshop:
             self._sizes[project] = await loop.run_in_executor(None, self._measure, root)
             if self.full(project):
                 result = replace(result, notes=(*result.notes, f"Attention : {self.full(project)}."))
+        if unmounted:
+            result = replace(result, notes=(*result.notes, *unmounted))
         return result
 
     def _measure(self, root: Path) -> int:
@@ -865,6 +934,219 @@ class BwrapWorkshop:
             r = await self._git(project, "merge", "--ff-only", "FETCH_HEAD")
         self._exclude(self.folder(project))
         return replace(r, argv=("git", "pull", url, branch))
+
+    # ── les vues des ateliers lus (ADR 0260) ──
+    def _views_of(self, reader: int) -> Path:
+        return self.root / VIEWS_DIRNAME / f"projet-{int(reader)}"
+
+    def _view_home(self, reader: int, target: int) -> Path:
+        """Là où se pose la vue qu'a ``reader`` de l'atelier de ``target`` : un dossier au nom du commit vu, un seul
+        à la fois."""
+        return self._views_of(reader) / f"projet-{int(target)}"
+
+    def _view_lock(self, reader: int) -> asyncio.Lock:
+        return self._view_locks.setdefault(int(reader), asyncio.Lock())
+
+    async def view(self, reader: int, target: int, *, fresh: bool = False) -> View:
+        key = (int(reader), int(target))
+        async with self._view_lock(reader):
+            known = self._views.get(key)
+            if known is not None and not fresh and (not known.sha or (self._view_home(*key) / known.sha).is_dir()):
+                return known  # telle qu'elle a été posée au départ de l'exécution : elle ne bouge pas en route
+            self._views[key] = view = await self._pose(*key)
+            return view
+
+    async def _pose(self, reader: int, target: int) -> View:
+        """Pose la vue, ou dit pourquoi il n'y en a pas. La tête de la branche de base se relit dans le dépôt du
+        projet lu (pas ``HEAD`` : pas la branche où son atelier se trouve) ; un commit déjà posé sert tel quel, un
+        autre le remplace, et ce qui n'est plus la vue est effacé."""
+        home = self._view_home(reader, target)
+        repo = self.folder(target) / ".git"
+        loop = asyncio.get_running_loop()
+        if reader == target or not repo.is_dir():
+            await loop.run_in_executor(None, self._unpose, reader, target)
+            return View(target, why=NO_COMMIT)
+        if not self.bwrap:  # git ne lit le dépôt d'un autre projet que dans la cage : jamais de repli
+            return View(target, why=UNREADABLE)
+        cage.private_root(self.root)
+        home.mkdir(parents=True, exist_ok=True)
+        tip = await self._view_git(repo, home, "for-each-ref", "--count=1",
+                                   "--format=%(objectname)%1f%(committerdate:unix)", f"refs/heads/{BASE_BRANCH}")
+        if not tip.ok:
+            return View(target, why=UNREADABLE)
+        sha, _, stamp = tip.stdout.strip().partition("\x1f")
+        if not _FULL_SHA.match(sha):  # la branche de base n'a encore aucun commit
+            await loop.run_in_executor(None, self._unpose, reader, target)
+            return View(target, why=NO_COMMIT)
+        at = int(stamp) * 1_000_000 if stamp.isdigit() else 0
+        if not (home / sha).is_dir():
+            why = await self._checkout(repo, home, sha)
+            if why == TOO_BIG:  # la vue d'avant ne dit plus où en est le projet : elle part aussi
+                await loop.run_in_executor(None, self._unpose, reader, target)
+            if why:
+                return View(target, at=at, why=why)
+        await loop.run_in_executor(None, self._sweep, home, sha)
+        return View(target, sha, at)
+
+    async def _checkout(self, repo: Path, home: Path, sha: str) -> str:
+        """Recopie le commit ``sha`` du dépôt ``repo`` dans ``home/<sha>`` ; rend pourquoi il ne l'a pas fait (vide :
+        c'est fait). La place se mesure dans le commit avant de rien poser ; l'index est un fichier à part, dans le
+        dossier de la pose : celui du projet lu n'est ni lu ni écrit."""
+        listed = await self._view_git(repo, home, "ls-tree", "-r", "-l", "-z", sha, clip=False)
+        if listed.truncated:  # trop de fichiers pour seulement les compter
+            return TOO_BIG
+        if not listed.ok:
+            return UNREADABLE
+        size = 0
+        for record in listed.stdout.split("\x00"):
+            fields = record.partition("\t")[0].split()  # « mode type objet taille », puis le chemin
+            if len(fields) == 4 and fields[3].isdigit():
+                size += int(fields[3])
+        if size > self.limits.view_bytes:
+            return TOO_BIG
+        loop = asyncio.get_running_loop()
+        stage = home / f".pose-{next(self._poses)}"
+        tree = stage / "arbre"
+        tree.mkdir(parents=True)
+        index = {"GIT_INDEX_FILE": str(stage / "index")}
+        try:
+            done = await self._view_git(repo, home, "read-tree", sha, extra_env=index)
+            if done.ok:
+                done = await self._view_git(repo, home, f"--work-tree={tree}", "checkout-index", "--all", "--force",
+                                            f"--prefix={tree}/", extra_env=index, timeout_s=VIEW_TIMEOUT_S)
+            if done.ok:
+                os.rename(tree, home / sha)
+            return "" if done.ok else UNREADABLE
+        except OSError:
+            return UNREADABLE
+        finally:
+            await loop.run_in_executor(None, shutil.rmtree, stage, True)
+
+    async def _view_git(self, repo: Path, where: Path, *args: str, timeout_s: float = 30.0,
+                        extra_env: Mapping[str, str] | None = None, clip: bool = True) -> RunResult:
+        """Un git qui **lit** le dépôt d'un projet lu, pour poser la vue qu'un autre projet en a : dans une cage sans
+        réseau où ce dépôt est monté en lecture seule — rien ne s'y écrit, quoi que git veuille — et où seul
+        ``where`` (là où la vue se pose) s'écrit."""
+        assert self.bwrap
+        argv = ("git", *args)
+        exe = shutil.which("git", path=SYSTEM_PATH)
+        if exe is None:
+            return RunResult(argv, None, refused="git est absent de l'environnement isolé")
+        cmd = self._sandbox(where, [exe, *_GIT, f"--git-dir={repo}", *args], "", read_only=((repo, repo),))
+        loop = asyncio.get_running_loop()
+        job = _Job()
+        try:
+            return await loop.run_in_executor(None, self._run_sync, argv, cmd, where, timeout_s,
+                                              {**_GIT_ENV, **dict(extra_env or {})}, (), job, clip)
+        except asyncio.CancelledError:
+            job.cancel()  # la pose est annulée (l'échéance d'un enrichisseur) : son git ne lui survit pas
+            raise
+
+    @staticmethod
+    def _sweep(home: Path, keep: str) -> None:
+        """Efface, là où une vue se pose, tout ce qui n'est pas le commit vu : la vue d'avant, une pose inachevée."""
+        try:
+            names = [e.name for e in os.scandir(home)]
+        except OSError:
+            return
+        for name in names:
+            if name != keep:
+                shutil.rmtree(home / name, ignore_errors=True)
+
+    def _unpose(self, reader: int, target: int) -> None:
+        """Efface la vue qu'a ``reader`` de ``target``, et le dossier vide où elle se montait dans son atelier."""
+        shutil.rmtree(self._view_home(reader, target), ignore_errors=True)
+        at = self.folder(reader) / VIEWS_DIR / str(int(target))
+        for folder in (at, at.parent):  # seulement s'ils sont vides : ce que le projet y a mis lui-même reste
+            try:
+                os.rmdir(folder)
+            except OSError:
+                break
+
+    async def _mounts(self, reader: int, root: Path,
+                      targets: Sequence[int]) -> tuple[list[tuple[Path, Path]], tuple[str, ...]]:
+        """Les vues à monter pour un programme du projet ``reader`` — chacune (la vue posée, là où elle se lit dans
+        son atelier) — et ce qu'il faut dire de celles qui ne l'ont pas été."""
+        mounted: list[tuple[Path, Path]] = []
+        notes: list[str] = []
+        for target in dict.fromkeys(int(t) for t in targets):
+            view = await self.view(reader, target)
+            if not view.sha:
+                continue
+            at = self._mount_point(root, target)
+            if at is None:
+                notes.append(f"La vue {view_place(target)}/ n'est pas montée pour ce programme : « {VIEWS_DIR} » ou "
+                             f"« {view_place(target)} » n'est pas un dossier de cet atelier.")
+                continue
+            mounted.append((self._view_home(reader, target) / view.sha, at))
+        return mounted, tuple(notes)
+
+    @staticmethod
+    def _mount_point(root: Path, target: int) -> Path | None:
+        """Le dossier vide, dans l'atelier du lecteur, sur lequel la vue se monte : bubblewrap ne monte que sur un
+        dossier, et le poser ici décide où. Un fichier ou un lien symbolique à cette place ne reçoit rien."""
+        at = root / VIEWS_DIR / str(int(target))
+        for folder in (at.parent, at):
+            try:
+                folder.mkdir(exist_ok=True)
+            except OSError:
+                return None
+            if folder.is_symlink():
+                return None
+        return at
+
+    def _view_root(self, reader: int, target: int) -> Path:
+        """La racine de la vue posée, résolue ; ``FileNotFoundError`` si aucune ne l'est."""
+        view = self._views.get((int(reader), int(target)))
+        root = self._view_home(reader, target) / view.sha if view is not None and view.sha else None
+        if root is None or not root.is_dir():
+            raise FileNotFoundError(f"aucune vue de l'atelier du projet n° {int(target)} n'est posée")
+        return root.resolve()
+
+    async def view_tree(self, reader: int, target: int, path: str = ".") -> list[str]:
+        base = self._view_root(reader, target)
+        start = self._confined(base, path or ".", "la vue")
+        prefix = view_place(target) + "/"
+        try:
+            st = os.lstat(start)
+        except OSError:
+            return []
+        if not stat.S_ISDIR(st.st_mode):
+            return [_entry(prefix + str(start.relative_to(base)), st)]
+        loop = asyncio.get_running_loop()
+        return self._listing(await loop.run_in_executor(None, self._walk, base, start), prefix)
+
+    async def view_read(self, reader: int, target: int, path: str) -> str:
+        found = self._confined(self._view_root(reader, target), path, "la vue")
+        if not found.is_file():
+            raise FileNotFoundError(f"{view_place(target, path)} n'existe pas dans la vue du projet n° {int(target)} "
+                                    "(un dossier se liste avec ws_list)")
+        return self._text(found)
+
+    async def drop_views(self, reader: int, keep: Sequence[int] = ()) -> None:
+        kept = frozenset(int(t) for t in keep)
+        async with self._view_lock(reader):
+            for key in [k for k in self._views if k[0] == int(reader) and k[1] not in kept]:
+                del self._views[key]
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, self._drop_sync, int(reader), kept)
+
+    def _drop_sync(self, reader: int, kept: frozenset[int]) -> None:
+        home = self._views_of(reader)
+        try:
+            names = [e.name for e in os.scandir(home)]
+        except OSError:
+            return  # ce projet n'a aucune vue
+        for name in names:
+            number = name.removeprefix("projet-")
+            if number.isdecimal() and int(number) not in kept:
+                self._unpose(reader, int(number))
+            elif not number.isdecimal():
+                shutil.rmtree(home / name, ignore_errors=True)
+        try:
+            os.rmdir(home)
+        except OSError:
+            pass
 
 
 __all__ = ["BwrapWorkshop"]

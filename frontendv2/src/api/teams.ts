@@ -6,7 +6,7 @@
  */
 import type { Level } from "./mail";
 import { query } from "./mail";
-import { getJson, MOI, sendJson, type Done } from "./moi";
+import { apiUrl, getJson, MOI, sendJson, type Done } from "./moi";
 
 /** Les bornes des chaînes que l'API reçoit (`app/me/teams.py`, en caractères) : au-delà, elle refuse (400, `fields`). */
 export const TEAMS_LIMITS = {
@@ -39,6 +39,8 @@ export interface AccountsReply {
   plugged: boolean;
   /** Teams actif. */
   enabled: boolean;
+  /** L'extension à télécharger (ADR 0246) ; `null` : elle n'est pas à côté du serveur. */
+  extension: { version: string } | null;
   accounts: TeamsAccount[];
 }
 
@@ -53,6 +55,15 @@ export interface TeamsMessage {
   /** Écrit par la personne du compte. */
   own: boolean;
   mentions_me: boolean;
+  /** Ses images (ADR 0258), sans leurs octets : `teamsImageUrl` les sert ; `seen` : ce que Mika y a vu. */
+  images?: TeamsImage[];
+}
+
+export interface TeamsImage {
+  id: string;
+  position: number;
+  mime: string;
+  seen: string;
 }
 
 /** Une réponse de Mika en chemin dans une conversation. */
@@ -153,6 +164,11 @@ export interface PrefillReply extends Done {
 }
 
 const T = `${MOI}/teams`;
+
+/** L'adresse des octets d'une image d'un message (derrière la connexion). */
+export function teamsImageUrl(message: string, image: string): string {
+  return apiUrl(`${T}/image${query({ message, image })}`);
+}
 
 export function fetchAccounts(): Promise<AccountsReply> {
   return getJson<AccountsReply>(`${T}/accounts`);

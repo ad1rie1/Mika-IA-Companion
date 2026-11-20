@@ -21,6 +21,8 @@ const RESULTS = { placed: "brouillon placé", sent: "envoyé", failed: "échec",
   dropped: "issue non transmise" };
 
 let loaded = false;
+/** L'adresse que le service a enregistrée (son origine), pour savoir si le champ en dit une autre. */
+let savedBase = "";
 
 function ask(kind, extra) {
   return chrome.runtime.sendMessage(Object.assign({ kind: kind }, extra || {}));
@@ -51,7 +53,11 @@ function fillStats(status) {
     ["Dernière relève", when(status.lastPollAt)],
     ["Écrit par Mika", out.placed + " brouillon(s) placé(s), " + out.sent + " message(s) envoyé(s), "
       + out.failed + " échec(s)" + (out.uncertain ? ", " + out.uncertain + " issue(s) incertaine(s)" : "")],
-    ["Captés", st.received + " (réseau : " + (st.bySource.network || 0) + ", base locale : " + (st.bySource.idb || 0) + ")"],
+    ["Captés", st.received + " (en direct : " + (st.bySource.worker || 0) + ", réseau : " + (st.bySource.network || 0)
+      + ", base locale : " + (st.bySource.idb || 0) + ")"],
+    ["Connexion en direct", liveText(status.live)],
+    ["Images envoyées à Mika", st.images ? st.images.sent + " (écartées : " + st.images.skipped + ", échecs : "
+      + st.images.failed + ")" : "0"],
     ["Écartés", dropped || "aucun"],
     ["Conversations connues", String(status.conversations)],
     ["Ton identité Teams", status.selfFound ? (status.selfNameFound ? "connue, avec ton nom" : "connue, nom pas encore vu")
@@ -108,8 +114,36 @@ function fillLog(entries) {
   $("logEmpty").hidden = Boolean(entries.length);
 }
 
+function liveText(lv) {
+  if (!lv) return "—";
+  if (lv.connected) {
+    return "ouverte depuis " + when(lv.since) + (lv.lastPushAt ? ", dernière poussée " + when(lv.lastPushAt) : "");
+  }
+  return "fermée" + (lv.lastError ? " (" + lv.lastError + ")" : " — elle s'ouvre quand un onglet Teams l'est");
+}
+
+/** Un chargement sans nouvelles depuis 3 min : l'onglet a été fermé ou rechargé en route (le service le tient
+ * pour interrompu et accepte d'en relancer un). */
+function stale(h) {
+  return Date.now() - (h.lastAt || h.startedAt || 0) > 3 * 60 * 1000;
+}
+
+function historyText(h) {
+  if (!h) return "";
+  const counts = h.sent + " envoyé(s) : " + h.accepted + " nouveau(x), " + h.known + " déjà connu(s), " + h.twins
+    + " doublon(s) écarté(s)" + (h.dropped ? ", " + h.dropped + " laissé(s) de côté" : "");
+  if (h.state === "running" && stale(h)) {
+    return "Interrompu (plus de nouvelles depuis " + when(h.lastAt || h.startedAt) + ") — " + counts
+      + ". Relance-le : ce qui est déjà chez Mika n'est pas rangé deux fois.";
+  }
+  if (h.state === "running") return "En cours : " + h.done + " / " + (h.total || "?") + " conversation(s) — " + counts;
+  if (h.state === "done") return "Fini " + when(h.finishedAt) + " — " + counts;
+  return "Arrêté" + (h.error ? " : " + h.error : "") + " — " + counts;
+}
+
 function fill(status) {
   const s = status.settings;
+  savedBase = s.base;
   if (!loaded) {
     $("base").value = s.base;
     $("exclude").value = s.exclude;
@@ -129,6 +163,12 @@ function fill(status) {
   pill.className = "pill " + tone;
 
   fillStats(status);
+  const hist = $("historyResult");
+  if (status.history) {
+    hist.textContent = historyText(status.history);
+    hist.className = "note " + (status.history.state === "error" ? "bad-text" : status.history.state === "done" ? "ok-text" : "");
+  }
+  $("history").disabled = Boolean(status.history && status.history.state === "running" && !stale(status.history));
   fillWaiting(status.outbox.waiting || []);
   fillLog(status.outbox.log || []);
 
@@ -145,47 +185,98 @@ async function refresh() {
   }
 }
 
+function say(text, ok) {
+  const out = $("testResult");
+  out.textContent = text;
+  out.className = "note " + (ok ? "ok-text" : "bad-text");
+}
+
+function typedBase() {
+  return $("base").value.trim() || "http://127.0.0.1:8001";
+}
+
+/** Une clé collée, ou une adresse autre que celle enregistrée : ce qu'on voit n'est pas ce que le service a. */
+function unsaved() {
+  return Boolean($("key").value.trim()) || MikaTeamsSignals.serverAddress(typedBase()).origin !== savedBase;
+}
+
+/** Enregistrer ce qui est tapé ; rend vrai si le service l'a gardé. */
 async function save() {
-  const base = $("base").value.trim() || "http://127.0.0.1:8001";
+  const base = typedBase();
   // en http seulement sur cette machine ; ailleurs, https (la même règle que le service d'arrière-plan)
   const address = MikaTeamsSignals.serverAddress(base);
   if (address.error) {
-    $("testResult").textContent = "Adresse refusée : " + address.error + ".";
-    return;
+    say("Adresse refusée : " + address.error + ".", false);
+    return false;
   }
+  // Le réglage part au service d'abord, sans attendre : la fenêtre du bouton se ferme parfois quand Chrome affiche sa
+  // demande de permission, et la clé collée se perdait avec elle. La demande suit dans le même geste (Chrome l'exige
+  // pendant le clic) ; sans la permission, le service le dit à chaque essai, et un nouvel « Enregistrer » la redemande.
+  const saving = ask("save", { settings: { base: base, key: $("key").value, exclude: $("exclude").value } });
+  let granted = true;
+  let why = "";
   if (!address.local) {
-    // une adresse hors de cette machine demande une permission, accordée par un clic
-    const origin = address.origin + "/*";
-    const granted = await chrome.permissions.request({ origins: [origin] });
-    if (!granted) {
-      $("testResult").textContent = "Sans permission, l'extension ne peut pas joindre " + base + ".";
-      return;
+    try {
+      granted = await chrome.permissions.request({ origins: [address.origin + "/*"] });
+    } catch (e) {
+      granted = false;
+      why = e && e.message ? " (" + e.message + ")" : "";
     }
   }
-  const result = await ask("save", { settings: { base: base, key: $("key").value, exclude: $("exclude").value } });
-  if (result && result.settings) {
-    $("key").value = "";
-    $("testResult").textContent = "Enregistré.";
-    loaded = false;
-    fill(result);
-  } else {
-    $("testResult").textContent = "Refusé : " + ((result && result.error) || "réglage illisible");
+  let result;
+  try {
+    result = await saving;
+  } catch (e) {
+    result = { error: "le service de l'extension ne répond pas — la recharger dans chrome://extensions" };
   }
+  if (!(result && result.settings)) {
+    say("Refusé : " + ((result && result.error) || "réglage illisible"), false);
+    return false;
+  }
+  $("key").value = "";
+  loaded = false;
+  fill(result);
+  if (granted) say("Enregistré.", true);
+  else say("Enregistré, mais Chrome n'a pas donné l'accès à " + address.origin + why
+    + " : sans lui, l'extension ne peut pas joindre Mika. « Enregistrer » à nouveau, puis « Autoriser ».", false);
+  return true;
 }
 
-$("save").addEventListener("click", save);
-$("save2").addEventListener("click", save);
+$("save").addEventListener("click", () => { save(); });
+$("save2").addEventListener("click", () => { save(); });
 
 $("paused").addEventListener("change", async () => {
   fill(await ask("save", { settings: { paused: $("paused").checked } }));
 });
 
 $("test").addEventListener("click", async () => {
+  // on teste ce qu'on voit : une clé collée ou une adresse changée s'enregistre d'abord (dans le même clic, que la
+  // permission de Chrome exige)
+  if (unsaved() && !(await save())) return;
   const out = $("testResult");
   out.textContent = "…";
-  const result = await ask("test");
-  out.textContent = result.text;
-  out.className = "note " + (result.ok ? "ok-text" : "bad-text");
+  out.className = "note";
+  let result;
+  try {
+    result = await ask("test");
+  } catch (e) {
+    result = { ok: false, text: "Le service de l'extension ne répond pas : la recharger dans chrome://extensions." };
+  }
+  say(result.text, result.ok);
+});
+
+$("history").addEventListener("click", async () => {
+  const out = $("historyResult");
+  let result = null;
+  try {
+    result = await ask("history");
+  } catch (_) { /* le service dort ou a été rechargé */ }
+  if (!result || !result.ok) {
+    out.textContent = (result && result.error) || "Le service de l'extension ne répond pas.";
+    out.className = "note bad-text";
+    return;
+  }
+  refresh();
 });
 
 $("flush").addEventListener("click", async () => {
@@ -218,16 +309,33 @@ $("diagnose").addEventListener("click", async () => {
     "",
     "Réseau : " + r.network.responses + " réponse(s) lue(s), " + r.network.frames + " trame(s), "
       + r.network.messages + " message(s), " + r.network.errors + " erreur(s)",
-    "Base locale : " + (r.idb.available ? r.idb.sweeps + " relecture(s), la dernière en " + r.idb.lastSweepMs + " ms, "
-      + r.idb.messages + " message(s), " + r.idb.errors + " erreur(s)" : "indisponible dans ce navigateur"),
+    "Worker de Teams : " + (r.worker ? (r.worker.hooked ? "écouté" : "pas vu (onglet ouvert avant l'extension ?)")
+      + ", " + r.worker.received + " réponse(s), " + r.worker.kept + " avec des messages, " + r.worker.messages
+      + " message(s), " + r.worker.errors + " erreur(s)" : "—"),
+    "Base locale : " + (r.idb.available ? r.idb.syncs + " synchro(s), la dernière en " + r.idb.lastSyncMs + " ms, "
+      + r.idb.conversations + " conversation(s) suivie(s), " + r.idb.read + " relue(s) ciblées, " + r.idb.messages
+      + " message(s), " + r.idb.errors + " erreur(s)" : "indisponible dans ce navigateur"),
   ];
-  for (const db of r.idb.databases || []) {
-    lines.push("  · " + db.name + " — " + db.records + " enregistrement(s), " + db.messages + " message(s) neuf(s)"
-      + (db.stores.length ? " [" + db.stores.join(", ") + "]" : ""));
+  if (r.images) {
+    lines.push("Images : " + r.images.downloaded + " téléchargée(s), " + r.images.sent + " envoyée(s), "
+      + r.images.skipped + " écartée(s), " + r.images.failed + " échec(s)");
+  }
+  if (r.history && (r.history.running || r.history.total)) {
+    lines.push("Historique dans cet onglet : " + (r.history.running ? "en cours, " : "") + r.history.done + " / "
+      + r.history.total + " conversation(s), " + r.history.messages + " message(s)"
+      + (r.history.error ? " — " + r.history.error : ""));
   }
   lines.push("", "Conversations dont le nom est connu : " + r.conversationTitles,
-    "Messages passés à l'extension : " + r.sent,
-    "",
+    "Messages passés à l'extension : " + r.sent);
+  const rl = result.relayed;
+  if (rl) {
+    // ce qui sépare « passés à l'extension » de « Captés » : le trajet de l'onglet au service d'arrière-plan
+    lines.push("Transmis au service : " + rl.messages + " message(s) en " + rl.batches + " lot(s), " + rl.accepted
+      + " accepté(s), " + rl.lost + " perdu(s)"
+      + (rl.lastError ? " — dernière erreur (" + when(rl.lastErrorAt) + ") : " + rl.lastError
+        + (/invalidated|invalidé/i.test(rl.lastError) ? " → recharge l'onglet Teams" : "") : ""));
+  }
+  lines.push("",
     "Zone de saisie trouvée : " + yes(c.editorFound),
     "Conversation active connue : " + yes(c.activeConversationKnown),
     "Envoi par le service de chat possible : " + yes(c.chatSendPossible),

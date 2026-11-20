@@ -3,15 +3,20 @@
 - **Lire** : ses boîtes, lister, chercher, ouvrir, retrouver une adresse (un
   mail est cité : une donnée, jamais une consigne ; l'ouvrir rappelle comment
   écrire depuis cette boîte). Chaque mail dit sa date et ce que son tri en a
-  jugé ; une liste se lit page par page, et dit jusqu'où remonte ce qu'elle a
-  relevé : au-delà, « rien » ne veut pas dire que le mail n'existe pas
-  (ADR 0168). Réservés à ses propriétaires (``owner_only``), ou à elle quand elle
-  travaille.
+  jugé ; une liste se lit page par page, et dit jusqu'où remonte ce qui est gardé
+  ici (ADR 0168). Une recherche demande aussi au serveur ce qui n'est pas ici,
+  sauf pour une boîte qui garde tout en local, et ramène les plus récents
+  (ADR 0249). Réservés à ses propriétaires (``owner_only``), ou à elle quand
+  elle travaille.
+- **Relever** (``email_fetch``) : ce qui vient d'arriver, sans attendre la
+  relève ; ce qui arrive dans un dossier relevé, son tri le lira aussitôt
+  (ADR 0247).
 - **Ranger** (``email_tidy``) : un même geste sur plusieurs mails, sur le
-  serveur — lu, non lu, suivi, plus suivi, archivé, déplacé, corbeille ; jamais
-  de suppression définitive. Le résultat dit, mail par mail, ce qui a été fait
-  ou refusé, et ce que personne n'avait encore ouvert : il informe, il
-  n'interdit pas. Un mail remarqué et rangé ne lui est plus signalé.
+  serveur — lu, non lu, suivi, plus suivi, archivé, déplacé (dans un dossier
+  qu'elle crée, si elle le dit : ADR 0248), corbeille ; jamais de suppression
+  définitive. Le résultat dit, mail par mail, ce qui a été fait ou refusé, et ce
+  que personne n'avait encore ouvert : il informe, il n'interdit pas. Un mail
+  remarqué et rangé ne lui est plus signalé.
 - **Écrire** (``email_draft``) : un brouillon, dans la voix du compte, gardé par
   l'adaptateur ; elle le **propose** (capacité ``email.send``) avec le
   condensé de ce qui partirait. Le journal ne garde que l'identifiant du
@@ -25,6 +30,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from dataclasses import replace
 from typing import Annotated, Any, Literal
@@ -42,6 +48,7 @@ from mika.plugins.email import (
     BUNDLE,
     EMAIL,
     IMPORTANT,
+    POLL_ASKED,
     READ,
     REPLIED,
     SHARED,
@@ -62,7 +69,7 @@ from mika.plugins.email import (
 from mika.plugins.email.boxes import Boxes
 from mika.plugins.email.voice import voice_text
 from mika.ports.drafts import to_fill
-from mika.ports.mail import Draft, MailQuery, addresses, reply_recipients, reply_subject
+from mika.ports.mail import ASIDE, Draft, MailQuery, addresses, reply_recipients, reply_subject
 from mika.ports.preprocess import cite, inert
 from mika.vocab import flows
 from mika.vocab.access import SHARE_PREPARE, SHARE_READ, SHARE_USE
@@ -84,6 +91,11 @@ TIDY_HOW = {"read": "lu", "archive": "archivé", "move": "déplacé", "trash": "
 DONE, ALREADY, REFUSED = "done", "already", "refused"
 #: une page plus loin que la dernière : ``Page.bounds`` la ramène à la dernière (le mail le plus ancien relevé)
 LAST_PAGE = 10**9
+#: au plus, ce qu'un relevé à la demande ramène d'un dossier (ADR 0247), et ce qu'il en montre
+FETCH_MAX = 30
+FETCH_SHOWN = 10
+#: au plus, ce qu'une recherche ramène du serveur par boîte (ADR 0249)
+SEARCH_WANT_MAX = 30
 
 
 def voice_word(voice: str) -> str:
@@ -135,19 +147,44 @@ def _unread(ctx: Any, query: MailQuery) -> MailQuery:
     return replace(query, seen=False, exclude=read)
 
 
-def _covered(ctx: Any, port: Any, account: str, folder: str) -> str:
-    """Jusqu'où remonte ce qu'elle a relevé (le mail le plus ancien du cache, par boîte) : au-delà, elle ne trouve
-    rien, et ce n'est pas que rien n'existe."""
-    boxes = [a.key for a in port.accounts() if not account or a.key == account]
-    since = []
-    for key in boxes:
-        oldest = port.messages_page(MailQuery(account=key, folder=folder), LAST_PAGE, 1).items
+def all_here(port: Any, info: Any, folder: str = "") -> bool:
+    """Tout le courrier de cette boîte (ou de ce dossier) est gardé ici : elle garde tout en local, et chaque dossier
+    sauf ``ASIDE`` (ou celui-ci) est allé jusqu'au bout de son historique. Les indésirables et la corbeille ne le sont
+    jamais : nommés, ils se cherchent sur le serveur (ADR 0249)."""
+    if not info.keep_all:
+        return False
+    folders = port.folders(info.key)
+    if folder:
+        return any(f.name == folder and f.complete and f.role not in ASIDE for f in folders)
+    return all(f.complete for f in folders if f.role not in ASIDE)
+
+
+def _covered(ctx: Any, port: Any, account: str, folder: str, *, asked: frozenset[str] = frozenset(),
+             beyond: str = "later") -> str:
+    """Jusqu'où remonte ce qui est gardé ici, boîte par boîte (le mail le plus ancien) : au-delà, elle ne trouve
+    rien ici, et ce n'est pas que rien n'existe ; une boîte dont tout est ici le dit. ``asked`` : les boîtes qu'une
+    recherche vient de demander au serveur (rien ne s'y cache) ; ``beyond`` : ce qu'elle peut faire au-delà
+    (``email.tools.covered.beyond``)."""
+    boxes = [a for a in port.accounts() if (not account or a.key == account) and a.key not in asked]
+    several = len(port.accounts()) > 1
+    since, full, loading = [], [], True
+    for info in boxes:
+        if all_here(port, info, folder):
+            full.append(info.key)
+            continue
+        oldest = port.messages_page(MailQuery(account=info.key, folder=folder), LAST_PAGE, 1).items
         if oldest:
             at = when(ctx.frame, oldest[0].date)
-            since.append(phrase("email.tools.covered.box", when=at, account=key) if len(boxes) > 1 else at)
-    if not since:
-        return ""
-    return phrase("email.tools.covered.line", since=", ".join(since), who=keepers(ctx.frame))
+            since.append(phrase("email.tools.covered.box", when=at, account=info.key) if several else at)
+            loading = loading and info.keep_all
+    out = []
+    if since:
+        then = "loading" if loading and beyond == "later" else beyond
+        out.append(phrase("email.tools.covered.line", since=", ".join(since), beyond=phrase(f"email.tools.covered.beyond.{then}")))
+    if full:
+        out.append(phrase("email.tools.covered.all", where=", ".join(full)) if several else
+                   phrase("email.tools.covered.all_one"))
+    return "\n".join(out)
 
 
 def _page(ctx: Any, port: Any, query: MailQuery, number: int, size: int) -> tuple[list[str], str, bool] | None:
@@ -178,6 +215,11 @@ class ListArgs(BaseModel):
     account: str = Field(default="", max_length=40, description=phrase("email.tools.list.account"))
     folder: str = Field(default="", max_length=200, description=phrase("email.tools.list.folder"))
     unread_only: bool = Field(default=False, description=phrase("email.tools.list.unread_only"))
+
+
+class FetchArgs(BaseModel):
+    account: str = Field(default="", max_length=40, description=phrase("email.tools.list.account"))
+    folder: str = Field(default="", max_length=200, description=phrase("email.tools.fetch.folder"))
 
 
 class SearchArgs(BaseModel):
@@ -216,6 +258,7 @@ class TidyArgs(BaseModel):
     action: Literal["read", "unread", "flag", "unflag", "archive", "move", "trash"] = Field(
         description=phrase("email.tools.tidy.action"))
     folder: str = Field(default="", max_length=300, description=phrase("email.tools.tidy.folder"))
+    create: bool = Field(default=False, description=phrase("email.tools.tidy.create"))
 
 
 @EMAIL.tool("email_accounts", description=phrase("email.tools.accounts.description"), label=phrase("email.tools.accounts.label"), args=NoArgs, bundle=BUNDLE, episodes=EPISODES, owner_only=True, owned=owns_a_box)
@@ -265,6 +308,66 @@ async def email_list(args: ListArgs, ctx: Any) -> Any:
     return "\n".join(t for t in (phrase("email.tools.data"), *lines, where, covered) if t)
 
 
+@EMAIL.tool("email_fetch", description=phrase("email.tools.fetch.description"),
+            label=phrase("email.tools.fetch.label"), args=FetchArgs,
+            bundle=BUNDLE, episodes=EPISODES, owner_only=True, owned=owns_a_box, max_calls_per_episode=3)
+async def email_fetch(args: FetchArgs, ctx: Any) -> Any:
+    """Ce qui vient d'arriver, sans attendre la relève (ADR 0247) : les dossiers relevés de ses boîtes ici, ou le
+    dossier qu'elle nomme. Ce qui arrive dans un dossier relevé, son tri le lit aussitôt (la relève demandée)."""
+    port, refused = _port(ctx)
+    if refused is not None:
+        return refused
+    boxes = [a for a in port.accounts() if not args.account or a.key == args.account]
+    if args.account and not boxes:
+        return ToolResult(ok=False, content=phrase("email.tools.draft.unknown_box"))
+    ready = [a for a in boxes if a.ready]
+    if not ready:
+        return ToolResult(ok=False, content=phrase("email.tools.fetch.not_ready"))
+    several = len(port.accounts()) > 1
+    said: list[str] = []
+    arrived: list[tuple[str, str, int]] = []  # (boîte, dossier, combien)
+    polled = reached = False
+    for info in ready:
+        folders = port.folders(info.key)
+        if args.folder:
+            target = _folder_named(folders, args.folder.strip())
+            if target is None:
+                said.append(phrase("email.tools.fetch.unknown_folder", folder=inert(args.folder, 80), account=info.key))
+                said.append(_folders_line(info.key, folders))
+                continue
+            names = [target.name]
+        else:
+            names = list(info.folders)
+        for name in names:
+            label = next((f.label for f in folders if f.name == name), name)
+            where = phrase("email.tools.fetch.where", account=info.key, folder=inert(label, 60)) if several \
+                else inert(label, 60)
+            try:
+                n = await port.sync_folder(info.key, name, FETCH_MAX)
+            except (OSError, RuntimeError, ValueError) as exc:  # une erreur IMAP est une OSError ou une ImapError
+                said.append(phrase("email.tools.fetch.refused", where=where, why=inert(str(exc), 200) or
+                                   type(exc).__name__))
+                continue
+            reached = True
+            said.append(phrase("email.tools.fetch.new", where=where, count=n) if n else
+                        phrase("email.tools.fetch.nothing", where=where))
+            if n:
+                arrived.append((info.key, name, n))
+                polled = polled or name in info.folders
+    if polled:
+        # son tri lira ce qui vient d'arriver là où elle remarque : la relève, tout de suite (``by`` vide : elle)
+        await ctx.emit(POLL_ASKED.draft(by=""))
+    lines = []
+    for account, name, n in arrived:
+        got = port.messages_page(MailQuery(account=account, folder=name), 1, min(n, FETCH_SHOWN)).items
+        lines += [_line(ctx, m, phrase("email.tools.list.box", account=m.account, folder=inert(m.folder, 60))
+                        if several else "") for m in got]
+    head = [phrase("email.tools.data"), phrase("email.tools.fetch.newest")] if lines else []
+    tail = [phrase("email.tools.fetch.triage")] if polled else []
+    # refusé quand aucun dossier n'a pu être relu (une boîte, un dossier inconnus, un serveur qui refuse)
+    return ToolResult(ok=reached, content="\n".join((*said, *head, *lines, *tail)))
+
+
 def _line(ctx: Any, m: Any, box: str = "") -> str:
     """Un mail dans une liste : sa référence, sa date, lu ou non, sa boîte, l'expéditeur et l'objet (cités), puis ce
     que son tri en a jugé et ce qu'il porte."""
@@ -303,14 +406,41 @@ async def email_search(args: SearchArgs, ctx: Any) -> Any:
     if len(args.query.strip()) < 2 and len(args.sender.strip()) < 2:
         return ToolResult(ok=False, content=phrase("email.tools.search.what"))
     query = MailQuery(account=args.account, folder=args.folder, text=args.query, sender=args.sender)
+    # ce qui n'est pas ici, le serveur l'a : les plus récents qui manquent, jusqu'à cette page (ADR 0249) ; une boîte
+    # qui garde tout en local n'a rien à lui demander, une recherche des non-lus non plus (ils viennent d'arriver)
+    asked: set[str] = set()
+    failed: list[str] = []
+    skipped: list[str] = []
+    left = 0
+    if not args.unread_only:
+        want = min(SEARCH_WANT_MAX, args.page * args.limit)
+        for info in port.accounts():
+            if (args.account and info.key != args.account) or not info.ready or all_here(port, info, args.folder):
+                continue
+            try:
+                found = await port.search_server(replace(query, account=info.key), want)
+            except (OSError, RuntimeError, ValueError) as exc:  # une erreur IMAP est une OSError ou une ImapError
+                failed.append(phrase("email.tools.search.server_failed", account=info.key,
+                                     why=inert(str(exc), 200) or type(exc).__name__))
+                continue
+            asked.add(info.key)
+            left += found.left
+            skipped += [phrase("email.tools.fetch.where", account=info.key, folder=inert(name, 60))
+                        if len(port.accounts()) > 1 else inert(name, 60) for name in found.skipped]
+    server = "" if not asked else phrase("email.tools.search.server_left", left=left, next=args.page + 1) if left \
+        else phrase("email.tools.search.server")
+    if skipped:  # « cherché sur le serveur » ne vaut pas pour ces dossiers-là
+        failed.append(phrase("email.tools.search.server_skipped", folders=", ".join(skipped[:8]) +
+                             ("…" if len(skipped) > 8 else "")))
     page = _page(ctx, port, _unread(ctx, query) if args.unread_only else query, args.page, args.limit)
     if page is None:
-        return phrase("email.tools.page.past")
+        return "\n".join(t for t in (phrase("email.tools.page.past"), server, *failed) if t)
     lines, where, _ = page
-    covered = _covered(ctx, port, args.account, args.folder)
+    covered = _covered(ctx, port, args.account, args.folder, asked=frozenset(asked),
+                       beyond="unread" if args.unread_only else "unasked")
     if not lines:
-        return "\n".join(t for t in (phrase("email.tools.search.nothing"), covered) if t)
-    return "\n".join(t for t in (phrase("email.tools.data"), *lines, where, covered) if t)
+        return "\n".join(t for t in (phrase("email.tools.search.nothing"), server, *failed, covered) if t)
+    return "\n".join(t for t in (phrase("email.tools.data"), *lines, where, server, *failed, covered) if t)
 
 
 @EMAIL.tool("email_contacts", description=phrase("email.tools.contacts.description"),
@@ -480,14 +610,23 @@ def _may_tidy(frame: Frame) -> bool:
                         tasks=lambda target: (task_of(target) or ("", ""))[0] == EMAIL.name)
 
 
+def _path(name: str) -> tuple[str, ...]:
+    """Le chemin d'un dossier, quel que soit le séparateur du serveur (« / » ou « . ») : sans casse ni blancs."""
+    return tuple(p.strip().casefold() for p in re.split(r"[./]", name) if p.strip())
+
+
 def _folder_named(folders: list[Any], wanted: str) -> Any:
     """Le dossier demandé : par son nom sur le serveur, sinon par son nom ou son libellé (« Archives ») sans tenir
-    compte de la casse ; ``None`` s'il n'existe pas dans cette boîte."""
+    compte de la casse, sinon par son chemin (« Factures/EDF » pour « INBOX.Factures.EDF ») ; ``None`` s'il n'existe
+    pas dans cette boîte."""
     exact = next((f for f in folders if f.name == wanted), None)
     if exact is not None:
         return exact
     folded = wanted.casefold()
-    return next((f for f in folders if folded in (f.name.casefold(), f.label.casefold())), None)
+    found = next((f for f in folders if folded in (f.name.casefold(), f.label.casefold())), None)
+    if found is not None or not _path(wanted):
+        return found
+    return next((f for f in folders if _path(wanted) in (_path(f.name), _path(f.label))), None)
 
 
 def _folders_line(account: str, folders: list[Any]) -> str:
@@ -545,15 +684,32 @@ async def email_tidy(args: TidyArgs, ctx: Any) -> Any:
     outcome: dict[str, tuple[str, str]] = {}  # réf → (ce qui en est dit, ce que ça a donné)
     targets: dict[str, str] = {}
     lost: set[str] = set()  # les boîtes où le dossier demandé n'existe pas
+    made: list[str] = []  # ce qu'elle a créé, ou pas pu créer (ADR 0248)
+    created = False
+    named: dict[str, str] = {}  # par boîte, le dossier tel que le serveur l'a nommé (« INBOX.Factures.EDF »)
     todo: list[Any] = []
     already = family("email.tools.tidy.already")
     for m in mails.values():
         if m.account not in boxes:
             boxes[m.account] = port.folders(m.account)
+            if action == "move" and args.create and _folder_named(boxes[m.account], wanted) is None:
+                # le dossier qu'elle a dit de créer, une fois par boîte ; un refus vaut pour chacun de ses mails
+                try:
+                    name = await port.create_folder(m.account, wanted)
+                except (OSError, RuntimeError, ValueError) as exc:  # une erreur IMAP est une OSError ou une ImapError
+                    made.append(phrase("email.tools.tidy.not_created", folder=inert(wanted, 80), account=m.account,
+                                       why=inert(str(exc), 200) or type(exc).__name__))
+                else:
+                    existed = any(f.name == name for f in boxes[m.account])
+                    boxes[m.account] = port.folders(m.account)
+                    named[m.account] = name
+                    if not existed:
+                        created = True
+                        made.append(phrase("email.tools.tidy.created", folder=inert(name, 80), account=m.account))
         folders = boxes[m.account]
         role = next((f.role for f in folders if f.name == m.folder), "")
         if action == "move":
-            target = _folder_named(folders, wanted)
+            target = _folder_named(folders, named.get(m.account, wanted))
             if target is None:
                 lost.add(m.account)
                 outcome[m.ref] = (phrase("email.tools.tidy.unknown_folder", folder=inert(wanted, 80)), REFUSED)
@@ -601,11 +757,13 @@ async def email_tidy(args: TidyArgs, ctx: Any) -> Any:
     if quiet:
         await ctx.emit(*quiet)
     lines += missing
+    lines += made
     lines += [_folders_line(account, boxes[account]) for account in sorted(lost)]
     results = [result for _, result in outcome.values()]
     # ranger prouve qu'une exécution a produit, quand un mail a changé (ADR 0104)
+    # ranger, ou créer le dossier où ranger, prouve qu'une exécution a produit (ADR 0104)
     return ToolResult(ok=any(r != REFUSED for r in results), content="\n".join((phrase("email.tools.data"), *lines)),
-                      proof=DONE in results)
+                      proof=DONE in results or created)
 
 
 # ── Ce qui part ───────────────────────────────────────────────────────────

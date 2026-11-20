@@ -269,6 +269,37 @@ a.now-tag:hover { color: var(--accent); text-decoration: none; }
 .person-number { color: var(--muted); }
 .person-number a { color: var(--muted); }
 .person-chat .pager { margin-top: 18px; }
+/* Une de ses réponses rendue comme dans le chat (ADR 0241) : du Markdown assaini (inspector/document.py), complet en
+   mode pro — plus large, ses tableaux défilent dans la bulle —, gras et code ailleurs. Un long message montre son début
+   rendu, puis tout une fois « lire la suite » ouvert. */
+.person-thread li.wide { max-width: min(92%, 920px); }
+.person-md { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.person-md p, .person-md .person-long p { margin: 0 0 .6em; white-space: normal; }
+.person-md ul, .person-md ol { margin: 0 0 .6em; padding-left: 1.3em; }
+.person-md ul { list-style: disc; }
+.person-md ol { list-style: decimal; }
+/* ses listes ne sont pas des bulles : ``.person-thread li`` (une grille étroite) ne les touche pas */
+.person-thread .person-md li { display: list-item; max-width: none; }
+.person-md li + li { margin-top: 2px; }
+.person-md h3 { margin: .9em 0 .4em; color: var(--text); font: 600 14px/1.35 var(--display); }
+.person-md blockquote { margin: 0 0 .6em; padding: 0 0 0 10px; border-left: 3px solid var(--border-strong); color: var(--text-2); }
+.person-md hr { margin: .8em 0; border: 0; border-top: 1px solid var(--border); }
+.person-md code { padding: 1px 4px; border-radius: var(--radius-xs); background: var(--sunken); }
+.person-md pre { margin: 0 0 .6em; padding: 8px 10px; overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface); white-space: pre; overflow-wrap: normal; }
+.person-md pre code { padding: 0; background: none; }
+.person-md .document-table { margin: 0 0 .6em; overflow-x: auto; font-size: 13px; }
+.person-md .document-grid { gap: 4px 16px; }
+.person-md .document-grid .document-cell { overflow-wrap: normal; }
+.person-md .document-grid .document-head { padding-bottom: 2px; border-bottom: 1px solid var(--border); }
+.person-md > :last-child, .person-md .person-short > :last-child, .person-md .person-long > :last-child,
+.person-md :is(li, blockquote) > :last-child { margin-bottom: 0; }
+.person-md:has(> .person-long[open]) > .person-short { display: none; }
+.person-md .person-long > summary { margin-top: 4px; }
+/* ses conversations à côté (le fil avec elle, ses fils de travail) : leur nom tient sur deux lignes au plus */
+.person-threads .hm-sidenav a span:first-child { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; overflow-wrap: anywhere; }
+.person-chat-head { margin-bottom: 4px; }
 
 /* Un tableau sobre (l'exploitation) : des colonnes, une ligne par élément. */
 .hm-table-wrap { margin: 0 -4px; padding: 0 4px; overflow-x: auto; }

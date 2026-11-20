@@ -65,8 +65,9 @@ PLUGINS: dict[str, tuple[str, tuple[str, ...], tuple[str, str] | None]] = {
                 ("Ses sens › Appareils", "sens/appareils")),
     "location": ("D'où viennent les tuiles de la carte de sa position", ("carte",),
                  ("Ses sens › Localisation", "sens/positions")),
-    "trips": ("Où chercher un lieu et une adresse, qui calcule les itinéraires (l'écran Carte de frontendv2)",
-              ("lieux", "itineraires"), None),
+    "trips": ("Où chercher un lieu et une adresse, qui calcule les itinéraires, d'où viennent les données "
+              "touristiques et les événements (l'écran Carte de frontendv2)",
+              ("lieux", "itineraires", "tourisme", "rechauffage"), None),
     "wakeup": ("Ce que chaque réveil lui fait faire, quand, à qui elle en rend compte ; ses clés sur sa fiche",
                ("reveils",), ("Réveils par API", "reveils")),
     "forge": ("Le comportement du moteur qui exécute ses apps ; les réglages d'une app restent sur sa fiche", (),

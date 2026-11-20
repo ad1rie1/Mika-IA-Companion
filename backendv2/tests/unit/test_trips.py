@@ -44,6 +44,7 @@ from mika.ports.maps import (
     AVOIDS,
     MODES,
     ROUTE_POINTS_MAX,
+    PlaceHit,
     RouteLeg,
     RouteResult,
     decode_polyline6,
@@ -104,6 +105,19 @@ def state(kernel):
 
 
 # ── ce que l'écran Carte fait d'un voyage : les actions ──
+
+
+def test_a_look_keeps_what_was_known_of_a_place_but_not_whether_it_was_open():
+    """Ce qu'un regard garde d'un lieu (``Looked.found``, ADR 0244) : son objet d'OpenStreetMap, sa cuisine, ses
+    filtres — jamais s'il était ouvert, qui ne valait qu'à l'instant où elle a regardé."""
+    hit = PlaceHit("l7", "Pizzeria Il Gabbiano", "restaurant", "Restaurant", "manger", 50.6345, 3.059, "Lille",
+                   distance_m=300, osm="n11", open_state="open", open_text="Ouvert · ferme à 23:00",
+                   cuisine="Italienne, pizza" + "!" * 100, tags=("terrasse",))
+    item = trips_tools.hit_item(hit)
+    assert item["osm"] == "n11" and item["tags"] == ["terrasse"] and len(item["cuisine"]) == c.KIND_MAX
+    assert "open_state" not in item and "open_text" not in item and "rating" not in item
+    bare = trips_tools.hit_item(PlaceHit("l1", "Annecy", "town", "Ville", "villes", 45.9, 6.13))
+    assert set(bare) == {"id", "name", "kind", "kind_fr", "category", "lat", "lon", "town", "distance_m", "along_m"}
 
 
 def test_a_trip_is_hers_and_its_stops_are_ranged_by_day(tmp_path):

@@ -34,11 +34,11 @@ npm run preview    # le résultat de build, sur le même port
 |---|---|
 | `/ext/fonts/…` | `backendv2/src/mika/inspector/static/fonts/` (Inter, Inter Display) |
 | `/ext/avatar/…` | `frontend/Android/app/src/main/assets/avatar/` (ses portraits et `manifest.json`, sous licence, non versionnés) |
-| `/ext/models/…` | `frontend/Web/public/models/` (`default.vrm`, ~100 Mo, sous licence, non versionnée) |
+| `/ext/models/…` | `frontend/Web/public/models/` (`default.vrm`, la sienne, non versionnée ; sinon `mika-libre.vrm`, le modèle libre du dépôt, ADR 0252) |
 
 `vite build` ne les embarque pas : un déploiement sert ces trois chemins à côté de `dist/`, ou donne
 `VITE_MIKA_VRM_URL` (la VRM) et `VITE_MIKA_AVATAR_URL` (le dossier des portraits). Sans police, la page prend celle
-du système ; sans portraits, ses ronds restent à leur couleur ; sans VRM, son portrait reste.
+du système ; sans portraits, ses ronds restent à leur couleur ; sans aucune des deux VRM, son portrait reste.
 
 La carte ne joint que ce serveur : ses tuiles, ses polices et ses icônes sont des chemins de l'API, posés sur son
 adresse absolue (MapLibre lit ses tuiles dans un travailleur né d'une adresse `blob:`, où un chemin seul ne se résout
@@ -106,10 +106,11 @@ Mika n'a qu'un élément (`#mika-corner`) : son visage dans la pastille du haut,
 - **Mail** : ses boîtes et celles qu'on lui partage (à leur niveau : lire, préparer, s'en servir ; une boîte partagée
   dit son non-lu à côté de son niveau, et celle qu'on ne fait que lire reste hors de Toutes les réceptions et de la
   pastille, ADR 0200), dossiers et non-lus, « Réponse attendue » (ce qu'elle juge appeler une réponse), la liste
-  (recherche, filtres, dont « Où Mika est passée »), la liseuse (ce qu'elle en sait, HTML isolé dans son cadre, images
-  distantes, pièces ; elle se ferme quand la vue ne montre plus ce qu'elle lit), lu à l'ouverture selon
-  `read_on_open`, répondre, transférer, ranger (archiver, suivre, déplacer dans un dossier, corbeille, un mail ou la
-  sélection), écrire avec les destinataires proposés, une copie cachée et des fichiers joints (nouveau message, réponse,
+  (recherche, filtres, dont « Où Mika est passée » ; sur chaque ligne, ce que son tri en a fait : « lu par son tri »,
+  « en attente de son tri », « tri deviné », champ `triage`, ADR 0240), la liseuse (ce qu'elle en sait, HTML isolé dans
+  son cadre, images distantes, pièces ; elle se ferme quand la vue ne montre plus ce qu'elle lit), lu à l'ouverture
+  selon `read_on_open`, répondre, transférer, ranger (archiver, suivre, déplacer dans un dossier, corbeille, un mail ou
+  la sélection ; Suppr met à la corbeille la sélection, sinon le mail ouvert), écrire avec les destinataires proposés, une copie cachée et des fichiers joints (nouveau message, réponse,
   transfert ; 25 Mo par pièce, ADR 0214), « Préremplir avec Mika », ses brouillons (exactement ce qui
   partira : envoyer, retoucher, refuser, reprendre), les contacts. Sa pastille ne compte que ses brouillons qui
   attendent ta décision.
@@ -183,8 +184,9 @@ Mika n'a qu'un élément (`#mika-corner`) : son visage dans la pastille du haut,
   leur but : la ligne de son catalogue, écrite pour Mika), les siens et ceux qu'on lui partage (leur état et leur but,
   même sans case ouverte). Le pourquoi d'une case d'app redit la ligne de son app ou de son projet (ADR 0219). Ses accords se décident dans le chat : le chapeau le dit, et l'onglet « Accords » attend une route qui rende ses cartes.
 - **Paramètres** : son compte (nom, mot de passe ; « Lui demander » ouvre le chat, « Qu'est-ce que tu sais de moi ? »
-  posé dans le champ), ses boîtes (ajouter, régler, tester, connecter à Microsoft, retirer), ses comptes Teams (les
-  régler, la clé de leur extension, montrée une fois, les retirer), et pour chacun comment part ce que Mika y prépare
+  posé dans le champ), ses boîtes (ajouter, régler — dont ses consignes de tri : où ranger, de quoi te prévenir,
+  ADR 0243 ; « Tout garder en local », ADR 0249 —, tester, connecter à Microsoft, retirer), ses comptes Teams (les
+  régler, la clé de leur extension, montrée une fois, l'extension même à télécharger — ADR 0246 —, les retirer), et pour chacun comment part ce que Mika y prépare
   (ADR 0207 : préparer d'elle-même et comment ça part, ligne par ligne et par défaut ; qui écrit et l'ordre des lignes
   restent à la console), ses téléphones (révoquer, télécharger l'application), ses partages, ses services MCP
   (brancher un service distant, régler chacun de ses outils — coupé, il lit, il agit —, le retirer ; ses en-têtes

@@ -1,7 +1,8 @@
 """Piloter un projet de vive voix.
 
 En conversation, ``project_steer`` : un objectif de plus, une consigne, s'y mettre maintenant, la pause, la reprise —
-jamais son cadre —, et la réponse à son plan (le lancer, ou le lui faire reprendre — ADR 0145). Il n'est offert qu'à
+jamais son cadre —, et la réponse à son plan (le lancer, ou le lui faire reprendre — ADR 0145 ; lancé par le
+propriétaire du projet, ce que le plan demandait à lire se pose avec lui — ADR 0257). Il n'est offert qu'à
 qui une ligne d'accès laisse changer un projet vivant (``access.steering``, ``fits``) : en modification, le geste
 s'écrit aussitôt, au nom de la personne ; sur l'accord du propriétaire, la demande est gardée
 (``projects.steer_asked``, son texte effaçable) et proposée dans la console (la capacité ``projects.steer``, son
@@ -23,10 +24,12 @@ from pydantic import BaseModel, Field
 from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
+from mika.faculties.projects import links
 from mika.faculties.projects.access import steering
 from mika.faculties.projects.faculty import (
     AMENDED,
     APPROVE,
+    LINKS_SET,
     NUDGED,
     OBJECTIVE_ADDED,
     OBJECTIVES_KEPT,
@@ -51,7 +54,16 @@ from mika.faculties.projects.faculty import (
     written,
 )
 from mika.faculties.projects.rhythm import pick
-from mika.faculties.projects.tools import attributed, caretaker, contents_of, speaker, still_open, their_words
+from mika.faculties.projects.tools import (
+    attributed,
+    caretaker,
+    contents_of,
+    named_projects,
+    refused_lines,
+    speaker,
+    still_open,
+    their_words,
+)
 from mika.kernel.clock import HOUR
 from mika.kernel.codec import canonical_json
 from mika.kernel.events import Content, Draft
@@ -132,10 +144,11 @@ def _in_state(project: int, wanted: tuple[str, ...]) -> Guard:
     return Guard("projet inchangé", predicate=lambda view, k=project: view.get(c.STATUS(k)) in wanted)
 
 
-async def _steered(ctx: Any, draft: Draft[Any], guard: Guard) -> Any:
-    """Écrire un geste sous sa garde ; ``None`` quand c'est elle qui a cédé (le projet a changé entre-temps)."""
+async def _steered(ctx: Any, draft: Draft[Any], guard: Guard, *more: Draft[Any]) -> Any:
+    """Écrire un geste sous sa garde (et ce qui s'écrit avec lui, ``more``) ; ``None`` quand c'est elle qui a cédé (le
+    projet a changé entre-temps)."""
     try:
-        return await ctx.emit(draft, guard=guard)
+        return await ctx.emit(draft, *more, guard=guard)
     except Superseded:
         if guard.predicate is not None and guard.predicate(ctx.mind.frame().view):
             raise  # c'est la garde de la conversation qui a cédé
@@ -226,7 +239,9 @@ async def project_steer(args: SteerArgs, ctx: Any) -> Any:
 
 async def _answer_plan(args: SteerArgs, ctx: Any, p: Project, person: str, title: str) -> Any:
     """Sa réponse à un plan (ADR 0145) — seulement qui l'a demandé, ou qui s'occupe d'elle : le lancer (un plan qui
-    attend), ou le lui faire reprendre (ses mots, tels quels, deviennent une consigne de la séance qui le reprend)."""
+    attend), ou le lui faire reprendre (ses mots, tels quels, deviennent une consigne de la séance qui le reprend).
+    Lancé par le propriétaire du projet, ce que le plan demandait à lire se pose avec lui (ADR 0257) ; par quelqu'un
+    d'autre, le lien ne se pose pas, et la réponse le dit."""
     frame: Frame = ctx.frame
     if person != p.asked_by and not frame.get(identity_c.IS_OWNER(person)):
         return ToolResult(ok=False, content=phrase("projects.tools.steer.plan_not_theirs", title=title))
@@ -239,11 +254,26 @@ async def _answer_plan(args: SteerArgs, ctx: Any, p: Project, person: str, title
         return ToolResult(ok=False, content=phrase("projects.tools.steer.no_instruction"))
     draft = PLAN_ANSWERED.draft(project=p.id, verdict=args.what, words=Content.of(said, level=p.sensitivity)
                                 if said else None, by=person, owner=p.owner, about=p.about)
-    if await _steered(ctx, draft, _in_state(p.id, (c.ACTIVE,))) is None:
+    s: ProjectsState = frame.state("projects")
+    linking = links.approved(s, p, person, links.world_of(frame)) if args.what == APPROVE else links.Approved()
+    link = (LINKS_SET.draft(project=p.id, reads=linking.reads, by=person),) if linking.added else ()
+    if await _steered(ctx, draft, _in_state(p.id, (c.ACTIVE,)), *link) is None:
         return _changed()
     if args.what == APPROVE:
-        return phrase("projects.tools.steer.plan_approve", title=title)
+        return phrase("projects.tools.steer.plan_approve", title=title) + _linked_words(ctx, s, linking)
     return phrase("projects.tools.steer.plan_revise", title=title)
+
+
+def _linked_words(ctx: Any, s: ProjectsState, linking: links.Approved) -> str:
+    """Ce que sont devenus, à la validation, les projets que son plan demandait à lire (ADR 0257) : liés ; pas liés,
+    parce que qui valide n'est pas le propriétaire du projet ; ou refusés, chacun avec sa raison."""
+    if linking.denied:
+        return phrase("projects.tools.steer.plan_not_linked")
+    said = phrase("projects.tools.steer.plan_linked", projects=named_projects(ctx, s, linking.added)) \
+        if linking.added else ""
+    if linking.refused:
+        said += phrase("projects.tools.steer.plan_link_refused", refused=refused_lines(linking.refused))
+    return said
 
 
 async def _steer_now(args: SteerArgs, ctx: Any, s: ProjectsState, p: Project, person: str, title: str) -> Any:

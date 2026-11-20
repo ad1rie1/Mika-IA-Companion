@@ -1,0 +1,711 @@
+{
+ "objects": [
+  {
+   "hasMainRepresentation": [
+    {
+     "hasAnnotation": [
+      {
+       "credits": [
+        "© Patrick Messina"
+       ],
+       "isCoveredBy": "By-NC-ND 4.0",
+       "title": {
+        "@fr": "RESORT BARRIÈRE LILLE"
+       },
+       "rightsEndDate": "2032-06-03"
+      }
+     ],
+     "hasRelatedResource": [
+      {
+       "hasMimeType": [
+        {
+         "label": {
+          "@fr": "image/jpeg"
+         }
+        }
+       ],
+       "locator": [
+        "https://aisne.media.tourinsoft.eu/upload/resort-barriere-lille--2--3.jpg"
+       ]
+      }
+     ]
+    }
+   ],
+   "hasBeenCreatedBy": {
+    "legalName": "Hauts-de-France Tourisme",
+    "identifier": "d078e000-5ccd-4efd-8ad5-ab188b8e57f7"
+   },
+   "isLocatedAt": [
+    {
+     "geo": {
+      "latitude": 50.6365865,
+      "longitude": 3.077169
+     },
+     "address": [
+      {
+       "hasAddressCity": {
+        "insee": "59350",
+        "label": {
+         "@fr": "Lille"
+        }
+       },
+       "streetAddress": [
+        "777 Bis Pont des Flandres"
+       ],
+       "postalCode": "59777",
+       "addressLocality": "Lille"
+      }
+     ]
+    }
+   ],
+   "lastUpdate": "2019-04-26",
+   "hasDescription": [
+    {
+     "description": {
+      "@fr": "Au cœur de la ville de Lille, dans le quartier moderne d'Euralille, l'Hôtel Barrière Lille jouit d'un emplacement idéal, à proximité immédiate du centre historique et des moyens de transport. Imaginées par le décorateur Pierre-Yves Rochon, les 125 chambres et 17 suites vous offrent les équipements modernes et indispensables à votre confort dans un cadre contemporain et élégant.\n\nSauna, hammam et douches aux vertus apaisantes, consacrés à la relaxation, au sport et à la beauté, l'espace bien-être de l'Hôtel Barrière Lille vous réserve d'exquis moments de quiétude.\n\nProfitez d'une pause tout en prolongeant ce moment d’évasion au sein de l'un de nos bars et restaurants :\n    - L'Escal'777, le bar de l'hôtel. Faites une pause dans un espace au design élégant avec vue sur le parc des Dondaines.\n    - Les Hauts de Lille, le restaurant gastronomique, vous accueille dans une ambiance contemporaine éclairée par de larges baies vitrées. La brigade du restaurant imagine une cuisine audacieuse et élaborée au fil des saisons. \n    - Le Café des Sports, installé dans la salle des machines à sous avec un accès direct à l'hôtel. Ce bar propose une centaine de consommations différentes ainsi que toute une gamme de snacks, pour les petites faims. \n    - La Terrasse du Parc, la brasserie avec une cuisine moderne à base de produits régionaux et de saison qui multiplie les saveurs et les espaces pour mieux vous séduire, tous les jours, midi et soir. Le dimanche, le brunch musical vous plongera dans une ambiance gourmande et mélodieuse.\n    - Le Bar Lounge, au cœur de la salle de jeux. Offrez-vous une halte conviviale entre deux parties de Blackjack ou de roulette anglaise dans un élégant cadre contemporain.\n\nHôtel certifié ISO20121."
+     },
+     "shortDescription": {
+      "@fr": "Au cœur de la ville de Lille, dans le quartier moderne d'Euralille, l'Hôtel Barrière Lille jouit d'un emplacement idéal, à proximité immédiate du centre historique et des moyens de transport. Imaginées par le décorateur Pierre-Yves Rochon, les 125 chambres et 17 suites vous offrent les équipements modernes et indispensables à votre confort dans un cadre contemporain et élégant.\n\nSauna, hammam et douches aux vertus apaisantes, consacrés à la relaxation, au sport et à la beauté, l'espace bien-être de l'Hôtel Barrière Lille vous réserve d'exquis moments de quiétude.\n\nProfitez d'une pause tout en prolongeant ce moment d’évasion au sein de l'un de nos bars et restaurants :\n    - L'Escal'777, le bar de l'hôtel. Faites une pause dans un espace au design élégant avec vue sur le parc des Dondaines.\n    - Les Hauts de Lille, le restaurant gastronomique, vous accueille dans une ambiance contemporaine éclairée par de larges baies vitrées. La brigade du restaurant imagine une cuisine audacieuse et élaborée au fil des saisons. \n    - Le Café des Sports, installé dans la salle des machines à sous avec un accès direct à l'hôtel. Ce bar propose une centaine de consommations différentes ainsi que toute une gamme de snacks, pour les petites faims. \n    - La Terrasse du Parc, la brasserie avec une cuisine moderne à base de produits régionaux et de saison qui multiplie les saveurs et les espaces pour mieux vous séduire, tous les jours, midi et soir. Le dimanche, le brunch musical vous plongera dans une ambiance gourmande et mélodieuse.\n    - Le Bar Lounge, au cœur de la salle de jeux. Offrez-vous une halte conviviale entre deux parties de Blackjack ou de roulette anglaise dans un élégant cadre contemporain.\n\nHôtel certifié ISO20121."
+     }
+    }
+   ],
+   "label": {
+    "@fr": "Resort Barrière Lille"
+   },
+   "type": [
+    "Hotel",
+    "Accommodation",
+    "Restaurant",
+    "PointOfInterest",
+    "FoodEstablishment",
+    "HotelTrade",
+    "LodgingBusiness",
+    "HotelRestaurant",
+    "PlaceOfInterest"
+   ],
+   "lastUpdateDatatourisme": "2026-11-14T05:12:14.354Z",
+   "hasContact": [
+    {
+     "givenName": [
+      "Jeanne"
+     ],
+     "familyName": [
+      "EXEMPLE"
+     ],
+     "telephone": [
+      "+33 3 28 14 45 00",
+      "+33 9 70 80 89 69"
+     ],
+     "title": [
+      "Madame"
+     ],
+     "homepage": [
+      "https://www.hotelsbarriere.com/fr/lille/hotel-barriere.html"
+     ]
+    }
+   ],
+   "uuid": "51c8f7a1-25e0-3a9f-82b0-136e8d7d05de",
+   "uri": "https://data.datatourisme.fr/28/90c2b7f7-4d1c-30df-a7a6-eb1165cc18df",
+   "hasReview": [
+    {
+     "hasReviewValue": {
+      "label": {
+       "@fr": "Accueil Vélo"
+      },
+      "isCompliantWith": [
+       "PlaceOfInterest"
+      ],
+      "key": "LabelRating_AccueilVelo"
+     },
+     "reviewExpirationDate": "2028-06-15"
+    },
+    {
+     "reviewDeliveryDate": "2016-05-18",
+     "hasReviewValue": {
+      "label": {
+       "@fr": "5 étoiles"
+      },
+      "isCompliantWith": [
+       "ClubOrHolidayVillage",
+       "HolidayCentre",
+       "Hotel",
+       "CampingAndCaravanning",
+       "SelfCateringAccommodation"
+      ],
+      "key": "ScaleRating_5etoiles"
+     }
+    }
+   ]
+  },
+  {
+   "hasMainRepresentation": [
+    {
+     "hasAnnotation": [
+      {
+       "credits": [
+        "Krevette"
+       ],
+       "isCoveredBy": "By-NC-ND 4.0",
+       "title": {
+        "@fr": "krevette"
+       },
+       "rightsEndDate": "2050-12-31"
+      }
+     ],
+     "hasRelatedResource": [
+      {
+       "hasMimeType": [
+        {
+         "label": {
+          "@fr": "image/jpeg"
+         }
+        }
+       ],
+       "locator": [
+        "https://hautsdefrance.media.tourinsoft.eu/upload/krevette.jpg"
+       ]
+      }
+     ]
+    }
+   ],
+   "hasBeenCreatedBy": {
+    "legalName": "Office de Tourisme Métropolitain de Lille 2",
+    "identifier": "503ee931-c406-4c06-9ac8-b281316385ce",
+    "telephone": [
+     "+33 3 59 57 94 00"
+    ],
+    "homepage": [
+     "https://www.lilletourism.com/"
+    ]
+   },
+   "isLocatedAt": [
+    {
+     "geo": {
+      "latitude": 50.624999,
+      "longitude": 3.067897
+     },
+     "address": [
+      {
+       "hasAddressCity": {
+        "insee": "59350",
+        "label": {
+         "@fr": "Lille"
+        }
+       },
+       "streetAddress": [
+        "66 Boulevard Jean-Baptiste Lebas"
+       ],
+       "postalCode": "59000",
+       "addressLocality": "Lille"
+      }
+     ]
+    }
+   ],
+   "lastUpdate": "2025-10-18",
+   "hasDescription": [
+    {
+     "description": {
+      "@fr": "Embarquez pour une expérience culinaire iodée chez Krevette, où Florent Ladeyn met à l’honneur les richesses du littoral des Hauts-de-France. Dans ce restaurant aux accents marins, le chef locavore propose une cuisine de caractère, inspirée par la mer du Nord et les saveurs du terroir flamand.\n\nAu fil de la carte, les produits de la mer se déclinent dans des associations originales et audacieuses : bulots fumés accompagnés de mayonnaise au raifort et d’herbes des dunes, maquereau en gravlax avec betterave rôtie et vinaigrette au cassis, ou encore moules grillées au feu de bois relevées d’un jus réduit à la livèche. Chaque assiette révèle une cuisine inventive, qui joue avec les textures, les saveurs et les produits de saison.\n\nFidèle à une démarche engagée, Krevette privilégie les produits ultra-frais, la pêche durable et les circuits courts. Ici, les influences maritimes rencontrent les traditions flamandes pour offrir une véritable découverte gastronomique.\n\nUne adresse singulière pour les amateurs de cuisine de la mer, en quête de fraîcheur, d'authenticité et de nouvelles sensations gustatives."
+     },
+     "shortDescription": {
+      "@fr": "Embarquez pour une expérience culinaire iodée chez Krevette, où Florent Ladeyn met à l’honneur les richesses du littoral des Hauts-de-France. Dans ce restaurant aux accents marins, le chef locavore propose une cuisine de caractère, inspirée par la mer du Nord et les saveurs du terroir flamand.\n\nAu fil de la carte, les produits de la mer se déclinent dans des associations originales et audacieuses : bulots fumés accompagnés de mayonnaise au raifort et d’herbes des dunes, maquereau en gravlax avec betterave rôtie et vinaigrette au cassis, ou encore moules grillées au feu de bois relevées d’un jus réduit à la livèche. Chaque assiette révèle une cuisine inventive, qui joue avec les textures, les saveurs et les produits de saison.\n\nFidèle à une démarche engagée, Krevette privilégie les produits ultra-frais, la pêche durable et les circuits courts. Ici, les influences maritimes rencontrent les traditions flamandes pour offrir une véritable découverte gastronomique.\n\nUne adresse singulière pour les amateurs de cuisine de la mer, en quête de fraîcheur, d'authenticité et de nouvelles sensations gustatives."
+     }
+    }
+   ],
+   "label": {
+    "@fr": "Krevette"
+   },
+   "type": [
+    "Restaurant",
+    "PointOfInterest",
+    "PlaceOfInterest",
+    "FoodEstablishment"
+   ],
+   "lastUpdateDatatourisme": "2026-11-16T03:17:43.232Z",
+   "hasContact": [
+    {
+     "familyName": [
+      "EXEMPLE"
+     ],
+     "telephone": [
+      "+33 3 20 73 03 40"
+     ],
+     "title": [
+      "Madame"
+     ],
+     "homepage": [
+      "https://www.krevette-lille.fr/"
+     ],
+     "givenName": [
+      "Jeanne"
+     ]
+    }
+   ],
+   "uuid": "b0663d02-a762-3620-8838-e8e7ab0ec8ad",
+   "uri": "https://data.datatourisme.fr/28/f6da1017-6636-3beb-880b-f21128cb5ad6"
+  },
+  {
+   "hasBeenCreatedBy": {
+    "legalName": "Hauts-de-France Tourisme",
+    "identifier": "d078e000-5ccd-4efd-8ad5-ab188b8e57f7"
+   },
+   "isLocatedAt": [
+    {
+     "geo": {
+      "latitude": 50.6375305,
+      "longitude": 3.0611894
+     },
+     "address": [
+      {
+       "hasAddressCity": {
+        "insee": "59350",
+        "label": {
+         "@fr": "Lille"
+        }
+       },
+       "streetAddress": [
+        "16 rue de Pas"
+       ],
+       "postalCode": "59000",
+       "addressLocality": "Lille"
+      }
+     ]
+    }
+   ],
+   "lastUpdate": "2023-08-08",
+   "hasDescription": [
+    {
+     "description": {
+      "@fr": "Le Club Marot est un restaurant bistronomique niché au coeur de Lille, en face du Nouveau Siècle. C’est le projet de deux cousins, Augustin et Antoine, qui se sont réunis autour d’une cuisine bistronomique audacieuse. Une promesse de plats gastronomiques à des tarifs raisonnables. \n\nLa cuisine est 100% maison, même le pain. Dans les assiettes, les produits de saisons et les arrivages des producteurs locaux sont à la fête. \n\nProfitez de différentes salles (bar, salons privatifs), et d'une cuisine ouverte pour permettre l'échange avec nos chefs.\n\nRestaurant Bistronomique - Produit du marché et de saison.\n\nCarte des vins classée parmi 100 meilleures de France par Terre de vins "
+     },
+     "shortDescription": {
+      "@fr": "Le Club Marot est un restaurant bistronomique niché au coeur de Lille, en face du Nouveau Siècle. C’est le projet de deux cousins, Augustin et Antoine, qui se sont réunis autour d’une cuisine bistronomique audacieuse. Une promesse de plats gastronomiques à des tarifs raisonnables. \n\nLa cuisine est 100% maison, même le pain. Dans les assiettes, les produits de saisons et les arrivages des producteurs locaux sont à la fête. \n\nProfitez de différentes salles (bar, salons privatifs), et d'une cuisine ouverte pour permettre l'échange avec nos chefs.\n\nRestaurant Bistronomique - Produit du marché et de saison.\n\nCarte des vins classée parmi 100 meilleures de France par Terre de vins "
+     }
+    }
+   ],
+   "label": {
+    "@fr": "Club Marot"
+   },
+   "type": [
+    "Restaurant",
+    "FoodEstablishment",
+    "PointOfInterest",
+    "PlaceOfInterest"
+   ],
+   "lastUpdateDatatourisme": "2026-11-14T03:21:44.843Z",
+   "hasContact": [
+    {
+     "givenName": [
+      "Jeanne"
+     ],
+     "familyName": [
+      "EXEMPLE"
+     ],
+     "telephone": [
+      "+33 3 20 57 01 10"
+     ],
+     "title": [
+      "Madame"
+     ],
+     "homepage": [
+      "https://www.clubmarot.fr/"
+     ]
+    }
+   ],
+   "uuid": "221df9f2-0f8b-385a-9440-563398b0d62f",
+   "uri": "https://data.datatourisme.fr/28/918eab40-990c-346f-bf35-ffe49c2add00",
+   "hasReview": [
+    {
+     "hasReviewValue": {
+      "label": {
+       "@fr": "Accueil Vélo"
+      },
+      "isCompliantWith": [
+       "PlaceOfInterest"
+      ],
+      "key": "LabelRating_AccueilVelo"
+     },
+     "reviewExpirationDate": "2027-07-02"
+    }
+   ]
+  },
+  {
+   "hasBeenCreatedBy": {
+    "legalName": "Hauts-de-France Tourisme",
+    "identifier": "d078e000-5ccd-4efd-8ad5-ab188b8e57f7"
+   },
+   "isLocatedAt": [
+    {
+     "geo": {
+      "latitude": 50.6399745,
+      "longitude": 3.0758037
+     },
+     "address": [
+      {
+       "hasAddressCity": {
+        "insee": "59350",
+        "label": {
+         "@fr": "Lille"
+        }
+       },
+       "streetAddress": [
+        "335 Boulevard de Leeds"
+       ],
+       "postalCode": "59777",
+       "addressLocality": "Lille"
+      }
+     ]
+    }
+   ],
+   "lastUpdate": "2019-04-30",
+   "hasDescription": [
+    {
+     "description": {
+      "@fr": "Implanté au cœur du quartier d’affaires, à proximité des deux gares TGV, se dresse l'hôtel Hilton Lille. Cet hôtel qui propose 124 chambres spacieuses, climatisées et avec vue panoramique, est reconnaissable à sa façade cuivrée. Il allie architecture moderne, design et confort.\n\nHilton Lille est aujourd’hui l’une des références de l’hôtellerie haut de gamme lilloise. On s’y retrouve dans le cadre d’un séminaire ou d’un entretien au bar juste avant de reprendre un TGV vers Paris, Londres ou Bruxelles.\n\nL'histoire et la culture de la ville de Lille en font également une destination idéale pour le shopping ou flâner dans la vieille ville. La décoration intérieure se veut résolument moderne tout en étant chaleureuse. À vous de trouver maintenant le prétexte pour y séjourner ou y donner votre prochain rendez-vous..."
+     },
+     "shortDescription": {
+      "@fr": "Implanté au cœur du quartier d’affaires, à proximité des deux gares TGV, se dresse l'hôtel Hilton Lille. Cet hôtel qui propose 124 chambres spacieuses, climatisées et avec vue panoramique, est reconnaissable à sa façade cuivrée. Il allie architecture moderne, design et confort.\n\nHilton Lille est aujourd’hui l’une des références de l’hôtellerie haut de gamme lilloise. On s’y retrouve dans le cadre d’un séminaire ou d’un entretien au bar juste avant de reprendre un TGV vers Paris, Londres ou Bruxelles.\n\nL'histoire et la culture de la ville de Lille en font également une destination idéale pour le shopping ou flâner dans la vieille ville. La décoration intérieure se veut résolument moderne tout en étant chaleureuse. À vous de trouver maintenant le prétexte pour y séjourner ou y donner votre prochain rendez-vous..."
+     }
+    }
+   ],
+   "label": {
+    "@fr": "Hilton Lille"
+   },
+   "type": [
+    "HotelRestaurant",
+    "Accommodation",
+    "PointOfInterest",
+    "LodgingBusiness",
+    "Hotel",
+    "Restaurant",
+    "FoodEstablishment",
+    "HotelTrade",
+    "PlaceOfInterest"
+   ],
+   "lastUpdateDatatourisme": "2026-11-14T05:12:14.352Z",
+   "hasContact": [
+    {
+     "givenName": [
+      "Jeanne"
+     ],
+     "familyName": [
+      "EXEMPLE"
+     ],
+     "telephone": [
+      "+33 3 20 42 46 46",
+      "+33 6 10 05 03 35"
+     ],
+     "title": [
+      "Madame"
+     ],
+     "homepage": [
+      "https://www.hilton.com/fr/hotels/lillehi-hotel-lille-euralille/"
+     ]
+    }
+   ],
+   "uuid": "404cff43-9a3f-34f5-8e1b-fca6325eac8c",
+   "uri": "https://data.datatourisme.fr/28/e8cc969d-ac03-373e-a43f-4bf474f8465f",
+   "hasReview": [
+    {
+     "reviewDeliveryDate": "2016-11-14",
+     "hasReviewValue": {
+      "label": {
+       "@fr": "4 étoiles"
+      },
+      "isCompliantWith": [
+       "ClubOrHolidayVillage",
+       "SelfCateringAccommodation",
+       "HolidayCentre",
+       "CampingAndCaravanning",
+       "Hotel"
+      ],
+      "key": "ScaleRating_4etoiles"
+     }
+    }
+   ]
+  },
+  {
+   "hasBeenCreatedBy": {
+    "legalName": "Hello Lille",
+    "identifier": "2df411fa-c868-4f2d-9975-6717d51b7886",
+    "telephone": [
+     "+33 6 33 72 34 17"
+    ],
+    "homepage": [
+     "https://hellolille.eu/"
+    ]
+   },
+   "isLocatedAt": [
+    {
+     "geo": {
+      "latitude": 50.6462121,
+      "longitude": 3.0597319
+     },
+     "address": [
+      {
+       "hasAddressCity": {
+        "insee": "59350",
+        "label": {
+         "@fr": "Lille"
+        }
+       },
+       "streetAddress": [
+        "1 Bis Rue Princesse"
+       ],
+       "postalCode": "59800",
+       "addressLocality": "Lille"
+      }
+     ]
+    }
+   ],
+   "lastUpdate": "2024-06-11",
+   "hasDescription": [
+    {
+     "description": {
+      "@fr": "Offrez vous une pause hors du temps dans ce restaurant à jeux de société. Inspiré des cafés ludiques montréalais, La Luck propose une cuisine entièrement faite maison à partir de produits de saison. Des sommeliers du jeu pimentent votre expérience en vous expliquant les règles des  2000 références. \n\nUn brunch à l'assiette est servi tous les samedis et dimanches. D'inspiration nord-américaine, les pancakes, œufs Bénédicte, bagels et poutines déjeuner sont incontournables. \n\nEn rendez-vous galant, pour un afterwork, entre amis ou en famille, La Luck vous accueille dans un esprit de convivialité et de légèreté."
+     },
+     "shortDescription": {
+      "@fr": "Offrez vous une pause hors du temps dans ce restaurant à jeux de société. Inspiré des cafés ludiques montréalais, La Luck propose une cuisine entièrement faite maison à partir de produits de saison. Des sommeliers du jeu pimentent votre expérience en vous expliquant les règles des  2000 références. \n\nUn brunch à l'assiette est servi tous les samedis et dimanches. D'inspiration nord-américaine, les pancakes, œufs Bénédicte, bagels et poutines déjeuner sont incontournables. \n\nEn rendez-vous galant, pour un afterwork, entre amis ou en famille, La Luck vous accueille dans un esprit de convivialité et de légèreté."
+     }
+    }
+   ],
+   "label": {
+    "@fr": "La Luck"
+   },
+   "type": [
+    "PointOfInterest",
+    "FoodEstablishment",
+    "PlaceOfInterest",
+    "Restaurant"
+   ],
+   "lastUpdateDatatourisme": "2026-11-14T03:21:44.844Z",
+   "hasContact": [
+    {
+     "givenName": [
+      "Jeanne"
+     ],
+     "familyName": [
+      "EXEMPLE"
+     ],
+     "telephone": [
+      "+33 3 59 55 38 73"
+     ],
+     "title": [
+      "Madame"
+     ],
+     "homepage": [
+      "https://www.la-luck.com/restaurants/lille"
+     ]
+    }
+   ],
+   "uuid": "01d17a35-68e9-339b-b6e1-b110c7968edc",
+   "uri": "https://data.datatourisme.fr/28/3b1f975d-ba95-37cd-a86c-1c4f57deb5f1"
+  },
+  {
+   "hasBeenCreatedBy": {
+    "legalName": "Hauts-de-France Tourisme",
+    "identifier": "d078e000-5ccd-4efd-8ad5-ab188b8e57f7"
+   },
+   "isLocatedAt": [
+    {
+     "geo": {
+      "latitude": 50.6389959,
+      "longitude": 3.070982
+     },
+     "address": [
+      {
+       "hasAddressCity": {
+        "insee": "59350",
+        "label": {
+         "@fr": "Lille"
+        }
+       },
+       "streetAddress": [
+        "97 Place Saint-Hubert"
+       ],
+       "postalCode": "59800",
+       "addressLocality": "Lille"
+      }
+     ]
+    }
+   ],
+   "lastUpdate": "2023-08-08",
+   "hasDescription": [
+    {
+     "description": {
+      "@fr": "Envie d’un verre, d’un repas fait maison ou simplement d’un lieu chaleureux où vous retrouver ? Le restaurant et le bar du Mama Shelter Lille vous accueillent tout au long de la journée, que vous veniez en couple, entre amis, en famille ou pour un rendez-vous professionnel.\n\nDans une ambiance conviviale et décontractée, profitez d’une pause gourmande autour de plats faits maison, ou installez-vous au bar pour partager un verre et prolonger le plaisir. Ici, les occasions se multiplient : déjeuner entre collègues, dîner entre amis ou moment de détente improvisé, chacun trouve sa place dans cet univers accueillant, fidèle à l’esprit Mama Shelter.\n\nEt lorsque le soleil fait son apparition, direction la terrasse pour profiter des beaux jours et savourer l’instant en plein air. Pour un repas, un verre ou une parenthèse conviviale au cœur de Lille, le Mama Shelter vous invite à vous sentir bien, à toute heure de la journée. Une adresse vivante où la gourmandise et le plaisir d’être ensemble sont toujours au rendez-vous."
+     },
+     "shortDescription": {
+      "@fr": "Envie d’un verre, d’un repas fait maison ou simplement d’un lieu chaleureux où vous retrouver ? Le restaurant et le bar du Mama Shelter Lille vous accueillent tout au long de la journée, que vous veniez en couple, entre amis, en famille ou pour un rendez-vous professionnel.\n\nDans une ambiance conviviale et décontractée, profitez d’une pause gourmande autour de plats faits maison, ou installez-vous au bar pour partager un verre et prolonger le plaisir. Ici, les occasions se multiplient : déjeuner entre collègues, dîner entre amis ou moment de détente improvisé, chacun trouve sa place dans cet univers accueillant, fidèle à l’esprit Mama Shelter.\n\nEt lorsque le soleil fait son apparition, direction la terrasse pour profiter des beaux jours et savourer l’instant en plein air. Pour un repas, un verre ou une parenthèse conviviale au cœur de Lille, le Mama Shelter vous invite à vous sentir bien, à toute heure de la journée. Une adresse vivante où la gourmandise et le plaisir d’être ensemble sont toujours au rendez-vous."
+     }
+    }
+   ],
+   "label": {
+    "@fr": "Mama Shelter"
+   },
+   "type": [
+    "HotelRestaurant",
+    "LodgingBusiness",
+    "Restaurant",
+    "PlaceOfInterest",
+    "HotelTrade",
+    "Hotel",
+    "Accommodation",
+    "FoodEstablishment",
+    "PointOfInterest"
+   ],
+   "lastUpdateDatatourisme": "2026-11-14T03:21:44.845Z",
+   "hasContact": [
+    {
+     "givenName": [
+      "Jeanne"
+     ],
+     "familyName": [
+      "EXEMPLE"
+     ],
+     "telephone": [
+      "+33 3 59 82 72 72"
+     ],
+     "title": [
+      "Madame"
+     ],
+     "homepage": [
+      "https://fr.mamashelter.com/"
+     ]
+    }
+   ],
+   "uuid": "0ace7ea5-f85e-3dca-b899-c05e1cdfd16c",
+   "uri": "https://data.datatourisme.fr/28/025a41f9-4676-318a-929a-4f37699acb40"
+  },
+  {
+   "hasBeenCreatedBy": {
+    "legalName": "Hauts-de-France Tourisme",
+    "identifier": "d078e000-5ccd-4efd-8ad5-ab188b8e57f7"
+   },
+   "isLocatedAt": [
+    {
+     "geo": {
+      "latitude": 50.6391714,
+      "longitude": 3.0352272
+     },
+     "address": [
+      {
+       "hasAddressCity": {
+        "insee": "59328",
+        "label": {
+         "@fr": "Lambersart"
+        }
+       },
+       "streetAddress": [
+        "201 Avenue du Colysée"
+       ],
+       "postalCode": "59130",
+       "addressLocality": "Lambersart"
+      }
+     ]
+    }
+   ],
+   "lastUpdate": "2021-11-29",
+   "hasDescription": [
+    {
+     "description": {
+      "@fr": "La philosophie de La Table du Colysée est simple :  ici la star c'est le produit de saison, frais et local. Dans un décor contemporain, sur les berges de la Deûle, Laurent Cauchy propose une partition gourmande, mêlant tradition française et influences plus créatives. Placé sous le signe de la passion de la gastronomie, le chef vous livre une table joyeuse et inventive, vivante et enivrante. pour respecter la saisonnalité les produits changent très régulièrement. On peut également y venir pour boire un verre, prendre l'air en terrasse."
+     },
+     "shortDescription": {
+      "@fr": "La philosophie de La Table du Colysée est simple :  ici la star c'est le produit de saison, frais et local. Dans un décor contemporain, sur les berges de la Deûle, Laurent Cauchy propose une partition gourmande, mêlant tradition française et influences plus créatives. Placé sous le signe de la passion de la gastronomie, le chef vous livre une table joyeuse et inventive, vivante et enivrante. pour respecter la saisonnalité les produits changent très régulièrement. On peut également y venir pour boire un verre, prendre l'air en terrasse."
+     }
+    }
+   ],
+   "label": {
+    "@fr": "La table du Colysée"
+   },
+   "type": [
+    "Restaurant",
+    "FoodEstablishment",
+    "PlaceOfInterest",
+    "PointOfInterest"
+   ],
+   "lastUpdateDatatourisme": "2026-10-21T03:25:54.913Z",
+   "hasContact": [
+    {
+     "telephone": [
+      "+33 3 20 00 14 85"
+     ],
+     "homepage": [
+      "https://www.latableducolysee.fr/"
+     ]
+    }
+   ],
+   "uri": "https://data.datatourisme.fr/28/830a5813-acd7-3a08-9824-bbbc1431f025",
+   "uuid": "0d269509-3be2-3648-a0ae-909085c40e8a"
+  },
+  {
+   "hasBeenCreatedBy": {
+    "legalName": "Hauts-de-France Tourisme",
+    "identifier": "d078e000-5ccd-4efd-8ad5-ab188b8e57f7"
+   },
+   "isLocatedAt": [
+    {
+     "geo": {
+      "latitude": 50.6309399,
+      "longitude": 3.0550798
+     },
+     "address": [
+      {
+       "hasAddressCity": {
+        "insee": "59350",
+        "label": {
+         "@fr": "Lille"
+        }
+       },
+       "streetAddress": [
+        "164, rue Solférino"
+       ],
+       "postalCode": "59000",
+       "addressLocality": "Lille"
+      }
+     ]
+    }
+   ],
+   "lastUpdate": "2023-08-08",
+   "hasDescription": [
+    {
+     "description": {
+      "@fr": "Max vous accueille tous les jours de la semaine pour venir savourer de la cuisine bistronomique et vous faire passer un merveilleux moment.\nLes cuisiniers travaillent uniquement avec des produits frais et majoritairement de saison, afin de vous concocter des plats traditionnels avec un soupçon d’exotisme.\nSitué en plein cœur de Lille, le restaurant comporte un étage et deux salles distinctes, un climat chaleureux et lumineux pour des repas festifs entre amis, en famille ou même des réunions plus formelles.\n\nMenu gastronomique le week-end"
+     },
+     "shortDescription": {
+      "@fr": "Max vous accueille tous les jours de la semaine pour venir savourer de la cuisine bistronomique et vous faire passer un merveilleux moment.\nLes cuisiniers travaillent uniquement avec des produits frais et majoritairement de saison, afin de vous concocter des plats traditionnels avec un soupçon d’exotisme.\nSitué en plein cœur de Lille, le restaurant comporte un étage et deux salles distinctes, un climat chaleureux et lumineux pour des repas festifs entre amis, en famille ou même des réunions plus formelles.\n\nMenu gastronomique le week-end"
+     }
+    }
+   ],
+   "label": {
+    "@fr": "Chez Max"
+   },
+   "type": [
+    "Restaurant",
+    "PlaceOfInterest",
+    "FoodEstablishment",
+    "PointOfInterest"
+   ],
+   "lastUpdateDatatourisme": "2026-10-21T03:25:54.916Z",
+   "hasContact": [
+    {
+     "telephone": [
+      "+33 3 20 77 59 86"
+     ],
+     "homepage": [
+      "https://www.chezmaxbistrotlillois.com/"
+     ]
+    }
+   ],
+   "uri": "https://data.datatourisme.fr/28/0b55c1d1-df63-3cb9-ab84-d9842793284c",
+   "uuid": "0d8ede93-2b7d-3f62-ae6f-72e0f434b388"
+  }
+ ],
+ "meta": {
+  "total": 8,
+  "page": 1,
+  "page_size": 100,
+  "total_pages": 1
+ }
+}

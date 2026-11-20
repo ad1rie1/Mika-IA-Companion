@@ -22,6 +22,10 @@ standard, dans un fil), un cache à part pour ce qui est arrivé (sa base, ADR 0
 - **Une boîte Microsoft** (Hotmail, Outlook.com) entre par XOAUTH2 : avant
   chaque session, le jeton d'accès de sa connexion (``oauth``, ADR 0166) ; une
   boîte pas (ou plus) connectée échoue comme un serveur qui refuse, en le disant.
+- **Ce qui vient d'avant** (son historique, ``older`` et ``keep_history`` ; ce
+  qu'une recherche ramène du serveur, ``search_server``) n'est jamais rendu par
+  ``fetch_new`` : son tri ne lit que ce qui arrive (ADR 0249). Seul un mail d'un
+  dossier relevé que la relève n'a pas encore atteint reste à lui rendre.
 """
 
 from __future__ import annotations
@@ -32,6 +36,7 @@ import hashlib
 import logging
 import smtplib
 import ssl
+import time
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import replace
@@ -47,10 +52,12 @@ from mika.adapters.mail import compose
 from mika.adapters.mail.cache import MailCache
 from mika.adapters.mail.config import MailAccount, MailConfig
 from mika.adapters.mail.imap import ImapError, Session, role_of, since
+from mika.adapters.mail.models import sent_name
 from mika.adapters.mail.oauth import MicrosoftSignIn, OAuthError, answer
 from mika.adapters.mail.parse import Part, attachment_files, parse, parse_parts
 from mika.contracts.email import HANDLE_PREFIX
 from mika.ports.mail import (
+    ASIDE,
     PIECES_MAX,
     PIECES_TOTAL_MAX,
     AccountInfo,
@@ -59,13 +66,16 @@ from mika.ports.mail import (
     Draft,
     File,
     Folder,
+    Found,
     Mail,
+    MailQuery,
     Preview,
     Sent,
     SignIn,
     forwarded_text,
     split_ref,
 )
+from mika.ports.paging import written_words
 
 log = logging.getLogger("mika.mail")
 
@@ -76,6 +86,16 @@ SMTP_TIMEOUT = 30.0
 FLAGS_WINDOW = 200
 #: « tous les dossiers » : ce qu'un dossier seulement synchronisé (pas relevé) range au plus à chaque relève
 SYNC_ALL_BATCH = 50
+#: une lecture de l'historique ou d'une recherche lit les mails par paquets : jamais plus en mémoire à la fois
+HISTORY_CHUNK = 10
+#: un passage de l'historique ne commence plus de paquet au-delà (s) : le verrou de la boîte se rend vite
+HISTORY_SLICE_S = 20.0
+#: une recherche sur le serveur : au plus autant de dossiers, et, par dossier, les en-têtes des plus récents qui
+#: correspondent sans être ici
+SEARCH_FOLDERS = 40
+SEARCH_HEADS = 200
+#: le nom d'un dossier qu'elle crée (son chemin, « / » compris)
+FOLDER_NAME_MAX = 200
 #: les expéditeurs dont les images distantes s'affichent d'emblée (ADR 0175) : au plus autant, les plus récents
 IMAGES_FROM_MAX = 500
 
@@ -185,6 +205,9 @@ class ImapSmtpMail:
     def ack(self, refs: Sequence[str]) -> None:
         self._cache.ack(refs)
 
+    def waiting(self) -> frozenset[str]:
+        return self._cache.offered_refs()
+
     def seen_elsewhere(self) -> list[str]:
         out, self._seen_elsewhere = self._seen_elsewhere, []
         return out
@@ -199,11 +222,11 @@ class ImapSmtpMail:
                 if len(out) >= limit:
                     break
                 out += self._sync_sync(s, key, account, folder, limit - len(out), hand=True)
-            if account.sync_all:
+            if account.sync_all or account.keep_all:
                 # les autres dossiers sont tenus à jour pour la console, sans rien lui rendre : elle ne remarque que
-                # ceux qu'elle relève
+                # ceux qu'elle relève ; tout garder en local laisse à part les indésirables et la corbeille (ADR 0249)
                 for f in self._cache.folders(key):
-                    if f.name in account.folders:
+                    if f.name in account.folders or (not account.sync_all and f.role in ASIDE):
                         continue
                     try:
                         self._sync_sync(s, key, account, f.name, SYNC_ALL_BATCH, hand=False)
@@ -467,25 +490,191 @@ class ImapSmtpMail:
 
     async def older(self, account: str, folder: str, limit: int = 50) -> int:
         acc = self._account(account)
-        def run():
+
+        def run() -> int:
             with self._session(account, acc) as session:
-                _, validity, _ = session.select(folder)
-                previous, _ = self._cache.cursor(account, folder) or (0, 0)
-                if previous and validity and previous != validity:
-                    raise ValueError("Le dossier a changé sur le serveur : actualise-le avant de charger son historique.")
-                first = self._cache.oldest_uid(account, folder)
-                if first == 1:
-                    return 0
-                uids = sorted(u for u in session.search(f"UID 1:{first - 1}" if first else "ALL") if not first or u < first)
-                rows = session.fetch(uids[-max(1, min(100, limit)):])
-                for uid, flags, raw in rows:
-                    mail, parts = self._read(raw, uid, account, folder, flags)
-                    stored = self._cache.store(mail, uid, parts)
-                    self._cache.hand(account, split_ref(stored.ref)[1])
-                self._cache.save_folder(account, folder, uidvalidity=validity or None)
-                self._cache.recount(account, folder)
-                return len(rows)
+                return self._history_sync(session, account, acc, folder, max(1, min(100, limit)))
+
         return int(await self._in_thread(account, run))
+
+    def _hands(self, key: str, account: MailAccount, folder: str, uid: int) -> bool:
+        """Un mail ramené d'avant (son historique, une recherche) est-il rendu pour de bon, jamais remarqué comme
+        arrivé ? Seulement dans un dossier relevé, sous ce que la relève a déjà atteint : au-dessus, il vient
+        d'arriver, son tri le lira. Ailleurs, rien n'est rendu : « rendu » vaut pour le mail dans toute la boîte, et sa
+        copie dans un dossier relevé (Gmail : « Tous les messages » et la réception) doit encore être triée si elle
+        vient d'arriver (ADR 0249)."""
+        if folder not in account.folders:
+            return False
+        reached = (self._cache.cursor(key, folder) or (0, 0))[1]
+        return 0 < uid < reached
+
+    def _keep(self, s: Session, key: str, account: MailAccount, folder: str, uids: list[int]) -> int:
+        """Lit et garde ces mails du dossier ouvert, par paquets ; rend combien sont gardés (un correspondant oublié
+        ne l'est pas)."""
+        kept = 0
+        for at in range(0, len(uids), HISTORY_CHUNK):
+            for uid, flags, raw in s.fetch(uids[at:at + HISTORY_CHUNK]):
+                mail, parts = self._read(raw, uid, key, folder, flags)
+                stored = self._cache.store(mail, uid, parts)
+                kept += bool(stored.key)
+                if self._hands(key, account, folder, uid):
+                    self._cache.hand(key, split_ref(stored.ref)[1])
+        return kept
+
+    def _history_sync(self, s: Session, key: str, account: MailAccount, folder: str, limit: int,
+                      until: float | None = None) -> int:
+        """Remonte l'historique d'un dossier : jusqu'à ``limit`` mails du serveur qui ne sont pas ici, sous le
+        plancher de la lecture précédente (la première : tout le dossier, pour les trous que la fenêtre du premier
+        relevé laisse), les plus récents d'abord ; ``until`` (``time.monotonic``) : on ne commence plus de paquet
+        au-delà. Le dossier est complet quand il n'y en a plus. Rend combien ont été lus."""
+        _, validity, _ = s.select(folder)
+        previous, _ = self._cache.cursor(key, folder) or (0, 0)
+        if previous and validity and previous != validity:
+            raise ValueError("Le dossier a changé sur le serveur : actualise-le avant de charger son historique.")
+        floor = self._cache.history_floor(key, folder)
+        found = [] if floor == 1 else [u for u in s.search(f"UID 1:{floor - 1}" if floor else "ALL")
+                                        if not floor or u < floor]
+        here = self._cache.known_uids(key, folder, found)
+        uids = sorted(u for u in found if u not in here)
+        taken = uids[-max(0, limit):] if limit > 0 else []
+        read = 0
+        # les plus récents d'abord, et le plancher après chaque paquet : une lecture coupée reprend où elle en était
+        for at in range(len(taken), 0, -HISTORY_CHUNK):
+            if until is not None and read and time.monotonic() > until:
+                break
+            chunk = taken[max(0, at - HISTORY_CHUNK):at]
+            self._keep(s, key, account, folder, chunk)
+            read += len(chunk)
+            self._cache.save_folder(key, folder, uidvalidity=validity or None, floor=min(chunk))
+        self._cache.save_folder(key, folder, uidvalidity=validity or None, complete=read == len(uids))
+        self._cache.recount(key, folder)
+        return read
+
+    async def keep_history(self, account: str, limit: int) -> int:
+        acc = self._accounts().get(account)
+        if acc is None or not acc.ready or not acc.keep_all or limit <= 0:
+            return 0
+
+        def wanted() -> list[str]:
+            return [f.name for f in self._cache.folders(account, acc.folders) if f.role not in ASIDE and not f.complete]
+
+        if not wanted():  # tout est là : pas de connexion (un dossier nouveau paraît à la relève suivante)
+            return 0
+
+        def run() -> int:
+            # une tranche courte : le verrou de la boîte n'est tenu que le temps d'un passage, ses outils attendent peu
+            until, read = time.monotonic() + HISTORY_SLICE_S, 0
+            with self._session(account, acc) as s:
+                self._list_sync(s, account)
+                for name in wanted():
+                    if read >= limit or (read and time.monotonic() > until):
+                        break
+                    try:
+                        read += self._history_sync(s, account, acc, name, limit - read, until)
+                    except (ImapError, ValueError) as exc:  # un dossier refusé, ou changé : les suivants passent
+                        log.info("courrier : historique de %s/%s remis (%s)", account, name, type(exc).__name__)
+            return read
+
+        try:
+            return int(await self._in_thread(account, run))
+        except (OSError, ImapError, OAuthError, ValueError, EOFError) as exc:
+            self._cache.note(account, at=self._at(), error=_why(exc))
+            log.warning("courrier : historique de %s impossible (%s)", account, type(exc).__name__)
+            return 0
+
+    async def search_server(self, query: MailQuery, want: int) -> Found:
+        key = query.account
+        acc = self._account(key)
+        if not acc.ready:
+            raise ValueError("cette boîte n'est pas prête à relever")
+        words, senders = written_words(query.text), written_words(query.sender)
+        if not words and not senders:
+            return Found()
+
+        def run() -> Found:
+            with self._session(key, acc) as s:
+                self._list_sync(s, key)
+                roles = {f.name: f.role for f in self._cache.folders(key, acc.folders)}
+                names = [query.folder] if query.folder else [n for n, role in roles.items() if role not in ASIDE]
+                skipped = names[SEARCH_FOLDERS:]  # au-delà : dit, pas tu
+                missing: list[tuple[int, int, str]] = []  # (arrivée, uid, dossier) de ce qui manque ici
+                beyond = 0  # ce qui correspond au-delà des en-têtes lus : compté, sans être daté
+                ids: set[str] = set()
+                validities: dict[str, int] = {}
+                for name in names[:SEARCH_FOLDERS]:
+                    try:
+                        _, validity, _ = s.select(name)
+                        previous = (self._cache.cursor(key, name) or (0, 0))[0]
+                        if previous and validity and previous != validity:
+                            skipped.append(name)  # ses UID ne disent plus la même chose ici : la relève le relira
+                            continue
+                        found = s.matching(words, senders)
+                        here = self._cache.known_uids(key, name, found)
+                        fresh = [u for u in found if u not in here]
+                        beyond += max(0, len(fresh) - SEARCH_HEADS)
+                        heads = s.heads(fresh[-SEARCH_HEADS:]) if fresh else []
+                    except ImapError as exc:  # un dossier refusé n'arrête pas les suivants
+                        log.info("courrier : recherche dans %s/%s refusée (%s)", key, name, type(exc).__name__)
+                        skipped.append(name)
+                        continue
+                    validities[name] = validity
+                    sent = roles.get(name) == "sent" or sent_name(name)
+                    known = self._cache.known_ids(key, [h.message_id for h in heads])
+                    for h in heads:
+                        if h.message_id and (h.message_id in known or h.message_id in ids):
+                            continue  # le même mail, gardé ou trouvé dans un autre dossier
+                        if self._cache.forgotten(h.sender, h.at, recipients=h.recipients if sent else ()):
+                            continue  # un correspondant oublié : ni relu, ni compté
+                        if h.message_id:
+                            ids.add(h.message_id)
+                        missing.append((h.at, h.uid, name))
+                missing.sort(reverse=True)
+                chosen = missing[:max(0, want)]
+                kept = 0
+                for name in dict.fromkeys(n for _, _, n in chosen):
+                    s.select(name)
+                    if validities.get(name):  # ce qui est gardé d'un dossier jamais relu dit à quels UID il croit
+                        self._cache.save_folder(key, name, uidvalidity=validities[name])
+                    kept += self._keep(s, key, acc, name, sorted((u for _, u, n in chosen if n == name), reverse=True))
+                    self._cache.recount(key, name)
+                return Found(kept=kept, left=len(missing) - len(chosen) + beyond, skipped=tuple(skipped))
+
+        return await self._in_thread(key, run)  # type: ignore[no-any-return]
+
+    async def create_folder(self, account: str, name: str) -> str:
+        acc = self._account(account)
+        wanted = name.strip()
+        if not wanted or len(wanted) > FOLDER_NAME_MAX or not wanted.isprintable():
+            raise ValueError("un nom de dossier : des mots, « / » pour un sous-dossier, 200 caractères au plus")
+
+        def listed(full: str) -> str | None:
+            # la liste rend la réception comme le serveur l'écrit (« Inbox/Factures » chez Outlook) : sans casse
+            return next((f.name for f in self._cache.folders(account) if f.name.casefold() == full.casefold()), None)
+
+        def run() -> str:
+            with self._session(account, acc) as s:
+                self._list_sync(s, account)
+                if wanted in {f.name for f in self._cache.folders(account)}:
+                    return wanted
+                prefix, delim = s.root()
+                rest = wanted[len(prefix):] if prefix and wanted.startswith(prefix) else wanted
+                # « / » sépare un sous-dossier, comme le séparateur du serveur (un nom ne peut pas le porter)
+                parts = [p.strip() for p in rest.replace(delim, "/").split("/")]
+                if not all(parts):
+                    raise ValueError("un nom de dossier : des mots, « / » pour un sous-dossier, rien de vide entre deux")
+                path = delim.join(parts)
+                full = path if path.upper() == "INBOX" else prefix + path
+                there = listed(full)
+                if there is not None:
+                    return there
+                s.create(full)
+                self._list_sync(s, account)
+                there = listed(full)
+                if there is None:
+                    raise ValueError(f"le serveur n'a pas créé « {full} »")
+                return there
+
+        return str(await self._in_thread(account, run))
 
     # ── ranger ──
     def _where(self, ref: str) -> tuple[str, MailAccount, Mail, int]:
@@ -797,7 +986,7 @@ class ImapSmtpMail:
         address = subject[len(HANDLE_PREFIX):]
         if self.images_shown(address):
             await self.show_images(address, False)
-        return self._cache.forget(address)
+        return self._cache.forget(address, at=self._at())
 
     # ── images distantes (ADR 0175) ──
     def images_shown(self, address: str) -> bool:

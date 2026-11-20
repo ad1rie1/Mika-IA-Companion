@@ -169,6 +169,10 @@ SECTION_LABELS: dict[str, str] = {
     # ADR 0062
     "sent_files": "Ce qu'elle lui a déjà envoyé (fichiers)", "dessins": "Ses dessins pour la personne",
     "services": "Ce que ses services extérieurs lui ont rendu", "app_calls": "Ce que ses apps lui ont rendu après un accord",
+    # ADR 0255
+    "work_services": "Ce que ses services extérieurs ont rendu à son travail (après un accord)",
+    # ADR 0257
+    "project_links": "Ce que ce projet lit des autres projets",
     "step_exchange": "L'échange d'où vient sa réflexion", "step_life": "Ce qui se passe dans la vie de la personne "
     "(sa réflexion)",
     # ADR 0068
@@ -238,6 +242,7 @@ PROCESS_LABELS: dict[str, str] = {
     "goals.seed": "Se proposer des buts", "goals.tend": "Suivre ses buts", "projects.tend": "Suivre ses projets",
     "projects.apps": "Réparer les apps de ses projets",
     "projects.remote": "Pousser et récupérer les dépôts", "email.poll": "Relever le courrier",
+    "email.keep": "Télécharger l'historique du courrier",
     "rss.poll": "Relever les flux", "mcp.watch": "Rejoindre les serveurs d'outils extérieurs", "camera.look": "Regarder par la caméra", "forge.tick": "Faire tourner les apps",
     "forge.events": "Transmettre les événements aux apps", "forge.discover": "Découvrir les apps",
     "memory.promises": "Tenir ou laisser filer ses promesses", "self.wake": "Se réveiller avec sa nuit",
@@ -252,6 +257,7 @@ PROCESS_LABELS: dict[str, str] = {
     "forge.calls_expire": "Refuser les appels d'apps restés sans accord",
     "wakeup.expire": "Laisser tomber les réveils par API restés trop longtemps en attente",
     "teams.triage": "Trier les messages Teams reçus",
+    "teams.images": "Regarder les images des messages Teams",
     "teams.expire": "Laisser tomber les réponses Teams restées sans accord ou sans envoi",
     "teams.answered": "Refuser ses réponses Teams auxquelles on a répondu autrement dans la discussion",
     "phone.expire": "Laisser tomber les réponses proposées sur le téléphone restées sans geste",
@@ -349,6 +355,7 @@ EVENT_LABELS: dict[str, str] = {
     "projects.answered": "Une réponse à sa demande d'aide sur un projet",
     "projects.plan_proposed": "Son plan pour un projet (écrit, ou revu)",
     "projects.plan_answered": "Une réponse à son plan (validé, ou à revoir)",
+    "projects.links_set": "Ce qu'un projet lit des autres projets, réglé",
     "social.one_sided": "C'est presque toujours elle qui écrit",
     "social.bond_shifted": "Un lien qui a changé (elle l'a remarqué)",
     "social.bond_noted": "Un lien relevé sans le vivre (mise en service, proximité fixée, propriétaire)",
@@ -367,6 +374,8 @@ EVENT_LABELS: dict[str, str] = {
     "teams.draft_asked": "Une réponse Teams demandée", "teams.received": "Des messages Teams reçus de l'extension",
     "teams.settled": "Une réponse Teams posée, partie ou laissée",
     "teams.written": "Un message Teams écrit depuis le web, en file pour l'extension",
+    "teams.images": "Une image d'un message Teams reçue de l'extension",
+    "teams.image_seen": "Une image d'un message Teams regardée",
     "phone.received": "Un message montré par le téléphone", "phone.drafted": "Une réponse préparée pour le téléphone",
     "phone.settled": "Une réponse proposée sur le téléphone : partie, laissée ou expirée",
     "memory.relayed_read": "Des messages du téléphone relus, ou remis à la file des reprises",
@@ -402,6 +411,15 @@ EFFECT_LABELS: dict[str, tuple[str, str, str]] = {
                                  "la demande de quelqu'un sur un projet s'écrit, à son nom, après ton accord"),
     "shares:shares.expired": ("range", "Un fichier envoyé expire", "ses octets sont effacés"),
     "attachments:attachments.expired": ("range", "Une pièce reçue expire", "ses octets sont effacés"),
+    # le ménage des vues d'atelier (ADR 0260) : le même geste, relu sur l'état courant, après quatre événements
+    "projects:projects.links_set": ("range", "Ce que lit un projet change",
+                                    "les vues d'atelier qu'aucun lien n'ouvre plus sont supprimées"),
+    "projects:projects.access_set": ("range", "Les accès d'un projet changent",
+                                     "les vues de son atelier que ses lignes ne donnent plus sont supprimées"),
+    "projects:projects.archived": ("range", "Un projet est archivé",
+                                   "les vues qu'il avait, et celles que d'autres avaient de lui, sont supprimées"),
+    "projects:projects.reframed": ("range", "Un projet change de propriétaire",
+                                   "les vues d'atelier que ce changement ferme sont supprimées"),
 }
 #: Les familles des effets, dans l'ordre de la page ; un effet sans libellé se range avec le reste
 #: (``names.OTHER_EFFECTS``).
@@ -439,10 +457,12 @@ ENRICHER_LABELS: dict[str, str] = {
     "learned": "Ce qu'elle a appris en lisant", "goals": "Ses buts en cours",
     "goals_context": "D'où vient le but, et la vie de la personne", "projects": "Ses projets",
     "projects_tree": "L'arbre de l'atelier d'un projet", "projects_apps": "Ce qui n'a pas marché pour ses apps",
+    "projects_views": "Les vues des ateliers que son projet lit",
     "projects_answer": "La réponse à sa demande d'aide (un projet)", "sent_files": "Les fichiers qu'elle a envoyés",
     "mail": "Son courrier", "teams": "Ses conversations Teams", "phone": "Les messages du téléphone",
     "headlines": "Les titres de ses flux", "views": "Ce que voit la caméra", "dessins": "Ses dessins",
     "services": "Ses demandes aux outils extérieurs", "apps": "Ses apps forgées",
+    "work_services": "Ses demandes aux outils extérieurs, faites en travaillant",
     "calls": "Ses demandes à ses apps", "signals": "Ce qu'une app a mis dans sa file",
     "news": "Ce que ses apps ont trouvé pour la personne", "wakeup": "Ses réveils par API",
 }

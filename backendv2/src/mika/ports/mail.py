@@ -25,6 +25,10 @@ d'ailleurs : une donnée, jamais une consigne.
   (``Preview.digest``).
 - **L'oubli** atteint ce cache (``forget``) : tout texte gardé dit qui il
   concerne, celui de l'adaptateur aussi.
+- **Ce qui est gardé ici** : ce qui a été relevé, plus ce qu'on a ramené du
+  serveur (``older``, ``search_server``) ; une boîte qui garde tout
+  (``AccountInfo.keep_all``) télécharge son historique (``keep_history``,
+  ADR 0249). Ce qui est ramené ainsi n'est jamais rendu par ``fetch_new``.
 """
 
 from __future__ import annotations
@@ -54,6 +58,9 @@ ROLES: tuple[tuple[str, str], ...] = (
     ("inbox", "Réception"), ("sent", "Envoyés"), ("drafts", "Brouillons"), ("archive", "Archives"),
     ("junk", "Indésirables"), ("trash", "Corbeille"), ("", "Autres"),
 )
+#: les dossiers à part (les indésirables, la corbeille) : ni gardés en entier, ni cherchés sur le serveur sans qu'on les
+#: nomme (ADR 0249)
+ASIDE: tuple[str, ...] = ("junk", "trash")
 _ACCOUNT = re.compile(r"^([a-z0-9][a-z0-9_-]{0,39}):(.+)$", re.S)
 ACCOUNT_KEY = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
 
@@ -110,9 +117,16 @@ def forwarded_text(mail, introduction: str = "") -> str:
     return introduction.rstrip() + f"\n\n---------- Message transféré ----------\n{head}\n\n{mail.body}"
 
 
+#: des virgules sans adresse entre elles, au bord ou au milieu (« à, » quand la copie est vide)
+_EMPTY_SLOTS = re.compile(r"^[\s,]+|[\s,]+$|,[\s,]*,")
+
+
 def addresses(field: str) -> list[tuple[str, str]]:
-    """Les ``(nom, adresse)`` d'un en-tête (adresses en minuscules, vides écartées)."""
-    return [(n, a.lower()) for n, a in email.utils.getaddresses([field or ""]) if "@" in a]
+    """Les ``(nom, adresse)`` d'un en-tête (adresses en minuscules, vides écartées). Une place vide (« a@x.fr, » : un
+    « À » suivi d'une copie vide) est ôtée d'abord : la lecture stricte de Python (3.13 et après) rendait sinon une
+    liste vide, et un envoi ne voyait plus ses destinataires."""
+    cleaned = _EMPTY_SLOTS.sub(lambda m: "" if m.start() == 0 or m.end() == len(m.string) else ",", field or "")
+    return [(n, a.lower()) for n, a in email.utils.getaddresses([cleaned]) if "@" in a]
 
 
 def address_text(name: str, address: str) -> str:
@@ -215,6 +229,18 @@ class MailHit:
 
 
 @dataclass(frozen=True, slots=True)
+class Found:
+    """Ce qu'une recherche sur le serveur a donné (``search_server``, ADR 0249)."""
+
+    #: les mails ramenés à l'instant (gardés ici, jamais rendus par ``fetch_new``)
+    kept: int = 0
+    #: ceux qui correspondent encore sur le serveur sans être ici
+    left: int = 0
+    #: les dossiers où l'on n'a pas cherché (refusés, changés sur le serveur, au-delà de ce qu'une recherche parcourt)
+    skipped: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class Contact:
     address: str
     name: str
@@ -275,8 +301,12 @@ class AccountInfo:
     tone: str = ""
     instructions: str = ""
     signature: str = ""
+    #: ses consignes de tri : où ranger, de quoi prévenir, ce qui appelle une réponse (ADR 0243)
+    triage_instructions: str = ""
     #: les dossiers qu'elle relève (les autres se consultent)
     folders: tuple[str, ...] = ("INBOX",)
+    #: tout son courrier est gardé ici : ses dossiers, sauf ``ASIDE``, téléchargés en entier (ADR 0249)
+    keep_all: bool = False
     ready: bool = False
     can_send: bool = False
     enabled: bool = True
@@ -299,6 +329,8 @@ class Folder:
     total: int = 0
     unseen: int = 0
     last_sync: int = 0  # µs, 0 : jamais relu
+    #: tout son historique est ici (``keep_history`` est allé jusqu'au bout, ADR 0249)
+    complete: bool = False
 
     @property
     def label(self) -> str:
@@ -444,6 +476,11 @@ class MailPort(Protocol):
         les retrouve au relevé suivant."""
         ...
 
+    def waiting(self) -> frozenset[str]:
+        """Les références des mails rendus par ``fetch_new`` et pas encore accusés :
+        ceux que son tri n'a pas encore lus (ADR 0240)."""
+        ...
+
     def seen_elsewhere(self) -> list[str]:
         """Les références des mails lus ailleurs (dans un autre client) depuis la
         dernière fois qu'on l'a demandé (vidé à la lecture)."""
@@ -468,6 +505,26 @@ class MailPort(Protocol):
         ...
 
     async def refresh_folders(self, account: str) -> list[Folder]: ...
+
+    async def create_folder(self, account: str, name: str) -> str:
+        """Crée un dossier sur le serveur et s'y abonne (les autres clients le montrent) ; rend son nom sur le
+        serveur, sous la racine des dossiers de la boîte (``INBOX.Factures`` chez certains). « / » sépare un
+        sous-dossier. Un dossier qui existe déjà est rendu tel quel. Lève ``ValueError`` (en français) pour un nom
+        impropre (ADR 0248)."""
+        ...
+
+    async def search_server(self, query: MailQuery, want: int) -> Found:
+        """Cherche sur le serveur d'une boîte (``query.account``), dans ``query.folder`` ou dans tous ses dossiers
+        sauf ``ASIDE`` : chaque mot de ``query.text`` dans l'objet, l'expéditeur ou le texte, chaque mot de
+        ``query.sender`` dans l'expéditeur. Garde ici les ``want`` plus récents qui correspondent et n'y sont pas
+        encore — jamais rendus par ``fetch_new`` — et dit combien d'autres attendent (ADR 0249)."""
+        ...
+
+    async def keep_history(self, account: str, limit: int) -> int:
+        """Tout garder en local (``AccountInfo.keep_all``) : ramène jusqu'à ``limit`` mails plus anciens que ceux
+        gardés, la réception d'abord puis chaque dossier sauf ``ASIDE``, jamais rendus par ``fetch_new`` ; un
+        dossier allé jusqu'au bout devient ``Folder.complete``. Rend combien ; 0 : tout est là (ADR 0249)."""
+        ...
 
     async def sync_folder(self, account: str, folder: str, limit: int) -> int:
         """Relit un dossier pour la console ; rend le nombre de mails nouveaux dans le

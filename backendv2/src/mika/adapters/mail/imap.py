@@ -13,6 +13,12 @@
   est toujours une ``OSError`` ou une ``ImapError``.
 - Une boîte Microsoft entre par ``AUTHENTICATE XOAUTH2`` avec le jeton d'accès
   qu'on lui donne (``oauth``, ADR 0166), les autres par ``LOGIN``.
+- Créer un dossier : sous la racine des dossiers personnels (``NAMESPACE``,
+  RFC 2342), puis s'y abonner (ADR 0248).
+- Chercher des mots : ``UID SEARCH`` dans l'objet, l'expéditeur ou le texte ; un
+  mot en ASCII voyage entre guillemets, un autre en littéral UTF-8, seul dans sa
+  commande (``imaplib`` n'en porte qu'un) ; les ensembles se croisent ici
+  (ADR 0249).
 """
 
 from __future__ import annotations
@@ -22,11 +28,16 @@ import imaplib
 import re
 import ssl
 from collections.abc import Callable
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from email import policy
+from email.parser import BytesHeaderParser
 from typing import Any, TypeVar
 
 from mika.adapters.mail import compose, oauth, utf7
 from mika.adapters.mail.config import MailAccount
+from mika.adapters.mail.parse import HEADER_MAX
+from mika.ports.mail import addresses
 
 TIMEOUT = 30.0
 FETCH_BATCH = 25
@@ -36,6 +47,16 @@ _UID = re.compile(rb"UID (\d+)", re.I)
 _FLAGS = re.compile(rb"FLAGS \(([^)]*)\)", re.I)
 _CODE = re.compile(rb"\[(UIDVALIDITY|UIDNEXT) (\d+)\]", re.I)
 _COPYUID = re.compile(rb"COPYUID \d+ [\d:,]+ (\d+)", re.I)
+#: la première racine personnelle d'une réponse ``NAMESPACE`` : ``(("INBOX." "."))`` ou ``(("" "/"))``
+_NAMESPACE = re.compile(rb'^\(\("((?:[^"\\]|\\.)*)"\s+(?:"((?:[^"\\]|\\.)*)"|NIL)', re.I)
+_INTERNALDATE = re.compile(rb'INTERNALDATE "\s?(\d{1,2})-([A-Za-z]{3})-(\d{4}) (\d{2}):(\d{2}):(\d{2}) ([+-])(\d{2})(\d{2})"',
+                           re.I)
+_MESSAGE_ID = re.compile(rb"^Message-ID:[ \t]*(\S[^\r\n]*)", re.I | re.M)
+_FOLD = re.compile(rb"\r?\n[ \t]+")
+#: le début d'une réponse ``FETCH`` (son numéro de séquence) : ce qui ne commence pas ainsi la continue
+_START = re.compile(rb"^\d+ \(")
+#: au plus, les mots d'une recherche envoyés au serveur
+WORDS_MAX = 8
 _SPECIAL = {"\\sent": "sent", "\\drafts": "drafts", "\\trash": "trash", "\\junk": "junk", "\\archive": "archive"}
 _NAMES = {
     "sent": ("sent", "sent items", "sent messages", "sent mail", "envoyés", "envoyes", "éléments envoyés",
@@ -88,6 +109,58 @@ def role_of(name: str, flags: frozenset[str]) -> str:
     return "archive" if "\\all" in flags else ""
 
 
+def _ascii(word: str) -> bool:
+    return word.isascii() and word.isprintable()
+
+
+def _astring(word: str) -> str:
+    """Un mot ASCII entre guillemets, échappé (RFC 3501)."""
+    return '"' + word.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def internaldate(text: bytes) -> int:
+    """L'instant (µs) d'un ``INTERNALDATE`` ; 0 s'il est illisible."""
+    found = _INTERNALDATE.search(text)
+    if not found:
+        return 0
+    day, month, year, hh, mm, ss, sign, oh, om = (g.decode("ascii") for g in found.groups())
+    try:
+        number = [m.lower() for m in _MONTHS].index(month.lower()) + 1
+        offset = (int(oh) * 60 + int(om)) * (1 if sign == "+" else -1)
+        at = datetime(int(year), number, int(day), int(hh), int(mm), int(ss), tzinfo=timezone(timedelta(minutes=offset)))
+    except ValueError:
+        return 0
+    return int(at.timestamp() * 1_000_000)
+
+
+@dataclass(frozen=True, slots=True)
+class Head:
+    """Ce qu'on lit d'un mail avant de le lire en entier : de quoi le dater, le reconnaître, et ne pas relire celui
+    d'un correspondant oublié."""
+
+    uid: int
+    #: sa date d'arrivée (µs), 0 si illisible
+    at: int
+    message_id: str
+    #: l'adresse de l'expéditeur, et celles des destinataires (« À », « Cc »), en minuscules
+    sender: str = ""
+    recipients: tuple[str, ...] = ()
+
+
+def _head(uid: int, at: int, literal: bytes) -> Head:
+    """Un en-tête court lu comme ``parse`` lit le mail : un en-tête plié se déplie, le Message-ID est borné."""
+    try:
+        msg = BytesHeaderParser(policy=policy.default).parsebytes(literal)
+        mid = " ".join(str(msg.get("Message-ID", "") or "").split())[:HEADER_MAX]
+        sender = next((a for _, a in addresses(str(msg.get("From", "") or ""))), "")
+        to = tuple(a for _, a in addresses(f"{msg.get('To', '') or ''},{msg.get('Cc', '') or ''}"))
+    except (TypeError, ValueError, IndexError):
+        found = _MESSAGE_ID.search(_FOLD.sub(b" ", literal))
+        mid = " ".join(found.group(1).decode("utf-8", "replace").split())[:HEADER_MAX] if found else ""
+        sender, to = "", ()
+    return Head(uid, at, mid, sender, to)
+
+
 def _unquote(raw: bytes) -> str:
     text = raw.decode("utf-8", "replace").strip()
     if len(text) >= 2 and text[0] == '"' and text[-1] == '"':
@@ -131,6 +204,8 @@ class Session:
         self.caps = {str(c).upper() for c in getattr(self.box, "capabilities", ())}
         self.selected = ""
         self.writable = False
+        #: le séparateur de la hiérarchie que la liste des dossiers dit (vide : pas encore lue)
+        self.delimiter = ""
 
     def __enter__(self) -> Session:
         return self
@@ -166,6 +241,9 @@ class Session:
             if not found:
                 continue
             flags = frozenset(f.lower() for f in found.group("flags").decode("ascii", "replace").split())
+            delim = found.group("delim")
+            if delim.upper() != b"NIL" and not self.delimiter:
+                self.delimiter = _unquote(delim)
             if "\\noselect" in flags or "\\nonexistent" in flags:
                 continue
             name = utf7.decode(_unquote(found.group("name")))
@@ -173,6 +251,35 @@ class Session:
             # son curseur ne se perd pas quand la liste se relit
             out.append(("INBOX" if name.upper() == "INBOX" else name, flags))
         return out
+
+    @_translated
+    def root(self) -> tuple[str, str]:
+        """La racine des dossiers personnels (``INBOX.`` chez certains, souvent rien) et le séparateur de la
+        hiérarchie : ce que dit ``NAMESPACE`` (RFC 2342), sinon ce que dit la liste des dossiers."""
+        if "NAMESPACE" in self.caps:
+            typ, data = self.box.namespace()
+            first = data[0] if typ == "OK" and data else None
+            found = _NAMESPACE.match(first.strip()) if isinstance(first, bytes) else None
+            if found:
+                prefix = utf7.decode(_unquote(b'"' + found.group(1) + b'"'))
+                delim = _unquote(b'"' + found.group(2) + b'"') if found.group(2) is not None else ""
+                if not delim and not self.delimiter:
+                    self.folders()
+                return prefix, delim or self.delimiter or "/"
+        if not self.delimiter:
+            self.folders()
+        return "", self.delimiter or "/"
+
+    @_translated
+    def create(self, name: str) -> None:
+        """Crée un dossier (son nom complet sur le serveur), puis s'y abonne : sans abonnement, bien des clients ne le
+        montrent pas. Un abonnement refusé n'empêche rien."""
+        self._ok(self.box.create(quoted(name)), f"création du dossier « {name} » refusée")
+        try:
+            self.box.subscribe(quoted(name))
+        except imaplib.IMAP4.error as exc:
+            if isinstance(exc, imaplib.IMAP4.abort):
+                raise
 
     @_translated
     def select(self, name: str, *, write: bool = False) -> tuple[int, int, int]:
@@ -208,6 +315,55 @@ class Session:
     def search(self, criteria: str) -> list[int]:
         data = self._ok(self.box.uid("SEARCH", None, criteria), "recherche refusée")
         return sorted({int(u) for u in (data[0] or b"").split() if u.isdigit()}) if data else []
+
+    @_translated
+    def matching(self, words: list[str], senders: list[str]) -> list[int]:
+        """Les UID du dossier ouvert dont l'objet, l'expéditeur ou le texte portent chaque mot de ``words``, et dont
+        l'expéditeur porte chaque mot de ``senders`` (le serveur ne distingue pas la casse). Les mots ASCII partent
+        en une commande ; chaque autre, en littéral UTF-8, une commande par champ."""
+        words, senders = words[:WORDS_MAX], senders[:WORDS_MAX]
+        plain = [f"OR SUBJECT {_astring(w)} OR FROM {_astring(w)} BODY {_astring(w)}" for w in words if _ascii(w)]
+        plain += [f"FROM {_astring(w)}" for w in senders if _ascii(w)]
+        found: set[int] | None = set(self.search(" ".join(plain))) if plain else None
+        wide = [(("SUBJECT", "FROM", "BODY"), w) for w in words if not _ascii(w)]
+        wide += [(("FROM",), w) for w in senders if not _ascii(w)]
+        for keys, word in wide:
+            if found is not None and not found:
+                break
+            hits: set[int] = set()
+            for key in keys:
+                self.box.literal = word.encode("utf-8")
+                data = self._ok(self.box.uid("SEARCH", "CHARSET", "UTF-8", key), "recherche refusée")
+                hits |= {int(u) for u in (data[0] or b"").split() if u.isdigit()} if data else set()
+            found = hits if found is None else found & hits
+        return sorted(found or ())
+
+    @_translated
+    def heads(self, uids: list[int]) -> list[Head]:
+        """L'en-tête court de ces mails (``Head``), sans les lire en entier ni poser ``\\Seen``."""
+        out = []
+        for i in range(0, len(uids), 200):
+            batch = ",".join(str(u) for u in uids[i:i + 200])
+            data = self._ok(self.box.uid("FETCH", batch,
+                                         "(UID INTERNALDATE BODY.PEEK[HEADER.FIELDS (MESSAGE-ID FROM TO CC)])"),
+                            "lecture refusée")
+            # une réponse : ses éléments d'en-tête et son littéral (l'en-tête du mail) ; ce qui suit le littéral
+            # (« INTERNALDATE … ) », l'ordre est celui du serveur) arrive à part, et se recolle à elle
+            answers: list[list[bytes]] = []
+            for item in data or ():
+                if isinstance(item, tuple) and isinstance(item[0], bytes | bytearray):
+                    literal = item[1] if len(item) > 1 and isinstance(item[1], bytes | bytearray) else b""
+                    answers.append([bytes(item[0]), bytes(literal)])
+                elif isinstance(item, bytes | bytearray):
+                    if _START.match(item) or not answers:
+                        answers.append([bytes(item), b""])
+                    else:
+                        answers[-1][0] += b" " + bytes(item)
+            for head, literal in answers:
+                uid = _UID.search(head)
+                if uid:
+                    out.append(_head(int(uid.group(1)), internaldate(head), literal))
+        return out
 
     @_translated
     def fetch(self, uids: list[int]) -> list[tuple[int, frozenset[str], bytes]]:

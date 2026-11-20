@@ -52,7 +52,7 @@ class SettingsApiTest {
         ok(
             """{"box":"pro","values":{"label":"Pro","address":"a@b.fr","enabled":true,"auth":"microsoft","imap_host":"outlook.office365.com",
                "imap_port":993,"imap_ssl":true,"user":"a@b.fr","folders":["INBOX","Sent"],"sync_all":false,"since_days":7,
-               "oauth_client_id":"abc","oauth_tenant":"consumers","smtp_host":"","smtp_port":587,"smtp_security":"starttls",
+               "triage_instructions":"range les publicités dans PUB","oauth_client_id":"abc","oauth_tenant":"consumers","smtp_host":"","smtp_port":587,"smtp_security":"starttls",
                "smtp_user":"","save_sent":true,"voice":"assistante","display_name":"Adrien","sender_name":"","tone":"","instructions":"",
                "signature":"","futur":1},"secrets":{"password":false,"smtp_password":true},"ready":false,"can_send":false,"microsoft":true,
                "signin":{"state":"en_attente","code":"ABCD-1234","url":"https://microsoft.com/devicelogin","until":1790800000000,"error":""},
@@ -64,6 +64,7 @@ class SettingsApiTest {
         assertEquals(Auths.MICROSOFT, s.values.auth)
         assertEquals(listOf("INBOX", "Sent"), s.values.folders)
         assertEquals(Voices.ASSISTANT, s.values.voice)
+        assertEquals("range les publicités dans PUB", s.values.triageInstructions)
         assertTrue(s.secrets.smtpPassword)
         assertFalse(s.secrets.password)
         assertTrue(s.signin!!.waiting)

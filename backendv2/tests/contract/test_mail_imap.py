@@ -13,7 +13,15 @@ protocole.
   sont ajoutées, le fil est chaîné, une copie est rangée dans « Envoyés » et le
   mail d'origine est marqué répondu ; un brouillon ne part que tel qu'il a été
   lu, et jamais avec un « [À COMPLÉTER » ;
-- l'ancienne configuration (un seul compte) est reprise.
+- l'ancienne configuration (un seul compte) est reprise ;
+- créer un dossier : sous la racine que dit ``NAMESPACE``, abonné, jamais deux
+  fois (ADR 0248) ;
+- chercher sur le serveur : chaque mot dans l'objet, l'expéditeur ou le texte,
+  un littéral UTF-8 pour un mot accentué, jamais dans les indésirables ni la
+  corbeille sans qu'on les nomme ; les plus récents qui manquent sont ramenés,
+  sans jamais être rendus comme arrivés, sauf ce que la relève n'a pas encore
+  atteint ; tout garder en local télécharge l'historique, les plus récents
+  d'abord, sans rien rendre, et un dossier allé au bout est complet (ADR 0249).
 """
 
 from __future__ import annotations
@@ -29,7 +37,7 @@ import pytest
 
 from mika.adapters.mail import ImapSmtpMail, MailAccount, MailConfig, compose, from_stored, utf7
 from mika.adapters.mail.parse import attachment_files, parse
-from mika.ports.mail import AccountInfo, Draft, Mail, reply_recipients, split_ref
+from mika.ports.mail import AccountInfo, Draft, Found, Mail, MailQuery, reply_recipients, split_ref
 from tests.fixtures.mail_servers import Box, Imap, Smtp, raw_mail, serve
 
 NOW = datetime(2026, 9, 28, 12, tzinfo=UTC)
@@ -372,3 +380,167 @@ def test_without_all_folders_the_others_wait_for_the_console(tmp_path, servers):
     box.ack([m.ref for m in go(box.fetch_new(10))])
     assert box.cached(10, folder="Archives") == []
     assert go(box.sync_folder("perso", "Archives", 10)) == 1
+
+
+# ── créer un dossier (ADR 0248) ─────────────────────────────────────────
+
+
+def test_she_creates_a_folder_under_the_servers_root_subscribed_and_only_once(tmp_path, servers):
+    box = box_for(tmp_path, ("perso", account(*servers)))
+    assert go(box.create_folder("perso", "Factures/EDF")) == "Factures/EDF"
+    assert "Factures/EDF" in Imap.boxes and Imap.subscribed == ["Factures/EDF"]
+    assert "Factures/EDF" in {f.name for f in box.folders("perso")}
+    assert go(box.create_folder("perso", "Factures/EDF")) == "Factures/EDF"  # il existe : rien de plus
+    assert sum(c.upper().startswith("CREATE") for c in Imap.commands) == 1
+    # un nom accentué voyage en UTF-7 modifié ; on y range aussitôt
+    assert go(box.create_folder("perso", "Données")) == "Données" and "Données" in Imap.boxes
+    [m, _] = go(box.fetch_new(10))
+    assert go(box.move(m.ref, "Données")) == "Données" and len(Imap.boxes["Données"].mails) == 1
+    for bad in ("", "  ", "a//b", "x" * 201):
+        with pytest.raises(ValueError):
+            go(box.create_folder("perso", bad))
+
+
+def test_a_server_that_roots_folders_under_inbox_gets_them_there(tmp_path, servers):
+    Imap.caps += " NAMESPACE"
+    Imap.namespace = ("INBOX.", ".")
+    box = box_for(tmp_path, ("perso", account(*servers)))
+    assert go(box.create_folder("perso", "Factures")) == "INBOX.Factures"
+    assert go(box.create_folder("perso", "Factures/EDF")) == "INBOX.Factures.EDF"
+    assert go(box.create_folder("perso", "INBOX.Factures")) == "INBOX.Factures"  # son nom sur le serveur suffit
+    assert {"INBOX.Factures", "INBOX.Factures.EDF"} <= set(Imap.boxes)
+    labels = {f.name: f.label for f in box.folders("perso")}
+    assert labels["INBOX.Factures"] == "Factures"
+
+
+# ── chercher sur le serveur, tout garder en local (ADR 0249) ─────────────
+
+
+def _dated(uid: int, subject: str, body: str, day: int, **kw) -> bytes:
+    return raw_mail(uid, subject, body, date=f"{day:02d} Mar 2025 09:00:00 +0100", **kw)
+
+
+def test_a_search_on_the_server_brings_the_newest_missing_and_never_hands_them_to_her(tmp_path, servers):
+    for uid, day in ((1, 3), (2, 10), (3, 20)):
+        Imap.boxes["Archives"].add(_dated(100 + uid, f"Facture EDF {day} mars", "Votre facture", day), uid=uid)
+    Imap.boxes["Archives"].add(_dated(104, "Autre chose", "rien à voir", 25), uid=4)
+    Imap.boxes["Corbeille"].add(_dated(105, "Facture EDF jetée", "Votre facture", 28))
+    Imap.boxes["Envoyés"].add(_dated(106, "Re: au café", "On se voit au café de la gare", 5))
+    box = box_for(tmp_path, ("perso", account(*servers)))
+    box.ack([m.ref for m in go(box.fetch_new(10))])  # la relève : la réception seule
+    # arrivé après la relève : la recherche le ramène, la relève le lui rendra quand même
+    Imap.boxes["INBOX"].add(_dated(107, "Facture EDF avril", "Votre facture", 30), uid=9)
+    before = len(Imap.commands)
+    found = go(box.search_server(MailQuery(account="perso", text="facture edf"), 3))
+    assert found == Found(kept=3, left=1)
+    assert {m.subject for m in box.cached(20) if "EDF" in m.subject} == \
+        {"Facture EDF avril", "Facture EDF 20 mars", "Facture EDF 10 mars"}  # les plus récents
+    sent = Imap.commands[before:]
+    assert not any(c.upper().startswith(("SELECT", "UID STORE")) for c in sent)  # EXAMINE : rien n'est marqué lu
+    assert not any('"Corbeille"' in c or "Corbeille" in c for c in sent if c.upper().startswith("EXAMINE"))
+    arrived = go(box.fetch_new(10))
+    assert [m.subject for m in arrived] == ["Facture EDF avril"]  # le seul arrivé
+    box.ack([m.ref for m in arrived])
+    # la page suivante ramène le reste ; la corbeille, seulement nommée
+    assert go(box.search_server(MailQuery(account="perso", text="facture edf"), 3)) == Found(kept=1, left=0)
+    assert go(box.search_server(MailQuery(account="perso", folder="Corbeille", text="facture"), 3)) == \
+        Found(kept=1, left=0)
+    # un mot accentué part en littéral UTF-8, sans casse ; l'expéditeur aussi se cherche
+    assert go(box.search_server(MailQuery(account="perso", text="Café gare"), 5)) == Found(kept=1, left=0)
+    assert any("CHARSET UTF-8" in c for c in Imap.commands)
+    assert go(box.search_server(MailQuery(account="perso", sender="personne@ailleurs.fr"), 5)) == Found()
+    assert go(box.fetch_new(10)) == []
+    assert all(not flags for b in Imap.boxes.values() for flags, _ in b.mails.values())
+
+
+def test_keeping_everything_downloads_history_newest_first_and_never_hands_it(tmp_path, servers):
+    Imap.reset({i: raw_mail(i, f"Historique {i}", "Texte") for i in range(1, 31)})
+    for uid in range(1, 6):
+        Imap.boxes["Archives"].add(raw_mail(200 + uid, f"Archive {uid}", "Texte"), uid=uid)
+    Imap.boxes["Indésirables"].add(raw_mail(300, "Gagnez", "un lot"))
+    box = box_for(tmp_path, ("pro", account(*servers, keep_all=True)))
+    # la réception avait été relevée à partir des deux derniers
+    for uid in (29, 30):
+        box._cache.store(parse(Imap.boxes["INBOX"].mails[uid][1], str(uid), account="pro", folder="INBOX",
+                               complete=True), uid)
+        box._cache.hand("pro", f"<mail-{uid}@exemple.fr>")
+    box._cache.save_folder("pro", "INBOX", uidvalidity=Imap.boxes["INBOX"].validity, uidnext=31)
+    assert go(box.keep_history("pro", 20)) == 20
+    assert box._cache.oldest_uid("pro", "INBOX") == 9  # les plus récents d'abord
+    assert not {f.name: f for f in box.folders("pro")}["INBOX"].complete
+    assert go(box.keep_history("pro", 20)) == 8 + 5  # la fin de la réception, puis les archives
+    folders = {f.name: f for f in box.folders("pro")}
+    assert folders["INBOX"].complete and folders["Archives"].complete and folders["Envoyés"].complete
+    assert not folders["Indésirables"].complete and box.cached(5, folder="Indésirables") == []  # à part
+    logins = len(Imap.logins)
+    assert go(box.keep_history("pro", 20)) == 0 and len(Imap.logins) == logins  # tout est là : pas de connexion
+    assert go(box.fetch_new(50)) == []  # rien de l'historique ne lui est rendu
+    assert len(box.cached(100, folder="INBOX")) == 30
+    assert not any(c.upper().startswith("UID STORE") for c in Imap.commands)
+    # sans la case, rien ne se télécharge
+    plain = box_for(tmp_path / "autre", ("pro", account(*servers)))
+    assert go(plain.keep_history("pro", 20)) == 0
+
+
+def test_keeping_everything_keeps_every_folder_up_to_date_but_junk_and_trash(tmp_path, servers):
+    Imap.boxes["Archives"].add(raw_mail(4, "Facture", "Votre facture d'octobre"))
+    Imap.boxes["Indésirables"].add(raw_mail(5, "Gagnez", "un lot"))
+    box = box_for(tmp_path, ("perso", account(*servers, keep_all=True)))
+    first = go(box.fetch_new(10))
+    assert [m.folder for m in first] == ["INBOX", "INBOX"]
+    assert [m.subject for m in box.cached(10, folder="Archives")] == ["Facture"]
+    assert box.cached(10, folder="Indésirables") == []
+    assert box.account("perso").keep_all
+
+
+def test_a_forgotten_correspondent_never_comes_back_from_history_or_a_search(tmp_path, servers):
+    paul = "Paul <paul@ailleurs.fr>"
+    for uid in range(1, 4):
+        Imap.boxes["Archives"].add(_dated(400 + uid, f"Facture Paul {uid}", "Votre facture", uid, sender=paul), uid=uid)
+    Imap.boxes["Archives"].add(_dated(410, "Facture Alice", "Votre facture", 9), uid=10)
+    Imap.boxes["Envoyés"].add(_dated(411, "Re: Facture", "Votre facture, Paul", 9, to=paul,
+                                      sender="Mika <mika@exemple.fr>"))
+    first = box_for(tmp_path, ("perso", account(*servers)))  # sans la case : la réception seule est relevée
+    first.ack([m.ref for m in go(first.fetch_new(10))])
+    assert go(first.forget("mail:paul@ailleurs.fr")) == 0  # rien de lui n'était encore ici
+    first._cache.close()
+    box = box_for(tmp_path, ("perso", account(*servers, keep_all=True)))  # puis on coche « Tout garder en local »
+    # la recherche ne les relit pas et ne les compte pas ; l'historique les passe sans les garder
+    assert go(box.search_server(MailQuery(account="perso", text="facture"), 10)) == Found(kept=1, left=0)
+    go(box.keep_history("perso", 50))
+    kept = [m.subject for m in box.cached(50)]
+    assert "Facture Alice" in kept and not [s for s in kept if "Paul" in s or s == "Re: Facture"]
+    assert {f.name: f for f in box.folders("perso")}["Archives"].complete  # sans tourner en rond
+    assert go(box.keep_history("perso", 50)) == 0
+    # ce qu'il écrit après l'oubli est une correspondance nouvelle
+    Imap.boxes["INBOX"].add(raw_mail(420, "Bonjour", "Je reviens", sender=paul,
+                                     date="Tue, 29 Sep 2026 10:00:00 +0200"))
+    assert [m.subject for m in go(box.fetch_new(10))] == ["Bonjour"]
+
+
+def test_history_fills_the_holes_a_search_left_and_is_complete_only_when_everything_is_here(tmp_path, servers):
+    Imap.reset({i: raw_mail(i, f"Historique {i}", "Texte") for i in range(1, 31)})
+    Imap.boxes["INBOX"].mails[5][1] = raw_mail(5, "Facture EDF 2019", "Texte")
+    box = box_for(tmp_path, ("pro", account(*servers, keep_all=True)))
+    for uid in (29, 30):
+        box._cache.store(parse(Imap.boxes["INBOX"].mails[uid][1], str(uid), account="pro", folder="INBOX",
+                               complete=True), uid)
+        box._cache.hand("pro", f"<mail-{uid}@exemple.fr>")
+    box._cache.save_folder("pro", "INBOX", uidvalidity=Imap.boxes["INBOX"].validity, uidnext=31)
+    assert go(box.search_server(MailQuery(account="pro", text="facture edf"), 5)).kept == 1  # un mail épars, ancien
+    while go(box.keep_history("pro", 10)):
+        pass
+    assert len(box.cached(100, folder="INBOX")) == 30  # aucun trou entre lui et les plus récents
+    assert {f.name: f for f in box.folders("pro")}["INBOX"].complete
+    assert go(box.fetch_new(50)) == []
+
+
+def test_a_copy_read_elsewhere_never_hides_a_new_mail_from_her_triage(tmp_path, servers):
+    box = box_for(tmp_path, ("perso", account(*servers, keep_all=True)))
+    box.ack([m.ref for m in go(box.fetch_new(10))])  # la relève : 3 et 7, curseur à 8
+    # Gmail : le même mail arrive dans la réception et dans « Tous les messages », pendant qu'elle dort
+    fresh = raw_mail(9, "Arrivé cette nuit", "Bonjour")
+    Imap.boxes["INBOX"].add(fresh, uid=9)
+    Imap.boxes["Archives"].add(fresh, uid=1)
+    go(box.keep_history("perso", 50))  # l'historique passe d'abord, et lit ses deux copies
+    assert [m.subject for m in go(box.fetch_new(10))] == ["Arrivé cette nuit"]  # son tri le lira quand même

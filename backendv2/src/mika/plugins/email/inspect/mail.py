@@ -347,6 +347,12 @@ def _tab_thread(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]
             Note("Tous les messages conservés de ce compte, reçus et envoyés. ↗ : message envoyé.", tone="muted")]
 
 
+#: qui a jugé un mail à son arrivée (ADR 0240)
+TRIAGE_SAID = {c.TRIAGE_MODEL: "lu par le modèle",
+               c.TRIAGE_FALLBACK: "deviné : le modèle n'a pas répondu (ou son tri est coupé)",
+               c.TRIAGE_BULK: "envoi en masse : pas montré au modèle"}
+
+
 @EMAIL.inspect("remarque", title="Ce qu'elle en sait", subject="mail", order=20,
                description="Ce qu'elle a retenu de ce message et les événements associés.")
 def _tab_noticed(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
@@ -382,6 +388,8 @@ def _tab_noticed(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block
     elif ask is not None:
         blocks.append(Note(f"Tu lui as demandé d'y répondre ({ctx.when(ask.at)}) : elle le fera à son prochain "
                            "moment de travail (au réveil si elle dort).", tone="info"))
+    if seen is None and port is not None and ref in port.waiting():
+        return [*blocks, Note("Son tri ne l'a pas encore lu : il le lira au prochain relevé.", tone="info")]
     if seen is None:
         return [*blocks, Note("Elle ne l'a pas (ou plus) remarqué : il est dans la boîte, sans plus.", tone="muted")]
     p = params_of(frame)
@@ -394,6 +402,12 @@ def _tab_noticed(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block
         # d'un mail lu ne le dit plus (audit du 2026-11-05, C4-04)
         ("important", "oui" if important(seen, p) else "non"),
     ]
+    if seen.triage in TRIAGE_SAID:
+        pairs.append(("son tri", TRIAGE_SAID[seen.triage]))
+    rule = [said for said in ("te prévenir" if seen.alert else "",
+                              f"le ranger dans « {seen.file_to} »" if seen.file_to else "") if said]
+    if rule:
+        pairs.append(("ses consignes de tri", " ; ".join(rule)))
     if signal is not None:
         pairs.append(("ce que ça pourrait lui faire", emotion_cell(signal.data.emotion, signal.data.intensity or None)))
     if felt is not None:

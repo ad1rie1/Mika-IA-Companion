@@ -14,6 +14,9 @@ npm test           # vitest
 
 - Une autre adresse du moteur : `VITE_BACKEND_ORIGIN` dans `.env.local` (voir `.env.example`).
 - **Studio** : `npm run dev` puis `/studio.html` donne l'avatar sans backend ni connexion.
+- **Son modèle** (ADR 0252) : `public/models/default.vrm` si tu y mets le tien (jamais versionné : un modèle acheté ne
+  se redistribue pas) ; sinon le modèle libre du dépôt, `public/models/mika-libre.vrm` (fait dans VRoid Studio,
+  VRM 1.0). `vtuber/VTuberModel.ts::MODEL_URLS` dit l'ordre.
 
 ## Architecture (`src/`)
 

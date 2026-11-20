@@ -78,6 +78,16 @@ export class Cached<T> {
   invalidate(): void {
     this.at = 0;
   }
+
+  /** Ce qu'une écriture a rendu (une fiche actualisée) : la valeur lue, comme si elle venait d'arriver. */
+  put(value: T): void {
+    const said = JSON.stringify(value);
+    if (said !== this.said || this.error !== null) this.version += 1;
+    this.said = said;
+    this.value = value;
+    this.error = null;
+    this.at = Date.now();
+  }
 }
 
 /** Des lectures gardées par clé (un fil, une boîte). */

@@ -13,6 +13,8 @@ import {
   draftReply,
   forwardSubject,
   howLabel,
+  deleteTargets,
+  triageLabel,
   markToFill,
   ofName,
   outgoingText,
@@ -145,6 +147,14 @@ describe("le texte d'un mail", () => {
 });
 
 describe("ce qu'elle en a fait", () => {
+  it("son tri : lu, en attente, deviné, survolé (ADR 0240)", () => {
+    expect(triageLabel("read")).toMatchObject({ text: "lu par son tri", row: true, note: "" });
+    expect(triageLabel("waiting")?.note).toContain("prochain relevé");
+    expect(triageLabel("guessed")).toMatchObject({ text: "tri deviné", row: true });
+    expect(triageLabel("bulk")?.row).toBe(false); // un envoi en masse : rien sur la ligne
+    expect(triageLabel("")).toBeNull();
+    expect(triageLabel(undefined)).toBeNull(); // un serveur d'avant
+  });
   it("« lu par elle », « archivé par elle », la corbeille", () => {
     expect(howLabel("")).toEqual({ text: "lu par elle", icon: "eye" });
     expect(howLabel("archivé")).toEqual({ text: "archivé par elle", icon: "archive" });
@@ -262,5 +272,24 @@ describe("ta réponse partie de son brouillon (R2-02)", () => {
     expect(draftReply([d("parti")], "d1")).toEqual({ via: "stop", why: "Son brouillon est déjà parti." });
     expect(draftReply([d("approuve")], "d1")).toEqual({ via: "stop", why: "Son brouillon est déjà parti." });
     expect(draftReply([d("echec")], "d1")).toMatchObject({ via: "stop" });
+  });
+});
+
+describe("la touche Suppr", () => {
+  const row = { tag: "DIV", editable: false };
+  const key = (target: { tag: string; type?: string; editable: boolean } = row, k = "Delete", ctrl = false) => ({ key: k, ctrl, target });
+  it("met à la corbeille les mails cochés, sinon le mail ouvert qu'on peut ranger", () => {
+    expect(deleteTargets(key(), ["a", "b"], { ref: "c", tidy: true })).toEqual(["a", "b"]);
+    expect(deleteTargets(key({ tag: "INPUT", type: "checkbox", editable: false }), ["a"], null)).toEqual(["a"]); // la case qu'on vient de cocher
+    expect(deleteTargets(key(), [], { ref: "c", tidy: true })).toEqual(["c"]);
+    expect(deleteTargets(key(), [], { ref: "c", tidy: false })).toEqual([]); // une boîte qu'on ne fait que lire
+    expect(deleteTargets(key(), [], null)).toEqual([]);
+  });
+  it("jamais dans un champ qu'on remplit, ni avec une autre touche", () => {
+    expect(deleteTargets(key({ tag: "TEXTAREA", editable: false }), ["a"], null)).toEqual([]);
+    expect(deleteTargets(key({ tag: "INPUT", type: "text", editable: false }), ["a"], null)).toEqual([]);
+    expect(deleteTargets(key({ tag: "DIV", editable: true }), ["a"], null)).toEqual([]);
+    expect(deleteTargets(key(row, "Backspace"), ["a"], null)).toEqual([]);
+    expect(deleteTargets(key(row, "Delete", true), ["a"], null)).toEqual([]);
   });
 });

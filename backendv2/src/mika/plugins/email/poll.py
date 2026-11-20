@@ -4,7 +4,9 @@ important est arrivé."""
 from __future__ import annotations
 
 import json
+import logging
 import re
+from collections.abc import Sequence
 from typing import Any
 
 from mika.contracts import body as body_c
@@ -39,6 +41,8 @@ from mika.vocab.episodes import Kind
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
 
+log = logging.getLogger(__name__)
+
 
 def triage_system(name: str, persona: str) -> str:
     """La consigne du tri, pour la boîte de celle qui lit (son nom, celui de sa persona : jamais écrit ici) ; les
@@ -48,18 +52,52 @@ def triage_system(name: str, persona: str) -> str:
                   names=", ".join(e.value for e in Emotion if e is not Emotion.NEUTRAL)) + "\n\n" + phrase(
         "self.portrayed.intro", name=name, persona=persona)
 
+#: les dossiers où ses consignes de tri ne rangent jamais (ADR 0243)
+UNFILED = ("drafts", "sent")
+#: ce qu'on garde des consignes de tri d'une boîte dans le prompt du tri
+RULES_MAX = 2000
+#: comment elle a quitté ses non-lus un mail que sa consigne a rangé (comme ``email_tidy``)
+MOVED = "déplacé"
+
+
+def triage_rules(info: Any, folders: Sequence[Any]) -> str:
+    """Les consignes de tri d'une boîte, à la suite de la consigne du tri, avec ses dossiers où ranger ; rien sans
+    consigne (ADR 0243)."""
+    text = (getattr(info, "triage_instructions", "") or "").strip()
+    if not text:
+        return ""
+    names = [inert(f.name, 80) for f in folders if f.role not in UNFILED]
+    return phrase("email.triage.rules", instructions=inert(text, RULES_MAX),
+                  folders=", ".join(names) or phrase("email.triage.no_folders"))
+
+
+def filed_into(wanted: str, folders: Sequence[Any], here: str) -> str:
+    """Le dossier où sa consigne range un mail : un dossier qui existe dans sa boîte (son nom exact, sinon son nom
+    ou son libellé sans la casse), jamais ses brouillons ni ses envoyés, ni celui où il est déjà ; sinon rien."""
+    wanted = wanted.strip()
+    if not wanted:
+        return ""
+    allowed = [f for f in folders if f.role not in UNFILED]
+    found = next((f for f in allowed if f.name == wanted), None) or next(
+        (f for f in allowed if wanted.casefold() in (f.name.casefold(), getattr(f, "label", f.name).casefold())), None)
+    return found.name if found is not None and found.name != here else ""
+
+
 _JSON = re.compile(r"\{.*\}", re.S)
 #: au-delà, un mail qu'elle annonce ne « vient » plus d'arriver : elle dit l'heure où il est arrivé
 FRESH_FOR = 30 * MINUTE
+#: des mails attendent encore son tri : le relevé suivant vient au plus tard dans ce délai (ADR 0240)
+BEHIND_EVERY = 2 * MINUTE
 
 
 def heuristic(m: Any) -> dict[str, Any]:
-    """Sans tri (au-delà du relevé, quota, panne) : l'importance et la réponse attendue, devinées ; jamais une
-    émotion — ce qu'un mail lui fait, seul le modèle le dit (ADR 0147)."""
+    """Sans le modèle (un envoi en masse, un tri en panne ou retenu par le quota) : l'importance, devinée ; jamais une
+    réponse attendue (ADR 0240 : un « ? » de pied de page ou « ne pas répondre » la faisaient deviner à tort), jamais
+    une émotion — ce qu'un mail lui fait, seul le modèle le dit (ADR 0147)."""
     low = f"{m.subject} {m.body[:500]}".lower()
     importance = 0.1 if m.bulk else 0.8 if any(w in low for w in ("urgent", "important", "asap")) else 0.45
-    asks = not m.bulk and ("?" in m.body[:2000] or any(w in low for w in ("réponds", "répondre", "dis-moi")))
-    return {"importance": importance, "resume": "", "reponse": asks, "emotion": "", "intensite": 0.0}
+    return {"importance": importance, "resume": "", "reponse": False, "emotion": "", "intensite": 0.0,
+            "dossier": "", "prevenir": False}
 
 
 def read_triage(text: str, fallback: dict[str, Any]) -> dict[str, Any]:
@@ -78,7 +116,8 @@ def read_triage(text: str, fallback: dict[str, Any]) -> dict[str, Any]:
         importance = fallback["importance"]
     emotion, intensity = named_feeling(data.get("emotion"), data.get("intensite"))
     return {"importance": importance, "resume": str(data.get("resume") or "")[:300],
-            "reponse": bool(data.get("reponse")), "emotion": emotion, "intensite": intensity}
+            "reponse": bool(data.get("reponse")), "emotion": emotion, "intensite": intensity,
+            "dossier": str(data.get("dossier") or "")[:200], "prevenir": data.get("prevenir") is True}
 
 
 @EMAIL.process("email.poll", wake_on=[*body_c.ALL, POLL_ASKED], catch_up=CatchUp.ONCE,
@@ -86,6 +125,7 @@ def read_triage(text: str, fallback: dict[str, Any]) -> dict[str, Any]:
 class Poll:
     def __init__(self) -> None:
         self.unconfigured = False  # rien de configuré : on revérifie d'heure en heure
+        self.behind = False  # des mails attendent son tri (au-delà de ceux du dernier relevé) : on y revient vite
 
     def next_due(self, s: EmailState, frame: Frame, last_run: int | None) -> int | None:
         if s.poll_asked and s.poll_asked > (last_run or 0):
@@ -95,6 +135,8 @@ class Poll:
         p = params_of(frame)
         # la cadence vit dans l'ordonnanceur : un relevé vide ne s'écrit pas (le monde n'est pas sa vie)
         every = max(p.poll_every_us, HOUR) if self.unconfigured else p.poll_every_us
+        if self.behind:
+            every = min(every, BEHIND_EVERY)
         return max(frame.now, (last_run or 0) + every)
 
     async def run(self, ctx: Any) -> None:
@@ -107,22 +149,50 @@ class Poll:
         known = ctx.state.mails
         fetched = await port.fetch_new(p.per_poll)
         mails = [m for m in fetched if m.ref not in known]
-        labels = {a.key: a.name for a in port.accounts()}
+        accounts = {a.key: a for a in port.accounts()}
+        labels = {k: a.name for k, a in accounts.items()}
         several = len(labels) > 1
         drafts: list[Any] = []
-        system = triage_system(self_c.name_of(frame.get(self_c.PERSONA)), frame.get(self_c.PORTRAYED("compact"))) \
+        base = triage_system(self_c.name_of(frame.get(self_c.PERSONA)), frame.get(self_c.PORTRAYED("compact"))) \
             if mails else ""
+        # par boîte : la consigne du tri, ses consignes de tri à elle (ADR 0243), et ses dossiers où ranger
+        boxes: dict[str, tuple[str, str, list[Any]]] = {}
+        moves: list[tuple[str, str, bool]] = []  # (réf, dossier, prévenir) : rangés après l'événement
+        # le budget de « Mails triés par le modèle » ne compte que les appels faits : un envoi en masse n'en prend
+        # aucun ; au-delà, un mail n'est ni deviné ni remarqué : il attend le relevé suivant, sans accusé — sauf
+        # quand le tri par le modèle est coupé (0) : tout se devine (ADR 0240)
+        budget = p.triage_per_poll
+        later: set[str] = set()
         for i, m in enumerate(mails):
+            if m.account not in boxes:
+                folders = port.folders(m.account)
+                rules = triage_rules(accounts.get(m.account), folders)
+                boxes[m.account] = (base + ("\n\n" + rules if rules else ""), rules, folders)
+            system, rules, folders = boxes[m.account]
             guess = heuristic(m)
-            triage = guess
-            if i < p.triage_per_poll and not m.bulk:
+            triage, how = guess, c.TRIAGE_BULK if m.bulk else c.TRIAGE_FALLBACK
+            # une boîte qui a des consignes de tri fait lire au modèle ses envois en masse aussi : ce sont eux, le
+            # plus souvent, qu'on veut ranger
+            if (not m.bulk or rules) and p.triage_per_poll:
+                if budget <= 0:
+                    later.add(m.ref)
+                    continue
+                budget -= 1
                 req = LLMRequest(role="triage", call_id=f"{ctx.run_id}#{i}", system_stable=system,
                                  messages=(Message("user", phrase("email.header.from", who=m.sender) + "\n"
                                                    + phrase("email.header.subject", subject=m.subject)
                                                    + f"\n\n{m.body[:3000]}"),),
-                                 max_tokens=200, lane="background", priority=3)
-                resp = await ctx.ask(req)  # un tri raté n'empêche pas de remarquer le mail
+                                 max_tokens=300 if rules else 200, lane="background", priority=3)
+                resp = await ctx.ask(req)  # un tri raté n'empêche pas de remarquer le mail : le repli le juge
                 triage = read_triage(resp.text, guess) if resp is not None else guess
+                how = c.TRIAGE_FALLBACK if triage is guess else c.TRIAGE_MODEL
+            # ce que ses consignes de tri en font, quand le modèle l'a lu : prévenir (il devient important), ranger
+            ruled = bool(rules) and how == c.TRIAGE_MODEL
+            alert = ruled and triage["prevenir"]
+            file_to = filed_into(triage["dossier"], folders, m.folder) if ruled else ""
+            importance = max(triage["importance"], p.mention_from) if alert else triage["importance"]
+            if file_to:
+                moves.append((m.ref, file_to, alert))
             # l'expéditeur a choisi son nom et son objet : rendus inertes (ni titre de section, ni fin d'état
             # interne), ce résumé devient une pensée et voyage dans ses prompts
             who = inert(name_of(m.sender), 80)
@@ -139,11 +209,11 @@ class Poll:
             # ce qu'il lui fait, tel que le tri le dit : la veille le dose comme pour toute source (ADR 0147)
             drafts.append(c.NOTICED.draft(
                 source="email", kind=c.MAIL, summary=Content.of(summary[:400], level=int(Sensitivity.PERSONAL)),
-                pertinence=triage["importance"], emotion=triage["emotion"], intensity=triage["intensite"],
+                pertinence=importance, emotion=triage["emotion"], intensity=triage["intensite"],
                 sensitivity=int(Sensitivity.PERSONAL), bundle=BUNDLE, mail=m.ref,
-                sender=m.sender[:200], address=m.address, importance=triage["importance"],
+                sender=m.sender[:200], address=m.address, importance=importance,
                 needs_reply=bool(triage["reponse"]) and not m.bulk, account=m.account, folder=m.folder,
-                about=tuple(h for h in (c.address_handle(m.address),) if h), dedupe_key=f"mail:{m.ref}"))
+                triage=how, alert=alert, file_to=file_to, about=tuple(h for h in (c.address_handle(m.address),) if h), dedupe_key=f"mail:{m.ref}"))
             # déjà lu (ou répondu) ailleurs avant ce relevé : elle sait qu'il est arrivé, mais il n'est ni
             # à annoncer, ni à préparer, ni à montrer comme non lu
             if m.seen or m.answered:
@@ -156,9 +226,24 @@ class Poll:
                 drafts.append(READ.draft(mail=ref, how="ailleurs", dedupe_key=f"lu-ailleurs:{ref}"))
         if drafts:
             await ctx.emit(*drafts)
+        # le geste suit l'événement : ranger sur le serveur ce que sa consigne range ; elle n'en parlera plus, sauf
+        # d'un mail dont elle doit prévenir (ADR 0243)
+        tidied: list[Any] = []
+        for ref, folder, alert in moves:
+            try:
+                await port.move(ref, folder)
+            except (OSError, RuntimeError, ValueError) as exc:  # une erreur IMAP est une OSError ou une ImapError
+                log.warning("courrier : sa consigne de tri n'a pas pu ranger un mail dans %s (%s)", folder,
+                            type(exc).__name__)
+                continue
+            if not alert:
+                tidied.append(READ.draft(mail=ref, how=MOVED, dedupe_key=f"rangé:{ref}"))
+        if tidied:
+            await ctx.emit(*tidied)
         # remarqués (ou déjà connus) : le relevé ne les rendra plus ; un passage interrompu avant ce point
-        # (préempté, échu) les retrouve au relevé suivant
-        port.ack([m.ref for m in fetched])
+        # (préempté, échu) les retrouve au relevé suivant, comme ceux que son tri n'a pas encore lus
+        port.ack([m.ref for m in fetched if m.ref not in later])
+        self.behind = bool(later)
 
 
 def _owner_addresses(frame: Frame) -> list[str]:

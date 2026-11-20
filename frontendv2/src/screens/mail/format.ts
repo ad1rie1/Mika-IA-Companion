@@ -342,6 +342,37 @@ export function howLabel(how: string): { text: string; icon: IconName } {
   return { text: verb === "corbeille" ? "mis à la corbeille par elle" : `${verb} par elle`, icon };
 }
 
+/** Ce que la touche Suppr met à la corbeille : les mails cochés, sinon le mail ouvert si sa boîte permet de le ranger ;
+ *  rien hors d'un champ qu'on remplit (une case à cocher n'en est pas un). */
+export function deleteTargets(
+  key: { key: string; ctrl: boolean; target: { tag: string; type?: string; editable: boolean } },
+  checked: readonly string[],
+  open: { ref: string; tidy: boolean } | null,
+): string[] {
+  if (key.key !== "Delete" || key.ctrl) return [];
+  const t = key.target;
+  if (t.editable || t.tag === "TEXTAREA" || t.tag === "SELECT" || (t.tag === "INPUT" && t.type !== "checkbox")) return [];
+  if (checked.length) return [...checked];
+  return open?.tidy ? [open.ref] : [];
+}
+
+/** Ce que son tri a fait d'un mail (ADR 0240), en mots : sur la ligne (`row`, rien pour un envoi en masse), dans le
+ *  titre de « Ce qu'elle en sait », et ce qu'il faut en savoir (`note`) ; `null` : rien à en dire. */
+export function triageLabel(triage: string | undefined): { text: string; icon: IconName; row: boolean; quiet: boolean; note: string } | null {
+  switch (triage) {
+    case "read":
+      return { text: "lu par son tri", icon: "eye", row: true, quiet: true, note: "" };
+    case "waiting":
+      return { text: "en attente de son tri", icon: "clock", row: true, quiet: false, note: "Son tri ne l'a pas encore lu : il le lira au prochain relevé." };
+    case "guessed":
+      return { text: "tri deviné", icon: "alert", row: true, quiet: false, note: "Son tri n'a pas pu le lire (modèle indisponible) : son importance est devinée." };
+    case "bulk":
+      return { text: "survolé (envoi en masse)", icon: "eye", row: false, quiet: true, note: "" };
+    default:
+      return null;
+  }
+}
+
 /** Une clé d'envoi (un double clic ne refait rien, `protocole-moi.md` § 1). */
 export function newNonce(): string {
   const c = globalThis.crypto as Crypto | undefined;

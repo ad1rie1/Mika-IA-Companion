@@ -1,7 +1,8 @@
 /**
  * Les fichiers que le client lit là où ils sont, sans jamais les copier dans le dépôt (ADR 0187) :
- * la police Inter de la console, les portraits pré-rendus d'Android (et leur manifeste) et la VRM
- * du client web — ces deux derniers sous licence et non versionnés.
+ * la police Inter de la console, les portraits pré-rendus d'Android (et leur manifeste) et les VRM
+ * du client web — les portraits et la VRM achetée sous licence et non versionnés, le modèle libre
+ * (`mika-libre.vrm`) versionné.
  *
  * Le serveur de développement (et `vite preview`) les sert sous des adresses stables :
  *

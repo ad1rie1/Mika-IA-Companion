@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { SceneManager } from "./scene/SceneManager";
 import { Environment } from "./scene/Environment";
 import { CameraController } from "./scene/CameraController";
-import { VTuberModel } from "./vtuber/VTuberModel";
+import { MODEL_URLS, VTuberModel } from "./vtuber/VTuberModel";
 import { EmotionController } from "./vtuber/EmotionController";
 import { AnimationSystem } from "./vtuber/animation/AnimationSystem";
 import { AnimationDebugger } from "./vtuber/animation/AnimationDebugger";
@@ -182,7 +182,7 @@ async function init() {
   // already handles "not loaded yet", so the avatar simply shows up when
   // it's ready.
   void vtuberModel
-    .load("/models/default.vrm")
+    .loadFirst(MODEL_URLS)
     .then((vrm) => {
       emotionController.setVRM(vrm);
       lipSyncController.setVRM(vrm);
@@ -219,7 +219,7 @@ async function init() {
     })
     .catch(() => {
       console.warn(
-        "No VRM model found at /models/default.vrm - running without model.",
+        `No VRM model found at ${MODEL_URLS.join(" nor ")} - running without model.`,
         "Place a .vrm file in frontend/Web/public/models/default.vrm"
       );
       createPlaceholder(sceneManager);

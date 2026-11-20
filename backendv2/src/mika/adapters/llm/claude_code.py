@@ -41,6 +41,8 @@ boucle d'outils de l'épisode (même ``call_id`` d'un tour à l'autre) :
   l'atelier : 600 s) pour ne jamais faucher une session vivante, plus court que
   le délai d'outil de la CLI (``MCP_TOOL_TIMEOUT``) pour qu'elle ne continue
   jamais seule sur un outil abandonné ;
+- les séquences d'arrêt (``LLMRequest.stop_sequences``) sont ignorées : la CLI n'en a pas, elle écrit jusqu'au
+  bout et l'appelant coupe lui-même ce qu'il garde ;
 - **une boucle d'outils ne se reprend pas** : une requête qui porte déjà des
   échanges d'outils sans session vivante (un redémarrage, une bascule de
   fournisseur) est refusée — aplatie en un message, la CLI referait les outils ;

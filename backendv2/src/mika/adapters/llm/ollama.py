@@ -18,6 +18,7 @@ Contrat :
   reprise serait coupée au même mot ;
 - ``tool_choice="none"`` (le tour de clôture) : les outils ne partent pas,
   Ollama n'a pas de ``tool_choice`` ;
+- les séquences d'arrêt (``LLMRequest.stop_sequences``) → ``options.stop`` ;
 - un délai explicite côté client HTTP (``HTTP_TIMEOUT_S``) : la passerelle borne
   l'appel, mais un serveur muet ne doit pas tenir une connexion sans limite ;
 - un refus du paramètre ``think`` (message qui le nomme, ou 400) est rejoué une
@@ -139,6 +140,8 @@ class OllamaBackend:
         options: dict[str, Any] = {"num_predict": cap, "num_ctx": self.context_tokens}
         if self.temperature is not None:
             options["temperature"] = self.temperature
+        if req.stop_sequences:
+            options["stop"] = list(req.stop_sequences)
         body: dict[str, Any] = {
             "model": self.model,
             "messages": ollama_messages(req),

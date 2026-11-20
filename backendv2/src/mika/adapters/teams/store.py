@@ -20,10 +20,11 @@ from __future__ import annotations
 
 import difflib
 import hashlib
+import re
 import threading
 import time
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -41,6 +42,7 @@ from mika.adapters.teams.models import (
     AccountRow,
     ConversationRow,
     DraftRow,
+    ImageRow,
     MessageRow,
     fit,
 )
@@ -53,6 +55,9 @@ from mika.ports.teams import (
     DISCARDED,
     FAILED,
     GONE,
+    IMAGE_KEPT,
+    IMAGE_KNOWN,
+    IMAGE_NO_MESSAGE,
     OPEN_STATES,
     OUTBOX_PLACE,
     OUTBOX_SEND,
@@ -64,8 +69,11 @@ from mika.ports.teams import (
     AccountInfo,
     Conversation,
     Draft,
+    ImageIn,
+    ImageToRead,
     InboxBatch,
     Message,
+    MessageImage,
     OutboxItem,
     Preview,
     Settled,
@@ -84,6 +92,60 @@ CLOCK_SLACK = 120 * 1_000_000
 SIMILAR = 0.5
 #: un message Teams est coupé à cette longueur par l'extension : au-delà, on compare ce qui en reste
 CUT_AT = 3990
+#: un même message sous deux identifiants (sa version en attente dans Teams puis celle du service, ou deux sources de
+#: l'extension : le worker de Teams, sa base locale, l'historique) : même conversation, même auteur, même texte, à
+#: moins de tant de µs l'un de l'autre — le second est un jumeau, laissé de côté (ADR 0251)
+TWIN_WINDOW = 120 * 1_000_000
+
+
+#: les images (ADR 0258) : la place des images d'un compte, au plus — les plus
+#: anciennes partent au-delà ; un message aux images annoncées attend au plus tant (µs) avant d'être remarqué ; une
+#: image que la lecture n'a pas pu regarder (un échec passager) est retentée tant de fois ; ce que Mika y a vu tient
+#: dans le texte du message en tant de caractères au plus
+IMAGES_PER_ACCOUNT_BYTES = 500 * 1024 * 1024
+IMAGE_HOLD = 3 * 60 * 1_000_000
+IMAGE_TRIES = 3
+IMAGE_SEEN_IN_TEXT = 500
+#: « [image] » dans le texte d'un message, ou « [image : ce qu'elle y a vu] »
+_IMAGE_MARK = re.compile(r"\[image(?: : [^\]\n]*)?\]")
+
+
+def described(text: str, seen: Mapping[int, str]) -> str:
+    """Le texte d'un message, où la n-ième image (``seen`` : son rang → ce que Mika y a vu) se dit « [image : …] ».
+    Une image vue sans marque à son rang (une version d'avant de l'extension) s'ajoute à la fin."""
+    marks = list(_IMAGE_MARK.finditer(text))
+    out, last = [], 0
+    for rank, mark in enumerate(marks):
+        out.append(text[last:mark.start()])
+        said = " ".join(seen.get(rank, "").replace("]", ")").split())[:IMAGE_SEEN_IN_TEXT]
+        out.append(f"[image : {said}]" if said else mark.group(0))
+        last = mark.end()
+    out.append(text[last:])
+    extra = [" ".join(v.replace("]", ")").split())[:IMAGE_SEEN_IN_TEXT] for k, v in sorted(seen.items())
+             if k >= len(marks) and v.strip()]
+    return "".join(out) + "".join(f" [image : {e}]" for e in extra)
+
+
+#: l'historique n'est rangé « déjà lu » qu'au-delà de la fenêtre du direct (µs) : un message plus récent, arrivé
+#: d'abord par un paquet d'historique, se range comme du direct (elle le remarque, il règle ses brouillons)
+HISTORY_LIVE_WINDOW = 24 * 3600 * 1_000_000
+
+
+def id_kind(external_id: str) -> str:
+    """La sorte d'un identifiant de message Teams : ``service`` (l'heure d'arrivée en ms, 13 chiffres — 16 au plus),
+    ``client`` (celui que le client lui donne tant qu'il attend, plus long), ``empreinte`` (« h… », tirée du contenu
+    par l'extension faute d'identifiant), ``autre``."""
+    if external_id.isdigit():
+        return "service" if len(external_id) <= 16 else "client"
+    return "empreinte" if external_id.startswith("h") else "autre"
+
+
+def maybe_same_message(a: str, b: str) -> bool:
+    """Deux identifiants qui peuvent nommer le même message : de sortes différentes parmi le service, le client et
+    l'empreinte (``id_kind``). Deux identifiants de la même sorte sont deux messages : un « ok » redit dans la minute
+    n'est pas un doublon, deux empreintes non plus."""
+    ka, kb = id_kind(a), id_kind(b)
+    return a != b and ka != kb and "autre" not in (ka, kb)
 
 #: ce qu'on lit d'un message, d'une conversation, d'un brouillon (dans l'ordre des champs de ``Message``,
 #: ``Conversation`` — son nombre de messages compté à part, puis son compte —, ``Draft``)
@@ -245,8 +307,14 @@ class TeamsStore:
         return row
 
     def store_batch(self, account: str, batch: InboxBatch, now: int) -> Stored:
-        """Un lot poussé par l'extension de ce compte : rangé sous lui seul."""
-        new = known = 0
+        """Un lot poussé par l'extension de ce compte : rangé sous lui seul. Un message se reconnaît à sa référence
+        (sa conversation et son identifiant) ou à son alias : déjà là, il est connu (son texte suit une retouche) ;
+        sinon, un jumeau — le même message déjà rangé sous un autre identifiant (``_twin``) — n'est pas rangé une
+        seconde fois : sa référence devient l'alias de la ligne, et une retouche ou une suppression qui arrive sous
+        elle la retrouve. L'historique (``batch.history``) se range déjà lu, sans régler de brouillon, au-delà de la
+        fenêtre du direct (``HISTORY_LIVE_WINDOW``) : en deçà, il se range comme du direct."""
+        new = known = twins = recent = 0
+        touched: set[str] = set()
         replied: dict[str, int] = {}
         settled: list[Settled] = []
         key = _account_key(account)
@@ -270,7 +338,7 @@ class TeamsStore:
             for m in sorted(batch.messages, key=lambda m: m.time_ms):
                 ref = message_ref(m.conversation, m.id, key)
                 at = m.time_ms * 1000
-                row = s.scalars(select(MessageRow).where(MessageRow.ref == ref)).first()
+                row = s.scalars(select(MessageRow).where(or_(MessageRow.ref == ref, MessageRow.alias == ref))).first()
                 if m.deleted:  # supprimé dans Teams : son texte part du cache (jamais remarqué s'il ne l'était pas)
                     if row is not None:
                         known += 1
@@ -278,22 +346,49 @@ class TeamsStore:
                     continue
                 if row is not None:  # déjà connu (rejoué, ou retouché dans Teams : son texte suit)
                     known += 1
-                    if row.text != m.text:
-                        row.text = m.text
+                    text = self._with_images(s, row.ref, m.text)
+                    if row.text != text:
+                        row.text = text
                     continue
-                new += 1
                 conv = fit(m.conversation, CONVERSATION_MAX)
+                author_key = fit(m.author_id.strip().lower(), AUTHOR_MAX)
+                twin = self._twin(s, key, conv, author_key, at, m.id, m.text)
+                if twin is not None:
+                    twin.alias = ref
+                    twins += 1
+                    continue
+                live = not batch.history or at >= now - HISTORY_LIVE_WINDOW
+                new += 1
+                recent += live
+                touched.add(conv)
                 s.add(MessageRow(ref=ref, account=key, conversation=conv, external_id=m.id, author=m.author,
-                                 author_id=m.author_id, author_key=fit(m.author_id.strip().lower(), AUTHOR_MAX), at=at,
-                                 text=m.text, own=m.own, mentions_me=m.mentions_me, received=now, acked=m.own))
+                                 author_id=m.author_id, author_key=author_key, at=at, text=m.text, own=m.own,
+                                 mentions_me=m.mentions_me, received=now, acked=m.own or not live,
+                                 images_pending=max(0, min(m.images, 8))))
                 found = self._conversation_row(s, seen, key, conv)
                 found.last_at = max(found.last_at or 0, at)
-                if m.own:
+                if m.own and live:
                     replied[conv] = max(replied.get(conv, 0), at)
                     settled.extend(self._answered_by_owner(s, key, conv, at, m.text, now))
-            if new:
-                self._prune(s)
-        return Stored(new=new, known=known, replied=tuple(sorted(replied.items())), settled=tuple(settled))
+            if touched:
+                self._prune(s, key, touched)
+        return Stored(new=new, known=known, replied=tuple(sorted(replied.items())), settled=tuple(settled),
+                      twins=twins, recent=recent)
+
+    @staticmethod
+    def _twin(s: Session, account: str, conversation: str, author_key: str, at: int, external_id: str,
+              text: str) -> MessageRow | None:
+        """La ligne du même message, déjà rangé sous un autre identifiant : même conversation, même auteur, même
+        texte (aux espaces près), à moins de ``TWIN_WINDOW``, des identifiants de sortes différentes
+        (``maybe_same_message``), et pas encore d'alias — une ligne qui a déjà trouvé son jumeau n'en prend pas un
+        second : le même « ok » redit depuis un autre appareil reste un message."""
+        wanted = " ".join(text.split())
+        rows = s.scalars(select(MessageRow).where(
+            MessageRow.account == account, MessageRow.conversation == conversation,
+            MessageRow.author_key == author_key, MessageRow.alias == "", MessageRow.at >= at - TWIN_WINDOW,
+            MessageRow.at <= at + TWIN_WINDOW).order_by(MessageRow.at, MessageRow.id)).all()
+        return next((r for r in rows if maybe_same_message(r.external_id, external_id)
+                     and " ".join(r.text.split()) == wanted), None)
 
     def _answered_by_owner(self, s: Session, account: str, conversation: str, at: int, text: str,
                            now: int) -> list[Settled]:
@@ -320,23 +415,110 @@ class TeamsStore:
         return out
 
     @staticmethod
-    def _prune(s: Session) -> None:
-        """Au plus ``KEEP_PER_CONVERSATION`` messages par conversation, les plus récents. Les messages en trop se
-        lisent d'abord, puis partent (MariaDB refuse de supprimer d'une table en relisant la même dans la
-        condition)."""
+    def _prune(s: Session, account: str, conversations: set[str]) -> None:
+        """Au plus ``KEEP_PER_CONVERSATION`` messages par conversation, les plus récents, pour les conversations qu'un
+        lot vient de toucher (les autres n'ont pas grandi). Les messages en trop se lisent d'abord, puis partent
+        (MariaDB refuse de supprimer d'une table en relisant la même dans la condition)."""
         ranked = select(MessageRow.id, func.row_number().over(
             partition_by=(MessageRow.account, MessageRow.conversation),
             order_by=(MessageRow.at.desc(), MessageRow.id.desc())
-        ).label("rank")).subquery()
+        ).label("rank")).where(MessageRow.account == account,
+                               MessageRow.conversation.in_(sorted(conversations))).subquery()
         beyond = s.scalars(select(ranked.c.id).where(ranked.c.rank > KEEP_PER_CONVERSATION)).all()
         if beyond:
+            gone = s.scalars(select(MessageRow.ref).where(MessageRow.id.in_(beyond))).all()
+            s.execute(delete(ImageRow).where(ImageRow.ref.in_(gone)))
             s.execute(delete(MessageRow).where(MessageRow.id.in_(beyond)))
+
+    # ── les images (ADR 0258) ──
+    @staticmethod
+    def _with_images(s: Session, ref: str, text: str) -> str:
+        """Le texte d'un message, avec ce que Mika a vu de ses images."""
+        seen = {pos: v for pos, v in s.execute(select(ImageRow.position, ImageRow.seen).where(
+            ImageRow.ref == ref, ImageRow.seen != "")).all()}
+        return described(text, seen) if seen else text
+
+    def keep_image(self, account: str, image: ImageIn, now: int) -> str:
+        """Garder une image de ce message (retrouvé par sa référence ou son alias) ; la même image redite n'en fait
+        qu'une ; au-delà de la place du compte, les plus anciennes partent."""
+        key = _account_key(account)
+        ref = message_ref(image.conversation, image.message_id, key)
+        with self._lock, self._session.begin() as s:
+            row = s.scalars(select(MessageRow).where(MessageRow.account == key,
+                                                     or_(MessageRow.ref == ref, MessageRow.alias == ref))).first()
+            if row is None:
+                return IMAGE_NO_MESSAGE
+            if s.scalars(select(ImageRow.id).where(ImageRow.ref == row.ref, ImageRow.image == image.image)).first():
+                return IMAGE_KNOWN
+            s.add(ImageRow(ref=row.ref, account=key, image=image.image, position=image.position, mime=image.mime,
+                           size=len(image.data), data=image.data, at=now, seen="", read=False, sensitive=False, tries=0))
+            if row.images_pending > 0:
+                row.images_pending -= 1
+            s.flush()
+            self._prune_images(s, key)
+        return IMAGE_KEPT
+
+    @staticmethod
+    def _prune_images(s: Session, account: str) -> None:
+        """La place des images d'un compte : au-delà de ``IMAGES_PER_ACCOUNT_BYTES``, les plus anciennes partent."""
+        rows = s.execute(select(ImageRow.id, ImageRow.size).where(ImageRow.account == account)
+                         .order_by(ImageRow.at.desc(), ImageRow.id.desc())).all()
+        total, beyond = 0, []
+        for image_id, size in rows:
+            total += size or 0
+            if total > IMAGES_PER_ACCOUNT_BYTES:
+                beyond.append(image_id)
+        if beyond:
+            s.execute(delete(ImageRow).where(ImageRow.id.in_(beyond)))
+
+    def image_to_read(self) -> ImageToRead | None:
+        with self._lock, self._session() as s:
+            row = s.execute(select(ImageRow.id, ImageRow.ref, ImageRow.image, ImageRow.mime, ImageRow.data)
+                            .where(ImageRow.read == false()).order_by(ImageRow.at, ImageRow.id).limit(1)).first()
+        return ImageToRead(*row) if row else None
+
+    def image_read(self, image_id: int, *, seen: str, sensitive: bool, read: bool) -> str:
+        """Ce que Mika a vu d'une image ; un échec passager (``read`` faux) la laisse à regarder, ``IMAGE_TRIES``
+        fois au plus (puis elle est tenue pour lue, sans rien). Le texte de son message suit."""
+        with self._lock, self._session.begin() as s:
+            row = s.get(ImageRow, image_id)
+            if row is None:
+                return ""
+            row.tries += 1
+            if read or row.tries >= IMAGE_TRIES:
+                row.read = True
+                row.seen = seen if read else ""
+                row.sensitive = sensitive
+            message = s.scalars(select(MessageRow).where(MessageRow.ref == row.ref)).first()
+            if message is not None and row.read and row.seen:
+                s.flush()
+                message.text = self._with_images(s, row.ref, message.text)
+            return row.ref
+
+    def images_of(self, refs: Sequence[str]) -> list[MessageImage]:
+        if not refs:
+            return []
+        with self._lock, self._session() as s:
+            rows = s.execute(select(ImageRow.ref, ImageRow.image, ImageRow.position, ImageRow.mime, ImageRow.size,
+                                    ImageRow.seen, ImageRow.read).where(ImageRow.ref.in_(list(refs)))
+                             .order_by(ImageRow.ref, ImageRow.position, ImageRow.id)).all()
+        return [MessageImage(*r) for r in rows]
+
+    def image_bytes(self, ref: str, image: str) -> tuple[str, bytes] | None:
+        with self._lock, self._session() as s:
+            row = s.execute(select(ImageRow.mime, ImageRow.data).where(ImageRow.ref == ref,
+                                                                       ImageRow.image == image)).first()
+        return (row[0], bytes(row[1])) if row else None
 
     # ── ce qu'elle remarque ──
     async def fetch_new(self, limit: int, *, accounts: Sequence[str] | None = None) -> list[Message]:
+        """Les messages à remarquer ; un message dont des images sont annoncées et pas arrivées, ou arrivées et pas
+        encore regardées, attend (``IMAGE_HOLD`` au plus) : elle le remarque déjà décrit (ADR 0258)."""
+        unread = select(ImageRow.id).where(ImageRow.ref == MessageRow.ref, ImageRow.read == false()).exists()
+        waiting = and_(or_(MessageRow.images_pending > 0, unread), MessageRow.received > self._now() - IMAGE_HOLD)
         with self._lock, self._session() as s:
             rows = s.execute(select(*_MESSAGE).where(MessageRow.acked == false(), MessageRow.own == false(),
-                                                     *_in_accounts(MessageRow.account, accounts))
+                                                     *_in_accounts(MessageRow.account, accounts), ~waiting)
                              .order_by(MessageRow.at, MessageRow.id).limit(max(0, limit))).all()
         return [Message(*r) for r in rows]
 
@@ -627,7 +809,7 @@ class TeamsStore:
         key = _account_key(account)
         with self._lock, self._session.begin() as s:
             n = 0
-            for row in (DraftRow, MessageRow, ConversationRow):
+            for row in (DraftRow, ImageRow, MessageRow, ConversationRow):
                 n += _count(s.execute(delete(row).where(row.account == key)))
             n += _count(s.execute(delete(AccountRow).where(AccountRow.key == key)))
         return n
@@ -650,11 +832,15 @@ class TeamsStore:
                                               ConversationRow.id == MessageRow.conversation), isouter=True)
                               .where(MessageRow.author_key == key)).all()
             convs = sorted({(account, conv) for account, conv, kind in pairs if _one_to_one(kind, conv)})
-            # les réponses à ses messages, ailleurs (un groupe) : elles citent ce qu'il a écrit
+            # les réponses à ses messages, ailleurs (un groupe) : elles citent ce qu'il a écrit ; ses images aussi
             n = _count(s.execute(delete(DraftRow).where(
                 DraftRow.reply_to.in_(select(MessageRow.ref).where(MessageRow.author_key == key)))))
+            n += _count(s.execute(delete(ImageRow).where(
+                ImageRow.ref.in_(select(MessageRow.ref).where(MessageRow.author_key == key)))))
             n += _count(s.execute(delete(MessageRow).where(MessageRow.author_key == key)))
             for account, conv in convs:
+                n += _count(s.execute(delete(ImageRow).where(ImageRow.ref.in_(select(MessageRow.ref).where(
+                    MessageRow.account == account, MessageRow.conversation == conv)))))
                 n += _count(s.execute(delete(MessageRow).where(MessageRow.account == account,
                                                                MessageRow.conversation == conv)))
                 n += _count(s.execute(delete(DraftRow).where(DraftRow.account == account,

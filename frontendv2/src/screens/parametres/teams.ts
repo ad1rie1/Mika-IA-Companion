@@ -11,6 +11,7 @@ import { API_BASE } from "@web/network/api";
 import { ApiError } from "../../api/moi";
 import type { RuleLine } from "../../api/rights";
 import {
+  EXTENSION_URL,
   newExtensionKey,
   removeTeamsAccount,
   revokeExtensionKey,
@@ -151,6 +152,20 @@ export function ruleUpdate(rules: SendRules, values: Record<string, FormValue>):
 
 // ── La fiche ─────────────────────────────────────────────────────────
 
+/** L'adresse que l'extension doit joindre : celle de l'API, ou celle de cette page quand le client est construit sans
+ * adresse (`VITE_BACKEND_ORIGIN` vide, en service : il parle alors à l'adresse de sa page). */
+function server(): string {
+  return API_BASE || location.origin;
+}
+
+/** Le zip de l'extension (ADR 0246), tel que le serveur l'a à côté de lui ; sinon, à qui le demander. */
+function extensionDownload(): string {
+  const ext = store.teamsAccounts.value?.extension;
+  if (!ext) return `<span class="small muted">Elle n'est pas à côté de ce serveur : demande-la à ton opérateur.</span>`;
+  return `<a class="btn xs primary" href="${h(EXTENSION_URL)}" download="mika-teams-${h(ext.version)}.zip">${ico("download", "xs")}Télécharger</a>
+    <span class="small muted">version ${h(ext.version)}</span>`;
+}
+
 function keyRow(key: string, a: TeamsAccount, now: number): string {
   const k = a.extension_key;
   const value = k
@@ -195,8 +210,8 @@ function ficheView(key: string, host: Host, item: string | null, now: number): s
   const extension = section(
     "Brancher l'extension",
     keyRow(key, a, now) +
-      row("L'adresse de Mika", "À coller dans la fenêtre de l'extension, avec ta clé.", `<code class="key">${h(API_BASE)}</code><button class="btn xs ghost" type="button" data-act="copy" data-copy="${h(API_BASE)}">${ico("copy", "xs")}Copier</button>`) +
-      row("L'extension", "Chrome, Edge ou Chromium : en mode développeur, « Charger l'extension non empaquetée », puis colle l'adresse et ta clé dans sa fenêtre, Enregistrer et Tester. Un Teams par navigateur (ou par profil).", `<span class="small muted">Elle ne se télécharge pas encore d'ici : demande-la à ton opérateur.</span>`),
+      row("L'adresse de Mika", "À coller dans la fenêtre de l'extension, avec ta clé.", `<code class="key">${h(server())}</code><button class="btn xs ghost" type="button" data-act="copy" data-copy="${h(server())}">${ico("copy", "xs")}Copier</button>`) +
+      row("L'extension", "Chrome, Edge ou Chromium : télécharge-la et décompresse-la ; dans chrome://extensions, le mode développeur, puis « Charger l'extension non empaquetée » sur le dossier mika-teams. Colle l'adresse et ta clé dans sa fenêtre, Enregistrer et Tester. Un Teams par navigateur (ou par profil). Pour la mettre à jour : la décompresser par-dessus, puis la recharger.", extensionDownload()),
     sub("extension"),
   );
   return `<form class="set-page" data-form="teams" data-account="${h(key)}" autocomplete="off">${back}${extCard(a, now, false)}

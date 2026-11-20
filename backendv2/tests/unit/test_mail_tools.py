@@ -2,15 +2,21 @@
 
 - chaque mail dit sa date, ce que son tri en a jugé (important, une réponse
   attendue) et ce qu'il porte (répondu, suivi, des pièces jointes) ;
-- une liste se lit page par page, et dit jusqu'où remonte ce qu'elle a relevé :
+- une liste se lit page par page, et dit jusqu'où remonte ce qui est gardé ici :
   au-delà, « rien » ne veut pas dire que le mail n'existe pas ;
 - chercher, c'est trouver chaque mot, dans n'importe quel ordre, et par
-  expéditeur aussi ;
+  expéditeur aussi ; ce qui n'est pas ici, le serveur le dit, et les plus
+  récents sont ramenés sans jamais être triés ; une boîte qui garde tout en
+  local ne lui demande rien, et son historique se télécharge sans être trié
+  (ADR 0249) ;
+- elle relève quand elle veut, et ce qui arrive là où elle relève est trié
+  aussitôt (ADR 0247) ;
 - elle retrouve l'adresse de quelqu'un ;
 - elle range elle-même (``email_tidy``), un geste pour plusieurs mails, sur le
   serveur, jamais une suppression définitive : chaque mail dit ce qui a été fait
   ou refusé, et ce que personne n'avait encore ouvert ; un mail remarqué et rangé
-  ne lui est plus signalé ; un serveur qui refuse est dit, pas une panne.
+  ne lui est plus signalé ; un serveur qui refuse est dit, pas une panne ; elle
+  crée le dossier où ranger quand elle le dit (ADR 0248).
 """
 
 from __future__ import annotations
@@ -18,18 +24,20 @@ from __future__ import annotations
 import asyncio
 import itertools
 import json
+from dataclasses import replace
 from types import SimpleNamespace as NS
 
 from mika.app.me import form
 from mika.faculties.identity import audience_for
 from mika.kernel.clock import MINUTE, US
 from mika.kernel.frame import Audience, EpisodeRef, Frame
-from mika.plugins.email import EMAIL, READ, SENT_KEPT, answered
+from mika.plugins.email import EMAIL, POLL_ASKED, READ, SENT_KEPT, answered
 from mika.plugins.email import params_of as email_params
 from mika.plugins.email.inspect.common import mail_key
+from mika.plugins.email.keep import KEEP_EVERY, KEEP_IDLE, Keep
 from mika.plugins.email.tasks import _prepare
 from mika.ports.llm import LLMRequest, LLMResponse
-from mika.ports.mail import AccountInfo, Attachment, Mail
+from mika.ports.mail import AccountInfo, Attachment, Found, Mail, addresses
 from mika.runtime.operations import perform
 from mika.runtime.pipeline import EpisodeRequest
 from mika.runtime.tool_offer import allowed
@@ -37,7 +45,7 @@ from mika.runtime.tools import ToolContext, checked_args
 from mika.sim.clock import run_virtual
 from mika.sim.outside import FakeMail
 from mika.vocab.access import ALONE, EVERYONE, NO
-from mika.vocab.canals import CanalRule, Canals, CanalTable
+from mika.vocab.canals import CanalRule, Canals, CanalTable, mail_rule_for_all, mail_send
 from mika.vocab.episodes import Kind, task_target
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import ChannelTrust
@@ -88,8 +96,10 @@ async def call(kernel, tool: str, **args):
     return out if isinstance(out, str) else out.content
 
 
-def live(tmp_path, scenario, box_type=FakeMail):
-    box = box_type(boxes=[PERSO])
+def live(tmp_path, scenario, box_type=FakeMail, *, info=PERSO, remote=()):
+    """Sa boîte, quatre mails relevés et triés ; ``remote`` : ce que le serveur a en plus (son historique, ce qui
+    arrive)."""
+    box = box_type(boxes=[info], remote=list(remote))
     box.deliver(mail(1, "Facture de votre contrat EDF", "EDF <factures@edf.fr>", at_paris(2026, 10, 28, 9, 5),
                      attachments=(Attachment("facture.pdf", "application/pdf", 1200),)))
     box.deliver(mail(2, "Un café jeudi ?", ALICE, at_paris(2026, 10, 27, 22, 30), seen=True, answered=True))
@@ -128,12 +138,13 @@ def test_a_list_says_when_what_her_triage_judged_and_how_far_it_goes(tmp_path):
                         "contrat EDF » (important) (attend une réponse) (1 pièce(s) jointe(s))")
     assert first[2] == f"[{ref(2)}] hier 22 h 30 · de Alice <alice@exemple.fr> : « Un café jeudi ? » (répondu)"
     assert first[-1] == "(page 1 sur 2, 4 mails ; la suite : page=2)"
-    assert "relevé commence" not in out["first"]  # pas encore au bout
+    assert "le plus ancien mail gardé ici" not in out["first"]  # pas encore au bout
     # la dernière page : une autre année n'a que son jour ; jusqu'où remonte ce qu'elle a relevé, et qui l'étend
     assert second[1].startswith(f"[{ref(3)}] le 12/10 9 h 14 · (non lu) de Bob") and second[1].endswith("(suivi)")
     assert second[2].startswith(f"[{ref(4)}] le 03/02/2025 · ")
     assert second[3] == "(page 2 sur 2, 4 mails : la dernière)"
-    assert "ce que tu as relevé commence le 03/02/2025" in second[4] and "Adrien peut le charger" in second[4]
+    assert second[4] == ("(le plus ancien mail gardé ici : le 03/02/2025 ; ce qui n'est pas ici, cherche-le avec "
+                         "email_search, qui demande aussi au serveur)")
     assert out["past"] == "Il n'y a pas de page aussi loin."
     # non lu : ni sur le serveur, ni par elle
     assert [ref(1), ref(3), ref(4)] == [r for r in (ref(n) for n in range(1, 5)) if f"[{r}]" in out["unread"]]
@@ -144,6 +155,7 @@ def test_a_list_says_when_what_her_triage_judged_and_how_far_it_goes(tmp_path):
 def test_a_search_finds_every_word_by_sender_too_and_says_how_far_it_goes(tmp_path):
     async def scenario(kernel):
         return {"words": await call(kernel, "email_search", query="edf facture"),
+                "asked": list(kernel.ports["mail"].actions),
                 "none": await call(kernel, "email_search", query="facture gaz"),
                 "sender": await call(kernel, "email_search", sender="alice"),
                 "both": await call(kernel, "email_search", query="café", sender="bob"),
@@ -152,9 +164,10 @@ def test_a_search_finds_every_word_by_sender_too_and_says_how_far_it_goes(tmp_pa
                 "nobody": await call(kernel, "email_contacts", query="zoé")}
 
     out = live(tmp_path, scenario)
-    assert f"[{ref(1)}]" in out["words"] and "relevé commence le 03/02/2025" in out["words"]
-    # rien : elle sait que ce n'est que dans ce qu'elle a relevé
-    assert out["none"].startswith("Rien ne correspond.") and "relevé commence le 03/02/2025" in out["none"]
+    assert f"[{ref(1)}]" in out["words"] and out["words"].endswith("(cherché ici et sur le serveur)")
+    assert out["asked"] == [("search", "perso", "edf facture", "")]
+    # rien : ni ici ni sur le serveur
+    assert out["none"] == "Rien ne correspond.\n(cherché ici et sur le serveur)"
     assert [f"[{ref(n)}]" in out["sender"] for n in range(1, 5)] == [False, True, False, True]
     assert out["both"].startswith("Rien ne correspond.")
     assert out["empty"] == "Dis des mots à chercher, ou un expéditeur."
@@ -375,3 +388,204 @@ def test_a_reply_by_hand_is_kept_with_its_mail_and_she_never_prepares_another(tm
     assert out["after"] == []  # répondue à la main : rien à préparer
     assert out["forgotten"] and out["answered"]  # sortie de ses derniers envois, gardée sur le mail
     assert out["later"] == []
+
+
+# ── Ce que le serveur a, et ce qui arrive (ADR 0247, 0249) ────────────────
+
+
+def old(n: int, subject: str, at: int, folder: str = "Archives", **kw) -> Mail:
+    return mail(n, subject, "EDF <factures@edf.fr>", at, folder=folder, **kw)
+
+
+def test_a_search_brings_the_newest_from_the_server_and_her_triage_never_reads_them(tmp_path):
+    history = [old(10 + i, f"Facture EDF {i}", at_paris(2024, 1 + i, 5, 9, 0)) for i in range(5)]
+    history.append(old(20, "Facture EDF jetée", at_paris(2024, 9, 1, 9, 0), folder="Corbeille"))
+
+    async def scenario(kernel):
+        out = {"first": await call(kernel, "email_search", query="facture edf", limit=3),
+               "second": await call(kernel, "email_search", query="facture edf", limit=3, page=2),
+               "unread": await call(kernel, "email_search", query="facture", unread_only=True)}
+        await asyncio.sleep(15 * MINUTE / US)  # une relève passe : rien de ce qui est ramené ne lui est rendu
+        out["noticed"] = set(kernel.mind.frame().state("email").mails)
+        out["box"] = kernel.ports["mail"]
+        return out
+
+    out = live(tmp_path, scenario, remote=history)
+    first = out["first"].splitlines()
+    # le plus récent ici (aujourd'hui), puis les plus récents du serveur ; le reste attend la page suivante
+    assert [line.split(" ", 1)[0] for line in first[1:4]] == [f"[{ref(1)}]", f"[{ref(14)}]", f"[{ref(13)}]"]
+    assert "(cherché ici et sur le serveur : 2 autre(s) y correspondent encore ; page=2 pour les ramener)" in first
+    second = out["second"].splitlines()
+    assert [line.split(" ", 1)[0] for line in second[1:4]] == [f"[{ref(12)}]", f"[{ref(11)}]", f"[{ref(10)}]"]
+    assert "(cherché ici et sur le serveur)" in second
+    assert [m.subject for m in out["box"].remote] == ["Facture EDF jetée"]  # la corbeille, seulement nommée
+    # les non-lus : seulement ce qui est ici
+    assert ("search", "perso", "facture", "") not in out["box"].actions
+    assert "les non-lus qui ne sont pas ici ne sont pas cherchés sur le serveur" in out["unread"]
+    # ramenés, jamais triés ni remarqués
+    assert not {ref(n) for n in range(10, 15)} & out["noticed"]
+    assert {ref(n) for n in range(10, 15)} <= out["box"].handed
+
+
+def test_a_box_that_keeps_everything_downloads_its_history_untriaged_and_never_asks_the_server(tmp_path):
+    keeper = replace(PERSO, keep_all=True)
+    history = [old(30 + i, f"Relevé {i}", at_paris(2023, 1 + i, 2, 8, 0)) for i in range(4)]
+    history.append(old(40, "Gagnez un lot", at_paris(2024, 5, 1, 8, 0), folder="Indésirables"))
+
+    async def scenario(kernel):
+        await asyncio.sleep(2 * MINUTE / US)  # le téléchargement de l'historique passe
+        return {"search": await call(kernel, "email_search", query="relevé"),
+                "list": await call(kernel, "email_list", limit=30),
+                "noticed": set(kernel.mind.frame().state("email").mails),
+                "box": kernel.ports["mail"],
+                "journal": [kernel.mind.decode(s).type.name for s in kernel.mind.store.read()]}
+
+    out = live(tmp_path, scenario, info=keeper, remote=history)
+    assert all(f"[{ref(n)}]" in out["search"] for n in range(30, 34))
+    assert not [a for a in out["box"].actions if a[0] == "search"]  # tout est ici : le serveur n'est pas demandé
+    assert out["search"].endswith("(tout ton courrier est ici)") and out["list"].endswith("(tout ton courrier est ici)")
+    assert [m.subject for m in out["box"].remote] == ["Gagnez un lot"]  # les indésirables restent à part
+    assert not {ref(n) for n in range(30, 34)} & out["noticed"]  # jamais triés
+    assert not [t for t in out["journal"] if "process_failed" in t]
+
+
+def test_she_fetches_now_and_what_lands_where_she_polls_is_triaged_at_once(tmp_path):
+    arrived = mail(50, "Le devis signé", ALICE, at_paris(2026, 10, 28, 10, 12))
+    archived = old(51, "Contrat 2026", at_paris(2026, 10, 28, 10, 13))
+
+    async def scenario(kernel):
+        def asked():
+            return len(list(kernel.mind.store.read(types={POLL_ASKED.name})))
+
+        out = {"nothing": await invoke(kernel, "email_fetch"), "asked before": asked()}
+        kernel.ports["mail"].remote += [arrived, archived]
+        out["fetch"] = await invoke(kernel, "email_fetch")
+        out["asked"] = [kernel.mind.decode(s).data.by for s in kernel.mind.store.read(types={POLL_ASKED.name})]
+        await asyncio.sleep(30)  # la relève demandée suit
+        out["noticed"] = set(kernel.mind.frame().state("email").mails)
+        out["archives"] = await invoke(kernel, "email_fetch", folder="archives")
+        out["unknown"] = await invoke(kernel, "email_fetch", folder="Projets")
+        await asyncio.sleep(30)
+        out["noticed after"] = set(kernel.mind.frame().state("email").mails)
+        out["asked after"] = asked()
+        return out
+
+    out = live(tmp_path, scenario)
+    assert out["nothing"].ok and out["nothing"].content == "Réception : rien de nouveau"
+    assert out["asked before"] == 0  # rien de nouveau : rien ne s'écrit
+    lines = out["fetch"].content.splitlines()
+    assert lines[0] == "Réception : 1 nouveau(x)" and lines[2] == "Les plus récents :"
+    assert lines[3].startswith(f"[{ref(50)}] aujourd'hui 10 h 12 · (non lu) de Alice") and \
+        lines[-1] == "(ton tri les lit dans un instant)"
+    assert out["asked"] == [""]  # c'est elle qui l'a demandée
+    assert ref(50) in out["noticed"]  # trié et remarqué aussitôt
+    # un dossier qu'elle ne relève pas : elle le voit, son tri n'en lit rien
+    assert out["archives"].content.splitlines()[0] == "Archives : 1 nouveau(x)"
+    assert "(ton tri" not in out["archives"].content and ref(51) not in out["noticed after"]
+    assert out["asked after"] == 1
+    assert not out["unknown"].ok and out["unknown"].content.splitlines()[0] == \
+        "Pas de dossier « Projets » dans la boîte perso."
+
+
+def test_she_creates_the_folder_she_files_into_only_when_she_says_so(tmp_path):
+    async def scenario(kernel):
+        return {"unknown": await invoke(kernel, "email_tidy", mails=[ref(1)], action="move", folder="Factures"),
+                "create": await invoke(kernel, "email_tidy", mails=[ref(1)], action="move", folder="Factures",
+                                       create=True),
+                "again": await invoke(kernel, "email_tidy", mails=[ref(4)], action="move", folder="factures",
+                                      create=True),
+                "actions": list(kernel.ports["mail"].actions)}
+
+    out = live(tmp_path, scenario)
+    assert not out["unknown"].ok and "— pas de dossier « Factures » dans cette boîte" in out["unknown"].content
+    lines = out["create"].content.splitlines()
+    assert out["create"].ok and out["create"].proof
+    assert "— déplacé (« Factures »)" in lines[1] and lines[2] == "Dossier « Factures » créé dans la boîte perso."
+    assert "— déplacé (« Factures »)" in out["again"].content.splitlines()[1]
+    assert [a for a in out["actions"] if a[0] == "create"] == [("create", "perso", "Factures")]  # une fois
+    assert ("move", ref(1), "Factures") in out["actions"]
+
+
+def test_fetching_reads_for_you_alone_and_creating_rides_on_tidying():
+    tools = {s.name: s for s in EMAIL.tools}
+    fetch = tools["email_fetch"]
+    assert fetch.owner_only and not fetch.acts and fetch.bundle == "email" and fetch.max_calls_per_episode == 3
+    assert "create" in tools["email_tidy"].args.model_fields
+
+
+class _Rooted(FakeMail):
+    """Un serveur qui range ses dossiers sous « INBOX. », séparés par des points (cPanel, Courier)."""
+
+    async def create_folder(self, account: str, name: str) -> str:
+        full = "INBOX." + ".".join(p.strip() for p in name.split("/"))
+        if full not in self.made.get(account, []):
+            self.made.setdefault(account, []).append(full)
+            self.actions.append(("create", account, full))
+        return full
+
+
+def test_she_files_into_the_folder_as_the_server_named_it(tmp_path):
+    async def scenario(kernel):
+        return {"create": await invoke(kernel, "email_tidy", mails=[ref(1)], action="move", folder="Factures / EDF",
+                                       create=True),
+                "again": await invoke(kernel, "email_tidy", mails=[ref(4)], action="move", folder="Factures/EDF",
+                                      create=True)}
+
+    out = live(tmp_path, scenario, _Rooted)
+    lines = out["create"].content.splitlines()
+    assert "— déplacé (« INBOX.Factures.EDF »)" in lines[1]
+    assert lines[2] == "Dossier « INBOX.Factures.EDF » créé dans la boîte perso."
+    # il existe : elle y range, sans se dire qu'elle l'a créé
+    again = out["again"].content.splitlines()
+    assert "— déplacé (« INBOX.Factures.EDF »)" in again[1] and not [x for x in again if "créé" in x]
+
+
+class _Partial(FakeMail):
+    """Un serveur qui refuse de chercher dans un dossier."""
+
+    async def search_server(self, query, want):
+        found = await FakeMail.search_server(self, query, want)
+        return Found(found.kept, found.left, ("Projets",))
+
+
+def test_a_search_says_where_the_server_was_not_asked(tmp_path):
+    async def scenario(kernel):
+        return await call(kernel, "email_search", query="facture")
+
+    out = live(tmp_path, scenario, _Partial)
+    assert "(pas cherché sur le serveur dans : Projets)" in out.splitlines()
+
+
+def test_a_box_that_keeps_everything_still_asks_the_server_for_its_trash(tmp_path):
+    keeper = replace(PERSO, keep_all=True)
+    trashed = [old(60, "Facture jetée", at_paris(2024, 3, 1, 8, 0), folder="Corbeille")]
+
+    async def scenario(kernel):
+        await asyncio.sleep(2 * MINUTE / US)
+        return {"named": await call(kernel, "email_search", query="facture", folder="Corbeille"),
+                "list": await call(kernel, "email_list", folder="Corbeille")}
+
+    out = live(tmp_path, scenario, info=keeper, remote=trashed)
+    assert f"[{ref(60)}]" in out["named"] and "(cherché ici et sur le serveur)" in out["named"]
+    assert "(tout ton courrier est ici)" not in out["named"] and "(tout ton courrier est ici)" not in out["list"]
+
+
+def test_a_reply_without_copies_still_sees_its_recipient():
+    """« À : Paul » avec une copie vide s'écrivait « Paul <…>, » : la lecture stricte de Python n'y voyait personne,
+    et la règle d'envoi tombait sur le défaut de la boîte, même quand une ligne de Paul demandait ton accord."""
+    assert addresses("Paul <paul@ailleurs.fr>,") == [("Paul", "paul@ailleurs.fr")]
+    assert addresses('"Dupré, Élodie" <e@x.fr>,, b@c.fr ,') == [("Dupré, Élodie", "e@x.fr"), ("", "b@c.fr")]
+    table = CanalTable(lines=(CanalRule(who=("adresse:paul@ailleurs.fr",), reply="accord"),),
+                       default=CanalRule(who=(EVERYONE,), reply="seule"))
+    canals = Canals(tables={"courrier:perso": table})
+    to, cc = "Paul <paul@ailleurs.fr>", ""
+    assert mail_send(mail_rule_for_all(canals, "perso", (a for _, a in addresses(f"{to},{cc}")))) == "accord"
+
+
+def test_the_history_cadence_counts_from_the_end_of_a_pass():
+    keep, frame = Keep(), NS(now=1_000 * MINUTE)
+    assert keep.next_due(None, frame, None) == frame.now  # au démarrage : tout de suite
+    keep.busy, keep.done_at = True, frame.now - 10  # un passage long, fini il y a un instant
+    assert keep.next_due(None, frame, frame.now - 5 * MINUTE) == keep.done_at + KEEP_EVERY  # pas « dû aussitôt »
+    keep.busy = False
+    assert keep.next_due(None, frame, frame.now - 5 * MINUTE) == keep.done_at + KEEP_IDLE

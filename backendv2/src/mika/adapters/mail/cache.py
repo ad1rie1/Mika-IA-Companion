@@ -17,7 +17,10 @@ n'est pas rendu deux fois, un faux qui imite un vrai l'est (on le remarque).
 
 Oublier un correspondant (``forget``) efface ses mails, ce qui lui a été écrit
 et ce qui lui répondait ; ses mails restent sur le serveur, leur empreinte est
-retenue (``forgotten``) pour qu'une relecture ne les ramène pas.
+retenue (``forgotten``) pour qu'une relecture ne les ramène pas, et l'empreinte
+de son adresse avec l'instant de l'oubli (``forgotten_people``) : ce qu'il avait
+écrit avant, jamais gardé ici, ne l'est pas non plus quand l'historique ou une
+recherche le ramène (ADR 0249).
 
 **Les pièces d'un mail sont gardées avec lui** (ADR 0172) : ses pièces jointes et
 ses images intégrées (``parts``), leurs octets à part, une fois par contenu
@@ -65,6 +68,7 @@ from mika.adapters.mail.models import (
     BlobRow,
     DraftRow,
     FolderRow,
+    ForgottenPersonRow,
     ForgottenRow,
     HandedRow,
     MessageRow,
@@ -73,6 +77,7 @@ from mika.adapters.mail.models import (
     RecipientRow,
     SentRow,
     StatusRow,
+    address_print,
     content_print,
     draft_values,
     first_ref,
@@ -92,6 +97,7 @@ from mika.ports.mail import (
     Folder,
     Mail,
     Sent,
+    addresses,
     assigned_ref,
     mail_ref,
     split_ref,
@@ -247,7 +253,7 @@ class MailCache:
         fingerprint = self._print(m.address, m.subject, m.date, m.body)
         account, folder, mid = fit(m.account, ACCOUNT), fit(m.folder, FOLDER), fit(m.message_id, MID)
         with self._use(write=True) as s:
-            if s.get(ForgottenRow, (account, fingerprint)) is not None:
+            if s.get(ForgottenRow, (account, fingerprint)) is not None or self._of_forgotten(s, m):
                 return m  # une relecture du serveur ne ramène pas ce qui a été oublié
             # sa place, et les places provisoires de ce mail dans ce dossier, en une lecture
             found = s.execute(select(M.id, M.uid, M.message_id, M.ref, M.twin)
@@ -287,6 +293,30 @@ class MailCache:
                 if fresh:
                     _bound(s)
         return replace(m, key=ref, twin=twin, parts_kept=values["parts_kept"])
+
+    @staticmethod
+    def _of_forgotten(s: Session, m: Mail) -> bool:
+        """Un mail d'un correspondant oublié, daté d'avant l'oubli : écrit par lui, ou, rangé dans « Envoyés », écrit
+        pour lui (ce qu'``forget`` efface)."""
+        who = [m.address]
+        filed = s.scalar(select(F.role).where(F.account == fit(m.account, ACCOUNT), F.name == fit(m.folder, FOLDER)))
+        if filed == "sent" or sent_name(m.folder):
+            who += [a for _, a in addresses(f"{m.to},{m.cc}")]
+        digests = sorted({address_print(a) for a in who if a})
+        if not digests:
+            return False
+        until = s.scalar(select(func.max(ForgottenPersonRow.until)).where(ForgottenPersonRow.digest.in_(digests)))
+        return until is not None and (m.date or 0) <= int(until)
+
+    def forgotten(self, address: str, at: int, *, recipients: Iterable[str] = ()) -> bool:
+        """Ce mail (son expéditeur, ou ses destinataires pour un mail rangé dans « Envoyés »), arrivé à ``at`` (µs),
+        est-il d'un correspondant oublié depuis ? De quoi ne pas le relire du tout."""
+        digests = sorted({address_print(a) for a in (address, *recipients) if a})
+        if not digests:
+            return False
+        with self._use(write=False) as s:
+            until = s.scalar(select(func.max(ForgottenPersonRow.until)).where(ForgottenPersonRow.digest.in_(digests)))
+        return until is not None and (at or 0) <= int(until)
 
     @staticmethod
     def _where_ref(ref: str) -> Any:
@@ -430,6 +460,35 @@ class MailCache:
                                 .where(M.account == fit(account, ACCOUNT), M.folder == fit(folder, FOLDER),
                                        M.uid > 0)) or 0)
 
+    def history_floor(self, account: str, folder: str) -> int:
+        """D'où une lecture de l'historique repart, en remontant : au-dessus de ce plancher, chaque UID du serveur a
+        été lu (gardé, ou refusé : un correspondant oublié) ou l'était déjà ; 0 : aucune lecture de l'historique.
+        Ce que la relève ou une recherche ont gardé, épars, ne le déplace pas."""
+        with self._use(write=False) as s:
+            row = s.get(F, (fit(account, ACCOUNT), fit(folder, FOLDER)))
+        return int(row.floor or 0) if row is not None else 0
+
+    def known_uids(self, account: str, folder: str, uids: Iterable[int]) -> set[int]:
+        """Ceux de ces UID qu'un mail gardé de ce dossier occupe."""
+        wanted = sorted({int(u) for u in uids})
+        out: set[int] = set()
+        with self._use(write=False) as s:
+            for at in range(0, len(wanted), 500):
+                out |= {int(u) for u in s.scalars(select(M.uid).where(
+                    M.account == fit(account, ACCOUNT), M.folder == fit(folder, FOLDER),
+                    M.uid.in_(wanted[at:at + 500])))}
+        return out
+
+    def known_ids(self, account: str, message_ids: Iterable[str]) -> set[str]:
+        """Ceux de ces Message-ID qu'un mail gardé de ce compte porte, dans n'importe quel dossier."""
+        wanted = sorted({fit(m, MID) for m in message_ids if m})
+        out: set[str] = set()
+        with self._use(write=False) as s:
+            for at in range(0, len(wanted), 500):
+                out |= set(s.scalars(select(M.message_id).where(M.account == fit(account, ACCOUNT),
+                                                                M.message_id.in_(wanted[at:at + 500]))))
+        return out
+
     def folder_count(self, account: str, folder: str) -> int:
         with self._use(write=False) as s:
             return int(s.scalar(select(func.count()).select_from(M)
@@ -487,8 +546,11 @@ class MailCache:
             s.execute(update(M).where(M.id == moving).values(folder=there, uid=new_uid, sent_name=sent_name(dest)))
 
     def reset_folder(self, account: str, folder: str) -> None:
+        """Ses UID ont changé de sens (un autre UIDVALIDITY) : ses mails s'en vont, son historique est à relire."""
         with self._use(write=True) as s:
             self._drop_messages(s, M.account == fit(account, ACCOUNT), M.folder == fit(folder, FOLDER))
+            s.execute(update(F).where(F.account == fit(account, ACCOUNT), F.name == fit(folder, FOLDER))
+                      .values(floor=0, complete=False))
 
     def prune(self, account: str, folder: str, keep: int = KEEP_PER_FOLDER) -> None:
         """Ne garde que les ``keep`` mails les plus récents d'un dossier : lit d'abord le premier à partir, puis
@@ -532,6 +594,12 @@ class MailCache:
                     out.append(mail)
         return out
 
+    def offered_refs(self) -> frozenset[str]:
+        """Les références de tous les mails rendus et pas encore accusés (tous comptes) : ceux qu'elle n'a pas encore
+        triés."""
+        with self._use(write=False) as s:
+            return frozenset(s.scalars(select(OfferedRow.ref)))
+
     def ack(self, refs: Iterable[str]) -> None:
         """Ces mails ont été remarqués : rendus pour de bon, plus jamais rendus."""
         with self._use(write=True) as s:
@@ -544,7 +612,8 @@ class MailCache:
     # ── dossiers ──
     @staticmethod
     def _folder(r: FolderRow, polled: frozenset[str]) -> Folder:
-        return Folder(r.account, r.name, r.role or "", r.name in polled, r.total or 0, r.unseen or 0, r.last_sync or 0)
+        return Folder(r.account, r.name, r.role or "", r.name in polled, r.total or 0, r.unseen or 0, r.last_sync or 0,
+                      bool(r.complete))
 
     def folders(self, account: str, polled: Iterable[str] = ()) -> list[Folder]:
         chosen = frozenset(fit(name, FOLDER) for name in polled)
@@ -565,18 +634,19 @@ class MailCache:
 
     def save_folder(self, account: str, name: str, *, role: str | None = None, uidvalidity: int | None = None,
                     uidnext: int | None = None, total: int | None = None, unseen: int | None = None,
-                    last_sync: int | None = None) -> None:
+                    last_sync: int | None = None, floor: int | None = None, complete: bool | None = None) -> None:
         with self._use(write=True) as s:
             key = (fit(account, ACCOUNT), fit(name, FOLDER))
             row = s.get(F, key)
             if row is None:
                 row = F(account=key[0], name=key[1], role="", uidvalidity=0, uidnext=0, total=0, unseen=0,
-                        last_sync=0)
+                        last_sync=0, floor=0, complete=False)
                 s.add(row)
             if role is not None:
                 row.role = fit(role, WORD)
             for col, value in (("uidvalidity", uidvalidity), ("uidnext", uidnext), ("total", total),
-                               ("unseen", unseen), ("last_sync", last_sync)):
+                               ("unseen", unseen), ("last_sync", last_sync), ("floor", floor),
+                               ("complete", complete)):
                 if value is not None:
                     setattr(row, col, value)
 
@@ -702,15 +772,23 @@ class MailCache:
                 self.save_draft(replace(found, state=state, sent_id=sent_id or found.sent_id))
 
     # ── l'oubli ──
-    def forget(self, address: str) -> int:
+    def forget(self, address: str, at: int = 0) -> int:
         """Oublier un correspondant, par son adresse : les mails qu'il a écrits ; ce qui lui a été écrit
         (brouillons, envois, leurs copies dans « Envoyés ») ; ce qui répondait à ses mails (ça les cite).
         Ses mails restent sur le serveur : leur empreinte est retenue, pour qu'une relecture ne les
-        ramène pas. Rend combien de lignes ont été effacées."""
+        ramène pas, et celle de son adresse avec l'instant ``at`` de l'oubli (µs), pour que ce qui n'était pas
+        gardé ici ne le soit pas non plus. Rend combien de lignes ont été effacées."""
         address = address.strip().lower()
         if not address:
             return 0
         wanted = fit(address, ADDRESS)
+        with self._use(write=True) as s:
+            digest = address_print(address)
+            row = s.get(ForgottenPersonRow, digest)
+            if row is None:
+                s.add(ForgottenPersonRow(digest=digest, until=max(0, at)))
+            else:
+                row.until = max(int(row.until or 0), at)
 
         def to_them(kind: int, owner: Any) -> Any:
             return exists().where(R.kind == kind, R.owner == owner, R.role == TO, R.address == wanted)

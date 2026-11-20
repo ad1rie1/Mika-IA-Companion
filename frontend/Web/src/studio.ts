@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { SceneManager } from "./scene/SceneManager";
 import { Environment } from "./scene/Environment";
 import { CameraController } from "./scene/CameraController";
-import { VTuberModel } from "./vtuber/VTuberModel";
+import { MODEL_URLS, VTuberModel } from "./vtuber/VTuberModel";
 import { EmotionController } from "./vtuber/EmotionController";
 import { AnimationSystem } from "./vtuber/animation/AnimationSystem";
 import { LipSyncController, msPerCharForRate } from "./audio/LipSyncController";
@@ -88,7 +88,7 @@ async function boot() {
 
   // No backend here: she starts on the rug, so the first button walks.
   animationSystem.setPlace("center", { instant: true });
-  void vtuberModel.load("/models/default.vrm").then((vrm) => {
+  void vtuberModel.loadFirst(MODEL_URLS).then((vrm) => {
     emotionController.setVRM(vrm);
     lipSync.setVRM(vrm);
     const root = vtuberModel.getRoot();

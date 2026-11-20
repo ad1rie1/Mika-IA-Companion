@@ -7,7 +7,7 @@ import { h, initials } from "../../shell/dom";
 import { ico } from "../../shell/icons";
 import { mikaAvatar } from "../../mika/face";
 import { clock, dayAndClock, shortWhen } from "../chat/markup";
-import { TEAMS_LIMITS, type Conversation, type Reply, type TeamsAccount, type TeamsMessage, type Thread } from "../../api/teams";
+import { TEAMS_LIMITS, teamsImageUrl, type Conversation, type Reply, type TeamsAccount, type TeamsMessage, type Thread } from "../../api/teams";
 import { ago, avatar, caps, firstName, levelTag, markToFill, type Caps } from "../mail/format";
 import { countSpan } from "../mail/markup";
 import { ofName } from "../../shared/names";
@@ -104,8 +104,26 @@ function message(m: TeamsMessage, mark: { day: string; suite: boolean }, v: Thre
   return `${day}<div class="tm-msg${me ? " me" : ""}${suite ? " suite" : ""}${m.mentions_me ? " mention" : ""}">
     ${me || suite ? '<span class="tm-gut"></span>' : avatar(name, "sm", m.author_id || name)}
     <div class="tm-body">${suite ? "" : `<div class="tm-meta"><b>${h(name)}</b><time title="${h(dayAndClock(m.at, v.now))}">${h(clock(m.at))}</time></div>`}
-      ${m.text ? `<div class="tm-txt">${messageHtml(m.text, v.selfName, m.mentions_me)}</div>` : ""}
+      ${shownText(m) ? `<div class="tm-txt">${messageHtml(shownText(m), v.selfName, m.mentions_me)}</div>` : ""}
+      ${images(m)}
       ${fromHer(m, replies) ? `<div class="by-mika">${ico("sparkle")}rédigé avec Mika</div>` : ""}</div></div>`;
+}
+
+/** Les « [image] » du texte (ou « [image : ce que Mika y a vu] ») : l'image elle-même les remplace quand on l'a. */
+const IMAGE_MARK = /\s*\[image(?: : [^\]\n]*)?\]/g;
+
+function shownText(m: TeamsMessage): string {
+  return m.images?.length ? m.text.replace(IMAGE_MARK, "").trim() : m.text;
+}
+
+/** Ses images (ADR 0258), dans l'ordre du message ; ce que Mika y a vu en légende et en texte de remplacement. */
+function images(m: TeamsMessage): string {
+  if (!m.images?.length) return "";
+  const shown = [...m.images].sort((a, b) => a.position - b.position).map((i) => {
+    const said = i.seen ? h(i.seen) : "image";
+    return `<figure class="tm-img"><a href="${h(teamsImageUrl(m.ref, i.id))}" target="_blank" rel="noopener"><img src="${h(teamsImageUrl(m.ref, i.id))}" alt="${said}" loading="lazy"></a>${i.seen ? `<figcaption>${ico("sparkle", "xs")}${h(i.seen)}</figcaption>` : ""}</figure>`;
+  });
+  return `<div class="tm-imgs">${shown.join("")}</div>`;
 }
 
 function pendingMessage(p: OwnBubble, v: ThreadView): string {

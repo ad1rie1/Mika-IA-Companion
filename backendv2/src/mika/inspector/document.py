@@ -28,6 +28,7 @@ from html import escape
 from html.parser import HTMLParser
 from urllib.parse import urlsplit
 
+from markdown_it import MarkdownIt
 from markupsafe import Markup
 
 ALLOWED = frozenset(("p", "div", "span", "br", "hr", "strong", "b", "em", "i", "u", "s", "blockquote",
@@ -195,6 +196,21 @@ def readable_html(source: str) -> Markup:
     parser.feed(source[:200_000])
     parser.close()
     return parser.finish()
+
+
+#: une réponse du mode pro, comme le chat la rend (``frontend/Web/src/ui/proMarkdown.ts``) : titres, listes,
+#: citations, tableaux, code, gras, italique, liens ; un saut de ligne simple reste un saut de ligne
+_PRO = MarkdownIt("commonmark", {"html": False, "breaks": True}).enable(["table", "strikethrough"])
+#: une réponse ordinaire, comme le chat la rend (``inlineMarkup.ts``) : blocs de code, code en ligne, gras (et
+#: l'italique, que le même découpage apporte) ; un « # » ou un « - » en tête de ligne reste un caractère
+_ORDINARY = MarkdownIt("zero", {"breaks": True}).enable(["backticks", "fence", "emphasis", "newline", "escape"])
+
+
+def readable_markdown(source: str, *, pro: bool) -> Markup:
+    """Un de ses messages écrit en Markdown, rendu comme le chat le montre (ADR 0241) : complet en mode pro, léger
+    ailleurs. Le HTML brut du texte reste du texte, et la sortie repasse par ``readable_html`` : les mêmes balises
+    que pour un mail, les liens ``http(s)``/``mailto`` seuls, une image réduite à son texte."""
+    return readable_html((_PRO if pro else _ORDINARY).render(source[:200_000]))
 
 
 def readable_text(source: str) -> Markup:

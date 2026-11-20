@@ -351,7 +351,9 @@ class KernelPort:
     async def locate(self, handle: str, *, lat: float, lon: float, accuracy_m: int, label: str,
                      age_ms: int) -> int | None:
         """Une position, à son adresse et à sa personne pour sujets ; coordonnées et lieu sont personnels (l'oubli
-        de la personne les efface)."""
+        de la personne les efface). Puis les avis de sa case se préchargent (ADR 0259 : le port de la carte met en file
+        la case et ses voisines, lues en fond ; seules les cases partent, jamais la position) — sans retenir la
+        réponse."""
         mind = self.kernel.mind
         person = mind.frame().get(identity_c.PERSON(handle)) or handle
         level = int(Sensitivity.PERSONAL)
@@ -361,6 +363,9 @@ class KernelPort:
             fixed_at=mind.clock.now() - max(0, int(age_ms)) * 1000)
         commit = await mind.append([draft], emitter=location_c.OWNER, correlation=f"lieu:{handle}",
                                    origin=Origin.EXTERNAL)
+        maps = self.kernel.ports.get("maps")
+        if maps is not None and commit.seqs and hasattr(maps, "preload"):
+            maps.preload(lat, lon)
         return commit.seqs[-1] if commit.seqs else None
 
     async def unlocate(self, handle: str) -> int | None:

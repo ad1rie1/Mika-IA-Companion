@@ -24,6 +24,12 @@ def words_of(text: str) -> list[str]:
     return [w for w in (part.strip(_EDGES) for part in fold_text(text).split()) if w]
 
 
+def written_words(text: str) -> list[str]:
+    """Les mots d'une recherche tels qu'ils sont écrits (ni casse ni accents repliés), sans la ponctuation qui les
+    entoure : ce qu'on demande à un serveur, qui ne replie pas comme nos bases (ADR 0249)."""
+    return [w for w in (part.strip(_EDGES) for part in str(text).split()) if w]
+
+
 def has_words(haystack: str, needle: str) -> bool:
     """Chaque mot de ``needle`` est dans ``haystack``, dans n'importe quel ordre : « facture edf » trouve « Facture
     de votre contrat EDF ». Sans mot, tout correspond."""

@@ -230,7 +230,46 @@
     return m && isConversationId(m[1]) ? m[1] : "";
   }
 
+  // ── La synchro ciblée de la base locale (ADR 0251) ─────────────────────────
+  //
+  // Teams range chaque conversation dans le magasin `conversations` (sa fiche, qui change quand un message y arrive,
+  // y est retouché ou retiré) et ses fils dans `replychains`, indexés par [conversation, heure de dernière livraison].
+  // Un curseur par conversation (`{w, m}` : le plus tard livré qu'on ait lu, la fiche vue) dit ce qu'il reste à lire.
+
+  /** La marque d'une fiche de conversation : elle change quand un message y arrive, y est retouché ou retiré. */
+  function conversationMarker(record) {
+    if (!isObject(record)) return "";
+    return [record.version, record.threadVersion, record.lastUpdatedMessageVersion, record.lastMessageTimeUtc,
+      record.lastUpdatedMessageId].map(function (v) { return v === undefined || v === null ? "" : String(v); })
+      .join("|");
+  }
+
+  /**
+   * Depuis quand relire les fils d'une conversation (ms) ; `null` : sa fiche n'a pas bougé depuis le curseur. Une
+   * conversation connue repart de son curseur moins `overlapMs` (un fil rangé un peu après sa voisine) ; une inconnue,
+   * de la fenêtre `windowMs` ; l'historique, du début (0).
+   */
+  function syncSince(marker, cursor, now, opts) {
+    if (opts.history) return 0;
+    if (cursor && marker && cursor.m === marker) return null;
+    if (cursor && Number(cursor.w) > 0) return Math.max(0, Number(cursor.w) - opts.overlapMs);
+    return Math.max(0, now - opts.windowMs);
+  }
+
+  /** Les fils lus ont rattrapé la fiche : le plus tard livré qu'on ait lu atteint son dernier message (à `slackMs`). */
+  function caughtUp(record, latest, slackMs) {
+    const last = isObject(record) ? Number(record.lastMessageTimeUtc) || 0 : 0;
+    return !last || (Number(latest) || 0) >= last - slackMs;
+  }
+
+  /** Le curseur après une relecture : jamais en arrière ; la marque, seulement quand les fils ont suivi la fiche. */
+  function advanceCursor(cursor, since, latest, marker) {
+    const before = cursor ? Number(cursor.w) || 0 : 0;
+    return { w: Math.max(before, cursor ? 0 : Number(since) || 0, Number(latest) || 0), m: String(marker || "") };
+  }
+
   return { NAV_KEY: NAV_KEY, isConversationId: isConversationId, sameConversation: sameConversation,
+    conversationMarker: conversationMarker, syncSince: syncSince, caughtUp: caughtUp, advanceCursor: advanceCursor,
     headerPairs: headerPairs, isAuthHeader: isAuthHeader, authFromHeaders: authFromHeaders,
     isChatServiceUrl: isChatServiceUrl, isChatServiceHost: isChatServiceHost, chatServiceBase: chatServiceBase,
     escapeHtml: escapeHtml, messageContent: messageContent, clientMessageIdFor: clientMessageIdFor,

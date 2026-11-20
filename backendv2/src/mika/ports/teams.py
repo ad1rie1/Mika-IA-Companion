@@ -212,6 +212,53 @@ class InboxMessage:
     mentions_me: bool = False
     #: supprimé dans Teams : son texte est effacé du cache
     deleted: bool = False
+    #: ses images, que l'extension annonce et enverra à part (ADR 0258) : il attend qu'elles soient lues
+    images: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class ImageIn:
+    """Une image d'un message, telle que l'extension l'envoie (déjà validée par la porte, ADR 0258) : son message
+    (sa conversation, son identifiant Teams), son identifiant d'image, son rang dans le message, ses octets."""
+
+    conversation: str
+    message_id: str
+    image: str
+    position: int
+    mime: str
+    data: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class ImageToRead:
+    """Une image gardée que Mika n'a pas encore regardée (``id`` : sa ligne)."""
+
+    id: int
+    ref: str
+    image: str
+    mime: str
+    data: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class MessageImage:
+    """Une image d'un message, sans ses octets : ce que le fil en montre."""
+
+    ref: str
+    image: str
+    position: int
+    mime: str
+    size: int
+    seen: str
+    read: bool
+
+
+#: une image gardée, au plus (octets, ADR 0258) : la porte refuse au-delà
+IMAGE_MAX_BYTES = 8 * 1024 * 1024
+#: ce que devient une image envoyée : gardée, déjà là, ou sans message connu (son message n'est pas arrivé)
+IMAGE_KEPT = "kept"
+IMAGE_KNOWN = "known"
+IMAGE_NO_MESSAGE = "no_message"
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,17 +276,24 @@ class InboxBatch:
     self_name: str = ""
     conversations: tuple[InboxConversation, ...] = ()
     messages: tuple[InboxMessage, ...] = ()
+    #: l'historique chargé à la mise en service (ADR 0251) : rangé déjà lu — elle ne le remarque pas comme du neuf —,
+    #: sans régler de brouillon ni rien journaliser
+    history: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class Stored:
     """Ce qu'un lot a changé : les messages neufs, ceux déjà connus, les conversations où la personne a écrit (avec
-    l'heure Teams, µs, de son dernier message dans chacune), et les brouillons que ses messages ont réglés."""
+    l'heure Teams, µs, de son dernier message dans chacune), les brouillons que ses messages ont réglés, et les
+    jumeaux : un message déjà rangé sous un autre identifiant (ADR 0251), laissé de côté ; et parmi les neufs, ceux
+    rangés comme du direct (``recent`` : tout le lot hors historique, l'historique de moins de 24 h)."""
 
     new: int = 0
     known: int = 0
     replied: tuple[tuple[str, int], ...] = ()
     settled: tuple[Settled, ...] = ()
+    twins: int = 0
+    recent: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -358,6 +412,28 @@ class TeamsPort(Protocol):
 
     async def forget(self, subject: str) -> int: ...
 
+    # ── les images (ADR 0258) ──
+    def keep_image(self, account: str, image: ImageIn, now: int) -> str:
+        """Garder une image de ce message (``IMAGE_KEPT``, ``IMAGE_KNOWN`` ou ``IMAGE_NO_MESSAGE``)."""
+        ...
+
+    def image_to_read(self) -> ImageToRead | None:
+        """La plus ancienne image pas encore regardée."""
+        ...
+
+    def image_read(self, image_id: int, *, seen: str, sensitive: bool, read: bool) -> str:
+        """Ce que Mika a vu d'une image (``read`` faux : un échec passager, retentée quelques fois) ; son texte
+        rejoint celui du message. Rend la référence du message."""
+        ...
+
+    def images_of(self, refs: Sequence[str]) -> list[MessageImage]:
+        """Les images de ces messages, sans leurs octets."""
+        ...
+
+    def image_bytes(self, ref: str, image: str) -> tuple[str, bytes] | None:
+        """Le type et les octets d'une image (``None`` : pas d'image)."""
+        ...
+
 
 class TeamsKeys(Protocol):
     """Les clés de l'extension, une par compte (le port ``teams_keys`` : ``app/teams.TeamsDesk``). Une clé neuve
@@ -383,3 +459,9 @@ class TeamsGate(Protocol):
     async def outbox(self, key: str) -> GateResult: ...
 
     async def ack(self, key: str, item: str, data: object) -> GateResult: ...
+
+    async def image(self, key: str, data: object) -> GateResult: ...
+
+    async def live(self, key: str) -> GateResult: ...
+
+    async def live_items(self, key: str) -> GateResult: ...

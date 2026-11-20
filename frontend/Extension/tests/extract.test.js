@@ -199,3 +199,50 @@ test("une réponse énorme est parcourue en temps borné", () => {
   const { truncated } = X.extract(many);
   assert.equal(truncated, true);
 });
+
+test("un tableau de Teams : une ligne par rangée, ses cellules séparées par « | », pas une colonne de lignes", () => {
+  const html = "<p>Bonjour <span itemtype=\"http://schema.skype.com/Mention\">Tout le monde</span></p>"
+    + "<p>Nous avons une liste de 10 magasins :</p>"
+    + "<table itemprop=\"copy-paste-table\"><tbody>"
+    + "<tr><td><p>AP Antibes Wilson</p></td><td><p>103</p></td></tr>"
+    + "<tr><td><p>AP Castellane</p></td><td><p>106</p></td></tr>"
+    + "<tr><th>Nom &amp; ville</th><th>N°<br>badge</th></tr>"
+    + "<tr><td><p></p></td><td></td></tr>"
+    + "</tbody></table><p>Merci</p>";
+  // le tableau se tient à part, une ligne vide avant et après
+  assert.equal(X.htmlToText(html), "Bonjour Tout le monde\nNous avons une liste de 10 magasins :\n\n"
+    + "AP Antibes Wilson | 103\nAP Castellane | 106\nNom & ville | N° badge\n\nMerci");
+});
+
+test("une image collée devient « [image] » ; un emoji garde son texte ; une image seule fait encore un message", () => {
+  const pasted = "<p><img alt=\"image\" src=\"https://eu-api.asm.skype.com/v1/objects/0-neu-d4-abc/views/imgo\" "
+    + "itemscope=\"\" itemtype=\"http://schema.skype.com/AMSImage\"></p>";
+  assert.equal(X.htmlToText(pasted), "[image]");
+  assert.equal(X.htmlToText("<p>Regarde <img src=\"https://x.example/views/imgo\"> ça</p>"), "Regarde [image] ça");
+  assert.equal(X.htmlToText("<p>Top <img itemtype=\"http://schema.skype.com/Emoji\" alt=\"😀\" src=\"e.png\"></p>"),
+    "Top 😀");
+  assert.equal(X.htmlToText("<p>sans texte <img src=\"deco.png\"></p>"), "sans texte");
+  const m = X.normalizeMessage({ id: "1759737600000", conversationid: "19:a@thread.v2", messagetype: "RichText/Html",
+    content: pasted, originalarrivaltime: "2026-10-06T08:00:00Z", imdisplayname: "Alice" });
+  assert.equal(m && m.text, "[image]");
+});
+
+test("les images à télécharger : du service d'images de Teams seulement, à leur rang parmi les marques", () => {
+  const ams = (id, view = "imgo") => `<img alt="image" itemtype="http://schema.skype.com/AMSImage" src="https://eu-api.asm.skype.com/v1/objects/${id}/views/${view}">`;
+  const html = `<p>${`<img itemtype="http://schema.skype.com/Giphy" alt="image" src="https://media.giphy.com/a.gif">`}`
+    + `${ams("0-neu-d4-aaa", "imgpsh_fullsize_anim")} <img src="https://evil.example/v1/objects/x/views/imgo"> `
+    + `${ams("0-neu-d4-bbb")}<img itemtype="http://schema.skype.com/Emoji" alt="😀" src="e.png"></p>`;
+  assert.deepEqual(X.imagesOf(html), [
+    { id: "0-neu-d4-aaa", url: "https://eu-api.asm.skype.com/v1/objects/0-neu-d4-aaa/views/imgo", position: 1 },
+    { id: "0-neu-d4-bbb", url: "https://eu-api.asm.skype.com/v1/objects/0-neu-d4-bbb/views/imgo", position: 3 },
+  ], "le GIF et l'adresse étrangère ont leur marque sans être téléchargés ; l'emoji n'en a pas");
+  assert.equal(X.htmlToText(html), "[image] [image] [image] [image] 😀");
+  const many = Array.from({ length: 12 }, (_, i) => ams("0-img-" + i)).join("");
+  assert.equal(X.imagesOf(many).length, 8, "huit par message au plus");
+  assert.deepEqual(X.imagesOf('<img src="https://eu-api.asm.skype.com.evil.example/v1/objects/x/views/imgo">'), []);
+  const m = X.normalizeMessage({ id: "1759737600000", conversationid: "19:a@thread.v2", messagetype: "RichText/Html",
+    content: "<p>regarde " + ams("0-neu-d4-ccc") + "</p>", originalarrivaltime: "2026-10-06T08:00:00Z",
+    imdisplayname: "Alice" });
+  assert.deepEqual(m.images.map((i) => i.id), ["0-neu-d4-ccc"]);
+  assert.equal(m.text, "regarde [image]");
+});

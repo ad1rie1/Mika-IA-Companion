@@ -32,7 +32,8 @@ Comportement et outils, « Accès » et Carnet dessinés (ADR 0121, 0133, 0176, 
   pas : ce que veut dire un mode est l'aide de son réglage (``MODE_HELP``), ses plafonds (par défaut, espacement, par
   heure) celle de « Exécutions par jour au plus », sa prochaine exécution une ligne au-dessus. Un projet archivé n'a
   pas de formulaire : ces cartes s'y lisent, en lecture. Puis ses outils : la table des lots, « Choisir ses outils »
-  (``projects.outils``) à côté.
+  (``projects.outils``) à côté. Puis ses liens de lecture (ADR 0257) : « Ce qu'il lit » — chaque projet lu et ce que le
+  lien donne maintenant —, « Choisir ce qu'il lit » (``projects.liens``) à côté, et « Qui le lit ».
 - Ses onglets disent combien ils en comptent (objectifs, exécutions, décisions) ; les plus rares (Accès, Carnet) sont
   rangés sous « Plus ».
 - Accès : qui peut le voir, le piloter, se servir de ses apps, et quand — un tableau de lignes lues de haut en bas,
@@ -77,9 +78,12 @@ from mika.faculties.projects.faculty import access_of, project_at
 from mika.faculties.projects.inspect import (
     DECIDE_LABEL,
     EFFECTS_CURSOR,
+    LINKS_TITLE,
     NEXT_RUN_LABEL,
     NOTES_CURSOR,
     OPERATIONS_CURSOR,
+    READERS_TITLE,
+    READS_TITLE,
     tab_counts,
 )
 from mika.inspector import render
@@ -290,7 +294,8 @@ def behaviour(got: Got) -> Markup | None:
     (préparé par la console) par groupes, une ligne par réglage et « Enregistrer » collé en bas ; ce que sa vue dit
     en cartes (son mode, son rythme, sa liberté) passe en aide de leur réglage, sa prochaine exécution en une ligne
     au-dessus ; sans formulaire (un projet archivé), ces faits en lecture. Puis ses outils : la table des lots, et
-    « Choisir ses outils » à côté."""
+    « Choisir ses outils » à côté. Puis ses liens de lecture (ADR 0257), dans le même dessin : ce qu'il lit, « Choisir
+    ce qu'il lit » à côté, et qui le lit."""
     rhythm, tools = got.fields("Son rythme"), got.first("section", "Ses outils")
     if rhythm is None or tools is None:
         return None
@@ -300,7 +305,9 @@ def behaviour(got: Got) -> Markup | None:
         "handmade/projets/fiche_comportement.html", notes=got.notes(), next_run=facts.get(NEXT_RUN_LABEL),
         edit=_edited(form, facts) if form is not None else None,
         settings=[] if form is not None else [b for title in SETTINGS_FACTS if (b := got.fields(title))],
-        tools=tools, lots=_one_page(got.table("Ce qu'elle a en main")), choose=_form(got.forms, "projects.outils"))
+        tools=tools, lots=_one_page(got.table("Ce qu'elle a en main")), choose=_form(got.forms, "projects.outils"),
+        links=got.first("section", LINKS_TITLE), reads=_one_page(got.table(READS_TITLE)),
+        readers=_one_page(got.table(READERS_TITLE)), link=_form(got.forms, "projects.liens"))
 
 
 def _one_page(table: dict[str, Any] | None) -> dict[str, Any] | None:

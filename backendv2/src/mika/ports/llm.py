@@ -91,6 +91,12 @@ class LLMRequest:
     #: clôture d'une boucle). Les outils restent déclarés : un fournisseur refuse une conversation qui porte leurs
     #: appels sans eux (Claude) ; celui qui n'a pas de ``tool_choice`` (Ollama) ne les envoie pas
     tool_choice: str = "auto"
+    #: où le modèle s'arrête d'écrire : dès qu'il produit l'une de ces suites de caractères, sa réponse finit là — pour
+    #: une sortie dont l'appelant ne garde que le début (la seconde passe : ses messages, jusqu'à la première ligne de
+    #: l'autre, ADR 0261). Une économie, jamais une garantie : un fournisseur qui ne sait pas s'arrêter (la CLI de
+    #: Claude Code) les ignore et écrit jusqu'au bout — l'appelant coupe lui-même ce qu'il garde, et ne compte ni sur la
+    #: présence ni sur l'absence de la suite dans le texte rendu
+    stop_sequences: tuple[str, ...] = ()
     meta: Mapping[str, Any] = field(default_factory=dict)
 
     def extend(self, *messages: Message) -> LLMRequest:

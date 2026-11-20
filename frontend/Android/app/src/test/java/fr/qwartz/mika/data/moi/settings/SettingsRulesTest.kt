@@ -157,6 +157,12 @@ class SettingsRulesTest {
         assertNull(boxChanges(before, before, password = "", smtpPassword = "")["password"])
         val t = TeamsValues(label = "A", sign = false)
         assertEquals(setOf("sign"), teamsChanges(t, t.copy(sign = true)).keys)
+        // ses consignes de tri partent sous leur nom du moteur, comme les autres (ADR 0243)
+        val sorted = boxChanges(before, before.copy(triageInstructions = "préviens-moi de la banque"))
+        assertEquals(setOf("triage_instructions"), sorted.keys)
+        assertEquals("préviens-moi de la banque", sorted["triage_instructions"]!!.jsonPrimitive.content)
+        assertEquals("Consignes de tri", BOX_LABELS["triage_instructions"])
+        assertTrue("triage_instructions" in boxShownFields(before))
     }
 
     @Test fun `les bornes que le serveur ne vérifie pas d'avance`() {

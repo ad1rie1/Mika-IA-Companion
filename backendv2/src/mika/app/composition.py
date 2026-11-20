@@ -166,9 +166,10 @@ READING = (
     # comment elle écrit ailleurs (un mail, Teams)
     "voice", "teams_voice",
     # ce qu'on lui demande : un pas sur un but, un projet, un réveil, une tâche de rédaction — la matière, puis la
-    # demande
+    # demande ; ce que ses services ont rendu à ce travail après un accord, à côté de ce que le réseau a rendu ; ce
+    # qu'un projet lit des autres, juste après lui (ADR 0257)
     "step_origin", "step_exchange", "step_life", "step",
-    "project", "project_network", "project_answer", "wake_text", "wake_order",
+    "project", "project_links", "project_network", "work_services", "project_answer", "wake_text", "wake_order",
     "app_consignes", "app_signals", "task_mail", "edits", "task_ask", "teams_task", "teams_ask",
     # sa parole : ce qu'elle se répète, puis sa réponse
     "habits", "answer",

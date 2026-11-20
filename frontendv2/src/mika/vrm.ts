@@ -1,8 +1,8 @@
 /**
  * Mika en VRM dans son coin — le port de `frontendv2/maquette/mika-vrm.js`, au même cadrage : son visage seul
- * dans le rond de la pastille, son buste dans la colonne du chat. Le modèle est celui du client web
- * (`frontend/Web/public/models/default.vrm`, VRM 0.x, ~100 Mo, non versionné), servi sous
- * `/ext/models/default.vrm` ou par `VITE_MIKA_VRM_URL`. Une vie simple et procédurale : souffle, clignements,
+ * dans le rond de la pastille, son buste dans la colonne du chat. Le modèle est celui du client web, servi sous
+ * `/ext/models/` (ADR 0252) : le sien s'il est là (`default.vrm`, non versionné), sinon le modèle libre du dépôt
+ * (`mika-libre.vrm`) ; `VITE_MIKA_VRM_URL` les remplace. Une vie simple et procédurale : souffle, clignements,
  * regard vers le pointeur, tête qui bouge, humeur sur le visage, bouche quand elle parle.
  *
  * Chargé à part (import dynamique) : three et three-vrm ne retardent pas l'écran. Sans WebGL, ou sans le
@@ -15,9 +15,10 @@ import type { MikaCorner } from "./corner";
 import { emotionCategory } from "./labels";
 import type { MikaStore } from "./store";
 
-export function vrmUrl(): string {
+/** Où chercher sa VRM, dans l'ordre : la sienne, puis le modèle libre ; ou la seule adresse qu'on a donnée. */
+export function vrmUrls(): string[] {
   const env = import.meta.env.VITE_MIKA_VRM_URL;
-  return typeof env === "string" && env.trim() ? env.trim() : "/ext/models/default.vrm";
+  return typeof env === "string" && env.trim() ? [env.trim()] : ["/ext/models/default.vrm", "/ext/models/mika-libre.vrm"];
 }
 
 /** L'humeur sur le visage, avec les expressions de base (VRM 0.x converties par three-vrm). */
@@ -60,7 +61,7 @@ const BONES = [
 ] as const;
 type Bone = (typeof BONES)[number];
 
-export function startVrm(corner: MikaCorner, store: MikaStore, url: string = vrmUrl()): void {
+export function startVrm(corner: MikaCorner, store: MikaStore, urls: readonly string[] = vrmUrls()): void {
   const { canvas, stage, live } = corner;
   let renderer: THREE.WebGLRenderer;
   try {
@@ -100,8 +101,8 @@ export function startVrm(corner: MikaCorner, store: MikaStore, url: string = vrm
 
   const loader = new GLTFLoader();
   loader.register((parser) => new VRMLoaderPlugin(parser));
-  loader.load(
-    url,
+  const tryLoad = (i: number): void => loader.load(
+    urls[i],
     (gltf) => {
       const loaded = gltf.userData.vrm as VRM | undefined;
       if (!loaded) {
@@ -145,10 +146,15 @@ export function startVrm(corner: MikaCorner, store: MikaStore, url: string = vrm
       if (ev.total) live.textContent = `VRM ${Math.round((ev.loaded / ev.total) * 100)} %`;
     },
     (err) => {
+      if (i + 1 < urls.length) {
+        tryLoad(i + 1);
+        return;
+      }
       console.warn("VRM indisponible, le portrait reste :", err);
       live.hidden = true;
     },
   );
+  tryLoad(0);
 
   function restPose(): void {
     // Les bras le long du corps (le repos d'un VRM est un T), les épaules un peu basses, les coudes à peine pliés.

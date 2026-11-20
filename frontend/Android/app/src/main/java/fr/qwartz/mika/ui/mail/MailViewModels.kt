@@ -26,6 +26,8 @@ import fr.qwartz.mika.data.moi.mail.leftView
 import fr.qwartz.mika.data.moi.mail.messagesQuery
 import fr.qwartz.mika.data.moi.mail.moveTargets
 import fr.qwartz.mika.data.moi.mail.nextPage
+import fr.qwartz.mika.data.moi.mail.restoredRows
+import fr.qwartz.mika.data.moi.mail.swipeTrashable
 import fr.qwartz.mika.data.moi.mail.tidiedRows
 import fr.qwartz.mika.ui.shell.Load
 import fr.qwartz.mika.ui.shell.said
@@ -33,6 +35,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 
@@ -344,13 +348,88 @@ class MailListViewModel(deps: MailDeps) : MailScreenModel(deps) {
                     say(got.value.message)
                     patch(refs, gesture)
                     selected = emptySet()
-                    loadBoxes()
-                    if (filter == MailStates.UNREAD || filter == MailStates.FLAGGED) loadList(keep = true, silent = true, pages = currentPages())
+                    afterTidy()
                 }
                 is MoiApi.Result.Failed -> say(got.error)
             }
             busy = false
         }
+    }
+
+    /** Après un rangement : les boîtes (leurs non-lus) ; sous « Non lus » ou « Suivis », la liste, qui a pu changer. */
+    private suspend fun afterTidy() {
+        loadBoxes()
+        if (filter == MailStates.UNREAD || filter == MailStates.FLAGGED) loadList(keep = true, silent = true, pages = currentPages())
+    }
+
+    // ── Glisser vers la corbeille ──
+
+    /** Une ligne glissée à la corbeille, et ce que la liste montrait alors : de quoi la remettre (« Annuler »). */
+    data class Trashed(val row: MailRow, val view: MailView, val filter: String, val query: String)
+
+    /** Les lignes glissées dont le serveur n'a pas encore répondu : elles restent écartées sous le doigt ; refusées,
+     *  elles reviennent. */
+    var trashing by mutableStateOf<Set<String>>(emptySet())
+        private set
+
+    private val swiped = MutableSharedFlow<Trashed>(extraBufferCapacity = 8)
+
+    /** Une ligne partie à la corbeille d'un glissement : l'écran l'offre à « Annuler ». Sans écran pour l'entendre,
+     *  rien n'attend : on n'offre pas plus tard d'annuler un geste qu'on ne voit plus. */
+    val trashed: Flow<Trashed> = swiped.asSharedFlow()
+
+    /** Glissée d'un côté ou de l'autre : à la corbeille, par le même geste que la barre de rangement. Faux : rien ne
+     *  part (pas permis ici, ou déjà en route), la ligne revient. */
+    fun swipeTrash(row: MailRow): Boolean {
+        if (!swipeTrashable(row, boxOf(row.box)) || row.ref in trashing) return false
+        trashing = trashing + row.ref
+        val at = Trashed(row, view, filter, query)
+        viewModelScope.launch {
+            when (val got = api.tidy(listOf(row.ref), TRASH)) {
+                is MoiApi.Result.Ok -> {
+                    // ôtée de la liste avant de n'être plus « en route » : elle ne revient pas un instant à l'écran
+                    patch(listOf(row.ref), TRASH)
+                    trashing = trashing - row.ref
+                    swiped.tryEmit(at)
+                    afterTidy()
+                }
+                is MoiApi.Result.Failed -> {
+                    trashing = trashing - row.ref
+                    say(got.error)
+                }
+            }
+        }
+        return true
+    }
+
+    /** « Annuler » : le mail revient dans son dossier d'origine (le geste `move`, comme « Déplacer »). */
+    fun untrash(t: Trashed) {
+        val folder = t.row.folder
+        if (folder.isBlank()) return
+        viewModelScope.launch {
+            when (val got = api.tidy(listOf(t.row.ref), MOVE, folder)) {
+                is MoiApi.Result.Ok -> {
+                    say(got.value.message)
+                    restore(t)
+                    loadBoxes()
+                }
+                is MoiApi.Result.Failed -> say(got.error)
+            }
+        }
+    }
+
+    /** Remis : une lecture partie avant ne le jette plus, et la liste le reprend à sa place si elle montre encore ce
+     *  qu'elle montrait (sinon, la prochaine relecture le dira). */
+    private fun restore(t: Trashed) {
+        val ref = t.row.ref
+        val kept = tidies.map { if (it.gesture == TRASH && ref in it.refs) Tidy(it.seq, it.refs - ref, it.gesture) else it }
+        tidies.clear()
+        tidies.addAll(kept)
+        val cur = listing.valueOrNull ?: return
+        if (view != t.view || filter != t.filter || query != t.query) return
+        val rows = restoredRows(cur.rows, t.row, complete = cur.rows.size >= cur.total)
+        if (rows.size == cur.rows.size) return
+        listing = Load.Ready(cur.copy(rows = rows, total = cur.total + 1, drift = (cur.drift - 1).coerceAtLeast(0)))
     }
 
     /** Ce qu'un geste change aux lignes montrées, sans tout relire ; retenu pour les lectures en cours. */
@@ -419,5 +498,7 @@ class MailListViewModel(deps: MailDeps) : MailScreenModel(deps) {
         const val SEARCH_DEBOUNCE_MS = 350L
         const val POLL_SETTLE_MS = 3_000L
         const val TIDIES_KEPT = 64
+        const val TRASH = "trash"
+        const val MOVE = "move"
     }
 }

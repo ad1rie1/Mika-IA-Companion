@@ -9,9 +9,19 @@ Chrome, Edge et Chromium 120 ou plus récents. Firefox n'est pas pris en charge 
 
 ## Installer
 
-1. `chrome://extensions` → activer **Mode développeur** (en haut à droite).
-2. **Charger l'extension non empaquetée** → choisir ce dossier (`frontend/Extension/`).
-3. **Recharger l'onglet Teams** s'il était déjà ouvert : le script n'entre que dans une page chargée après.
+1. La prendre : dans frontendv2, Paramètres › Teams › ton compte › L'extension › **Télécharger** (un zip, ADR 0246 :
+   le serveur le fait depuis ce dossier, tel qu'il est déployé), puis le décompresser ; ou, sur la machine du dépôt,
+   ce dossier même (`frontend/Extension/`).
+2. `chrome://extensions` → activer **Mode développeur** (en haut à droite).
+3. **Charger l'extension non empaquetée** → choisir le dossier `mika-teams` décompressé (ou ce dossier-ci).
+4. **Recharger l'onglet Teams** s'il était déjà ouvert : le script n'entre que dans une page chargée après.
+
+Pour la mettre à jour : décompresser le nouveau zip par-dessus, puis ↻ (Recharger) sur sa carte dans
+`chrome://extensions`. Chrome relit sa fenêtre sur le disque à chaque ouverture, mais garde son service d'arrière-plan
+tant qu'on ne la recharge pas : sans ce geste, la fenêtre neuve parle à l'ancien service.
+
+Le zip emporte ses fichiers tels qu'ils sont, sans `tests/`, `package.json` ni ce `README.md` : un fichier qu'elle
+charge se range ailleurs qu'à ces trois places.
 
 Une mise à jour depuis la première version (celle des signaux d'appareil) oublie l'ancien jeton et l'ancienne file :
 il faut coller la clé Teams.
@@ -27,13 +37,20 @@ L'extension parle au plugin `teams` de Mika (`/api/teams/…`). Il lui faut la *
   sans `--compte`, le compte `principal`).
 
 Dans la fenêtre de l'extension, colle l'adresse (`http://127.0.0.1:8001` par défaut) et la clé, puis
-**Enregistrer** et **Tester**. « Tester » relève la boîte d'envoi de Mika sans rien y changer : « Mika répond et
-accepte la clé », « clé refusée », un refus de Mika (Teams désactivé dans ses réglages), « pas de plugin Teams à
-cette adresse (mettre à jour Mika) », ou l'erreur réseau.
+**Enregistrer** et **Tester**. « Tester » enregistre d'abord une clé collée ou une adresse changée (on teste ce
+qu'on voit), puis relève la boîte d'envoi de Mika sans rien y changer : « Mika répond et accepte la clé », « clé
+refusée », un refus de Mika (Teams désactivé dans ses réglages), « pas de plugin Teams à cette adresse (mettre à
+jour Mika) », l'accès que Chrome n'a pas donné, ou l'erreur réseau.
 La clé n'est jamais réaffichée (le champ dit seulement qu'elle est définie). Une adresse qui n'est pas sur cette
 machine doit être en `https://` (la clé et les messages ne traversent pas un réseau en clair : `http://` n'est accepté
-que pour `127.0.0.1` et `localhost`), et demande une permission supplémentaire, que Chrome affiche à
+que pour `127.0.0.1`, `localhost` et `[::1]`), et demande une permission supplémentaire, que Chrome affiche à
 l'enregistrement.
+
+En IPv6 : `http://[::1]:8001` vaut la machine locale, si le serveur écoute en IPv6 (`serve --host ::1`, ou `::`). Un
+nom qui n'a qu'une adresse IPv6 (un enregistrement AAAA sans A) s'écrit comme un autre : c'est le système qui le
+résout, et il ne répond que d'un réseau qui a l'IPv6 (sinon « Mika injoignable »). Une IPv6 littérale s'écrit entre
+crochets (`https://[2001:db8::1]:8443`), mais le certificat du mandataire est celui de son nom : derrière Caddy,
+garder le nom.
 
 Une clé refusée arrête tout envoi jusqu'à ce que les réglages changent.
 
@@ -45,6 +62,21 @@ Les messages neufs, **entiers** (4000 caractères au plus, coupés sans jamais c
 - `own` : c'est **ton** message. Les tiens partent aussi : Mika a besoin des deux voix d'un fil, et c'est à ton
   message qu'elle voit qu'une réponse qu'elle avait préparée est partie ;
 - `mentions_me` : le message te mentionne.
+
+Le texte est celui du HTML de Teams : une réponse citée tient sur une ligne (« … »), un **tableau** donne une ligne
+par rangée, ses cellules séparées par « | » (et une ligne vide avant et après), un emoji garde son caractère, une
+**image** collée ou jointe devient « [image] » et une pièce jointe « [pièce jointe : nom] ».
+
+**Les images** (ADR 0258) partent aussi, elles-mêmes. L'extracteur relève celles du service d'images de Teams
+(`https://….asm.skype.com/v1/objects/<id>/views/…`, 8 par message au plus) avec leur rang parmi les « [image] » du
+texte ; aucune autre adresse n'est jamais ouverte. Le message part avec leur nombre (`images`) : Mika l'attend le
+temps de les regarder. La page les télécharge une à une, par leur vue d'origine (`imgo`), avec les cookies du
+navigateur comme Teams lui-même — affichées ou non —, 8 Mo au plus, PNG, JPEG, GIF ou WebP ; le service les trie comme
+leur message (exclusions, pauses ; en direct, la fenêtre de 24 h) et les envoie à `POST /api/teams/image`
+(`{conv, id, image, position, type, data}`, `data` en base64, sous la clé du compte) une fois le message chez Mika :
+202 (gardée), 404 (son message n'y est pas encore : retentée 30 s plus tard, trois fois), 400 (pas une image de ce
+type). L'historique envoie les images de chaque paquet juste après lui. Chez Mika, ce qu'elle y voit remplace
+« [image] » dans le texte (« [image : … ] »), et frontendv2 les montre dans le fil.
 
 Un message **modifié** repart avec son nouveau texte (même identifiant : Mika met le sien à jour) ; un message
 **supprimé** part comme une suppression (`deleted: true`, texte vide : Mika efface sa copie), et plus aucun texte de
@@ -75,8 +107,24 @@ noté), pour ne pas bloquer toute la file.
 
 ## Ce que Mika écrit
 
-Toutes les 30 s, et juste après chaque envoi, l'extension relève la boîte d'envoi de Mika
-(`GET /api/teams/outbox`) et lui rend chaque issue sûre (`POST /api/teams/outbox/<id>` : placé, envoyé, ou échec avec
+Tant qu'un onglet Teams est ouvert, l'extension tient une **connexion en direct** avec Mika (`/api/teams/live`, une
+WebSocket, ADR 0251) : la clé part dans le premier message, jamais dans l'adresse, et Mika pousse sa boîte d'envoi dès
+qu'elle change — ce qu'elle écrit est dans Teams dans la seconde. Ses signes de vie (toutes les 20 s, des deux côtés)
+gardent le service de l'extension éveillé ; coupée, la connexion reprend de plus en plus espacée (2 s à 1 min), et
+ce délai ne repart à 2 s qu'à la première boîte reçue (Mika accepte chaque connexion avant de la refuser).
+
+Le protocole de `/api/teams/live` : l'extension se présente dans les 10 s par un premier message `hello`, sa clé dans
+le champ `key` ; admise comme un relevé (la clé, l'état de Teams et du compte, la cadence), elle reçoit aussitôt
+`{"type": "outbox", "items": […]}` — les éléments tels que les rend `GET /api/teams/outbox` —, puis la même trame à
+chaque changement de la boîte (relue chaque seconde, la clé revérifiée), et `{"type": "ping"}` après 20 s sans
+changement. Ce qu'elle envoie ensuite (ses signes de vie) est lu et ignoré ; les issues restent en HTTP. Mika ferme
+en 4400 (rien de lisible), 4401 (clé refusée, ou retirée en cours de route), 4403 (une page web, Teams ou ce compte
+coupés), 4404 (pas de Teams), 4408 (pas présentée à temps), 4409 (remplacée : au-delà de 4 connexions d'une clé, la
+plus ancienne cède sa place) ou 4429 (trop d'échecs, ou trop de connexions pas encore présentées, de cette adresse).
+Chaque refus accepte d'abord la connexion, pour que son code arrive au navigateur. Après 4401, 4403, 4404 ou 4409,
+l'extension n'y revient qu'une minute plus tard.
+Toutes les 30 s, et juste après chaque envoi, l'extension relève aussi la boîte d'envoi de Mika
+(`GET /api/teams/outbox`) — le filet si la connexion tombe — et lui rend chaque issue sûre (`POST /api/teams/outbox/<id>` : placé, envoyé, ou échec avec
 sa raison). Les issues partent avant chaque relève, même en pause ou pendant une attente de la file (pas après une
 clé refusée), et sont gardées tant que Mika ne les a pas reçues, même quand elle ne liste plus l'élément ; une issue
 qu'elle refuse 10 fois de suite (une 4xx autre que 401, 403, 404, 408, 409 et 429, redite de plus en plus espacée)
@@ -135,14 +183,44 @@ qui partent en ton nom. Vérifie ce que la charte informatique en dit.
 
 ## Comment elle capte, comment elle écrit
 
-`page/capture.js` est chargé **dans** la page (monde `MAIN`), avant le client Teams. Pour lire, il a deux sources :
+`page/capture.js` est chargé **dans** la page (monde `MAIN`), avant le client Teams. Pour lire, il a trois sources
+(ADR 0251) :
 
+- **le worker de Teams** : le Teams d'aujourd'hui fait vivre son service de chat, sa connexion en direct et sa base
+  dans un worker (`precompiled-web-worker`) ; la page n'en voit que les réponses JSON qu'il lui passe, où un message
+  passe dès qu'il arrive. `Worker` est enveloppé comme `WebSocket` : chaque réponse qui parle d'un message
+  (`"content"` et `"messagetype"`, 2 Mo au plus) est lue, et une synchro ciblée suit ;
+- **la base IndexedDB du client**, par **synchro ciblée** : les fiches de conversation (le magasin `conversations`,
+  quelques centaines) sont relues à chaque signe — le worker parle d'un message, le titre de l'onglet change (il
+  compte les non-lus) — et toutes les 5 s sinon ; pour chaque conversation dont la fiche a bougé
+  (`P.conversationMarker`), seuls ses fils livrés depuis son **curseur** (moins une minute de recouvrement) sont relus,
+  par l'index `latestDeliveryTimeByConversationId` de `replychains`. Une conversation sans curseur est relue sur 24 h.
+  Les curseurs (le plus tard livré qu'on ait lu, la marque de la fiche) sont gardés par le service : un onglet rouvert
+  ne relit que ce qui a changé depuis ; ils ne partent qu'avec le dernier lot qu'ils couvrent. Une fiche en avance sur
+  ses fils (Teams les range en deux fois) est retentée pendant 45 s avant d'en prendre la marque. Le recouvrement
+  grandit avec le temps écoulé depuis la dernière synchro (une veille, des fils remplis après coup). Les fiches passent
+  de la plus active à la moins active ; un tour lit au moins une fiche et dure 1,5 s au plus ; le reste passe au tour
+  suivant. Un lot que le service n'a pas reçu fait reprendre à la page les curseurs du service : un curseur ne
+  passe jamais devant un lot perdu (le relais fait partir les lots l'un après l'autre). Les bases sont ouvertes sans version et refermées aussitôt : l'extension
+  n'en crée et n'en modifie aucune ;
 - **le réseau** : les réponses JSON (`fetch`, `XMLHttpRequest`) dont l'adresse ressemble au service de chat, et
-  les trames du WebSocket par lequel arrivent les messages en direct (2 Mo au plus, lues après que Teams a traité
-  l'événement ; `socket.constructor === WebSocket` reste vrai pour le client) ;
-- **la base IndexedDB du client**, relue toutes les 45 s (1,5 s de travail au plus) : elle rattrape ce que le réseau
-  ne montre pas, comme une requête faite par un worker ou un message arrivé avant l'ouverture de l'onglet. Les bases
-  sont ouvertes sans version et refermées aussitôt : l'extension n'en crée et n'en modifie aucune.
+  les trames des WebSockets de la page (2 Mo au plus, lues après que Teams a traité l'événement ;
+  `socket.constructor === WebSocket` reste vrai pour le client) — le Teams d'aujourd'hui n'y passe plus ses messages.
+
+Ce qui est capté part au service de l'extension 300 ms plus tard, et à Mika 400 ms après.
+
+**L'historique** (Réglages › L'historique › « Charger tout l'historique », pour une première mise en service) :
+l'onglet lit toute sa base, conversation par conversation — celles des fiches et celles qui n'ont que des fils —,
+par pages de 200 fils (une transaction chacune : Teams écrit entre deux), en garde les 1 000 messages les plus récents
+de chacune (Mika n'en garde pas plus) et les envoie au service par paquets de 150, chacun attendu avant le suivant
+(180 s au plus ; le service s'en donne 120). Le service les trie : les exclusions et toutes les pauses gardées (les 50
+dernières, quel que soit leur âge) valent toujours, et une conversation qu'on ne sait pas nommer ne part pas s'il y a
+des exclusions ; ni fenêtre de 24 h, ni « avant l'activation », ni « déjà vu ». Il les range chez Mika marqués
+`history` : ce qui a plus de 24 h, elle le garde déjà lu, sans le prendre pour du neuf. Une pause prise en route
+arrête le chargement. Chaque chargement a son identifiant : les paquets d'un chargement d'avant ne comptent plus. Sans
+nouvelles depuis 3 min (l'onglet fermé en route), il est tenu pour interrompu et peut être relancé. Le service n'en garde rien que ses comptes. Le relancer ne range rien deux fois : Mika reconnaît
+un message à son identifiant, et le même message sous un autre (sa version en attente, une empreinte) est écarté
+comme doublon.
 
 Les deux sources sont dédoublonnées par **version** : l'identifiant du message et un condensé de son texte. Un message
 modifié repasse ; une version plus ancienne qu'une déjà vue (un cache en retard) ne revient pas, ni le texte d'un
@@ -159,9 +237,15 @@ Pour écrire (`lib/page.js` pour ce qui se calcule sans la page) :
   (`tmp.session.<uuid>-mainWindowNavHistory`, l'entrée courante, `activeEntities.mainEntity.id`), sinon dans
   l'adresse de la page ;
 - la **zone de saisie** est le premier élément visible parmi `[data-tid="ckeditor"][contenteditable="true"]`,
-  `[data-tid*="ckeditor"][contenteditable="true"]` et `div[role="textbox"][contenteditable="true"]` ; le texte y
-  entre par `document.execCommand("insertText")`, ligne à ligne, avec un saut de ligne simple entre deux lignes
-  (jamais `innerHTML`, que les Trusted Types interdisent) ;
+  `[data-tid*="ckeditor"][contenteditable="true"]` et `div[role="textbox"][contenteditable="true"]`. C'est un
+  CKEditor 5, dont la page pose l'instance sur l'élément (`ckeditorInstance`) : le texte entre dans son modèle, là où
+  Teams lit ce qu'il envoie, par ses commandes (`insertText`, `shiftEnter` entre deux lignes), la sélection d'abord
+  mise en fin de texte, une commande à la fois ; vide ou pas se lit dans ce modèle (`getData()`). Une frappe simulée
+  (`document.execCommand("insertText")`) n'y entrait pas toujours : le texte s'affichait, l'éditeur le redessinait
+  vide au clic sur Envoyer, rien ne partait, et la zone vidée passait pour un envoi. Elle ne sert plus qu'à un éditeur
+  sans instance connue (jamais `innerHTML`, que les Trusted Types interdisent). Le bouton est
+  `[data-tid="sendMessageCommands-send"]` (puis `newMessageCommands-send`, `button[name="send"]`) ; le journal de
+  l'extension dit par où chaque envoi est parti ;
 - l'**envoi par le service de chat** est un `POST <base>/v1/users/ME/conversations/<id>/messages`
   (`RichText/Html`, texte échappé, retours à la ligne en `<br>`, `clientmessageid` stable — 19 chiffres d'un condensé
   FNV-1a 64 bits de l'identifiant de l'élément —, ton nom d'affichage), avec les en-têtes `authentication`,
@@ -175,7 +259,10 @@ qui manque laisse l'issue douteuse (la page ne commence pas une demande arrivée
 `background.js` décide de ce qui part (`lib/signals.js`), tient la file, relève la boîte d'envoi et suit chaque élément
 (`lib/outbox.js`) : un placement, une réclamation ou un envoi est marqué avant d'être fait, pour ne jamais l'être deux
 fois. Toute coupe de texte passe par `lib/text.js`, qui ne coupe jamais une paire de substitution (une moitié
-d'emoji seule faisait refuser un lot entier). Tout l'état vit dans `chrome.storage.local` (sans plafond de taille,
+d'emoji seule faisait refuser un lot entier) ; le relais seul a sa copie de `cut`. Chrome n'injecte un même fichier
+qu'une fois par cadre, quel que soit le monde : `lib/text.js`, chargé dans la page, ne l'était jamais dans le relais,
+et chaque lot capté y tombait sans bruit. La page et le relais ne partagent donc aucun fichier
+(`tests/relay.test.js` le garde, et fait tourner le relais seul, comme Chrome le charge). Tout l'état vit dans `chrome.storage.local` (sans plafond de taille,
 `unlimitedStorage`), parce qu'un service MV3 peut être arrêté à tout moment.
 
 ### Limites
@@ -192,8 +279,9 @@ zone de saisie de la conversation ouverte.
 Microsoft modifie son client sans prévenir. Si plus rien n'arrive, ou que Mika n'arrive plus à écrire, ouvre
 **Diagnostic de l'onglet Teams** :
 
+- le worker de Teams : écouté ou non, ses réponses, celles qui parlaient d'un message, les messages qu'on en a tirés ;
+- la base locale : les synchros, leur durée, les conversations suivies, celles relues de façon ciblée, les messages ;
 - les réponses et trames lues côté réseau, et les messages qu'on en a tirés ;
-- les bases locales trouvées, leurs magasins, leurs enregistrements et les messages qu'on en a tirés ;
 - si ton identité a été trouvée (pour reconnaître tes propres messages et les mentions) ;
 - **zone de saisie trouvée**, **conversation active connue**, **envoi par le service de chat possible** (oui ou
   non : l'existence de l'en-tête, jamais sa valeur), et ce qui a été placé ou envoyé depuis l'ouverture de l'onglet.
@@ -215,11 +303,16 @@ réponse citée) ; ce qui part (nouveauté, pause jugée à l'heure du message e
 l'identifiant ou la personne, retenue le temps d'apprendre un nom, déjà vu, conversation inconnue, soi exact, les deux
 voix et la mention, lots coupés sous 200 messages, 200 conversations et 512 Kio comptés en octets, recoupe après un
 413, nom appris après coup, Retry-After, attente croissante, erreurs 5xx comptées, adresse https hors de cette
-machine) ; la boîte d'envoi (un brouillon placé une seule fois même si la liste du serveur est en retard ou après un
+machine, IPv6 entre crochets et `[::1]` local) ; la boîte d'envoi (un brouillon placé une seule fois même si la liste du serveur est en retard ou après un
 redémarrage, un placement refusé qui redevient possible, échéance et exclusion dites en échec, réclamation accordée,
 prise ailleurs ou sans réponse, un envoi marqué avant de partir et jamais refait, « rien n'a commencé » qui garde la
 réclamation, envoi douteux ou interrompu ni dit ni retenté, issues gardées quand le serveur ne liste plus l'élément,
 réponses 404/409/4xx/429/5xx aux issues et abandon après 10 refus, issue sans texte, journal borné à 120 caractères) ;
 et ce que lit la page (en-têtes d'authentification en `Headers`, en liste ou en objet, base du service de chat et
 hôtes de Teams seulement, échappement HTML du corps d'envoi, identifiant client stable, réponse du service de chat
-sûre ou douteuse, conversation ouverte dans un historique de navigation de formes diverses ou dans l'adresse).
+sûre ou douteuse, conversation ouverte dans un historique de navigation de formes diverses ou dans l'adresse ; la
+marque d'une fiche de conversation, ce qu'il faut relire et depuis quand, un curseur qui n'avance jamais en arrière).
+`tests/relay.test.js` fait tourner le relais seul, comme Chrome le charge (sources, curseurs, demandes au service,
+l'ordre de l'historique) ; `tests/background.test.js` fait tourner le service tel quel avec de fausses API de Chrome,
+`fetch` et `WebSocket` (curseurs gardés et rendus, historique marqué et trié, refus de Mika, la boîte poussée en
+direct traitée sans relevé, la connexion fermée en pause ou sans clé).

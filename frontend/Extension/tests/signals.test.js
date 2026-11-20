@@ -226,9 +226,9 @@ test("la pause se juge à l'heure du message : écrit pendant, il ne part jamais
   assert.equal(S.notePause(open, true, NOW).length, 2);
 });
 
-test("les pauses gardées sont bornées : celles hors de la fenêtre partent, 50 au plus", () => {
-  const old = [{ start: NOW - 40 * 3600000, end: NOW - 30 * 3600000 }, { start: NOW - 3600000, end: NOW - 1800000 }];
-  assert.deepEqual(S.prunePauses(old, NOW), [old[1]]);
+test("les pauses gardées sont bornées à 50, quel que soit leur âge (l'historique n'a pas de fenêtre)", () => {
+  const old = [{ start: NOW - 40 * 86400000, end: NOW - 30 * 86400000 }, { start: NOW - 3600000, end: NOW - 1800000 }];
+  assert.deepEqual(S.prunePauses(old, NOW), old, "une pause d'il y a un mois vaut toujours");
   let many = [];
   for (let i = 0; i < 80; i++) {
     many = S.notePause(many, true, NOW - 100000 + i * 1000);
@@ -328,7 +328,30 @@ test("l'adresse de Mika : http seulement sur cette machine, https ailleurs", () 
   assert.deepEqual(S.serverAddress("https://127.0.0.1:8443"), { origin: "https://127.0.0.1:8443", local: true });
   assert.match(S.serverAddress("http://192.168.1.20:8001").error, /https/);
   assert.match(S.serverAddress("http://mika.lan").error, /https/);
-  assert.match(S.serverAddress("http://[::1]:8001").error, /https/, "pas de permission d'hôte pour [::1]");
   assert.ok(S.serverAddress("ftp://127.0.0.1").error);
   assert.ok(S.serverAddress("pas une adresse").error);
+});
+
+test("l'adresse de Mika en IPv6 : [::1] est cette machine, toute autre IPv6 passe en https", () => {
+  assert.deepEqual(S.serverAddress("http://[::1]:8001"), { origin: "http://[::1]:8001", local: true });
+  assert.deepEqual(S.serverAddress("http://[0:0:0:0:0:0:0:1]:8001/api"), { origin: "http://[::1]:8001", local: true },
+    "la forme longue de la boucle est la même machine");
+  assert.deepEqual(S.serverAddress("https://[::1]:8443"), { origin: "https://[::1]:8443", local: true });
+  assert.deepEqual(S.serverAddress("https://[2001:DB8::1]:8443/x"), { origin: "https://[2001:db8::1]:8443", local: false });
+  assert.deepEqual(S.serverAddress("https://[2001:db8::1]"), { origin: "https://[2001:db8::1]", local: false });
+  assert.match(S.serverAddress("http://[2001:db8::1]:8001").error, /https/, "une IPv6 du réseau, jamais en clair");
+  assert.match(S.serverAddress("http://[::ffff:192.168.1.20]:8001").error, /https/);
+  assert.ok(S.serverAddress("https://2001:db8::1/").error, "sans crochets, l'adresse est illisible");
+  assert.ok(S.serverAddress("ftp://[::1]").error);
+  // l'adresse que la requête construit (background.js, request) depuis l'origine gardée
+  const origin = S.serverAddress("https://[2001:db8::1]:8443").origin;
+  assert.equal(new URL("/api/teams/outbox", origin).toString(), "https://[2001:db8::1]:8443/api/teams/outbox");
+});
+
+test("un message part avec le nombre de ses images, jamais pour une suppression", () => {
+  const base = { id: "1", conv: "19:a@thread.v2", author: "A", authorId: "8:orgid:a", time: 1, text: "[image]" };
+  assert.equal(S.wireMessage({ ...base, images: 2 }, "").images, 2);
+  assert.equal(S.wireMessage({ ...base, images: 30 }, "").images, 8);
+  assert.equal(S.wireMessage({ ...base }, "").images, undefined);
+  assert.equal(S.wireMessage({ ...base, images: 2, deleted: true }, "").images, undefined);
 });

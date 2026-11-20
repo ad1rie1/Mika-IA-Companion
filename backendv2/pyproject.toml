@@ -23,6 +23,8 @@ dependencies = [
     "alembic>=1.13",
     # la carte de sa position, lue dans un fichier PMTiles ou relayée d'un serveur (ADR 0193)
     "pmtiles>=3.8,<4",
+    # ses réponses relues dans la console comme le chat les montre : le Markdown du mode pro (ADR 0241)
+    "markdown-it-py>=3",
 ]
 
 [project.optional-dependencies]
@@ -35,7 +37,9 @@ memory = ["numpy>=1.26", "sentence-transformers>=3.0"]
 documents = ["pypdf>=4"]
 # le pilote MariaDB (ADR 0101) : en production, et pour la voie de tests ``--mariadb``
 mariadb = ["pymysql>=1.1"]
-dev = ["pytest>=8", "pytest-asyncio>=0.23", "hypothesis>=6.100", "import-linter>=2.0", "ruff>=0.6", "time-machine>=2.14", "jsonschema>=4.20"]
+# lire l'extrait OpenStreetMap de Geofabrik pour l'index des lieux (``mika carte lieux``, ADR 0244)
+cartes = ["osmium>=4.3"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "hypothesis>=6.100", "import-linter>=2.0", "ruff>=0.6", "time-machine>=2.14", "jsonschema>=4.20", "osmium>=4.3"]
 
 [project.scripts]
 mika = "mika.app.cli:main"

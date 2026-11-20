@@ -1,7 +1,9 @@
-"""L'index des lieux (ADR 0194) : les points d'intérêt et les lieux habités de la carte, tirés une fois des tuiles de
-l'archive (``mika carte lieux``), cherchés ensuite dans un fichier SQLite du dossier de données — par le nom (texte
-intégral), autour d'un point, dans une zone, le long d'un trajet (arbre R). Rien ne sort : la recherche ne joint
-personne.
+"""L'index des lieux (ADR 0194, 0244) : les points d'intérêt et les lieux habités, tirés une fois de l'extrait
+OpenStreetMap de Geofabrik (``mika carte lieux``, ``adapters/maps/osm.py`` : le schéma 2, avec les attributs d'une
+fiche) ou des tuiles de l'archive (ici : le schéma 1, sans détails), cherchés ensuite dans un fichier SQLite du
+dossier de données — par le nom (texte intégral), autour d'un point, dans une zone, le long d'un trajet (arbre R),
+filtrés (ouvert maintenant, terrasse, végétarien…, cuisine) ; la fiche d'un lieu (``place``). Rien ne sort : la
+recherche ne joint personne.
 
 **Construire** (``build``) : les tuiles du zoom le plus fin de l'archive (le 15 de Protomaps, où ``pois`` et
 ``places`` sont complets), chaque contenu décodé une fois, ses points nommés d'une sorte connue (``CATEGORIES``)
@@ -10,7 +12,9 @@ l'ouvre alors de lui-même. La mémoire reste bornée : des tableaux pour les en
 lignes, une grille des villes (quelques dizaines de milliers) pour dire près de quoi est chaque lieu.
 
 **Chercher** (``Places``) : une connexion en lecture seule par requête, dans un fil à part (la boucle ne s'arrête
-pas) ; un fichier remplacé se lit à la requête suivante, celles en cours finissent sur l'ancien."""
+pas) ; un fichier remplacé se lit à la requête suivante, celles en cours finissent sur l'ancien. Un index de schéma 1
+se lit toujours : on y cherche, sans détails (un filtre n'y trouve rien, une fiche n'y a que sa ligne). Ouvert ou
+fermé se juge à l'instant de la requête, à l'heure de Paris (``hours``)."""
 
 from __future__ import annotations
 
@@ -31,10 +35,12 @@ from typing import Any
 
 from pmtiles.tile import Compression, TileType, deserialize_header, tileid_to_zxy, zxy_to_tileid
 
+from mika.adapters.maps import hours
+from mika.adapters.maps import tags as osm_tags
 from mika.adapters.maps.config import PlacesConfig
 from mika.adapters.maps.mvt import read_points
 from mika.adapters.maps.tiles import BROKEN, DIR_MAX_BYTES, read_directory
-from mika.ports.maps import MapsUnavailable, PlaceHit
+from mika.ports.maps import MapsUnavailable, OsmFacts, PlaceDetail, PlaceHit
 
 #: ce qu'une recherche lève quand l'index manque ou s'abîme : une personne (``app/me/maps.py``) et le modèle (les outils
 #: de voyage) le lisent, sans consigne d'exploitation — la console dit comment le refaire (``IndexInfo.reason``)
@@ -115,17 +121,32 @@ COMMUNES = ("city", "town", "village")
 TOWN_RADIUS_M = 15_000
 
 # ── le fichier ──
+#: le schéma 1 (ADR 0194), tiré des tuiles : le nom, la sorte, la catégorie, la position, l'importance, la commune
 SCHEMA_VERSION = "1"
-SCHEMA = """
-CREATE TABLE place (id INTEGER PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, category TEXT NOT NULL,
-                    lat REAL NOT NULL, lon REAL NOT NULL, weight INTEGER NOT NULL, town TEXT NOT NULL DEFAULT '');
+_TABLES = """
 CREATE VIRTUAL TABLE place_text USING fts5(name, town, content='place', content_rowid='id',
                                            tokenize='unicode61 remove_diacritics 2');
 CREATE VIRTUAL TABLE place_box USING rtree(id, lat0, lat1, lon0, lon1);
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """
+SCHEMA = """
+CREATE TABLE place (id INTEGER PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, category TEXT NOT NULL,
+                    lat REAL NOT NULL, lon REAL NOT NULL, weight INTEGER NOT NULL, town TEXT NOT NULL DEFAULT '');
+""" + _TABLES
+#: le schéma 2 (ADR 0244), tiré de l'extrait OpenStreetMap : en plus, l'objet d'OpenStreetMap (``n123``, ``w45``,
+#: ``r6``), les filtres qu'il vérifie (des bits, ``tags.FEATURE_RULES``), sa cuisine rangée (« french;regional »), ses
+#: horaires tels quels, et les attributs de sa fiche (JSON, ``tags.KEPT``)
+DETAILED_VERSION = "2"
+DETAILED_SCHEMA = """
+CREATE TABLE place (id INTEGER PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, category TEXT NOT NULL,
+                    lat REAL NOT NULL, lon REAL NOT NULL, weight INTEGER NOT NULL, town TEXT NOT NULL DEFAULT '',
+                    osm TEXT NOT NULL DEFAULT '', features INTEGER NOT NULL DEFAULT 0,
+                    cuisine TEXT NOT NULL DEFAULT '', hours TEXT NOT NULL DEFAULT '', tags TEXT NOT NULL DEFAULT '');
+""" + _TABLES
 #: posé une fois les lieux écrits : les plus importants d'abord, dans une grande zone (la France entière, de loin)
 RANK_INDEX = "CREATE INDEX place_weight ON place(weight)"
+#: une fiche par son objet d'OpenStreetMap (schéma 2)
+OSM_INDEX = "CREATE INDEX place_osm ON place(osm)"
 BATCH = 10_000
 SAY_EVERY = 50_000
 #: les contenus décodés gardés (l'océan, les terres vides : des tuiles qui partagent le leur, sans suite)
@@ -378,23 +399,11 @@ def build(archive: Path, out: Path, say: Callable[[str], None] = lambda _text: N
                 next_say += SAY_EVERY
         _write(db, places)
         say(f"{done} tuiles lues : {count} lieux ; près de quelle ville est chacun…")
-        _towns(db)
-        say("l'index du texte…")
-        db.execute("INSERT INTO place_text(place_text) VALUES ('rebuild')")
-        db.execute("INSERT INTO place_text(place_text) VALUES ('optimize')")
-        db.execute(RANK_INDEX)
-        db.execute("ANALYZE")
+        towns(db)
         bounds = (h["min_lon_e7"] / 1e7, h["min_lat_e7"] / 1e7, h["max_lon_e7"] / 1e7, h["max_lat_e7"] / 1e7)
-        built = datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
-        db.executemany("INSERT INTO meta(key, value) VALUES (?, ?)", [
-            ("version", SCHEMA_VERSION), ("source", archive.name), ("built", built), ("count", str(count)),
-            ("zoom", str(zoom)), ("bounds", ",".join(f"{v:.5f}" for v in bounds))])
-        db.commit()
-        db.close()
+        seal(db, partial, out, say, [("version", SCHEMA_VERSION), ("source", archive.name), ("count", str(count)),
+                                     ("zoom", str(zoom)), ("bounds", ",".join(f"{v:.5f}" for v in bounds))])
         db = None
-        with partial.open("rb") as f:
-            os.fsync(f.fileno())
-        os.replace(partial, out)
     except sqlite3.Error as exc:
         raise BuildFailed(f"l'index ne s'écrit pas ({exc})") from None
     except OSError as exc:
@@ -406,6 +415,27 @@ def build(archive: Path, out: Path, say: Callable[[str], None] = lambda _text: N
         partial.unlink(missing_ok=True)
     return Built(out, count, done, broken, zoom, dict(categories), skipped.most_common(25),
                  round(time.monotonic() - started, 1))
+
+
+def seal(db: sqlite3.Connection, partial: Path, out: Path, say: Callable[[str], None],
+         meta: list[tuple[str, str]], *, more: Sequence[str] = ()) -> None:
+    """Finir un index écrit dans ``partial`` : le texte intégral, l'ordre d'importance (et ``more``), ses
+    statistiques, ce qu'il dit de lui (``meta``, plus ``built``) ; puis il prend la place de ``out``, entier. Ferme
+    ``db``."""
+    say("l'index du texte…")
+    db.execute("INSERT INTO place_text(place_text) VALUES ('rebuild')")
+    db.execute("INSERT INTO place_text(place_text) VALUES ('optimize')")
+    db.execute(RANK_INDEX)
+    for sql in more:
+        db.execute(sql)
+    db.execute("ANALYZE")
+    built = datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+    db.executemany("INSERT INTO meta(key, value) VALUES (?, ?)", [*meta, ("built", built)])
+    db.commit()
+    db.close()
+    with partial.open("rb") as f:
+        os.fsync(f.fileno())
+    os.replace(partial, out)
 
 
 def _write(db: sqlite3.Connection, places: list[tuple[int, str, str, str, float, float, int]]) -> None:
@@ -458,11 +488,11 @@ class _Grid:
             k += 1
 
 
-def _towns(db: sqlite3.Connection) -> None:
+def towns(db: sqlite3.Connection) -> None:
     """``town`` : la ville, le village (ou le quartier) le plus proche de chaque lieu, à moins de 15 km."""
-    towns = db.execute(f"SELECT name, kind, lat, lon FROM place WHERE category = '{TOWNS}' AND kind IN "
+    found = db.execute(f"SELECT name, kind, lat, lon FROM place WHERE category = '{TOWNS}' AND kind IN "
                        f"({', '.join(repr(k) for k in NEAR_KINDS)})").fetchall()
-    near, communes = _Grid(towns, NEAR_KINDS), _Grid(towns, COMMUNES)
+    near, communes = _Grid(found, NEAR_KINDS), _Grid(found, COMMUNES)
     last = 0
     while True:
         batch = db.execute("SELECT id, name, kind, category, lat, lon FROM place WHERE id > ? ORDER BY id LIMIT ?",
@@ -520,38 +550,87 @@ def _box(lat: float, lon: float, radius_m: float) -> tuple[float, float, float, 
     return _expand(lat, lon, lat, lon, radius_m)
 
 
-def _hit(row: Sequence[Any], *, distance_m: float | None = None, along_m: float | None = None) -> PlaceHit:
+#: ce qu'une ligne de l'index donne : ses colonnes lues, selon le schéma (le 2 en ajoute quatre)
+COLUMNS = "p.id, p.name, p.kind, p.category, p.lat, p.lon, p.weight, p.town"
+DETAIL_COLUMNS = ", p.osm, p.features, p.cuisine, p.hours"
+HOURS_AT = 11
+#: un filtre qui se juge après la requête (ouvert maintenant) lit plus de candidats, au plus tant
+CANDIDATES_MAX = 2_000
+OSM_ID = re.compile(r"^([nwr])(\d{1,15})$")
+ROW_ID = re.compile(r"^l(\d{1,15})$")
+OSM_PAGES = {"n": "node", "w": "way", "r": "relation"}
+WIKIDATA = re.compile(r"^Q\d{1,12}$")
+
+
+@dataclass(frozen=True, slots=True)
+class _Ask:
+    """Une recherche : le schéma de l'index (les colonnes lues), ce qui la filtre, l'instant (pour les horaires)."""
+
+    detailed: bool
+    at: datetime
+    category: str = ""
+    features: int = 0
+    cuisine: str = ""
+    open_now: bool = False
+
+    @property
+    def columns(self) -> str:
+        return COLUMNS + (DETAIL_COLUMNS if self.detailed else "")
+
+    def where(self) -> tuple[str, list[Any]]:
+        """Ce que la requête filtre elle-même : `` AND …`` et ses paramètres."""
+        sql, params = "", []
+        if self.category:
+            sql += " AND p.category = ?"
+            params.append(self.category)
+        if self.features:
+            sql += " AND (p.features & ?) = ?"
+            params += [self.features, self.features]
+        if self.cuisine:
+            sql += " AND instr(';' || p.cuisine || ';', ?) > 0"
+            params.append(f";{self.cuisine};")
+        if self.open_now:
+            sql += " AND p.hours != ''"
+        return sql, params
+
+    def widen(self, n: int) -> int:
+        """Combien de candidats lire pour en garder ``n`` après le filtre des horaires."""
+        return min(CANDIDATES_MAX, 8 * n + 200) if self.open_now else n
+
+    def keeps(self, row: Sequence[Any]) -> bool:
+        return not self.open_now or hours.state_at(row[HOURS_AT], self.at)[0] == hours.OPEN
+
+
+def _hit(row: Sequence[Any], ask: _Ask, *, distance_m: float | None = None,
+         along_m: float | None = None) -> PlaceHit:
     pid, name, kind, category, lat, lon, _weight, town = row[:8]
+    more: dict[str, Any] = {}
+    if ask.detailed:
+        osm, features, cuisine, raw_hours = row[8:12]
+        state, text = hours.state_at(raw_hours, ask.at) if raw_hours else ("", "")
+        more = {"osm": osm, "open_state": state, "open_text": text, "cuisine": osm_tags.cuisine_fr(cuisine),
+                "tags": osm_tags.features_named(int(features or 0))}
     return PlaceHit(id=f"l{pid}", name=name, kind=kind, kind_fr=KIND_FR.get(kind, kind.replace("_", " ").capitalize()),
                     category=category, lat=lat, lon=lon, town=town,
                     distance_m=None if distance_m is None else round(distance_m),
-                    along_m=None if along_m is None else round(along_m))
+                    along_m=None if along_m is None else round(along_m), **more)
 
 
-COLUMNS = "p.id, p.name, p.kind, p.category, p.lat, p.lon, p.weight, p.town"
-
-
-def _in_box(conn: sqlite3.Connection, box: tuple[float, float, float, float], category: str, *, limit: int,
+def _in_box(conn: sqlite3.Connection, box: tuple[float, float, float, float], ask: _Ask, *, limit: int,
             closest_to: tuple[float, float] | None = None, tree: bool = False) -> list[tuple[Any, ...]]:
     """Ce qui est dans la boîte (par l'arbre R) : les plus importants d'abord, ou les plus proches de ``closest_to``
     (une distance approchée, l'ordre exact se refait ensuite) ; au plus ``limit``. ``tree`` : toujours par l'arbre
     R, même pour une boîte plus grande que ``WIDE_DEG2`` (un morceau de trajet près des pôles)."""
     w, s, e, n = box
+    where, filters = ask.where()
     if closest_to is None and not tree and (e - w) * (n - s) > WIDE_DEG2:
         # une grande zone : les plus importants d'abord, sans énumérer tout ce qu'elle contient
-        sql = (f"SELECT {COLUMNS} FROM place p INDEXED BY place_weight "
-               "WHERE p.lat BETWEEN ? AND ? AND p.lon BETWEEN ? AND ?")
-        wide: list[Any] = [s, n, w, e]
-        if category:
-            sql += " AND p.category = ?"
-            wide.append(category)
-        return conn.execute(sql + " ORDER BY p.weight DESC LIMIT ?", [*wide, limit]).fetchall()
-    sql = (f"SELECT {COLUMNS} FROM place_box b JOIN place p ON p.id = b.id "
-           "WHERE b.lat0 <= ? AND b.lat1 >= ? AND b.lon0 <= ? AND b.lon1 >= ?")
-    params: list[Any] = [n, s, e, w]
-    if category:
-        sql += " AND p.category = ?"
-        params.append(category)
+        sql = (f"SELECT {ask.columns} FROM place p INDEXED BY place_weight "
+               f"WHERE p.lat BETWEEN ? AND ? AND p.lon BETWEEN ? AND ?{where} ORDER BY p.weight DESC LIMIT ?")
+        return conn.execute(sql, [s, n, w, e, *filters, limit]).fetchall()
+    sql = (f"SELECT {ask.columns} FROM place_box b JOIN place p ON p.id = b.id "
+           f"WHERE b.lat0 <= ? AND b.lat1 >= ? AND b.lon0 <= ? AND b.lon1 >= ?{where}")
+    params: list[Any] = [n, s, e, w, *filters]
     if closest_to is None:
         sql += " ORDER BY p.weight DESC LIMIT ?"
     else:
@@ -563,29 +642,29 @@ def _in_box(conn: sqlite3.Connection, box: tuple[float, float, float, float], ca
     return conn.execute(sql, params).fetchall()
 
 
-def _around(conn: sqlite3.Connection, lat: float, lon: float, radius_m: float, category: str,
+def _around(conn: sqlite3.Connection, lat: float, lon: float, radius_m: float, ask: _Ask,
             limit: int) -> list[PlaceHit]:
     near = []
-    for row in _in_box(conn, _box(lat, lon, radius_m), category, limit=3 * limit + 50, closest_to=(lat, lon)):
+    for row in _in_box(conn, _box(lat, lon, radius_m), ask, limit=ask.widen(3 * limit + 50), closest_to=(lat, lon)):
         d = _distance_m(lat, lon, row[4], row[5])
-        if d <= radius_m:
+        if d <= radius_m and ask.keeps(row):
             near.append((d, -row[6], row))
     near.sort(key=lambda t: (t[0], t[1]))
-    return [_hit(row, distance_m=d) for d, _w, row in near[:limit]]
+    return [_hit(row, ask, distance_m=d) for d, _w, row in near[:limit]]
 
 
-def _nearest(conn: sqlite3.Connection, lat: float, lon: float, category: str, limit: int) -> list[PlaceHit]:
+def _nearest(conn: sqlite3.Connection, lat: float, lon: float, ask: _Ask, limit: int) -> list[PlaceHit]:
     """Les plus proches, de plus en plus loin jusqu'à en avoir assez."""
     found: list[PlaceHit] = []
     for km in NEAR_RADII_KM:
-        found = _around(conn, lat, lon, km * 1000, category, limit)
+        found = _around(conn, lat, lon, km * 1000, ask, limit)
         if len(found) >= limit:
             break
     return found
 
 
 def _text(conn: sqlite3.Connection, words: list[str], near: tuple[float, float] | None,
-          bbox: tuple[float, float, float, float] | None, category: str, limit: int) -> list[PlaceHit]:
+          bbox: tuple[float, float, float, float] | None, ask: _Ask, limit: int) -> list[PlaceHit]:
     """Par le texte : chaque mot (en début de mot) dans le nom ou la ville ; puis la pertinence, l'importance du
     lieu et la distance au point donné. Autour d'un point : d'abord tout près, puis de plus en plus loin."""
     match = _match(words)
@@ -596,24 +675,23 @@ def _text(conn: sqlite3.Connection, words: list[str], near: tuple[float, float] 
         boxes = [_box(near[0], near[1], km * 1000) for km in TEXT_RADII_KM] + [None]
     else:
         boxes = [None]
+    where, filters = ask.where()
     #: ce qu'ont trouvé les zones déjà lues : gardé quand on élargit (le plus proche ne se perd pas parmi les
     #: meilleurs textes d'une zone plus grande)
     found: dict[int, tuple[Any, ...]] = {}
     for box in boxes:
-        sql = f"SELECT {COLUMNS}, {BM25} FROM place_text JOIN place p ON p.id = place_text.rowid " \
-              "WHERE place_text MATCH ?"
-        params: list[Any] = [match]
-        if category:
-            sql += " AND p.category = ?"
-            params.append(category)
+        sql = f"SELECT {ask.columns}, {BM25} FROM place_text JOIN place p ON p.id = place_text.rowid " \
+              f"WHERE place_text MATCH ?{where}"
+        params: list[Any] = [match, *filters]
         if box is not None:
             sql += " AND p.lat BETWEEN ? AND ? AND p.lon BETWEEN ? AND ?"
             params += [box[1], box[3], box[0], box[2]]
         sql += f" ORDER BY {BM25} LIMIT ?"
-        params.append(TEXT_CANDIDATES)
+        params.append(ask.widen(TEXT_CANDIDATES))
         try:
             for row in conn.execute(sql, params).fetchall():
-                found.setdefault(row[0], row)
+                if ask.keeps(row):
+                    found.setdefault(row[0], row)
         except sqlite3.OperationalError:  # une requête illisible malgré tout : rien trouvé, jamais une erreur
             return []
         if len(found) >= limit:
@@ -621,14 +699,14 @@ def _text(conn: sqlite3.Connection, words: list[str], near: tuple[float, float] 
     rows = list(found.values())
     if not rows:
         return []
-    best = max(-row[8] for row in rows) or 1.0
+    best = max(-row[-1] for row in rows) or 1.0
     scored = []
     for row in rows:
         d = _distance_m(near[0], near[1], row[4], row[5]) if near is not None else None
-        score = 3.0 * (-row[8] / best) + 0.1 * row[6] - (0.8 * math.log1p(d / 1000) if d is not None else 0.0)
+        score = 3.0 * (-row[-1] / best) + 0.1 * row[6] - (0.8 * math.log1p(d / 1000) if d is not None else 0.0)
         scored.append((score, d, row))
     scored.sort(key=lambda t: -t[0])
-    return [_hit(row, distance_m=d) for _s, d, row in scored[:limit]]
+    return [_hit(row[:-1], ask, distance_m=d) for _s, d, row in scored[:limit]]
 
 
 def _project(points: Sequence[tuple[float, float]], lat0: float) -> list[tuple[float, float]]:
@@ -669,7 +747,7 @@ def simplify(line: Sequence[tuple[float, float]], tolerance_m: float, most: int 
         tolerance_m *= 2
 
 
-def _along(conn: sqlite3.Connection, line: Sequence[tuple[float, float]], corridor_m: float, category: str,
+def _along(conn: sqlite3.Connection, line: Sequence[tuple[float, float]], corridor_m: float, ask: _Ask,
            limit: int) -> list[PlaceHit]:
     """Le long d'une ligne : pour chaque tronçon de la ligne simplifiée, ce qui est dans sa boîte élargie du couloir ;
     la distance exacte à la ligne, et où on le croise ; puis les meilleurs, répartis sur le trajet, dans l'ordre."""
@@ -687,7 +765,7 @@ def _along(conn: sqlite3.Connection, line: Sequence[tuple[float, float]], corrid
     kept = [thin[i] for i in kept_at]
     cumulative = [walked[i] for i in kept_at]
     if len(kept) == 1:
-        return _around(conn, kept[0][0], kept[0][1], corridor_m, category, limit)
+        return _around(conn, kept[0][0], kept[0][1], corridor_m, ask, limit)
     lat0 = sum(p[0] for p in kept) / len(kept)
     xy = _project(kept, lat0)
     best: dict[int, tuple[float, float, tuple[Any, ...]]] = {}
@@ -702,7 +780,7 @@ def _along(conn: sqlite3.Connection, line: Sequence[tuple[float, float]], corrid
             lat_a, lon_a = a_lat + (b_lat - a_lat) * t0, a_lon + (b_lon - a_lon) * t0
             lat_b, lon_b = a_lat + (b_lat - a_lat) * t1, a_lon + (b_lon - a_lon) * t1
             box = _expand(min(lat_a, lat_b), min(lon_a, lon_b), max(lat_a, lat_b), max(lon_a, lon_b), corridor_m)
-            for row in _in_box(conn, box, category, limit=ALONG_PER_SEGMENT, tree=True):
+            for row in _in_box(conn, box, ask, limit=ALONG_PER_SEGMENT, tree=True):
                 px, py = _project([(row[4], row[5])], lat0)[0]
                 d, t = _segment(px, py, *xy[i], *xy[i + 1])
                 if d <= corridor_m and (row[0] not in best or d < best[row[0]][0]):
@@ -728,7 +806,7 @@ def _along(conn: sqlite3.Connection, line: Sequence[tuple[float, float]], corrid
             break
         chosen.setdefault(item[2][0], item)
     ordered = sorted(chosen.values(), key=lambda item: item[1])[:limit]
-    return [_hit(row, distance_m=d, along_m=at) for d, at, row in ordered]
+    return [_hit(row, ask, distance_m=d, along_m=at) for d, at, row in ordered]
 
 
 @dataclass(frozen=True, slots=True)
@@ -741,14 +819,25 @@ class IndexInfo:
     zoom: int = 0
     bounds: tuple[float, float, float, float] | None = None
     size: int = 0
+    #: 1 : tiré des tuiles, sans détails ; 2 : tiré de l'extrait OpenStreetMap (ADR 0244)
+    schema: int = 0
+    #: la date de l'extrait OpenStreetMap (ISO 8601), pour le schéma 2
+    extract: str = ""
+
+
+def utc_now() -> datetime:
+    return datetime.now(UTC)
 
 
 class Places:
-    """L'index réglé (``config`` relu à chaque fois : la console le change sans redémarrer), dans ``data``."""
+    """L'index réglé (``config`` relu à chaque fois : la console le change sans redémarrer), dans ``data`` ; ``now``,
+    l'instant où l'on juge des horaires."""
 
-    def __init__(self, data: Path, config: Callable[[], PlacesConfig]) -> None:
+    def __init__(self, data: Path, config: Callable[[], PlacesConfig],
+                 now: Callable[[], datetime] = utc_now) -> None:
         self.data = data
         self.config = config
+        self.now = now
         self._info: tuple[tuple[object, ...], IndexInfo] | None = None
 
     def _file(self) -> tuple[Path, tuple[str, int, int]] | None:
@@ -774,12 +863,12 @@ class Places:
                 meta = dict(conn.execute("SELECT key, value FROM meta").fetchall())
             finally:
                 conn.close()
-            if meta.get("version") != SCHEMA_VERSION:
+            if meta.get("version") not in (SCHEMA_VERSION, DETAILED_VERSION):
                 raise ValueError("une autre version")
             w, s, e, n = (float(v) for v in meta.get("bounds", "").split(","))
             got = IndexInfo(True, count=int(meta.get("count", "0")), built=meta.get("built", ""),
                             source=meta.get("source", ""), zoom=int(meta.get("zoom", "0")), bounds=(w, s, e, n),
-                            size=key[2])
+                            size=key[2], schema=int(meta["version"]), extract=meta.get("extract", ""))
         except (sqlite3.Error, ValueError):
             got = IndexInfo(False, "L'index des lieux est illisible : refais-le (mika carte lieux).")
         self._info = (key, got)
@@ -787,6 +876,11 @@ class Places:
 
     def ready(self) -> bool:
         return self.info().ready
+
+    def detailed(self) -> bool:
+        """L'index connaît les attributs d'une fiche (schéma 2) : horaires, filtres, cuisine."""
+        info = self.info()
+        return info.ready and info.schema >= 2
 
     def _ready_path(self) -> Path:
         found = self._file()
@@ -809,9 +903,21 @@ class Places:
         except sqlite3.DatabaseError:
             raise MapsUnavailable(DAMAGED) from None
 
+    def _ask(self, category: str = "", *, open_now: bool = False, features: frozenset[str] = frozenset(),
+             cuisine: str = "") -> _Ask | None:
+        """La recherche demandée ; ``None`` quand l'index ne peut rien y trouver (des filtres sur un index sans
+        détails). Un filtre inconnu lève ``ValueError``."""
+        mask = osm_tags.mask_of(frozenset(features))
+        key = osm_tags.cuisine_key(cuisine) if cuisine.strip() else ""
+        detailed = self.detailed()
+        if not detailed and (mask or key or open_now):
+            return None
+        return _Ask(detailed, self.now(), category, mask, key, bool(open_now))
+
     async def search(self, text: str, *, near: tuple[float, float] | None = None,
                      bbox: tuple[float, float, float, float] | None = None, category: str = "",
-                     limit: int = 20) -> list[PlaceHit]:
+                     limit: int = 20, open_now: bool = False, features: frozenset[str] = frozenset(),
+                     cuisine: str = "") -> list[PlaceHit]:
         limit = max(1, min(LIMIT_MAX, int(limit)))
         if category and category not in dict(LABELS):
             return []
@@ -819,29 +925,80 @@ class Places:
             w, s, e, n = bbox
             if not (w < e and s < n):
                 raise ValueError("une zone : ouest < est, sud < nord")
+        self._ready_path()
+        ask = self._ask(category, open_now=open_now, features=features, cuisine=cuisine)
+        if ask is None:
+            return []
         words = _words(text or "")
         if words:
-            return await self._run(lambda conn: _text(conn, words, near, bbox, category, limit))
+            return await self._run(lambda conn: _text(conn, words, near, bbox, ask, limit))
         if bbox is not None:
             if near is None:
-                return await self._run(lambda conn: [_hit(r) for r in _in_box(conn, bbox, category, limit=limit)])
+                def inside(conn: sqlite3.Connection) -> list[PlaceHit]:
+                    rows = _in_box(conn, bbox, ask, limit=ask.widen(limit))
+                    return [_hit(r, ask) for r in rows if ask.keeps(r)][:limit]
+
+                return await self._run(inside)
 
             def framed(conn: sqlite3.Connection) -> list[PlaceHit]:
-                rows = _in_box(conn, bbox, category, limit=3 * limit + 50, closest_to=near)
-                ranked = sorted((_distance_m(near[0], near[1], r[4], r[5]), r) for r in rows)[:limit]
-                return [_hit(r, distance_m=d) for d, r in ranked]
+                rows = _in_box(conn, bbox, ask, limit=ask.widen(3 * limit + 50), closest_to=near)
+                ranked = sorted((_distance_m(near[0], near[1], r[4], r[5]), r) for r in rows if ask.keeps(r))
+                return [_hit(r, ask, distance_m=d) for d, r in ranked[:limit]]
 
             return await self._run(framed)
         if near is not None:
-            return await self._run(lambda conn: _nearest(conn, near[0], near[1], category, limit))
+            return await self._run(lambda conn: _nearest(conn, near[0], near[1], ask, limit))
 
-        return await self._run(lambda conn: [_hit(r) for r in _in_box(conn, WORLD, category, limit=limit)])
+        def anywhere(conn: sqlite3.Connection) -> list[PlaceHit]:
+            rows = _in_box(conn, WORLD, ask, limit=ask.widen(limit))
+            return [_hit(r, ask) for r in rows if ask.keeps(r)][:limit]
+
+        return await self._run(anywhere)
 
     async def around(self, lat: float, lon: float, radius_m: float, category: str = "",
-                     limit: int = 20) -> list[PlaceHit]:
+                     limit: int = 20, *, open_now: bool = False, features: frozenset[str] = frozenset(),
+                     cuisine: str = "") -> list[PlaceHit]:
         limit = max(1, min(LIMIT_MAX, int(limit)))
         radius_m = max(1.0, min(500_000.0, float(radius_m)))
-        return await self._run(lambda conn: _around(conn, lat, lon, radius_m, category, limit))
+        self._ready_path()
+        ask = self._ask(category, open_now=open_now, features=features, cuisine=cuisine)
+        if ask is None:
+            return []
+        return await self._run(lambda conn: _around(conn, lat, lon, radius_m, ask, limit))
+
+    async def hits(self, ids: Sequence[str], *, near: tuple[float, float] | None = None, category: str = "",
+                   open_now: bool = False, features: frozenset[str] = frozenset(),
+                   cuisine: str = "") -> list[PlaceHit]:
+        """Des lieux de l'index par leurs identifiants (leur objet d'OpenStreetMap, ou leur ligne ``l<n>``), aux
+        filtres de ``search`` — ceux qu'ils ne vérifient pas, ou que l'index n'a pas, manquent ; avec leur distance à
+        ``near``. Le cache des avis s'en sert pour qu'un tri par note trouve aussi les mieux notés un peu plus loin
+        (ADR 0250)."""
+        if category and category not in dict(LABELS):
+            return []
+        self._ready_path()
+        ask = self._ask(category, open_now=open_now, features=features, cuisine=cuisine)
+        if ask is None:
+            return []
+        osm = [i for i in dict.fromkeys(ids) if OSM_ID.match(i)] if ask.detailed else []
+        rows = [int(m.group(1)) for i in dict.fromkeys(ids) if (m := ROW_ID.match(i))]
+        if not osm and not rows:
+            return []
+        where, filters = ask.where()
+
+        def read(conn: sqlite3.Connection) -> list[PlaceHit]:
+            found: dict[int, tuple[Any, ...]] = {}
+            for column, values in (("p.osm", osm), ("p.id", rows)):
+                for k in range(0, len(values), 500):
+                    part = values[k:k + 500]
+                    sql = f"SELECT {ask.columns} FROM place p WHERE {column} IN ({', '.join('?' * len(part))}){where}"
+                    for row in conn.execute(sql, [*part, *filters]).fetchall():
+                        if ask.keeps(row):
+                            found.setdefault(row[0], row)
+            out = [_hit(r, ask, distance_m=_distance_m(near[0], near[1], r[4], r[5]) if near is not None else None)
+                   for r in found.values()]
+            return sorted(out, key=lambda h: h.distance_m or 0) if near is not None else out
+
+        return await self._run(read)
 
     async def along(self, line: Sequence[tuple[float, float]], *, corridor_m: int = 10_000, category: str = "",
                     limit: int = 20) -> list[PlaceHit]:
@@ -852,7 +1009,36 @@ class Places:
             return []
         if not points:
             return []
-        return await self._run(lambda conn: _along(conn, points, corridor, category, limit))
+        self._ready_path()
+        ask = _Ask(self.detailed(), self.now(), category)
+        return await self._run(lambda conn: _along(conn, points, corridor, ask, limit))
+
+    async def place(self, place_id: str) -> PlaceDetail | None:
+        """La fiche d'un lieu, par sa ligne (``l<n>``) ou, dans un index de schéma 2, son objet d'OpenStreetMap
+        (``n123``, ``w45``, ``r6``) ; ``None`` s'il n'y est pas. Un index sans détails : sa ligne seule."""
+        key = str(place_id or "").strip()
+        by_row, by_osm = ROW_ID.match(key), OSM_ID.match(key)
+        if by_row is None and by_osm is None:
+            return None
+        self._ready_path()
+        ask = _Ask(self.detailed(), self.now())
+        info = self.info()
+        columns = ask.columns + (", p.tags" if ask.detailed else "")
+
+        def read(conn: sqlite3.Connection) -> tuple[Any, ...] | None:
+            if by_row is not None:
+                return conn.execute(f"SELECT {columns} FROM place p WHERE p.id = ?", (int(by_row.group(1)),)).fetchone()
+            if not ask.detailed:
+                return None
+            return conn.execute(f"SELECT {columns} FROM place p WHERE p.osm = ? ORDER BY p.id LIMIT 1",
+                                (key,)).fetchone()
+
+        row = await self._run(read)
+        if row is None:
+            return None
+        if not ask.detailed:
+            return PlaceDetail(_hit(row, ask))
+        return PlaceDetail(_hit(row[:-1], ask), _osm_facts(row[8], row[HOURS_AT], row[-1], ask.at, info.extract))
 
     def summary(self) -> dict[str, object]:
         info = self.info()
@@ -863,13 +1049,37 @@ class Places:
         index = self.config().index
         if not info.ready:
             return [("Index des lieux", f"{index} : {info.reason}")]
-        facts = [("Index des lieux", f"{index} : {_count_fr(info.count)} lieux, tirés de {info.source} (zoom "
-                                     f"{info.zoom})"), ("Construit", _when_fr(info.built))]
+        if info.schema >= 2:
+            origin = f"tirés de {info.source} (OpenStreetMap" + \
+                (f", extrait du {_when_fr(info.extract).removeprefix('le ')})" if info.extract else ")")
+            facts = [("Index des lieux", f"{index} : {_count_fr(info.count)} lieux, {origin}"),
+                     ("Détails", "cuisine, horaires, téléphone, site, terrasse, végétarien, accessibilité… : les "
+                                 "filtres et la fiche d'un lieu")]
+        else:
+            facts = [("Index des lieux", f"{index} : {_count_fr(info.count)} lieux, tirés de {info.source} (zoom "
+                                         f"{info.zoom})"),
+                     ("Détails", "aucun (tiré des tuiles) : ni horaires ni filtres ; refais-le depuis l'extrait "
+                                 "OpenStreetMap (mika carte lieux --depuis cartes/france-latest.osm.pbf)")]
+        facts.append(("Construit", _when_fr(info.built)))
         if info.bounds is not None:
             w, s, e, n = info.bounds
             facts.append(("Zone (ouest, sud → est, nord)", f"{w:.2f}, {s:.2f} → {e:.2f}, {n:.2f}"))
         facts.append(("Taille", f"{max(1, round(info.size / 1e6))} Mo"))
         return facts
+
+
+def _osm_facts(osm: str, raw_hours: str, kept: str, at: datetime, extract: str) -> OsmFacts:
+    """La partie OpenStreetMap d'une fiche : ses attributs en français, ses horaires lisibles."""
+    tags = osm_tags.read_kept(kept)
+    found = OSM_ID.match(osm or "")
+    url = f"https://www.openstreetmap.org/{OSM_PAGES[found.group(1)]}/{found.group(2)}" if found else ""
+    week = hours.week_fr(raw_hours, at) if raw_hours else ""
+    wikidata = tags.get("wikidata", "")
+    return OsmFacts(id=osm or "", url=url, address=osm_tags.address(tags), phone=osm_tags.phone(tags),
+                    website=osm_tags.website(tags), email=osm_tags.email(tags), hours=raw_hours or "",
+                    hours_text=week, facts=osm_tags.facts(tags, week),
+                    wikidata=wikidata if WIKIDATA.match(wikidata) else "",
+                    wikipedia=osm_tags.wikipedia_url(tags.get("wikipedia", "")), extract=extract)
 
 
 def _connect(path: Path) -> sqlite3.Connection:

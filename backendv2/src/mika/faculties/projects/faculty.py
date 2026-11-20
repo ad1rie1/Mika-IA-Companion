@@ -25,6 +25,7 @@ ses événements font ressentir (ADR 0031).
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import Annotated, Any
 
@@ -51,6 +52,9 @@ from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
 
 NOTES_KEPT = 8
+#: ce qu'un objectif garde de lui-même (ADR 0253) : ses derniers comptes rendus et ses dernières notes
+OBJECTIVE_REPORTS_KEPT = 3
+OBJECTIVE_NOTES_KEPT = 3
 INSTRUCTIONS_KEPT = 8
 EFFECTS_KEPT = 8
 DEPOSITS_KEPT = 8
@@ -60,6 +64,8 @@ OBJECTIVES_KEPT = 60
 OBJECTIVES_HISTORY = 200
 #: les décisions en vigueur, au plus ; une décision remplacée ou retirée reste lisible tant qu'il y a la place
 DECISIONS_KEPT = 200
+#: les projets qu'un projet lit, au plus (ADR 0257)
+LINKS_MAX = 4
 #: les lots d'outils que tout projet a : son atelier et ses propres outils
 BASE_BUNDLES = ("projects", "workshop")
 #: chercher et lire sur le web (ADR 0105) : un projet à elle l'a toujours en main, comme ses autres outils ; un projet
@@ -237,6 +243,11 @@ class Objective:
     pass_ref: str = ""
     pass_notable: float = 0.0
     told_at: int = 0
+    #: sa mémoire de travail à lui (ADR 0253) : ses derniers comptes rendus, du plus ancien au plus récent — (instant,
+    #: verdict, réf. du texte) —, et ses dernières notes de carnet (des références). L'exécution qui le vise les
+    #: retrouve même quand d'autres objectifs ont travaillé entre-temps
+    reports: tuple[tuple[int, str, str], ...] = ()
+    notes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -360,9 +371,21 @@ class Project:
     reports: tuple[tuple[int, int, str, str], ...] = ()
     #: les mots de la personne derrière une consigne de vive voix : (réf. de la consigne, réf. de ses mots)
     said: tuple[tuple[str, str], ...] = ()
+    #: les projets qu'il lit, sans jamais y écrire (ADR 0257) : leurs numéros, dans l'ordre où son propriétaire les a
+    #: posés, ``LINKS_MAX`` au plus, jamais en boucle. Ce qu'un lien donne ne se garde pas ici : il se relit à chaque
+    #: exécution dans les lignes d'accès du projet lu (``links.py``)
+    reads: tuple[int, ...] = ()
+    #: ce que son plan demande à lire (des numéros) : le lien se pose quand son propriétaire valide le plan
+    plan_reads: tuple[int, ...] = ()
+    #: ce que ses lectures lui laissent pour de bon : le niveau au moins de ce qu'il écrit (``written``), et les sujets
+    #: venus des projets lus (leur propriétaire, de qui ils parlent), déjà joints à ``about`` — retirer un lien ne
+    #: redescend ni l'un ni les autres
+    read_level: int = 0
+    read_about: tuple[str, ...] = ()
 
 
-#: les comptes rendus qu'une exécution relit (sa mémoire de travail, ADR 0145)
+#: les comptes rendus du projet qu'une exécution relit (sa mémoire de travail, ADR 0145) ; chaque objectif garde en
+#: plus les siens (``OBJECTIVE_REPORTS_KEPT``, ADR 0253)
 REPORTS_KEPT = 5
 
 
@@ -430,8 +453,11 @@ STEERS_KEPT = 50
 #:     derniers comptes rendus, les passages des constants qu'elle raconte.
 #: v11 : la réponse à ses questions gardée avec elles, ses séances de cadrage sans plan, un objectif bloqué que sa
 #:     réponse rouvre, le premier passage d'un constant à sa cadence (ADR 0161).
+#: v12 : la mémoire de travail de chaque objectif — ses comptes rendus et ses notes à lui (ADR 0253).
+#: v13 : les liens de lecture entre projets — ce qu'il lit, ce que son plan demande à lire, le niveau et les sujets
+#:     que ses lectures lui laissent (``reads``, ``plan_reads``, ``read_level``, ``read_about`` : ADR 0257).
 PROJECTS = Faculty("projects", state=ProjectsState, init=lambda p: ProjectsState(), params=ProjectsParams,
-                   state_version=11, retired_params=("wrap_up_after",))
+                   state_version=13, retired_params=("wrap_up_after",))
 PROJECTS.declare(*c.ALL)
 
 
@@ -560,6 +586,8 @@ class Noted(Payload):
 
     project: int
     text: Content
+    #: l'objectif que visait l'exécution qui l'a écrite (0 : aucun) — il la garde parmi les siennes (ADR 0253)
+    objective: int = 0
     owner: str | None = None
     about: tuple[str, ...] = ()
 
@@ -591,6 +619,16 @@ class AccessSet(Payload):
     by: str = ""
 
 
+class LinksSet(Payload):
+    """Ce qu'un projet lit, réglé d'un coup par son propriétaire (ADR 0257) : toute la liste, dans son ordre — les
+    numéros des projets lus. Ce que chaque lien donne n'est pas ici : il se relit dans les lignes d'accès du projet
+    lu."""
+
+    project: int
+    reads: tuple[int, ...] = ()
+    by: str = ""
+
+
 class Amended(Payload):
     """Une consigne d'un opérateur, ou de vive voix de qui s'occupe d'elle (``project_steer``) : elle la lit à
     l'exécution suivante (la plus récente prime)."""
@@ -615,6 +653,8 @@ class PlanProposed(Payload):
     questions: Content | None = None
     approved: bool = False
     tell: bool = False
+    #: les projets que ce plan demande à lire (ADR 0257) : posés quand son propriétaire le valide
+    reads: tuple[int, ...] = ()
     owner: str | None = None
     about: tuple[str, ...] = ()
 
@@ -697,6 +737,7 @@ REMOTE_REQUESTED = PROJECTS.event("remote_requested", RemoteRequested, subjects=
 NETWORK_QUEUED = PROJECTS.event("network_queued", NetworkQueued, content=("why",), subjects=("owner", "about"))
 ANSWERED = PROJECTS.event("answered", Answered, subjects=("owner", "about", "person"))
 ACCESS_SET = PROJECTS.event("access_set", AccessSet, subjects=("by",))
+LINKS_SET = PROJECTS.event("links_set", LinksSet, subjects=("by",))
 STEER_ASKED = PROJECTS.event("steer_asked", SteerAsked, content=("text",), subjects=("owner", "about", "by"))
 #: ce qu'un opérateur (ou elle) fait d'un projet — la chronologie du carnet
 OPERATIONS = (REFRAMED, PAUSED, RESUMED, ARCHIVED, RESTORED, NUDGED, OBJECTIVE_ADDED, OBJECTIVE_CHANGED,
@@ -773,8 +814,9 @@ def run_bundles(p: Project) -> tuple[str, ...]:
 
 def written(p: Project) -> int:
     """Le niveau de ce qu'elle écrit pendant une exécution (compte rendu, carnet, décisions, résultat, les fichiers
-    de l'atelier) : elle y voit toute sa mémoire, ce qui en sort est au moins personnel."""
-    return max(p.sensitivity, int(Sensitivity.PERSONAL))
+    de l'atelier) : elle y voit toute sa mémoire, ce qui en sort est au moins personnel — et au moins du niveau de ce
+    qu'écrivent les projets qu'il lit, ou a lus (``read_level``, ADR 0257)."""
+    return max(p.sensitivity, int(Sensitivity.PERSONAL), p.read_level)
 
 
 def living(p: Project) -> int:
@@ -797,6 +839,41 @@ def rank(p: Project) -> int:
 
 def busy(s: ProjectsState, project: int) -> bool:
     return any(r.project == project and r.purpose == "run" for r in s.running.values())
+
+
+def reaches(projects: Mapping[int, Project], start: int, goal: int) -> bool:
+    """En suivant les liens de lecture depuis ``start``, arrive-t-on à ``goal`` ?"""
+    seen: set[int] = set()
+    todo = [start]
+    while todo:
+        pid = todo.pop()
+        if pid == goal:
+            return True
+        p = projects.get(pid)
+        if pid in seen or p is None:
+            continue
+        seen.add(pid)
+        todo.extend(p.reads)
+    return False
+
+
+def linked(projects: Mapping[int, Project], reader: int, asked: Iterable[int]) -> tuple[int, ...]:
+    """Ce qu'un projet lira de ce qu'on demande, dans son ordre (ADR 0257) : des projets qui existent, jamais
+    lui-même, chacun une fois, ``LINKS_MAX`` au plus — et aucun qui le lit déjà, de près ou de loin : les liens ne
+    forment jamais de boucle. C'est la règle du réducteur, qui reste total : ce qui ne tient pas est ignoré."""
+    kept: list[int] = []
+    for target in asked:
+        if len(kept) >= LINKS_MAX:
+            break
+        if target == reader or target in kept or target not in projects or reaches(projects, target, reader):
+            continue
+        kept.append(target)
+    return tuple(kept)
+
+
+def readers_of(s: ProjectsState, project: int) -> tuple[Project, ...]:
+    """Les projets qui lisent celui-ci, par numéro."""
+    return tuple(p for p in sorted(s.projects.values(), key=lambda p: p.id) if project in p.reads)
 
 
 # ── Réducteurs ────────────────────────────────────────────────────────────
@@ -939,8 +1016,8 @@ def _reframed(s: ProjectsState, e, cx) -> ProjectsState:
         changes["description_ref"] = d.description.ref
     if d.mode in c.MODES:
         changes["mode"] = d.mode
-    if d.set_owner:
-        changes.update(owner=d.owner, about=tuple(d.about), address=d.address)
+    if d.set_owner:  # « pour qui » change : les sujets venus de ses lectures restent (ADR 0257)
+        changes.update(owner=d.owner, about=tuple(dict.fromkeys((*d.about, *p.read_about))), address=d.address)
     if d.bundles is not None:
         changes["bundles"] = tuple(dict.fromkeys((*BASE_BUNDLES, *d.bundles)))
     for name in ("schedule", "remote", "branch", "auto_push", "approval"):
@@ -959,7 +1036,11 @@ def _reframed(s: ProjectsState, e, cx) -> ProjectsState:
         changes["priority"] = d.priority
     if d.sensitivity is not None and d.sensitivity > p.sensitivity:
         changes["sensitivity"] = d.sensitivity
-    return _set(s, replace(p, **changes)) if changes else s
+    if not changes:
+        return s
+    s = _set(s, replace(p, **changes))
+    # son niveau ou ses sujets ont changé : ce qu'il laisse à ses lecteurs aussi
+    return _spread(s, p.id) if changes.keys() & {"owner", "about", "sensitivity"} else s
 
 
 @PROJECTS.reducer(PAUSED)
@@ -1021,6 +1102,56 @@ def _access_set(s: ProjectsState, e, cx) -> ProjectsState:
     return _set(s, replace(p, access=tuple(d.rows), default_access=d.default))
 
 
+def _carried(p: Project) -> tuple[int, tuple[str, ...]]:
+    """Ce qu'un projet laisse à qui le lit (ADR 0257) : le niveau de ce qu'il écrit, et de qui il parle — son
+    propriétaire et ses sujets, ceux de ses propres lectures compris."""
+    return written(p), tuple(dict.fromkeys(x for x in (p.owner, *p.about) if x))
+
+
+def _reading(reader: Project, level: int, subjects: tuple[str, ...]) -> Project:
+    """Le lecteur, une fois qu'il lit un projet de ce niveau, qui parle de ces personnes : ce qu'il écrit ensuite
+    prend au moins ce niveau, et ses sujets les reçoivent — l'oubli de l'une d'elles atteindra ce qu'il écrit."""
+    about = tuple(dict.fromkeys((*reader.about, *subjects)))
+    kept = tuple(dict.fromkeys((*reader.read_about, *subjects)))
+    level = max(reader.read_level, level)
+    if (about, kept, level) == (reader.about, reader.read_about, reader.read_level):
+        return reader
+    return replace(reader, about=about, read_about=kept, read_level=level)
+
+
+def _spread(s: ProjectsState, source: int) -> ProjectsState:
+    """La confidentialité suit le lien, de lecteur en lecteur : ce que ``source`` laisse à qui le lit passe à ses
+    lecteurs, puis aux leurs. Rien ne redescend, donc la marche s'arrête : chaque pas relève un niveau borné ou
+    ajoute un sujet déjà connu d'un projet."""
+    todo = [source]
+    while todo:
+        p = s.projects.get(todo.pop())
+        if p is None:
+            continue
+        level, subjects = _carried(p)
+        for reader in readers_of(s, p.id):
+            raised = _reading(reader, level, subjects)
+            if raised is not reader:
+                s = _set(s, raised)
+                todo.append(reader.id)
+    return s
+
+
+@PROJECTS.reducer(LINKS_SET)
+def _links_set(s: ProjectsState, e, cx) -> ProjectsState:
+    """Ce qu'il lit : la liste demandée, moins ce qui ne tient pas (``linked`` : un projet inconnu, lui-même, un
+    doublon, au-delà de ``LINKS_MAX``, un lien qui fermerait une boucle). Un lien retiré ne reprend ni le niveau ni
+    les sujets qu'il a laissés : ce qu'elle en a lu est déjà dans ses notes."""
+    d = e.data
+    p = s.projects.get(d.project)
+    if p is None:
+        return s
+    p = replace(p, reads=linked(s.projects, p.id, d.reads))
+    for target in p.reads:
+        p = _reading(p, *_carried(s.projects[target]))
+    return _spread(_set(s, p), p.id)
+
+
 @PROJECTS.reducer(STEER_ASKED)
 def _steer_asked(s: ProjectsState, e, cx) -> ProjectsState:
     d = e.data
@@ -1039,7 +1170,12 @@ def _noted(s: ProjectsState, e, cx) -> ProjectsState:
     p = s.projects.get(e.data.project)
     if p is None or not e.data.text.ref:
         return s
-    return _set(s, replace(p, notes=(*p.notes, e.data.text.ref)[-NOTES_KEPT:]))
+    ref = e.data.text.ref
+    p = replace(p, notes=(*p.notes, ref)[-NOTES_KEPT:])
+    o = objective_at(p, e.data.objective) if e.data.objective else None
+    if o is not None:  # l'objectif qu'elle visait la garde aussi : il la retrouvera à son prochain passage
+        p = _objective(p, replace(o, notes=(*o.notes, ref)[-OBJECTIVE_NOTES_KEPT:]))
+    return _set(s, p)
 
 
 @PROJECTS.reducer(AMENDED)
@@ -1099,8 +1235,9 @@ def _plan_proposed(s: ProjectsState, e, cx) -> ProjectsState:
     asked = d.questions.ref or "" if d.questions is not None else ""
     # revu en cours de route sans question neuve, il garde celles qui l'ont fondé et leur réponse (ADR 0161)
     kept = not asked and p.plan_state == c.PLANNED
+    reads = tuple(dict.fromkeys(t for t in d.reads if t != p.id))[:LINKS_MAX]  # ce qu'il demande à lire (ADR 0257)
     return _set(s, replace(p, plan_ref=d.plan.ref, questions_ref=p.questions_ref if kept else asked,
-                           plan_answer_ref=p.plan_answer_ref if kept else "", plan_at=e.at,
+                           plan_answer_ref=p.plan_answer_ref if kept else "", plan_at=e.at, plan_reads=reads,
                            plan_version=p.plan_version + 1, plan_state=state, plan_tell=d.tell, plan_asked=False,
                            plan_asked_at=0, plan_asked_to="", plan_attempts=0, plan_reminded=False, frame_silent=0))
 
@@ -1417,6 +1554,8 @@ def _reported(s: ProjectsState, e, cx) -> ProjectsState:
         gained = len(d.tools) if d.proof is None else int(bool(d.proof))
         o = replace(o, silent=0, evidence=o.evidence + gained, note_ref=d.summary.ref or o.note_ref,
                     waiting_until=0)
+        if d.summary.ref:  # ses comptes rendus à lui : sa mémoire ne dépend pas de ce que les autres ont fait depuis
+            o = replace(o, reports=(*o.reports, (e.at, d.verdict, d.summary.ref))[-OBJECTIVE_REPORTS_KEPT:])
         needed = d.need.ref if d.need is not None and d.need.ref else ""
         # un nouveau besoin, ou un besoin qui reste après la réponse que l'exécution avait sous les yeux : elle le dira
         if needed and (not o.need_ref or (o.asked and _settled(o, began))):

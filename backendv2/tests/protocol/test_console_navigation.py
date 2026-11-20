@@ -190,7 +190,7 @@ def test_a_menu_tab_leads_to_its_page_and_lights_up(world):  # noqa: F811
     # l'historique des réglages vit dans Réglages : Système › Journaux y mène sans le lui prendre
     ('reglages/journal', 'Réglages', 'Historique des réglages', None),
     ('approbations/historique', 'À valider', 'Historique des autorisations', None),
-    # Carte et téléphone a son lien (ADR 0197), ses quatre pages derrière lui
+    # Carte et téléphone a son lien (ADR 0197), ses six pages derrière lui (ADR 0245)
     ('reglages/itineraires', 'Réglages', 'Carte et téléphone', None),
     # les réglages d'un plugin, derrière la roue de sa destination (ADR 0206) : elle s'allume, aucun de ses onglets
     ('teams/parametres', 'Relations & échanges', 'Teams', None),
@@ -436,7 +436,7 @@ def test_search_writes_dates_finds_settings_by_name_and_leaves_raw_views_aside(w
 def test_each_settings_page_belongs_to_one_menu_link_and_its_bar_follows_it(world):  # noqa: F811
     """C7-03, Q01 : chaque page de réglages appartient à un seul lien du menu (hors les liens d'une colonne, qui
     mènent à une page rangée ailleurs) ; sa barre d'onglets suit ce lien, dans son ordre — Portrait dans celle du
-    Personnage, Import / export en dernier ; Carte et téléphone a son lien, et ses quatre pages une barre commune."""
+    Personnage, Import / export en dernier ; Carte et téléphone a son lien, et ses six pages une barre commune."""
     client, _, _ = world
     bootstrap(client)
     directory = html.unescape(client.get('/admin/reglages/apercu').text)
@@ -451,7 +451,7 @@ def test_each_settings_page_belongs_to_one_menu_link_and_its_bar_follows_it(worl
         "Identité", "Portrait", "Sa parole", "Tempérament", "Autrices", "Import / export"]
     map_and_phone = client.get('/admin/reglages/lieux').text
     assert [href.rsplit('/', 1)[1] for href, _title in bar_of(map_and_phone)] == [
-        "carte", "lieux", "itineraires", "notifications"]
+        "carte", "lieux", "itineraires", "tourisme", "avis", "rechauffage", "notifications"]
     assert texts(trail_of(map_and_phone)) == ["Réglages", "Carte et téléphone"]
 
 

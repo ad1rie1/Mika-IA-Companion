@@ -17,7 +17,7 @@ import xml.etree.ElementTree as ET
 
 from mika.contracts import trips as c
 from mika.kernel.events import Content
-from mika.ports.maps import decode_polyline6
+from mika.ports.maps import PlaceHit, decode_polyline6
 from tests.fixtures.fake_maps import BUILT_MS, HORIZON, TALLOIRES, FakeMaps
 from tests.protocol.test_moi_mail import API, append, journal, login, second_person
 from tests.protocol.test_web import bootstrap, csrf, world  # noqa: F401 — fixture partagée
@@ -162,6 +162,20 @@ def test_places_addresses_routes_and_orders_come_from_this_server(world):  # noq
 
 
 # ── tes voyages ──
+
+
+def test_a_place_carries_what_the_index_knows_only_when_it_knows_it(world):  # noqa: F811
+    """Un lieu trouvé garde ses champs de toujours ; ce que l'index en sait en plus (ADR 0244 : son objet
+    d'OpenStreetMap, ouvert ou fermé, sa cuisine, ses filtres) n'y paraît que s'il le sait."""
+    gabbiano = PlaceHit("l7", "Pizzeria Il Gabbiano", "restaurant", "Restaurant", "manger", 45.8990, 6.1290, "Annecy",
+                        osm="n11", open_state="open", open_text="Ouvert · ferme à 23:00", cuisine="Italienne, pizza",
+                        tags=("terrasse", "emporter"))
+    client, _live, _maps = plugged(world, FakeMaps(places=(HORIZON, gabbiano)))
+    found = {p["id"]: p for p in client.get(CARTE + "/lieux?q=a").json()["places"]}
+    assert set(found["l3"]) == {"id", "name", "kind", "kind_fr", "category", "lat", "lon", "town", "distance_m",
+                                "along_m"}
+    assert found["l7"]["osm"] == "n11" and found["l7"]["open_text"] == "Ouvert · ferme à 23:00"
+    assert found["l7"]["tags"] == ["terrasse", "emporter"] and "rating" not in found["l7"]
 
 
 def test_your_trips_are_yours_alone(world):  # noqa: F811

@@ -33,6 +33,8 @@ def _bubbles(text: str) -> str:
 # (``pipeline``, rôle ``polish``) est donc une autrice : elle lit son portrait, le fil et ce que le premier jet voulait
 # dire, et écrit la suite du fil — ses messages à elle, puis la réponse probable de l'autre (l'écrire la garde
 # autrice) ; seuls les siens partent. Ses balises, ses outils et ce qu'elle sait restent ceux du premier jet.
+# ADR 0261 : la consigne demande toujours toute la suite (c'est elle qui fait l'autrice), mais l'appel s'arrête à la
+# première ligne de l'autre (``stops``) — ce qu'on jetait n'est plus écrit, ce qu'on garde ne change pas.
 
 #: les derniers messages du fil que lit l'autrice
 _POLISH_THREAD = 16
@@ -103,6 +105,17 @@ def authored(text: str, name: str) -> str:
     return "\n\n".join(out)
 
 
+def stops() -> tuple[str, ...]:
+    """Où l'autrice s'arrête d'écrire (``LLMRequest.stop_sequences``, ADR 0261) : le début d'une ligne de l'autre, tel
+    que le fil le montre (``expression.polish.them`` : « L'autre : ») — avec ou sans espace avant les deux-points,
+    l'apostrophe droite ou typographique. Ce qu'on garde de sa suite (``authored``) finit à cette ligne : ce qui la
+    suit ne s'écrit plus. Toujours en début de ligne : dans un de ses messages, « L'autre : » ne coupe rien. Une forme
+    que ces séquences ne prévoient pas (un prénom, du gras) laisse l'appel aller au bout, et ``authored`` coupe."""
+    other = phrase("expression.polish.them", text="").strip().rstrip(":").strip()
+    forms = dict.fromkeys((other, other.replace("'", "’")))
+    return tuple(f"\n{form}{colon}" for form in forms for colon in (" :", ":"))
+
+
 #: les sections de son état qui disent qui est l'autre (qui écrit, le ton entre eux, sa fiche), que l'autrice lit
 OTHER_SECTIONS = ("who", "register", "about_person")
 
@@ -117,9 +130,11 @@ _QUOTED = re.compile(r'^(?:«([^«»]*)»|"([^"]*)"|“([^“”]*)”)$')
 
 
 def polish(draft: str, messages: Sequence[Any], heard: str = "", persona: Any = None, author: Any = None,
-           bodies: Mapping[str, str] | None = None) -> tuple[str, str, Callable[[str], str]] | None:
-    """La seconde passe sur sa réponse : (consigne, message, ce qu'on garde de la suite écrite) d'un appel où une
-    autrice écrit la suite du fil à partir de son premier jet, ou ``None`` sans premier jet. ``persona`` : sa persona
+           bodies: Mapping[str, str] | None = None
+           ) -> tuple[str, str, Callable[[str], str], tuple[str, ...]] | None:
+    """La seconde passe sur sa réponse : (consigne, message, ce qu'on garde de la suite écrite, où s'arrêter de
+    l'écrire — ``stops``) d'un appel où une autrice écrit la suite du fil à partir de son premier jet, ou ``None``
+    sans premier jet. ``persona`` : sa persona
     rendue pour la conversation (``text``, ``name``, ``reference`` : un fil de référence pour le registre) ;
     ``author`` : l'autrice du chat (``vocab.flows.Author``, ADR 0124) — ses codes s'ajoutent au cadre, son exemple
     prend la place du fil de référence ; ``bodies`` : le texte de chaque section de son prompt, par clé — l'autrice
@@ -154,7 +169,7 @@ def polish(draft: str, messages: Sequence[Any], heard: str = "", persona: Any = 
         system += "\n\n" + phrase("expression.polish.reference", thread=reference, name=name)
     message = phrase("expression.polish.message", thread="\n".join(lines), name=name,
                      draft=" / ".join(text.split("\n\n")))
-    return system, message, lambda written: authored(written, name)
+    return system, message, lambda written: authored(written, name), stops()
 
 
 def polish_draft(flow: str, draft: str, about: str, author: Any) -> tuple[str, str] | None:

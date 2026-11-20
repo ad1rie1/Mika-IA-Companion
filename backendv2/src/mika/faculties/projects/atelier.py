@@ -21,6 +21,15 @@ récupération, ce qui arrivera.
 pas pendant qu'une exécution y travaille ; sans accord requis, elle attend la
 fin de l'exécution qui l'a demandée ; et aucune exécution ne part tant qu'une
 commande, un envoi ou une récupération sont en route.
+
+**Ce qu'un projet lit des fichiers d'un autre** (ADR 0260) est une vue de son
+atelier : son dernier commit, sous ``liens/<n>/``. ``ws_list`` et ``ws_read`` la
+lisent, ``ws_run`` la monte en lecture seule pour ses programmes, ``ws_write``
+et ``ws_edit`` la refusent : un projet n'écrit jamais dans un autre. Le droit se
+relit **à chaque appel** dans les lignes d'accès du projet lu (``links.views``) :
+retiré, la lecture s'arrête à l'appel suivant et la vue est supprimée. Un lien
+retiré ou suspendu, un projet archivé, un « pour qui » changé font le même
+ménage après le commit (``tidy_views``), sans attendre que le lecteur retravaille.
 """
 
 from __future__ import annotations
@@ -35,13 +44,19 @@ from pydantic import BaseModel, Field, field_validator
 
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
+from mika.faculties.projects import links
 from mika.faculties.projects.faculty import (
+    ACCESS_SET,
+    ARCHIVED,
+    LINKS_SET,
     NETWORK_QUEUED,
     NETWORKED_CAPABILITY,
     PROJECTS,
     PULL_CAPABILITY,
     PUSH_CAPABILITY,
+    REFRAMED,
     Project,
+    ProjectsState,
     busy,
     params,
 )
@@ -57,9 +72,21 @@ from mika.kernel.events import Content
 from mika.kernel.faculty import ToolResult
 from mika.kernel.inspect import plural
 from mika.kernel.operate import Preview
-from mika.ports.workshop import Commit, Hosted, OutsideWorkshop, WorkshopFull, argv_lines, describe
+from mika.ports.workshop import (
+    UNREADABLE,
+    VIEWS_DIR,
+    Commit,
+    Hosted,
+    OutsideWorkshop,
+    View,
+    WorkshopFull,
+    argv_lines,
+    describe,
+    view_place,
+    viewed,
+)
 from mika.vocab.episodes import PROJECT_KINDS, project_of, project_target
-from mika.vocab.phrasebook import phrase
+from mika.vocab.phrasebook import family, phrase
 
 BUNDLE = "workshop"
 RUNS = list(PROJECT_KINDS)
@@ -80,6 +107,79 @@ def _atelier(ctx: Any) -> tuple[Any, Any] | str:
 
 
 PROJECTS.bundle(BUNDLE, phrase("projects.workshop.bundle"))
+
+
+# ── La vue de l'atelier d'un projet lu (ADR 0260) ─────────────────────────
+
+
+def _seen(p: Project, path: str) -> tuple[int, str] | None:
+    """Ce chemin vise-t-il la vue d'un projet que ``p`` lit (``liens/<n>/…``) ? Son numéro et le reste du chemin.
+    Un lien suspendu garde sa place : ``liens/<n>/`` reste la vue, fermée, pas un dossier de l'atelier."""
+    got = viewed(path)
+    return got if got is not None and got[0] in p.reads else None
+
+
+async def _open_views(ctx: Any, p: Project, port: Any) -> tuple[int, ...]:
+    """Les projets dont la vue est ouverte à ``p`` **maintenant** : le droit se relit à chaque appel, dans les lignes
+    d'accès de chaque projet lu. Une vue qu'il n'a plus le droit de lire est supprimée ici, avant de répondre."""
+    if not p.reads:
+        return ()
+    granted = links.views(ctx.frame.state("projects"), p, links.world_of(ctx.frame))
+    await port.drop_views(p.id, keep=granted)
+    return granted
+
+
+def no_view_words(why: str) -> str:
+    """Pourquoi un projet lu n'a pas de vue, en mots (``View.why``)."""
+    reasons = family("projects.links.view.none")
+    return reasons.get(why) or reasons[UNREADABLE]
+
+
+async def _view(ctx: Any, p: Project, port: Any, target: int) -> View | ToolResult:
+    """La vue du projet ``target``, si elle est ouverte à ``p`` et posée ; sinon ce qu'il faut répondre."""
+    if target not in await _open_views(ctx, p, port):
+        return ToolResult(ok=False, content=phrase("projects.workshop.view_closed", id=target))
+    view = await port.view(p.id, target)
+    if not view.sha:
+        return ToolResult(ok=False, content=phrase("projects.workshop.view_none", id=target,
+                                                   why=no_view_words(view.why)))
+    return view
+
+
+def _read_only(target: int) -> ToolResult:
+    """Ce que ``ws_write`` et ``ws_edit`` répondent pour un chemin d'une vue, ouverte ou non : elle ne s'écrit pas."""
+    return ToolResult(ok=False, content=phrase("projects.workshop.view_read_only", path=view_place(target) + "/",
+                                               id=target))
+
+
+async def _view_entries(ctx: Any, p: Project, port: Any) -> list[str]:
+    """Une ligne par vue ouverte et posée : ce que ``ws_list`` ajoute à la racine de l'atelier, et sous ``liens``."""
+    out = []
+    for target in await _open_views(ctx, p, port):
+        if (await port.view(p.id, target)).sha:
+            out.append(phrase("projects.workshop.view_entry", path=view_place(target) + "/", id=target))
+    return out
+
+
+async def tidy_views(ev: Any, ports: Mapping[str, Any]) -> None:
+    """Le ménage des vues, après le commit : chaque projet ne garde que celles que ses liens et les lignes d'accès
+    des projets lus lui donnent maintenant — aucune s'il est archivé. Relu sur l'état courant, donc rejouable : un
+    lien retiré ou suspendu, un droit repris, un projet archivé, un « pour qui » changé ne laissent pas de vue
+    derrière eux, même si le lecteur ne retravaille jamais."""
+    port, frame_of = ports.get("workshop"), ports.get("frame")
+    if port is None or frame_of is None:
+        return
+    frame = frame_of()
+    s: ProjectsState = frame.state("projects")
+    world = links.world_of(frame)
+    for p in sorted(s.projects.values(), key=lambda p: p.id):
+        await port.drop_views(p.id, keep=links.views(s, p, world))
+
+
+PROJECTS.effect(LINKS_SET)(tidy_views)
+PROJECTS.effect(ACCESS_SET)(tidy_views)
+PROJECTS.effect(ARCHIVED)(tidy_views)
+PROJECTS.effect(REFRAMED, when=lambda d: d.set_owner)(tidy_views)
 
 
 class ListArgs(BaseModel):
@@ -129,9 +229,18 @@ async def ws_list(args: ListArgs, ctx: Any) -> Any:
     if isinstance(got, str):
         return got
     p, port = got
+    seen = _seen(p, args.path)
     try:
-        files = await port.tree(p.id, args.path or ".")
-    except OutsideWorkshop as exc:
+        if seen is not None:  # la vue d'un projet lu : son dernier commit, si le droit tient encore
+            view = await _view(ctx, p, port, seen[0])
+            if isinstance(view, ToolResult):
+                return view
+            files = await port.view_tree(p.id, *seen)
+        else:
+            files = await port.tree(p.id, args.path or ".")
+            if p.reads and args.path.strip().strip("/") in ("", ".", VIEWS_DIR):
+                files = [*files, *await _view_entries(ctx, p, port)]
+    except (OutsideWorkshop, FileNotFoundError) as exc:
         return ToolResult(ok=False, content=phrase("projects.workshop.refused", error=exc))
     return "\n".join(files) if files else phrase("projects.workshop.empty")
 
@@ -142,8 +251,12 @@ async def ws_read(args: ReadArgs, ctx: Any) -> Any:
     if isinstance(got, str):
         return got
     p, port = got
+    seen = _seen(p, args.path)
     try:
-        return await port.read(p.id, args.path)
+        if seen is None:
+            return await port.read(p.id, args.path)
+        view = await _view(ctx, p, port, seen[0])
+        return view if isinstance(view, ToolResult) else await port.view_read(p.id, *seen)
     except (OutsideWorkshop, FileNotFoundError) as exc:
         return ToolResult(ok=False, content=phrase("projects.workshop.refused", error=exc))
 
@@ -156,6 +269,8 @@ async def ws_write(args: WriteArgs, ctx: Any) -> Any:
     if isinstance(got, str):
         return got
     p, port = got
+    if (seen := _seen(p, args.path)) is not None:  # un projet n'écrit jamais dans un autre
+        return _read_only(seen[0])
     try:
         rel = await port.write(p.id, args.path, args.content)
     except (OutsideWorkshop, WorkshopFull) as exc:
@@ -169,6 +284,8 @@ async def ws_edit(args: EditArgs, ctx: Any) -> Any:
     if isinstance(got, str):
         return got
     p, port = got
+    if (seen := _seen(p, args.path)) is not None:
+        return _read_only(seen[0])
     try:
         rel = await port.edit(p.id, args.path, args.old, args.new)
     except (OutsideWorkshop, FileNotFoundError, ValueError) as exc:  # WorkshopFull est une ValueError
@@ -196,7 +313,9 @@ async def ws_run(args: RunArgs, ctx: Any) -> Any:
     left = program_time_left(ctx)
     if left < 2:
         return ToolResult(ok=False, content=phrase("projects.workshop.no_time"))
-    result = await port.run(p.id, args.argv, timeout_s=min(float(args.timeout_s), left))
+    # ses programmes lisent les vues qui lui sont ouvertes maintenant, là où ses outils les disent
+    result = await port.run(p.id, args.argv, timeout_s=min(float(args.timeout_s), left),
+                            views=await _open_views(ctx, p, port))
     # une commande refusée ou en échec n'est pas du travail fait (elle reste une information)
     return ToolResult(ok=result.ok, content=describe(result))
 
@@ -527,4 +646,4 @@ def network_proposal(p: Project, request: int, argv: tuple[str, ...], why: str) 
         about=tuple(x for x in (p.owner, *p.about) if x), dedupe_key=f"reseau:{p.id}:{request}")
 
 
-__all__ = ["network_proposal", "network_summary", "pending_push", "remote_proposal"]
+__all__ = ["network_proposal", "network_summary", "no_view_words", "pending_push", "remote_proposal", "tidy_views"]

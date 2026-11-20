@@ -235,3 +235,141 @@ span.cm-pin-el { cursor: default; pointer-events: none; }
   .modal-foot:has(> .trip-delete) { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; }
   .modal-foot > .trip-delete { grid-column: 1 / -1; justify-self: start; }
 }
+
+/* ── Les notes, les fiches, les événements et les photos (ADR 0259) ─────────────────────────────────────────────
+   La forme de la maquette de l'app Android (frontend/Android/maquette/ecrans/carte-avis.js), posée dans la colonne de
+   gauche ; la carte reste à droite. Les notes et les avis viennent de Google Maps. */
+.carte-side { --star: #e09a00; }
+:root[data-theme="dark"] .carte-side, :root[data-theme="dark"] .viewer-modal { --star: #f4c04e; }
+.viewer-modal { --star: #e09a00; }
+
+/* Explorer : les filtres sous la recherche, l'ordre, la ligne des notes lues */
+.cs-flt { gap: 5px; }
+.cat.flt { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 9px; font-size: 12px; }
+.cat.flt .ico { width: 12px; height: 12px; }
+.flt-select { height: 24px; padding: 0 6px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--raised);
+  color: var(--text-2); font: 500 12px var(--font); max-width: 150px; }
+.sort-btn { margin-right: 6px; font-weight: 500; color: var(--text-2); }
+.cov-line { display: flex; gap: 6px; align-items: baseline; margin: 0; padding: 0 12px 8px; }
+.cov-line .ico { flex: none; }
+.ok-txt { color: var(--ok); }
+.ko-txt { color: var(--danger); }
+/* la vignette d'un lieu (sa première photo) à la place de son rond */
+.pl-thumb { position: relative; display: grid; place-items: center; width: 44px; height: 44px; flex: none; border-radius: var(--radius);
+  overflow: hidden; background: var(--tint); }
+.pl-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.pl-thumb.mika { box-shadow: 0 0 0 2px var(--mika); }
+.li.place.has-thumb { align-items: center; }
+
+/* une note : des étoiles, pleines, à moitié, vides */
+.stars { display: inline-flex; gap: 1px; vertical-align: -1px; }
+.stars i { position: relative; width: 13px; height: 13px; background: color-mix(in srgb, var(--star) 22%, var(--border));
+  clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%); }
+.stars i.on { background: var(--star); }
+.stars i.half { background: linear-gradient(90deg, var(--star) 50%, color-mix(in srgb, var(--star) 22%, var(--border)) 50%); }
+.stars.xs i { width: 10px; height: 10px; }
+.g-mini { color: var(--text); font-weight: 500; }
+.g-mini .muted { font-weight: 400; }
+
+/* une fiche, à la place de la liste : la tête (revenir), puis ce qui défile */
+.fiche { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.fiche-top { flex: none; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.fiche.by-mika .fiche-top { box-shadow: inset 0 -2px 0 var(--mika); }
+.fiche-scroll { padding: 12px 12px 24px; display: flex; flex-direction: column; gap: 12px; }
+.fc-head { display: flex; flex-direction: column; gap: 3px; }
+.fc-head h2 { margin: 0; font: 700 18px/1.25 var(--display); overflow-wrap: anywhere; }
+.fc-head .small .ico { width: 12px; height: 12px; margin-right: 4px; vertical-align: -1px; color: var(--muted); }
+.fiche-tags { gap: 6px; }
+.fiche-acts { gap: 6px; }
+.fiche-sec { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--border); padding-top: 12px; }
+.fiche-h { display: flex; align-items: baseline; gap: 6px; margin: 0; font: 600 13.5px var(--display); }
+.fiche-desc { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--text-2); overflow-wrap: anywhere; }
+.fiche-labels { gap: 6px; }
+.fiche-sec .kv dd { overflow-wrap: anywhere; }
+.src-line { display: flex; gap: 6px; align-items: baseline; margin: 2px 0 0; font-size: 11.5px; line-height: 1.45; color: var(--muted); }
+.src-line > .ico { flex: none; width: 12px; height: 12px; }
+.carte-side > .pane-scroll > .src-line { padding: 10px 12px 4px; }
+.src-line a, .fiche-sec .kv a, .g-author { color: var(--accent); }
+.fiche-none, .fiche-loading { display: flex; gap: 6px; align-items: baseline; margin: 0; }
+.fiche-end { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; border-top: 1px solid var(--border); padding-top: 12px; }
+.fiche-warn { padding: 0; }
+
+/* Google Maps : la note, le prix, le résumé, ses avis, la date du cache et « Actualiser » */
+.g-sec { border: 1px solid var(--border); border-radius: var(--radius-float); padding: 12px; gap: 10px; }
+.g-sec.none { background: var(--tint); }
+.g-head { display: flex; align-items: center; gap: 8px; }
+.g-logo { font: 650 12.5px var(--font); letter-spacing: .01em; color: var(--text); padding: 2px 8px; border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm); background: var(--raised); }
+.g-link { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; color: var(--accent); }
+.g-link::after { content: "↗"; font-size: 11px; }
+.g-score { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.g-score b { font: 700 24px/1 var(--display); }
+.g-score .stars i { width: 15px; height: 15px; }
+.g-summary { margin: 0; font-size: 13.5px; color: var(--text-2); font-style: italic; }
+.g-tag { gap: 4px; }
+.g-review { display: flex; flex-direction: column; gap: 4px; padding: 10px 0 0; border-top: 1px solid var(--border); }
+.g-r-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12.5px; }
+.g-r-who { font-weight: 600; }
+.g-r-text p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text-2); overflow-wrap: anywhere; }
+.g-r-text p + p { margin-top: 4px; }
+.g-note { margin: 0; }
+.g-foot { display: flex; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+.g-foot > .ico { flex: none; width: 13px; height: 13px; }
+
+/* la bande des photos : le plan d'abord, puis les photos, chacune avec sa source et son crédit */
+.ph-wrap { position: relative; margin: 0 -12px; }
+.ph-band { display: flex; gap: 4px; height: 150px; padding: 0 12px; overflow-x: auto; scroll-snap-type: x proximity; scrollbar-width: thin; }
+.ph-band.solo { height: 120px; margin: 0; padding: 0; overflow: hidden; }
+.ph { position: relative; flex: none; width: 200px; height: 100%; margin: 0; overflow: hidden; border-radius: var(--radius);
+  background: var(--tint); scroll-snap-align: start; }
+.ph-band.solo .ph { width: 100%; }
+.ph-open { position: absolute; inset: 0; display: block; width: 100%; height: 100%; padding: 0; border: 0; background: none; cursor: zoom-in; }
+.ph-open img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.ph-open:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ph-fallback { position: absolute; inset: 0; display: grid; place-items: center; color: var(--faint); pointer-events: none; }
+.ph-fallback .ico { width: 26px; height: 26px; }
+.ph.loaded .ph-fallback { display: none; }
+.ph-src { position: absolute; top: 6px; left: 6px; z-index: 1; display: inline-flex; align-items: center; gap: 3px; padding: 2px 6px;
+  border-radius: var(--radius-sm); background: rgb(0 0 0 / 58%); color: #fff; font: 600 10.5px var(--font); pointer-events: none; }
+.ph-src .ico { width: 11px; height: 11px; }
+.ph-credit { position: absolute; left: 0; right: 0; bottom: 0; z-index: 1; padding: 16px 8px 5px; margin: 0; font-size: 11px; color: #fff;
+  background: linear-gradient(transparent, rgb(0 0 0 / 64%)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.ph-credit a { color: #fff; text-decoration: underline; text-underline-offset: 2px; pointer-events: auto; }
+.ph-plan { width: 200px; padding: 0; border: 1px solid var(--border); cursor: pointer; }
+.ph-plan > .drawn-map { position: absolute; inset: 0; }
+.ph-plan .ph-credit { color: var(--text); background: linear-gradient(transparent, color-mix(in srgb, var(--bg) 86%, transparent)); }
+.ph-band.solo .ph-plan .ph-credit { text-align: right; }
+.ph-count { position: absolute; top: 6px; right: 18px; z-index: 2; display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px;
+  border-radius: 10px; background: rgb(0 0 0 / 60%); color: #fff; font: 500 11px var(--font); pointer-events: none; }
+.ph-count .ico { width: 12px; height: 12px; }
+
+/* la visionneuse */
+.viewer-modal .modal-body { padding: 0; }
+.vw-img { position: relative; height: min(62vh, 560px); background: #0b0b12; }
+.vw-img img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.vw-prev, .vw-next { position: absolute; top: 50%; transform: translateY(-50%); border-radius: 50%; background: rgb(255 255 255 / 88%);
+  color: #16141f; border-color: transparent; }
+.vw-prev { left: 10px; }
+.vw-next { right: 10px; }
+.vw-meta { display: flex; flex-direction: column; gap: 3px; padding: 12px 18px 16px; }
+.vw-meta p { margin: 0; }
+.vw-caption { font-weight: 500; }
+.vw-meta a { color: var(--accent); }
+
+/* Événements : quand, quoi, les jours de la liste, ses dates choisies */
+.day-label { position: sticky; top: 0; z-index: 1; padding: 8px 12px 6px; font: 600 12px var(--font); color: var(--text-2);
+  background: color-mix(in srgb, var(--bg) 94%, transparent); border-bottom: 1px solid var(--border); }
+.ev-dates-pick { gap: 10px; }
+.field-inline { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-2); }
+.field-inline input { height: 28px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--raised);
+  color: var(--text); font: inherit; }
+.ev-near-list { display: flex; flex-direction: column; margin: 0 -12px; }
+a.li.place:hover { text-decoration: none; }
+.ev-dates { margin: 0; padding-left: 18px; font-size: 13px; color: var(--text-2); display: flex; flex-direction: column; gap: 3px; }
+
+@media (max-width: 760px) {
+  .ph-band { height: 140px; }
+  .ph, .ph-plan { width: 180px; }
+  .vw-img { height: 52vh; }
+  .day-label { position: static; }
+}

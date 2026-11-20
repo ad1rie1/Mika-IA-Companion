@@ -13,6 +13,13 @@ préparer un voyage avec la personne qui lui parle, montrer une carte.
   ajoute à un voyage porte ``by = BY_HER`` : rose dans l'écran, retirable d'un geste.
 - **Ce qu'elle lit** : les noms viennent d'OpenStreetMap — rendus inertes (``inert``), sous une ligne qui dit que ce
   sont des données. Ses phrases sont dans sa voix (``trips.*``).
+- **Les fiches et les événements** (ADR 0259) : une liste se filtre (ouvert, ce qu'un lieu offre, sa cuisine, sa
+  note) et se range (la distance, la note), chaque ligne dit sa note Google, son nombre d'avis, son prix, sa cuisine
+  et s'il est ouvert ; ``place_read`` lit la fiche d'un lieu (OpenStreetMap, l'office de tourisme, Google : sa note,
+  son résumé, ses avis récents ; les événements tout près) ou d'un événement (« e:… ») ; ``events_search`` cherche
+  les événements d'un endroit, d'une période, d'un thème. Tout texte venu du dehors (un avis et son auteur, un
+  résumé, une description, ce que Google ajoute, un nom) passe par ``inert``, borné, sous la ligne « données » ; un
+  regard ne garde que le lieu ou l'événement, jamais le texte d'un avis.
 """
 
 from __future__ import annotations
@@ -34,15 +41,24 @@ from mika.kernel.guards import Superseded
 from mika.plugins.trips import BUNDLE, TRIPS, Stop, Trip, days_of, geo, looks_of, trip_of, trips_of, unchanged
 from mika.ports.maps import (
     AVOIDS,
+    EVENT_REF,
+    FEATURES,
+    PLACE_REF,
     ROUTE_POINTS_MAX,
+    THEMES,
+    EventDetail,
+    EventHit,
     MapsPort,
     MapsUnavailable,
+    PlaceDetail,
     PlaceHit,
+    ReviewFacts,
     RouteLeg,
     RouteResult,
+    extras,
 )
 from mika.ports.preprocess import inert
-from mika.vocab.circadian import day_fr
+from mika.vocab.circadian import day_fr, day_month_fr
 from mika.vocab.episodes import Kind, is_work_target
 from mika.vocab.phrasebook import family, phrase
 from mika.vocab.privacy import ChannelTrust, Sensitivity
@@ -50,8 +66,18 @@ from mika.vocab.rights import here_allowed
 
 #: ce qu'elle lit au plus d'un nom (OpenStreetMap, une adresse), d'une consigne de trajet, d'une note
 NAME_SHOWN, STEP_SHOWN, NOTE_SHOWN = 120, 160, 300
-#: ses appels par épisode : la recherche, le reste
-SEARCH_CALLS, OTHER_CALLS = 6, 3
+#: d'une fiche (ADR 0259), au plus : un avis, son auteur, un résumé, une description, une valeur d'un fait, combien
+#: d'avis, d'événements, de dates
+REVIEW_SHOWN, AUTHOR_SHOWN, SUMMARY_SHOWN, DESCRIPTION_SHOWN, FACT_SHOWN = 400, 60, 300, 800, 160
+REVIEWS_SHOWN, EVENTS_SHOWN, DATES_SHOWN = 5, 6, 8
+#: ses appels par épisode : la recherche, le reste ; lire une fiche
+SEARCH_CALLS, OTHER_CALLS, READ_CALLS = 6, 3, 4
+#: « ici » ou des coordonnées, pour une fiche : le lieu nommé le plus proche, à moins de tant de mètres — jamais une
+#: ville ni un lieu-dit (la catégorie ``villes`` des lieux de la carte), qui n'a pas de fiche à lire
+HERE_PLACE_M = 100
+TOWNS = "villes"
+#: les événements autour d'un endroit : à tant de kilomètres par défaut, au plus
+EVENTS_RADIUS_KM, EVENTS_RADIUS_MAX_KM = 15.0, 100.0
 #: ce qu'elle cherche le long d'un voyage : à tant du trajet
 SUGGEST_CORRIDOR_M = 5_000
 #: combien de lieux elle propose le long d'un voyage, combien de grandes routes elle lit d'un trajet
@@ -63,6 +89,15 @@ PLACE_ID = re.compile(r"^(?:l\d{1,12}|a:\d{1,3})$")
 
 Mode = Literal["voiture", "velo", "pied"]
 Avoid = Literal["peages", "autoroutes", "ferries"]
+Feature = Literal["terrasse", "vegetarien", "vegan", "accessible", "emporter", "livraison"]
+Sort = Literal["distance", "rating"]
+Theme = Literal["concerts", "spectacles", "expositions", "marches", "fetes", "sport", "enfants", "visites",
+                "conferences"]
+#: une période en mots (``events_search``) : un jour, le prochain week-end, cette semaine ou la suivante, un jour de la
+#: semaine (le prochain, aujourd'hui compris)
+When = Literal["", "aujourdhui", "demain", "ce_weekend", "cette_semaine", "semaine_prochaine", "lundi", "mardi",
+               "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
+WEEKDAYS = ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")
 
 
 def offered(audience: Any) -> bool:
@@ -141,6 +176,9 @@ class Point:
     kind: str = ""
     town: str = ""
     here: bool = False
+    #: l'identifiant qu'un regard lui a donné (« l123 ») et son objet d'OpenStreetMap, quand on le sait : sa fiche
+    ident: str = ""
+    osm: str = ""
 
     @property
     def at(self) -> geo.Point:
@@ -161,7 +199,8 @@ def _from_item(item: Any) -> Point | None:
         return None
     if not geo.valid(lat, lon):
         return None
-    return Point(str(item.get("name") or ""), lat, lon, str(item.get("kind_fr") or ""), str(item.get("town") or ""))
+    return Point(str(item.get("name") or ""), lat, lon, str(item.get("kind_fr") or ""), str(item.get("town") or ""),
+                 ident=str(item.get("id") or "")[:20], osm=str(item.get("osm") or "")[:20])
 
 
 def place_items(text: str | None) -> list[dict[str, Any]]:
@@ -207,7 +246,8 @@ def _here(call: _Call) -> Point:
 
 
 def _from_hit(hit: PlaceHit) -> Point:
-    return Point(hit.name[:c.NAME_MAX], hit.lat, hit.lon, hit.kind_fr[:c.KIND_MAX], hit.town[:c.NAME_MAX])
+    return Point(hit.name[:c.NAME_MAX], hit.lat, hit.lon, hit.kind_fr[:c.KIND_MAX], hit.town[:c.NAME_MAX],
+                 ident=hit.id[:20], osm=hit.osm[:20])
 
 
 async def _point(call: _Call, text: str) -> Point:
@@ -256,26 +296,68 @@ def _what(kind: str, town: str) -> str:
     return f"{kind}, {town}" if kind and town else kind or town or "—"
 
 
-def _line(item: dict[str, Any]) -> str:
-    """Un lieu trouvé, tel qu'elle le lit."""
+def _line(item: dict[str, Any], hit: PlaceHit | None = None) -> str:
+    """Un lieu trouvé, tel qu'elle le lit ; et ce qu'on en sait en plus (``hit`` : sa note, son prix, sa cuisine,
+    s'il est ouvert)."""
     ident = str(item.get("id") or "—")
     name = inert(str(item.get("name") or ""), NAME_SHOWN) or "—"
     what = _what(str(item.get("kind_fr") or ""), str(item.get("town") or ""))
     distance, along = item.get("distance_m"), item.get("along_m")
     if isinstance(distance, int | float) and isinstance(along, int | float):
-        return phrase("trips.tools.places.line_along", id=ident, name=name, what=what,
+        line = phrase("trips.tools.places.line_along", id=ident, name=name, what=what,
                       distance=geo.km_text(distance), at=geo.km_text(along))
-    if isinstance(distance, int | float):
-        return phrase("trips.tools.places.line_at", id=ident, name=name, what=what, distance=geo.km_text(distance))
-    return phrase("trips.tools.places.line", id=ident, name=name, what=what)
+    elif isinstance(distance, int | float):
+        line = phrase("trips.tools.places.line_at", id=ident, name=name, what=what, distance=geo.km_text(distance))
+    else:
+        line = phrase("trips.tools.places.line", id=ident, name=name, what=what)
+    known = _known_of(hit) if hit is not None else []
+    return " · ".join([line, *known])
+
+
+def _rating(rating: float | None, count: int | None) -> str:
+    """« note Google 4,6/5 (1 203 avis) » ; sans note : vide."""
+    if rating is None:
+        return ""
+    shown = f"{rating:.1f}".rstrip("0").rstrip(".").replace(".", ",")
+    if count:
+        return phrase("trips.tools.places.rated", rating=shown, count=f"{count:,}".replace(",", " "))
+    return phrase("trips.tools.places.rated_bare", rating=shown)
+
+
+def _open_text(text: str) -> str:
+    """« ouvert, ferme à 22:30 » (ce que disent ses horaires, à l'instant)."""
+    said = inert(text, 60).replace(" · ", ", ")
+    return said[:1].lower() + said[1:]
+
+
+def _known_of(hit: PlaceHit) -> list[str]:
+    """Ce qu'on sait d'un lieu en plus de sa ligne (ADR 0259), quand on le sait : sa note Google et son nombre d'avis,
+    son prix, sa cuisine (d'OpenStreetMap : inerte), s'il est ouvert."""
+    out = [p for p in (_rating(hit.rating, hit.reviews), inert(hit.price, 10)) if p]
+    if hit.cuisine:
+        out.append(phrase("trips.tools.places.cuisine_is", cuisine=inert(hit.cuisine, 60)))
+    if hit.open_text:
+        out.append(_open_text(hit.open_text))
+    return out
+
+
+#: ce qu'un regard garde en plus d'un lieu, quand on le sait (ADR 0244) : jamais s'il était ouvert, qui ne valait qu'à
+#: l'instant où elle a regardé ; chaque texte borné
+HIT_KEPT = {"osm": 20, "cuisine": c.KIND_MAX, "rating": None, "reviews": None, "price": 10, "photo": 80, "tags": None}
 
 
 def hit_item(hit: PlaceHit) -> dict[str, Any]:
     """Ce qu'un regard garde d'un lieu trouvé (``Looked.found``) — ce que l'écran Carte montre aussi."""
-    return {"id": hit.id[:20], "name": hit.name[:c.NAME_MAX], "kind": hit.kind[:c.KIND_MAX],
-            "kind_fr": hit.kind_fr[:c.KIND_MAX], "category": hit.category[:40], "lat": round(hit.lat, 6),
-            "lon": round(hit.lon, 6), "town": hit.town[:c.NAME_MAX], "distance_m": hit.distance_m,
-            "along_m": hit.along_m}
+    item: dict[str, Any] = {
+        "id": hit.id[:20], "name": hit.name[:c.NAME_MAX], "kind": hit.kind[:c.KIND_MAX],
+        "kind_fr": hit.kind_fr[:c.KIND_MAX], "category": hit.category[:40], "lat": round(hit.lat, 6),
+        "lon": round(hit.lon, 6), "town": hit.town[:c.NAME_MAX], "distance_m": hit.distance_m,
+        "along_m": hit.along_m}
+    for name, value in extras(hit).items():
+        if name in HIT_KEPT:
+            most = HIT_KEPT[name]
+            item[name] = value[:most] if most is not None and isinstance(value, str) else value
+    return item
 
 
 def point_item(p: Point) -> dict[str, Any]:
@@ -347,6 +429,12 @@ class PlacesArgs(BaseModel):
     near: str = Field(default="", max_length=200, description=phrase("trips.tools.places.near"))
     radius_km: float = Field(default=10.0, ge=0.1, le=200.0, description=phrase("trips.tools.places.radius_km"))
     limit: int = Field(default=8, ge=1, le=c.FOUND_MAX, description=phrase("trips.tools.places.limit"))
+    open_now: bool = Field(default=False, description=phrase("trips.tools.places.open_now"))
+    features: list[Feature] = Field(default_factory=list, max_length=len(FEATURES),
+                                    description=phrase("trips.tools.places.features"))
+    cuisine: str = Field(default="", max_length=40, description=phrase("trips.tools.places.cuisine"))
+    min_rating: float | None = Field(default=None, ge=0.0, le=5.0, description=phrase("trips.tools.places.min_rating"))
+    sort: Sort = Field(default="distance", description=phrase("trips.tools.places.sort"))
 
 
 @TRIPS.tool("places_search", description=phrase("trips.tools.places.description"),
@@ -375,14 +463,16 @@ async def places_search(args: PlacesArgs, ctx: Any) -> Any:
     try:
         hits = await port.search(text, near=near.at if near else None,
                                  bbox=geo.box(near.at, radius) if near else None, category=category[0],
-                                 limit=args.limit)
+                                 limit=args.limit, open_now=args.open_now, features=frozenset(args.features),
+                                 cuisine=" ".join(args.cuisine.split()), min_rating=args.min_rating, sort=args.sort)
     except MapsUnavailable as exc:
         return _failed(exc)
     if near is not None:
         hits = [h for h in hits if h.distance_m is None or h.distance_m <= radius]
     if not hits:
         return call.done(phrase("trips.tools.places.nothing"))
-    found = [hit_item(h) for h in hits[:c.FOUND_MAX]]
+    hits = hits[:c.FOUND_MAX]
+    found = [hit_item(h) for h in hits]
     where = "" if near is None else phrase("trips.look.here") if near.here else phrase("trips.look.near",
                                                                                          place=near.name)
     query = " · ".join(p for p in (text, category[1], where) if p)
@@ -390,8 +480,317 @@ async def places_search(args: PlacesArgs, ctx: Any) -> Any:
         await _look(call, c.LOOK_PLACES, query, found)
     except Superseded:
         return _refused(phrase("trips.tools.moved"))
-    return call.done("\n".join([phrase("trips.tools.data"), *(_line(x) for x in found),
+    return call.done("\n".join([phrase("trips.tools.data"), *(_line(x, h) for x, h in zip(found, hits, strict=True)),
                                 phrase("trips.tools.places.then")]))
+
+
+# ── la fiche d'un lieu, d'un événement (ADR 0259) ──
+
+
+class ReadArgs(BaseModel):
+    place: str = Field(min_length=1, max_length=200, description=phrase("trips.tools.fiche.place"))
+
+
+async def _nearest(call: _Call, at: Point) -> str:
+    """Le lieu nommé le plus proche d'un point (« ici », des coordonnées), à moins de ``HERE_PLACE_M`` mètres : son
+    identifiant de fiche."""
+    port = call.port
+    assert port is not None
+    try:
+        hits = await port.search("", near=at.at, bbox=geo.box(at.at, HERE_PLACE_M), limit=5)
+    except MapsUnavailable as exc:
+        raise _Miss(phrase("trips.tools.failed", error=inert(str(exc), 300))) from None
+    hits = [h for h in hits if h.category != TOWNS and (h.distance_m is None or h.distance_m <= HERE_PLACE_M)]
+    if not hits:
+        raise _Miss(phrase("trips.tools.fiche.nothing_here"))
+    return hits[0].osm or hits[0].id
+
+
+async def _fiche_id(call: _Call, raw: str) -> str:
+    """L'identifiant de la fiche d'un lieu, de ce qu'elle a donné : un identifiant qu'elle a trouvé (« l123 », par
+    son objet d'OpenStreetMap s'il est connu), un objet d'OpenStreetMap ou un lieu des données touristiques, « ici »
+    ou des coordonnées (le lieu nommé le plus proche), ou un nom (le premier trouvé)."""
+    key = raw.lower()
+    if key in HERE_WORDS:
+        return await _nearest(call, _here(call))
+    at = geo.parse_coords(raw)
+    if at is not None:
+        return await _nearest(call, Point("", at[0], at[1]))
+    if key.startswith("a:"):
+        raise _Miss(phrase("trips.tools.fiche.address"))
+    if PLACE_ID.match(key):
+        found = _known(call).get(key)
+        if found is None:
+            raise _Miss(phrase("trips.tools.unknown_id", id=inert(raw, 20)))
+        return found.osm or found.ident or key
+    if PLACE_REF.match(key):
+        return key
+    point = await _point(call, raw)
+    return point.osm or point.ident
+
+
+def _pairs(pairs: Any, most: int = 10) -> str:
+    """« Cuisine : italienne ; Terrasse : oui » : des paires venues d'ailleurs, inertes, bornées."""
+    return " ; ".join(f"{inert(a, 40)} : {inert(b, FACT_SHOWN)}" for a, b in list(pairs)[:most])
+
+
+def _review_lines(f: ReviewFacts) -> list[str]:
+    """Les avis récents de Google, un par ligne, chacun inerte et borné — le texte, son auteur, quand."""
+    out = []
+    for r in f.reviews[:REVIEWS_SHOWN]:
+        text = inert(r.text, REVIEW_SHOWN)
+        if not text:
+            continue
+        rating = f"{r.rating:g}".replace(".", ",")
+        out.append(phrase("trips.tools.fiche.review", rating=rating, when=inert(r.relative, 40) or "—",
+                          author=inert(r.author, AUTHOR_SHOWN) or "—", text=text))
+    return out
+
+
+def _event_line(e: EventHit) -> str:
+    return phrase("trips.tools.fiche.event", id=e.id, name=inert(e.name, NAME_SHOWN) or "—",
+                  when=inert(e.when_text, 80) or "—", place=inert(e.place, 120) or "—")
+
+
+def _fiche_lines(d: PlaceDetail) -> list[str]:
+    """La fiche d'un lieu, telle qu'elle la lit : chaque source dans sa partie, tout texte venu d'ailleurs inerte."""
+    hit = d.hit
+    head = phrase("trips.tools.fiche.head", id=hit.id, name=inert(hit.name, NAME_SHOWN) or "—",
+                  what=_what(hit.kind_fr, hit.town))
+    lines = [" · ".join([head, *_known_of(hit)])]
+    if d.osm is not None:
+        if d.osm.address:
+            lines.append(phrase("trips.tools.fiche.address_is", address=inert(d.osm.address, 160)))
+        if d.osm.facts:
+            lines.append(phrase("trips.tools.fiche.osm", facts=_pairs(d.osm.facts, 12)))
+    t = d.tourism
+    if t is not None and (t.description or t.labels or t.prices):
+        lines.append(phrase("trips.tools.fiche.tourism", author=inert(t.author, 80), date=_date_text(t.updated))
+                     if t.author else phrase("trips.tools.fiche.tourism_bare"))
+        if t.description:
+            lines.append(f"  {inert(t.description, DESCRIPTION_SHOWN)}")
+        if t.labels:
+            lines.append(phrase("trips.tools.fiche.labels", labels=", ".join(inert(x, 60) for x in t.labels[:6])))
+        if t.prices:
+            lines.append(phrase("trips.tools.fiche.prices", prices=inert(t.prices, 200)))
+    f = d.reviews
+    if f is not None:
+        rated = " · ".join(p for p in (_rating(f.rating, f.count), inert(f.price, 10), inert(f.price_range, 20)) if p)
+        if f.id and rated:
+            lines.append(phrase("trips.tools.fiche.google", rating=rated))
+        if f.summary:
+            lines.append(phrase("trips.tools.fiche.summary", summary=inert(f.summary, SUMMARY_SHOWN)))
+        if f.facts:
+            lines.append(phrase("trips.tools.fiche.google_facts", facts=_pairs(f.facts)))
+        reviews = _review_lines(f)
+        if reviews:
+            lines += [phrase("trips.tools.fiche.reviews"), *reviews]
+        if f.note:
+            lines.append(phrase("trips.tools.fiche.google_note", note=inert(f.note, 300)))
+    if d.events:
+        lines += [phrase("trips.tools.fiche.events"), *(_event_line(e) for e in d.events[:EVENTS_SHOWN])]
+    return lines
+
+
+def _date_text(iso: str) -> str:
+    """« 5 décembre 2023 » ; illisible : tel quel (inerte)."""
+    try:
+        day = date.fromisoformat(str(iso or "")[:10])
+    except ValueError:
+        return inert(iso, 20) or "—"
+    return f"{day_month_fr(day)} {day.year}"
+
+
+def _event_fiche_lines(d: EventDetail) -> list[str]:
+    """La fiche d'un événement, telle qu'elle la lit : quand, où, ses tarifs, ses dates, ce qu'en dit son auteur."""
+    hit = d.hit
+    lines = [phrase("trips.tools.fiche.event_head", id=hit.id, name=inert(hit.name, NAME_SHOWN) or "—",
+                    when=inert(hit.when_text, 80) or "—")]
+    where = " · ".join(p for p in (inert(d.venue, 120), inert(d.address, 160)) if p) or inert(hit.place, 160)
+    if where:
+        lines.append(phrase("trips.tools.fiche.where", place=where))
+    if hit.free:
+        lines.append(phrase("trips.tools.events.free_is"))
+    if d.prices:
+        lines.append(phrase("trips.tools.fiche.prices", prices=inert(d.prices, 200)))
+    if d.dates:
+        lines.append(phrase("trips.tools.fiche.dates", dates=" ; ".join(inert(x.text, 80) for x in
+                                                                       d.dates[:DATES_SHOWN])))
+        more = len(d.dates) - DATES_SHOWN + d.more_dates
+        if more > 0:
+            lines.append(phrase("trips.tools.fiche.more_dates", n=more))
+    if d.description:
+        lines.append(phrase("trips.tools.fiche.by", author=inert(d.author, 80) or "—", date=_date_text(d.updated))
+                     if d.author else phrase("trips.tools.fiche.tourism_bare"))
+        lines.append(f"  {inert(d.description, DESCRIPTION_SHOWN)}")
+    if d.contacts:
+        lines.append(phrase("trips.tools.fiche.contacts", contacts=_pairs(d.contacts, 4)))
+    return lines
+
+
+def event_item(e: EventHit) -> dict[str, Any]:
+    """Ce qu'un regard garde d'un événement (``Looked.found``, ``LOOK_EVENTS``) : qui il est, quand, où — rien de sa
+    description."""
+    return {"id": e.id[:60], "name": e.name[:c.NAME_MAX], "start": e.start[:40], "end": e.end[:40],
+            "when_text": e.when_text[:120], "place": e.place[:c.NAME_MAX],
+            "lat": round(e.lat, 6) if e.lat is not None else None,
+            "lon": round(e.lon, 6) if e.lon is not None else None}
+
+
+@TRIPS.tool("place_read", description=phrase("trips.tools.fiche.description"),
+            label=phrase("trips.tools.fiche.label"), args=ReadArgs, bundle=BUNDLE,
+            episodes=[Kind.REPLY], max_calls_per_episode=READ_CALLS, when=offered, needs="maps")
+async def place_read(args: ReadArgs, ctx: Any) -> Any:
+    call = _open(ctx, "place_read")
+    if isinstance(call, ToolResult):
+        return call
+    port = call.port
+    if port is None or not port.places_ready():
+        return _refused(phrase("trips.tools.no_places"))
+    raw = " ".join(args.place.split())
+    if EVENT_REF.match(raw.lower()):
+        return await _read_event(call, port, raw.lower())
+    try:
+        ident = await _fiche_id(call, raw)
+        detail = await port.place(ident) if ident else None
+    except _Miss as miss:  # « ici » lu sans lieu tout près : sa bulle 📍 reste
+        return ToolResult(ok=False, content=str(miss), attach=tuple(call.attach))
+    except MapsUnavailable as exc:
+        return call.failed(exc)
+    if detail is None:
+        return _refused(phrase("trips.tools.fiche.unknown"))
+    try:
+        await _look(call, c.LOOK_PLACES, phrase("trips.look.fiche", place=detail.hit.name[:120]),
+                    [hit_item(detail.hit)])
+    except Superseded:
+        return _refused(phrase("trips.tools.moved"))
+    return call.done("\n".join([phrase("trips.tools.data"), *_fiche_lines(detail),
+                                phrase("trips.tools.fiche.then")]))
+
+
+async def _read_event(call: _Call, port: MapsPort, ident: str) -> ToolResult:
+    try:
+        detail = await port.event(ident)
+    except MapsUnavailable as exc:
+        return _failed(exc)
+    if detail is None:
+        return _refused(phrase("trips.tools.fiche.unknown_event"))
+    try:
+        await _look(call, c.LOOK_EVENTS, phrase("trips.look.fiche", place=detail.hit.name[:120]),
+                    [event_item(detail.hit)])
+    except Superseded:
+        return _refused(phrase("trips.tools.moved"))
+    return call.done("\n".join([phrase("trips.tools.data"), *_event_fiche_lines(detail)]))
+
+
+# ── les événements (ADR 0259) ──
+
+
+class EventsArgs(BaseModel):
+    near: str = Field(min_length=1, max_length=200, description=phrase("trips.tools.events.near"))
+    radius_km: float = Field(default=EVENTS_RADIUS_KM, ge=1.0, le=EVENTS_RADIUS_MAX_KM,
+                             description=phrase("trips.tools.events.radius_km"))
+    when: When = Field(default="", description=phrase("trips.tools.events.when"))
+    start: str = Field(default="", max_length=10, description=phrase("trips.tools.events.start"))
+    end: str = Field(default="", max_length=10, description=phrase("trips.tools.events.end"))
+    themes: list[Theme] = Field(default_factory=list, max_length=len(THEMES),
+                                description=phrase("trips.tools.events.themes"))
+    text: str = Field(default="", max_length=100, description=phrase("trips.tools.events.text"))
+    free: bool = Field(default=False, description=phrase("trips.tools.events.free"))
+    limit: int = Field(default=8, ge=1, le=c.FOUND_MAX, description=phrase("trips.tools.events.limit"))
+
+
+def period(when: str, today: date) -> tuple[date, date]:
+    """Une période en mots (``When``), du premier au dernier jour : aujourd'hui, demain, le prochain week-end (celui-ci
+    s'il a commencé), le reste de cette semaine, la semaine prochaine, le prochain de ces jours (aujourd'hui compris)."""
+    if when == "aujourdhui":
+        return today, today
+    if when == "demain":
+        return today + timedelta(days=1), today + timedelta(days=1)
+    if when == "ce_weekend":
+        saturday = today + timedelta(days=(5 - today.weekday()) % 7) if today.weekday() < 6 else today
+        return saturday, saturday + timedelta(days=1) if saturday.weekday() == 5 else saturday
+    if when == "cette_semaine":
+        return today, today + timedelta(days=6 - today.weekday())
+    if when == "semaine_prochaine":
+        monday = today + timedelta(days=7 - today.weekday())
+        return monday, monday + timedelta(days=6)
+    day = today + timedelta(days=(WEEKDAYS.index(when) - today.weekday()) % 7)
+    return day, day
+
+
+def _dates(args: EventsArgs, today: date) -> tuple[date | None, date | None] | None:
+    """Du premier au dernier jour : la période en mots, sinon les dates ; ``None`` : illisibles, à l'envers ou sur
+    plus d'un an."""
+    if args.when:
+        return period(args.when, today)
+    start, end = _date(args.start), _date(args.end)
+    if start is None or end is None:
+        return None
+    first = date.fromisoformat(start) if start else None
+    last = date.fromisoformat(end) if end else None
+    if (first and last and last < first) or (last and (last - (first or today)).days > 366):
+        return None
+    return first, last
+
+
+def _event_found(e: EventHit) -> str:
+    parts = [phrase("trips.tools.events.line", id=e.id, name=inert(e.name, NAME_SHOWN) or "—",
+                    when=inert(e.when_text, 80) or "—", place=inert(e.place, 120) or "—")]
+    if e.free:
+        parts.append(phrase("trips.tools.events.free_is"))
+    elif e.price:
+        parts.append(inert(e.price, 80))
+    if e.distance_m is not None:
+        parts.append(phrase("trips.tools.events.at", distance=geo.km_text(e.distance_m)))
+    return " · ".join(parts)
+
+
+@TRIPS.tool("events_search", description=phrase("trips.tools.events.description"),
+            label=phrase("trips.tools.events.label"), args=EventsArgs, bundle=BUNDLE,
+            episodes=[Kind.REPLY], max_calls_per_episode=SEARCH_CALLS, when=offered, needs="maps")
+async def events_search(args: EventsArgs, ctx: Any) -> Any:
+    call = _open(ctx, "events_search")
+    if isinstance(call, ToolResult):
+        return call
+    port = call.port
+    if port is None:
+        return _refused(phrase("trips.tools.no_places"))
+    span = _dates(args, ctx.frame.local().date())
+    if span is None:
+        return _refused(phrase("trips.tools.events.bad_dates"))
+    try:
+        near = await _point(call, args.near)
+    except _Miss as miss:
+        return _refused(str(miss))
+    radius = round(args.radius_km * 1_000)
+    try:
+        hits = await port.events(near=near.at, radius_m=radius, start=span[0], end=span[1],
+                                 themes=frozenset(args.themes), text=" ".join(args.text.split()), free=args.free,
+                                 limit=args.limit)
+    except (MapsUnavailable, ValueError) as exc:
+        return call.failed(exc)
+    cover = port.tourism_coverage(near=near.at, radius_m=radius)
+    if not hits:
+        said = [phrase("trips.tools.events.nothing")]
+        if cover.note:
+            said.append(phrase("trips.tools.events.partial", note=inert(cover.note, 300)))
+        return call.done("\n".join(said))
+    hits = hits[:c.FOUND_MAX]
+    where = phrase("trips.look.here") if near.here else phrase("trips.look.near", place=near.name)
+    labels = dict(THEMES)
+    when = family("trips.when").get(args.when, "") if args.when else " – ".join(
+        day_fr(d) for d in dict.fromkeys(x for x in span if x is not None))
+    query = " · ".join(p for p in (phrase("trips.look.events"), ", ".join(labels[t] for t in args.themes), when, where)
+                       if p)
+    try:
+        await _look(call, c.LOOK_EVENTS, query, [event_item(e) for e in hits])
+    except Superseded:
+        return _refused(phrase("trips.tools.moved"))
+    lines = [phrase("trips.tools.data"), *(_event_found(e) for e in hits)]
+    if cover.note:
+        lines.append(phrase("trips.tools.events.partial", note=inert(cover.note, 300)))
+    return call.done("\n".join([*lines, phrase("trips.tools.events.then")]))
 
 
 class AddressArgs(BaseModel):

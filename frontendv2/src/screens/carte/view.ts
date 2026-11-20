@@ -12,6 +12,7 @@ import {
   MODES,
   tripGpxUrl,
   type CarteInfo,
+  type Coverage,
   type Place,
   type Route,
   type Trip,
@@ -28,7 +29,8 @@ import { AVOID_LABELS, avoidWords, dayLabel, duration, km, MODE_LABELS, modeWord
 import { h } from "../../shell/dom";
 import { ico } from "../../shell/icons";
 import { errorBlock } from "../../shared/kit";
-import { alongPlace, categoryIcon, dayTitle, hersCount, legsByStop } from "./format";
+import { alongPlace, categoryIcon, cuisineChoices, dayTitle, hersCount, legsByStop } from "./format";
+import { coverageLine, photoImg, ratingInline } from "./sources";
 
 // ── Le cadre de la carte ─────────────────────────────────────────────
 
@@ -67,6 +69,23 @@ export function failedBlock(title: string, message: string): string {
 
 export type Where = "moi" | "zone";
 
+/** Ce qu'une liste de lieux filtre et range (ADR 0244, 0259) : ouvert, ce qu'il offre, sa cuisine, sa note, l'ordre. */
+export interface ExplorerFilters {
+  open: boolean;
+  /** Parmi `features` du serveur (`terrasse`, `vegetarien`…). */
+  features: readonly string[];
+  /** Une note minimale (4 : « 4 et plus ») ; `null` : aucune. */
+  minRating: number | null;
+  /** `distance` ou `rating`. */
+  sort: string;
+  cuisine: string;
+}
+
+export const NO_FILTERS: ExplorerFilters = { open: false, features: [], minRating: null, sort: "distance", cuisine: "" };
+
+/** La note minimale que propose la puce « 4 et plus ». */
+export const MIN_RATING = 4;
+
 export interface ExplorerView {
   info: CarteInfo | null;
   q: string;
@@ -91,6 +110,15 @@ export interface ExplorerView {
   /** Une phrase de plus, sous la recherche (sa position inconnue…). */
   hint: string;
   map: string;
+  /** Les filtres de la recherche (rien : aucun). */
+  filters?: ExplorerFilters;
+  /** Ce que le cache des avis sait de l'endroit : la ligne « Notes Google Maps lues le … ». */
+  coverage?: Coverage | null;
+  /** La fiche d'un lieu ouverte, en HTML (`fiche.ts`) : elle remplace la recherche et la liste. */
+  fiche?: string;
+  /** Les photos déjà montrées (posées sans attendre). */
+  seen?: (ref: string) => boolean;
+  now?: number;
 }
 
 /** L'identifiant d'un lieu dans la liste : le sien, sinon sa place (un point nommé d'un regard n'en a pas). */
@@ -98,13 +126,27 @@ export function placeId(p: Place, i: number): string {
   return p.id || `p${i}`;
 }
 
-export function placeItem(p: Place, id: string, opts: { on: boolean; mika: boolean; where: Where }): string {
+/**
+ * La ligne d'un lieu : son nom et sa distance ; sa note Google et le nombre d'avis, son prix, sa cuisine (sinon ce
+ * qu'il est) ; ouvert ou fermé (« Ouvert · ferme à 22:30 ») ; une vignette quand il a une photo.
+ */
+export function placeItem(p: Place, id: string, opts: { on: boolean; mika: boolean; where: Where; seen?: (ref: string) => boolean }): string {
   const dist = typeof p.distance_m === "number" ? km(p.distance_m) : "";
   const what = placeWhat(p);
-  return `<button class="li place${opts.on ? " on" : ""}${opts.mika ? " by-mika" : ""}" type="button" data-lieu="${h(id)}">
-    <span class="pl-dot${opts.mika ? " mika" : ""}">${ico(categoryIcon(p.category), "xs")}</span>
+  const rated = ratingInline(p.rating, p.reviews);
+  const parts = rated
+    ? [rated, h(p.price?.trim() ?? ""), h(p.cuisine?.trim() || p.kind_fr)]
+    : [h(what), h(p.price?.trim() ?? ""), h(p.cuisine?.trim() ?? "")];
+  const first = parts.filter(Boolean).join(" · ");
+  const open = p.open_text?.trim()
+    ? `<span class="li-snip ${p.open_state === "open" ? "ok-txt" : p.open_state === "closed" ? "ko-txt" : ""}">${h(p.open_text.trim())}</span>` : "";
+  const img = p.photo && opts.seen ? photoImg(p.photo, "", opts.seen) : "";
+  const lead = img ? `<span class="pl-thumb${opts.mika ? " mika" : ""}">${img}</span>`
+    : `<span class="pl-dot${opts.mika ? " mika" : ""}">${ico(categoryIcon(p.category), "xs")}</span>`;
+  return `<button class="li place${opts.on ? " on" : ""}${opts.mika ? " by-mika" : ""}${img ? " has-thumb" : ""}" type="button" data-lieu="${h(id)}">
+    ${lead}
     <span class="li-main"><span class="li-top"><span class="li-title">${h(p.name || "—")}</span>${dist ? `<span class="pl-dist">${h(dist)}</span>` : ""}</span>
-    <span class="li-snip">${h(what)}${opts.mika ? `${what ? " · " : ""}<b class="mika-txt">Mika te l'a proposé</b>` : ""}</span></span></button>`;
+    <span class="li-snip">${first}${opts.mika ? `${first ? " · " : ""}<b class="mika-txt">Mika te l'a proposé</b>` : ""}</span>${open}</span></button>`;
 }
 
 export function placeCard(p: Place, mika: boolean, where: Where): string {
@@ -144,7 +186,7 @@ function resultsMarkup(v: ExplorerView): string {
   if (v.regard) {
     out.push(`<div class="group-label mika-label">${ico("sparkle", "xs")}Ce que Mika a ${v.regard.route ? "montré" : "cherché"} <span class="cnt">${v.places.length}</span></div>`);
     if (!v.places.length) out.push(`<div class="empty">${ico("map")}<p>Elle n'a gardé aucun lieu de ce regard.</p></div>`);
-    out.push(...v.places.map((p, i) => placeItem(p, placeId(p, i), { on: v.sel === placeId(p, i), mika: true, where: v.where })));
+    out.push(...v.places.map((p, i) => placeItem(p, placeId(p, i), { on: v.sel === placeId(p, i), mika: true, where: v.where, seen: v.seen })));
     return out.join("");
   }
   if (v.addresses.length || v.addrError) {
@@ -162,11 +204,50 @@ function resultsMarkup(v: ExplorerView): string {
     }
     return out.join("");
   }
-  out.push(`<div class="group-label">${h(searchTitle(v.info, v.q, v.cat))} <span class="cnt">${v.places.length}</span><span class="grow"></span><span class="muted">index local, rien ne sort</span></div>`);
+  out.push(`<div class="group-label">${h(searchTitle(v.info, v.q, v.cat))} <span class="cnt">${v.places.length}</span><span class="grow"></span>${sortToggle(v)}<span class="muted">index local, rien ne sort</span></div>`);
+  const cover = coverageLine(v.coverage, "Notes Google Maps lues", v.now ?? Date.now());
+  if (cover) out.push(`<p class="small muted cov-line">${ico("info", "xs")}<span>${h(cover)}</span></p>`);
   if (v.loading && !v.places.length) out.push(`<div class="empty">${ico("refresh")}<p>Recherche…</p></div>`);
-  else if (!v.places.length) out.push(`<div class="empty">${ico("search")}<p>Rien de tel ${v.where === "moi" ? "autour de toi" : "dans cette zone"}.</p></div>`);
-  out.push(...v.places.map((p, i) => placeItem(p, placeId(p, i), { on: v.sel === placeId(p, i), mika: false, where: v.where })));
+  else if (!v.places.length) {
+    const filtered = filtersOn(v.filters);
+    out.push(`<div class="empty">${ico("search")}<p>${h(`Rien de tel ${v.where === "moi" ? "autour de toi" : "dans cette zone"}${filtered ? " avec ces filtres" : ""}.`)}</p></div>`);
+  }
+  out.push(...v.places.map((p, i) => placeItem(p, placeId(p, i), { on: v.sel === placeId(p, i), mika: false, where: v.where, seen: v.seen })));
   return out.join("");
+}
+
+/** Un filtre au moins est posé. */
+export function filtersOn(f: ExplorerFilters | undefined): boolean {
+  return !!f && (f.open || f.features.length > 0 || f.minRating !== null || !!f.cuisine.trim());
+}
+
+/** L'ordre de la liste : un bouton qui passe de l'un à l'autre (« Les plus proches », « Les mieux notés »). */
+function sortToggle(v: ExplorerView): string {
+  const sorts = v.info?.sorts ?? [];
+  if (sorts.length < 2) return "";
+  const now = v.filters?.sort ?? "distance";
+  const label = sorts.find((s) => s.id === now)?.label ?? sorts[0].label;
+  return `<button class="btn xs ghost sort-btn" type="button" data-sort title="Changer l'ordre de la liste">${ico("sort", "xs")}${h(label)}</button>`;
+}
+
+/**
+ * Les filtres, sous la recherche : ouvert maintenant, ce que le serveur sait reconnaître (terrasse, végétarien, vegan,
+ * accessible…), « 4 et plus » (sa note Google), et la cuisine parmi celles de la liste.
+ */
+export function filtersMarkup(v: Pick<ExplorerView, "info" | "places" | "filters">): string {
+  const f = v.filters ?? NO_FILTERS;
+  const chip = (id: string, label: string, on: boolean, icon = "") =>
+    `<button type="button" class="cat flt${on ? " on" : ""}" data-flt="${h(id)}" aria-pressed="${on}">${icon}${h(label)}</button>`;
+  const chips = [
+    chip("open", "Ouvert maintenant", f.open, ico("clock", "xs")),
+    ...(v.info?.features ?? []).map((x) => chip(`f:${x.id}`, x.label, f.features.includes(x.id))),
+    chip("rating", `${MIN_RATING} et plus`, f.minRating !== null, ico("star", "xs")),
+  ].join("");
+  const cuisines = cuisineChoices(v.places, f.cuisine);
+  const select = cuisines.length
+    ? `<select class="flt-select" data-cuisine aria-label="Cuisine"><option value="">Toute cuisine</option>${cuisines
+      .map((c) => `<option value="${h(c)}"${c === f.cuisine ? " selected" : ""}>${h(c)}</option>`).join("")}</select>` : "";
+  return `<div class="cs-cats cs-flt" role="group" aria-label="Filtres">${chips}${select}</div>`;
 }
 
 /** Le lieu choisi de la liste (une adresse : `a<n>`), sinon `null`. */
@@ -178,7 +259,9 @@ export function selectedPlace(v: Pick<ExplorerView, "places" | "addresses" | "se
 }
 
 export function explorerMarkup(v: ExplorerView): string {
+  if (v.fiche) return `<div class="split carte-split"><aside class="pane carte-side">${v.fiche}</aside>${v.map}</div>`;
   const sel = selectedPlace(v);
+  const filters = !v.regard && (v.q.trim() || v.cat) ? filtersMarkup(v) : "";
   return `<div class="split carte-split">
     <aside class="pane carte-side">
       <div class="cs-search">
@@ -187,6 +270,7 @@ export function explorerMarkup(v: ExplorerView): string {
         <div class="seg" role="group" aria-label="Où chercher">
           <button type="button" aria-pressed="${v.where === "moi"}" data-where="moi">${ico("pin", "sm")}Autour de moi</button>
           <button type="button" aria-pressed="${v.where === "zone"}" data-where="zone">${ico("map", "sm")}Dans cette zone</button></div>
+        ${filters}
       </div>
       <div class="pane-scroll" data-results>${resultsMarkup(v)}</div>
       ${sel ? placeCard(sel, !!v.regard, v.where) : v.regard?.links.length

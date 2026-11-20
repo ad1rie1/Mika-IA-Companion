@@ -7,6 +7,9 @@ toucher à la machine — l'atelier d'un projet, un serveur MCP lancé ici.
   un résolveur qui n'existe nulle part ailleurs, et des routes « unreachable » vers tout ce qui n'est pas Internet
   (le réseau local, l'hôte, les métadonnées d'un nuage) — posées avant d'entrer dans la cage, qui n'a plus aucune
   capacité pour les retirer.
+- *Un dossier de plus, en lecture seule* (``read_only``, ADR 0260) : la vue de l'atelier d'un projet lu, montée dans
+  l'atelier du lecteur ; le dépôt d'un projet lu, pour le git qui pose cette vue. Le programme le lit, il ne peut pas
+  y écrire.
 
 Ce module ne lance rien : il construit des lignes de commande. Sans bubblewrap, rien ne se lance (pas de repli).
 """
@@ -46,6 +49,14 @@ def system(network: str) -> list[str]:
         if Path(f).exists():
             args += ["--ro-bind", f, f]
     return args
+
+
+def read_only(source: Path, at: Path) -> list[str]:
+    """Le montage d'un dossier de plus, en lecture seule : ``source`` (hors de la cage) se lit à ``at`` (dans la
+    cage). Bubblewrap ne monte que sur un dossier, et crée celui qui manque — pour de bon, sur le disque, quand
+    ``at`` est dans un dossier lié en écriture : qui appelle le pose donc lui-même, et vérifie que ce n'est pas un
+    lien."""
+    return ["--ro-bind", str(source), str(at)]
 
 
 #: les dossiers des cages (``forge/``, ``ateliers/``, ``mcp/``) : à l'utilisateur de Mika seul — des bases d'apps, des

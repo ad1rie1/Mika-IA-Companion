@@ -413,3 +413,29 @@ describe("un compte qu'on te partage : sous le nom de sa personne, et son propri
     expect(card).toContain("Adrien Moreau");
   });
 });
+
+describe("Teams : les images d'un message (ADR 0258)", () => {
+  const withImages = (images: TeamsMessage["images"], text: string): Thread => ({
+    key: "19:proj@thread.v2", account: "principal", title: "Projet", kind: "group",
+    messages: [msg({ ref: "t9", text, images })], more: false, replies: [], pending: [], under_way: false, asked: false,
+  });
+
+  it("l'image remplace sa marque dans le texte, et ce que Mika y a vu se lit en légende", () => {
+    const t = withImages([{ id: "0-img-b", position: 1, mime: "image/png", seen: "un graphe" },
+      { id: "0-img-a", position: 0, mime: "image/jpeg", seen: "" }], "voilà [image] et [image : un graphe]");
+    const html = threadBody(t, [], view("proprietaire"), false);
+    expect(html).toContain("voilà et");
+    expect(html).not.toContain("[image");
+    const srcs = [...html.matchAll(/<img src="([^"]+)"/g)].map((x) => x[1]);
+    expect(srcs.map((s) => decodeURIComponent(s.split("image=")[1]))).toEqual(["0-img-a", "0-img-b"]);
+    expect(srcs[0]).toContain("/teams/image?");
+    expect(html).toContain("<figcaption>");
+    expect(html).toContain("un graphe");
+  });
+
+  it("sans image gardée, la marque reste dans le texte", () => {
+    const html = threadBody(withImages(undefined, "regarde [image]"), [], view("proprietaire"), false);
+    expect(html).toContain("[image]");
+    expect(html).not.toContain("tm-imgs");
+  });
+});

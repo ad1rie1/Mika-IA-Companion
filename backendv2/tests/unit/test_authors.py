@@ -75,10 +75,10 @@ def _persona(reference: str = "") -> PersonaRender:
 
 def test_on_the_chat_her_codes_join_the_frame_and_her_example_replaces_the_reference_thread():
     msgs = [Message("user", "salut")]
-    plain, _m, _keep = polish("Coucou !", msgs, "salut", _persona("Léa : t'es où\nMoi : là"))
+    plain, _m, _keep, _stop = polish("Coucou !", msgs, "salut", _persona("Léa : t'es où\nMoi : là"))
     assert "Léa : t'es où" in plain and "ses codes" not in plain
     author = Author("message", "Message", codes="Pas d'émoji.", example="Zoé : ok\nMoi : ça marche")
-    system, _m, _keep = polish("Coucou !", msgs, "salut", _persona("Léa : t'es où\nMoi : là"), author)
+    system, _m, _keep, _stop = polish("Coucou !", msgs, "salut", _persona("Léa : t'es où\nMoi : là"), author)
     assert phrase("expression.polish.codes", codes="Pas d'émoji.") in system
     assert "Zoé : ok" in system and "Léa : t'es où" not in system
 

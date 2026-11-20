@@ -84,6 +84,14 @@ CONVERSATIONS = (
     ("adrien", ["salut ! moi c'est Adrien", "je bosse sur un jeu en ce moment", "tu aimes le café ?"]),
     ("bea", ["coucou, c'est Béa", "je suis un peu fatiguée aujourd'hui", "à demain !"]),
 )
+#: un fil de travail de son opérateur (ADR 0164) : l'onglet Échanges de sa fiche le liste à part, et sa réponse s'y
+#: lit en Markdown rendu (ADR 0241)
+STRAND = ("apercu-devis", "Devis du trimestre", "montants hors taxes, à relancer avant vendredi",
+          "fais-moi le point sur les devis en attente")
+PRO_REPLY = ("Voici le point sur **les devis en attente** :\n\n## À relancer\n\n| Client | Montant HT | Envoyé |\n"
+             "|---|---:|---|\n| Atelier Lune | 1 240 € | 3 nov. |\n| Studio Brume | 860 € | 7 nov. |\n\n"
+             "- le plus ancien attend depuis **deux semaines** ;\n- `devis-2026-041` a été ouvert hier.\n\n"
+             "> Je propose une relance commune jeudi matin.")
 
 
 async def _project(kernel, *, title: str = "Outils réseau",
@@ -265,6 +273,8 @@ class _Model(PersonaSimLLM):
     message à l'autre sans jamais se taire (l'aperçu veut une parole à chaque message)."""
 
     async def complete(self, req: LLMRequest) -> LLMResponse:
+        if req.role == "pro":  # une réponse de travail, en Markdown comme le modèle les écrit
+            return LLMResponse(PRO_REPLY, model=self.model, usage=Usage(input_tokens=200, output_tokens=120))
         if req.role != "reply":
             return await super().complete(req)
         self.calls.append(req)
@@ -347,6 +357,18 @@ def export(out: Path) -> list[str]:
                     break
                 time.sleep(0.1)
             client.post("/auth/login", json=operator, headers=token())
+            strand, title, about, asked = STRAND  # son fil de travail, titré, à côté de leur conversation
+            with client.websocket_connect(HOST.replace("http", "ws") + "/ws") as ws:
+                ws.receive_json(), ws.receive_json()
+                ws.send_json({"type": "chat", "message": asked, "client_msg_id": "adrien-pro", "mode": "pro",
+                              "strand": strand})
+                for _ in range(60):
+                    if ws.receive_json().get("type") == "speech":
+                        break
+                ws.send_json({"type": "strand", "id": strand, "title": title, "description": about, "archived": False})
+                for _ in range(30):
+                    if ws.receive_json().get("type") == "strand_result":
+                        break
             urls: list[str] = [f"{PREFIX}/"]  # l'accueil, dessiné à la main hors de la carte
             for group in NAVIGATION:
                 for d in group.items:
@@ -370,6 +392,9 @@ def export(out: Path) -> list[str]:
                     base = f"{PREFIX}/fiche/{kind}/{quote(obj.key, safe='')}"
                     urls.append(base)
                     urls += [f"{base}?onglet={quote(v.name)}" for v in live.kernel.registry.inspectors if v.subject == kind]
+                    work = f"{base}?onglet=echanges&travail={STRAND[0]}"  # le fil de travail, chez qui l'a
+                    if kind == "person" and f"travail={STRAND[0]}" in client.get(f"{base}?onglet=echanges").text:
+                        urls.append(work)
             project = client.portal.call(lambda: _project(live.kernel))  # un projet, et chaque onglet de sa fiche
             client.portal.call(lambda: repository(live.kernel, project, clock.now()))  # son dépôt, son distant
             second = client.portal.call(lambda: _project(live.kernel, title="Préparer le prochain stream",

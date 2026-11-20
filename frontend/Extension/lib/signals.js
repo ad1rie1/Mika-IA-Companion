@@ -31,7 +31,8 @@
   };
 
   const KINDS = ["dm", "group", "channel", "meeting", "other"];
-  const LOOPBACK = ["127.0.0.1", "localhost"];
+  // `URL.hostname` garde les crochets d'une IPv6 (« [::1] »), et écrit toute forme longue de la boucle sous celle-ci
+  const LOOPBACK = ["127.0.0.1", "localhost", "[::1]"];
 
   // les formes d'identifiant que le serveur accepte : un identifiant hors de ces formes fait écarter le message
   const CONVERSATION_ID = /^\d{1,3}:[A-Za-z0-9@._:=+-]{1,300}$/;
@@ -125,10 +126,12 @@
       .map(function (p) { return { start: Number(p.start), end: Number(p.end) || 0 }; });
   }
 
-  /** Les pauses qui comptent encore : celles qui touchent la fenêtre (un message plus vieux est « ancien »). */
-  function prunePauses(pauses, now, windowMs) {
-    const limit = now - (windowMs || LIMITS.windowMs) - 2 * 3600 * 1000;
-    return cleanPauses(pauses).filter(function (p) { return !p.end || p.end >= limit; }).slice(-LIMITS.pausesMax);
+  /**
+   * Les pauses gardées : les `pausesMax` dernières, quel que soit leur âge — l'historique de la mise en service n'a
+   * pas de fenêtre de 24 h, et ce qui a été écrit pendant une pause, même ancienne, ne part jamais (ADR 0251).
+   */
+  function prunePauses(pauses) {
+    return cleanPauses(pauses).slice(-LIMITS.pausesMax);
   }
 
   function pauseOpen(pauses) {
@@ -142,7 +145,7 @@
     const last = list[list.length - 1];
     if (paused && !(last && !last.end)) list.push({ start: now, end: 0 });
     else if (!paused && last && !last.end) last.end = Math.max(now, last.start);
-    return prunePauses(list, now);
+    return prunePauses(list);
   }
 
   /** Le message a été écrit pendant une pause : il ne part jamais, même capté après la reprise. */
@@ -206,6 +209,9 @@
       mentions_me: m.deleted ? false : mentionsSelf(m, selfId),
     };
     if (m.deleted) wire.deleted = true;
+    // ses images, envoyées à part : Mika l'attend le temps de les regarder (ADR 0258)
+    const images = Math.min(8, Math.max(0, Math.floor(Number(m.images) || 0)));
+    if (images && !m.deleted) wire.images = images;
     return wire;
   }
 
@@ -329,7 +335,9 @@
 
   /**
    * L'adresse du serveur, vérifiée : `{origin, local}`, ou `{error}`. En http seulement sur cette machine
-   * (127.0.0.1, localhost) ; ailleurs, https — la clé et les messages ne traversent pas un réseau en clair.
+   * (127.0.0.1, localhost, [::1]) ; ailleurs, https — la clé et les messages ne traversent pas un réseau en clair.
+   * Une IPv6 s'écrit entre crochets (`https://[2001:db8::1]:8443`) ; un nom qui n'a qu'une adresse IPv6 est un nom
+   * comme un autre : c'est le système qui le résout, pas l'extension.
    */
   function serverAddress(raw) {
     let url;
@@ -341,7 +349,7 @@
     if (url.protocol !== "http:" && url.protocol !== "https:") return { error: "une adresse http:// ou https://" };
     const local = LOOPBACK.indexOf(url.hostname.toLowerCase()) >= 0;
     if (url.protocol === "http:" && !local) {
-      return { error: "hors de cette machine (127.0.0.1, localhost), seulement une adresse https://" };
+      return { error: "hors de cette machine (127.0.0.1, localhost, [::1]), seulement une adresse https://" };
     }
     return { origin: url.origin, local: local };
   }

@@ -55,6 +55,15 @@ open class MailApi(private val api: MoiApi, private val uploads: MoiApi = api) {
     /** Une pièce jointe, toujours en téléchargement : son adresse sur le serveur de la session (`null` hors session). */
     fun fileUrl(ref: String, part: String): HttpUrl? = api.url("/mail/file", mapOf("ref" to ref, "part" to part))
 
+    /** Le HTML du mail, purgé, son document isolé (ADR 0169), pour [fr.qwartz.mika.ui.mail.MailFrame] ; [images] :
+     *  ses images distantes, cette fois. Un mail sans HTML : 404. */
+    open suspend fun frame(ref: String, images: Boolean = false): MoiApi.Result<String> =
+        api.text("/mail/frame", mapOf("ref" to ref, "images" to if (images) "1" else null))
+
+    /** Les images distantes de son expéditeur : toujours ([shown]), ou plus (ADR 0175) ; seule une propriétaire. */
+    open suspend fun images(ref: String, shown: Boolean, key: String? = MoiApi.newKey()) =
+        json("/mail/images", listOf("ref" to ref, "shown" to shown), key)
+
     // ── Écrire ──
     /** Un mail nouveau ; il part tout de suite. */
     open suspend fun send(box: String, mail: Outgoing, files: List<OutgoingPiece> = emptyList(), key: String? = MoiApi.newKey()) =

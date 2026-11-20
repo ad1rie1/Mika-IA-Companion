@@ -79,10 +79,12 @@ MENU = (
                   "reglages/document"), hint="Identité, portrait, tempérament, autrices"),
         # la vue d'ensemble : leurs réglages vivent dans leur destination, derrière sa roue (ADR 0206)
         MenuLink("Configuration des plugins", "reglages/plugins", hint="Où se règle chaque plugin"),
-        # sa position, les lieux, les trajets, les notifications du téléphone : une barre d'onglets (ADR 0197)
+        # sa position, les lieux, les trajets, les données touristiques, les avis et leur réchauffage (ADR 0245,
+        # 0250), les notifications du téléphone : une barre d'onglets (ADR 0197)
         MenuLink("Carte et téléphone", "reglages/carte",
-                 ("reglages/lieux", "reglages/itineraires", "reglages/notifications"),
-                 hint="Sa position, les lieux, les trajets, les notifications"),
+                 ("reglages/lieux", "reglages/itineraires", "reglages/tourisme", "reglages/avis",
+                  "reglages/rechauffage", "reglages/notifications"),
+                 hint="Sa position, les lieux, les trajets, les données touristiques, les avis, les notifications"),
         MenuLink("Paramètres avancés", "reglages/comportement", hint="Les réglages internes de chaque faculté"),
         MenuLink("Comptes", "reglages/comptes", hint="Qui se connecte, qui pilote la console"),
         MenuLink("Droits", "reglages/droits", hint="Ce qu'elle a, ressource par ressource"),

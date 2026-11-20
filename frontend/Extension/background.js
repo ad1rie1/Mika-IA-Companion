@@ -27,6 +27,21 @@ const TITLES_MAX = 3000;
 const PEOPLE_MAX = 3000; // conversations dont on garde les noms des personnes vues
 const PEOPLE_PER_CONVERSATION = 12;
 const REQUEST_TIMEOUT_MS = 15000;
+const CURSORS_MAX = 3000; // conversations dont on garde le curseur de synchro (ADR 0251)
+const FLUSH_SOON_MS = 400; // ce que la page vient de capter part presque aussitôt
+// la boîte d'envoi en direct (ADR 0251) : la route, les reprises (de plus en plus espacées), le signe de vie
+const LIVE_PATH = "/api/teams/live";
+const LIVE_RETRY_MIN_MS = 2000;
+const LIVE_RETRY_MAX_MS = 60000;
+const LIVE_KEEPALIVE_MS = 20000;
+const LIVE_CLOSE = { 4400: "demande illisible", 4401: "clé refusée", 4403: "refusée (Teams ou ce compte coupés)",
+  4404: "pas de Teams chez Mika", 4408: "présentée trop tard", 4409: "remplacée par une connexion plus récente",
+  4429: "trop de connexions ou d'échecs" };
+// l'historique : un paquet refusé pour l'instant (429, 5xx, coupure) est retenté quelques fois, dans le temps du
+// paquet (sous ce que la page attend : 180 s) ; un chargement sans nouvelles depuis 3 min est tenu pour interrompu
+const HISTORY_RETRIES = 4;
+const HISTORY_CHUNK_BUDGET_MS = 120000;
+const HISTORY_STALE_MS = 3 * 60 * 1000;
 const TAB_SEND_TIMEOUT_MS = 45000; // au-delà du relais (30 s) : un onglet figé ne bloque pas la tournée
 const RUNTIME_VERSION = 2;
 const NOTE_PREFIX = "mika-draft:";
@@ -39,11 +54,21 @@ function freshRuntime() {
     version: RUNTIME_VERSION,
     armedAt: 0, seen: {}, queue: [], titles: {}, people: {}, pauses: [], self: "", selfName: "",
     batchMax: S.LIMITS.maxMessages,
-    stats: { received: 0, admitted: 0, delivered: 0, own: 0, posts: 0, dropped: {}, bySource: { network: 0, idb: 0 } },
+    stats: { received: 0, admitted: 0, delivered: 0, own: 0, posts: 0, dropped: {}, bySource: { network: 0, idb: 0 },
+      images: { sent: 0, skipped: 0, failed: 0 } },
     lastError: "", lastErrorAt: 0, lastOkAt: 0, lastPollAt: 0, retryAt: 0, authFailed: false, failures: 0,
     ackRetryAt: 0, ackFailures: 0, inboxStrike: null,
     outbox: O.freshBox(),
+    // conversation → `{w, m, at}` : le plus tard livré que la page y ait lu, la fiche vue (ADR 0251)
+    cursors: {},
+    // l'historique de la mise en service, s'il a été lancé
+    history: null,
   };
+}
+
+function freshHistory(now, run) {
+  return { run: run || "", state: "running", startedAt: now, lastAt: now, finishedAt: 0, done: 0, total: 0, read: 0,
+    sent: 0, accepted: 0, known: 0, twins: 0, dropped: 0, error: "" };
 }
 
 // ── L'état ─────────────────────────────────────────────────────────────────
@@ -128,6 +153,20 @@ function learnTitles(rt, conversations, now) {
   }
 }
 
+/** Les curseurs de synchro que la page envoie avec son dernier lot : jamais en arrière, les plus vieux oubliés. */
+function learnCursors(rt, list, now) {
+  for (const c of list) {
+    if (!c || typeof c.conv !== "string" || !c.conv) continue;
+    const prev = rt.cursors[c.conv];
+    rt.cursors[c.conv] = { w: Math.max(Number(c.w) || 0, prev ? Number(prev.w) || 0 : 0), m: String(c.m || ""), at: now };
+  }
+  const ids = Object.keys(rt.cursors);
+  if (ids.length > CURSORS_MAX) {
+    ids.sort(function (a, b) { return rt.cursors[a].at - rt.cursors[b].at; });
+    for (const id of ids.slice(0, ids.length - CURSORS_MAX)) delete rt.cursors[id];
+  }
+}
+
 /** Une personne vue écrire dans une conversation (pas soi) : c'est par elle qu'on nomme un tête-à-tête. */
 function learnPerson(rt, conv, author, now) {
   const name = S.clean(author, 120);
@@ -185,6 +224,7 @@ function ingest(state, batch) {
   // en pause, rien n'est appris des noms de conversation : ils ne partiraient qu'après, avec ce qui a été écrit
   // pendant (l'onglet les redit à la reprise)
   if (!settings.paused) learnTitles(rt, batch.conversations || [], now);
+  learnCursors(rt, batch.cursors || [], now);
   rt.pauses = S.prunePauses(rt.pauses, now);
   const exclude = S.exclusions(settings.exclude);
   for (const m of batch.messages || []) {
@@ -210,6 +250,7 @@ function ingest(state, batch) {
     rt.queue = rt.queue.filter(function (q) { return q.id !== m.id; });
     const entry = { id: m.id, conv: m.conv, author: m.author, authorId: m.authorId, time: m.time, text: m.text,
       mentions: (m.mentions || []).slice(0, 20), at: now };
+    if (m.images > 0) entry.images = Math.min(8, Number(m.images) || 0);
     if (m.deleted) {
       entry.deleted = true;
       entry.text = "";
@@ -230,7 +271,22 @@ function ingest(state, batch) {
 
 // ── Le serveur ─────────────────────────────────────────────────────────────
 
+/** Chrome a donné l'accès à cette origine (une adresse hors de cette machine : une permission accordée par un clic). */
+async function allowed(origin) {
+  try {
+    return await chrome.permissions.contains({ origins: [origin + "/*"] });
+  } catch (_) {
+    return false;
+  }
+}
+
 async function request(settings, method, path, body) {
+  const address = S.serverAddress(settings.base);
+  if (address.origin && !address.local && !(await allowed(address.origin))) {
+    // sans elle, le fetch tombe en « Failed to fetch », qui ne dit rien de la cause
+    return { status: 0, data: {}, error: "Chrome n'a pas donné à l'extension l'accès à " + address.origin
+      + " : « Enregistrer » à nouveau dans sa fenêtre, puis « Autoriser »" };
+  }
   const controller = new AbortController();
   const timer = setTimeout(function () { controller.abort(); }, REQUEST_TIMEOUT_MS);
   try {
@@ -657,12 +713,26 @@ async function sendOne(id) {
 }
 
 let polling = null;
-function poll() {
-  if (!polling) polling = pollOnce().finally(function () { polling = null; });
+let pushedItems = null;
+/**
+ * Relever la boîte d'envoi : par une requête, ou avec la liste que la connexion en direct vient de pousser (`items`).
+ * Une poussée qui arrive pendant un relevé est traitée juste après lui, jamais en même temps.
+ */
+function poll(items) {
+  if (items) pushedItems = items;
+  if (!polling) {
+    polling = (async function () {
+      do {
+        const pushed = pushedItems;
+        pushedItems = null;
+        await pollOnce(pushed);
+      } while (pushedItems);
+    })().finally(function () { polling = null; });
+  }
   return polling;
 }
 
-async function pollOnce() {
+async function pollOnce(pushed) {
   // les issues d'abord : même en pause, même pendant une attente de la file, et avant que la liste ne fasse foi
   await deliverAcks();
   const state = await load();
@@ -670,7 +740,8 @@ async function pollOnce() {
     if (state.settings.paused || !state.settings.key) await refreshDrafts();
     return;
   }
-  const got = await request(state.settings, "GET", "/api/teams/outbox");
+  const got = pushed ? { status: 200, data: { items: pushed } }
+    : await request(state.settings, "GET", "/api/teams/outbox");
   const plans = await mutate(function (s) {
     const rt = s.runtime;
     const now = Date.now();
@@ -711,6 +782,332 @@ function schedulePoll(ms) {
     pollTimer = 0;
     poll().catch(function () { /* noté dans l'état */ });
   }, ms);
+}
+
+// ── En direct (ADR 0251) ─────────────────────────────────────────────────────
+//
+// Tant qu'un onglet Teams est ouvert, une WebSocket vers Mika (`/api/teams/live`) : la clé dans le premier message,
+// jamais dans l'adresse ; Mika pousse sa boîte d'envoi dès qu'elle change, traitée comme un relevé. Ses signes de vie
+// (et les nôtres) gardent ce service éveillé (Chrome ≥ 116). Coupée, elle reprend de plus en plus espacée ; le relevé
+// toutes les 30 s reste le filet.
+
+const live = { ws: null, base: "", key: "", connected: false, since: 0, lastPushAt: 0, lastError: "",
+  retryMs: LIVE_RETRY_MIN_MS, retryTimer: 0, keepalive: 0 };
+
+function liveUrl(base) {
+  const url = new URL(LIVE_PATH, base);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return url.toString();
+}
+
+function liveStop(reason) {
+  const ws = live.ws;
+  live.ws = null;
+  live.connected = false;
+  if (live.keepalive) clearInterval(live.keepalive);
+  live.keepalive = 0;
+  if (reason) live.lastError = reason;
+  if (ws) {
+    try {
+      ws.onclose = null;
+      ws.close(1000);
+    } catch (_) { /* déjà fermée */ }
+  }
+}
+
+/** Ouvre la connexion s'il le faut (une clé, pas de pause, un onglet Teams, l'accès donné), la ferme sinon. */
+async function liveEnsure() {
+  const state = await load();
+  const s = state.settings;
+  const tabs = await teamsTabs().catch(function () { return []; });
+  if (!s.key || s.paused || state.runtime.authFailed || !tabs.length || typeof WebSocket !== "function") {
+    if (live.ws) liveStop("");
+    return;
+  }
+  const address = S.serverAddress(s.base);
+  if (address.error || (!address.local && !(await allowed(address.origin)))) {
+    liveStop("Chrome n'a pas donné l'accès à " + (address.origin || s.base));
+    return;
+  }
+  if (live.ws && live.base === s.base && live.key === s.key) return;
+  if (live.ws) liveStop("");
+  // une autre clé, une autre adresse : la reprise prévue pour l'ancienne n'a plus à attendre
+  if (live.retryTimer && (live.base !== s.base || live.key !== s.key)) {
+    clearTimeout(live.retryTimer);
+    live.retryTimer = 0;
+    live.retryMs = LIVE_RETRY_MIN_MS;
+  }
+  if (!live.retryTimer) liveOpen(s.base, s.key);
+}
+
+let liveKickedAt = 0;
+/** Relancer la connexion si elle n'est ni ouverte ni en attente de reprise (un onglet Teams vient de parler) ; une
+ * fois toutes les 10 s au plus : elle peut être fermée exprès (pause, accès refusé), et chaque essai relit l'état. */
+function liveKick() {
+  if (live.ws || live.retryTimer || Date.now() - liveKickedAt < 10000) return;
+  liveKickedAt = Date.now();
+  liveEnsure().catch(function () { /* rien */ });
+}
+
+function liveOpen(base, key) {
+  let ws;
+  try {
+    ws = new WebSocket(liveUrl(base));
+  } catch (_) {
+    live.lastError = "adresse illisible";
+    return;
+  }
+  live.ws = ws;
+  live.base = base;
+  live.key = key;
+  ws.onopen = function () {
+    if (live.ws !== ws) return;
+    ws.send(JSON.stringify({ type: "hello", key: key }));
+    live.connected = true;
+    live.since = Date.now();
+    live.lastError = "";
+    // le délai de reprise ne repart à 2 s qu'à la première boîte reçue : Mika accepte chaque connexion avant de la
+    // refuser, une ouverture ne prouve donc rien
+    live.keepalive = setInterval(function () {
+      try {
+        ws.send("{\"type\":\"ping\"}");
+      } catch (_) { /* la fermeture suit */ }
+    }, LIVE_KEEPALIVE_MS);
+  };
+  ws.onmessage = function (event) {
+    if (live.ws !== ws) return;
+    let data = null;
+    try {
+      data = JSON.parse(String(event.data));
+    } catch (_) {
+      return;
+    }
+    if (data && data.type === "outbox" && Array.isArray(data.items)) {
+      live.lastPushAt = Date.now();
+      live.retryMs = LIVE_RETRY_MIN_MS;
+      poll(data.items).catch(function () { /* noté dans l'état */ });
+    }
+  };
+  ws.onclose = function (event) {
+    if (live.ws !== ws) return;
+    live.ws = null;
+    live.connected = false;
+    if (live.keepalive) clearInterval(live.keepalive);
+    live.keepalive = 0;
+    live.lastError = LIVE_CLOSE[event.code] || (event.code === 1006 ? "coupée" : "fermée (" + event.code + ")");
+    // refusée (clé, Teams coupé) : le relevé le dira aussi ; on ne réessaie que bien plus tard
+    // remplacée (4409) : une autre connexion de cette clé a pris la place ; revenir vite les ferait se chasser
+    const refused = event.code === 4401 || event.code === 4403 || event.code === 4404 || event.code === 4409;
+    const wait = refused ? LIVE_RETRY_MAX_MS : live.retryMs;
+    live.retryMs = Math.min(LIVE_RETRY_MAX_MS, live.retryMs * 2);
+    live.retryTimer = setTimeout(function () {
+      live.retryTimer = 0;
+      liveEnsure().catch(function () { /* rien */ });
+    }, wait);
+  };
+  ws.onerror = function () { /* la fermeture suit */ };
+}
+
+// ── L'historique (le bouton de la mise en service, ADR 0251) ─────────────────
+//
+// L'onglet Teams lit toute sa base et l'envoie par paquets ; chacun est trié ici (les exclusions et les pauses
+// valent toujours ; ni fenêtre de 24 h, ni « avant l'activation », ni « déjà vu ») puis rangé chez Mika, marqué
+// historique (déjà lu chez elle), avant que l'onglet n'envoie le suivant. Rien n'en est gardé ici.
+
+function sleep(ms) {
+  return new Promise(function (resolve) { setTimeout(resolve, ms); });
+}
+
+async function startHistory() {
+  const state = await load();
+  if (!state.settings.key) return { ok: false, error: "Enregistre d'abord ta clé Teams." };
+  if (state.settings.paused) return { ok: false, error: "L'extension est en pause." };
+  const h = state.runtime.history;
+  if (h && h.state === "running" && Date.now() - (h.lastAt || h.startedAt) < HISTORY_STALE_MS) {
+    return { ok: false, error: "L'historique est déjà en cours de chargement." };
+  }
+  const tabs = await teamsTabs();
+  if (!tabs.length) return { ok: false, error: "Ouvre Teams dans un onglet : c'est lui qui lit l'historique." };
+  // l'état d'abord : l'onglet envoie son premier paquet aussitôt ; un chargement d'avant, encore en route, ne compte
+  // plus (ses paquets portent un autre identifiant)
+  const run = "h" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  await mutate(function (s) { s.runtime.history = freshHistory(Date.now(), run); });
+  for (const tab of tabs) {
+    try {
+      const answer = await chrome.tabs.sendMessage(tab.id, { kind: "history", run: run });
+      if (answer && answer.ok) return { ok: true };
+    } catch (_) { /* onglet ouvert avant l'installation : pas de script */ }
+  }
+  await mutate(function (s) {
+    s.runtime.history.state = "error";
+    s.runtime.history.error = "l'onglet Teams n'a pas encore le script : recharge-le";
+  });
+  return { ok: false, error: "L'onglet Teams n'a pas encore le script : recharge-le." };
+}
+
+/** Un paquet d'un chargement qui n'est plus le chargement en cours : ignoré, il ne compte nulle part. */
+function staleRun(rt, run) {
+  return !rt.history || !run || rt.history.run !== run;
+}
+
+/**
+ * Poster à Mika des messages de l'historique, en lots bornés (le drapeau compté dans la taille) ; un lot refusé pour
+ * sa taille (413) est recoupé en deux ; un refus de l'instant (coupure, 429, 5xx) est retenté tant que le temps du
+ * paquet le permet — jamais d'attente après le dernier essai. Les comptes s'ajoutent à `totals`.
+ */
+async function historyPost(settings, entries, opts, deadline, totals) {
+  for (const b of S.batches(entries, opts)) {
+    b.body.history = true;
+    let result = null;
+    for (let attempt = 0; ; attempt++) {
+      result = await request(settings, "POST", "/api/teams/inbox", b.body);
+      const again = result.status === 0 || result.status === 429 || result.status >= 500;
+      if (!again || attempt + 1 >= HISTORY_RETRIES) break;
+      const wait = Math.min(60, Math.max(2, result.retryAfter || 3 * (attempt + 1))) * 1000;
+      if (Date.now() + wait + REQUEST_TIMEOUT_MS > deadline) break; // pas le temps d'un essai de plus
+      await sleep(wait);
+    }
+    if (result.status === 413 && b.ids.length > 1) {
+      const ids = new Set(b.ids);
+      const mine = entries.filter(function (e) { return ids.has(e.id); });
+      const half = Math.ceil(mine.length / 2);
+      for (const part of [mine.slice(0, half), mine.slice(half)]) {
+        const r = await historyPost(settings, part, opts, deadline, totals);
+        if (!r.ok) return r;
+      }
+      continue;
+    }
+    if (result.status !== 202) {
+      return { ok: false, status: result.status, error: result.status === 401 ? "clé refusée par Mika"
+        : result.status === 0 ? result.error : "Mika a répondu " + result.status + (result.error ? " : " + result.error : "") };
+    }
+    const d = result.data || {};
+    totals.sent += b.ids.length;
+    totals.accepted += Number(d.accepted) || 0;
+    totals.known += Number(d.known) || 0;
+    totals.twins += Number(d.twins) || 0;
+    totals.dropped += Number(d.dropped) || 0;
+  }
+  return { ok: true };
+}
+
+async function historyChunk(msg) {
+  const deadline = Date.now() + HISTORY_CHUNK_BUDGET_MS;
+  const prepared = await mutate(function (s) {
+    const rt = s.runtime;
+    const now = Date.now();
+    if (staleRun(rt, msg.run)) return { refused: "un autre chargement a pris la place" };
+    const h = rt.history;
+    h.lastAt = now;
+    if (!s.settings.key || rt.authFailed) return { refused: "pas de clé Teams valable" };
+    if (s.settings.paused) {
+      // une pause prise pendant le chargement l'arrête : rien de ce qui reste ne part
+      h.state = "error";
+      h.error = "arrêté : l'extension a été mise en pause";
+      return { refused: h.error };
+    }
+    if (S.isSelfId(msg.self)) rt.self = String(msg.self).toLowerCase();
+    // les noms et les personnes d'abord : ce sont eux que visent les exclusions
+    learnTitles(rt, msg.conversations || [], now);
+    for (const m of msg.messages || []) {
+      if (m.author && S.isOwn(m, rt.self)) rt.selfName = S.clean(m.author, 120);
+      else if (m.author) learnPerson(rt, m.conv, m.author, now);
+    }
+    const exclude = S.exclusions(s.settings.exclude);
+    const kept = [];
+    for (const m of msg.messages || []) {
+      h.read++;
+      const c = describe(rt, m.conv);
+      // l'historique : ni fenêtre de 24 h, ni « avant l'activation », ni « déjà vu » ; les exclusions et toutes les
+      // pauses gardées valent toujours, et une conversation qu'on ne sait pas nommer ne part pas s'il y a des
+      // exclusions (le direct la retient le temps de l'apprendre ; ici, rien ne la retient)
+      const reason = S.admit(m, { now: now, armedAt: 0, seen: {}, paused: false, pauses: rt.pauses, title: c.title,
+        kind: c.kind, people: c.people, exclude: exclude, windowMs: Infinity });
+      if (reason || (exclude.length && !S.named(c))) {
+        h.dropped++;
+        continue;
+      }
+      kept.push({ id: m.id, conv: m.conv, author: m.author, authorId: m.authorId, time: m.time, text: m.text,
+        mentions: (m.mentions || []).slice(0, 20), deleted: m.deleted === true,
+        images: Math.min(8, Number(m.images) || 0) });
+    }
+    prunePeople(rt);
+    const info = {};
+    for (const e of kept) info[e.conv] = { title: titleOf(rt, e.conv), kind: kindOf(rt, e.conv) };
+    return { settings: s.settings, kept: kept, opts: { info: info, self: { id: S.selfMri(rt.self), name: rt.selfName },
+      selfId: rt.self, maxMessages: rt.batchMax, maxBytes: S.LIMITS.maxBytes - 64 } };
+  });
+  if (prepared.refused) return { ok: false, error: prepared.refused };
+  const opts = prepared.opts;
+  const info = opts.info;
+  opts.info = function (conv) { return info[conv] || { title: "", kind: "other" }; };
+  const totals = { sent: 0, accepted: 0, known: 0, twins: 0, dropped: 0 };
+  const result = await historyPost(prepared.settings, prepared.kept, opts, deadline, totals);
+  await mutate(function (s) {
+    if (staleRun(s.runtime, msg.run)) return;
+    const h = s.runtime.history;
+    h.lastAt = Date.now();
+    h.sent += totals.sent;
+    h.accepted += totals.accepted;
+    h.known += totals.known;
+    h.twins += totals.twins;
+    h.dropped += totals.dropped;
+    if (!result.ok) h.error = result.error;
+    if (result.status === 401) {
+      s.runtime.authFailed = true;
+      fail(s.runtime, "Clé refusée. Collez la clé Teams de Mika (Console › Configuration › Teams).");
+    }
+  });
+  return result.ok ? { ok: true } : { ok: false, error: result.error };
+}
+
+// ── Les images (ADR 0258) ───────────────────────────────────────────────────
+//
+// L'onglet télécharge chaque image d'un message et la passe ici ; elle est triée comme son message (les exclusions,
+// les pauses, et en direct la fenêtre de 24 h et l'activation), puis envoyée à Mika une fois son message chez elle.
+// Rien n'en est gardé ici. Un refus pour l'instant (son message pas encore arrivé, 429, coupure) : l'onglet retente.
+
+function noteImage(outcome) {
+  return mutate(function (state) {
+    const st = state.runtime.stats;
+    st.images = st.images || { sent: 0, skipped: 0, failed: 0 };
+    st.images[outcome] = (st.images[outcome] || 0) + 1;
+  }).catch(function () { /* un compte de moins */ });
+}
+
+async function imageUpload(msg) {
+  if (!msg.conv || !msg.id || !msg.image || !msg.type || !msg.data) return { ok: false, error: "image illisible" };
+  const state = await load();
+  const rt = state.runtime;
+  const s = state.settings;
+  if (!s.key || rt.authFailed) return { ok: false, error: "pas de clé Teams valable" };
+  const exclude = S.exclusions(s.exclude);
+  const c = describe(rt, msg.conv);
+  const reason = s.paused ? "en pause" : S.admit(
+    { id: msg.id, conv: msg.conv, time: Number(msg.time) || 0, text: "[image]", authorId: msg.authorId },
+    { now: Date.now(), armedAt: msg.history ? 0 : rt.armedAt, seen: {}, paused: false, pauses: rt.pauses,
+      title: c.title, kind: c.kind, people: c.people, exclude: exclude, windowMs: msg.history ? Infinity : 0 });
+  if (reason || (exclude.length && !S.named(c))) {
+    await noteImage("skipped");
+    return { ok: true, skipped: true };
+  }
+  // son message d'abord : Mika refuse une image dont le message n'est pas chez elle
+  if (rt.queue.some(function (q) { return q.id === msg.id; })) await flush();
+  const result = await request(s, "POST", "/api/teams/image", { conv: msg.conv, id: msg.id, image: msg.image,
+    position: Number(msg.position) || 0, type: msg.type, data: msg.data });
+  if (result.status === 202) {
+    await noteImage("sent");
+    return { ok: true };
+  }
+  if (result.status === 401) {
+    await mutate(function (st) {
+      st.runtime.authFailed = true;
+      fail(st.runtime, "Clé refusée. Collez la clé Teams de Mika (Console › Configuration › Teams).");
+    });
+  }
+  const retry = result.status === 404 || result.status === 429 || result.status === 0 || result.status >= 500;
+  if (!retry) await noteImage("failed");
+  return { ok: false, retry: retry, error: result.error || "Mika a répondu " + result.status };
 }
 
 /** Montre la conversation d'un brouillon : l'onglet Teams, ouvert sur elle quand c'est possible. */
@@ -767,6 +1164,9 @@ function status(state) {
     retryAt: rt.retryAt, authFailed: rt.authFailed, armedAt: rt.armedAt,
     conversations: Object.keys(rt.titles).length, selfFound: Boolean(rt.self), selfNameFound: Boolean(rt.selfName),
     outbox: { waiting: O.waiting(box, now), stats: box.stats, log: box.log },
+    live: { connected: live.connected, since: live.since, lastPushAt: live.lastPushAt, lastError: live.lastError,
+      retryMs: live.retryMs },
+    history: rt.history,
   };
 }
 
@@ -800,15 +1200,48 @@ async function diagnose() {
 }
 
 /** Les demandes que peut faire un onglet Teams ; le reste ne vient que des pages de l'extension elle-même. */
-const FROM_TABS = new Set(["captured", "pendingDrafts", "claim", "placedResult"]);
+const FROM_TABS = new Set(["captured", "pendingDrafts", "claim", "placedResult", "cursors", "historyChunk",
+  "historyProgress", "historyDone", "image"]);
 
 async function handle(msg) {
   switch (msg && msg.kind) {
     case "captured": {
       await mutate(function (state) { ingest(state, msg); });
-      scheduleFlush(2500);
+      scheduleFlush(FLUSH_SOON_MS);
+      liveKick();
       return { ok: true };
     }
+    case "cursors": {
+      // un onglet Teams s'ouvre : ses curseurs, et la connexion en direct s'il n'y en a pas
+      const rt = (await load()).runtime;
+      const out = {};
+      for (const conv of Object.keys(rt.cursors)) out[conv] = { w: rt.cursors[conv].w, m: rt.cursors[conv].m };
+      liveKick();
+      return { ok: true, cursors: out };
+    }
+    case "historyChunk":
+      return historyChunk(msg);
+    case "historyProgress":
+    case "historyDone": {
+      await mutate(function (state) {
+        if (staleRun(state.runtime, msg.run)) return; // un chargement d'avant
+        const h = state.runtime.history;
+        h.lastAt = Date.now();
+        h.done = Number(msg.done) || 0;
+        h.total = Number(msg.total) || 0;
+        if (msg.kind === "historyDone") {
+          h.state = msg.error || h.error ? "error" : "done";
+          if (msg.error) h.error = String(msg.error).slice(0, 200);
+          h.finishedAt = Date.now();
+        }
+      });
+      if (msg.kind === "historyDone") scheduleFlush(FLUSH_SOON_MS);
+      return { ok: true };
+    }
+    case "history":
+      return startHistory();
+    case "image":
+      return imageUpload(msg);
     case "pendingDrafts":
       return { items: currentDrafts(await load()) };
     case "claim": {
@@ -853,6 +1286,8 @@ async function handle(msg) {
       });
       if (resumed) resendTitles().catch(function () { /* rien */ });
       refreshDrafts().catch(function () { /* rien */ });
+      // une autre adresse, une autre clé, la pause : la connexion en direct suit (rien ne change pour une exclusion)
+      liveEnsure().catch(function () { /* rien */ });
       scheduleFlush(500);
       schedulePoll(800);
       return result;
@@ -903,7 +1338,8 @@ chrome.notifications.onClicked.addListener(function (noteId) {
 });
 
 function tick() {
-  return flush().then(poll).catch(function () { /* noté dans l'état */ });
+  liveEnsure().catch(function () { /* rien */ });
+  return flush().then(function () { return poll(); }).catch(function () { /* noté dans l'état */ });
 }
 
 function arm() {
@@ -911,6 +1347,9 @@ function arm() {
   chrome.alarms.create("mika-tick", { periodInMinutes: 0.5 });
   locked(async function () { await save(await load()); });
 }
+
+// le service redémarre (Chrome l'a endormi, ou l'extension a été rechargée) : la connexion en direct reprend
+liveEnsure().catch(function () { /* rien */ });
 
 chrome.runtime.onInstalled.addListener(arm);
 chrome.runtime.onStartup.addListener(arm);

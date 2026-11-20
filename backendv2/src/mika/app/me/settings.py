@@ -38,9 +38,9 @@ from mika.vocab.canals import CanalRule, Canals, CanalTable
 
 #: ce qu'une personne règle d'une boîte (``owner`` n'y est pas : une boîte reste à qui l'a branchée)
 MAIL_FIELDS = ("label", "address", "enabled", "auth", "imap_host", "imap_port", "imap_ssl", "user", "password",
-               "folders", "sync_all", "since_days", "oauth_client_id", "oauth_tenant", "smtp_host", "smtp_port",
+               "folders", "sync_all", "keep_all", "since_days", "oauth_client_id", "oauth_tenant", "smtp_host", "smtp_port",
                "smtp_security", "smtp_user", "smtp_password", "save_sent", "voice", "display_name", "sender_name",
-               "tone", "instructions", "signature")
+               "tone", "instructions", "signature", "triage_instructions")
 #: ses secrets : jamais rendus, laissés vides ils restent
 MAIL_SECRETS = ("password", "smtp_password")
 #: ce qu'une personne règle d'un compte Teams

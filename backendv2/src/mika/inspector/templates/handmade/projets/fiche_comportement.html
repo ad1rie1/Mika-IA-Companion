@@ -4,7 +4,9 @@
    valeur à droite), « Enregistrer » collé en bas ; pas de cadre dans la carte. Ce que la vue dit en cartes (son mode,
    son rythme, sa liberté) n'est pas redit : leurs faits sont dans l'aide de leur réglage, sa prochaine exécution sur
    une ligne au-dessus. Un projet archivé n'a pas de formulaire : ses réglages se lisent. Puis ses outils : les lots
-   qu'elle a en main pendant une exécution, et « Choisir ses outils » (``projects.outils``) à côté. #}
+   qu'elle a en main pendant une exécution, et « Choisir ses outils » (``projects.outils``) à côté. Puis ses liens de
+   lecture (ADR 0257), dans le même dessin : « Ce qu'il lit » et « Choisir ce qu'il lit » (``projects.liens``) à côté,
+   puis « Qui le lit ». #}
 {% import "handmade/shared/tab.html" as tab with context %}
 {% from "_forms.html" import field %}
 {% macro plumbing(f) -%}
@@ -61,4 +63,27 @@
       {% endif %}
     </div>
   </section>
+
+  {% if links %}
+  <section class="prj-tools prj-links" aria-labelledby="prj-links-title">
+    <header class="prj-tools-head">
+      <h2 id="prj-links-title">{{ links.title }}</h2>
+      {% if links.description %}<p>{{ links.description }}</p>{% endif %}
+    </header>
+    <div class="prj-split{{ ' with-side' if link and link.fields }}">
+      {% if reads %}{{ tab.table(reads) }}{% endif %}
+      {% if link and link.fields %}
+      <form method="post" action="{{ link.url }}" class="form hm-form prj-tools-form" aria-label="Choisir ce qu'il lit">
+        {{ plumbing(link) }}
+        <fieldset class="prj-tools-checks">
+          <legend>Choisir ce qu'il lit</legend>
+          {% for f in link.fields %}{{ field(f) }}{% endfor %}
+        </fieldset>
+        <div class="form-actions"><button class="btn">{{ link.button or link.title }}</button></div>
+      </form>
+      {% endif %}
+    </div>
+    {% if readers %}{{ tab.table(readers) }}{% endif %}
+  </section>
+  {% endif %}
 </div>

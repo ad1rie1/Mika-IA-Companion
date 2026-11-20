@@ -3,7 +3,7 @@
 Des opérations seulement, chacune journalisée sous une garde (« le projet n'a
 pas changé entre-temps ») : **créer** un projet, le **modifier** (cadre, mode,
 rythme, plage de travail, accord), choisir ses **outils**, régler son **dépôt
-distant**, le **lancer maintenant** (ou sur un objectif), le **mettre en
+distant**, poser **ce qu'il lit** (ADR 0257), le **lancer maintenant** (ou sur un objectif), le **mettre en
 pause**, le **reprendre**, l'**archiver**, le **restaurer**, lui donner une
 **consigne**, tenir ses **objectifs** et ses **décisions techniques**,
 **déposer** un fichier dans l'atelier, **pousser** ou **récupérer**. Ce qu'il
@@ -19,14 +19,17 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Mapping
+from dataclasses import replace
 from typing import Annotated, Any
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field
 
 from mika.contracts import identity as identity_c
+from mika.contracts import mcp as mcp_c
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
+from mika.faculties.projects import links
 from mika.faculties.projects.faculty import (
     AMENDED,
     APPROVE,
@@ -38,6 +41,8 @@ from mika.faculties.projects.faculty import (
     DECISIONS_KEPT,
     DEPOSITED,
     EXTRA_BUNDLES,
+    LINKS_MAX,
+    LINKS_SET,
     NUDGED,
     OBJECTIVE_ADDED,
     OBJECTIVE_CHANGED,
@@ -70,7 +75,7 @@ from mika.faculties.projects.rhythm import pick
 from mika.kernel import schedule
 from mika.kernel.clock import HOUR, MINUTE
 from mika.kernel.events import Content
-from mika.kernel.forms import UPLOAD_MAX, Knob, Upload
+from mika.kernel.forms import UPLOAD_MAX, FormField, Knob, Upload, describe
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard
 from mika.kernel.operate import ActionContext, Done, Refused
@@ -150,10 +155,13 @@ BUNDLE_WORDS = {"memory": "sa mémoire (souvenirs, croyances)", "mcp.web": "le w
 _HHMM = re.compile(r"^(\d{1,2})(?:\s*[:h]\s*(\d{0,2}))?$")
 
 
+def _capital(words: str) -> str:
+    return words[:1].upper() + words[1:]
+
+
 def _label(bundle: str) -> str:
     """Le libellé d'une case d'outil : la majuscule au début, le reste tel quel (« Ses flux RSS »)."""
-    words = BUNDLE_WORDS[bundle]
-    return words[:1].upper() + words[1:]
+    return _capital(BUNDLE_WORDS[bundle])
 
 
 def _still(project: int, wanted: tuple[str, ...]) -> Guard:
@@ -229,8 +237,36 @@ def knob_of(bundle: str) -> str:
     return "tool_" + bundle.removeprefix("mcp.")
 
 
-def _bundles(args: Any) -> tuple[str, ...]:
-    return (*BASE_BUNDLES, *(b for b in EXTRA_BUNDLES if getattr(args, knob_of(b), False)))
+#: la case d'un service branché (ADR 0254) : « mcp.meteo » → ``service_meteo`` — à part des cases des lots du code,
+#: pour qu'un serveur nommé comme l'un d'eux ne prenne pas sa case
+SERVICE_KNOB = "service_"
+
+
+def service_knob(bundle: str) -> str:
+    return SERVICE_KNOB + mcp_c.service_of(bundle)
+
+
+def service_words(bundle: str) -> str:
+    """Un service branché, en mots (« le service « meteo » »)."""
+    return f"le service « {mcp_c.service_of(bundle)} »"
+
+
+def services_here(frame: Frame) -> dict[str, str]:
+    """Les services branchés qu'on peut donner à un projet : leur lot, et ce qu'il permet (ADR 0254). Le web n'en
+    est pas un : il a sa case."""
+    known: Mapping[str, str] = getattr(frame.env, "bundles", {}) or {}
+    return {b: known[b] for b in sorted(known) if mcp_c.is_service(b)}
+
+
+def _ticked(args: Any, knob: str) -> bool:
+    """Une case cochée, que les arguments viennent d'un modèle ou d'un formulaire à champs dynamiques."""
+    return bool(args.get(knob, False) if isinstance(args, Mapping) else getattr(args, knob, False))
+
+
+def _bundles(args: Any, services: Iterable[str] = ()) -> tuple[str, ...]:
+    """Ses lots : ceux de tout projet, les cases cochées, puis les services cochés parmi ``services``."""
+    return (*BASE_BUNDLES, *(b for b in EXTRA_BUNDLES if _ticked(args, knob_of(b))),
+            *(b for b in services if _ticked(args, service_knob(b))))
 
 
 def _rhythm(args: Any, errors: dict[str, str]) -> tuple[str, int, int]:
@@ -530,21 +566,137 @@ class ToolsArgs(BaseModel):
     tool_camera: Annotated[bool, Knob(label=_label("camera"), advanced=False, order=6)] = False
 
 
+def _services_of(p: Project | None, frame: Frame) -> dict[str, str]:
+    """Les services qu'on peut cocher sur ce projet : ceux qui sont branchés, et ceux qu'il a déjà — un service
+    débranché depuis se décoche encore."""
+    offered = services_here(frame)
+    gone = {b: "" for b in (p.bundles if p is not None else ()) if mcp_c.is_service(b) and b not in offered}
+    return {**offered, **gone}
+
+
 def _tools_initial(s: ProjectsState, frame: Frame, key: str) -> dict[str, Any]:
     p = project_at(s, key)
-    return {knob_of(b): b in p.bundles for b in EXTRA_BUNDLES} if p is not None else {}
+    if p is None:
+        return {}
+    return {**{knob_of(b): b in p.bundles for b in EXTRA_BUNDLES},
+            **{service_knob(b): b in p.bundles for b in _services_of(p, frame)}}
+
+
+def _tools_fields(s: ProjectsState, frame: Frame, key: str, fixed: Mapping[str, str]) -> tuple[FormField, ...]:
+    """Les cases de « Ses outils » : celles des lots du code, puis une par service branché (ADR 0254) — la liste
+    dépend de ce que l'opérateur a branché, d'où des champs dits au moment de l'afficher."""
+    base = describe(ToolsArgs)
+    services = _services_of(project_at(s, key), frame)
+    last = max((f.order for f in base), default=0)
+    extra = tuple(
+        replace(base[0], path=service_knob(b), label=_capital(service_words(b)) + ("" if what else " (débranché)"),
+                help=what[:200], default=False, order=last + 1 + n)
+        for n, (b, what) in enumerate(services.items()))
+    return (*base, *extra)
 
 
 @PROJECTS.action("outils", title="Enregistrer ses outils", args=ToolsArgs, emits=[REFRAMED], subject="project",
-                 order=61, available=_editable, initial=_tools_initial, inline=True,
+                 order=61, available=_editable, initial=_tools_initial, fields=_tools_fields, inline=True,
                  description="Ce qu'elle a en main pendant une exécution, en plus de son atelier.")
-def _tools(s: ProjectsState, frame: Frame, args: ToolsArgs, ctx: ActionContext) -> Done:
+def _tools(s: ProjectsState, frame: Frame, args: Any, ctx: ActionContext) -> Done:
     p = _target(s, ctx)
-    bundles = _bundles(args)
+    bundles = _bundles(args, _services_of(p, frame))
     if set(bundles) == set(p.bundles):
         raise Refused("Rien n'a changé.")
     return Done(drafts=(REFRAMED.draft(project=p.id, bundles=bundles, by=ctx.by, owner=p.owner, about=p.about),),
                 message="Outils enregistrés : la prochaine exécution les aura en main.", guard=_still(p.id, LIVE))
+
+
+# ── Ce qu'il lit (ADR 0257) ───────────────────────────────────────────────
+
+
+#: pourquoi un projet ne peut pas en lire un autre, en mots (``links.refusal``)
+LINK_REFUSALS = {links.UNKNOWN: "il n'existe pas", links.ITSELF: "c'est ce projet lui-même",
+                 links.ARCHIVED: "il est archivé",
+                 links.LOOP: "il lit déjà ce projet, de près ou de loin : les liens ne font jamais de boucle",
+                 links.UNSHARED: "son propriétaire ne le laisse pas voir à celui de ce projet (ses lignes d'accès)",
+                 links.FULL: f"un projet en lit {LINKS_MAX} au plus"}
+#: la case d'un projet à lire : « lit_7 »
+LINK_KNOB = "lit_"
+
+
+class LinkArgs(BaseModel):
+    """Le gabarit d'une case de « Ce qu'il lit » : ses cases dépendent des projets qu'il peut lire, elles sont dites
+    au moment de l'afficher (``_links_fields``)."""
+
+    lit: Annotated[bool, Knob(label="Un projet", advanced=False, order=1)] = False
+
+
+def link_knob(project: int) -> str:
+    return f"{LINK_KNOB}{project}"
+
+
+def numbered(ids: Iterable[int]) -> str:
+    """Des projets à la suite, par leur numéro (« n° 3, n° 5 »)."""
+    return ", ".join(f"n° {i}" for i in ids)
+
+
+def refused_words(refused: Iterable[tuple[int, str]]) -> str:
+    """Les projets qu'un lien ne peut pas viser, chacun avec sa raison (« n° 7 (il est archivé) »)."""
+    return " ; ".join(f"n° {i} ({LINK_REFUSALS.get(why, why)})" for i, why in refused)
+
+
+def operator_person(frame: Frame, ctx: ActionContext) -> str:
+    """La personne de l'opérateur qui agit (vide : inconnue)."""
+    return (frame.get(identity_c.PERSON(ctx.by)) or "") if ctx.by else ""
+
+
+def link_options(s: ProjectsState, frame: Frame, p: Project) -> list[tuple[Project, str]]:
+    """Les projets qu'on peut cocher sous « Ce qu'il lit », et ce qu'il faut en dire : ceux qu'il lit déjà (un lien
+    suspendu se décoche encore), puis ceux qu'il peut se mettre à lire (ce que son plan demande le dit)."""
+    world = links.world_of(frame)
+    read = [(r.project, "suspendu" if r.suspended else "") for r in links.readings(s, p, world)
+            if r.project is not None]
+    return [*read, *((t, "demandé par son plan" if t.id in p.plan_reads else "")
+                     for t in links.candidates(s, p, world))]
+
+
+def _links_initial(s: ProjectsState, frame: Frame, key: str) -> dict[str, Any]:
+    p = project_at(s, key)
+    return {link_knob(t): True for t in p.reads} if p is not None else {}
+
+
+def _links_fields(s: ProjectsState, frame: Frame, key: str, fixed: Mapping[str, str],
+                  ports: Mapping[str, Any]) -> tuple[FormField, ...]:
+    """Les cases de « Ce qu'il lit » : une par projet qu'il lit ou peut lire, nommé par son numéro et son titre."""
+    p = project_at(s, key)
+    if p is None:
+        return ()
+    options = link_options(s, frame, p)
+    texts = _texts(ports, (t.title_ref for t, _ in options))
+    base = describe(LinkArgs)[0]
+    return tuple(
+        replace(base, path=link_knob(t.id), default=False, order=n,
+                label=f"n° {t.id} — {texts.get(t.title_ref) or '(titre oublié)'}" + (f" ({note})" if note else ""))
+        for n, (t, note) in enumerate(options, start=1))
+
+
+@PROJECTS.action("liens", title="Enregistrer ce qu'il lit", args=LinkArgs, emits=[LINKS_SET], subject="project",
+                 order=65, available=_editable, initial=_links_initial, fields=_links_fields, inline=True,
+                 description="Les projets qu'il lit, sans jamais y écrire. Ce qu'il en reçoit se lit dans leurs lignes "
+                             "d'accès, à chaque exécution.")
+def _links(s: ProjectsState, frame: Frame, args: Any, ctx: ActionContext) -> Done:
+    p = _target(s, ctx)
+    world = links.world_of(frame)
+    if not links.may_link(p, operator_person(frame, ctx), world):
+        owner = links.owner_of(p)
+        raise Refused(f"Seul son propriétaire ({identity_c.person_name(frame, owner) or owner}) pose ce que lit ce "
+                      "projet." if owner else "Seul quelqu'un qui s'occupe d'elle pose ce que lit un projet à elle.")
+    wanted = [t.id for t, _ in link_options(s, frame, p) if _ticked(args, link_knob(t.id))]
+    kept, refused = links.chosen(s, p, wanted, world)
+    if refused:
+        raise Refused(f"Ce projet ne peut pas lire : {refused_words(refused)}.")
+    if kept == p.reads:
+        raise Refused("Rien n'a changé.")
+    said = f"Il lit maintenant : {numbered(kept)}. Sa prochaine exécution les aura sous les yeux." if kept else \
+        "Il ne lit plus aucun projet. Ce qu'il en a déjà écrit garde leur niveau et leurs sujets."
+    return Done(drafts=(LINKS_SET.draft(project=p.id, reads=kept, by=ctx.by),), message=said,
+                guard=_still(p.id, LIVE))
 
 
 # ── Son dépôt distant ─────────────────────────────────────────────────────
@@ -728,13 +880,26 @@ def _plan_revisable(s: ProjectsState, frame: Frame, key: str) -> bool:
     return p is not None and p.status == c.ACTIVE and p.plan_state != c.TO_FRAME
 
 
-@PROJECTS.action("plan_valider", title="Valider le plan", args=NoArgs, emits=[PLAN_ANSWERED], subject="project",
-                 order=3, available=_plan_waits, inline=True,
-                 description="Son plan attend une réponse : validé, le projet le suit et elle s'y met.")
+@PROJECTS.action("plan_valider", title="Valider le plan", args=NoArgs, emits=[PLAN_ANSWERED, LINKS_SET],
+                 subject="project", order=3, available=_plan_waits, inline=True,
+                 description="Son plan attend une réponse : validé, le projet le suit et elle s'y met. Validé par le "
+                             "propriétaire du projet, ce que le plan demandait à lire se pose avec lui.")
 def _plan_approve(s: ProjectsState, frame: Frame, args: NoArgs, ctx: ActionContext) -> Done:
     p = _target(s, ctx)
-    return Done(drafts=(PLAN_ANSWERED.draft(project=p.id, verdict=APPROVE, by=ctx.by, owner=p.owner, about=p.about),),
-                message="Plan validé : elle s'y met dès que possible.", guard=_still(p.id, (c.ACTIVE,)))
+    # ce que son plan demandait à lire se pose si qui valide est le propriétaire du projet (ADR 0257)
+    linking = links.approved(s, p, operator_person(frame, ctx), links.world_of(frame))
+    drafts = [PLAN_ANSWERED.draft(project=p.id, verdict=APPROVE, by=ctx.by, owner=p.owner, about=p.about)]
+    said = "Plan validé : elle s'y met dès que possible."
+    if linking.added:
+        drafts.append(LINKS_SET.draft(project=p.id, reads=linking.reads, by=ctx.by))
+        said += f" Ce projet lit maintenant : {numbered(linking.added)}."
+    if linking.denied:
+        said += (f" Ce que son plan demandait à lire ({numbered(linking.pending)}) n'est pas lié : seul le "
+                 "propriétaire du projet pose ce lien.")
+    if linking.refused:
+        said += f" Ne peuvent pas être lus : {refused_words(linking.refused)}."
+    return Done(drafts=tuple(drafts), message=said, tone="warn" if linking.denied or linking.refused else "ok",
+                guard=_still(p.id, (c.ACTIVE,)))
 
 
 class ReviseArgs(BaseModel):

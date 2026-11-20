@@ -25,10 +25,18 @@ l'appelant, jamais le modèle).
 L'**hôte** d'un dépôt distant (GitHub, ``RepoHost``) se lit à part, pour la
 console seulement : la tête de la branche, ses derniers commits, les issues et
 pull requests ouvertes (ADR 0183). Il ne lui écrit rien.
+
+Un projet qui en lit un autre voit une **vue** de son atelier (``View``, ADR
+0260) : le dernier commit de sa branche de base, posé à part, jamais son dossier
+en cours de travail. Elle se lit sous ``liens/<n>/…`` (``VIEWS_DIR``,
+``view_place``, ``viewed``) — le même chemin pour ses outils, son prompt et les
+programmes qu'il lance, où elle est montée en lecture seule. Rien ne s'écrit
+chez le projet lu pour la poser, et rien ne s'écrit dans une vue.
 """
 
 from __future__ import annotations
 
+import posixpath
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -131,6 +139,50 @@ class Commit:
     deletions: int = 0
 
 
+#: le dossier, dans l'atelier d'un projet lecteur, où se lisent les vues des ateliers qu'il lit (ADR 0260) :
+#: ``liens/<n>/…``, ``n`` étant le numéro du projet lu
+VIEWS_DIR = "liens"
+#: pourquoi un projet lu n'a pas de vue (``View.why`` ; les clés de ``projects.links.view.none`` dans sa voix : NE PAS
+#: RENOMMER) : sa branche de base n'a aucun commit ; son dernier commit dépasse la place d'une vue ; son dépôt ne se
+#: lit pas pour l'instant
+NO_COMMIT, TOO_BIG, UNREADABLE = "no_commit", "too_big", "unreadable"
+
+
+def view_place(target: int, rel: str = "") -> str:
+    """Où se lit la vue du projet ``target``, ou un de ses fichiers : ``liens/<n>`` puis ``rel`` — le chemin que
+    disent ses outils et son prompt, et que voient les programmes qu'elle lance."""
+    rest = rel.strip().strip("/")
+    return f"{VIEWS_DIR}/{int(target)}" + (f"/{rest}" if rest and rest != "." else "")
+
+
+def viewed(path: str) -> tuple[int, str] | None:
+    """Ce chemin vise-t-il la vue d'un projet lu ? Son numéro et le reste du chemin (``"."`` : la racine de la vue) ;
+    ``None`` : un chemin de l'atelier lui-même. Le chemin est d'abord réduit (``a/../liens/3/x`` vise la vue) ; seul
+    un numéro écrit comme on le dit (``3``, pas ``03``) en désigne une."""
+    raw = str(path or "").strip()
+    if not raw or raw.startswith("/"):
+        return None
+    parts = [x for x in posixpath.normpath(raw).split("/") if x and x != "."]
+    if len(parts) < 2 or parts[0] != VIEWS_DIR or not parts[1].isdigit() or str(int(parts[1])) != parts[1]:
+        return None
+    return int(parts[1]), "/".join(parts[2:]) or "."
+
+
+@dataclass(frozen=True, slots=True)
+class View:
+    """La vue qu'un projet a de l'atelier d'un projet qu'il lit (ADR 0260) : le dernier commit de sa branche de
+    base, posé à part et en lecture seule."""
+
+    #: le projet lu
+    project: int
+    #: le commit vu (son identifiant complet) ; vide : pas de vue, et ``why`` dit pourquoi
+    sha: str = ""
+    #: l'instant de ce commit (µs depuis l'époque), tel que git l'a daté
+    at: int = 0
+    #: ``NO_COMMIT``, ``TOO_BIG`` ou ``UNREADABLE`` quand il n'y a pas de vue
+    why: str = ""
+
+
 class Workshop(Protocol):
     def exists(self, project: int) -> bool: ...
 
@@ -151,7 +203,10 @@ class Workshop(Protocol):
     async def edit(self, project: int, path: str, old: str, new: str) -> str: ...
 
     async def run(self, project: int, argv: Sequence[str], *, timeout_s: float | None = None,
-                  network: bool = False) -> RunResult: ...
+                  network: bool = False, views: Sequence[int] = ()) -> RunResult:
+        """Lance un programme dans l'atelier. ``views`` : les projets lus dont la vue est montée, en lecture seule,
+        sous ``liens/<n>/`` (ADR 0260) — jamais pour une commande réseau."""
+        ...
 
     async def commit(self, project: int, message: str, paths: Sequence[str] = ()) -> str:
         """Enregistre l'état s'il a changé (``paths`` : ces chemins seulement) ; rend l'identifiant court, ou
@@ -202,6 +257,28 @@ class Workshop(Protocol):
 
     async def pull(self, project: int, url: str, branch: str) -> RunResult:
         """Récupérer l'histoire d'un dépôt distant : en ligne droite seulement ; un atelier vierge la prend."""
+        ...
+
+    async def view(self, reader: int, target: int, *, fresh: bool = False) -> View:
+        """La vue qu'a le projet ``reader`` de l'atelier du projet ``target`` (ADR 0260) : le dernier commit de sa
+        branche de base, dans un dossier à part — rien ne s'écrit chez ``target``. ``fresh`` (au départ d'une
+        exécution) : la tête est relue, et la vue reposée si elle a bougé ; sinon la vue déjà posée sert telle
+        quelle, et n'est posée que si elle manque. Sans vue, ``View.why`` dit pourquoi."""
+        ...
+
+    async def view_tree(self, reader: int, target: int, path: str = ".") -> list[str]:
+        """Les fichiers de la vue posée (ou d'un de ses dossiers), comme ``tree``, chacun sous son chemin
+        ``liens/<n>/…`` ; ``path`` est relatif à la vue. Lève ``OutsideWorkshop`` pour un chemin qui en sort,
+        ``FileNotFoundError`` si aucune vue n'est posée."""
+        ...
+
+    async def view_read(self, reader: int, target: int, path: str) -> str:
+        """Un fichier de la vue posée, comme ``read`` ; ``path`` est relatif à la vue."""
+        ...
+
+    async def drop_views(self, reader: int, keep: Sequence[int] = ()) -> None:
+        """Supprime les vues du projet ``reader``, sauf celles des projets ``keep`` : un droit retiré, un lien
+        retiré ou suspendu, un projet archivé ne laissent rien derrière eux."""
         ...
 
 

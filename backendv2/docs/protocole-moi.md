@@ -108,13 +108,20 @@ disent en entier : la liste seule le dit), `page`, `size` (100 au plus).
             "subject": "…", "snippet": "…", "date": 1790790060000, "seen": false, "flagged": false,
             "answered": false, "attachments": 1, "html": true, "bulk": false,
             "her": {"noticed": true, "important": true, "needs_reply": true, "read": false, "how": "",
-                    "draft": "", "asked": false}}]}
+                    "draft": "", "asked": false, "alert": false, "filed": ""},
+            "triage": "read"}]}
 ```
 
 `her` (absent : `null`) dit ce qu'elle en a fait, à part de ton non-lu (`seen`, le drapeau du serveur) : remarqué,
 important, réponse attendue, lu de son côté (`read`, `how`), un brouillon qui attend (`draft`), une réponse demandée
-(`asked`). Dans une boîte qu'on ne te partage qu'en lecture, `draft` et `asked` restent vides : les réponses en
+(`asked`), et ce que les consignes de tri de la boîte en ont fait (ADR 0243) : `alert` (te prévenir), `filed` (le
+dossier où elles l'ont rangé, tant qu'il y est ; vide sinon). Dans une boîte qu'on ne te partage qu'en lecture, `draft` et `asked` restent vides : les réponses en
 préparation sont l'affaire de son propriétaire.
+
+`triage` dit ce que son tri a fait du mail (ADR 0240) : `read` (le modèle l'a lu), `guessed` (le repli seul, le modèle
+n'ayant pas répondu, ou son tri coupé : son importance est devinée, jamais une réponse attendue), `bulk` (un envoi en
+masse, jamais montré au modèle), `waiting` (relevé, pas encore trié : au relevé suivant, deux minutes après au plus) ;
+vide sinon (un mail d'un dossier qu'elle ne relève pas, d'avant sa boîte, ou remarqué avant que son journal le dise).
 
 **`GET /api/moi/mail/message?ref=`** — un mail entier : les champs d'une ligne, plus `cc`, `reply_to`,
 `in_reply_to`, `body` (le texte), `complete` (faux : la copie gardée n'en est qu'une partie — le moteur la complète
@@ -204,8 +211,18 @@ sa clé (`<compte>~<identifiant>`, l'identifiant seul pour le compte `principal`
 **`GET /api/moi/teams/accounts`** — ses comptes : `key`, `name`, `level`, `owner_name` (un compte partagé),
 `enabled`, `last_batch` (le dernier lot de son extension), `self_name` (son nom dans Teams), `extension_key`
 (`{"hint", "created_at"}`, jamais la clé ; `null` : pas de clé, ou un compte qui ne t'est que partagé),
-`drafts_waiting` (0 en lecture seule), `common` (un compte « à toi », commun à ses propriétaires) ; plus `plugged`
-et `enabled` (Teams actif).
+`drafts_waiting` (0 en lecture seule), `common` (un compte « à toi », commun à ses propriétaires) ; plus `plugged`,
+`enabled` (Teams actif) et `extension` (`{"version"}` : l'extension se télécharge ; `null` : elle n'est pas à côté
+du serveur).
+
+**`GET /api/moi/teams/extension`** — l'extension de navigateur en zip, `mika-teams-<version>.zip`, à qui est connecté
+(ADR 0246) : sa session, ou un jeton de son compte, jamais un lien public. Le serveur le fait à la demande depuis le
+dossier `frontend/Extension` du dépôt où il tourne ; il crée un dossier `mika-teams/`, à charger « non empaquetée ».
+Pas de dossier, ou un manifeste illisible : 404.
+
+**`GET /api/moi/teams/image?message=&image=`** — les octets d'une image d'un message (ADR 0258), son type tel quel
+(`image/png`, `image/jpeg`, `image/gif`, `image/webp`), à qui peut lire le compte de ce message ; gardée un jour dans
+le navigateur. Message ou image inconnus : 404.
 
 **`GET /api/moi/teams/conversations[?account=&q=&size=]`** — ses conversations, la plus récente d'abord : `key`,
 `account`, `title` (son nom : celui de Teams ; sinon, pour un tête-à-tête seulement — `kind` `dm`, ou un identifiant
@@ -218,7 +235,9 @@ et pour une réponse à laquelle on a répondu autrement).
 **`GET /api/moi/teams/thread?conversation=[&before=&size=]`** — le fil (les plus récents ; `before` : avant cet
 instant) : `key`, `account`, `title` (son nom, comme dans la liste), `kind`, `messages` (`ref`, `author`, `author_id`,
 `at`, `text`, `own` — écrit par la personne du compte : toi sur un compte à toi, son propriétaire sur un compte qu'on
-te partage —, `mentions_me`), `more`, `replies` (ses réponses dans cette conversation, voir ci-dessous ;
+te partage —, `mentions_me`, `images` : ses images, ADR 0258 — `id`, `position` (son rang parmi les « [image] » du
+texte), `mime`, `seen` (ce que Mika y a vu, vide tant qu'elle ne l'a pas regardée ; le texte le reprend déjà en
+« [image : … ] ») —), `more`, `replies` (ses réponses dans cette conversation, voir ci-dessous ;
 vides en lecture seule), `pending`, `under_way` (une réponse d'elle en chemin), `asked` (une réponse demandée, dont ses
 essais ne sont pas épuisés — elle y a renoncé, « Préremplir » la relance —, sur un compte coché de Teams actif : sinon
 elle ne s'y mettra pas) — ces deux-là toujours faux en lecture seule. `pending` : ce que tu as écrit toi-même (ADR 0189) et qui
@@ -383,7 +402,7 @@ propriétaires — jamais à quelqu'un d'autre (le partager est une délégation
 | `POST /api/moi/account/name` | `name` | son nom (celui sous lequel elle la connaît) |
 | `POST /api/moi/account/password` | `current`, `password` | son mot de passe ; toutes ses sessions se ferment, et ses jetons obtenus par connexion (ses téléphones) sont révoqués → `{"relogin": true}`. Cinq essais faux par minute au plus (comptés dès leur arrivée : des essais lancés ensemble n'en font pas plus) : 429 |
 | `GET /api/moi/mail/box?box=` | — | les réglages d'une de ses boîtes : `values` (sans secret), `secrets` (`{"password": true}` : un secret est gardé), `ready`, `can_send`, `microsoft`, `signin` (une connexion Microsoft : `state`, `code`, `url`, `until`, `error`), `rules` (la règle de son canal) |
-| `POST /api/moi/mail/box/save` | `box?`, `values` | sans `box` : une boîte nouvelle → `{"box": "<clé>"}` ; avec : la régler (les bornes de la console : un port, une fenêtre de relève). `values` : `label`, `address`, `enabled`, `auth` (`password` ou `microsoft`), `imap_host`, `imap_port`, `imap_ssl`, `user`, `password`, `folders`, `sync_all`, `since_days`, `oauth_client_id`, `oauth_tenant`, `smtp_host`, `smtp_port`, `smtp_security`, `smtp_user`, `smtp_password`, `save_sent`, `voice`, `display_name`, `sender_name`, `tone`, `instructions`, `signature` |
+| `POST /api/moi/mail/box/save` | `box?`, `values` | sans `box` : une boîte nouvelle → `{"box": "<clé>"}` ; avec : la régler (les bornes de la console : un port, une fenêtre de relève). `values` : `label`, `address`, `enabled`, `auth` (`password` ou `microsoft`), `imap_host`, `imap_port`, `imap_ssl`, `user`, `password`, `folders`, `sync_all`, `keep_all` (tout garder en local, ADR 0249), `since_days`, `oauth_client_id`, `oauth_tenant`, `smtp_host`, `smtp_port`, `smtp_security`, `smtp_user`, `smtp_password`, `save_sent`, `voice`, `display_name`, `sender_name`, `tone`, `instructions`, `signature`, `triage_instructions` (ses consignes de tri, ADR 0243) |
 | `POST /api/moi/mail/box/remove` | `box` | la retirer : plus relevée ; ce qu'elle en a appris reste |
 | `POST /api/moi/mail/box/test` | `box` | essayer sa connexion (trente fois par minute au plus, avec les relèves : § 1) |
 | `POST /api/moi/mail/box/microsoft` | `box` | connecter une boîte Microsoft (ADR 0166) : un code à entrer chez Microsoft (`GET …/mail/box` dit où en est la connexion) |
@@ -438,7 +457,7 @@ l'avait retiré. Il n'en donne aucun : seul le propriétaire partage.
 
 ## 10. Carte, lieux, itinéraires et voyages
 
-Ce que l'écran Carte montre (ADR 0194, 0195, 0196), et le fond de toutes les cartes (ADR 0193, 0229). Le navigateur ne parle qu'à ce serveur ; le serveur cherche les
+Ce que l'écran Carte montre (ADR 0194, 0195, 0196, 0259), et le fond de toutes les cartes (ADR 0193, 0229). Le navigateur ne parle qu'à ce serveur ; le serveur cherche les
 lieux dans son index local (`cartes/lieux.db` : rien ne sort), demande une adresse à la Géoplateforme de l'IGN (seul
 le texte cherché part, jamais la position de la personne) et un itinéraire au serveur Valhalla réglé (seuls ses points
 partent). Ce qui n'est pas branché répond 503, en mots. Une personne lit ce qui n'est pas prêt (« La recherche de lieux
@@ -452,7 +471,12 @@ Un **lieu** : `id` (`l<n>` : l'index, qui change à chaque reconstruction — un
 coordonnées ; `a:<n>` : une adresse de cette réponse), `name`, `kind` (la sorte OpenStreetMap, `camp_site` ;
 `address`), `kind_fr` (« Camping »), `category` (`manger`, `dormir`… ; `adresse`), `lat`, `lon`, `town`,
 `distance_m` (depuis `near`, ou jusqu'au trajet), `along_m` (le long d'un trajet : où on le croise, depuis le départ ;
-sinon `null`). Des points s'écrivent `latitude,longitude`, séparés par `;` ; une zone `ouest,sud,est,nord` (ouest
+sinon `null`). Et, seulement quand on les sait (ADR 0244 ; absents sinon) : `osm` (son objet d'OpenStreetMap, `n123`,
+`w45`, `r6`, stable d'une reconstruction à l'autre), `open_state` (`open`, `closed`, `unknown` : des horaires qu'on ne
+comprend pas) et `open_text` (« Ouvert · ferme à 22:30 », à l'instant de la réponse), `cuisine` (« Italienne,
+pizza »), `tags` (ce qu'il vérifie parmi `terrasse`, `vegetarien`, `vegan`, `accessible`, `emporter`, `livraison`) ;
+`rating` (sur 5), `reviews` (leur nombre), `price` (en euros, « €€ ») et `photo` (`p:<hash>`) quand le cache des avis les sait (Google Places, ADR 0256). Un lieu d'un regard ou d'une carte qu'elle a
+gardés n'a jamais `open_state` ni `open_text`. Des points s'écrivent `latitude,longitude`, séparés par `;` ; une zone `ouest,sud,est,nord` (ouest
 < est, sud < nord). Un paramètre hors de ses bornes est refusé (400), jamais ramené dedans : un nombre qui n'est pas
 entier (`2.9`, `Infinity`) aussi. Ce qui fait sortir une demande vers le serveur d'itinéraires (un trajet, un ordre,
 les lieux le long d'un trajet calculé, les tronçons d'un voyage, un GPX tracé) compte : au plus 20 par minute et par
@@ -464,11 +488,70 @@ propre borne, 60 par minute et par compte (la Géoplateforme en permet bien dava
 
 | Route | Ce que ça rend |
 |---|---|
-| `GET /api/moi/carte` | `{"places": {"ready", "count", "built"}, "addresses": {"ready"}, "routing": {"ready", "provider", "modes", "avoid"}, "categories": [{"id", "label"}]}` : ce qui est branché (`built` : quand l'index a été construit, en ms ; `provider` : qui calcule les trajets, en mots ; `modes` : `voiture`, `velo`, `pied` ; `avoid` : `peages`, `autoroutes`, `ferries`), et les catégories dans l'ordre de l'écran |
-| `GET /api/moi/carte/lieux?q=&cat=&near=&bbox=&limit=` | `{"places": [lieu…]}` : dans l'index, par le nom (`q`, 200 caractères), d'une catégorie (`cat`), près d'un point (`near`, les plus proches d'abord), dans une zone (`bbox`) — au moins un de `q`, `near`, `bbox` ; `limit` : 1 à 50 (20) |
+| `GET /api/moi/carte` | `{"places": {"ready", "count", "built"}, "addresses": {"ready"}, "routing": {"ready", "provider", "modes", "avoid"}, "categories": [{"id", "label"}], "tourism": {"ready", "places", "events", "synced"}, "features": [{"id", "label"}], "sorts": [{"id", "label"}], "themes": [{"id", "label"}]}` : ce qui est branché (`built` : quand l'index a été construit, en ms ; `provider` : qui calcule les trajets, en mots ; `modes` : `voiture`, `velo`, `pied` ; `avoid` : `peages`, `autoroutes`, `ferries` ; `tourism` : la base des données touristiques, `synced` sa dernière lecture en ms), les catégories dans l'ordre de l'écran, et ce qu'une liste et les événements savent filtrer : `features` (`terrasse`, `vegetarien`, `vegan`, `accessible`, `emporter`, `livraison`), `sorts` (`distance`, `rating`), `themes` (`concerts`, `spectacles`, `expositions`, `marches`, `fetes`, `sport`, `enfants`, `visites`, `conferences`), chacun avec son libellé |
+| `GET /api/moi/carte/lieux?q=&cat=&near=&bbox=&limit=&open_now=&features=&cuisine=&min_rating=&sort=&here=` | `{"places": [lieu…], "reviews"?, "here"?}` : dans l'index, par le nom (`q`, 200 caractères), d'une catégorie (`cat`), près d'un point (`near` : `latitude,longitude`, ou `ici` — ta dernière position ; les plus proches d'abord), dans une zone (`bbox`) — au moins un de `q`, `near`, `bbox` ; `limit` : 1 à 50 (20). Filtres (ADR 0244, 0259) : `open_now=1` (ouvert à l'instant, d'après ses horaires), `features=terrasse,vegan` (tous ceux-là), `cuisine` (40 caractères : « italian » ou « italienne »), `min_rating` (0 à 5, « 4.5 » : écarte les lieux sans note), `sort` (`distance` ou `rating` : les mieux notés d'abord, ceux sans note à la fin). `reviews` (avec `near` ou `bbox`) : ce que le cache des avis sait de l'endroit, `{"ready", "cells", "loaded", "oldest", "note"}` (`oldest` : la lecture la plus ancienne, en ms, 0 : aucune ; `note` : ce qu'il faut en dire, en mots) — la ligne « notes Google lues le … ». `here` (avec `near=ici`) : `{"lat", "lon", "label", "at"}`. Chercher autour de toi (`near=ici`, ou `here=1` avec ta propre position) précharge les avis de ta case (§ « Les fiches… ») |
 | `GET /api/moi/carte/adresses?q=&limit=` | `{"places": [lieu…]}` : une adresse (`q` : 3 à 200 caractères ; `limit` : 1 à 10, 5) |
 | `GET /api/moi/carte/itineraire?points=&mode=&avoid=` | `{"distance_m", "duration_s", "legs": [{"distance_m", "duration_s", "shape", "steps": [{"text", "distance_m", "duration_s"}]}], "has_toll", "has_highway", "has_ferry", "provider"}` : de 2 à 20 points ; `shape`, le tracé d'un tronçon en polyline à six décimales ; `steps`, ses consignes en français ; `avoid` : `peages,autoroutes` |
-| `GET /api/moi/carte/regards/<seq>` | ce qu'elle a cherché (`"kind": "look"`) ou montré (`"kind": "map"`) pour toi, la note d'un de ses messages (`protocole-chat.md`, § 4) : `{"kind", "title", "what", "places": [lieu…], "route", "trip", "at"}` — `what` : `lieux` ou `trajet` (un regard) ; `route` : `{"mode", "distance_m", "duration_s", "shape", "avoid"}` (le trajet résumé, et ce qu'il évitait ; une carte qui relie ses lieux sans tracé calculé : `{"mode"}` seul), sinon `null` ; `trip` : le voyage qu'elle montrait, s'il est encore là. Pour quelqu'un d'autre, oublié, ou ni un regard ni une carte : 404 |
+| `GET /api/moi/carte/regards/<seq>` | ce qu'elle a cherché (`"kind": "look"`) ou montré (`"kind": "map"`) pour toi, la note d'un de ses messages (`protocole-chat.md`, § 4) : `{"kind", "title", "what", "places": [lieu…], "route", "trip", "at"}` — `what` : `lieux`, `trajet` ou `evenements` (un regard ; pour des événements, `"events": [{"id", "name", "start", "end", "when_text", "place", "lat", "lon"}]` et `places` vide ; la fiche qu'elle a lue est un regard de `lieux` d'un seul lieu, ou d'`evenements` d'un seul) ; `route` : `{"mode", "distance_m", "duration_s", "shape", "avoid"}` (le trajet résumé, et ce qu'il évitait ; une carte qui relie ses lieux sans tracé calculé : `{"mode"}` seul), sinon `null` ; `trip` : le voyage qu'elle montrait, s'il est encore là. Pour quelqu'un d'autre, oublié, ou ni un regard ni une carte : 404 |
+
+### Les fiches, les événements et les photos
+
+Ce que les sources disent d'un lieu ou d'un événement (ADR 0244, 0245, 0256, 0259), lu par ce serveur : l'index
+d'OpenStreetMap, la base des données touristiques (un cache de DATAtourisme par cases), le cache des avis de Google
+Places. Ce qui manque ou est vieux se lit en direct quand on ouvre une fiche, si le quota le permet ; sinon on montre
+ce qu'on avait, et une `note` le dit en mots. Ce qui peut ainsi faire appeler un service compté est borné **par
+compte** (429 au-delà, en mots) : 60 fiches ou recherches d'événements par minute (ensemble), 120 photos par minute,
+10 « Actualiser » par minute ; une liste de lieux, qui ne lit que les caches, ne compte pas.
+
+| Route | Ce que ça rend |
+|---|---|
+| `GET /api/moi/carte/lieu/<id>` | la fiche d'un lieu (`l<n>`, son objet d'OpenStreetMap `n123`/`w45`/`r6`, ou un lieu des données touristiques `t:<uuid>`) : `{"place": lieu, "osm", "tourism", "reviews", "events": [événement…]}` — chaque partie `null` quand sa source ne sait rien du lieu (ci-dessous). Une autre forme d'identifiant, ou un lieu qui n'est pas là : 404 |
+| `POST /api/moi/carte/lieu/<id>/actualiser` | « Actualiser » : sa fiche relue tout de suite chez Google (la fiche avec ses avis et ses photos) et chez DATAtourisme, quel que soit son âge → `{"ok", "message", …la fiche}`. Ce qui n'a pas pu se relire (le quota, la clé, le réseau) : 503, en mots — ce qui l'a pu est gardé : relis la fiche. 10 par minute et par compte, les refus compris |
+| `GET /api/moi/carte/evenements?near=&bbox=&radius=&start=&end=&themes=&q=&free=&limit=` | `{"events": [événement…], "coverage", "here"?}` : les événements à venir près d'un point (`near` : `latitude,longitude` ou `ici` ; à moins de `radius` mètres, 500 à 100 000, 20 000) ou dans une zone (`bbox`), du `start` au `end` (`AAAA-MM-JJ`, à l'heure de Paris ; par défaut d'aujourd'hui à trente jours ; un an au plus), d'un des `themes` (`concerts,fetes`), dont le nom ou le résumé dit `q`, gratuits seulement (`free=1`) ; `limit` : 1 à 50 (30) ; au moins un de `near`, `bbox`, `q`. Les plus tôt d'abord, puis les plus proches. `coverage` : ce que la base sait de l'endroit, au même rayon, `{"ready", "cells", "loaded", "oldest", "note"}` — une zone lue en partie (« Cette zone n'est lue qu'en partie (cases lues : 3 sur 11) : la suite se lit à la prochaine recherche, ou ce soir. »), trop grande, ou un quota atteint se disent dans `note` |
+| `GET /api/moi/carte/evenement/<id>` | la fiche d'un événement (`e:<uuid>`) : `{"event": événement, "description", "dates": [{"start", "end", "text", "days"}], "more_dates", "prices", "contacts": [{"label", "value"}], "address", "town", "venue", "venue_place", "author", "updated", "url", "photos": [photo…], "merged", "attribution", "licence", "licence_url"}` — `dates` : toutes ses dates à venir, la prochaine d'abord (60 au plus, `more_dates` en plus) ; `venue` : le lieu nommé où il se tient, s'il est rapproché (`venue_place` : son identifiant, pour `…/lieu/<id>`) ; `merged` : combien de fiches de DATAtourisme il réunit. Inconnu : 404 |
+| `GET /api/moi/carte/photo/<ref>` | une photo relayée (`p:<32 chiffres hexadécimaux>`) : ses octets, `Content-Type` `image/jpeg`, `image/png`, `image/webp` ou `image/gif`, `Cache-Control: private, max-age=86400`, `X-Content-Type-Options: nosniff`. Une référence qu'aucune source ne connaît, dont les droits ont pris fin, ou qui n'a pas cette forme : 404, et rien ne part ; sa source muette : 503 ; ce qu'elle rend n'est pas une de ces images : 502. La première fois, une photo de Google coûte un appel compté : un client ne charge que celles qu'il montre |
+
+Un **événement** (dans une liste, une fiche de lieu, un regard) a tous ses champs, toujours : `id` (`e:<uuid>`),
+`name`, `start` et `end` (sa prochaine date dans la période, en ISO 8601 : une date, ou une date et une heure à
+l'heure de Paris), `when_text` (« ven. 20 nov. · 19:00–20:30 », « du mar. au dim. · 13:00–19:00 »), `place` (où, en
+mots : le lieu nommé, ou l'adresse, et la commune), `lat`, `lon`, `distance_m` (depuis `near`, sinon `null`),
+`themes`, `free` (`true`, `false`, `null` : on ne sait pas), `price` (ses tarifs en clair, ou vide), `photo` (`p:<hash>`,
+ou vide). Une **photo** : `ref`, `path` (le chemin de `…/photo/<ref>` sur ce serveur : jamais une adresse du dehors),
+`source` (`datatourisme`, `google`), `credit` et `credit_url` (son auteur et son lien), `licence`, `caption`, `width`,
+`height`.
+
+Les parties d'une fiche de lieu :
+
+- `osm` (OpenStreetMap) : `id`, `url` (sa page sur openstreetmap.org), `address`, `phone`, `website`, `email`, `hours`
+  (le texte d'`opening_hours`), `hours_text` (la semaine en clair), `facts` (`[{"label", "value"}]` : « Cuisine »,
+  « Horaires », « Téléphone », « Terrasse »…, seulement ce qui est renseigné), `wikidata`, `wikipedia`, `extract` (la
+  date de l'extrait), `attribution` (« © les contributeurs d'OpenStreetMap ») et `licence_url`. Ouvert ou fermé à
+  l'instant : `place.open_state` et `place.open_text`.
+- `tourism` (DATAtourisme, l'office de tourisme) : `id` (`t:<uuid>`), `description` (en paragraphes), `labels`,
+  `prices`, `contacts` (`[{"label", "value"}]`), `author` (qui l'a écrite), `updated` (sa mise à jour, `AAAA-MM-JJ`),
+  `url`, `photos`, `attribution` (« DATAtourisme · Hello Lille, mis à jour le 5 décembre 2023 »), `licence` (« Licence
+  Ouverte 2.0 ») et `licence_url`.
+- `reviews` (Google Places) : `source` (`google`), `source_label` (« Google Maps »), `found` (faux : Google n'a rien de
+  ce lieu, ou on n'a pas pu chercher — `note` dit lequel), `id`, `rating`, `count`, `price` (« €€ »), `price_range`
+  (« 20–40 € »), `summary` (le résumé de Google), `facts` (ce que Google dit et qu'OpenStreetMap ne dit pas :
+  « Terrasse » « oui (selon Google) »), `reviews` (cinq au plus : `rating`, `text` en paragraphes, `author`,
+  `author_url`, `at` en ms, `relative` « il y a un mois », `language`), `photos`, `url` (sa page chez Google Maps),
+  `cached` (quand ce serveur l'a lue, en ms), `note`.
+- `events` : les événements à venir qui s'y tiennent ou tout près (trente jours, six au plus).
+
+**Ce qu'un client montre avec**, toujours : « Google Maps » et le lien `reviews.url` avec la note et les avis ; l'auteur
+(`author`, lien `author_url`) de chaque avis et le crédit (`credit`, lien `credit_url`) de chaque photo, à côté
+d'elle ; l'`attribution` de l'office de tourisme (son auteur et sa date) avec ce qu'il en dit, et celle d'une fiche
+d'événement ; « © les contributeurs d'OpenStreetMap » sous ce qui vient d'OpenStreetMap ; la `note` d'une partie quand
+elle n'est pas vide.
+
+**« Ici »** (`near=ici`) : ta dernière position, celle que ton téléphone a donnée (ADR 0119 : l'application ouverte, si
+tu l'as permis), la tienne seule — jamais celle d'une autre personne. Aucune (jamais donnée, effacée, oubliée) : 409,
+`fields.near`. **Le préchargement** (ADR 0250, 0256) : quand ton téléphone donne sa position, et quand tu cherches
+autour de toi (`near=ici`, ou `here=1` avec ta propre position), les avis de ta case et des huit d'à côté se mettent
+en file, lus en fond sur ce qui reste des quotas — seules les cases partent vers Google, jamais la position ; la
+réponse n'attend pas. Au plus dix fois par compte et par dix minutes (au-delà, rien, sans le dire). Un point de la carte
+qu'on regarde n'est pas toi : il ne précharge rien.
 
 **Le fond de carte** (ADR 0193, 0229) — celui de toutes les cartes (Téléphone › Position, l'écran Carte, les miniatures
 du chat), servi par ce serveur seul, à qui est connecté (il n'est à personne) ; d'où viennent ses tuiles se règle dans

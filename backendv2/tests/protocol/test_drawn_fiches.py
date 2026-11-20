@@ -357,14 +357,20 @@ def test_a_mail_reads_with_what_she_knows_beside_it(world):  # noqa: F811
 def test_what_she_knows_of_a_mail_says_each_fact_once_and_its_shares_in_percent(world):  # noqa: F811
     """Un mail que son tri a remarqué, important, qui attend une réponse : l'en-tête de la fiche dit son état et la
     réponse attendue, la carte de côté et « Ce qu'elle en sait » ne les redisent pas ; sa pertinence et ce que son
-    attention en a gardé, des parts, se disent en % (audit du 2026-11-05, C4-04)."""
+    attention en a gardé, des parts, se disent en % (audit du 2026-11-05, C4-04) ; qui l'a jugé, son tri ou le repli,
+    une ligne (ADR 0240) — et, avant, qu'il attend son tri."""
     client, live, box = with_mail(world)
+    base = "/admin/fiche/mail/" + quote("pro:<projet@example.test>", safe="")
+    box.offered.add("pro:<projet@example.test>")  # relevé, pas encore accusé
+    assert "Son tri ne l'a pas encore lu" in drawn(client, base + "?onglet=remarque")
+    box.offered.clear()
     append(client, live, [email_c.NOTICED.draft(
         source="email", kind=email_c.MAIL, summary=Content.of("Léa attend ton retour sur les maquettes."),
         pertinence=0.9, bundle="email", mail="pro:<projet@example.test>", sender="Léa Martin <lea@example.test>",
-        address="lea@example.test", importance=0.85, needs_reply=True, account="pro", folder="INBOX")], "email")
-    base = "/admin/fiche/mail/" + quote("pro:<projet@example.test>", safe="")
+        address="lea@example.test", importance=0.85, needs_reply=True, account="pro", folder="INBOX",
+        triage=email_c.TRIAGE_MODEL)], "email")
     page, known = drawn(client, base), drawn(client, base + "?onglet=remarque")
+    assert "lu par le modèle" in known
     for shown in (page, known):
         assert shown.count("important, non lu") == 1, shown  # l'en-tête, pas une ligne « état »
         assert shown.casefold().count("réponse attendue") == 1  # l'en-tête, ni une ligne ni une tuile

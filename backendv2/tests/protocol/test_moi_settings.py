@@ -62,6 +62,11 @@ def test_a_box_she_plugs_is_hers_alone_and_keeps_its_secrets(world):  # noqa: F8
     assert post(client, "/mail/box/save", {"box": key, "values": {"label": "Rando", "password": ""}}).status_code == 200
     again = boxes(client, live)[key]
     assert again.label == "Rando" and again.password == "secret-imap" and again.owner == "personne:" + lea
+    # ses consignes de tri se règlent comme le reste (ADR 0243)
+    rules = "Range les publicités dans PUB."
+    assert post(client, "/mail/box/save", {"box": key, "values": {"triage_instructions": rules}}).status_code == 200
+    assert boxes(client, live)[key].triage_instructions == rules
+    assert client.get(API + f"/mail/box?box={key}").json()["values"]["triage_instructions"] == rules
     assert post(client, "/mail/box/save", {"box": key, "values": {"owner": ""}}).status_code == 400
     bad = post(client, "/mail/box/save", {"values": {"label": "x", "imap_port": "beaucoup"}})
     assert bad.status_code == 400 and bad.json()["fields"]

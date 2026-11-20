@@ -71,6 +71,9 @@
     return mark ? mark.act : "";
   }
 
+  /** Le chemin d'un envoi, tel que le journal le dit (la page rend `service` ou `zone de saisie`). */
+  const VIA = { "service": "par le service de chat", "zone de saisie": "par la zone de saisie" };
+
   function note(box, e, result, reason, text, now) {
     box.log.unshift({ at: now, id: e.id, mode: e.mode, title: e.title || "", result: result, reason: reason || "",
       text: excerpt(text) });
@@ -276,7 +279,7 @@
       box.marks[id] = { act: "sent", at: now };
       if (e) {
         // le texte est celui de la file : inutile de le redire
-        e.ack = { result: "sent", message_id: str(outcome.message_id, 200) };
+        e.ack = { result: "sent", message_id: str(outcome.message_id, 200), via: str(outcome.via, 20) };
         e.lastReason = "";
       }
     } else if (result === "failed") {
@@ -339,7 +342,7 @@
     if (status === 200) {
       if (e) {
         const ack = e.ack || { result: result };
-        note(box, e, result, ack.reason || "", ack.text || e.text, now);
+        note(box, e, result, ack.reason || VIA[ack.via] || "", ack.text || e.text, now);
         e.ack = null;
         e.acked = result;
         e.refusals = 0;

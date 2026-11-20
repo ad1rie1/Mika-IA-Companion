@@ -19,7 +19,7 @@ from pmtiles.writer import Writer
 from mika.adapters.maps import places as pl
 from mika.adapters.maps.config import PlacesConfig
 from mika.adapters.maps.mvt import read_points
-from mika.ports.maps import MapsUnavailable
+from mika.ports.maps import MapsUnavailable, extras
 
 Z = 15
 EXTENT = 4096
@@ -344,6 +344,25 @@ def test_the_console_says_what_the_index_holds(index):
     assert facts["Construit"].startswith("le ") and "Zone (ouest, sud → est, nord)" in facts
     summary = index.summary()
     assert summary["ready"] is True and summary["count"] == 10 and str(summary["built"]).endswith("Z")
+
+
+async def test_an_index_without_details_is_still_searched_until_it_is_rebuilt(index):
+    """Un index de schéma 1 (tiré des tuiles, celui d'avant l'ADR 0244) se lit jusqu'à sa reconstruction : on y
+    cherche comme avant, ses lieux n'ont rien en plus ; un filtre n'y trouve rien (il ne sait rien de ce qu'on
+    filtre), une fiche n'y a que sa ligne, et la console dit qu'il est sans détails."""
+    assert index.info().schema == 1 and not index.detailed()
+    got = await index.search("camping")
+    assert [h.name for h in got] == ["Camping de l'Horizon"] and extras(got[0]) == {}
+    assert await index.search("", near=SEVRIER, open_now=True) == []
+    assert await index.search("camping", features=frozenset({"terrasse"})) == []
+    assert await index.around(*SEVRIER, 5_000, cuisine="italian") == []
+    assert await index.around(*SEVRIER, 600) != []
+    detail = await index.place(got[0].id)
+    assert detail is not None and detail.hit == got[0] and detail.osm is None
+    assert await index.place("n123") is None and await index.place("l99999") is None
+    assert dict(index.describe())["Détails"].startswith("aucun")
+    with pytest.raises(ValueError, match="filtre inconnu"):
+        await index.search("", near=SEVRIER, features=frozenset({"piscine"}))
 
 
 def test_every_category_kind_has_its_french_name():

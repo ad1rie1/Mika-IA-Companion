@@ -75,8 +75,9 @@ class Shell(
     /** Dire le sort d'un geste, sans attendre qu'il soit lu. */
     val toast: (String) -> Unit = {},
     /**
-     * Dire le sort d'un geste fini ailleurs, où qu'on soit, avec de quoi y aller ([action], « Ouvrir ») : [onAction]
-     * seulement si on le touche — rien n'emmène tout seul.
+     * Dire le sort d'un geste fini ailleurs, où qu'on soit, avec de quoi y aller ([action], « Ouvrir ») ou le défaire
+     * (« Annuler », une ligne de Mail glissée à la corbeille) : [onAction] seulement si on le touche — rien ne se fait
+     * tout seul.
      */
     val offer: (text: String, action: String, onAction: () -> Unit) -> Unit = { text, _, _ -> toast(text) },
 )

@@ -4,11 +4,15 @@ accord ; ses décisions sur une réponse de Mika passent par les actions de la c
 
 from __future__ import annotations
 
+import io
 import json
+import re
 import time
+import zipfile
 
 from mika.adapters.teams import TeamsAccount, TeamsConfig
 from mika.app.me import form
+from mika.app.me.teams_extension import EXTENSION_DIR
 from mika.contracts import runtime as rt
 from mika.contracts import teams as teams_c
 from mika.kernel.events import Content
@@ -60,6 +64,31 @@ def test_her_accounts_conversations_and_threads(world):  # noqa: F811
     assert thread["messages"][-1]["author"] == "Alice" and not thread["messages"][-1]["own"]
     assert client.get(API + "/teams/thread?conversation=19:ailleurs").status_code == 404
     assert client.get(API).json()["counts"]["teams"] == 0
+
+
+def test_the_extension_is_downloaded_behind_the_login_as_the_server_has_it(world):  # noqa: F811
+    client, _, _ = world
+    assert client.get(API + "/teams/extension").status_code == 401
+    bootstrap(client)
+    manifest = json.loads((EXTENSION_DIR / "manifest.json").read_text(encoding="utf-8"))
+    version = manifest["version"]
+    assert client.get(API + "/teams/accounts").json()["extension"] == {"version": version}
+    got = client.get(API + "/teams/extension")
+    assert got.status_code == 200 and got.headers["content-type"] == "application/zip"
+    assert f'filename="mika-teams-{version}.zip"' in got.headers["content-disposition"]
+    assert got.headers["cache-control"] == "no-store"
+    shipped = set(zipfile.ZipFile(io.BytesIO(got.content)).namelist())
+    assert all(n.startswith("mika-teams/") for n in shipped)
+    assert not any(n.startswith("mika-teams/tests/") for n in shipped)
+    assert "mika-teams/README.md" not in shipped and "mika-teams/package.json" not in shipped
+    # tout ce que le manifeste et son service chargent est dans le zip : l'extension décompressée se charge telle quelle
+    needed = {manifest["background"]["service_worker"], manifest["action"]["default_popup"],
+              manifest["options_ui"]["page"], *manifest["icons"].values(), *manifest["action"]["default_icon"].values(),
+              *(js for script in manifest["content_scripts"] for js in script["js"])}
+    background = (EXTENSION_DIR / manifest["background"]["service_worker"]).read_text(encoding="utf-8")
+    for call in re.findall(r"importScripts\(([^)]*)\)", background):
+        needed |= set(re.findall(r'"([^"]+)"', call))
+    assert {f"mika-teams/{path}" for path in needed} <= shipped
 
 
 def test_the_list_of_conversations_reads_their_last_messages_in_one_go(world, monkeypatch):  # noqa: F811

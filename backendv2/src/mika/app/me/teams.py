@@ -12,12 +12,15 @@ Une conversation s'appelle comme dans Teams, sinon (un tête-à-tête) comme l'a
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
+from starlette.responses import Response
 from starlette.routing import Route
 
 from mika.app.me.api import Call, Denied, MeApiBase, done, form, missing
 from mika.app.me.common import allows, held_by, millis, only_owner, opened, snippet
+from mika.app.me.teams_extension import download, version_of
 from mika.plugins import teams as teams_p
 from mika.plugins.teams import (
     UNDER_WAY,
@@ -39,6 +42,7 @@ from mika.ports.teams import (
     UNUSED,
     AccountInfo,
     Message,
+    MessageImage,
     conversation_key,
     split_conversation_key,
 )
@@ -105,9 +109,11 @@ def state(call: Call) -> TeamsState:
 # ── ce qui se montre ──
 
 
-def message_json(m: Message) -> dict[str, Any]:
+def message_json(m: Message, images: Sequence[MessageImage] = ()) -> dict[str, Any]:
+    """Un message ; ``images`` : les siennes (ADR 0258), sans leurs octets — ``GET …/teams/image`` les sert."""
     return {"ref": m.ref, "author": m.author, "author_id": m.author_id, "at": millis(m.at), "text": m.text,
-            "own": m.own, "mentions_me": m.mentions_me}
+            "own": m.own, "mentions_me": m.mentions_me,
+            "images": [{"id": i.image, "position": i.position, "mime": i.mime, "seen": i.seen} for i in images]}
 
 
 def _notes(call: Call, seens: list[DraftSeen]) -> dict[str, str]:
@@ -157,7 +163,10 @@ def _account_json(call: Call, a: AccountInfo, level: str) -> dict[str, Any]:
 
 async def list_accounts(call: Call) -> dict[str, Any]:
     p = teams_p.params_of(call.frame)
+    version = version_of(call.api.extension)
     return {"plugged": call.port("teams") is not None, "enabled": p.enabled,
+            # l'extension à télécharger (ADR 0246), si elle est à côté du serveur
+            "extension": {"version": version} if version is not None else None,
             "accounts": [_account_json(call, a, level) for a, level in accounts(call).values()]}
 
 
@@ -226,10 +235,13 @@ async def thread(call: Call) -> dict[str, Any]:
         asked_still(s, ref, p) for ref, a in s.asked.items() if a.account == account and a.conversation == conversation)
     conv = port.conversation(account, conversation)
     notes = _notes(call, replies)
+    images: dict[str, list[MessageImage]] = {}
+    for i in port.images_of([m.ref for m in found]):
+        images.setdefault(i.ref, []).append(i)
     # son nom, comme dans la liste : celui de Teams, sinon (un tête-à-tête) l'autre personne
     return {"key": conversation_key(account, conversation), "account": account,
             "title": port.title(account, conversation), "kind": conv.kind,
-            "messages": [message_json(m) for m in found], "more": more,
+            "messages": [message_json(m, images.get(m.ref, ())) for m in found], "more": more,
             "replies": [_reply_json(call, d, notes) for d in replies], "pending": pending[::-1],
             "under_way": prepares and under_way(s, account, conversation),
             "asked": asked}
@@ -322,9 +334,23 @@ def count(call: Call) -> int:
                if d.state == WAITING and not d.answered and mine.get(d.account, (None, ""))[1] == OWNED)
 
 
+async def image(call: Call) -> Response:
+    """``GET …/teams/image?message=&image=`` : les octets d'une image d'un message (ADR 0258), à qui peut lire son
+    compte ; inconnue : 404. Gardée dans le navigateur un jour (elle ne change pas)."""
+    m = _message(call, call.arg("message", limit=40))
+    found = _port(call).image_bytes(m.ref, call.arg("image", limit=200))
+    if found is None:
+        raise missing()
+    mime, data = found
+    return Response(data, media_type=mime, headers={"Cache-Control": "private, max-age=86400",
+                                                    "X-Content-Type-Options": "nosniff"})
+
+
 def routes(api: MeApiBase) -> list[Route]:
     r = api.route
-    return [r("/teams/accounts", list_accounts), r("/teams/conversations", conversations),
+    return [r("/teams/accounts", list_accounts), r("/teams/extension", download, raw=True),
+            r("/teams/image", image, raw=True),
+            r("/teams/conversations", conversations),
             r("/teams/thread", thread), r("/teams/replies", replies),
             r("/teams/send", send, write=True), r("/teams/prefill", prefill, write=True),
             r("/teams/reply/send", reply_send, write=True), r("/teams/reply/edit", reply_edit, write=True),

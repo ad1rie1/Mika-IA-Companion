@@ -4,7 +4,7 @@ from html.parser import HTMLParser
 
 import pytest
 
-from mika.inspector.document import readable_html, readable_text
+from mika.inspector.document import readable_html, readable_markdown, readable_text
 from mika.kernel.inspect import Note, Prose
 from mika.plugins.forge.envelope import decode, encode
 
@@ -130,3 +130,28 @@ def test_mailto_links_stay_clickable_and_open_the_mail_client():
                                '<a href="mailto:">Vide</a>'))
     assert result == ('<a href="mailto:contact@example.test?subject=D%C3%A9mo" rel="noopener noreferrer nofollow">'
                       'Demander une présentation</a><span>Vide</span>')
+
+
+def test_her_pro_answers_read_as_the_chat_renders_them():
+    """Une réponse du mode pro (ADR 0241) : son Markdown rendu — titres, gras, listes, tableaux en grille, code —, son
+    HTML brut resté du texte, un lien autre que http(s) laissé inerte, une image réduite à son texte."""
+    result = str(readable_markdown(
+        "Voilà **le travail** <script>run()</script>\n## Les devis\n\n| client | montant |\n|---|---|\n"
+        "| Paul | 1 200 € |\n\n- un\n- deux\n\n```py\nx = 1 < 2\n```\n"
+        "[ici](javascript:run()) [là](https://example.test) ![plan](https://example.test/p.png)", pro=True))
+    assert "<strong>le travail</strong> &lt;script&gt;run()&lt;/script&gt;" in result
+    assert "<h3>Les devis</h3>" in result and "<ul>" in result and "<pre><code>x = 1 &lt; 2" in result
+    assert 'class="document-table document-grid document-cols-2"' in result and ">Paul</div>" in result
+    assert '<a href="https://example.test" target="_blank" rel="noopener noreferrer nofollow">là</a>' in result
+    assert "javascript:" not in [a.get("href") for _t, a in Tags(result).tags] and "[ici]" in result
+    assert '<span class="document-image">plan</span>' in result
+    assert {t for t, _a in Tags(result).tags} <= {"p", "br", "strong", "h3", "div", "ul", "li", "pre", "code", "a",
+                                                  "span"}
+
+
+def test_her_ordinary_answers_keep_only_bold_and_code_as_in_the_chat():
+    """Une réponse ordinaire : gras et code, comme le chat ; un « # » ou un « - » en tête de ligne reste un caractère."""
+    result = str(readable_markdown("salut **toi** `x`\n## pas un titre\n- pas une liste\n\n```\nbloc\n```",
+                                   pro=False))
+    assert "<strong>toi</strong> <code>x</code><br>" in result and "## pas un titre<br>" in result
+    assert "- pas une liste" in result and "<pre><code>bloc" in result and "<h3>" not in result and "<ul>" not in result

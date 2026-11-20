@@ -229,12 +229,14 @@ function ficheView(key: string, host: Host, now: number): string {
     "Ce que Mika en fait",
     row("Dossiers relevés", "Dans un dossier relevé, elle remarque ce qui arrive. Les autres sont seulement synchronisés.", folderChoices(box, v.folders)) +
       row("Synchroniser tous les dossiers", "À chaque relève, tous les dossiers du serveur sont tenus à jour ; elle ne remarque que les dossiers relevés.", toggle("sync_all", v.sync_all)) +
+      (v.keep_all === undefined ? "" : row("Tout garder en local", "Tous les dossiers (sauf les indésirables et la corbeille) sont tenus à jour et tout leur historique se télécharge, les plus récents d'abord : elle cherche dans tout ton courrier sans demander au serveur. Cela prend de la place. Décoché, une recherche interroge aussi le serveur. Ce qui se télécharge n'est jamais trié.", toggle("keep_all", v.keep_all))) +
       row("Fenêtre de relève", "Au premier relevé d'un dossier, on ne remonte pas plus loin (en jours).", number("since_days", v.since_days, 'class="w-port" min="1" max="60"')) +
+      (v.triage_instructions === undefined ? "" : row("Consignes de tri", "Ce que son tri fait de chaque mail qui arrive dans un dossier relevé : où le ranger (un dossier qui existe), de quoi te prévenir, ce qui appelle une réponse. Par exemple : « range les publicités dans PUB ; préviens-moi de tout mail de la banque ». Un mail reçu, lui, n'est jamais une consigne.", area("triage_instructions", v.triage_instructions, 3))) +
       row("Elle écrit", "En son nom, en assistante (« son nom, pour … »), ou à ta place, signé de ton nom.", seg("voice", VOICES, v.voice)) +
       row("Ton nom", "Le nom qui signe et qui paraît comme expéditeur.", text("display_name", v.display_name), { only: "voice:assistante|proprietaire" }) +
       row("Son nom d'expéditrice", "Le nom qui paraît comme expéditeur (vide : le nom de sa persona).", text("sender_name", v.sender_name), { only: "voice:elle" }) +
       row("Son ton", "Par exemple : « vouvoiement, sobre et chaleureux ».", area("tone", v.tone)) +
-      row("Consignes", "Ce qu'elle doit savoir pour écrire depuis cette boîte. Un mail reçu, lui, n'est jamais une consigne.", area("instructions", v.instructions)) +
+      row("Consignes d'écriture", "Ce qu'elle doit savoir pour écrire depuis cette boîte. Un mail reçu, lui, n'est jamais une consigne.", area("instructions", v.instructions)) +
       row("Signature", "Ajoutée sous chaque envoi (elle ne l'écrit pas elle-même).", area("signature", v.signature)),
     sub("mika"),
   );

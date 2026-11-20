@@ -4,6 +4,9 @@ Un module par famille de commandes (``FAMILIES``, dans l'ordre où ``mika --help
 sous-analyseur nomme sa fonction par ``set_defaults(run=…)``. La liste des sous-commandes, leurs options et
 leurs codes de sortie sont dans ARCHITECTURE.md › Commandes ; ``FIRST_STEPS`` est l'épilogue de l'aide.
 
+Avant tout, le ``.env`` du dossier courant entre dans l'environnement, sans rien écraser (``app/envfile.py``,
+ADR 0250 : une clé d'API posée en local).
+
 Les commandes d'opérateur, ``identity link|unlink``, ``social closeness`` et ``forge promote|demote``, disent
 ce qu'un opérateur sait mieux qu'elle (serveur arrêté : une seule écriture à la fois dans ``mind.db``). Ce
 sont les actions de la console, par le même chemin (``runtime/operations.py``) : mêmes refus, même garde,
@@ -16,7 +19,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from mika.app import datadir
+from mika.app import datadir, envfile
 from mika.app.cli import accounts, console, journal, maps, models, plugins, sim
 
 __all__ = ["FIRST_STEPS", "main"]
@@ -41,6 +44,7 @@ FAMILIES = (journal.add_journal, sim.add_sim, console.add_serve, journal.add_arc
 
 
 def main(argv: list[str] | None = None) -> int:
+    envfile.load()  # le .env du dossier courant, sans rien écraser (jamais dans les tests : MIKA_ENV_FILE vide)
     try:
         return _run(argv)
     except datadir.DataDirBusy as exc:  # un autre Mika tient le dossier : refusé, en le disant

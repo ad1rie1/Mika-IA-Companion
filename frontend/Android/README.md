@@ -121,17 +121,26 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
   les nommant, ADR 0200), chaque boîte, les dossiers de la boîte choisie et leurs non-lus, « Ses brouillons », « Régler
   les boîtes ». Des puces filtrent (Réponse attendue et son compte, Non lus, Suivis, Où Mika est passée), la loupe
   cherche. Les lignes sont groupées par jour ; ton non-lu (le point indigo) reste à part de ce qu'elle en a fait (en
-  rose : réponse attendue, son brouillon, « lu par Mika »). La page suivante se lit en fin de liste : jusqu'à cent
+  rose : réponse attendue, son brouillon, « lu par Mika ») et, en gris discret, d'où en est son tri (le champ
+  `triage` : « lu par son tri », « en attente de son tri » jusqu'au relevé suivant, « tri deviné » quand le modèle
+  n'a pas pu le lire ; rien pour un envoi en masse). La page suivante se lit en fin de liste : jusqu'à cent
   lignes, la liste se relit d'un coup depuis le début, une page de plus, et au-delà la page qui contient la première
   ligne pas encore lue — un mail rangé entre-temps ne fait rien sauter, et une page qui arrive ne défait pas un
   rangement fait pendant sa lecture. Tirer relit, et la liste se relit chaque minute. Un appui long sélectionne (archiver, lu ou non lu, suivre, corbeille, déplacer) ;
+  glisser une ligne vers la gauche ou vers la droite la met à la corbeille (le même geste `trash`, là où la sélection
+  la rangerait : ni dans une boîte qu'on te partage sans t'en servir, ni dans la Corbeille elle-même, ni sur « Envoyés »), elle
+  reste écartée le temps que le serveur réponde, revient s'il refuse, et « Annuler » la remet dans son dossier (`move`) ;
   « Relever maintenant » est dans le menu.
   - **La liseuse** montre l'objet et ses marques, l'expéditeur et les destinataires, « Ce qu'elle en sait » (son
-    résumé), le texte du mail (citations en retrait, liens), ses pièces (Enregistrer dans Téléchargements/Mika, ou
+    résumé ; son titre dit où en est son tri à la place de « remarqué », et le cadre paraît aussi pour un mail que son
+    tri n'a pas encore lu, ou dont il n'a pu que deviner l'importance ; il dit aussi ce que tes consignes de tri en ont
+    fait, `her.alert` et `her.filed` : te prévenir, le ranger dans un dossier, ADR 0243), le texte du mail (citations en retrait, liens), ses pièces (Enregistrer dans Téléchargements/Mika, ou
     Ouvrir avec…) et le lien vers son brouillon. Le mail devient lu à l'ouverture selon `read_on_open`. En haut :
     archiver, corbeille, non lu, et dans ⋮ suivre, déplacer, répondre à tous. En bas : Répondre, Transférer et
-    « Préremplir avec Mika » (sa réponse demandée se guette sur place). Le HTML d'un mail (`/mail/frame`) n'est pas
-    encore montré : son texte l'est.
+    « Préremplir avec Mika » (sa réponse demandée se guette sur place). Un mail HTML se montre dans sa mise en page
+    (`/mail/frame`, ADR 0242) : une WebView sans script ni réseau, à la hauteur de son contenu, qui ne navigue jamais
+    (un lien touché s'ouvre dehors). Ses images distantes restent masquées sous un bandeau (cette fois, ou toujours pour
+    cet expéditeur si tu es propriétaire) ; un cadre qui ne se charge pas rend son texte.
   - **Ses brouillons** se rangent en trois : à décider, partis, refusés. Un brouillon montre exactement ce qui partira,
     pourquoi elle l'a écrit, sa voix, le passage « [À COMPLÉTER » surligné qui bloque l'envoi, et le mail d'origine.
     Les gestes : Refuser (une note facultative), Lui demander une autre version, Retoucher, Envoyer (tel qu'il a été lu, par
@@ -341,7 +350,8 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
     tombé —, et l'écran de connexion dit pourquoi).
   - **Ce que Mika touche pour toi** — **Boîtes mail** : les tiennes (état, relève, non-lus, ses brouillons, l'erreur),
     celles qu'on te partage (leur niveau, leur propriétaire) ; une boîte : la boîte, la connexion de lecture (mot de passe
-    ou compte Microsoft), l'envoi, comment elle y écrit, « Comment part ce que Mika y prépare » (pour chaque ligne de la
+    ou compte Microsoft), l'envoi, ce qu'elle en relève (ses dossiers, « Tout garder en local » (ADR 0249), la fenêtre de
+    relève, ses « Consignes de tri », ADR 0243), comment elle y écrit, « Comment part ce que Mika y prépare » (pour chaque ligne de la
     règle de son canal et pour le défaut, préparer d'elle-même et comment ça part, ADR 0207 ; qui écrit et l'ordre des
     lignes restent à la console), avec qui elle est partagée, Tester, Relever maintenant, Retirer. Un secret laissé vide
     reste gardé ; une connexion qui change le redemande, dit sous son champ avant l'envoi. Une boîte Microsoft montre
@@ -432,6 +442,9 @@ Ces signaux viennent de `ui/chat/ConversationCues.kt` (`ConversationCues`, `Spee
   ```bash
   python3 frontend/Android/tools/vrm_mobile.py   # → app/src/main/assets/avatar3d/mika.glb (ignoré par git)
   ```
+
+  `vrm_mobile.py` ne lit qu'un VRM 0.x (`default.vrm`). Le modèle libre du dépôt (`mika-libre.vrm`, ADR 0252) est en
+  1.0 : il n'arrive pas encore sur le téléphone.
 
 - **Les animations** sont les mouvements de l'atelier (`frontend/Unity/ArtSource/atelier/motions`, ceux qu'Unity
   importe) et le manifeste du client web (`frontend/Web/public/animations/manifest.json`). Ils sont copiés dans
@@ -690,8 +703,8 @@ pastille hors du chat (`ChatCueTest`), la fermeture d'une session qui va au bout
 gardé pour la même écriture (`UnsentMailTest`), les « où aller après » d'une page de Paramètres (`PageMovesTest`), les
 écrans de Mail contre une fausse API qui répond quand le test le veut (`MailComposeModelTest` : une écriture quittée qui
 finit de charger, « Préremplir » tardif, sa réponse repartie de son brouillon, l'envoi quitté, son refus en toast ;
-`MailReaderModelTest` : un geste tardif sur la liseuse ou la page d'un brouillon ; `MailListModelTest` : la page
-suivante après un rangement ; `VisitOrdersTest` : un ordre ne suit que l'écran de sa visite), les pages de Paramètres
+`MailReaderModelTest` : un geste tardif sur la liseuse ou la page d'un brouillon ; `MailReaderFrameTest` : la mise en page d'un mail HTML, ses images, un cadre tardif ou refusé ; `MailFramePageTest` : sa politique posée en tête, les liens qui s'ouvrent dehors ; `MailListModelTest` : la page
+suivante après un rangement, une ligne glissée à la corbeille, son refus, « Annuler » ; `VisitOrdersTest` : un ordre ne suit que l'écran de sa visite), les pages de Paramètres
 contre une fausse API (`FakeSettingsApi` ; `BoxModelTest` : une boîte enregistrée puis quittée pour une autre, une
 lecture tardive, une règle changée ailleurs ; `TeamsAccountModelTest` : la clé neuve liée à son compte ;
 `ServiceModelTest` : ses outils pour lui, ses en-têtes redemandés quand l'adresse mène ailleurs ; `SharesModelTest` :

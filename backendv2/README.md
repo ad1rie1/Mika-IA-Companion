@@ -10,7 +10,7 @@ l'installation en service (systemd, MariaDB, sauvegardes, mandataire TLS) dans
 ```bash
 cd backendv2
 python3 -m venv .venv
-.venv/bin/pip install -e ".[llm,memory]"     # + documents (lire les PDF), dev (les tests), mariadb
+.venv/bin/pip install -e ".[llm,memory]"     # + documents (lire les PDF), dev (les tests), mariadb, cartes (OSM)
 ```
 
 Seule l'installation éditable (`-e`) est prise en charge : sa persona et sa voix
@@ -120,6 +120,10 @@ Connecte-toi avec le compte créé à l'étape 3, et parle-lui.
   « Pourquoi a-t-elle dit ça ? » s'ouvre depuis chacune de ses paroles. La carte
   de la console est dans `docs/console-carte.md`.
 - **Tout se règle aussi en ligne de commande** : `python -m mika --help`.
+- **Des variables à toi, sans les retaper** : la commande lit le `.env` du dossier
+  où tu la lances (`NOM=valeur` par ligne, les commentaires en `#`), sans jamais
+  écraser une variable déjà posée — par exemple `MIKA_GOOGLE_PLACES_API_KEY`, la
+  clé des avis de la carte (ADR 0256 ; droits 0600, il est ignoré par git).
 - **Les tests** : `pip install -e ".[dev]"`, puis `python -m pytest -q` (les tests
   longs — scénarios complets, vies de plusieurs semaines, performances — sont
   écartés par défaut : `--slow` les ajoute, `-m slow` ne lance qu'eux). `--mariadb`

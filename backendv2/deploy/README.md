@@ -437,6 +437,10 @@ sudo install -o mika -g mika -m 640 app-release.apk /var/lib/mika/telephone/mika
 
 Sans ce fichier, la page dit qu'elle n'est pas encore déposée (`GET /api/moi/phone/apk` : 404).
 
+L'extension de Teams, elle, ne se dépose pas (ADR 0246) : le serveur la zippe à la demande depuis
+`/opt/mika/frontend/Extension`, le dossier du dépôt à côté de lui, que l'utilisateur `mika` doit pouvoir lire. Elle
+suit donc chaque mise à jour du code ; Paramètres › Teams › L'extension la propose (`GET /api/moi/teams/extension`).
+
 ## La carte de sa position (ADR 0193)
 
 Téléphone › Position montre une vraie carte, dont les tuiles passent toujours par ce serveur : le navigateur ne joint
@@ -461,22 +465,42 @@ Protomaps ou d'images) se règle au même endroit : ce serveur le joint seul, sa
 les tuiles. Il doit servir l'archive par plages (`Range`) ; s'il ne répond pas, ou si l'archive change à la même
 adresse, la carte le voit en une minute au plus (elle se rouvre, ou garde son plan dessiné).
 
-### Les lieux, les adresses et les itinéraires de l'écran Carte (ADR 0194)
+### Les lieux, les adresses et les itinéraires de l'écran Carte (ADR 0194, 0244)
 
-Les lieux (restaurants, campings, sommets, musées, villes et lieux-dits) se cherchent dans un index tiré des tuiles
-de la carte, sur la machine — rien ne sort :
+Les lieux (restaurants, campings, sommets, musées, villes et lieux-dits) se cherchent dans un index de la machine —
+rien ne sort. Il se tire de l'extrait OpenStreetMap de Geofabrik, qui garde ce qu'en dit une fiche (cuisine, horaires,
+téléphone, site, terrasse, végétarien, vegan, accessibilité, à emporter, étoiles…) : les filtres de l'écran et la
+fiche d'un lieu en viennent. Le télécharger et construire l'index **sur le PC** (pyosmium, l'extra `cartes`), puis
+copier l'index seul sur le portable :
 
 ```bash
-mika carte lieux                                    # depuis cartes/france.pmtiles → cartes/lieux.db
+# sur le PC, dans backendv2 : un dossier de données à part, pour la carte seulement
+.venv/bin/pip install -e ".[cartes]"                         # pyosmium
+mkdir -p data/carte/cartes
+curl -L -o data/carte/cartes/france-latest.osm.pbf \
+  https://download.geofabrik.de/europe/france-latest.osm.pbf  # la métropole, ~4,8 Go, refait chaque nuit
+../scripts/borne.sh .venv/bin/python -m mika --data data/carte carte lieux --depuis cartes/france-latest.osm.pbf
+# puis sur le portable : à côté de l'ancien, qu'il remplace d'un seul coup
+rsync -a data/carte/cartes/lieux.db mika-portable:lieux.db.neuf
+ssh -t mika-portable 'sudo install -o mika -g mika -m 0644 lieux.db.neuf /var/lib/mika/cartes/lieux.db.neuf \
+  && sudo mv /var/lib/mika/cartes/lieux.db.neuf /var/lib/mika/cartes/lieux.db && rm lieux.db.neuf'
 ```
 
 Serveur en marche, sans risque : l'index neuf ne remplace l'ancien qu'entier, et le serveur le lit à la recherche
-suivante. À refaire après chaque `mika carte extraire`. Une autre archive : `--depuis cartes/<nom>.pmtiles` (et
-`--sortie cartes/<nom>.db`). Mesuré sur la zone de Lille (600 tuiles au zoom 15, 7 786 lieux) : 0,4 s, 290 Mo de
-mémoire au plus, dont 282 Mo pour charger la commande elle-même. Mesuré sur la France (2026-11-05, sur le PC : 1,84
-million de tuiles au zoom 15) : 2 978 370 lieux en 2 min 10 s, 467 Mo de mémoire au plus, un index de 522 Mo — sur
-le portable, compter davantage de temps, la même mémoire ; ou le construire sur un PC et le copier dans `cartes/`. La
-fin de la sortie dit combien de lieux par catégorie et les sortes laissées de côté les plus fréquentes.
+suivante (celles en cours finissent sur l'ancien). Le refaire de temps en temps, sur un extrait du jour. Sans
+`--depuis`, la commande prend `cartes/france-latest.osm.pbf` s'il est là, sinon `cartes/france.pmtiles` ; une autre
+région de Geofabrik se construit de même (`--depuis cartes/<nom>.osm.pbf`, `--sortie cartes/<nom>.db`). La mémoire ne
+dépend presque pas de la taille de l'extrait : seule la position des nœuds utiles se garde, par tranches
+d'identifiants. Mesuré le 2026-11-17 sur le PC, sur l'extrait Nord-Pas-de-Calais (241 Mo, 24,5 millions de nœuds) :
+35 725 lieux en 13 s, 1,05 Go de mémoire au plus (dont 280 Mo pour charger la commande), un index de 12 Mo, 98,8 % des
+horaires compris. La France (vingt fois plus de données) n'est pas encore mesurée : compter quelques minutes, la même
+mémoire, un index de quelques centaines de Mo. La fin de la sortie dit combien de lieux par catégorie, combien sans
+nom, sans position (hors de l'extrait) ou comptés deux fois.
+
+Sans extrait, l'index se tire encore des tuiles de l'archive (`mika carte lieux --depuis cartes/france.pmtiles`, à
+refaire après chaque `mika carte extraire`) : sans détails — ni horaires, ni filtres, ni fiche. Mesuré sur la France
+(2026-11-05, 1,84 million de tuiles au zoom 15) : 2 978 370 lieux en 2 min 10 s, 467 Mo de mémoire au plus, un index
+de 522 Mo. Un tel index reste lisible jusqu'à ce qu'on le refasse depuis l'extrait.
 
 Puis, dans la console, Réglages › Carte et téléphone :
 
@@ -488,6 +512,107 @@ Puis, dans la console, Réglages › Carte et téléphone :
 
 Par défaut, ni adresses ni itinéraires : rien ne sort sans ce choix. Sans index ou sans itinéraires, l'écran Carte
 le dit.
+
+### Les données touristiques et les événements (DATAtourisme, ADR 0245)
+
+Les fiches des offices de tourisme (musées, sites, restaurants, hébergements) et leurs événements à venir (concerts,
+spectacles, expositions, marchés…) viennent de l'API de DATAtourisme, gardées dans `cartes/tourisme.db` : un cache
+**par cases** (une dizaine de kilomètres), où l'écran Carte cherche sans que rien ne sorte. Seule une case part vers
+DATAtourisme, jamais la position d'une personne. Il faut une clé personnelle de leur API (www.datatourisme.fr,
+« Utiliser les données »). Elle se colle dans la console, **Réglages › Carte et téléphone › Données touristiques
+(DATAtourisme)** : chiffrée, jamais réaffichée, jamais écrite au journal. À défaut, le serveur prend la variable
+`MIKA_DATATOURISME_API_KEY` de son environnement (`/etc/mika/mika.env`) ; la page dit laquelle sert, jamais sa
+valeur. On y règle aussi les bornes des demandes (900 par heure et 8 par seconde par défaut ; leur API en permet 1 000
+et une dizaine), la réserve gardée à ce qu'une personne ouvre (20 %), la taille d'une case, combien de temps on garde
+ses lieux (7 jours) et ses événements (1 jour), et jusqu'où voir les événements.
+
+Avec une clé, rien d'autre à faire :
+
+- **Chaque soir** (22:00 par défaut, **Réglages › Carte et téléphone › Réchauffage des caches**), le serveur relit les
+  cases autour de la dernière position que le téléphone de chacun a donnée (s'il l'a permis) et des points fixes qu'on y
+  ajoute (« Lille », « 45.90, 6.13 ») : les événements d'abord, puis les lieux, les cases les plus vieilles d'abord, sur
+  ce qui reste du quota — la réserve gardée. « Réchauffer maintenant » lance un passage. La page dit le dernier, les
+  cases rafraîchies, le budget consommé et restant, le prochain.
+- **En direct** : une case jamais vue qu'une personne ouvre (les événements autour d'elle, la fiche d'un lieu) se lit
+  tout de suite, quelques pages, si le quota le permet ; sinon l'écran montre ce qu'on a, et dit pourquoi.
+
+Les compteurs des demandes sont dans `cartes/quotas.db` : un redémarrage ne les oublie pas.
+
+**En option**, des départements copiés en entier (le réglage « Départements tenus en entier » ; « France » : tous),
+une fois par semaine et ce qui y change chaque nuit. Toute la France, c'est environ 6 000 demandes, **plus de six
+heures** au rythme permis : la première se fait mieux **sur le PC**, puis la base se copie (une synchronisation à la
+fois : un verrou, `cartes/tourisme.lock`) :
+
+```bash
+# sur le PC, dans backendv2 : le dossier de la carte (il n'a pas besoin d'être celui d'un Mika)
+read -rs MIKA_DATATOURISME_API_KEY && export MIKA_DATATOURISME_API_KEY   # tapée, jamais sur la ligne de commande
+BORNE_TEMPS=9h ../scripts/borne.sh .venv/bin/python -m mika --data data/carte carte tourisme --zones 59,62 \
+  > tourisme.log 2>&1
+tail -1 tourisme.log      # {"ok": true, "lieux": …, "événements": …, "demandes": …}
+# interrompue (Ctrl-C, une erreur, la borne) : la même commande reprend là où elle s'est arrêtée
+# puis sur le portable, serveur arrêté le temps de la copie
+rsync -a data/carte/cartes/tourisme.db mika-portable:tourisme.db.neuf
+ssh -t mika-portable 'sudo systemctl stop mika \
+  && sudo install -o mika -g mika -m 0644 tourisme.db.neuf /var/lib/mika/cartes/tourisme.db \
+  && sudo rm -f /var/lib/mika/cartes/tourisme.db-journal && rm tourisme.db.neuf && sudo systemctl start mika'
+```
+
+Puis, dans la console, les mêmes départements dans « Départements tenus en entier » : le serveur prend la suite
+(chaque nuit, et une complète par semaine). Si `data/carte/cartes/lieux.db` est là, la commande rapproche aussi chaque
+fiche de son lieu d'OpenStreetMap ; sinon, le portable le fait de lui-même, avec son index. `--complete` pour tout
+refaire, `--horizon 60` pour les événements des 60 prochains jours. `cartes/` n'entre dans aucune sauvegarde : la base
+se relit.
+
+### Les avis (Google Places, ADR 0256)
+
+Les notes, le nombre d'avis, le prix, les horaires, les avis en français, le résumé et les photos des restaurants, de
+ce qui est à voir et des hébergements viennent de l'**API officielle Places (New)** de Google — rien d'autre n'est lu
+de Google —, gardés dans `cartes/avis.db` : un cache **par cases** (3 km par défaut), où l'écran Carte lit sans que
+rien ne sorte. Vers Google ne part que le cercle qui couvre une case (son centre et son rayon), jamais la position
+d'une personne. Ses conditions ne permettent de garder que l'identifiant d'un lieu (et ses coordonnées trente jours) :
+l'opérateur a choisi de garder ce cache sept jours et de le faire lire par Mika, sous sa responsabilité (ADR 0256) ; la
+mention « Google Maps », le lien vers la page du lieu, le nom et le lien de l'auteur de chaque avis et de chaque photo
+restent toujours avec.
+
+**La clé.** Dans [Google Cloud](https://console.cloud.google.com/) : un projet, **un compte de facturation** lié (Google
+le demande, même pour ne rien payer), l'API **Places API (New)** activée, puis une clé (« API et services ›
+Identifiants »). **Restreins-la** : « Restrictions relatives aux API » → *Places API (New)* seule ; et, si l'adresse
+du portable est fixe, « Restrictions relatives aux applications » → *Adresses IP* (son IPv6). Elle se pose :
+
+- **sur le portable** : dans la console, **Réglages › Carte et téléphone › Avis (Google)** (chiffrée, jamais
+  réaffichée, jamais écrite au journal), ou dans `/etc/mika/mika.env` (`MIKA_GOOGLE_PLACES_API_KEY=…`, droits 0600,
+  puis `sudo systemctl restart mika`) — la console passe en premier, et sa page dit laquelle sert, jamais sa valeur ;
+- **en local** : dans `backendv2/.env` (`MIKA_GOOGLE_PLACES_API_KEY=…`, droits 0600, ignoré par git) : la commande
+  `mika` lit le `.env` du dossier où on la lance, sans jamais écraser une variable déjà posée (`MIKA_ENV_FILE` en
+  nomme un autre ; vide, aucun). Ne le copie pas dans `/opt/mika/backendv2` : il y serait lu aussi.
+
+**Ce que ça coûte.** Google facture **chaque appel**, au niveau des champs qu'il demande (prix et quotas vérifiés le
+2026-11-20) :
+
+| Appel | SKU | Offerts chaque mois | Puis |
+|---|---|---|---|
+| une recherche pour une liste (vingt lieux au plus) | Nearby Search Enterprise | 1 000 | 35 $ les 1 000 |
+| la fiche d'un lieu, avec ses avis | Place Details Enterprise + Atmosphere | 1 000 | 25 $ les 1 000 |
+| une photo, la première fois qu'on la montre | Place Details Photos | 1 000 | 7 $ les 1 000 |
+
+Une case coûte, par sorte, une recherche (un cercle qui la couvre), ou cinq quand elle est dense (ce cercle rend vingt
+lieux : ses quatre quarts sont redemandés) ; un réchauffage autour d'une personne (neuf cases, trois sortes), de 27 à
+135 recherches, une fois par semaine. La fiche d'un lieu jamais vu coûte une recherche (le chercher tout près de lui)
+et une fiche ; relue, une fiche. Le mois de Google commence le 1er à minuit, **heure du Pacifique** (9 h à Paris).
+D'où, réglés sur la même page et relus à chaque appel :
+
+- **un plafond par mois et par SKU**, par défaut **le quota offert** (1 000 recherches, 1 000 fiches, 1 000 photos) :
+  sans rien toucher, rien n'est facturé ; chaque appel compte dès qu'il part, même en erreur ;
+- 5 appels par seconde, 500 sur 24 heures glissantes (tous niveaux : un garde-fou) ;
+- la réserve gardée au direct (20 %) : le réchauffage et le préchargement ne prennent que le reste ;
+- la durée du cache (7 jours) : d'ici là, rien ne repart ; la taille d'une case et son découpage.
+
+Avec une clé, rien d'autre à faire : **chaque soir** (Réchauffage des caches), les restaurants autour de la dernière
+position de chacun et des points fixes, puis ce qui est à voir, puis les hébergements, les cases les plus vieilles
+d'abord, puis la fiche des lieux ouverts depuis un mois ; **en direct**, la fiche d'un lieu lit ce qui lui manque, et
+« Actualiser » la relit. Les compteurs sont dans `cartes/quotas.db` (un redémarrage ne les oublie pas) ; la page dit
+les appels du mois de chaque SKU, ce qui serait facturé au-delà des quotas offerts, ce que tient le cache, la dernière
+erreur.
 
 ### Un Valhalla à toi, sur le portable
 

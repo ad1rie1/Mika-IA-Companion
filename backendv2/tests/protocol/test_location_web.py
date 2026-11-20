@@ -4,6 +4,7 @@
 - une position invalide est ignorée ; une position qui n'a pas bougé (même lieu, quelques mètres) redite à chaque
   ouverture ne s'écrit pas deux fois ; une qui a bougé, si ;
 - ``off`` efface la dernière position ;
+- une position écrite précharge les avis de sa case (ADR 0259), une fois par position ;
 - la console la montre, personne par personne, et sur sa fiche (« Sa position ») — seulement sur la fiche de qui en a
   une.
 """
@@ -14,6 +15,7 @@ import html
 
 from mika.contracts import location as c
 from mika.runtime.effects import with_content
+from tests.fixtures.fake_maps import FakeMaps
 from tests.protocol.test_mobile_presence import CHAT, PASSWORD, ctx, headers, pong  # noqa: F401 — la fixture
 from tests.protocol.test_web import bootstrap
 
@@ -68,3 +70,18 @@ def test_the_console_shows_where_each_person_is(ctx) -> None:  # noqa: F811
     assert "Sa dernière position" in tab and HOME["label"] in tab and "45.764043,4.835659" in tab
     owner = ctx.client.get("/admin/fiche/person/user_1")
     assert owner.status_code == 200 and "onglet=position" not in owner.text
+
+
+def test_the_phone_position_preloads_the_reviews_of_its_cell_once_per_place(ctx) -> None:  # noqa: F811
+    """La position que le téléphone donne précharge les avis de sa case (ADR 0259 : une mise en file, lue en fond) —
+    une fois par position écrite : la même place redite ne remet rien en file."""
+    maps = ctx.live.kernel.ports["maps"] = FakeMaps()
+    token = ctx.phone()
+    with ctx.client.websocket_connect(CHAT, headers=headers(token)) as ws:
+        ws.send_json(HOME)
+        ws.send_json({**HOME, "lat": HOME["lat"] + 0.0001})  # la même place
+        pong(ws, 1)
+        assert maps.preloads == [(HOME["lat"], HOME["lon"])]
+        ws.send_json({**HOME, "lat": 45.75, "label": "Place Bellecour, Lyon"})
+        pong(ws, 2)
+        assert maps.preloads == [(HOME["lat"], HOME["lon"]), (45.75, HOME["lon"])]

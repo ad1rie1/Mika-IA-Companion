@@ -93,6 +93,10 @@ export interface HerMark {
   asked: boolean;
   /** Ce qu'elle en a retenu (le mail entier seulement). */
   summary?: string;
+  /** Tes consignes de tri demandent de te prévenir de ce mail (ADR 0243 ; absent d'un serveur d'avant). */
+  alert?: boolean;
+  /** Le dossier où tes consignes de tri l'ont rangé, tant qu'il y est. */
+  filed?: string;
 }
 
 export interface MailRow {
@@ -112,7 +116,12 @@ export interface MailRow {
   html: boolean;
   bulk: boolean;
   her: HerMark | null;
+  /** Ce que son tri en a fait (ADR 0240) : lu par le modèle, deviné par le repli, un envoi en masse, en attente du
+   *  relevé suivant ; vide (ou absent, d'un serveur d'avant) : rien à en dire. */
+  triage?: Triage;
 }
+
+export type Triage = "read" | "guessed" | "bulk" | "waiting" | "";
 
 export interface MailPage {
   total: number;

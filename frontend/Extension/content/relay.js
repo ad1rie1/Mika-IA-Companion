@@ -12,9 +12,35 @@
  */
 (function () {
   "use strict";
-  const T = globalThis.MikaTeamsText;
+  // Chrome n'injecte un même fichier qu'une fois par cadre, quel que soit le monde : `lib/text.js`, chargé d'abord
+  // dans la page (monde MAIN), ne l'est jamais ici — `MikaTeamsText` n'existe pas dans ce monde, et chaque lot capté
+  // tombait sur `T.cut` sans rien dire. Le relais a donc sa coupe à lui, la même que `MikaTeamsText.cut` (au plus
+  // `max` unités, bien formée, jamais au milieu d'une paire) : `tests/relay.test.js` les confronte.
+  const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
+  function wellFormed(s) {
+    const t = typeof s === "string" ? s : s === undefined || s === null ? "" : String(s);
+    return typeof t.toWellFormed === "function" ? t.toWellFormed() : t.replace(LONE_SURROGATE, "�");
+  }
+
+  function cut(s, max) {
+    const t = wellFormed(s);
+    if (!(max >= 0) || t.length <= max) return t;
+    let end = Math.floor(max);
+    const c = t.charCodeAt(end - 1);
+    if (c >= 0xd800 && c <= 0xdbff) end--;
+    return t.slice(0, end);
+  }
+
+  const T = { cut: cut };
   const TAG = "mika-teams";
   const MAX_ITEMS = 300;
+  const MAX_CURSORS = 5000;
+  const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+  const IMAGE_B64_MAX = Math.ceil((8 * 1024 * 1024 * 4) / 3) + 8;
+  const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
+  const IMAGE_ID = /^[A-Za-z0-9._:-]{1,200}$/;
+  const SOURCES = ["network", "idb", "worker"];
   const MAX_DRAFTS = 50;
   const MAX_OUT_TEXT = 20000;
   const ASK_TIMEOUT_MS = { diagnose: 8000, where: 2000 };
@@ -41,12 +67,59 @@
     if (!isFinite(time) || !str(m.id, 200) || (!text && !deleted)) return null;
     const out = {
       id: str(m.id, 200), conv: str(m.conv, 300), author: str(m.author, 120), authorId: str(m.authorId, 200),
-      time: time, type: str(m.type, 60), text: text, source: m.source === "idb" ? "idb" : "network",
+      time: time, type: str(m.type, 60), text: text, source: SOURCES.indexOf(m.source) >= 0 ? m.source : "network",
       mentions: Array.isArray(m.mentions) ? m.mentions.slice(0, 20).map(function (x) { return str(x, 200); }) : [],
     };
     if (deleted) out.deleted = true;
+    // ses images : leur nombre seulement (la page les télécharge et les envoie à part, ADR 0258)
+    const images = Array.isArray(m.images) ? m.images.length : Number(m.images) || 0;
+    if (images > 0 && !deleted) out.images = Math.min(8, Math.floor(images));
     return out;
   }
+
+  /** Un curseur de synchro (ADR 0251) : une conversation, le plus tard livré qu'on y ait lu (ms), la fiche vue. */
+  function cursor(c) {
+    if (!c || typeof c !== "object" || !str(c.conv, 300)) return null;
+    const w = Number(c.w);
+    return isFinite(w) && w >= 0 ? { conv: str(c.conv, 300), w: Math.floor(w), m: str(c.m, 200) } : null;
+  }
+
+  function list(v, max, fn) {
+    return (Array.isArray(v) ? v.slice(0, max) : []).map(fn).filter(Boolean);
+  }
+
+  function count(v) {
+    const n = Number(v);
+    return isFinite(n) && n >= 0 ? Math.floor(n) : 0;
+  }
+
+  /**
+   * Ce que la page peut demander au service, et la forme qu'on laisse passer : ses curseurs ; un paquet de
+   * l'historique (attendu avant le suivant) ; où en est l'historique ; sa fin.
+   */
+  const ASKS = {
+    cursors: function () { return {}; },
+    historyChunk: function (p) {
+      return { run: str(p.run, 40), messages: list(p.messages, MAX_ITEMS, message),
+        conversations: list(p.conversations, MAX_ITEMS, conversation), self: str(p.self, 64) };
+    },
+    image: function (p) {
+      // une image d'un message (ADR 0258) : rien ne passe qui n'en ait la forme
+      const type = IMAGE_TYPES.indexOf(p.type) >= 0 ? p.type : "";
+      const data = typeof p.data === "string" && p.data.length <= IMAGE_B64_MAX && BASE64.test(p.data) ? p.data : "";
+      const position = Math.min(7, count(p.position));
+      return { conv: str(p.conv, 300), id: str(p.id, 200), image: IMAGE_ID.test(String(p.image || "")) ? p.image : "",
+        position: position, type: type, data: data, time: Number(p.time) || 0, author: str(p.author, 120),
+        authorId: str(p.authorId, 200), history: p.history === true };
+    },
+    historyProgress: function (p) {
+      return { run: str(p.run, 40), done: count(p.done), total: count(p.total), messages: count(p.messages) };
+    },
+    historyDone: function (p) {
+      return { run: str(p.run, 40), done: count(p.done), total: count(p.total), messages: count(p.messages),
+        error: str(p.error, 200) };
+    },
+  };
 
   function conversation(c) {
     if (!c || typeof c !== "object" || !str(c.id, 300)) return null;
@@ -72,11 +145,27 @@
       message_id: str(o.message_id, 200), via: str(o.via, 20) };
   }
 
+  // les lots captés partent l'un après l'autre ; un lot perdu retient les curseurs des suivants
+  let capturedChain = Promise.resolve();
+  let lostSinceCursors = false;
+
+  /** Ce que le relais a passé au service, et ce que le service en a dit : le diagnostic de l'onglet le montre. */
+  const relayed = { batches: 0, messages: 0, accepted: 0, lost: 0, lastError: "", lastErrorAt: 0 };
+
+  function noteError(e) {
+    relayed.lastError = T.cut(String(e && e.message ? e.message : e || "sans réponse"), 200);
+    relayed.lastErrorAt = Date.now();
+  }
+
   function send(payload) {
     try {
-      return chrome.runtime.sendMessage(payload).catch(function () { return null; /* extension rechargée ou endormie */ });
-    } catch (_) {
-      // contexte invalidé : l'extension a été rechargée, la page aussi le sera
+      return chrome.runtime.sendMessage(payload).catch(function (e) {
+        noteError(e); // extension rechargée ou endormie
+        return null;
+      });
+    } catch (e) {
+      // contexte invalidé : l'extension a été rechargée après l'ouverture de l'onglet, qu'il faut recharger
+      noteError(e);
       return Promise.resolve(null);
     }
   }
@@ -93,17 +182,61 @@
         .filter(Boolean);
       const conversations = (Array.isArray(data.conversations) ? data.conversations.slice(0, MAX_ITEMS) : [])
         .map(conversation).filter(Boolean);
-      if (messages.length || conversations.length) {
-        send({ kind: "captured", messages: messages, conversations: conversations, self: str(data.self, 64) });
+      const cursors = list(data.cursors, MAX_ITEMS, cursor);
+      if (messages.length || conversations.length || cursors.length) {
+        relayed.batches++;
+        relayed.messages += messages.length;
+        const self = str(data.self, 64);
+        // un lot après l'autre : un curseur dit « tout ce qui précède est passé » ; un lot perdu, les curseurs qui
+        // suivent ne partent pas, et la page reprend les siens chez le service (ADR 0251)
+        capturedChain = capturedChain.then(function () {
+          const withCursors = lostSinceCursors ? [] : cursors;
+          return send({ kind: "captured", messages: messages, conversations: conversations, self: self,
+            cursors: withCursors }).then(function (answer) {
+            if (answer && answer.ok === true) {
+              relayed.accepted += messages.length;
+              if (lostSinceCursors && cursors.length) {
+                lostSinceCursors = false;
+                toPage("cursorsLost");
+              }
+            } else {
+              relayed.lost += messages.length;
+              if (answer && answer.error) noteError(answer.error);
+              lostSinceCursors = true;
+              toPage("cursorsLost");
+            }
+          });
+        });
       }
     } else if (data.kind === "report" && waiting.has(data.nonce)) {
-      waiting.get(data.nonce)({ ok: true, report: data.report });
+      waiting.get(data.nonce)({ ok: true, report: data.report, relayed: Object.assign({}, relayed) });
       waiting.delete(data.nonce);
     } else if (data.kind === "claim" && str(data.nonce, 64) && str(data.id, 64)) {
       const id = str(data.id, 64);
       const n = str(data.nonce, 64);
       send({ kind: "claim", id: id }).then(function (answer) {
         toPage("answer", { nonce: n, ok: Boolean(answer && answer.ok === true) });
+      });
+    } else if (data.kind === "ask" && str(data.nonce, 64) && Object.prototype.hasOwnProperty.call(ASKS, data.what)) {
+      const n = str(data.nonce, 64);
+      const what = data.what;
+      const payload = ASKS[what](data.payload && typeof data.payload === "object" ? data.payload : {});
+      send(Object.assign({ kind: what }, payload)).then(function (answer) {
+        const ok = Boolean(answer && answer.ok === true);
+        let out = null;
+        if (what === "image") {
+          out = { skipped: Boolean(answer && answer.skipped), retry: Boolean(answer && answer.retry),
+            error: str(answer && answer.error, 200) };
+        } else if (what === "cursors" && ok && answer.cursors && typeof answer.cursors === "object") {
+          out = {};
+          for (const conv of Object.keys(answer.cursors).slice(0, MAX_CURSORS)) {
+            const c = cursor(Object.assign({ conv: conv }, answer.cursors[conv]));
+            if (c) out[c.conv] = { w: c.w, m: c.m };
+          }
+        } else if (!ok) {
+          out = { error: str(answer && answer.error, 200) };
+        }
+        toPage("answer", { nonce: n, ok: ok, data: out });
       });
     } else if (data.kind === "placed" && str(data.id, 64)) {
       send({ kind: "placedResult", id: str(data.id, 64), ok: data.ok === true, reason: str(data.reason, 200) });
@@ -160,6 +293,11 @@
     }
     if (msg.kind === "drafts") {
       toPage("drafts", { items: drafts(msg.items) });
+      reply({ ok: true });
+      return false;
+    }
+    if (msg.kind === "history") {
+      toPage("history", { run: str(msg.run, 40) });
       reply({ ok: true });
       return false;
     }

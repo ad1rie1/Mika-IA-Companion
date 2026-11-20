@@ -25,7 +25,7 @@ from mika.contracts import identity as identity_c
 from mika.contracts import runtime as rt
 from mika.contracts import transcript as c
 from mika.faculties.transcript.faculty import TRANSCRIPT, TranscriptState
-from mika.faculties.transcript.thread import _COLUMNS, _messages_of
+from mika.faculties.transcript.thread import _COLUMNS, _messages_of, strands_of
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
     Badge,
@@ -34,6 +34,8 @@ from mika.kernel.inspect import (
     Column,
     Disclosure,
     InspectContext,
+    Nav,
+    NavItem,
     Note,
     Pager,
     Param,
@@ -45,6 +47,7 @@ from mika.kernel.inspect import (
     Table,
     Text,
     When,
+    Workspace,
     agree,
     paginate,
 )
@@ -124,9 +127,12 @@ def _episodes(ctx: InspectContext, rows: Sequence[Mapping[str, Any]]) -> dict[in
     return out
 
 
+#: l'étiquette d'un message écrit en mode pro (ADR 0116) : ses réponses s'y lisent en Markdown, comme le chat les rend
+#: (ADR 0241)
+PRO = "mode pro"
 MESSAGE_COLUMNS = (Column("n°", "fit", detail=True), Column("quand", "fit"), Column("qui parle", role="title"), "avec",
                    Column("où", detail=True), Column("texte", role="body"), Column("émotion", detail=True),
-                   "réponse", Column("épisode", detail=True))
+                   "réponse", Column("épisode", detail=True), Column("mode", "fit", detail=True))
 
 
 def _answers(ctx: InspectContext, rows: Sequence[Mapping[str, Any]]) -> dict[int, int]:
@@ -263,6 +269,7 @@ def _messages(frame: Frame, ctx: InspectContext, rows: Sequence[Mapping[str, Any
             emotion_cell(r["emotion"], r["emotion_intensity"]) if mine and r["emotion"] else "",
             _answer_cell(r, pending, answers, silences),
             Ref("episode", corr, "épisode") if corr else "—",
+            Badge(PRO, "info", key="pro") if r["mode"] == "pro" else "",
         ), tone="muted" if _internal(r) else "", href=Ref.why(int(r["id"])) if mine and corr else None,
             detail=(Prose(r["text"] or FORGOTTEN, title="Message", reading=True),)))
     return tuple(out)
@@ -410,53 +417,107 @@ def _stats(store: Any, handles: Sequence[str]) -> Stats:
                   Stat("envoyés", int(total) - int(received))))
 
 
+# ── Une conversation : le fil avec elle, ou un de ses fils de travail (ADR 0164, 0241) ──
+
+#: le paramètre qui choisit un fil de travail ; absent, le fil avec elle (salons compris)
+STRAND = "travail"
+#: le nom du fil avec elle, dans la navigation d'Échanges et de Fil ; le titre de ses fils de travail
+ORDINARY, STRANDS_TITLE = "Leur conversation", "Fils du mode pro"
+#: un fil de travail sans titre se nomme par le début de son premier message, en tant de lettres — comme le chat
+#: (``strandLabel``, ``frontend/Web/src/ui/strands.ts``)
+STRAND_LABEL = 48
+ARCHIVED = "archivé"
+
+
+def strand_label(item: Mapping[str, Any]) -> str:
+    """Le nom d'un fil de travail : son titre, sinon le début de son premier message, sinon « Nouveau fil »."""
+    title = " ".join(str(item.get("title") or "").split())
+    if title:
+        return title
+    opener = " ".join(str(item.get("opener") or "").split())
+    if not opener:
+        return "Nouveau fil"
+    return opener if len(opener) <= STRAND_LABEL else opener[:STRAND_LABEL - 1].rstrip() + "…"
+
+
+def _strands(store: Any, handles: Sequence[str]) -> list[dict[str, Any]]:
+    """Les fils de travail de ces moyens de communication (``strands_of``, un même fil réuni), le plus récemment actif
+    d'abord, ceux qu'on a archivés à la fin."""
+    merged: dict[str, dict[str, Any]] = {}
+    for handle in handles:
+        for item in strands_of(store, handle):
+            got = merged.setdefault(item["id"], {**item, "count": 0})
+            got["count"] += item["count"]
+            got["last_at"] = max(got["last_at"], item["last_at"])
+            for name in ("title", "description", "opener"):
+                got[name] = got[name] or item[name]
+    return sorted(merged.values(), key=lambda x: (x["archived"], -x["last_at"], x["id"]))
+
+
+def _conversation(s: TranscriptState, frame: Frame, ctx: InspectContext, *, kind: str, key: str, tab: str,
+                  handles: Sequence[str], title: str, empty: str) -> list[Block]:
+    """Ce qu'ils se sont dit, une conversation à la fois : le fil avec elle (tout ce qui n'est pas d'un fil de
+    travail), ou le fil de travail que nomme ``travail``, chacun avec son contexte. Dès qu'il y a un fil de travail,
+    une navigation à côté les liste, chacun avec son nombre de messages ; les chiffres en tête comptent tout."""
+    store = ctx.store
+    t = c.thread_table()
+    chosen = ctx.param(STRAND)
+    strands = _strands(store, handles)
+    rows, pager = _page(store, [t.c.person.in_(list(handles)), t.c.strand == chosen if chosen else t.c.strand.is_(None)],
+                        ctx.int_param("avant", 0) or None)
+    if kind == "handle" and not rows and not strands and not ctx.int_param("avant", 0) \
+            and not (key in s.last_from or key in s.last_to):
+        return [Note(f"Aucun message avec « {key} ».", tone="muted")]
+    stats = _stats(store, handles)
+    shown: list[Block] = []
+    current = next((x for x in strands if x["id"] == chosen), None) if chosen else None
+    if current is not None and current["description"]:
+        shown.append(Note(current["description"], title=strand_label(current)))
+    shown.append(Table(MESSAGE_COLUMNS, _messages(frame, ctx, rows), pager=pager, title=title, layout="feed",
+                       link_label="Pourquoi cette réponse ?", empty="aucun message dans ce fil" if chosen else empty))
+    folded = None if chosen else _summaries(store, s, frame, handles)  # les résumés sont ceux du fil avec elle
+    if folded is not None:
+        shown.append(folded)
+    if not strands:
+        return [stats, *shown]
+    ordinary = store.query_mind(select(func.count()).select_from(t)
+                                .where(t.c.person.in_(list(handles)), t.c.strand.is_(None)))[0][0]
+    side = (Nav((NavItem(ORDINARY, Ref.subject(kind, key, ORDINARY, tab=tab), count=int(ordinary), active=not chosen),)),
+            Nav(tuple(NavItem(strand_label(x) + (f" · {ARCHIVED}" if x["archived"] else ""),
+                              Ref("subject", f"{kind}/{key}", strand_label(x), (("onglet", tab), (STRAND, x["id"]))),
+                              count=x["count"] or None, active=x["id"] == chosen) for x in strands),
+                title=STRANDS_TITLE))
+    return [stats, Workspace(side, tuple(shown))]
+
+
 @TRANSCRIPT.inspect("echanges", title="Échanges", subject="person", order=40,
                     description="Ce qu'ils se sont dit, tous ses moyens de communication confondus, du plus récent au "
-                                "plus ancien.")
+                                "plus ancien : le fil avec elle, puis chacun de ses fils de travail du mode pro.")
 def _exchanges(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list[Block]:
     person = ctx.subject
     if not person:
         return [Note("Ouvre la fiche d'une personne : Personnes, puis la personne.", tone="muted")]
     if person.startswith("name:"):
         return [Note("Connue seulement de nom : elle ne lui a jamais écrit.", tone="muted")]
-    store = ctx.store
-    if store is None:
+    if ctx.store is None:
         return _no_store()
-    handles = sorted({person, *frame.get(identity_c.HANDLES(person))})
-    t = c.thread_table()
-    rows, pager = _page(store, [t.c.person.in_(handles)], ctx.int_param("avant", 0) or None)
-    blocks: list[Block] = [_stats(store, handles),
-                           Table(MESSAGE_COLUMNS, _messages(frame, ctx, rows), pager=pager, title="Échanges",
-                                 layout="feed", link_label="Pourquoi cette réponse ?",
-                                 empty="aucun échange pour l'instant")]
-    folded = _summaries(store, s, frame, handles)
-    if folded is not None:
-        blocks.append(folded)
-    return blocks
+    return _conversation(s, frame, ctx, kind="person", key=person, tab="echanges",
+                         handles=sorted({person, *frame.get(identity_c.HANDLES(person))}), title="Échanges",
+                         empty="aucun échange pour l'instant")
 
 
 @TRANSCRIPT.inspect("fil", title="Fil", subject="handle", order=50,
-                    description="Les messages de ce moyen de communication seulement.")
+                    description="Les messages de ce moyen de communication seulement : le fil avec elle, puis chacun "
+                                "de ses fils de travail du mode pro.")
 def _handle_thread(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list[Block]:
     handle = ctx.subject or ctx.param("handle")
     if not handle:
         return [Note("Ouvre la fiche d'un moyen de communication : Identités et moyens de communication, puis le "
                      "moyen de communication.", tone="muted")]
-    store = ctx.store
-    if store is None:
+    if ctx.store is None:
         return _no_store()
-    before = ctx.int_param("avant", 0) or None
-    rows, pager = _page(store, [c.thread_table().c.person == handle], before)
-    if not rows and not before and not (handle in s.last_from or handle in s.last_to):
-        return [Note(f"Aucun message avec « {handle} ».", tone="muted")]
-    blocks: list[Block] = [_stats(store, [handle]),
-                           Table(MESSAGE_COLUMNS, _messages(frame, ctx, rows), pager=pager, title="Messages",
-                                 layout="feed", link_label="Pourquoi cette réponse ?",
-                                 empty="aucun message")]
-    folded = _summaries(store, s, frame, [handle])
-    if folded is not None:
-        blocks.append(folded)
-    return blocks
+    return _conversation(s, frame, ctx, kind="handle", key=handle, tab="fil", handles=[handle], title="Messages",
+                         empty="aucun message")
 
 
 # ── Par personne ──────────────────────────────────────────────────────────
