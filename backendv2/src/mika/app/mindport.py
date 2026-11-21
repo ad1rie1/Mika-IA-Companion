@@ -26,7 +26,15 @@ from mika.contracts import social as social_c
 from mika.contracts import trips as trips_c
 from mika.contracts import wakeup as wakeup_c
 from mika.contracts import world as w
-from mika.contracts.entry import Admission, HistoryRow, MessageNote, SharedDownload, SharedMeta, StrandItem
+from mika.contracts.entry import (
+    Admission,
+    Efforts,
+    HistoryRow,
+    MessageNote,
+    SharedDownload,
+    SharedMeta,
+    StrandItem,
+)
 from mika.contracts.runtime import PerceptionReceived
 from mika.faculties import attachments, shares, transcript
 from mika.faculties.attention import prompt as attention_prompt
@@ -51,7 +59,7 @@ from mika.runtime.bootstrap import Kernel, ReadOnlyStore
 from mika.runtime.effects import with_content
 from mika.vocab.affect import emotion_of
 from mika.vocab.circadian import day_fr
-from mika.vocab.episodes import project_of
+from mika.vocab.episodes import PRO, project_of
 from mika.vocab.privacy import Sensitivity
 
 
@@ -212,6 +220,35 @@ class KernelPort:
         if archived:
             form["archived"] = ["1"]
         outcome = await operations.perform(self.kernel, "transcript.regler_fil", form, by=handle, via=operations.SPACE)
+        if outcome.ok:
+            return "ok"
+        return "failed" if outcome.retry else "invalid"
+
+    def efforts(self, handle: str) -> Efforts:
+        """Ce que la personne a forcé (sa conversation, ses fils), et ce que « auto » vaut en ce moment : l'effort
+        du rôle qui lui répond, et de celui du mode pro (ADR 0287)."""
+        forced = dict(transcript.efforts_of(self._store, handle))
+        runner = self.kernel.runner
+        reply = runner.policies.get(self.kernel.deps.reply_kind)
+        pro = runner.modes.get(PRO)
+        return Efforts(conversation=forced.pop("", ""), strands=forced,
+                       auto=self._role_effort(reply.role if reply is not None else None),
+                       auto_pro=self._role_effort(pro.role if pro is not None else None))
+
+    def _role_effort(self, role: str | None) -> str:
+        """L'effort auquel part un appel de ce rôle qui n'en demande pas (ADR 0285) ; « » : le défaut du modèle, ou
+        aucun modèle."""
+        gateway = self.kernel.deps.gateway
+        return gateway.effort_of(str(role))[0] if gateway is not None and role else ""
+
+    async def set_effort(self, handle: str, strand: str, effort: str) -> str:
+        """L'effort de réflexion forcé depuis le chat (ADR 0287) : le chemin des actions de la console
+        (``transcript.regler_effort``, validé et audité), au nom de celle qui règle. ``ok``, ``invalid`` ou
+        ``failed``."""
+        form = {"strand": [strand], operations.FIXED_FIELD: ["strand"], forms.RENDERED: ["effort"],
+                "effort": [effort or "auto"]}
+        outcome = await operations.perform(self.kernel, "transcript.regler_effort", form, by=handle,
+                                           via=operations.SPACE)
         if outcome.ok:
             return "ok"
         return "failed" if outcome.retry else "invalid"

@@ -31,6 +31,11 @@ PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 #: au-delà, une requête est refusée (413) : un appel d'outil n'a pas à peser plus
 MAX_BODY = 4 * 1024 * 1024
 
+#: les messages d'un lot, au plus (ADR 0292) : au-delà, le lot entier est refusé — rien n'en est exécuté. Un lot
+#: s'exécute message par message pour un seul passage de la porte : sans plafond, une requête porterait des centaines
+#: d'appels d'outil
+BATCH_MAX = 20
+
 PARSE_ERROR, INVALID_REQUEST, METHOD_NOT_FOUND, INVALID_PARAMS = -32700, -32600, -32601, -32602
 
 
@@ -131,6 +136,9 @@ def asgi(resolve: Resolve) -> Callable[..., Awaitable[None]]:
             await _json(send, _error(None, PARSE_ERROR, "JSON illisible"))
             return
         if isinstance(message, list):
+            if len(message) > BATCH_MAX:
+                await _json(send, _error(None, INVALID_REQUEST, f"lot trop grand : {BATCH_MAX} messages au plus"))
+                return
             replies = [r for r in [await answer(host, m) for m in message] if r is not None]
             if replies:
                 await _json(send, replies)

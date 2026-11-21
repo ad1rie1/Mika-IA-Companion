@@ -7,6 +7,7 @@ boutons sur leur ligne) — et ce qu'ils disent, vides."""
 from __future__ import annotations
 
 import json
+import re
 
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
@@ -283,20 +284,24 @@ def test_a_project_page_reads_like_the_mockup(world):  # noqa: F811
     assert bar[0].index("Donner une consigne") < bar[0].index("Lancer maintenant")  # la principale à droite
     assert 'aria-label="Autres actions"' in bar[0] and "Mettre en pause" in bar[1]
     tabs = page.split('class="tabs-row"', 1)[1].split("</details>", 1)[0]
-    assert 'Objectifs<span class="tab-n now-num">3</span>' in tabs  # deux ponctuels, un constant
-    assert ">Plus <" in tabs and ">Accès</a>" in tabs and ">Carnet</a>" in tabs
-    banner = page.split('class="prj-ov-banner', 1)[1].split("</p>", 1)[0]
+    assert ">Où il en est</a>" in tabs and ">Cadre</a>" in tabs  # rangée par ce qu'on y fait (ADR 0281)
+    assert ">Plus <" in tabs and ">Décisions techniques</a>" in tabs and ">Carnet</a>" in tabs
+    # ses objectifs sont le second sous-onglet de « Où il en est » : deux ponctuels, un constant
+    assert 'Missions et objectifs <span class="hm-count">3</span>' in page
+    # ce qui attend ton accord se dit en tête, dans « Ce qui t'attend », et mène à la file : plus de bandeau
+    waiting = page.split('class="now-card prj-todo"', 1)[1].split("</section>", 1)[0]
     pending = [p.proposal for p in kernel.mind.frame().get(rt.PENDING_EFFECTS)]
-    assert "1 demande attend ton accord" in banner and f"/approbations/en_attente?demande={pending[0]}" in banner
-    assert page.count('<p class="prj-ov-banner ') == 1 and "À décider" not in page
+    assert "Une commande avec le réseau — Installer requests avec le réseau" in waiting
+    assert f"/approbations/en_attente?demande={pending[0]}" in waiting and "Décider dans « À valider »" in waiting
+    assert '<p class="prj-ov-banner ' not in page and "À décider" not in page
     band = page.split('class="prj-ov-band"', 1)[1].split("</ul>", 1)[0]
     assert ">0/2<" in band and "ponctuels faits · 1 constant" in band
-    assert f'href="/admin/fiche/project/{pid}?onglet=objectifs">Objectifs →' in page
+    assert 'href="#objectifs">Ses missions →' in page and 'href="#objectifs">Ses objectifs en cours →' in page
 
 
 def test_a_project_page_sends_its_requests_to_the_approvals_queue(world):  # noqa: F811
-    """La fiche d'un projet ne décide plus ses demandes sur place (ADR 0177) : son bandeau les compte — lues dans la
-    section « À décider » de sa vue — et mène à la première dans « À valider » ; son Carnet garde la commande exacte et
+    """La fiche d'un projet ne décide plus ses demandes sur place (ADR 0177) : « Ce qui t'attend » les dit en tête,
+    une ligne chacune (ADR 0281), et chacune mène à elle dans « À valider » ; son Carnet garde la commande exacte et
     pose, sous chaque demande qui attend, le lien vers la file ; ni l'un ni l'autre n'a de quoi approuver ou refuser.
     Sa vue d'ensemble dit chaque fait une fois : ni le mode ni la plage dans « Prochaine exécution », le distant dans
     « Son dépôt » seulement."""
@@ -311,9 +316,9 @@ def test_a_project_page_sends_its_requests_to_the_approvals_queue(world):  # noq
     pending = [p.proposal for p in kernel.mind.frame().get(rt.PENDING_EFFECTS)]
     assert len(pending) == 2
     page = drawn(client, f"/admin/fiche/project/{pid}")
-    banner = page.split('class="prj-ov-banner', 1)[1].split("</p>", 1)[0]
-    assert "2 demandes attendent ton accord" in banner
-    assert f'href="/admin/approbations/en_attente?demande={pending[0]}"' in banner  # la première
+    waiting = page.split('class="now-card prj-todo"', 1)[1].split("</section>", 1)[0]
+    assert waiting.count("Une commande avec le réseau") == 2  # une ligne par demande, la plus ancienne d'abord
+    assert [int(n) for n in re.findall(r'href="/admin/approbations/en_attente\?demande=(\d+)"', waiting)] == pending
     tiles = page.split('class="prj-ov-grid"', 1)[1]
     shown = [t.split("</dt>", 1)[0] for t in tiles.split("<dt>")[1:]]
     assert shown == ["quand", "sur quoi", "dépôt distant", "dernier échange"]  # l'en-tête, la bande disent le reste

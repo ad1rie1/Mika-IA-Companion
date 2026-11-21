@@ -49,6 +49,29 @@ def test_exchange_deduplication_uses_history_after_budget_trimming():
     assert "rendez-vous" in small.system_volatile and trace.provenance == ("chunk:2",)
 
 
+def test_a_heading_left_alone_goes_with_what_it_announced():
+    """ADR 0263 : un intertitre (« Ce qui n'appartient qu'à vous : ») n'annonce plus rien quand ses lignes sont déjà
+    dans l'historique rendu, ou coupées faute de place — il part avec elles ; ce qui n'est pas un intertitre reste."""
+    joke = "- " + "la blague des yoyos " * 14
+    parts = (Fragment("Cette personne fait partie de tes amis."),
+             Fragment("Ce qui n'appartient qu'à vous :", heading=True), Fragment(joke, ("memory:7",), (1, 2)),
+             Fragment("Ce que tu crois savoir :", heading=True), Fragment("- Sam adore la city pop", ("memory:8",)))
+    body = SectionBody("\n".join(p.text for p in parts), provenance=("memory:7", "memory:8"), fragments=parts)
+    history = (spec("history", Zone.HISTORY), SectionBody((ChatTurn("user", "tes yoyos tout neufs", id=1),
+                                                          ChatTurn("assistant", "même pas fait exprès", id=2))))
+    seen, trace = compose([history, (spec("register", Zone.VOLATILE), body)], 3000)
+    assert "yoyos" not in seen.system_volatile and "n'appartient qu'à vous" not in seen.system_volatile
+    assert "fait partie de tes amis" in seen.system_volatile and "Ce que tu crois savoir :\n- Sam" in seen.system_volatile
+    assert trace.provenance == ("memory:8",)
+    # sans ces tours dans le fil rendu, tout se redit
+    alone, _trace = compose([(spec("register", Zone.VOLATILE), body)], 3000)
+    assert "yoyos" in alone.system_volatile and "n'appartient qu'à vous" in alone.system_volatile
+    # coupée faute de place juste après l'intertitre : il ne reste pas seul
+    tight, trace = compose([(spec("register", Zone.VOLATILE), body)], 250)
+    assert "fait partie de tes amis" in tight.system_volatile and "n'appartient qu'à vous" not in tight.system_volatile
+    assert trace.trimmed == ("register",)
+
+
 def test_history_protocol_overhead_is_reserved_only_for_rendered_turns():
     turns = tuple(ChatTurn("user", "message " * 60, id=i) for i in range(1000))
     budget = Budget(2000, chars_per_token=1, message_overhead=16)

@@ -197,13 +197,12 @@ def _entry_name(entry: Any) -> str:
     return str(name).strip() if isinstance(name, str) else ""
 
 
-def _mapping_view(f: forms.FormField, given: Mapping[str, Any], errors: Mapping[str, str], prefix: str,
-                  describe: Callable[[str, Any], Mapping[str, Any]] | None = None) -> dict[str, Any]:
-    """Une correspondance (rôle → fournisseur, flux → autrice) : une ligne par clé. Chaque ligne peut rester vide
-    (« — ») : la clé est alors absente (``forms._read_mapping``) et le rôle retombe sur son repli. La règle de l'ADR
-    0174 (une liste qui ne peut rester vide n'a pas de « — ») ne vaut pas ici : sans elle, la première option était
-    sélectionnée pour chaque clé absente, et l'enregistrement la figeait. ``describe(clé, valeur)`` : ce que donne
-    chaque ligne (ce qui sert vraiment ce rôle) — la correspondance devient une table, sa liste dans une colonne."""
+def _mapping_rows(f: forms.FormField, given: Mapping[str, Any], errors: Mapping[str, str],
+                  prefix: str) -> list[tuple[str, dict[str, Any]]]:
+    """Les lignes d'une correspondance : (clé, la vue de son champ). Chaque ligne peut rester vide (« — ») : la clé
+    est alors absente (``forms._read_mapping``). La règle de l'ADR 0174 (une liste qui ne peut rester vide n'a pas de
+    « — ») ne vaut pas ici : sans elle, la première option était sélectionnée pour chaque clé absente, et
+    l'enregistrement la figeait."""
     item = f.item[0] if f.item else None
     current = given.get(f.path) or {}
     keys = f.keys or tuple((k, k) for k in sorted(current))
@@ -222,15 +221,37 @@ def _mapping_view(f: forms.FormField, given: Mapping[str, Any], errors: Mapping[
         view = field_view(sub, current.get(key), error=errors.get(sub.path, ""), prefix=prefix)
         if view is not None:
             view["nochamp"] = True
-            if describe is not None:
-                about = call(describe, key, current.get(key), label=f"ligne {f.path}.{key}")
-                view["about"] = {} if isinstance(about, Failed) else dict(about or {})
-            rows.append(view)
-    out = {"kind": "mapping", "path": f.path, "label": f.label, "help": f.help, "rows": rows,
-           "id": f"{prefix}-{f.path.replace('.', '-')}", "readonly": f.readonly, "table": None,
+            rows.append((key, view))
+    return rows
+
+
+def _mapping_view(f: forms.FormField, given: Mapping[str, Any], errors: Mapping[str, str], prefix: str,
+                  describe: Callable[[str, Any], Mapping[str, Any]] | None = None,
+                  beside: Sequence[forms.FormField] = ()) -> dict[str, Any]:
+    """Une correspondance (rôle → fournisseur, flux → autrice) : une ligne par clé (``_mapping_rows``) ; vide, le
+    rôle retombe sur son repli. ``describe(clé, valeur)`` : ce que donne chaque ligne (ce qui sert vraiment ce rôle)
+    — la correspondance devient une table, sa liste dans une colonne. ``beside`` : des correspondances de mêmes clés
+    posées dans cette table, chacune dans sa colonne à côté du choix (l'effort d'un rôle, ADR 0285) ; sans table,
+    elles ne sont pas rendues ici."""
+    current = given.get(f.path) or {}
+    rows = []
+    for key, view in _mapping_rows(f, given, errors, prefix):
+        if describe is not None:
+            about = call(describe, key, current.get(key), label=f"ligne {f.path}.{key}")
+            view["about"] = {} if isinstance(about, Failed) else dict(about or {})
+        rows.append((key, view))
+    out = {"kind": "mapping", "path": f.path, "label": f.label, "help": f.help, "rows": [view for _key, view in rows],
+           "id": f"{prefix}-{f.path.replace('.', '-')}", "readonly": f.readonly, "table": None, "beside": [],
            "error": _error_for(f.path, {k: v for k, v in errors.items() if k == f.path})}
     if describe is not None and rows:
-        out["table"] = _mapping_table(rows)
+        guests = [(g, dict(_mapping_rows(g, given, errors, prefix))) for g in beside]
+        for key, view in rows:
+            # une ligne sans cette clé chez l'invitée laisse sa cellule vide
+            view["beside"] = [found.get(key) for _g, found in guests]
+        out["beside"] = [{"path": g.path, "label": g.label, "help": g.help,
+                          "error": _error_for(g.path, {k: v for k, v in errors.items() if k == g.path})}
+                         for g, _found in guests]
+        out["table"] = _mapping_table(out["rows"])
     return out
 
 
@@ -473,6 +494,11 @@ class SettingsForms:
                 out["commands"], out["blocks"], out["facts"] = [], [], []
                 return out
         placed: list[tuple[forms.FormField, dict[str, Any]]] = []
+        # les correspondances posées dans la table d'une autre (``SettingsSection.beside``) : seulement quand
+        # celle-ci est sur cette page et se rend en table
+        mappings = {f.path: f for f in fields if f.kind == "mapping"}
+        hosted = {p for host, paths in s.beside.items() if host in mappings and host in s.describe
+                  for p in paths if p in mappings}
         for f in fields:
             if f.kind == "group":
                 continue
@@ -481,11 +507,14 @@ class SettingsForms:
                     out["records"].append(self._records_view(s, f, current, page, query))
                 continue
             if f.kind == "mapping":
+                if f.path in hosted:
+                    continue  # rangée dans la table d'une autre correspondance de cette page (``beside``)
                 if f.path in s.keys:
                     known = call(s.keys[f.path], label=f"clés de {s.key}.{f.path}")
                     if not isinstance(known, Failed):
                         f = dataclasses.replace(f, keys=tuple(known))
-                placed.append((f, _mapping_view(f, given, state.errors, prefix, s.describe.get(f.path))))
+                placed.append((f, _mapping_view(f, given, state.errors, prefix, s.describe.get(f.path),
+                                                [mappings[p] for p in s.beside.get(f.path, ()) if p in hosted])))
                 continue
             if f.path in s.choices:
                 f = _with_choices(f, s.choices[f.path](), given.get(f.path))

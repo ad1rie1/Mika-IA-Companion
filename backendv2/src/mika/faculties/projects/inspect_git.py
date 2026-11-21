@@ -1,4 +1,4 @@
-"""L'onglet « Dépôt git » de la fiche d'un projet (``git``, ADR 0183) : le dépôt de l'atelier face à son dépôt
+"""L'onglet « Dépôt » de la fiche d'un projet (``git``, ADR 0183, 0281) : le dépôt de l'atelier face à son dépôt
 distant — l'écart entre les deux, l'historique de chacun, ce qui n'est pas encore enregistré, les issues et pull
 requests ouvertes (GitHub), les envois et récupérations passés. Lu du port de l'atelier et, pour le distant, du port
 ``repo_host`` ; les aides communes de la fiche viennent de ``inspect.py``."""
@@ -9,9 +9,29 @@ from typing import Any
 
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
+from mika.faculties.projects import inspect_merge, inspect_reviews, merge
 from mika.faculties.projects.actions import _editable, _remote_ready, pending_of
-from mika.faculties.projects.faculty import PROJECTS, PULL_CAPABILITY, PUSH_CAPABILITY, Project, ProjectsState
-from mika.faculties.projects.inspect import PAGE, _cut, _effect_state, _host, _remote_ref, _subject
+from mika.faculties.projects.faculty import (
+    PROJECTS,
+    PULL_CAPABILITY,
+    PUSH_CAPABILITY,
+    Project,
+    ProjectsState,
+    by_pulls,
+)
+from mika.faculties.projects.inspect import (
+    CHECKS_FR,
+    PAGE,
+    PULL_FR,
+    _cut,
+    _effect_state,
+    _host,
+    _remote_ref,
+    _subject,
+    _text,
+    _texts,
+)
+from mika.faculties.projects.pulls import pull_url
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
     ActionSlot,
@@ -34,7 +54,7 @@ from mika.kernel.inspect import (
     When,
     plural,
 )
-from mika.ports.workshop import Hosted
+from mika.ports.workshop import PULL_OPEN, Hosted
 from mika.vocab.episodes import project_target
 
 # ── La fiche : dépôt git ──────────────────────────────────────────────────
@@ -46,7 +66,7 @@ EXCHANGES_SHOWN = 12
 EXCHANGE_FR = {PUSH_CAPABILITY: "pousser", PULL_CAPABILITY: "récupérer"}
 
 
-@PROJECTS.inspect("git", title="Dépôt git", subject="project", order=60,
+@PROJECTS.inspect("git", title="Dépôt", subject="project", order=28,
                   description="Le dépôt de l'atelier face à son dépôt distant : l'écart entre les deux (à pousser, à "
                               "récupérer), l'historique de chacun, ce qui n'est pas encore enregistré, les issues et "
                               "pull requests ouvertes (GitHub), et les envois et récupérations passés.")
@@ -64,14 +84,14 @@ async def _git_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[
     if not there:
         return [Note("Pas encore de dépôt : il s'ouvre à la première exécution qui écrit (ou au premier dépôt de "
                      "fichier, ou en récupérant le dépôt distant).", "muted"),
-                _remote_section(p, s, frame, ctx, hosted, gap), *distant, *exchanges]
+                _remote_section(p, s, frame, ctx, hosted, gap), *_work_branches(p, ctx), *distant, *exchanges]
     blocks: list[Block] = []
     sha = ctx.param("commit")
     if sha:
         shown = await port.show(p.id, sha)
-        blocks.append(Section(f"L'enregistrement {sha}", (
+        blocks.append(Section(f"L'enregistrement {sha[:12]}", (
             Code(_cut(shown, DIFF_SHOWN), title="Message et changements", lang="diff") if shown
-            else Note(f"Aucun enregistrement « {sha} » dans ce dépôt.", "warn"),
+            else Note(f"Aucun enregistrement « {sha[:12]} » dans ce dépôt.", "warn"),
             Fields((("fermer", Ref("subject", f"project/{p.id}", "revenir à l'historique", (("onglet", "git"),))),)))))
     count = await port.count(p.id)
     pager = ctx.pager("page_commits", size=PAGE, total=count)
@@ -84,9 +104,11 @@ async def _git_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[
     ahead = gap[0] if gap is not None else -1
     rows = []
     for i, k in enumerate(commits, start=pager.offset):
-        run = runs.get(k.sha)
+        # un compte rendu d'avant l'ADR 0277 portait l'abrégé : il garde son lien
+        run = runs.get(k.sha) or next((e for sha, e in runs.items() if k.sha.startswith(sha)), None)
         rows.append(Row((
-            Ref("subject", f"project/{p.id}", k.sha, (("onglet", "git"), ("commit", k.sha))), Text(k.title, clamp=120),
+            Ref("subject", f"project/{p.id}", k.sha[:7], (("onglet", "git"), ("commit", k.sha))),
+            Text(k.title, clamp=120),
             When(k.at) if k.at else "—", k.author or "—", k.files,
             Text(f"+{k.insertions} −{k.deletions}", "mono"),
             Ref("episode", run.correlation, "exécution") if run is not None else
@@ -95,7 +117,7 @@ async def _git_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[
             href=Ref("subject", f"project/{p.id}", "", (("onglet", "git"), ("commit", k.sha)))))
     blocks += [
         Stats((Stat("Enregistrements", count, branch), Stat("Le dernier", When(latest[0].at) if latest and latest[0].at
-                                                            else "—", latest[0].sha if latest else ""),
+                                                            else "—", latest[0].sha[:7] if latest else ""),
                Stat("Non enregistré", plural(changed, "fichier", "fichiers") if changed else "rien", "",
                     "warn" if changed else ""),
                Stat("Dépôt distant", _host(p.remote) or "aucun", p.branch if p.remote else "",
@@ -112,10 +134,61 @@ async def _git_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[
               caption="Un commit s'ouvre en diff coloré. Chaque exécution qui change quelque chose laisse un commit, "
                       "qu'on retrouve dans son compte rendu."),
         _remote_section(p, s, frame, ctx, hosted, gap),
+        *_work_branches(p, ctx),
         *distant,
         *exchanges,
     ]
     return blocks
+
+
+#: ses branches de travail (ADR 0274, 0281) : la fiche dessinée retrouve leur table par ce titre
+BRANCHES_TITLE = "Branches de travail"
+
+
+def _work_branches(p: Project, ctx: InspectContext) -> list[Block]:
+    """Ses branches de travail, une par objectif qui en a une : la branche, où en est sa pull request (et sa page
+    chez l'hôte), les vérifications de son commit, le verdict de sa relecture. Rien sur un projet au flux direct
+    dont aucun objectif n'a de branche."""
+    worked = [o for o in p.objectives if o.branch or o.pull_state or o.pull_proposal]
+    if not worked and not by_pulls(p):
+        return []
+    texts = _texts(ctx, (o.text_ref for o in worked))
+    rows = []
+    for o in sorted(worked, key=lambda o: (o.status not in (c.OPEN, c.BLOCKED), -o.id)):
+        if o.pull_proposal:
+            pull: Any = Badge("proposée : elle attend ton accord", "warn")
+        elif o.pull_state:
+            state = "ouverte, des changements sont demandés" if o.pull_state == PULL_OPEN and o.pull_changes \
+                else PULL_FR.get(o.pull_state, o.pull_state)
+            if o.pull_state == PULL_OPEN and o.pull_conflicts:
+                state += ", en conflit avec la base"
+            words = f"n° {o.pull} {state}" if o.pull else state
+            url = pull_url(p, o)
+            pull = Ref.url(url, words) if url else words
+        else:
+            pull = "pas encore" if o.unsent else "—"
+        # la fusion, ton geste (ADR 0288) : offerte sur la ligne d'une pull request prête, au commit qu'elle a laissé ;
+        # une fusion demandée ou refusée s'y dit
+        fuse: tuple[Any, ...] = ()
+        if o.pull_state == PULL_OPEN and not merge.blocked(p, o) and o.commit:
+            fuse = (ActionSlot(inspect_merge.ACTION, (("objective", str(o.id)), ("head", o.commit)),
+                               title=f"Fusionner la pull request n° {o.pull} (commit {o.commit[:12]})",
+                               presentation="button"),)
+        elif o.pull_state == PULL_OPEN and (merge.merging(o) or o.merge_refused):
+            fuse = (Note(inspect_merge.BLOCK_WORDS[merge.ASKED] if merge.merging(o) else
+                         inspect_merge.REFUSED_WORDS.get(o.merge_refused, ""), "warn"),)
+        rows.append(Row((
+            Ref("subject", f"project/{p.id}", f"n° {o.id} · {_text(texts, o.text_ref)}"[:90], (("onglet", "objectifs"),)),
+            Text(o.branch or "—", "mono"), pull,
+            CHECKS_FR.get(o.checks, "—") if o.pull_state == PULL_OPEN else "—",
+            Text(inspect_reviews.review_words(p, o) or "—", clamp=140)),
+            tone="" if o.status in (c.OPEN, c.BLOCKED) else "muted", detail=fuse))
+    return [Table((Column("objectif"), Column("branche", "fit"), Column("pull request"), Column("vérifications"),
+                   Column("relecture")), tuple(rows), title=BRANCHES_TITLE,
+                  empty="aucune branche de travail encore : chaque objectif ouvre la sienne à sa première exécution",
+                  caption="Sur un projet qui passe par des pull requests, chaque objectif travaille sur sa branche ; "
+                          "sa pull request se propose quand il est fait, et sa fusion reste à toi : chez l'hôte, ou ici, sur "
+                          "sa ligne, quand elle est prête. Elle ne fusionne jamais.")]
 
 
 async def _hosted(p: Project, ctx: InspectContext) -> Hosted | None:

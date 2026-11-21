@@ -39,9 +39,11 @@ from starlette.routing import Route
 
 from mika.adapters.maps import NONE as NO_MAP
 from mika.adapters.maps import MapUnavailable, gpx
+from mika.adapters.maps.hours import PARIS
 from mika.app.me.api import PREFIX, Call, Denied, MeApiBase, done, form, missing, spend
 from mika.app.me.common import millis, texts_of
 from mika.contracts import trips as c
+from mika.kernel.clock import local
 from mika.kernel.events import EventType
 from mika.plugins import location as location_p
 from mika.plugins import trips as trips_p
@@ -55,6 +57,7 @@ from mika.ports.maps import (
     FEATURES,
     HIT_FIELDS,
     MODES,
+    PHOTO_CITED,
     PHOTO_REF,
     PLACE_REF,
     ROUTE_POINTS_MAX,
@@ -62,6 +65,7 @@ from mika.ports.maps import (
     THEMES,
     EventDetail,
     EventHit,
+    MapsBadMedia,
     MapsNotFound,
     MapsUnavailable,
     OsmFacts,
@@ -485,10 +489,10 @@ def _reviews(f: ReviewFacts | None) -> dict[str, Any] | None:
 
 def _event_hit(e: EventHit) -> dict[str, Any]:
     """Un événement trouvé : tous ses champs, toujours (``free`` : ``null`` quand on ne sait pas ; ``photo`` : vide
-    sans photo)."""
+    sans photo, et avec elle ce qu'il faut en citer — d'où elle vient, son auteur, son lien, sa licence : ADR 0269)."""
     return {"id": e.id, "name": e.name, "start": e.start, "end": e.end, "when_text": e.when_text, "place": e.place,
             "lat": e.lat, "lon": e.lon, "distance_m": e.distance_m, "themes": list(e.themes), "free": e.free,
-            "price": e.price, "photo": e.photo}
+            "price": e.price, "photo": e.photo, **{name: getattr(e, name) for name in PHOTO_CITED}}
 
 
 def _fiche(d: PlaceDetail) -> dict[str, Any]:
@@ -522,7 +526,9 @@ async def place_read(call: Call) -> dict[str, Any]:
 
 async def place_refresh(call: Call) -> dict[str, Any]:
     """« Actualiser » : sa fiche relue tout de suite chez Google et à l'office de tourisme — au plus ``REFRESHES`` par
-    compte. Ce qui n'a pas pu se relire : 503, en mots (ce qui l'a pu est gardé : relis la fiche)."""
+    compte (et ce que le guichet borne pour tout le serveur, ADR 0269). ``message`` dit ce qui s'est passé, en mots
+    (« Fiche relue. », « Relue il y a 4 min : elle est à jour… », « Rien à relire pour ce lieu… ») ; ce qui n'a pas
+    pu se relire : 503, en mots (ce qui l'a pu est gardé : relis la fiche)."""
     ident = _place_id(call)
     port = _maps(call, "places")
     if not spend(call.api.refreshes, call.me.account):
@@ -533,7 +539,7 @@ async def place_refresh(call: Call) -> dict[str, Any]:
         raise _unavailable(exc) from None
     if got is None:
         raise missing()
-    return {"ok": True, "message": "Fiche relue.", **_fiche(got)}
+    return {"ok": True, "message": got.said, **_fiche(got.detail)}
 
 
 # ── les événements (ADR 0259) ──
@@ -573,9 +579,12 @@ async def events(call: Call) -> dict[str, Any]:
         raise Denied(400, "Cherche autour d'un point (near), dans une zone (bbox), ou un nom (q).")
     radius = _int(call, "radius", RADIUS, RADIUS_MIN, RADIUS_MAX)
     start, end = _day(call, "start"), _day(call, "end")
-    if start is not None and end is not None and end < start:
-        raise Denied(400, "« end » : après « start ».", {"end": "après start"})
-    if start is not None and end is not None and (end - start).days > EVENTS_SPAN_MAX_DAYS:
+    # sans ``start``, la période commence aujourd'hui (à Paris) : sa fin se juge de là, avant le guichet
+    begins = start if start is not None else local(call.kernel.mind.clock.now(), PARIS).date()
+    if end is not None and end < begins:
+        raise Denied(400, "« end » : après « start »." if start is not None else "« end » : aujourd'hui ou après.",
+                     {"end": "après start" if start is not None else "aujourd'hui ou après"})
+    if end is not None and (end - begins).days > EVENTS_SPAN_MAX_DAYS:
         raise Denied(400, f"Une période d'au plus {EVENTS_SPAN_MAX_DAYS} jours.", {"end": "trop loin de start"})
     themes, free = _themes(call), call.flag("free")
     limit = _int(call, "limit", 30, 1, EVENTS_LIMIT_MAX)
@@ -635,6 +644,8 @@ async def photo(call: Call) -> Response:
         data, media = await port.photo(ref)
     except MapsNotFound:
         raise missing() from None
+    except MapsBadMedia as exc:  # elle a répondu, mais pas une image qu'on sert
+        raise Denied(502, str(exc)[:300]) from None
     except MapsUnavailable as exc:
         raise _unavailable(exc) from None
     if media not in PHOTO_MEDIA:

@@ -17,6 +17,7 @@ import { h } from "../../shell/dom";
 import { ico } from "../../shell/icons";
 import { failureText } from "../../shared/kit";
 import {
+  bandCredit,
   countWords,
   isoWords,
   outLink,
@@ -70,29 +71,30 @@ function sourceLine(parts: readonly string[]): string {
 }
 
 /** La tuile du plan, en tête de la bande : le lieu et toi, dessinés ; un clic recadre la carte sur lui. */
-function planTile(scene: Scene, title: string, dist: string): string {
+function planTile(scene: Scene, title: string, dist: string, count: number): string {
   const plan = drawnScene(scene, { width: 200, height: 150, title, pad: 34 });
-  return `<button class="ph ph-plan" type="button" data-plan title="Recadrer la carte sur ce lieu">${plan}<span class="ph-src">${ico("map", "xs")}Plan</span>${
+  const n = count ? `<span class="ph-count">${ico("image", "xs")}${count} photo${count > 1 ? "s" : ""}</span>` : "";
+  return `<button class="ph ph-plan" type="button" data-plan title="Recadrer la carte sur ce lieu">${plan}<span class="ph-src">${ico("map", "xs")}Plan</span>${n}${
     dist ? `<span class="ph-credit">${h(dist)}</span>` : ""}</button>`;
 }
 
 /**
- * La bande du haut d'une fiche : le plan d'abord, puis les photos (chacune avec sa source et son crédit, lié) ; une
- * photo touchée s'ouvre dans la visionneuse (`data-photo` : sa place dans `photos`). Sans photo, le plan seul. Les
- * photos se chargent quand elles paraissent dans la bande (`data-photo-scroll`, `photos.ts`).
+ * La bande du haut d'une fiche : le plan d'abord, puis les photos (chacune avec sa source, son crédit lié et sa licence
+ * — celle d'une photo de l'office de tourisme se montre là où elle se montre, R2-W03) ; une photo touchée s'ouvre dans la
+ * visionneuse (`data-photo` : sa place dans `photos`). Sans photo, le plan seul. Les photos se chargent quand elles
+ * paraissent dans la bande (`data-photo-scroll`, `photos.ts`).
  */
 export function photoBand(o: { scene: Scene; title: string; dist: string; photos: readonly Photo[]; seen: (ref: string) => boolean }): string {
-  const plan = planTile(o.scene, o.title, o.dist);
+  const plan = planTile(o.scene, o.title, o.dist, o.photos.length);
   if (!o.photos.length) return `<div class="ph-band solo">${plan}</div>`;
   const items = o.photos.map((p, i) => {
     const alt = p.caption.trim() || `Photo ${i + 1}${p.credit ? `, de ${p.credit}` : ""}`;
     return `<figure class="ph">
       <button class="ph-open" type="button" data-photo="${i}" aria-label="${h(`Voir en grand : ${alt}`)}">${photoImg(p.ref, alt, o.seen)}<span class="ph-fallback">${ico("image")}</span></button>
       <span class="ph-src ${h(p.source)}">${h(photoSource(p))}</span>
-      ${p.credit.trim() ? `<figcaption class="ph-credit">${outLink(p.credit_url, p.credit.trim())}</figcaption>` : ""}</figure>`;
+      ${bandCredit(p) ? `<figcaption class="ph-credit">${bandCredit(p)}</figcaption>` : ""}</figure>`;
   }).join("");
-  const count = `<span class="ph-count">${ico("image", "xs")}${o.photos.length} photo${o.photos.length > 1 ? "s" : ""}</span>`;
-  return `<div class="ph-wrap"><div class="ph-band" data-photo-scroll>${plan}${items}</div>${count}</div>`;
+  return `<div class="ph-wrap"><div class="ph-band" data-photo-scroll>${plan}${items}</div></div>`;
 }
 
 /**
@@ -118,6 +120,9 @@ export function viewerMarkup(photos: readonly Photo[], index: number): string {
 }
 
 // ── La fiche d'un lieu ───────────────────────────────────────────────
+
+/** Au-delà de tant de caractères, un avis se replie. */
+const LONG_REVIEW = 320;
 
 export interface PlaceFicheView {
   /** Sa ligne (celle de la liste en attendant la fiche, puis celle de la fiche). */
@@ -149,15 +154,20 @@ function openTag(p: Place): string {
   return `<span class="tag ${cls}">${ico("clock", "xs")}${h(p.open_text.trim())}</span>`;
 }
 
-/** Les étiquettes d'un lieu : ouvert ou fermé, sa cuisine, son prix, sa note. */
+/**
+ * Les étiquettes d'un lieu : ouvert ou fermé, sa cuisine, son prix, sa note. Une note qui ne vient pas du bloc Google de
+ * la fiche (celle de la liste, en attendant la fiche ; une fiche sans bloc) dit d'où elle vient : « Google Maps » (R2).
+ */
 export function placeTags(p: Place, r: ReviewsPart | null): string {
-  const rating = r?.found && typeof r.rating === "number" ? r.rating : p.rating;
+  const fromBlock = !!r?.found && typeof r.rating === "number";
+  const rating = fromBlock ? r!.rating : p.rating;
   const price = r?.found && r.price ? r.price : p.price;
   const tags = [
     openTag(p),
     p.cuisine?.trim() ? `<span class="tag">${h(p.cuisine.trim())}</span>` : "",
     price?.trim() ? `<span class="tag">${h(price.trim())}</span>` : "",
-    typeof rating === "number" ? `<span class="tag g-tag">${stars(rating, "xs")}${h(ratingWords(rating))}</span>` : "",
+    typeof rating === "number"
+      ? `<span class="tag g-tag">${stars(rating, "xs")}${h(ratingWords(rating))}${fromBlock ? "" : '<span class="muted">· Google Maps</span>'}</span>` : "",
   ].filter(Boolean);
   return tags.length ? `<div class="row wrap fiche-tags">${tags.join("")}</div>` : "";
 }
@@ -214,9 +224,11 @@ export function googleBlock(r: ReviewsPart, v: Pick<PlaceFicheView, "refreshing"
   const facts = factRows(r.facts);
   const reviews = r.reviews.map((x) => {
     const who = x.author.trim() ? outLink(x.author_url, x.author.trim(), "g-author") : "Un visiteur";
-    return `<article class="g-review"><div class="g-r-head">${stars(x.rating, "xs")}<span class="g-r-who">${who}</span>${
+    // un long avis se replie (cinq lignes) : « Lire la suite » le déplie
+    const long = x.text.length > LONG_REVIEW;
+    return `<article class="g-review${long ? " long" : ""}"><div class="g-r-head">${stars(x.rating, "xs")}<span class="g-r-who">${who}</span>${
       x.relative.trim() ? `<span class="muted">· ${h(x.relative.trim())}</span>` : ""}</div>
-      <div class="g-r-text">${paragraphs(x.text)}</div></article>`;
+      <div class="g-r-text">${paragraphs(x.text)}</div>${long ? `<button class="btn xs ghost g-more" type="button" data-review-more aria-expanded="false">Lire la suite</button>` : ""}</article>`;
   }).join("");
   return `<section class="fiche-sec g-sec" aria-label="${h(label)}">${head}${score}${summary}
     ${facts ? `<dl class="kv g-facts">${facts}</dl>` : ""}
@@ -335,10 +347,12 @@ export function themeWords(e: Pick<EventItem, "themes">, themes: ReadonlyMap<str
   return (e.themes ?? []).map((t) => themes.get(t) ?? "").filter(Boolean).join(", ");
 }
 
-/** Son prix en court : « Gratuit », ses tarifs, ou rien. */
+/** Son prix en court : « Gratuit » (et ce que ses tarifs en disent, sans le redire), ses tarifs, ou rien. */
 export function priceWords(e: Pick<EventItem, "free" | "price">): string {
-  if (e.free === true) return e.price?.trim() && !/^gratuit$/i.test(e.price.trim()) ? `Gratuit · ${e.price.trim()}` : "Gratuit";
-  return e.price?.trim() ?? "";
+  const price = e.price?.trim() ?? "";
+  if (e.free !== true) return price;
+  if (!price) return "Gratuit";
+  return /^gratuit/i.test(price) ? price[0].toUpperCase() + price.slice(1) : `Gratuit · ${price}`;
 }
 
 /** La fiche d'un événement : quand, où, combien, le programme, ses dates, les contacts, et qui l'a écrite. */

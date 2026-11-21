@@ -45,7 +45,7 @@ import httpx
 
 from mika.adapters.maps.config import ReviewsConfig, reviews_key
 from mika.adapters.maps.pace import client
-from mika.adapters.maps.quota import Limiter, Limits
+from mika.adapters.maps.quota import Limiter, Limits, QuotaExceeded, note_sent
 from mika.adapters.maps.tiles import read_capped
 from mika.ports.maps import MapsUnavailable, Review
 from mika.ports.preprocess import visible
@@ -292,13 +292,18 @@ class PlacesClient:
         if not self.key():
             raise PlacesUnavailable(NO_KEY, AUTH)
         # le jour et la seconde de tout Google, puis le mois de ce SKU, compté dès qu'il part (le dernier : un appel
-        # retenu ailleurs ne lui coûte rien)
-        await self.limiter.take(background=background, wait_max=wait_max)
-        await self.skus[sku.service].take(background=background, wait_max=0.0, book=True)
+        # retenu ailleurs ne lui coûte rien) ; retenu par son mois, il ne compte pas non plus dans le jour (ADR 0269)
+        noted = await self.limiter.take(background=background, wait_max=wait_max)
+        try:
+            await self.skus[sku.service].take(background=background, wait_max=0.0, book=True)
+        except QuotaExceeded:
+            await self.limiter.forget(noted)
+            raise
         key = self.key()
         if not key:
             raise PlacesUnavailable(NO_KEY, AUTH)
         self.asked += 1
+        note_sent()
         try:
             raw = await self._ask(method, path, key, mask=mask, body=body, params=params, sku=sku)
             try:

@@ -8,7 +8,20 @@ from __future__ import annotations
 
 from typing import Any
 
-from mika.ports.workshop import Commit, Hosted, Ticket
+from mika.ports.workshop import (
+    MERGE_UNREACHED,
+    CheckLog,
+    Checks,
+    Commit,
+    Hosted,
+    Issue,
+    Issues,
+    Merged,
+    Pull,
+    Remark,
+    Talk,
+    Ticket,
+)
 from mika.runtime.operations import perform
 
 URL = "https://github.com/exemple/outils-reseau.git"
@@ -18,6 +31,7 @@ WORK = (("README.md", "# Outils réseau\n\nUn petit outillage d'administration.\
         ("rdp/module.py", "def connect(host: str) -> None:\n    ...\n", "exécution 2 · objectif n° 1"),
         ("docs/rdp.md", "# Le module RDP\n\nComment s'en servir.\n", "exécution 3 · objectif n° 2"))
 HOUR = 3_600_000_000
+DEMO = "hôte de démonstration"
 
 
 class DemoHost:
@@ -34,6 +48,44 @@ class DemoHost:
 
     async def compare(self, url: str, base: str, head: str) -> tuple[int, int] | None:
         return None
+
+    def writes(self, url: str) -> bool:
+        return False  # la démonstration n'ouvre aucune pull request
+
+    async def open_pull(self, url: str, *, head: str, base: str, title: str, body: str) -> Pull:
+        return Pull(head=head, error=DEMO)
+
+    async def pull(self, url: str, head: str) -> Pull:
+        return Pull(head=head)
+
+    # la démonstration ne reflète aucun ticket et ne lit aucune vérification (ADR 0275) : rien ne s'y écrit
+    async def issues(self, url: str) -> Issues:
+        return Issues(error=DEMO)
+
+    async def open_issue(self, url: str, *, title: str, body: str, mark: str) -> Issue:
+        return Issue(error=DEMO)
+
+    async def set_issue(self, url: str, number: int, *, closed: bool, dropped: bool = False) -> Issue:
+        return Issue(number=number, error=DEMO)
+
+    async def remark(self, url: str, number: int, *, body: str, mark: str) -> Remark:
+        return Remark(issue=number, error=DEMO)
+
+    async def checks(self, url: str, sha: str) -> Checks:
+        return Checks(sha=sha, error=DEMO)
+
+    async def check_log(self, url: str, sha: str) -> CheckLog:
+        return CheckLog(sha=sha, error=DEMO)
+
+    # ni échanges à lire, ni fusion (ADR 0288) : la démonstration ne fusionne rien
+    async def talk(self, url: str, number: int, *, pull: bool = False) -> Talk:
+        return Talk(error=DEMO)
+
+    async def merge_pull(self, url: str, number: int, *, sha: str) -> Merged:
+        return Merged(number=number, why=MERGE_UNREACHED, error=DEMO)
+
+    async def edit_pull(self, url: str, number: int, *, title: str | None = None, body: str | None = None) -> Pull:
+        return Pull(number=number, error=DEMO)
 
 
 async def repository(kernel: Any, key: str, now: int) -> None:

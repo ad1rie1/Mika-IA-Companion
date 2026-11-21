@@ -25,7 +25,7 @@ from datetime import datetime
 from mika.app.mindport import KernelPort
 from mika.contracts import trips as c
 from mika.kernel.events import Content
-from mika.ports.maps import ReviewsCoverage
+from mika.ports.maps import MapsBadMedia, MapsUnavailable, ReviewsCoverage
 from tests.fixtures.fake_maps import (
     CIBOULETTE,
     CONCERT,
@@ -67,6 +67,9 @@ def test_a_list_is_filtered_sorted_and_says_when_its_ratings_were_read(world):  
     assert found["id"] == "l7" and found["rating"] == 4.6 and found["reviews"] == 1203 and found["price"] == "€€€"
     assert found["open_state"] == "open" and found["open_text"] == "Ouvert · ferme à 22:30"
     assert found["photo"] == PHOTO and found["tags"] == ["terrasse", "vegetarien"] and found["cuisine"]
+    # sa vignette se montre avec son auteur et son lien : la liste les porte (ADR 0269), sans licence (Google)
+    assert (found["photo_source"], found["photo_credit"], found["photo_credit_url"]) == (
+        "google", "Camille R.", "https://www.google.com/maps/contrib/1") and "photo_licence" not in found
     [asked] = [x for x in maps.calls if x[0] == "search"]
     assert asked[6] == {"open_now": True, "features": frozenset({"terrasse", "vegetarien"}), "cuisine": "française",
                         "min_rating": 4.5, "sort": "rating"}
@@ -173,14 +176,18 @@ def test_refresh_is_bounded_per_account_and_says_what_could_not_be_read(world): 
     assert client.post(CARTE + "/lieu/l7/actualiser", json={}).status_code == 403  # sans CSRF
     done = post(client, CARTE + "/lieu/l7/actualiser", {})
     assert done.status_code == 200 and done.json()["ok"] and done.json()["reviews"]["rating"] == 4.6
-    assert ("place_refresh", "l7") in maps.calls
+    assert done.json()["message"] == "Fiche relue." and ("place_refresh", "l7") in maps.calls
+    maps.refresh_said = "Relue il y a 4 min : elle est à jour (une fiche se relit au plus une fois toutes les 10 minutes)."
+    fresh = post(client, CARTE + "/lieu/l7/actualiser", {})  # R1-05, R1-07 : ce que dit le guichet, tel quel
+    assert fresh.status_code == 200 and fresh.json()["message"].startswith("Relue il y a 4 min")
+    maps.refresh_said = "Fiche relue."
     assert post(client, CARTE + "/lieu/l999/actualiser", {}).status_code == 404
     maps.refresh_fail = "Le quota du mois de Google (fiches avec avis) est atteint : il revient le 1er décembre à 09:00."
     failed = post(client, CARTE + "/lieu/l7/actualiser", {})
     assert failed.status_code == 503 and failed.json()["error"].startswith("Le quota du mois de Google")
     maps.refresh_fail = ""
-    codes = [post(client, CARTE + "/lieu/l7/actualiser", {}).status_code for _ in range(8)]
-    assert codes == [200] * 7 + [429]  # dix par minute et par compte, les refus compris
+    codes = [post(client, CARTE + "/lieu/l7/actualiser", {}).status_code for _ in range(7)]
+    assert codes == [200] * 6 + [429]  # dix par minute et par compte, les refus compris
     second_person(client, live)
     login(client, "lea")
     assert post(client, CARTE + "/lieu/l7/actualiser", {}).status_code == 200  # la borne est par compte
@@ -209,8 +216,14 @@ def test_events_are_looked_for_around_a_point_a_zone_a_period_and_themes(world):
     assert [e["id"] for e in body["events"]] == [FETE.id, CONCERT.id]
     concert = body["events"][1]
     assert set(concert) == {"id", "name", "start", "end", "when_text", "place", "lat", "lon", "distance_m", "themes",
-                            "free", "price", "photo"}
+                            "free", "price", "photo", "photo_source", "photo_credit", "photo_credit_url",
+                            "photo_licence"}
     assert concert["when_text"] == "dim. 22 nov. · 18:00–19:30" and concert["photo"] == TOURISM_PHOTO
+    # la vignette d'une photo de l'office de tourisme se montre avec son auteur et sa licence (ADR 0269)
+    assert (concert["photo_source"], concert["photo_credit"], concert["photo_licence"]) == (
+        "datatourisme", "Bonlieu", "CC BY-NC-ND 4.0")
+    fete = body["events"][0]
+    assert set(fete) == set(concert) and fete["photo"] == fete["photo_credit"] == fete["photo_licence"] == ""
     assert concert["free"] is False and concert["distance_m"] > 0
     assert body["coverage"] == {"ready": True, "cells": 4, "loaded": 4, "oldest": ms("2026-11-18T03:00:00Z"),
                                 "note": ""}
@@ -264,6 +277,38 @@ def test_a_photo_is_served_by_its_reference_alone_with_private_cache_headers(wor
     for data, media in ((b"<svg onload=alert(1)>", "image/svg+xml"), (b"<html>", "text/html")):
         maps.photos[PHOTO] = (data, media)
         assert client.get(CARTE + f"/photo/{PHOTO}").status_code == 502, media
+
+
+def test_a_source_that_answers_something_else_than_an_image_is_a_502(world):  # noqa: F811
+    """R1-12 : le relais lit les premiers octets ; une source qui rend du HTML répondait 503 (« muette ») alors que le
+    contrat dit 502 — elle a répondu, mais pas une image. Muette, elle reste un 503."""
+    client, _live, maps = rated(world)
+
+    async def not_an_image(ref: str) -> tuple[bytes, str]:
+        raise MapsBadMedia("Ce que la source a rendu n'est pas une image.")
+
+    async def silent(ref: str) -> tuple[bytes, str]:
+        raise MapsUnavailable("La source de cette photo ne répond pas (ConnectError).")
+
+    maps.photo = not_an_image
+    got = client.get(CARTE + f"/photo/{PHOTO}")
+    assert got.status_code == 502 and got.json()["error"] == "Ce que la source a rendu n'est pas une image."
+    maps.photo = silent
+    assert client.get(CARTE + f"/photo/{PHOTO}").status_code == 503
+
+
+def test_a_period_too_long_or_over_is_refused_with_its_field_even_without_a_start(world):  # noqa: F811
+    """R1-12 : ``end`` à plus d'un an sans ``start`` (qui vaut aujourd'hui) passait au guichet, qui refusait en
+    minuscules, sans ``fields`` ; une fin déjà passée aussi."""
+    client, _live, maps = rated(world)
+    asked = len(maps.calls)
+    said = {}
+    for end in ("2031-01-01", "2020-01-01"):
+        refused = client.get(CARTE + f"/evenements?near={ANNECY}&end={end}")
+        assert refused.status_code == 400 and "end" in refused.json()["fields"], end
+        said[end] = refused.json()["error"]
+    assert said == {"2031-01-01": "Une période d'au plus 366 jours.", "2020-01-01": "« end » : aujourd'hui ou après."}
+    assert not [x for x in maps.calls[asked:] if x[0] == "events"]  # refusé avant le guichet
 
 
 def test_a_coverage_without_cells_and_a_list_without_place_still_answer(world):  # noqa: F811

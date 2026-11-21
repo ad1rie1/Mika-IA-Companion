@@ -3,7 +3,10 @@ et, si elle veut, ce qu'elle aurait dû dire ou pourquoi. Le fil le garde à cô
 vit (``transcript.judged`` n'est pas public).
 
 Régler un fil de travail (ADR 0164) : son opératrice lui donne, depuis le chat, un titre, une petite description —
-ce que Mika relit en tête de ce fil —, ou l'archive. Le réglage entier à chaque fois ; le dernier vaut."""
+ce que Mika relit en tête de ce fil —, ou l'archive. Le réglage entier à chaque fois ; le dernier vaut.
+
+Forcer l'effort de réflexion (ADR 0287) : son opératrice choisit, depuis le chat, combien le modèle réfléchit avant de
+lui répondre — dans toute sa conversation, ou dans un fil de travail ; « auto » rend la main au réglage du rôle."""
 
 from __future__ import annotations
 
@@ -18,6 +21,7 @@ from mika.kernel.events import Content
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.operate import ActionContext, Done, Refused
+from mika.ports.llm import EFFORT_LABELS
 from mika.vocab.privacy import Sensitivity
 
 #: ce que dit un commentaire, au plus
@@ -79,3 +83,29 @@ def _set_strand(s: TranscriptState, frame: Frame, args: StrandArgs, ctx: ActionC
         person=ctx.by, strand=args.strand, title=Content.of(" ".join(args.title.split()), level=level),
         description=Content.of(args.description.strip(), level=level), archived=args.archived)
     return Done(drafts=(draft,), message="Le fil est archivé." if args.archived else "Le fil est réglé.")
+
+
+#: « auto » : rien de forcé (une valeur à part : un champ vide se lit comme absent)
+AUTO = "auto"
+EFFORT_CHOICES = ((AUTO, "auto"), *((effort, label) for effort, label in EFFORT_LABELS.items() if effort))
+
+
+class EffortArgs(BaseModel):
+    #: le fil de travail réglé ; vide : toute sa conversation
+    strand: Annotated[str, Knob(widget="hidden")] = Field("", max_length=c.STRAND_MAX, pattern=r"^[A-Za-z0-9_-]*$")
+    effort: Annotated[Literal["auto", "low", "medium", "high", "xhigh", "max"],
+                      Knob(label="Effort de réflexion", choices=EFFORT_CHOICES, advanced=False,
+                           help="auto : un fil suit la conversation, la conversation suit le réglage du rôle")] = AUTO
+
+
+@TRANSCRIPT.action("regler_effort", title="Forcer l'effort de réflexion", args=EffortArgs, emits=[c.EFFORT_SET],
+                   section="fil", inline=True,
+                   description="Combien le modèle réfléchit avant de lui répondre, dans toute sa conversation ou dans un "
+                               "fil de travail ; auto rend la main au réglage du rôle.")
+def _set_effort(s: TranscriptState, frame: Frame, args: EffortArgs, ctx: ActionContext) -> Done:
+    if not ctx.by:
+        raise Refused("L'effort d'une conversation se règle par celle à qui elle est.")
+    effort = "" if args.effort == AUTO else args.effort
+    draft = c.EFFORT_SET.draft(person=ctx.by, strand=args.strand, effort=effort)
+    where = "ce fil" if args.strand else "toute la conversation"
+    return Done(drafts=(draft,), message=f"Effort forcé pour {where}." if effort else f"Effort en auto pour {where}.")

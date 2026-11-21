@@ -5,8 +5,9 @@ Contrat :
 - préfixe en cache : les outils (triés par nom) puis ``system_stable``, marqué
   ``cache_control`` — à défaut de système, la dernière déclaration d'outil ; un
   second point sur le dernier message avant le tour final, pour qu'une
-  conversation qui s'allonge relise son préfixe. Deux points au plus (l'API en
-  accepte quatre) ;
+  conversation qui s'allonge relise son préfixe — ou, dans une boucle d'outils,
+  sur le lot de résultats qui la finit : le tour suivant le relira (ADR 0267).
+  Deux points au plus (l'API en accepte quatre) ;
 - ``system_volatile`` suit le préfixe stable, hors cache, sauf s'il voyage déjà
   en tête du dernier tour utilisateur (dans le système, il change à chaque tour
   et le cache des messages, rendus après lui, n'est plus jamais relu) ;
@@ -14,7 +15,13 @@ Contrat :
   → UN tour utilisateur de blocs ``tool_result`` (``is_error`` honoré) ;
 - les blocs de réflexion d'un tour outillé reviennent tels que reçus (l'API les
   exige inchangés) : mémoire bornée, indexée par les identifiants d'appels ;
-  sans elle, le tour est reconstruit sans réflexion ;
+  sans elle, le tour est reconstruit sans réflexion. Une réflexion que l'API
+  refuse parce que le fil a changé depuis qu'elle l'a écrite (un ancien résultat
+  d'outil abrégé faute de place : 400 « Invalid signature in thinking block »)
+  est retirée du fil et oubliée, et l'appel rejoué une fois (ADR 0267) ;
+- une sortie en JSON (``LLMRequest.output_schema``) → ``output_config.format`` ;
+  un 400 qui la refuse (un modèle qui ne la connaît pas) est rejoué une fois
+  sans elle, et le refus mémorisé par modèle — l'appelant relit du texte ;
 - ``temperature`` n'est jamais envoyée aux modèles qui la refusent ; un 400 qui
   la nomme est rejoué une fois sans elle, et le refus mémorisé par modèle ;
 - le plafond de sortie envoyé (``output_tokens``) ne descend jamais sous
@@ -54,7 +61,16 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from mika.kernel.prompt import CONTEXT_FOOTER, CONTEXT_HEADER
-from mika.ports.llm import RAW_ARGS_KEY, TOOL_CHOICE_NONE, LLMRequest, LLMResponse, Message, ToolCall, Usage
+from mika.ports.llm import (
+    RAW_ARGS_KEY,
+    TOOL_CHOICE_NONE,
+    LLMRequest,
+    LLMResponse,
+    Message,
+    ToolCall,
+    Usage,
+    checked_effort,
+)
 
 try:
     import anthropic
@@ -98,14 +114,9 @@ _STOPS = {
 _THINKING = frozenset({"thinking", "redacted_thinking"})
 #: l'en-tête de l'espace de travail, pour une clé qui n'est attachée à aucun
 WORKSPACE_HEADER = "anthropic-workspace-id"
-#: les efforts de réflexion (ceux de la CLI, ``--effort``), chacun avec son libellé ; vide : pas de réflexion par
-#: l'API, le défaut de la CLI. Avec les modes de connexion de Claude Code, ils ne sont déclarés qu'ici : les deux
-#: fournisseurs Claude (cette API et la CLI, ``claude_code.py``), le réglage d'un fournisseur (``config.py``) et la
-#: commande ``mika llm backend`` les lisent — un effort nouveau s'ajoute à cette seule ligne
-EFFORT_LABELS = {"": "défaut de la CLI", "low": "faible", "medium": "moyen", "high": "élevé", "xhigh": "très élevé",
-                 "max": "maximal"}
-EFFORTS = tuple(EFFORT_LABELS)
-#: comment Claude Code se connecte (le login de la CLI, ou une clé d'API Console), chacun avec son libellé
+#: comment Claude Code se connecte (le login de la CLI, ou une clé d'API Console), chacun avec son libellé ; déclarés
+#: ici seulement : la CLI (``claude_code.py``), la fiche d'un fournisseur (``config.py``) et ``mika llm backend`` les
+#: lisent. (Les efforts de réflexion sont au port : ``ports.llm.EFFORTS``.)
 AUTH_LABELS = {"abonnement": "le login de la CLI (abonnement)", "cle_api": "une clé d'API Console"}
 AUTHS = tuple(AUTH_LABELS)
 #: avec la réflexion, la sortie (réflexion comprise) n'est jamais plafonnée en deçà
@@ -114,14 +125,6 @@ THINKING_OUTPUT_TOKENS = 16_384
 SEARCH_TOOL = {"type": "tool_search_tool_bm25_20251119", "name": "tool_search_tool_bm25"}
 #: des blocs produits par le serveur, à rendre inchangés au tour suivant
 _SERVER = frozenset({"server_tool_use", "tool_search_tool_result"})
-
-
-def checked_effort(effort: str) -> str:
-    """L'effort de réflexion demandé, s'il fait partie d'``EFFORTS`` ; sinon ``ValueError`` (les deux fournisseurs
-    Claude le refusent au même message)."""
-    if effort not in EFFORTS:
-        raise ValueError(f"effort de réflexion inconnu : {effort!r} (attendu : {', '.join(e for e in EFFORTS if e)})")
-    return effort
 
 
 class ClaudeBackend:
@@ -148,7 +151,9 @@ class ClaudeBackend:
             # une clé qui n'est attachée à aucun espace de travail (« sk-ant-usr- ») le dit à chaque requête
             client = anthropic.AsyncAnthropic(api_key=api_key or None,
                                               default_headers={WORKSPACE_HEADER: workspace} if workspace else None)
-        #: la réflexion adaptative à cet effort (comme ``--effort`` de la CLI) ; vide : pas de réflexion
+        #: la réflexion adaptative à cet effort (comme ``--effort`` de la CLI) quand l'appel n'en demande pas
+        #: (``LLMRequest.effort``, ADR 0285) ; vide : le défaut du modèle (les familles 5.x réfléchissent d'emblée,
+        #: ``THINKING_PREFIXES`` ; celles d'avant, pas du tout)
         self.effort = effort
         self.name = name
         self.model = model
@@ -156,6 +161,8 @@ class ClaudeBackend:
         self.temperature = temperature
         self._client = client
         self._no_temperature: set[str] = set()
+        #: modèles qui refusent ``output_config.format`` (une sortie en JSON garantie)
+        self._no_format: set[str] = set()
         self._replays: OrderedDict[tuple[str, ...], tuple[dict[str, Any], ...]] = OrderedDict()
 
     # ── Requête ──────────────────────────────────────────────────────────
@@ -166,15 +173,21 @@ class ClaudeBackend:
             mark["ttl"] = self.cache_ttl
         return mark
 
-    def thinks(self) -> bool:
-        """Le modèle réfléchit avant d'écrire : à l'effort demandé, ou d'emblée (``THINKING_PREFIXES``)."""
-        return bool(self.effort) or self.model.startswith(THINKING_PREFIXES)
+    def effort_of(self, req: LLMRequest | None = None) -> str:
+        """L'effort de cet appel : celui qu'il demande (l'appelant, ou le réglage de son rôle), sinon celui de la
+        fiche (ADR 0285) ; « » : le défaut du modèle."""
+        return (req.effort if req is not None else "") or self.effort
+
+    def thinks(self, req: LLMRequest | None = None) -> bool:
+        """Le modèle réfléchit avant d'écrire : à l'effort demandé (par l'appel ou par la fiche), ou d'emblée
+        (``THINKING_PREFIXES``)."""
+        return bool(self.effort_of(req)) or self.model.startswith(THINKING_PREFIXES)
 
     def output_tokens(self, req: LLMRequest) -> int:
         """Le plafond de sortie envoyé pour ``req`` : celui demandé, jamais sous ``THINKING_OUTPUT_TOKENS`` quand le
         modèle réfléchit (la réflexion compte dans la sortie : assez de place pour réfléchir puis répondre, la CLI
         fait de même)."""
-        return max(req.max_tokens, THINKING_OUTPUT_TOKENS) if self.thinks() else req.max_tokens
+        return max(req.max_tokens, THINKING_OUTPUT_TOKENS) if self.thinks(req) else req.max_tokens
 
     def payload(self, req: LLMRequest) -> dict[str, Any]:
         """Le corps de ``messages.create``, hors ``temperature`` (décidée à l'envoi)."""
@@ -193,12 +206,21 @@ class ClaudeBackend:
         if volatile:
             system.append({"type": "text", "text": volatile})
         messages = self._messages(req.messages)
-        if len(messages) >= 2:
+        if messages and req.messages[-1].role == "tool":
+            # une boucle d'outils : le dernier message est un lot de résultats, que le tour suivant relira — marqué
+            # ici, il s'écrit en cache une fois ; marqué un tour plus tard, il était payé plein tarif d'abord
+            _mark_last_block(messages[-1], self.cache_mark())
+        elif len(messages) >= 2:
+            # une conversation : le tour final porte son état du moment, jamais relu — le point se pose avant lui
             _mark_last_block(messages[-2], self.cache_mark())
         body: dict[str, Any] = {"model": self.model, "max_tokens": self.output_tokens(req), "messages": messages}
-        if self.effort:
+        effort = self.effort_of(req)
+        if effort:
             body["thinking"] = {"type": "adaptive"}
-            body["output_config"] = {"effort": self.effort}
+            body["output_config"] = {"effort": effort}
+        if req.output_schema is not None and self.model not in self._no_format:
+            body.setdefault("output_config", {})["format"] = {"type": "json_schema",
+                                                             "schema": _plain(req.output_schema)}
         if req.stop_sequences:
             body["stop_sequences"] = list(req.stop_sequences)
         if system:
@@ -292,21 +314,45 @@ class ClaudeBackend:
     async def _create(self, body: dict[str, Any], client: Any = None) -> Any:
         client = client if client is not None else self._client
         kwargs = dict(body)
-        if self.temperature is not None and self._accepts_temperature():
+        if self.temperature is not None and self._accepts_temperature(body):
             kwargs["temperature"] = self.temperature
         try:
             return await client.messages.create(**kwargs)
         except Exception as exc:
-            if "temperature" not in kwargs or not _rejects(exc, "temperature"):
+            if _unbound_thinking(exc) and _has_thinking(kwargs["messages"]):
+                # la réflexion rejouée n'est plus celle de ce fil (un message d'avant elle a changé) : retirée du fil
+                # et oubliée — les tours suivants de la boucle ne la rejouent pas —, l'appel rejoué une fois
+                log.warning("%s refuse une réflexion rejouée (le fil a changé depuis) : retirée, appel rejoué",
+                            self.model)
+                self._forget_thinking(kwargs["messages"])
+                kwargs["messages"] = _without_thinking(kwargs["messages"])
+            elif _has_format(kwargs) and _rejects_format(exc):
+                self._no_format.add(self.model)
+                log.info("%s refuse une sortie en JSON garantie : mémorisé, plus jamais demandée", self.model)
+                kwargs["output_config"] = {k: v for k, v in kwargs["output_config"].items() if k != "format"}
+                if not kwargs["output_config"]:
+                    del kwargs["output_config"]
+            elif "temperature" in kwargs and _rejects(exc, "temperature"):
+                self._no_temperature.add(self.model)
+                log.info("%s refuse « temperature » : mémorisé, plus jamais envoyée", self.model)
+                del kwargs["temperature"]
+            else:
                 raise
-            self._no_temperature.add(self.model)
-            log.info("%s refuse « temperature » : mémorisé, plus jamais envoyée", self.model)
-            del kwargs["temperature"]
             return await client.messages.create(**kwargs)
 
-    def _accepts_temperature(self) -> bool:
-        # la réflexion impose la température par défaut
-        return not self.thinks() and not self.model.startswith(NO_SAMPLING_PREFIXES) \
+    def _forget_thinking(self, messages: Sequence[Mapping[str, Any]]) -> None:
+        """Les tours mémorisés de ce fil, sans leur réflexion : rejoués ensuite, ils ne la rapportent plus."""
+        for message in messages:
+            content = message.get("content")
+            if message.get("role") != "assistant" or not isinstance(content, list):
+                continue
+            key = tuple(b["id"] for b in content if b.get("type") == "tool_use")
+            if key in self._replays:
+                self._replays[key] = tuple(b for b in self._replays[key] if b.get("type") not in _THINKING)
+
+    def _accepts_temperature(self, body: Mapping[str, Any]) -> bool:
+        # la réflexion impose la température par défaut — celle de la fiche, ou celle que cet appel demande
+        return not self.thinks() and "thinking" not in body and not self.model.startswith(NO_SAMPLING_PREFIXES) \
             and self.model not in self._no_temperature
 
     # ── Réponse ──────────────────────────────────────────────────────────
@@ -419,6 +465,41 @@ def _mark_last_block(message: dict[str, Any], mark: Mapping[str, str]) -> None:
 def _rejects(exc: BaseException, param: str) -> bool:
     """Un 400 qui nomme ``param`` : le modèle refuse ce paramètre."""
     return getattr(exc, "status_code", None) == 400 and param in str(exc)
+
+
+def _unbound_thinking(exc: BaseException) -> bool:
+    """Un 400 sur la signature d'un bloc de réflexion : il n'est plus lié à ce fil (« Invalid `signature` in
+    `thinking` block. The block is bound to a different conversation ») — un message d'avant lui a changé."""
+    text = str(exc)
+    return getattr(exc, "status_code", None) == 400 and "signature" in text and "thinking" in text
+
+
+def _has_thinking(messages: Sequence[Mapping[str, Any]]) -> bool:
+    return any(b.get("type") in _THINKING for m in messages if isinstance(m.get("content"), list) for b in m["content"])
+
+
+def _without_thinking(messages: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Le fil sans aucun bloc de réflexion (ses textes, ses appels et leurs résultats restent)."""
+    out = []
+    for message in messages:
+        content = message.get("content")
+        if isinstance(content, list):
+            content = [b for b in content if b.get("type") not in _THINKING]
+            if not content:
+                continue
+        out.append({**message, "content": content})
+    return out
+
+
+def _has_format(kwargs: Mapping[str, Any]) -> bool:
+    return "format" in (kwargs.get("output_config") or {})
+
+
+def _rejects_format(exc: BaseException) -> bool:
+    """Un 400 qui refuse ``output_config.format`` : le modèle ne garantit pas de sortie en JSON."""
+    text = str(exc)
+    return getattr(exc, "status_code", None) == 400 and "format" in text and any(
+        word in text for word in ("output_config", "json_schema", "structured"))
 
 
 def _sum(usages: Sequence[Usage]) -> Usage:

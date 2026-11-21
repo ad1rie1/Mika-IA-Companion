@@ -17,6 +17,16 @@ de même : le dépôt, la branche, le commit épinglé et les enregistrements qu
 partiront (relus dans l'atelier, face à ce que l'hôte dit du distant) ; une
 récupération, ce qui arrivera.
 
+**Un projet qui passe par des pull requests** (ADR 0274) ne pousse jamais sa
+branche de base : ``project_push`` et l'envoi demandé depuis la console poussent
+la branche de travail où l'atelier se trouve, la capacité ``projects.push``
+refuse la base, et rien ici ne fusionne. Récupérer n'avance que la base.
+Quand la base a avancé et que la branche de travail ne s'y accorde plus (l'hôte
+dit sa pull request impossible à fusionner), ``ws_take_base`` ramène la base
+**dans la branche de travail** (ADR 0280) : les conflits restent dans les
+fichiers, nommés, elle les résout et son compte rendu enregistre. La base
+elle-même n'est jamais écrite.
+
 **L'atelier n'a qu'un occupant à la fois** : une commande réseau ne s'approuve
 pas pendant qu'une exécution y travaille ; sans accord requis, elle attend la
 fin de l'exécution qui l'a demandée ; et aucune exécution ne part tant qu'une
@@ -29,7 +39,10 @@ et ``ws_edit`` la refusent : un projet n'écrit jamais dans un autre. Le droit s
 relit **à chaque appel** dans les lignes d'accès du projet lu (``links.views``) :
 retiré, la lecture s'arrête à l'appel suivant et la vue est supprimée. Un lien
 retiré ou suspendu, un projet archivé, un « pour qui » changé font le même
-ménage après le commit (``tidy_views``), sans attendre que le lecteur retravaille.
+ménage après le commit (``tidy_views``), sans attendre que le lecteur retravaille ;
+et ce ménage se rejoue au démarrage puis à intervalle régulier (``projects.views``,
+ADR 0262) : un droit repris hors des événements des projets — une personne qui
+n'est plus proche, un tableau de canal changé — ne laisse pas de vue non plus.
 """
 
 from __future__ import annotations
@@ -42,12 +55,14 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.faculties.projects import links
 from mika.faculties.projects.faculty import (
     ACCESS_SET,
     ARCHIVED,
+    BASE_REQUEST,
     LINKS_SET,
     NETWORK_QUEUED,
     NETWORKED_CAPABILITY,
@@ -57,19 +72,29 @@ from mika.faculties.projects.faculty import (
     REFRAMED,
     Project,
     ProjectsState,
+    branch_of,
     busy,
+    by_pulls,
     params,
+    subjects_of,
+    written,
 )
+from mika.faculties.projects.inspect_pulls import BASE_KEPT, BASE_PULL
+from mika.faculties.projects.inspect_reviews import review_line
 from mika.faculties.projects.tools import (
+    CONFLICTS_SHOWN,
+    TAKE_BASE,
     current,
     gone,
     pending_push,
     pinned,
     propose_push,
+    push_branch,
     push_summary,
 )
+from mika.kernel.clock import MINUTE
 from mika.kernel.events import Content
-from mika.kernel.faculty import ToolResult
+from mika.kernel.faculty import CatchUp, ToolResult
 from mika.kernel.inspect import plural
 from mika.kernel.operate import Preview
 from mika.ports.workshop import (
@@ -82,6 +107,7 @@ from mika.ports.workshop import (
     WorkshopFull,
     argv_lines,
     describe,
+    view_entry,
     view_place,
     viewed,
 )
@@ -181,6 +207,28 @@ PROJECTS.effect(ACCESS_SET)(tidy_views)
 PROJECTS.effect(ARCHIVED)(tidy_views)
 PROJECTS.effect(REFRAMED, when=lambda d: d.set_owner)(tidy_views)
 
+#: le ménage des vues se rejoue à cet intervalle (ADR 0262)
+VIEWS_SWEEP_US = 15 * MINUTE
+
+
+@PROJECTS.process("projects.views", wake_on=[LINKS_SET], catch_up=CatchUp.ONCE, max_quantum_s=3600, priority=70,
+                  reads=[identity_c.IS_OWNER])
+class Views:
+    """Le ménage des vues, rejoué au démarrage puis à intervalle régulier (ADR 0262). Les effets ci-dessus suivent
+    ce qui change dans les projets ; un droit se reprend aussi sans qu'aucun de leurs événements ne le dise — une
+    personne qui n'est plus proche (la source « tes proches » d'une ligne), un tableau de canal réglé autrement
+    (la porte « elle seule ») —, et la vue restait sur le disque tant que le lecteur ne retravaillait pas. Il ne
+    tourne que tant qu'un projet en lit un autre, n'écrit rien au journal, et refait ce que ferait un effet rejoué :
+    chaque projet ne garde que les vues que ses liens et les lignes des projets lus lui donnent maintenant."""
+
+    def next_due(self, s: ProjectsState, frame: Any, last_run: int | None) -> int | None:
+        if not any(p.reads for p in s.projects.values()):
+            return None
+        return frame.now if last_run is None else last_run + VIEWS_SWEEP_US
+
+    async def run(self, ctx: Any) -> None:
+        await tidy_views(None, {**ctx.ports, "frame": lambda: ctx.frame})
+
 
 class ListArgs(BaseModel):
     path: str = Field(default="", max_length=300, description=phrase("projects.workshop.list_path"))
@@ -219,6 +267,10 @@ class NetworkArgs(BaseModel):
         return argv
 
 
+class BaseArgs(BaseModel):
+    pass
+
+
 class PushArgs(BaseModel):
     why: str = Field(min_length=1, max_length=400, description=phrase("projects.workshop.push_why"))
 
@@ -235,7 +287,8 @@ async def ws_list(args: ListArgs, ctx: Any) -> Any:
             view = await _view(ctx, p, port, seen[0])
             if isinstance(view, ToolResult):
                 return view
-            files = await port.view_tree(p.id, *seen)
+            # les noms des fichiers d'un autre projet : des données, sans caractère de contrôle, coupées (ADR 0262)
+            files = [view_entry(f) for f in await port.view_tree(p.id, *seen)]
         else:
             files = await port.tree(p.id, args.path or ".")
             if p.reads and args.path.strip().strip("/") in ("", ".", VIEWS_DIR):
@@ -320,6 +373,41 @@ async def ws_run(args: RunArgs, ctx: Any) -> Any:
     return ToolResult(ok=result.ok, content=describe(result))
 
 
+@PROJECTS.tool(TAKE_BASE, acts=True, description=phrase("projects.workshop.take_base"),
+               label=phrase("projects.workshop.take_base_label"), args=BaseArgs, bundle=BUNDLE, episodes=RUNS,
+               max_calls_per_episode=3)
+async def ws_take_base(args: BaseArgs, ctx: Any) -> Any:
+    """Ramener la base dans la branche de travail de l'objectif visé (ADR 0280) : la sortie d'une pull request que
+    l'hôte dit impossible à fusionner. C'est l'adaptateur de l'atelier qui le fait, hors de la cage — là où elle
+    lance ses commandes, le dépôt ne s'écrit pas. Les conflits restent dans les fichiers, nommés ; elle les résout,
+    et son compte rendu enregistre. Rien n'est écrit sur la base, rien ne part chez l'hôte."""
+    got = _atelier(ctx)
+    if isinstance(got, str):
+        return got
+    p, port = got
+    if not by_pulls(p):
+        return ToolResult(ok=False, content=phrase("projects.workshop.take_base_direct"))
+    found = current(ctx)
+    joined = await port.take_base(p.id, branch_of(found[1] if found is not None else None),
+                                  stow=phrase("projects.commit.stowed"))
+    if not joined.branch:
+        return ToolResult(ok=False, content=phrase("projects.workshop.take_base_refused", why=joined.why or "?"))
+    stowed = phrase("projects.workshop.take_base_stowed", sha=joined.stowed[:12]) if joined.stowed else ""
+    if joined.already:
+        o = found[1] if found is not None else None
+        if o is not None and o.pull_conflicts:
+            # l'hôte la dit en conflit, mais l'atelier n'a pas encore ce que la base a reçu là-bas : la récupération
+            # est demandée dès que l'hôte l'a dit, et passe quand l'atelier est libre — elle reprendra ensuite
+            return ToolResult(ok=False, content=phrase("projects.workshop.take_base_stale", branch=joined.branch,
+                                                       base=joined.base[:12]))
+        return phrase("projects.workshop.take_base_already", branch=joined.branch, base=joined.base[:12])
+    if joined.conflicts:
+        files = ", ".join(joined.conflicts[:CONFLICTS_SHOWN]) + (" …" if len(joined.conflicts) > CONFLICTS_SHOWN else "")
+        return phrase("projects.workshop.take_base_conflicts", branch=joined.branch, base=joined.base[:12],
+                      files=files) + stowed
+    return phrase("projects.workshop.take_base_clean", branch=joined.branch, base=joined.base[:12]) + stowed
+
+
 @PROJECTS.tool("ws_diff", description=phrase("projects.workshop.diff"), label=phrase("projects.workshop.diff_label"), args=ListArgs, bundle=BUNDLE, episodes=RUNS)
 async def ws_diff(args: ListArgs, ctx: Any) -> Any:
     got = _atelier(ctx)
@@ -366,19 +454,21 @@ async def ws_network(args: NetworkArgs, ctx: Any) -> Any:
     if got is None:
         return gone()
     p, _ = got
-    about = tuple(x for x in (p.owner, *p.about) if x)
+    # ses mots et sa commande sont ce qu'elle écrit pendant une exécution : au niveau de ce qu'elle y lit, celui des
+    # projets que le sien lit compris (``written``, ADR 0262) — pas au seul niveau de son cadre
+    level = written(p)
     if _already(ctx.frame, p, args.argv):  # la même commande ne s'empile pas : elle attend déjà
         return ToolResult(ok=False, content=phrase("projects.workshop.already"))
     if not p.approval:  # sans accord : elle partira quand cette exécution aura fini (l'atelier est à elle d'ici là)
         await ctx.emit(NETWORK_QUEUED.draft(project=p.id, argv=tuple(args.argv),
-                                            why=Content.of(args.why.strip(), level=p.sensitivity),
-                                            owner=p.owner, about=p.about))
+                                            why=Content.of(args.why.strip(), level=level),
+                                            owner=p.owner, about=p.about, read_about=p.read_about))
         return phrase("projects.workshop.queued")
     await ctx.propose(rt.EFFECT_PROPOSED.draft(
         capability=NETWORKED_CAPABILITY, owner=PROJECTS.name,
         args_json=json.dumps({"project": p.id, "argv": args.argv}),
-        summary=Content.of(network_summary(p, args.argv, args.why), level=p.sensitivity), approval=True,
-        context=project_target(p.id), about=about))
+        summary=Content.of(network_summary(p, args.argv, args.why), level=level), approval=True,
+        context=project_target(p.id), about=subjects_of(p)))
     return phrase("projects.workshop.proposed")
 
 
@@ -397,6 +487,10 @@ async def project_push(args: PushArgs, ctx: Any) -> Any:
         return ToolResult(ok=False, content=phrase("projects.workshop.nothing"))
     if done == "pending":
         return ToolResult(ok=False, content=phrase("projects.workshop.push_pending"))
+    if done == "base":  # un projet qui passe par des pull requests : sa base ne se pousse pas (ADR 0274)
+        return ToolResult(ok=False, content=phrase("projects.workshop.push_base"))
+    if done == "unreviewed":  # rien ne sort d'elle-même sans verdict favorable pour ce commit (ADR 0276)
+        return ToolResult(ok=False, content=phrase("projects.workshop.push_unreviewed"))
     return phrase("projects.workshop.push_proposed") if p.approval else phrase("projects.workshop.push_sent")
 
 
@@ -535,6 +629,14 @@ def _remote_blocked(ports: Mapping[str, Any], pid: int, url: str) -> str:
     return _gone(ports, pid).removeprefix("refusé : ") or ("" if url else REMOTE["no_remote"])
 
 
+def base_kept(ports: Mapping[str, Any], pid: int, branch: str) -> str:
+    """Pourquoi cet envoi ne part pas (vide : il peut) : il vise la branche de base d'un projet qui passe par des
+    pull requests. Aucune capacité ne pousse sur elle : elle n'avance que par ce qui est accepté chez l'hôte."""
+    frame = ports["frame"]() if "frame" in ports else None
+    p = frame.state("projects").projects.get(pid) if frame is not None else None
+    return BASE_KEPT.format(branch=branch) if p is not None and by_pulls(p) and branch == p.branch else ""
+
+
 async def push_preview(args: Mapping[str, Any], ports: Mapping[str, Any]) -> Preview | None:
     """Exactement ce qui partirait : le dépôt distant, sa branche, le commit épinglé, et les enregistrements que le
     distant n'a pas encore — relus dans l'atelier jusqu'au bout de la branche distante, tel que l'hôte le dit. Le
@@ -561,11 +663,19 @@ async def push_preview(args: Mapping[str, Any], ports: Mapping[str, Any]) -> Pre
         said = _listed(REMOTE["leaving"], leaving) if leaving else REMOTE["pushed"]
     else:
         said = _listed(f"{REMOTE['diverged'].format(head=hosted.head[:7])}\n{REMOTE['last']}", upto)
-    head = REMOTE["push"].format(sha=sha[:12] or (upto[0].sha if upto else ""),
+    head = REMOTE["push"].format(sha=(sha or (upto[0].sha if upto else ""))[:12],
                                  title=f" (« {upto[0].title} »)" if upto else "", url=url or REMOTE["none"],
                                  branch=branch)
+    # ce qu'une relecture indépendante a dit de ce commit-là (ADR 0276), quand le projet en demande une — pour une
+    # branche de travail aussi (ADR 0277) : un envoi que l'opérateur demande part sans verdict, et l'aperçu le dit
+    frame = ports["frame"]() if "frame" in ports else None
+    project = frame.state("projects").projects.get(pid) if frame is not None else None
+    judged = review_line(project, None, sha) if project is not None else ""
+    if judged:
+        said = f"{judged}\n\n{said}"
     return Preview(f"{head}\n\n{said}", _pin(url=url, branch=branch, sha=sha, remote=hosted.head if hosted else None,
-                                             leaving=[k.sha for k in leaving]), _remote_blocked(ports, pid, url))
+                                             leaving=[k.sha for k in leaving]),
+                   _remote_blocked(ports, pid, url) or base_kept(ports, pid, branch))
 
 
 async def pull_preview(args: Mapping[str, Any], ports: Mapping[str, Any]) -> Preview | None:
@@ -598,8 +708,10 @@ async def push(args: Mapping[str, Any], context: str, ports: Mapping[str, Any]) 
         return False, "atelier introuvable"
     if why := _gone(ports, pid):
         return False, why
-    result = await port.push(pid, str(args.get("url") or ""), str(args.get("branch") or "main"),
-                             str(args.get("sha") or ""))
+    branch = str(args.get("branch") or "main")
+    if kept := base_kept(ports, pid, branch):
+        return False, f"refusé : {kept}"
+    result = await port.push(pid, str(args.get("url") or ""), branch, str(args.get("sha") or ""))
     return result.ok, describe(result, 3000)
 
 
@@ -626,14 +738,20 @@ async def remote_proposal(p: Any, what: str, request: int, port: Any) -> Any:
     if what == "push":
         sha, title = await pinned(port, p.id)
         args["sha"] = sha
-        summary = push_summary(p, sha, title, "demandé depuis la console") if sha else \
+        # un projet qui passe par des pull requests pousse la branche de travail où l'atelier se trouve ; sur sa base,
+        # l'envoi garde la base pour cible et la capacité le refuse en le disant (ADR 0274)
+        args["branch"] = await push_branch(port, p) or p.branch
+        summary = push_summary(p, sha, title, "demandé depuis la console", args["branch"]) if sha else \
             f"Pousser vers {p.remote} — demandé depuis la console (l'atelier n'a encore rien enregistré)"
+    elif what == BASE_REQUEST:  # sa pull request vient d'être fusionnée : la base se récupère (ADR 0274)
+        summary = BASE_PULL.format(url=p.remote, branch=p.branch)
     else:
         summary = f"Récupérer dans l'atelier {p.remote} (branche {p.branch}) — demandé depuis la console"
+    capability = PUSH_CAPABILITY if what == "push" else PULL_CAPABILITY
     return rt.EFFECT_PROPOSED.draft(
-        capability=f"{c.OWNER}.{what}", owner=PROJECTS.name, context=project_target(p.id), approval=False,
+        capability=capability, owner=PROJECTS.name, context=project_target(p.id), approval=False,
         args_json=json.dumps(args), summary=Content.of(summary[:600], level=0),
-        about=tuple(x for x in (p.owner, *p.about) if x), dedupe_key=f"distant:{p.id}:{request}")
+        about=subjects_of(p), dedupe_key=f"distant:{p.id}:{request}")
 
 
 def network_proposal(p: Project, request: int, argv: tuple[str, ...], why: str) -> Any:
@@ -642,8 +760,8 @@ def network_proposal(p: Project, request: int, argv: tuple[str, ...], why: str) 
     return rt.EFFECT_PROPOSED.draft(
         capability=NETWORKED_CAPABILITY, owner=PROJECTS.name, context=project_target(p.id), approval=p.approval,
         args_json=json.dumps({"project": p.id, "argv": list(argv), "request": request}),
-        summary=Content.of(network_summary(p, argv, why or "(sans raison donnée)"), level=p.sensitivity),
-        about=tuple(x for x in (p.owner, *p.about) if x), dedupe_key=f"reseau:{p.id}:{request}")
+        summary=Content.of(network_summary(p, argv, why or "(sans raison donnée)"), level=written(p)),
+        about=subjects_of(p), dedupe_key=f"reseau:{p.id}:{request}")
 
 
 __all__ = ["network_proposal", "network_summary", "no_view_words", "pending_push", "remote_proposal", "tidy_views"]

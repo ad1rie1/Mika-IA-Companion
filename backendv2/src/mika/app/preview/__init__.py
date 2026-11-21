@@ -44,6 +44,7 @@ from mika.app.preview.git import URL as REMOTE_URL
 from mika.app.preview.git import repository
 from mika.app.preview.inner import inner
 from mika.app.preview.mail import mailbox
+from mika.app.preview.projects import chain
 from mika.app.server import build
 from mika.contracts import attachments as attachments_c
 from mika.contracts import email as email_c
@@ -400,7 +401,12 @@ def export(out: Path) -> list[str]:
             second = client.portal.call(lambda: _project(live.kernel, title="Préparer le prochain stream",
                 description="Un programme clair, des supports prêts et un moment pour les questions du chat.",
                 objectives="Choisir les sujets\nPréparer les supports\nRelire le programme", nonce="apercu-stream"))
-            for key in (project, second):
+            # une chaîne d'exemple (ADR 0281) : un projet qui lit le premier, des tickets, un point d'arrêt, une liste
+            third = client.portal.call(lambda: _project(live.kernel, title="Faire connaître Outils réseau",
+                description="Le site et les articles qui présentent l'outillage, cohérents avec le produit.",
+                objectives="Écrire la page d'accueil\nPublier trois articles", nonce="apercu-site"))
+            client.portal.call(lambda: chain(live.kernel, project, third))
+            for key in (project, second, third):
                 if key:
                     urls.append(f"{PREFIX}/fiche/project/{key}")
                     urls += [f"{PREFIX}/fiche/project/{key}?onglet={quote(v.name)}"

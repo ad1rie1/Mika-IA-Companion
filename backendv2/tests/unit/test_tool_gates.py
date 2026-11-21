@@ -184,9 +184,11 @@ def test_in_conversation_the_core_is_in_hand_and_the_rest_is_fetched_on_demand(t
     # « AUTOUR DE TOI » n'est plus lu à chaque réplique : world_look le remplace, dans le lot du monde
     assert {"memory_search", "goal_remind", "world_look"} <= in_hand and len(in_hand) <= 7
     assert {"identity_whoami_with", "social_about"} <= deferred  # relire une section présente : à la demande
-    assert {"forge_write", "rss_list", "camera_look"} <= deferred
+    assert {"forge_write", "camera_look"} <= deferred
+    # sans flux suivi, ses outils des flux ne s'offrent pas et le catalogue ne les annonce pas (ADR 0266)
+    assert not {"rss_list", "rss_read"} & (deferred | in_hand)
     catalogue = req.system_stable.split(CATALOGUE_HEADER, 1)[1]
-    assert "- forge : la Forge" in catalogue and "- rss : les flux" in catalogue
+    assert "- forge : la Forge" in catalogue and "- rss : les flux" not in catalogue
     assert "- social" in catalogue  # relire ce que ses sections disent déjà : à la demande
     assert "- memory" not in catalogue  # ce qui est en main n'est pas à chercher
 

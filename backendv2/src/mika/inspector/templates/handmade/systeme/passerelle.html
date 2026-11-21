@@ -47,7 +47,7 @@
       {% for name, roles in served %}
       <div class="sys-gw-group">
         <h3><span class="mono">{{ name }}</span> <span class="now-muted now-num">{{ roles|length }}</span></h3>
-        <p class="sys-ct-chips">{% for r in roles %}<span class="now-tag sys-chip" title="{{ r.tech }}">{{ r.label }}</span>{% endfor %}</p>
+        <p class="sys-ct-chips">{% for r in roles %}<span class="now-tag sys-chip" title="{{ r.tech }}{% if r.effort %} · effort {{ r.effort }}, réglé pour ce rôle{% endif %}">{{ r.label }}{% if r.effort %} · {{ r.effort }}{% endif %}</span>{% endfor %}</p>
       </div>
       {% endfor %}
       {% if cut %}

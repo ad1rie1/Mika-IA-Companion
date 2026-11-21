@@ -19,6 +19,8 @@ Contrat :
 - ``tool_choice="none"`` (le tour de clôture) : les outils ne partent pas,
   Ollama n'a pas de ``tool_choice`` ;
 - les séquences d'arrêt (``LLMRequest.stop_sequences``) → ``options.stop`` ;
+- une sortie en JSON (``LLMRequest.output_schema``) → ``format`` (le schéma) ;
+- l'effort demandé (``LLMRequest.effort``, ADR 0285) est ignoré : ``think`` est une case de la fiche, pas un niveau ;
 - un délai explicite côté client HTTP (``HTTP_TIMEOUT_S``) : la passerelle borne
   l'appel, mais un serveur muet ne doit pas tenir une connexion sans limite ;
 - un refus du paramètre ``think`` (message qui le nomme, ou 400) est rejoué une
@@ -150,6 +152,8 @@ class OllamaBackend:
         }
         if req.tools and req.tool_choice != TOOL_CHOICE_NONE:
             body["tools"] = function_tools(req.tools)
+        if req.output_schema is not None:
+            body["format"] = dict(req.output_schema)
         return body
 
     async def complete(self, req: LLMRequest) -> LLMResponse:

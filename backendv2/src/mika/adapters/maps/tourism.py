@@ -12,13 +12,16 @@ ce qu'elle dit d'elle (``meta``). Elle s'écrit page par page, en flux (jamais t
 mémoire), en journal de retour arrière : un lecteur lit pendant qu'elle s'écrit, et le fichier seul suffit à la copier.
 
 **Le rapprochement** avec l'index des lieux (``lieux.db``, OpenStreetMap), refait après chaque lecture pour ce qui a
-changé, et pour tout quand l'index a été reconstruit : un lieu DATAtourisme est un lieu d'OpenStreetMap à moins
-de ``TWIN_M`` mètres dont le nom se ressemble (``twin`` : son objet, ``n123``) ; sinon il reste trouvable comme
+changé, et pour tout quand l'index a été reconstruit ou que sa règle a changé (``match_stamp``) : un lieu DATAtourisme
+est un lieu d'OpenStreetMap à moins de ``TWIN_M`` mètres qui est lui — son nom, et sa sorte quand les noms ne sont pas
+les mêmes ; jamais une gare, un parking, une banque (``same_place``, ADR 0269) — (``twin`` : son objet, ``n123``) ;
+sinon il reste trouvable comme
 ``t:<uuid>`` — seulement s'il est sûr qu'aucun lieu d'OpenStreetMap n'est le sien, jamais en double. Le lieu d'un
 événement (``venue``, ADR 0259) est le plus proche à moins de ``VENUE_M`` mètres qui accueille du public (une salle,
 un théâtre, un musée, une bibliothèque, un stade… ; une église, pour un concert ou une visite) — jamais pour un
 marché ni pour une fête qui n'est que cela, qui se tiennent dehors ; une adresse sans numéro qui nomme une place ou
-une rue (« Place du Concert ») dit où il est, et un lieu n'y est retenu que si l'événement ou l'adresse le nomme.
+une rue (« Place du Concert ») dit où il est, et un lieu n'y est retenu que si l'événement ou l'adresse le nomme ; un
+peu plus loin (``VENUE_FAR_M``), un lieu que l'événement nomme en entier ou qui est à la même adresse (ADR 0269).
 Sinon, son adresse. **Les doublons** d'un événement (une fiche par date, sous des identifiants différents : même nom, même
 endroit) se réunissent à la lecture, toutes leurs dates ensemble, sous l'identifiant le plus petit."""
 
@@ -38,11 +41,22 @@ from pathlib import Path
 from typing import Any
 
 from mika.adapters.maps.config import TOURISM_FILE
-from mika.adapters.maps.datatourisme import EVENT, GENERIC_WORDS, PLACE, THEME_BITS, UUID, Fiche, name_key
+from mika.adapters.maps.datatourisme import (
+    EVENT,
+    GENERIC_WORDS,
+    PLACE,
+    THEME_BITS,
+    UUID,
+    Fiche,
+    _place_sort,
+    _plain_words,
+    name_key,
+)
 from mika.adapters.maps.hours import PARIS
 from mika.adapters.maps.photos import PhotoOrigin, photo_ref
 from mika.adapters.maps.places import _box, _distance_m, _match
-from mika.adapters.maps.when import Occurrence, bounds, dates_fr, upcoming, when_text
+from mika.adapters.maps.tags import read_kept
+from mika.adapters.maps.when import Occurrence, dates_fr, session, upcoming, when_text
 from mika.ports.maps import (
     DATES_SHOWN,
     THEMES,
@@ -63,8 +77,32 @@ SOURCE = "datatourisme"
 #: un lieu DATAtourisme et un lieu d'OpenStreetMap à moins de tant de mètres, aux noms qui se ressemblent : le même
 TWIN_M = 150
 TWIN_LIKENESS = 0.75
-#: le lieu d'un événement : le plus proche, à moins de tant de mètres, qui accueille du public (ADR 0259)
+#: la règle du rapprochement : quand elle change, tout se rejuge (``match_stamp``, avec la date de l'index)
+MATCH_RULE = "3"
+#: les catégories de l'index qui ne sont le pendant de rien : une gare, une station, un parking, une borne, une banque,
+#: une location, une pharmacie — même sous le même nom, ce n'est pas le lieu qu'une fiche ou des avis décrivent ;
+#: sauf une mairie, qui se visite (``TOWN_HALL``), et, sous son nom même, une fiche de cette catégorie (une location,
+#: un office de tourisme : ``same_place``)
+NO_TWIN = frozenset({"route", "services", "sante", "villes"})
+TOWN_HALL = "townhall"
+#: sous des noms qui ne sont pas les mêmes, les sortes qui peuvent être un même lieu (la sorte d'une fiche ou d'un lieu
+#: de Google → celle d'un lieu de l'index) : un restaurant et une boulangerie, une pâtisserie, un hôtel-restaurant ; ce
+#: qui se visite et un parc, ou une salle de spectacle (``STAGES``)
+AKIN = {
+    "manger": frozenset({"manger", "courses", "dormir"}),
+    "dormir": frozenset({"dormir", "manger"}),
+    "courses": frozenset({"courses", "manger"}),
+    "voir": frozenset({"voir", "nature", "sortir"}),
+    "nature": frozenset({"nature", "voir"}),
+    "sortir": frozenset({"sortir", "voir"}),
+}
+#: ce qui, de « sortir », se visite aussi : une salle de spectacle, un centre d'art (« à voir » chez Google)
+STAGES = frozenset({"theatre", "arts_centre", "cinema"})
+#: le lieu d'un événement : le plus proche, à moins de tant de mètres, qui accueille du public (ADR 0259) ; plus loin,
+#: jusqu'à ``VENUE_FAR_M``, seulement celui que l'événement nomme en entier ou qui est à la même adresse (ADR 0269 : un
+#: grand lieu est placé au centre de ses contours, loin de l'entrée que ses événements donnent)
 VENUE_M = 60
+VENUE_FAR_M = 300
 #: les sortes de l'index qui accueillent du public pour un événement : salles, scènes, musées, bibliothèques, stades…
 #: (jamais une place, un parc, un monument, une « attraction » : un marché ou une fête de plein air s'y rapprocherait)
 VENUE_KINDS = frozenset({
@@ -177,9 +215,17 @@ def twins_key(fiche: Fiche) -> str:
     return f"{name_key(fiche.name)}|{where}"
 
 
+def match_stamp(built: str) -> str:
+    """Ce que le rapprochement suit (``meta.matched_with``) : quand l'index a été construit, et la règle
+    (``MATCH_RULE``) — l'un ou l'autre changé, tout se rejuge."""
+    return f"{built} · règle {MATCH_RULE}"
+
+
 def likeness(a: str, b: str) -> float:
     """Deux noms de lieux se ressemblent-ils (0 à 1) : les mêmes mots, l'un dans l'autre (« Barrière Lille » et
-    « Resort Barrière Lille »), ou presque les mêmes lettres — sans accents, casse, articles ni mots de sorte."""
+    « Resort Barrière Lille » — pas quand ils n'ont en commun que ce qui dit une rue ou une place : « La Place » n'est
+    pas « Friterie Meunier - Grand Place »), ou presque les mêmes lettres — sans accents, casse, articles ni mots de
+    sorte. Seul, il ne dit pas que deux lieux sont le même : ``same_place`` y ajoute leur sorte."""
     ka, kb = name_key(a).split(), name_key(b).split()
     if not ka or not kb:
         return 0.0
@@ -188,8 +234,55 @@ def likeness(a: str, b: str) -> float:
         return 1.0
     common = sa & sb
     contained = 0.9 if common and common == (sa if len(sa) <= len(sb) else sb) and \
-        len("".join(common)) >= 4 else 0.0
+        len("".join(common)) >= 4 and not all(STREET.fullmatch(w) for w in common) else 0.0
     return max(contained, len(common) / len(sa | sb), SequenceMatcher(None, " ".join(ka), " ".join(kb)).ratio())
+
+
+def akin(sort: str, category: str, kind: str) -> bool:
+    """Une fiche ou un lieu de Google de cette sorte (``sort`` : une catégorie de l'écran Carte) peut-il être, sous un
+    autre nom, ce lieu de l'index (sa catégorie, sa sorte) : la même sorte, ou une voisine (``AKIN``) ; une sorte
+    inconnue, jamais."""
+    other = "voir" if kind == TOWN_HALL else category
+    if not sort or not other:
+        return False
+    if sort == "voir" and other == "sortir":
+        return kind in STAGES
+    return other == sort or other in AKIN.get(sort, ())
+
+
+def same_name(a: str, b: str, town: str = "") -> bool:
+    """Deux noms qui sont les mêmes (sans accents, casse, articles ni mots de sorte), ou qui ne diffèrent que par la
+    commune (``town``) que l'un y ajoute — « France Cars Villeneuve d'Ascq » et « France Cars », à Villeneuve-d'Ascq."""
+    ka, kb = set(name_key(a).split()), set(name_key(b).split())
+    if not ka or not kb:
+        return False
+    if ka == kb:
+        return True
+    there = set(name_key(town).split()) if town else set()
+    return bool(there) and bool(ka - there) and ka - there == kb - there
+
+
+def same_place(name: str, sort: str, other: str, category: str, kind: str, *, town: str = "") -> float:
+    """Combien un lieu (son nom, sa sorte ; ``town`` : sa commune) est ce lieu de l'index (son nom, sa catégorie, sa
+    sorte), de 0 à 1 : jamais ce qui n'est le pendant de rien (``NO_TWIN`` : une banque, une gare, un parking…), sauf
+    une fiche de cette catégorie sous son nom même, sa commune mise à part (une location, un office de tourisme :
+    « France Cars Villeneuve d'Ascq » est « France Cars » ; « Taxi Lille Europe » n'est pas la gare) ; sous le même
+    nom, lui ; sous un nom qui se ressemble seulement (l'un dans l'autre, presque les mêmes lettres), seulement d'une
+    sorte voisine (``akin``) — « BAR PARIBAS » n'est pas « BNP Paribas », ni « Le Beffroi », un restaurant, le beffroi
+    d'à côté."""
+    if category in NO_TWIN and kind != TOWN_HALL:
+        return 1.0 if sort == category and same_name(name, other, town) else 0.0
+    score = likeness(name, other)
+    if score >= 1.0:
+        return score
+    return score if akin(sort, category, kind) else 0.0
+
+
+def busy(exc: sqlite3.DatabaseError) -> bool:
+    """Une base tenue par une autre écriture (``database is locked``, ``busy``), pas une base abîmée : on ne l'efface
+    jamais pour cela (ADR 0269)."""
+    said = str(exc).lower()
+    return isinstance(exc, sqlite3.OperationalError) and ("locked" in said or "busy" in said)
 
 
 def _connect(path: Path, *, write: bool = False) -> sqlite3.Connection:
@@ -233,7 +326,8 @@ class TourismBase:
 
     def open(self) -> sqlite3.Connection:
         """Une connexion en écriture, la base créée si elle manque — ou refaite si elle est d'une autre version ou
-        illisible : elle se refait, on ne la convertit pas."""
+        illisible : elle se refait, on ne la convertit pas. Tenue par une autre écriture : l'erreur remonte, elle
+        reste."""
         with self._opening:
             return self._open()
 
@@ -246,8 +340,9 @@ class TourismBase:
                 if row is not None and row[0] == SCHEMA_VERSION:
                     return conn
                 conn.close()
-            except sqlite3.DatabaseError:
-                pass
+            except sqlite3.DatabaseError as exc:
+                if busy(exc):  # tenue par une autre écriture : pas abîmée, jamais effacée pour cela
+                    raise
             for suffix in ("", "-journal", "-wal", "-shm"):
                 Path(str(self.path) + suffix).unlink(missing_ok=True)
         conn = _connect(self.path, write=True)
@@ -398,14 +493,16 @@ class TourismBase:
         try:
             while True:
                 rows = conn.execute(
-                    "SELECT id, kind, name, lat, lon, street, town, themes FROM fiche WHERE id > ? AND lat IS NOT NULL "
-                    "AND ((kind = ? AND twin IS NULL) OR (kind = ? AND venue IS NULL)) ORDER BY id LIMIT ?",
-                    (last, PLACE, EVENT, MATCH_BATCH)).fetchall()
+                    "SELECT id, kind, name, lat, lon, street, town, themes, category, types FROM fiche WHERE id > ? "
+                    "AND lat IS NOT NULL AND ((kind = ? AND twin IS NULL) OR (kind = ? AND venue IS NULL)) ORDER BY id "
+                    "LIMIT ?", (last, PLACE, EVENT, MATCH_BATCH)).fetchall()
                 if not rows:
                     break
-                for fid, kind, name, lat, lon, street, town, themes in rows:
+                for fid, kind, name, lat, lon, street, town, themes, category, types in rows:
                     if kind == PLACE:
-                        found = _twin(lieux, name, lat, lon) if lieux is not None else None
+                        # une fiche lue avant qu'on connaisse sa classe (``Transport``) : sa sorte d'aujourd'hui
+                        sort = category or _place_sort((types or "").split(";"))[0]
+                        found = _twin(lieux, name, lat, lon, sort=sort, town=town) if lieux is not None else None
                         conn.execute("UPDATE fiche SET twin = ?, twin_m = ? WHERE id = ?",
                                      (found[0] if found else "", found[1] if found else None, fid))
                         twins += found is not None
@@ -505,12 +602,14 @@ def _place_id(row: Sequence[Any]) -> str:
     return row[6] or f"l{row[0]}"
 
 
-def _twin(lieux: _Lieux, name: str, lat: float, lon: float, radius: float = TWIN_M) -> tuple[str, int] | None:
-    """Le lieu de l'index à moins de ``radius`` mètres au nom qui se ressemble le plus (le plus proche à égalité) : son
-    identifiant durable et sa distance. Le cache des avis s'en sert aussi (ADR 0250), à son rayon."""
+def _twin(lieux: _Lieux, name: str, lat: float, lon: float, radius: float = TWIN_M, *,
+          sort: str = "", town: str = "") -> tuple[str, int] | None:
+    """Le lieu de l'index à moins de ``radius`` mètres qui est le plus ce lieu (``same_place`` : son nom, sa sorte —
+    ``sort``, une catégorie de l'écran Carte —, sa commune ; le plus proche à égalité) : son identifiant durable et sa
+    distance. Le cache des avis s'en sert aussi (ADR 0250), à son rayon."""
     best: tuple[float, float, tuple[Any, ...]] | None = None
     for row in _near(lieux, lat, lon, radius):
-        score = likeness(name, row[1])
+        score = same_place(name, sort, row[1], row[3], row[2], town=town)
         if score >= TWIN_LIKENESS and (best is None or (score, -row[7]) > (best[0], -best[1])):
             best = (score, row[7], row)
     return (_place_id(best[2]), round(best[1])) if best else None
@@ -532,16 +631,18 @@ def lone_places(path: Path) -> sqlite3.Connection | None:
     return conn
 
 
-def lone_twin(conn: sqlite3.Connection, name: str, lat: float, lon: float, radius: float) -> tuple[str, int] | None:
-    """Le lieu DATAtourisme qu'OpenStreetMap n'a pas (``t:<uuid>``) à moins de ``radius`` mètres, au nom qui se
-    ressemble : son identifiant et sa distance."""
+def lone_twin(conn: sqlite3.Connection, name: str, lat: float, lon: float, radius: float, *,
+              sort: str = "") -> tuple[str, int] | None:
+    """Le lieu DATAtourisme qu'OpenStreetMap n'a pas (``t:<uuid>``) à moins de ``radius`` mètres qui est ce lieu (son
+    nom, sa sorte ``sort`` : ``same_place``) : son identifiant et sa distance."""
     w, s, e, n = _box(lat, lon, radius)
     best: tuple[float, float, str] | None = None
-    for uuid, other, olat, olon in conn.execute(
-            "SELECT f.uuid, f.name, f.lat, f.lon FROM fiche_box b JOIN fiche f ON f.id = b.id WHERE b.lat0 <= ? AND "
-            "b.lat1 >= ? AND b.lon0 <= ? AND b.lon1 >= ? AND f.kind = ? AND f.twin = ''", (n, s, e, w, PLACE)):
+    for uuid, other, olat, olon, category, kind in conn.execute(
+            "SELECT f.uuid, f.name, f.lat, f.lon, f.category, f.sort FROM fiche_box b JOIN fiche f ON f.id = b.id "
+            "WHERE b.lat0 <= ? AND b.lat1 >= ? AND b.lon0 <= ? AND b.lon1 >= ? AND f.kind = ? AND f.twin = ''",
+            (n, s, e, w, PLACE)):
         d = _distance_m(lat, lon, olat, olon)
-        score = likeness(name, other)
+        score = same_place(name, sort, other, category, kind)
         if d <= radius and score >= TWIN_LIKENESS and (best is None or (score, -d) > (best[0], -best[1])):
             best = (score, d, uuid)
     return (f"t:{best[2]}", round(best[1])) if best else None
@@ -573,21 +674,43 @@ def _echo(text: str, town: str) -> set[str]:
 
 def _venue(lieux: _Lieux, lat: float, lon: float, *, name: str = "", street: str = "", town: str = "",
            themes: Sequence[str] = ()) -> tuple[str, str] | None:
-    """Le lieu où se tient un événement (ADR 0259) : le plus proche à moins de ``VENUE_M`` mètres qui accueille du
-    public (``VENUE_KINDS`` ; un lieu de culte pour un concert ou une visite) — aucun pour un événement de plein air ;
-    à une adresse qui nomme une place ou une rue, seulement un lieu que l'événement ou l'adresse nomme (« l'opéra »,
-    place du Théâtre : l'Opéra de Lille) ; sinon ``None`` : son adresse dit où il est."""
+    """Le lieu où se tient un événement (ADR 0259, 0269) : le plus proche à moins de ``VENUE_M`` mètres qui accueille
+    du public (``VENUE_KINDS`` ; un lieu de culte pour un concert ou une visite) — aucun pour un événement de plein
+    air ; à une adresse qui nomme une place ou une rue, seulement un lieu que l'événement ou l'adresse nomme
+    (« l'opéra », place du Théâtre : l'Opéra de Lille) ; plus loin, jusqu'à ``VENUE_FAR_M``, seulement un lieu que
+    l'événement nomme en entier (« … à l'Aéronef ») ou qui est à son adresse (le LaM, « 1 allée du Musée ») ; sinon
+    ``None`` : son adresse dit où il est."""
     if open_air(themes):
         return None
     worship = bool(WORSHIP_THEMES & set(themes))
-    said = _echo(f"{name} {street}", town) if names_a_street(street) else None
-    for row in _near(lieux, lat, lon, VENUE_M):
+    words = _echo(f"{name} {street}", town)
+    said = words if names_a_street(street) else None
+    for row in _near(lieux, lat, lon, VENUE_FAR_M):
         if row[2] not in VENUE_KINDS and not (worship and row[2] == WORSHIP):
             continue
-        if said is not None and not _echo(row[1], town) & said:
+        own = _echo(row[1], town)
+        if row[7] > VENUE_M:  # plus loin : nommé en entier, ou à la même adresse
+            if not ((own and own <= words) or _same_address(lieux, row[0], street)):
+                continue
+        elif said is not None and not own & said:
             continue
         return row[1], _place_id(row)
     return None
+
+
+def _same_address(lieux: _Lieux, place: int, street: str) -> bool:
+    """Ce lieu de l'index est-il à cette adresse : son numéro et sa rue (``addr:housenumber``, ``addr:street``) en tête
+    de celle de l'événement, mot pour mot (« 1 allée du Musée »)."""
+    conn, detailed = lieux
+    if not detailed or not street:
+        return False
+    row = conn.execute("SELECT tags FROM place WHERE id = ?", (place,)).fetchone()
+    tags = read_kept(row[0] if row is not None else "")
+    number, way = tags.get("addr:housenumber", ""), tags.get("addr:street", "")
+    if not number or not way:
+        return False
+    want = _plain_words(f"{number} {way}")
+    return _plain_words(street)[:len(want)] == want
 
 
 # ── lire ──
@@ -615,9 +738,16 @@ class TourismInfo:
     zones: str = ""
     #: la construction de l'index des lieux avec lequel elle a été rapprochée
     matched_with: str = ""
-    #: les cases lues jusqu'au bout (une case et une liste), et la plus ancienne de leurs lectures
+    #: les cases lues jusqu'au bout (une case et une liste), la plus ancienne et la plus récente de leurs lectures
     cells: int = 0
     oldest_cell: str = ""
+    newest_cell: str = ""
+
+    @property
+    def read_at(self) -> str:
+        """Sa dernière lecture (ISO 8601 ; vide : jamais) : celle d'une case ou d'un département, la plus récente
+        (R3-04 — le cache par cases, le défaut, ne marque pas la synchronisation des départements)."""
+        return max(self.last_ended, self.newest_cell)
 
 
 @dataclass(frozen=True, slots=True)
@@ -760,6 +890,25 @@ class Tourism:
         except MapsUnavailable:
             return None, ""
 
+    async def synced_at(self, uuid: str) -> datetime | None:
+        """Quand cette fiche a été lue chez DATAtourisme la dernière fois (``None`` : on ne l'a pas) — « Actualiser »
+        ne la relit pas tout de suite (ADR 0269)."""
+        if not UUID.match(uuid) or not self.ready():
+            return None
+
+        def read(conn: sqlite3.Connection) -> str:
+            row = conn.execute("SELECT synced FROM fiche WHERE uuid = ?", (uuid,)).fetchone()
+            return row[0] if row is not None else ""
+
+        try:
+            synced = await self._run(read)
+        except MapsUnavailable:
+            return None
+        try:
+            return datetime.fromisoformat(synced.replace("Z", "+00:00")) if synced else None
+        except ValueError:
+            return None
+
     async def place(self, uuid: str) -> tuple[PlaceHit, TourismFacts, str] | None:
         """Un lieu DATAtourisme (``t:<uuid>``) : ce qu'en dit une liste, sa partie DATAtourisme, et son pendant
         d'OpenStreetMap s'il en a un (vide sinon)."""
@@ -834,7 +983,8 @@ def _info(conn: sqlite3.Connection, size: int) -> TourismInfo:
     twins = conn.execute("SELECT COUNT(*) FROM fiche WHERE kind = ? AND twin != ''", (PLACE,)).fetchone()[0]
     venues = conn.execute("SELECT COUNT(*) FROM fiche WHERE kind = ? AND venue != ''", (EVENT,)).fetchone()[0]
     photos = conn.execute("SELECT COUNT(*) FROM photo").fetchone()[0]
-    cells, oldest = conn.execute("SELECT COUNT(*), MIN(fetched) FROM cell WHERE fetched != ''").fetchone()
+    cells, oldest, newest = conn.execute("SELECT COUNT(*), MIN(fetched), MAX(fetched) FROM cell "
+                                         "WHERE fetched != ''").fetchone()
     run = meta.get("run", "")
     done = parts = fiches = 0
     if run:
@@ -847,7 +997,7 @@ def _info(conn: sqlite3.Connection, size: int) -> TourismInfo:
                        run_done=done or 0, run_parts=parts or 0, run_fiches=fiches or 0,
                        last_error=meta.get("last_error", ""), last_error_at=meta.get("last_error_at", ""),
                        zones=meta.get("zones", ""), matched_with=meta.get("matched_with", ""), cells=cells or 0,
-                       oldest_cell=oldest or "")
+                       oldest_cell=oldest or "", newest_cell=newest or "")
 
 
 def _photos(conn: sqlite3.Connection, ids: Sequence[int], today: date) -> dict[int, list[Photo]]:
@@ -1005,7 +1155,7 @@ def _hit(group: _Group, now: datetime, *, start: date | None = None, end: date |
         else None
     if ahead:
         day, first = ahead[0]
-        begins, ends = bounds(day, first)
+        begins, ends = session(day, first)  # sa prochaine séance, jamais la fin de sa période (ses ``dates`` la disent)
     elif start is not None:
         return None
     else:
@@ -1014,7 +1164,16 @@ def _hit(group: _Group, now: datetime, *, start: date | None = None, end: date |
                     when_text=when_text(group.occurrences, now, start, end), place=_where(row), lat=row["lat"],
                     lon=row["lon"], distance_m=None if distance is None else round(distance),
                     themes=_themes(group.themes), free=_free(group), price=row["prices"],
-                    photo=group.photos[0].ref if group.photos else "")
+                    **_photo_cited(group.photos[0] if group.photos else None))
+
+
+def _photo_cited(photo: Photo | None) -> dict[str, str]:
+    """La première photo d'un événement et ce qu'il faut en citer là où elle se montre (ADR 0269) : son auteur et sa
+    licence ; sans photo, rien."""
+    if photo is None:
+        return {}
+    return {"photo": photo.ref, "photo_source": photo.source, "photo_credit": photo.credit,
+            "photo_credit_url": photo.credit_url, "photo_licence": photo.licence}
 
 
 def _events(conn: sqlite3.Connection, now: datetime, *, near: tuple[float, float] | None,
@@ -1074,10 +1233,11 @@ def _event(conn: sqlite3.Connection, uuid: str, now: datetime) -> EventDetail | 
 
 def merge_places(osm: Sequence[PlaceHit], tourism: Sequence[PlaceHit], *, near: bool, limit: int) -> list[PlaceHit]:
     """Les lieux d'OpenStreetMap et ceux des données touristiques qu'il n'a pas, sans jamais un lieu en double : un
-    ``t:`` à moins de ``TWIN_M`` mètres d'un lieu de la liste au nom qui se ressemble s'en va. Autour d'un point,
+    ``t:`` à moins de ``TWIN_M`` mètres d'un lieu de la liste qui est lui (``same_place``) s'en va. Autour d'un point,
     tous par la distance ; sinon ceux d'OpenStreetMap d'abord."""
     kept = [t for t in tourism if not any(
-        _distance_m(t.lat, t.lon, o.lat, o.lon) <= TWIN_M and likeness(t.name, o.name) >= TWIN_LIKENESS for o in osm)]
+        _distance_m(t.lat, t.lon, o.lat, o.lon) <= TWIN_M
+        and same_place(t.name, t.category, o.name, o.category, o.kind, town=t.town) >= TWIN_LIKENESS for o in osm)]
     if near:
         both = sorted([*osm, *kept], key=lambda h: (h.distance_m is None, h.distance_m or 0))
         return both[:limit]

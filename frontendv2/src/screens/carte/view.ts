@@ -1,6 +1,7 @@
 /**
  * Carte : ce qui se montre, sans DOM ni réseau — Explorer (la recherche, les catégories, « Autour de moi » / « Dans
- * cette zone », les lieux, la fiche d'un lieu), Itinéraire (ses points, son mode, ce qu'il évite, le résultat et ses
+ * cette zone », ses filtres et son ordre, les lieux notés et la ligne des notes lues, le pied d'un lieu choisi ; la
+ * fiche d'un lieu, elle, est dans `fiche.ts`), Itinéraire (ses points, son mode, ce qu'il évite, le résultat et ses
  * consignes), Voyages (les cartes de la liste, l'éditeur jour par jour — la note d'un arrêt, qu'on corrige en place —,
  * « Sur la route » et ses épingles secondaires sur la carte, les actions d'un voyage dans la barre de titre, les
  * fenêtres « Nouveau voyage » et « Le voyage »), et le cadre de la carte. Le balisage et les mots sont ceux de la
@@ -30,7 +31,7 @@ import { h } from "../../shell/dom";
 import { ico } from "../../shell/icons";
 import { errorBlock } from "../../shared/kit";
 import { alongPlace, categoryIcon, cuisineChoices, dayTitle, hersCount, legsByStop } from "./format";
-import { coverageLine, photoImg, ratingInline } from "./sources";
+import { listThumb, photoImg, ratingInline, ratingsLine, thumbRow } from "./sources";
 
 // ── Le cadre de la carte ─────────────────────────────────────────────
 
@@ -128,7 +129,8 @@ export function placeId(p: Place, i: number): string {
 
 /**
  * La ligne d'un lieu : son nom et sa distance ; sa note Google et le nombre d'avis, son prix, sa cuisine (sinon ce
- * qu'il est) ; ouvert ou fermé (« Ouvert · ferme à 22:30 ») ; une vignette quand il a une photo.
+ * qu'il est) ; ouvert ou fermé (« Ouvert · ferme à 22:30 ») ; une vignette quand il a une photo dont on sait l'auteur —
+ * cité juste dessous (`thumbRow`), lié (R2, ADR 0269).
  */
 export function placeItem(p: Place, id: string, opts: { on: boolean; mika: boolean; where: Where; seen?: (ref: string) => boolean }): string {
   const dist = typeof p.distance_m === "number" ? km(p.distance_m) : "";
@@ -140,13 +142,21 @@ export function placeItem(p: Place, id: string, opts: { on: boolean; mika: boole
   const first = parts.filter(Boolean).join(" · ");
   const open = p.open_text?.trim()
     ? `<span class="li-snip ${p.open_state === "open" ? "ok-txt" : p.open_state === "closed" ? "ko-txt" : ""}">${h(p.open_text.trim())}</span>` : "";
-  const img = p.photo && opts.seen ? photoImg(p.photo, "", opts.seen) : "";
+  const thumb = opts.seen ? listThumb(p) : null;
+  const img = thumb && opts.seen ? photoImg(thumb.ref, "", opts.seen) : "";
   const lead = img ? `<span class="pl-thumb${opts.mika ? " mika" : ""}">${img}</span>`
     : `<span class="pl-dot${opts.mika ? " mika" : ""}">${ico(categoryIcon(p.category), "xs")}</span>`;
-  return `<button class="li place${opts.on ? " on" : ""}${opts.mika ? " by-mika" : ""}${img ? " has-thumb" : ""}" type="button" data-lieu="${h(id)}">
+  return thumbRow(`<button class="li place${opts.on ? " on" : ""}${opts.mika ? " by-mika" : ""}${img ? " has-thumb" : ""}" type="button" data-lieu="${h(id)}">
     ${lead}
     <span class="li-main"><span class="li-top"><span class="li-title">${h(p.name || "—")}</span>${dist ? `<span class="pl-dist">${h(dist)}</span>` : ""}</span>
-    <span class="li-snip">${first}${opts.mika ? `${first ? " · " : ""}<b class="mika-txt">Mika te l'a proposé</b>` : ""}</span>${open}</span></button>`;
+    <span class="li-snip">${first}${opts.mika ? `${first ? " · " : ""}<b class="mika-txt">Mika te l'a proposé</b>` : ""}</span>${open}</span></button>`,
+  img ? thumb : null, opts.mika);
+}
+
+/** La ligne des notes sous la tête d'une liste (« Notes : Google Maps », sa date, sa note), si elle a de quoi citer. */
+function ratingsMarkup(places: readonly Place[], coverage: Coverage | null | undefined, now: number): string {
+  const line = ratingsLine(places, coverage, now);
+  return line ? `<p class="small muted cov-line">${ico("info", "xs")}<span>${h(line)}</span></p>` : "";
 }
 
 export function placeCard(p: Place, mika: boolean, where: Where): string {
@@ -185,6 +195,7 @@ function resultsMarkup(v: ExplorerView): string {
   }
   if (v.regard) {
     out.push(`<div class="group-label mika-label">${ico("sparkle", "xs")}Ce que Mika a ${v.regard.route ? "montré" : "cherché"} <span class="cnt">${v.places.length}</span></div>`);
+    out.push(ratingsMarkup(v.places, null, v.now ?? Date.now()));
     if (!v.places.length) out.push(`<div class="empty">${ico("map")}<p>Elle n'a gardé aucun lieu de ce regard.</p></div>`);
     out.push(...v.places.map((p, i) => placeItem(p, placeId(p, i), { on: v.sel === placeId(p, i), mika: true, where: v.where, seen: v.seen })));
     return out.join("");
@@ -205,8 +216,7 @@ function resultsMarkup(v: ExplorerView): string {
     return out.join("");
   }
   out.push(`<div class="group-label">${h(searchTitle(v.info, v.q, v.cat))} <span class="cnt">${v.places.length}</span><span class="grow"></span>${sortToggle(v)}<span class="muted">index local, rien ne sort</span></div>`);
-  const cover = coverageLine(v.coverage, "Notes Google Maps lues", v.now ?? Date.now());
-  if (cover) out.push(`<p class="small muted cov-line">${ico("info", "xs")}<span>${h(cover)}</span></p>`);
+  out.push(ratingsMarkup(v.places, v.coverage, v.now ?? Date.now()));
   if (v.loading && !v.places.length) out.push(`<div class="empty">${ico("refresh")}<p>Recherche…</p></div>`);
   else if (!v.places.length) {
     const filtered = filtersOn(v.filters);

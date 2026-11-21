@@ -6,6 +6,8 @@ lieux, les plus vieilles d'abord, sur le budget de fond — qui attend son quota
 
 from __future__ import annotations
 
+import asyncio
+import sqlite3
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
@@ -15,11 +17,12 @@ import pytest
 from mika.adapters.maps import tourism_cells
 from mika.adapters.maps.cells import cell_of
 from mika.adapters.maps.config import PlacesConfig, RoutingConfig, TourismConfig, WarmConfig
-from mika.adapters.maps.datatourisme import EVENTS, PLACES
+from mika.adapters.maps.datatourisme import EVENTS, PLACES, DataTourismeClient
 from mika.adapters.maps.desk import MapsDesk
 from mika.adapters.maps.quota import HOUR, QuotaExceeded
-from mika.adapters.maps.tourism_cells import LIVE_PAGES, LIVE_READS_MAX
-from mika.adapters.maps.warm import Warmer, WarmTask
+from mika.adapters.maps.tourism import Tourism
+from mika.adapters.maps.tourism_cells import LIVE_PAGES, LIVE_READS_MAX, TourismCells
+from mika.adapters.maps.warm import ERRORS_MAX, Warmer, WarmTask
 from mika.app.warm_points import last_positions
 from tests.fixtures import tourism as tf
 
@@ -148,6 +151,22 @@ async def test_a_place_fiche_loads_its_cell_and_finds_its_tourism_part(desk):
     assert parts == {0, 1}  # ses lieux et ses événements
 
 
+async def test_the_summary_says_when_the_base_was_last_read_its_cells_included(desk):
+    """R3-04 : ``GET /carte`` dit ``tourism.synced``, la dernière lecture de la base ; seule la synchronisation des
+    départements la marquait — avec le cache par cases (le défaut), elle disait « jamais lue ». La plus récente des
+    lectures, d'une case comme d'un département."""
+    maps, _api, clock, _config = desk
+    assert maps.tourism_summary()["synced"] == ""
+    cell = maps.cells.cell(*LILLE)
+    await maps.cells.ensure([cell], (EVENTS,))
+    first = maps.tourism.cell_states([cell.key])[(cell.key, EVENTS)].fetched
+    assert first and maps.tourism_summary()["synced"] == first
+    clock.advance(days=2)
+    await maps.cells.load(cell, EVENTS, background=True, pages_max=5)  # relue le soir
+    again = maps.tourism.cell_states([cell.key])[(cell.key, EVENTS)].fetched
+    assert again > first and maps.tourism_summary()["synced"] == again
+
+
 async def test_without_quota_the_desk_shows_what_it_has_and_says_when_it_comes_back(desk):
     maps, api, clock, config = desk
     config[0] = TourismConfig(api_key=tf.KEY, per_hour=1)
@@ -228,6 +247,46 @@ async def test_the_warmer_goes_around_people_and_fixed_points_and_waits_for_a_qu
     assert facts["Prochain passage"].startswith("2026-11-19T21:00:00Z")  # 22:00 de Paris
 
 
+class Locked(Source):
+    """Une source dont le cache ne s'écrit pas : chaque tâche lève ``database is locked``."""
+
+    name, label = "tenue", "Tenue"
+
+    async def warm(self, task):
+        raise sqlite3.OperationalError("database is locked")
+
+
+class Buggy(Source):
+    """Une source qui tombe sur une erreur imprévue."""
+
+    name, label = "bogue", "Bogue"
+
+    async def warm(self, task):
+        raise RuntimeError("imprévu")
+
+
+async def test_a_source_whose_cache_does_not_write_stops_saying_it_and_the_other_finishes(tmp_path):
+    """R3-02 : une erreur de la base pendant le passage (``database is locked``, un disque plein) sortait du
+    réchauffage — l'autre source continuait seule, le compte rendu s'effaçait (« autour de 0 point(s) », sans ligne par
+    source). La source en panne s'arrête en le disant, comptée en erreurs ; l'autre finit ; le compte rendu des deux se
+    garde. Une erreur imprévue d'une source ne fait pas tomber les autres non plus."""
+    clock = tf.Clock(datetime(2026, 11, 18, 22, 0, tzinfo=tf.PARIS))
+    locked, buggy, good = Locked(ERRORS_MAX + 2, {}), Buggy(2, {}), Source(3, {})
+    warmer = Warmer(tmp_path, lambda: WarmConfig(), points=lambda: [LILLE], sources=[locked, buggy, good],
+                    clock=clock, sleep=clock.sleep)
+    run = await warmer.run()
+    tenue, bogue, essai = run.sources
+    assert tenue.errors == ERRORS_MAX and tenue.done == 0
+    assert "ne s'écrit pas" in tenue.stopped and "database is locked" in tenue.stopped
+    assert bogue.stopped and "RuntimeError" in bogue.stopped
+    assert (essai.done, essai.planned, essai.stopped) == (3, 3, "") and len(good.done) == 3
+    assert run.ended and not warmer.running
+    again = Warmer(tmp_path, lambda: WarmConfig(), sources=[good], clock=clock)  # un redémarrage : il se relit
+    assert [r.label for r in again.last.sources] == ["Tenue", "Bogue", "Essai"] and again.last.points == 1
+    facts = dict(again.describe(lambda iso: iso))
+    assert "arrêté : le cache ne s'écrit pas" in facts["Tenue"]
+
+
 async def test_the_warmer_stops_a_source_whose_quota_comes_back_after_morning(tmp_path):
     clock = tf.Clock(datetime(2026, 11, 18, 22, 0, tzinfo=tf.PARIS))
     source = Source(3, {1: QuotaExceeded("le quota du jour de Essai est atteint : il revient demain à 21:00.",
@@ -277,3 +336,51 @@ async def test_a_base_matched_without_an_index_is_matched_whole_once_the_index_c
     assert tourism.info().matched_with == "2026-11-17T10:00:00Z"
     facts, uuid = await tourism.facts_for(["w100"])  # le Resort, lu sans index, a retrouvé son pendant
     assert uuid == tf.RESORT and facts is not None
+
+
+class Gated:
+    """La fausse API, derrière une porte : chaque page attend qu'on l'ouvre (une lecture de fond longue)."""
+
+    def __init__(self, api: tf.FakeApi) -> None:
+        self.api = api
+        self.gate = asyncio.Event()
+        self.asked = 0
+
+    async def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.asked += 1
+        await self.gate.wait()
+        return self.api(request)
+
+
+async def test_a_live_read_never_waits_for_the_evening_warming_of_its_cell(tmp_path):
+    """R1-11 : une fiche ouverte pendant que le réchauffage du soir lisait sa case attendait toute la lecture de
+    fond (des dizaines de pages) et héritait de son quota de fond. Elle n'attend pas : la case se montre telle
+    qu'elle est, et ``coverage`` dit qu'elle se lit en ce moment ; une lecture en direct de la même case, elle, se
+    partage toujours."""
+    gated = Gated(tf.FakeApi(BOTH(), page_size=1))
+    clock = tf.Clock()
+    config = [TourismConfig(api_key=tf.KEY)]
+    tourism = Tourism(tmp_path, now=clock)
+    client = DataTourismeClient(lambda: config[0], tf.limiter(tmp_path, config, clock),
+                                transport=httpx.MockTransport(gated))
+    cells = TourismCells(tourism, lambda: config[0], client, clock=clock)
+    cell = cells.cell(*LILLE)
+    warming = asyncio.ensure_future(cells.warm(WarmTask(cell, PLACES, "")))
+    for _ in range(200):
+        if gated.asked:
+            break
+        await asyncio.sleep(0.01)
+    assert gated.asked == 1  # le réchauffage attend sa première page
+    await asyncio.wait_for(cells.ensure([cell], (PLACES,)), 1.0)
+    assert gated.asked == 1  # rien de plus n'est parti : la lecture du soir continue seule
+    assert "se lisent en ce moment" in cells.coverage([cell], (PLACES,)).note
+    gated.gate.set()
+    assert await warming >= 1
+
+
+async def test_two_live_reads_of_a_cell_still_make_one(tmp_path):
+    api = tf.FakeApi(BOTH())
+    cells, _tourism, _clock, _cfg = tf.make_cells(tmp_path, api)
+    cell = cells.cell(*LILLE)
+    await asyncio.gather(cells.ensure([cell], (PLACES,)), cells.ensure([cell], (PLACES,)))
+    assert len([u for u in api.urls() if "placeOfInterest" in u and "crs" not in u]) == 1

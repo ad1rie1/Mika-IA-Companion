@@ -97,6 +97,26 @@ def test_months_and_dates_select_their_season():
     assert h.state_at(dated, at(TUESDAY + timedelta(days=7), "10:00"))[0] == "open"  # seulement cette année-là
 
 
+#: le LaM dans l'index du Nord (R1-03 : 49 lieux sur 10 250 ont une liste de dates séparées par des virgules)
+LAM = "10:00-18:00; Mo off; Jan 01,May 01,Dec 25 off"
+
+
+@pytest.mark.parametrize("day", [date(2027, 1, 1), date(2027, 5, 1), date(2026, 12, 25)])
+def test_a_list_of_dates_keeps_its_off(day):
+    """« Jan 01,May 01,Dec 25 off » ferme les trois jours : la virgule d'une liste de dates n'ajoute pas une règle (le
+    1er janvier et le 1er mai étaient ouverts 24 h sur 24)."""
+    assert h.state_at(LAM, at(day, "11:00"))[0] == "closed"
+    assert h.state_at(LAM, at(date(2027, 1, 2), "11:00"))[0] == "open"  # un samedi : ouvert
+
+
+def test_a_list_of_dates_keeps_its_hours():
+    rule = h.parse("Mo-Sa 09:00-19:00; Dec 24,Dec 31 08:00-12:00")
+    assert rule.spans(date(2026, 12, 24)) == ((480, 720),) and rule.spans(date(2026, 12, 31)) == ((480, 720),)
+    assert rule.spans(date(2026, 12, 23)) == ((540, 1140),)
+    assert h.state_at("Mo-Sa 09:00-19:00; Jan 01,Dec 25 off, Su 10:00-12:00", at(date(2026, 11, 22), "11:00"))[0] \
+        == "open"  # une règle ajoutée après « off » : toujours lue
+
+
 def test_spaces_and_an_added_rule_after_a_comma_are_read():
     assert h.state_at("Mo - Fr 08:00 - 12:00, Sa 09:00-12:00", at(date(2026, 11, 21), "10:00"))[0] == "open"
     assert h.state_at("Mo, We 10:00-12:00", at(TUESDAY, "11:00"))[0] == "closed"

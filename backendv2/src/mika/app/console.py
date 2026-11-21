@@ -173,6 +173,23 @@ SECTION_LABELS: dict[str, str] = {
     "work_services": "Ce que ses services extérieurs ont rendu à son travail (après un accord)",
     # ADR 0257
     "project_links": "Ce que ce projet lit des autres projets",
+    # ADR 0265
+    "project_stirs": "Ce qui amène cette exécution (ce qui a déclenché son objectif)",
+    "project_items": "Le registre du projet (ses tickets, ses listes de suivi)",
+    # ADR 0289
+    "project_docs": "La documentation de son projet, et celle des projets qu'il lit quand le lien la donne",
+    # ADR 0270
+    "project_tickets": "Les tickets à traiter (leur étape, ce qui est attendu d'elle), ou le ticket de son objectif",
+    "project_pull": "La branche où elle travaille, la pull request de son objectif et ses vérifications (ce que "
+                    "l'hôte en dit, cité)",
+    # ADR 0276
+    "review": "Ce qu'une relecture indépendante juge (la demande, le but, l'objectif, son critère, ses jalons)",
+    "review_said": "Ce que l'exécution relue a écrit de ses jalons (son dire, cité à une relecture indépendante)",
+    "review_diff": "Le diff du commit qu'une relecture indépendante relit (une donnée, citée)",
+    "project_review": "Les constats de la relecture qui a rouvert son objectif (le dire d'une autre exécution, "
+                      "cité)",
+    # ADR 0271
+    "project_asks": "Ses demandes aux autres projets (où chacune en est)",
     "step_exchange": "L'échange d'où vient sa réflexion", "step_life": "Ce qui se passe dans la vie de la personne "
     "(sa réflexion)",
     # ADR 0068
@@ -241,7 +258,14 @@ PROCESS_LABELS: dict[str, str] = {
     "self.journal": "Tenir son journal", "self.dream": "Rêver", "self.reflect": "Voir ce qui la passionne", "social.profile": "Comprendre les gens",
     "goals.seed": "Se proposer des buts", "goals.tend": "Suivre ses buts", "projects.tend": "Suivre ses projets",
     "projects.apps": "Réparer les apps de ses projets",
-    "projects.remote": "Pousser et récupérer les dépôts", "email.poll": "Relever le courrier",
+    "projects.views": "Retirer les vues d'atelier qu'un projet n'a plus le droit de lire",
+    "projects.stirs": "Juger ce qui déclenche un objectif (un commit d'un projet lu, un signal d'app)",
+    "projects.tickets": "Faire naître « Traiter les tickets », et suivre l'objectif né d'un ticket",
+    "projects.remote": "Pousser et récupérer les dépôts",
+    "projects.pulls": "Proposer la pull request d'un travail conclu, la relire chez l'hôte avec ses vérifications",
+    "projects.issues": "Tenir les issues pour le reflet des tickets : ce qui part, et ce que l'hôte en dit",
+    "projects.reviews": "Demander la relecture indépendante d'un travail conclu, hors des pull requests",
+    "email.poll": "Relever le courrier",
     "email.keep": "Télécharger l'historique du courrier",
     "rss.poll": "Relever les flux", "mcp.watch": "Rejoindre les serveurs d'outils extérieurs", "camera.look": "Regarder par la caméra", "forge.tick": "Faire tourner les apps",
     "forge.events": "Transmettre les événements aux apps", "forge.discover": "Découvrir les apps",
@@ -285,6 +309,7 @@ EVENT_LABELS: dict[str, str] = {
     "transcript.compacted": "Un fil replié en résumé",
     "transcript.judged": "Une de ses réponses jugée par son opératrice",
     "transcript.strand_set": "Un fil de travail réglé (titre, description, archivé)",
+    "transcript.effort_set": "L'effort de réflexion forcé pour une conversation ou un fil de travail",
     "memory.believed": "Une croyance retenue", "memory.consolidated": "Une relecture de la mémoire",
     "memory.night_sorted": "La mémoire triée la nuit", "memory.promise_noticed": "Une promesse remarquée",
     "memory.promise_resolved": "Une promesse tenue ou abandonnée", "memory.reinforced": "Un souvenir renforcé",
@@ -325,6 +350,18 @@ EVENT_LABELS: dict[str, str] = {
     "projects.objective_added": "Un objectif ajouté", "projects.objective_changed": "Un objectif modifié",
     "projects.objective_closed": "Un objectif clos", "projects.paused": "Un projet en pause",
     "projects.reframed": "Un projet recadré", "projects.remote_requested": "Un échange avec le dépôt distant demandé",
+    "projects.pull_seen": "Ce que l'hôte dit d'une pull request (ouverte, fusionnée, fermée, changements demandés)",
+    "projects.checks_seen": "Ce que l'hôte dit des vérifications du commit d'une pull request",
+    "projects.base_seen": "La base d'un atelier, relue après une récupération (ce qu'un projet lecteur en voit)",
+    "projects.merge_asked": "Une personne demande la fusion d'une pull request, au commit qu'elle a lu",
+    "projects.merge_answered": "Ce que l'hôte a répondu à une fusion demandée (fusionnée, ou pourquoi non)",
+    "projects.decision_revised": "Les textes d'une décision technique modifiés par une personne",
+    "projects.pull_write_asked": "Une personne écrit chez l'hôte sur une pull request (son titre, son texte, un "
+                                 "commentaire)",
+    "projects.pull_write_answered": "Ce que l'hôte a répondu à ce qu'une personne a écrit sur une pull request",
+    "projects.issue_asked": "La publication d'un ticket ou d'une note chez l'hôte demandée",
+    "projects.review_asked": "Une relecture indépendante demandée pour le commit d'un objectif",
+    "projects.reviewed": "Le verdict d'une relecture indépendante (bon, ou ses constats)",
     "projects.restored": "Un projet restauré", "projects.resumed": "Un projet repris",
     "projects.run_reported": "Une exécution rendue",
     "email.draft_asked": "Une réponse à un mail demandée", "email.noticed": "Un mail remarqué",
@@ -339,6 +376,7 @@ EVENT_LABELS: dict[str, str] = {
     "forge.proved": "Une version d'app prouvée à l'essai",
     "forge.signaled": "Une app l'a interpellée", "forge.switched": "Une app allumée ou éteinte",
     "forge.queued": "Un signal d'app mis en file", "forge.judged": "Une file d'app lue",
+    "forge.raised": "Une app d'un projet a signalé (son nom, sans le texte du signal)",
     "forge.ticked": "Une app a tourné", "forge.written": "Une app écrite", "sensors.sensed": "Un appareil a signalé",
     "location.located": "Son téléphone a dit où était la personne",
     "location.cleared": "La personne ne partage plus où elle est",
@@ -356,6 +394,19 @@ EVENT_LABELS: dict[str, str] = {
     "projects.plan_proposed": "Son plan pour un projet (écrit, ou revu)",
     "projects.plan_answered": "Une réponse à son plan (validé, ou à revoir)",
     "projects.links_set": "Ce qu'un projet lit des autres projets, réglé",
+    "projects.stirred": "Ce qui vient d'arriver a déclenché des objectifs (ou aucun)",
+    "projects.list_set": "Une liste de suivi créée ou réglée (un projet)",
+    "projects.item_added": "Un élément ajouté à une liste (un ticket ouvert)",
+    "projects.item_changed": "Un élément d'une liste changé (un ticket accepté, fermé)",
+    "projects.item_noted": "Une note dans le fil d'un élément",
+    # sa documentation (ADR 0289), un espace à part de son dépôt
+    "projects.doc_written": "Une version de plus d'une page de la documentation d'un projet",
+    "projects.doc_moved": "Une page de documentation renommée ou déplacée",
+    "projects.doc_removed": "Une page de documentation supprimée, avec ses versions",
+    "projects.doc_image_added": "Une image de plus dans la documentation d'un projet",
+    "projects.doc_image_removed": "Une image retirée de la documentation d'un projet",
+    "projects.milestone_added": "Un jalon posé sur un objectif",
+    "projects.milestone_changed": "Un jalon révisé, dit prêt, refusé, atteint ou retiré",
     "social.one_sided": "C'est presque toujours elle qui écrit",
     "social.bond_shifted": "Un lien qui a changé (elle l'a remarqué)",
     "social.bond_noted": "Un lien relevé sans le vivre (mise en service, proximité fixée, propriétaire)",
@@ -420,6 +471,20 @@ EFFECT_LABELS: dict[str, tuple[str, str, str]] = {
                                    "les vues qu'il avait, et celles que d'autres avaient de lui, sont supprimées"),
     "projects:projects.reframed": ("range", "Un projet change de propriétaire",
                                    "les vues d'atelier que ce changement ferme sont supprimées"),
+    # la copie de commit qu'une relecture indépendante lisait (ADR 0277) : effacée à la fin de son exécution
+    "projects:episode.ended": ("range", "Une relecture de projet se termine",
+                               "la copie du commit qu'elle relisait est effacée"),
+    # la fusion d'une pull request (ADR 0288) : le geste d'une personne, jamais le sien
+    # une image retirée de la documentation d'un projet (ADR 0289)
+    "projects:projects.doc_image_removed": ("range", "Une image de documentation retirée",
+                                            "ses octets sont effacés"),
+    # un ajout que l'espace n'a pas gardé (un nom pris au même instant, une borne atteinte) ne laisse pas ses octets
+    "projects:projects.doc_image_added": ("range", "Une image de documentation ajoutée",
+                                          "si l'espace ne l'a pas gardée, ses octets sont effacés"),
+    "projects:projects.merge_asked": ("agit", "Une fusion demandée par une personne",
+                                      "la pull request est fusionnée chez l'hôte, au commit que la personne a lu"),
+    "projects:projects.pull_write_asked": ("agit", "Ce qu'une personne écrit sur une pull request",
+                                           "son titre, son texte ou un commentaire signé partent chez l'hôte"),
 }
 #: Les familles des effets, dans l'ordre de la page ; un effet sans libellé se range avec le reste
 #: (``names.OTHER_EFFECTS``).
@@ -432,6 +497,7 @@ EFFECT_FAMILIES: tuple[tuple[str, str], ...] = (
 BUNDLE_LABELS: dict[str, str] = {
     "attention": "Ses pensées", "self": "Son journal", "social": "Qui lui parle", "workshop": "L'atelier d'un projet",
     "forge": "La Forge (écrire ses apps)", "forge_signals": "Ce que ses apps lui signalent",
+    "project_review": "Relire le travail d'un projet",
     "mcp.*": "Service « {} »", "forge_apps.*": "Son app « {} »",
 }
 
@@ -441,6 +507,9 @@ CAPABILITY_LABELS: dict[str, str] = {
     "email.send": "Mail", "teams.send": "Réponse Teams", "phone.send": "Réponse téléphone",
     "mcp.call": "Outil extérieur", "forge.call": "Outil d'app", "forge.install": "Version d'app",
     "projects.networked": "Commande réseau", "projects.push": "Push git", "projects.pull": "Pull git",
+    "projects.pull_request": "Pull request",
+    "projects.issue": "Issue publiée", "projects.issue_state": "État d'une issue",
+    "projects.issue_note": "Note publiée",
     "projects.steer": "Pilotage de projet",
 }
 
@@ -458,6 +527,10 @@ ENRICHER_LABELS: dict[str, str] = {
     "goals_context": "D'où vient le but, et la vie de la personne", "projects": "Ses projets",
     "projects_tree": "L'arbre de l'atelier d'un projet", "projects_apps": "Ce qui n'a pas marché pour ses apps",
     "projects_views": "Les vues des ateliers que son projet lit",
+    "projects_items": "Le registre de son projet (ce qui a bougé, ses éléments ouverts)",
+    "projects_tickets": "Les tickets que regarde son exécution (entre ses mains, ou celui de son objectif)",
+    "projects_review": "Ce qu'une relecture indépendante a sous les yeux (ses textes, le diff du commit relu)",
+    "projects_asks": "Les demandes de son projet aux projets qu'il lit (où chacune en est)",
     "projects_answer": "La réponse à sa demande d'aide (un projet)", "sent_files": "Les fichiers qu'elle a envoyés",
     "mail": "Son courrier", "teams": "Ses conversations Teams", "phone": "Les messages du téléphone",
     "headlines": "Les titres de ses flux", "views": "Ce que voit la caméra", "dessins": "Ses dessins",
@@ -475,6 +548,7 @@ ENRICHER_LABELS: dict[str, str] = {
 NEED_LABELS: dict[str, tuple[str, str]] = {
     "imaging": ("aucun fournisseur d'images n'est configuré", "images-fournisseurs"),
     "maps": ("les lieux, les adresses et les itinéraires ne sont pas branchés", "lieux"),
+    "feeds": ("elle ne suit aucun flux", "flux"),
 }
 
 #: Tout ce que la console nomme en français, d'un bloc.

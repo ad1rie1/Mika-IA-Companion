@@ -42,7 +42,7 @@ from mika.faculties.social.faculty import SOCIAL, THEIR_DAY, Profile, SocialStat
 from mika.faculties.social.profile import lines_of, register
 from mika.kernel.faculty import Zone
 from mika.kernel.frame import Frame
-from mika.kernel.prompt import SectionBody, readable
+from mika.kernel.prompt import Fragment, SectionBody, readable
 from mika.vocab.episodes import CONVERSATIONAL, Kind, Tag
 from mika.vocab.knowledge import knowns
 from mika.vocab.lineage import admits
@@ -136,11 +136,19 @@ _TO_YOU = ((re.compile(r"\bm'(?=appell|surnomm)"), "t'"), (re.compile(r"\bme (?=
            (re.compile(r"\bmoi\b"), "toi"), (re.compile(r"\bnotre\b"), "votre"), (re.compile(r"\bnos\b"), "vos"))
 
 
+#: ce qui reste à la première personne dans une note que ``_TO_YOU`` ne sait pas dire à elle (« je l'ai faite »)
+_STILL_MINE = re.compile(r"\b(?:je|me|mon|ma|mes)\b|\b[jm]['’](?=\w)", re.IGNORECASE)
+
+
 def to_you(text: str) -> str:
-    """Une note d'elle (« Sam m'appelle « Mikachu » »), dite à elle (« Sam t'appelle « Mikachu » »)."""
+    """Une note d'elle (« Sam m'appelle « Mikachu » »), dite à elle (« Sam t'appelle « Mikachu » ») — en entier ou pas
+    du tout (ADR 0266) : une note qui garderait un « je » après coup reste telle qu'elle l'a écrite, à la première
+    personne. Le 19 novembre 2026, « moi le poney » devenait « toi le poney » dans une ligne dont la suite disait
+    encore « je l'ai faite… je la garde »."""
+    told = text
     for pattern, repl in _TO_YOU:
-        text = pattern.sub(repl, text)
-    return text
+        told = pattern.sub(repl, told)
+    return text if _STILL_MINE.search(told) else told
 
 
 def _tie(frame: Frame) -> str | None:
@@ -163,13 +171,16 @@ def _register(s: SocialState, frame: Frame, enrich: Mapping[str, Any]) -> Sectio
     if ep is None or tie is None:
         return None
     level = frame.get(c.CLOSENESS(frame.get(identity_c.PERSON(ep.target))))
-    lines = [tie]
     ours = enrich.get("between_us") or ()
     if ours and aud is not None and aud.private_ok and level in (c.FRIEND, c.CLOSE):
-        lines += [phrase("social.register.ours"),
-                  *(f"- {to_you(text)}" for _i, text in ours)]
-        return SectionBody("\n".join(lines), provenance=tuple(f"memory:{i}" for i, _t in ours))
-    return SectionBody("\n".join(lines))
+        # ce que le fil montre encore ne se redit pas (ADR 0263) : une blague fraîche dont tous les messages sont
+        # dans l'historique rendu s'y lit déjà ; quand le fil glisse hors de la fenêtre, ou qu'elle a vieilli, sa
+        # ligne revient
+        parts = (Fragment(tie), Fragment(phrase("social.register.ours"), heading=True),
+                 *(Fragment(f"- {to_you(text)}", (f"memory:{i}",), tuple(shown)) for i, text, shown in ours))
+        return SectionBody("\n".join(f.text for f in parts), provenance=tuple(f"memory:{i}" for i, _t, _s in ours),
+                           fragments=parts)
+    return SectionBody(tie)
 
 
 @SOCIAL.enricher("profile_text", episodes=CONVERSATIONAL, deadline_ms=500)
@@ -189,11 +200,12 @@ async def _profile_text(s: SocialState, frame: Frame, ports: Mapping[str, Any]) 
 BETWEEN_SHOWN = 4
 
 
-def between_us(store: Any, frame: Frame, person: str) -> tuple[tuple[int, str], ...]:
+def between_us(store: Any, frame: Frame, person: str) -> tuple[tuple[int, str, tuple[int, ...]], ...]:
     """Ce qui n'appartient qu'à elle et à cette personne (``memory`` : un surnom, leur blague) — de première main :
     ce que la personne lui en a dit, ou ce qu'elle-même en a dit, jamais ce qu'un tiers en raconte ; seulement ce qui
     ne concerne qu'elles deux (« Sam et Léa m'appellent Mimi » n'est pas à Sam seul), et ce que le verdict de la
-    mémoire laisse dire ici (audit du 2026-10-09)."""
+    mémoire laisse dire ici (audit du 2026-10-09). Chacun : (son numéro, son texte, les tours du fil qui dispensent
+    de le redire — ``memory.shown_by_thread``, ADR 0263)."""
     handles = sorted({person, *frame.get(identity_c.HANDLES(person))})
     v = memory_c.KNOWLEDGE
     rows = knowns(store.query_mind(
@@ -208,12 +220,13 @@ def between_us(store: Any, frame: Frame, person: str) -> tuple[tuple[int, str], 
             continue
         if aud is None or not admits(k.lineage, person, aud, resolve=resolve, presumed=presumed).ok:
             continue
-        out.append((k.id, k.text))
+        out.append((k.id, k.text, memory_c.shown_by_thread(k.sources, k.touched_at, frame.now)))
     return tuple(out[:BETWEEN_SHOWN])
 
 
 @SOCIAL.enricher("between_us", episodes=CONVERSATIONAL, deadline_ms=500)
-async def _between_us(s: SocialState, frame: Frame, ports: Mapping[str, Any]) -> tuple[tuple[int, str], ...] | None:
+async def _between_us(s: SocialState, frame: Frame, ports: Mapping[str, Any]
+                      ) -> tuple[tuple[int, str, tuple[int, ...]], ...] | None:
     """Avec une amie ou une proche, en privé : ce qui n'appartient qu'à vous."""
     store = ports.get("store")
     ep, aud = frame.episode, frame.audience

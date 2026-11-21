@@ -103,6 +103,9 @@ class Item:
     #: le témoignage d'où vient ``felt`` (une croyance) : ce que la personne en ressent ne se dit que là où il
     #: s'entend (0 : aucun)
     felt_from: int = 0
+    #: les messages d'où il vient (leur ``seq``, celui des tours du fil : ``memory_items.sources``), dans l'ordre ;
+    #: une redite les complète. Ce que le fil montre encore ne se redit pas (ADR 0263)
+    sources: tuple[int, ...] = ()
 
     @classmethod
     def of(cls, row: dict[str, Any]) -> Item:
@@ -125,6 +128,7 @@ class Item:
             felt=facets(json.loads(row.get("felt") or "[]")), empathy=facets(json.loads(row.get("empathy") or "[]")),
             until=row.get("until"), precision=str(row.get("precision") or ""), likelihood=row.get("likelihood"),
             veiled=str(row.get("veiled") or ""), felt_from=int(row.get("felt_from") or 0),
+            sources=tuple(sorted(int(seq) for seq in json.loads(row.get("sources") or "[]"))),
         )
 
 

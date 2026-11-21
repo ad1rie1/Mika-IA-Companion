@@ -85,13 +85,15 @@ def _body(recall: Recall, frame: Frame, *, witness: bool) -> SectionBody | None:
     for bucket, belief, heading in ((memories, False, phrase("memory.recall.souvenirs")),
                                     (beliefs, True, phrase("memory.recall.beliefs"))):
         if bucket:
-            parts.append(Fragment(heading))
+            parts.append(Fragment(heading, heading=True))
+            # ce qui lui revient se redit même quand le fil le montre encore (ADR 0263 ne vaut que pour ce qu'elle a
+            # dit d'elle et ce qui vous lie) : ce qu'elle a sous les yeux est ce que son usage renforce
             parts.extend(Fragment(line, tuple(f"memory:{i}" for i in (r.evidence or (r.item.id,)))) for r, line in zip(
                 bucket, _lines(bucket, frame.now, beliefs=belief, names=names), strict=True))
     if hidden:
         # sonde réelle du 2026-10-02 : sans cette ligne, interrogée là-dessus, elle mentait (« il ne m'a rien dit »)
-        parts.extend(Fragment(line) for line in [phrase("memory.recall.unsaid"), *hidden,
-                                                phrase("memory.recall.unsaid_advice")])
+        parts.append(Fragment(phrase("memory.recall.unsaid"), heading=True))
+        parts.extend(Fragment(line) for line in [*hidden, phrase("memory.recall.unsaid_advice")])
     shown = memories + beliefs  # ce qu'on lui a confié porte son étiquette (``memory.tag``), ligne par ligne
     return SectionBody("\n".join(f.text for f in parts), level=max((r.verdict.level for r in shown), default=0),
                        provenance=tuple(f"memory:{i}" for r in shown for i in (r.evidence or (r.item.id,))), witness=witness,
@@ -297,4 +299,10 @@ def _self_said_section(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) 
         return None
     lines = [phrase("memory.self_said.line", age=age_words(it.born_at, frame.now), text=it.text)
              for it in recall.self_said]
-    return SectionBody("\n".join(lines), provenance=tuple(f"memory:{it.id}" for it in recall.self_said))
+    # ce que le fil montre encore ne se redit pas (ADR 0263) : le dernier message où elle l'a dit, tant qu'il est
+    # frais — une redite complète ses sources, et c'est la plus récente que le fil garde ; la fenêtre glissée, ou
+    # vingt jours plus tard, la ligne revient
+    return SectionBody("\n".join(lines), provenance=tuple(f"memory:{it.id}" for it in recall.self_said),
+                       fragments=tuple(Fragment(line, (f"memory:{it.id}",),
+                                                c.shown_by_thread(it.sources, it.touched_at, frame.now, last=True))
+                                       for it, line in zip(recall.self_said, lines, strict=True)))

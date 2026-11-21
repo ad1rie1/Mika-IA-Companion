@@ -72,7 +72,29 @@ export function regardLine(regard: Regard): Scene["lines"] {
   return line ? [{ ...line, mika: true }] : [];
 }
 
+/**
+ * Ce qu'un regard ouvre dans l'écran Carte : le voyage qu'elle montrait, Itinéraire pour un trajet, Événements pour des
+ * événements (R2-W01), sinon Explorer.
+ */
+export function regardHref(seq: string, regard: Pick<Regard, "kind" | "what" | "trip">): string {
+  if (regard.trip) return noteRoute({ kind: "trip", ref: regard.trip });
+  if (regard.kind === "look" && regard.what === "trajet") return `#carte/itineraire/${regardItem(seq)}`;
+  if (regard.kind === "look" && regard.what === "evenements") return `#carte/evenements/${regardItem(seq)}`;
+  return `#carte/explorer/${regardItem(seq)}`;
+}
+
+/** Les événements d'un regard (`what` : `evenements`), en épingles roses ; sans coordonnées, aucune. */
+function regardEventPins(regard: Regard): ScenePin[] {
+  return (regard.events ?? []).flatMap((e, i) => (validPoint(e.lat, e.lon)
+    ? [{ id: e.id || `e${i}`, lat: e.lat as number, lon: e.lon as number, mika: true, title: e.name ?? "" }] : []));
+}
+
 export function regardMini(seq: string, regard: Regard): MiniData {
+  if (regard.kind === "look" && regard.what === "evenements") {
+    const found = regard.events?.length ?? 0;
+    return { title: regard.title || "Ce que Mika a trouvé", sub: `Mika a cherché · ${plural(found, "événement")}`,
+      href: regardHref(seq, regard), scene: { pins: regardEventPins(regard), lines: [] } };
+  }
   const route = regard.kind === "look" && regard.what === "trajet";
   const pins = regardPins(regard, route);
   const lines = regardLine(regard);
@@ -83,10 +105,7 @@ export function regardMini(seq: string, regard: Regard): MiniData {
   if (route) sub = ["Mika a calculé le trajet", [trip, how].filter(Boolean).join(" ")].filter(Boolean).join(" · ");
   else if (regard.kind === "look") sub = `Mika a cherché · ${plural(pins.length, "lieu", "lieux")}`;
   else sub = ["Une carte de Mika", plural(pins.length, "lieu", "lieux"), ...(trip ? [trip] : [])].join(" · ");
-  const href = regard.trip
-    ? noteRoute({ kind: "trip", ref: regard.trip })
-    : route ? `#carte/itineraire/${regardItem(seq)}` : `#carte/explorer/${regardItem(seq)}`;
-  return { title: regard.title || "Sa carte", sub, href, scene: { pins, lines } };
+  return { title: regard.title || "Sa carte", sub, href: regardHref(seq, regard), scene: { pins, lines } };
 }
 
 /** Avant d'être lue : le texte de la note, et ce qu'elle est. */

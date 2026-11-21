@@ -133,11 +133,12 @@ def may_link(p: Project, person: str, world: World) -> bool:
 @dataclass(frozen=True, slots=True)
 class Grant:
     """Ce que les lignes d'accès d'un projet donnent à un projet qui le lit : le voir, le piloter (``STEERS``), ses
-    fichiers — et ce que le lecteur en reçoit."""
+    fichiers, sa documentation (ADR 0289) — et ce que le lecteur en reçoit."""
 
     see: bool = False
     steer: str = STEER_NO
     files: bool = False
+    docs: bool = False
 
     @property
     def detail(self) -> bool:
@@ -149,6 +150,12 @@ class Grant:
     def view(self) -> bool:
         """La vue de son atelier : le voir, et ses fichiers."""
         return self.see and self.files
+
+    @property
+    def documentation(self) -> bool:
+        """Lire sa documentation, l'espace à part de son dépôt (ADR 0289) : le voir, et sa colonne « documentation ».
+        Jamais l'écrire : un lien ne fait que lire."""
+        return self.see and self.docs
 
     @property
     def ask(self) -> str:
@@ -203,9 +210,11 @@ def granted(rows: Iterable[c.ProjectAccess], where: str, person: str = "",
         return NOTHING
     steer = min((line.steer for line in lines), key=lambda level: STEER_RANK.get(level, 0))
     files = all(line.files for line in lines)
+    docs = all(line.docs for line in lines)
     if through is not None:
-        steer, files = tighten(steer, through.steer, STEER_RANK), files and through.files
-    return Grant(True, steer, files)
+        # le tableau d'un canal n'a pas de colonne à elle : sa documentation y suit « fichiers » (ADR 0289)
+        steer, files, docs = tighten(steer, through.steer, STEER_RANK), files and through.files, docs and through.files
+    return Grant(True, steer, files, docs)
 
 
 def _granted_to(target: Project, where: str, person: str, world: World) -> Grant:
@@ -213,6 +222,13 @@ def _granted_to(target: Project, where: str, person: str, world: World) -> Grant
         return NOTHING
     rows, _ = access_of(target)
     return granted(rows, where, person, world.close, door(world.canals))
+
+
+def given_to(target: Project, person: str, world: World) -> Grant:
+    """Ce que les lignes d'accès de ``target`` donnent à cette personne hors de toute conversation (la même lecture
+    serrée que pour un lien) : ce qu'elle peut en voir et en piloter depuis son espace, sans canal ni moment. Vide :
+    elle seule, au travail."""
+    return _granted_to(target, *_standing(person, world), world)
 
 
 def grant(reader: Project, target: Project, world: World) -> Grant:

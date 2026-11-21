@@ -2,10 +2,11 @@
  * Carte : ce qui se calcule sans DOM ni réseau — l'ordre des arrêts d'un voyage et où un geste les met (un geste qui ne
  * change rien, ce qu'en dit un lecteur d'écran), une note changée, ce dont son trajet dépend, le jour et la place d'un
  * lieu croisé le long du trajet, ce que la fenêtre d'un voyage envoie, tes choix d'itinéraire face à ceux d'un trajet
- * de Mika, jusqu'où une recherche est allée, un itinéraire en GPX, les phrases qu'on prépare pour Mika, le contrôle qui
- * garde la main d'un dessin à l'autre, les icônes des catégories.
+ * de Mika, jusqu'où une recherche est allée, la fiche d'un lieu dans la route, les cuisines d'une liste, un itinéraire
+ * en GPX, les phrases qu'on prépare pour Mika, le contrôle qui garde la main d'un dessin à l'autre, les icônes des
+ * catégories.
  */
-import { AVOIDS, MODES, PLACE_REF, type Place, type Route, type Trip, type TripRoute, type TripStop, type TripValues } from "../../api/carte";
+import { AVOIDS, EVENT_REF, MODES, PLACE_REF, type Place, type Route, type Trip, type TripRoute, type TripStop, type TripValues } from "../../api/carte";
 import { meters, validPoint } from "../../map/mapgeo";
 import { safeDecode, type LatLon } from "../../map/polyline";
 import type { IconName } from "../../shell/icons";
@@ -292,6 +293,66 @@ export function lieuOf(item: string | null | undefined): string | null {
 export function ficheId(p: Pick<Place, "id" | "osm">): string | null {
   if (p.osm && PLACE_REF.test(p.osm)) return p.osm;
   return p.id && PLACE_REF.test(p.id) ? p.id : null;
+}
+
+/** Ce qu'un regard garde d'un lieu, en plus de ses champs de toujours (`plugins/trips/tools.py::HIT_KEPT`). */
+const KEPT = ["osm", "rating", "reviews", "price", "cuisine", "photo", "tags"] as const;
+
+/**
+ * Un lieu tel que la liste l'attend, depuis ce qu'un regard a gardé : ses champs de toujours (un point nommé n'a ni
+ * sorte ni distance), et ce qu'elle a vu de lui — sa note Google, son nombre d'avis, son prix, sa cuisine, sa photo
+ * (R2-W08). Un regard ne garde ni ses horaires (ils ne valaient qu'à l'instant) ni le crédit de sa photo : sa vignette
+ * ne se montre pas (`sources.ts::listThumb`).
+ */
+export function regardPlace(p: Partial<Place>): Place {
+  const out: Place = {
+    id: p.id ?? "", name: p.name ?? "", kind: p.kind ?? "", kind_fr: p.kind_fr ?? "", category: p.category ?? "",
+    lat: p.lat ?? NaN, lon: p.lon ?? NaN, town: p.town ?? "", distance_m: p.distance_m ?? null, along_m: p.along_m ?? null,
+  };
+  const known = out as unknown as Record<string, unknown>;
+  for (const k of KEPT) {
+    const v = p[k];
+    if (v !== undefined && v !== null && v !== "") known[k] = v;
+  }
+  return out;
+}
+
+/**
+ * La liste après « Actualiser » (R2-W07) : la ligne du lieu relu (même fiche) prend ce que la fiche relue en dit — sa
+ * note, son nombre d'avis, sa photo… —, en gardant sa distance et sa place le long d'un trajet, que la fiche ne sait pas.
+ */
+export function withRefreshed(places: readonly Place[], id: string, fresh: Place): Place[] {
+  return places.map((p) => (ficheId(p) === id ? { ...fresh, distance_m: p.distance_m, along_m: p.along_m } : p));
+}
+
+/** Où revenir d'une fiche : la fiche d'où elle s'est ouverte (`href`), en mots (`label`). */
+export interface Origin {
+  href: string;
+  label: string;
+}
+
+/**
+ * Une fiche ouverte par un lien d'une fiche de l'autre onglet (« Bientôt, tout près » d'un lieu, le lieu d'un
+ * événement) : où revenir (R2-W06). `before` et `now` : l'onglet et l'objet de la route d'avant et de maintenant
+ * (`explorer/lieu-w84451082`, `evenements/e:…`) ; une autre transition (depuis une liste, le même onglet) : `null`.
+ */
+export function crossOrigin(before: string, now: string): Origin | null {
+  const [fromTab, fromItem = ""] = splitKey(before);
+  const [toTab, toItem = ""] = splitKey(now);
+  const place = (item: string) => item.startsWith("lieu-") && PLACE_REF.test(item.slice(5));
+  const event = (item: string) => EVENT_REF.test(item);
+  if (fromTab === "explorer" && place(fromItem) && toTab === "evenements" && event(toItem)) {
+    return { href: `#carte/explorer/${lieuItem(encodeURIComponent(fromItem.slice(5)))}`, label: "Retour au lieu" };
+  }
+  if (fromTab === "evenements" && event(fromItem) && toTab === "explorer" && place(toItem)) {
+    return { href: `#carte/evenements/${encodeURIComponent(fromItem)}`, label: "Retour à l'événement" };
+  }
+  return null;
+}
+
+function splitKey(key: string): [string, string] {
+  const at = key.indexOf("/");
+  return at < 0 ? [key, ""] : [key.slice(0, at), key.slice(at + 1)];
 }
 
 // ── Les filtres d'une liste ──────────────────────────────────────────

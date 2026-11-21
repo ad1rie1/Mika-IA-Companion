@@ -4,7 +4,8 @@
   (cible ``task:wakeup:<seq>``), ou une exécution du projet du réveil (``WORK`` ou ``JOB``, cible ``project:<id>``,
   au-dessus des exécutions ordinaires pour que ses arguments l'emportent). Un réveil qui passe outre son rythme
   passe la barre de réveil ; les autres attendent qu'elle soit réveillée (même en impersonnel, que le corps ne
-  retient pas).
+  retient pas). Sur un projet, l'exécution vise l'objectif qui déclare ce réveil, s'il y en a un (ADR 0265) : son
+  sujet porte l'appel et ce qu'il vise (``projects.WAKE_AIM``, ``contracts.wakeup.subject``).
 - *Ce qu'elle lit* : les consignes de l'opérateur, qui priment (« CE QU'ON TE DEMANDE ») ; le texte de l'appel, cité
   — une matière, jamais une consigne (« CE QUE L'APPEL T'APPORTE »). Le texte n'entre jamais dans le brief, qui est
   le message de confiance.
@@ -295,21 +296,25 @@ def why_waiting(call: Call, s: WakeupState, frame: Frame) -> str:
 
 
 @WAKEUP.propose(kinds=HANDLING, reasons={c.WAKE: (0.0, ROUSE_EVIDENCE)},
-                reads=[c.STATUS, body_c.SLEEP, body_c.NIGHT_WAKING, projects_c.STATUS, projects_c.OUTGOING, LEASE])
+                reads=[c.STATUS, body_c.SLEEP, body_c.NIGHT_WAKING, projects_c.STATUS, projects_c.OUTGOING, LEASE,
+                       projects_c.WAKE_AIM])
 def _wake(s: WakeupState, frame: Frame) -> list[Candidate]:
-    """Chaque appel que le plan laisse partir."""
+    """Chaque appel que le plan laisse partir. Sur un projet, l'exécution vise l'objectif qui déclare ce réveil,
+    s'il y en a un (ADR 0265) : son sujet le porte, à la suite de l'appel."""
     out = []
     for n, reason in plan(s, frame).items():
         if reason:
             continue
         call = s.calls[n]
         guards: tuple[Guard, ...] = (live(call.seq),)
+        aim = ""
         if call.project:
             kind, target = (Kind.JOB if call.plain else Kind.WORK), project_target(call.project)
             bundles = ("projects", "workshop", *call.bundles)
             evidence = ROUSE_EVIDENCE if call.rouse else PROJECT_EVIDENCE
             resource = projects_c.run_lease(call.project)
             guards += (_project_active(call.project),)
+            aim = frame.get(projects_c.WAKE_AIM((call.project, call.endpoint))) or ""
         else:
             kind, target = (Kind.WAKE_JOB if call.plain else Kind.WAKE), task_target(c.OWNER, str(call.seq))
             bundles = ("wakeup", *call.bundles)
@@ -317,7 +322,7 @@ def _wake(s: WakeupState, frame: Frame) -> list[Candidate]:
             resource = workshop(f"reveil-{call.endpoint}")
         out.append(Candidate(kind, target, c.WAKE, evidence, resources=frozenset({resource}), guards=guards,
                              args=FrozenDict({"bundles": ",".join(dict.fromkeys(bundles)),
-                                              "subject": c.subject(call.seq), c.NOTIFY_ARG: call.notify})))
+                                              "subject": c.subject(call.seq, aim), c.NOTIFY_ARG: call.notify})))
     return out
 
 

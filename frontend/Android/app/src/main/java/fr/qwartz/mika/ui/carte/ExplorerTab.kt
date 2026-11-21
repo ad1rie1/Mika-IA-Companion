@@ -26,6 +26,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.BottomSheetScaffold
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -48,6 +50,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -70,25 +73,36 @@ import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
 import fr.qwartz.mika.data.moi.Tone
 import fr.qwartz.mika.data.moi.carte.Category
+import fr.qwartz.mika.data.moi.carte.MIN_RATING
 import fr.qwartz.mika.data.moi.carte.Place
 import fr.qwartz.mika.data.moi.carte.Regard
 import fr.qwartz.mika.data.moi.carte.Where
 import fr.qwartz.mika.data.moi.carte.addressId
+import fr.qwartz.mika.data.moi.carte.cuisineChoices
+import fr.qwartz.mika.data.moi.carte.ficheId
+import fr.qwartz.mika.data.moi.carte.filtersOn
 import fr.qwartz.mika.data.moi.carte.km
+import fr.qwartz.mika.data.moi.carte.listThumb
 import fr.qwartz.mika.data.moi.carte.placeId
 import fr.qwartz.mika.data.moi.carte.placeLine
-import fr.qwartz.mika.data.moi.carte.placeWhat
+import fr.qwartz.mika.data.moi.carte.placeRow
+import fr.qwartz.mika.data.moi.carte.ratingWords
+import fr.qwartz.mika.data.moi.carte.ratingsLine
+import fr.qwartz.mika.data.moi.carte.regardTab
 import fr.qwartz.mika.data.moi.carte.plural
 import fr.qwartz.mika.data.moi.carte.searchLegend
 import fr.qwartz.mika.data.moi.carte.searchTitle
+import fr.qwartz.mika.data.moi.carte.sortLabel
 import fr.qwartz.mika.ui.Route
 import fr.qwartz.mika.ui.map.ScenePlan
 import fr.qwartz.mika.ui.map.SceneMap
 import fr.qwartz.mika.ui.map.rememberMapFond
 import fr.qwartz.mika.ui.shell.Load
+import fr.qwartz.mika.ui.shell.LocalShell
 import fr.qwartz.mika.ui.shell.MIcon
 import fr.qwartz.mika.ui.shell.NoteBox
 import fr.qwartz.mika.ui.shell.said
+import fr.qwartz.mika.ui.shell.toneColors
 import fr.qwartz.mika.ui.theme.mika
 import kotlin.math.roundToInt
 
@@ -130,7 +144,7 @@ internal fun ExplorerTab(graph: AppGraph, vm: ExplorerViewModel, links: CarteLin
         BottomSheetScaffold(
             scaffoldState = sheet,
             sheetPeekHeight = peek,
-            sheetContent = { ExplorerSheet(vm, links, Modifier.heightIn(min = peek)) },
+            sheetContent = { ExplorerSheet(graph, vm, links, Modifier.heightIn(min = peek)) },
             modifier = Modifier.fillMaxSize(),
         ) {
             Box(Modifier.fillMaxSize()) {
@@ -142,7 +156,11 @@ internal fun ExplorerTab(graph: AppGraph, vm: ExplorerViewModel, links: CarteLin
                     Modifier.fillMaxSize(),
                     control = vm.control,
                     insets = PaddingValues(top = searchTop, bottom = peek),
-                    onPin = vm::pinTouched,
+                    onPin = { id ->
+                        // un lieu qui a une fiche l'ouvre ; une adresse, un point sans fiche : choisi
+                        val p = vm.placeOf(id)
+                        if (p != null && ficheId(p) != null) links.openPlace(p, vm.look != null) else vm.pinTouched(id)
+                    },
                     onMove = vm::mapMoved,
                     plan = { why ->
                         ScenePlan(scene, title, why, Modifier.fillMaxSize(), notePadding = Modifier.padding(bottom = peek))
@@ -256,25 +274,133 @@ private fun CategoryChip(c: Category, on: Boolean, onClick: () -> Unit) {
     )
 }
 
-/** La feuille du bas : la fiche du lieu choisi, sinon les résultats (ou ce qui empêche de chercher). */
+/** La feuille du bas : la carte du lieu choisi (une adresse, un lieu sans fiche), sinon les résultats (ou ce qui empêche de chercher). */
 @Composable
-private fun ExplorerSheet(vm: ExplorerViewModel, links: CarteLinks, modifier: Modifier) {
+private fun ExplorerSheet(graph: AppGraph, vm: ExplorerViewModel, links: CarteLinks, modifier: Modifier) {
     val chosen = vm.chosen
     Column(modifier.fillMaxWidth()) {
         if (vm.loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 16.dp))
         if (chosen != null) {
             PlaceCard(chosen, vm.where ?: Where.ZONE, links, hers = vm.look != null, onClose = { vm.select(null) })
         } else if (vm.look != null) {
-            RegardResults(vm, links)
+            RegardResults(graph, vm, links)
         } else {
-            Results(vm)
+            Results(graph, vm, links)
         }
+    }
+}
+
+/**
+ * Les filtres d'une liste (ADR 0259), sous la poignée de la feuille : ouvert maintenant, ce que le serveur sait
+ * reconnaître (terrasse, végétarien, vegan, accessible…), « 4 et plus » (sa note Google), la cuisine parmi celles de la
+ * liste (un menu).
+ */
+@Composable
+private fun FilterChips(vm: ExplorerViewModel) {
+    val f = vm.filters
+    val features = (vm.info as? Load.Ready)?.value?.features.orEmpty()
+    val cuisines = cuisineChoices(vm.places, f.cuisine)
+    var cuisineMenu by remember { mutableStateOf(false) }
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 2.dp),
+    ) {
+        item("open") {
+            FilterChip(
+                selected = f.open,
+                onClick = vm::toggleOpen,
+                label = { Text(stringResource(R.string.fiche_filter_open)) },
+                leadingIcon = { MIcon(R.drawable.ic_m_clock, null, size = 16.dp) },
+            )
+        }
+        items(features, key = { "f:" + it.id }) { c ->
+            FilterChip(selected = c.id in f.features, onClick = { vm.toggleFeature(c.id) }, label = { Text(c.label) })
+        }
+        item("rating") {
+            FilterChip(
+                selected = f.minRating != null,
+                onClick = vm::toggleRating,
+                label = { Text(stringResource(R.string.fiche_filter_rating, MIN_RATING.toInt())) },
+                leadingIcon = { MIcon(R.drawable.ic_m_star, null, size = 16.dp) },
+            )
+        }
+        if (cuisines.isNotEmpty()) {
+            item("cuisine") {
+                Box {
+                    FilterChip(
+                        selected = f.cuisine.isNotBlank(),
+                        onClick = { cuisineMenu = true },
+                        label = { Text(f.cuisine.ifBlank { stringResource(R.string.fiche_filter_cuisine) }) },
+                        trailingIcon = { MIcon(R.drawable.ic_m_chev_down, null, size = 16.dp) },
+                    )
+                    DropdownMenu(expanded = cuisineMenu, onDismissRequest = { cuisineMenu = false }) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.fiche_filter_cuisine_all)) },
+                            onClick = {
+                                cuisineMenu = false
+                                vm.chooseCuisine("")
+                            },
+                        )
+                        for (c in cuisines) {
+                            DropdownMenuItem(
+                                text = { Text(c) },
+                                onClick = {
+                                    cuisineMenu = false
+                                    vm.chooseCuisine(c)
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * La tête d'une liste : son titre, combien et jusqu'où, l'ordre (« Les plus proches » ↔ « Les mieux notés ») ; puis d'où
+ * viennent ses notes, en petit, dès qu'un lieu en a une (« Notes : Google Maps », « Notes Google Maps lues le … », R2-A03),
+ * et ce que le cache des notes en dit (sa `note` telle quelle).
+ */
+@Composable
+private fun ResultsHead(vm: ExplorerViewModel, title: String, more: String) {
+    val scheme = MaterialTheme.colorScheme
+    val sorts = (vm.info as? Load.Ready)?.value?.sorts.orEmpty()
+    Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(more, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+            }
+            if (sorts.size >= 2) {
+                val order = stringResource(R.string.fiche_sort_change)
+                TextButton(onClick = vm::nextOrder, modifier = Modifier.semantics { contentDescription = order }) {
+                    MIcon(R.drawable.ic_m_sort, null, size = 16.dp)
+                    Spacer(Modifier.width(4.dp))
+                    Text(sortLabel(sorts, vm.filters.sort), style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                }
+            }
+        }
+        RatingsLine(ratingsLine(vm.places, vm.coverage, LocalShell.current.graph.clock.wallMs()), Modifier.padding(top = 4.dp, end = 8.dp))
+    }
+}
+
+/** D'où viennent les notes d'une liste, en petit (vide : rien à citer). */
+@Composable
+private fun RatingsLine(text: String, modifier: Modifier = Modifier) {
+    if (text.isEmpty()) return
+    val scheme = MaterialTheme.colorScheme
+    Row(modifier) {
+        MIcon(R.drawable.ic_m_info, null, size = 13.dp, tint = scheme.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(text, style = MaterialTheme.typography.labelSmall, color = scheme.onSurfaceVariant)
     }
 }
 
 /** Les résultats (`resultsMarkup` du web) : la phrase de plus, les adresses, les lieux de l'index, ou pourquoi rien. */
 @Composable
-private fun Results(vm: ExplorerViewModel) {
+private fun Results(graph: AppGraph, vm: ExplorerViewModel, links: CarteLinks) {
     val scheme = MaterialTheme.colorScheme
     val info = vm.info
     LazyColumn(Modifier.fillMaxWidth(), contentPadding = PaddingValues(bottom = 24.dp)) {
@@ -309,7 +435,7 @@ private fun Results(vm: ExplorerViewModel) {
                     NoteBox(vm.addrError, R.drawable.ic_m_alert, Modifier.padding(horizontal = 16.dp, vertical = 4.dp), tone = Tone.WARN)
                 }
             }
-            itemsIndexed(vm.addresses, key = { i, _ -> addressId(i) }) { i, p -> PlaceRow(p) { vm.select(addressId(i)) } }
+            itemsIndexed(vm.addresses, key = { i, _ -> addressId(i) }) { i, p -> PlaceRow(graph, p) { vm.select(addressId(i)) } }
         }
         when {
             vm.error.isNotEmpty() -> item("error") {
@@ -320,18 +446,22 @@ private fun Results(vm: ExplorerViewModel) {
             }
             !vm.searched -> if (!vm.loading) item("empty") { Empty(R.drawable.ic_m_search, stringResource(R.string.carte_empty_title), stringResource(R.string.carte_empty_text)) }
             else -> {
+                item("filters") { FilterChips(vm) }
                 item("head") {
                     val title = searchTitle((info as? Load.Ready)?.value, vm.q, vm.cat)
-                    GroupHead(title, "${searchLegend(vm.searchedNear, vm.places)} · ${stringResource(R.string.carte_index_note)}")
+                    ResultsHead(vm, title, "${searchLegend(vm.searchedNear, vm.places)} · ${stringResource(R.string.carte_index_note)}")
                 }
                 if (vm.places.isEmpty()) {
                     item("none") {
                         val text = if (vm.loading) R.string.carte_searching
+                        else if (filtersOn(vm.filters)) R.string.fiche_nothing_filtered
                         else if (vm.where == Where.HERE) R.string.carte_nothing_here else R.string.carte_nothing_zone
                         Empty(R.drawable.ic_m_search, null, stringResource(text))
                     }
                 }
-                itemsIndexed(vm.places, key = { i, p -> "l:" + placeId(p, i) }) { i, p -> PlaceRow(p) { vm.select(placeId(p, i)) } }
+                itemsIndexed(vm.places, key = { i, p -> "l:" + placeId(p, i) }) { i, p ->
+                    PlaceRow(graph, p) { if (ficheId(p) != null) links.openPlace(p, false) else vm.select(placeId(p, i)) }
+                }
             }
         }
     }
@@ -364,7 +494,7 @@ private fun Empty(@DrawableRes icon: Int, title: String?, text: String) {
  * l'ouvrir aussi (son trajet dans Itinéraire, son voyage) ; oublié (404) : pourquoi ; une autre panne se réessaie.
  */
 @Composable
-private fun RegardResults(vm: ExplorerViewModel, links: CarteLinks) {
+private fun RegardResults(graph: AppGraph, vm: ExplorerViewModel, links: CarteLinks) {
     val scheme = MaterialTheme.colorScheme
     val seq = vm.look ?: return
     when (val load = vm.regardLoad) {
@@ -380,6 +510,13 @@ private fun RegardResults(vm: ExplorerViewModel, links: CarteLinks) {
         }
         is Load.Ready -> {
             val r: Regard = load.value
+            // des événements (une miniature touchée avant d'être lue) : ils se montrent dans leur onglet, à la place
+            // d'Explorer — la route est remplacée, pas empilée (R2-A04)
+            if (regardTab(r) == CarteTabs.EVENTS) {
+                LaunchedEffect(seq) { links.open(Route.Carte(CarteTabs.EVENTS, look = seq)) }
+                Empty(R.drawable.ic_m_sparkle, null, stringResource(R.string.carte_regard_loading))
+                return
+            }
             val shown = r.what == Regard.WHAT_ROUTE || r.kind == Regard.KIND_MAP
             LazyColumn(Modifier.fillMaxWidth(), contentPadding = PaddingValues(bottom = 24.dp)) {
                 item("regard-head") {
@@ -403,6 +540,8 @@ private fun RegardResults(vm: ExplorerViewModel, links: CarteLinks) {
                         }
                     }
                 }
+                val notes = ratingsLine(r.places, null, graph.clock.wallMs())
+                if (notes.isNotEmpty()) item("regard-notes") { RatingsLine(notes, Modifier.padding(start = 16.dp, end = 16.dp, bottom = 4.dp)) }
                 if (r.isRoute || r.trip.isNotBlank()) {
                     item("regard-links") {
                         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -422,31 +561,64 @@ private fun RegardResults(vm: ExplorerViewModel, links: CarteLinks) {
                 if (r.places.isEmpty()) {
                     item("regard-none") { Empty(R.drawable.ic_m_map, null, stringResource(R.string.carte_regard_empty)) }
                 }
-                itemsIndexed(r.places, key = { i, p -> "r:" + placeId(p, i) }) { i, p -> PlaceRow(p, hers = true) { vm.select(placeId(p, i)) } }
+                itemsIndexed(r.places, key = { i, p -> "r:" + placeId(p, i) }) { i, p ->
+                    PlaceRow(graph, p, hers = true) { if (ficheId(p) != null) links.openPlace(p, true) else vm.select(placeId(p, i)) }
+                }
             }
         }
     }
 }
 
-/** Un lieu de la liste : sa catégorie, son nom, ce qu'il est et où, sa distance ; [hers] : un lieu qu'elle t'a proposé, en rose. */
+/**
+ * Un lieu de la liste (`ligne` de la maquette) : sa vignette (sa première photo, quand on sait son auteur — cité sous la
+ * ligne, lié, R2-A01 —, sinon l'icône de sa catégorie), son nom ; sa note Google en étoiles et le nombre d'avis, son
+ * prix, sa cuisine (sinon ce qu'il est et où) ; ouvert ou fermé à sa couleur ; sa distance. [hers] : un lieu qu'elle t'a
+ * proposé, en rose.
+ */
 @Composable
-private fun PlaceRow(p: Place, hers: Boolean = false, onClick: () -> Unit) {
+private fun PlaceRow(graph: AppGraph, p: Place, hers: Boolean = false, onClick: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
+    val row = placeRow(p)
+    val thumb = listThumb(p)
     Row(
         Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(if (hers) mika.container else scheme.secondaryContainer),
-            contentAlignment = Alignment.Center,
-        ) {
-            MIcon(categoryIcon(p.category), null, size = 20.dp, tint = if (hers) mika.onContainer else scheme.onSecondaryContainer)
+        if (thumb != null) {
+            Box(Modifier.size(48.dp).clip(RoundedCornerShape(12.dp))) {
+                PhotoImage(graph, thumb.ref, null, Modifier.size(48.dp))
+                if (hers) Box(Modifier.align(Alignment.BottomEnd).padding(3.dp).size(10.dp).clip(RoundedCornerShape(5.dp)).background(mika.fill))
+            }
+        } else {
+            Box(
+                Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(if (hers) mika.container else scheme.secondaryContainer),
+                contentAlignment = Alignment.Center,
+            ) {
+                MIcon(categoryIcon(p.category), null, size = 20.dp, tint = if (hers) mika.onContainer else scheme.onSecondaryContainer)
+            }
         }
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(p.name.ifBlank { "—" }, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            val what = placeWhat(p)
-            if (what.isNotBlank()) Text(what, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (row.rating != null) {
+                    Stars(row.rating, size = 11.dp)
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        "${ratingWords(row.rating)}${if (row.count.isNotEmpty()) " " + row.count else ""}${if (row.line.isNotEmpty()) " · " else ""}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = scheme.onSurface,
+                        maxLines = 1,
+                    )
+                }
+                if (row.line.isNotEmpty()) {
+                    Text(row.line, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            if (row.open.isNotEmpty()) {
+                val (_, fg) = toneColors(row.openTone)
+                Text(row.open, style = MaterialTheme.typography.bodySmall, color = fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
             if (hers) {
                 Text(
                     stringResource(R.string.carte_regard_proposed),
@@ -455,6 +627,7 @@ private fun PlaceRow(p: Place, hers: Boolean = false, onClick: () -> Unit) {
                     maxLines = 1,
                 )
             }
+            if (thumb != null) ThumbCredit(thumb, Modifier.padding(top = 2.dp))
         }
         val dist = km(p.distanceM)
         if (dist.isNotEmpty()) {

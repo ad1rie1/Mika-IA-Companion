@@ -18,7 +18,7 @@ from mika.adapters.maps import places as maps_places
 from mika.adapters.maps.config import KEY_ENV, TOURISM_KEY_ENV, tourism_key
 from mika.adapters.maps.datatourisme import DataTourismeClient, TourismUnavailable, tourism_limits
 from mika.adapters.maps.quota import QUOTAS_FILE, Limiter, QuotaStore
-from mika.adapters.maps.tourism import Tourism
+from mika.adapters.maps.tourism import Tourism, match_stamp
 from mika.adapters.maps.tourism_sync import KIND_FR, NO_ZONES, SyncBusy, TourismSync
 from mika.app import schema
 from mika.app.cli.common import _with_settings
@@ -107,7 +107,7 @@ def _tourism(data: Path, args: argparse.Namespace) -> int:
 
         def index() -> tuple[Path, str] | None:
             info = places.info()
-            return (data / places_cfg.index, info.built) if info.ready else None
+            return (data / places_cfg.index, match_stamp(info.built)) if info.ready else None
 
         sync = TourismSync(tourism, lambda: cfg, client, index=index, say=_said)
         try:

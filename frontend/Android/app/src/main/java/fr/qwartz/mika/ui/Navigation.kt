@@ -1,6 +1,7 @@
 package fr.qwartz.mika.ui
 
 import fr.qwartz.mika.core.MikaJson
+import fr.qwartz.mika.data.moi.carte.EventItem
 import fr.qwartz.mika.data.moi.carte.Place
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -73,14 +74,26 @@ sealed interface Route {
 
     // ── Carte ───────────────────────────────────────────────────────────
     /**
-     * [tab] : `explorer`, `itineraire`, `voyages` ; [look] : ce qu'elle a cherché ou montré (`regards/<seq>`) ; [to] :
-     * l'arrivée qu'« Itinéraire jusqu'ici » demande à Itinéraire (un lieu d'Explorer), que l'onglet prend une fois.
+     * [tab] : `explorer`, `evenements`, `itineraire`, `voyages` ; [look] : ce qu'elle a cherché ou montré
+     * (`regards/<seq>`) ; [to] : l'arrivée qu'« Itinéraire jusqu'ici » demande à Itinéraire (un lieu d'Explorer, d'une
+     * fiche), que l'onglet prend une fois.
      */
     @Serializable @SerialName("carte")
     data class Carte(val tab: String = "explorer", val look: String = "", val to: Place? = null) : Route
 
     @Serializable @SerialName("trip")
     data class Trip(val id: String) : Route
+
+    /**
+     * La fiche d'un lieu (ADR 0259) : [id] `l<n>`, son objet d'OpenStreetMap `n123`/`w45`/`r6`, ou `t:<uuid>` ; [hint] :
+     * sa ligne de la liste (ce qu'on montre pendant la lecture, sa distance) ; [mika] : Mika te l'a proposé (rose).
+     */
+    @Serializable @SerialName("place_fiche")
+    data class PlaceFiche(val id: String, val hint: Place? = null, val mika: Boolean = false) : Route
+
+    /** La fiche d'un événement (`e:<uuid>`) ; [hint] : sa ligne de la liste ; [mika] : Mika l'a trouvé pour toi. */
+    @Serializable @SerialName("event_fiche")
+    data class EventFiche(val id: String, val hint: EventItem? = null, val mika: Boolean = false) : Route
 
     // ── Téléphone ───────────────────────────────────────────────────────
     /** [tab] : `messages` ou `position`. */

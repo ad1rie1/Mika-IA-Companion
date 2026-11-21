@@ -1,7 +1,9 @@
 """Les processus des projets.
 
 **Tenir** (``projects.tend``) : un objectif qui n'a rien conclu trois
-exécutions de suite bloque ; un ponctuel à bout d'exécutions aussi ; un projet
+exécutions de suite bloque ; un ponctuel à bout d'exécutions aussi — et, s'il
+a des jalons, après quelques exécutions de suite sans en atteindre un nouveau
+(ADR 0273 ; le plafond d'exécutions reste son filet, ADR 0278) ; un projet
 dont le modèle ne répond plus trois fois d'affilée se met en pause (« en
 panne ») — sans reproche, et rien ne le relance avant qu'on le reprenne ; un
 projet à elle, elle vient le dire à qui s'occupe d'elle (ADR 0143). Un
@@ -18,6 +20,15 @@ console (pousser, récupérer) devient une proposition d'effet, exécutée tout 
 suite par le runtime (c'est lui qui l'a demandé) ; une commande réseau qu'elle a
 demandée sur un projet sans accord part quand l'exécution qui l'a demandée a
 fini. Un projet archivé n'a plus rien en file : rien ne tourne en boucle.
+
+**Éveiller** (``projects.stirs``, ADR 0265) : ce qui vient d'arriver et qu'un
+objectif attend — un commit ou un objectif abouti d'un projet lu, le signal
+d'une app, la fermeture d'une demande faite à un autre projet (ADR 0271) —
+est jugé ici, devant ce qu'elle vit : entre projets, le lien doit
+donner au moins les comptes rendus du projet lu à ce moment-là ; une app
+éveille les objectifs de son projet. Ce qu'il en a fait s'écrit
+(``projects.stirred``), même quand rien n'est éveillé : un lien suspendu ne
+déclenche rien, ni alors ni plus tard.
 """
 
 from __future__ import annotations
@@ -29,10 +40,12 @@ from mika.contracts import forge as forge_c
 from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
+from mika.faculties.projects import asks, links, triggers
 from mika.faculties.projects.atelier import network_proposal, remote_proposal
 from mika.faculties.projects.faculty import (
     ANSWERED,
     ARCHIVED,
+    BASE_REQUEST,
     NETWORK_QUEUED,
     NUDGED,
     OBJECTIVE_ADDED,
@@ -40,17 +53,24 @@ from mika.faculties.projects.faculty import (
     OBJECTIVES_KEPT,
     PAUSED,
     PROJECTS,
+    PULL_SEEN,
     REMOTE_REQUESTED,
+    STIRRED,
+    Heard,
     Objective,
     Project,
     ProjectsState,
     busy,
     living,
+    milestones_of,
     params,
+    readers_of,
+    stirring,
     stuck_asking,
     written,
 )
 from mika.faculties.projects.tools import closing
+from mika.faculties.projects.tracker import MOVES
 from mika.kernel.clock import MINUTE
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp
@@ -75,7 +95,12 @@ def closures(s: ProjectsState, frame: Frame) -> list[tuple[Project, Objective, s
                 continue
             if o.silent >= pm.silent_before_blocked:
                 out.append((p, o, phrase("projects.stuck.silent", n=o.silent)))
+            elif milestones_of(o) and o.stale >= pm.milestone_runs_max:
+                # il a des jalons (ADR 0273) : il bloque quand il n'en atteint plus
+                out.append((p, o, phrase("projects.stuck.stale", n=o.stale)))
             elif o.kind == c.ONCE and o.runs >= pm.once_runs_max:
+                # le filet de tout ponctuel, avec ou sans jalons (ADR 0278) : retirer ses jalons puis en poser
+                # d'autres ne fait pas tourner un objectif sans fin
                 out.append((p, o, phrase("projects.stuck.spent", n=o.runs)))
     return out
 
@@ -181,7 +206,7 @@ class Tend:
             else:  # un constant ne se clôt pas : il est mis de côté, sans ressenti, et l'opérateur le rouvre
                 drafts.append(OBJECTIVE_CHANGED.draft(
                     project=p.id, objective=o.id, status=c.BLOCKED, note=Content.of(why, level=p.sensitivity),
-                    owner=p.owner, about=p.about, dedupe_key=key))
+                    owner=p.owner, about=p.about, read_about=p.read_about, dedupe_key=key))
         pm = params(frame.env.params_of("projects", frame.root))
         for p in broken(s, frame):
             drafts.append(PAUSED.draft(project=p.id, reason=pause_reason(p, pm), broke=True, owner=p.owner,
@@ -233,9 +258,68 @@ class Apps:
             await ctx.emit(
                 OBJECTIVE_ADDED.draft(project=p.id, objective=number, text=Content.of(text, level=written(p)),
                                       kind=c.ONCE, author="self", app=f"{a.name}@{a.version}", owner=p.owner,
-                                      about=p.about, dedupe_key=f"réparer:{p.id}:{a.name}:{a.version}"),
+                                      about=p.about, read_about=p.read_about,
+                                      dedupe_key=f"réparer:{p.id}:{a.name}:{a.version}"),
                 NUDGED.draft(project=p.id, objective=number, owner=p.owner, about=p.about,
                              dedupe_key=f"réparer:maintenant:{p.id}:{a.name}:{a.version}"))
+
+
+def stirs_of(s: ProjectsState, frame: Frame, news: Heard) -> tuple[tuple[int, int], ...]:
+    """Les objectifs qu'une nouvelle éveille : (projet, objectif), jugés devant ce qu'elle vit (ADR 0265).
+
+    - Un commit ou un objectif abouti d'un projet : les objectifs des projets qui le lisent, quand le lien donne au
+      moins ses comptes rendus **maintenant** (``links.grant``, ``detail``) — un lien suspendu, ou qui ne laisse voir
+      que son titre, ne déclenche rien.
+    - Le signal d'une app — public (une panne, ce qu'elle a gardé en tête) ou tout juste mis dans sa file
+      (``forge.raised``, ADR 0280) : les objectifs du projet où elle vit (``forge.APPS``) ; une app sans projet, ou
+      d'un autre projet, n'éveille rien.
+    - Toute autre sorte (``triggers.SORTS``) vaut dans le projet où c'est arrivé (``Heard.project``) : ce qui s'y
+      passe éveille ses propres objectifs, sans lien à relire — ce qui bouge dans une de ses listes (``item:<liste>``,
+      ADR 0268 : un élément ajouté, changé ou noté par un autre qu'elle).
+    - La fermeture d'une demande faite à un autre projet (``ask:<n>``, ADR 0271) : l'objectif qui l'a ouverte, quand
+      le lien donne encore le détail du projet visé (``asks.roused``) — aucun objectif ne la déclare.
+
+    Qu'un objectif attende ce déclencheur (un constant ouvert, qui le déclare, le long d'un lien posé) se relit par
+    la même règle que le réducteur (``faculty.stirring``)."""
+    if triggers.asked(news.key):
+        return asks.roused(s, news, links.world_of(frame))
+    t = triggers.read(news.key)
+    readers: list[Project] = []
+    if t is None:
+        return ()
+    if t.sort == triggers.PROJECT:
+        source = s.projects.get(t.project)
+        if source is not None:
+            world = links.world_of(frame)
+            readers = [p for p in readers_of(s, source.id) if links.grant(p, source, world).detail]
+    else:
+        home = news.project
+        if t.sort == triggers.APP:
+            home = next((a.project for a in frame.get(forge_c.APPS) or () if a.name == t.name), 0)
+        readers = [p for p in (s.projects.get(home),) if p is not None]
+    return tuple((p.id, o.id) for p in readers for o in p.objectives if stirring(p, o, news.key))
+
+
+@PROJECTS.process("projects.stirs", wake_on=[forge_c.SIGNALED, forge_c.RAISED, *c.ALL, *MOVES], catch_up=CatchUp.ONCE, max_quantum_s=3600,
+                  priority=40, reads=[identity_c.IS_OWNER, forge_c.APPS])
+class Stirs:
+    """Juger ce qui vient d'arriver (ADR 0265) : chaque nouvelle notée par un réducteur (``ProjectsState.heard``)
+    devient un ``projects.stirred`` — les objectifs qu'elle éveille, ou aucun. C'est ici, et pas dans un réducteur,
+    que se lit ce qu'un lien donne : les tableaux des canaux sont un réglage, hors du journal."""
+
+    def next_due(self, s: ProjectsState, frame: Frame, last_run: int | None) -> int | None:
+        if not s.heard:
+            return None
+        # une passe qui n'a rien pu écrire (dédoublonnée) ne repart pas aussitôt : au pire une minute, jamais une boucle
+        return frame.now if last_run is None else max(frame.now, last_run + RETRY_US)
+
+    async def run(self, ctx: Any) -> None:
+        s: ProjectsState = ctx.state
+        # un même événement peut porter deux nouvelles (ADR 0271) : chacune est jugée sous son déclencheur
+        drafts = [STIRRED.draft(news=h.seq, key=h.key, targets=stirs_of(s, ctx.frame, h),
+                                dedupe_key=f"éveil:{h.seq}:{h.key}") for h in s.heard]
+        if drafts:
+            await ctx.emit(*drafts)
 
 
 def waiting(s: ProjectsState) -> list[tuple[Project, str, int, Any]]:
@@ -248,13 +332,16 @@ def waiting(s: ProjectsState) -> list[tuple[Project, str, int, Any]]:
         if p.status == c.ARCHIVED:
             continue
         if p.remote:
-            out += [(p, what, seq, None) for seq, what in p.requests]
+            # la base à récupérer après une fusion (ADR 0274) attend que l'atelier soit libre : la capacité refuse
+            # pendant une exécution, et la demande serait perdue
+            out += [(p, what, seq, None) for seq, what in p.requests
+                    if what != BASE_REQUEST or not busy(s, p.id)]
         if p.status == c.ACTIVE and not busy(s, p.id):
             out += [(p, "network", seq, (argv, why)) for seq, argv, why in p.network]
     return out
 
 
-@PROJECTS.process("projects.remote", wake_on=[REMOTE_REQUESTED, NETWORK_QUEUED, rt.EFFECT_PROPOSED, rt.EPISODE_ENDED,
+@PROJECTS.process("projects.remote", wake_on=[REMOTE_REQUESTED, NETWORK_QUEUED, PULL_SEEN, rt.EFFECT_PROPOSED, rt.EPISODE_ENDED,
                                               *c.ALL], catch_up=CatchUp.ONCE, max_quantum_s=60,
                   priority=40)
 class Remote:

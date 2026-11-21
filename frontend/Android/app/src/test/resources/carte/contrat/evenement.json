@@ -1,0 +1,20 @@
+{
+  "event": {"id": "e:9a03e72c-35c0-3b1d-8e4f-6a2b0c1d3e5f",
+            "name": "Exposition « Fiat lux ! Une quête effrénée de lumière au XIXᵉ siècle »",
+            "start": "2026-11-21T10:00+01:00", "end": "2026-11-21T18:00+01:00",
+            "when_text": "du mer. au lun. · 10:00–18:00 · jusqu'au 4 janv.",
+            "place": "Maison natale de Charles de Gaulle, Lille",
+            "lat": 50.645994, "lon": 3.058752, "distance_m": null, "themes": ["expositions"], "free": false,
+            "price": "Tarif 8 € / Réduit 6 €", "photo": "", "photo_source": "", "photo_credit": "",
+            "photo_credit_url": "", "photo_licence": ""},
+  "description": "Une exposition sur la lumière au XIXᵉ siècle…",
+  "dates": [{"start": "2026-11-21T10:00+01:00", "end": "2027-01-04T18:00+01:00",
+             "text": "du mer. au lun. · 10:00–18:00 · jusqu'au 4 janv.",
+             "days": ["mer.", "jeu.", "ven.", "sam.", "dim.", "lun."]}],
+  "more_dates": 0, "prices": "Tarif 8 € / Réduit 6 €", "contacts": [{"label": "Site web", "value": "https://…"}],
+  "address": "9 rue Princesse, 59800 Lille", "town": "Lille", "venue": "Maison natale de Charles de Gaulle",
+  "venue_place": "w84451082", "author": "Hello Lille", "updated": "2026-10-02",
+  "url": "https://data.datatourisme.fr/…", "photos": [], "merged": 3,
+  "attribution": "DATAtourisme · Hello Lille, mis à jour le 2 octobre 2026", "licence": "Licence Ouverte 2.0",
+  "licence_url": "https://www.etalab.gouv.fr/licence-ouverte-open-licence/"
+}

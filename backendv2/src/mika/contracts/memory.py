@@ -55,6 +55,7 @@ se réécrit ni ne s'efface : une correction n'est pas un moment de sa vie.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import cache
 from typing import Annotated, Any, Literal
@@ -62,6 +63,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BeforeValidator, model_validator
 from sqlalchemy import BigInteger, Column, Double, Index, Select, Table, select
 
+from mika.kernel.clock import DAY as DAY_US
 from mika.kernel.events import Content, Payload, event_type
 from mika.kernel.facts import FactFamily, FactKey
 from mika.ports.sql import HANDLE_MAX, Key, LongText, projection_table, view_table
@@ -931,6 +933,25 @@ THEIRS = "theirs"
 HERS = "hers"
 #: Les colonnes de ``KNOWLEDGE_VIEW`` et ``FORMER_VIEW``. ``told_by``, ``heard_by``, ``secret``, ``sensitivity``
 #: disent l'enveloppe la plus stricte de l'élément : on ne décide jamais dessus à la main, on passe par le verdict.
+#: Tant qu'une ligne de sa mémoire est aussi fraîche (dite, ou redite, depuis moins longtemps), le fil qui montre
+#: encore ses messages la dit mieux qu'elle : la redire la mettait deux fois sous ses yeux, et elle la ressortait
+#: (ADR 0263). Au-delà, le fil est long et ce qui s'y est dit s'y perd : sa mémoire le redit, même si le fil le montre
+#: encore — « c'était quoi déjà ton plat préféré ? », vingt jours plus tard.
+THREAD_SAYS_IT_US = 2 * DAY_US
+
+
+def shown_by_thread(sources: Sequence[int], touched_at: int, now: int, *, last: bool = False) -> tuple[int, ...]:
+    """Les tours du fil qui dispensent de redire une ligne de sa mémoire (``Fragment.covered_by``, ADR 0263) : les
+    messages d'où elle vient (``memory_items.sources``, les numéros des tours du fil), tant qu'elle est fraîche
+    (``THREAD_SAYS_IT_US`` depuis qu'on y a touché : ``touched_at``) — le composeur ne la retire que si l'historique
+    rendu les montre tous. ``last`` : le plus récent seul (ce qu'elle a dit d'elle : sa dernière redite suffit).
+    Rien pour une ligne sans messages connus, ou plus ancienne : elle se dit toujours."""
+    if not sources or now - touched_at > THREAD_SAYS_IT_US:
+        return ()
+    ordered = tuple(sorted(int(seq) for seq in sources))
+    return ordered[-1:] if last else ordered
+
+
 KNOWN_COLUMNS = ("id", "kind", "text", "about", "sensitivity", "importance", "confidence", "origin", "source",
                  "emotion", "born_at", "touched_at", "status", "recipient", "due", "sources", "told_by", "heard_by",
                  "secret", "about_self", "between_us", "knowledge_kind", "holder", "constraints", "internal_only")

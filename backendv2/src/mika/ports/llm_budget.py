@@ -3,7 +3,9 @@
 Le comptage en caractères est une estimation configurable, pas un tokenizer. Les
 enveloppes de messages, les schémas, les images et la sortie ont leur réserve.
 Une extraction trop longue échoue explicitement : on ne tronque jamais ses preuves.
-Seuls les résultats d'outils, accompagnés d'un marqueur de coupe, peuvent être réduits.
+Seuls les résultats d'outils, accompagnés d'un marqueur de coupe, peuvent être réduits :
+les anciens d'abord, chacun à son début — le même d'un appel à l'autre —, puis les
+derniers, au plus juste (ADR 0267).
 """
 
 from __future__ import annotations
@@ -17,6 +19,9 @@ from mika.kernel.prompt import Budget, PromptBudgetError
 from mika.ports.llm import LLMRequest
 
 TOOL_CUT = "\n[résultat abrégé pour le contexte ; préciser la recherche pour la suite]"
+#: ce qu'il reste d'un ancien résultat d'outil quand le fil ne tient plus (caractères, avant ``TOOL_CUT``) : son début,
+#: le même à chaque appel suivant de la boucle (ADR 0267)
+TOOL_STUB = 400
 
 T = TypeVar("T")
 
@@ -95,16 +100,31 @@ class LLMLimits:
         if excess <= 0:
             return req
         messages = list(req.messages)
-        # D'abord les anciens résultats ; ni les appels ni leurs identifiants ne disparaissent.
-        for i, message in enumerate(messages):
+        # les derniers résultats — ceux qui suivent son dernier tour : ce qu'elle vient de demander et lit maintenant
+        newest = max((i for i, m in enumerate(messages) if m.role == "assistant"), default=-1) + 1
+        # D'abord les anciens résultats, du plus ancien au plus récent, chacun ramené à son début (``TOOL_STUB``) : les
+        # mêmes caractères à chaque appel suivant de la boucle. Coupé « au plus juste », un ancien résultat changeait
+        # à chaque tour : le préfixe en cache se réécrivait depuis lui, et la réflexion rejouée après lui n'était plus
+        # celle de ce fil (ADR 0267). Ni les appels ni leurs identifiants ne disparaissent.
+        for i, message in enumerate(messages[:newest]):
+            if excess <= 0:
+                break
+            if message.role != "tool" or len(message.content) <= TOOL_STUB + len(TOOL_CUT):
+                continue
+            content = message.content[:TOOL_STUB].rstrip() + TOOL_CUT
+            excess -= len(message.content) - len(content)
+            messages[i] = replace(message, content=content)
+        # puis les derniers, au plus juste : c'est eux qu'elle lit
+        for i in range(newest, len(messages)):
+            if excess <= 0:
+                break
+            message = messages[i]
             if message.role != "tool" or len(message.content) <= len(TOOL_CUT):
                 continue
             keep = max(0, len(message.content) - excess - len(TOOL_CUT))
             content = message.content[:keep].rstrip() + TOOL_CUT
             excess -= len(message.content) - len(content)
             messages[i] = replace(message, content=content)
-            if excess <= 0:
-                break
         req = replace(req, messages=tuple(messages))
         if self.size(req) > ceiling:
             raise PromptBudgetError("requête trop longue pour le contexte du fournisseur (sortie réservée)")

@@ -5,6 +5,7 @@ charge (le plan dessiné) ; la console règle d'où elles viennent."""
 from __future__ import annotations
 
 import gzip
+import html
 import os
 import re
 
@@ -199,3 +200,14 @@ def test_the_console_sets_places_addresses_and_routes(world):  # noqa: F811
     assert client.portal.call(desk.routing_ready)
     assert client.portal.call(desk.routing_provider) == "Valhalla, serveur public de FOSSGIS"
     assert "une demande par seconde" in client.get("/admin/reglages/itineraires").text
+
+
+def test_the_places_page_says_where_its_index_comes_from_today(world):  # noqa: F811
+    """R3-07 : la page disait l'index « tiré des tuiles de la carte, refait quand la carte l'est » ; depuis l'ADR 0244,
+    il se tire de l'extrait OpenStreetMap (sur le PC, puis copié), avec cuisine, horaires et filtres, et se refait sur un
+    extrait plus récent — des tuiles seulement à défaut, sans ces détails."""
+    client, _live, _ = world
+    bootstrap(client)
+    text = html.unescape(client.get("/admin/reglages/lieux").text)
+    assert "refait quand la carte l'est" not in text and "tiré des tuiles de la carte" not in text
+    assert "tire de l'extrait OpenStreetMap de Geofabrik" in text and "à défaut d'extrait, des tuiles" in text

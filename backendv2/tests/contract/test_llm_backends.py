@@ -31,7 +31,7 @@ from mika.adapters.llm.pricing import price_usd
 from mika.kernel.clock import ManualClock
 from mika.kernel.faculty import ToolSpec
 from mika.kernel.prompt import ChatPrompt
-from mika.ports.llm import LLMRequest, Message, ToolCall, ToolDecl, Usage
+from mika.ports.llm import LLMRequest, Message, ToolCall, ToolDecl, Usage, json_object
 from mika.runtime.tool_offer import declare
 from mika.runtime.tools import ToolResult, run_tool_loop
 
@@ -215,11 +215,14 @@ async def test_claude_tool_calls_become_tool_use_and_results_one_user_turn():
     assert messages[1] == {"role": "assistant", "content": [
         text("Je note."),
         tool_use("t1", "note_add", {"what": "pain"}),
-        {**tool_use("t2", "note_count", {}), "cache_control": EPHEMERAL},
+        tool_use("t2", "note_count", {}),
     ]}
+    # dans une boucle d'outils, le point de cache va sur le lot de résultats qui la finit : le tour suivant le relira
+    # (ADR 0267) — posé un tour plus tard, chaque résultat était payé plein tarif, puis écrit
     assert messages[2] == {"role": "user", "content": [
         {"type": "tool_result", "tool_use_id": "t1", "content": "noté"},
-        {"type": "tool_result", "tool_use_id": "t2", "content": "base verrouillée", "is_error": True},
+        {"type": "tool_result", "tool_use_id": "t2", "content": "base verrouillée", "is_error": True,
+         "cache_control": EPHEMERAL},
     ]}
 
 
@@ -232,7 +235,7 @@ async def test_claude_assistant_turn_without_text_sends_no_empty_block():
     ))
     messages = fake.create.calls[0]["messages"]
     assert [b["type"] for b in messages[1]["content"]] == ["tool_use"]
-    assert messages[2]["content"] == [{"type": "tool_result", "tool_use_id": "t1"}]
+    assert messages[2]["content"] == [{"type": "tool_result", "tool_use_id": "t1", "cache_control": EPHEMERAL}]
 
 
 async def test_claude_reads_text_tool_calls_usage_and_model():
@@ -331,7 +334,7 @@ async def test_claude_replays_the_thinking_of_a_tool_turn_unchanged():
     assert fake.create.calls[1]["messages"][1]["content"] == [
         thinking("sig-1"),
         text("Je note."),
-        {**tool_use("toolu_1", "note_add", {"what": "pain"}), "cache_control": EPHEMERAL},
+        tool_use("toolu_1", "note_add", {"what": "pain"}),
     ]
     # un tour réécrit n'est plus celui que le modèle a produit : il repart sans réflexion
     await backend.complete(req.extend(Message("assistant", "Autre chose.", tool_calls=first.tool_calls), result))
@@ -423,7 +426,7 @@ async def test_claude_through_the_runtime_tool_loop():
     last = calls[2]["messages"]
     assert last[1]["content"][0] == thinking("sig")
     assert last[2] == {"role": "user", "content": [
-        {"type": "tool_result", "tool_use_id": "toolu_1", "content": "noté"}]}
+        {"type": "tool_result", "tool_use_id": "toolu_1", "content": "noté", "cache_control": EPHEMERAL}]}
     assert [t.outcome for t in gateway.traces] == ["ok", "ok", "ok"]
 
 
@@ -922,6 +925,75 @@ async def test_stop_sequences_reach_each_provider_its_own_way():
     await local.complete(stopped)
     await local.complete(plain)
     assert fake_l.chat.calls[0]["options"]["stop"] == list(stops) and "stop" not in fake_l.chat.calls[1]["options"]
+
+
+async def test_a_reply_shape_reaches_each_provider_its_own_way_and_a_refusal_is_remembered():
+    """Une sortie en JSON (``LLMRequest.output_schema``, ADR 0267) : ``output_config.format`` pour Claude — à côté de
+    l'effort —, ``response_format`` strict pour un serveur compatible OpenAI, ``format`` pour Ollama ; un fournisseur
+    qui la refuse est rejoué une fois sans, et ne la reçoit plus : l'appelant relit du texte, comme avant."""
+    schema = json_object(importance={"type": "number"}, resume={"type": "string"})
+    assert schema == {"type": "object", "properties": {"importance": {"type": "number"}, "resume": {"type": "string"}},
+                      "required": ["importance", "resume"], "additionalProperties": False}
+    shaped = replace(request(Message("user", "x"), tools=()), output_schema=schema)
+    fake_c = FakeAnthropic(claude_reply(text('{"importance": 0.5, "resume": "ok"}')), claude_reply(text("ok")))
+    claude = ClaudeBackend("k", "claude-opus-5-5", effort="low", client=fake_c)
+    await claude.complete(shaped)
+    await claude.complete(request(Message("user", "x"), tools=()))
+    assert fake_c.create.calls[0]["output_config"] == {"effort": "low",
+                                                       "format": {"type": "json_schema", "schema": schema}}
+    assert fake_c.create.calls[1]["output_config"] == {"effort": "low"}
+    # un modèle qui ne la connaît pas : rejoué sans, mémorisé
+    old = FakeAnthropic(bad_request(anthropic, "output_config.format: Extra inputs are not permitted"),
+                        claude_reply(text("{}")), claude_reply(text("{}")))
+    legacy = ClaudeBackend("k", "claude-sonnet-4-5", client=old)
+    await legacy.complete(shaped)
+    await legacy.complete(shaped)
+    assert [("output_config" in c) for c in old.create.calls] == [True, False, False]
+    fake_o = FakeOpenAI(openai_reply("{}"), bad_request(openai, "Unknown parameter: 'response_format'"),
+                        openai_reply("{}"), openai_reply("{}"))
+    compat = OpenAICompatBackend("k", "gpt-4.1", client=fake_o)
+    await compat.complete(shaped)
+    assert fake_o.create.calls[0]["response_format"] == {"type": "json_schema", "json_schema": {
+        "name": "sortie", "strict": True, "schema": schema}}
+    other = OpenAICompatBackend("k", "glm-4", client=fake_o)
+    await other.complete(shaped)
+    await other.complete(shaped)
+    assert [("response_format" in c) for c in fake_o.create.calls[1:]] == [True, False, False]
+    assert other.memo.no_format == {"glm-4"}
+    fake_l = FakeOllama(ollama_reply("{}"))
+    await OllamaBackend("gemma4:12b", client=fake_l).complete(shaped)
+    assert fake_l.chat.calls[0]["format"] == schema
+
+
+async def test_claude_drops_a_thinking_the_thread_no_longer_carries_and_asks_again():
+    """ADR 0267. Sur les familles 5.x, un bloc de réflexion est lié au fil qui l'a produit : un message d'avant lui qui
+    change (un ancien résultat d'outil abrégé faute de place) le rend irrecevable — 400. La réflexion est retirée du
+    fil, l'appel rejoué une fois ; elle est oubliée, pour que les tours suivants de la boucle ne la rejouent pas."""
+    fake = FakeAnthropic(
+        claude_reply(thinking("sig-1"), text("Je note."), tool_use("toolu_1", "note_add", {"what": "pain"}),
+                     stop="tool_use", model="claude-opus-5-5"),
+        bad_request(anthropic, "messages.1.content.0: Invalid `signature` in `thinking` block. The block is bound to "
+                               "a different conversation. Remove the block, or set …"),
+        claude_reply(text("C'est noté."), model="claude-opus-5-5"),
+        claude_reply(text("Encore."), model="claude-opus-5-5"),
+    )
+    backend = ClaudeBackend("k", "claude-opus-5-5", client=fake)
+    req = request(Message("user", "Note « pain »."))
+    first = await backend.complete(req)
+    then = req.extend(Message("assistant", first.text, tool_calls=first.tool_calls),
+                      Message("tool", "noté", tool_call_id="toolu_1", name="note_add"))
+    assert (await backend.complete(then)).text == "C'est noté."
+    refused, again = fake.create.calls[1], fake.create.calls[2]
+    assert [b["type"] for b in refused["messages"][1]["content"]] == ["thinking", "text", "tool_use"]
+    assert [b["type"] for b in again["messages"][1]["content"]] == ["text", "tool_use"]
+    await backend.complete(then)  # le tour suivant ne la rejoue plus : un seul appel, sans elle
+    assert len(fake.create.calls) == 4
+    assert [b["type"] for b in fake.create.calls[3]["messages"][1]["content"]] == ["text", "tool_use"]
+    # un autre 400 n'est pas rejoué
+    plain = FakeAnthropic(bad_request(anthropic, "messages.0: Invalid content"))
+    with pytest.raises(anthropic.BadRequestError):
+        await ClaudeBackend("k", "claude-opus-5-5", client=plain).complete(then)
+    assert len(plain.create.calls) == 1
 
 
 async def test_openai_stop_dropped_on_400_and_memoized():

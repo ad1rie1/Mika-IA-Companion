@@ -32,11 +32,13 @@ from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.faculties.projects.faculty import (
     DECIDED,
+    ISSUE_CAPABILITIES,
     NETWORKED_CAPABILITY,
     OBJECTIVE_ADDED,
     PAUSED,
     PROJECTS,
     PULL_CAPABILITY,
+    PULL_REQUEST_CAPABILITY,
     PUSH_CAPABILITY,
     STEER_CAPABILITY,
     _code_of,
@@ -424,7 +426,7 @@ def test_pushing_from_the_console_goes_at_once_and_hers_waits_for_approval(tmp_p
 
     async def scenario(kernel, llm):
         pid = await create(kernel, "p1", title="Outils", objectives="Écrire l'outil", approval="on",
-                           remote="https://github.com/moi/outils.git", branch="dev")
+                           remote="https://github.com/moi/outils.git", branch="dev", reread="never")
         await atelier.write(pid, "outil.py", "print(1)\n")
         await atelier.commit(pid, "première version")
         pushed = await perform(kernel, "projects.pousser", form(), by="user_1", subject=str(pid), nonce="u1")
@@ -621,7 +623,7 @@ def test_an_approval_sends_what_was_shown_not_what_the_workshop_became(tmp_path)
 
     async def scenario(kernel, llm):
         pid = await create(kernel, "p1", title="Outils", objectives="Écrire l'outil", approval="on", start="3:00",
-                           end="4:00", remote="https://github.com/moi/outils.git")
+                           end="4:00", remote="https://github.com/moi/outils.git", reread="never")
         await atelier.write(pid, "outil.py", "print(1)\n")
         shown = await atelier.commit(pid, "première version")
         ctx = _context(kernel, "project_push", Kind.WORK, project_target(pid), Audience(owner=True))
@@ -1266,9 +1268,11 @@ def test_each_capability_is_declared_under_the_name_its_reducers_read():
     """Une capacité se déclare sous la constante que ses réducteurs, son carnet et la console relisent : son nom
     n'est écrit qu'une fois. Ce nom est au journal (chaque proposition, chaque accord, chaque exécution le porte) :
     il ne change pas."""
-    names = (PUSH_CAPABILITY, PULL_CAPABILITY, NETWORKED_CAPABILITY, STEER_CAPABILITY)
+    names = (PUSH_CAPABILITY, PULL_CAPABILITY, NETWORKED_CAPABILITY, STEER_CAPABILITY, PULL_REQUEST_CAPABILITY,
+             *ISSUE_CAPABILITIES)
     assert {s.name for s in PROJECTS.capabilities} == set(names)
-    assert names == ("projects.push", "projects.pull", "projects.networked", "projects.steer")
+    assert names == ("projects.push", "projects.pull", "projects.networked", "projects.steer",
+                     "projects.pull_request", "projects.issue", "projects.issue_state", "projects.issue_note")
 
 
 def test_a_command_status_is_read_in_what_the_workshop_wrote_of_it():

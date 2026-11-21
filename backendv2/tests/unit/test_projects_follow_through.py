@@ -19,25 +19,33 @@ from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.faculties.projects.faculty import (
+    OBJECTIVE_ADDED,
+    OBJECTIVE_CHANGED,
     PAUSED,
     Objective,
     Project,
     ProjectsState,
     _answered,
     _ended,
+    _objective_added,
+    _objective_changed,
     _paused,
     _started,
     frame_subject,
 )
 from mika.faculties.projects.faculty import params as projects_params
 from mika.faculties.projects.prompt import _refs, _run_section, job_brief, work_brief
-from mika.faculties.projects.rhythm import pick
+from mika.faculties.projects.rhythm import NEVER, due_at, pick
 from mika.faculties.projects.steer import SteerArgs, project_steer
 from mika.faculties.projects.tend import finished_at, pause_reason, unframed
 from mika.faculties.projects.tools import (
+    ConstantArg,
+    ObjectiveArgs,
     PlanArgs,
+    PlanStep,
     ReportArgs,
     StartArgs,
+    _constants,
     project_plan,
     report_run,
     start_project,
@@ -49,11 +57,12 @@ from mika.kernel.faculty import ToolSpec
 from mika.kernel.frame import EpisodeRef
 from mika.kernel.state import FrozenDict
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
+from mika.runtime.operations import perform
 from mika.runtime.tool_offer import declare
 from mika.runtime.tools import ToolResult, run_tool_loop
 from mika.vocab.episodes import Kind, goal_target, project_target
 from tests.fixtures.mika import said
-from tests.unit.test_projects import events, live
+from tests.unit.test_projects import create, events, form, live, runs, wait
 from tests.unit.test_projects_framing import _asked_project, _ctx
 
 PM = projects_params(None)
@@ -264,6 +273,74 @@ def test_a_constant_first_pass_waits_its_cadence_after_it_can_start():
     assert pick(p, DAY + MINUTE, PM).id == 2  # les vues d'abord
     done = replace(p, objectives=(app, replace(views, status=c.DONE), weekly))
     assert pick(done, 2 * DAY, PM) is None and pick(done, 8 * DAY, PM).id == 3
+
+
+def test_a_constant_that_says_so_makes_its_first_pass_at_once_then_keeps_its_cadence():
+    """Ce que le banc de la chaîne a montré (ADR 0280) : un audit hebdomadaire partait au septième jour. Un constant
+    peut dire que son premier passage vient tout de suite — dès qu'il peut commencer ; sans lui, la règle de l'ADR
+    0161 reste. Ensuite, sa cadence."""
+    audit = Objective(id=1, text_ref="audit", kind=c.CONSTANT, cadence_us=7 * DAY, at=DAY, at_once=True)
+    p = Project(id=1, title_ref="t", authority=c.SELF, created_at=0, plan_state=c.PLANNED, objectives=(audit,))
+    assert due_at(p, audit, PM) == DAY and pick(p, DAY + MINUTE, PM).id == 1
+    plain = replace(audit, at_once=False)
+    assert due_at(p, plain, PM) == 8 * DAY and pick(replace(p, objectives=(plain,)), DAY + MINUTE, PM) is None
+    # son premier passage fait : sa cadence, comme tout constant
+    passed = replace(audit, passed_at=DAY + HOUR, passes=1)
+    assert due_at(replace(p, objectives=(passed,)), passed, PM) == 8 * DAY + HOUR
+    # il attend quand même l'étape dont il dépend, et part quand elle est faite
+    app, after = Objective(id=2, text_ref="app", rank=1), replace(audit, after=2)
+    waiting = replace(p, objectives=(app, after))
+    assert pick(waiting, 2 * DAY, PM).id == 2
+    done = replace(p, objectives=(replace(app, status=c.DONE, closed_at=3 * DAY), after))
+    assert due_at(done, after, PM) == 3 * DAY and pick(done, 3 * DAY, PM).id == 1
+    # sans cadence : son premier passage tout de suite, puis plus rien sans événement
+    event = replace(audit, only_on_event=True, on=("wake:deploy",))
+    assert due_at(p, event, PM) == DAY and due_at(p, replace(event, passed_at=DAY + HOUR), PM) == NEVER
+    # le réducteur : seul un constant le garde, et il se change
+    s = ProjectsState(projects=FrozenDict({1: Project(id=1, title_ref="t", authority=c.SELF, created_at=0)}))
+
+    def added(**fields) -> ProjectsState:
+        data = OBJECTIVE_ADDED.payload(project=1, objective=1, text=Content(ref="o1"), **fields)
+        return _objective_added(s, _ev(DAY, data), _cx())
+
+    def first(state: ProjectsState) -> bool:
+        return state.projects[1].objectives[0].at_once
+
+    assert first(added(kind=c.CONSTANT, at_once=True)) and not first(added(kind=c.CONSTANT))
+    assert not first(added(kind=c.ONCE, at_once=True))
+    changed = _objective_changed(added(kind=c.CONSTANT), _ev(
+        2 * DAY, OBJECTIVE_CHANGED.payload(project=1, objective=1, at_once=True)), _cx())
+    assert first(changed)
+    assert first(_objective_changed(changed, _ev(3 * DAY, OBJECTIVE_CHANGED.payload(
+        project=1, objective=1, cadence_us=DAY)), _cx()))  # sans le redire : inchangé
+    assert not first(_objective_changed(changed, _ev(3 * DAY, OBJECTIVE_CHANGED.payload(
+        project=1, objective=1, kind=c.ONCE)), _cx()))
+    # ses outils le portent : le plan, l'ajout d'un objectif, les constants d'un projet qui naît
+    assert PlanStep(text="Auditer", kind="constant", cadence_hours=168, at_once=True).at_once
+    assert ObjectiveArgs(text="Auditer", kind="constant", at_once=True).at_once and not ObjectiveArgs(text="x").at_once
+    [made] = _constants([ConstantArg(text="Auditer le code", cadence_hours=168, at_once=True)])
+    assert (made.cadence_us, made.at_once) == (168 * HOUR, True)
+
+
+def test_a_weekly_constant_added_in_the_console_starts_at_once_only_when_it_says_so(tmp_path):
+    async def scenario(kernel, llm):
+        # chacun a déjà un constant mensuel, qui ne part pas : l'audit hebdomadaire est leur objectif n° 2
+        now = await create(kernel, "p1", title="Le produit", constants="Tenir le journal", cadence_hours="720")
+        later = await create(kernel, "p2", title="Le site", constants="Tenir le journal", cadence_hours="720")
+        for pid, extra in ((now, {"at_once": "on"}), (later, {})):
+            got = await perform(kernel, "projects.objectif_ajouter", form(
+                text="Auditer le code chaque semaine", kind="constant", cadence_hours="168", **extra), by="user_1",
+                subject=str(pid), nonce=f"o{pid}")
+            assert got.ok, got
+        await wait(40)
+        await kernel.lanes.join()
+        s = kernel.mind.frame().state("projects")
+        return [e.data.subject for e in runs(kernel, now)], len(runs(kernel, later)), \
+            s.projects[now].objectives[1], s.projects[later].objectives[1], now
+
+    started, idle, first, plain, now = live(tmp_path, scenario)
+    assert started == [f"objective:{now}:2"] and idle == 0
+    assert first.at_once and not plain.at_once and first.cadence_us == plain.cadence_us == 7 * DAY
 
 
 def test_a_kept_idea_of_the_person_keeps_its_place_in_the_plan():

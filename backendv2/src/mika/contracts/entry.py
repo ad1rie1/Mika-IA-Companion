@@ -8,8 +8,8 @@ adaptateurs, et il parle la langue des contrats (perceptions, présence).
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Sequence
-from dataclasses import dataclass
+from collections.abc import Awaitable, Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from mika.contracts import world as w
@@ -71,6 +71,19 @@ class StrandItem:
     first_at: int = 0
     last_at: int = 0
     opener: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class Efforts:
+    """L'effort de réflexion de ses réponses tel qu'un écran le montre (ADR 0287) : ce que la personne a forcé pour
+    toute sa conversation (``conversation`` ; « » : auto) et pour ses fils de travail (``strands`` : fil → effort, les
+    seuls forcés), et ce que « auto » vaut en ce moment — l'effort réglé pour le rôle qui lui répond (``auto``) et
+    pour celui du mode pro (``auto_pro``) ; « » : le défaut du modèle."""
+
+    conversation: str = ""
+    strands: Mapping[str, str] = field(default_factory=dict)
+    auto: str = ""
+    auto_pro: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,6 +164,16 @@ class MindPort(Protocol):
 
     async def set_strand(self, handle: str, strand: str, *, title: str, description: str, archived: bool) -> str:
         """Un fil de travail réglé par celle à qui il est : ``ok``, ``invalid`` ou ``failed``."""
+        ...
+
+    def efforts(self, handle: str) -> Efforts:
+        """L'effort de réflexion que ``handle`` a forcé pour sa conversation et ses fils de travail, et ce que
+        « auto » vaut en ce moment (ADR 0287)."""
+        ...
+
+    async def set_effort(self, handle: str, strand: str, effort: str) -> str:
+        """L'effort de réflexion forcé par ``handle`` pour toute sa conversation (``strand`` vide) ou un de ses fils
+        de travail ; ``effort`` vide : auto. ``ok``, ``invalid`` ou ``failed``."""
         ...
 
     def life(self) -> str:

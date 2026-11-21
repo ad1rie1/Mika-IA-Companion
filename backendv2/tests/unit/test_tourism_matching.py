@@ -5,12 +5,14 @@ pendant, elle se trouve comme ``t:<uuid>`` — jamais en double d'un lieu de l'i
 
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
 from mika.adapters.maps.config import PlacesConfig, RoutingConfig
 from mika.adapters.maps.datatourisme import EVENTS, PLACES
 from mika.adapters.maps.desk import MapsDesk
-from mika.adapters.maps.tourism import likeness, merge_places
+from mika.adapters.maps.tourism import TourismBase, likeness, merge_places
 from mika.ports.maps import PlaceHit
 from tests.fixtures import tourism as tf
 
@@ -101,6 +103,171 @@ def test_a_place_not_yet_matched_never_doubles_one_of_the_list():
                PlaceHit("t:b", "Hilton Lille", "hotel", "Hôtel", "dormir", 50.63997, 3.07580, distance_m=1200)]
     assert [h.id for h in merge_places(osm, tourism, near=True, limit=10)] == ["l1", "t:b"]
     assert [h.id for h in merge_places(osm, tourism, near=False, limit=1)] == ["l1"]
+
+
+#: les vrais cas de la sonde du 2026-11-20 (``sonde/data3``, R1-02) : des lieux de l'index aux positions réelles
+SONDE_LIEUX = (
+    ("n302942324", "Rihour", "station", "services", 50.6356918, 3.0630331),
+    ("n8745537418", "Lille-Europe", "station", "services", 50.638983, 3.075714),
+    ("n10683165885", "Power Dot - Ibis Styles - Marcq-en-Baroeul", "charging_station", "route", 50.675552, 3.1169334),
+    ("n1372584412", "Magasin", "bicycle_rental", "services", 50.6461773, 3.0535298),
+    ("n5620628420", "La Place", "cafe", "manger", 50.6369234, 3.0641169),
+    ("n9548393322", "Le Septentrion", "restaurant", "manger", 50.7075258, 3.1124489),
+    ("n9001441423", "Barrière Lille", "restaurant", "manger", 50.6367635, 3.0772599),
+    ("w45911888", "Coq Hardi", "restaurant", "manger", 50.6374053, 3.063623),
+    ("n4846431902", "Méert", "pastry", "courses", 50.6377451, 3.0619182),
+    ("w94965208", "Euralille", "mall", "courses", 50.6372709, 3.0742867),
+    ("w84922920", "Hôtel Casino Barrière Lille", "hotel", "dormir", 50.6364761, 3.0773328),
+)
+#: les fiches de la sonde : (uuid, nom, classes, lat, lon, le pendant attendu — '' : aucun, elle reste ``t:``)
+SONDE_FICHES = (
+    ("6c4fb7cf-9afb-30c0-adf5-102682de07ca", "Bouillon Rihour", ["Restaurant", "FoodEstablishment"], 50.635186,
+     3.062703, ""),                                                                       # pas la station de métro
+    ("74afb398-c11c-3333-8e46-191fadaaef7d", "Novotel Suites Lille Europe", ["Hotel", "Accommodation"], 50.638604,
+     3.076783, ""),                                                                       # pas la gare
+    ("8cc1fd48-116f-3dde-800e-1b0120a7d050", "Ibis Styles Lille Marcq-en-Baroeul", ["Restaurant"], 50.675534,
+     3.116652, ""),                                                                       # pas la borne
+    ("b5167bcc-0797-34ae-bf59-c99c52b44043", "Au Chat Qui Dort Lille - Magasin", ["Accommodation"], 50.64592,
+     3.05455, ""),                                                                        # pas la location de vélos
+    ("8618c6cb-572a-38e7-bcfa-34187ca871bb", "Friterie Meunier - Grand Place", ["Restaurant"], 50.637568, 3.063313,
+     ""),                                                                                 # « place » n'est qu'un lieu
+    ("ccde72f7-6b50-3a7b-9d5d-c29713cc0f7f", "Parc de la Fondation Prouvost-Septentrion", ["CulturalSite"], 50.70642,
+     3.11342, ""),                                                                        # pas le restaurant
+    ("51c8f7a1-25e0-3a9f-82b0-136e8d7d05de", "Resort Barrière Lille", ["Hotel", "Restaurant"], 50.636586, 3.077169,
+     "n9001441423"),
+    ("849e88e9-0ccc-36a6-b151-020738370b6b", "Le Coq Hardi", ["Restaurant"], 50.637383, 3.063598, "w45911888"),
+    ("3e50f17b-704f-3337-97bb-d9bc3d7f8bf9", "Restaurant Méert", ["Restaurant"], 50.637718, 3.06187, "n4846431902"),
+    ("a7c753ca-bf73-37d6-b53a-a2ac6acfbf0d", "Westfield Euralille", ["FoodEstablishment", "Store"], 50.637194,
+     3.074159, "w94965208"),
+    ("5570eb99-0dfd-3069-bd47-ed12d9babbea", "Casino Barrière Lille", ["SportsAndLeisurePlace"], 50.636451, 3.077058,
+     "w84922920"),                                                                        # le même nom : lui
+)
+
+
+def _place_fiche(uuid: str, name: str, types: list[str], lat: float, lon: float, town: str = "Lille") -> dict:
+    """Une fiche de lieu telle que l'API de DATAtourisme la rend (réduite)."""
+    return {"uuid": uuid, "label": {"@fr": name}, "type": [*types, "PlaceOfInterest", "PointOfInterest"],
+            "isLocatedAt": [{"geo": {"latitude": lat, "longitude": lon},
+                             "address": [{"streetAddress": ["1 rue Esquermoise"], "postalCode": "59800",
+                                          "addressLocality": town,
+                                          "hasAddressCity": {"insee": "59350", "label": {"@fr": town}}}]}],
+            "hasBeenCreatedBy": {"legalName": "Hello Lille"}, "lastUpdate": "2025-06-03"}
+
+
+async def test_a_fiche_never_joins_a_place_of_another_sort_under_a_like_name(tmp_path):
+    """La sonde (R1-02) : « Bouillon Rihour » avait pris la station « Rihour », un hôtel la gare de Lille-Europe, un
+    autre une borne de recharge — une station, une gare, une borne, une location ne sont le pendant de rien ; sous des
+    noms qui ne sont pas les mêmes, la sorte doit aller, et un nom qui n'a en commun qu'un mot de rue (« place ») ne
+    suffit pas. Ces fiches restent ``t:``, trouvables ; les bons rapprochements tiennent."""
+    index = tf.write_index(tmp_path / "cartes" / "lieux.db", SONDE_LIEUX)
+    api = tf.FakeApi({PLACES: [_place_fiche(u, n, t, la, lo) for u, n, t, la, lo, _twin in SONDE_FICHES]},
+                     page_size=100)
+    cells, tourism, _clock, _cfg = tf.make_cells(tmp_path, api, index=index)
+    for cell in {cells.cell(la, lo).key: cells.cell(la, lo) for *_r, la, lo, _t in SONDE_FICHES}.values():
+        await cells.load(cell, PLACES, background=True, pages_max=5)
+    conn = sqlite3.connect(tourism.path)
+    try:
+        found = dict(conn.execute("SELECT uuid, twin FROM fiche"))
+    finally:
+        conn.close()
+    assert found == {uuid: twin for uuid, *_r, twin in SONDE_FICHES}
+    rihour = PlaceHit("t:6c4f", "Bouillon Rihour", "restaurant", "Restaurant", "manger", 50.635186, 3.062703)
+    station = PlaceHit("l1", "Rihour", "station", "Station", "services", 50.6356918, 3.0630331)
+    assert [h.id for h in merge_places([station], [rihour], near=False, limit=10)] == ["l1", "t:6c4f"]
+
+
+#: R3-06 : le cas réel de la sonde (``sonde/data3``) — une agence de location, de la seule classe ``Transport`` ; et,
+#: tout près d'autres services, une boutique (d'une sorte inconnue) et une fiche qui ne fait que contenir le nom d'une gare
+FRANCE_CARS_LIEUX = (
+    ("w77109657", "France Cars", "car_rental", "services", 50.6397202, 3.121817),
+    ("n1372584412", "Magasin", "bicycle_rental", "services", 50.6461773, 3.0535298),
+    ("n8745537418", "Lille-Europe", "station", "services", 50.638983, 3.075714),
+)
+FRANCE_CARS, ATELIER, TAXI = ("ef51a71a-68ec-3f6b-b796-15a998a4e45e", "1f2ceb62-a8a0-3bc5-90fc-c7121b0ef8d7",
+                              "33333333-0000-4000-8000-000000000001")
+FRANCE_CARS_AT = (50.63948, 3.12159)
+
+
+async def test_a_service_joins_the_service_of_its_name_its_town_aside(tmp_path):
+    """R3-06 : « France Cars Villeneuve d'Ascq » était le pendant de « France Cars », une location, au même endroit ;
+    la règle 2 l'avait perdu (une location n'est le pendant de rien, et une sorte inconnue jamais sous un nom seulement
+    contenu) — deux lignes dans une liste. Un service (une location, un office de tourisme) est le pendant d'un service
+    de l'index sous son nom même, la commune qu'il y ajoute mise à part ; jamais sous un nom qui ne fait que contenir
+    l'autre (« Taxi Lille Europe » n'est pas la gare), jamais une fiche d'une autre sorte (« Atelier boutique le
+    Magasin », cas réel aussi, n'est pas la location de vélos « Magasin »). Une fiche lue avant qu'on connaisse sa
+    classe se rejuge à sa sorte d'aujourd'hui."""
+    index = tf.write_index(tmp_path / "cartes" / "lieux.db", FRANCE_CARS_LIEUX)
+    api = tf.FakeApi({PLACES: [
+        _place_fiche(FRANCE_CARS, "France Cars Villeneuve d'Ascq", ["Transport"], *FRANCE_CARS_AT,
+                     town="Villeneuve-d'Ascq"),
+        _place_fiche(ATELIER, "Atelier boutique le Magasin", ["LocalBusiness", "TastingProvider", "Producer"],
+                     50.646007, 3.054946),
+        _place_fiche(TAXI, "Taxi Lille Europe", ["Transport"], 50.63905, 3.07560)]}, page_size=100)
+    cells, tourism, clock, _cfg = tf.make_cells(tmp_path, api, index=index)
+    for at in (FRANCE_CARS_AT, (50.646007, 3.054946), (50.63905, 3.07560)):
+        await cells.load(cells.cell(*at), PLACES, background=True, pages_max=5)
+
+    def twins() -> dict[str, str]:
+        conn = sqlite3.connect(tourism.path)
+        try:
+            return dict(conn.execute("SELECT uuid, twin FROM fiche"))
+        finally:
+            conn.close()
+
+    assert twins() == {FRANCE_CARS: "w77109657", ATELIER: "", TAXI: ""}
+    desk = MapsDesk(tmp_path, PlacesConfig, RoutingConfig, clock=clock)
+    try:
+        assert [h.name for h in await desk.around(*FRANCE_CARS_AT, 300, limit=20)] == ["France Cars"]
+    finally:
+        await desk.close()
+    # une base d'avant : la fiche lue sans sorte (``Transport`` inconnu), rejugée quand la règle change
+    conn = sqlite3.connect(tourism.path)
+    try:
+        conn.execute("UPDATE fiche SET category = '', sort = 'tourism'")
+        TourismBase.match(conn, index, everything=True)
+        assert dict(conn.execute("SELECT uuid, twin FROM fiche")) == {FRANCE_CARS: "w77109657", ATELIER: "", TAXI: ""}
+    finally:
+        conn.close()
+
+
+#: le LaM dans l'index de la sonde (R1-08) : une relation, placée au centre de ses contours, à 154 m du point de ses
+#: événements ; et une salle sans adresse dans l'index
+LAM_VENUES = (
+    ("r17508558", "LaM Lille Métropole - Musée d'Art Moderne, d'Art Comptemporain et d'Art Brut", "museum", "voir",
+     50.6375223, 3.150778),
+    ("n9000001", "L'Aéronef", "arts_centre", "sortir", 50.636554, 3.074244),
+)
+LAM_TAGS = '{"addr:housenumber": "1", "addr:street": "Allée du Musée", "addr:city": "Villeneuve-d\'Ascq"}'
+OBSESSION_LAM, SINGULIERES, NOEL_LAM, AERONEF, POTERIE = (f"22222222-0000-4000-8000-00000000000{k}"
+                                                          for k in range(1, 6))
+
+
+async def test_a_venue_a_little_further_is_kept_when_the_event_names_it_or_shares_its_address(tmp_path):
+    """R1-08 : le LaM est loin du point de ses événements (154 m, au-delà des 60 m) : ils n'avaient pas de lieu. Plus
+    loin (300 m au plus), un lieu qui accueille du public reste le leur quand l'événement le nomme en entier
+    (« … à l'Aéronef ») ou qu'il est à la même adresse (« 1 allée du Musée », le numéro et la rue de l'index) — jamais
+    un autre sans cela, jamais pour un marché."""
+    index = tf.write_index(tmp_path / "cartes" / "lieux.db", LAM_VENUES)
+    db = sqlite3.connect(index)
+    db.execute("UPDATE place SET tags = ? WHERE osm = 'r17508558'", (LAM_TAGS,))
+    db.commit()
+    db.close()
+    lam = (50.637583, 3.148595, "1 allée du Musée VIlleneuve-d'Ascq")
+    near_aeronef = (50.6383, 3.0742)
+    api = tf.FakeApi({EVENTS: [
+        _fiche(OBSESSION_LAM, 'Exposition "Obsession" au LaM', ["FairOrShow"], *lam),
+        _fiche(SINGULIERES, "Singulières : artistes, autodidactes, affranchies", ["FairOrShow"], *lam),
+        _fiche(NOEL_LAM, "Marché de Noël des créateurs", ["ChristmasMarket"], *lam),
+        _fiche(AERONEF, "Concert de Noël à l'Aéronef", ["Concert"], *near_aeronef, "168 avenue Willy Brandt"),
+        _fiche(POTERIE, "Exposition de poterie", ["Exhibition"], *near_aeronef, "170 avenue Willy Brandt")]},
+        page_size=100)
+    cells, tourism, _clock, _cfg = tf.make_cells(tmp_path, api, index=index)
+    for at in ((lam[0], lam[1]), near_aeronef):
+        await cells.load(cells.cell(*at), EVENTS, background=True, pages_max=5)
+    found = {uuid: await tourism.event(uuid) for uuid in (OBSESSION_LAM, SINGULIERES, NOEL_LAM, AERONEF, POTERIE)}
+    assert {u: d.venue_place for u, d in found.items()} == {OBSESSION_LAM: "r17508558", SINGULIERES: "r17508558",
+                                                            NOEL_LAM: "", AERONEF: "n9000001", POTERIE: ""}
+    assert found[SINGULIERES].hit.place.startswith("LaM Lille Métropole")
 
 
 @pytest.mark.parametrize(("a", "b", "same"), [

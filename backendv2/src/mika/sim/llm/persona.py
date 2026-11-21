@@ -246,6 +246,12 @@ class PersonaSimLLM:
         #: de la personne concernée, puis travaille), « plan » (coche la première tâche ouverte
         #: de son plan, y ajoute une vérification, puis dit qu'elle continue)
         self.step_mode = "honest"
+        #: comment elle relit le travail d'un projet (ADR 0276) : « good » (rien à redire), « findings » (un
+        #: constat : le travail ne sort pas), « silent » (elle lit, puis ne conclut pas)
+        self.review_mode = "good"
+        #: ce que chaque relecture a eu sous les yeux (le système et ses messages, en un texte) : un test y cherche
+        #: ce qu'elle ne doit pas voir
+        self.reviews_seen: list[str] = []
 
     def _rng(self, req: LLMRequest) -> random.Random:
         return random.Random(h64("persona-sim", self.seed, req.call_id, len(req.messages)))
@@ -280,6 +286,8 @@ class PersonaSimLLM:
             return self._step(req)
         if req.role in ("project", "job"):
             return self._work(req)
+        if req.role == "review":
+            return self._review(req)
         if req.role == "reply" and FORGE_ASK in _asked(req)[0].lower():
             return self._forge(req)
         if req.role == "reply" and WATCH_ASK in _asked(req)[0].lower():
@@ -385,6 +393,22 @@ class PersonaSimLLM:
         return self._call(req, ("report_step", {"verdict": "done", "notable": 0.7,
                                                "summary": f"J'ai pris le temps d'y réfléchir ({title[:80]}) : "
                                                           "je vois plus clair."}))
+
+    def _review(self, req: LLMRequest) -> LLMResponse:
+        """Une relecture indépendante du travail d'un projet (ADR 0276), selon ``review_mode`` : elle liste
+        l'atelier, puis rend son verdict — ou ne conclut pas."""
+        done = [m.name for m in req.messages if m.role == "tool"]
+        if not done:
+            self.reviews_seen.append("\n".join([req.system_stable, req.system_volatile,
+                                                *(m.content or "" for m in req.messages),
+                                                "OUTILS : " + ", ".join(sorted(t.name for t in req.tools))]))
+            return self._call(req, ("review_list", {"path": ""}))
+        if "review_verdict" in done or self.review_mode == "silent":
+            return self._out(req, "Relecture terminée.")
+        if self.review_mode == "findings":
+            return self._call(req, ("review_verdict", {"verdict": "findings", "findings": [
+                {"where": "JOURNAL.md, ligne 1", "what": "Le critère n'est pas rempli : rien ne le montre."}]}))
+        return self._call(req, ("review_verdict", {"verdict": "good"}))
 
     def _work(self, req: LLMRequest) -> LLMResponse:
         """Une exécution sur un projet, selon ``step_mode`` : écrire et tester un programme (le projet

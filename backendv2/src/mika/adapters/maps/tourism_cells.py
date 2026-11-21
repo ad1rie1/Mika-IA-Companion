@@ -9,7 +9,8 @@ rapproche de l'index des lieux.
 
 **En direct** (``ensure``) : une case jamais vue, ou dont la lecture est restée en route, que la personne ouvre (les
 événements autour d'elle, la fiche d'un lieu) se lit tout de suite — quelques pages, sur la réserve du limiteur —, si
-le quota le permet ; sinon on montre ce qu'on a, et ``coverage`` dit pourquoi. Autour d'un point, ce sont les cases
+le quota le permet ; sinon on montre ce qu'on a, et ``coverage`` dit pourquoi — une case que le réchauffage lit en ce
+moment ne s'attend pas (ADR 0269 : elle se montre telle qu'elle est). Autour d'un point, ce sont les cases
 que son rayon touche (``area``, ADR 0259), la sienne d'abord puis les plus proches, au plus ``LIVE_READS_MAX`` par
 demande, quelques-unes à la fois : au-delà, ``coverage`` dit que la zone n'est lue qu'en partie, et la suite se lit à
 la demande suivante, ou le soir. **Le soir** (``warm.Warmer``) : c'est
@@ -74,6 +75,10 @@ KIND = {EVENTS: EVENT, PLACES: PLACE}
 PART_FR = {EVENTS: "événements", PLACES: "lieux"}
 
 
+class CellBusy(Exception):
+    """Une case qu'une lecture de fond lit déjà : une lecture en direct ne l'attend pas (ADR 0269)."""
+
+
 class TourismCells:
     """Les cases de ``tourism`` (sa base), lues par ``client`` avec le réglage ``config`` (relu à chaque fois) ;
     ``index`` : l'index des lieux pour le rapprochement (son chemin et sa date ; ``None`` : aucun)."""
@@ -90,7 +95,8 @@ class TourismCells:
         self.index = index
         self.clock = clock
         self._notes: dict[str, tuple[datetime, str]] = {}
-        self._reading: dict[tuple[str, str], asyncio.Future[tuple[int, bool]]] = {}
+        #: les lectures en cours, par case et liste : leur futur, et si c'est une lecture de fond
+        self._reading: dict[tuple[str, str], tuple[asyncio.Future[tuple[int, bool]], bool]] = {}
 
     def cell(self, lat: float, lon: float) -> Cell:
         return cell_of(lat, lon, self.config().cell_km)
@@ -112,12 +118,17 @@ class TourismCells:
     # ── lire une case ──
     async def load(self, cell: Cell, part: str, *, background: bool, pages_max: int) -> tuple[int, bool]:
         """Une case et une liste lues (ou continuées), au plus ``pages_max`` pages : (fiches lues, finie). Deux
-        lectures de la même case en même temps n'en font qu'une."""
+        lectures de la même case en même temps n'en font qu'une — sauf qu'une lecture en direct n'attend jamais une
+        lecture de fond (des centaines de pages, sur la part de fond du quota) : ``CellBusy``, tout de suite."""
         key = (cell.key, part)
-        pending = self._reading.get(key)
-        if pending is None:
+        found = self._reading.get(key)
+        if found is not None:
+            pending, behind = found
+            if behind and not background:
+                raise CellBusy(f"{cell.key} : {PART_FR[part]}")
+        else:
             pending = asyncio.ensure_future(self._load(cell, part, background=background, pages_max=pages_max))
-            self._reading[key] = pending
+            self._reading[key] = (pending, background)
             pending.add_done_callback(lambda done, key=key: self._settled(key, done))
         return await asyncio.shield(pending)
 
@@ -223,6 +234,10 @@ class TourismCells:
         pour le dire — on s'arrête là."""
         try:
             _count, done = await self.load(cell, part, background=False, pages_max=LIVE_PAGES[part])
+        except CellBusy:
+            self._notes[cell.key] = (self.clock(), f"Les {PART_FR[part]} de cette case se lisent en ce moment (le "
+                                                   "réchauffage) : la suite paraît à la prochaine ouverture.")
+            return True
         except (QuotaExceeded, TourismUnavailable) as exc:
             self._notes[cell.key] = (self.clock(), f"{exc} On montre ce qu'on avait.")
             return False

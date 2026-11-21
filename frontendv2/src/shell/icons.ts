@@ -83,10 +83,28 @@ export const ICONS = {
   wifi: `<path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.5a9.5 9.5 0 0 1 13 0M8.5 16a5 5 0 0 1 7 0M12 19.5h.01"/>`,
   battery: `<rect x="2.5" y="7.5" width="17" height="9" rx="2"/><path d="M21.5 10.5v3M5.5 10.5v3M8.5 10.5v3M11.5 10.5v3"/>`,
   history: `<path d="M3.5 12a8.5 8.5 0 1 0 2.5-6L3.5 8.5"/><path d="M3.5 4v4.5H8M12 7.5V12l3 2"/>`,
+  flag: `<path d="M5.5 21V4M5.5 4.5h12l-2.6 4 2.6 4h-12"/>`,
+  play: `<path d="M7.5 5v14l11-7Z"/>`,
   pause: `<path d="M9 5.5v13M15 5.5v13"/>`,
   mic: `<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5v3.5"/>`,
   sort: `<path d="M7 4.5v15M3.5 16 7 19.5l3.5-3.5M17 19.5v-15M13.5 8 17 4.5 20.5 8"/>`,
   "moon-z": `<path d="M19 14.5A7.8 7.8 0 1 1 9.5 5a6.2 6.2 0 0 0 9.5 9.5Z"/><path d="M15 3.5h4l-4 4h4"/>`,
+  // l'écran Projets (la maquette : `maquette/ecrans/projets2.js`) : branche, commit, pull request, fusion, issue…
+  "p2-branch": `<path d="M6.5 4v10.5"/><circle cx="17.5" cy="6.5" r="2.5"/><circle cx="6.5" cy="17.5" r="2.5"/><path d="M17.5 9a8.5 8.5 0 0 1-8.5 8.5"/>`,
+  "p2-commit": `<circle cx="12" cy="12" r="3.5"/><path d="M3 12h5.5M15.5 12H21"/>`,
+  "p2-pr": `<circle cx="6.5" cy="6.5" r="2.5"/><circle cx="6.5" cy="17.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/><path d="M6.5 9v6M17.5 15v-5a3.5 3.5 0 0 0-3.5-3.5h-2.5M13.5 4 11 6.5 13.5 9"/>`,
+  "p2-merge": `<circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="15.5" r="2.5"/><path d="M6.5 9v11.5M6.5 9a6.5 6.5 0 0 0 6.5 6.5h2"/>`,
+  "p2-issue": `<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="2.2"/>`,
+  "p2-target": `<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><path d="M12 12h.01"/>`,
+  "p2-ticket": `<path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h13A1.5 1.5 0 0 1 20 8.5v2a1.6 1.6 0 0 0 0 3v2a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 15.5v-2a1.6 1.6 0 0 0 0-3ZM14.5 9.5v1M14.5 13.5v1"/>`,
+  "p2-board": `<rect x="3.5" y="4.5" width="5" height="15" rx="1.2"/><rect x="9.5" y="4.5" width="5" height="9.5" rx="1.2"/><rect x="15.5" y="4.5" width="5" height="12.5" rx="1.2"/>`,
+  "p2-stop": `<path d="M8.5 3.5h7l5 5v7l-5 5h-7l-5-5v-7Z"/><path d="M12 8v5M12 16h.01"/>`,
+  "p2-question": `<circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.6a2.5 2.5 0 1 1 3.7 2.2c-.8.5-1.3 1-1.3 1.9M12 16.8h.01"/>`,
+  "p2-plan": `<path d="M9 6.5h11M9 12h11M9 17.5h11"/><path d="m3.5 6.3 1.2 1.2 2-2.2M3.5 11.8l1.2 1.2 2-2.2"/><circle cx="5" cy="17.5" r="1.3"/>`,
+  "p2-table": `<rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="M3.5 10h17M3.5 14.5h17M9.5 5v14M15 5v14"/>`,
+  "p2-unifie": `<rect x="4" y="4.5" width="16" height="15" rx="2"/><path d="M7.5 9h9M7.5 12h9M7.5 15h6"/>`,
+  "p2-cote": `<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M12 4.5v15M6.5 9h3M6.5 12h3M14.5 9h3M14.5 12h3M14.5 15h2"/>`,
+  "p2-schema": `<rect x="9" y="9" width="6" height="6" rx="1.5"/><circle cx="4.5" cy="6" r="2"/><circle cx="4.5" cy="18" r="2"/><circle cx="19.5" cy="12" r="2"/><path d="M6.3 7 9 10M6.3 17 9 14M15 12h2.5"/>`,
 } as const;
 
 export type IconName = keyof typeof ICONS;

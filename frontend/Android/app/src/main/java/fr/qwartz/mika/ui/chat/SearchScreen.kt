@@ -438,6 +438,7 @@ private fun screenCatalog(): List<ScreenEntry> {
         ScreenEntry(sub(teams, stringResource(R.string.teams_her_replies)), stringResource(R.string.search_sub_teams_replies), Route.TeamsReplies, parent = Route.Teams, icon = R.drawable.ic_m_pen),
         ScreenEntry(map, stringResource(R.string.search_sub_map), Route.Carte(), icon = R.drawable.ic_m_map),
         ScreenEntry(sub(map, stringResource(R.string.carte_tab_explorer)), "", Route.Carte("explorer"), icon = R.drawable.ic_m_search),
+        ScreenEntry(sub(map, stringResource(R.string.carte_tab_events)), "", Route.Carte("evenements"), icon = R.drawable.ic_m_calendar),
         ScreenEntry(sub(map, stringResource(R.string.carte_tab_route)), "", Route.Carte("itineraire"), icon = R.drawable.ic_m_route),
         ScreenEntry(sub(map, stringResource(R.string.carte_tab_trips)), "", Route.Carte("voyages"), icon = R.drawable.ic_m_flag),
         ScreenEntry(phone, stringResource(R.string.search_sub_phone), Route.Phone(), icon = R.drawable.ic_m_phone),

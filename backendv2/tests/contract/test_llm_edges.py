@@ -599,3 +599,58 @@ def test_a_claude_backend_without_a_declared_context_gets_room_to_think(caplog):
     with caplog.at_level(logging.WARNING, logger="mika.llm.config"):
         build_gateway(cfg, ManualClock(0), make=lambda n, s: Quick())
     assert [r for r in caplog.records if "Contexte" in r.getMessage()]
+
+
+# ── L'effort se demande par appel (ADR 0285) ──────────────────────────────
+
+
+async def test_a_call_thinks_at_the_effort_of_its_role_unless_it_asks_its_own():
+    """L'ordre : ce que la requête porte, sinon l'effort réglé pour son rôle, sinon celui de la fiche. La seconde
+    passe à « low » et la réponse à l'effort de la fiche partent du même fournisseur, sans seconde fiche."""
+    ok = claude({"type": "text", "text": "ok"}, stop="end_turn")
+    fake = FakeAnthropic(ok, ok, ok, ok)
+    backend = ClaudeBackend("k", "claude-opus-5-5", client=fake, effort="high")
+    gw = Gateway({"c": backend}, {"reply": "c", "polish": "c", "triage": "c"}, clock=ManualClock(0),
+                 efforts={"polish": "low", "triage": ""})
+
+    def ask(role: str, **more: Any) -> LLMRequest:
+        return LLMRequest(role=role, call_id=f"c-{role}-{len(more)}", system_stable="s",
+                          messages=(Message("user", "x"),), **more)
+
+    for req in (ask("polish"), ask("reply"), ask("polish", effort="max"), ask("triage")):
+        await gw.call(req)
+    sent = [(call["output_config"]["effort"], call["thinking"]) for call in fake.create.calls]
+    assert [effort for effort, _thinking in sent] == ["low", "high", "max", "high"]  # un effort vide n'en est pas un
+    assert all(thinking == {"type": "adaptive"} for _effort, thinking in sent)
+
+
+async def test_the_effort_of_a_role_reserves_its_thinking_and_sends_no_temperature():
+    """Sur un modèle qui ne réfléchit pas d'emblée, l'effort d'un rôle allume la réflexion pour ses appels seulement :
+    la passerelle réserve sa sortie (le plancher de la réflexion) pour ce rôle et pas pour les autres, et la
+    température de la fiche ne part pas avec lui (la réflexion impose celle par défaut)."""
+    ok = claude({"type": "text", "text": "ok"}, stop="end_turn")
+    fake = FakeAnthropic(ok, ok)
+    backend = ClaudeBackend("k", "claude-sonnet-4-6", client=fake, temperature=0.7)
+    gw = Gateway({"c": backend}, {"reply": "c", "triage": "c"}, clock=ManualClock(0), efforts={"triage": "low"})
+    plain = LLMRequest(role="reply", call_id="a", system_stable="s", messages=(Message("user", "x"),), max_tokens=80)
+    asked = replace(plain, role="triage", call_id="b")
+    assert gw.output_tokens(plain) == 80 and gw.output_tokens(asked) == 16_384
+    assert gw.budget("triage", 80).max_tokens < gw.budget("reply", 80).max_tokens
+    await gw.call(plain)
+    await gw.call(asked)
+    first, second = fake.create.calls
+    assert first["temperature"] == 0.7 and "thinking" not in first and first["max_tokens"] == 80
+    assert "temperature" not in second and second["output_config"] == {"effort": "low"}
+    assert second["max_tokens"] == 16_384
+
+
+def test_an_effort_left_empty_is_not_kept_and_an_unknown_one_is_said():
+    """Les réglages : un effort laissé vide n'est pas gardé (le rôle suit sa fiche) ; un rôle qui n'existe pas ou un
+    effort inconnu est un problème dit en mots ; la passerelle construite porte ceux qui restent."""
+    spec = BackendSpec(kind="claude", model="claude-opus-5-5", api_key="k")
+    cfg = LLMConfig(backends={"c": spec}, routes={"reply": "c"}, efforts={"polish": "low", "triage": ""})
+    assert cfg.efforts == {"polish": "low"} and cfg.problems() == []
+    assert build_gateway(cfg, ManualClock(0), make=lambda name, spec: Quick(name)).efforts == {"polish": "low"}
+    wrong = LLMConfig(backends={"c": spec}, routes={"reply": "c"}, efforts={"polir": "low", "triage": "énorme"})
+    said = " ; ".join(wrong.problems())
+    assert "« polir »" in said and "ce rôle n'existe pas" in said and "« triage » est inconnu : énorme" in said

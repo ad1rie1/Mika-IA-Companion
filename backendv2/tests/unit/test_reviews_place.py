@@ -9,10 +9,12 @@ images de Google seulement, et un nom de photo expiré fait relire la fiche."""
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 
 import pytest
 
+from mika.adapters.maps import desk as desk_module
 from mika.adapters.maps.cells import cell_of
 from mika.adapters.maps.config import ReviewsConfig
 from mika.adapters.maps.photos import photo_ref
@@ -156,21 +158,111 @@ async def test_a_quota_reached_shows_what_was_there_and_says_why(tmp_path):
 
 async def test_refresh_reads_everything_again_whatever_its_age(tmp_path):
     api = gp.FakeGoogle()
-    maps, _outside, _clock, config = gp.desk(tmp_path, api)
+    maps, _outside, clock, config = gp.desk(tmp_path, api)
     await maps.place("n301")
-    count = len(api.requests)
-    detail = await maps.place_refresh("n301")
-    assert [gp._kind(r) for r in api.requests[count:]] == [gp.DETAILS]
-    assert detail.reviews.id == gp.BELLEZZA and detail.osm is not None
     await maps.place("n304")
+    clock.advance(minutes=11)  # au-delà du délai d'« Actualiser » (R1-05)
+    count = len(api.requests)
+    got = await maps.place_refresh("n301")
+    assert [gp._kind(r) for r in api.requests[count:]] == [gp.DETAILS]
+    assert got.detail.reviews.id == gp.BELLEZZA and got.detail.osm is not None and got.said == "Fiche relue."
     count = len(api.requests)
     await maps.place_refresh("n304")  # « rien trouvé », recherché tout de suite
     assert [gp._kind(r) for r in api.requests[count:]] == [gp.NEARBY]
     assert await maps.place_refresh("n999") is None
+    clock.advance(minutes=11)
     config[0] = ReviewsConfig(api_key=gp.KEY, details_per_month=0)
     with pytest.raises(MapsUnavailable) as caught:
         await maps.place_refresh("n301")
     assert "le quota du mois de Google (fiches avec avis) est atteint" in str(caught.value)
+
+
+async def test_a_fiche_read_a_moment_ago_is_not_asked_again(tmp_path):
+    """R1-05 : chaque clic sur « Actualiser » faisait une « fiche avec avis » (et une lecture DATAtourisme), même
+    cinq secondes après la précédente. Une fiche relue il y a moins de dix minutes ne repart pas : on dit quand."""
+    api = gp.FakeGoogle()
+    maps, _outside, clock, _config = gp.desk(tmp_path, api)
+    await maps.place("n301")  # sa fiche avec ses avis, lue à l'instant
+    asked = api.calls(gp.DETAILS)
+    got = await maps.place_refresh("n301")
+    assert api.calls(gp.DETAILS) == asked and got.detail.reviews.id == gp.BELLEZZA
+    assert got.said.startswith("Relue à l'instant : elle est à jour")
+    clock.advance(seconds=30)
+    assert (await maps.place_refresh("n301")).said.startswith("Relue à l'instant")
+    clock.advance(minutes=9)
+    assert (await maps.place_refresh("n301")).said.startswith("Relue il y a 9 min")
+    assert api.calls(gp.DETAILS) == asked
+    clock.advance(minutes=1)
+    assert (await maps.place_refresh("n301")).said == "Fiche relue."
+    assert api.calls(gp.DETAILS) == asked + 1
+
+
+async def test_refreshes_are_bounded_for_the_whole_server(tmp_path, monkeypatch):
+    """R1-05 : la borne par compte (dix par minute) n'empêchait pas un compte de vider le mois des fiches de tout le
+    serveur en deux heures. Au plus ``REFRESHES_PER_DAY`` « Actualiser » qui partent, par 24 heures, pour tout le
+    serveur — un refus en mots, qui dit quand il revient ; une fiche à jour ne compte pas."""
+    monkeypatch.setattr(desk_module, "REFRESHES_PER_DAY", 3)
+    api = gp.FakeGoogle()
+    maps, _outside, clock, _config = gp.desk(tmp_path, api)
+    for _ in range(3):
+        clock.advance(minutes=11)
+        assert (await maps.place_refresh("n301")).said == "Fiche relue."
+    assert (await maps.place_refresh("n301")).said.startswith("Relue à l'instant")  # à jour : ni compté ni refusé
+    clock.advance(minutes=11)
+    asked = len(api.requests)
+    with pytest.raises(MapsUnavailable) as caught:
+        await maps.place_refresh("n301")
+    assert "le quota du jour de ce serveur (« Actualiser ») est atteint : il revient" in str(caught.value)
+    assert len(api.requests) == asked  # rien n'est parti
+    clock.advance(hours=24)
+    assert (await maps.place_refresh("n301")).said == "Fiche relue."
+
+
+async def test_a_refresh_held_by_a_quota_does_not_take_a_server_turn(tmp_path, monkeypatch):
+    """R3-01 : un « Actualiser » que le mois de Google retient ne part pas — il ne prend pas un des tours du serveur,
+    et le refus reste celui de Google ; quand le mois revient, les tours sont tous là. Un appel parti, même en échec
+    (Google en panne), en prend un."""
+    monkeypatch.setattr(desk_module, "REFRESHES_PER_DAY", 2)
+    api = gp.FakeGoogle()
+    maps, _outside, clock, config = gp.desk(tmp_path, api)
+    await maps.place("n301")
+    held = config[0]
+    config[0] = held.model_copy(update={"details_per_month": 0})
+    for _ in range(3):
+        clock.advance(minutes=11)
+        asked = len(api.requests)
+        with pytest.raises(MapsUnavailable) as caught:
+            await maps.place_refresh("n301")
+        assert "mois de Google" in str(caught.value) and "ce serveur" not in str(caught.value)
+        assert len(api.requests) == asked  # rien n'est parti
+    config[0] = held
+    clock.advance(minutes=11)
+    assert (await maps.place_refresh("n301")).said == "Fiche relue."
+    clock.advance(minutes=11)
+    api.statuses = [500]
+    with pytest.raises(MapsUnavailable) as caught:  # parti : il compte
+        await maps.place_refresh("n301")
+    assert "en panne" in str(caught.value)
+    clock.advance(minutes=11)
+    with pytest.raises(MapsUnavailable) as caught:
+        await maps.place_refresh("n301")
+    assert "le quota du jour de ce serveur (« Actualiser ») est atteint" in str(caught.value)
+
+
+async def test_refresh_with_nothing_to_read_never_says_it_read(tmp_path):
+    """R1-07 : sans clé Google ni DATAtourisme, « Actualiser » répondait « Fiche relue. » sans rien relire — c'est un
+    refus en mots ; avec la clé, un lieu dont on ne lit pas les avis (une pharmacie) et sans fiche de l'office de
+    tourisme le dit, sans rien demander."""
+    api = gp.FakeGoogle()
+    maps, outside, _clock, config = gp.desk(tmp_path, api)
+    pharmacy = await maps.place_refresh("w305")
+    assert pharmacy.said.startswith("Rien à relire pour ce lieu") and pharmacy.detail.hit.osm == "w305"
+    assert outside.seen == []
+    config[0] = ReviewsConfig()
+    with pytest.raises(MapsUnavailable) as caught:
+        await maps.place_refresh("n301")
+    assert "ni les avis (Google) ni les données touristiques (DATAtourisme) ne sont réglés" in str(caught.value)
+    assert outside.seen == []
 
 
 async def test_google_completes_the_fiche_where_osm_is_silent_and_never_replaces_it(tmp_path):
@@ -213,6 +305,23 @@ async def test_an_expired_photo_name_reads_the_fiche_again_and_keeps_its_referen
     assert api.requests[-1].url.path.endswith("AV-photo-fictive-02v2/media")
     again = (await maps.place("n301")).reviews
     assert [p.ref for p in again.photos] == [p.ref for p in facts.photos]  # les mêmes références
+
+
+async def test_photos_of_a_place_whose_names_expired_read_its_fiche_once(tmp_path):
+    """R3-10 : les noms des photos d'un lieu ont expiré chez Google ; la bande d'une fiche (ou deux tuiles d'Android)
+    en demande trois ensemble, jamais relevées — chacune relisait la fiche (une « fiche avec avis », 25 $ les 1 000)
+    là où une suffit, puisqu'elle renomme toutes les photos sous les mêmes références. Une seule relecture par lieu à
+    la fois ; les autres prennent leur nom neuf."""
+    api = gp.FakeGoogle()
+    maps, _outside, _clock, _config = gp.desk(tmp_path, api)
+    facts = (await maps.place("n301")).reviews
+    api.rotate()  # Google a changé le nom de ses photos
+    api.requests.clear()
+    got = await asyncio.gather(*(maps.photo(p.ref) for p in facts.photos[:3]))
+    assert [data for data, _media in got] == [gp.JPEG] * 3
+    assert api.calls(gp.DETAILS) == 1
+    renamed = [r.url.path for r in api.requests if gp._kind(r) == gp.MEDIA and r.url.path.endswith("v2/media")]
+    assert len(renamed) == 3  # chacune sous son nom neuf
 
 
 async def test_the_coverage_says_when_the_ratings_were_read(tmp_path):

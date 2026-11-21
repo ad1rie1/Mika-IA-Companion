@@ -17,6 +17,8 @@ from mika.kernel.facts import FactFamily, FactKey
 
 OWNER = "forge"
 APP_SIGNAL, APP_BROKEN = "app", "broken"
+#: ce qu'une cause d'objectif dit d'une app qui vient de mettre un signal dans sa file (``RAISED``, ADR 0280)
+APP_QUEUED = "queued"
 #: la raison d'une initiative : dire à la personne que son projet concerne ce qu'une de ses apps vient de lui signaler
 #: (ADR 0105) — elle prévient (``agency.INFORMS``) : la personne attend qu'on la prévienne, ce n'est pas une relance
 APP_NEWS = "app_news"
@@ -54,6 +56,14 @@ class SignalQueued(Payload):
     sensitivity: int = 1
 
 
+class AppRaised(Payload):
+    """Une app qui vit dans un projet vient de mettre un signal dans sa file (ADR 0280) : le fait public que lit qui
+    écoute cette app (``app:<nom>``, ADR 0265). Rien que son nom — ni le texte du signal, ni qui il concerne : eux
+    restent dans ``forge.queued``, privé, et se lisent par la file."""
+
+    app: str
+
+
 class SignalsJudged(Payload):
     """Ce qu'elle a fait d'un lot de la file : ce qu'elle dira à la personne (``tell``), ce qu'elle garde en tête
     (``keep``), ou rien — les signaux lus (``seqs``) quittent la file."""
@@ -82,7 +92,8 @@ SIGNALED = event_type("forge.signaled", OWNER, AppSignaled, public=True, content
 QUEUED = event_type("forge.queued", OWNER, SignalQueued, content=("summary",), subjects=("about",))
 JUDGED = event_type("forge.judged", OWNER, SignalsJudged, content=("tell", "keep"), subjects=("about",))
 ANSWERED = event_type("forge.answered", OWNER, AppAnswered, content=("text",), subjects=("about",))
-ALL = (SIGNALED, QUEUED, JUDGED, ANSWERED)
+RAISED = event_type("forge.raised", OWNER, AppRaised, public=True)
+ALL = (SIGNALED, QUEUED, JUDGED, ANSWERED, RAISED)
 
 
 @dataclass(frozen=True, slots=True)

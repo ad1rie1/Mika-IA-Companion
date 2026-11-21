@@ -329,7 +329,11 @@ class TourismSync:
         """Une fiche relue tout de suite (``/catalog/{uuid}``, la fiche d'un lieu qu'on actualise), écrite, rapprochée ;
         disparue chez DATAtourisme : effacée. Rend si elle existe encore. Ce qui ne va pas : ``TourismUnavailable``."""
         raw = await self.client.fiche(uuid)
-        conn = await asyncio.to_thread(self.tourism.base.open)
+        try:
+            conn = await asyncio.to_thread(self.tourism.base.open)
+        except (sqlite3.Error, OSError):  # tenue par une autre écriture : elle reste, on le dit
+            raise TourismUnavailable("La base des données touristiques ne s'écrit pas en ce moment : réessaie dans "
+                                     "un instant.", BROKEN) from None
         try:
             if raw is None:
                 await asyncio.to_thread(TourismBase.forget, conn, uuid)

@@ -1,12 +1,17 @@
-{# Activité › Projets › un projet › Comportement et outils (app/handmade/subjects/project.py, ADR 0121, 0176, 0177) : le
-   gabarit du paramétrage. Le formulaire « Modifier le projet », celui que la console a préparé (``projects.modifier``),
-   par groupes — Le projet, Son mode, Son rythme, Sa liberté —, une ligne par réglage (son nom et son aide à gauche, sa
-   valeur à droite), « Enregistrer » collé en bas ; pas de cadre dans la carte. Ce que la vue dit en cartes (son mode,
-   son rythme, sa liberté) n'est pas redit : leurs faits sont dans l'aide de leur réglage, sa prochaine exécution sur
-   une ligne au-dessus. Un projet archivé n'a pas de formulaire : ses réglages se lisent. Puis ses outils : les lots
-   qu'elle a en main pendant une exécution, et « Choisir ses outils » (``projects.outils``) à côté. Puis ses liens de
-   lecture (ADR 0257), dans le même dessin : « Ce qu'il lit » et « Choisir ce qu'il lit » (``projects.liens``) à côté,
-   puis « Qui le lit ». #}
+{# Activité › Projets › un projet › Cadre (app/handmade/subjects/project.py, ADR 0121, 0176, 0177, 0281) : le gabarit du
+   paramétrage, en sous-onglets.
+   - « Ses réglages » : le formulaire « Modifier le projet », celui que la console a préparé (``projects.modifier``),
+     par groupes — Le projet, Son mode, Son rythme, Sa liberté (la relecture indépendante y est) —, une ligne par
+     réglage (son nom et son aide à gauche, sa valeur à droite), « Enregistrer » collé en bas ; pas de cadre dans la
+     carte. Ce que la vue dit en cartes (son mode, son rythme, sa liberté) n'est pas redit : leurs faits sont dans
+     l'aide de leur réglage, sa prochaine exécution sur une ligne au-dessus. Un projet archivé n'a pas de
+     formulaire : ses réglages se lisent.
+   - « Outils et services » : les lots qu'elle a en main pendant une exécution, et « Choisir ses outils »
+     (``projects.outils``) à côté.
+   - « Accès » : ses lignes d'accès (``acces.html``, l'onglet réuni : son ancienne adresse y mène).
+   - « Tickets et issues » : qui valide le plan d'un ticket, la borne d'un petit ticket, ses fichiers protégés, la
+     publication en issues — en faits, puis le formulaire qui les règle (``projects.tickets_regler``).
+   Ses liens de lecture ont leur onglet (« Liens », ``fiche_liens.html``). #}
 {% import "handmade/shared/tab.html" as tab with context %}
 {% from "_forms.html" import field %}
 {% macro plumbing(f) -%}
@@ -16,6 +21,12 @@
 {%- endmacro %}
 <div class="now-page prj-fiche prj-behaviour" data-tab="project/comportement">
   {% for n in notes %}<p class="person-tab-note {{ n.tone }}">{{ n.text }}</p>{% endfor %}
+  <div class="hm-subtabs" data-subtabs>
+    <nav class="hm-subnav" aria-label="Son cadre">
+      {% for p in panes %}<a href="#{{ p.id }}">{{ p.label }}</a>{% endfor %}
+    </nav>
+    <div class="hm-subpanes">
+  <div id="cadre-reglages" class="prj-frame-pane" data-pane>
   {% if next_run and edit %}<p class="person-entry-facts hm-settings-facts"><span><span class="k">prochaine exécution</span> {{ tab.cell(next_run) }}</span></p>{% endif %}
 
   {% if edit %}
@@ -42,8 +53,9 @@
     </div>
   </section>
   {% endif %}
+  </div>
 
-  <section class="prj-tools" aria-labelledby="prj-tools-title">
+  <section id="cadre-outils" class="prj-tools" data-pane aria-labelledby="prj-tools-title">
     <header class="prj-tools-head">
       <h2 id="prj-tools-title">{{ tools.title }}</h2>
       {% if tools.description %}<p>{{ tools.description }}</p>{% endif %}
@@ -64,26 +76,34 @@
     </div>
   </section>
 
-  {% if links %}
-  <section class="prj-tools prj-links" aria-labelledby="prj-links-title">
+  {% if access %}<div id="acces" class="prj-frame-pane" data-pane>{{ access }}</div>{% endif %}
+
+  {% if tickets %}
+  <section id="cadre-tickets" class="prj-tools" data-pane aria-labelledby="prj-tickets-title">
     <header class="prj-tools-head">
-      <h2 id="prj-links-title">{{ links.title }}</h2>
-      {% if links.description %}<p>{{ links.description }}</p>{% endif %}
+      <h2 id="prj-tickets-title">{{ tickets.title }}</h2>
+      {% if tickets.description %}<p>{{ tickets.description }}</p>{% endif %}
     </header>
-    <div class="prj-split{{ ' with-side' if link and link.fields }}">
-      {% if reads %}{{ tab.table(reads) }}{% endif %}
-      {% if link and link.fields %}
-      <form method="post" action="{{ link.url }}" class="form hm-form prj-tools-form" aria-label="Choisir ce qu'il lit">
-        {{ plumbing(link) }}
+    <div class="prj-split{{ ' with-side' if ticket_form }}">
+      {% if ticket_facts %}
+      <section class="now-card prj-settings-ro" aria-labelledby="prj-tickets-now">
+        <header class="now-card-head"><h3 id="prj-tickets-now">Ce qui vaut maintenant</h3></header>
+        <dl class="prj-ov-dl">{% for p in ticket_facts.pairs %}<div><dt>{{ p.label }}</dt><dd>{{ tab.cell(p.value) }}</dd></div>{% endfor %}</dl>
+      </section>
+      {% endif %}
+      {% if ticket_form %}
+      <form method="post" action="{{ ticket_form.url }}" class="form hm-form prj-tools-form" aria-label="Régler ses tickets">
+        {{ plumbing(ticket_form) }}
         <fieldset class="prj-tools-checks">
-          <legend>Choisir ce qu'il lit</legend>
-          {% for f in link.fields %}{{ field(f) }}{% endfor %}
+          <legend>Les régler</legend>
+          {% for f in ticket_form.fields %}{{ field(f) }}{% endfor %}
         </fieldset>
-        <div class="form-actions"><button class="btn">{{ link.button or link.title }}</button></div>
+        <div class="form-actions"><button class="btn">{{ ticket_form.button or "Enregistrer" }}</button></div>
       </form>
       {% endif %}
     </div>
-    {% if readers %}{{ tab.table(readers) }}{% endif %}
   </section>
   {% endif %}
+    </div>
+  </div>
 </div>

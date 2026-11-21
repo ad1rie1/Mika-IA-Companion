@@ -61,6 +61,7 @@ import fr.qwartz.mika.data.moi.carte.placeWhat
 import fr.qwartz.mika.data.moi.carte.refused
 import fr.qwartz.mika.data.moi.carte.tripChanges
 import fr.qwartz.mika.data.moi.carte.tripPins
+import fr.qwartz.mika.data.moi.carte.TripSummary
 import fr.qwartz.mika.data.moi.carte.tripSpan
 import fr.qwartz.mika.data.moi.carte.tripTitleFor
 import fr.qwartz.mika.data.moi.carte.validPoint
@@ -236,13 +237,20 @@ internal fun TripFormDialog(
 }
 
 /**
- * « Ajouter au voyage » (Explorer) : tes voyages (huit au plus, les plus récemment changés), leurs dates en court
- * (« 3–7 avr. ») ; un toucher ajoute le lieu à la fin de son dernier jour, avec une clé par voyage gardée le temps de la
- * feuille (un double appui ne l'ajoute qu'une fois) ; « Nouveau voyage… » ouvre la fenêtre, le lieu pour premier arrêt.
+ * « Ajouter au voyage » (Explorer, une fiche) : tes voyages (huit au plus, les plus récemment changés), leurs dates en
+ * court (« 3–7 avr. ») ; un toucher ajoute le lieu à la fin de son dernier jour — ou du jour que [dayOf] dit (un
+ * événement tombe un jour précis : « jour 2 ») —, avec une clé par voyage gardée le temps de la feuille (un double appui
+ * ne l'ajoute qu'une fois) ; « Nouveau voyage… » ouvre la fenêtre, le lieu pour premier arrêt.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun AddToTripSheet(store: CarteStore, place: Place, onDismiss: () -> Unit, onNew: () -> Unit) {
+internal fun AddToTripSheet(
+    store: CarteStore,
+    place: Place,
+    onDismiss: () -> Unit,
+    onNew: () -> Unit,
+    dayOf: ((TripSummary) -> Int)? = null,
+) {
     val shell = LocalShell.current
     val scope = rememberCoroutineScope()
     val keys = remember { mutableStateMapOf<String, String>() }
@@ -263,17 +271,19 @@ internal fun AddToTripSheet(store: CarteStore, place: Place, onDismiss: () -> Un
                     TextButton(onClick = store::retryList) { Text(stringResource(R.string.retry)) }
                 }
                 is Load.Ready -> for (t in list.value.take(8)) {
+                    // le jour que l'événement dit, s'il tombe dans le voyage ; sinon le dernier
+                    val said = dayOf?.invoke(t)?.takeIf { it > 0 }
                     SheetRow(
                         icon = R.drawable.ic_m_flag,
                         title = t.title.ifBlank { stringResource(R.string.carte_untitled) },
-                        sub = tripSpan(t.start, t.days, now),
+                        sub = listOfNotNull(tripSpan(t.start, t.days, now).ifBlank { null }, said?.let { "jour $it" }).joinToString(" · "),
                         enabled = busy == null,
                     ) {
                         val key = keys.getOrPut(t.id) { MoiApi.newKey() }
                         busy = t.id
                         scope.launch {
                             val name = t.title.ifBlank { untitled }
-                            when (val got = store.addPlaceAsync(t.id, place, max(1, t.days), -1, key).await()) {
+                            when (val got = store.addPlaceAsync(t.id, place, said ?: max(1, t.days), -1, key).await()) {
                                 is AddOutcome.Added -> {
                                     shell.toast(if (got.deduped) already.format(name) else addedTo.format(name, got.day))
                                     onDismiss()

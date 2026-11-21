@@ -824,7 +824,7 @@ def _test_fields(s: ForgeState, frame: Frame, key: str, fixed: dict[str, str]) -
                        help="un objet JSON : les paramètres d'une vue, les données d'une action…"))
 
 
-@FORGE.action("tester", title="Tester", args=TestForm, emits=[EMITTED, c.QUEUED], subject="app", order=60,
+@FORGE.action("tester", title="Tester", args=TestForm, emits=[EMITTED, c.QUEUED, c.RAISED], subject="app", order=60,
               fields=_test_fields,
               description="Lance une de ses fonctions maintenant et montre ce qu'elle rend (sans compter contre "
                           "elle ; une vue : son enveloppe est vérifiée). C'est un vrai passage : ce qu'elle range "
@@ -960,7 +960,7 @@ async def _act(s: ForgeState, frame: Frame, data: Any, ctx: ActionContext) -> Do
     return Done(drafts=drafts, message=message, tone="ok" if ok else "warn")
 
 
-FORGE.action("agir", title="Agir", args=NoArgs, emits=[EMITTED, c.SIGNALED, c.QUEUED], fields=_act_fields,
+FORGE.action("agir", title="Agir", args=NoArgs, emits=[EMITTED, c.SIGNALED, c.QUEUED, c.RAISED], fields=_act_fields,
              description="Renseigne les champs puis valide pour appliquer cette action dans l'app.")(_act)
 
 

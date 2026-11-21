@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Carte (ADR 0259) : les fiches des lieux (fiche_*), l'onglet Événements et la fiche d'un événement (events_*). Les mots
+  qui se calculent (une note, une date de lecture, la ligne d'une source, ce que chaque bloc montre) sont dans
+  data/moi/carte/FicheRules.kt et EventRules.kt, testés sur la JVM.
+-->
+<resources>
+    <string name="carte_tab_events">Événements</string>
+
+    <!-- La fiche d'un lieu -->
+    <string name="fiche_place_title">Fiche du lieu</string>
+    <string name="fiche_ask_mika">Demander à Mika</string>
+    <string name="fiche_place_gone">Ce lieu n\'est plus là : l\'index des lieux a changé depuis, ou il n\'existe pas.</string>
+    <string name="fiche_back_to_map">Revenir à la carte</string>
+    <string name="fiche_where_is">Où est %1$s</string>
+    <string name="fiche_call">Appeler</string>
+    <string name="fiche_site">Site</string>
+    <string name="fiche_site_full">Ouvrir son site : %1$s</string>
+    <string name="fiche_reading">Lecture de la fiche…</string>
+    <string name="fiche_no_google">Pas de note ni d\'avis Google Maps pour ce lieu.</string>
+    <string name="fiche_osm">Infos pratiques</string>
+    <string name="fiche_tourism">Ce qu\'en dit l\'office de tourisme</string>
+    <string name="fiche_events_near">Bientôt, tout près</string>
+    <string name="fiche_google_open">Voir sur Google Maps</string>
+    <string name="fiche_reviews_recent">Les avis les plus récents</string>
+    <string name="fiche_review_more">Lire la suite</string>
+    <string name="fiche_review_less">Replier</string>
+    <string name="fiche_refresh">Actualiser</string>
+    <string name="fiche_refresh_all">Actualiser la fiche</string>
+    <string name="fiche_refreshing">Actualisation…</string>
+    <string name="fiche_refreshed">Fiche relue.</string>
+
+    <!-- Les photos -->
+    <string name="fiche_plan">Plan</string>
+    <string name="fiche_photo_open">Voir en grand : %1$s</string>
+    <string name="fiche_photo_failed">Cette photo ne se montre pas.</string>
+    <string name="fiche_viewer_title">Photos</string>
+    <string name="fiche_viewer_close">Fermer les photos</string>
+    <string name="fiche_viewer_prev">Photo précédente</string>
+    <string name="fiche_viewer_next">Photo suivante</string>
+
+    <!-- Les filtres d'une liste de lieux -->
+    <string name="fiche_filter_open">Ouvert maintenant</string>
+    <string name="fiche_filter_rating">%1$d et plus</string>
+    <string name="fiche_filter_cuisine">Cuisine</string>
+    <string name="fiche_filter_cuisine_all">Toute cuisine</string>
+    <string name="fiche_sort_change">Changer l\'ordre de la liste</string>
+    <string name="fiche_nothing_filtered">Rien de tel avec ces filtres.</string>
+
+    <!-- Événements -->
+    <string name="events_map_title">Carte des événements</string>
+    <string name="events_search_label">Chercher un événement</string>
+    <string name="events_search_hint">Un concert, un marché, une fête…</string>
+    <string name="events_dates_ok">Choisir</string>
+    <string name="events_dates_change">Dates : %1$s</string>
+    <string name="events_free">Gratuit</string>
+    <string name="events_hint_where">Déplace la carte sur l\'endroit à explorer, ou cherche un nom.</string>
+    <string name="events_failed">Les événements ne se cherchent pas ici</string>
+    <string name="events_empty_title">Ce qui se passe autour</string>
+    <string name="events_empty_text">Concerts, expositions, marchés, fêtes… : autour de toi, ou dans la zone de la carte. Ils viennent des offices de tourisme, gardés sur ce serveur : chercher ne fait rien sortir.</string>
+    <string name="events_title">Événements</string>
+    <string name="events_around_me">autour de toi</string>
+    <string name="events_in_zone">dans cette zone</string>
+    <string name="events_nothing_here">Rien de prévu autour de toi à ces dates.</string>
+    <string name="events_nothing_zone">Rien de prévu dans cette zone à ces dates.</string>
+    <string name="events_source">Les offices de tourisme, par DATAtourisme (Licence Ouverte) : une base sur ce serveur, lue autour de toi et remise à jour chaque soir.</string>
+    <string name="events_regard_loading">Ce que Mika a trouvé se lit…</string>
+    <string name="events_regard_gone_title">Ce que Mika avait trouvé n\'est plus là</string>
+    <string name="events_regard_failed">Ce que Mika avait trouvé ne se lit pas</string>
+    <string name="events_regard_title">Ce que Mika a trouvé</string>
+    <string name="events_regard_lc">ce que Mika a trouvé</string>
+    <string name="events_regard_empty">Elle n\'a gardé aucun événement de ce regard.</string>
+    <string name="events_all">Tous les événements</string>
+    <string name="events_found_by_mika">repéré par Mika</string>
+    <string name="events_found_for_you">Mika l\'a trouvé pour toi</string>
+
+    <!-- La fiche d'un événement -->
+    <string name="fiche_event_title">Événement</string>
+    <string name="fiche_event_gone">Cet événement n\'est plus là : il est passé, ou l\'office de tourisme l\'a retiré.</string>
+    <string name="fiche_event_where">Où se tient %1$s</string>
+    <string name="fiche_event_programme">Le programme</string>
+    <string name="fiche_event_dates">Ses dates</string>
+    <string name="fiche_event_practical">Pratique</string>
+    <string name="fiche_event_venue">Lieu</string>
+</resources>

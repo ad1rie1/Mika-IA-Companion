@@ -25,6 +25,9 @@ En mode pro, son opératrice ouvre des fils de travail (ADR 0164) : chaque
 message en porte l'identifiant (``strand``), choisi par le client. Le fil privé
 ne les relit pas ; un fil de travail ne relit que ses messages, sous son titre
 et sa petite description (``transcript.strand_set``, le dernier réglage vaut).
+Son opératrice peut aussi forcer l'effort de réflexion des réponses qu'elle reçoit
+(ADR 0287), pour toute sa conversation ou pour un fil (``transcript.effort_set``) :
+l'épisode qui lui répond le lit quand il compose.
 Tout reste au journal : sa mémoire les consolide comme le reste de sa vie.
 
 Carte des modules (le sens de leurs imports : ``marks`` ← ``faculty`` ← ``thread`` ← ``history`` ; ``compact`` lit
@@ -35,12 +38,13 @@ Carte des modules (le sens de leurs imports : ``marks`` ← ``faculty`` ← ``th
   (``transcript.head``, ``transcript.last_from``, ``transcript.last_to``) ;
 - ``marks`` : les repères de temps du fil (``gap_mark``, ``opening_mark``, ``read_late``) et celui d'un message resté
   sans réponse (``left_unanswered``) ;
-- ``thread`` : le fil matérialisé — les projections ``thread`` et ``strands`` — et les requêtes qui le relisent
-  (``recent``, ``after``, ``private_thread``, ``strand_thread``, ``room_thread``, ``strand_history``, ``strands_of``…) ;
+- ``thread`` : le fil matérialisé — les projections ``thread``, ``strands`` et ``thread_efforts`` — et les requêtes
+  qui le relisent (``recent``, ``after``, ``private_thread``, ``strand_thread``, ``room_thread``, ``strand_history``,
+  ``strands_of``, ``efforts_of``…) ;
 - ``history`` : l'historique du prompt — l'enrichisseur ``thread``, les tours datés (``thread_turns``), sa balise
   relue (``tagged``), ce qu'elle relit en tête d'un fil de travail (``strand_about``), la section ``history`` ;
 - ``compact`` : le repli des longs fils en un résumé (processus ``transcript.compact``) ;
-- ``actions`` : juger une de ses réponses, régler un fil de travail ;
+- ``actions`` : juger une de ses réponses, régler un fil de travail, forcer l'effort d'une conversation ou d'un fil ;
 - ``inspect`` : ce que la console montre du fil.
 """
 
@@ -59,7 +63,17 @@ from mika.faculties.transcript.compact import Compact
 from mika.faculties.transcript.faculty import TRANSCRIPT, TranscriptParams, TranscriptState
 from mika.faculties.transcript.history import strand_about, tagged, thread_turns
 from mika.faculties.transcript.marks import gap_mark, opening_mark, read_late
-from mika.faculties.transcript.thread import Thread, after, recent, strand_history, strands_of, window_start
+from mika.faculties.transcript.thread import (
+    Thread,
+    after,
+    asked_effort,
+    effort_for,
+    efforts_of,
+    recent,
+    strand_history,
+    strands_of,
+    window_start,
+)
 
 __all__ = [
     "TRANSCRIPT",
@@ -68,6 +82,9 @@ __all__ = [
     "TranscriptParams",
     "TranscriptState",
     "after",
+    "asked_effort",
+    "effort_for",
+    "efforts_of",
     "gap_mark",
     "opening_mark",
     "read_late",

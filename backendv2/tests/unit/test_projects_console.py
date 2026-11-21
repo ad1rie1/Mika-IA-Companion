@@ -61,11 +61,15 @@ from mika.runtime import decisions
 from mika.runtime.inspection import Inspection
 from mika.runtime.operations import initial_values, offered, perform
 from mika.sim.llm.persona import _section
+from mika.sim.outside import FakeFeeds
 from tests.fixtures.atelier import STAMP, Atelier, Host
 from tests.unit.test_goals_console import field, flat, nested
 from tests.unit.test_projects import create, events, form, live, wait
 
-TABS = ["apercu", "objectifs", "executions", "decisions", "fichiers", "git", "comportement", "acces", "carnet"]
+#: les onglets de la fiche, dans l'ordre de leurs vues (ADR 0281) : la fiche dessinée réunit « objectifs » sous
+#: « apercu » et « acces » sous « comportement », et range les trois derniers sous « Plus »
+TABS = ["apercu", "objectifs", "tickets", "suivi", "liens", "git", "executions", "comportement", "acces", "decisions",
+        "fichiers", "documentation", "carnet"]
 
 
 def row_form(fixed: dict[str, str], **values: str) -> dict[str, list[str]]:
@@ -130,8 +134,9 @@ def test_the_projects_menu_fresh_then_alive(tmp_path):
     row = tables(listing)["Projets"].rows[0]
     assert row.href.key == f"project/{pid}" and row.cells[0].text == "Outils réseau"
     assert row.cells[1].text == "impersonnel"
-    assert row.cells[4].text.endswith("/2 ponctuels faits · 1 constant")  # ses deux ponctuels, son constant, accordés
-    assert row.cells[9] == "les jours ouvrés, de 9 h à 18 h" and "github.com/moi/outils" in row.cells[12].text
+    assert row.cells[4] == "—"  # rien ne t'y attend (ADR 0281)
+    assert row.cells[5].text.endswith("/2 ponctuels faits · 1 constant")  # ses deux ponctuels, son constant, accordés
+    assert row.cells[10] == "les jours ouvrés, de 9 h à 18 h" and "github.com/moi/outils" in row.cells[13].text
     stats = next(b for b in listing if isinstance(b, Stats))
     counts = {st.label: st.value for st in stats.items}
     assert counts["Actifs"] == 1 and counts["Exécutions (24 h)"] >= 1 and counts["Archivés"] == 0
@@ -241,11 +246,18 @@ def test_every_tab_reads_a_project_that_lived_and_the_forms_stay_in_their_tabs(t
     assert (told["Objectifs"].value, told["Objectifs"].sub, told["Objectifs"].tone) == (
         "1/1", "ponctuel fait · 1 constant", "")
     assert told["Dernier commit"].sub == ""  # le distant se dit une fois, dans la tuile « Son dépôt »
+    # ce qui t'attend en tête (ADR 0281), puis ses missions et ses objectifs en cours, une ligne chacun
+    [waiting] = tables(overview)["Ce qui t'attend (1)"].rows  # la demande qui attend ton accord, et où la décider
+    assert waiting.cells[0].text == "ton accord" and "installer requests" in waiting.cells[1].text
+    assert (waiting.cells[4].kind, waiting.cells[4].key) == ("approvals", "en_attente")
+    missions = tables(overview)["Missions"]
+    assert [c.label for c in missions.columns] == ["n°", "mission", "état", "revient", "déclenchée par",
+                                                   "dernier passage", "ce qui l'a éveillée"]
+    assert len(missions.rows) == 1 and not tables(overview)["Objectifs en cours"].rows  # son ponctuel est fait
     grids = [b for b in overview if isinstance(b, Grid)]
-    assert [[f.title for f in g.items] for g in grids] == [["Ses objectifs", "Dernières exécutions"],
-                                                           ["Prochaine exécution", "Le cadre", "Son dépôt"]]
+    assert [[f.title for f in g.items] for g in grids] == [["Prochaine exécution", "Le cadre", "Son dépôt"]]
     # chaque fait une fois : le mode et la plage sont dans l'en-tête, le dernier commit dans la bande
-    tiles = {f.title: [k for k, _ in f.pairs] for f in grids[1].items if isinstance(f, Fields)}
+    tiles = {f.title: [k for k, _ in f.pairs] for f in grids[0].items if isinstance(f, Fields)}
     assert tiles == {"Prochaine exécution": ["quand", "sur quoi"],
                      "Son dépôt": ["dépôt distant", "dernier échange", "l'histoire complète"]}
     assert "Dernières exécutions" in flat(overview) and "Décisions en vigueur (les dernières)" in flat(overview)
@@ -317,7 +329,7 @@ def test_an_agenda_reads_in_words_in_the_list_and_in_the_fiche(tmp_path):
                                 schedule="cron:0 9 * * MON-FRI")  # une des valeurs proposées
         own = await create(kernel, "p2", title="Le module", objectives="Écrire le module", mode="plain",
                            schedule="autre", schedule_rule="cron:30 8 * * MON-FRI")  # écrite à la main, hors liste
-        listed = {r.href.key: r.cells[10] for r in tables(await tab(kernel, "tous"))["Projets"].rows}
+        listed = {r.href.key: r.cells[11] for r in tables(await tab(kernel, "tous"))["Projets"].rows}
         said = {}
         for pid in (proposed, own):
             said[pid] = (listed[f"project/{pid}"], field(await tab(kernel, "comportement", str(pid)), "agenda"))
@@ -404,8 +416,9 @@ def test_the_progress_of_objectives_is_counted_once_and_agreed():
     gauge = _progress(project((once, c.DONE), (once, c.BLOCKED), (constant, c.OPEN), (constant, c.OPEN)))
     assert (gauge.ratio, gauge.text, gauge.tone) == (0.5, "1/2 ponctuels faits · 2 constants · 1 bloqué", "warn")
     # ce que ses onglets comptent : ses objectifs hors retirés, ses exécutions, ses décisions en vigueur
+    # — et son registre (ADR 0268) : ses tickets ouverts, ce qui reste ouvert dans ses listes de suivi
     assert tab_counts(project((once, c.DROPPED), (once, c.OPEN))) == {"objectifs": 1, "executions": 0,
-                                                                      "decisions": 0}
+                                                                      "decisions": 0, "tickets": 0, "suivi": 0}
     # l'oubli d'une personne, accordé au nombre de ses projets
     assert "garde de ce projet" in forget_note(1) and "pas son atelier" in forget_note(1)
     assert "garde de ces 3 projets" in forget_note(3) and "pas leurs ateliers" in forget_note(3)
@@ -427,6 +440,8 @@ def test_who_asked_for_a_project_is_said_by_a_cleaned_name_and_by_the_key_withou
 
 def test_modifying_starts_from_what_it_is_and_the_next_run_reads_the_new_frame(tmp_path):
     async def scenario(kernel, llm):
+        # elle suit des flux : leurs outils s'offrent (ADR 0266)
+        kernel.ports["feeds"] = kernel.runner.ports["feeds"] = FakeFeeds()
         pid = str(await create(kernel, "p1", title="Ranger les notes", description="Les classer par date.",
                                constants="Les garder rangées", cadence_hours="1", start="8:00", end="20:00"))
         spec = kernel.registry.actions["projects.modifier"]

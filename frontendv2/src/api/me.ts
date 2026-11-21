@@ -12,6 +12,8 @@ export interface Counts {
   teams: number;
   /** Ses réponses offertes au téléphone, qui attendent ton geste. */
   phone: number;
+  /** Ce qui t'attend, toi, dans tes projets (« À faire », `protocole-moi.md` § 11). */
+  projects: number;
 }
 
 export interface Me {

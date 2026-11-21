@@ -8,9 +8,13 @@ se reconstruit pas :
   forgées), copiées par l'API de sauvegarde de SQLite : cohérentes même
   serveur en marche, WAL compris ;
 - ses apps forgées (``forge/``, avec leurs versions), ses ateliers
-  (``ateliers/``, avec leur git), les fichiers qu'elle a envoyés
+  (``ateliers/``, avec leur git — sans les vues qu'un projet a de l'atelier
+  d'un autre, ``ateliers/.vues`` : le dernier commit d'un atelier déjà
+  archivé, qui se repose seul, ADR 0262 ; ni la copie de commit qu'une
+  relecture lit, ``ateliers/.relectures``, ADR 0277), les fichiers qu'elle a envoyés
   (``partages/``, ADR 0062 : leurs octets ne sont pas dans le journal) et les
-  pièces jointes qu'on lui a envoyées (``pieces/``, ADR 0106) ; un
+  pièces jointes qu'on lui a envoyées (``pieces/``, ADR 0106), les images de la
+  documentation de ses projets (``documentation/``, ADR 0289) ; un
   lien symbolique est gardé comme un lien (sa cible, dans le manifeste) et
   recréé à la restauration : sans lui, le prochain commit de l'atelier
   enregistrerait sa suppression ;
@@ -18,6 +22,10 @@ se reconstruit pas :
   les secrets rangés dans les réglages sont perdus), et la clé Firebase des
   notifications quand elle est posée en fichier (``firebase-service-account.json``,
   ADR 0077) ;
+- de ``cartes/`` (la carte, l'index des lieux et les caches de la carte, qui
+  se refont), seulement ``quotas.db`` : les compteurs du mois des services
+  payés (ADR 0269), restaurés là où il n'y en a pas — sur place, ceux du
+  dossier, plus récents, restent ;
 - ``MANIFEST.json`` : tête du journal, empreinte de l'état **rejoué depuis la
   copie**, empreinte du code qui l'a rejouée, somme SHA-256 de chaque fichier.
 
@@ -78,8 +86,10 @@ from sqlalchemy import delete
 from sqlalchemy.exc import SQLAlchemyError
 
 from mika.adapters.database import Target, as_target
+from mika.adapters.maps.quota import QUOTAS_FILE
 from mika.adapters.store_sql import SqlStore
 from mika.adapters.system import RandomIdGen, RealClock
+from mika.adapters.workshop import REVIEWS_DIRNAME, VIEWS_DIRNAME
 from mika.app import backup_server, datadir, schema
 from mika.app.composition import READING, faculties
 from mika.app.settings import PUSH_KEY_FILE
@@ -102,6 +112,14 @@ SKIPPED = frozenset({"views.db", "views.db-wal", "views.db-shm", "sauvegardes.js
 #: de plongements, qui se retélécharge — 1,2 Go pour Qwen3, ADR 0109) ; ``cartes`` (la carte de sa position, ADR 0193 :
 #: quelques Go qui se réextraient)
 SKIPPED_DIRS = frozenset({"claude-code", "cache", "cartes"})
+#: sous un dossier jamais archivé, ce qui l'est quand même : les compteurs des services de la carte (quelques Ko, R3-08)
+#: — ce qui empêche la facture de Google ; une machine neuve ne repart pas d'un mois à zéro. Restaurés seulement là où
+#: il n'y en a pas : ceux du dossier, en service, sont plus récents que l'archive
+KEPT_UNDER_SKIPPED = frozenset({QUOTAS_FILE})
+#: sous un dossier archivé, ce qui ne l'est pas : les vues des ateliers lus (ADR 0260, 0262) — la copie du dernier
+#: commit d'un autre atelier, que l'archive porte déjà avec son dépôt, et qui se repose seule à l'exécution suivante ;
+#: et la copie de commit qu'une relecture indépendante lit (ADR 0277), jetable par nature
+SKIPPED_UNDER = frozenset({("ateliers", VIEWS_DIRNAME), ("ateliers", REVIEWS_DIRNAME)})
 #: dans le dossier de données, ce qu'une restauration prépare et ce qu'elle met de côté (cachés : aucune archive ne
 #: les prend, une restauration suivante ne les remplace pas)
 STAGING, ASIDE, KEPT = ".restauration-", ".avant-restauration-", ".avant-bases-"
@@ -247,7 +265,10 @@ def _walk(data: Path) -> tuple[list[Path], list[Path]]:
     files, links = [], []
     for path in sorted(data.rglob("*")):
         rel = path.relative_to(data)
-        if rel.name in SKIPPED or rel.parts[0].startswith(".") or rel.parts[0] in SKIPPED_DIRS:
+        if rel.name in SKIPPED or rel.parts[0].startswith(".") or \
+                (rel.parts[0] in SKIPPED_DIRS and rel.as_posix() not in KEPT_UNDER_SKIPPED):
+            continue
+        if rel.parts[:2] in SKIPPED_UNDER:
             continue
         if path.is_symlink():
             links.append(rel)
@@ -518,8 +539,10 @@ PLACES: dict[str, str] = {
     "mcp": "les services MCP lancés sur cette machine, chacun dans sa cage",
     "pieces": "les pièces jointes qu'on lui a envoyées (2 Gio par personne)",
     "partages": "les fichiers qu'elle a envoyés",
+    "documentation": "les images de la documentation de ses projets (100 Mio par projet)",
     "telephone": "l'application Android à installer",
-    "cartes": "la carte de sa position et l'index des lieux",
+    "cartes": "la carte de sa position, l'index des lieux et les caches de la carte ; ses compteurs du mois, eux, se "
+              "sauvegardent",
     "cache": "le modèle de plongements",
     "claude-code": "les appels de Claude Code d'une installation d'avant",
     "secret.key": "la clé qui chiffre les secrets des réglages",
@@ -706,8 +729,9 @@ def restore(archive: Path, data: Path, *, force: bool = False, now: datetime | N
                 aside.mkdir(exist_ok=True)
                 kept.rename(aside / BASES)
                 warnings.append(f"bases en service copiées avant d'être remplacées : {aside / BASES}")
-            for sub in ("forge", "ateliers", "partages", "pieces"):
+            for sub in ("forge", "ateliers", "partages", "pieces", "documentation"):
                 (data / sub).mkdir(exist_ok=True)
+            (data / "documentation").chmod(0o700)  # les images de la documentation de ses projets (ADR 0289)
             (data / "partages").chmod(0o700)  # ce qu'elle a envoyé à chacun : à elle seule
             (data / "pieces").chmod(0o700)  # ce qu'on lui a envoyé (ADR 0106) : à elle seule
             for name in ("secret.key", PUSH_KEY_FILE):  # des clés : à leur propriétaire seul
@@ -761,6 +785,11 @@ def _swap(data: Path, stage: Path, old: list[Path], aside: Path, *, reloaded: bo
         for path in sorted(stage.iterdir()):
             if not _ours(path.name):
                 path.rename(data / path.name)
+        for rel in sorted(KEPT_UNDER_SKIPPED):  # là où il n'y en a pas : ceux du dossier sont plus récents (R3-08)
+            got, there = stage / rel, data / rel
+            if got.is_file() and not there.exists():
+                there.parent.mkdir(exist_ok=True)
+                got.rename(there)
     except OSError as exc:
         where = f" ; l'ancien contenu est dans {aside}" if old else ""
         raise BackupError(f"pose de l'archive interrompue ({exc}) : le dossier est incomplet{where}{bases} — "

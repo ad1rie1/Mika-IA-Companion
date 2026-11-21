@@ -21,7 +21,7 @@ import { $, isMobile, on } from "../../shell/dom";
 import { openMenu, toast, type MenuItem } from "../../shell/float";
 import { CachedMap, failureText, newNonce } from "../../shared/kit";
 import { placeFicheMarkup, type FicheBack } from "./fiche";
-import { askAboutPlace, ficheId, lieuItem, lieuOf, searchReach } from "./format";
+import { askAboutPlace, ficheId, lieuItem, lieuOf, regardPlace, searchReach, withRefreshed, type Origin } from "./format";
 import type { CarteFrame } from "./index";
 import { photoSeen } from "./photos";
 import { ADDRESS_WAIT_MS, gone, wantsAddress } from "./requests";
@@ -91,15 +91,6 @@ export async function addToTripMenu(host: TripMenuHost, anchor: HTMLElement, p: 
   openMenu(anchor, items);
 }
 
-/** Un lieu tel que la liste l'attend, depuis ce qu'un regard a gardé (un point nommé n'a ni sorte ni distance). */
-function asPlace(p: Partial<Place>): Place {
-  return {
-    id: p.id ?? "", name: p.name ?? "", kind: p.kind ?? "", kind_fr: p.kind_fr ?? "", category: p.category ?? "",
-    lat: p.lat ?? NaN, lon: p.lon ?? NaN, town: p.town ?? "", distance_m: p.distance_m ?? null, along_m: p.along_m ?? null,
-    ...(p.osm ? { osm: p.osm } : {}),
-  };
-}
-
 export class ExplorerTab {
   private q = "";
   private cat = "";
@@ -145,17 +136,24 @@ export class ExplorerTab {
   private refreshing = false;
   /** Ce qui n'a pas pu se relire (« Actualiser »), en mots. */
   private refreshNote = "";
+  /** La fiche s'est ouverte depuis celle d'un événement (son lieu) : son retour y ramène (R2-W06). */
+  private from: Origin | null = null;
 
   constructor(private readonly host: ExplorerHost) {}
 
-  /** Ce que la route ouvre dans Explorer : la fiche d'un lieu, un regard de Mika, ou rien. */
-  applyItem(item: string | null): void {
+  /**
+   * Ce que la route ouvre dans Explorer : la fiche d'un lieu, un regard de Mika, ou rien. `from` : la fiche de l'autre
+   * onglet d'où l'on vient (R2-W06) — le retour de la fiche y ramène.
+   */
+  applyItem(item: string | null, from: Origin | null = null): void {
     const lieu = lieuOf(item);
     if (lieu) {
+      if (lieu !== this.fiche || from) this.from = from;
       this.openFiche(lieu);
       return;
     }
     const back = this.fiche !== null;
+    this.from = null;
     this.fiche = null;
     this.ficheHit = null;
     this.refreshNote = "";
@@ -199,7 +197,7 @@ export class ExplorerTab {
   /** Les lieux que la liste montre (ceux du regard, ou ceux de la recherche). */
   private listed(): Place[] {
     const shown = this.regardShown();
-    return shown ? shown.regard.places.map(asPlace) : this.places;
+    return shown ? shown.regard.places.map(regardPlace) : this.places;
   }
 
   /**
@@ -277,11 +275,16 @@ export class ExplorerTab {
     try {
       const got = await refreshPlace(id);
       this.fiches.get(id).put({ place: got.place, osm: got.osm, tourism: got.tourism, reviews: got.reviews, events: got.events });
+      // la ligne de la liste montre ce que la fiche relue dit (sa note, ses avis), sa distance gardée (R2-W07)
+      this.places = withRefreshed(this.places, id, got.place);
       toast(got.message || "Fiche relue.", { ico: "refresh" });
     } catch (err) {
       note = failureText(err);
       // ce qui a pu se relire est gardé : la fiche se relit (sauf un refus de trop de demandes, qui n'a rien tenté)
-      if (!(err instanceof ApiError && err.status === 429)) await this.fiches.get(id).load(true);
+      if (!(err instanceof ApiError && err.status === 429)) {
+        const again = await this.fiches.get(id).load(true);
+        if (again) this.places = withRefreshed(this.places, id, again.place);
+      }
     }
     if (this.fiche !== id) return;
     this.refreshing = false;
@@ -295,9 +298,13 @@ export class ExplorerTab {
     return f ? shownPhotos(f.tourism?.photos, f.reviews?.photos) : [];
   }
 
-  /** Où revenir de la fiche : la liste d'où elle s'est ouverte (le regard de Mika, ou la recherche). */
+  /**
+   * Où revenir de la fiche : la fiche d'événement d'où elle s'est ouverte, sinon la liste d'où elle vient — le
+   * regard de Mika si c'est un de ses lieux, ou la recherche.
+   */
   private ficheBack(): FicheBack {
-    if (this.regard) return { href: `#carte/explorer/${regardItem(this.regard)}`, label: "Ce que Mika a cherché" };
+    if (this.from) return this.from;
+    if (this.regard && this.ficheMika) return { href: `#carte/explorer/${regardItem(this.regard)}`, label: "Ce que Mika a cherché" };
     return { href: "#carte/explorer", label: this.searched && this.places.length ? "Les résultats" : "Explorer" };
   }
 
@@ -330,7 +337,8 @@ export class ExplorerTab {
     } else {
       pins = p && Number.isFinite(p.lat) && Number.isFinite(p.lon) ? [{ id: "fiche", lat: p.lat, lon: p.lon, title: p.name, selected: true, mika: this.ficheMika }] : [];
     }
-    const scene: Scene = { pins, lines: [], here: this.where === "moi" && here ? here : null };
+    // tant que son lieu n'est pas connu, la scène reste vide (ta position seule) : le cadrage demandé attend qu'il arrive
+    const scene: Scene = { pins, lines: [], here: pins.length && this.where === "moi" && here ? here : null };
     return { html, scene, title: p?.name || "Ce lieu" };
   }
 
@@ -348,7 +356,7 @@ export class ExplorerTab {
     let scene: Scene;
     let legend: string;
     if (shown) {
-      places = shown.regard.places.map(asPlace);
+      places = shown.regard.places.map(regardPlace);
       // ses épingles portent l'identifiant de leur lieu dans la liste (`placeId`) : un clic sur l'une choisit l'autre
       scene = { pins: regardPins(shown.regard).map((p) => ({ ...p, selected: p.id === this.sel })), lines: regardLine(shown.regard) };
       legend = legendMarkup("sparkle", shown.regard.title || "Ce que Mika a cherché", `${places.length} lieu${places.length > 1 ? "x" : ""} · ce que Mika a ${shown.regard.what === "trajet" || shown.regard.kind === "map" ? "montré" : "cherché"}`);
@@ -577,7 +585,7 @@ export class ExplorerTab {
     }
     const shown = this.regardShown();
     if (shown) {
-      const places = shown.regard.places.map(asPlace);
+      const places = shown.regard.places.map(regardPlace);
       return places.find((p, i) => placeId(p, i) === this.sel) ?? null;
     }
     return selectedPlace({ places: this.places, addresses: this.addresses, sel: this.sel });
@@ -654,6 +662,12 @@ export class ExplorerTab {
     });
     on(section, "[data-fiche-retry]", "click", () => {
       if (here()) void this.readFiche(true);
+    });
+    // un long avis, déplié ou replié (rien ne se redessine)
+    on(section, "[data-review-more]", "click", (_e, b) => {
+      const open = !!b.closest(".g-review")?.classList.toggle("open");
+      b.setAttribute("aria-expanded", String(open));
+      b.textContent = open ? "Replier" : "Lire la suite";
     });
     section.addEventListener("input", (e) => {
       const t = e.target as HTMLInputElement;

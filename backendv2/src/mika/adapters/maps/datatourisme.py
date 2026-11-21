@@ -34,7 +34,7 @@ import httpx
 
 from mika.adapters.maps.config import TourismConfig, tourism_key
 from mika.adapters.maps.pace import client
-from mika.adapters.maps.quota import Limiter, Limits
+from mika.adapters.maps.quota import Limiter, Limits, note_sent
 from mika.adapters.maps.tiles import read_capped
 from mika.adapters.maps.when import Occurrence, occurrence_of
 from mika.ports.maps import THEMES, MapsUnavailable
@@ -79,6 +79,9 @@ class TourismUnavailable(MapsUnavailable):
 BACK_OFF_S = 900.0
 #: ce qu'attend une demande en direct (une personne attend sa réponse) que le limiteur la laisse partir
 LIVE_WAIT_S = 3.0
+#: ce qui dit « elle n'existe plus » (``CURSOR``) : pour une page suivante, son curseur expiré (l'API rend 400, 404 ou
+#: 410) ; pour une fiche, 404 et 410 seulement — un 400 y est un refus (ADR 0269)
+CURSOR_GONE, FICHE_GONE = (400, 404, 410), (404, 410)
 
 
 def tourism_limits(cfg: TourismConfig) -> Limits:
@@ -136,26 +139,32 @@ class DataTourismeClient:
         limiteur reste au direct) ; ``wait_max`` : ce qu'elle attend, au plus, que le limiteur la laisse partir."""
         if endpoint not in ENDPOINTS:
             raise ValueError(f"une liste : {', '.join(ENDPOINTS)}")
-        return _page(await self._get(f"{self.base}/{endpoint}", dict(params), wait_max=wait_max, cursor=False,
+        return _page(await self._get(f"{self.base}/{endpoint}", dict(params), wait_max=wait_max, gone=(),
                                      background=background))
 
     async def follow(self, url: str, *, background: bool = True, wait_max: float = SYNC_WAIT_S) -> Page:
         """La page suivante, à l'adresse que la précédente a donnée (``meta.next``, avec son curseur ``crs``), telle
         quelle — sur l'hôte de l'API seulement, en https, sans clé dans l'adresse."""
-        return _page(await self._get(self.next_url(url), None, wait_max=wait_max, cursor=True, background=background))
+        return _page(await self._get(self.next_url(url), None, wait_max=wait_max, gone=CURSOR_GONE,
+                                     background=background))
 
     async def fiche(self, uuid: str, *, wait_max: float = LIVE_WAIT_S) -> dict[str, Any] | None:
-        """Une fiche par son identifiant (``/catalog/{uuid}``), en direct ; ``None`` si elle n'existe plus."""
+        """Une fiche par son identifiant (``/catalog/{uuid}``), en direct ; ``None`` si elle n'existe plus (404, 410
+        seulement : un 400 est un refus, ``REFUSED``, et un 200 qui n'est pas cette fiche, ``BROKEN`` — la fiche qu'on
+        a reste)."""
         if not UUID.match(uuid):
             raise ValueError("un identifiant de fiche")
         try:
             body = await self._get(f"{self.base}/catalog/{uuid}", {"lang": "fr", "fields": FIELDS[EVENTS]},
-                                   wait_max=wait_max, cursor=True, background=False)
+                                   wait_max=wait_max, gone=FICHE_GONE, background=False)
         except TourismUnavailable as exc:
-            if exc.kind == CURSOR:  # 404 : elle n'existe plus
+            if exc.kind == CURSOR:  # 404, 410 : elle n'existe plus
                 return None
             raise
-        return body if isinstance(body, dict) and "uuid" in body else None
+        if isinstance(body, dict) and str(body.get("uuid", "")).lower() == uuid.lower():
+            return body
+        # une réponse, mais pas cette fiche (enveloppée, un champ renommé, vide) : ni « partie » ni effacée (R3-09)
+        raise TourismUnavailable("DATAtourisme a rendu une fiche illisible : on garde celle qu'on avait.", BROKEN)
 
     def next_url(self, url: str) -> str:
         parts = urlsplit(str(url or ""))
@@ -165,7 +174,7 @@ class DataTourismeClient:
         base = urlsplit(self.base)
         return urlunsplit((base.scheme, base.netloc, parts.path, query, ""))
 
-    async def _get(self, url: str, params: dict[str, str] | None, *, wait_max: float, cursor: bool,
+    async def _get(self, url: str, params: dict[str, str] | None, *, wait_max: float, gone: tuple[int, ...],
                    background: bool) -> object:
         if not tourism_key(self.config())[0]:
             raise TourismUnavailable(NO_KEY, AUTH)
@@ -177,13 +186,16 @@ class DataTourismeClient:
             if not key:
                 raise TourismUnavailable(NO_KEY, AUTH)
             self.asked += 1
+            note_sent()
             try:
-                return await self._ask(url, params, key, cursor)
+                return await self._ask(url, params, key, gone)
             except TourismUnavailable:
                 self.failed += 1
                 raise
 
-    async def _ask(self, url: str, params: dict[str, str] | None, key: str, cursor: bool) -> object:
+    async def _ask(self, url: str, params: dict[str, str] | None, key: str, gone: tuple[int, ...]) -> object:
+        """Une demande ; ``gone`` : les statuts qui disent que ce qu'on demande n'existe plus (``CURSOR``) — une page
+        suivante dont le curseur a expiré (400, 404, 410), une fiche partie (404, 410)."""
         headers = {"X-API-Key": key, "Accept": "application/json"}
         try:
             async with self._http().stream("GET", url, params=params, headers=headers) as r:
@@ -204,7 +216,7 @@ class DataTourismeClient:
                                      "tard.", BUSY)
         if status >= 500:
             raise TourismUnavailable(f"DATAtourisme est en panne (HTTP {status}).", SERVER)
-        if cursor and status in (400, 404, 410):
+        if status in gone:
             raise TourismUnavailable(f"DATAtourisme ne reconnaît plus cette page (HTTP {status}).", CURSOR)
         if status != 200:
             raise TourismUnavailable(f"DATAtourisme refuse la demande (HTTP {status}"
@@ -313,6 +325,8 @@ PLACE_TYPES: tuple[tuple[str, str, str, str], ...] = (
     ("SportsAndLeisurePlace", "sports_centre", "Sports et loisirs", "sortir"),
     ("Store", "shop", "Commerce", "courses"),
     ("TouristInformationCenter", "information", "Office de tourisme", "services"),
+    # la dernière : une location, une gare… qu'aucune autre classe ne dit mieux (« France Cars », R3-06)
+    ("Transport", "transport", "Transport", "services"),
 )
 _PLACE_TYPE = {t[0]: t for t in PLACE_TYPES}
 TOURISM_KIND, TOURISM_KIND_FR = "tourism", "Lieu touristique"
@@ -408,6 +422,30 @@ def name_key(name: str) -> str:
 def _plain_words(text: str) -> list[str]:
     ascii_ = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode().casefold()
     return re.findall(r"[a-z0-9]+", ascii_)
+
+
+#: ce qui précède le nom d'une ville dans une rue qui le porte (« rue de Lille ») : alors, ce n'est pas la commune
+_NAMED_AFTER = frozenset({"de", "d", "du", "des"})
+_TOWN_WORDS_MAX = 6
+_PUNCT = " ,;-–—"
+
+
+def street_without_town(street: str, town: str) -> str:
+    """La rue d'une adresse sans la commune que DATAtourisme y recopie souvent, et le code postal ou le « à » qui la
+    précèdent (« Roubaix » seule, « 1 allée du Musée VIlleneuve-d'Ascq », « Rue Kléber Loquet 59 560 Comines », « 13 rue
+    de l'Hospice à Roubaix ») ; une rue qui porte le nom d'une ville (« 12 rue de Lille », à Lille) le garde."""
+    want = _plain_words(town)
+    words = street.split()
+    while want and words:
+        size = next((k for k in range(1, min(len(words), _TOWN_WORDS_MAX) + 1)
+                     if _plain_words(" ".join(words[-k:])) == want), 0)
+        before = _plain_words(words[-size - 1]) if size and len(words) > size else []
+        if not size or (before and before[-1] in _NAMED_AFTER):
+            break
+        words = words[:-size]
+        while words and (words[-1].strip(_PUNCT).isdigit() or words[-1].strip(_PUNCT).lower() in ("", "à")):
+            words.pop()
+    return " ".join(words).strip(_PUNCT)
 
 
 #: les mots d'un nom qui ne le distinguent pas
@@ -665,8 +703,8 @@ def _read(raw: object) -> Fiche | None:
     category, sort, sort_fr = ("", "event", "Événement") if kind == EVENT else _place_sort(types)
     return Fiche(
         uuid=uuid, kind=kind, name=name, types=types, lat=lat, lon=lon,
-        street=text_of(_strings(address.get("streetAddress")) and ", ".join(_strings(address.get("streetAddress"))),
-                       200),
+        street=street_without_town(text_of(_strings(address.get("streetAddress")) and
+                                           ", ".join(_strings(address.get("streetAddress"))), 200), town),
         postcode=text_of(address.get("postalCode"), 10), town=town, insee=insee[:6],
         department=_department(city, insee), summary=summary, description=description, labels=_labels(raw),
         prices=prices, free=free, contacts=_contacts(raw),

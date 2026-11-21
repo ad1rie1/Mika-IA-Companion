@@ -18,7 +18,10 @@ secondes qu'il revienne.
 Pour s'en servir (un nouveau service) : ``Limiter("google", store, lambda: Limits(...), label="Google",
 unit="appels")``, puis ``await limiter.take(background=…, wait_max=…)`` avant chaque appel (``book=True`` : compté au
 mois dès qu'il part), ``await limiter.charge(n)`` après si le mois compte autre chose que des appels (``unit`` : ce
-qu'il compte, en mots), ``limiter.back_off(s)`` sur un 429, ``limiter.status()`` pour la console."""
+qu'il compte, en mots), ``limiter.forget(at)`` quand une autre borne la retient après coup (``take`` rend ``at`` : elle
+ne coûte alors rien ici), ``limiter.back_off(s)`` sur un 429, ``limiter.status()`` pour la console. Au moment où un
+appel part vraiment, le client appelle ``note_sent()`` : qui veut savoir si ce qu'il a demandé est parti (« Actualiser »
+et la borne de tout le serveur, ADR 0269) compte sous ``counting_sent()``."""
 
 from __future__ import annotations
 
@@ -27,7 +30,8 @@ import contextlib
 import math
 import sqlite3
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, tzinfo
 from pathlib import Path
@@ -63,6 +67,30 @@ class Limits:
     per_day: int | None = None
     per_month: int | None = None
     reserve: float = 0.0
+
+
+#: les appels partis, pour qui les compte (``counting_sent``) : ceux de sa tâche et de ce qu'elle lance, jamais ceux
+#: d'une autre demande au même moment (le réchauffage, une autre personne)
+_SENT: ContextVar[list[int] | None] = ContextVar("maps_sent", default=None)
+
+
+@contextlib.contextmanager
+def counting_sent() -> Iterator[list[int]]:
+    """Compte (``[n]``) les appels qui partent vraiment pendant le bloc : un appel retenu par une borne, un recul, une
+    clé absente ou la base n'en est pas ; un appel parti en échec (le réseau, un 4xx, un 5xx), si."""
+    box = [0]
+    token = _SENT.set(box)
+    try:
+        yield box
+    finally:
+        _SENT.reset(token)
+
+
+def note_sent() -> None:
+    """Un appel part, là, vers le service : ce que ``counting_sent`` compte."""
+    box = _SENT.get()
+    if box is not None:
+        box[0] += 1
 
 
 class QuotaExceeded(MapsUnavailable):
@@ -112,6 +140,20 @@ class QuotaStore:
             conn.execute("INSERT INTO call(service, at) VALUES (?, ?)", (service, at))
             if int(at) % 50 == 0:  # de temps en temps : ce qui est sorti de toutes les fenêtres
                 conn.execute("DELETE FROM call WHERE at < ?", (at - KEPT_S,))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def forget_call(self, service: str, at: float) -> None:
+        """Une demande comptée qui n'est pas partie (retenue ailleurs) : retirée des fenêtres — une seule, même si une
+        autre a été comptée au même instant."""
+        conn = self._connect(write=True)
+        assert conn is not None
+        try:
+            same = conn.execute("SELECT COUNT(*) FROM call WHERE service = ? AND at = ?", (service, at)).fetchone()[0]
+            if same:
+                conn.execute("DELETE FROM call WHERE service = ? AND at = ?", (service, at))
+                conn.executemany("INSERT INTO call(service, at) VALUES (?, ?)", [(service, at)] * (same - 1))
             conn.commit()
         finally:
             conn.close()
@@ -254,12 +296,12 @@ class Limiter:
         return None
 
     async def take(self, *, cost: int = 1, background: bool = False, wait_max: float = 0.0,
-                   book: bool = False) -> None:
+                   book: bool = False) -> float:
         """Une demande (``cost`` : ce qu'elle coûtera au mois, au plus) : comptée, ou retenue tant qu'une borne est
         atteinte — au plus ``wait_max`` secondes, puis ``QuotaExceeded``. ``background`` : un travail de fond, qui
         laisse la réserve au direct. ``book`` : ``cost`` compte au mois dès maintenant, dans le même tour que le
         contrôle (deux demandes en même temps ne passent pas toutes deux sous le plafond), qu'elle réussisse ou non —
-        pour un service qui facture l'appel."""
+        pour un service qui facture l'appel. Rend l'instant où elle a été comptée (``forget`` : si elle ne part pas)."""
         waited = 0.0
         while True:
             lim = self.limits()
@@ -282,6 +324,13 @@ class Limiter:
             waited += wait
         if lim.per_second:
             await self._turns(lim.per_second).turn()
+        return now
+
+    async def forget(self, at: float) -> None:
+        """Une demande comptée (``take`` rend ``at``) qui n'est pas partie, retenue par une autre borne (le mois d'un
+        SKU) : elle ne coûte rien ici."""
+        async with self._counting:
+            await asyncio.to_thread(self.store.forget_call, self.service, at)
 
     def _turns(self, rate: float) -> Pace:
         if self._pace is None or self._pace[0] != rate:

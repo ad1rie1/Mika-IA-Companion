@@ -497,17 +497,19 @@ def test_the_backend_opens_its_sessions_on_the_relay_the_server_mounts():
 
 
 def test_the_efforts_and_connections_of_claude_are_declared_once(tmp_path):
-    """Les efforts de réflexion et les modes de connexion de Claude Code ne sont déclarés que dans ``claude.py`` :
-    le type du réglage ``auth``, écrit à la main, n'a que ses modes ; les choix du réglage (libellés compris) et ceux
-    de ``mika llm backend`` sont les mêmes, dans le même ordre ; les deux fournisseurs Claude refusent un effort
+    """Les efforts de réflexion ne sont déclarés qu'au port (``ports.llm`` : la requête en porte un, ADR 0285), les
+    modes de connexion de Claude Code que dans ``claude.py`` : le type du réglage ``auth``, écrit à la main, n'a que
+    ses modes ; les choix du réglage (libellés compris), ceux de ``mika llm backend`` et de ``mika llm effort`` et
+    ceux de l'effort d'un rôle sont les mêmes, dans le même ordre ; les deux fournisseurs Claude refusent un effort
     inconnu au même message."""
     import argparse
     import typing
 
-    from mika.adapters.llm.claude import AUTH_LABELS, AUTHS, EFFORT_LABELS, EFFORTS, ClaudeBackend
-    from mika.adapters.llm.config import BackendSpec
+    from mika.adapters.llm.claude import AUTH_LABELS, AUTHS, ClaudeBackend
+    from mika.adapters.llm.config import ROLE_EFFORTS, BackendSpec
     from mika.app.cli.models import add_models
     from mika.kernel.forms import Knob
+    from mika.ports.llm import EFFORT_LABELS, EFFORTS
 
     assert AUTHS == ("abonnement", "cle_api") and EFFORTS == ("", "low", "medium", "high", "xhigh", "max")
     auth = BackendSpec.model_fields["auth"]
@@ -525,6 +527,12 @@ def test_the_efforts_and_connections_of_claude_are_declared_once(tmp_path):
     assert [parser.parse_args([*line, "--effort", e]).effort for e in EFFORTS] == list(EFFORTS)
     with pytest.raises(SystemExit):
         parser.parse_args([*line, "--effort", "énorme"])
+    # l'effort d'un rôle : les mêmes, sans le vide (sans choix, le rôle suit sa fiche)
+    asked = [e for e in EFFORTS if e]
+    assert [e for e, _label in ROLE_EFFORTS] == asked and dict(ROLE_EFFORTS)["low"] == EFFORT_LABELS["low"]
+    assert [parser.parse_args(["llm", "effort", e, "polish"]).level for e in asked] == asked
+    with pytest.raises(SystemExit):
+        parser.parse_args(["llm", "effort", "énorme", "polish"])
     said = "effort de réflexion inconnu : 'énorme' (attendu : low, medium, high, xhigh, max)"
     with pytest.raises(ValueError) as by_api:
         ClaudeBackend("k", "claude-sonnet-5-5", client=object(), effort="énorme")
@@ -535,6 +543,21 @@ def test_the_efforts_and_connections_of_claude_are_declared_once(tmp_path):
         ClaudeCodeBackend("sonnet", relay=Relay(), relay_base="http://x", work_dir=tmp_path, auth="jeton")
     assert ClaudeCodeBackend("sonnet", relay=Relay(), relay_base="http://x", work_dir=tmp_path, effort="xhigh").effort \
         == "xhigh"
+
+
+def test_the_cli_is_started_at_the_effort_the_call_asks(tmp_path):
+    """ADR 0285 : ``--effort`` est celui que l'appel demande (l'appelant, ou le réglage de son rôle posé par la
+    passerelle), sinon celui de la fiche ; sans l'un ni l'autre, l'option ne part pas (le défaut de la CLI)."""
+    def effort_sent(backend: ClaudeCodeBackend, req: LLMRequest) -> str | None:
+        argv = backend.argv(req, tmp_path, mcp=False, deferred=False)
+        return argv[argv.index("--effort") + 1] if "--effort" in argv else None
+
+    plain = LLMRequest(role="reply", call_id="c", system_stable="s")
+    asking = LLMRequest(role="polish", call_id="c", system_stable="s", effort="low")
+    fiche = ClaudeCodeBackend("opus", relay=Relay(), relay_base="http://x", work_dir=tmp_path, effort="high")
+    bare = ClaudeCodeBackend("opus", relay=Relay(), relay_base="http://x", work_dir=tmp_path)
+    assert effort_sent(fiche, plain) == "high" and effort_sent(fiche, asking) == "low"
+    assert effort_sent(bare, plain) is None and effort_sent(bare, asking) == "low"
 
 
 # ── Les bords de la CLI ───────────────────────────────────────────────────

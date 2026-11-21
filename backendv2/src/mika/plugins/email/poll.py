@@ -34,9 +34,9 @@ from mika.plugins.email import (
     name_of,
     params_of,
 )
-from mika.ports.llm import LLMRequest, Message
-from mika.ports.preprocess import inert
-from mika.vocab.affect import Emotion, named_feeling
+from mika.ports.llm import LLMRequest, Message, json_object
+from mika.ports.preprocess import cite, inert
+from mika.vocab.affect import Emotion, felt_schema, named_feeling
 from mika.vocab.episodes import Kind
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
@@ -56,6 +56,15 @@ def triage_system(name: str, persona: str) -> str:
 UNFILED = ("drafts", "sent")
 #: ce qu'on garde des consignes de tri d'une boîte dans le prompt du tri
 RULES_MAX = 2000
+#: ce que le tri lit du corps d'un mail (caractères)
+TRIAGE_BODY = 3000
+#: la forme de la réponse du tri, que le fournisseur garantit quand il le sait (ADR 0267) — celle que dit sa consigne
+#: (``email.triage.system``) ; avec des consignes de tri, où ranger et s'il faut prévenir (``email.triage.rules``).
+#: ``read_triage`` relit toujours du texte : un fournisseur qui ne garantit rien répond comme avant
+TRIAGE_FIELDS = {"importance": {"type": "number"}, "resume": {"type": "string"}, "reponse": {"type": "boolean"},
+                 **felt_schema()}
+TRIAGE_SCHEMA = json_object(**TRIAGE_FIELDS)
+TRIAGE_RULED_SCHEMA = json_object(**TRIAGE_FIELDS, dossier={"type": "string"}, prevenir={"type": "boolean"})
 #: comment elle a quitté ses non-lus un mail que sa consigne a rangé (comme ``email_tidy``)
 MOVED = "déplacé"
 
@@ -179,10 +188,13 @@ class Poll:
                     continue
                 budget -= 1
                 req = LLMRequest(role="triage", call_id=f"{ctx.run_id}#{i}", system_stable=system,
-                                 messages=(Message("user", phrase("email.header.from", who=m.sender) + "\n"
-                                                   + phrase("email.header.subject", subject=m.subject)
-                                                   + f"\n\n{m.body[:3000]}"),),
-                                 max_tokens=300 if rules else 200, lane="background", priority=3)
+                                 # ce qu'un mail dit vient d'ailleurs : son expéditeur et son objet rendus inertes,
+                                 # son corps cité — comme partout où un mail entre dans un prompt (ADR 0198, 0266)
+                                 messages=(Message("user", phrase("email.header.from", who=inert(m.sender, 200)) + "\n"
+                                                   + phrase("email.header.subject", subject=inert(m.subject, 300))
+                                                   + "\n\n" + cite(m.body, TRIAGE_BODY)),),
+                                 max_tokens=300 if rules else 200, lane="background", priority=3,
+                                 output_schema=TRIAGE_RULED_SCHEMA if rules else TRIAGE_SCHEMA)
                 resp = await ctx.ask(req)  # un tri raté n'empêche pas de remarquer le mail : le repli le juge
                 triage = read_triage(resp.text, guess) if resp is not None else guess
                 how = c.TRIAGE_FALLBACK if triage is guess else c.TRIAGE_MODEL

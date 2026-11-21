@@ -83,7 +83,7 @@ class TranscriptState:
 #: refaire (ADR 0082)
 TRANSCRIPT = Faculty("transcript", state=TranscriptState, init=lambda p: TranscriptState(), params=TranscriptParams,
                      state_version=2)
-TRANSCRIPT.declare(c.COMPACTED, c.SUMMARY_RESET, c.JUDGED, c.STRAND_SET)
+TRANSCRIPT.declare(c.COMPACTED, c.SUMMARY_RESET, c.JUDGED, c.STRAND_SET, c.EFFORT_SET)
 
 
 def _params(p: TranscriptParams | None) -> TranscriptParams:

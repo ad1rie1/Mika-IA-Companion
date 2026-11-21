@@ -20,7 +20,8 @@ Mika, sous sa responsabilité.
 avec sa date et on le relit dès qu'on peut ; ce qui n'a pas été relu depuis ``PURGE_TIMES`` fois cette durée s'efface.
 
 **Le rapprochement** (``match``) : un lieu de Google est le lieu de l'index (OpenStreetMap) à moins de ``TWIN_M`` mètres
-dont le nom se ressemble (la même règle que les données touristiques, ``tourism.likeness``), sinon le lieu DATAtourisme
+qui est lui — son nom et sa sorte (la même règle que les données touristiques, ``tourism.same_place`` : jamais une
+banque, une gare, un parking ; sous un nom seulement ressemblant, une sorte voisine) —, sinon le lieu DATAtourisme
 sans pendant (``t:<uuid>``) qui y répond ; sans pendant, il ne se montre nulle part (jamais un lieu de plus, jamais un
 double). Ce qui est neuf se rapproche après chaque lecture, et tout quand l'index a été reconstruit.
 
@@ -31,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+import threading
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
@@ -46,7 +48,7 @@ from mika.adapters.maps.google_places import (
     attribute_facts,
 )
 from mika.adapters.maps.photos import photo_ref
-from mika.adapters.maps.tourism import _lieux, _twin, lone_places, lone_twin
+from mika.adapters.maps.tourism import _lieux, _twin, busy, lone_places, lone_twin
 from mika.ports.maps import Photo, Review, ReviewFacts
 
 #: le schéma 2 : Google (le 1 était celui de la source d'avant : un fichier d'une autre version s'efface, il se relit)
@@ -151,10 +153,17 @@ class ReviewsBase:
 
     def __init__(self, path: Path) -> None:
         self.path = path
+        #: deux fils qui ouvrent un fichier neuf en même temps (le préchargement, une fiche) ne le créent qu'une fois
+        self._opening = threading.Lock()
 
     def open(self) -> sqlite3.Connection:
         """Une connexion en écriture, le fichier créé s'il manque — ou refait s'il est d'une autre version ou
-        illisible : il se relit, on ne le convertit pas."""
+        illisible : il se relit, on ne le convertit pas. Tenu par une autre écriture (``busy``) : l'erreur remonte,
+        il reste."""
+        with self._opening:
+            return self._open()
+
+    def _open(self) -> sqlite3.Connection:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if self.path.exists():
             try:
@@ -163,8 +172,9 @@ class ReviewsBase:
                 if row is not None and row[0] == SCHEMA_VERSION:
                     return conn
                 conn.close()
-            except sqlite3.DatabaseError:
-                pass
+            except sqlite3.DatabaseError as exc:
+                if busy(exc):
+                    raise
             for suffix in ("", "-journal", "-wal", "-shm"):
                 Path(str(self.path) + suffix).unlink(missing_ok=True)
         conn = _connect(self.path, write=True)
@@ -297,17 +307,17 @@ class ReviewsBase:
         if ReviewsBase.meta(conn).get("matched_with", "") != built:
             conn.execute("UPDATE spot SET twin = NULL, twin_m = NULL")
             ReviewsBase.set_meta(conn, {"matched_with": built})
-        rows = conn.execute("SELECT id, name, lat, lon FROM spot WHERE twin IS NULL").fetchall()
+        rows = conn.execute("SELECT id, name, lat, lon, category FROM spot WHERE twin IS NULL").fetchall()
         if not rows:
             return 0
         lieux = _lieux(index)
         lone = lone_places(tourism) if tourism is not None else None
         found = 0
         try:
-            for sid, name, lat, lon in rows:
-                twin = _twin(lieux, name, lat, lon, TWIN_M) if lieux is not None else None
+            for sid, name, lat, lon, sort in rows:
+                twin = _twin(lieux, name, lat, lon, TWIN_M, sort=sort) if lieux is not None else None
                 if twin is None and lone is not None:
-                    twin = lone_twin(lone, name, lat, lon, TWIN_M)
+                    twin = lone_twin(lone, name, lat, lon, TWIN_M, sort=sort)
                 conn.execute("UPDATE spot SET twin = ?, twin_m = ? WHERE id = ?",
                              (twin[0] if twin else "", twin[1] if twin else None, sid))
                 found += twin is not None
@@ -338,12 +348,14 @@ class ReviewsInfo:
 @dataclass(frozen=True, slots=True)
 class Noted:
     """Ce qu'une liste montre d'un lieu rapproché : sa note, le nombre de ses avis, son prix, sa première photo
-    (``p:<hash>``)."""
+    (``p:<hash>``) et son auteur, avec son lien (``credit``, ``credit_url`` : Google les demande avec la photo)."""
 
     rating: float | None
     count: int | None
     price: str
     photo: str
+    credit: str = ""
+    credit_url: str = ""
 
 
 def _reviews_of(items: object) -> tuple[Review, ...]:
@@ -422,11 +434,13 @@ class Reviews:
         def read(conn: sqlite3.Connection) -> dict[str, Noted]:
             out: dict[str, tuple[int, Noted]] = {}
             for part in _chunks(wanted):
-                for row in conn.execute(f"SELECT twin, twin_m, rating, count, price, photo FROM spot "
-                                        f"WHERE twin IN ({_marks(part)})", list(part)):
+                for row in conn.execute(f"SELECT s.twin, s.twin_m, s.rating, s.count, s.price, s.photo, p.author, "
+                                        f"p.author_url FROM spot s LEFT JOIN photo p ON p.ref = s.photo "
+                                        f"WHERE s.twin IN ({_marks(part)})", list(part)):
                     near = row["twin_m"] if row["twin_m"] is not None else TWIN_M
                     if row["twin"] not in out or near < out[row["twin"]][0]:
-                        out[row["twin"]] = (near, Noted(row["rating"], row["count"], row["price"], row["photo"]))
+                        out[row["twin"]] = (near, Noted(row["rating"], row["count"], row["price"], row["photo"],
+                                                        row["author"] or "", row["author_url"] or ""))
             return {k: v for k, (_d, v) in out.items()}
 
         return await self.read(read, {})

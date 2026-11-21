@@ -62,7 +62,10 @@ TOKEN_KEY = "token:"
 #: ce qu'ouvre un jeton : un écran (navigateur, moteur de jeu) ou l'application du téléphone (une messagerie)
 CLIENT_SCREEN = "screen"
 CLIENT_MOBILE = "mobile"
-TOKEN_CLIENTS = frozenset({CLIENT_SCREEN, CLIENT_MOBILE})
+#: un outil branché par MCP (ADR 0289) : son jeton n'ouvre que le point MCP d'une personne (``/mcp/moi``) — ni
+#: l'API, ni le chat, ni le monde (``Accounts.token`` ne le rend qu'à qui le demande : ``tool=True``)
+CLIENT_TOOL = "tool"
+TOKEN_CLIENTS = frozenset({CLIENT_SCREEN, CLIENT_MOBILE, CLIENT_TOOL})
 #: d'où vient un jeton : la ligne de commande, la console, ou une connexion par mot de passe (l'application)
 SOURCE_CLI = "cli"
 SOURCE_CONSOLE = "console"
@@ -71,6 +74,8 @@ TOKEN_SOURCES = frozenset({SOURCE_CLI, SOURCE_CONSOLE, SOURCE_LOGIN})
 #: jetons vivants obtenus par mot de passe gardés par compte : au-delà, les moins récemment utilisés partent
 #: (une application réinstallée dix fois ne laisse pas dix portes ouvertes)
 LOGIN_TOKENS_KEPT = 10
+#: les jetons d'outil vivants obtenus par mot de passe gardés par compte (ADR 0292) : à part des connexions
+TOOL_TOKENS_KEPT = 20
 #: une connexion ouverte (``/ws``, ``/ws/world``) revérifie son identifiant au moins aussi souvent (secondes) : ce
 #: qu'aucun écouteur n'a pu dire — un jeton révoqué par la ligne de commande, une session expirée
 CREDENTIAL_CHECK_S = 10.0
@@ -482,12 +487,18 @@ class Accounts:
             await self._changed()  # une application qui reçoit hors ligne : on peut désormais lui écrire
         return info, raw
 
-    async def prune_login_tokens(self, account_id: int, keep: int = LOGIN_TOKENS_KEPT) -> list[int]:
+    async def prune_login_tokens(self, account_id: int, keep: int = LOGIN_TOKENS_KEPT,
+                                 keep_tools: int = TOOL_TOKENS_KEPT) -> list[int]:
         """Au-delà de ``keep`` jetons vivants obtenus par mot de passe, révoque les moins récemment utilisés ;
-        rend leurs identifiants."""
-        live = [t for t in self.tokens(account_id) if t.source == SOURCE_LOGIN and not t.revoked]
-        live.sort(key=lambda t: (t.last_used or t.created_at, t.id))
-        doomed = live[:max(0, len(live) - keep)]
+        rend leurs identifiants. Les jetons d'outil (ADR 0289) ne s'élaguent pas comme des connexions : ils ont leur
+        propre plafond (``keep_tools``) — une application qui se reconnecte n'emporte pas le jeton d'un outil qui
+        sert (ADR 0292)."""
+        mine = [t for t in self.tokens(account_id) if t.source == SOURCE_LOGIN and not t.revoked]
+        doomed: list[ClientToken] = []
+        for live, kept in (([t for t in mine if t.client != CLIENT_TOOL], keep),
+                           ([t for t in mine if t.client == CLIENT_TOOL], keep_tools)):
+            live.sort(key=lambda t: (t.last_used or t.created_at, t.id))
+            doomed += live[:max(0, len(live) - kept)]
         for t in doomed:
             await self.revoke_token(t.id)
         return [t.id for t in doomed]
@@ -516,22 +527,25 @@ class Accounts:
             ClientTokenRow.revoked_at.is_(None)).limit(1))
         return bool(rows)
 
-    def token(self, raw: str | None) -> tuple[Account, int] | None:
-        """Le compte (actif) d'un jeton valide, et l'identifiant du jeton ; ``None`` sinon."""
+    def token(self, raw: str | None, *, tool: bool = False) -> tuple[Account, int] | None:
+        """Le compte (actif) d'un jeton valide, et l'identifiant du jeton ; ``None`` sinon. Le jeton d'un outil
+        (client ``tool``, ADR 0289) n'est rendu qu'avec ``tool=True`` — au point MCP d'une personne : partout
+        ailleurs il ne vaut rien."""
         if not raw or not raw.startswith(TOKEN_PREFIX) or len(raw) > 200:
             return None
         digest = token_digest(raw)
         found = self._read(lambda s: s.execute(
-            select(AccountRow, ClientTokenRow.id).join(ClientTokenRow, ClientTokenRow.account == AccountRow.id)
+            select(AccountRow, ClientTokenRow.id, ClientTokenRow.client)
+            .join(ClientTokenRow, ClientTokenRow.account == AccountRow.id)
             .where(ClientTokenRow.digest == digest, ClientTokenRow.revoked_at.is_(None))).first())
-        if found is None:
+        if found is None or (found[2] == CLIENT_TOOL and not tool):
             return None
         acc = self._account(found[0])
         return (acc, int(found[1])) if acc is not None and acc.active else None
 
-    async def use_token(self, raw: str | None) -> tuple[Account, int] | None:
+    async def use_token(self, raw: str | None, *, tool: bool = False) -> tuple[Account, int] | None:
         """Comme ``token``, et la date de dernier usage notée (ce que la liste des jetons montre)."""
-        found = self.token(raw)
+        found = self.token(raw, tool=tool)
         if found is not None:
             now, token_id = int(time.time()), found[1]
             await self.store.run_mind(lambda sql: sql.execute(

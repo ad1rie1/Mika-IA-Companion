@@ -1,7 +1,8 @@
 """Les dates d'un événement (ADR 0245) : ses occurrences telles que DATAtourisme les donne (``takesPlaceAt``) — un
 jour, ou une période et ses jours de la semaine, avec ses heures —, ce qui en reste à venir, et comment le dire en
 français, à l'heure de Paris : « ven. 20 nov. · 19:00–20:30 » (une date), « du mer. au dim. · 11:00–19:00 » (des dates
-qui se suivent dans la semaine, aux mêmes heures), « le dim. · 08:00–12:00 · jusqu'au 31 déc. » (une période),
+qui se suivent dans les six jours qui viennent, aux mêmes heures ; plus loin, avec leurs dates : « sam. 5 et dim. 6 déc.
+· 10:00–19:00 »), « le dim. · 08:00–12:00 · jusqu'au 31 déc. » (une période),
 « jusqu'au 10 janv. ». Des fonctions pures : l'instant est donné."""
 
 from __future__ import annotations
@@ -178,6 +179,21 @@ def _run(days: Sequence[int]) -> str:
     return ", ".join(DAYS_FR[d] for d in days)
 
 
+def _dated(days: Sequence[date], today: date) -> str:
+    """Des jours avec leurs dates, le mois dit après le dernier de chaque mois : « sam. 5 et dim. 6 déc. », « du jeu. 24
+    au sam. 26 déc. » (trois et plus qui se suivent), « jeu. 3, sam. 5 et lun. 7 déc. »."""
+    def bare(d: date) -> str:
+        return f"{DAYS_FR[d.weekday()]} {'1er' if d.day == 1 else d.day}"
+
+    if len(days) >= 3 and all((b - a).days == 1 for a, b in zip(days, days[1:], strict=False)):
+        head = bare(days[0]) if (days[0].year, days[0].month) == (days[-1].year, days[-1].month) else \
+            day_fr(days[0], today)
+        return f"du {head} au {day_fr(days[-1], today)}"
+    said = [day_fr(d, today) if k + 1 == len(days) or (days[k + 1].year, days[k + 1].month) != (d.year, d.month)
+            else bare(d) for k, d in enumerate(days)]
+    return said[0] if len(said) == 1 else f"{', '.join(said[:-1])} et {said[-1]}"
+
+
 def mask_days(mask: int) -> list[int]:
     """Les jours d'un masque (lundi 0 … dimanche 6), dans l'ordre où on les dit : une suite qui passe par le dimanche
     commence après le jour qui manque (« du ven. au lun. »)."""
@@ -227,8 +243,11 @@ def when_text(occurrences: Iterable[Occurrence], now: datetime, start: date | No
             run += 1
         if run >= 3:  # des jours qui se suivent d'abord : eux seuls (« du mer. au dim. », fermé le lundi)
             dates = dates[:run]
-        days = [d.weekday() for d in dates]
-        said = "tous les jours" if len(days) == 7 else _run(days)
+        if (dates[-1] - today).days < WEEK:  # dans les six jours qui viennent : leurs jours suffisent
+            days = [d.weekday() for d in dates]
+            said = "tous les jours" if len(days) == 7 else _run(days)
+        else:  # plus loin : avec leurs dates (« sam. 5 et dim. 6 déc. »), jamais un « sam., dim. » pris pour ce week-end
+            said = _dated(dates, today)
         return " · ".join(p for p in (said, hours_fr(head.opens, head.closes)) if p)
     return " · ".join(p for p in (day_fr(first, today), hours_fr(head.opens, head.closes)) if p)
 
@@ -245,14 +264,19 @@ def _iso(d: date, hm: str, *, end: bool = False) -> str:
 
 
 def bounds(day: date, o: Occurrence) -> tuple[str, str]:
-    """Le début et la fin d'une séance (ISO 8601) : ce jour-là, à ses heures ; pour une période, sa fin est la
-    sienne."""
-    start = _iso(day, o.opens)
-    last = day if o.single else o.last
+    """Le début d'une séance et la fin de son occurrence (ISO 8601), pour une date de la fiche (``EventDate``) : ce
+    jour-là à ses heures ; pour une période, la fin est la sienne (son dernier jour, à l'heure de fin)."""
+    return _iso(day, o.opens), session(day if o.single else o.last, o)[1]
+
+
+def session(day: date, o: Occurrence) -> tuple[str, str]:
+    """Le début et la fin de la séance de ce jour (ISO 8601) — ce qu'un événement rend (``EventHit``) : ce jour-là à
+    ses heures, la fin le lendemain après minuit ; sans heure de fin, le jour."""
     closes = o.closes
+    last = day
     if o.opens and closes and closes <= o.opens and closes not in ("00:00", "24:00"):
         last += timedelta(days=1)  # après minuit : le lendemain
-    return start, _iso(last, closes, end=True) if closes else last.isoformat()
+    return _iso(day, o.opens), _iso(last, closes, end=True) if closes else last.isoformat()
 
 
 def dates_fr(occurrences: Iterable[Occurrence], now: datetime, most: int) -> tuple[list[EventDate], int]:

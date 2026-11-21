@@ -33,6 +33,16 @@ data class MiniRef(val kind: String, val ref: String) {
  */
 data class MiniOpen(val trip: String = "", val tab: String = "explorer", val look: String = "")
 
+/**
+ * L'onglet où un regard se montre, une fois lu : Événements pour des événements trouvés (R2-A04), Itinéraire pour un
+ * trajet, sinon Explorer. Une miniature pas encore lue ouvre Explorer, qui suit cette règle quand il l'a lu.
+ */
+fun regardTab(r: Regard): String = when {
+    r.isEvents -> "evenements"
+    r.isRoute -> "itineraire"
+    else -> "explorer"
+}
+
 /** Ce qu'une note ouvre : le voyage, ou le regard (ses lieux dans Explorer). */
 fun noteOpen(ref: MiniRef): MiniOpen =
     if (ref.kind == MapNoteKind.TRIP) MiniOpen(trip = ref.ref) else MiniOpen(tab = "explorer", look = ref.ref)
@@ -84,8 +94,20 @@ fun regardLine(regard: Regard): List<SceneLine> {
     return listOf(line.copy(mika = true))
 }
 
-/** Un regard en miniature : ses lieux en rose, son trajet ; ce qu'il ouvre (son voyage, Itinéraire pour un trajet, sinon Explorer). */
+/**
+ * Un regard en miniature : ses lieux en rose, son trajet ; ce qu'il ouvre (son voyage, Itinéraire pour un trajet,
+ * l'onglet Événements pour des événements trouvés, sinon Explorer).
+ */
 fun regardMini(seq: String, regard: Regard): MiniData {
+    if (regard.isEvents) {
+        val pins = eventPins(regard.events, sel = null, mika = true)
+        return MiniData(
+            regard.title.ifBlank { "Ce que Mika a trouvé" },
+            "Mika a cherché · ${plural(regard.events.size.toLong(), "événement")}",
+            MiniOpen(tab = regardTab(regard), look = seq),
+            Scene(pins = pins),
+        )
+    }
     val route = regard.isRoute
     val pins = regardPins(regard, numbered = route)
     val lines = regardLine(regard)
@@ -101,8 +123,7 @@ fun regardMini(seq: String, regard: Regard): MiniData {
     }
     val opens = when {
         regard.trip.isNotBlank() -> MiniOpen(trip = regard.trip)
-        route -> MiniOpen(tab = "itineraire", look = seq)
-        else -> MiniOpen(tab = "explorer", look = seq)
+        else -> MiniOpen(tab = regardTab(regard), look = seq)
     }
     return MiniData(regard.title.ifBlank { "Sa carte" }, sub, opens, Scene(pins = pins, lines = lines))
 }

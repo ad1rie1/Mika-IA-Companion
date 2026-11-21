@@ -190,6 +190,46 @@ def test_who_serves_what_says_the_second_pass_without_a_model_is_cut_not_failing
     assert "t-danger" not in table and "chaque appel échoue" not in table
 
 
+def test_a_role_asks_its_effort_in_the_same_table_beside_its_provider(world):  # noqa: F811
+    """ADR 0285 : l'effort d'un rôle se choisit dans la table de Qui sert quoi, dans une colonne à côté de son
+    fournisseur — pas une seconde table. Laissé à « — », le rôle garde celui de sa fiche et rien n'est gardé ; la page
+    enregistrée telle quelle ne change rien ; sur un fournisseur qui n'a pas d'effort, la ligne le dit."""
+    client, live, _ = world
+    bootstrap(client)
+    post(client, f"{BASE}/fournisseurs", {"_section": "modeles", "_enregistrement": "backends", "_ancienne": "",
+                                          "_cle": "local", "_champs": ["kind", "model", "host"], "kind": "ollama",
+                                          "model": "gemma", "host": "http://127.0.0.1:9"})
+    page = html.unescape(page_of(client, f"{BASE}/roles"))
+    assert page.count("<table") == 1 and page.count('name="_champs" value="efforts"') == 1
+    table = page.split("<table", 1)[1].split("</table>", 1)[0]
+    head = table.split("</thead>", 1)[0]
+    assert head.index("Son fournisseur") < head.index(">Effort<") < head.index("Ce qui le sert vraiment")
+    options = select(page, "efforts.polish")
+    assert options.lstrip().startswith('<option value="">—</option>') and " selected" not in options
+    assert '<option value="low">faible</option>' in options and '<option value="max">maximal</option>' in options
+
+    saved = post(client, f"{BASE}/roles", {"_section": "modeles", "_champs": ["routes", "efforts"],
+                                           "routes.reply": "local", "efforts.triage": "low", "efforts.polish": ""})
+    assert saved.status_code == 200 and "Qui sert quoi : enregistré" in html.unescape(saved.text)
+    cfg = client.portal.call(live.settings.llm)
+    assert cfg.efforts == {"triage": "low"} and cfg.routes == {"reply": "local"}
+    page = html.unescape(page_of(client, f"{BASE}/roles"))
+    assert '<option value="low" selected>faible</option>' in select(page, "efforts.triage")
+    table = page.split("<table", 1)[1].split("</table>", 1)[0]
+    at = table.index('name="efforts.triage"')
+    row = table[table.rfind("<tr", 0, at):table.index("</tr>", at)]
+    assert "effort sans effet ici" in row and "ollama · gemma" in row
+    assert "effort sans effet ici" not in table.replace(row, "")
+    sent = FormReader(page, f"{BASE}/roles", "hm-form").posted()
+    assert sent["efforts.reply"] == [""] and sent["efforts.triage"] == ["low"]
+    again = post(client, f"{BASE}/roles", sent)
+    assert again.status_code == 200 and "Rien n'a changé" in html.unescape(again.text)
+    assert client.portal.call(live.settings.llm).efforts == {"triage": "low"}
+    wrong = post(client, f"{BASE}/roles", {"_section": "modeles", "_champs": ["routes", "efforts"],
+                                           "routes.reply": "local", "efforts.triage": "énorme"})
+    assert client.portal.call(live.settings.llm).efforts == {"triage": "low"}, html.unescape(wrong.text)[:300]
+
+
 def written_paths() -> set[str]:
     """Les chemins vers ces pages, dans toutes les chaînes du code : par l'AST, qui recolle une chaîne coupée sur deux
     lignes et ne lit pas les commentaires."""

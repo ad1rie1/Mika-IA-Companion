@@ -16,7 +16,8 @@ import { clock, shortWhen } from "../screens/chat/markup";
  * Une ressource de l'API, lue au plus une fois à la fois et gardée `ttl` millisecondes. Une relecture qui échoue
  * garde la valeur d'avant (et dit l'erreur), sauf un 404 : ce qui n'existe plus (supprimé, oublié) ne se montre plus.
  * Une relecture forcée demandée pendant une lecture en cours suit celle-ci (elle a pu partir avant ce qu'on vient
- * d'écrire). `version` ne bouge que si ce qui est lu change : un écran ne se redessine que pour cela.
+ * d'écrire) ; une lecture partie avant un `put` (une fiche actualisée) et revenue après lui ne l'écrase pas : elle était
+ * plus vieille. `version` ne bouge que si ce qui est lu change : un écran ne se redessine que pour cela.
  */
 export class Cached<T> {
   value: T | null = null;
@@ -27,6 +28,8 @@ export class Cached<T> {
   private pending: Promise<T | null> | null = null;
   /** La relecture forcée qui suivra la lecture en cours : une seule, pour toutes les demandes d'ici là. */
   private again: Promise<T | null> | null = null;
+  /** Combien de `put` : une lecture partie avant le dernier n'écrit rien en revenant. */
+  private puts = 0;
 
   constructor(
     private readonly fetcher: () => Promise<T>,
@@ -48,8 +51,10 @@ export class Cached<T> {
       return this.again;
     }
     if (!force && this.settled && Date.now() - this.at < this.ttl) return Promise.resolve(this.value);
+    const puts = this.puts;
     this.pending = this.fetcher()
       .then((value) => {
+        if (puts !== this.puts) return this.value; // un put l'a dépassée : ce qu'il a posé est plus récent
         const said = JSON.stringify(value);
         if (said !== this.said || this.error !== null) this.version += 1;
         this.said = said;
@@ -58,6 +63,7 @@ export class Cached<T> {
         return value;
       })
       .catch((err: unknown) => {
+        if (puts !== this.puts) return this.value;
         const gone = err instanceof ApiError && err.status === 404 && this.value !== null;
         if (this.error === null || gone) this.version += 1;
         this.error = err;
@@ -81,6 +87,7 @@ export class Cached<T> {
 
   /** Ce qu'une écriture a rendu (une fiche actualisée) : la valeur lue, comme si elle venait d'arriver. */
   put(value: T): void {
+    this.puts += 1;
     const said = JSON.stringify(value);
     if (said !== this.said || this.error !== null) this.version += 1;
     this.said = said;

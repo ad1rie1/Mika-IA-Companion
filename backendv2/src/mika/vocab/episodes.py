@@ -42,6 +42,9 @@ CONVERSATIONAL = frozenset({Kind.REPLY, Kind.INITIATIVE})
 PRO = "pro"
 #: les modes qu'un message peut demander (``""`` : la conversation ordinaire)
 MODES = frozenset({PRO})
+#: La relecture indépendante d'un travail de projet (ADR 0276) : un mode qu'un candidat demande, jamais un message —
+#: une exécution impersonnelle sous un autre rôle de modèle (``Role.REVIEW``), avec un budget plus court.
+REVIEW = "review"
 #: Les épisodes de travail, que personne n'écoute : une séance sur un but, une exécution sur un projet, un réveil.
 WORKING = frozenset({Kind.STEP, Kind.WORK, Kind.JOB, Kind.WAKE, Kind.WAKE_JOB})
 #: Les exécutions d'un projet (ses deux modes).
@@ -141,6 +144,9 @@ class Role(enum.StrEnum):
     # utilitaires
     #: travailler sur un projet en mode impersonnel (sans persona)
     JOB = "job"
+    #: relire le travail conclu d'un projet avant qu'il sorte (ADR 0276) : une exécution impersonnelle, à part de
+    #: celle qui a travaillé ; sans modèle à elle, celui des exécutions impersonnelles
+    REVIEW = "review"
     EXTRACT = "extract"
     VALIDATE = "validate"
     PROFILE = "profile"
@@ -167,7 +173,7 @@ FALLBACKS = {
     Role.INITIATIVE: Role.REPLY, Role.STEP: Role.REPLY, Role.MURMUR: Role.REPLY, Role.JOURNAL: Role.REPLY,
     Role.DREAM: Role.REPLY, Role.NARRATIVE: Role.REPLY, Role.PRO: Role.REPLY, Role.CHARACTER: Role.REPLY,
     # un projet travaille d'abord avec le modèle de ses séances ; l'impersonnel, avec celui de ses projets
-    Role.PROJECT: Role.STEP, Role.JOB: Role.PROJECT,
+    Role.PROJECT: Role.STEP, Role.JOB: Role.PROJECT, Role.REVIEW: Role.JOB,
     Role.VALIDATE: Role.EXTRACT, Role.PROFILE: Role.EXTRACT, Role.INTERPRET: Role.EXTRACT,
     Role.TRIAGE: Role.EXTRACT, Role.COMPACT: Role.EXTRACT, Role.PLAN: Role.EXTRACT,
     # un seul modèle déclaré suffit : les utilitaires retombent sur celui qui répond

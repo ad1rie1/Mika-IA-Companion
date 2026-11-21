@@ -1,0 +1,33 @@
+{# Activité › Projets › un projet › Liens (app/handmade/subjects/project.py, ADR 0257, 0260, 0271, 0281) : ce que ce
+   projet lit — chaque projet lu, ce que le lien donne maintenant, ce que la vue de son atelier montre (le dernier
+   commit de sa branche de base), comment une demande y naîtrait — et « Choisir ce qu'il lit » (``projects.liens``,
+   avec le mode direct de chaque lien) à côté ; puis, côte à côte, ce qu'il leur a demandé et ce qu'on lui a demandé
+   (des tickets : chacun mène au sien) ; enfin qui le lit. Les tables sont celles de sa vue, dans le dessin commun. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% from "_forms.html" import field %}
+<div class="now-page prj-fiche prj-links" data-tab="project/liens">
+  {% for n in notes %}<p class="person-tab-note {{ n.tone }}">{{ n.text }}</p>{% endfor %}
+  <div class="prj-split{{ ' with-side' if link and link.fields }}">
+    {% if reads %}{{ tab.table(reads) }}{% endif %}
+    {% if link and link.fields %}
+    <form method="post" action="{{ link.url }}" class="form hm-form prj-tools-form" aria-label="Choisir ce qu'il lit">
+      <input type="hidden" name="csrf" value="{{ link.csrf }}"><input type="hidden" name="_op" value="{{ link.nonce }}">
+      <input type="hidden" name="_retour" value="{{ link.back }}"><input type="hidden" name="_sujet" value="{{ link.subject }}">
+      {% for k, v in link.fixed or [] %}<input type="hidden" name="_fixes" value="{{ k }}"><input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+      <fieldset class="prj-tools-checks">
+        <legend>Choisir ce qu'il lit</legend>
+        {% for f in link.fields %}{{ field(f) }}{% endfor %}
+      </fieldset>
+      <div class="form-actions"><button class="btn">{{ link.button or link.title }}</button></div>
+    </form>
+    {% endif %}
+  </div>
+  {% if asks or received %}
+  <div class="prj-ov-pair">
+    {% if asks %}{{ tab.table(asks) }}{% endif %}
+    {% if received %}{{ tab.table(received) }}{% endif %}
+  </div>
+  {% endif %}
+  {% if readers %}{{ tab.table(readers) }}{% endif %}
+  {% if links.description %}<details class="person-list-help"><summary>Ce qu'un lien donne, et comment il se juge</summary><p>{{ links.description }}</p></details>{% endif %}
+</div>

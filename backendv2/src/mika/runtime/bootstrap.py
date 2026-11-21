@@ -49,6 +49,7 @@ from mika.runtime.lanes import Lanes
 from mika.runtime.mind import BootReport, Commit, Mind
 from mika.runtime.pipeline import (
     AudienceResolver,
+    EffortOf,
     EpisodeReport,
     EpisodeRequest,
     EpisodeRunner,
@@ -92,6 +93,9 @@ class KernelDeps:
     draft_polishers: Sequence[Any] = ()
     #: les façons de répondre qu'un message peut demander (``kernel.episode.EpisodeMode``, par nom : le mode pro)
     modes: Mapping[str, EpisodeMode] = field(default_factory=dict)
+    #: l'effort de réflexion lu pour un épisode qui n'en demande pas (``pipeline.EffortOf``, ADR 0287) : ce que la
+    #: personne a forcé dans sa conversation ou son fil
+    effort: EffortOf | None = None
     budget: Budget | None = None
     lanes: Mapping[str, int] | None = None
     process_lanes: Mapping[str, int] | None = None
@@ -181,7 +185,7 @@ class Kernel:
             polishers=deps.polishers, polished=deps.polished, reannotators=deps.reannotators, modes=deps.modes,
             budget=deps.budget, ports=ports,
             traces=self.traces, authors=deps.authors,
-            draft_polishers=deps.draft_polishers,
+            draft_polishers=deps.draft_polishers, effort=deps.effort,
         )
         self.mind.registry.access_tables = deps.access_tables
         self.mind.registry.closeness = deps.closeness
@@ -636,5 +640,9 @@ class Kernel:
             kind=row.kind, target=target, selected=row, reason=",".join(p[1] for p in row.parts),
             trigger=f"selected:{selected if selected is not None else frame.seq}", priority=policy.priority,
             basis=frame.root, subject=str(subject) if subject else None, selected_seq=selected,
+            # le mode que ce candidat demande (ADR 0276) : inconnu, ou pas pour cette sorte d'épisode, l'ordinaire
+            mode=str(row.args.get("mode") or ""),
+            # l'effort de réflexion qu'il demande (ADR 0287) : inconnu, celui du rôle
+            effort=str(row.args.get("effort") or ""),
         ))
         return queued is not None

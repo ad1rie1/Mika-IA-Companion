@@ -37,6 +37,7 @@ from starlette.responses import RedirectResponse, Response
 from mika.adapters.web.accounts import (
     CLIENT_MOBILE,
     CLIENT_SCREEN,
+    CLIENT_TOOL,
     SESSION_TTL_S,
     SOURCE_CONSOLE,
     SOURCE_LOGIN,
@@ -66,10 +67,14 @@ BAD_TOKEN = ("danger", "Jeton de formulaire invalide : recharge la page.")
 US = 1_000_000
 _SOURCES = {SOURCE_LOGIN: "connexion (identifiant et mot de passe)", SOURCE_CONSOLE: "console"}
 #: ce qu'ouvre un jeton créé ici (``client``) : ce que la page en dit, et comment s'en servir (montré avec lui)
-CLIENTS = {CLIENT_SCREEN: "Un écran ou un moteur de jeu", CLIENT_MOBILE: "Le téléphone (l'application Android)"}
+CLIENTS = {CLIENT_SCREEN: "Un écran ou un moteur de jeu", CLIENT_MOBILE: "Le téléphone (l'application Android)",
+           CLIENT_TOOL: "Un outil, par MCP (un assistant de code)"}
 TOKEN_USE = {
     CLIENT_SCREEN: "À donner au moteur de jeu ou à l'écran : il le présente dans l'en-tête « Authorization: Bearer … », "
                    "sans Origin, sur /ws/world (le monde) ou /ws (le chat). Il n'y lit que si la personne est là.",
+    CLIENT_TOOL: "À donner à un outil qui parle MCP (un assistant de code) : il le présente dans l'en-tête "
+                 "« Authorization: Bearer … » sur /mcp/moi/, et y lit et écrit la documentation des projets auxquels "
+                 "cette personne a droit. Il n'ouvre rien d'autre : ni l'API, ni le chat.",
     CLIENT_MOBILE: "Pour l'application du téléphone en version de débogage (« Utiliser un jeton ») ; sinon, elle "
                    "obtient le sien en se connectant. Tant qu'il vit, elle peut écrire à cette personne absente.",
 }
@@ -90,7 +95,7 @@ def _app_row(ui: Any, t: ClientToken) -> dict[str, Any]:
     """Une application connectée telle que la page la montre (jamais le secret)."""
     return {"id": t.id, "label": t.label or "sans nom",
             "kind": ("Téléphone (notifié fermé)" if t.push else "Téléphone (sans notifications)")
-            if t.client == CLIENT_MOBILE else "Écran ou moteur",
+            if t.client == CLIENT_MOBILE else "Outil, par MCP" if t.client == CLIENT_TOOL else "Écran ou moteur",
             "source": _SOURCES.get(t.source, "ligne de commande"),
             "created": ui.when(t.created_at * US), "last_used": ui.when((t.last_used or 0) * US),
             "revoked": t.revoked}

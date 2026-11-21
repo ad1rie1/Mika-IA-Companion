@@ -415,6 +415,14 @@ def tag_intensity(raw: str | None, percent: bool = False) -> float:
     return max(0.0, min(1.0, value))
 
 
+def felt_schema() -> dict[str, dict[str, Any]]:
+    """Les deux champs JSON d'une émotion dite par un modèle hors de ses balises (le tri d'un mail, d'un message, un
+    regard par la caméra), pour le schéma de sa réponse (``ports.llm.json_object``) : « emotion », un nom de son
+    vocabulaire ou « » (rien) ; « intensite », un nombre. ``named_feeling`` les relit."""
+    return {"emotion": {"type": "string", "enum": ["", *(e.value for e in Emotion if e is not Emotion.NEUTRAL)]},
+            "intensite": {"type": "number"}}
+
+
 def named_feeling(name: object, intensity: object) -> tuple[str, float]:
     """Ce qu'une chose lui fait, dit par un modèle hors de ses balises (le tri d'un mail, d'un message, ADR 0147) :
     l'émotion d'après tout nom qu'``emotion_named`` comprend, l'intensité lue comme celle d'une balise — ou

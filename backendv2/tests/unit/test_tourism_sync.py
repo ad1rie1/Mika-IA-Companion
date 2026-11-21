@@ -9,16 +9,21 @@ import asyncio
 import json
 import logging
 import sqlite3
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import timedelta
 
 import httpx
 import pytest
 
 from mika.adapters.maps import datatourisme as dt
-from mika.adapters.maps.config import DEPARTMENTS, TOURISM_FILE, TourismConfig
+from mika.adapters.maps import desk as desk_module
+from mika.adapters.maps.config import DEPARTMENTS, TOURISM_FILE, PlacesConfig, RoutingConfig, TourismConfig
+from mika.adapters.maps.desk import MapsDesk
 from mika.adapters.maps.tourism_sync import ALL_PARTS, COMPLETE, INCREMENTAL, SyncBusy, SyncLock, last_slot
 from mika.app import cli
 from mika.app.cli import maps as cli_maps
+from mika.ports.maps import MapsUnavailable
 from tests.fixtures import tourism as tf
 
 BOTH = lambda: {dt.EVENTS: tf.events(), dt.PLACES: tf.restaurants()}  # noqa: E731
@@ -248,6 +253,111 @@ async def test_after_an_error_it_waits_then_a_new_key_or_a_button_tries_again(tm
 def test_the_night_slot_is_in_paris_time():
     assert last_slot(tf.NOW, 4).hour == 4 and last_slot(tf.NOW, 4).day == 18
     assert last_slot(tf.NOW, 23).day == 17
+
+
+@pytest.mark.parametrize(("status", "gone"), [(400, False), (403, False), (500, False), (404, True), (410, True)])
+async def test_a_fiche_refused_is_kept_only_a_vanished_one_is_forgotten(tmp_path, status, gone):
+    """R1-14 : un 400 de ``/catalog/{uuid}`` (un ``fields`` qu'elle refuse depuis un changement de son API) était pris
+    pour « elle n'existe plus », et la fiche s'effaçait avec ses photos. Seuls 404 et 410 disent qu'elle est partie ;
+    le reste est un refus, en mots, et la fiche reste."""
+    api = tf.FakeApi(BOTH())
+    sync, _tourism, _clock, _cfg = tf.make_sync(tmp_path, api)
+    await sync.run()
+    assert await sync.refresh(tf.KREVETTE)  # la vraie : relue
+    api.statuses = [status]
+    if gone:
+        assert await sync.refresh(tf.KREVETTE) is False
+    else:
+        with pytest.raises(dt.TourismUnavailable):
+            await sync.refresh(tf.KREVETTE)
+    assert (tf.KREVETTE in uuids(tmp_path, "place")) is not gone
+
+
+@dataclass
+class Reshaped(tf.FakeApi):
+    """La fausse API, dont un ``/catalog/{uuid}`` en 200 rend autre chose que la fiche nue (``shape`` : ce qu'il rend
+    à la place)."""
+
+    shape: Callable[[dict], object] | None = None
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        got = super().__call__(request)
+        if self.shape is not None and "/catalog/" in request.url.path and got.status_code == 200:
+            return httpx.Response(200, json=self.shape(got.json()))
+        return got
+
+
+@pytest.mark.parametrize("shape", [lambda o: {"objects": [o]}, lambda o: {}, lambda o: [o],
+                                   lambda o: {**{k: v for k, v in o.items() if k != "uuid"}, "id": o["uuid"]},
+                                   lambda o: {**o, "uuid": "00000000-0000-0000-0000-000000000000"}],
+                         ids=["enveloppe", "vide", "liste", "uuid-renomme", "autre-fiche"])
+async def test_a_fiche_answered_but_unreadable_is_kept_not_forgotten(tmp_path, shape):
+    """R3-09 : un 200 de ``/catalog/{uuid}`` sans la fiche demandée (enveloppée comme une liste, un champ renommé, un
+    corps vide) se lisait « elle n'existe plus » — la fiche s'effaçait avec ses photos et ses occurrences, et
+    « Actualiser » disait « Fiche relue. ». Seuls 404 et 410 disent qu'elle est partie : ceci est une réponse
+    illisible, en mots, et la fiche reste."""
+    api = Reshaped(BOTH())
+    sync, _tourism, _clock, _cfg = tf.make_sync(tmp_path, api)
+    await sync.run()
+    assert await sync.refresh(tf.KREVETTE)  # la vraie : relue
+    api.shape = shape
+    with pytest.raises(dt.TourismUnavailable) as caught:
+        await sync.refresh(tf.KREVETTE)
+    assert "illisible" in str(caught.value)
+    assert tf.KREVETTE in uuids(tmp_path, "place")
+
+
+async def test_a_fiche_read_a_moment_ago_is_not_asked_again_at_datatourisme(tmp_path):
+    """R1-05 : « Actualiser » relisait la fiche DATAtourisme à chaque clic. Lue il y a moins de dix minutes, elle ne
+    repart pas ; au-delà, oui."""
+    index = tf.write_index(tmp_path / "cartes" / "lieux.db")
+    api = tf.FakeApi(BOTH())
+    sync, _tourism, clock, config = tf.make_sync(tmp_path, api, index=index)
+    await sync.run()
+    desk = MapsDesk(tmp_path, PlacesConfig, RoutingConfig, tourism=lambda: config[0], clock=clock,
+                    transport=httpx.MockTransport(api), quota_now=clock.stamp, quota_sleep=clock.sleep)
+    try:
+        def catalog() -> int:
+            return sum("/catalog/" in u for u in api.urls())
+
+        got = await desk.place_refresh("n101")  # Krevette : sa fiche vient d'être lue par la synchronisation
+        assert got.detail.tourism.id == f"t:{tf.KREVETTE}" and got.said.startswith("Relue à l'instant")
+        assert catalog() == 0
+        clock.advance(minutes=11)
+        assert (await desk.place_refresh("n101")).said == "Fiche relue." and catalog() == 1
+        clock.advance(minutes=3)
+        assert (await desk.place_refresh("n101")).said.startswith("Relue il y a 3 min") and catalog() == 1
+    finally:
+        await desk.close()
+
+
+async def test_a_refresh_held_by_datatourisme_does_not_take_a_server_turn(tmp_path, monkeypatch):
+    """R3-01 : DATAtourisme a demandé d'attendre (son recul après un 429) — « Actualiser » ne part pas, le dit, et ne
+    prend pas un des tours de tout le serveur."""
+    monkeypatch.setattr(desk_module, "REFRESHES_PER_DAY", 1)
+    index = tf.write_index(tmp_path / "cartes" / "lieux.db")
+    api = tf.FakeApi(BOTH())
+    sync, _tourism, clock, config = tf.make_sync(tmp_path, api, index=index)
+    await sync.run()
+    desk = MapsDesk(tmp_path, PlacesConfig, RoutingConfig, tourism=lambda: config[0], clock=clock,
+                    transport=httpx.MockTransport(api), quota_now=clock.stamp, quota_sleep=clock.sleep)
+    try:
+        def catalog() -> int:
+            return sum("/catalog/" in u for u in api.urls())
+
+        assert (await desk.place_refresh("n101")).said.startswith("Relue à l'instant")  # sa case lue, à jour
+        clock.advance(minutes=11)
+        desk.tourism_limiter.back_off(600)
+        for _ in range(2):
+            with pytest.raises(MapsUnavailable) as caught:
+                await desk.place_refresh("n101")
+            assert "DATAtourisme a demandé d'attendre" in str(caught.value)
+            assert "ce serveur" not in str(caught.value)
+        assert catalog() == 0
+        clock.advance(minutes=11)
+        assert (await desk.place_refresh("n101")).said == "Fiche relue." and catalog() == 1
+    finally:
+        await desk.close()
 
 
 async def test_a_base_of_another_version_is_remade_not_converted(tmp_path):

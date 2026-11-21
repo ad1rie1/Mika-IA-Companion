@@ -38,7 +38,7 @@ from mika.faculties.projects import PROJECTS, job_brief, work_brief
 from mika.faculties.self import SELF, load, persona_for
 from mika.faculties.shares import SHARES
 from mika.faculties.social import SOCIAL
-from mika.faculties.transcript import TRANSCRIPT
+from mika.faculties.transcript import TRANSCRIPT, asked_effort
 from mika.faculties.world import WORLD
 from mika.kernel.episode import EpisodeMode, EpisodePolicy
 from mika.kernel.events import Origin
@@ -63,7 +63,7 @@ from mika.plugins.web import WEB
 from mika.runtime import params
 from mika.runtime.bootstrap import Kernel, KernelDeps
 from mika.sim.world import Composition
-from mika.vocab.episodes import CONVERSATIONAL, PRO, VOICE_ROLES, Kind, Role, Tag
+from mika.vocab.episodes import CONVERSATIONAL, PRO, REVIEW, VOICE_ROLES, Kind, Role, Tag
 
 log = logging.getLogger("mika.composition")
 
@@ -104,6 +104,9 @@ EXTERNAL = "mcp.*"
 #: les lots qu'un projet peut avoir (chaque projet choisit les siens parmi eux)
 PROJECT_TOOLS = frozenset({"projects", "workshop", "memory", "email", "rss", "camera", "forge", "forge_apps",
                            EXTERNAL})
+#: le lot d'une relecture indépendante (ADR 0276) : lire l'atelier, y lancer une commande, conclure — le seul que
+#: son candidat demande, et aucun projet ne le choisit : une relecture n'a donc aucun outil qui écrit
+REVIEW_TOOLS = frozenset({"project_review"})
 #: les lots qu'un réveil par API sans projet peut avoir (ADR 0068) : chacun choisit les siens parmi eux, et garde de
 #: quoi conclure (``wakeup``) ; ``goals`` y plante un rappel, y ouvre une exploration (ADR 0117)
 WAKE_TOOLS = frozenset({"wakeup", "memory", "email", "rss", "camera", "forge", "forge_apps", "goals", EXTERNAL})
@@ -129,6 +132,8 @@ WAKE_IN_HAND = frozenset({"wakeup"})
 #: résultat d'outil peut rendre (un fichier entier qu'elle relit), autant d'appels à chaque outil d'un service que de
 #: tours (ADR 0162)
 WORK_TURNS, WORK_DEADLINE_S, WORK_OUTSIDE_CHARS = 24, 900.0, 120_000
+#: le budget d'une relecture indépendante (ADR 0276) : elle lit et vérifie, elle n'écrit pas
+REVIEW_TURNS, REVIEW_DEADLINE_S = 16, 600.0
 
 #: les ouvriers de chaque voie d'épisodes : trois réponses à des personnes différentes se composent en même temps
 #: — Bob qui écrit « coucou » n'attend pas la fin d'une recherche faite pour Alice — ; une seule par personne, une
@@ -167,9 +172,20 @@ READING = (
     "voice", "teams_voice",
     # ce qu'on lui demande : un pas sur un but, un projet, un réveil, une tâche de rédaction — la matière, puis la
     # demande ; ce que ses services ont rendu à ce travail après un accord, à côté de ce que le réseau a rendu ; ce
-    # qu'un projet lit des autres, juste après lui (ADR 0257)
+    # qui amène une exécution quand ce n'est pas sa cadence (ADR 0265), son registre (ADR 0268), ce qu'il a demandé
+    # aux autres projets (ADR 0271), puis ce qu'il en lit (ADR 0257), juste après lui
     "step_origin", "step_exchange", "step_life", "step",
-    "project", "project_links", "project_network", "work_services", "project_answer", "wake_text", "wake_order",
+    # sa branche et sa pull request (ADR 0274) juste après le projet : où elle travaille, avant ce qu'elle y fait
+    # une relecture indépendante (ADR 0276) : ce qu'elle juge, puis le diff ; et, pour l'exécution qu'elle a
+    # renvoyée, ses constats juste après sa branche
+    "review", "review_said", "review_diff",
+    "project", "project_pull", "project_review", "project_stirs", "project_items", "project_tickets", "project_asks", "project_links",
+    # sa documentation (ADR 0289), un espace à part de son dépôt, juste après ce qu'il lit des autres
+    "project_docs",
+    "project_network",
+    "work_services",
+    "project_answer", "wake_text",
+    "wake_order",
     "app_consignes", "app_signals", "task_mail", "edits", "task_ask", "teams_task", "teams_ask",
     # sa parole : ce qu'elle se répète, puis sa réponse
     "habits", "answer",
@@ -210,7 +226,8 @@ def policies() -> dict[str, EpisodePolicy]:
         Kind.JOB: EpisodePolicy(kind=Kind.JOB, role=Role.JOB, voice=False, priority=2, lane="background",
                                 visible=False, delivered=False, brief=or_wake(job_brief), max_tool_turns=WORK_TURNS,
                                 max_tokens=8192, deadline_s=WORK_DEADLINE_S, outside_chars=WORK_OUTSIDE_CHARS,
-                                outside_calls=WORK_TURNS, tool_bundles=PROJECT_TOOLS, core_bundles=PROJECT_IN_HAND,
+                                outside_calls=WORK_TURNS, tool_bundles=PROJECT_TOOLS | REVIEW_TOOLS,
+                                core_bundles=PROJECT_IN_HAND | REVIEW_TOOLS,
                                 muted_tags=frozenset({Tag.AFFECTIVE, Tag.INNER})),
         # un réveil par API sans projet (ADR 0068) : ce qu'un appel lui demande, avec les outils du réveil — dans son
         # mode à elle (sa voix compacte, comme un projet), ou impersonnel ; pour elle seule, ni fil ni livraison
@@ -251,6 +268,11 @@ def modes() -> dict[str, EpisodeMode]:
                          max_tokens=8192, deadline_s=900.0, outside_chars=120_000, outside_calls=24,
                          muted_tags=frozenset({Tag.AFFECTIVE, Tag.INNER, Tag.CHAT}),
                          polished=False, live=True, markdown=True, instruction=pro_style),
+        # la relecture indépendante (ADR 0276) : demandée par son candidat, jamais par un message — une exécution
+        # impersonnelle sous son rôle de modèle à elle (``review``, qui retombe sur celui des exécutions
+        # impersonnelles), avec un budget plus court
+        REVIEW: EpisodeMode(kinds=frozenset({Kind.JOB}), role=Role.REVIEW, max_tool_turns=REVIEW_TURNS,
+                            deadline_s=REVIEW_DEADLINE_S, polished=False),
     }
 
 
@@ -291,6 +313,8 @@ def deps(**kw: Any) -> KernelDeps:
         # ce qui décrit la forme de sa réponse (une question, le passage faux) suit le message que l'autrice envoie
         "reannotators": [reannotate_reply],
         "modes": modes(),
+        # l'effort de réflexion que la personne a forcé dans sa conversation ou son fil de travail (ADR 0287)
+        "effort": asked_effort,
         "reply_kind": Kind.REPLY,
         "reply_wait": _reply_wait,
         "lanes": LANES,

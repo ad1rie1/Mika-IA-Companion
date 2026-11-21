@@ -116,9 +116,12 @@ def test_the_rights_page_and_a_projects_access_tab(world):  # noqa: F811
     assert 'name="qui.1|proprietaire" checked' in tab and 'name="canal.2|interne" checked' in tab
     assert 'name="qui.2|elle" checked' in tab  # elle seule : elle, cochée par son nom (ADR 0184), plus un « qui » caché
     assert 'name="fichiers.1" checked' in tab and "Par où" in tab
+    assert 'name="documentation.1" checked' in tab and 'name="documentation.2" checked' in tab  # ADR 0289
+    assert 'name="defaut_documentation"' in tab and 'name="defaut_documentation" checked' not in tab
     shown = {"qui.1|proprietaire": "on", "toujours.1": "on", "voir.1": "on", "piloter.1": "modification",
-             "fichiers.1": "on", "lecture.1": "seule", "action.1": "seule", "tous.1": "on",
+             "fichiers.1": "on", "documentation.1": "on", "lecture.1": "seule", "action.1": "seule", "tous.1": "on",
              "qui.2|elle": "on", "canal.2|interne": "on", "voir.2": "on", "piloter.2": "modification", "fichiers.2": "on",
+             "documentation.2": "on",
              "lecture.2": "seule", "action.2": "seule", "tous.2": "on",
              "defaut_piloter": "non", "defaut_lecture": "non", "defaut_action": "non"}
     added = submit(client, tab, "projects.acces", faire="ajouter", **shown)
@@ -136,9 +139,9 @@ def test_the_rights_page_and_a_projects_access_tab(world):  # noqa: F811
     # la page le lit aussitôt : pour toi, plus rien (la ligne fermée) ; elle seule garde tout — chaque case le dit,
     # avec les deux lignes qui en décident (la ressource, le canal)
     after = html_of(client.get(PAGE, params={"qui": "toi", "canal": "web:prive"}))
-    assert "le voir : non · piloter projet : aucun pilotage · ses fichiers : non — ligne 2" in after
+    assert "le voir : non · piloter projet : aucun pilotage · ses fichiers : non · sa documentation : non — ligne 2" in after
     alone = html_of(client.get(PAGE, params={"qui": "seule", "canal": "interne"}))
-    assert "le voir : oui · piloter projet : modification · ses fichiers : oui — ligne 1" in alone
+    assert "le voir : oui · piloter projet : modification · ses fichiers : oui · sa documentation : oui — ligne 1" in alone
 
 
 def test_a_rights_table_shows_what_is_saved_and_saving_it_unchanged_keeps_it(world):  # noqa: F811

@@ -152,6 +152,8 @@ class ReviewsCells:
         self.tourism = tourism
         self.clock = clock
         self._reading: dict[tuple[str, str], asyncio.Future[tuple[int, bool]]] = {}
+        #: la fiche d'un lieu relue pour le nom neuf de ses photos : une à la fois par lieu (R3-10)
+        self._renaming: dict[str, asyncio.Future[None]] = {}
         self._queue: deque[tuple[Cell, str]] = deque()
         self._queued: set[tuple[str, str]] = set()
         self._wake = asyncio.Event()
@@ -308,6 +310,21 @@ class ReviewsCells:
         await asyncio.to_thread(self._look, row["id"])
         return await self.reviews.facts(row["id"], note=" ".join(notes))
 
+    async def read_at(self, category: str, kind: str, keys: Sequence[str]) -> tuple[bool, datetime | None]:
+        """Pour « Actualiser » (ADR 0269) : Google a-t-il de quoi relire ce lieu (son pendant, ou une sorte dont on lit
+        les avis), et quand on l'a lu la dernière fois — sa fiche avec ses avis, ou la recherche tout près de lui
+        (``None`` : jamais)."""
+        keys = [k for k in dict.fromkeys(keys) if k]
+        if not keys:
+            return False, None
+        row = await self.reviews.spot_for(keys)
+        if row is not None:
+            return True, parse(row["detailed"]) if row["detailed"] else None
+        if not (FOR_CATEGORY.get(category) or FOR_KIND.get(kind, "")):
+            return False, None
+        probe = await self.reviews.probe_of(keys[0])
+        return True, parse(probe["fetched"]) if probe is not None else None
+
     def _look(self, spot: str) -> None:
         with contextlib.suppress(*_DB_ERRORS):
             conn = self.reviews.base.open()
@@ -354,7 +371,9 @@ class ReviewsCells:
 
     async def _photo_uri(self, ref: str) -> str:
         """L'adresse de l'image de cette photo chez Google (un appel « photo ») ; son nom expiré (400 ou 404) : la fiche
-        se relit, et la photo reprend son nom neuf sous la même référence — partie, elle le dit."""
+        se relit, et la photo reprend son nom neuf sous la même référence — partie, elle le dit. Les photos d'un même
+        lieu relevées ensemble ne relisent sa fiche qu'une fois ; une photo déjà renommée entre-temps prend son nom neuf
+        sans la relire (R3-10)."""
         row = await asyncio.to_thread(self.reviews.photo_row, ref)
         if row is None:
             raise MapsNotFound(UNKNOWN)
@@ -363,11 +382,28 @@ class ReviewsCells:
         except PlacesUnavailable as exc:
             if exc.kind not in (REFUSED, MISSING):
                 raise
-        await self._detail(row["spot"], "", background=False)
         again = await asyncio.to_thread(self.reviews.photo_row, ref)
+        if again is not None and again["name"] == row["name"]:
+            await self._rename(row["spot"])
+            again = await asyncio.to_thread(self.reviews.photo_row, ref)
         if again is None:
             raise MapsNotFound(GONE)
         return await self.client.photo_uri(again["name"])
+
+    async def _rename(self, spot: str) -> None:
+        """La fiche de ce lieu relue pour le nom neuf de ses photos : une seule relecture en cours par lieu, que les
+        autres attendent."""
+        pending = self._renaming.get(spot)
+        if pending is None:
+            pending = asyncio.ensure_future(self._detail(spot, "", background=False))
+            self._renaming[spot] = pending
+            pending.add_done_callback(lambda done, spot=spot: self._renamed(spot, done))
+        await asyncio.shield(pending)
+
+    def _renamed(self, spot: str, done: asyncio.Future[None]) -> None:
+        self._renaming.pop(spot, None)
+        if not done.cancelled():
+            done.exception()  # lue : une relecture que plus personne n'attendait ne se plaint pas au journal
 
     # ── le préchargement ──
     def preload(self, lat: float, lon: float) -> int:

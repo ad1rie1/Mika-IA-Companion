@@ -1,14 +1,18 @@
-{# Activité › Projets › Ses projets (app/handmade/tabs/projects.py, ADR 0177) : ses projets en chiffres (ce qui attend
-   ton accord en tête quand il y en a), puis une liste, une rangée par projet sous des colonnes nommées — son nom et
-   où il en est (une ligne, le texte entier au survol), son mode et son état, ses objectifs en jauge, sa prochaine
-   exécution, la dernière, pour qui ; le reste (priorité, plage de travail, agenda, outils, dépôt distant, ce qui
+{# Activité › Projets › Ses projets (app/handmade/tabs/projects.py, ADR 0177, 0281), la page d'ensemble : « À faire »
+   en tête — ce qui t'attend dans tous ses projets (``_todo.html``) —, ses projets en chiffres (ce qui t'attend en
+   tête quand il y en a), puis une liste, une rangée par projet sous des colonnes nommées — son nom et
+   où il en est (une ligne, le texte entier au survol), son mode et son état, combien de choses t'y attendent, ses
+   objectifs en jauge, sa prochaine exécution, la dernière, pour qui ; sous la liste, les liens entre projets (qui
+   lit qui, ce que le lien donne, les demandes en cours) ; le reste (priorité, plage de travail, agenda, outils, dépôt distant, ce qui
    sort) se déplie sous la rangée, par la flèche à son bout. Sur un écran étroit, chaque rangée s'empile et nomme ses
    valeurs. La bascule « Fiches / Tableau » et la pagination de la console ; « Créer un projet » est dans la barre de
    titre. #}
 {% import "handmade/shared/tab.html" as tab with context %}
 {% from "handmade/shared/macros.html" import bar %}
+{% from "handmade/projets/_todo.html" import todo %}
 <div class="now-page prj" data-tab="projets/tous">
   {% for n in notes %}<p class="person-tab-note {{ n.tone }}">{{ n.text }}</p>{% endfor %}
+  {% if waiting and items %}{{ todo(waiting, "À faire", "prj-todo-title", 6) }}{% endif %}
   {% if band["items"] %}{{ tab.block(band) }}{% endif %}
   <section class="now-card" id="{{ t.id }}" aria-labelledby="prj-title">
     {{ tab.head(t.title, "prj-title", t.count, list=t) }}
@@ -22,7 +26,7 @@
           {% if p.where %}<p class="prj-where" title="{{ p.where }}">{{ p.where }}</p>{% endif %}
         </div>
         <p class="prj-tags"><span class="prj-k">Mode et état</span>
-          {%- if p.waiting %}<span class="now-tag warn">attend ton accord</span>{% endif -%}
+          {%- if p.awaits %}<span class="now-tag warn" title="Ce qui t'attend dans ce projet">t’attend : {{ p.awaits.text }}</span>{% endif -%}
           {%- if p.mode %}<span class="now-tag {{ p.mode.tone }}">{{ p.mode.text }}</span>{% endif -%}
           {%- if p.state %}<span class="now-tag {{ p.state.tone }}">{{ p.state.text }}</span>{% endif -%}
         </p>
@@ -49,4 +53,19 @@
     {{ tab.pager(t) }}
     {% if t.caption and items %}<details class="person-list-help"><summary>Comprendre cette liste</summary><p>{{ t.caption }}</p></details>{% endif %}
   </section>
+  {% if links %}
+  <section class="now-card prj-linked" aria-labelledby="prj-linked-title">
+    <header class="now-card-head"><h2 id="prj-linked-title">Dépendances entre projets</h2><span class="person-count now-num">{{ links|length }}</span></header>
+    <ul class="prj-linked-list" role="list">
+      {% for x in links %}
+      <li class="prj-linked-item{{ ' off' if x.off }}">
+        <p class="prj-linked-pair">{{ tab.cell(x.reader) }} <span class="prj-linked-verb">lit</span> {{ tab.cell(x.target) }}</p>
+        <p class="prj-linked-gives"><span class="prj-k">Ce qu’il en reçoit : </span>{{ x.gives }}</p>
+        <p class="prj-linked-asks">{% if x.asks and x.asks.text != 'aucune' %}{{ tab.cell(x.asks) }}{% else %}<span class="now-muted">aucune demande</span>{% endif %}</p>
+      </li>
+      {% endfor %}
+    </ul>
+    {% if links_help %}<details class="person-list-help"><summary>Ce qu’un lien permet</summary><p>{{ links_help }}</p></details>{% endif %}
+  </section>
+  {% endif %}
 </div>

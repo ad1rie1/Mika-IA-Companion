@@ -189,11 +189,13 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
     d'elle-même, son heure, la note d'un refus). Toucher une carte ouvre sa discussion ; celle qui attend ta décision
     se décide aussi d'ici ; sur un compte qu'on te partage, elle attend l'accord de son propriétaire, et la carte dit
     qui décide.
-- **Carte** (ADR 0193 à 0196, 0235 ; l'API par personne : [`protocole-moi.md`](../../backendv2/docs/protocole-moi.md)
-  § 10), une rubrique du tiroir, trois onglets sous la barre du haut (Explorer · Itinéraire · Voyages) qui se remplacent
-  sans s'empiler. La carte est celle que sert ce serveur, et lui seul (voir [La carte](#la-carte-maplibre)) ; sans fond
-  prêt, hors de sa zone, ou quand elle ne se dessine pas ici, un plan dessiné de ce qu'elle montre la remplace, sa note
-  dit pourquoi.
+- **Carte** (ADR 0193 à 0196, 0235, 0259 ; l'API par personne : [`protocole-moi.md`](../../backendv2/docs/protocole-moi.md)
+  § 10), une rubrique du tiroir, quatre onglets sous la barre du haut (Explorer · Événements · Itinéraire · Voyages) qui
+  se remplacent sans s'empiler. La carte est celle que sert ce serveur, et lui seul (voir [La carte](#la-carte-maplibre)) ;
+  sans fond prêt, hors de sa zone, ou quand elle ne se dessine pas ici, un plan dessiné de ce qu'elle montre la remplace,
+  sa note dit pourquoi. Trois sources disent ce qu'est un lieu, chacune nommée là où elle parle : OpenStreetMap (l'index
+  de ce serveur), Google Maps (la note et les avis, un cache de ce serveur) et les offices de tourisme (DATAtourisme,
+  Licence Ouverte : les descriptions et les événements). La maquette de ces écrans : `maquette/ecrans/carte-avis.js`.
   - **Explorer** : la carte prend l'écran, la recherche flotte dessus — « Autour de moi » au bout du champ (ta dernière
     position, celle de ton téléphone ; éteint, « Dans cette zone » : ce que la carte montre au-dessus de la feuille,
     recherché de nouveau quand on la déplace), les catégories du serveur en puces. Les lieux se cherchent dans l'index
@@ -201,19 +203,82 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
     l'air (un chiffre, ou cinq caractères quand l'index n'a rien trouvé), après 0,7 s sans frappe, une fois par texte.
     Les résultats montent du bas, dans une feuille à un peu moins de la moitié de l'écran ; autour de toi, la carte se
     cadre sur eux, et la légende dit jusqu'où l'index est allé (« autour de ta position », ou au-delà de 20 km « les plus
-    proches que l'index connaisse · jusqu'à … km »). Un lieu touché, dans la liste ou sur la carte, ouvre sa fiche à la
-    place de la liste (« retour » rend la liste) : son nom, sa sorte, sa ville, sa distance ; **Itinéraire** (jusqu'ici),
-    **Au voyage**, **En parler** (à Mika : une phrase dans le champ du chat, à compléter, puis le chat s'ouvre). Sans
-    index, sans adresses (503) ou trop d'adresses d'affilée (429), l'endroit qui en a besoin dit le message du serveur,
-    le reste marche.
+    proches que l'index connaisse · jusqu'à … km »). En tête de la feuille, des **filtres** (ADR 0259, tous jugés par le
+    serveur) : ouvert maintenant, ce qu'il sait reconnaître (`features` : terrasse, végétarien, vegan, accessible, à
+    emporter, livraison), « 4 et plus » (sa note Google : un lieu sans note s'écarte) et la cuisine (un menu des cuisines
+    de la liste) ; puis l'**ordre** (« Les plus proches » ↔ « Les mieux notés ») et, en petit, d'où viennent les notes
+    dès qu'un lieu en a une, quelle que soit la couverture (« Notes : Google Maps », « Notes Google Maps lues hier à
+    21:23 ») et ce que le cache en dit (sa `note` telle quelle ; `ratingsLine`, R2-A03). Chaque ligne : sa vignette (sa
+    première photo quand on sait son auteur, sinon l'icône de sa catégorie ; `listThumb`, R2-A01), sa note en étoiles et
+    le nombre d'avis, son prix, sa cuisine, ouvert ou fermé à sa couleur, sa distance, et sous elle le crédit de sa
+    photo (« Photo : Camille R. · Google Maps », l'auteur lié ; sa licence pour l'office de tourisme). « Actualiser »
+    dans une fiche refait sa ligne (`CarteStore.refreshed`, R2-A06), relue aussi après un 503 qui en a gardé une part
+    (R3-03). « Autour de moi » envoie ta position avec `here=1` : le serveur précharge les notes de ta case, et la liste se relit une fois six secondes plus tard si elles n'étaient pas toutes
+    lues (une panne de cette relecture ne vide pas la liste) ; un point de la carte n'est jamais `here`. Un lieu touché,
+    dans la liste ou sur la carte, ouvre **sa fiche** par-dessus (ci-dessous) ; une adresse, ou un point sans fiche, se
+    choisit à la place de la liste (« retour » rend la liste) : son nom, sa sorte, sa ville, sa distance ;
+    **Itinéraire** (jusqu'ici), **Au voyage**, **En parler** (à Mika : une phrase dans le champ du chat, à compléter,
+    puis le chat s'ouvre). Sans index, sans adresses (503) ou trop d'adresses d'affilée (429), l'endroit qui en a
+    besoin dit le message du serveur, le reste marche.
     **Au voyage** ouvre la feuille « Ajouter au voyage » : tes voyages (huit au plus), leurs dates en court (« 3–7
     avr. ») ; un toucher l'ajoute à la fin de son dernier jour (« Ajouté au voyage « … », jour 3. », ou « Déjà
     ajouté » pour la même clé), « Nouveau voyage… » ouvre la fenêtre avec le lieu pour premier arrêt.
+  - **La fiche d'un lieu** (`Route.PlaceFiche`, ADR 0259 ; `GET …/lieu/<id>` : son objet d'OpenStreetMap, sinon sa ligne
+    de l'index ou `t:<uuid>`) : par-dessus la Carte, sa barre (son nom, ce qu'il est, où, à quelle distance ; ✦
+    « Demander à Mika »), puis la **bande** du plan (le lieu, et toi) et de ses photos — l'office de tourisme d'abord,
+    puis Google —, chacune avec sa source, son crédit (son auteur, lié) et sa licence (R2-A02), le compte sur la tuile du
+    plan, qui défile avec elle (fixe, il passait sur la source des photos : R2-A05) ; une photo touchée
+    s'ouvre dans la **visionneuse** (plein écran, on glisse de l'une à l'autre ; sa légende, son auteur lié, sa licence,
+    d'où elle vient et ce qu'on en garde). Ses étiquettes (ouvert ou fermé à sa couleur, la cuisine, le prix, la note) ;
+    **Itinéraire**, **Au voyage**, **Appeler** (le composeur, jamais un appel lancé), **Site** (dans le navigateur),
+    **En parler à Mika**. Le bloc **Google Maps** : son nom et « Voir sur Google Maps », la note en grand et ses étoiles,
+    le nombre d'avis, le prix et sa fourchette, le résumé, ce que Google ajoute à OpenStreetMap (« oui (selon
+    Google) »), les avis les plus récents — chacun avec son auteur (lié à sa page), sa date en mots, son texte (un long
+    avis se replie : « Lire la suite ») —, sa `note`, quand ce serveur l'a lu et **Actualiser** (la fiche relue chez
+    Google et à l'office ; ce qui n'a pas pu se relire se dit dessous, en mots, et la fiche se relit : ce qui l'a pu est
+    gardé). Google sans rien de ce lieu : le bloc le dit (« Rien trouvé sur Google sous ce nom à moins de 100 m… ») ;
+    rien à en dire (pas de clé ni de cache, une sorte sans avis) : « Pas de note ni d'avis Google Maps pour ce lieu. » et
+    « Actualiser la fiche » en bas. Puis les **infos pratiques** d'OpenStreetMap (un numéro s'appelle, un site s'ouvre ;
+    « © les contributeurs d'OpenStreetMap », la date de l'extrait, « Corriger sur OpenStreetMap »), **ce qu'en dit
+    l'office de tourisme** (sa description, ses labels, ses tarifs, ses contacts ; son auteur et sa date, la Licence
+    Ouverte, sa fiche) et **Bientôt, tout près** (les événements, qui ouvrent leur fiche). Une fiche se lit en entrant
+    (la ligne de la liste se montre en attendant ; sa note dit alors « · Google Maps ») et se relit au retour après deux
+    minutes — ce qui n'avait pas pu se relire ne se dit plus (R2-A07) ; plus là (404) : « Ce lieu n'est plus là ». Son
+    modèle (`PlaceFicheViewModel`, sur `FicheDeps`) se teste sur la JVM. Bornes du serveur : 60 fiches ou recherches d'événements par minute, 10 « Actualiser » (429, en
+    mots).
+  - **Les photos** ne viennent que de ce serveur : leur adresse se refait depuis leur référence (`p:<hash>`), jamais
+    depuis le `path` d'une réponse, et leur chargeur (`ui/carte/CartePhotos`, Coil) passe par le client de la carte
+    (`MapHttp` : ce serveur seul, avec le jeton, sans suivre une redirection). Une photo ne se demande que quand elle
+    paraît (une ligne à l'écran, la bande qui défile, la page de la visionneuse : la première relève d'une photo de
+    Google coûte un appel compté), puis se garde (50 Mo dans `cacheDir/carte-photos`, vidés à la déconnexion) le temps
+    que le serveur dit (`max-age`) : la stratégie de Coil 3 par défaut ne lit jamais `Cache-Control`, `MaxAgeCacheStrategy`
+    la redemande au-delà — une photo dont les droits ont pris fin (404) ne se ressert plus (R2-A08). Son cache mémoire,
+    que Coil consulte avant toute requête, a une clé qui change chaque heure (`photoMemoryKey`) : passé ce temps, la
+    photo repasse par le disque et son `max-age` (R3-11).
+  - **Événements** (ADR 0259 ; `GET …/evenements`) : la carte prend l'écran, la recherche flotte dessus — un texte,
+    « Autour de moi » au bout du champ (à 20 km, le rayon du serveur ; éteint, « Dans cette zone », recherchée de nouveau
+    quand on déplace la carte), **quand** en puces (Aujourd'hui, Ce week-end, Cette semaine — par défaut —, Des dates… :
+    une période choisie, remise dans l'ordre) —, puis dans la feuille **quoi** (les thèmes du serveur, Gratuit), ce que
+    la base sait de la zone (« Cette zone n'est lue qu'en partie (cases lues : 9 sur 11)… », tel quel) et la liste **par
+    jour** (des jours de Paris, l'heure des dates des événements, quel que soit le fuseau du téléphone : R2-A09 ;
+    « Aujourd'hui · samedi 21 novembre ») : chaque événement, sa vignette et son crédit, son thème, son heure et son lieu, son
+    prix (vert s'il est gratuit), sa distance ; leurs épingles sur la carte. La première recherche part d'elle-même ;
+    la source se dit en bas (les offices de tourisme, par DATAtourisme). Un événement touché ouvre **sa fiche**
+    (`Route.EventFiche`) : sa barre (son nom, ses thèmes, sa commune ; ✦), la bande du plan et de ses photos, où, quand,
+    combien, à quelle distance ; **Itinéraire**, **Au voyage** (au jour du voyage où il tombe, dit dans la feuille :
+    « jour 2 » ; hors du voyage, son dernier jour), **En parler à Mika** ; le programme, ses dates (et combien d'autres),
+    le pratique (le lieu nommé ouvre sa fiche, l'adresse, les tarifs, les contacts), et toujours qui l'a écrite (l'office,
+    sa date, la Licence Ouverte, combien de fiches réunies).
   - **Ce que Mika a cherché ou montré** (un regard, `Route.Carte(tab, look = "<seq>")`, qu'ouvrent les miniatures du
     chat) : dans Explorer, ses lieux en rose (« Mika te l'a proposé ») à la place des résultats, son tracé tel
     qu'elle l'a gardé, « Ouvrir dans Itinéraire » pour un trajet, « Ouvrir le voyage » s'il en montrait un ; chercher
-    autre chose le quitte. Oublié, ou pour quelqu'un d'autre (404) : « Ce que Mika avait cherché n'est plus là », et la
-    carte revient au fond ; une autre panne se réessaie.
+    autre chose le quitte ; un de ses lieux ouvre sa fiche, en rose. Des événements qu'elle a trouvés (`what`
+    `evenements`) s'ouvrent dans Événements, en rose, par jour (« repéré par Mika »), « Tous les événements » les quitte ;
+    ouverts dans Explorer (une miniature touchée avant d'être lue), ils y partent en remplaçant la route (`regardTab`,
+    R2-A04). Les lieux d'un regard n'ont pas de vignette : il ne garde pas le crédit de leur photo. Un lieu des données
+    touristiques (`t:<uuid>`) y garde son identifiant entier et rouvre sa fiche (R2-M01).
+    Oublié, ou pour quelqu'un d'autre (404) : « Ce que Mika avait cherché n'est plus là », et la carte revient au fond ;
+    une autre panne se réessaie.
   - **Itinéraire** : la carte prend l'écran, ses points et son résultat montent du bas. Ses points (A, les étapes, B ; 20
     au plus) : un lieu de l'index, une adresse (si le texte en a l'air, après 0,7 s sans frappe, une fois par texte —
     les mêmes qu'Explorer), « Ma position » (la dernière de ton téléphone ; un itinéraire vide part d'elle) ; ajouter
@@ -257,7 +322,13 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
     d'une autre, comme le web ; une relecture qui échoue après des gestes tous aboutis garde ce qu'ils ont posé (le
     serveur l'a écrit), le dit, et le voyage se relit au retour sur l'écran ; après un refus, le dernier lu fait foi.
     Supprimé, ou pas à toi (404) : « Ce voyage n'existe pas ».
-  - Pas fait, ou autrement que la maquette : le bouton « Distance » de la liste (l'index classe déjà, en mêlant
+  - Pas fait, ou autrement que la maquette (`carte-avis.js`) : Google Maps à la place de Tripadvisor (ADR 0256 : ni
+    classement, ni répartition, ni sous-notes, ni distinction ; la maquette est refaite) ; ni « Partager » ni le bouton
+    « Agenda » d'un événement ; ce que Mika pense d'un lieu ne s'écrit pas sur sa fiche (aucune route ne le rend : on lui
+    demande, ✦) ; la puce « € » devient le menu des cuisines, et le tri par note est l'ordre de la liste, à côté de son
+    titre. Les liens du dehors (Google Maps, un auteur, un site, OpenStreetMap, l'office) s'ouvrent dans le navigateur
+    du téléphone, http ou https seulement.
+  - Pas fait, ou autrement que la maquette (`carte.js`) : le bouton « Distance » de la liste (l'index classe déjà, en mêlant
     pertinence et distance), les boutons de zoom du web (on pince) ; la note d'un arrêt de Mika se lit à part, sans
     guillemets (la règle du web : « ajouté par Mika » n'est qu'une marque, tu as pu écrire ou corriger la note) ; la
     carte d'un voyage de la liste dit ses jours et ses arrêts, pas ses kilomètres (la liste n'a pas son trajet) ;
@@ -720,7 +791,14 @@ les ressources et leurs groupes, le résumé d'une carte, ce qu'une opératrice 
 (`MapWordsTest`), quand une adresse se demande et les adresses gardées, la légende, la vraie carte ou le plan (et pour
 une miniature), les tuiles en échec (`CarteRulesTest`), le style tiré du web et ce que l'app y pose — le même que celui
 que compose le web pour les cartes servies de référence (`CarteStyleTest`) —, `CarteApi` et le client de MapLibre contre
-un faux serveur, une redirection ailleurs comprise (`CarteApiTest`), ce que la carte pose en GeoJSON (`MapGeoJsonTest`),
+un faux serveur, une redirection ailleurs comprise (`CarteApiTest`), les fiches, les événements et les photos
+(`CarteFichesApiTest` : les exemples du contrat de `output/carte-avis/SUIVI.md` lus tels quels, `test/resources/carte/contrat/`,
+ce que chaque appel envoie — filtres, `here`, rayon, dates —, un identifiant d'une autre forme qui ne part pas, une photo
+refaite sur ce serveur seul, les refus en mots), ce que montre une fiche (`FicheRulesTest` : les liens du dehors en http ou
+https seulement, les numéros, la note et les avis, les dates de lecture, la couverture, les photos et leur crédit, chaque
+bloc — Google Maps, OpenStreetMap, l'office de tourisme — et ses attributions toujours là, les filtres, l'ordre, les
+cuisines et la ligne d'un lieu), Événements (`EventRulesTest` : quand, les jours et leur tête, la ligne d'un événement,
+son prix, le jour d'un voyage où il tombe, la fiche d'un événement et qui l'a écrite), ce que la carte pose en GeoJSON (`MapGeoJsonTest`),
 ce qui ne s'est pas dessiné, carte par carte, les places des miniatures et l'encre des numéros (`MapFailuresTest`), un voyage
 (`TripRulesTest` : l'ordre des arrêts et où un geste les met, un geste qui ne change rien, ce dont son trajet dépend,
 « Sur la route » et le jour d'un lieu croisé, ce que la fenêtre d'un voyage envoie, ses miniatures et celles d'un
@@ -756,7 +834,7 @@ en mémoire (`ChatStoreTest`) et les écrans Compose (`ChatScreenTest`, `LoginSc
 | `data/push` | les notifications par Firebase : ouvrir un message scellé (`PushPayload`), dire au serveur où notifier (`PushRegistrar`) |
 | `push` | Firebase lui-même : le jeton (`FirebasePush`) et la réception (`MikaMessagingService`) |
 | `share` | « Partager vers Mika », raccourci de conversation |
-| `data/moi` | l'API par personne (`/api/moi`, ADR 0235) : `MoiApi` (lire, écrire en JSON ou en `multipart`, clé d'envoi, refus en mots), `MeRepository` (qui est connecté, les pastilles du tiroir), les règles que les domaines partagent (`MoiRules` : niveaux, `SendKey`, « [À COMPLÉTER », refus en mots ; `MoiText` : instants, initiales) ; un sous-paquet par domaine, `mail/` pour Mail (ses formes, `MailApi`, ses règles pures), `teams/` pour Teams (ses formes, `TeamsApi`, `TeamsRules`), `phone/` pour Téléphone (ses formes, `PhoneMoiApi`, `PhoneRules` : sorts de ses propositions et ce qui se décide d'ici, le fil, l'état de tes téléphones et « ce téléphone », la position et son plan), `settings/` pour Paramètres (ses formes, `SettingsApi` — § 5, 7, 8, 9 —, `SettingsRules` : niveaux et partages, état d'une boîte ou d'un service, ce qu'un formulaire envoie, secrets à redonner, refus par champ, règle d'envoi et sa version, outils d'un service, lignes de la page racine), `tools/` pour Outils (les formes de la matrice, `ToolsApi` — § 6 et, par `SettingsApi`, § 8 —, `ToolsRules` : les mots d'une case et de ce qu'elle garde, le canal lu, le nom d'un outil, ressources, groupes et résumés, ce qu'une opératrice voit de plus, les lignes de « Services »), `carte/` pour la Carte (ses formes et le fond servi, `CarteApi` — § 10 —, `MapGeo` et `Polyline` : zone, cercle, zoom, distance, le tracé ; `Scene` : ce qu'une carte montre et son cadrage ; `MapWords` : distances, durées, dates d'un voyage ; `CarteStyle` : le style tiré du web et ce que l'app y pose ; `MapHttp` : le client de MapLibre, ce serveur seul ; `CarteRules` : les adresses et leurs bornes, la légende, ce qu'Explorer montre, la vraie carte ou le plan, les tuiles en échec ; `TripModels` et `TripsApi` : les formes et les appels des itinéraires, des regards et des voyages ; `TripRules` : l'ordre des arrêts et où un geste les met, ce dont le trajet d'un voyage dépend, « Sur la route », ce que la fenêtre d'un voyage envoie ; `RouteRules` : les points d'un itinéraire, tes choix face à ceux de Mika, son GPX ; `TripRequests` : le trajet d'un voyage relu après le dernier geste, les gestes l'un après l'autre, ce qu'un refus fait de la clé ; `MapMinis` : la miniature d'un voyage ou d'un regard et ce qu'elle ouvre, les places des cartes vivantes ; `GpxDownloads` : le GPX d'un itinéraire, dans Téléchargements/Mika) |
+| `data/moi` | l'API par personne (`/api/moi`, ADR 0235) : `MoiApi` (lire, écrire en JSON ou en `multipart`, clé d'envoi, refus en mots), `MeRepository` (qui est connecté, les pastilles du tiroir), les règles que les domaines partagent (`MoiRules` : niveaux, `SendKey`, « [À COMPLÉTER », refus en mots ; `MoiText` : instants, initiales) ; un sous-paquet par domaine, `mail/` pour Mail (ses formes, `MailApi`, ses règles pures), `teams/` pour Teams (ses formes, `TeamsApi`, `TeamsRules`), `phone/` pour Téléphone (ses formes, `PhoneMoiApi`, `PhoneRules` : sorts de ses propositions et ce qui se décide d'ici, le fil, l'état de tes téléphones et « ce téléphone », la position et son plan), `settings/` pour Paramètres (ses formes, `SettingsApi` — § 5, 7, 8, 9 —, `SettingsRules` : niveaux et partages, état d'une boîte ou d'un service, ce qu'un formulaire envoie, secrets à redonner, refus par champ, règle d'envoi et sa version, outils d'un service, lignes de la page racine), `tools/` pour Outils (les formes de la matrice, `ToolsApi` — § 6 et, par `SettingsApi`, § 8 —, `ToolsRules` : les mots d'une case et de ce qu'elle garde, le canal lu, le nom d'un outil, ressources, groupes et résumés, ce qu'une opératrice voit de plus, les lignes de « Services »), `carte/` pour la Carte (ses formes et le fond servi, `CarteApi` — § 10 —, `MapGeo` et `Polyline` : zone, cercle, zoom, distance, le tracé ; `Scene` : ce qu'une carte montre et son cadrage ; `MapWords` : distances, durées, dates d'un voyage ; `CarteStyle` : le style tiré du web et ce que l'app y pose ; `MapHttp` : le client de MapLibre, ce serveur seul ; `CarteRules` : les adresses et leurs bornes, la légende, ce qu'Explorer montre, la vraie carte ou le plan, les tuiles en échec ; `FicheModels` : les formes des fiches, des événements et des photos (ADR 0259) ; `FicheRules` : les liens du dehors (http ou https), les notes et les avis, les dates de lecture, la couverture, les photos et leur crédit, ce que chaque bloc d'une fiche montre, les filtres et la ligne d'un lieu ; `EventRules` : quand, les jours, la ligne d'un événement, le jour d'un voyage, la fiche d'un événement ; `TripModels` et `TripsApi` : les formes et les appels des itinéraires, des regards et des voyages ; `TripRules` : l'ordre des arrêts et où un geste les met, ce dont le trajet d'un voyage dépend, « Sur la route », ce que la fenêtre d'un voyage envoie ; `RouteRules` : les points d'un itinéraire, tes choix face à ceux de Mika, son GPX ; `TripRequests` : le trajet d'un voyage relu après le dernier geste, les gestes l'un après l'autre, ce qu'un refus fait de la clé ; `MapMinis` : la miniature d'un voyage ou d'un regard et ce qu'elle ouvre, les places des cartes vivantes ; `GpxDownloads` : le GPX d'un itinéraire, dans Téléchargements/Mika) |
 | `ui` | écrans Compose : connexion, conversation, « Ce qu'elle fait », visionneuse |
 | `ui/chat` | la conversation : `ChatScreen` et `ChatViewModel` (le fil, la saisie, la ligne au-dessus du champ et « Tout accepter », le message à montrer), `ChatParts` (la barre, le fil, ses bulles, ses miniatures, le surlignage), `ChatItems` (ce que le fil dessine), `MapNotes` (ses notes de carte, validées), `ApprovalCards` (la ligne repliée, les cartes d'accord, les liens vers ses brouillons) et `ChatTray` (ses règles pures), `StrandParts` (les fils de travail), `SearchScreen` et `SearchRules` (« Rechercher » : les puces, les groupes, le classement, Mail et Teams au serveur), `FilesScreen` et `ExchangedFiles` (« Fichiers échangés ») |
 | `ui/shell` | le cadre des rubriques : `Shell` et `LocalShell` (aller, revenir, le tiroir, les toasts), la barre du haut, le tiroir, la pastille du chat (`ChatCue`), `Load` et `LoadBox`, les icônes de la maquette (`MIcon`) ; `Parts.kt`, les petites formes que Mail et Teams partagent (rond d'initiales, marque, ligne rose, note, ⋮, recherche, ligne de feuille, fenêtre à un champ) |
@@ -764,7 +842,7 @@ en mémoire (`ChatStoreTest`) et les écrans Compose (`ChatScreenTest`, `LoginSc
 | `ui/teams` | Teams : les discussions et la feuille des comptes, un fil (ses cartes, le champ), ses brouillons ; un ViewModel par écran |
 | `ui/phone` | Téléphone : la barre (l'état de tes téléphones) et ses onglets, Messages, un fil (ses propositions, répondre d'ici), Position sur la vraie carte (`PositionMap`) et son plan dessiné de repli (`PositionPlan`) ; un ViewModel par écran (celui d'un fil prend `PhoneThreadDeps` — l'API, les gestes d'ici par `PhoneHereGestures`, la portée de l'application — et se teste sur la JVM) |
 | `ui/map` | ce qui sert à toute carte : MapLibre réglé une fois (`MapKit`), les calques du style lus dans les assets, le fond de la session (`MapFondViewModel`), ce qui ne s'est pas dessiné, carte par carte (`LiveRefusal`), la poignée d'un écran sur sa carte (`MapControl`) ; `SceneMap` (la vraie carte ou le plan), `LiveMap` (le `MapView`, son cycle de vie, ce qu'elle pose par-dessus le fond, ses cadrages, ses échecs), `ScenePlan` (le plan dessiné d'une scène), `PinImages` (les épingles en images), `MiniMaps` (ce que montrent les miniatures, lu une fois pour la session — `MiniStore` —, leurs quatre places et leurs refus — `MiniSlots` —, une miniature — `MiniMap`) |
-| `ui/carte` | Carte : `CarteScreen` (la barre et ses trois onglets, « Nouveau voyage » flottant, `CarteLinks` : ce qu'un onglet demande à un autre, au chat, à un voyage ; ce que la route ouvre : un regard, « Itinéraire jusqu'ici »), `CarteStore` (ce que la Carte partage pour la session : ce qui est branché, ta position, les adresses trouvées, ses regards, tes voyages, chaque voyage lu — `TripReads`, où une relecture forcée suit celle en cours —, les miniatures), `ExplorerViewModel` et `ExplorerTab` (la recherche, les adresses, le lieu choisi, un regard de Mika en rose), `ItineraryViewModel` et `ItineraryTab` (les points et leurs propositions, le calcul, le regard de Mika, tes choix, le GPX, « En faire un voyage »), `TripsTab` (la liste en cartes), `TripViewModel` (sur `TripDeps`) et `TripScreen` (un voyage : ses gestes l'un après l'autre et montrés d'abord, le voyage et son trajet relus après le dernier, la poignée, la note en place, « Sur la route »), `TripEditorRows` (les lignes de l'éditeur et où tombe un arrêt glissé, sans Compose), `TripDialogs` (« Nouveau voyage », « Le voyage », « Ajouter au voyage », « Ajouter un arrêt »), `CarteMinis` (une miniature et ce qu'elle ouvre ; `MapNoteCard`, pour le chat) |
+| `ui/carte` | Carte : `CarteScreen` (la barre et ses quatre onglets, « Nouveau voyage » flottant, `CarteLinks` : ce qu'un onglet demande à un autre, au chat, à un voyage ; ce que la route ouvre : un regard, « Itinéraire jusqu'ici »), `CarteStore` (ce que la Carte partage pour la session : ce qui est branché, ta position, les adresses trouvées, ses regards, tes voyages, chaque voyage lu — `TripReads`, où une relecture forcée suit celle en cours —, les miniatures), `ExplorerViewModel` et `ExplorerTab` (la recherche, ses filtres et son ordre, les adresses, le lieu choisi, un regard de Mika en rose), `PlaceFicheScreen` (la fiche d'un lieu et son modèle, « Actualiser », `TripAdder` : « Au voyage » d'une fiche), `EventsViewModel` et `EventsTab` (Événements : quand, quoi, par jour, ses épingles, ce que Mika a trouvé), `EventFicheScreen` (la fiche d'un événement), `CartePhotos` (le chargeur des photos — ce serveur seul —, la bande, la visionneuse), `FicheParts` (les étoiles, les étiquettes, les faits, la ligne d'une source, `Outside` : un lien dans le navigateur, un numéro dans le composeur), `ItineraryViewModel` et `ItineraryTab` (les points et leurs propositions, le calcul, le regard de Mika, tes choix, le GPX, « En faire un voyage »), `TripsTab` (la liste en cartes), `TripViewModel` (sur `TripDeps`) et `TripScreen` (un voyage : ses gestes l'un après l'autre et montrés d'abord, le voyage et son trajet relus après le dernier, la poignée, la note en place, « Sur la route »), `TripEditorRows` (les lignes de l'éditeur et où tombe un arrêt glissé, sans Compose), `TripDialogs` (« Nouveau voyage », « Le voyage », « Ajouter au voyage », « Ajouter un arrêt »), `CarteMinis` (une miniature et ce qu'elle ouvre ; `MapNoteCard`, pour le chat) |
 | `ui/tools` | Outils : `ToolsScreen` (la barre et ses onglets, `ToolsViewModel` : la matrice, tes services, le canal lu et les cartes dépliées, un par session), `RightsTab` (Droits : le canal, les cartes, les pastilles, la règle d'un compte), `ToolSheets` (la feuille des canaux, « Ce qui décide »), `ServicesTab` (Services, Accords) |
 | `ui/settings` | Paramètres : la page racine et l'aiguillage des pages (`SettingsScreen` : `SettingsPages`), les pièces communes (`SettingsParts` : groupes, lignes, champ et son refus, choix, barre « Enregistrer », `SettingsModel`), Compte, Boîtes mail (la liste, une boîte, sa connexion Microsoft, une boîte nouvelle), la règle d'envoi (`RulesEditor`), Comptes Teams (la clé montrée une fois), Téléphones, Partages (et la fenêtre « Partager »), Services MCP (brancher, ses outils) ; « Ce téléphone » (`ThisPhonePages` : notifications, position, ses messages, apparence, données ; `WhereSwitch`, partagé avec Téléphone › Position) ; un ViewModel par sorte de page, rouvert pour chaque page qu'il sert : il prend `SettingsDeps` (l'API, ses textes, les pastilles), un geste fige ce qu'il envoie et ne pose rien sur une autre page (`stillOn`, `sayFor`, `refusedFor`) ; ceux d'une boîte, d'un compte Teams, d'un service et des partages se testent sur la JVM (`FakeSettingsApi`) |
 | `ui/avatar` | Mika en fond : chargement des portraits, l'aura, le souffle, les clignements, le sommeil, son visage dans la barre |

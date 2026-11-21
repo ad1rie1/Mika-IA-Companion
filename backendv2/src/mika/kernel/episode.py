@@ -101,9 +101,10 @@ class EpisodePolicy:
 
 @dataclass(frozen=True, slots=True)
 class EpisodeMode:
-    """Une façon de répondre que la personne choisit pour un message (``EpisodeRequest.mode``), jamais l'arbitre :
-    ce qu'elle change à la politique des épisodes de ``kinds``. Ce qu'elle laisse à ``None`` reste celui de la
-    politique ; ses étiquettes coupées s'ajoutent aux siennes."""
+    """Une façon de mener un épisode (``EpisodeRequest.mode``) : celle que la personne choisit pour un message, ou
+    celle que demande le candidat choisi (``mode`` dans ses arguments : une relecture indépendante, ADR 0276) —
+    l'arbitre n'en choisit aucune de lui-même. Ce qu'elle change à la politique des épisodes de ``kinds`` ; ce
+    qu'elle laisse à ``None`` reste celui de la politique ; ses étiquettes coupées s'ajoutent aux siennes."""
 
     kinds: frozenset[str]
     #: un autre rôle de modèle (qui a son repli, comme tout rôle)

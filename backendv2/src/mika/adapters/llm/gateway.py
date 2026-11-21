@@ -19,6 +19,9 @@
   appel dont l'épisode n'a plus de temps n'est pas tenté (issue ``expired``,
   pas « timeout » : le fournisseur n'a pas manqué).
 - Une erreur est journalisée et propagée, sans changement de fournisseur.
+- **L'effort se demande par appel** (ADR 0285) : celui que la requête porte (``LLMRequest.effort`` : ce qu'un
+  appelant a choisi), sinon celui réglé pour son rôle (``efforts``, posé ici), sinon celui de la fiche du
+  fournisseur. Le rôle est constant le long d'une boucle d'outils : son effort aussi.
 - Une boucle d'outils reste sur son fournisseur pendant toute sa durée — et sur sa passerelle : une boucle
   ouverte (``continues``) y finit même quand les réglages en installent une autre (``LiveGateway``, ADR 0142).
 - Le budget (``LLMLimits.fit``) mesure ce qui part : un tour qu'un fournisseur à session tient déjà
@@ -195,9 +198,13 @@ class Gateway:
         pricing: Mapping[str, tuple[str, str]] | None = None,
         deadlines: Mapping[str, float] | None = None,
         limits: Mapping[str, LLMLimits] | None = None,
+        efforts: Mapping[str, str] | None = None,
     ) -> None:
         self.backends = dict(backends)
         self.routes = dict(routes)
+        #: rôle → l'effort de réflexion de ses appels, quand la requête n'en demande pas (ADR 0285) ; un rôle absent
+        #: garde celui de la fiche de son fournisseur
+        self.efforts = {str(role): str(effort) for role, effort in dict(efforts or {}).items() if effort}
         self.clock = clock
         self.voice_roles = voice_roles
         self.fallbacks = dict(fallbacks or {})
@@ -225,12 +232,31 @@ class Gateway:
     def is_voice(self, role: str) -> bool:
         return role in self.voice_roles
 
+    def asked(self, req: LLMRequest) -> LLMRequest:
+        """``req`` avec l'effort de son rôle quand elle n'en demande pas elle-même (ADR 0285) : ce que l'appelant a
+        posé l'emporte ; sans l'un ni l'autre, la fiche du fournisseur décide."""
+        effort = "" if req.effort else self.efforts.get(req.role, "")
+        return replace(req, effort=effort) if effort else req
+
+    def effort_of(self, role: str) -> tuple[str, bool]:
+        """L'effort auquel part un appel de ce rôle qui n'en demande pas, et s'il est le sien (ADR 0285) : celui réglé
+        pour le rôle (vrai), sinon celui de la fiche du fournisseur qui le sert (faux) ; « » : le défaut du modèle, ou
+        personne ne sert ce rôle."""
+        own = self.efforts.get(role, "")
+        if own:
+            return own, True
+        try:
+            backend = self.backends[self.resolve(role)]
+        except UnconfiguredRole:
+            return "", False
+        return str(getattr(backend, "effort", "") or ""), False
+
     def budget(self, role: str, max_tokens: int) -> Budget:
         """Le budget de prompt du fournisseur de ce rôle, la sortie réservée sur le plafond qu'il enverra vraiment
         (``output_tokens`` du fournisseur : un modèle qui réfléchit a son plancher)."""
         name = self.resolve(role)
         limits = self.limits.get(name, LLMLimits())
-        probe = LLMRequest(role=role, call_id="", system_stable="", max_tokens=max_tokens)
+        probe = self.asked(LLMRequest(role=role, call_id="", system_stable="", max_tokens=max_tokens))
         return limits.budget(max_tokens, self._sent(name, probe))
 
     def output_tokens(self, req: LLMRequest) -> int:
@@ -242,7 +268,7 @@ class Gateway:
                 name = self.resolve(req.role)
             except UnconfiguredRole:
                 return req.max_tokens
-        return self._sent(name, req)
+        return self._sent(name, self.asked(req))
 
     def _sent(self, name: str, req: LLMRequest) -> int:
         """Ce que le fournisseur ``name`` enverra comme plafond de sortie pour ``req`` : le plafond demandé, borné par le
@@ -346,7 +372,7 @@ class Gateway:
     async def call(self, req: LLMRequest) -> LLMResponse:
         if self.is_voice(req.role) and req.persona is None:
             raise MissingPersona(f"le rôle voix « {req.role} » exige une persona")
-        req = _inherit(req)
+        req = self.asked(_inherit(req))
         name = self._sticky.get(req.call_id)
         if name not in self.backends:
             name = self.resolve(req.role)

@@ -14,7 +14,7 @@ from pydantic import ValidationError
 
 from mika.adapters.imaging.config import ImageBackendSpec, ImagingConfig
 from mika.adapters.imaging.config import build_gateway as build_image_gateway
-from mika.adapters.llm.claude import AUTHS, EFFORTS
+from mika.adapters.llm.claude import AUTHS
 from mika.adapters.llm.claude_code import FORBIDDEN, ClaudeCodeBackend, ClaudeCodeError, runtime_dir
 from mika.adapters.llm.config import REPLY, ROLE_LABELS, ROLES, BackendSpec, LLMConfig
 from mika.adapters.mcp.relay import Relay
@@ -25,7 +25,10 @@ from mika.kernel import forms
 from mika.ports.imaging import ASPECTS, QUALITIES, ImageRequest
 from mika.ports.imaging import ROLE_LABELS as IMAGE_ROLE_LABELS
 from mika.ports.imaging import ROLES as IMAGE_ROLES
-from mika.ports.llm import LLMRequest, Message
+from mika.ports.llm import EFFORTS, LLMRequest, Message
+
+#: ``mika llm effort defaut <rôles>`` : le rôle n'a plus d'effort à lui, il suit la fiche de son fournisseur
+EFFORT_OF_BACKEND = "defaut"
 
 
 async def llm_command(data: Path, args: argparse.Namespace) -> dict[str, object]:
@@ -33,6 +36,7 @@ async def llm_command(data: Path, args: argparse.Namespace) -> dict[str, object]
         cfg = settings.llm()
         backends = dict(cfg.backends)
         routes = dict(cfg.routes)
+        efforts = dict(cfg.efforts)
         if args.llm_cmd == "backend":
             previous = backends.get(args.name)
 
@@ -67,6 +71,13 @@ async def llm_command(data: Path, args: argparse.Namespace) -> dict[str, object]
         elif args.llm_cmd == "route":
             for role in args.roles:
                 routes[role] = args.name
+        elif args.llm_cmd == "effort":
+            # l'effort d'un rôle (ADR 0285) ; « defaut » le rend à la fiche de son fournisseur
+            for role in args.roles:
+                if args.level == EFFORT_OF_BACKEND:
+                    efforts.pop(role, None)
+                else:
+                    efforts[role] = args.level
         elif args.llm_cmd == "remove":
             backends.pop(args.name, None)
             routes = {r: b for r, b in routes.items() if b != args.name}
@@ -81,11 +92,11 @@ async def llm_command(data: Path, args: argparse.Namespace) -> dict[str, object]
             # ce qui vaut désormais : le premier fournisseur déclaré y sert « répondre » d'office ; une
             # configuration refusée (un fournisseur inconnu) l'est en le disant, rien n'est gardé
             try:
-                cfg = await settings.save_llm(LLMConfig(backends=backends, routes=routes))
+                cfg = await settings.save_llm(LLMConfig(backends=backends, routes=routes, efforts=efforts))
             except ValueError as exc:
                 return {"ok": False, "problems": [p.strip() for p in str(exc).split(";") if p.strip()]}
         return {"backends": {n: b.redacted() for n, b in cfg.backends.items()}, "routes": cfg.routes,
-                "répondre": cfg.routes.get(REPLY, ""),
+                "efforts": cfg.efforts, "répondre": cfg.routes.get(REPLY, ""),
                 "problems": cfg.problems()}
 
     try:
@@ -300,6 +311,12 @@ def add_models(sub) -> None:  # type: ignore[no-untyped-def]
                          epilog="Les rôles : " + " ; ".join(f"{r} ({ROLE_LABELS.get(r, r)})" for r in ROLES))
     lr.add_argument("name", help="un fournisseur déclaré (mika llm backend …)")
     lr.add_argument("roles", nargs="+", choices=ROLES, metavar="rôle", help="reply, initiative, extract…")
+    le = lsub.add_parser("effort", help="l'effort de réflexion d'un ou plusieurs rôles : il l'emporte sur celui de "
+                                        "la fiche du fournisseur (« defaut » : le rôle la suit de nouveau)",
+                         epilog="Les rôles : " + " ; ".join(f"{r} ({ROLE_LABELS.get(r, r)})" for r in ROLES))
+    le.add_argument("level", choices=[*(e for e in EFFORTS if e), EFFORT_OF_BACKEND], metavar="effort",
+                    help=f"{', '.join(e for e in EFFORTS if e)}, ou {EFFORT_OF_BACKEND}")
+    le.add_argument("roles", nargs="+", choices=ROLES, metavar="rôle", help="polish, triage, caption…")
     lx = lsub.add_parser("remove")
     lx.add_argument("name")
     lb.add_argument("--context-tokens", type=int, default=None, help="fenêtre totale de ce fournisseur")

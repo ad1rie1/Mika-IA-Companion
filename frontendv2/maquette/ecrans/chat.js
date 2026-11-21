@@ -74,6 +74,61 @@
   try { etat.pro = sessionStorage.getItem('mika-maquette-pro') === '1'; } catch (e) { /* rien */ }
   if (new URLSearchParams(location.search).get('pro') === '1') etat.pro = true;   // pour les captures
 
+  // ── L'effort de réflexion (proposition, pas encore validée) ───────────
+  // « Auto » (vide) ou forcé à un niveau, pour toute la conversation et pour chaque fil de travail. Un fil en auto
+  // suit la conversation ; la conversation en auto suit ce que la console règle pour le rôle (« Qui sert quoi »,
+  // ADR 0285). `role` : ce que ce réglage donne aujourd'hui, pour dire ce que « auto » vaut en ce moment.
+  const NIVEAUX = [['low', 'faible', 'le plus rapide'], ['medium', 'moyen', ''], ['high', 'élevé', ''], ['xhigh', 'très élevé', ''], ['max', 'maximal', 'le plus lent']];
+  const nomEffort = (k) => (NIVEAUX.find((n) => n[0] === k) || [])[1] || '';
+  const maj = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+  const effort = { conv: '', fils: { devis: 'high' }, role: { ordinaire: 'medium', pro: 'high' } };
+  let effortOuvert = new URLSearchParams(location.search).get('effort') === '1';
+  // Ce qui vaut ici : l'effort forcé du fil, sinon celui de la conversation, sinon le réglage du rôle.
+  function effortIci() {
+    const fil = etat.pro ? etat.fil : null;
+    const propre = fil ? effort.fils[fil] || '' : effort.conv;
+    const role = etat.pro ? effort.role.pro : effort.role.ordinaire;
+    return { fil, propre, vaut: propre || effort.conv || role };
+  }
+  // Cinq barres : autant d'allumées que le niveau.
+  function jauge(k) {
+    const n = NIVEAUX.findIndex((x) => x[0] === k) + 1;
+    return `<svg class="ico sm jauge" viewBox="0 0 24 24" aria-hidden="true">${[0, 1, 2, 3, 4].map((i) =>
+      `<path d="M${4 + i * 4} 20v-${4 + i * 3}"${i < n ? '' : ' class="off"'}/>`).join('')}</svg>`;
+  }
+  function pastilleEffort() {
+    const e = effortIci();
+    const ou = e.fil ? 'pour ce fil' : 'pour toute la conversation';
+    return `<button class="pill-toggle effort${e.propre ? ' forced' : ''}" type="button" data-cmp="effort" aria-haspopup="menu"
+      title="Effort de réflexion ${ou} : ${e.propre ? 'forcé à « ' + nomEffort(e.propre) + ' »' : 'auto (' + nomEffort(e.vaut) + ' en ce moment)'}">${jauge(e.propre || e.vaut)}<span class="lbl">Effort ·</span><span>${e.propre ? nomEffort(e.propre) : 'auto'}</span></button>`;
+  }
+  function menuEffort(ancre) {
+    if (!ancre) return;
+    const e = effortIci();
+    const auto = e.fil
+      ? `suit la conversation · ${nomEffort(effort.conv || effort.role.pro)} en ce moment`
+      : `suit le réglage de la console · ${nomEffort(effort.role.ordinaire)} en ce moment`;
+    const ligne = (k, nom, sous) => `<button class="eff-row" type="button" role="menuitemradio" aria-checked="${e.propre === k}" data-eff="${k}">
+      <span class="eff-radio"></span><span class="eff-nom">${h(nom)}</span>${sous ? `<span class="eff-sous">${h(sous)}</span>` : ''}</button>`;
+    const m = M.menu(ancre, [
+      { entete: e.fil ? 'Effort de réflexion · ce fil' : 'Effort de réflexion · toute la conversation' },
+      { html: ligne('', 'Auto', auto) },
+      { entete: 'Forcer' },
+      { html: NIVEAUX.map(([k, nom, sous]) => ligne(k, maj(nom), sous)).join('') },
+      'sep',
+      { html: `<p class="eff-note">${e.fil ? 'Vaut pour ce fil seulement, sur tous tes appareils. Les autres fils suivent la conversation.'
+        : 'Vaut pour toute ta conversation avec Mika, mode pro compris, sur tous tes appareils. Un fil de travail peut avoir le sien.'}</p>` },
+    ]);
+    M.on(m, '[data-eff]', 'click', (ev, b) => reglerEffort(e.fil, b.dataset.eff));
+  }
+  function reglerEffort(fil, k) {
+    if (!fil) effort.conv = k; else if (k) effort.fils[fil] = k; else delete effort.fils[fil];
+    M.fermerMenu();
+    M.rafraichir();
+    M.toast(k ? `Effort forcé à « ${nomEffort(k)} » ${fil ? 'pour ce fil' : 'pour toute la conversation'}.`
+      : fil ? 'Ce fil suit de nouveau la conversation.' : 'Effort en auto : celui que la console règle.', { ico: 'check' });
+  }
+
   // ── Les pièces de la conversation ─────────────────────────────────────
   function bulleMoi(m) {
     const f = m.fichier ? `<div class="msg-file${m.fichier.image ? ' img' : ''}">${m.fichier.image
@@ -137,6 +192,7 @@
         <span class="grow"></span>
         ${D.moi.operatrice ? `<button class="pill-toggle${etat.accord === 'tout' ? ' bolt' : ''}" type="button" data-cmp="accord" title="${etat.accord === 'tout' ? 'Chaque carte acceptable part acceptée, une à la fois (pour cet onglet)' : 'Chaque appel extérieur attend ta carte d\'accord'}">
           ${ico(etat.accord === 'tout' ? 'bolt' : 'shield', 'sm')}<span class="lbl">${etat.accord === 'tout' ? 'Tout accepter' : 'Accords : un par un'}</span></button>
+        ${pastilleEffort()}
         <button class="pill-toggle pro${etat.pro ? ' on' : ''}" type="button" data-cmp="pro" aria-pressed="${etat.pro}" title="Mode pro : sans son caractère, outils en direct, fils de travail">${ico('terminal', 'sm')}<span>Pro</span></button>` : ''}
         <button class="btn primary sm" type="button" data-cmp="envoyer">${ico('send', 'sm')}<span class="lbl">Envoyer</span></button>
       </div></div>`;
@@ -171,7 +227,7 @@
     const messages = f.id === 'devis' ? proDevis : f.n === 0 ? [] : [{ de: 'moi', t: f.t, txt: f.desc || f.titre }, { de: 'pro', t: f.t, html: '<p>Ce fil a son propre contexte : je n\'y relis que ses messages, sous son titre et sa description.</p>' }];
     const vide = `<div class="empty">${ico('threads')}<b>Un fil à part</b><p>Mika n'y relit que ce qui s'y dit. Demande-lui un travail ; /aide pour les commandes.</p></div>`;
     const li = (x) => `<button class="li${x.id === f.id ? ' on' : ''}" type="button" data-fil="${x.id}"><span class="li-main">
-      <span class="li-top"><span class="li-title">${h(x.titre)}</span><time>${h(x.t)}</time></span>
+      <span class="li-top"><span class="li-title">${h(x.titre)}</span>${effort.fils[x.id] ? `<span class="eff-tag" title="Effort forcé pour ce fil">${jauge(effort.fils[x.id])}${h(nomEffort(effort.fils[x.id]))}</span>` : ''}<time>${h(x.t)}</time></span>
       <span class="li-snip">${h(x.desc || 'Sans description')}</span></span></button>`;
     return `<div class="split pro-split">
       <aside class="pane fils-pane">
@@ -235,6 +291,7 @@
     if (cmd === '/clear' || cmd === '/nouveau') { fils.unshift({ id: 'neuf' + fils.length, titre: 'Nouveau fil', desc: '', t: D.maintenant.heure, n: 0 }); etat.fil = fils[0].id; M.rafraichir(); M.toast('Fil neuf ouvert : rien n\'est effacé.', { ico: 'threads' }); }
     else if (cmd === '/archiver' && f) { f.archive = true; etat.fil = fils.find((x) => !x.archive).id; M.rafraichir(); M.toast('Fil archivé', { ico: 'archive' }); }
     else if (cmd === '/renommer' || cmd === '/description') renommer();
+    else if (cmd === '/effort') menuEffort(document.querySelector('[data-cmp="effort"]'));
     else menuCommandes(body.querySelector('[data-cmp="commandes"]') || body);
   }
   function menuCommandes(ancre) {
@@ -243,6 +300,7 @@
       { label: '/clear — ouvrir un fil neuf', ico: 'plus', action: () => commande('/clear') },
       { label: '/renommer <titre>', ico: 'pen', action: renommer },
       { label: '/description <texte>', ico: 'threads', action: renommer },
+      { label: '/effort — auto, ou forcé pour ce fil', ico: 'sort', action: () => commande('/effort') },
       { label: '/archiver', ico: 'archive', action: () => commande('/archiver') },
       { label: '/aide', ico: 'info', action: () => M.toast('// en tête envoie le message avec un seul /.', { ico: 'info' }) },
     ], { align: 'left' });
@@ -251,11 +309,15 @@
     const f = fils.find((x) => x.id === etat.fil);
     const el = M.modal({ titre: 'Le fil', taille: 'narrow',
       corps: `<div class="stack"><label class="field"><span>Titre</span><input data-f="titre" value="${h(f.titre)}"></label>
-        <label class="field"><span>Petite description</span><textarea data-f="desc" rows="3" placeholder="Ce que Mika doit savoir de ce fil, et rien d'autre.">${h(f.desc)}</textarea></label></div>`,
+        <label class="field"><span>Petite description</span><textarea data-f="desc" rows="3" placeholder="Ce que Mika doit savoir de ce fil, et rien d'autre.">${h(f.desc)}</textarea></label>
+        <label class="field"><span>Effort de réflexion</span><select data-f="effort"><option value="">Auto — comme la conversation</option>
+          ${NIVEAUX.map(([k, nom]) => `<option value="${k}"${effort.fils[f.id] === k ? ' selected' : ''}>Forcé · ${h(nom)}</option>`).join('')}</select></label></div>`,
       pied: `<span class="grow"></span><button class="btn" type="button" data-close>Annuler</button><button class="btn primary" type="button" data-ok>Enregistrer</button>` });
     el.querySelector('[data-ok]').addEventListener('click', () => {
       f.titre = el.querySelector('[data-f="titre"]').value || f.titre;
       f.desc = el.querySelector('[data-f="desc"]').value;
+      const k = el.querySelector('[data-f="effort"]').value;
+      if (k) effort.fils[f.id] = k; else delete effort.fils[f.id];
       M.fermerModal(); M.rafraichir();
     });
   }
@@ -291,6 +353,7 @@
           M.toast(etat.pro ? 'Mode pro : sans son caractère, ses outils en direct, tes fils de travail.' : 'Retour à la conversation avec Mika.', { ico: 'terminal' });
         }
         if (k === 'accord') { etat.accord = etat.accord === 'tout' ? 'demander' : 'tout'; M.rafraichir(); }
+        if (k === 'effort') menuEffort(b);
         if (k === 'envoyer') envoyer(body);
         if (k === 'emoji') emojis(b, body);
         if (k === 'commandes') menuCommandes(b);
@@ -329,6 +392,8 @@
     rendu(body) {
       body.innerHTML = etat.pro ? vuePro() : vueOrdinaire();
       enBas(body);
+      // ?effort=1 : le menu de l'effort ouvert d'emblée (pour les captures)
+      if (effortOuvert) { effortOuvert = false; setTimeout(() => menuEffort(body.querySelector('[data-cmp="effort"]')), 60); }
     },
     notes: () => [
       { groupe: 'Ce qui marche déjà', statut: 'existe', titre: 'Le chat limité au compte connecté', texte: 'fil, fichiers, cartes d\'accord et position passent par le moyen de communication du compte', src: 'adapters/web/app.py:714-743 · hub.py' },
@@ -337,7 +402,9 @@
       { statut: 'existe', titre: 'Mode pro, « Son travail », fils, 👍/👎', texte: 'réservés à un opérateur authentifié : une seule garde côté serveur', src: 'app.py:1318 · hub.py:216-230' },
       { statut: 'existe', titre: '« Tout accepter »', texte: 'vaut pour l\'onglet (sessionStorage), le serveur ne voit qu\'une trame approval ordinaire', src: 'ADR 0170 · frontend/Web/src/ui/approvals.ts' },
       { statut: 'existe', titre: '« Ce qu\'elle fait »', texte: 'trame inner_state_update ; ses sections suivent tes droits', src: 'protocol.py:468-521 · mindport.py:312-354' },
-      { groupe: 'À faire ou à décider', statut: 'partiel', titre: '« Mika écrit… »', texte: 'aucune trame typing : le client le déduit de l\'envoi jusqu\'à sa réponse' },
+      { statut: 'existe', titre: 'L\'effort par rôle', texte: 'chaque appel porte son effort ; réglé par rôle dans la console (« Qui sert quoi »)', src: 'ADR 0285 · ports/llm.py · adapters/llm/gateway.py' },
+      { groupe: 'À faire ou à décider', statut: 'partiel', titre: 'L\'effort de réflexion dans le champ : auto ou forcé', texte: 'pour toute la conversation et pour chaque fil de travail (un fil en auto suit la conversation, la conversation en auto suit la console) ; réservé à un opérateur, comme le mode pro. Le serveur le garde et l\'applique (trames effort, efforts, effort_result) ; l\'écran est une proposition, pas encore validée.', src: 'ADR 0287 · protocole-chat.md · faculties/transcript' },
+      { statut: 'partiel', titre: '« Mika écrit… »', texte: 'aucune trame typing : le client le déduit de l\'envoi jusqu\'à sa réponse' },
       { statut: 'partiel', titre: '« Lu »', texte: 'le serveur connaît la trame read, le web ne l\'envoie pas (Android oui)', src: 'app.py:953-993' },
       { statut: 'partiel', titre: 'Sa VRM, en haut à droite', texte: 'le corps du web se réutilise sans la pièce ni le monde ; muette (la voix serait celle du navigateur) ; 97 Mio, ou 28 Mio préparé pour Android, ou les portraits', src: 'frontend/Web/src/vtuber · frontend/Android/tools/vrm_mobile.py' },
       { statut: 'manque', titre: 'Remonter au-delà des 50 derniers messages', texte: 'sync ne rend que l\'après ; seul strand_history accepte before' },

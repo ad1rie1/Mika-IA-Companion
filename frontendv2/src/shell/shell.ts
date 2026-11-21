@@ -57,6 +57,11 @@ export interface ScreenDef {
   defaultTab?: string;
   subtitle?: (ctx: ScreenContext) => string;
   actions?: (ctx: ScreenContext) => string;
+  /**
+   * L'écran dessine lui-même sa barre de titre, dans son corps (`sansTete` de la maquette : Projets, dont la fiche a
+   * sa propre tête et ses onglets) ; il y passe `nameTitleButtons`.
+   */
+  noHead?: boolean;
   /** Une fois, à la première ouverture : ses écouteurs délégués. */
   mount?: (section: HTMLElement) => void;
   render: (body: HTMLElement, ctx: ScreenContext) => void;
@@ -65,8 +70,8 @@ export interface ScreenDef {
   count?: () => number | "";
 }
 
-/** L'ordre de la barre du bas d'un téléphone, comme sur Android (et la maquette : sept entrées). */
-export const TABBAR_ORDER = ["chat", "mail", "teams", "telephone", "carte", "outils", "parametres"];
+/** L'ordre de la barre du bas d'un téléphone (la maquette : huit entrées, Projets juste après le chat). */
+export const TABBAR_ORDER = ["chat", "projets", "mail", "teams", "telephone", "carte", "outils", "parametres"];
 
 function cornerMarkup(): string {
   return `<span class="mika-corner" id="mika-corner" data-size="mini">
@@ -141,7 +146,7 @@ export class Shell {
     if (!ctx) return;
     const def = this.screens.get(ctx.screen);
     const head = $(".page-head", ctx.el);
-    if (def && head) this.paintHead(head, def, ctx);
+    if (def && head && !def.noHead) this.paintHead(head, def, ctx);
   }
 
   go(hash: string): void {
@@ -296,13 +301,14 @@ export class Shell {
     for (const s of $$<HTMLElement>(".screen", this.root)) s.hidden = s.dataset.screen !== route.screen;
     const section = $<HTMLElement>(`.screen[data-screen="${route.screen}"]`, this.root)!;
     if (!section.dataset.mounted) {
-      section.innerHTML = '<header class="page-head"></header><div class="page-body"></div>';
+      section.innerHTML = def.noHead ? '<div class="page-body"></div>' : '<header class="page-head"></header><div class="page-body"></div>';
+      if (def.noHead) section.classList.add("no-head");
       section.dataset.mounted = "1";
       def.mount?.(section);
     }
     const ctx: ScreenContext = { ...route, el: section };
     this.current = ctx;
-    this.paintHead($(".page-head", section)!, def, ctx);
+    if (!def.noHead) this.paintHead($(".page-head", section)!, def, ctx);
     this.corner.park();
     def.render($(".page-body", section)!, ctx);
     this.corner.lodge(section.querySelector("[data-mika-scene]"));

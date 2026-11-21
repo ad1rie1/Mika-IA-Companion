@@ -1,7 +1,7 @@
 # Mika — le client de tous les jours (frontendv2)
 
 Le client web d'une personne qui a un compte (ADR 0187) : le chat avec Mika (et le mode pro pour une opératrice),
-puis Outils, Mail, Teams, Téléphone, Carte et Paramètres. Il a la forme de la maquette validée (`maquette/`, à ne pas
+puis Projets, Outils, Mail, Teams, Téléphone, Carte et Paramètres. Il a la forme de la maquette validée (`maquette/`, à ne pas
 modifier) et parle au moteur par le protocole du chat (`backendv2/docs/protocole-chat.md`) et par l'API par personne
 (`backendv2/docs/protocole-moi.md`) : chaque écran ne montre que ce qui est à la personne connectée, ou qu'on lui
 partage (ADR 0188).
@@ -43,8 +43,11 @@ du système ; sans portraits, ses ronds restent à leur couleur ; sans aucune de
 La carte ne joint que ce serveur : ses tuiles, ses polices et ses icônes sont des chemins de l'API, posés sur son
 adresse absolue (MapLibre lit ses tuiles dans un travailleur né d'une adresse `blob:`, où un chemin seul ne se résout
 pas : un client construit sans `VITE_BACKEND_ORIGIN`, servi à la même adresse que le serveur, prend celle de la page).
-Les seules adresses du dehors du code sont le lien « Ouvrir dans OpenStreetMap » et les espaces de noms XML (SVG,
-GPX), qu'aucune requête ne joint.
+Une photo d'une fiche ne vient que de lui aussi (`GET …/carte/photo/<ref>`, l'adresse refaite depuis sa référence :
+`api/carte.ts::photoUrl`). Les seules adresses du dehors du code sont des liens qu'on ouvre soi-même dans un autre
+onglet, sans référent (`screens/carte/sources.ts::outLink` : http ou https seulement) — « Ouvrir dans OpenStreetMap »,
+les sources d'une fiche (Google Maps, l'auteur d'un avis ou d'une photo, OpenStreetMap, l'office de tourisme, la
+Licence Ouverte) — et les espaces de noms XML (SVG, GPX) ; aucune requête ne les joint.
 
 Les modules purs du client web sont réutilisés sans copie par l'alias `@web` (→ `frontend/Web/src`) :
 `network/api.ts` et `WebSocketClient.ts`, `types/`, et `ui/chatSync`, `approvals`, `toolActivity`, `proMarkdown`,
@@ -60,14 +63,15 @@ Les modules purs du client web sont réutilisés sans copie par l'alias `@web` (
 | `shell/` | le cadre porté de `maquette.js` : barre du haut, routes `#écran/onglet/objet`, barre de titre et onglets, palette Ctrl K, menus, fenêtres, toasts, thème, icônes |
 | `mika/` | Mika : ce qu'on sait d'elle (`state.ts`, plié des trames ; `store.ts`, qui le garde et le diffuse), sa ligne d'état, ses facettes et son visage (`view.ts`, `labels.ts` ; `view.ts` écrit aussi les lignes de la carte « Ce qu'elle fait » — une facette et une promesse, que sa colonne du chat reprend telles quelles, un projet et son statut en mots — et décide quand sa VRM se charge), son visage en rond (`face.ts`), ses portraits (`portraits.ts`), son élément unique (`corner.ts`) et sa VRM (`vrm.ts`, chargée à part) |
 | `screens/chat/` | le chat : `chat.ts` (les trames, l'état du fil, l'orchestration des gestes), `approvals.ts` (les cartes d'accord et « Tout accepter »), `strands.ts` (les fils de travail et leurs commandes), `composer.ts` (le champ : pièces jointes, emojis, compteur, phrase préremplie, envoi), `older.ts` (« Messages plus anciens » : d'où repartir, comment ce qui revient se recoud au fil chargé, pur), `markup.ts` (le balisage de la maquette, pur) |
+| `screens/projets/` | Projets (ADR 0291, d'après la maquette validée : `maquette/ecrans/projets2.js` et ses suites) : `index.ts`, `projets.ts` (l'état, les lectures gardées, les gestes : un envoi, puis tout se relit ; ce qui est saisi, où chaque cadre a défilé et le curseur tiennent d'un dessin à l'autre ; un refus se dit à l'endroit du geste), `routes.ts` (les adresses de la maquette, la clé d'une attente : pur), `state.ts` (les filtres, ce qui est choisi, les groupes d'« À faire » et des objectifs : pur), `gestures.ts` (un geste traduit en requête — trancher en nommant le plan lu, un accord avec le condensé lu, ajouter ou modifier un objectif, un jalon, un ticket, les seuls réglages changés, un lien : pur), `diagram.ts` (les calculs du diagramme des objectifs : ses lignes, la part faite, l'axe qui se resserre, les fantômes sans date, les flèches : pur), `time.ts`, `tones.ts` (la couleur d'un état, depuis les codes du serveur), `md.ts` (un petit Markdown, échappé d'abord), `parts.ts` (les morceaux partagés : les trois zones — `trio` —, les sections du panneau, pastilles, barres en segments, lignes liées, champs et formulaires, le panneau qui s'ouvre, un texte venu d'ailleurs — `outside`), `views/` (une vue par fichier : `todo.ts` « À faire », `sheet.ts` la barre de titre, la grille, la tête d'une fiche et la Vue d'ensemble, `objectives.ts`, `diagram.ts`, `tickets.ts`, `activity.ts`, `more.ts` Dépendances, Listes et « Modifier le projet »), `tabs.ts` (où se branchent les onglets écrits à part : `registerTab`) ; l'onglet **Code** : `code.ts` (ses lectures gardées, la forme du diff, la branche choisie, fusionner, modifier une pull request, y répondre), `codeparts.ts` (ses adresses, la coloration simple d'une ligne en jetons de texte, un diff mis en lignes — unifié ou côte à côte —, la demande de fusion : pur), `paint.ts` (le contenu d'un fichier et les lignes d'un diff posés après le dessin par insertion de texte, jamais en HTML), `screens/projets/views/code.ts` (Fichiers, Commits, Branches) et `screens/projets/views/codehost.ts` (Pull requests, Issues, CI : ce qui se joue avec l'hôte) ; l'onglet **Documentation** : `documentation.ts` (ses lectures gardées, les brouillons, l'éditeur gardé d'un dessin à l'autre, ses gestes), `docparts.ts` (ses adresses, l'arborescence, le chemin d'une page, le brouillon et son conflit : pur), `docmd.ts` (le rendu d'une page en lecture : échappé, rien d'ailleurs n'y est chargé ; pur), `editor.ts` (l'éditeur : Milkdown, par Crepe — chargé à la demande, son propre morceau), `screens/projets/views/docs.ts` (Pages, Images, Décisions), `dialogs.ts` (la confirmation d'une fusion, le mot sur ce qui a changé) |
 | `screens/mail/` | Mail : `index.ts` (l'écran et sa pastille), `mail.ts` (l'état, les gestes), `markup.ts` (le rendu de la maquette, pur), `compose.ts` (les destinataires proposés, la fenêtre d'un mail), `format.ts` (niveaux de partage, adresses, texte d'un mail, « [À COMPLÉTER », pur) |
 | `screens/teams/` | Teams : `index.ts`, `teams.ts` (l'état, les gestes), `markup.ts`, `format.ts` (états, modes, jours, mentions, qui a écrit — « Toi » sur un compte à toi seulement —, les cartes du fil, l'adresse d'une réponse) |
 | `screens/telephone/` | Téléphone : `index.ts`, `view.ts` (le rendu, pur ; la scène de la position, `positionScene` : son point et sa précision, que la vraie carte — `map/view.ts` et `map/live.ts`, comme la Carte — et le plan montrent) |
-| `screens/carte/` | Carte (ADR 0194 à 0196) : `index.ts` (le cadre : les onglets, les lectures communes, la carte gardée d'un dessin à l'autre et son cadrage, ce qui garde la main d'un dessin à l'autre, la palette ; il délègue le dessin et les gestes à l'onglet montré, et chaque contrôleur reçoit de lui ce qu'il lui faut, jamais l'état d'un autre onglet), `explorer.ts` (Explorer : la recherche, les adresses, le regard de Mika, la fiche, « Itinéraire jusqu'ici », « Ajouter au voyage »), `itinerary.ts` (Itinéraire : les points et leurs propositions, le calcul, le regard de Mika, tes choix, le GPX, « En faire un voyage »), `trip.ts` (Voyages : la liste et le voyage ouvert, ses gestes — l'un après l'autre, montrés avant que le serveur les dise —, « Sur la route », la note d'un arrêt, optimiser, un lieu ajouté à un voyage), `modals.ts` (les fenêtres « Nouveau voyage », « Le voyage », « Ajouter un arrêt »), `drag.ts` (glisser un arrêt : la cible, l'indice, le suivi du pointeur), `view.ts` (Explorer, Itinéraire, Voyages et l'éditeur d'un voyage — la note d'un arrêt en place, les épingles de « Sur la route » —, les fenêtres d'un voyage, les actions d'un voyage dans la barre de titre, le cadre de la carte : pur), `format.ts` (l'ordre des arrêts et où un geste les met, une note changée, ce dont le trajet d'un voyage dépend, ce que la fenêtre d'un voyage envoie, le jour d'un lieu croisé le long du trajet, tes choix d'itinéraire face à ceux d'un trajet de Mika, jusqu'où une recherche est allée, le GPX d'un itinéraire, les phrases préparées pour Mika, le contrôle qui garde la main d'un dessin à l'autre : pur), `requests.ts` (ménager ce qui sort du serveur : les adresses gardées par texte, le trajet d'un voyage gardé pour ses arrêts et relu après le dernier geste, les gestes l'un après l'autre, ce qui n'est plus là (404) : sans DOM) |
+| `screens/carte/` | Carte (ADR 0194 à 0196, 0259) : `index.ts` (le cadre : les onglets, les lectures communes, la carte gardée d'un dessin à l'autre et son cadrage, ce qui garde la main d'un dessin à l'autre, la visionneuse des photos, la palette ; il délègue le dessin et les gestes à l'onglet montré, et chaque contrôleur reçoit de lui ce qu'il lui faut, jamais l'état d'un autre onglet), `explorer.ts` (Explorer : la recherche, ses filtres et son ordre, les adresses, le regard de Mika, la fiche d'un lieu et « Actualiser », « Itinéraire jusqu'ici », « Ajouter au voyage » — son menu, que les Événements partagent), `events.ts` (Événements : quand, quoi, où, la liste, ce que Mika a trouvé, la fiche d'un événement et ses gestes), `fiche.ts` (la fiche d'un lieu — Google Maps, OpenStreetMap, l'office de tourisme, les événements tout près —, celle d'un événement, la bande des photos, la visionneuse : pur), `agenda.ts` (l'onglet Événements : les jours d'une recherche, les groupes par jour, le jour d'un voyage où tombe un événement, la phrase pour Mika : pur), `sources.ts` (ce que disent les sources et comment on les cite : liens sûrs, numéros, notes en étoiles, photos servies par ce serveur, dates de lecture, ligne de couverture : pur), `photos.ts` (les photos chargées quand elles paraissent, la visionneuse), `itinerary.ts` (Itinéraire : les points et leurs propositions, le calcul, le regard de Mika, tes choix, le GPX, « En faire un voyage »), `trip.ts` (Voyages : la liste et le voyage ouvert, ses gestes — l'un après l'autre, montrés avant que le serveur les dise —, « Sur la route », la note d'un arrêt, optimiser, un lieu ajouté à un voyage), `modals.ts` (les fenêtres « Nouveau voyage », « Le voyage », « Ajouter un arrêt »), `drag.ts` (glisser un arrêt : la cible, l'indice, le suivi du pointeur), `view.ts` (Explorer et sa liste notée, Itinéraire, Voyages et l'éditeur d'un voyage — la note d'un arrêt en place, les épingles de « Sur la route » —, les fenêtres d'un voyage, les actions d'un voyage dans la barre de titre, le cadre de la carte : pur), `format.ts` (l'ordre des arrêts et où un geste les met, une note changée, ce dont le trajet d'un voyage dépend, ce que la fenêtre d'un voyage envoie, le jour d'un lieu croisé le long du trajet, tes choix d'itinéraire face à ceux d'un trajet de Mika, jusqu'où une recherche est allée, la fiche d'un lieu dans la route, les cuisines d'une liste, le GPX d'un itinéraire, les phrases préparées pour Mika, le contrôle qui garde la main d'un dessin à l'autre : pur), `requests.ts` (ménager ce qui sort du serveur : les adresses gardées par texte, le trajet d'un voyage gardé pour ses arrêts et relu après le dernier geste, les gestes l'un après l'autre, ce qui n'est plus là (404) : sans DOM) |
 | `map/` | Ce qui sert à toute carte (Téléphone, Carte, les miniatures du chat) : `info.ts` (le fond de carte servi, `GET /api/moi/carte/fond`, lu une fois pour la page et relu toutes les cinq minutes), `mapgeo.ts` (ce qu'elle couvre, une précision en cercle, le zoom, une zone, une distance), `polyline.ts` (`decodePolyline6`, la même que `backendv2/src/mika/ports/maps.py`), `mapstyle.ts` (le style Protomaps, clair ou sombre, sans les points d'intérêt qui n'apprennent rien : une attraction sans nom, ou nommée « Immeuble », « Maison »…), `base.ts` (une carte MapLibre : adresses absolues, la session, les commandes en français, le nord toujours en haut, le thème, `restyle`, des tuiles en échec de suite qui font revenir le plan, une image vide pour une icône que la planche n'a pas), `view.ts` (`MapView` : épingles numérotées, roses pour ce que Mika a fait, secondaires — plus petites, sans numéro : les lieux de « Sur la route » —, tracés, la position et le cercle de sa précision, `fitBounds` ; une position seule s'ouvre centrée, au zoom de sa précision ; un cadrage demandé se fait même sur une scène inchangée, et une scène vide garde la vue, sauf quand l'écran demande le fond de carte), `live.ts` (le cycle de vie d'une carte vivante, le même pour la Carte et la Position du Téléphone : si elle se montre, la monter, la reposer d'un dessin à l'autre, une autre carte servie qui se repose sur elle, seul le dernier montage qui se pose, ses échecs — tuiles, chargement, WebGL — qui laissent le plan sans réessayer, et les mots de sa note), `scene.ts` et `drawn.ts` (ce qu'une carte montre, comment une vue la cadre — `sceneFraming` : sur l'écran Carte, une zone d'au moins ~200 m et jusqu'au zoom 17, sur une miniature, ~2 km et 12,5 au plus —, et son plan dessiné sans tuile ; la position peut porter sa précision, un cercle que la zone tient), `notes.ts` et `cards.ts` (ses notes de carte et leur miniature), `minis.ts` (les miniatures d'une liste : créées quand elles paraissent, quatre vivantes au plus ; ce qu'elles montrent, lu une fois pour la page et relu quand il a changé), `words.ts` (distances, durées, ce qu'un trajet en voiture peut éviter — la seule table de ces libellés —, dates d'un voyage, en long et en court), `load.ts` (MapLibre et la vue, chargés une fois et à part) |
 | `screens/outils/` | Outils : `index.ts`, `matrix.ts` (la matrice des droits et les lignes de « Services », pur) |
 | `screens/parametres/` | Paramètres : `index.ts` (routes, routes d'action, gestes délégués, sous-onglets), `page.ts` (ce qu'une page et son hôte se doivent), `form.ts` (lignes et barre d'enregistrement), `words.ts` (les mots des niveaux et des états), une page par sous-onglet (`account`, `mail`, `teams`, `phones`, `shares`, `mcp`) |
-| `api/` | `moi.ts` (`getJson`, `sendJson`, `sendForm`, `apiUrl`), `me.ts` (`GET /api/moi`), et un client typé par domaine : `mail`, `teams`, `phone`, `rights`, `settings`, `shares`, `mcp`, `carte` (lieux, adresses, itinéraires, regards, voyages, et le fond de carte : `protocole-moi.md` § 10) |
+| `api/` | `moi.ts` (`getJson`, `sendJson`, `sendForm`, `apiUrl`), `me.ts` (`GET /api/moi`), et un client typé par domaine : `mail`, `teams`, `phone`, `rights`, `settings`, `shares`, `mcp`, `projects` (ses projets, « À faire », la fiche, le registre, ses gestes, ses réglages, son activité, le diagramme de ses objectifs : `protocole-moi.md` § 11), `projectCode` (le code d'un projet : fichiers, commits et leur diff, branches, pull requests, issues, CI) et `projectDocs` (sa documentation — pages, versions, images, enregistrer en nommant la version lue — et ses décisions), `carte` (lieux et leurs filtres, fiches, « Actualiser », événements, photos, adresses, itinéraires, regards, voyages, et le fond de carte : `protocole-moi.md` § 10) |
 | `shared/` | ce que plusieurs écrans partagent : `kit.ts` (lectures en cache — une relecture forcée suit celle en cours, un 404 efface ce qu'on avait lu —, erreurs, dates, copier, confirmer), `store.ts` (les lectures partagées, dont ta dernière position, celle du Téléphone et de la Carte), `storage.ts` (le stockage du navigateur, sans jamais lever), `names.ts` (« de Léa », « d'Adrien » : `ofName`, que `screens/mail/format.ts` réexporte) |
 | `shell/counts.ts` | les pastilles de la barre du haut, relues dans `GET /api/moi` (au démarrage, chaque minute, au retour sur l'onglet, après un geste) ; la même lecture donne le nom du compte, que le menu du compte suit quand on l'a changé ailleurs (un autre appareil, la console) |
 | `styles/` | `base.css` et `chat.css` portés de la maquette, `ecrans/` pour chaque écran, `app.css` pour ce qu'elle ne montrait pas |
@@ -103,6 +107,82 @@ Mika n'a qu'un élément (`#mika-corner`) : son visage dans la pastille du haut,
   demande d'itinéraire : un voyage s'y dessine en reliant ses arrêts, un regard avec le tracé qu'elle a gardé. Ce
   qu'elles montrent se lit une fois pour la page, chat et écran Carte ensemble : un voyage changé dans l'un se relit
   dans l'autre quand sa miniature reparaît.
+- **Projets** (ADR 0291, 0294, `protocole-moi.md` § 11) : l'écran de la maquette validée, en **trois zones sur toute la
+  largeur** — la liste, le contenu découpé en volets, un panneau latéral (l'état, les propriétés, ce qui est lié avec
+  son statut, les gestes). Sur un écran moyen le panneau se replie sous l'en-tête du détail ; sur un téléphone il
+  devient le volet « Infos », et la liste puis le détail sont deux pages. Ses adresses sont celles de la maquette :
+  `#projets/a-faire[/<projet>/<attente>]`, `#projets/projets`, `#projets/projets/<id>[/<onglet>/…]`.
+  **À faire** : ce qui t'attend dans tous tes projets, groupé par projet, dans l'ordre du serveur ; au centre ce qu'il
+  faut lire pour décider (ce qui partirait pour un accord, le plan d'un projet et ses questions, le plan d'un ticket,
+  la question posée, un point d'arrêt et sa preuve, un élément à ta charge, le ticket d'une pull request à fusionner), à droite la décision : accorder ou refuser
+  (avec le condensé lu ; un accord dit ce qu'il concerne, où il part et pourquoi), valider un plan ou demander une révision, accepter ou écarter un ticket, valider ou refuser
+  son plan (la requête nomme le plan lu), répondre, valider ou refuser un point d'arrêt, changer un statut. Ce qui ne
+  se fait pas ici dit pourquoi, avec les mots du serveur (`why`) ; une pull request à fusionner s'ouvre dans l'onglet
+  Code. **Projets** : la grille des cartes (l'état, où il en est, ses objectifs en une barre, ses compteurs, ses
+  liens, par qui il est mené — servis avec la liste, `card` : la grille ne lit aucune fiche), les projets archivés (« Désarchiver ») et « Nouveau projet »
+  (ses champs sont ceux que le serveur décrit).
+  **La fiche** : sa tête (piloter — une consigne, lancer maintenant, la pause, la reprise —, « Modifier le projet » en
+  sections, archiver) et ses onglets. **Vue d'ensemble** : une grille de cartes (où il en est, ses objectifs, son
+  code et son dernier commit, ses tickets par étape du parcours, ses dépendances, ce qui t'attend, son prochain passage — quand,
+  sur quoi, son rythme, ses consignes en attente). **Objectifs** : la liste serrée — une
+  ligne par objectif —, le détail (ses jalons en étapes et leurs preuves, sa branche et sa pull request, ses comptes
+  rendus, lus dans le fil d'activité), une mission (son rythme, ses passages), « Ajouter un objectif » (ponctuel ou
+  mission ; ce qui peut la déclencher et les façons de vérifier un jalon sont ceux que la fiche sert, `forms`), Modifier, Rouvrir, Terminer, Retirer, « Ajouter un jalon », le modifier, le retirer, valider un point
+  d'arrêt ; et **le diagramme**, en deux modes — Avancement, Dans le temps (l'axe se resserre, ou passe en semaines,
+  pour que la première date et aujourd'hui tiennent à l'écran ; ce qui n'a pas commencé est un fantôme, sans date).
+  **Tickets** : la liste, ses filtres et sa recherche, « Nouveau ticket », le détail en volets (Description, Plan,
+  Fil, Historique), le panneau (son parcours en six étapes, servi — `journey` : l'étape fine en précision, les étapes
+  sautées quand il ne produit pas de code —, ses propriétés, ce qui est lié : son objectif, sa pull request avec son
+  statut, son issue avec son état), l'Historique (l'histoire de ses étapes, et ce qui est arrivé à ses objectifs), Modifier, et les gestes du moment (ceux que `can` ouvre). **Activité** : le Fil (par
+  jour, ses filtres par sorte et par objectif, le graphique des trente derniers jours, les totaux de toute son histoire), les Exécutions (le détail pas
+  à pas), le Carnet. **Dépendances** : le schéma (le projet au centre, ce dont il dépend, ce qui dépend de lui), le
+  panneau d'un lien (depuis quand, pourquoi, ce qu'il donne — en lecture —, le commit que montre la vue, les demandes
+  dans les deux sens, « Lui demander quelque chose » : un ticket ouvert chez le projet lu, au nom de la personne),
+  « Ajouter une dépendance » (le mot du lien s'y saisit), le volet des demandes. **Listes**, seulement pour un projet
+  qui en a une : en colonnes par statut ou en tableau ; un statut et à qui est un élément se changent sur la carte,
+  « Ajouter » y pose un élément. **Modifier le projet** : un champ que le serveur réserve (`can`, `why`) se montre
+  verrouillé avec sa raison, et ne part jamais.
+  **Code**, en six sous-onglets (`#projets/projets/<id>/code/<sous-onglet>/…`) : **Fichiers** (le choix de la branche,
+  l'arborescence un dossier à la fois — les entrées cachées se disent, sans se lister —, le fichier en chasse fixe avec
+  ses numéros de ligne et une coloration simple, son dernier commit et son historique ; un fichier binaire ou trop gros
+  se dit ; un fichier Markdown — le README d'abord — se lit rendu, par le rendu des pages de documentation, sans
+  charger aucune image, avec une bascule Rendu | Source), **Commits** (la ligne de temps par jour, le filtre par
+  branche, le commit et son diff unifié ou côte à côte, ses fichiers changés en sommaire ; un fichier coupé se relit
+  seul), **Pull requests** (la liste ; Résumé avec les jalons et leurs preuves, Commits, Fichiers, Échanges ; le
+  panneau : sa fusion, sa relecture, ses vérifications une à une, ses conflits, sa branche, le ticket et l'objectif
+  liés ; **Modifier** et **répondre** avec `rights.pull_write` ; **Fusionner** : une confirmation dit ce qui va être
+  fusionné, la demande nomme le commit de tête qu'elle vient de relire, puis le panneau dit la suite — demandée,
+  fusionnée, refusée avec les mots du serveur ; le même geste part d'« À faire »), **Branches** (le tableau pleine
+  largeur, le panneau d'une branche), **Issues** (Description, Échanges, l'état chez l'hôte, le ticket lié et son
+  étape — un ticket proposé s'y accepte ou s'y écarte quand son registre le dit (`can`) —, sa pull request, l'accord qui
+  attend sur une réponse) et **CI** (les vérifications par commit, une à une, la fin du journal d'un échec). Tout texte de l'hôte est
+  présenté comme venu d'ailleurs, échappé ; la source d'un fichier et les lignes d'un diff sont posées par insertion
+  de texte (`paint.ts`), jamais en HTML ; un fichier Markdown rendu passe par `docmd.ts`, échappé d'abord.
+  **Documentation**, en trois sous-onglets (`…/documentation/pages|modifier|historique/<chemin>`, `…/images/<nom>`,
+  `…/decisions/<n>`) : **Pages** (l'arborescence, la recherche, Nouvelle page ; en lecture la page rendue, son
+  sommaire, sa dernière modification — une personne dans le navigateur, Mika, un outil par MCP —, ses versions ; son
+  historique, revenir à une version ; renommer, déplacer, supprimer), **Images** (la grille, téléverser, copier le
+  lien, retirer) et **Décisions** (la liste, le choix, le contexte, les options écartées, la raison, ce qu'elle
+  remplace ; créer, modifier, remplacer, retirer, remettre en vigueur). **Le mode Modifier est un éditeur : Milkdown,
+  par son éditeur Crepe** (`@milkdown/crepe`, licence MIT — la bibliothèque de la maquette validée ; `editor.ts`), chargé à
+  la demande : son morceau (≈ 1,2 Mo, 371 ko compressé) ne pèse pas sur le reste du client. Sa barre d'outils et son
+  menu à la barre oblique sont en français ; ses couleurs sont celles du client, en clair et en sombre (les variables
+  `--crepe-…` de `styles/ecrans/projets.css` ; le thème des blocs de code vient de `@codemirror/theme-one-dark`, que
+  Crepe apporte déjà et que `package.json` déclare parce que `src/` l'importe). **Enregistrer** demande un mot sur ce
+  qui a changé et envoie le Markdown avec la version lue (en `multipart/form-data`) ; si la page a changé depuis, le
+  refus du serveur se dit et **ce qui est écrit reste** : on relit, puis on reprend sur la version actuelle. Une page
+  modifiée et pas enregistrée le montre (sa tête, l'arbre, l'onglet), quitter la vue le dit, et le brouillon attend.
+  Une image — par le bouton, glissée, collée — part au serveur, puis s'insère dans la page. **Rien de ce qu'une page
+  contient ne s'exécute ni ne se charge d'ailleurs** : en lecture, un rendu échappé (`docmd.ts`) ; dans l'éditeur, ce
+  que la bibliothèque laisse passer a été vérifié (un lien n'a d'adresse que http(s), mailto, tel ou relative ; du
+  HTML écrit dans le Markdown s'affiche comme du texte) ; dans les deux, seules les images de l'espace de
+  documentation, servies par l'API, sont chargées — toute autre adresse d'image se dit, sans être chargée.
+  L'écran ne recalcule aucune règle : pas de bouton sans `can` ou `rights`, les libellés d'étape et de statut sont
+  ceux du serveur (seule la couleur d'un état se choisit ici), rien de ce qui est saisi n'est vérifié ici, et un
+  geste refusé se dit sur place avec les mots du serveur (un 409 relit ce qu'on lisait). Un texte venu d'ailleurs
+  (`outside` : une issue d'un inconnu, un commentaire de l'hôte, la fin d'un journal de CI, la sortie d'une commande)
+  est cité dans sa présentation à lui, échappé, sans lien ni balisage ; un lien venu d'ailleurs ne s'ouvre que s'il
+  est http ou https. Ce que l'API ne sert pas ne s'invente pas ici. Sa pastille : `counts.projects` de `GET /api/moi`.
 - **Mail** : ses boîtes et celles qu'on lui partage (à leur niveau : lire, préparer, s'en servir ; une boîte partagée
   dit son non-lu à côté de son niveau, et celle qu'on ne fait que lire reste hors de Toutes les réceptions et de la
   pastille, ADR 0200), dossiers et non-lus, « Réponse attendue » (ce qu'elle juge appeler une réponse), la liste
@@ -135,10 +215,50 @@ Mika n'a qu'un élément (`#mika-corner`) : son visage dans la pastille du haut,
   polices ajoutées, une autre source, une autre zone), se repose sur la carte ouverte. Une carte qui ne se dessine pas
   (pas de WebGL, MapLibre qui ne vient pas, ses tuiles en échec de suite) laisse le plan dessiné et sa note, sans
   réessayer à chaque dessin — jusqu'à une autre carte servie.
-- **Carte** (ADR 0194 à 0196) : sur la carte du serveur (la même que Téléphone), ou sur le plan dessiné de ce qu'elle
-  montre quand elle ne se dessine pas. **Explorer** cherche dans l'index des lieux du serveur (rien ne sort) : un nom,
-  une catégorie, « Autour de moi » (la dernière position de son téléphone) ou « Dans cette zone » (le cadre de la carte,
-  recherché de nouveau quand on la déplace), et une adresse (Géoplateforme, relayée : seul le texte part). Autour de toi,
+- **Carte** (ADR 0194 à 0196, 0259) : sur la carte du serveur (la même que Téléphone), ou sur le plan dessiné de ce
+  qu'elle montre quand elle ne se dessine pas. Quatre onglets : Explorer, Événements, Itinéraire, Voyages. Trois sources
+  disent ce qu'est un lieu, chacune nommée là où elle parle : OpenStreetMap (l'index de ce serveur), l'office de
+  tourisme (DATAtourisme, une base de ce serveur) et Google Maps (le cache des notes et des avis de ce serveur) ; la
+  forme des fiches et des événements : la maquette de l'app Android (`frontend/Android/maquette/ecrans/carte-avis.js`, corrigée : Google
+  Maps à la place de Tripadvisor), posée dans la colonne de gauche. **Explorer** cherche dans l'index des lieux du
+  serveur (rien ne sort) : un nom, une catégorie, « Autour de moi » (`near=ici` : la dernière position de son
+  téléphone, que le serveur connaît, et qui précharge les notes de ta case — la liste se relit une fois quelques
+  secondes plus tard ; une position oubliée, son 409 se dit et la zone de la carte prend le relais) ou « Dans cette
+  zone » (le cadre de la carte, recherché de nouveau quand on la déplace), et une adresse (Géoplateforme, relayée : seul
+  le texte part). Sous la recherche, ses filtres : ouvert maintenant, ce que le serveur sait reconnaître (terrasse,
+  végétarien, vegan, accessible, à emporter, livraison), « 4 et plus » (la note Google), la cuisine parmi celles de la
+  liste ; l'ordre (les plus proches, les mieux notés) en tête de la liste. Chaque ligne dit la note Google et le nombre
+  d'avis, le prix, la cuisine, ouvert ou fermé (« Fermé · ouvre demain 12:00 »), avec une vignette quand le lieu a une
+  photo dont on sait l'auteur — cité juste sous la ligne, lié (« Photo : Camille R. · Google Maps » ; sa licence pour une
+  photo de l'office de tourisme) ; sans auteur (un regard de Mika, qui n'en garde pas), pas de vignette (R2, ADR 0269).
+  Au-dessus, la ligne des notes, dès qu'un lieu a une note, quelle que soit la couverture (« Notes : Google Maps »,
+  « Notes Google Maps lues aujourd'hui à 22:00 », et ce que le serveur en dit) ; un regard de Mika noté l'a aussi, et ses
+  lieux gardent leur note, leur prix et leur cuisine. « Actualiser » dans une fiche refait aussi sa ligne de la liste.
+  Choisir un lieu (dans la liste ou sur la carte) ouvre sa **fiche** à la place de la liste (`#carte/explorer/lieu-<id>`,
+  son objet d'OpenStreetMap d'abord) : la bande des photos (le plan d'abord, qui recadre la carte, puis les photos de
+  l'office de tourisme et de Google, chacune avec sa source, son auteur lié et sa licence ; le compte des photos sur
+  la tuile du plan ; sans photo, le plan seul), ouvert ou fermé, la cuisine, le prix, la note (« · Google Maps » tant
+  que le bloc Google n'est pas là) ; « Itinéraire », « Ajouter au voyage », « Appeler » et « Site » quand on les a,
+  « En parler à Mika » ; le bloc **Google Maps** (la note, le nombre d'avis, le prix et sa fourchette, le résumé, ce que
+  Google ajoute à la fiche, les avis — chacun avec son auteur lié et sa date en mots, un long avis replié —, « Voir sur
+  Google Maps », la date du cache et « Actualiser », qui dit en mots ce qui n'a pas pu se relire ; un lieu que Google
+  ne connaît pas le dit, avec la raison du serveur) ; les infos pratiques d'OpenStreetMap (sous « © les contributeurs
+  d'OpenStreetMap », la date de l'extrait, « Corriger sur OpenStreetMap ») ; ce qu'en dit l'office de tourisme (sa
+  description, ses labels, ses tarifs, ses contacts, son auteur et sa date, la Licence Ouverte) ; les événements tout
+  près. Une photo ne se charge que quand elle paraît (la première relève d'une photo de Google coûte un appel compté),
+  et s'ouvre dans la **visionneuse** (sa légende, son auteur lié, sa licence pour l'office de tourisme, d'où elle vient ;
+  les flèches du clavier). **Événements** (entre Explorer et Itinéraire) : quand (aujourd'hui, ce week-end, cette
+  semaine jusqu'au dimanche, des dates — des jours de Paris, l'heure des dates des événements, quel que soit le fuseau
+  du navigateur), quoi (les thèmes du serveur, « Gratuit »), un texte, autour de moi ou dans la zone de la carte ; la
+  liste groupée par jour (son quand, son lieu, son prix, sa distance, une vignette avec son auteur et sa licence), leurs épingles sur la carte, la couverture de la zone (« lue en partie : cases lues 11 sur 21 ») ; la fiche
+  d'un événement (`#carte/evenements/e:<uuid>`) : quand, où (son lieu nommé ouvre sa fiche), combien, le programme, ses
+  dates, ses contacts, ses photos, son auteur et sa date sous la Licence Ouverte ; « Itinéraire », « Ajouter au voyage »
+  (au jour du voyage où il tombe), « En parler à Mika ». Ce que Mika a trouvé en événements s'y montre en rose
+  (`#carte/evenements/regard-<n>` ; sa miniature du chat y mène, et un regard d'événements ouvert dans Explorer — une
+  miniature touchée avant d'être lue — y part en remplaçant l'adresse : « Retour » ramène au chat) ; une fiche n'est
+  « trouvée par Mika » que si l'événement est dans ce regard. Une fiche ouverte par un lien d'une fiche de l'autre
+  onglet (« Bientôt, tout près », le lieu d'un événement) a un retour qui y ramène (« Retour au lieu », « Retour à
+  l'événement »). Autour de toi,
   l'index élargit ses cercles jusqu'à trouver : au-delà de 20 km, la légende ne dit plus « autour de ta position » mais
   « les plus proches que l'index connaisse · jusqu'à … km » (le classement mêle pertinence et distance). La carte se
   cadre sur ce que dit la colonne : des lieux à quelques mètres les uns des autres se départagent (jusqu'au zoom 17), une
@@ -199,4 +319,6 @@ Mika n'a qu'un élément (`#mika-corner`) : son visage dans la pastille du haut,
   résultats par groupe au plus) : choisir un message ouvre son fil et l'y montre, surligné un instant ; le menu du
   compte change le thème et déconnecte. Sur un téléphone, les boutons de la barre de titre, réduits à leur icône,
   gardent leur nom (`title` et `aria-label`, posés par le cadre d'après leur libellé) ; ceux de la tête d'une section
-  de Paramètres ou d'une fenêtre gardent leur libellé.
+  de Paramètres ou d'une fenêtre gardent leur libellé. La barre du bas a huit entrées (Projets après le chat) ;
+  Paramètres s'y dit « Réglages ». Sur un écran large, les libellés des rubriques se replient sous 1360 px, et
+  « Rechercher partout » se réduit à sa loupe sous 1700 px.

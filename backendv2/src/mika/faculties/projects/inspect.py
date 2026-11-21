@@ -1,15 +1,19 @@
 """Ce que les projets montrent à un opérateur (ADR 0031).
 
-- **Projets** (menu) : la liste — mode, état, objectifs, prochaine exécution ;
-  toutes les exécutions ; toutes les décisions techniques.
-- **La fiche d'un projet** (type d'objet ``project``, clé = son numéro) :
-  Vue d'ensemble, Objectifs, Exécutions, Décisions techniques, Fichiers,
-  Dépôt git, Comportement et outils (avec ses liens de lecture : ce qu'il lit,
-  qui le lit — ADR 0257), Carnet. La fiche **gouverne** : chaque onglet porte
-  les formulaires de ce qu'il montre (``ActionSlot``), les actions qui valent
-  pour tout le projet sont en tête. Les onglets Fichiers (avec le téléchargement)
-  et Dépôt git vivent à part, dans ``inspect_files.py`` et ``inspect_git.py`` :
-  ils lisent les aides communes d'ici.
+- **Projets** (menu) : la page d'ensemble — « À faire » pour tous les projets,
+  la liste (mode, état, ce qui t'attend, objectifs, prochaine exécution), les
+  liens entre projets ; toutes les exécutions ; toutes les décisions techniques.
+- **La fiche d'un projet** (type d'objet ``project``, clé = son numéro), rangée par
+  ce qu'on y fait (ADR 0281) : Où il en est (ce qui t'attend en tête —
+  ``todo.py``, ``inspect_todo.py`` —, ses missions et ses objectifs en une ligne),
+  Missions et objectifs, Tickets, Suivi, Liens (ce qu'il lit, qui le lit, les
+  demandes — ADR 0257, 0271), Dépôt, Exécutions, Cadre (ses réglages, ses outils,
+  la validation de ses tickets), Accès, Décisions techniques, Fichiers, Carnet.
+  La fiche **gouverne** : chaque onglet porte les formulaires de ce qu'il montre
+  (``ActionSlot``), les actions qui valent pour tout le projet sont en tête. Les
+  onglets Fichiers (avec le téléchargement), Dépôt, Tickets et Suivi vivent à
+  part (``inspect_files.py``, ``inspect_git.py``, ``inspect_tracker.py``) : ils
+  lisent les aides communes d'ici.
 - **Sur la fiche d'une personne** : les projets qui la concernent.
 
 Lecture seule : les compteurs viennent de la tranche, l'histoire (exécutions,
@@ -30,7 +34,15 @@ from mika.contracts import identity as identity_c
 from mika.contracts import mcp as mcp_c
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
-from mika.faculties.projects import links
+from mika.faculties.projects import (
+    asks,
+    inspect_milestones,
+    inspect_reviews,
+    inspect_todo,
+    links,
+    tickets,
+    todo,
+)
 from mika.faculties.projects.actions import (
     BUNDLE_WORDS,
     DECISION_STATUS_FR,
@@ -51,18 +63,24 @@ from mika.faculties.projects.faculty import (
     NOTED,
     OPERATIONS,
     PROJECTS,
+    SMALL_FILES,
+    SMALL_LINES,
     Decision,
     Objective,
     Project,
     ProjectsState,
     busy,
+    by_pulls,
     in_force,
     live,
     objective_of,
     params,
     project_at,
+    readers_of,
 )
-from mika.faculties.projects.rhythm import always, cadence, daily_cap, pick, runs_today
+from mika.faculties.projects.pulls import pull_url
+from mika.faculties.projects.rhythm import always, cadence, daily_cap, pick, runs_today, stirred_due
+from mika.faculties.projects.tools import trigger_words
 from mika.faculties.projects.work import Why, next_run_at, why_not_now
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.events import Content, Event
@@ -100,13 +118,20 @@ from mika.kernel.inspect import (
     plural,
 )
 from mika.kernel.text import fold
-from mika.ports.workshop import argv_lines
+from mika.ports.workshop import (
+    CHECKS_FAILED,
+    CHECKS_PASSED,
+    CHECKS_PENDING,
+    PULL_CLOSED,
+    PULL_MERGED,
+    PULL_OPEN,
+    argv_lines,
+)
 from mika.vocab.episodes import Kind, outcome_words, project_target
 
 PAGE = 25
 FORGOTTEN = "(oublié)"
 SUMMARY_CLAMP = 260
-APPROVALS = Ref.approvals("ouvrir les actions à autoriser")
 
 MODE_FR = {c.PERSONA: "elle-même", c.PLAIN: "impersonnel"}
 MODE_LONG = dict(MODE_CHOICES)
@@ -234,12 +259,19 @@ def _progress(p: Project) -> Meter:
     return Meter(done / once if once else 0.0, f"{value} {line}" if line else "aucun objectif", tone)
 
 
-def tab_counts(p: Project) -> dict[str, int]:
+def tab_counts(p: Project, s: ProjectsState | None = None) -> dict[str, int]:
     """Ce que les onglets de sa fiche comptent, par leur nom (``Overview.counts``) : ses objectifs (hors retirés),
     ses exécutions et ses décisions en vigueur — la tuile « Décisions en vigueur » de sa vue d'ensemble dessinée dit
-    ce dernier nombre, quand sa vue n'en montre que les dernières."""
+    ce dernier nombre, quand sa vue n'en montre que les dernières —, ses tickets ouverts et ce qui reste ouvert dans
+    ses listes de suivi ; avec l'état (``s``), ses liens : ce qu'il lit et qui le lit."""
+    b = p.board
     return {"objectifs": sum(1 for o in p.objectives if o.status != c.DROPPED), "executions": p.runs,
-            "decisions": in_force(p)}
+            **({"liens": len(p.reads) + len(readers_of(s, p.id))} if s is not None else {}),
+            "decisions": in_force(p),
+            # son registre (ADR 0268) : ses tickets ouverts, et les éléments ouverts de ses listes de suivi
+            "tickets": sum(n for name, status, n in b.counts if name == c.TICKETS and status in c.STAGES_OPEN),
+            "suivi": sum(n for lst in b.lists for name, status, n in b.counts
+                         if name == lst.name and status not in lst.closed)}
 
 
 #: ce qui retient son exécution (``work.why_not_now``), en mots ; ``{waits}`` : « ou une attente se termine »
@@ -302,7 +334,8 @@ def _remote_ref(p: Project) -> Ref | str:
     if not p.remote:
         return "aucun"
     shown = re.sub(r"\.git$", "", p.remote.split("://", 1)[-1])
-    return Ref.url(re.sub(r"\.git$", "", p.remote), f"{shown} ({p.branch})")
+    # son flux, quand il passe par des pull requests (ADR 0274) : la branche nommée ne reçoit que ce qui est accepté
+    return Ref.url(re.sub(r"\.git$", "", p.remote), f"{shown} ({p.branch}{', par pull request' if by_pulls(p) else ''})")
 
 
 def _subject(s: ProjectsState, ctx: InspectContext) -> Project | Note:
@@ -412,13 +445,21 @@ def _search(s: ProjectsState, frame: Frame, ctx: InspectContext, text: str, limi
 
 
 def _awaiting(s: ProjectsState, frame: Frame) -> tuple[int, str]:
-    """Les projets arrêtés sur un accord de l'opérateur."""
-    n = sum(1 for p in s.projects.values() if pending_of(frame, p.id))
-    return n, "attendent ton accord"
+    """Les projets où quelque chose attend quelqu'un (ADR 0281) : un accord, un plan, un ticket, un point d'arrêt."""
+    n = len(todo.counts(todo.everywhere(s, todo.pending_in(frame))))
+    return n, "t'attendent"
+
+
+def awaited(frame: Frame, p: Project, w: todo.Waiting) -> Any:
+    """Qui une attente attend, tel que la console le dit (``todo.awaits`` : qui peut la régler) : la personne nommée,
+    sinon le propriétaire du projet — « toi » pour un projet à elle ou confié sans personne, et pour un accord, que
+    seul quelqu'un qui s'occupe d'elle donne."""
+    person = todo.awaits(p, w)
+    return _person(frame, person) if person else "toi"
 
 
 LIST_COLUMNS = (Column("projet", role="title"), Column("mode", "fit", role="badge"), Column("pour qui"), Column("état", "fit", role="badge"),
-                Column("objectifs"), Column("prochaine exécution"), Column("dernière", "fit"),
+                Column("t'attend", "fit"), Column("objectifs"), Column("prochaine exécution"), Column("dernière", "fit"),
                 Column("où il en est", role="body"),
                 Column("priorité", detail=True), Column("plage de travail", detail=True),
                 Column("agenda", detail=True), Column("outils", detail=True), Column("dépôt distant", detail=True),
@@ -433,7 +474,7 @@ def _tools_words(p: Project) -> str:
 
 @PROJECTS.inspect("tous", title="Ses projets", section="projets", order=5, params=[STATE_PARAM, MODE_PARAM],
                   badge=_awaiting,
-                  description="Suivre ses objectifs, repérer ce qui attend ton accord et ouvrir un espace de travail.")
+                  description="Voir ce qui t'attend dans ses projets, suivre leurs objectifs et ouvrir un espace de travail.")
 def _list_view(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     now = frame.now
     pm = params(frame.env.params_of("projects", frame.root))
@@ -442,13 +483,18 @@ def _list_view(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Bloc
     shown = [p for p in every if (wanted == "tous" or (wanted == "vivants" and live(p)) or p.status == wanted)
              and (not mode or p.mode == mode)]
     page, pager = paginate(shown, ctx.pager(size=PAGE, total=len(shown)))
-    texts = _texts(ctx, [r for p in page for r in (p.title_ref, p.summary_ref)])
-    waiting = {p.id for p in s.projects.values() if pending_of(frame, p.id)}
+    found = todo.everywhere(s, todo.pending_in(frame))  # ce qui attend quelqu'un, tous projets (ADR 0281)
+    waiting = todo.counts(found)
+    linked = _linked(s, frame)
+    texts = _texts(ctx, [*(r for p in page for r in (p.title_ref, p.summary_ref)), *inspect_todo.refs(found),
+                         *(s.projects[w.project].title_ref for w in found if w.project in s.projects),
+                         *(t.title_ref for pair in linked for t in pair[:2])])
     rows = []
     for p in page:
         rows.append(Row((
             _link(p, _text(texts, p.title_ref, "(sans titre)")), _mode(p),
-            "elle" if p.authority == c.SELF and not p.owner else _person(frame, p.owner), _state(p), _progress(p),
+            "elle" if p.authority == c.SELF and not p.owner else _person(frame, p.owner), _state(p),
+            Badge(plural(waiting[p.id], "chose", "choses"), "warn") if p.id in waiting else "—", _progress(p),
             _next_words(p, s, frame, ctx), When(p.last_run_at) if p.last_run_at else "—",
             Text(_text(texts, p.summary_ref, "aucune exécution encore"), clamp=160),
             _priority(p), window_words(p), schedule_words(p.schedule), _tools_words(p), _remote_ref(p),
@@ -467,8 +513,9 @@ def _list_view(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Bloc
             Stat("Objectifs", open_once, f"{agree(open_once, 'ponctuel ouvert', 'ponctuels ouverts')} · "
                                          f"{plural(constants, 'constant', 'constants')}"),
             Stat("Exécutions (24 h)", today, f"{pm.runs_per_hour} par heure au plus, tous projets confondus"),
-            Stat("Attendent ton accord", len(waiting), "pour faire sortir quelque chose",
-                 "warn" if waiting else "", APPROVALS),
+            Stat("T'attendent", len(found), f"dans {plural(len(waiting), 'projet', 'projets')} : accords, plans, "
+                                            "tickets, points d'arrêt" if found else "rien : ils avancent seuls",
+                 "warn" if found else ""),
             Stat("Archivés", sum(1 for p in every if p.status == c.ARCHIVED)),
         )),
         Table(LIST_COLUMNS, tuple(rows), title="Projets", pager=pager, layout="cards",
@@ -477,7 +524,58 @@ def _list_view(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Bloc
               caption="Une exécution vise un objectif : celui que tu demandes, sinon le constant le plus en retard, "
                       "sinon le premier ponctuel ouvert. Un projet en mode « elle-même » ne travaille pas pendant son sommeil ; "
                       "un projet impersonnel suit seulement sa plage de travail."),
+        # après la liste, qui reste la première table de sa vue (sa bascule « Tableau » et sa pagination gardent
+        # leur clé) : la page dessinée pose « À faire » en tête
+        inspect_todo.table(s, found, texts, lambda p, w: awaited(frame, p, w),
+                           named=lambda p: _link(p, _text(texts, p.title_ref, "(sans titre)")),
+                           title=inspect_todo.EVERYWHERE_TITLE, empty=inspect_todo.EVERYWHERE_EMPTY,
+                           most=inspect_todo.EVERYWHERE_SHOWN),
+        _linked_table(linked, texts),
     ]
+
+
+#: les liens entre ses projets, sur la page d'ensemble (ADR 0281)
+LINKED_TITLE = "Dépendances entre projets"
+
+
+def _linked(s: ProjectsState, frame: Frame) -> list[tuple[Project, Project, links.Grant, tuple[Any, ...]]]:
+    """Qui lit qui, parmi ses projets vivants : (le lecteur, le projet lu, ce que le lien donne maintenant, ses
+    demandes encore ouvertes chez lui), par lecteur puis dans l'ordre de ses liens."""
+    world = links.world_of(frame)
+    out = []
+    for p in sorted(s.projects.values(), key=lambda p: p.id):
+        if not live(p):
+            continue
+        for r in links.readings(s, p, world):
+            if r.project is not None:
+                opened = tuple(a for a in p.asks if a.target == r.id and asks.opened(a))
+                out.append((p, r.project, links.NOTHING if r.suspended else r.grant, opened))
+    return out
+
+
+def _linked_table(linked: Sequence[tuple[Project, Project, links.Grant, tuple[Any, ...]]],
+                  texts: Mapping[str, str]) -> Table:
+    """« Liens entre projets » : une ligne par lien — qui lit, qui est lu, ce que le lien donne, les demandes en
+    cours du lecteur chez le projet lu (chacune mène à son ticket)."""
+    rows = []
+    for reader, target, grant, opened in linked:
+        said: Any = "aucune"
+        if opened:
+            first = opened[-1]
+            said = Ref("subject", f"project/{target.id}",
+                       f"{plural(len(opened), 'demande', 'demandes')} en cours"
+                       f" ({ASK_WORDS[asks.state(first.status)]})" if len(opened) == 1 else
+                       f"{plural(len(opened), 'demande', 'demandes')} en cours",
+                       (("onglet", "tickets"), *((("element", f"#{first.number}"),) if len(opened) == 1 else ())))
+        rows.append(Row((_link(reader, _text(texts, reader.title_ref, "(sans titre)"), "liens"),
+                         _link(target, _text(texts, target.title_ref, "(sans titre)"), "liens"),
+                         Text(gives_words(grant) if grant.see else "rien : le lien est suspendu",
+                              tone="" if grant.see else "warn"), said),
+                        tone="" if grant.see else "muted"))
+    return Table((Column("le projet"), Column("lit"), Column("ce qu'il en reçoit"), Column("ses demandes", "fit")),
+                 tuple(rows), title=LINKED_TITLE, empty="aucun projet n'en lit un autre",
+                 caption="Un projet en lit d'autres sans jamais y écrire ; il peut leur adresser une demande, un "
+                         "ticket chez eux. Les liens se posent sur la fiche du projet lecteur, onglet Dépendances.")
 
 
 RUN_COLUMNS = (Column("quand", "fit"), Column("projet"), Column("objectif"), Column("verdict", "fit"),
@@ -494,9 +592,10 @@ def _proof(verdict: str, proven: bool) -> Any:
 def _commit_ref(p: Project | None, sha: str) -> Any:
     if not sha:
         return "—"
+    # le journal porte l'identifiant complet (ADR 0277) : on en montre l'abrégé, le lien garde le complet
     if p is None:
-        return Text(sha, "mono")
-    return Ref("subject", f"project/{p.id}", sha, (("onglet", "git"), ("commit", sha)))
+        return Text(sha[:7], "mono")
+    return Ref("subject", f"project/{p.id}", sha[:7], (("onglet", "git"), ("commit", sha)))
 
 
 def _objective_words(p: Project | None, oid: int, texts: Mapping[str, str]) -> Any:
@@ -648,14 +747,47 @@ def _state_notes(p: Project, s: ProjectsState, frame: Frame, ctx: InspectContext
     if p.status == c.ACTIVE and p.plan_state == c.TO_FRAME:
         out.append(Note("À cadrer : sa séance de cadrage relira la demande et écrira son plan avant toute autre "
                         "exécution.", "info"))
-    elif p.status == c.ACTIVE and p.plan_state == c.PROPOSED:
-        out.append(Note("Son plan attend une réponse : « Valider le plan » le lance, « Demander une révision » le lui "
-                        "fait reprendre (ou en conversation, avec elle).", "warn"))
     if p.status != c.ARCHIVED and not any(o.status == c.OPEN for o in p.objectives):
-        out.append(Note("Aucun objectif ouvert : il n'a rien à faire. Ajoutes-en un (onglet Objectifs).", "warn"))
+        out.append(Note("Aucun objectif ouvert : il n'a rien à faire. Ajoutes-en un (« Missions et objectifs »).", "warn"))
     if busy(s, p.id):
         out.append(Note("Elle y travaille en ce moment.", "info"))
     return out
+
+
+#: sur la ligne d'un objectif (ADR 0274) : sa branche et l'état de sa pull request, puis sa page chez l'hôte — la
+#: fiche dessinée les reprend par ces titres
+PULL_TITLE, PULL_LINK_TITLE = "Sa branche et sa pull request", "Sa pull request chez l'hôte"
+PULL_FR = {PULL_OPEN: "ouverte, en attente de fusion", PULL_MERGED: "fusionnée", PULL_CLOSED: "fermée sans fusion"}
+#: les vérifications du commit d'une pull request ouverte (ADR 0275) ; un dépôt sans CI n'en dit rien
+CHECKS_FR = {CHECKS_PENDING: "ses vérifications tournent encore", CHECKS_PASSED: "ses vérifications sont passées",
+             CHECKS_FAILED: "ses vérifications ont échoué (l'objectif est rouvert)"}
+
+
+def pull_words(o: Any) -> str:
+    """La branche d'un objectif et où en est sa pull request, en une ligne."""
+    said = [f"branche {o.branch}"] if o.branch else []
+    if o.pull_proposal:
+        said.append("pull request proposée, elle attend ton accord")
+    elif o.pull_state:
+        state = "ouverte, des changements sont demandés" if o.pull_state == PULL_OPEN and o.pull_changes \
+            else PULL_FR.get(o.pull_state, o.pull_state)
+        said.append(f"pull request{f' n° {o.pull}' if o.pull else ''} {state}")
+        if o.pull_state == PULL_OPEN and o.pull_conflicts:
+            said.append("en conflit avec la base : elle ne peut pas être fusionnée telle quelle")
+        if o.pull_state == PULL_OPEN and o.checks in CHECKS_FR:
+            said.append(CHECKS_FR[o.checks])
+    elif o.branch and o.unsent:
+        said.append("pas encore de pull request (elle se propose quand l'objectif est fait)")
+    return " · ".join(said)
+
+
+def pull_detail(p: Project, o: Any) -> list[Any]:
+    """Ce que la ligne d'un objectif dit de sa branche et de sa pull request, sur un projet qui passe par elles."""
+    words = pull_words(o) if by_pulls(p) or o.pull_state else ""
+    if not words:
+        return []
+    url = pull_url(p, o)
+    return [Prose(words, title=PULL_TITLE), *([Prose(url, title=PULL_LINK_TITLE)] if url else [])]
 
 
 def exact(s: ProjectsState, proposal: int) -> str:
@@ -743,9 +875,51 @@ def _plan_section(p: Project, frame: Frame, texts: Mapping[str, str]) -> Section
                    "étapes sont ses objectifs, dans l'ordre, chacun avec son critère de fait.")
 
 
-@PROJECTS.inspect("apercu", title="Vue d'ensemble", subject="project", order=10,
-                  description="Où en est le projet : ce qui attend ta décision, son avancement, sa prochaine exécution, "
-                              "son dépôt, ses objectifs, ses dernières exécutions et ses décisions en vigueur.")
+#: sur « Où il en est » (ADR 0281) : ses missions — ses objectifs constants — et ses objectifs ponctuels en cours, une
+#: ligne chacun ; la fiche dessinée les retrouve par ces titres
+MISSIONS_TITLE, ONCE_TITLE = "Missions", "Objectifs en cours"
+MISSION_COLUMNS = (Column("n°", "fit"), Column("mission"), Column("état", "fit"), Column("revient"),
+                   Column("déclenchée par"), Column("dernier passage", "fit"), Column("ce qui l'a éveillée"))
+ONCE_COLUMNS = (Column("n°", "fit"), Column("objectif"), Column("état", "fit"), Column("jalons", "fit"),
+                Column("branche et pull request"), Column("relecture"), Column("dernier passage"))
+
+
+def _mission_row(p: Project, o: Objective, texts: Mapping[str, str], frame: Frame, ctx: InspectContext,
+                 pm: Any) -> Row:
+    """Une mission en une ligne : sa cadence, ce qui la déclenche, son dernier passage, ce qui l'a éveillée."""
+    back = "sur événement seulement" if o.only_on_event else _cadence_words(o, pm)
+    if o.at_once and not o.passed_at:
+        back += " · premier passage tout de suite"
+    stirred: Any = "—"
+    if o.status == c.OPEN and (due := stirred_due(o, pm)) is not None:
+        causes = ", ".join(dict.fromkeys(trigger_words(x.key) for x in o.stirred[-3:]))
+        more = len(o.stirred) + o.stirred_more
+        stirred = Text(f"{causes or plural(more, 'cause', 'causes')} — passage "
+                       + ("dès que possible" if due <= frame.now else f"à partir de {ctx.when(due)}"), tone="info")
+    return Row((o.id, Text(_text(texts, o.text_ref), clamp=160),
+                Badge(OBJ_FR.get(o.status, o.status), OBJ_TONE.get(o.status, "")),
+                back if o.status == c.OPEN else "mise de côté",
+                ", ".join(trigger_words(k) for k in o.on) or "—",
+                f"il y a {_ago(frame.now - o.passed_at)}" if o.passed_at else "jamais encore", stirred),
+               href=_link(p, tab="objectifs"), tone="danger" if o.status == c.BLOCKED else "")
+
+
+def _once_row(p: Project, o: Objective, texts: Mapping[str, str], frame: Frame, pm: Any) -> Row:
+    """Un objectif ponctuel en une ligne : ses jalons, sa branche et sa pull request (ses vérifications comprises),
+    le verdict de sa relecture, son dernier passage."""
+    marks = inspect_milestones.progress(o).removeprefix("jalons ")
+    return Row((o.id, Text(_text(texts, o.text_ref), clamp=160),
+                Badge(OBJ_FR.get(o.status, o.status), OBJ_TONE.get(o.status, "")),
+                Text(marks, tone="warn" if "t'attend" in marks else "") if marks else "—",
+                Text(pull_words(o), clamp=160) if (by_pulls(p) or o.pull_state) and pull_words(o) else "—",
+                Text(inspect_reviews.review_words(p, o), clamp=160) if inspect_reviews.review_words(p, o) else "—",
+                _last_words(o, frame.now, pm)),
+               href=_link(p, tab="objectifs"), tone="danger" if o.status == c.BLOCKED else "")
+
+
+@PROJECTS.inspect("apercu", title="Où il en est", subject="project", order=10,
+                  description="Où en est le projet : ce qui t'attend en tête, son avancement, ses missions et ses "
+                              "objectifs en cours, ce qui vient ensuite, son plan, ses dernières exécutions.")
 def _overview(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     p = _subject(s, ctx)
     if isinstance(p, Note):
@@ -753,11 +927,13 @@ def _overview(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block
     pm = params(frame.env.params_of("projects", frame.root))
     pending = pending_of(frame, p.id)
     decisions = [d for d in p.decisions if d.status == c.IN_FORCE][-5:]
+    found = todo.of_project(p, todo.pending_in(frame))  # ce qui l'attend, dans l'ordre où s'en occuper (ADR 0281)
     texts = _texts(ctx, [p.description_ref, p.summary_ref, p.request_ref, p.plan_ref, p.questions_ref,
                          *(o.text_ref for o in p.objectives),
                          *(r for d in decisions for r in (d.title_ref, d.choice_ref)),
-                         *(v.summary_ref for v in pending)])
+                         *(v.summary_ref for v in pending), *inspect_todo.refs(found)])
     blocks: list[Block] = [*_state_notes(p, s, frame, ctx)]
+    blocks.append(inspect_todo.table(s, found, texts, lambda q, w: awaited(frame, q, w)))
     approvals = _approvals(p, s, frame, texts)
     if approvals is not None:
         blocks.append(approvals)
@@ -774,28 +950,23 @@ def _overview(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block
         Stat("Dernier commit", Text(p.last_commit[:7], "mono") if p.last_commit else "aucun encore",
              href=_link(p, tab="git")),
     ), title="Où il en est"))
-    open_rows = []
-    for o in sorted(p.objectives, key=lambda o: (OBJ_ORDER.get((o.kind, o.status), 9), o.id)):
-        if o.status == c.DROPPED:
-            continue
-        open_rows.append(Row((o.id, Text(_text(texts, o.text_ref), clamp=160),
-                              Badge(KIND_FR.get(o.kind, o.kind), KIND_TONE.get(o.kind, "")),
-                              Badge(OBJ_FR.get(o.status, o.status), OBJ_TONE.get(o.status, "")),
-                              _last_words(o, frame.now, pm)), href=_link(p, tab="objectifs")))
+    living = sorted((o for o in p.objectives if o.status in LIVING),
+                    key=lambda o: (OBJ_ORDER.get((o.kind, o.status), 9), o.id))
+    missions = [o for o in living if o.kind == c.CONSTANT]
+    once = [o for o in living if o.kind == c.ONCE]
+    more = "Tous, leurs comptes rendus et leurs boutons : « Missions et objectifs »."
+    blocks.append(Table(MISSION_COLUMNS, tuple(_mission_row(p, o, texts, frame, ctx, pm) for o in missions[:8]),
+                        title=MISSIONS_TITLE, empty="aucune mission : un objectif constant, qui revient",
+                        caption=more if len(missions) > 8 else ""))
+    blocks.append(Table(ONCE_COLUMNS, tuple(_once_row(p, o, texts, frame, pm) for o in once[:8]), title=ONCE_TITLE,
+                        empty="aucun objectif ponctuel en cours", caption=more if len(once) > 8 else ""))
     recent = ctx.events([c.RUN_REPORTED], 5, where=("project", p.id))
-    blocks.append(Grid((
-        Table((Column("n°", "fit"), Column("objectif"), Column("sorte", "fit"), Column("état", "fit"),
-               Column("dernier passage")), tuple(open_rows[:6]), title="Ses objectifs",
-              empty="aucun objectif : ajoutes-en un (onglet Objectifs)",
-              caption="Tous les objectifs, leur cadence et leurs boutons : onglet Objectifs."
-              if len(open_rows) > 6 else ""),
-        Timeline(tuple(
+    blocks.append(Timeline(tuple(
             Entry(e.at, f"{VERDICT_FR.get(e.data.verdict, e.data.verdict)} — objectif n° {e.data.objective}"
                   if e.data.objective else VERDICT_FR.get(e.data.verdict, e.data.verdict),
                   _said(e.data.summary), tone=VERDICT_TONE.get(e.data.verdict, ""),
-                  meta=f"commit {e.data.commit}" if e.data.commit else "", href=Ref("episode", e.correlation, ""))
-            for e in recent), title="Dernières exécutions", empty="aucune exécution encore"),
-    ), columns=2))
+                  meta=f"commit {e.data.commit[:7]}" if e.data.commit else "", href=Ref("episode", e.correlation, ""))
+        for e in recent), title="Dernières exécutions", empty="aucune exécution encore"))
     blocks.append(Grid((
         # son mode et sa plage sont dans les faits de son en-tête ; son dernier commit, dans la bande
         Fields((("quand", _next_words(p, s, frame, ctx)),
@@ -804,11 +975,11 @@ def _overview(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block
                title="Prochaine exécution"),
         Prose(_text(texts, p.description_ref), title="Le cadre") if p.description_ref
         else Note("Aucun cadre écrit : elle suit le titre, ses objectifs et les consignes. Il se change dans l'onglet "
-                  "Comportement et outils.", "muted", title="Le cadre"),
+                  "Cadre.", "muted", title="Le cadre"),
         Fields((("dépôt distant", _remote_ref(p)),
                 ("dernier échange", Text(p.remote_line, tone="ok" if p.remote_ok else "danger", clamp=90)
                  if p.remote_line else "aucun"),
-                ("l'histoire complète", _link(p, "onglet Dépôt git", "git"))),
+                ("l'histoire complète", _link(p, "onglet Dépôt", "git"))),
                title="Son dépôt"),
     ), columns=3))
     if decisions:
@@ -824,7 +995,12 @@ def _last_words(o: Objective, now: int, pm: Any) -> str:
         return "mis de côté : rouvre-le pour qu'il revienne"
     if o.kind == c.CONSTANT:
         last = f"il y a {_ago(now - o.passed_at)}" if o.passed_at else "jamais encore"
-        return f"{last} · revient {_cadence_words(o, pm)}"
+        back = "sans cadence" if o.only_on_event else f"revient {_cadence_words(o, pm)}"
+        if o.at_once and not o.passed_at:  # son premier passage n'attend pas une cadence (ADR 0280)
+            back += " · premier passage tout de suite"
+        # ce qui le déclenche en plus (ou à la place) de sa cadence
+        fired = f" · déclenché par {', '.join(trigger_words(k) for k in o.on)}" if o.on else ""
+        return f"{last} · {back}{fired}"
     if o.status == c.DONE and o.closed_at:
         return f"fait il y a {_ago(now - o.closed_at)}"
     if o.last_run_at:
@@ -840,11 +1016,12 @@ OBJECTIVE_COLUMNS = (Column("n°", "fit"), Column("objectif"), Column("sorte", "
                      Column("posé par", "fit", detail=True))
 
 
-@PROJECTS.inspect("objectifs", title="Objectifs", subject="project", order=20, params=[OBJECTIVE_PARAM],
-                  description="Ce que le projet cherche, ligne par ligne : un objectif ponctuel se coche une fois (avec "
-                              "une preuve), un objectif constant revient selon sa cadence. Déplie une ligne pour la "
-                              "lancer, la modifier ou changer son statut. Les objectifs ouverts et bloqués d'abord ; "
-                              "les faits et les retirés se filtrent.")
+@PROJECTS.inspect("objectifs", title="Missions et objectifs", subject="project", order=12, params=[OBJECTIVE_PARAM],
+                  description="Ce que le projet cherche, ligne par ligne : une mission (un objectif constant) revient "
+                              "selon sa cadence ou quand quelque chose la déclenche, un objectif ponctuel se coche une "
+                              "fois (avec une preuve). Chaque ligne porte ses boutons : la lancer, la modifier, "
+                              "changer son statut, ses jalons. Les ouverts et les bloqués d'abord ; les faits et les "
+                              "retirés se filtrent.")
 def _objectives_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     p = _subject(s, ctx)
     if isinstance(p, Note):
@@ -858,7 +1035,8 @@ def _objectives_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list
                      or (wanted == "vivants" and o.status in LIVING)),
                     key=lambda o: (OBJ_ORDER.get((o.kind, o.status), 9), o.id))
     page, pager = paginate(chosen, ctx.pager(size=PAGE, total=len(chosen)))  # une page de formulaires, pas mille
-    texts = _texts(ctx, [r for o in page for r in (o.text_ref, o.note_ref, o.result_ref)])
+    texts = _texts(ctx, [*(r for o in page for r in (o.text_ref, o.note_ref, o.result_ref)),
+                         *inspect_milestones.refs(page), *inspect_reviews.refs(page)])
     rows = []
     for o in page:
         text = _text(texts, o.text_ref)
@@ -877,10 +1055,25 @@ def _objectives_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list
             detail.append(Toolbar(tuple(buttons), title="Cet objectif"))
             detail.append(Disclosure("Modifier l'objectif", (ActionSlot("projects.objectif_modifier", (
                 ("objective", str(o.id)), ("text", texts.get(o.text_ref, "")), ("kind", o.kind),
-                ("cadence_hours", str(o.cadence_us // HOUR))), title="Modifier l'objectif", compact=True),)))
+                # ses déclencheurs tels quels (une liste : le champ en fait une ligne chacun), la case cochée ou non
+                ("cadence_hours", str(o.cadence_us // HOUR)), ("on", o.on),
+                ("only_on_event", "on" if o.only_on_event else ""), ("routine", texts.get(o.routine_ref, "")),
+                ("at_once", "on" if o.at_once else "")),
+                title="Modifier l'objectif", compact=True),)))
+        # ses jalons, leur preuve, et ce que tu y fais — ou la liste de passage d'un constant (ADR 0273) ; après
+        # « Modifier l'objectif », qui reste le premier panneau de sa ligne
+        detail += inspect_milestones.detail(o, texts, editable)
+        detail += pull_detail(p, o)  # sa branche et sa pull request, leur état et un lien (ADR 0274)
+        detail += inspect_reviews.detail(p, o, texts)  # son dernier verdict de relecture et ses constats (ADR 0276)
         rhythm = _last_words(o, frame.now, pm)
+        if o.status in LIVING and (where := inspect_milestones.progress(o)):
+            rhythm += f" · {where}"
         if o.waiting_until > frame.now:
             rhythm = f"en attente jusqu'à {ctx.when(o.waiting_until)}"
+        elif o.status == c.OPEN and (due := stirred_due(o, pm)) is not None:
+            # quelque chose l'a déclenché : il passe quand le travail s'est posé
+            rhythm += f" · {plural(len(o.stirred) + o.stirred_more, 'cause', 'causes')} en attente, passage " + \
+                ("dès que possible" if due <= frame.now else f"à partir de {ctx.when(due)}")
         rows.append(Row((o.id, Text(text, clamp=300), Badge(KIND_FR.get(o.kind, o.kind), KIND_TONE.get(o.kind, "")),
                          Badge(OBJ_FR.get(o.status, o.status), OBJ_TONE.get(o.status, "")), rhythm, o.runs,
                          Text(_text(texts, o.note_ref, "—"), clamp=220), AUTHOR_FR.get(o.author, o.author)),
@@ -896,14 +1089,19 @@ def _objectives_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list
         Table(OBJECTIVE_COLUMNS, tuple(rows), title="Ses objectifs", pager=pager,
               empty="aucun objectif : ajoutes-en un ci-dessous" if not p.objectives else "aucun objectif ici (filtre)",
               caption=f"Une exécution vise un objectif : celui que tu lances, sinon le constant le plus en retard, sinon "
-                      f"le premier ponctuel ouvert. Un ponctuel qui n'est pas fait après {pm.once_runs_max} exécutions "
-                      f"bloque ; un objectif qui n'a rien conclu {pm.silent_before_blocked} fois de suite aussi."),
+                      f"le premier ponctuel ouvert. Un constant que quelque chose a déclenché passe quand rien de "
+                      f"neuf n'est arrivé depuis {max(1, pm.stir_settle_us // MINUTE)} min, une heure au plus après "
+                      f"la première cause. Un ponctuel qui n'est pas fait après {pm.once_runs_max} exécutions "
+                      f"bloque — s'il a des jalons, après {pm.milestone_runs_max} exécutions de suite sans en "
+                      f"atteindre un nouveau ; un objectif qui n'a rien conclu {pm.silent_before_blocked} fois de "
+                      f"suite aussi. « Fait » attend que ses jalons soient atteints."),
     ]
     if editable:
         out.append(Section("Ajouter un objectif", (ActionSlot("projects.objectif_ajouter", title="Ajouter un objectif",
                                                               compact=True),),
                            description="Ponctuel : à faire une fois (« Créer un module RDP »). Constant : à entretenir, "
-                                       "il revient selon sa cadence (« Améliorer la sécurité »)."))
+                                       "il revient selon sa cadence (« Améliorer la sécurité ») — ou quand quelque "
+                                       "chose le déclenche : un commit d'un projet qu'il lit, un signal d'app."))
     return out
 
 
@@ -1031,10 +1229,11 @@ def _decisions_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[
 NEXT_RUN_LABEL = "prochaine exécution"
 
 
-@PROJECTS.inspect("comportement", title="Comportement et outils", subject="project", order=70,
+@PROJECTS.inspect("comportement", title="Cadre", subject="project", order=32,
                   description="Comment elle y travaille : son mode (elle, avec son humeur et ses avis, ou un travail "
                               "impersonnel), son rythme et sa plage de travail, ce qu'elle a le droit de faire sortir, "
-                              "et les outils qu'elle a en main.")
+                              "la relecture de son travail, les outils et les services qu'elle a en main, la "
+                              "validation de ses tickets et leur publication en issues.")
 def _behaviour_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     """Le formulaire « Modifier le projet », puis ses réglages en faits — son mode, son rythme (et sa prochaine
     exécution), sa liberté — et ses outils. La fiche dessinée (``app/handmade/subjects/project.py``) montre le
@@ -1076,8 +1275,49 @@ def _behaviour_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[
                title="Sa liberté"),
     ), columns=2))
     blocks.append(_tools_section(p, frame, editable))
-    blocks.append(_links_section(p, s, frame, ctx, editable))
+    blocks.append(_tickets_section(p, editable))
     return blocks
+
+
+#: le réglage de ses tickets, sur « Cadre » (ADR 0270, 0275, 0281) : la fiche dessinée le retrouve par ce titre
+TICKETS_SETTING_TITLE = "Ses tickets et ses issues"
+REVIEW_FR = {c.REVIEW_ALWAYS: "toujours par toi", c.REVIEW_LARGE: "par toi, sauf pour un petit ticket"}
+ISSUES_FR = {c.ISSUES_NEVER: "jamais", c.ISSUES_ASK: "sur ton accord, ticket par ticket",
+             c.ISSUES_ALWAYS: "toujours (la synchronisation)"}
+
+
+def _tickets_section(p: Project, editable: bool) -> Section:
+    """Ce qui règle ses tickets : qui valide le plan d'un ticket, la borne d'un petit ticket, ses fichiers protégés,
+    la publication de ses tickets en issues — en faits, et le formulaire qui les change (``projects.tickets_regler``)
+    tant que le projet se modifie."""
+    files, lines_ = p.small_files or SMALL_FILES, p.small_lines or SMALL_LINES
+    items: list[Any] = [Fields((
+        ("validation du plan d'un ticket", REVIEW_FR.get(p.ticket_review, p.ticket_review)),
+        ("un petit ticket", f"{plural(files, 'fichier', 'fichiers')} et {plural(lines_, 'ligne', 'lignes')} au plus"),
+        ("fichiers protégés", Text(", ".join(p.protected), "mono") if p.protected else "aucun"),
+        ("ses tickets en issues chez l'hôte", ISSUES_FR.get(p.issues, p.issues) if p.remote
+         else "sans dépôt distant : rien ne se publie"),
+        ("la fusion d'une pull request", "toujours par toi, chez l'hôte")), columns=2)]
+    if editable:
+        items.append(Disclosure("Régler la validation des plans, la borne des petits tickets et la publication en "
+                                "issues", (ActionSlot("projects.tickets_regler", title="Enregistrer", compact=True),)))
+    return Section(TICKETS_SETTING_TITLE, tuple(items),
+                   description="Un ticket suit un parcours : elle l'analyse, pose une question ou écrit son plan ; "
+                               "son plan validé devient un objectif. Un petit ticket peut se valider seul ; y "
+                               "toucher un fichier protégé n'est jamais petit.")
+
+
+# ── La fiche : ses liens ──────────────────────────────────────────────────
+
+
+@PROJECTS.inspect("liens", title="Dépendances", subject="project", order=26,
+                  description="Ce que ce projet lit des autres et ce que chaque lien lui donne, ce qu'il leur a "
+                              "demandé, ce qu'on lui a demandé, et qui le lit.")
+def _links_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:
+    p = _subject(s, ctx)
+    if isinstance(p, Note):
+        return [p]
+    return [_links_section(p, s, frame, ctx, _editable(s, frame, str(p.id)))]
 
 
 def _tools_section(p: Project, frame: Frame, editable: bool) -> Section:
@@ -1105,11 +1345,23 @@ def _tools_section(p: Project, frame: Frame, editable: bool) -> Section:
 
 
 #: ses liens de lecture (ADR 0257), tels que la fiche dessinée les retrouve
-LINKS_TITLE, READS_TITLE, READERS_TITLE = "Ses liens de lecture", "Ce qu'il lit", "Qui le lit"
+#: l'onglet s'appelle « Dépendances » (ADR 0290) : « Il dépend de », « Dépendent de lui », « Ses demandes »
+LINKS_TITLE, READS_TITLE, READERS_TITLE = "Ses dépendances", "Il dépend de", "Dépendent de lui"
+#: ses demandes aux projets qu'il lit (ADR 0271) : leur table sur sa fiche, où chacune en est, comment elles naissent
+ASKS_TITLE = "Ses demandes : envoyées"
+#: … et ce que d'autres projets lui ont demandé (ADR 0281) : leurs tickets chez lui
+RECEIVED_TITLE = "Ses demandes : reçues"
+ASK_WORDS = {asks.PENDING: "en attente d'accord", asks.ACCEPTED: "acceptée, pas encore lue", asks.WORKING: "en cours",
+             asks.DONE: "traitée", asks.DROPPED: "écartée"}
+ASK_TONES = {asks.PENDING: "warn", asks.ACCEPTED: "info", asks.WORKING: "info", asks.DONE: "ok", asks.DROPPED: "muted"}
+ASK_MODES = {asks.DIRECT: "directes : elles entrent dans ses tickets", asks.PROPOSED: "sur l'accord de son propriétaire",
+             "": "aucune : le lien ne le donne pas"}
 
 
 #: ce qu'un lien donne de plus quand les lignes du projet lu donnent ses fichiers (ADR 0260)
 GIVES_FILES = "ses fichiers, par la vue de son atelier (son dernier commit, en lecture seule)"
+#: … et quand elles donnent sa documentation (ADR 0289)
+GIVES_DOCS = "sa documentation, en lecture seule"
 
 
 def gives_words(grant: links.Grant) -> str:
@@ -1120,13 +1372,16 @@ def gives_words(grant: links.Grant) -> str:
         return "rien"
     words = "son titre, son état, ses comptes rendus, ses décisions en vigueur et ses objectifs ouverts" \
         if grant.detail else "son titre et son état"
-    return f"{words} ; {GIVES_FILES}" if grant.view else words
+    words = f"{words} ; {GIVES_FILES}" if grant.view else words
+    return f"{words} ; {GIVES_DOCS}" if grant.documentation else words
 
 
 def _links_section(p: Project, s: ProjectsState, frame: Frame, ctx: InspectContext, editable: bool) -> Section:
     """Ses liens de lecture (ADR 0257) : « Ce qu'il lit » — chaque projet lu et ce que le lien donne maintenant, un
     lien suspendu le dit, ce que son plan demande sans être encore lié aussi —, « Choisir ce qu'il lit »
-    (``projects.liens``) tant que le projet se modifie, et « Qui le lit »."""
+    (``projects.liens``) tant que le projet se modifie, et « Qui le lit ». Chaque lien dit aussi comment naîtrait une
+    demande (ADR 0271 : sur accord, directe, aucune), et « Ce qu'il leur a demandé » montre ses demandes — le ticket
+    chez le projet visé, où il en est."""
     world = links.world_of(frame)
     read, readers = links.readings(s, p, world), links.readers(s, p, world)
     asked = [s.projects[t] for t in p.plan_reads if t not in p.reads and t in s.projects]
@@ -1134,39 +1389,80 @@ def _links_section(p: Project, s: ProjectsState, frame: Frame, ctx: InspectConte
                                                *(reader for reader, _ in readers))])
 
     def named(t: Project) -> Ref:
-        return _link(t, f"n° {t.id} — {_text(texts, t.title_ref)}", "comportement")
+        return _link(t, f"n° {t.id} — {_text(texts, t.title_ref)}", "liens")
+
+    def seen(t: Project, grant: links.Grant) -> Any:
+        """Ce que la vue de son atelier montre : le dernier commit de sa branche de base qu'on lui connaît."""
+        if not grant.view:
+            return Text("—")
+        return Text(f"son commit {t.base_commit[:7]}", "mono") if t.base_commit else Text("aucun commit encore", "muted")
 
     rows: list[tuple[Any, ...]] = []
     for r in read:
         t = r.project
         if t is None:
-            rows.append((Text(f"n° {r.id}"), Text("—"), Text("rien : ce projet n'existe plus", "muted")))
+            rows.append((Text(f"n° {r.id}"), Text("—"), Text("rien : ce projet n'existe plus", "muted"), Text("—"),
+                         Text("—")))
         elif r.suspended:
             why = "il est archivé" if not live(t) else "ses lignes d'accès ne le laissent plus voir"
-            rows.append((named(t), _state(t), Text(f"rien : le lien est suspendu ({why})", tone="warn")))
+            rows.append((named(t), _state(t), Text(f"rien : le lien est suspendu ({why})", tone="warn"), Text("—"),
+                         Text("—")))
         else:
-            rows.append((named(t), _state(t), Text(gives_words(r.grant))))
-    rows += [(named(t), _state(t), Text("rien encore : son plan demande à le lire, le lien n'est pas posé", "muted"))
-             for t in asked]
-    items: list[Any] = [Table((Column("projet"), Column("état", "fit"), Column("ce qu'il en reçoit")), tuple(rows),
+            rows.append((named(t), _state(t), Text(gives_words(r.grant)), seen(t, r.grant),
+                         Text(ASK_MODES[asks.mode(p, t, r.grant)])))
+    rows += [(named(t), _state(t), Text("rien encore : son plan demande à le lire, le lien n'est pas posé", "muted"),
+              Text("—"), Text("—")) for t in asked]
+    items: list[Any] = [Table((Column("projet"), Column("état", "fit"), Column("ce qu'il en reçoit"),
+                               Column("la vue de son atelier", "fit"), Column("ses demandes")), tuple(rows),
                               title=READS_TITLE, empty="il ne lit aucun projet")]
     if editable and link_options(s, frame, p):
         items.append(Disclosure("Choisir ce qu'il lit", (ActionSlot("projects.liens", title="Enregistrer ce qu'il lit",
                                                                     compact=True),)))
-    items.append(Table((Column("projet"), Column("pour qui"), Column("ce qu'il en reçoit")),
+    if p.asks:  # ses demandes, la plus récente d'abord : le ticket chez le projet visé, où il en est
+        items.append(Table(
+            (Column("ticket"), Column("où elle en est", "fit"), Column("demandée", "fit"), Column("par son objectif", "fit"),
+             Column("fermée", "fit")),
+            tuple((Ref("subject", f"project/{a.target}", f"n° {a.target} · #{a.number}",
+                       (("onglet", "tickets"), ("element", f"#{a.number}"))),
+                   Badge(ASK_WORDS[asks.state(a.status)], ASK_TONES[asks.state(a.status)]), When(a.at),
+                   Text(f"n° {a.objective}" if a.objective else "—"),
+                   When(a.closed_at) if a.closed_at else Text("—")) for a in reversed(p.asks)),
+            title=ASKS_TITLE,
+            caption="Une demande est un ticket ouvert chez un projet qu'il lit : c'est ce projet, et son "
+                    "propriétaire, qui la font avancer."))
+    received = [x for x in p.board.items if x.list_name == c.TICKETS and c.asking_project(x.author)]
+    if received:  # ce que d'autres projets lui ont demandé : des tickets chez lui, que son onglet Tickets ouvre
+        titles = _texts(ctx, [x.title_ref for x in received])
+        items.append(Table(
+            (Column("ticket"), Column("demandé par", "fit"), Column("où il en est", "fit"), Column("la main à", "fit"),
+             Column("touché", "fit")),
+            tuple((Ref("subject", f"project/{p.id}", f"#{x.number} {_text(titles, x.title_ref)}",
+                       (("onglet", "tickets"), ("element", f"#{x.number}"))),
+                   _link(s.projects[c.asking_project(x.author)], f"projet n° {c.asking_project(x.author)}", "liens")
+                   if c.asking_project(x.author) in s.projects else Text(f"projet n° {c.asking_project(x.author)}"),
+                   Badge(ASK_WORDS[asks.state(x.status)], ASK_TONES[asks.state(x.status)]),
+                   Text({c.ACTOR_OWNER: "toi", c.ACTOR_SELF: "elle"}.get(tickets.hand(x), "—")), When(x.updated_at))
+                  for x in sorted(received, key=lambda x: -x.updated_at)),
+            title=RECEIVED_TITLE,
+            caption="Les demandes d'autres projets sont des tickets chez lui : ouverts, et les derniers touchés."))
+    items.append(Table((Column("projet"), Column("pour qui"), Column("ce qu'il en reçoit"), Column("ses demandes")),
                        tuple((named(reader), Text(_who(frame, links.owner_of(reader)) if links.owner_of(reader)
                                                    else "à elle"),
                               Text(gives_words(grant) if grant.see else "rien : le lien est suspendu",
-                                   tone="" if grant.see else "warn")) for reader, grant in readers),
+                                   tone="" if grant.see else "warn"),
+                              Text(ASK_MODES[asks.mode(reader, p, grant)] if grant.see else "—"))
+                             for reader, grant in readers),
                        title=READERS_TITLE, empty="aucun projet ne le lit"))
     return Section(LINKS_TITLE, tuple(items),
                    description="Un projet en lit d'autres, quatre au plus, sans jamais y écrire. Ce qu'il en reçoit se "
-                               "relit à chaque exécution dans les lignes d'accès du projet lu (son onglet « Accès »), "
+                               "relit à chaque exécution dans les lignes d'accès du projet lu (Cadre, « Accès »), "
                                "pour le propriétaire du projet lecteur : le voir donne son titre et son état ; le "
                                "piloter, au moins en lecture seule, ses comptes rendus, ses décisions et ses "
                                "objectifs ouverts ; ses fichiers, la vue de son atelier — son dernier commit, sous "
                                "« liens/<n>/ », jamais son travail en cours. Ce dernier droit se relit à chaque "
-                               "appel d'outil : repris, la vue est supprimée.")
+                               "appel d'outil : repris, la vue est supprimée. Le piloter sur accord ou en "
+                               "modification donne de lui adresser une demande : un ticket chez lui, proposé — ou "
+                               "direct, si le lien le règle et que ses lignes donnent la modification.")
 
 
 # ── La fiche : carnet ─────────────────────────────────────────────────────
@@ -1180,8 +1476,8 @@ EFFECTS_CURSOR = "avant_effets"
 def _operation(e: Event[Any], frame: Frame) -> Entry:
     d = e.data
     name = e.type.name.rsplit(".", 1)[-1]
-    by = f"par {_who(frame, d.by)}" if getattr(d, "by", "") else "par elle" if name.startswith(("objective", "decision")) \
-        else "automatique"
+    by = f"par {_who(frame, d.by)}" if getattr(d, "by", "") else "par elle" \
+        if name.startswith(("objective", "decision", "milestone")) else "automatique"
     titles = {"paused": ("mis en pause", "warn"), "resumed": ("repris", "ok"), "archived": ("archivé", "muted"),
               "restored": ("restauré", "info"), "reframed": ("cadre ou réglages modifiés", "info"),
               "decision_changed": (f"décision D{getattr(d, 'decision', '')} : "
@@ -1203,6 +1499,15 @@ def _operation(e: Event[Any], frame: Frame) -> Entry:
         what = OBJECTIVE_STATUS_FR.get(d.status, "") if d.status else "modifié"
         return Entry(e.at, f"objectif n° {d.objective} : {what}", meta=by,
                      tone="ok" if d.status == c.DONE else "danger" if d.status == c.BLOCKED else "")
+    if name == "milestone_added":
+        return Entry(e.at, f"jalon n° {d.milestone} posé sur l'objectif n° {d.objective}", _said(d.text), meta=by)
+    if name == "milestone_changed":  # atteint, retiré, refusé, dit prêt, sinon révisé — avec ce qui en est gardé
+        what, tone = ("atteint", "ok") if d.status == c.REACHED else ("retiré", "muted") if d.status == c.DROPPED \
+            else ("refusé", "warn") if d.refused else ("dit prêt : il attend ta validation", "warn") if d.ready \
+            else ("révisé", "")
+        kept = d.proof or d.how or d.reason
+        return Entry(e.at, f"jalon n° {d.milestone} de l'objectif n° {d.objective} : {what}",
+                     _said(kept) if kept is not None else "", meta=by, tone=tone)
     title, tone = titles.get(name, (name, ""))
     text = getattr(d, "reason", "") if name in ("paused", "archived") else ""
     return Entry(e.at, title, text, meta=by, tone=tone)
@@ -1270,14 +1575,16 @@ def _effect_state(proposal: Event[Any], pending: bool, outcomes: Sequence[Event[
 
 def of_person(s: ProjectsState, handles: Iterable[str]) -> list[Project]:
     """Les projets qui regardent cette personne (``handles`` : sa clé et ses moyens de communication) : menés pour
-    elle, ou qui la concernent — l'onglet Projets de sa fiche, et son compte dans la barre
-    (``PersonOverview.counts``)."""
+    elle, qui la concernent, ou qui lisent un projet qui la concerne (``read_about`` : l'oubli de cette personne
+    atteint ce qu'ils écrivent depuis, ADR 0262) — l'onglet Projets de sa fiche, et son compte dans la barre
+    (``PersonOverview.counts``). C'est la console de l'opérateur : rien ici ne décide de qui entend un projet."""
     keys = set(handles)
-    return [p for p in s.projects.values() if p.owner in keys or keys & set(p.about)]
+    return [p for p in s.projects.values() if p.owner in keys or keys & set(p.about) or keys & set(p.read_about)]
 
 
 @PROJECTS.inspect("projets", title="Projets", subject="person", order=75,
-                  description="Les projets qu'elle mène pour cette personne, ou qui la concernent.")
+                  description="Les projets qu'elle mène pour cette personne, qui la concernent, ou qui lisent un "
+                              "projet qui la concerne.")
 def _person_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     person = ctx.subject
     if not person:
@@ -1287,7 +1594,7 @@ def _person_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Blo
     page, pager = paginate(concerned, ctx.pager(size=PAGE, total=len(concerned)))
     texts = _texts(ctx, (p.title_ref for p in page))
     rows = [Row((_link(p, _text(texts, p.title_ref, "(sans titre)")), _mode(p), _state(p), _progress(p),
-                 "pour cette personne" if p.owner in handles else "la concerne", When(p.created_at)), href=_link(p))
+                 _concern(p, handles), When(p.created_at)), href=_link(p))
             for p in page]
     out: list[Block] = []
     if concerned:  # l'oubli efface sa vie (contenus, journal) ; un atelier est un dossier : il faut le dire
@@ -1295,6 +1602,13 @@ def _person_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Blo
     return [*out, Table((Column("projet"), Column("mode", "fit"), Column("état", "fit"), Column("objectifs"),
                          Column("lien", "fit"), Column("ouvert", "fit")), tuple(rows), title="Ses projets",
                         pager=pager, empty="aucun projet pour cette personne ni à son sujet")]
+
+
+def _concern(p: Project, handles: set[str]) -> str:
+    """Ce qui relie un projet à cette personne, sur sa fiche."""
+    if p.owner in handles:
+        return "pour cette personne"
+    return "la concerne" if handles & set(p.about) else "lit un projet qui la concerne"
 
 
 def forget_note(n: int) -> str:

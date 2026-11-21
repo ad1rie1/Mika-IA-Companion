@@ -148,7 +148,7 @@ def test_between_us_is_only_what_she_and_the_person_share():
     private = Audience(persons=(SAM,), public=False, level=int(Sensitivity.PERSONAL),
                        witness_level=int(Sensitivity.PERSONAL), private_ok=True)
     shown = between_us(db, Frame(private), SAM)
-    assert [i for i, _t in shown] == [mine]
+    assert [i for i, _t, _sources in shown] == [mine]
 
 
 # ── Une matière d'initiative ────────────────────────────────────────────────

@@ -129,6 +129,10 @@ class FakeApi:
                 return httpx.Response(int(forced), json={"message": f"refus {forced} {request.headers.get('x-api-key')}"})
         if request.headers.get("x-api-key") != KEY:
             return httpx.Response(401, json={"message": "Invalid API key"})
+        catalog = re.fullmatch(r"/v1/catalog/([0-9a-f-]{36})", request.url.path)
+        if catalog:  # une fiche par son identifiant
+            found = next((o for kept in self.fiches.values() for o in kept if o.get("uuid") == catalog.group(1)), None)
+            return httpx.Response(200, json=found) if found else httpx.Response(404, json={"message": "Not found"})
         params = dict(request.url.params)
         if "crs" in params:
             state = self.cursors.get(params["crs"])

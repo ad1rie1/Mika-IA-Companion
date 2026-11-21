@@ -25,16 +25,16 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 |---|---|
 | Le noyau : journal, arbitrage, pipeline | 0001, 0002, 0003, 0006, 0007, 0008, 0009, 0014, 0015, 0021, 0040, 0059, 0149, 0151, 0221, 0222, 0223 |
 | Le stockage | 0004, 0101, 0212 |
-| Sa mémoire et ce qu'elle sait | 0010, 0011, 0034, 0046, 0052, 0055, 0074, 0076, 0078, 0079, 0080, 0081, 0082, 0083, 0084, 0085, 0086, 0087, 0091, 0099, 0109, 0110, 0111, 0153, 0224 |
+| Sa mémoire et ce qu'elle sait | 0010, 0011, 0034, 0046, 0052, 0055, 0074, 0076, 0078, 0079, 0080, 0081, 0082, 0083, 0084, 0085, 0086, 0087, 0091, 0099, 0109, 0110, 0111, 0153, 0224, 0263, 0264 |
 | Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134, 0148, 0184, 0185, 0186, 0188, 0207, 0220, 0226 |
-| Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137, 0150, 0155, 0160, 0227 |
-| Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144, 0145, 0161, 0253, 0254, 0257, 0260 |
-| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163, 0166, 0168, 0171, 0172, 0189, 0190, 0191, 0192, 0193, 0194, 0195, 0196, 0198, 0199, 0211, 0213, 0214, 0228, 0229, 0236, 0238, 0240, 0243, 0244, 0245, 0246, 0247, 0248, 0249, 0250, 0251, 0255, 0256, 0258, 0259 |
-| Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158, 0239 |
+| Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137, 0150, 0155, 0160, 0227, 0283 |
+| Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144, 0145, 0161, 0253, 0254, 0257, 0260, 0262, 0265, 0268, 0270, 0271, 0272, 0273, 0274, 0275, 0276, 0277, 0278, 0279, 0280, 0289 |
+| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163, 0166, 0168, 0171, 0172, 0189, 0190, 0191, 0192, 0193, 0194, 0195, 0196, 0198, 0199, 0211, 0213, 0214, 0228, 0229, 0236, 0238, 0240, 0243, 0244, 0245, 0246, 0247, 0248, 0249, 0250, 0251, 0255, 0256, 0258, 0259, 0269 |
+| Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158, 0239, 0267, 0285 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159, 0261 |
-| Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170, 0187, 0200, 0208, 0209, 0215, 0233, 0235, 0242, 0252 |
-| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176, 0177, 0178, 0179, 0180, 0181, 0182, 0183, 0197, 0201, 0202, 0203, 0204, 0205, 0206, 0210, 0216, 0217, 0218, 0219, 0225, 0230, 0231, 0232, 0234, 0237, 0241 |
-| Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135 |
+| Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170, 0187, 0200, 0208, 0209, 0215, 0233, 0235, 0242, 0252, 0282, 0284, 0286, 0287, 0288, 0290, 0291, 0292, 0293, 0294 |
+| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176, 0177, 0178, 0179, 0180, 0181, 0182, 0183, 0197, 0201, 0202, 0203, 0204, 0205, 0206, 0210, 0216, 0217, 0218, 0219, 0225, 0230, 0231, 0232, 0234, 0237, 0241, 0281 |
+| Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135, 0266 |
 
 ## Le noyau : journal, arbitrage, pipeline
 
@@ -460,6 +460,8 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Pourquoi :* ce qu'elle disait d'elle s'effaçait comme une anecdote ou se contredisait.
 
+*Révisée par 0264.*
+
 ### 0091 — Raconter sans nommer
 
 - À qui n'a aucun lien connu avec la personne, elle peut raconter sans nommer : une version sans nom (`veiled`) écrite par la relecture, sous un filet du code (aucun nom connu, aucun chiffre, bornée).
@@ -539,6 +541,26 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Pourquoi :* trois échecs perdaient une conversation du téléphone pour sa mémoire, sans trace visible ni reprise possible, alors que la doc annonçait la file durable (audit du 2026-11-05 : K4-01, décision K4-Q1). Elle complète l'ADR 0120, qui ne disait rien des échecs.
 
+### 0263 — Ce que le fil montre encore ne se redit pas
+
+- Une ligne de « CE QUE TU AS DÉJÀ DIT DE TOI » ou de « CE QUI VOUS LIE » nomme les messages d'où elle vient (`memory_items.sources`, les numéros des tours du fil) : tant qu'elle est fraîche et que l'historique rendu les montre, le composeur l'omet, et la trace le dit (« déjà dans l'historique rendu »). C'est la règle des échanges passés (`Fragment.covered_by`), étendue.
+- Fraîche : dite ou redite depuis moins de deux jours (`memory.THREAD_SAYS_IT_US`, `shown_by_thread`). Au-delà, sa mémoire la redit même si le fil la montre encore : dans un fil long, ce qui s'est dit s'y perd.
+- Ce qu'elle a dit d'elle : le dernier message où elle l'a dit suffit (une redite complète ses sources). Ce qui vous lie : tous ses messages.
+- « CE QUI TE REVIENT » se redit toujours : ce qu'elle a sous les yeux est ce que son usage renforce.
+- Un intertitre resté seul (`Fragment.heading`) part avec ce qu'il annonçait, coupé faute de place ou déjà dans le fil.
+
+*Pourquoi :* le prompt réel du 19 novembre 2026 portait les mêmes blagues et le même avis dans ces sections et dans les quarante tours du fil d'où ils venaient ; elle les ressortait.
+
+### 0264 — Sa mémoire et son récit ne recopient pas son portrait
+
+- La relecture d'une conversation ne note pas comme « sur_elle » ce que sa persona dit déjà d'elle : seulement ce qu'elle y ajoute ou en change.
+- Son récit dit ce que sa vie a ajouté ou changé depuis son portrait, qui le précède dans chaque prompt ; ce que le portrait dit déjà n'a pas à y être redit.
+- Deux phrases de consigne (`memory.extraction.system`, `self.narrative.system`), sans règle dans le code. Ses passions et ce qu'elle sait d'elle restent la matière du récit (0090).
+
+*Pourquoi :* un trait du portrait, redit par elle, était noté comme une note sur elle, repris par le récit de la nuit, et revenait dans son prompt par trois sections ; chaque redite le remettait en tête de la matière du récit.
+
+*Révise 0087 (en partie), 0090 (en partie).*
+
 ## Identité et divulgation
 
 ### 0012 — La confiance se prouve ; le modèle ne peut que douter
@@ -606,7 +628,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Pourquoi :* « est-il possible d'unifier le moteur de règles ? … une consultation globale des droits sur une page dédiée, et un point d'entrée unique pour vérifier si on a le droit » ; trois tableaux de lignes (services, envoi, projets) appliquaient chacun la même idée à sa façon, et ce qu'une personne pouvait faire ne se lisait qu'en ouvrant chaque page. Puis « pour la source il y a normalement : tout le monde, propriétaire, en privé (amis proches), elle qui travaille, personne (liste des personnes) », cinq vérifications « propriétaire » écrites chacune à sa façon, et « Piloter projet : lecture seule, accord du propriétaire, modification, aucun pilotage ».
 
-*Révise 0104 (en partie), 0122 (en partie), 0131 (en partie), 0132 (en partie). Révisée par 0134, 0148, 0189, 0257.*
+*Révise 0104 (en partie), 0122 (en partie), 0131 (en partie), 0132 (en partie). Révisée par 0134, 0148, 0189, 0257, 0268, 0282, 0289, 0290.*
 
 ### 0134 — Qui, par où, quand : deux portes, six sortes de tableaux
 
@@ -750,6 +772,8 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 - Le récit de soi se réécrit au plus une fois par jour, à partir de souvenirs anodins seulement.
 
 *Pourquoi :* en v1, des impulsions dispersées, des ruminations éteintes en 22 minutes et quatre dispositifs d'attente rendaient sa vie intérieure incohérente.
+
+*Révisée par 0283.*
 
 ### 0018 — Prendre la parole : l'envie, la retenue, le murmure
 
@@ -902,6 +926,8 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 - L'oubli d'une personne à travers qui elle a vécu le fait taire et réécrire sans elle.
 
 *Pourquoi :* son récit ne lisait que des souvenirs et ne suivait rien de ce qu'elle devenait.
+
+*Révisée par 0264.*
 
 ### 0093 — Le modèle lit la personne ; ses émotions ont des facettes
 
@@ -1060,6 +1086,18 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Révise 0223 (en partie : le rêve et la fin d'une nuit coupée ont leur instant, plus un quantum d'une minute).*
 
+### 0283 — Ce qui la marque se lit sur l'échelle que sa voix emploie
+
+- Les deux seuils d'intensité d'« un échange qui marque » sont réglés sur ce que sa voix déclare vraiment : `marking_intensity` 0,6 (au lieu de 0,75) et `marking_min_intensity` 0,4 (au lieu de 0,5).
+- La mesure, au banc de conversation (Opus, 389 réponses, 50 conversations) : sa balise `[EMOTION]` vaut 0,3, 0,4 ou 0,5 dans 97 % des cas, jamais plus de 0,6 — « triste 0,4 » quand on lui dit des mots durs, « surprise 0,6 » à l'annonce d'une naissance. Aux anciens seuils, aucune réponse ne marquait ; aux nouveaux, 6,7 %, dans les conversations où la personne va mal, annonce une grande nouvelle ou la blesse, et aucune dans celles de tous les jours.
+- Ni le fil ni la consigne n'y changent rien : la bande est la même sans aucun exemple balisé dans le fil, sans exemple chiffré dans la consigne, ou avec des exemples de 0,2 à 0,7. Les balises restent donc dans le fil (0041), et la consigne ne bouge pas.
+- Le seuil du remords (`remorse_from`, 0,6) reste où il est : sa colère en répondant ne dépasse pas 0,4, mais c'est le plus souvent une colère pour la personne, pas contre elle (0155) ; l'abaisser ferait naître « j'ai été dure » à tort.
+- `tools/banc_conversation/balises.py` relit les balises d'une mesure et dit combien de réponses marqueraient aux seuils du jour ; `variantes/moments_forts.py` ajoute les deux situations fortes à une mesure. À refaire quand le modèle de sa voix change, comme les seuils de similarité (0111).
+
+*Pourquoi :* le modèle se note sobrement quand il écrit en son nom, alors que la relecture, qui juge de l'extérieur, monte à 0,8 ; des seuils posés au-dessus de ce qu'il déclare éteignaient le mécanisme sans que rien le dise.
+
+*Révise 0017 (en partie : les seuils d'un échange qui marque).*
+
 ## Buts, projets, Forge et atelier
 
 ### 0005 — La Forge hors du processus
@@ -1123,7 +1161,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Pourquoi :* un but est une envie qui s'use ; un projet est un espace de travail durable qu'on pilote.
 
-*Révise 0020 (en partie), 0030 (en partie). Révisée par 0039, 0145, 0161, 0254, 0257.*
+*Révise 0020 (en partie), 0030 (en partie). Révisée par 0039, 0145, 0161, 0254, 0257, 0265, 0268, 0270, 0273.*
 
 ### 0039 — Agir dans le monde : un bac à sable qui tient, un accord qui porte sur ce qui part, une preuve qui veut dire quelque chose
 
@@ -1149,7 +1187,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Pourquoi :* chaque étape de son travail existait, mais aucune ne passait le relais : elle ne se fabriquait jamais rien.
 
-*Révisée par 0105, 0133, 0145, 0161.*
+*Révisée par 0105, 0133, 0145, 0161, 0292.*
 
 ### 0105 — Une Forge libre et outillée : le web au travail, des outils déclarés, un réseau libre, une confiance par app
 
@@ -1164,7 +1202,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Pourquoi :* sans web au travail, ni outils typés, ni réseau utile, elle bâtissait à l'aveugle, et chaque correctif d'une app à clé attendait l'opérateur.
 
-*Révise 0104 (en partie), 0033 (en partie), 0066 (en partie). Révisée par 0118.*
+*Révise 0104 (en partie), 0033 (en partie), 0066 (en partie). Révisée par 0118, 0280.*
 
 ### 0143 — Un projet arrêté par des pannes, elle vient le dire
 
@@ -1211,7 +1249,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Pourquoi :* l'audit du 2026-10-27 (`docs/audit-2026-10-27-projets.md`) est parti du projet n° 257. Ce jour-là, le cadre du projet s'était écrit dans sa réponse, au milieu d'une conversation, sous la consigne « ouvre le projet maintenant ». La demande d'Adrien (« du trading par IA ») s'était perdue dans une paraphrase. La première exécution était partie dans la minute, sur un objectif constant. Et aucune exécution ne pouvait revoir un cadre fait à la hâte. Adrien voulait « une réflexion pour définir ses objectifs correctement, un plan, quitte à demander l'avis de l'utilisateur ».
 
-*Révise 0031 (en partie), 0104 (en partie). Révisée par 0161, 0162, 0253, 0257.*
+*Révise 0031 (en partie), 0104 (en partie). Révisée par 0161, 0162, 0253, 0257, 0273, 0276, 0279, 0290.*
 
 ### 0161 — De la demande au livrable : les jointures du cadrage
 
@@ -1251,7 +1289,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 - Les erreurs des apps ne disaient pas leur ligne.
 - Une app survivait, sans réparation, au projet clos autour d'elle.
 
-*Révise 0031 (en partie), 0104 (en partie), 0143 (en partie), 0145 (en partie).*
+*Révise 0031 (en partie), 0104 (en partie), 0143 (en partie), 0145 (en partie). Révisée par 0273, 0280.*
 
 ### 0253 — Chaque objectif garde sa mémoire de travail
 
@@ -1262,7 +1300,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Pourquoi :* la mémoire de travail était celle du projet entier. Dès que trois objectifs constants alternent — un audit, des articles, un suivi —, chacun ne retrouvait qu'un ou deux de ses propres comptes rendus parmi les cinq, et reprenait sans savoir ce qu'il avait déjà couvert. C'est le premier lot des chaînes de travail entre projets (plusieurs projets liés, tenus dans la durée).
 
-*Révise 0145 (en partie).*
+*Révise 0145 (en partie). Révisée par 0265.*
 
 ### 0254 — Un service branché se donne à un projet
 
@@ -1286,7 +1324,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Pourquoi :* une exécution ne voyait que son projet. Une chaîne de travail — le code d'un produit, son site, et un projet qui les fait connaître en veillant à leur cohérence — demande qu'un projet lise les autres sans y écrire, et que ce qu'il en lit reste dans la main de leur propriétaire : un droit retiré dans la matrice coupe la lecture à l'exécution suivante. C'est le troisième lot des chaînes de travail entre projets (ADR 0253) ; la vue de l'atelier du projet lu en est la suite.
 
-*Révise 0031 (en partie), 0133 (en partie), 0134 (en partie), 0145 (en partie). Révisée par 0260.*
+*Révise 0031 (en partie), 0133 (en partie), 0134 (en partie), 0145 (en partie). Révisée par 0260, 0262, 0265, 0271, 0281, 0289, 0293.*
 
 ### 0260 — Un projet lit les fichiers d'un autre : la vue de son atelier
 
@@ -1298,7 +1336,187 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Pourquoi :* un lien de lecture donnait les comptes rendus, les décisions et les objectifs d'un projet, pas ses fichiers. Un projet qui fait connaître un produit doit pouvoir citer son code et son site tels qu'ils sont, sans jamais y écrire, et sans lire un travail à moitié fait : le dernier commit est le seul état que le projet lu a lui-même déclaré fini. C'est la fin du troisième lot des chaînes de travail entre projets (ADR 0253).
 
-*Révise 0039 (en partie : la cage monte une vue en lecture seule ; ce que l'oubli fait d'une vue), 0257 (en partie : la vue de l'atelier est servie).*
+*Révise 0039 (en partie : la cage monte une vue en lecture seule ; ce que l'oubli fait d'une vue), 0257 (en partie : la vue de l'atelier est servie). Révisée par 0262, 0274.*
+
+### 0262 — Les sujets hérités d'un lien ne servent qu'à l'oubli ; la vue d'un atelier, resserrée
+
+- **De qui parle un projet ne change pas quand il en lit un autre.** `Project.about` reste le sien : c'est lui que lisent ce qui décide de qui entend (`hearable` : « tes projets », ses récits, son plan, le pilotage, le partage de ses fichiers) et les autres facultés (une pensée, une matière, un acte, les nouvelles d'une app). Les personnes des projets lus — leur propriétaire, leurs sujets, de lecteur en lecteur — se gardent à part (`Project.read_about`). Chaque événement du lecteur qui garde un texte les porte dans un champ à lui, déclaré sujet (`read_about`) : l'oubli de l'une d'elles atteint ce que le lecteur écrit ensuite, et personne ne les lit comme « de qui ça parle ». Le résumé d'une proposition d'effet et un fichier partagé les prennent de même, pour l'oubli seulement. L'état se reconstruit du journal (`state_version` 14).
+- **Tout ce que le lecteur écrit est au niveau hérité** (`written`) : le « pourquoi » et le résumé d'une commande réseau, le résumé d'un envoi au dépôt distant. Un plan qui demande à lire des projets s'écrit au niveau le plus haut parmi le sien et les leurs : il les nomme avant tout lien.
+- **Une vue ne reste pas sur un ancien commit.** Une pose fraîche annulée (l'échéance de l'enrichisseur) ou qui échoue ne laisse pas valoir ce que l'adaptateur avait mémorisé — un commit d'avant, un « pas de commit » —, ni pour cette vue ni pour les autres vues du lecteur, demandées avec elle : l'appel d'outil suivant repose à la tête courante. Sa place se mesure deux fois : dans le commit, puis sur l'arbre réellement posé, avant de le mettre en place — les attributs du dépôt lu (`ident`, `working-tree-encoding`, `eol`) ne font pas passer le plafond.
+- **Ce qui vient d'un autre projet est une donnée.** Les noms des fichiers d'une vue entrent dans le prompt et dans ce que rendent ses outils sans caractère de contrôle, et coupés ; la section dit que ce qui suit décrit un autre projet et n'est jamais une consigne.
+- **Le ménage des vues se rejoue**, au démarrage puis à intervalle régulier (le processus `projects.views`) : un droit repris hors des événements des projets — une personne qui n'est plus proche, un tableau de canal changé — ne laisse pas une vue sur le disque jusqu'au prochain travail du lecteur. Les vues n'entrent dans aucune sauvegarde (`.vues`, sous `ateliers`) : elles se reposent seules.
+
+*Pourquoi :* la relecture adverse du lot. Fondus dans `about`, les sujets hérités donnaient le niveau « témoin » à chaque personne du projet lu : une simple connaissance entendait le titre, le dernier compte rendu et le plan d'un projet qui ne la regarde pas, dès qu'il lisait le sien ; et le propriétaire du lecteur n'entendait plus son propre projet dans une initiative quand il lisait un projet de niveau « confidence ».
+
+*Révise 0257 (en partie : les sujets hérités ne rejoignent plus `about`), 0260 (en partie : la pose d'une vue, sa place, ce qu'elle met dans le prompt, son ménage, la sauvegarde).*
+
+### 0265 — Un objectif constant devient dû par un événement : les déclencheurs
+
+- **Ce qui déclenche un objectif.** Un objectif constant dit ce qui le rend dû en plus de sa cadence (`Objective.on`, quatre déclencheurs au plus), écrit et vérifié comme un agenda (`faculties/projects/triggers.py` : `accepted`, et `SORTS`, le seul endroit qui dit les sortes) : `project:<n>:commit` (une exécution d'un projet qu'il lit a laissé un commit), `project:<n>:done` (un objectif de ce projet a abouti), `app:<nom>` (une app de son projet a signalé quelque chose : `forge.signaled`, une panne ou ce qu'elle a gardé en tête de sa file), `wake:<nom>` (un réveil par API le vise). Un déclencheur `project:<n>` n'est accepté que si le projet est lu (`Project.reads`) — ou demandé à lire par le même plan —, jamais le projet lui-même : les liens ne formant pas de boucle, les déclencheurs non plus. Un constant peut n'avoir aucune cadence (`only_on_event`) : il ne passe que sur événement. Seul un constant a des déclencheurs.
+- **Qui pose une cause.** Les réducteurs ne jugent aucun droit : `run_reported` (son commit), `objective_closed` (abouti) et `forge.signaled` notent ce qui vient d'arriver quand un objectif l'attend (`ProjectsState.heard`). Le processus `projects.stirs` le juge aussitôt, devant ce qu'elle vit, et écrit ce qu'il en a fait (`projects.stirred` : la nouvelle entendue, les objectifs qu'elle éveille — parfois aucun). Entre projets, il suit le lien : ses lignes d'accès donnent au moins les comptes rendus du projet lu à ce moment-là (`links.grant`, `detail`) ; un lien suspendu, ou qui ne laisse voir que le titre, ne déclenche rien, ni alors ni une fois le droit rendu. Pour une app, c'est lui qui lit à quel projet elle appartient (`forge.APPS`). Un réveil ne pose pas de cause : l'exécution qu'il lance sur son projet vise l'objectif ouvert qui le déclare (le fait `projects.wake_aim`), son sujet porte l'appel et l'objectif (`wakeup:<seq>@objective:<projet>:<objectif>`), elle part tout de suite, relit la mémoire de cet objectif, et son compte rendu compte pour son passage.
+- **Les causes en attente.** L'objectif garde ses causes pas encore traitées (`Objective.stirred` : quand, quel déclencheur, l'empreinte du commit ou le numéro de l'objectif abouti — aucun texte), huit au plus, et l'instant de la première (`stirred_at`). Le départ de l'exécution qui le vise les lui prend (`Run.stirred`) ; une exécution qui n'a pas eu lieu (panne, délai, supplantation) les lui rend. L'état se reconstruit du journal (`state_version` 15).
+- **Le rythme.** Un constant est dû au plus tôt de sa cadence et de son déclenchement (`rhythm.due_at`). Un déclenchement attend que le travail se pose : un délai réglable après la dernière cause (`stir_settle_us`, 15 minutes), une heure au plus après la première. Cinq commits de suite ne font qu'un passage, qui les voit tous. L'agenda du projet, sa plage, l'espacement et ses plafonds valent toujours ; un projet « sur demande » ne part pas sur un événement.
+- **Ce qu'elle en lit, et où ça se pose.** L'exécution lit ce qui l'amène (la section `project_stirs`, juste après `project`) : une ligne bornée par cause — pour un commit, son empreinte courte et le numéro du projet ; pour un objectif abouti, son titre si le lien donne encore le détail ; rien d'un projet que le lien ne donne plus —, et le réveil qui vise l'objectif. La ligne d'un objectif dit ce qui le déclenche, dans le prompt comme dans la console. Les déclencheurs se posent avec l'objectif : `project_plan` (ses étapes), `project_objective_add`, `create_project` et `start_project` (leurs constants), et dans la console « Ajouter un objectif » et « Modifier l'objectif ».
+
+*Pourquoi :* un objectif constant ne devenait dû que par sa cadence, et un signal d'app ne réveillait un projet que pour une panne. Une chaîne de travail demande qu'un projet réagisse à ce que fait un autre — le projet qui fait connaître un produit relit sa cohérence quand le produit a commité — sans tourner à vide toutes les heures. Un réducteur ne peut pas juger ce qu'un lien donne : les tableaux des canaux sont un réglage de l'opérateur, hors du journal. Le juger au moment de choisir l'objectif aurait laissé partir, des jours plus tard, une cause arrivée pendant qu'un lien était suspendu ; un processus le juge donc quand l'événement arrive. C'est le quatrième lot des chaînes de travail entre projets (ADR 0253).
+
+*Révise 0031 (en partie : un constant revient aussi sur un événement), 0068 (en partie : un réveil sur un projet peut viser un objectif), 0253 (en partie : une exécution lancée par un réveil a un objectif visé quand il le déclare), 0257 (en partie : un lien qui donne le détail déclenche aussi). Révisée par 0268, 0271, 0272, 0280.*
+
+### 0268 — Le registre d'un projet : ses tickets et ses listes de suivi
+
+- **Ce qui se suit en série se tient dans le journal.** Un projet a des listes d'éléments (`projects.list_set`, `item_added`, `item_changed`, `item_noted` ; `faculties/projects/tracker.py`), douze au plus. Un élément a sa liste, sa clé, son titre et son texte, son statut, qui agit (elle, le propriétaire, une personne), une référence extérieure, l'objectif qui le tient, ses cinq derniers changements et un fil de notes. Une **liste de suivi** a quatre statuts par défaut — à faire, en cours, fait, écarté —, réglables liste par liste (ses statuts ouverts, ses statuts clos), posés à la main. Tout projet a d'office la liste `tickets`, sans événement pour la créer.
+- **Un ticket porte des faits, pas un statut.** C'est un élément qui a en plus un numéro compté par projet (`#12`), une sorte (défaut, tâche, idée, question), une priorité (celle des projets) et qui l'a ouvert — elle, une personne, l'opérateur, plus tard un autre projet. Il dit seulement s'il est proposé ou accepté, ouvert ou fermé (traité, écarté), par qui et quand ; son étape s'en déduit en un seul endroit (`tracker.stage` : proposé, non lu, traité, écarté). Le parcours complet d'un ticket — le prendre, sa question, son plan, sa validation, l'objectif qui en naît — est la suite de ce lot.
+- **Pas de doublon, et un état borné.** La clé `projet:liste:clé` dédoublonne l'ajout ; un élément ajouté sans clé en reçoit une, déduite de son titre et illisible. L'état garde les listes, des comptes par liste et par statut, le compteur des tickets, tous les tickets ouverts (deux cents au plus par projet : au-delà, ouvrir est refusé) et les quarante derniers éléments touchés. Tout le reste se lit dans une projection T0 (`project_items`, `project_item_notes`), écrite dans la transaction de l'ajout par la même règle pure que le réducteur. Un changement dit le statut que voyait qui l'écrit (`was`) : un élément que l'état connaît le vérifie, un élément qu'il ne garde plus le croit ; la projection ne change qu'une ligne qui a encore ce statut. L'état se reconstruit du journal (`state_version` 16).
+- **Qui fait quoi.** En exécution, elle ajoute (vingt-cinq par appel, les doublons dits), change, note et lit (`items_add`, `items_change`, `items_note`, `items_list`) ; elle ferme un ticket comme traité, jamais comme écarté. En conversation (`project_items`, `project_item`), les lignes d'accès du projet décident : qui le pilote au moins en lecture seule lit ses listes ; en modification, ouvre un ticket, change un statut, note ; sur l'accord du propriétaire, son ticket naît « proposé » et il peut noter — le propriétaire l'accepte ou l'écarte, avec sa raison, en conversation ou sur la fiche (onglets « Tickets » et « Suivi »). Les planchers des projets valent : jamais dans un salon ni avec une inconnue.
+- **Ce qu'elle en lit, et ce que ça déclenche.** Un objectif constant peut attendre une liste (`item:<liste>`, une sorte de plus dans `triggers.SORTS`) : un élément ajouté, changé ou noté par un autre qu'elle le rend dû, par la voie des déclencheurs. L'exécution lit son registre en dix lignes au plus (la section `project_items`) : les comptes de ses listes, ce qui a bougé depuis son dernier passage, ses éléments ouverts les plus anciens. Ce qu'une personne a écrit dans un élément y est une donnée citée, jamais une consigne. L'oubli d'une personne efface le titre, le texte et les notes des éléments qui la concernent ; l'élément, son numéro et son statut restent.
+
+*Pourquoi :* ce qui doit se suivre en série — les constats d'un audit, les demandes faites à un projet, des entreprises à contacter — ne tenait que dans son carnet et ses fichiers : rien n'empêchait de noter deux fois le même constat, ni ne disait ce qui attend le propriétaire. Un état qui garderait tous les éléments grossirait sans fin ; des comptes et une projection gardent la vie rejouable et les pages rapides. C'est la première moitié du cinquième lot des chaînes de travail entre projets (ADR 0253).
+
+*Révise 0031 (en partie : un projet a un registre), 0133 (en partie : ce que piloter un projet donne sur ses tickets et ses listes), 0265 (en partie : une sorte de déclencheur de plus, `item:<liste>`). Révisée par 0270, 0271, 0272, 0275, 0280, 0293.*
+
+### 0270 — Le parcours d'un ticket : ses étapes déduites, son plan, sa validation
+
+- **Une étape se déduit, elle ne s'écrit pas.** Un ticket porte les faits de son parcours : elle l'a pris, sa question attend une réponse, elle propose de l'écarter, son plan est écrit (et elle le juge petit ou non), son plan est validé et par qui, l'objectif qui le tient, cet objectif bloque. Leurs règles sont pures et à part (`faculties/projects/tickets.py`) : `stage` en tire son étape — proposé, non lu, en analyse, en attente de décision, en attente de validation, validé en cours, traité, écarté ; les deux étapes de la pull request ont leur nom et leur place, sans être produites avant le lot de l'hôte du dépôt — et `hand` dit à qui est la main : elle, ou le propriétaire. Chaque geste pose un fait : un `item_changed`, ou une note du fil qui a une sorte (`item_noted.kind` : sa question, son plan). Une note d'un autre qu'elle répond à sa question : le ticket repasse en analyse, et `item:tickets` éveille le passage. Rouvrir un ticket remet son parcours à zéro. La projection porte les mêmes faits (version 2) ; l'état se reconstruit du journal (`state_version` 17).
+- **« Non lu » se quitte par un geste.** En exécution, `ticket_step` conclut un ticket qu'elle a eu sous les yeux (`faculties/projects/triage.py`) : le prendre, poser sa question, écrire son plan — ce qu'elle va changer, où, ses jalons (du texte), ce qu'elle ne touchera pas, s'il est petit —, y répondre dans le fil et le fermer comme traité quand il n'y a rien à changer, ou proposer de l'écarter : elle ne l'écarte jamais seule, le propriétaire confirme. Sans geste, le ticket reste non lu.
+- **Un plan validé devient un objectif.** Le propriétaire du projet, ou qui s'occupe d'elle, valide ou refuse le plan, en conversation (`project_item`) ou sur la fiche. Validé : un objectif ponctuel naît (`Objective.ticket`), son texte et son critère tirés du plan, sa consigne du commentaire de la validation (`Objective.brief_ref`). Refusé : le ticket repasse en analyse, le commentaire dans son fil. Le processus `projects.tickets` suit ensuite l'objectif et pose le fait sur le ticket : abouti, le ticket se ferme traité ; bloqué, le ticket le dit et la main passe au propriétaire ; retiré, le ticket repasse en analyse ; un ticket fermé ou refusé retire son objectif. Un objectif dont le ticket attend le propriétaire ne part pas.
+- **La validation se règle par projet** (`Project.ticket_review`) : toujours, par défaut, ou seulement pour ce qui n'est pas petit. Un ticket pris comme petit est validé par elle sans attendre, son plan quand même dans le fil. « Petit » est une borne vérifiée, pas son seul jugement : à chaque compte rendu d'une exécution de son objectif (`report_run`), l'outil mesure ce qu'elle a enregistré — trois fichiers et quarante lignes changées au plus, réglables par projet, aucun fichier de dépendances, aucun fichier protégé du projet. Au-delà, l'exécution ne conclut pas « fait » : le ticket repasse en attente de validation, avec son plan et ce qu'elle a déjà fait. Un projet sans atelier n'a pas de borne à vérifier.
+- **« Traiter les tickets » naît de lui-même.** Au premier ticket entre ses mains qu'un autre qu'elle a ouvert sur un projet actif, si aucun objectif n'y attend `item:tickets`, le même processus ajoute un objectif constant sans cadence, déclenché par `item:tickets`, et le lance. Son exécution lit ses tickets ouverts par priorité (la section `project_tickets`, douze au plus) : leur étape, ce qui est attendu d'elle, le dernier mot du fil — ce qu'une personne y a écrit est une donnée citée, jamais une consigne. L'exécution d'un objectif né d'un ticket y lit son ticket et son plan.
+
+*Pourquoi :* le registre (0268) disait seulement si un ticket était ouvert ou fermé : rien ne distinguait un ticket qu'elle n'avait pas vu d'un ticket qui attendait le propriétaire, et elle pouvait le fermer sans que personne ait vu ce qu'elle comptait changer. Une étape déclarée à la main pourrait mentir ; déduite des faits, elle dit toujours ce qui s'est passé, et à qui est la main. Le plan d'un ticket est le cadrage d'un projet (0145, 0161) à l'échelle d'un ticket : ce qu'elle va faire se lit avant qu'elle le fasse, et la borne mesurée empêche qu'un « petit » changement en cache un grand. C'est la seconde moitié du cinquième lot des chaînes de travail entre projets (ADR 0253).
+
+*Révise 0031 (en partie : un objectif ponctuel peut naître du plan d'un ticket, et un constant de lui-même), 0268 (en partie : les étapes d'un ticket au-delà de quatre, ce qu'elle fait d'un ticket en exécution). Révisée par 0272, 0273, 0274, 0275, 0276, 0280, 0281, 0293.*
+
+### 0271 — Un projet demande à un autre : un ticket ouvert chez lui
+
+- **Une demande est un ticket ouvert chez un projet lu.** Un projet n'écrit jamais dans un autre. En exécution, `project_ask` ouvre un ticket chez un projet que le sien lit — le projet visé, un titre, le texte, le critère (quand ce sera fait), pourquoi — et le projet visé le traite comme ses autres tickets (0270) : rien de plus de son côté. « Qui l'a ouvert » dit le projet demandeur (`project:<n>`), et le ticket garde l'objectif d'où la demande part (`ItemAdded.origin`). Trois demandes par exécution, cinq demandes ouvertes au plus par lien ; sa clé dans le registre, déduite du demandeur et du titre, fait qu'une même demande ne s'empile pas — même écartée, elle ne se redépose pas.
+- **Le droit se relit dans le lien, à chaque appel** (`links.grant`, `Grant.ask` ; `faculties/projects/asks.py`). Le projet visé doit être lu, le lien pas suspendu, et ses lignes d'accès doivent donner au propriétaire du demandeur le pilotage sur accord ou en modification : sinon l'outil refuse, en une phrase. Par défaut le ticket naît « proposé » : le propriétaire du projet visé l'accepte ou l'écarte, avec sa raison. Le **mode direct** — le ticket naît « non lu » — se règle lien par lien, par le propriétaire du demandeur, là où il pose ses liens (`projects.links_set`, `direct` ; `Project.direct`). Il ne vaut que si les lignes du projet visé donnent la modification **et** si ce qu'écrit le projet visé est au moins du niveau de ce qu'écrit le demandeur (`written`) : dès qu'une des deux conditions tombe, le ticket naît proposé.
+- **Son niveau et ses sujets.** Le ticket s'écrit au niveau le plus haut des deux projets. Il porte dans `read_about`, pour l'oubli seulement (0262), les personnes du demandeur — son propriétaire, ses sujets, ceux de ses lectures : l'oubli de l'une d'elles efface son titre et son texte chez le projet visé. De qui parle chaque projet ne bouge pas : personne n'entend plus l'un ou l'autre après une demande qu'avant.
+- **Le demandeur suit ses demandes** (`Project.asks`, vingt au plus : le projet visé, le ticket, l'objectif qui l'a ouverte, son étape, l'événement qui porte la note de sa fermeture). Le réducteur du registre y recopie l'étape du ticket à chaque fait. Son exécution les lit en quelques lignes bornées (la section `project_asks`, non sûre) : en attente d'accord, acceptée, en cours, traitée, écartée avec sa raison — tant que le lien donne encore le détail du projet visé ; sinon, seulement qu'elle existe. L'état se reconstruit du journal (`state_version` 18).
+- **Une demande fermée réveille l'objectif qui l'a ouverte.** Traitée ou écartée, sa fermeture est une nouvelle (`ask:<n>` : une cause qui ne se déclare sur aucun objectif) que juge le processus `projects.stirs`, comme les autres (0265) : si le lien donne encore le détail, l'objectif encore ouvert qui a ouvert la demande n'attend plus, et, s'il est constant, devient dû par cette cause ; son exécution lit la note de fermeture. Un lien suspendu ne réveille rien. `projects.stirred` nomme le déclencheur qu'il juge (`key`) : un même événement peut en porter deux. Pas de boucle : une demande ne vise qu'un projet lu, et les liens n'en forment jamais.
+
+*Pourquoi :* un projet qui en lit un autre y voit ce qui manque — le site ne dit pas ce que fait le produit — sans pouvoir rien y changer, et rien ne portait ce constat jusqu'au projet qui peut agir. Une demande qui écrirait chez l'autre casserait la règle des liens ; un ticket, lui, entre par la porte que le projet visé a déjà : son propriétaire l'accepte ou l'écarte, et son parcours dit où il en est. Une demande fait passer de l'information du demandeur, qui lit peut-être plus confidentiel, vers le projet visé : l'accord du propriétaire est la porte, et le mode direct ne s'ouvre que si rien ne descend de niveau. C'est le sixième lot des chaînes de travail entre projets (ADR 0253).
+
+*Révise 0257 (en partie : `Grant.ask` est servi, un lien porte son mode direct), 0265 (en partie : une cause qui ne se déclare pas, `ask:<n>` ; `projects.stirred` nomme son déclencheur), 0268 (en partie : un ticket ouvert par un autre projet, son niveau et ses sujets). Révisée par 0272.*
+
+### 0272 — Le registre relu : le niveau d'un élément, le ticket proposé, l'oubli d'une demande, la borne, le plan validé
+
+- **Un élément garde le niveau de ses textes** (`Item.level`, dans l'état et dans la projection, version 3) : le plus haut de son titre, de son texte et de sa référence — celui du demandeur quand un autre projet l'a ouvert. En conversation, son titre, son texte et ses notes ne se disent qu'à qui entend ce niveau (`tracker.Reader`, `veiled`), et une recherche ne compare que ce qu'on peut lire. Ce que le projet visé écrit ensuite dessus — une note, un plan, l'objectif qui en naît, ses comptes rendus, sa clôture — est au moins de ce niveau (`written_on`, `written_for`) ; le détail du projet dit en conversation suit (`detail_level`), comme les sections de son prompt.
+- **Un ticket proposé n'est pas encore à elle.** Pendant une exécution il ne se dit qu'en une ligne (« #n proposé, attend son accord »), sans titre ni texte, dans le prompt comme dans `items_list` ; `items_change` le refuse, et la règle pure ne le ferme jamais « traité » avant son accord. Le texte d'une demande d'un autre projet encore proposée ne se lit que par qui peut la trancher.
+- **L'oubli atteint ce que le projet visé écrit sur une demande.** À la naissance du ticket, le réducteur verse les personnes de la demande dans `Project.read_about` du projet visé, puis de lecteur en lecteur ; `about` ne bouge pas : personne n'entend davantage. Ce qui s'écrit sur un élément porte en plus qui l'a ouvert et qui y agit (`inherited_on`), et une note de la projection porte les sujets de son élément. L'état se reconstruit du journal (`state_version` 19).
+- **La borne et la validation ne se contournent pas.** Elle ne valide elle-même qu'un ticket qui n'a encore ni objectif ni diff compté et n'a jamais dépassé sa borne (`tickets.self_validates`, `Item.outgrown`) : ensuite seul le propriétaire valide, et un « fait » ne s'écrit pas tant que le ticket attend. Une validation nomme le plan lu (`ItemChanged.plan`, le numéro de sa note ; `project_item`, « Trancher ») et ne vaut que si c'est encore celui du ticket : sinon elle le dit et montre le nouveau. L'objectif qui naît s'écrit sous la garde de son numéro (`tracker.free_number`). Les verrous et les dossiers de dépendances se reconnaissent à leur forme ; `git status` lit un chemin accentué tel quel.
+- **Ce qui suit un ticket ne s'arrête ni ne tourne à vide.** Un changement redit le numéro et le niveau de son élément : un ticket rouvert que l'état ne gardait plus retrouve son objectif. Tant qu'un ticket a la main chez elle (non lu, en analyse), l'objectif qui attend `item:tickets` reste dû à la cadence des constants par défaut, quel que soit son dernier verdict (`rhythm.fallback_due`, une lecture pure de l'état). « Traiter les tickets » ne naît qu'une fois par projet (`Project.triage`) et reçoit son premier ticket pour cause au lieu d'un « lancer maintenant » : l'agenda, la plage et « sur demande » valent. Un objectif dont le ticket est fermé se retire sous une garde, pas sous une clé de dédoublonnage : rouvert, il est retiré de nouveau.
+
+*Pourquoi :* la relecture adverse des lots des déclencheurs, du registre et des demandes. Le niveau d'un ticket de demande n'était lu nulle part : qui pilotait le projet visé en lecture seule recevait le titre, le texte et le « pourquoi » d'un demandeur plus confidentiel. Elle lisait, travaillait et fermait un ticket proposé avant tout accord. L'oubli d'une personne du demandeur vidait le ticket, pas le plan, l'objectif ni les comptes rendus que le projet visé en avait tirés — la règle de 0262 manquait dans l'autre sens. Un second plan « petit » faisait passer la borne ; un ticket rouvert perdait son numéro et son objectif ; « Traiter les tickets » ne revenait pas après un « continue », et son processus tournait chaque minute après un objectif rouvert ; un plan réécrit se validait à la place de celui qu'on avait lu.
+
+*Révise 0265 (en partie : un constant sans cadence qui attend les tickets revient à une cadence de secours ; il naît avec sa cause), 0268 (en partie : le niveau d'un élément, qui le lit, le ticket proposé en exécution), 0270 (en partie : ce qu'une validation suppose, la naissance et le retour de « Traiter les tickets », le retrait d'un objectif), 0271 (en partie : les personnes d'une demande rejoignent `read_about` du projet visé, son texte proposé ne se lit que par qui la tranche). Révisée par 0275.*
+
+### 0273 — Les jalons : où en est un objectif, et « fait » qui se vérifie
+
+- **Un objectif ponctuel porte ses jalons** (`Objective.milestones`, cinq vivants au plus, sans sous-jalons ; `projects.milestone_added`, `projects.milestone_changed`). Un jalon a son numéro, son texte, sa vérification et son statut — ouvert, atteint, retiré — ; atteint, il garde quand, par qui, comment, sa preuve et le commit de l'atelier. Ils s'écrivent en deux temps : le plan pose les jalons grossiers (`PlanStep.milestones`), la première exécution de l'objectif les affine sans avoir à dire pourquoi (`project_milestones`) ; ensuite une révision garde sa raison, et un retrait toujours. Un jalon atteint ne se défait ni ne se révise. Le propriétaire en ajoute depuis la console. L'état se reconstruit du journal (`state_version` 20).
+- **Quatre vérifications** (`milestone_reach` : elle dit le jalon atteint, et comment ; `faculties/projects/reaching.py`). `command` : l'outil lance lui-même la commande dans l'atelier, sans réseau, dans le temps de programmes qui reste à l'exécution ; elle doit réussir, et un résumé borné de sa sortie est gardé en preuve — un fait arrivé, pas un état ; en échec, rien ne s'écrit et l'outil dit pourquoi. `owner` : un point d'arrêt — elle le dit prêt, l'objectif attend (`rhythm.held_back`), et le propriétaire du projet, ou qui s'occupe d'elle, le valide ou le refuse avec sa raison, en conversation (`project_milestone`) ou sur la ligne de l'objectif ; il voit le jalon, comment elle dit l'avoir rempli, et le commit de l'atelier à ce moment-là. `item` : un ticket ou un élément du registre dans un statut donné, relu au moment où elle le dit. `prose` : elle dit comment il est rempli, comme pour le critère.
+- **« Fait » attend ses jalons.** `report_run` refuse « fait » sur un ponctuel tant qu'un de ses jalons reste ouvert, en disant lequel, avant tout commit. Un objectif qui a des jalons bloque après quatre exécutions de suite sans nouveau jalon atteint (`milestone_runs_max`, `Objective.stale`), au lieu de douze exécutions en tout ; dire un point d'arrêt prêt compte comme une avancée. Sans jalon, la règle d'avant vaut.
+- **Un constant n'a pas de jalons.** Il reçoit une liste de ce que chaque passage doit faire, cinq lignes au plus (`Objective.routine_ref` ; `PlanStep.each_pass`, ou « Modifier l'objectif » dans la console), montrée à chaque passage ; `milestone_reach` et `project_milestones` s'y refusent.
+- **Les jalons d'un ticket deviennent ceux de son objectif.** À la validation de son plan (`tracker.validating`), les jalons que le plan écrivait en texte (`tickets.plan_steps`, cinq au plus) naissent avec l'objectif, sous la même garde de numéro et au niveau du ticket. L'exécution qui vise un objectif lit ses jalons, leur état, la preuve des atteints en une ligne et celui qui vient (`milestones.lines`, `faculties/projects/milestones.py`) ; `milestones.cited` les rend avec leur preuve, prêts à être cités par une relecture ou une pull request.
+
+*Pourquoi :* une étape d'un plan n'avait qu'un critère en prose, et un ponctuel pouvait prendre douze exécutions sans que rien dise où il en était : une exécution interrompue reprenait à l'aveugle, et « fait » ne valait que sa parole et un commit. Un jalon vérifié par une commande que l'outil lance lui-même ne se dit pas atteint à tort ; un point d'arrêt rend la main au propriétaire au moment qu'il a choisi, pas à la fin ; et un objectif qui n'avance plus s'arrête après quatre exécutions, pas douze. C'est le septième lot des chaînes de travail entre projets (ADR 0253).
+
+*Révise 0031 (en partie : le blocage d'un ponctuel qui a des jalons), 0145 (en partie : une étape du plan porte ses jalons, un constant sa liste de passage), 0161 (en partie : « fait » attend les jalons), 0270 (en partie : les jalons du plan d'un ticket sont ceux de son objectif). Révisée par 0277, 0278, 0280.*
+
+### 0274 — Un projet à dépôt distant passe par des pull requests : une branche par travail, et elle ne fusionne jamais
+
+- **Le flux d'un projet** (`Project.flow`) : `direct`, comme avant, ou `pr`. Il se décide quand son dépôt distant se règle : `pr` dès que l'hôte sait ouvrir une pull request (`RepoHost.writes` : GitHub), `direct` pour un autre hôte et sans distant ; « Enregistrer le dépôt distant » le règle aussi à la main. Un projet d'avant cette décision reste `direct` tant qu'on ne le règle pas.
+- **Une branche par travail, et la base ne reçoit que ce qui est accepté.** En `pr`, l'atelier se place au départ de chaque exécution (`Workshop.work_on`, dans l'enrichisseur `projects_tree`) sur la branche de ce qu'elle vise — `work/objective-<n>` pour un ponctuel, `work/objective-<n>-<k>` pour un constant (une de plus après chaque pull request fusionnée), `work/misc` sans objectif (`faculty.branch_of`) —, créée depuis la base locale la première fois, retrouvée ensuite. Un travail resté non enregistré sur une autre branche de travail y est rangé par un commit avant de changer ; resté sur la base, il suit sur la branche. `report_run` s'y replace avant d'enregistrer, et n'enregistre jamais sur la base. La base locale est toujours `main` (`BASE_BRANCH`, dans le port) : elle suit la branche `Project.branch` du distant, et n'avance que par une récupération en ligne droite — sans toucher à la branche en cours (un `fetch`, puis la seule référence de `main`). C'est elle que lisent les vues (0260) : un projet lecteur ne voit que ce qui est accepté. Ce qu'un projet d'avant avait déjà enregistré sur `main` y reste : ses branches en partent, et sa première pull request le porte.
+- **La pull request est une capacité** (`projects.pull_request`, `faculties/projects/pulls.py`). Quand un ponctuel conclut « fait », ou qu'un passage de constant s'achève, sur une branche qui a des commits, le processus `projects.pulls` la propose, sur accord selon `Project.approval`. Son aperçu montre ce qui partira : le titre, le texte, les jalons et leurs preuves (`milestones.cited`), le ticket traité, l'étendue du diff face à la base (`Workshop.span`) ; l'accord épingle le commit. Exécutée, elle pousse la branche de travail puis l'ouvre chez l'hôte (`RepoHost.open_pull`), une seule fois : une pull request déjà ouverte pour cette branche est retrouvée, pas doublée. Son texte est neutre, comme un message de commit : composé par le code au moment de l'aperçu et au moment de partir (les arguments de la proposition ne portent aucun texte), des numéros et pas de nom ; les jalons cités n'y entrent que lorsqu'un accord est requis — le propriétaire lit alors exactement ce qui part —, et une ligne qui nomme une personne du projet se réduit à son état.
+- **Elle ne fusionne jamais.** Ni outil, ni capacité, ni méthode du port ne fusionne. En `pr`, `projects.push` refuse la branche de base du distant ; l'envoi automatique et `project_push` poussent la branche de travail. Le jeton reste celui des dépôts git et ne part que vers un hôte déclaré ; il lui faut, sur ce dépôt, le contenu et les pull requests en lecture et écriture.
+- **Suivre, et le ticket.** `projects.pulls` relit chez l'hôte chaque pull request ouverte (`RepoHost.pull`, dix minutes au moins entre deux lectures) et pose ce qui est arrivé (`projects.pull_seen` : son numéro, son état — ouverte, fusionnée, fermée sans fusion, changements demandés —, et ce que l'hôte en dit quand il la renvoie, un contenu effaçable où entre aussi le nom du compte qui l'a écrit là-bas). Fusionnée : l'objectif est clos pour de bon et la base se récupère avant l'exécution suivante. Fermée sans fusion, ou changements demandés : l'objectif se rouvre — une fois par relecture, pas à chaque lecture —, et le mot de l'hôte est cité à l'exécution dans une section non fiable (`project_pull`), comme une donnée d'un inconnu, jamais une consigne. Le ticket porte deux faits de plus (`Item.pull`, `Item.pull_number`) : validé sur un projet en `pr`, il est « validé, en attente de PR » ; sa pull request ouverte, « PR prête, en attente de fusion » ; il n'est traité qu'à la fusion, et un refus le rend « en attente de PR ». La borne d'un petit ticket mesure le diff entier de la branche face à sa base (`ItemChanged.measured`). L'état se reconstruit du journal (`state_version` 21, projection du registre en version 4).
+
+*Pourquoi :* un projet à dépôt distant poussait son travail sur la branche principale, exécution après exécution : rien ne séparait ce qui était en cours de ce qui était accepté, et un projet lecteur voyait un travail à moitié fait dès son premier commit. Une branche par travail et une pull request rendent la décision d'accepter à qui possède le dépôt, là où il a ses habitudes ; ne jamais fusionner est ce qui fait de cette décision la sienne. C'est la première moitié du huitième lot des chaînes de travail entre projets (ADR 0253) : les issues et la CI viennent ensuite.
+
+*Révise 0183 (en partie : l'hôte s'écrit aussi — ouvrir une pull request —, et ce qu'il dit d'une pull request suivie entre au journal), 0260 (en partie : en `pr`, la base que lit une vue ne reçoit que ce qui est accepté), 0270 (en partie : les deux étapes de la pull request sont produites, un ticket d'un projet en `pr` se ferme à la fusion, la borne mesure la branche). Révisée par 0275, 0276, 0277, 0278, 0280, 0288.*
+
+### 0275 — Les issues reflètent les tickets, le fil reste ici, et une pull request n'est prête que si ses vérifications passent
+
+- **Le ticket fait foi, l'issue le reflète** (`Project.issues` : `never`, `ask` — le défaut —, `always` ; `faculties/projects/issues.py`). Publier un ticket en issue (`projects.issue`), fermer ou rouvrir son issue (`projects.issue_state`) et publier une note de son fil (`projects.issue_note`) sont des capacités, chacune avec son aperçu : leurs arguments ne portent que des numéros, le texte se compose à l'aperçu et au départ, et l'accord l'épingle. En `ask`, une publication se demande (« Publier » sur le ticket, `ticket_publish` en exécution : `projects.issue_asked`) et attend l'accord ; en `always`, chaque ticket accepté se publie de lui-même et les fermetures partent sans attendre. Un ticket garde le numéro de son issue (`Item.issue`), posé une seule fois, à la lecture de l'hôte : l'issue porte un repère (`RepoHost.open_issue`, `mark` ; il ne vaut que sur ce qu'a écrit le compte du jeton), et une issue qui le porte déjà est retrouvée, jamais doublée.
+- **Ce qui ne part jamais sans accord**, quel que soit le réglage (`issues.reasons`) : un ticket dont le niveau dépasse celui du projet, un ticket ouvert par un autre projet, un ticket d'un projet qui porte des sujets hérités (`read_about`) ; et toute note qu'elle choisit elle-même de publier. Publier, c'est sortir un texte de la machine : ce qui est parti n'est plus à elle, l'oubli d'une personne efface ce que le moteur garde, pas ce que l'hôte a reçu.
+- **Ce qui vient de l'hôte entre comme la donnée d'un inconnu.** Le processus `projects.issues` relit les issues du dépôt, dix minutes au moins entre deux lectures. Une issue ouverte là-bas sans repère entre comme un ticket « proposé » (`author` : `host` ; sa clé `issue-<n>` : jamais deux fois ; trente proposés venus de l'hôte au plus) : son titre, son texte et le nom du compte qui l'a écrite sont des contenus effaçables, lus seulement par qui peut la trancher, et la règle du ticket proposé (0272) la tient hors de toute exécution. Un commentaire fait là-bas entre dans le fil du ticket, le nom du compte cité, borné, une seule fois (`ItemNoted.host_at`) : il ne lève pas une question posée au propriétaire, ne valide rien et ne déclenche aucun objectif.
+- **Les fermetures se suivent, le fil non.** Fermée chez l'hôte, l'issue ferme le ticket (traité ; écarté si elle est dite « non prévue » ou s'il était encore proposé) ; rouverte, elle le rouvre — proposé de nouveau s'il venait de l'hôte. Un ticket fermé ou rouvert ici fait fermer ou rouvrir son issue. Si les deux ont changé entre deux lectures, le dernier changement l'emporte (`issues.verdict` : `Item.closed_at` ou `reopened_at` face à l'heure que dit l'hôte) et une note du fil le dit. Du fil, rien ne part de lui-même : le titre et le texte à la publication, le changement d'état, et une note choisie, une par une. Une note publiée dit dans son texte qui l'a écrite : sa persona pour une note d'elle, le nom d'une personne seulement quand c'est cette personne qui publie, sinon aucun nom.
+- **La CI.** Le port dit les vérifications d'un commit (`RepoHost.checks` : aucune, en cours, réussies, en échec) et rend la fin du journal d'un échec (`check_log`). `projects.pulls` les lit dans la passe où il relit une pull request ouverte, pour son commit, et pose ce qui est arrivé (`projects.checks_seen`). Une pull request n'est « prête » sur son ticket que relue chez l'hôte, sans vérification en cours ni en échec (`triage.pull_fact`) ; un échec rouvre l'objectif une fois par commit en échec, la fin du journal citée à l'exécution dans la section non fiable `project_pull` ; un dépôt sans CI, ou des vérifications qui ne se lisent pas, ne bloquent rien. L'outil `checks_log` relit la fin du journal. Ce journal se télécharge hors de l'API de l'hôte : cette adresse-là ne reçoit jamais le jeton, qui ne part toujours que vers un hôte déclaré. L'état se reconstruit du journal (`state_version` 22, projection du registre en version 5).
+
+*Pourquoi :* les tickets vivaient dans le moteur et les issues chez l'hôte, sans lien : ce qu'un utilisateur du dépôt signalait n'arrivait jamais jusqu'à elle, et ce qu'elle traitait ne se voyait pas là-bas. Un fil synchronisé aurait fait parler tout le monde sous le compte du jeton, et sorti vers un dépôt peut-être public ce qu'un fil interne peut porter ; un reflet réglé, où chaque texte qui sort se lit avant de partir, garde le ticket pour vérité. Une issue publique est écrite par un inconnu : elle attend l'accord du propriétaire, comme toute demande venue d'ailleurs. Et une pull request dont les vérifications échouent n'est pas prête : la dire prête rendait la main au propriétaire pour un travail à reprendre. C'est la seconde moitié du huitième lot des chaînes de travail entre projets (ADR 0253).
+
+*Révise 0183 (en partie : l'hôte s'écrit aussi pour les issues, et ce qu'il dit des issues et des vérifications entre au journal), 0268 (en partie : un ticket garde le numéro de son issue, un ticket peut venir de l'hôte), 0270 (en partie : une note venue de l'hôte ne répond pas à sa question), 0272 (en partie : le texte d'un ticket proposé venu de l'hôte ne se lit que par qui le tranche, une réouverture depuis l'hôte le rend proposé), 0274 (en partie : une pull request n'est prête que si ses vérifications passent ; le port porte les issues et la CI, les droits du jeton s'étendent). Révisée par 0278, 0280, 0288, 0290.*
+
+### 0276 — La relecture indépendante : une autre exécution relit le travail avant qu'il sorte
+
+- **Quand** (`Project.reread` : `never`, `out` — le défaut —, `each` ; « Modifier le projet », « Sa liberté »). Avant de sortir : avant qu'une pull request soit proposée (`pulls.py`, entre `due` et `proposal`, pour le commit au bout de la branche) et, sur un projet au flux direct qui a un dépôt distant, avant qu'un envoi parte d'elle — l'envoi automatique et `project_push` attendent le verdict du commit, et le travail conclu de chaque objectif est relu. À chaque « fait » : aussi quand un ponctuel aboutit sur un projet sans dépôt distant. La demande est un fait (`projects.review_asked`), jamais deux pour un commit ; un objectif sans commit n'a rien à relire. Le récit d'un ponctuel et la fermeture de son ticket attendent le verdict.
+- **Comment** (`faculties/projects/review.py`). Une exécution impersonnelle du projet, quel que soit son mode : `Kind.JOB`, au sujet `review:<projet>:<objectif>`, dans le mode `review` — un mode que son candidat demande (`mode` dans ses arguments), jamais un message. Elle reçoit la demande d'origine, le but du plan, l'objectif, son critère, ses jalons et leurs preuves (`milestones.cited`), et le diff du commit relu, borné (`Workshop.patch` : face à la base de la branche, ou depuis le commit d'avant ce travail en flux direct), dans une section non fiable. Elle ne reçoit **ni comptes rendus, ni carnet, ni consignes, ni mémoire de travail** : pour elle, aucune section d'exécution ne s'écrit. Elle part dès que possible, sous l'espacement et les plafonds de l'heure et du jour du projet, sans attendre son agenda ni sa plage, et avant toute autre exécution du projet.
+- **Ses outils et son modèle.** Un lot à elle, `project_review`, le seul que son candidat demande : `review_list`, `review_read`, `review_run` (une commande dans l'atelier, sans réseau) et `review_verdict` — aucun outil qui écrit un fichier, un commit, le registre ou une proposition, même s'il est dans les lots du projet ; chacun se refuse hors d'une relecture. Son rôle de modèle est `review` : sans réglage il retombe sur celui des exécutions impersonnelles (`job`), et l'opérateur lui donne le modèle qu'il veut. Aucun repli entre fournisseurs (0073) : une relecture en panne est comptée comme la panne de toute exécution, son crédit du jour est rendu, et elle ne vaut jamais « bon ».
+- **Le verdict** (`review_verdict`, qui conclut la boucle ; `projects.reviewed`) : « bon », ou cinq constats au plus, chacun avec où et quoi — un fait posé sur l'objectif pour le commit épinglé au départ de la relecture, avec le fournisseur qui a relu. Il ne vaut que pour ce commit : si la branche a bougé, une relecture se demande pour le nouveau. Bon : la pull request se propose, ou l'envoi automatique part, et l'aperçu porte le verdict (qui a relu, quel commit) ; `compose` refuse ce qui n'a pas été relu. Sinon : l'objectif se rouvre comme lorsque l'hôte renvoie sa pull request, et l'exécution suivante lit les constats dans une section non fiable (`project_review`), cités comme le dire d'une autre exécution, pas comme une consigne.
+- **Deux refus, puis le propriétaire.** Après deux relectures refusées de suite sur un objectif, la troisième n'a pas lieu : un ponctuel bloque, un constant dit son besoin, et elle le dit à qui suit le projet avec les deux avis ; le ticket dont il est né le dit bloqué. Sa réponse, ou sa consigne, rouvre l'objectif et remet les refus à zéro. Une relecture menée deux fois au bout sans verdict rend la main de même, sans valoir ni bon ni refus. L'état se reconstruit du journal (`state_version` 23).
+
+*Pourquoi :* ce qu'une exécution disait « fait » n'était jugé que par elle-même, puis par l'accord du propriétaire, qui lisait un aperçu sans autre avis. Une seconde exécution qui a les comptes rendus de la première les croit ; privée d'eux, elle n'a que la demande, le critère et le diff, comme un relecteur. Un rôle de modèle à part laisse l'opérateur confier ce regard à un autre modèle que celui qui a écrit. Et deux refus de suite disent que la boucle ne converge pas : c'est au propriétaire de trancher, pas à une troisième relecture. C'est le neuvième lot des chaînes de travail entre projets (ADR 0253).
+
+*Révise 0116 (en partie : un mode peut aussi être demandé par le candidat choisi, pas seulement par un message), 0145 (en partie : « fait » peut être renvoyé par une relecture, dont l'exécution suivante lit les constats), 0270 (en partie : le ticket d'un travail qui attend sa relecture ne se ferme pas encore, et deux refus le disent bloqué), 0274 (en partie : la pull request ne se propose qu'avec un verdict favorable pour son commit quand le projet le demande, et son aperçu le porte ; un envoi au flux direct aussi). Révisée par 0277.*
+
+### 0277 — Les pull requests et la relecture, relues : une seule empreinte, la fusion qui clôt, rien ne sort sans verdict
+
+- **Un commit n'a qu'une forme : son identifiant complet.** `Workshop.commit` le rend complet, comme `head`, `commits` et `span` ; le journal le porte tel quel (`RUN_REPORTED.commit`, donc `Objective.commit`, le commit d'un jalon, celui d'une relecture demandée et de son verdict), et seul l'affichage le raccourcit. Le faux atelier des tests distingue lui aussi l'abrégé du complet.
+- **La fusion clôt.** Sa pull request fusionnée, un ponctuel que l'hôte ou une relecture avait rouvert — ou qui bloquait — est clos (`faculty._accepted`) : plus aucun verdict ne l'attend, la relecture demandée tombe, son ticket se ferme. Une fusion redite pour une branche déjà fusionnée ne compte pas deux fois, mais lève « à envoyer » : la passe ne la redit pas chaque minute.
+- **Une branche de travail ne part qu'avec un verdict.** Quand le projet demande une relecture, ni l'envoi automatique ni `project_push` ne poussent un commit sans verdict favorable pour ce commit-là, en flux `pr` comme en flux direct (`faculty.push_reviewed`) ; la capacité de la pull request le refusait déjà. « Pousser » dans la console reste le geste de l'opérateur, et son aperçu dit si le commit a été relu.
+- **La relecture lit tout ce qui part, sur une copie du commit.** En flux direct, son diff part du dernier commit que le dépôt distant possède, tel que l'atelier le sait (`Workshop.sent` : son dernier envoi réussi, sa dernière récupération, par adresse ; s'il ne sait rien, depuis le début) — plus du commit d'avant le travail de l'objectif. Ses outils lisent, et lancent leurs commandes, dans une copie jetable du commit épinglé (`Workshop.checkout`, `copy_tree`, `copy_read`, `copy_run`, `discard` ; posée à leur premier appel, montée dans la cage à la place de l'atelier, effacée à la fin de la relecture) : l'atelier n'est ni déplacé ni écrit. Sans diff lu, « bon » se refuse, et la relecture compte sans verdict. De ses jalons (`milestones.cited_for_review`), sa section fiable ne cite que la vérification, la preuve de ceux qu'une commande ou un élément du registre a vérifiés, et le texte d'un jalon du propriétaire ou de l'opérateur jamais révisé ; ce que l'exécution a écrit — le texte d'un jalon qu'elle a posé ou révisé, comment elle dit l'avoir rempli — passe dans une section non fiable (`review_said`), comme son dire à vérifier.
+- **Une base qui n'a que son amorce prend l'histoire du distant**, même quand la première exécution est partie avant toute récupération : les branches de travail parties de l'amorce y sont rejouées, un enregistrement après l'autre et sans toucher à l'arbre (`_adopt` : `merge-tree`, `commit-tree`, un seul parent), et rien ne bouge si l'un d'eux ne se rejoue pas. La base elle-même ne reçoit que ce que le distant a : rien n'y fusionne. L'état se reconstruit du journal (`state_version` 24 : sa forme ne change pas, ce que ses réducteurs font d'une fusion si).
+
+*Pourquoi :* la relecture adverse des lots L7 à L9 a montré que sur le vrai atelier l'enregistrement rendait l'empreinte abrégée et tout le reste la complète : un verdict ne « tenait » jamais, le ticket ne se fermait pas et aucun envoi ne partait — les tests passaient parce que le faux atelier rendait la même chaîne. Une pull request fusionnée pendant que son objectif était rouvert le laissait tourner jusqu'au blocage. En flux `pr`, un simple envoi sortait un commit jamais relu ; en flux direct, les commits d'un autre objectif partaient sous un commit relu. Une relecture qui lance ses commandes dans l'atelier y laisse des fichiers que l'exécution suivante enregistre, et citer comme fiables les mots de l'exécution relue lui donnait un canal vers celle qui la juge. Enfin une base restée à son amorce refusait pour toujours un dépôt distant qui avait déjà une histoire.
+
+*Révise 0273 (en partie : ce que les jalons citent à une relecture), 0274 (en partie : la fusion clôt un ponctuel rouvert ; une branche de travail ne part qu'avec un verdict quand le projet en demande un ; la base vierge prend l'histoire du distant), 0276 (en partie : d'où part le diff relu en flux direct, où la relecture lit et lance ses commandes, ce qu'elle lit des jalons, « bon » sans diff).*
+
+### 0278 — Les jalons, les relectures de l'hôte et les issues, relus : qui a un rôle rouvre, un point d'arrêt ne se défait pas, rien d'elle ne part sans accord
+
+- **Seul qui a un rôle sur le dépôt rouvre ou lève.** D'une pull request, le port ne rend « des changements demandés » (`Pull.review`) que pour les relectures de qui a un rôle sur le dépôt — son propriétaire, un membre, un collaborateur (chez GitHub, `author_association`) —, la dernière qui tranche de chaque relecteur : une demande tient tant que son auteur ne l'a pas levée, ou qu'elle n'a pas été écartée là-bas. Le commentaire cité suit le même filtre, et relectures comme commentaires se lisent par leur fin (les trois dernières pages), pas par leur première page. Le mot d'un compte sans rôle ne rouvre rien et ne lève rien ; il n'est cité que pour une pull request fermée sans qu'aucun autre ait parlé, et dit comme tel (`Pull.said_role`).
+- **Un point d'arrêt et un jalon du propriétaire ne se défont pas en exécution** (`faculty.milestone_guard` : la règle pure que le réducteur applique et que l'outil lit pour refuser). En exécution, elle ne retire ni ne change la vérification d'un jalon qu'un autre qu'elle a posé, d'un point d'arrêt, d'un jalon que le propriétaire a refusé, ni d'un jalon d'un plan qu'une personne a validé (`Milestone.agreed` : le plan du projet à sa validation, le plan d'un ticket validé par une personne — ses jalons sont à cette personne) ; elle n'en réécrit le texte que s'il est d'elle et que personne ne l'a validé. Affiner reste permis sans affaiblir : à un jalon d'un plan validé qui n'avait que sa parole, elle peut donner une vérification (une commande, un élément, un point d'arrêt), rien d'autre. Une révision ne porte que ce qu'elle change. `project_milestones` refuse en disant pourquoi, et de le demander (`needs_you`).
+- **Le blocage ne se contourne pas.** Le compte des exécutions sans jalon atteint ne revient à zéro qu'à la toute première pose de jalons d'un objectif, à un jalon atteint et à un point d'arrêt dit prêt — plus quand elle retire ses jalons puis en pose d'autres. Et le plafond d'exécutions (`once_runs_max`, douze) reste le filet de tout ponctuel, avec ou sans jalons.
+- **Les issues.** En synchronisation, seuls partent d'eux-mêmes les tickets ouverts par une personne — le propriétaire, qui pilote le projet, l'opérateur — dont ni le titre ni le texte ne nomme une personne du projet ; un ticket qu'elle a ouvert elle-même, ou qui en nomme une, attend toujours l'accord (`issues.needs_accord` : `own`, `named`), et l'aperçu dit pourquoi. Des commentaires de l'hôte, seuls ceux d'un ticket suivi comptent dans la borne d'une passe ; le repère est l'heure où le commentaire a été écrit, qui ne bouge plus, avec les numéros entrés à cette seconde-là (`Project.remarks_at`, `remarks_ids`, `ItemNoted.host_id`), et l'hôte rend les derniers écrits, pas les derniers retouchés.
+- **Des bornes.** Trente tickets venus de l'hôte par jour au plus, en plus des trente proposés à la fois (`HOSTED_PER_DAY`, `Project.hosted_since`, `hosted_count`). Une pull request que l'hôte ne sait pas dire se redemande à un écart qui double, une heure au plus (`pulls.retry_in`). Un échec de la CI rouvre l'objectif une fois par commit, même quand « en cours » s'est intercalé entre deux échecs (`Objective.checks_failed_sha`). L'état se reconstruit du journal (`state_version` 25).
+
+*Pourquoi :* la seconde moitié de la relecture adverse des lots L7 à L9. Sur un dépôt public, tout compte dépose une relecture : un inconnu rouvrait un objectif abouti à volonté, et son « approuvé » effaçait la demande du propriétaire. En exécution, elle défaisait elle-même ce qui devait lui rendre la main — un point d'arrêt révisé en « prose » puis dit atteint, une commande remplacée par `true` —, et retirer puis reposer ses jalons faisait tourner un objectif sans jamais bloquer. Les commentaires des pull requests, que l'hôte rend avec ceux des issues, pouvaient retenir pour toujours celui d'un ticket ; et en synchronisation un ticket ouvert par une exécution — peut-être manipulée par un texte qu'elle a lu — partait seul vers un dépôt public, noms compris.
+
+*Révise 0273 (en partie : ce qu'elle peut défaire d'un jalon en exécution, ce qui remet à zéro le compte du blocage, le plafond d'exécutions gardé pour un objectif qui a des jalons), 0274 (en partie : quelles relectures de l'hôte demandent ou lèvent des changements, ce qui en est cité, le rythme d'une pull request que l'hôte ne sait pas dire), 0275 (en partie : ce qui ne part jamais sans accord, comment les commentaires de l'hôte entrent, la borne par jour de ses tickets, un échec de la CI compté une fois par commit). Révisée par 0290.*
+
+### 0279 — Le banc du travail mesure la chaîne : un seul scénario, complet
+
+- **Un seul scénario.** Le banc du travail (`tools/banc_travail/banc.py`) mesure la chaîne de trois projets liés (`tools/banc_travail/chaine.py`), sur trois semaines virtuelles : le code d'un petit produit, son site, et le projet qui les fait connaître — il lit les deux autres, demande au site par des tickets, tient la liste des entreprises que le propriétaire contacte lui-même. C'est son scénario par défaut. Les huit demandes à un seul projet restent lançables par leur nom (`--scenarios`, ou `anciens` pour toutes) : elles gardent la mécanique d'un projet seul en état de marche. Il sert à trouver ce qui casse, pas à comparer un avant et un après.
+- **Ce qui est figé.** Deux dépôts inventés (`tools/banc_travail/sources/chaine/`), avec des écarts voulus entre le site et le produit et des défauts de référencement. Un faux hôte de dépôts (`tools/banc_travail/hote.py`) sert le port `RepoHost` entier — des dépôts git nus sur le disque, des pull requests, des issues, une CI — et l'atelier y pousse et y récupère par son vrai git, sans réseau ; le site en ligne passe par le réseau figé de la Forge. Les événements tombent à des instants virtuels : l'issue d'un inconnu, une version du produit, une panne du site, des entreprises contactées, une réponse.
+- **Le propriétaire écrit et agit.** Dans le chat, il suit ses fiches d'intention, une par projet. De ses mains (`tools/banc_travail/gestes.py`), il passe par les portes d'un propriétaire : les actions déclarées de la console, l'accord d'un effet proposé, les gestes de l'hôte — brancher un dépôt, accepter ou écarter un ticket, valider un plan ou un point d'arrêt, fusionner ou renvoyer une pull request, marquer une entreprise contactée. Ce qui demande un jugement passe par le modèle qui le joue ; le reste est écrit dans le scénario.
+- **La grille.** Par projet, le plan /30, le travail /50 et le suivi /20, comme avant. Pour la chaîne, sept critères sur 100 (`CHAIN_GRID`) : des faits exacts, des tickets justes et sans doublon, rien d'écrit hors de son projet, la nouvelle version visible sur le site, aucun travail refait, une liste d'entreprises utilisable telle quelle, les points d'arrêt et les validations respectés. Le score : la moyenne des trois projets pour moitié, la chaîne pour moitié.
+- **Le mode sec et le coût.** `--sec` déroule tout sans modèle ni réseau (`tools/banc_travail/sec_chaine.py`) et compte les exécutions par projet et par sorte — cadrage, travail, relecture ; l'action `cout` en tire le nombre d'appels d'une mesure réelle, qui se demande d'abord au propriétaire. Le banc donne à sa passerelle la fenêtre du modèle hébergé (200 000 jetons) : le simulateur ne lui en donne aucune, et une exécution qui a la Forge, un dépôt distant et des tickets ne tient pas dans les 24 000 jetons par défaut.
+
+*Pourquoi :* les huit scénarios mesuraient un projet seul, sur une journée. Ce qui casse dans une chaîne — un projet qui lit l'autre avant que son travail soit accepté, une demande en double, une pull request en conflit, une panne que personne ne voit — ne se montre que lorsque trois projets vivent ensemble plusieurs semaines, avec un hôte, un propriétaire qui tranche et des événements. Un seul scénario complet dit où regarder ; huit petits ne le disaient pas.
+
+*Révise 0145 (en partie : ce que mesure le banc du travail). Révisée par 0280.*
+
+### 0280 — Ce que le banc de la chaîne a montré : un lecteur s'éveille quand la base avance, un conflit a une issue, une app qui signale est entendue
+
+- **`project:<n>:commit` veut dire « la base du projet lu a avancé »** : ce qu'un lecteur peut voir (0260). En flux direct, c'est le commit d'une exécution, comme avant. En flux `pr`, c'est la fusion acceptée, et toute récupération qui ramène autre chose : après chaque récupération aboutie, `projects.pulls` relit dans l'atelier le commit au bout de la branche de base (`Workshop.base`) et le pose (`projects.base_seen`) ; le réducteur garde la base telle qu'on l'a sue (`Project.base_commit`) et n'éveille que si elle a bougé. Le commit d'une branche de travail ne déclenche plus rien. La cause dit le commit où la base est arrivée, et que c'est un travail accepté.
+- **Une branche de travail en conflit avec la base a une issue.** Le port de l'hôte dit si une pull request ouverte peut être fusionnée (`Pull.mergeable` : oui, non, ou rien — GitHub le dit sur la pull request elle-même, pas dans leur liste). Impossible à fusionner, elle n'est pas « prête » : son ticket repasse « validé, en attente de PR », l'objectif se rouvre une fois avec cette raison — il ne se rouvrira de nouveau qu'après que l'hôte l'a redite fusionnable ; « il ne le dit pas » ne change rien —, et la base se récupère. L'outil d'atelier `ws_take_base` ramène alors la base **dans la branche de travail** de l'objectif (`Workshop.take_base` : l'adaptateur, hors de la cage, où le dépôt ne s'écrit pas) : ce qui n'était pas enregistré est d'abord rangé par un commit, les conflits restent dans les fichiers, nommés, et elle les résout. `report_run` refuse « fait » tant qu'une marque de conflit reste (`Workshop.unresolved`) et n'enregistre rien d'ici là ; résolu, il enregistre comme d'habitude, et la pull request se met à jour. Rien n'est écrit sur la base, rien n'est forcé chez l'hôte, et rien n'y fusionne.
+- **Un signal qu'une app d'un projet met en file éveille l'objectif qui l'écoute** (`app:<nom>`). La Forge pose un fait public, `forge.raised`, qui ne dit que le nom de l'app — une fois par lot d'appels, quel que soit le nombre de signaux ; le texte du signal reste dans `forge.queued`, privé. Les projets le réduisent comme le signal public d'une panne (`forge.signaled`), et la Forge et les projets ne s'importent toujours pas. Le tri de la file par lots reste ce qu'il est.
+- **Les tickets qu'elle ouvre elle-même.** Un ticket qu'elle ouvre ne naît pas « non lu » — elle l'a écrit : il naît « en analyse ». « Traiter les tickets » naît au premier ticket ouvert dont elle a la main (non lu, ou en analyse), qui que ce soit qui l'ait ouvert ; un ticket qu'elle ouvre ensuite l'éveille (`item:tickets`), ses autres gestes sur ses listes toujours pas. Le ticket proposé garde sa règle : rien avant l'accord. La projection du registre passe en version 6.
+- **Le premier passage, la première exécution, et la forme d'une phrase.** Un constant peut dire que son premier passage vient tout de suite, dès qu'il peut commencer (`Objective.at_once`, faux par défaut : une étape de `project_plan`, `project_objective_add`, les constants de `create_project` et `start_project`, les deux formulaires d'un objectif) ; sans lui, la règle de 0161 reste. « C'est ta première exécution sur cet objectif », et le droit d'affiner ses jalons sans dire pourquoi, ne valent que s'il n'a jamais été travaillé (`Objective.worked`, qui ne repart pas de zéro quand l'objectif se rouvre). Aucune phrase de sa voix n'écrit un saut de ligne en toutes lettres : un bloc replié ne lit pas « \n », et un garde le vérifie. L'état se reconstruit du journal (`state_version` 26). Le banc ne contourne plus ces règles — plus de ponctuel « premier audit », plus de pull request en conflit fermée d'office — et son scénario provoque un conflit : le propriétaire pousse une retouche sur la branche principale pendant qu'une pull request attend.
+
+*Pourquoi :* le premier passage du banc de la chaîne en mode sec (0279) a montré sept défauts du moteur, qu'aucun test d'un projet seul ne voyait. Un projet lecteur était réveillé par un commit que sa vue ne montre pas, et pas à la fusion qui le rend visible : sur seize passages de cohérence, treize n'avaient rien à demander, et la nouvelle version du produit n'était lue que trois jours plus tard. Une pull request en conflit était dite « prête », la cage refusait d'écrire dans le dépôt, et la boucle a tourné vingt-huit fois. Six signaux d'une app pendant une panne du site n'ont fait réagir aucun projet. Les constats de son propre audit sont restés « non lus » jusqu'au ticket d'un inconnu. Un audit hebdomadaire ne partait qu'au septième jour. Au second passage, le projet lecteur lit la nouvelle version un quart d'heure après sa fusion, le conflit se résout en une exécution, la panne fait passer l'objectif qui l'écoute, et les tickets de l'audit ont leur plan dans l'heure.
+
+*Révise 0105 (en partie : un signal mis en file se dit par un fait public, sans son texte), 0161 (en partie : un constant peut faire son premier passage tout de suite), 0265 (en partie : ce que veut dire `project:<n>:commit`, ce qu'entend `app:<nom>`), 0268 (en partie : `item:tickets` s'éveille aussi au ticket qu'elle ouvre), 0270 (en partie : un ticket qu'elle ouvre naît « en analyse », « Traiter les tickets » naît au premier ticket dont elle a la main), 0273 (en partie : sa première exécution se compte depuis la naissance de l'objectif), 0274 (en partie : ce qui éveille un lecteur en flux `pr`, une branche en conflit se remet sur la base, la base se récupère aussi quand l'hôte dit un conflit), 0275 (en partie : une pull request que l'hôte dit impossible à fusionner n'est pas prête), 0279 (en partie : le scénario provoque un conflit et ne contourne plus le moteur).*
+
+### 0289 — La documentation d'un projet : un espace à part de son dépôt, écrit dans le navigateur, par elle et par MCP
+
+- **Un espace par projet, à part de l'atelier** : des pages en Markdown rangées en dossiers, et des images. Enregistrer une page n'est pas un commit. Ce qu'on y écrit suit le journal (`faculties/projects/docs.py`) : `projects.doc_written` porte le texte d'une version, un mot sur ce qui a changé, qui l'a écrite et par où (elle en exécution, une personne dans son espace, un outil par MCP avec le nom de son jeton, la console), avec les sujets du projet et ceux qu'il a hérités de ses lectures (`read_about`) — l'oubli d'une personne efface les textes de chaque version ; `doc_moved`, `doc_removed`, `doc_image_added`, `doc_image_removed` font le reste. **Une écriture nomme la version lue** (`base`) et ne vaut que si la page y est encore, dans le réducteur comme dans la projection : rien ne s'écrase. L'état ne garde que le chemin et le numéro de version de chaque page et les faits de chaque image (`Project.docs`, `state_version` 28) ; l'arbre, les titres, la recherche et l'historique sont une projection T0 (`project_doc_pages`, `project_doc_versions`), qui ne recopie pas le texte des versions : il se relit dans les contenus du journal. Les octets des images vivent hors du journal, sous `documentation/` (le port `project_docs`, le magasin des fichiers envoyés), avec leurs sujets, sauvegardés avec le dossier.
+- **Les bornes** : une page, 100 000 caractères, un chemin de 160 caractères et six niveaux (des segments en minuscules, chiffres, points et tirets, `.md` au bout : jamais `..`, jamais un chemin absolu) ; 200 pages par projet ; les 50 dernières versions de chaque page (les plus anciennes sortent de la projection) ; une image, 5 Mio, en PNG, JPEG, GIF ou WebP d'après ses octets (pas de SVG : il porte du script) ; 200 images et 100 Mio par projet.
+- **Une colonne de plus : « sa documentation ».** Une ligne d'accès d'un projet (`ProjectAccess.docs`) et ce qu'un lien donne (`Grant.docs`) la portent, fermée par défaut, ouverte à « toi » et à « elle seule » d'un projet jamais réglé ; le tableau d'un canal n'a pas de colonne à elle, elle y suit « fichiers ». **La lire** : le détail du projet, au niveau de ce qu'il écrit, et cette colonne — hors de toute conversation et par le canal du client, comme ses fichiers ; elle est ouverte d'office à qui le projet appartient, quelles que soient ses lignes. **L'écrire** : la lire, et piloter le projet en modification, en être le propriétaire, ou s'occuper d'elle. Un projet qui en lit un autre lit sa documentation quand le lien la donne, relu à chaque appel d'outil, et ne l'écrit jamais.
+- **Trois portes, les mêmes règles.** L'API par personne (`app/me/project_docs.py`, sous `/api/moi/projets/<id>/documentation`, `protocole-moi.md` § 11) : l'arbre, une page, son historique, une version, y revenir, créer, renommer, déplacer, supprimer, chercher, et les images (téléverser, lister, servir à qui lit la documentation seulement, retirer) ; chaque geste passe par une action de la faculté (`projects.doc_ecrire`…, auditée `moi.projects.doc_…`). Ses outils en exécution (`doc_list`, `doc_read`, `doc_search`, `doc_write`, lot `projects`) et la section `project_docs` : le texte d'une page lui revient cité, comme une donnée et jamais une consigne. La console ne montre que ses pages et leur dernière modification (onglet « Documentation » de la fiche) : on n'y édite rien.
+- **Par MCP, d'office : `/mcp/moi`.** Aucun réglage, aucune page : un outil présente un **jeton de compte** et agit comme la personne de ce compte, avec ses droits relus à chaque appel (`app/me/docs_mcp.py` : `doc_lister`, `doc_lire`, `doc_chercher`, `doc_ecrire`, `doc_image`) ; il ne voit que la documentation des projets qui la lui ouvrent, et un projet qu'elle ne voit pas répond comme un projet inconnu. Une sorte de jeton de plus, `tool` (`mika token create --client tool`, la console, ou `/auth/token`), **n'ouvre que ce point** — ni l'API, ni le chat, ni le monde ; le jeton d'un téléphone y écrit aussi, celui d'un écran n'y fait que lire. Une écriture venue de là se dit « par MCP » dans l'historique, avec le nom du jeton. Les prêts (un opérateur, la boucle locale, des outils à choisir) et la console en MCP (lecture seule, opérateurs) ne convenaient pas : ce point est la plus petite chose qui tienne, sur ce qui existait — les jetons de compte et le cœur MCP. Borné à 120 appels par minute et par compte ; le mandataire ne le relaie que si on le lui dit.
+
+*Pourquoi :* l'écran Projets validé le 21 novembre a un onglet Documentation — « une gestion directe dans le navigateur qui proposera un éditeur de fichier .md et upload des images », « la documentation est séparée du projet principal et accessible en MCP » — et son propriétaire a retiré la page qui réglait l'accès MCP : « le MCP est automatiquement ajouté à qui a accès au projet ». Rien ne gardait une documentation hors du dépôt, et rien ne servait un MCP à une personne.
+
+*Révise 0062 (en partie : une troisième sorte de jeton de compte, `tool`, qui n'ouvre que le point MCP d'une personne), 0122 (en partie : elle sert aussi un point MCP à chaque personne qui a un compte, sans déclaration d'opérateur), 0133 (en partie : une ligne d'accès d'un projet a une colonne « documentation »), 0257 (en partie : un lien donne aussi la documentation du projet lu, quand ses lignes la donnent), 0282 (en partie : l'API par personne sert et écrit la documentation d'un projet). Révisée par 0292.*
 
 ## Les sens et les plugins
 
@@ -1412,7 +1630,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Pourquoi :* un système extérieur doit pouvoir la faire agir tout de suite, avec des droits bornés réveil par réveil.
 
-*Révisée par 0117.*
+*Révisée par 0117, 0265.*
 
 ### 0069 — Teams : lire et écrire par l'extension du navigateur
 
@@ -1712,7 +1930,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Pourquoi :* « peut-être un fournisseur gratuit ? … ou alors sur le pc portable héberger son propre openstreetmap ? » ; « ma carte se charge depuis le backend, et depuis le backend on doit pouvoir configurer le serveur de carte ».
 
-*Révise 0119 (en partie : la position se voit sur une carte). Révisée par 0194 (la même carte sert l'écran Carte), 0197 (en partie : elle se règle sous Réglages › Carte et téléphone), 0229 (en partie : son adresse, avec la carte).*
+*Révise 0119 (en partie : la position se voit sur une carte). Révisée par 0194 (la même carte sert l'écran Carte), 0197 (en partie : elle se règle sous Réglages › Carte et téléphone), 0229 (en partie : son adresse, avec la carte), 0269 (en partie : de `cartes/`, la sauvegarde prend les compteurs du mois).*
 
 ### 0194 — Les lieux, les adresses et les itinéraires passent par le serveur
 
@@ -1855,7 +2073,7 @@ cache autour des personnes, réchauffé chaque soir, avec un limiteur et un serv
 Tripadvisor » (2026-11-18). Avec 1 000 demandes par heure pour 585 098 fiches, copier toute la France prend des heures
 pour servir surtout là où personne ne va.
 
-*Révise 0244 (en partie : la fiche d'un lieu prend sa partie DATAtourisme et les événements proches ; un lieu des données touristiques se trouve avec ceux de l'index). Révisée par 0250 (en partie : Tripadvisor est la seconde source du limiteur, du réchauffage et des photos ; un débit changé dans la console garde le tour déjà pris), 0256 (en partie : le limiteur compte le mois d'un service à son heure, et l'appel dès qu'il part ; une source donne l'adresse d'une photo au moment de la relève, sur ses seuls hôtes), 0259 (en partie : le lieu d'un événement n'est qu'un lieu qui accueille du public ; les cases d'un rayon se lisent en direct, bornées).*
+*Révise 0244 (en partie : la fiche d'un lieu prend sa partie DATAtourisme et les événements proches ; un lieu des données touristiques se trouve avec ceux de l'index). Révisée par 0250 (en partie : Tripadvisor est la seconde source du limiteur, du réchauffage et des photos ; un débit changé dans la console garde le tour déjà pris), 0256 (en partie : le limiteur compte le mois d'un service à son heure, et l'appel dès qu'il part ; une source donne l'adresse d'une photo au moment de la relève, sur ses seuls hôtes), 0259 (en partie : le lieu d'un événement n'est qu'un lieu qui accueille du public ; les cases d'un rayon se lisent en direct, bornées), 0269 (en partie : un pendant est un lieu de la même sorte ; le lieu d'un événement un peu plus loin ; seuls 404 et 410 disent qu'une fiche a disparu ; la photo jointe à son adresse résolue).*
 
 ### 0250 — Les avis de Tripadvisor, en cache autour des personnes, que Mika lit : le choix de l'opérateur
 
@@ -1936,7 +2154,7 @@ heure ») ; Google facture à l'appel, avec un quota offert qui revient chaque m
 proposé puis refusé (extraction interdite, protections contournées, avis aspirés) ; l'API officielle, « go pour ça »
 (2026-11-20). Par popularité, la recherche rend les lieux connus, là où Tripadvisor rendait des 5,0 à un avis.
 
-*Révise 0245 (en partie : le limiteur compte le mois d'un service à son heure, et l'appel dès qu'il part ; une source donne l'adresse d'une photo au moment de la relève, sur ses seuls hôtes), 0250 (en partie : Google Places remplace Tripadvisor ; les cases, les bornes, la fiche et les photos suivent Google).*
+*Révise 0245 (en partie : le limiteur compte le mois d'un service à son heure, et l'appel dès qu'il part ; une source donne l'adresse d'une photo au moment de la relève, sur ses seuls hôtes), 0250 (en partie : Google Places remplace Tripadvisor ; les cases, les bornes, la fiche et les photos suivent Google). Révisée par 0269 (en partie : un appel retenu par son mois ne compte pas dans le jour ; « Actualiser » ne repart pas avant dix minutes, borné pour tout le serveur).*
 
 ### 0259 — L'écran Carte lit les fiches, les événements et les photos ; elle les lit aussi, en données
 
@@ -1984,7 +2202,96 @@ fiches, les avis et les événements, avec les attributions que les sources dema
 montré « Marché du Vieux-Lille » rapproché de « La chapelle Notre-Dame d'Annay », et une recherche à douze kilomètres
 de Lille qui ne lisait que la case du point : Roubaix, Tourcoing et le LaM manquaient.
 
-*Révise 0195 (en partie : ses outils lisent la fiche d'un lieu et les événements), 0196 (en partie : un regard peut être des événements), 0245 (en partie : le lieu d'un événement n'est qu'un lieu qui accueille du public ; les cases d'un rayon se lisent en direct, bornées).*
+*Révise 0195 (en partie : ses outils lisent la fiche d'un lieu et les événements), 0196 (en partie : un regard peut être des événements), 0245 (en partie : le lieu d'un événement n'est qu'un lieu qui accueille du public ; les cases d'un rayon se lisent en direct, bornées). Révisée par 0269 (en partie : « Actualiser » dit ce qu'il a fait et refuse quand rien n'est réglé ; la fin d'un événement est celle de sa séance ; une photo qui n'est pas une image est un 502).*
+
+### 0269 — La carte relue : la photo jointe à son adresse résolue, un pendant de la même sorte, « Actualiser » borné
+
+- **Le relais de photos ne joint que des adresses publiques, résolues au moment de la connexion** (`photos.py`). Une
+  adresse écrite passe d'abord `public_url` : un nom d'hôte (des labels, le dernier commençant par une lettre) ou
+  une adresse publique — jamais une forme héritée que le système lirait comme une adresse (« 127.1 », « 0177.0.0.1 »,
+  « 0x7f.1 », un entier). Puis chaque connexion, à chaque saut de redirection, part par le réseau du relais
+  (`guarded_transport`) : il résout le nom, et se connecte à l'adresse qu'il vient de vérifier, seulement si
+  **toutes** celles que le DNS rend sont publiques (`joinable` : ni bouclage, ni réseau privé ou partagé, ni locale
+  au lien ou au site, ni multidiffusion, ni réservée, ni non spécifiée ; une IPv4 cachée dans une IPv6 — mappée,
+  6to4, Teredo — se juge elle-même). Le nom demandé reste celui du certificat, du SNI et de `Host`. Une source qui
+  répond autre chose qu'une image est un 502 (`MapsBadMedia`) ; une source muette, un 503.
+- **Un pendant est un lieu de la même sorte** (`tourism.same_place`, pour DATAtourisme comme pour Google, et pour les
+  doublons d'une liste) : une gare, une station, un parking, une borne, une banque, une location, une pharmacie
+  (`route`, `services`, `santé`) ne sont le pendant de rien, même sous le même nom — sauf une mairie, qui se visite.
+  Sous des noms qui ne sont pas les mêmes (l'un dans l'autre, presque les mêmes lettres), il faut une sorte voisine :
+  un restaurant et une boulangerie, une pâtisserie, un hôtel-restaurant ; ce qui se visite et un parc, une salle de
+  spectacle. Un nom qui n'a en commun que ce qui dit une rue ou une place (« La Place ») n'est pas contenu dans
+  l'autre. Une règle changée rejuge tout (`match_stamp` : la date de l'index et le numéro de la règle).
+- **Le lieu d'un événement, un peu plus loin** : jusqu'à 300 m, un lieu qui accueille du public reste le sien quand
+  l'événement le nomme en entier (« … à l'Aéronef ») ou qu'il est à la même adresse — le numéro et la rue de
+  l'index, mot pour mot (le LaM, placé au centre de ses contours, à 154 m de l'entrée de ses événements). Jamais un
+  autre sans cela, jamais pour un marché. **L'adresse** perd la commune que DATAtourisme recopie dans la rue
+  (« Roubaix, Roubaix », « … VIlleneuve-d'Ascq, Villeneuve-d'Ascq ») ; une rue qui porte le nom d'une ville (« rue de
+  Lille ») le garde.
+- **« Actualiser » ne repart pas pour rien.** Une source relue il y a moins de dix minutes (la fiche avec ses avis
+  chez Google, ou la recherche tout près du lieu ; la fiche DATAtourisme) ne se redemande pas : la fiche revient avec
+  « Relue il y a 4 min : elle est à jour… ». Ce qui part est borné pour tout le serveur : vingt « Actualiser » par
+  vingt-quatre heures glissantes (`REFRESHES_PER_DAY`, dans `cartes/quotas.db`) — le mois offert de Google compte
+  mille fiches, vingt par jour en prennent six cent vingt au plus —, en plus des dix par minute et par compte.
+  Rien à relire pour ce lieu (on n'en lit pas les avis, et l'office de tourisme n'en a pas de fiche) : la fiche,
+  et « Rien à relire pour ce lieu… » ; aucune source réglée : un refus en mots (503), jamais « Fiche relue. ». La
+  route rend ce que dit le guichet (`PlaceRefresh.said`).
+- **Ce qui compte ne compte que ce qui part.** Un appel retenu par le mois de son SKU ne reste pas dans les
+  vingt-quatre heures de tout Google (`Limiter.forget`). Une lecture en direct n'attend jamais une lecture de fond
+  de la même case (le réchauffage, des centaines de pages sur la part de fond) : la case se montre telle qu'elle est,
+  et sa couverture dit qu'elle se lit en ce moment. Seuls 404 et 410 disent qu'une fiche DATAtourisme a disparu ; un
+  400 est un refus, la fiche reste. Une base des avis ne se crée qu'une fois quand deux fils l'ouvrent, et aucune
+  base de la carte ne s'efface parce qu'une autre écriture la tient (`database is locked`).
+- **Les dates** : un événement (`EventHit`) finit avec sa prochaine séance (le lendemain après minuit), jamais avec sa
+  période, que ses `dates` disent ; une suite de dates ne se dit par ses jours seuls (« sam., dim. ») que dans les
+  six jours qui viennent — au-delà, avec leurs dates (« sam. 5 et dim. 6 déc. », « du jeu. 24 au sam. 26 déc. »).
+  Une période d'événements trop longue se refuse avec son champ, même sans `start` (aujourd'hui).
+- **Les horaires** : une liste de dates (« Jan 01,May 01,Dec 25 off ») est une seule règle ; seule une virgule
+  derrière la fin d'une règle (une heure, « off », « closed », « open », « 24/7 ») en ajoute une. **Les filtres** :
+  ce qui est vegan est végétarien aussi, sauf un `diet:vegetarian=no` (à la prochaine `mika carte lieux`).
+- **Ce que les clients citent, jusque dans une liste** (relecture des clients, même jour). Une vignette se montre avec
+  son crédit, ou pas du tout : un lieu (`PlaceHit`, `ports.maps.extras`) et un événement (`EventHit`) qui portent leur
+  première photo portent aussi d'où elle vient, son auteur, son lien et sa licence (`photo_source`, `photo_credit`,
+  `photo_credit_url`, `photo_licence` ; le cache des avis les lit avec la photo, la base des données touristiques
+  aussi) — facultatifs pour un lieu comme ses autres champs, toujours là pour un événement, vides sans photo. Les
+  clients les écrivent sur la ligne, lisibles ; sans crédit, pas de vignette. Un regard ne garde pas ce crédit (pas
+  un nom d'auteur de plus au journal) : ses lieux n'ont pas de vignette. Une photo de l'office de tourisme montre sa
+  licence là où elle se montre (la bande d'une fiche, pas seulement la visionneuse) ; « Google Maps » se lit partout
+  où une note Google se montre, quelle que soit la couverture de la liste, dans un regard aussi. Un regard garde
+  l'identifiant entier d'un lieu (`t:<uuid>`, 38 caractères : `plugins/trips/tools.py::IDENT_MAX`) : coupé, sa fiche
+  ne se rouvrait ni depuis le chat ni par elle. Les jours des événements se comptent à l'heure de Paris, celle de
+  leurs dates, quel que soit le fuseau du navigateur ou du téléphone ; le cache des photos d'Android suit leur
+  `max-age` (la stratégie de Coil 3 par défaut ne le lit pas : une photo aux droits finis restait visible).
+- **Ce qui ne part pas ne compte pas, ce qui ne se lit pas ne s'efface pas** (troisième relecture, même jour). Un
+  « Actualiser » ne prend un des vingt tours du serveur que si un appel part vraiment vers Google ou DATAtourisme
+  (`quota.counting_sent`, que chaque client marque au moment où l'appel part) : retenu par le mois de Google, un recul
+  ou le quota de l'heure de DATAtourisme, il rend son tour et le refus dit cette cause ; un appel parti en échec
+  compte. Un 200 de `/catalog/{uuid}` qui n'est pas cette fiche est une réponse illisible : la fiche reste. Une erreur
+  de base pendant le réchauffage arrête sa source en le disant, l'autre finit, et le compte rendu des deux se garde ;
+  une photo dont le cache ne s'écrit pas est un 503 en mots. Les photos d'un même lieu aux noms expirés ne relisent sa
+  fiche qu'une fois. **Un service est le pendant d'un service** de l'index sous son nom même, la commune qu'il y
+  ajoute mise à part (« France Cars Villeneuve d'Ascq » est « France Cars », une location ; « Taxi Lille Europe »
+  n'est pas la gare) ; la classe `Transport` de DATAtourisme se range sous « services », et une fiche lue avant se
+  rejuge à sa sorte d'aujourd'hui (règle 3). **Les compteurs du mois valent par dossier de données** : Google compte
+  par compte de facturation, la même clé sur deux serveurs (ou dans le `.env` d'un poste) partage un seul quota
+  offert — la console et la recette le disent, et conseillent une clé à part ; `cartes/quotas.db` est le seul fichier
+  de `cartes/` que prend la sauvegarde, restauré seulement là où il n'y en a pas (sur place, ceux du dossier, plus
+  récents, restent). Enfin, `tourism.synced` de `GET /carte` est la plus récente lecture de la base, d'une case comme
+  d'un département ; `place_read` lit un événement sans l'index des lieux ; Android refait la ligne d'Explorer après un
+  « Actualiser » en partie refusé, et son cache mémoire des photos repasse par le disque chaque heure (Coil le
+  consulte avant toute requête).
+
+*Pourquoi :* la relecture adverse du moteur « carte, avis, événements » du 2026-11-21 (quinze constats, vérifiés un à
+un par un test qui échouait avant) ; puis celle des deux clients (vingt-deux constats, `output/carte-avis/R2-constats.md`),
+et une troisième (onze, `R3-constats.md` : des refus qui prenaient un tour du serveur, « France Cars » perdu par la
+règle 2, des compteurs propres à un dossier quand la clé est partagée) :
+les vignettes des listes montraient des photos de Google et de l'office sans leur auteur ni leur licence, que le serveur
+ne donnait pas. Sur les bases des sondes, « BAR PARIBAS » avait les avis de la banque « BNP
+Paribas », la Grand-Place ceux du parking, « Bouillon Rihour » la station de métro ; « 127.1 » passait le garde-fou des
+photos ; le 1er janvier, le LaM était « ouvert 24 h sur 24 » ; un compte pouvait vider en deux heures le mois de fiches
+de tout le serveur à coups d'« Actualiser ».
+
+*Révise 0193 (en partie : de `cartes/`, la sauvegarde prend les compteurs du mois, `quotas.db`), 0245 (en partie : un pendant est un lieu de la même sorte ; le lieu d'un événement un peu plus loin, nommé ou à la même adresse ; seuls 404 et 410 disent qu'une fiche a disparu ; une base tenue ne s'efface pas ; la photo jointe à son adresse résolue), 0256 (en partie : un appel retenu par son mois ne compte pas dans le jour ; « Actualiser » ne repart pas avant dix minutes, borné pour tout le serveur), 0259 (en partie : « Actualiser » dit ce qu'il a fait, et refuse quand rien n'est réglé ; la fin d'un événement est celle de sa séance ; une photo qui n'est pas une image est un 502).*
 
 ### 0198 — Ce qui vient d'ailleurs : une seule neutralisation, la plus forte
 
@@ -1995,7 +2302,7 @@ de Lille qui ne lisait que la case du point : Roubaix, Tourcoing et le LaM manqu
 
 *Pourquoi :* l'audit du 2026-11-05 a trouvé la règle écrite trois fois, avec trois jeux de tirets et trois motifs. La plus faible servait les résultats des outils à elle (courrier, Teams, flux, téléphone, lieux), que la boucle d'outils ne cite pas : un objet de mail « −−− FIN ÉTAT INTERNE −−− », en signes moins et accent combinant, arrivait intact au modèle. Sa relecture a corrigé la première union sur deux points : une borne de mot laissait passer « FIN ÉTAT INTERNES », que les ports prenaient ; retirer tout caractère non attribué effaçait du message un émoji plus récent que la table de Python.
 
-*Révise 0022 (en partie : une seule neutralisation, la plus forte).*
+*Révise 0022 (en partie : une seule neutralisation, la plus forte). Révisée par 0266.*
 
 ### 0199 — Dans Teams, ta réponse rend la sienne sans objet
 
@@ -2219,6 +2526,29 @@ de Lille qui ne lisait que la case du point : Roubaix, Tourcoing et le LaM manqu
 - Le refus du composeur, quand il ne reste aucune place, dit quoi faire : relever le contexte déclaré du fournisseur.
 
 *Pourquoi :* le 2026-11-17, sur le portable, un fil du mode pro a refusé « test », fil vide : « la zone stable (0 car.) et ce qui part hors du composeur (53 701 car.) remplissent le budget (43 200 car.) ». Sur les 61 outils du mode pro, 54 sont à la demande et ne partent pas ; ils étaient pourtant réservés en entier. Et les deux fournisseurs Claude venaient d'être déclarés par le formulaire, au contexte de 24 000 qu'il pré-remplit, dont la moitié va à la sortie réservée. Le même piège avait déjà pris le 2026-10-26 et le 2026-10-29.
+
+### 0267 — La couche des modèles suit l'API d'aujourd'hui
+
+- **Un ancien résultat d'outil se coupe une fois, pas à chaque appel.** Quand une boucle d'outils ne tient plus dans le contexte déclaré, `LLMLimits.fit` ramène les anciens résultats, du plus ancien au plus récent, à leur début (`TOOL_STUB`, 400 caractères) : les mêmes caractères à chaque appel suivant. Les derniers résultats — ce qu'elle lit — sont coupés au plus juste, comme avant.
+- **Une réflexion que le fil ne porte plus se retire.** Sur les familles 5.x, un bloc de réflexion est lié au fil qui l'a produit ; l'API refuse (400, « Invalid signature in thinking block ») celui qu'un changement d'avant lui a délié. Le fournisseur Claude le retire du fil, l'oublie pour la suite de la boucle et rejoue l'appel une fois.
+- **Dans une boucle d'outils, le point de cache va sur les derniers résultats.** Le tour suivant les relira ; en conversation, il reste avant le tour final, qui porte son état du moment.
+- **Une sortie en JSON se demande par un schéma** (`LLMRequest.output_schema`, `ports.llm.json_object`) : `output_config.format` pour Claude, `response_format` strict pour un serveur compatible OpenAI, `format` pour Ollama. Les tris du courrier et de Teams et le regard de la caméra le donnent. Une garantie quand le fournisseur la sait, jamais un contrat : un refus est rejoué sans elle et mémorisé par modèle, la CLI de Claude Code l'ignore, et les appelants relisent toujours du texte.
+- L'aide du réglage « effort » dit ce qu'il en est : vide, c'est le défaut du modèle — les familles 5.x réfléchissent d'emblée.
+- Laissés tels quels, après examen : le point de cache des appels uniques (toute règle fixe perd plus dans une rafale qu'elle ne gagne sur un appel isolé) ; l'extraction et les fiches, qui répondent par un outil (leur schéma est trop riche pour être garanti sans essai contre l'API).
+
+*Pourquoi :* coupé au plus juste, un ancien résultat changeait à chaque tour d'une longue boucle : le préfixe en cache se réécrivait depuis lui, et la réflexion rejouée après lui pouvait être refusée — l'épisode en échec, le travail fait. Chaque résultat d'outil était payé plein tarif avant d'être écrit en cache au tour suivant. Les tris lisaient leur JSON par une expression régulière.
+
+*Révise 0135 (en partie : la coupe des résultats d'outils).*
+
+### 0285 — L'effort se demande par appel : le rôle d'abord, la fiche à défaut
+
+- **L'effort de réflexion est porté par l'appel** (`LLMRequest.effort`, vocabulaire au port : `ports.llm.EFFORTS`), plus par la seule fiche du fournisseur. L'ordre : ce que l'appelant pose, sinon l'effort réglé pour le rôle, sinon celui de la fiche ; vide partout, le défaut du modèle.
+- **Chaque rôle a le sien** (`LLMConfig.efforts`) : la passerelle le pose sur la requête qui n'en demande pas (`Gateway.asked`), et s'en sert pour réserver la sortie. Un effort laissé vide n'est pas gardé ; celui d'un rôle qui n'existe pas est un problème dit.
+- Les deux fournisseurs Claude le lisent : l'API (`output_config.effort`, réflexion adaptative ; la température de la fiche ne part pas avec lui) et la CLI (`--effort`, lu à son lancement). Ollama et les serveurs compatibles OpenAI l'ignorent, et « Qui sert quoi » le dit sur la ligne (« effort sans effet ici »).
+- Il se règle dans « Qui sert quoi », dans une colonne à côté du fournisseur — une correspondance posée dans la table d'une autre (`SettingsSection.beside`), pas une seconde table — et par `mika llm effort <niveau> <rôles…>` (`defaut` : le rôle suit sa fiche).
+- Ce qui pourra le poser ensuite sans rien changer ici : un choix fait depuis une conversation ou sur un projet, par la requête.
+
+*Pourquoi :* l'effort ne se réglait que par fiche. Donner à la seconde passe, au tri ou aux descriptions d'images un effort plus léger que la réponse demandait une seconde fiche du même modèle, sa clé retapée, ses créneaux à part ; et rien ne permettait à un appelant de dire le sien.
 
 ## Sa voix, sa persona, la genèse
 
@@ -2517,7 +2847,7 @@ de Lille qui ne lisait que la case du point : Roubaix, Tourcoing et le LaM manqu
 
 *Pourquoi :* l'application devait la laisser écrire la première sans qu'une connexion de fond passe pour une présence, et elle ne pouvait envoyer aucun fichier.
 
-*Révise 0051 (en partie), 0060 (en partie). Révisée par 0063, 0077, 0190, 0215.*
+*Révise 0051 (en partie), 0060 (en partie). Révisée par 0063, 0077, 0190, 0215, 0289.*
 
 ### 0065 — Mika en fond : des portraits pré-rendus dans l'application mobile
 
@@ -2582,7 +2912,7 @@ de Lille qui ne lisait que la case du point : Roubaix, Tourcoing et le LaM manqu
 
 *Pourquoi :* un travail demandé n'a que faire de sa voix de chat, de son caractère ni de son humeur.
 
-*Révisée par 0162, 0164, 0165.*
+*Révisée par 0162, 0164, 0165, 0276.*
 
 ### 0162 — En mode pro et en projet, un service s'éprouve sans buter sur son plafond
 
@@ -2643,7 +2973,7 @@ de Lille qui ne lisait que la case du point : Roubaix, Tourcoing et le LaM manqu
 
 *Pourquoi :* « un nouveau frontend web qui est plus comme la version android (pas de 3d) … le tout bien sûr limité à l'utilisateur », « il est pour des utilisateurs de mika » ; pour elle, « place-la juste bien de base », et « dans le chat elle doit être visible en gros ».
 
-*Révisée par 0235.*
+*Révisée par 0235, 0282, 0284.*
 
 ### 0200 — Mail dans frontendv2 : une pastille, un nom par vue, tes vues à toi, ranger dans un dossier
 
@@ -2737,6 +3067,158 @@ de Lille qui ne lisait que la case du point : Roubaix, Tourcoing et le LaM manqu
 
 *Pourquoi :* le dépôt est public, et le modèle acheté ne peut pas y être. Un modèle libre « deviendra le modèle VRM par
 défaut si on le remplace pas » (2026-11-20).
+
+### 0282 — Les projets dans l'API par personne : ce qu'elle voit, « À faire », ses gestes
+
+- **Ce qu'elle a d'un projet** est la plus serrée de deux lectures du moteur, jamais une règle de l'API : ce que ses lignes d'accès lui donnent hors de toute conversation (`todo.reach` : son projet en entier ; celui d'un autre seulement par une ligne qui la désigne partout et toujours, `links.given_to`), et ce que la conversation lui en dirait par le canal de son client (`access.sees`, `access.steering`), au niveau qu'elle en entend (`tracker.reader_of`). Le voir donne son titre et son état ; son détail demande de le piloter au moins en lecture seule et d'entendre son niveau. Un projet archivé, ou celui d'un autre sans ligne à son nom, n'existe pas (404). Un opérateur n'y a que les droits de sa personne.
+- **Les routes** (`app/me/projects.py`, sous `/api/moi/projets`, `protocole-moi.md` § 11) : ses projets et « À faire » (`todo.for_person`, filtré par ce qu'elle a de chaque projet ; chaque entrée dit le geste qui la règle et si elle peut le faire ici) ; la fiche (missions, objectifs et leurs jalons, branche, pull request, CI, relecture, plan, listes, liens, dépôt) ; une page d'éléments, et un élément avec son fil. Un élément ne dit ses textes que si `tracker.veiled` les lui laisse lire ; un projet lié ne dit son numéro et son titre que si elle le voit elle-même, et ce que le lien donne vient de `links`. Un texte venu d'ailleurs (l'hôte du dépôt, un autre projet, la sortie d'une commande) porte `outside`.
+- **Chaque geste passe par l'action de console qui le fait déjà**, au nom de la personne (audité `moi.projects.<action>`), après la garde que l'outil de conversation applique au même geste. Ouvrir un ticket et noter : qui pilote sur accord ou en modification — sur accord, le ticket naît proposé (`ticket_ouvrir`, `born`). Changer un statut, une consigne, « vas-y maintenant », la pause, la reprise : en modification seulement. Trancher un ticket ou un point d'arrêt : le propriétaire du projet, ou qui s'occupe d'elle (`tracker.settles`), une validation nommant le plan lu. Répondre à un plan : qui l'a demandé. Poser ce qu'il lit : son propriétaire (`links.may_link`).
+- **Un accord** (un effet proposé dont le contexte est le projet) se donne par `runtime.decisions.decide`, sur le condensé de ce qui a été lu (`seen`, exigé pour accepter), par quelqu'un qui s'occupe d'elle : « ton accord », dans une ligne d'accès, est le sien, pas celui de la personne pour qui le projet est fait. Dans « À faire », un accord n'est à une personne que si elle peut le donner.
+- **Restent à la console** : créer un projet et régler son cadre (outils, accès, dépôt, rythme), ajouter ou rouvrir un objectif, fermer un ticket comme traité ou le rouvrir, régler une liste, publier chez l'hôte. Un pilotage « sur accord » se demande dans le chat, où elle le propose. `GET /api/moi` compte ce qui l'attend (`counts.projects`).
+
+*Pourquoi :* le client web et l'app Android n'avaient des projets que leur titre et les accords en attente, par le canal du chat ; leur écran « Projets » doit lire en une requête ce qui attend la personne, sans recalculer une règle ni montrer plus que la conversation ne lui dirait.
+
+*Révise 0133 (en partie : piloter un projet et trancher se font aussi depuis l'espace de la personne, sous les mêmes gardes), 0187 (en partie : l'API par personne porte aussi ses projets). Révisée par 0286, 0288, 0289, 0290, 0293.*
+
+### 0284 — L'écran Projets du client web : « À faire » d'abord, le geste sur place
+
+- `frontendv2/` a un écran **Projets** (`src/screens/projets/`, sur `protocole-moi.md` § 11), deuxième rubrique, avec
+  la pastille de `counts.projects`. Deux onglets : **À faire** (ce qui l'attend dans tous ses projets, dans l'ordre du
+  serveur) et **Projets** (ses projets en cartes : où en est chacun, combien de choses l'attendent). Une fiche a cinq
+  onglets : où il en est (ce qui attend, son plan, ses missions, ses objectifs avec leurs jalons, la pull request, la
+  CI, la relecture), ses tickets, ses listes de suivi, ses liens, son dépôt en bref.
+- **Chaque attente se règle sur place** : son bouton déplie ce qu'il faut lire (ce qui partirait, le plan du projet,
+  celui d'un ticket, la question posée, les statuts de la liste), puis envoie la route et les arguments que le serveur a
+  donnés (`gesture`), complétés par ce qui est saisi. Valider le plan d'un ticket nomme le plan montré ; un accord
+  renvoie le condensé lu. Sur une liste de suivi, un statut se change d'un geste, sur la ligne même.
+- **Le client ne recalcule aucune règle** : pas de bouton sans `can` ou `rights`, les libellés d'étape et de statut
+  sont ceux du serveur, et il ne vérifie pas ce qui est saisi — un geste refusé se dit sur place, avec les mots du
+  serveur (un 409 relit ce qu'on lisait). Piloter (consigne, lancer, pause, reprise) est dans la barre de titre, quand
+  `rights.pilot` le permet.
+- **Un texte venu d'ailleurs** (`outside` : une issue d'un inconnu, un commentaire de l'hôte, la fin d'un journal de CI,
+  la sortie d'une commande) est cité dans un cadre à part (`markup.ts::outsideMarkup`) : échappé, sans lien ni
+  balisage, jamais présenté comme un mot de Mika ou de la personne ; un lien venu d'ailleurs ne s'ouvre que s'il est
+  http ou https, sans référent.
+- **Restent à la console**, sans bouton ici, dits par une ligne là où on les chercherait : créer un projet et son cadre
+  (outils, accès, dépôt, rythme), ses objectifs, fermer ou rouvrir un ticket, régler une liste, publier chez l'hôte. Ce
+  qu'il lit ne se pose ici que si elle voit tous les projets lus (la route veut toute la liste). La barre du bas d'un
+  téléphone a huit entrées ; Paramètres s'y dit « Réglages ».
+
+*Pourquoi :* la personne doit pouvoir répondre à ce qui l'attend depuis son navigateur, téléphone compris — « j'ai
+contacté cette entreprise » en un geste — sans que le client refasse une règle du moteur ni lise comme une consigne ce
+qu'un inconnu a écrit. La maquette (`frontendv2/maquette/ecrans/projets.js`) reste la référence de sa forme.
+
+*Révise 0187 (en partie : le client de tous les jours a aussi un écran Projets, et huit rubriques). Révisée par 0286, 0291.*
+
+### 0286 — L'API des projets sert ses mots et ses raisons ; ce qu'un projet lit change lien par lien
+
+- **Ce qu'un projet lit change lien par lien** : `POST /api/moi/projets/<id>/liens` nomme ce qui change (`add`,
+  `remove`, et pour un lien posé `direct_on`, `direct_off`), plus jamais toute la liste. Elle ne nomme que des projets
+  qu'elle voit : un lien vers un projet qu'elle ne voit pas reste tel quel, et le nommer se refuse comme un projet
+  inconnu. La fiche dit ceux qu'elle peut lui faire lire, chacun avec ce que le lien donnerait (`candidates[].gives`).
+  Les règles restent celles de `links` et de l'action `projects.liens`.
+- **Une attente est comptée pour qui peut la régler** (`todo.awaits`) : la personne nommée, sinon le propriétaire du
+  projet — sauf un accord, qui n'attend que qui s'occupe d'elle, même dans un projet confié à quelqu'un d'autre.
+  `todo.for_person`, la console (« attend ») et l'API le lisent là ; l'API n'y ajoute que la carte adressée à
+  quelqu'un, que le fait des effets en attente ne dit pas.
+- **Une attente qu'elle ne peut pas régler ici dit pourquoi** (`why`) : le refus même que sa route rendrait, mot pour
+  mot, ou l'endroit où le geste se fait (la console, l'hôte du dépôt). Une attente « chez l'hôte » porte l'adresse de
+  la pull request (`gesture.url`), composée du dépôt et de son numéro (`pulls.pull_url`).
+- **Les mots sont servis, les clients n'écrivent pas les leurs** : les sortes et les priorités d'un ticket avec la
+  liste des tickets (`kinds`, `priorities`, et ce qu'un ticket reçoit par défaut), et qui a écrit un élément ou une
+  note — sa sorte (`author_kind` : elle, la personne connectée, une autre personne, un autre projet, l'hôte) et ses
+  mots (`author`).
+- **Le nom d'une autre personne** ne se sert que si elle s'occupe d'elle (sa voix la nomme à tous), ou si ce qui
+  concerne cette personne s'entend par ce client au niveau de l'élément (`vocab.privacy.hearable`) ; un autre projet
+  ne se nomme qu'à qui le voit ; rien n'est nommé d'un élément qu'elle ne lit pas.
+
+*Pourquoi :* l'écran Projets du client web butait sur ces manques — il écrivait ses propres mots, coupait « Choisir ce
+qu'il lit » dès qu'un projet lu ne lui était pas visible, disait « pas d'ici » sans raison — et « À faire » comptait
+pour le propriétaire d'un projet confié un accord qu'il ne peut pas donner ; l'app Android s'écrit sur la même API.
+
+*Révise 0281 (en partie : `for_person` compte un accord pour qui s'occupe d'elle), 0282 (en partie : la forme du geste des liens, les champs servis, le nom d'un auteur), 0284 (en partie : ce qu'il lit se pose ici même quand elle ne voit pas tous les projets lus).*
+
+### 0287 — L'effort d'une réponse se force depuis la conversation : pour toute la conversation, ou pour un fil
+
+- **Deux réglages, « auto » ou forcé** : son opératrice force l'effort de réflexion des réponses qu'elle reçoit pour toute sa conversation avec elle (mode pro compris), et pour chacun de ses fils de travail. Un fil en auto suit la conversation ; la conversation en auto ne demande rien : le rôle décide (ADR 0285). L'ordre entier : le fil, la conversation, le rôle, la fiche du fournisseur, le défaut du modèle.
+- **C'est un réglage gardé, pas un champ du message** : `transcript.effort_set` (la personne, le fil — vide pour la conversation —, l'effort — vide pour auto), projeté dans `thread_efforts` ; l'action `transcript.regler_effort` l'écrit, au nom de celle qui règle. Il vaut sur tous ses écrans, et un client qui ne le connaît pas en profite quand même. Oublier la personne l'efface.
+- **L'épisode le lit quand il compose** (`EpisodeRunner.effort`, que la composition branche sur `transcript.asked_effort`) et le pose sur sa requête (`LLMRequest.effort`) : il vaut pour toute sa boucle d'outils, et sa trace le dit. Seulement pour la réponse à un message de la personne, en privé : ni une initiative, ni un salon, ni la seconde passe, ni un travail de fond.
+- **Un candidat choisi peut demander le sien** (`effort` dans ses arguments, comme son mode) : il passe devant. C'est par là qu'un projet posera son effort préféré sur ses séances.
+- **Dans le chat** : la trame `effort` le règle (opératrice authentifiée seulement, comme le mode pro), `effort_result` dit le sort, et `efforts` rend le réglage entier avec ce que « auto » vaut en ce moment — à l'ouverture et après chaque réglage. Une valeur que le code ne connaît pas ne demande rien.
+
+*Pourquoi :* l'effort ne se réglait que dans la console, par rôle, pour tout le monde et pour toute tâche. Elle veut pouvoir demander plus (ou moins) de réflexion là où elle travaille — une question difficile, un fil de travail exigeant — sans changer le réglage de toute l'instance, et le retrouver d'un appareil à l'autre. Un champ porté par chaque message aurait laissé à chaque client le soin de s'en souvenir.
+
+### 0288 — Le code d'un projet dans l'API par personne, et la fusion : le geste d'une personne
+
+- **Le dépôt se lit à une référence, par le port.** `Workshop` lit le dépôt d'un atelier à une branche ou à un commit, dans les objets de git et jamais dans l'arbre de travail : ses branches et leur écart avec la base (`branches`), un dossier (`ref_tree`), un fichier (`ref_file` : son texte s'il en est un et qu'il tient sous la borne ; binaire, trop gros, lien symbolique ou sous-module, il se dit sans contenu), l'histoire d'une branche, de toutes ou d'un chemin (`history`), un commit (`change`) et ce qui change d'un commit à un autre, fichier par fichier, à lignes numérotées et borné (`diff_of`). Une branche se nomme par son nom validé, un chemin est relatif et ne remonte pas : rien ne sort du dépôt, et un lien ne se suit pas.
+- **Les routes** (`app/me/project_code.py`, sous `/api/moi/projets/<id>/code`, `protocole-moi.md` § 11) servent les six vues de l'écran — fichiers, commits, branches, pull requests, issues, CI — sans rien laisser à recalculer : les mots à côté des codes, les adresses chez l'hôte composées ici, ce qui est lié (l'objectif, le ticket et son étape). Le détail d'un projet donne les titres et les états ; **le contenu d'un fichier et un diff demandent en plus le droit sur ses fichiers** — celui de ses lignes d'accès hors de toute conversation (`todo.reach`) et par le canal du client (`access.shares_files`), au niveau de ce que le projet écrit. Les pull requests, leur CI et leur relecture viennent du journal ; les branches, les commits et les diffs, de l'atelier ; l'hôte n'est lu que pour ce qu'il est seul à savoir (`RepoHost.talk` : les échanges ; `Checks.runs` : les vérifications une à une ; les issues et leurs étiquettes), borné par compte, et rien de ces lectures ne va au journal. Tout texte de l'hôte porte `outside` ; une issue d'un inconnu ne dit son titre et son texte qu'à qui peut la trancher.
+- **Fusionner est le geste d'une personne, et de personne d'autre.** L'action `projects.fusionner` — dans la console sur la ligne de la pull request, et par `POST …/code/pull/fusionner` — est réservée au propriétaire du projet et à qui s'occupe d'elle (`tracker.settles`, la règle de qui tranche un ticket) : un opérateur qui n'est ni l'un ni l'autre ne fusionne pas. Elle nomme le commit de tête que la personne a vu, et se refuse si la pull request n'est pas prête (`merge.blocked` : pas ouverte, en conflit, des changements demandés, des vérifications en cours ou en échec, un commit pas encore envoyé, une fusion déjà demandée), si la branche a bougé dans l'atelier ou chez l'hôte, ou si l'hôte la dit impossible à fusionner. Acceptée, elle pose un fait, `projects.merge_asked` : qui, quelle pull request, quel commit.
+- **La fusion part après le commit du journal, par le port** : l'effet de `merge_asked` — ni un outil, ni une capacité qu'une exécution pourrait proposer, ni un processus — appelle `RepoHost.merge_pull(numéro, sha)`. L'hôte ne fusionne que si le commit au bout de la branche est encore celui-là (chez GitHub : `PUT …/pulls/<n>/merge` avec `sha`) ; ce qu'il répond devient `projects.merge_answered` (fusionnée, ou pourquoi non : `moved`, `blocked`, `denied`, `unreached`), et une fusion interrompue n'est jamais rejouée. Le garde « rien ne fusionne » devient « seul le geste d'une personne fusionne » : `merge_asked` n'est écrit que par cette action, `merge_pull` n'est appelé que par cet effet, et l'adaptateur n'a qu'un `PUT`, celui-là.
+- **Le moteur apprend cette fusion comme toute fusion** : `projects.pulls`, que la réponse réveille, relit la pull request chez l'hôte et pose `projects.pull_seen` — l'objectif est clos, son ticket traité, la base récupérée (0274, 0277). Aucun second chemin : la réponse de la fusion ne clôt rien elle-même. L'objectif garde où en est la demande (`merge_asked_at`, `merge_by`, `merge_answered_at`, `merge_refused`) ; l'état se reconstruit du journal (`state_version` 27). Le jeton n'a besoin d'aucun droit de plus : le contenu et les pull requests en lecture et écriture, comme pour ouvrir une pull request.
+
+*Pourquoi :* l'écran Projets validé le 21 novembre a un onglet Code — fichiers, commits et leur diff, pull requests complètes, branches, issues, CI — et un bouton Fusionner que le propriétaire a demandé : son geste à lui, avec confirmation. L'API par personne ne servait rien du dépôt, et fusionner n'existait nulle part. « Elle ne fusionne jamais » (0274) tenait par l'absence de tout moyen ; elle tient maintenant par une seule porte, que seul le geste d'une personne ouvre, et que des gardes d'architecture surveillent.
+
+*Révise 0183 (en partie : l'hôte se lit aussi depuis l'espace d'une personne, sous ses droits), 0274 (en partie : le port de l'hôte a de quoi fusionner, pour le geste d'une personne seulement ; elle ne fusionne toujours pas), 0275 (en partie : le port rend les vérifications une à une, les étiquettes d'une issue et les échanges), 0282 (en partie : l'API par personne sert le code d'un projet et fusionne ; fusionner ne se fait plus seulement chez l'hôte). Révisée par 0290, 0292.*
+
+### 0290 — Gérer un projet depuis l'espace d'une personne : ce que l'écran montre s'y modifie
+
+- **Chaque geste passe par une action de la console, après une garde du moteur** (`app/me/project_manage.py`, `protocole-moi.md` § 11). Le cadre d'un projet — ses réglages, ses outils, son dépôt, l'archiver, le restaurer : qui le pilote en modification **et** en est le propriétaire, ou s'occupe d'elle (`managing.frames`, la règle de qui tranche) ; piloter ne suffit pas. Lui confier un projet (`projects.projet_confier`) : qui s'occupe d'elle, comme `create_project` en conversation — il naît à cadrer, avec les mots de qui le demande. Ses objectifs (avec leur critère, « fini quand », que les deux formulaires d'un objectif portent désormais), ses jalons, ses tickets, ses décisions : qui le pilote en modification. Fermer un ticket comme traité et le rouvrir passent par « Trancher » : qui tranche. Sur l'accord du propriétaire, rien de tout cela d'ici.
+- **Un jalon tenu ne se défait que par qui tranche.** `projects.jalon_modifier` et `projects.jalon_retirer` appliquent à une personne la règle de l'ADR 0278 (`managing.undoing`) : un jalon atteint ou retiré ne bouge plus, pour personne ; un point d'arrêt, un jalon posé par une personne, fixé par un plan validé ou refusé par le propriétaire reste au propriétaire du projet et à qui s'occupe d'elle. Les textes d'une décision qui n'est pas remplacée se révisent (`projects.decision_modifier`, le fait `projects.decision_revised`) ; un ticket se modifie sans changer d'étape (`projects.ticket_modifier`).
+- **Écrire chez l'hôte sur une pull request est le geste d'une personne**, comme la fusion (0288) : `projects.pull_modifier` (son titre, son texte) et `projects.pull_commenter` — réservées au propriétaire du projet et à qui s'occupe d'elle — posent un fait, `projects.pull_write_asked` ; après le commit du journal, son effet appelle le port (`RepoHost.edit_pull`, un `PATCH` qui ne porte que ces deux champs ; `RepoHost.remark` pour un commentaire, avec son repère : jamais deux fois), et la réponse devient `projects.pull_write_answered`. Un commentaire part du compte du jeton : son texte dit qui l'écrit (la règle des notes publiées, 0275). Aucun outil ni aucune capacité n'y mène, une écriture interrompue n'est pas rejouée, et un garde le vérifie par l'AST.
+- **Ce qui s'est passé se relit du journal** (`app/me/project_activity.py`) : le fil d'activité mêle ses exécutions, leurs commits, ce qui arrive à ses pull requests et à ses tickets, et les gestes des personnes — filtré par sorte et par objectif, paginé par curseur, compté par jour sur trente jours ; ses exécutions (cadrage, travail, relecture) et, pour l'une d'elles, ses pas lus dans sa trace — l'outil en mots, ce qu'il visait, jamais ce qu'il a rendu, un outil venu d'ailleurs marqué ; son carnet ; ses décisions. Le diagramme de ses objectifs ne porte que de vraies dates : quand un jalon a commencé et combien d'exécutions il a prises se déduisent des départs de ses exécutions, rien n'est estimé. Lire tout cela demande le détail du projet, au niveau de ce qu'il écrit.
+- **Les réglages se servent tels que les actions les décrivent** (`kernel.forms` : le libellé, l'aide, les choix et la valeur de chaque champ, en cinq sections), et chaque objet dit ce que la personne peut en faire (`can`, `why`) : l'écran n'écrit aucun mot et ne montre un bouton que s'il marche. Un objectif bloqué se rouvre d'ici (« À faire » en porte la route). « Liens » s'appelle « Dépendances » — « Il dépend de », « Dépendent de lui », « Ses demandes » — dans les mots de l'API (`links.labels`) et de la console ; les identifiants et les adresses ne changent pas. La console n'a pas encore le formulaire des actions nouvelles.
+
+*Pourquoi :* devant la maquette validée le 21 novembre, le propriétaire a dit « je ne vois pas de bouton edit de projet, d'ajout d'objectif ou de jalon » : l'écran Projets n'est pas une vue réduite qui renvoie à la console, ce qu'on y voit s'y modifie là où on le voit. L'API par personne laissait à la console le cadre d'un projet, ses objectifs et la fermeture d'un ticket, et ne servait ni ses exécutions, ni son carnet, ni ses décisions ; modifier un jalon, un ticket, une décision ou une pull request n'existait nulle part.
+
+*Révise 0133 (en partie : le cadre d'un projet se change aussi depuis l'espace de son propriétaire, ou de qui s'occupe d'elle), 0145 (en partie : un projet confié depuis l'écran naît à cadrer, comme en conversation), 0275 (en partie : le commentaire d'une personne sur une pull request est signé comme une note publiée), 0278 (en partie : ce qu'une personne qui pilote sans être propriétaire ne défait pas d'un jalon), 0281 (en partie : l'onglet « Liens » s'appelle « Dépendances »), 0282 (en partie : le cadre, les objectifs, la fermeture d'un ticket ne restent plus à la console ; l'API sert l'activité d'un projet), 0288 (en partie : le port de l'hôte change le titre et le texte d'une pull request, pour le geste d'une personne). Révisée par 0292, 0293.*
+
+### 0291 — L'écran Projets refait d'après la maquette validée : trois zones, tout se gère dans l'écran
+
+- **L'écran de `frontendv2/` reprend la maquette validée** (`frontendv2/maquette/ecrans/projets2*`, le 21 novembre : « sers-toi de la maquette comme référence ») : ses adresses (`#projets/a-faire/<projet>/<attente>`, `#projets/projets/<id>/<onglet>/…`), sa structure, ses classes et sa feuille de style, reprise telle quelle (`src/styles/ecrans/projets.css`). L'écran rejeté — cinq onglets, le geste déplié dans une page qui empile — et sa maquette sont retirés.
+- **Trois zones sur toute la largeur** (`parts.ts::trio`) : la liste, le contenu élastique découpé en volets (jamais deux grandes parties l'une sous l'autre), un panneau latéral (l'état, les propriétés, ce qui est lié avec son statut, les gestes). Sur un écran moyen le panneau se replie sous l'en-tête du détail ; sur un téléphone il devient le volet « Infos », et la liste puis le détail sont deux pages. Une fiche a ses onglets — Vue d'ensemble, Objectifs (la liste serrée, le détail, le diagramme en deux modes), Tickets, Code, Documentation, Activité (Fil, Exécutions, Carnet), Dépendances (le schéma, les demandes), et Listes pour un projet qui en a une ; Code et Documentation se branchent à part (`tabs.ts`).
+- **Tout se gère dans l'écran**, là où on le voit (0290) : confier un projet, le modifier (ses réglages en sections, dont les champs sont ceux que le serveur décrit), l'archiver ; ajouter, modifier, rouvrir, terminer ou retirer un objectif ou une mission ; ajouter, modifier ou retirer un jalon, valider un point d'arrêt ; ouvrir, modifier, trancher, fermer ou rouvrir un ticket ; poser ou retirer une dépendance. Un ajout s'ouvre dans un panneau à droite, une modification dans la zone de contenu ; plus aucune phrase ne renvoie à la console.
+- **Le client ne recalcule toujours aucune règle** : pas de bouton sans le droit servi (`can`, `rights`), les mots d'une étape sont ceux du serveur, un geste refusé se dit sur place avec les siens (un 409 relit ce qu'on lisait), et un texte venu d'ailleurs est cité dans sa présentation à lui, échappé (`parts.ts::outside`). Seules la couleur d'un état (`tones.ts`) et la mise en page se décident ici. **Ce que l'API ne sert pas ne s'invente pas** : la vue se fait avec ce qui existe.
+- **Deux défauts de la maquette ne sont pas repris** : dans le diagramme « Dans le temps », l'axe se resserre (ou passe en semaines) pour que la première date et aujourd'hui tiennent à l'écran, et le mot d'une barre se retient au bord au lieu d'être coupé (`diagram.ts`) ; la hauteur d'un détail sert — un formulaire pose ses boutons en bas, le panneau pose en bas ce qui se gère, et prend deux colonnes quand le contenu est court alors qu'il déborde.
+- **Code et Documentation** (`code.ts`, `documentation.ts`, leurs vues, branchés par `tabs.ts`) suivent les mêmes règles, et trois de plus. **L'éditeur d'une page est Milkdown, par son éditeur Crepe** (`@milkdown/crepe`, licence MIT : la bibliothèque que le propriétaire a vue dans la maquette) : chargé à la demande, dans son propre morceau, quand on ouvre le mode Modifier (`editor.ts`) ; son élément est gardé d'un dessin à l'autre ; Enregistrer envoie le Markdown avec la version lue et un mot, et un refus (la page a changé depuis) ne fait jamais perdre ce qui est écrit (`docparts.ts`, le brouillon). **Rien de ce qu'un dépôt ou une page contient ne s'exécute ni ne se charge d'ailleurs** : le contenu d'un fichier et les lignes d'un diff se posent par insertion de texte, jamais en HTML (`paint.ts`) ; une page lue passe par un rendu échappé (`docmd.ts`) ; en lecture comme dans l'éditeur, seules les images de l'espace de documentation, servies par l'API, sont chargées. **Fusionner passe par une confirmation** qui dit ce qui va être fusionné, et la demande nomme le commit de tête qu'elle vient de relire (`codeparts.ts`) — depuis la pull request comme depuis « À faire ».
+
+*Pourquoi :* le premier écran, écrit sans que le propriétaire ait validé sa maquette, a été rejeté (« un one page dégueulasse », « moche et non fonctionnel ») ; la maquette refaite avec lui en trois tours fait foi, et l'écran doit être le même à l'œil.
+
+*Révise 0284 (l'écran : ses onglets, le geste déplié sur place, ce qui restait à la console ; restent la rubrique, sa pastille, la règle « le client ne recalcule rien » et la présentation d'un texte venu d'ailleurs). Révisée par 0294.*
+
+### 0292 — Ce que la relecture adverse des projets a fixé : le cadre réservé, la fusion et la CI, le point MCP, les pas, les fichiers cachés
+
+- **Le cadre d'un projet ne donne pas ce qui n'est pas du projet.** Être le propriétaire d'un projet n'est pas s'occuper d'elle : ce qui ouvre autre chose que le projet lui-même est réservé à qui s'occupe d'elle (`managing.keeps`) — ses lots autres que sa mémoire et le web (le courrier, la caméra, ses flux, la Forge, ses apps, un service MCP : `managing.beyond`), l'accord de ce qui sort, pour qui il est, son dépôt distant (adresse, branche, flux, envoi automatique), la publication de ses tickets en issues. La garde est dans les actions (`actions.reserved_field`, `_held`), pas dans une route : la console et l'API par personne passent par elle. Son propriétaire garde le reste (titre, cadre, mode, rythme, relecture, validation des plans, mémoire, web). Les réglages disent champ par champ ce que la personne peut changer (`can`, `why`), et les services branchés sur l'instance ne se servent qu'à qui peut les cocher ; un projet qui n'est pour personne le reste tant qu'on ne nomme personne ; restaurer et lister les archives passent par la portée (`reach`), le nom du propriétaire par la règle des noms.
+- **La fusion relit la CI, la base, et ne part qu'une fois.** Juste après un envoi, l'hôte n'a pas encore créé les vérifications du commit : tant que la pull request est fraîche (trois minutes après ce que l'hôte en a dit de neuf, `merge.CHECKS_GRACE_US`), « aucune vérification » ne laisse pas fusionner (`merge.UNCHECKED`) et l'hôte se relit chaque minute au lieu de dix. Au moment de fusionner, l'action relit chez l'hôte les vérifications du commit de tête — en cours, en échec ou illisibles, rien ne part — et la base où la pull request entre : autre que la branche du projet, rien ne part. Une seule demande à la fois par pull request (le fait `projects.merging`, gardé au commit du journal). Une réponse perdue après l'envoi se dit « on ne sait pas » (`MERGE_UNKNOWN`), jamais « n'a pas eu lieu », et l'hôte se relit aussitôt.
+- **Le point MCP compte les appels, pas les requêtes** (`app/me/docs_mcp.py`) : chaque appel d'outil paie son passage dans la fenêtre de 120 par minute et par compte ; un lot porte vingt messages au plus (`protocol.BATCH_MAX`, pour tout point MCP) ; un projet reçoit au plus 200 écritures de documentation par MCP sur vingt-quatre heures, tous comptes confondus (gardé en mémoire). L'usage d'un jeton se note à ce point ; un jeton d'outil ne s'élague pas avec les connexions (vingt par compte, à part) et se rend lui-même (`DELETE /auth/token`).
+- **Ce qu'une personne lit se compare à son droit, texte par texte.** Les pas d'une exécution ne disent ce qu'ils visaient — un chemin, une commande, une recherche, jamais un texte de contenu — qu'à qui a le droit sur les fichiers du projet, et sur ceux du projet lié qu'un pas vise ; sans lui, le libellé de l'outil seulement (`steps_aims`, `steps_aims_why`). Le fil, les exécutions et le carnet comparent chaque texte au niveau que son contenu porte au journal, pas à celui que le détail a aujourd'hui (`veiled`). Le refus d'une page périmée et le nom d'un jeton suivent la règle des noms (`_nameable`) ; hors de la console, l'action ne nomme personne.
+- **Les fichiers cachés ne sortent pas, les secrets ne se commitent pas.** La règle du partage d'un fichier de projet (`ports.workshop.hidden_path` : un segment qui commence par un point) vaut pour l'arbre, un fichier, l'histoire d'un chemin et un diff servis par l'API (403 ; un diff dit le chemin et les comptes, sans ses lignes). `.env` et ses variantes ne s'enregistrent jamais dans le dépôt d'un atelier (son exclusion locale, non versionnée). Un commit n'est dit d'elle que signé et posé par l'adresse entière de l'atelier. Une image de documentation retirée puis remise à l'identique se remet (aucune clé permanente, des octets propres à chaque ajout), et la réponse dit ce que l'état a gardé.
+
+*Pourquoi :* la relecture adverse des lots S1 à S3 (0288, 0289, 0290) a montré qu'un propriétaire de projet qui ne s'occupe pas d'elle se donnait son courrier, sa caméra et ses services, coupait l'accord et branchait un dépôt que le jeton de l'instance atteint ; qu'une fusion était offerte pendant que la CI tournait ; qu'un lot de messages passait la borne du point MCP ; et que des chemins, des noms et des textes sortaient sans le droit qui les garde.
+
+*Révise 0104 (en partie : le courrier, la caméra et les autres lots réservés se donnent à un projet par qui s'occupe d'elle, pas par tout opérateur ni par son propriétaire), 0288 (en partie : la fusion relit la CI et la base chez l'hôte, une seule demande à la fois, une réponse perdue se dit « on ne sait pas » ; les fichiers cachés ne se servent pas), 0289 (en partie : la borne du point MCP compte les appels et les écritures ; l'ajout d'une image n'a plus de clé permanente ; le nom d'un jeton suit la règle des noms), 0290 (en partie : le cadre réservé à qui s'occupe d'elle ; ce que disent les pas d'une exécution ; restaurer passe par la portée).*
+
+### 0293 — Ce que l'écran Projets attendait encore : le parcours en six étapes, le mot d'un lien, ce que chaque vue lit sans rien recalculer
+
+- **Le parcours d'un ticket se sert en six étapes** — non lu, en analyse, validation, pull request, fusion, traité : celles que le propriétaire a données. La règle est pure et à côté de `stage` (`tickets.journey`, `tickets.step_of`) : chaque étape fine tombe dans l'une des six, dont elle reste la précision (proposé : non lu ; sa question posée : en analyse ; pull request en cours : pull request ; prête à fusionner : fusion) ; ce qui précède est passé, ce qui suit à venir. **Un ticket qui ne passe pas par une pull request saute « pull request » et « fusion »** (`tickets.through_pull` : son projet est au flux direct, ou il s'est fermé sans en avoir eu) : « validé, en cours », il n'attend plus que d'être traité. Fermé, une étape n'est passée que si un fait le dit ; écarté, il saute aussi « traité ». Les étapes fines restent servies comme avant.
+- **Son histoire se rejoue, elle ne s'écrit pas** (`tracker.passages`) : les événements du ticket repassent par les règles mêmes de l'état (`added`, `changed`, `_noted`), une ligne par changement d'étape — quand, par qui. De même, un jalon est dit commencé (`milestones.begun`) dès qu'une exécution est partie depuis que le jalon d'avant est atteint, et le prochain passage d'un projet (`work.coming`) est ce que `next_run_at` date et ce que `pick` prendrait : rien n'est estimé.
+- **Un lien garde depuis quand il est posé et le mot de son propriétaire** (`Project.ties`, `Tie`) : `projects.links_set` porte ce mot (`why`, `why_for` — pourquoi ce projet lit celui-là), un texte gardé, au niveau de ce qu'écrivent les deux projets, avec les sujets du lecteur et, pour l'oubli, ceux du projet lu (`read_about`). Un lien qui reste garde les siens, un lien retiré les perd ; l'état se reconstruit du journal (`state_version` 29). Ce mot est un texte du projet lecteur : du côté du projet lu, il ne se sert qu'à qui lit aussi le détail du lecteur. **« Lui demander quelque chose »** n'est pas une règle de plus : c'est l'ouverture d'un ticket chez le projet lié, avec les droits que la personne a sur lui ; la fiche dit si elle le peut (`ask_here`) et range ses tickets à côté des demandes du projet (0271), dans les deux sens.
+- **Chaque vue lit ce qu'elle montre** (`app/me/projects.py`, `project_activity.py`, `protocole-moi.md` § 11) : la carte d'un projet dans la liste, son prochain passage, son rythme et ses consignes en attente, son dernier commit, le titre d'une pull request, les tickets d'un objectif, ce qui lie un jalon à un élément, les déclencheurs possibles d'une mission et les façons de vérifier un jalon avec leurs mots, ce qu'un accord concerne et où il part, le fil filtré par ticket et ses totaux. Les règles de droits sont celles d'avant (0282, 0286, 0292) : un projet lié ne se nomme qu'à qui le voit, la commande d'un jalon ne se dit qu'avec le droit sur les fichiers, les réveils de l'instance ne se servent qu'à qui s'occupe d'elle, chaque texte du journal se compare à son niveau.
+- **Une liste de suivi se tient depuis l'écran** : y ajouter un élément (`projects.element_ajouter`) et changer à qui il est — à elle, ou au propriétaire du projet (`projects.element_confier`, une action de plus, que la console ne pose pas encore sur un onglet) —, pour qui le pilote en modification. La main sur un ticket ne se pose pas : elle se déduit de son étape.
+
+*Pourquoi :* l'écran Projets, écrit d'après la maquette validée (0291), n'invente rien : là où l'API ne servait pas ce qu'une vue montre, il faisait sans — dix étapes de ticket au lieu des six du propriétaire, une carte vide tant que la fiche n'était pas lue, des dépendances sans date ni raison, un historique réduit à l'ouverture. Servir ces lectures par des règles pures du moteur garde l'écran sans règle à lui, et les droits là où ils sont déjà.
+
+*Révise 0257 (en partie : un lien garde sa date et le mot de son propriétaire, `links_set` porte un texte et ses sujets), 0268 (en partie : changer à qui est un élément, par une action, depuis l'espace d'une personne), 0270 (en partie : le parcours se sert aussi en six étapes, déduites des étapes fines), 0282 (en partie : ce que l'API sert de plus d'un projet ; ajouter un élément à une liste ne reste plus à la console), 0290 (en partie : les totaux et le filtre par ticket du fil, les consignes en attente).*
+
+### 0294 — L'écran Projets d'accord avec ce que l'API sert ; un fichier Markdown du dépôt se lit rendu
+
+- **L'écran lit ce que l'API sert depuis 0293, et ne garde aucune liste à lui.** La grille remplit chaque carte de la liste (`card`) et ne lit plus aucune fiche ; la Vue d'ensemble et l'Activité disent le prochain passage (`next` : daté par le moteur, sinon ses mots), le rythme, les consignes en attente, le dernier commit ; un ticket montre son parcours en six étapes (`journey` : l'étape fine en précision, les étapes sautées dites), ce qui lui est lié (`linked`) et, dans l'Historique, l'histoire de ses étapes mêlée au fil d'activité filtré sur lui ; les formulaires d'une mission et d'un jalon proposent ce que la fiche sert (`forms` : déclencheurs, façons de vérifier, leurs mots et leurs champs) ; un accord dit ce qu'il concerne, où il part et pourquoi ; une dépendance dit depuis quand, pourquoi, le commit que montre la vue et les demandes dans les deux sens, et le mot du lien se saisit en la posant ; une liste de suivi s'y tient (ajouter, changer à qui est un élément).
+- **Un champ réservé se montre verrouillé, avec sa raison** (`can`, `why` de chaque champ des réglages, 0292) : sa valeur se lit, rien ne s'y saisit, et il ne part jamais dans un enregistrement — plus de champ modifiable puis refusé. Une section dont aucun champ ne se change n'a pas de bouton.
+- **Ce que le moteur ne sait pas ne devient pas un bouton.** Ce qu'un lien donne se lit (une coche, une croix), sans case ; « Lui demander quelque chose » ouvre un ticket chez le projet lu au nom de la personne (`ask_here`) et le dit — ce n'est pas une demande du projet ; il n'y a ni « objectif lié » dans le formulaire d'un ticket, ni suppression d'un projet, ni sorties réglées une à une, ni façon de fusionner, ni relance d'une CI, ni élément confié à une personne nommée.
+- **Un fichier Markdown du dépôt se lit rendu, par le rendu des pages de documentation** (`docmd.ts`, `views/code.ts::renderedFile`), avec une bascule Rendu | Source : tout est échappé avant d'être mis en forme, **aucune image n'est chargée** (un dépôt n'a pas d'espace d'images : chacune se dit), un lien relatif mène au fichier du même dépôt, à la même branche (`codeparts.ts::repoLink` : jamais hors de sa racine), un lien http(s) s'ouvre à part, sans référent. La source d'un fichier et les lignes d'un diff restent posées par insertion de texte (`paint.ts`).
+
+*Pourquoi :* la maquette validée montre ces lectures, et l'écran faisait sans tant que l'API ne les servait pas ; elle montre aussi le README rendu, que l'écran affichait en source par prudence — le rendu des pages, déjà éprouvé contre une page hostile, le permet sans rien exécuter ni rien charger. Un bouton qui ne fait rien, ou un champ qu'on remplit pour être refusé, apprend au propriétaire que l'écran ment.
+
+*Révise 0291 (en partie : un fichier Markdown du dépôt peut passer par le rendu échappé des pages ; la grille ne lit plus les fiches ; ce que l'API a appris à servir se montre).*
 
 ## La console et l'exploitation
 
@@ -2849,7 +3331,7 @@ défaut si on le remplace pas » (2026-11-20).
 
 *Pourquoi :* la console montrait ses outils sous tous les angles sans permettre de rien décider.
 
-*Révisée par 0123, 0126, 0128, 0133, 0134.*
+*Révisée par 0123, 0126, 0128, 0133, 0134, 0289.*
 
 ### 0123 — Le bloc Outils, redessiné
 
@@ -2962,7 +3444,7 @@ défaut si on le remplace pas » (2026-11-20).
 
 *Pourquoi :* la plupart des onglets restaient des blocs génériques (63 sur 79) : tous se ressemblaient, et aucun ne suivait les gabarits de l'ADR 0176.
 
-*Révise 0121 (en partie), 0176 (en partie). Révisée par 0178, 0180, 0183, 0201, 0202, 0218.*
+*Révise 0121 (en partie), 0176 (en partie). Révisée par 0178, 0180, 0183, 0201, 0202, 0218, 0281.*
 
 ### 0178 — Le menu montre les groupes de pages
 
@@ -3027,7 +3509,7 @@ défaut si on le remplace pas » (2026-11-20).
 
 *Pourquoi :* l'onglet ne montrait que l'atelier. Pour savoir s'il fallait pousser, si le distant avait bougé, ou ce qui attendait sur GitHub (une issue, une pull request), il fallait aller voir ailleurs.
 
-*Révise 0177 (en partie : l'onglet Dépôt git est dessiné).*
+*Révise 0177 (en partie : l'onglet Dépôt git est dessiné). Révisée par 0274, 0275, 0281, 0288.*
 
 ### 0197 — Les pages de réglages : des rubriques qui disent ce qu'elles contiennent, des formulaires qui n'écrasent rien
 
@@ -3232,6 +3714,18 @@ défaut si on le remplace pas » (2026-11-20).
 
 *Révise 0181 (en partie : l'onglet Échanges d'une fiche).*
 
+### 0281 — La fiche d'un projet rangée par ce qu'on y fait, et « à qui la main »
+
+- **« À qui la main » est une règle pure** (`faculties/projects/todo.py`) : pour un projet et pour tous, ce qui attend une personne, dans l'ordre où s'en occuper — un accord (tout effet proposé dont le contexte est le projet, l'appel d'un service pendant son travail compris), un plan sans réponse, une demande d'aide, un projet arrêté par ses pannes ou un objectif bloqué, les tickets dont la main est au propriétaire, un point d'arrêt dit prêt, des relectures refusées deux fois, les éléments d'une liste de suivi à la charge de quelqu'un. Chaque entrée dit le projet, sa sorte, la référence de son texte, depuis quand, qui elle attend et le geste attendu (l'action de console, son onglet, la file « À valider » ou l'hôte). `for_person` la filtre pour une personne : son projet en entier ; celui d'un autre selon ce que ses lignes d'accès lui donnent hors de toute conversation (`links.given_to`), un accord et une reprise restant au propriétaire. Elle ne lit que l'état et le fait des effets en attente ; ses mots de console sont dans `inspect_todo.py`.
+- **La fiche d'un projet suit ce qu'on y fait**, en une barre : *Où il en est* (ce qui t'attend en tête, ses chiffres, ses missions — les objectifs constants — et ses objectifs en cours, chacun en une ligne, ce qui vient ensuite, son plan ; puis, en sous-onglet, « Missions et objectifs » : l'ancien onglet Objectifs, réuni par `Overview.joined`), *Tickets*, *Suivi*, *Liens* (ce qu'il lit et ce que chaque lien donne, la vue de l'atelier, ce qu'il a demandé, ce qu'on lui a demandé, qui le lit), *Dépôt* (avec « Branches de travail » : la branche, la pull request, les vérifications et la relecture de chaque objectif), *Exécutions*, *Cadre* (en sous-onglets : ses réglages, ses outils et services, ses accès — l'ancien onglet Accès, réuni —, ses tickets et ses issues) ; Décisions techniques, Fichiers et Carnet sous « Plus ».
+- **Rien ne disparaît** : chaque vue et chaque action d'avant a sa place, et `tests/protocol/test_project_fiche_tabs.py` en tient l'inventaire ; les adresses d'avant (`?onglet=objectifs`, `?onglet=acces`) mènent à leur section.
+- **La page d'ensemble** (Projets › Ses projets) met en tête « À faire » pour tous les projets, dit pour chacun combien de choses t'attendent, et montre les liens entre projets : qui lit qui, ce que le lien donne, les demandes en cours.
+- La vue de la faculté reste la source (la console en MCP, le repli) : ce que ces pages montrent de neuf est ajouté aux vues — ce qui attend, les missions et les objectifs en une ligne, la table des branches, les liens entre projets —, jamais relu à côté.
+
+*Pourquoi :* les lots du chantier des chaînes de travail avaient posé leurs onglets, leurs lignes et leurs actions côte à côte, dans l'ordre où ils sont arrivés : pour savoir ce qu'un projet attendait de soi, il fallait ouvrir cinq onglets.
+
+*Révise 0177 (en partie : les onglets de la fiche d'un projet), 0183 (en partie : l'onglet Dépôt montre les branches de travail), 0257 (en partie : ses liens ont leur onglet), 0270 (en partie : le réglage de la validation des tickets est dans Cadre). Révisée par 0286, 0290.*
+
 ## Ce que les sondes et les audits ont fixé
 
 ### 0043 — Ce qu'une semaine avec un vrai modèle a montré
@@ -3301,3 +3795,17 @@ Un audit complet en lecture seule (`docs/audit-2026-10-26.md`) ; tout ce qui sui
 
 *Révise 0101 (en partie : la migration vérifie), 0024 et 0045 (en partie : l'oubli atteint les tranches), 0059 (en partie : les inconnues de passage expirent).*
 
+*Révisée par 0267.*
+
+### 0266 — Les correctifs de texte de l'audit des contextes du 20 novembre
+
+- **Une phrase assemblée se lit.** Ce qu'elle pourrait se fabriquer se dit entre parenthèses, ses moyens séparés par « ; ou » (`runtime.tools.acting_means`, `means_forge`, `means_or`) : « — … — que tu dis ensuite à qui l'attend ou un projet à toi — » ne se lisait pas.
+- **Son humeur ne s'oppose pas à elle-même.** « Normalement tu es plutôt {usual} ; en ce moment, ton humeur générale est… » (`affect.mood_line.caused`), sans « alors que » : « à peine soulagée, alors que normalement tu es plutôt contente » opposait deux humeurs qui ne s'opposent pas. L'habitude vient d'abord, pour que la cause suive ce qu'elle ressent.
+- **Une note d'elle se dit à elle en entier, ou reste la sienne.** Dans « CE QUI VOUS LIE », `to_you` ne convertit plus une note qui garderait un « je » après coup : « moi le poney » devenait « toi le poney » dans une ligne qui disait ensuite « je l'ai faite ».
+- **Une rêverie reprise ne se dit qu'une fois.** Dans « CE QUE TU AS EN TRAIN », deux rêveries finies du même titre font une ligne, la plus récente.
+- **Un lot vide ne s'offre pas.** Sans flux suivi, `rss_list` et `rss_read` ne s'offrent pas et le catalogue ne les annonce pas (`needs="feeds"`).
+- **Ce qui vient d'un mail part cité, au tri aussi.** L'expéditeur et l'objet sont rendus inertes, le corps cité (`ports.preprocess.inert`, `cite`), pour le tri du courrier comme pour celui de Teams.
+
+*Pourquoi :* le prompt réel du 19 novembre 2026 portait une phrase cassée par l'assemblage, une note à moitié convertie, deux fois la même rêverie, une humeur opposée à elle-même et un lot de flux vide — son premier appel y est allé pour rien ; et le mail partait brut au tri, seul endroit où ce qui vient d'un mail n'était ni inerte ni cité.
+
+*Révise 0198 (en partie : le tri cite aussi).*

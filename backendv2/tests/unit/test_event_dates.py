@@ -41,6 +41,24 @@ def test_when_text_says_the_next_date_first(occurrences, said):
     assert when_text(occurrences, NOW) == said
 
 
+@pytest.mark.parametrize(("occurrences", "said"), [
+    # le week-end du 5 décembre, cherché le 18 novembre : « sam., dim. » se lisait « ce week-end »
+    ([day("2026-12-05", "10:00", "19:00"), day("2026-12-06", "10:00", "19:00")], "sam. 5 et dim. 6 déc. · 10:00–19:00"),
+    ([day(f"2026-12-{d}", "10:00", "18:00") for d in (24, 25, 26)], "du jeu. 24 au sam. 26 déc. · 10:00–18:00"),
+    ([day(d, "10:00", "18:00") for d in ("2026-11-30", "2026-12-01", "2026-12-02")],
+     "du lun. 30 nov. au mer. 2 déc. · 10:00–18:00"),
+    ([day(f"2026-12-0{d}", "14:00", "16:00") for d in (3, 5, 7)], "jeu. 3, sam. 5 et lun. 7 déc. · 14:00–16:00"),
+    ([day(f"2026-12-{d:02d}", "09:00", "12:00") for d in range(7, 14)], "du lun. 7 au dim. 13 déc. · 09:00–12:00"),
+    ([day("2026-11-24", "20:00", "22:00"), day("2026-11-25", "20:00", "22:00")],
+     "mar. 24 et mer. 25 nov. · 20:00–22:00"),  # le mercredi qui vient est à sept jours : dit avec sa date
+    ([day("2026-11-21", "20:00", "22:00"), day("2026-11-22", "20:00", "22:00")], "sam., dim. · 20:00–22:00"),
+])
+def test_a_series_in_a_later_week_says_its_dates(occurrences, said):
+    """R1-06 : des dates qui se suivent ne se disent par leurs jours seuls que dans les six jours qui viennent ;
+    au-delà, avec leurs dates — Mika n'a que ce texte."""
+    assert when_text(occurrences, NOW) == said
+
+
 def test_a_session_of_today_that_has_ended_no_longer_counts():
     morning = day("2026-11-18", "08:00", "09:00")
     assert upcoming([morning], NOW) == []

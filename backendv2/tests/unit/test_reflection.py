@@ -147,6 +147,28 @@ def test_a_full_exchange_keeps_its_most_marking_moment(tmp_path):
     assert "répondait à peine" not in texts[0] and "« samedi c'est mon anniv" in texts[0]
 
 
+def test_what_marks_her_is_read_on_the_scale_her_voice_really_uses(tmp_path):
+    """Sa voix se note sobrement (ADR 0283 : au banc, 389 réponses entre 0,2 et 0,6). Sa tristesse en répondant à des
+    mots durs se déclare à 0,4, sa surprise devant une grande nouvelle à 0,6 : l'une et l'autre laissent une pensée.
+    Contre-exemple : la bonne humeur d'une conversation de tous les jours (0,5) n'en laisse pas."""
+    def thoughts_after(folder, lines):
+        async def scenario(kernel, mika):
+            await sam_evening(kernel, mika, lines)
+            await asyncio.sleep(15 * MINUTE / US)
+            return thought_texts(kernel)
+
+        folder.mkdir()
+        return live(folder, scenario)[0]
+
+    hurt = thoughts_after(tmp_path / "blessee", [("t'es qu'un programme qui fait semblant d'être là", "sad", 0.4)])
+    assert len(hurt) == 1 and "« t'es qu'un programme qui fait semblant d'être là »" in hurt[0]
+    news = thoughts_after(tmp_path / "nouvelle", [("ma copine est enceinte, elle me l'a dit ce matin", "surprised", 0.6)])
+    assert len(news) == 1 and "« ma copine est enceinte" in news[0]
+    plain = thoughts_after(tmp_path / "ordinaire", [("je rentre du boulot", "happy", 0.5),
+                                                    ("rien de spécial, et toi ?", "amused", 0.5)])
+    assert plain == []
+
+
 def test_her_reflection_sees_the_exchange_and_what_the_person_is_living_in_one_session(tmp_path):
     """Elle repense à Sam l'échange sous les yeux, avec ce qu'elle sait de ce qu'il vit (son chat, son
     anniversaire) — en une séance : elle écrit ce qu'elle en pense, c'est tout. Rien de ce qu'elle sait de la vie

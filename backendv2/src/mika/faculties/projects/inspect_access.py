@@ -1,5 +1,5 @@
-"""Les accès d'un projet dans la console (ADR 0133, 0134) : l'onglet « Accès » de sa fiche (``acces``, dessiné par la
-composition), l'action ``projects.acces`` — chaque bouton (ajouter, monter, descendre, retirer, enregistrer) envoie
+"""Les accès d'un projet dans la console (ADR 0133, 0134) : « Accès », sous l'onglet Cadre de sa fiche (``acces``,
+réuni : ADR 0281 ; dessiné par la composition), l'action ``projects.acces`` — chaque bouton (ajouter, monter, descendre, retirer, enregistrer) envoie
 tout le tableau, journalisé (``access_set``) ; une ligne ajoutée est fermée : enregistrée dès le clic, elle n'ouvre rien
 avant d'être réglée — et son type de règles sur la page « Droits »."""
 
@@ -39,7 +39,8 @@ MAX_ROWS = 40
 NEW_ROW = c.ProjectAccess(who=(OWNER,))
 #: un outil d'une de ses apps, tel qu'une ligne le nomme (``<app>_<outil>``)
 TOOL = re.compile(r"[a-z][a-z0-9_]{0,120}")
-COLUMNS = ("qui", "par où", "quand", "voir", "piloter projet", "fichiers", "apps : lecture", "apps : action", "outils")
+COLUMNS = ("qui", "par où", "quand", "voir", "piloter projet", "fichiers", "documentation", "apps : lecture",
+           "apps : action", "outils")
 
 
 # ── L'onglet « Accès » ────────────────────────────────────────────────────
@@ -47,11 +48,12 @@ COLUMNS = ("qui", "par où", "quand", "voir", "piloter projet", "fichiers", "app
 
 def _row(frame: Frame, a: c.ProjectAccess) -> tuple[str, ...]:
     return (who_named(frame, a.who), canal_words(a.canal), when_words(a.when), "oui" if a.see else "non",
-            STEER_WORDS.get(a.steer, a.steer), "oui" if a.files else "non", POLICY_WORDS.get(a.read, a.read),
+            STEER_WORDS.get(a.steer, a.steer), "oui" if a.files else "non", "oui" if a.docs else "non",
+            POLICY_WORDS.get(a.read, a.read),
             POLICY_WORDS.get(a.act, a.act), "tous" if not a.tools else ", ".join(a.tools))
 
 
-@PROJECTS.inspect("acces", title="Accès", subject="project", order=75,
+@PROJECTS.inspect("acces", title="Accès", subject="project", order=33,
                   description="Qui peut le voir, le piloter, en recevoir les fichiers et se servir de ses apps, par "
                               "où et quand : des lignes lues de haut en bas, puis la ligne par défaut.")
 def _tab_access(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:
@@ -87,6 +89,8 @@ class AccessArgs(TableArgs):
     piloter: Annotated[dict[str, Steer], Knob(label="Piloter projet", choices=STEERS, advanced=False)] = \
         Field(default_factory=dict)
     fichiers: Annotated[dict[str, bool], Knob(label="Ses fichiers", advanced=False)] = Field(default_factory=dict)
+    documentation: Annotated[dict[str, bool], Knob(label="Sa documentation", advanced=False)] = \
+        Field(default_factory=dict)
     lecture: Annotated[dict[str, Policy], Knob(label="Apps : un outil qui lit", choices=POLICIES,
                                                advanced=False)] = Field(default_factory=dict)
     action: Annotated[dict[str, Policy], Knob(label="Apps : un outil qui agit", choices=POLICIES,
@@ -95,6 +99,7 @@ class AccessArgs(TableArgs):
     defaut_piloter: Annotated[Steer, Knob(label="Par défaut, piloter projet", choices=STEERS, advanced=False)] = \
         "non"
     defaut_fichiers: Annotated[bool, Knob(label="Par défaut, ses fichiers", advanced=False)] = False
+    defaut_documentation: Annotated[bool, Knob(label="Par défaut, sa documentation", advanced=False)] = False
     defaut_lecture: Annotated[Policy, Knob(label="Par défaut, un outil qui lit", choices=POLICIES,
                                            advanced=False)] = "non"
     defaut_action: Annotated[Policy, Knob(label="Par défaut, un outil qui agit", choices=POLICIES,
@@ -105,8 +110,8 @@ def access_rows(args: AccessArgs) -> list[c.ProjectAccess]:
     """Les lignes du tableau envoyé, dans leur ordre ; refuse une ligne sans source lisible, sans moment ou sans
     outil (``vocab.access.rows_sent``), ou dont un outil est illisible."""
     try:
-        sent = args.rows(tools=True, see=args.voir, steer=args.piloter, files=args.fichiers, read=args.lecture,
-                         act=args.action)
+        sent = args.rows(tools=True, see=args.voir, steer=args.piloter, files=args.fichiers, docs=args.documentation,
+                         read=args.lecture, act=args.action)
     except ValueError as exc:
         raise Refused(str(exc)) from None
     rows = []
@@ -114,7 +119,8 @@ def access_rows(args: AccessArgs) -> list[c.ProjectAccess]:
         if any(not TOOL.fullmatch(t) for t in r["tools"]):
             raise Refused(f"Ligne {n} : un outil illisible.")
         rows.append(c.ProjectAccess(who=r["who"], canal=r["canal"], when=r["when"], see=bool(r["see"]),
-                                    steer=r["steer"] or c.STEER_NO, files=bool(r["files"]), read=r["read"] or NO,
+                                    steer=r["steer"] or c.STEER_NO, files=bool(r["files"]), docs=bool(r["docs"]),
+                                    read=r["read"] or NO,
                                     act=r["act"] or NO, tools=r["tools"]))
     return rows
 
@@ -137,6 +143,7 @@ def _access(s: ProjectsState, frame: Frame, args: AccessArgs, ctx: ActionContext
     except ValueError as exc:
         raise Refused(str(exc)) from None
     default = c.ProjectAccess(see=args.defaut_voir, steer=args.defaut_piloter, files=args.defaut_fichiers,
+                              docs=args.defaut_documentation,
                               read=args.defaut_lecture, act=args.defaut_action)
     return Done(drafts=(ACCESS_SET.draft(project=p.id, rows=tuple(rows), default=default, by=ctx.by),),
                 message=said, guard=_exists(p.id))
@@ -168,7 +175,8 @@ def _project_grants(s: ProjectsState, frame: Frame, ctx: Any, audience: Any, kin
         out.append(Grant(f"project:{pid}", f"Le projet « {title} »",
                          (("le voir", "oui" if got.see else "non"),
                           ("piloter projet", STEER_WORDS.get(got.steer, got.steer)),
-                          ("ses fichiers", "oui" if got.files else "non")),
+                          ("ses fichiers", "oui" if got.files else "non"),
+                          ("sa documentation", "oui" if got.docs else "non")),
                          got.why, href=Ref.subject("project", str(pid), title, "acces"), closed=not got.see))
     return out
 

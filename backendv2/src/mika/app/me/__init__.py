@@ -27,7 +27,21 @@ from typing import Any
 
 from starlette.routing import Route
 
-from mika.app.me import mail, maps, mcp, phone, rights, settings, sharing, teams
+from mika.app.me import (
+    mail,
+    maps,
+    mcp,
+    phone,
+    project_activity,
+    project_code,
+    project_docs,
+    project_manage,
+    projects,
+    rights,
+    settings,
+    sharing,
+    teams,
+)
 from mika.app.me.api import OUTBOUND, PROBES, ROUTES_BUSY, Call, Denied, MeApiBase, form, missing, spend
 
 __all__ = ["COUNTERS", "MODULES", "OUTBOUND", "PROBES", "ROUTES_BUSY", "Call", "Denied", "MeApi", "form", "missing",
@@ -35,9 +49,12 @@ __all__ = ["COUNTERS", "MODULES", "OUTBOUND", "PROBES", "ROUTES_BUSY", "Call", "
 
 #: les modules : chacun rend ses routes, et ce qu'il compte pour la barre du haut
 MODULES: tuple[Callable[[MeApiBase], list[Route]], ...] = (mail.routes, teams.routes, phone.routes, rights.routes,
-                                                           settings.routes, mcp.routes, sharing.routes, maps.routes)
+                                                           settings.routes, mcp.routes, sharing.routes, maps.routes,
+                                                           projects.routes, project_code.routes,
+                                                           project_docs.routes, project_manage.routes,
+                                                           project_activity.routes)
 COUNTERS: tuple[tuple[str, Callable[[Call], int]], ...] = (("mail", mail.count), ("teams", teams.count),
-                                                            ("phone", phone.count))
+                                                            ("phone", phone.count), ("projects", projects.count))
 
 
 async def who(req: Call) -> dict[str, Any]:

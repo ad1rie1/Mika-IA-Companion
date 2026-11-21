@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { CarteInfo, EventItem, Place } from "../../api/carte";
 import { ApiError } from "../../api/moi";
 import {
@@ -101,11 +101,11 @@ describe("Événements : l'onglet", () => {
   it("quand, quoi (les thèmes du serveur, gratuit), où ; la couverture ; la liste par jour, ses prix et ses distances", () => {
     const html = eventsMarkup(events({ themes: ["concerts"], free: true }));
     expect(html).toContain('placeholder="Un concert, un marché, une fête…"');
-    expect(html).toContain('class="cat on" data-when="week" aria-pressed="true">Cette semaine');
+    expect(html).toContain('class="cat flt on" data-when="week" aria-pressed="true">Cette semaine');
     expect(html).toContain('data-when="weekend"');
-    expect(html).toContain('class="cat on" data-theme="concerts" aria-pressed="true">Concerts');
+    expect(html).toContain('class="cat flt on" data-theme="concerts" aria-pressed="true">Concerts');
     expect(html).toContain('data-theme="marches"');
-    expect(html).toContain('class="cat on" data-free="1" aria-pressed="true">Gratuit');
+    expect(html).toContain('class="cat flt on" data-free="1" aria-pressed="true">Gratuit');
     expect(html).toContain('aria-pressed="true" data-ev-where="moi"');
     expect(html).toContain("Cette zone n&#39;est lue qu&#39;en partie (cases lues : 3 sur 11)");
     expect(html.indexOf("Demain · samedi 21 novembre")).toBeLessThan(html.indexOf("Dimanche 22 novembre"));
@@ -159,13 +159,14 @@ function place(extra: Partial<Place> = {}): Place {
 
 function explorer(extra: Partial<ExplorerView> = {}): ExplorerView {
   return { info: INFO, q: "", cat: "manger", where: "moi", places: [place({ osm: "n4021153781", open_state: "open", open_text: "Ouvert · ferme à 22:30",
-    cuisine: "Pizza", rating: 4.8, reviews: 15235, price: "€€", photo: "p:3f1c9a0e5b7d2c4e6f8a1b3c5d7e9f02" }), place({ id: "l22918", name: "Le Coq Hardi", cuisine: "Régionale" })],
+    cuisine: "Pizza", rating: 4.8, reviews: 15235, price: "€€", photo: "p:3f1c9a0e5b7d2c4e6f8a1b3c5d7e9f02", photo_source: "google", photo_credit: "Camille R.",
+    photo_credit_url: "https://www.google.com/maps/contrib/100000000000000000001" }), place({ id: "l22918", name: "Le Coq Hardi", cuisine: "Régionale" })],
   addresses: [], error: "", addrError: "", loading: false, searched: true, sel: null, regard: null, hint: "", map: "",
   filters: NO_FILTERS, coverage: { ready: true, cells: 1, loaded: 1, oldest: new Date(2026, 10, 20, 22, 0).getTime(), note: "" }, seen: never, now: NOW, ...extra };
 }
 
 describe("Explorer : la liste notée et ses filtres", () => {
-  it("chaque ligne : la note et le nombre d'avis, le prix, la cuisine, ouvert ou fermé, une vignette quand il a une photo", () => {
+  it("chaque ligne : la note et le nombre d'avis, le prix, la cuisine, ouvert ou fermé, une vignette quand il a une photo et son auteur", () => {
     const html = explorerMarkup(explorer());
     expect(html).toContain("4,8");
     expect(html).toContain("(15\u00a0235)");
@@ -235,5 +236,27 @@ describe("Explorer : la liste notée et ses filtres", () => {
     expect(focusSelector({ evq: "" })).toBe("[data-evq]");
     expect(focusSelector({ evWhere: "moi" })).toBe('[data-ev-where="moi"]');
     expect(focusSelector({ refresh: "" })).toBe("[data-refresh]");
+  });
+});
+
+describe("les jours des événements se comptent à l'heure de Paris, celle de leurs dates (R2-W10)", () => {
+  // un navigateur hors du fuseau de Paris (un poste en voyage) : ses jours ne sont pas ceux des événements
+  beforeAll(() => {
+    vi.stubEnv("TZ", "America/New_York");
+  });
+  afterAll(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("à 00:30 le dimanche à Paris (18:30 le samedi à New York), « aujourd'hui » est dimanche", () => {
+    const at = Date.UTC(2026, 10, 21, 23, 30);
+    expect(new Date(at).getDate()).toBe(21); // le navigateur, lui, est encore samedi
+    expect(whenRange("today", at)).toEqual({ start: "2026-11-22", end: "2026-11-22" });
+    expect(whenRange("weekend", at)).toEqual({ start: "2026-11-22", end: "2026-11-22" }); // un dimanche : lui seul
+    expect(whenRange("week", at)).toEqual({ start: "2026-11-22", end: "2026-11-29" });
+    expect(dayHeading("2026-11-22", at)).toBe("Aujourd'hui · dimanche 22 novembre");
+    expect(dayHeading("2026-11-23", at)).toBe("Demain · lundi 23 novembre");
+    // à 23:30 le samedi à Paris, c'est encore samedi
+    expect(whenRange("today", Date.UTC(2026, 10, 21, 22, 30))).toEqual({ start: "2026-11-21", end: "2026-11-21" });
   });
 });

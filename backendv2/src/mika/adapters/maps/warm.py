@@ -19,6 +19,7 @@ import contextlib
 import json
 import logging
 import os
+import sqlite3
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, time, timedelta
@@ -72,7 +73,8 @@ class WarmSource(Protocol):
 
     async def warm(self, task: WarmTask) -> int:
         """Une tâche, en travail de fond : combien de fiches lues. Son quota pris : ``QuotaExceeded`` ; une autre
-        panne : ``MapsUnavailable``."""
+        panne : ``MapsUnavailable`` ; son cache qui ne s'écrit pas : l'erreur de la base (``sqlite3.Error``,
+        ``OSError``), comptée comme une panne."""
         ...
 
     def budget(self) -> str:
@@ -190,8 +192,14 @@ class Warmer:
             ready = [s for s in self.sources if s.ready()]
             run = WarmRun(_stamp(started), points=len(points), sources=[SourceRun(s.label) for s in ready])
             self.last = run
-            await asyncio.gather(*(self._source(s, r, points, deadline) for s, r in zip(ready, run.sources,
-                                                                                     strict=True)))
+            # chaque source jusqu'au bout, même quand une autre tombe : le compte rendu de toutes se garde (R3-02)
+            fell = await asyncio.gather(*(self._source(s, r, points, deadline) for s, r in zip(ready, run.sources,
+                                                                                            strict=True)),
+                                        return_exceptions=True)
+            for report, exc in zip(run.sources, fell, strict=True):
+                if isinstance(exc, BaseException):
+                    log.error("réchauffage : %s est tombé", report.label, exc_info=exc)
+                    report.stopped = report.stopped or f"en panne ({type(exc).__name__}) : voir le journal du serveur"
             run.ended = _stamp(self.clock())
             self._save(run)
             log.info("réchauffage : %s", " ; ".join(f"{r.label} {r.done}/{r.planned} cases" for r in run.sources)
@@ -222,6 +230,13 @@ class Warmer:
                     report.errors += 1
                     if errors >= ERRORS_MAX or getattr(exc, "kind", "") == "cle":
                         report.stopped = str(exc)
+                        return
+                    break
+                except (sqlite3.Error, OSError) as exc:  # son cache ne s'écrit pas (tenu, le disque plein) : une erreur
+                    errors += 1
+                    report.errors += 1
+                    if errors >= ERRORS_MAX:
+                        report.stopped = f"le cache ne s'écrit pas ({exc})"
                         return
                     break
 

@@ -6,7 +6,10 @@ due, et raconter ce qu'elle a mené à bout (mode Mika seulement).
   selon l'agenda et l'espacement, sous le plafond du jour du projet et le
   plafond horaire commun. « Lancer maintenant » passe l'agenda, l'espacement
   et la plage, jamais les plafonds. En mode Mika, son corps la retient
-  pendant qu'elle dort (``body``) ; en mode impersonnel, non.
+  pendant qu'elle dort (``body``) ; en mode impersonnel, non. Un objectif
+  constant est dû par sa cadence ou par ce qui l'a déclenché (ADR 0265,
+  ``rhythm.due_at``) : dans les deux cas l'agenda, la plage, l'espacement et
+  les plafonds décident de l'instant.
 - **Raconter** : à qui lui a confié le projet (ou à une propriétaire), à la
   mesure du lien (``contracts.social.retelling``, l'échelle commune aux buts et
   aux projets ; l'adresse : ``contracts.identity.reach_now``) — jamais d'un
@@ -16,6 +19,11 @@ due, et raconter ce qu'elle a mené à bout (mode Mika seulement).
 - **Demander** : un objectif qui bloque ou attend quelque chose, à qui l'a confié
   (ou à une propriétaire) ; un projet à elle arrêté par des pannes, à une
   propriétaire, pour qu'on le relance (ADR 0143).
+- **La relecture** (ADR 0276) : le travail conclu d'un objectif dont une relecture
+  indépendante est demandée a d'abord la sienne (sujet ``review:<projet>:<objectif>``,
+  mode ``review``, toujours impersonnelle, avec son seul lot d'outils) — sous
+  l'espacement et les plafonds de l'heure et du jour, sans attendre l'agenda ni
+  la plage : elle ne travaille pas, elle relit.
 - **Le cadrage** (ADR 0145) : un projet né en conversation a d'abord sa séance
   de cadrage (sujet ``frame:<id>``), qui écrit son plan ; son plan se dit à qui
   l'a demandé (``plan:<id>``) — ses questions, qui attendent sa réponse, ou ce
@@ -25,7 +33,7 @@ due, et raconter ce qu'elle a mené à bout (mode Mika seulement).
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any
+from typing import Any, NamedTuple
 
 from mika.contracts import body as body_c
 from mika.contracts import identity as identity_c
@@ -47,18 +55,31 @@ from mika.faculties.projects.faculty import (
     pass_untold,
     plan_subject,
     rank,
+    review_subject,
+    review_waiting,
     run_bundles,
     stall_subject,
     subject_of,
+    unreviewed,
 )
-from mika.faculties.projects.rhythm import daily_cap, in_window, next_due, pick, runs_today, window_opens
+from mika.faculties.projects.rhythm import (
+    NEVER,
+    daily_cap,
+    due_at,
+    in_window,
+    next_due,
+    pick,
+    ready,
+    runs_today,
+    window_opens,
+)
 from mika.kernel import schedule
 from mika.kernel.arbitration import Candidate, Modulation, RowView
 from mika.kernel.clock import DAY, HOUR
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard, floor
 from mika.kernel.state import FrozenDict
-from mika.vocab.episodes import Kind, project_of, project_target
+from mika.vocab.episodes import REVIEW, Kind, project_of, project_target
 from mika.vocab.phrasebook import phrase
 
 
@@ -86,12 +107,33 @@ def frame_at(p: Project, s: ProjectsState, frame: Frame) -> int | None:
     return at
 
 
+#: le lot d'outils d'une relecture (``review.BUNDLE`` : ce module ne peut pas importer ``review.py``, qui dépend de
+#: ``tools.py``) — le seul que son candidat demande : aucun outil du projet n'y entre
+REVIEW_BUNDLE = "project_review"
+
+
+def review_at(p: Project, s: ProjectsState, frame: Frame) -> int | None:
+    """Quand la relecture indépendante qu'il attend peut partir (ADR 0276 ; ``None`` : aucune) : dès que possible,
+    sous l'espacement et le plafond du jour — ni son agenda ni sa plage ne la retiennent."""
+    if p.status != c.ACTIVE or busy(s, p.id) or outgoing(p, frame.now) or review_waiting(p) is None:
+        return None
+    pm = params(frame.env.params_of("projects", frame.root))
+    at = max(frame.now, p.tried_at + pm.run_spacing_us if p.tried_at else p.created_at)
+    if runs_today(p, frame.now) >= daily_cap(p, pm):
+        at = max(at, min(t for t in p.runs_at if frame.now - t < DAY) + DAY)
+    return at
+
+
 def next_run_at(p: Project, s: ProjectsState, frame: Frame) -> int | None:
-    """Quand ce projet peut avoir sa prochaine exécution (``None`` : pas en vue) — sa séance de cadrage d'abord."""
+    """Quand ce projet peut avoir sa prochaine exécution (``None`` : pas en vue) — sa séance de cadrage d'abord,
+    puis la relecture qu'un travail conclu attend : rien d'autre ne part de ce projet avant elle."""
     pm = params(frame.env.params_of("projects", frame.root))
     now = frame.now
     if p.plan_state == c.TO_FRAME:
         return frame_at(p, s, frame)
+    relu = review_at(p, s, frame)
+    if relu is not None:
+        return relu
     if p.status != c.ACTIVE or busy(s, p.id) or not p.objectives or outgoing(p, now):
         return None
     if p.schedule == ON_DEMAND and not nudged(p):  # « sur demande » : il ne part que quand on le lance
@@ -123,6 +165,40 @@ def next_run_at(p: Project, s: ProjectsState, frame: Frame) -> int | None:
     return opens
 
 
+#: ce que sera son prochain passage : sa séance de cadrage, une relecture indépendante, du travail
+COMING_FRAME, COMING_REVIEW, COMING_RUN = "frame", "review", "run"
+
+
+class Coming(NamedTuple):
+    """Son prochain passage (ADR 0293) : quand (0 : rien en vue), ce que ce sera (``COMING_…`` ; vide : rien) et sur
+    quel objectif (0 : aucun)."""
+
+    at: int = 0
+    sort: str = ""
+    objective: int = 0
+
+
+def coming(p: Project, s: ProjectsState, frame: Frame) -> Coming:
+    """Le prochain passage de ce projet, tel que ``next_run_at`` le date : sa séance de cadrage, la relecture qu'un
+    travail conclu attend, ou l'objectif que ``pick`` prendrait maintenant — sinon celui qui sera dû le premier.
+    Rien n'est estimé : sans rien en vue (en pause, sur demande, rien de dû), rien."""
+    at = next_run_at(p, s, frame)
+    if at is None:
+        return Coming()
+    if p.plan_state == c.TO_FRAME:
+        return Coming(at, COMING_FRAME)
+    awaited = review_waiting(p) if review_at(p, s, frame) is not None else None
+    if awaited is not None:
+        return Coming(at, COMING_REVIEW, awaited.id)
+    pm = params(frame.env.params_of("projects", frame.root))
+    target = pick(p, frame.now, pm)
+    if target is not None:
+        return Coming(at, COMING_RUN, target.id)
+    due = [(when, o.id) for o in p.objectives
+           if o.status == c.OPEN and ready(p, o) and (when := due_at(p, o, pm)) < NEVER]
+    return Coming(at, COMING_RUN, min(due)[1] if due else 0)
+
+
 @PROJECTS.propose(kinds=[Kind.WORK, Kind.JOB], reasons={c.RUN: (0.0, 12.0)}, reads=[c.STATUS])
 def _run(s: ProjectsState, frame: Frame) -> list[Candidate]:
     pm = params(frame.env.params_of("projects", frame.root))
@@ -134,6 +210,16 @@ def _run(s: ProjectsState, frame: Frame) -> list[Candidate]:
         if runs_today(p, frame.now) >= daily_cap(p, pm):
             continue
         evidence = max(0.0, min(12.0, pm.run_evidence + pm.priority_step * rank(p)))
+        awaited = review_waiting(p) if p.plan_state != c.TO_FRAME and review_at(p, s, frame) is not None else None
+        if awaited is not None:
+            # une relecture indépendante (ADR 0276) : toujours impersonnelle, sous son rôle de modèle à elle (le
+            # mode ``review``), avec son seul lot d'outils — aucun de ceux du projet, donc aucun qui écrit
+            out.append(Candidate(
+                Kind.JOB, project_target(p.id), c.RUN, round(evidence, 4),
+                resources=frozenset({c.run_lease(p.id)}), guards=(_still(p.id),),
+                args=FrozenDict({"bundles": REVIEW_BUNDLE, "subject": review_subject(p.id, awaited.id),
+                                 "mode": REVIEW})))
+            continue
         if p.plan_state == c.TO_FRAME:  # sa séance de cadrage : aucun objectif, le projet entier (ADR 0145)
             subject = frame_subject(p.id)
         else:
@@ -195,6 +281,9 @@ def why_not_now(p: Project, s: ProjectsState, frame: Frame) -> tuple[Why, dict[s
     if p.plan_state == c.TO_FRAME:
         at = frame_at(p, s, frame)
         return None if at is not None and at <= now else (Why.FRAMING, {})
+    if review_waiting(p) is not None:  # sa relecture d'abord (ADR 0276) : sous l'espacement et le plafond du jour
+        at = review_at(p, s, frame)
+        return None if at is not None and at <= now else (Why.LATER, {})
     if not p.objectives or not any(o.status == c.OPEN for o in p.objectives):
         return Why.NO_OBJECTIVE, {}
     if p.schedule == ON_DEMAND and not nudged(p):
@@ -241,7 +330,8 @@ def _shareable(o: Objective, p: Project, now: int, pm) -> bool:
     if o.kind == c.CONSTANT:
         return (pass_untold(o) and o.share_attempts < pm.share_attempts and o.pass_notable >= pm.share_notable_from
                 and now - o.passed_at <= pm.share_within_us)
-    return (o.kind == c.ONCE and o.status == c.DONE and not o.shared
+    # un travail qui attend encore sa relecture ne se raconte pas : elle peut le renvoyer (ADR 0276)
+    return (o.kind == c.ONCE and o.status == c.DONE and not o.shared and not unreviewed(p, o)
             and o.share_attempts < pm.share_attempts and o.notable >= pm.share_notable_from
             and now - o.closed_at <= pm.share_within_us)
 

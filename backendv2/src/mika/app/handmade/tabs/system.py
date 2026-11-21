@@ -146,6 +146,7 @@ from mika.kernel.inspect import (
     relative_fr,
     short_day_fr,
 )
+from mika.ports.llm import EFFORT_LABELS
 from mika.runtime import health as health_m
 from mika.runtime.effects import (
     MAX_ATTEMPTS,
@@ -518,10 +519,15 @@ def passerelle(got: Got) -> Markup | None:
     # range à part, sans alarme ; tout autre rôle que personne ne sert garde la sienne
     served: dict[str, list[dict[str, str]]] = defaultdict(list)
     unserved, cut = [], []
+    effort_of = getattr(gateway, "effort_of", None)
     for row in roles_raw.rows:
         label, tech, by = (_cells(row) + [None] * 3)[:3]
         role = {"label": str(label), "tech": tech.text if isinstance(tech, Text) else str(tech),
-                "said": by.text if isinstance(by, Text) else str(by)}
+                "said": by.text if isinstance(by, Text) else str(by), "effort": ""}
+        # l'effort réglé pour ce rôle (ADR 0285) se lit sur sa pastille ; celui de la fiche est celui du fournisseur
+        effort, own = effort_of(role["tech"]) if callable(effort_of) else ("", False)
+        if own:
+            role["effort"] = EFFORT_LABELS.get(effort, effort)
         if not (isinstance(by, Text) and by.kind == "muted"):
             served[role["said"]].append(role)
         elif role["tech"] in OPTIONAL_ROLES:
@@ -1035,10 +1041,13 @@ PROJECTIONS = {
     "memory_life": "Ce qu'elle sait de la vie des autres",
     "memory_readings": "Ses lectures",
     "memory_told": "Qui a entendu quoi",
+    "project_items": "Le registre des projets (tickets, listes de suivi)",
+    "project_doc_pages": "La documentation des projets (pages, versions)",
     "received_files": "Les pièces qu'on lui envoie",
     "shared_files": "Les fichiers qu'elle envoie",
     "social_relations": "Ses relations",
     "strands": "Ses fils de travail (mode pro)",
+    "thread_efforts": "L'effort de réflexion forcé (conversations, fils de travail)",
     "thread": "Le fil des conversations",
 }
 

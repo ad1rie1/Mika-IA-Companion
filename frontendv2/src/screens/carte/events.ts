@@ -14,9 +14,10 @@ import { sceneBounds, type Scene, type ScenePin } from "../../map/scene";
 import type { MapView } from "../../map/view";
 import { on } from "../../shell/dom";
 import { CachedMap, failureText } from "../../shared/kit";
-import { askAboutEvent, eventsLegend, eventsMarkup, eventTripDay, themeLabels, whenRange, type WhenKind } from "./agenda";
+import { askAboutEvent, eventsLegend, eventsMarkup, eventTripDay, ficheIsHers, themeLabels, whenRange, type WhenKind } from "./agenda";
 import { addToTripMenu, type ExplorerHost } from "./explorer";
 import { eventFicheMarkup, type FicheBack } from "./fiche";
+import type { Origin } from "./format";
 import type { CarteFrame } from "./index";
 import { photoSeen } from "./photos";
 import { gone } from "./requests";
@@ -69,6 +70,8 @@ export class EventsTab {
   /** L'événement dont la fiche est ouverte, sinon `null`. */
   private fiche: string | null = null;
   private ficheHit: EventItem | null = null;
+  /** La fiche s'est ouverte depuis celle d'un lieu (« Bientôt, tout près ») : son retour y ramène (R2-W06). */
+  private from: Origin | null = null;
   private readonly fiches = new CachedMap<EventFiche>((id) => fetchEvent(id), FICHE_TTL);
   private seq = 0;
   private typeTimer = 0;
@@ -78,10 +81,17 @@ export class EventsTab {
 
   constructor(private readonly host: EventsHost) {}
 
-  /** Ce que la route ouvre : la fiche d'un événement, ce que Mika a trouvé, ou la liste. */
-  applyItem(item: string | null): void {
+  /**
+   * Ce que la route ouvre : la fiche d'un événement, ce que Mika a trouvé, ou la liste. `from` : la fiche de l'autre
+   * onglet d'où l'on vient (R2-W06). Un événement qui n'est pas dans le regard montré le quitte : il n'est pas à elle
+   * (R2-W05).
+   */
+  applyItem(item: string | null, from: Origin | null = null): void {
     const id = item && EVENT_REF.test(item) ? item : null;
     if (id) {
+      if (this.fiche !== id || from) this.from = from;
+      const regard = this.regardEvents();
+      if (regard && !ficheIsHers(regard, id)) this.regard = null;
       if (this.fiche !== id) {
         if (this.ficheHit?.id !== id) this.ficheHit = this.listed().find((e) => e.id === id) ?? null;
         if (!this.ficheHit) this.host.fitNext();
@@ -93,6 +103,7 @@ export class EventsTab {
     }
     const back = this.fiche !== null;
     this.fiche = null;
+    this.from = null;
     const seq = regardOf(item);
     if (seq) {
       if (back && this.regard === seq) return;
@@ -185,15 +196,17 @@ export class EventsTab {
       const e = f?.event ?? this.ficheHit;
       fiche = eventFicheMarkup({
         event: this.ficheHit, fiche: f, loading: !cached.settled, error: cached.error, gone: gone(cached.error),
-        back: this.ficheBack(), mika: !!regard, themes: themeLabels(info), here, seen: photoSeen,
+        back: this.ficheBack(), mika: ficheIsHers(regard, this.fiche), themes: themeLabels(info), here, seen: photoSeen,
       });
-      if (!this.ficheHit && e && typeof e.lat === "number" && typeof e.lon === "number") {
-        pins = [{ id: "fiche", lat: e.lat, lon: e.lon, title: e.name, selected: true, mika: !!regard }];
+      // ouverte d'ailleurs (un lieu, la route) : son épingle seule, une fois connue — d'ici là, rien (le cadrage attend)
+      if (!this.ficheHit) {
+        pins = e && typeof e.lat === "number" && typeof e.lon === "number"
+          ? [{ id: "fiche", lat: e.lat, lon: e.lon, title: e.name, selected: true, mika: ficheIsHers(regard, this.fiche) }] : [];
       }
       title = e?.name || "Cet événement";
     }
     const legend = this.fiche ? "" : eventsLegend({ events, where: this.searchedNear ? "moi" : "zone", regard, searched: inRegard ? !!regard : this.searched });
-    const map = this.host.pane({ pins, lines: [], here }, title, legend, !!pendingRegard?.error);
+    const map = this.host.pane({ pins, lines: [], here: this.fiche && !pins.length ? null : here }, title, legend, !!pendingRegard?.error);
     return eventsMarkup({
       info, q: this.q, when: this.when, dates: this.dates, themes: this.themes, free: this.free, where: this.where ?? "zone",
       events, coverage: inRegard ? null : this.coverage, error: inRegard ? "" : this.error,
@@ -206,7 +219,10 @@ export class EventsTab {
   }
 
   private ficheBack(): FicheBack {
-    if (this.regard) return { href: `#carte/evenements/${regardItem(this.regard)}`, label: "Ce que Mika a trouvé" };
+    if (this.from) return this.from;
+    if (this.regard && ficheIsHers(this.regardEvents(), this.fiche)) {
+      return { href: `#carte/evenements/${regardItem(this.regard)}`, label: "Ce que Mika a trouvé" };
+    }
     return { href: "#carte/evenements", label: "Les événements" };
   }
 

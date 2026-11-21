@@ -28,6 +28,40 @@ noms utilisateur sans être setuid (le cas sur Fedora ; sur Debian/Ubuntu,
 vérifier `kernel.unprivileged_userns_clone=1` et, sur Ubuntu 24.04+, le profil
 AppArmor de `bwrap`).
 
+**Le jeton des dépôts git** (console, Connexions › Dépôts Git) sert à pousser, à
+récupérer un dépôt privé et — pour un projet qui passe par des pull requests
+(ADR 0274) — à ouvrir et relire une pull request sur GitHub. Il ne part que
+vers les hôtes qu'il déclare. Les droits qu'il lui faut, sur les seuls dépôts
+des projets : avec un jeton GitHub à portée fine, « Contents » et « Pull
+requests » en « Read and write » (« Metadata » en lecture vient avec) ; avec un
+jeton classique, `repo`. Rien de plus : elle ne fusionne jamais, et la
+protection de la branche principale chez GitHub reste la tienne.
+
+**Fusionner une pull request depuis Mika** (ADR 0288) est le geste d'une
+personne — le propriétaire du projet, ou qui s'occupe d'elle —, depuis l'écran
+Projets ou la console : jamais elle, ni aucun de ses outils. Ce geste part sous
+ce même jeton et ne lui demande aucun droit de plus : « Contents » et « Pull
+requests » en « Read and write » (un jeton classique : `repo`). La fusion est
+une fusion ordinaire (un commit de fusion), et GitHub ne la fait que si le
+commit au bout de la branche est encore celui que la personne a lu. Si la
+branche principale est protégée, c'est le compte du jeton qui doit avoir le
+droit d'y fusionner (une règle qui exige une relecture ou des vérifications
+réussies s'applique à lui comme à tout autre) ; un dépôt qui interdit les
+commits de fusion refuse — la pull request se fusionne alors chez GitHub. Pour
+qu'elle ne puisse jamais fusionner depuis Mika, retire ce droit au jeton chez
+GitHub : la demande est refusée, et le dit.
+
+Pour un projet dont les tickets se reflètent en issues et dont les pull
+requests attendent leur CI (ADR 0275), le même jeton demande en plus, à portée
+fine : « Issues » en « Read and write » (lire les issues et leurs commentaires,
+en ouvrir une, la fermer, la rouvrir, y publier une note), et, en lecture
+seule, « Checks » et « Commit statuses » (l'état des vérifications d'un
+commit ; l'un des deux suffit si la CI n'écrit que l'un) et « Actions » (la fin
+du journal d'un échec). Un jeton classique `repo` les couvre. Le journal d'un
+échec se télécharge à une adresse signée, hors de l'API de GitHub : elle est
+lue sans le jeton. Sans ces droits, rien ne casse : les issues ne se lisent
+pas, et des vérifications illisibles ne bloquent aucune pull request.
+
 `/etc/mika/mika.env` (facultatif, droits 0600) — une affectation `NOM=valeur`
 par ligne, les commentaires sur leur propre ligne (systemd ne coupe pas un
 commentaire en fin de ligne : il le garderait dans la valeur) :
@@ -353,8 +387,9 @@ son propre site.
    chiffrée et jamais réaffichée ; « Charger la liste » propose ses modèles ; à l'enregistrement, la fenêtre du
    modèle est lue chez le fournisseur et borne le contexte, ADR 0136). Le premier déclaré sert « répondre »
    d'office, et les autres rôles y retombent — sauf la seconde passe (`polish`, l'autrice qui récrit ses messages),
-   qui ne se fait que si un fournisseur lui est confié dans « Qui sert quoi ». Tant qu'aucun modèle ne sert
-   « répondre », `/health` dit `degraded` et elle ne peut pas parler.
+   qui ne se fait que si un fournisseur lui est confié dans « Qui sert quoi ». La même table règle l'effort de
+   réflexion de chaque rôle (vide : celui de la fiche ; `mika llm effort low polish triage caption` fait de même).
+   Tant qu'aucun modèle ne sert « répondre », `/health` dit `degraded` et elle ne peut pas parler.
 3. Le reste se règle dans **Réglages** (« Tous les réglages » les liste) : sa personnalité (identité, parole,
    caractère, tempérament avec ce que pilote chaque curseur, ses autrices), la configuration des plugins (courrier,
    flux, Teams, réveils…), la transcription, les comptes opérateurs, et les **paramètres avancés** : une page par
@@ -458,7 +493,8 @@ Serveur en marche, sans risque : l'archive neuve ne remplace l'ancienne qu'enti�
 lui-même. Une autre zone : `--zone ouest,sud,est,nord` (en degrés) et `--sortie cartes/<nom>.pmtiles` ; chaque zoom de
 moins divise la taille par quatre environ. Puis, dans la console, Réglages › Carte et téléphone › Carte de sa
 position : « Un fichier PMTiles sur ce serveur », `cartes/france.pmtiles` ; la page dit sa taille, ses zooms et sa
-zone. Pour la mettre à jour, relancer `mika carte extraire` de temps en temps. `cartes/` n'entre dans aucune sauvegarde.
+zone. Pour la mettre à jour, relancer `mika carte extraire` de temps en temps. `cartes/` n'entre dans aucune sauvegarde,
+sauf ses compteurs (`cartes/quotas.db`, ci-dessous).
 
 Un serveur de carte à part (un `pmtiles serve`, une archive sur un stockage, un serveur `{z}/{x}/{y}` au schéma
 Protomaps ou d'images) se règle au même endroit : ce serveur le joint seul, sans rien de la personne, et en relaie
@@ -560,8 +596,8 @@ ssh -t mika-portable 'sudo systemctl stop mika \
 Puis, dans la console, les mêmes départements dans « Départements tenus en entier » : le serveur prend la suite
 (chaque nuit, et une complète par semaine). Si `data/carte/cartes/lieux.db` est là, la commande rapproche aussi chaque
 fiche de son lieu d'OpenStreetMap ; sinon, le portable le fait de lui-même, avec son index. `--complete` pour tout
-refaire, `--horizon 60` pour les événements des 60 prochains jours. `cartes/` n'entre dans aucune sauvegarde : la base
-se relit.
+refaire, `--horizon 60` pour les événements des 60 prochains jours. `cartes/tourisme.db` n'entre dans aucune
+sauvegarde : la base se relit.
 
 ### Les avis (Google Places, ADR 0256)
 
@@ -584,7 +620,11 @@ du portable est fixe, « Restrictions relatives aux applications » → *Adresse
   puis `sudo systemctl restart mika`) — la console passe en premier, et sa page dit laquelle sert, jamais sa valeur ;
 - **en local** : dans `backendv2/.env` (`MIKA_GOOGLE_PLACES_API_KEY=…`, droits 0600, ignoré par git) : la commande
   `mika` lit le `.env` du dossier où on la lance, sans jamais écraser une variable déjà posée (`MIKA_ENV_FILE` en
-  nomme un autre ; vide, aucun). Ne le copie pas dans `/opt/mika/backendv2` : il y serait lu aussi.
+  nomme un autre ; vide, aucun). Ne le copie pas dans `/opt/mika/backendv2` : il y serait lu aussi. **Une clé à
+  part**, d'un autre projet Google (ou, à défaut, des plafonds bas dans la console de chaque dossier local, 50 par
+  SKU) : les plafonds ci-dessous comptent par dossier de données (`cartes/quotas.db`), et Google par compte de
+  facturation — la même clé dans `backendv2/.env` et sur le portable, c'est un seul quota offert chez Google, que
+  chaque dossier local (`data/v2`, la démo, une sonde) croit avoir à lui seul.
 
 **Ce que ça coûte.** Google facture **chaque appel**, au niveau des champs qu'il demande (prix et quotas vérifiés le
 2026-11-20) :
@@ -602,7 +642,8 @@ et une fiche ; relue, une fiche. Le mois de Google commence le 1er à minuit, **
 D'où, réglés sur la même page et relus à chaque appel :
 
 - **un plafond par mois et par SKU**, par défaut **le quota offert** (1 000 recherches, 1 000 fiches, 1 000 photos) :
-  sans rien toucher, rien n'est facturé ; chaque appel compte dès qu'il part, même en erreur ;
+  sans rien toucher, rien n'est facturé **tant que cette clé ne sert qu'à ce serveur** (ces comptes sont ceux de son
+  dossier de données) ; chaque appel compte dès qu'il part, même en erreur ;
 - 5 appels par seconde, 500 sur 24 heures glissantes (tous niveaux : un garde-fou) ;
 - la réserve gardée au direct (20 %) : le réchauffage et le préchargement ne prennent que le reste ;
 - la durée du cache (7 jours) : d'ici là, rien ne repart ; la taille d'une case et son découpage.
@@ -610,9 +651,11 @@ D'où, réglés sur la même page et relus à chaque appel :
 Avec une clé, rien d'autre à faire : **chaque soir** (Réchauffage des caches), les restaurants autour de la dernière
 position de chacun et des points fixes, puis ce qui est à voir, puis les hébergements, les cases les plus vieilles
 d'abord, puis la fiche des lieux ouverts depuis un mois ; **en direct**, la fiche d'un lieu lit ce qui lui manque, et
-« Actualiser » la relit. Les compteurs sont dans `cartes/quotas.db` (un redémarrage ne les oublie pas) ; la page dit
-les appels du mois de chaque SKU, ce qui serait facturé au-delà des quotas offerts, ce que tient le cache, la dernière
-erreur.
+« Actualiser » la relit (vingt qui partent par 24 heures pour tout le serveur ; un refus qui ne fait rien partir, le
+mois de Google atteint, ne compte pas). Les compteurs sont dans `cartes/quotas.db` (un redémarrage ne les oublie pas) :
+seul fichier de `cartes/` que prend la sauvegarde ; restaurés là où il n'y en a pas (une machine neuve), ceux du
+dossier restent sur une restauration sur place. La page dit les appels du mois de chaque SKU, ce qui serait facturé
+au-delà des quotas offerts, ce que tient le cache, la dernière erreur.
 
 ### Un Valhalla à toi, sur le portable
 

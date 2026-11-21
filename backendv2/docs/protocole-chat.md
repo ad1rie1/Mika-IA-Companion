@@ -57,7 +57,9 @@ ignoré).
   `mika token revoke <id>`). Un compte désactivé rend muets tous ses jetons ; un jeton obtenu par mot de passe est en
   plus révoqué quand le mot de passe change ou que le compte est désactivé. Au-delà de dix jetons obtenus par
   connexion, le moins récemment utilisé est révoqué.
-- `mika token create <compte> --client mobile|screen --label …` en donne un sans mot de passe (serveur arrêté).
+- `mika token create <compte> --client mobile|screen|tool --label …` en donne un sans mot de passe (serveur arrêté).
+  `tool` (ADR 0289) : le jeton d'un outil branché par MCP — il n'ouvre que le point MCP de la personne (`/mcp/moi`,
+  `protocole-moi.md` § 11), ni ce chat, ni l'API, ni le monde ; `POST /auth/token` le donne aussi (`"client": "tool"`).
 - `POST /auth/push` avec un jeton `mobile` : où notifier le téléphone fermé (§ 5) —
 
   ```json
@@ -125,6 +127,7 @@ Le serveur laisse de même environ cinq minutes au pong de ses propres pings Web
 | `verdict` | `message_id`, `verdict` (`ok` \| `ko` \| vide), `comment?` | juger une de ses réponses (ADR 0113) ; opératrice authentifiée seulement |
 | `strand` | `id`, `title`, `description`, `archived` | régler un de ses fils de travail (ADR 0164) ; opératrice authentifiée seulement |
 | `strand_history` | `id`, `before?` | relire un fil, par pages : `id` vide, le fil avec elle (ADR 0215), pour toute connexion authentifiée ; sinon un de ses fils de travail (ADR 0164), opératrice authentifiée seulement |
+| `effort` | `effort`, `strand?` | forcer l'effort de réflexion de ses réponses, ou le rendre à « auto » (ADR 0287) ; opératrice authentifiée seulement |
 
 `chat` :
 
@@ -150,8 +153,8 @@ Le serveur laisse de même environ cinq minutes au pong de ses propres pings Web
 - `strand` (clé absente d'ordinaire, ADR 0164) : le fil de travail où le message est écrit — un identifiant que le
   client choisit (1 à 40 lettres, chiffres, `_` ou `-`), propre au compte. Honoré seulement avec `mode: "pro"` ;
   sinon, ou invalide, le message va au fil avec elle, sans erreur. Un renvoi garde son `strand`.
-- Débits : 20 `chat` par 10 s ; 12 par 10 s pour `sync`, `read`, `where`, `approval`, `verdict`, `strand` et
-  `strand_history` réunis (au-delà, ignorées). Au plus 8 `chat` en attente sur une connexion, comptés à la réception : au-delà, `overloaded` — les
+- Débits : 20 `chat` par 10 s ; 12 par 10 s pour `sync`, `read`, `where`, `approval`, `verdict`, `strand`,
+  `strand_history` et `effort` réunis (au-delà, ignorées). Au plus 8 `chat` en attente sur une connexion, comptés à la réception : au-delà, `overloaded` — les
   derniers d'une rafale, jamais les premiers.
 
 `presence` : revenir vaut tout de suite (la personne est là ; un visage et un panneau frais suivent) ; partir vaut
@@ -223,6 +226,15 @@ récents), pour un écran qui relit un fil sans en avoir les messages. Avec `id`
 — sa conversation à toi, jamais celle d'un autre compte : c'est la session qui dit de qui il s'agit, et aucun champ ne
 peut désigner quelqu'un d'autre. Avec un `id`, c'est un de ses fils de travail (ADR 0164), pour une opératrice
 seulement. Réponse : un `history` de mode `strand`, avec `strand` (le fil relu, vide pour le fil avec elle) et `more`.
+
+`effort` (ADR 0287) : combien le modèle réfléchit avant de lui répondre. `effort` : `low`, `medium`, `high`, `xhigh`
+ou `max` pour le forcer, vide pour « auto » ; `strand` : un de ses fils de travail, ou absent (ou vide) pour toute sa
+conversation, mode pro compris. Un fil en auto suit la conversation ; la conversation en auto suit l'effort réglé pour
+le rôle qui lui répond (ADR 0285). Il vaut pour la réponse à ses messages — sa boucle d'outils comprise —, jamais pour
+ce que Mika écrit d'elle-même, ni pour la seconde passe, ni pour ses travaux de fond. Le dernier réglage vaut, sur tous
+ses écrans ; il passe par le chemin des actions de la console (`transcript.regler_effort`, audité sous
+`moi.transcript.regler_effort`). Un niveau inconnu ou un fil mal nommé : la trame est ignorée. Réponse :
+`effort_result` ; le réglage entier (`efforts`) suit, à tous ses écrans d'opératrice.
 
 `verdict` (ADR 0113) : son opératrice dit si une de ses réponses était adaptée (`ok`) ou non (`ko`), et, si elle veut,
 ce qu'elle aurait dû dire ou pourquoi (`comment`, 2 000 caractères au plus) ; un `verdict` vide retire l'avis. Le
@@ -413,6 +425,22 @@ liste entière, du plus récemment actif au plus ancien, archivés compris :
 
 **`strand_result`** — le sort d'un réglage : `{"type": "strand_result", "id": "s1mx4k2", "status": "ok"}` ;
 `status` : `ok`, `invalid` (un champ trop long), `forbidden` (pas une opératrice), `failed` (réessayer).
+
+**`efforts`** — l'effort de réflexion de ses réponses (ADR 0287), aux seules connexions **authentifiées
+d'opératrice** : à l'ouverture (après `strands`) et après un réglage (`effort`). Le réglage entier :
+
+```json
+{"type": "efforts", "conversation": "high", "strands": {"s1mx4k2": "max"}, "auto": {"chat": "medium", "pro": ""}}
+```
+
+- `conversation` : ce qu'elle a forcé pour toute sa conversation ; vide : auto. `strands` : ses fils de travail qui
+  ont le leur (un fil absent est en auto : il suit la conversation).
+- `auto` : ce que « auto » vaut en ce moment — l'effort réglé pour le rôle qui lui répond (`chat`) et pour celui du
+  mode pro (`pro`) ; vide : le défaut du modèle. De quoi écrire « auto · moyen ».
+
+**`effort_result`** — le sort d'un réglage : `{"type": "effort_result", "strand": "", "effort": "high", "status": "ok"}` ;
+`strand` vide : toute la conversation ; `status` : `ok`, `invalid`, `forbidden` (pas une opératrice), `failed`
+(réessayer).
 
 **`emotion_update`** — son visage entre deux tours, seulement vers un écran regardé : `person_id`, `emotion`,
 `emotion_intensity`, `emotion_blend` (`[{"emotion", "weight"}]`) et `emotion_state`, comme dans `speech` :

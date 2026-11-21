@@ -67,3 +67,15 @@ def test_the_page_is_a_tab_of_map_and_phone_and_its_warm_budget_is_said(world): 
     assert 'href="/admin/reglages/avis"' in client.get("/admin/reglages/carte").text
     warm = html.unescape(client.get("/admin/reglages/rechauffage").text)
     assert "Budget de Google" in warm and "Google : les restaurants" in warm
+
+
+def test_the_page_says_its_counts_are_those_of_this_data_folder_only(world):  # noqa: F811
+    """R3-08 : « rien n'est facturé » ne vaut que pour une clé qui ne sert qu'à ce serveur — les compteurs du mois sont
+    ceux de ce dossier de données ; la même clé sur un autre serveur, ou dans le ``.env`` d'un poste, puise dans le même
+    quota offert de Google, sans que ces comptes le voient. La page le dit là où on lit le mois et la facture."""
+    client, _live, _ = world
+    bootstrap(client)
+    text = html.unescape(client.get(PAGE).text)
+    assert "d'après les comptes de ce dossier de données" in text
+    assert "la même clé ailleurs puise dans le même quota offert" in text
+    assert "une clé à part pour un autre serveur ou un poste de développement" in text

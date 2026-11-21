@@ -690,13 +690,20 @@ class Tick:
 def outcomes(name: str, app: App, results: list[Any], now: int, p: ForgeParams, *, breaker: bool = True,
              concern: tuple[tuple[str, ...], int] = ((), 0), service: str = "") -> list[Any]:
     """Ce qu'un ou plusieurs appels d'une app laissent : ses émissions, ses signaux — chacun dans sa file, qu'elle lira
-    selon ce que l'app déclare (ADR 0105) —, et le disjoncteur si les échecs s'accumulent (``breaker=False`` : une
+    selon ce que l'app déclare (ADR 0105) —, le fait public qu'une app d'un projet a signalé (ADR 0280), et le
+    disjoncteur si les échecs s'accumulent (``breaker=False`` : une
     action d'opérateur, qui n'est jamais comptée contre l'app)."""
     drafts: list[Any] = [EMITTED.draft(app=name, type=t, data=data) for r in results for t, data in r.emits]
     about, level = concern
-    for said, pertinence, emotion in (sig for r in results for sig in r.signals):
-        drafts.append(c.QUEUED.draft(app=name, summary=Content.of(said[:300], level=level), pertinence=pertinence,
-                                     emotion=emotion, about=about, sensitivity=level))
+    queued = [c.QUEUED.draft(app=name, summary=Content.of(said[:300], level=level), pertinence=pertinence,
+                             emotion=emotion, about=about, sensitivity=level)
+              for said, pertinence, emotion in (sig for r in results for sig in r.signals)]
+    drafts += queued
+    if queued and app.project:
+        # une app d'un projet a signalé : le fait public, sans le texte (ADR 0280) — ce qu'attend l'objectif de son
+        # projet qui l'écoute. Une fois par lot d'appels, quel que soit le nombre de signaux ; le tri de la file
+        # reste ce qu'il est
+        drafts.append(c.RAISED.draft(app=name))
     failed = [r for r in results if not r.ok]
     if breaker and failed and service:  # un service : son disjoncteur à lui
         if app.svc_failures.get(service, 0) + 1 >= p.breaker:

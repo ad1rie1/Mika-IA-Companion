@@ -379,10 +379,15 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
 
 Ses onglets sont dans `app/handmade/tabs/projects.py` (ADR 0177).
 
-- **Ses projets** : ses chiffres (ce qui attend ton accord en tête quand il y en a), puis une liste, une rangée par
+- **Ses projets**, la page d'ensemble (ADR 0281) : « À faire » en tête — ce qui t'attend dans tous ses projets, dans
+  l'ordre où s'en occuper (la règle : `faculties/projects/todo.py` ; ses mots : `inspect_todo.py`), chaque ligne
+  disant sa sorte, de quoi il s'agit, son projet, depuis quand, à qui la main, et menant là où elle se règle (six
+  lignes, le reste replié ; les éléments d'une même liste au-delà de trois en une ligne) ; ses chiffres (ce qui
+  t'attend en tête quand il y en a) ; puis une liste, une rangée par
   projet sous des colonnes nommées : son nom et où il en est (une ligne), mode (Mika ou impersonnel) et état,
-  objectifs en jauge, prochaine et dernière exécution, pour qui ; priorité, plage de travail, agenda, outils, dépôt
-  distant et ce qui sort se déplient sous la rangée (la flèche à son bout). Sur un écran étroit, la rangée s'empile
+  combien de choses t'y attendent, objectifs en jauge, prochaine et dernière exécution, pour qui ; priorité, plage de travail, agenda, outils, dépôt
+  distant et ce qui sort se déplient sous la rangée (la flèche à son bout) ; sous la liste, « Dépendances entre projets » :
+  qui lit qui, ce que le lien donne maintenant, les demandes en cours du lecteur (chacune mène à son ticket). Sur un écran étroit, la rangée s'empile
   et nomme ses valeurs. « Créer un projet » est dans la barre de titre et a sa page : le projet, ses objectifs (un
   par ligne, ponctuels et constants), son mode et ses outils, son rythme et sa plage, sa liberté, son dépôt distant.
 - **Exécutions** : ce qui tourne en ce moment, puis le fil jour par jour (filtrable par projet et par verdict) :
@@ -390,51 +395,112 @@ Ses onglets sont dans `app/handmade/tabs/projects.py` (ADR 0177).
   appels, décision). L'onglet Exécutions de la fiche d'un projet suit le même fil (`handmade/projets/_runs.html`).
 - **Décisions techniques** : rangées par projet (filtrables par projet, et par statut en bouton à choix), chacune
   avec sa question, ce qui est choisi, pourquoi, qui l'a posée et quand ; une décision remplacée s'estompe.
-- **La fiche** gouverne, onglet par onglet ; ses onglets disent leur compte (objectifs, exécutions, décisions), Accès
-  et Carnet sont rangés sous « Plus » ; en tête, la principale (« Lancer maintenant », ou « Reprendre » en pause) et
-  « Donner une consigne », le reste sous « ⋯ ». *Vue d'ensemble* (dessinée, `app/handmade/subjects/project.py`, ADR 0177 : la
-  vue d'un objet de la maquette — un seul bandeau : ce qui attend ton accord, « Les décider » ouvrant la file des
-  validations, sinon sa pause ou ce qui le retient ; une bande de chiffres « Où il en est », ses dernières exécutions
-  en barres ; son plan et sa réponse ; puis des tuiles qui mènent à leurs onglets : ses objectifs, ses dernières
-  exécutions, ses décisions en vigueur, son cadre, sa prochaine exécution, son dépôt ; la prochaine exécution se dit
+- **La fiche** gouverne, onglet par onglet, rangée par ce qu'on y fait (ADR 0281) : Où il en est, Tickets, Suivi, Dépendances (« Liens » jusqu'à l'ADR 0290),
+  Dépôt, Exécutions, Cadre ; ses onglets disent leur compte (tickets, suivi, liens, exécutions) ; Décisions
+  techniques, Fichiers, Documentation et Carnet sont rangés sous « Plus » (**Documentation**, ADR 0289 : les pages
+  de sa documentation — un espace à part de son dépôt — avec leur titre, leur version, leur dernière modification et
+  qui l'a faite, et ses images ; rien ne s'y édite : elle s'écrit dans l'espace de chaque personne, par elle en
+  exécution et par MCP) ; ses objectifs se lisent sous « Où il en est » et ses
+  accès sous « Cadre » (`Overview.joined` : leurs anciennes adresses y mènent) ; en tête, la principale (« Lancer
+  maintenant », ou « Reprendre » en pause) et « Donner une consigne », le reste sous « ⋯ ». L'inventaire de ses
+  actions, et l'onglet qui porte chacune, est gardé par `tests/protocol/test_project_fiche_tabs.py`.
+  *Où il en est* (dessinée, `app/handmade/subjects/project.py`, ADR 0177, 0281 : la
+  vue d'un objet de la maquette — un seul bandeau : sa pause ou ce qui le retient ; puis deux sous-onglets. « En
+  bref » : « Ce qui t'attend » en tête (`handmade/projets/_todo.html`) — un accord (tout effet proposé pendant son
+  travail, l'appel d'un service compris : la file « À valider » s'ouvre sur lui), son plan sans réponse, une demande
+  d'aide, ses pannes, un objectif bloqué, les tickets dont la main est à toi, un point d'arrêt dit prêt, des
+  relectures refusées deux fois, ce qui est à ta charge dans ses listes —, chaque ligne avec le bouton de son geste ;
+  sans attente, une ligne le dit ; une bande de chiffres « Où il en est », ses dernières exécutions
+  en barres ; ses missions (ses objectifs constants : leur cadence, ce qui les déclenche, leur dernier passage, ce
+  qui les a éveillées) et ses objectifs en cours (leurs jalons en jauge, leur branche et leur pull request, leurs
+  vérifications, leur relecture), une ligne chacun ; son plan et sa réponse (en tête s'il attend) ; puis des tuiles
+  qui mènent à leurs onglets : ce qui vient ensuite, ses dernières
+  exécutions, ses décisions en vigueur, son cadre, son dépôt ; la prochaine exécution se dit
   comme la prochaine séance d'un but, `projects.inspect._next_words` : « dès que possible », sa date puis pourquoi
   pas avant — son agenda ou l'espacement, sa plage de travail, la cadence de ses objectifs —, ou ce qui la retient)
-  · *Objectifs* (dessiné,
-  `app/handmade/subjects/project.py` : ses chiffres, puis une entrée par objectif — son numéro, ce qu'il vise, sa sorte et son
+  · *Missions et objectifs* (le second sous-onglet de « Où il en est » : l'onglet `objectifs`, réuni ; dessiné,
+  `app/handmade/subjects/project.py` : ses chiffres, puis ses missions et ses objectifs ponctuels, chacun sous
+  son titre, le filtre — ouverts et bloqués, faits, retirés, tous — en bouton à choix dans l'en-tête de la liste ;
+  une entrée par objectif — son numéro, ce qu'il vise, sa sorte et son
   état, son rythme et qui l'a posé, son dernier compte rendu en citation (long, quatre lignes que « lire la suite »
   déplie) et ce qu'elle en a tiré ; ses boutons sur sa ligne, deux en vue (le lancer, le premier statut), « Modifier
   l'objectif » en panneau, le reste sous « ⋯ » ; un constant ne se coche pas ; « Ajouter un objectif » en colonne à
-  côté de la liste sur un grand écran) · *Exécutions* (dessiné, `app/handmade/subjects/project.py`, jour par jour comme
+  côté de la liste sur un grand écran ; le rythme d'un constant dit aussi ce qui le déclenche — la base qui
+  avance ou un objectif abouti d'un projet qu'il lit, un signal d'app, un réveil par API —, s'il est sans cadence, et les causes
+  qui attendent son passage ; les deux formulaires d'un objectif ont « Déclenché par », un déclencheur par ligne,
+  « Sur événement seulement » et « Premier passage tout de suite » (ADR 0280) ; ses jalons (ADR 0273, `faculties/projects/inspect_milestones.py`) : sa ligne dit où
+  il en est — « jalons 2/4 », « un point d'arrêt t'attend » —, puis un jalon par ligne, son état, comment il se
+  vérifie, comment elle dit l'avoir rempli, sa preuve et le commit ; à côté de « Modifier l'objectif », « Valider ou
+  refuser le point d'arrêt » quand un jalon t'attend (refuser demande ta raison) et « Ajouter un jalon » ; un constant
+  n'a pas de jalons : sa liste « À chaque passage » se règle dans « Modifier l'objectif » et se lit sur sa ligne ; les deux formulaires
+  d'un objectif portent « Fini quand », son critère (ADR 0290 ; laissé vide, il ne change pas) ;
+  sur un projet qui passe par des pull requests (ADR 0274), sa branche de travail et sa pull request — proposée,
+  ouverte, changements demandés, fermée sans fusion, fusionnée — avec le lien vers sa page chez l'hôte, et où en
+  sont les vérifications de son commit (elles tournent, sont passées, ont échoué : ADR 0275) ; le flux du
+  projet se règle avec son dépôt distant, onglet Dépôt, et la proposition d'une pull request se décide dans
+  « À valider » avec son aperçu, comme un envoi ; « Sa relecture » (ADR 0276) : le dernier verdict de la relecture
+  indépendante de son travail — le commit relu, le fournisseur qui a relu, bon ou refusé —, ses constats, et les
+  deux avis quand la main t'est revenue ; le réglage « Relecture indépendante » — jamais, avant de sortir, à chaque
+  « fait » — est dans « Modifier le projet », sous « Sa liberté », et l'aperçu d'une pull request ou d'un envoi dit
+  le verdict du commit qui part)
+  · *Exécutions* (dessiné, `app/handmade/subjects/project.py`, jour par jour comme
   Projets › Exécutions et sur les mêmes pièces, `handmade/projets/_runs.html` : ses chiffres en tuiles — exécutions,
   sur 24 h face à son plafond, pannes d'affilée, la dernière —, puis chaque exécution sans le projet, c'est lui :
   l'heure, l'objectif visé, son issue, le verdict et sa preuve, le compte rendu cité, le commit, la durée, et les
   onglets de son épisode — prompt, outils, appels, décision — que la légende explique ; sans exécution, il le dit une
   fois, sans chiffres ; la pagination reste celle de la console) · *Décisions techniques* (dessiné, comme
-  *Objectifs* et sur les mêmes pièces, `handmade/projets/_fiche.html` :
+  *Missions et objectifs* et sur les mêmes pièces, `handmade/projets/_fiche.html` :
   une entrée par décision — la question tranchée et son statut, ce qui est choisi, pourquoi en citation, le contexte
   et les options envisagées repliés, qui l'a posée, quand, ce qu'elle remplace ; sur sa ligne, la retirer ou la
   remettre en vigueur et « Remplacer cette décision » en panneau ; remplacée ou retirée, elle s'estompe ; « Consigner
   une décision » en colonne à côté ; sur la fiche d'un but, « Décisions » sont les pesées de l'arbitre) · *Fichiers*
   (dessiné bloc par bloc, `app/handmade/blocks.py`, comme les autres onglets d'un moyen de communication et ceux d'un
   but, son arborescence en table d'exploitation : la navigation « Dossier », un fichier ouvert à lire ou à
-  télécharger, la table du dossier, « Déposer un fichier » avec le formulaire de la console) · *Dépôt git*
+  télécharger, la table du dossier, « Déposer un fichier » avec le formulaire de la console) · *Tickets* et *Suivi*
+  (son registre, ADR 0268, dessinés bloc par bloc comme *Fichiers*, en table d'exploitation : *Tickets* — le filtre
+  par étape avec ses comptes (les étapes de son parcours, ADR 0270 : proposé, non lu, en analyse, en attente de
+  décision, en attente de validation, validé en cours, traité, écarté), le ticket ouvert avec ses faits et à qui est
+  la main, son fil — sa question et son plan y sont nommés, le plan qui attend sa validation avec son numéro —,
+  « Noter » (y répondre à sa question) et « Trancher » (accepter, valider son plan avec ta consigne — celui que tu
+  as sous les yeux : réécrit entre-temps, il est refusé et à relire, ADR 0272 — ou le refuser avec ton commentaire,
+  écarter avec sa raison ou confirmer qu'elle l'écarte, fermer comme traité, rouvrir), le tableau paginé avec l'étape et « la main à » sur
+  chaque ligne, « Ouvrir un ticket » ; leur réglage — qui valide un plan, la borne d'un petit ticket, la publication
+  en issues — est dans Cadre, où un lien mène (ADR 0281). Sur un
+  ticket d'un projet qui reflète ses tickets : son issue, son état et son lien ; « Publier » tant qu'il n'en a pas,
+  puis « Publier cette note » (par son numéro, que son fil dit) — une demande, dont l'aperçu attend dans
+  « À valider » ; une issue ouverte chez l'hôte y arrive « proposée », ouverte par « quelqu'un chez l'hôte » ;
+  *Suivi* — ses listes en navigation avec ce qui y reste ouvert, le filtre par statut, l'élément ouvert
+  avec son fil, « Noter » et « Changer le statut », le tableau paginé, « Ajouter un élément » et « Créer ou régler
+  une liste » : son nom, son titre, ses statuts ouverts et clos, qui agit par défaut) · *Dépendances* (dessiné,
+  `handmade/projets/fiche_liens.html`, ADR 0257, 0271, 0281, 0290 : « Il dépend de » — chaque projet lu et ce que le lien
+  donne maintenant (ses fichiers compris, par la vue de son atelier, ADR 0260 : la colonne « la vue de son atelier »
+  dit le dernier commit de sa branche de base qu'elle montre), un lien suspendu le dit, ce que son plan demande sans
+  être lié aussi, et comment une demande y naîtrait (sur l'accord de son propriétaire, directe, aucune) —, « Choisir
+  ce qu'il lit » à côté, une case par projet qu'il peut lire et, sous chaque lien posé, celle de son mode direct ;
+  « Ses demandes : envoyées » (le ticket chez le projet visé, où il en est) et « Ses demandes : reçues » (les
+  tickets que d'autres projets ont ouverts chez lui, à qui la main), côte à côte ; « Dépendent de lui » ;
+  sur un ticket qu'un autre projet a ouvert, *Tickets* dit de quel projet vient la demande) · *Dépôt*
   (dessiné, `app/handmade/subjects/project_git.py`, ADR 0183 : un seul bandeau — un
   envoi qui attend ton accord, GitHub qui ne répond pas, ou les deux histoires qui ont divergé ; l'atelier et son
   dépôt distant face à face, l'atelier avec sa branche, son dernier commit et ce qui n'est pas enregistré, le distant
   avec son hôte, le bout de sa branche, ses issues et pull requests et quand il a été lu ; entre eux l'écart (à
   pousser, à récupérer) et « Pousser maintenant », « Récupérer », « Relire », le geste qui comble l'écart en avant ;
   puis des sous-onglets : l'historique paginé, ceux qui restent à pousser marqués, un commit ouvert en diff coloré
-  au-dessus ; ce qui n'est pas enregistré ; l'histoire du distant, ceux à récupérer marqués ; ses issues et ses pull
+  au-dessus ; ce qui n'est pas enregistré ; ses branches de travail (ADR 0281 : une par objectif — sa branche, sa
+  pull request et sa page chez l'hôte, les vérifications de son commit, le verdict de sa relecture) ; l'histoire du distant, ceux à récupérer marqués ; ses issues et ses pull
   requests ouvertes, qui s'ouvrent sur GitHub ; les échanges passés et ce que git a répondu ; les réglages du
-  distant) · *Comportement et outils* (dessiné, `handmade/projets/fiche_comportement.html`, dans le gabarit du
-  paramétrage : « Modifier le projet », le formulaire de la console, par groupes — le projet, son mode, son rythme, sa
-  liberté —, une ligne par réglage et « Enregistrer » collé en bas ; ce que veut dire son mode et ses plafonds sont
-  l'aide de leur réglage, sa prochaine exécution une ligne au-dessus ; archivé, ses réglages en lecture ; puis ses
-  outils, les lots et leurs noms, et « Choisir ses outils » à côté : les lots du code, puis une case par service MCP branché, ADR 0254 ;
-  puis ses liens de lecture, ADR 0257 : « Ce qu'il lit » — chaque projet lu et ce que le lien donne maintenant (ses
-  fichiers compris, par la vue de son atelier, ADR 0260), un lien
-  suspendu le dit, ce que son plan demande sans être lié aussi —, « Choisir ce qu'il lit » à côté, une case par projet
-  qu'il peut lire, et « Qui le lit ») · *Accès* (dessiné, ADR 0133, `app/handmade/subjects/project.py` : un tableau
+  distant) · *Cadre* (dessiné, `handmade/projets/fiche_comportement.html`, ADR 0281, dans le gabarit du
+  paramétrage et en sous-onglets — « Ses réglages » : « Modifier le projet », le formulaire de la console, par
+  groupes — le projet, son mode, son rythme, sa liberté (la relecture indépendante y est) —, une ligne par réglage
+  et « Enregistrer » collé en bas ; ce que veut dire son mode et ses plafonds sont l'aide de leur réglage, sa
+  prochaine exécution une ligne au-dessus ; archivé, ses réglages en lecture ; « Outils et services » : les lots et
+  leurs noms, et « Choisir ses outils » à côté : les lots du code, puis une case par service MCP branché, ADR 0254 ;
+  « Accès » : l'onglet `acces`, réuni ; « Tickets et issues » : ce qui vaut maintenant — qui valide le plan d'un
+  ticket, la borne d'un petit ticket, ses fichiers protégés, la publication de ses tickets en issues, la fusion qui
+  reste à toi — et le formulaire qui le règle : toujours ou seulement pour ce qui n'est pas petit, les fichiers et
+  les lignes d'un petit ticket, les fichiers protégés ; publier ses tickets en issues chez l'hôte : jamais, sur ton
+  accord, toujours — ADR 0270, 0275)
+  · *Accès* (sous Cadre ; dessiné, ADR 0133, `app/handmade/subjects/project.py` : un tableau
   de lignes lues de haut en bas — qui et par où (les mêmes cases qu'un service), quand, voir, piloter projet (lecture seule, accord du propriétaire, modification, aucun pilotage), fichiers, ce qu'elle fait d'un outil de ses apps qui lit et d'un
   outil qui agit, à quels outils —, « + Ajouter un accès » (une ligne fermée), chaque ligne montée, descendue ou
   retirée, la dernière, obligatoire, le comportement par défaut ; jamais réglé, il le dit) · *Carnet* (dessiné, en
@@ -720,7 +786,7 @@ rôle par rôle (`CallLog.profile`).
 | Rubrique | Sous-page | Contenu |
 |---|---|---|
 | Intelligence | Fournisseurs (menu : Modèles de texte) | chaque fournisseur a sa page : type, modèle (**sélecteur** chargé chez le fournisseur, même pour un fournisseur pas encore enregistré), connexion, clé ; options avancées repliées (URL, hôte, commande, créneaux, température…) ; ses budgets (contexte, sortie, caractères par jeton) ; un échec est journalisé, sans basculement |
-| | Qui sert quoi | une seule table, une ligne par rôle : sa famille (voix, mémoire, compréhension, sens, travail), son fournisseur (une liste, « — » : son repli), ce qui le sert **vraiment** après replis (le fournisseur, son type et son modèle), et comment (déclaré, la chaîne de ses replis, ou « chaque appel échoue », en rouge) — sauf `polish` (rendre naturel), qui n'a pas de repli : sans modèle, il est coupé par choix (`OPTIONAL_ROLES`, `vocab/episodes.py`), sa ligne dit « coupée : la seconde passe ne se fait pas », sans alarme (aucun appel n'est fait, ADR 0140) ; un seul Enregistrer |
+| | Qui sert quoi | une seule table, une ligne par rôle : sa famille (voix, mémoire, compréhension, sens, travail), son fournisseur (une liste, « — » : son repli), son effort de réflexion dans la colonne d'à côté (une liste, « — » : celui de la fiche ; ADR 0285 — une correspondance posée dans la table d'une autre, `SettingsSection.beside`), ce qui le sert **vraiment** après replis (le fournisseur, son type et son modèle ; « effort sans effet ici » quand un effort est demandé à un fournisseur qui n'en a pas), et comment (déclaré, la chaîne de ses replis, ou « chaque appel échoue », en rouge) — sauf `polish` (rendre naturel), qui n'a pas de repli : sans modèle, il est coupé par choix (`OPTIONAL_ROLES`, `vocab/episodes.py`), sa ligne dit « coupée : la seconde passe ne se fait pas », sans alarme (aucun appel n'est fait, ADR 0140) ; un seul Enregistrer |
 | | Fournisseurs d'images, Qui dessine quoi (menu : Modèles d'image) | les fournisseurs d'images et leurs rôles (`draw`, `edit`, `own`), ADR 0061 ; Qui dessine quoi est la même table : ce qui sert chaque rôle, son type et son modèle, où il tourne, ce qu'il sait aussi faire, comment |
 | Personnage | Identité | nom, nature, description (une phrase), langue, fuseau |
 | | Portrait | son portrait en prose — le seul texte qui la décrit, lu partout (ADR 0138) —, ce qui est vrai d'elle, ses centres d'intérêt |
@@ -733,7 +799,7 @@ rôle par rôle (`CallLog.profile`).
 | | Lieux et adresses | l'index des lieux de l'écran Carte (un fichier SQLite de `cartes/`, refait par `mika carte lieux`) : combien de lieux, tirés de quel extrait OpenStreetMap (et de quand) ou de quelle archive, s'il a les détails d'une fiche (ADR 0244), quand il a été construit, sa zone et sa taille — ou comment le construire ; les adresses (aucune, par défaut, ou la Géoplateforme de l'IGN : seul le texte cherché part), ce qui en est parti depuis le démarrage, la dernière erreur (ADR 0194) |
 | | Itinéraires | qui les calcule (aucun, par défaut ; le Valhalla public de FOSSGIS, au plus une demande par seconde pour tout ce serveur, sans garantie ; un Valhalla à toi, son adresse et son débit) ; les trajets demandés depuis le démarrage, ceux repris du cache, la dernière erreur (ADR 0194) |
 | | Données touristiques (DATAtourisme) | la clé de leur API (secrète, jamais réaffichée) et d'où vient celle en service (réglée ici, ou la variable `MIKA_DATATOURISME_API_KEY`, jamais sa valeur), les bornes des demandes et la réserve gardée au direct, la taille d'une case, la durée du cache des lieux et des événements, l'horizon des événements, les départements tenus en entier (une option) ; en faits, les demandes de l'heure et ce qui les bloque, ce que tient `cartes/tourisme.db` (lieux, événements à venir, taille), les cases lues et la plus ancienne, la synchronisation des départements s'il y en a (dernière, complète, en cours ou à reprendre, prochaine), la dernière erreur, les rapprochements avec OpenStreetMap, les photos relayées, la licence ; « Synchroniser maintenant » dans la barre de titre (un passage du réchauffage, et les départements) (ADR 0245) |
-| | Avis (Google) | la clé de l'API Places (New) de Google (secrète, jamais réaffichée) et d'où vient celle en service (réglée ici, ou la variable `MIKA_GOOGLE_PLACES_API_KEY`, jamais sa valeur), le plafond du mois de chaque SKU (recherches à proximité, fiches avec avis, photos : par défaut leur quota offert), les appels sur 24 heures et par seconde, la réserve gardée au direct, la durée du cache, la taille d'une case et son découpage, le préchargement autour d'une position et la part au réchauffage du soir ; en faits, les appels des dernières 24 heures et ceux du mois de chaque SKU (sur leur plafond, la réserve, leur quota offert et leur prix au-delà) et ce qui les bloque, ce qui serait facturé ce mois, ce que tient `cartes/avis.db` (lieux et rapprochés, fiches et avis, photos, taille), les cases lues, la plus ancienne et ce qu'en coûte une, le préchargement, le réchauffage, la dernière erreur, les conditions de Google avec ce que l'opérateur en a décidé, et de restreindre la clé à « Places API (New) » (ADR 0256) |
+| | Avis (Google) | la clé de l'API Places (New) de Google (secrète, jamais réaffichée) et d'où vient celle en service (réglée ici, ou la variable `MIKA_GOOGLE_PLACES_API_KEY`, jamais sa valeur), le plafond du mois de chaque SKU (recherches à proximité, fiches avec avis, photos : par défaut leur quota offert), les appels sur 24 heures et par seconde, la réserve gardée au direct, la durée du cache, la taille d'une case et son découpage, le préchargement autour d'une position et la part au réchauffage du soir ; en faits, les appels des dernières 24 heures et ceux du mois de chaque SKU (sur leur plafond, la réserve, leur quota offert et leur prix au-delà) et ce qui les bloque, ce qui serait facturé ce mois (d'après les comptes de ce dossier de données, `cartes/quotas.db` : la même clé sur un autre serveur ou dans le `.env` d'un poste puise dans le même quota offert de Google — la page conseille une clé à part), ce que tient `cartes/avis.db` (lieux et rapprochés, fiches et avis, photos, taille), les cases lues, la plus ancienne et ce qu'en coûte une, le préchargement, le réchauffage, la dernière erreur, les conditions de Google avec ce que l'opérateur en a décidé, et de restreindre la clé à « Places API (New) » (ADR 0256) |
 | | Réchauffage des caches | l'heure du passage du soir, autour des personnes ou non, des points fixes ; en faits, quand, autour de quoi, le dernier passage (et, par source, les cases rafraîchies, ce qui l'a arrêté), le budget de chaque source (DATAtourisme, Google), le prochain passage ; « Réchauffer maintenant » dans la barre de titre (ADR 0245, 0256) |
 | Plugins (menu : Configuration des plugins) | Vue d'ensemble des plugins | dessinée (`handmade/reglages/plugins.html`, ADR 0197) : une ligne par plugin composé — son nom et ce qui s'y règle, ses pages de réglages (nommées par leur destination quand elles y vivent : « Teams › Paramètres », « Ses sens › Flux suivis », ADR 0206), ses paramètres avancés (si sa faculté en a), où s'en servir —, tirée d'`app/settings_sections/plugins.py` (`PLUGINS`, une entrée par paquet de `plugins/`, `tests/protocol/test_settings_pages.py` les compare) ; puis ce qui se branche sans être un plugin (Transcription vocale, Notifications du téléphone) ; sans pagination ; les réglages d'une app restent sur sa fiche, dans la Forge |
 | | Courrier | ses boîtes, l'application Microsoft propre à l'instance, à la place de celle que Mika livre (« Compte Microsoft », ADR 0238) et ses paramètres généraux vivent dans Courrier › Paramètres, en haut à droite du courrier (ADR 0173) ; ce qu'elle prépare d'elle-même : le tableau de chaque boîte, Réglages › Canaux |
@@ -764,10 +830,10 @@ rubrique.
 | | Processus | ceux qui échouent d'abord : passages, échecs, dernière erreur, en cours ; un processus en échec (« en échec », « a trébuché »), s'il n'est pas en cours, a **Réessayer maintenant** (`POST /admin/systeme/processus`, ADR 0234 : son recul effacé, une passe demandée, `Scheduler.retry_now` ; il repart à sa prochaine échéance, tout de suite s'il était dû), geste audité `console.systeme.reessayer` ; jamais un processus retenu pour une rafale, même en échec (sa ligne dit pourquoi il n'a pas le bouton) |
 | | Anomalies | (`app/handmade/tabs/system.py`, ADR 0177) un bandeau (tranches corrompues — chacune et l'événement où son réducteur a levé, quand la reconstruction sert — une fois le réducteur corrigé — et ses deux façons : « Reconstruire » en ligne, le serveur relancé sur ce code, ou la commande exacte, `mika rebuild` et leurs clés, serveur arrêté —, anomalies, ou rien depuis le démarrage), les chiffres ; les tranches corrompues, une ligne chacune (la faculté, l'événement), avec **Reconstruire** (`POST /admin/systeme/etat`, ADR 0234 : `Mind.rebuild`, sans arrêter les ajouts ; sa confirmation dit qu'elle relit tout le journal et ne sert qu'avec un réducteur corrigé ; le message dit le résultat, saine ou encore corrompue au n° N, et les tranches qu'elle lit qui ne rejouent pas à l'identique), geste audité `console.systeme.reconstruire` ; pas pour une tranche volatile, qui ne se rejoue pas ; côte à côte ce qui a échoué dans ses facultés et à l'arbitre — la faculté, l'événement, l'erreur en clair et telle quelle ; les traces du journal (supplanté, oubli…) jour par jour, en mots, celles qui disent un problème marquées |
 | | File de sortie | (`app/handmade/tabs/system.py::outbox`) à quoi elle sert et le chemin de ce qui part (écrit au journal → en route → parti, et ce qui est à traiter) ; **À traiter** (le filtre d'état le suit, 8 par page, Relancer / Marquer comme vu, l'erreur ; chaque départ dit ce qui n'est pas parti et à qui — une parole, son destinataire et le début de son texte, « texte oublié » si l'oubli l'a effacé ; une réponse qui ne viendra pas, à qui ; une action, l'action nommée et son résumé —, et que faire selon sa sorte : « Ce message n'est pas parti… » pour une parole échouée, « Ce message est périmé : elle ne le dira plus. », les actions gardant les leurs) ; **ce qui part, par sorte**, en mots (ses messages, ce que montrent ses écrans, ce qu'elle fait au dehors — l'action nommée —, le ménage ; les mots de chaque effet, sa famille, son nom et ce que c'est, viennent de la composition : `EFFECT_LABELS` et `EFFECT_FAMILIES` de `app/console.py`, lus par `Names.effect`, et un test d'architecture veut un nom pour chaque effet du registre composé), une barre empilée parti / en route / à traiter / vu ; **les derniers départs**, filtrés par état, 20 par page, avec leur heure et leur événement. Tout est lu dans les blocs de la vue (`inspector/pages/system.py::sorties`, ADR 0177) : ses comptes par état, sa page de départs, et, repliés, les lignes à traiter et le tableau « Par sorte » — un seul calcul, les mêmes pages pour la page dessinée, son repli et la console en MCP. « À traiter » (échoué, orphelin, périmé, interrompu) a une seule définition, dans `runtime/effects.py`, que le badge et le contrôle de santé comptent aussi |
-| | Moteur des modèles | un bandeau (un vrai rôle sans fournisseur, des appels qui attendent un créneau) ; chaque fournisseur : ses créneaux en cases, son quota en jauges, ses 24 dernières heures (appels, échecs, médiane) ; qui sert quoi, en vrai : les rôles par fournisseur, ceux que personne ne sert d'abord, et à part, sans alarme, la seconde passe sans modèle (« rendre naturel », un rôle facultatif, `OPTIONAL_ROLES`) : coupée par choix, elle ne compte pas parmi les rôles sans fournisseur |
+| | Moteur des modèles | un bandeau (un vrai rôle sans fournisseur, des appels qui attendent un créneau) ; chaque fournisseur : ses créneaux en cases, son quota en jauges, ses 24 dernières heures (appels, échecs, médiane) ; qui sert quoi, en vrai : les rôles par fournisseur (une pastille dit l'effort réglé pour son rôle, « rendre naturel · faible », ADR 0285 ; la vue servie en MCP donne pour chaque rôle l'effort appliqué et d'où il vient), ceux que personne ne sert d'abord, et à part, sans alarme, la seconde passe sans modèle (« rendre naturel », un rôle facultatif, `OPTIONAL_ROLES`) : coupée par choix, elle ne compte pas parmi les rôles sans fournisseur |
 | | Écrans du monde | un bandeau (ce qui manque à un hôte connecté) ; côte à côte les clients de `/ws/world` (client, moteur, qui, rôles, qui tient le bail d'hôte et qui l'attend) et, par hôte, la révision chargée et ce qui lui manque (ancres, assets en puces, révision dépassée). ADR 0051 |
 | | Appels et coûts | une période choisie, appliquée à toute la page : un bouton à choix au bout de la barre d'onglets, « 7 jours · 14 jours · 30 jours » (14 posé, `?periode=`), les titres la disent ; un bandeau des échecs (les rôles qui échouent surtout) ; les chiffres ; la période en barres, une par jour, le premier jour entamé compris (le coût, les appels, leurs échecs en rouge) ; en sous-onglets où va le coût (par rôle, **modèle**, fournisseur : une barre de coût et une d'appels chacun), tous les appels paginés (sans période ; une page de la liste garde `?periode=`), le détail jour par jour. La page dessinée lit les blocs de sa vue (son graphe, ses tableaux par jour, rôle, fournisseur et modèle) : la période et ses agrégats se calculent une fois |
-| | Stockage et sauvegardes | un bandeau si les sauvegardes manquent ou échouent ; taille des bases, dernier instantané ; ses bases et ses dossiers, une ligne chacun (`app/backup.place`, mesuré hors de la boucle d'événements) : sa place, ce qu'il garde, ce que la sauvegarde en fait — sauvegardé, jetable (`views.db` se reconstruit), réextrait (la carte), retéléchargé (le modèle de plongements), mis de côté par une restauration ; sous MariaDB, ses bases sont « sur le serveur MariaDB » ; ce que garde `mind`, une barre par table ; la dernière sauvegarde (ce qui s'est écrit depuis), la dernière vérification (sinon, la dernière archive à vérifier), les archives gardées ; en note, les commandes pour sauvegarder, vérifier, restaurer, avec ses vrais dossiers (`app/backup.overview` : le dossier de données, celui de la dernière archive ; un mot entre chevrons à la place de ce qu'on ne connaît pas), et `sudo systemctl start mika-backup.service` là où l'unité de sauvegarde est installée pour ce dossier |
+| | Stockage et sauvegardes | un bandeau si les sauvegardes manquent ou échouent ; taille des bases, dernier instantané ; ses bases et ses dossiers, une ligne chacun (`app/backup.place`, mesuré hors de la boucle d'événements) : sa place, ce qu'il garde, ce que la sauvegarde en fait — sauvegardé, jetable (`views.db` se reconstruit), réextrait (la carte — ses compteurs du mois, `cartes/quotas.db`, se sauvegardent, et la ligne le dit), retéléchargé (le modèle de plongements), mis de côté par une restauration ; sous MariaDB, ses bases sont « sur le serveur MariaDB » ; ce que garde `mind`, une barre par table ; la dernière sauvegarde (ce qui s'est écrit depuis), la dernière vérification (sinon, la dernière archive à vérifier), les archives gardées ; en note, les commandes pour sauvegarder, vérifier, restaurer, avec ses vrais dossiers (`app/backup.overview` : le dossier de données, celui de la dernière archive ; un mot entre chevrons à la place de ce qu'on ne connaît pas), et `sudo systemctl start mika-backup.service` là où l'unité de sauvegarde est installée pour ce dossier |
 | Journaux | Journal d'événements | jour par jour, une ligne par événement (l'heure, ce qui s'est passé, son type, son numéro, ses données repliées), deux colonnes sur un écran large ; un geste audité (`runtime.operated`) dit lequel et qui l'a fait (« Geste audité : Compte créé, par Adrien »), et son lien « un geste audité » mène à ses événements (la corrélation `opérateur:…` ne change pas) ; les événements d'un même épisode se suivent et ne disent son lien qu'une fois ; les familles de la page en puces qui filtrent (`?type=<préfixe>.`), chacune sous le nom de la faculté qui possède ses types (la colonne repliée « faculté » de la vue), celles du moteur sous leur sens (« Épisodes », « Ce qu'elle perçoit », « Effets », « Moteur »), son préfixe au survol ; filtrable, quarante par page, paginé dans les deux sens |
 | | Gestes audités | ce que les opérateurs ont fait dans la console, et chacun depuis son espace (`runtime.operated`) : jour par jour, l'heure, qui, le geste sous son titre (jamais sa clé), d'où (la console, son espace, la ligne de commande : le début de sa clé, `operations.origin` ; une action déclarée sous sa clé nue vient de la console si un opérateur l'a faite), sur quoi (le lien de sa fiche si elle s'ouvre, sous son titre — « Projet « Labo de trading » », le titre seul s'il dit déjà sa sorte —, sa clé au survol et dans la colonne repliée « sur (clé) » ; une personne par son nom, même quand l'action ne déclare pas d'objet — un voyage supprimé depuis sa fiche ; sinon sa clé en texte : un objet retiré depuis, un partage), l'issue, sa clé et ses événements ; en tête, qui et quelles issues sur la page ; « depuis » en bouton à choix (`?depuis=`) |
 | Anatomie | Diagnostic avancé | le bandeau des tranches corrompues (la phrase d'Anomalies, sa commande comprise) ; en sous-onglets : l'ensemble de ses tranches (la plus récemment modifiée d'abord, « modifiée au n° N »), puis une faculté par sous-onglet — corrompue, **Reconstruire** dans son en-tête (le geste d'Anomalies) ; ses faits lus maintenant (les familles en une ligne), sa tranche en JSON, repliée |

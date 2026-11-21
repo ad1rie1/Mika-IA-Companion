@@ -32,7 +32,7 @@ import type { PhonePosition } from "../../api/phone";
 import { mapInfo } from "../../map/info";
 import { LiveMap } from "../../map/live";
 import { MiniMaps } from "../../map/minis";
-import { regardOf } from "../../map/notes";
+import { regardItem, regardOf } from "../../map/notes";
 import { EMPTY_SCENE, sceneBounds, type Scene } from "../../map/scene";
 import { placeWhat, tripDates } from "../../map/words";
 import { $, $$, on } from "../../shell/dom";
@@ -45,7 +45,7 @@ import * as store from "../../shared/store";
 import { StopDrag } from "./drag";
 import { EventsTab } from "./events";
 import { ExplorerTab } from "./explorer";
-import { focusSelector } from "./format";
+import { crossOrigin, focusSelector } from "./format";
 import { ItineraryTab } from "./itinerary";
 import { TripModals } from "./modals";
 import { attachPhotos, openViewer } from "./photos";
@@ -106,6 +106,8 @@ class CarteScreen {
   private current: View = "explorer";
   /** L'objet de route déjà appliqué (un regard, un voyage) : on ne le réapplique pas à chaque dessin. */
   private applied = "";
+  /** Chaque fiche ouverte par un lien d'une fiche de l'autre onglet, et celle-ci (`explorer/lieu-…` → `evenements/e:…`). */
+  private readonly openedFrom = new Map<string, string>();
   /** Ce que montrait le dernier dessin (la vue et son objet) : ses listes ne gardent leur défilement que pour lui. */
   private painted = "";
   /** Ce qu'un lecteur d'écran annonce (un arrêt déplacé au clavier) ; hors du corps, que chaque dessin refait. */
@@ -309,14 +311,20 @@ class CarteScreen {
     void this.ensure();
   }
 
-  /** Ce que la route ouvre : un regard de Mika (dans Explorer ou Itinéraire), un voyage. */
+  /**
+   * Ce que la route ouvre : un regard de Mika (dans Explorer, Événements ou Itinéraire), une fiche, un voyage. Une fiche
+   * ouverte par un lien d'une fiche de l'autre onglet sait d'où elle vient : son retour y ramène (R2-W06).
+   */
   private applyItem(ctx: ScreenContext): void {
     const key = `${ctx.tab}/${ctx.item ?? ""}`;
     if (key === this.applied) return;
+    // revenir le long du lien (le « Retour » du navigateur) n'est pas en ouvrir un : la fiche garde son retour à elle
+    const origin = this.openedFrom.get(this.applied) === key ? null : crossOrigin(this.applied, key);
+    if (origin) this.openedFrom.set(key, this.applied);
     this.applied = key;
     const seq = regardOf(ctx.item);
-    if (this.current === "explorer") this.explorer.applyItem(ctx.item);
-    if (this.current === "evenements") this.events.applyItem(ctx.item);
+    if (this.current === "explorer") this.explorer.applyItem(ctx.item, origin);
+    if (this.current === "evenements") this.events.applyItem(ctx.item, origin);
     if (this.current === "itineraire" && seq) this.itinerary.applyItem(seq);
     if (this.current === "voyage") this.tripsTab.applyItem(ctx.item);
   }
@@ -335,10 +343,12 @@ class CarteScreen {
     await Promise.all(reads);
     this.tripsTab.opened(id, force);
     if (!this.open() || this.current !== view) return;
-    // ce que Mika a trouvé, quand ce sont des événements : il se montre dans leur onglet
+    // ce que Mika a trouvé, quand ce sont des événements (une miniature ouverte avant d'être lue) : il se montre dans
+    // leur onglet — l'adresse est remplacée, pas empilée : « Retour » ramène d'où l'on venait, pas ici (R2-W01)
     const regard = seq ? this.regards.get(seq).value : null;
     if (view === "explorer" && seq && regard?.what === "evenements") {
-      this.shell.go(`#carte/evenements/regard-${seq}`);
+      history.replaceState(null, "", `#carte/evenements/${regardItem(seq)}`);
+      this.shell.refresh();
       return;
     }
     this.syncTabs();

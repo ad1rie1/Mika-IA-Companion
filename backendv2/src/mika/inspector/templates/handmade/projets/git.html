@@ -171,6 +171,11 @@
       </section>
       {% endif %}
 
+      {% if branches %}
+      {# ses branches de travail (ADR 0274, 0281) : une par objectif — sa pull request, ses vérifications, sa relecture #}
+      <div id="git-branches" class="prj-git-branches-pane" data-pane>{{ tab.table(branches) }}</div>
+      {% endif %}
+
       {% if pulls is not none %}
       <section id="git-pr" class="now-card" data-pane aria-labelledby="git-pr-t">
         {{ tab.head("Pull requests ouvertes", "git-pr-t", none, pulls.caption) }}

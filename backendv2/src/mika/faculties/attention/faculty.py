@@ -107,18 +107,21 @@ class AttentionParams(BaseModel):
     max_thoughts: Annotated[int, Knob(
         label="Pensées vivantes au plus", group="Pensées", lo=1, hi=30,
         help="Au-delà, les plus faibles s'effacent quand une nouvelle naît.")] = 8
-    # un échange qui marque
+    # un échange qui marque — les deux seuils d'intensité se lisent sur l'échelle que sa voix emploie vraiment
+    # (ADR 0283 : au banc, sa balise reste entre 0,3 et 0,6, même blessée ou bouleversée ; à 0,75 et 0,5, aucune de
+    # ses réponses ne marquait). À remesurer quand le modèle de sa voix change : tools/banc_conversation/balises.py
     marking_intensity: Annotated[float, Knob(
         label="Intensité qui marque", group="Un échange qui marque", lo=0.0, hi=1.0, step=0.05,
         help="Une réponse qu'elle donne avec une émotion déclarée au moins aussi intense laisse une pensée sur "
-             "la personne.")] = 0.75
+             "la personne. Sa balise dépasse rarement 0,6 : plus haut, plus rien ne marque par l'intensité.")] = 0.6
     marking_valence: Annotated[float, Knob(
         label="Valence qui marque", group="Un échange qui marque", lo=-1.0, hi=0.0, step=0.05,
         help="Une réponse dont l'émotion déclarée est au moins aussi négative (valence) marque aussi, dès "
              "l'intensité minimale. Près de 0 : presque tout échange un peu tendu laisse une pensée.")] = -0.2
     marking_min_intensity: Annotated[float, Knob(
         label="Intensité minimale", group="Un échange qui marque", lo=0.0, hi=1.0, step=0.05,
-        help="Sous cette intensité déclarée, aucun échange ne marque, même négatif.")] = 0.5
+        help="Sous cette intensité déclarée, aucun échange ne marque, même négatif. Sa tristesse ou son "
+             "inquiétude en répondant se déclarent d'ordinaire à 0,4.")] = 0.4
     birth_factor: Annotated[float, Knob(
         label="Force à la naissance", group="Un échange qui marque", lo=0.0, hi=1.0, step=0.05,
         help="La pensée naît à cette fraction de l'intensité déclarée ; un nouvel échange marquant avec la même "

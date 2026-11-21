@@ -195,6 +195,9 @@ def test_ws_conversation_round_trip(world):
         assert state["type"] == "inner_state_update" and state["inner_state"]["place"] == here
         # puis, à une opératrice, ses fils de travail (ADR 0164) : aucun encore
         assert ws.receive_json() == {"type": "strands", "items": []}
+        # et l'effort de réflexion qu'elle a forcé (ADR 0287) : rien, et auto vaut le défaut du modèle
+        assert ws.receive_json() == {"type": "efforts", "conversation": "", "strands": {},
+                                     "auto": {"chat": "", "pro": ""}}
         ws.send_json({"type": "identify", "person_id": "user_99", "display_name": "Usurpateur"})
         ws.send_json({"type": "ping", "t": 123})
         assert ws.receive_json() == {"type": "pong", "t": 123}

@@ -6,6 +6,7 @@
  */
 import "./styles/base.css";
 import "./styles/chat.css";
+import "./styles/ecrans/projets.css";
 import "./styles/ecrans/outils.css";
 import "./styles/ecrans/mail.css";
 import "./styles/ecrans/teams.css";
@@ -27,6 +28,7 @@ import { ChatScreen } from "./screens/chat/chat";
 import { mailScreen } from "./screens/mail";
 import { outilsScreen } from "./screens/outils";
 import { parametresScreen } from "./screens/parametres";
+import { projetsScreen } from "./screens/projets";
 import { teamsScreen } from "./screens/teams";
 import { telephoneScreen } from "./screens/telephone";
 import { startCounts } from "./shell/counts";
@@ -85,7 +87,7 @@ function startApp(state: AuthState, loginRoot: HTMLElement, appRoot: HTMLElement
   const chat = new ChatScreen(shell, store, account);
   shell.register(chat.screen());
   // dans l'ordre de la barre du haut, celui de la maquette
-  for (const make of [outilsScreen, mailScreen, teamsScreen]) {
+  for (const make of [projetsScreen, outilsScreen, mailScreen, teamsScreen]) {
     shell.register(make(shell));
   }
   // le téléphone et la carte : « Lui en parler dans le chat », « Demander à Mika » ouvrent le chat avec une phrase

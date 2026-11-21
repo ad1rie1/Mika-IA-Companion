@@ -8,10 +8,17 @@ a été demandé (``pushed``, ``pulled``).
 Les vues des ateliers lus (ADR 0260) y sont des copies de ce qui était
 enregistré au dernier commit (``committed``), gardées par (lecteur, lu) : on y
 lit ce qui est posé (``views``), ce qui a été retiré (``dropped``) et les vues
-qu'un programme a reçues (``ran``)."""
+qu'un programme a reçues (``ran``).
+
+Un commit y a son identifiant complet (``full_sha``), et chaque commit garde
+ce qui était enregistré à ce moment-là (``snapshots``) : le diff d'un commit à
+un autre (``patch``), la copie d'un commit qu'une relecture lit (``checkout``,
+``copies``, ``copy_ran``, ``discarded``) et ce que le dépôt distant possède
+(``sent`` : le dernier envoi, la dernière récupération) s'y lisent (ADR 0277)."""
 
 from __future__ import annotations
 
+import hashlib
 import re
 
 from mika.ports.workshop import (
@@ -27,6 +34,19 @@ from mika.ports.workshop import (
 
 #: l'instant d'un commit en mémoire (il n'a pas d'horloge : il compte)
 STAMP = 1_790_000_000_000_000
+
+
+def full_sha(project: int, n: int, kind: str = "c") -> str:
+    """L'identifiant complet d'un commit en mémoire : quarante chiffres hexadécimaux, comme ceux de git. Le port ne
+    rend que lui (``commit``, ``head``, ``commits``) ; l'abrégé (``short``) n'est qu'un affichage (``log``) — les
+    deux ne sont jamais la même chaîne, pour qu'un code qui comparerait l'un à l'autre échoue ici comme sur le vrai
+    atelier (ADR 0277)."""
+    return hashlib.sha1(f"{kind}:{project}:{n}".encode()).hexdigest()
+
+
+def short(sha: str) -> str:
+    """L'abrégé d'un identifiant, tel que ``git log --format=%h`` le montre."""
+    return sha[:7]
 
 
 class Atelier:
@@ -48,6 +68,15 @@ class Atelier:
         self.ran: list[tuple[int, tuple[str, ...], tuple[int, ...]]] = []
         #: la place d'une vue (octets) ; ``None`` : sans limite
         self.view_bytes: int | None = None
+        #: ce qui était enregistré à chaque commit, par projet puis par identifiant complet
+        self.snapshots: dict[int, dict[str, dict[str, str]]] = {}
+        #: ce que le dépôt distant possède, par (projet, adresse, branche)
+        self.sent_: dict[tuple[int, str, str], str] = {}
+        #: la copie de commit posée pour une relecture, par projet : le commit et ses fichiers ; les commandes
+        #: lancées dans une copie (projet, commit, commande) ; les copies effacées
+        self.copies: dict[int, tuple[str, dict[str, str]]] = {}
+        self.copy_ran: list[tuple[int, str, tuple[str, ...]]] = []
+        self.discarded: list[int] = []
 
     def exists(self, project: int) -> bool:
         return project in self.files
@@ -71,7 +100,7 @@ class Atelier:
         self._check(path)
         self.files.setdefault(project, {})[path] = content
         self.dirty.setdefault(project, []).append(path)
-        self.commits_.setdefault(project, [("a000000", "atelier ouvert")])
+        self.commits_.setdefault(project, [(full_sha(project, 0, "a"), "atelier ouvert")])
         return path
 
     async def edit(self, project: int, path: str, old: str, new: str) -> str:
@@ -95,10 +124,11 @@ class Atelier:
         taken = [d for d in dirty if not paths or d in paths]
         if not taken:
             return ""
-        sha = f"c{len(self.commits_[project]):06d}"
+        sha = full_sha(project, len(self.commits_[project]))
         self.commits_[project].append((sha, re.sub(r"\s+", " ", message).strip()[:72]))
         self.dirty[project] = [d for d in dirty if d not in taken]
         self.committed.setdefault(project, {}).update({d: self.files[project][d] for d in taken})
+        self.snapshots.setdefault(project, {})[sha] = dict(self.committed[project])
         return sha
 
     async def pending(self, project: int) -> list[str]:
@@ -110,7 +140,7 @@ class Atelier:
 
     async def log(self, project: int, n: int = 10, *, offset: int = 0) -> str:
         rows = list(reversed(self.commits_.get(project, [])))[offset:offset + n]
-        return "\n".join(f"{sha} {title}" for sha, title in rows)
+        return "\n".join(f"{short(sha)} {title}" for sha, title in rows)
 
     async def commits(self, project: int, n: int = 25, *, offset: int = 0) -> list[Commit]:
         rows = list(reversed(list(enumerate(self.commits_.get(project, [])))))[offset:offset + n]
@@ -119,7 +149,12 @@ class Atelier:
     async def count(self, project: int) -> int:
         return len(self.commits_.get(project, []))
 
+    def _known(self, project: int, sha: str) -> str:
+        """L'identifiant complet du commit que ``sha`` désigne (complet, ou abrégé comme git l'accepte), ou ``""``."""
+        return next((k for k, _ in self.commits_.get(project, []) if sha and k.startswith(sha)), "")
+
     async def show(self, project: int, sha: str) -> str:
+        sha = self._known(project, sha)
         title = dict(self.commits_.get(project, [])).get(sha)
         return f"{sha}\nMika\n\n    {title}\n\ndiff --git a/x b/x\n@@ -1 +1 @@\n-avant\n+après\n" if title else ""
 
@@ -130,9 +165,14 @@ class Atelier:
     async def branch(self, project: int) -> str:
         return "main" if project in self.commits_ else ""
 
+    async def base(self, project: int) -> str:
+        """Cet atelier n'a qu'une branche : sa base est sa tête."""
+        return await self.head(project)
+
     async def compare(self, project: int, sha: str) -> tuple[int, int] | None:
         """Une histoire en ligne droite : un commit connu est derrière la tête d'autant de commits."""
         shas = [s for s, _ in self.commits_.get(project, [])]
+        sha = self._known(project, sha)
         return (len(shas) - 1 - shas.index(sha), 0) if sha in shas else None
 
     async def push(self, project: int, url: str, branch: str, sha: str = "") -> RunResult:
@@ -141,14 +181,70 @@ class Atelier:
                                                             "Connexions › Dépôts Git")
         self.pushed.append((project, url, branch))
         self.pushed_shas.append(sha)
+        self.sent_[(project, url, branch)] = self._known(project, sha) or await self.head(project)
         return RunResult(("git", "push", url, branch), 0, stderr=f"To {url}\n * [new branch] HEAD -> {branch}\n")
 
     async def pull(self, project: int, url: str, branch: str) -> RunResult:
         self.pulled.append((project, url, branch))
         self.files.setdefault(project, {})["README.md"] = "# Récupéré\n"
-        self.commits_.setdefault(project, [("a000000", "atelier ouvert")]).append(("r000001", "depuis le distant"))
+        history = self.commits_.setdefault(project, [(full_sha(project, 0, "a"), "atelier ouvert")])
+        history.append((full_sha(project, len(history), "r"), "depuis le distant"))
         self.committed.setdefault(project, {})["README.md"] = "# Récupéré\n"
+        self.snapshots.setdefault(project, {})[history[-1][0]] = dict(self.committed[project])
+        self.sent_[(project, url, branch)] = history[-1][0]
         return RunResult(("git", "pull", url, branch), 0, stdout="Fast-forward\n")
+
+    # ── ce qu'une relecture lit (ADR 0276, 0277) ──
+    async def sent(self, project: int, url: str, branch: str) -> str:
+        return self.sent_.get((project, url, branch), "")
+
+    async def patch(self, project: int, since: str, head: str, limit: int = 60_000) -> str | None:
+        """Ce qui change de ``since`` à ``head`` : une entrée par fichier dont le contenu enregistré diffère."""
+        end = self._known(project, head)
+        start = self._known(project, since) if since else ""
+        if not end or (since and not start):
+            return None
+        snaps = self.snapshots.get(project, {})
+        before, after = snaps.get(start, {}), snaps.get(end, {})
+        text = "".join(f"diff --git a/{p} b/{p}\n+++ b/{p}\n+{after[p][:200]}\n"
+                       for p in sorted(after) if before.get(p) != after[p])
+        return text[:limit]
+
+    async def checkout(self, project: int, sha: str) -> str:
+        full = self._known(project, sha)
+        if not full:
+            return NO_COMMIT
+        self.copies[project] = (full, dict(self.snapshots.get(project, {}).get(full, {})))
+        return ""
+
+    def _copied(self, project: int, sha: str) -> dict[str, str]:
+        full, files = self.copies.get(project, ("", {}))
+        if not full or full != sha:
+            raise FileNotFoundError(f"aucune copie du commit {sha[:12] or '?'} n'est posée")
+        return files
+
+    async def copy_tree(self, project: int, sha: str, path: str = ".") -> list[str]:
+        files = self._copied(project, sha)
+        self._check(path)
+        prefix = "" if path in (".", "") else path.strip("/") + "/"
+        return [f"{p} ({len(t.encode())} o)" for p, t in sorted(files.items())
+                if not prefix or p.startswith(prefix) or p == path.strip("/")]
+
+    async def copy_read(self, project: int, sha: str, path: str) -> str:
+        files = self._copied(project, sha)
+        self._check(path)
+        if path not in files:
+            raise FileNotFoundError(f"{path} n'existe pas dans le commit relu")
+        return files[path]
+
+    async def copy_run(self, project: int, sha: str, argv, *, timeout_s=None, views=()) -> RunResult:
+        self._copied(project, sha)
+        self.copy_ran.append((project, sha, tuple(argv)))
+        return RunResult(tuple(argv), 0, stdout="tests : ok\n")
+
+    async def discard(self, project: int) -> None:
+        if self.copies.pop(project, None) is not None:
+            self.discarded.append(project)
 
     # ── les vues des ateliers lus (ADR 0260) ──
     async def view(self, reader: int, target: int, *, fresh: bool = False) -> View:

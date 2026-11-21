@@ -17,6 +17,7 @@ import pytest
 
 from mika.adapters.maps import osm as om
 from mika.adapters.maps import places as pl
+from mika.adapters.maps import tags as osm_tags
 from mika.adapters.maps.config import PlacesConfig
 from mika.adapters.maps.desk import MapsDesk
 from mika.adapters.maps.hours import PARIS
@@ -337,3 +338,14 @@ def test_a_hit_carries_its_extras_only_when_known():
     assert extras(full) == {"osm": "n11", "open_state": "open", "open_text": "Ouvert · ferme à 23:00",
                             "cuisine": "Italienne", "rating": 4.5, "reviews": 612, "price": "€€", "photo": "p:abc",
                             "tags": ["terrasse"]}
+
+
+@pytest.mark.parametrize(("tags", "named"), [
+    ({"diet:vegan": "only"}, ("vegetarien", "vegan")), ({"diet:vegan": "yes"}, ("vegetarien", "vegan")),
+    ({"diet:vegan": "limited"}, ("vegetarien", "vegan")), ({"diet:vegetarian": "yes"}, ("vegetarien",)),
+    ({"diet:vegan": "no"}, ()), ({"diet:vegan": "only", "diet:vegetarian": "no"}, ("vegan",)),
+])
+def test_what_is_vegan_is_vegetarian_too(tags, named):
+    """R1-15 : « végétarien » écartait un lieu tagué ``diet:vegan=only`` sans ``diet:vegetarian`` (l'usage d'OSM pour
+    un lieu vegan) : tout plat vegan est végétarien. Un ``diet:vegetarian=no`` explicite reste ce qu'il dit."""
+    assert osm_tags.features_named(osm_tags.features_of(tags)) == named

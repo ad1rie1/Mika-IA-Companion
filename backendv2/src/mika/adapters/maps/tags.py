@@ -89,10 +89,15 @@ def read_kept(text: str) -> dict[str, str]:
 
 
 def features_of(tags: Mapping[str, str]) -> int:
+    """Les filtres que ces attributs vérifient (des bits) ; ce qui est vegan est végétarien aussi (OpenStreetMap ne tague
+    souvent qu'un ``diet:vegan=only``), sauf un ``diet:vegetarian=no`` explicite."""
     mask = 0
     for bit, key, values in FEATURE_RULES.values():
         if str(tags.get(key, "")).strip().lower() in values:
             mask |= bit
+    vegetarian, vegan = FEATURE_RULES["vegetarien"][0], FEATURE_RULES["vegan"][0]
+    if mask & vegan and str(tags.get("diet:vegetarian", "")).strip().lower() != "no":
+        mask |= vegetarian
     return mask
 
 

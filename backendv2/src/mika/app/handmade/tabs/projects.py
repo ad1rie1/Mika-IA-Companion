@@ -1,11 +1,13 @@
 """Activité › Projets : ses onglets, chacun dans sa forme (ADR 0177). « Créer un projet », l'action de la destination,
 reste dans la barre de titre, à droite, sur chacun d'eux (``head_actions``).
 
-- Ses projets : ses projets en chiffres (ce qui attend ton accord en tête quand il y en a), puis une liste, une
-  rangée par projet sous des colonnes nommées — son nom et où il en est (une ligne), son mode et son état, ses
-  objectifs en jauge, sa prochaine exécution et la dernière, pour qui ; le reste (priorité, plage, agenda, outils,
-  dépôt, ce qui sort) replié sous la rangée. La bascule « Fiches / Tableau » et la pagination restent celles de la
-  console.
+- Ses projets, la page d'ensemble (ADR 0281) : « À faire » en tête — ce qui t'attend dans tous ses projets, dans
+  l'ordre où s'en occuper, chaque ligne nommant son projet et menant là où elle se règle —, ses projets en chiffres
+  (ce qui t'attend en tête quand il y en a), puis une liste, une rangée par projet sous des colonnes nommées — son
+  nom et où il en est (une ligne), son mode et son état, combien de choses t'y attendent, ses objectifs en jauge, sa
+  prochaine exécution et la dernière, pour qui ; le reste (priorité, plage, agenda, outils, dépôt, ce qui sort)
+  replié sous la rangée ; enfin les liens entre projets : qui lit qui, ce que le lien donne, les demandes en cours.
+  La bascule « Fiches / Tableau » et la pagination restent celles de la console.
 - Exécutions : ce qui tourne en ce moment, puis le fil de ses exécutions jour par jour — le projet et l'objectif
   visé, le verdict et sa preuve, le compte rendu cité, le commit laissé dans l'atelier, l'épisode (prompt, outils,
   appels). Une exécution se met en forme par ``run``, que l'onglet Exécutions de la fiche d'un projet partage
@@ -17,17 +19,33 @@ reste dans la barre de titre, à droite, sur chacun d'eux (``head_actions``).
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Any
 
 from markupsafe import Markup
 
-from mika.app.handmade.tabs import Got, Line, Tab, blank, gauge, instant, raw_lines, rest, text, tiles
+from mika.app.handmade.tabs import (
+    Got,
+    Line,
+    Tab,
+    blank,
+    gauge,
+    instant,
+    lines,
+    raw_lines,
+    rest,
+    text,
+    tiles,
+)
 from mika.app.handmade.tabs.decisions import by_day
 
 STYLES = ("handmade/projets.css",)
+#: le chiffre de ce qui attend quelqu'un, et les tables que la page d'ensemble pose autour de la liste (les titres
+#: de la vue : ``projects.inspect_todo.EVERYWHERE_TITLE``, ``projects.inspect.LINKED_TITLE``)
+WAITING, TODO_TITLE, LINKED_TITLE = "T'attendent", "À faire", "Dépendances entre projets"
 #: les chiffres de la liste, dans l'ordre de la bande (ce qui attend ton accord passe devant quand il y en a)
-FIGURES = ("Actifs", "En pause", "Objectifs", "Exécutions (24 h)", "Attendent ton accord", "Archivés")
+FIGURES = ("Actifs", "En pause", "Objectifs", "Exécutions (24 h)", WAITING, "Archivés")
 #: ce que la liste replie dans le détail d'un projet, que la page montre déjà
 SHOWN = ("priorité", "plage de travail", "agenda", "outils", "dépôt distant", "ce qui sort")
 
@@ -43,6 +61,7 @@ def _project(line: Line) -> dict[str, Any]:
     state, where = line.get("état"), line.get("où il en est")
     return {"title": line["projet"], "href": line.href, "mode": line.get("mode"), "state": state,
             "waiting": line.tone == "warn", "archived": line.tone == "muted",
+            "awaits": _cell(line.get("t'attend")),
             "who": _cell(line.get("pour qui")), "goals": gauge(line.get("objectifs")),
             "goals_text": line.text("objectifs"), "next": _cell(line.get("prochaine exécution")),
             "last": _cell(line.get("dernière")), "where": "" if blank(where) else text(where),
@@ -56,11 +75,31 @@ def tous(got: Got) -> Markup | None:
     if t is None:
         return None
     s = tiles(got.stats())
-    waiting = s.get("Attendent ton accord")
-    order = (("Attendent ton accord",) if waiting and text(waiting.get("value")) not in ("0", "") else ()) + FIGURES
+    waiting = s.get(WAITING)
+    order = ((WAITING,) if waiting and text(waiting.get("value")) not in ("0", "") else ()) + FIGURES
     band = {"t": "stats", "title": "", "items": [s[label] for label in dict.fromkeys(order) if label in s]}
+    todo = got.table(TODO_TITLE)
+    linked = got.table(LINKED_TITLE)
+    # les liens entre projets, une ligne chacun (une table à quatre colonnes s'écrase sur un écran étroit)
+    links = [{"reader": x.get("le projet"), "target": x.get("lit"), "gives": x.text("ce qu'il en reçoit"),
+              "off": x.tone == "muted", "asks": _cell(x.get("ses demandes"))} for x in lines(linked)]
     return got.draw("handmade/projets/tous.html", t=t, band=band, items=[_project(x) for x in got.lines("Projets")],
-                    notes=got.notes())
+                    notes=got.notes(), waiting=_waiting(todo), links=links,
+                    links_help=(linked or {}).get("caption", ""))
+
+
+def _waiting(t: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """« À faire » : une ligne par attente, avec son projet (``handmade/projets/_todo.html``)."""
+    if t is None:
+        return None
+    # combien attendent : une ligne peut en résumer plusieurs (les éléments d'une liste) — le titre de la table le
+    # dit alors ; sinon c'est le nombre de ses lignes, que la console a ôté du titre
+    counted = re.search(r"\((\d+)\)$", str(t.get("title") or ""))
+    return {"empty": t.get("empty", ""), "caption": t.get("caption", ""),
+            "count": int(counted.group(1)) if counted else int(t.get("count") or 0),
+            "items": [{"kind": x.get("quoi"), "text": x.text("de quoi il s'agit"), "since": x.get("depuis"),
+                       "who": x.get("attend"), "go": x.get("le geste"), "project": x.get("projet")}
+                      for x in lines(t)]}
 
 
 # ── Exécutions ────────────────────────────────────────────────────────────

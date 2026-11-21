@@ -1,0 +1,14 @@
+{
+  "places": [
+    {"id": "l22871", "name": "Magmatic", "kind": "restaurant", "kind_fr": "Restaurant", "category": "manger",
+     "lat": 50.63712, "lon": 3.06455, "town": "Lille", "distance_m": 240, "along_m": null, "osm": "n4021153781",
+     "open_state": "open", "open_text": "Ouvert · ferme à 22:30", "cuisine": "Pizza", "rating": 4.8,
+     "reviews": 15235, "price": "€€", "photo": "p:3f1c9a0e5b7d2c4e6f8a1b3c5d7e9f02",
+     "tags": ["terrasse", "vegetarien", "emporter"], "photo_source": "google", "photo_credit": "Camille R.",
+     "photo_credit_url": "https://www.google.com/maps/contrib/100000000000000000001"},
+    {"id": "l22918", "name": "Le Coq Hardi", "kind": "restaurant", "kind_fr": "Restaurant", "category": "manger",
+     "lat": 50.63689, "lon": 3.06392, "town": "Lille", "distance_m": 310, "along_m": null, "osm": "w45911888",
+     "cuisine": "Régionale"}
+  ],
+  "reviews": {"ready": true, "cells": 1, "loaded": 1, "oldest": 1795155120000, "note": ""}
+}

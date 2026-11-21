@@ -49,6 +49,8 @@ import fr.qwartz.mika.data.auth.Session
 import fr.qwartz.mika.data.files.MikaFileRefs
 import fr.qwartz.mika.data.settings.Settings
 import fr.qwartz.mika.ui.carte.CarteScreen
+import fr.qwartz.mika.ui.carte.EventFicheScreen
+import fr.qwartz.mika.ui.carte.PlaceFicheScreen
 import fr.qwartz.mika.ui.carte.TripScreen
 import fr.qwartz.mika.ui.chat.ChatScreen
 import fr.qwartz.mika.ui.chat.FilesScreen
@@ -235,6 +237,8 @@ private fun Screen(graph: AppGraph, stack: BackStack, shell: Shell) {
         // le tiroir depuis le tiroir ; la flèche quand un autre écran y mène
         is Route.Carte -> CarteScreen(graph, top, if (stack.routes.size <= 2) BarNav.DRAWER else BarNav.BACK)
         is Route.Trip -> TripScreen(graph, top)
+        is Route.PlaceFiche -> PlaceFicheScreen(graph, top)
+        is Route.EventFiche -> EventFicheScreen(graph, top)
         is Route.Phone -> PhoneScreen(graph, top.tab)
         is Route.PhoneThread -> PhoneThreadScreen(graph, top.key)
         // le tiroir depuis le tiroir ; la flèche quand un autre écran y mène (« Comment ça part » de Teams…)

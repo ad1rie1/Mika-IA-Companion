@@ -19,7 +19,8 @@ from mika.kernel.frame import Frame
 from mika.vocab.access import AT_OWNER, STEER_WORDS, situation, who_words
 from mika.vocab.rights import ProjectAllowance, Rights, closeness_of, project_allowance, rights_of
 
-__all__ = ["STEER_WORDS", "allowance", "lines", "of_frame", "reads", "sees", "shares_files", "steering", "who_named"]
+__all__ = ["STEER_WORDS", "allowance", "lines", "of_frame", "reads", "sees", "shares_docs", "shares_files", "steering",
+           "who_named"]
 
 
 def lines(p: Project | c.ProjectView) -> tuple[tuple[c.ProjectAccess, ...], c.ProjectAccess]:
@@ -76,6 +77,14 @@ def shares_files(p: Project | c.ProjectView, audience: Any, kind: str, frame: Fr
     rights, close = of_frame(frame)
     got = allowance(p, audience, kind, rights=rights, close=close)
     return got is not None and got.files
+
+
+def shares_docs(p: Project | c.ProjectView, audience: Any, kind: str, frame: Frame | None = None) -> bool:
+    """Peut-elle lui ouvrir la documentation de ce projet (ADR 0289) ? Sa colonne « documentation », sous le plafond
+    « fichiers » du canal : jamais dans un salon ni à une inconnue."""
+    rights, close = of_frame(frame)
+    got = allowance(p, audience, kind, rights=rights, close=close)
+    return got is not None and got.docs
 
 
 def who_named(frame: Frame | None, who: str | Sequence[str]) -> str:

@@ -210,6 +210,11 @@ class SettingsSection:
     #: ``fn(clé, entrée) -> {tags, lead, lead_label, facts, activity, activity_tone}``,
     #: ``handmade/reglages/enregistrements.html``) ; une description en panne retombe sur ses champs
     describe: Mapping[str, Callable[[str, Any], Mapping[str, Any]]] = field(default_factory=dict)
+    #: des correspondances de mêmes clés rangées dans la table d'une autre (chemin de la correspondance décrite → les
+    #: chemins posés à côté de son choix) : une colonne de plus par correspondance, pas une seconde table (l'effort
+    #: d'un rôle à côté de son fournisseur, ADR 0285). Sans table (``describe``) ou sur une autre page, elles
+    #: gardent leur place
+    beside: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     #: d'autres valeurs que celles en place, proposées par l'adresse (``fn(paramètres) -> valeur | None`` : un profil
     #: de tempérament, ``?profil=…``) : le formulaire s'ouvre sur elles, rien n'est enregistré
     prefill: Callable[[Mapping[str, str]], Any] | None = None

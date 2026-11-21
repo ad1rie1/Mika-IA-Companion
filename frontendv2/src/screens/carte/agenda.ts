@@ -10,7 +10,7 @@ import { h } from "../../shell/dom";
 import { ico } from "../../shell/icons";
 import { errorBlock } from "../../shared/kit";
 import { priceWords, themeWords } from "./fiche";
-import { coverageLine, photoImg } from "./sources";
+import { coverageLine, listThumb, photoImg, thumbRow } from "./sources";
 import { failedBlock, legendMarkup, type Where } from "./view";
 
 // ── Quand ────────────────────────────────────────────────────────────
@@ -25,14 +25,26 @@ function addDays(d: Date, n: number): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
 }
 
+/** Le jour qu'il est à Paris, l'heure des dates des événements (`protocole-moi.md` § 10). */
+const PARIS_DAY = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit" });
+
 /**
- * Les jours d'une recherche, `AAAA-MM-JJ` (à l'heure locale) : aujourd'hui ; ce week-end (le samedi et le dimanche qui
- * viennent — un samedi, lui et demain ; un dimanche, lui seul) ; cette semaine (jusqu'au dimanche ; un dimanche, la
- * semaine qui vient) ; des dates (celles qu'on a choisies, remises dans l'ordre ; une seule : ce jour-là).
+ * Aujourd'hui à Paris, quel que soit le fuseau du navigateur (R2-W10) : ce jour du calendrier, à minuit de l'heure
+ * locale — la date que le serveur lit (`start`, `end`), et la tête « Aujourd'hui » de la liste.
+ */
+export function parisToday(now: number): Date {
+  const parts = Object.fromEntries(PARIS_DAY.formatToParts(new Date(now)).map((x) => [x.type, x.value]));
+  return new Date(Number(parts.year), Number(parts.month) - 1, Number(parts.day));
+}
+
+/**
+ * Les jours d'une recherche, `AAAA-MM-JJ` (à l'heure de Paris, celle des événements) : aujourd'hui ; ce week-end (le
+ * samedi et le dimanche qui viennent — un samedi, lui et demain ; un dimanche, lui seul) ; cette semaine (jusqu'au
+ * dimanche ; un dimanche, la semaine qui vient) ; des dates (celles qu'on a choisies, remises dans l'ordre ; une seule :
+ * ce jour-là).
  */
 export function whenRange(kind: WhenKind, now: number, dates: { start: string; end: string } = { start: "", end: "" }): { start: string; end: string } {
-  const t = new Date(now);
-  const today = new Date(t.getFullYear(), t.getMonth(), t.getDate());
+  const today = parisToday(now);
   const dow = today.getDay(); // 0 : dimanche
   if (kind === "today") return { start: isoOf(today), end: isoOf(today) };
   if (kind === "weekend") {
@@ -65,8 +77,7 @@ export function eventDayOf(e: Pick<EventItem, "start">): string {
 export function dayHeading(iso: string, now: number): string {
   const d = isoDay(iso);
   if (!d) return "Plus tard";
-  const t = new Date(now);
-  const today = new Date(t.getFullYear(), t.getMonth(), t.getDate());
+  const today = parisToday(now);
   const diff = Math.round((d.getTime() - today.getTime()) / 86_400_000);
   const year = d.getFullYear() !== today.getFullYear() ? ` ${d.getFullYear()}` : "";
   const day = `${WEEKDAYS[d.getDay()]} ${d.getDate() === 1 ? "1er" : d.getDate()} ${MONTHS[d.getMonth()]}${year}`;
@@ -164,23 +175,36 @@ export interface EventsView {
   map: string;
 }
 
-/** La ligne d'un événement : son nom, son quand et son lieu, son prix, sa distance, une vignette s'il a une photo. */
+/**
+ * La ligne d'un événement : son nom, son quand et son lieu, son prix, sa distance, une vignette s'il a une photo dont on
+ * sait l'auteur — cité juste dessous, avec sa licence (R2, ADR 0269).
+ */
 export function eventItem(e: EventItem, o: { on: boolean; mika: boolean; themes: ReadonlyMap<string, string>; seen: (ref: string) => boolean; inDay: boolean }): string {
   const dist = typeof e.distance_m === "number" ? km(e.distance_m) : "";
   const theme = themeWords({ themes: e.themes.slice(0, 1) }, o.themes);
   const when = o.inDay ? whenInDay(e) : e.when_text;
   const line = [theme, when, e.place].map((x) => x?.trim()).filter(Boolean).join(" · ");
   const price = priceWords(e);
-  const img = e.photo ? photoImg(e.photo, "", o.seen) : "";
+  const thumb = listThumb(e);
+  const img = thumb ? photoImg(thumb.ref, "", o.seen) : "";
   const lead = img ? `<span class="pl-thumb">${img}</span>` : `<span class="pl-dot${o.mika ? " mika" : ""}">${ico("calendar", "xs")}</span>`;
-  return `<button class="li place ev${o.on ? " on" : ""}${o.mika ? " by-mika" : ""}" type="button" data-ev="${h(e.id)}">${lead}
+  return thumbRow(`<button class="li place ev${o.on ? " on" : ""}${o.mika ? " by-mika" : ""}" type="button" data-ev="${h(e.id)}">${lead}
     <span class="li-main"><span class="li-top"><span class="li-title">${h(e.name || "—")}</span>${dist ? `<span class="pl-dist">${h(dist)}</span>` : ""}</span>
     ${line ? `<span class="li-snip">${h(line)}</span>` : ""}
-    ${price || o.mika ? `<span class="li-snip${e.free ? " ok-txt" : ""}">${h(price)}${o.mika ? `${price ? " · " : ""}<b class="mika-txt">repéré par Mika</b>` : ""}</span>` : ""}</span></button>`;
+    ${price || o.mika ? `<span class="li-snip${e.free ? " ok-txt" : ""}">${h(price)}${o.mika ? `${price ? " · " : ""}<b class="mika-txt">repéré par Mika</b>` : ""}</span>` : ""}</span></button>`,
+  img ? thumb : null, o.mika);
+}
+
+/**
+ * La fiche ouverte est-elle de ce que Mika a trouvé (R2-W05) ? Seulement si l'événement est dans son regard : un autre,
+ * ouvert depuis un autre onglet (la fiche d'un lieu, « Bientôt, tout près »), n'est pas le sien.
+ */
+export function ficheIsHers(regard: { events: readonly Pick<EventItem, "id">[] } | null, id: string | null): boolean {
+  return !!regard && !!id && regard.events.some((e) => e.id === id);
 }
 
 function chip(attr: string, value: string, label: string, on: boolean, icon = ""): string {
-  return `<button type="button" class="cat${on ? " on" : ""}" ${attr}="${h(value)}" aria-pressed="${on}">${icon}${h(label)}</button>`;
+  return `<button type="button" class="cat flt${on ? " on" : ""}" ${attr}="${h(value)}" aria-pressed="${on}">${icon}${h(label)}</button>`;
 }
 
 function listMarkup(v: EventsView): string {

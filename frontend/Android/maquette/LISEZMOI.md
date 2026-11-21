@@ -8,10 +8,17 @@ l'app (ADR 0235). Les écarts de l'app avec elle, et pourquoi, sont dans `fronte
 sur Téléphone : ni onglet Notifications, ni sélecteur de téléphone). Ses écrans ne se retouchent plus ; son sprite
 d'icônes (`index.html`) reste la source de celles de l'app (`tools/icones.py`) : une icône neuve s'y ajoute.
 
-**Proposé le 2026-11-17, à valider** : la fiche d'un lieu (notes et avis Tripadvisor, infos pratiques d'OpenStreetMap,
-ce qu'en dit l'office de tourisme, photos) et un onglet Événements (DATAtourisme), dans `ecrans/carte-avis.js` :
+**Proposé le 2026-11-17** (Google Maps à la place de Tripadvisor depuis le 2026-11-20, ADR 0256 ; fait dans l'app,
+lot L6 : `frontend/Android/README.md`, « Carte ») : la fiche d'un lieu (la note et les avis de Google Maps — sans
+répartition ni sous-notes, chaque avis avec son auteur, son lien et sa date —, infos pratiques d'OpenStreetMap, ce qu'en
+dit l'office de tourisme, photos) et un onglet Événements (DATAtourisme), dans `ecrans/carte-avis.js` :
 `#carte/manger`, `#carte/fiche/atelier`, `#carte/fiche/reblochon`, `#carte/evenements`, `#carte/evenement/poulenc`.
 Les événements sont les vrais, tirés de l'API DATAtourisme le 17 novembre ; les restaurants et leurs avis sont inventés.
+
+**Proposé le 2026-11-21, pas encore validé** : l'effort de réflexion dans le chat, dans `ecrans/chat-effort.js`, posé
+par-dessus l'écran Chat sans le retoucher. Le menu ⋮ gagne « Effort de réflexion · auto », qui ouvre une feuille (Auto,
+ou forcé à un niveau) : pour toute la conversation, ou, en mode pro, pour le fil ouvert (aussi dans « Régler ce fil »).
+Forcé, il se voit dans le champ, à côté de « Pro ». Routes : `#chat/effort`, `#chat/pro/effort`.
 
 ## L'ouvrir
 

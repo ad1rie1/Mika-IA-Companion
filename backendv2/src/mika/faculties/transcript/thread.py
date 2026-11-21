@@ -193,6 +193,61 @@ def _kept(text: Any) -> str | None:
 TRANSCRIPT.projector(c.STRANDS_TABLE, version=1, tier=Tier.T0, types=[c.STRAND_SET])(Strands)
 
 
+class Efforts:
+    """T0 : l'effort de réflexion forcé pour une conversation ou un fil de travail
+    (``contracts.transcript.efforts_table``, ADR 0287) ; le dernier réglage vaut, « auto » retire la ligne."""
+
+    def create(self, sql: Sql, sfx: str) -> None:
+        sql.create(c.efforts_table(sfx))
+
+    def drop(self, sql: Sql, sfx: str) -> None:
+        sql.drop(c.efforts_table(sfx))
+
+    def apply(self, sql: Sql, events: Sequence[Any], sfx: str) -> None:
+        t = c.efforts_table(sfx)
+        for e in events:
+            if e.type.name != c.EFFORT_SET.name:
+                continue
+            person, strand = fit(e.data.person, HANDLE_MAX), fit(e.data.strand, c.STRAND_MAX)
+            if e.data.effort:
+                upsert(sql, t, {"person": person, "strand": strand, "at": e.at,
+                                "effort": fit(e.data.effort, c.EFFORT_MAX)}, keys=["person", "strand"])
+            else:
+                sql.execute(delete(t).where(t.c.person == person, t.c.strand == strand))
+
+    def forget(self, sql: Sql, subject: str, sfx: str) -> None:
+        t = c.efforts_table(sfx)
+        sql.execute(delete(t).where(t.c.person == fit(subject, HANDLE_MAX)))
+
+
+TRANSCRIPT.projector(c.EFFORTS_TABLE, version=1, tier=Tier.T0, types=[c.EFFORT_SET])(Efforts)
+
+
+def efforts_of(store: Any, handle: str) -> dict[str, str]:
+    """L'effort de réflexion que ``handle`` a forcé (ADR 0287) : par fil de travail, et sous la clé vide pour toute
+    sa conversation. Ce qui est en « auto » n'y est pas."""
+    t = c.efforts_table()
+    return {str(strand): str(effort)
+            for strand, effort in store.query_mind(select(t.c.strand, t.c.effort).where(t.c.person == handle))}
+
+
+def effort_for(store: Any, handle: str, strand: str | None) -> str:
+    """L'effort forcé là où ``handle`` écrit (ADR 0287) : celui de ce fil de travail, sinon celui de toute sa
+    conversation ; « » : rien de forcé."""
+    forced = efforts_of(store, handle)
+    return forced.get(strand or "") or forced.get("", "")
+
+
+def asked_effort(store: Any, req: Any) -> str:
+    """L'effort de réflexion d'un épisode, tel que le lanceur le demande à la composition (ADR 0287) : celui que la
+    personne a forcé là où elle a écrit — seulement pour la réponse à un de ses messages, en privé. Une initiative,
+    un salon, un travail de fond : rien (« »), le rôle décide."""
+    target = getattr(req, "target", None)
+    if not target or getattr(req, "reply_to", None) is None or getattr(req, "room", None):
+        return ""
+    return effort_for(store, target, getattr(req, "strand", None))
+
+
 def _columns() -> list[Any]:
     t = c.thread_table()
     return [t.c[n] for n in _COLUMNS]

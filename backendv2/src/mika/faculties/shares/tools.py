@@ -37,7 +37,7 @@ from mika.kernel.faculty import ToolResult
 from mika.kernel.frame import Audience, Frame
 from mika.kernel.guards import Superseded
 from mika.kernel.inspect import num_fr
-from mika.ports.workshop import OutsideWorkshop
+from mika.ports.workshop import OutsideWorkshop, hidden_path
 from mika.vocab.access import ACCOUNT, AT_OWNER, situation
 from mika.vocab.days import when_fr
 from mika.vocab.episodes import CONVERSATIONAL, Kind, is_work_target
@@ -342,7 +342,7 @@ async def share_project_file(args: ProjectFileArgs, ctx: Any) -> Any:
     parts = [x for x in path.split("/") if x]
     if not parts or any(x == ".." for x in parts):
         return ToolResult(ok=False, content=phrase("shares.tools.share_project_file.give_path"))
-    if any(x.startswith(".") for x in parts):
+    if hidden_path(path):
         return ToolResult(ok=False, content=phrase("shares.tools.share_project_file.hidden"))
     if atelier is None or not atelier.exists(v.id):
         return ToolResult(ok=False, content=phrase("shares.tools.share_project_file.missing"))
@@ -359,8 +359,10 @@ async def share_project_file(args: ProjectFileArgs, ctx: Any) -> Any:
     if refused is not None:
         return refused
     name, mime, kind = project_name(parts[-1])
+    # ses sujets pour l'oubli : de qui parle le projet, et les personnes des projets qu'il lit (``read_about`` : ce
+    # fichier peut reprendre ce qu'il en a lu) — qui peut le recevoir s'est jugé sur ``about`` seul (``may_share``)
     return await _send(ctx, target, person, name=name, mime=mime, data=data, kind=kind, origin=c.PROJECT,
-                       level=v.written, project=v.id, path="/".join(parts), about=v.about)
+                       level=v.written, project=v.id, path="/".join(parts), about=(*v.about, *v.read_about))
 
 
 # ── Relire ce qu'elle a envoyé ────────────────────────────────────────────

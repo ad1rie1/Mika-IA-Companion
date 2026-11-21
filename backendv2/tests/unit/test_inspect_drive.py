@@ -64,7 +64,7 @@ VIEWS = {("affect", "humeur"): "Humeur", ("affect", "postures"): "Postures", ("b
          ("goals", "clos"): "Clos", ("goals", "resume"): "Résumé",
          ("goals", "politique"): "Cadre et réglages", ("goals", "decisions"): "Décisions",
          ("projects", "tous"): "Ses projets", ("projects", "toutes_executions"): "Exécutions",
-         ("projects", "toutes_decisions"): "Décisions techniques", ("projects", "apercu"): "Vue d'ensemble"}
+         ("projects", "toutes_decisions"): "Décisions techniques", ("projects", "apercu"): "Où il en est"}
 SERIES = {"affect.valence": (-1.0, 1.0), "affect.eveil": (-1.0, 1.0), "body.energie": (0.0, 1.0),
           "body.pression": (0.0, 1.0), "needs.social": (0.0, 1.0), "needs.expression": (0.0, 1.0),
           "needs.curiosite": (0.0, 1.0)}

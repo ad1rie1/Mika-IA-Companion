@@ -222,7 +222,7 @@
 .prj-side-help { margin: -4px 0 14px; color: var(--text-2); font-size: 12.5px; line-height: 1.5; }
 .prj-side .form > p.muted { margin: 0 0 4px; font-size: 12.5px; }
 
-/* Un projet › Comportement et outils (app/handmade/subjects/project.py, gabarit fiche_comportement.html) : le gabarit du
+/* Un projet › Cadre (app/handmade/subjects/project.py, gabarit fiche_comportement.html, ADR 0281) : le gabarit du
    paramétrage (.hm-form de base.css et console.css : une ligne par réglage, « Enregistrer » collé en bas), sans cadre
    dans la carte ; ses réglages en lecture quand il est archivé ; ses outils — la table des lots, « Choisir ses outils »
    en colonne à côté sur un grand écran (.prj-split). */
@@ -263,4 +263,81 @@
   .prj-out-top { grid-template-columns: minmax(0, 1fr) auto; }
   .prj-out-what { grid-column: 1 / -1; grid-row: 2; }
   .prj-out-item > :not(.prj-out-top) { margin-left: 0; }
+}
+
+/* La fiche d'un projet rangée par ce qu'on y fait (ADR 0281).
+   « Ce qui t'attend » (gabarit _todo.html, sur « Où il en est » et sur « Ses projets ») : une ligne par attente — sa
+   sorte en étiquette, de quoi il s'agit, depuis quand et à qui la main, le bouton de son geste à droite ; sur un écran
+   étroit, le bouton passe sous le texte. Sans attente, une seule ligne discrète. */
+.prj-todo { border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); }
+.prj-todo-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.prj-todo-item { display: grid; grid-template-columns: 124px minmax(0, 1fr) auto; align-items: start; gap: 4px 14px;
+  padding: 9px 0; border-top: 1px solid var(--border); }
+.prj-todo-item:first-child { padding-top: 2px; border-top: 0; }
+.prj-todo-kind .now-tag { white-space: nowrap; }
+.prj-todo-body { display: grid; gap: 2px; min-width: 0; }
+.prj-todo-project { color: var(--text-2); font-weight: 600; }
+.prj-todo-project a { color: inherit; }
+.prj-todo-more { border-top: 1px solid var(--border); }
+.prj-todo-more > summary { padding: 9px 0 2px; color: var(--accent); cursor: pointer; font-size: 12.5px; }
+.prj-todo-more[open] > summary { color: var(--muted); }
+.prj-todo-text { max-width: 110ch; margin: 0; font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+.prj-todo-meta { display: flex; flex-wrap: wrap; margin: 0; color: var(--muted); font-size: 12px; }
+.prj-todo-meta > span:not(:last-child)::after { content: "·"; margin: 0 8px; }
+.prj-todo-go { align-self: center; white-space: nowrap; }
+.prj-todo-none { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text-2); font-size: 13px; }
+.prj-todo-none .now-dot { --sw: var(--ok); flex: none; }
+@media (max-width: 720px) {
+  .prj-todo-item { grid-template-columns: minmax(0, 1fr); }
+  .prj-todo-go { justify-self: start; white-space: normal; }
+}
+
+/* « Où il en est » : ses deux sous-onglets ; « En bref » empile ses cartes, ses missions et ses objectifs en cours
+   côte à côte sur un grand écran, une ligne chacun (leur numéro, leur texte, leurs faits, la jauge de leurs jalons). */
+.prj-ov-brief, .prj-ov-objectives, .prj-frame-pane, .prj-git-branches-pane { display: grid; gap: 16px; min-width: 0; }
+.prj-ov-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 16px;
+  align-items: start; }
+.prj-ov-pair > * { min-width: 0; }
+.prj-lines { display: grid; margin: 0; padding: 0; list-style: none; }
+.prj-line { display: grid; gap: 4px; min-width: 0; padding: 10px 0; border-top: 1px solid var(--border); }
+.prj-line:first-child { padding-top: 0; border-top: 0; }
+.prj-line-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.prj-line-title { min-width: 0; color: var(--text); font-size: 14px; font-weight: 550; line-height: 1.4; overflow-wrap: anywhere; }
+.prj-line-title:hover { color: var(--accent); text-decoration: none; }
+.prj-line-n { display: inline-block; min-width: 22px; margin-right: 8px; padding: 0 4px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); color: var(--accent); font-size: 11.5px; font-weight: 650; text-align: center; }
+.prj-line.danger .prj-line-n { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); color: var(--danger); }
+.prj-line-marks { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; margin: 0; color: var(--text-2);
+  font-size: 12.5px; line-height: 1.5; }
+.prj-line-dl { display: grid; gap: 2px; margin: 0; color: var(--text-2); font-size: 12.5px; line-height: 1.5; }
+.prj-line-dl > div { display: grid; grid-template-columns: 108px minmax(0, 1fr); gap: 10px; }
+.prj-line-dl dt { color: var(--muted); }
+.prj-line-dl dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.prj-line-dl .stirred dd { color: var(--accent); }
+.prj-line-marks .now-bar { flex: none; width: 96px; margin: 0; }
+.prj-line-marks .now-bar .fill { stroke: var(--ok); }
+
+/* « Missions et objectifs » : le filtre en bouton à choix dans l'en-tête de la liste, un titre par sorte. */
+.prj-obj-head { flex-wrap: wrap; row-gap: 8px; }
+.prj-obj-seg { margin-left: auto; }
+.prj-group { display: flex; align-items: baseline; gap: 8px; margin: 18px 0 0; }
+.prj-group.first { margin-top: 0; }
+.prj-group-help { margin: 2px 0 6px; color: var(--text-2); font-size: 12.5px; }
+.prj-fiche .prj-entries + .prj-group { padding-top: 16px; border-top: 1px solid var(--border); }
+
+/* « Liens entre projets », sous la liste (ADR 0281) : une ligne par lien — qui lit qui, ce que le lien donne, la demande
+   en cours ; sur un écran étroit, la ligne s'empile. */
+.prj-linked-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.prj-linked-item { display: grid; grid-template-columns: minmax(220px, 30%) minmax(0, 1fr) auto; align-items: baseline;
+  gap: 4px 20px; padding: 10px 0; border-top: 1px solid var(--border); font-size: 13.5px; }
+.prj-linked-item:first-child { padding-top: 2px; border-top: 0; }
+.prj-linked-item > p { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.prj-linked-pair { font-weight: 550; }
+.prj-linked-verb { color: var(--muted); font-weight: 400; }
+.prj-linked-gives { color: var(--text-2); }
+.prj-linked-item.off .prj-linked-gives { color: var(--warn); }
+.prj-linked-asks { white-space: nowrap; }
+@media (max-width: 860px) {
+  .prj-linked-item { grid-template-columns: minmax(0, 1fr); }
+  .prj-linked-asks { white-space: normal; }
 }

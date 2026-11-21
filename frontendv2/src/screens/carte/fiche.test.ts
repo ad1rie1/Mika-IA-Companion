@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { EventFiche, PlaceFiche, ReviewsPart } from "../../api/carte";
 import { ApiError } from "../../api/moi";
-import { eventFicheMarkup, googleBlock, photoBand, placeFicheMarkup, viewerMarkup, type EventFicheView, type PlaceFicheView } from "./fiche";
+import { eventFicheMarkup, googleBlock, photoBand, placeFicheMarkup, priceWords, viewerMarkup, type EventFicheView, type PlaceFicheView } from "./fiche";
 import {
   countWords,
   coverageLine,
@@ -198,6 +198,15 @@ describe("la fiche d'un lieu", () => {
     expect(html).not.toMatch(/Excellent|Très bon|Rapport qualité|Tripadvisor/);
   });
 
+  it("un long avis se replie, « Lire la suite » le déplie ; un court, non", () => {
+    const long = googleBlock(google({ reviews: [{ ...google().reviews[0], text: "Très bien. ".repeat(60) }] }), { refreshing: false, refreshNote: "", now: NOW });
+    expect(long).toContain('class="g-review long"');
+    expect(long).toContain("data-review-more");
+    expect(long).toContain("Lire la suite");
+    const short = googleBlock(google(), { refreshing: false, refreshNote: "", now: NOW });
+    expect(short).not.toContain("data-review-more");
+  });
+
   it("un avis, un nom, un résumé, un crédit qui portent du HTML restent du texte ; un lien javascript: n'est pas un lien", () => {
     const r = google({
       summary: EVIL,
@@ -371,6 +380,9 @@ describe("la fiche d'un événement", () => {
     }) }));
     expect(html).toContain('data-photo="0"');
     expect(html).toContain("Office de Roubaix");
+    // sa licence, dans la bande même, à côté de son auteur — pas seulement dans la visionneuse (R2-W03, R2-W11)
+    const band = html.slice(html.indexOf('class="ph-wrap"'), html.indexOf("fiche-tags") > 0 ? html.indexOf("fiche-tags") : undefined);
+    expect(band).toContain("Office de Roubaix · CC BY-SA 4.0");
     expect(html).not.toContain("<script>");
     expect(html).not.toContain("javascript:");
     expect(html).not.toContain("#carte/explorer/lieu-"); // pas un lieu de l'index : pas de lien
@@ -379,6 +391,12 @@ describe("la fiche d'un événement", () => {
   it("gratuit, plus là, en lecture", () => {
     const free = eventFicheMarkup(eventView({ fiche: eventFiche({ event: { ...eventFiche().event, free: true, price: "Entrée libre" } }) }));
     expect(free).toContain("Gratuit · Entrée libre");
+    // ses tarifs le disent déjà : pas deux fois
+    expect(priceWords({ free: true, price: "Gratuit - Entrée libre dans le hall du musée" })).toBe("Gratuit - Entrée libre dans le hall du musée");
+    expect(priceWords({ free: true, price: "gratuit" })).toBe("Gratuit");
+    expect(priceWords({ free: true, price: "" })).toBe("Gratuit");
+    expect(priceWords({ free: null, price: "" })).toBe("");
+    expect(priceWords({ free: false, price: "10 €" })).toBe("10 €");
     expect(eventFicheMarkup(eventView({ fiche: null, gone: true, error: new ApiError(404, "Introuvable.") }))).toContain("Cet événement n'est plus là");
     expect(eventFicheMarkup(eventView({ fiche: null, event: eventFiche().event, loading: true }))).toContain("Lecture de la fiche…");
   });

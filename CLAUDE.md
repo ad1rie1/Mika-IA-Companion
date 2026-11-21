@@ -179,6 +179,8 @@ ou ajouter une faculté : ARCHITECTURE.md, « Écrire une faculté ».
   - `tools/banc_conversation` (ADR 0112) fait vivre des conversations au vrai noyau (Sonnet par la CLI, effort high),
     face à un Adrien simulé (Haiku), jugées par Opus : un score sur 100, des scénarios réservés, chaque mesure sur une
     copie figée du code (`--variante`, `--profil`, `--voix api:sonnet`). Tout changement de sa voix s'y mesure.
+    `balises.py MESURE…` relit, sans appel au modèle, les balises d'émotion d'une mesure et dit combien de réponses
+    « marquent » aux seuils du jour (ADR 0283) : à refaire quand le modèle de sa voix change.
   - `tools/banc_travail` (ADR 0145) mesure le travail sur un projet demandé, au regard de la demande :
     - le vrai noyau, avec la voix en Opus par la CLI ;
     - une Adrien simulée (Haiku) qui suit une fiche d'intention cachée ;

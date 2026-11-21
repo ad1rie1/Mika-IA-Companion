@@ -106,6 +106,29 @@ async def test_two_calls_at_once_never_both_pass_under_the_cap(tmp_path):
     assert rig.api.calls(gp.MEDIA) == 1 and used(rig, PHOTO) == 1
 
 
+def day_used(rig: gp.Rig) -> int:
+    return next(w.used for w in rig.client.limiter.status().windows if w.name == DAY)
+
+
+async def test_a_call_held_by_its_month_does_not_count_in_the_day(tmp_path):
+    """R1-04 : le mois des photos atteint, chaque vignette redemandée inscrivait un appel qui n'était jamais parti
+    dans les 24 heures de tout Google — les fiches et les recherches finissaient refusées, leurs mois intacts. Un appel
+    retenu par son mois ne coûte rien ailleurs, même quand deux partent au même instant."""
+    rig = gp.rig(tmp_path, cfg=config(photos_per_month=0, per_day=2, reserve_pct=0))
+    for _ in range(3):
+        with pytest.raises(QuotaExceeded) as caught:
+            await rig.client.photo_uri(PHOTO_NAME)
+        assert caught.value.window == MONTH
+    assert day_used(rig) == 0 and rig.api.calls(gp.MEDIA) == 0
+    await rig.client.details(gp.BELLEZZA)
+    await rig.client.nearby(*gp.GRAND_PLACE, 500, "manger")
+    assert day_used(rig) == 2
+    other = gp.rig(tmp_path / "deux", cfg=config(photos_per_month=1, reserve_pct=0))
+    await asyncio.gather(other.client.photo_uri(PHOTO_NAME), other.client.photo_uri(PHOTO_NAME),
+                         return_exceptions=True)
+    assert day_used(other) == 1 and other.api.calls(gp.MEDIA) == 1
+
+
 async def test_background_work_leaves_the_reserve_to_what_a_person_opens(tmp_path):
     rig = gp.rig(tmp_path, cfg=config(searches_per_month=10, reserve_pct=30))
     for _ in range(7):

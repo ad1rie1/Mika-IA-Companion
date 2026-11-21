@@ -115,6 +115,9 @@ def test_an_evening_greeting_after_a_day_of_daydreams_has_nothing_finished_to_te
         # ses rêveries se montrent comme ce qu'elles sont — rien de neuf —, jamais comme une nouvelle ; ce qu'elle en
         # fait est à elle (le code ne les tait plus en initiative)
         assert all("une rêverie, rien de neuf" in line for line in prompt.splitlines() if "Rêvasser" in line)
+        # la même rêverie, reprise dans la journée, ne se dit qu'une fois (ADR 0266)
+        mused = [line.split("(«", 1)[1] for line in prompt.splitlines() if "tu as laissé ton esprit vagabonder" in line]
+        assert len(mused) == len(set(mused))
 
 
 def test_a_real_exploration_stays_something_to_tell_and_lifts_her_a_little(tmp_path):

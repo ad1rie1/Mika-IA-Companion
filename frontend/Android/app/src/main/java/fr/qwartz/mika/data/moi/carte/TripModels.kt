@@ -65,7 +65,8 @@ data class RegardRoute(
 /**
  * Ce qu'elle a cherché (`look`) ou montré (`map`) pour toi (`GET /api/moi/carte/regards/<seq>`), la note d'un de ses
  * messages : [what] `lieux` ou `trajet` (un regard), vide pour une carte ; [trip] : le voyage qu'elle montrait, s'il
- * est encore là. Ses lieux sont ce qu'elle en a gardé (un point nommé n'a ni sorte ni distance).
+ * est encore là. Ses lieux sont ce qu'elle en a gardé (un point nommé n'a ni sorte ni distance). Des événements qu'elle
+ * a trouvés (ADR 0259) : [what] `evenements`, [events], et ses lieux vides (l'onglet Événements l'ouvre).
  */
 @Serializable
 data class Regard(
@@ -76,14 +77,19 @@ data class Regard(
     val route: RegardRoute? = null,
     val trip: String = "",
     val at: Long = 0,
+    val events: List<EventItem> = emptyList(),
 ) {
     /** Elle a calculé un trajet (Itinéraire l'ouvre). */
     val isRoute: Boolean get() = kind == KIND_LOOK && what == WHAT_ROUTE
+
+    /** Elle a cherché des événements (l'onglet Événements l'ouvre). */
+    val isEvents: Boolean get() = what == WHAT_EVENTS
 
     companion object {
         const val KIND_LOOK = "look"
         const val KIND_MAP = "map"
         const val WHAT_ROUTE = "trajet"
+        const val WHAT_EVENTS = "evenements"
     }
 }
 

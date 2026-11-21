@@ -2,8 +2,8 @@
 
 Ce document est pour qui écrit un client de tous les jours, `frontendv2/` ou l'application Android (ADR 0235) : ce qu'il montre à la personne connectée,
 et seulement à elle — ses boîtes, ses comptes Teams, ses téléphones, ses services, ce qu'on lui partage, ses droits, sa
-carte et ses voyages. Les décisions et leurs raisons sont les ADR 0187 à 0192 de [`decisions.md`](decisions.md) (et,
-pour la carte, 0193 à 0196 et 0229) ; le code fait foi dans
+carte et ses voyages, ses projets. Les décisions et leurs raisons sont les ADR 0187 à 0192 de [`decisions.md`](decisions.md) (et,
+pour la carte, 0193 à 0196 et 0229 ; pour les projets, 0282 et 0290) ; le code fait foi dans
 [`app/me/`](../src/mika/app/me/__init__.py). La conversation reste sur `/ws` ([`protocole-chat.md`](protocole-chat.md)) ;
 la console, celle des opérateurs, voit tout et ne passe pas par ici.
 
@@ -57,14 +57,15 @@ révoqué) est audité aussi (`moi.<geste>`). Une écriture réussie rend `{"ok"
 
 ```json
 {"username": "adrien", "name": "Adrien Moreau", "handle": "user_1", "person": "user_1", "operator": true,
- "owner": true, "counts": {"mail": 7, "teams": 1, "phone": 0}}
+ "owner": true, "counts": {"mail": 7, "teams": 1, "phone": 0, "projects": 3}}
 ```
 
 - `person` : la clé de sa personne (ce qu'une ressource nomme dans son propriétaire, `personne:<clé>`).
 - `owner` : une de ses propriétaires — ce qui est « à toi » (sans propriétaire nommé) est à elle.
 - `counts` : pour la barre du haut, ce qui attend ta décision (ADR 0200) — `mail` : ses brouillons qui attendent,
   dans tes boîtes seulement (les non-lus ont leurs compteurs, dossier par dossier : `GET …/mail/boxes`) ; `teams` : ses
-  réponses qui attendent ta décision ; `phone` : ses réponses offertes au téléphone.
+  réponses qui attendent ta décision ; `phone` : ses réponses offertes au téléphone ; `projects` : ce qui t'attend, toi,
+  dans tes projets (« À faire », § 11).
 
 ## 3. Mail
 
@@ -475,8 +476,11 @@ sinon `null`). Et, seulement quand on les sait (ADR 0244 ; absents sinon) : `osm
 `w45`, `r6`, stable d'une reconstruction à l'autre), `open_state` (`open`, `closed`, `unknown` : des horaires qu'on ne
 comprend pas) et `open_text` (« Ouvert · ferme à 22:30 », à l'instant de la réponse), `cuisine` (« Italienne,
 pizza »), `tags` (ce qu'il vérifie parmi `terrasse`, `vegetarien`, `vegan`, `accessible`, `emporter`, `livraison`) ;
-`rating` (sur 5), `reviews` (leur nombre), `price` (en euros, « €€ ») et `photo` (`p:<hash>`) quand le cache des avis les sait (Google Places, ADR 0256). Un lieu d'un regard ou d'une carte qu'elle a
-gardés n'a jamais `open_state` ni `open_text`. Des points s'écrivent `latitude,longitude`, séparés par `;` ; une zone `ouest,sud,est,nord` (ouest
+`rating` (sur 5), `reviews` (leur nombre), `price` (en euros, « €€ ») et `photo` (`p:<hash>`) quand le cache des avis les sait (Google Places, ADR 0256) ; avec `photo`, ce qu'il faut en citer
+là où elle se montre (ADR 0269) : `photo_source` (`google`, `datatourisme`), `photo_credit` (son auteur),
+`photo_credit_url` (son lien) et `photo_licence` (une photo de l'office de tourisme), eux aussi seulement quand on les
+sait. Un lieu d'un regard ou d'une carte qu'elle a gardés n'a jamais `open_state` ni `open_text`, ni le crédit de sa
+photo (un client n'en montre alors pas la vignette) ; son `id` y est entier (`t:<uuid>` compris : sa fiche se rouvre). Des points s'écrivent `latitude,longitude`, séparés par `;` ; une zone `ouest,sud,est,nord` (ouest
 < est, sud < nord). Un paramètre hors de ses bornes est refusé (400), jamais ramené dedans : un nombre qui n'est pas
 entier (`2.9`, `Infinity`) aussi. Ce qui fait sortir une demande vers le serveur d'itinéraires (un trajet, un ordre,
 les lieux le long d'un trajet calculé, les tronçons d'un voyage, un GPX tracé) compte : au plus 20 par minute et par
@@ -488,7 +492,7 @@ propre borne, 60 par minute et par compte (la Géoplateforme en permet bien dava
 
 | Route | Ce que ça rend |
 |---|---|
-| `GET /api/moi/carte` | `{"places": {"ready", "count", "built"}, "addresses": {"ready"}, "routing": {"ready", "provider", "modes", "avoid"}, "categories": [{"id", "label"}], "tourism": {"ready", "places", "events", "synced"}, "features": [{"id", "label"}], "sorts": [{"id", "label"}], "themes": [{"id", "label"}]}` : ce qui est branché (`built` : quand l'index a été construit, en ms ; `provider` : qui calcule les trajets, en mots ; `modes` : `voiture`, `velo`, `pied` ; `avoid` : `peages`, `autoroutes`, `ferries` ; `tourism` : la base des données touristiques, `synced` sa dernière lecture en ms), les catégories dans l'ordre de l'écran, et ce qu'une liste et les événements savent filtrer : `features` (`terrasse`, `vegetarien`, `vegan`, `accessible`, `emporter`, `livraison`), `sorts` (`distance`, `rating`), `themes` (`concerts`, `spectacles`, `expositions`, `marches`, `fetes`, `sport`, `enfants`, `visites`, `conferences`), chacun avec son libellé |
+| `GET /api/moi/carte` | `{"places": {"ready", "count", "built"}, "addresses": {"ready"}, "routing": {"ready", "provider", "modes", "avoid"}, "categories": [{"id", "label"}], "tourism": {"ready", "places", "events", "synced"}, "features": [{"id", "label"}], "sorts": [{"id", "label"}], "themes": [{"id", "label"}]}` : ce qui est branché (`built` : quand l'index a été construit, en ms ; `provider` : qui calcule les trajets, en mots ; `modes` : `voiture`, `velo`, `pied` ; `avoid` : `peages`, `autoroutes`, `ferries` ; `tourism` : la base des données touristiques, `synced` sa dernière lecture en ms — celle d'une case ou d'un département, la plus récente ; 0 : jamais lue), les catégories dans l'ordre de l'écran, et ce qu'une liste et les événements savent filtrer : `features` (`terrasse`, `vegetarien`, `vegan`, `accessible`, `emporter`, `livraison`), `sorts` (`distance`, `rating`), `themes` (`concerts`, `spectacles`, `expositions`, `marches`, `fetes`, `sport`, `enfants`, `visites`, `conferences`), chacun avec son libellé |
 | `GET /api/moi/carte/lieux?q=&cat=&near=&bbox=&limit=&open_now=&features=&cuisine=&min_rating=&sort=&here=` | `{"places": [lieu…], "reviews"?, "here"?}` : dans l'index, par le nom (`q`, 200 caractères), d'une catégorie (`cat`), près d'un point (`near` : `latitude,longitude`, ou `ici` — ta dernière position ; les plus proches d'abord), dans une zone (`bbox`) — au moins un de `q`, `near`, `bbox` ; `limit` : 1 à 50 (20). Filtres (ADR 0244, 0259) : `open_now=1` (ouvert à l'instant, d'après ses horaires), `features=terrasse,vegan` (tous ceux-là), `cuisine` (40 caractères : « italian » ou « italienne »), `min_rating` (0 à 5, « 4.5 » : écarte les lieux sans note), `sort` (`distance` ou `rating` : les mieux notés d'abord, ceux sans note à la fin). `reviews` (avec `near` ou `bbox`) : ce que le cache des avis sait de l'endroit, `{"ready", "cells", "loaded", "oldest", "note"}` (`oldest` : la lecture la plus ancienne, en ms, 0 : aucune ; `note` : ce qu'il faut en dire, en mots) — la ligne « notes Google lues le … ». `here` (avec `near=ici`) : `{"lat", "lon", "label", "at"}`. Chercher autour de toi (`near=ici`, ou `here=1` avec ta propre position) précharge les avis de ta case (§ « Les fiches… ») |
 | `GET /api/moi/carte/adresses?q=&limit=` | `{"places": [lieu…]}` : une adresse (`q` : 3 à 200 caractères ; `limit` : 1 à 10, 5) |
 | `GET /api/moi/carte/itineraire?points=&mode=&avoid=` | `{"distance_m", "duration_s", "legs": [{"distance_m", "duration_s", "shape", "steps": [{"text", "distance_m", "duration_s"}]}], "has_toll", "has_highway", "has_ferry", "provider"}` : de 2 à 20 points ; `shape`, le tracé d'un tronçon en polyline à six décimales ; `steps`, ses consignes en français ; `avoid` : `peages,autoroutes` |
@@ -506,17 +510,20 @@ compte** (429 au-delà, en mots) : 60 fiches ou recherches d'événements par mi
 | Route | Ce que ça rend |
 |---|---|
 | `GET /api/moi/carte/lieu/<id>` | la fiche d'un lieu (`l<n>`, son objet d'OpenStreetMap `n123`/`w45`/`r6`, ou un lieu des données touristiques `t:<uuid>`) : `{"place": lieu, "osm", "tourism", "reviews", "events": [événement…]}` — chaque partie `null` quand sa source ne sait rien du lieu (ci-dessous). Une autre forme d'identifiant, ou un lieu qui n'est pas là : 404 |
-| `POST /api/moi/carte/lieu/<id>/actualiser` | « Actualiser » : sa fiche relue tout de suite chez Google (la fiche avec ses avis et ses photos) et chez DATAtourisme, quel que soit son âge → `{"ok", "message", …la fiche}`. Ce qui n'a pas pu se relire (le quota, la clé, le réseau) : 503, en mots — ce qui l'a pu est gardé : relis la fiche. 10 par minute et par compte, les refus compris |
-| `GET /api/moi/carte/evenements?near=&bbox=&radius=&start=&end=&themes=&q=&free=&limit=` | `{"events": [événement…], "coverage", "here"?}` : les événements à venir près d'un point (`near` : `latitude,longitude` ou `ici` ; à moins de `radius` mètres, 500 à 100 000, 20 000) ou dans une zone (`bbox`), du `start` au `end` (`AAAA-MM-JJ`, à l'heure de Paris ; par défaut d'aujourd'hui à trente jours ; un an au plus), d'un des `themes` (`concerts,fetes`), dont le nom ou le résumé dit `q`, gratuits seulement (`free=1`) ; `limit` : 1 à 50 (30) ; au moins un de `near`, `bbox`, `q`. Les plus tôt d'abord, puis les plus proches. `coverage` : ce que la base sait de l'endroit, au même rayon, `{"ready", "cells", "loaded", "oldest", "note"}` — une zone lue en partie (« Cette zone n'est lue qu'en partie (cases lues : 3 sur 11) : la suite se lit à la prochaine recherche, ou ce soir. »), trop grande, ou un quota atteint se disent dans `note` |
-| `GET /api/moi/carte/evenement/<id>` | la fiche d'un événement (`e:<uuid>`) : `{"event": événement, "description", "dates": [{"start", "end", "text", "days"}], "more_dates", "prices", "contacts": [{"label", "value"}], "address", "town", "venue", "venue_place", "author", "updated", "url", "photos": [photo…], "merged", "attribution", "licence", "licence_url"}` — `dates` : toutes ses dates à venir, la prochaine d'abord (60 au plus, `more_dates` en plus) ; `venue` : le lieu nommé où il se tient, s'il est rapproché (`venue_place` : son identifiant, pour `…/lieu/<id>`) ; `merged` : combien de fiches de DATAtourisme il réunit. Inconnu : 404 |
-| `GET /api/moi/carte/photo/<ref>` | une photo relayée (`p:<32 chiffres hexadécimaux>`) : ses octets, `Content-Type` `image/jpeg`, `image/png`, `image/webp` ou `image/gif`, `Cache-Control: private, max-age=86400`, `X-Content-Type-Options: nosniff`. Une référence qu'aucune source ne connaît, dont les droits ont pris fin, ou qui n'a pas cette forme : 404, et rien ne part ; sa source muette : 503 ; ce qu'elle rend n'est pas une de ces images : 502. La première fois, une photo de Google coûte un appel compté : un client ne charge que celles qu'il montre |
+| `POST /api/moi/carte/lieu/<id>/actualiser` | « Actualiser » : sa fiche relue tout de suite chez Google (la fiche avec ses avis et ses photos) et chez DATAtourisme, quel que soit son âge → `{"ok", "message", …la fiche}` — sauf une source relue il y a moins de dix minutes, qui ne repart pas (ADR 0269). `message`, à montrer tel quel, dit ce qui s'est passé : « Fiche relue. », « Relue il y a 4 min : elle est à jour (…) », « Rien à relire pour ce lieu : … » (on n'en lit pas les avis, et l'office de tourisme n'en a pas de fiche). Ce qui n'a pas pu se relire (le quota — celui du jour de tout le serveur compris : vingt « Actualiser » qui partent par 24 heures ; un « Actualiser » que rien ne laisse partir, le mois de Google atteint, son recul ou le quota de l'heure de DATAtourisme, n'en prend pas et dit cette cause —, la clé, le réseau, une fiche que DATAtourisme rend illisible, qui reste telle qu'on l'avait), ou rien de réglé (« Rien ne peut se relire ici : ni les avis (Google) ni les données touristiques (DATAtourisme) ne sont réglés. ») : 503, en mots — ce qui l'a pu est gardé : relis la fiche. 10 par minute et par compte, les refus compris |
+| `GET /api/moi/carte/evenements?near=&bbox=&radius=&start=&end=&themes=&q=&free=&limit=` | `{"events": [événement…], "coverage", "here"?}` : les événements à venir près d'un point (`near` : `latitude,longitude` ou `ici` ; à moins de `radius` mètres, 500 à 100 000, 20 000) ou dans une zone (`bbox`), du `start` au `end` (`AAAA-MM-JJ`, à l'heure de Paris ; par défaut d'aujourd'hui à trente jours ; un an au plus — sans `start`, compté d'aujourd'hui : au-delà, ou un `end` déjà passé, 400 avec `fields.end`), d'un des `themes` (`concerts,fetes`), dont le nom ou le résumé dit `q`, gratuits seulement (`free=1`) ; `limit` : 1 à 50 (30) ; au moins un de `near`, `bbox`, `q`. Les plus tôt d'abord, puis les plus proches. `coverage` : ce que la base sait de l'endroit, au même rayon, `{"ready", "cells", "loaded", "oldest", "note"}` — une zone lue en partie (« Cette zone n'est lue qu'en partie (cases lues : 3 sur 11) : la suite se lit à la prochaine recherche, ou ce soir. »), trop grande, ou un quota atteint se disent dans `note` |
+| `GET /api/moi/carte/evenement/<id>` | la fiche d'un événement (`e:<uuid>`) : `{"event": événement, "description", "dates": [{"start", "end", "text", "days"}], "more_dates", "prices", "contacts": [{"label", "value"}], "address", "town", "venue", "venue_place", "author", "updated", "url", "photos": [photo…], "merged", "attribution", "licence", "licence_url"}` — `dates` : toutes ses dates à venir, la prochaine d'abord (60 au plus, `more_dates` en plus ; `start` : sa prochaine séance, `end` : la fin de l'occurrence — pour une période, son dernier jour) ; `venue` : le lieu nommé où il se tient, s'il est rapproché (`venue_place` : son identifiant, pour `…/lieu/<id>`) ; `merged` : combien de fiches de DATAtourisme il réunit. Inconnu : 404 |
+| `GET /api/moi/carte/photo/<ref>` | une photo relayée (`p:<32 chiffres hexadécimaux>`) : ses octets, `Content-Type` `image/jpeg`, `image/png`, `image/webp` ou `image/gif`, `Cache-Control: private, max-age=86400`, `X-Content-Type-Options: nosniff`. Une référence qu'aucune source ne connaît, dont les droits ont pris fin, ou qui n'a pas cette forme : 404, et rien ne part ; sa source muette, ou le cache de la carte qui ne s'écrit pas : 503, en mots ; ce qu'elle rend n'est pas une de ces images : 502. La première fois, une photo de Google coûte un appel compté : un client ne charge que celles qu'il montre |
 
 Un **événement** (dans une liste, une fiche de lieu, un regard) a tous ses champs, toujours : `id` (`e:<uuid>`),
-`name`, `start` et `end` (sa prochaine date dans la période, en ISO 8601 : une date, ou une date et une heure à
-l'heure de Paris), `when_text` (« ven. 20 nov. · 19:00–20:30 », « du mar. au dim. · 13:00–19:00 »), `place` (où, en
+`name`, `start` et `end` (sa prochaine séance dans la période, en ISO 8601 : une date, ou une date et une heure à
+l'heure de Paris, « 2026-11-21T10:00+01:00 » ; `end` est la fin de cette séance, le lendemain après minuit — jamais
+celle d'une période, que `dates[].end` dit), `when_text` (« ven. 20 nov. · 19:00–20:30 », « du mar. au dim. ·
+13:00–19:00 » dans les six jours qui viennent ; plus loin, avec leurs dates : « sam. 5 et dim. 6 déc. · 10:00–19:00 »), `place` (où, en
 mots : le lieu nommé, ou l'adresse, et la commune), `lat`, `lon`, `distance_m` (depuis `near`, sinon `null`),
 `themes`, `free` (`true`, `false`, `null` : on ne sait pas), `price` (ses tarifs en clair, ou vide), `photo` (`p:<hash>`,
-ou vide). Une **photo** : `ref`, `path` (le chemin de `…/photo/<ref>` sur ce serveur : jamais une adresse du dehors),
+ou vide) et ce qu'il faut en citer — `photo_source`, `photo_credit`, `photo_credit_url`, `photo_licence`, vides sans
+photo (ADR 0269). Une **photo** : `ref`, `path` (le chemin de `…/photo/<ref>` sur ce serveur : jamais une adresse du dehors),
 `source` (`datatourisme`, `google`), `credit` et `credit_url` (son auteur et son lien), `licence`, `caption`, `width`,
 `height`.
 
@@ -541,9 +548,13 @@ Les parties d'une fiche de lieu :
 
 **Ce qu'un client montre avec**, toujours : « Google Maps » et le lien `reviews.url` avec la note et les avis ; l'auteur
 (`author`, lien `author_url`) de chaque avis et le crédit (`credit`, lien `credit_url`) de chaque photo, à côté
-d'elle ; l'`attribution` de l'office de tourisme (son auteur et sa date) avec ce qu'il en dit, et celle d'une fiche
+d'elle, avec sa `licence` (une photo de l'office de tourisme, dans la bande d'une fiche comme dans la visionneuse) ;
+l'`attribution` de l'office de tourisme (son auteur et sa date) avec ce qu'il en dit, et celle d'une fiche
 d'événement ; « © les contributeurs d'OpenStreetMap » sous ce qui vient d'OpenStreetMap ; la `note` d'une partie quand
-elle n'est pas vide.
+elle n'est pas vide. Dans une liste (ADR 0269) : la vignette d'un lieu ou d'un événement montre `photo_credit` (lié à
+`photo_credit_url`) et `photo_licence` sur sa ligne, lisibles — jamais dans le seul texte alternatif ; sans
+`photo_credit`, pas de vignette ; et « Google Maps » se lit dès qu'un lieu de la liste a une note, quelle que soit la
+couverture (une zone trop grande pour la compter, une `note` qui ne nomme pas Google), dans un regard de Mika aussi.
 
 **« Ici »** (`near=ici`) : ta dernière position, celle que ton téléphone a donnée (ADR 0119 : l'application ouverte, si
 tu l'as permis), la tienne seule — jamais celle d'une autre personne. Aucune (jamais donnée, effacée, oubliée) : 409,
@@ -601,3 +612,565 @@ console (ta fiche, onglet Voyages, ADR 0204) : il disparaît de ta liste, et le 
 | `POST /api/moi/voyages/<id>/ordre` | `day` | le meilleur ordre de ce jour, appliqué (son premier et son dernier arrêt restent à leur place) → `{"ok", "message", "order"}` ; moins de trois arrêts : rien à faire ; plus de 20 : refusé (400), le serveur d'itinéraires n'en range pas plus d'un coup ; un ordre illisible du serveur : 502, rien n'est appliqué |
 | `GET /api/moi/voyages/<id>/sur-la-route?cat=&day=&corridor=&limit=` | — | `{"places": [lieu…], "route"}` : les lieux à moins de `corridor` mètres (200 à 50 000 ; 5 000) du trajet de tout le voyage (`day` 0, par défaut) ou d'un jour (depuis le dernier arrêt de la veille), dans l'ordre où on les croise ; `limit` : 1 à 50 (20) ; `route` faux : sans itinéraires, le long des arrêts reliés à vol d'oiseau |
 | `GET /api/moi/voyages/<id>/gpx` | — | le voyage en GPX 1.1 (`application/gpx+xml`, en pièce jointe `voyage-<id>.gpx`) : ses arrêts dans l'ordre, et le tracé quand les itinéraires le calculent |
+
+## 11. Projets
+
+Ce que l'écran Projets montre (ADR 0282) : ses projets, ce qui l'y attend, la fiche d'un projet, son registre (tickets
+et listes de suivi), ses liens, **son code** (ADR 0288 : fichiers, commits, branches, pull requests, issues, CI),
+**sa documentation** (ADR 0289 : un espace à part de son dépôt, ses pages et ses images, qui s'écrit ici) ; et
+ses gestes, dont **fusionner une pull request**. **Ce qu'elle y voit s'y modifie** (ADR 0290) : le projet (le
+confier, le modifier, l'archiver), ses objectifs, ses jalons, un ticket, une pull request, ses décisions ; et **son
+activité** s'y lit — son fil, ses exécutions, son carnet, le diagramme de ses objectifs. Régler ses lignes d'accès,
+régler une liste et publier un ticket chez l'hôte du dépôt **restent à la console**.
+
+**Ce qu'elle a d'un projet** n'est pas une règle d'ici : c'est la plus serrée de ce que les lignes d'accès du projet
+lui donnent hors de toute conversation (son projet en entier ; celui d'un autre seulement par une ligne qui la désigne,
+partout et toujours — la ligne par défaut n'ouvre rien) et de ce que la conversation lui en dirait par ce client (le
+chat web pour un navigateur, l'app pour un jeton), au niveau de confidentialité qu'elle en entend.
+
+- Un projet est **à elle** (`mine`) quand elle en est le propriétaire (il est fait pour elle), ou qu'il est à Mika
+  (`hers`) et qu'elle s'occupe d'elle. Un opérateur n'a ici que les droits de sa personne : la console lui montre
+  tout, cette API non.
+- **Le voir** donne son titre et son état. **Son détail** (`detail`) demande de le piloter au moins en lecture seule
+  et d'entendre son niveau ; sans lui, toute route de détail répond 403 (« Ce projet ne t'est ouvert qu'à voir… »).
+- **Le piloter** (`steer`, en mots dans `steer_label`) : `non`, `lecture` (lire), `accord` (ouvrir un ticket, qui naît
+  proposé, et noter), `modification` (aussi changer un statut, donner une consigne, lancer, mettre en pause,
+  reprendre). **Trancher** (un ticket, un point d'arrêt) est au propriétaire du projet et à qui s'occupe d'elle ;
+  **répondre à son plan**, à qui l'a demandé et à qui s'occupe d'elle ; **poser ce qu'il lit**, à son propriétaire ;
+  **donner un accord**, à qui s'occupe d'elle.
+- Un projet qu'on ne lui ouvre pas, archivé, ou inconnu : 404, la même réponse. Un geste que son niveau n'ouvre pas :
+  403, dit en mots. Un geste qui ne vaut plus (déjà tranché, déjà en pause, un statut qu'il a déjà) : 409 ; un champ
+  refusé : 400 avec `fields`.
+
+Les codes d'étape et de statut ont leurs mots à côté (`…_label`), comme les sortes et les priorités d'un ticket, la
+raison d'un geste qui ne se fait pas d'ici (`why`) et qui a écrit (`author`) : le client les affiche, il ne les traduit
+pas et n'écrit pas les siens. Un texte **venu d'ailleurs** — un ticket ou une note de l'hôte du dépôt ou d'un autre projet (`outside: true`), un
+commentaire de l'hôte, la fin d'un journal de CI, la sortie d'une commande, la ligne du dépôt distant (des objets
+`{"text", "outside": true}`, ou `null`) — se présente comme tel : une donnée citée, jamais un mot d'elle ni du
+propriétaire. Les textes sont bornés (8 000 caractères ; 400 pour une ligne).
+
+### Lire
+
+**`GET /api/moi/projets[?size=]`** — ses projets, ceux où quelque chose l'attend d'abord, et la première page d'« À
+faire » (`size` : 25, 100 au plus) :
+
+```json
+{"projects": [{"id": 3, "title": "Outils réseau", "status": "active", "status_label": "actif", "mine": true,
+               "hers": true, "owner_name": "", "steer": "modification", "steer_label": "modification",
+               "detail": true, "where": "Le squelette est posé.", "last_run": 1790790000000, "plan": "planned",
+               "plan_label": "validé", "waiting": 2}],
+ "todo": [{"project": 3, "project_title": "Outils réseau", "kind": "ticket", "kind_label": "ticket",
+           "what": "validation", "about": "#4 Journaliser les refus — son plan attend ta validation",
+           "since": 1790790000000, "mine": true, "can": true, "why": "", "waits_for": "", "objective": 0,
+           "number": 4, "key": "", "veiled": "", "outside": false,
+           "gesture": {"route": "ticket/trancher", "args": {"item": "#4", "verdict": "validate", "plan": 812},
+                       "label": "Valider ou refuser son plan", "where": "ici", "url": ""}}],
+ "todo_total": 7, "create": {"can": true, "why": ""}}
+```
+
+- `create` : peut-elle lui confier un projet d'ici (`POST …/projets/nouveau/creer` : qui s'occupe d'elle), sinon
+  pourquoi.
+- `card` (ADR 0293, absent de l'exemple) : de quoi remplir la carte d'un projet sans lire sa fiche, pour qui lit
+  son détail (`null` sinon) — `objectives` (ses ponctuels dans l'ordre du plan : `total`, `done`, `doing` — au moins
+  une exécution —, `todo`, `blocked`, et `states` : `[{"id", "state", "state_label"}]`, un segment par objectif),
+  `pulls_open`, `tickets_open`, `reads` et `readers` (ce dont il dépend, ce qui dépend de lui : `project`, `title`,
+  `visible` — un projet qu'elle ne voit pas : `null`, `""`, `false`), `led_by` (par qui il est mené : son nom à
+  elle), `last_activity` (la dernière fois que quelque chose y a bougé).
+- `status` : `active`, `paused`. `hers` : un projet à Mika ; `owner_name` : pour qui il est, quand ce n'est pas elle.
+  `where` (où il en est, son dernier compte rendu), `last_run`, `plan` (`""` sans plan, `to_frame`, `proposed`,
+  `planned`) : vides sans le détail. `waiting` : ce qui l'attend, elle, dans ce projet.
+- **Une attente** (`todo`) : `kind` — dans l'ordre où s'en occuper, celui du serveur : `approval` (un accord), `plan`,
+  `need` (elle a besoin de toi), `stalled` (arrêté par ses pannes), `blocked` (un objectif bloqué), `ticket`,
+  `checkpoint` (un point d'arrêt dit prêt), `review` (ses relectures l'ont refusé deux fois), `item` (un élément d'une
+  liste à ta charge) ; `what` : la capacité d'un accord, ce qu'un ticket attend (`accept`, `question`, `dismissal`,
+  `validation`, `merge`, `stuck`), le nom de la liste d'un élément ; `about` : de quoi il s'agit, en une ligne ;
+  `mine` : c'est elle qu'on attend (« À faire » ne rend que celles-là ; la fiche les rend toutes) ; `waits_for` : qui
+  elle attend — la personne nommée ; pour un accord, qui s'occupe d'elle, par son prénom ; sinon vide (le
+  propriétaire du projet) ; `veiled` : un élément qu'elle ne peut pas lire (ni titre ni clé).
+- **Une attente est comptée pour qui peut la régler** (`mine`, la règle du moteur : `todo.awaits`) : la personne
+  nommée, sinon le propriétaire du projet — sauf un accord, qui n'attend que qui s'occupe d'elle, même dans un projet
+  confié à quelqu'un d'autre (son propriétaire le voit attendre sur la fiche, `mine: false`). La console dit de même.
+- **Le geste** (`gesture`) : `where` — `ici` : `POST /api/moi/projets/<project>/<route>` avec `args`, à compléter
+  (une raison, un statut… ; pour fusionner une pull request — `code/pull/fusionner`, `args: {"number"}` —, le commit
+  lu, `head`, que rend `GET …/code/pull` ; pour un objectif bloqué, `objectif/statut` avec `status: "open"`) ; `console` : rien ici ne le fait ; `hote` :
+  chez l'hôte du dépôt (une pull request prête dont le numéro n'est pas encore connu). `url` : pour une pull request à
+  fusionner, sa page chez l'hôte — composée par le serveur de l'adresse du dépôt et de son numéro, jamais prise dans
+  un texte de l'hôte ; vide sinon, sans dépôt distant, ou pour un ticket qu'elle ne lit pas. `can` : elle peut le faire ici — la garde de la route, dite
+  d'avance : ne pas la recalculer.
+- **Pourquoi pas** (`why`) : vide quand `can` ; sinon la raison, en mots à afficher tels quels — elle ne pilote pas ce
+  projet, ce geste demande l'accord de son propriétaire (il se demande dans le chat), ce n'est pas à elle de trancher
+  ni de répondre à ce plan, cet accord n'est pas le sien, l'élément ne se lit pas d'ici, le projet ne lui est ouvert
+  qu'à voir, le geste se fait dans la console, ce n'est pas à elle de fusionner, ou ce qui retient la pull request
+  (un conflit, des vérifications en cours…). C'est, mot pour mot, le refus que la route
+  rendrait (403) : elle n'y apprend rien qu'elle n'apprendrait en essayant.
+
+**`GET /api/moi/projets/a-faire[?page=&size=]`** — « À faire » pour tous ses projets : `{"total", "page", "size",
+"items"}`, les mêmes entrées.
+
+**`GET /api/moi/projets/accords[?project=]`** — ce qui attend **son** accord (rien pour qui ne peut pas le donner), 20
+au plus : `{"items": [{"id", "project", "project_title", "capability", "label", "summary", "text", "digest",
+"blocked", "at"}]}` — `text` est exactement ce qui partirait, `digest` son condensé, à renvoyer pour l'accepter tel
+qu'il a été lu ; `blocked` dit pourquoi il ne peut pas partir tel quel. Et ce qu'il concerne (ADR 0293) :
+`concerns` — `objective` (0 : aucun), `ticket` (le ticket en une ligne — voir « Un ticket en une ligne » —, ou
+`null`), `issue` et `pull` (leurs numéros chez l'hôte, 0 : aucun) — ; `where` (où cela part, en mots : chez l'hôte en
+issue ou en pull request, vers son dépôt distant, sur le réseau depuis son atelier, dans ce projet) et `where_url`
+(sa page chez l'hôte, composée ici ; vide sinon) ; `asked_by_kind` et `asked_by` (qui l'a demandé : elle, ou la
+personne dont elle porte la demande, selon la règle des noms) ; `why` (les mots de cette personne, pour un pilotage
+demandé ; vide ailleurs : la raison d'une commande réseau est dans `summary`).
+
+**`GET /api/moi/projets/<id>`** — la fiche. Qui ne fait que le voir reçoit `project`, `rights` et `todo` (ce qui est
+à sa charge), rien d'autre.
+
+- `project` : la ligne de la liste, plus `description`.
+- `rights` : ce qu'elle peut faire par les routes d'ici — `steer`, `steer_label`, `detail`, `ticket` (en ouvrir un),
+  `ticket_born` (`open`, `proposed`, ou vide), `note`, `status` (changer un statut), `settle` (trancher), `plan` (y
+  répondre), `pilot` (consigne, lancer, pause, reprise), `links` (poser ce qu'il lit), `approve` (donner un accord),
+  `files` (lire le contenu de ses fichiers et ses diffs), `merge` (fusionner ses pull requests), `frame` (changer son
+  cadre), `edit` (ses objectifs, ses jalons, ses tickets, ses décisions), `pull_write` (écrire chez l'hôte sur une
+  pull request), `work` (lire son activité).
+- `todo` : ce qui attend dans ce projet (60 au plus), le sien (`mine`) et celui du propriétaire.
+- `missions` (ses objectifs constants) : `id`, `text`, `status`, `status_label`, `cadence_hours` (0 : la cadence par
+  défaut), `cadence_label`, `on` (ce qui la déclenche : `[{"key", "label"}]`), `only_on_event`, `last_run`,
+  `passes`, `each_pass` (ce que chaque passage doit faire), `need`.
+- `next` (ADR 0293) — son prochain passage : `at` (0 : rien n'est daté), `state` (`due` : daté ; `running` : une
+  exécution est en cours ; `paused` ; `on_demand` ; `idle` : rien de prévu) et `state_label`, `sort` (`frame` : sa
+  séance de cadrage, `review` : une relecture, `run` : du travail ; vide) et `sort_label`, `objective` (`id`, `text`,
+  `kind` ; `null`). Le moteur n'estime rien : sans date, `at` vaut 0.
+- `rhythm` : `schedule` (son agenda en mots), `window` (sa plage en mots), `summary` (les deux, en une phrase — celle
+  de `…/reglages`).
+- `instructions` — ses consignes en attente, données depuis le départ de sa dernière exécution (8 au plus, les plus
+  récentes d'abord) : `seq`, `at`, `text`, `veiled` (d'un niveau qu'elle n'entend pas : le texte n'est pas servi),
+  `author_kind`, `author`.
+- `forms` — de quoi remplir les formulaires d'un objectif et d'un jalon : `can`, `why` ; `triggers` (ce qui peut
+  déclencher une mission, à envoyer tel quel dans `on` : `key`, `label`, `sort` — `project`, `app`, `item`, `wake` —,
+  `sort_label`, `project` et `title` pour un projet dont il dépend) — les projets qu'il lit **et qu'elle voit**, ses
+  apps, ses listes, ceux que ses missions ont déjà ; les réveils de l'instance ne sont servis qu'à qui s'occupe
+  d'elle — ; `triggers_max` ; `checks` (les façons de vérifier un jalon : `code`, `label`, `help`, et `fields` — ce
+  qu'il faut saisir pour elle : `name`, `label`, `help`, `required`).
+- `objectives` (ses ponctuels, les ouverts d'abord, 40 au plus) : `id`, `text`, `status` (`open`, `blocked`, `done`),
+  `status_label`, `done_when`, `ticket` (le ticket dont il est né), `need`, `note`, `result`, `runs`, `last_run`,
+  `closed_at`, `branch`, `tickets` (ceux qui lui sont liés — celui dont il est né, ceux qu'il tient —, chacun en une
+  ligne), et :
+  - `milestones` : `id`, `text`, `check` (`prose`, `command`, `owner` : un point d'arrêt, `item`), `check_label`,
+    `status` (`open`, `reached`, `dropped`), `status_label`, `ready` (un point d'arrêt qui attend), `ready_at`,
+    `reached_at`, `refused_at`, `how`, `proof` (venu d'ailleurs), `reason`, `commit`, `started` (elle s'y est mise :
+    une exécution est partie depuis que le jalon d'avant est atteint), ce qui le lie à un élément de son registre
+    (`item_list`, `item` — sa clé —, `item_status` et `item_status_label` ; vides sinon), et `command` (sa commande,
+    telle qu'on la taperait — **seulement avec le droit sur ses fichiers**, vide sinon) ;
+  - `pull` (`null` sans pull request) : `number`, `title`, `url`, `state` (`open`, `merged`, `closed`), `state_label`,
+    `words` (où elle en est, en une ligne), `changes_asked`, `conflicts`, `at`, `awaits_accord` (la proposition qui
+    attend, 0 sinon), `said` (le dernier mot de l'hôte, venu d'ailleurs) ;
+  - `checks` (`null` sans CI lue) : `state` (`pending`, `passed`, `failed`), `state_label`, `sha`, `at`, `said` (la
+    fin du journal, venue d'ailleurs) ;
+  - `review` (`null` : pas encore relu) : `ok`, `label`, `at`, `text`, `refused` (combien de fois de suite),
+    `handed_over` (la main est au propriétaire), `last_refusal`.
+- `plan` : `state`, `state_label`, `text`, `questions`, `at`, `version`, `asked_by`.
+- `lists` : chaque liste — `name`, `title`, `tickets` (c'est la liste des tickets), `open` et `closed` (ses statuts :
+  `[{"code", "label"}]` ; pour les tickets, leurs étapes), `counts` (par statut), `total`, `living` (encore ouverts),
+  `actor`, `actor_label`. La liste des tickets dit aussi ce qu'il faut pour **en ouvrir un** : `kinds` (ses sortes :
+  `[{"code": "bug", "label": "défaut"}, …]`) et `priorities` (`[{"code": "low", "label": "basse"}, …]`), dans l'ordre
+  du moteur, avec `kind_default` et `priority_default` — ce qu'un ticket reçoit quand `POST …/ticket` n'en dit rien.
+  Pour une liste de suivi : `[]` et `""`. La liste des tickets les compte aussi par étape du parcours (`journey` :
+  `[{"code", "label", "count"}]`, les six étapes — voir « Le parcours d'un ticket »). Une liste de suivi dit ce
+  qu'elle peut y faire (`can` : `add`, `assign`, `why`) et à qui un élément peut être (`actors` : `self`, `owner`,
+  avec leurs mots).
+- `links` : `reads` (ce qu'il lit : `project`, `title`, `visible`, `suspended`, `direct`, `gives` — `see`, `detail`,
+  `files`, `docs` (sa documentation, ADR 0289), `ask`, `ask_label`), `plan_asks` (ce que son plan demande à lire), `readers` (qui le lit, et ce qu'il en
+  reçoit), `asks` (ses demandes à d'autres projets) et `received` (celles qu'il a reçues — voir « Les demandes »), `can`
+  (elle peut poser ses liens), `labels` (les mots de cette vue, qui s'appelle « Dépendances » : `title`, `reads` —
+  « Il dépend de » —, `readers` — « Dépendent de lui » —, `asks` — « Ses demandes »), `candidates` (ceux qu'elle peut lui faire lire — ceux qu'il peut se mettre à lire et
+  qu'elle voit : `project`, `title`, `visible`, et `gives`, ce que le lien donnerait maintenant ; `see: false` : il ne
+  donnerait rien pour l'instant ; vide si elle ne pose pas ses liens). **Un projet lié ne dit son numéro et son titre
+  que si elle le voit elle-même** : sinon `project: null`, `title: ""`, `visible: false` — ce que le lien donne se
+  dit, quel projet, non ; un tel lien ne se retire pas d'ici (il reste tel quel).
+- **Par lien** (ADR 0293), sur `reads[]` : `since` (depuis quand il est posé), `why` (le mot de son propriétaire —
+  vide s'il n'en a pas, ou si elle ne voit pas le projet lu), `commit` (le commit que montre la vue de son atelier :
+  `sha`, `short`, `title`, `at` — pour qui lit le détail du projet lu, quand le lien donne ses fichiers ; `null`
+  sinon), `asks` (les demandes entre les deux : celles du projet, et les tickets qu'elle y a ouverts elle-même) et
+  `ask_here` — **« Lui demander quelque chose »** : peut-elle ouvrir un ticket chez ce projet, avec les droits
+  qu'elle a sur lui (`can`, `why`, `born` — `open`, `proposed` —, `project`, et `route` : `ticket`, c'est
+  `POST /api/moi/projets/<project>/ticket`) ; un projet qu'elle ne voit pas : `can: false`, sans un mot. Sur
+  `readers[]` : `since`, `why` (**pour qui lit aussi le détail du projet lecteur** : le mot est un texte de ce
+  projet-là) et `asks` (ce qu'il lui a demandé).
+- **Les demandes** (`links.asks`, `links.received`, et `asks` de chaque lien ; 20 au plus, les plus récentes
+  d'abord) : `project`, `title`, `visible` (l'autre projet, nommé seulement si elle le voit), `direction` (`sent`,
+  `received`), `from` (`project` : une demande du projet, ADR 0271 ; `you` : un ticket qu'elle a ouvert elle-même
+  chez le projet lié), `number` (0 si elle ne voit pas le projet où vit le ticket), `title` (seulement si elle lit ce
+  ticket là-bas ; sinon `""` et `veiled: true`), `status` et `status_label` (son étape fine), `step` et `step_label`
+  (son étape du parcours), `at`, `closed_at`. Les demandes reçues sont celles que l'état du projet garde (ses
+  tickets ouverts, les derniers touchés).
+- `repo` : `has_remote`, `remote` (son adresse, pour un projet à elle seulement), `branch`, `flow` (`direct`, `pr`),
+  `flow_label`, `auto_push`, `last_commit`, `remote_ok`, `remote_at`, `remote_line` (venue d'ailleurs), `commit` (son
+  dernier commit, lu dans le dépôt de l'atelier : `sha`, `short`, `title`, `at`, `author_kind`, `author`, `outside`,
+  `branch` ; `null` sans dépôt — le détail donne les titres de ses commits, comme `…/code`).
+
+**`GET /api/moi/projets/<id>/elements[?list=&state=&status=&q=&page=&size=]`** — une page d'une liste (`list` : par
+défaut `tickets`), les derniers touchés d'abord : `{"list", "total", "page", "size", "items"}`. `state` : `open`,
+`closed`, ou rien ; `status` : un statut de la liste (une étape, pour les tickets) ; `q` : 120 caractères, ne compare
+que ce qu'elle peut lire. Une liste inconnue : 404. Un élément :
+
+```json
+{"list": "tickets", "handle": "#4", "number": 4, "key": "plan-journal", "title": "Journaliser les refus",
+ "veiled": "", "veiled_label": "", "status": "validation", "status_label": "en attente de validation",
+ "open": true, "hand": "owner", "hand_label": "au propriétaire", "yours": true, "kind": "task",
+ "kind_label": "tâche", "priority": "normal", "priority_label": "normale", "actor": "self", "actor_label": "elle",
+ "author_kind": "person", "author": "Adrien Moreau", "outside": false, "objective": 0, "notes": 1, "at": 1790790000000,
+ "updated_at": 1790790060000, "plan": 812, "issue": 0, "pull": 0, "step": "validation",
+ "step_label": "Validation", "issue_state": "", "issue_state_label": ""}
+```
+
+`status` d'un ticket, son étape : `proposed`, `unread`, `analysis`, `decision`, `validation`, `working`,
+`pr_pending`, `pr_ready`, `treated`, `dismissed`. `hand` : à qui est la main (`owner`, `self`) ; `yours` : à elle,
+et elle peut trancher. `veiled` : pourquoi ses textes ne se lisent pas — `proposed` (proposé par un autre projet ou
+venu de l'hôte : il se lit quand son propriétaire l'a accepté, et par qui peut le trancher), `level` (d'un niveau
+qu'elle n'entend pas) ; alors `title` et `key` sont vides. `plan` : le numéro de son plan (0 : aucun). `issue_state`
+(`open`, `closed`, ou vide) : ce que l'hôte a dit en dernier de son issue.
+
+**Le parcours d'un ticket** (ADR 0293) a **six étapes** : `unread` (non lu), `analysis` (en analyse), `validation`,
+`pull` (pull request), `merge` (fusion), `treated` (traité). Les étapes fines (`status`) restent servies comme avant :
+chacune tombe dans l'une des six, dont elle est la précision — proposé : non lu ; sa question posée : en analyse ;
+validé, en cours : pull request, ou traité s'il ne passe pas par une pull request ; pull request en cours : pull
+request ; prête à fusionner : fusion. `step` et `step_label`, sur chaque ligne : son étape du parcours (vide : écarté,
+ou pas un ticket). **Un ticket qui ne produit pas de code saute `pull` et `merge`** — un projet au flux direct, une
+réponse dans son fil : le parcours le dit (`through_pull: false`, `skips`, `skips_label`).
+
+**Un ticket en une ligne** (sur un objectif, un accord) : `number`, `handle`, `title` (vide s'il ne se lit pas),
+`veiled`, `veiled_label`, `status`, `status_label`, `step`, `step_label`, `open`.
+
+**Qui a écrit** un élément ou une note : `author_kind` — `self` (elle), `you` (la personne connectée), `person` (une
+autre personne), `project` (un autre projet, qui lui adresse une demande), `host` (quelqu'un chez l'hôte du dépôt) — et
+`author`, les mots à afficher : son nom à elle ; « toi » ; le nom de la personne, **seulement si elle a le droit de le
+savoir**, sinon « une autre personne » ; « le projet « titre » » si elle voit ce projet, sinon « un autre projet » ;
+« quelqu'un chez l'hôte du dépôt » (le compte de l'hôte n'est jamais servi). Le nom d'une autre personne se sert quand
+elle s'occupe d'elle (sa voix la nomme à tous), ou quand ce qui concerne cette personne s'entend par ce client au
+niveau de l'élément (la règle de sa mémoire sur autrui, comme pour le projet) ; rien n'est nommé d'un élément qu'elle
+ne lit pas (`veiled`).
+
+**`GET /api/moi/projets/<id>/element?list=&item=`** — un élément (`item` : `#n` pour un ticket, sa clé sinon) : les
+champs d'une ligne, plus `body`, `link`, `thread` (son fil, les 50 dernières notes : `seq`, `at`, `author_kind`,
+`author` — qui l'a écrite, comme pour un élément —, `kind` — sa sorte : `note` (une note), `change` (ce qui a été dit
+d'un changement), `question` (sa question), `plan` (son plan) —, `kind_label`, `text`, `outside`), `plan_text` (le
+plan à lire avant de le valider), `small`, `statuses` (ceux de sa liste, vide pour un ticket), `journey` (pour un
+ticket, sinon `null` : `steps` — les six, chacune `code`, `label`, `state` (`done` : passée, `current` : en cours,
+`todo` : à venir, `skipped` : sautée), `state_label` —, `current` et `current_label`, `fine` et `fine_label` (son
+étape fine et ses mots, la précision de l'étape en cours), `through_pull`, `skips`, `skips_label`, `ended` — vide,
+`treated`, `dismissed` — et `ended_label` ; fermé, une étape n'est passée que si un fait le dit), `linked` (ce qui lui
+est lié : `objective` — `id`, `text`, `status`, `status_label` —, `pull` et `checks`, comme sur la fiche ; `null`
+chacun) et `can` : `note`, `status`, `assign` (changer à qui il est : un élément d'une liste de suivi), `accept`,
+`dismiss`, `dismiss_needs_reason`, `validate`, `refuse`, `modify`, `close` (le fermer comme traité), `reopen`. Un élément qu'elle ne peut pas lire rend ses faits, sans
+texte ni fil.
+
+**`GET /api/moi/projets/<id>/element/historique?item=`** — l'histoire des étapes d'un ticket (ADR 0293), rejouée de
+son journal par les règles de l'état, de la plus ancienne à la plus récente : `{"item", "cut", "items"}` — `seq`,
+`at`, `status` et `status_label` (l'étape où il entre), `was` et `was_label` (celle qu'il quitte ; vide : sa
+naissance), `step`, `step_label`, `author_kind`, `author` (qui l'y a fait passer, selon la règle des noms),
+`outside`. Des faits, aucun texte : un ticket qu'elle ne peut pas lire la rend aussi, sans un nom. `cut` : trop
+d'événements (2 000) pour tout rejouer.
+
+### Écrire
+
+Chaque geste passe par l'action que la console déclare pour lui, au nom de la personne (auditée
+`moi.projects.<action>`, dédoublonnée par la clé d'envoi, § 1), après la garde de l'outil de conversation du même
+geste. `<id>` : le projet.
+
+| Route | Corps | Qui | Ce que ça fait |
+|---|---|---|---|
+| `POST /api/moi/projets/<id>/plan` | `verdict` (`approve`, `revise`), `words?` | qui a demandé le projet, ou qui s'occupe d'elle | valider son plan (ce qu'il demandait à lire se pose si c'est son propriétaire), ou le lui faire reprendre avec `words` (2 000 caractères, exigés) ; plus de plan qui attend : 409 |
+| `POST /api/moi/projets/<id>/ticket` | `title`, `text?`, `kind?` (`bug`, `task`, `idea`, `question`), `priority?` (`low`, `normal`, `high`, `urgent`) — servis avec leurs mots par la fiche (`lists[].kinds`, `priorities`) | qui le pilote, sur accord ou en modification | ouvrir un ticket → `{"ok", "message", "number", "proposed"}` ; sur accord il naît **proposé** (son propriétaire l'accepte ou l'écarte) ; le même titre : 400 ; 200 tickets ouverts : 409 |
+| `POST /api/moi/projets/<id>/element/noter` | `list`, `item`, `text` | qui le pilote, sur accord ou en modification | une note dans son fil ; sur un ticket qui pose une question, elle y répond (il repasse en analyse). Un élément qu'elle ne peut pas lire : 403 |
+| `POST /api/moi/projets/<id>/ticket/trancher` | `item`, `verdict` (`accept`, `dismiss`, `validate`, `refuse`, `done` : le fermer comme traité, `reopen` : le rouvrir), `reason?`, `plan?` | le propriétaire du projet, ou qui s'occupe d'elle | accepter un ticket proposé ; l'écarter (`reason` exigée, sauf pour confirmer qu'elle l'écarte) ; valider son plan **en nommant le plan lu** (`plan` : son numéro, exigé — un plan réécrit depuis : 409, relire) : un objectif le porte, `reason` devient sa consigne ; le refuser (`reason` exigée). Un ticket qui n'attend pas ce verdict : 409 |
+| `POST /api/moi/projets/<id>/jalon` | `objective`, `milestone`, `verdict` (`validate`, `refuse`), `reason?` | le propriétaire du projet, ou qui s'occupe d'elle | un point d'arrêt dit prêt : validé, il est atteint et elle reprend ; refusé (`reason` exigée), il lui revient. Un jalon qui n'attend pas : 409 |
+| `POST /api/moi/projets/<id>/element/statut` | `list`, `item`, `status`, `note?` | qui le pilote en modification | le statut d'un élément d'une liste de suivi (pas d'un ticket : 409) ; un statut qui n'est pas de la liste : 400 ; déjà ce statut : 409 |
+| `POST /api/moi/projets/<id>/element/ajouter` | `list`, `title`, `key?`, `text?`, `status?`, `actor?` (`self`, `owner`), `link?` | qui le pilote en modification | un élément de plus dans une liste de suivi → `{"ok", "message", "list", "key"}` ; un ticket s'ouvre par `…/ticket` (400) ; la même clé : 400 ; une liste inconnue : 404 |
+| `POST /api/moi/projets/<id>/element/confier` | `list`, `item`, `actor` (`self` : à elle, `owner` : au propriétaire du projet) | qui le pilote en modification | à qui est un élément d'une liste de suivi (la main sur un ticket se déduit de son étape : 409) ; déjà à lui : 409 |
+| `POST /api/moi/projets/<id>/piloter` | `what` (`instruct`, `now`, `pause`, `resume`), `text?`, `objective?` | qui le pilote en modification | une consigne (`text`), « vas-y maintenant » (sur `objective`, s'il est nommé), la pause, la reprise. Sur accord : 403, la demande se fait dans le chat, où elle la propose |
+| `POST /api/moi/projets/<id>/liens` | `add?`, `remove?`, `direct_on?`, `direct_off?` (des numéros de projets, 12 au plus chacun), `why?` et `why_for?` | le propriétaire du projet | **ce qui change** dans ce qu'il lit, lien par lien : se mettre à lire (`add`), ne plus lire (`remove`), et pour un projet qu'il lit déjà, que ses demandes y entrent directement (`direct_on`) ou plus (`direct_off`). Elle ne nomme que des projets qu'elle voit : **un lien vers un projet qu'elle ne voit pas reste tel quel** ; le nommer, comme un projet inconnu ou qu'il ne peut pas lire : 400, la même réponse. Rien à changer dans l'envoi, le même projet ajouté et retiré, `direct_on` sur un projet qu'il ne lit pas encore, ou l'ancienne forme (`reads`, `direct` : toute la liste) : 400 ; rien de changé, ou la borne (4 projets lus) : 409. **Le mot d'un lien** (ADR 0293) : `why` (300 caractères) dit pourquoi ce projet lit le projet `why_for` — un projet qu'il lit ou se met à lire, et qu'elle voit (400 sinon) ; sans `why_for`, le seul projet de `add`. Il se dit en posant le lien, ou seul, plus tard ; un lien retiré le perd |
+| `POST /api/moi/projets/<id>/accord` | `proposal`, `decision` (`accept`, `refuse`), `seen`, `note?` | qui s'occupe d'elle | décider de ce qui attend un accord dans ce projet (un envoi, une commande avec le réseau, une pull request, une issue, une note à publier, un pilotage demandé…) → `{"ok", "message", "status"}` (`approved`, `rejected`). Accepter exige `seen`, le `digest` lu (400 sans) ; ce qui partirait a changé, ou ne peut pas partir tel quel : 409, rien ne part ; déjà décidé, ou pas de ce projet : 404 |
+
+L'action de projet du chat (`POST /api/projects/pending/<id>/approve`, `protocole-chat.md` § 4) reste celle des
+opératrices ; celle d'ici porte le condensé lu et suit la personne.
+
+### Le code d'un projet
+
+Les six vues de l'onglet Code (ADR 0288), sous `/api/moi/projets/<id>/code`. Toutes demandent **le détail** du projet
+(sinon 403, « Ce projet ne t'est ouvert qu'à voir… » ; un projet qu'elle ne voit pas : 404).
+
+- **Le détail donne les titres et les états** : ses commits, ses branches, ses pull requests, ses issues, sa CI.
+  **Le contenu demande le droit sur ses fichiers** (`rights.files`) — celui de ses lignes d'accès, hors de toute
+  conversation et par ce client, au niveau de ce que le projet écrit : sans lui, l'arbre, un fichier et les commits
+  d'un chemin répondent 403 (« Ce projet ne t'ouvre pas ses fichiers… »), et un commit, une branche ou une pull
+  request se lisent sans leurs fichiers (`files: []`, `files_readable: false`, `files_why`).
+- **D'où vient chaque chose.** Les pull requests, leur CI et leur relecture : du journal. Les fichiers, les commits,
+  les branches et les diffs : du dépôt de l'atelier, à une référence (`ref` : une branche, ou l'identifiant d'un
+  commit — rien d'autre ne se nomme). Ce que l'hôte est seul à savoir : relu chez lui à la demande, au plus soixante
+  lectures par minute et par compte (429 au-delà) ; s'il ne répond pas, `error` le dit et le reste est vide.
+- **Un chemin** (`path`, 1 000 caractères) est relatif à la racine du dépôt : absolu, ou qui remonte (`..`), il est
+  refusé (400, `fields.path`) ; un lien symbolique se dit, il ne se suit pas. Une référence, un commit, un chemin ou
+  un numéro inconnus : 404.
+- **Un fichier caché ne sort pas d'ici** (ADR 0292) — un segment qui commence par un point (`.env`, `.gitignore`,
+  `.github/…`), la règle du partage d'un fichier de projet : le nommer répond 403 (`fields.path`), même à qui lit ses
+  fichiers ; l'arbre ne le liste pas (`hidden` : combien il en tait) ; un diff dit son chemin et ses comptes, sans ses
+  passages (`hidden: true`, `why`). `.env` et ses variantes ne s'enregistrent jamais dans le dépôt d'un atelier.
+- **Tout texte de l'hôte** est un objet `{"text", "outside": true}` (ou `null`) : le titre et le texte d'une pull
+  request ou d'une issue, une étiquette, le nom d'une vérification, la fin d'un journal, le compte qui a écrit là-bas
+  (`account`). Un commit venu du dépôt distant porte `outside: true` : son message et son auteur ne sont pas d'elle.
+  Une issue qu'aucun ticket accepté ne reflète est le texte d'un inconnu : son titre, ses étiquettes, son texte et
+  ses échanges ne se servent qu'à qui peut la trancher (sinon `veiled`, `title: null`).
+
+**Un commit** (partout où il apparaît) : `sha`, `short`, `title`, `at`, `author_kind` (`self` : elle ; `other`),
+`author`, `outside`, `branch` (celle de la base, ou la branche de travail qui le porte), `base`, `merge` (une fusion),
+`files`, `insertions`, `deletions`, `objective` et `ticket` (ceux qui lui sont liés ; 0 : aucun), `url` (sa page chez
+l'hôte, composée ici). **Ce qui est lié** (`objective`, `ticket`, `pull`, `checks`, ou `null`) : l'objectif (`id`,
+`text`, `kind`, `status`, `status_label`), son ticket (`number`, `handle`, `title`, `veiled`, `veiled_label`, `status`
+— son étape —, `status_label`, `open`, `hand`, `hand_label`, `yours`), sa pull request en bref (`number`, `title`,
+`state`, `state_label`, `url`, `branch`, `checks`, `review`), ses vérifications (`state`, `state_label`, `sha`, `at`).
+
+| Route | Ce qu'elle rend |
+|---|---|
+| `GET …/code` | le dépôt en bref : `has_repo`, `base`, `current` (la branche où l'atelier se trouve), `remote` (`has`, `web` : sa page chez l'hôte, `branch`, `flow`, `by_pulls`, `synced_at`), `rights` (`files`, `merge`), `counts` (`commits`, `branches`, `pulls_open`, `pulls_ready`, `issues_open`, `checks_failed`), `last_commit` |
+| `GET …/code/fichiers[?ref=&path=]` | **droit sur les fichiers.** Un dossier à une référence (par défaut la base), un niveau à la fois : `ref`, `path`, `parent` (`null` à la racine), `readme` (le chemin de son README, ou vide), `hidden` (les entrées cachées qu'il tait), `items` (les dossiers d'abord, 1 000 au plus : `path`, `name`, `kind` — `dir`, `file`, `link`, `module` —, `kind_label`, `size`), `last_commit` |
+| `GET …/code/fichier?path=[&ref=]` | **droit sur les fichiers.** Un fichier : `ref`, `sha` (le commit lu), `path`, `name`, `kind`, `kind_label`, `size`, `text` et `lines` s'il se lit (`readable`) ; sinon `binary`, `too_big` (plus de 400 000 octets) et `why`, en mots — un lien symbolique et un sous-module se disent aussi, sans contenu. `last_commit`, `history` (les dix derniers commits qui l'ont touché), `history_total`, `url` |
+| `GET …/code/commits[?ref=&path=&page=&size=]` | l'histoire d'une branche, ou de toutes sans `ref`, du plus récent : `{"ref", "total", "page", "size", "items"}` (`size` : 30, 100 au plus). `path` : ceux qui ont touché ce chemin (droit sur les fichiers) |
+| `GET …/code/commit?sha=[&path=&lines=]` | un commit : `commit` (plus `body`, son message entier, et `parents`), ses fichiers et leur diff (voir plus bas), `linked` |
+| `GET …/code/branches` | `{"base", "items"}`, la base d'abord : `name`, `base`, `current`, `ahead` et `behind` (son avance et son retard sur la base), `head` (son dernier commit), et ce qui lui est lié (`objective`, `ticket`, `pull`, `checks`) |
+| `GET …/code/branche?name=` | `branch` (la même ligne), `commits` (ceux qu'elle a d'avance, 200 au plus), ses fichiers changés avec leurs comptes, sans leurs passages (`files`) |
+| `GET …/code/pulls[?page=&size=]` | ses pull requests, les prêtes d'abord : `number`, `title`, `state` (`proposed` : elle attend un accord avant de partir ; `open` ; `ready` : prête à fusionner ; `merged` ; `closed`), `state_label`, `url`, `branch`, `base`, `at`, `checks`, `review` (`ok`, `asked`, `label`, `at`, `commit`, `refused`, `handed_over`, ou `null`), `conflicts`, `changes_asked`, `awaits_accord`, `unsent`, `objective`, `ticket`, `merge` |
+| `GET …/code/pull?number=[&path=&lines=]` | une pull request (`objective=` pour celle qui n'a pas encore de numéro) : `pull` — la ligne de la liste, plus `head` (**le commit au bout de sa branche : celui à nommer pour la fusionner**), `fork` (d'où elle s'écarte de la base), `done_when`, `result`, `milestones` (les jalons de son objectif et leurs preuves, comme sur la fiche), `review` (plus `by`, `text` : ses constats, `last_refusal`), `checks` (plus `said` : la fin du journal d'un échec), `said` (le dernier mot de l'hôte) — ; `commits` ; ses fichiers et leur diff |
+| `GET …/code/pull/hote?number=` | ce que l'hôte en dit maintenant : `title`, `body`, `head`, `mergeable`, `state`, `at`, `read_at`, `talk` (ses commentaires et le texte de ses relectures, du plus ancien au plus récent, 60 au plus : `id`, `at`, `account`, `text`, `outside`, `from_here` — publié d'ici, sous le compte du jeton), `checks` (comme `…/ci/commit`), `error`. Sans dépôt distant lisible : 409 |
+| `GET …/code/issues[?state=&page=&size=]` | les issues du dépôt, relues chez l'hôte (les cinquante dernières touchées) et celles que ses tickets connaissent : `{"total", "page", "size", "error", "items"}` — `number`, `url`, `title`, `veiled`, `veiled_label`, `state` (`open`, `closed`, ou vide si l'hôte ne l'a pas dite), `state_label`, `dropped`, `labels`, `comments`, `at`, `from_here`, `account`, `ticket` (celui qui la reflète, et son étape). `state` : `open`, `closed` |
+| `GET …/code/issue?number=` | une issue : la même ligne, plus `body` et `talk` (ses commentaires), pour qui peut la lire ; `error` |
+| `GET …/code/ci` | les vérifications que le moteur suit, par commit (celui de chaque pull request), les plus récentes d'abord, 40 au plus : `sha`, `state` (`none`, `pending`, `passed`, `failed`), `state_label`, `at`, `said` (la fin du journal d'un échec), `commit`, `branch`, `objective`, `pull` |
+| `GET …/code/ci/commit?sha=` | les vérifications d'un commit de ce dépôt, relues chez l'hôte : `sha`, `state`, `state_label`, `at`, `read_at`, `runs` (une à une, 30 au plus : `name`, `state`, `state_label`, `started`, `at`, `seconds`), `failed`, `log` (`name`, `tail` : la fin du journal de la première en échec, ou `null`), `error`, `commit`, `linked` |
+
+**Un diff** (`…/code/commit`, `…/code/pull` ; ses comptes seuls pour `…/code/branche`) : `files` — pour chacun `path`,
+`status` (`added`, `modified`, `deleted`), `status_label`, `insertions`, `deletions`, `binary`, `cut`, `hidden` et
+`why` (un fichier caché : sans passages), et `hunks` : ses
+passages (`header`, et `lines` : `kind` — `" "`, `"+"`, `"-"` —, `old` et `new`, ses numéros avant et après, 0 quand
+la ligne n'y est pas, `text`, 500 caractères au plus) : de quoi l'afficher unifié ou côte à côte —, `insertions`,
+`deletions`, `cut` et `cut_label`, `files_readable`, `files_why`. Borné à `lines` lignes en tout (3 000, le plus
+aussi) : au-delà, le fichier où la borne tombe est coupé, les suivants gardent leurs seuls comptes (`cut: true`), et
+chacun se relit seul par `path=`. Un fichier binaire n'a pas de passages.
+
+**Peut-elle la fusionner** (`merge`, sur chaque pull request) : `can` — la garde de la route, dite d'avance —, `why`
+(en mots : ce n'est pas à elle, ou ce qui retient la pull request — pas ouverte, en conflit, des changements
+demandés, des vérifications en cours ou en échec, un commit pas encore envoyé, une fusion déjà demandée, **un commit
+tout juste parti dont l'hôte n'a pas encore dit les vérifications** : trois minutes au plus, pendant lesquelles il se
+relit chaque minute), `asked`
+(une fusion est en route : demandée, ou faite et pas encore relue chez l'hôte), `asked_at`, `asked_by`, `refused`
+(pourquoi la dernière demande n'a pas abouti, en mots) et `refused_at`.
+
+**`POST /api/moi/projets/<id>/code/pull/fusionner`** — corps : `number`, `head`. **Le geste d'une personne** : le
+propriétaire du projet, ou qui s'occupe d'elle (403 sinon) — Mika ne fusionne jamais, et aucun de ses outils ne le
+peut. `head` nomme le commit qu'elle a lu (`pull.head`, 40 caractères ; 400 sans lui) : si la branche a bougé depuis,
+dans l'atelier ou chez l'hôte, si l'hôte la dit impossible à fusionner, ou si la pull request n'est pas prête, rien ne
+part (409, en mots). Sinon `{"ok", "message", "deduped", "asked": true, "number"}` : la fusion est demandée chez
+l'hôte, après quoi le moteur relit la pull request et l'apprend comme toute fusion — l'objectif clos, son ticket
+traité. Entre-temps `merge.asked` est vrai ; un refus de l'hôte se lit dans `merge.refused`. **Au moment de fusionner
+(ADR 0292)**, l'action relit chez l'hôte les vérifications du commit de tête — en cours, en échec ou illisibles : 409
+— et la base où la pull request entre — autre que la branche du projet : 409, en mots. De deux demandes parties
+ensemble, une seule s'écrit (l'autre : 409). Une réponse de l'hôte perdue après l'envoi se lit dans `merge.refused`
+comme « on ne sait pas si la fusion a eu lieu » — jamais « n'a pas eu lieu » — et l'hôte se relit aussitôt. L'action est celle de la
+console (`projects.fusionner`), auditée `moi.projects.fusionner`. Le client demande une confirmation avant d'envoyer.
+
+### Gérer un projet
+
+Ce que l'écran montre s'y modifie (ADR 0290). Chaque geste passe par l'action de la console du même geste, au nom de
+la personne (auditée `moi.projects.<action>`, dédoublonnée par la clé d'envoi), après la garde du moteur :
+
+- **son cadre** — ses réglages, ses outils, son dépôt, l'archiver, le restaurer : qui le pilote en modification
+  **et** en est le propriétaire, ou s'occupe d'elle (`rights.frame`). Qui ne fait que le piloter : 403 (« Seul le
+  propriétaire du projet… change son cadre ») ;
+- **ce qui ouvre autre chose que le projet** (ADR 0292) est réservé à **qui s'occupe d'elle**, même pour le
+  propriétaire du projet : ses outils autres que sa mémoire et le web (`tool_email`, `tool_camera`, `tool_rss`,
+  `tool_forge`, `tool_forge_apps`, chaque `service_…`), `approval` (l'accord de ce qui sort), `issues` (la publication
+  en issues), et tout son dépôt distant (`remote`, `branch`, `auto_push`, `flow`). Les changer sans s'occuper d'elle :
+  403, « Ce réglage ouvre autre chose que ce projet… », avec `fields` — le champ refusé ; rien d'autre de l'envoi
+  n'est enregistré. Chaque champ le dit d'avance (`can`, `why`) ;
+- **ses objectifs, ses jalons, ses tickets, ses décisions** : qui le pilote en modification (`rights.edit`) ;
+- **sur l'accord du propriétaire**, rien de tout cela d'ici (403 : la demande se fait dans le chat) ; qui ne fait que
+  le voir : 403 ; qui ne le voit pas : 404.
+
+Chaque objet dit ce qu'elle peut en faire, la garde de sa route dite d'avance, et sinon pourquoi (`why`, en mots à
+afficher tels quels) : sur un objectif ou une mission de la fiche, `can` — `modify`, `reopen`, `done`, `drop`,
+`milestone` (lui ajouter un jalon), `why` ; sur un jalon, `can` — `modify`, `drop`, `why`.
+
+**Le projet**
+
+| Route | Corps | Qui | Ce que ça rend ou fait |
+|---|---|---|---|
+| `GET /api/moi/projets/nouveau` | — | toute personne | de quoi remplir « Nouveau projet » : `can`, `why`, `fields` (voir « Un champ ») |
+| `POST /api/moi/projets/nouveau/creer` | `title`, `request?` (ce qu'elle veut, 2 000 caractères), `mode?`, `schedule?`, `schedule_rule?` | qui s'occupe d'elle | lui confier un projet : il naît **à cadrer**, pour elle, avec ses mots — elle pose ses questions puis propose un plan → `{"ok", "message", "project"}` |
+| `GET /api/moi/projets/archives` | — | toute personne | les projets archivés qu'elle peut restaurer (les siens ; tous, pour qui s'occupe d'elle), sous ce qu'elle en aurait une fois restaurés — ses lignes d'accès, son niveau : `{"items": [{"id", "title", "archived_at", "owner_name"}]}` (`owner_name` : vide pour le sien, et pour qui n'a pas le droit de connaître ce nom) |
+| `GET /api/moi/projets/<id>/reglages` | — | qui lit son détail | ses réglages en cinq sections : `can`, `why`, `renamable` (un projet qu'elle a ouvert d'elle-même ne se renomme pas), `archive` (`can`, `why`), `sections` — `name` (`general`, `rythme`, `accords`, `depot`, `outils`), `title`, `summary` (la section en une ligne), `can` et `why` (au moins un de ses champs se change), `fields`. L'adresse du dépôt distant n'est servie qu'à qui le projet est ; **les services branchés sur l'instance (`service_…`) ne sont servis qu'à qui peut les cocher** — les autres ne voient que ceux que le projet a |
+| `POST /api/moi/projets/<id>/reglages/enregistrer` | `section`, `values` (les champs qui changent, par leur nom) | son cadre ; un champ réservé : qui s'occupe d'elle | le reste garde sa valeur. Un champ d'une autre section, ou d'une forme fausse : 400 (`fields`) ; un champ réservé à qui s'occupe d'elle : 403 (`fields`) ; rien de changé : 409. Un projet qui n'est pour personne le reste |
+| `POST /api/moi/projets/<id>/archiver` | — | son cadre | il ne travaille plus, rien n'est effacé ; il n'existe plus dans cette API, sauf dans `…/archives` |
+| `POST /api/moi/projets/<id>/restaurer` | — | son cadre, tel qu'elle l'aurait une fois le projet restauré | un projet archivé revient, en pause ; celui qu'elle ne pourrait pas régler : 404 |
+
+**Un champ** (`fields`) : `name`, `label`, `help`, `kind` (`text`, `textarea`, `select`, `bool`, `int`…), `required`,
+`choices` (`[{"code", "label"}]`), `value` (sa valeur actuelle), `min`, `max`, `only` (les valeurs d'un autre champ
+qui le rendent utile : `[{"field", "values"}]`), `can` (elle peut le changer : la garde de l'enregistrement, dite
+d'avance) et `why` (sinon pourquoi, en mots à afficher tels quels). Ce sont les champs des actions de la console, décrits par elles :
+le client n'écrit aucun libellé.
+
+**Ses objectifs et ses jalons** — qui le pilote en modification :
+
+| Route | Corps | Ce que ça fait |
+|---|---|---|
+| `POST …/objectif` | `text`, `kind?` (`once`, `constant` : une mission), `done_when?` (« fini quand »), et pour une mission `cadence_hours?`, `on?` (ce qui la déclenche, quatre au plus), `only_on_event?`, `at_once?` (premier passage tout de suite), `each_pass?` (ce que chaque passage doit faire, une ligne par chose) | ajouter un objectif → `{"ok", "message", "objective"}` ; un déclencheur refusé : 400 (`fields.on`) |
+| `POST …/objectif/modifier` | `objective`, et les mêmes champs : ceux qui changent | le reste garde sa valeur ; rien de changé : 409 ; un objectif retiré : 404 |
+| `POST …/objectif/statut` | `objective`, `status` (`open` : le rouvrir, `done` : le dire terminé, `dropped` : le retirer) | une mission ne se dit pas terminée (409) |
+| `POST …/jalon/ajouter` | `objective`, `text`, `check?` (`prose` : sa parole, `command`, `owner` : un point d'arrêt, `item`), `command?`, `item_list?`, `item?`, `item_status?` | un jalon de plus sur un objectif ponctuel ouvert (cinq vivants au plus) |
+| `POST …/jalon/modifier` | `objective`, `milestone`, ce qui change parmi `text`, `check`, `command`, `item_list`, `item`, `item_status`, et `reason?` | un jalon encore ouvert |
+| `POST …/jalon/retirer` | `objective`, `milestone`, `reason?` | il reste lisible, retiré |
+
+Un jalon atteint ou retiré ne bouge plus (409). **Un point d'arrêt, un jalon posé par une personne, fixé par un plan
+validé ou refusé par le propriétaire ne se modifie ni ne se retire que par qui tranche** — le propriétaire du projet,
+ou qui s'occupe d'elle (403 sinon, dit dans `can.why`).
+
+**Un ticket** : `POST …/ticket/modifier` — `item`, et ce qui change parmi `title`, `text`, `kind`, `priority` : qui
+le pilote en modification, pour un ticket qu'elle peut lire ; son étape ne change pas. Le fermer comme traité et le
+rouvrir : `POST …/ticket/trancher`, `verdict: done` et `reopen` (qui tranche).
+
+**Ses décisions techniques** — les lire demande son détail ; les changer, de le piloter en modification :
+
+| Route | Corps | Ce que ça rend ou fait |
+|---|---|---|
+| `GET …/decisions[?status=]` | `status` : `active` (en vigueur, par défaut), `withdrawn`, `superseded`, `all` | `{"total", "in_force", "can", "why", "items"}`, les plus récentes d'abord : `number`, `title`, `choice`, `status`, `status_label`, `author_kind`, `author`, `at`, `replaces`, `replaced_by`, `objective`, `can` (`modify`, `replace`, `withdraw`, `restore`, `why`) |
+| `GET …/decision?number=` | — | la même ligne, plus `context`, `options` (les options écartées) et `reason` |
+| `POST …/decision/ajouter` | `title`, `choice`, `reason?`, `context?`, `options?`, `replaces?` (la décision en vigueur qu'elle remplace) | la consigner → `{"ok", "message", "number"}` ; l'ancienne reste lisible, remplacée |
+| `POST …/decision/modifier` | `number`, et ce qui change parmi ces textes (vide : un texte facultatif est retiré) | une décision remplacée ne se modifie pas (409) |
+| `POST …/decision/statut` | `number`, `status` (`withdrawn` : la retirer, `active` : la remettre en vigueur) | — |
+
+**Une pull request : son titre, son texte, un commentaire.** Le geste d'une personne, comme la fusion : le
+propriétaire du projet, ou qui s'occupe d'elle (`rights.pull_write` ; 403 sinon) — Mika n'écrit jamais ainsi.
+
+- `POST …/code/pull/modifier` — `number`, `title?`, `body?` (un champ vide ne change pas ; les deux vides : 400) ;
+- `POST …/code/pull/commenter` — `number`, `text` (4 000 caractères).
+
+L'une et l'autre répondent `{"ok", "message", "asked": true, "number"}` : la demande est posée au journal, puis elle
+part chez l'hôte. Un commentaire part du compte du jeton : son texte dit qui l'écrit, par son nom. Le résultat se lit
+dans le fil d'activité (« parti chez l'hôte », ou pourquoi non) et, pour ce qui est parti, dans `…/code/pull/hote`.
+Une pull request qui n'est pas ouverte chez l'hôte : 409 ; inconnue : 404.
+
+### L'activité d'un projet
+
+Tout se relit du journal (ADR 0290). Ces lectures demandent **son détail, au niveau de ce que le projet écrit**
+(`rights.work` ; 403 sinon). **Chaque texte se compare en plus au niveau où il a été écrit** (ADR 0292) : le compte
+rendu, la demande ou la note d'un objectif né d'un ticket plus confidentiel ne se sert pas à qui n'entend pas ce
+niveau, même quand ce ticket n'est plus là pour le dire — la ligne porte alors `veiled: true` et, à la place du
+texte, « Un texte d'un niveau que tu n'entends pas ici. ».
+
+**`GET …/activite[?kind=&objective=&ticket=&before=&size=]`** — son fil, du plus récent au plus ancien :
+`{"kinds": [{"code", "label"}], "size", "next", "items"}`. `kind` : `run` (une exécution), `commit` (le commit
+qu'elle a laissé), `pull` (ce qui arrive à une pull request : l'hôte relu, ses vérifications, une fusion, ce qui est
+parti), `ticket`, `gesture` (**ce qu'une personne a fait**, quel que soit l'objet : un objectif, un jalon, une
+décision, une consigne, une pause, un plan validé, une fusion demandée, un commentaire). `objective` : ce qui le
+concerne. `ticket` (son numéro) : ce qui arrive à ce ticket, et aux objectifs nés de lui (leurs exécutions, leurs
+commits, leur pull request). `next` : le curseur à renvoyer dans `before` (0 : il n'y a plus rien). Une ligne :
+
+```json
+{"seq": 4120, "at": 1790790000000, "kind": "run", "kind_label": "exécution", "what": "report",
+ "title": "Le journal des refus est écrit et testé.", "sub": "", "objective": 2, "ticket": 0, "pull": 0,
+ "sha": "cdd07ae46e31…", "verdict": "continue", "verdict_label": "continuer", "run": "ep-…",
+ "author_kind": "self", "author": "Mika", "outside": false}
+```
+
+`title` : pour une exécution, son compte rendu ; sinon ce qui s'est passé, en mots ; `sub` : ce qui a été écrit (une
+consigne, le texte d'un objectif), ou la branche d'un commit ; `run` : l'exécution à ouvrir (`…/execution?id=`) ;
+`author_kind` et `author` : comme pour un ticket (`self`, `you`, `person`, `project`, `host`) ; `outside` : ce que
+dit l'hôte, ou un autre projet. Le titre d'un ticket n'est dit que si elle peut le lire. Le message d'un commit se
+lit dans `…/code/commit?sha=`.
+
+**`GET …/activite/jours`** — les trente derniers jours : `days` (du plus ancien au plus récent : `day`, puis un
+compte par sorte — `run`, `commit`, `pull`, `ticket`, `gesture` — et `total`), `totals`, `total`, `kinds`, `by` (qui
+a fait quoi : `[{"who": "self" | "you" | "others", "label", "count"}]`), `cut` (trop d'événements : les jours les
+plus anciens sont incomplets).
+
+**`GET …/activite/totaux[?objective=&ticket=]`** — les totaux (ADR 0293), sur toute son histoire et pour ce filtre :
+`kinds` (`code`, `label`, `count`), `totals` (par sorte), `total`, `cut` (trop d'événements : le compte est
+incomplet), `notes` (les notes de son carnet) et `notes_cut`, `runs` (ses exécutions).
+
+**`GET …/executions[?before=&size=]`** — `{"total", "size", "next", "sorts", "items"}` : `id`, `at`, `sort`
+(`frame` : cadrage, `run` : travail, `review` : relecture), `sort_label`, `objective` (`id`, `text`, `kind`,
+`ticket`, `status`, `status_label` ; `null` pour un cadrage), `running`, `outcome`, `outcome_label`, `seconds` (sa
+durée), `verdict` (`continue`, `done`, `blocked`, `wait`, ou vide), `verdict_label`, `proven`, `summary`, `commit`,
+`branch`, `asked` (elle a demandé quelque chose).
+
+**`GET …/execution?id=`** — une exécution : la même ligne, plus `report` (son compte rendu entier), `need` (ce
+qu'elle a demandé), et **ce qu'elle a fait pas à pas** : `steps` (200 au plus ; `steps_cut` au-delà) — `tool`,
+`label` (l'outil, en mots), `aim` (ce qu'il visait, en une ligne : un chemin, une commande, une recherche, une
+adresse — jamais un texte qu'il portait), `ok`, `ran`, `ms`, `acts` (il change quelque chose), `outside` (**ce que
+cet outil rend vient d'ailleurs**). Jamais ce qu'un outil a rendu. **`aim` ne se dit qu'avec le droit sur les
+fichiers du projet** (`rights.files`, ADR 0292) — c'est l'arbre du dépôt par morceaux : sans lui, `aim` est vide
+partout, `steps_aims` est faux et `steps_aims_why` dit pourquoi ; un pas qui vise un projet lié ne dit `aim` qu'à qui
+lit aussi les fichiers de ce projet-là. `steps_kept: false` : sa trace n'est plus gardée (quatorze jours).
+
+**`GET …/carnet[?objective=&before=&size=]`** — ses notes, les plus récentes d'abord : `seq`, `at`, `text`,
+`objective` (celui qu'elle visait en l'écrivant, ou `null`), `run` ; et `total` (combien, pour ce filtre),
+`total_cut`.
+
+**`GET …/diagramme`** — de quoi dessiner ses objectifs, dans l'ordre du plan : `now`, `from` (la première date),
+`cut`, `objectives` — `id`, `text`, `kind`, `status`, `status_label`, `after` (**l'objectif dont il dépend**),
+`rank`, `ticket`, `added_at`, `started_at` (sa première exécution), `last_run`, `closed_at`, `runs`, `reached` et
+`milestones_total`, `passes` (**les passages d'une mission**, soixante au plus), et `milestones` : `id`, `text`,
+`status`, `status_label`, `check`, `check_label`, `ready`, `added_at`, `started_at` (**quand elle s'y est mise**),
+`ready_at`, `reached_at`, `runs` (les exécutions qu'il a prises). **De vraies dates seulement** : 0 veut dire « pas
+encore arrivé ». Quand elle s'est mise à un jalon et ce qu'il a pris se déduisent des départs de ses exécutions (la
+première après le jalon d'avant) ; le moteur n'estime aucune durée.
+
+### La documentation d'un projet
+
+Un espace à part de son dépôt (ADR 0289), sous `/api/moi/projets/<id>/documentation` : des pages en Markdown rangées
+en dossiers, et des images. **Enregistrer une page n'est pas un commit** : c'est une version de plus dans cet espace.
+
+- **La lire** : le détail du projet, et sa documentation — ouverte d'office à qui le projet appartient ; à une autre
+  personne quand une ligne d'accès qui la désigne la donne (la colonne « documentation », fermée tant qu'on ne la
+  coche pas), hors de toute conversation et par ce client, au niveau de ce que le projet écrit. Sans elle, toutes ces
+  routes répondent 403 (« Ce projet ne t'ouvre pas sa documentation… ») ; un projet qu'elle ne voit pas, 404.
+- **L'écrire** : la lire, et piloter le projet en modification, en être le propriétaire, ou s'occuper d'elle. Sinon
+  403 (« Tu lis la documentation de ce projet sans pouvoir l'écrire… »). `rights.write` et `can.write` le disent
+  d'avance.
+- **Un chemin** (`path`) est relatif à l'espace et finit par `.md` : des segments en minuscules, chiffres, points et
+  tirets, séparés par `/`, six niveaux et 160 caractères au plus. Absolu, qui remonte (`..`), ou écrit autrement : 400
+  (`fields.path`) — rien n'est corrigé. Une image a un nom simple (`schema-reseau.png`) ; une page la cite par
+  `images/<nom>`.
+- **Qui a écrit** une version ou ajouté une image : `author_kind` et `author` comme pour un élément (`self` : elle ;
+  `you` ; `person`, nommée seulement si elle a le droit de le savoir), plus `via` — `run` (elle, pendant une
+  exécution), `web` (une personne, dans le navigateur ou l'application), `mcp` (un outil, par MCP, au nom de cette
+  personne), `console` —, `via_label` (ses mots) et `tool` (par MCP : le nom du jeton que l'outil présentait — servi
+  à sa personne et à qui a le droit de la nommer seulement, vide sinon : ADR 0292).
+- **Les bornes** (`limits`) : une page, 100 000 caractères ; 200 pages ; les 50 dernières versions de chaque page ;
+  une image, 5 Mio (PNG, JPEG, GIF, WebP — pas de SVG) ; 200 images et 100 Mio par projet.
+
+| Route | Ce qu'elle rend |
+|---|---|
+| `GET …/documentation` | l'espace : `project`, `rights` (`read`, `write`), `limits`, `pages` (toutes, par chemin : `path`, `name`, `folder`, `title` — son premier titre de niveau 1, sinon le nom du fichier —, `version`, `at`, `created_at`, `chars`, `images` : celles qu'elle cite, et qui l'a écrite en dernier), `folders` (ses dossiers, déduits des chemins), `images` (les plus récentes d'abord : `name`, `path`, `size`, `mime`, `at`, `used_by` : les pages qui la citent, et qui l'a ajoutée), `space_used` (octets) |
+| `GET …/documentation/page?path=` | une page : la ligne de l'arbre, plus `text` (son Markdown), `forgotten` (son texte a été oublié) et `can.write`. Inconnue : 404 |
+| `GET …/documentation/historique?path=` | `path`, `version` (la dernière), `kept` (50), `versions` (de la plus récente à la plus ancienne : `n`, `at`, `word` — le mot sur ce qui a changé —, `restored` — la version reprise, 0 sinon —, `chars`, `current`, et qui l'a écrite) |
+| `GET …/documentation/version?path=&n=` | une version gardée : la même ligne, plus `text` et `forgotten`. Plus gardée, ou inconnue : 404 |
+| `GET …/documentation/chercher?q=` | `{"q", "items"}` : les pages dont le chemin ou le texte contient ces mots (ni casse ni accents ; 120 caractères, 20 pages au plus, les dernières écrites d'abord), chacune avec `excerpt`, le passage |
+| `GET …/documentation/images` | `{"items", "space_used", "limits"}` : ses images, comme dans l'espace |
+| `GET …/documentation/image?name=` | les octets d'une image, servis comme une image (`nosniff`, sans rien d'actif) — **à qui peut lire la documentation seulement**. Inconnue, ou ses octets oubliés : 404 |
+
+| Route (écrire) | Corps | Ce que ça fait |
+|---|---|---|
+| `POST …/documentation/page/enregistrer` | `path`, `text`, `word?` (200 caractères), `base` | **une version de plus**, avec son mot. `base` nomme la version lue (`version`) ; `0` crée la page. **Si quelqu'un l'a changée depuis** : 409, en mots (« Cette page a changé depuis ta lecture : elle en est à la version N, écrite … » — par qui, selon la règle des noms : « une autre personne » pour qui n'a pas le droit de le savoir, et jamais le nom de son jeton) — rien n'est écrasé : relire, puis reprendre. Sans `base` : 400 ; une page qui existe avec `base: 0`, le même texte, 200 pages déjà : 409. Rend `{"ok", "message", "path", "version"}`. Un corps JSON est borné à 64 Kio : **une longue page s'envoie en `multipart/form-data`** (les mêmes champs) |
+| `POST …/documentation/page/revenir` | `path`, `version`, `base` | revenir à une version gardée : son texte redevient celui de la page, **dans une version de plus** (`restored`, le mot « Retour à la version N ») — rien n'est perdu. Version plus gardée : 404 ; la page a changé depuis `base` : 409 |
+| `POST …/documentation/page/deplacer` | `path`, `to` | renommer ou déplacer (un autre chemin) : ses versions la suivent, les liens des autres pages ne sont pas réécrits. Un chemin pris, une page inconnue : 409 |
+| `POST …/documentation/page/supprimer` | `path` | supprimer la page et ses versions |
+| `POST …/documentation/image/televerser` | `multipart/form-data` : un fichier, `name?` | une image de plus → `{"ok", "message", "name", "path"}`. Son nom est celui du fichier, replié en un nom simple, à l'extension que disent ses octets ; pris, il reçoit un numéro (`schema-2.png`). Une image retirée se remet sous le même nom. Un envoi redit avec la même clé d'envoi rend la même réponse (`deduped`). Pas une image qu'on garde, plus de 5 Mio, 200 images ou 100 Mio déjà, ou une image que l'espace n'a pas gardée (un nom pris au même instant) : 409 |
+| `POST …/documentation/image/retirer` | `name` | retirer une image : ses octets s'effacent ; les pages qui la citent la montrent introuvable |
+
+Chaque geste passe par une action de la faculté (`projects.doc_ecrire`, `doc_deplacer`, `doc_supprimer`, `doc_image`,
+`doc_image_retirer`), auditée `moi.projects.doc_…`. La même documentation se lit et s'écrit **par MCP**, sans rien
+régler, sous les mêmes droits : `POST /mcp/moi/` avec un jeton de compte (`Authorization: Bearer mw_…` ; celui d'un
+outil se crée par `mika token create <compte> --client tool`, dans la console, ou par `POST /auth/token` avec
+`"client": "tool"`, et n'ouvre que ce point). Ses outils : `doc_lister` (sans `projet` : les projets dont la
+documentation lui est ouverte ; avec : ses pages et ses images), `doc_lire` (`projet`, `chemin`, `version?`),
+`doc_chercher` (`projet`, `mots`), `doc_ecrire` (`projet`, `chemin`, `texte`, `mot?`, `base`), `doc_image` (`projet`,
+`nom`, `base64`) ; ils rendent le JSON des routes ci-dessus. **Sa porte** (ADR 0292) : 120 appels d'outil par minute
+et par compte — chaque appel compte, aussi dans un lot (vingt messages au plus : au-delà, le lot entier est refusé) ;
+l'appel de trop répond « Trop d'appels d'affilée… », la requête suivante 429 — et 200 écritures (une page, une image)
+par projet sur vingt-quatre heures, tous comptes confondus. Un jeton d'outil se rend lui-même par
+`DELETE /auth/token`, et ne s'élague pas avec les connexions d'un compte. Les décisions techniques d'un projet, que l'écran range
+sous Documentation, ont leurs routes à elles.

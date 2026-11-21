@@ -80,6 +80,8 @@ from mika.app.lending import Lending
 from mika.app.logs import configure_logging
 from mika.app.mcp_settings import McpSettingsStore
 from mika.app.me import MeApi
+from mika.app.me.docs_mcp import PREFIX as DOCS_MCP_PREFIX
+from mika.app.me.docs_mcp import DocsPoint
 from mika.app.me.phone import APK_NAME
 from mika.app.me.teams_extension import EXTENSION_DIR
 from mika.app.mindport import KernelPort
@@ -94,6 +96,7 @@ from mika.contracts import identity as identity_c
 from mika.contracts import self_ as self_c
 from mika.contracts import social as social_c
 from mika.contracts.self_ import PersonaDoc, name_of
+from mika.faculties.projects.docs import PORT as PROJECT_DOCS_PORT
 from mika.inspector.app import assemble
 from mika.inspector.mcp import PREFIX as CONSOLE_MCP_PREFIX
 from mika.inspector.mcp import console_app
@@ -326,6 +329,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     outside["shares"] = DiskShares(data / "partages")
     # ce qu'on lui envoie (ADR 0106) : les octets des pièces jointes, leur index, et de quoi les relire de près
     outside[attachments_c.PORT] = DiskShares(data / "pieces")
+    # les images de la documentation de ses projets (ADR 0289) : leurs octets hors du journal, sauvegardés de même
+    outside[PROJECT_DOCS_PORT] = DiskShares(data / "documentation")
     outside[attachments_c.VECTORS] = piece_vectors
     preprocess = outside["preprocess"] = LocalPreprocessor(gateway, transcribe=whisper(settings.stt))
     # les réveils par API (ADR 0068) : leurs réglages et leurs clés, et la porte qui admet un appel
@@ -496,6 +501,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     console_mcp = Mount(CONSOLE_MCP_PREFIX, app=console_app(kernel, settings.console_mcp_digest, console_pages,
                                                             settings.console_mcp_served, settings.console_mcp_network))
     lent = Mount(LENT_PREFIX, app=lending.app())
+    # la documentation de ses projets, par MCP, pour qui présente un jeton de compte (ADR 0289)
+    docs_mcp = Mount(DOCS_MCP_PREFIX, app=DocsPoint(kernel, live.accounts).app())
     # ce que frontendv2 montre à qui est connecté, et seulement à elle (ADR 0187) ; sa borne des trajets vaut aussi pour
     # le GPX d'un voyage qu'un opérateur tire de la console, sur son compte (ADR 0204)
     moi = MeApi(kernel, live.accounts, origins=web.origins, apk=data / "telephone" / APK_NAME, extension=EXTENSION_DIR,
@@ -506,7 +513,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                                     *home_page.routes(), *now_page.routes(), *people_page.routes(),
                                     *person_overview.routes(console_pages.ui, outbound=moi.outbound),
                                     *rights.routes(console_pages.ui),
-                                    *inspector, relay, console_mcp, lent, world_hub.route()],
+                                    *inspector, relay, console_mcp, lent, docs_mcp, world_hub.route()],
                       preprocess=preprocess, camera=camera, sensor_digest=settings.sensors_digest,
                       wakeup=wakeups.call, teams=teams, push_ready=push_sender.configured,
                       phone=phone), live

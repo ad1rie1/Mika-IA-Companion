@@ -97,6 +97,15 @@ class LLMRequest:
     #: Claude Code) les ignore et écrit jusqu'au bout — l'appelant coupe lui-même ce qu'il garde, et ne compte ni sur la
     #: présence ni sur l'absence de la suite dans le texte rendu
     stop_sequences: tuple[str, ...] = ()
+    #: la forme de la réponse : un schéma JSON (``json_object``) que le fournisseur garantit quand il le sait
+    #: (``output_config.format`` de Claude, ``response_format`` d'un serveur compatible OpenAI, ``format`` d'Ollama —
+    #: ADR 0267). Une garantie quand elle existe, jamais un contrat : un fournisseur qui ne la connaît pas (la CLI de
+    #: Claude Code, un modèle qui la refuse) répond en texte, et l'appelant relit sa réponse comme avant
+    output_schema: Mapping[str, Any] | None = None
+    #: combien le modèle réfléchit avant d'écrire, pour cet appel (``EFFORTS``) ; « » : rien n'est demandé. L'ordre
+    #: (ADR 0285) : ce que l'appelant pose ici, sinon l'effort réglé pour le rôle (la passerelle le pose), sinon celui
+    #: de la fiche du fournisseur. Un fournisseur qui n'a pas d'effort (Ollama, un serveur compatible OpenAI) l'ignore
+    effort: str = ""
     meta: Mapping[str, Any] = field(default_factory=dict)
 
     def extend(self, *messages: Message) -> LLMRequest:
@@ -120,6 +129,14 @@ class LLMResponse:
     prompt_tokens: int = 0
 
 
+def json_object(**properties: Mapping[str, Any]) -> dict[str, Any]:
+    """Le schéma d'un objet JSON plat pour ``LLMRequest.output_schema`` : chaque champ par son nom (un schéma JSON :
+    ``{"type": "number"}``, ``{"type": "string", "enum": […]}``), tous attendus, aucun autre — la forme que les
+    fournisseurs savent garantir (ni bornes de nombre, ni longueurs : l'appelant les tient à la lecture)."""
+    return {"type": "object", "properties": {name: dict(spec) for name, spec in properties.items()},
+            "required": list(properties), "additionalProperties": False}
+
+
 #: ``meta`` d'une requête redemandée après une coupure par ``max_tokens`` : un
 #: fournisseur qui bride sa sortie (un modèle local) lève alors son propre plafond
 RETRY_AFTER_CUT = "retry_after_cut"
@@ -129,6 +146,23 @@ RAW_ARGS_KEY = "_raw"
 #: ``meta`` : l'instant (``loop.time()``) où l'épisode qui porte la requête s'arrête — la passerelle ne donne à aucun
 #: de ses appels plus que ce qui reste devant lui
 DEADLINE_AT = "deadline_at"
+#: les efforts de réflexion (ceux de l'API Claude et de la CLI, ``--effort``), du plus léger au plus poussé, chacun
+#: avec son libellé ; « » : rien n'est demandé (le défaut du modèle ou de la CLI). Ils ne sont déclarés qu'ici : la
+#: requête (``LLMRequest.effort``), les deux fournisseurs Claude, la fiche d'un fournisseur, l'effort d'un rôle et
+#: les commandes ``mika llm`` les lisent — un effort nouveau s'ajoute à cette seule ligne
+EFFORT_LABELS = {"": "défaut de la CLI", "low": "faible", "medium": "moyen", "high": "élevé", "xhigh": "très élevé",
+                 "max": "maximal"}
+EFFORTS = tuple(EFFORT_LABELS)
+
+
+def checked_effort(effort: str) -> str:
+    """L'effort de réflexion demandé, s'il fait partie d'``EFFORTS`` ; sinon ``ValueError`` (partout le même
+    message)."""
+    if effort not in EFFORTS:
+        raise ValueError(f"effort de réflexion inconnu : {effort!r} (attendu : {', '.join(e for e in EFFORTS if e)})")
+    return effort
+
+
 #: les valeurs de ``LLMRequest.tool_choice``
 TOOL_CHOICE_AUTO, TOOL_CHOICE_NONE = "auto", "none"
 
@@ -225,6 +259,11 @@ class LLMGateway(Protocol):
 
     def resolution(self) -> dict[str, str]:
         """Rôle → fournisseur qui le sert vraiment (« » : aucun), pour chaque rôle."""
+        ...
+
+    def effort_of(self, role: str) -> tuple[str, bool]:
+        """L'effort auquel part un appel de ce rôle qui n'en demande pas, et s'il est le sien (ADR 0285) : celui réglé
+        pour le rôle (vrai), sinon celui de la fiche de son fournisseur (faux) ; « » : le défaut du modèle."""
         ...
 
     async def try_on(self, name: str, req: LLMRequest) -> Any:

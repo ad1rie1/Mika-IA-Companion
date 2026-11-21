@@ -51,6 +51,7 @@ from mika.faculties.projects.faculty import (
     objective_at,
     outgoing,
     params,
+    subjects_of,
     written,
 )
 from mika.faculties.projects.rhythm import pick
@@ -216,7 +217,7 @@ async def project_steer(args: SteerArgs, ctx: Any) -> Any:
         said = their_words(ctx)  # ses mots à elle ou lui, tels quels, à côté de ce qu'elle en a retenu (ADR 0145)
         draft = AMENDED.draft(project=p.id, instruction=Content.of(text, level=p.sensitivity), by=person,
                               words=Content.of(said, level=p.sensitivity) if said else None,
-                              owner=p.owner, about=p.about)
+                              owner=p.owner, about=p.about, read_about=p.read_about)
         if await _steered(ctx, draft, _in_state(p.id, STEERABLE)) is None:
             return _changed()
         return phrase("projects.tools.steer.instructed", title=title)
@@ -228,7 +229,7 @@ async def project_steer(args: SteerArgs, ctx: Any) -> Any:
     commit = await _steered(ctx, OBJECTIVE_ADDED.draft(
         project=p.id, objective=number, text=Content.of(text, level=written(p)), kind=args.kind,
         cadence_us=args.cadence_hours * HOUR if args.kind == c.CONSTANT else 0, author="owner", by=person,
-        owner=p.owner, about=p.about), _in_state(p.id, STEERABLE))
+        owner=p.owner, about=p.about, read_about=p.read_about), _in_state(p.id, STEERABLE))
     if commit is None:
         return _changed()
     number = attributed(ctx, p.id, commit, "text", "objectives", number)
@@ -253,10 +254,12 @@ async def _answer_plan(args: SteerArgs, ctx: Any, p: Project, person: str, title
     if args.what == REVISE and not said:
         return ToolResult(ok=False, content=phrase("projects.tools.steer.no_instruction"))
     draft = PLAN_ANSWERED.draft(project=p.id, verdict=args.what, words=Content.of(said, level=p.sensitivity)
-                                if said else None, by=person, owner=p.owner, about=p.about)
+                                if said else None, by=person, owner=p.owner, about=p.about,
+                                read_about=p.read_about)
     s: ProjectsState = frame.state("projects")
     linking = links.approved(s, p, person, links.world_of(frame)) if args.what == APPROVE else links.Approved()
-    link = (LINKS_SET.draft(project=p.id, reads=linking.reads, by=person),) if linking.added else ()
+    link = (LINKS_SET.draft(project=p.id, reads=linking.reads, by=person, owner=p.owner, about=p.about,
+                            read_about=p.read_about),) if linking.added else ()
     if await _steered(ctx, draft, _in_state(p.id, (c.ACTIVE,)), *link) is None:
         return _changed()
     if args.what == APPROVE:
@@ -354,7 +357,7 @@ async def _ask_steer(args: SteerArgs, ctx: Any, p: Project, person: str, title: 
     await ctx.emit(STEER_ASKED.draft(
         project=p.id, request=request, what=args.what, text=Content.of(text, level=written(p)) if text else None,
         kind=args.kind, cadence_us=args.cadence_hours * HOUR if args.kind == c.CONSTANT else 0, objective=objective,
-        by=person, owner=p.owner, about=p.about))
+        by=person, owner=p.owner, about=p.about, read_about=p.read_about))
     # jamais toi en face (ta demande s'applique aussitôt, ``access.steering``) : la console décide
     payload: dict[str, Any] = {"project": p.id, "asked": request}
     what = asks_words(args.what, text)
@@ -363,7 +366,7 @@ async def _ask_steer(args: SteerArgs, ctx: Any, p: Project, person: str, title: 
     await ctx.propose(rt.EFFECT_PROPOSED.draft(
         capability=STEER_CAPABILITY, owner=PROJECTS.name, context=project_target(p.id), approval=True,
         args_json=json.dumps(payload, ensure_ascii=False, sort_keys=True),
-        summary=Content.of(summary[:400], level=written(p)), about=tuple(x for x in (person, p.owner, *p.about) if x)))
+        summary=Content.of(summary[:400], level=written(p)), about=subjects_of(p, person)))
     return phrase("projects.tools.steer.waits", title=title, who=caretaker(frame))
 
 
@@ -418,11 +421,12 @@ def accepted(p: Project, a: SteerAsk, text: str) -> list[Any]:
     if not text:
         return []
     if a.what == INSTRUCT:
-        return [AMENDED.draft(project=p.id, instruction=Content.of(text, level=p.sensitivity), **who)]
+        return [AMENDED.draft(project=p.id, instruction=Content.of(text, level=p.sensitivity), read_about=p.read_about,
+                              **who)]
     if a.what == ADD and living(p) < OBJECTIVES_KEPT:
         return [OBJECTIVE_ADDED.draft(project=p.id, objective=p.objective_seq + 1,
                                       text=Content.of(text, level=written(p)), kind=a.kind, cadence_us=a.cadence_us,
-                                      author="owner", **who)]
+                                      author="owner", read_about=p.read_about, **who)]
     return []
 
 

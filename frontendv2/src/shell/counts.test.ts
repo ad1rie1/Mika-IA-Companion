@@ -8,7 +8,7 @@ const me: Me = {
   person: "user_1",
   operator: true,
   owner: true,
-  counts: { mail: 3, teams: 1, phone: 0 },
+  counts: { mail: 3, teams: 1, phone: 0, projects: 2 },
 };
 
 vi.mock("../api/me", () => ({ fetchMe: vi.fn(async () => me) }));
@@ -28,6 +28,7 @@ describe("la relecture de GET /api/moi", () => {
     await refreshCounts();
     expect(countOf("mail")).toBe(3);
     expect(countOf("phone")).toBe("");
+    expect(countOf("projects")).toBe(2); // ce qui t'attend dans tes projets : la pastille de « Projets »
     expect(paint).toHaveBeenCalled();
     expect(read).toHaveBeenCalledWith(me);
   });

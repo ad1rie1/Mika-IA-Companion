@@ -5,6 +5,17 @@ courrier, son Teams, son téléphone et ses paramètres. Pas de monde 3D : Mika 
 grand dans le chat. Cette page est la **maquette validée** (le 2026-11-04) : les données sont fictives et rien ne
 parle au moteur. Le vrai client est `frontendv2/` (son `README.md`), sur l'API par personne (ADR 0187).
 L'écran **Carte** (lieux, itinéraires, voyages, et sa carte dans le chat) s'y est ajouté le même soir, validé lui aussi.
+L'écran **Projets** s'y est ajouté le 2026-11-21 (`ecrans/projets2*.js`, d'après
+`output/chaines-de-travail/web/MAQUETTE-V2.md`) : un atelier en trois zones sur toute la largeur (la liste, le contenu
+en volets, un panneau latéral), où tout se modifie sur place, avec le code, la documentation et son éditeur, le fil
+d'activité et le schéma des dépendances. **Validée le même jour**, au troisième tour (« ok mieux ! go là-dessus »,
+« sers-toi de la maquette comme référence ») : le vrai écran en reprend la structure, les classes et la feuille de
+style (ADR 0291). Sa première maquette, rejetée, est retirée.
+**Proposé le 2026-11-21, pas encore validé** : l'effort de réflexion dans le champ du chat (`ecrans/chat.js`,
+`chat.css`). Une pastille « Effort · auto » à côté de « Pro » ouvre son menu : Auto, ou forcé à un niveau, pour toute
+la conversation et, en mode pro, pour le fil ouvert (un fil en auto suit la conversation ; la conversation en auto suit
+le réglage de la console, ADR 0285). Il se règle aussi dans la fenêtre « Le fil » et par `/effort` ; un fil forcé le
+dit dans la liste des fils. `?effort=1` ouvre le menu d'emblée.
 
 ## L'ouvrir
 
@@ -30,6 +41,7 @@ mode pro), `?notes=1` (panneau des notes ouvert), et la route après `#` :
 | Écran | Routes |
 |---|---|
 | Chat | `#chat` (le bouton Pro du champ passe en mode pro) |
+| Projets | `#projets/a-faire` (et `/a-faire/3/ticket-4`, `/3/pr-11`…), `#projets/projets`, puis la fiche `#projets/projets/3` et ses onglets : `/objectifs/o2` (et `/rendus`, `/modifier`), `/objectifs/m1`, `/objectifs/diagramme/avancement` et `/objectifs/diagramme/temps` (et `/o2`, `/o2/3` pour un jalon), `/tickets/4` (et `/description`, `/plan`, `/fil`, `/historique`, `/modifier`), `/code/fichiers/<branche>/<chemin>`, `/code/commits/<empreinte>`, `/code/pulls/11` (et `/commits`, `/fichiers`, `/echanges`, `/modifier`), `/code/branches/<branche>`, `/code/issues/9` (et `/echanges`), `/code/ci/57` (et `/journal`), `/documentation/pages/<page>` (et `/modifier/<page>`, `/historique/<page>`, `/images/<image>`, `/decisions/3`, `/decisions/3/options`, `/decisions/3/modifier`), `/activite` (le fil ; et `/executions/61`, `/carnet`), `/dependances/lit-7` (le schéma ; et `/demandes/d3`), `/reglages/general` (« Modifier le projet » ; et `/rythme`, `/accords`, `/depot`, `/outils`) ; `#projets/projets/5/listes/entreprises` (un projet qui a des listes) |
 | Outils | `#outils/droits` (la matrice des droits, ressource par ressource), `#outils/services`, `#outils/accords` |
 | Mail | `#mail/messages`, `#mail/messages/m-claire`, `#mail/messages/d-lefevre`, `#mail/contacts` |
 | Teams | `#teams/discussions/lumen`, `#teams/discussions/claire`, `#teams/brouillons` |
@@ -46,7 +58,8 @@ et pas dans l'interface, que la maquette dit ce qui n'existe pas encore.
 ## Le thème
 
 - Fond blanc et filets, sans aplat gris en clair ; sombre complet. Inter, Inter Display pour les titres.
-- La navigation est en haut ; sur un téléphone, elle passe en barre du bas, comme sur Android.
+- La navigation est en haut ; sur un téléphone, elle passe en barre du bas, comme sur Android (huit entrées depuis
+  l'écran Projets ; Paramètres s'y dit « Réglages »).
 - Chaque écran a une barre de titre : son nom, ses onglets, puis ses actions à droite.
 - Un écran tient dans la fenêtre ; chaque liste défile dans son cadre.
 - Deux couleurs portent un sens : **l'indigo** de l'app Android pour ce que tu fais, **le rose** de Mika pour ce
@@ -67,5 +80,9 @@ et pas dans l'interface, que la maquette dit ce qui n'existe pas encore.
 | `donnees.js` | qui est connecté, les personnes, l'état de Mika et le fil rouge entre les écrans |
 | `mika-vrm.js` | sa VRM (module, HTTP seulement) : son visage dans la barre, son buste dans le chat |
 | `ecrans/<écran>.js` et `.css` | un écran chacun : chat, outils, mail, teams, telephone, carte, parametres (et `carte-fond.js`, le fond de France, généré) |
+| `ecrans/projets2.js`, `-travail.js`, `-diagramme.js`, `-code.js`, `-doc.js`, `-suite.js` | l'écran Projets, seconde maquette : le socle (les trois zones, les formulaires, le panneau qui s'ouvre), « À faire », la grille et la Vue d'ensemble ; Objectifs, Tickets et « Modifier le projet » ; le diagramme des objectifs (leur avancement, ou leur place dans le temps) ; Code ; Documentation (Pages, Images, Décisions, et le petit rendu Markdown de la lecture) ; Activité, Dépendances, Listes |
+| `ecrans/projets2.css`, `projets2-zones.css` | ses styles : le cadre et les morceaux partagés ; les trois zones, les formulaires et les vues refaites (l'éditeur à nos couleurs, le graphique, le schéma) |
+| `ecrans/projets2-donnees.js` | ses données d'exemple, inventées : un projet « Outils réseau » complet (dépôt, commits et diffs, pull requests, tickets, espace de documentation, décisions…) ; les gestes les modifient en mémoire |
+| `vendor/milkdown-crepe.js`, `.css` | l'éditeur de la documentation : Milkdown, son éditeur Crepe (`@milkdown/crepe`, MIT), en un seul paquet pour navigateur (il expose `window.MikaEditeur`). Fabriqué hors du dépôt : `output/chaines-de-travail/web/v2/editeur/` (`sh empaqueter.sh`). Rien n'est ajouté au `package.json` de `frontendv2/` : la dépendance du vrai client se décidera au moment du code |
 
 L'API d'un écran est décrite en tête de `maquette.js`.

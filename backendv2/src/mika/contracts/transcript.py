@@ -28,6 +28,7 @@ HEAD = FactKey("transcript.head", type=int)
 
 THREAD_TABLE = "thread"
 STRANDS_TABLE = "strands"
+EFFORTS_TABLE = "thread_efforts"
 
 #: un identifiant de fil de travail, au plus : choisi par le client (lettres, chiffres, ``_`` et ``-``), propre à
 #: l'adresse qui l'a ouvert (ADR 0164)
@@ -116,6 +117,24 @@ def strands_table(sfx: str = "") -> Table:
     )
 
 
+#: l'effort de réflexion qu'une personne force, au plus long (un des ``ports.llm.EFFORTS``)
+EFFORT_MAX = 16
+
+
+def efforts_table(sfx: str = "") -> Table:
+    """``thread_efforts`` (suffixée de sa version) : l'effort de réflexion qu'une personne a forcé pour ses réponses
+    (ADR 0287) — ``strand`` vide : toute sa conversation avec elle ; sinon un de ses fils de travail. Rien de forcé
+    (« auto ») : pas de ligne. ``at`` : l'instant du réglage."""
+    name = f"{EFFORTS_TABLE}{sfx}"
+    return projection_table(
+        name,
+        Column("person", Key(HANDLE_MAX), primary_key=True),
+        Column("strand", Key(STRAND_MAX), primary_key=True),
+        Column("at", BigInteger, nullable=False),
+        Column("effort", Key(EFFORT_MAX), nullable=False),
+    )
+
+
 #: Pourquoi un message reçu est resté sans réponse pour de bon — la colonne ``unanswered`` du fil, nulle pour un
 #: message répondu, encore en attente ou qui ne lui était pas adressé (``EpisodeEnded.unanswered``) : elle a
 #: choisi de se taire, une panne, un délai dépassé, une question lue trop tard.
@@ -184,9 +203,23 @@ class StrandSet(Payload):
     archived: bool = False
 
 
+class EffortSet(Payload):
+    """L'effort de réflexion qu'une personne force pour les réponses qu'elle reçoit (ADR 0287) : dans toute sa
+    conversation (``strand`` vide), ou dans un de ses fils de travail. ``effort`` vide : « auto » — plus rien de
+    forcé ici (un fil suit alors la conversation, la conversation le réglage du rôle, ADR 0285). Le dernier
+    réglage vaut."""
+
+    #: l'adresse de celle qui règle : sa conversation, ses fils
+    person: str
+    strand: str = ""
+    #: un des ``ports.llm.EFFORTS`` ; vide : auto
+    effort: str = ""
+
+
 COMPACTED = event_type("transcript.compacted", OWNER, Compacted, public=True, content=("summary",),
                        subjects=("person", "speakers"))
 SUMMARY_RESET = event_type("transcript.summary_reset", OWNER, SummaryReset, public=True)
 JUDGED = event_type("transcript.judged", OWNER, Judged, content=("comment",), subjects=("person", "by"))
 STRAND_SET = event_type("transcript.strand_set", OWNER, StrandSet, content=("title", "description"),
                         subjects=("person",))
+EFFORT_SET = event_type("transcript.effort_set", OWNER, EffortSet, subjects=("person",))

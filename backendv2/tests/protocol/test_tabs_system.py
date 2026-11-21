@@ -259,6 +259,35 @@ def _gateway_view(resolution: dict[str, str]) -> list:
     return asyncio.run(system_pages.passerelle(ui, None))
 
 
+def test_the_gateway_says_at_what_effort_each_role_really_thinks(world, monkeypatch):  # noqa: F811
+    """ADR 0285 : la vue (celle que lit la console en MCP) dit pour chaque rôle servi l'effort auquel partent ses
+    appels et d'où il vient — réglé pour ce rôle, celui de la fiche, ou le défaut du modèle ; la page dessinée le dit
+    sur la pastille du rôle qui a le sien."""
+    efforts = {"polish": ("low", True), "reply": ("high", False)}
+    gateway = SimpleNamespace(configured=True, status=lambda: [],
+                              resolution=lambda: {"reply": "claude", "polish": "claude", "extract": "claude",
+                                                  "dream": ""},
+                              effort_of=lambda role: efforts.get(role, ("", False)))
+    ui = SimpleNamespace(kernel=SimpleNamespace(deps=SimpleNamespace(gateway=gateway)))
+    _stats, _providers, roles = asyncio.run(system_pages.passerelle(ui, None))
+    said = {r.cells[1].text: getattr(r.cells[3], "text", r.cells[3]) for r in roles.rows}
+    assert said == {"reply": "élevé — celui de sa fiche", "polish": "faible — réglé pour ce rôle",
+                    "extract": "défaut du modèle", "dream": ""}
+    assert "sinon celui de la fiche de son fournisseur" in roles.caption
+
+    client, live, _ = world
+    _life(client, live)
+    served = live.kernel.deps.gateway
+    monkeypatch.setattr(served, "status", lambda: [
+        {"name": "claude", "slots": 3, "busy": 0, "waiting": 0, "preempt": False, "extra": {}}])
+    monkeypatch.setattr(served, "resolution", lambda: {"reply": "claude", "polish": "claude"})
+    monkeypatch.setattr(served, "effort_of", lambda role: efforts.get(role, ("", False)))
+    page = drawn(client, "/admin/systeme/passerelle")
+    chips = page[page.index('id="sys-gw-roles"'):]
+    assert "rendre naturel (voix, seconde passe) · faible</span>" in chips
+    assert "répondre (voix)</span>" in chips and "répondre (voix) · " not in chips
+
+
 def test_the_gateway_view_keeps_its_alarm_for_a_real_role_only():
     """C8-02, la vue : la seconde passe coupée ne compte pas parmi les rôles sans fournisseur, sa ligne est neutre et
     dit « coupée » ; un vrai rôle que personne ne sert garde son chiffre en danger et sa ligne rouge."""

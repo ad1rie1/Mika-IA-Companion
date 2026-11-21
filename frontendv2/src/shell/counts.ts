@@ -9,7 +9,7 @@
 import { fetchMe, type Counts, type Me } from "../api/me";
 
 const EVERY_MS = 60_000;
-const current: Counts = { mail: 0, teams: 0, phone: 0 };
+const current: Counts = { mail: 0, teams: 0, phone: 0, projects: 0 };
 let painter: (() => void) | null = null;
 let reader: ((me: Me) => void) | null = null;
 let inflight: Promise<void> | null = null;

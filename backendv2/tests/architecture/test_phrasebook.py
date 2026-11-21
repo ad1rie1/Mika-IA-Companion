@@ -6,7 +6,8 @@ On lit le code par l'AST (jamais par le texte : un commentaire qui cite une clé
 - une ``phrase`` reçoit exactement les trous de son texte (un trou renommé dans le fichier, ou oublié par le code,
   serait une erreur au premier appel — parfois des jours plus tard) ;
 - aucune phrase du fichier n'est orpheline : chacune est demandée quelque part (sinon on la modifierait pour
-  rien, sans comprendre pourquoi rien ne change).
+  rien, sans comprendre pourquoi rien ne change) ;
+- aucune phrase n'écrit un saut de ligne en toutes lettres (un bloc replié ne lit pas ``\\n``).
 
 Une clé construite à l'exécution (``phrase(f"affect.mood.{nom}")``) compte pour toutes les clés sous son préfixe
 littéral (``affect.mood``) ; ses trous ne se vérifient pas statiquement — elle doit passer par ``family`` ou par un
@@ -76,6 +77,17 @@ def uses() -> list[Use]:
 def test_the_file_reads():
     phrasebook.reset()
     assert phrasebook.catalog() is not None
+
+
+def test_no_phrase_spells_out_a_line_break():
+    """Dans un bloc replié (``>-``) ou une chaîne sans guillemets doubles, YAML ne lit pas ``\\n`` comme un saut de
+    ligne : les deux caractères partaient tels quels dans le prompt de toute exécution d'un projet demandé (ADR
+    0280, ``projects.run.request``). Une phrase qui veut un saut de ligne s'écrit entre guillemets doubles."""
+    spelled = sorted(key for key, leaf in phrasebook.catalog().items()
+                     for text in ((leaf,) if isinstance(leaf, str) else leaf) if "\\n" in text)
+    assert not spelled, f"« \\n » écrit en toutes lettres dans : {', '.join(spelled)}"
+    asked = phrasebook.phrase("projects.run.request", who="Adrien", text="Fais-moi un site.")
+    assert asked.endswith(":\nFais-moi un site.") and "\\" not in asked
 
 
 def test_every_key_the_code_asks_for_exists_with_its_holes():

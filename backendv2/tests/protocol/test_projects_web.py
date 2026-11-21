@@ -206,9 +206,14 @@ def test_the_project_fiche_is_driven_over_http(world):  # noqa: F811
     fiche = html.unescape(client.get(f"/admin/fiche/project/{pid}").text)
     # en tête : ce qui vaut pour tout le projet ; les formulaires des onglets restent dans leurs onglets
     assert "Lancer maintenant" in fiche and "Mettre en pause" in fiche and "Archiver" in fiche
+    head = fiche.split('<nav class="tabs', 1)[0]  # la barre de titre ; « Où il en est » porte ses objectifs (ADR 0281)
     for inline in ("Ajouter un objectif", "Consigner une décision", "Modifier le projet", "Enregistrer ses outils",
                    "Pousser maintenant", "Changer le statut", "Approuver"):
-        assert inline not in fiche, inline
+        assert inline not in head, inline
+    for elsewhere in ("Consigner une décision", "Modifier le projet", "Enregistrer ses outils", "Pousser maintenant",
+                      "Approuver"):
+        assert elsewhere not in fiche, elsewhere
+    assert "Ajouter un objectif" in fiche.split('id="objectifs"', 1)[1]  # ses objectifs : son second sous-onglet
     assert "Ajouter un objectif" in html.unescape(client.get(f"/admin/fiche/project/{pid}?onglet=objectifs").text)
     assert act("projects.objectif_ajouter", "o1", text="Améliorer la sécurité", kind="constant",
                cadence_hours="12").status_code == 303

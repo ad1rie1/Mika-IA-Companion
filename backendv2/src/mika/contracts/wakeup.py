@@ -30,16 +30,27 @@ NOBODY, OWNERS = "personne", "proprietaire"
 NOTIFY_ARG = "notify"
 
 
-def subject(call: int) -> str:
-    return f"{PREFIX}{call}"
+#: ce qui sépare, dans le sujet d'un épisode, l'appel de ce qu'il vise (``wakeup:<seq>@objective:3:2``, ADR 0265)
+AIM = "@"
+
+
+def subject(call: int, aim: str = "") -> str:
+    """Le sujet de l'épisode qui traite cet appel ; ``aim`` : ce que l'appel vise chez un autre propriétaire (le
+    sujet d'un objectif de son projet), qui le reconnaît — le réveil le porte sans savoir ce qu'il désigne."""
+    return f"{PREFIX}{call}{AIM}{aim}" if aim else f"{PREFIX}{call}"
 
 
 def call_of(subject: str | None) -> int | None:
-    """Le ``seq`` de l'appel qu'un sujet d'épisode traite, sinon ``None``."""
+    """Le ``seq`` de l'appel qu'un sujet d'épisode traite, sinon ``None`` (ce que l'appel vise ne compte pas)."""
     if not subject or not subject.startswith(PREFIX):
         return None
-    tail = subject[len(PREFIX):]
+    tail = subject[len(PREFIX):].partition(AIM)[0]
     return int(tail) if tail.isdigit() else None
+
+
+def aim_of(subject: str | None) -> str:
+    """Ce que vise l'appel que ce sujet d'épisode traite (``""`` : rien, ou ce n'est pas un appel)."""
+    return (subject or "").partition(AIM)[2] if call_of(subject) is not None else ""
 
 
 class Called(Payload):

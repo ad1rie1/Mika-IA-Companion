@@ -45,6 +45,11 @@ class MapsNotFound(MapsUnavailable):
     pris fin. L'API par personne en fait un 404 ; le reste d'une ``MapsUnavailable``, un 503."""
 
 
+class MapsBadMedia(MapsUnavailable):
+    """Une source qui a répondu, mais pas ce qu'on attendait d'elle (ADR 0259) : une photo qui n'est pas une image
+    qu'on sert. L'API par personne en fait un 502."""
+
+
 #: les identifiants qu'on reçoit du dehors (un client, ses outils), avant de rien chercher (ADR 0259) : un lieu
 #: (``l<n>``, son objet d'OpenStreetMap ``n123``/``w45``/``r6``, un lieu des données touristiques ``t:<uuid>``), un
 #: événement (``e:<uuid>``), une photo relayée (``p:<hash>``)
@@ -71,7 +76,9 @@ class PlaceHit:
     reconstruction à l'autre (``n123``, ``w45``, ``r6``) ; ``open_state`` (``OPEN_STATES``) et ``open_text`` (« Ouvert ·
     ferme à 22:30 »), à l'instant de la réponse ; ``cuisine`` (« Flamande, régionale ») ; ``rating`` (la note, sur 5) et
     ``reviews`` (le nombre d'avis), ``price`` (« €€ ») et ``photo`` (la référence de sa première photo, ``p:<hash>``),
-    quand une source d'avis les donne ; ``tags``, les filtres qu'il vérifie (``FEATURES``)."""
+    quand une source d'avis les donne ; ``tags``, les filtres qu'il vérifie (``FEATURES``). Avec sa photo, ce qu'il
+    faut en citer là où elle se montre (ADR 0269) : ``photo_source`` (``google``, ``datatourisme``), ``photo_credit``
+    (son auteur), ``photo_credit_url`` (son lien) et ``photo_licence`` (une photo de l'office de tourisme)."""
 
     id: str
     name: str
@@ -92,11 +99,18 @@ class PlaceHit:
     price: str = ""
     photo: str = ""
     tags: tuple[str, ...] = ()
+    photo_source: str = ""
+    photo_credit: str = ""
+    photo_credit_url: str = ""
+    photo_licence: str = ""
 
 
 #: les champs d'un lieu trouvé qu'on écrit toujours ; les autres (``extras``), seulement quand on les sait
 HIT_FIELDS = ("id", "name", "kind", "kind_fr", "category", "lat", "lon", "town", "distance_m", "along_m")
-HIT_EXTRAS = ("osm", "open_state", "open_text", "cuisine", "rating", "reviews", "price", "photo", "tags")
+HIT_EXTRAS = ("osm", "open_state", "open_text", "cuisine", "rating", "reviews", "price", "photo", "tags",
+              "photo_source", "photo_credit", "photo_credit_url", "photo_licence")
+#: ce qu'un lieu ou un événement porte de sa première photo : d'où elle vient, son auteur, son lien, sa licence
+PHOTO_CITED = ("photo_source", "photo_credit", "photo_credit_url", "photo_licence")
 
 
 def extras(hit: PlaceHit) -> dict[str, object]:
@@ -244,12 +258,14 @@ EVENTS_SPAN_MAX_DAYS = 366
 @dataclass(frozen=True, slots=True)
 class EventHit:
     """Un événement trouvé (DATAtourisme, ADR 0245). ``id`` : ``e:<uuid>`` (celui d'une fiche ; les fiches d'un même
-    événement, même nom au même endroit, n'en font qu'un) ; ``start`` et ``end`` : sa prochaine date dans la période
-    demandée, en ISO 8601 (une date, ou une date et une heure à l'heure de Paris) ; ``when_text`` : quand, en mots
+    événement, même nom au même endroit, n'en font qu'un) ; ``start`` et ``end`` : sa prochaine séance dans la période
+    demandée, en ISO 8601 (une date, ou une date et une heure à l'heure de Paris) — sa fin est celle de la séance, le
+    lendemain après minuit, jamais celle d'une période (``EventDate`` la dit) ; ``when_text`` : quand, en mots
     (« ven. 20 nov. · 19:00–20:30 », « du mar. au dim. · 13:00–19:00 », « jusqu'au 10 janv. »), la prochaine date
     d'abord ; ``place`` : où, en mots (le lieu nommé d'OpenStreetMap le plus proche, ou l'adresse, et la commune) ;
     ``themes`` : parmi ``THEMES`` ; ``free`` : gratuit (deviné du prix ; ``None`` : on ne sait pas) ; ``photo`` : la
-    référence de sa première photo (``p:<hash>``)."""
+    référence de sa première photo (``p:<hash>``), avec ce qu'il faut en citer (ADR 0269, comme ``PlaceHit``) :
+    ``photo_source``, ``photo_credit``, ``photo_credit_url`` et ``photo_licence``."""
 
     id: str
     name: str
@@ -264,11 +280,16 @@ class EventHit:
     free: bool | None = None
     price: str = ""
     photo: str = ""
+    photo_source: str = ""
+    photo_credit: str = ""
+    photo_credit_url: str = ""
+    photo_licence: str = ""
 
 
 @dataclass(frozen=True, slots=True)
 class EventDate:
-    """Une date à venir d'un événement : ``start`` et ``end`` en ISO 8601 (comme ``EventHit``) ; ``text`` : en clair
+    """Une date à venir d'un événement : ``start`` (sa prochaine séance) et ``end`` (la fin de son occurrence : pour une
+    période, son dernier jour), en ISO 8601 (comme ``EventHit``) ; ``text`` : en clair
     (« ven. 20 nov. · 19:00–20:30 », « du 3 déc. au 10 janv. · du mar. au dim. · 13:00–19:00 ») ; ``days`` : pour une
     période, les jours de la semaine où il a lieu (« mar. », « dim. »), vide : chaque jour."""
 
@@ -337,6 +358,15 @@ class PlaceDetail:
     tourism: TourismFacts | None = None
     reviews: ReviewFacts | None = None
     events: tuple[EventHit, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class PlaceRefresh:
+    """Ce que rend « Actualiser » (ADR 0269) : la fiche (``detail``) et ce qu'il faut en dire, en mots (``said`` :
+    « Fiche relue. », « Relue il y a 4 min : elle est à jour. », « Rien à relire pour ce lieu : … »)."""
+
+    detail: PlaceDetail
+    said: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -418,11 +448,14 @@ class MapsPort(Protocol):
         les avis."""
         ...
 
-    async def place_refresh(self, place_id: str) -> PlaceDetail | None:
-        """« Actualiser » (ADR 0250, 0256) : sa fiche relue tout de suite, quel que soit son âge — chez Google (la
-        fiche avec ses avis et ses photos ; un lieu pas rapproché se recherche) et chez DATAtourisme (sa fiche rapprochée),
-        sur la réserve du direct ; puis la fiche (``place``). ``None`` : le lieu n'est pas dans l'index. Ce qui n'a
-        pas pu se relire (le quota, la clé, le réseau) : ``MapsUnavailable``, en mots — ce qui a pu l'être est gardé."""
+    async def place_refresh(self, place_id: str) -> PlaceRefresh | None:
+        """« Actualiser » (ADR 0250, 0256, 0269) : sa fiche relue tout de suite, quel que soit son âge — chez Google (la
+        fiche avec ses avis et ses photos ; un lieu pas rapproché se recherche) et chez DATAtourisme (sa fiche
+        rapprochée), sur la réserve du direct ; puis la fiche (``place``), et ce qu'il faut en dire (``PlaceRefresh``).
+        Une source relue il y a moins de dix minutes ne repart pas ; rien à relire pour ce lieu, ou tout à jour : la
+        fiche, sans rien demander, et ``said`` le dit. ``None`` : le lieu n'est pas dans l'index. Ce qui n'a pas pu se
+        relire (le quota — celui du jour de tout le serveur compris —, la clé, le réseau ; aucune source réglée) :
+        ``MapsUnavailable``, en mots — ce qui a pu l'être est gardé."""
         ...
 
     def preload(self, lat: float, lon: float) -> int:

@@ -376,7 +376,8 @@ def test_a_push_is_approved_on_what_leaves_its_raw_arguments_folded(world):  # n
                                  summary=Content.of("Une demande sans aperçu"))]).seqs
     push = _reader(page(client, f"/admin/approbations/en_attente?demande={asked[0]}"))
     shown = push.split('aria-label="Aperçu"', 1)[1].split("</section>", 1)[0]
-    assert f"Pousser le commit {commits[0].sha} (« le module RDP ») vers {ours}, branche main." in shown
+    # l'aperçu montre l'abrégé du commit épinglé ; ses arguments, repliés, gardent l'identifiant complet (ADR 0277)
+    assert f"Pousser le commit {commits[0].sha[:12]} (« le module RDP ») vers {ours}, branche main." in shown
     assert f"- {commits[0].sha[:7]} le module RDP" in shown and "le README" not in shown  # ce que le distant n'a pas
     folded = push.split('<details class="hm-subfold">', 1)[1].split("</details>", 1)[0]
     assert "projects.push" in folded and f'"sha": "{commits[0].sha}"' in folded

@@ -34,9 +34,9 @@ from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.prompt import SectionBody
 from mika.kernel.state import FrozenDict
-from mika.ports.llm import Image, LLMRequest, Message
+from mika.ports.llm import Image, LLMRequest, Message, json_object
 from mika.ports.preprocess import inert
-from mika.vocab.affect import Emotion, named_feeling
+from mika.vocab.affect import Emotion, felt_schema, named_feeling
 from mika.vocab.days import ago_words
 from mika.vocab.episodes import CONVERSATIONAL, WORKING, Kind
 from mika.vocab.phrasebook import phrase
@@ -99,6 +99,9 @@ def _views(s: CameraState, cx) -> tuple[c.View, ...]:
 
 
 _JSON = re.compile(r"\{.*\}", re.S)
+#: la forme de ce qu'elle dit d'une image, que le fournisseur garantit quand il le sait (ADR 0267) — celle que dit sa
+#: consigne (``camera.look.system``) ; ``read_look`` relit toujours du texte
+LOOK_SCHEMA = json_object(description={"type": "string"}, notable={"type": "boolean"}, **felt_schema())
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,7 +143,7 @@ def request(snap: Any, call_id: str, frame: Frame) -> LLMRequest:
     system = look(self_c.name_of(frame.get(self_c.PERSONA)), frame.get(self_c.PORTRAYED("compact")))
     return LLMRequest(role="caption", call_id=call_id, system_stable=system,
                       messages=(Message("user", phrase("camera.look.ask"), images=(image,)),), max_tokens=200,
-                      lane="background", priority=3)
+                      lane="background", priority=3, output_schema=LOOK_SCHEMA)
 
 
 def seen_draft(snap: Any, seen: Sight) -> Any:

@@ -8,13 +8,22 @@ d'abord, puis la fiche des lieux ouverts depuis peu — sur le budget de fond.""
 
 from __future__ import annotations
 
+import sqlite3
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 
+from mika.adapters.maps import reviews as rv
+from mika.adapters.maps import tourism as tourism_module
 from mika.adapters.maps.cells import cell_of, neighbours
 from mika.adapters.maps.config import ReviewsConfig, WarmConfig
-from mika.adapters.maps.google_places import PRIMARY_TYPES
+from mika.adapters.maps.google_places import PRIMARY_TYPES, read_place
 from mika.adapters.maps.quota import MONTH, QuotaExceeded
+from mika.adapters.maps.reviews import ReviewsBase
 from mika.adapters.maps.reviews_cells import AVIS, _distance_m, circle
+from mika.adapters.maps.tourism import TourismBase
 from mika.adapters.maps.warm import Warmer
 from tests.fixtures import google_places as gp
 
@@ -204,3 +213,71 @@ async def test_the_evening_pass_stops_on_its_budget_and_keeps_the_reserve(tmp_pa
     assert api.calls(gp.NEARBY) == 8 and "la part de fond du quota du mois de Google (recherches" in report.stopped
     assert "8 recherches ce mois sur 10 (2 gardées pour le direct)" in rig.cells.budget()
     await rig.client.nearby(*LILLE, 500, "manger")  # le direct a encore sa réserve
+
+
+async def test_eight_opens_at_once_create_the_cache_once_and_lose_nothing(tmp_path, monkeypatch):
+    """R1-10 : deux fils qui ouvraient un ``avis.db`` neuf en même temps — l'un le créait, l'autre, ne trouvant pas
+    encore la table ``meta``, l'effaçait et le refaisait : ce que le premier écrivait (des lieux qu'une recherche avait
+    payés) partait avec l'inode effacé. Une seule création ; chaque écriture reste."""
+    base = ReviewsBase(tmp_path / "cartes" / "avis.db")
+    slow, calls = rv._connect, []
+
+    def connect(path, *, write=False):  # noqa: ANN001, ANN202
+        conn = slow(path, write=write)
+        calls.append(path)
+        if len(calls) == 1:
+            time.sleep(0.2)  # le premier vient de créer le fichier, sans ses tables : la fenêtre des autres fils
+        return conn
+
+    monkeypatch.setattr(rv, "_connect", connect)
+    start = threading.Barrier(8)
+
+    def one(k: int) -> None:
+        start.wait()
+        conn = base.open()
+        try:
+            ReviewsBase.write_spots(conn, [read_place(gp.place(f"ChIJlieu{k:08d}", f"Lieu {k}", 50.63 + k / 1000, 3.06),
+                                                      "manger")], "2026-11-21T10:00:00Z")
+        finally:
+            conn.close()
+
+    with ThreadPoolExecutor(8) as pool:
+        list(pool.map(one, range(8)))
+    db = sqlite3.connect(base.path)
+    try:
+        assert db.execute("SELECT COUNT(*) FROM spot").fetchone()[0] == 8
+    finally:
+        db.close()
+
+
+class _Locked:
+    """Une connexion dont la première lecture trouve la base tenue par un autre (``database is locked``)."""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+    def execute(self, *args):  # noqa: ANN002, ANN201
+        raise sqlite3.OperationalError("database is locked")
+
+    def close(self) -> None:
+        self.conn.close()
+
+
+@pytest.mark.parametrize("which", ["avis", "tourisme"])
+def test_a_base_held_by_another_writer_is_never_erased(tmp_path, monkeypatch, which):
+    """R1-10 : une base tenue par une autre écriture (``database is locked`` après le délai) s'effaçait en entier,
+    comme une base abîmée. Seule une autre version, ou une base illisible, se refait ; tenue, elle reste — l'erreur
+    remonte, et la suivante la relira."""
+    module, base = (rv, ReviewsBase(tmp_path / "avis.db")) if which == "avis" else \
+        (tourism_module, TourismBase(tmp_path / "tourisme.db"))
+    base.open().close()
+    real = module._connect
+    monkeypatch.setattr(module, "_connect", lambda path, *, write=False: _Locked(real(path, write=write)))
+    with pytest.raises(sqlite3.OperationalError):
+        base.open()
+    monkeypatch.setattr(module, "_connect", real)
+    db = sqlite3.connect(base.path)
+    try:
+        assert db.execute("SELECT value FROM meta WHERE key = 'version'").fetchone() is not None
+    finally:
+        db.close()

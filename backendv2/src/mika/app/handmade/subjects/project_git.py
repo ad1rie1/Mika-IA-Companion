@@ -8,7 +8,9 @@ et pull requests ouvertes, les échanges passés et les réglages du distant.
   hôte et son nom, le bout de sa branche, ses issues et pull requests, quand il a été lu. Entre elles, l'écart (à
   pousser, à récupérer) et « Pousser », « Récupérer », « Relire » : le geste qui comble l'écart passe en avant.
 - Les sous-onglets : Historique (un commit par ligne, ceux qui restent à pousser marqués ; un commit ouvert en diff
-  au-dessus), Non enregistré, Sur le distant (ceux à récupérer marqués), Issues, Pull requests, Échanges, Réglages.
+  au-dessus), Non enregistré, Branches de travail (ADR 0281 : une par objectif — sa branche, sa pull request, les
+  vérifications de son commit, sa relecture), Sur le distant (ceux à récupérer marqués), Issues, Pull requests,
+  Échanges, Réglages.
 - Les données sont les blocs de la vue « git » de la faculté (``Got``) : elle reste la source, pour la console en
   MCP comme pour le repli ; l'adresse du distant se lit dans la tranche des projets (``project_at``, déclaré :
   ADR 0218 ; sa vue ne la donne qu'en lien, et seulement en http(s)).
@@ -22,14 +24,16 @@ from urllib.parse import urlsplit
 
 from markupsafe import Markup
 
-from mika.app.handmade.tabs import Got, Line, anchored, blank, lines, pairs, text, tiles
+from mika.app.handmade.tabs import Got, Line, anchored, blank, lines, paged, pairs, text, tiles
 from mika.faculties.projects.faculty import project_at
+from mika.faculties.projects.inspect_git import BRANCHES_TITLE
 from mika.inspector.ui import PREFIX
 
 #: le titre de l'hôte d'un dépôt distant qu'on sait lire
 HOSTS = {"github.com": "GitHub"}
 #: les sous-onglets, dans l'ordre : (ancre, libellé)
-PANES = (("git-historique", "Historique"), ("git-encours", "Non enregistré"), ("git-distant", "Sur le distant"),
+PANES = (("git-historique", "Historique"), ("git-encours", "Non enregistré"), ("git-branches", "Branches de travail"),
+         ("git-distant", "Sur le distant"),
          ("git-issues", "Issues"), ("git-pr", "Pull requests"), ("git-echanges", "Échanges"),
          ("git-reglages", "Réglages du distant"))
 #: ce que la section du distant dit et que les cartes montrent déjà (le reste va aux réglages)
@@ -84,7 +88,7 @@ def _banner(exchanges: list[dict[str, Any]], error: str, gap: dict[str, Any] | N
 
 
 def git_page(got: Got, key: str) -> Markup | None:
-    """Projet › Dépôt git : l'atelier et le distant face à face, puis leurs histoires en sous-onglets."""
+    """Projet › Dépôt : l'atelier et le distant face à face, puis leurs histoires en sous-onglets."""
     remote = got.first("section", "Son dépôt distant")
     if remote is None:
         return None
@@ -106,6 +110,9 @@ def git_page(got: Got, key: str) -> Markup | None:
     distant = got.table("Sur le distant")
     issues, pulls = got.table("Issues ouvertes"), got.table("Pull requests ouvertes")
     exchanged = got.table("Échanges avec le distant")
+    branches = got.table(BRANCHES_TITLE)  # une par objectif : sa pull request, ses vérifications, sa relecture
+    if branches is not None and not paged(branches):  # elle tient sur une page : sa pagination reste, masquée
+        branches = {**branches, "pager": None, "raw_pager": branches.get("pager")}
     commits = [_commit(x, "distant") for x in lines(history)]
     exchanges = [_exchange(x) for x in lines(exchanged)]
     opened = got.first("section", "L'enregistrement ")
@@ -137,10 +144,12 @@ def git_page(got: Got, key: str) -> Markup | None:
     counts = {"git-historique": local["count"] or "0",
               "git-encours": re.sub(r" fichier.*", "", text((local["pending"] or {}).get("value"))).replace(
                   "rien", "0"),
+              "git-branches": str(len(lines(branches))) if branches else "",
               "git-distant": str(len(lines(distant))) if distant else "",
               "git-issues": text(facts.get("issues ouvertes")), "git-pr": text(facts.get("pull requests ouvertes")),
               "git-echanges": str(len(exchanges)) if exchanged else "", "git-reglages": ""}
-    shown = {"git-historique": bool(history), "git-encours": bool(history), "git-distant": distant is not None,
+    shown = {"git-historique": bool(history), "git-encours": bool(history), "git-branches": branches is not None,
+             "git-distant": distant is not None,
              "git-issues": issues is not None, "git-pr": pulls is not None, "git-echanges": exchanged is not None,
              "git-reglages": True}
     panes = [{"id": i, "label": label, "count": counts[i],
@@ -151,7 +160,7 @@ def git_page(got: Got, key: str) -> Markup | None:
         "handmade/projets/git.html", banner=_banner(exchanges, error, gap), local=local, distant=distant_card,
         gap=gap, ahead=ahead, behind=behind, push=actions.get("projects.pousser"),
         pull=actions.get("projects.recuperer"), panes=panes, opened=opened, pending=pending,
-        history=history, commits=commits, remote_table=distant,
+        history=history, commits=commits, remote_table=distant, branches=branches,
         remote_commits=[_commit(x, "atelier") for x in lines(distant)],
         issues=issues, issue_items=[_ticket(x) for x in lines(issues)],
         pulls=pulls, pull_items=[_ticket(x) for x in lines(pulls)],

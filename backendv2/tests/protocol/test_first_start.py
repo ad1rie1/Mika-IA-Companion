@@ -95,6 +95,28 @@ def test_configured_means_reply_resolves_and_problems_name_what_would_break():
     assert any("aucun fournisseur ne sert « reply »" in p for p in problems)
 
 
+def test_the_cli_sets_the_effort_of_a_role_and_gives_it_back_to_its_provider(tmp_path, capsys):
+    """ADR 0285 : ``mika llm effort low polish triage`` règle l'effort de ces rôles ; « defaut » le rend à la fiche de
+    leur fournisseur ; déclarer ou router un fournisseur ensuite ne l'efface pas ; un rôle ou un effort qui n'existe
+    pas est refusé, rien n'est gardé."""
+    data = tmp_path / "v2"
+    assert cli.main(["--data", str(data), "llm", "backend", "local", "--kind", "ollama", "--model", "gemma4"]) == 0
+    capsys.readouterr()
+    assert cli.main(["--data", str(data), "llm", "effort", "low", "polish", "triage"]) == 0
+    assert json.loads(capsys.readouterr().out)["efforts"] == {"polish": "low", "triage": "low"}
+    assert cli.main(["--data", str(data), "llm", "route", "local", "dream"]) == 0
+    assert json.loads(capsys.readouterr().out)["efforts"] == {"polish": "low", "triage": "low"}
+    assert cli.main(["--data", str(data), "llm", "effort", "defaut", "triage"]) == 0
+    assert json.loads(capsys.readouterr().out)["efforts"] == {"polish": "low"}
+    for wrong in (["effort", "low", "polir"], ["effort", "énorme", "polish"]):
+        with pytest.raises(SystemExit) as refused:
+            cli.main(["--data", str(data), "llm", *wrong])
+        assert refused.value.code == 2
+    capsys.readouterr()
+    assert cli.main(["--data", str(data), "llm", "show"]) == 0
+    assert json.loads(capsys.readouterr().out)["efforts"] == {"polish": "low"}
+
+
 def test_the_cli_routes_only_roles_that_exist_and_says_who_replies(tmp_path, capsys):
     data = tmp_path / "v2"
     assert cli.main(["--data", str(data), "llm", "backend", "local", "--kind", "ollama", "--model", "gemma4"]) == 0

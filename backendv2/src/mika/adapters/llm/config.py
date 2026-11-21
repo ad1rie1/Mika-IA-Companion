@@ -21,13 +21,13 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from mika.adapters.llm.claude import AUTH_LABELS, EFFORT_LABELS, THINKING_OUTPUT_TOKENS
+from mika.adapters.llm.claude import AUTH_LABELS, THINKING_OUTPUT_TOKENS
 from mika.adapters.llm.gateway import TRACES_KEPT, Gateway, LLMTrace, Trial, UnconfiguredRole
 from mika.kernel import forms
 from mika.kernel.clock import Clock
 from mika.kernel.forms import Knob
 from mika.kernel.prompt import Budget
-from mika.ports.llm import LLMBackend, LLMRequest, LLMResponse, MissingPersona
+from mika.ports.llm import EFFORT_LABELS, EFFORTS, LLMBackend, LLMRequest, LLMResponse, MissingPersona
 from mika.ports.llm_budget import LLMLimits
 from mika.vocab.episodes import FALLBACKS, TRIAL_ROLE, VOICE_ROLES, Role
 
@@ -161,7 +161,9 @@ class BackendSpec(BaseModel):
                                     group="Options avancées", order=110, only=(("kind", ("claude_code",)),))] = ""
     effort: Annotated[str, Knob(label="Effort de réflexion", help="Combien le modèle réfléchit avant de répondre "
                                 "(--effort de la CLI ; par l'API, la réflexion adaptative à cet effort). Vide : le "
-                                "défaut de la CLI, et pas de réflexion par l'API.",
+                                "défaut de la CLI ou du modèle — par l'API, Opus 5.5 et Haiku 5.5 réfléchissent "
+                                "d'emblée à l'effort moyen, Sonnet 5.5 à l'effort élevé ; les familles d'avant, pas "
+                                "du tout. Un rôle peut demander le sien (Qui sert quoi) : il l'emporte sur celui-ci.",
                                 choices=tuple(EFFORT_LABELS.items()),
                                 group="Options avancées", order=115, only=(("kind", ("claude_code", "claude")),))] = ""
     quota_ceiling: Annotated[float, Knob(label="Réserve d'abonnement", help="Au-delà de cet usage de "
@@ -270,9 +272,14 @@ ROLE_LABELS = {"reply": "répondre (voix)", "initiative": "prendre la parole (vo
                "profile": "comprendre les gens", "interpret": "interpréter", "triage": "trier le courrier",
                "caption": "décrire une image", "compact": "résumer le fil", "plan": "planifier",
                "project": "travailler sur un projet (voix)", "job": "exécuter un projet (impersonnel)",
+               "review": "relire un travail avant qu'il sorte (impersonnel)",
                "polish": "rendre naturel (voix, seconde passe)", "pro": "répondre en mode pro (voix)",
                "character": "écrire son caractère (d'après sa matrice)",
                TRIAL_ROLE: "rejouer une parole (essai de la console)"}
+
+
+#: les efforts qu'un rôle peut demander (« » n'en est pas un : sans choix, le rôle garde celui de sa fiche)
+ROLE_EFFORTS = tuple((effort, label) for effort, label in EFFORT_LABELS.items() if effort)
 
 
 class LLMConfig(BaseModel):
@@ -288,6 +295,21 @@ class LLMConfig(BaseModel):
                              "sans fournisseur retombe sur son rôle de repli.",
         keys=tuple((str(r), ROLE_LABELS.get(str(r), str(r))) for r in Role), choices_from="backends",
         advanced=False, order=20)] = Field(default_factory=dict)
+    #: rôle → effort de réflexion de ses appels (ADR 0285) ; un rôle absent garde celui de la fiche qui le sert
+    efforts: Annotated[dict[str, Annotated[str, Knob(choices=ROLE_EFFORTS)]], Knob(
+        label="Effort", help="Combien le modèle réfléchit pour ce rôle. Laisse vide : celui de la fiche du "
+                             "fournisseur. Sans effet sur un fournisseur qui n'a pas d'effort (Ollama, un serveur "
+                             "compatible OpenAI).",
+        keys=tuple((str(r), ROLE_LABELS.get(str(r), str(r))) for r in Role),
+        advanced=False, order=30)] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _efforts_asked(cls, data: Any) -> Any:
+        """Un effort laissé vide n'est pas un effort : le rôle n'est pas gardé (il suit sa fiche)."""
+        if not isinstance(data, Mapping) or not isinstance(data.get("efforts"), Mapping):
+            return data
+        return {**data, "efforts": {role: effort for role, effort in data["efforts"].items() if effort}}
 
     @model_validator(mode="before")
     @classmethod
@@ -328,6 +350,13 @@ class LLMConfig(BaseModel):
                            "est nécessaire, les autres y retombent")
             elif name not in self.backends:
                 out.append(f"le rôle « {role} » vise un fournisseur inconnu : {name}")
+        for role, effort in self.efforts.items():
+            if role not in ROLES:
+                out.append(f"l'effort du rôle « {role} » ne sert à rien : ce rôle n'existe pas (les rôles : "
+                           f"{', '.join(ROLES)})")
+            elif effort not in EFFORTS:
+                out.append(f"l'effort du rôle « {role} » est inconnu : {effort} (attendu : "
+                           f"{', '.join(e for e in EFFORTS if e)})")
         if self.backends and REPLY not in self.routes:
             out.append(f"aucun fournisseur ne sert « {REPLY} » (répondre) : chaque tour échouerait")
         for name, spec in self.backends.items():
@@ -420,7 +449,7 @@ def build_gateway(cfg: LLMConfig, clock: Clock, *, on_trace: Callable[[LLMTrace]
     return Gateway(backends, dict(cfg.routes), clock=clock, voice_roles=frozenset(str(r) for r in VOICE_ROLES),
                    fallbacks={str(k): str(v) for k, v in FALLBACKS.items()}, slots=slots, preempt=preempt,
                    on_trace=on_trace, pricing={n: (price_kind(s), s.cache_ttl) for n, s in cfg.backends.items()},
-                   limits={n: s.limits for n, s in cfg.backends.items()})
+                   limits={n: s.limits for n, s in cfg.backends.items()}, efforts=dict(cfg.efforts))
 
 
 class LiveGateway:
@@ -500,6 +529,10 @@ class LiveGateway:
     def status(self) -> list[dict[str, Any]]:
         """L'état vivant de chaque fournisseur (vide sans configuration)."""
         return self._inner.status() if self._inner is not None else []
+
+    def effort_of(self, role: str) -> tuple[str, bool]:
+        """L'effort d'un appel de ce rôle qui n'en demande pas, et s'il est le sien (``Gateway.effort_of``)."""
+        return self._inner.effort_of(role) if self._inner is not None else ("", False)
 
     def resolution(self) -> dict[str, str]:
         """Rôle → fournisseur qui le sert vraiment (« » : aucun), pour chaque ``Role`` (``Gateway.resolution``)."""

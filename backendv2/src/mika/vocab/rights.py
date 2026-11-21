@@ -165,6 +165,8 @@ class ProjectAllowance:
     canal: Verdict[CanalRule]
     canal_key: str
     ceiling: Ceiling
+    #: sa documentation (ADR 0289) : la colonne de sa ligne, sous le plafond « fichiers » du canal et de qui est en face
+    docs: bool = False
 
     @property
     def reads(self) -> bool:
@@ -187,13 +189,14 @@ def project_allowance(lines: Iterable[Any], default: Any, audience: Any, kind: s
     see = bool(line.see)
     steer = tighten(tighten(line.steer, via.steer, STEER_RANK), cap.steer, STEER_RANK) if see else STEER_NO
     files = bool(line.files) and via.files and cap.files and see
+    docs = bool(getattr(line, "docs", False)) and via.files and cap.files and see
     read = tighten(tighten(line.read, via.read, POLICY_RANK), cap.read, POLICY_RANK)
     act = tighten(tighten(line.act, via.act, POLICY_RANK), cap.act, POLICY_RANK)
     narrowed = see and (STEER_RANK[via.steer] < STEER_RANK[line.steer] or (bool(line.files) and not via.files))
     capped = see and (STEER_RANK[cap.steer] < STEER_RANK[tighten(line.steer, via.steer, STEER_RANK)]
                       or (bool(line.files) and via.files and not cap.files))
     return ProjectAllowance(see, steer, files, read, act, _why(key, got, canal_line, narrowed, cap, capped), got,
-                            canal_line, key, cap)
+                            canal_line, key, cap, docs)
 
 
 def here_allowed(frame: Any, bundle: str, tool: str = "", acts: bool = False,

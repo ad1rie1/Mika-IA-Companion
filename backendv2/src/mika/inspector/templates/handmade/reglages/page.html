@@ -6,14 +6,16 @@
 {% from "handmade/shared/drawn.html" import sober with context %}
 {% from "handmade/reglages/enregistrements.html" import records %}
 {% from "_navigation.html" import pager as pages %}
-{# le contrôle seul d'une ligne de correspondance, dans sa cellule : son nom est l'en-tête de sa ligne #}
-{% macro control(r) -%}
+{# le contrôle seul d'une ligne de correspondance, dans sa cellule : son nom est l'en-tête de sa ligne (``named`` :
+   pour une correspondance posée à côté, l'en-tête de la ligne puis celui de sa colonne) #}
+{% macro control(r, named="") -%}
+{% set named = named or (r.id ~ "-nom") %}
 {% if r.kind == "select" %}
-<select name="{{ r.path }}" id="{{ r.id }}" aria-labelledby="{{ r.id }}-nom"{% if r.error %} aria-invalid="true" aria-describedby="{{ r.id }}-error"{% endif %}{{ ' disabled' if r.readonly }}{{ ' required' if r.required and not r.readonly }}>
+<select name="{{ r.path }}" id="{{ r.id }}" aria-labelledby="{{ named }}"{% if r.error %} aria-invalid="true" aria-describedby="{{ r.id }}-error"{% endif %}{{ ' disabled' if r.readonly }}{{ ' required' if r.required and not r.readonly }}>
   {% if not r.required and '' not in r.choices|map('first')|list %}<option value="">—</option>{% endif %}
   {% for v, l in r.choices %}<option value="{{ v }}"{{ ' selected' if v == r.value }}>{{ l }}</option>{% endfor %}
 </select>
-{% else %}<input name="{{ r.path }}" id="{{ r.id }}" value="{{ r.value }}" aria-labelledby="{{ r.id }}-nom"{% if r.error %} aria-invalid="true" aria-describedby="{{ r.id }}-error"{% endif %}{{ ' readonly' if r.readonly }}>{% endif %}
+{% else %}<input name="{{ r.path }}" id="{{ r.id }}" value="{{ r.value }}" aria-labelledby="{{ named }}"{% if r.error %} aria-invalid="true" aria-describedby="{{ r.id }}-error"{% endif %}{{ ' readonly' if r.readonly }}>{% endif %}
 {% if r.error %}<span class="error" id="{{ r.id }}-error">{{ r.error }}</span>{% endif %}
 {%- endmacro %}
 {# ce que donne une ligne de correspondance (ce qui sert vraiment ce rôle) : un texte, une étiquette, une précision #}
@@ -33,21 +35,26 @@
     {% set t = f.table %}
     <div class="field mapping mapping-described table-block{{ ' has-error' if f.error }}">
       <input type="hidden" name="_champs" value="{{ f.path }}">
+      {# les correspondances posées à côté (l'effort d'un rôle) : lues avec elle, une colonne chacune #}
+      {% for g in f.beside %}<input type="hidden" name="_champs" value="{{ g.path }}">{% endfor %}
       <span class="label" id="{{ f.id }}-titre">{{ t.title or f.label }}</span>
       {% if f.help %}<span class="help">{{ f.help }}</span>{% endif %}
+      {% for g in f.beside if g.help %}<span class="help">{{ g.label }} : {{ g.help }}</span>{% endfor %}
       <div class="hm-table-wrap"><table class="hm-table mapping-table" aria-labelledby="{{ f.id }}-titre">
-        <thead><tr><th scope="col">{{ t.key }}</th>{% for h in t.before %}<th scope="col">{{ h }}</th>{% endfor %}<th scope="col">{{ t.choice }}</th>{% for h in t.after %}<th scope="col">{{ h }}</th>{% endfor %}</tr></thead>
+        <thead><tr><th scope="col">{{ t.key }}</th>{% for h in t.before %}<th scope="col">{{ h }}</th>{% endfor %}<th scope="col">{{ t.choice }}</th>{% for g in f.beside %}<th scope="col" id="{{ f.id }}-col-{{ loop.index }}">{{ g.label }}</th>{% endfor %}{% for h in t.after %}<th scope="col">{{ h }}</th>{% endfor %}</tr></thead>
         <tbody>
         {% for r in f.rows %}<tr{% if r.tone %} class="t-{{ r.tone }}"{% endif %}>
           <th scope="row" id="{{ r.id }}-nom">{{ r.label }}</th>
           {% for c in r.before %}<td>{{ cell(c) }}</td>{% endfor %}
           <td class="mapping-choice{{ ' has-error' if r.error }}">{{ control(r) }}</td>
+          {% for b in r.beside %}<td class="mapping-choice{{ ' has-error' if b and b.error }}">{% if b %}{{ control(b, r.id ~ "-nom " ~ f.id ~ "-col-" ~ loop.index) }}{% endif %}</td>{% endfor %}
           {% for c in r.after %}<td>{{ cell(c) }}</td>{% endfor %}
         </tr>{% endfor %}
         </tbody>
       </table></div>
       <div class="hm-pager single">{{ pages(t.pager) }}</div>
       {% if f.error %}<span class="error">{{ f.error }}</span>{% endif %}
+      {% for g in f.beside if g.error %}<span class="error">{{ g.error }}</span>{% endfor %}
     </div>
     {% elif f.kind == "mapping" %}
     <div class="field mapping{{ ' has-error' if f.error }}">

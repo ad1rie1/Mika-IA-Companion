@@ -7,10 +7,12 @@
 - ce que le lien donne se lit dans les lignes d'accès du projet lu : elles ouvrent (son titre, puis son détail, ses
   fichiers, lui adresser une demande), réduisent et coupent ; hors de toute conversation, la ligne la plus serrée
   décide ; un projet qui n'est plus visible suspend le lien, sans le retirer ;
-- la confidentialité suit le lien : ce que le lecteur écrit prend le niveau et les sujets de ce qu'il lit, de
-  lecteur en lecteur, et retirer un lien ne retire rien ;
+- la confidentialité suit le lien : ce que le lecteur écrit prend le niveau de ce qu'il lit, et l'oubli d'une
+  personne du projet lu l'atteint (``read_about``), de lecteur en lecteur ; de qui parle le lecteur ne change pas
+  (ADR 0262 : qui l'entend est gardé par ``test_project_links_audience.py``), et retirer un lien ne retire rien ;
 - une exécution lit, de chaque projet lié, ce que la matrice donne — et tait le reste ;
-- un plan demande un lien : il se pose quand le propriétaire du projet valide le plan, pas quand un autre le valide.
+- un plan demande un lien : il se pose quand le propriétaire du projet valide le plan, pas quand un autre le valide ;
+  et il ne peut demander, puis nommer, que les projets que la personne qui a demandé le projet peut voir elle aussi.
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.faculties.projects import links
 from mika.faculties.projects.faculty import (
+    ACCESS_SET,
     LINKS_MAX,
     LINKS_SET,
     NOTED,
@@ -41,12 +44,15 @@ from mika.faculties.projects.faculty import (
     linked,
     objectives_of,
     opened,
+    plan_subject,
     reaches,
+    subjects_of,
+    view,
     written,
 )
 from mika.faculties.projects.faculty import params as projects_params
 from mika.faculties.projects.inspect import READERS_TITLE, READS_TITLE
-from mika.faculties.projects.prompt import _link_refs, _links_section, _run_section, _texts
+from mika.faculties.projects.prompt import _link_refs, _links_section, _run_section, _share_section, _texts
 from mika.faculties.projects.steer import SteerArgs, project_steer
 from mika.faculties.projects.tools import (
     CreateArgs,
@@ -54,6 +60,7 @@ from mika.faculties.projects.tools import (
     NoteArgs,
     PlanArgs,
     ReportArgs,
+    _read_problems,
     create_project,
     project_decide,
     project_note,
@@ -61,6 +68,7 @@ from mika.faculties.projects.tools import (
     report_run,
 )
 from mika.kernel.events import Content, Origin
+from mika.kernel.frame import EpisodeRef, Frame
 from mika.kernel.state import FrozenDict
 from mika.runtime.operations import dynamic_fields, perform
 from mika.vocab.access import (
@@ -81,10 +89,10 @@ from mika.vocab.access import (
 )
 from mika.vocab.canals import CanalRule, Canals, CanalTable
 from mika.vocab.episodes import Kind, project_target
-from mika.vocab.phrasebook import phrase
+from mika.vocab.phrasebook import family, phrase
 from mika.vocab.privacy import Sensitivity
 from tests.fixtures.mika import connect, said
-from tests.unit.test_project_access import set_access
+from tests.unit.test_project_access import facing, set_access
 from tests.unit.test_projects import create, events, form, live
 from tests.unit.test_projects_console import tab, tables
 from tests.unit.test_projects_framing import _asked_project, _ctx
@@ -223,8 +231,9 @@ def test_the_matrix_opens_what_a_link_gives_step_by_step():
     assert given_to_bea(steer=STEER_EDIT, files=True) == links.NOTHING
     # un projet jamais réglé : une de ses propriétaires et elle seule ont tout ; qui l'a confié, ses fichiers et
     # l'accord du propriétaire
-    assert links.granted(c.UNSET, AT_OWNER) == links.Grant(True, STEER_EDIT, True)
-    assert links.granted(c.UNSET, WORK) == links.Grant(True, STEER_EDIT, True)
+    # … et sa documentation (ADR 0289), ouverte à elles deux comme le reste
+    assert links.granted(c.UNSET, AT_OWNER) == links.Grant(True, STEER_EDIT, True, True)
+    assert links.granted(c.UNSET, WORK) == links.Grant(True, STEER_EDIT, True, True)
     confided = (*c.UNSET, _line(PERSON + "bea", see=True, steer=STEER_ASK, files=True))
     assert links.granted(confided, ACCOUNT, "bea") == links.Grant(True, STEER_ASK, True)
 
@@ -295,25 +304,30 @@ def test_a_right_taken_back_cuts_the_link_and_an_invisible_project_suspends_it()
 # ── La confidentialité suit le lien ────────────────────────────────────────
 
 
-def test_what_the_reader_writes_takes_the_level_and_the_subjects_of_what_it_reads():
+def test_what_the_reader_writes_takes_the_level_of_what_it_reads_and_its_people_for_forgetting_only():
     produit = _project(1, about=("adrien", "carla"), sensitivity=CONFIDENCE)
     veille, bilan = _project(2, "bea", sensitivity=PERSONAL), _project(3, "dan")
     s = _state(produit, veille, bilan)
     assert written(s.projects[2]) == PERSONAL
     s = _read(s, 3, 2)  # le bilan lit la veille, avant que la veille ne lise le produit
-    assert s.projects[3].about == ("dan", "bea") and written(s.projects[3]) == PERSONAL
+    assert s.projects[3].read_about == ("bea",) and written(s.projects[3]) == PERSONAL
     s = _read(s, 2, 1)
     reader = s.projects[2]
-    # ses sujets reçoivent le propriétaire et les sujets du projet lu ; ce qu'il écrit prend son niveau
-    assert reader.about == ("bea", "adrien", "carla") and reader.read_about == ("adrien", "carla")
+    # les personnes du projet lu — son propriétaire, ses sujets — se gardent à part, pour l'oubli ; ce qu'il écrit
+    # prend son niveau
+    assert reader.read_about == ("adrien", "carla") and subjects_of(reader) == ("bea", "adrien", "carla")
     assert reader.read_level == written(produit) == CONFIDENCE and written(reader) == CONFIDENCE
     assert reader.sensitivity == PERSONAL  # son cadre à lui ne change pas
+    # de qui parle le lecteur ne change pas (ADR 0262) : lire un projet ne fait de personne un témoin du lecteur
+    assert reader.about == ("bea",) and s.projects[3].about == ("dan",) and s.projects[1].about == ("adrien", "carla")
     # de lecteur en lecteur : le bilan, qui lit la veille, les reçoit aussi
-    assert s.projects[3].about == ("dan", "bea", "adrien", "carla") and written(s.projects[3]) == CONFIDENCE
+    assert s.projects[3].read_about == ("bea", "adrien", "carla") and written(s.projects[3]) == CONFIDENCE
+    assert view(s.projects[3]).about == ("dan",) and view(s.projects[3]).read_about == ("bea", "adrien", "carla")
     # retirer le lien ne retire rien : ce qu'elle en a lu est déjà dans ses notes
     gone = _read(s, 2)
-    assert gone.projects[2].reads == () and gone.projects[2].about == reader.about
+    assert gone.projects[2].reads == () and gone.projects[2].about == ("bea",)
     assert written(gone.projects[2]) == CONFIDENCE and gone.projects[2].read_about == ("adrien", "carla")
+    assert PROJECTS.state_version >= 14  # un état d'avant, où ils étaient fondus dans ``about``, se reconstruit
 
 
 def test_a_change_in_the_project_read_reaches_its_readers():
@@ -322,24 +336,30 @@ def test_a_change_in_the_project_read_reaches_its_readers():
     # le projet lu devient plus sensible : ce qu'écrivent ses lecteurs suit
     raised = _reframed(s, _ev(REFRAMED.payload(project=1, sensitivity=CONFIDENCE)), _cx())
     assert written(raised.projects[2]) == written(raised.projects[3]) == CONFIDENCE
-    # il change de propriétaire : ses lecteurs reçoivent le nouveau sujet
+    # il change de propriétaire : ce que ses lecteurs écrivent ensuite, l'oubli du nouveau l'atteindra aussi
     moved = _reframed(s, _ev(REFRAMED.payload(project=1, set_owner=True, owner="eve", about=("eve",))), _cx())
-    assert "eve" in moved.projects[2].about and "eve" in moved.projects[3].about
-    # le lecteur change de « pour qui » : les sujets venus de ses lectures restent
+    assert "eve" in moved.projects[2].read_about and "eve" in moved.projects[3].read_about
+    assert moved.projects[2].about == ("bea",) and moved.projects[3].about == ("dan",)  # sans devenir leurs sujets
+    # le lecteur change de « pour qui » : ses sujets sont les nouveaux, ceux venus de ses lectures restent à part
     again = _reframed(s, _ev(REFRAMED.payload(project=2, set_owner=True, owner="fay", about=("fay",))), _cx())
-    assert again.projects[2].about == ("fay", "adrien") and again.projects[2].owner == "fay"
-    assert "fay" in again.projects[3].about  # et son propre lecteur le reçoit à son tour
+    assert again.projects[2].about == ("fay",) and again.projects[2].owner == "fay"
+    assert again.projects[2].read_about == ("adrien",)
+    assert "fay" in again.projects[3].read_about  # et son propre lecteur le reçoit à son tour
 
 
-def test_what_she_writes_in_the_reader_carries_the_subjects_and_the_level(tmp_path):
-    """Dans un vrai noyau : un projet de Bea, lu par un projet d'Adrien — ce qu'elle note et conclut ensuite chez
-    Adrien nomme Bea parmi ses sujets, au niveau de ce qu'elle a lu : l'oubli de Bea l'atteindra."""
+def test_what_she_writes_in_the_reader_carries_the_level_and_is_reached_by_forgetting(tmp_path):
+    """Dans un vrai noyau : un projet de Bea, plus confidentiel, lu par un projet d'Adrien — ce qu'elle note et
+    conclut ensuite chez Adrien est au niveau de ce qu'elle a lu, et porte Bea parmi ses sujets hérités, pas parmi
+    ceux dont il parle : l'oubli de Bea l'atteint, sans qu'elle en devienne un témoin."""
 
     async def scenario(kernel, llm):
         await connect(kernel, "user_2", "Bea")
         frame = kernel.mind.frame()
         bea = frame.get(identity_c.PERSON("user_2"))
         theirs = await create(kernel, "p1", title="Le carnet de Bea", objectives="Tenir le carnet", owner="user_2")
+        # son carnet est une confidence : plus haut que ce qu'écrit d'ordinaire un projet (« personnel »)
+        await kernel.mind.append([REFRAMED.draft(project=theirs, sensitivity=CONFIDENCE)], emitter="projects",
+                                 correlation="niveau", origin=Origin.GENESIS)
         mine = await create(kernel, "p2", title="La veille", constants="Veiller", cadence_hours="24")
         before = kernel.mind.frame().state("projects").projects[mine]
         got = await perform(kernel, "projects.liens", form(**{f"lit_{theirs}": "on"}), by="user_1", subject=str(mine),
@@ -351,17 +371,31 @@ def test_what_she_writes_in_the_reader_carries_the_subjects_and_the_level(tmp_pa
         await report_run(ReportArgs(verdict=c.CONTINUE, summary="Lu le carnet de Bea."),
                          _ctx(kernel, "report_run", Kind.WORK, project_target(mine), subject=subject))
         after = kernel.mind.frame().state("projects")
-        return got, bea, before, after.projects[mine], after.projects[theirs], \
-            [e for e in events(kernel, NOTED) if e.data.project == mine][-1], \
-            [e for e in events(kernel, c.RUN_REPORTED) if e.data.project == mine][-1], events(kernel, LINKS_SET)
+        noted = [e for e in events(kernel, NOTED) if e.data.project == mine][-1]
+        reported = [e for e in events(kernel, c.RUN_REPORTED) if e.data.project == mine][-1]
+        store = kernel.ports["store"]
+        refs = [after.projects[mine].title_ref, noted.data.text.ref, reported.data.summary.ref]
+        kept = dict(store.content(refs))
+        await kernel.forget(bea)
+        return got, bea, before, after.projects[mine], after.projects[theirs], noted, reported, \
+            events(kernel, LINKS_SET), refs, kept, dict(store.content(refs))
 
-    got, bea, before, reader, target, noted, reported, set_ = live(tmp_path, scenario)
+    got, bea, before, reader, target, noted, reported, set_, refs, kept, left = live(tmp_path, scenario)
     assert got.ok, got
     assert [e.data.reads for e in set_] == [(target.id,)] and set_[0].data.by == "user_1"
-    assert bea not in before.about and bea in reader.about and reader.reads == (target.id,)
-    assert written(reader) >= written(target) >= PERSONAL
-    assert bea in noted.data.about and bea in reported.data.about  # l'oubli de Bea atteint ce qu'elle écrit ensuite
-    assert noted.data.text.level == reported.data.summary.level == written(reader)
+    assert reader.reads == (target.id,) and bea in reader.read_about
+    assert reader.about == before.about and bea not in reader.about  # de qui il parle n'a pas changé
+    # le niveau : celui du projet lu, plus haut que celui du lecteur avant le lien
+    assert written(target) == CONFIDENCE > written(before) == PERSONAL and written(reader) == CONFIDENCE
+    assert noted.data.text.level == reported.data.summary.level == CONFIDENCE
+    # ses sujets hérités : à part, déclarés sujets — jamais « de qui ça parle »
+    for event in (noted, reported):
+        assert bea in event.data.read_about and bea not in event.data.about, event.type.name
+        assert "read_about" in event.type.subject_fields
+    # l'oubli de Bea atteint ce qu'elle a écrit chez Adrien après le lien, pas ce qui y était avant
+    title, note, summary = refs
+    assert kept[note] == "le carnet avance bien" and kept[summary] == "Lu le carnet de Bea."
+    assert note not in left and summary not in left and left[title] == "La veille"
 
 
 # ── La console : ce qu'il lit, qui le lit ──────────────────────────────────
@@ -383,8 +417,8 @@ def test_the_fiche_sets_what_it_reads_and_shows_who_reads_it(tmp_path):
                                     subject=str(produit), nonce="l2")
         out["stranger"] = await perform(kernel, "projects.liens", form(), by="user_9", subject=str(connaitre),
                                         nonce="l3")
-        out["reader"] = tables(await tab(kernel, "comportement", str(connaitre)))
-        out["read"] = tables(await tab(kernel, "comportement", str(produit)))
+        out["reader"] = tables(await tab(kernel, "liens", str(connaitre)))
+        out["read"] = tables(await tab(kernel, "liens", str(produit)))
         out["unset"] = await perform(kernel, "projects.liens", form((f"lit_{produit}",)), by="user_1",
                                      subject=str(connaitre), nonce="l4")
         out["end"] = kernel.mind.frame().state("projects").projects[connaitre].reads
@@ -590,6 +624,103 @@ def test_what_a_plan_asks_to_read_is_set_by_who_may_and_only_while_it_holds():
     assert denied.denied and denied.pending == (1, 9) and denied.added == () and denied.reads == ()
     # déjà lié : plus rien à poser
     assert links.approved(_read(s, 2, 1), _read(s, 2, 1).projects[2], "bea", WORLD).added == ()
+
+
+# ── Ce que la personne qui a demandé le projet peut voir ───────────────────
+
+
+def test_a_plan_only_asks_to_read_what_who_asked_for_the_project_can_see_too():
+    """La règle pure : un projet à elle, demandé par Bea, peut lire les projets d'Adrien (elle seule, au travail) —
+    mais son plan, dit à Bea, ne peut demander que ceux que Bea voit elle aussi."""
+    produit = _project(1)  # à Adrien, jamais réglé : aucune ligne ne désigne Bea
+    site = replace(_project(2), access=(*c.UNSET, _line(PERSON + "bea", see=True)), default_access=c.UNSET_DEFAULT)
+    a_elle = _project(3, None, asked_by="bea", plan_state=c.TO_FRAME)
+    s = _state(produit, site, a_elle)
+    assert [t.id for t in links.candidates(s, a_elle, WORLD)] == [1, 2]  # ce qu'il peut lire
+    assert [t.id for t in links.candidates(s, a_elle, WORLD, seen_by="bea")] == [2]  # ce que Bea voit aussi
+    assert [t.id for t in links.askable(s, a_elle, WORLD)] == [2]  # ce que son plan peut demander
+    # demandé par quelqu'un qui s'occupe d'elle, il voit tout ; sans personne qui l'ait demandé, rien à filtrer
+    assert [t.id for t in links.askable(s, replace(a_elle, asked_by="adrien"), WORLD)] == [1, 2]
+    assert [t.id for t in links.askable(s, replace(a_elle, asked_by=None), WORLD)] == [1, 2]
+    # un projet confié à Bea ne lit que ce qu'on lui partage : son propriétaire le voit, par construction
+    de_bea = _project(4, "bea", asked_by="bea")
+    assert [t.id for t in links.askable(_state(produit, site, de_bea), de_bea, WORLD)] == [2]
+    # ce que le plan s'entend dire : le projet se lirait, mais qui l'a demandé ne peut pas le voir
+    hidden = family("projects.links.refused")[links.HIDDEN]
+    assert _read_problems(s, a_elle, (1, 2), WORLD) == [phrase("projects.tools.plan.bad_read", id=1, why=hidden)]
+    assert _read_problems(s, a_elle, (2,), WORLD) == []
+
+
+def test_her_plan_names_to_who_asked_only_the_projects_they_can_see(tmp_path):
+    """Dans un vrai noyau : Bea lui a demandé un projet (une promesse tenue). Sa séance de cadrage ne voit pas le
+    produit d'Adrien, que rien ne partage à Bea ; son plan ne peut pas le demander ; et quand elle dit son plan,
+    le projet qu'il demande à lire n'est nommé qu'à qui peut le voir."""
+
+    async def scenario(kernel, llm):
+        await connect(kernel, "user_2", "Bea")
+        bea = kernel.mind.frame().get(identity_c.PERSON("user_2"))
+        produit = await create(kernel, "p1", title="Le produit secret", objectives="Écrire le module")
+        site = await create(kernel, "p2", title="Le site vitrine", objectives="Le mettre en ligne")
+        shared = {"who": [PERSON + bea], "see": True}
+        mine = {"who": [OWNER], "see": True, "steer": "modification", "files": True}
+        hers = {"who": [SELF], "canal": [INTERNAL], "see": True, "steer": "modification", "files": True}
+        await kernel.mind.append([faculty_access(site, (mine, hers, shared))], emitter="projects",
+                                 correlation="partage", origin=Origin.GENESIS)
+        made = await kernel.mind.append([opened(
+            title="Le guide de Bea", description="", authority=c.SELF, mode=c.PERSONA, owner=None, address=None,
+            about=(bea,), level=PERSONAL, source="conversation", request="écris-moi un guide", asked_by=bea,
+            framing=True)], emitter="projects", correlation="bea", origin=Origin.GENESIS)
+        pid = made.seqs[-1]
+        await kernel.mind.append(objectives_of(pid, ["Écrire le guide"], [], author="self", owner=None, about=(bea,),
+                                               level=PERSONAL), emitter="projects", correlation="bea",
+                                 origin=Origin.GENESIS)
+        framing = _ctx(kernel, "project_plan", Kind.WORK, project_target(pid), subject=frame_subject(pid))
+        s = framing.frame.state("projects")
+        out = {"frame": _run_section(s, framing.frame, {"projects": await _texts(s, framing.frame, kernel.ports)})}
+        out["hidden"] = await project_plan(PlanArgs.model_validate({**PLAN, "reads": [produit]}), framing)
+        asking = {**PLAN, "reads": [site], "questions": [{"question": "Pour qui ?", "advice": "Pour tous."}]}
+        out["plan"] = await project_plan(PlanArgs.model_validate(asking), framing)
+        out["waiting"] = kernel.mind.frame().state("projects").projects[pid]
+
+        async def told(handle: str, owner: bool = False) -> str:
+            mind = kernel.mind
+            frame = Frame(mind.frame().root, mind.clock.now(), mind.registry, facing(handle, owner=owner),
+                          EpisodeRef(f"ep-plan-{handle}", Kind.INITIATIVE, target=handle,
+                                     attrs=FrozenDict({"subject": plan_subject(pid)})))
+            state = frame.state("projects")
+            body = _share_section(state, frame, {"projects": await _texts(state, frame, kernel.ports)})
+            return str(body.content)
+
+        out["to_bea"], out["to_adrien"] = await told("user_2"), await told("user_1", owner=True)
+        # Adrien ne le lui partage plus : son plan ne le nomme plus devant elle
+        await kernel.mind.append([faculty_access(site, (mine, hers))], emitter="projects", correlation="repris",
+                                 origin=Origin.GENESIS)
+        out["after"], out["adrien_after"] = await told("user_2"), await told("user_1", owner=True)
+        return produit, site, out
+
+    produit, site, out = live(tmp_path, scenario)
+    # la séance de cadrage : ce qu'elle peut demander à lire, sans le projet que Bea ne voit pas
+    shown = out["frame"].content.split(phrase("projects.frame.readable"), 1)[1]
+    assert f"- n° {site} « Le site vitrine »" in shown and "Le produit secret" not in out["frame"].content
+    # le plan qui le demande quand même est refusé, avec sa raison
+    assert not out["hidden"].ok
+    assert f"n° {produit} ne peut pas être lu : la personne qui t'a demandé ce projet ne peut pas le voir" in \
+        out["hidden"].content
+    assert out["plan"].ends and out["waiting"].plan_state == c.PROPOSED and out["waiting"].plan_reads == (site,)
+    # dit à Bea, qui voit le site ; dit à Adrien aussi
+    named = phrase("projects.share.plan_reads", projects=phrase("projects.links.named", id=site,
+                                                                title="Le site vitrine"))
+    assert named in out["to_bea"] and named in out["to_adrien"]
+    # le partage repris : plus un mot du site devant Bea — Adrien, lui, le voit toujours
+    assert "Le site vitrine" not in out["after"] and named in out["adrien_after"]
+
+
+def faculty_access(project: int, rows: tuple[dict, ...]):
+    """Les lignes d'accès d'un projet, posées d'un coup (ce que l'action ``projects.acces`` écrit)."""
+    return ACCESS_SET.draft(project=project, rows=tuple(c.ProjectAccess(
+        who=tuple(r["who"]), canal=tuple(r.get("canal", ())), see=r.get("see", False),
+        steer={"modification": STEER_EDIT, "lecture": STEER_READ}.get(r.get("steer", ""), STEER_NO),
+        files=r.get("files", False)) for r in rows), default=c.CLOSED, by="user_1")
 
 
 def test_a_project_confided_in_conversation_reads_what_its_owner_asks(tmp_path):

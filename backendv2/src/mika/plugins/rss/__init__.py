@@ -422,9 +422,11 @@ class ReadArgs(BaseModel):
 EPISODES = [Kind.REPLY, Kind.INITIATIVE, *WORKING]
 
 
+# sans flux suivi (``feeds.configured``), ses outils ne s'offrent pas et le catalogue ne les annonce pas (ADR 0266) :
+# le 19 novembre 2026, à « tu as des actus ? », son premier appel allait lire des flux qu'elle ne suit pas
 @RSS.tool("rss_list", description=phrase("rss.tools.list.description"),
           label=phrase("rss.tools.list.label"), args=ListArgs, bundle=BUNDLE,
-          episodes=EPISODES)
+          episodes=EPISODES, needs="feeds")
 async def rss_list(args: ListArgs, ctx: Any) -> Any:
     port = ctx.ports.get("feeds")
     if port is None:
@@ -440,7 +442,7 @@ async def rss_list(args: ListArgs, ctx: Any) -> Any:
 
 @RSS.tool("rss_read", description=phrase("rss.tools.read.description"),
           label=phrase("rss.tools.read.label"), args=ReadArgs,
-          bundle=BUNDLE, episodes=EPISODES, max_calls_per_episode=3, owner_only=True)
+          bundle=BUNDLE, episodes=EPISODES, max_calls_per_episode=3, owner_only=True, needs="feeds")
 async def rss_read(args: ReadArgs, ctx: Any) -> Any:
     port = ctx.ports.get("feeds")
     if port is None:

@@ -86,6 +86,9 @@ SUGGESTED, ROADS = 8, 3
 HERE_WORDS = frozenset({"ici", "here"})
 #: l'identifiant d'un lieu qu'elle a trouvé : l'index local (« l123 »), une adresse (« a:1 »)
 PLACE_ID = re.compile(r"^(?:l\d{1,12}|a:\d{1,3})$")
+#: ce qu'un regard garde de l'identifiant d'un lieu : le plus long, un lieu des données touristiques (« t: » et un
+#: uuid, 38 caractères) — coupé, sa fiche ne se rouvrirait plus (R2-M01)
+IDENT_MAX = 40
 
 Mode = Literal["voiture", "velo", "pied"]
 Avoid = Literal["peages", "autoroutes", "ferries"]
@@ -200,7 +203,7 @@ def _from_item(item: Any) -> Point | None:
     if not geo.valid(lat, lon):
         return None
     return Point(str(item.get("name") or ""), lat, lon, str(item.get("kind_fr") or ""), str(item.get("town") or ""),
-                 ident=str(item.get("id") or "")[:20], osm=str(item.get("osm") or "")[:20])
+                 ident=str(item.get("id") or "")[:IDENT_MAX], osm=str(item.get("osm") or "")[:20])
 
 
 def place_items(text: str | None) -> list[dict[str, Any]]:
@@ -247,7 +250,7 @@ def _here(call: _Call) -> Point:
 
 def _from_hit(hit: PlaceHit) -> Point:
     return Point(hit.name[:c.NAME_MAX], hit.lat, hit.lon, hit.kind_fr[:c.KIND_MAX], hit.town[:c.NAME_MAX],
-                 ident=hit.id[:20], osm=hit.osm[:20])
+                 ident=hit.id[:IDENT_MAX], osm=hit.osm[:20])
 
 
 async def _point(call: _Call, text: str) -> Point:
@@ -349,7 +352,7 @@ HIT_KEPT = {"osm": 20, "cuisine": c.KIND_MAX, "rating": None, "reviews": None, "
 def hit_item(hit: PlaceHit) -> dict[str, Any]:
     """Ce qu'un regard garde d'un lieu trouvé (``Looked.found``) — ce que l'écran Carte montre aussi."""
     item: dict[str, Any] = {
-        "id": hit.id[:20], "name": hit.name[:c.NAME_MAX], "kind": hit.kind[:c.KIND_MAX],
+        "id": hit.id[:IDENT_MAX], "name": hit.name[:c.NAME_MAX], "kind": hit.kind[:c.KIND_MAX],
         "kind_fr": hit.kind_fr[:c.KIND_MAX], "category": hit.category[:40], "lat": round(hit.lat, 6),
         "lon": round(hit.lon, 6), "town": hit.town[:c.NAME_MAX], "distance_m": hit.distance_m,
         "along_m": hit.along_m}
@@ -645,11 +648,11 @@ async def place_read(args: ReadArgs, ctx: Any) -> Any:
     if isinstance(call, ToolResult):
         return call
     port = call.port
+    raw = " ".join(args.place.split())
+    if port is not None and EVENT_REF.match(raw.lower()):  # un événement ne demande pas l'index des lieux (R3-05)
+        return await _read_event(call, port, raw.lower())
     if port is None or not port.places_ready():
         return _refused(phrase("trips.tools.no_places"))
-    raw = " ".join(args.place.split())
-    if EVENT_REF.match(raw.lower()):
-        return await _read_event(call, port, raw.lower())
     try:
         ident = await _fiche_id(call, raw)
         detail = await port.place(ident) if ident else None

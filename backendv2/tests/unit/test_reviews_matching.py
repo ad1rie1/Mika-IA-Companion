@@ -80,6 +80,74 @@ async def test_a_rebuilt_index_judges_everything_again(tmp_path):
     assert await twins(rig) == {gp.MEERT: "n302", gp.BELLEZZA: "n301"}
 
 
+#: les vrais cas de la sonde du 2026-11-20 (``sonde/data/cartes/avis.db``, R1-02) : des lieux de l'index tout près de
+#: lieux de Google, aux positions réelles — (osm, nom, sorte, catégorie, lat, lon)
+SONDE_PLACES = (
+    ("w45895545", "BNP Paribas", "bank", "services", 50.6363932, 3.0628541),
+    ("n9722004201", "Parking Grand Place", "parking", "route", 50.6370583, 3.0633047),
+    ("n5761496453", "Le Beffroi", "restaurant", "manger", 50.6375022, 3.0641179),
+    ("n1559451471", "Médiathèque du Vieux Lille", "library", "sortir", 50.640948, 3.064544),
+    ("w40848253", "Beffroi de Lille", "attraction", "voir", 50.6306325, 3.0697915),
+    ("r288199", "Maison Meert", "attraction", "voir", 50.6375645, 3.0615961),
+    ("n10996980643", "Mamatte", "bakery", "courses", 50.6355377, 3.063366),
+    ("n13283410235", "Magmatic", "restaurant", "manger", 50.6362561, 3.0674061),
+    ("r11371717", "Opéra de Lille", "theatre", "sortir", 50.6375261, 3.0651522),
+    ("w23475365", "Parc Henri Matisse", "park", "nature", 50.6405634, 3.072453),
+    ("w45822366", "Théâtre du Nord", "theatre", "sortir", 50.6361486, 3.064029),
+)
+#: les lieux de Google de la sonde (id, nom, type premier, sorte, lat, lon) et le pendant attendu ('' : aucun)
+SONDE_SPOTS = (
+    ("ChIJbarparibas", "BAR PARIBAS", "bar", "manger", 50.636564, 3.063192, ""),               # pas la banque
+    ("ChIJgrandplace", "Grand Place", "historical_landmark", "voir", 50.63684, 3.063501, ""),   # pas le parking
+    ("ChIJbeffroicci", "Beffroi de la Chambre de Commerce de Lille", "historical_landmark", "voir", 50.637675,
+     3.064511, ""),                                                                            # pas le restaurant
+    ("ChIJvieuxlille", "Le Vieux Lille", "visitor_center", "voir", 50.640499, 3.064246, ""),    # pas la médiathèque
+    ("ChIJbeffroihdv", "Beffroi de l'Hôtel de Ville de Lille", "historical_landmark", "voir", 50.630668, 3.069767,
+     "w40848253"),
+    ("ChIJmaisonmeert", "Maison Méert", "pastry_shop", "manger", 50.63772, 3.061992, "r288199"),  # le même nom
+    ("ChIJmamatte", "Mamatte Lille Rihour - Café & Brunch", "brunch_restaurant", "manger", 50.63555, 3.063334,
+     "n10996980643"),                                                                          # une boulangerie
+    ("ChIJmagmatic", "Magmatic by Ephemera", "restaurant", "manger", 50.636288, 3.067431, "n13283410235"),
+    ("ChIJopera", "Opéra de Lille", "opera_house", "voir", 50.6377, 3.065262, "r11371717"),      # une salle
+    ("ChIJmatisse", "Parc Henri Matisse", "park", "voir", 50.639919, 3.072903, "w23475365"),
+    ("ChIJtheatrenord", "Théâtre du Nord", "performing_arts_theater", "voir", 50.636286, 3.06398, "w45822366"),
+)
+
+
+async def test_a_place_of_another_sort_never_takes_the_rating_of_one_under_a_like_name(tmp_path):
+    """La sonde (R1-02) : « BAR PARIBAS » avait les avis de la banque « BNP Paribas », la Grand-Place ceux du parking,
+    le beffroi de la Chambre de Commerce ceux du restaurant « Le Beffroi » — un nom dans l'autre ne suffit plus : une
+    banque, un parking, une gare ne sont le pendant de rien, et sous des noms qui ne sont pas les mêmes, la sorte doit
+    aller (un restaurant et une boulangerie, ce qui se visite et un parc ou une salle). Les bons rapprochements
+    restent."""
+    index = write_index(tmp_path / "cartes" / "lieux.db", SONDE_PLACES)
+    api = gp.FakeGoogle(places=[gp.place(sid, name, lat, lon, primary=primary)
+                                for sid, name, primary, _sort, lat, lon, _twin in SONDE_SPOTS])
+    rig = gp.rig(tmp_path, api, index=index)
+    for sort in ("manger", "voir"):
+        for cell in {cell_of(lat, lon, 3).key: cell_of(lat, lon, 3) for *_r, lat, lon, _t in SONDE_SPOTS}.values():
+            await rig.cells.load(cell, sort, background=True)
+    assert await twins(rig) == {sid: twin for sid, *_r, twin in SONDE_SPOTS}
+    assert await rig.reviews.noted(["w45895545", "n9722004201", "n5761496453", "n1559451471"]) == {}
+
+
+async def test_a_cache_matched_under_the_former_rule_is_judged_again(tmp_path):
+    """Un cache rapproché avant la règle de la sorte (R1-02 : seule la date de l'index dans ``matched_with``) se rejuge
+    en entier au prochain passage : « BAR PARIBAS » quitte la banque."""
+    spot = next(s for s in SONDE_SPOTS if s[1] == "BAR PARIBAS")
+    maps, _outside, _clock, _config = gp.desk(tmp_path, gp.FakeGoogle(places=[]), places=SONDE_PLACES)
+    conn = maps.reviews.base.open()
+    try:
+        ReviewsBase.write_spots(conn, [read_place(gp.place(spot[0], spot[1], spot[4], spot[5], primary=spot[2]),
+                                                  "manger")], "2026-11-20T10:00:00Z")
+        conn.execute("UPDATE spot SET twin = 'w45895545', twin_m = 30")
+        ReviewsBase.set_meta(conn, {"matched_with": maps.places.info().built})  # la date seule : la règle d'avant
+        maps.review_cells._match(conn)
+    finally:
+        conn.close()
+    assert await twins(maps) == {spot[0]: ""}
+
+
 async def test_a_place_that_moved_or_was_alone_is_judged_again_when_read_again(tmp_path):
     index = write_index(tmp_path / "cartes" / "lieux.db", gp.GRAND_PLACE_PLACES)
     rig = gp.rig(tmp_path, index=index)

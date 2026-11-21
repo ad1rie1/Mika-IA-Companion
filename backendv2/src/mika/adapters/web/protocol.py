@@ -27,11 +27,12 @@ from mika.contracts import place as place_c
 from mika.contracts import presence as presence_c
 from mika.contracts import self_ as self_c
 from mika.contracts import world as world_c
-from mika.contracts.entry import HistoryRow, MessageNote, SharedMeta, StrandItem
+from mika.contracts.entry import Efforts, HistoryRow, MessageNote, SharedMeta, StrandItem
 from mika.contracts.transcript import STRAND_MAX
 from mika.kernel.clock import HOUR, US
 from mika.kernel.frame import Frame
 from mika.ports.delivery import DONE, NOTE, TOO_LATE, Activity, Delivery
+from mika.ports.llm import EFFORTS
 from mika.vocab import privacy, voice
 from mika.vocab.affect import Emotion, emotion_of
 from mika.vocab.episodes import MODES
@@ -403,6 +404,20 @@ def strands(items: Sequence[StrandItem]) -> dict[str, Any]:
          "first_at": i.first_at // 1000, "last_at": i.last_at // 1000,
          "opener": i.opener if len(i.opener) <= STRAND_OPENER_MAX else i.opener[:STRAND_OPENER_MAX - 1] + "…"}
         for i in items]}
+
+
+def effort_level(raw: Any) -> str | None:
+    """L'effort de réflexion qu'une trame demande (ADR 0287) : un des niveaux, vide pour « auto » ; ``None`` : rien
+    de valide."""
+    return raw if isinstance(raw, str) and raw in EFFORTS else None
+
+
+def efforts(e: Efforts) -> dict[str, Any]:
+    """L'effort de réflexion de ses réponses (ADR 0287) : ce que la personne a forcé pour toute sa conversation et
+    pour ses fils de travail (« » ou absent : auto), et ce que « auto » vaut en ce moment (« » : le défaut du
+    modèle)."""
+    return {"type": "efforts", "conversation": e.conversation, "strands": dict(e.strands),
+            "auto": {"chat": e.auto, "pro": e.auto_pro}}
 
 
 def _cut(text: str, limit: int = TOOL_TEXT_MAX) -> str:

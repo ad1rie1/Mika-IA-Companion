@@ -15,7 +15,9 @@ coupe, plancher, étiquettes) ; le composeur, générique :
 4. budgète — ce qui part hors du composeur (persona, catalogue, déclarations
    d'outils) est réservé ; coupe par rang croissant jusqu'aux planchers,
    toujours après une ligne, une phrase ou un mot entiers (un élément qui ne
-   tient pas est retiré, jamais laissé à moitié) ;
+   tient pas est retiré, jamais laissé à moitié) ; ce que le fil rendu montre
+   déjà ne se redit pas (``Fragment.covered_by``, ADR 0263), et un intertitre
+   resté seul se retire (``Fragment.heading``) ;
    l'historique est coupé avec hystérésis (jusqu'à un niveau bas), mémorisée
    par fil, pour que le préfixe en cache ne bouge pas à chaque tour ; un tour
    épinglé (le résumé du début du fil) est prioritaire sans dépasser le budget ; le message en
@@ -227,8 +229,12 @@ class Fragment:
 
     text: str
     provenance: tuple[str, ...] = ()
-    #: Un rappel d'échange peut être omis seulement si ces tours sont effectivement rendus.
+    #: Ce que le fil montre déjà ne se redit pas (ADR 0263) : le fragment est omis seulement si ces tours — les
+    #: messages d'où il vient — sont tous effectivement rendus dans l'historique ; vide : jamais omis.
     covered_by: tuple[int, ...] = ()
+    #: un intertitre : il annonce les fragments qui le suivent, jusqu'au prochain intertitre. Resté seul (ce qu'il
+    #: annonçait coupé faute de place, ou déjà dans l'historique rendu), il se retire avec eux
+    heading: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -528,6 +534,7 @@ class Composer:
                         if len(candidate) > target:
                             break
                         parts.append(fragment)
+                    parts = _announced(parts)
                     kept = _fragments(b.spec, parts)
                     b.body = replace(b.body, provenance=tuple(p for f in parts for p in f.provenance),
                                      fragments=tuple(parts))
@@ -579,6 +586,7 @@ class Composer:
             parts = tuple(f for f in b.body.fragments if not f.covered_by or not set(f.covered_by) <= visible_ids)
             if len(parts) == len(b.body.fragments):
                 continue
+            parts = tuple(_announced(parts))
             b.body = replace(b.body, fragments=parts, provenance=tuple(p for f in parts for p in f.provenance))
             b.text = _fragments(b.spec, parts)
             if not b.text:
@@ -657,6 +665,12 @@ class Composer:
         self._history_cut[key] = first_id
         while len(self._history_cut) > HISTORY_KEYS_MAX:
             self._history_cut.pop(next(iter(self._history_cut)))
+
+
+def _announced(parts: Sequence[Fragment]) -> list[Fragment]:
+    """Les fragments sans leurs intertitres restés seuls (``Fragment.heading``) : un intertitre que ne suit aucune
+    ligne — la fin, ou un autre intertitre — n'annonce plus rien."""
+    return [f for i, f in enumerate(parts) if not f.heading or (i + 1 < len(parts) and not parts[i + 1].heading)]
 
 
 def _fragments(spec: SectionSpec, parts: Sequence[Fragment]) -> str:

@@ -197,8 +197,9 @@ def add_accounts(sub) -> None:  # type: ignore[no-untyped-def]
     tkc = tksub.add_parser("create", help="un jeton neuf pour un compte, montré une seule fois")
     tkc.add_argument("username")
     tkc.add_argument("--label", default="", help="à quoi il sert (« Unity, PC du salon »)")
-    tkc.add_argument("--client", choices=("screen", "mobile"), default="screen",
-                     help="screen : un écran ou un moteur ; mobile : l'application du téléphone (une messagerie)")
+    tkc.add_argument("--client", choices=("screen", "mobile", "tool"), default="screen",
+                     help="screen : un écran ou un moteur ; mobile : l'application du téléphone (une messagerie) ; "
+                          "tool : un outil branché par MCP sur /mcp/moi/ (rien d'autre ne lui est ouvert)")
     tkl = tksub.add_parser("list", help="les jetons, jamais leur secret")
     tkl.add_argument("username", nargs="?", default=None)
     tkr = tksub.add_parser("revoke", help="révoquer un jeton : il ne vaut plus rien, ses connexions se ferment")

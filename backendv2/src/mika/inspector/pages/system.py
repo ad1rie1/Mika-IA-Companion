@@ -77,6 +77,7 @@ from mika.kernel.inspect import (
 from mika.kernel.text import clipped, fold
 from mika.ports.errors import describe_error
 from mika.ports.journal import JournalContent, JournalEvent, JournalOutbox, JournalSnapshot
+from mika.ports.llm import EFFORT_LABELS
 from mika.runtime import health
 from mika.runtime import operations as ops
 from mika.runtime.boundary import Failed, acall, call
@@ -1059,14 +1060,25 @@ async def passerelle(ui: Any, request: Request) -> list[Any]:
         Table(("fournisseur", Column("créneaux", "num"), Column("en attente", "num"), "préempte",
                "quota d'abonnement"), tuple(rows), title="Fournisseurs",
               caption="Un fournisseur à un seul créneau préempte : une réponse interrompt un travail de fond."),
-        Table(("rôle", Column("nom technique", "fit"), "servi par"), tuple(
-            Row((ROLE_LABELS.get(r, r), Text(r, "mono"), _served_by(r, n)),
+        Table(("rôle", Column("nom technique", "fit"), "servi par", "effort"), tuple(
+            Row((ROLE_LABELS.get(r, r), Text(r, "mono"), _served_by(r, n), _effort(gateway, r) if n else ""),
                 tone="" if n or r in OPTIONAL_ROLES else "danger")
             for r, n in resolution.items()), title="Qui sert quoi, en vrai",
             caption="Replis compris : un rôle sans fournisseur retombe sur un autre rôle (murmurer → répondre). "
                     f"{optional} {lacks} pas de repli : sans modèle, sa passe ne se fait pas, et aucun appel "
-                    "n'échoue. Se règle dans Réglages › Modèles de texte › Qui sert quoi."),
+                    "n'échoue. L'effort est celui réglé pour le rôle, sinon celui de la fiche de son fournisseur. "
+                    "Se règle dans Réglages › Modèles de texte › Qui sert quoi."),
     ]
+
+
+def _effort(gateway: Any, role: str) -> Text | str:
+    """La cellule « effort » d'un rôle servi : l'effort auquel partent ses appels (ADR 0285), et d'où il vient — le
+    sien, ou celui de la fiche de son fournisseur ; aucun : le défaut du modèle."""
+    asked = getattr(gateway, "effort_of", None)
+    effort, own = asked(role) if callable(asked) else ("", False)
+    if not effort:
+        return Text("défaut du modèle", "muted")
+    return f"{EFFORT_LABELS.get(effort, effort)} — {'réglé pour ce rôle' if own else 'celui de sa fiche'}"
 
 
 #: ce qu'un rôle facultatif coupé ne fait pas (``OPTIONAL_ROLES``)

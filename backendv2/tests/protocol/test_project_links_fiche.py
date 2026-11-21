@@ -1,6 +1,6 @@
-"""Les liens de lecture d'un projet sur sa fiche (ADR 0257), à travers le vrai serveur : sous « Comportement et
-outils », « Ce qu'il lit » avec « Choisir ce qu'il lit » à côté (une case par projet qu'il peut lire), puis « Qui le
-lit » — et ce qu'ils disent, vides."""
+"""Les liens de lecture d'un projet sur sa fiche (ADR 0257), à travers le vrai serveur : dans l'onglet « Liens »
+(ADR 0281), « Ce qu'il lit » avec « Choisir ce qu'il lit » à côté (une case par projet qu'il peut lire), puis « Qui
+le lit » — et ce qu'ils disent, vides."""
 
 from __future__ import annotations
 
@@ -11,9 +11,8 @@ from tests.protocol.test_web import world  # noqa: F401 — fixture partagée
 
 
 def _links(client, pid: int) -> str:
-    page = drawn(client, f"/admin/fiche/project/{pid}?onglet=comportement")
-    assert 'data-tab="project/comportement"' in page
-    return page.split('id="prj-links-title"', 1)[1]
+    page = drawn(client, f"/admin/fiche/project/{pid}?onglet=liens")  # ses liens ont leur onglet (ADR 0281)
+    return page.split('data-tab="project/liens"', 1)[1]
 
 
 def test_a_projects_fiche_shows_what_it_reads_and_who_reads_it(world):  # noqa: F811
@@ -22,7 +21,7 @@ def test_a_projects_fiche_shows_what_it_reads_and_who_reads_it(world):  # noqa: 
     produit = _create(client, kernel, "Le produit", "Écrire le module")
     connaitre = _create(client, kernel, "Faire connaître", "Écrire un article")
     empty = _links(client, connaitre)
-    assert ">Ses liens de lecture</h2>" in empty and "sans jamais y écrire" in empty
+    assert "Il dépend de" in empty and "sans jamais y écrire" in empty
     assert "il ne lit aucun projet" in empty and "aucun projet ne le lit" in empty
     # « Choisir ce qu'il lit », à côté : une case par projet qu'il peut lire, nommé par son numéro et son titre
     chooser = empty.split('action="/admin/action/projects.liens"', 1)[1].split("</form>", 1)[0]
@@ -33,12 +32,12 @@ def test_a_projects_fiche_shows_what_it_reads_and_who_reads_it(world):  # noqa: 
         "_champs": [f"lit_{produit}"], f"lit_{produit}": ["on"]}, by="user_1", subject=str(connaitre), nonce="l1"))
     assert got.ok, got
     reader = _links(client, connaitre)
-    reads = reader.split("Qui le lit", 1)[0]
+    reads = reader.split("Dépendent de lui", 1)[0]
     assert f"n° {produit} — Le produit" in reads and "ses comptes rendus" in reads  # ce que le lien donne
     assert f'href="/admin/fiche/project/{produit}' in reads and "il ne lit aucun projet" not in reader
     assert "aucun projet ne le lit" in reader
     # sur la fiche du projet lu : « Qui le lit » ; lui-même ne lit rien, et ne peut pas lire son lecteur (une boucle)
     read = _links(client, produit)
-    who = read.split("Qui le lit", 1)[1]
+    who = read.split("Dépendent de lui", 1)[1]
     assert f"n° {connaitre} — Faire connaître" in who and "il ne lit aucun projet" in read
     assert "projects.liens" not in read  # rien à cocher : pas de formulaire vide

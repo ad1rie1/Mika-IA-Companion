@@ -188,7 +188,7 @@ def auth_routes(cfg: WebConfig, accounts: Accounts, hub: Hub,
         if not username or not password:
             return JSONResponse({"error": "Nom d'utilisateur et mot de passe requis."}, status_code=400)
         if client not in TOKEN_CLIENTS:
-            return JSONResponse({"error": "Sorte de client inconnue (screen ou mobile)."}, status_code=400)
+            return JSONResponse({"error": "Sorte de client inconnue (screen, mobile ou tool)."}, status_code=400)
         ip = request.client.host if request.client else "?"
         keys = (f"ip:{ip}", f"ip:{ip}:nom:{username.lower()}")
         if by_ip.blocked(keys[0]) or by_name.blocked(keys[1]):
@@ -207,8 +207,9 @@ def auth_routes(cfg: WebConfig, accounts: Accounts, hub: Hub,
         return JSONResponse(report, headers={"Cache-Control": "no-store"})
 
     async def token_logout(request: Request) -> Response:
-        """L'application rend son jeton en se déconnectant : il ne vaut plus rien, ses connexions se ferment."""
-        found = accounts.token(native_token(request.headers))
+        """L'application rend son jeton en se déconnectant : il ne vaut plus rien, ses connexions se ferment. Un
+        jeton d'outil se rend lui-même aussi (ADR 0292) : c'est le seul geste qu'il a hors de son point MCP."""
+        found = accounts.token(native_token(request.headers), tool=True)
         if found is None:
             return JSONResponse({"error": "Jeton invalide."}, status_code=401)
         await accounts.revoke_token(found[1])

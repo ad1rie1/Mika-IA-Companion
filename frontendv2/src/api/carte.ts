@@ -94,6 +94,14 @@ export interface Place {
   photo?: string;
   /** Ce qu'il offre parmi `features` (`terrasse`, `vegetarien`…). */
   tags?: string[];
+  // Avec sa photo, ce qu'il faut en citer sur la ligne (R2, ADR 0269) ; un lieu d'un regard n'en garde pas :
+  /** `google`, `datatourisme`. */
+  photo_source?: string;
+  /** Son auteur, lié à `photo_credit_url`. */
+  photo_credit?: string;
+  photo_credit_url?: string;
+  /** Sa licence (une photo de l'office de tourisme). */
+  photo_licence?: string;
 }
 
 /** Ce qu'un cache sait d'un endroit : les notes Google d'une liste (`reviews`), les événements (`coverage`). */
@@ -232,6 +240,11 @@ export interface EventItem {
   price: string;
   /** `p:<hash>`, ou vide. */
   photo: string;
+  // Ce qu'il faut citer de sa photo (vides sans photo ; absents d'un regard ou d'un serveur d'avant R2) :
+  photo_source?: string;
+  photo_credit?: string;
+  photo_credit_url?: string;
+  photo_licence?: string;
 }
 
 /** La fiche d'un lieu : sa ligne, puis ce qu'en dit chaque source (`null` : elle n'en sait rien). */
@@ -310,7 +323,7 @@ export interface Route {
 export interface Regard {
   kind: "look" | "map";
   title: string;
-  /** `lieux` ou `trajet` (un regard) ; vide pour une carte. */
+  /** `lieux`, `trajet` ou `evenements` (un regard) ; vide pour une carte. */
   what: string;
   places: Partial<Place>[];
   /**

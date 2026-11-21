@@ -23,6 +23,10 @@ Contrat :
   ``STOP_MAX`` premières (la limite de l'API) ; un 400 qui refuse ce nom (un
   modèle à raisonnement) est rejoué une fois sans elles, et le refus mémorisé
   par modèle — l'appelant coupe lui-même ce qu'il garde ;
+- l'effort demandé (``LLMRequest.effort``, ADR 0285) est ignoré : ces serveurs n'ont pas tous de réglage commun ;
+- une sortie en JSON (``LLMRequest.output_schema``) → ``response_format``
+  (``json_schema``, strict) ; un 400 qui refuse ce nom est rejoué une fois sans,
+  et le refus mémorisé par modèle — l'appelant relit du texte ;
 - ``input_tokens`` exclut les jetons lus (``cache_read``) ou écrits
   (``cache_write``) en cache, comptés à part.
 
@@ -175,7 +179,8 @@ def count(obj: Any, attr: str) -> int:
 
 
 class ParamMemo:
-    """Ce que chaque modèle a refusé : le nom de son plafond de sortie, ``temperature``, ``stop``."""
+    """Ce que chaque modèle a refusé : le nom de son plafond de sortie, ``temperature``, ``stop``,
+    ``response_format``."""
 
     def __init__(self) -> None:
         #: modèle → paramètre de plafond accepté (absent = ``max_tokens``)
@@ -184,6 +189,8 @@ class ParamMemo:
         self.no_temperature: set[str] = set()
         #: modèles qui refusent ``stop`` (les séquences d'arrêt)
         self.no_stop: set[str] = set()
+        #: modèles qui refusent ``response_format`` (une sortie en JSON garantie)
+        self.no_format: set[str] = set()
 
 
 def chat_messages(req: LLMRequest) -> list[dict[str, Any]]:
@@ -253,6 +260,9 @@ class OpenAICompatBackend:
                 body["tool_choice"] = "none"
         if req.stop_sequences:
             body["stop"] = list(req.stop_sequences[:STOP_MAX])
+        if req.output_schema is not None:
+            body["response_format"] = {"type": "json_schema", "json_schema": {
+                "name": "sortie", "strict": True, "schema": dict(req.output_schema)}}
         return body
 
     async def complete(self, req: LLMRequest) -> LLMResponse:
@@ -268,11 +278,14 @@ class OpenAICompatBackend:
         token_param = memo.token_param.get(self.model, "max_tokens")
         send_temperature = self.temperature is not None and self.model not in memo.no_temperature
         send_stop = "stop" in body and self.model not in memo.no_stop
-        renamed = dropped = unstopped = False
+        send_format = "response_format" in body and self.model not in memo.no_format
+        renamed = dropped = unstopped = unformatted = False
         while True:
             kwargs = {**body, token_param: max_tokens}
             if not send_stop:
                 kwargs.pop("stop", None)
+            if not send_format:
+                kwargs.pop("response_format", None)
             if send_temperature:
                 kwargs["temperature"] = self.temperature
             try:
@@ -293,6 +306,12 @@ class OpenAICompatBackend:
                     memo.no_stop.add(self.model)
                     log.info("%s refuse « stop » : mémorisé, plus jamais envoyé (la réponse s'écrit jusqu'au bout)",
                              self.model)
+                    continue
+                if send_format and not unformatted and rejects(exc, "response_format"):
+                    unformatted, send_format = True, False
+                    memo.no_format.add(self.model)
+                    log.info("%s refuse « response_format » : mémorisé, plus jamais envoyé (la réponse se relit en "
+                             "texte)", self.model)
                     continue
                 raise
 

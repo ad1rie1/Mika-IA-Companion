@@ -82,6 +82,8 @@ class ParametresScreen {
     return {
       id: ID,
       title: "Paramètres",
+      // la barre du bas d'un téléphone a huit entrées : un mot plus court y tient
+      short: "Réglages",
       icon: "settings",
       tabs: TABS,
       defaultTab: "compte",

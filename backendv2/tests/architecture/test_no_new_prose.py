@@ -46,9 +46,15 @@ CEILING = {
     "faculties/projects/atelier.py": 22,
     # règle de project_steer (console) ; +1 le 2026-10-25 : la description de la capacité projects.steer, piloter sur
     # ton accord (console, ADR 0133) — venues de tools.py avec le pilotage (audit du 2026-11-05, K5-03)
+    # la règle de project_milestone (console : la page « Droits » la lit sur l'outil, comme celle de project_steer),
+    # ADR 0273
+    "faculties/projects/reaching.py": 1,
     "faculties/projects/steer.py": 2,
     "faculties/projects/tend.py": 4,  # raisons de pause (pannes, cadrage sans plan), gardées au journal
     "faculties/projects/tools.py": 2,  # raisons de clôture, gardées au journal
+    # les règles de project_items et de project_item (console : la page « Droits » les lit sur l'outil, comme celle
+    # de project_steer), ADR 0268
+    "faculties/projects/tracker.py": 2,
     "faculties/world/commands.py": 13,  # refus adressés aux clients du monde, pas à elle
     "plugins/email/tools.py": 2,  # capacité et résumé (console)
     # capacité d'installation (console) ; venue de ``plugins/forge/__init__.py`` le 2026-11-15, avec la version qui

@@ -61,11 +61,11 @@ from mika.adapters.maps.hours import PARIS
 from mika.adapters.maps.pace import Pace
 from mika.adapters.maps.photos import PhotoRelay
 from mika.adapters.maps.places import LABELS, LIMIT_MAX, Places, _box, _when_fr, _words, utc_now
-from mika.adapters.maps.quota import QUOTAS_FILE, Limiter, QuotaStore
+from mika.adapters.maps.quota import QUOTAS_FILE, Limiter, Limits, QuotaStore, counting_sent
 from mika.adapters.maps.reviews import Reviews
 from mika.adapters.maps.reviews_cells import ReviewsCells
 from mika.adapters.maps.routing import Router
-from mika.adapters.maps.tourism import Tourism, merge_places, paris_today
+from mika.adapters.maps.tourism import Tourism, match_stamp, merge_places, paris_today
 from mika.adapters.maps.tourism_cells import TourismCells
 from mika.adapters.maps.tourism_sync import KIND_FR, TourismSync
 from mika.adapters.maps.warm import Warmer
@@ -79,6 +79,7 @@ from mika.ports.maps import (
     MapsUnavailable,
     PlaceDetail,
     PlaceHit,
+    PlaceRefresh,
     ReviewsCoverage,
     RouteResult,
     TourismCoverage,
@@ -95,6 +96,16 @@ TOURISM_NEAR_M = 25_000
 #: un tri par note autour d'un point, sans zone ni rayon : les mieux notés du cache des avis à moins de tant de mètres
 #: rejoignent les plus proches
 RATED_NEAR_M = 2_000
+#: « Actualiser » (ADR 0269) : une source relue il y a moins de tant ne repart pas (ni Google, ni DATAtourisme) — un
+#: clic répété, un client qui boucle ne refont pas l'appel compté
+REFRESH_AFTER = timedelta(minutes=10)
+#: … et, pour tout ce serveur, au plus tant d'« Actualiser » qui partent sur 24 heures glissantes : un compte ne vide
+#: pas le mois des fiches de Google (mille offertes : vingt par jour en prennent six cent vingt au plus)
+REFRESHES_PER_DAY = 20
+REFRESHED = "Fiche relue."
+NOTHING_TO_READ = "Rien à relire pour ce lieu : ni avis à aller chercher chez Google, ni fiche de l'office de tourisme."
+NOTHING_SET = ("Rien ne peut se relire ici : ni les avis (Google) ni les données touristiques (DATAtourisme) ne sont "
+               "réglés.")
 
 
 def _rated(hits: list[PlaceHit], min_rating: float | None, sort: str) -> list[PlaceHit]:
@@ -135,6 +146,14 @@ def _price_fr(price: float) -> str:
     return (f"{price:g} $" if price == int(price) else f"{price:.2f} $").replace(".", ",")
 
 
+def _fresh_fr(age: timedelta) -> str:
+    """« Relue il y a 4 min : elle est à jour. » — ce que dit « Actualiser » d'une fiche relue tout à l'heure."""
+    minutes = int(age.total_seconds() // 60)
+    when = "à l'instant" if minutes < 1 else f"il y a {minutes} min"
+    return f"Relue {when} : elle est à jour (une fiche se relit au plus une fois toutes les " \
+           f"{int(REFRESH_AFTER.total_seconds() // 60)} minutes)."
+
+
 def _at_fr(iso: str) -> str:
     """« le 17 novembre 2026 à 04:12 » (heure de Paris)."""
     try:
@@ -142,6 +161,16 @@ def _at_fr(iso: str) -> str:
     except ValueError:
         return iso or "jamais"
     return f"{_when_fr(at.isoformat())} à {at:%H:%M}"
+
+
+def _with_photo(hit: PlaceHit, ref: str, *, credit: str, credit_url: str, licence: str = "",
+                source: str = "google") -> PlaceHit:
+    """Un lieu et la première photo des avis (Google), avec ce qu'il faut en citer (ADR 0269) — sauf s'il a déjà la
+    sienne : elle garde alors son crédit."""
+    if hit.photo or not ref:
+        return hit
+    return replace(hit, photo=ref, photo_source=source, photo_credit=credit, photo_credit_url=credit_url,
+                   photo_licence=licence)
 
 
 class MapsDesk:
@@ -192,6 +221,9 @@ class MapsDesk:
                              sources=(self.cells, self.review_cells), clock=clock)
         self.photos = PhotoRelay(data / MAPS_DIR / "photos", sources=(self.tourism, self.review_cells),
                                  transport=transport, today=lambda: paris_today(self.clock()))
+        #: « Actualiser », pour tout ce serveur (``REFRESHES_PER_DAY``), dans la base des compteurs
+        self.refreshes = Limiter("actualiser", self.quotas, lambda: Limits(per_day=REFRESHES_PER_DAY),
+                                 label="ce serveur (« Actualiser »)", unit="fiches", now=quota_now, sleep=quota_sleep)
 
     async def _town(self, name: str) -> tuple[float, float] | None:
         """Un point fixe du réchauffage nommé (« Lille ») : la ville de l'index des lieux."""
@@ -201,9 +233,10 @@ class MapsDesk:
         return (hits[0].lat, hits[0].lon) if hits else None
 
     def places_index(self) -> tuple[Path, str] | None:
-        """L'index des lieux, s'il est prêt : son chemin et quand il a été construit (le rapprochement le suit)."""
+        """L'index des lieux, s'il est prêt : son chemin et ce que le rapprochement suit — quand il a été construit, et
+        la règle du rapprochement (``tourism.match_stamp``) : l'un ou l'autre changé, tout se rejuge."""
         info = self.places.info()
-        return (self.places.data / self.places.config().index, info.built) if info.ready else None
+        return (self.places.data / self.places.config().index, match_stamp(info.built)) if info.ready else None
 
     def start(self) -> None:
         """Les travaux de fond (le serveur) : le réchauffage du soir, la synchronisation des départements tenus en
@@ -278,8 +311,8 @@ class MapsDesk:
             if found is None:
                 out.append(hit)
                 continue
-            out.append(replace(hit, rating=found.rating, reviews=found.count, price=found.price or hit.price,
-                               photo=hit.photo or found.photo))
+            out.append(replace(_with_photo(hit, found.photo, credit=found.credit, credit_url=found.credit_url),
+                               rating=found.rating, reviews=found.count, price=found.price or hit.price))
         return out
 
     async def _best_rated(self, hits: list[PlaceHit], area: tuple[float, float, float, float], *,
@@ -347,36 +380,66 @@ class MapsDesk:
             said = {label for label, _value in detail.osm.facts}
             facts = replace(facts, facts=tuple(f for f in facts.facts if f[0] not in said))
         if facts.id:
-            first = facts.photos[0].ref if facts.photos else ""
-            hit = replace(hit, rating=facts.rating, reviews=facts.count, price=facts.price or hit.price,
-                          photo=hit.photo or first)
+            first = facts.photos[0] if facts.photos else None
+            if first is not None:
+                hit = _with_photo(hit, first.ref, credit=first.credit, credit_url=first.credit_url,
+                                  licence=first.licence, source=first.source or "google")
+            hit = replace(hit, rating=facts.rating, reviews=facts.count, price=facts.price or hit.price)
         return replace(detail, hit=hit, reviews=facts)
 
-    async def place_refresh(self, place_id: str) -> PlaceDetail | None:
+    async def place_refresh(self, place_id: str) -> PlaceRefresh | None:
+        """« Actualiser » : chaque source qui a de quoi relire ce lieu, et ne l'a pas fait depuis ``REFRESH_AFTER`` —
+        sous la borne de tout le serveur (``refreshes``), dont un tour ne compte que si un appel est vraiment parti
+        (retenu par le mois de Google, un recul, le quota de l'heure de DATAtourisme : il est rendu, et le refus dit
+        cette cause) ; ce qui n'a pas pu se relire lève, en mots (ce qui l'a pu est gardé) ; aucune source réglée :
+        ``NOTHING_SET``."""
         found = await self._resolve(place_id)
         if found is None:
             return None
         detail, keys = found
-        failed: list[str] = []
+        now = self.clock()
         uuid = next((k[2:] for k in keys if k.startswith("t:")), "")
+        latest: list[datetime] = []
+        tourism_due = google_due = False
         if uuid and self.datatourisme.ready():
-            try:
-                await self.tourism_sync.refresh(uuid)
-            except MapsUnavailable as exc:
-                failed.append(str(exc))
+            synced = await self.tourism.synced_at(uuid)
+            tourism_due = synced is None or now - synced >= REFRESH_AFTER
+            latest += [] if tourism_due or synced is None else [synced]
         if self.google.ready():
-            try:
-                refreshed = await self._reviewed(detail, keys, refresh=True)
-            except MapsUnavailable as exc:
-                failed.append(str(exc))
-            else:
-                if not failed:
-                    again = await self._resolve(place_id)
-                    return refreshed if again is None else replace(again[0], hit=refreshed.hit,
-                                                                   reviews=refreshed.reviews)
+            reads, read = await self.review_cells.read_at(detail.hit.category, detail.hit.kind, keys)
+            google_due = reads and (read is None or now - read >= REFRESH_AFTER)
+            latest += [read] if reads and not google_due and read is not None else []
+        if not tourism_due and not google_due:
+            if not self.google.ready() and not self.datatourisme.ready():
+                raise MapsUnavailable(NOTHING_SET)
+            fiche = await self.place(place_id)
+            if fiche is None:
+                return None
+            return PlaceRefresh(fiche, _fresh_fr(now - min(latest)) if latest else NOTHING_TO_READ)
+        turn = await self.refreshes.take(wait_max=0.0)  # tout ce serveur : ``QuotaExceeded``, en mots
+        failed: list[str] = []
+        refreshed = None
+        with counting_sent() as sent:
+            if tourism_due:
+                try:
+                    await self.tourism_sync.refresh(uuid)
+                except MapsUnavailable as exc:
+                    failed.append(str(exc))
+            if google_due:
+                try:
+                    refreshed = await self._reviewed(detail, keys, refresh=True)
+                except MapsUnavailable as exc:
+                    failed.append(str(exc))
+        if not sent[0]:  # rien n'est parti (le mois de Google, un recul, la base…) : ce tour ne coûte rien (R3-01)
+            await self.refreshes.forget(turn)
         if failed:
             raise MapsUnavailable(" ".join(failed))
-        return await self.place(place_id)
+        again = await self._resolve(place_id)
+        if refreshed is None:
+            fiche = await self.place(place_id)
+        else:
+            fiche = refreshed if again is None else replace(again[0], hit=refreshed.hit, reviews=refreshed.reviews)
+        return PlaceRefresh(fiche, REFRESHED) if fiche is not None else None
 
     def preload(self, lat: float, lon: float) -> int:
         return self.review_cells.preload(lat, lon)
@@ -401,7 +464,7 @@ class MapsDesk:
 
     def tourism_summary(self) -> dict[str, object]:
         info = self.tourism.info()
-        return {"ready": info.ready, "places": info.places, "events": info.events, "synced": info.last_ended}
+        return {"ready": info.ready, "places": info.places, "events": info.events, "synced": info.read_at}
 
     async def events(self, *, near: tuple[float, float] | None = None,
                      bbox: tuple[float, float, float, float] | None = None, radius_m: int = 20_000,
@@ -607,9 +670,10 @@ class MapsDesk:
                           f"{_price_fr(sku.price)} les 1 000"))
         said = "rien : tout tient dans les quotas offerts" if not billed else \
             f"environ {_usd_fr(billed)} au-delà des quotas offerts"
-        facts.append(("Facturé ce mois", f"{said} (d'après nos comptes, si ce compte de facturation ne sert qu'à ce "
-                                         "serveur ; le mois de Google commence à minuit, heure du Pacifique ; prix "
-                                         f"vérifiés {_when_fr(PRICES_CHECKED)})"))
+        facts.append(("Facturé ce mois", f"{said} (d'après les comptes de ce dossier de données : la même clé ailleurs "
+                                         "puise dans le même quota offert, sans qu'ils le voient ; le mois de Google "
+                                         "commence à minuit, heure du Pacifique ; prix vérifiés "
+                                         f"{_when_fr(PRICES_CHECKED)})"))
         rel = self.reviews.path.relative_to(self.reviews.data) if self.reviews.path.is_relative_to(self.reviews.data) \
             else self.reviews.path
         if info.ready:

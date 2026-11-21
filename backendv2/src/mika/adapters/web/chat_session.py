@@ -113,6 +113,8 @@ class ChatSession:
         if self._judges():
             # ses fils de travail (ADR 0164), après le visage et le panneau : l'ouverture garde son ordre
             await self.send(protocol.strands(self.port.strands(c.handle)))
+            # l'effort de réflexion qu'elle a forcé pour sa conversation et ses fils (ADR 0287)
+            await self.send(protocol.efforts(self.port.efforts(c.handle)))
 
     async def run(self) -> None:
         try:
@@ -354,6 +356,9 @@ class ChatSession:
         elif kind == "strand_history":
             if self.conn.control.allow():
                 await self.strand_history(frame)
+        elif kind == "effort":
+            if self.conn.control.allow():
+                await self.set_effort(frame)
         elif kind == "chat":
             self.enqueue_chat(frame)
 
@@ -394,6 +399,24 @@ class ChatSession:
         await self.send(reply | {"status": status})
         if status == "ok":
             await self.hub.push_strands(self.conn.handle)
+
+    async def set_effort(self, frame: dict[str, Any]) -> None:
+        """L'effort de réflexion forcé depuis le chat (ADR 0287) : pour toute sa conversation (sans ``strand``) ou
+        pour un de ses fils de travail ; ``effort`` vide : auto. Par une opératrice connectée et authentifiée. La
+        réponse dit le sort ; le réglage entier suit, à tous ses écrans."""
+        raw = frame.get("strand")
+        strand = "" if raw is None or raw == "" else protocol.strand_id(raw)
+        effort = protocol.effort_level(frame.get("effort"))
+        if strand is None or effort is None:
+            return
+        reply = {"type": "effort_result", "strand": strand, "effort": effort}
+        if not self._judges() or self.account is None or not self._session_valid():
+            await self.send(reply | {"status": "forbidden"})
+            return
+        status = await self.port.set_effort(self.conn.handle, strand, effort)
+        await self.send(reply | {"status": status})
+        if status == "ok":
+            await self.hub.push_efforts(self.conn.handle)
 
     async def strand_history(self, frame: dict[str, Any]) -> None:
         """Les messages d'un fil, pour un écran qui les relit : les plus récents avant ``before`` (tous s'il est

@@ -34,7 +34,8 @@ gardé de l'épisode principal et une fois sa réponse prête, sous la même
 garde : si l'initiative est devancée avant de parler, le murmure ne part pas.
 
 **Un mode** (``EpisodeRequest.mode``, le mode pro : ADR 0116) est choisi par
-la personne pour un message : il plie la politique de l'épisode (son rôle, sa
+la personne pour un message, ou demandé par le candidat choisi (``mode`` dans
+ses arguments : la relecture indépendante, ADR 0276) : il plie la politique de l'épisode (son rôle, sa
 persona, ses étiquettes coupées, ses limites), peut taire la seconde passe,
 ajoute sa consigne ; ``live`` : chaque moment de sa boucle
 d'outils est montré en direct à la personne (le port ``activity``), puis la
@@ -43,6 +44,13 @@ fin de l'épisode. Rien de ce qui se montre n'est gardé.
 **Un fil de travail** (``EpisodeRequest.strand``, ADR 0164) est un tour à
 lui : sa garde, sa file et la portée de ses écritures ne se mêlent pas à
 celles du fil avec la personne, ni à celles d'un autre fil.
+
+**L'effort de réflexion** d'un épisode (ADR 0287) est celui que demande le
+candidat choisi (``effort`` dans ses arguments), sinon celui que la
+composition lit pour lui (``effort`` : ce que la personne a forcé dans sa
+conversation ou dans son fil) ; il part sur la requête (``LLMRequest.effort``)
+et vaut pour toute sa boucle d'outils, pas pour la seconde passe. Rien de
+demandé : le rôle décide (ADR 0285).
 """
 
 from __future__ import annotations
@@ -68,6 +76,7 @@ from mika.kernel.state import FrozenDict, Root
 from mika.ports.delivery import DONE, NOTE, Activity
 from mika.ports.llm import (
     DEADLINE_AT,
+    EFFORTS,
     Held,
     LLMGateway,
     LLMRequest,
@@ -94,6 +103,8 @@ _UNFINISHED = frozenset({"max_turns", "truncated"})
 
 PersonaProvider = Callable[[Frame, str], PersonaRender]
 AudienceResolver = Callable[[Frame, "EpisodeRequest"], Audience]
+#: ``(magasin, demande)`` → l'effort de réflexion que la composition lit pour cet épisode (ADR 0287) ; « » : aucun
+EffortOf = Callable[[Any, "EpisodeRequest"], str]
 #: ``(texte, son nom)`` → (texte livrable, annotations) ; son nom vient de la persona rendue (vide : inconnu)
 Parser = Callable[[str, str], tuple[str, Mapping[str, str]]]
 
@@ -131,6 +142,9 @@ class EpisodeRequest:
     #: le fil de travail où elle répond (``PerceptionReceived.strand``, ADR 0164) : un tour à lui, son historique à
     #: lui ; ``None`` : le fil avec la personne
     strand: str | None = None
+    #: l'effort de réflexion que demande le candidat choisi (``effort`` dans ses arguments, ADR 0287) ; ``""`` : ce
+    #: que la composition lit pour lui (``EpisodeRunner.effort``), sinon le rôle
+    effort: str = ""
 
 
 @dataclass(slots=True)
@@ -209,6 +223,7 @@ class EpisodeRunner:
         traces: EpisodeTraces | None = None,
         authors: AuthorOf | None = None,
         draft_polishers: Sequence[DraftPolisher] = (),
+        effort: EffortOf | None = None,
     ) -> None:
         self.mind = mind
         self.ports = dict(ports or {})
@@ -225,6 +240,8 @@ class EpisodeRunner:
         self.modes = dict(modes or {})
         self.composer = composer or Composer()
         self.budget = budget
+        #: l'effort de réflexion lu pour un épisode qui n'en demande pas (``_effort``, ADR 0287) ; ``None`` : aucun
+        self.effort = effort
         self.lease_margin_us = int(lease_margin_s * 1_000_000)
         #: ce que les facultés tirent d'un énoncé, journalisé juste après lui (``Bootstrap.interpret``) : ce que le
         #: modèle qui a répondu a lu de la personne (ADR 0093) ; ``None`` : personne n'interprète
@@ -514,6 +531,8 @@ class EpisodeRunner:
             messages=tuple(Message(m["role"], m["content"]) for m in prompt.chat_messages()),
             tools=declared, max_tokens=policy.max_tokens, persona=persona,
             lane=policy.lane, priority=req.priority,
+            # l'effort demandé pour cet épisode (ADR 0287) ; vide : la passerelle pose celui du rôle (ADR 0285)
+            effort=self._effort(req),
             # le délai de chaque appel : celui de l'épisode (le mode pro a quinze minutes, pas les deux de sa
             # voie), et jamais plus que ce qui lui reste (``DEADLINE_AT``)
             deadline_s=policy.deadline_s,
@@ -524,6 +543,15 @@ class EpisodeRunner:
         ep.seen.update(_request(llm_req))
         self._record(ep, settled=False)
         return _Composed(llm_req, tools, persona, prompt, trace)
+
+    def _effort(self, req: EpisodeRequest) -> str:
+        """L'effort de réflexion demandé pour cet épisode (ADR 0287) : celui que porte la demande (le candidat
+        choisi), sinon celui que la composition lit (``effort`` : la conversation ou le fil où la personne a écrit).
+        « » : rien — le rôle décide (ADR 0285). Une valeur inconnue, ou une lecture qui échoue, ne demande rien."""
+        asked: Any = req.effort
+        if not asked and self.effort is not None:
+            asked = call(self.effort, self.mind.store, req, label="effort")
+        return asked if isinstance(asked, str) and asked in EFFORTS else ""
 
     @staticmethod
     def _unspoken(ep: _Live, loop: LoopResult, tools: Mapping[str, Any]) -> tuple[Outcome, str]:
@@ -896,6 +924,8 @@ def _request(llm_req: LLMRequest) -> dict[str, Any]:
         "persona": {"hash": persona.hash, "depth": persona.depth} if persona is not None else None,
         "call_id": llm_req.call_id, "max_tokens": llm_req.max_tokens, "lane": llm_req.lane,
         "priority": llm_req.priority, "deadline_s": llm_req.deadline_s,
+        # l'effort demandé pour l'épisode (ADR 0287) ; vide : celui du rôle, que la passerelle pose
+        "effort": llm_req.effort,
     }
 
 

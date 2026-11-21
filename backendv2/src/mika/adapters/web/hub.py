@@ -222,6 +222,14 @@ class Hub:
             return 0
         return await self._send(conns, protocol.strands(self.port.strands(handle)))
 
+    async def push_efforts(self, handle: str) -> int:
+        """L'effort de réflexion que la personne a forcé (ADR 0287), à ses écrans d'opératrice authentifiée : les
+        seuls qui le règlent."""
+        conns = [c for c in self.of(handle) if c.operator and c.authenticated]
+        if not conns:
+            return 0
+        return await self._send(conns, protocol.efforts(self.port.efforts(handle)))
+
     async def activity(self, a: Activity) -> None:
         """Un moment de son travail en mode pro (le port ``activity``, ADR 0116) : aux écrans regardés de la personne,
         s'ils sont d'une opératrice authentifiée — le seul qui a pu le demander. Ni gardé ni rattrapé."""

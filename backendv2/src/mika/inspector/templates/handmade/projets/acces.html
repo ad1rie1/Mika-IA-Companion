@@ -19,7 +19,7 @@
   <form method="post" action="{{ form.url if form else '' }}" class="access-form">
     {% if not locked %}
     {{ plumbing(form) }}
-    {% for p in ("ligne", "qui", "canal", "toujours", "moments", "voir", "piloter", "fichiers", "lecture", "action", "tous", "prend", "defaut_voir", "defaut_piloter", "defaut_fichiers", "defaut_lecture", "defaut_action", "faire") %}<input type="hidden" name="_champs" value="{{ p }}">{% endfor %}
+    {% for p in ("ligne", "qui", "canal", "toujours", "moments", "voir", "piloter", "fichiers", "documentation", "lecture", "action", "tous", "prend", "defaut_voir", "defaut_piloter", "defaut_fichiers", "defaut_documentation", "defaut_lecture", "defaut_action", "faire") %}<input type="hidden" name="_champs" value="{{ p }}">{% endfor %}
     {# la touche Entrée enregistre (le premier bouton du formulaire), elle n'ajoute pas de ligne #}
     <button class="service-hidden" name="faire" value="" tabindex="-1" aria-hidden="true">Enregistrer</button>
     {% endif %}
@@ -36,7 +36,7 @@
           <thead>
             <tr>
               <th scope="col" class="access-n">#</th><th scope="col">Qui</th><th scope="col">Par où</th><th scope="col">Quand</th>
-              <th scope="col">Voir</th><th scope="col">Piloter projet</th><th scope="col">Fichiers</th>
+              <th scope="col">Voir</th><th scope="col">Piloter projet</th><th scope="col">Fichiers</th><th scope="col">Documentation</th>
               <th scope="col">Apps : lecture</th><th scope="col">Apps : action</th><th scope="col">Outils</th>
               {% if not locked %}<th scope="col"><span class="service-hidden">Ordre</span></th>{% endif %}
             </tr>
@@ -76,6 +76,7 @@
               <td><label class="access-tool"><input type="checkbox" name="voir.{{ r.n }}"{{ ' checked' if r.see }}{{ ' disabled' if locked }}> oui</label></td>
               <td>{{ pick("piloter." ~ r.n, steers, r.steer, "Piloter projet, ligne " ~ r.n, locked) }}</td>
               <td><label class="access-tool"><input type="checkbox" name="fichiers.{{ r.n }}"{{ ' checked' if r.files }}{{ ' disabled' if locked }}> oui</label></td>
+              <td><label class="access-tool"><input type="checkbox" name="documentation.{{ r.n }}"{{ ' checked' if r.docs }}{{ ' disabled' if locked }}> oui</label></td>
               <td>{{ pick("lecture." ~ r.n, policies, r.read, "Apps : un outil qui lit, ligne " ~ r.n, locked) }}</td>
               <td>{{ pick("action." ~ r.n, policies, r.act, "Apps : un outil qui agit, ligne " ~ r.n, locked) }}</td>
               <td>
@@ -104,6 +105,7 @@
               <td><label class="access-tool"><input type="checkbox" name="defaut_voir"{{ ' checked' if default.see }}{{ ' disabled' if locked }}> oui</label></td>
               <td>{{ pick("defaut_piloter", steers, default.steer, "Par défaut, piloter projet", locked) }}</td>
               <td><label class="access-tool"><input type="checkbox" name="defaut_fichiers"{{ ' checked' if default.files }}{{ ' disabled' if locked }}> oui</label></td>
+              <td><label class="access-tool"><input type="checkbox" name="defaut_documentation"{{ ' checked' if default.docs }}{{ ' disabled' if locked }}> oui</label></td>
               <td>{{ pick("defaut_lecture", policies, default.read, "Par défaut, un outil qui lit", locked) }}</td>
               <td>{{ pick("defaut_action", policies, default.act, "Par défaut, un outil qui agit", locked) }}</td>
               <td class="access-all">Tous</td>
@@ -114,7 +116,7 @@
       </div>
       <div class="hm-pager single">{{ pages(pager) }}</div>
       {% if not rows %}<p class="now-muted">Aucune ligne : seul le comportement par défaut s'applique. « Ajouter un accès » ouvre une ligne fermée, que tu règles.</p>{% endif %}
-      {% if not has_apps %}<p class="now-muted">Ce projet n'a pas encore d'app : les colonnes « Apps » vaudront pour celles qu'elle y forgera. Qu'elle s'en serve pendant le projet dépend aussi de ses lots d'outils (<a href="{{ behaviour_tab }}">« Comportement et outils »</a>).</p>{% endif %}
+      {% if not has_apps %}<p class="now-muted">Ce projet n'a pas encore d'app : les colonnes « Apps » vaudront pour celles qu'elle y forgera. Qu'elle s'en serve pendant le projet dépend aussi de ses lots d'outils (<a href="{{ behaviour_tab }}">Cadre, « Outils et services »</a>).</p>{% endif %}
       {% if not locked %}<div class="form-actions-inline"><button class="btn" name="faire" value="">Enregistrer</button> <span class="now-muted">Les flèches et la croix enregistrent aussi ce que tu as changé.</span></div>{% endif %}
     </section>
   </form>
@@ -127,6 +129,7 @@
       <div><dt>Voir</dt><dd>Elle peut en parler à cette personne : son titre, où il en est. Sa confidentialité filtre encore le détail.</dd></div>
       <div><dt>Piloter projet</dt><dd><b>Lecture seule</b> : elle lui en dit le détail (son dernier compte rendu, ce qui vient), sans rien y changer · <b>Accord du propriétaire</b> : ses demandes (une consigne, un objectif, une pause, une reprise, « vas-y maintenant ») t'attendent — une carte dans la console ; les tiennes, quand c'est toi en face, s'appliquent aussitôt · <b>Modification</b> : ses demandes s'appliquent aussitôt, à son nom · <b>Aucun pilotage</b>. Toujours avec « Voir » ; seulement quand elle lui répond, quel que soit « Quand » ; jamais son cadre (titre, outils, accord), qui reste ici.</dd></div>
       <div><dt>Fichiers</dt><dd>Elle peut lui envoyer les fichiers de ce projet (<code>project_files</code>, <code>share_project_file</code>). Jamais dans un salon ni à une inconnue.</dd></div>
+      <div><dt>Documentation</dt><dd>La personne lit la documentation de ce projet — ses pages et ses images, un espace à part du dépôt — dans son espace et par MCP ; un projet à elle qui lit celui-ci la lit aussi. L'écrire demande en plus de le piloter en modification. Jamais dans un salon ni à une inconnue.</dd></div>
       <div><dt>Apps : lecture, action</dt><dd>Ce qu'elle fait d'un outil de ses apps : un outil qui lit prend la colonne « lecture », un outil qui agit celle d'« action ». <b>Seule — sans demander</b> · <b>Demande à la personne en face</b> : une carte dans son chat · <b>Demande ton accord</b> : une carte dans ton chat quand c'est toi en face, sinon la console · <b>Non</b> : l'outil ne lui est pas offert.</dd></div>
       <div><dt>Outils</dt><dd>À quels outils de ses apps s'appliquent les deux colonnes « Apps » ; « Voir » et « Piloter » valent quelle que soit la sélection.</dd></div>
     </dl>

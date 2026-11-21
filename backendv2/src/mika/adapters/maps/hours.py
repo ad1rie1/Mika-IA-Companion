@@ -42,8 +42,10 @@ _DAYS_ITEM = re.compile(rf"^({_DAY})(?:-({_DAY}))?$")
 #: « 2024May20 ») ; un jour seul après une virgule garde le mois d'avant (« Dec24,31 »)
 _MONTH_ITEM = re.compile(rf"^(\d{{4}})?({_MON})?(\d{{1,2}})?(?:-(\d{{4}})?({_MON})?(\d{{1,2}})?)?$")
 _DATES = re.compile(rf"^(?:\d{{4}})?{_MON}")
-#: une virgule entre deux règles (« Mo-Fr 08:00-12:00, Sa 09:00-12:00 ») : après une heure ou « off », avant des jours
-_ADDED = re.compile(rf"(?<=\d|f|d),\s*(?=(?:{_DAY}|PH|{_MON})\b)")
+#: une virgule entre deux règles (« Mo-Fr 08:00-12:00, Sa 09:00-12:00 ») : seulement derrière la fin d'une règle — une
+#: heure, « 24/7 », « off », « closed » ou « open » —, devant des jours ou des dates ; jamais dans une liste de dates
+#: (« Jan 01,May 01,Dec 25 off » est une seule règle)
+_ADDED = re.compile(rf"(?:(?<=:\d\d)|(?<=24/7)|(?<=off)|(?<=closed)|(?<=open)),\s*(?=(?:{_DAY}|PH|{_MON})\b)")
 
 
 class _Unreadable(Exception):

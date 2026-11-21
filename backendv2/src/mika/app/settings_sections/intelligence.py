@@ -9,7 +9,15 @@ from pydantic import ValidationError
 from mika.adapters.imaging.config import ImagingConfig
 from mika.adapters.imaging.models import list_image_models
 from mika.adapters.listing import ListingFailed
-from mika.adapters.llm.config import KIND_LABELS, REPLY, ROLE_LABELS, BackendSpec, LLMConfig, tokens_fr
+from mika.adapters.llm.config import (
+    KIND_LABELS,
+    REPLY,
+    ROLE_LABELS,
+    THINKING_KINDS,
+    BackendSpec,
+    LLMConfig,
+    tokens_fr,
+)
 from mika.adapters.llm.models import list_models, settle_limits
 from mika.app.handmade import ago
 from mika.inspector.catalog import SettingsPage, SettingsSection
@@ -26,7 +34,7 @@ if TYPE_CHECKING:
 #: la famille de chaque rôle (la page « Qui sert quoi »)
 ROLE_FAMILIES = {**{str(r): "voix" for r in VOICE_ROLES}, "extract": "mémoire", "validate": "mémoire",
                  "compact": "mémoire", "profile": "compréhension", "interpret": "compréhension",
-                 "triage": "sens", "caption": "sens", "plan": "travail", "job": "travail", "polish": "voix",
+                 "triage": "sens", "caption": "sens", "plan": "travail", "job": "travail", "review": "travail", "polish": "voix",
                  "character": "voix"}
 
 
@@ -107,11 +115,15 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         # personne ne le sert : chaque appel échoue — sauf un rôle facultatif (rendre naturel), coupé par choix, sans
         # alarme : sa passe ne se fait pas, aucun appel n'est fait
         cut = not served and role in OPTIONAL_ROLES
+        # un effort demandé à un fournisseur qui n'en a pas (Ollama, un serveur compatible OpenAI) ne change rien :
+        # la ligne le dit, plutôt que de laisser croire au réglage (ADR 0285)
+        idle = bool(cfg.efforts.get(role)) and spec is not None and spec.kind not in THINKING_KINDS
         return {"title": "Ce qui sert vraiment chaque rôle", "key_head": "Rôle", "choice_head": "Son fournisseur",
                 "tone": "" if served or cut else "danger",
                 "cells": [{"head": "Famille", "text": ROLE_FAMILIES.get(role, "—"), "tag": True, "before": True},
                           {"head": "Ce qui le sert vraiment", "text": served or "aucun", "mono": bool(served),
-                           "tone": "" if served else "muted", "sub": f"{spec.kind} · {spec.model}" if spec else ""},
+                           "tone": "" if served else "muted", "sub": f"{spec.kind} · {spec.model}" if spec else "",
+                           "note": "effort sans effet ici" if idle else ""},
                           # une étiquette pour ce qui se lit d'un coup (déclaré, rien) ; la chaîne d'un repli et un
                           # rôle coupé, en texte
                           {"head": "Comment", "text": how or ("coupée : la seconde passe ne se fait pas" if cut
@@ -278,15 +290,18 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                         description="Les fournisseurs de modèles, et lequel sert chaque rôle. Les clés sont "
                                     "chiffrées, jamais réaffichées.", loaders={"models": models}, facts=llm_facts,
                         describe={"backends": describe_backend, "routes": route}, adjust=settle_llm,
+                        beside={"routes": ("efforts",)},
                         pages=(
                             SettingsPage("fournisseurs", "Fournisseurs", ("backends",), order=10, extra=who_replies,
                                          description=(
                                 "Les services qui font tourner ses modèles. Chaque fournisseur a sa page : son "
                                 "type, le modèle choisi dans la liste qu'il propose, sa clé ; le reste est rangé "
                                 "dans « Options avancées ». Le premier déclaré sert « répondre » d'office.")),
-                            SettingsPage("roles", "Qui sert quoi", ("routes",), order=20, facts=False, description=(
+                            SettingsPage("roles", "Qui sert quoi", ("routes", "efforts"), order=20, facts=False,
+                                         description=(
                                              "Chaque rôle (répondre, rêver, retenir, trier le courrier…) choisit "
-                                             "son fournisseur. Laisse vide : le rôle retombe sur son repli. "
+                                             "son fournisseur, et combien il réfléchit. Sans fournisseur, le rôle "
+                                             "retombe sur son repli ; sans effort, il garde celui de la fiche. "
                                              "« Répondre » est toujours servi : sans choix, par le premier "
                                              "fournisseur déclaré.")),
                         )),

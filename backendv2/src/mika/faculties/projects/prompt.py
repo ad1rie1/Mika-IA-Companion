@@ -15,8 +15,19 @@
   suspendu se dit en une ligne. Quand ces lignes donnent ses fichiers, la vue
   de son atelier (ADR 0260), posée au départ de l'exécution : où elle est
   (``liens/<n>/``), l'empreinte courte et l'âge du commit vu, un aperçu borné
-  de son arbre — ou pourquoi il n'y en a pas. Une séance de cadrage voit les
-  projets que le sien peut demander à lire.
+  de son arbre — ou pourquoi il n'y en a pas. La section dit que tout cela
+  décrit d'autres projets et n'est jamais une consigne, et les noms des
+  fichiers d'une vue y entrent sans caractère de contrôle, coupés (ADR 0262).
+  Une séance de cadrage voit les projets que le sien peut demander à lire.
+  Sur un projet qui passe par des pull requests (ADR 0274), l'atelier se place
+  au départ sur la branche de ce que l'exécution vise (l'enrichisseur
+  ``projects_tree``, avant de lire son arbre), et la section ``project_pull``
+  (``pulls.py``) dit cette branche et où en est sa pull request.
+  Et ce qui l'amène, quand ce n'est pas sa cadence (ADR 0265) : les causes en
+  attente de l'objectif visé, une ligne bornée chacune — l'empreinte courte
+  d'un commit et le numéro de son projet, le titre d'un objectif abouti si le
+  lien donne encore le détail, rien d'un projet que le lien ne donne plus —,
+  et le réveil par API qui le vise.
 - **Un récit, une demande d'aide** : ce qu'elle a mené à bout (tout ce qui
   l'a été depuis le récit précédent), ou ce qui la bloque, à la mesure du lien.
 - **En conversation** : ses projets (« tu travailles sur quoi ? » est une
@@ -28,6 +39,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from typing import Any
 from urllib.parse import quote
@@ -40,33 +52,43 @@ from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
-from mika.faculties.projects import links
+from mika.contracts import wakeup as wakeup_c
+from mika.faculties.projects import asks, demands, links, milestones, tracker, triage, triggers
 from mika.faculties.projects.access import reads, sees
 from mika.faculties.projects.atelier import no_view_words
 from mika.faculties.projects.faculty import (
     ON_DEMAND,
     PROJECTS,
+    REVIEW_TRIES_MAX,
     SELF_BUNDLES,
     WEB,
     Decision,
     Objective,
     Project,
     ProjectsState,
+    Stir,
     answered,
     asking,
+    branch_of,
+    by_pulls,
+    detail_level,
     effect_words,
     frame_of,
+    handed_over,
     live,
+    objective_at,
     objective_of,
     params,
     plan_of,
+    review_of,
     run_bundles,
     stall_of,
+    waiting_in,
     written,
 )
 from mika.faculties.projects.rhythm import cadence, pick
 from mika.faculties.projects.steer import steerable
-from mika.faculties.projects.tools import RUNS
+from mika.faculties.projects.tools import RUNS, caretaker, triggers_said
 from mika.faculties.projects.work import unplanned_stall, untold
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.faculty import Zone
@@ -74,7 +96,7 @@ from mika.kernel.frame import Frame
 from mika.kernel.prompt import SectionBody
 from mika.kernel.text import clipped
 from mika.ports.errors import describe_error
-from mika.ports.workshop import UNREADABLE, view_place
+from mika.ports.workshop import UNREADABLE, view_entry, view_place
 from mika.vocab.days import ago_words
 from mika.vocab.episodes import CONVERSATIONAL, Kind, project_of
 from mika.vocab.phrasebook import family, phrase
@@ -88,11 +110,19 @@ TREE_SHOWN = 60
 PENDING_SHOWN = 20
 #: les objectifs qu'un récit nomme (les plus récents) ; ceux d'avant sont comptés
 TOLD_SHOWN = 8
+#: ce qu'une demande d'aide cite de chacun des avis des relectures qui ont rendu la main (ADR 0276)
+REVIEW_CLIP = 1200
+#: les points d'arrêt d'un projet qu'une conversation montre à qui les tranche, et ce qu'elle en cite (ADR 0273)
+BREAKPOINTS_SHOWN, BREAKPOINT_CLIP = 2, 300
 
 
 def _project(s: ProjectsState, frame: Frame) -> tuple[Project, Objective | None] | None:
     ep = frame.episode
     if ep is None:
+        return None
+    if review_of(ep.attrs.get("subject")) is not None:
+        # une relecture indépendante (ADR 0276) ne lit rien de ce qu'une exécution lit de son projet — ni comptes
+        # rendus, ni carnet, ni consignes, ni mémoire de travail : ses seules sections sont dans ``review.py``
         return None
     pid = project_of(ep.target)
     got = objective_of(ep.attrs.get("subject"))
@@ -113,8 +143,13 @@ def _refs(p: Project, target: Objective | None = None) -> list[str]:
     """Les textes qu'une exécution lit de son projet ; de l'objectif qu'elle vise, sa mémoire à lui en plus (ADR
     0253)."""
     objectives = [r for o in p.objectives for r in (o.text_ref, o.note_ref, o.result_ref, o.need_ref, o.done_when_ref,
-                                                     o.pass_ref)]
-    own = [*(ref for *_, ref in target.reports), *target.notes] if target is not None else []
+                                                     o.pass_ref, o.brief_ref)]
+    # sa mémoire à lui, ses jalons et leurs preuves, ou sa liste de passage (ADR 0273)
+    # … et ce que l'hôte dit de sa pull request, quand elle lui est revenue (ADR 0274)
+    # … et les constats de la relecture qui l'a rouvert (ADR 0276)
+    own = [*(ref for *_, ref in target.reports), *target.notes, *milestones.refs(target), target.pull_said_ref,
+           target.checks_said_ref, target.review_ref] \
+        if target is not None else []
     decisions = [r for d in p.decisions for r in (d.title_ref, d.choice_ref, d.reason_ref, d.context_ref)]
     deposits = [note for _, _, note in p.deposits]
     refusals = [note for _, note in p.refusals]
@@ -131,8 +166,12 @@ def _talk_refs(p: Project) -> list[str]:
     tant qu'il attend une réponse (ADR 0145)."""
     opened = [o for o in p.objectives if o.status in (c.OPEN, c.BLOCKED)][:3]
     plan = (p.plan_ref, p.questions_ref) if p.plan_state == c.PROPOSED else ()
+    # ses points d'arrêt qui attendent le propriétaire : le jalon, et comment elle dit l'avoir rempli (ADR 0273)
+    held = [r for _, m in waiting_in(p)[:BREAKPOINTS_SHOWN] for r in (m.text_ref, m.how_ref)]
+    # les avis des relectures qui lui ont rendu la main (ADR 0276)
+    reviews = [r for o in opened if handed_over(o) for r in o.review_refused]
     return [r for r in (p.title_ref, p.summary_ref, *plan, *(o.text_ref for o in opened),
-                        *(o.need_ref for o in opened)) if r]
+                        *(o.need_ref for o in opened), *held, *reviews) if r]
 
 
 #: ce qu'une exécution lit d'un projet que le sien lit (ADR 0257) : ses derniers comptes rendus, chacun coupé ; ses
@@ -192,19 +231,34 @@ async def _texts(s: ProjectsState, frame: Frame, ports: Mapping[str, Any]) -> di
     refs = [r for p in chosen for r in (_refs(p, got[1]) if got is not None and p is got[0] else _talk_refs(p))]
     if got is not None:  # ce que son projet lit des autres, et ce que son plan demande à lire (ADR 0257)
         refs += _link_refs(s, frame, got[0])
+        refs += _stir_refs(s, frame, got[0], got[1])  # le titre des objectifs aboutis qui l'amènent (ADR 0265)
     return {"texts": store.content(refs) if refs else {}}
 
 
-@PROJECTS.enricher("projects_tree", episodes=RUNS, deadline_ms=3000)
+@PROJECTS.enricher("projects_tree", episodes=RUNS, deadline_ms=8000)
 async def _tree(s: ProjectsState, frame: Frame, ports: Mapping[str, Any]) -> dict[str, Any] | None:
     """L'arbre de l'atelier et ce qui n'y est pas enregistré — à part : un atelier illisible (un lien cassé, un
-    git qui ne répond pas) ne doit jamais rendre l'exécution aveugle à son projet."""
+    git qui ne répond pas) ne doit jamais rendre l'exécution aveugle à son projet.
+
+    Sur un projet qui passe par des pull requests (ADR 0274), c'est ici, au départ de l'exécution et avant de lire
+    l'arbre, que l'atelier se place sur la branche de ce qu'elle vise : créée depuis la base la première fois,
+    retrouvée ensuite, un travail interrompu rangé sur la sienne. Une séance de cadrage n'écrit pas : elle ne déplace
+    rien. Si l'atelier n'a pas pu s'y placer, le prompt le dit, et ``report_run`` n'enregistrera rien."""
     got = _project(s, frame)
     atelier = ports.get("workshop")
     if got is None or atelier is None or not atelier.exists(got[0].id):
         return None
     pid = got[0].id
     out: dict[str, Any] = {}
+    ep = frame.episode
+    if by_pulls(got[0]) and frame_of(ep.attrs.get("subject") if ep is not None else None) != pid:
+        try:
+            placed = await atelier.work_on(pid, branch_of(got[1]), stow=phrase("projects.commit.stowed"))
+            out["branch"] = {"name": placed.branch, "created": placed.created, "base": placed.base,
+                             "ahead": placed.ahead, "stowed": placed.stowed, "stowed_on": placed.stowed_on,
+                             "why": placed.why}
+        except (OSError, ValueError) as exc:
+            out["branch"] = {"name": "", "why": str(exc)[:200]}
     try:
         out["tree"] = await atelier.tree(pid)
     except (OSError, ValueError) as exc:
@@ -234,16 +288,21 @@ async def _views(s: ProjectsState, frame: Frame, ports: Mapping[str, Any]) -> di
     p = got[0]
     granted = links.views(s, p, links.world_of(frame))
     await atelier.drop_views(p.id, keep=granted)
-    out: dict[str, dict[str, Any]] = {}  # par numéro de projet lu, en texte : ce que garde la trace de l'épisode
-    for target in granted:
+
+    async def seen(target: int) -> dict[str, Any]:
         try:
             view = await atelier.view(p.id, target, fresh=True)
             tree = await atelier.view_tree(p.id, target) if view.sha else []
         except (OSError, ValueError):
-            out[str(target)] = {"sha": "", "at": 0, "why": UNREADABLE, "tree": []}
-            continue
-        out[str(target)] = {"sha": view.sha, "at": view.at, "why": view.why, "tree": tree[:VIEW_TREE_SHOWN + 1]}
-    return {"views": out}
+            return {"sha": "", "at": 0, "why": UNREADABLE, "tree": []}
+        return {"sha": view.sha, "at": view.at, "why": view.why, "tree": tree[:VIEW_TREE_SHOWN + 1]}
+
+    # Demandées ensemble (l'atelier n'en pose qu'une à la fois par lecteur) : chacune est dite périmée avant qu'une
+    # pose lente ne prenne toute l'échéance. Coupée, aucune ne garde son commit d'avant, pas même celles dont le tour
+    # n'est pas venu : ses outils la reposeront à la tête courante (ADR 0262).
+    found = await asyncio.gather(*(seen(target) for target in granted))
+    # par numéro de projet lu, en texte : ce que garde la trace de l'épisode
+    return {"views": {str(target): view for target, view in zip(granted, found, strict=True)}}
 
 
 @PROJECTS.enricher("projects_apps", episodes=RUNS, deadline_ms=1500, reads=[forge_c.APPS])
@@ -281,6 +340,79 @@ async def _answer(s: ProjectsState, frame: Frame, ports: Mapping[str, Any]) -> d
     return {"lines": lines} if lines else None
 
 
+#: « TON REGISTRE » (ADR 0268) tient en dix lignes : trois de comptes, puis ce qui a bougé et ses plus anciens
+#: éléments ouverts, chacun sous son en-tête ; une ligne est coupée
+ITEMS_LINES = 10
+ITEMS_LISTS, ITEMS_MOVED, ITEMS_OLDEST = 3, 3, 2
+ITEM_LINE_CLIP = 220
+
+
+@PROJECTS.enricher("projects_items", episodes=RUNS, deadline_ms=1500,
+                   reads=[identity_c.IDENTITY, identity_c.OWNERS])
+async def _items(s: ProjectsState, frame: Frame, ports: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Le registre du projet, pour l'exécution qui vise un objectif (ADR 0268) : ce qu'un autre qu'elle a touché
+    depuis son dernier passage, et ses éléments ouverts les plus anciens — lus dans la projection, une ligne
+    chacun ; les comptes, eux, sont dans l'état."""
+    store = ports.get("store")
+    got = _project(s, frame)
+    if store is None or got is None or got[1] is None or not got[0].board.counts:
+        return None
+    p, target = got
+    ep = frame.episode
+    run = s.running.get(ep.id) if ep is not None else None
+    # son dernier passage : celui d'avant cette exécution, qu'elle a déjà rendu sien à son départ
+    since = run.previous_objective if run is not None and run.objective == target.id else target.last_run_at
+    titles = [x.title_ref for x in p.board.lists if x.title_ref]
+    moved = tracker.moved(store, p.id, since, ITEMS_MOVED)
+    oldest = tracker.oldest_open(store, p.id, p.board, ITEMS_OLDEST)
+    # un ticket encore proposé n'y dit qu'une ligne, sans titre ni texte (``tracker.RUN``, ADR 0272) ; le niveau de
+    # la section est celui de ce qu'elle cite : un élément peut être d'un niveau plus haut que ce qu'écrit le projet
+    return {"moved": [tracker.line(frame, e, tracker.RUN) for e in moved],
+            "oldest": [tracker.line(frame, e, tracker.RUN) for e in oldest],
+            "titles": store.content(titles) if titles else {},
+            "level": max([0, *(e.item.level for e in (*moved, *oldest) if not tracker.veiled(tracker.RUN, e.item))])}
+
+
+@PROJECTS.enricher("projects_asks", episodes=RUNS, deadline_ms=1500, reads=[identity_c.IS_OWNER])
+async def _asks(s: ProjectsState, frame: Frame, ports: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Les demandes de son projet aux projets qu'il lit (ADR 0271), pour l'exécution qui vise un objectif : où
+    chacune en est, celles fermées depuis son dernier passage d'abord. Le titre d'un ticket et la note de sa
+    fermeture se relisent dans la projection du projet visé, seulement tant que le lien donne encore son détail —
+    c'est ici que ce droit est relu."""
+    store = ports.get("store")
+    got = _project(s, frame)
+    if store is None or got is None or got[1] is None or not got[0].asks:
+        return None
+    p, target = got
+    ep = frame.episode
+    run = s.running.get(ep.id) if ep is not None else None
+    # son dernier passage : celui d'avant cette exécution, qu'elle a déjà rendu sien à son départ
+    since = run.previous_objective if run is not None and run.objective == target.id else target.last_run_at
+    said, seen = demands.lines(s, frame, store, p, target, since, links.world_of(frame))
+    return {"lines": said, "seen": list(seen)}
+
+
+@PROJECTS.enricher("projects_tickets", episodes=RUNS, deadline_ms=1500,
+                   reads=[identity_c.IDENTITY, identity_c.OWNERS])
+async def _tickets(s: ProjectsState, frame: Frame, ports: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Les tickets du projet, pour l'exécution qu'ils regardent (ADR 0270), lus dans la projection : le passage qui
+    traite les tickets (son objectif attend ``item:tickets``) voit ceux qui sont entre ses mains, par priorité ;
+    l'exécution d'un objectif né d'un ticket voit le sien, et son plan."""
+    store = ports.get("store")
+    got = _project(s, frame)
+    if store is None or got is None or got[1] is None:
+        return None
+    p, target = got
+    if target.ticket:
+        e = tracker.ticket(store, p.id, target.ticket)
+        return {"own": True, "lines": triage.own_lines(frame, store, p, e), "level": e.item.level} \
+            if e is not None else None
+    if triggers.item_key(c.TICKETS) not in target.on or not tracker.open_tickets(p.board):
+        return None
+    lines, level = triage.triage_lines(frame, store, p)
+    return {"own": False, "lines": lines, "level": level}
+
+
 def _recent(s: ProjectsState) -> list[Project]:
     return sorted((p for p in s.projects.values() if live(p)), key=lambda p: p.id)
 
@@ -290,6 +422,8 @@ def _awaits(p: Project, person: str | None) -> bool:
     if not person:
         return False
     if p.plan_state == c.PROPOSED and person in (p.asked_by, p.plan_asked_to):
+        return True
+    if person == p.owner and waiting_in(p):  # un point d'arrêt attend sa validation (ADR 0273)
         return True
     return any(o.asked_to == person and (o.status == c.BLOCKED or (o.status == c.OPEN and o.need_ref))
                for o in p.objectives)
@@ -315,12 +449,17 @@ def _objective_line(o: Objective, texts: Mapping[str, str], pm: Any, now: int) -
     if o.kind == c.CONSTANT and o.status != c.OPEN:
         state = phrase("projects.objective.aside", status=status)
     elif o.kind == c.CONSTANT:
+        # jamais passé : sa cadence l'amènera — ou tout de suite, s'il le dit (ADR 0280)
         last = phrase("projects.objective.last_pass", ago=ago_words(now - o.passed_at)) if o.passed_at else \
-            phrase("projects.objective.never")
-        state = phrase("projects.objective.constant", every=_every(cadence(o, pm)), last=last)
+            phrase("projects.objective.never_at_once") if o.at_once else phrase("projects.objective.never")
+        # sans cadence, il ne passe que sur événement (ADR 0265)
+        state = phrase("projects.objective.on_event", last=last) if o.only_on_event else \
+            phrase("projects.objective.constant", every=_every(cadence(o, pm)), last=last)
     else:
         state = phrase("projects.objective.once", status=status)
     line = "- " + phrase("projects.objective.line", id=o.id, state=state, text=text)
+    if o.status == c.OPEN:  # ce qui le déclenche, en plus de sa cadence
+        line += triggers_said(o.on, o.only_on_event)
     if o.status == c.DONE and texts.get(o.result_ref):  # ce qu'il a donné : la suite s'appuie dessus (ADR 0145)
         line += phrase("projects.objective.result", result=clipped(texts[o.result_ref], 240))
     return line
@@ -428,8 +567,13 @@ def _run_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> S
         lines.append(phrase("projects.run.target") + "\n" + _objective_line(target, texts, pm, frame.now))
         if target.done_when_ref and texts.get(target.done_when_ref):
             lines.append(phrase("projects.run.done_when", criterion=texts[target.done_when_ref]))
+        if target.brief_ref and texts.get(target.brief_ref):  # le commentaire de qui a validé son plan (ADR 0270)
+            lines.append(phrase("projects.run.ticket_brief", brief=texts[target.brief_ref]))
+        # où elle en est (ADR 0273) : ses jalons, leur état, la preuve des atteints, celui qui vient
+        lines += milestones.lines(target, texts, caretaker(frame))
         if target.kind == c.CONSTANT:
             lines.append(phrase("projects.run.constant"))
+            lines += milestones.routine_lines(target, texts)  # ce que chaque passage doit faire
         if target.note_ref and texts.get(target.note_ref):
             lines.append(phrase("projects.run.note", note=texts[target.note_ref]))
         lines += _own_memory(target, texts, frame.now)
@@ -621,7 +765,8 @@ def _view_lines(t: Project, view: Mapping[str, Any] | None, now: int) -> list[st
     at = int(view.get("at") or 0)
     out = ["  " + phrase("projects.links.view.open", path=place, sha=str(view["sha"])[:7],
                          age=phrase("projects.links.view.age", ago=ago_words(now - at)) if at else "")]
-    entries = [str(f) for f in view.get("tree") or ()]
+    # le nom d'un fichier d'un autre projet est une donnée : sans caractère de contrôle, et coupé (ADR 0262)
+    entries = [view_entry(str(f)) for f in view.get("tree") or ()]
     if not entries:
         return [*out, "  - " + phrase("projects.links.view.empty")]
     out += [f"  - {entry}" for entry in entries[:VIEW_TREE_SHOWN]]
@@ -631,16 +776,20 @@ def _view_lines(t: Project, view: Mapping[str, Any] | None, now: int) -> list[st
 
 
 def _link_lines(t: Project, grant: links.Grant, texts: Mapping[str, str], pm: Any, now: int,
-                view: Mapping[str, Any] | None = None) -> list[str]:
+                view: Mapping[str, Any] | None = None, ask: str = "") -> list[str]:
     """Un projet lu, selon ce que son lien donne (ADR 0257). Le voir : son titre et son état. Le lire : la date de
     sa dernière exécution, ses derniers comptes rendus, ses décisions en vigueur, ses objectifs ouverts. Ses
-    fichiers : la vue de son atelier (``view`` : ce que l'enrichisseur en a posé, ADR 0260)."""
+    fichiers : la vue de son atelier (``view`` : ce que l'enrichisseur en a posé, ADR 0260). Lui adresser une
+    demande (``ask`` : comment elle naîtrait, ``asks.mode`` — ADR 0271)."""
     done = sum(1 for o in t.objectives if o.kind == c.ONCE and o.status == c.DONE)
     total = sum(1 for o in t.objectives if o.kind == c.ONCE and o.status != c.DROPPED)
     state = family("projects.links.states").get(t.status, t.status)
     if total:
         state += phrase("projects.links.progress", done=done, total=total)
     out = ["- " + phrase("projects.links.line", project=_named(t, texts), state=state)]
+    if ask:
+        out.append("  " + (phrase("projects.links.ask.direct") if ask == asks.DIRECT else
+                           phrase("projects.links.ask.proposed")))
     if grant.detail:
         out += _detail_lines(t, texts, pm, now)
     elif not grant.view:
@@ -691,17 +840,215 @@ def _links_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) ->
     texts: Mapping[str, str] = (enrich.get("projects") or {}).get("texts") or {}
     pm = params(frame.env.params_of("projects", frame.root))
     views: Mapping[str, Mapping[str, Any]] = (enrich.get("projects_views") or {}).get("views") or {}
-    lines = [phrase("projects.links.head")]
+    lines = [phrase("projects.links.head"), phrase("projects.links.foreign")]
     level, seen = 0, []
     for r in links.readings(s, p, links.world_of(frame)):
         t = r.project
         if t is None or r.suspended:
             lines.append("- " + phrase("projects.links.suspended", id=r.id))
             continue
-        lines += _link_lines(t, r.grant, texts, pm, frame.now, views.get(str(t.id)))
+        lines += _link_lines(t, r.grant, texts, pm, frame.now, views.get(str(t.id)), asks.mode(p, t, r.grant))
         level = max(level, written(t) if r.grant.detail or r.grant.view else t.sensitivity)
         seen.append(f"project:{t.id}")
     return SectionBody("\n".join(lines), level=level, provenance=tuple(seen))
+
+
+#: ce qui amène une exécution tient en quelques lignes : coupé tard, jamais au point de disparaître ; une ligne par
+#: cause, coupée
+STIRS_FLOOR = 400
+STIR_LINE_CLIP = 240
+
+
+def _causes(s: ProjectsState, frame: Frame, target: Objective | None) -> tuple[tuple[Stir, ...], int]:
+    """Ce qui a déclenché l'objectif visé (ADR 0265) : les causes que l'exécution a prises à son départ
+    (``Run.stirred``) — sinon celles qu'il a encore, tant qu'aucune exécution n'est partie —, et combien sont tombées
+    de la liste."""
+    if target is None:
+        return (), 0
+    ep = frame.episode
+    run = s.running.get(ep.id) if ep is not None else None
+    if run is not None and run.purpose == "run" and run.objective == target.id:
+        return run.stirred, run.stirred_more
+    return target.stirred, target.stirred_more
+
+
+def _stir_source(s: ProjectsState, frame: Frame, p: Project, cause: Stir) -> tuple[int, Project | None]:
+    """Le projet d'où vient une cause, et lui-même si le lien donne **encore** son détail (ADR 0265) : ce qu'on dit
+    d'une cause se relit au moment de la dire — un droit repris depuis qu'elle est arrivée la tait."""
+    t = triggers.read(cause.key)
+    if t is None or t.sort != triggers.PROJECT:
+        return 0, None
+    reading = next((r for r in links.readings(s, p, links.world_of(frame)) if r.id == t.project), None)
+    return t.project, reading.project if reading is not None and reading.grant.detail else None
+
+
+def _stir_done(source: Project | None, cause: Stir) -> Objective | None:
+    """L'objectif abouti que nomme une cause, dans le projet d'où elle vient."""
+    return objective_at(source, cause.detail) if source is not None else None
+
+
+def _stir_refs(s: ProjectsState, frame: Frame, p: Project, target: Objective | None) -> list[str]:
+    """Les titres des objectifs aboutis que nomment les causes de l'objectif visé — seulement ceux que le lien donne."""
+    refs = []
+    for cause in _causes(s, frame, target)[0]:
+        t = triggers.read(cause.key)
+        if t is not None and t.sort == triggers.PROJECT and t.name == triggers.DONE:
+            done = _stir_done(_stir_source(s, frame, p, cause)[1], cause)
+            if done is not None and done.text_ref:
+                refs.append(done.text_ref)
+    return refs
+
+
+def _stir_line(s: ProjectsState, frame: Frame, p: Project, cause: Stir, texts: Mapping[str, str]) -> tuple[str, Project | None, bool]:
+    """Une cause en une ligne, le projet d'où elle vient quand on en dit le détail, et si elle cite un titre venu de
+    lui. Une base qui a avancé (ADR 0280) : l'empreinte courte du commit où elle est arrivée et le numéro du projet. Un objectif abouti : son titre, si le lien donne
+    encore le détail. Un projet que le lien ne donne plus : son numéro, rien d'autre."""
+    ago = ago_words(max(0, frame.now - cause.at))
+    asked = triggers.asked(cause.key)
+    if asked:  # une demande fermée (ADR 0271) : son ticket, si le lien donne encore le détail du projet visé
+        if not asks.reads(s, p, asked, links.world_of(frame)):
+            return phrase("projects.stirs.unread", ago=ago, id=asked), None, False
+        return phrase("projects.stirs.ask", ago=ago, item=cause.detail, id=asked), s.projects.get(asked), False
+    t = triggers.read(cause.key)
+    if t is None:
+        return phrase("projects.stirs.other", ago=ago), None, False
+    if t.sort == triggers.APP:
+        said = phrase("projects.stirs.app_broken", ago=ago, name=t.name) if cause.detail == forge_c.APP_BROKEN else \
+            phrase("projects.stirs.app_queued", ago=ago, name=t.name) if cause.detail == forge_c.APP_QUEUED else \
+            phrase("projects.stirs.app", ago=ago, name=t.name)
+        return said, None, False
+    if t.sort == triggers.ITEM:  # ce qui a bougé dans une de ses listes (ADR 0268) : un numéro ou une clé, pas un titre
+        return phrase("projects.stirs.item", ago=ago, name=t.name, item=cause.detail), None, False
+    if t.sort != triggers.PROJECT:
+        return phrase("projects.stirs.other", ago=ago), None, False
+    number, source = _stir_source(s, frame, p, cause)
+    if source is None:
+        return phrase("projects.stirs.unread", ago=ago, id=number), None, False
+    if t.name == triggers.COMMIT:
+        return phrase("projects.stirs.commit", ago=ago, id=number, sha=cause.detail[:7]), source, False
+    done = _stir_done(source, cause)
+    title = texts.get(done.text_ref, "") if done is not None else ""
+    if not title:
+        return phrase("projects.stirs.done", ago=ago, id=number), source, False
+    return phrase("projects.stirs.done_titled", ago=ago, id=number, objective=done.id, title=title), source, True
+
+
+@PROJECTS.section("project_stirs", zone=Zone.VOLATILE, episodes=RUNS, trim_rank=85, floor_chars=STIRS_FLOOR,
+                  title=phrase("projects.stirs.title"), reads=[identity_c.IS_OWNER])
+def _stirs_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
+    """Ce qui amène cette exécution, quand ce n'est pas la cadence de l'objectif (ADR 0265) : ses causes en attente,
+    de la plus ancienne à la plus récente, une ligne bornée chacune ; et le réveil par API qui le vise. Son niveau
+    est celui de ce qu'elle y lit : ce qu'écrivent les projets dont une cause dit le détail."""
+    got = _project(s, frame)
+    ep = frame.episode
+    if got is None or got[1] is None or ep is None:
+        return None
+    p, target = got
+    causes, more = _causes(s, frame, target)
+    woken = wakeup_c.call_of(ep.attrs.get("subject")) is not None
+    if not causes and not woken:
+        return None
+    texts: Mapping[str, str] = (enrich.get("projects") or {}).get("texts") or {}
+    lines = [phrase("projects.stirs.woken")] if woken else []
+    seen: dict[int, Project] = {}
+    cited = False
+    if causes:
+        lines.append(phrase("projects.stirs.head"))
+        if more:
+            lines.append("- " + phrase("projects.stirs.more", count=more))
+        for cause in causes:
+            said, source, titled = _stir_line(s, frame, p, cause, texts)
+            lines.append("- " + clipped(said, STIR_LINE_CLIP))
+            cited = cited or titled
+            if source is not None:
+                seen[source.id] = source
+    if cited:  # le titre d'un objectif d'un autre projet est une donnée, comme ce que montre « CE QUE CE PROJET LIT »
+        lines.append(phrase("projects.stirs.foreign"))
+    if seen:
+        lines.append(phrase("projects.stirs.see_links"))
+    return SectionBody("\n".join(lines), level=max([p.sensitivity, *(written(t) for t in seen.values())]),
+                       provenance=(f"project:{p.id}", *(f"project:{n}" for n in seen)))
+
+
+#: son registre tient en dix lignes : coupé tard, jamais au point de disparaître
+ITEMS_FLOOR = 500
+
+
+@PROJECTS.section("project_items", zone=Zone.VOLATILE, episodes=RUNS, trim_rank=70, untrusted=True,
+                  floor_chars=ITEMS_FLOOR, title=phrase("projects.items.title"))
+def _items_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
+    """Le registre du projet, pour l'exécution qui vise un objectif (ADR 0268) : les comptes de ses listes, puis ce
+    qu'un autre qu'elle a touché depuis son dernier passage, puis ses éléments ouverts les plus anciens — dix
+    lignes au plus, chacune coupée. Un titre écrit par une personne y est cité : une donnée, jamais une consigne
+    (la section est déclarée non sûre, comme la réponse à une demande d'aide)."""
+    got = _project(s, frame)
+    if got is None or got[1] is None or not got[0].board.counts:
+        return None
+    p = got[0]
+    found: Mapping[str, Any] = enrich.get("projects_items") or {}
+    titles: Mapping[str, str] = found.get("titles") or {}
+    counted = [lst for lst in tracker.listings(p.board) if tracker.count(p.board, lst.name)]
+    lines = [tracker.counts_line(p.board, lst, tracker.list_title(lst, titles)) for lst in counted[:ITEMS_LISTS]]
+    if len(counted) > ITEMS_LISTS:  # la dernière ligne des comptes dit ce qu'on ne montre pas
+        lines[-1] = phrase("projects.items.more_lists", count=len(counted) - ITEMS_LISTS + 1)
+    for head, entries in ((phrase("projects.items.moved"), list(found.get("moved") or ())[:ITEMS_MOVED]),
+                          (phrase("projects.items.oldest"), list(found.get("oldest") or ())[:ITEMS_OLDEST])):
+        if entries:
+            lines.append(head)
+            lines += [f"- {said}" for said in entries]
+    body = "\n".join(clipped(x, ITEM_LINE_CLIP) for x in lines[:ITEMS_LINES])
+    return SectionBody(body, level=max(written(p), int(found.get("level") or 0)), provenance=(f"project:{p.id}",))
+
+
+#: ses tickets sont ce sur quoi le passage travaille : coupés tard, jamais au point de disparaître ; une ligne est
+#: coupée
+TICKETS_FLOOR = 900
+TICKET_LINE_CLIP = 420
+
+
+@PROJECTS.section("project_tickets", zone=Zone.VOLATILE, episodes=RUNS, trim_rank=75, untrusted=True,
+                  floor_chars=TICKETS_FLOOR, title=phrase("projects.tickets.title"))
+def _tickets_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
+    """Les tickets que regarde cette exécution (ADR 0270) : pour le passage qui les traite, ceux qui sont entre ses
+    mains, par priorité — leur étape, ce qui est attendu d'elle, le dernier mot du fil —, bornés ; pour l'objectif
+    né d'un ticket, le sien et son plan. Ce qu'une personne y a écrit est cité : une donnée, jamais une consigne
+    (la section est déclarée non sûre)."""
+    got = _project(s, frame)
+    found: Mapping[str, Any] = enrich.get("projects_tickets") or {}
+    lines = [clipped(x, triage.PLAN_SHOWN + 200 if found.get("own") else TICKET_LINE_CLIP)
+             for x in found.get("lines") or ()]
+    if got is None or got[1] is None or not lines:
+        return None
+    p = got[0]
+    head = phrase("projects.tickets.head.own") if found.get("own") else phrase("projects.tickets.head.triage")
+    return SectionBody("\n".join([head, *lines]), level=max(written(p), int(found.get("level") or 0)),
+                       provenance=(f"project:{p.id}",))
+
+
+#: ses demandes aux autres projets tiennent en quelques lignes : coupées tard, jamais au point de disparaître ; une
+#: ligne est coupée
+ASKS_FLOOR = 500
+ASK_LINE_CLIP = 520
+
+
+@PROJECTS.section("project_asks", zone=Zone.VOLATILE, episodes=RUNS, trim_rank=72, untrusted=True,
+                  floor_chars=ASKS_FLOOR, title=phrase("projects.asks.title"))
+def _asks_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
+    """Les demandes que son projet a adressées aux projets qu'il lit (ADR 0271), pour l'exécution qui vise un
+    objectif : en attente d'accord, acceptée, en cours, traitée, écartée avec sa raison — celles fermées depuis son
+    dernier passage d'abord, bornées. Une demande à un projet dont le lien ne donne plus le détail ne dit que son
+    existence. Le titre d'un ticket et la note de sa fermeture sont cités : une donnée, jamais une consigne (la
+    section est déclarée non sûre). Son niveau est celui de ce qu'elle y lit : ce qu'écrivent les projets visés."""
+    got = _project(s, frame)
+    found: Mapping[str, Any] = enrich.get("projects_asks") or {}
+    lines = [clipped(x, ASK_LINE_CLIP) for x in found.get("lines") or ()]
+    if got is None or got[1] is None or not lines:
+        return None
+    p = got[0]
+    seen = [s.projects[t] for t in found.get("seen") or () if t in s.projects]
+    return SectionBody("\n".join([phrase("projects.asks.head"), *lines]),
+                       level=max([written(p), *(written(t) for t in seen)]),
+                       provenance=(f"project:{p.id}", *(f"project:{t.id}" for t in seen)))
 
 
 #: ce que sa dernière commande réseau a rendu est ce sur quoi elle travaille : coupé en premier (venu d'Internet),
@@ -774,7 +1121,16 @@ def _share_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) ->
         wanted = store.get(o.need_ref, "") or store.get(o.result_ref, "")
         state = phrase("projects.share.blocked") if o.status == c.BLOCKED else phrase("projects.share.waiting")
         body = phrase("projects.share.need_head", title=title, objective=objective or "…", state=state)
-        if wanted:
+        opinions = [store.get(r, "") for r in o.review_refused] if handed_over(o) else []
+        if any(opinions):
+            # deux relectures indépendantes l'ont refusé : la main est à cette personne, avec les deux avis, cités
+            # comme le dire d'autres exécutions (ADR 0276)
+            body += "\n" + phrase("projects.share.reviews") + "".join(
+                "\n" + phrase("projects.share.review", n=i, said=clipped(x, REVIEW_CLIP))
+                for i, x in enumerate(opinions, start=1) if x)
+        elif o.review_due and o.review_tries >= REVIEW_TRIES_MAX:
+            body += "\n" + phrase("projects.share.review_silent")
+        elif wanted:
             body += "\n" + phrase("projects.share.need", need=wanted)
         return SectionBody(body, level=level, title=phrase("projects.share.need_title"),
                            provenance=(f"project:{p.id}",))
@@ -915,7 +1271,7 @@ def _live_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> 
     pm = params(frame.env.params_of("projects", frame.root))
     person = frame.get(identity_c.PERSON(ep.target)) if ep is not None and ep.target else None
     owner = bool(person) and aud.owner  # l'adresse qui parle, là où elle parle (jamais un groupe public)
-    lines, level, witness, steering, answering = [], 0, False, False, False
+    lines, level, witness, steering, answering, settling = [], 0, False, False, False, False
     kind = ep.kind if ep is not None else ""
     for p in _talked(s, person):
         title = texts.get(p.title_ref)
@@ -940,7 +1296,7 @@ def _live_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> 
         line = "- " + phrase("projects.live.line", title=title, whose=whose, how=how, state=state)
         # le détail (son dernier compte rendu, ce qui vient) : à qui le pilote, au moins en lecture seule (ADR 0133) —
         # et il est au moins personnel : seulement à qui peut l'entendre
-        if reads(p, aud, kind, frame) and hearable(p.about, written(p), person, aud.level, aud.witness_level,
+        if reads(p, aud, kind, frame) and hearable(p.about, detail_level(p), person, aud.level, aud.witness_level,
                                                    aud.private_ok):
             if p.last_run_at:
                 summary = texts.get(p.summary_ref, "")
@@ -955,8 +1311,19 @@ def _live_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> 
                 if texts.get(p.questions_ref):
                     line += "\n  " + phrase("projects.live.questions", questions=clipped(texts[p.questions_ref], 700))
                 answering = answering or person == p.asked_by or bool(frame.get(identity_c.IS_OWNER(person)))
+            if person and tracker.settles(frame, p, person):
+                # un point d'arrêt attend sa validation (ADR 0273) : le jalon, comment elle dit l'avoir rempli, et
+                # le commit de l'atelier à ce moment-là
+                for o, m in waiting_in(p)[:BREAKPOINTS_SHOWN]:
+                    forgotten = phrase("projects.milestones.forgotten")
+                    line += "\n  " + phrase(
+                        "projects.live.breakpoint", objective=o.id, id=m.id,
+                        text=clipped(texts.get(m.text_ref) or forgotten, BREAKPOINT_CLIP),
+                        how=clipped(texts.get(m.how_ref) or forgotten, BREAKPOINT_CLIP),
+                        commit=phrase("projects.live.breakpoint_commit", sha=m.commit[:12]) if m.commit else "")
+                    settling = True
             if any(a != person for a in p.about):
-                level = max(level, written(p))
+                level = max(level, detail_level(p))
             steering = steering or steerable(p, aud, frame) in c.CHANGES
         waiting = _awaiting(frame, p, person) if owner and person else ""
         if waiting:
@@ -975,7 +1342,15 @@ def _live_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> 
         lines.append(phrase("projects.live.steer"))
         if answering:  # un plan attend sa réponse : un « vas-y » le lance, une remarque le fait reprendre
             lines.append(phrase("projects.live.plan_steer"))
+        if settling:  # un point d'arrêt attend : sa validation le dit atteint, son refus le lui rend avec sa raison
+            lines.append(phrase("projects.live.breakpoint_steer"))
     return SectionBody("\n".join(lines), level=level, witness=witness)
+
+
+def _reviewing(frame: Frame) -> bool:
+    """Cette exécution est-elle une relecture indépendante (ADR 0276) ? Elle se conclut par son verdict."""
+    ep = frame.episode
+    return ep is not None and review_of(ep.attrs.get("subject")) is not None
 
 
 def _framing(frame: Frame) -> bool:
@@ -989,4 +1364,6 @@ def work_brief(frame: Frame, req: Any) -> str:
 
 
 def job_brief(frame: Frame, req: Any) -> str:
+    if _reviewing(frame):
+        return phrase("projects.review.brief")
     return phrase("projects.frame.job_brief") if _framing(frame) else phrase("projects.run.job_brief")

@@ -23,7 +23,9 @@ from pathlib import Path
 import pytest
 
 from mika.adapters.llm.config import BackendSpec, LLMConfig
+from mika.adapters.maps.quota import QUOTAS_FILE, QuotaStore
 from mika.adapters.store_sql import SqlStore
+from mika.adapters.workshop import VIEWS_DIRNAME
 from mika.app import backup, datadir
 from mika.app.cli import main
 from mika.app.cli.journal import replay_verify
@@ -397,6 +399,29 @@ def test_workshop_symlinks_survive_a_backup_and_their_history_stays_clean(tmp_pa
     assert status == ""  # rien à commettre : aucune suppression de lien
 
 
+def test_the_views_of_other_workshops_are_never_archived(tmp_path):
+    """Une vue (``ateliers/.vues``, ADR 0260) est la copie du dernier commit d'un autre atelier, que l'archive porte
+    déjà avec son dépôt, et elle se repose seule à l'exécution suivante (ADR 0262) : ni ses fichiers ni ses liens
+    n'entrent dans une archive. Le reste des ateliers y entre comme avant — leur dépôt, leur dossier ``liens/`` à
+    eux."""
+    data = tmp_path / "data"
+    read, reader = data / "ateliers" / "projet-1", data / "ateliers" / "projet-2"
+    view = data / "ateliers" / VIEWS_DIRNAME / "projet-2" / "projet-1" / ("a" * 40)
+    for folder in (read / ".git", reader / "liens", view / "src"):
+        folder.mkdir(parents=True)
+    for path, text in ((read / "README.md", "le produit\n"), (read / ".git" / "HEAD", "ref: refs/heads/main\n"),
+                       (reader / "notes.md", "mes notes\n"), (reader / "liens" / "utiles.md", "des liens à lui\n"),
+                       (view / "README.md", "le produit\n"), (view / "src" / "module.py", "x = 1\n")):
+        path.write_text(text, encoding="utf-8")
+    (view / "lien").symlink_to("README.md")
+    files, links = backup._walk(data)
+    assert {str(f) for f in files} == {
+        "ateliers/projet-1/README.md", "ateliers/projet-1/.git/HEAD", "ateliers/projet-2/notes.md",
+        "ateliers/projet-2/liens/utiles.md"}
+    assert links == [] and backup._members(data) == files
+    assert VIEWS_DIRNAME == ".vues" and ("ateliers", VIEWS_DIRNAME) in backup.SKIPPED_UNDER
+
+
 def test_an_archive_whose_link_would_escape_the_folder_is_refused(tmp_path, monkeypatch):
     """Un lien ne se recrée jamais hors du dossier, ni à travers un autre lien qui en sort ; et hors des cages
     (``ateliers/``, ``mcp/``), sa cible ne sort pas du dossier non plus — ni absolue ni remontante : le serveur
@@ -451,3 +476,28 @@ def test_the_files_she_sent_are_archived_and_restored_private(tmp_path, monkeypa
     again = DiskShares(restored / "partages")
     assert asyncio.run(again.read(file)) == b"- pain\n- lait\n"
     assert asyncio.run(again.forget("user_2")) == 1  # ses sujets reviennent avec lui
+
+
+def test_the_map_counters_are_archived_and_never_put_back_over_newer_ones(tmp_path, monkeypatch):
+    """R3-08 : les compteurs du mois de Google (``cartes/quotas.db``, ce qui empêche la facture) ne sont que dans le
+    dossier de données, et ``cartes/`` ne se sauvegarde pas (la carte et l'index se refont) — restauré sur une machine
+    neuve, le mois repartait de zéro quand Google, lui, avait compté. Les compteurs partent avec l'archive (le reste de
+    ``cartes/``, non) ; restaurés là où il n'y en a pas, ils reviennent ; sur place, ceux du dossier, plus récents,
+    restent."""
+    monkeypatch.delenv("MIKA_SECRET_KEY", raising=False)
+    data, dest = tmp_path / "data", tmp_path / "archives"
+    live(data, talk=False)
+    QuotaStore(data / QUOTAS_FILE).add_month("google-fiches", "2026-11", 640)
+    (data / "cartes" / "lieux.db").write_bytes(b"un index qui se refait")
+    made = backup.backup(data, dest)
+    with tarfile.open(made.archive) as tar:
+        names = tar.getnames()
+    assert f"data/{QUOTAS_FILE}" in names and not any(n.endswith("cartes/lieux.db") for n in names)
+    fresh = tmp_path / "neuve"
+    backup.restore(made.archive, fresh)
+    assert QuotaStore(fresh / QUOTAS_FILE).month_used("google-fiches", "2026-11") == 640
+    assert not (fresh / "cartes" / "lieux.db").exists()
+    QuotaStore(data / QUOTAS_FILE).add_month("google-fiches", "2026-11", 60)  # le serveur a compté depuis
+    backup.restore(made.archive, data, force=True)
+    assert QuotaStore(data / QUOTAS_FILE).month_used("google-fiches", "2026-11") == 700
+    assert (data / "cartes" / "lieux.db").read_bytes() == b"un index qui se refait"

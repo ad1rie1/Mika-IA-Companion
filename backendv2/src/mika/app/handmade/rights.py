@@ -203,6 +203,9 @@ FAMILY_ABOUT: Mapping[str, str] = {
     "teams": "lister et relire les conversations Teams des comptes qu'elle lit, préparer une réponse",
     "trips": "la carte : chercher un lieu, calculer un trajet, préparer un voyage avec la personne",
     "wakeup": "conclure un réveil par API : le compte rendu de ce que l'appel lui a fait faire",
+    "project_review": "relire le travail d'un projet avant qu'il sorte : lire le commit relu, y lancer une "
+                      "commande (dans une copie, à part de l'atelier), rendre un verdict — rien qui écrit (une "
+                      "exécution à part, ADR 0276)",
     "workshop": "l'atelier d'un projet : lire, écrire, lancer des programmes isolés, son dépôt git",
     "world": "se déplacer et faire des choses dans sa chambre (on la voit le faire)",
 }

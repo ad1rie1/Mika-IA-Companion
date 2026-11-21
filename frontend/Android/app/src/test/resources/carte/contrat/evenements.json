@@ -1,0 +1,10 @@
+{
+  "events": [{"id": "e:450c81b3-6ffa-3d4e-9c1b-2a7f0e5d8c41", "name": "Éclats du rire !",
+              "start": "2026-11-21T19:00+01:00", "end": "2026-11-21T22:00+01:00",
+              "when_text": "sam. 21 nov. · 19:00–22:00", "place": "L'Aéronef, Lille", "lat": 50.636554,
+              "lon": 3.074244, "distance_m": 780, "themes": ["spectacles"], "free": false,
+              "price": "12/8€ - Gratuit moins de 18 ans", "photo": "", "photo_source": "", "photo_credit": "",
+              "photo_credit_url": "", "photo_licence": ""}],
+  "coverage": {"ready": true, "cells": 11, "loaded": 9, "oldest": 1795122180000,
+               "note": "Cette zone n'est lue qu'en partie (cases lues : 9 sur 11) : la suite se lit à la prochaine recherche, ou ce soir."}
+}

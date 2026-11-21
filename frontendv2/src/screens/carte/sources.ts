@@ -6,7 +6,7 @@
  * lecture en mots, la ligne de couverture d'une liste. Tout texte venu du dehors (un avis, un nom, une description, un
  * crédit) passe par `h()`.
  */
-import { photoUrl, type Coverage, type Photo } from "../../api/carte";
+import { photoUrl, type Coverage, type Photo, type Place } from "../../api/carte";
 import { h } from "../../shell/dom";
 import { dateWords, daysBetween } from "../../shared/kit";
 
@@ -135,6 +135,18 @@ export function coverageLine(c: Coverage | null | undefined, what: string, now: 
   return `${what} ${readWhen(c.oldest, now)}`;
 }
 
+/**
+ * La ligne des notes d'une liste de lieux (R2, ADR 0269) : « Google Maps » dès qu'un de ses lieux a une note, quelle que
+ * soit la couverture — « Notes Google Maps lues le 18 novembre » quand on sait quand, sinon « Notes : Google Maps » —,
+ * puis la `note` de la couverture, telle quelle. Ni note ni couverture : vide (rien à citer).
+ */
+export function ratingsLine(places: readonly Pick<Place, "rating">[], c: Coverage | null | undefined, now: number): string {
+  const rated = places.some((p) => typeof p.rating === "number" && Number.isFinite(p.rating));
+  const read = c && c.ready && c.oldest > 0 ? `Notes Google Maps lues ${readWhen(c.oldest, now)}` : "";
+  const head = read || (rated ? "Notes : Google Maps" : "");
+  return [head, c?.note.trim() ?? ""].filter(Boolean).join(" · ");
+}
+
 // ── Les photos ───────────────────────────────────────────────────────
 
 const SOURCE_LABELS: Record<string, string> = { google: "Google Maps", datatourisme: "Office de tourisme" };
@@ -160,6 +172,43 @@ export function photoImg(ref: string, alt: string, seen: (ref: string) => boolea
 export function photoCredit(p: Photo): string {
   const who = p.credit.trim() ? `Photo : ${outLink(p.credit_url, p.credit.trim())}` : "";
   return [who, p.licence.trim() ? h(p.licence.trim()) : "", h(photoSource(p))].filter(Boolean).join(" · ");
+}
+
+/** Ce qu'on cite d'une photo dans la bande d'une fiche, sur elle : son auteur (lié), puis sa licence. */
+export function bandCredit(p: Photo): string {
+  return [p.credit.trim() ? outLink(p.credit_url, p.credit.trim()) : "", p.licence.trim() ? h(p.licence.trim()) : ""]
+    .filter(Boolean).join(" · ");
+}
+
+/** Ce qu'un lieu ou un événement d'une liste porte de sa première photo (R2, ADR 0269). */
+export interface Thumbed {
+  photo?: string;
+  photo_source?: string;
+  photo_credit?: string;
+  photo_credit_url?: string;
+  photo_licence?: string;
+}
+
+/**
+ * La vignette d'une ligne de liste : sa première photo, seulement avec son auteur — il se montre sur la ligne, jamais
+ * dans le seul texte alternatif ; sans lui (un regard de Mika, qui n'en garde pas ; un serveur d'avant), aucune
+ * vignette. Une référence qui n'est pas de ce serveur : aucune non plus.
+ */
+export function listThumb(o: Thumbed): Photo | null {
+  const ref = o.photo ?? "";
+  const credit = o.photo_credit?.trim() ?? "";
+  if (!photoUrl(ref) || !credit) return null;
+  return { ref, path: "", source: o.photo_source ?? "", credit, credit_url: o.photo_credit_url ?? "", licence: o.photo_licence?.trim() ?? "",
+    caption: "", width: null, height: null };
+}
+
+/**
+ * Une ligne de liste avec sa vignette : la ligne (un bouton), puis le crédit de sa photo juste dessous — « Photo : Camille
+ * R. · Google Maps », l'auteur lié (un lien ne s'ouvre pas dans un bouton) ; sans vignette, la ligne seule.
+ */
+export function thumbRow(row: string, thumb: Photo | null, mika = false): string {
+  if (!thumb) return row;
+  return `<div class="pl-row${mika ? " by-mika" : ""}">${row}<p class="pl-credit">${photoCredit(thumb)}</p></div>`;
 }
 
 /** Les photos qu'on peut montrer (une référence de ce serveur), dans l'ordre : l'office de tourisme, puis Google. */

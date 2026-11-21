@@ -35,6 +35,7 @@ import fr.qwartz.mika.ui.shell.rememberSessionKey
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
 
 /** Ta dernière position, telle qu'un itinéraire ou un voyage la prend : ses coordonnées et le nom du lieu. */
@@ -118,6 +119,15 @@ class CarteStore(private val graph: AppGraph) : ViewModel() {
             positionSettled = true
         }.also { positionJob = it }
         running.await()
+    }
+
+    // ── Les fiches relues ───────────────────────────────────────────────
+
+    /** Un lieu qu'« Actualiser » vient de relire (l'identifiant de sa fiche, et lui) : Explorer en refait sa ligne. */
+    val refreshed = MutableSharedFlow<Pair<String, Place>>(extraBufferCapacity = 8)
+
+    fun placeRefreshed(id: String, place: Place) {
+        refreshed.tryEmit(id to place)
     }
 
     // ── Ses regards ─────────────────────────────────────────────────────

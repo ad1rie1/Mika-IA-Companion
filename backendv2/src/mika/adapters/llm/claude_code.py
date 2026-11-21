@@ -42,7 +42,8 @@ boucle d'outils de l'épisode (même ``call_id`` d'un tour à l'autre) :
   le délai d'outil de la CLI (``MCP_TOOL_TIMEOUT``) pour qu'elle ne continue
   jamais seule sur un outil abandonné ;
 - les séquences d'arrêt (``LLMRequest.stop_sequences``) sont ignorées : la CLI n'en a pas, elle écrit jusqu'au
-  bout et l'appelant coupe lui-même ce qu'il garde ;
+  bout et l'appelant coupe lui-même ce qu'il garde ; de même le schéma de sortie (``output_schema``) : la réponse se
+  relit en texte ;
 - **une boucle d'outils ne se reprend pas** : une requête qui porte déjà des
   échanges d'outils sans session vivante (un redémarrage, une bascule de
   fournisseur) est refusée — aplatie en un message, la CLI referait les outils ;
@@ -92,12 +93,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from mika.adapters.llm.claude import AUTHS, checked_effort
+from mika.adapters.llm.claude import AUTHS
 from mika.adapters.llm.openai_compat import volatile_system
 from mika.adapters.mcp.protocol import Outcome, Tool
 from mika.adapters.mcp.relay import Pending, Relay, RelaySession
 from mika.kernel.prompt import CONTEXT_FOOTER, CONTEXT_HEADER
-from mika.ports.llm import Held, LLMRequest, LLMResponse, Message, ToolCall, Usage
+from mika.ports.llm import Held, LLMRequest, LLMResponse, Message, ToolCall, Usage, checked_effort
 from mika.vocab.phrasebook import phrase
 
 log = logging.getLogger("mika.llm.claude_code")
@@ -298,7 +299,8 @@ class ClaudeCodeBackend:
     ) -> None:
         if auth not in AUTHS:
             raise ValueError(f"mode d'authentification inconnu : {auth!r} (attendu : {' ou '.join(AUTHS)})")
-        #: l'effort de réflexion passé à la CLI (``--effort``, ``claude.EFFORTS``) ; vide : son défaut
+        #: l'effort de réflexion passé à la CLI (``--effort``, ``ports.llm.EFFORTS``) quand l'appel n'en demande pas
+        #: (``LLMRequest.effort``, ADR 0285) ; vide : son défaut
         self.effort = checked_effort(effort)
         self.name = name
         self.model = model
@@ -345,8 +347,11 @@ class ClaudeCodeBackend:
                      "--allowedTools", ",".join(f"mcp__{s}__*" for s in SERVERS.values())]
         if self.model:
             args += ["--model", self.model]
-        if self.effort:
-            args += ["--effort", self.effort]
+        # l'effort de cet appel (l'appelant, ou le réglage de son rôle), sinon celui de la fiche (ADR 0285) : la CLI
+        # le lit à son lancement, une boucle d'outils garde donc celui de son premier tour
+        effort = req.effort or self.effort
+        if effort:
+            args += ["--effort", effort]
         return args
 
     def output_tokens(self, req: LLMRequest) -> int:

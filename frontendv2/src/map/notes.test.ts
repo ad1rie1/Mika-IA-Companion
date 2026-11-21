@@ -89,6 +89,18 @@ describe("la carte miniature", () => {
     expect(m.scene.lines[0].straight).toBe(true);
   });
 
+  it("un regard d'événements : ses épingles, combien elle en a trouvé, et il s'ouvre dans Événements (R2-W01)", () => {
+    const ev: Regard = { kind: "look", title: "Ce week-end", what: "evenements", places: [], route: null, trip: "", at: 1,
+      events: [{ id: "e:450c81b3-6ffa-3d4e-9c1b-2a7f0e5d8c41", name: "Éclats du rire !", lat: 50.63, lon: 3.07 },
+        { id: "e:9a03e72c-35c0-3b1d-8e4f-6a2b0c1d3e5f", name: "Fiat lux !", lat: null, lon: null }] };
+    const m = regardMini("840", ev);
+    expect(m.href).toBe("#carte/evenements/regard-840");
+    expect(m.sub).toBe("Mika a cherché · 2 événements");
+    expect(m.scene.pins).toHaveLength(1); // sans coordonnées : pas d'épingle
+    expect(m.scene.pins[0].mika).toBe(true);
+    expect(regardMini("841", { ...ev, events: ev.events!.slice(0, 1) }).sub).toBe("Mika a cherché · 1 événement");
+  });
+
   it("le balisage : un lien vers l'écran Carte, son plan dessiné, tout texte échappé, la mention sans lien", () => {
     const html = miniCard(slotKey("812", { kind: "trip", ref: "640" }), tripMini(TRIP), "© OpenStreetMap");
     expect(html).toContain('href="#carte/voyages/640"');

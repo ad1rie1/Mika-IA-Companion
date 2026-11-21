@@ -14,15 +14,19 @@ from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
 from mika.plugins.teams import BUNDLE, RECEIVED, TEAMS, TeamsParams, TeamsState, her, owner_of, params_of
-from mika.ports.llm import LLMRequest, Message
-from mika.ports.preprocess import inert
+from mika.ports.llm import LLMRequest, Message, json_object
+from mika.ports.preprocess import cite, inert
 from mika.vocab.access import SELF
-from mika.vocab.affect import Emotion, named_feeling
+from mika.vocab.affect import Emotion, felt_schema, named_feeling
 from mika.vocab.canals import CanalRule, teams_rule
 from mika.vocab.phrasebook import family, phrase
 from mika.vocab.privacy import Sensitivity
 
 _JSON = re.compile(r"\{.*\}", re.S)
+#: la forme de la réponse du tri, que le fournisseur garantit quand il le sait (ADR 0267) — celle que dit sa consigne
+#: (``teams.triage.system``) ; ``read_triage`` relit toujours du texte
+TRIAGE_SCHEMA = json_object(importance={"type": "number"}, resume={"type": "string"}, question={"type": "boolean"},
+                            aide={"type": "boolean"}, **felt_schema())
 #: les conversations où un message s'adresse à la personne même sans la mentionner
 ADDRESSED = frozenset({"dm", "group"})
 #: le fil qu'on montre au tri, au plus (les derniers messages avant celui-ci)
@@ -154,9 +158,12 @@ class Triage:
                                 text=inert(x.text, 300)) for x in before[-CONTEXT:]]
                 body = "\n".join([phrase("teams.triage.place", place=place),
                                   *([phrase("teams.triage.before"), *lines] if lines else []),
-                                  phrase("teams.triage.message", who=inert(m.author, 80), text=m.text[:3000])])
+                                  # ce qu'un message dit vient d'ailleurs : cité, comme le fil au-dessus est
+                                  # rendu inerte (ADR 0198, 0266)
+                                  phrase("teams.triage.message", who=inert(m.author, 80), text=cite(m.text, 3000))])
                 req = LLMRequest(role="triage", call_id=f"{ctx.run_id}#{m.ref}", system_stable=system,
-                                 messages=(Message("user", body),), max_tokens=200, lane="background", priority=3)
+                                 messages=(Message("user", body),), max_tokens=200, lane="background", priority=3,
+                                 output_schema=TRIAGE_SCHEMA)
                 resp = await ctx.ask(req)  # un tri raté n'empêche pas de remarquer le message
                 triage = read_triage(resp.text, guess) if resp is not None else guess
             summary = phrase("teams.noticed.line", who=inert(m.author, 80) or phrase("teams.noticed.someone"),

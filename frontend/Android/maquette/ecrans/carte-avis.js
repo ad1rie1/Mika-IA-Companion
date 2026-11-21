@@ -1,10 +1,12 @@
-/* Carte : la fiche d'un lieu et les événements autour (proposés le 2026-11-17, à valider). Trois sources, chacune
-   nommée là où elle parle :
+/* Carte : la fiche d'un lieu et les événements autour (proposés le 2026-11-17 ; Google Maps à la place de Tripadvisor
+   depuis le 2026-11-20, ADR 0256). Trois sources, chacune nommée là où elle parle :
    - OpenStreetMap complet (l'extrait France de Geofabrik) : cuisine, horaires, téléphone, site, terrasse, végétarien,
      accessibilité, étoiles… dans l'index local, rien ne sort ;
-   - Tripadvisor : la note, le classement, les avis, chargés autour de toi et gardés un temps sur le serveur ;
+   - Google Maps (l'API Google Places) : la note, le nombre d'avis, le prix et sa fourchette, le résumé, les avis avec
+     leur auteur, chargés autour de toi et gardés un temps sur le serveur ; ni répartition ni sous-notes (Google n'en
+     donne pas) ;
    - DATAtourisme (les offices de tourisme) : la description, les labels, les tarifs, et les événements, dans une base
-     locale remise à jour chaque nuit.
+     locale remise à jour chaque soir.
    Mika lit les mêmes données par ses outils ; ce qu'elle en tire est rose. */
 (function () {
   const { h, ico } = A;
@@ -12,16 +14,17 @@
   const { V } = K;
 
   // ── Les restaurants (inventés, dans le Vieux-Lille) ──────────────────
-  const AV = (note, titre, texte, qui, quand, type) => ({ note, titre, texte, qui, quand, type });
+  const AV = (note, texte, qui, quand) => ({ note, texte, qui, quand });
   const RESTOS = [
     { id: 'atelier', nom: 'La Table de la Treille', sorte: 'Estaminet', cuisine: 'Flamande', ville: 'Lille', at: [3.0628, 50.6408], dist: '0,4 km',
       ouvert: 'Ouvert · ferme à 22:30', prix: '€€–€€€',
-      ta: { note: 4.5, nb: '1 284', rang: 'n° 23 sur 1 412 restaurants à Lille', prime: 'Travellers\' Choice 2026', maj: 'il y a 3 jours',
-        repart: [912, 250, 80, 25, 17], sous: [['Cuisine', 4.5], ['Service', 4], ['Rapport qualité-prix', 4], ['Ambiance', 4.5]],
+      g: { note: 4.5, nb: '1 284', prix: '€€', fourchette: '20–40 €', maj: 'aujourd\'hui à 07:12',
+        resume: 'Estaminet au pied de la Treille : carbonade, potjevleesch et welsh, avec les bières de la métropole.',
+        ajoute: [['Réservation', 'oui (selon Google)']],
         avis: [
-          AV(5, 'Le meilleur welsh de la ville', 'Accueil chaleureux, welsh généreux et carbonade fondante, pain de la boulangerie d\'à côté. On a réservé la veille pour une table en terrasse, rue de la Monnaie.', 'Camille L.', 'oct. 2026', 'en couple'),
-          AV(4, 'Très bon, mais long un samedi soir', 'Potjevleesch excellent. Il a fallu attendre 40 minutes entre l\'entrée et le plat : la salle était pleine. En semaine, sans doute parfait.', 'Thomas B.', 'oct. 2026', 'entre amis'),
-          AV(3, 'Correct sans plus', 'Bons produits mais un peu cher pour ce que c\'est, et la terrasse est bruyante côté rue.', 'Inès R.', 'sept. 2026', 'en famille'),
+          AV(5, 'Accueil chaleureux, welsh généreux et carbonade fondante, pain de la boulangerie d\'à côté. On a réservé la veille pour une table en terrasse, rue de la Monnaie.', 'Camille L.', 'il y a 2 semaines'),
+          AV(4, 'Potjevleesch excellent. Il a fallu attendre 40 minutes entre l\'entrée et le plat : la salle était pleine. En semaine, sans doute parfait.', 'Thomas B.', 'il y a un mois'),
+          AV(3, 'Bons produits mais un peu cher pour ce que c\'est, et la terrasse est bruyante côté rue.', 'Inès R.', 'il y a 2 mois'),
         ] },
       osm: [['Cuisine', 'flamande, régionale'], ['Horaires', 'mar.–sam. 12:00–14:00, 19:00–22:30 · dim. 12:00–14:30 · lun. fermé'],
         ['Téléphone', '03 20 00 00 00'], ['Site', 'table-treille.exemple'], ['Terrasse', 'oui'], ['Végétarien', 'quelques plats'], ['Vegan', 'non renseigné'],
@@ -29,16 +32,16 @@
       dt: { desc: 'Au pied de la cathédrale de la Treille, un estaminet où l\'on sert carbonade, potjevleesch et welsh, avec les bières des brasseries de la métropole et les fromages des Flandres.',
         labels: ['Maître Restaurateur', 'Qualité Tourisme'], tarifs: 'menu du midi 19 € · carte de 24 à 40 €', par: 'Un office de tourisme (texte inventé)' },
       mika: 'les avis récents parlent d\'attente le samedi soir. un mardi, c\'est parfait, et demande la terrasse côté rue de la Monnaie',
-      photos: [{ de: 'ot', credit: 'Office de tourisme (exemple)', legende: 'La terrasse, rue de la Monnaie', teinte: 30 }, { de: 'ta', credit: 'Camille L.', legende: 'Le welsh', teinte: 45 },
-        { de: 'ta', credit: 'Thomas B.', legende: 'La salle, un samedi soir', teinte: 15 }, { de: 'ot', credit: 'Office de tourisme (exemple)', legende: 'La façade', teinte: 210 }] },
+      photos: [{ de: 'ot', credit: 'Office de tourisme (exemple)', licence: 'CC BY-NC-ND 4.0', legende: 'La terrasse, rue de la Monnaie', teinte: 30 }, { de: 'g', credit: 'Camille L.', legende: 'Le welsh', teinte: 45 },
+        { de: 'g', credit: 'Thomas B.', legende: 'La salle, un samedi soir', teinte: 15 }, { de: 'ot', credit: 'Office de tourisme (exemple)', licence: 'CC BY-NC-ND 4.0', legende: 'La façade', teinte: 210 }] },
     { id: 'gabbiano', nom: 'Pizzeria Il Gabbiano', sorte: 'Pizzeria', cuisine: 'Italienne', ville: 'Lille', at: [3.0590, 50.6345], dist: '0,4 km',
-      ouvert: 'Ouvert · ferme à 23:00', prix: '€€', ta: { note: 4, nb: '612' }, terrasse: true, vege: true, photos: [{ de: 'ta', credit: 'Léa M.', teinte: 5 }] },
+      ouvert: 'Ouvert · ferme à 23:00', prix: '€€', g: { note: 4, nb: '612' }, terrasse: true, vege: true, photos: [{ de: 'g', credit: 'Léa M.', teinte: 5 }] },
     { id: 'margaux', nom: 'Chez Margaux', sorte: 'Bistrot', cuisine: 'Française', ville: 'Lille', at: [3.0705, 50.6390], dist: '0,6 km',
-      ouvert: 'Ouvre à 19:00', prix: '€€', ta: { note: 4.5, nb: '388' }, vege: true, mika: true, photos: [{ de: 'ot', credit: 'Office de tourisme (exemple)', teinte: 330 }] },
+      ouvert: 'Ouvre à 19:00', prix: '€€', g: { note: 4.5, nb: '388' }, vege: true, mika: true, photos: [{ de: 'ot', credit: 'Office de tourisme (exemple)', teinte: 330 }] },
     { id: 'remparts', nom: 'Café des Remparts', sorte: 'Café', cuisine: 'Brunch', ville: 'Lille', at: [3.0560, 50.6430], dist: '0,8 km',
-      ouvert: 'Fermé · ouvre demain 08:00', prix: '€', ta: { note: 3.5, nb: '95' }, terrasse: true },
+      ouvert: 'Fermé · ouvre demain 08:00', prix: '€', g: { note: 3.5, nb: '95' }, terrasse: true },
     { id: 'reblochon', nom: 'Le Petit Maroilles', sorte: 'Restaurant', cuisine: 'Flamande', ville: 'Lambersart', at: [3.0310, 50.6500], dist: '2,6 km',
-      ouvert: 'Ouvert · ferme à 21:30', prix: '€€', ta: null, terrasse: true },
+      ouvert: 'Ouvert · ferme à 21:30', prix: '€€', g: { introuvable: 'Rien trouvé sur Google sous ce nom à moins de 100 m (cherché le 20 novembre).', maj: 'aujourd\'hui à 07:12' }, terrasse: true },
   ];
   // Vrais événements autour de Lille, la semaine du 17 novembre 2026, tirés de l'API DATAtourisme (Licence Ouverte) :
   // le texte et les tarifs sont ceux des offices ; seul ce que Mika en dit est inventé.
@@ -84,17 +87,18 @@
   const VILLES_NORD = [{ k: [3.063, 50.637], nom: 'Lille' }, { k: [3.174, 50.692], nom: 'Roubaix' }, { k: [3.161, 50.724], nom: 'Tourcoing' }, { k: [3.131, 50.623], nom: 'Villeneuve-d\'Ascq' }];
 
   // ── Le dessin ─────────────────────────────────────────────────────────
-  /** Les bulles de Tripadvisor (la vraie app affiche l'image qu'ils fournissent, rating_image_url). */
-  const bulles = (n, cls) => `<span class="bulles${cls ? ' ' + cls : ''}" role="img" aria-label="${String(n).replace('.', ',')} sur 5">${[1, 2, 3, 4, 5].map((i) => `<i class="${n >= i ? 'on' : n >= i - 0.5 ? 'half' : ''}"></i>`).join('')}</span>`;
+  /** Les étoiles d'une note Google (pleines, à moitié, vides : une moitié dès 0,25, pleine dès 0,75). */
+  const etoiles = (n, cls) => `<span class="etoiles${cls ? ' ' + cls : ''}" role="img" aria-label="${String(n).replace('.', ',')} sur 5">${[1, 2, 3, 4, 5].map((i) => `<i class="${n >= i - 0.25 ? 'on' : n >= i - 0.75 ? 'half' : ''}"></i>`).join('')}</span>`;
   const note = (n) => String(n).replace('.', ',');
   const ouvertTag = (o) => `<span class="tag ${/^Ouvert/.test(o) ? 'ok' : /^Fermé/.test(o) ? 'danger' : 'warn'}">${h(o)}</span>`;
   const source = (txt) => `<p class="src-line">${txt}</p>`;
 
   // ── Les photos ────────────────────────────────────────────────────────
-  // Une photo : { src (l'adresse que le serveur relaie ; vide : un aplat de la maquette), de ('ta' Tripadvisor,
-  // 'ot' l'office de tourisme), credit, legende, teinte }. Le téléphone ne joint jamais Tripadvisor ni le site d'un
-  // office : le serveur va chercher l'image, la garde un temps, et la sert (comme les tuiles et les images d'un mail).
-  const PH_DE = { ta: 'Tripadvisor', ot: 'Office de tourisme' };
+  // Une photo : { src (l'adresse que le serveur relaie ; vide : un aplat de la maquette), de ('g' Google Maps,
+  // 'ot' l'office de tourisme), credit (son auteur, lié à sa page), licence, legende, teinte }. Le téléphone ne joint
+  // jamais Google ni le site d'un office : le serveur va chercher l'image, la garde un temps, et la sert (comme les
+  // tuiles et les images d'un mail).
+  const PH_DE = { g: 'Google Maps', ot: 'Office de tourisme' };
   const PHOTOS = {};
   let nPh = 0;
   function photo(p, cls, attrs) {
@@ -102,7 +106,7 @@
     PHOTOS[id] = p;
     const fond = p.src ? `<img src="${h(p.src)}" alt="${h(p.legende || '')}" loading="lazy" referrerpolicy="no-referrer">`
       : `<span class="ph-fake" style="--t:${p.teinte || 200}">${ico('image')}</span>`;
-    return `<button type="button" class="ph${cls ? ' ' + cls : ''}" data-sheet="photo" data-ph="${id}" ${attrs || ''}>${fond}<span class="ph-src ${p.de}">${h(PH_DE[p.de])}</span>${p.credit ? `<span class="ph-credit">© ${h(p.credit)}</span>` : ''}</button>`;
+    return `<button type="button" class="ph${cls ? ' ' + cls : ''}" data-sheet="photo" data-ph="${id}" ${attrs || ''}>${fond}<span class="ph-src ${p.de}">${h(PH_DE[p.de])}</span>${p.credit ? `<span class="ph-credit">${h(p.credit)}</span>` : ''}</button>`;
   }
   /** La bande du haut d'une fiche : le plan d'abord, puis les photos ; sans photo, le plan seul. */
   const bande = (map, photos) => photos && photos.length
@@ -115,7 +119,7 @@
   A.sheets.photo = (b) => {
     const p = PHOTOS[b.dataset.ph] || {};
     A.sheet(PH_DE[p.de] || 'Photo', `<div class="ph-full">${p.src ? `<img src="${h(p.src)}" alt="${h(p.legende || '')}" referrerpolicy="no-referrer">` : `<span class="ph-fake" style="--t:${p.teinte || 200}">${ico('image')}</span>`}</div>
-      <div class="pad" style="padding-bottom:16px">${p.legende ? `<p style="margin-bottom:4px">${h(p.legende)}</p>` : ''}<small class="muted">${p.credit ? '© ' + h(p.credit) + ' · ' : ''}${p.de === 'ta' ? 'une photo publiée sur Tripadvisor, gardée sur ce serveur le temps du cache' : 'une photo de l\'office de tourisme, par DATAtourisme : son crédit s\'affiche toujours'}</small></div>`);
+      <div class="pad" style="padding-bottom:16px">${p.legende ? `<p style="margin-bottom:4px">${h(p.legende)}</p>` : ''}<small class="muted">${p.credit ? 'Photo : <a href="#" data-snack="Sa page s\'ouvre dans le navigateur">' + h(p.credit) + '</a> · ' : ''}${p.licence ? h(p.licence) + ' · ' : ''}${p.de === 'g' ? 'publiée sur Google Maps, gardée sur ce serveur le temps du cache' : 'de l\'office de tourisme, par DATAtourisme : son crédit et sa licence s\'affichent toujours'}</small></div>`);
   };
 
   // ── Manger, avec les notes ────────────────────────────────────────────
@@ -124,7 +128,7 @@
     const map = K.carte({ vue, largeur: 384, slice: true, titre: 'Restaurants à Lille', ici: [3.063, 50.637], villes: [{ k: [3.045, 50.628], nom: 'Lille' }],
       pins: RESTOS.map((r) => ({ at: r.at, mika: r.mika, go: `#carte/fiche/${r.id}` })) });
     const ligne = (r) => `<button class="li" type="button" data-go="#carte/fiche/${r.id}">${tete(r, 'pin')}
-      <span class="txt"><b>${h(r.nom)}</b><small>${r.ta ? `<span class="ta-mini">${bulles(r.ta.note, 'xs')} ${note(r.ta.note)} <span class="muted">(${h(r.ta.nb)})</span></span> · ` : '<span class="muted">pas sur Tripadvisor</span> · '}${h(r.cuisine)} · ${h(r.prix)}</small>
+      <span class="txt"><b>${h(r.nom)}</b><small>${r.g && r.g.note ? `<span class="g-mini">${etoiles(r.g.note, 'xs')} ${note(r.g.note)} <span class="muted">(${h(r.g.nb)})</span></span> · ` : '<span class="muted">pas sur Google Maps</span> · '}${h(r.prix)} · ${h(r.cuisine)}</small>
       <small class="${/^Ouvert/.test(r.ouvert) ? 'ok-txt' : 'muted'}">${h(r.ouvert)}${r.mika ? ' · <span class="mk-txt">Mika te le conseille</span>' : ''}</small></span><span class="trail">${h(r.dist)}</span></button>`;
     return {
       nav: 'carte', racine: true,
@@ -137,14 +141,14 @@
             ${A.chips([{ l: 'Ouvert maintenant', ico: 'clock' }, { l: 'Terrasse' }, { l: 'Végétarien' }, { l: '4 et plus', ico: 'star' }, { l: '€' }, { l: 'Accessible' }])}
             <div class="row" style="padding:0 16px 4px"><span class="grow"><b style="font-weight:500">5 restaurants</b> <span class="muted">· autour de toi</span></span><button class="btn text sm" type="button" data-snack="Trié par note, puis par distance">${ico('sort', 'xs')}Note</button></div>
             ${RESTOS.map(ligne).join('')}
-            ${source(`${ico('info', 'xs')}Notes Tripadvisor, chargées autour de toi il y a 3 jours. Le reste vient d'OpenStreetMap, dans l'index de ce serveur.`)}
+            ${source(`${ico('info', 'xs')}Notes Google Maps lues aujourd'hui à 07:12, autour de toi. Le reste vient d'OpenStreetMap, dans l'index de ce serveur.`)}
           </div></div>
         </div>`,
       notes: {
         titre: 'Carte · Manger, avec les notes',
-        reprend: ['Chaque ligne : la note et le nombre d\'avis Tripadvisor, la cuisine et les prix, ouvert ou fermé (les horaires d\'OpenStreetMap), la distance.',
-          'Des filtres sous la recherche : ouvert maintenant, terrasse, végétarien, 4 et plus, petits prix, accessible. Tous se jugent sur le serveur, sauf la note qui vient du cache Tripadvisor.',
-          'Un lieu absent de Tripadvisor le dit ; il reste dans la liste.'],
+        reprend: ['Chaque ligne : la note et le nombre d\'avis Google Maps, les prix et la cuisine, ouvert ou fermé (les horaires d\'OpenStreetMap), la distance.',
+          'Des filtres sous la recherche : ouvert maintenant, terrasse, végétarien, vegan, accessible, 4 et plus, la cuisine. Tous se jugent sur le serveur ; la note vient du cache de Google.',
+          'Un lieu absent de Google Maps le dit ; il reste dans la liste.'],
         trancher: ['Trier par note d\'office pour « Manger », ou garder la distance comme partout ailleurs ?'],
       },
     };
@@ -153,22 +157,24 @@
   // ── La fiche d'un lieu ────────────────────────────────────────────────
   function vueFiche(id) {
     const r = RESTOS.find((x) => x.id === id) || RESTOS[0];
-    const t = r.ta;
+    const g = r.g;
     const map = K.carte({ vue: K.boite([[r.at[0] - 0.02, r.at[1] - 0.01], [r.at[0] + 0.02, r.at[1] + 0.01]], 0.02, 150 / 160), largeur: 150, slice: true,
       ici: [3.063, 50.637], pins: [{ at: r.at, sel: true, mika: r.mika }] });
-    const total = t && t.repart ? t.repart.reduce((a, b) => a + b, 0) : 0;
-    const repart = t && t.repart ? `<div class="ta-repart">${['Excellent', 'Très bon', 'Moyen', 'Médiocre', 'Horrible'].map((l, i) => `<span>${l}</span><i style="--p:${Math.round(t.repart[i] / total * 100)}%"></i><span class="num">${t.repart[i]}</span>`).join('')}</div>` : '';
-    const sous = t && t.sous ? `<div class="ta-sous">${t.sous.map(([l, n]) => `<span>${h(l)}</span>${bulles(n, 'xs')}`).join('')}</div>` : '';
-    const avis = t && t.avis ? t.avis.map((a) => `<div class="ta-avis">${bulles(a.note, 'xs')}<b>${h(a.titre)}</b><p>${h(a.texte)}</p><small>${h(a.qui)} · ${h(a.type)} · ${h(a.quand)}</small></div>`).join('') : '';
-    const blocTA = t ? `<section class="card out fiche-ta">
-        <div class="row"><span class="ta-logo">Tripadvisor</span><span class="grow"></span>${t.prime ? `<span class="tag pc">${ico('star', 'xs')}${h(t.prime)}</span>` : ''}</div>
-        <div class="ta-head">${bulles(t.note)}<b>${note(t.note)}</b><span class="muted">${h(t.nb)} avis</span></div>
-        ${t.rang ? `<small class="muted">${h(t.rang)}</small>` : ''}
-        ${repart}${sous}
+    // chaque avis montre son auteur (lié à sa page chez Google) et sa date, toujours
+    const avis = g && g.avis ? g.avis.map((a) => `<div class="g-avis"><div class="g-avis-tete">${etoiles(a.note, 'xs')}<a href="#" data-snack="Sa page Google Maps s'ouvre dans le navigateur">${h(a.qui)}</a><span class="muted">· ${h(a.quand)}</span></div><p>${h(a.texte)}</p></div>`).join('') : '';
+    const pied = g ? `<div class="g-foot">${ico('history', 'xs')}<span class="grow">Lu ${h(g.maj || 'aujourd\'hui')} · gardé sur ce serveur</span><button class="btn tonal sm" type="button" data-snack="Note et avis relus chez Google">${ico('refresh', 'sm')}Actualiser</button></div>` : '';
+    const blocG = g && !g.introuvable ? `<section class="card out fiche-g">
+        <div class="row"><span class="g-logo">Google Maps</span><span class="grow"></span><button class="btn text sm" type="button" data-snack="La page du lieu s'ouvre sur Google Maps, dans le navigateur">${ico('external', 'sm')}Voir sur Google Maps</button></div>
+        <div class="g-head"><b>${note(g.note)}</b>${etoiles(g.note)}<span class="muted">${h(g.nb)} avis</span></div>
+        ${g.prix ? `<div class="row wrap" style="gap:6px"><span class="tag">${h(g.prix)}${g.fourchette ? ' · ' + h(g.fourchette) : ''}</span></div>` : ''}
+        ${g.resume ? `<p class="g-resume">${h(g.resume)}</p>` : ''}
+        ${g.ajoute ? `<div class="kv">${g.ajoute.map(([k, v]) => `<span>${h(k)}</span><b>${h(v)}</b>`).join('')}</div>` : ''}
         ${avis ? `<div class="list-head" style="padding:14px 0 4px">Les avis les plus récents</div>${avis}` : ''}
-        <div class="btns" style="margin-top:10px"><button class="btn text sm" type="button" data-snack="La page du lieu s'ouvre sur Tripadvisor">${ico('external', 'sm')}Tous les avis sur Tripadvisor</button></div>
-        <div class="ta-foot">${ico('history', 'xs')}<span class="grow">Mis à jour ${h(t.maj || 'il y a 3 jours')} · gardé sur ce serveur</span><button class="btn tonal sm" type="button" data-snack="Note et avis rechargés depuis Tripadvisor">${ico('refresh', 'sm')}Actualiser</button></div>
-      </section>` : `<section class="note box">${ico('info', 'sm')}<span>Ce lieu n'est pas sur Tripadvisor, ou pas encore rapproché : rien n'a été trouvé sous ce nom à moins de 150 m.</span></section>`;
+        ${pied}
+      </section>` : g ? `<section class="card out fiche-g">
+        <div class="row"><span class="g-logo">Google Maps</span></div>
+        <p class="g-resume">${h(g.introuvable)}</p>${pied}
+      </section>` : `<section class="note box">${ico('info', 'sm')}<span>Pas de note ni d'avis Google Maps pour ce lieu.</span></section>`;
     const blocOSM = r.osm ? `<section class="fiche-sec"><div class="list-head">Infos pratiques</div>
         <div class="kv pad">${r.osm.map(([k, v]) => `<span>${h(k)}</span><b>${h(v)}</b>`).join('')}</div>
         ${source('OpenStreetMap, extrait du 12 novembre · index de ce serveur, rien ne sort · <a href="#" data-snack="La page du lieu s\'ouvre sur openstreetmap.org">corriger</a>')}</section>` : '';
@@ -183,24 +189,24 @@
       html: `${A.top({ title: h(r.nom), sub: `${h(r.sorte)} · ${h(r.ville)} · ${h(r.dist)}`, small: true, back: true, actions: [A.act('sparkle', 'Demander à Mika', 'data-go="#chat" data-snack="Le chat s\'ouvre avec ce lieu sous ses yeux"', 'mk'), A.act('share', 'Partager', 'data-snack="Lien partagé"')] })}
         <div class="body">
           ${bande(map, r.photos)}
-          <div class="pad" style="padding-top:12px"><div class="row wrap" style="gap:6px">${ouvertTag(r.ouvert)}<span class="tag">${h(r.cuisine)}</span><span class="tag">${h(r.prix)}</span>${t ? `<span class="tag">${bulles(t.note, 'xs')}${note(t.note)}</span>` : ''}</div>
+          <div class="pad" style="padding-top:12px"><div class="row wrap" style="gap:6px">${ouvertTag(r.ouvert)}<span class="tag">${h(r.cuisine)}</span><span class="tag">${h(r.prix)}</span>${g && g.note ? `<span class="tag">${etoiles(g.note, 'xs')}${note(g.note)}</span>` : ''}</div>
             <div class="btns three" style="margin-top:12px"><button class="btn filled" type="button" data-go="#carte/itineraire">${ico('route')}Itinéraire</button><button class="btn tonal" type="button" data-sheet="ajouter-voyage">${ico('plus')}Au voyage</button><button class="btn outlined" type="button" data-snack="Appel du 04 50 00 00 00">${ico('phone')}Appeler</button></div>
             ${r.mika ? `<div class="mika-said">${ico('sparkle')}<span>${h(r.mika)}<small class="mk-src">Mika a lu les 5 derniers avis et les horaires</small></span></div>` : ''}</div>
-          <div class="pad" style="margin-top:14px">${blocTA}</div>
+          <div class="pad" style="margin-top:14px">${blocG}</div>
           ${blocOSM}${blocDT}
           <section class="fiche-sec"><div class="list-head">Bientôt, tout près</div>${proches}</section>
           <div style="height:24px"></div>
         </div>`,
       notes: {
         titre: 'Carte · la fiche d\'un lieu',
-        reprend: ['La bande du haut : le plan, puis les photos (office de tourisme, Tripadvisor), chacune avec sa source et son crédit ; touchée, une photo s\'ouvre en grand. Sans photo, le plan seul.',
-          'En haut : ouvert ou fermé, la cuisine, les prix, la note ; Itinéraire, Au voyage, Appeler.',
+        reprend: ['La bande du haut : le plan, puis les photos (office de tourisme, Google Maps), chacune avec sa source et son crédit (son auteur, lié) ; touchée, une photo s\'ouvre en grand (légende, auteur, licence). Sans photo, le plan seul.',
+          'En haut : ouvert ou fermé, la cuisine, les prix, la note ; Itinéraire, Au voyage, Appeler (et dans l\'app : Site, En parler à Mika).',
           'Ce que Mika en pense, en rose, quand elle l\'a lu (elle lit la même fiche par son outil).',
-          'Tripadvisor : la note, le classement, la répartition, les sous-notes, les avis récents ; « Actualiser » recharge tout de suite. Leur logo et le lien vers leur page sont obligatoires.',
+          'Google Maps : la note, le nombre d\'avis, le prix et sa fourchette, le résumé, ce que Google ajoute à OpenStreetMap, les avis récents (cinq au plus), chacun avec son auteur (lié à sa page) et sa date ; « Voir sur Google Maps », la date du cache et « Actualiser ». Ni répartition ni sous-notes : Google n\'en donne pas.',
+          'Un lieu que Google n\'a pas le dit dans le bloc (« Rien trouvé sur Google sous ce nom à moins de 100 m ») ; sans clé et sans cache, une note le dit.',
           'Infos pratiques (OpenStreetMap), puis ce qu\'en dit l\'office de tourisme (DATAtourisme), puis les événements tout près. Chaque bloc nomme sa source.'],
         trancher: ['L\'ordre des blocs : la note et les avis d\'abord (comme ici), ou les infos pratiques d\'abord ?',
-          'Combien d\'avis montrer : les 3 plus récents (comme ici), ou les 5 que Tripadvisor donne ?',
-          'Les photos Tripadvisor coûtent un appel de plus par lieu : les charger avec le reste, ou seulement quand tu ouvres la fiche ?'],
+          'Les photos Google coûtent un appel compté la première fois : l\'app ne charge que celles qu\'elle montre (la bande, en défilant). Suffisant ?'],
       },
     };
   }
@@ -263,6 +269,6 @@
   }
 
   Object.assign(A.carteVues, { manger: vueManger, fiche: vueFiche, evenements: vueEvenements, evenement: vueEvenement });
-  A.index('Carte · avis et événements', [['Manger, avec les notes', '#carte/manger'], ['La fiche d\'un lieu', '#carte/fiche/atelier'], ['Un lieu sans Tripadvisor', '#carte/fiche/reblochon'],
+  A.index('Carte · avis et événements', [['Manger, avec les notes', '#carte/manger'], ['La fiche d\'un lieu', '#carte/fiche/atelier'], ['Un lieu sans Google Maps', '#carte/fiche/reblochon'],
     ['Événements', '#carte/evenements'], ['Un événement', '#carte/evenement/quatuor']]);
 })();

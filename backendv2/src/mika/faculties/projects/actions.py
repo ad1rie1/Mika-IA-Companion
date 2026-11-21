@@ -29,7 +29,7 @@ from mika.contracts import identity as identity_c
 from mika.contracts import mcp as mcp_c
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
-from mika.faculties.projects import links
+from mika.faculties.projects import asks, links, managing, triggers
 from mika.faculties.projects.faculty import (
     AMENDED,
     APPROVE,
@@ -59,8 +59,10 @@ from mika.faculties.projects.faculty import (
     Project,
     ProjectsState,
     busy,
+    by_pulls,
     check_schedule,
     decision_at,
+    default_flow,
     in_force,
     living,
     nudged,
@@ -70,7 +72,12 @@ from mika.faculties.projects.faculty import (
     outgoing,
     params,
     project_at,
+    subjects_of,
+    writes_pulls,
+    written,
 )
+from mika.faculties.projects.inspect_reviews import REREAD_CHOICES, REREAD_HELP, REREAD_LABEL, REREAD_UNKNOWN
+from mika.faculties.projects.milestones import routine_text
 from mika.faculties.projects.rhythm import pick
 from mika.kernel import schedule
 from mika.kernel.clock import HOUR, MINUTE
@@ -79,9 +86,10 @@ from mika.kernel.forms import UPLOAD_MAX, FormField, Knob, Upload, describe
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard
 from mika.kernel.operate import ActionContext, Done, Refused
-from mika.ports.workshop import OutsideWorkshop, WorkshopFull
+from mika.ports.workshop import BASE_BRANCH, OutsideWorkshop, WorkshopFull
 from mika.vocab.circadian import DAYS_FR
 from mika.vocab.episodes import project_of
+from mika.vocab.phrasebook import family
 from mika.vocab.privacy import Sensitivity
 
 MODE_CHOICES = ((c.PERSONA, "Elle-même : elle y travaille avec son humeur et ses avis"),
@@ -258,6 +266,43 @@ def services_here(frame: Frame) -> dict[str, str]:
     return {b: known[b] for b in sorted(known) if mcp_c.is_service(b)}
 
 
+# ── Ce que le cadre réserve à qui s'occupe d'elle (ADR 0292) ───────────────
+
+#: les champs du cadre d'un projet qui ouvrent autre chose que le projet lui-même, par action : pour qui il est et
+#: l'accord de ce qui sort ; son dépôt distant en entier (son adresse, sa branche, l'envoi automatique, son flux) ; la
+#: publication de ses tickets en issues. Les cases de ses outils se jugent lot par lot (``managing.beyond``)
+RESERVED_FIELDS: Mapping[str, tuple[str, ...]] = {
+    "projects.modifier": ("owner", "approval"),
+    "projects.depot_distant": ("remote", "branch", "auto_push", "flow"),
+    "projects.tickets_regler": ("issues",),
+}
+TOOLS_ACTION = "projects.outils"
+KEEPER_ONLY = ("Ce réglage ouvre autre chose que ce projet (son courrier, sa caméra, ses services, ce qui sort sans "
+               "accord, un dépôt distant) : il est réservé à qui s'occupe d'elle.")
+KEEPER_FIELD = "réservé à qui s'occupe d'elle"
+
+
+def reserved_field(action: str, name: str) -> bool:
+    """Ce champ du cadre d'un projet est-il réservé à qui s'occupe d'elle ? La règle que les actions appliquent, et
+    que l'API de la personne lit pour dire d'avance, champ par champ, ce qu'elle peut changer."""
+    if action == TOOLS_ACTION:
+        return name.startswith(SERVICE_KNOB) or name in {knob_of(b) for b in EXTRA_BUNDLES if managing.beyond(b)}
+    return name in RESERVED_FIELDS.get(action, ())
+
+
+def keeper_acts(frame: Frame, ctx: ActionContext) -> bool:
+    """La personne qui agit s'occupe-t-elle d'elle ?"""
+    return managing.keeps(frame, operator_person(frame, ctx))
+
+
+def _held(frame: Frame, ctx: ActionContext, action: str, changed: Iterable[str]) -> None:
+    """Refuse le geste si l'un des champs qu'il change est réservé à qui s'occupe d'elle et que la personne qui
+    agit ne l'est pas — depuis la console comme depuis son espace : la garde est ici, pas dans une route."""
+    held = [name for name in changed if reserved_field(action, name)]
+    if held and not keeper_acts(frame, ctx):
+        raise Refused(KEEPER_ONLY, {name: KEEPER_FIELD for name in held})
+
+
 def _ticked(args: Any, knob: str) -> bool:
     """Une case cochée, que les arguments viennent d'un modèle ou d'un formulaire à champs dynamiques."""
     return bool(args.get(knob, False) if isinstance(args, Mapping) else getattr(args, knob, False))
@@ -364,6 +409,9 @@ class CreateArgs(BaseModel):
                                    advanced=False, order=80,
                                    help="Une commande avec le réseau, un envoi au dépôt distant : rien ne part sans "
                                         "ton accord. Dans son atelier, elle travaille librement.")] = True
+    # la relecture indépendante (ADR 0276) : ses mots sont dans ``inspect_reviews.py``
+    reread: Annotated[str, Knob(label=REREAD_LABEL, choices=REREAD_CHOICES, group="Sa liberté", advanced=False,
+                                order=81, help=REREAD_HELP)] = c.REREAD_OUT
     remote: Annotated[str, Knob(label="Dépôt distant", group="Son dépôt distant", advanced=False, order=90,
                                 help="Facultatif : une adresse https (https://github.com/compte/depot.git). Le jeton "
                                      "se règle dans Connexions › Dépôts Git.")
@@ -412,7 +460,9 @@ def _create(s: ProjectsState, frame: Frame, args: CreateArgs, ctx: ActionContext
         address=ctx.by if owner == me and ctx.by else None, about=about, level=level, source="operator",
         schedule_rule=rule, approval=args.approval, priority=args.priority, bundles=_bundles(args), days=args.days,
         start_min=start, end_min=end, runs_per_day=args.runs_per_day, remote=remote, branch=branch,
-        auto_push=args.auto_push and bool(remote))
+        auto_push=args.auto_push and bool(remote),
+        # son flux se décide ici, à sa naissance : par pull request dès que l'hôte sait en ouvrir une (ADR 0274)
+        flow=default_flow(ctx.ports, remote), reread=args.reread)
 
     def objectives(seqs: tuple[int, ...]) -> list[Any]:
         """Ses objectifs, aussitôt après : ils portent le numéro que la création vient de lui donner."""
@@ -432,7 +482,9 @@ class ModifyArgs(BaseModel):
                                      order=20, help="Elle relit le cadre à chaque exécution.")
                            ] = Field(default="", max_length=4000)
     owner: Annotated[str, Knob(label="Pour qui", widget="subject", subject="person", group="Le projet",
-                               advanced=False, order=30, help="Vide : pour toi.")] = Field(default="", max_length=120)
+                               advanced=False, order=30,
+                               help="Vide : pour toi. Un projet qui n'est pour personne le reste tant qu'on ne nomme "
+                                    "personne.")] = Field(default="", max_length=120)
     mode: Annotated[str, Knob(label="Mode de travail", choices=MODE_CHOICES, group="Son mode", advanced=False,
                               order=40, help=MODE_HELP)] = c.PERSONA
     schedule: Annotated[str, Knob(label="Agenda", choices=SCHEDULE_CHOICES, group="Son rythme", advanced=False,
@@ -454,6 +506,10 @@ class ModifyArgs(BaseModel):
                                   order=55, help=PRIORITY_HELP)] = c.NORMAL
     approval: Annotated[bool, Knob(label="Ce qui sort de la machine attend ton accord", group="Sa liberté",
                                    advanced=False, order=60)] = True
+    # absente d'un formulaire (un client d'avant l'ADR 0276, un envoi qui ne la porte pas), elle garde sa valeur :
+    # jamais un refus, jamais le défaut posé à la place de ce que le projet avait
+    reread: Annotated[str | None, Knob(label=REREAD_LABEL, choices=REREAD_CHOICES, group="Sa liberté",
+                                       advanced=False, order=61, help=REREAD_HELP)] = None
 
 
 def _editable(s: ProjectsState, frame: Frame, key: str) -> bool:
@@ -469,7 +525,7 @@ def _modify_initial(s: ProjectsState, frame: Frame, key: str, ports: Mapping[str
     return {"title": texts.get(p.title_ref, ""), "description": texts.get(p.description_ref, ""),
             "owner": p.owner or "", "mode": p.mode, **_schedule_initial(p.schedule), "days": p.days,
             "start": _clock(p.start_min) if p.start_min else "", "end": _clock(p.end_min) if p.end_min < 1440 else "",
-            "runs_per_day": p.runs_per_day, "priority": p.priority, "approval": p.approval}
+            "runs_per_day": p.runs_per_day, "priority": p.priority, "approval": p.approval, "reread": p.reread}
 
 
 def _schedule_initial(rule: str) -> dict[str, str]:
@@ -499,11 +555,16 @@ def _modify(s: ProjectsState, frame: Frame, args: ModifyArgs, ctx: ActionContext
     title, description = args.title.strip(), args.description.strip()
     own = p.authority == c.SELF
     me = frame.get(identity_c.PERSON(ctx.by)) if ctx.by else None
-    owner = p.owner if own else me
+    # un champ vidé dit « pour toi » ; un projet qui n'est pour personne le reste tant qu'on ne nomme personne — sinon
+    # enregistrer n'importe quel autre réglage poserait qui agit comme son propriétaire (ADR 0292)
+    owner = p.owner if own or not p.owner else me
     if args.owner.strip():
         owner = _known_person(frame, args.owner.strip(), me, p.owner)
         if owner is None:
             errors["owner"] = f"personne inconnue : « {args.owner.strip()[:60]} »"
+    # pour qui il est, et l'accord de ce qui sort : à qui s'occupe d'elle seulement
+    _held(frame, ctx, "projects.modifier", [name for name, moved in (
+        ("owner", "owner" not in errors and owner != p.owner), ("approval", args.approval != p.approval)) if moved])
     # pour quelqu'un, il parle de quelqu'un : ce qui s'y écrit (dès ce formulaire) est au moins personnel
     level = max(p.sensitivity, int(Sensitivity.PERSONAL)) if owner and owner != p.owner else p.sensitivity
     if not title:
@@ -541,13 +602,19 @@ def _modify(s: ProjectsState, frame: Frame, args: ModifyArgs, ctx: ActionContext
         changes["priority"] = args.priority
     if args.approval != p.approval:
         changes["approval"] = args.approval
+    reread = p.reread if args.reread is None else args.reread
+    if reread not in c.REREADS:
+        errors["reread"] = REREAD_UNKNOWN
+    elif reread != p.reread:
+        changes["reread"] = reread
     if errors:
         raise Refused("Le projet n'a pas été modifié : vérifie le formulaire.", errors)
     if not changes:
         raise Refused("Rien n'a changé.")
     new_owner = owner if changes.get("set_owner") else p.owner
     about = (new_owner,) if changes.get("set_owner") and new_owner else p.about
-    return Done(drafts=(REFRAMED.draft(project=p.id, by=ctx.by, owner=new_owner, about=about, **changes),),
+    return Done(drafts=(REFRAMED.draft(project=p.id, by=ctx.by, owner=new_owner, about=about, read_about=p.read_about,
+                                       **changes),),
                 message="Projet modifié : la prochaine exécution lira son nouveau cadre.", guard=_still(p.id, LIVE))
 
 
@@ -600,10 +667,15 @@ def _tools_fields(s: ProjectsState, frame: Frame, key: str, fixed: Mapping[str, 
                  description="Ce qu'elle a en main pendant une exécution, en plus de son atelier.")
 def _tools(s: ProjectsState, frame: Frame, args: Any, ctx: ActionContext) -> Done:
     p = _target(s, ctx)
-    bundles = _bundles(args, _services_of(p, frame))
+    services = _services_of(p, frame)
+    bundles = _bundles(args, services)
     if set(bundles) == set(p.bundles):
         raise Refused("Rien n'a changé.")
-    return Done(drafts=(REFRAMED.draft(project=p.id, bundles=bundles, by=ctx.by, owner=p.owner, about=p.about),),
+    # le courrier, la caméra, ses flux, la Forge, ses apps, un service : à qui s'occupe d'elle seulement
+    _held(frame, ctx, TOOLS_ACTION, [service_knob(b) if mcp_c.is_service(b) else knob_of(b)
+                                     for b in (*EXTRA_BUNDLES, *services) if (b in bundles) != (b in p.bundles)])
+    return Done(drafts=(REFRAMED.draft(project=p.id, bundles=bundles, by=ctx.by, owner=p.owner, about=p.about,
+                                       read_about=p.read_about),),
                 message="Outils enregistrés : la prochaine exécution les aura en main.", guard=_still(p.id, LIVE))
 
 
@@ -618,6 +690,12 @@ LINK_REFUSALS = {links.UNKNOWN: "il n'existe pas", links.ITSELF: "c'est ce proje
                  links.FULL: f"un projet en lit {LINKS_MAX} au plus"}
 #: la case d'un projet à lire : « lit_7 »
 LINK_KNOB = "lit_"
+#: la case du mode direct d'un lien posé (ADR 0271) : « direct_7 » — ses demandes entrent dans les tickets du projet
+#: lu sans attendre l'accord de son propriétaire
+DIRECT_KNOB = "direct_"
+#: pourquoi le mode direct ne vaut pas sur un lien, en mots (``asks.indirect``)
+DIRECT_REFUSALS = {asks.MATRIX: "ses lignes d'accès ne donnent pas la modification au propriétaire de ce projet",
+                   asks.LEVEL: "ce qu'il écrit est d'un niveau moins confidentiel que ce qu'écrit ce projet"}
 
 
 class LinkArgs(BaseModel):
@@ -629,6 +707,29 @@ class LinkArgs(BaseModel):
 
 def link_knob(project: int) -> str:
     return f"{LINK_KNOB}{project}"
+
+
+def direct_knob(project: int) -> str:
+    return f"{DIRECT_KNOB}{project}"
+
+
+#: le mot de son propriétaire sur un lien (ADR 0293), sa borne
+LINK_WHY_MAX = 300
+
+
+def _link_word(args: Any, kept: tuple[int, ...]) -> tuple[int, str]:
+    """Le mot dit sur un lien, et le projet qu'il concerne (``why``, ``why_for`` : des champs cachés, que la console
+    ne rend pas) ; ``(0, "")`` : rien n'est dit. Il ne se dit que d'un projet que ce projet lit, ou se met à lire."""
+    given = args if isinstance(args, Mapping) else {}
+    why = " ".join(str(given.get("why") or "").split())
+    if not why:
+        return 0, ""
+    target = str(given.get("why_for") or "")
+    if not target.isdecimal() or int(target) not in kept:
+        raise Refused("Ce mot se dit d'un projet que ce projet lit.", {"why_for": "projet non lu"})
+    if len(why) > LINK_WHY_MAX:
+        raise Refused(f"Ce mot est trop long ({LINK_WHY_MAX} caractères au plus).", {"why": "trop long"})
+    return int(target), why
 
 
 def numbered(ids: Iterable[int]) -> str:
@@ -658,28 +759,44 @@ def link_options(s: ProjectsState, frame: Frame, p: Project) -> list[tuple[Proje
 
 def _links_initial(s: ProjectsState, frame: Frame, key: str) -> dict[str, Any]:
     p = project_at(s, key)
-    return {link_knob(t): True for t in p.reads} if p is not None else {}
+    if p is None:
+        return {}
+    return {**{link_knob(t): True for t in p.reads}, **{direct_knob(t): True for t in p.direct}}
 
 
 def _links_fields(s: ProjectsState, frame: Frame, key: str, fixed: Mapping[str, str],
                   ports: Mapping[str, Any]) -> tuple[FormField, ...]:
-    """Les cases de « Ce qu'il lit » : une par projet qu'il lit ou peut lire, nommé par son numéro et son titre."""
+    """Les cases de « Ce qu'il lit » : une par projet qu'il lit ou peut lire, nommé par son numéro et son titre. Sous
+    chaque lien déjà posé, la case de son mode direct (ADR 0271) : elle dit quand il ne vaudrait pas maintenant."""
     p = project_at(s, key)
     if p is None:
         return ()
     options = link_options(s, frame, p)
     texts = _texts(ports, (t.title_ref for t, _ in options))
     base = describe(LinkArgs)[0]
-    return tuple(
-        replace(base, path=link_knob(t.id), default=False, order=n,
-                label=f"n° {t.id} — {texts.get(t.title_ref) or '(titre oublié)'}" + (f" ({note})" if note else ""))
-        for n, (t, note) in enumerate(options, start=1))
+    world = links.world_of(frame)
+    fields: list[FormField] = []
+    for t, note in options:
+        fields.append(replace(base, path=link_knob(t.id), default=False, order=len(fields) + 1,
+                              label=f"n° {t.id} — {texts.get(t.title_ref) or '(titre oublié)'}"
+                                    + (f" ({note})" if note else "")))
+        if t.id in p.reads:
+            why = asks.indirect(p, t, links.grant(p, t, world))
+            fields.append(replace(
+                base, path=direct_knob(t.id), default=False, order=len(fields) + 1,
+                label=f"↳ ses demandes au n° {t.id} entrent directement dans ses tickets"
+                      + (f" (sans effet pour l'instant : {DIRECT_REFUSALS[why]})" if why else ""),
+                help="Sans cette case, une demande de ce projet y naît « proposée » : son propriétaire l'accepte ou "
+                     "l'écarte."))
+    return tuple(fields)
 
 
 @PROJECTS.action("liens", title="Enregistrer ce qu'il lit", args=LinkArgs, emits=[LINKS_SET], subject="project",
                  order=65, available=_editable, initial=_links_initial, fields=_links_fields, inline=True,
                  description="Les projets qu'il lit, sans jamais y écrire. Ce qu'il en reçoit se lit dans leurs lignes "
-                             "d'accès, à chaque exécution.")
+                             "d'accès, à chaque exécution. Il peut leur adresser une demande — un ticket chez eux — "
+                             "quand leurs lignes donnent de les piloter : sur l'accord de leur propriétaire, ou "
+                             "directement si le lien le règle ici.")
 def _links(s: ProjectsState, frame: Frame, args: Any, ctx: ActionContext) -> Done:
     p = _target(s, ctx)
     world = links.world_of(frame)
@@ -691,15 +808,38 @@ def _links(s: ProjectsState, frame: Frame, args: Any, ctx: ActionContext) -> Don
     kept, refused = links.chosen(s, p, wanted, world)
     if refused:
         raise Refused(f"Ce projet ne peut pas lire : {refused_words(refused)}.")
-    if kept == p.reads:
+    # le mode direct (ADR 0271) se règle sur un lien déjà posé, et seulement s'il vaudrait maintenant
+    direct = tuple(t for t in kept if t in p.reads and _ticked(args, direct_knob(t)))
+    why_for, why = _link_word(args, kept)
+    if kept == p.reads and direct == p.direct and not why:
         raise Refused("Rien n'a changé.")
+    blocked = [(t, why) for t in direct if t not in p.direct and (target := s.projects.get(t)) is not None
+               and (why := asks.indirect(p, target, links.grant(p, target, world)))]
+    if blocked:
+        raise Refused("Ses demandes ne peuvent pas entrer directement chez : "
+                      + " ; ".join(f"n° {t} ({DIRECT_REFUSALS[why]})" for t, why in blocked) + ".")
     said = f"Il lit maintenant : {numbered(kept)}. Sa prochaine exécution les aura sous les yeux." if kept else \
         "Il ne lit plus aucun projet. Ce qu'il en a déjà écrit garde leur niveau et leurs sujets."
-    return Done(drafts=(LINKS_SET.draft(project=p.id, reads=kept, by=ctx.by),), message=said,
+    if direct:
+        said += f" Ses demandes entrent directement chez : {numbered(direct)}."
+    word: dict[str, Any] = {}
+    if why:
+        # un texte gardé (ADR 0293) : au niveau de ce qu'écrivent les deux projets, avec les sujets du sien et —
+        # pour l'oubli — ceux du projet lu, que le lien lui laissera
+        read = s.projects[why_for]
+        word = {"why": Content.of(why, level=max(written(p), written(read))), "why_for": why_for, "owner": p.owner,
+                "about": p.about, "read_about": tuple(dict.fromkeys((*p.read_about, *subjects_of(read))))}
+    return Done(drafts=(LINKS_SET.draft(project=p.id, reads=kept, direct=direct, by=ctx.by, **word),), message=said,
                 guard=_still(p.id, LIVE))
 
 
 # ── Son dépôt distant ─────────────────────────────────────────────────────
+
+
+#: le flux qu'on règle avec le dépôt distant (ADR 0274) : laissé à l'hôte, par pull request, ou direct
+FLOW_AUTO = "auto"
+FLOW_CHOICES = ((FLOW_AUTO, "selon l'hôte (par pull request s'il sait en ouvrir une)"),
+                (c.FLOW_PR, "par pull request"), (c.FLOW_DIRECT, "direct"))
 
 
 class RemoteArgs(BaseModel):
@@ -709,12 +849,19 @@ class RemoteArgs(BaseModel):
     branch: Annotated[str, Knob(label="Branche", advanced=False, order=2)] = Field(default="main", max_length=100)
     auto_push: Annotated[bool, Knob(label="Pousser après chaque exécution qui enregistre quelque chose",
                                     advanced=False, order=3,
-                                    help="Selon l'accord du projet : tout de suite, ou après ton accord.")] = False
+                                    help="Selon l'accord du projet : tout de suite, ou après ton accord. Par pull "
+                                         "request, c'est sa branche de travail qui part.")] = False
+    flow: Annotated[str, Knob(label="Son flux", choices=FLOW_CHOICES, advanced=False, order=4,
+                              help="Par pull request : chaque objectif a sa branche, elle propose une pull request "
+                                   "quand il est fait, et elle ne fusionne jamais — la branche ci-dessus ne reçoit "
+                                   "que ce que tu acceptes. Direct : son travail va sur cette branche.")
+                    ] = Field(default=FLOW_AUTO, max_length=10)
 
 
 def _remote_initial(s: ProjectsState, frame: Frame, key: str) -> dict[str, Any]:
     p = project_at(s, key)
-    return {"remote": p.remote, "branch": p.branch, "auto_push": p.auto_push} if p is not None else {}
+    return {"remote": p.remote, "branch": p.branch, "auto_push": p.auto_push,
+            "flow": p.flow if p.remote else FLOW_AUTO} if p is not None else {}
 
 
 @PROJECTS.action("depot_distant", title="Enregistrer le dépôt distant", args=RemoteArgs, emits=[REFRAMED],
@@ -735,11 +882,24 @@ def _remote(s: ProjectsState, frame: Frame, args: RemoteArgs, ctx: ActionContext
     if errors:
         raise Refused("Le dépôt distant n'a pas été enregistré.", errors)
     auto = args.auto_push and bool(remote)
-    if (remote, branch, auto) == (p.remote, p.branch, p.auto_push):
+    # son flux (ADR 0274) : celui qu'on choisit, sinon celui que l'hôte permet — décidé ici, écrit dans l'événement
+    flow = (args.flow if args.flow in c.FLOWS else default_flow(ctx.ports, remote)) if remote else c.FLOW_DIRECT
+    if flow == c.FLOW_PR and not writes_pulls(ctx.ports, remote):
+        raise Refused("Le dépôt distant n'a pas été enregistré.",
+                      {"flow": "l'hôte de ce dépôt ne sait pas ouvrir de pull request d'ici (GitHub seulement)"})
+    if (remote, branch, auto, flow) == (p.remote, p.branch, p.auto_push, p.flow):
         raise Refused("Rien n'a changé.")
-    return Done(drafts=(REFRAMED.draft(project=p.id, remote=remote, branch=branch, auto_push=auto, by=ctx.by,
-                                       owner=p.owner, about=p.about),),
-                message="Dépôt distant enregistré." if remote else "Dépôt distant retiré.", guard=_still(p.id, LIVE))
+    # le dépôt distant est atteint par le jeton git de l'instance : le brancher, le changer, y envoyer d'office
+    # reste à qui s'occupe d'elle
+    _held(frame, ctx, "projects.depot_distant", [name for name, moved in (
+        ("remote", remote != p.remote), ("branch", branch != p.branch), ("auto_push", auto != p.auto_push),
+        ("flow", flow != p.flow)) if moved])
+    said = "Dépôt distant retiré." if not remote else "Dépôt distant enregistré." + (
+        " Elle passera par des pull requests : une branche par travail, et la fusion reste à toi."
+        if flow == c.FLOW_PR else "")
+    return Done(drafts=(REFRAMED.draft(project=p.id, remote=remote, branch=branch, auto_push=auto, flow=flow,
+                                       by=ctx.by, owner=p.owner, about=p.about, read_about=p.read_about),),
+                message=said, guard=_still(p.id, LIVE))
 
 
 class NoArgs(BaseModel):
@@ -888,10 +1048,11 @@ def _plan_approve(s: ProjectsState, frame: Frame, args: NoArgs, ctx: ActionConte
     p = _target(s, ctx)
     # ce que son plan demandait à lire se pose si qui valide est le propriétaire du projet (ADR 0257)
     linking = links.approved(s, p, operator_person(frame, ctx), links.world_of(frame))
-    drafts = [PLAN_ANSWERED.draft(project=p.id, verdict=APPROVE, by=ctx.by, owner=p.owner, about=p.about)]
+    drafts = [PLAN_ANSWERED.draft(project=p.id, verdict=APPROVE, by=ctx.by, owner=p.owner, about=p.about,
+                                  read_about=p.read_about)]
     said = "Plan validé : elle s'y met dès que possible."
     if linking.added:
-        drafts.append(LINKS_SET.draft(project=p.id, reads=linking.reads, by=ctx.by))
+        drafts.append(LINKS_SET.draft(project=p.id, reads=linking.reads, by=ctx.by, owner=p.owner, about=p.about, read_about=p.read_about))
         said += f" Ce projet lit maintenant : {numbered(linking.added)}."
     if linking.denied:
         said += (f" Ce que son plan demandait à lire ({numbered(linking.pending)}) n'est pas lié : seul le "
@@ -917,7 +1078,7 @@ def _plan_revise(s: ProjectsState, frame: Frame, args: ReviseArgs, ctx: ActionCo
     if not text:
         raise Refused("Dis ce qu'il faut changer.", {"words": "valeur requise"})
     return Done(drafts=(PLAN_ANSWERED.draft(project=p.id, verdict=REVISE, words=Content.of(text, level=p.sensitivity),
-                                            by=ctx.by, owner=p.owner, about=p.about),),
+                                            by=ctx.by, owner=p.owner, about=p.about, read_about=p.read_about),),
                 message="Révision demandée : elle reprendra son plan avec tes mots.", guard=_still(p.id, (c.ACTIVE,)))
 
 
@@ -936,7 +1097,7 @@ def _amend(s: ProjectsState, frame: Frame, args: InstructionArgs, ctx: ActionCon
     if not text:
         raise Refused("La consigne est vide.", {"instruction": "valeur requise"})
     return Done(drafts=(AMENDED.draft(project=p.id, instruction=Content.of(text, level=p.sensitivity), by=ctx.by,
-                                      owner=p.owner, about=p.about),),
+                                      owner=p.owner, about=p.about, read_about=p.read_about),),
                 message="Consigne ajoutée : elle la lira à sa prochaine exécution.", guard=_still(p.id, LIVE))
 
 
@@ -972,6 +1133,37 @@ def _restore(s: ProjectsState, frame: Frame, args: NoArgs, ctx: ActionContext) -
 # ── Ses objectifs ─────────────────────────────────────────────────────────
 
 
+#: ce qui déclenche un objectif constant (ADR 0265), tel que les deux formulaires d'un objectif le demandent
+TRIGGERS_HELP = ("Pour un constant, ce qui le fait passer en plus de sa cadence, un par ligne (quatre au plus) : "
+                 "project:<n>:commit (la base du projet n° n, que ce projet lit, a avancé : un commit en flux direct, "
+                 "une fusion acceptée en flux par pull request), "
+                 "project:<n>:done (un de ses objectifs a abouti), app:<nom> (une app de ce projet a signalé quelque "
+                 "chose), wake:<nom> (le réveil par API de ce nom vise cet objectif), item:<liste> (un autre qu'elle a "
+                 "ajouté, changé ou noté un élément de cette liste du projet : item:tickets). Vide : sa cadence "
+                 "seule.")
+ONLY_ON_EVENT_HELP = "Coché : il n'a aucune cadence, il ne passe que quand un de ses déclencheurs arrive."
+AT_ONCE_HELP = ("Pour un constant. Coché : son premier passage vient tout de suite (un audit hebdomadaire commence "
+                "par un audit). Sinon il vient une cadence après sa naissance : un bilan de la semaine ne tombe pas "
+                "le premier jour.")
+ROUTINE_HELP = ("Ce que chaque passage d'un constant doit faire, une ligne par chose (cinq au plus) : elle le relit à "
+                "chaque passage. Un ponctuel a des jalons à la place.")
+#: son critère de fait (ADR 0145), tel que les deux formulaires d'un objectif le demandent (ADR 0290), et sa borne
+DONE_WHEN_HELP = ("Facultatif : ce qui te ferait dire « c'est fait ». Elle dit comment il est rempli quand elle "
+                  "conclut. Vide : inchangé.")
+DONE_WHEN_MAX = 1500
+
+
+def _triggers(p: Project, kind: str, on: Iterable[str], only_on_event: bool) -> tuple[str, ...]:
+    """Les déclencheurs d'un objectif saisis dans la console, vérifiés et normalisés (ADR 0265) — un constant
+    seulement, un projet que le sien lit ; sinon le formulaire dit pourquoi, sur son champ."""
+    try:
+        return triggers.accepted(p.id, p.reads, kind == c.CONSTANT, on, only_on_event)
+    except triggers.BadTrigger as exc:
+        why = family("projects.triggers.refused")[exc.why]
+        said = f"« {exc.text} » : {why}" if exc.text else why
+        raise Refused("Ce qui le déclenche n'est pas accepté.", {"on": said}) from exc
+
+
 class ObjectiveAddArgs(BaseModel):
     text: Annotated[str, Knob(label="Objectif", widget="textarea", advanced=False, order=1,
                               help="En une phrase : ce qu'il faut atteindre, ou entretenir.")
@@ -979,6 +1171,15 @@ class ObjectiveAddArgs(BaseModel):
     kind: Annotated[str, Knob(label="Sorte", choices=KIND_CHOICES, advanced=False, order=2)] = c.ONCE
     cadence_hours: Annotated[int, Knob(label="Cadence (heures, pour un constant)", advanced=False, order=3, lo=0,
                                        hi=720, help="0 : la valeur par défaut.")] = Field(default=0, ge=0, le=720)
+    on: Annotated[tuple[str, ...], Knob(label="Déclenché par", advanced=False, order=4, help=TRIGGERS_HELP)] = ()
+    only_on_event: Annotated[bool, Knob(label="Sur événement seulement", advanced=False, order=5,
+                                        help=ONLY_ON_EVENT_HELP)] = False
+    routine: Annotated[str, Knob(label="À chaque passage (pour un constant)", widget="textarea", advanced=False,
+                                 order=6, help=ROUTINE_HELP)] = Field(default="", max_length=1200)
+    at_once: Annotated[bool, Knob(label="Premier passage tout de suite", advanced=False, order=7,
+                                  help=AT_ONCE_HELP)] = False
+    done_when: Annotated[str, Knob(label="Fini quand", widget="textarea", advanced=False, order=8,
+                                   help=DONE_WHEN_HELP)] = Field(default="", max_length=DONE_WHEN_MAX)
 
 
 @PROJECTS.action("objectif_ajouter", title="Ajouter un objectif", args=ObjectiveAddArgs, emits=[OBJECTIVE_ADDED],
@@ -991,10 +1192,17 @@ def _objective_add(s: ProjectsState, frame: Frame, args: ObjectiveAddArgs, ctx: 
                       "ajouter.")
     if args.kind not in c.OBJECTIVE_KINDS:
         raise Refused("Sorte inconnue.", {"kind": "ponctuel ou constant"})
+    on = _triggers(p, args.kind, args.on, args.only_on_event)
+    each = routine_text(args.routine.split("\n")) if args.kind == c.CONSTANT else ""
     draft = OBJECTIVE_ADDED.draft(project=p.id, objective=p.objective_seq + 1,
                                   text=Content.of(args.text.strip(), level=p.sensitivity), kind=args.kind,
                                   cadence_us=args.cadence_hours * HOUR if args.kind == c.CONSTANT else 0,
-                                  author="operator", by=ctx.by, owner=p.owner, about=p.about)
+                                  author="operator", by=ctx.by, owner=p.owner, about=p.about,
+                                  read_about=p.read_about, on=on, only_on_event=args.only_on_event,
+                                  at_once=args.at_once and args.kind == c.CONSTANT,
+                                  routine=Content.of(each, level=p.sensitivity) if each else None,
+                                  done_when=Content.of(args.done_when.strip(), level=p.sensitivity)
+                                  if args.done_when.strip() else None)
     return Done(drafts=(draft,), message="Objectif ajouté.", guard=_still(p.id, LIVE))
 
 
@@ -1021,7 +1229,7 @@ def _objective_status(s: ProjectsState, frame: Frame, args: ObjectiveStatusArgs,
         raise Refused(f"Ce projet a déjà {OBJECTIVES_KEPT} objectifs ouverts ou bloqués : retires-en avant d'en "
                       "rouvrir un.")
     draft = OBJECTIVE_CHANGED.draft(project=p.id, objective=o.id, status=args.status, by=ctx.by, owner=p.owner,
-                                    about=p.about)
+                                    about=p.about, read_about=p.read_about)
     return Done(drafts=(draft,), message=f"Objectif n° {o.id} : {OBJECTIVE_STATUS_FR[args.status]}.",
                 guard=_still(p.id, LIVE))
 
@@ -1033,6 +1241,16 @@ class ObjectiveEditArgs(BaseModel):
     kind: Annotated[str, Knob(label="Sorte", choices=KIND_CHOICES, advanced=False)] = c.ONCE
     cadence_hours: Annotated[int, Knob(label="Cadence (heures, pour un constant)", advanced=False, lo=0, hi=720,
                                        help="0 : la valeur par défaut.")] = Field(default=0, ge=0, le=720)
+    on: Annotated[tuple[str, ...], Knob(label="Déclenché par", advanced=False, help=TRIGGERS_HELP)] = ()
+    only_on_event: Annotated[bool, Knob(label="Sur événement seulement", advanced=False,
+                                        help=ONLY_ON_EVENT_HELP)] = False
+    routine: Annotated[str, Knob(label="À chaque passage (pour un constant)", widget="textarea", advanced=False,
+                                 help=ROUTINE_HELP)] = Field(default="", max_length=1200)
+    at_once: Annotated[bool, Knob(label="Premier passage tout de suite", advanced=False,
+                                  help=AT_ONCE_HELP)] = False
+    # absent ou vide, son critère garde sa valeur : l'événement ne sait pas le retirer
+    done_when: Annotated[str | None, Knob(label="Fini quand", widget="textarea", advanced=False,
+                                          help=DONE_WHEN_HELP)] = Field(default=None, max_length=DONE_WHEN_MAX)
 
 
 @PROJECTS.action("objectif_modifier", title="Modifier l'objectif", args=ObjectiveEditArgs,
@@ -1040,21 +1258,39 @@ class ObjectiveEditArgs(BaseModel):
 def _objective_edit(s: ProjectsState, frame: Frame, args: ObjectiveEditArgs, ctx: ActionContext) -> Done:
     p = _target(s, ctx)
     o = _objective_of(p, args.objective)
-    text = _texts(ctx.ports or {}, (o.text_ref,)).get(o.text_ref, "")
+    texts = _texts(ctx.ports or {}, (o.text_ref, o.routine_ref, o.done_when_ref))
+    text = texts.get(o.text_ref, "")
     changes: dict[str, Any] = {}
     if args.text.strip() != text:
         changes["text"] = Content.of(args.text.strip(), level=p.sensitivity)
+    criterion = (args.done_when or "").strip()
+    if criterion and criterion != texts.get(o.done_when_ref, "").strip():
+        changes["done_when"] = Content.of(criterion, level=p.sensitivity)
     if args.kind in c.OBJECTIVE_KINDS and args.kind != o.kind:
         if args.kind == c.CONSTANT and o.status == c.DONE:
             raise Refused("Un objectif fait ne devient pas constant : rouvre-le d'abord, ou ajoutes-en un.")
         changes["kind"] = args.kind
-    cadence = args.cadence_hours * HOUR if (changes.get("kind") or o.kind) == c.CONSTANT else 0
+    kind = changes.get("kind") or o.kind
+    cadence = args.cadence_hours * HOUR if kind == c.CONSTANT else 0
     if cadence != o.cadence_us:
         changes["cadence_us"] = cadence
+    # ce qui le déclenche (ADR 0265) : seul un constant en a — devenu ponctuel, le formulaire demande de les retirer
+    on = _triggers(p, kind, args.on, args.only_on_event)
+    if on != o.on:
+        changes["on"] = on
+    if args.only_on_event != o.only_on_event:
+        changes["only_on_event"] = args.only_on_event
+    # son premier passage tout de suite (ADR 0280) : un constant seulement
+    if (args.at_once and kind == c.CONSTANT) != o.at_once:
+        changes["at_once"] = args.at_once and kind == c.CONSTANT
+    # sa liste de passage (ADR 0273) : un constant seulement ; vidée, elle est retirée
+    each = routine_text(args.routine.split("\n")) if kind == c.CONSTANT else ""
+    if each != (texts.get(o.routine_ref, "") if o.routine_ref else ""):
+        changes.update({"routine": Content.of(each, level=p.sensitivity)} if each else {"routine_cleared": True})
     if not changes:
         raise Refused("Rien n'a changé.")
     return Done(drafts=(OBJECTIVE_CHANGED.draft(project=p.id, objective=o.id, by=ctx.by, owner=p.owner, about=p.about,
-                                                **changes),),
+                                                read_about=p.read_about, **changes),),
                 message=f"Objectif n° {o.id} modifié.", guard=_still(p.id, LIVE))
 
 
@@ -1100,7 +1336,7 @@ def _decide(s: ProjectsState, frame: Frame, args: DecideArgs, ctx: ActionContext
     draft = DECIDED.draft(project=p.id, decision=number, title=Content.of(args.title.strip(), level=level),
                           choice=Content.of(args.choice.strip(), level=level), context=opt(args.context),
                           options=opt(args.options), reason=opt(args.reason), replaces=args.replaces,
-                          author="operator", by=ctx.by, owner=p.owner, about=p.about)
+                          author="operator", by=ctx.by, owner=p.owner, about=p.about, read_about=p.read_about)
     return Done(drafts=(draft,), message="Décision consignée.", guard=_still(p.id, LIVE))
 
 
@@ -1182,12 +1418,16 @@ async def _deposit(s: ProjectsState, frame: Frame, args: DepositArgs, ctx: Actio
     except OSError as exc:  # un dossier pris pour un fichier, un disque plein : dit en français, jamais brut
         raise Refused(f"Le fichier n'a pas pu être écrit dans l'atelier ({exc.strerror or exc}).") from None
     # ce fichier seulement : le travail en cours d'une exécution reste à elle (elle l'enregistrera)
-    sha = await port.commit(p.id, f"apport de l'opérateur : {rel}", paths=(rel,))
+    # sur la base d'un projet qui passe par des pull requests, rien ne s'enregistre (ADR 0274) : la base ne reçoit
+    # que ce qui est accepté chez l'hôte — le fichier suivra sur la branche de sa prochaine exécution
+    on_base = by_pulls(p) and await port.branch(p.id) in ("", BASE_BRANCH)
+    sha = "" if on_base else await port.commit(p.id, f"apport de l'opérateur : {rel}", paths=(rel,))
     note = Content.of(args.note.strip(), level=p.sensitivity) if args.note.strip() else None
-    said = f"Déposé dans l'atelier : {rel} (enregistré : {sha})." if sha else \
-        f"Déposé dans l'atelier : {rel} — mais pas enregistré dans son dépôt (identique, ou git indisponible)."
+    said = f"Déposé dans l'atelier : {rel} (enregistré : {sha[:12]})." if sha else \
+        f"Déposé dans l'atelier : {rel} — il s'enregistrera sur la branche de sa prochaine exécution." if on_base \
+        else f"Déposé dans l'atelier : {rel} — mais pas enregistré dans son dépôt (identique, ou git indisponible)."
     return Done(drafts=(DEPOSITED.draft(project=p.id, name=rel, size=len(args.file.data), note=note, by=ctx.by,
-                                        owner=p.owner, about=p.about),),
+                                        owner=p.owner, about=p.about, read_about=p.read_about),),
                 message=said, tone="ok" if sha else "warn", guard=_still(p.id, LIVE))
 
 

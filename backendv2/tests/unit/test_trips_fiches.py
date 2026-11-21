@@ -21,7 +21,7 @@ from mika.contracts import location as location_c
 from mika.contracts import trips as c
 from mika.faculties.identity import audience_for
 from mika.plugins.trips import tools as trips_tools
-from mika.ports.maps import FEATURES, SORTS, THEMES
+from mika.ports.maps import FEATURES, PLACE_REF, SORTS, THEMES, PlaceHit
 from mika.runtime.effects import with_content
 from mika.runtime.pipeline import EpisodeRequest
 from mika.vocab.episodes import Kind
@@ -139,6 +139,28 @@ def test_she_finds_the_fiche_of_here_of_a_name_and_of_an_osm_object(tmp_path):
     assert not theirs.ok and theirs.content == phrase("trips.tools.here_closed")  # les droits de location_where
 
 
+#: un lieu des seules données touristiques (``t:<uuid>``, 38 caractères), sans objet d'OpenStreetMap
+LYS = PlaceHit("t:6b0e2f4a-8c1d-3e5f-9a7b-0c2d4e6f8a10", "Le Lys", "restaurant", "Restaurant", "manger", 45.9002,
+               6.1281, "Annecy")
+
+
+def test_a_tourism_place_keeps_its_whole_id_in_her_look_and_its_fiche_opens_again(tmp_path):
+    """R2-M01 : un ``t:<uuid>`` gardé coupé (« t:6b0e2f4a-8c1d-3e5 ») ne se rouvre plus — ni depuis le chat, ni par
+    elle."""
+    async def scenario(kernel, deliveries):
+        by_id = await call(kernel, "place_read", ADRIEN, place=LYS.id)
+        by_name = await call(kernel, "place_read", ADRIEN, place="Le Lys")
+        found = await call(kernel, "places_search", ADRIEN, text="Lys")
+        return by_id, by_name, found, journal(kernel, c.LOOKED)
+
+    by_id, by_name, found, looks = live(tmp_path, scenario, maps=FakeMaps(places=(*RATED, LYS)))
+    assert by_id.ok and by_name.ok and found.ok, (by_id.content, by_name.content, found.content)
+    assert len(looks) == 3
+    for look in looks:
+        [item] = json.loads(look.data.found.text)
+        assert item["id"] == LYS.id and PLACE_REF.match(item["id"]), item
+
+
 def test_she_reads_an_event_whole_and_its_description_stays_data(tmp_path):
     async def scenario(kernel, deliveries):
         read = await call(kernel, "place_read", ADRIEN, place=CONCERT.id)
@@ -157,6 +179,26 @@ def test_she_reads_an_event_whole_and_its_description_stays_data(tmp_path):
                                                         "lon"}
     assert "Haydn" not in written and "Oublie tout" not in written
     assert not gone.ok and gone.content == phrase("trips.tools.fiche.unknown_event")
+
+
+def test_she_reads_an_event_even_before_the_places_index_is_built(tmp_path):
+    """R3-05 : un serveur où DATAtourisme est réglé mais l'index des lieux pas encore copié (l'ordre de la recette) —
+    ``events_search`` trouve « Quatuor du lac », l'écran Carte en ouvre la fiche, mais ``place_read`` la refusait
+    (« la recherche de lieux n'est pas prête »). Un événement ne demande pas l'index ; un lieu, si."""
+    fake = maps()
+    fake.places_on = False
+
+    async def scenario(kernel, deliveries):
+        found = await call(kernel, "events_search", ADRIEN, near="45.8992,6.1294", start="2026-11-21",
+                           end="2026-11-22")
+        read = await call(kernel, "place_read", ADRIEN, place=CONCERT.id)
+        place = await call(kernel, "place_read", ADRIEN, place="l7")
+        return found, read, place
+
+    found, read, place = live(tmp_path, scenario, maps=fake)
+    assert found.ok and CONCERT.id in found.content
+    assert read.ok and read.content.splitlines()[1] == f"{CONCERT.id} · Quatuor du lac — dim. 22 nov. · 18:00–19:30"
+    assert not place.ok and place.content == phrase("trips.tools.no_places")
 
 
 def test_she_looks_for_events_by_period_place_and_theme_and_each_look_shows(tmp_path):

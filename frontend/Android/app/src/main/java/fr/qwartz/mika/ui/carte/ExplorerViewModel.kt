@@ -12,22 +12,31 @@ import fr.qwartz.mika.data.moi.carte.AddressBook
 import fr.qwartz.mika.data.moi.carte.Bounds
 import fr.qwartz.mika.data.moi.carte.CarteApi
 import fr.qwartz.mika.data.moi.carte.CarteInfo
+import fr.qwartz.mika.data.moi.carte.Coverage
 import fr.qwartz.mika.data.moi.carte.LatLon
 import fr.qwartz.mika.data.moi.carte.MOVE_MS
 import fr.qwartz.mika.data.moi.carte.PLACES_SHOWN
+import fr.qwartz.mika.data.moi.carte.MIN_RATING
 import fr.qwartz.mika.data.moi.carte.POSITION_TTL_MS
+import fr.qwartz.mika.data.moi.carte.PRELOAD_REREAD_MS
 import fr.qwartz.mika.data.moi.carte.Place
+import fr.qwartz.mika.data.moi.carte.PlaceFilters
+import fr.qwartz.mika.data.moi.carte.PlacesQuery
 import fr.qwartz.mika.data.moi.carte.Regard
 import fr.qwartz.mika.data.moi.carte.Scene
 import fr.qwartz.mika.data.moi.carte.TYPE_MS
 import fr.qwartz.mika.data.moi.carte.Where
 import fr.qwartz.mika.data.moi.carte.addressWanted
 import fr.qwartz.mika.data.moi.carte.explorerScene
+import fr.qwartz.mika.data.moi.carte.nextSort
 import fr.qwartz.mika.data.moi.carte.placeId
 import fr.qwartz.mika.data.moi.carte.regardLine
 import fr.qwartz.mika.data.moi.carte.regardPins
 import fr.qwartz.mika.data.moi.carte.sceneBounds
 import fr.qwartz.mika.data.moi.carte.selectedPlace
+import fr.qwartz.mika.data.moi.carte.toggledFeature
+import fr.qwartz.mika.data.moi.carte.wantsReread
+import fr.qwartz.mika.data.moi.carte.withRefreshed
 import fr.qwartz.mika.data.moi.phone.PhoneMoiApi
 import fr.qwartz.mika.data.moi.phone.PhonePosition
 import fr.qwartz.mika.ui.map.MapControl
@@ -48,6 +57,11 @@ enum class ExplorerHint { NONE, NO_POSITION, CHOOSE_WHERE }
  * seulement si le texte en a l'air, après une pause de frappe, une fois par texte) ; le lieu choisi. Un modèle par
  * session : la recherche survit à un autre onglet, à une rotation. Ce qui n'est pas prêt (503) ou trop demandé (429)
  * se dit à l'endroit qui l'a reçu : les lieux, ou les adresses — le reste marche.
+ *
+ * Depuis l'ADR 0259, la liste se filtre (ouvert maintenant, ce qu'offre le lieu, sa note Google, sa cuisine) et se range
+ * (les plus proches, les mieux notés) ; elle dit ce que le cache des notes sait de l'endroit ([coverage]). « Autour de
+ * moi » envoie ta position avec `here=1` : le serveur précharge les notes de ta case, et la liste se relit une fois,
+ * quelques secondes plus tard, si elles n'étaient pas toutes lues. Un lieu qui a une fiche l'ouvre (`Route.PlaceFiche`).
  *
  * Ce que Mika a cherché ou montré (un regard, `Route.Carte.look`) prend la place de la recherche : ses lieux en rose,
  * son tracé tel qu'elle l'a gardé ; chercher autre chose le quitte. Les adresses déjà trouvées sont celles de la Carte
@@ -88,6 +102,12 @@ class ExplorerViewModel(private val graph: AppGraph, private val store: CarteSto
     /** La recherche montrée est partie de ta position (inconnue : de la zone de la carte) : ce que dit sa légende. */
     var searchedNear by mutableStateOf(false)
         private set
+    /** Les filtres et l'ordre de la liste (ADR 0259). */
+    var filters by mutableStateOf(PlaceFilters())
+        private set
+    /** Ce que le cache des notes Google sait de l'endroit cherché (la ligne « Notes Google Maps lues le … »). */
+    var coverage by mutableStateOf<Coverage?>(null)
+        private set
     /** Le lieu choisi (son identifiant dans la liste). */
     var sel by mutableStateOf<String?>(null)
         private set
@@ -108,6 +128,12 @@ class ExplorerViewModel(private val graph: AppGraph, private val store: CarteSto
     private var typeJob: Job? = null
     private var moveJob: Job? = null
     private var addrJob: Job? = null
+    private var rereadJob: Job? = null
+
+    init {
+        // « Actualiser » dans une fiche : la ligne de ce lieu montre ce que la fiche relue dit (R2-A06)
+        viewModelScope.launch { store.refreshed.collect { (id, fresh) -> places = withRefreshed(places, id, fresh) } }
+    }
 
     /** Ta dernière position (son téléphone), si elle est connue. */
     val here: LatLon?
@@ -256,6 +282,39 @@ class ExplorerViewModel(private val graph: AppGraph, private val store: CarteSto
         sel = id
     }
 
+    /** Le lieu d'une épingle ou d'une ligne (celle de son regard, quand elle en montre un), s'il est encore là. */
+    fun placeOf(id: String): Place? {
+        if (look != null) return regard?.places?.withIndex()?.firstOrNull { (i, p) -> placeId(p, i) == id }?.value
+        return selectedPlace(places, addresses, id)
+    }
+
+    // ── Les filtres et l'ordre (ADR 0259) ─────────────────────────────────
+
+    fun toggleOpen() = applyFilters(filters.copy(open = !filters.open))
+
+    fun toggleFeature(id: String) = applyFilters(toggledFeature(filters, id))
+
+    /** « 4 et plus » : sa note Google (elle écarte les lieux sans note). */
+    fun toggleRating() = applyFilters(filters.copy(minRating = if (filters.minRating == null) MIN_RATING else null))
+
+    /** Une cuisine (vide : toutes). */
+    fun chooseCuisine(cuisine: String) = applyFilters(filters.copy(cuisine = cuisine.trim()))
+
+    /** L'ordre suivant : les plus proches, les mieux notés. */
+    fun nextOrder() {
+        val sorts = (info as? Load.Ready)?.value?.sorts.orEmpty()
+        applyFilters(filters.copy(sort = nextSort(sorts, filters.sort)))
+    }
+
+    /** Un filtre de plus ou de moins : la recherche se refait sans recadrer la carte (le lieu choisi s'oublie). */
+    private fun applyFilters(next: PlaceFilters) {
+        if (next == filters) return
+        filters = next
+        sel = null
+        typeJob?.cancel()
+        viewModelScope.launch { search(refit = false) }
+    }
+
     /** La personne a bougé la carte : « Dans cette zone » cherche dans ce qu'elle montre maintenant. */
     fun mapMoved() {
         if (look != null || where != Where.ZONE || (q.isBlank() && cat.isEmpty())) return
@@ -275,14 +334,18 @@ class ExplorerViewModel(private val graph: AppGraph, private val store: CarteSto
      * Une recherche : l'index local (le texte, la catégorie, autour de toi ou dans la zone), puis les adresses — elles ne
      * dépendent pas de la zone : seul un autre texte les redemande.
      */
-    private suspend fun search(refit: Boolean = true) {
+    private suspend fun search(refit: Boolean = true, reread: Boolean = false) {
         val text = q.trim()
         val seq = ++searchSeq
-        hint = ExplorerHint.NONE
+        if (!reread) {
+            hint = ExplorerHint.NONE
+            rereadJob?.cancel()
+        }
         if (text.isEmpty() && cat.isEmpty()) {
             addrJob?.cancel()
             places = emptyList()
             addresses = emptyList()
+            coverage = null
             addrQ = ""
             error = ""
             addrError = ""
@@ -303,25 +366,38 @@ class ExplorerViewModel(private val graph: AppGraph, private val store: CarteSto
             hint = ExplorerHint.CHOOSE_WHERE
             return
         }
-        loading = true
-        val got = api.places(q = text, cat = cat, near = near, bbox = bbox, limit = PLACES_SHOWN)
+        if (!reread) loading = true
+        // autour de toi : ta propre position (`here`), le serveur précharge les notes de ta case ; un point de la carte, non
+        val query = PlacesQuery(q = text, cat = cat, near = near, bbox = bbox, limit = PLACES_SHOWN, filters = filters, here = near != null)
+        val got = api.list(query)
         if (seq != searchSeq) return
         when (got) {
             is MoiApi.Result.Ok -> {
-                places = got.value
+                places = got.value.places
+                coverage = got.value.reviews
                 error = ""
             }
             is MoiApi.Result.Failed -> {
+                // la relecture après le préchargement : une panne passagère ne vide pas la liste montrée
+                if (reread) return
                 places = emptyList()
+                coverage = null
                 error = got.error.said
             }
         }
         searchedNear = near != null
-        if (text != addrQ) findAddresses(text, places.isNotEmpty())
+        if (!reread && text != addrQ) findAddresses(text, places.isNotEmpty())
         loading = false
         searched = true
         if (sel != null && chosen == null) sel = null
-        if (refit && from == Where.HERE) control.fit()
+        if (!reread && refit && from == Where.HERE) control.fit()
+        // les notes de ta case arrivent au prochain affichage : la liste se relit une fois, un peu plus tard
+        if (!reread && wantsReread(coverage, near != null)) {
+            rereadJob = viewModelScope.launch {
+                delay(PRELOAD_REREAD_MS)
+                search(refit = false, reread = true)
+            }
+        }
     }
 
     /**
