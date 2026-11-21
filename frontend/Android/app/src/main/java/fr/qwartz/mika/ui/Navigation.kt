@@ -10,7 +10,8 @@ import kotlinx.serialization.builtins.ListSerializer
 /**
  * Les écrans d'une session ouverte. La connexion n'en fait pas partie : c'est la session qui la montre.
  *
- * Les rubriques du tiroir (ADR 0235) sont [isTopLevel] : le chat, Mail, Teams, Carte, Téléphone, Outils, Paramètres.
+ * Les rubriques du tiroir (ADR 0235, 0296) sont [isTopLevel] : le chat, Projets, Mail, Teams, Carte, Téléphone, Outils,
+ * Paramètres.
  * Les autres s'ouvrent par-dessus l'écran qui les montre (un mail, un fil, un voyage, une page de réglages).
  */
 @Serializable
@@ -39,6 +40,36 @@ sealed interface Route {
         val mime: String? = null,
         val size: Long? = null,
     ) : Route
+
+    // ── Projets (ADR 0296) ──────────────────────────────────────────────
+    /** [tab] : `a-faire` (ce qui t'attend dans tous tes projets) ou `projets`. */
+    @Serializable @SerialName("projects")
+    data class Projects(val tab: String = "a-faire") : Route
+
+    /** Une attente d'« À faire », de quoi la lire et la décider : son projet, sa clé (`waitingKey`). */
+    @Serializable @SerialName("project_todo")
+    data class ProjectTodo(val project: Int, val key: String) : Route
+
+    /** La fiche d'un projet ; [tab] : `vue`, `objectifs`, `tickets`, `code`, `documentation`, `activite`,
+     *  `dependances`, `listes`. */
+    @Serializable @SerialName("project")
+    data class Project(val id: Int, val tab: String = "vue") : Route
+
+    /** Un objectif (`o2`) ou une mission (`m5`) du projet [id]. */
+    @Serializable @SerialName("project_goal")
+    data class ProjectGoal(val id: Int, val key: String) : Route
+
+    /** Un ticket du projet [id], par son numéro. */
+    @Serializable @SerialName("project_ticket")
+    data class ProjectTicket(val id: Int, val number: Int) : Route
+
+    /**
+     * Une page du code du projet [id] ; [kind] (`CodePages`) : `fichier` ([key] : son chemin, [ref] : sa branche ou son
+     * commit), `commit` (son empreinte), `pull` (son numéro, ou `o<objectif>` ; [pane] : son volet), `branche` (son
+     * nom), `issue` (son numéro), `ci` (l'empreinte du commit vérifié).
+     */
+    @Serializable @SerialName("project_code")
+    data class ProjectCode(val id: Int, val kind: String, val key: String, val ref: String = "", val pane: String = "") : Route
 
     // ── Mail ────────────────────────────────────────────────────────────
     @Serializable @SerialName("mail")
@@ -119,7 +150,7 @@ sealed interface Route {
 
 /** Une rubrique du tiroir : on y arrive depuis le chat, et « retour » y ramène. */
 val Route.isTopLevel: Boolean
-    get() = this == Route.Chat || this == Route.Mail || this == Route.Teams || this is Route.Carte ||
+    get() = this == Route.Chat || this is Route.Projects || this == Route.Mail || this == Route.Teams || this is Route.Carte ||
         this is Route.Phone || this is Route.Tools || this == Route.Settings
 
 /**

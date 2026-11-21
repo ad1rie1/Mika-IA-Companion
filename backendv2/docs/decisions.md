@@ -32,8 +32,8 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 | Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163, 0166, 0168, 0171, 0172, 0189, 0190, 0191, 0192, 0193, 0194, 0195, 0196, 0198, 0199, 0211, 0213, 0214, 0228, 0229, 0236, 0238, 0240, 0243, 0244, 0245, 0246, 0247, 0248, 0249, 0250, 0251, 0255, 0256, 0258, 0259, 0269 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158, 0239, 0267, 0285 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159, 0261 |
-| Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170, 0187, 0200, 0208, 0209, 0215, 0233, 0235, 0242, 0252, 0282, 0284, 0286, 0287, 0288, 0290, 0291, 0292, 0293, 0294 |
-| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176, 0177, 0178, 0179, 0180, 0181, 0182, 0183, 0197, 0201, 0202, 0203, 0204, 0205, 0206, 0210, 0216, 0217, 0218, 0219, 0225, 0230, 0231, 0232, 0234, 0237, 0241, 0281 |
+| Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170, 0187, 0200, 0208, 0209, 0215, 0233, 0235, 0242, 0252, 0282, 0284, 0286, 0287, 0288, 0290, 0291, 0292, 0293, 0294, 0296 |
+| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176, 0177, 0178, 0179, 0180, 0181, 0182, 0183, 0197, 0201, 0202, 0203, 0204, 0205, 0206, 0210, 0216, 0217, 0218, 0219, 0225, 0230, 0231, 0232, 0234, 0237, 0241, 0281, 0295 |
 | Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135, 0266 |
 
 ## Le noyau : journal, arbitrage, pipeline
@@ -1930,7 +1930,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Pourquoi :* « peut-être un fournisseur gratuit ? … ou alors sur le pc portable héberger son propre openstreetmap ? » ; « ma carte se charge depuis le backend, et depuis le backend on doit pouvoir configurer le serveur de carte ».
 
-*Révise 0119 (en partie : la position se voit sur une carte). Révisée par 0194 (la même carte sert l'écran Carte), 0197 (en partie : elle se règle sous Réglages › Carte et téléphone), 0229 (en partie : son adresse, avec la carte), 0269 (en partie : de `cartes/`, la sauvegarde prend les compteurs du mois).*
+*Révise 0119 (en partie : la position se voit sur une carte). Révisée par 0194 (la même carte sert l'écran Carte), 0197 (en partie : elle se règle sous Réglages › Carte et téléphone), 0229 (en partie : son adresse, avec la carte), 0269 (en partie : de `cartes/`, la sauvegarde prend les compteurs du mois), 0295 (en partie : l'archive se refait d'elle-même, toutes les deux semaines).*
 
 ### 0194 — Les lieux, les adresses et les itinéraires passent par le serveur
 
@@ -2029,7 +2029,7 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 horaires, téléphone, site, terrasse, végétarien/vegan, accessibilité, étoiles… Oui » (2026-11-17) ; les tuiles de
 Protomaps ne gardent presque aucun de ces attributs.
 
-*Révise 0194 (en partie : l'index des lieux se tire de l'extrait OpenStreetMap, avec ce qu'en dit une fiche). Révisée par 0245 (en partie : la fiche d'un lieu prend sa partie DATAtourisme et les événements proches ; un lieu des données touristiques se trouve avec ceux de l'index), 0250 (en partie : la note vient du cache des avis ; la note minimale écarte les lieux sans note, l'ordre par note les met à la fin ; la fiche prend sa partie « avis »).*
+*Révise 0194 (en partie : l'index des lieux se tire de l'extrait OpenStreetMap, avec ce qu'en dit une fiche). Révisée par 0245 (en partie : la fiche d'un lieu prend sa partie DATAtourisme et les événements proches ; un lieu des données touristiques se trouve avec ceux de l'index), 0250 (en partie : la note vient du cache des avis ; la note minimale écarte les lieux sans note, l'ordre par note les met à la fin ; la fiche prend sa partie « avis »), 0295 (en partie : l'index se construit sur le serveur, toutes les deux semaines).*
 
 ### 0245 — Les lieux touristiques et les événements de DATAtourisme, en cache par cases autour des personnes
 
@@ -3043,7 +3043,7 @@ de tout le serveur à coups d'« Actualiser ».
 
 *Pourquoi :* « peux-tu améliorer mon appli Android en reprenant les fonctionnalités de frontendv2 », puis, devant la maquette : « en mode tiroir je préfère ». Une API qui refusait l'écriture à un client natif laissait l'application en lecture seule, alors que le téléphone a déjà son jeton, révocable, et décide déjà des accords sur la socket.
 
-*Révise 0187 (en partie : un client natif ne faisait que lire l'API).*
+*Révise 0187 (en partie : un client natif ne faisait que lire l'API). Révisée par 0296 (en partie : l'app a aussi l'écran Projets).*
 
 ### 0242 — L'app Android montre un mail HTML dans sa mise en page, dans une WebView qui ne fait qu'afficher
 
@@ -3219,6 +3219,19 @@ pour le propriétaire d'un projet confié un accord qu'il ne peut pas donner ; l
 *Pourquoi :* la maquette validée montre ces lectures, et l'écran faisait sans tant que l'API ne les servait pas ; elle montre aussi le README rendu, que l'écran affichait en source par prudence — le rendu des pages, déjà éprouvé contre une page hostile, le permet sans rien exécuter ni rien charger. Un bouton qui ne fait rien, ou un champ qu'on remplit pour être refusé, apprend au propriétaire que l'écran ment.
 
 *Révise 0291 (en partie : un fichier Markdown du dépôt peut passer par le rendu échappé des pages ; la grille ne lit plus les fiches ; ce que l'API a appris à servir se montre).*
+
+### 0296 — L'écran Projets de l'app Android
+
+- **L'app a sa rubrique « Projets »**, dans le tiroir juste après le chat, avec sa pastille (`counts.projects`) : ce que fait l'écran Projets du client web (0291, 0294), d'après la même maquette validée, lue dans ses vues en largeur de téléphone, sur la même API (`/api/moi/projets`, `protocole-moi.md` § 11) et sous le jeton du téléphone, qui écrit sans jeton CSRF (0235).
+- **Sa forme est celle d'un téléphone : une liste, puis son détail en page, avec un retour.** La rubrique a deux volets, « À faire » et « Projets » ; la fiche d'un projet a ses onglets qui défilent en largeur (Vue d'ensemble, Objectifs, Tickets, Code, Documentation, Activité, Dépendances, et Listes quand le projet en a) ; ce que le web met dans son panneau latéral devient un volet « Infos » du détail ; un formulaire s'ouvre en feuille, par-dessus, sans quitter la vue. Aucune page n'empile tout.
+- **L'app ne recalcule aucune règle** : ce qu'on peut faire vient du serveur (`can`, `why`, `rights`, `gesture`, `forms`) — pas de bouton sans le droit servi, un geste refusé se dit sur place avec les mots du serveur, les libellés d'étape et de statut sont les siens. Ses règles pures (quelle route et quel corps un bouton envoie, quelle couleur porte un état, comment une liste se range) sont portées du client web (`data/moi/projects/ProjectsRules.kt`) et testées sur la JVM. Un verdict sur un ticket passe toujours par `ticket/trancher`, même depuis une attente qui porte un autre geste (une pull request prête, dont le ticket s'écarte encore).
+- **Un texte venu d'ailleurs** (`outside`) se montre comme tel — un liseré, « venu d'ailleurs », en texte brut, jamais mis en forme ; un texte d'elle ou de la personne se lit en Markdown par le rendu du mode pro (0116), qui n'interprète aucun HTML.
+- **Le code et la fusion.** L'onglet Code a ses six volets (Fichiers, Commits, Pull requests, Branches, Issues, CI), chacun une liste puis son détail en page. Le contenu d'un fichier et les lignes d'un diff sont du texte : posés tels quels en chasse fixe, ils défilent en largeur dans leur cadre, jamais la page ; le diff est unifié, replié fichier par fichier ; un fichier Markdown se lit rendu, sans un lien qui s'ouvre ni une image chargée. **Fusionner est le geste d'une personne, confirmé** (0288) : la pull request se relit à l'instant, la confirmation dit ce qui va être fusionné, et la demande nomme le commit de tête qu'on vient de relire. **La route de la fusion n'a qu'un chemin dans l'app** — un seul appel, sur un ordre qui ne naît que d'une pull request relue que le serveur ouvre (`merge.can`) ; aucun geste générique ne la porte, depuis « À faire » comme ailleurs, et un test le garde.
+- **Livré en trois lots sur un même socle** : d'abord À faire, Projets, la fiche et sa Vue d'ensemble, Objectifs (la liste, le détail, ses formulaires, le diagramme en mode « Avancement ») et Tickets ; puis Code ; puis Documentation, Activité, Dépendances, Listes et Modifier le projet. Un onglet pas encore écrit le dit tel quel.
+
+*Pourquoi :* devant l'écran Projets du web, le propriétaire a dit qu'il en fallait un sur Android, puis « fais l'app android ». Un téléphone n'a pas la largeur des trois zones du web : la même maquette, lue à 390 px, donne la liste puis le détail, et le panneau latéral en volet.
+
+*Révise 0235 (en partie : l'app a aussi l'écran Projets, à la place que la maquette du web lui donne dans la navigation).*
 
 ## La console et l'exploitation
 
@@ -3725,6 +3738,17 @@ pour le propriétaire d'un projet confié un accord qu'il ne peut pas donner ; l
 *Pourquoi :* les lots du chantier des chaînes de travail avaient posé leurs onglets, leurs lignes et leurs actions côte à côte, dans l'ordre où ils sont arrivés : pour savoir ce qu'un projet attendait de soi, il fallait ouvrir cinq onglets.
 
 *Révise 0177 (en partie : les onglets de la fiche d'un projet), 0183 (en partie : l'onglet Dépôt montre les branches de travail), 0257 (en partie : ses liens ont leur onglet), 0270 (en partie : le réglage de la validation des tickets est dans Cadre). Révisée par 0286, 0290.*
+
+### 0295 — Les cartes se refont sur le serveur, toutes les deux semaines
+
+- Le serveur tient ses cartes à jour seul : `deploy/mika-cartes.service`, que `mika-cartes.timer` lance le 1er et le 15 du mois, la nuit, après la sauvegarde. Un passage manqué, machine éteinte, est rattrapé au démarrage.
+- Dans l'ordre : les tuiles de la France (`mika carte extraire --zone france --zoom 15`) et leurs polices ; l'extrait OpenStreetMap du jour, téléchargé chez Geofabrik et gardé sous `cartes/france-latest.osm.pbf`, d'où se reconstruit l'index des lieux (`mika carte lieux`) ; les départements de DATAtourisme qui sont dus (`mika carte tourisme`).
+- Chaque pièce neuve ne remplace l'ancienne qu'entière : tout se fait serveur en marche. Une étape des tuiles ou des données touristiques qui échoue laisse les anciennes et n'arrête pas le reste ; un index qui échoue fait échouer le passage, qu'on lit par `journalctl -u mika-cartes`.
+- Il tourne à côté de Mika, au plus bas de la machine (`Nice`, entrées-sorties au repos) et borné en mémoire (`MemoryMax`) : il cède plutôt qu'elle. Le serveur porte donc l'extra `cartes` (pyosmium). Construire l'index sur un PC reste possible, pour un serveur trop juste.
+
+*Pourquoi :* le serveur doit vivre seul. Les lieux, leurs horaires et les fiches vieillissent chaque jour dans OpenStreetMap, et l'index se construisait sur le PC, puis se copiait à la main.
+
+*Révise 0193 (en partie : l'archive se refait d'elle-même), 0244 (en partie : l'index se construit sur le serveur).*
 
 ## Ce que les sondes et les audits ont fixé
 

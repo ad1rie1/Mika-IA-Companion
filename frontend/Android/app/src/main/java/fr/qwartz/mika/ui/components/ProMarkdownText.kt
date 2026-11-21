@@ -51,6 +51,15 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun ProMarkdownText(text: String, color: Color, modifier: Modifier = Modifier) {
     val blocks = remember(text) { ProMarkdown.parse(text) }
+    ProMarkdownBlocks(blocks, color, modifier)
+}
+
+/**
+ * Des blocs déjà lus par [ProMarkdown], mis en forme de la même façon : pour qui les retouche avant de les montrer (un
+ * fichier du dépôt d'un projet, dont les liens ne s'ouvrent pas — ADR 0296).
+ */
+@Composable
+fun ProMarkdownBlocks(blocks: List<ProMarkdown.Block>, color: Color, modifier: Modifier = Modifier) {
     val codeBackground = color.copy(alpha = 0.12f)
     val typography = MaterialTheme.typography
     Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {

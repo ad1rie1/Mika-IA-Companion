@@ -38,6 +38,8 @@ private data class Destination(val route: Route, @param:DrawableRes val icon: In
 
 private val DESTINATIONS = listOf(
     Destination(Route.Chat, R.drawable.ic_m_chat, R.string.nav_chat),
+    // juste après la conversation, à la place que la maquette du web lui donne (ADR 0296) : ce qui t'attend dans tes projets
+    Destination(Route.Projects(), R.drawable.ic_m_flag, R.string.nav_projects) { it?.counts?.projects ?: 0 },
     Destination(Route.Mail, R.drawable.ic_m_mail, R.string.nav_mail) { it?.counts?.mail ?: 0 },
     Destination(Route.Teams, R.drawable.ic_m_teams, R.string.nav_teams) { it?.counts?.teams ?: 0 },
     Destination(Route.Carte(), R.drawable.ic_m_map, R.string.nav_map),

@@ -2,13 +2,14 @@
 
 Le client de tous les jours sur un téléphone (ADR 0235) : d'abord la conversation avec Mika — on lui écrit, on lui
 envoie des photos et des fichiers, elle répond, et comme dans une vraie messagerie elle peut écrire la première quand
-l'application est fermée —, puis, par le tiroir, ce que fait le client web `frontendv2/` : Mail, Teams, Carte,
+l'application est fermée —, puis, par le tiroir, ce que fait le client web `frontendv2/` : Projets, Mail, Teams, Carte,
 Téléphone, Outils et Paramètres, pour la personne connectée. On voit aussi ce qu'elle fait : sa ligne d'état sous son
 nom, son visage au bout de chaque barre du haut, et l'écran « Ce qu'elle fait ».
 
 Le serveur est `backendv2/` (`python -m mika serve`). La conversation passe par
 [`backendv2/docs/protocole-chat.md`](../../backendv2/docs/protocole-chat.md), le reste par l'API par personne
-[`backendv2/docs/protocole-moi.md`](../../backendv2/docs/protocole-moi.md) ; les décisions : ADR 0062, puis 0235. La
+[`backendv2/docs/protocole-moi.md`](../../backendv2/docs/protocole-moi.md) ; les décisions : ADR 0062, puis 0235, et
+0296 pour les projets. La
 maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.md`) : on navigue par le tiroir.
 
 ## Ce que fait l'application
@@ -115,6 +116,109 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
 - **« Lui montrer mes messages »** (ADR 0120, coupé par défaut) : les messages WhatsApp et SMS que le téléphone affiche
   partent à Mika, qui s'en souvient ; elle peut proposer une réponse, qu'une notification te demande d'autoriser. Voir
   [Ses messages](#ses-messages).
+- **Projets** (ADR 0296, l'API par personne : [`protocole-moi.md`](../../backendv2/docs/protocole-moi.md) § 11), une
+  rubrique du tiroir, juste après le chat, avec sa pastille (`counts.projects` : ce qui t'attend). C'est l'écran Projets
+  du client web, d'après la même maquette validée, lue dans ses vues en largeur de téléphone
+  (`output/chaines-de-travail/web/MAQUETTE-V2.md`, ses captures `-390-`) : une liste, puis son détail en page, avec un
+  retour ; ce que le web met dans son panneau latéral est un volet « Infos » ; un formulaire s'ouvre en feuille. **L'app
+  ne recalcule aucune règle** : un bouton n'existe que si le serveur l'ouvre (`can`, `rights`, `gesture`), un geste refusé
+  se dit sur place avec ses mots (`why`, `error`, et sous son champ : `fields`), les libellés d'étape et de statut sont
+  les siens. Un texte venu d'ailleurs (`outside` : une issue d'un inconnu, un commentaire de l'hôte, la fin d'un journal,
+  la sortie d'une commande) se montre sous un liseré en tirets, « venu d'ailleurs », en texte brut ; un texte d'elle se
+  lit en Markdown (le rendu du mode pro). Les couleurs d'état sont les mêmes partout : à toi (ambre), elle y travaille
+  (bleu), fait (vert), en échec ou refusé (rouge), en attente (gris-bleu). Chaque écran se relit à son retour et en
+  tirant ; hors ligne ou en erreur, il le dit et propose de réessayer.
+  - **À faire** : ce qui t'attend dans tous tes projets, groupé par projet (des pastilles filtrent sur un projet ; la
+    suite se lit en fin de liste). Une ligne ouvre de quoi décider (`Route.ProjectTodo`) : pour un accord, exactement ce
+    qui partirait, en texte brut à chasse fixe, et « Accorder » renvoie le condensé lu (éteint si le serveur dit qu'il ne
+    peut pas partir tel quel) ; le plan d'un projet (Valider, Demander une révision) ; un point d'arrêt et sa preuve
+    (Valider, Refuser avec ce qui manque) ; la question d'un ticket (ta réponse, tapée sur place) ; un ticket proposé
+    (Accepter, Écarter) ; le plan d'un ticket, validé en nommant le plan lu ; un élément à ta charge (ses statuts). Les
+    boutons sont en bas, ceux que le serveur ouvre ; sinon sa raison se lit telle quelle, et un geste de l'hôte ouvre sa
+    page dans le navigateur. Une pull request prête se fusionne d'ici quand le serveur l'ouvre — par la même
+    confirmation que dans l'onglet Code (voir « Code ») — et s'ouvre en page ; aucun autre bouton de l'attente ne mène
+    à la fusion (un verdict y tranche son ticket). Décidée, l'attente quitte la liste et l'écran y revient.
+  - **Projets** : tes projets en cartes — son état (ou son plan qui attend), pour qui, où il en est, la progression de
+    ses objectifs (un segment par objectif), ses compteurs (pull requests, tickets ouverts, à toi), sa dernière activité
+    et ses dépendances —, toutes remplies par la liste (`card`). « Nouveau projet » (dans la barre et en fin de liste,
+    si le serveur l'ouvre) : ses champs sont ceux que le serveur décrit ; confié, il s'ouvre.
+  - **La fiche** (`Route.Project(id, tab)`) : son titre, son état, pour qui ; piloter dans la barre, avec le droit servi
+    — donner une consigne, lancer maintenant (confirmé), mettre en pause, reprendre — ; ses onglets, qui défilent en
+    largeur : Vue d'ensemble, Objectifs, Tickets, Code, Documentation, Activité (avec le droit de la lire),
+    Dépendances, et Listes quand le projet en a. **La Vue d'ensemble** est faite de cartes courtes : À toi, où il en
+    est, ses objectifs et leurs barres de jalons, son code (ses pull requests ouvertes, son dernier commit), ses tickets
+    par étape du parcours, son prochain passage (daté par le moteur, jamais estimé ; son rythme, ses consignes en
+    attente, ses missions), ses dépendances. Qui ne fait que voir le projet n'a que la Vue d'ensemble.
+  - **Objectifs** : une bascule Liste | Diagramme. La liste est serrée (le point de son état, son titre, sa barre de
+    jalons dessous, « 1/4 », son âge ; une mission dit sa cadence), filtrée en pastilles (En cours, Missions,
+    Terminés). Un objectif en page (`Route.ProjectGoal`) : « Lancer maintenant », « Modifier », puis ses volets —
+    Jalons (en étapes : son état, comment il se vérifie, sa commande, sa preuve repliée ; un point d'arrêt prêt a
+    Valider et Refuser ; modifier, retirer, ajouter un jalon), Comptes rendus (ses exécutions, sa relecture), Infos
+    (fini quand, où il en est, sa branche et sa pull request avec son statut, ses tickets, le rouvrir, le dire terminé,
+    le retirer). Une mission : ses passages, son rythme, la retirer. Les formulaires lisent `forms` : ce qui peut
+    déclencher une mission, les façons de vérifier un jalon et leurs champs ; modifier n'envoie que ce qui change. **Le
+    diagramme**, en mode « Avancement » : une ligne par objectif et, en retrait (repliables), par jalon ; la part faite
+    (hachurée quand elle t'attend), puis un mot (« atteint le 3 nov. », « 2 exécutions », « attend ta validation »).
+  - **Tickets** : une recherche, ses filtres (À toi, Ouverts, Tous), « Nouveau ticket » (ses sortes et ses priorités
+    sont celles de la fiche ; il dit s'il naîtra proposé), la liste (son numéro, son titre, son étape en pastille, un
+    point ambre quand la main est à toi, sa priorité si elle est haute). Un ticket en page (`Route.ProjectTicket`) : son
+    en-tête et les gestes du moment (accepter, écarter, valider ou refuser son plan, fermer, rouvrir, Modifier), puis
+    ses volets — Description, Plan, Fil (ses bulles, une note ou ta réponse en bas), Historique (l'histoire de ses
+    étapes, mêlée à ce qui est arrivé à ses objectifs), Infos (son parcours en six étapes, `journey` ; à qui la main, sa
+    priorité, sa sorte, qui l'a ouvert ; l'objectif lié, la pull request liée avec son statut — son état, la CI, la
+    relecture —, l'issue et son état).
+  - **Code** (`protocole-moi.md` § 11, « Le code d'un projet ») : six volets dans une barre qui défile — Fichiers,
+    Commits, Pull requests, Branches, Issues, CI (`Route.Project(id, "code/<volet>")`) —, une liste, puis le détail en
+    page (`Route.ProjectCode`), ce que le web met dans son panneau latéral dans un volet « Infos ». Le dépôt en bref
+    (`GET …/code`) dit s'il y a un dépôt et ce qu'elle peut en faire (`rights.files`, `rights.merge`).
+    - **Fichiers** : le choix de la branche ; l'arborescence, un dossier à la fois (un dossier ne se lit qu'en
+      s'ouvrant ; ce qu'il tait de caché se dit) ; un fichier en chasse fixe avec ses numéros de ligne — il défile en
+      largeur **dans son cadre**, ses numéros restent en place, jamais la page — ; un fichier Markdown rendu (le rendu
+      du mode pro, **sans un lien qui s'ouvre** ni une image chargée), avec sa bascule Rendu et Source ; dans « Infos »,
+      son dernier commit, sa branche, ses lignes, son poids, son langage, son historique. Un fichier binaire, trop
+      gros, un lien symbolique ou un fichier caché se dit avec les mots du serveur.
+    - **Commits** : la ligne de temps par jour, le filtre par branche, la suite à la demande ; un commit en page — son
+      message, puis ses fichiers changés avec leurs comptes, chacun replié : le toucher déplie son diff **unifié**, en
+      couleurs, ses deux colonnes de numéros en place (le côte à côte n'a pas sa place à cette largeur). Un diff coupé
+      le dit (`cut_label`), un fichier coupé se relit seul ; sans le droit sur ses fichiers, les mots du serveur.
+    - **Pull requests** : la liste et ses états (un point ambre quand elle attend ta fusion) ; une pull request en
+      volets — Résumé (ce qui la dit finie, les jalons de son objectif et leurs preuves), Commits, Fichiers (son diff),
+      Échanges (ce que l'hôte en dit, cité tel quel) — et « Infos » : sa fusion, sa relecture, ses vérifications une à
+      une, ses conflits, sa branche, le ticket et l'objectif liés. **Modifier** (son titre et son texte, relus chez
+      l'hôte ; seul ce qui change part) et **répondre** dans Échanges, avec `rights.pull_write`. **Fusionner**, avec
+      `rights.merge` et seulement quand le serveur le dit (`merge.can` ; sinon sa raison, `merge.why`) : la pull
+      request **se relit à l'instant**, une confirmation dit ce qui va être fusionné (son titre, sa branche et sa base,
+      ses commits, ses fichiers, où elle en est, son commit de tête), puis la demande nomme **le commit de tête qu'on
+      vient de relire** ; l'état qui suit se lit sur place — demandée, fusionnée, ou refusée avec les mots du serveur.
+      **La route de la fusion n'a qu'un chemin** dans l'app : `ProjectsApi.merge`, sur un `MergeOrder` qui ne naît que
+      d'une pull request relue que le serveur ouvre ; `ProjectsApi.gesture` la refuse, aucun geste générique ne la
+      porte (`MergePathTest` le garde).
+    - **Branches** : la liste (pour quoi elle existe, son retard et son avance, son dernier commit, sa pull request) ;
+      une branche en page : sa pull request, son objectif et son ticket, ce qu'elle a d'avance, ses fichiers changés
+      avec leurs comptes ; « Ses fichiers » et « Ses commits » ouvrent ces volets sur elle.
+    - **Issues** : la liste (si l'hôte ne répond pas, ses mots le disent) ; une issue en volets Description et
+      Échanges — le texte de l'hôte, cité, sous son liseré — et « Infos » : son état chez l'hôte, ses étiquettes, le
+      ticket lié et son étape, l'accepter ou l'écarter quand son registre l'ouvre (`can`), la pull request liée, et ce
+      qui attend ton accord à son sujet (« Lire et décider » mène à « À faire »). Une issue qu'elle ne peut pas lire
+      (`veiled`) dit pourquoi, sans son texte.
+    - **CI** : les vérifications que le moteur suit, par commit ; le détail, relu chez l'hôte s'il y a un dépôt
+      distant : les vérifications une à une (leurs noms sont ceux de l'hôte), la fin du journal d'un échec en chasse
+      fixe, et « Infos » (le commit vérifié, sa pull request, pour quoi).
+    - **Tout texte de l'hôte** (un titre d'issue, un commentaire, une étiquette, le nom d'une vérification, la fin
+      d'un journal, le message d'un commit du dépôt distant) **et tout contenu de fichier ou de diff** se pose en texte
+      brut — présenté comme venu d'ailleurs quand il l'est —, jamais lu comme une mise en forme, jamais rendu
+      cliquable ; les seules adresses qui s'ouvrent sont celles que le serveur compose (« Voir chez l'hôte »). La
+      coloration du code ne pose que des couleurs, jeton par jeton.
+    - Ce que la maquette montre et que l'API ne sert pas n'est pas dans l'app : la façon de fusionner (un commit de
+      fusion ou tout en un) et « Supprimer la branche après la fusion » dans la confirmation, « Relancer » une CI, son
+      numéro et sa durée totale, qui a ouvert une pull request. Le dépôt distant et sa dernière relecture
+      (`remote.web`, `synced_at`) ne sont pas montrés sur téléphone.
+  - Pas encore fait (le lot suivant ; d'ici là l'onglet le dit) : Documentation, Activité, Dépendances, Listes,
+    « Modifier le projet » et l'archiver, les projets archivés. Pas fait, ou autrement que la maquette : le mode « Dans le temps » du diagramme (son axe, ses
+    flèches) ; le diagramme tient en largeur sans défiler (le nom, la barre, le mot sur deux lignes) et une ligne ouvre
+    son objectif plutôt qu'un panneau ; piloter est en icônes dans la barre, sans « Modifier le projet » ; « Lancer
+    maintenant » de la barre demande confirmation (une icône seule, sur un téléphone) ; les avatars des auteurs ne sont
+    pas dessinés (leur nom, tel que le serveur le sert).
 - **Mail** (ADR 0235, l'API par personne : [`protocole-moi.md`](../../backendv2/docs/protocole-moi.md) § 3), une
   rubrique du tiroir. Tes boîtes et celles qu'on te partage, à leur niveau (lire, préparer, s'en servir). Le titre est la
   vue et ouvre une feuille : toutes les réceptions (sans les boîtes qu'on ne te partage qu'en lecture, qui s'ouvrent en
@@ -811,7 +915,27 @@ ou quitté, le GPX après les gestes ; `TripReadsTest` : une relecture forcée s
 où tombe un arrêt glissé, par la clé de sa ligne), « En faire un voyage » fini hors de l'onglet (`ShownOrdersTest`) —
 et Paramètres — ses règles (`SettingsRulesTest` : niveaux et partages, ce qu'un formulaire envoie, les secrets
 à redonner, les refus par champ, la règle d'envoi et sa version, les outils d'un service, les lignes de la page
-racine), `SettingsApi` contre un faux serveur) est du Kotlin pur. Les tests instrumentés (`app/src/androidTest`) éprouvent Room
+racine), `SettingsApi` contre un faux serveur —, Projets — ses règles (`ProjectsRulesTest` : la route et le corps que
+chaque bouton envoie, le plan lu et le condensé lu, les boutons d'une attente — pas un sans le droit servi —, un
+verdict qui passe toujours par `ticket/trancher`, les couleurs d'état, « À faire » par projet, les objectifs en trois
+groupes, les onglets d'une fiche, le parcours et l'histoire d'un ticket, le diagramme en mode « Avancement », les mots
+d'un instant), `ProjectsApi` contre un faux serveur (`ProjectsApiTest` : les exemples du protocole lus tels quels, ce
+que chaque appel envoie, un geste sous le jeton, sans CSRF, avec sa clé d'envoi, les refus avec les mots du serveur),
+ses modèles contre une fausse API (`FakeProjectsApi` ; `ProjectsModelTest` : une relecture en panne qui garde ce qui
+était montré, une attente ouverte et sa décision, un refus dit sur place, un double appui qui ne part qu'une fois, la
+clé d'envoi d'un réessai, ce qui se relit après un geste), son onglet Code — ses règles (`CodeRulesTest` : les volets
+et leurs adresses, une ligne en jetons qui redonne la ligne même, la mise en lignes d'un diff unifié et ses numéros,
+l'arborescence un dossier à la fois, les jours d'une ligne de temps, l'ordre de fusion qui ne naît que d'une pull request
+relue que le serveur ouvre, ce que la confirmation en dit, un geste générique qui ne porte jamais la route de la fusion,
+modifier sans rien envoyer qui ne change), ses lectures contre un faux serveur (`CodeApiTest` : les réponses de
+`project_code.py` lues telles quelles, ce que chaque lecture demande, les textes de l'hôte marqués, la fusion qui nomme
+le numéro et le commit de tête sous le jeton avec sa clé d'envoi, ses refus avec les mots du serveur, `gesture` qui
+n'atteint jamais sa route), **l'unique chemin vers la fusion** (`MergePathTest` : le code de l'app lu sans ses
+commentaires — la route écrite une fois, un seul appel qui l'envoie, un seul endroit qui fabrique son ordre, un seul qui
+le lance) et ses modèles contre la fausse API (`CodeModelTest` : la pull request relue avant la confirmation, le commit
+de tête relu nommé, un refus dit sur place, un double appui, la clé d'envoi après une coupure, la fusion depuis « À
+faire » et aucun autre bouton qui y mène, modifier et répondre, ce que chaque volet lit, l'hôte relu une fois par minute,
+le ticket d'une issue, un fichier Markdown du dépôt rendu sans un lien qui s'ouvre)) est du Kotlin pur. Les tests instrumentés (`app/src/androidTest`) éprouvent Room
 en mémoire (`ChatStoreTest`) et les écrans Compose (`ChatScreenTest`, `LoginScreenTest`, `MindScreenTest`).
 
 ## Organisation du code
@@ -834,7 +958,7 @@ en mémoire (`ChatStoreTest`) et les écrans Compose (`ChatScreenTest`, `LoginSc
 | `data/push` | les notifications par Firebase : ouvrir un message scellé (`PushPayload`), dire au serveur où notifier (`PushRegistrar`) |
 | `push` | Firebase lui-même : le jeton (`FirebasePush`) et la réception (`MikaMessagingService`) |
 | `share` | « Partager vers Mika », raccourci de conversation |
-| `data/moi` | l'API par personne (`/api/moi`, ADR 0235) : `MoiApi` (lire, écrire en JSON ou en `multipart`, clé d'envoi, refus en mots), `MeRepository` (qui est connecté, les pastilles du tiroir), les règles que les domaines partagent (`MoiRules` : niveaux, `SendKey`, « [À COMPLÉTER », refus en mots ; `MoiText` : instants, initiales) ; un sous-paquet par domaine, `mail/` pour Mail (ses formes, `MailApi`, ses règles pures), `teams/` pour Teams (ses formes, `TeamsApi`, `TeamsRules`), `phone/` pour Téléphone (ses formes, `PhoneMoiApi`, `PhoneRules` : sorts de ses propositions et ce qui se décide d'ici, le fil, l'état de tes téléphones et « ce téléphone », la position et son plan), `settings/` pour Paramètres (ses formes, `SettingsApi` — § 5, 7, 8, 9 —, `SettingsRules` : niveaux et partages, état d'une boîte ou d'un service, ce qu'un formulaire envoie, secrets à redonner, refus par champ, règle d'envoi et sa version, outils d'un service, lignes de la page racine), `tools/` pour Outils (les formes de la matrice, `ToolsApi` — § 6 et, par `SettingsApi`, § 8 —, `ToolsRules` : les mots d'une case et de ce qu'elle garde, le canal lu, le nom d'un outil, ressources, groupes et résumés, ce qu'une opératrice voit de plus, les lignes de « Services »), `carte/` pour la Carte (ses formes et le fond servi, `CarteApi` — § 10 —, `MapGeo` et `Polyline` : zone, cercle, zoom, distance, le tracé ; `Scene` : ce qu'une carte montre et son cadrage ; `MapWords` : distances, durées, dates d'un voyage ; `CarteStyle` : le style tiré du web et ce que l'app y pose ; `MapHttp` : le client de MapLibre, ce serveur seul ; `CarteRules` : les adresses et leurs bornes, la légende, ce qu'Explorer montre, la vraie carte ou le plan, les tuiles en échec ; `FicheModels` : les formes des fiches, des événements et des photos (ADR 0259) ; `FicheRules` : les liens du dehors (http ou https), les notes et les avis, les dates de lecture, la couverture, les photos et leur crédit, ce que chaque bloc d'une fiche montre, les filtres et la ligne d'un lieu ; `EventRules` : quand, les jours, la ligne d'un événement, le jour d'un voyage, la fiche d'un événement ; `TripModels` et `TripsApi` : les formes et les appels des itinéraires, des regards et des voyages ; `TripRules` : l'ordre des arrêts et où un geste les met, ce dont le trajet d'un voyage dépend, « Sur la route », ce que la fenêtre d'un voyage envoie ; `RouteRules` : les points d'un itinéraire, tes choix face à ceux de Mika, son GPX ; `TripRequests` : le trajet d'un voyage relu après le dernier geste, les gestes l'un après l'autre, ce qu'un refus fait de la clé ; `MapMinis` : la miniature d'un voyage ou d'un regard et ce qu'elle ouvre, les places des cartes vivantes ; `GpxDownloads` : le GPX d'un itinéraire, dans Téléchargements/Mika) |
+| `data/moi` | l'API par personne (`/api/moi`, ADR 0235) : `MoiApi` (lire, écrire en JSON ou en `multipart`, clé d'envoi, refus en mots), `MeRepository` (qui est connecté, les pastilles du tiroir), les règles que les domaines partagent (`MoiRules` : niveaux, `SendKey`, « [À COMPLÉTER », refus en mots ; `MoiText` : instants, initiales) ; un sous-paquet par domaine, `mail/` pour Mail (ses formes, `MailApi`, ses règles pures), `teams/` pour Teams (ses formes, `TeamsApi`, `TeamsRules`), `phone/` pour Téléphone (ses formes, `PhoneMoiApi`, `PhoneRules` : sorts de ses propositions et ce qui se décide d'ici, le fil, l'état de tes téléphones et « ce téléphone », la position et son plan), `settings/` pour Paramètres (ses formes, `SettingsApi` — § 5, 7, 8, 9 —, `SettingsRules` : niveaux et partages, état d'une boîte ou d'un service, ce qu'un formulaire envoie, secrets à redonner, refus par champ, règle d'envoi et sa version, outils d'un service, lignes de la page racine), `tools/` pour Outils (les formes de la matrice, `ToolsApi` — § 6 et, par `SettingsApi`, § 8 —, `ToolsRules` : les mots d'une case et de ce qu'elle garde, le canal lu, le nom d'un outil, ressources, groupes et résumés, ce qu'une opératrice voit de plus, les lignes de « Services »), `carte/` pour la Carte (ses formes et le fond servi, `CarteApi` — § 10 —, `MapGeo` et `Polyline` : zone, cercle, zoom, distance, le tracé ; `Scene` : ce qu'une carte montre et son cadrage ; `MapWords` : distances, durées, dates d'un voyage ; `CarteStyle` : le style tiré du web et ce que l'app y pose ; `MapHttp` : le client de MapLibre, ce serveur seul ; `CarteRules` : les adresses et leurs bornes, la légende, ce qu'Explorer montre, la vraie carte ou le plan, les tuiles en échec ; `FicheModels` : les formes des fiches, des événements et des photos (ADR 0259) ; `FicheRules` : les liens du dehors (http ou https), les notes et les avis, les dates de lecture, la couverture, les photos et leur crédit, ce que chaque bloc d'une fiche montre, les filtres et la ligne d'un lieu ; `EventRules` : quand, les jours, la ligne d'un événement, le jour d'un voyage, la fiche d'un événement ; `TripModels` et `TripsApi` : les formes et les appels des itinéraires, des regards et des voyages ; `TripRules` : l'ordre des arrêts et où un geste les met, ce dont le trajet d'un voyage dépend, « Sur la route », ce que la fenêtre d'un voyage envoie ; `RouteRules` : les points d'un itinéraire, tes choix face à ceux de Mika, son GPX ; `TripRequests` : le trajet d'un voyage relu après le dernier geste, les gestes l'un après l'autre, ce qu'un refus fait de la clé ; `MapMinis` : la miniature d'un voyage ou d'un regard et ce qu'elle ouvre, les places des cartes vivantes ; `GpxDownloads` : le GPX d'un itinéraire, dans Téléchargements/Mika), `projects/` pour Projets (ADR 0296 ; `ProjectsModels` : les formes de § 11 — la liste et « À faire », la fiche, un élément et son parcours, le diagramme, un champ servi ; `ProjectsApi` : ses lectures et `gesture`, l'écriture de tout geste, ouverte pour qu'une fausse API la remplace ; `ProjectsRules` : la route et le corps que chaque bouton envoie, les boutons d'une attente, les couleurs d'état, ce que l'écran range, les mots d'un instant, le diagramme ; `CodeModels` : les formes du code d'un projet — commits, diff, fichiers, branches, pull requests, issues, vérifications, tout texte de l'hôte marqué ; `CodeRules` : les volets de l'onglet Code et ses pages, la coloration d'une ligne en jetons, la mise en lignes d'un diff unifié, l'arborescence un dossier à la fois, où en est une fusion en mots, `MergeOrder` — l'ordre de fusion, né d'une pull request relue —, modifier une pull request et y répondre) |
 | `ui` | écrans Compose : connexion, conversation, « Ce qu'elle fait », visionneuse |
 | `ui/chat` | la conversation : `ChatScreen` et `ChatViewModel` (le fil, la saisie, la ligne au-dessus du champ et « Tout accepter », le message à montrer), `ChatParts` (la barre, le fil, ses bulles, ses miniatures, le surlignage), `ChatItems` (ce que le fil dessine), `MapNotes` (ses notes de carte, validées), `ApprovalCards` (la ligne repliée, les cartes d'accord, les liens vers ses brouillons) et `ChatTray` (ses règles pures), `StrandParts` (les fils de travail), `SearchScreen` et `SearchRules` (« Rechercher » : les puces, les groupes, le classement, Mail et Teams au serveur), `FilesScreen` et `ExchangedFiles` (« Fichiers échangés ») |
 | `ui/shell` | le cadre des rubriques : `Shell` et `LocalShell` (aller, revenir, le tiroir, les toasts), la barre du haut, le tiroir, la pastille du chat (`ChatCue`), `Load` et `LoadBox`, les icônes de la maquette (`MIcon`) ; `Parts.kt`, les petites formes que Mail et Teams partagent (rond d'initiales, marque, ligne rose, note, ⋮, recherche, ligne de feuille, fenêtre à un champ) |
@@ -843,6 +967,7 @@ en mémoire (`ChatStoreTest`) et les écrans Compose (`ChatScreenTest`, `LoginSc
 | `ui/phone` | Téléphone : la barre (l'état de tes téléphones) et ses onglets, Messages, un fil (ses propositions, répondre d'ici), Position sur la vraie carte (`PositionMap`) et son plan dessiné de repli (`PositionPlan`) ; un ViewModel par écran (celui d'un fil prend `PhoneThreadDeps` — l'API, les gestes d'ici par `PhoneHereGestures`, la portée de l'application — et se teste sur la JVM) |
 | `ui/map` | ce qui sert à toute carte : MapLibre réglé une fois (`MapKit`), les calques du style lus dans les assets, le fond de la session (`MapFondViewModel`), ce qui ne s'est pas dessiné, carte par carte (`LiveRefusal`), la poignée d'un écran sur sa carte (`MapControl`) ; `SceneMap` (la vraie carte ou le plan), `LiveMap` (le `MapView`, son cycle de vie, ce qu'elle pose par-dessus le fond, ses cadrages, ses échecs), `ScenePlan` (le plan dessiné d'une scène), `PinImages` (les épingles en images), `MiniMaps` (ce que montrent les miniatures, lu une fois pour la session — `MiniStore` —, leurs quatre places et leurs refus — `MiniSlots` —, une miniature — `MiniMap`) |
 | `ui/carte` | Carte : `CarteScreen` (la barre et ses quatre onglets, « Nouveau voyage » flottant, `CarteLinks` : ce qu'un onglet demande à un autre, au chat, à un voyage ; ce que la route ouvre : un regard, « Itinéraire jusqu'ici »), `CarteStore` (ce que la Carte partage pour la session : ce qui est branché, ta position, les adresses trouvées, ses regards, tes voyages, chaque voyage lu — `TripReads`, où une relecture forcée suit celle en cours —, les miniatures), `ExplorerViewModel` et `ExplorerTab` (la recherche, ses filtres et son ordre, les adresses, le lieu choisi, un regard de Mika en rose), `PlaceFicheScreen` (la fiche d'un lieu et son modèle, « Actualiser », `TripAdder` : « Au voyage » d'une fiche), `EventsViewModel` et `EventsTab` (Événements : quand, quoi, par jour, ses épingles, ce que Mika a trouvé), `EventFicheScreen` (la fiche d'un événement), `CartePhotos` (le chargeur des photos — ce serveur seul —, la bande, la visionneuse), `FicheParts` (les étoiles, les étiquettes, les faits, la ligne d'une source, `Outside` : un lien dans le navigateur, un numéro dans le composeur), `ItineraryViewModel` et `ItineraryTab` (les points et leurs propositions, le calcul, le regard de Mika, tes choix, le GPX, « En faire un voyage »), `TripsTab` (la liste en cartes), `TripViewModel` (sur `TripDeps`) et `TripScreen` (un voyage : ses gestes l'un après l'autre et montrés d'abord, le voyage et son trajet relus après le dernier, la poignée, la note en place, « Sur la route »), `TripEditorRows` (les lignes de l'éditeur et où tombe un arrêt glissé, sans Compose), `TripDialogs` (« Nouveau voyage », « Le voyage », « Ajouter au voyage », « Ajouter un arrêt »), `CarteMinis` (une miniature et ce qu'elle ouvre ; `MapNoteCard`, pour le chat) |
+| `ui/projects` | Projets (ADR 0296) : `ProjectsScreen` (la rubrique : À faire, Projets, « Nouveau projet »), `TodoScreen` (une attente : ce qu'il faut lire, ses boutons, « Infos »), `ProjectScreen` (la fiche : son en-tête et piloter, ses onglets — `SheetTabContent` est le point d'entrée d'un onglet, `PendingTab` ce qui n'est pas encore écrit, `projectMenu` le menu « ⋮ » —, la Vue d'ensemble), `ObjectivesTab` (la liste serrée, le diagramme), `GoalScreen` (un objectif ou une mission), `TicketViews` (l'onglet Tickets, un ticket), `ProjectForms` (les formulaires en feuille : un objectif, un jalon, un ticket, un projet), `ProjectsParts` (ce que les vues partagent : `StatePill` et `toneOf`, `MilestoneBar`, `SegmentBar`, `OutsideMark` et `OutsideBlock`, `PaneTabs`, `ChipRow`, `GroupLabel`, `Fact`, `LinkedLine`, `PullCard`, `Bubble`, `TimelineRow`, `FormSheet`), `ProjectsViewModels` (`ProjectsDeps` ; `GestureRunner` : un geste à la fois, son refus dit à son endroit, sa clé d'envoi ; la rubrique, un projet — partagé par sa fiche, un objectif, un ticket —, un ticket ; testés sur la JVM) ; l'onglet Code : `CodeTab` (ses six volets et leurs listes ; `pullPage`), `CodeScreens` (`CodeScreen`, la page que `Route.ProjectCode` nomme : un fichier, un commit, une branche), `CodeHostScreens` (une pull request — ses volets, Modifier, répondre, Fusionner —, une issue, les vérifications d'un commit), `CodeParts` (`CodePage` : l'en-tête, les volets qui restent en haut, le contenu ; `sourceLines` et `diffZone` : le code et un diff unifié en chasse fixe, qui défilent en largeur dans leur cadre ; `repoMarkdown` ; `CommitRow`, `PullLinked`, `LinkedCode`, `RunsList`, `MergeStatus`, `MergeDialog`), `CodeViewModels` (`Kept` : une lecture gardée ; `CodeViewModel` : l'onglet, un par projet ; `MergeFlow` : relire, confirmer, demander — la même fusion depuis la page d'une pull request et depuis « À faire » ; une pull request, une issue, des vérifications, un commit ; testés sur la JVM) |
 | `ui/tools` | Outils : `ToolsScreen` (la barre et ses onglets, `ToolsViewModel` : la matrice, tes services, le canal lu et les cartes dépliées, un par session), `RightsTab` (Droits : le canal, les cartes, les pastilles, la règle d'un compte), `ToolSheets` (la feuille des canaux, « Ce qui décide »), `ServicesTab` (Services, Accords) |
 | `ui/settings` | Paramètres : la page racine et l'aiguillage des pages (`SettingsScreen` : `SettingsPages`), les pièces communes (`SettingsParts` : groupes, lignes, champ et son refus, choix, barre « Enregistrer », `SettingsModel`), Compte, Boîtes mail (la liste, une boîte, sa connexion Microsoft, une boîte nouvelle), la règle d'envoi (`RulesEditor`), Comptes Teams (la clé montrée une fois), Téléphones, Partages (et la fenêtre « Partager »), Services MCP (brancher, ses outils) ; « Ce téléphone » (`ThisPhonePages` : notifications, position, ses messages, apparence, données ; `WhereSwitch`, partagé avec Téléphone › Position) ; un ViewModel par sorte de page, rouvert pour chaque page qu'il sert : il prend `SettingsDeps` (l'API, ses textes, les pastilles), un geste fige ce qu'il envoie et ne pose rien sur une autre page (`stillOn`, `sayFor`, `refusedFor`) ; ceux d'une boîte, d'un compte Teams, d'un service et des partages se testent sur la JVM (`FakeSettingsApi`) |
 | `ui/avatar` | Mika en fond : chargement des portraits, l'aura, le souffle, les clignements, le sommeil, son visage dans la barre |

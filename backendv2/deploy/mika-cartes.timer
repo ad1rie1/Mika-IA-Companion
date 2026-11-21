@@ -1,0 +1,12 @@
+[Unit]
+Description=Mika v2 — cartes refaites toutes les deux semaines
+
+[Timer]
+# le 1er et le 15 du mois, la nuit, après la sauvegarde (03:30)
+OnCalendar=*-*-01,15 04:15:00
+RandomizedDelaySec=30min
+# un passage manqué (machine éteinte) est rattrapé au démarrage
+Persistent=true
+
+[Install]
+WantedBy=timers.target

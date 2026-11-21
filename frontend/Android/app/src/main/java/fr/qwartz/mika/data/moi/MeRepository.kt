@@ -26,10 +26,10 @@ data class Me(
 
 /**
  * Les pastilles du tiroir (ADR 0200) : ses brouillons de mail qui attendent, ses réponses Teams qui attendent, ses
- * réponses offertes au téléphone.
+ * réponses offertes au téléphone, ce qui t'attend dans tes projets (« À faire », ADR 0296).
  */
 @Serializable
-data class Counts(val mail: Int = 0, val teams: Int = 0, val phone: Int = 0)
+data class Counts(val mail: Int = 0, val teams: Int = 0, val phone: Int = 0, val projects: Int = 0)
 
 /**
  * Ce que le serveur dit de la personne connectée, relu à l'ouverture, chaque minute tant que l'app est à l'écran

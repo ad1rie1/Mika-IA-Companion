@@ -98,8 +98,23 @@ export function gestureRequest(w: Waiting, action: string, typed: string, read: 
     const plan = action === "validate" ? (read.plan ?? Number(args.plan ?? 0)) : undefined;
     return { route, body: filled({ item: args.item, verdict: action, reason: text, plan }) };
   }
+  if (route === MERGE_ROUTE) {
+    // une pull request prête : sa route est la fusion, mais ce qu'on lit dans « À faire » est son ticket. Un verdict
+    // touché là (écarter, fermer…) tranche le ticket, il ne fusionne pas ; et la fusion ne part jamais d'ici : elle
+    // a sa confirmation, qui nomme le commit lu (`mergeRequest`). Sans route, rien ne part (`send`).
+    if (w.kind === "ticket" && w.number && TICKET_VERDICTS.has(action)) {
+      const plan = action === "validate" ? read.plan : undefined;
+      return { route: "ticket/trancher", body: filled({ item: `#${w.number}`, verdict: action, reason: text, plan }) };
+    }
+    return { route: "", body: {} };
+  }
   return { route, body: filled({ ...args }) };
 }
+
+/** La route de la fusion d'une pull request : jamais envoyée par un geste générique. */
+export const MERGE_ROUTE = "code/pull/fusionner";
+/** Les verdicts d'un ticket (`ticket/trancher`). */
+const TICKET_VERDICTS = new Set(["accept", "dismiss", "validate", "refuse", "done", "reopen"]);
 
 // ── Les gestes de la fiche ───────────────────────────────────────────
 

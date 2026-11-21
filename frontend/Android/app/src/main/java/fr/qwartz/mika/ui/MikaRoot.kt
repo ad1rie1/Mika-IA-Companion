@@ -64,6 +64,12 @@ import fr.qwartz.mika.ui.mail.MailReaderScreen
 import fr.qwartz.mika.ui.mind.MindScreen
 import fr.qwartz.mika.ui.phone.PhoneScreen
 import fr.qwartz.mika.ui.phone.PhoneThreadScreen
+import fr.qwartz.mika.ui.projects.CodeScreen
+import fr.qwartz.mika.ui.projects.GoalScreen
+import fr.qwartz.mika.ui.projects.ProjectScreen
+import fr.qwartz.mika.ui.projects.ProjectsScreen
+import fr.qwartz.mika.ui.projects.TicketScreen
+import fr.qwartz.mika.ui.projects.TodoScreen
 import fr.qwartz.mika.ui.settings.SettingsPageScreen
 import fr.qwartz.mika.ui.settings.SettingsScreen
 import fr.qwartz.mika.ui.teams.TeamsListScreen
@@ -226,6 +232,13 @@ private fun Screen(graph: AppGraph, stack: BackStack, shell: Shell) {
         Route.Mind -> MindScreen(graph, onBack = shell.back)
         Route.Settings -> SettingsScreen(graph)
         is Route.Viewer -> ImageViewerScreen(graph, top, onBack = shell.back)
+        // Projets (ADR 0296) : la rubrique, puis une liste ouvre son détail en page
+        is Route.Projects -> ProjectsScreen(graph, top.tab, if (stack.routes.size <= 2) BarNav.DRAWER else BarNav.BACK)
+        is Route.ProjectTodo -> TodoScreen(graph, top)
+        is Route.Project -> ProjectScreen(graph, top)
+        is Route.ProjectGoal -> GoalScreen(graph, top)
+        is Route.ProjectTicket -> TicketScreen(graph, top)
+        is Route.ProjectCode -> CodeScreen(graph, top)
         Route.Mail -> MailListScreen(graph)
         is Route.MailMessage -> MailReaderScreen(graph, top.ref)
         Route.MailDrafts -> MailDraftsScreen(graph)

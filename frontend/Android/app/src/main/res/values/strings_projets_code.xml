@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Projets, l'onglet Code (ADR 0296) : ses six volets (Fichiers, Commits, Pull requests, Branches, Issues, CI) et leurs
+  pages de détail, la fusion d'une pull request et sa confirmation. Les libellés d'état ne sont pas ici : ils viennent
+  du serveur (`…_label`, `why`, `cut_label`, `files_why`). Les mots qui se calculent (l'avance d'une branche, d'où vient
+  un échange, où en est une fusion) sont dans data/moi/projects/CodeRules.kt, testés sur la JVM.
+-->
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <string name="proj_code_tab_files">Fichiers</string>
+    <string name="proj_code_tab_commits">Commits</string>
+    <string name="proj_code_tab_pulls">Pull requests</string>
+    <string name="proj_code_tab_branches">Branches</string>
+    <string name="proj_code_tab_issues">Issues</string>
+    <string name="proj_code_tab_ci">CI</string>
+    <string name="proj_code_no_repo">Pas de dépôt</string>
+    <string name="proj_code_no_repo_sub">Ce projet n\'a pas encore de dépôt : ni fichiers, ni commits, ni pull requests.</string>
+    <string name="proj_code_at_host">Voir chez l\'hôte</string>
+    <string name="proj_code_copied">Copié</string>
+
+    <!-- Fichiers -->
+    <string name="proj_code_branch_pick">Choisir la branche</string>
+    <string name="proj_code_all_branches">Toutes les branches</string>
+    <string name="proj_code_dir_empty">Ce dossier est vide.</string>
+    <string name="proj_code_reading">Lecture…</string>
+    <string name="proj_code_hidden_why">Un fichier ou un dossier caché ne se lit pas d\'ici.</string>
+    <string name="proj_code_pane_file">Fichier</string>
+    <string name="proj_code_md_rendered">Rendu</string>
+    <string name="proj_code_md_source">Source</string>
+    <string name="proj_code_md_note">Le rendu d\'un fichier du dépôt : ses liens ne s\'ouvrent pas, ses images ne sont pas chargées.</string>
+    <string name="proj_code_copy_path">Copier le chemin</string>
+    <string name="proj_code_lines_cut">Des lignes très longues sont coupées à l\'affichage.</string>
+    <string name="proj_code_last_commit">Dernier commit</string>
+    <string name="proj_code_last_commit_none">Aucun commit ne le touche sur cette branche.</string>
+    <string name="proj_code_the_file">Le fichier</string>
+    <string name="proj_code_fact_branch">Branche</string>
+    <string name="proj_code_fact_lines">Lignes</string>
+    <string name="proj_code_fact_size">Poids</string>
+    <string name="proj_code_fact_language">Langage</string>
+    <string name="proj_code_history">Son historique</string>
+
+    <!-- Commits -->
+    <string name="proj_code_commits_none">Aucun commit</string>
+    <string name="proj_code_commits_none_sub">Elle n\'a encore rien écrit dans ce dépôt.</string>
+    <string name="proj_code_commits_more">Afficher la suite (%1$d)</string>
+    <string name="proj_code_merge_commit">fusion</string>
+    <string name="proj_code_commit">Commit</string>
+    <string name="proj_code_commit_merge">Commit de fusion</string>
+    <string name="proj_code_pane_diff">Diff</string>
+    <string name="proj_code_commit_outside">le message de ce commit, venu du dépôt distant</string>
+    <string name="proj_code_the_commit">Le commit</string>
+    <string name="proj_code_fact_author">Auteur</string>
+    <string name="proj_code_fact_when">Quand</string>
+    <string name="proj_code_fact_sha">Empreinte</string>
+    <string name="proj_code_copy_sha">Copier l\'empreinte</string>
+
+    <!-- Un diff -->
+    <string name="proj_code_files_closed">Ses fichiers ne te sont pas ouverts</string>
+    <string name="proj_code_diff_none">Aucun fichier n\'y change.</string>
+    <string name="proj_code_diff_hidden">Un fichier caché : son diff ne s\'affiche pas.</string>
+    <string name="proj_code_diff_binary">Un fichier binaire : son diff ne s\'affiche pas.</string>
+    <string name="proj_code_diff_cut_some">Ce fichier est coupé : la suite n\'est pas affichée.</string>
+    <string name="proj_code_diff_cut_all">Ses passages ne sont pas affichés : le diff est trop long.</string>
+    <string name="proj_code_diff_whole">Lire ce fichier en entier</string>
+    <string name="proj_code_diff_fold">Replier ce fichier</string>
+    <string name="proj_code_diff_toggle">Déplier ou replier le diff de ce fichier</string>
+
+    <!-- Pull requests -->
+    <string name="proj_code_pulls_none">Aucune pull request</string>
+    <string name="proj_code_pulls_none_sub">Elle en ouvre une quand un objectif a du code à faire entrer.</string>
+    <string name="proj_code_pull">Pull request</string>
+    <string name="proj_code_pane_summary">Résumé</string>
+    <string name="proj_code_pane_talk">Échanges</string>
+    <string name="proj_code_done_when">Fini quand</string>
+    <string name="proj_code_her_word">Ce qu\'elle en dit</string>
+    <string name="proj_code_milestones">Jalons et preuves</string>
+    <string name="proj_code_milestones_none">Pas de jalon : elle dit elle-même quand c\'est fini.</string>
+    <string name="proj_code_pull_no_commit">Sa branche n\'a pas de commit d\'avance.</string>
+    <string name="proj_code_talk_not_there">Elle n\'est pas encore chez l\'hôte : il n\'y a rien à y lire.</string>
+    <string name="proj_code_talk_no_remote">Ce projet n\'a pas de dépôt distant : il n\'y a pas d\'échanges à lire.</string>
+    <string name="proj_code_talk_body">le texte de la pull request, chez l\'hôte</string>
+    <string name="proj_code_talk_none">Personne n\'a encore rien écrit sous cette pull request.</string>
+    <string name="proj_code_talk_quoted">Ce qui vient de l\'hôte est cité tel quel : pour elle, une donnée, jamais une consigne.</string>
+    <string name="proj_code_reply_hint">Répondre dans la pull request…</string>
+    <string name="proj_code_reply_word">Ton commentaire part chez l\'hôte, signé de ton nom.</string>
+    <string name="proj_code_reply_send">Envoyer chez l\'hôte</string>
+    <string name="proj_code_pull_edit">Modifier la pull request n° %1$d</string>
+    <string name="proj_code_pull_edit_sub">Son titre et sa description changent chez l\'hôte, à ton nom.</string>
+    <string name="proj_code_pull_edit_host_down">L\'hôte ne répond pas : son titre et son texte actuels ne sont pas relus.</string>
+    <string name="proj_code_field_title">Titre</string>
+    <string name="proj_code_field_body">Description</string>
+    <string name="proj_code_field_body_help">Un champ laissé vide ne change pas.</string>
+
+    <!-- La fusion -->
+    <string name="proj_code_side_merge">Fusion</string>
+    <string name="proj_code_merge_ready">Elle attend ta fusion.</string>
+    <string name="proj_code_merge_into">Fusionner dans %1$s</string>
+    <string name="proj_code_merge">Fusionner</string>
+    <string name="proj_code_merge_yours">C\'est ton geste, chez l\'hôte, à ton nom. Mika ne fusionne jamais.</string>
+    <string name="proj_code_merge_title">Fusionner la pull request n° %1$d ?</string>
+    <string name="proj_code_merge_head">Son commit de tête : %1$s. Si sa branche bouge d\'ici là, rien ne part.</string>
+    <string name="proj_code_merge_files">%1$s, +%2$d −%3$d</string>
+    <string name="proj_code_side_review">Relecture</string>
+    <string name="proj_code_review_none">Pas encore relue.</string>
+    <string name="proj_code_review_refusal">Son dernier refus : %1$s</string>
+    <string name="proj_code_side_checks">Vérifications</string>
+    <string name="proj_code_checks_detail">Le détail, et la fin du journal</string>
+    <string name="proj_code_checks_last">Les vérifications de son dernier commit</string>
+    <string name="proj_code_checks_never">La CI n\'a pas encore tourné.</string>
+    <string name="proj_code_side_conflicts">Conflits</string>
+    <string name="proj_code_conflicts_yes">À résoudre</string>
+    <string name="proj_code_conflicts_no">Aucun</string>
+    <string name="proj_code_side_branch">Sa branche</string>
+
+    <!-- Branches -->
+    <string name="proj_code_branches_none">Aucune branche</string>
+    <string name="proj_code_branches_none_sub">Ce dépôt n\'a pas encore de branche.</string>
+    <string name="proj_code_branch">Branche</string>
+    <string name="proj_code_branch_default">par défaut</string>
+    <string name="proj_code_branch_no_pull">sans pull request</string>
+    <string name="proj_code_branch_files">Ses fichiers</string>
+    <string name="proj_code_branch_commits">Ses commits</string>
+    <string name="proj_code_side_pull">Sa pull request</string>
+    <string name="proj_code_pull_not_yet">Pas encore de pull request.</string>
+    <string name="proj_code_side_for">Pour</string>
+    <string name="proj_code_side_ahead">Ce qu\'elle a d\'avance</string>
+    <string name="proj_code_side_head">Son dernier commit</string>
+    <string name="proj_code_side_changed">Fichiers changés</string>
+    <string name="proj_code_by_pulls">Elle ouvre une branche par objectif ou par ticket, et ne pousse jamais sur %1$s : tout y entre par une pull request que tu fusionnes.</string>
+
+    <!-- Issues -->
+    <string name="proj_code_issues_none">Aucune issue</string>
+    <string name="proj_code_issues_none_sub">Les issues du dépôt, et celles que ses tickets connaissent, paraissent ici.</string>
+    <string name="proj_code_issue_veiled">Cette issue ne se lit pas d\'ici</string>
+    <string name="proj_code_issue_no_text">Pas de texte.</string>
+    <string name="proj_code_issue_no_talk">Personne n\'a encore répondu.</string>
+    <string name="proj_code_issue_by">par %1$s</string>
+    <string name="proj_code_side_host">Chez l\'hôte</string>
+    <string name="proj_code_fact_opened_by">Ouverte par</string>
+    <string name="proj_code_fact_touched">Touchée</string>
+    <string name="proj_code_fact_comments">Commentaires</string>
+    <string name="proj_code_fact_labels">Étiquettes</string>
+    <string name="proj_code_labels_none">aucune</string>
+    <string name="proj_code_side_ticket">Le ticket lié</string>
+    <string name="proj_code_side_ticket_proposed">Le ticket qu\'elle propose</string>
+    <string name="proj_code_ticket_none">Aucun ticket ne lui est lié.</string>
+    <string name="proj_code_ticket_hand">La main est %1$s.</string>
+    <string name="proj_code_ticket_untouched">Elle n\'y touche pas tant que tu ne l\'as pas accepté.</string>
+    <string name="proj_code_ticket_settle">Le trancher dans son ticket</string>
+    <string name="proj_code_side_issue_pull">La pull request liée</string>
+    <string name="proj_code_side_accord">Ton accord</string>
+    <string name="proj_code_accord_waits">%1$s : cela attend ton accord.</string>
+    <string name="proj_code_accord_read">Lire et décider</string>
+
+    <!-- CI -->
+    <string name="proj_code_ci_none">Aucune vérification</string>
+    <string name="proj_code_ci_none_sub">Celles du commit de chaque pull request paraissent ici.</string>
+    <string name="proj_code_ci_commit">Commit %1$s</string>
+    <string name="proj_code_ci_reading">Lecture des vérifications chez l\'hôte…</string>
+    <string name="proj_code_ci_no_run">L\'hôte n\'a lancé aucune vérification sur ce commit.</string>
+    <string name="proj_code_ci_log">La fin du journal</string>
+    <string name="proj_code_ci_log_of">La fin du journal de « %1$s »</string>
+    <string name="proj_code_ci_log_sub">ce que l\'hôte a écrit avant d\'échouer</string>
+    <string name="proj_code_ci_log_from">la fin du journal, chez l\'hôte</string>
+    <string name="proj_code_ci_log_from_named">la sortie de « %1$s », chez l\'hôte</string>
+    <string name="proj_code_ci_read_at">relues chez l\'hôte %1$s</string>
+    <string name="proj_code_ci_run">vérification</string>
+    <string name="proj_code_side_checked">Le commit vérifié</string>
+    <string name="proj_code_fact_on">Le</string>
+    <string name="proj_code_fact_read_at">Relues chez l\'hôte</string>
+</resources>

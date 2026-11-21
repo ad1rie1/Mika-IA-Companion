@@ -146,6 +146,7 @@ class Projets implements TabHost {
 
   async send(project: number, request: GestureRequest, where: string, done?: (r: GestureDone) => void): Promise<boolean> {
     if (this.ui.busy) return false;
+    if (!request.route) return false;  // un geste sans route ne part pas (la fusion a sa propre confirmation)
     this.ui.busy = where;
     try {
       const r = await sendGesture(project, request.route, request.body, newNonce());

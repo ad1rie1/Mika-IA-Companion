@@ -210,7 +210,8 @@ ou ajouter une faculté : ARCHITECTURE.md, « Écrire une faculté ».
 - **Claude Code.** Une boucle d'outils ne reprend pas après un redémarrage. Le plafond de quota vaut pour les appels de
   fond.
 - **En service** : code dans `/opt/mika/backendv2`, données dans `/var/lib/mika`, environnement dans
-  `/etc/mika/mika.env`, unités `mika.service` et `mika-backup.timer`. Une commande lancée à la main
+  `/etc/mika/mika.env`, unités `mika.service`, `mika-backup.timer` et `mika-cartes.timer` (les cartes, toutes les deux
+  semaines, ADR 0295). Une commande lancée à la main
   (`sudo -u mika … python -m mika`) ne lit pas `mika.env` : passer par la fonction `mika` de `deploy/README.md`, sinon,
   avec MariaDB ou `MIKA_SECRET_KEY`, elle crée des fichiers SQLite ou un nouveau `secret.key`. La restauration
   travaille dans le dossier de données même (ADR 0125).
@@ -224,7 +225,7 @@ ou ajouter une faculté : ARCHITECTURE.md, « Écrire une faculté ».
   commande échoue si le fichier a vieilli : régénérer après tout changement du protocole côté noyau (de même pour
   `frontend/Web/tools/gen_world_protocol.py`).
 - **Android** (`frontend/Android/`) : la conversation (fichiers dans les deux sens, Mika en 3D native avec Filament,
-  portraits pré-rendus en repli), puis par le tiroir Mail, Teams, Carte (MapLibre), Téléphone, Outils et Paramètres
-  (ADR 0235). Lire son `README.md` ; les icônes et le style de la carte se tirent de la maquette et du web par
-  `frontend/Android/tools/icones.py` et `frontend/Android/tools/carte_style.mjs` (`--check`).
+  portraits pré-rendus en repli), puis par le tiroir Projets (ADR 0296), Mail, Teams, Carte (MapLibre), Téléphone,
+  Outils et Paramètres (ADR 0235). Lire son `README.md` ; les icônes et le style de la carte se tirent de la maquette et
+  du web par `frontend/Android/tools/icones.py` et `frontend/Android/tools/carte_style.mjs` (`--check`).
 - **Extension** (`frontend/Extension/`) : lire son `README.md`.

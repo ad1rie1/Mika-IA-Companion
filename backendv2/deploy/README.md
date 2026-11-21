@@ -15,7 +15,7 @@ cd /opt/mika/backendv2
 sudo python3 -m venv .venv                       # Python ≥ 3.12 ; développé et testé en 3.14 — garder la même
                                                  # version que le poste de développement (torch et les pilotes suivent
                                                  # les nouvelles versions de Python avec retard)
-sudo .venv/bin/pip install -e ".[llm,memory,documents]"   # documents : lire les PDF ; + mariadb, plus bas
+sudo .venv/bin/pip install -e ".[llm,memory,documents,cartes]"   # documents : les PDF ; cartes : pyosmium ; + mariadb, plus bas
 sudo dnf install bubblewrap passt iproute git   # ou apt install bubblewrap passt iproute2 git
 ```
 
@@ -77,9 +77,10 @@ commentaire en fin de ligne : il le garderait dans la valeur) :
 Puis :
 
 ```bash
-sudo cp deploy/mika.service deploy/mika-backup.service deploy/mika-backup.timer /etc/systemd/system/
+sudo cp deploy/mika.service deploy/mika-backup.service deploy/mika-backup.timer \
+  deploy/mika-cartes.service deploy/mika-cartes.timer /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now mika.service mika-backup.timer
+sudo systemctl enable --now mika.service mika-backup.timer mika-cartes.timer   # cartes : toutes les deux semaines
 ```
 
 Le serveur écoute sur `127.0.0.1:8001`. Pour l'ouvrir au réseau, place un
@@ -122,7 +123,7 @@ des apps de la Forge : sous MariaDB, ce droit vaut administration) :
 
 ```bash
 sudo dnf install mariadb-server            # ou apt install mariadb-server
-sudo .venv/bin/pip install -e ".[llm,memory,documents,mariadb]"   # mariadb : le pilote PyMySQL
+sudo .venv/bin/pip install -e ".[llm,memory,documents,cartes,mariadb]"   # mariadb : le pilote PyMySQL
 ```
 
 `/etc/my.cnf.d/mika.cnf` (Debian : `/etc/mysql/mariadb.conf.d/90-mika.cnf`) :
@@ -493,8 +494,9 @@ Serveur en marche, sans risque : l'archive neuve ne remplace l'ancienne qu'enti�
 lui-même. Une autre zone : `--zone ouest,sud,est,nord` (en degrés) et `--sortie cartes/<nom>.pmtiles` ; chaque zoom de
 moins divise la taille par quatre environ. Puis, dans la console, Réglages › Carte et téléphone › Carte de sa
 position : « Un fichier PMTiles sur ce serveur », `cartes/france.pmtiles` ; la page dit sa taille, ses zooms et sa
-zone. Pour la mettre à jour, relancer `mika carte extraire` de temps en temps. `cartes/` n'entre dans aucune sauvegarde,
-sauf ses compteurs (`cartes/quotas.db`, ci-dessous).
+zone. Le serveur la refait de lui-même toutes les deux semaines, avec ses polices, l'index des lieux et les données
+touristiques (`mika-cartes.timer`, ADR 0295 ; ci-dessous) ; tout de suite : `sudo systemctl start mika-cartes.service`.
+`cartes/` n'entre dans aucune sauvegarde, sauf ses compteurs (`cartes/quotas.db`, ci-dessous).
 
 Un serveur de carte à part (un `pmtiles serve`, une archive sur un stockage, un serveur `{z}/{x}/{y}` au schéma
 Protomaps ou d'images) se règle au même endroit : ce serveur le joint seul, sans rien de la personne, et en relaie
@@ -506,8 +508,13 @@ adresse, la carte le voit en une minute au plus (elle se rouvre, ou garde son pl
 Les lieux (restaurants, campings, sommets, musées, villes et lieux-dits) se cherchent dans un index de la machine —
 rien ne sort. Il se tire de l'extrait OpenStreetMap de Geofabrik, qui garde ce qu'en dit une fiche (cuisine, horaires,
 téléphone, site, terrasse, végétarien, vegan, accessibilité, à emporter, étoiles…) : les filtres de l'écran et la
-fiche d'un lieu en viennent. Le télécharger et construire l'index **sur le PC** (pyosmium, l'extra `cartes`), puis
-copier l'index seul sur le portable :
+fiche d'un lieu en viennent. **Le serveur le fait lui-même** (pyosmium, l'extra `cartes`) : `mika-cartes.service`
+télécharge l'extrait du jour (~5 Go, gardé sous `cartes/france-latest.osm.pbf`) et reconstruit l'index, le 1er et le 15
+du mois (`mika-cartes.timer`, ADR 0295), après les tuiles et avant les données touristiques. Il tourne à côté de Mika,
+borné (`MemoryMax`), au plus bas de la machine ; ce qu'il a fait se lit par `journalctl -u mika-cartes`. Pour le faire
+tout de suite : `sudo systemctl start mika-cartes.service`.
+
+Sur un serveur trop juste en mémoire, l'index se construit sur un PC, puis se copie seul sur le serveur :
 
 ```bash
 # sur le PC, dans backendv2 : un dossier de données à part, pour la carte seulement
@@ -523,7 +530,7 @@ ssh -t mika-portable 'sudo install -o mika -g mika -m 0644 lieux.db.neuf /var/li
 ```
 
 Serveur en marche, sans risque : l'index neuf ne remplace l'ancien qu'entier, et le serveur le lit à la recherche
-suivante (celles en cours finissent sur l'ancien). Le refaire de temps en temps, sur un extrait du jour. Sans
+suivante (celles en cours finissent sur l'ancien). Sans
 `--depuis`, la commande prend `cartes/france-latest.osm.pbf` s'il est là, sinon `cartes/france.pmtiles` ; une autre
 région de Geofabrik se construit de même (`--depuis cartes/<nom>.osm.pbf`, `--sortie cartes/<nom>.db`). La mémoire ne
 dépend presque pas de la taille de l'extrait : seule la position des nœuds utiles se garde, par tranches
@@ -807,7 +814,7 @@ les souvenirs).
 
 ```bash
 sudo systemctl start mika-backup.service
-cd /opt/mika && sudo git pull && cd backendv2 && sudo .venv/bin/pip install -e ".[llm,memory,documents]"   # les extras de l'installation (+ mariadb)
+cd /opt/mika && sudo git pull && cd backendv2 && sudo .venv/bin/pip install -e ".[llm,memory,documents,cartes]"   # les extras de l'installation (+ mariadb)
 cd /opt/mika/frontendv2 && sudo npm ci && sudo env VITE_BACKEND_ORIGIN= npm run build   # si tu sers frontendv2
 sudo systemctl restart mika
 ```

@@ -431,6 +431,10 @@ private fun screenCatalog(): List<ScreenEntry> {
         ScreenEntry(stringResource(R.string.nav_chat), stringResource(R.string.search_sub_chat), Route.Chat, icon = R.drawable.ic_m_chat),
         ScreenEntry(stringResource(R.string.menu_status), stringResource(R.string.search_sub_mind), Route.Mind, icon = R.drawable.ic_m_sparkle),
         ScreenEntry(stringResource(R.string.files_title), stringResource(R.string.search_sub_files), Route.Files, icon = R.drawable.ic_m_folder),
+        // Projets (ADR 0296) : la rubrique et ses deux volets
+        ScreenEntry(stringResource(R.string.nav_projects), stringResource(R.string.proj_search_sub), Route.Projects(), icon = R.drawable.ic_m_flag),
+        ScreenEntry(sub(stringResource(R.string.nav_projects), stringResource(R.string.proj_tab_todo)), "", Route.Projects("a-faire"), icon = R.drawable.ic_m_inbox),
+        ScreenEntry(sub(stringResource(R.string.nav_projects), stringResource(R.string.proj_tab_projects)), "", Route.Projects("projets"), icon = R.drawable.ic_m_grid),
         ScreenEntry(mail, stringResource(R.string.search_sub_mail), Route.Mail, icon = R.drawable.ic_m_mail),
         ScreenEntry(sub(mail, stringResource(R.string.mail_her_drafts)), stringResource(R.string.search_sub_mail_drafts), Route.MailDrafts, parent = Route.Mail, icon = R.drawable.ic_m_pen),
         ScreenEntry(sub(mail, stringResource(R.string.search_screen_write)), stringResource(R.string.search_sub_mail_compose), Route.MailCompose(), parent = Route.Mail, icon = R.drawable.ic_m_pen),

@@ -110,6 +110,16 @@ describe("l'état de l'écran", () => {
 });
 
 describe("un geste traduit en requête", () => {
+  it("un verdict touché sur le ticket d'une pull request prête tranche le ticket, il ne fusionne jamais", () => {
+    // l'attente d'une pull request prête a pour route la fusion, avec le commit de tête dans ses arguments : l'écran
+    // montre son ticket, et « Écarter » partait vers la fusion
+    const ready = waiting({ what: "merge", number: 2, gesture: { route: "code/pull/fusionner", args: { number: 11, head: "9d2f7c1" }, label: "Fusionner", where: "ici", url: "" } });
+    expect(gestureRequest(ready, "dismiss", " plus utile ")).toEqual({ route: "ticket/trancher", body: { item: "#2", verdict: "dismiss", reason: "plus utile" } });
+    expect(gestureRequest(ready, "done", "")).toEqual({ route: "ticket/trancher", body: { item: "#2", verdict: "done" } });
+    // aucun geste générique n'envoie la fusion : elle a sa confirmation (mergeRequest), qui nomme le commit lu
+    for (const action of ["", "go", "accept-all", "merge"]) expect(gestureRequest(ready, action, "").route).toBe("");
+  });
+
   it("valider le plan d'un ticket nomme le plan lu, pas celui que la liste portait", () => {
     expect(gestureRequest(waiting(), "validate", "", { plan: 815 })).toEqual({ route: "ticket/trancher", body: { item: "#4", verdict: "validate", plan: 815 } });
     expect(gestureRequest(waiting(), "refuse", " pas de troisième commande ")).toEqual({ route: "ticket/trancher", body: { item: "#4", verdict: "refuse", reason: "pas de troisième commande" } });
