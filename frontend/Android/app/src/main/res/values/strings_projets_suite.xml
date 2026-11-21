@@ -1,0 +1,295 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Projets, la suite de la fiche (ADR 0296) : Documentation (ses pages, son éditeur, ses images, ses décisions), Activité
+  (le fil, une exécution, le carnet), Dépendances, Listes, « Modifier le projet », les projets archivés, le diagramme
+  « Dans le temps ». Les libellés d'état, les mots d'un refus, les libellés des champs d'un réglage ne sont pas ici : ils
+  viennent du serveur (`…_label`, `why`, `fields`). Lint lit des mots français comme des fautes d'anglais (« exemple »,
+  « attendent ») : d'où le tools:ignore="Typos" du fichier.
+-->
+<resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="Typos">
+    <string name="proj_x_more">Afficher la suite</string>
+
+    <!-- Documentation : ses volets, ses pages -->
+    <string name="proj_doc_tab_pages">Pages</string>
+    <string name="proj_doc_tab_images">Images</string>
+    <string name="proj_doc_tab_decisions">Décisions</string>
+    <string name="proj_doc_search">Chercher dans les pages…</string>
+    <string name="proj_doc_found_none">Aucune page pour ces mots</string>
+    <string name="proj_doc_found_none_sub">La recherche lit le chemin et le texte des pages.</string>
+    <string name="proj_doc_none">Pas encore de page</string>
+    <string name="proj_doc_none_sub">La documentation du projet s\'écrit ici, à part de son dépôt. Elle la lit et l\'écrit aussi pendant ses exécutions.</string>
+    <string name="proj_doc_none_read">Ce projet n\'a pas encore de documentation.</string>
+    <string name="proj_doc_root">la racine de l\'espace</string>
+    <string name="proj_doc_new">Nouvelle page</string>
+    <string name="proj_doc_new_sub">Dans la documentation de « %1$s »</string>
+    <string name="proj_doc_new_ok">Créer la page</string>
+    <string name="proj_doc_new_title">Son titre</string>
+    <string name="proj_doc_new_title_hint">Par exemple : Dépannage</string>
+    <string name="proj_doc_new_folder">Dossier</string>
+    <string name="proj_doc_new_folder_fresh">Ou un nouveau dossier</string>
+    <string name="proj_doc_new_folder_hint">par exemple : guide/avance</string>
+    <string name="proj_doc_new_path">Son chemin : %1$s</string>
+    <string name="proj_doc_pane_page">Page</string>
+    <string name="proj_doc_empty">Une page vide</string>
+    <string name="proj_doc_empty_sub">Rien n\'y est encore écrit.</string>
+    <string name="proj_doc_forgotten">Le texte de cette page n\'est plus là : il a été oublié.</string>
+    <string name="proj_doc_image_missing">image introuvable : %1$s</string>
+    <string name="proj_doc_image_elsewhere">image d\'ailleurs, non chargée : %1$s</string>
+    <string name="proj_doc_side_outline">Sur cette page</string>
+    <string name="proj_doc_side_last">Dernière modification</string>
+    <string name="proj_doc_side_versions">Versions</string>
+    <string name="proj_doc_fact_path">Chemin</string>
+    <string name="proj_doc_fact_created">Créée</string>
+    <string name="proj_doc_version_n">Version %1$d</string>
+    <string name="proj_doc_version_is_current">actuelle</string>
+    <string name="proj_doc_version_current">C\'est la version actuelle de la page.</string>
+    <string name="proj_doc_version_reading">Lecture…</string>
+    <string name="proj_doc_version_back">Revenir à la page</string>
+    <string name="proj_doc_versions_kept">Les %1$s dernières versions de chaque page sont gardées.</string>
+    <string name="proj_doc_restore">Revenir à cette version</string>
+    <string name="proj_doc_restore_title">Revenir à la version %1$d ?</string>
+    <string name="proj_doc_restore_text">Son texte redevient celui de la page, dans une version de plus : rien n\'est perdu.</string>
+    <string name="proj_doc_move">Renommer ou déplacer</string>
+    <string name="proj_doc_move_ok">Déplacer</string>
+    <string name="proj_doc_move_name">Nom</string>
+    <string name="proj_doc_move_folder">Dossier</string>
+    <string name="proj_doc_move_folder_help">Vide : la racine de l\'espace.</string>
+    <string name="proj_doc_move_note">Ses versions la suivent. Les liens des autres pages ne sont pas réécrits.</string>
+    <string name="proj_doc_delete">Supprimer la page</string>
+    <string name="proj_doc_delete_title">Supprimer cette page ?</string>
+    <string name="proj_doc_delete_text">« %1$s » et toutes ses versions sont supprimées.</string>
+
+    <!-- Documentation : l'éditeur -->
+    <string name="proj_doc_write">Écrire</string>
+    <string name="proj_doc_preview">Aperçu</string>
+    <string name="proj_doc_preview_empty">Rien à montrer : la page est vide.</string>
+    <string name="proj_doc_write_hint">Écris ici, en Markdown. La barre au-dessus du clavier met en forme ce qui est sélectionné.</string>
+    <string name="proj_doc_unsaved">pas encore enregistrée</string>
+    <string name="proj_doc_tool_heading">Titre : texte, titre 1, titre 2, titre 3</string>
+    <string name="proj_doc_tool_bold">Gras</string>
+    <string name="proj_doc_tool_italic">Italique</string>
+    <string name="proj_doc_tool_list">Liste à puces</string>
+    <string name="proj_doc_tool_tasks">Liste à cocher</string>
+    <string name="proj_doc_tool_numbers">Liste numérotée</string>
+    <string name="proj_doc_tool_quote">Citation</string>
+    <string name="proj_doc_tool_code">Code</string>
+    <string name="proj_doc_tool_link">Lien</string>
+    <string name="proj_doc_tool_image">Image</string>
+    <string name="proj_doc_save_title">Enregistrer la page</string>
+    <string name="proj_doc_save_word">Un mot sur ce qui a changé</string>
+    <string name="proj_doc_save_word_hint">Par exemple : ajout de la section Dépannage</string>
+    <string name="proj_doc_save_note">Une version de la page est créée dans l\'espace de documentation, à ton nom. Le dépôt du code n\'est pas touché.</string>
+    <string name="proj_doc_conflict_kept">Rien n\'a été écrasé, et ce que tu as écrit est toujours là.</string>
+    <string name="proj_doc_conflict_see">Voir la version actuelle</string>
+    <string name="proj_doc_conflict_rebase">Reprendre dessus</string>
+    <string name="proj_doc_rebased">Tu repars de la version %1$d, que tu viens de relire. Ton texte est gardé : enregistre pour en faire la version suivante.</string>
+    <string name="proj_doc_current_title">La page, version %1$d</string>
+    <string name="proj_doc_current_take">Prendre cette version</string>
+    <string name="proj_doc_current_take_text">Ce que tu as écrit depuis ta lecture sera remplacé par la version actuelle de la page.</string>
+    <string name="proj_doc_current_take_ok">Remplacer mon texte</string>
+    <string name="proj_doc_leave_title">La page n\'est pas enregistrée</string>
+    <string name="proj_doc_leave_text">Tu peux garder ce brouillon : il sera là quand tu rouvriras cette page, tant que l\'application reste ouverte. Ou le jeter.</string>
+    <string name="proj_doc_leave_keep">Garder le brouillon</string>
+    <string name="proj_doc_leave_drop">Jeter</string>
+    <string name="proj_doc_link_title">Un lien</string>
+    <string name="proj_doc_link_url">Son adresse</string>
+    <string name="proj_doc_link_ok">Insérer</string>
+
+    <!-- Documentation : ses images -->
+    <string name="proj_doc_images_title">Les images de la documentation</string>
+    <string name="proj_doc_images_sub">Une image téléversée se cite dans une page : ![texte](images/nom.png).</string>
+    <string name="proj_doc_images_none">Pas encore d\'image</string>
+    <string name="proj_doc_images_none_sub">Les images téléversées ici, ou depuis une page qu\'on écrit, se rangent dans l\'espace du projet.</string>
+    <string name="proj_doc_images_of_space">Les images de l\'espace</string>
+    <string name="proj_doc_image_upload">Téléverser une image</string>
+    <string name="proj_doc_image_pick">Choisir dans le téléphone</string>
+    <string name="proj_doc_image_sending">Envoi…</string>
+    <string name="proj_doc_image_unreadable">Cette image n\'a pas pu être lue.</string>
+    <string name="proj_doc_image_unused">aucune page ne la cite</string>
+    <string name="proj_doc_image_ref">La référence à coller dans une page</string>
+    <string name="proj_doc_image_copy">Copier la référence</string>
+    <string name="proj_doc_image_remove_title">Retirer cette image ?</string>
+    <string name="proj_doc_image_remove_text">« %1$s » est effacée de l\'espace. Les pages qui la citent la montreront introuvable.</string>
+    <string name="proj_doc_space_used">%1$s utilisés sur %2$s</string>
+    <string name="proj_doc_fact_weight">Poids</string>
+    <string name="proj_doc_fact_added">Ajoutée</string>
+    <string name="proj_doc_fact_used">Citée par</string>
+
+    <!-- Documentation : ses décisions techniques -->
+    <string name="proj_doc_decisions_title">Décisions techniques</string>
+    <string name="proj_doc_decisions_none">Aucune décision consignée</string>
+    <string name="proj_doc_decisions_none_sub">Un choix technique durable se consigne ici : elle le relit avant chaque passage.</string>
+    <string name="proj_doc_decision_n">Décision n° %1$d</string>
+    <string name="proj_doc_pane_decision">La décision</string>
+    <string name="proj_doc_pane_options">Options écartées</string>
+    <string name="proj_doc_options_none">Aucune option écartée n\'est consignée.</string>
+    <string name="proj_doc_choice">Le choix</string>
+    <string name="proj_doc_context">Le contexte</string>
+    <string name="proj_doc_reason">La raison</string>
+    <string name="proj_doc_text_none">Rien n\'est écrit ici.</string>
+    <string name="proj_doc_fact_author">Consignée par</string>
+    <string name="proj_doc_replaces">celle qu\'elle remplace</string>
+    <string name="proj_doc_replaced_by">celle qui la remplace</string>
+
+    <!-- Activité -->
+    <string name="proj_act_tab_feed">Fil</string>
+    <string name="proj_act_tab_runs">Exécutions</string>
+    <string name="proj_act_tab_notebook">Carnet</string>
+    <string name="proj_act_all">Tout</string>
+    <string name="proj_act_all_goals">Tous les objectifs</string>
+    <string name="proj_act_none">Rien pour ce filtre</string>
+    <string name="proj_act_none_sub">Change de sorte ou d\'objectif pour retrouver le fil.</string>
+    <string name="proj_act_cut">Trop d\'événements : ce compte est incomplet.</string>
+    <string name="proj_act_reading">Lecture…</string>
+    <string name="proj_act_side_days">Trente derniers jours</string>
+    <string name="proj_act_side_by">Qui a fait quoi</string>
+    <string name="proj_act_days_cut">Trop d\'événements : les jours les plus anciens sont incomplets.</string>
+    <string name="proj_act_days_from">il y a trente jours → aujourd\'hui</string>
+    <string name="proj_act_days_peak">au plus %1$s par jour</string>
+    <string name="proj_act_runs_none">Pas encore d\'exécution</string>
+    <string name="proj_act_runs_none_sub">Chaque séance de travail laisse ici son compte rendu, pas à pas.</string>
+    <string name="proj_act_run_over">Exécution · %1$s</string>
+    <string name="proj_act_pane_steps">Pas à pas</string>
+    <string name="proj_act_steps_title">Ce qu\'elle a fait, pas à pas</string>
+    <string name="proj_act_steps_gone">Sa trace n\'est plus gardée : elle l\'est quatorze jours.</string>
+    <string name="proj_act_steps_cut">Trop de pas pour tous les montrer : les deux cents premiers.</string>
+    <string name="proj_act_step_not_run">pas lancé</string>
+    <string name="proj_act_fact_verdict">Verdict</string>
+    <string name="proj_act_fact_duration">Durée</string>
+    <string name="proj_act_proven">sa sortie fait preuve</string>
+    <string name="proj_act_side_need">Ce qu\'elle t\'a demandé</string>
+    <string name="proj_act_see_todo">Voir dans À faire</string>
+    <string name="proj_act_side_about">Sur quoi</string>
+    <string name="proj_act_side_commit">Son commit</string>
+    <string name="proj_act_notebook_title">Son carnet</string>
+    <string name="proj_act_notebook_sub">Ce qu\'elle note pour elle-même en travaillant. Elle le relit avant chaque passage.</string>
+    <string name="proj_act_notebook_none">Carnet vide</string>
+    <string name="proj_act_notebook_none_sub">Elle n\'a encore rien noté sur ce projet.</string>
+    <string name="proj_act_notebook_none_goal">Elle n\'a rien noté sur cet objectif.</string>
+
+    <!-- Dépendances -->
+    <string name="proj_dep_tab_schema">Schéma</string>
+    <string name="proj_dep_tab_demands">Demandes</string>
+    <string name="proj_dep_unknown">Ce projet ne dit rien de ses liens.</string>
+    <string name="proj_dep_goals_open">objectifs en cours</string>
+    <string name="proj_dep_tickets_open">tickets ouverts</string>
+    <string name="proj_dep_asks_sent">demandes envoyées</string>
+    <string name="proj_dep_reads_sub">les projets qu\'il lit</string>
+    <string name="proj_dep_readers_sub">les projets qui le lisent</string>
+    <string name="proj_dep_reads_none">Il ne dépend d\'aucun autre projet.</string>
+    <string name="proj_dep_readers_none">Aucun projet ne dépend de lui.</string>
+    <string name="proj_dep_plan_asks">Son plan demande à lire %1$s.</string>
+    <string name="proj_dep_schema_hint">Touche un projet pour voir ce que le lien donne, et les demandes entre les deux.</string>
+    <string name="proj_dep_read_by_it">lu par ce projet</string>
+    <string name="proj_dep_reads_it">lit ce projet</string>
+    <string name="proj_dep_suspended">suspendu</string>
+    <string name="proj_dep_suspended_long">Ce lien est suspendu : il ne donne rien pour l\'instant.</string>
+    <string name="proj_dep_no_demand">aucune demande</string>
+    <string name="proj_dep_give_see">le voir</string>
+    <string name="proj_dep_give_see_sub">le minimum : son nom, son état, où il en est</string>
+    <string name="proj_dep_give_detail">son détail</string>
+    <string name="proj_dep_give_detail_sub">ses objectifs, ses tickets, son activité</string>
+    <string name="proj_dep_give_files">ses fichiers</string>
+    <string name="proj_dep_give_files_sub">le dépôt, en lecture</string>
+    <string name="proj_dep_give_docs">sa documentation</string>
+    <string name="proj_dep_give_docs_sub">ses pages, en lecture</string>
+    <string name="proj_dep_gives_hint">Ce que le lien donne — le voir, son détail, ses fichiers, sa documentation — vient des lignes d\'accès du projet lu : cela ne se choisit pas ici.</string>
+    <string name="proj_dep_gives_read_hint">Ce qu\'un lien donne vient des lignes d\'accès du projet lu : cela se lit ici, sans s\'y régler.</string>
+    <string name="proj_dep_head_reads">« %1$s » le lit</string>
+    <string name="proj_dep_head_reader">il lit « %1$s »</string>
+    <string name="proj_dep_since">depuis le %1$s</string>
+    <string name="proj_dep_hidden_hint">Tu ne vois pas ce projet : ce que le lien donne se dit, quel projet, non. Un tel lien reste tel quel.</string>
+    <string name="proj_dep_gone">Ce lien n\'est plus là</string>
+    <string name="proj_dep_gone_sub">Il a été retiré, ou le projet ne le dit plus.</string>
+    <string name="proj_dep_side_gives">Ce que le lien lui donne</string>
+    <string name="proj_dep_side_gives_reader">Ce qu\'il lui donne</string>
+    <string name="proj_dep_side_commit">Le commit que montre la vue</string>
+    <string name="proj_dep_side_asks">Ses demandes</string>
+    <string name="proj_dep_side_between">Les demandes entre les deux</string>
+    <string name="proj_dep_between_none">Aucune demande entre ces deux projets.</string>
+    <string name="proj_dep_direct">Ses demandes y entrent directement</string>
+    <string name="proj_dep_direct_sub">sinon, chacune est proposée à son propriétaire</string>
+    <string name="proj_dep_why_say">Dire pourquoi il le lit</string>
+    <string name="proj_dep_why_change">Changer ce mot</string>
+    <string name="proj_dep_why_title">Le mot du lien</string>
+    <string name="proj_dep_why_hint">Par exemple : pour citer ses commandes sans les inventer</string>
+    <string name="proj_dep_why_help">Pourquoi ce projet lit l\'autre. Il se lit sur le schéma.</string>
+    <string name="proj_dep_open">Ouvrir « %1$s »</string>
+    <string name="proj_dep_remove">Retirer la dépendance</string>
+    <string name="proj_dep_remove_text">« %1$s » ne lira plus « %2$s ». Le mot du lien est perdu.</string>
+    <string name="proj_dep_add">Ajouter une dépendance</string>
+    <string name="proj_dep_add_sub">« %1$s » lira un autre projet.</string>
+    <string name="proj_dep_add_project">Le projet dont il dépendra</string>
+    <string name="proj_dep_add_none">Aucun projet à lui faire lire</string>
+    <string name="proj_dep_add_none_sub">Il lit déjà ceux qu\'il peut lire, ou tu n\'en vois pas d\'autre.</string>
+    <string name="proj_dep_would">donnerait :</string>
+    <string name="proj_dep_would_nothing">ne donnerait rien pour l\'instant</string>
+    <string name="proj_dep_ask">Lui demander quelque chose</string>
+    <string name="proj_dep_ask_ok">Demander</string>
+    <string name="proj_dep_ask_title">Ce que tu lui demandes</string>
+    <string name="proj_dep_ask_title_hint">Par exemple : exposer la liste des hôtes en JSON</string>
+    <string name="proj_dep_ask_text">Pourquoi, et pour quand</string>
+    <string name="proj_dep_ask_proposed">Le ticket naîtra proposé : le propriétaire de ce projet l\'accepte ou l\'écarte.</string>
+    <string name="proj_dep_ask_open">Le ticket s\'ouvre chez ce projet : elle le lira à son prochain passage.</string>
+    <string name="proj_dep_demands_title">Demandes entre projets</string>
+    <string name="proj_dep_demands_none">Aucune demande</string>
+    <string name="proj_dep_demands_none_sub">Ni reçue, ni envoyée.</string>
+    <string name="proj_dep_demand_veiled">Une demande que tu ne lis pas</string>
+    <string name="proj_dep_demand_veiled_hint">Son titre ne se lit pas d\'ici : il se lit là où vit le ticket, par qui peut le lire.</string>
+    <string name="proj_dep_demand_n">Demande n° %1$d</string>
+    <string name="proj_dep_received">Demande reçue</string>
+    <string name="proj_dep_sent">Demande envoyée</string>
+    <string name="proj_dep_yours">Ton ticket chez lui</string>
+    <string name="proj_dep_from">de %1$s</string>
+    <string name="proj_dep_to">à %1$s</string>
+    <string name="proj_dep_lede_received">Le projet %1$s a demandé quelque chose à ce projet : ici, c\'est le ticket n° %2$d.</string>
+    <string name="proj_dep_lede_yours">Tu as ouvert ce ticket toi-même chez %1$s : c\'est le tien, pas une demande de « %2$s ».</string>
+    <string name="proj_dep_lede_sent">Ce projet a demandé quelque chose à %1$s : là-bas, c\'est le ticket n° %2$d, et c\'est là que son texte et son fil se lisent.</string>
+    <string name="proj_dep_fact_fine">Précision</string>
+    <string name="proj_dep_fact_closed">Close</string>
+    <string name="proj_dep_ticket_hidden">Tu ne vois pas le projet où vit ce ticket : il ne se lit pas d\'ici.</string>
+
+    <!-- Listes -->
+    <string name="proj_list_none">Pas de liste</string>
+    <string name="proj_list_none_sub">Ce projet ne suit aucune liste.</string>
+    <string name="proj_list_living">%1$d en cours sur %2$d</string>
+    <string name="proj_list_nothing">Rien ici.</string>
+    <string name="proj_list_notes">%1$s dans son fil</string>
+    <string name="proj_list_partial">Les %1$s derniers touchés, sur %2$s.</string>
+    <string name="proj_list_assign">Changer à qui il est</string>
+    <string name="proj_list_change_status">Changer son statut</string>
+    <string name="proj_list_add_title">Ajouter à « %1$s »</string>
+    <string name="proj_list_add_name">Nom</string>
+    <string name="proj_list_add_text">Ce qu\'il faut en savoir</string>
+    <string name="proj_list_veiled">Cet élément ne se lit pas d\'ici</string>
+    <string name="proj_list_fact_key">Clé</string>
+
+    <!-- Modifier le projet -->
+    <string name="proj_set_title">Modifier le projet</string>
+    <string name="proj_set_see">Voir ses réglages</string>
+    <string name="proj_set_what">Ce qui se règle</string>
+    <string name="proj_set_none">Rien à régler</string>
+    <string name="proj_set_none_sub">Ce projet n\'a pas de réglage ouvert d\'ici.</string>
+    <string name="proj_set_project">Le projet</string>
+    <string name="proj_set_archive">Archiver le projet</string>
+    <string name="proj_set_archive_text">« %1$s » ne travaillera plus et ne te demandera plus rien. Rien n\'est effacé : il se désarchive depuis la liste des projets.</string>
+    <string name="proj_set_archive_ok">Archiver</string>
+    <string name="proj_set_archive_hint">Archivé, un projet ne travaille plus et ne te demande plus rien ; rien n\'est effacé, et il se désarchive depuis la liste des projets.</string>
+    <string name="proj_set_not_renamable">Un projet qu\'elle a ouvert d\'elle-même ne se renomme pas.</string>
+    <string name="proj_set_yes">oui</string>
+    <string name="proj_set_no">non</string>
+    <string name="proj_set_empty">—</string>
+
+    <!-- Les projets archivés -->
+    <string name="proj_archived_title">Archivés</string>
+    <string name="proj_archived_since">archivé le %1$s</string>
+    <string name="proj_archived_restore">Désarchiver</string>
+
+    <!-- Le diagramme, dans le temps -->
+    <string name="proj_time_progress">Avancement</string>
+    <string name="proj_time_time">Dans le temps</string>
+    <string name="proj_time_days">Jours</string>
+    <string name="proj_time_weeks">Semaines</string>
+    <string name="proj_time_later">à suivre · sans date</string>
+    <string name="proj_time_hint">De vraies dates seulement : ce qui n\'a pas commencé se range après aujourd\'hui, dans l\'ordre du plan, sans date. La piste défile en largeur.</string>
+</resources>

@@ -7,6 +7,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -68,7 +75,8 @@ import fr.qwartz.mika.ui.shell.MIcon
  * L'onglet Objectifs d'une fiche (ADR 0296) : une bascule Liste | Diagramme. La liste est serrée — une ligne par
  * objectif : un point à la couleur de son état, son titre, sa barre de jalons dessous, « 1/4 » et son âge ; une mission
  * dit sa cadence à la place de la barre — et ouvre le détail en page. Le diagramme montre les objectifs et, en retrait,
- * leurs jalons, chacun avec sa barre, dans son mode « Avancement » : les barres partent du même bord.
+ * leurs jalons, chacun avec sa barre, en deux modes : « Avancement » (les barres partent du même bord) et « Dans le
+ * temps » ([TimeDiagram] : un axe en jours ou en semaines, de vraies dates seulement).
  */
 
 @Composable
@@ -197,9 +205,39 @@ private fun DiagramView(vm: ProjectViewModel, sheet: Sheet, now: Long) {
             RefusalNote(load.error.message)
             OutlinedButton(onClick = { vm.loadDiagram() }) { Text(stringResource(R.string.retry)) }
         }
-        is Load.Ready -> DiagramRows(vm, sheet, load.value, now)
+        is Load.Ready -> {
+            // « Avancement » (les barres partent du même bord) ou « Dans le temps » ; là, en jours ou en semaines
+            var time by rememberSaveable { mutableStateOf(false) }
+            var picked by rememberSaveable { mutableIntStateOf(SCALE_AUTO) }
+            var shown by remember { mutableStateOf(false) }
+            Column(Modifier.fillMaxSize()) {
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    SingleChoiceSegmentedButtonRow {
+                        SegmentedButton(selected = !time, onClick = { time = false }, shape = SegmentedButtonDefaults.itemShape(0, 2), label = { Text(stringResource(R.string.proj_time_progress), maxLines = 1) })
+                        SegmentedButton(selected = time, onClick = { time = true }, shape = SegmentedButtonDefaults.itemShape(1, 2), label = { Text(stringResource(R.string.proj_time_time), maxLines = 1) })
+                    }
+                    if (time) {
+                        Spacer(Modifier.width(10.dp))
+                        SingleChoiceSegmentedButtonRow {
+                            SegmentedButton(selected = !shown, onClick = { picked = SCALE_DAYS }, shape = SegmentedButtonDefaults.itemShape(0, 2), label = { Text(stringResource(R.string.proj_time_days), maxLines = 1) })
+                            SegmentedButton(selected = shown, onClick = { picked = SCALE_WEEKS }, shape = SegmentedButtonDefaults.itemShape(1, 2), label = { Text(stringResource(R.string.proj_time_weeks), maxLines = 1) })
+                        }
+                    }
+                }
+                if (time) {
+                    TimeDiagram(vm, sheet, load.value, now, if (picked == SCALE_AUTO) null else picked == SCALE_WEEKS) { shown = it }
+                } else {
+                    DiagramRows(vm, sheet, load.value, now)
+                }
+            }
+        }
     }
 }
+
+/** L'échelle du diagramme dans le temps : celle qui tient dans la piste, ou celle qu'on a choisie. */
+private const val SCALE_AUTO = 0
+private const val SCALE_DAYS = 1
+private const val SCALE_WEEKS = 2
 
 @Composable
 private fun DiagramRows(vm: ProjectViewModel, sheet: Sheet, d: Diagram, now: Long) {

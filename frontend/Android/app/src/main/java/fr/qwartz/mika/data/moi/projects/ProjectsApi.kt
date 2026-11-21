@@ -15,6 +15,8 @@ import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import okhttp3.MultipartBody
+import okhttp3.RequestBody
 
 /**
  * Les projets par l'API par personne (`backendv2/docs/protocole-moi.md` § 11), sous le jeton du téléphone, qui écrit
@@ -26,10 +28,12 @@ import kotlinx.serialization.json.JsonPrimitive
  *
  * Ouverte, pour que les modèles d'écran se testent contre une fausse API. Son code se lit ici aussi (`…/code/…`, ses
  * formes dans `CodeModels.kt`) ; modifier une pull request et y répondre passent par [gesture], **la fusionner par
- * [merge] seulement**. Les lots suivants y ajoutent leurs lectures (`…/docs/…`, `…/activite/…`, `…/reglages`) : une
- * méthode par route, sa forme dans `ProjectsModels.kt` ou un fichier à côté ; leurs écritures passent par [gesture].
+ * [merge] seulement**. Sa documentation (`…/documentation/…`, `DocsModels.kt`), son activité (`…/activite/…`,
+ * `…/executions`, `…/carnet`) et ses réglages (`…/reglages`, `ActivityModels.kt`) s'y lisent de même ; leurs écritures
+ * passent par [gesture], sauf les deux qui partent en `multipart/form-data` : enregistrer une page ([saveDoc], qui nomme
+ * la version lue) et téléverser une image ([uploadDocImage], par [uploads] : le client sans délai global).
  */
-open class ProjectsApi(private val api: MoiApi) {
+open class ProjectsApi(private val api: MoiApi, private val uploads: MoiApi = api) {
     // ── Lire ──
 
     /** Ses projets, ceux où quelque chose l'attend d'abord, et la première page d'« À faire ». */
@@ -152,7 +156,86 @@ open class ProjectsApi(private val api: MoiApi) {
     open suspend fun commitChecks(id: Int, sha: String): MoiApi.Result<HostChecks> =
         api.get("$ROOT/$id/code/ci/commit", linkedMapOf("sha" to sha), HostChecks.serializer())
 
+    // ── Lire sa documentation (§ 11, « La documentation d'un projet ») ──
+
+    /** L'espace en entier : ses droits, ses bornes, ses pages à plat, ses dossiers, ses images. */
+    open suspend fun docs(id: Int): MoiApi.Result<DocSpace> = api.get("$ROOT/$id/$DOCS", reader = DocSpace.serializer())
+
+    /** Une page : sa ligne, son Markdown, et si elle peut l'écrire. Sa `version` est celle qu'un enregistrement nomme. */
+    open suspend fun docPage(id: Int, path: String): MoiApi.Result<DocPage> =
+        api.get("$ROOT/$id/$DOCS/page", linkedMapOf("path" to path), DocPage.serializer())
+
+    /** Les versions gardées d'une page, de la plus récente à la plus ancienne. */
+    open suspend fun docHistory(id: Int, path: String): MoiApi.Result<DocHistory> =
+        api.get("$ROOT/$id/$DOCS/historique", linkedMapOf("path" to path), DocHistory.serializer())
+
+    /** Une version gardée, avec son texte. */
+    open suspend fun docVersion(id: Int, path: String, n: Int): MoiApi.Result<DocVersion> =
+        api.get("$ROOT/$id/$DOCS/version", linkedMapOf("path" to path, "n" to n.toString()), DocVersion.serializer())
+
+    /** Les pages dont le chemin ou le texte contient ces mots, chacune avec le passage. */
+    open suspend fun docSearch(id: Int, q: String): MoiApi.Result<DocFound> =
+        api.get("$ROOT/$id/$DOCS/chercher", linkedMapOf("q" to q.trim().take(QUERY_MAX)), DocFound.serializer())
+
+    /**
+     * L'adresse des octets d'une image de l'espace, servie par ce serveur à qui peut lire la documentation : **la seule
+     * adresse d'image qu'une page fait charger**, sous la session de l'app ; `null` hors session.
+     */
+    open fun docImageUrl(id: Int, name: String): String? = api.url("$ROOT/$id/$DOCS/image", linkedMapOf("name" to name))?.toString()
+
+    /** Ses décisions techniques, toutes (aussi celles qu'une autre remplace), les plus récentes d'abord. */
+    open suspend fun decisions(id: Int): MoiApi.Result<DecisionList> =
+        api.get("$ROOT/$id/decisions", linkedMapOf("status" to "all"), DecisionList.serializer())
+
+    /** Une décision : le choix, le contexte, les options écartées, la raison. */
+    open suspend fun decision(id: Int, number: Int): MoiApi.Result<Decision> =
+        api.get("$ROOT/$id/decision", linkedMapOf("number" to number.toString()), Decision.serializer())
+
+    // ── Lire son activité (§ 11, « L'activité d'un projet ») ──
+
+    /** Les trente derniers jours : un compte par sorte et par jour, qui a fait quoi. */
+    open suspend fun activityDays(id: Int): MoiApi.Result<ActivityDays> = api.get("$ROOT/$id/activite/jours", reader = ActivityDays.serializer())
+
+    /** Ses totaux sur toute son histoire, pour ce filtre ; les notes de son carnet, ses exécutions. */
+    open suspend fun activityTotals(id: Int, objective: Int = 0): MoiApi.Result<ActivityTotals> =
+        api.get("$ROOT/$id/activite/totaux", linkedMapOf("objective" to objective.takeIf { it > 0 }?.toString()), ActivityTotals.serializer())
+
+    /** Ses exécutions, de la plus récente ; [before] : le curseur de la page d'avant. */
+    open suspend fun runs(id: Int, before: Long = 0): MoiApi.Result<RunPage> =
+        api.get("$ROOT/$id/executions", linkedMapOf("before" to before.takeIf { it > 0 }?.toString()), RunPage.serializer())
+
+    /** Une exécution : son compte rendu entier, ce qu'elle a demandé, ce qu'elle a fait pas à pas. */
+    open suspend fun run(id: Int, run: String): MoiApi.Result<Run> = api.get("$ROOT/$id/execution", linkedMapOf("id" to run), Run.serializer())
+
+    /** Les notes de son carnet, les plus récentes d'abord ; [objective] : celles qui le visaient. */
+    open suspend fun notebook(id: Int, objective: Int = 0, before: Long = 0): MoiApi.Result<NotebookPage> =
+        api.get(
+            "$ROOT/$id/carnet",
+            linkedMapOf("objective" to objective.takeIf { it > 0 }?.toString(), "before" to before.takeIf { it > 0 }?.toString()),
+            NotebookPage.serializer(),
+        )
+
+    // ── Gérer (§ 11, « Gérer un projet ») ──
+
+    /** Ses réglages en sections : chaque champ avec son libellé, sa valeur, et si elle peut le changer. */
+    open suspend fun settings(id: Int): MoiApi.Result<ProjectSettings> = api.get("$ROOT/$id/reglages", reader = ProjectSettings.serializer())
+
+    /** Les projets archivés qu'elle peut restaurer. */
+    open suspend fun archives(): MoiApi.Result<Archives> = api.get("$ROOT/archives", reader = Archives.serializer())
+
     // ── Écrire ──
+
+    /**
+     * Enregistrer une page : **une version de plus, partie de la version lue** ([DocSave.base] ; 0 : une page nouvelle).
+     * Si quelqu'un l'a changée depuis, le serveur refuse (409, en mots) et rien n'est écrasé. En `multipart/form-data` :
+     * un corps JSON est borné à 64 Kio, une page à 100 000 caractères.
+     */
+    open suspend fun saveDoc(id: Int, save: DocSave, key: String? = MoiApi.newKey()): MoiApi.Result<PageSaved> =
+        api.postForm("$ROOT/$id/$DOCS/page/enregistrer", saveForm(save), key).decode(PageSaved.serializer())
+
+    /** Téléverser une image : elle rejoint les images de l'espace, sous le nom que le serveur rend. */
+    open suspend fun uploadDocImage(id: Int, image: DocUpload, key: String? = MoiApi.newKey()): MoiApi.Result<ImageSaved> =
+        uploads.postForm("$ROOT/$id/$DOCS/image/televerser", imageForm(image), key).decode(ImageSaved.serializer())
 
     /** Lui confier un projet : il naît à cadrer → [GestureDone.project], à ouvrir. */
     open suspend fun create(body: JsonObject, key: String? = MoiApi.newKey()): MoiApi.Result<GestureDone> =
@@ -187,6 +270,22 @@ open class ProjectsApi(private val api: MoiApi) {
         const val QUERY_MAX = 120
         /** Les commits lus d'un coup (le serveur en rend cent au plus). */
         const val COMMITS_PAGE = 50
+        /** L'espace de documentation d'un projet, sous sa racine. */
+        const val DOCS = "documentation"
+
+        /** Le corps d'un enregistrement : `base` part toujours — un zéro (une page nouvelle) est une valeur, pas une absence. */
+        internal fun saveForm(save: DocSave): MultipartBody {
+            val b = MultipartBody.Builder().setType(MultipartBody.FORM)
+                .addFormDataPart("path", save.path)
+                .addFormDataPart("text", save.text)
+                .addFormDataPart("base", save.base.toString())
+            if (save.word.isNotEmpty()) b.addFormDataPart("word", save.word)
+            return b.build()
+        }
+
+        /** Le corps d'un téléversement : un fichier, sous `files` (comme le formulaire du web). */
+        internal fun imageForm(image: DocUpload): MultipartBody =
+            MultipartBody.Builder().setType(MultipartBody.FORM).addFormDataPart("files", image.name, image.body()).build()
 
         /** Une réponse qui porte un diff à côté d'autre chose (`commit`, `branch`, `pull`) : lue deux fois. */
         internal fun <H, T> diffed(got: MoiApi.Result<JsonObject>, head: KSerializer<H>, make: (H, Diff) -> T): MoiApi.Result<T> = when (got) {
@@ -216,6 +315,9 @@ open class ProjectsApi(private val api: MoiApi) {
         const val NOT_A_GESTURE = "Ce geste ne part pas d'ici."
     }
 }
+
+/** Une image choisie dans le téléphone, prête à partir : son nom, son poids, et son contenu lu seulement au moment d'envoyer. */
+class DocUpload(val name: String, val size: Long, val body: () -> RequestBody)
 
 /** La valeur d'un champ servi, quelle que soit sa sorte JSON (un texte, un nombre, un booléen, rien) : son texte. */
 internal object LooseText : KSerializer<String> {

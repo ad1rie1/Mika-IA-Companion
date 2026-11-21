@@ -94,8 +94,8 @@ import fr.qwartz.mika.ui.theme.mika
  * lancer maintenant, mettre en pause, reprendre), ses onglets qui défilent en largeur, puis l'onglet montré. Pas de page
  * qui empile tout : la Vue d'ensemble est faite de cartes courtes, et chaque liste ouvre son détail en page.
  *
- * Pour les lots suivants : un onglet se branche dans [SheetTabContent] (Code y est : [CodeTab] ; Documentation, Activité,
- * Dépendances, Listes : aujourd'hui [PendingTab]), « Modifier le projet » et « Archiver » dans [projectMenu].
+ * Un onglet se branche dans [SheetTabContent] : la Vue d'ensemble, [ObjectivesTab], [TicketsTab], [CodeTab], [DocsTab],
+ * [ActivityTab], [LinksTab], [ListsTab] ; « Modifier le projet » (ses réglages, la pause, l'archiver) dans [projectMenu].
  */
 
 /** Le modèle d'un projet, que ses écrans partagent (la fiche, un objectif, un ticket) : un par projet et par session. */
@@ -183,11 +183,17 @@ fun ProjectScreen(graph: AppGraph, route: Route.Project) {
 }
 
 /**
- * Ce que le menu « ⋮ » de la fiche offre. Vide dans ce lot : « Modifier le projet » et « Archiver » (`rights.frame`) s'y
- * branchent avec le lot qui écrit les réglages — pas de bouton qui ne mène à rien.
+ * Ce que le menu « ⋮ » de la fiche offre : « Modifier le projet » — ses réglages, le mettre en pause, l'archiver — pour
+ * qui change son cadre (`rights.frame`) ; pour qui ne fait que lire son détail, « Voir ses réglages » : la même page,
+ * où rien ne se saisit. Rien sans le détail.
  */
-@Suppress("UNUSED_PARAMETER")
-internal fun projectMenu(sheet: Sheet): List<MenuEntry> = emptyList()
+@Composable
+internal fun projectMenu(sheet: Sheet, onSettings: () -> Unit): List<MenuEntry> =
+    if (!sheet.rights.detail) {
+        emptyList()
+    } else {
+        listOf(MenuEntry(stringResource(if (sheet.rights.frame) R.string.proj_set_title else R.string.proj_set_see), R.drawable.ic_m_settings, onSettings))
+    }
 
 /** Le nom d'un onglet de la fiche. */
 @Composable
@@ -237,7 +243,7 @@ private fun ProjectTopBar(
                         BarAction(R.drawable.ic_m_pause, stringResource(R.string.proj_pilot_pause), { if (!busy) onPause("pause") })
                     }
                 }
-                if (sheet != null) BarMenu(projectMenu(sheet))
+                if (sheet != null) BarMenu(projectMenu(sheet) { shell.navigate(Route.ProjectPage(id, SheetPages.SETTINGS)) })
             },
         )
         if (sheet != null) {
@@ -269,9 +275,8 @@ private fun ProjectTopBar(
 }
 
 /**
- * L'onglet montré. **Le point d'entrée des lots suivants** : Documentation, Activité, Dépendances et Listes remplacent
- * ici [PendingTab] par leur vue, comme Code l'a fait ([CodeTab]) ; elle reçoit le modèle du projet ([vm] : la fiche lue,
- * ses gestes), la fiche ([sheet] : ses droits) et, si son adresse en nomme un, son volet ([sub] : `code/pulls`).
+ * L'onglet montré : sa vue reçoit le modèle du projet ([vm] : la fiche lue, ses gestes), la fiche ([sheet] : ses droits)
+ * et, si son adresse en nomme un, son volet ([sub] : `code/pulls`, `documentation/images`, `listes/<liste>`).
  */
 @Composable
 private fun SheetTabContent(
@@ -289,25 +294,11 @@ private fun SheetTabContent(
         SheetTabs.OBJECTIVES -> ObjectivesTab(vm, sheet, now, onAddGoal)
         SheetTabs.TICKETS -> TicketsTab(vm, sheet, now, onNewTicket)
         SheetTabs.CODE -> CodeTab(graph, vm, sheet, now, sub)
-        else -> PendingTab(tab)
-    }
-}
-
-/** Un onglet pas encore écrit dans l'app : dit tel quel, jamais une page vide ni un bouton qui ne fait rien. */
-@Composable
-private fun PendingTab(tab: String) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        EmptyNote(
-            when (tab) {
-                SheetTabs.CODE -> R.drawable.ic_m_code
-                SheetTabs.DOCS -> R.drawable.ic_m_book
-                SheetTabs.ACTIVITY -> R.drawable.ic_m_history
-                SheetTabs.LINKS -> R.drawable.ic_m_link
-                else -> R.drawable.ic_m_board
-            },
-            tabLabel(tab),
-            stringResource(R.string.proj_tab_pending),
-        )
+        SheetTabs.DOCS -> DocsTab(graph, vm, sheet, now, sub)
+        SheetTabs.ACTIVITY -> ActivityTab(graph, vm, sheet, now, sub)
+        SheetTabs.LINKS -> LinksTab(vm, sheet, now, sub)
+        SheetTabs.LISTS -> ListsTab(graph, vm, sheet, now, sub)
+        else -> OverviewTab(graph, vm, sheet, now, onAddGoal)
     }
 }
 

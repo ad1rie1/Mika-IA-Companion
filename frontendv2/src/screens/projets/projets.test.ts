@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ActivityPage, Demand, Diagram, DiagramMilestone, DiagramObjective, EntryDetail, EntryHistory, Field, Journey, Links, Listing, Milestone, Overview, ProjectHead, Sheet, Waiting } from "../../api/projects";
 import { arrowPath, DAY_WIDTH, daysBack, goalSegments, milestonePart, pickZoom, rows, timeLayout } from "./diagram";
 import {
-  assignRequest, changed, checkpointRequest, fieldShown, fieldValue, gesturePlace, gestureRead, gestureRequest, itemAddRequest, linkCandidates, linkRequest, linkWhyRequest, milestoneRequest, noteRequest,
+  assignRequest, changed, checkpointRequest, fieldShown, fieldValue, gesturePlace, gestureRead, gestureRequest, gestureTyped, itemAddRequest, linkCandidates, linkRequest, linkWhyRequest, milestoneRequest, noteRequest,
   objectiveRequest, pilotRequest, refusalWords, safeLink, settingsRequest, settleRequest, ticketRequest,
 } from "./gestures";
 import { inline, markdown } from "./md";
@@ -118,6 +118,16 @@ describe("un geste traduit en requête", () => {
     expect(gestureRequest(ready, "done", "")).toEqual({ route: "ticket/trancher", body: { item: "#2", verdict: "done" } });
     // aucun geste générique n'envoie la fusion : elle a sa confirmation (mergeRequest), qui nomme le commit lu
     for (const action of ["", "go", "accept-all", "merge"]) expect(gestureRequest(ready, action, "").route).toBe("");
+  });
+
+  it("reprendre un projet à l'arrêt ne demande rien à écrire ; une consigne, si", () => {
+    // le serveur ne lit aucun texte avec `what: resume` : exiger une réponse la faisait écrire pour rien
+    const stalled = waiting({ kind: "stalled", gesture: { route: "piloter", args: { what: "resume" }, label: "Reprendre", where: "ici", url: "" } });
+    const need = waiting({ kind: "need", gesture: { route: "piloter", args: { what: "instruct" }, label: "Répondre", where: "ici", url: "" } });
+    expect(gestureTyped(stalled)).toBe(false);
+    expect(gestureTyped(need)).toBe(true);
+    expect(gestureRequest(stalled, "go", "")).toEqual({ route: "piloter", body: { what: "resume" } });
+    expect(gestureRequest(need, "go", " finis l'export ")).toEqual({ route: "piloter", body: { what: "instruct", text: "finis l'export" } });
   });
 
   it("valider le plan d'un ticket nomme le plan lu, pas celui que la liste portait", () => {

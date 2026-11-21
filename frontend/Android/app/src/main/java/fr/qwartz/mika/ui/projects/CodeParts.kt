@@ -227,12 +227,34 @@ internal fun <T> CodePage(
     bottomBar: @Composable (T) -> Unit = {},
     notice: @Composable (T) -> Unit = {},
     body: LazyListScope.(T) -> Unit,
+) = DetailPage(codeTabLabel(home), projectTitle, load, onRetry, panes, pane, onPane, head, bottomBar, notice, body = body)
+
+/**
+ * Une page de détail d'une fiche, quel que soit son onglet (une pull request, une page de documentation, une exécution,
+ * un lien) : la barre ([title] : d'où elle vient ; [actions] : ses gestes), son en-tête, ses volets collants, son
+ * contenu.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+internal fun <T> DetailPage(
+    title: String,
+    projectTitle: String?,
+    load: Load<T>?,
+    onRetry: () -> Unit,
+    panes: @Composable (T) -> List<Pane>,
+    pane: String,
+    onPane: (String) -> Unit,
+    head: @Composable (T) -> Unit,
+    bottomBar: @Composable (T) -> Unit = {},
+    notice: @Composable (T) -> Unit = {},
+    actions: @Composable RowScope.() -> Unit = {},
+    body: LazyListScope.(T) -> Unit,
 ) {
     val list = rememberLazyListState()
     // un autre volet : il se lit depuis son début, ses onglets en haut
     LaunchedEffect(pane) { if (list.firstVisibleItemIndex > 1) list.scrollToItem(1) }
     SectionScaffold(
-        topBar = { MikaTopBar(title = codeTabLabel(home), nav = BarNav.BACK, subtitle = projectTitle) },
+        topBar = { MikaTopBar(title = title, nav = BarNav.BACK, subtitle = projectTitle, actions = actions) },
         bottomBar = { load?.valueOrNull?.let { bottomBar(it) } },
     ) { modifier ->
         when (load) {

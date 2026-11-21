@@ -13,6 +13,7 @@ import fr.qwartz.mika.data.moi.SendKey
 import fr.qwartz.mika.data.moi.projects.ActivityPage
 import fr.qwartz.mika.data.moi.projects.Approval
 import fr.qwartz.mika.data.moi.projects.Approvals
+import fr.qwartz.mika.data.moi.projects.Archives
 import fr.qwartz.mika.data.moi.projects.Diagram
 import fr.qwartz.mika.data.moi.projects.EntryDetail
 import fr.qwartz.mika.data.moi.projects.EntryHistory
@@ -42,6 +43,7 @@ import fr.qwartz.mika.data.moi.projects.noteRequest
 import fr.qwartz.mika.data.moi.projects.objectiveStatusRequest
 import fr.qwartz.mika.data.moi.projects.pilotRequest
 import fr.qwartz.mika.data.moi.projects.refusalWords
+import fr.qwartz.mika.data.moi.projects.restoreRequest
 import fr.qwartz.mika.data.moi.projects.settleRequest
 import fr.qwartz.mika.data.moi.projects.ticketRequest
 import fr.qwartz.mika.data.moi.projects.todoRequest
@@ -70,7 +72,12 @@ class ProjectsDeps(
     val refreshBadges: () -> Unit = {},
     val now: () -> Long = System::currentTimeMillis,
 ) {
-    constructor(graph: AppGraph) : this(ProjectsApi(graph.moi), { graph.me.refresh() }, { graph.clock.wallMs() })
+    /** Une image téléversée part par le client sans délai global (un fichier lourd sur une liaison faible), comme une pièce de Mail. */
+    constructor(graph: AppGraph) : this(
+        ProjectsApi(graph.moi, MoiApi(graph.filesHttp, { graph.auth.credentials() }, { graph.auth.checkAfterUnauthorized() })),
+        { graph.me.refresh() },
+        { graph.clock.wallMs() },
+    )
 }
 
 /** Un refus du serveur, dit sur place : où ([where], la clé de l'endroit), ses mots, et ce qu'il dit champ par champ. */
@@ -190,6 +197,11 @@ class ProjectsViewModel(private val deps: ProjectsDeps) : ViewModel() {
     /** Le projet qui vient d'être confié, à ouvrir (une fois). */
     var created by mutableIntStateOf(0)
         private set
+    /** Les projets archivés qu'elle peut restaurer (`GET …/projets/archives`). */
+    val archives: Kept<Archives> = Kept(viewModelScope, deps.now, gestures::say) { deps.api.archives() }
+    /** Le projet qui vient d'être désarchivé, à ouvrir (une fois). */
+    var restored by mutableIntStateOf(0)
+        private set
 
     // ── L'attente ouverte ──
     /** L'attente ouverte, telle qu'on l'a lue en dernier ; `null` tant qu'elle n'est pas trouvée. */
@@ -223,6 +235,20 @@ class ProjectsViewModel(private val deps: ProjectsDeps) : ViewModel() {
         val first = !started
         started = true
         load(quiet = !first)
+        archives.read()
+    }
+
+    /** Désarchiver un projet : il revient, en pause ; un refus se dit sous sa ligne. */
+    fun restore(project: Int) {
+        gestures.send(project, restoreRequest(), restoreWhere(project)) {
+            restored = project
+            archives.read()
+            load(quiet = true)
+        }
+    }
+
+    fun restoredOpened() {
+        restored = 0
     }
 
     fun pull() {
@@ -405,6 +431,9 @@ class ProjectsViewModel(private val deps: ProjectsDeps) : ViewModel() {
         const val TODO_PAGE = 25
 
         fun todoWhere(project: Int, key: String): String = "todo:$project:$key"
+
+        /** « Désarchiver », dit sous la ligne du projet archivé. */
+        fun restoreWhere(project: Int): String = "restore:$project"
     }
 }
 

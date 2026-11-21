@@ -71,6 +71,15 @@ sealed interface Route {
     @Serializable @SerialName("project_code")
     data class ProjectCode(val id: Int, val kind: String, val key: String, val ref: String = "", val pane: String = "") : Route
 
+    /**
+     * Une page de détail des autres onglets du projet [id] ; [kind] (`SheetPages`) : `page` (une page de documentation,
+     * [key] : son chemin), `ecrire` (l'écrire), `nouvelle` (une page nouvelle : [key] son chemin, [ref] son titre),
+     * `decision` (son numéro), `execution` (son identifiant), `lien` (sa clé : `lit-3`, `luPar-3`), `element` ([ref] :
+     * sa liste, [key] : sa clé), `reglages` ([key] : une section ; vide : ce qui se règle).
+     */
+    @Serializable @SerialName("project_page")
+    data class ProjectPage(val id: Int, val kind: String, val key: String = "", val ref: String = "") : Route
+
     // ── Mail ────────────────────────────────────────────────────────────
     @Serializable @SerialName("mail")
     data object Mail : Route

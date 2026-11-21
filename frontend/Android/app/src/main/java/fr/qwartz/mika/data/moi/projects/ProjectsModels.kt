@@ -76,9 +76,73 @@ data class Waiting(
     val gesture: Gesture = Gesture(),
 )
 
-/** Un projet lié : son numéro et son titre seulement si elle le voit elle-même. */
+/** Ce qu'un lien donne : le voir, son détail, ses fichiers, sa documentation ; et comment ses demandes y entrent, en mots. */
 @Serializable
-data class Linked(val project: Int? = null, val title: String = "", val visible: Boolean = false)
+data class Gives(
+    val see: Boolean = false,
+    val detail: Boolean = false,
+    val files: Boolean = false,
+    val docs: Boolean = false,
+    val ask: String = "",
+    @SerialName("ask_label") val askLabel: String = "",
+)
+
+/**
+ * Une demande entre deux projets : du projet (`from` : `project`), ou un ticket qu'elle a ouvert elle-même chez le projet
+ * lié (`you`). [title] est le titre du ticket — vide et [veiled] si elle ne le lit pas là-bas.
+ */
+@Serializable
+data class Demand(
+    /** L'autre projet (`null` : elle ne le voit pas). */
+    val project: Int? = null,
+    val title: String = "",
+    val visible: Boolean = false,
+    /** `sent`, `received`. */
+    val direction: String = "",
+    val from: String = "",
+    /** 0 si elle ne voit pas le projet où vit le ticket. */
+    val number: Int = 0,
+    val veiled: Boolean = false,
+    val status: String = "",
+    @SerialName("status_label") val statusLabel: String = "",
+    val step: String = "",
+    @SerialName("step_label") val stepLabel: String = "",
+    val at: Long = 0,
+    @SerialName("closed_at") val closedAt: Long = 0,
+)
+
+/** « Lui demander quelque chose » : ouvrir un ticket chez un projet lu (`POST /projets/<project>/<route>`). */
+@Serializable
+data class AskHere(
+    val can: Boolean = false,
+    val why: String = "",
+    /** `open`, `proposed`, ou vide. */
+    val born: String = "",
+    val project: Int? = null,
+    val route: String = "",
+)
+
+/**
+ * Un projet lié : son numéro et son titre seulement si elle le voit elle-même. Sur une carte de la liste, rien d'autre ;
+ * dans les dépendances d'une fiche (`links.reads`, `readers`, `candidates`), ce que le lien donne ([gives]), depuis quand
+ * ([since]), le mot de son propriétaire ([why]), et pour un projet lu : s'il est suspendu, si ses demandes y entrent
+ * directement ([direct]), le commit que montre la vue de son atelier, les demandes entre les deux, et si elle peut lui
+ * demander quelque chose ([askHere]).
+ */
+@Serializable
+data class Linked(
+    val project: Int? = null,
+    val title: String = "",
+    val visible: Boolean = false,
+    val suspended: Boolean = false,
+    val direct: Boolean = false,
+    val gives: Gives = Gives(),
+    val since: Long = 0,
+    val why: String = "",
+    val commit: CommitBrief? = null,
+    val asks: List<Demand> = emptyList(),
+    @SerialName("ask_here") val askHere: AskHere? = null,
+)
 
 /** Un segment de la barre d'une carte : un objectif ponctuel, et où il en est (`done`, `doing`, `todo`, `blocked`). */
 @Serializable
@@ -390,7 +454,17 @@ data class Listing(
     @SerialName("priority_default") val priorityDefault: String = "",
     /** La liste des tickets : ses tickets comptés par étape du parcours (les six). */
     val journey: List<StepCount> = emptyList(),
+    /** À qui ses éléments sont d'office (`self`, `owner`), en mots. */
+    val actor: String = "",
+    @SerialName("actor_label") val actorLabel: String = "",
+    /** Une liste de suivi : ce qu'elle peut y faire, et à qui un élément peut être (`self`, `owner`, avec leurs mots). */
+    val can: ListCan = ListCan(),
+    val actors: List<Coded> = emptyList(),
 )
+
+/** Ce qu'elle peut faire dans une liste de suivi : y ajouter un élément, changer à qui il est ; sinon pourquoi. */
+@Serializable
+data class ListCan(val add: Boolean = false, val assign: Boolean = false, val why: String = "")
 
 /** Un commit en bref ; venu du dépôt distant, il porte [outside]. */
 @Serializable
@@ -407,11 +481,20 @@ data class CommitBrief(
 @Serializable
 data class LinkLabels(val title: String = "", val reads: String = "", val readers: String = "", val asks: String = "")
 
-/** Ses dépendances, telles que la Vue d'ensemble les nomme (le lot « Dépendances » lit le reste de `links`). */
+/**
+ * Ses dépendances : ce qu'il lit ([reads]), ce que son plan demande à lire ([planAsks]), qui le lit ([readers]), ses
+ * demandes à d'autres projets ([asks]) et celles qu'il a reçues ([received]), si elle peut poser ses liens ([can]), et
+ * ceux qu'elle peut lui faire lire ([candidates]).
+ */
 @Serializable
 data class Links(
     val reads: List<Linked> = emptyList(),
+    @SerialName("plan_asks") val planAsks: List<Linked> = emptyList(),
     val readers: List<Linked> = emptyList(),
+    val asks: List<Demand> = emptyList(),
+    val received: List<Demand> = emptyList(),
+    val can: Boolean = false,
+    val candidates: List<Linked> = emptyList(),
     val labels: LinkLabels = LinkLabels(),
 )
 
@@ -790,7 +873,7 @@ data class NewProject(val can: Boolean = false, val why: String = "", val fields
 
 /**
  * Ce que rend un geste : son message, et selon lui `number` et `proposed` (un ticket ouvert), `status` (un accord
- * décidé), `project` (un projet confié), `objective` (un objectif ajouté).
+ * décidé), `project` (un projet confié), `objective` (un objectif ajouté), `list` et `key` (un élément ajouté).
  */
 @Serializable
 data class GestureDone(
@@ -802,4 +885,7 @@ data class GestureDone(
     val status: String = "",
     val project: Int = 0,
     val objective: Int = 0,
+    /** Un élément ajouté à une liste : sa liste, sa clé. */
+    val list: String = "",
+    val key: String = "",
 )

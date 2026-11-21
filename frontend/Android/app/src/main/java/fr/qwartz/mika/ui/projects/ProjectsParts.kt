@@ -124,6 +124,11 @@ internal fun projectIcon(name: String): Int = when (name) {
     "commit" -> R.drawable.ic_m_commit
     "issue" -> R.drawable.ic_m_issue
     "bolt" -> R.drawable.ic_m_bolt
+    "user" -> R.drawable.ic_m_user
+    "code" -> R.drawable.ic_m_code
+    "flag" -> R.drawable.ic_m_flag
+    "tools" -> R.drawable.ic_m_tools
+    "settings" -> R.drawable.ic_m_settings
     else -> R.drawable.ic_m_alert
 }
 

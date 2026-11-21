@@ -7,7 +7,7 @@ import type { Approval, EntryDetail, Overview, Sheet, Waiting } from "../../../a
 import { errorBlock, loadingBlock } from "../../../shared/kit";
 import { h } from "../../../shell/dom";
 import { ico } from "../../../shell/icons";
-import { gesturePlace, gestureRead, safeLink } from "../gestures";
+import { gesturePlace, gestureRead, gestureTyped, safeLink } from "../gestures";
 import { markdown } from "../md";
 import { authorAvatar, bubble, empty, F, filters, head, hint, linked, OUTSIDE, outside, planBlock, props, pullCard, refusal, sc, st, ticketLine, tile, trio, type Trio } from "../parts";
 import { route, sheetRoute, waitingHome, waitingKey, waitingRoute } from "../routes";
@@ -137,7 +137,7 @@ function reading(w: Waiting, d: TodoData, ctx: Ctx): { body: string; decide: str
   } else if (here && w.gesture.route !== "code/pull/fusionner") {
     // un geste que rien d'ici ne détaille : son bouton porte le libellé du serveur, et s'il se saisit quelque chose, on le demande
     // (fusionner a le sien, `mergeDecision` : il passe par une confirmation qui nomme le commit de tête)
-    const typed = w.gesture.route === "piloter";
+    const typed = gestureTyped(w);
     decide = button("go", w.gesture.label, true, w, typed ? "Ta réponse" : "", typed ? "send" : "check");
   }
   return { body, decide, word, lied };

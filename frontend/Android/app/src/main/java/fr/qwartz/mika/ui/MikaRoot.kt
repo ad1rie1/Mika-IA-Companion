@@ -67,6 +67,7 @@ import fr.qwartz.mika.ui.phone.PhoneThreadScreen
 import fr.qwartz.mika.ui.projects.CodeScreen
 import fr.qwartz.mika.ui.projects.GoalScreen
 import fr.qwartz.mika.ui.projects.ProjectScreen
+import fr.qwartz.mika.ui.projects.SheetPageScreen
 import fr.qwartz.mika.ui.projects.ProjectsScreen
 import fr.qwartz.mika.ui.projects.TicketScreen
 import fr.qwartz.mika.ui.projects.TodoScreen
@@ -239,6 +240,7 @@ private fun Screen(graph: AppGraph, stack: BackStack, shell: Shell) {
         is Route.ProjectGoal -> GoalScreen(graph, top)
         is Route.ProjectTicket -> TicketScreen(graph, top)
         is Route.ProjectCode -> CodeScreen(graph, top)
+        is Route.ProjectPage -> SheetPageScreen(graph, top)
         Route.Mail -> MailListScreen(graph)
         is Route.MailMessage -> MailReaderScreen(graph, top.ref)
         Route.MailDrafts -> MailDraftsScreen(graph)

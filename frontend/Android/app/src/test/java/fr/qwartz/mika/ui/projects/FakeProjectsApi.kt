@@ -4,6 +4,24 @@ import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.MoiError
 import fr.qwartz.mika.data.moi.projects.ActivityPage
 import fr.qwartz.mika.data.moi.projects.Approvals
+import fr.qwartz.mika.data.moi.projects.ActivityDays
+import fr.qwartz.mika.data.moi.projects.ActivityTotals
+import fr.qwartz.mika.data.moi.projects.Archives
+import fr.qwartz.mika.data.moi.projects.Decision
+import fr.qwartz.mika.data.moi.projects.DecisionList
+import fr.qwartz.mika.data.moi.projects.DocFound
+import fr.qwartz.mika.data.moi.projects.DocHistory
+import fr.qwartz.mika.data.moi.projects.DocPage
+import fr.qwartz.mika.data.moi.projects.DocSave
+import fr.qwartz.mika.data.moi.projects.DocSpace
+import fr.qwartz.mika.data.moi.projects.DocUpload
+import fr.qwartz.mika.data.moi.projects.DocVersion
+import fr.qwartz.mika.data.moi.projects.ImageSaved
+import fr.qwartz.mika.data.moi.projects.NotebookPage
+import fr.qwartz.mika.data.moi.projects.PageSaved
+import fr.qwartz.mika.data.moi.projects.ProjectSettings
+import fr.qwartz.mika.data.moi.projects.Run
+import fr.qwartz.mika.data.moi.projects.RunPage
 import fr.qwartz.mika.data.moi.projects.Blob
 import fr.qwartz.mika.data.moi.projects.Branch
 import fr.qwartz.mika.data.moi.projects.BranchDetail
@@ -92,14 +110,14 @@ class FakeProjectsApi : ProjectsApi(MoiApi(OkHttpClient(), { null }, {})) {
     override suspend fun sheet(id: Int): MoiApi.Result<Sheet> = answer("sheet:$id", sheet)
 
     override suspend fun elements(id: Int, list: String, state: String, q: String, size: Int): MoiApi.Result<EntryPage> =
-        answer("elements:$id:$state:$q", tickets)
+        if (list == TICKETS) answer("elements:$id:$state:$q", tickets) else answer("list:$id:$list", MoiApi.Result.Ok(listPages[list] ?: EntryPage(list = list)))
 
     override suspend fun element(id: Int, list: String, item: String): MoiApi.Result<EntryDetail> = answer("element:$id:$list:$item", element)
 
     override suspend fun history(id: Int, item: String): MoiApi.Result<EntryHistory> = answer("history:$id:$item", MoiApi.Result.Ok(history))
 
     override suspend fun activity(id: Int, kind: String, objective: Int, ticket: Int, before: Long): MoiApi.Result<ActivityPage> =
-        answer("activity:$id:$kind:$objective:$ticket", MoiApi.Result.Ok(activity))
+        answer("activity:$id:$kind:$objective:$ticket" + (if (before > 0) ":$before" else ""), MoiApi.Result.Ok(feeds["$kind|$objective|$before"] ?: activity))
 
     override suspend fun diagram(id: Int): MoiApi.Result<Diagram> = answer("diagram:$id", MoiApi.Result.Ok(diagram))
 
@@ -174,6 +192,80 @@ class FakeProjectsApi : ProjectsApi(MoiApi(OkHttpClient(), { null }, {})) {
     override suspend fun checks(id: Int): MoiApi.Result<ChecksList> = answer("checks:$id", checks)
 
     override suspend fun commitChecks(id: Int, sha: String): MoiApi.Result<HostChecks> = answer("commitChecks:$id:$sha", commitChecks)
+
+    // ── Sa documentation, son activité, ses réglages ──
+
+    var docs: MoiApi.Result<DocSpace> = MoiApi.Result.Ok(DocSpace())
+    /** La page telle que le serveur la rend **maintenant** : le test la change entre deux lectures. */
+    var docPage: MoiApi.Result<DocPage> = MoiApi.Result.Ok(DocPage())
+    var docHistory: MoiApi.Result<DocHistory> = MoiApi.Result.Ok(DocHistory())
+    var docVersion: MoiApi.Result<DocVersion> = MoiApi.Result.Ok(DocVersion())
+    var docFound = DocFound()
+    var decisions: MoiApi.Result<DecisionList> = MoiApi.Result.Ok(DecisionList())
+    var decision: MoiApi.Result<Decision> = MoiApi.Result.Ok(Decision())
+    /** Ce qu'un enregistrement rend, si le test l'impose (sinon : la version d'après celle qu'il nomme). */
+    var saveResult: MoiApi.Result<PageSaved>? = null
+    var uploadResult: MoiApi.Result<ImageSaved> = MoiApi.Result.Ok(ImageSaved(ok = true, message = "Image ajoutée.", name = "schema.png", path = "images/schema.png"))
+    /** Les enregistrements demandés : le projet, ce qui est envoyé (dont la version lue), la clé d'envoi. */
+    val saves = mutableListOf<Triple<Int, DocSave, String?>>()
+    val uploads = mutableListOf<Pair<DocUpload, String?>>()
+    var days = ActivityDays()
+    var totals = ActivityTotals()
+    /** Les pages du fil d'après un curseur, par `sorte|objectif|curseur` (la première : curseur 0, sinon [activity]). */
+    val feeds = HashMap<String, ActivityPage>()
+    val runPages = HashMap<Long, RunPage>()
+    var run: MoiApi.Result<Run> = MoiApi.Result.Ok(Run())
+    val notebooks = HashMap<String, NotebookPage>()
+    var settings: MoiApi.Result<ProjectSettings> = MoiApi.Result.Ok(ProjectSettings())
+    var archives = Archives()
+    /** Les éléments d'une liste de suivi, par son nom (la liste des tickets : [tickets]). */
+    val listPages = HashMap<String, EntryPage>()
+
+    override suspend fun docs(id: Int): MoiApi.Result<DocSpace> = answer("docs:$id", docs)
+
+    override suspend fun docPage(id: Int, path: String): MoiApi.Result<DocPage> {
+        answer("docPage:$id:$path", Unit)
+        return docPage
+    }
+
+    override suspend fun docHistory(id: Int, path: String): MoiApi.Result<DocHistory> = answer("docHistory:$id:$path", docHistory)
+
+    override suspend fun docVersion(id: Int, path: String, n: Int): MoiApi.Result<DocVersion> = answer("docVersion:$id:$path:$n", docVersion)
+
+    override suspend fun docSearch(id: Int, q: String): MoiApi.Result<DocFound> = answer("docSearch:$id:$q", MoiApi.Result.Ok(docFound))
+
+    override fun docImageUrl(id: Int, name: String): String? = "https://mika.invalid/api/moi/projets/$id/documentation/image?name=$name"
+
+    override suspend fun decisions(id: Int): MoiApi.Result<DecisionList> = answer("decisions:$id", decisions)
+
+    override suspend fun decision(id: Int, number: Int): MoiApi.Result<Decision> = answer("decision:$id:$number", decision)
+
+    override suspend fun saveDoc(id: Int, save: DocSave, key: String?): MoiApi.Result<PageSaved> {
+        saves += Triple(id, save, key)
+        answer("saveDoc:${save.path}", Unit)
+        return saveResult ?: MoiApi.Result.Ok(PageSaved(ok = true, message = "Page enregistrée.", path = save.path, version = save.base + 1))
+    }
+
+    override suspend fun uploadDocImage(id: Int, image: DocUpload, key: String?): MoiApi.Result<ImageSaved> {
+        uploads += image to key
+        return answer("upload:${image.name}", uploadResult)
+    }
+
+    override suspend fun activityDays(id: Int): MoiApi.Result<ActivityDays> = answer("days:$id", MoiApi.Result.Ok(days))
+
+    override suspend fun activityTotals(id: Int, objective: Int): MoiApi.Result<ActivityTotals> = answer("totals:$id:$objective", MoiApi.Result.Ok(totals))
+
+    override suspend fun runs(id: Int, before: Long): MoiApi.Result<RunPage> = answer("runs:$id:$before", MoiApi.Result.Ok(runPages[before] ?: RunPage()))
+
+    override suspend fun run(id: Int, run: String): MoiApi.Result<Run> = answer("run:$id:$run", this.run)
+
+    override suspend fun notebook(id: Int, objective: Int, before: Long): MoiApi.Result<NotebookPage> =
+        answer("notebook:$id:$objective:$before", MoiApi.Result.Ok(notebooks["$objective|$before"] ?: NotebookPage()))
+
+    override suspend fun settings(id: Int): MoiApi.Result<ProjectSettings> = answer("settings:$id", settings)
+
+    /** Lus à chaque retour sur la rubrique : pas notés dans [calls], que les tests d'avant comptent. */
+    override suspend fun archives(): MoiApi.Result<Archives> = MoiApi.Result.Ok(archives)
 
     override suspend fun merge(project: Int, order: MergeOrder, key: String?): MoiApi.Result<GestureDone> {
         merges += Triple(project, order, key)

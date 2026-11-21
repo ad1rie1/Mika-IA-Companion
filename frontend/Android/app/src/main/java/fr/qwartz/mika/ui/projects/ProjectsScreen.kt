@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
@@ -46,6 +47,8 @@ import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
 import fr.qwartz.mika.data.moi.hue
 import fr.qwartz.mika.data.moi.initials
+import fr.qwartz.mika.data.moi.projects.Archived
+import fr.qwartz.mika.data.moi.projects.shortDate
 import fr.qwartz.mika.data.moi.projects.Overview
 import fr.qwartz.mika.data.moi.projects.ProjectHead
 import fr.qwartz.mika.data.moi.projects.StateTone
@@ -111,6 +114,14 @@ fun ProjectsScreen(graph: AppGraph, tab: String, nav: BarNav) {
         val id = vm.created
         if (id != 0) {
             vm.createdOpened()
+            shell.navigate(Route.Project(id))
+        }
+    }
+    // le projet qui vient d'être désarchivé s'ouvre : il revient en pause
+    LaunchedEffect(vm.restored) {
+        val id = vm.restored
+        if (id != 0) {
+            vm.restoredOpened()
             shell.navigate(Route.Project(id))
         }
     }
@@ -267,6 +278,44 @@ private fun ProjectsTab(overview: Overview, now: Long, vm: ProjectsViewModel) {
                     }
                 }
             }
+        }
+        // les projets archivés qu'elle peut restaurer : rien n'en est effacé, ils reviennent en pause
+        val archived = vm.archives.value?.items.orEmpty()
+        if (archived.isNotEmpty()) {
+            item(key = "archived") {
+                Text(
+                    stringResource(R.string.proj_archived_title),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+            items(archived, key = { "a${it.id}" }) { a -> ArchivedRow(a, now, vm) }
+        }
+    }
+}
+
+/** Un projet archivé : son titre, depuis quand, à qui ; « Désarchiver » — un refus se dit dessous, avec les mots du serveur. */
+@Composable
+private fun ArchivedRow(a: Archived, now: Long, vm: ProjectsViewModel) {
+    Surface(shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                MIcon(R.drawable.ic_m_archive, null, size = 20.dp, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(a.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        listOf(stringResource(R.string.proj_archived_since, shortDate(a.archivedAt, now)), a.ownerName).filter { it.isNotBlank() }.joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(onClick = { vm.restore(a.id) }, enabled = vm.gestures.busy.isEmpty()) { Text(stringResource(R.string.proj_archived_restore), maxLines = 1) }
+            }
+            RefusalNote(vm.gestures.refusalAt(ProjectsViewModel.restoreWhere(a.id)), Modifier.padding(top = 8.dp))
         }
     }
 }

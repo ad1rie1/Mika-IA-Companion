@@ -111,6 +111,14 @@ export function gestureRequest(w: Waiting, action: string, typed: string, read: 
   return { route, body: filled({ ...args }) };
 }
 
+/**
+ * Ce qu'un geste d'« À faire » demande d'écrire : seule une consigne se saisit (`piloter`, `what: instruct`). Une
+ * reprise, une pause, « vas-y maintenant » partent telles quelles : le serveur ne lit aucun texte avec elles.
+ */
+export function gestureTyped(w: Waiting): boolean {
+  return w.gesture.route === "piloter" && w.gesture.args?.what === "instruct";
+}
+
 /** La route de la fusion d'une pull request : jamais envoyée par un geste générique. */
 export const MERGE_ROUTE = "code/pull/fusionner";
 /** Les verdicts d'un ticket (`ticket/trancher`). */

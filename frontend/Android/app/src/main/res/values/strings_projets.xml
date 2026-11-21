@@ -111,7 +111,6 @@
     <string name="proj_tab_activity">Activité</string>
     <string name="proj_tab_links">Dépendances</string>
     <string name="proj_tab_lists">Listes</string>
-    <string name="proj_tab_pending">Cet onglet n\'est pas encore dans l\'application : il arrive avec sa prochaine version. D\'ici là, il est dans le client web.</string>
     <string name="proj_pilot_instruct">Donner une consigne</string>
     <string name="proj_pilot_instruct_lede">Elle la lira avant son prochain passage.</string>
     <string name="proj_pilot_instruct_label">Ta consigne</string>
