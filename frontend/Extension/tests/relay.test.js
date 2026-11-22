@@ -161,3 +161,19 @@ test("une image passe vérifiée : un type admis, du base64, des identifiants de
   assert.equal(bad.data, "");
   assert.equal(bad.image, "");
 });
+
+test("les profils joints passent vérifiés : un identifiant de Teams reconnu, un e-mail bien formé, des champs bornés", async () => {
+  const r = relay();
+  const id = "8:orgid:7c2e41d0-5b8a-4f0e-9d21-3a6e0c1f91ab";
+  r.fromPage({ kind: "captured", conversations: [], messages: [], profiles: [
+    { id, name: "Gilles Rousseau", email: "gilles@nordis.fr", title: "x".repeat(500), phones: ["+33 6 12 34 56 78", 5, "1", "2", "3"] },
+    { id: "javascript:alert(1)", name: "piège" },
+    { id: "8:orgid:11111111-2222-3333-4444-555555555555", name: "Sophie", email: "<script>@x" }] });
+  await settle();
+  const sent = r.sent.find((p) => p.kind === "captured");
+  assert.ok(sent, "un lot de profils seuls part aussi");
+  assert.deepEqual(sent.profiles.map((p) => p.id), [id, "8:orgid:11111111-2222-3333-4444-555555555555"]);
+  assert.equal(sent.profiles[0].title.length, 120);
+  assert.deepEqual(sent.profiles[0].phones, ["+33 6 12 34 56 78", "5", "1"]);
+  assert.equal(sent.profiles[1].email, "");
+});

@@ -3,8 +3,9 @@ chose sur SQLite (les tests, le simulateur, le jumeau) et sur MariaDB (sa vie, e
 écritures que les deux moteurs disent autrement.
 
 **Une base, une** ``MetaData`` : ``MIND`` (sa vie : sauvegardée), ``VIEWS`` (reconstructible), ``MAIL``, ``FEEDS``,
-``TEAMS``. Une entité se déclare dans le paquet qui la possède, sur la base de sa base (``MindBase``…), avec
-``Mapped[...]`` ; une table qui ajoute des index les passe par ``table_args(...)``, qui garde la collation binaire.
+``TEAMS``, ``CONTACTS`` (l'annuaire, ADR 0298). Une entité se déclare dans le paquet qui la possède, sur la base de
+sa base (``MindBase``…), avec ``Mapped[...]`` ; une table qui ajoute des index les passe par ``table_args(...)``, qui
+garde la collation binaire.
 
 **Les types.** Un entier est un ``BIGINT`` (les instants sont en microsecondes) ; une clé primaire numérique est
 ``Id`` (l'alias de ``rowid`` sous SQLite, ``AUTO_INCREMENT`` sous MariaDB). Toute colonne indexée, ou clé, est une
@@ -80,6 +81,7 @@ VIEWS = MetaData(naming_convention=NAMING)
 MAIL = MetaData(naming_convention=NAMING)
 FEEDS = MetaData(naming_convention=NAMING)
 TEAMS = MetaData(naming_convention=NAMING)
+CONTACTS = MetaData(naming_convention=NAMING)
 
 #: les tables des projections et les vues de la mémoire : déclarées pour les deux moteurs, hors des migrations
 PROJECTIONS = MetaData(naming_convention=NAMING)
@@ -87,7 +89,8 @@ PROJECTIONS = MetaData(naming_convention=NAMING)
 VIEW_COLUMNS = MetaData()
 
 #: chaque base par son nom (les migrations, la sauvegarde, les tests)
-DATABASES: dict[str, MetaData] = {"mind": MIND, "views": VIEWS, "mail": MAIL, "feeds": FEEDS, "teams": TEAMS}
+DATABASES: dict[str, MetaData] = {"mind": MIND, "views": VIEWS, "mail": MAIL, "feeds": FEEDS, "teams": TEAMS,
+                                  "contacts": CONTACTS}
 
 #: ce que toute table déclare pour MariaDB (SQLite l'ignore)
 TABLE_OPTIONS: dict[str, str] = {
@@ -205,6 +208,14 @@ class TeamsBase(DeclarativeBase):
     """Les entités de Teams."""
 
     metadata = TEAMS
+    __table_args__ = TABLE_OPTIONS
+    type_annotation_map = _TYPES
+
+
+class ContactsBase(DeclarativeBase):
+    """Les entités de l'annuaire (ADR 0298)."""
+
+    metadata = CONTACTS
     __table_args__ = TABLE_OPTIONS
     type_annotation_map = _TYPES
 
@@ -479,8 +490,8 @@ Builder = Callable[[str], Table]
 
 
 __all__ = [
-    "DATABASES", "FEEDS", "FIT_DIGEST", "HANDLE_MAX", "MAIL", "MIND", "NAMING", "TABLE_OPTIONS", "TEAMS", "VIEWS",
-    "FeedsBase", "Id", "Key", "KeyTooLong", "LongBlob", "LongText", "MailBase", "MindBase", "TeamsBase", "ViewsBase",
+    "CONTACTS", "DATABASES", "FEEDS", "FIT_DIGEST", "HANDLE_MAX", "MAIL", "MIND", "NAMING", "TABLE_OPTIONS", "TEAMS", "VIEWS",
+    "ContactsBase", "FeedsBase", "Id", "Key", "KeyTooLong", "LongBlob", "LongText", "MailBase", "MindBase", "TeamsBase", "ViewsBase",
     "PROJECTIONS", "VIEW_COLUMNS", "Builder", "Prepared", "alias_of", "create_view", "drop_view", "json_field", "json_has", "json_values",
     "projection_table", "view_table",
     "dialect_of", "fit", "greatest", "insert_ignore", "least", "table_args", "upsert",

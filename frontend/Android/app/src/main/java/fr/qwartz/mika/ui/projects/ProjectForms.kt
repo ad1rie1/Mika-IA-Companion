@@ -67,6 +67,9 @@ import fr.qwartz.mika.data.moi.projects.fieldShown
 import fr.qwartz.mika.ui.shell.Gap
 import fr.qwartz.mika.ui.shell.Load
 import fr.qwartz.mika.ui.shell.said
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.snapshots.SnapshotStateMap
+import androidx.compose.runtime.saveable.Saver
 
 /*
  * Les formulaires de l'écran Projets (ADR 0296) : chacun s'ouvre en feuille, par-dessus la vue, sans quitter où l'on
@@ -117,9 +120,13 @@ internal fun FormSheet(
     }
 }
 
-/** La feuille se ferme quand son geste a abouti. */
+/**
+ * La feuille se ferme quand son geste a abouti — celui qu'elle a envoyé : en s'ouvrant, elle oublie ce qu'on avait dit
+ * à son endroit (un refus d'avant, un geste abouti après qu'on l'a quittée, qui la refermerait aussitôt).
+ */
 @Composable
 private fun CloseWhenDone(runner: GestureRunner, where: String, onDismiss: () -> Unit) {
+    FreshEntry(runner, where)
     LaunchedEffect(runner.finished) {
         if (runner.finished == where) {
             runner.acknowledge()
@@ -252,8 +259,9 @@ internal fun GoalFormSheet(vm: ProjectViewModel, sheet: Sheet, goal: Goal?, onDi
             null -> null
         }
     }
-    var form by remember(goal?.key) { mutableStateOf(before ?: GoalForm()) }
-    var cadence by remember(goal?.key) { mutableStateOf((before?.cadenceHours ?: 0).toString()) }
+    // ce qui est saisi survit à une rotation
+    var form by rememberSaveable(goal?.key) { mutableStateOf(before ?: GoalForm()) }
+    var cadence by rememberSaveable(goal?.key) { mutableStateOf((before?.cadenceHours ?: 0).toString()) }
     val where = if (goal == null) ProjectViewModel.GOAL_NEW else ProjectViewModel.goalFormWhere(goal.id)
     val errors = vm.gestures.fieldsAt(where)
     CloseWhenDone(vm.gestures, where, onDismiss)
@@ -267,8 +275,9 @@ internal fun GoalFormSheet(vm: ProjectViewModel, sheet: Sheet, goal: Goal?, onDi
         ),
         sub = stringResource(if (goal == null) R.string.proj_goal_add_sub else R.string.proj_goal_edit_sub),
         submit = stringResource(if (goal == null) R.string.proj_add else R.string.proj_save),
-        busy = vm.gestures.busy == where,
-        error = vm.gestures.refusalAt(where),
+        // rien ne part tant que la fiche se relit : le bouton attend, et une relecture en panne se dit ici
+        busy = vm.gestures.busy == where || vm.stale,
+        error = vm.saidAt(where),
         onDismiss = onDismiss,
         onSubmit = { vm.saveGoal(form.copy(cadenceHours = cadence.trim().toIntOrNull() ?: 0), before, goal?.id ?: 0) },
         enabled = form.text.isNotBlank(),
@@ -350,7 +359,7 @@ internal fun GoalFormSheet(vm: ProjectViewModel, sheet: Sheet, goal: Goal?, onDi
 internal fun MilestoneFormSheet(vm: ProjectViewModel, sheet: Sheet, objective: Objective, milestone: Milestone?, onDismiss: () -> Unit) {
     val checks = sheet.forms.checks
     val before = remember(milestone?.id) { milestone?.let { MilestoneForm.of(it) } }
-    var form by remember(milestone?.id) { mutableStateOf(before ?: MilestoneForm(check = checks.firstOrNull()?.code ?: "prose")) }
+    var form by rememberSaveable(milestone?.id) { mutableStateOf(before ?: MilestoneForm(check = checks.firstOrNull()?.code ?: "prose")) }
     val where = ProjectViewModel.milestoneWhere(objective.id)
     val errors = vm.gestures.fieldsAt(where)
     CloseWhenDone(vm.gestures, where, onDismiss)
@@ -358,8 +367,8 @@ internal fun MilestoneFormSheet(vm: ProjectViewModel, sheet: Sheet, objective: O
         title = stringResource(if (milestone == null) R.string.proj_milestone_add else R.string.proj_milestone_edit),
         sub = objective.text,
         submit = stringResource(if (milestone == null) R.string.proj_add else R.string.proj_save),
-        busy = vm.gestures.busy == where,
-        error = vm.gestures.refusalAt(where),
+        busy = vm.gestures.busy == where || vm.stale,
+        error = vm.saidAt(where),
         onDismiss = onDismiss,
         onSubmit = { vm.saveMilestone(objective.id, form, before, milestone?.id ?: 0) },
         enabled = form.text.isNotBlank(),
@@ -426,16 +435,19 @@ internal fun TicketFormSheet(
     where: String,
     onSubmit: (TicketForm) -> Unit,
     onDismiss: () -> Unit,
+    /** Ce dont le geste dépend se relit : rien ne part d'ici là ; [waitsWhy] : sa relecture a échoué, avec ses mots. */
+    waits: Boolean = false,
+    waitsWhy: String = "",
 ) {
-    var form by remember(where) { mutableStateOf(initial) }
+    var form by rememberSaveable(where) { mutableStateOf(initial) }
     val errors = runner.fieldsAt(where)
     CloseWhenDone(runner, where, onDismiss)
     FormSheet(
         title = title,
         sub = sub,
         submit = submit,
-        busy = runner.busy == where,
-        error = runner.refusalAt(where),
+        busy = runner.busy == where || waits,
+        error = runner.refusalAt(where).ifBlank { waitsWhy },
         onDismiss = onDismiss,
         onSubmit = { onSubmit(form) },
         enabled = form.title.isNotBlank(),
@@ -464,11 +476,18 @@ internal fun TicketFormSheet(
 
 // ── Nouveau projet ──────────────────────────────────────────────────────
 
+/** Ce qui est saisi dans des champs servis, par leur nom, gardé avec l'écran. */
+private val FieldValuesSaver: Saver<SnapshotStateMap<String, String>, HashMap<String, String>> = Saver(
+    save = { HashMap(it) },
+    restore = { saved -> mutableStateMapOf<String, String>().apply { putAll(saved) } },
+)
+
 /** « Nouveau projet » : ses champs sont ceux que le serveur décrit (`GET …/projets/nouveau`), l'app n'écrit aucun libellé. */
 @Composable
 internal fun NewProjectSheet(vm: ProjectsViewModel) {
     val load = vm.fresh ?: return
-    val values = remember { mutableStateMapOf<String, String>() }
+    // ce qui est saisi survit à une rotation (la feuille, elle, est tenue par le modèle)
+    val values = rememberSaveable(saver = FieldValuesSaver) { mutableStateMapOf() }
     val where = ProjectsViewModel.NEW
     val form = load.valueOrNull
     val errors = vm.gestures.fieldsAt(where)

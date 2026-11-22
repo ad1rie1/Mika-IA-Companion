@@ -47,6 +47,7 @@ from mika.kernel.frame import Audience, Frame
 from mika.kernel.guards import Guard
 from mika.kernel.registry import ArbitrationPolicy
 from mika.plugins.camera import CAMERA
+from mika.plugins.contacts import CONTACTS
 from mika.plugins.email import EMAIL
 from mika.plugins.forge import FORGE
 from mika.plugins.imaging import IMAGING
@@ -72,7 +73,7 @@ def faculties() -> list[Faculty[Any, Any]]:
     """Les facultés de Mika, puis ses plugins (M7)."""
     return [PRESENCE, IDENTITY, TRANSCRIPT, MEMORY, BODY, WORLD, PLACE, AFFECT, NEEDS, OTHERS, ATTENTION, SELF,
             EXPRESSION, SOCIAL, AGENCY, GOALS, PROJECTS, SHARES, ATTACHMENTS, EMAIL, RSS, CAMERA, FORGE, SENSORS,
-            IMAGING, MCP, WEB, WAKEUP, TEAMS, LOCATION, PHONE, TRIPS]
+            IMAGING, MCP, WEB, WAKEUP, TEAMS, LOCATION, PHONE, TRIPS, CONTACTS]
 
 
 def _reply_guard(frame: Frame, target: str | None, audience: Audience | None) -> Guard | None:

@@ -150,6 +150,9 @@ class Role(enum.StrEnum):
     EXTRACT = "extract"
     VALIDATE = "validate"
     PROFILE = "profile"
+    #: se faire une idée de quelqu'un qu'elle lit sans lui parler (ADR 0298) : quelques faits tirés de ses derniers
+    #: messages ; sans modèle à lui, celui qui retient
+    PORTRAIT = "portrait"
     INTERPRET = "interpret"
     TRIAGE = "triage"
     CAPTION = "caption"
@@ -174,7 +177,7 @@ FALLBACKS = {
     Role.DREAM: Role.REPLY, Role.NARRATIVE: Role.REPLY, Role.PRO: Role.REPLY, Role.CHARACTER: Role.REPLY,
     # un projet travaille d'abord avec le modèle de ses séances ; l'impersonnel, avec celui de ses projets
     Role.PROJECT: Role.STEP, Role.JOB: Role.PROJECT, Role.REVIEW: Role.JOB,
-    Role.VALIDATE: Role.EXTRACT, Role.PROFILE: Role.EXTRACT, Role.INTERPRET: Role.EXTRACT,
+    Role.VALIDATE: Role.EXTRACT, Role.PROFILE: Role.EXTRACT, Role.PORTRAIT: Role.EXTRACT, Role.INTERPRET: Role.EXTRACT,
     Role.TRIAGE: Role.EXTRACT, Role.COMPACT: Role.EXTRACT, Role.PLAN: Role.EXTRACT,
     # un seul modèle déclaré suffit : les utilitaires retombent sur celui qui répond
     Role.EXTRACT: Role.REPLY, Role.CAPTION: Role.REPLY,

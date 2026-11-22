@@ -14,6 +14,9 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 import java.time.ZoneOffset
 
 /**
@@ -303,5 +306,86 @@ class SheetRulesTest {
         val t = timeLayout(empty, diagramRows(empty), weeks = false, width = 0f, zone = utc)
         assertNull(t.tracks.single().bars.single().tone)
         assertTrue(t.arrows.isEmpty())
+    }
+
+    @Test fun `dans le temps - un changement d'heure ne décale pas les jours - chaque trait tombe à minuit`() {
+        val paris = ZoneId.of("Europe/Paris")
+        // le mardi qui suit le passage à l'heure d'été (un dimanche de 23 h), à 10 h
+        val sunday = LocalDate.of(2027, 3, 28)
+        assertEquals(23 * 3_600_000L, sunday.plusDays(1).atStartOfDay(paris).toInstant().toEpochMilli() - sunday.atStartOfDay(paris).toInstant().toEpochMilli())
+        val at = sunday.plusDays(2).atTime(10, 0).atZone(paris).toInstant().toEpochMilli()
+        val started = sunday.minusDays(2).atTime(12, 0).atZone(paris).toInstant().toEpochMilli()
+        val d = Diagram(now = at, from = started, objectives = listOf(DiagramObjective(id = 1, kind = "once", status = "open", startedAt = started)))
+        val t = timeLayout(d, diagramRows(d), weeks = false, width = 0f, zone = paris)
+        // du vendredi au mardi : cinq traits, un par jour du calendrier, chacun à minuit de son jour
+        assertEquals(4, daysBack(d, false, paris))
+        assertEquals((0..4).map { sunday.minusDays(2).plusDays(it.toLong()) }, t.days.map { Instant.ofEpochMilli(it.at).atZone(paris).toLocalDate() })
+        assertTrue(t.days.all { dayStart(it.at, paris) == it.at })
+        assertEquals(sunday.minusDays(2).atStartOfDay(paris).toInstant().toEpochMilli(), t.origin)
+        // les traits sont à pas égaux, et midi tombe au milieu de son jour — le dimanche de 23 h compris
+        assertEquals(listOf(0f, t.day, 2 * t.day, 3 * t.day, 4 * t.day), t.days.map { it.x })
+        assertEquals(t.day / 2, t.tracks.single().bars.first().left, 1f)
+        assertEquals(2.5, dayOffset(sunday.atTime(12, 30).atZone(paris).toInstant().toEpochMilli(), sunday.minusDays(2), paris), 0.001)
+    }
+
+    // ── Ce que la relecture d'A3 a trouvé ──
+
+    @Test fun `le fil - une exécution et son commit, nés du même événement, ont chacun leur clé`() {
+        val run = Happening(seq = 95, kind = "run", what = "report")
+        val commit = Happening(seq = 95, kind = "commit", what = "commit")
+        assertTrue(happeningKey(run) != happeningKey(commit))
+        assertFalse(sameHappening(run, commit))
+        assertTrue(sameHappening(run, run.copy(title = "relu")))
+        // et deux lignes que rien ne distingue gardent chacune la leur dans la liste
+        val keys = keyed(listOf(run, commit, run), ::happeningKey).map { it.key }
+        assertEquals(3, keys.toSet().size)
+        assertEquals(happeningKey(run), keys.first())
+    }
+
+    @Test fun `une suite déjà chargée reste quand la première page relue la rejoint, et repart sinon`() {
+        val same: (Int, Int) -> Boolean = { a, b -> a == b }
+        assertEquals(listOf(7, 6), olderKept(listOf(10, 9, 8, 7, 6), listOf(10, 9, 8), same))
+        assertEquals(listOf(8, 7, 6), olderKept(listOf(10, 9, 8, 7, 6), listOf(11, 10, 9), same))
+        assertEquals(emptyList<Int>(), olderKept(listOf(10, 9, 8), listOf(10, 9, 8), same))
+        // la page relue ne touche plus ce qu'on avait : entre les deux il manquerait des lignes
+        assertEquals(emptyList<Int>(), olderKept(listOf(10, 9, 8, 7), listOf(20, 19), same))
+        assertEquals(emptyList<Int>(), olderKept(listOf(10, 9), emptyList(), same))
+        assertEquals(emptyList<Int>(), olderKept(emptyList(), listOf(10, 9), same))
+    }
+
+    @Test fun `le mot d'un lien ne s'enregistre ni vide ni inchangé`() {
+        assertFalse(linkWordReady("", "sa bibliothèque"))
+        assertFalse(linkWordReady("   ", "sa bibliothèque"))
+        assertFalse(linkWordReady(" sa bibliothèque ", "sa bibliothèque"))
+        assertFalse(linkWordReady("", ""))
+        assertTrue(linkWordReady("son API", "sa bibliothèque"))
+        assertTrue(linkWordReady("son API", ""))
+    }
+
+    @Test fun `ajouter à une liste - à qui il est ne part que s'il est de ceux que la liste sert`() {
+        val served = list.copy(actors = listOf(Coded("self", "Elle"), Coded("owner", "Toi")), actor = "person")
+        // une liste confiée à une personne : `person` n'est pas un choix de l'ajout — rien ne part, la liste lui donne le sien
+        assertEquals("", addActor(served, served.actor))
+        assertEquals("owner", addActor(served, "owner"))
+        assertEquals("", addActor(served, ""))
+        val sent = itemAddRequest("entreprises", "Lumen", "", "a_contacter", addActor(served, served.actor))
+        assertFalse("actor" in sent.body.keys)
+        assertTrue("actor" in itemAddRequest("entreprises", "Lumen", "", "a_contacter", addActor(served, "self")).body.keys)
+    }
+
+    @Test fun `un sélecteur n'offre que les choix servis - un choix vide seulement pour revenir à ce qui était là`() {
+        val choices = listOf(Coded("persona", "Elle avance seule"), Coded("pro", "Mode pro"))
+        // une valeur servie : pas de « — », qui ne donnerait que « choisissez une valeur »
+        val set = SettingField(name = "mode", kind = "select", choices = choices, value = JsonPrimitive("persona"))
+        assertEquals(choices, settingChoices(set))
+        assertEquals(choices, settingChoices(set.copy(required = true)))
+        // servi sans valeur : « — » y ramène, et ne part pas (rien ne change)
+        val unset = set.copy(value = JsonPrimitive(""))
+        assertEquals(listOf(Coded("", "—")) + choices, settingChoices(unset))
+        assertTrue(settingsChanged(listOf(unset), mapOf("mode" to JsonPrimitive(""))).isEmpty())
+        assertEquals(choices, settingChoices(unset.copy(required = true)))
+        // un choix vide servi reste le sien, avec ses mots
+        val own = set.copy(choices = listOf(Coded("", "Rien de particulier")) + choices, value = JsonPrimitive(""))
+        assertEquals(listOf(Coded("", "Rien de particulier")) + choices, settingChoices(own))
     }
 }

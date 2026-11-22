@@ -68,8 +68,8 @@ from tests.unit.test_projects import create, events, form, live, wait
 
 #: les onglets de la fiche, dans l'ordre de leurs vues (ADR 0281) : la fiche dessinée réunit « objectifs » sous
 #: « apercu » et « acces » sous « comportement », et range les trois derniers sous « Plus »
-TABS = ["apercu", "objectifs", "tickets", "suivi", "liens", "git", "executions", "comportement", "acces", "decisions",
-        "fichiers", "documentation", "carnet"]
+TABS = ["apercu", "objectifs", "tickets", "git", "fichiers", "documentation", "decisions", "executions", "carnet",
+        "liens", "suivi", "comportement", "acces"]  # l'ordre de l'écran Projets (ADR 0297)
 
 
 def row_form(fixed: dict[str, str], **values: str) -> dict[str, list[str]]:
@@ -214,7 +214,9 @@ def test_every_tab_reads_a_project_that_lived_and_the_forms_stay_in_their_tabs(t
         tabs = {name: await tab(kernel, name, str(pid)) for name in TABS}
         tabs["tous les objectifs"] = await tab(kernel, "objectifs", str(pid), objectifs="tous")
         commits = await atelier.commits(pid, 1)
-        tabs["commit"] = await tab(kernel, "git", str(pid), commit=commits[0].sha)
+        # Code s'ouvre sur ses fichiers (ADR 0297) : l'atelier face au distant est sa sous-vue « distant »
+        tabs["git"] = await tab(kernel, "git", str(pid), vue="distant")
+        tabs["commit"] = await tab(kernel, "git", str(pid), vue="distant", commit=commits[0].sha)
         tabs["file"] = await tab(kernel, "fichiers", str(pid), fichier="JOURNAL.md")
         ins = Inspection(kernel)
         specs = [a for a in ins.actions_for(subject="project")]
@@ -664,8 +666,8 @@ def test_git_history_pages_beyond_five_hundred_commits(tmp_path):
                            end="4:00")
         await atelier.write(pid, "notes.txt", "exemple")
         atelier.commits_[pid] = [(f"c{i:06}", f"Version {i}") for i in range(555)]
-        first = tables(await tab(kernel, "git", str(pid)))["Historique"]
-        last = tables(await tab(kernel, "git", str(pid), page_commits="23"))["Historique"]
+        first = tables(await tab(kernel, "git", str(pid), vue="distant"))["Historique"]
+        last = tables(await tab(kernel, "git", str(pid), vue="distant", page_commits="23"))["Historique"]
         return first, last
 
     first, last = live(tmp_path, scenario, atelier=atelier)
@@ -689,7 +691,7 @@ def test_pushing_and_pulling_from_the_git_tab(tmp_path):
         await asyncio.sleep(MINUTE / US)
         out["push"] = await perform(kernel, "projects.pousser", form(), by="user_1", subject=pid, nonce="u2")
         await asyncio.sleep(MINUTE / US)
-        out["git"] = await tab(kernel, "git", pid)
+        out["git"] = await tab(kernel, "git", pid, vue="distant")
         out["executed"] = events(kernel, rt.EFFECT_EXECUTED)
         out["journal"] = "".join(str(e.data) for e in events(kernel, rt.EFFECT_PROPOSED, rt.EFFECT_EXECUTED))
         return out
@@ -723,11 +725,11 @@ def test_the_git_tab_faces_the_workshop_with_its_github_remote(tmp_path):
                         pulls=(Ticket(8, "Une PR", f"{page}/pull/8", "bea", STAMP, head="f", base="main", draft=True),),
                         open_issues=1, open_pulls=1, read_at=STAMP)
         host = kernel.ports["repo_host"] = Host(hosted)
-        out = {"ahead": await tab(kernel, "git", str(pid), frais="1")}
+        out = {"ahead": await tab(kernel, "git", str(pid), vue="distant", frais="1")}
         host.hosted, host.gap = replace(hosted, head="f" * 40, commits=(Commit("f" * 40, STAMP, "d'ailleurs"),)), (2, 1)
-        out["diverged"] = await tab(kernel, "git", str(pid))
+        out["diverged"] = await tab(kernel, "git", str(pid), vue="distant")
         host.hosted = replace(hosted, error="GitHub ne répond pas", head="", commits=(), issues=(), pulls=())
-        out["down"] = await tab(kernel, "git", str(pid))
+        out["down"] = await tab(kernel, "git", str(pid), vue="distant")
         out["asked"] = host.asked
         return out
 
@@ -850,7 +852,7 @@ def test_files_git_and_deposits_tell_the_truth(tmp_path):
                                         by="user_1", subject=str(pid), nonce="d2")}
         out["pending"] = await atelier.pending(pid)
         out["src"] = await tab(kernel, "fichiers", str(pid), dossier="src")
-        out["git"] = await tab(kernel, "git", str(pid))
+        out["git"] = await tab(kernel, "git", str(pid), vue="distant")
         return out
 
     out = live(tmp_path, scenario, atelier=atelier)

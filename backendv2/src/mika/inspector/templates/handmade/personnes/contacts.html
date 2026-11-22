@@ -1,0 +1,20 @@
+{# La fiche d'une personne › Contacts (app/handmade/person/identifies.py, ADR 0298) : ceux que ses comptes lui ont
+   fait connaître, ceux qu'on lui partage et ceux que personne n'a ; des puces par compte ; une entrée chacun, comme
+   l'annuaire les dit (handmade/personnes/_annuaire.html). La liste que montrera l'onglet Contacts de frontendv2. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/personnes/_annuaire.html" as dir %}
+<div class="now-page person-tab pers">
+  <ul class="person-counts">{% for n, label in counts %}<li><span class="now-num">{{ n }}</span> {{ label }}</li>{% endfor %}</ul>
+  {% if chips %}<nav class="hm-chips" aria-label="Par où elle les connaît">{% for c in chips %}<a class="hm-chip{{ ' on' if c.on }}" href="{{ c.href }}"{% if c.on %} aria-current="true"{% endif %}>{{ c.label }} <span class="hm-count">{{ c.count }}</span></a>{% endfor %}</nav>{% endif %}
+  <section class="now-card" aria-labelledby="c-title">
+    <header class="now-card-head"><h2 id="c-title">Les contacts {{ of }}</h2><span class="person-count now-num">{{ total }}</span><p>ceux que ses comptes lui ont fait connaître, ceux qu'on lui partage et ceux que personne n'a · vus le plus récemment d'abord</p></header>
+    {% if entries %}
+    <ul class="pers-dir" role="list">
+      {% for e in entries %}{{ dir.entry(e) }}
+      {% endfor %}
+    </ul>
+    {{ tab.pager(pager) }}
+    {% else %}{{ tab.empty("Ses comptes ne lui ont fait connaître personne") }}{% endif %}
+  </section>
+  <p class="person-tab-note muted">Ce qu'elle a lu de ses contacts ne se dit qu'à {{ name }}, et à qui {{ name }} partage ses comptes ; ceux que personne n'a se disent à tout le monde.</p>
+</div>

@@ -31,6 +31,7 @@ from starlette.routing import Mount, Route
 
 from mika.adapters.addresses import serving_on
 from mika.adapters.camera import CameraBuffer
+from mika.adapters.contacts import ContactsStore
 from mika.adapters.feeds import HttpFeeds
 from mika.adapters.forge import ForgeBases, ForgeHost
 from mika.adapters.imaging.config import LiveImaging
@@ -339,6 +340,9 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     teams_store = outside["teams"] = TeamsStore(settings.teams, bases["teams"], now=clock.now)
     # ses clés, une par compte (ADR 0186) : la console les crée et les retire par ce port
     teams = outside["teams_keys"] = TeamsDesk(settings, clock.now, teams_store)
+    # l'annuaire (ADR 0298) : tous ceux qu'elle connaît, même sans leur avoir parlé, tirés de Teams et du courrier par
+    # le plugin ``contacts`` (sa base à lui, hors du journal)
+    outside["contacts"] = ContactsStore(bases["contacts"], now=clock.now)
     # les messages du téléphone (ADR 0120) : la porte de ``/api/phone/…``, et l'envoi d'une réponse proposée
     phone = outside["phone"] = PhoneDesk()
     # les lieux, les adresses et les itinéraires de l'écran Carte et de ses outils (ADR 0194) : l'index des lieux de

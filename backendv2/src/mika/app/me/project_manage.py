@@ -232,8 +232,8 @@ async def set_settings(call: Call) -> dict[str, Any]:
     if not plans:
         raise Denied(409, NOTHING)
     got: dict[str, Any] = {}
-    for key, values in plans:
-        got = done(await call.act(key, form(**values), subject=_subject(r)))
+    for key, values in plans:  # une clé d'envoi par action : la seconde n'est pas une redite de la première
+        got = done(await call.act(key, form(**values), subject=_subject(r), part=key))
     return got
 
 

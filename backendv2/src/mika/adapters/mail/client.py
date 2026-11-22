@@ -345,6 +345,15 @@ class ImapSmtpMail:
     def contacts_page(self, account="", text="", page=1, size=25):
         return self._cache.browse("contacts", account, text, tuple(a.address for a in self.accounts()), page, size)
 
+    def correspondents_since(self, cursor: tuple[int, int], limit: int):
+        return self._cache.correspondents_since(cursor, limit, {a.key: a.address for a in self.accounts()})
+
+    def exchanged(self, since: int, *, limit: int = 2000, accounts=None):
+        return self._cache.exchanged(since, limit, {a.key: a.address for a in self.accounts()}, accounts)
+
+    def letters_from(self, address: str, *, since: int = 0, limit: int = 30, accounts=None):
+        return self._cache.letters_from(address, since, limit, accounts)
+
     def thread_page(self, ref, page=1, size=25):
         return self._cache.browse("thread", ref, page, size)
 

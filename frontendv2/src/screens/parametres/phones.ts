@@ -61,7 +61,7 @@ async function revoke(id: number, host: Host): Promise<void> {
 }
 
 export function phonesView(apk: boolean, items: readonly Phone[], now: number): string {
-  const apps = ["WhatsApp", "WhatsApp Business", "Messages"].map((a) => `<span class="tag">${h(a)}</span>`).join("");
+  const apps = ["WhatsApp", "WhatsApp Business", "Messenger", "Messages"].map((a) => `<span class="tag">${h(a)}</span>`).join("");
   return `<div class="set-page">${apkCard(apk)}
       ${section("Tes téléphones connectés", phonesTable(items, now), { single: true })}
       ${section(

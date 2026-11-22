@@ -1,0 +1,20 @@
+{# « Ce qu'elle en sait » d'un contact (app/handmade/subjects/contact.py, ADR 0298, lot 6) : chaque fait qu'elle a
+   tiré de ses derniers messages — d'où il vient, sa sorte, sa confiance en jauge — et « Oublier » sur sa ligne ;
+   l'état de son dernier portrait. #}
+{% from "_forms.html" import action_form %}
+{% from "handmade/shared/macros.html" import bar %}
+<div class="now-page person-tab">
+  <ul class="person-counts"><li><span class="now-num">{{ notes|length }}</span> {{ "faits" if notes|length > 1 else "fait" }}</li><li><span class="now-num">{{ portraits }}</span> {{ "portraits" if portraits > 1 else "portrait" }}</li></ul>
+  <section class="now-card person-list" aria-labelledby="knows-title">
+    <header class="now-card-head"><h2 id="knows-title">Ce qu'elle sait {{ of }}</h2><span class="person-count now-num">{{ notes|length }}</span></header>
+    {% if notes %}
+    <ul class="person-known">
+      {% for n in notes %}<li id="fait-{{ n.id }}"><p>{{ n.text }}</p>
+        <div class="person-belief"><span class="person-meta">{{ n.meta }}{% if n.kind %} · <span>{{ n.kind }}</span>{% endif %}</span><span class="person-confidence" title="sa confiance">{{ bar(n.confidence_w, "confidence") }}<span class="now-num">{{ n.confidence }}</span></span></div>
+        {% if n.form %}<div class="person-entry-more">{{ action_form(n.form, True, True) }}</div>{% endif %}
+      </li>{% endfor %}
+    </ul>
+    {% else %}<p class="now-empty">Elle ne s'en fait pas encore d'idée.</p>{% endif %}
+    <p class="person-meta">{{ status }} Chaque fait vient de ses derniers messages dans un compte : il ne se dit qu'à qui voit ce compte. Un fait oublié ne se réapprend pas, même reformulé.</p>
+  </section>
+</div>

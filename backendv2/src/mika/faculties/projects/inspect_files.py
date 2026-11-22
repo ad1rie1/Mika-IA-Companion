@@ -7,6 +7,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from mika.faculties.projects import docs
 from mika.faculties.projects.actions import _depositable
 from mika.faculties.projects.faculty import PROJECTS, Project, ProjectsState, project_at
 from mika.faculties.projects.inspect import _cut, _subject
@@ -38,6 +39,8 @@ from mika.ports.workshop import OutsideWorkshop
 #: ce qu'on montre d'un fichier ouvert (au-delà : coupé, et dit ; le téléchargement donne tout)
 FILE_SHOWN = 60_000
 DOWNLOAD_MAX = 20 * 1024 * 1024
+#: une image de sa documentation (ADR 0289), par son nom : la fiche de la console la montre (ADR 0297)
+DOC_IMAGE = "documentation:images/"
 
 _TREE_LINE = re.compile(r"^(?P<path>.+) \((?P<size>\d+) o\)$")
 
@@ -78,7 +81,7 @@ def _listing(tree: list[str], folder: str) -> tuple[list[tuple[str, int, int]], 
     return [(n, v[0], v[1]) for n, v in sorted(dirs.items())], sorted(files)
 
 
-@PROJECTS.inspect("fichiers", title="Fichiers", subject="project", order=50,
+@PROJECTS.inspect("fichiers", title="Fichiers", subject="project", order=29,
                   description="Le dossier du projet, à parcourir : un dossier s'ouvre, un fichier se lit ici ou se "
                               "télécharge ; tu peux y déposer un fichier pour elle.")
 async def _files_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:
@@ -148,8 +151,14 @@ async def _opened_file(p: Project, port: Any, path: str) -> list[Block]:
 
 @PROJECTS.download("project")
 async def _download(s: ProjectsState, frame: Frame, ctx: InspectContext, key: str, name: str) -> Download | Note:
-    """Un fichier de l'atelier, tel quel."""
+    """Un fichier de l'atelier, tel quel ; ou une image de sa documentation (``DOC_IMAGE`` puis son nom)."""
     p = project_at(s, key)
+    if p is not None and name.startswith(DOC_IMAGE):
+        found = docs.image_at(p.docs, name.removeprefix(DOC_IMAGE))
+        store = ctx.ports.get(docs.PORT)
+        data = await store.read(found.file, docs.IMAGE_BYTES) if found is not None and store is not None else None
+        return Download(found.name, data) if found is not None and data is not None else \
+            Note("Cette image n'est pas (ou plus) dans sa documentation.", tone="warn")
     port = ctx.ports.get("workshop")
     if p is None or port is None or not port.exists(p.id):
         return Note("Ce fichier n'est pas disponible.", tone="warn")

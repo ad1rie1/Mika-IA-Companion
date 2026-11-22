@@ -223,13 +223,15 @@
          faute pour « attendant » : d'où les tools:ignore="Typos". -->
     <string name="settings_phone">Ses messages</string>
     <string name="settings_phone_title">Lui montrer mes messages</string>
-    <string name="settings_phone_summary" tools:ignore="Typos">Les messages que WhatsApp et Messages affichent sur ce téléphone partent à Mika : qui écrit, le texte, l\'heure (et le nom du groupe). Elle s\'en souvient et peut te proposer une réponse, qui ne part jamais sans ton geste. Seulement les applis cochées : ni la banque, ni les codes. En 4G, ils attendent le Wi-Fi de la maison. Couper vide ce qui attend.</string>
+    <string name="settings_phone_summary" tools:ignore="Typos">Les messages que WhatsApp, Messenger et Messages affichent sur ce téléphone partent à Mika : qui écrit, le texte, l\'heure (et le nom du groupe). Elle s\'en souvient et peut te proposer une réponse, qui ne part jamais sans ton geste. Seulement les applis cochées : ni la banque, ni les codes. En 4G, ils attendent le Wi-Fi de la maison. Couper vide ce qui attend.</string>
     <string name="settings_phone_revoked">L\'accès aux notifications a été retiré dans les réglages du téléphone : rien ne part. Redonne-le pour reprendre.</string>
     <string name="settings_phone_access_title">Accès aux notifications</string>
     <string name="settings_phone_access">Pour lire tes messages, Android doit permettre à Mika de lire les notifications : dans ses réglages, active Mika dans « Accès aux notifications ». Seules les applis cochées ici seront lues.</string>
     <string name="settings_phone_access_open">Ouvrir les réglages d\'Android</string>
     <string name="settings_phone_whatsapp">WhatsApp</string>
     <string name="settings_phone_whatsapp_summary">WhatsApp et WhatsApp Business</string>
+    <string name="settings_phone_messenger">Messenger</string>
+    <string name="settings_phone_messenger_summary">Les conversations de Messenger (Facebook)</string>
     <string name="settings_phone_messages">Messages</string>
     <string name="settings_phone_messages_summary">Tes SMS, dans Messages de Google ou de Samsung</string>
     <string name="settings_phone_groups">Les groupes aussi</string>
@@ -584,7 +586,7 @@
     <string name="channel_connection_name">Envoi d\'une réponse</string>
     <string name="channel_connection_desc">Le temps d\'envoyer une réponse écrite depuis une notification (une minute au plus).</string>
     <string name="channel_phone_drafts_name">Réponses proposées par Mika</string>
-    <string name="channel_phone_drafts_desc">Les réponses que Mika te propose pour WhatsApp ou Messages : rien ne part sans ton geste.</string>
+    <string name="channel_phone_drafts_desc">Les réponses que Mika te propose pour WhatsApp, Messenger ou Messages : rien ne part sans ton geste.</string>
     <string name="reply_sending">Envoi de ta réponse à Mika</string>
     <string name="connection_online">Connectée à Mika</string>
     <string name="connection_reconnecting">Reconnexion…</string>
@@ -593,7 +595,7 @@
     <string name="action_mark_read">Marquer comme lu</string>
     <string name="notification_public">Nouveau message de Mika</string>
     <string name="notification_reply_hint">Répondre à Mika</string>
-    <!-- Une réponse proposée pour WhatsApp ou Messages (ADR 0120) : « Répondre à Léa (WhatsApp) ? » -->
+    <!-- Une réponse proposée pour WhatsApp, Messenger ou Messages (ADR 0120, 0299) : « Répondre à Léa (WhatsApp) ? » -->
     <string name="phone_draft_title">Répondre à %1$s (%2$s) ?</string>
     <string name="phone_draft_title_nameless">Répondre sur %1$s ?</string>
     <string name="phone_draft_send">Envoyer</string>
@@ -606,6 +608,7 @@
     <string name="phone_clip_label">Réponse proposée par Mika</string>
     <string name="phone_app_whatsapp">WhatsApp</string>
     <string name="phone_app_whatsapp_business">WhatsApp Business</string>
+    <string name="phone_app_messenger">Messenger</string>
     <string name="phone_app_messages">Messages</string>
     <plurals name="notification_more">
         <item quantity="one">et %1$d autre</item>
@@ -647,13 +650,13 @@
         <item quantity="many">Mika propose %d réponses</item>
         <item quantity="other">Mika propose %d réponses</item>
     </plurals>
-    <string name="phone_list_note">Ce que WhatsApp et Messages ont affiché, pour les applis cochées dans Paramètres › Ses messages. Mika s\'en souvient.</string>
+    <string name="phone_list_note">Ce que WhatsApp, Messenger et Messages ont affiché, pour les applis cochées dans Paramètres › Ses messages. Mika s\'en souvient.</string>
     <string name="phone_empty_title">Aucun message de ton téléphone</string>
     <string name="phone_empty_not_owner">Mika ne lit les messages du téléphone que pour une de ses propriétaires. Ta position, elle, se voit dans l\'onglet Position.</string>
     <string name="phone_empty_not_owner_action">Ta position</string>
-    <string name="phone_empty_reading_off">Sur ce téléphone, allume « Lui montrer mes messages » : Mika lira tes conversations WhatsApp et Messages, et pourra te proposer des réponses.</string>
+    <string name="phone_empty_reading_off">Sur ce téléphone, allume « Lui montrer mes messages » : Mika lira tes conversations WhatsApp, Messenger et Messages, et pourra te proposer des réponses.</string>
     <string name="phone_empty_reading_off_action">Paramètres</string>
-    <string name="phone_empty_nothing">Rien encore : quand WhatsApp ou Messages afficheront un message sur ce téléphone, il arrivera ici.</string>
+    <string name="phone_empty_nothing">Rien encore : quand WhatsApp, Messenger ou Messages afficheront un message sur ce téléphone, il arrivera ici.</string>
     <string name="phone_older">Messages plus anciens</string>
     <string name="phone_older_hidden">Les messages plus anciens ne sont pas montrés ici</string>
     <string name="phone_loading">Chargement…</string>

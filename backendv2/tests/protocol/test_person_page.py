@@ -294,9 +294,10 @@ def test_every_list_tab_is_drawn(world):  # noqa: F811
         text = html.unescape(page.text)
         assert 'class="now-page person-tab"' in text and '<table class="tbl">' not in text, tab
         assert expected in text, tab
-    # une adresse : son nom mène à sa fiche, sa confiance est une étiquette
+    # ce qui l'identifie (ADR 0298) : une tuile par moyen de communication, sa sorte, sa valeur vers sa fiche
     addresses = html.unescape(client.get(f"{PAGE}?onglet=adresses").text)
-    assert re.search(r'<p class="person-entry-title"><a href="/admin/fiche/handle/user_1">', addresses)
+    assert re.search(r'<p class="id-value"><a href="/admin/fiche/handle/user_1">', addresses)
+    assert "Identifiant de compte" in addresses and "lui parle" in addresses
 
 
 def test_files_tab_carries_what_she_received_and_what_she_sent(world):  # noqa: F811

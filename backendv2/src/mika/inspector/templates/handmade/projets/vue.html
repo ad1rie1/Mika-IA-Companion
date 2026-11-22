@@ -1,0 +1,133 @@
+{# Activité › Projets › un projet › Vue d'ensemble (app/handmade/subjects/project.py::overview, ADR 0297) : la vue
+   d'ensemble de l'écran Projets du client web, sur les jetons de la console. Une grille de cartes sur toute la
+   largeur, sans liste à gauche ni panneau à droite, sans rien d'imbriqué — trois colonnes, un écran à 1440 px :
+   - en tête : où il en est (son dernier compte rendu) et ce qui attend quelqu'un, à qui la main (les trois premières
+     attentes, le reste replié ; chacune mène là où elle se règle) ;
+   - puis ses objectifs (leurs jalons en une barre ; son plan en une ligne quand il n'attend rien), son code (son
+     dépôt distant, ses pull requests ouvertes avec leurs vérifications et leur relecture, son dernier commit), son
+     prochain passage (quand, sur quoi, son rythme, ses missions) ;
+   - puis ses tickets par étape (une barre empilée, en SVG : la CSP interdit un style en ligne), ses dépendances, ses
+     dernières exécutions.
+   Son plan est en carte, en tête, seulement quand il attend sa réponse. Chaque carte mène à son onglet ; ce que
+   seul le portail dit (ses identifiants, ses plafonds, ses pannes) est dans Administration › Sous le capot. Sur un
+   téléphone, une colonne : ce qui attend d'abord. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% from "_cells.html" import cell %}
+{% from "handmade/projets/_morceaux.html" import ico, st, seg, tile %}
+{% macro card_head(icon, title, href="", link="") -%}
+<header class="pj-card-h">{{ ico(icon) }}<h2>{{ title }}</h2>{% if href %}<a href="{{ href }}">{{ link }}{{ ico('chev', 'xs') }}</a>{% endif %}</header>
+{%- endmacro %}
+{% macro waits(x) -%}
+<li><a class="pj-mini" href="{{ x.go.href if x.go and x.go.href else links.tickets }}"{% if x.go and x.go.external %} rel="noopener noreferrer nofollow" target="_blank"{% endif %}>
+  {{ tile(x.icon, 'you') }}
+  <span class="pj-mini-main"><b class="pj-wait-text" title="{{ x.text }}">{{ x.text }}</b>
+    <span class="pj-mini-sub"><small>{% if x.kind %}{{ x.kind.text }}{% endif %}{% if x.since and x.since.text != '—' %} · {{ x.since.text }}{% endif %}{% if x.who and x.who.text != '—' %} · la main à {{ x.who.text }}{% endif %}</small>{% if x.go and x.go.href %}<span class="pj-go">{{ x.go.text }}{{ ico('chev', 'xs') }}</span>{% endif %}</span></span>
+</a></li>
+{%- endmacro %}
+{% macro plan_body(plan) -%}
+  <p class="pj-facts">{% if plan.by and plan.by.text not in ('—', '') %}<span><span class="k">demandé par</span> {{ cell(plan.by) }}</span>{% endif %}{% if plan.version %}<span><span class="k">version</span> {{ cell(plan.version) }}</span>{% endif %}</p>
+  {% for t in plan.texts %}<details class="pj-fold"{{ ' open' if plan.waits and loop.index == 2 }}><summary>{{ t.title }}</summary><p class="pj-prose">{{ t.text }}</p></details>{% endfor %}
+  {% if plan.bar %}<div class="pj-acts">{{ tab.block(plan.bar) }}</div>{% endif %}
+{%- endmacro %}
+{% macro plan_state(plan) -%}
+{% if plan.state %}{{ st('you' if plan.waits else 'done' if plan.state.tone == 'ok' else 'wait', plan.state.text) }}{% endif %}
+{%- endmacro %}
+{% macro plan_card(plan) -%}
+<section class="pj-card pj-plan you" aria-labelledby="pj-plan-t">
+  <header class="pj-card-h">{{ ico('list') }}<h2 id="pj-plan-t">Son plan</h2>{{ plan_state(plan) }}</header>
+  {{ plan_body(plan) }}
+</section>
+{%- endmacro %}
+<div class="pj-vue" data-tab="project/apercu">
+  {% if banner %}
+  <div class="pj-banner {{ 'fail' if banner.tone == 'danger' else 'you' }}" role="status">{{ ico('info') }}<span>{{ banner.text }}</span>{% if banner.button %}<a class="btn quiet small" href="{{ banner.href }}">{{ banner.button }}</a>{% endif %}</div>
+  {% endif %}
+  {% for n in notes %}<p class="pj-banner {{ 'work' if n.tone == 'info' else '' }}">{{ ico('info') }}<span>{{ n.text }}</span></p>{% endfor %}
+  {% if plan and plan.waits %}{{ plan_card(plan) }}{% endif %}
+  <div class="pj-grid">
+    <div class="pj-gcol">
+      <section class="pj-card pj-ou" aria-labelledby="pj-ou-t">
+        <header class="pj-card-h">{{ ico('flag') }}<h2 id="pj-ou-t">Où il en est</h2>{% if where.age %}<span class="pj-age">{{ where.age }}</span>{% endif %}</header>
+        <p class="pj-ou-text">{{ where.text or "Elle n'y a pas encore travaillé." }}</p>
+        {% if where.description %}<p class="pj-ou-sub">{{ where.description }}</p>{% endif %}
+      </section>
+      <div class="pj-gpair">
+        <section class="pj-card" aria-label="Objectifs">
+          {{ card_head('target', 'Objectifs', links.objectifs, done ~ ' sur ' ~ total ~ (' terminés' if total > 1 else ' terminé')) }}
+          {% for o in goals %}
+          <a class="pj-mini col" href="{{ o.href }}">
+            <span class="pj-mini-top"><b>{{ o.text }}</b>{{ st(o.tone, o.state) }}</span>
+            <span class="pj-prog">{{ seg(o.marks) }}<span>{{ o.said }}</span></span>
+          </a>
+          {% else %}<p class="pj-none">Pas encore d'objectif ponctuel.</p>{% endfor %}
+          {% if plan and not plan.waits %}<a class="pj-lastc" href="{{ links.plan }}">{{ ico('list') }}<span class="pj-ellipsis">Son plan : {{ plan.state.text if plan.state else 'sans plan' }}{% if plan.version and plan.version.text not in ('—', 'aucune encore') %} · version {{ plan.version.text }}{% endif %}</span>{{ ico('chev', 'xs') }}</a>{% endif %}
+        </section>
+        <section class="pj-card" aria-label="Code">
+          {{ card_head('code', 'Code', links.pulls if by_pulls else links.code, 'Pull requests' if by_pulls else 'Le dépôt') }}
+          {% for x in pulls %}
+          <a class="pj-mini" href="{{ x.href }}">{{ tile('pr', 'work') }}<span class="pj-mini-main"><b>{{ x.title }}</b><small>n° {{ x.n }} · objectif n° {{ x.objective }} · {{ x.age }}</small>
+            <span class="pj-dots">{% if x.checks %}<span title="{{ x.checks_said }}"><i class="{{ x.checks_tone }}"></i>{{ x.checks }}</span>{% endif %}{% if x.review %}<span><i class="{{ x.review_tone }}"></i>{{ x.review }}</span>{% endif %}{% if x.conflicts %}<span><i class="fail"></i>conflits</span>{% endif %}</span></span>{{ st(x.tone, x.state) }}</a>
+          {% else %}<p class="pj-none">{{ 'Aucune pull request ouverte.' if by_pulls else ("Flux direct : elle enregistre sur sa branche, sans pull request." if remote else "Pas de dépôt distant : son travail reste dans l'atelier.") }}</p>{% endfor %}
+          <div class="pj-depot">
+            {% if depot %}<p>{{ ico('link', 'xs') }}<span class="pj-ellipsis">{{ cell(depot) }}</span></p>{% endif %}
+            {% if commit %}<a href="{{ links.code }}">{{ ico('commit') }}<code>{{ commit }}</code><span class="pj-ellipsis">{{ branch }} · {{ flow }}</span></a>{% endif %}
+          </div>
+        </section>
+      </div>
+      <div class="pj-gpair">
+        <section class="pj-card" aria-label="Tickets">
+          {{ card_head('ticket', 'Tickets', links.tickets, steps.open ~ (' ouverts' if steps.open > 1 else ' ouvert')) }}
+          {% if steps.total %}
+          <div class="pj-stack" role="img" aria-label="Ses tickets par étape">
+            <svg viewBox="0 0 {{ steps.total }} 10" preserveAspectRatio="none" aria-hidden="true">{% for s in steps.parts if s.count %}<rect class="e{{ s.i }}" x="{{ s.x }}" y="0" width="{{ s.count }}" height="10"/>{% endfor %}</svg>
+          </div>
+          <ul class="pj-legend" role="list">{% for s in steps.parts %}<li{% if not s.count %} class="zero"{% endif %}><i class="e{{ s.i }}"></i>{{ s.label }}<b>{{ s.count }}</b></li>{% endfor %}</ul>
+          {% else %}<p class="pj-none">Aucun ticket pour l'instant.</p>{% endif %}
+        </section>
+        <section class="pj-card" aria-label="Dépendances">
+          {{ card_head('link', 'Dépendances', links.liens, 'Le détail') }}
+          {% if reads or readers %}
+          <dl class="pj-deps">
+            <div><dt>Il dépend de</dt><dd>{% for x in reads %}<a href="{{ x.href }}">{{ x.title }}</a>{% else %}<span>aucun projet</span>{% endfor %}</dd></div>
+            <div><dt>Dépendent de lui</dt><dd>{% for x in readers %}<a href="{{ x.href }}">{{ x.title }}</a>{% else %}<span>aucun projet</span>{% endfor %}</dd></div>
+          </dl>
+          {% else %}<p class="pj-none">Ce projet ne dépend d'aucun autre, et aucun ne dépend de lui.</p>{% endif %}
+        </section>
+      </div>
+    </div>
+    <div class="pj-gcol">
+      <section class="pj-card pj-atoi{{ '' if waiting and waiting['items'] else ' rien' }}" aria-labelledby="pj-atoi-t">
+        <header class="pj-card-h">{{ ico('inbox') }}<h2 id="pj-atoi-t">Ce qui attend</h2></header>
+        {% set n = waiting.count if waiting else 0 %}
+        <div class="pj-big"><b class="now-num">{{ n }}</b><span>{{ 'choses attendent quelqu\'un' if n > 1 else 'chose attend quelqu\'un' if n else 'rien n\'attend personne : il avance seul' }}</span></div>
+        {% if waiting and waiting['items'] %}
+        <ul class="pj-minis" role="list">{% for x in waiting['items'][:most] %}{{ waits(x) }}{% endfor %}</ul>
+        {% if waiting['items']|length > most %}
+        <details class="pj-more"><summary>et {{ waiting['items']|length - most }} de plus</summary>
+          <ul class="pj-minis" role="list">{% for x in waiting['items'][most:] %}{{ waits(x) }}{% endfor %}</ul>
+        </details>
+        {% endif %}
+        {% endif %}
+      </section>
+      <section class="pj-card" aria-label="Prochain passage">
+        {{ card_head('clock', 'Prochain passage', links.activite, 'Activité') }}
+        <div class="pj-next"><b{% if coming.when|length > 30 %} class="long"{% endif %}>{{ coming.when or '—' }}</b>{% if coming.about or coming.held %}<span>{{ [coming.about, coming.held]|select|join(' · ') }}</span>{% endif %}</div>
+        <p class="pj-consigne">{{ ico('calendar', 'xs') }}<span>{{ rhythm }}</span><a href="{{ links.reglages }}">Régler</a></p>
+        {% for m in missions %}
+        <a class="pj-mini{{ ' off' if m.off }}" href="{{ m.href }}">{{ tile('refresh') }}<span class="pj-mini-main"><b>{{ m.text }}</b><small>{{ m.said }}</small></span></a>
+        {% endfor %}
+      </section>
+      <section class="pj-card pj-runs" aria-label="Dernières exécutions">
+        {{ card_head('play', 'Dernières exécutions', links.activite, 'Activité') }}
+        {% if runs %}
+        <ul class="pj-tl" role="list">
+          {% for e in runs %}
+          <li class="{{ e.tone }}"><span class="pj-tl-top">{% if e.href %}<a href="{{ e.href }}">{{ e.title }}</a>{% else %}<b>{{ e.title }}</b>{% endif %}<time title="{{ e.at }}">{{ e.rel }}</time>{% if e.meta %}<code>{{ e.meta }}</code>{% endif %}</span>
+            {% if e.text and e.text != '—' %}<p>{{ e.text }}</p>{% endif %}</li>
+          {% endfor %}
+        </ul>
+        {% else %}<p class="pj-none">Aucune exécution encore.</p>{% endif %}
+      </section>
+    </div>
+  </div>
+</div>

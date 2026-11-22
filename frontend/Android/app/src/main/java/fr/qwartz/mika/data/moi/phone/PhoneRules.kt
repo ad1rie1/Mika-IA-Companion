@@ -191,13 +191,14 @@ fun threadSubtitle(t: PhoneThread): String {
 private const val MEMBERS = 4
 
 /** Les sortes d'appli, pour la pastille d'une conversation. */
-enum class AppKind { WHATSAPP, MESSAGES, OTHER }
+enum class AppKind { WHATSAPP, MESSENGER, MESSAGES, OTHER }
 
 /** La pastille d'une appli : sa sorte (sa couleur) et sa lettre. */
 data class AppBadge(val kind: AppKind, val letter: String)
 
 fun appBadge(app: String, appName: String): AppBadge = when (app) {
     "whatsapp", "whatsapp_business" -> AppBadge(AppKind.WHATSAPP, "W")
+    "messenger" -> AppBadge(AppKind.MESSENGER, "M")
     "messages", "samsung_messages", "sms" -> AppBadge(AppKind.MESSAGES, "M")
     else -> {
         val name = appName.trim()

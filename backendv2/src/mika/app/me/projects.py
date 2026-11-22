@@ -49,6 +49,7 @@ from mika.contracts import self_ as self_c
 from mika.faculties.projects import (
     access,
     actions,
+    glance,
     inspect_todo,
     links,
     managing,
@@ -65,7 +66,6 @@ from mika.faculties.projects.faculty import (
     AMENDED,
     ISSUE_CAPABILITIES,
     NETWORKED_CAPABILITY,
-    ON_DEMAND,
     PULL_OPEN,
     PULL_REQUEST_CAPABILITY,
     STEER_CAPABILITY,
@@ -74,7 +74,6 @@ from mika.faculties.projects.faculty import (
     Project,
     ProjectsState,
     awaiting,
-    busy,
     by_pulls,
     detail_level,
     handed_over,
@@ -88,7 +87,9 @@ from mika.faculties.projects.faculty import (
 from mika.faculties.projects.inspect import CHECKS_FR, OBJ_FR, PULL_FR, STATUS_FR, pull_words, window_words
 from mika.faculties.projects.inspect_manage import HELD_WORDS, NOT_KEEPER
 from mika.faculties.projects.inspect_merge import BLOCK_WORDS
+from mika.faculties.projects.inspect_milestones import CHECK_WORDS
 from mika.faculties.projects.inspect_milestones import STATE_FR as MILESTONE_FR
+from mika.faculties.projects.inspect_reviews import REVIEW_WORDS
 from mika.faculties.projects.inspect_tracker import (
     ACTOR_CHOICES,
     BORN_PROPOSED,
@@ -99,7 +100,7 @@ from mika.faculties.projects.inspect_tracker import (
     PRIORITY_WORDS,
 )
 from mika.faculties.projects.tools import trigger_words
-from mika.kernel.clock import DAY, HOUR
+from mika.kernel.clock import HOUR
 from mika.kernel.frame import Audience
 from mika.runtime import decisions
 from mika.runtime.operations import audit
@@ -123,12 +124,9 @@ LINKS_SENT = 12
 PLAN_WORDS = {c.UNPLANNED: "sans plan", c.TO_FRAME: "à cadrer", c.PROPOSED: "attend une réponse", c.PLANNED: "validé"}
 HAND_WORDS = {c.ACTOR_OWNER: "au propriétaire", c.ACTOR_SELF: "à elle"}
 ACTOR_WORDS = {c.ACTOR_SELF: "elle", c.ACTOR_OWNER: "le propriétaire", c.ACTOR_PERSON: "une personne"}
-CHECK_WORDS = {c.CHECK_PROSE: "sa parole", c.CHECK_COMMAND: "une commande", c.CHECK_OWNER: "un point d'arrêt",
-               c.CHECK_ITEM: "un élément d'une liste"}
 FLOW_WORDS = {c.FLOW_DIRECT: "direct", c.FLOW_PR: "par pull request"}
 VEIL_WORDS = {tracker.PROPOSED_VEIL: "proposé par un autre : il se lit quand son propriétaire l'a accepté",
               tracker.LEVEL_VEIL: "d'un niveau que tu n'entends pas ici"}
-REVIEW_WORDS = {True: "relu : rien à redire", False: "relu : des constats à reprendre"}
 #: où se fait un geste : ici (une route de cette API), dans la console (rien ici ne le fait), chez l'hôte du dépôt
 HERE, CONSOLE, HOST = "ici", "console", "hote"
 APPROVAL_GESTURE = "Lire et décider"
@@ -568,22 +566,12 @@ def _head(sc: Scene, r: Reach, texts: Mapping[str, str], waiting: int) -> dict[s
 
 
 def _progress(p: Project) -> dict[str, Any]:
-    """Où en sont ses objectifs ponctuels, dans l'ordre du plan : faits, en cours (au moins une exécution), à venir,
-    bloqués — de quoi dessiner la barre de sa carte sans lire sa fiche."""
-    once = sorted((o for o in p.objectives if o.kind == c.ONCE and o.status != c.DROPPED),
-                  key=lambda o: (o.rank or 10_000, o.id))
-    states = [(o.id, "done" if o.status == c.DONE else "blocked" if o.status == c.BLOCKED else
-               "doing" if o.worked or o.runs else "todo") for o in once]
+    """Où en sont ses objectifs ponctuels, dans l'ordre du plan (``glance.progress``, ADR 0297) : faits, en cours,
+    à venir, bloqués — de quoi dessiner la barre de sa carte sans lire sa fiche."""
+    states = glance.progress(p)
     counts = {k: sum(1 for _, state in states if state == k) for k in PROGRESS_WORDS}
     return {"total": len(states), **counts,
             "states": [{"id": oid, "state": state, "state_label": PROGRESS_WORDS[state]} for oid, state in states]}
-
-
-def _last_activity(p: Project) -> int:
-    """La dernière fois que quelque chose a bougé dans ce projet, d'après ce que l'état en garde : une exécution,
-    son plan, un élément de son registre, un objectif, sa pull request, sa relecture."""
-    return max(p.created_at, p.last_run_at, p.plan_at, p.paused_at, *(i.updated_at for i in p.board.items),
-               *(at for o in p.objectives for at in (o.at, o.closed_at, o.pull_at, o.review_at, o.checks_at)))
 
 
 def _card(sc: Scene, r: Reach, mine: Mapping[int, Reach], texts: Mapping[str, str]) -> dict[str, Any] | None:
@@ -598,7 +586,7 @@ def _card(sc: Scene, r: Reach, mine: Mapping[int, Reach], texts: Mapping[str, st
             "tickets_open": tracker.open_tickets(p.board),
             "reads": [_linked(sc, mine, target, texts) for target in p.reads],
             "readers": [_linked(sc, mine, reader.id, texts) for reader in readers_of(sc.s, p.id)],
-            "led_by": self_c.name_of(sc.frame.get(self_c.PERSONA)), "last_activity": millis(_last_activity(p))}
+            "led_by": self_c.name_of(sc.frame.get(self_c.PERSONA)), "last_activity": millis(glance.last_activity(p))}
 
 
 def _paged(call: Call) -> tuple[int, int]:
@@ -690,10 +678,7 @@ def _author(sc: Scene, titles: Mapping[int, str], author: str, by: str, level: i
 
 
 def _cadence(o: Objective) -> str:
-    if not o.cadence_us:
-        return "à la cadence par défaut"
-    return f"tous les {o.cadence_us // DAY} jours" if o.cadence_us >= 2 * DAY and o.cadence_us % DAY == 0 else \
-        f"toutes les {max(1, round(o.cadence_us / HOUR))} h"
+    return glance.cadence_words(o)
 
 
 def _objective_refs(o: Objective, *, files: bool = False) -> list[str]:
@@ -789,14 +774,8 @@ def _edit_only(r: Reach) -> str:
 
 
 def _steps_counted(p: Project) -> list[dict[str, Any]]:
-    """Ses tickets comptés par étape du parcours en six (ADR 0293), d'après ses comptes par étape fine : un ticket
-    « validé, en cours » se range selon le flux du projet ; les écartés ne sont plus sur le parcours."""
-    counts = dict.fromkeys(tickets.JOURNEY, 0)
-    for name, fine, n in p.board.counts:
-        step = tickets.step_of(fine, by_pulls(p)) if name == c.TICKETS else ""
-        if step:
-            counts[step] += n
-    return [{"code": step, "label": JOURNEY_WORDS[step], "count": n} for step, n in counts.items()]
+    """Ses tickets comptés par étape du parcours en six (ADR 0293 ; ``glance.steps``, ADR 0297)."""
+    return [{"code": step, "label": JOURNEY_WORDS[step], "count": n} for step, n in glance.steps(p).items()]
 
 
 def _lists_json(r: Reach, texts: Mapping[str, str]) -> list[dict[str, Any]]:
@@ -983,8 +962,7 @@ def _next_json(sc: Scene, r: Reach, texts: Mapping[str, str]) -> dict[str, Any]:
     p = r.p
     coming = work.coming(p, sc.s, sc.frame)
     o = objective_at(p, coming.objective) if coming.objective else None
-    state = "running" if busy(sc.s, p.id) else "due" if coming.at else "paused" if p.status != c.ACTIVE else \
-        "on_demand" if p.schedule == ON_DEMAND else "idle"
+    state = glance.next_state(p, sc.s, coming)
     return {"at": millis(coming.at), "state": state, "state_label": NEXT_WORDS[state], "sort": coming.sort,
             "sort_label": COMING_WORDS.get(coming.sort, ""),
             "objective": {"id": o.id, "text": texts.get(o.text_ref, ""), "kind": o.kind} if o is not None else None}

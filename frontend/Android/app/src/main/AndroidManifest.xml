@@ -28,6 +28,7 @@
              proposée est copiée et sa notification ouvre l'appli (getLaunchIntentForPackage) pour la coller. -->
         <package android:name="com.whatsapp" />
         <package android:name="com.whatsapp.w4b" />
+        <package android:name="com.facebook.orca" />
         <package android:name="com.google.android.apps.messaging" />
         <package android:name="com.samsung.android.messaging" />
     </queries>
@@ -110,9 +111,9 @@
             android:name=".service.NotificationActionReceiver"
             android:exported="false" />
 
-        <!-- « Lui montrer mes messages » (ADR 0120) : le lecteur des notifications de WhatsApp et de Messages (les
-             applis cochées seulement), branché par Android une fois l'accès aux notifications accordé dans ses
-             réglages. Exporté pour le seul système (BIND_NOTIFICATION_LISTENER_SERVICE). Il ne garde rien d'ouvert :
+        <!-- « Lui montrer mes messages » (ADR 0120) : le lecteur des notifications de WhatsApp, de Messenger et de
+             Messages (les applis cochées seulement), branché par Android une fois l'accès aux notifications accordé
+             dans ses réglages. Exporté pour le seul système (BIND_NOTIFICATION_LISTENER_SERVICE). Il ne garde rien d'ouvert :
              les messages partent par un appel HTTP par lot, ou attendent le Wi-Fi de la maison (ADR 0077). -->
         <service
             android:name=".service.PhoneListenerService"

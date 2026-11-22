@@ -24,6 +24,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -109,9 +113,14 @@ internal fun TimeDiagram(vm: ProjectViewModel, sheet: Sheet, d: Diagram, now: Lo
         val layout = remember(d, rows, byWeeks, track) { timeLayout(d, rows, byWeeks, track) }
         val side = rememberScrollState()
         val pxPerDp = with(androidx.compose.ui.platform.LocalDensity.current) { 1.dp.toPx() }
-        // la piste s'ouvre sur aujourd'hui, la suite sans date à sa droite
-        LaunchedEffect(layout.width, layout.today, track) {
-            side.scrollTo(((layout.today - track * 0.55f) * pxPerDp).toInt().coerceAtLeast(0))
+        // la piste s'ouvre sur aujourd'hui, la suite sans date à sa droite — une fois par échelle : ni une largeur qui
+        // change (une rotation, un écran partagé) ni une relecture ne la ramènent d'où on l'a fait défiler
+        var placed by rememberSaveable(byWeeks) { mutableStateOf(false) }
+        LaunchedEffect(byWeeks, track > 0f) {
+            if (!placed && track > 0f) {
+                placed = true
+                side.scrollTo(((layout.today - track * 0.55f) * pxPerDp).toInt().coerceAtLeast(0))
+            }
         }
         val height = rows.sumOf { rowHeight(it).toDouble() }.toFloat()
         val words = rows.map { r ->

@@ -249,6 +249,31 @@ class Contact:
     last: int
 
 
+@dataclass(frozen=True, slots=True)
+class Correspondent:
+    """Un correspondant d'une boîte dans les mails qu'une lecture a parcourus (``correspondents_since``, l'annuaire :
+    ADR 0298) : l'expéditeur d'un mail reçu, un destinataire (copies comprises) d'un mail parti ; le dernier nom qu'il
+    y porte, combien de mails reçus de lui et partis vers lui, le premier et le dernier (µs, leur date)."""
+
+    account: str
+    address: str
+    name: str
+    received: int
+    sent: int
+    first: int
+    last: int
+
+
+@dataclass(frozen=True, slots=True)
+class CorrespondentsSince:
+    """Ce qu'une lecture de ``correspondents_since`` a trouvé, où elle s'est arrêtée (les mails gardés, les envois : à
+    repasser à la suivante), et s'il en reste après."""
+
+    people: tuple[Correspondent, ...] = ()
+    cursor: tuple[int, int] = (0, 0)
+    more: bool = False
+
+
 #: ce qu'un mail écrit à la main peut joindre (ADR 0214) : une pièce, au plus ce que le courrier garde d'une pièce
 #: (ADR 0172) ; un mail, au plus tant de pièces et tant d'octets en tout (il tient en mémoire le temps de partir)
 PIECE_MAX = 25 * 1024 * 1024
@@ -419,6 +444,28 @@ class MailPort(Protocol):
     def outgoing_page(self, query: MailQuery, page: int = 1, size: int = 25) -> Page[tuple[Mail | Sent, bool]]: ...
 
     def contacts_page(self, account: str = "", text: str = "", page: int = 1, size: int = 25) -> Page[Contact]: ...
+
+    def correspondents_since(self, cursor: tuple[int, int], limit: int) -> CorrespondentsSince:
+        """Les correspondants de chaque boîte dans les ``limit`` mails gardés et les ``limit`` envois arrivés après
+        ``cursor`` (leur ordre d'arrivée ; ce que l'historique ou une recherche ramène compte aussi), par boîte : un
+        mail reçu dit son expéditeur, un mail parti ses destinataires ; jamais l'adresse de la boîte elle-même, ni deux
+        fois le même mail (ses copies, sa copie locale). ``cursor`` : celui que rendait la lecture d'avant ((0, 0) :
+        depuis le début)."""
+        ...
+
+    def exchanged(self, since: int, *, limit: int = 2000, accounts: Sequence[str] | None = None) \
+            -> list[Correspondent]:
+        """Les adresses avec qui chaque boîte échange vraiment depuis ``since`` (µs, la date des mails) : qui lui a
+        écrit et à qui elle a écrit (ce qu'elle sait d'un contact, ADR 0298) — combien de mails reçus et partis, le
+        dernier ; le plus récent d'abord, ``limit`` au plus. Jamais l'adresse de la boîte, ni deux fois le même mail."""
+        ...
+
+    def letters_from(self, address: str, *, since: int = 0, limit: int = 30,
+                     accounts: Sequence[str] | None = None) -> list[Mail]:
+        """Les derniers mails reçus de cette adresse depuis ``since`` (µs, leur date), dans ces boîtes (``None`` :
+        toutes), chacun une fois, le plus récent d'abord, ``limit`` au plus (200) ; leur corps peut n'être qu'un
+        extrait."""
+        ...
 
     def thread_page(self, ref: str, page: int = 1, size: int = 25) -> Page[MailHit]: ...
 

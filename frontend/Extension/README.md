@@ -18,7 +18,10 @@ Chrome, Edge et Chromium 120 ou plus récents. Firefox n'est pas pris en charge 
 
 Pour la mettre à jour : décompresser le nouveau zip par-dessus, puis ↻ (Recharger) sur sa carte dans
 `chrome://extensions`. Chrome relit sa fenêtre sur le disque à chaque ouverture, mais garde son service d'arrière-plan
-tant qu'on ne la recharge pas : sans ce geste, la fenêtre neuve parle à l'ancien service.
+tant qu'on ne la recharge pas : sans ce geste, la fenêtre neuve parle à l'ancien service. La fenêtre le voit (la
+version du `manifest.json` sur le disque n'est pas celle que Chrome a chargée, ou le service répond « demande
+inconnue ») et l'affiche en haut, avec **Recharger l'extension et l'onglet Teams** : l'extension se recharge, puis son
+nouveau service recharge les onglets Teams, seulement à cette demande et dans la minute.
 
 Le zip emporte ses fichiers tels qu'ils sont, sans `tests/`, `package.json` ni ce `README.md` : un fichier qu'elle
 charge se range ailleurs qu'à ces trois places.
@@ -77,6 +80,17 @@ leur message (exclusions, pauses ; en direct, la fenêtre de 24 h) et les envoie
 202 (gardée), 404 (son message n'y est pas encore : retentée 30 s plus tard, trois fois), 400 (pas une image de ce
 type). L'historique envoie les images de chaque paquet juste après lui. Chez Mika, ce qu'elle y voit remplace
 « [image] » dans le texte (« [image : … ] »), et frontendv2 les montre dans le fil.
+
+**Les profils** (ADR 0298, depuis 0.6.0) : Teams garde dans le navigateur le profil des personnes croisées (base
+`Teams:profiles`). La page le relit au plus toutes les 10 minutes et joint à chaque lot, dans `profiles`, celui des
+auteurs et des personnes mentionnées de ses messages : `{id, name, email, title, company, department, tenant, phones}`
+(l'identifiant Teams, le nom, l'e-mail ou à défaut l'identifiant de connexion s'il en a la forme — jamais celui d'un
+invité, `…#ext#@…` —, le poste, l'entreprise, le service, l'organisation, trois numéros au plus). Un profil ne part
+qu'avec un message de cette personne (ou qui la mentionne) qui part lui-même — jamais pour une conversation exclue, rien
+d'appris pendant une pause — et une seule fois tant qu'il ne change pas ; un profil qu'un envoi n'a pas pu joindre (plus
+de 200 dans un paquet de l'historique) n'est pas marqué parti, et repartira. Mika en tire son annuaire : le contact de chaque personne, son
+organisation, et la même personne reconnue au courrier par son e-mail. Le diagnostic de l'onglet dit combien de
+profils il a lus.
 
 Un message **modifié** repart avec son nouveau texte (même identifiant : Mika met le sien à jour) ; un message
 **supprimé** part comme une suppression (`deleted: true`, texte vide : Mika efface sa copie), et plus aucun texte de
@@ -172,8 +186,9 @@ avec 120 caractères du texte au plus.
 
 - Le texte des messages va de l'onglet Teams au serveur de Mika (local par défaut). De là, quand elle les lit, il
   part chez le **fournisseur du modèle** qu'elle utilise (Ollama Cloud, l'API Claude…), comme tout ce qu'elle lit.
+- Le profil des personnes dont un message part (voir plus haut) va au même serveur.
 - Dans le navigateur, l'extension garde (`chrome.storage.local`) la clé, les messages en attente d'envoi, les
-  identifiants déjà vus (24 heures), ce que Mika veut écrire et ce qui en est advenu (les 30 dernières issues ; le
+  identifiants déjà vus (24 heures), les profils des personnes (3000 au plus) et l'empreinte de ceux déjà partis, ce que Mika veut écrire et ce qui en est advenu (les 30 dernières issues ; le
   bouton « Effacer » les retire).
 - L'authentification du service de chat de Teams ne quitte jamais l'onglet.
 

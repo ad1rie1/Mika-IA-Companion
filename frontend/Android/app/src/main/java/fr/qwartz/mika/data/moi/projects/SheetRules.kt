@@ -9,8 +9,9 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
-import kotlin.math.ceil
+import java.time.temporal.ChronoUnit
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
@@ -71,6 +72,27 @@ fun happeningTone(x: Happening): StateTone? = when {
     x.kind == "run" -> runTone(false, x.verdict)
     x.what == "merged" -> StateTone.DONE
     else -> null
+}
+
+/**
+ * La clé d'une ligne du fil. Le serveur rend **deux lignes pour un même événement** quand une exécution a laissé un
+ * commit (le même `seq`) : la clé porte donc aussi sa sorte et ce qu'elle dit ; la liste lui ajoute son rang si deux
+ * lignes restaient égales ([keyed]).
+ */
+fun happeningKey(x: Happening): String = "e${x.seq}:${x.kind}:${x.what}"
+
+/** Deux lignes du fil sont-elles la même ? */
+fun sameHappening(a: Happening, b: Happening): Boolean = a.seq == b.seq && a.kind == b.kind && a.what == b.what
+
+/**
+ * Une liste lue page après page (du plus récent au plus ancien), dont la première page vient d'être relue ([fresh]) :
+ * ce qu'on avait de plus ancien qu'elle ([known] : la première page d'avant et sa suite) reste — tant que la page relue
+ * rejoint ce qu'on avait. Sinon rien : entre les deux il manquerait des lignes, la suite repart de la page relue.
+ */
+fun <T> olderKept(known: List<T>, fresh: List<T>, same: (T, T) -> Boolean): List<T> {
+    val last = fresh.lastOrNull() ?: return emptyList()
+    val at = known.indexOfLast { same(it, last) }
+    return if (at < 0) emptyList() else known.drop(at + 1)
 }
 
 /** Où mène une ligne du fil. */
@@ -181,6 +203,12 @@ fun linkRequest(change: String, project: Int, why: String = ""): GestureRequest 
     return GestureRequest("liens", bodyOf(*fields.toTypedArray()))
 }
 
+/**
+ * Le mot d'un lien se laisse-t-il enregistrer ? Il a changé, et il n'est pas vide : sans mot ni lien qui bouge, le
+ * serveur ne voit rien à faire et refuse.
+ */
+fun linkWordReady(word: String, before: String): Boolean = word.isNotBlank() && word.trim() != before.trim()
+
 /** Le mot d'un lien déjà posé, dit seul, plus tard. */
 fun linkWhyRequest(project: Int, why: String): GestureRequest = GestureRequest("liens", bodyOf("why" to why.trim(), "why_for" to project))
 
@@ -218,6 +246,12 @@ fun itemStatusRequest(e: Entry, status: String, note: String = ""): GestureReque
 
 fun itemAddRequest(list: String, title: String, text: String, status: String, actor: String): GestureRequest =
     GestureRequest("element/ajouter", filled("list" to list, "title" to title.trim(), "text" to text.trim(), "status" to status, "actor" to actor))
+
+/**
+ * À qui est un élément qu'on ajoute, tel qu'il part : un de ceux que la liste sert ([Listing.actors]), sinon rien — la
+ * liste lui donne alors le sien. Une liste confiée à une personne dit `person`, que l'ajout n'accepte pas d'ici.
+ */
+fun addActor(list: Listing, picked: String): String = if (list.actors.any { it.code == picked }) picked else ""
 
 fun itemAssignRequest(e: Entry, actor: String): GestureRequest =
     GestureRequest("element/confier", bodyOf("list" to e.list, "item" to entryItem(e), "actor" to actor))
@@ -266,6 +300,17 @@ fun settingOn(f: SettingField, typed: Map<String, JsonElement>): Boolean = ((typ
 
 fun settingCodes(f: SettingField, typed: Map<String, JsonElement>): Set<String> = (typed[f.name] ?: f.value).codes().toSet()
 
+/**
+ * Les choix d'un sélecteur : **ceux que le serveur sert**, tels quels. Un choix vide n'est ajouté (« — ») que si le
+ * champ est servi sans valeur et que rien de vide n'est servi : il ramène à ce qui était là, et ne part donc pas. Un
+ * « — » posé d'office ne donnerait, enregistré, que « choisissez une valeur ».
+ */
+fun settingChoices(f: SettingField): List<Coded> {
+    val served = f.choices.map { if (it.code.isEmpty() && it.label.isBlank()) Coded("", "—") else it }
+    val unset = !f.required && f.value.words().isEmpty() && served.none { it.code.isEmpty() }
+    return if (unset) listOf(Coded("", "—")) + served else served
+}
+
 /** Un champ ne sert que pour certaines valeurs d'un autre (`only`) : se montre-t-il, vu ce qui est saisi ? */
 fun settingShown(f: SettingField, fields: List<SettingField>, typed: Map<String, JsonElement>): Boolean = f.only.all { o ->
     (typed[o.field] ?: fields.firstOrNull { it.name == o.field }?.value ?: JsonNull).words() in o.values
@@ -300,6 +345,22 @@ fun rowHeight(r: DiagramRow): Float = if (r is DiagramRow.StepRow) ROW_STEP else
 
 fun dayStart(ms: Long, zone: ZoneId = ZoneId.systemDefault()): Long =
     Instant.ofEpochMilli(ms).atZone(zone).toLocalDate().atStartOfDay(zone).toInstant().toEpochMilli()
+
+private fun dateOf(ms: Long, zone: ZoneId): LocalDate = Instant.ofEpochMilli(ms).atZone(zone).toLocalDate()
+
+private fun startOf(date: LocalDate, zone: ZoneId): Long = date.atStartOfDay(zone).toInstant().toEpochMilli()
+
+/**
+ * Où tombe un instant sur l'axe, en **jours du calendrier** depuis [from] : le jour où il est, plus la part de ce jour
+ * déjà passée. Un jour de 23 h ou de 25 h (le changement d'heure) y vaut un jour, comme les autres — compter par pas
+ * de 24 h décalerait tout ce qui le précède.
+ */
+fun dayOffset(ms: Long, from: LocalDate, zone: ZoneId = ZoneId.systemDefault()): Double {
+    val date = dateOf(ms, zone)
+    val start = startOf(date, zone)
+    val length = startOf(date.plusDays(1), zone) - start
+    return ChronoUnit.DAYS.between(from, date) + (ms - start).toDouble() / length
+}
 
 /**
  * Une barre de la piste : de [left] sur [width]. [tone] : sa couleur (`null` : un fantôme — pas commencé, sans date) ;
@@ -337,7 +398,7 @@ private const val GHOST_GAP = 8f
 fun daysBack(d: Diagram, weeks: Boolean, zone: ZoneId = ZoneId.systemDefault()): Int {
     val dated = (listOf(d.from) + d.objectives.flatMap { listOf(it.startedAt) + it.passes }).filter { it > 0 }
     val first = dated.minOrNull() ?: d.now
-    val span = max(0, ceil((dayStart(d.now, zone) - dayStart(first, zone)).toDouble() / DAY_MS).toInt())
+    val span = max(0, ChronoUnit.DAYS.between(dateOf(first, zone), dateOf(d.now, zone)).toInt())
     return max(if (weeks) 13 else 2, span + if (weeks) 1 else 0)
 }
 
@@ -349,7 +410,10 @@ fun daysBack(d: Diagram, weeks: Boolean, zone: ZoneId = ZoneId.systemDefault()):
  */
 fun timeLayout(d: Diagram, rows: List<DiagramRow>, weeks: Boolean, width: Float, zone: ZoneId = ZoneId.systemDefault()): TimeLayout {
     val back = daysBack(d, weeks, zone)
-    val origin = dayStart(d.now, zone) - back * DAY_MS
+    // l'axe compte des jours du calendrier : chaque trait tombe à minuit, changement d'heure ou non
+    val first = dateOf(d.now, zone).minusDays(back.toLong())
+    val origin = startOf(first, zone)
+    val past = dayOffset(d.now, first, zone)
     val tops = ArrayList<Float>(rows.size)
     var y = 0f
     for (r in rows) {
@@ -359,7 +423,7 @@ fun timeLayout(d: Diagram, rows: List<DiagramRow>, weeks: Boolean, width: Float,
     val goals = rows.withIndex().filter { it.value is DiagramRow.GoalRow }
 
     class Ghosts(day: Float) {
-        val today = (((d.now - origin).toDouble() / DAY_MS) * day).roundToInt().toFloat()
+        val today = (past * day).roundToInt().toFloat()
         /** La largeur d'un fantôme (un autre nom que la largeur de la piste, que le corps de la fonction lit). */
         val wide = max(74f, (day * 0.8f).roundToInt().toFloat())
         val goal = HashMap<Int, Pair<Float, Float>>()
@@ -390,13 +454,12 @@ fun timeLayout(d: Diagram, rows: List<DiagramRow>, weeks: Boolean, width: Float,
     var g = Ghosts(day)
     var tries = 0
     while (tries < 5 && width > 0 && g.end > width && day > least) {
-        val past = (d.now - origin).toDouble() / DAY_MS
         day = max(least, min(day - 1f, floor((width - (g.end - g.today)) / past).toFloat()))
         g = Ghosts(day)
         tries++
     }
     val scale = day
-    fun x(ms: Long): Float = (((ms - origin).toDouble() / DAY_MS) * scale).roundToInt().toFloat()
+    fun x(ms: Long): Float = (dayOffset(ms, first, zone) * scale).roundToInt().toFloat()
     fun span(a: Float, b: Float, tone: StateTone?, running: Boolean = false, yours: Boolean = false, goal: Boolean = false) =
         TimeBar(a, max(10f, b - a), tone, running, yours, goal)
 
@@ -449,7 +512,7 @@ fun timeLayout(d: Diagram, rows: List<DiagramRow>, weeks: Boolean, width: Float,
         val x2 = g.goal[r.o.id]?.first ?: x(if (r.o.startedAt > 0) r.o.startedAt else d.now)
         TimeArrow(x1, tops[from.index] + ROW_GOAL / 2, x2, tops[i] + ROW_GOAL / 2)
     }
-    val days = (0..back).map { AxisDay(it * scale, origin + it * DAY_MS, it == back) }
+    val days = (0..back).map { AxisDay(it * scale, startOf(first.plusDays(it.toLong()), zone), it == back) }
     return TimeLayout(scale, max(g.end, width), origin, g.today, days, tracks, arrows)
 }
 

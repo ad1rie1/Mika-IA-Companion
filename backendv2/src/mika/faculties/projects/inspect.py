@@ -748,7 +748,7 @@ def _state_notes(p: Project, s: ProjectsState, frame: Frame, ctx: InspectContext
         out.append(Note("À cadrer : sa séance de cadrage relira la demande et écrira son plan avant toute autre "
                         "exécution.", "info"))
     if p.status != c.ARCHIVED and not any(o.status == c.OPEN for o in p.objectives):
-        out.append(Note("Aucun objectif ouvert : il n'a rien à faire. Ajoutes-en un (« Missions et objectifs »).", "warn"))
+        out.append(Note("Aucun objectif ouvert : il n'a rien à faire. Ajoutes-en un (« Objectifs »).", "warn"))
     if busy(s, p.id):
         out.append(Note("Elle y travaille en ce moment.", "info"))
     return out
@@ -917,7 +917,7 @@ def _once_row(p: Project, o: Objective, texts: Mapping[str, str], frame: Frame, 
                href=_link(p, tab="objectifs"), tone="danger" if o.status == c.BLOCKED else "")
 
 
-@PROJECTS.inspect("apercu", title="Où il en est", subject="project", order=10,
+@PROJECTS.inspect("apercu", title="Vue d'ensemble", subject="project", order=10,
                   description="Où en est le projet : ce qui t'attend en tête, son avancement, ses missions et ses "
                               "objectifs en cours, ce qui vient ensuite, son plan, ses dernières exécutions.")
 def _overview(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:
@@ -954,7 +954,7 @@ def _overview(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block
                     key=lambda o: (OBJ_ORDER.get((o.kind, o.status), 9), o.id))
     missions = [o for o in living if o.kind == c.CONSTANT]
     once = [o for o in living if o.kind == c.ONCE]
-    more = "Tous, leurs comptes rendus et leurs boutons : « Missions et objectifs »."
+    more = "Tous, leurs comptes rendus et leurs boutons : « Objectifs »."
     blocks.append(Table(MISSION_COLUMNS, tuple(_mission_row(p, o, texts, frame, ctx, pm) for o in missions[:8]),
                         title=MISSIONS_TITLE, empty="aucune mission : un objectif constant, qui revient",
                         caption=more if len(missions) > 8 else ""))
@@ -975,11 +975,11 @@ def _overview(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block
                title="Prochaine exécution"),
         Prose(_text(texts, p.description_ref), title="Le cadre") if p.description_ref
         else Note("Aucun cadre écrit : elle suit le titre, ses objectifs et les consignes. Il se change dans l'onglet "
-                  "Cadre.", "muted", title="Le cadre"),
+                  "Administration.", "muted", title="Le cadre"),
         Fields((("dépôt distant", _remote_ref(p)),
                 ("dernier échange", Text(p.remote_line, tone="ok" if p.remote_ok else "danger", clamp=90)
                  if p.remote_line else "aucun"),
-                ("l'histoire complète", _link(p, "onglet Dépôt", "git"))),
+                ("l'histoire complète", _link(p, "onglet Code", "git"))),
                title="Son dépôt"),
     ), columns=3))
     if decisions:
@@ -1016,7 +1016,7 @@ OBJECTIVE_COLUMNS = (Column("n°", "fit"), Column("objectif"), Column("sorte", "
                      Column("posé par", "fit", detail=True))
 
 
-@PROJECTS.inspect("objectifs", title="Missions et objectifs", subject="project", order=12, params=[OBJECTIVE_PARAM],
+@PROJECTS.inspect("objectifs", title="Objectifs", subject="project", order=12, params=[OBJECTIVE_PARAM],
                   description="Ce que le projet cherche, ligne par ligne : une mission (un objectif constant) revient "
                               "selon sa cadence ou quand quelque chose la déclenche, un objectif ponctuel se coche une "
                               "fois (avec une preuve). Chaque ligne porte ses boutons : la lancer, la modifier, "
@@ -1117,7 +1117,7 @@ def _started(p: Project, ctx: InspectContext) -> tuple[list[Event[Any]], Pager]:
     return page, Pager(param="avant", size=PAGE, older=older)
 
 
-@PROJECTS.inspect("executions", title="Exécutions", subject="project", order=30,
+@PROJECTS.inspect("executions", title="Activité", subject="project", order=40,
                   description="Chaque exécution de travail : son objectif, son issue, son verdict et sa preuve, le "
                               "commit qu'elle a laissé, sa durée — et de quoi relire le prompt exact, les outils "
                               "appelés, les appels de modèle et la décision.")
@@ -1173,7 +1173,7 @@ def _runs_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block
 # ── La fiche : décisions ──────────────────────────────────────────────────
 
 
-@PROJECTS.inspect("decisions", title="Décisions techniques", subject="project", order=40, params=[DECISION_PARAM],
+@PROJECTS.inspect("decisions", title="Décisions techniques", subject="project", order=35, params=[DECISION_PARAM],
                   description="Les décisions techniques du projet : ce qui est choisi, pourquoi, et ce que chaque "
                               "décision remplace. Elle relit celles en vigueur à chaque exécution.")
 def _decisions_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:
@@ -1229,7 +1229,7 @@ def _decisions_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[
 NEXT_RUN_LABEL = "prochaine exécution"
 
 
-@PROJECTS.inspect("comportement", title="Cadre", subject="project", order=32,
+@PROJECTS.inspect("comportement", title="Administration", subject="project", order=70,
                   description="Comment elle y travaille : son mode (elle, avec son humeur et ses avis, ou un travail "
                               "impersonnel), son rythme et sa plage de travail, ce qu'elle a le droit de faire sortir, "
                               "la relecture de son travail, les outils et les services qu'elle a en main, la "
@@ -1276,10 +1276,51 @@ def _behaviour_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[
     ), columns=2))
     blocks.append(_tools_section(p, frame, editable))
     blocks.append(_tickets_section(p, editable))
+    blocks.append(_engine_section(p, s, frame, ctx, pm))
     return blocks
 
 
-#: le réglage de ses tickets, sur « Cadre » (ADR 0270, 0275, 0281) : la fiche dessinée le retrouve par ce titre
+#: « Sous le capot », sur « Administration » (ADR 0297) : ce que seul le portail dit d'un projet — la fiche dessinée
+#: le retrouve par ce titre
+ENGINE_TITLE = "Sous le capot"
+
+
+def _engine_section(p: Project, s: ProjectsState, frame: Frame, ctx: InspectContext, pm: Any) -> Section:
+    """Ce que seul le portail dit d'un projet : qui il est pour le moteur (son numéro, sa naissance, qui l'a
+    demandé), ce qui retient son exécution, ses plafonds et ses pannes, ce que son dépôt a laissé."""
+    since = f"depuis le {ctx.when(p.paused_at)}" + (f" ({p.pause_reason})" if p.pause_reason else "")
+    plan = PLAN_FR.get(p.plan_state, ("sans plan", ""))[0]
+    identity: list[tuple[str, Any]] = [
+        ("numéro", str(p.id)), ("créé le", ctx.when(p.created_at)),
+        ("à l'initiative de", "elle-même" if p.authority == c.SELF else "une personne"),
+        ("demandé par", _person(frame, p.asked_by) if p.asked_by else "—"),
+        ("état", Badge(STATUS_FR.get(p.status, p.status), STATUS_TONE.get(p.status, ""))),
+        ("en pause", since if p.status == c.PAUSED else "non"),
+        ("son plan", f"{plan} · version {p.plan_version}" if p.plan_version else plan)]
+    if p.status == c.ARCHIVED:
+        identity.append(("archivé le", ctx.when(p.archived_at)))
+    runs: list[tuple[str, Any]] = [
+        ("ce qui retient son exécution", Text(_next_words(p, s, frame, ctx))),
+        ("exécutions", f"{p.runs} en tout · {runs_today(p, frame.now)} sur 24 h (au plus {daily_cap(p, pm)})"),
+        ("dernière exécution", ctx.when(p.last_run_at) if p.last_run_at else "aucune encore"),
+        ("dernière tentative", ctx.when(p.tried_at) if p.tried_at else "aucune encore"),
+        ("pannes d'affilée", Text(str(p.failures), tone="danger") if p.failures else "aucune"),
+        ("dernière panne", Text(p.last_failure, "mono", clamp=200) if p.last_failure else "—"),
+        ("au travail en ce moment", "oui" if busy(s, p.id) else "non")]
+    repo: list[tuple[str, Any]] = [
+        ("dernier commit", Text(p.last_commit[:12], "mono") if p.last_commit else "aucun encore"),
+        ("commit de sa base", Text(p.base_commit[:12], "mono") if p.base_commit else "jamais su"),
+        ("en route hors de la machine", plural(len(p.outgoing), "envoi", "envois") if p.outgoing else "rien"),
+        ("demandes de l'opérateur en file", str(len(p.requests)) if p.requests else "aucune")]
+    return Section(ENGINE_TITLE, (Grid((Fields(tuple(identity), title="Pour le moteur"),
+                                        Fields(tuple(runs), title="Ses exécutions"),
+                                        Fields(tuple(repo), title="Son atelier")), columns=3),),
+                   "Ce que seul le portail dit d'un projet : ses identifiants, ce qui retient son exécution, ses "
+                   "plafonds et ses pannes. Rien ne s'y règle.")
+
+
+#: le réglage de ses tickets, sur « Administration » (ADR 0270, 0275, 0281, 0297) : la fiche dessinée le retrouve par
+#: ce titre
 TICKETS_SETTING_TITLE = "Ses tickets et ses issues"
 REVIEW_FR = {c.REVIEW_ALWAYS: "toujours par toi", c.REVIEW_LARGE: "par toi, sauf pour un petit ticket"}
 ISSUES_FR = {c.ISSUES_NEVER: "jamais", c.ISSUES_ASK: "sur ton accord, ticket par ticket",
@@ -1310,7 +1351,7 @@ def _tickets_section(p: Project, editable: bool) -> Section:
 # ── La fiche : ses liens ──────────────────────────────────────────────────
 
 
-@PROJECTS.inspect("liens", title="Dépendances", subject="project", order=26,
+@PROJECTS.inspect("liens", title="Dépendances", subject="project", order=50,
                   description="Ce que ce projet lit des autres et ce que chaque lien lui donne, ce qu'il leur a "
                               "demandé, ce qu'on lui a demandé, et qui le lit.")
 def _links_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:
@@ -1455,7 +1496,7 @@ def _links_section(p: Project, s: ProjectsState, frame: Frame, ctx: InspectConte
                        title=READERS_TITLE, empty="aucun projet ne le lit"))
     return Section(LINKS_TITLE, tuple(items),
                    description="Un projet en lit d'autres, quatre au plus, sans jamais y écrire. Ce qu'il en reçoit se "
-                               "relit à chaque exécution dans les lignes d'accès du projet lu (Cadre, « Accès »), "
+                               "relit à chaque exécution dans les lignes d'accès du projet lu (Administration, « Accès »), "
                                "pour le propriétaire du projet lecteur : le voir donne son titre et son état ; le "
                                "piloter, au moins en lecture seule, ses comptes rendus, ses décisions et ses "
                                "objectifs ouverts ; ses fichiers, la vue de son atelier — son dernier commit, sous "
@@ -1513,7 +1554,7 @@ def _operation(e: Event[Any], frame: Frame) -> Entry:
     return Entry(e.at, title, text, meta=by, tone=tone)
 
 
-@PROJECTS.inspect("carnet", title="Carnet", subject="project", order=80,
+@PROJECTS.inspect("carnet", title="Carnet", subject="project", order=41,
                   description="Les consignes que tu lui as données, les notes qu'elle garde pour la suite, ce qu'on a "
                               "fait du projet, et ce qu'il a voulu faire sortir de la machine.")
 def _notebook_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:

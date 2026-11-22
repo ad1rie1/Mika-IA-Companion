@@ -35,7 +35,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /**
- * Les réponses que Mika propose pour WhatsApp ou Messages (ADR 0120) : c'est ici que la personne autorise. Une
+ * Les réponses que Mika propose pour WhatsApp, Messenger ou Messages (ADR 0120) : c'est ici que la personne autorise. Une
  * notification par proposition — « Répondre à Léa (WhatsApp) ? », le texte entier — avec « Envoyer », « Écrire autre
  * chose » et « Ignorer » : **le geste vaut accord**, et il se fait aussi en 4G (le texte est dans la notification).
  *
@@ -370,6 +370,7 @@ class PhoneDraftNotifier(
         when (PhoneApp.ofCode(code)) {
             PhoneApp.WHATSAPP -> R.string.phone_app_whatsapp
             PhoneApp.WHATSAPP_BUSINESS -> R.string.phone_app_whatsapp_business
+            PhoneApp.MESSENGER -> R.string.phone_app_messenger
             // Une appli inconnue n'arrive pas ici (PhoneDrafts.isValid) : « Messages » par défaut.
             PhoneApp.MESSAGES, PhoneApp.SAMSUNG_MESSAGES, null -> R.string.phone_app_messages
         },

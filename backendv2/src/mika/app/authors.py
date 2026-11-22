@@ -133,5 +133,5 @@ def flow_list(mail: MailConfig) -> list[tuple[str, str]]:
     """Les flux, dans l'ordre de la page : le chat, chaque boîte mail, Teams, le téléphone (clé, libellé)."""
     out = [(flows.CHAT, "Chat")]
     out += [(flows.mail(key), f"Courrier · {box.label or key}") for key, box in mail.accounts.items()]
-    out += [(flows.TEAMS, "Teams"), (flows.PHONE, "Téléphone (WhatsApp, SMS)")]
+    out += [(flows.TEAMS, "Teams"), (flows.PHONE, "Téléphone (WhatsApp, Messenger, SMS)")]
     return out

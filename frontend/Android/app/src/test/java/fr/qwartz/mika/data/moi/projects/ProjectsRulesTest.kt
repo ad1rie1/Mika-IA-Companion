@@ -211,6 +211,42 @@ class ProjectsRulesTest {
         assertTrue(todoDecision(merge.copy(number = 0), null, null, null).buttons.isEmpty())
     }
 
+    @Test fun `piloter - seule une consigne se saisit, une reprise part telle quelle`() {
+        // le serveur ne lit un texte qu'avec `what: instruct` : une reprise (un projet qui n'avance plus) ne demande rien
+        val need = waiting("""{"project":3,"kind":"need","objective":2,"mine":true,"can":true,"gesture":{"route":"piloter","args":{"what":"instruct"},"label":"Lui répondre","where":"ici"}}""")
+        val stalled = waiting("""{"project":3,"kind":"stalled","mine":true,"can":true,"gesture":{"route":"piloter","args":{"what":"resume"},"label":"Reprendre","where":"ici"}}""")
+        assertTrue(gestureTyped(need))
+        assertFalse(gestureTyped(stalled))
+        assertEquals(AskFor.REPLY, todoDecision(need, null, null, null).buttons.single().ask)
+        val resume = todoDecision(stalled, null, null, null).buttons.single()
+        assertEquals(AskFor.NOTHING, resume.ask)
+        assertEquals("Reprendre", resume.label)
+        // et rien ne part en plus de ce que le serveur a dit du geste
+        assertEquals(setOf("what"), gestureRequest(stalled, "", "").body.keys)
+        assertEquals("piloter", gestureRequest(stalled, "", "").route)
+    }
+
+    @Test fun `un point d'arrêt - aucun bouton tant que son jalon n'est pas lu`() {
+        val stop = waiting("""{"project":3,"kind":"checkpoint","objective":2,"mine":true,"can":true,"gesture":{"route":"jalon","args":{"objective":2,"milestone":7},"where":"ici"}}""")
+        // la fiche pas encore lue, ou sa lecture en échec : on ne valide pas une preuve qu'on n'a pas sous les yeux
+        assertTrue(todoDecision(stop, null, null, null).buttons.isEmpty())
+        // lue, mais le jalon n'y est plus (retiré, un autre objectif)
+        assertTrue(todoDecision(stop, null, Sheet(objectives = listOf(Objective(id = 2, milestones = listOf(Milestone(id = 8))))), null).buttons.isEmpty())
+        assertTrue(todoDecision(stop, null, Sheet(objectives = listOf(Objective(id = 5, milestones = listOf(Milestone(id = 7))))), null).buttons.isEmpty())
+        val read = Sheet(objectives = listOf(Objective(id = 2, milestones = listOf(Milestone(id = 7, text = "Le domaine reste")))))
+        assertEquals(listOf(Verb.CHECKPOINT_VALIDATE, Verb.CHECKPOINT_REFUSE), todoDecision(stop, null, read, null).buttons.map { it.verb })
+        assertEquals("Le domaine reste", checkpointRead(read, GestureRead.Checkpoint(2, 7))?.text)
+        // le plan d'un projet : de même, rien avant de l'avoir lu
+        val plan = waiting("""{"project":3,"kind":"plan","mine":true,"can":true,"gesture":{"route":"plan","where":"ici"}}""")
+        assertTrue(todoDecision(plan, null, Sheet(), null).buttons.isEmpty())
+        assertEquals(2, todoDecision(plan, null, Sheet(plan = Plan(text = "1. …")), null).buttons.size)
+    }
+
+    @Test fun `une note venue d'ailleurs ne se rend jamais en Markdown`() {
+        assertTrue(noteRendered(ThreadNote(kind = "question", text = "**Quel** port ?")))
+        assertFalse(noteRendered(ThreadNote(kind = "question", text = "[clique](https://exemple.invalid)", outside = true)))
+    }
+
     @Test fun `ce qu'un geste demande de lire, et la clé d'une attente`() {
         assertEquals(GestureRead.Accord(41), gestureRead(accord))
         assertEquals(GestureRead.Element("tickets", "#4"), gestureRead(ticketPlan))
@@ -286,6 +322,13 @@ class ProjectsRulesTest {
         assertEquals(listOf("open" to listOf("o2", "o3"), "missions" to listOf("m5"), "done" to listOf("o1")), goalGroups(sheet).map { g -> g.code to g.items.map { it.key } })
         assertEquals(5, findGoal(sheet, "m5")?.id)
         assertNull(findGoal(sheet, "o9"))
+        // qui ne connaît qu'un numéro (une attente née d'une mission, un accord, l'objectif lié d'un ticket) ouvre
+        // `o<id>` : la mission qui le porte se retrouve — un objectif du même numéro passerait devant, il n'y en a pas
+        assertEquals("m5", findGoal(sheet, "o5")?.key)
+        assertEquals("o2", findGoal(sheet, "o2")?.key)
+        assertNull(findGoal(sheet, "m2"))
+        assertNull(findGoal(sheet, "o"))
+        assertNull(findGoal(sheet, ""))
         assertTrue(goalAwaits(sheet.objectives[1]))
         assertEquals(2, needWaiting(sheet, 2)?.objective)
         // sans liste de suivi, pas d'onglet « Listes » ; sans le droit de lire l'activité, pas d'« Activité »
@@ -373,5 +416,25 @@ class ProjectsRulesTest {
         assertEquals("à venir", milestoneWord(todo, now, paris))
         assertEquals("1 / 4 jalons atteints · 6 exécutions", goalWord(goal, now, paris))
         assertEquals("3 passages · le dernier il y a 5 h", missionWord(mission, now, paris))
+    }
+
+    @Test fun `les clés d'une liste - uniques quoi que rende le serveur, et la même tant qu'une ligne est seule de la sienne`() {
+        // deux éléments voilés n'ont ni clé ni nom : la même clé, que la liste refuserait
+        val veiled = listOf(Entry(list = "entreprises", veiled = "level"), Entry(list = "entreprises", key = "atelier", handle = "atelier"), Entry(list = "entreprises", veiled = "level"))
+        val rows = keyed(veiled) { "e${it.key}:${it.handle}" }
+        assertEquals(listOf("e:", "eatelier:atelier", "e:#2"), rows.map { it.key })
+        assertEquals(veiled, rows.map { it.value })
+        // une clé déjà prise par le rang d'une autre ne se redonne pas
+        assertEquals(listOf("a", "a#2", "a#2#2", "a#3"), keyed(listOf("a", "a", "a#2", "a")) { it }.map { it.key })
+        assertTrue(keyed(emptyList<String>()) { it }.isEmpty())
+    }
+
+    @Test fun `la page d'un objectif nommé par son seul numéro - une mission s'ouvre sous m, un objectif sous o`() {
+        val sheet = Sheet(objectives = listOf(Objective(id = 2)), missions = listOf(Mission(id = 5)))
+        assertEquals("m5", goalKey(sheet, 5))
+        assertEquals("o2", goalKey(sheet, 2))
+        // la fiche pas encore lue, un objectif qu'elle ne nomme pas : un objectif
+        assertEquals("o5", goalKey(null, 5))
+        assertEquals("o9", goalKey(sheet, 9))
     }
 }

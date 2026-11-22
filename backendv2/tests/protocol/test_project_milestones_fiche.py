@@ -1,9 +1,11 @@
-"""Les jalons d'un objectif sur la fiche d'un projet (ADR 0273), à travers le vrai serveur : la ligne d'un objectif
-dit où il en est, ses jalons se lisent un par ligne avec leur vérification et ce qu'elle en a dit, un point d'arrêt
-qui attend se tranche sur place, « Ajouter un jalon » est à côté de « Modifier l'objectif » — qui reste le premier
-panneau de la ligne et règle la liste de passage d'un constant."""
+"""Les jalons d'un objectif sur la fiche d'un projet (ADR 0273, 0297), à travers le vrai serveur : la ligne d'un
+objectif dit où il en est, ses jalons se lisent en étapes avec leur vérification et ce qu'elle en a dit, un point
+d'arrêt qui attend se tranche sur place, « Ajouter un jalon » ouvre son formulaire dans le contenu ; la liste de
+passage d'une mission se lit dans son détail et se règle par « Modifier la mission »."""
 
 from __future__ import annotations
+
+import re
 
 from mika.contracts import projects as c
 from mika.faculties.projects import milestones
@@ -16,14 +18,19 @@ from tests.protocol.test_web import world  # noqa: F401 — fixture partagée
 from tests.unit.test_projects import row_form
 
 
-def _objectives(client, pid: int) -> str:
-    page = drawn(client, f"/admin/fiche/project/{pid}?onglet=objectifs")
+def _objective(client, pid: int, n: int) -> str:
+    page = drawn(client, f"/admin/fiche/project/{pid}?onglet=objectifs&objectif={n}")
     assert 'data-tab="project/objectifs"' in page
-    return page
+    return page.split('data-tab="project/objectifs"', 1)[1]
 
 
-def _entry(page: str, n: int) -> str:
-    return page.split(f"Objectif n° {n} : ", 1)[1].split("</li>", 1)[0]
+def _row(page: str) -> str:
+    """La ligne de l'objectif choisi, dans la liste."""
+    return re.search(r'<a class="pj-orow[^"]*" href="[^"]*" aria-current="true".*?</a>', page, re.S).group(0)
+
+
+def _marks(page: str) -> str:
+    return page.split('id="obj-jalons"', 1)[1].split("</section>", 1)[0]
 
 
 def test_an_objective_shows_its_milestones_and_a_breakpoint_is_settled_on_its_line(world):  # noqa: F811
@@ -39,29 +46,32 @@ def test_an_objective_shows_its_milestones_and_a_breakpoint_is_settled_on_its_li
 
     act("jalon_ajouter", "j1", {"objective": "1"}, text="La page est relue", check="owner")
     act("jalon_ajouter", "j2", {"objective": "1"}, text="Les tests passent", check="command", command="pytest -q")
-    entry = _entry(_objectives(client, pid), 1)
-    assert "jalons 0/2" in entry
-    assert "Jalon n° 1 · à faire" in entry and "La page est relue — vérifié par toi (un point d'arrêt)" in entry
-    assert "Les tests passent — vérifié par la commande : pytest -q" in entry
-    # « Modifier l'objectif » reste le premier panneau ; « Ajouter un jalon » vient après, rien à trancher encore
-    assert entry.index("projects.objectif_modifier") < entry.index("projects.jalon_ajouter")
-    assert "projects.jalon_trancher" not in entry
-    # elle le dit prêt : la ligne dit qu'il t'attend, avec comment elle l'a rempli, et se tranche sur place
+    page = _objective(client, pid, 1)
+    marks = _marks(page)
+    assert '<span class="num">0/2</span>' in _row(page)
+    assert "La page est relue" in marks and "Vérifié par un point d'arrêt" in marks and "à faire" in marks
+    assert "Les tests passent" in marks and "Vérifié par une commande · <code>pytest -q</code>" in marks
+    # « Ajouter un jalon » ouvre son formulaire dans le contenu ; rien à trancher encore
+    assert 'href="#obj-jalon"' in marks and 'action="/admin/action/projects.jalon_ajouter"' in page
+    assert "projects.jalon_trancher" not in page
+    # elle le dit prêt : la ligne dit qu'il attend, avec comment elle l'a rempli, et se tranche sur place
     p = kernel.mind.frame().state("projects").projects[pid]
     o = objective_at(p, 1)
     append(client, kernel, [milestones.changing(p, o.id, milestone_at(o, 1), level=1, inherited=(), ready=True,
                                                 how="Voir tarifs.html.", commit="c0ffee0123456789")], "projects")
-    entry = _entry(_objectives(client, pid), 1)
-    assert "un point d'arrêt t'attend" in entry and "Jalon n° 1 · t'attend" in entry
-    assert "Voir tarifs.html." in entry and "commit c0ffee012345" in entry
-    assert "Valider ou refuser le point d'arrêt n° 1" in entry and "projects.jalon_trancher" in entry
+    page = _objective(client, pid, 1)
+    marks = _marks(page)
+    assert 'class="pj-orow atoi"' in page and "prêt · à valider" in marks
+    assert "Voir tarifs.html." in marks and "commit <code>c0ffee0</code>" in marks
+    assert "Valider le jalon" in marks and "Refuser le point d'arrêt n° 1" in marks and "projects.jalon_trancher" in marks
     act("jalon_trancher", "t1", {"objective": "1", "milestone": "1"}, verdict="validate")
-    entry = _entry(_objectives(client, pid), 1)
-    assert "jalons 1/2" in entry and "Jalon n° 1 · atteint" in entry and "projects.jalon_trancher" not in entry
-    # un constant : sa liste de passage se règle par « Modifier l'objectif », et se lit sur sa ligne
+    page = _objective(client, pid, 1)
+    assert '<span class="num">1/2</span>' in _row(page) and "atteint" in _marks(page)
+    assert "projects.jalon_trancher" not in page
+    # une mission : sa liste de passage se règle par « Modifier la mission », et se lit dans son détail
     constant = next(x for x in p.objectives if x.kind == c.CONSTANT)
     act("objectif_modifier", "c1", {"objective": str(constant.id)}, text="Garder les tests verts", kind="constant",
         cadence_hours="24", routine="Lancer les tests\nNoter ce qui casse")
-    entry = _entry(_objectives(client, pid), constant.id)
-    assert "À chaque passage" in entry and "Lancer les tests" in entry
-    assert 'name="routine"' in entry and "projects.jalon_ajouter" not in entry
+    page = _objective(client, pid, constant.id)
+    assert "À chaque passage" in page and "Lancer les tests" in page
+    assert 'name="routine"' in page and "projects.jalon_ajouter" not in page

@@ -6,7 +6,8 @@
    partira tel quel après ton accord (son aperçu, sinon ses arguments un par ligne), sa source (des liens), ce qui la
    bloque, ses détails techniques repliés, ta note, approuver ou refuser, puis son historique (l'épisode qui l'a
    proposée, les dernières décisions du même genre, et tout l'historique de ce genre). Un autre élément (une identité
-   à confirmer, un nom à relier) : ses faits, sa source, ses actions sur leur page et ses boutons, qui ramènent ici.
+   à confirmer, un nom à relier, un rapprochement) : ce que la composition en dessine (deux fiches côte à côte), ses
+   faits, sa source, ses actions sur leur page et ses boutons, qui ramènent ici.
    Après une décision, le suivant s'ouvre. Des puces filtrent la file par sorte quand il y en a plusieurs — pas
    celles qu'un onglet garde déjà ; « Toutes » ne se compte pas (l'onglet le dit), la file se compte quand une puce
    filtre. Sur un écran étroit, l'élément choisi passe avant la file. #}
@@ -56,11 +57,12 @@
     </header>
     {% if p.sources %}<p class="apv-sources"><span class="now-muted">Sa source</span>{% for x in p.sources %}<a href="{{ x.href }}">{{ x.text }}</a>{% endfor %}</p>{% endif %}
     {% if p.warn %}<p class="person-tab-note warn" role="alert">{{ p.warn }}</p>{% endif %}
+    {% if p.body %}{{ p.body }}{% endif %}
     {% if p.facts %}<dl class="apv-facts">{% for f in p.facts %}<div><dt>{{ f.label }}</dt><dd>{{ cell(f.cell) }}</dd></div>{% endfor %}</dl>{% endif %}
     {% if p.links or p.forms %}
     <div class="apv-do" role="group" aria-label="Décider">
       {% for a in p.links %}<a class="btn{{ ' quiet' if not loop.first }}" href="{{ a.href }}">{{ a.text }}</a>{% endfor %}
-      {% for f in p.forms %}{{ action_button(f) }}{% endfor %}
+      {% for f in p.forms %}{{ action_button(f, loop.first and not p.links) }}{% endfor %}
     </div>
     {% endif %}
     {% if p.note %}<p class="apv-rule">{{ p.note }}</p>{% endif %}

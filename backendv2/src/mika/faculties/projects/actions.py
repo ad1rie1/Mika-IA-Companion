@@ -732,6 +732,18 @@ def _link_word(args: Any, kept: tuple[int, ...]) -> tuple[int, str]:
     return int(target), why
 
 
+#: un geste de console qui pose tout l'état lu, quand cet état a bougé depuis (ADR 0297)
+LINKS_MOVED = ("Ce qu'il lit a changé depuis ta lecture (dans un autre onglet, ou par quelqu'un d'autre) : rien n'est "
+               "enregistré. Relis la page, puis refais ton geste.")
+
+
+def links_seen(p: Any) -> str:
+    """L'état de « Ce qu'il lit » tel qu'une page l'a lu : les projets qu'il lit, le mode direct de chacun. Un geste qui
+    le pose (``seen``, un champ caché) prend tout l'état lu : il est refusé si cet état a bougé depuis — il déferait
+    ce qu'un autre onglet a posé. Sans lui (l'API, qui envoie ce qui change), rien n'est comparé."""
+    return ",".join(str(t) for t in sorted(p.reads)) + "|" + ",".join(str(t) for t in sorted(p.direct))
+
+
 def numbered(ids: Iterable[int]) -> str:
     """Des projets à la suite, par leur numéro (« n° 3, n° 5 »)."""
     return ", ".join(f"n° {i}" for i in ids)
@@ -804,6 +816,9 @@ def _links(s: ProjectsState, frame: Frame, args: Any, ctx: ActionContext) -> Don
         owner = links.owner_of(p)
         raise Refused(f"Seul son propriétaire ({identity_c.person_name(frame, owner) or owner}) pose ce que lit ce "
                       "projet." if owner else "Seul quelqu'un qui s'occupe d'elle pose ce que lit un projet à elle.")
+    seen = str((args if isinstance(args, Mapping) else {}).get("seen") or "")
+    if seen and seen != links_seen(p):
+        raise Refused(LINKS_MOVED)
     wanted = [t.id for t, _ in link_options(s, frame, p) if _ticked(args, link_knob(t.id))]
     kept, refused = links.chosen(s, p, wanted, world)
     if refused:

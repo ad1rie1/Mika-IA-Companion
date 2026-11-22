@@ -157,7 +157,13 @@ data class DiffFile(
     val hidden: Boolean = false,
     val why: String = "",
     val hunks: List<Hunk> = emptyList(),
-)
+) {
+    /**
+     * Ses lignes mises en rangées ([diffLayout]), calculées une fois. Le modèle les demande **hors du fil principal**
+     * dès que le diff est lu ([Diff.lay]) : l'écran ne fait que les poser.
+     */
+    val laid: DiffLayout by lazy { diffLayout(this) }
+}
 
 /** Un diff : ses fichiers, ses comptes, et s'il est coupé. [filesReadable] faux : elle ne lit pas ses fichiers. */
 @Serializable
@@ -169,7 +175,12 @@ data class Diff(
     val deletions: Int = 0,
     @SerialName("files_readable") val filesReadable: Boolean = true,
     @SerialName("files_why") val filesWhy: String = "",
-)
+) {
+    /** Mettre en rangées tous ses fichiers qui ont des lignes : à faire hors du fil principal, une fois le diff lu. */
+    fun lay() {
+        for (f in files) if (diffBody(f) == DiffBody.LINES) f.laid
+    }
+}
 
 // ── Le dépôt, ses fichiers ──────────────────────────────────────────────
 
@@ -258,7 +269,13 @@ data class Blob(
     val history: List<Commit> = emptyList(),
     @SerialName("history_total") val historyTotal: Int = 0,
     val url: String = "",
-)
+) {
+    /**
+     * Ses lignes telles qu'on les pose ([fileLines]), calculées une fois. Le modèle les demande **hors du fil
+     * principal** dès que le fichier est lu : l'écran ne fait que les poser.
+     */
+    val laid: FileLines by lazy { fileLines(if (readable) text else "") }
+}
 
 // ── Commits, branches, pull requests ────────────────────────────────────
 

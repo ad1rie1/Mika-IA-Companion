@@ -21,6 +21,13 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.util.concurrent.TimeUnit
+import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.DeserializationStrategy
+import kotlinx.coroutines.asCoroutineDispatcher
+import java.util.concurrent.Executors
 
 /**
  * Le code d'un projet sur l'API par personne (`protocole-moi.md` § 11, « Le code d'un projet ») : ses réponses lues
@@ -356,5 +363,36 @@ class CodeApiTest {
         val req = server.takeRequest()
         assertEquals("/api/moi/projets/3/code/pull/commenter", req.url.encodedPath)
         assertEquals("Oui.", MikaJson.parseToJsonElement(req.body!!.utf8()).jsonObject.text("text"))
+    }
+
+    @Test fun `la forme d'une réponse se lit là où elle arrive, jamais sur le fil de qui appelle`() {
+        val worker = Executors.newSingleThreadExecutor { Thread(it, "moi-io") }
+        try {
+            val base = (ServerBase.parse(server.url("/").toString()) as ServerBase.Parsed.Ok).base
+            val moi = MoiApi(client, { Credentials(base, "mw_secret") }, {}, worker.asCoroutineDispatcher())
+            val seen = mutableListOf<String>()
+            val reader = object : DeserializationStrategy<String> {
+                override val descriptor = PrimitiveSerialDescriptor("Seen", PrimitiveKind.STRING)
+
+                override fun deserialize(decoder: Decoder): String {
+                    seen += Thread.currentThread().name
+                    (decoder as JsonDecoder).decodeJsonElement()
+                    return "lu"
+                }
+            }
+            ok("""{"text":"un gros fichier"}""")
+            ok("""{"commit":$commit,"linked":{},$diff}""")
+            runBlocking {
+                assertEquals("lu", (moi.get("/projets/3/code/fichier", reader = reader) as MoiApi.Result.Ok).value)
+                moi.read("/projets/3/code/commit") {
+                    seen += Thread.currentThread().name
+                    MoiApi.Result.Ok(it)
+                }
+            }
+            assertEquals(2, seen.size)
+            assertTrue(seen.toString(), seen.all { it.startsWith("moi-io") })
+        } finally {
+            worker.shutdown()
+        }
     }
 }

@@ -1,11 +1,16 @@
 """La file « À valider » (ADR 0177) : une seule page pour tout ce qui attend une décision. La composition lui donne ses
-onglets (``TABS`` : les courriers à envoyer, les réponses Teams, les identités à confirmer, les noms à relier — « Tout »
-et l'historique sont ceux de la console), ce qui n'est pas une demande d'envoi (``Waiting.items``) — les identités à
-confirmer et les noms à relier, lus dans les vues de la faculté d'identité, avec leurs faits, leur source et leurs
-actions déjà orientées (``tabs/identities.py``) — et ce que concerne une demande (``Waiting.about``, lu dans son
-contexte par ``approval_sources.about`` : une personne, un projet, un service, une app, un canal). Les vues de la
-faculté d'identité n'ont plus de destination : la file est le seul endroit où l'on en décide (ADR 0180). L'inspecteur
-dessine la file sans nommer ni plugin ni faculté.
+onglets (``TABS`` : les courriers à envoyer, les réponses Teams, les identités à confirmer, les rapprochements —
+« Tout » et l'historique sont ceux de la console), ce qui n'est pas une demande d'envoi (``Waiting.items``) — les
+identités à confirmer, lues dans la vue de la faculté d'identité, avec leurs faits, leur source et leurs actions déjà
+orientées (``tabs/identities.py``) ; les rapprochements — deux fiches de l'annuaire au même nom, sans identifiant
+commun (ADR 0298, lues dans le port ``contacts``), et une personne dont on lui a parlé que porte quelqu'un qui lui
+parle (la vue « Noms à relier » de l'identité, ``NAMES_VIEW``) —, leurs deux fiches côte à côte (``QueueItem.body``)
+et leurs deux gestes — et ce que concerne une demande (``Waiting.about``, lu dans son contexte par
+``approval_sources.about`` : une personne, un projet, un service, une app, un canal). « Noms à relier » n'est plus un
+onglet (ADR 0298, lot 5) : une personne dont on lui parle a sa fiche d'emblée, et se rapproche des autres comme
+n'importe quelle fiche ; face à quelqu'un qui lui parle, c'est l'identité qui les relie (sa mémoire le saura). Les vues
+de la faculté d'identité n'ont plus de destination : la file est le seul endroit où l'on en décide (ADR 0180).
+L'inspecteur dessine la file sans nommer ni plugin ni faculté.
 """
 
 from __future__ import annotations
@@ -13,15 +18,35 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from mika.app.handmade import approval_sources
+from markupsafe import Markup
+
+from mika.app.handmade import Look, approval_sources
+from mika.app.handmade.directory import STYLES as DIRECTORY_STYLES
+from mika.app.handmade.directory import Talker, accounts, contact_entry, person_entry
+from mika.app.handmade.subjects.contact import MATCH, line_of, sheet_of, whose_words
+from mika.app.handmade.subjects.parts import safely
 from mika.app.handmade.tabs import Got, Line, blank, instant, raw_lines, text
 from mika.app.handmade.tabs.identities import claim_entry, handle_of, name_entry
 from mika.contracts import email as email_c
 from mika.contracts import teams as teams_c
-from mika.inspector.ui import UI, QueueItem, QueueTab
+from mika.contracts import transcript as transcript_c
+from mika.faculties.identity.inspect import handles_of
+from mika.inspector.ui import UI, QueueItem, QueueTab, env
+from mika.kernel.clock import DAY
+from mika.plugins.contacts.inspect import contact_key
+from mika.ports.contacts import TOLD_NAME
+from mika.vocab.people import fold, named_label
 
 #: les sortes d'éléments que la composition met dans la file
 CLAIM, NAME = "identite", "nom"
+#: les rapprochements de l'annuaire lus d'un coup, au plus (``ContactsPort.suggestions``)
+MATCHES_MAX = 200
+#: pourquoi deux fiches se ressemblent, en mots
+REASONS = {"same_name": "le même nom", "initial": "le même nom, à l'initiale près",
+           "first_name": "le même prénom, d'un côté sans nom de famille"}
+#: ce que dit la file de chaque rapprochement
+MATCH_RULE = ("Rien ne se réunit sur un nom sans toi ; ce qu'un identifiant prouve (la même adresse, le même compte) "
+              "se réunit d'office.")
 #: les vues de la faculté d'où ils viennent : (propriétaire, vue)
 CLAIMS_VIEW, NAMES_VIEW = ("identity", "revendications"), ("identity", "noms")
 
@@ -36,10 +61,10 @@ TABS: tuple[QueueTab, ...] = (
              description="Qui dit être quelqu'un d'autre, sans preuve encore : t'en porter garant, la démentir ou "
                          "relier ce moyen de communication.",
              empty="Personne ne dit être quelqu'un d'autre sans preuve en ce moment."),
-    QueueTab("noms", "Noms à relier", kinds=(NAME,), order=40,
-             description="Un nom dont on lui a parlé, porté par quelqu'un qu'elle connaît : c'est elle, ou non. Rien "
-                         "n'est relié d'une ressemblance de nom.",
-             empty="Aucun nom dont on lui a parlé n'attend quelqu'un."),
+    QueueTab("rapprochements", "Rapprochements", kinds=(MATCH, NAME), order=35,
+             description="Deux fiches qui portent le même nom — deux fiches de l'annuaire, ou une personne dont on lui "
+                         "a parlé et quelqu'un qui lui parle : la même personne ? " + MATCH_RULE,
+             empty="Aucune fiche n'en rappelle une autre par son nom."),
 )
 
 
@@ -68,26 +93,88 @@ def _claim_item(got: Got, line: Line, raw: dict[str, Any], rule: str) -> QueueIt
                      links=tuple((a["label"], a["href"]) for a in c["actions"]), note=rule)
 
 
-def _name_item(line: Line, raw: dict[str, Any], rule: str) -> QueueItem:
+def _told_side(ui: UI, look: Look, acc: Any, key: str, said: str) -> dict[str, Any]:
+    """La personne dont on lui a parlé, comme l'annuaire la dit : sa fiche (``TOLD_NAME``), sinon son nom seul."""
+    port = ui.kernel.ports.get("contacts")
+    cid = safely(lambda: port.contact_of(TOLD_NAME, key), "un nom raconté") if port is not None and key else None
+    sheet = sheet_of(ui, contact_key(cid)) if cid else None
+    if sheet is not None:
+        return contact_entry(look, acc, line_of(sheet))
+    return {"kind": "far", "name": said, "initial": (said[:1] or "?").upper(), "href": "",
+            "tags": [{"text": "connue de nom", "cls": "far"}], "idea": "", "ids": [], "more": 0,
+            "sources": [{"name": "Racontée", "n": ""}], "of": [], "everyone": False, "links": []}
+
+
+def _talker_side(look: Look, acc: Any, person: str) -> dict[str, Any]:
+    """Quelqu'un qui lui parle, comme l'annuaire le dit."""
+    s = look.frame.state("identity")
+    handles = tuple(handles_of(s, person))
+    last = max((look.frame.get(transcript_c.LAST_FROM(h)) for h in handles), default=0)
+    return person_entry(look, acc, Talker(person, handles, last), {}, {})
+
+
+def _name_item(ui: UI, look: Look, acc: Any, line: Line, raw: dict[str, Any], rule: str) -> QueueItem:
+    """Une personne dont on lui a parlé, que porte quelqu'un qui lui parle : les deux fiches côte à côte, et les
+    gestes de l'identité — la relier (sa fiche, le formulaire pré-rempli : sa mémoire le saura) ou l'écarter."""
     w = name_entry(line)
     person = w["person"]
     facts = [(k, v) for k, v in (("qui lui en a parlé", w["told"]), ("ce qui attend", {"t": "text", "text": w["what"]}),
                                  ("personne qui le porte", person), ("par où", {"t": "text", "text": w["where"]}),
                                  ("vue pour la première fois", w["first"])) if not blank(v)]
     dismiss = w["dismiss"]
-    return QueueItem(NAME, f"{w['name']}|{text(person)}", "Nom à relier", f"On lui a parlé de {w['name']}",
+    given = (dismiss or {}).get("initial") or {}
+    key, who = str(given.get("name") or ""), str(given.get("person") or "")
+    said = w["name"].strip("« »") or named_label(key).title()
+    body = None
+    if key and who:
+        sides = [_told_side(ui, look, acc, key, said), _talker_side(look, acc, who)]
+        same = named_label(key).split() == fold(sides[1]["name"]).split()
+        why = ("Le même nom." if same else "Le même prénom, d'un côté sans nom de famille.") + \
+            " On lui en a parlé ; l'autre lui parle. Reliée, ce qu'on lui en a dit se rattache à elle — chacun garde " \
+            "qui le lui a confié."
+        body = Markup(env.get_template("handmade/approbations/rapprochement.html").render(sides=sides, why=why))
+    return QueueItem(NAME, f"{w['name']}|{text(person)}", "Rapprochement",
+                     f"« {said} », dont on lui a parlé, et {text(person)} : la même personne ?",
                      context=f"porté par {text(person)}", at=instant(raw.get("vue pour la première fois")),
-                     facts=tuple(facts),
+                     facts=tuple(facts), body=body,
                      sources=((f"La fiche de {text(person)}", person["href"]),) if (person or {}).get("href") else (),
-                     links=(("C'est elle : relier…", w["href"]),) if w["href"] else (),
-                     actions=((dismiss["key"], dismiss.get("initial") or {}, dismiss.get("title") or "Ce n'est pas elle"),)
-                     if dismiss else (), note=rule, warn=w["homonyms"])
+                     links=(("La même personne : relier…", w["href"]),) if w["href"] else (),
+                     actions=((dismiss["key"], given, "Deux personnes différentes"),) if dismiss else (),
+                     note=rule, warn=w["homonyms"])
+
+
+def _suggestions(ui: UI) -> list[Any]:
+    port = ui.kernel.ports.get("contacts")
+    return list(safely(lambda: port.suggestions(MATCHES_MAX), "rapprochements", []) or ()) if port is not None else []
+
+
+def _match_item(ui: UI, look: Look, acc: Any, x: Any) -> QueueItem | None:
+    """Un rapprochement : ses deux fiches côte à côte, pourquoi, et ses deux gestes."""
+    a, b = sheet_of(ui, contact_key(x.a.id)), sheet_of(ui, contact_key(x.b.id))
+    if a is None or b is None:
+        return None
+    sides = [contact_entry(look, acc, line_of(sheet)) for sheet in (a, b)]
+    common = not {(i.kind, i.value) for i in a.identifiers} & {(i.kind, i.value) for i in b.identifiers}
+    why = REASONS.get(x.reason, x.reason).capitalize() + (". Aucun identifiant en commun." if common else ".")
+    holders = list(dict.fromkeys(w["name"] for sheet in (a, b) for w in whose_words(look, acc, sheet)))
+    if len(holders) > 1:
+        why += (f" Réunies, elle serait le contact de {', '.join(holders[:-1])} et de {holders[-1]} ; ce que chacun "
+                "lui a appris d'elle reste à lui.")
+    body = Markup(env.get_template("handmade/approbations/rapprochement.html").render(sides=sides, why=why))
+    pair = {"a": a.id, "b": b.id}
+    return QueueItem(MATCH, f"{min(a.id, b.id)}-{max(a.id, b.id)}", "Rapprochement",
+                     f"« {a.name} » et « {b.name} » : la même personne ?", context=REASONS.get(x.reason, x.reason),
+                     at=max(a.created, b.created), body=body,
+                     actions=(("contacts.rapprocher", pair, "La même personne : réunir"),
+                              ("contacts.ecarter", pair, "Deux personnes différentes")), note=MATCH_RULE)
 
 
 class Waiting:
     """Ce que la composition met dans la file « À valider » (``InspectorDeps.queue``)."""
 
     tabs: Sequence[QueueTab] = TABS
+    #: les feuilles de ce qu'elle dessine dans la liseuse (deux fiches côte à côte)
+    styles: Sequence[str] = DIRECTORY_STYLES
     #: les vues qui montrent les mêmes demandes que la file, dans leur destination : l'accueil ne les compte pas une
     #: seconde fois (``UI.attention_items(distinct=True)``)
     covers: Sequence[str] = ("courrier/brouillons", "teams/reponses", "projets/tous")
@@ -101,6 +188,8 @@ class Waiting:
             spec = ui.inspection.find(owner, name)
             got = ui.inspection.badge(spec) if spec is not None else None
             total += int(got[0]) if got else 0
+        if kinds is None or MATCH in kinds:
+            total += len(_suggestions(ui))
         return total
 
     def about(self, ui: UI, context: str) -> tuple[str, str | None]:
@@ -109,7 +198,8 @@ class Waiting:
         return approval_sources.about(ui, context)
 
     async def items(self, ui: UI) -> list[QueueItem]:
-        """Les identités à confirmer et les noms à relier, tels que leurs vues les disent."""
+        """Les identités à confirmer, telles que leur vue les dit ; les rapprochements — les noms qui attendent
+        quelqu'un (la vue de l'identité) et ceux de l'annuaire."""
         out: list[QueueItem] = []
         got = await _view(ui, *CLAIMS_VIEW)
         table = got.table("Revendications en attente") if got is not None else None
@@ -117,12 +207,15 @@ class Waiting:
             rule = next((n["text"] for n in got.notes()), "")
             out += [_claim_item(got, x, r, rule) for x, r in zip(got.lines("Revendications en attente"),
                                                                  raw_lines(got, table), strict=False)]
+        look = Look.of(ui, DAY)
+        acc = accounts(look)
         got = await _view(ui, *NAMES_VIEW)
         table = got.table("Noms qui attendent") if got is not None else None
         if got is not None and table is not None:
             rule = next((n["text"] for n in got.notes()), "")
-            out += [_name_item(x, r, rule) for x, r in zip(got.lines("Noms qui attendent"),
-                                                          raw_lines(got, table), strict=False)]
+            out += [_name_item(ui, look, acc, x, r, rule) for x, r in zip(got.lines("Noms qui attendent"),
+                                                                          raw_lines(got, table), strict=False)]
+        out += [item for x in _suggestions(ui) if (item := _match_item(ui, look, acc, x)) is not None]
         return out
 
 

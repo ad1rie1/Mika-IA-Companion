@@ -107,6 +107,17 @@ def blocked(p: Project, o: Objective, now: int = 0) -> str:
     return UNCHECKED if unchecked(o, now) else ""
 
 
+def checks_block(o: Objective, state: str, seen_at: int, now: int) -> str:
+    """Ce que les vérifications du commit de tête, relues chez l'hôte (``state``), retiennent de la fusion ; vide :
+    rien. La règle même de l'action, qui les relit au moment de fusionner — et que la fiche de la console applique à
+    sa propre lecture de l'hôte (ADR 0297), pour ne pas offrir un geste que l'action refuserait."""
+    if state in (CHECKS_PENDING, CHECKS_FAILED):
+        return RUNNING if state == CHECKS_PENDING else FAILED
+    if state == CHECKS_NONE and now - max(o.pull_at, seen_at) < CHECKS_GRACE_US:
+        return UNCHECKED
+    return ""
+
+
 def merging(o: Objective) -> bool:
     """Une fusion demandée est-elle en route — l'hôte n'a pas encore répondu, ou il l'a faite et la pull request n'a
     pas encore été relue chez lui ?"""

@@ -207,6 +207,19 @@ fun shownLine(text: String): String {
     return if (flat.length > LINE_SHOWN) flat.take(LINE_SHOWN) + " …" else flat
 }
 
+/**
+ * Un fichier mis en lignes, une fois : ses lignes telles qu'on les pose ([lines]), la plus large (pour mesurer le cadre
+ * où elles défilent, [widest]), et si l'une d'elles est coupée à l'affichage ([cut]).
+ */
+class FileLines(val lines: List<String>, val widest: String, val cut: Boolean)
+
+fun fileLines(text: String): FileLines {
+    if (text.isEmpty()) return FileLines(emptyList(), "", false)
+    val raw = linesOf(text)
+    val shown = raw.map(::shownLine)
+    return FileLines(shown, widestLine(shown), anyLineCut(raw))
+}
+
 /** Une ligne au moins est coupée à l'affichage. */
 fun anyLineCut(lines: List<String>): Boolean = lines.any { it.length > LINE_SHOWN }
 
@@ -277,6 +290,17 @@ sealed interface DiffRow {
 
 /** Le diff unifié d'un fichier : chaque passage, son en-tête puis ses lignes, dans l'ordre servi. */
 fun unifiedRows(hunks: List<Hunk>): List<DiffRow> = hunks.flatMap { hunk -> listOf<DiffRow>(DiffRow.Head(hunk.header)) + hunk.lines.map { DiffRow.Line(it) } }
+
+/**
+ * Un fichier de diff mis en rangées, une fois : ses rangées, sa ligne la plus large telle qu'on la pose (pour mesurer
+ * son cadre), et la largeur de ses colonnes de numéros, en chiffres.
+ */
+class DiffLayout(val rows: List<DiffRow>, val widest: String, val digits: Int)
+
+fun diffLayout(f: DiffFile): DiffLayout {
+    val rows = unifiedRows(f.hunks)
+    return DiffLayout(rows, widestLine(rows.mapNotNull { (it as? DiffRow.Line)?.line?.text?.let(::shownLine) }), numberDigits(f.hunks))
+}
 
 /** Le numéro d'une ligne dans sa colonne : rien quand la ligne n'y est pas (0). */
 fun lineNumber(n: Int): String = if (n > 0) n.toString() else ""

@@ -21,9 +21,6 @@ from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.operate import ActionContext, Done, Refused
 from mika.ports.workshop import (
-    CHECKS_FAILED,
-    CHECKS_NONE,
-    CHECKS_PENDING,
     CHECKS_STATES,
     MERGE_BLOCKED,
     MERGE_DENIED,
@@ -136,9 +133,7 @@ async def _fuse(s: ProjectsState, frame: Frame, args: MergeArgs, ctx: ActionCont
         got = await read(p.remote, args.head)
         if got.error or got.state not in CHECKS_STATES:
             raise Refused(CHECKS_SILENT.format(why=(got.error or "réponse illisible")[:200]))
-        if got.state in (CHECKS_PENDING, CHECKS_FAILED):
-            raise Refused(BLOCK_WORDS[merge.RUNNING if got.state == CHECKS_PENDING else merge.FAILED])
-        if got.state == CHECKS_NONE and ctx.now - max(o.pull_at, seen.at) < merge.CHECKS_GRACE_US:
-            raise Refused(BLOCK_WORDS[merge.UNCHECKED])
+        if held := merge.checks_block(o, got.state, seen.at, ctx.now):
+            raise Refused(BLOCK_WORDS[held])
     return Done(drafts=(merge.asking(p, o, args.head, person),), message=ASKED,
                 guard=_still(p.id, LIVE) & merge.alone(p.id, o.id))

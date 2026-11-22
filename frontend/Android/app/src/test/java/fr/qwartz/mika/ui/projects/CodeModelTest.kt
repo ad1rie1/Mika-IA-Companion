@@ -34,6 +34,7 @@ import fr.qwartz.mika.data.moi.projects.waitingKey
 import fr.qwartz.mika.ui.components.ProMarkdown
 import fr.qwartz.mika.ui.mail.MainDispatcherRule
 import fr.qwartz.mika.ui.shell.Load
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -46,6 +47,15 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import kotlin.coroutines.CoroutineContext
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.CoroutineDispatcher
+import fr.qwartz.mika.data.moi.projects.DocPage
+import fr.qwartz.mika.data.moi.projects.Hunk
+import fr.qwartz.mika.data.moi.projects.DiffLine
+import fr.qwartz.mika.data.moi.projects.CommitDetail
+import fr.qwartz.mika.data.moi.projects.CodeLinked
+import fr.qwartz.mika.data.moi.projects.Blob
 
 /**
  * Les modèles de l'onglet Code contre une fausse API : **la fusion** — la pull request relue à l'instant, la
@@ -60,7 +70,7 @@ class CodeModelTest {
 
     private val api = FakeProjectsApi()
     private var clock = 1_795_600_000_000L
-    private val deps = ProjectsDeps(api, {}, { clock })
+    private val deps = ProjectsDeps(api, {}, { clock }, Dispatchers.Unconfined)
 
     private val headA = "a".repeat(40)
     private val headB = "b".repeat(40)
@@ -110,7 +120,9 @@ class CodeModelTest {
         assertEquals(PullViewModel.MERGE, vm.gestures.finished)
         // abouti : elle se relit (son état qui suit : demandée), et l'onglet et la fiche avec elle
         assertEquals(1, vm.revision)
-        assertEquals(3, api.calls.count { it == "pull:3:11:0:" })
+        // lue en arrivant, relue pour la confirmation, relue une fois la fusion demandée — puis deux fois un peu plus
+        // tard : la fusion n'atteint l'hôte qu'après la réponse du serveur
+        assertEquals(5, api.calls.count { it == "pull:3:11:0:" })
         // aucun geste générique n'a porté la route
         assertTrue(api.sent.none { it.second.route == MERGE_ROUTE })
     }
@@ -278,6 +290,14 @@ class CodeModelTest {
         assertEquals(setOf("number", "body"), api.sent.single().second.body.keys)
         assertEquals("Nouveau texte", text("body"))
         assertEquals(PullViewModel.EDIT, vm.gestures.finished)
+        // ce qui part se compte sur ce dont le formulaire est parti. Rempli pendant que l'hôte était muet — le titre
+        // que le moteur connaît, son texte inconnu —, puis l'hôte relu sans que la saisie se vide : seul ce qu'elle a
+        // touché part. Le titre de l'hôte, qu'elle n'a jamais vu, n'est pas remis à celui d'avant
+        vm.gestures.acknowledge()
+        vm.edit("Export", "Mon texte", from = "Export" to "")
+        advanceUntilIdle()
+        assertEquals(setOf("number", "body"), api.sent.last().second.body.keys)
+        assertEquals("Mon texte", text("body"))
         // refusé : ses mots sous le champ, la feuille reste
         vm.gestures.acknowledge()
         api.refuse(400, "Le titre est trop long.", mapOf("title" to "400 caractères au plus"))
@@ -289,7 +309,7 @@ class CodeModelTest {
         api.gestureResult = null
         vm.comment()
         advanceUntilIdle()
-        assertEquals(2, api.sent.size)
+        assertEquals(3, api.sent.size)
         vm.reply = "  Oui, j'ajoute le test.  "
         vm.comment()
         advanceUntilIdle()
@@ -465,5 +485,205 @@ class CodeModelTest {
         assertEquals("Outils réseau <script>alert(1)</script>", heading.spans.joinToString("") { it.text })
         assertTrue(shown.any { b -> b is ProMarkdown.Block.Paragraph && b.spans.any { it.text == "la doc" } })
         assertFalse(shown.any { it is ProMarkdown.Block.Code })
+    }
+
+    // ── Les constats de la relecture ──
+
+    @Test fun `la confirmation d'une fusion n'appartient qu'à l'écran qui l'a demandée - quitté ou changé de cible, elle s'annule`() = runTest {
+        serve(ready(headA))
+        val vm = section()
+        val key = waitingKey(mergeWaiting)
+        vm.open(3, key)
+        advanceUntilIdle()
+        // « Fusionner », puis retour arrière pendant la relecture : la confirmation ne s'ouvrira pas plus tard, ailleurs
+        api.hold("pull:3:11:0:")
+        vm.askMerge()
+        advanceUntilIdle()
+        assertTrue(vm.merge.reading)
+        vm.leave(3, key)
+        api.release("pull:3:11:0:")
+        advanceUntilIdle()
+        assertNull(vm.merge.asking)
+        assertFalse(vm.merge.reading)
+        // rouverte : rien n'attend, et la fusion se redemande sur une lecture faite pour elle
+        vm.open(3, key)
+        advanceUntilIdle()
+        assertNull(vm.merge.asking)
+        serve(ready(headB))
+        vm.askMerge()
+        advanceUntilIdle()
+        assertEquals(headB, vm.merge.asking?.facts?.head)
+        assertEquals(ProjectsViewModel.todoWhere(3, key), vm.merge.asking?.where)
+        // une autre attente s'ouvre : la confirmation de la première ne la suit pas
+        vm.open(3, "accord-41")
+        advanceUntilIdle()
+        assertNull(vm.merge.asking)
+        // de même sur la page de la pull request, quand on la quitte
+        val pull = pullModel()
+        pull.resume()
+        advanceUntilIdle()
+        pull.askMerge()
+        advanceUntilIdle()
+        assertNotNull(pull.merge.asking)
+        pull.leave()
+        assertNull(pull.merge.asking)
+        assertTrue(api.merges.isEmpty())
+    }
+
+    @Test fun `après une réponse, l'hôte se relit un peu plus tard - pas à l'instant - et encore au retour sur l'écran`() = runTest {
+        serve(ready(headA))
+        api.pullHost = MoiApi.Result.Ok(PullHost(number = 11))
+        val vm = pullModel()
+        vm.resume()
+        vm.openHost()
+        advanceUntilIdle()
+        fun hostReads() = api.calls.count { it == "pullHost:3:11" }
+        assertEquals(1, hostReads())
+        vm.reply = "Oui."
+        vm.comment()
+        runCurrent()
+        // le serveur n'a fait que demander le commentaire : relu à l'instant, l'hôte ne le montrerait pas encore
+        assertEquals(1, hostReads())
+        // il se relit un peu plus tard, deux fois
+        advanceUntilIdle()
+        assertEquals(3, hostReads())
+        // et le retour sur l'écran le relit encore, sans attendre une minute
+        vm.resume()
+        advanceUntilIdle()
+        assertEquals(4, hostReads())
+        // ensuite seulement son âge compte de nouveau
+        vm.resume()
+        advanceUntilIdle()
+        assertEquals(4, hostReads())
+    }
+
+    @Test fun `les commits - leurs pages se comptent, et la première page qui change vide la suite`() = runTest {
+        api.commitPages["|1"] = CommitPage(total = 6, page = 1, size = 2, items = listOf(Commit(sha = "a"), Commit(sha = "b")))
+        api.commitPages["|2"] = CommitPage(total = 6, page = 2, size = 2, items = listOf(Commit(sha = "b"), Commit(sha = "c")))
+        api.commitPages["|3"] = CommitPage(total = 6, page = 3, size = 2, items = listOf(Commit(sha = "d"), Commit(sha = "e")))
+        val vm = main.model { CodeViewModel(deps, 3) }
+        vm.resume()
+        vm.show(CodeTabs.COMMITS)
+        advanceUntilIdle()
+        vm.more()
+        advanceUntilIdle()
+        // « b » était déjà là : la suite est la page 3, pas la page 2 de nouveau
+        vm.more()
+        advanceUntilIdle()
+        assertEquals(listOf("commits:3::1", "commits:3::2", "commits:3::3"), api.calls.filter { it.startsWith("commits:") })
+        assertEquals(listOf("a", "b", "c", "d", "e"), vm.allCommits.map { it.sha })
+        // un commit de plus en tête : la première page a changé, la suite lue ne lui fait plus suite (elle laisserait un trou)
+        api.commitPages["|1"] = CommitPage(total = 7, page = 1, size = 2, items = listOf(Commit(sha = "z"), Commit(sha = "a")))
+        vm.resume()
+        advanceUntilIdle()
+        assertEquals(listOf("z", "a"), vm.allCommits.map { it.sha })
+        assertEquals(5, vm.commitsRest)
+        vm.more()
+        advanceUntilIdle()
+        assertEquals("commits:3::2", api.calls.last { it.startsWith("commits:") })
+    }
+
+    @Test fun `une issue - son ticket ne se tranche pas pendant sa relecture, ni après une relecture en panne - et repart ensuite`() = runTest {
+        api.issue = MoiApi.Result.Ok(Issue(number = 9, state = "open", ticket = TicketLine(number = 5, status = "proposed", yours = true)))
+        val read = MoiApi.Result.Ok(EntryDetail(Entry(list = "tickets", handle = "#5", number = 5), EntryMore(can = EntryCan(accept = true, dismiss = true))))
+        api.element = read
+        val vm = main.model { IssueViewModel(deps, 3, 9) }
+        vm.resume(approve = false)
+        advanceUntilIdle()
+        assertFalse(vm.stale)
+        // l'écran revient devant : l'issue se relit d'abord — son ticket montré date déjà d'avant
+        clock += HOST_AGE_MS + 1
+        api.hold("issue:3:9")
+        vm.resume(approve = false)
+        advanceUntilIdle()
+        assertTrue(vm.stale)
+        assertFalse(vm.settle("accept"))
+        // puis son ticket se relit dans le registre : toujours rien
+        api.hold("element:3:tickets:#5")
+        api.release("issue:3:9")
+        advanceUntilIdle()
+        assertTrue(vm.stale)
+        assertFalse(vm.settle("dismiss", "hors sujet"))
+        assertTrue(api.sent.isEmpty())
+        api.release("element:3:tickets:#5")
+        advanceUntilIdle()
+        assertFalse(vm.stale)
+        // sa relecture en panne : il reste d'avant, on le dit, rien ne part ; « Réessayer » relit
+        api.element = MoiApi.Result.Failed(MoiError(0, MoiError.NETWORK))
+        vm.resume(approve = false)
+        advanceUntilIdle()
+        assertTrue(vm.stale)
+        assertEquals(MoiError.NETWORK, vm.staleError?.message)
+        assertFalse(vm.settle("accept"))
+        assertTrue(api.sent.isEmpty())
+        api.element = read
+        vm.reread()
+        advanceUntilIdle()
+        assertFalse(vm.stale)
+        assertNull(vm.staleError)
+        assertTrue(vm.settle("accept"))
+        advanceUntilIdle()
+        assertEquals("ticket/trancher", api.sent.single().second.route)
+    }
+
+    @Test fun `une issue - un second retour pendant sa première lecture n'empêche pas de lire son ticket`() = runTest {
+        api.issue = MoiApi.Result.Ok(Issue(number = 9, state = "open", ticket = TicketLine(number = 5, status = "proposed", yours = true)))
+        api.element = MoiApi.Result.Ok(EntryDetail(Entry(list = "tickets", handle = "#5", number = 5), EntryMore(can = EntryCan(accept = true, dismiss = true))))
+        val vm = main.model { IssueViewModel(deps, 3, 9) }
+        api.hold("issue:3:9")
+        vm.resume(approve = false)
+        // la fiche du projet arrive, le droit de donner un accord est connu : l'écran relance son retour
+        vm.resume(approve = true)
+        api.release("issue:3:9")
+        advanceUntilIdle()
+        assertTrue("element:3:tickets:#5" in api.calls)
+        assertTrue(vm.entry!!.more.can.accept)
+    }
+
+    /** Un répartiteur qui compte ce qu'on lui confie, et le fait sur place. */
+    private class Counting : CoroutineDispatcher() {
+        var hops = 0
+
+        override fun dispatch(context: CoroutineContext, block: Runnable) {
+            hops++
+            block.run()
+        }
+    }
+
+    @Test fun `un fichier, un diff, une page - mis en lignes par le modèle hors du fil principal, avant d'être montrés`() = runTest {
+        val heavy = Counting()
+        val deps = ProjectsDeps(api, {}, { clock }, heavy)
+        api.blob = MoiApi.Result.Ok(Blob(path = "LISEZMOI.md", readable = true, text = "# Titre\n\nUn [lien](https://exemple.invalid).\n"))
+        val file = main.model { FileViewModel(deps, 3, "main", "LISEZMOI.md") }
+        file.resume()
+        advanceUntilIdle()
+        assertEquals(1, heavy.hops)
+        assertEquals(3, file.read.value?.laid?.lines?.size)
+        // ses blocs sont lus avec lui, sans un lien qui s'ouvre
+        assertEquals(2, file.rendered.size)
+        assertTrue(file.rendered.filterIsInstance<ProMarkdown.Block.Paragraph>().single().spans.none { it.url != null })
+        // un commit : son diff mis en rangées
+        api.commit = MoiApi.Result.Ok(
+            CommitDetail(Commit(sha = "c1"), CodeLinked(), Diff(files = listOf(DiffFile(path = "a.py", hunks = listOf(Hunk("@@ -0,0 +1 @@", listOf(DiffLine("+", 0, 1, "x = 1")))))))),
+        )
+        val commit = main.model { CommitViewModel(deps, 3, "c1") }
+        commit.resume()
+        advanceUntilIdle()
+        assertEquals(2, heavy.hops)
+        assertEquals(2, commit.detail.value?.diff?.files?.single()?.laid?.rows?.size)
+        // une page de documentation : découpée en morceaux à poser, son sommaire avec
+        api.docPage = MoiApi.Result.Ok(DocPage(path = "guide.md", text = "# Guide\n\nUn paragraphe.\n\n![schéma](images/schema.png)\n\nFin."))
+        val page = main.model { DocPageViewModel(deps, 3, "guide.md") }
+        page.resume()
+        advanceUntilIdle()
+        assertEquals(3, heavy.hops)
+        assertEquals(listOf(true, true, false, true), page.body.map { it is DocPiece.Md })
+        assertEquals(listOf(1 to "Guide"), page.outline)
+        // une lecture refusée : rien à calculer
+        api.blob = MoiApi.Result.Failed(MoiError(403, "Ses fichiers ne te sont pas ouverts."))
+        val closed = main.model { FileViewModel(deps, 3, "main", "secret.py") }
+        closed.resume()
+        advanceUntilIdle()
+        assertEquals(3, heavy.hops)
     }
 }

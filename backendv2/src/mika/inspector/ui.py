@@ -55,7 +55,7 @@ from mika.runtime.inspection import Inspection
 PREFIX = render.PREFIX
 TEMPLATES = Path(__file__).parent / "templates"
 STATIC = Path(__file__).parent / "static"
-ASSET_VERSION = "79"
+ASSET_VERSION = "85"
 
 log = logging.getLogger("mika.console")
 
@@ -171,9 +171,11 @@ class QueueTab:
 @dataclass(frozen=True, slots=True)
 class QueueItem:
     """Ce qui attend une décision dans la file « À valider » sans être une demande d'envoi (ADR 0177) : une identité
-    à confirmer, un nom à relier. ``facts`` : des cellules rendues (``render.cell``) ; ``sources`` : d'où il vient,
-    en liens ; ``links`` : ses actions sur leur propre page (texte, adresse — leur retour est la file) ; ``actions`` :
-    des boutons que la console prépare (clé de l'action, valeurs posées, titre) ; ``warn`` : son seul bandeau."""
+    à confirmer, un nom à relier, un rapprochement. ``facts`` : des cellules rendues (``render.cell``) ; ``sources`` :
+    d'où il vient, en liens ; ``links`` : ses actions sur leur propre page (texte, adresse — leur retour est la file) ;
+    ``actions`` : des boutons que la console prépare (clé de l'action, valeurs posées, titre) ; ``warn`` : son seul
+    bandeau ; ``body`` : ce que la composition en dessine (HTML déjà échappé), montré avant ses faits — deux fiches
+    côte à côte (ADR 0298)."""
 
     kind: str
     key: str
@@ -187,6 +189,7 @@ class QueueItem:
     actions: tuple[tuple[str, Mapping[str, Any], str], ...] = ()
     note: str = ""
     warn: str = ""
+    body: Any = None
 
 
 class Forms(dict[str, Any]):
@@ -210,12 +213,19 @@ class Drawn:
     droite, ADR 0176), ou ``None`` : ses blocs, tels quels. ``styles`` et ``scripts`` : ce que ses gabarits
     demandent (sous ``static/``). ``last`` : son HTML vient après les blocs et le panneau de la console (un onglet
     qui ne redessine que sa liste, sous les chiffres et les boutons qui restent à la console). ``panel`` : la console
-    garde le panneau de l'onglet ; faux, le dessin dit ce qu'il disait."""
+    garde le panneau de l'onglet ; faux, le dessin dit ce qu'il disait. ``params`` : ses filtres à lui (des ``Param``),
+    à la place de ceux de la vue — un onglet qui réunit plusieurs sources (l'Annuaire, ADR 0298) les lit lui-même dans
+    l'adresse ; un petit choix y devient un bouton à choix au bout de la barre d'onglets (ADR 0176). ``description`` :
+    ce que l'onglet dit sous son titre, à la place de la description de la vue (vide : la sienne)."""
 
     styles: tuple[str, ...] = ()
     scripts: tuple[str, ...] = ()
+    #: ceux que ses onglets dessinés demandent (``render_tab`` ; ADR 0297 : l'éditeur d'une page de documentation)
+    tab_scripts: tuple[str, ...] = ()
     last: bool = False
     panel: bool = True
+    params: tuple[Any, ...] = ()
+    description: str = ""
 
     def render(self, ui: UI, blocks: Sequence[Any], query: Mapping[str, str],
                forms: Mapping[str, Any] | None = None) -> Any:
@@ -236,6 +246,8 @@ class Overview:
     #: les feuilles et les scripts de la console (sous ``static/``) que ses gabarits demandent
     styles: tuple[str, ...] = ()
     scripts: tuple[str, ...] = ()
+    #: ceux que ses onglets dessinés demandent (``render_tab`` ; ADR 0297 : l'éditeur d'une page de documentation)
+    tab_scripts: tuple[str, ...] = ()
     #: les onglets des facultés que la vue d'ensemble résume : rangés au bout de la barre, sous ``folded_title``
     folded: tuple[str, ...] = ()
     folded_title = "Le détail"
@@ -245,9 +257,19 @@ class Overview:
     #: adresse mène au sien, ouvert sur leur section (``#<nom>``). La console exécute chacun et passe leurs blocs à
     #: ``render_tab`` dans une ``Section`` par onglet, à son titre, le sien d'abord ; les filtres restent les siens
     joined: Mapping[str, tuple[str, ...]] = {}
+    #: des onglets des facultés dont l'adresse mène à un autre sans être exécutés : son nom → celui qui l'a remplacé
+    #: (ADR 0297 : l'arbre de travail d'un projet, qu'aucun dessin ne montre plus). Ils quittent la barre ; leur
+    #: adresse mène au sien, ouvert sur leur section (``#<nom>``), comme un onglet réuni — sans rien lire
+    moved: Mapping[str, str] = {}
 
     def render(self, ui: UI, key: str) -> Any:
         raise NotImplementedError
+
+    def preview(self, ui: UI, key: str, text: str, where: str = "") -> Any:
+        """Un texte en Markdown que la fiche de cet objet rendrait tel qu'elle le montre (ADR 0297 : l'aperçu de
+        l'éditeur d'une page de documentation ; ``where`` : où il sera, pour ses liens relatifs) : son HTML, déjà
+        échappé ; ``None`` : elle n'en rend pas."""
+        return None
 
     def head(self, ui: UI, key: str) -> Any:
         return None
@@ -265,6 +287,12 @@ class Overview:
         """Des onglets des facultés qu'elle montre sur la fiche de cet objet même quand leur faculté n'a rien à en dire
         (``InspectSpec.shown``), parce qu'elle y dessine elle-même autre chose (``render_tab``) : leurs noms. Rien
         par défaut. ``UI.subject_tabs`` les réunit aux autres."""
+        return ()
+
+    def hidden(self, ui: UI, key: str) -> Sequence[str]:
+        """Des onglets des facultés qu'elle tient hors de la barre de cet objet tant qu'on n'y est pas (ADR 0297 : les
+        listes d'un projet qui n'en a pas) : leurs noms. Leur adresse marche toujours, et l'onglet ouvert reprend sa
+        place dans la barre. Rien par défaut."""
         return ()
 
     def render_tab(self, ui: UI, key: str, tab: str, blocks: Sequence[Any], query: Mapping[str, str],
@@ -325,6 +353,11 @@ class UI:
         self._flash[key] = (tone, text)
         while len(self._flash) > 200:
             self._flash.pop(next(iter(self._flash)))
+
+    def peek_flash(self, key: str) -> tuple[str, str] | None:
+        """Le message d'un retour d'action, sans le consommer : une page dessinée peut se régler sur lui (un
+        enregistrement réussi ou refusé, ADR 0297) avant que la page le montre."""
+        return self._flash.get(key) if key else None
 
     def pop_flash(self, key: str) -> tuple[str, str] | None:
         return self._flash.pop(key, None) if key else None

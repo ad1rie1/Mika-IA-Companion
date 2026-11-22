@@ -4,8 +4,8 @@
  * partages et ses droits, tels que le moteur les calcule pour elle. Sous la session du navigateur ; une écriture
  * passe par `sendJson` ou `sendForm` (et `postJson`, `postForm` du client web dessous), les seuls chemins qui portent
  * le jeton CSRF. Chaque
- * domaine a son client typé à côté (`mail.ts`, `teams.ts`, `phone.ts`, `rights.ts`, `settings.ts`, `shares.ts`,
- * `mcp.ts`).
+ * domaine a son client typé à côté (`mail.ts`, `teams.ts`, `phone.ts`, `contacts.ts`, `rights.ts`, `settings.ts`,
+ * `shares.ts`, `mcp.ts`).
  */
 import { API_BASE, BackendUnreachableError, postForm, postJson } from "@web/network/api";
 

@@ -34,15 +34,17 @@ from mika.faculties.identity import audience_for
 from mika.faculties.memory import tables as tb
 from mika.faculties.memory.relayed import ATTEMPTS_MAX
 from mika.kernel.clock import HOUR, MINUTE
+from mika.plugins.phone import app_name
+from mika.plugins.phone import inspect as phone_inspect
 from mika.ports.gate import ACCEPTED, DISABLED, FORBIDDEN
 from mika.ports.llm import LLMResponse, ToolCall
-from mika.ports.phone import IGNORED, SENT
+from mika.ports.phone import APPS, IGNORED, SENT
 from mika.runtime.effects import with_content
 from mika.runtime.operations import FIXED_FIELD, perform
 from mika.runtime.pipeline import EpisodeRequest
 from mika.sim.clock import SimClock, run_virtual
 from mika.vocab.episodes import Kind
-from mika.vocab.phrasebook import phrase
+from mika.vocab.phrasebook import family, phrase
 from mika.vocab.privacy import Sensitivity
 from tests.fixtures.mika import DOC, build, connect
 from tests.unit.test_shares import call
@@ -450,3 +452,11 @@ def test_the_reply_args_name_only_the_draft(tmp_path):
     # le texte n'est jamais dans les arguments (ils ne s'oublient pas) : il est dans le brouillon, un contenu
     assert json.loads(p.data.args_json) == {"draft": json.loads(p.data.args_json)["draft"]}
     assert "Je ne sais pas encore" not in p.data.args_json
+
+
+def test_each_app_the_phone_reads_is_named_everywhere():
+    """Une appli que la porte accepte (Messenger compris, ADR 0299) a son nom dans ses outils, dans la relecture des
+    messages et dans la console : sans lui, elle deviendrait « son téléphone »."""
+    for app in APPS:
+        assert app in family("phone.apps") and app in family("memory.relayed.apps") and app in phone_inspect.APPS
+    assert app_name("messenger") == "Messenger"

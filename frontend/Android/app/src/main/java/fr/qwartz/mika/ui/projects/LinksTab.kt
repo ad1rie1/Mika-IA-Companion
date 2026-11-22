@@ -69,6 +69,7 @@ import fr.qwartz.mika.data.moi.projects.given
 import fr.qwartz.mika.data.moi.projects.linkCandidates
 import fr.qwartz.mika.data.moi.projects.linkRequest
 import fr.qwartz.mika.data.moi.projects.linkWhyRequest
+import fr.qwartz.mika.data.moi.projects.linkWordReady
 import fr.qwartz.mika.data.moi.projects.moment
 import fr.qwartz.mika.data.moi.projects.planState
 import fr.qwartz.mika.data.moi.projects.plural
@@ -93,7 +94,9 @@ import fr.qwartz.mika.ui.shell.Shell
  * pose ses liens (`links.can`). Un projet lié ne dit son nom que si la personne le voit elle-même.
  */
 
-/** Les endroits où un geste sur les liens se dit. */
+// Les endroits où un geste sur les liens se dit.
+
+/** Le mode direct d'un lien : son refus se dit sous sa case. */
 private const val AT_LINK = "link"
 private const val AT_ADD = "link-add"
 private const val AT_WHY = "link-why"
@@ -411,7 +414,6 @@ private fun AddLinkSheet(vm: ProjectViewModel, sheet: Sheet, links: Links, onDis
     val options = remember(links) { linkCandidates(links) }
     var project by rememberSaveable { mutableIntStateOf(options.firstOrNull()?.project ?: 0) }
     var why by rememberSaveable { mutableStateOf("") }
-    LaunchedEffect(Unit) { vm.gestures.forget(AT_ADD) }
     DoneCloses(vm.gestures, AT_ADD, onDismiss)
     val nothing = stringResource(R.string.proj_dep_would_nothing)
     val would = stringResource(R.string.proj_dep_would)
@@ -420,10 +422,11 @@ private fun AddLinkSheet(vm: ProjectViewModel, sheet: Sheet, links: Links, onDis
         title = stringResource(R.string.proj_dep_add),
         sub = stringResource(R.string.proj_dep_add_sub, sheet.project.title),
         submit = stringResource(R.string.proj_add),
-        busy = vm.gestures.busy == AT_ADD,
-        error = vm.gestures.refusalAt(AT_ADD),
+        // rien ne part tant que la fiche se relit : le bouton attend, et une relecture en panne se dit ici
+        busy = vm.gestures.busy == AT_ADD || vm.stale,
+        error = vm.saidAt(AT_ADD),
         onDismiss = onDismiss,
-        onSubmit = { vm.gestures.send(vm.id, linkRequest(LinkChange.ADD, project, why), AT_ADD) { vm.reload() } },
+        onSubmit = { vm.link(linkRequest(LinkChange.ADD, project, why), AT_ADD) },
         enabled = project != 0,
     ) {
         if (options.isEmpty()) {
@@ -452,10 +455,14 @@ internal fun LinkScreen(graph: AppGraph, route: Route.ProjectPage) {
     val now = rememberNow(wallMs = graph.clock::wallMs)
     Toasts(vm.gestures)
     OnResume(vm) { vm.resume() }
-    var editingWhy by rememberSaveable { mutableStateOf(false) }
-    var asking by rememberSaveable { mutableStateOf(false) }
-    var removing by rememberSaveable { mutableStateOf(false) }
-    var picked by remember { mutableStateOf<Demand?>(null) }
+    // la page s'ouvre : ce qu'on y avait dit avant de la quitter ne vaut plus — ni un refus d'un autre jour, ni un
+    // retrait abouti après le départ, qui la refermerait aussitôt
+    FreshEntry(vm.gestures, AT_LINK, AT_REMOVE)
+    // par route : un autre lien s'ouvre sans les feuilles de celui qu'on quitte
+    var editingWhy by rememberSaveable(route.id, route.key) { mutableStateOf(false) }
+    var asking by rememberSaveable(route.id, route.key) { mutableStateOf(false) }
+    var removing by rememberSaveable(route.id, route.key) { mutableStateOf(false) }
+    var picked by remember(route.id, route.key) { mutableStateOf<Demand?>(null) }
     // le lien retiré, sa page n'a plus rien à montrer : retour au schéma
     LaunchedEffect(vm.gestures.finished) {
         if (vm.gestures.finished == AT_REMOVE) {
@@ -463,7 +470,9 @@ internal fun LinkScreen(graph: AppGraph, route: Route.ProjectPage) {
             shell.back()
         }
     }
-    val busy = vm.gestures.busy.isNotEmpty()
+    // aucun geste sur une fiche d'avant : elle se relit au retour sur l'écran et après chaque geste
+    val busy = vm.gestures.busy.isNotEmpty() || vm.stale
+    val notSentPlain = stringResource(R.string.proj_not_sent_plain)
     DetailPage(
         title = tabLabel(SheetTabs.LINKS),
         projectTitle = vm.sheet.valueOrNull?.project?.title,
@@ -502,7 +511,8 @@ internal fun LinkScreen(graph: AppGraph, route: Route.ProjectPage) {
         // ce lien se gère d'ici : elle pose ses liens, elle voit le projet, et c'est un projet qu'il lit
         val mine = links.can && x.visible && other != null && t.reads
         paneBlock("why") {
-            RefusalNote(vm.gestures.refusalAt(AT_LINK))
+            // sa relecture a échoué : ce qu'on montre date d'avant, rien ne s'y change — on le dit
+            StaleNote(vm.staleError, vm::reread)
             if (x.suspended) Banner(StateTone.FAIL, R.drawable.ic_m_alert, stringResource(R.string.proj_dep_suspended_long))
             if (!x.visible) Hint(stringResource(R.string.proj_dep_hidden_hint), R.drawable.ic_m_lock)
             if (x.why.isNotBlank()) Text(x.why, style = MaterialTheme.typography.bodyLarge)
@@ -550,8 +560,10 @@ internal fun LinkScreen(graph: AppGraph, route: Route.ProjectPage) {
             Muted(x.gives.askLabel)
             if (mine && other != null) {
                 FormCheck(stringResource(R.string.proj_dep_direct), stringResource(R.string.proj_dep_direct_sub), x.direct) { on ->
-                    if (!busy) vm.gestures.send(vm.id, linkRequest(if (on) LinkChange.DIRECT_ON else LinkChange.DIRECT_OFF, other), AT_LINK) { vm.reload() }
+                    if (!busy) vm.link(linkRequest(if (on) LinkChange.DIRECT_ON else LinkChange.DIRECT_OFF, other), AT_LINK)
                 }
+                // son refus se dit sous la case, pas en tête de la page
+                RefusalNote(vm.gestures.refusalAt(AT_LINK))
             }
             SideTitle(stringResource(R.string.proj_dep_side_between) + "  ${x.asks.size}")
             if (x.asks.isEmpty()) Muted(stringResource(R.string.proj_dep_between_none))
@@ -588,6 +600,8 @@ internal fun LinkScreen(graph: AppGraph, route: Route.ProjectPage) {
                     Spacer(Modifier.width(6.dp))
                     Text(stringResource(R.string.proj_dep_remove), color = MaterialTheme.colorScheme.error)
                 }
+                // le retrait refusé : les mots du serveur, là où est le bouton
+                RefusalNote(vm.gestures.refusalAt(AT_REMOVE))
             }
         }
     }
@@ -601,15 +615,15 @@ internal fun LinkScreen(graph: AppGraph, route: Route.ProjectPage) {
                 sub = linkedName(tie.link),
                 label = stringResource(R.string.proj_fact_why),
                 initial = tie.link.why,
-                runner = vm.gestures,
+                vm = vm,
                 where = AT_WHY,
                 onDismiss = { editingWhy = false },
-            ) { why -> vm.gestures.send(vm.id, linkWhyRequest(other, why), AT_WHY) { vm.reload() } }
+            ) { why -> vm.link(linkWhyRequest(other, why), AT_WHY) }
         }
         val here = tie.link.askHere
         if (asking && here?.can == true) {
-            AskSheet(linkedName(tie.link), here.born, vm.gestures, onDismiss = { asking = false }) { title, text ->
-                vm.gestures.send(here.project ?: other, askRequest(here.route.ifBlank { "ticket" }, title, text), AT_ASK) { vm.reload() }
+            AskSheet(linkedName(tie.link), here.born, vm, onDismiss = { asking = false }) { title, text ->
+                vm.link(askRequest(here.route.ifBlank { "ticket" }, title, text), AT_ASK, here.project ?: other)
             }
         }
         if (removing) {
@@ -618,7 +632,7 @@ internal fun LinkScreen(graph: AppGraph, route: Route.ProjectPage) {
                 stringResource(R.string.proj_dep_remove_text, sheet.project.title, tie.link.title),
                 stringResource(R.string.proj_remove),
                 onDismiss = { removing = false },
-            ) { vm.gestures.send(vm.id, linkRequest(LinkChange.REMOVE, other), AT_REMOVE) { vm.reload() } }
+            ) { if (!vm.link(linkRequest(LinkChange.REMOVE, other), AT_REMOVE)) shell.toast(notSentPlain) }
         }
         picked?.let { a -> sheet.links?.let { l -> DemandSheet(sheet, l, a, shell, now) { picked = null } } }
     }
@@ -626,29 +640,30 @@ internal fun LinkScreen(graph: AppGraph, route: Route.ProjectPage) {
 
 /** Le mot d'un lien : pourquoi ce projet lit l'autre. */
 @Composable
-private fun WordSheet(title: String, sub: String, label: String, initial: String, runner: GestureRunner, where: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
+private fun WordSheet(title: String, sub: String, label: String, initial: String, vm: ProjectViewModel, where: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
+    val runner = vm.gestures
     var word by rememberSaveable { mutableStateOf(initial) }
-    LaunchedEffect(Unit) { runner.forget(where) }
     DoneCloses(runner, where, onDismiss)
-    FormSheet(title = title, sub = sub, submit = stringResource(R.string.proj_save), busy = runner.busy == where, error = runner.refusalAt(where), onDismiss = onDismiss, onSubmit = { onSave(word) }, enabled = word.trim() != initial.trim()) {
+    // un mot vide ne s'enregistre pas : le bouton reste éteint ; et rien ne part tant que la fiche se relit
+    FormSheet(title = title, sub = sub, submit = stringResource(R.string.proj_save), busy = runner.busy == where || vm.stale, error = vm.saidAt(where), onDismiss = onDismiss, onSubmit = { onSave(word) }, enabled = linkWordReady(word, initial)) {
         FormLong(label, word, { word = it.take(300) }, rows = 2, hint = stringResource(R.string.proj_dep_why_hint), help = stringResource(R.string.proj_dep_why_help), error = runner.fieldsAt(where)["why"])
     }
 }
 
 /** « Lui demander quelque chose » : un ticket qu'elle ouvre elle-même chez le projet lu, avec les droits qu'elle a sur lui. */
 @Composable
-private fun AskSheet(project: String, born: String, runner: GestureRunner, onDismiss: () -> Unit, onAsk: (String, String) -> Unit) {
+private fun AskSheet(project: String, born: String, vm: ProjectViewModel, onDismiss: () -> Unit, onAsk: (String, String) -> Unit) {
+    val runner = vm.gestures
     var title by rememberSaveable { mutableStateOf("") }
     var text by rememberSaveable { mutableStateOf("") }
-    LaunchedEffect(Unit) { runner.forget(AT_ASK) }
     DoneCloses(runner, AT_ASK, onDismiss)
     val errors = runner.fieldsAt(AT_ASK)
     FormSheet(
         title = stringResource(R.string.proj_dep_ask),
         sub = project,
         submit = stringResource(R.string.proj_dep_ask_ok),
-        busy = runner.busy == AT_ASK,
-        error = runner.refusalAt(AT_ASK),
+        busy = runner.busy == AT_ASK || vm.stale,
+        error = vm.saidAt(AT_ASK),
         onDismiss = onDismiss,
         onSubmit = { onAsk(title, text) },
         enabled = title.isNotBlank(),

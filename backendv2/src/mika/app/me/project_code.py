@@ -59,34 +59,46 @@ from mika.contracts import projects as c
 from mika.contracts import self_ as self_c
 from mika.faculties.projects import merge, pulls, tickets, tracker
 from mika.faculties.projects.faculty import (
-    WORK_PREFIX,
     Item,
     Objective,
     Project,
     by_pulls,
     handed_over,
-    objective_at,
 )
 from mika.faculties.projects.inspect import OBJ_FR
+from mika.faculties.projects.inspect_code import (  # ses mots et ses règles : ceux de la console (ADR 0297)
+    BINARY,
+    CHECK_WORDS,
+    DIFF_CUT,
+    ENTRY_WORDS,
+    FILE_WORDS,
+    HIDDEN,
+    HIDDEN_FILE,
+    ISSUE_DROPPED,
+    ISSUE_WORDS,
+    LINK,
+    MODULE,
+    PULL_ORDER,
+    PULL_WORDS,
+    READY,
+    TOO_BIG,
+)
+from mika.faculties.projects.inspect_code import issue_ticket as _issue_ticket
+from mika.faculties.projects.inspect_code import objective_for as _objective_for
+from mika.faculties.projects.inspect_code import objective_on as _objective_on
+from mika.faculties.projects.inspect_code import pull_stage as _pull_state
+from mika.faculties.projects.inspect_code import pulled as _pulled
+from mika.faculties.projects.inspect_code import ticket_of as _ticket_of
 from mika.faculties.projects.inspect_merge import ACTION as MERGE_ACTION
 from mika.faculties.projects.inspect_merge import REFUSED_WORDS
 from mika.ports.workshop import (
     BASE_BRANCH,
     CHECKS_FAILED,
-    CHECKS_NONE,
-    CHECKS_PASSED,
-    CHECKS_PENDING,
-    ENTRY_DIR,
     ENTRY_FILE,
     ENTRY_LINK,
     ENTRY_MODULE,
-    FILE_ADDED,
-    FILE_DELETED,
-    FILE_MODIFIED,
     ISSUE_CLOSED,
     ISSUE_OPEN,
-    PULL_CLOSED,
-    PULL_MERGED,
     PULL_OPEN,
     Commit,
     FileDiff,
@@ -108,40 +120,20 @@ CHECKS_SHOWN, CHECKS_HISTORY = 40, 300
 
 # ── Ses mots ──────────────────────────────────────────────────────────────
 
-ENTRY_WORDS = {ENTRY_DIR: "dossier", ENTRY_FILE: "fichier", ENTRY_LINK: "lien symbolique", ENTRY_MODULE: "sous-module"}
-FILE_WORDS = {FILE_ADDED: "ajouté", FILE_MODIFIED: "modifié", FILE_DELETED: "supprimé"}
-#: où en est une pull request, pour qui la regarde : proposée (elle attend un accord avant de partir), ouverte,
-#: prête à fusionner, fusionnée, fermée
-PROPOSED, OPEN, READY, MERGED, CLOSED = "proposed", "open", "ready", "merged", "closed"
-PULL_WORDS = {PROPOSED: "proposée, elle attend un accord", OPEN: "ouverte", READY: "prête à fusionner",
-              MERGED: "fusionnée", CLOSED: "fermée sans fusion"}
-PULL_ORDER = {READY: 0, OPEN: 1, PROPOSED: 2, MERGED: 3, CLOSED: 4}
-CHECK_WORDS = {CHECKS_NONE: "aucune vérification", CHECKS_PENDING: "en cours", CHECKS_PASSED: "passée",
-               CHECKS_FAILED: "en échec"}
-ISSUE_WORDS = {ISSUE_OPEN: "ouverte", ISSUE_CLOSED: "fermée", "": "état inconnu"}
-ISSUE_DROPPED = "fermée, non prévue"
 #: une relecture indépendante : aucune encore, demandée, puis son verdict
 REVIEW_NONE, REVIEW_ASKED = "pas encore relue", "relecture demandée"
-#: pourquoi un fichier ne dit pas son contenu
-BINARY, TOO_BIG = "Un fichier binaire : son contenu ne s'affiche pas.", "Un fichier trop gros pour s'afficher ici."
-LINK, MODULE = "Un lien symbolique : il ne se suit pas.", "Un sous-module : il ne s'ouvre pas d'ici."
-DIFF_CUT = "Ce diff est trop long pour tenir ici : les fichiers coupés se relisent un à un (« path »)."
 #: qui a signé un commit : elle (l'atelier), ou quelqu'un d'autre (un commit venu du dépôt distant)
 BY_HER, BY_OTHER = "self", "other"
 
 # ── Les refus, en mots ────────────────────────────────────────────────────
 
 OUTSIDE = "Ce chemin sort du dépôt : écris un chemin relatif à sa racine."
-HIDDEN = ("Un fichier ou un dossier caché (son nom commence par un point) ne se lit pas d'ici : ni son contenu, ni "
-          "son diff.")
-HIDDEN_FILE = "Un fichier caché : son diff ne s'affiche pas."
 NO_REMOTE = "Ce projet n'a pas de dépôt distant que l'on sache lire."
 HOST_BUSY = "Trop de lectures de l'hôte d'affilée : attends une minute."
 HEAD_NEEDED = "Nomme le commit que tu as lu : « head », l'identifiant complet du commit au bout de sa branche."
 
 _SHA = re.compile(r"^[0-9a-f]{4,40}$")
 _FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
-_WORK = re.compile(rf"^{re.escape(WORK_PREFIX)}objective-(\d+)(?:-\d+)?$")
 _REPO_TAIL = re.compile(r"(?:\.git)?/?$")
 _host_reads: WeakKeyDictionary[MeApiBase, SlidingWindow] = WeakKeyDictionary()
 
@@ -203,27 +195,6 @@ def _outside_path() -> Denied:
 # ── Ce qui est lié : l'objectif, le ticket, la pull request ───────────────
 
 
-def _objective_on(p: Project, branch: str) -> Objective | None:
-    """L'objectif qui travaille sur cette branche : celui qui la dit sienne, sinon celui que son nom désigne
-    (``faculty.branch_of`` : ``work/objective-<n>``, ou ``…-<k>`` pour un constant)."""
-    found = next((o for o in p.objectives if o.branch and o.branch == branch), None)
-    named = _WORK.match(branch or "")
-    return found or (objective_at(p, int(named.group(1))) if named is not None else None)
-
-
-def _objective_for(p: Project, k: Commit) -> Objective | None:
-    """L'objectif lié à un commit : celui de sa branche de travail ; sur la base, celui qui l'a laissé."""
-    if k.branch and k.branch != BASE_BRANCH:
-        return _objective_on(p, k.branch)
-    return next((o for o in p.objectives if o.commit and o.commit == k.sha), None)
-
-
-def _ticket_of(p: Project, o: Objective | None) -> Item | None:
-    if o is None or not o.ticket:
-        return None
-    return next((x for x in p.board.items if x.list_name == c.TICKETS and x.number == o.ticket), None)
-
-
 def _ticket_refs(items: Iterable[Item | None]) -> list[str]:
     return [x.title_ref for x in items if x is not None]
 
@@ -245,16 +216,6 @@ def _ticket_brief(r: Reach, item: Item | None, texts: Mapping[str, str]) -> dict
             "veiled": veil, "veiled_label": VEIL_WORDS.get(veil, ""), "status": item.status,
             "status_label": tracker.status_words(c.TICKETS, item.status), "open": not item.closed, "hand": hand,
             "hand_label": HAND_WORDS.get(hand, ""), "yours": hand == c.ACTOR_OWNER and r.settles}
-
-
-def _pull_state(p: Project, o: Objective) -> str:
-    if o.pull_state == PULL_MERGED:
-        return MERGED
-    if o.pull_state == PULL_CLOSED:
-        return CLOSED
-    if o.pull_state != PULL_OPEN:
-        return PROPOSED
-    return OPEN if merge.blocked(p, o) else READY
 
 
 def _checks_brief(o: Objective) -> dict[str, Any] | None:
@@ -302,11 +263,6 @@ def _pull_json(sc: Scene, r: Reach, o: Objective, texts: Mapping[str, str]) -> d
             "conflicts": o.pull_conflicts, "changes_asked": o.pull_changes, "awaits_accord": o.pull_proposal,
             "unsent": o.unsent, "objective": _objective_brief(o, texts),
             "ticket": _ticket_brief(r, _ticket_of(p, o), texts), "merge": _merge_json(sc, r, o)}
-
-
-def _pulled(p: Project) -> list[Objective]:
-    """Ses objectifs qui ont une pull request — proposée, ouverte, fusionnée ou fermée."""
-    return [o for o in p.objectives if o.pull_state or o.pull or o.pull_proposal] if by_pulls(p) else []
 
 
 # ── Un commit, un diff ────────────────────────────────────────────────────
@@ -666,12 +622,6 @@ async def fuse(call: Call) -> dict[str, Any]:
 
 
 # ── Issues ────────────────────────────────────────────────────────────────
-
-
-def _issue_ticket(p: Project, number: int) -> Item | None:
-    """Le ticket que reflète cette issue : celui qui porte son numéro, ou qui en est né (``issue-<n>``)."""
-    return next((x for x in p.board.items if x.list_name == c.TICKETS
-                 and (x.issue == number or x.key == f"issue-{number}")), None)
 
 
 def _issue_veil(r: Reach, item: Item | None) -> str:

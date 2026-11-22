@@ -63,6 +63,9 @@ function freshRuntime() {
     cursors: {},
     // l'historique de la mise en service, s'il a été lancé
     history: null,
+    // les profils Teams des personnes (ADR 0298) : identifiant → `{p, d, at}` ; ce qui en est parti, par empreinte
+    profiles: {},
+    profilesSent: {},
   };
 }
 
@@ -224,6 +227,7 @@ function ingest(state, batch) {
   // en pause, rien n'est appris des noms de conversation : ils ne partiraient qu'après, avec ce qui a été écrit
   // pendant (l'onglet les redit à la reprise)
   if (!settings.paused) learnTitles(rt, batch.conversations || [], now);
+  if (!settings.paused) learnProfiles(rt, batch.profiles || [], now);
   learnCursors(rt, batch.cursors || [], now);
   rt.pauses = S.prunePauses(rt.pauses, now);
   const exclude = S.exclusions(settings.exclude);
@@ -367,6 +371,48 @@ function titleUpdates(rt, exclude) {
   }).slice(0, S.LIMITS.maxConversations);
 }
 
+// ── Les profils (ADR 0298) ──────────────────────────────────────────────────
+//
+// L'onglet joint aux messages le profil Teams de leurs auteurs et de leurs mentionnés (nom, e-mail, poste,
+// entreprise, service, numéros) : Mika en tire son annuaire. Un profil ne part qu'avec un message de cette personne
+// (ou qui la mentionne) qui part lui-même — jamais pour une conversation exclue, rien pendant une pause — et une fois,
+// tant qu'il ne change pas.
+
+const PROFILES_MAX = 3000;
+const PROFILES_SENT_MAX = 6000;
+
+function learnProfiles(rt, list, now) {
+  rt.profiles = rt.profiles || {};
+  for (const p of (list || []).slice(0, 300)) {
+    if (!p || typeof p.id !== "string" || !p.id) continue;
+    const wire = S.wireProfile(p);
+    rt.profiles[wire.id] = { p: wire, d: T.hash(JSON.stringify(wire)), at: now };
+  }
+  const ids = Object.keys(rt.profiles);
+  if (ids.length > PROFILES_MAX) {
+    ids.sort(function (a, b) { return rt.profiles[a].at - rt.profiles[b].at; });
+    for (const id of ids.slice(0, ids.length - PROFILES_MAX)) delete rt.profiles[id];
+  }
+}
+
+/** Le profil à joindre pour cette personne : connu, et pas déjà parti tel quel. */
+function profileFor(rt) {
+  return function (id) {
+    const e = rt.profiles && rt.profiles[id];
+    return e && (!rt.profilesSent || rt.profilesSent[id] !== e.d) ? e.p : null;
+  };
+}
+
+function markProfilesSent(rt, ids) {
+  rt.profilesSent = rt.profilesSent || {};
+  for (const id of ids || []) {
+    const e = rt.profiles && rt.profiles[id];
+    if (e) rt.profilesSent[id] = e.d;
+  }
+  const sent = Object.keys(rt.profilesSent);
+  if (sent.length > PROFILES_SENT_MAX) for (const id of sent.slice(0, sent.length - PROFILES_SENT_MAX)) delete rt.profilesSent[id];
+}
+
 /** Les messages de la file retenus le temps d'apprendre le nom de leur conversation. */
 function heldMessages(rt, exclude, now) {
   return rt.queue.filter(function (m) { return S.held(m, describe(rt, m.conv), exclude, now); });
@@ -389,6 +435,7 @@ function nextBatch(state) {
     selfId: rt.self,
     extra: titleUpdates(rt, exclude),
     maxMessages: rt.batchMax,
+    profile: profileFor(rt),
   });
   return list[0] || null;
 }
@@ -412,6 +459,7 @@ function afterInbox(state, batch, result) {
     rt.stats.own += batch.body.messages.filter(function (m) { return m.own; }).length;
     rt.stats.posts++;
     for (const conv of batch.convs) markShared(rt, conv, now);
+    markProfilesSent(rt, batch.profiles);
     rt.batchMax = Math.min(S.LIMITS.maxMessages, (rt.batchMax || 1) * 2);
     rt.lastOkAt = now;
     rt.inboxStrike = null;
@@ -982,6 +1030,8 @@ async function historyPost(settings, entries, opts, deadline, totals) {
         : result.status === 0 ? result.error : "Mika a répondu " + result.status + (result.error ? " : " + result.error : "") };
     }
     const d = result.data || {};
+    // les profils vraiment partis (un profil qui ne tenait pas dans ce paquet attend : il n'est pas marqué)
+    totals.profiles = (totals.profiles || []).concat(b.profiles || []);
     totals.sent += b.ids.length;
     totals.accepted += Number(d.accepted) || 0;
     totals.known += Number(d.known) || 0;
@@ -1009,6 +1059,7 @@ async function historyChunk(msg) {
     if (S.isSelfId(msg.self)) rt.self = String(msg.self).toLowerCase();
     // les noms et les personnes d'abord : ce sont eux que visent les exclusions
     learnTitles(rt, msg.conversations || [], now);
+    learnProfiles(rt, msg.profiles || [], now);
     for (const m of msg.messages || []) {
       if (m.author && S.isOwn(m, rt.self)) rt.selfName = S.clean(m.author, 120);
       else if (m.author) learnPerson(rt, m.conv, m.author, now);
@@ -1034,16 +1085,29 @@ async function historyChunk(msg) {
     prunePeople(rt);
     const info = {};
     for (const e of kept) info[e.conv] = { title: titleOf(rt, e.conv), kind: kindOf(rt, e.conv) };
-    return { settings: s.settings, kept: kept, opts: { info: info, self: { id: S.selfMri(rt.self), name: rt.selfName },
-      selfId: rt.self, maxMessages: rt.batchMax, maxBytes: S.LIMITS.maxBytes - 64 } };
+    // les profils à joindre, figés ici (le service peut s'endormir entre deux envois du paquet)
+    const profiles = {};
+    const wanted = profileFor(rt);
+    for (const e of kept) {
+      for (const id of [e.authorId].concat(e.mentions || [])) {
+        const key = String(id || "").toLowerCase();
+        const p = key && wanted(key);
+        if (p) profiles[key] = p;
+      }
+    }
+    return { settings: s.settings, kept: kept, profiles: profiles, opts: { info: info,
+      self: { id: S.selfMri(rt.self), name: rt.selfName }, selfId: rt.self, maxMessages: rt.batchMax,
+      maxBytes: S.LIMITS.maxBytes - 64 } };
   });
   if (prepared.refused) return { ok: false, error: prepared.refused };
   const opts = prepared.opts;
   const info = opts.info;
   opts.info = function (conv) { return info[conv] || { title: "", kind: "other" }; };
+  opts.profile = function (id) { return prepared.profiles[id] || null; };
   const totals = { sent: 0, accepted: 0, known: 0, twins: 0, dropped: 0 };
   const result = await historyPost(prepared.settings, prepared.kept, opts, deadline, totals);
   await mutate(function (s) {
+    if (result.ok) markProfilesSent(s.runtime, totals.profiles || []);
     if (staleRun(s.runtime, msg.run)) return;
     const h = s.runtime.history;
     h.lastAt = Date.now();
@@ -1351,7 +1415,29 @@ function arm() {
 // le service redémarre (Chrome l'a endormi, ou l'extension a été rechargée) : la connexion en direct reprend
 liveEnsure().catch(function () { /* rien */ });
 
-chrome.runtime.onInstalled.addListener(arm);
+/** Posé par la page de réglages juste avant de recharger l'extension : les onglets Teams suivent. */
+const RELOAD_TABS_KEY = "reloadTeamsTabs";
+const RELOAD_TABS_FRESH_MS = 60 * 1000;
+
+/**
+ * L'extension rechargée depuis sa page de réglages : les onglets Teams gardent sinon les scripts de l'ancienne version,
+ * coupés du service, jusqu'à ce qu'on les recharge. Seulement à sa demande, et seulement si elle date de l'instant.
+ */
+async function reloadTeamsTabs() {
+  const got = await chrome.storage.local.get([RELOAD_TABS_KEY]);
+  const asked = Number(got[RELOAD_TABS_KEY]) || 0;
+  if (!asked) return;
+  await chrome.storage.local.remove(RELOAD_TABS_KEY);
+  if (Date.now() - asked > RELOAD_TABS_FRESH_MS) return;
+  for (const tab of await chrome.tabs.query({ url: TEAMS_TABS })) {
+    chrome.tabs.reload(tab.id).catch(function () { /* fermé entre-temps */ });
+  }
+}
+
+chrome.runtime.onInstalled.addListener(function () {
+  arm();
+  reloadTeamsTabs().catch(function () { /* les onglets restent à recharger à la main */ });
+});
 chrome.runtime.onStartup.addListener(arm);
 chrome.alarms.onAlarm.addListener(function (alarm) {
   if (alarm.name === "mika-tick") tick();

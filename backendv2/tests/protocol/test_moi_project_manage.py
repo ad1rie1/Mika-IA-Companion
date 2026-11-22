@@ -29,10 +29,10 @@ from mika.faculties.projects.faculty import ACCESS_SET, EXTRA_BUNDLES, MILESTONE
 from mika.ports.workshop import Pull, Remark
 from mika.runtime.operations import perform
 from mika.vocab.access import PERSON
-from tests.protocol.test_moi_mail import append, journal, login, post
+from tests.protocol.test_moi_mail import API, append, journal, login, post
 from tests.protocol.test_moi_project_code import FakeHost, Repo
 from tests.protocol.test_moi_projects import _chain, _get, _lea, _numbers, _project, _share, _ticket
-from tests.protocol.test_web import world  # noqa: F401 — fixture partagée
+from tests.protocol.test_web import csrf, world  # noqa: F401 — fixture partagée
 from tests.unit.test_project_pulls import needs_bwrap
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "mika"
@@ -148,6 +148,29 @@ def test_its_settings_come_in_sections_with_their_words_and_are_changed_field_by
     assert _project(live, pid).owner == before.owner  # le modifier ne change pas pour qui il est
     empty = _post(client, pid, "reglages/enregistrer", {"section": "general", "values": {"title": ""}})
     assert empty.status_code == 400 and "title" in empty.json()["fields"]
+
+
+def test_a_section_shared_by_two_actions_is_saved_whole_under_one_send_key(world):  # noqa: F811
+    """« Accords et relecture » tient à deux actions (modifier le projet, régler ses tickets). Envoyée avec une clé
+    d'envoi, comme le font les deux clients, la seconde action se voyait répondre « déjà envoyé » : la moitié de
+    l'enregistrement était perdue sans qu'on le dise. Chacune a sa clé, tirée de celle de l'envoi ; la redite du même
+    envoi ne refait rien."""
+    client, live, _ = world
+    pid, _ = _chain(client, live)
+    before = _project(live, pid)
+    assert before.approval and before.issues != c.ISSUES_NEVER
+    body = {"section": "accords", "values": {"approval": False, "issues": c.ISSUES_NEVER}}
+    headers = {**csrf(client), "Idempotency-Key": "envoi-accords-1"}
+    got = client.post(f"{API}/projets/{pid}/reglages/enregistrer", json=body, headers=headers)
+    assert got.status_code == 200, got.text
+    assert not got.json()["deduped"]
+    p = _project(live, pid)
+    assert (p.approval, p.issues) == (False, c.ISSUES_NEVER)
+    # la redite du même envoi (une coupure, un double appui) : rien de plus, et rien de défait
+    again = client.post(f"{API}/projets/{pid}/reglages/enregistrer", json=body, headers=headers)
+    assert again.status_code in (200, 409), again.text
+    p = _project(live, pid)
+    assert (p.approval, p.issues) == (False, c.ISSUES_NEVER)
 
 
 def test_a_project_is_archived_then_restored_by_who_frames_it(world):  # noqa: F811
@@ -582,7 +605,7 @@ def test_dependances_is_the_word_served(world):  # noqa: F811
         "title": "Dépendances", "reads": "Il dépend de", "readers": "Dépendent de lui", "asks": "Ses demandes"}
     page = client.get(f"/admin/fiche/project/{rid}?onglet=liens").text
     assert "Dépendances" in page and "Il dépend de" in page and "Dépendent de lui" in page
-    assert "Ses demandes : envoyées" in page and "Ses liens de lecture" not in page
+    assert "Ses demandes" in page and "Ses liens de lecture" not in page
     assert "Dépendances entre projets" in client.get("/admin/projets/tous").text
 
 

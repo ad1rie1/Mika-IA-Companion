@@ -37,10 +37,9 @@ import fr.qwartz.mika.data.moi.projects.DocVersion
 import fr.qwartz.mika.data.moi.projects.SheetTabs
 import fr.qwartz.mika.data.moi.projects.StateTone
 import fr.qwartz.mika.data.moi.projects.decisionTone
-import fr.qwartz.mika.data.moi.projects.docBlocks
 import fr.qwartz.mika.data.moi.projects.folderOf
+import fr.qwartz.mika.data.moi.projects.goalKey
 import fr.qwartz.mika.data.moi.projects.folderPath
-import fr.qwartz.mika.data.moi.projects.headingsOf
 import fr.qwartz.mika.data.moi.projects.moment
 import fr.qwartz.mika.data.moi.projects.nameOf
 import fr.qwartz.mika.data.moi.projects.optionLines
@@ -76,11 +75,15 @@ internal fun DocPageScreen(graph: AppGraph, route: Route.ProjectPage) {
     val vm: DocPageViewModel = viewModel(key = "doc-page|$session|${route.id}|${route.key}") { DocPageViewModel(ProjectsDeps(graph), route.id, route.key) }
     val now = rememberNow(wallMs = graph.clock::wallMs)
     Toasts(vm.gestures)
+    // la page s'ouvre : ce qu'on y avait dit avant de la quitter (un refus d'un autre jour) ne vaut plus
+    FreshEntry(vm.gestures, DocPageViewModel.HERE, DocPageViewModel.MOVE)
     OnResume(vm) {
         project.resume()
         docs.space.open()
         vm.resume()
     }
+    // quittée avant la réponse d'un geste, elle ne suit ni ne referme rien à son retour
+    OnLeave(vm) { vm.leave() }
     LaunchedEffect(vm.revision) { if (vm.revision > 0) docs.reload() }
     // la page a changé de chemin : l'écran la suit ; supprimée : il revient à l'arborescence
     LaunchedEffect(vm.moved, vm.removed) {
@@ -96,17 +99,19 @@ internal fun DocPageScreen(graph: AppGraph, route: Route.ProjectPage) {
             }
         }
     }
-    var pane by rememberSaveable { mutableStateOf(PANE_PAGE) }
-    var moving by rememberSaveable { mutableStateOf(false) }
-    var removing by rememberSaveable { mutableStateOf(false) }
-    var restoring by rememberSaveable { mutableIntStateOf(0) }
+    // par route : la page déplacée s'ouvre sans la feuille ni la fenêtre de celle qu'on quitte
+    var pane by rememberSaveable(route.id, route.key) { mutableStateOf(PANE_PAGE) }
+    var moving by rememberSaveable(route.id, route.key) { mutableStateOf(false) }
+    var removing by rememberSaveable(route.id, route.key) { mutableStateOf(false) }
+    var restoring by rememberSaveable(route.id, route.key) { mutableIntStateOf(0) }
     LaunchedEffect(pane) { if (pane == PANE_INFOS) vm.openHistory() }
     val shownVersion = vm.version
     BackHandler(enabled = shownVersion != null) { vm.showVersion(0) }
     val images = docs.space.value?.images?.associateBy { it.name }
     val page = vm.page.value
     val seen = (shownVersion as? Load.Ready)?.value
-    val blocks = remember(page?.text, seen?.text, shownVersion == null) { docBlocks(if (shownVersion == null) page?.text.orEmpty() else seen?.text.orEmpty()) }
+    // la page (ou la version relue) est découpée par le modèle, hors du fil principal : ici on ne fait que la poser
+    val pieces = if (shownVersion == null) vm.body else vm.versionBody
     val busy = vm.gestures.busy.isNotEmpty()
     DetailPage(
         title = tabLabel(SheetTabs.DOCS),
@@ -144,12 +149,12 @@ internal fun DocPageScreen(graph: AppGraph, route: Route.ProjectPage) {
                 is Load.Ready -> {
                     val v = shownVersion.value
                     paneBlock("version") { VersionCard(v, p, now, busy) { restoring = v.n } }
-                    if (v.forgotten) paneBlock("forgotten") { Hint(stringResource(R.string.proj_doc_forgotten), R.drawable.ic_m_lock) } else docBody(graph, route.id, blocks, images)
+                    if (v.forgotten) paneBlock("forgotten") { Hint(stringResource(R.string.proj_doc_forgotten), R.drawable.ic_m_lock) } else docBody(graph, route.id, pieces, images)
                 }
             }
             p.forgotten -> paneBlock("forgotten") { Hint(stringResource(R.string.proj_doc_forgotten), R.drawable.ic_m_lock) }
             p.text.isBlank() -> item(key = "empty") { EmptyNote(R.drawable.ic_m_file, stringResource(R.string.proj_doc_empty), stringResource(R.string.proj_doc_empty_sub)) }
-            else -> docBody(graph, route.id, blocks, images)
+            else -> docBody(graph, route.id, pieces, images)
         }
     }
     if (moving && page != null) MoveSheet(page, vm) { moving = false }
@@ -162,13 +167,15 @@ internal fun DocPageScreen(graph: AppGraph, route: Route.ProjectPage) {
             onConfirm = vm::remove,
         )
     }
-    if (restoring > 0) {
+    // le numéro est figé avant la fenêtre : la fermer le remet à zéro, et c'est lui que le geste nomme
+    val wanted = restoring
+    if (wanted > 0) {
         ConfirmDialog(
-            stringResource(R.string.proj_doc_restore_title, restoring),
+            stringResource(R.string.proj_doc_restore_title, wanted),
             stringResource(R.string.proj_doc_restore_text),
             stringResource(R.string.proj_doc_restore),
             onDismiss = { restoring = 0 },
-        ) { vm.restore(restoring) }
+        ) { vm.restore(wanted) }
     }
 }
 
@@ -223,7 +230,7 @@ private fun VersionCard(v: DocVersion, p: DocPage, now: Long, busy: Boolean, onR
 /** « Infos » d'une page : son sommaire, sa dernière modification, ses versions gardées (toucher l'une la relit). */
 @Composable
 private fun PageInfos(p: DocPage, vm: DocPageViewModel, now: Long, onVersion: (Int) -> Unit) {
-    val titles = remember(p.text) { headingsOf(p.text) }
+    val titles = vm.outline
     if (titles.isNotEmpty()) {
         SideTitle(stringResource(R.string.proj_doc_side_outline))
         for ((level, text) in titles) {
@@ -263,7 +270,7 @@ private fun MoveSheet(p: DocPage, vm: DocPageViewModel, onDismiss: () -> Unit) {
     var folder by rememberSaveable { mutableStateOf(folderOf(p.path)) }
     val where = DocPageViewModel.MOVE
     val to = pagePath(folderPath(folder), name)
-    LaunchedEffect(Unit) { vm.gestures.forget(where) }
+    DoneCloses(vm.gestures, where, onDismiss)
     FormSheet(
         title = stringResource(R.string.proj_doc_move),
         sub = p.path,
@@ -301,7 +308,8 @@ internal fun DecisionScreen(graph: AppGraph, route: Route.ProjectPage) {
         project.resume()
         vm.resume()
     }
-    var pane by rememberSaveable { mutableStateOf(PANE_DECISION) }
+    // par route : une autre décision (celle qu'elle remplace) s'ouvre sur son premier volet
+    var pane by rememberSaveable(route.id, route.key) { mutableStateOf(PANE_DECISION) }
     DetailPage(
         title = stringResource(R.string.proj_doc_tab_decisions),
         projectTitle = project.sheet.valueOrNull?.project?.title,
@@ -347,7 +355,7 @@ internal fun DecisionScreen(graph: AppGraph, route: Route.ProjectPage) {
                 if (d.replaces > 0) LinkedLine(R.drawable.ic_m_shield_check, StateTone.WAIT, stringResource(R.string.proj_doc_decision_n, d.replaces), stringResource(R.string.proj_doc_replaces), onClick = { open(d.replaces) })
                 if (d.replacedBy > 0) LinkedLine(R.drawable.ic_m_shield_check, StateTone.DONE, stringResource(R.string.proj_doc_decision_n, d.replacedBy), stringResource(R.string.proj_doc_replaced_by), onClick = { open(d.replacedBy) })
                 if (d.objective > 0) {
-                    LinkedLine(R.drawable.ic_m_target, StateTone.WORK, stringResource(R.string.proj_goal_n, d.objective), stringResource(R.string.proj_goal_concerned), onClick = { shell.navigate(Route.ProjectGoal(route.id, "o${d.objective}")) })
+                    LinkedLine(R.drawable.ic_m_target, StateTone.WORK, stringResource(R.string.proj_goal_n, d.objective), stringResource(R.string.proj_goal_concerned), onClick = { shell.navigate(Route.ProjectGoal(route.id, goalKey(project.sheet.valueOrNull, d.objective))) })
                 }
             }
             else -> paneBlock("decision") {

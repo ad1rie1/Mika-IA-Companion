@@ -78,12 +78,14 @@ import fr.qwartz.mika.core.AppGraph
 import fr.qwartz.mika.data.files.ImageCompressor
 import fr.qwartz.mika.data.moi.mail.outgoingPiece
 import fr.qwartz.mika.data.moi.projects.DocImage
+import fr.qwartz.mika.data.moi.projects.DocLimits
 import fr.qwartz.mika.data.moi.projects.DocUpload
 import fr.qwartz.mika.data.moi.projects.Edit
 import fr.qwartz.mika.data.moi.projects.MdEdit
 import fr.qwartz.mika.data.moi.projects.StateTone
 import fr.qwartz.mika.data.moi.projects.WORD_MAX
 import fr.qwartz.mika.data.moi.projects.folderOf
+import fr.qwartz.mika.data.moi.projects.imageReencoded
 import fr.qwartz.mika.data.moi.projects.moment
 import fr.qwartz.mika.data.moi.projects.nameOf
 import fr.qwartz.mika.ui.Route
@@ -129,22 +131,23 @@ private const val ASK_CURRENT = "current"
 internal fun DocEditScreen(graph: AppGraph, route: Route.ProjectPage) {
     val outer = LocalShell.current
     val session = rememberSessionKey(graph)
-    val fresh = route.kind == SheetPages.NEW
     val vm: DocEditViewModel = viewModel(key = "doc-edit|$session|${route.id}|${route.key}") {
-        DocEditViewModel(ProjectsDeps(graph), route.id, route.key, if (fresh) route.ref else null)
+        DocEditViewModel(ProjectsDeps(graph), route.id, route.key)
     }
     val docs = rememberDocsModel(graph, route.id)
     val now = rememberNow(wallMs = graph.clock::wallMs)
     Toasts(vm.gestures)
     LaunchedEffect(vm) { vm.open() }
-    var preview by rememberSaveable { mutableStateOf(false) }
-    var asking by rememberSaveable { mutableStateOf("") }
+    // quitté avant la réponse d'un enregistrement, l'éditeur ne se referme pas tout seul à son retour
+    OnLeave(vm) { vm.leave() }
+    var preview by rememberSaveable(route.id, route.key) { mutableStateOf(false) }
+    var asking by rememberSaveable(route.id, route.key) { mutableStateOf("") }
     // enregistrée : l'onglet se relit, et l'écran revient à la page
     LaunchedEffect(vm.justSaved) {
         if (vm.justSaved) {
             vm.savedSeen()
             docs.reload()
-            if (fresh) outer.replace(Route.ProjectPage(route.id, SheetPages.PAGE, route.key)) else outer.back()
+            outer.back()
         }
     }
     // quitter avec un texte pas enregistré : on le dit d'abord (le brouillon reste, si on le garde)
@@ -226,14 +229,26 @@ internal fun DocEditScreen(graph: AppGraph, route: Route.ProjectPage) {
         )
         ASK_LINK -> LinkDialog(vm.edit.selected, onDismiss = {
             asking = ""
-            focus.requestFocus()
+            focus.back()
         }) { url ->
             asking = ""
             vm.change { MdEdit.link(it, url) }
-            focus.requestFocus()
+            focus.back()
         }
         ASK_IMAGES -> ImagesSheet(graph, vm, images, onDismiss = { asking = "" })
         ASK_CURRENT -> CurrentSheet(graph, vm, now, onDismiss = { asking = "" })
+    }
+}
+
+/**
+ * Rendre la main au champ après une fenêtre. Il peut ne pas être composé (l'aperçu, une page qui se relit après le
+ * retour de l'app) : il n'y a alors rien à qui la rendre, et le demander ferait tomber l'écran.
+ */
+private fun FocusRequester.back() {
+    try {
+        requestFocus()
+    } catch (_: IllegalStateException) {
+        // le champ n'est pas à l'écran
     }
 }
 
@@ -407,7 +422,7 @@ private fun LinkDialog(selected: String, onDismiss: () -> Unit, onLink: (String)
 private fun ImagesSheet(graph: AppGraph, vm: DocEditViewModel, images: List<DocImage>, onDismiss: () -> Unit) {
     val shell = LocalShell.current
     val unreadable = stringResource(R.string.proj_doc_image_unreadable)
-    val pick = rememberImagePicker(vm.space.value?.limits?.imageBytes ?: 0, onPicked = vm::upload, onUnreadable = { shell.toast(unreadable) })
+    val pick = rememberImagePicker(vm.space.value?.limits, onPicked = vm::upload, onUnreadable = { shell.toast(unreadable) })
     // l'image téléversée est citée dans la page : la feuille se ferme
     var sent by remember { mutableStateOf(false) }
     LaunchedEffect(vm.uploading) {
@@ -458,7 +473,12 @@ private fun CurrentSheet(graph: AppGraph, vm: DocEditViewModel, now: Long, onDis
         ) {
             val p = vm.current
             if (p == null) {
-                Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                // elle ne s'est pas relue (elle n'existe plus, une panne) : les mots de l'erreur, pas une attente sans fin
+                if (vm.currentRefusal.isNotBlank()) {
+                    RefusalNote(vm.currentRefusal)
+                } else {
+                    Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                }
             } else {
                 Text(stringResource(R.string.proj_doc_current_title, p.version), style = MaterialTheme.typography.titleLarge)
                 Text(listOf(p.author, p.viaLabel, moment(p.at, now)).filter { it.isNotBlank() }.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -485,16 +505,19 @@ private fun CurrentSheet(graph: AppGraph, vm: DocEditViewModel, now: Long, onDis
 
 /**
  * Le sélecteur de photos du système (aucune permission). L'image choisie se prépare hors du fil de l'écran ; illisible
- * (un fournisseur muet), on le dit. [maxBytes] : ce que l'espace garde d'une image, dit par le serveur (0 : pas dit).
+ * (un fournisseur muet), on le dit. [limits] : ce que l'espace garde d'une image, dit par le serveur — son poids, ses
+ * sortes (`null` : pas lu).
  */
 @Composable
-internal fun rememberImagePicker(maxBytes: Long, onPicked: (DocUpload) -> Unit, onUnreadable: () -> Unit): () -> Unit {
+internal fun rememberImagePicker(limits: DocLimits?, onPicked: (DocUpload) -> Unit, onUnreadable: () -> Unit): () -> Unit {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val kept by rememberUpdatedState(limits ?: DocLimits())
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) {
             scope.launch {
-                val picked = withContext(Dispatchers.IO) { pickedImage(context.applicationContext, uri, maxBytes) }
+                val bounds = kept
+                val picked = withContext(Dispatchers.IO) { pickedImage(context.applicationContext, uri, bounds) }
                 if (picked == null) onUnreadable() else onPicked(picked)
             }
         }
@@ -503,14 +526,16 @@ internal fun rememberImagePicker(maxBytes: Long, onPicked: (DocUpload) -> Unit, 
 }
 
 /**
- * Une image choisie, prête à partir. Plus lourde que ce que l'espace garde, elle est réencodée en JPEG sous cette borne
- * (comme une photo jointe à la conversation : orientation appliquée, plus aucune métadonnée) ; si rien n'y tient, elle
+ * Une image choisie, prête à partir. Plus lourde que ce que l'espace garde, **ou d'une sorte qu'il ne garde pas** (une
+ * photo HEIC, AVIF, BMP : `limits.image_kinds`), elle est réencodée en JPEG sous sa borne (comme une photo jointe à la
+ * conversation : orientation appliquée, plus aucune métadonnée) ; si rien n'y tient, ou si elle ne se décode pas, elle
  * part telle quelle et le serveur dira non, avec ses mots.
  */
-private fun pickedImage(context: Context, uri: Uri, maxBytes: Long): DocUpload? {
+private fun pickedImage(context: Context, uri: Uri, limits: DocLimits): DocUpload? {
     val resolver = context.contentResolver
     val piece = resolver.outgoingPiece(uri) ?: return null
-    if (maxBytes <= 0 || piece.size <= maxBytes) return DocUpload(piece.name, piece.size, piece.body)
+    if (!imageReencoded(limits, piece.size, piece.mime)) return DocUpload(piece.name, piece.size, piece.body)
+    val maxBytes = if (limits.imageBytes > 0) limits.imageBytes else Long.MAX_VALUE
     val dir = File(context.cacheDir, "doc-images").apply { mkdirs() }
     dir.listFiles()?.forEach { it.delete() }
     val source = File(dir, "source")

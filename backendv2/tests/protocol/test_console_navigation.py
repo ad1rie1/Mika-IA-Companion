@@ -177,13 +177,13 @@ def test_a_menu_tab_leads_to_its_page_and_lights_up(world):  # noqa: F811
     ('courrier/brouillons', 'Relations & échanges', 'Courrier', 'Ses brouillons'),
     # « À valider » est une seule file (ADR 0177) : chacun de ses onglets allume son lien
     ('approbations/courriers', 'À valider', 'Courriers à envoyer', None),
-    ('approbations/noms', 'À valider', 'Noms à relier', None),
+    ('approbations/rapprochements', 'À valider', 'Rapprochements', None),
     ('courrier/reception', 'Relations & échanges', 'Courrier', 'Réception'),
     ('vie/rythme', 'Mika', 'Humeur et corps', 'Sommeil et rythme'),
     ('reglages/comportement-memory', 'Réglages', 'Paramètres avancés', None),
     ('fiche/person/user_1', 'Relations & échanges', 'Personnes', None),
     # une fiche ouverte depuis une liste allume cette liste, pas seulement la rubrique de la fiche
-    ('fiche/person/user_1?retour=/admin/approbations/noms', 'À valider', 'Noms à relier', None),
+    ('fiche/person/user_1?retour=/admin/approbations/rapprochements', 'À valider', 'Rapprochements', None),
     # Système en colonnes (ADR 0202) : la colonne s'allume, et la page dedans ; un événement allume son journal
     ('systeme/operations', 'Système', 'Journaux', 'Gestes audités'),
     ('evenement/1', 'Système', 'Journaux', None),
@@ -397,9 +397,9 @@ def test_every_trail_starts_from_its_menu_rubric(world):  # noqa: F811
     assert trails['/admin/fiche/serveur/web'][1:] == [("Ses outils", '/admin/outils/serveurs'), ("web", "")]
     assert back_of(client.get('/admin/action/projects.creer?retour=/admin/projets').text) is None
     # une fiche ouverte depuis une liste : son chemin à elle, et le retour à part
-    listed = client.get('/admin/fiche/person/user_1?retour=/admin/approbations/noms').text
+    listed = client.get('/admin/fiche/person/user_1?retour=/admin/approbations/rapprochements').text
     assert texts(trail_of(listed)) == ["Échanges", "Personnes"]
-    assert back_of(listed) == ("Retour à la liste", '/admin/approbations/noms')
+    assert back_of(listed) == ("Retour à la liste", '/admin/approbations/rapprochements')
 
 
 def pane(page, title):

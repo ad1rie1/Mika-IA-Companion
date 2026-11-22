@@ -47,19 +47,27 @@ data class Settings(
      */
     val shareWhere: Boolean = false,
     /**
-     * « Lui montrer mes messages » (ADR 0120) : les messages WhatsApp et SMS que le téléphone affiche partent à Mika.
-     * Coupé par défaut, et remis à zéro à la fin de la session, comme ses cases.
+     * « Lui montrer mes messages » (ADR 0120) : les messages WhatsApp, Messenger et SMS que le téléphone affiche
+     * partent à Mika. Coupé par défaut, et remis à zéro à la fin de la session, comme ses cases.
      */
     val phoneShare: Boolean = false,
     /** WhatsApp (et WhatsApp Business) : cochée par défaut une fois l'interrupteur allumé. */
     val phoneWhatsApp: Boolean = true,
+    /** Messenger (ADR 0299) : cochée par défaut une fois l'interrupteur allumé. */
+    val phoneMessenger: Boolean = true,
     /** Messages (Google, Samsung) : cochée par défaut une fois l'interrupteur allumé. */
     val phoneMessages: Boolean = true,
     /** « Les groupes aussi » : coupé par défaut (bavards). */
     val phoneGroups: Boolean = false,
 ) {
     /** Ce que le lecteur de notifications a le droit de lire. */
-    val phone: PhoneGate get() = PhoneGate(phoneShare, phoneWhatsApp, phoneMessages, phoneGroups)
+    val phone: PhoneGate get() = PhoneGate(
+        enabled = phoneShare,
+        whatsapp = phoneWhatsApp,
+        messenger = phoneMessenger,
+        messages = phoneMessages,
+        groups = phoneGroups,
+    )
 }
 
 class SettingsStore(private val store: DataStore<Preferences>) {
@@ -78,6 +86,7 @@ class SettingsStore(private val store: DataStore<Preferences>) {
             shareWhere = p[SHARE_WHERE] ?: false,
             phoneShare = p[PHONE_SHARE] ?: false,
             phoneWhatsApp = p[PHONE_WHATSAPP] ?: true,
+            phoneMessenger = p[PHONE_MESSENGER] ?: true,
             phoneMessages = p[PHONE_MESSAGES] ?: true,
             phoneGroups = p[PHONE_GROUPS] ?: false,
         )
@@ -100,6 +109,7 @@ class SettingsStore(private val store: DataStore<Preferences>) {
         it.remove(SHARE_WHERE)
         it.remove(PHONE_SHARE)
         it.remove(PHONE_WHATSAPP)
+        it.remove(PHONE_MESSENGER)
         it.remove(PHONE_MESSAGES)
         it.remove(PHONE_GROUPS)
     }
@@ -131,6 +141,7 @@ class SettingsStore(private val store: DataStore<Preferences>) {
     suspend fun setShareWhere(on: Boolean) = store.edit { it[SHARE_WHERE] = on }
     suspend fun setPhoneShare(on: Boolean) = store.edit { it[PHONE_SHARE] = on }
     suspend fun setPhoneWhatsApp(on: Boolean) = store.edit { it[PHONE_WHATSAPP] = on }
+    suspend fun setPhoneMessenger(on: Boolean) = store.edit { it[PHONE_MESSENGER] = on }
     suspend fun setPhoneMessages(on: Boolean) = store.edit { it[PHONE_MESSAGES] = on }
     suspend fun setPhoneGroups(on: Boolean) = store.edit { it[PHONE_GROUPS] = on }
 
@@ -156,6 +167,7 @@ class SettingsStore(private val store: DataStore<Preferences>) {
         val SHARE_WHERE = booleanPreferencesKey("share_where")
         val PHONE_SHARE = booleanPreferencesKey("phone_share")
         val PHONE_WHATSAPP = booleanPreferencesKey("phone_whatsapp")
+        val PHONE_MESSENGER = booleanPreferencesKey("phone_messenger")
         val PHONE_MESSAGES = booleanPreferencesKey("phone_messages")
         val PHONE_GROUPS = booleanPreferencesKey("phone_groups")
     }

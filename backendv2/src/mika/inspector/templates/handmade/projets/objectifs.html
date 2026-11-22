@@ -1,0 +1,110 @@
+{# Activité › Projets › un projet › Objectifs, en liste (app/handmade/subjects/project_goals.py::goals, ADR 0297) :
+   l'onglet Objectifs de l'écran Projets, sur les jetons de la console. Trois zones sur toute la largeur.
+   - La liste : la bascule Liste | Diagramme, « Ajouter un objectif », le filtre en pastilles (ouverts, faits, retirés,
+     tous), puis une ligne serrée par objectif (36 px : un point à la couleur de son état, son texte, ses jalons en une
+     barre, « 1/4 », son dernier passage ; une mission dit sa cadence), par groupes ; son plan en bas, quand il
+     n'attend rien.
+   - Le contenu : l'objectif choisi — son en-tête (« Lancer maintenant », « Modifier »), puis ses volets en
+     sous-onglets (``[data-subtabs]``) : ses jalons, ses comptes rendus ; « Modifier », « Ajouter un jalon » et
+     « Modifier le jalon » ouvrent leur formulaire dans le contenu. Ou le formulaire « Ajouter un objectif », ou son
+     plan.
+   - Le panneau : ce qui le dit fini, où il en est, sa branche et sa pull request avec leur statut, ses tickets, ce
+     qui se gère.
+   Sur un téléphone : la liste, puis le détail (``lire``) avec un retour. Aucun style ni script en ligne. #}
+{% from "handmade/projets/_morceaux.html" import ico, st, seg, tile %}
+{% from "handmade/projets/_zones.html" import pform, pone, ppop, outside, goal_side, jalon %}
+{% macro reports(items, nothing) -%}
+{% if items %}
+<ol class="pj-tl col" role="list">
+  {% for r in items %}<li class="{{ r.tone }}"><span class="pj-tl-top"><time title="{{ r.when }}">{{ r.ago }}</time>{{ st(r.tone, r.verdict) }}{% if r.commit %}<code>{{ r.commit }}</code>{% endif %}</span><p>{% if r.href %}<a href="{{ r.href }}">{{ r.text }}</a>{% else %}{{ r.text }}{% endif %}</p></li>{% endfor %}
+</ol>
+{% else %}<p class="pj-none">{{ nothing }}</p>{% endif %}
+{%- endmacro %}
+<div class="pj-split pj-obj{{ ' lire' if lire }}" data-tab="project/objectifs">
+  <aside class="pj-list" aria-label="Ses objectifs">
+    <div class="pj-tools">
+      <nav class="seg pj-mode" aria-label="La vue des objectifs"><a href="{{ links.liste }}" aria-current="true">{{ ico('list', 'xs') }}Liste</a><a href="{{ links.diagramme }}">{{ ico('sort', 'xs') }}Diagramme</a></nav>
+      {% if can_add %}<a class="btn pj-add-btn" href="{{ links.ajouter }}"{% if adding %} aria-current="page"{% endif %}>{{ ico('plus', 'xs') }}<span>Ajouter un objectif</span></a>{% endif %}
+    </div>
+    <nav class="pj-filters" aria-label="Lesquels">{% for f in filters %}<a href="{{ f.href }}"{% if f.on %} aria-current="true"{% endif %}>{{ f.text }}<span class="pj-cnt">{{ f.count }}</span></a>{% endfor %}</nav>
+    <div class="pj-olist">
+      {% for g in groups %}
+      <div class="pj-group">{{ g.title }}<span>{{ g.rows|length }}</span></div>
+      {% for r in g.rows %}
+      <a class="pj-orow{{ ' mission' if r.mission }}{{ ' atoi' if r.awaits }}" href="{{ r.href }}"{% if r.on %} aria-current="true"{% endif %} title="{{ r.text }} — {{ r.state }}">
+        <i class="{{ r.tone }}"></i><span class="pj-orow-t">{{ r.text }}</span>
+        {% if r.mission %}<span class="pj-orow-c">{{ r.cadence }}</span>{% elif r.count %}{{ seg(r.marks) }}<span class="num">{{ r.count }}</span>{% else %}<span class="pj-orow-c">sans jalon</span>{% endif %}
+        <time>{{ r.age }}</time>
+      </a>
+      {% endfor %}
+      {% else %}
+      <p class="pj-none pad">{{ "Aucun objectif ici : change de filtre." if total else "Pas encore d'objectif." }}</p>
+      {% endfor %}
+      {% if plan and not plan.waits %}
+      <div class="pj-group">Son plan</div>
+      <a class="pj-orow plan" href="{{ plan.href }}"{% if planning %} aria-current="true"{% endif %}><i class="{{ plan.tone }}"></i><span class="pj-orow-t">La demande et son plan</span><span class="pj-orow-c">{{ plan.state }}{% if plan.version %} · v{{ plan.version }}{% endif %}</span></a>
+      {% endif %}
+    </div>
+  </aside>
+  <div class="pj-detail">
+    <a class="pj-back" href="{{ home }}">{{ ico('back', 'xs') }}Objectifs</a>
+    {% if adding %}
+    <div class="pj-c">{{ pform(adding, "Ajouter un objectif", "Un objectif ponctuel a une fin : des jalons, puis « terminé ». Une mission (un constant) revient : à une cadence, ou quand quelque chose bouge.", home, "Ajouter", "plus") }}</div>
+    {% elif planning %}
+    <header class="pj-dh">{{ tile('list', planning.tone) }}<div class="pj-dh-main"><span class="pj-over">Le plan du projet</span><h2>La demande et son plan</h2>
+      <p class="pj-meta">{{ st(planning.tone, planning.state) }}{% if planning.version %}<span>version {{ planning.version }}</span>{% endif %}</p></div></header>
+    <div class="pj-c">
+      {% if planning.waits %}<p class="pj-banner you">{{ ico('info') }}<span>Son plan attend une réponse : il se lit et se tranche sur la Vue d'ensemble.</span><a class="btn quiet small" href="{{ planning.overview }}">Y aller</a></p>{% endif %}
+      {% for t in planning.texts %}<section class="pj-text"><h3>{{ t.title }}</h3><p class="pj-prose">{{ t.text }}</p></section>{% else %}<p class="pj-none">Ce projet n'a pas encore de plan : ses objectifs ont été posés un à un.</p>{% endfor %}
+      {% if planning.revise %}<div class="pj-plan-ask">{{ pform(planning.revise, planning.button, "Elle le réécrit à sa prochaine séance de cadrage, et te le propose.", "", planning.button, "pen") }}</div>{% endif %}
+    </div>
+    {% elif detail %}
+    {% set d = detail %}
+    <header class="pj-dh">{{ tile(d.icon, d.side.tone) }}
+      <div class="pj-dh-main"><span class="pj-over">{{ d.over }}</span><h2>{{ d.title }}</h2>
+        <p class="pj-meta">{{ st(d.side.tone, d.side.state) }}{% for f in d.facts %}<span>{{ f }}</span>{% endfor %}</p></div>
+      <div class="pj-dh-side">{% if d.launch %}{{ pone(d.launch, 'Lancer maintenant', 'play') }}{% endif %}{% if d.edit %}<a class="btn quiet" href="#obj-modifier">{{ ico('pen', 'xs') }}Modifier</a>{% endif %}</div>
+    </header>
+    <div class="pj-dz">
+      <input type="checkbox" id="pj-infos" class="sr pj-infos-box" data-volet>
+      <div class="pj-main" data-subtabs>
+        <div class="pj-volets"><nav class="hm-subnav" aria-label="Ce qu'on en lit">
+          {% if d.sort == 'goal' %}<a href="#obj-jalons">Jalons<span class="pj-cnt">{{ d.reached }}/{{ d.total }}</span></a><a href="#obj-rendus">Comptes rendus{% if d.reports %}<span class="pj-cnt">{{ d.reports|length }}</span>{% endif %}</a>
+          {% else %}<a href="#obj-passages">Derniers passages{% if d.reports %}<span class="pj-cnt">{{ d.reports|length }}</span>{% endif %}</a>{% endif %}
+        </nav><label for="pj-infos" class="pj-v-infos">Infos</label></div>
+        <div class="hm-subpanes pj-vbody">
+          {% if d.sort == 'goal' %}
+          <section id="obj-jalons" class="pj-c" data-pane>
+            {% if d.need %}<div class="pj-need"><b>Elle a besoin de quelque chose</b><p class="pj-prose">{{ d.need }}</p></div>{% endif %}
+            {% if d.milestones %}<ol class="pj-jalons" role="list">{% for m in d.milestones %}{{ jalon(m) }}{% endfor %}</ol>
+            {% else %}<p class="pj-none">Pas de jalon : elle dira elle-même quand c'est fini.</p>{% endif %}
+            {% if d.add %}<a class="pj-add" href="#obj-jalon">{{ ico('plus', 'xs') }}Ajouter un jalon</a>{% endif %}
+            {% if d.dropped %}<details class="pj-fold"><summary>{{ d.dropped|length }} jalon{{ 's' if d.dropped|length > 1 }} retiré{{ 's' if d.dropped|length > 1 }}</summary><ol class="pj-jalons retires" role="list">{% for m in d.dropped %}{{ jalon(m) }}{% endfor %}</ol></details>{% endif %}
+            {% for o in d.outside %}{{ outside(o.from, o.text, True) }}{% endfor %}
+          </section>
+          <section id="obj-rendus" class="pj-c" data-pane>
+            {{ reports(d.reports, d.side.result or "Elle n'y a pas encore travaillé.") }}
+            {% if d.review %}<h3 class="pj-h3">Sa relecture</h3>
+            <p class="pj-lede">{{ st('done' if d.review.ok else 'fail', d.review.label) }} <span class="muted">{{ d.review.when }}{% if d.review.refused %} · {{ d.review.refused }} refus de suite{% endif %}</span></p>
+            {% if d.review.text %}<p class="pj-prose">{{ d.review.text }}</p>{% endif %}
+            {% if d.review.last_refusal and d.review.last_refusal != d.review.text %}<details class="pj-fold"><summary>Son dernier refus</summary><p class="pj-prose">{{ d.review.last_refusal }}</p></details>{% endif %}{% endif %}
+          </section>
+          {% if d.add %}<section id="obj-jalon" class="pj-c" data-pane>{{ pform(d.add, "Ajouter un jalon", d.over ~ " · " ~ d.title, "#obj-jalons", "Ajouter", "plus") }}</section>{% endif %}
+          {% if d.editing and d.editing.form %}<section id="obj-jalon-modifier" class="pj-c" data-pane>{{ pform(d.editing.form, "Modifier le jalon n° " ~ d.editing.n, d.over ~ " · " ~ d.title, "#obj-jalons", "Enregistrer") }}</section>{% endif %}
+          {% else %}
+          <section id="obj-passages" class="pj-c" data-pane>
+            {% if d.need %}<div class="pj-need"><b>Elle a besoin de quelque chose</b><p class="pj-prose">{{ d.need }}</p></div>{% endif %}
+            <p class="pj-when"><b>À chaque passage</b>{{ d.each_pass or "Rien de précisé." }}</p>
+            {{ reports(d.reports, "Elle n'est pas encore passée.") }}
+          </section>
+          {% endif %}
+          {% if d.edit %}<section id="obj-modifier" class="pj-c" data-pane>{{ pform(d.edit, "Modifier la mission" if d.sort == 'mission' else "Modifier l'objectif", "Elle lira ce changement avant son prochain passage.", "#obj-passages" if d.sort == 'mission' else "#obj-jalons", "Enregistrer") }}</section>{% endif %}
+        </div>
+      </div>
+      <aside class="pj-side" aria-label="Infos">{{ goal_side(d.side) }}</aside>
+    </div>
+    {% else %}
+    <div class="pj-empty">{{ tile('target') }}<b>Pas encore d'objectif</b><p>Un objectif a une fin ; une mission revient. Ajoute le premier, ou laisse-la les proposer dans son plan.</p>{% if can_add %}<a class="btn" href="{{ links.ajouter }}">{{ ico('plus', 'xs') }}Ajouter un objectif</a>{% endif %}</div>
+    {% endif %}
+  </div>
+</div>

@@ -52,7 +52,9 @@ import fr.qwartz.mika.data.moi.projects.Listing
 import fr.qwartz.mika.data.moi.projects.Sheet
 import fr.qwartz.mika.data.moi.projects.SheetTabs
 import fr.qwartz.mika.data.moi.projects.StateTone
+import fr.qwartz.mika.data.moi.projects.addActor
 import fr.qwartz.mika.data.moi.projects.followLists
+import fr.qwartz.mika.data.moi.projects.keyed
 import fr.qwartz.mika.data.moi.projects.listGroups
 import fr.qwartz.mika.data.moi.projects.listStatusTone
 import fr.qwartz.mika.data.moi.projects.moment
@@ -84,6 +86,8 @@ internal fun ListsTab(graph: AppGraph, vm: ProjectViewModel, sheet: Sheet, now: 
     val model = rememberListsModel(graph, vm.id)
     Toasts(model.gestures)
     OnResume(model) { model.resume() }
+    // quitté avant la réponse d'un ajout, l'onglet n'ouvre rien à son retour
+    OnLeave(model) { model.leave() }
     LaunchedEffect(model, list?.name) { list?.let { model.show(it.name) } }
     LaunchedEffect(model.revision) { if (model.revision > 0) vm.reload() }
     LaunchedEffect(vm.refreshing) { if (vm.refreshing) model.resume() }
@@ -99,6 +103,11 @@ internal fun ListsTab(graph: AppGraph, vm: ProjectViewModel, sheet: Sheet, now: 
         return
     }
     var adding by rememberSaveable { mutableStateOf(false) }
+    val where = ListsViewModel.where(list.name)
+    // la liste s'ouvre : ce qu'on y avait dit avant de la quitter ne vaut plus
+    FreshEntry(model.gestures, where)
+    // ce qu'on montre se relit (un retour sur l'écran, un geste abouti ou refusé) : d'ici là, rien ne s'y décide
+    val stale = list.name in model.stale
     Column(Modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             ChipRow(
@@ -116,18 +125,22 @@ internal fun ListsTab(graph: AppGraph, vm: ProjectViewModel, sheet: Sheet, now: 
             item(key = "head") {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(stringResource(R.string.proj_list_living, list.living, list.total), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    RefusalNote(model.gestures.refusalAt(ListsViewModel.where(list.name)))
+                    RefusalNote(model.gestures.refusalAt(where))
+                    StaleNote(model.staleErrors[list.name], { model.load(list.name) })
                     if (!list.can.add && list.can.why.isNotBlank()) Hint(list.can.why, R.drawable.ic_m_lock)
                 }
             }
-            for (g in listGroups(list, page.items)) {
-                item(key = "s${g.status.code}") { StatusLabel(list, g.status, g.count) }
+            // une clé par élément, unique dans toute la liste : deux éléments voilés n'ont ni clé ni nom
+            val rows = keyed(page.items) { "e${it.key}:${it.handle}" }
+            listGroups(list, page.items).forEachIndexed { n, g ->
+                item(key = "s$n") { StatusLabel(list, g.status, g.count) }
                 if (g.items.isEmpty()) {
-                    item(key = "n${g.status.code}") { Text(stringResource(R.string.proj_list_nothing), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
+                    item(key = "n$n") { Text(stringResource(R.string.proj_list_nothing), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
                 }
-                items(g.items, key = { "e${it.key}:${it.handle}" }) { e ->
+                items(rows.filter { it.value.status == g.status.code }, key = { it.key }) { row ->
+                    val e = row.value
                     ItemCard(
-                        e, list, sheet.rights.status, now, model.gestures.busy.isNotEmpty(),
+                        e, list, sheet.rights.status, now, model.gestures.busy.isNotEmpty() || stale,
                         onOpen = { shell.navigate(Route.ProjectPage(vm.id, SheetPages.ITEM, e.key, list.name)) },
                         onStatus = { model.setStatus(e, it) },
                         onAssign = { model.assign(e, it) },
@@ -219,9 +232,9 @@ private fun AddItemSheet(model: ListsViewModel, list: Listing, onDismiss: () -> 
     var title by rememberSaveable { mutableStateOf("") }
     var text by rememberSaveable { mutableStateOf("") }
     var status by rememberSaveable { mutableStateOf(statuses.firstOrNull()?.code.orEmpty()) }
-    var actor by rememberSaveable { mutableStateOf(list.actor) }
+    // à qui il est : un de ceux que la liste sert, sinon rien n'est choisi et la liste lui donne le sien
+    var actor by rememberSaveable { mutableStateOf(addActor(list, list.actor)) }
     val where = ListsViewModel.ADD
-    LaunchedEffect(Unit) { model.gestures.forget(where) }
     DoneCloses(model.gestures, where, onDismiss)
     val errors = model.gestures.fieldsAt(where)
     FormSheet(
@@ -231,7 +244,7 @@ private fun AddItemSheet(model: ListsViewModel, list: Listing, onDismiss: () -> 
         busy = model.gestures.busy == where,
         error = model.gestures.refusalAt(where),
         onDismiss = onDismiss,
-        onSubmit = { model.add(list.name, title, text, status, actor) },
+        onSubmit = { model.add(list.name, title, text, status, addActor(list, actor)) },
         enabled = title.isNotBlank(),
     ) {
         FormText(stringResource(R.string.proj_list_add_name), title, { title = it }, error = errors["title"])
@@ -251,6 +264,8 @@ internal fun ItemScreen(graph: AppGraph, route: Route.ProjectPage) {
     val vm: ItemViewModel = viewModel(key = "item|$session|${route.id}|${route.ref}|${route.key}") { ItemViewModel(ProjectsDeps(graph), route.id, route.ref, route.key) }
     val now = rememberNow(wallMs = graph.clock::wallMs)
     Toasts(vm.gestures)
+    // l'élément s'ouvre : ce qu'on y avait dit avant de le quitter ne vaut plus
+    FreshEntry(vm.gestures, ItemViewModel.HERE)
     OnResume(vm) {
         project.resume()
         vm.resume()
@@ -261,14 +276,16 @@ internal fun ItemScreen(graph: AppGraph, route: Route.ProjectPage) {
             project.reload()
         }
     }
-    var pane by rememberSaveable { mutableStateOf(PANE_THREAD) }
+    // par route : un autre élément s'ouvre sur son premier volet
+    var pane by rememberSaveable(route.id, route.ref, route.key) { mutableStateOf(PANE_THREAD) }
     val list = project.sheet.valueOrNull?.lists?.firstOrNull { it.name == route.ref }
-    val busy = vm.gestures.busy.isNotEmpty()
+    // il se relit (un retour sur l'écran, un geste abouti ou refusé) : d'ici là, rien ne s'y décide
+    val busy = vm.gestures.busy.isNotEmpty() || vm.stale
     DetailPage(
         title = list?.title ?: tabLabel(SheetTabs.LISTS),
         projectTitle = project.sheet.valueOrNull?.project?.title,
-        load = vm.element.load,
-        onRetry = vm.element::retry,
+        load = vm.element,
+        onRetry = vm::retry,
         panes = { x -> listOf(Pane(PANE_THREAD, stringResource(R.string.proj_pane_thread), x.more.thread.size.takeIf { it > 0 }?.toString().orEmpty()), Pane(PANE_INFOS, stringResource(R.string.proj_pane_infos))) },
         pane = pane,
         onPane = { pane = it },
@@ -282,7 +299,15 @@ internal fun ItemScreen(graph: AppGraph, route: Route.ProjectPage) {
             })
         },
         bottomBar = { x -> if (pane == PANE_THREAD && x.more.can.note && x.line.veiled.isEmpty()) ItemNoteBar(vm, busy) },
-        notice = { RefusalNote(vm.gestures.refusalAt(ItemViewModel.HERE), Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) },
+        notice = {
+            val refusal = vm.gestures.refusalAt(ItemViewModel.HERE)
+            if (refusal.isNotBlank() || vm.staleError != null) {
+                Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    RefusalNote(refusal)
+                    StaleNote(vm.staleError, vm::reread)
+                }
+            }
+        },
     ) { x ->
         when {
             x.line.veiled.isNotEmpty() -> item(key = "veiled") { EmptyNote(R.drawable.ic_m_lock, stringResource(R.string.proj_list_veiled), x.line.veiledLabel) }

@@ -303,12 +303,16 @@ class Tab(Drawn):
     après), un triplet (HTML, blocs, actions de la page pour la barre de titre), ou ``None`` (ses blocs, tels
     quels). ``styles`` : les feuilles de ses gabarits (sous ``static/``), en plus de ``handmade/base.css`` ;
     ``panel`` faux : il dit lui-même ce que disait le panneau de l'onglet ; ``last`` : son HTML vient après les
-    blocs et le panneau que la console garde."""
+    blocs et le panneau que la console garde ; ``params`` : ses filtres à lui, à la place de ceux de la vue
+    (``Drawn.params``) ; ``description`` : ce qu'il dit sous son titre (``Drawn.description``)."""
 
-    def __init__(self, draw: Callable[[Got], Any], *styles: str, panel: bool = True, last: bool = False) -> None:
+    def __init__(self, draw: Callable[[Got], Any], *styles: str, panel: bool = True, last: bool = False,
+                 params: Sequence[Any] = (), description: str = "") -> None:
         self.draw = draw
         self.styles = styles
         self.panel, self.last = panel, last
+        self.params = tuple(params)
+        self.description = description
 
     def render(self, ui: UI, items: Sequence[Any], query: Mapping[str, str],
                forms: Mapping[str, Any] | None = None) -> Any:

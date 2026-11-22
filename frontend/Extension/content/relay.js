@@ -77,6 +77,17 @@
     return out;
   }
 
+  /** Un profil de personne (ADR 0298) : un identifiant de Teams reconnu, des champs bornés, un e-mail bien formé. */
+  const PROFILE_ID = /^(8:orgid:[0-9a-f-]{36}|8:live:[a-z0-9._-]{1,80}|8:teamsvisitor:[0-9a-f-]{32,36})$/;
+  const PROFILE_EMAIL = /^[^\s@<>"',;]{1,64}@[a-z0-9.-]{1,253}\.[a-z]{2,}$/;
+  function profile(p) {
+    if (!p || typeof p !== "object" || !PROFILE_ID.test(String(p.id || ""))) return null;
+    const email = str(p.email, 254);
+    return { id: p.id, name: str(p.name, 120), email: PROFILE_EMAIL.test(email) ? email : "", title: str(p.title, 120),
+      company: str(p.company, 120), department: str(p.department, 120), tenant: str(p.tenant, 120),
+      phones: list(p.phones, 3, function (n) { return str(n, 40) || null; }) };
+  }
+
   /** Un curseur de synchro (ADR 0251) : une conversation, le plus tard livré qu'on y ait lu (ms), la fiche vue. */
   function cursor(c) {
     if (!c || typeof c !== "object" || !str(c.conv, 300)) return null;
@@ -101,7 +112,8 @@
     cursors: function () { return {}; },
     historyChunk: function (p) {
       return { run: str(p.run, 40), messages: list(p.messages, MAX_ITEMS, message),
-        conversations: list(p.conversations, MAX_ITEMS, conversation), self: str(p.self, 64) };
+        conversations: list(p.conversations, MAX_ITEMS, conversation), self: str(p.self, 64),
+        profiles: list(p.profiles, MAX_ITEMS, profile) };
     },
     image: function (p) {
       // une image d'un message (ADR 0258) : rien ne passe qui n'en ait la forme
@@ -183,7 +195,8 @@
       const conversations = (Array.isArray(data.conversations) ? data.conversations.slice(0, MAX_ITEMS) : [])
         .map(conversation).filter(Boolean);
       const cursors = list(data.cursors, MAX_ITEMS, cursor);
-      if (messages.length || conversations.length || cursors.length) {
+      const profiles = list(data.profiles, MAX_ITEMS, profile);
+      if (messages.length || conversations.length || cursors.length || profiles.length) {
         relayed.batches++;
         relayed.messages += messages.length;
         const self = str(data.self, 64);
@@ -192,7 +205,7 @@
         capturedChain = capturedChain.then(function () {
           const withCursors = lostSinceCursors ? [] : cursors;
           return send({ kind: "captured", messages: messages, conversations: conversations, self: self,
-            cursors: withCursors }).then(function (answer) {
+            cursors: withCursors, profiles: profiles }).then(function (answer) {
             if (answer && answer.ok === true) {
               relayed.accepted += messages.length;
               if (lostSinceCursors && cursors.length) {

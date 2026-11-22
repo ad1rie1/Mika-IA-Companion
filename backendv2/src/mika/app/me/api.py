@@ -29,7 +29,7 @@ from mika.contracts import identity as identity_c
 from mika.kernel.forms import RENDERED, errors_fr
 from mika.ports.mail import PIECES_MAX, PIECES_TOTAL_MAX, File
 from mika.runtime.bootstrap import Kernel
-from mika.runtime.operations import FIXED_FIELD, SPACE, Outcome, perform
+from mika.runtime.operations import FIXED_FIELD, SPACE, Outcome, perform, sent
 
 #: où vit l'API
 PREFIX = "/api/moi"
@@ -240,11 +240,21 @@ class Call:
         cleaned = "".join(ch for ch in str(given) if ch.isalnum() or ch in "-_.")[:80]
         return f"moi:{self.me.handle}:{cleaned}" if cleaned else ""
 
-    async def act(self, key: str, values: dict[str, list[str]], *, subject: str = "") -> Outcome:
+    async def act(self, key: str, values: dict[str, list[str]], *, subject: str = "", part: str = "") -> Outcome:
         """Une action déclarée par une faculté, au nom de qui est connecté (``by`` : son adresse), auditée comme faite
-        depuis son espace (``moi.<action>``)."""
-        return await perform(self.kernel, key, values, by=self.me.handle, subject=subject, nonce=self.nonce(),
-                             via=SPACE, files=self.files)
+        depuis son espace (``moi.<action>``). ``part`` : quand un même envoi mène plusieurs actions (une section de
+        réglages que deux actions se partagent), chacune a sa clé, tirée de celle de l'envoi — sans quoi la seconde
+        se verrait répondre « déjà envoyé » et ne ferait rien ; une redite de l'envoi les retrouve toutes."""
+        nonce = self.nonce()
+        return await perform(self.kernel, key, values, by=self.me.handle, subject=subject,
+                             nonce=f"{nonce}:{part}" if nonce and part else nonce, via=SPACE, files=self.files)
+
+    def repeated(self, part: str = "") -> bool:
+        """Cet envoi redit-il un envoi déjà fait (la même clé d'envoi, qu'une action a consommée) ? Une route qui
+        juge avant d'agir (une page écrite depuis la version lue) ne rejuge pas la redite : après une coupure, le
+        premier envoi est peut-être arrivé, et sa propre version le ferait passer pour périmé."""
+        nonce = self.nonce()
+        return sent(self.kernel, f"{nonce}:{part}" if nonce and part else nonce)
 
     async def once(self, make: Callable[[], Awaitable[dict[str, Any]]]) -> dict[str, Any]:
         """Une création qui ne passe pas par une action (une boîte, un compte Teams, un service) : redite avec la même

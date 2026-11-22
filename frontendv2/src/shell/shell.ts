@@ -70,8 +70,9 @@ export interface ScreenDef {
   count?: () => number | "";
 }
 
-/** L'ordre de la barre du bas d'un téléphone (la maquette : huit entrées, Projets juste après le chat). */
-export const TABBAR_ORDER = ["chat", "projets", "mail", "teams", "telephone", "carte", "outils", "parametres"];
+/** L'ordre de la barre du bas d'un téléphone (la maquette : neuf entrées, Projets juste après le chat, Contacts entre
+ *  Téléphone et Carte — ADR 0298). */
+export const TABBAR_ORDER = ["chat", "projets", "mail", "teams", "telephone", "contacts", "carte", "outils", "parametres"];
 
 function cornerMarkup(): string {
   return `<span class="mika-corner" id="mika-corner" data-size="mini">

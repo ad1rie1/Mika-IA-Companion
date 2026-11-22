@@ -8,6 +8,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import fr.qwartz.mika.data.moi.MoiApi
+import fr.qwartz.mika.data.moi.MoiError
 import fr.qwartz.mika.data.moi.SendKey
 import fr.qwartz.mika.data.moi.projects.ActivityDays
 import fr.qwartz.mika.data.moi.projects.ActivityPage
@@ -26,10 +27,12 @@ import fr.qwartz.mika.data.moi.projects.Edit
 import fr.qwartz.mika.data.moi.projects.Entry
 import fr.qwartz.mika.data.moi.projects.EntryDetail
 import fr.qwartz.mika.data.moi.projects.EntryPage
+import fr.qwartz.mika.data.moi.projects.GestureDone
 import fr.qwartz.mika.data.moi.projects.Happening
 import fr.qwartz.mika.data.moi.projects.MdEdit
 import fr.qwartz.mika.data.moi.projects.NotebookNote
 import fr.qwartz.mika.data.moi.projects.NotebookPage
+import fr.qwartz.mika.data.moi.projects.PageSaved
 import fr.qwartz.mika.data.moi.projects.ProjectSettings
 import fr.qwartz.mika.data.moi.projects.Run
 import fr.qwartz.mika.data.moi.projects.RunPage
@@ -42,8 +45,11 @@ import fr.qwartz.mika.data.moi.projects.docRestoreRequest
 import fr.qwartz.mika.data.moi.projects.itemAddRequest
 import fr.qwartz.mika.data.moi.projects.itemAssignRequest
 import fr.qwartz.mika.data.moi.projects.itemStatusRequest
+import fr.qwartz.mika.data.moi.projects.newPageSave
 import fr.qwartz.mika.data.moi.projects.noteRequest
+import fr.qwartz.mika.data.moi.projects.olderKept
 import fr.qwartz.mika.data.moi.projects.refusalWords
+import fr.qwartz.mika.data.moi.projects.sameHappening
 import fr.qwartz.mika.data.moi.projects.saveOf
 import fr.qwartz.mika.data.moi.projects.settingsChanged
 import fr.qwartz.mika.data.moi.projects.settingsRequest
@@ -53,6 +59,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonElement
+import fr.qwartz.mika.data.moi.projects.headingsOf
 
 /*
  * Les modèles des onglets Documentation, Activité et Listes, et de « Modifier le projet » (ADR 0296) : ce que chaque vue
@@ -86,17 +93,48 @@ class DocsViewModel(private val deps: ProjectsDeps, val id: Int) : ViewModel() {
     var uploading by mutableStateOf(false)
         private set
 
+    /** La page qui vient d'être créée : son chemin (elle s'ouvre en écriture, une fois, puis [createdSeen]). */
+    var created by mutableStateOf("")
+        private set
+
     private var searchJob: Job? = null
     private val uploadKey = SendKey()
+    /** L'onglet est à l'écran : quitté, un geste qui aboutit plus tard n'y ouvre plus rien. */
+    private var watched = true
 
     /** Le volet montré s'ouvre : ce qu'il lit se lit une fois, puis à chaque retour. */
     fun show(sub: String) {
+        watched = true
         if (sub == DocTabs.DECISIONS) decisions.open() else space.open()
     }
 
     fun resume() {
+        watched = true
         space.again()
         decisions.again()
+    }
+
+    /** L'onglet quitté pour de bon (pas une rotation) : ce qui devait s'y ouvrir ne s'ouvrira pas à son retour. */
+    fun leave() {
+        watched = false
+        created = ""
+    }
+
+    /**
+     * « Nouvelle page », validée : **la page se crée tout de suite** (son titre pour premier texte, comme le client
+     * web), et le serveur juge son chemin — trop long, trop profond, déjà pris — avant qu'on ait écrit quoi que ce
+     * soit : son refus se dit dans la feuille ([NEW]). Créée, elle s'ouvre en écriture ([created]).
+     */
+    fun create(path: String, title: String): Boolean {
+        val sending = newPageSave(path, title)
+        return gestures.run(NEW, sending, { key -> deps.api.saveDoc(id, sending, key).done() }, failed = { space.read() }) {
+            space.read()
+            if (watched) created = path
+        }
+    }
+
+    fun createdSeen() {
+        created = ""
     }
 
     /** Après un geste (ici ou sur une page) : ce qui était lu se relit. */
@@ -153,7 +191,15 @@ class DocsViewModel(private val deps: ProjectsDeps, val id: Int) : ViewModel() {
     companion object {
         /** Les gestes sur les images, dits en tête de leur volet. */
         const val IMAGES = "doc-images"
+        /** « Nouvelle page » : son refus se dit dans sa feuille. */
+        const val NEW = "doc-new"
     }
+}
+
+/** Un enregistrement vu comme un geste : fait, avec les mots du serveur ; refusé, tel quel. */
+private fun MoiApi.Result<PageSaved>.done(): MoiApi.Result<GestureDone> = when (this) {
+    is MoiApi.Result.Ok -> MoiApi.Result.Ok(GestureDone(ok = true, message = value.message))
+    is MoiApi.Result.Failed -> this
 }
 
 /**
@@ -163,7 +209,24 @@ class DocsViewModel(private val deps: ProjectsDeps, val id: Int) : ViewModel() {
  */
 class DocPageViewModel(private val deps: ProjectsDeps, val project: Int, val path: String) : ViewModel() {
     val gestures = GestureRunner(deps, viewModelScope)
-    val page: Kept<DocPage> = Kept(viewModelScope, deps.now, gestures::say) { deps.api.docPage(project, path) }
+
+    /** La page découpée pour l'écran ([docPieces]) et son sommaire : calculés hors du fil principal, avant qu'elle soit montrée. */
+    var body by mutableStateOf<List<DocPiece>>(emptyList())
+        private set
+    var outline by mutableStateOf<List<Pair<Int, String>>>(emptyList())
+        private set
+    /** La version gardée qu'on regarde, découpée de même. */
+    var versionBody by mutableStateOf<List<DocPiece>>(emptyList())
+        private set
+
+    val page: Kept<DocPage> = Kept(viewModelScope, deps.now, gestures::say) {
+        val got = deps.api.docPage(project, path)
+        got.weighed(deps.compute) { docPieces(it.text) to headingsOf(it.text) }?.let { (pieces, titles) ->
+            body = pieces
+            outline = titles
+        }
+        got
+    }
     val history: Kept<DocHistory> = Kept(viewModelScope, deps.now, gestures::say) { deps.api.docHistory(project, path) }
 
     /** La version gardée qu'on regarde ; `null` : la page elle-même. */
@@ -176,28 +239,55 @@ class DocPageViewModel(private val deps: ProjectsDeps, val project: Int, val pat
         private set
     var removed by mutableStateOf(false)
         private set
+    /** La page est à l'écran : quittée, un geste qui aboutit plus tard ne le déplace ni ne le referme à son retour. */
+    private var watched = true
 
     fun resume() {
+        watched = true
         if (page.load == null) page.read() else page.again()
         history.again()
     }
 
+    /** L'écran quitté pour de bon (pas une rotation). */
+    fun leave() {
+        watched = false
+        gone()
+    }
+
     fun openHistory() = history.open()
 
+    private var versionJob: Job? = null
+
+    /**
+     * Regarder une version gardée ([n] ≤ 0 : revenir à la page). La lecture d'avant s'abandonne : une version demandée
+     * puis quittée, ou une autre choisie entre-temps, ne revient pas quand sa réponse arrive.
+     */
     fun showVersion(n: Int) {
+        versionJob?.cancel()
         if (n <= 0) {
             version = null
             return
         }
         version = Load.Loading
-        viewModelScope.launch { version = Load.of(deps.api.docVersion(project, path, n)) }
+        versionJob = viewModelScope.launch {
+            val got = deps.api.docVersion(project, path, n)
+            versionBody = got.weighed(deps.compute) { docPieces(it.text) }.orEmpty()
+            version = Load.of(got)
+        }
     }
 
-    /** Revenir à une version gardée : la demande nomme la version courante lue. */
+    /**
+     * Revenir à une version gardée : la demande nomme la version courante lue. Il n'y a pas de version 0 : sans numéro,
+     * rien ne part. Refusée (la page a changé depuis), la page et ses versions se relisent.
+     */
     fun restore(n: Int) {
         val base = page.value?.version ?: return
-        gestures.send(project, docRestoreRequest(path, n, base), HERE) {
-            version = null
+        if (n <= 0) return
+        gestures.send(project, docRestoreRequest(path, n, base), HERE, failed = {
+            page.read()
+            history.again()
+        }) {
+            showVersion(0)
             revision++
             page.read()
             history.again()
@@ -207,7 +297,7 @@ class DocPageViewModel(private val deps: ProjectsDeps, val project: Int, val pat
     fun move(to: String) {
         gestures.send(project, docMoveRequest(path, to), MOVE) {
             revision++
-            moved = to
+            if (watched) moved = to
         }
     }
 
@@ -220,7 +310,7 @@ class DocPageViewModel(private val deps: ProjectsDeps, val project: Int, val pat
     fun remove() {
         gestures.send(project, docRemoveRequest(path), HERE) {
             revision++
-            removed = true
+            if (watched) removed = true
         }
     }
 
@@ -233,10 +323,12 @@ class DocPageViewModel(private val deps: ProjectsDeps, val project: Int, val pat
 /**
  * L'éditeur d'une page : **son brouillon** — la version lue, le texte lu, ce qui est tapé depuis — et la sélection du
  * champ. Enregistrer nomme la version lue (`base`) ; si la page a changé depuis, le serveur refuse : ses mots se disent,
- * le texte reste, et l'on reprend sur la version actuelle ([rebase]) ou on la prend ([takeCurrent]). [title] : une page
- * nouvelle, qui naît à son premier enregistrement (`base` 0).
+ * le texte reste, et l'on reprend sur la version actuelle ([rebase]) ou on la prend ([takeCurrent]). **Un 409 n'est un
+ * conflit que si la page existe et n'en est plus à la version lue** : après lui la page se relit pour le savoir ; un
+ * autre refus (le même texte, une page disparue, une borne) se dit avec les mots du serveur, sans rien à reprendre. Si
+ * elle ne se relit pas (le réseau, une panne — pas une page introuvable), on ne le sait pas : de quoi reprendre reste.
  */
-class DocEditViewModel(private val deps: ProjectsDeps, val project: Int, val path: String, private val title: String? = null) : ViewModel() {
+class DocEditViewModel(private val deps: ProjectsDeps, val project: Int, val path: String) : ViewModel() {
     val gestures = GestureRunner(deps, viewModelScope)
     val space: Kept<DocSpace> = Kept(viewModelScope, deps.now, gestures::say) { deps.api.docs(project) }
 
@@ -255,6 +347,9 @@ class DocEditViewModel(private val deps: ProjectsDeps, val project: Int, val pat
     /** La page telle qu'elle est maintenant, relue après un conflit. */
     var current by mutableStateOf<DocPage?>(null)
         private set
+    /** La version actuelle ne s'est pas relue : les mots de l'erreur, dits à sa place (plutôt qu'une attente sans fin). */
+    var currentRefusal by mutableStateOf("")
+        private set
     /** Les enregistrements aboutis : l'onglet et la page se relisent alors. */
     var saved by mutableIntStateOf(0)
         private set
@@ -265,6 +360,8 @@ class DocEditViewModel(private val deps: ProjectsDeps, val project: Int, val pat
     private val saveKey = SendKey()
     private val uploadKey = SendKey()
     private var started = false
+    /** L'éditeur est à l'écran : quitté, un enregistrement qui aboutit plus tard ne le referme pas à son retour. */
+    private var watched = true
 
     val dirty: Boolean get() = draft?.dirty == true
 
@@ -273,17 +370,21 @@ class DocEditViewModel(private val deps: ProjectsDeps, val project: Int, val pat
      * Sans rien d'écrit en attente, elle se relit : elle a pu changer depuis.
      */
     fun open() {
+        watched = true
         space.open()
         if (started) {
-            if (!dirty && !saving) read()
+            // même avec un texte en attente : la page a pu être supprimée, ou recréée, depuis qu'on l'a quittée
+            if (!saving) read()
             return
         }
         started = true
-        if (title != null) {
-            start(Draft.fresh(path, if (title.isBlank()) "" else "# ${title.trim()}\n\n"))
-            return
-        }
         read()
+    }
+
+    /** L'écran quitté pour de bon (pas une rotation) : ce qui devait le refermer ne le refermera pas à son retour. */
+    fun leave() {
+        watched = false
+        justSaved = false
     }
 
     fun savedSeen() {
@@ -298,9 +399,22 @@ class DocEditViewModel(private val deps: ProjectsDeps, val project: Int, val pat
     private fun read() {
         viewModelScope.launch {
             when (val got = deps.api.docPage(project, path)) {
-                // ce qui a été tapé pendant la lecture reste : la page lue ne remplace qu'un brouillon intact
-                is MoiApi.Result.Ok -> if (!dirty) start(Draft.of(got.value))
-                is MoiApi.Result.Failed -> if (draft == null) load = Load.Failed(got.error)
+                // ce qui a été tapé pendant la lecture reste : la page lue ne remplace qu'un brouillon intact — ou
+                // celui d'une autre page : supprimée puis recréée sous ce chemin, ce qu'on avait de l'ancienne n'est
+                // pas d'elle, et ne ressort pas
+                is MoiApi.Result.Ok -> if (draft?.takeIf { it.dirty }?.isOf(got.value) != true) start(Draft.of(got.value))
+                is MoiApi.Result.Failed -> when {
+                    draft == null -> load = Load.Failed(got.error)
+                    got.error.code != 404 -> Unit
+                    // la page n'existe plus : sans rien d'écrit en attente, son ancien texte ne ressort pas
+                    !dirty -> {
+                        draft = null
+                        current = null
+                        load = Load.Failed(got.error)
+                    }
+                    // ce qui est écrit reste, et on dit qu'elle n'est plus là : rien à reprendre
+                    else -> draft = draft?.refused(refusalWords(got.error.message, got.error.fields))
+                }
             }
         }
     }
@@ -331,28 +445,56 @@ class DocEditViewModel(private val deps: ProjectsDeps, val project: Int, val pat
         viewModelScope.launch {
             val got = deps.api.saveDoc(project, sending, saveKey.of(sending))
             saveKey.settled(networkFailure = (got as? MoiApi.Result.Failed)?.error?.network == true)
-            saving = false
             when (got) {
                 is MoiApi.Result.Ok -> {
                     // ce qui a été tapé pendant l'envoi reste à enregistrer
                     draft = draft?.copy(base = got.value.version, read = sending.text, refusal = "", conflict = false)
                     current = null
                     saved++
-                    justSaved = true
+                    if (watched) justSaved = true
                     gestures.say(got.value.message)
                 }
-                is MoiApi.Result.Failed -> draft = draft?.refused(got.error.code, refusalWords(got.error.message, got.error.fields))
+                is MoiApi.Result.Failed -> {
+                    // un 409 n'est un conflit que si la page a bougé : le serveur le répond aussi au même texte, à une
+                    // page disparue, à une borne atteinte. On la relit pour le savoir ; introuvable, ce n'en est pas
+                    // un — ses mots se disent, sans rien à reprendre. Injoignable (le réseau, une panne), on ne le
+                    // sait pas : de quoi reprendre reste offert, et la version actuelle se relira à la demande
+                    val reread = if (got.error.code == 409) deps.api.docPage(project, path) else null
+                    val now = (reread as? MoiApi.Result.Ok)?.value
+                    val unknown = reread is MoiApi.Result.Failed && reread.error.code != 404
+                    val moved = draft?.movedOn(now) == true
+                    current = now.takeIf { moved }
+                    currentRefusal = ""
+                    draft = draft?.refused(refusalWords(got.error.message, got.error.fields), moved || unknown)
+                }
             }
+            saving = false
         }
     }
 
     /** Après un conflit : relire la page telle qu'elle est maintenant, pour la montrer. */
     fun readCurrent() {
+        currentRefusal = ""
         viewModelScope.launch {
             when (val got = deps.api.docPage(project, path)) {
                 is MoiApi.Result.Ok -> current = got.value
-                is MoiApi.Result.Failed -> gestures.say(got.error.said)
+                is MoiApi.Result.Failed -> unread(got.error)
             }
+        }
+    }
+
+    /**
+     * La version actuelle ne s'est pas relue : l'erreur se dit avec ses mots. Si la page n'existe plus, il n'y a plus
+     * de conflit à reprendre — ce qui est écrit reste.
+     */
+    private fun unread(error: MoiError) {
+        val words = refusalWords(error.message, error.fields)
+        currentRefusal = words
+        if (error.code == 404) {
+            current = null
+            draft = draft?.refused(words)
+        } else {
+            gestures.say(error.said)
         }
     }
 
@@ -362,9 +504,10 @@ class DocEditViewModel(private val deps: ProjectsDeps, val project: Int, val pat
             when (val got = deps.api.docPage(project, path)) {
                 is MoiApi.Result.Ok -> {
                     current = got.value
+                    currentRefusal = ""
                     draft = draft?.rebased(got.value)
                 }
-                is MoiApi.Result.Failed -> gestures.say(got.error.said)
+                is MoiApi.Result.Failed -> unread(got.error)
             }
         }
     }
@@ -374,6 +517,7 @@ class DocEditViewModel(private val deps: ProjectsDeps, val project: Int, val pat
         val now = current ?: return
         start(Draft.of(now))
         current = null
+        currentRefusal = ""
     }
 
     /** Jeter ce qui est écrit depuis la lecture. */
@@ -420,7 +564,10 @@ class ActivityViewModel(private val deps: ProjectsDeps, val id: Int) : ViewModel
     /** Les totaux de toute son histoire (les comptes des volets), et ceux de l'objectif filtré (les pastilles du fil). */
     val totals: Kept<ActivityTotals> = Kept(viewModelScope, deps.now, gestures::say) { deps.api.activityTotals(id) }
     val filtered: Kept<ActivityTotals> = Kept(viewModelScope, deps.now, gestures::say) { deps.api.activityTotals(id, objective) }
-    val runs: Kept<RunPage> = Kept(viewModelScope, deps.now, gestures::say) { deps.api.runs(id) }
+    /** Les exécutions : chaque lecture de leur première page (ouverte, relue, réessayée) pose aussi le curseur de la suite. */
+    val runs: Kept<RunPage> = Kept(viewModelScope, deps.now, gestures::say) {
+        deps.api.runs(id).also { got -> if (got is MoiApi.Result.Ok) runsRead(got.value) }
+    }
 
     // ── Le fil ──
     var kind by mutableStateOf("")
@@ -464,7 +611,7 @@ class ActivityViewModel(private val deps: ProjectsDeps, val id: Int) : ViewModel
     fun show(sub: String) {
         totals.open()
         when (sub) {
-            ActivityTabs.RUNS -> if (runs.load == null) loadRuns()
+            ActivityTabs.RUNS -> runs.open()
             ActivityTabs.NOTEBOOK -> if (notes == null) loadNotes()
             else -> {
                 if (feed == null) loadFeed()
@@ -479,7 +626,7 @@ class ActivityViewModel(private val deps: ProjectsDeps, val id: Int) : ViewModel
         totals.again()
         days.again()
         if (feed != null) loadFeed()
-        if (runs.load != null) loadRuns()
+        runs.again()
         if (notes != null) loadNotes()
         filtered.again()
     }
@@ -500,14 +647,21 @@ class ActivityViewModel(private val deps: ProjectsDeps, val id: Int) : ViewModel
         filtered.read()
     }
 
+    /**
+     * Le fil se lit, ou se relit. **Relu en place** (un retour sur l'écran, tirer), la suite déjà chargée reste tant
+     * que la page relue la rejoint ([olderKept]) ; sous un autre filtre, ou s'il manquerait des lignes entre les deux,
+     * elle repart de la page relue.
+     */
     fun loadFeed(): Job {
         feedJob?.cancel()
         if (feed == null) feed = Load.Loading
+        val keep = feed is Load.Ready
         return viewModelScope.launch {
             val got = deps.api.activity(id, kind = kind, objective = objective)
             if (got is MoiApi.Result.Ok) {
-                more = emptyList()
-                cursor = got.value.next
+                val older = if (keep) olderKept(items, got.value.items, ::sameHappening) else emptyList()
+                if (older.isEmpty()) cursor = got.value.next
+                more = older
             }
             if (got is MoiApi.Result.Ok || feed !is Load.Ready) feed = Load.of(got)
         }.also { feedJob = it }
@@ -517,10 +671,11 @@ class ActivityViewModel(private val deps: ProjectsDeps, val id: Int) : ViewModel
     fun more() {
         if (loadingMore || cursor <= 0) return
         loadingMore = true
-        val asked = kind to objective
+        val asked = Triple(kind, objective, cursor)
         viewModelScope.launch {
             when (val got = deps.api.activity(id, kind = kind, objective = objective, before = cursor)) {
-                is MoiApi.Result.Ok -> if (asked == kind to objective) {
+                // une réponse tardive — un autre filtre, une suite repartie entre-temps — ne s'ajoute pas
+                is MoiApi.Result.Ok -> if (asked == Triple(kind, objective, cursor)) {
                     val known = items.map { it.seq }.toSet()
                     more = more + got.value.items.filterNot { it.seq in known }
                     cursor = got.value.next
@@ -531,19 +686,21 @@ class ActivityViewModel(private val deps: ProjectsDeps, val id: Int) : ViewModel
         }
     }
 
-    private fun loadRuns() {
-        runs.read().invokeOnCompletion {
-            moreRuns = emptyList()
-            runsCursor = runs.value?.next ?: 0
-        }
+    /** La première page des exécutions vient d'être lue : la suite déjà chargée reste si elle la rejoint, et le curseur suit. */
+    private fun runsRead(fresh: RunPage) {
+        val older = olderKept(allRuns, fresh.items) { a, b -> a.id == b.id }
+        if (older.isEmpty()) runsCursor = fresh.next
+        moreRuns = older
     }
 
     fun moreRuns() {
         if (loadingMore || runsCursor <= 0) return
         loadingMore = true
+        val asked = runsCursor
         viewModelScope.launch {
             when (val got = deps.api.runs(id, runsCursor)) {
-                is MoiApi.Result.Ok -> {
+                // une suite repartie entre-temps (la première page relue ne la rejoignait plus) : la réponse ne s'ajoute pas
+                is MoiApi.Result.Ok -> if (asked == runsCursor) {
                     val known = allRuns.map { it.id }.toSet()
                     moreRuns = moreRuns + got.value.items.filterNot { it.id in known }
                     runsCursor = got.value.next
@@ -569,11 +726,13 @@ class ActivityViewModel(private val deps: ProjectsDeps, val id: Int) : ViewModel
     private fun loadNotes() {
         notesJob?.cancel()
         if (notes == null) notes = Load.Loading
+        val keep = notes is Load.Ready
         notesJob = viewModelScope.launch {
             val got = deps.api.notebook(id, notebookObjective)
             if (got is MoiApi.Result.Ok) {
-                moreNotes = emptyList()
-                notesCursor = got.value.next
+                val older = if (keep) olderKept(allNotes, got.value.items) { a, b -> a.seq == b.seq } else emptyList()
+                if (older.isEmpty()) notesCursor = got.value.next
+                moreNotes = older
             }
             if (got is MoiApi.Result.Ok || notes !is Load.Ready) notes = Load.of(got)
         }
@@ -582,9 +741,11 @@ class ActivityViewModel(private val deps: ProjectsDeps, val id: Int) : ViewModel
     fun moreNotes() {
         if (loadingMore || notesCursor <= 0) return
         loadingMore = true
+        val asked = notebookObjective to notesCursor
         viewModelScope.launch {
             when (val got = deps.api.notebook(id, notebookObjective, notesCursor)) {
-                is MoiApi.Result.Ok -> {
+                // une réponse tardive — un autre objectif, une suite repartie entre-temps — ne s'ajoute pas
+                is MoiApi.Result.Ok -> if (asked == notebookObjective to notesCursor) {
                     val known = allNotes.map { it.seq }.toSet()
                     moreNotes = moreNotes + got.value.items.filterNot { it.seq in known }
                     notesCursor = got.value.next
@@ -612,21 +773,50 @@ class ListsViewModel(private val deps: ProjectsDeps, val id: Int) : ViewModel() 
     /** L'élément qui vient d'être ajouté : sa liste et sa clé (à ouvrir, une fois). */
     var added by mutableStateOf<Pair<String, String>?>(null)
         private set
+    /**
+     * Les listes dont ce qu'on montre date d'avant — l'écran revient devant, un geste vient d'aboutir ou d'être refusé —
+     * et se relit : tant que le serveur n'a pas redit où en sont leurs éléments, aucun geste ne s'y offre.
+     */
+    var stale by mutableStateOf<Set<String>>(emptySet())
+        private set
+    /** Les relectures qui ont échoué, par liste : on le dit, et « Réessayer » ([load]). */
+    var staleErrors by mutableStateOf<Map<String, MoiError>>(emptyMap())
+        private set
+
+    private val jobs = HashMap<String, Job>()
+    /** L'onglet est à l'écran : quitté, un ajout qui aboutit plus tard n'y ouvre plus rien. */
+    private var watched = true
 
     fun show(list: String) {
+        watched = true
         if (list.isNotEmpty() && list !in pages) load(list)
     }
 
     fun resume() {
+        watched = true
         pages.keys.toList().forEach(::load)
     }
 
+    /** L'onglet quitté pour de bon (pas une rotation). */
+    fun leave() {
+        watched = false
+        added = null
+    }
+
     fun load(list: String): Job {
-        if (list !in pages) pages = pages + (list to Load.Loading)
+        jobs[list]?.cancel()
+        if (pages[list] is Load.Ready) stale = stale + list else pages = pages + (list to Load.Loading)
+        staleErrors = staleErrors - list
         return viewModelScope.launch {
-            val got = deps.api.elements(id, list = list)
-            if (got is MoiApi.Result.Ok || pages[list] !is Load.Ready) pages = pages + (list to Load.of(got))
-        }
+            when (val got = deps.api.elements(id, list = list)) {
+                is MoiApi.Result.Ok -> {
+                    pages = pages + (list to Load.Ready(got.value))
+                    stale = stale - list
+                }
+                is MoiApi.Result.Failed ->
+                    if (pages[list] is Load.Ready) staleErrors = staleErrors + (list to got.error) else pages = pages + (list to Load.Failed(got.error))
+            }
+        }.also { jobs[list] = it }
     }
 
     private fun changed(list: String) {
@@ -634,18 +824,22 @@ class ListsViewModel(private val deps: ProjectsDeps, val id: Int) : ViewModel() 
         load(list)
     }
 
+    // Un geste refusé relit la liste comme un geste abouti : un refus dit le plus souvent que la situation a changé.
+
     fun setStatus(e: Entry, status: String) {
-        gestures.send(id, itemStatusRequest(e, status), where(e.list)) { changed(e.list) }
+        if (e.list in stale) return
+        gestures.send(id, itemStatusRequest(e, status), where(e.list), failed = { load(e.list) }) { changed(e.list) }
     }
 
     fun assign(e: Entry, actor: String) {
-        gestures.send(id, itemAssignRequest(e, actor), where(e.list)) { changed(e.list) }
+        if (e.list in stale) return
+        gestures.send(id, itemAssignRequest(e, actor), where(e.list), failed = { load(e.list) }) { changed(e.list) }
     }
 
     fun add(list: String, title: String, text: String, status: String, actor: String) {
         gestures.send(id, itemAddRequest(list, title, text, status, actor), ADD) { done ->
             changed(list)
-            if (done.key.isNotEmpty()) added = (done.list.ifEmpty { list }) to done.key
+            if (watched && done.key.isNotEmpty()) added = (done.list.ifEmpty { list }) to done.key
         }
     }
 
@@ -664,34 +858,82 @@ class ListsViewModel(private val deps: ProjectsDeps, val id: Int) : ViewModel() 
 /** Un élément d'une liste de suivi, ouvert : son texte, son fil (ce qui lui est arrivé), ses gestes du moment. */
 class ItemViewModel(private val deps: ProjectsDeps, val project: Int, val list: String, val key: String) : ViewModel() {
     val gestures = GestureRunner(deps, viewModelScope)
-    val element: Kept<EntryDetail> = Kept(viewModelScope, deps.now, gestures::say) { deps.api.element(project, list, key) }
+    var element by mutableStateOf<Load<EntryDetail>?>(null)
+        private set
     var note by mutableStateOf("")
     var revision by mutableIntStateOf(0)
         private set
+    /**
+     * L'élément montré date d'avant — l'écran revient devant, un geste vient d'aboutir ou d'être refusé — et se relit :
+     * tant que le serveur n'a pas redit où il en est, aucun geste ne s'y offre (rien ne se décide sur l'ancienne lecture).
+     */
+    var stale by mutableStateOf(false)
+        private set
+    /** Sa relecture a échoué : on le dit, et « Réessayer » ([reread]). */
+    var staleError by mutableStateOf<MoiError?>(null)
+        private set
 
+    private var job: Job? = null
+
+    /** L'écran s'ouvre, ou revient devant : l'élément montre ce que le serveur dit maintenant. */
     fun resume() {
-        if (element.load == null) element.read() else element.again()
+        load(quiet = true)
+    }
+
+    fun retry() {
+        element = Load.Loading
+        load(quiet = false)
+    }
+
+    /** « Réessayer », après une relecture qui a échoué. */
+    fun reread() {
+        load(quiet = false)
+    }
+
+    private fun load(quiet: Boolean): Job {
+        job?.cancel()
+        // ce qu'on montre date d'avant cette lecture : rien ne s'y décide tant qu'elle n'a pas abouti
+        if (element is Load.Ready) stale = true else element = Load.Loading
+        staleError = null
+        return viewModelScope.launch {
+            when (val got = deps.api.element(project, list, key)) {
+                is MoiApi.Result.Ok -> {
+                    element = Load.Ready(got.value)
+                    stale = false
+                }
+                is MoiApi.Result.Failed -> if (element is Load.Ready) {
+                    staleError = got.error
+                    if (!quiet) gestures.say(got.error.said)
+                } else {
+                    element = Load.Failed(got.error)
+                }
+            }
+        }.also { job = it }
     }
 
     private fun changed() {
         revision++
-        element.read()
+        load(quiet = true)
     }
 
+    // Un geste refusé relit l'élément comme un geste abouti : un refus dit le plus souvent que la situation a changé.
+
     fun setStatus(status: String) {
-        val e = element.value ?: return
-        gestures.send(project, itemStatusRequest(e.line, status), HERE) { changed() }
+        val e = element?.valueOrNull ?: return
+        if (stale) return
+        gestures.send(project, itemStatusRequest(e.line, status), HERE, failed = { load(quiet = true) }) { changed() }
     }
 
     fun assign(actor: String) {
-        val e = element.value ?: return
-        gestures.send(project, itemAssignRequest(e.line, actor), HERE) { changed() }
+        val e = element?.valueOrNull ?: return
+        if (stale) return
+        gestures.send(project, itemAssignRequest(e.line, actor), HERE, failed = { load(quiet = true) }) { changed() }
     }
 
     fun sendNote() {
-        val e = element.value ?: return
-        if (note.isBlank()) return
-        gestures.send(project, noteRequest(e.line, note), HERE) {
+        val e = element?.valueOrNull ?: return
+        if (note.isBlank() || stale) return
+        gestures.send(project, noteRequest(e.line, note), HERE, failed = { load(quiet = true) }) {
             note = ""
             changed()
         }
@@ -719,9 +961,23 @@ class SettingsViewModel(private val deps: ProjectsDeps, val id: Int) : ViewModel
         private set
     var archived by mutableStateOf(false)
         private set
+    /** L'écran est devant : quitté, un archivage qui aboutit plus tard ne ramène pas à la rubrique à son retour. */
+    private var watched = true
 
     fun resume() {
+        watched = true
         if (settings.load == null) settings.read() else settings.again()
+    }
+
+    /**
+     * La page d'une section quittée pour de bon (pas une rotation ; [section] vide : la liste des sections) : ce qu'on
+     * y avait saisi sans l'enregistrer, et ce qu'on y avait dit, ne valent pas pour la visite suivante.
+     */
+    fun leave(section: String) {
+        watched = false
+        archived = false
+        typed = typed - section
+        gestures.forget(where(section))
     }
 
     fun typedIn(section: String): Map<String, JsonElement> = typed[section].orEmpty()
@@ -733,18 +989,23 @@ class SettingsViewModel(private val deps: ProjectsDeps, val id: Int) : ViewModel
     /** Ce qui change dans une section, vu ce qui est servi : rien, tant que rien n'est saisi d'autre. */
     fun changes(section: SettingsSection): Map<String, JsonElement> = settingsChanged(section.fields, typedIn(section.name))
 
-    fun save(section: SettingsSection) {
-        if (changes(section).isEmpty()) return
-        gestures.send(id, settingsRequest(section.name, section.fields, typedIn(section.name)), where(section.name)) {
+    /**
+     * Enregistrer une section : seulement ce qui change de ce que le serveur sert. Rien ne part tant que ses réglages
+     * se relisent ([Kept.stale] : l'écran revient devant, une section vient d'être enregistrée) — ce qui change se
+     * compte sur ce qu'il sert maintenant, pas sur l'ancienne lecture. Faux : rien n'est parti.
+     */
+    fun save(section: SettingsSection): Boolean {
+        if (settings.stale || changes(section).isEmpty()) return false
+        return gestures.send(id, settingsRequest(section.name, section.fields, typedIn(section.name)), where(section.name)) {
             typed = typed - section.name
             revision++
             settings.read()
         }
     }
 
-    fun archive() {
-        gestures.send(id, archiveRequest(), PROJECT) { archived = true }
-    }
+    /** L'archiver : pas plus que le reste tant que ses réglages se relisent (le droit de l'archiver en vient). */
+    fun archive(): Boolean =
+        !settings.stale && gestures.send(id, archiveRequest(), PROJECT) { if (watched) archived = true }
 
     fun archivedSeen() {
         archived = false

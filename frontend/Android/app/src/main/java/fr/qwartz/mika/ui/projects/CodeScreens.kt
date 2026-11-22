@@ -35,14 +35,11 @@ import fr.qwartz.mika.data.moi.projects.CodeTabs
 import fr.qwartz.mika.data.moi.projects.CommitDetail
 import fr.qwartz.mika.data.moi.projects.StateTone
 import fr.qwartz.mika.data.moi.projects.aheadBehind
-import fr.qwartz.mika.data.moi.projects.anyLineCut
 import fr.qwartz.mika.data.moi.projects.isMarkdown
 import fr.qwartz.mika.data.moi.projects.languageOf
-import fr.qwartz.mika.data.moi.projects.linesOf
 import fr.qwartz.mika.data.moi.projects.messageRest
 import fr.qwartz.mika.data.moi.projects.moment
 import fr.qwartz.mika.data.moi.projects.plural
-import fr.qwartz.mika.data.moi.projects.shownLine
 import fr.qwartz.mika.data.moi.projects.sizeWords
 import fr.qwartz.mika.ui.Route
 import fr.qwartz.mika.ui.shell.Gap
@@ -79,19 +76,20 @@ fun CodeScreen(graph: AppGraph, route: Route.ProjectCode) {
 private fun FileScreen(graph: AppGraph, route: Route.ProjectCode) {
     val frame = rememberCodeFrame(graph, route.id)
     val session = rememberSessionKey(graph)
-    val vm: CodeReadViewModel<Blob> = viewModel(key = "code-file|$session|${route.id}|${route.ref}|${route.key}") {
-        fileModel(ProjectsDeps(graph), route.id, route.ref, route.key)
+    val vm: FileViewModel = viewModel(key = "code-file|$session|${route.id}|${route.ref}|${route.key}") {
+        FileViewModel(ProjectsDeps(graph), route.id, route.ref, route.key)
     }
     Toasts(vm.gestures)
     OnResume(vm) { vm.resume() }
-    var pane by rememberSaveable { mutableStateOf(PANE_MAIN) }
-    var source by rememberSaveable { mutableStateOf(false) }
+    var pane by rememberSaveable(route.id, route.key, route.ref) { mutableStateOf(PANE_MAIN) }
+    var source by rememberSaveable(route.id, route.key, route.ref) { mutableStateOf(false) }
     val blob = vm.read.value
-    // ses lignes telles qu'on les pose (tabulations en espaces, coupées au-delà de ce qu'une ligne montre), une fois par fichier lu
-    val raw = remember(blob?.sha, blob?.path, blob?.text) { blob?.takeIf { it.readable }?.let { linesOf(it.text) }.orEmpty() }
-    val lines = remember(raw) { raw.map(::shownLine) }
+    // ses lignes telles qu'on les pose (tabulations en espaces, coupées au-delà de ce qu'une ligne montre) : le modèle
+    // les a mises en place hors du fil principal, avant de montrer le fichier — ici, seule la plus large se mesure
+    val laid = blob?.laid
+    val lines = laid?.lines.orEmpty()
     val measure = rememberCodeMeasure()
-    val width = remember(lines, measure) { measure.width(lines) }
+    val width = remember(laid, measure) { measure.width(laid?.widest.orEmpty()) }
     val numbers = remember(lines.size, measure) { measure.numbers(maxOf(2, lines.size.toString().length)) }
     val scroll = rememberScrollState()
     val copy = rememberCopy()
@@ -111,10 +109,10 @@ private fun FileScreen(graph: AppGraph, route: Route.ProjectCode) {
             !f.readable -> item(key = "why") { EmptyNote(R.drawable.ic_m_file, f.kindLabel, f.why) }
             isMarkdown(f.path) && !source -> paneBlock("rendered") {
                 Hint(stringResource(R.string.proj_code_md_note), R.drawable.ic_m_eye)
-                RepoMarkdown(f.text)
+                RepoMarkdown(vm.rendered)
             }
             else -> {
-                if (anyLineCut(raw)) paneBlock("cut") { Hint(stringResource(R.string.proj_code_lines_cut)) }
+                if (laid?.cut == true) paneBlock("cut") { Hint(stringResource(R.string.proj_code_lines_cut)) }
                 sourceLines(lines, f.path, width, numbers, scroll)
             }
         }
@@ -179,7 +177,7 @@ private fun CommitScreen(graph: AppGraph, route: Route.ProjectCode) {
     val vm: CommitViewModel = viewModel(key = "code-commit|$session|${route.id}|${route.key}") { CommitViewModel(ProjectsDeps(graph), route.id, route.key) }
     Toasts(vm.gestures)
     OnResume(vm) { vm.resume() }
-    var pane by rememberSaveable { mutableStateOf(PANE_MAIN) }
+    var pane by rememberSaveable(route.id, route.key, route.ref) { mutableStateOf(PANE_MAIN) }
     val diffUi = rememberDiffUi()
     val copy = rememberCopy()
     CodePage(

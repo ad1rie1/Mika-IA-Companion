@@ -78,7 +78,9 @@ MOVED_TABS = {("reglages", "apps"): "apps", ("sens", "courrier"): "courrier/rece
               # un profil n'est qu'un préréglage du tempérament : il se choisit en haut de sa page
               ("reglages", "profil"): "reglages/temperament",
               # ce qui attend ta décision ne se décide que dans la file (ADR 0180)
-              ("identites", "revendications"): "approbations/identites", ("identites", "noms"): "approbations/noms",
+              ("identites", "revendications"): "approbations/identites",
+              # les noms à relier sont des rapprochements (ADR 0298) : l'onglet est parti, son adresse y mène
+              ("identites", "noms"): "approbations/rapprochements", ("approbations", "noms"): "approbations/rapprochements",
               # le fil de tous les messages : Conversations s'ouvre sur les personnes, leur filtre gardé (ADR 0181)
               ("fil", "messages"): "fil/conversations",
               # la place de chacun se lit avec les pièces, en sous-onglet (une ancre : « #… », après la requête)
@@ -293,6 +295,9 @@ class Pages(Actions):
         drawn = self.drawn(request, f"{d.key}/{slug}", got) if produced is None else {}
         if drawn:
             got = {**got, "blocks": drawn.pop("blocks"), **({} if drawn.pop("panel") else {"panel": None})}
+            if own := drawn.pop("filters", ()):  # ses filtres à lui (``Drawn.params``), à la place de ceux de la vue
+                got["filters"] = own
+        said = drawn.pop("description", "") if drawn else ""  # ce qu'il dit sous son titre (``Drawn.description``)
         tab_list: list[dict[str, Any]] = []
         for tab_slug, tab_title, tab_item in tabs:
             count, hint = self.tab_badge(tab_item)  # l'indice, dit au survol du nombre (ADR 0219)
@@ -329,7 +334,7 @@ class Pages(Actions):
                                     filters=got.get("filters") or (), panel=got.get("panel"),
                                     messages=got.get("messages") or [], crumbs=crumbs, status=status)
         return self.render_page(request, title=f"{current[1]} · {d.label}", heading=current[1], active=d.key,
-                                subtitle=item.description or d.description, tabs=tab_list, gear=gear,
+                                subtitle=said or item.description or d.description, tabs=tab_list, gear=gear,
                                 blocks=got["blocks"],
                                 console_blocks=getattr(item, "owner", "") in self.ui.deps.plain_owners, **drawn,
                                 head_actions=self.head_actions(request, section=d.key) if d.automatic_actions else [],
@@ -360,7 +365,8 @@ class Pages(Actions):
         else:
             html, rest = out, []
         return {"blocks": rest, "panel": drawn.panel, "overview": html, "overview_last": drawn.last,
-                "fiche_styles": drawn.styles, "fiche_scripts": drawn.scripts, "head_extra": head}
+                "fiche_styles": drawn.styles, "fiche_scripts": drawn.scripts, "head_extra": head,
+                "filters": tuple(drawn.params), "description": drawn.description}
 
     async def view(self, request: Request) -> Response:
         owner, name = request.path_params["owner"], request.path_params["name"]

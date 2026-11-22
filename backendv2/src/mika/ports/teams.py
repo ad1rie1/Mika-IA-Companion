@@ -269,6 +269,23 @@ class InboxConversation:
 
 
 @dataclass(frozen=True, slots=True)
+class InboxProfile:
+    """Le profil d'une personne croisée dans Teams (ADR 0298), tel que l'extension le lit dans la base du client et
+    le joint aux messages de cette personne (ou qui la mentionnent) : son identifiant Teams (``8:orgid:<guid>``…, en
+    minuscules), son nom, son e-mail (vide s'il n'en a pas une bien formée), son poste, son entreprise, son service,
+    l'organisation Teams du compte (pas forcément son employeur), trois numéros au plus. Déjà validé par la porte."""
+
+    id: str
+    name: str = ""
+    email: str = ""
+    title: str = ""
+    company: str = ""
+    department: str = ""
+    tenant: str = ""
+    phones: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class InboxBatch:
     """Un lot poussé par l'extension (déjà validé et borné par la porte)."""
 
@@ -279,6 +296,8 @@ class InboxBatch:
     #: l'historique chargé à la mise en service (ADR 0251) : rangé déjà lu — elle ne le remarque pas comme du neuf —,
     #: sans régler de brouillon ni rien journaliser
     history: bool = False
+    #: les profils des auteurs et des personnes mentionnées de ses messages (ADR 0298), historique compris
+    profiles: tuple[InboxProfile, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -294,6 +313,64 @@ class Stored:
     settled: tuple[Settled, ...] = ()
     twins: int = 0
     recent: int = 0
+    #: les profils neufs ou changés (ADR 0298) : un profil redit tel quel ne compte pas
+    profiles: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class SeenAuthor:
+    """Quelqu'un qui a écrit dans un compte (pas la personne du compte), dans les messages qu'une lecture a parcourus
+    (``people_since``, l'annuaire : ADR 0298) : son identifiant Teams, le dernier nom qu'il y porte, combien de
+    messages, le premier et le dernier (µs, l'heure de Teams)."""
+
+    account: str
+    author_id: str
+    name: str
+    count: int
+    first: int
+    last: int
+
+
+@dataclass(frozen=True, slots=True)
+class PeopleSince:
+    """Ce qu'une lecture de ``people_since`` a trouvé, où elle s'est arrêtée (le dernier message parcouru et son
+    arrivée, µs : à repasser à la suivante), et s'il reste des messages après."""
+
+    people: tuple[SeenAuthor, ...] = ()
+    cursor: tuple[int, int] = (0, 0)
+    more: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class TeamsProfile:
+    """Le profil d'une personne tel qu'un compte l'a reçu en dernier (ADR 0298) : ``id``, l'identifiant Teams en
+    minuscules (``author_key``) ; ``updated``, son dernier changement (µs, l'horloge du serveur) ; ``seq``, son rang
+    dans l'ordre des changements (``profiles_since``) ; ``said_at``, son dernier message dans ce compte (µs, l'heure
+    de Teams ; 0 : aucun) — ce que le profil atteste, et la date qui compte face à un oubli (un profil reçu après
+    l'oubli, avec un historique rechargé, ne la ramène pas)."""
+
+    account: str
+    id: str
+    name: str = ""
+    email: str = ""
+    title: str = ""
+    company: str = ""
+    department: str = ""
+    tenant: str = ""
+    phones: tuple[str, ...] = ()
+    updated: int = 0
+    seq: int = 0
+    said_at: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class ProfilesSince:
+    """Ce qu'une lecture de ``profiles_since`` a trouvé (les profils changés, dans l'ordre de leurs changements), où
+    elle s'est arrêtée (à repasser à la suivante), et s'il en reste après."""
+
+    profiles: tuple[TeamsProfile, ...] = ()
+    cursor: int = 0
+    more: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -408,6 +485,42 @@ class TeamsPort(Protocol):
 
     def drop_account(self, account: str) -> int:
         """Un compte supprimé des réglages : tout ce que son extension avait apporté s'efface (lignes effacées)."""
+        ...
+
+    def people_since(self, cursor: tuple[int, int], limit: int) -> PeopleSince:
+        """Qui a écrit dans les ``limit`` messages arrivés après ``cursor`` (l'ordre d'arrivée, tous les comptes,
+        l'historique compris), par compte : les messages de la personne du compte n'y comptent pas. ``cursor`` : celui
+        que rendait la lecture d'avant ((0, 0) : depuis le début)."""
+        ...
+
+    def profiles_since(self, cursor: int, limit: int) -> ProfilesSince:
+        """Les profils (ADR 0298) neufs ou changés depuis ``cursor`` (0 : tous), ``limit`` au plus, dans l'ordre de
+        leurs changements, chacun sous son compte ; un profil changé deux fois n'est rendu qu'à son dernier état. Le
+        rang d'un changement ne resert jamais, même après un oubli : rien de neuf n'est sauté."""
+        ...
+
+    def written_in(self, authors: Sequence[str], limit: int, *, accounts: Sequence[str] | None = None) \
+            -> list[tuple[Conversation, int, int]]:
+        """Les conversations où ces personnes (leurs identifiants Teams, sans casse) ont écrit, dans ces comptes
+        (``None`` : tous), la plus récente d'abord : chacune sous son nom (comme ``conversations``), combien de leurs
+        messages, le dernier (µs). Ce que la personne du compte a écrit n'y compte pas (l'écran Contacts, ADR 0298)."""
+        ...
+
+    def exchanged(self, since: int, *, limit: int = 2000, accounts: Sequence[str] | None = None) \
+            -> list[tuple[str, str, int, int]]:
+        """Qui échange vraiment avec la personne de chaque compte (ADR 0298, lot 6) : les auteurs qui ont écrit depuis
+        ``since`` (µs, l'heure des messages) en tête-à-tête avec elle, quand elle y a écrit aussi depuis ; ou dans un
+        petit groupe (``EXCHANGE_GROUP_MAX`` personnes au plus, elle comprise — jamais un canal) où elle a écrit après
+        l'un de leurs messages, ou dont un message la mentionne quand elle y a écrit — (compte, son identifiant en
+        minuscules, combien de ces messages, le dernier), le plus récent d'abord, ``limit`` au plus. Ses propres
+        messages n'y sont jamais ; ce qui n'a pas d'auteur non plus."""
+        ...
+
+    def authored(self, authors: Sequence[str], *, since: int = 0, limit: int = 30,
+                 accounts: Sequence[str] | None = None) -> list[Message]:
+        """Les derniers messages de ces personnes (leurs identifiants Teams, sans casse) depuis ``since`` (µs, l'heure
+        des messages), dans ces comptes (``None`` : tous), le plus récent d'abord, ``limit`` au plus (200) ; jamais
+        ceux de la personne du compte (ce qu'elle sait d'un contact, ADR 0298)."""
         ...
 
     async def forget(self, subject: str) -> int: ...

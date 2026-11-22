@@ -346,7 +346,7 @@
 
   M.register('mail', {
     titre: 'Mail',
-    onglets: [{ id: 'messages', titre: 'Messages' }, { id: 'contacts', titre: 'Contacts', cnt: CONTACTS.length }],
+    onglets: [{ id: 'messages', titre: 'Messages' }],  // ses contacts sont dans l'écran Contacts (ADR 0298)
     compte: () => nonlus('tout'),
     actions: (ctx) => ctx.onglet === 'contacts' ? `<button class="btn" type="button" data-nouveau-contact>${ico('user-plus', 'sm')}<span class="lbl">Nouveau contact</span></button>
          <button class="btn primary" type="button" data-nouveau>${ico('plus', 'sm')}<span class="lbl">Nouveau message</span></button>`
@@ -468,7 +468,7 @@
     recherche: () => [
       ...MAILS.filter((m) => m.boite !== 'lea').map((m) => ({ groupe: 'Mails', titre: m.objet, sous: `${m.de.nom} · ${boiteDe(m.boite).nom} · ${m.quand}`, ico: 'mail', route: '#mail/messages/' + m.id })),
       ...BROUILLONS.map((b) => ({ groupe: 'Ses brouillons', titre: b.objet, sous: `à ${b.a.split(' <')[0]} · ${b.etat[1]}`, ico: 'pen', route: '#mail/messages/' + b.id })),
-      ...CONTACTS.map((c) => ({ groupe: 'Contacts', titre: c.nom || M.who(c.cle).nom, sous: c.adr, ico: 'user', action: () => { etat.contact = c.cle || c.adr; M.go('#mail/contacts'); } })),
+      
     ],
     notes: () => [
       { groupe: 'Décidé', statut: 'decide', titre: 'Ses brouillons se relisent dans Mail', texte: '« Ses brouillons » : relire, retoucher, refuser, envoyer, pour toutes tes boîtes ; pas de carte dans le chat' },

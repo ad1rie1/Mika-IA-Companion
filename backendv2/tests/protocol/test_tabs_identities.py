@@ -56,14 +56,16 @@ def test_one_line_per_means_of_communication_and_a_banner_while_a_claim_waits(wo
 
 def test_what_waits_a_decision_has_no_page_here_but_the_queue(world):  # noqa: F811
     """Identités à confirmer et Noms à relier ne se décident que dans la file « À valider » (ADR 0180) : la barre
-    d'Identités n'en a plus d'onglet, et leurs anciennes adresses y mènent, la requête avec elles."""
+    d'Identités n'en a plus d'onglet, et leurs anciennes adresses y mènent, la requête avec elles — les noms à relier
+    sont des rapprochements (ADR 0298), l'ancien onglet de la file y mène aussi."""
     client, _, _ = world
     bootstrap(client)
     page = drawn(client, "/admin/identites/annuaire")
     bar = _between(page, '<nav class="tabs"', "</nav>")
     assert re.findall(r'href="/admin/identites/(\w+)"', bar) == ["annuaire", "politique"]
-    for old, new in (("revendications", "identites"), ("noms", "noms")):
-        moved = client.get(f"/admin/identites/{old}?page=2", follow_redirects=False)
+    for old, new in (("identites/revendications", "identites"), ("identites/noms", "rapprochements"),
+                     ("approbations/noms", "rapprochements")):
+        moved = client.get(f"/admin/{old}?page=2", follow_redirects=False)
         assert moved.status_code == 301 and moved.headers["location"] == f"/admin/approbations/{new}?page=2"
 
 

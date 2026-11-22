@@ -7,7 +7,8 @@ import { h, initials } from "../../shell/dom";
 import { ico } from "../../shell/icons";
 import { mikaAvatar } from "../../mika/face";
 import { clock, dayAndClock, shortWhen } from "../chat/markup";
-import { TEAMS_LIMITS, teamsImageUrl, type Conversation, type Reply, type TeamsAccount, type TeamsMessage, type Thread } from "../../api/teams";
+import { TEAMS_LIMITS, teamsImageUrl, type Conversation, type Reply, type TeamsAccount, type TeamsImage, type TeamsMessage, type Thread } from "../../api/teams";
+import { pageHtml } from "../projets/docmd";
 import { ago, avatar, caps, firstName, levelTag, markToFill, type Caps } from "../mail/format";
 import { countSpan } from "../mail/markup";
 import { ofName } from "../../shared/names";
@@ -116,14 +117,49 @@ function shownText(m: TeamsMessage): string {
   return m.images?.length ? m.text.replace(IMAGE_MARK, "").trim() : m.text;
 }
 
-/** Ses images (ADR 0258), dans l'ordre du message ; ce que Mika y a vu en légende et en texte de remplacement. */
+/** Les images d'un message dans l'ordre où il les montre. */
+export function imagesInOrder(m: TeamsMessage): TeamsImage[] {
+  return [...(m.images ?? [])].sort((a, b) => a.position - b.position);
+}
+
+/** Ce que Mika voit sur une image, en une ligne courte (son texte de remplacement) : sans Markdown, coupé. */
+function altOf(seen: string): string {
+  const flat = seen.replace(/[*_`#>|]+/g, " ").replace(/\s+/g, " ").trim();
+  return flat ? (flat.length > 240 ? `${flat.slice(0, 239)}…` : flat) : "image";
+}
+
+/** Ce que Mika voit sur une image, rendu (Markdown échappé : titres, listes, tableaux), sur toute la largeur. */
+function seenBlock(seen: string, label: string): string {
+  return `<section class="tm-seen"><div class="tm-seen-head">${ico("sparkle", "xs")}${h(label)}</div><div class="p2-md tm-seen-md">${pageHtml(seen)}</div></section>`;
+}
+
+/**
+ * Ses images (ADR 0258), dans l'ordre du message : chacune s'ouvre en grand ici (`data-tm-img`) ; puis ce que Mika
+ * voit sur chacune, sous elles, sur toute la largeur du message.
+ */
 function images(m: TeamsMessage): string {
-  if (!m.images?.length) return "";
-  const shown = [...m.images].sort((a, b) => a.position - b.position).map((i) => {
-    const said = i.seen ? h(i.seen) : "image";
-    return `<figure class="tm-img"><a href="${h(teamsImageUrl(m.ref, i.id))}" target="_blank" rel="noopener"><img src="${h(teamsImageUrl(m.ref, i.id))}" alt="${said}" loading="lazy"></a>${i.seen ? `<figcaption>${ico("sparkle", "xs")}${h(i.seen)}</figcaption>` : ""}</figure>`;
-  });
-  return `<div class="tm-imgs">${shown.join("")}</div>`;
+  const all = imagesInOrder(m);
+  if (!all.length) return "";
+  const shown = all.map((i, n) => `<figure class="tm-img"><button class="tm-img-open" type="button" data-tm-img="${n}" data-tm-ref="${h(m.ref)}" title="Voir en grand"><img src="${h(teamsImageUrl(m.ref, i.id))}" alt="${h(altOf(i.seen))}" loading="lazy"></button></figure>`);
+  const seen = all.map((i, n) => (i.seen.trim()
+    ? seenBlock(i.seen, all.length > 1 ? `Ce que Mika voit sur l'image ${n + 1}` : "Ce que Mika y voit") : ""));
+  return `<div class="tm-imgs">${shown.join("")}</div>${seen.join("")}`;
+}
+
+/** La visionneuse d'une image d'un message : en grand, « précédente » et « suivante » s'il en a plusieurs, et ce que
+ *  Mika y voit. */
+export function imageViewer(m: TeamsMessage, index: number): string {
+  const all = imagesInOrder(m);
+  if (!all.length) return `<div class="empty">${ico("image")}<p>Aucune image.</p></div>`;
+  const n = ((index % all.length) + all.length) % all.length;
+  const i = all[n];
+  const nav = all.length > 1
+    ? `<button class="btn icon vw-prev" type="button" data-vw="-1" title="Image précédente (←)" aria-label="Image précédente">${ico("chev-left")}</button>
+       <button class="btn icon vw-next" type="button" data-vw="1" title="Image suivante (→)" aria-label="Image suivante">${ico("chev-right")}</button>` : "";
+  return `<div class="viewer" data-viewer="${n}">
+    <div class="vw-img"><img src="${h(teamsImageUrl(m.ref, i.id))}" alt="${h(altOf(i.seen))}">${nav}</div>
+    ${i.seen.trim() ? `<div class="tm-vw-seen">${seenBlock(i.seen, "Ce que Mika y voit")}</div>` : ""}
+    ${all.length > 1 ? `<p class="small muted tm-vw-count">${n + 1} / ${all.length}</p>` : ""}</div>`;
 }
 
 function pendingMessage(p: OwnBubble, v: ThreadView): string {

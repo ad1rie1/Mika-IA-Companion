@@ -1,6 +1,6 @@
-"""Les liens de lecture d'un projet sur sa fiche (ADR 0257), à travers le vrai serveur : dans l'onglet « Liens »
-(ADR 0281), « Ce qu'il lit » avec « Choisir ce qu'il lit » à côté (une case par projet qu'il peut lire), puis « Qui
-le lit » — et ce qu'ils disent, vides."""
+"""Les liens de lecture d'un projet sur sa fiche (ADR 0257), à travers le vrai serveur : l'onglet Dépendances (ADR
+0281, 0297), son schéma — « Il dépend de », lui au centre, « Dépendent de lui » —, « Ajouter une dépendance » (un
+formulaire par projet qu'il peut lire, ce qui ne change pas posé) — et ce qu'ils disent, vides."""
 
 from __future__ import annotations
 
@@ -21,23 +21,24 @@ def test_a_projects_fiche_shows_what_it_reads_and_who_reads_it(world):  # noqa: 
     produit = _create(client, kernel, "Le produit", "Écrire le module")
     connaitre = _create(client, kernel, "Faire connaître", "Écrire un article")
     empty = _links(client, connaitre)
-    assert "Il dépend de" in empty and "sans jamais y écrire" in empty
-    assert "il ne lit aucun projet" in empty and "aucun projet ne le lit" in empty
-    # « Choisir ce qu'il lit », à côté : une case par projet qu'il peut lire, nommé par son numéro et son titre
-    chooser = empty.split('action="/admin/action/projects.liens"', 1)[1].split("</form>", 1)[0]
-    assert "Choisir ce qu'il lit" in chooser and f'name="lit_{produit}"' in chooser
-    assert f"n° {produit} — Le produit" in chooser and "Enregistrer ce qu'il lit" in chooser
-    assert f'name="lit_{connaitre}"' not in chooser  # jamais lui-même
+    assert "Il dépend de" in empty and "Dépendent de lui" in empty
+    assert "Il ne lit aucun projet." in empty and "Aucun projet ne dépend de lui." in empty
+    # « Ajouter une dépendance » : un formulaire par projet qu'il peut lire, nommé par son titre ; jamais lui-même
+    adding = drawn(client, f"/admin/fiche/project/{connaitre}?onglet=liens&ajouter=1")
+    forms = [f.split("</form>", 1)[0] for f in adding.split('action="/admin/action/projects.liens"')[1:]]
+    assert len(forms) == 1 and f'name="lit_{produit}" value="on"' in forms[0]
+    assert f'name="why_for" value="{produit}"' in forms[0] and "Le produit" in adding
+    assert f'name="lit_{connaitre}"' not in adding
     got = client.portal.call(lambda: perform(kernel, "projects.liens", {
         "_champs": [f"lit_{produit}"], f"lit_{produit}": ["on"]}, by="user_1", subject=str(connaitre), nonce="l1"))
     assert got.ok, got
     reader = _links(client, connaitre)
-    reads = reader.split("Dépendent de lui", 1)[0]
-    assert f"n° {produit} — Le produit" in reads and "ses comptes rendus" in reads  # ce que le lien donne
-    assert f'href="/admin/fiche/project/{produit}' in reads and "il ne lit aucun projet" not in reader
-    assert "aucun projet ne le lit" in reader
-    # sur la fiche du projet lu : « Qui le lit » ; lui-même ne lit rien, et ne peut pas lire son lecteur (une boucle)
+    reads = reader.split('class="pj-center"', 1)[0]
+    assert "Le produit" in reads and "son détail" in reads  # ce que le lien donne
+    assert f"lien={produit}" in reads and "Il ne lit aucun projet." not in reader
+    assert "Aucun projet ne dépend de lui." in reader
+    # sur la fiche du projet lu : qui le lit ; lui-même ne lit rien, et ne peut pas lire son lecteur (une boucle)
     read = _links(client, produit)
     who = read.split("Dépendent de lui", 1)[1]
-    assert f"n° {connaitre} — Faire connaître" in who and "il ne lit aucun projet" in read
-    assert "projects.liens" not in read  # rien à cocher : pas de formulaire vide
+    assert "Faire connaître" in who and "Il ne lit aucun projet." in read
+    assert "Ajouter une dépendance" not in read  # rien à lire de plus : pas de formulaire vide

@@ -60,9 +60,12 @@ import fr.qwartz.mika.data.moi.projects.StateTone
 import fr.qwartz.mika.data.moi.projects.byDay
 import fr.qwartz.mika.data.moi.projects.dayCount
 import fr.qwartz.mika.data.moi.projects.duration
+import fr.qwartz.mika.data.moi.projects.goalKey
 import fr.qwartz.mika.data.moi.projects.happeningIcon
+import fr.qwartz.mika.data.moi.projects.happeningKey
 import fr.qwartz.mika.data.moi.projects.happeningTarget
 import fr.qwartz.mika.data.moi.projects.happeningTone
+import fr.qwartz.mika.data.moi.projects.keyed
 import fr.qwartz.mika.data.moi.projects.moment
 import fr.qwartz.mika.data.moi.projects.nextAbout
 import fr.qwartz.mika.data.moi.projects.nextWhen
@@ -153,9 +156,11 @@ private fun FeedPane(activity: ActivityViewModel, sheet: Sheet, shell: Shell, no
                 if (items.isEmpty()) {
                     item(key = "none") { EmptyNote(R.drawable.ic_m_history, stringResource(R.string.proj_act_none), stringResource(R.string.proj_act_none_sub)) }
                 }
-                for (day in byDay(items, { it.at }, now)) {
-                    item(key = "d${day.label}") { GroupLabel(day.label) }
-                    items(day.items, key = { "e${it.seq}" }) { x -> HappeningRow(x) { openHappening(shell, activity.id, x) } }
+                // une clé par ligne, unique dans toute la liste : une exécution et son commit sont deux lignes du même
+                // événement ; un jour porte son rang, pas son nom (deux groupes peuvent le partager)
+                byDay(keyed(items, ::happeningKey), { it.value.at }, now).forEachIndexed { g, day ->
+                    item(key = "day$g") { GroupLabel(day.label) }
+                    items(day.items, key = { it.key }) { row -> HappeningRow(row.value) { openHappening(shell, sheet, activity.id, row.value) } }
                 }
                 moreRow(activity.cursor > 0 && items.isNotEmpty(), activity.loadingMore, activity::more)
             }
@@ -164,13 +169,14 @@ private fun FeedPane(activity: ActivityViewModel, sheet: Sheet, shell: Shell, no
 }
 
 /** Où mène une ligne du fil : la page de son exécution, de son commit, de sa pull request, de son ticket, de son objectif. */
-private fun openHappening(shell: Shell, project: Int, x: Happening) {
+private fun openHappening(shell: Shell, sheet: Sheet, project: Int, x: Happening) {
     when (val to = happeningTarget(x)) {
         is HappeningTarget.ToRun -> shell.navigate(Route.ProjectPage(project, SheetPages.RUN, to.id))
         is HappeningTarget.ToCommit -> shell.navigate(Route.ProjectCode(project, CodePages.COMMIT, to.sha))
         is HappeningTarget.ToPull -> shell.navigate(pullPage(project, to.number, x.objective))
         is HappeningTarget.ToTicket -> shell.navigate(Route.ProjectTicket(project, to.number))
-        is HappeningTarget.ToGoal -> shell.navigate(Route.ProjectGoal(project, "o${to.objective}"))
+        // une mission s'ouvre sous `m<id>` : la fiche dit si c'en est une
+        is HappeningTarget.ToGoal -> shell.navigate(Route.ProjectGoal(project, goalKey(sheet, to.objective)))
         HappeningTarget.Nowhere -> Unit
     }
 }
@@ -307,11 +313,14 @@ private fun RunsPane(activity: ActivityViewModel, shell: Shell, now: Long) {
             item(key = "none") { EmptyNote(R.drawable.ic_m_history, stringResource(R.string.proj_act_runs_none), stringResource(R.string.proj_act_runs_none_sub)) }
         }
         var left = items.size
-        for (day in byDay(items, { it.at }, now)) {
-            item(key = "d${day.label}") { GroupLabel(day.label) }
+        byDay(keyed(items) { "r${it.id}" }, { it.value.at }, now).forEachIndexed { g, day ->
+            item(key = "day$g") { GroupLabel(day.label) }
             left -= day.items.size
             val last = left == 0
-            items(day.items, key = { "r${it.id}" }) { r -> RunRow(r, last && r === day.items.last()) { shell.navigate(Route.ProjectPage(activity.id, SheetPages.RUN, r.id)) } }
+            items(day.items, key = { it.key }) { row ->
+                val r = row.value
+                RunRow(r, last && row === day.items.last()) { shell.navigate(Route.ProjectPage(activity.id, SheetPages.RUN, r.id)) }
+            }
         }
         moreRow(activity.runsCursor > 0 && items.isNotEmpty() && items.size < page.total, activity.loadingMore, activity::moreRuns)
     }
@@ -359,7 +368,7 @@ private fun NotebookPane(activity: ActivityViewModel, sheet: Sheet, now: Long) {
                 }
             }
             if (page.totalCut) item(key = "cut") { Hint(stringResource(R.string.proj_act_cut), modifier = Modifier.padding(12.dp)) }
-            items(items, key = { "n${it.seq}" }) { n -> NoteCard(n, now) }
+            keyedItems(items, { "n${it.seq}" }) { n -> NoteCard(n, now) }
             moreRow(activity.notesCursor > 0 && items.isNotEmpty(), activity.loadingMore, activity::moreNotes)
         }
     }
@@ -410,7 +419,8 @@ internal fun RunScreen(graph: AppGraph, route: Route.ProjectPage) {
         project.resume()
         vm.resume()
     }
-    var pane by rememberSaveable { mutableStateOf(PANE_STEPS) }
+    // par route : une autre exécution s'ouvre sur son premier volet
+    var pane by rememberSaveable(route.id, route.key) { mutableStateOf(PANE_STEPS) }
     DetailPage(
         title = stringResource(R.string.proj_act_tab_runs),
         projectTitle = project.sheet.valueOrNull?.project?.title,

@@ -28,6 +28,7 @@
     holdMs: 120 * 1000, // le temps laissé pour apprendre le nom d'une conversation, quand des exclusions sont réglées
     pausesMax: 50,
     serverErrorsMax: 8, // un même lot refusé autant de fois de suite par la même erreur 5xx est écarté
+    maxProfiles: 200, // par envoi : les profils des auteurs et des mentionnés de ses messages (ADR 0298)
   };
 
   const KINDS = ["dm", "group", "channel", "meeting", "other"];
@@ -221,6 +222,15 @@
     return { id: T.cut(String(id), 300), title: clean(i.title, 120), kind: wireKind(i.kind) };
   }
 
+  /** Un profil tel qu'il part (ADR 0298) : ses champs recoupés, ses numéros bornés. */
+  function wireProfile(p) {
+    const o = p || {};
+    return { id: T.cut(String(o.id || ""), 200), name: clean(o.name, 120), email: T.cut(String(o.email || ""), 254),
+      title: clean(o.title, 120), company: clean(o.company, 120), department: clean(o.department, 120),
+      tenant: clean(o.tenant, 120),
+      phones: (Array.isArray(o.phones) ? o.phones : []).slice(0, 3).map(function (n) { return T.cut(String(n), 40); }) };
+  }
+
   /** La longueur d'une chaîne en octets UTF-8 (ce que compte le plafond du serveur). */
   function utf8Length(s) {
     let n = 0;
@@ -257,8 +267,27 @@
 
     function open() {
       current = { body: { self: self, conversations: [], messages: [] }, ids: [], convs: [], bytes: emptyBytes,
-        known: new Set() };
+        known: new Set(), profiles: [] };
       out.push(current);
+    }
+    // les profils des auteurs et des mentionnés de ses messages, chacun une fois par lot ; un profil qui ne tient
+    // plus (nombre, octets) attend le prochain envoi de cette personne
+    function addProfiles(m) {
+      if (!o.profile || m.deleted) return;
+      const ids = [m.authorId].concat(m.mentions || []);
+      for (const raw of ids) {
+        const id = String(raw || "").toLowerCase();
+        if (!id || current.profiles.indexOf(id) >= 0 || current.profiles.length >= LIMITS.maxProfiles) continue;
+        const p = o.profile(id);
+        if (!p) continue;
+        const wire = wireProfile(p);
+        const bytes = utf8Length(JSON.stringify(wire)) + 1 + (current.body.profiles ? 0 : utf8Length(',"profiles":[]'));
+        if (current.bytes + bytes > maxBytes) continue;
+        if (!current.body.profiles) current.body.profiles = [];
+        current.body.profiles.push(wire);
+        current.profiles.push(id);
+        current.bytes += bytes;
+      }
     }
     function entryFor(conv) {
       return wireConversation(conv, o.info ? o.info(conv) : null);
@@ -291,6 +320,7 @@
       current.body.messages.push(wire);
       current.ids.push(m.id);
       current.bytes += bytes;
+      addProfiles(m);
     }
 
     for (const conv of o.extra || []) {
@@ -302,7 +332,7 @@
       addConversation(conv, entry, bytes);
     }
 
-    return out.map(function (b) { return { body: b.body, ids: b.ids, convs: b.convs }; });
+    return out.map(function (b) { return { body: b.body, ids: b.ids, convs: b.convs, profiles: b.profiles }; });
   }
 
   // ── Attendre ───────────────────────────────────────────────────────────────
@@ -357,6 +387,7 @@
   return { LIMITS: LIMITS, admit: admit, pruneSeen: pruneSeen, exclusions: exclusions, isExcluded: isExcluded,
     named: named, held: held, isOwn: isOwn, mentionsSelf: mentionsSelf, mri: mri, isSelfId: isSelfId, clean: clean,
     selfMri: selfMri, wireKind: wireKind, wireMessage: wireMessage, wireConversation: wireConversation,
+    wireProfile: wireProfile,
     utf8Length: utf8Length, batches: batches, retryAfterSeconds: retryAfterSeconds, backoffSeconds: backoffSeconds,
     serverStrike: serverStrike, notePause: notePause, prunePauses: prunePauses, pauseOpen: pauseOpen,
     inPause: inPause, serverAddress: serverAddress };

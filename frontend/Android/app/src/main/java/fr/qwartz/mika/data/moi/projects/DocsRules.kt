@@ -169,7 +169,8 @@ fun headingsOf(text: String): List<Pair<Int, String>> {
 /**
  * Ce qu'on écrit d'une page, tant que ce n'est pas enregistré : la version lue ([base], celle que l'enregistrement
  * nomme ; 0 : une page nouvelle), le texte lu à cette version ([read]) et ce qui est tapé depuis ([text]) ; un refus du
- * serveur avec ses mots ([refusal]), et s'il dit que la page a changé depuis la lecture ([conflict], 409).
+ * serveur avec ses mots ([refusal]), et si la page a changé depuis la lecture ([conflict]). [born] : quand la page lue
+ * est née — une page supprimée puis recréée sous le même chemin en est une autre.
  */
 data class Draft(
     val path: String,
@@ -178,6 +179,7 @@ data class Draft(
     val text: String,
     val refusal: String = "",
     val conflict: Boolean = false,
+    val born: Long = 0,
 ) {
     /** La page a-t-elle été modifiée sans être enregistrée ? */
     val dirty: Boolean get() = text != read
@@ -188,17 +190,33 @@ data class Draft(
     /** Enregistré : la version rendue devient la version lue, plus rien n'est en attente. */
     fun saved(version: Int): Draft = copy(base = version, read = text, refusal = "", conflict = false)
 
-    /** Refusé : les mots du serveur se disent, et **ce qui est écrit reste**. Un 409 est un conflit : rien n'est écrasé. */
-    fun refused(code: Int, words: String): Draft = copy(refusal = words, conflict = code == 409)
+    /**
+     * Refusé : les mots du serveur se disent, et **ce qui est écrit reste**. C'est un conflit seulement si la page a
+     * bougé depuis la lecture ([moved], voir [movedOn]) — ou si, après un 409, elle n'a pas pu se relire pour le
+     * savoir : rien n'est écrasé, il faut la relire avant de reprendre. Le serveur répond 409 à d'autres refus — le
+     * même texte, une page disparue, une borne atteinte — qui n'en sont pas un.
+     */
+    fun refused(words: String, moved: Boolean = false): Draft = copy(refusal = words, conflict = moved)
+
+    /**
+     * La page a-t-elle bougé depuis la lecture ? Elle existe ([current], relue après un 409 ; `null` : introuvable ou
+     * injoignable) et n'en est plus à la version que le brouillon nomme — ce qui vaut aussi pour une page nouvelle
+     * (`base` 0) qui existe déjà.
+     */
+    fun movedOn(current: DocPage?): Boolean = current != null && current.version != base
+
+    /** Ce brouillon est-il celui de cette page ? Non, si elle est née après celle qu'on a lue (supprimée, puis recréée). */
+    fun isOf(page: DocPage): Boolean = born == page.createdAt
 
     /**
      * Reprendre après un conflit, une fois la version actuelle relue : elle devient la version de départ, le texte tapé
      * reste entier. L'enregistrement qui suit en fait une version de plus, sans rien écraser à l'aveugle.
      */
-    fun rebased(current: DocPage): Draft = copy(base = current.version, read = current.text, refusal = "", conflict = false)
+    fun rebased(current: DocPage): Draft =
+        copy(base = current.version, read = current.text, refusal = "", conflict = false, born = current.createdAt)
 
     companion object {
-        fun of(page: DocPage): Draft = Draft(page.path, page.version, page.text, page.text)
+        fun of(page: DocPage): Draft = Draft(page.path, page.version, page.text, page.text, born = page.createdAt)
 
         /** Une page nouvelle : rien n'est lu (`base` 0), son premier texte est déjà à enregistrer. */
         fun fresh(path: String, text: String = ""): Draft = Draft(path, 0, "", text)
@@ -211,6 +229,23 @@ data class DocSave(val path: String, val text: String, val word: String, val bas
 const val WORD_MAX = 200
 
 fun saveOf(d: Draft, word: String): DocSave = DocSave(d.path, d.text, word.trim().take(WORD_MAX), d.base)
+
+/** Le mot de la première version d'une page (celui du client web). */
+const val NEW_PAGE_WORD = "Création de la page"
+
+/**
+ * Une page nouvelle, créée dès qu'on valide « Nouvelle page » : son titre pour premier texte, `base` 0. Le serveur juge
+ * alors son chemin (trop long, trop profond, déjà pris) **avant** qu'on ait écrit quoi que ce soit.
+ */
+fun newPageSave(path: String, title: String): DocSave =
+    DocSave(path, if (title.isBlank()) "" else "# ${title.trim()}\n\n", NEW_PAGE_WORD, 0)
+
+/**
+ * Une image choisie doit-elle être réencodée avant de partir ? Plus lourde que ce que l'espace garde, ou d'une sorte
+ * qu'il ne garde pas (`limits.image_kinds` : une photo HEIC, AVIF, BMP) — le serveur la refuserait.
+ */
+fun imageReencoded(limits: DocLimits, size: Long, mime: String): Boolean =
+    (limits.imageBytes in 1 until size) || (limits.imageKinds.isNotEmpty() && mime.trim().lowercase() !in limits.imageKinds)
 
 // ── Les gestes sur une page, une image ──────────────────────────────────
 

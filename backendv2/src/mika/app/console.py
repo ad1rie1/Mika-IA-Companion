@@ -32,7 +32,7 @@ NAVIGATION: tuple[NavGroup, ...] = (
     NavGroup("Relations & échanges", (
         # un fichier qu'elle a envoyé se lit sur la fiche de sa personne (onglet Fichiers) : sa fiche vit ici
         Destination("personnes", "Personnes", "Les gens qu'elle connaît et ce qui les lie.",
-                    subjects=("person", "partage"), lead="Vue d'ensemble"),
+                    subjects=("person", "partage", "contact"), lead="Vue d'ensemble"),
         Destination("identites", "Identités", "Qui parle derrière chaque moyen de communication, et ce "
                     "que ça ouvre.",
                     subjects=("handle",)),
@@ -60,11 +60,12 @@ NAVIGATION: tuple[NavGroup, ...] = (
     )),
     NavGroup("À valider", (
         # une seule file : ce qui attend une décision, quelle qu'en soit la sorte ; ses onglets (courriers, Teams,
-        # identités, noms) sont déclarés par la composition (``app/handmade/waiting.py``, ADR 0177)
+        # identités, rapprochements) sont déclarés par la composition (``app/handmade/waiting.py``, ADR 0177)
         Destination("approbations", "À valider", "Ce qui attend ta décision — ce qu'elle voudrait faire sortir de "
-                    "la machine, les identités à confirmer, les noms à relier — et ce qui en a été décidé.",
+                    "la machine, les identités à confirmer, les rapprochements — et ce qui en a "
+                    "été décidé.",
                     builtin=("approbations.en_attente", "approbations.historique"), dynamic=True,
-                    order=("en_attente", "courriers", "teams", "identites", "noms", "historique")),
+                    order=("en_attente", "courriers", "teams", "identites", "rapprochements", "historique")),
     )),
     NavGroup("Relations & échanges", (
         Destination("courrier", "Courrier", "Lire les messages, répondre et suivre les brouillons de chaque boîte.",
@@ -128,7 +129,7 @@ FACULTY_LABELS: dict[str, str] = {
     "world": "Son monde et son corps", "shares": "Fichiers envoyés", "attachments": "Pièces reçues",
     "imaging": "Dessins", "location": "Localisation", "forge_signals": "Signaux de ses apps",
     "mcp": "Outils extérieurs", "web": "Recherche web", "wakeup": "Réveils par API", "teams": "Teams",
-    "phone": "Messages du téléphone", "trips": "Carte et voyages",
+    "phone": "Messages du téléphone", "trips": "Carte et voyages", "contacts": "Annuaire",
 }
 
 #: Les sections du prompt, nommées par ce qu'elles lui montrent (Pourquoi a-t-elle dit ça ?, Prompt).
@@ -282,6 +283,8 @@ PROCESS_LABELS: dict[str, str] = {
     "wakeup.expire": "Laisser tomber les réveils par API restés trop longtemps en attente",
     "teams.triage": "Trier les messages Teams reçus",
     "teams.images": "Regarder les images des messages Teams",
+    "contacts.ingest": "Ranger dans l'annuaire qui elle lit dans Teams et le courrier",
+    "contacts.portrait": "Se faire une idée de qui échange avec un compte, à partir de ses derniers messages",
     "teams.expire": "Laisser tomber les réponses Teams restées sans accord ou sans envoi",
     "teams.answered": "Refuser ses réponses Teams auxquelles on a répondu autrement dans la discussion",
     "phone.expire": "Laisser tomber les réponses proposées sur le téléphone restées sans geste",

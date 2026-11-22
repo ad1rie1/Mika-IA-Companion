@@ -35,6 +35,9 @@ REREAD_HELP = ("Avant que son travail sorte, une autre exécution le relit sans 
 REREAD_UNKNOWN = "jamais, avant de sortir, ou à chaque « fait »"
 #: sur la ligne d'un objectif : le titre de son détail (la fiche dessinée le reprend par ce titre)
 TITLE = "Sa relecture"
+#: le verdict d'une relecture indépendante, en court : les mots que disent l'écran Projets (par l'API par
+#: personne) et la fiche de la console
+REVIEW_WORDS = {True: "relu : rien à redire", False: "relu : des constats à reprendre"}
 WORDS = {
     "good": "relu au commit {sha}{by} : bon",
     "refused": "relu au commit {sha}{by} : refusé ({n} refus de suite)",

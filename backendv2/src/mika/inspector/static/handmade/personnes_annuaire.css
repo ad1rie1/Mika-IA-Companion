@@ -1,0 +1,101 @@
+/* L'annuaire (ADR 0298) : Personnes › Annuaire, la fiche d'un contact et d'une organisation, les onglets « Ce qui
+   l'identifie » et « Contacts » d'une personne, À valider › Rapprochements. Ce qui s'ajoute à personnes.css et
+   person.css ; jetons de console.css seulement, jamais de couleur en dur (la maquette validée,
+   output/annuaire-complet/maquette/maquette.css). */
+
+/* connue de loin : un avatar neutre, cerné d'un pointillé ; une organisation : un avatar carré */
+.now-avatar.far, .person-avatar.far { background: var(--sunken); color: var(--text-2); box-shadow: none;
+  outline: 1px dashed var(--border-strong); outline-offset: -1px; }
+.now-avatar.org, .person-avatar.org { border-radius: var(--radius); background: var(--info-bg); color: var(--info); box-shadow: none; }
+.person-avatar.org { font-size: 2.2rem; }
+.pers-head .now-muted { font-size: 13px; font-weight: 400; }
+
+/* d'où elle la connaît : une étiquette par source, avec son compte */
+.pers-src { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.now-tag.src { background: var(--raised); color: var(--text-2); box-shadow: inset 0 0 0 1px var(--border-strong);
+  text-transform: none; letter-spacing: 0; font-weight: 500; }
+.now-tag.src b { color: var(--text); font-weight: 600; }
+.now-tag.far { background: var(--raised); color: var(--muted); box-shadow: inset 0 0 0 1px var(--border-strong); }
+.now-tag.org { background: var(--info-bg); color: var(--info); }
+a.now-tag:hover { text-decoration: none; filter: brightness(.97); }
+
+/* ce qui l'identifie, sur une ligne : la sorte en petit, la valeur */
+.pers-ids { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; padding: 0; list-style: none; font-size: 13px; }
+.pers-ids li { min-width: 0; overflow-wrap: anywhere; }
+.pers-ids .k { margin-right: 6px; color: var(--muted); font-size: 12px; }
+.pers-ids .v { color: var(--text); font-family: var(--mono); font-size: 12.5px; }
+
+/* de qui elle est le contact */
+.pers-of { margin: 0; font-size: 13px; color: var(--text-2); }
+.pers-of .now-muted { margin-right: 4px; }
+
+/* l'idée qu'elle s'en fait, en une ligne */
+.pers-idea { margin: 0; font-size: 13px; color: var(--text-2); font-style: italic; }
+
+/* la recherche de l'annuaire, sur toute la largeur */
+.dir-find { display: flex; gap: 8px; margin: 0; }
+.dir-find input[type="search"] { flex: 1 1 auto; min-width: 0; height: var(--ctl, 32px); padding: 0 12px;
+  border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--raised); color: var(--text); font: inherit; }
+.dir-find .btn { flex: none; }
+
+/* le bandeau unique d'une fiche (un rapprochement à valider) */
+.fiche-alert { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 0; padding: 12px 16px;
+  border: 1px solid var(--warn-line); border-radius: var(--radius); background: var(--warn-bg); color: var(--text); }
+.fiche-alert p { margin: 0; flex: 1 1 320px; }
+.fiche-alert .btn { flex: none; }
+
+/* la bande de chiffres, qui mène à ses onglets */
+.fiche-figures { display: flex; flex-wrap: wrap; gap: 10px 28px; margin: 0; padding: 0; list-style: none; }
+.fiche-figures a, .fiche-figures span.fig { color: var(--muted); }
+.fiche-figures a:hover { color: var(--text); text-decoration: none; }
+.fiche-figures .now-num { margin-right: 6px; color: var(--text); font-family: var(--display); font-size: 1.35rem; font-weight: 600; }
+
+/* où elle la voit : une ligne par compte */
+.seen-where { margin: 0; padding: 0; list-style: none; }
+.seen-where > li { display: grid; grid-template-columns: 132px minmax(0, 1fr) auto; gap: 4px 14px; align-items: baseline;
+  padding: 10px 0; border-top: 1px solid var(--border); }
+.seen-where > li:first-child { border-top: 0; padding-top: 2px; }
+.seen-where .src-name { color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+  overflow-wrap: anywhere; }
+.seen-where .what { min-width: 0; }
+.seen-where .what p { margin: 0; }
+.seen-where .what .person-meta { margin-top: 2px; }
+.seen-where .when { color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+
+/* ce qui l'identifie : une tuile par identifiant, sa sorte en tête */
+.id-tile { display: flex; flex-direction: column; gap: 6px; }
+.id-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.id-top .now-tag { flex: none; }
+.id-tile .id-value { margin: 0; }
+.id-kind { display: block; margin: 0; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; }
+.id-value { font-family: var(--mono); font-size: 13.5px; overflow-wrap: anywhere; }
+.id-value a { color: var(--text); }
+.id-why { margin: 0; font-size: 12.5px; color: var(--text-2); }
+.id-why.merged::before { content: "↔ "; color: var(--ok); font-weight: 700; }
+.id-tile .person-entry-facts { display: flex; flex-wrap: wrap; gap: 2px 12px; margin: 0; color: var(--text-2); font-size: 12.5px; }
+.id-tile .person-entry-facts .k { margin-right: 4px; color: var(--muted); }
+.id-tile form { margin: 0; }
+
+/* qui peut savoir ce qu'elle en a lu, ses noms, son organisation */
+.who-knows { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.who-knows li { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+
+/* À valider › Rapprochements : deux fiches côte à côte */
+.pair { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 16px; align-items: stretch; }
+.pair-side { display: grid; align-content: start; gap: 7px; padding: 14px 16px; border: 1px solid var(--border);
+  border-radius: var(--radius); background: var(--raised); min-width: 0; }
+.pair-side .pers-head { margin: 0; }
+.pair-mid { display: grid; place-items: center; color: var(--muted); font-size: 22px; }
+.pair-why { margin: 0; color: var(--text-2); font-size: 13px; }
+@media (max-width: 800px) { .pair { grid-template-columns: 1fr; } .pair-mid { transform: rotate(90deg); } }
+
+/* une liste d'une seule colonne (les personnes d'une organisation) */
+.pers-dir.one { grid-template-columns: minmax(0, 1fr); }
+.dir-modes { margin-left: 0; }
+
+@media (max-width: 640px) {
+  .seen-where > li { grid-template-columns: minmax(0, 1fr) auto; }
+  .seen-where .src-name { grid-column: 1 / -1; }
+  .dir-find { flex-wrap: wrap; }
+}

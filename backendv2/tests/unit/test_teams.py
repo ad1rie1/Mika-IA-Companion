@@ -780,6 +780,33 @@ def test_only_a_one_to_one_is_named_after_the_other_person(tmp_path):
         store.close()
 
 
+def test_a_one_to_one_is_named_after_the_other_person_even_with_a_teams_title(tmp_path):
+    """Teams donne à un tête-à-tête, qui ne se renomme pas, la liste de ses membres, toi compris : son nom est
+    l'autre personne, dans la liste comme dans l'aperçu ; ton nom ne fait pas sortir tous tes tête-à-tête d'une
+    recherche. Personne d'autre n'y a encore écrit : ce que Teams en dit, faute de mieux."""
+    clock = SimClock(START)
+    store = TeamsStore(lambda: TeamsConfig(), tmp_path / "teams.db", now=clock.now)
+    alone = "19:bruno_adrien@unq.gbl.spaces"
+    lot = {"self": {"id": SELF, "name": "Adrien Dupont"},
+           "conversations": [conv(DM, title="Adrien Dupont, Alice Martin"),
+                             conv(alone, title="Adrien Dupont, Bruno Roy"),
+                             conv(GROUP, title="Projet Adrien", kind="group")],
+           "messages": [msg(clock, 1, "Tu as vu ?"),
+                        msg(clock, 2, "Je t'écris d'abord", conv=alone, author="Adrien Dupont", author_id=SELF,
+                            own=True),
+                        msg(clock, 3, "On fait le point ?", conv=GROUP, author="Marc Petit", author_id="8:orgid:m")]}
+    try:
+        store.store_batch(PRINCIPAL, batch_of(lot, clock.now() // 1000)[0], clock.now())
+        assert store.title(PRINCIPAL, DM) == "Alice Martin"
+        assert store.title(PRINCIPAL, alone) == "Adrien Dupont, Bruno Roy"
+        assert {c.id: c.title for c in store.conversations(10)} == {
+            DM: "Alice Martin", alone: "Adrien Dupont, Bruno Roy", GROUP: "Projet Adrien"}
+        assert [c.id for c in store.conversations(10, text="alice")] == [DM]
+        assert {c.id for c in store.conversations(10, text="dupont")} == {alone}
+    finally:
+        store.close()
+
+
 # ── La demande en cours et le compte où elle prépare, dits une fois (audit du 2026-11-05, K10-03) ──
 
 

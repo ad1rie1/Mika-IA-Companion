@@ -37,7 +37,10 @@ def test_a_cell_names_the_person_its_link_leads_to():
     assert people.person_of(None) == ""
 
 
-def test_the_directory_says_each_person_by_her_means_of_communication(world):  # noqa: F811
+def test_the_directory_says_each_person_by_what_identifies_her(world):  # noqa: F811
+    """ADR 0298 : l'annuaire dit qui lui parle comme la vue d'ensemble (son nom, propriétaire), puis ce qui
+    l'identifie, d'où elle la connaît et ses liens ; il se cherche (ses personnes connues de loin aussi :
+    ``test_console_annuaire.py``)."""
     client, live, _ = world
     bootstrap(client)
     chat(client, "salut ! moi c'est Adrien")
@@ -46,21 +49,20 @@ def test_the_directory_says_each_person_by_her_means_of_communication(world):  #
          Origin.EXTERNAL)
     page = drawn(client, "/admin/personnes/personnes")
     assert 'data-tab="personnes/personnes"' in page
-    entry = _between(page, 'class="pers-dir-item"', "</li>\n")
-    # dite comme sur la vue d'ensemble : son nom, propriétaire ; puis ses moyens de communication, le principal d'abord
+    entry = _between(page, 'class="pers-dir-item"', '</div>\n</li>')
+    # dite comme sur la vue d'ensemble : son nom, propriétaire ; puis ce qui l'identifie, d'où elle la connaît
     assert 'href="/admin/fiche/person/user_1"' in entry and "propriétaire" in entry
-    handles = _between(entry, 'class="pers-handles"', "</ul>")
-    assert handles.index("adrien · compte opérateur") < handles.index("compte extérieur")
-    assert "authentifiée" in handles and "principal" in handles
-    assert 'href="/admin/fiche/handle/ext_12"' in handles
-    assert "lui a écrit" in entry and "certitude" in entry
+    ids = _between(entry, 'class="pers-ids"', "</ul>")
+    assert ids.index("identifiant") < ids.index("compte extérieur") and "Adrien T" in ids
+    assert "Chat" in _between(entry, 'class="pers-src"', "</ul>")
+    assert "lui a écrit" in entry
     assert 'href="/admin/fiche/person/user_1?onglet=echanges"' in entry
-    assert "1 avec plusieurs moyens de communication" in page
-    assert 'href="?vue_pg1=table"' in page  # la bascule « Tableau » de la faculté
-    # il se parcourt : on cherche quelqu'un depuis la vue d'ensemble, une ancienne recherche n'a plus d'effet
-    assert '<form class="filters"' not in page
-    old = drawn(client, "/admin/personnes/personnes?q=personne-inconnue")
-    assert 'href="/admin/fiche/person/user_1"' in old and "ne correspond" not in old
+    assert "1 lui parle" in page
+    assert "Tableau</a>" in page  # sa bascule à lui (« Fiches / Tableau »)
+    # une recherche à lui, et « Qui » au bout de la barre, jamais le formulaire « Filtrer »
+    assert 'class="dir-find"' in page and '<form class="filters"' not in page and 'class="seg"' in page
+    missing = drawn(client, "/admin/personnes/personnes?q=personne-inconnue")
+    assert 'href="/admin/fiche/person/user_1"' not in missing and "Personne ne correspond" in missing
 
 
 def test_links_go_by_closeness_with_the_silence_on_a_gauge(world):  # noqa: F811

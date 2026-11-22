@@ -536,9 +536,9 @@ de Messages et les pousse au serveur. Les deux routes passent sous le jeton de l
                  "own": false}]}
   ```
 
-  200 messages au plus. `app` : `whatsapp`, `whatsapp_business`, `messages` ou `samsung_messages`. `id`, `thread` et
-  `sender` sont des empreintes calculées par le téléphone (l'expéditeur est vide quand c'est toi qui as écrit,
-  `own`). `title` est le nom du groupe. `time` est en ms. Un message illisible (clé qui n'est pas en hex, appli
+  200 messages au plus. `app` : `whatsapp`, `whatsapp_business`, `messenger` (ADR 0299), `messages` ou
+  `samsung_messages`. `id`, `thread` et `sender` sont des empreintes calculées par le téléphone (l'expéditeur est
+  vide quand c'est toi qui as écrit, `own`). `title` est le nom du groupe. `time` est en ms. Un message illisible (clé qui n'est pas en hex, appli
   inconnue, texte vide, date invraisemblable) est écarté seul. Réponse : `{"ok": true, "accepted", "known",
   "dropped"}`. Un même `id` renvoyé est « connu », jamais réécrit.
 - `POST /api/phone/settled` :

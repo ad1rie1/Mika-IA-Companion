@@ -398,7 +398,7 @@ def _nameable(s: IdentityState, frame: Frame, key: str) -> bool:
 
 def _can_bind_name(s: IdentityState, frame: Frame, key: str, ports: Mapping[str, Any]) -> bool:
     """« C'est la personne dont on lui a parlé » n'est offerte que si au moins un nom dont on lui a parlé attend
-    encore d'être relié (``free_names``, l'index de sa mémoire, comme la file « À valider › Noms à relier » le lit) :
+    encore d'être relié (``free_names``, l'index de sa mémoire, comme la file « À valider › Rapprochements » le lit) :
     sans lui, l'action était en vue sur chaque fiche alors qu'elle n'avait rien à rattacher — c'est la file qui
     propose les noms et ouvre la fiche, le formulaire pré-rempli (ADR 0180 ; audit du 2026-11-05, C3-08). Dès qu'un
     nom attend, elle revient sur toute fiche qui s'y prête : relier un surnom que la file ne propose pas, ou un nom

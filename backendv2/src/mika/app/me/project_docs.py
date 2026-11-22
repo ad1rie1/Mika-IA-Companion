@@ -284,7 +284,10 @@ async def _write(call: Call, r: Reach, path: str, base: int, fixed: Mapping[str,
     """Une version de plus, partie de ``base`` — et, une fois écrite, la preuve qu'elle est bien la dernière : deux
     écritures arrivées au même instant ne valent pas toutes deux, et la seconde doit le savoir (409)."""
     hidden = {"via": docs.WEB, **{k: str(v) for k, v in (fixed or {}).items()}}
-    stale(scene(call), r, _store(call), path, base)
+    # la redite d'un envoi déjà fait (une coupure, puis le client réessaie avec la même clé) ne se juge pas contre la
+    # version que le premier envoi a écrite : l'action la reconnaît et ne refait rien (``deduped``)
+    if not call.repeated():
+        stale(scene(call), r, _store(call), path, base)
     outcome = await call.act(words.WRITE, form(fixed=hidden, path=path, base=base, **values), subject=str(r.p.id))
     got = done(outcome)
     if not outcome.deduped and not docs.landed(_store(call), r.p.id, path, outcome.seqs):

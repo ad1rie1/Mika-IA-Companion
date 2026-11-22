@@ -94,9 +94,9 @@ private const val PANE_REPORTS = "rendus"
 private const val PANE_INFOS = "infos"
 
 /** Ce que l'écran demande avant un geste : une raison, une confirmation. */
-private sealed interface GoalAsk {
+private sealed interface GoalAsk : java.io.Serializable {
     data class RefuseCheckpoint(val milestone: Int) : GoalAsk
-    data class DropMilestone(val milestone: Milestone) : GoalAsk
+    data class DropMilestone(val milestone: Int, val text: String) : GoalAsk
     data object DropGoal : GoalAsk
 }
 
@@ -111,19 +111,28 @@ fun GoalScreen(graph: AppGraph, route: Route.ProjectGoal) {
     }
     val now = rememberNow(wallMs = graph.clock::wallMs)
     var pane by rememberSaveable(route.id, route.key) { mutableStateOf(if (route.key.startsWith("m")) PANE_REPORTS else PANE_STEPS) }
-    var editing by remember { mutableStateOf(false) }
+    // une feuille ou une fenêtre ouverte survit à une rotation (et ce qu'on y tape aussi)
+    var editing by rememberSaveable(route.id, route.key) { mutableStateOf(false) }
     // le jalon dont la feuille est ouverte : `null` fermé, 0 un jalon neuf, sinon celui qu'on modifie
-    var milestoneForm by remember { mutableStateOf<Int?>(null) }
-    var ask by remember { mutableStateOf<GoalAsk?>(null) }
-    var dropped by remember { mutableStateOf(false) }
+    var milestoneForm by rememberSaveable(route.id, route.key) { mutableStateOf<Int?>(null) }
+    var ask by rememberSaveable(route.id, route.key) { mutableStateOf<GoalAsk?>(null) }
+    var dropped by rememberSaveable(route.id, route.key) { mutableStateOf(false) }
     val sheet = vm.sheet.valueOrNull
     val goal = sheet?.let { findGoal(it, route.key) }
     val where = goal?.let { ProjectViewModel.goalWhere(it.id) }.orEmpty()
-    // l'objectif retiré n'est plus là : on revient à la liste
-    LaunchedEffect(vm.gestures.finished, dropped) {
-        if (dropped && where.isNotEmpty() && vm.gestures.finished == where) {
-            vm.gestures.acknowledge()
-            shell.back()
+    // l'objectif qui s'ouvre ne redit pas un refus d'avant, et ne se referme pas sur un geste abouti après son départ
+    if (where.isNotEmpty()) FreshEntry(vm.gestures, where)
+    // l'objectif retiré n'est plus là : on revient à la liste — sur ce geste-là, que [GestureRunner.finished] ne dit
+    // qu'une fois abouti (un geste qui part efface le précédent)
+    LaunchedEffect(vm.gestures.finished, vm.gestures.busy, dropped) {
+        if (dropped && where.isNotEmpty()) {
+            if (vm.gestures.finished == where) {
+                vm.gestures.acknowledge()
+                shell.back()
+            } else if (vm.gestures.busy.isEmpty()) {
+                // refusé : l'objectif est toujours là, on y reste — et un geste suivant ne ramène pas en arrière
+                dropped = false
+            }
         }
     }
     SectionScaffold(topBar = { MikaTopBar(title = stringResource(R.string.proj_tab_objectives), nav = BarNav.BACK, subtitle = sheet?.project?.title) }) { modifier ->
@@ -133,7 +142,8 @@ fun GoalScreen(graph: AppGraph, route: Route.ProjectGoal) {
                 Notice(stringResource(R.string.proj_goal_gone), modifier, action = stringResource(R.string.shell_back), onAction = shell.back)
                 return@LoadBox
             }
-            val busy = vm.gestures.busy.isNotEmpty()
+            // aucun geste sur une fiche d'avant : elle se relit au retour sur l'écran et après chaque geste
+            val busy = vm.gestures.busy.isNotEmpty() || vm.stale
             Column(modifier) {
                 GoalHead(g, s, now, busy, onLaunch = { vm.pilot("now", objective = g.id, where = ProjectViewModel.goalWhere(g.id)) }, onEdit = { editing = true })
                 val panes = when (g) {
@@ -151,6 +161,7 @@ fun GoalScreen(graph: AppGraph, route: Route.ProjectGoal) {
                 PaneTabs(panes, shown) { pane = it }
                 Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     RefusalNote(vm.gestures.refusalAt(ProjectViewModel.goalWhere(g.id)))
+                    StaleNote(vm.staleError, vm::reread)
                     when (g) {
                         is Goal.Once -> when (shown) {
                             PANE_REPORTS -> Reports(vm, s, g.id, now, g.o.result.ifBlank { stringResource(R.string.proj_reports_none) }, g.o)
@@ -160,7 +171,7 @@ fun GoalScreen(graph: AppGraph, route: Route.ProjectGoal) {
                                 onValidate = { m -> vm.checkpoint(g.o.id, m, "validate") },
                                 onRefuse = { m -> ask = GoalAsk.RefuseCheckpoint(m) },
                                 onEdit = { m -> milestoneForm = m },
-                                onDrop = { m -> ask = GoalAsk.DropMilestone(m) },
+                                onDrop = { m -> ask = GoalAsk.DropMilestone(m.id, m.text) },
                                 onAdd = { milestoneForm = 0 },
                             )
                         }
@@ -178,6 +189,10 @@ fun GoalScreen(graph: AppGraph, route: Route.ProjectGoal) {
             }
         }
     }
+    // rien n'est parti (la fiche se relit à l'instant, un autre geste attend sa réponse) : on le dit — une fenêtre où
+    // l'on tape reste, avec ce qui est tapé
+    val notSent = stringResource(R.string.proj_not_sent)
+    val notSentPlain = stringResource(R.string.proj_not_sent_plain)
     if (sheet != null && goal != null) {
         if (editing) GoalFormSheet(vm, sheet, goal) { editing = false }
         val o = (goal as? Goal.Once)?.o
@@ -196,14 +211,11 @@ fun GoalScreen(graph: AppGraph, route: Route.ProjectGoal) {
                 max = 2000,
                 danger = true,
                 onDismiss = { ask = null },
-                onConfirm = { reason ->
-                    ask = null
-                    vm.checkpoint(goal.id, a.milestone, "refuse", reason)
-                },
+                onConfirm = { reason -> if (vm.checkpoint(goal.id, a.milestone, "refuse", reason)) ask = null else shell.toast(notSent) },
             )
             is GoalAsk.DropMilestone -> AskDialog(
                 title = stringResource(R.string.proj_milestone_drop),
-                lede = stringResource(R.string.proj_milestone_drop_lede, a.milestone.text),
+                lede = stringResource(R.string.proj_milestone_drop_lede, a.text),
                 label = stringResource(R.string.proj_ask_why_optional),
                 placeholder = "",
                 confirm = stringResource(R.string.proj_remove),
@@ -211,10 +223,7 @@ fun GoalScreen(graph: AppGraph, route: Route.ProjectGoal) {
                 max = 2000,
                 danger = true,
                 onDismiss = { ask = null },
-                onConfirm = { reason ->
-                    ask = null
-                    vm.dropMilestone(goal.id, a.milestone.id, reason)
-                },
+                onConfirm = { reason -> if (vm.dropMilestone(goal.id, a.milestone, reason)) ask = null else shell.toast(notSent) },
             )
             GoalAsk.DropGoal -> AlertDialog(
                 onDismissRequest = { ask = null },
@@ -224,8 +233,9 @@ fun GoalScreen(graph: AppGraph, route: Route.ProjectGoal) {
                     TextButton(
                         onClick = {
                             ask = null
-                            dropped = true
-                            vm.goalStatus(goal, "dropped")
+                            // seulement si le geste est parti : sinon rien n'est à attendre, et on le dit
+                            dropped = vm.goalStatus(goal, "dropped")
+                            if (!dropped) shell.toast(notSentPlain)
                         },
                         colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
                     ) { Text(stringResource(R.string.proj_remove)) }

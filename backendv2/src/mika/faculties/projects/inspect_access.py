@@ -1,4 +1,4 @@
-"""Les accès d'un projet dans la console (ADR 0133, 0134) : « Accès », sous l'onglet Cadre de sa fiche (``acces``,
+"""Les accès d'un projet dans la console (ADR 0133, 0134) : « Accès », sous l'onglet Administration de sa fiche (``acces``,
 réuni : ADR 0281 ; dessiné par la composition), l'action ``projects.acces`` — chaque bouton (ajouter, monter, descendre, retirer, enregistrer) envoie
 tout le tableau, journalisé (``access_set``) ; une ligne ajoutée est fermée : enregistrée dès le clic, elle n'ouvre rien
 avant d'être réglée — et son type de règles sur la page « Droits »."""
@@ -53,7 +53,7 @@ def _row(frame: Frame, a: c.ProjectAccess) -> tuple[str, ...]:
             POLICY_WORDS.get(a.act, a.act), "tous" if not a.tools else ", ".join(a.tools))
 
 
-@PROJECTS.inspect("acces", title="Accès", subject="project", order=33,
+@PROJECTS.inspect("acces", title="Accès", subject="project", order=71,
                   description="Qui peut le voir, le piloter, en recevoir les fichiers et se servir de ses apps, par "
                               "où et quand : des lignes lues de haut en bas, puis la ligne par défaut.")
 def _tab_access(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:

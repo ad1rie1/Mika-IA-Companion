@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
@@ -205,12 +204,12 @@ private fun TodoTab(overview: Overview, now: Long, vm: ProjectsViewModel) {
                 TodoRow(w, now) { shell.navigate(Route.ProjectTodo(w.project, waitingKey(w))) }
             }
         }
-        if (vm.todo.size < overview.todoTotal) {
+        if (vm.todoRest > 0) {
             item(key = "more") {
                 TextButton(onClick = vm::more, enabled = !vm.loadingMore, modifier = Modifier.fillMaxWidth().padding(8.dp)) {
                     MIcon(R.drawable.ic_m_chev_down, null, size = 18.dp)
                     Spacer(Modifier.width(6.dp))
-                    Text(stringResource(R.string.proj_todo_more, overview.todoTotal - vm.todo.size))
+                    Text(stringResource(R.string.proj_todo_more, vm.todoRest))
                 }
             }
         }
@@ -258,7 +257,7 @@ private fun ProjectsTab(overview: Overview, now: Long, vm: ProjectsViewModel) {
                 EmptyNote(R.drawable.ic_m_flag, stringResource(R.string.proj_none), overview.create.why.ifBlank { stringResource(R.string.proj_none_sub) })
             }
         }
-        items(overview.projects, key = { "p${it.id}" }) { p -> ProjectCardView(p, now) { shell.navigate(Route.Project(p.id)) } }
+        keyedItems(overview.projects, { "p${it.id}" }) { p -> ProjectCardView(p, now) { shell.navigate(Route.Project(p.id)) } }
         if (overview.create.can) {
             item(key = "new") {
                 Surface(
@@ -291,7 +290,7 @@ private fun ProjectsTab(overview: Overview, now: Long, vm: ProjectsViewModel) {
                     modifier = Modifier.padding(top = 8.dp),
                 )
             }
-            items(archived, key = { "a${it.id}" }) { a -> ArchivedRow(a, now, vm) }
+            keyedItems(archived, { "a${it.id}" }) { a -> ArchivedRow(a, now, vm) }
         }
     }
 }

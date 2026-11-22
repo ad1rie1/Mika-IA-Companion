@@ -183,11 +183,20 @@ export function saved(d: Draft, version: number): Draft {
 }
 
 /**
- * Refusé : les mots du serveur se disent, et **ce qui est écrit reste**. Un 409 est un conflit — la page a changé
- * depuis la lecture, ou elle existe déjà : rien n'est écrasé, il faut relire avant de reprendre.
+ * Refusé : les mots du serveur se disent, et **ce qui est écrit reste**. C'est un conflit seulement si la page a
+ * bougé depuis la lecture (`moved`, voir `movedOn`) : rien n'est écrasé, il faut relire avant de reprendre. Le
+ * serveur répond 409 à d'autres refus — le même texte, une page disparue, une borne atteinte — qui n'en sont pas un.
  */
-export function refused(d: Draft, status: number, words: string): Draft {
-  return { ...d, refusal: words, conflict: status === 409 };
+export function refused(d: Draft, words: string, moved = false): Draft {
+  return { ...d, refusal: words, conflict: moved };
+}
+
+/**
+ * La page a-t-elle bougé depuis la lecture ? Elle existe (`current`, relue après un 409) et n'en est plus à la
+ * version que le brouillon nomme — ce qui vaut aussi pour une page nouvelle (`base` 0) qui existe déjà.
+ */
+export function movedOn(d: Draft, current: { version: number } | null): boolean {
+  return current !== null && current.version !== d.base;
 }
 
 /**

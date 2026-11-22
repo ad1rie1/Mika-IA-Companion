@@ -85,6 +85,7 @@ import fr.qwartz.mika.ui.shell.MikaTopBar
 import fr.qwartz.mika.ui.shell.SectionScaffold
 import fr.qwartz.mika.ui.shell.Shell
 import fr.qwartz.mika.ui.shell.rememberSessionKey
+import androidx.compose.runtime.saveable.rememberSaveable
 
 /*
  * Les tickets d'un projet (ADR 0296) : l'onglet — une recherche, ses filtres (À toi, Ouverts, Tous), « Nouveau ticket »,
@@ -200,7 +201,7 @@ private fun PriorityMark(label: String, high: Boolean) {
 // ── Un ticket ───────────────────────────────────────────────────────────
 
 /** Un geste du moment qui demande un mot avant de partir. */
-private data class TicketAsk(val verdict: String, val title: String, val ask: AskFor)
+private data class TicketAsk(val verdict: String, val title: String, val ask: AskFor) : java.io.Serializable
 
 @Composable
 fun TicketScreen(graph: AppGraph, route: Route.ProjectTicket) {
@@ -219,13 +220,17 @@ fun TicketScreen(graph: AppGraph, route: Route.ProjectTicket) {
     // un geste abouti change la fiche (ses comptes, ce qui t'attend) : elle se relit
     LaunchedEffect(vm.revision) { if (vm.revision > 0) project.reload() }
     val now = rememberNow(wallMs = graph.clock::wallMs)
-    var asking by remember { mutableStateOf<TicketAsk?>(null) }
-    var editing by remember { mutableStateOf(false) }
+    // une fenêtre ou une feuille ouverte survit à une rotation (et ce qu'on y tape aussi)
+    var asking by rememberSaveable(route.id, route.number) { mutableStateOf<TicketAsk?>(null) }
+    var editing by rememberSaveable(route.id, route.number) { mutableStateOf(false) }
+    // le ticket qui s'ouvre ne redit pas un refus d'avant
+    FreshEntry(vm.gestures, TicketViewModel.HERE)
     val sheet = project.sheet.valueOrNull
     val e = vm.element.valueOrNull
     val asks = sheet?.todo?.any { it.kind == "ticket" && it.number == route.number && it.what == "question" } == true
     val pane = vm.pane.ifEmpty { e?.let { TicketPanes.first(it, asks) } ?: TicketPanes.DESCRIPTION }
-    val busy = vm.gestures.busy.isNotEmpty()
+    // aucun geste sur un ticket d'avant : il se relit au retour sur l'écran et après chaque geste
+    val busy = vm.gestures.busy.isNotEmpty() || vm.stale
     SectionScaffold(
         topBar = { MikaTopBar(title = stringResource(R.string.proj_tab_tickets), nav = BarNav.BACK, subtitle = sheet?.project?.title) },
         bottomBar = {
@@ -248,6 +253,7 @@ fun TicketScreen(graph: AppGraph, route: Route.ProjectTicket) {
                 ) { vm.pane = it }
                 Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     RefusalNote(vm.gestures.refusalAt(TicketViewModel.HERE))
+                    StaleNote(vm.staleError, vm::reread)
                     val veiled = ticket.line.veiled.isNotEmpty()
                     when {
                         pane == TicketPanes.INFOS -> TicketInfos(ticket, sheet, now, shell, route.id)
@@ -267,6 +273,7 @@ fun TicketScreen(graph: AppGraph, route: Route.ProjectTicket) {
             }
         }
     }
+    val notSent = stringResource(R.string.proj_not_sent)
     asking?.let { a ->
         AskDialog(
             title = "${a.title} — #${route.number}",
@@ -279,8 +286,8 @@ fun TicketScreen(graph: AppGraph, route: Route.ProjectTicket) {
             danger = true,
             onDismiss = { asking = null },
             onConfirm = { reason ->
-                asking = null
-                vm.settle(a.verdict, reason)
+                // rien n'est parti (le ticket se relit à l'instant) : la fenêtre reste, avec ce qui est tapé, et on le dit
+                if (vm.settle(a.verdict, reason)) asking = null else shell.toast(notSent)
             },
         )
     }

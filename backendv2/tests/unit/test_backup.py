@@ -323,7 +323,7 @@ def test_the_console_sees_each_base_and_folder_and_what_the_backup_does_with_it(
     assert datadir.LOCK_NAME not in rows and not any(n.endswith(("-wal", "-shm")) for n in rows)
     monkeypatch.setenv("MIKA_DATABASE_URL", "mariadb+pymysql://mika@localhost/")
     served = [r for r in backup.place(data) if r["serveur"]]
-    assert [r["nom"] for r in served] == ["mind", "mail", "feeds", "teams", "views"]
+    assert [r["nom"] for r in served] == ["mind", "mail", "feeds", "teams", "contacts", "views"]
     assert all(r["octets"] is None for r in served) and served[-1]["sauvegarde"] == "jetable"
 
 

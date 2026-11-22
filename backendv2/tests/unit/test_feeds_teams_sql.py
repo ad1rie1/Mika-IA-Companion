@@ -290,7 +290,8 @@ def _length(column) -> int:
 def test_keys_and_indexes_are_bounded_varchars_under_mariadb_limits():
     dialect = MariaDBDialect()
     assert set(FEEDS.tables) == {"entries", "feeds"}
-    assert set(TEAMS.tables) == {"accounts", "conversations", "messages", "drafts"}  # ``meta`` : avant l'ADR 0186
+    # ``meta`` : avant l'ADR 0186 ; ``images`` : ADR 0258 ; ``profiles`` et ``counters`` : ADR 0298
+    assert set(TEAMS.tables) == {"accounts", "conversations", "messages", "drafts", "images", "profiles", "counters"}
     for metadata in (FEEDS, TEAMS):
         for table in metadata.sorted_tables:
             CreateTable(table).compile(dialect=dialect)

@@ -71,6 +71,13 @@ import fr.qwartz.mika.ui.shell.MIcon
 import fr.qwartz.mika.ui.shell.NoteBox
 import fr.qwartz.mika.ui.theme.mika
 import fr.qwartz.mika.ui.theme.states
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.LaunchedEffect
+import fr.qwartz.mika.data.moi.MoiError
+import androidx.compose.material3.OutlinedButton
 
 /*
  * Les formes que les vues de l'écran Projets partagent (ADR 0296), d'après sa maquette validée en largeur de téléphone
@@ -382,6 +389,35 @@ internal fun Fact(label: String, value: String) {
 internal fun RefusalNote(text: String, modifier: Modifier = Modifier) {
     if (text.isBlank()) return
     NoteBox(text, R.drawable.ic_m_alert, modifier, tone = Tone.DANGER)
+}
+
+/**
+ * Ce qu'on montre date d'avant le retour sur l'écran et n'a pas pu se relire : l'erreur dite avec ses mots, et
+ * « Réessayer ». D'ici là rien ne s'y décide (le modèle n'offre aucun geste sur une lecture ancienne).
+ */
+@Composable
+internal fun StaleNote(error: MoiError?, onRetry: () -> Unit, modifier: Modifier = Modifier) {
+    if (error == null) return
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        RefusalNote(error.message)
+        OutlinedButton(onClick = onRetry) { Text(stringResource(R.string.retry)) }
+    }
+}
+
+/**
+ * Un écran qui s'ouvre ne porte pas ce qu'on avait dit à ses endroits ([wheres]) avant de le quitter — un refus d'un
+ * autre jour, un geste abouti après son départ, qui le refermerait. Une fois par ouverture : une rotation n'efface pas
+ * le refus qu'on est en train de lire.
+ */
+@Composable
+internal fun FreshEntry(runner: GestureRunner, vararg wheres: String) {
+    var entered by rememberSaveable(runner, *wheres) { mutableStateOf(false) }
+    LaunchedEffect(runner, *wheres) {
+        if (!entered) {
+            entered = true
+            wheres.forEach(runner::forget)
+        }
+    }
 }
 
 /** Pourquoi un geste ne se fait pas d'ici, ou ce qu'il fera : les mots du serveur, ou une phrase de l'écran. */

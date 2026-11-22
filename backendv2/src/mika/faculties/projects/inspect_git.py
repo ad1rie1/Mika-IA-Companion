@@ -9,7 +9,7 @@ from typing import Any
 
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
-from mika.faculties.projects import inspect_merge, inspect_reviews, merge
+from mika.faculties.projects import inspect_code, inspect_merge, inspect_reviews, merge
 from mika.faculties.projects.actions import _editable, _remote_ready, pending_of
 from mika.faculties.projects.faculty import (
     PROJECTS,
@@ -66,14 +66,19 @@ EXCHANGES_SHOWN = 12
 EXCHANGE_FR = {PUSH_CAPABILITY: "pousser", PULL_CAPABILITY: "récupérer"}
 
 
-@PROJECTS.inspect("git", title="Dépôt", subject="project", order=28,
-                  description="Le dépôt de l'atelier face à son dépôt distant : l'écart entre les deux (à pousser, à "
-                              "récupérer), l'historique de chacun, ce qui n'est pas encore enregistré, les issues et "
-                              "pull requests ouvertes (GitHub), et les envois et récupérations passés.")
+@PROJECTS.inspect("git", title="Code", subject="project", order=28,
+                  description="Son code, en sous-vues (« vue ») : fichiers (par défaut : l'arborescence à une branche, "
+                              "« ref », et un fichier, « chemin »), commits (« sha »), pulls (« pr »), branches "
+                              "(« branche »), issues (« issue »), ci (« sha ») ; et « distant » : le dépôt de "
+                              "l'atelier face à son dépôt distant — l'écart entre les deux (à pousser, à récupérer), "
+                              "l'historique de chacun, ce qui n'est pas encore enregistré, les envois et "
+                              "récupérations passés, ses réglages.")
 async def _git_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     p = _subject(s, ctx)
     if isinstance(p, Note):
         return [p]
+    if ctx.param(inspect_code.VIEW) != inspect_code.REMOTE:  # Code, en sous-vues (ADR 0297)
+        return await inspect_code.code_view(p, s, frame, ctx)
     port = ctx.ports.get("workshop")
     hosted = await _hosted(p, ctx)
     there = port is not None and port.exists(p.id)
@@ -92,7 +97,8 @@ async def _git_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[
         blocks.append(Section(f"L'enregistrement {sha[:12]}", (
             Code(_cut(shown, DIFF_SHOWN), title="Message et changements", lang="diff") if shown
             else Note(f"Aucun enregistrement « {sha[:12]} » dans ce dépôt.", "warn"),
-            Fields((("fermer", Ref("subject", f"project/{p.id}", "revenir à l'historique", (("onglet", "git"),))),)))))
+            Fields((("fermer", Ref("subject", f"project/{p.id}", "revenir à l'historique",
+                                      (("onglet", "git"), ("vue", "distant")))),)))))
     count = await port.count(p.id)
     pager = ctx.pager("page_commits", size=PAGE, total=count)
     commits = await port.commits(p.id, pager.size, offset=pager.offset)
@@ -107,14 +113,14 @@ async def _git_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[
         # un compte rendu d'avant l'ADR 0277 portait l'abrégé : il garde son lien
         run = runs.get(k.sha) or next((e for sha, e in runs.items() if k.sha.startswith(sha)), None)
         rows.append(Row((
-            Ref("subject", f"project/{p.id}", k.sha[:7], (("onglet", "git"), ("commit", k.sha))),
+            Ref("subject", f"project/{p.id}", k.sha[:7], (("onglet", "git"), ("vue", "commits"), ("sha", k.sha))),
             Text(k.title, clamp=120),
             When(k.at) if k.at else "—", k.author or "—", k.files,
             Text(f"+{k.insertions} −{k.deletions}", "mono"),
             Ref("episode", run.correlation, "exécution") if run is not None else
             ("amorce" if k.title == "atelier ouvert" else "—"),
             Badge("à pousser", "warn") if i < ahead else Text("sur le distant", "muted") if ahead >= 0 else "—"),
-            href=Ref("subject", f"project/{p.id}", "", (("onglet", "git"), ("commit", k.sha)))))
+            href=Ref("subject", f"project/{p.id}", "", (("onglet", "git"), ("vue", "commits"), ("sha", k.sha)))))
     blocks += [
         Stats((Stat("Enregistrements", count, branch), Stat("Le dernier", When(latest[0].at) if latest and latest[0].at
                                                             else "—", latest[0].sha[:7] if latest else ""),
@@ -193,11 +199,13 @@ def _work_branches(p: Project, ctx: InspectContext) -> list[Block]:
 
 async def _hosted(p: Project, ctx: InspectContext) -> Hosted | None:
     """Ce que l'hôte du dépôt distant en dit (GitHub), ou rien : pas de dépôt distant, ou un hôte qu'on ne lit pas.
-    Une lecture d'avant le dernier envoi (ou la dernière récupération) se refait ; « relire » (``frais``) aussi."""
+    Une lecture d'avant le dernier envoi (ou la dernière récupération) se refait ; « relire » (``frais``, son jeton :
+    ``inspect_code.fresh_from``) aussi, une fois — recharger la page ne la refait plus."""
     host = ctx.ports.get("repo_host")
     if not p.remote or host is None or not host.handles(p.remote):
         return None
-    return await host.read(p.remote, p.branch, fresh=ctx.param("frais") == "1", since=p.remote_at)
+    again = inspect_code.read_again(host, inspect_code.fresh_from(ctx), ("read", p.remote, p.branch))
+    return await host.read(p.remote, p.branch, fresh=again, since=p.remote_at)
 
 
 async def _gap(p: Project, ctx: InspectContext, hosted: Hosted | None, head: str) -> tuple[int, int] | None:
@@ -256,7 +264,7 @@ def _remote_section(p: Project, s: ProjectsState, frame: Frame, ctx: InspectCont
             ("lu", When(hosted.read_at) if hosted.read_at else "—")]
     if hosted is not None:
         pairs.append(("relire", Ref("subject", f"project/{p.id}", f"relire {hosted.host} maintenant",
-                                    (("onglet", "git"), ("frais", "1")))))
+                                    (("onglet", "git"), ("vue", "distant"), ("frais", str(ctx.now))))))
     items: list[Any] = [Fields(tuple(pairs), columns=2)]
     if hosted is not None and hosted.error:
         items.append(Note(f"{hosted.error[:1].upper()}{hosted.error[1:]}.", "warn"))

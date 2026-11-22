@@ -70,6 +70,8 @@ data class DocLimits(
     @SerialName("image_bytes") val imageBytes: Long = 0,
     val images: Int = 0,
     @SerialName("space_bytes") val spaceBytes: Long = 0,
+    /** Les sortes d'image que l'espace garde, par leur type MIME (`image/png`…) ; vide : pas dit. */
+    @SerialName("image_kinds") val imageKinds: List<String> = emptyList(),
 )
 
 @Serializable

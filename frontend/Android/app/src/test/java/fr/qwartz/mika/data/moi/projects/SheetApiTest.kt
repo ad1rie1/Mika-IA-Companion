@@ -87,6 +87,8 @@ class SheetApiTest {
         assertTrue(s.rights.read && s.rights.write)
         assertEquals(listOf(5_242_880L, 104_857_600L), listOf(s.limits.imageBytes, s.limits.spaceBytes))
         assertEquals(200, s.limits.wordChars)
+        // les sortes d'image que l'espace garde : une photo d'une autre sorte est réencodée avant de partir
+        assertEquals(listOf("image/gif", "image/jpeg", "image/png", "image/webp"), s.limits.imageKinds)
         val p = s.pages.single()
         assertEquals(listOf("guide/installation.md", "Installation", "pendant une exécution", "Mika"), listOf(p.path, p.title, p.viaLabel, p.author))
         assertEquals(4, p.version)

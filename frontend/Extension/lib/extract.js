@@ -379,8 +379,44 @@
     return { messages: messages, conversations: conversations, truncated: nodes >= MAX_NODES };
   }
 
+  // ── Les profils (ADR 0298) ─────────────────────────────────────────────────
+
+  /** Un identifiant de personne de Teams (son « mri ») : un compte d'organisation, un compte Microsoft, un invité. */
+  const PROFILE_ID = /^(8:orgid:[0-9a-f-]{36}|8:live:[a-z0-9._-]{1,80}|8:teamsvisitor:[0-9a-f-]{32,36})$/;
+  const PROFILE_EMAIL = /^[^\s@<>"',;]{1,64}@[a-z0-9.-]{1,253}\.[a-z]{2,}$/;
+  const PROFILE_PHONES = 3;
+
+  /**
+   * Le profil d'une personne tel que Teams le garde dans ce navigateur (base `Teams:profiles`, magasin `profiles`) :
+   * son identifiant, son nom, son e-mail (sinon celui de connexion, s'il en a la forme), son poste, son entreprise, son
+   * service, son organisation et jusqu'à trois numéros. `null` sans identifiant reconnu, ou sans rien qui dise qui
+   * c'est.
+   */
+  function profileOf(o) {
+    if (!isObject(o)) return null;
+    const id = typeof o.mri === "string" ? o.mri.trim().toLowerCase() : "";
+    if (!PROFILE_ID.test(id)) return null;
+    const pick = function (v, n) { return typeof v === "string" ? T.cut(v.replace(/\s+/g, " ").trim(), n) : ""; };
+    // un nom de connexion d'invité (« x_gmail.com#ext#@hote.onmicrosoft.com ») n'est pas une adresse qu'on lui connaît
+    const emailOf = function (v) {
+      const e = pick(v, 254).toLowerCase();
+      return PROFILE_EMAIL.test(e) && e.indexOf("#ext#") < 0 ? e : "";
+    };
+    const phones = [];
+    const raw = [o.telephoneNumber, o.mobile].concat(Array.isArray(o.phones)
+      ? o.phones.map(function (p) { return isObject(p) ? p.number : p; }) : []);
+    for (const v of raw) {
+      const n = pick(v, 40);
+      if (n.replace(/\D/g, "").length >= 6 && phones.indexOf(n) < 0 && phones.length < PROFILE_PHONES) phones.push(n);
+    }
+    const out = { id: id, name: pick(o.displayName, 120), email: emailOf(o.email) || emailOf(o.mail)
+      || emailOf(o.userPrincipalName), title: pick(o.jobTitle, 120), company: pick(o.companyName, 120),
+      department: pick(o.department, 120), tenant: pick(o.tenantName, 120), phones: phones };
+    return out.name || out.email || out.title || out.company ? out : null;
+  }
+
   return { extract: extract, normalizeMessage: normalizeMessage, normalizeConversation: normalizeConversation,
     conversationKind: conversationKind, conversationFromUrl: conversationFromUrl, htmlToText: htmlToText,
-    imagesOf: imagesOf,
+    imagesOf: imagesOf, profileOf: profileOf, PROFILE_ID: PROFILE_ID, PROFILE_EMAIL: PROFILE_EMAIL,
     parseEmbedded: parseEmbedded, toMillis: toMillis };
 });

@@ -3,6 +3,7 @@ package fr.qwartz.mika.ui.projects
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -32,10 +33,10 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -65,6 +66,7 @@ import fr.qwartz.mika.data.moi.projects.SheetTabs
 import fr.qwartz.mika.data.moi.projects.StateTone
 import fr.qwartz.mika.data.moi.projects.TodoButton
 import fr.qwartz.mika.data.moi.projects.TodoDecision
+import fr.qwartz.mika.data.moi.projects.ThreadNote
 import fr.qwartz.mika.data.moi.projects.Verb
 import fr.qwartz.mika.data.moi.projects.Waiting
 import fr.qwartz.mika.data.moi.projects.gesturePlace
@@ -72,12 +74,13 @@ import fr.qwartz.mika.data.moi.projects.gestureRead
 import fr.qwartz.mika.data.moi.projects.isMerge
 import fr.qwartz.mika.data.moi.projects.mergeNumber
 import fr.qwartz.mika.data.moi.projects.moment
+import fr.qwartz.mika.data.moi.projects.noteRendered
+import fr.qwartz.mika.data.moi.projects.checkpointRead
 import fr.qwartz.mika.data.moi.projects.objectiveTone
 import fr.qwartz.mika.data.moi.projects.plural
 import fr.qwartz.mika.data.moi.projects.safeLink
 import fr.qwartz.mika.data.moi.projects.since
 import fr.qwartz.mika.data.moi.projects.ticketTone
-import fr.qwartz.mika.data.moi.projects.todoDecision
 import fr.qwartz.mika.data.moi.projects.waitingIcon
 import fr.qwartz.mika.ui.Route
 import fr.qwartz.mika.ui.components.rememberNow
@@ -110,7 +113,13 @@ fun TodoScreen(graph: AppGraph, route: Route.ProjectTodo) {
     val vm = rememberProjectsModel(graph)
     val where = ProjectsViewModel.todoWhere(route.project, route.key)
     LaunchedEffect(vm) { vm.gestures.said.collect { shell.toast(it) } }
-    LaunchedEffect(vm, route) { vm.open(route.project, route.key) }
+    // l'attente se relit à chaque fois que son écran est devant : il s'ouvre, l'app revient de l'arrière-plan
+    OnResume(vm to route) { vm.open(route.project, route.key) }
+    // l'écran quitté (pas une rotation) : plus rien ne s'y relit, la confirmation d'une fusion demandée là s'annule
+    val activity = LocalActivity.current
+    DisposableEffect(vm, route) {
+        onDispose { if (activity?.isChangingConfigurations != true) vm.leave(route.project, route.key) }
+    }
     // décidée : elle n'est plus à faire, on revient à la liste
     LaunchedEffect(vm.gestures.finished) {
         if (vm.gestures.finished == where) {
@@ -120,10 +129,12 @@ fun TodoScreen(graph: AppGraph, route: Route.ProjectTodo) {
     }
     val now = rememberNow(wallMs = graph.clock::wallMs)
     var pane by rememberSaveable(route.project, route.key) { mutableStateOf(PANE_READ) }
-    var asking by remember { mutableStateOf<TodoButton?>(null) }
+    // le bouton qui demande un mot : sa fenêtre survit à une rotation, et ce qu'on y tape aussi
+    var asking by rememberSaveable(route.project, route.key) { mutableStateOf<TodoButton?>(null) }
     val w = vm.shown
-    val decision = if (w == null) TodoDecision() else todoDecision(w, vm.approval, vm.sheet?.valueOrNull?.plan, vm.element?.valueOrNull)
-    val busy = vm.gestures.busy.isNotEmpty()
+    // ses boutons : ceux de ce qu'on vient de lire — aucun pendant une relecture
+    val decision = vm.decision
+    val busy = vm.gestures.busy.isNotEmpty() || vm.rereading || vm.failure != null
     SectionScaffold(
         topBar = { MikaTopBar(title = stringResource(R.string.proj_tab_todo), nav = BarNav.BACK, subtitle = w?.projectTitle) },
         bottomBar = {
@@ -141,19 +152,25 @@ fun TodoScreen(graph: AppGraph, route: Route.ProjectTodo) {
                         TodoInfos(w, vm, now, shell)
                     } else {
                         RefusalNote(vm.gestures.refusalAt(where))
+                        // sa relecture a échoué : ce qu'on montre date d'avant, rien ne s'y décide — on le dit
+                        StaleNote(vm.failure, vm::reread)
                         TodoReading(w, vm, decision, now, busy)
                         Elsewhere(w, shell)
                     }
                 }
             }
+            // une panne n'est pas une absence : son erreur, et « Réessayer »
+            vm.failure != null -> Notice(vm.failure?.message.orEmpty(), modifier, action = stringResource(R.string.retry), onAction = vm::reread)
             vm.missing -> Notice(stringResource(R.string.proj_todo_gone), modifier, action = stringResource(R.string.proj_todo_back), onAction = shell.back)
             else -> LoadBox(vm.overview, vm::retry, modifier) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             }
         }
     }
-    // la fusion d'une pull request prête : rien ne part sans sa confirmation, qui dit ce qui va être fusionné
-    vm.merge.asking?.let { MergeDialog(it, onConfirm = vm::confirmMerge, onDismiss = vm.merge::cancel) }
+    // la fusion d'une pull request prête : rien ne part sans sa confirmation, qui dit ce qui va être fusionné — celle
+    // que cet écran a demandée, sur la lecture faite pour elle, jamais celle d'une autre attente
+    vm.merge.asking?.takeIf { it.where == where }?.let { MergeDialog(it, onConfirm = vm::confirmMerge, onDismiss = vm.merge::cancel) }
+    val notSent = stringResource(R.string.proj_not_sent)
     asking?.let { b ->
         AskDialog(
             title = buttonLabel(b),
@@ -166,8 +183,9 @@ fun TodoScreen(graph: AppGraph, route: Route.ProjectTodo) {
             danger = b.verb.danger,
             onDismiss = { asking = null },
             onConfirm = { typed ->
-                asking = null
-                vm.decide(b.action, typed)
+                // le modèle ne l'envoie que si ce bouton est encore offert par ce qu'on vient de relire ; rien n'est
+                // parti (elle se relit à l'instant) : la fenêtre reste, avec ce qui est tapé, et on le dit
+                if (vm.decide(b.action, typed)) asking = null else shell.toast(notSent)
             },
         )
     }
@@ -402,9 +420,9 @@ internal fun PlanCard(title: String, stateLabel: String, tone: StateTone, text: 
 /** Un point d'arrêt dit prêt : ce qu'elle en dit, le jalon, comment il se vérifie, sa preuve (venue d'ailleurs). */
 @Composable
 private fun CheckpointReading(w: Waiting, sheet: Sheet, read: GestureRead.Checkpoint, now: Long, decides: Boolean) {
-    val o = sheet.objectives.firstOrNull { it.id == read.objective }
-    val m = o?.milestones?.firstOrNull { it.id == read.milestone }
-    if (o == null || m == null) {
+    // le jalon n'est plus dans la fiche : il n'y a rien à valider (et aucun bouton, `todoDecision`)
+    val m = checkpointRead(sheet, read)
+    if (m == null) {
         Lede(w.about)
         return
     }
@@ -446,7 +464,7 @@ private fun ElementReading(w: Waiting, e: EntryDetail, vm: ProjectsViewModel, de
             }
             PlanCard(stringResource(R.string.proj_her_plan), line.statusLabel, StateTone.YOU, more.planText, waits = true, number = line.plan)
         }
-        asks && question != null -> Bubble("self", question.author, since(question.at, now), question.text, markdown = true)
+        asks && question != null -> QuestionView(question, now)
         more.body.isBlank() && more.thread.isEmpty() -> Lede(w.about)
         else -> {
             if (more.body.isNotBlank()) {
@@ -455,7 +473,9 @@ private fun ElementReading(w: Waiting, e: EntryDetail, vm: ProjectsViewModel, de
             for (n in more.thread.filter { it.kind != "change" }) ThreadNoteView(n, now)
         }
     }
-    if (decision.answer) {
+    // le champ reste posé pendant une relecture (l'app revient de l'arrière-plan) : ce qu'on y tape et le clavier
+    // restent ; seul « Répondre » attend — rien ne part sur l'ancienne lecture
+    if (vm.answering) {
         OutlinedTextField(
             value = vm.answer,
             onValueChange = { vm.answer = it },
@@ -464,7 +484,7 @@ private fun ElementReading(w: Waiting, e: EntryDetail, vm: ProjectsViewModel, de
             modifier = Modifier.fillMaxWidth(),
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            Button(onClick = { vm.decide("answer", vm.answer) }, enabled = vm.answer.isNotBlank() && !busy) {
+            Button(onClick = { vm.decide("answer", vm.answer) }, enabled = decision.answer && vm.answer.isNotBlank() && !busy) {
                 MIcon(R.drawable.ic_m_send, null, size = 18.dp)
                 Spacer(Modifier.width(8.dp))
                 Text(stringResource(R.string.proj_answer))
@@ -475,6 +495,20 @@ private fun ElementReading(w: Waiting, e: EntryDetail, vm: ProjectsViewModel, de
     when {
         decision.buttons.any { it.verb == Verb.TICKET_VALIDATE } -> Hint(stringResource(R.string.proj_word_ticket_plan))
         decision.buttons.any { it.verb == Verb.TICKET_ACCEPT } && line.outside -> Hint(stringResource(R.string.proj_word_outside_ticket))
+    }
+}
+
+/**
+ * La question d'un ticket : la sienne se lit en Markdown ; venue d'ailleurs (`outside`), elle se pose telle quelle sous
+ * son liseré, comme dans le fil du ticket — un texte venu d'ailleurs ne se rend jamais.
+ */
+@Composable
+private fun QuestionView(question: ThreadNote, now: Long) {
+    val at = since(question.at, now)
+    if (noteRendered(question)) {
+        Bubble("self", question.author, at, question.text, markdown = true)
+    } else {
+        OutsideBlock(listOf(question.author, at).filter { it.isNotBlank() }.joinToString(" · "), question.text)
     }
 }
 

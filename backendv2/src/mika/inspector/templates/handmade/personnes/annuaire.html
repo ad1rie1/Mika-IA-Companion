@@ -1,39 +1,37 @@
-{# Relations & échanges › Personnes › Annuaire (app/handmade/tabs/people.py, ADR 0177) : chaque personne qu'elle
-   connaît — une entrée par personne, dite comme sur la vue d'ensemble (son initiale de la couleur de ce qu'elle
-   ressent envers elle, sa présence, ce qu'elle est pour elle), puis ce que l'annuaire sait d'elle : par où elle lui
-   écrit (chacun de ses moyens de communication et ce que son canal prouve), la certitude, depuis quand elle la
-   connaît, son dernier message ; ses échanges et son lien à un clic. Il se parcourt : on cherche quelqu'un depuis la
-   vue d'ensemble. La pagination et la bascule « Tableau » sont celles de la faculté. #}
+{# Relations & échanges › Personnes › Annuaire (app/handmade/tabs/people.py, app/handmade/directory.py, ADR 0298) :
+   tous ceux qu'elle connaît — qui lui parle, et qui elle connaît de loin (par ce qu'elle lit, ou ce qu'on lui
+   raconte), personnes et organisations —, une entrée chacun (handmade/personnes/_annuaire.html), du plus récemment vu.
+   « Qui » est au bout de la barre d'onglets ; ici, la recherche (nom, e-mail, téléphone, identifiant), les puces
+   « Contacts de… » (à qui sont ceux qu'elle connaît de loin), la bascule Fiches / Tableau, la pagination ; sous la
+   liste, l'état des portraits (ADR 0298, lot 6) et le lien vers leurs réglages. #}
 {% import "handmade/shared/tab.html" as tab with context %}
-{% import "handmade/personnes/_personnes.html" as pers %}
-{% set lede %}{% for c in counts %}{{ c.value }} {{ c.label }}{{ " · " if not loop.last }}{% endfor %}{% if counts %} · {% endif %}qui lui a écrit le plus récemment d'abord{% endset %}
+{% import "handmade/personnes/_annuaire.html" as dir %}
 <div class="now-page pers pers-annuaire" data-tab="personnes/personnes">
-  <section class="now-card" id="{{ t.id }}" aria-labelledby="pers-dir-title">
-    {{ tab.head("Personnes", "pers-dir-title", t.count, lede, list=t) }}
-    {% if people %}
+  <form class="dir-find" role="search" method="get" action="">
+    {% for k, v in d.hidden %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+    <label class="sr" for="dir-q">Chercher</label>
+    <input id="dir-q" type="search" name="q" value="{{ d.q }}" placeholder="Chercher un nom, un e-mail, un téléphone, un identifiant…">
+    <button class="btn" type="submit">Chercher</button>
+  </form>
+  {% if d.chips %}
+  <nav class="hm-chips" aria-label="De qui ce sont les contacts">
+    {% for c in d.chips %}<a class="hm-chip{{ ' on' if c.on }}" href="{{ c.href }}"{% if c.on %} aria-current="true"{% endif %}>{{ c.label }} <span class="hm-count">{{ c.count }}</span></a>{% endfor %}
+  </nav>
+  {% endif %}
+  {% if table %}{{ tab.table(table) }}
+  {% else %}
+  <section class="now-card" aria-labelledby="dir-title">
+    <header class="now-card-head"><h2 id="dir-title">Personnes et organisations</h2><span class="person-count now-num">{{ d.total }}</span>
+      <nav class="hm-modes" aria-label="Affichage">{% for m in d.modes %}<a href="{{ m.href }}"{{ ' aria-current=page' if m.on }}>{{ m.label }}</a>{% endfor %}</nav>
+      <p>{{ lede }}</p></header>
+    {% if d.entries %}
     <ul class="pers-dir" role="list">
-      {% for p in people %}
-      <li class="pers-dir-item">
-        {{ pers.avatar(p) }}
-        <div class="pers-dir-main">
-          <p class="pers-head">{{ pers.name(p) }}{% if p.last %}<span class="pers-when">lui a écrit {{ tab.cell(p.last) }}</span>{% endif %}</p>
-          {% if p.handles %}
-          <ul class="pers-handles" role="list" aria-label="Ses moyens de communication">
-            {% for h in p.handles %}<li><a href="{{ h.href }}">{{ h.label }}</a><span class="now-tag {{ h.tone }}" title="ce que son canal prouve de qui écrit">{{ h.trust }}</span>{% if h.main %}<span class="now-muted">principal</span>{% endif %}</li>{% endfor %}
-            {% if p.more %}<li class="now-muted">et {{ p.more }} autre{{ 's' if p.more > 1 }}</li>{% endif %}
-          </ul>
-          {% else %}<p class="pers-meta now-muted">Aucun moyen de communication : connue seulement de nom.</p>{% endif %}
-          <p class="pers-meta">
-            {% if p.certainty %}<span><span class="now-muted">certitude</span> {{ p.certainty }}</span>{% endif %}
-            {% if p.first %}<span><span class="now-muted">connue depuis</span> {{ tab.cell(p.first) }}</span>{% endif %}
-            {% if not p.last %}<span class="now-muted">ne lui a jamais écrit</span>{% endif %}
-          </p>
-          {% if p.exchanges %}<p class="pers-links"><a href="{{ p.exchanges }}">Leurs échanges →</a><a href="{{ p.link }}">Leur lien →</a></p>{% endif %}
-        </div>
-      </li>
+      {% for e in d.entries %}{{ dir.entry(e) }}
       {% endfor %}
     </ul>
-    {% else %}{{ tab.empty(t.empty) }}{% endif %}
-    {{ tab.pager(t) }}
+    {{ tab.pager(pager) }}
+    {% else %}{{ tab.empty("Personne ne correspond" if d.q else "Elle ne connaît encore personne") }}{% endif %}
   </section>
+  {% endif %}
+  {% if portraits %}<p class="person-meta dir-portraits">{{ portraits.text }} · <a href="{{ portraits.href }}">Régler</a></p>{% endif %}
 </div>

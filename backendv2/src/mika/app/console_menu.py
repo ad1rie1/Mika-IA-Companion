@@ -38,7 +38,7 @@ MENU = (
         MenuLink("Courriers à envoyer", "approbations/courriers", hint="Ses mails, prêts à partir"),
         MenuLink("Réponses Teams", "approbations/teams", hint="Ce qu'elle poserait dans Teams"),
         MenuLink("Identités à confirmer", "approbations/identites", hint="Qui est qui, à valider"),
-        MenuLink("Noms à relier", "approbations/noms", hint="Un nom dont on lui a parlé, une personne"),
+        MenuLink("Rapprochements", "approbations/rapprochements", hint="Deux fiches au même nom, des noms racontés"),
         MenuLink("Historique des autorisations", "approbations/historique", hint="Ce que tu as permis ou refusé"),
     ), question="Qu'est-ce qui attend ta décision ?"),
     MenuGroup("Elle", "heart", (

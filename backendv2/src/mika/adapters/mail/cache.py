@@ -36,17 +36,18 @@ une lecture faite pendant une écriture la voit.
 
 from __future__ import annotations
 
+import email.utils
 import hashlib
 import json
 import threading
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy import and_, bindparam, case, delete, exists, func, insert, literal, or_, select, update
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session, aliased, sessionmaker
 
 from mika.adapters.database import Target, as_target
 from mika.adapters.mail.browse import Browse
@@ -57,6 +58,7 @@ from mika.adapters.mail.models import (
     DRAFT,
     DRAFTED,
     FOLDER,
+    FROM,
     LOCAL,
     MESSAGE,
     MID,
@@ -92,6 +94,8 @@ from mika.ports.mail import (
     PIECE_MAX,
     AccountStatus,
     Attachment,
+    Correspondent,
+    CorrespondentsSince,
     Draft,
     File,
     Folder,
@@ -354,6 +358,115 @@ class MailCache:
     def browse(self, method: str, *args):
         with self._use(write=False):
             return getattr(Browse(self), method)(*args)
+
+    # ── ses correspondants, pour l'annuaire (ADR 0298) ──
+    def correspondents_since(self, cursor: tuple[int, int], limit: int,
+                             own: Mapping[str, str]) -> CorrespondentsSince:
+        """Les correspondants des ``limit`` mails gardés et des ``limit`` envois suivants dans l'ordre d'arrivée (leur
+        ``id``), par boîte : l'expéditeur d'un mail reçu, les destinataires d'un mail parti — un mail rangé dans
+        « Envoyés » qui a sa copie locale (``sent``) n'est compté que par elle, la copie d'un mail dans un second
+        dossier (la même référence) pas du tout. ``own`` : l'adresse de chaque boîte, jamais rendue pour elle. Un
+        curseur au-delà de la dernière ligne (ses dernières effacées) repart d'elle. Sous SQLite seulement, un numéro
+        libéré en haut resservira au mail suivant : effacé puis remplacé entre deux lectures, ce mail-là n'est pas lu
+        (MariaDB ne redonne jamais un numéro ; l'annuaire relit souvent, ce qui rend ce cas rare)."""
+        limit = max(1, min(5000, int(limit)))
+        mine = {fit(a, ACCOUNT): fit((addr or "").strip().lower(), ADDRESS) for a, addr in own.items()}
+        with self._use(write=False) as s:
+            after_m = min(max(0, int(cursor[0])), int(s.scalar(select(func.max(M.id))) or 0))
+            after_s = min(max(0, int(cursor[1])), int(s.scalar(select(func.max(S.id))) or 0))
+            ids = list(s.scalars(select(M.id).where(M.id > after_m).order_by(M.id).limit(limit)))
+            sids = list(s.scalars(select(S.id).where(S.id > after_s).order_by(S.id).limit(limit)))
+            rows: list[Any] = []
+            if ids:
+                is_sent = or_(exists().where(F.account == M.account, F.name == M.folder, F.role == "sent"),
+                              M.sent_name)
+                earlier = aliased(M)
+                copied = exists().where(earlier.account == M.account, earlier.ref == M.ref, earlier.id < M.id)
+                local = exists().where(S.account == M.account, S.ref == M.ref)
+                rows += s.execute(
+                    select(M.account, M.date, R.address, R.name, case((is_sent, 1), else_=0).label("sent"))
+                    .join(R, and_(R.kind == MESSAGE, R.owner == M.id))
+                    .where(M.id > after_m, M.id <= ids[-1], ~copied,
+                           or_(and_(~is_sent, R.role == FROM), and_(is_sent, ~local, R.role == TO)))).all()
+            if sids:
+                rows += s.execute(select(S.account, S.date, R.address, R.name, literal(1).label("sent"))
+                                  .join(R, and_(R.kind == SENT, R.owner == S.id))
+                                  .where(S.id > after_s, S.id <= sids[-1], R.role == TO)).all()
+        seen: dict[tuple[str, str], list[Any]] = {}
+        for account, date, address, name, sent in rows:
+            if not address or address == mine.get(account):
+                continue
+            if "<" in (name or "") or "@" in (name or ""):  # l'expéditeur est gardé tel que l'en-tête l'écrit
+                name = email.utils.parseaddr(name)[0]
+            date = int(date or 0)
+            got = seen.setdefault((account, address), ["", 0, 0, date, date, -1])
+            got[2 if sent else 1] += 1
+            got[3], got[4] = min(got[3], date), max(got[4], date)
+            if name and date >= got[5]:  # le nom du plus récent
+                got[0], got[5] = name, date
+        people = tuple(Correspondent(account, address, v[0], v[1], v[2], v[3], v[4])
+                       for (account, address), v in sorted(seen.items()))
+        return CorrespondentsSince(people, (ids[-1] if ids else after_m, sids[-1] if sids else after_s),
+                                   len(ids) == limit or len(sids) == limit)
+
+    def exchanged(self, since: int, limit: int, own: Mapping[str, str],
+                  accounts: Sequence[str] | None = None) -> list[Correspondent]:
+        """Les adresses avec qui chaque boîte échange vraiment depuis ``since`` (la date des mails) : qui lui a écrit
+        et à qui elle a écrit (ses envois, rangés dans « Envoyés » ou gardés ici), comptés en trois requêtes groupées,
+        comme ``correspondents_since`` les compte ; ``own`` : l'adresse de chaque boîte, jamais rendue pour elle (ADR
+        0298, lot 6)."""
+        limit = max(0, min(5000, int(limit)))
+        if not limit or (accounts is not None and not accounts):
+            return []
+        mine = {fit(a, ACCOUNT): fit((addr or "").strip().lower(), ADDRESS) for a, addr in own.items()}
+        boxes = [M.account.in_([fit(a, ACCOUNT) for a in accounts])] if accounts is not None else []
+        sent_boxes = [S.account.in_([fit(a, ACCOUNT) for a in accounts])] if accounts is not None else []
+        is_sent = or_(exists().where(F.account == M.account, F.name == M.folder, F.role == "sent"), M.sent_name)
+        earlier = aliased(M)
+        copied = exists().where(earlier.account == M.account, earlier.ref == M.ref, earlier.id < M.id)
+        local = exists().where(S.account == M.account, S.ref == M.ref)
+        got: dict[tuple[str, str], list[int]] = {}
+
+        def count(rows: Any, at: int) -> None:
+            for account, address, n, last in rows:
+                if address and address != mine.get(account):
+                    found = got.setdefault((account, address), [0, 0, 0])
+                    found[at] += int(n or 0)
+                    found[2] = max(found[2], int(last or 0))
+
+        with self._use(write=False) as s:
+            count(s.execute(select(M.account, R.address, func.count(M.id), func.max(M.date))
+                            .join(R, and_(R.kind == MESSAGE, R.owner == M.id))
+                            .where(M.date >= int(since), ~copied, ~is_sent, R.role == FROM, *boxes)
+                            .group_by(M.account, R.address)).all(), 0)
+            count(s.execute(select(M.account, R.address, func.count(M.id), func.max(M.date))
+                            .join(R, and_(R.kind == MESSAGE, R.owner == M.id))
+                            .where(M.date >= int(since), ~copied, is_sent, ~local, R.role == TO, *boxes)
+                            .group_by(M.account, R.address)).all(), 1)
+            count(s.execute(select(S.account, R.address, func.count(S.id), func.max(S.date))
+                            .join(R, and_(R.kind == SENT, R.owner == S.id))
+                            .where(S.date >= int(since), R.role == TO, *sent_boxes)
+                            .group_by(S.account, R.address)).all(), 1)
+        both = [Correspondent(account, address, "", v[0], v[1], 0, v[2]) for (account, address), v in got.items()
+                if v[0] and v[1]]
+        return sorted(both, key=lambda c: (-c.last, c.account, c.address))[:limit]
+
+    def letters_from(self, address: str, since: int, limit: int, accounts: Sequence[str] | None = None) -> list[Any]:
+        """Les derniers mails reçus de cette adresse depuis ``since``, chacun une fois (pas ses copies d'un autre
+        dossier), le plus récent d'abord, le corps réduit à un extrait."""
+        wanted = fit((address or "").strip().lower(), ADDRESS)
+        limit = max(0, min(200, int(limit)))
+        if not wanted or not limit or (accounts is not None and not accounts):
+            return []
+        boxes = [M.account.in_([fit(a, ACCOUNT) for a in accounts])] if accounts is not None else []
+        is_sent = or_(exists().where(F.account == M.account, F.name == M.folder, F.role == "sent"), M.sent_name)
+        earlier = aliased(M)
+        copied = exists().where(earlier.account == M.account, earlier.ref == M.ref, earlier.id < M.id)
+        sender = exists().where(R.kind == MESSAGE, R.owner == M.id, R.role == FROM, R.address == wanted)
+        with self._use(write=False) as s:
+            ids = list(s.scalars(select(M.id).where(sender, M.date >= int(since), ~copied, ~is_sent, *boxes)
+                                 .order_by(M.date.desc(), M.id.desc()).limit(limit)))
+            return [self.at_row(int(i)) for i in ids]
 
     # ── ses pièces ──
     def _owners(self, s: Session, ref: str) -> list[int]:

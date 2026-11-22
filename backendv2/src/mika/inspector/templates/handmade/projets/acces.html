@@ -116,7 +116,7 @@
       </div>
       <div class="hm-pager single">{{ pages(pager) }}</div>
       {% if not rows %}<p class="now-muted">Aucune ligne : seul le comportement par défaut s'applique. « Ajouter un accès » ouvre une ligne fermée, que tu règles.</p>{% endif %}
-      {% if not has_apps %}<p class="now-muted">Ce projet n'a pas encore d'app : les colonnes « Apps » vaudront pour celles qu'elle y forgera. Qu'elle s'en serve pendant le projet dépend aussi de ses lots d'outils (<a href="{{ behaviour_tab }}">Cadre, « Outils et services »</a>).</p>{% endif %}
+      {% if not has_apps %}<p class="now-muted">Ce projet n'a pas encore d'app : les colonnes « Apps » vaudront pour celles qu'elle y forgera. Qu'elle s'en serve pendant le projet dépend aussi de ses lots d'outils (<a href="{{ behaviour_tab }}">Administration, « Outils et services »</a>).</p>{% endif %}
       {% if not locked %}<div class="form-actions-inline"><button class="btn" name="faire" value="">Enregistrer</button> <span class="now-muted">Les flèches et la croix enregistrent aussi ce que tu as changé.</span></div>{% endif %}
     </section>
   </form>

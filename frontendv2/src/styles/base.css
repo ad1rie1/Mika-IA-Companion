@@ -54,7 +54,7 @@
   --danger: #c41d3a; --danger-soft: #fff0f2;
   --info: #0b66d6;   --info-soft: #eef5ff;
 
-  --app-whatsapp: #0f7d40; --app-sms: #1f63d6; --app-signal: #2b62d9; --app-insta: #b41d86; --app-other: #5b6170;
+  --app-whatsapp: #0f7d40; --app-messenger: linear-gradient(45deg, #0866ff, #8f2ad8, #d6246e); --app-sms: #1f63d6; --app-signal: #2b62d9; --app-insta: #b41d86; --app-other: #5b6170;
   --teams: #5b5fc7;
 
   --shadow-pop: 0 18px 44px rgb(22 20 52 / 13%), 0 2px 8px rgb(22 20 52 / 6%);
@@ -267,7 +267,7 @@ input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; a
 .av .pres.away { background: var(--warn); }
 .app-ico { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 5px; color: #fff; font: 700 10px var(--font); flex: none; }
 .app-ico.lg { width: 32px; height: 32px; border-radius: 8px; font-size: 13px; }
-.app-ico.whatsapp { background: var(--app-whatsapp); } .app-ico.sms { background: var(--app-sms); } .app-ico.signal { background: var(--app-signal); }
+.app-ico.whatsapp { background: var(--app-whatsapp); } .app-ico.messenger { background: var(--app-messenger); } .app-ico.sms { background: var(--app-sms); } .app-ico.signal { background: var(--app-signal); }
 .app-ico.insta { background: var(--app-insta); } .app-ico.other { background: var(--app-other); } .app-ico.teams { background: var(--teams); }
 
 /* ── Le cadre : la barre du haut ──────────────────────────────────────── */

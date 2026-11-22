@@ -1,0 +1,94 @@
+{# La vue d'ensemble de la fiche d'un contact (app/handmade/subjects/contact.py, ADR 0298). Une personne connue de
+   loin : un seul bandeau (un rapprochement à valider), la bande de chiffres, ce qu'elle en sait (ses profils, puis
+   ce qu'elle a tiré de ses derniers messages — lot 6 : chaque fait d'où il vient et sa confiance, « Oublier » dans
+   l'onglet du même nom), où elle la voit, de qui c'est le contact (et à qui ce qu'elle en a lu se dit), ce qui
+   l'identifie, ses derniers courriers lus. Une organisation : ses personnes, ce qu'elle en sait, ce qui l'identifie
+   (et ses adresses sans personne derrière), de qui c'est le contact. #}
+{% import "handmade/personnes/_annuaire.html" as dir %}
+{% from "handmade/shared/macros.html" import bar %}
+<div class="now-page person-overview">
+{% if c.alert %}<div class="fiche-alert" role="status"><p><b>« {{ c.alert.name }} »</b>{% if c.alert.said %} ({{ c.alert.said }}){% endif %} porte presque le même nom. La même personne ?</p><a class="btn" href="{{ c.alert.open }}">Voir le rapprochement</a></div>{% endif %}
+<ul class="fiche-figures">{% for f in c.figures %}<li><a href="{{ f.href }}"><span class="now-num">{{ f.n }}</span>{{ f.text }}</a></li>{% endfor %}</ul>
+
+{% macro whose_card() %}
+<section class="now-card" aria-labelledby="c-who">
+  <header class="now-card-head"><h2 id="c-who">De qui {{ c.name }} est le contact</h2></header>
+  {% if c.whose %}
+  <ul class="who-knows">{% for w in c.whose %}<li><a href="{{ w.href }}"><b>{{ w.name }}</b></a><span class="now-muted">par {{ w.via }}</span></li>{% endfor %}</ul>
+  <p class="person-meta">Ce qu'elle a lu {{ c.of }} ne se dit qu'à {{ c.whose_names }}, et à qui ses comptes sont partagés.{% if not c.org and not c.person %} {{ c.name }} ne lui a jamais écrit : ce n'est pas quelqu'un à qui elle parle — ni lien, ni initiative.{% endif %}</p>
+  {% else %}
+  <p class="person-meta">Vue dans des comptes qui ne sont à personne : c'est le contact de tout le monde, et ce qu'elle en a lu peut se dire à chacun.{% if not c.org and not c.person %} {{ c.name }} ne lui a jamais écrit : ce n'est pas quelqu'un à qui elle parle.{% endif %}</p>
+  {% endif %}
+  {% if c.person %}<p class="person-meta">Reliée à <a href="{{ c.person_href }}">{{ c.person_name }}</a>, qui lui parle : dans l'annuaire, elle paraît comme cette personne.</p>{% endif %}
+</section>
+{% endmacro %}
+
+{% macro known_card() %}
+<section class="now-card" aria-labelledby="c-knows">
+  <header class="now-card-head"><h2 id="c-knows">Ce qu'elle sait {{ c.of }}</h2>{% if c.notes %}<a class="now-more" href="{{ c.notes_href }}">Oublier un fait →</a>{% endif %}</header>
+  {% if c.known %}<dl class="person-fields">{% for k, v in c.known %}<div><dt>{{ k }}</dt><dd>{{ v }}</dd></div>{% endfor %}</dl>{% endif %}
+  {% if c.notes %}
+  <h3 class="now-subhead">L'idée qu'elle s'en fait</h3>
+  <ul class="person-known">
+    {% for n in c.notes %}<li><p>{{ n.text }}</p>
+      <div class="person-belief"><span class="person-meta">{{ n.meta }}{% if n.kind %} · <span>{{ n.kind }}</span>{% endif %} · <a href="{{ n.forget }}">Oublier</a></span><span class="person-confidence" title="sa confiance">{{ bar(n.confidence_w, "confidence") }}<span class="now-num">{{ n.confidence }}</span></span></div>
+    </li>{% endfor %}
+  </ul>
+  <p class="person-meta">Tiré de ses derniers messages, compte par compte : chaque fait ne se dit qu'à qui voit le compte d'où il vient.</p>
+  {% elif not c.org %}
+  <p class="person-meta">{% if c.known %}Ce que ses profils en disent. {% endif %}Elle ne s'en fait une idée qu'à partir des derniers messages de qui échange vraiment avec un compte (des messages dans les deux sens).</p>
+  {% elif c.known %}<p class="person-meta">Ce que ses profils et ce qu'elle lit en disent.</p>
+  {% endif %}
+</section>
+{% endmacro %}
+
+{% macro ids_card() %}
+<section class="now-card" aria-labelledby="c-ids">
+  <header class="now-card-head"><h2 id="c-ids">Ce qui l'identifie</h2><a class="now-more" href="{{ c.ids_href }}">Tout ce qui l'identifie →</a></header>
+  {{ dir.ids(c.ids) }}
+  {% if c.generic %}<h3 class="now-subhead">Ses adresses sans personne derrière</h3>
+  {{ dir.ids(c.generic) }}
+  <p class="person-meta">Une adresse générique (support, noreply, facturation) se range à son organisation, pas à une personne.</p>{% endif %}
+</section>
+{% endmacro %}
+
+{% if c.org %}
+<div class="now-grid two">
+  <section class="now-card" aria-labelledby="c-people">
+    <header class="now-card-head"><h2 id="c-people">Ses personnes</h2>{% if c.members_total %}<a class="now-more" href="{{ c.members_href }}">{{ 'Les ' ~ c.members_total ~ ' →' if c.members_total > 1 else 'Sa fiche →' }}</a>{% endif %}</header>
+    {% if c.members %}<div class="pers"><ul class="pers-dir one" role="list">
+      {% for m in c.members %}<li class="pers-dir-item"><span class="now-avatar far" aria-hidden="true">{{ m.initial }}</span><div class="pers-dir-main"><p class="pers-head"><span class="pers-name"><a href="{{ m.href }}">{{ m.name }}</a></span></p></div></li>{% endfor %}
+    </ul></div>
+    {% else %}<p class="now-empty">Aucune personne qu'elle connaisse.</p>{% endif %}
+  </section>
+  <div class="now-stack">
+    {% if c.known %}{{ known_card() }}{% endif %}
+    {{ ids_card() }}
+    {{ whose_card() }}
+  </div>
+</div>
+{% else %}
+<div class="now-grid two">
+  {{ known_card() }}
+  <div class="now-stack">
+    <section class="now-card" aria-labelledby="c-where">
+      <header class="now-card-head"><h2 id="c-where">Où elle voit {{ c.name }}</h2><a class="now-more" href="{{ c.places_href }}">Tout →</a></header>
+      {% if c.places %}<ul class="seen-where">
+        {% for p in c.places %}<li><span class="src-name">{{ p.source }}</span><div class="what"><p>{% if p.href %}<a href="{{ p.href }}">{{ p.text }}</a>{% else %}{{ p.text }}{% endif %}</p>{% if p.meta %}<p class="person-meta">{{ p.meta }}</p>{% endif %}</div><span class="when">{{ p.when }}</span></li>{% endfor %}
+      </ul>{% else %}<p class="now-empty">Nulle part encore.</p>{% endif %}
+    </section>
+    {{ whose_card() }}
+  </div>
+</div>
+{{ ids_card() }}
+{% if c.read %}
+<section class="now-card" aria-labelledby="c-thread">
+  <header class="now-card-head"><h2 id="c-thread">Ses derniers courriers lus</h2></header>
+  <ol class="person-thread">
+    {% for m in c.read %}<li class="theirs"><p class="person-bubble"><a href="{{ m.href }}">{{ m.text }}</a>{% if m.body %}<br>{{ m.body }}{% endif %}</p><p class="person-meta">{{ m.meta }}</p></li>{% endfor %}
+  </ol>
+  <p class="person-meta">Ses messages Teams se lisent dans leurs conversations (Où elle la voit).</p>
+</section>
+{% endif %}
+{% endif %}
+</div>

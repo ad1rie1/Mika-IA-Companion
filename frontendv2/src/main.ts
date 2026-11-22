@@ -11,6 +11,7 @@ import "./styles/ecrans/outils.css";
 import "./styles/ecrans/mail.css";
 import "./styles/ecrans/teams.css";
 import "./styles/ecrans/telephone.css";
+import "./styles/ecrans/contacts.css";
 import "./styles/ecrans/carte.css";
 import "./styles/ecrans/parametres.css";
 import "./styles/app.css";
@@ -25,6 +26,7 @@ import { MikaStore } from "./mika/store";
 import { startVrmWhenShown } from "./mika/view";
 import { carteScreen } from "./screens/carte";
 import { ChatScreen } from "./screens/chat/chat";
+import { contactsScreen } from "./screens/contacts";
 import { mailScreen } from "./screens/mail";
 import { outilsScreen } from "./screens/outils";
 import { parametresScreen } from "./screens/parametres";
@@ -90,10 +92,11 @@ function startApp(state: AuthState, loginRoot: HTMLElement, appRoot: HTMLElement
   for (const make of [projetsScreen, outilsScreen, mailScreen, teamsScreen]) {
     shell.register(make(shell));
   }
-  // le téléphone et la carte : « Lui en parler dans le chat », « Demander à Mika » ouvrent le chat avec une phrase
-  // préremplie
+  // le téléphone, les contacts et la carte : « Lui en parler dans le chat », « Lui présenter quelqu'un », « Demander à
+  // Mika » ouvrent le chat avec une phrase préremplie
   const ask = (text: string) => chat.prefill(text);
   shell.register(telephoneScreen(shell, { ask }));
+  shell.register(contactsScreen(shell, { ask }));
   shell.register(carteScreen(shell, { ask }));
   shell.register(parametresScreen(shell));
   shell.start();

@@ -1,0 +1,78 @@
+{# Les morceaux que partagent les gabarits de la fiche d'un projet (ADR 0297, app/handmade/subjects/project.py) — ceux
+   de l'écran Projets du client web, sur les jetons de la console (``projets_fiche.css``) :
+   - ``ico`` : une icône au trait (du SVG, jamais un script ni un style en ligne) ;
+   - ``st`` : une pastille d'état — à toi (``you``), elle y travaille (``work``), fait (``done``), en échec (``fail``),
+     en attente (``wait``) ;
+   - ``seg`` : une barre en segments, un par chose, à la couleur de son état ;
+   - ``tile`` : une tuile, l'icône d'une ligne. #}
+{% macro ico(name, cls="") -%}
+<svg class="pj-ico{{ ' ' ~ cls if cls }}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+{%- if name == 'target' %}<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>
+{%- elif name == 'code' %}<path d="m8 7-5 5 5 5M16 7l5 5-5 5"/>
+{%- elif name == 'ticket' %}<path d="M3 9a3 3 0 0 0 0 6v3h18v-3a3 3 0 0 1 0-6V6H3ZM14 6v2M14 11v2M14 16v2"/>
+{%- elif name == 'link' %}<path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/>
+{%- elif name == 'clock' %}<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>
+{%- elif name == 'inbox' %}<path d="M3 13h5l1 3h6l1-3h5M5 5h14l2 8v6H3v-6Z"/>
+{%- elif name == 'pr' %}<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7M18 15.5V10a3 3 0 0 0-3-3h-3M14 4l-3 3 3 3"/>
+{%- elif name == 'commit' %}<circle cx="12" cy="12" r="3"/><path d="M3 12h6M15 12h6"/>
+{%- elif name == 'refresh' %}<path d="M20 11a8 8 0 0 0-14.5-4.5L4 8M4 4v4h4M4 13a8 8 0 0 0 14.5 4.5L20 16M20 20v-4h-4"/>
+{%- elif name == 'calendar' %}<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>
+{%- elif name == 'flag' %}<path d="M5 21V4M5 4h13l-3 4 3 4H5"/>
+{%- elif name == 'shield' %}<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6ZM9 12l2 2 4-4"/>
+{%- elif name == 'list' %}<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>
+{%- elif name == 'play' %}<path d="M7 4l13 8-13 8Z"/>
+{%- elif name == 'chev' %}<path d="m9 6 6 6-6 6"/>
+{%- elif name == 'info' %}<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/>
+{%- elif name == 'sliders' %}<path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h10M18 18h2"/><circle cx="16" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="18" r="2"/>
+{%- elif name == 'tool' %}<path d="M14.5 6.5a4 4 0 0 0 5 5L11 20a2.1 2.1 0 0 1-3-3ZM14.5 6.5 17 4"/>
+{%- elif name == 'lock' %}<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+{%- elif name == 'cpu' %}<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/>
+{%- elif name == 'pen' %}<path d="M4 20h4L19 9l-4-4L4 16ZM13 7l4 4"/>
+{%- elif name == 'check' %}<path d="m5 12 5 5 9-10"/>
+{%- elif name == 'x' %}<path d="M6 6l12 12M18 6 6 18"/>
+{%- elif name == 'minus' %}<path d="M6 12h12"/>
+{%- elif name == 'plus' %}<path d="M12 5v14M5 12h14"/>
+{%- elif name == 'stop' %}<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16v.5"/>
+{%- elif name == 'trash' %}<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/>
+{%- elif name == 'external' %}<path d="M14 4h6v6M20 4l-9 9M18 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h6"/>
+{%- elif name == 'branch' %}<circle cx="6" cy="5" r="2.5"/><circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="8" r="2.5"/><path d="M6 7.5v9M18 10.5c0 4-6 3-12 6"/>
+{%- elif name == 'back' %}<path d="m15 6-6 6 6 6"/>
+{%- elif name == 'search' %}<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>
+{%- elif name == 'send' %}<path d="M4 12 20 4l-6 16-3-7Z"/>
+{%- elif name == 'expand' %}<path d="M14 4h6v6M20 4l-7 7M10 20H4v-6M4 20l7-7"/>
+{%- elif name == 'sort' %}<path d="M8 4v16M8 20l-3-3M8 20l3-3M16 20V4M16 4l-3 3M16 4l3 3"/>
+{%- elif name == 'board' %}<rect x="4" y="4" width="4" height="16" rx="1"/><rect x="10" y="4" width="4" height="10" rx="1"/><rect x="16" y="4" width="4" height="13" rx="1"/>
+{%- elif name == 'table' %}<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M3 15h18M9 5v14M15 5v14"/>
+{%- elif name == 'user' %}<circle cx="12" cy="8" r="4"/><path d="M4 20c1-4 4.5-6 8-6s7 2 8 6"/>
+{%- elif name == 'merge' %}<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M6 8.5v7M6 8.5c0 3.5 4 3.5 9.5 3.5"/>
+{%- elif name == 'file' %}<path d="M14 3H6v18h12V7ZM14 3v4h4"/>
+{%- elif name == 'folder' %}<path d="M3 6h6l2 2h10v11H3Z"/>
+{%- elif name == 'globe' %}<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/>
+{%- elif name == 'bolt' %}<path d="M13 3 5 13h6l-1 8 8-10h-6Z"/>
+{%- elif name == 'eyeoff' %}<path d="M3 3l18 18M10.6 6.1A10 10 0 0 1 12 6c6 0 10 6 10 6a17 17 0 0 1-3 3.6M6.6 6.6C3.9 8.4 2 12 2 12s4 7 10 7a9.6 9.6 0 0 0 4.4-1.1M9.9 9.9a3 3 0 0 0 4.2 4.2"/>
+{%- elif name == 'down' %}<path d="m6 9 6 6 6-6"/>
+{%- elif name == 'terminal' %}<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/>
+{%- elif name == 'issue' %}<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/>
+{%- elif name == 'upload' %}<path d="M12 16V4M7 9l5-5 5 5M4 16v4h16v-4"/>
+{%- elif name == 'columns' %}<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/>
+{%- elif name == 'rows' %}<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 12h18"/>
+{%- elif name == 'eye' %}<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>
+{%- elif name == 'book' %}<path d="M4 19V5a2 2 0 0 1 2-2h14v16H6a2 2 0 0 0-2 2Zm0 0a2 2 0 0 0 2 2h14"/>
+{%- elif name == 'undo' %}<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>
+{%- elif name == 'copy' %}<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/>
+{%- elif name == 'image' %}<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 17-5-5-9 8"/>
+{%- elif name == 'quote' %}<path d="M7 7H4v6h3l-2 4M17 7h-3v6h3l-2 4"/>
+{%- elif name == 'olist' %}<path d="M10 6h11M10 12h11M10 18h11M4 5h1v4M4 9h2M4 14h2l-2 3h2"/>
+{%- elif name == 'tasks' %}<path d="m3 6 2 2 3-3M3 15l2 2 3-3M11 7h10M11 16h10"/>
+{%- elif name == 'activity' %}<path d="M3 12h4l3-8 4 16 3-8h4"/>
+{%- else %}<circle cx="12" cy="12" r="9"/>{% endif -%}
+</svg>
+{%- endmacro %}
+
+{% macro st(tone, label) -%}<span class="pj-st {{ tone }}">{{ label }}</span>{%- endmacro %}
+
+{% macro seg(marks) -%}
+<span class="pj-seg" role="img" aria-label="{{ marks|select('equalto', 'done')|list|length }} sur {{ marks|length }}">{% for m in marks %}<i{% if m %} class="{{ m }}"{% endif %}></i>{% endfor %}</span>
+{%- endmacro %}
+
+{% macro tile(icon, tone="") -%}<span class="pj-tile{{ ' ' ~ tone if tone }}">{{ ico(icon) }}</span>{%- endmacro %}

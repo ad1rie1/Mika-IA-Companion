@@ -207,7 +207,7 @@ def _item_view(ui: Any, request: Request, x: QueueItem, back: str) -> dict[str, 
             "when": ui.when_long(x.at) if x.at else "",
             "facts": [{"label": k, "cell": v if isinstance(v, dict) else render.cell(v, env)} for k, v in x.facts],
             "sources": [{"text": t, "href": h} for t, h in x.sources],
-            "links": [{"text": t, "href": _back(h, back)} for t, h in x.links], "forms": forms}
+            "links": [{"text": t, "href": _back(h, back)} for t, h in x.links], "forms": forms, "body": x.body}
 
 
 async def _queue(ui: Any, request: Request, tab: QueueTab | None) -> Any:
@@ -297,13 +297,16 @@ async def _queue(ui: Any, request: Request, tab: QueueTab | None) -> Any:
                 "kinds": kinds if len(counts) > 1 and kinds else [], "kind": sort, "all_href": "?",
                 "explicit": bool(wanted) and opened is not None and current["id"] == wanted,
                 "empty": tab.empty if tab is not None else "",
-                "pending_pager": render._pager(pager, query)}, styles=("handmade/approbations.css",)),
+                "pending_pager": render._pager(pager, query)},
+                # et les feuilles de ce que la composition dessine dans la liseuse (``QueueItem.body``)
+                styles=("handmade/approbations.css", *(getattr(_provider(ui), "styles", ()) or ()))),
             "blocks": [], "messages": MESSAGES.get(query.get("fait", ""), [])}
 
 
 @TABS.tab("approbations.en_attente", title="Tout ce qui attend", badge=lambda ui: _count(ui, None),
           description="Ce qui attend ta décision : ce qu'elle voudrait faire sortir de la machine (ce qui est montré "
-                      "est exactement ce qui partira), les identités à confirmer, les noms à relier.")
+                      "est exactement ce qui partira), les identités à confirmer, les rapprochements, les noms à "
+                      "relier.")
 async def pending(ui: Any, request: Request) -> Any:
     return await _queue(ui, request, None)
 

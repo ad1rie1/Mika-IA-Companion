@@ -1,0 +1,12 @@
+{# Un rapprochement de l'annuaire, dans la liseuse de la file « À valider » (app/handmade/waiting.py, ADR 0298) : ses
+   deux fiches côte à côte, comme l'annuaire les dit, et pourquoi elles se ressemblent. Ses deux gestes sont ceux de
+   la file. #}
+{% import "handmade/personnes/_annuaire.html" as dir %}
+<div class="pers">
+  <div class="pair">
+    {{ dir.side(sides[0]) }}
+    <div class="pair-mid" aria-hidden="true">↔</div>
+    {{ dir.side(sides[1]) }}
+  </div>
+</div>
+<p class="pair-why"><b>Pourquoi :</b> {{ why }}</p>

@@ -22,6 +22,7 @@ function service({ settings = {}, tabs = [{ id: 7, active: true, lastAccessed: 1
   const fetched = [];
   const toTabs = [];
   const sockets = [];
+  const reloaded = [];
   class FakeSocket {
     constructor(url) {
       this.url = url;
@@ -36,6 +37,7 @@ function service({ settings = {}, tabs = [{ id: 7, active: true, lastAccessed: 1
     storage: { local: {
       get: async (keys) => Object.fromEntries(keys.filter((k) => store[k] !== undefined).map((k) => [k, plain(store[k])])),
       set: async (o) => { Object.assign(store, plain(o)); },
+      remove: async (k) => { delete store[k]; },
     } },
     runtime: { onMessage: { addListener: (f) => { listeners.message = f; } },
       onInstalled: { addListener: (f) => { listeners.installed = f; } }, onStartup: { addListener: () => {} },
@@ -43,7 +45,8 @@ function service({ settings = {}, tabs = [{ id: 7, active: true, lastAccessed: 1
     alarms: { clear: () => {}, create: () => {}, onAlarm: { addListener: () => {} } },
     notifications: { onClicked: { addListener: () => {} }, create: () => {}, clear: () => {}, getAll: async () => ({}) },
     permissions: { contains: async () => true },
-    tabs: { query: async () => tabs, sendMessage: async (id, msg) => { toTabs.push(plain(msg)); return { ok: true }; } },
+    tabs: { query: async () => tabs, sendMessage: async (id, msg) => { toTabs.push(plain(msg)); return { ok: true }; },
+      reload: async (id) => { reloaded.push(id); } },
   };
   const fetch = async (url, init) => {
     const body = init.body ? JSON.parse(init.body) : undefined;
@@ -71,7 +74,8 @@ function service({ settings = {}, tabs = [{ id: 7, active: true, lastAccessed: 1
   const send = (msg, sender) => new Promise((resolve) => {
     if (!listeners.message(msg, sender, (r) => resolve(plain(r)))) resolve(null);
   });
-  return { store, fetched, toTabs, sockets, send, settle: () => new Promise((done) => setTimeout(done, 30)) };
+  return { store, fetched, toTabs, sockets, reloaded, send, installed: () => listeners.installed({ reason: "update" }),
+    settle: () => new Promise((done) => setTimeout(done, 30)) };
 }
 
 function message(id, time, text, conv = CONV) {
@@ -251,4 +255,89 @@ test("une image part après son message, triée comme lui ; un message pas encor
   assert.deepEqual(await s.send(imageAsk({ time: 1_600_000_000_000, id: "1600000000000", history: true }), TAB),
     { ok: true });
   assert.equal((await s.send({ kind: "status" }, PAGE)).stats.images.sent, 2);
+});
+
+test("rechargée depuis sa page de réglages, l'extension recharge les onglets Teams ; d'elle-même, jamais", async () => {
+  const s = service({ tabs: [{ id: 7 }, { id: 9 }] });
+  s.installed();
+  await s.settle();
+  assert.deepEqual(s.reloaded, [], "une mise à jour que personne n'a demandée ne touche pas aux onglets");
+  s.store.reloadTeamsTabs = Date.now();
+  s.installed();
+  await s.settle();
+  assert.deepEqual(s.reloaded, [7, 9]);
+  assert.equal(s.store.reloadTeamsTabs, undefined, "la demande ne sert qu'une fois");
+  s.store.reloadTeamsTabs = Date.now() - 5 * 60 * 1000;
+  s.installed();
+  await s.settle();
+  assert.deepEqual(s.reloaded, [7, 9], "une demande d'il y a cinq minutes ne vaut plus");
+});
+
+const GILLES = "8:orgid:7c2e41d0-5b8a-4f0e-9d21-3a6e0c1f91ab";
+const PROFILE = { id: GILLES, name: "Gilles Rousseau", email: "gilles@nordis.fr", title: "Responsable réseau",
+  company: "Nordis", department: "", tenant: "Nordis SAS", phones: [] };
+
+// daté après l'activation du service neuf (fixée à son premier chargement)
+function fromGilles(id, conv = CONV) {
+  return { ...message(id, Date.now() + 1000, "bonjour", conv), authorId: GILLES, author: "Gilles Rousseau" };
+}
+
+/** Les envois à Mika, une fois que l'envoi automatique (≈ 400 ms après une capture) est passé. */
+async function inboxPosts(s, count) {
+  const posts = () => s.fetched.filter((f) => f.method === "POST" && f.url.endsWith("/api/teams/inbox"));
+  for (let waited = 0; posts().length < count && waited < 3000; waited += 50) await new Promise((r) => setTimeout(r, 50));
+  return posts();
+}
+
+test("un profil part avec le premier message de sa personne qui part, puis plus, tant qu'il ne change pas (ADR 0298)", async () => {
+  const s = service();
+  await s.send({ kind: "captured", self: SELF, conversations: [{ id: CONV, title: "Projet", threadType: "chat" }],
+    messages: [fromGilles("1800000000101")], profiles: [PROFILE] }, TAB);
+  const first = await inboxPosts(s, 1);
+  assert.equal(first.length, 1);
+  assert.deepEqual(first[0].body.profiles.map((p) => p.email), ["gilles@nordis.fr"]);
+  await s.send({ kind: "captured", self: SELF, conversations: [], messages: [fromGilles("1800000000102")],
+    profiles: [PROFILE] }, TAB);
+  const second = await inboxPosts(s, 2);
+  assert.equal(second.length, 2);
+  assert.equal(second[1].body.profiles, undefined, "déjà parti tel quel");
+  // il change : il repart
+  await s.send({ kind: "captured", self: SELF, conversations: [], messages: [fromGilles("1800000000103")],
+    profiles: [{ ...PROFILE, title: "Directeur réseau" }] }, TAB);
+  const third = await inboxPosts(s, 3);
+  assert.deepEqual(third[2].body.profiles.map((p) => p.title), ["Directeur réseau"]);
+});
+
+test("pas de profil pour une conversation exclue, ni appris pendant une pause", async () => {
+  const s = service({ settings: { exclude: "Médecin" } });
+  await s.send({ kind: "captured", self: SELF, conversations: [{ id: "19:med@thread.v2", title: "Médecin", threadType: "chat" }],
+    messages: [fromGilles("1800000000201", "19:med@thread.v2")], profiles: [PROFILE] }, TAB);
+  await new Promise((r) => setTimeout(r, 700));
+  const posted = s.fetched.filter((f) => f.method === "POST" && f.url.endsWith("/api/teams/inbox"));
+  assert.ok(posted.every((f) => !f.body.profiles), "son seul message est exclu : son profil ne part pas");
+  const paused = service({ settings: { paused: true } });
+  await paused.send({ kind: "captured", self: SELF, conversations: [], messages: [fromGilles("1800000000202")],
+    profiles: [PROFILE] }, TAB);
+  assert.deepEqual((paused.store.runtime && paused.store.runtime.profiles) || {}, {}, "rien d'appris en pause");
+});
+
+test("l'historique ne marque partis que les profils vraiment joints : ceux qui ne tenaient pas repartiront", async () => {
+  // relecture de l'ADR 0298, mineur 4 : tous les profils préparés étaient marqués partis, même ceux que le paquet
+  // avait laissés faute de place (au-delà de 200 par envoi) ; ils ne repartaient plus tant qu'ils ne changeaient pas
+  const s = service();
+  await s.send({ kind: "history" }, PAGE);
+  const run = s.toTabs.find((m) => m.kind === "history").run;
+  const ids = Array.from({ length: 230 }, (_, i) => `8:orgid:00000000-0000-4000-8000-${String(i).padStart(12, "0")}`);
+  const profiles = ids.map((id, i) => ({ id, name: `Personne ${i}`, email: "", title: "", company: "", department: "",
+    tenant: "", phones: [] }));
+  const messages = Array.from({ length: 12 }, (_, i) => ({ ...message(String(1600000000100 + i), 1_600_000_000_100 + i,
+    "bonjour"), authorId: ids[i * 20], mentions: ids.slice(i * 20 + 1, i * 20 + 20) }));
+  const answer = await s.send({ kind: "historyChunk", run, self: SELF, conversations: [{ id: CONV, title: "Projet",
+    threadType: "chat" }], messages, profiles }, TAB);
+  assert.deepEqual(answer, { ok: true });
+  const posted = s.fetched.filter((f) => f.method === "POST" && f.url.endsWith("/api/teams/inbox"));
+  const joined = new Set(posted.flatMap((f) => (f.body.profiles || []).map((p) => p.id)));
+  assert.ok(joined.size > 0 && joined.size < ids.length, "un paquet en porte au plus 200");
+  const sent = Object.keys(s.store.runtime.profilesSent || {});
+  assert.deepEqual(sent.sort(), [...joined].sort(), "seuls ceux qui sont partis sont marqués");
 });

@@ -311,12 +311,12 @@ def _tickets_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Bl
         Disclosure("Ouvrir un ticket", (
             ActionSlot("projects.ticket_ouvrir", title="Ouvrir un ticket", compact=True),)),
         Fields((("la validation des plans, les petits tickets, la publication en issues",
-                 _ref(p, "comportement", text="Les régler dans Cadre")),), columns=1),
+                 _ref(p, "comportement", text="Les régler dans Administration")),), columns=1),
     ] if _editable(s, frame, str(p.id)) else []
     return [*_list_blocks(frame, ctx, p, tracker.TICKET_LIST, "tickets"), *opening]
 
 
-@PROJECTS.inspect("suivi", title="Suivi", subject="project", order=24,
+@PROJECTS.inspect("suivi", title="Listes", subject="project", order=60,
                   description="Ses listes de suivi (des entreprises à contacter, des articles à relire) : leurs "
                               "éléments par statut, le fil de chacun ; créer ou régler une liste, ajouter un élément.")
 def _follow_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:

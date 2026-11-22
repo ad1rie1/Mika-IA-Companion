@@ -41,6 +41,7 @@ SRC = ROOT / "src" / "mika"
 IMPLEMENTATIONS: dict[tuple[str, str], tuple[tuple[str, str], ...]] = {
     ("contracts/entry.py", "MindPort"): (("app/mindport.py", "KernelPort"),),
     ("ports/camera.py", "CameraPort"): (("adapters/camera/__init__.py", "CameraBuffer"),),
+    ("ports/contacts.py", "ContactsPort"): (("adapters/contacts/store.py", "ContactsStore"),),
     ("ports/delivery.py", "DeliveryPort"): (
         ("adapters/web/hub.py", "Hub"),
         ("sim/world.py", "Transport"),

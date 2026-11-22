@@ -118,10 +118,9 @@
   .prj-runs > li { grid-template-columns: minmax(0, 1fr); }
 }
 
-/* Un projet › Vue d'ensemble (app/handmade/subjects/project.py, ADR 0177) : la vue d'un objet de la maquette — un bandeau,
-   une bande de chiffres à filets (les dernières exécutions en barres), puis des tuiles en trois colonnes, chacune
-   vers son onglet. Couleurs : les jetons ; une barre prend sa couleur de sa classe. */
-.prj-ov { gap: 16px; }
+/* Un projet › Code › l'atelier face au distant (git.html) et Administration (admin.html) : un bandeau, des faits en
+   deux colonnes. Le reste de la fiche d'un projet a ses feuilles (projets_fiche.css et les suivantes, ADR 0297). */
+
 .prj-ov-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 0; padding: 10px 14px;
   border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--border)); border-radius: var(--radius);
   background: var(--warn-bg); color: var(--warn); font-size: 13.5px; }
@@ -129,100 +128,17 @@
   color: var(--danger); }
 .prj-ov-banner-text { flex: 1 1 320px; font-weight: 550; }
 .prj-ov-banner .btn { flex: none; }
-.prj-ov-note { margin: -6px 0 0; color: var(--muted); font-size: 12.5px; }
-.prj-ov-note.info { color: var(--accent); }
 
-.prj-ov-band { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); margin: 0; padding: 0;
-  border: 1px solid var(--border); border-radius: var(--radius); list-style: none; }
-.prj-ov-band li { min-width: 0; border-left: 1px solid var(--border); }
-.prj-ov-band li:first-child { border-left: 0; }
-.prj-ov-band li > a, .prj-ov-band li > .prj-ov-band-label { color: inherit; }
-.prj-ov-band li > a { display: grid; gap: 4px; height: 100%; padding: 12px 16px; }
-.prj-ov-band li > a:hover { background: var(--hover); text-decoration: none; }
-.prj-ov-band li:not(:has(> a)) { display: grid; gap: 4px; padding: 12px 16px; }
-.prj-ov-band-label { color: var(--muted); font-size: 12.5px; }
-.prj-ov-band-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
-.prj-ov-band-value { font: 650 22px/1.2 var(--display); letter-spacing: -.01em; }
-.prj-ov-band li.danger .prj-ov-band-value { color: var(--danger); }
-.prj-ov-band-sub { color: var(--text-2); font-size: 12.5px; }
-.prj-ov-bars { width: auto; height: 20px; margin-left: auto; align-self: center; }
-.prj-ov-bars rect, .prj-ov-bars rect.ok { fill: var(--ok); }
-.prj-ov-bars rect.danger { fill: var(--danger); }
-.prj-ov-bars rect.warn { fill: var(--warn); }
-.prj-ov-bars rect.muted, .prj-ov-bars rect.info { fill: var(--border-strong); }
-@media (max-width: 640px) { .prj-ov-band li { border-left: 0; border-top: 1px solid var(--border); } .prj-ov-band li:first-child { border-top: 0; } }
-
-.prj-ov-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 16px; align-items: stretch; }
-.prj-ov-tile { display: grid; align-content: start; gap: 10px; min-width: 0; }
-.prj-ov-tile-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.prj-ov-tile-head h2 { font-size: 14.5px; }
-.prj-ov-tile-head h2 a { color: var(--text); }
-.prj-ov-tile-head h2 a:hover { color: var(--accent); text-decoration: none; }
-.prj-ov-list { display: grid; margin: 0; padding: 0; list-style: none; }
-.prj-ov-list li { display: flex; align-items: baseline; gap: 8px; min-width: 0; padding: 7px 0; border-top: 1px solid var(--border);
-  font-size: 13.5px; }
-.prj-ov-list li:first-child { border-top: 0; }
-.prj-ov-list-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.prj-ov-decision .prj-ov-list-text { white-space: normal; }
-.prj-ov-choice { display: block; color: var(--text-2); font-size: 12.5px; }
-.prj-ov-when { flex: none; color: var(--muted); font-size: 12px; white-space: nowrap; }
-.prj-ov-dot { flex: none; align-self: center; }
-.prj-ov-dot.ok { --sw: var(--ok); } .prj-ov-dot.danger { --sw: var(--danger); } .prj-ov-dot.warn { --sw: var(--warn); }
-.prj-ov-more { margin: 0; font-size: 12.5px; }
-.prj-ov-prose { margin: 0; font-size: 13.5px; line-height: 1.55; white-space: pre-line; }
-.prj-ov-facts { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; font-size: 13px; }
 .prj-ov-dl { display: grid; gap: 6px; margin: 0; font-size: 13.5px; }
 .prj-ov-dl div { display: grid; grid-template-columns: minmax(110px, 40%) minmax(0, 1fr); gap: 10px; }
 .prj-ov-dl dt { color: var(--muted); }
 .prj-ov-dl dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 
-/* Un projet › Objectifs, Décisions (app/handmade/subjects/project.py, gabarits fiche_*.html et _fiche.html, ADR 0177) : une
-   entrée par objectif ou par décision — son numéro, son titre, ses étiquettes, ses faits en une ligne, ses boutons à
-   leur droite ; un texte cité (compte rendu, pourquoi : long, quatre lignes que « lire la suite » déplie sans
-   script) ; le formulaire d'ajout en colonne à côté sur un grand écran. Une décision remplacée ou retirée s'estompe. */
+/* une colonne de formulaire à côté de ce qu'il règle, sur un grand écran */
 .prj-split { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
 @media (min-width: 1100px) { .prj-split.with-side { grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); } }
-.prj-entries { display: grid; margin: 0; padding: 0; list-style: none; }
-.prj-entry { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 4px 14px; padding: 16px 0;
-  border-top: 1px solid var(--border); }
-.prj-entry:first-child { padding-top: 4px; border-top: 0; }
-.prj-entry-n { align-self: start; margin-top: 1px; padding: 2px 0; border: 1px solid var(--border); border-radius: var(--radius-sm);
-  color: var(--accent); font-size: 12px; font-weight: 650; font-variant-numeric: tabular-nums; text-align: center; }
-.prj-entry-body { display: grid; gap: 8px; min-width: 0; }
-.prj-entry-top { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
-.prj-entry-title { flex: 1 1 320px; min-width: 0; margin: 0; font: 600 15px/1.4 var(--display); overflow-wrap: anywhere; }
-.prj-entry-choice { margin: 0; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
-.prj-entry-facts { display: flex; flex-wrap: wrap; margin: 0; color: var(--text-2); font-size: 12.5px; }
-.prj-entry-facts > span:not(:last-child)::after { content: "·"; margin: 0 8px; color: var(--muted); }
-.prj-entry-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 16px; }
-.prj-entry-foot .prj-entry-facts { flex: 1 1 260px; }
-.prj-entry-actions { align-items: center; gap: 6px; }
-.prj-entry-actions .action-overflow-panel { display: grid; justify-items: stretch; width: max-content; padding: 8px; }
-.prj-entry-actions .action-overflow-panel .btn { width: 100%; justify-content: flex-start; }
-.prj-entry-more { max-width: 110ch; }
-.prj-entry-more > .prj-said { margin-top: 8px; }
-.prj-said { display: grid; justify-items: start; gap: 3px; max-width: 110ch; padding-left: 12px;
-  border-left: 2px solid var(--border); }
-.prj-said.result { border-left-color: color-mix(in srgb, var(--ok) 50%, var(--border)); }
-.prj-said-label { color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
-.prj-said-text { margin: 0; color: var(--text); font-size: 13.5px; line-height: 1.55; overflow-wrap: anywhere; white-space: pre-line; }
-.prj-said-text.long { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 4; }
-.prj-said:has(> .prj-said-all[open]) .prj-said-text.long { display: block; -webkit-line-clamp: unset; }
-.prj-said-all > summary { color: var(--accent); cursor: pointer; font-size: 12.5px; list-style: none; }
-.prj-said-all > summary::-webkit-details-marker { display: none; }
-.prj-said-all .less, .prj-said-all[open] .more { display: none; }
-.prj-said-all[open] .less { display: inline; }
-/* l'état d'une entrée : un objectif fait ou retiré, une décision remplacée ou retirée s'estompent ; bloqué, en rouge */
-.prj-entry.done .prj-entry-title, .prj-entry.dropped .prj-entry-title { color: var(--text-2); }
-.prj-entry.faded .prj-entry-title, .prj-entry.faded .prj-entry-choice, .prj-entry.faded .prj-dec-arrow,
-.prj-entry.faded .prj-said-text { color: var(--muted); }
-.prj-entry.dropped .prj-entry-title { text-decoration: line-through; text-decoration-color: var(--border-strong); }
-.prj-entry.done .prj-entry-n, .prj-entry.dropped .prj-entry-n, .prj-entry.faded .prj-entry-n { color: var(--muted); }
-.prj-entry.blocked .prj-entry-n { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); color: var(--danger); }
-.prj-side-help { margin: -4px 0 14px; color: var(--text-2); font-size: 12.5px; line-height: 1.5; }
-.prj-side .form > p.muted { margin: 0 0 4px; font-size: 12.5px; }
 
-/* Un projet › Cadre (app/handmade/subjects/project.py, gabarit fiche_comportement.html, ADR 0281) : le gabarit du
+/* Un projet › Administration (app/handmade/subjects/project.py, gabarit admin.html, ADR 0281, 0297) : le gabarit du
    paramétrage (.hm-form de base.css et console.css : une ligne par réglage, « Enregistrer » collé en bas), sans cadre
    dans la carte ; ses réglages en lecture quand il est archivé ; ses outils — la table des lots, « Choisir ses outils »
    en colonne à côté sur un grand écran (.prj-split). */
@@ -240,30 +156,6 @@
 .prj-tools-checks > legend { margin-bottom: 4px; padding: 0; color: var(--text); font-family: var(--display);
   font-size: 1.1rem; font-weight: 600; }
 .prj-tools-checks > .field { padding: 10px 0; border-top: 1px solid var(--border); }
-
-/* Un projet › Carnet (gabarit fiche_carnet.html) : en sous-onglets (.hm-subtabs de base.css) ; une consigne, une note,
-   son texte d'abord ; ce qui sort de la machine, une entrée par demande — celle qui attend ton accord marquée, sa
-   commande et le lien vers la file sous elle. */
-.prj-notebook-text { color: var(--text); font-size: 13.5px; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-line; }
-.now-feed .prj-notebook-meta { display: flex; flex-wrap: wrap; gap: 2px 14px; margin-top: 2px; color: var(--muted); font-size: 12.5px; }
-.prj-out { display: grid; margin: 0; padding: 0; list-style: none; }
-.prj-out-item { position: relative; display: grid; gap: 8px; min-width: 0; padding: 12px 0; border-top: 1px solid var(--border); }
-.prj-out-item:first-child { padding-top: 2px; border-top: 0; }
-.prj-out-item.waiting::before { content: ""; position: absolute; top: 12px; bottom: 12px; left: -11px; width: 3px;
-  border-radius: var(--radius-sm); background: var(--warn); }
-.prj-out-item.waiting:first-child::before { top: 2px; }
-.prj-out-top { display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; align-items: baseline; gap: 4px 14px; }
-.prj-out-when { color: var(--muted); font-size: 12px; white-space: nowrap; }
-.prj-out-what { margin: 0; font-size: 13.5px; overflow-wrap: anywhere; }
-.prj-out-tags { display: inline-flex; flex-wrap: wrap; align-items: baseline; justify-content: flex-end; gap: 4px 10px;
-  font-size: 12.5px; }
-.prj-out-decide { margin: 0; }
-.prj-out-item > :not(.prj-out-top) { margin-left: 110px; }
-@media (max-width: 640px) {
-  .prj-out-top { grid-template-columns: minmax(0, 1fr) auto; }
-  .prj-out-what { grid-column: 1 / -1; grid-row: 2; }
-  .prj-out-item > :not(.prj-out-top) { margin-left: 0; }
-}
 
 /* La fiche d'un projet rangée par ce qu'on y fait (ADR 0281).
    « Ce qui t'attend » (gabarit _todo.html, sur « Où il en est » et sur « Ses projets ») : une ligne par attente — sa
@@ -292,38 +184,8 @@
   .prj-todo-go { justify-self: start; white-space: normal; }
 }
 
-/* « Où il en est » : ses deux sous-onglets ; « En bref » empile ses cartes, ses missions et ses objectifs en cours
-   côte à côte sur un grand écran, une ligne chacun (leur numéro, leur texte, leurs faits, la jauge de leurs jalons). */
-.prj-ov-brief, .prj-ov-objectives, .prj-frame-pane, .prj-git-branches-pane { display: grid; gap: 16px; min-width: 0; }
-.prj-ov-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 16px;
-  align-items: start; }
-.prj-ov-pair > * { min-width: 0; }
-.prj-lines { display: grid; margin: 0; padding: 0; list-style: none; }
-.prj-line { display: grid; gap: 4px; min-width: 0; padding: 10px 0; border-top: 1px solid var(--border); }
-.prj-line:first-child { padding-top: 0; border-top: 0; }
-.prj-line-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.prj-line-title { min-width: 0; color: var(--text); font-size: 14px; font-weight: 550; line-height: 1.4; overflow-wrap: anywhere; }
-.prj-line-title:hover { color: var(--accent); text-decoration: none; }
-.prj-line-n { display: inline-block; min-width: 22px; margin-right: 8px; padding: 0 4px; border: 1px solid var(--border);
-  border-radius: var(--radius-sm); color: var(--accent); font-size: 11.5px; font-weight: 650; text-align: center; }
-.prj-line.danger .prj-line-n { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); color: var(--danger); }
-.prj-line-marks { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; margin: 0; color: var(--text-2);
-  font-size: 12.5px; line-height: 1.5; }
-.prj-line-dl { display: grid; gap: 2px; margin: 0; color: var(--text-2); font-size: 12.5px; line-height: 1.5; }
-.prj-line-dl > div { display: grid; grid-template-columns: 108px minmax(0, 1fr); gap: 10px; }
-.prj-line-dl dt { color: var(--muted); }
-.prj-line-dl dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
-.prj-line-dl .stirred dd { color: var(--accent); }
-.prj-line-marks .now-bar { flex: none; width: 96px; margin: 0; }
-.prj-line-marks .now-bar .fill { stroke: var(--ok); }
-
-/* « Missions et objectifs » : le filtre en bouton à choix dans l'en-tête de la liste, un titre par sorte. */
-.prj-obj-head { flex-wrap: wrap; row-gap: 8px; }
-.prj-obj-seg { margin-left: auto; }
-.prj-group { display: flex; align-items: baseline; gap: 8px; margin: 18px 0 0; }
-.prj-group.first { margin-top: 0; }
-.prj-group-help { margin: 2px 0 6px; color: var(--text-2); font-size: 12.5px; }
-.prj-fiche .prj-entries + .prj-group { padding-top: 16px; border-top: 1px solid var(--border); }
+/* une section d'Administration : ses cartes l'une sous l'autre */
+.prj-frame-pane { display: grid; gap: 16px; min-width: 0; }
 
 /* « Liens entre projets », sous la liste (ADR 0281) : une ligne par lien — qui lit qui, ce que le lien donne, la demande
    en cours ; sur un écran étroit, la ligne s'empile. */

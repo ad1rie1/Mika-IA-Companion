@@ -74,6 +74,10 @@
   const IMAGE_ASK_MS = 120000;
   const WORKER_PER_TASK = 5;
   const FLUSH_MS = 300;
+  // les profils des personnes (ADR 0298) : la base que Teams garde dans ce navigateur, relue au plus toutes les 10 min
+  const PROFILES_DB = /^Teams:profiles:/;
+  const PROFILES_TTL_MS = 10 * 60 * 1000;
+  const PROFILES_MAX = 20000;
   const SENT_IN_PAGE_MAX = 20000;
   const DRAFT_CHECK_MS = 2000;
   const DRAFT_TRIES = 3;
@@ -96,6 +100,7 @@
     history: { running: false, done: 0, total: 0, messages: 0, images: 0, error: "" },
     images: { downloaded: 0, sent: 0, skipped: 0, failed: 0 },
     conversations: 0,
+    profiles: 0,
     sent: 0,
     compose: { placed: 0, sentByService: 0, sentByComposeBox: 0, uncertain: 0, errors: 0 },
   };
@@ -141,6 +146,64 @@
     } catch (_) { /* rien */ }
   }
 
+  // ── Les profils (ADR 0298) ─────────────────────────────────────────────────
+  //
+  // Teams garde le profil des personnes croisées (nom, e-mail, poste, entreprise, service, numéros). On le lit dans
+  // cette page et on joint, à chaque lot, celui des auteurs et des mentionnés de ses messages ; le service de
+  // l'extension ne le fait partir qu'avec un message qui part, une fois tant qu'il ne change pas.
+
+  const profiles = { at: 0, byId: new Map(), loading: null };
+
+  async function readProfiles() {
+    const names = (await indexedDB.databases()).map(function (d) { return d && d.name ? String(d.name) : ""; })
+      .filter(function (n) { return PROFILES_DB.test(n); });
+    const me = selfId();
+    const name = names.find(function (n) { return me && n.toLowerCase().indexOf(me) >= 0; }) || names[0];
+    if (!name) return;
+    const db = await openExisting(name);
+    if (!db) return;
+    let rows = [];
+    try {
+      rows = await getAll(db, "profiles");
+    } finally {
+      db.close();
+    }
+    const byId = new Map();
+    for (const r of rows.slice(0, PROFILES_MAX)) {
+      const p = X.profileOf(r);
+      if (p) byId.set(p.id, p);
+    }
+    profiles.byId = byId;
+    stats.profiles = byId.size;
+  }
+
+  /** Relit les profils s'ils ont vieilli ; jamais deux lectures à la fois, jamais d'erreur qui remonte. */
+  function loadProfiles() {
+    if (Date.now() - profiles.at < PROFILES_TTL_MS) return Promise.resolve();
+    if (!profiles.loading) {
+      profiles.loading = readProfiles().catch(function () { /* une autre version de Teams : sans profils */ })
+        .finally(function () {
+          profiles.at = Date.now();
+          profiles.loading = null;
+        });
+    }
+    return profiles.loading;
+  }
+
+  /** Les profils connus des auteurs et des mentionnés de ces messages, chacun une fois. */
+  function profilesFor(messages) {
+    const out = new Map();
+    for (const m of messages) {
+      if (m.deleted) continue;
+      for (const raw of [m.authorId].concat(m.mentions || [])) {
+        const id = String(raw || "").toLowerCase();
+        const p = id && profiles.byId.get(id);
+        if (p && !out.has(id)) out.set(id, p);
+      }
+    }
+    return Array.from(out.values()).slice(0, 300);
+  }
+
   function flush() {
     flushTimer = 0;
     if (!pendingMessages.length && !pendingConversations.length && !pendingCursors.size) return;
@@ -154,7 +217,8 @@
       for (const c of cursors) pendingCursors.delete(c.conv);
     }
     stats.sent += messages.length;
-    post("captured", { messages: messages, conversations: conversations, self: selfId(), cursors: cursors });
+    post("captured", { messages: messages, conversations: conversations, self: selfId(), cursors: cursors,
+      profiles: profilesFor(messages) });
     if (pendingMessages.length || pendingConversations.length || pendingCursors.size) schedule();
   }
 
@@ -579,6 +643,7 @@
     let finished = false;
     try {
       if (!cursorsLoaded && !(await loadCursors())) return; // le service dort ou l'extension a été rechargée
+      await loadProfiles();
       data = await openTeamsData();
       if (!data) return;
       stats.idb.conversations = data.records.length;
@@ -838,6 +903,7 @@
     h.error = "";
     let data = null;
     try {
+      await loadProfiles();
       data = await openTeamsData();
       if (!data) throw new Error("pas de base de Teams lisible dans cet onglet");
       const records = new Map();
@@ -875,7 +941,8 @@
           const part = kept.slice(i, i + HISTORY_CHUNK);
           if (!part.length && !conversations.length) break;
           const answer = await askService("historyChunk", { run: run, messages: part,
-            conversations: i === 0 ? conversations.slice(0, 50) : [], self: selfId() }, HISTORY_ASK_MS);
+            conversations: i === 0 ? conversations.slice(0, 50) : [], self: selfId(), profiles: profilesFor(part) },
+          HISTORY_ASK_MS);
           if (!answer || !answer.ok) {
             throw new Error((answer && answer.data && answer.data.error) || "le service de l'extension ne répond pas");
           }

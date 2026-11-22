@@ -143,7 +143,8 @@ private fun GoalList(vm: ProjectViewModel, sheet: Sheet, now: Long, onAdd: () ->
         }
         for (g in seen) {
             item(key = "g${g.code}") { GroupLabel(labels[g.code].orEmpty(), g.items.size) }
-            items(g.items, key = { it.key }) { goal -> GoalRow(goal, now) { shell.navigate(Route.ProjectGoal(vm.id, goal.key)) } }
+            // sa clé porte son groupe : unique dans toute la liste, quoi que rende le serveur
+            keyedItems(g.items, { "${g.code}:${it.key}" }) { goal -> GoalRow(goal, now) { shell.navigate(Route.ProjectGoal(vm.id, goal.key)) } }
         }
     }
 }

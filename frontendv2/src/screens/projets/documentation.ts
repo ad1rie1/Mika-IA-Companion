@@ -26,7 +26,7 @@ import { askLine } from "./dialogs";
 import { spaceImage } from "./docmd";
 import {
   decisionRequest, decisionRoute, decisionStatusRequest, docPlace, draftKey, folderOf, folderPath, homePage, imageMarkdown, imageRemoveRequest, imageRoute, isDirty, moveRequest, nameOf, pagePath,
-  pageRoute, rebased, refused, removeRequest, restoreRequest, saveBody, startDraft, tidyMarkdown, typed, type Draft,
+  movedOn, pageRoute, rebased, refused, removeRequest, restoreRequest, saveBody, startDraft, tidyMarkdown, typed, type Draft,
 } from "./docparts";
 import type { PageEditor } from "./editor";
 import { plural, refusalWords } from "./gestures";
@@ -401,8 +401,18 @@ const acts: Record<string, Act> = {
         return;
       }
       const status = err instanceof ApiError ? err.status : 0;
+      // un 409 n'est un conflit que si la page a bougé : le serveur le répond aussi au même texte, à une page
+      // disparue, à une borne atteinte. On la relit pour le savoir ; introuvable ou injoignable, ce n'en est pas un
+      let moved = false;
+      if (status === 409) {
+        try {
+          moved = movedOn(current, await fetchDocPage(id, path));
+        } catch {
+          moved = false;
+        }
+      }
       // ce qui est écrit reste : le brouillon garde le texte, et dit le refus avec les mots du serveur
-      drafts.set(key, refused(drafts.get(key) ?? current, status, refusalWords(failureText(err), err instanceof ApiError ? err.fields : {})));
+      drafts.set(key, refused(drafts.get(key) ?? current, refusalWords(failureText(err), err instanceof ApiError ? err.fields : {}), moved));
       if (status === 409 || status === 404) invalidateDocs();
       h0.repaint();
     } finally {
@@ -420,7 +430,8 @@ const acts: Record<string, Act> = {
     try {
       page = await fetchDocPage(id, path);
     } catch (err) {
-      drafts.set(key, refused(draft, err instanceof ApiError ? err.status : 0, failureText(err)));
+      // la relecture a échoué : le conflit reste à reprendre, sauf si la page n'existe plus
+      drafts.set(key, refused(draft, failureText(err), draft.conflict && !(err instanceof ApiError && err.status === 404)));
       h0.repaint();
       return;
     }

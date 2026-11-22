@@ -155,6 +155,7 @@ modules = [
     "mika.plugins.location",
     "mika.plugins.phone",
     "mika.plugins.trips",
+    "mika.plugins.contacts",
 ]
 
 [[tool.importlinter.contracts]]

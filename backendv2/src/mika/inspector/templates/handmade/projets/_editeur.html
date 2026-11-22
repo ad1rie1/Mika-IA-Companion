@@ -1,0 +1,75 @@
+{# L'éditeur d'une page de documentation (documentation.html, ADR 0297) : un champ ordinaire, que
+   static/handmade/doc_editor.js augmente — une barre d'outils qui agit sur la sélection, « Écrire | Aperçu | Les
+   deux » (l'aperçu rendu par le moteur, comme la page le sera), l'insertion d'une image de l'espace, le brouillon
+   gardé le temps d'un envoi, ce qui n'est pas enregistré. Sans script, le champ et « Enregistrer » suffisent.
+   ``e`` : ce que prépare ``project_docs._editor``. Le formulaire est celui de ``projects.doc_ecrire`` ; il nomme la
+   version lue (``base``, posée sans se montrer). #}
+{% from "handmade/projets/_morceaux.html" import ico %}
+{% from "handmade/projets/_zones.html" import plumbing %}
+{% from "_forms.html" import field %}
+<div class="pj-ed{{ ' conflit' if e.conflict }}" data-doc-editor data-draft="{{ e.draft }}"{% if e.restore %} data-restore{% endif %} data-preview="{{ e.preview }}" data-where="{{ e.path }}" data-csrf="{{ e.form.csrf }}">
+  {% if e.conflict %}{% set k = e.conflict %}
+  <div class="pj-conflict" role="alert">
+    {% if k.exists %}<p>{{ ico('x', 'xs') }}<span><b>Une page « {{ k.path }} » existe déjà</b> : elle en est à la version {{ k.version }}, écrite par {{ k.who.name }}{% if k.who.where %}, {{ k.who.where }}{% endif %}, {{ k.ago }}. Rien n'a été écrasé. Ton texte est revenu dans l'éditeur, sur elle : enregistrer remplacera sa version {{ k.version }} — relis-la d'abord.</span></p>
+    {% else %}<p>{{ ico('x', 'xs') }}<span><b>La page a bougé depuis ta lecture</b> (la version {{ k.read }}) : elle en est à la version {{ k.version }}, écrite par {{ k.who.name }}{% if k.who.where %}, {{ k.who.where }}{% endif %}, {{ k.ago }}. Rien n'a été écrasé. Ton texte est revenu dans l'éditeur et repart de la version {{ k.version }} : relis-la avant d'enregistrer.</span></p>{% endif %}
+    <details class="pj-conflict-v"><summary>{{ ico('eye', 'xs') }}La version {{ k.version }}, telle qu'elle est</summary><article class="pj-md pj-doc">{{ k.html }}</article></details>
+  </div>
+  {% endif %}
+  <div class="pj-dz pj-ed-dz">
+    <input type="checkbox" id="pj-infos" class="sr pj-infos-box" data-volet>
+    <div class="pj-main">
+      <form method="post" action="{{ e.form.url }}" id="pj-ed-form" class="form pj-ed-form"{% if e.new %} data-goto-field="path"{% endif %}>
+        {{ plumbing(e.form) }}
+        {% if e.new %}<header class="pj-ed-new"><h3>Nouvelle page</h3><p>Dans l'espace de documentation du projet. Son chemin finit par « .md » ; des dossiers se séparent par « / ».</p>
+          {% for x in e.form.fields if x.path == 'path' %}{{ field(x) }}{% endfor %}</header>{% endif %}
+        <div class="pj-ed-bar" role="toolbar" aria-label="Mettre en forme" data-ed-bar hidden>
+          <select data-md="heading" aria-label="Le style du paragraphe"><option value="0">Paragraphe</option><option value="1">Titre 1</option><option value="2">Titre 2</option><option value="3">Titre 3</option></select>
+          <span class="sep"></span>
+          <button type="button" data-md="bold" title="Gras (Ctrl+B)" aria-label="Gras"><b>B</b></button>
+          <button type="button" data-md="italic" title="Italique (Ctrl+I)" aria-label="Italique"><i>I</i></button>
+          <button type="button" data-md="strike" title="Barré" aria-label="Barré"><s>S</s></button>
+          <button type="button" data-md="code" title="Code" aria-label="Code">{{ ico('code', 'xs') }}</button>
+          <span class="sep"></span>
+          <button type="button" data-md="ul" title="Liste" aria-label="Liste">{{ ico('list', 'xs') }}</button>
+          <button type="button" data-md="ol" title="Liste numérotée" aria-label="Liste numérotée">{{ ico('olist', 'xs') }}</button>
+          <button type="button" data-md="task" title="Liste de tâches" aria-label="Liste de tâches">{{ ico('tasks', 'xs') }}</button>
+          <span class="sep"></span>
+          <button type="button" data-md="link" title="Lien (Ctrl+K)" aria-label="Lien">{{ ico('link', 'xs') }}</button>
+          <button type="button" data-md="image" title="Image de la documentation" aria-label="Image">{{ ico('image', 'xs') }}</button>
+          <button type="button" data-md="table" title="Tableau" aria-label="Tableau">{{ ico('table', 'xs') }}</button>
+          <span class="sep"></span>
+          <button type="button" data-md="codeblock" title="Bloc de code" aria-label="Bloc de code">{{ ico('terminal', 'xs') }}</button>
+          <button type="button" data-md="quote" title="Citation" aria-label="Citation">{{ ico('quote', 'xs') }}</button>
+          <button type="button" data-md="rule" title="Séparateur" aria-label="Séparateur">{{ ico('minus', 'xs') }}</button>
+          <span class="pj-grow"></span>
+          <span class="seg pj-ed-mode" role="group" aria-label="Écrire ou voir"><button type="button" data-ed-mode="ecrire" aria-pressed="true">{{ ico('pen', 'xs') }}Écrire</button><button type="button" data-ed-mode="apercu" aria-pressed="false">{{ ico('eye', 'xs') }}Aperçu</button><button type="button" data-ed-mode="deux" aria-pressed="false">{{ ico('columns', 'xs') }}Les deux</button></span>
+          <label for="pj-infos" class="pj-v-infos">Infos</label>
+        </div>
+        <div class="pj-ed-area" data-ed-area>
+          <textarea name="text" class="pj-ed-text" data-ed-text maxlength="{{ e.limit }}" spellcheck="true" aria-label="Son texte, en Markdown">{{ e.text }}</textarea>
+          <input type="hidden" name="_champs" value="text">
+          <div class="pj-ed-prev pj-md pj-doc" data-ed-preview hidden aria-live="polite" aria-label="Son aperçu"></div>
+        </div>
+        <footer class="pj-ed-foot">
+          {% for x in e.form.fields if x.path == 'word' %}{{ field(x) }}{% endfor %}
+          <span class="pj-ed-state" data-ed-state aria-live="polite">{% if e.restore %}Ton texte, pas encore enregistré, revient dans l'éditeur (s'il est encore gardé par ce navigateur).{% endif %}</span>
+          {% if e.new %}<a class="btn quiet" href="{{ home }}">Annuler</a>{% endif %}
+          <button class="btn">{{ ico('check', 'xs') }}{{ 'Créer la page' if e.new else 'Enregistrer' }}</button>
+        </footer>
+      </form>
+    </div>
+    <aside class="pj-side" aria-label="Infos">
+      <section class="pj-sc"><h3>Écrire</h3>
+        <ul class="pj-ed-help" role="list">{% for code, said in e.help %}<li><code>{{ code }}</code><span>{{ said }}</span></li>{% endfor %}</ul>
+        <p class="pj-hint">Enregistrer fait une version de la page, à ton nom ; si quelqu'un l'a enregistrée depuis ta lecture, rien n'est écrasé.</p></section>
+      {% if e.upload %}<section class="pj-sc"><h3>Téléverser une image</h3>
+        <form method="post" action="{{ e.upload.url }}" class="form pj-upload petit" enctype="multipart/form-data">{{ plumbing(e.upload) }}
+          <label class="pj-drop">{{ ico('upload', 'xs') }}<b>Choisir une image</b><span>PNG, JPEG, GIF ou WebP, 5 Mio au plus ; ton texte t'attend.</span><input type="file" name="_fichier" accept="image/png,image/jpeg,image/gif,image/webp" required></label>
+          <button class="btn quiet">{{ ico('upload', 'xs') }}Téléverser</button>
+        </form></section>{% endif %}
+      <section class="pj-sc" id="pj-ed-images"><h3>Images de la documentation<span class="pj-cnt">{{ e.images|length }}</span></h3>
+        <div class="pj-ed-imgs">{% for i in e.images %}<button type="button" class="pj-ed-img" data-insert="{{ i.ref }}" title="L'insérer dans la page"><img src="{{ i.url }}" alt="" loading="lazy"><code>{{ i.name }}</code></button>{% else %}<p class="pj-none">Pas encore d'image : téléverses-en une.</p>{% endfor %}</div>
+        {% if e.images %}<p class="pj-hint">Choisir une image l'insère là où est le curseur : <code>![texte](images/nom)</code>.</p>{% endif %}</section>
+    </aside>
+  </div>
+</div>

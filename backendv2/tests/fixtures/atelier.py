@@ -20,14 +20,24 @@ from __future__ import annotations
 
 import hashlib
 import re
+from dataclasses import replace
 
 from mika.ports.workshop import (
+    ENTRY_DIR,
+    ENTRY_FILE,
     NO_COMMIT,
     TOO_BIG,
+    Blob,
+    Branch,
+    Change,
     Commit,
+    FileDiff,
+    History,
     Hosted,
     OutsideWorkshop,
     RunResult,
+    Span,
+    TreeEntry,
     View,
     view_place,
 )
@@ -161,6 +171,60 @@ class Atelier:
     async def head(self, project: int) -> str:
         commits = self.commits_.get(project, [])
         return commits[-1][0] if commits else ""
+
+    # ── Le dépôt lu à une référence (ADR 0288) : une seule branche, « main », ce qui est enregistré ──
+
+    async def branches(self, project: int) -> list[Branch]:
+        latest = await self.commits(project, 1)
+        return [Branch("main", replace(latest[0], branch="main", local=True), base=True, current=True)] if latest else []
+
+    async def history(self, project: int, ref: str = "", *, path: str = "", n: int = 25, offset: int = 0) -> History | None:
+        if project not in self.commits_ or ref not in ("", "main") and not self._known(project, ref):
+            return None
+        found = [replace(k, branch="main", local=True) for k in await self.commits(project, 10_000)]
+        return History(tuple(found[offset:offset + n]), len(found))
+
+    def _snapshot(self, project: int, ref: str) -> dict[str, str] | None:
+        sha = self._known(project, ref) if ref not in ("", "main") else (self.commits_.get(project) or [("", "")])[-1][0]
+        return None if not sha else self.snapshots.get(project, {}).get(sha, {})
+
+    async def ref_tree(self, project: int, ref: str, path: str = ".") -> list[TreeEntry] | None:
+        self._check(path)
+        files = self._snapshot(project, ref)
+        if files is None:
+            return None
+        prefix = "" if path in (".", "") else path.strip("/") + "/"
+        dirs, out = set(), []
+        for name, text in sorted(files.items()):
+            if not name.startswith(prefix):
+                continue
+            rest = name[len(prefix):]
+            if "/" in rest:
+                dirs.add(prefix + rest.split("/", 1)[0])
+            else:
+                out.append(TreeEntry(name, ENTRY_FILE, len(text.encode())))
+        return [TreeEntry(d, ENTRY_DIR) for d in sorted(dirs)] + out
+
+    async def ref_file(self, project: int, ref: str, path: str, limit: int = 400_000) -> Blob | None:
+        self._check(path)
+        files = self._snapshot(project, ref)
+        if files is None:
+            return None
+        if path not in files:
+            raise FileNotFoundError(path)
+        return Blob(path, sha=await self.head(project), size=len(files[path].encode()), text=files[path])
+
+    async def change(self, project: int, sha: str) -> Change | None:
+        sha = self._known(project, sha)
+        found = next((k for k in await self.commits(project, 10_000) if k.sha == sha), None)
+        return Change(replace(found, branch="main", local=True), found.title) if found is not None else None
+
+    async def diff_of(self, project: int, since: str, head: str, *, path: str = "",
+                      lines: int = 3000) -> tuple[FileDiff, ...] | None:
+        return () if self._known(project, head) else None
+
+    async def span(self, project: int, branch: str) -> Span | None:
+        return None
 
     async def branch(self, project: int) -> str:
         return "main" if project in self.commits_ else ""

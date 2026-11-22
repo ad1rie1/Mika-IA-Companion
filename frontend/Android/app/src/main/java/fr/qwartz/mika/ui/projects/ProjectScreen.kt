@@ -88,6 +88,7 @@ import fr.qwartz.mika.ui.shell.MikaTopBar
 import fr.qwartz.mika.ui.shell.SectionScaffold
 import fr.qwartz.mika.ui.shell.rememberSessionKey
 import fr.qwartz.mika.ui.theme.mika
+import androidx.compose.runtime.saveable.rememberSaveable
 
 /*
  * La fiche d'un projet (ADR 0296), en page : son en-tête (son titre, son état, pour qui ; piloter : donner une consigne,
@@ -115,24 +116,32 @@ fun ProjectScreen(graph: AppGraph, route: Route.Project) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) { vm.resume() }
     }
     val now = rememberNow(wallMs = graph.clock::wallMs)
-    var instructing by remember { mutableStateOf(false) }
-    var launching by remember { mutableStateOf(false) }
-    var addingGoal by remember { mutableStateOf(false) }
-    var newTicket by remember { mutableStateOf(false) }
+    // une feuille ou une fenêtre ouverte survit à une rotation (et ce qu'on y tape aussi)
+    var instructing by rememberSaveable(route.id) { mutableStateOf(false) }
+    var launching by rememberSaveable(route.id) { mutableStateOf(false) }
+    var addingGoal by rememberSaveable(route.id) { mutableStateOf(false) }
+    var newTicket by rememberSaveable(route.id) { mutableStateOf(false) }
+    // la fiche qui s'ouvre ne redit pas un refus d'avant
+    FreshEntry(vm.gestures, ProjectViewModel.TOP)
     val sheet = vm.sheet.valueOrNull
     val tab = sheet?.let { SheetTabs.shown(it, route.tab) } ?: route.tab
     SectionScaffold(
-        topBar = { ProjectTopBar(route.id, sheet, tab, vm.gestures.busy.isNotEmpty(), onInstruct = { instructing = true }, onLaunch = { launching = true }, onPause = { vm.pilot(it) }) },
+        topBar = { ProjectTopBar(route.id, sheet, tab, vm.gestures.busy.isNotEmpty() || vm.stale, onInstruct = { instructing = true }, onLaunch = { launching = true }, onPause = { vm.pilot(it) }) },
     ) { modifier ->
         LoadBox(vm.sheet, vm::retry, modifier) { s ->
             Column(modifier) {
                 RefusalNote(vm.gestures.refusalAt(ProjectViewModel.TOP), Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+                StaleNote(vm.staleError, vm::reread, Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
                 PullToRefreshBox(isRefreshing = vm.refreshing, onRefresh = vm::pull, modifier = Modifier.fillMaxSize()) {
                     SheetTabContent(tab, SheetTabs.sub(route.tab), graph, vm, s, now, onAddGoal = { addingGoal = true }, onNewTicket = { newTicket = true })
                 }
             }
         }
     }
+    // rien n'est parti (la fiche se relit à l'instant, un autre geste attend sa réponse) : on le dit — une fenêtre où
+    // l'on tape reste, avec ce qui est tapé
+    val notSent = stringResource(R.string.proj_not_sent)
+    val notSentPlain = stringResource(R.string.proj_not_sent_plain)
     if (instructing) {
         AskDialog(
             title = stringResource(R.string.proj_pilot_instruct),
@@ -144,10 +153,7 @@ fun ProjectScreen(graph: AppGraph, route: Route.Project) {
             max = 2000,
             danger = false,
             onDismiss = { instructing = false },
-            onConfirm = { text ->
-                instructing = false
-                vm.pilot("instruct", text)
-            },
+            onConfirm = { text -> if (vm.pilot("instruct", text)) instructing = false else shell.toast(notSent) },
         )
     }
     if (launching) {
@@ -158,7 +164,7 @@ fun ProjectScreen(graph: AppGraph, route: Route.Project) {
             confirmButton = {
                 TextButton(onClick = {
                     launching = false
-                    vm.pilot("now")
+                    if (!vm.pilot("now")) shell.toast(notSentPlain)
                 }) { Text(stringResource(R.string.proj_pilot_now)) }
             },
             dismissButton = { TextButton(onClick = { launching = false }) { Text(stringResource(R.string.cancel)) } },
@@ -176,8 +182,11 @@ fun ProjectScreen(graph: AppGraph, route: Route.Project) {
             born = sheet.rights.ticketBorn,
             runner = vm.gestures,
             where = ProjectViewModel.TICKET_NEW,
-            onSubmit = vm::openTicket,
+            onSubmit = { vm.openTicket(it) },
             onDismiss = { newTicket = false },
+            // ouvert depuis la fiche : rien ne part tant qu'elle se relit
+            waits = vm.stale,
+            waitsWhy = vm.staleError?.message.orEmpty(),
         )
     }
 }

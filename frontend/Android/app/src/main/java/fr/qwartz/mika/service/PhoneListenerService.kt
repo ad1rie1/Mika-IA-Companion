@@ -23,9 +23,9 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
- * Le lecteur des notifications du téléphone (« Lui montrer mes messages », ADR 0120) : celles de WhatsApp et de Messages,
- * seulement les applis cochées, lues dans leur `MessagingStyle`. Tout le reste est écarté au premier regard (le paquet),
- * avant le moindre travail. La logique est dans `data/phone` ([PhoneReading], la file) ; ici, la colle Android : décrire
+ * Le lecteur des notifications du téléphone (« Lui montrer mes messages », ADR 0120) : celles de WhatsApp, de Messenger
+ * (ADR 0299) et de Messages, seulement les applis cochées, lues dans leur `MessagingStyle`. Tout le reste est écarté au
+ * premier regard (le paquet), avant le moindre travail. La logique est dans `data/phone` ([PhoneReading], la file) ; ici, la colle Android : décrire
  * la notification, garder son action « Répondre » (en mémoire seulement), passer la main au graphe.
  *
  * Android le branche tant que l'accès aux notifications est accordé. Réglage coupé, il demande à être débranché

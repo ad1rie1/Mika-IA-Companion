@@ -59,10 +59,7 @@ open class ProjectsApi(private val api: MoiApi, private val uploads: MoiApi = ap
 
     /** Un élément ([item] : `#n` pour un ticket, sa clé sinon) : sa ligne, son texte, son fil, son parcours, ses gestes. */
     open suspend fun element(id: Int, list: String, item: String): MoiApi.Result<EntryDetail> =
-        when (val got = api.get("$ROOT/$id/element", linkedMapOf("list" to list, "item" to item))) {
-            is MoiApi.Result.Failed -> got
-            is MoiApi.Result.Ok -> readEntry(got.value)
-        }
+        api.read("$ROOT/$id/element", linkedMapOf("list" to list, "item" to item)) { readEntry(it) }
 
     /** L'histoire des étapes d'un ticket, de la plus ancienne à la plus récente. */
     open suspend fun history(id: Int, item: String): MoiApi.Result<EntryHistory> =
@@ -113,13 +110,17 @@ open class ProjectsApi(private val api: MoiApi, private val uploads: MoiApi = ap
 
     /** Un commit et son diff ; [path] : un seul fichier, relu en entier (un fichier coupé). */
     open suspend fun commit(id: Int, sha: String, path: String = ""): MoiApi.Result<CommitDetail> =
-        diffed(api.get("$ROOT/$id/code/commit", linkedMapOf("sha" to sha, "path" to path)), CommitHead.serializer()) { h, d -> CommitDetail(h.commit, h.linked, d) }
+        api.read("$ROOT/$id/code/commit", linkedMapOf("sha" to sha, "path" to path)) { json ->
+            diffed(MoiApi.Result.Ok(json), CommitHead.serializer()) { h, d -> CommitDetail(h.commit, h.linked, d) }
+        }
 
     open suspend fun branches(id: Int): MoiApi.Result<BranchList> = api.get("$ROOT/$id/code/branches", reader = BranchList.serializer())
 
     /** Une branche : ce qu'elle a d'avance sur la base, ses fichiers changés avec leurs comptes. */
     open suspend fun branch(id: Int, name: String): MoiApi.Result<BranchDetail> =
-        diffed(api.get("$ROOT/$id/code/branche", linkedMapOf("name" to name)), BranchHead.serializer()) { h, d -> BranchDetail(h.branch, h.commits, d) }
+        api.read("$ROOT/$id/code/branche", linkedMapOf("name" to name)) { json ->
+            diffed(MoiApi.Result.Ok(json), BranchHead.serializer()) { h, d -> BranchDetail(h.branch, h.commits, d) }
+        }
 
     /** Ses pull requests, les prêtes d'abord. */
     open suspend fun pulls(id: Int): MoiApi.Result<PullPage> =
@@ -130,13 +131,10 @@ open class ProjectsApi(private val api: MoiApi, private val uploads: MoiApi = ap
      * `pull.head`, le commit à nommer pour la fusionner ([MergeOrder]). [path] : un seul fichier de son diff.
      */
     open suspend fun pull(id: Int, number: Int, objective: Int = 0, path: String = ""): MoiApi.Result<PullDetail> =
-        diffed(
-            api.get(
-                "$ROOT/$id/code/pull",
-                if (number > 0) linkedMapOf("number" to number.toString(), "path" to path) else linkedMapOf("objective" to objective.toString(), "path" to path),
-            ),
-            PullHead.serializer(),
-        ) { h, d -> PullDetail(h.pull, h.commits, d) }
+        api.read(
+            "$ROOT/$id/code/pull",
+            if (number > 0) linkedMapOf("number" to number.toString(), "path" to path) else linkedMapOf("objective" to objective.toString(), "path" to path),
+        ) { json -> diffed(MoiApi.Result.Ok(json), PullHead.serializer()) { h, d -> PullDetail(h.pull, h.commits, d) } }
 
     /** Ce que l'hôte dit d'une pull request, maintenant : son titre, son texte, ses échanges, ses vérifications. */
     open suspend fun pullHost(id: Int, number: Int): MoiApi.Result<PullHost> =
@@ -287,7 +285,7 @@ open class ProjectsApi(private val api: MoiApi, private val uploads: MoiApi = ap
         internal fun imageForm(image: DocUpload): MultipartBody =
             MultipartBody.Builder().setType(MultipartBody.FORM).addFormDataPart("files", image.name, image.body()).build()
 
-        /** Une réponse qui porte un diff à côté d'autre chose (`commit`, `branch`, `pull`) : lue deux fois. */
+        /** Une réponse qui porte un diff à côté d'autre chose (`commit`, `branch`, `pull`) : lue deux fois — hors du fil principal (`MoiApi.read`). */
         internal fun <H, T> diffed(got: MoiApi.Result<JsonObject>, head: KSerializer<H>, make: (H, Diff) -> T): MoiApi.Result<T> = when (got) {
             is MoiApi.Result.Failed -> got
             is MoiApi.Result.Ok -> try {

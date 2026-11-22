@@ -1,0 +1,35 @@
+{# « Ce qui l'identifie » (app/handmade/subjects/contact.py et app/handmade/person/identifies.py, ADR 0298) : une
+   tuile par identifiant — sa sorte, son état (lui parle, son compte, elle le lit), sa valeur, où elle l'a vu, depuis
+   quand, pourquoi il est là (réuni d'office), « Détacher » ; puis ses noms et son organisation. #}
+{% from "_forms.html" import action_form %}
+<div class="now-page person-tab">
+  <ul class="person-counts">{% for n, label in counts %}<li><span class="now-num">{{ n }}</span> {{ label }}</li>{% endfor %}</ul>
+  <section class="now-card person-list" aria-labelledby="id-title">
+    <header class="now-card-head"><h2 id="id-title">Ses moyens de communication</h2><span class="person-count now-num">{{ tiles|length }}</span></header>
+    {% if tiles %}
+    <ul class="person-entries tiles">
+      {% for t in tiles %}
+      <li class="id-tile">
+        <div class="id-top"><span class="id-kind">{{ t.kind }}</span><span class="now-tag {{ t.state[1] }}">{{ t.state[0] }}</span></div>
+        <p class="id-value">{% if t.href %}<a href="{{ t.href }}">{{ t.value }}</a>{% else %}{{ t.value }}{% endif %}</p>
+        <div class="person-entry-foot">
+          {% if t.facts %}<p class="person-entry-facts">{% for k, v in t.facts %}<span><span class="k">{{ k }}</span>{{ v }}</span>{% endfor %}</p>{% endif %}
+          {% if t.why %}<p class="id-why{{ ' merged' if t.merged }}">{{ t.why }}</p>{% endif %}
+          {% if t.form %}<div class="person-entry-more">{{ action_form(t.form, True, True) }}</div>{% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="now-empty">Aucun moyen de communication connu.</p>{% endif %}
+  </section>
+  {% if names or org %}
+  <div class="now-grid two">
+    {% if names %}<section class="now-card" aria-labelledby="id-names"><header class="now-card-head"><h2 id="id-names">Ses noms</h2></header>
+      <ul class="who-knows">{% for n in names %}<li><b>{{ n.name }}</b><span class="now-muted">{{ n.where }}{% if n.shown %} · celui qu'elle montre{% endif %}</span></li>{% endfor %}</ul></section>{% endif %}
+    {% if org %}<section class="now-card" aria-labelledby="id-org"><header class="now-card-head"><h2 id="id-org">Son organisation</h2></header>
+      <ul class="who-knows"><li><a href="{{ org.href }}"><b>{{ org.name }}</b></a>{% if org.why %}<span class="now-muted">{{ org.why }}</span>{% endif %}</li></ul></section>{% endif %}
+  </div>
+  {% endif %}
+  {% if note %}<p class="person-tab-note muted">{{ note }}</p>
+  {% elif contact %}<p class="person-tab-note muted">Un moyen de communication réuni par erreur se détache de cette fiche (« Détacher ») ; une autre fiche s'y réunit par « Réunir avec… ». Un même nom seul ne réunit jamais : il se propose dans <a href="{{ matches }}">À valider › Rapprochements</a>.</p>{% endif %}
+</div>

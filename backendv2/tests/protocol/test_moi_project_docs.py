@@ -118,6 +118,28 @@ def test_a_page_is_saved_read_back_versioned_and_never_overwritten(world):  # no
     assert r.status_code == 403
 
 
+def test_a_save_sent_again_after_a_cut_is_recognised_not_taken_for_a_conflict(world):  # noqa: F811
+    """Le premier envoi est arrivé, sa réponse s'est perdue, le client réessaie avec la même clé d'envoi : la page en
+    est à la version qu'il a lui-même écrite. La redite se reconnaît (rien de refait, pas de conflit « écrite par
+    toi ») ; un autre envoi parti de la même version, lui, reste refusé."""
+    client, live, _ = world
+    pid = _project(client, live)
+    _save(client, pid, "accueil.md", "# Outils réseau", 0, "Création")
+    url = f"{P}/{pid}/documentation/page/enregistrer"
+    body = {"path": "accueil.md", "text": "# Outils réseau\n\nDeux commandes.", "word": "Les commandes", "base": 1}
+    headers = {**csrf(client), "Idempotency-Key": "enregistrer-accueil-1"}
+    first = client.post(url, json=body, headers=headers)
+    assert first.status_code == 200 and first.json()["version"] == 2 and not first.json()["deduped"]
+    again = client.post(url, json=body, headers=headers)
+    assert again.status_code == 200, again.text
+    assert again.json()["deduped"] and again.json()["version"] == 2
+    history = _get(client, pid, "/historique", path="accueil.md")["versions"]
+    assert [v["n"] for v in history] == [2, 1]  # une seule version de plus
+    # une autre clé, la même version lue : périmée, comme avant
+    other = client.post(url, json=body, headers={**csrf(client), "Idempotency-Key": "enregistrer-accueil-2"})
+    assert other.status_code == 409 and "version 2" in other.json()["error"]
+
+
 def test_pages_are_created_renamed_moved_removed_and_searched(world):  # noqa: F811
     client, live, _ = world
     pid = _project(client, live)
@@ -148,10 +170,10 @@ def test_pages_are_created_renamed_moved_removed_and_searched(world):  # noqa: F
     _get(client, pid, "/page", 404, path="demarrer.md")
     _get(client, pid, "/historique", 404, path="demarrer.md")
     assert [x["path"] for x in _get(client, pid)["pages"]] == ["accueil.md", "guide/avance/rdp.md"]
-    # la console montre ses pages et leur dernière modification, sans rien y éditer
+    # la console montre ses pages et leur dernière modification ; elle les écrit aussi, par les mêmes actions (ADR 0297)
     tab = client.get(f"/admin/fiche/project/{pid}", params={"onglet": "documentation"})
-    assert tab.status_code == 200 and "Ses pages" in tab.text and "guide/avance/rdp.md" in tab.text
-    assert "dans son espace" in tab.text and "doc_ecrire" not in tab.text and "doc_supprimer" not in tab.text
+    assert tab.status_code == 200 and "Ses pages" in tab.text and "rdp.md" in tab.text
+    assert "dans son espace" in tab.text and "projects.doc_supprimer" in tab.text
 
 
 def test_a_path_never_leaves_the_space_and_a_page_has_its_bound(world):  # noqa: F811

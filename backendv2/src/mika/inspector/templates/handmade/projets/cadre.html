@@ -1,0 +1,5 @@
+{# Le cadre d'un onglet de la fiche d'un projet (app/handmade/subjects/project.py::framed, ADR 0297), sous sa barre
+   d'onglets : son contenu sur toute la largeur. La liste des projets n'y est pas — on y revient par le fil d'Ariane,
+   comme l'écran Projets par « ‹ Projets » ; un onglet en liste et détail pose lui-même ses trois zones : sa liste (ses
+   objectifs, ses tickets), son contenu, son panneau (``objectifs.html``, ``tickets.html``). #}
+<div class="pj-cadre">{{ body }}</div>

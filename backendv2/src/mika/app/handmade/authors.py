@@ -27,7 +27,8 @@ WHAT = {
     flows.CHAT: "ses réponses et ses initiatives, avant qu'elles partent (pas le mode pro)",
     flows.MAIL: "les brouillons de cette boîte, avant qu'on te les propose",
     flows.TEAMS: "les réponses qu'elle prépare à ta place, avant qu'elles partent ou soient posées dans Teams",
-    flows.PHONE: "les réponses WhatsApp et SMS qu'elle prépare à ta place, avant que ton téléphone te les propose",
+    flows.PHONE: "les réponses WhatsApp, Messenger et SMS qu'elle prépare à ta place, avant que ton téléphone "
+                 "te les propose",
 }
 
 

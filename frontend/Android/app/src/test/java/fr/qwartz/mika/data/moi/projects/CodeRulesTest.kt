@@ -325,4 +325,26 @@ class CodeRulesTest {
         assertEquals("code/pull/commenter", reply.route)
         assertEquals(JsonPrimitive("Oui, j'ajoute le test."), reply.body["text"])
     }
+
+    @Test fun `un fichier et un diff mis en lignes - une fois, par une fonction pure que le modèle appelle hors du fil principal`() {
+        val long = "x".repeat(LINE_SHOWN + 10)
+        val laid = fileLines("a\tb\r\n$long\n")
+        assertEquals(listOf("a    b", "x".repeat(LINE_SHOWN) + " …"), laid.lines)
+        assertEquals(laid.lines[1], laid.widest)
+        assertTrue(laid.cut)
+        assertTrue(fileLines("").lines.isEmpty())
+        assertFalse(fileLines("court").cut)
+        // un fichier lu sait ses lignes ; illisible, il n'en a pas
+        assertEquals(listOf("un", "deux"), Blob(readable = true, text = "un\ndeux\n").laid.lines)
+        assertTrue(Blob(readable = false, text = "octets").laid.lines.isEmpty())
+        // un fichier de diff : ses rangées (l'en-tête d'un passage, puis ses lignes), sa plus large, ses colonnes de numéros
+        val f = DiffFile(path = "a.py", hunks = listOf(Hunk("@@ -1,2 +1,2 @@", listOf(DiffLine(" ", 1, 1, "import json"), DiffLine("+", 0, 120, "\tPORT = 3389")))))
+        val rows = f.laid
+        assertEquals(3, rows.rows.size)
+        assertEquals("    PORT = 3389", rows.widest)
+        assertEquals(3, rows.digits)
+        // calculé une fois : le même objet à chaque lecture, et `lay` ne touche que ce qui a des lignes
+        assertTrue(rows === f.laid)
+        Diff(files = listOf(f, DiffFile(path = ".env", hidden = true))).lay()
+    }
 }

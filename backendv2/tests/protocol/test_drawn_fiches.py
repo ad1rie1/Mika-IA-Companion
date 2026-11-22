@@ -474,7 +474,7 @@ def test_drafts_and_contacts_are_drawn_in_the_mail_space(world):  # noqa: F811
 
 def test_every_fiche_kind_is_registered_once():
     assert set(subjects.OVERVIEWS) == {"serveur", "handle", "project", "goal", "reveil", "conversation_teams",
-                                       "reponse_teams", "compte", "mail", "brouillon"}
+                                       "reponse_teams", "compte", "mail", "brouillon", "contact"}
     assert "app" not in subjects.OVERVIEWS  # la Forge garde le rendu de la console
     assert "person" not in subjects.OVERVIEWS  # la fiche d'une personne a son paquet (``person/``)
 
@@ -503,8 +503,95 @@ READS: dict[str, dict[str, str]] = {
     },
     "project.py": {
         "project_at": "le projet lui-même, dans sa tranche",
+        "glance": "ce qu'un projet montre d'un coup d'œil (ADR 0297) : ses objectifs et leurs jalons en barres, ses "
+                  "pull requests ouvertes, ses tickets par étape, ses dépendances — la source que lit aussi l'API "
+                  "par personne, pour que les deux écrans disent la même chose",
         "access_of": "ses lignes d'accès, qu'un formulaire édite et que sa vue ne porte pas",
         "who_named": "le nom de qui une ligne d'accès nomme",
+        "docs": "les pages de sa documentation, pour rendre l'aperçu de l'éditeur avec ses liens (ADR 0297)",
+    },
+    # Objectifs, Tickets et Listes sont calqués sur l'écran Projets (ADR 0297) : des listes serrées, un détail en
+    # volets, un diagramme — des formes que les blocs de leur vue ne portent pas. Ils lisent la tranche du projet par
+    # les fonctions mêmes que lit l'API par personne (une seule source), et la vue de la faculté garde ses blocs
+    "project_zones.py": {
+        "project_at": "le projet lui-même, dans sa tranche",
+        "glance": "où en est un jalon, en un mot : la couleur de son segment",
+        "pulls": "le titre d'une pull request et son adresse chez l'hôte, composés par le moteur",
+        "pull_key": "ce qui nomme une pull request dans l'adresse de Code (son numéro, ou son objectif)",
+    },
+    "project_goals.py": {
+        "glance": "où en est un jalon (``milestone_state``) et la cadence d'une mission en mots",
+        "milestones_of": "ses jalons qui comptent (sans les retirés)",
+        "awaiting": "le point d'arrêt qu'elle a dit prêt et qui attend d'être tranché",
+        "objective_at": "l'objectif que l'adresse choisit",
+        "by_pulls": "si le projet passe par des pull requests",
+        "milestones": "la commande d'un jalon, telle qu'elle est gardée (``decoded``)",
+        "tracker": "le statut d'un ticket lié et d'un élément attendu, en mots",
+        "trigger_words": "ce qui déclenche une mission, en mots",
+    },
+    "project_diagram.py": {
+        "diagram": "le diagramme des objectifs (ADR 0297) : ses lignes et leurs vraies dates, la source que lit "
+                   "aussi ``GET …/diagramme`` de l'API par personne",
+        "objective_at": "l'objectif que l'adresse choisit",
+        "milestone_at": "le jalon que l'adresse choisit",
+    },
+    "project_tickets.py": {
+        "tracker": "son registre dans sa projection : une page d'une liste, un élément, son fil, son histoire "
+                   "rejouée du journal (``passages``)",
+        "tickets": "le parcours d'un ticket en six étapes et à qui est la main",
+        "issues": "la page d'une issue chez l'hôte, et si un ticket peut encore se publier",
+        "objective_at": "l'objectif qui tient un ticket",
+        "by_pulls": "si le projet passe par des pull requests",
+        "reflected": "si le projet reflète ses tickets en issues",
+        "issue_move": "si la publication d'un ticket est déjà demandée",
+        "_by": "qui a écrit, tel que la console le dit (les mots de la vue de son registre)",
+        "_changer": "qui a fait un changement, tel que la console le dit",
+        "_actor": "à qui est un élément, tel que la console le dit",
+        "_hand": "à qui est la main sur un ticket, tel que la console le dit",
+    },
+    # Code est calqué sur l'écran Projets (ADR 0297) : ses sous-vues lisent les blocs de la vue « git »
+    # (``inspect_code``) ; ce que le journal sait d'une pull request, par les règles que lit aussi l'API par personne
+    "project_code.py": {
+        "inspect_code": "les mots et les titres des blocs de la vue « git », et ses pull requests (``pulled``)",
+        "diff_rows": "un diff de la vue relu ligne à ligne, ses numéros avant et après",
+        "pull_order": "ses pull requests dans l'ordre de l'écran (les prêtes d'abord)",
+        "pull_named": "la pull request que l'adresse nomme",
+        "pull_stage": "où en est une pull request : proposée, ouverte, prête, fusionnée, fermée",
+        "merge": "ce qui retient une fusion (``blocked``) et si elle est demandée (``merging``) : la règle même de "
+                 "l'action ``projects.fusionner``",
+        "writable": "si l'on peut écrire sur une pull request (la modifier, y répondre)",
+        "objective_on": "l'objectif d'une branche de travail",
+        "objective_at": "l'objectif lié à un commit ou à un ticket",
+        "ticket_of": "le ticket que tient un objectif",
+        "issue_ticket": "le ticket que reflète une issue",
+        "status_words": "l'étape d'un ticket lié, en mots",
+    },
+    # Documentation, Activité et Dépendances (ADR 0297) : l'espace de documentation, le journal et les liens, lus par
+    # les fonctions mêmes de la faculté que lit l'API par personne
+    "project_docs.py": {
+        "docs": "ses pages (l'arbre, une page, ses versions, la recherche) et ses images, lues dans leur projection",
+        "objective_at": "l'objectif pendant lequel une décision a été prise",
+        "who_wrote": "qui a écrit une version et par où, en mots de console",
+    },
+    "project_activity.py": {
+        "feed": "ce que chaque événement du journal donne au fil, et les pas d'une exécution : la fonction que lit "
+                "l'API par personne",
+        "episode_sort": "ce qu'était une exécution (cadrage, travail, relecture) et son objectif",
+        "glance": "son prochain passage et son rythme",
+        "objective_at": "l'objectif qu'une ligne nomme",
+        "tracker": "un ticket nommé par le fil (``tracker.entry``)",
+    },
+    "project_links.py": {
+        "links": "ce qu'il lit et qui le lit, et ce que chaque lien donne (``readings``, ``readers``, ``grant``)",
+        "asks": "où en est une demande, et comment elle naîtrait (directe, sur accord)",
+        "tie_of": "le mot et la date d'un lien",
+        "link_options": "les projets qu'il peut lire : ceux que propose « Ajouter une dépendance »",
+        "link_knob": "la case d'un lien dans ``projects.liens``, que la page pose pour un geste",
+        "direct_knob": "la case du mode direct d'un lien, idem",
+        "links_seen": "l'état de « Ce qu'il lit » que la page a lu, posé avec chaque geste : l'action refuse s'il a "
+                      "bougé depuis (un autre onglet)",
+        "tickets": "à qui la main sur le ticket d'une demande",
+        "tracker": "le ticket d'une demande chez le projet visé",
     },
     "project_git.py": {
         "project_at": "l'adresse du distant telle qu'elle est réglée, son hôte et son nom : sa vue ne la donne qu'en "

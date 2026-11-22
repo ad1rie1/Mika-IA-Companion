@@ -68,6 +68,7 @@ from mika.kernel.inspect import (
     num_fr,
     paginate,
 )
+from mika.ports.contacts import subject_aliases
 from mika.vocab import privacy
 from mika.vocab.people import ACCOUNT_PREFIX, fold, is_identifiable, is_internal
 from mika.vocab.privacy import LEVEL_WORDS, ChannelTrust, Disclosure, Sensitivity
@@ -440,10 +441,27 @@ def _person_head(s: IdentityState, frame: Frame, ctx: InspectContext, key: str) 
         badges.append(Badge("jetable", "muted"))
     facts += [("proximité", relation), ("vue pour la première fois", _when(ctx, first, "—")),
               ("dernier message reçu", _when(ctx, _last_from(frame, handles)))]
-    # ses adresses, et les noms qui ne désignent qu'elle : oublier la personne les oublie tous
-    aliases = (*handles, *(n for n in (*name_aliases(s, person), *presumed_mentions(s, ctx.store, person))
-                           if n not in handles))
+    # ses adresses, et les noms qui ne désignent qu'elle : oublier la personne les oublie tous — et ce que l'annuaire
+    # lit d'elle par ses fiches reliées (ses identifiants Teams, ses adresses, ses noms racontés : ADR 0298)
+    aliases = tuple(dict.fromkeys((*handles, *name_aliases(s, person), *presumed_mentions(s, ctx.store, person),
+                                   *directory_aliases(ctx, person))))
     return Head(person, known_as(s, person), subtitle, tuple(badges), tuple(facts[:6]), aliases)
+
+
+def directory_aliases(ctx: InspectContext, person: str) -> tuple[str, ...]:
+    """Ce que l'annuaire (le port ``contacts``) garde sous les fiches reliées à cette personne : ses identifiants
+    Teams et ses adresses (``teams:``, ``mail:``), ses clés du téléphone, les noms sous lesquels on lui en a parlé —
+    oublier la personne atteint aussi ce que Teams, le courrier et sa mémoire gardaient sous eux (ADR 0298)."""
+    port = ctx.ports.get("contacts") if ctx.ports is not None else None
+    if port is None or not person:
+        return ()
+    out: list[str] = []
+    for cid in port.links().get(person, ()):
+        sheet = port.sheet(cid)
+        if sheet is not None:
+            out += subject_aliases(((i.kind, i.value) for i in sheet.identifiers),
+                                   ctx.store.subjects if ctx.store is not None else None)
+    return tuple(out)
 
 
 @IDENTITY.search("person")
@@ -925,14 +943,15 @@ def _synthesis(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Bloc
         _opens(frame, main, h, view),
     ), description="Sur son moyen de communication principal (celui dont le canal prouve le plus). Chacun a son verdict "
                    "pas à pas sur sa fiche."))
-    # la liste de ses adresses vit dans l'onglet « Moyens de communication » : ici, un renvoi (pas deux fois la table)
+    # la liste de ses adresses vit dans l'onglet « Ce qui l'identifie » : ici, un renvoi (pas deux fois la table)
     blocks.append(Fields((("ses moyens de communication", Ref.subject("person", person, f"{len(handles)} : voir l'onglet "
-                                                                          "Moyens de communication", "adresses")),),
+                                                                          "Ce qui l'identifie", "adresses")),),
                          title="Ses moyens de communication"))
     return blocks
 
 
-@IDENTITY.inspect("adresses", title="Moyens de communication", subject="person", order=20,
+# « Ce qui l'identifie » (ADR 0298) : la console y ajoute les identifiants des fiches de l'annuaire reliées à elle
+@IDENTITY.inspect("adresses", title="Ce qui l'identifie", subject="person", order=20,
                   description="Par où cette personne lui parle (son compte, son téléphone, sa boîte…), et comment "
                               "chacun a été relié à elle.")
 def _person_handles(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:

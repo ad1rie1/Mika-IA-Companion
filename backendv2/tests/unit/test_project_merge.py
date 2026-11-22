@@ -273,7 +273,7 @@ def test_only_the_gesture_of_a_person_merges(tmp_path):
     # constante : qui le nomme ainsi est compté aussi, et ne fait que le lire (ni brouillon, ni émission)
     named_so = {**_mentions(MERGE_ASKED.name), **_mentions(MERGE_ASKED.name.rsplit(".", 1)[-1])}
     assert MERGE_ASKED.name == "projects.merge_asked" and set(named_so) == {
-        "app/console.py", "app/me/project_activity.py", "faculties/projects/faculty.py"}
+        "app/console.py", "faculties/projects/feed.py", "faculties/projects/faculty.py"}
     writers = [where for where in named_so if where != "faculties/projects/faculty.py" for node in ast.walk(trees[where])
                if isinstance(node, ast.Attribute) and node.attr in ("draft", "emit")]
     assert writers == []

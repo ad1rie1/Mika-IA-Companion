@@ -5,6 +5,7 @@ vide."""
 
 from __future__ import annotations
 
+import html
 import re
 from urllib.parse import parse_qs, urlsplit
 
@@ -58,7 +59,7 @@ def test_each_request_reads_with_its_decision_then_its_execution(world):  # noqa
 
 def test_everything_to_decide_is_one_queue_with_one_tab_bar(world):  # noqa: F811
     """« À valider » est une seule file (ADR 0177) : une barre d'onglets (tout, les courriers, Teams, les identités,
-    les noms, l'historique) ; une identité à confirmer y entre comme une demande, avec ses faits, sa source et ses
+    les rapprochements — les noms à relier en sont, ADR 0298 —, l'historique) ; une identité à confirmer y entre comme une demande, avec ses faits, sa source et ses
     actions, qui ramènent à la file ; un courrier à envoyer a son onglet."""
     client, live, _ = world
     bootstrap(client)
@@ -69,7 +70,7 @@ def test_everything_to_decide_is_one_queue_with_one_tab_bar(world):  # noqa: F81
     everything = drawn(client, "/admin/approbations")
     bar = everything.split('<nav class="tabs"', 1)[1].split("</nav>", 1)[0]
     titles = re.findall(r'class="tab[^"]*" href="/admin/approbations/(\w+)"', bar)
-    assert titles == ["en_attente", "courriers", "teams", "identites", "noms", "historique"]
+    assert titles == ["en_attente", "courriers", "teams", "identites", "rapprochements", "historique"]
     rows = everything.split('class="apv-list"', 1)[1].split("</ol>", 1)[0]
     assert "Identité à confirmer" in rows and "Répondre au libraire" in rows
     mails = drawn(client, "/admin/approbations/courriers")
@@ -137,22 +138,24 @@ def test_a_claim_is_decided_in_the_queue_its_actions_already_oriented(world):  #
 
 
 def test_a_name_is_decided_in_the_queue_with_both_answers(world):  # noqa: F811
-    """Un nom à relier ne se décide que dans la file (ADR 0180) : qui lui en a parlé, la personne qui le porte, et
-    ses deux réponses — « C'est elle » (la fiche, le formulaire pré-rempli) et « Ce n'est pas elle » (le bouton de la
-    faculté)."""
+    """Un nom à relier ne se décide que dans la file (ADR 0180), parmi les rapprochements (ADR 0298) : les deux fiches
+    côte à côte — la personne dont on lui a parlé, celle qui lui parle —, qui lui en a parlé, et ses deux réponses :
+    « La même personne : relier… » (la fiche, le formulaire pré-rempli de l'identité) et « Deux personnes
+    différentes » (le bouton de la faculté)."""
     client, live, _ = world
     bootstrap(client)
-    assert "Aucun nom dont on lui a parlé n'attend quelqu'un." in drawn(client, "/admin/approbations/noms")
+    assert "Aucune fiche n'en rappelle une autre par son nom." in drawn(client, "/admin/approbations/rapprochements")
     emit(client, live, "memory", [memory_c.BELIEVED.draft(
         text=Content.of("Léa, la sœur d'Adrien, prépare un concours."), about=("name:lea",), sensitivity=1,
         source="user_1", told_by=("user_1",))])
     stranger(client, live, "ext_7", "Léa Martin")
-    reader = _reader(drawn(client, "/admin/approbations/noms"))
-    assert "On lui a parlé de « Lea »" in reader and "porté par Léa Martin" in reader
+    reader = _reader(drawn(client, "/admin/approbations/rapprochements"))
+    assert "« Lea », dont on lui a parlé, et Léa Martin : la même personne ?" in html.unescape(reader)
+    assert 'class="pair"' in reader and "porté par Léa Martin" in reader
     assert "<dt>qui lui en a parlé</dt>" in reader
     actions = reader.split('class="apv-do"', 1)[1]
-    assert "C'est elle : relier" in actions and "onglet=synthese" in actions
-    assert "/admin/action/identity.ecarter_nom" in actions and "Ce n'est pas elle" in actions
+    assert "La même personne : relier" in actions and "onglet=synthese" in actions
+    assert "/admin/action/identity.ecarter_nom" in actions and "Deux personnes différentes" in actions
     # son badge accorde son nom à son nombre, jamais « nom(s) » (ADR 0219)
     names = Inspection(live.kernel).find("identity", "noms")
     assert client.portal.call(lambda: Inspection(live.kernel).badge(names)) == (
@@ -183,8 +186,8 @@ def test_naming_shows_in_the_title_bar_only_while_a_name_waits(world):  # noqa: 
         source="user_1", told_by=("user_1",))])
     stranger(client, live, "ext_7", "Léa Martin")
     assert "C'est la personne dont on lui a parlé" in _head(drawn(client, "/admin/fiche/person/user_1"))
-    reader = _reader(drawn(client, "/admin/approbations/noms"))
-    href = re.search(r'href="([^"]+)">C\'est elle : relier', reader).group(1)
+    reader = _reader(drawn(client, "/admin/approbations/rapprochements"))
+    href = re.search(r'href="([^"]+)">La même personne : relier', reader).group(1)
     assert parse_qs(urlsplit(href).query) == {"onglet": ["synthese"], "nom": ["name:lea"]}
     synthesis = drawn(client, href)
     body = synthesis.split('class="tabs', 1)[1]

@@ -66,6 +66,7 @@ import fr.qwartz.mika.data.moi.projects.pullLive
 import fr.qwartz.mika.data.moi.projects.pullTitle
 import fr.qwartz.mika.data.moi.projects.since
 import fr.qwartz.mika.data.moi.projects.treeRows
+import fr.qwartz.mika.data.moi.projects.keyed
 import fr.qwartz.mika.ui.Route
 import fr.qwartz.mika.ui.shell.Gap
 import fr.qwartz.mika.ui.shell.Load
@@ -356,18 +357,20 @@ private fun CommitsList(code: CodeViewModel, shell: Shell, now: Long) {
                 MetaText(plural(it.total, "commit", "commits"))
             }
         }
-        Listed(code.commits, { code.loadCommits() }) { page ->
+        Listed(code.commits, { code.loadCommits() }) { _ ->
             val items = code.allCommits
             if (items.isEmpty()) {
                 item(key = "none") { EmptyNote(R.drawable.ic_m_commit, stringResource(R.string.proj_code_commits_none), stringResource(R.string.proj_code_commits_none_sub)) }
             }
-            byDay(items, { it.at }, now).forEachIndexed { g, day ->
+            // une clé par commit, unique dans toute la liste, quoi que rende le serveur
+            byDay(keyed(items) { it.sha }, { it.value.at }, now).forEachIndexed { g, day ->
                 item(key = "day$g", contentType = "day") { GroupLabel(day.label) }
-                itemsIndexed(day.items, key = { _, c -> c.sha }, contentType = { _, _ -> "commit" }) { i, c ->
+                itemsIndexed(day.items, key = { _, row -> "c${row.key}" }, contentType = { _, _ -> "commit" }) { i, row ->
+                    val c = row.value
                     CommitRow(c, last = i == day.items.lastIndex) { shell.navigate(Route.ProjectCode(code.id, CodePages.COMMIT, c.sha)) }
                 }
             }
-            val rest = page.total - items.size
+            val rest = code.commitsRest
             if (rest > 0) {
                 item(key = "more") {
                     TextButton(onClick = code::more, enabled = !code.loadingMore, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {

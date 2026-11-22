@@ -179,10 +179,65 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** Le texte d'un message, échappé, ses retours à la ligne gardés, et une mention de toi en valeur
- *  (« @Adrien Moreau », « @Adrien »). */
+/** Une ligne de séparation d'un tableau en Markdown (`|---|:--:|`). */
+const TABLE_RULE = /^\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?$/;
+
+/**
+ * Les cellules d'une ligne de tableau : telle que l'extension l'écrit (« a | b », une ligne par rangée), ou en
+ * Markdown (« | a | b | ») ; `null` : une ligne de texte.
+ */
+function tableCells(line: string): string[] | null {
+  const t = line.trim();
+  const cells = /^\|.+\|$/.test(t) ? t.slice(1, -1).split("|") : t.split(/ \|(?: |$)/);
+  return cells.length >= 2 ? cells.map((c) => c.trim()) : null;
+}
+
+/** Un tableau : sa première rangée en tête, les rangées plus courtes complétées ; tout est échappé. */
+function tableHtml(rows: string[][]): string {
+  const width = Math.max(...rows.map((r) => r.length));
+  const [head, ...body] = rows.map((r) => [...r, ...Array<string>(width - r.length).fill("")]);
+  const cells = (r: string[], tag: string): string => r.map((c) => `<${tag}>${h(c)}</${tag}>`).join("");
+  return `<div class="tm-table"><table><thead><tr>${cells(head, "th")}</tr></thead><tbody>${body
+    .map((r) => `<tr>${cells(r, "td")}</tr>`).join("")}</tbody></table></div>`;
+}
+
+/** Le texte d'un message en morceaux : le texte tel quel, et les tableaux (au moins deux rangées qui se suivent). */
+function bodyHtml(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let prose: string[] = [];
+  const flushProse = (): void => {
+    while (prose.length && !prose[0].trim()) prose.shift();
+    while (prose.length && !prose[prose.length - 1].trim()) prose.pop();
+    if (prose.length) out.push(h(prose.join("\n")).replace(/\n/g, "<br>"));
+    prose = [];
+  };
+  for (let i = 0; i < lines.length; ) {
+    const rows: string[][] = [];
+    let j = i;
+    for (; j < lines.length; j += 1) {
+      if (rows.length === 1 && TABLE_RULE.test(lines[j].trim())) continue; // la ligne sous la tête
+      const cells = tableCells(lines[j]);
+      if (!cells) break;
+      rows.push(cells);
+    }
+    if (rows.length >= 2) {
+      flushProse();
+      out.push(tableHtml(rows));
+      i = j;
+    } else {
+      prose.push(lines[i]);
+      i += 1;
+    }
+  }
+  flushProse();
+  return out.join("");
+}
+
+/** Le texte d'un message, échappé, ses retours à la ligne gardés, ses tableaux en tableaux, et une mention de toi en
+ *  valeur (« @Adrien Moreau », « @Adrien »). */
 export function messageHtml(text: string, selfName: string, mentioned: boolean): string {
-  let out = h(text).replace(/\n/g, "<br>");
+  let out = bodyHtml(text);
   const name = selfName.trim();
   if (mentioned && name) {
     const first = name.split(/\s+/)[0];

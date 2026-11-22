@@ -1,0 +1,110 @@
+{# Activité › Projets › un projet › Objectifs › Diagramme (app/handmade/subjects/project_diagram.py, ADR 0297) : le
+   diagramme de l'écran Projets, dessiné côté serveur. Une barre d'outils (Liste | Diagramme, Avancement | Dans le
+   temps, Jours | Semaines, la légende, « Ajouter un objectif »), puis deux zones : le diagramme — les noms à gauche
+   (un lien par ligne : la choisir recharge la page sur elle), les barres à droite, qui défilent en largeur dans leur
+   cadre — et le panneau de ce qu'on a choisi.
+   Tout est en SVG, sans un style en ligne (la CSP) : en « Avancement », une petite barre étirée par ligne (sa part,
+   en unités de 0 à ``full``) ; « Dans le temps », un seul dessin à pixels fixes — l'axe, les fins de semaine, les
+   barres, les fantômes en pointillé, les flèches, le trait d'aujourd'hui. Les hachures sont deux motifs (``pattern``). #}
+{% from "handmade/projets/_morceaux.html" import ico, st, seg, tile %}
+{% from "handmade/projets/_zones.html" import pone, ppop, goal_side %}
+<div class="pj-split sans-liste pj-diag{{ ' lire' if lire }}" data-tab="project/objectifs">
+  <div class="pj-detail">
+    <div class="pj-g-bar">
+      <nav class="seg pj-mode" aria-label="La vue des objectifs"><a href="{{ links.liste }}">{{ ico('list', 'xs') }}Liste</a><a href="{{ links.diagramme }}" aria-current="true">{{ ico('sort', 'xs') }}Diagramme</a></nav>
+      <nav class="seg" aria-label="Ce que disent les barres">{% for m in modes %}<a href="{{ m.href }}"{% if m.on %} aria-current="true"{% endif %}>{{ m.text }}</a>{% endfor %}</nav>
+      {% if time %}<nav class="seg" aria-label="L'échelle">{% for z in zooms %}<a href="{{ z.href }}"{% if z.on %} aria-current="true"{% endif %}>{{ z.text }}</a>{% endfor %}</nav>{% endif %}
+      <span class="pj-g-leg"><span><i class="done"></i>atteint</span><span><i class="work"></i>en cours</span><span><i class="you"></i>à valider</span><span><i class="fail"></i>bloqué</span><span><i></i>à venir</span>{% if time %}<span><i class="fantome"></i>pas commencé, sans date</span>{% endif %}</span>
+      {% if can_add %}<a class="btn pj-add-btn" href="{{ links.ajouter }}">{{ ico('plus', 'xs') }}<span>Ajouter un objectif</span></a>{% endif %}
+    </div>
+    <div class="pj-dz">
+      <input type="checkbox" id="pj-infos" class="sr pj-infos-box" data-volet>
+      <div class="pj-main">
+        <label for="pj-infos" class="pj-volet">{{ ico('info') }}<span>Ce qu'on a choisi</span></label>
+        {% if rows %}
+        <svg class="pj-defs" width="0" height="0" aria-hidden="true"><defs>
+          <pattern id="pj-hache" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)"><rect class="pj-hache-f" width="3" height="6"/></pattern>
+          <pattern id="pj-hache-av" width="22" height="7" patternUnits="userSpaceOnUse"><path class="pj-hache-f" d="M0 7 11 0h11L11 7Z"/></pattern>
+        </defs></svg>
+        <div class="pj-gantt {{ mode }}">
+          <div class="pj-g-noms">
+            <div class="pj-g-head">Objectifs, jalons et missions</div>
+            {% for r in rows %}
+            <a class="pj-g-nom {{ r.sort }}" href="{{ r.href }}"{% if r.on %} aria-current="true"{% endif %} title="{{ r.text }}">
+              {% if r.sort == 'mark' %}<i class="pj-g-pt {{ r.tone }}"></i><span class="pj-g-t">{{ r.text }}</span>
+              {% else %}{{ tile('refresh' if r.sort == 'mission' else 'target', r.tone) }}<span class="pj-g-t"><b>{{ r.text }}</b><small>{{ r.sub }}</small></span>{% endif %}
+            </a>
+            {% endfor %}
+          </div>
+          <div class="pj-g-piste">
+            {% if time %}
+            {% set total = head + height %}
+            <svg class="pj-g-svg" width="{{ time.width }}" height="{{ total }}" viewBox="0 0 {{ time.width }} {{ total }}" role="img" aria-label="Ses objectifs et leurs jalons dans le temps">
+              {% for d in time.days %}{% if d.weekend and time.today > d.x %}<rect class="we" x="{{ d.x }}" y="{{ head }}" width="{{ [time.day, time.today - d.x]|min }}" height="{{ height }}"/>{% endif %}<line class="jour{{ ' lundi' if d.monday }}" x1="{{ d.x }}" x2="{{ d.x }}" y1="{{ head }}" y2="{{ total }}"/>{% endfor %}
+              <rect class="suite" x="{{ time.today }}" y="{{ head }}" width="{{ time.width - time.today }}" height="{{ height }}"/>
+              {% for r in rows %}<a href="{{ r.href }}"><title>{{ r.text }}</title><rect class="rang{{ ' on' if r.on }}" x="0" y="{{ head + r.y }}" width="{{ time.width }}" height="{{ r.h }}"/></a><line class="filet" x1="0" x2="{{ time.width }}" y1="{{ head + r.y + r.h }}" y2="{{ head + r.y + r.h }}"/>{% endfor %}
+              <line class="filet fort" x1="0" x2="{{ time.width }}" y1="{{ head }}" y2="{{ head }}"/>
+              {% for d in time.days %}
+              {% if zoom == 'semaines' %}{% if d.monday %}<text class="sem" x="{{ d.x + 8 }}" y="26">{{ d.week }}</text>{% endif %}
+              {% elif d.today %}<rect class="auj-n" x="{{ d.x + 5 }}" y="10" width="26" height="22" rx="11"/><text class="auj-t" x="{{ d.x + 18 }}" y="25" text-anchor="middle">{{ d.n }}</text>
+              {% elif d.named %}<text class="jour-t" x="{{ d.x + 9 }}" y="26"><tspan class="n">{{ d.n }}</tspan>{% if d.month %} {{ d.month }}{% endif %}</text>{% endif %}
+              {% endfor %}
+              <text class="suite-t" x="{{ time.today + 48 }}" y="26">à suivre · sans date</text>
+              {% for r in rows %}{% set t = time.tracks[loop.index0] %}{% set mid = head + r.y + r.h // 2 %}
+              {% if r.sort == 'mission' %}<line class="fil" x1="0" x2="{{ t.line }}" y1="{{ mid }}" y2="{{ mid }}"/>{% for px in t.passes %}<circle class="pass" cx="{{ px }}" cy="{{ mid }}" r="5"/>{% endfor %}{% endif %}
+              {% for b in t.bars %}{% set bh = 22 if 'obj' in b.cls else 14 %}{% set hw = b.w if 'hache' in b.cls else [30, (b.w * 0.55)|int]|min %}
+              <rect class="b {{ b.cls }}" x="{{ b.x }}" y="{{ mid - bh // 2 }}" width="{{ b.w }}" height="{{ bh }}" rx="{{ 7 if 'obj' in b.cls else 5 }}"/>{% if 'encours' in b.cls or 'hache' in b.cls %}<rect class="hachure" x="{{ b.x + b.w - hw }}" y="{{ mid - bh // 2 }}" width="{{ hw }}" height="{{ bh }}" rx="{{ 7 if 'obj' in b.cls else 5 }}" fill="url(#pj-hache)"/>{% endif %}
+              {% endfor %}
+              {% if t.label >= 0 and t.word %}<text class="mot{{ ' you' if t.you }}" x="{{ t.label }}" y="{{ mid + 4 }}">{{ t.word }}</text>{% endif %}
+              {% endfor %}
+              {% for a in time.arrows %}<path class="fleche" d="{{ a.line }}"/><path class="fleche" d="{{ a.head }}"/>{% endfor %}
+              <line class="auj" x1="{{ time.today }}" x2="{{ time.today }}" y1="{{ head - 6 }}" y2="{{ total }}"/>
+            </svg>
+            {% else %}
+            <div class="pj-g-head av"><span>La part faite</span><span>Où il en est</span></div>
+            {% for r in rows %}
+            <a class="pj-g-av {{ r.sort }}" href="{{ r.href }}"{% if r.on %} aria-current="true"{% endif %}>
+              {% if r.sort == 'mission' %}<span class="pj-g-dots" aria-hidden="true">{% for i in range(r.dots) %}<i></i>{% endfor %}</span>
+              {% else %}<svg class="pj-g-part{{ ' vide' if not r.bar }}" viewBox="0 0 {{ full }} 10" preserveAspectRatio="none" aria-hidden="true">{% for s in r.bar %}<rect class="{{ s.tone }}" x="{{ s.x }}" y="0" width="{{ s.w }}" height="10"/>{% if s.tone == 'you' %}<rect x="{{ s.x }}" y="0" width="{{ s.w }}" height="10" fill="url(#pj-hache-av)"/>{% endif %}{% endfor %}</svg>{% endif %}
+              <span class="pj-g-mot{{ ' you' if r.ready }}">{% if r.ready %}{{ ico('stop', 'xs') }}{% endif %}{{ r.word }}</span>
+            </a>
+            {% endfor %}
+            {% endif %}
+          </div>
+        </div>
+        {% if cut %}<p class="pj-hint">Trop d'exécutions pour tout relire : les dates les plus anciennes peuvent manquer.</p>{% endif %}
+        {% else %}
+        <div class="pj-empty">{{ tile('target') }}<b>Pas encore d'objectif</b><p>Le diagramme se dessine dès le premier objectif.</p>{% if can_add %}<a class="btn" href="{{ links.ajouter }}">{{ ico('plus', 'xs') }}Ajouter un objectif</a>{% endif %}</div>
+        {% endif %}
+      </div>
+      <aside class="pj-side" aria-label="Ce qu'on a choisi">
+        {% if panel and panel.sort == 'mark' %}
+        {% set m = panel.m %}
+        <section class="pj-sc">
+          <div class="pj-side-h">{{ tile(m.icon, m.tone) }}<span><b>{{ m.text }}</b><small>jalon de l'{{ panel.goal.sub }}</small></span>{{ st(m.tone, m.state) }}</div>
+          {% if m.validate or m.refuse %}<div class="pj-decide row">{% if m.validate %}{{ pone(m.validate, 'Valider le jalon', 'check', '') }}{% endif %}{% if m.refuse %}{{ ppop(m.refuse, 'Refuser', 'Refuser le point d\'arrêt n° ' ~ m.id, 'x', 'quiet', 'Refuser') }}{% endif %}</div>
+          <p class="pj-hint">Un point d'arrêt : elle attend qu'il soit validé pour continuer.</p>{% endif %}
+        </section>
+        <section class="pj-sc"><h3>Comment on le vérifie</h3>
+          <p class="pj-sc-text">Vérifié par {{ m.verified.by }}{% if m.verified.command %} · <code>{{ m.verified.command }}</code>{% endif %}{% if m.verified.item %} · <code>{{ m.verified.item }}</code>{% if m.verified.item_status %} doit être « {{ m.verified.item_status }} »{% endif %}{% endif %}{% if m.verified.how %} — {{ m.verified.how }}{% endif %}</p>
+          {% if m.refused %}<p class="pj-j-no">{{ ico('x', 'xs') }}Refusé : « {{ m.refused }} »</p>{% endif %}
+          {% if m.proof %}<details class="pj-proof"><summary>{{ ico('chev', 'xs') }}La preuve{% if m.commit %} · commit <code>{{ m.commit }}</code>{% endif %}</summary><pre>{{ m.proof }}</pre></details>{% endif %}
+        </section>
+        {% if panel.times %}<section class="pj-sc"><h3>Dans le temps</h3><dl class="pj-props">{% for k, v in panel.times %}<div><dt>{{ k }}</dt><dd>{{ v }}</dd></div>{% endfor %}</dl></section>{% endif %}
+        <section class="pj-sc"><h3>Son objectif</h3><a class="pj-lie" href="{{ panel.goal.href }}">{{ tile('target', panel.goal.tone) }}<span class="pj-mini-main"><b>{{ panel.goal.title }}</b><small>{{ panel.goal.sub }}</small></span>{{ st(panel.goal.tone, panel.goal.state) }}</a></section>
+        {% if panel.edit or m.drop %}<section class="pj-sc bas"><h3>Gérer</h3><div class="pj-decide">{% if panel.edit %}<a class="btn quiet" href="{{ panel.edit }}">{{ ico('pen', 'xs') }}Modifier le jalon</a>{% endif %}{% if m.drop %}{{ ppop(m.drop, 'Retirer le jalon', 'Retirer le jalon n° ' ~ m.id, 'trash', 'quiet danger', 'Retirer le jalon') }}{% endif %}</div></section>{% endif %}
+        {% elif panel %}
+        <section class="pj-sc">
+          <div class="pj-side-h">{{ tile(panel.goal.icon, panel.goal.tone) }}<span><b>{{ panel.goal.title }}</b><small>{{ panel.goal.sub }}</small></span>{{ st(panel.goal.tone, panel.goal.state) }}</div>
+          <div class="pj-decide row"><a class="btn quiet" href="{{ panel.goal.open }}">{{ ico('expand', 'xs') }}L'ouvrir</a><a class="btn quiet" href="{{ panel.edit }}">{{ ico('pen', 'xs') }}Modifier</a></div>
+          {% if panel.add %}<div class="pj-decide"><a class="btn quiet" href="{{ panel.add }}">{{ ico('plus', 'xs') }}Ajouter un jalon</a></div>{% endif %}
+        </section>
+        {% if panel.before %}<section class="pj-sc"><h3>Il dépend de</h3><a class="pj-lie" href="{{ panel.before.href }}">{{ tile('target', panel.before.tone) }}<span class="pj-mini-main"><b>{{ panel.before.title }}</b><small>objectif n° {{ panel.before.n }} : sa suite attend qu'il soit fini</small></span>{{ st(panel.before.tone, panel.before.state) }}</a></section>{% endif %}
+        {{ goal_side(panel.side) }}
+        {% else %}
+        <section class="pj-sc"><h3>Rien à montrer</h3><p class="pj-sc-text">Ce projet n'a pas encore d'objectif.</p></section>
+        {% endif %}
+      </aside>
+    </div>
+  </div>
+</div>

@@ -186,6 +186,8 @@ FAMILY_ABOUT: Mapping[str, str] = {
     "attachments": "retrouver, rouvrir et relier ce qu'on lui a envoyé (photos, documents, messages vocaux)",
     "attention": "ce qui lui trotte dans la tête en ce moment",
     "camera": "regarder par la caméra, sur le moment",
+    "contacts": "retrouver ce qu'elle sait d'un contact qu'elle lit pour la personne (où elle le voit, ce qu'elle a "
+                "compris de ses derniers messages), seulement ce que les comptes de cette personne en montrent",
     "email": "lister, chercher et lire le courrier des boîtes qu'elle lit, le ranger, préparer une réponse",
     "forge": "se fabriquer une app qui surveille ou relève pour elle : l'écrire, la tester, la commander",
     "forge_signals": "lire la file de signaux d'une de ses apps, et dire ce qu'elle en fait",
@@ -194,7 +196,8 @@ FAMILY_ABOUT: Mapping[str, str] = {
     "imaging": "dessiner pour la personne (quelques minutes par image), montrer un dessin prêt",
     "location": "savoir où est la personne qui lui parle, d'après ce que son téléphone en a dit",
     "memory": "fouiller ses souvenirs et ce qu'elle sait ; dire qu'une promesse est tenue",
-    "phone": "lire les messages (WhatsApp, SMS) du téléphone de la personne, préparer une réponse à sa place",
+    "phone": "lire les messages (WhatsApp, Messenger, SMS) du téléphone de la personne, préparer une réponse "
+             "à sa place",
     "projects": "ouvrir, accepter ou clore un projet ; en l'exécutant, son carnet, ses décisions, ses objectifs",
     "rss": "ses flux d'actualité : les derniers titres, lire un article",
     "self": "relire ce qu'elle a écrit dans son journal un jour passé",

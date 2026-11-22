@@ -14,6 +14,8 @@ qui doit repartir.
   personne a écrit autre chose, et le brouillon n'a pas servi.
 - **Ce qui part est ce qui a été montré** : le texte final (signature comprise) est figé à la mise en file, avec
   son condensé ; l'extension relève ce texte-là.
+- **Les profils des personnes croisées** (ADR 0298) arrivent avec les lots : gardés par compte et par personne, chaque
+  changement prend un rang qui ne resert jamais (``profiles_since`` : l'annuaire les relit dans cet ordre).
 """
 
 from __future__ import annotations
@@ -29,7 +31,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import and_, case, delete, false, func, or_, select, update
+from sqlalchemy import and_, case, delete, false, func, or_, select, true, update
 from sqlalchemy.orm import Session, aliased, sessionmaker
 
 from mika.adapters.database import Target, as_target
@@ -41,9 +43,11 @@ from mika.adapters.teams.models import (
     REF_MAX,
     AccountRow,
     ConversationRow,
+    CounterRow,
     DraftRow,
     ImageRow,
     MessageRow,
+    ProfileRow,
     fit,
 )
 from mika.contracts import teams as teams_c
@@ -72,12 +76,17 @@ from mika.ports.teams import (
     ImageIn,
     ImageToRead,
     InboxBatch,
+    InboxProfile,
     Message,
     MessageImage,
     OutboxItem,
+    PeopleSince,
     Preview,
+    ProfilesSince,
+    SeenAuthor,
     Settled,
     Stored,
+    TeamsProfile,
     Voice,
     message_ref,
     plain,
@@ -129,6 +138,10 @@ def described(text: str, seen: Mapping[int, str]) -> str:
 #: l'historique n'est rangé « déjà lu » qu'au-delà de la fenêtre du direct (µs) : un message plus récent, arrivé
 #: d'abord par un paquet d'historique, se range comme du direct (elle le remarque, il règle ses brouillons)
 HISTORY_LIVE_WINDOW = 24 * 3600 * 1_000_000
+#: le compteur des rangs des profils (ADR 0298, ``counters``)
+PROFILES_COUNTER = "profiles"
+#: ce qu'un profil garde, dans l'ordre de ``TeamsProfile`` (après le compte et l'identifiant)
+_PROFILE_FIELDS = ("name", "email", "title", "company", "department", "tenant", "phones")
 
 
 def id_kind(external_id: str) -> str:
@@ -158,6 +171,8 @@ _DRAFT = (DraftRow.draft_id, DraftRow.conversation, DraftRow.body, DraftRow.repl
           DraftRow.edited_by, DraftRow.reason, DraftRow.account)
 #: un tête-à-tête se reconnaît aussi à son identifiant (``19:a_b@unq.gbl.spaces``)
 _DM_SUFFIX = "@unq.gbl.spaces"
+#: un groupe où l'on échange vraiment (``exchanged``, ADR 0298) : au plus tant d'auteurs, la personne du compte comprise
+EXCHANGE_GROUP_MAX = 8
 
 
 def _one_to_one(kind: str | None, conversation: str) -> bool:
@@ -208,14 +223,15 @@ def _counted() -> Any:
 
 
 def _named() -> Any:
-    """Le nom d'une conversation (corrélé à la requête qui l'appelle), celui que rend ``title`` : celui de Teams ;
-    sinon, pour un tête-à-tête seulement, le dernier à y avoir écrit qui n'est pas la personne du compte ; sinon
-    rien — dans la requête de la liste, pas une de plus par ligne."""
+    """Le nom d'une conversation (corrélé à la requête qui l'appelle), celui que rend ``title`` : pour un
+    tête-à-tête, le dernier à y avoir écrit qui n'est pas la personne du compte, sinon ce que Teams en dit ; pour
+    toute autre, celui de Teams, sinon rien — dans la requête de la liste, pas une de plus par ligne."""
     other = (select(MessageRow.author)
              .where(MessageRow.account == ConversationRow.account, MessageRow.conversation == ConversationRow.id,
                     MessageRow.own == false(), MessageRow.author != "")
              .order_by(MessageRow.at.desc(), MessageRow.id.desc()).limit(1).scalar_subquery())
-    return func.coalesce(func.nullif(ConversationRow.title, ""), case((_is_one_to_one(), other)), "")
+    teams = func.nullif(ConversationRow.title, "")
+    return func.coalesce(case((_is_one_to_one(), func.coalesce(other, teams)), else_=teams), "")
 
 
 def _account_key(account: str) -> str:
@@ -372,8 +388,72 @@ class TeamsStore:
                     settled.extend(self._answered_by_owner(s, key, conv, at, m.text, now))
             if touched:
                 self._prune(s, key, touched)
+            profiles = self._keep_profiles(s, key, batch.profiles, now) if batch.profiles else 0
         return Stored(new=new, known=known, replied=tuple(sorted(replied.items())), settled=tuple(settled),
-                      twins=twins, recent=recent)
+                      twins=twins, recent=recent, profiles=profiles)
+
+    # ── les profils des personnes croisées (l'annuaire, ADR 0298) ──
+    @staticmethod
+    def _profile_counter(s: Session) -> CounterRow:
+        """Le compteur des rangs : jamais sous le plus haut rang gardé (une base d'avant ce compteur, une ligne
+        perdue)."""
+        row = s.get(CounterRow, PROFILES_COUNTER)
+        if row is None:
+            row = CounterRow(name=PROFILES_COUNTER, value=0)
+            s.add(row)
+        row.value = max(int(row.value or 0), int(s.scalar(select(func.max(ProfileRow.seq))) or 0))
+        return row
+
+    def _keep_profiles(self, s: Session, account: str, profiles: Sequence[InboxProfile], now: int) -> int:
+        """Les profils d'un lot, sous son compte : un profil neuf, ou qui a changé, prend le rang suivant (et
+        ``updated`` : maintenant) ; redit tel quel, rien ne bouge. Le dernier d'une même personne dans le lot
+        l'emporte. Rend combien ont changé."""
+        latest: dict[str, InboxProfile] = {}
+        for p in profiles:
+            if (found := fit(p.id.strip().lower(), AUTHOR_MAX)):
+                latest[found] = p
+        counter: CounterRow | None = None
+        changed = 0
+        for person, p in sorted(latest.items()):
+            values = {"name": p.name, "email": p.email, "title": p.title, "company": p.company,
+                      "department": p.department, "tenant": p.tenant, "phones": "\n".join(p.phones)}
+            row = s.get(ProfileRow, (account, person))
+            if row is not None and all((getattr(row, k) or "") == v for k, v in values.items()):
+                continue
+            counter = counter or self._profile_counter(s)
+            counter.value = int(counter.value) + 1
+            if row is None:
+                row = ProfileRow(account=account, key=person, **values)
+                s.add(row)
+            else:
+                for k, v in values.items():
+                    setattr(row, k, v)
+            row.updated, row.seq = now, counter.value
+            changed += 1
+        return changed
+
+    def profiles_since(self, cursor: int, limit: int) -> ProfilesSince:
+        """Les profils de rang au-delà de ``cursor``, dans l'ordre des rangs. Un curseur au-delà du compteur (une
+        base ``teams`` revenue d'une sauvegarde plus ancienne) repart du compteur : les profils qui changeront ensuite
+        ne sont pas sautés."""
+        limit = max(1, min(5000, int(limit)))
+        # son dernier message dans ce compte : ce que le profil atteste (l'heure de Teams, pas celle de sa réception)
+        said = (select(func.max(MessageRow.at)).where(MessageRow.account == ProfileRow.account,
+                                                      MessageRow.author_key == ProfileRow.key)
+                .scalar_subquery().label("said_at"))
+        with self._lock, self._session() as s:
+            top = s.scalar(select(CounterRow.value).where(CounterRow.name == PROFILES_COUNTER))
+            top = max(int(top or 0), int(s.scalar(select(func.max(ProfileRow.seq))) or 0))
+            after = min(max(0, int(cursor)), top)
+            rows = s.execute(select(ProfileRow.account, ProfileRow.key, *(getattr(ProfileRow, f) for f in
+                                                                          _PROFILE_FIELDS),
+                                    ProfileRow.updated, ProfileRow.seq, said)
+                             .where(ProfileRow.seq > after).order_by(ProfileRow.seq).limit(limit)).all()
+        found = tuple(TeamsProfile(r.account, r.key, r.name or "", r.email or "", r.title or "", r.company or "",
+                                   r.department or "", r.tenant or "",
+                                   tuple(n for n in (r.phones or "").split("\n") if n), int(r.updated or 0),
+                                   int(r.seq), int(r.said_at or 0)) for r in rows)
+        return ProfilesSince(found, found[-1].seq if found else after, len(rows) == limit)
 
     @staticmethod
     def _twin(s: Session, account: str, conversation: str, author_key: str, at: int, external_id: str,
@@ -573,25 +653,26 @@ class TeamsStore:
     def conversations(self, limit: int, *, text: str = "", accounts: Sequence[str] | None = None) \
             -> list[Conversation]:
         """Les conversations où quelque chose a été écrit (de ces comptes ; ``None`` : de tous), la plus récente
-        d'abord, chacune sous son nom (``title`` : celui de Teams, sinon l'autre personne d'un tête-à-tête — rien
-        pour un groupe sans titre —, comme ``title()``) ; ``text`` cherché dans ce nom et l'identifiant, casse et
+        d'abord, chacune sous son nom (``title`` : l'autre personne d'un tête-à-tête, celui de Teams pour les autres —
+        rien pour un groupe sans titre —, comme ``title()``) ; ``text`` cherché dans ce nom et l'identifiant, casse et
         accents ignorés (les deux côtés repliés, comparés par ``instr`` : pareil sur les deux moteurs, ``%`` et ``_``
-        n'y sont que des caractères ; le nom d'un tête-à-tête sans titre de Teams se replie ici, la base ne le garde
-        pas replié).
+        n'y sont que des caractères ; le nom d'un tête-à-tête se replie ici, la base ne le garde pas replié).
 
         ``conversation()``, lui, rend le titre de Teams tel quel : le tri y lit le nom qu'une règle d'envoi peut
         désigner (``triage.where_of``), pas l'auteur du dernier message."""
         where = [ConversationRow.last_at > 0, *_in_accounts(ConversationRow.account, accounts)]
         named = _named()
         with self._lock, self._session() as s:
-            if folded := fold_text(text.strip()):  # seul un tête-à-tête sans titre a un nom qu'on ne garde pas replié
-                untitled = s.execute(select(ConversationRow.account, ConversationRow.id, named).where(
-                    *where, or_(ConversationRow.title == "", ConversationRow.title.is_(None)), _is_one_to_one())).all()
+            if folded := fold_text(text.strip()):
+                # le nom d'un tête-à-tête (l'autre personne) n'est pas gardé replié ; son titre de Teams (ses membres,
+                # toi compris) ne se cherche pas : ton nom ferait sortir tous tes tête-à-tête
+                one_to_one = s.execute(select(ConversationRow.account, ConversationRow.id, named).where(
+                    *where, _is_one_to_one())).all()
                 by_account: dict[str, list[str]] = {}
-                for account, cid, name in untitled:
+                for account, cid, name in one_to_one:
                     if folded in fold_text(name or ""):
                         by_account.setdefault(account, []).append(cid)
-                where.append(or_(func.instr(ConversationRow.title_fold, folded) > 0,
+                where.append(or_(and_(~_is_one_to_one(), func.instr(ConversationRow.title_fold, folded) > 0),
                                  func.instr(ConversationRow.id_fold, folded) > 0,
                                  *(and_(ConversationRow.account == account, ConversationRow.id.in_(ids))
                                    for account, ids in by_account.items())))
@@ -605,22 +686,23 @@ class TeamsStore:
         found = self._conversation_in(s, account, conversation)
         if found is None:  # inconnue (une conversation part toujours avec ses messages)
             return ""
-        if found.title:
-            return found.title
         if not _one_to_one(found.kind, found.id):
-            return ""  # un groupe, un canal, une réunion sans titre : jamais le nom de qui y a parlé en dernier
+            # un groupe, un canal, une réunion sans titre : jamais le nom de qui y a parlé en dernier
+            return found.title or ""
+        # un tête-à-tête ne se renomme pas dans Teams : son « titre » y est la liste de ses membres, toi compris
         name = s.scalar(select(MessageRow.author)
                         .where(MessageRow.account == _account_key(account),
                                MessageRow.conversation == fit(conversation, CONVERSATION_MAX),
                                MessageRow.own == false(), MessageRow.author != "")
                         .order_by(MessageRow.at.desc(), MessageRow.id.desc()).limit(1))
-        return str(name) if name else ""
+        return str(name) if name else found.title or ""
 
     def title(self, account: str, conversation: str) -> str:
-        """Le nom d'une conversation : celui de Teams ; sinon, pour un tête-à-tête seulement, l'autre personne (la
-        dernière à y avoir écrit) ; vide pour un groupe, un canal ou une réunion sans titre — le nom de qui y a parlé
-        en dernier changerait à chaque auteur, et le confondrait avec le tête-à-tête de cette personne. Celui de la
-        liste (``_named``), de l'aperçu, de la file que relève l'extension."""
+        """Le nom d'une conversation. Un tête-à-tête : l'autre personne (la dernière à y avoir écrit), sinon ce que
+        Teams en dit (la liste de ses membres : il ne se renomme pas). Toute autre : celui de Teams ; vide pour un
+        groupe, un canal ou une réunion sans titre — le nom de qui y a parlé en dernier changerait à chaque auteur,
+        et le confondrait avec le tête-à-tête de cette personne. Celui de la liste (``_named``), de l'aperçu, de la
+        file que relève l'extension."""
         with self._lock, self._session() as s:
             return self._title_in(s, account, conversation)
 
@@ -802,21 +884,136 @@ class TeamsStore:
                 return CONFLICT, None
         return ACCEPTED, done
 
+    # ── qui elle lit (l'annuaire, ADR 0298) ──
+    def people_since(self, cursor: tuple[int, int], limit: int) -> PeopleSince:
+        """Les auteurs des ``limit`` messages suivants dans l'ordre d'arrivée (``MessageRow.id`` : l'historique chargé
+        compte comme le reste), par compte et par auteur, hors des messages de la personne du compte. Le curseur est le
+        dernier message parcouru et son arrivée (``received``, µs) : sous SQLite, un numéro libéré en haut (les
+        derniers messages effacés : un oubli, un compte supprimé) resservira au suivant — un message du curseur parti
+        ou remplacé fait relire aussi ce qui est arrivé depuis, quel que soit son numéro. Rien de neuf n'est sauté."""
+        limit = max(1, min(5000, int(limit)))
+        last_id, last_received = (max(0, int(c)) for c in cursor)
+        with self._lock, self._session() as s:
+            after = min(last_id, int(s.scalar(select(func.max(MessageRow.id))) or 0))
+            where: Any = MessageRow.id > after
+            if after:
+                at_cursor = s.scalar(select(MessageRow.received).where(MessageRow.id == after))
+                if at_cursor is None or (last_received and int(at_cursor) != last_received):
+                    where = or_(MessageRow.id > after, MessageRow.received > last_received)
+            rows = s.execute(select(MessageRow.id, MessageRow.account, MessageRow.author_key, MessageRow.author_id,
+                                    MessageRow.author, MessageRow.at, MessageRow.own, MessageRow.received)
+                             .where(where).order_by(MessageRow.id).limit(limit)).all()
+        seen: dict[tuple[str, str], list[Any]] = {}
+        for r in rows:
+            if r.own or not r.author_key:
+                continue
+            got = seen.get((r.account, r.author_key))
+            if got is None:
+                seen[(r.account, r.author_key)] = [r.author_id or r.author_key, r.author or "", 1, r.at, r.at, r.at]
+                continue
+            got[2] += 1
+            got[3], got[4] = min(got[3], r.at), max(got[4], r.at)
+            if r.at >= got[5]:  # le nom et l'identifiant du plus récent
+                got[5] = r.at
+                got[0] = r.author_id or got[0]
+                got[1] = r.author or got[1]
+        people = tuple(SeenAuthor(account, v[0], v[1], v[2], v[3], v[4]) for (account, _), v in sorted(seen.items()))
+        end = (int(rows[-1].id), int(rows[-1].received or 0)) if rows else (after, last_received)
+        return PeopleSince(people, end, len(rows) == limit)
+
+    def written_in(self, authors: Sequence[str], limit: int, *, accounts: Sequence[str] | None = None) \
+            -> list[tuple[Conversation, int, int]]:
+        """Les conversations où ces personnes ont écrit (``author_key`` : leur identifiant en minuscules), par compte,
+        la plus récente d'abord, chacune sous son nom (``_named``, comme la liste), avec combien de leurs messages et le
+        dernier ; leurs messages se comptent en une requête, chaque conversation se nomme par la sienne (``limit`` au
+        plus, 50)."""
+        keys = sorted({fit(a.strip().lower(), AUTHOR_MAX) for a in authors if a and a.strip()})
+        limit = max(0, min(50, int(limit)))
+        if not keys or not limit or (accounts is not None and not accounts):
+            return []
+        last = func.max(MessageRow.at)
+        with self._lock, self._session() as s:
+            found = s.execute(select(MessageRow.account, MessageRow.conversation, func.count(MessageRow.id), last)
+                              .where(MessageRow.author_key.in_(keys), MessageRow.own == false(),
+                                     *_in_accounts(MessageRow.account, accounts))
+                              .group_by(MessageRow.account, MessageRow.conversation)
+                              .order_by(last.desc(), MessageRow.account, MessageRow.conversation).limit(limit)).all()
+            out = []
+            for account, cid, n, at in found:
+                row = s.execute(select(ConversationRow.id, _named(), ConversationRow.kind, ConversationRow.last_at,
+                                       _counted(), ConversationRow.account)
+                                .where(ConversationRow.account == account, ConversationRow.id == cid)).first()
+                if row is not None:
+                    out.append((_conversation(row), int(n or 0), int(at or 0)))
+        return out
+
+    def exchanged(self, since: int, *, limit: int = 2000, accounts: Sequence[str] | None = None) \
+            -> list[tuple[str, str, int, int]]:
+        """Les auteurs avec qui la personne du compte échange depuis ``since`` : en tête-à-tête (elle y a écrit
+        depuis) ; dans un petit groupe (``EXCHANGE_GROUP_MAX`` auteurs au plus, elle comprise ; jamais un canal), un
+        message auquel elle a répondu (elle a écrit après) ou qui la mentionne quand elle y a écrit. Une requête groupée
+        par (compte, auteur) : un grand canal où elle a écrit une fois ne fait de personne quelqu'un avec qui elle
+        échange."""
+        limit = max(0, min(5000, int(limit)))
+        if not limit or (accounts is not None and not accounts):
+            return []
+        mine, people = aliased(MessageRow), aliased(MessageRow)
+        theirs, conv = MessageRow, ConversationRow
+        here = and_(mine.account == theirs.account, mine.conversation == theirs.conversation, mine.own == true(),
+                    mine.at >= int(since))
+        replied = select(mine.id).where(here).exists()
+        answered = select(mine.id).where(here, mine.at > theirs.at).exists()
+        # combien d'auteurs a chaque conversation (elle comprise), comptés une fois par lecture, pas par message
+        sizes = (select(people.account.label("account"), people.conversation.label("conversation"),
+                        func.count(func.distinct(people.author_key)).label("n"))
+                 .where(people.author_key != "").group_by(people.account, people.conversation).subquery("sizes"))
+        kind = func.coalesce(conv.kind, "other")  # une conversation que Teams n'a pas décrite : « other »
+        one_to_one = or_(kind == "dm", func.lower(theirs.conversation).like(f"%{_DM_SUFFIX}"))
+        small = and_(kind != "channel", func.coalesce(sizes.c.n, 0) <= EXCHANGE_GROUP_MAX,
+                     or_(answered, and_(theirs.mentions_me == true(), replied)))
+        last = func.max(theirs.at)
+        with self._lock, self._session() as s:
+            rows = s.execute(select(theirs.account, theirs.author_key, func.count(theirs.id), last)
+                             .select_from(theirs)
+                             .join(conv, and_(conv.account == theirs.account, conv.id == theirs.conversation),
+                                   isouter=True)
+                             .join(sizes, and_(sizes.c.account == theirs.account,
+                                               sizes.c.conversation == theirs.conversation), isouter=True)
+                             .where(theirs.own == false(), theirs.author_key != "", theirs.at >= int(since),
+                                    or_(and_(one_to_one, replied), and_(~one_to_one, small)),
+                                    *_in_accounts(theirs.account, accounts))
+                             .group_by(theirs.account, theirs.author_key)
+                             .order_by(last.desc(), theirs.account, theirs.author_key).limit(limit)).all()
+        return [(account, key, int(n or 0), int(at or 0)) for account, key, n, at in rows]
+
+    def authored(self, authors: Sequence[str], *, since: int = 0, limit: int = 30,
+                 accounts: Sequence[str] | None = None) -> list[Message]:
+        keys = sorted({fit(a.strip().lower(), AUTHOR_MAX) for a in authors if a and a.strip()})
+        limit = max(0, min(200, int(limit)))
+        if not keys or not limit or (accounts is not None and not accounts):
+            return []
+        with self._lock, self._session() as s:
+            rows = s.execute(select(*_MESSAGE).where(MessageRow.author_key.in_(keys), MessageRow.own == false(),
+                                                     MessageRow.at >= int(since),
+                                                     *_in_accounts(MessageRow.account, accounts))
+                             .order_by(MessageRow.at.desc(), MessageRow.id.desc()).limit(limit)).all()
+        return [Message(*r) for r in rows]
+
     # ── l'oubli ──
     def drop_account(self, account: str) -> int:
-        """Un compte supprimé des réglages (ADR 0186) : ses conversations, ses messages, ses brouillons et ce que son
-        extension en avait dit s'effacent ; le nombre de lignes effacées."""
+        """Un compte supprimé des réglages (ADR 0186) : ses conversations, ses messages, ses brouillons, les profils
+        qu'il a reçus et ce que son extension en avait dit s'effacent ; le nombre de lignes effacées."""
         key = _account_key(account)
         with self._lock, self._session.begin() as s:
             n = 0
-            for row in (DraftRow, ImageRow, MessageRow, ConversationRow):
+            for row in (DraftRow, ImageRow, MessageRow, ConversationRow, ProfileRow):
                 n += _count(s.execute(delete(row).where(row.account == key)))
             n += _count(s.execute(delete(AccountRow).where(AccountRow.key == key)))
         return n
 
     async def forget(self, subject: str) -> int:
-        """Oublier quelqu'un (``teams:<identifiant>``), dans tous les comptes : ses messages, et ses tête-à-tête
-        entiers (ce qui y a été écrit, les brouillons qui y répondaient, la conversation elle-même)."""
+        """Oublier quelqu'un (``teams:<identifiant>``), dans tous les comptes : ses messages, son profil, et ses
+        tête-à-tête entiers (ce qui y a été écrit, les brouillons qui y répondaient, la conversation elle-même)."""
         if not subject.startswith(teams_c.HANDLE_PREFIX):
             return 0
         author = subject[len(teams_c.HANDLE_PREFIX):].strip().lower()
@@ -838,6 +1035,7 @@ class TeamsStore:
             n += _count(s.execute(delete(ImageRow).where(
                 ImageRow.ref.in_(select(MessageRow.ref).where(MessageRow.author_key == key)))))
             n += _count(s.execute(delete(MessageRow).where(MessageRow.author_key == key)))
+            n += _count(s.execute(delete(ProfileRow).where(ProfileRow.key == key)))
             for account, conv in convs:
                 n += _count(s.execute(delete(ImageRow).where(ImageRow.ref.in_(select(MessageRow.ref).where(
                     MessageRow.account == account, MessageRow.conversation == conv)))))

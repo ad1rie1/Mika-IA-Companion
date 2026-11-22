@@ -75,7 +75,8 @@ export interface UnderWay {
 export interface Conversation {
   key: string;
   account: string;
-  /** Son nom : celui de Teams, sinon (un tête-à-tête) l'autre personne ; vide si personne d'autre n'y a écrit. */
+  /** Son nom : un tête-à-tête, l'autre personne (sinon la liste des membres que donne Teams) ; une autre, celui de
+   *  Teams (vide sans titre). */
   title: string;
   kind: ConversationKind;
   last_at: number;

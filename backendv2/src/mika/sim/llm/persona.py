@@ -276,6 +276,8 @@ class PersonaSimLLM:
             return self._out(req, "Je marche dans une ville qui ressemble à un clavier ; les touches chantent.")
         if req.role == "profile":
             return self._profile(req)
+        if req.role == "portrait":  # ce qu'elle sait d'un contact (ADR 0298) : la doublure n'en tire rien
+            return self._out(req, '{"faits": []}')
         if req.role == "murmur":
             return self._out(req, "Hmm… tiens, et si j'écrivais un petit mot ?")
         if req.role == "narrative":

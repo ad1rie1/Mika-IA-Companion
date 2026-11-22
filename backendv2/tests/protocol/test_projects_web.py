@@ -206,19 +206,19 @@ def test_the_project_fiche_is_driven_over_http(world):  # noqa: F811
     fiche = html.unescape(client.get(f"/admin/fiche/project/{pid}").text)
     # en tête : ce qui vaut pour tout le projet ; les formulaires des onglets restent dans leurs onglets
     assert "Lancer maintenant" in fiche and "Mettre en pause" in fiche and "Archiver" in fiche
-    head = fiche.split('<nav class="tabs', 1)[0]  # la barre de titre ; « Où il en est » porte ses objectifs (ADR 0281)
+    head = fiche.split('<nav class="tabs', 1)[0]  # la barre de titre
     for inline in ("Ajouter un objectif", "Consigner une décision", "Modifier le projet", "Enregistrer ses outils",
                    "Pousser maintenant", "Changer le statut", "Approuver"):
         assert inline not in head, inline
-    for elsewhere in ("Consigner une décision", "Modifier le projet", "Enregistrer ses outils", "Pousser maintenant",
-                      "Approuver"):
+    # sa vue d'ensemble mène aux onglets, elle ne porte pas leurs formulaires (ADR 0297)
+    for elsewhere in ("Ajouter un objectif", "Consigner une décision", "Modifier le projet", "Enregistrer ses outils",
+                      "Pousser maintenant", "Approuver"):
         assert elsewhere not in fiche, elsewhere
-    assert "Ajouter un objectif" in fiche.split('id="objectifs"', 1)[1]  # ses objectifs : son second sous-onglet
     assert "Ajouter un objectif" in html.unescape(client.get(f"/admin/fiche/project/{pid}?onglet=objectifs").text)
     assert act("projects.objectif_ajouter", "o1", text="Améliorer la sécurité", kind="constant",
                cadence_hours="12").status_code == 303
     objectifs = html.unescape(client.get(f"/admin/fiche/project/{pid}?onglet=objectifs").text)
-    assert "Améliorer la sécurité" in objectifs and "toutes les 12 h" in objectifs and "constant" in objectifs
+    assert "Améliorer la sécurité" in objectifs and "toutes les 12 h" in objectifs and "Missions" in objectifs
     assert act("projects.objectif_statut", "s1", {"objective": "1", "status": "done"}).status_code == 303
     refused = act("projects.objectif_statut", "s2", {"objective": "2", "status": "done"})
     shown = html.unescape(client.get(refused.headers["location"]).text)
@@ -229,29 +229,31 @@ def test_the_project_fiche_is_driven_over_http(world):  # noqa: F811
     assert "Langage" in decisions and "Python" in decisions and "en vigueur" in decisions
     assert act("projects.decision_ajouter", "d2", title="Langage", choice="Rust", reason="plus sûr", context="",
                options="", replaces="1").status_code == 303
-    decisions = html.unescape(client.get(f"/admin/fiche/project/{pid}?onglet=decisions&statut=toutes").text)
-    assert "remplacée par D2" in decisions and "Rust" in decisions
+    decisions = html.unescape(client.get(f"/admin/fiche/project/{pid}?onglet=decisions&statut=toutes&decision=1").text)
+    assert "Remplacée par" in decisions and "Python" in decisions and "remplacée" in decisions
     deposit = client.post("/admin/action/projects.deposer", data={
         "csrf": token, "_op": "f1", "_retour": f"/admin/fiche/project/{pid}?onglet=fichiers", "_sujet": pid,
         "folder": "donnees", "note": "Les mesures.", "_champs": ["file", "folder", "note"]},
         files={"file": ("mesures.csv", b"a,b\n1,2\n", "text/csv")}, follow_redirects=False)
     assert deposit.status_code == 303, deposit.text[:500]
     assert (live.data / "ateliers" / f"projet-{pid}" / "donnees" / "mesures.csv").read_bytes() == b"a,b\n1,2\n"
+    # Code › Fichiers (ADR 0297) : le dépôt à sa branche — le dépôt d'un fichier y entre par son commit
     files = html.unescape(client.get(f"/admin/fiche/project/{pid}?onglet=fichiers").text)
-    assert "donnees/" in files and 'enctype="multipart/form-data"' in files
-    inside = html.unescape(client.get(f"/admin/fiche/project/{pid}?onglet=fichiers&dossier=donnees"
-                                      f"&fichier=donnees/mesures.csv").text)
+    assert ">donnees</span>" in files and "chemin=donnees" in files
+    assert 'enctype="multipart/form-data"' in client.get(f"/admin/fiche/project/{pid}?onglet=git&deposer=1").text
+    inside = html.unescape(client.get(f"/admin/fiche/project/{pid}?onglet=git&chemin=donnees/mesures.csv").text)
     assert "1,2" in inside and "mesures.csv" in inside
     got = client.get(f"/admin/telecharger/project/{pid}?fichier=donnees/mesures.csv")
     assert got.status_code == 200 and got.content == b"a,b\n1,2\n"
     assert client.get(f"/admin/telecharger/project/{pid}?fichier=../../mind.db").status_code == 404
-    git = html.unescape(client.get(f"/admin/fiche/project/{pid}?onglet=git").text)
+    git = html.unescape(client.get(f"/admin/fiche/project/{pid}?onglet=git&vue=commits").text)
     assert "apport de l'opérateur : donnees/mesures.csv" in git and "atelier ouvert" in git
-    sha = re.search(r"commit=([0-9a-f]{7,40})", git).group(1)
-    shown = client.get(f"/admin/fiche/project/{pid}?onglet=git&commit={sha}").text
-    assert 'class="hm-code diff"' in shown and "d-line d-add" in shown and "+1,2" in html.unescape(shown)
-    block = shown.split('class="hm-code diff"', 1)[1].split("</pre>", 1)[0]
-    assert "</span>\n<span" not in block  # une ligne de diff par ligne, sans ligne vide entre deux
+    sha = re.search(r"sha=([0-9a-f]{40})", git).group(1)  # le premier : le plus récent, ce dépôt
+    shown = client.get(f"/admin/fiche/project/{pid}?onglet=git&vue=commits&sha={sha}").text
+    assert 'class="pj-diff"' in shown and '<div class="r add">' in shown
+    added = re.findall(r'<div class="r add"><span class="ln"></span><span class="ln">(\d+)</span>'
+                       r'<span class="sg">\+</span><span class="cd">([^<]*)</span></div>', shown)
+    assert added == [("1", "a,b"), ("2", "1,2")]  # une ligne de diff par ligne, numérotée, sans ligne vide
     assert act("projects.outils", "t1", tool_memory="on", tool_rss="on").status_code == 303
     behaviour = html.unescape(client.get(f"/admin/fiche/project/{pid}?onglet=comportement").text)
     assert "ses flux RSS" in behaviour and "rss_" in behaviour  # le lot, et ses outils nommés
@@ -291,18 +293,20 @@ def test_the_git_tab_faces_the_workshop_with_github_and_offers_its_gestures(worl
         issues=(Ticket(7, "Un bogue <b>gras</b>", f"{page}/issues/7", "bea", 0, ("bug",), 2),),
         pulls=(Ticket(8, "Une PR", f"{page}/pull/8", "bea", 0, head="essai", base="main", draft=True),),
         open_issues=1, open_pulls=1))
-    got = client.get(f"/admin/fiche/project/{pid}?onglet=git")
+    got = client.get(f"/admin/fiche/project/{pid}?onglet=git&vue=distant")  # Code › l'atelier face au distant
     assert got.status_code == 200 and 'data-tab="project/git"' in got.text
     shown = html.unescape(got.text)
     assert "L’atelier" in shown and "GitHub" in shown and "moi/outils" in shown
     assert "1 à pousser" in shown and "0 à récupérer" in shown and "pas 1" in shown
     assert "/admin/action/projects.pousser" in got.text and "/admin/action/projects.recuperer" in got.text
-    assert "frais=1" in got.text  # « Relire »
-    for pane in ("git-historique", "git-encours", "git-distant", "git-issues", "git-pr", "git-echanges",
-                 "git-reglages"):
+    assert re.search(r"frais=\d{6,}", got.text)  # « Relire » : son jeton, l'instant de la page (une fois)
+    # ce qui n'est qu'à lui ; ses commits, ses branches, ses issues et ses pull requests sont les sous-onglets de Code
+    # (ADR 0297) : ses comptes y mènent, il ne les redit pas
+    for pane in ("git-encours", "git-distant", "git-echanges", "git-reglages"):
         assert f'id="{pane}"' in got.text, pane
-    assert "Un bogue &lt;b&gt;gras&lt;/b&gt;" in got.text  # ce que GitHub dit est une donnée
-    assert f'href="{page}/issues/7"' in got.text and "essai → main" in shown and "brouillon" in shown
-    sha = re.search(r"commit=([0-9a-f]{7,40})", got.text).group(1)
-    opened = client.get(f"/admin/fiche/project/{pid}?onglet=git&commit={sha}").text
-    assert 'class="hm-code diff"' in opened and "L'enregistrement" in html.unescape(opened)
+    for pane in ("git-historique", "git-issues", "git-pr", "git-branches"):
+        assert f'id="{pane}"' not in got.text, pane
+    assert "Un bogue" not in got.text and "onglet=git&amp;vue=issues" in got.text and "vue=pulls" in got.text
+    # un ancien lien vers un commit ouvre Code › Commits sur lui
+    opened = client.get(f"/admin/fiche/project/{pid}?onglet=git&commit={shas[0]}").text
+    assert "pas 1" in html.unescape(opened) and 'aria-current="page">Commits' in opened

@@ -1,0 +1,54 @@
+{# Une entrée de l'annuaire (app/handmade/directory.py, ADR 0298), la même partout — Personnes › Annuaire, l'onglet
+   Contacts d'une personne, les personnes d'une organisation, un rapprochement : son avatar (de la couleur de ce
+   qu'elle ressent pour qui lui parle ; neutre et cerné d'un pointillé pour qui elle connaît de loin ; carré pour une
+   organisation), son nom et ses étiquettes, quand elle l'a vue, ce qu'elle en sait en une ligne (s'il y a quelque
+   chose), ce qui l'identifie (la sorte, la valeur), d'où elle la connaît (une étiquette par source, combien de fois),
+   de qui c'est le contact, ses liens. Aucun style en ligne (CSP). #}
+
+{% macro avatar(e) -%}
+{% if e.kind == "talks" %}<span class="now-avatar sw-{{ e.emotion }}" aria-hidden="true">{{ e.initial }}{% if e.online %}<span class="now-presence{{ ' typing' if e.composing }}"></span>{% endif %}</span>
+{% else %}<span class="now-avatar {{ 'org' if e.kind == 'org' else 'far' }}" aria-hidden="true">{{ e.initial }}</span>{% endif %}
+{%- endmacro %}
+
+{% macro tags(e) -%}
+{% for t in e.tags %}{% if t.href %}<a class="now-tag {{ t.cls }}" href="{{ t.href }}">{{ t.text }}</a>{% else %}<span class="now-tag {{ t.cls }}">{{ t.text }}</span>{% endif %}{% endfor %}
+{%- endmacro %}
+
+{% macro ids(items, more=0, empty=True) -%}
+{% if items %}<ul class="pers-ids" role="list" aria-label="Ce qui l'identifie">{% for i in items %}<li><span class="k">{{ i.k }}</span><span class="v">{{ i.v }}</span></li>{% endfor %}{% if more %}<li class="now-muted">et {{ more }} autre{{ 's' if more > 1 }}</li>{% endif %}</ul>
+{% elif empty %}<p class="pers-meta now-muted">Aucun moyen de communication : connue seulement de nom.</p>{% endif %}
+{%- endmacro %}
+
+{% macro sources(items) -%}
+{% if items %}<ul class="pers-src" role="list" aria-label="D'où elle la connaît">{% for s in items %}<li><span class="now-tag src">{{ s.name }}{% if s.n %} · <b>{{ s.n }}</b>{% endif %}</span></li>{% endfor %}</ul>{% endif %}
+{%- endmacro %}
+
+{% macro of(e) -%}
+{% if e.kind != "talks" %}<p class="pers-of"><span class="now-muted">contact de</span>{% if e.everyone %} tout le monde{% else %} {% for p in e.of %}<a href="{{ p.href }}">{{ p.name }}</a>{{ ' et ' if loop.revindex == 2 else ', ' if not loop.last }}{% endfor %}{% endif %}</p>{% endif %}
+{%- endmacro %}
+
+{% macro entry(e, with_when=True) -%}
+<li class="pers-dir-item">
+  {{ avatar(e) }}
+  <div class="pers-dir-main">
+    <p class="pers-head"><span class="pers-name"><a href="{{ e.href }}">{{ e.name }}</a></span>
+      {{ tags(e) }}{% if e.extra %}<span class="now-muted">{{ e.extra }}</span>{% endif %}{% if with_when and e.when %}<span class="pers-when">{{ e.when }}</span>{% endif %}</p>
+    {% if e.idea %}<p class="pers-idea">{{ e.idea }}</p>{% endif %}
+    {{ ids(e.ids, e.more, e.kind != "org") }}
+    {{ sources(e.sources) }}
+    {{ of(e) }}
+    {% if e.links %}<p class="pers-links">{% for l in e.links %}<a href="{{ l.href }}">{{ l.text }}</a>{% endfor %}</p>{% endif %}
+  </div>
+</li>
+{%- endmacro %}
+
+{# un rapprochement : une des deux fiches, dans sa carte #}
+{% macro side(e) -%}
+<div class="pair-side">
+  <p class="pers-head">{{ avatar(e) }} <span class="pers-name"><a href="{{ e.href }}">{{ e.name }}</a></span> {{ tags(e) }}</p>
+  {% if e.idea %}<p class="pers-idea">{{ e.idea }}</p>{% endif %}
+  {{ ids(e.ids, e.more) }}
+  {{ sources(e.sources) }}
+  {{ of(e) }}
+</div>
+{%- endmacro %}

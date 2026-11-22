@@ -295,6 +295,14 @@ def _reserve(kernel: Kernel, nonce: str) -> bool:
     return True
 
 
+def sent(kernel: Kernel, nonce: str) -> bool:
+    """Ce jeton a-t-il déjà servi — une action aboutie ou refusée l'a consommé, même avant un redémarrage ? Pour qui
+    juge une demande avant de la confier à ``perform`` (une écriture partie d'une version lue) : la redite d'un envoi
+    déjà fait ne se juge pas une seconde fois contre ce qu'il a lui-même écrit, elle se reconnaît (``deduped``)."""
+    return bool(nonce) and (nonce in _USED.setdefault(kernel, OrderedDict())
+                            or kernel.mind.store.find_dedupe(rt.OPERATED.name, f"op:{nonce}:audit") is not None)
+
+
 def _settle(kernel: Kernel, nonce: str, *, consumed: bool) -> None:
     """L'action est finie : son jeton est consommé (succès, refus) ou rendu (panne, situation changée)."""
     _INFLIGHT.setdefault(kernel, set()).discard(nonce)

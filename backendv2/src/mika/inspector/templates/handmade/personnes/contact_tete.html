@@ -1,0 +1,14 @@
+{# L'en-tête de la fiche d'un contact (app/handmade/subjects/contact.py, ADR 0298), sur tous ses onglets : son avatar
+   (neutre et cerné d'un pointillé ; carré pour une organisation), son nom, ses étiquettes, ses faits sur une ligne,
+   ses liens. La console y ajoute ses gestes, à droite. #}
+{% import "handmade/personnes/_annuaire.html" as dir %}
+<div class="person-head">
+  <span class="person-avatar {{ h.kind }}" aria-hidden="true">{{ h.initial }}</span>
+  <div class="person-head-text">
+    <h1>{{ h.name }}</h1>
+    <p class="person-tags">{{ dir.tags(h) }}</p>
+    {# une organisation commence par son domaine, qui ne prend pas de capitale #}
+    {% if h.facts %}{% set said = h.facts|join(" · ") %}<p class="person-head-facts">{% if h.kind == "org" %}{{ said }}{% else %}{{ said[:1]|upper }}{{ said[1:] }}{% endif %}</p>{% endif %}
+    <p class="person-head-links">{% for l in h.links %}{% if l.href %}<a href="{{ l.href }}">{{ l.text }}</a>{% else %}<span>{{ l.text }}</span>{% endif %}{% if not loop.last %}<span aria-hidden="true">·</span>{% endif %}{% endfor %}</p>
+  </div>
+</div>

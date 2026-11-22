@@ -337,6 +337,12 @@ fun gestureRequest(w: Waiting, action: String, typed: String = "", digest: Strin
     return GestureRequest(route, body)
 }
 
+/**
+ * Ce qu'un geste d'« À faire » demande d'écrire : seule une consigne se saisit (`piloter`, `what: instruct`). Une
+ * reprise, une pause, « vas-y maintenant » partent telles quelles : le serveur ne lit aucun texte avec elles.
+ */
+fun gestureTyped(w: Waiting): Boolean = w.gesture.route == "piloter" && w.gesture.args.str("what") == "instruct"
+
 /** Les verdicts qui tranchent un ticket (`POST …/ticket/trancher`). */
 private val SETTLES = setOf("accept", "dismiss", "validate", "refuse", "done", "reopen")
 
@@ -365,7 +371,10 @@ enum class AskFor {
     val required: Boolean get() = this != NOTHING && this != WHY_OPTIONAL
 }
 
-/** Un bouton d'une décision : ce qu'il envoie ([action]), ce qu'il dit, s'il est le geste principal, ce qu'il demande. */
+/**
+ * Un bouton d'une décision : ce qu'il envoie ([action]), ce qu'il dit, s'il est le geste principal, ce qu'il demande.
+ * Il se garde avec l'écran (`Serializable`) : la fenêtre qui demande son mot survit à une rotation.
+ */
 data class TodoButton(
     val action: String,
     val verb: Verb,
@@ -375,29 +384,31 @@ data class TodoButton(
     val label: String = "",
     /** Éteint, avec sa raison dite à côté (un accord qui ne peut pas partir tel quel : `blocked`). */
     val enabled: Boolean = true,
-)
+) : java.io.Serializable
 
 /** La décision d'une attente : ses boutons, et si une réponse se tape sur place ([answer] : sa question). */
 data class TodoDecision(val buttons: List<TodoButton> = emptyList(), val answer: Boolean = false)
 
 /**
- * Les boutons d'une attente, une fois lu ce que son geste demande ([approval], [plan], [element]) : seulement si le
- * serveur dit le geste faisable ici ([gesturePlace]), et pour un élément, ceux que son `can` ouvre — rien d'autre. Une
- * pull request prête n'a pas son bouton ici : sa fusion est dans l'onglet Code.
+ * Les boutons d'une attente, **une fois lu ce que son geste demande** ([approval], la fiche [sheet] — son plan, le
+ * jalon d'un point d'arrêt —, [element]) : seulement si le serveur dit le geste faisable ici ([gesturePlace]), et pour
+ * un élément, ceux que son `can` ouvre — rien d'autre. Tant que ce qu'il faut lire ne l'est pas (la lecture est en
+ * cours, elle a échoué, le jalon n'y est plus), aucun bouton : on ne valide pas une preuve qu'on n'a pas sous les yeux.
+ * Une pull request prête n'a pas son bouton ici : sa fusion a sa confirmation.
  */
-fun todoDecision(w: Waiting, approval: Approval?, plan: Plan?, element: EntryDetail?): TodoDecision {
+fun todoDecision(w: Waiting, approval: Approval?, sheet: Sheet?, element: EntryDetail?): TodoDecision {
     if (gesturePlace(w) != GesturePlace.HERE) return TodoDecision()
-    return when (gestureRead(w)) {
+    return when (val read = gestureRead(w)) {
         is GestureRead.Accord -> if (approval == null) TodoDecision() else TodoDecision(
             listOf(
                 TodoButton("accept", Verb.ACCORD_ACCEPT, primary = true, enabled = approval.blocked.isBlank()),
                 TodoButton("refuse", Verb.ACCORD_REFUSE),
             ),
         )
-        GestureRead.ProjectPlan -> if (plan == null) TodoDecision() else TodoDecision(
+        GestureRead.ProjectPlan -> if (sheet?.plan == null) TodoDecision() else TodoDecision(
             listOf(TodoButton("approve", Verb.PLAN_APPROVE, primary = true), TodoButton("revise", Verb.PLAN_REVISE, ask = AskFor.REVISE)),
         )
-        is GestureRead.Checkpoint -> TodoDecision(
+        is GestureRead.Checkpoint -> if (checkpointRead(sheet, read) == null) TodoDecision() else TodoDecision(
             listOf(TodoButton("validate", Verb.CHECKPOINT_VALIDATE, primary = true), TodoButton("refuse", Verb.CHECKPOINT_REFUSE, ask = AskFor.MISSING)),
         )
         is GestureRead.Element -> when {
@@ -429,10 +440,21 @@ fun todoDecision(w: Waiting, approval: Approval?, plan: Plan?, element: EntryDet
             }
         }
         GestureRead.Nothing -> if (w.gesture.route == MERGE_ROUTE) TodoDecision() else TodoDecision(
-            listOf(TodoButton("go", Verb.GO, primary = true, ask = if (w.gesture.route == "piloter") AskFor.REPLY else AskFor.NOTHING, label = w.gesture.label)),
+            // un geste que rien d'ici ne détaille : son bouton porte le libellé du serveur ; seule une consigne se saisit
+            listOf(TodoButton("go", Verb.GO, primary = true, ask = if (gestureTyped(w)) AskFor.REPLY else AskFor.NOTHING, label = w.gesture.label)),
         )
     }
 }
+
+/** Le jalon d'un point d'arrêt, dans la fiche qu'on vient de lire ; `null` : pas lue, ou il n'y est plus. */
+fun checkpointRead(sheet: Sheet?, read: GestureRead.Checkpoint): Milestone? =
+    sheet?.objectives?.firstOrNull { it.id == read.objective }?.milestones?.firstOrNull { it.id == read.milestone }
+
+/**
+ * Une note d'un fil se lit-elle comme un texte d'elle (en Markdown) ? Jamais quand elle est venue d'ailleurs
+ * (`outside`) : un texte venu d'ailleurs se pose tel quel, sous son liseré, où qu'on le montre.
+ */
+fun noteRendered(n: ThreadNote): Boolean = !n.outside
 
 // ── Les gestes de la fiche ──────────────────────────────────────────────
 
@@ -476,7 +498,10 @@ private fun same(a: Any?, b: Any?): Boolean =
 internal fun changed(before: Map<String, Any?>, after: Map<String, Any?>): List<Pair<String, Any?>> =
     after.entries.filterNot { (k, v) -> same(before[k], v) }.map { it.key to it.value }
 
-/** Ce qu'on saisit d'un objectif ponctuel (« fini quand ») ou d'une mission (sa cadence, ce qui la déclenche…). */
+/**
+ * Ce qu'on saisit d'un objectif ponctuel (« fini quand ») ou d'une mission (sa cadence, ce qui la déclenche…). Comme les
+ * autres formulaires, il se garde avec l'écran (`Serializable`) : une rotation ne perd pas ce qui est tapé.
+ */
 data class GoalForm(
     val mission: Boolean = false,
     val text: String = "",
@@ -488,7 +513,7 @@ data class GoalForm(
     val eachPass: String = "",
     /** Premier passage tout de suite (à la création d'une mission seulement). */
     val atOnce: Boolean = true,
-) {
+) : java.io.Serializable {
     internal fun values(): Map<String, Any?> = if (mission) {
         linkedMapOf("text" to text.trim(), "cadence_hours" to cadenceHours, "on" to on, "only_on_event" to onlyOnEvent, "each_pass" to eachPass.trim())
     } else {
@@ -529,7 +554,7 @@ data class MilestoneForm(
     val itemStatus: String = "",
     /** Pourquoi ce changement (facultatif, à la modification). */
     val reason: String = "",
-) {
+) : java.io.Serializable {
     internal fun values(): Map<String, Any?> {
         val v = linkedMapOf<String, Any?>("text" to text.trim(), "check" to check)
         if (check == "command") v["command"] = command.trim()
@@ -579,7 +604,7 @@ fun milestoneRequest(objective: Int, form: MilestoneForm, before: MilestoneForm?
 }
 
 /** Ce qu'on saisit d'un ticket : ses sortes et ses priorités sont celles que la fiche sert, avec leurs mots. */
-data class TicketForm(val title: String = "", val text: String = "", val kind: String = "", val priority: String = "") {
+data class TicketForm(val title: String = "", val text: String = "", val kind: String = "", val priority: String = "") : java.io.Serializable {
     internal fun values(): Map<String, Any?> = linkedMapOf("title" to title.trim(), "text" to text, "kind" to kind, "priority" to priority)
 
     companion object {
@@ -648,6 +673,38 @@ sealed interface Goal {
     }
 }
 
+/**
+ * La clé de la page d'un objectif qu'on ne connaît que par son numéro (une ligne du fil, une décision) : `m<id>` si
+ * c'est une mission de la fiche, `o<id>` sinon — sous l'autre lettre, sa page ne le trouverait pas.
+ */
+fun goalKey(sheet: Sheet?, objective: Int): String =
+    if (sheet?.missions?.any { it.id == objective } == true) "m$objective" else "o$objective"
+
+// ── Les clés d'une liste ────────────────────────────────────────────────
+
+/** Une ligne d'une liste paresseuse et sa clé. */
+data class Keyed<T>(val key: String, val value: T)
+
+/**
+ * Les lignes d'une liste paresseuse sous leur clé, dans l'ordre : celle que [of] donne, suivie de son rang quand une
+ * ligne d'avant l'a déjà prise. **Deux clés égales font tomber la liste** (Compose le refuse), et le serveur peut rendre
+ * deux lignes que rien ne distingue : une exécution et son commit (le même événement), deux éléments voilés (sans clé
+ * ni nom). Une ligne seule de sa clé la garde telle quelle : elle reste la même d'une lecture à l'autre.
+ */
+fun <T> keyed(rows: List<T>, of: (T) -> String): List<Keyed<T>> {
+    val taken = HashSet<String>()
+    return rows.map { row ->
+        val base = of(row)
+        var key = base
+        var rank = 1
+        while (!taken.add(key)) {
+            rank++
+            key = "$base#$rank"
+        }
+        Keyed(key, row)
+    }
+}
+
 /** Un groupe de la liste des objectifs : `open` (en cours), `missions`, `done` (terminés). */
 data class GoalGroup(val code: String, val items: List<Goal>)
 
@@ -661,7 +718,16 @@ fun goalGroups(sheet: Sheet): List<GoalGroup> {
     )
 }
 
-fun findGoal(sheet: Sheet, key: String): Goal? = goalGroups(sheet).flatMap { it.items }.firstOrNull { it.key == key }
+/**
+ * L'objectif ou la mission d'une page, par sa clé. Qui ne le connaît que par son numéro — une attente d'« À faire »,
+ * un accord, l'objectif lié d'un ticket, qui ne disent pas si c'est une mission — l'ouvre sous `o<id>` : quand aucun
+ * objectif ne porte ce numéro, c'est la mission qui le porte (ils se partagent les numéros), et sa page la trouve.
+ */
+fun findGoal(sheet: Sheet, key: String): Goal? {
+    val all = goalGroups(sheet).flatMap { it.items }
+    return all.firstOrNull { it.key == key }
+        ?: key.takeIf { it.startsWith("o") }?.let { o -> all.firstOrNull { it.key == "m" + o.drop(1) } }
+}
 
 /** Quelque chose attend la personne sur cet objectif : un point d'arrêt prêt, ou elle a besoin d'elle. */
 fun goalAwaits(o: Objective): Boolean = o.need.isNotBlank() || o.milestones.any { it.ready }

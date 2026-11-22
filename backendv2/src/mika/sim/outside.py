@@ -18,6 +18,8 @@ from mika.ports.mail import (
     AccountStatus,
     Attachment,
     Contact,
+    Correspondent,
+    CorrespondentsSince,
     Draft,
     File,
     Folder,
@@ -228,6 +230,49 @@ class FakeMail:
                                         old.sent + int(sent), max(old.last, m.date))
         rows = [c for c in book.values() if has_words(c.name + ' ' + c.address, text)]
         return Page.of(sorted(rows, key=lambda c: (-c.last, c.address)), page, size)
+
+    def correspondents_since(self, cursor, limit):
+        """Comme l'adaptateur réel, sur l'ordre où les mails sont arrivés ici (``inbox``) et sont partis
+        (``outgoing``) : le curseur compte ce qui a déjà été lu de chacun."""
+        limit = max(1, int(limit))
+        a, b = min(max(0, int(cursor[0])), len(self.inbox)), min(max(0, int(cursor[1])), len(self.outgoing))
+        took, gone = self.inbox[a:a + limit], self.outgoing[b:b + limit]
+        own = {box.key: box.address.lower() for box in self.accounts()}
+        sent_folders = {(box.key, f.name) for box in self.accounts() for f in self.folders(box.key) if f.role == "sent"}
+        book: dict[tuple[str, str], Correspondent] = {}
+        letters = [(m, (m.account, m.folder) in sent_folders) for m in took] + [(m, True) for m in gone]
+        for m, sent in letters:
+            found = addresses(','.join(x for x in (m.to, m.cc) if x)) if sent else addresses(m.sender)
+            for name, address in found:
+                if address == own.get(m.account):
+                    continue
+                old = book.get((m.account, address), Correspondent(m.account, address, name, 0, 0, m.date, m.date))
+                book[m.account, address] = Correspondent(m.account, address, name or old.name,
+                                                         old.received + int(not sent), old.sent + int(sent),
+                                                         min(old.first, m.date), max(old.last, m.date))
+        return CorrespondentsSince(tuple(v for _, v in sorted(book.items())), (a + len(took), b + len(gone)),
+                                   len(took) == limit or len(gone) == limit)
+
+    def exchanged(self, since, *, limit=2000, accounts=None):
+        """Comme l'adaptateur réel : qui a écrit à chaque boîte et à qui elle a écrit, depuis ``since``."""
+        own = {box.key: box.address.lower() for box in self.accounts()}
+        book: dict[tuple[str, str], list[int]] = {}
+        for m, _local, sent in self._letters().values():
+            if m.date < since or (accounts is not None and m.account not in accounts):
+                continue
+            for _name, address in addresses(','.join(x for x in (m.to, m.cc) if x)) if sent else addresses(m.sender):
+                if address != own.get(m.account):
+                    got = book.setdefault((m.account, address), [0, 0, 0])
+                    got[1 if sent else 0] += 1
+                    got[2] = max(got[2], m.date)
+        both = [Correspondent(a, address, "", v[0], v[1], 0, v[2]) for (a, address), v in book.items() if v[0] and v[1]]
+        return sorted(both, key=lambda c: (-c.last, c.account, c.address))[:limit]
+
+    def letters_from(self, address, *, since=0, limit=30, accounts=None):
+        wanted = (address or "").strip().lower()
+        got = [m for m, local, sent in self._letters().values() if not sent and not local and m.date >= since
+               and (accounts is None or m.account in accounts) and m.address == wanted]
+        return sorted(got, key=lambda m: (-m.date, m.ref))[:limit]
 
     def drafts_page(self, text="", page=1, size=25):
         rows = [d for d in self.kept_drafts.values() if has_words(d.subject + ' ' + d.to, text)]

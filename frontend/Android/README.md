@@ -113,8 +113,8 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
 - **« Lui dire où je suis »** (ADR 0119, coupé par défaut) : application ouverte, la position du téléphone part à
   Mika — les coordonnées exactes et le nom du lieu trouvé par le téléphone (`Geocoder`). Voir
   [Sa position](#sa-position).
-- **« Lui montrer mes messages »** (ADR 0120, coupé par défaut) : les messages WhatsApp et SMS que le téléphone affiche
-  partent à Mika, qui s'en souvient ; elle peut proposer une réponse, qu'une notification te demande d'autoriser. Voir
+- **« Lui montrer mes messages »** (ADR 0120, coupé par défaut) : les messages WhatsApp, Messenger (ADR 0299) et SMS
+  que le téléphone affiche partent à Mika, qui s'en souvient ; elle peut proposer une réponse, qu'une notification te demande d'autoriser. Voir
   [Ses messages](#ses-messages).
 - **Projets** (ADR 0296, l'API par personne : [`protocole-moi.md`](../../backendv2/docs/protocole-moi.md) § 11), une
   rubrique du tiroir, juste après le chat, avec sa pastille (`counts.projects` : ce qui t'attend). C'est l'écran Projets
@@ -129,7 +129,8 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
   (bleu), fait (vert), en échec ou refusé (rouge), en attente (gris-bleu). Chaque écran se relit à son retour et en
   tirant ; hors ligne ou en erreur, il le dit et propose de réessayer.
   - **À faire** : ce qui t'attend dans tous tes projets, groupé par projet (des pastilles filtrent sur un projet ; la
-    suite se lit en fin de liste). Une ligne ouvre de quoi décider (`Route.ProjectTodo`) : pour un accord, exactement ce
+    suite se lit en fin de liste, et reste chargée quand la liste se relit en place — une attente ouverte, décidée, le
+    retour sur l'écran — tant que sa première page relue la rejoint ; tirer relit tout). Une ligne ouvre de quoi décider (`Route.ProjectTodo`) : pour un accord, exactement ce
     qui partirait, en texte brut à chasse fixe, et « Accorder » renvoie le condensé lu (éteint si le serveur dit qu'il ne
     peut pas partir tel quel) ; le plan d'un projet (Valider, Demander une révision) ; un point d'arrêt et sa preuve
     (Valider, Refuser avec ce qui manque) ; la question d'un ticket (ta réponse, tapée sur place) ; un ticket proposé
@@ -137,7 +138,18 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
     boutons sont en bas, ceux que le serveur ouvre ; sinon sa raison se lit telle quelle, et un geste de l'hôte ouvre sa
     page dans le navigateur. Une pull request prête se fusionne d'ici quand le serveur l'ouvre — par la même
     confirmation que dans l'onglet Code (voir « Code ») — et s'ouvre en page ; aucun autre bouton de l'attente ne mène
-    à la fusion (un verdict y tranche son ticket). Décidée, l'attente quitte la liste et l'écran y revient.
+    à la fusion (un verdict y tranche son ticket). Décidée, l'attente quitte la liste et l'écran y revient. **Une
+    attente montre toujours ce que le serveur en dit maintenant** : elle se relit à chaque fois que son écran est devant
+    (il s'ouvre, l'app revient de l'arrière-plan) et après un refus ; pendant la relecture ses boutons ne s'offrent pas —
+    rien ne se décide sur l'ancienne lecture, ni la preuve d'un point d'arrêt avant de l'avoir lue. **Ce que tu y
+    tapais reste** : la réponse à une question survit à un détour par un autre écran (son projet, son fil, son
+    objectif, sa pull request) et ne tombe que quand une autre attente s'ouvre ; pendant une relecture son champ reste
+    posé, seul « Répondre » attend. Une panne se dit
+    avec son erreur et « Réessayer » ; « n'est plus à faire » ne se dit que quand le serveur le dit. Un geste de
+    `piloter` ne demande un texte que pour une consigne (`what: instruct`). La fiche d'un projet, un objectif, un
+    ticket, un lien, le ticket d'une issue et ses réglages suivent la même règle : relus au retour sur l'écran et après
+    un geste, ils n'offrent aucun geste d'ici là — et la garde est dans leur modèle, pas seulement dans les boutons :
+    une fenêtre ou une feuille restée ouverte ne fait rien partir non plus (elle le dit, et garde ce qui est tapé).
   - **Projets** : tes projets en cartes — son état (ou son plan qui attend), pour qui, où il en est, la progression de
     ses objectifs (un segment par objectif), ses compteurs (pull requests, tickets ouverts, à toi), sa dernière activité
     et ses dépendances —, toutes remplies par la liste (`card`). « Nouveau projet » (dans la barre et en fin de liste,
@@ -190,11 +202,15 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
       volets — Résumé (ce qui la dit finie, les jalons de son objectif et leurs preuves), Commits, Fichiers (son diff),
       Échanges (ce que l'hôte en dit, cité tel quel) — et « Infos » : sa fusion, sa relecture, ses vérifications une à
       une, ses conflits, sa branche, le ticket et l'objectif liés. **Modifier** (son titre et son texte, relus chez
-      l'hôte ; seul ce qui change part) et **répondre** dans Échanges, avec `rights.pull_write`. **Fusionner**, avec
+      l'hôte ; le formulaire en part une fois, et seul ce qui en diffère part) et **répondre** dans Échanges, avec `rights.pull_write`. **Fusionner**, avec
       `rights.merge` et seulement quand le serveur le dit (`merge.can` ; sinon sa raison, `merge.why`) : la pull
       request **se relit à l'instant**, une confirmation dit ce qui va être fusionné (son titre, sa branche et sa base,
       ses commits, ses fichiers, où elle en est, son commit de tête), puis la demande nomme **le commit de tête qu'on
       vient de relire** ; l'état qui suit se lit sur place — demandée, fusionnée, ou refusée avec les mots du serveur.
+      La confirmation n'appartient qu'à l'écran qui l'a demandée : quitter cet écran, ou y changer de cible, l'annule,
+      elle ne s'ouvre jamais plus tard sur une lecture ancienne. Un geste chez l'hôte (répondre, modifier, fusionner)
+      n'y arrive qu'après la réponse du serveur : la pull request et ce que l'hôte en dit se relisent un peu plus tard
+      (deux fois), et au retour suivant sur l'écran.
       **La route de la fusion n'a qu'un chemin** dans l'app : `ProjectsApi.merge`, sur un `MergeOrder` qui ne naît que
       d'une pull request relue que le serveur ouvre ; `ProjectsApi.gesture` la refuse, aucun geste générique ne la
       porte (`MergePathTest` le garde).
@@ -214,6 +230,10 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
       brut — présenté comme venu d'ailleurs quand il l'est —, jamais lu comme une mise en forme, jamais rendu
       cliquable ; les seules adresses qui s'ouvrent sont celles que le serveur compose (« Voir chez l'hôte »). La
       coloration du code ne pose que des couleurs, jeton par jeton.
+    - **Rien de lourd sur le fil principal** : la forme d'une réponse se lit là où elle arrive (`MoiApi.read`), et le
+      modèle met en lignes un fichier, un diff, une page de documentation (`ProjectsDeps.compute`) avant de les
+      montrer — l'écran ne fait que poser, et ne mesure que la ligne la plus large. Les suites (commits, « À faire »)
+      comptent leurs pages ; la première page qui change vide la suite.
     - Ce que la maquette montre et que l'API ne sert pas n'est pas dans l'app : la façon de fusionner (un commit de
       fusion ou tout en un) et « Supprimer la branche après la fusion » dans la confirmation, « Relancer » une CI, son
       numéro et sa durée totale, qui a ouvert une pull request. Le dépôt distant et sa dernière relecture
@@ -221,7 +241,8 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
   - **Documentation** (`protocole-moi.md` § 11, « La documentation d'un projet ») : un espace à part du dépôt, en trois
     volets (`Route.Project(id, "documentation/<volet>")`).
     - **Pages** : une recherche (le chemin et le texte, le passage trouvé), l'arborescence qui se replie, « Nouvelle
-      page » avec `rights.write` (son titre, son dossier — elle naît à son premier enregistrement). Une page en page
+      page » avec `rights.write` (son titre, son dossier — **elle se crée à la validation**, comme sur le web : le serveur
+      juge son chemin avant qu'on ait rien écrit, son refus se dit dans la feuille ; créée, elle s'ouvre en écriture). Une page en page
       (`Route.ProjectPage`) : son Markdown rendu par le rendu de l'app (`docBlocks` : rien n'y est interprété comme du
       balisage, rien ne s'exécute) ; **une image ne se charge que si elle est de l'espace du projet** (`images/<nom>`),
       par l'adresse de l'API et sous la session de l'app — une image d'une autre adresse se dit, sans être chargée ; dans
@@ -232,10 +253,14 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
       et agit sur la sélection — ses transformations sont des fonctions pures (`MdEdit`), qui se défont en les refaisant ;
       « Entrée » poursuit une liste. Une bascule Écrire | Aperçu. Une image se choisit par le sélecteur de photos du
       système (aucune permission), part au serveur, puis se cite au curseur ; plus lourde que ce que l'espace garde
-      (`limits.image_bytes`), elle est réencodée comme une photo jointe à la conversation. **Enregistrer** demande un mot
+      (`limits.image_bytes`), ou d'une sorte qu'il ne garde pas (`limits.image_kinds` : une photo HEIC, AVIF, BMP), elle
+      est réencodée comme une photo jointe à la conversation. **Enregistrer** demande un mot
       et nomme la version lue (`base` ; en `multipart`) : si la page a changé depuis, le serveur refuse — ses mots se
       disent, rien de ce qui est écrit n'est perdu, et l'on reprend sur la version actuelle (le texte tapé reste) ou on
-      la prend. Le brouillon vit dans son modèle : il survit à une rotation et à un aller-retour.
+      la prend. **Un 409 n'est un conflit que si la page existe et n'en est plus à la version lue** : après lui l'app la
+      relit pour le savoir ; un autre refus (le même texte, une page disparue, une borne) se dit avec les mots du
+      serveur, sans rien à reprendre ; si elle ne se relit pas (hors ligne), de quoi reprendre reste offert. Le brouillon vit dans son modèle : il survit à une rotation et à un aller-retour ;
+      il n'est celui que de la page lue — supprimée puis recréée sous le même chemin, elle repart de son texte à elle.
     - **Images** : la grille, téléverser, et pour chacune son poids, les pages qui la citent, **la référence à coller
       dans une page**, la retirer avec `rights.write`. **Décisions** : la liste (en vigueur d'abord) et une décision en
       page — le choix, le contexte, la raison, les options écartées, ce qu'elle remplace —, telles que le serveur les
@@ -490,7 +515,7 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
   samsung SM-S931B », « 2 téléphones · dont celui-ci », et s'il en est un qui ne reçoit pas les notifications — : un
   état, pas un sélecteur (ADR 0233), qui mène à Paramètres › Téléphones. Pas d'onglet Notifications tant que
   l'application ne lit que les messageries (ADR 0233).
-  - **Messages** : ce que l'application a lu dans WhatsApp et Messages (de tous tes téléphones : le serveur ne dit pas
+  - **Messages** : ce que l'application a lu dans WhatsApp, Messenger et Messages (de tous tes téléphones : le serveur ne dit pas
     encore lequel a reçu quoi), la plus récente d'abord — le groupe ou qui écrit, la pastille de l'appli, le dernier
     message, l'heure, et en rose sa réponse en chemin (partie, copiée, ou en échec en rouge). « Mika propose une
     réponse » en bandeau rose quand l'une attend ton geste (`counts.phone`), avec son texte et son échéance si ce
@@ -854,9 +879,9 @@ défaut**.
 
 - **L'accès aux notifications** s'accorde dans les réglages d'Android (« Accès aux notifications ») : le bouton y mène,
   et l'interrupteur s'allume au retour s'il a été accordé. Retiré plus tard, rien ne part (le réglage le dit).
-- **Ce qui est lu** : seulement les applis cochées — WhatsApp (et WhatsApp Business), Messages (Google et Samsung) —,
-  jamais une liste d'exclusions : ni la banque, ni les codes. Les groupes seulement si « Les groupes aussi » est coché.
-  Le lecteur (`service/PhoneListenerService`) lit le `MessagingStyle` de chaque notification : la conversation, qui
+- **Ce qui est lu** : seulement les applis cochées — WhatsApp (et WhatsApp Business), Messenger (`com.facebook.orca`,
+  ADR 0299 ; sa pastille est un « M » sur son dégradé), Messages (Google et Samsung) —, jamais une liste d'exclusions :
+  ni la banque, ni les codes. Les groupes seulement si « Les groupes aussi » est coché. Le lecteur (`service/PhoneListenerService`) lit le `MessagingStyle` de chaque notification : la conversation, qui
   écrit, le texte, l'heure, et si c'est toi qui as écrit. Le tri est pur et testé (`data/phone/PhoneReading`).
 - **Ce qui part** : `POST /api/phone/inbox`, par lots de 200, sous le jeton de l'app. La conversation et l'expéditeur
   ne partent qu'en clés opaques (`sha256` de l'appli et de l'identifiant que donne la notification, 32 caractères) ; le
@@ -868,7 +893,7 @@ défaut**.
 - **Ses réponses proposées** arrivent par Firebase, scellées comme ses paroles (`{"t": "phone_draft", …}`) : une
   notification « Répondre à Léa (WhatsApp) ? », le texte entier, avec **Envoyer**, **Écrire autre chose** et
   **Ignorer** (balayer la notification compte comme « Ignorer »). Le geste vaut accord, et marche aussi en 4G.
-  « Envoyer » passe par l'action « Répondre » de la notification de WhatsApp ou de Messages, gardée en mémoire
+  « Envoyer » passe par l'action « Répondre » de la notification de WhatsApp, de Messenger ou de Messages, gardée en mémoire
   seulement ; si elle n'existe plus (notification balayée, appli redémarrée), le texte est copié et la notification
   ouvre l'appli pour le coller. Le sort repart au serveur (`POST /api/phone/settled`) par la même file. Sans geste, la
   proposition expire (2 h) et la notification disparaît.
@@ -933,7 +958,7 @@ lecture tardive, une règle changée ailleurs ; `TeamsAccountModelTest` : la cl�
 « Retirer » vise le partage touché), un fil du Téléphone (`PhoneThreadModelTest` : le champ et sa proposition réglée,
 le sort d'un geste sur l'écran de sa visite, un geste qui va au bout l'écran parti, l'action gardée qui vise le fil
 montré), ce téléphone reconnu par son jeton (`AuthRepositoryTest`, `SettingsRulesTest`, `PhoneRulesTest`), ouverture d'un message Firebase — `PushPayloadTest` en ouvre un scellé par le serveur —, inscription aux
-notifications, tri des notifications de WhatsApp et de Messages, leurs clés opaques, leur file et son envoi, les
+notifications, tri des notifications de WhatsApp, de Messenger et de Messages, leurs clés opaques, leur file et son envoi, les
 réponses proposées, Mail — ses règles, ses dates, `MailApi` contre un faux serveur —, Teams — ses règles,
 `TeamsApi` contre un faux serveur —, Téléphone — ses règles, ce qui se décide d'ici, `PhoneMoiApi` contre un faux
 serveur —, Outils — ses règles (`ToolsRulesTest` : les mots d'une case, le canal lu et ses moments, le nom d'un outil,
@@ -970,7 +995,13 @@ d'un instant), `ProjectsApi` contre un faux serveur (`ProjectsApiTest` : les exe
 que chaque appel envoie, un geste sous le jeton, sans CSRF, avec sa clé d'envoi, les refus avec les mots du serveur),
 ses modèles contre une fausse API (`FakeProjectsApi` ; `ProjectsModelTest` : une relecture en panne qui garde ce qui
 était montré, une attente ouverte et sa décision, un refus dit sur place, un double appui qui ne part qu'une fois, la
-clé d'envoi d'un réessai, ce qui se relit après un geste), son onglet Code — ses règles (`CodeRulesTest` : les volets
+clé d'envoi d'un réessai, ce qui se relit après un geste, **une attente rouverte qui montre ce que le serveur dit
+maintenant** — relue à son retour et après un refus, sans ses boutons d'ici là —, **ce qu'on y tapait gardé** quand on
+la quitte pour un autre écran puis la retrouve, son champ qui reste posé pendant une relecture, une attente quittée
+avant la réponse qui ne se referme pas seule, une panne qui n'est pas une absence,
+la suite d'« À faire » qui compte ses pages et reste chargée quand une attente s'ouvre, un geste qui part et efface
+le geste abouti d'avant, un ticket et une fiche qui n'offrent rien avant leur relecture, **aucun geste de la fiche ni
+d'un lien qui parte pendant sa relecture**), son onglet Code — ses règles (`CodeRulesTest` : les volets
 et leurs adresses, une ligne en jetons qui redonne la ligne même, la mise en lignes d'un diff unifié et ses numéros,
 l'arborescence un dossier à la fois, les jours d'une ligne de temps, l'ordre de fusion qui ne naît que d'une pull request
 relue que le serveur ouvre, ce que la confirmation en dit, un geste générique qui ne porte jamais la route de la fusion,
@@ -982,7 +1013,9 @@ commentaires — la route écrite une fois, un seul appel qui l'envoie, un seul 
 le lance) et ses modèles contre la fausse API (`CodeModelTest` : la pull request relue avant la confirmation, le commit
 de tête relu nommé, un refus dit sur place, un double appui, la clé d'envoi après une coupure, la fusion depuis « À
 faire » et aucun autre bouton qui y mène, modifier et répondre, ce que chaque volet lit, l'hôte relu une fois par minute,
-le ticket d'une issue, un fichier Markdown du dépôt rendu sans un lien qui s'ouvre), et la suite de la fiche — ses
+le ticket d'une issue — qui ne se tranche pas pendant sa relecture —, un fichier Markdown du dépôt rendu sans un lien qui s'ouvre, la confirmation d'une fusion qui
+s'annule quand on quitte son écran, l'hôte relu un peu plus tard après une réponse, les pages de commits comptées, le
+ticket d'une issue lu après elle, la mise en lignes faite par le modèle hors du fil principal), et la suite de la fiche — ses
 règles (`DocsRulesTest` : **les transformations de la barre d'outils de l'éditeur**, « Entrée » qui poursuit une liste,
 l'arborescence, le chemin d'une page, ce qu'une page montre — aucune image d'ailleurs —, le brouillon et son conflit ;
 `SheetRulesTest` : où mène une ligne du fil, les gestes d'un lien, d'un élément, d'un réglage — seulement ce qui change,
@@ -990,7 +1023,12 @@ jamais un champ réservé —, le diagramme dans le temps), ses lectures et l'en
 serveur (`SheetApiTest` : en `multipart`, la version lue nommée, le conflit avec les mots du serveur) et ses modèles
 contre la fausse API (`SheetModelTest` : enregistrer, le conflit qui ne perd rien, reprendre, un double appui, la clé
 d'envoi après une coupure, le brouillon qui survit, revenir à une version, le fil et sa suite, une liste, un réglage, un
-projet désarchivé)) est du Kotlin pur. Les tests instrumentés (`app/src/androidTest`) éprouvent Room
+projet désarchivé ; **un 409 qui n'est un conflit que si la page a bougé**, une page créée à la validation et son refus
+dans la feuille, une page supprimée puis recréée qui ne ressort pas l'ancien brouillon, le fil relu qui garde sa suite,
+une liste et un élément rouverts qui n'offrent rien avant leur relecture, un écran quitté avant la réponse qui ne se
+referme ni ne se déplace à son retour, un conflit dont la relecture est injoignable, une version gardée quittée qui
+ne revient pas, des réglages qui ne s'enregistrent pas pendant leur relecture) ; et **les clés d'une liste, uniques quoi que rende le serveur** (`keyed` :
+`ProjectsRulesTest`, `SheetRulesTest` — une exécution et son commit, deux éléments voilés)) est du Kotlin pur. Les tests instrumentés (`app/src/androidTest`) éprouvent Room
 en mémoire (`ChatStoreTest`) et les écrans Compose (`ChatScreenTest`, `LoginScreenTest`, `MindScreenTest`).
 
 ## Organisation du code

@@ -10,7 +10,12 @@ est au compte ``principal`` (la migration ``a3c71e5d9b20``).
 - ``messages`` : un message, sous sa référence (``ports.teams.message_ref``, unique entre les comptes) ; ``id`` dit
   l'ordre d'arrivée (il départage deux messages du même instant, et l'élagage par conversation le lit) ;
 - ``drafts`` : ses brouillons et la file d'envoi ; ``id`` dit l'ordre de la **dernière écriture** — un brouillon
-  réécrit (mis en file, posé, parti) prend un nouveau numéro, et départage ainsi deux brouillons du même instant.
+  réécrit (mis en file, posé, parti) prend un nouveau numéro, et départage ainsi deux brouillons du même instant ;
+- ``profiles`` (ADR 0298) : le profil d'une personne croisée, sous son compte et son identifiant Teams en minuscules
+  (``key``, comme ``author_key``), tel que l'extension l'a envoyé en dernier ; ``seq`` dit l'ordre des changements
+  (un profil neuf ou changé prend le rang suivant, tiré de ``counters`` : un rang ne resert jamais, même quand le
+  dernier profil part) ;
+- ``counters`` : un compteur qui ne fait que monter (``profiles`` : le dernier rang donné).
 
 **Les recherches comparent des textes repliés à l'écriture** (``fold_text`` : casse et accents ignorés, ``%`` et
 ``_`` de simples caractères), dans des colonnes à part (``title_fold``, ``id_fold``), recalculées par l'entité à chaque
@@ -50,8 +55,8 @@ STATE_MAX = 16
 IMAGE_MAX = 200
 #: le type d'une image (``image/jpeg``…)
 MIME_MAX = 40
-
-
+#: le nom d'un compteur
+COUNTER_MAX = 32
 
 
 def _account() -> Any:
@@ -192,7 +197,40 @@ class DraftRow(TeamsBase):
     reason: Mapped[str] = mapped_column(LongText, default="")
 
 
+class ProfileRow(TeamsBase):
+    """Le profil d'une personne croisée par un compte (ADR 0298) ; ``phones`` : ses numéros, un par ligne."""
+
+    __tablename__ = "profiles"
+    __table_args__ = table_args(
+        UniqueConstraint("seq", name="uq_profiles_seq"),
+        Index("ix_profiles_key", "key"),
+    )
+
+    account: Mapped[str] = mapped_column(Key(ACCOUNT_MAX), primary_key=True)
+    key: Mapped[str] = mapped_column(Key(AUTHOR_MAX), primary_key=True)
+    name: Mapped[str] = mapped_column(LongText, default="")
+    email: Mapped[str] = mapped_column(LongText, default="")
+    title: Mapped[str] = mapped_column(LongText, default="")
+    company: Mapped[str] = mapped_column(LongText, default="")
+    department: Mapped[str] = mapped_column(LongText, default="")
+    tenant: Mapped[str] = mapped_column(LongText, default="")
+    phones: Mapped[str] = mapped_column(LongText, default="")
+    #: son dernier changement (µs, l'horloge du serveur)
+    updated: Mapped[int] = mapped_column(default=0)
+    #: son rang dans l'ordre des changements
+    seq: Mapped[int] = mapped_column(default=0)
+
+
+class CounterRow(TeamsBase):
+    """Un compteur qui ne fait que monter."""
+
+    __tablename__ = "counters"
+
+    name: Mapped[str] = mapped_column(Key(COUNTER_MAX), primary_key=True)
+    value: Mapped[int] = mapped_column(default=0)
+
+
 __all__ = [
-    "ACCOUNT_MAX", "AUTHOR_MAX", "CONVERSATION_MAX", "IMAGE_MAX", "MIME_MAX", "REF_MAX", "STATE_MAX",
-    "AccountRow", "ConversationRow", "DraftRow", "ImageRow", "MessageRow", "fit",
+    "ACCOUNT_MAX", "AUTHOR_MAX", "CONVERSATION_MAX", "COUNTER_MAX", "IMAGE_MAX", "MIME_MAX", "REF_MAX", "STATE_MAX",
+    "AccountRow", "ConversationRow", "CounterRow", "DraftRow", "ImageRow", "MessageRow", "ProfileRow", "fit",
 ]

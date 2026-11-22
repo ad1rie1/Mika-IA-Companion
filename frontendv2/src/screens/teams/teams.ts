@@ -34,12 +34,15 @@ import type { PaletteEntry } from "../../shell/palette";
 import type { ScreenContext, ScreenDef, ScreenTab, Shell } from "../../shell/shell";
 import { bindCounts, errorText, openAsk, paintCount } from "../mail/compose";
 import { ago, chars, newNonce, thousands, toFill } from "../mail/format";
+import { dayAndClock } from "../chat/markup";
 import { authorLabel, kindLabel, ownAccount, ownBubbles, sentUnder, stillSentHere, UNDER_WAY, withoutSent, type SentHere } from "./format";
 import {
   capsOf,
   conversationRow,
   dock,
   extensionChip,
+  imageViewer,
+  imagesInOrder,
   infoPane,
   listHead,
   repliesTable,
@@ -361,6 +364,30 @@ export class TeamsScreen {
         this.paintThreadPane();
       } else this.watchAsk();
     }
+  }
+
+  /** Une image d'un message, en grand (ADR 0258) : « précédente » et « suivante », les flèches du clavier aussi ;
+   *  Échap la ferme (le cadre). */
+  private openImage(ref: string, index: number): void {
+    const m = [...this.older, ...(this.thread?.messages ?? [])].find((x) => x.ref === ref);
+    const count = m ? imagesInOrder(m).length : 0;
+    if (!m || !count) return;
+    let at = index;
+    const title = `${authorLabel(m, this.account(this.thread?.account ?? ""))} · ${dayAndClock(m.at, Date.now())}`;
+    const el = openModal({ title, size: "wide", body: imageViewer(m, at) });
+    el.classList.add("viewer-modal");
+    const body = $<HTMLElement>(".modal-body", el);
+    const show = (delta: number): void => {
+      at = (at + delta + count) % count;
+      if (body) body.innerHTML = imageViewer(m, at);
+    };
+    on(el, "[data-vw]", "click", (_e, b) => show(Number(b.dataset.vw) < 0 ? -1 : 1));
+    el.tabIndex = -1;
+    el.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowLeft") show(-1);
+      else if (e.key === "ArrowRight") show(1);
+    });
+    window.setTimeout(() => el.focus(), 30);
   }
 
   private async loadOlder(): Promise<void> {
@@ -1004,6 +1031,7 @@ export class TeamsScreen {
       head?.classList.toggle("on", this.info);
     });
     on(section, "[data-plus-ancien]", "click", () => void this.loadOlder());
+    on(section, "[data-tm-img]", "click", (_e, b) => this.openImage(b.dataset.tmRef ?? "", Number(b.dataset.tmImg) || 0));
     on(section, "[data-mode-teams]", "click", (_e, b) => void this.howItLeaves(b));
     on(section, "[data-tm]", "click", (_e, b) => {
       const k = b.dataset.tm;

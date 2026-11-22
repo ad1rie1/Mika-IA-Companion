@@ -1,7 +1,7 @@
 /**
  * Le rendu de Mail, celui de la maquette (`frontendv2/maquette/ecrans/mail.js`), nourri par l'API par personne :
  * la colonne des boîtes, la liste, la liseuse d'un mail ou d'un brouillon d'elle, la réponse en place, le formulaire
- * d'un mail, les contacts. Pur : des chaînes HTML, tout texte venu d'ailleurs échappé.
+ * d'un mail. Pur : des chaînes HTML, tout texte venu d'ailleurs échappé.
  */
 import { h } from "../../shell/dom";
 import { ico, type IconName } from "../../shell/icons";
@@ -691,32 +691,6 @@ export function suggestions(found: readonly Contact[], typed: string, sel: numbe
     .map((c, k) => `<button type="button" class="ac-item${k === sel ? " on" : ""}" data-pick="${k}">${avatar(c.name || c.address, "sm", c.address)}
       <span><b>${h(c.name || c.address)}</b><small>${h(c.address)} · ${c.received} reçu${c.received > 1 ? "s" : ""} · ${c.sent} envoyé${c.sent > 1 ? "s" : ""}</small></span></button>`)
     .join("");
-}
-
-// ── Les contacts ──────────────────────────────────────────────────────
-
-export function contactRow(c: Contact, selected: string, now: number): string {
-  const name = c.name || c.address;
-  return `<button class="li" type="button" data-contact="${h(c.address)}" aria-selected="${selected === c.address}">
-    ${avatar(name, "sm", c.address)}<span class="li-main"><span class="li-top"><span class="li-title">${h(name)}</span><time>${h(shortWhen(c.last, now))}</time></span><span class="li-snip">${h(c.address)}</span></span></button>`;
-}
-
-export function contactCard(c: Contact, mails: readonly MailRow[] | null, now: number, canWrite: boolean, mobile: boolean, boxes: ReadonlyMap<string, BoxView>): string {
-  const name = c.name || c.address;
-  const recent = mails === null
-    ? '<p class="small muted">Chargement…</p>'
-    : mails.length
-      ? `<div class="ct-mails">${mails.map((m) => `<button class="li" type="button" data-ouvrir-mail="${h(m.ref)}"><span class="li-main"><span class="li-top"><span class="li-title">${h(m.subject || "(sans objet)")}</span><time>${h(shortWhen(m.date, now))}</time></span>
-          <span class="li-snip">${h(boxes.get(m.box)?.title ?? m.box)}</span></span></button>`).join("")}</div>`
-      : '<p class="small muted">Aucun mail relevé de cette adresse.</p>';
-  return `<div class="pane-scroll ct-card">${mobile ? `<button class="btn sm ghost mobile-back" type="button" data-retour-c>${ico("chev-left", "sm")}Contacts</button>` : ""}
-    <div class="ct-head">${avatar(name, "xl", c.address)}<div class="grow"><h2>${h(name)}</h2><p class="text-2">correspondant</p></div>
-      ${canWrite ? `<button class="btn primary sm" type="button" data-ecrire-a="${h(c.address)}">${ico("send", "sm")}Écrire</button>` : ""}</div>
-    <div class="facts ct-facts"><span>${ico("inbox", "sm")}${c.received} reçu${c.received > 1 ? "s" : ""}</span><span>${ico("send", "sm")}${c.sent} envoyé${c.sent > 1 ? "s" : ""}</span>${c.last ? `<span>${ico("clock", "sm")}dernier échange ${h(dayAndClock(c.last, now))}</span>` : ""}</div>
-    <h4 class="rd-h4">Ses moyens de communication</h4>
-    <ul class="ct-ways"><li>${ico("mail", "sm")}<span class="muted">Mail</span><b>${h(c.address)}</b></li></ul>
-    <h4 class="rd-h4">Derniers mails reçus</h4>${recent}
-  </div>`;
 }
 
 /** Les capacités d'une boîte (sa boîte, ou celle d'un partage). */

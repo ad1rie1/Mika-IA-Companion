@@ -210,6 +210,7 @@ fun SettingsScreen(graph: AppGraph) {
                 SetDivider()
                 val apps = listOfNotNull(
                     stringResource(R.string.settings_phone_whatsapp).takeIf { settings.phoneWhatsApp },
+                    stringResource(R.string.settings_phone_messenger).takeIf { settings.phoneMessenger },
                     stringResource(R.string.settings_phone_messages).takeIf { settings.phoneMessages },
                 )
                 val phoneLine = stringResource(R.string.settings_phone_title) + " · " + when {

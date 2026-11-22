@@ -21,7 +21,7 @@ import {
   threadMarks,
   withoutSent,
 } from "./format";
-import { conversationRow, dock, infoPane, repliesTable, replyCard, threadBody, type ThreadView } from "./markup";
+import { conversationRow, dock, imageViewer, infoPane, repliesTable, replyCard, threadBody, type ThreadView } from "./markup";
 
 const NOW = new Date(2026, 10, 4, 15, 0).getTime();
 const MIN = 60_000;
@@ -125,6 +125,20 @@ describe("le fil", () => {
     expect(messageHtml("@Adrien tu peux <valider> ?", "Adrien Moreau", true)).toBe('<span class="tm-at">@Adrien</span> tu peux &lt;valider&gt; ?');
     expect(messageHtml("@Adrien Moreau ok", "Adrien Moreau", true)).toBe('<span class="tm-at">@Adrien Moreau</span> ok');
     expect(messageHtml("@Adrien ok", "Adrien Moreau", false)).toBe("@Adrien ok");
+  });
+  it("un tableau de Teams (une rangée par ligne, ses cellules séparées par « | ») se montre en tableau", () => {
+    const html = messageHtml("Le point :\nPDV | État | Reste\nNesle | <OK> | \nMassieux | réparé\nmerci @Adrien",
+      "Adrien Moreau", true);
+    expect(html.startsWith("Le point :<div class=\"tm-table\"><table><thead><tr><th>PDV</th><th>État</th><th>Reste</th>")).toBe(true);
+    expect(html).toContain("<tr><td>Nesle</td><td>&lt;OK&gt;</td><td></td></tr>");
+    // une rangée plus courte est complétée
+    expect(html).toContain("<tr><td>Massieux</td><td>réparé</td><td></td></tr>");
+    expect(html.endsWith('</table></div>merci <span class="tm-at">@Adrien</span>')).toBe(true);
+    // en Markdown aussi, sa ligne de séparation retirée
+    const md = messageHtml("| a | b |\n|---|:-:|\n| 1 | 2 |", "", false);
+    expect(md).toBe('<div class="tm-table"><table><thead><tr><th>a</th><th>b</th></tr></thead><tbody><tr><td>1</td><td>2</td></tr></tbody></table></div>');
+    // une ligne seule avec un « | » reste du texte
+    expect(messageHtml("oui | non ?\nà toi", "", false)).toBe("oui | non ?<br>à toi");
   });
   it("ce que tu as envoyé et qu'elle avait préparé : « rédigé avec Mika »", () => {
     const parti = reply({ state: "parti", sent_text: "Oui, 15 h me va." });
@@ -429,8 +443,42 @@ describe("Teams : les images d'un message (ADR 0258)", () => {
     const srcs = [...html.matchAll(/<img src="([^"]+)"/g)].map((x) => x[1]);
     expect(srcs.map((s) => decodeURIComponent(s.split("image=")[1]))).toEqual(["0-img-a", "0-img-b"]);
     expect(srcs[0]).toContain("/teams/image?");
-    expect(html).toContain("<figcaption>");
-    expect(html).toContain("un graphe");
+    // un clic l'ouvre ici, en grand : pas de lien vers un autre onglet
+    expect(html).toContain('data-tm-img="1" data-tm-ref="t9"');
+    expect(html).not.toContain('target="_blank"');
+    expect(html).toContain("Ce que Mika voit sur l&#39;image 2");
+    expect(html).not.toContain("sur l&#39;image 1");
+  });
+
+  it("ce que Mika voit se lit rendu, sur toute la largeur : un tableau en tableau, rien d'exécuté", () => {
+    const seen = "**Un tableau de suivi** :\n\n| PDV | État |\n|---|---|\n| Nesle 12741 | ✅ OK |\n| <b>x</b> | ⚠️ |";
+    const html = threadBody(withImages([{ id: "0-img-a", position: 0, mime: "image/png", seen }], "[image]"), [],
+      view("proprietaire"), false);
+    expect(html).toContain('<section class="tm-seen">');
+    expect(html).toContain("Ce que Mika y voit");
+    expect(html).toContain("<strong>Un tableau de suivi</strong>");
+    expect(html).toContain("<th>PDV</th>");
+    expect(html).toContain("<td>Nesle 12741</td>");
+    expect(html).toContain("&lt;b&gt;x&lt;/b&gt;");
+    expect(html).not.toContain("<b>x</b>");
+    // le texte de remplacement : une ligne, sans Markdown
+    expect(html).toMatch(/alt="Un tableau de suivi : PDV État/);
+  });
+
+  it("la visionneuse montre une image en grand, la suivante et la précédente, et ce que Mika y voit", () => {
+    const m = msg({ ref: "t9", text: "[image] [image]", images: [
+      { id: "0-img-b", position: 1, mime: "image/png", seen: "un graphe" },
+      { id: "0-img-a", position: 0, mime: "image/jpeg", seen: "" }] });
+    const first = imageViewer(m, 0);
+    expect(first).toContain("image=0-img-a");
+    expect(first).not.toContain("tm-seen");
+    expect(first).toContain("1 / 2");
+    expect(first).toContain('data-vw="1"');
+    const second = imageViewer(m, 1);
+    expect(second).toContain("image=0-img-b");
+    expect(second).toContain("un graphe");
+    expect(imageViewer(m, -1)).toContain("2 / 2");
+    expect(imageViewer(msg({ ref: "t1", text: "rien" }), 0)).toContain("Aucune image.");
   });
 
   it("sans image gardée, la marque reste dans le texte", () => {

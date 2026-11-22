@@ -22,7 +22,6 @@ le lire (``tracker.veiled``). Le contrat, route par route : ``docs/protocole-moi
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterable, Mapping
 from datetime import timedelta
 from typing import Any
@@ -60,70 +59,35 @@ from mika.app.me.projects import (
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
+from mika.faculties.projects import diagram as diagram_rows
 from mika.faculties.projects import faculty as f
-from mika.faculties.projects import managing, tracker
+from mika.faculties.projects import feed, tracker
 from mika.faculties.projects.faculty import (
-    Objective,
     Project,
-    frame_of,
-    milestones_of,
-    objective_of,
-    review_of,
     written,
 )
-from mika.faculties.projects.inspect import CHECKS_FR, OBJ_FR, PULL_FR, VERDICT_FR
-from mika.faculties.projects.inspect_manage import WRITE_WORDS
+from mika.faculties.projects.inspect import OBJ_FR, VERDICT_FR
 from mika.faculties.projects.inspect_milestones import STATE_FR as MILESTONE_FR
 from mika.kernel.clock import DAY
-from mika.ports.workshop import CHECKS_FAILED, CHECKS_PASSED
 from mika.vocab.episodes import outcome_words, project_target
 
 #: ce que le fil lit du journal, par lots, et combien de lots au plus pour remplir une page ou compter trente jours
 SCAN, SCAN_BATCHES, COUNT_BATCHES = 200, 10, 25
-#: les jours comptés ; les pas d'une exécution qu'on rend, au plus, et la borne de ce qu'un pas visait
-DAYS, STEPS_SHOWN, STEP_SHOWN = 30, 200, 160
-#: les passages d'une mission que le diagramme rend, au plus ; les épisodes relus pour lui
-PASSES_SHOWN, EPISODES_READ = 60, 1000
+#: les jours comptés
+DAYS = 30
+#: les épisodes relus pour le diagramme (les passages d'une mission qu'il rend : ``diagram.PASSES_SHOWN``)
+EPISODES_READ = 1000
 NO_AIMS = ("Ce projet ne t'ouvre pas ses fichiers : tu lis ce qu'elle a fait, en mots, pas les chemins ni les "
            "commandes.")
 #: un texte écrit à un niveau qu'elle n'entend pas ici (ADR 0292) ne se sert pas : la ligne dit ``TEXT_VEILED``
 _VEILED_REF = "\x00veiled"
 NO_WORK = "Ce que ce projet écrit est d'un niveau que tu n'entends pas ici : son activité ne t'est pas lue."
 
-# ── Les sortes du fil ─────────────────────────────────────────────────────
+# ── Les sortes du fil : celles de la faculté (``feed``), que lit aussi la console ─
 
-RUN, COMMIT, PULL, TICKET, GESTURE = "run", "commit", "pull", "ticket", "gesture"
-KINDS = (RUN, COMMIT, PULL, TICKET, GESTURE)
-KIND_WORDS = {RUN: "exécution", COMMIT: "commit", PULL: "pull request", TICKET: "ticket", GESTURE: "geste"}
-#: une exécution, par ce qu'elle était : une séance de cadrage, du travail, une relecture indépendante
-SORT_WORDS = {"frame": "cadrage", "run": "travail", "review": "relecture"}
-PEOPLE = ("operator", "owner", c.BY_OPERATOR, c.BY_PERSON)
-
-_RUNS = (c.RUN_REPORTED,)
-# une fusion demandée, ce qu'une personne écrit chez l'hôte : lus par leur nom — ces faits ne s'écrivent que par
-# l'action d'une personne, et leurs gardes comptent qui les nomme (``tests/unit/test_project_merge.py``)
-_PULLS = (f.PULL_SEEN, f.CHECKS_SEEN, "projects.merge_asked", "projects.merge_answered",
-          "projects.pull_write_asked", "projects.pull_write_answered")
-_TICKETS = tracker.MOVES
-_GESTURES = (f.REFRAMED, f.PAUSED, f.RESUMED, f.ARCHIVED, f.RESTORED, f.NUDGED, f.OBJECTIVE_ADDED,
-             f.OBJECTIVE_CHANGED, f.MILESTONE_ADDED, f.MILESTONE_CHANGED, f.DECIDED, f.DECISION_CHANGED,
-             managing.DECISION_REVISED, f.AMENDED, f.PLAN_ANSWERED, f.LINKS_SET, f.DEPOSITED)
-_ALL = (*_RUNS, *_PULLS, *_TICKETS, *_GESTURES)
-#: ce qu'un filtre par sorte lit du journal : un geste peut porter sur tout sauf une exécution
-READS = {RUN: _RUNS, COMMIT: _RUNS, PULL: _PULLS, TICKET: _TICKETS, GESTURE: (*_PULLS, *_TICKETS, *_GESTURES)}
-
-STATE_WORDS = {"paused": "Projet mis en pause", "resumed": "Projet repris", "archived": "Projet archivé",
-               "restored": "Projet restauré", "reframed": "Réglages du projet modifiés",
-               "links_set": "Ce qu'il lit a changé", "decision_revised": "Décision n° {n} modifiée",
-               "nudged": "« Vas-y maintenant »", "amended": "Consigne donnée", "deposited": "Fichier déposé"}
-OBJECTIVE_WORDS = {c.OPEN: "rouvert", c.DONE: "dit terminé", c.BLOCKED: "dit bloqué", c.DROPPED: "retiré"}
-DECISION_MOVES = {c.IN_FORCE: "remise en vigueur", c.WITHDRAWN: "retirée", c.SUPERSEDED: "remplacée"}
-TICKET_MOVES = (("accepted", "accepté"), ("validated", "son plan validé"), ("refused", "son plan refusé"),
-                ("taken", "pris"), ("dismissal", "elle propose de l'écarter"))
-CLOSED_WORDS = {c.DONE: "fermé comme traité", c.DROPPED: "écarté", "": "rouvert"}
-NOTE_WORDS = {c.NOTE_QUESTION: "sa question", c.NOTE_PLAN: "son plan"}
-WRITE_KINDS = {managing.EDIT: "Titre et texte de la pull request n° {n}", managing.COMMENT: "Commentaire sur la "
-               "pull request n° {n}"}
+RUN, COMMIT, PULL, TICKET, GESTURE, KINDS = feed.RUN, feed.COMMIT, feed.PULL, feed.TICKET, feed.GESTURE, feed.KINDS
+KIND_WORDS, SORT_WORDS, READS = feed.KIND_WORDS, feed.SORT_WORDS, feed.READS
+_ALL = feed.ALL
 
 
 def _work(call: Call) -> tuple[Scene, Reach]:
@@ -141,10 +105,6 @@ def _journal(call: Call, types: Iterable[Any], limit: int, *, where: tuple[str, 
     names = [getattr(t, "name", t) for t in types]
     return [mind.decode(x) for x in mind.store.latest(names, limit, where=where, before=before,
                                                       correlations=correlations)]
-
-
-def _name_of(e: Any) -> str:
-    return e.type.name.rsplit(".", 1)[-1]
 
 
 class _Reader:
@@ -166,6 +126,10 @@ class _Reader:
             self._tickets[key] = tracker.entry(_store(self.sc.call), self.r.p.id, c.TICKETS, key)
         return self._tickets[key]
 
+    def veiled(self, item: Any) -> bool:
+        """Le titre de ce ticket lui est-il voilé (``tracker.veiled``) ?"""
+        return bool(tracker.veiled(self.r.reader, item))
+
     def who(self, author: str, by: str) -> dict[str, Any]:
         """Qui a fait ceci : elle ; la personne connectée ; une autre personne, nommée seulement si elle a le droit
         de le savoir ; un autre projet ; quelqu'un chez l'hôte."""
@@ -174,7 +138,7 @@ class _Reader:
             return {"author_kind": BY_HOST, "author": HOST_WORDS}
         if c.asking_project(author):
             return {"author_kind": BY_PROJECT, "author": PROJECT_WORDS}
-        if author in (c.BY_SELF, "self") or (not by and author not in PEOPLE):
+        if author in (c.BY_SELF, "self") or (not by and author not in feed.PEOPLE):
             return {"author_kind": BY_HER, "author": self_c.name_of(sc.frame.get(self_c.PERSONA))}
         if not by:  # une personne, sans qu'on sache laquelle (un geste de vive voix)
             return {"author_kind": BY_OTHER, "author": OTHER_WORDS}
@@ -199,128 +163,9 @@ def _said(texts: Mapping[str, str], ref: str) -> str:
     return TEXT_VEILED if ref == _VEILED_REF else texts.get(ref, "") if ref else ""
 
 
-def _entry(e: Any, kind: str, what: str, title: str, who: Mapping[str, Any], **more: Any) -> dict[str, Any]:
-    out = {"seq": e.seq, "at": millis(e.at), "kind": kind, "kind_label": KIND_WORDS[kind], "what": what,
-           "title": title, "text_ref": "", "sub": "", "objective": 0, "ticket": 0, "pull": 0, "sha": "",
-           "verdict": "", "verdict_label": "", "run": "", "outside": False, **who}
-    out.update(more)
-    return out
-
-
-def _person_did(d: Any) -> bool:
-    """Est-ce le geste d'une personne ? Un événement qui dit son auteur le dit ; sinon, celui qui nomme qui l'a
-    fait (``by``) — une pause pour pannes, sans personne, n'en est pas un."""
-    if hasattr(d, "author"):
-        return d.author in PEOPLE
-    return bool(getattr(d, "by", ""))
-
-
 def _entries(look: _Reader, e: Any) -> list[dict[str, Any]]:
-    """Ce qu'un événement du journal donne au fil : rien, une ligne, ou deux (une exécution et son commit)."""
-    d, name = e.data, _name_of(e)
-    her = look.who(c.BY_SELF, "")
-    if name == "run_reported":
-        run = _entry(e, RUN, "report", "", her, text_ref=look.heard(d.summary), objective=d.objective,
-                     verdict=d.verdict, verdict_label=VERDICT_FR.get(d.verdict, d.verdict), run=e.correlation,
-                     sha=d.commit[:40])
-        if not d.commit:
-            return [run]
-        return [run, _entry(e, COMMIT, "commit", f"Commit {d.commit[:7]}", her, sub=d.branch, objective=d.objective,
-                            sha=d.commit[:40], run=e.correlation)]
-    if name == "pull_seen":
-        words = PULL_FR.get(d.state, d.state)
-        return [_entry(e, PULL, f"pull_{d.state}", f"Pull request n° {d.number} : {words}", her, sub=d.branch,
-                       objective=d.objective, pull=d.number, outside=True)] if d.number and d.state else []
-    if name == "checks_seen":
-        if d.state not in (CHECKS_FAILED, CHECKS_PASSED):
-            return []
-        return [_entry(e, PULL, f"checks_{d.state}", f"Vérifications : {CHECKS_FR.get(d.state, d.state)}", her,
-                       objective=d.objective, sha=d.sha[:40], verdict=d.state,
-                       verdict_label=CHECKS_FR.get(d.state, d.state), outside=True)]
-    if name == "merge_asked":
-        return [_entry(e, GESTURE, "merge", f"Fusion de la pull request n° {d.number} demandée",
-                       look.who("operator", d.by), objective=d.objective, pull=d.number, sha=d.sha[:40])]
-    if name == "merge_answered":
-        said = "fusionnée par l'hôte" if d.merged else "l'hôte ne l'a pas fusionnée"
-        return [_entry(e, PULL, "merged" if d.merged else "merge_refused", f"Pull request n° {d.number} : {said}",
-                       her, objective=d.objective, pull=d.number, outside=True)]
-    if name == "pull_write_asked":
-        return [_entry(e, GESTURE, f"pull_{d.what}", WRITE_KINDS.get(d.what, "").format(n=d.number) + " : demandé",
-                       look.who("operator", d.by), objective=d.objective, pull=d.number,
-                       text_ref=look.heard(d.text))]
-    if name == "pull_write_answered":
-        said = "parti chez l'hôte" if d.ok else f"pas parti ({WRITE_WORDS.get(d.why, d.why)})"
-        return [_entry(e, PULL, f"pull_{d.what}_{'sent' if d.ok else 'unsent'}",
-                       WRITE_KINDS.get(d.what, "").format(n=d.number) + f" : {said}", her, objective=d.objective,
-                       pull=d.number)]
-    if name in ("item_added", "item_changed", "item_noted"):
-        return _ticket_entries(look, e, name)
-    by = getattr(d, "by", "")
-    who = look.who(getattr(d, "author", "operator" if by else c.BY_SELF), by)
-    if not _person_did(d) and hasattr(d, "author"):
-        return []  # ce qu'elle pose elle-même pendant une exécution se lit dans son compte rendu, pas ici
-    objective = getattr(d, "objective", 0) or 0
-    if name == "objective_added":
-        return [_entry(e, GESTURE, name, f"Objectif n° {d.objective} ajouté", who, text_ref=look.heard(d.text),
-                       objective=objective)]
-    if name == "objective_changed":
-        said = OBJECTIVE_WORDS.get(d.status or "", "modifié")
-        return [_entry(e, GESTURE, name, f"Objectif n° {d.objective} {said}", who, objective=objective)]
-    if name == "milestone_added":
-        return [_entry(e, GESTURE, name, f"Jalon n° {d.milestone} posé sur l'objectif n° {d.objective}", who,
-                       text_ref=look.heard(d.text), objective=objective)]
-    if name == "milestone_changed":
-        said = "validé" if d.status == c.REACHED else "retiré" if d.status == c.DROPPED else "refusé" if d.refused \
-            else "modifié"
-        return [_entry(e, GESTURE, name, f"Jalon n° {d.milestone} de l'objectif n° {d.objective} {said}", who,
-                       objective=objective)]
-    if name == "decided":
-        return [_entry(e, GESTURE, name, f"Décision n° {d.decision} consignée", who, text_ref=look.heard(d.title))]
-    if name == "decision_changed":
-        return [_entry(e, GESTURE, name, f"Décision n° {d.decision} {DECISION_MOVES.get(d.status, d.status)}", who)]
-    if name == "plan_answered":
-        said = "Plan du projet validé" if d.verdict == "approve" else "Révision du plan demandée"
-        return [_entry(e, GESTURE, name, said, who)]
-    title = STATE_WORDS.get(name, "")
-    if not title:
-        return []
-    if name == "nudged" and objective:
-        title += f" sur l'objectif n° {objective}"
-    return [_entry(e, GESTURE, name, title.format(n=getattr(d, "decision", "")), who, objective=objective,
-                   text_ref=look.heard(d.instruction) if name == "amended" else "")]
-
-
-def _ticket_entries(look: _Reader, e: Any, name: str) -> list[dict[str, Any]]:
-    """Ce qui arrive à un ticket. Son titre ne se dit que si elle peut le lire ; ce qui vient de l'hôte ou d'un autre
-    projet est marqué."""
-    d = e.data
-    if d.list_name != c.TICKETS:
-        return []
-    found = look.ticket(d.key)
-    if found is None:
-        return []
-    item = found.item
-    veiled = bool(tracker.veiled(look.r.reader, item))
-    who = look.who(d.author, d.by)
-    outside = d.author == c.BY_HOST or bool(c.asking_project(d.author))
-    kind = GESTURE if d.author in PEOPLE and d.by else TICKET
-    handle = f"#{item.number}"
-    named = handle if veiled else f"{handle} {found.title}"
-    if name == "item_added":
-        title, what = f"Ticket {named} ouvert", "ticket_opened"
-    elif name == "item_noted":
-        title, what = f"Ticket {handle} : {NOTE_WORDS.get(d.kind, 'une note dans son fil')}", "ticket_noted"
-    else:
-        moves = [words for field, words in TICKET_MOVES if getattr(d, field, False)]
-        if d.closed is not None:
-            moves.append(CLOSED_WORDS.get(d.closed, d.closed))
-        if any(x is not None for x in (d.title, d.text, d.kind, d.priority)):
-            moves.append("modifié")
-        if not moves:
-            return []  # ce que le moteur note pour lui (une mesure, l'état d'une pull request)
-        title, what = f"Ticket {handle} : {', '.join(moves)}", "ticket_changed"
-    return [_entry(e, kind, what, snippet(title, 240), who, ticket=item.number, objective=item.objective,
-                   outside=outside)]
+    """Ce qu'un événement du journal donne au fil (``feed.entries``), à l'instant du client (ms)."""
+    return [{**x, "at": millis(x["at"])} for x in feed.entries(look, e)]
 
 
 def _filled(call: Call, entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -347,9 +192,7 @@ def _about(call: Call, p: Project) -> tuple[int, int, frozenset[int]]:
 
 
 def _kept(x: Mapping[str, Any], objective: int, ticket: int, born: frozenset[int]) -> bool:
-    if objective and x["objective"] != objective:
-        return False
-    return not ticket or x["ticket"] == ticket or x["objective"] in born
+    return feed.kept(x, objective, ticket, born)
 
 
 async def activity(call: Call) -> dict[str, Any]:
@@ -463,14 +306,8 @@ async def activity_days(call: Call) -> dict[str, Any]:
 
 def _sort(p: Project, subject: str | None) -> tuple[str, int] | None:
     """Ce qu'était un épisode de ce projet — une séance de cadrage, du travail, une relecture — et l'objectif qu'il
-    visait ; ``None`` : une prise de parole sur lui (un récit, une demande), pas une exécution."""
-    if frame_of(subject) == p.id:
-        return "frame", 0
-    reviewed = review_of(subject)
-    if reviewed is not None and reviewed[0] == p.id:
-        return "review", reviewed[1]
-    aimed = objective_of(subject)
-    return ("run", aimed[1]) if aimed is not None and aimed[0] == p.id else None
+    visait ; ``None`` : une prise de parole sur lui (``diagram.episode_sort``, que lit aussi la console)."""
+    return diagram_rows.episode_sort(p, subject)
 
 
 def _objective_ref(p: Project, oid: int, texts: Mapping[str, str]) -> dict[str, Any] | None:
@@ -536,45 +373,6 @@ async def executions(call: Call) -> dict[str, Any]:
             "sorts": [{"code": k, "label": v} for k, v in SORT_WORDS.items()], "items": items}
 
 
-#: ce qu'un pas visait, lu dans les arguments de l'outil : le premier de ces noms qu'ils portent. Un chemin, une
-#: commande, une recherche, une adresse — **jamais un texte de contenu** (un titre, une note, un compte rendu, le
-#: texte d'une page : ADR 0292)
-STEP_KEYS = ("path", "argv", "command", "query", "url")
-
-
-def _args(raw: Any) -> dict[str, Any]:
-    try:
-        args = json.loads(raw) if isinstance(raw, str) else raw
-    except ValueError:
-        return {}
-    return args if isinstance(args, dict) else {}
-
-
-def _elsewhere(args: Mapping[str, Any], project: int) -> int | None:
-    """Le projet lié que cet appel vise (un outil qui lit un autre projet le nomme par ``project``) : son numéro ;
-    0, un projet qui ne se nomme pas par un numéro ; ``None`` : ce projet-ci."""
-    raw = args.get("project")
-    if raw in (None, "", 0, "0") or isinstance(raw, bool):
-        return None
-    try:
-        other = int(raw)
-    except (TypeError, ValueError):
-        return 0
-    return None if other == project else other
-
-
-def _aim(args: Mapping[str, Any]) -> str:
-    """Ce qu'un appel d'outil visait, en une ligne bornée — un chemin, une commande, une recherche — : jamais ce
-    qu'il a rendu, jamais un texte qu'il portait."""
-    for key in STEP_KEYS:
-        value = args.get(key)
-        if isinstance(value, list):
-            value = " ".join(str(x) for x in value)
-        if isinstance(value, str | int) and str(value).strip():
-            return snippet(str(value), STEP_SHOWN)
-    return ""
-
-
 def _steps(call: Call, sc: Scene, r: Reach, correlation: str) -> tuple[bool, list[dict[str, Any]], bool]:
     """Les pas d'une exécution, lus dans sa trace : (la trace est gardée, ses pas, il y en avait davantage). **Ce
     qu'un pas visait** (un chemin, une commande) est l'arbre du dépôt par morceaux : il ne se dit qu'avec le droit sur
@@ -584,7 +382,7 @@ def _steps(call: Call, sc: Scene, r: Reach, correlation: str) -> tuple[bool, lis
     opened: dict[int, bool] = {}
 
     def shown(args: Mapping[str, Any]) -> bool:
-        other = _elsewhere(args, r.p.id)
+        other = feed.elsewhere(args, r.p.id)
         if not files or other is None:
             return files
         if other not in opened:
@@ -594,23 +392,7 @@ def _steps(call: Call, sc: Scene, r: Reach, correlation: str) -> tuple[bool, lis
 
     traces = call.port("traces")
     trace = traces.get(correlation) if traces is not None else None
-    if not isinstance(trace, dict):
-        return False, [], False
-    calls = [t for t in trace.get("tool_calls") or () if isinstance(t, dict)]
-    tools = call.kernel.registry.tools
-    out = []
-    for t in calls[:STEPS_SHOWN]:
-        name = str(t.get("name", ""))
-        spec = tools.get(name)
-        args = _args(t.get("args"))
-        out.append({"tool": name, "label": (spec.label if spec is not None else "") or name,
-                    "aim": _aim(args) if shown(args) else "", "ok": bool(t.get("ok")),
-                    "ran": bool(t.get("executed", True)),
-                    "ms": int(t.get("duration_us") or 0) // 1000,
-                    "acts": bool(spec.acts) if spec is not None else False,
-                    # ce que cet outil rend vient d'ailleurs, et ce qu'il porte en sort : le client le présente ainsi
-                    "outside": bool(spec.outside) if spec is not None else True})
-    return True, out, len(calls) > STEPS_SHOWN
+    return feed.steps(trace, call.kernel.registry.tools, shown)
 
 
 async def execution(call: Call) -> dict[str, Any]:
@@ -679,57 +461,26 @@ async def notebook(call: Call) -> dict[str, Any]:
 # ── Le diagramme de ses objectifs ─────────────────────────────────────────
 
 
-def _spans(o: Objective, starts: list[int]) -> dict[int, tuple[int, int]]:
-    """Pour chaque jalon vivant d'un objectif : quand elle s'y est mise, et combien d'exécutions il a prises —
-    déduits de ses exécutions (``starts``, leurs départs, du plus ancien au plus récent). Elle se met à un jalon à la
-    première exécution qui suit le jalon d'avant atteint ; atteint dans la même exécution que lui, il part de
-    celle-là. Sans exécution depuis, il n'a pas commencé (0)."""
-    out: dict[int, tuple[int, int]] = {}
-    bound = 0
-    for m in milestones_of(o):
-        end = m.reached_at or 0
-        later = [s for s in starts if s >= bound and (not end or s <= end)]
-        start = later[0] if later else max((s for s in starts if end and s <= end), default=0)
-        runs = sum(1 for s in starts if start and s >= start and (not end or s <= end))
-        out[m.id] = (start, runs)
-        if not end:
-            break  # les suivants attendent celui-ci
-        bound = end
-    return out
-
-
 async def diagram(call: Call) -> dict[str, Any]:
     """``GET …/projets/<id>/diagramme`` : ses objectifs et ses missions dans l'ordre du plan, leurs jalons, et leurs
     dates — de quoi dessiner l'avancement et le temps. De vraies dates seulement ; 0 : pas encore arrivé."""
     sc, r = _work(call)
     p = r.p
     started = _journal(call, [rt.EPISODE_STARTED], EPISODES_READ, where=("target", project_target(p.id)))
-    starts: dict[int, list[int]] = {}
-    for e in reversed(started):
-        found = _sort(p, e.data.subject)
-        if found is not None and found[0] == "run" and found[1]:
-            starts.setdefault(found[1], []).append(e.at)
-    shown = sorted((o for o in p.objectives if o.status != c.DROPPED), key=lambda o: (o.rank or 10_000, o.id))
-    texts = _texts(call, [ref for o in shown for ref in (o.text_ref, *(m.text_ref for m in milestones_of(o)))])
-    rows = []
-    for o in shown:
-        mine = starts.get(o.id, [])
-        spans = _spans(o, mine) if o.kind == c.ONCE else {}
-        alive = milestones_of(o)
-        rows.append({
-            "id": o.id, "text": texts.get(o.text_ref, ""), "kind": o.kind, "status": o.status,
-            "status_label": OBJ_FR.get(o.status, o.status), "after": o.after, "rank": o.rank, "ticket": o.ticket,
-            "added_at": millis(o.at), "started_at": millis(mine[0]) if mine else 0,
-            "last_run": millis(o.last_run_at), "closed_at": millis(o.closed_at), "runs": len(mine) or o.worked,
-            "reached": sum(1 for m in alive if m.status == c.REACHED), "milestones_total": len(alive),
-            "passes": [millis(s) for s in mine[-PASSES_SHOWN:]] if o.kind == c.CONSTANT else [],
-            "milestones": [{
-                "id": m.id, "text": texts.get(m.text_ref, ""), "status": m.status,
-                "status_label": MILESTONE_FR.get(m.status, m.status), "check": m.check,
-                "check_label": CHECK_WORDS.get(m.check, m.check), "ready": bool(m.ready_at and m.status == c.OPEN),
-                "added_at": millis(m.at), "started_at": millis(spans.get(m.id, (0, 0))[0]),
-                "ready_at": millis(m.ready_at), "reached_at": millis(m.reached_at),
-                "runs": spans.get(m.id, (0, 0))[1]} for m in alive]})
+    found = diagram_rows.rows(p, diagram_rows.starts_of(p, started))
+    texts = _texts(call, [ref for o in found for ref in (o.text_ref, *(m.text_ref for m in o.marks))])
+    rows = [{
+        "id": o.id, "text": texts.get(o.text_ref, ""), "kind": o.kind, "status": o.status,
+        "status_label": OBJ_FR.get(o.status, o.status), "after": o.after, "rank": o.rank, "ticket": o.ticket,
+        "added_at": millis(o.added_at), "started_at": millis(o.started_at), "last_run": millis(o.last_run),
+        "closed_at": millis(o.closed_at), "runs": o.runs, "reached": o.reached, "milestones_total": len(o.marks),
+        "passes": [millis(s) for s in o.passes],
+        "milestones": [{
+            "id": m.id, "text": texts.get(m.text_ref, ""), "status": m.status,
+            "status_label": MILESTONE_FR.get(m.status, m.status), "check": m.check,
+            "check_label": CHECK_WORDS.get(m.check, m.check), "ready": m.ready, "added_at": millis(m.added_at),
+            "started_at": millis(m.started_at), "ready_at": millis(m.ready_at), "reached_at": millis(m.reached_at),
+            "runs": m.runs} for m in o.marks]} for o in found]
     dated = [x for row in rows for x in (row["added_at"], row["started_at"]) if x]
     return {"now": millis(sc.frame.now), "from": min(dated, default=0), "cut": len(started) >= EPISODES_READ,
             "objectives": rows}

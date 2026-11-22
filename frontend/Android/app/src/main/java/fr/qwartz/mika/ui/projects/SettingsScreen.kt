@@ -8,10 +8,10 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -35,7 +35,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
-import fr.qwartz.mika.data.moi.projects.Coded
 import fr.qwartz.mika.data.moi.projects.ProjectSettings
 import fr.qwartz.mika.data.moi.projects.SettingField
 import fr.qwartz.mika.data.moi.projects.SettingsSection
@@ -46,6 +45,7 @@ import fr.qwartz.mika.data.moi.projects.isListField
 import fr.qwartz.mika.data.moi.projects.planState
 import fr.qwartz.mika.data.moi.projects.projectTone
 import fr.qwartz.mika.data.moi.projects.sectionIcon
+import fr.qwartz.mika.data.moi.projects.settingChoices
 import fr.qwartz.mika.data.moi.projects.settingCodes
 import fr.qwartz.mika.data.moi.projects.settingOn
 import fr.qwartz.mika.data.moi.projects.settingShown
@@ -77,10 +77,16 @@ internal fun SettingsScreen(graph: AppGraph, route: Route.ProjectPage) {
     val vm: SettingsViewModel = viewModel(key = "settings|$session|${route.id}") { SettingsViewModel(ProjectsDeps(graph), route.id) }
     Toasts(vm.gestures)
     Toasts(project.gestures)
-    OnResume(vm) {
+    // la page s'ouvre : ce qu'on y avait dit avant de la quitter (un refus d'un autre jour) ne vaut plus
+    FreshEntry(vm.gestures, SettingsViewModel.where(route.key), SettingsViewModel.PROJECT)
+    FreshEntry(project.gestures, ProjectViewModel.TOP)
+    // par page : la liste des sections et chaque section se relisent quand on y arrive
+    OnResume(vm to route.key) {
         project.resume()
         vm.resume()
     }
+    // la page d'une section quittée : ce qu'on y avait saisi sans l'enregistrer ne revient pas à la visite suivante
+    OnLeave(vm, route.key) { vm.leave(route.key) }
     LaunchedEffect(vm.revision) { if (vm.revision > 0) project.reload() }
     // archivé, il n'existe plus dans cette API : retour à la rubrique, où il se désarchive
     LaunchedEffect(vm.archived) {
@@ -89,11 +95,14 @@ internal fun SettingsScreen(graph: AppGraph, route: Route.ProjectPage) {
             shell.open(Route.Projects(ProjectsTabs.PROJECTS))
         }
     }
-    var archiving by rememberSaveable { mutableStateOf(false) }
+    var archiving by rememberSaveable(route.id, route.key) { mutableStateOf(false) }
     val sheet = project.sheet.valueOrNull
     val settings = vm.settings.value
     val section = settings?.sections?.firstOrNull { it.name == route.key }?.takeIf { route.key.isNotEmpty() }
-    val busy = vm.gestures.busy.isNotEmpty() || project.gestures.busy.isNotEmpty()
+    // rien ne s'enregistre ni ne s'archive sur des réglages d'avant : ils se relisent au retour sur l'écran et après
+    // un enregistrement
+    val busy = vm.gestures.busy.isNotEmpty() || project.gestures.busy.isNotEmpty() || vm.settings.stale
+    val notSentPlain = stringResource(R.string.proj_not_sent_plain)
     DetailPage(
         title = stringResource(R.string.proj_set_title),
         projectTitle = sheet?.project?.title,
@@ -118,7 +127,8 @@ internal fun SettingsScreen(graph: AppGraph, route: Route.ProjectPage) {
         bottomBar = { s ->
             if (section != null && s.can && section.can) {
                 Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 3.dp, shadowElevation = 6.dp) {
-                    Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.End) {
+                    // au-dessus du clavier : la liste se resserre, et le champ qu'on remplit ne passe pas dessous
+                    Row(Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.End) {
                         Button(onClick = { vm.save(section) }, enabled = !busy && vm.changes(section).isNotEmpty()) {
                             MIcon(R.drawable.ic_m_check, null, size = 18.dp)
                             Spacer(Modifier.width(6.dp))
@@ -131,7 +141,7 @@ internal fun SettingsScreen(graph: AppGraph, route: Route.ProjectPage) {
     ) { s ->
         if (section == null) {
             item(key = "what") { GroupLabel(stringResource(R.string.proj_set_what)) }
-            items(s.sections, key = { "s${it.name}" }) { x -> SectionRow(x, s.can) { shell.navigate(Route.ProjectPage(route.id, SheetPages.SETTINGS, x.name)) } }
+            keyedItems(s.sections, { "s${it.name}" }) { x -> SectionRow(x, s.can) { shell.navigate(Route.ProjectPage(route.id, SheetPages.SETTINGS, x.name)) } }
             if (s.sections.isEmpty()) item(key = "none") { EmptyNote(R.drawable.ic_m_settings, stringResource(R.string.proj_set_none), s.why.ifBlank { stringResource(R.string.proj_set_none_sub) }) }
             if (sheet != null) {
                 paneBlock("project") { ProjectBlock(sheet, s, project, vm, busy) { archiving = true } }
@@ -142,6 +152,8 @@ internal fun SettingsScreen(graph: AppGraph, route: Route.ProjectPage) {
             val errors = vm.gestures.fieldsAt(where)
             paneBlock("form") {
                 RefusalNote(vm.gestures.refusalAt(where))
+                // leur relecture a échoué : ce qu'on montre date d'avant, rien ne s'enregistre — on le dit
+                StaleNote(vm.settings.staleError, { vm.settings.read(quiet = false) })
                 if (s.can && !section.can && section.why.isNotBlank()) Hint(section.why, R.drawable.ic_m_lock)
                 if (section.fields.isEmpty()) Muted(section.summary.ifBlank { stringResource(R.string.proj_set_none_sub) })
                 for (f in section.fields.filter { settingShown(it, section.fields, typed) }) {
@@ -163,7 +175,7 @@ internal fun SettingsScreen(graph: AppGraph, route: Route.ProjectPage) {
             stringResource(R.string.proj_set_archive_text, sheet.project.title),
             stringResource(R.string.proj_set_archive_ok),
             onDismiss = { archiving = false },
-            onConfirm = vm::archive,
+            onConfirm = { if (!vm.archive()) shell.toast(notSentPlain) },
         )
     }
 }
@@ -192,9 +204,13 @@ private fun ProjectBlock(sheet: Sheet, s: ProjectSettings, project: ProjectViewM
     SideTitle(stringResource(R.string.proj_set_project))
     RefusalNote(vm.gestures.refusalAt(SettingsViewModel.PROJECT))
     RefusalNote(project.gestures.refusalAt(ProjectViewModel.TOP))
+    // ses réglages ou sa fiche n'ont pas pu se relire : ce qu'on montre date d'avant, rien ne s'y décide — on le dit
+    StaleNote(vm.settings.staleError, { vm.settings.read(quiet = false) })
+    StaleNote(project.staleError, project::reread)
     val paused = sheet.project.status == "paused"
     if (sheet.rights.pilot) {
-        OutlinedButton(onClick = { project.pilot(if (paused) "resume" else "pause") }, enabled = !busy) {
+        // la pause et la reprise sont des gestes de la fiche : pas tant qu'elle se relit
+        OutlinedButton(onClick = { project.pilot(if (paused) "resume" else "pause") }, enabled = !busy && !project.stale) {
             MIcon(if (paused) R.drawable.ic_m_play else R.drawable.ic_m_pause, null, size = 18.dp)
             Spacer(Modifier.width(6.dp))
             Text(stringResource(if (paused) R.string.proj_pilot_resume else R.string.proj_pilot_pause))
@@ -271,9 +287,10 @@ private fun SettingInput(f: SettingField, typed: Map<String, JsonElement>, error
             }
             if (!error.isNullOrBlank()) Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
         }
+        // les choix que le serveur sert, tels quels : un « — » posé d'office ne donnerait que « choisissez une valeur »
         f.choices.isNotEmpty() -> FormChoice(
             f.label,
-            if (f.required) f.choices else listOf(Coded("", "—")) + f.choices.filter { it.code.isNotEmpty() },
+            settingChoices(f),
             settingText(f, typed),
             { onChange(JsonPrimitive(it)) },
             f.help,

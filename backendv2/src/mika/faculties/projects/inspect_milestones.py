@@ -37,6 +37,10 @@ CHECK_CHOICES = ((c.CHECK_PROSE, "elle dit comment il est rempli"),
                  (c.CHECK_COMMAND, "une commande dans l'atelier, qui doit réussir"),
                  (c.CHECK_OWNER, "un point d'arrêt : tu le valides avant qu'elle continue"),
                  (c.CHECK_ITEM, "un ticket ou un élément du registre dans un statut donné"))
+#: comment un jalon se vérifie, en court (« vérifié par une commande ») : les mots que disent l'écran Projets (par
+#: l'API par personne) et la fiche de la console
+CHECK_WORDS = {c.CHECK_PROSE: "sa parole", c.CHECK_COMMAND: "une commande", c.CHECK_OWNER: "un point d'arrêt",
+               c.CHECK_ITEM: "un élément d'une liste"}
 STATE_FR = {c.OPEN: "à faire", c.REACHED: "atteint", c.DROPPED: "retiré"}
 STATE_TONE = {c.OPEN: "", c.REACHED: "ok", c.DROPPED: "muted"}
 WAITING = Badge("t'attend", "warn")

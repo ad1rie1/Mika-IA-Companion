@@ -1,6 +1,8 @@
 package fr.qwartz.mika.ui.projects
 
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -22,8 +25,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -36,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import coil3.compose.LocalPlatformContext
+import coil3.network.HttpException
 import coil3.request.ImageRequest
 import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
@@ -43,10 +49,16 @@ import fr.qwartz.mika.data.moi.projects.DocBlock
 import fr.qwartz.mika.data.moi.projects.DocImage
 import fr.qwartz.mika.data.moi.projects.ProjectsApi
 import fr.qwartz.mika.data.moi.projects.docBlocks
+import fr.qwartz.mika.data.moi.projects.keyed
 import fr.qwartz.mika.ui.Route
 import fr.qwartz.mika.ui.shell.Load
 import fr.qwartz.mika.ui.shell.MIcon
 import fr.qwartz.mika.ui.shell.rememberSessionKey
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import androidx.compose.runtime.produceState
+import fr.qwartz.mika.ui.components.ProMarkdownBlocks
+import fr.qwartz.mika.ui.components.ProMarkdown
 
 /*
  * Ce que partagent les onglets Documentation, Activité, Dépendances et Listes et « Modifier le projet » (ADR 0296) :
@@ -61,8 +73,6 @@ import fr.qwartz.mika.ui.shell.rememberSessionKey
 object SheetPages {
     const val PAGE = "page"
     const val EDIT = "ecrire"
-    /** Une page nouvelle : [Route.ProjectPage.key] est son chemin, `ref` son titre. */
-    const val NEW = "nouvelle"
     const val DECISION = "decision"
     const val RUN = "execution"
     const val LINK = "lien"
@@ -74,7 +84,7 @@ object SheetPages {
 @Composable
 fun SheetPageScreen(graph: AppGraph, route: Route.ProjectPage) {
     when (route.kind) {
-        SheetPages.EDIT, SheetPages.NEW -> DocEditScreen(graph, route)
+        SheetPages.EDIT -> DocEditScreen(graph, route)
         SheetPages.DECISION -> DecisionScreen(graph, route)
         SheetPages.RUN -> RunScreen(graph, route)
         SheetPages.LINK -> LinkScreen(graph, route)
@@ -135,9 +145,35 @@ internal fun LazyListScope.moreRow(shown: Boolean, busy: Boolean, onMore: () -> 
     }
 }
 
-/** Une feuille se ferme quand son geste a abouti. */
+/**
+ * Les lignes d'une liste, chacune sous sa clé — unique quoi que rende le serveur ([keyed]) : deux clés égales feraient
+ * tomber la liste.
+ */
+internal fun <T> LazyListScope.keyedItems(rows: List<T>, key: (T) -> String, row: @Composable (T) -> Unit) {
+    items(keyed(rows, key), key = { it.key }) { row(it.value) }
+}
+
+/**
+ * Ce qu'un écran fait quand on le quitte pour de bon — pas à une rotation, où il revient aussitôt : son modèle baisse
+ * ce qui ne vaut qu'une fois (suivre une page déplacée, revenir après un enregistrement), pour qu'un geste abouti après
+ * le départ ne referme ni ne déplace l'écran à son retour. [block] est celui de l'écran qu'on quitte : quand [keys]
+ * change (une autre page dans le même écran), c'est l'ancienne qui est quittée.
+ */
+@Composable
+internal fun OnLeave(vararg keys: Any?, block: () -> Unit) {
+    val activity = LocalActivity.current
+    DisposableEffect(*keys) {
+        onDispose { if (activity?.isChangingConfigurations != true) block() }
+    }
+}
+
+/**
+ * Une feuille se ferme quand son geste a abouti — celui qu'elle a envoyé : en s'ouvrant, elle oublie ce qu'on avait dit
+ * à son endroit, une fois par ouverture (une rotation n'efface pas le refus qu'on est en train de lire).
+ */
 @Composable
 internal fun DoneCloses(runner: GestureRunner, where: String, onDismiss: () -> Unit) {
+    FreshEntry(runner, where)
     LaunchedEffect(runner.finished) {
         if (runner.finished == where) {
             runner.acknowledge()
@@ -155,8 +191,9 @@ internal fun ConfirmDialog(title: String, text: String, confirm: String, onDismi
         text = { Text(text) },
         confirmButton = {
             TextButton(onClick = {
-                onDismiss()
+                // le geste d'abord : il lit ce que la fenêtre montrait (un numéro de version), que la fermer efface
                 onConfirm()
+                onDismiss()
             }) { Text(confirm, color = MaterialTheme.colorScheme.error) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
@@ -168,25 +205,40 @@ internal fun ConfirmDialog(title: String, text: String, confirm: String, onDismi
 /** L'adresse d'une image de l'espace : la route de l'API, que le chargeur d'images de l'app lit sous sa session. */
 internal fun docImageUrl(graph: AppGraph, project: Int, name: String): String? = ProjectsApi(graph.moi).docImageUrl(project, name)
 
+private const val PICTURE_OK = 0
+private const val PICTURE_GONE = 1
+private const val PICTURE_UNLOADED = 2
+
 /**
  * Une image de l'espace de documentation. Sa clé de cache porte l'instant de son ajout ([stamp]) : une image retirée
- * puis remise sous le même nom ne ressort pas du cache. Introuvable (retirée, oubliée), elle le dit.
+ * puis remise sous le même nom ne ressort pas du cache. Introuvable (retirée, oubliée : le serveur répond 404), elle le
+ * dit ; pas chargée pour une autre raison (hors ligne, une panne), elle le dit aussi, et se recharge quand on la touche.
  */
 @Composable
 internal fun DocPicture(graph: AppGraph, project: Int, name: String, alt: String, stamp: Long, modifier: Modifier = Modifier, crop: Boolean = false) {
     val url = remember(project, name) { docImageUrl(graph, project, name) }
-    var failed by remember(url, stamp) { mutableStateOf(false) }
-    if (url == null || failed) {
-        ImageNote(stringResource(R.string.proj_doc_image_missing, name), modifier)
-        return
+    var state by remember(url, stamp) { mutableIntStateOf(PICTURE_OK) }
+    var attempt by remember(url, stamp) { mutableIntStateOf(0) }
+    when {
+        url == null || state == PICTURE_GONE -> {
+            ImageNote(stringResource(R.string.proj_doc_image_missing, name), modifier)
+            return
+        }
+        state == PICTURE_UNLOADED -> {
+            ImageNote(stringResource(R.string.proj_doc_image_unloaded, name), modifier.clickable {
+                attempt++
+                state = PICTURE_OK
+            })
+            return
+        }
     }
     val context = LocalPlatformContext.current
     val key = "doc|$project|$name|$stamp"
     AsyncImage(
-        model = remember(url, key) { ImageRequest.Builder(context).data(url).memoryCacheKey(key).diskCacheKey(key).build() },
+        model = remember(url, key, attempt) { ImageRequest.Builder(context).data(url).memoryCacheKey(key).diskCacheKey(key).build() },
         contentDescription = alt.ifBlank { null },
         contentScale = if (crop) ContentScale.Crop else ContentScale.FillWidth,
-        onError = { failed = true },
+        onError = { failure -> state = if ((failure.result.throwable as? HttpException)?.response?.code == 404) PICTURE_GONE else PICTURE_UNLOADED },
         modifier = modifier.clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh),
     )
 }
@@ -201,6 +253,33 @@ internal fun ImageNote(text: String, modifier: Modifier = Modifier) {
         MIcon(R.drawable.ic_m_image, null, size = 18.dp, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.width(8.dp))
         Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/**
+ * Un morceau d'une page prêt à poser : **un** bloc de son Markdown, déjà lu par le rendu de l'app, une image de
+ * l'espace, ou ce qu'on dit d'une image d'ailleurs. Une page se découpe une fois, hors du fil principal ([docPieces],
+ * par le modèle) : l'écran pose un élément par morceau — une longue page ne se lit ni ne se compose d'un bloc.
+ */
+sealed interface DocPiece {
+    class Md(val block: ProMarkdown.Block) : DocPiece
+    class Picture(val image: DocBlock) : DocPiece
+}
+
+/** Une page en morceaux prêts à poser : son texte coupé là où elle cite une image ([docBlocks]), puis son Markdown lu bloc par bloc. */
+internal fun docPieces(text: String): List<DocPiece> = docBlocks(text).flatMap { b ->
+    when (b) {
+        is DocBlock.Text -> ProMarkdown.parse(b.markdown).map { DocPiece.Md(it) }
+        else -> listOf(DocPiece.Picture(b))
+    }
+}
+
+/** Un morceau d'une page, posé : un bloc de Markdown (ses liens http(s) s'ouvrent, comme dans une page), ou une image. */
+@Composable
+internal fun DocPieceView(graph: AppGraph, project: Int, piece: DocPiece, images: Map<String, DocImage>?) {
+    when (piece) {
+        is DocPiece.Md -> ProMarkdownBlocks(listOf(piece.block), MaterialTheme.colorScheme.onSurface, Modifier.fillMaxWidth())
+        is DocPiece.Picture -> DocBlockView(graph, project, piece.image, images)
     }
 }
 
@@ -223,18 +302,24 @@ internal fun DocBlockView(graph: AppGraph, project: Int, block: DocBlock, images
     }
 }
 
-/** Une page rendue, dans une liste : un élément par morceau. [images] : celles de l'espace, par leur nom (`null` : pas lues). */
-internal fun LazyListScope.docBody(graph: AppGraph, project: Int, blocks: List<DocBlock>, images: Map<String, DocImage>?) {
-    itemsIndexed(blocks, key = { i, _ -> "doc$i" }, contentType = { _, b -> b::class }) { _, block ->
-        Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) { DocBlockView(graph, project, block, images) }
+/**
+ * Une page rendue, dans une liste : un élément par morceau ([pieces], découpés par le modèle hors du fil principal).
+ * [images] : celles de l'espace, par leur nom (`null` : pas lues).
+ */
+internal fun LazyListScope.docBody(graph: AppGraph, project: Int, pieces: List<DocPiece>, images: Map<String, DocImage>?) {
+    itemsIndexed(pieces, key = { i, _ -> "doc$i" }, contentType = { _, p -> if (p is DocPiece.Md) p.block::class else p::class }) { _, piece ->
+        Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = if (piece is DocPiece.Md) 3.dp else 6.dp)) { DocPieceView(graph, project, piece, images) }
     }
 }
 
-/** Une page rendue, d'un bloc (l'aperçu de l'éditeur, une version relue). */
+/**
+ * Une page rendue, d'un bloc (l'aperçu de l'éditeur, la version actuelle d'un conflit) : découpée hors du fil principal,
+ * à chaque texte — le temps de la découpe, rien n'est posé.
+ */
 @Composable
 internal fun DocText(graph: AppGraph, project: Int, text: String, images: Map<String, DocImage>?, modifier: Modifier = Modifier) {
-    val blocks = remember(text) { docBlocks(text) }
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        for (b in blocks) DocBlockView(graph, project, b, images)
+    val pieces by produceState(emptyList<DocPiece>(), text) { value = withContext(Dispatchers.Default) { docPieces(text) } }
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        for (p in pieces) DocPieceView(graph, project, p, images)
     }
 }

@@ -109,7 +109,6 @@ import fr.qwartz.mika.data.moi.projects.lineNumber
 import fr.qwartz.mika.data.moi.projects.mergeStage
 import fr.qwartz.mika.data.moi.projects.mergeStateWords
 import fr.qwartz.mika.data.moi.projects.mergedWords
-import fr.qwartz.mika.data.moi.projects.numberDigits
 import fr.qwartz.mika.data.moi.projects.objectiveTone
 import fr.qwartz.mika.data.moi.projects.plural
 import fr.qwartz.mika.data.moi.projects.pullColor
@@ -124,8 +123,6 @@ import fr.qwartz.mika.data.moi.projects.shownLine
 import fr.qwartz.mika.data.moi.projects.since
 import fr.qwartz.mika.data.moi.projects.ticketTone
 import fr.qwartz.mika.data.moi.projects.tokens
-import fr.qwartz.mika.data.moi.projects.unifiedRows
-import fr.qwartz.mika.data.moi.projects.widestLine
 import fr.qwartz.mika.ui.Route
 import fr.qwartz.mika.ui.components.ProMarkdown
 import fr.qwartz.mika.ui.components.ProMarkdownBlocks
@@ -445,9 +442,12 @@ internal fun codeLine(shown: String, path: String, palette: Map<TokenKind, Color
 internal class CodeMeasure(private val measurer: TextMeasurer, private val density: Density, val style: TextStyle) {
     val char: Dp = with(density) { measurer.measure("0", style).size.width.toDp() }
 
-    /** La largeur du contenu : celle de sa ligne la plus large, et un peu d'air au bout. */
-    fun width(shownLines: List<String>): Dp =
-        with(density) { measurer.measure(widestLine(shownLines), style, softWrap = false, maxLines = 1).size.width.toDp() } + 24.dp
+    /**
+     * La largeur du contenu : celle de sa ligne la plus large ([widest], que le modèle a trouvée hors du fil
+     * principal — ici on ne mesure qu'elle), et un peu d'air au bout.
+     */
+    fun width(widest: String): Dp =
+        with(density) { measurer.measure(widest, style, softWrap = false, maxLines = 1).size.width.toDp() } + 24.dp
 
     /** La largeur d'une colonne de numéros de [digits] chiffres. */
     fun numbers(digits: Int): Dp = char * digits + 10.dp
@@ -463,7 +463,8 @@ internal fun rememberCodeMeasure(): CodeMeasure {
 
 /**
  * Les lignes d'un fichier : son numéro, qui reste en place, puis la ligne, qui défile en largeur avec toutes les autres
- * ([scroll], le même pour tout le fichier) dans un cadre de la largeur de la plus longue ([width]).
+ * ([scroll], le même pour tout le fichier) dans un cadre de la largeur de la plus longue ([width]). [shownLines] :
+ * ses lignes déjà mises en place par le modèle (`Blob.laid`).
  */
 internal fun LazyListScope.sourceLines(shownLines: List<String>, path: String, width: Dp, numbers: Dp, scroll: ScrollState) {
     itemsIndexed(shownLines, key = { i, _ -> "src$i" }, contentType = { _, _ -> "src" }) { i, line ->
@@ -509,10 +510,10 @@ internal class DiffUi(private val measure: CodeMeasure) {
 
     fun scroll(path: String): ScrollState = scrolls.getOrPut(path) { ScrollState(0) }
 
+    /** Ses rangées sont celles que le modèle a calculées en lisant le diff (`DiffFile.laid`) : ici, seule sa ligne la plus large se mesure. */
     fun laid(f: DiffFile): Laid = laid.getOrPut(f) {
-        val rows = unifiedRows(f.hunks)
-        val shown = rows.mapNotNull { (it as? DiffRow.Line)?.line?.text?.let(::shownLine) }
-        Laid(rows, measure.width(shown), measure.numbers(numberDigits(f.hunks)))
+        val layout = f.laid
+        Laid(layout.rows, measure.width(layout.widest), measure.numbers(layout.digits))
     }
 }
 
@@ -672,9 +673,9 @@ internal fun repoMarkdown(text: String): List<ProMarkdown.Block> {
     }
 }
 
+/** Un fichier Markdown rendu : ses blocs, que le modèle a lus hors du fil principal (`FileViewModel.rendered`). */
 @Composable
-internal fun RepoMarkdown(text: String, modifier: Modifier = Modifier) {
-    val blocks = remember(text) { repoMarkdown(text) }
+internal fun RepoMarkdown(blocks: List<ProMarkdown.Block>, modifier: Modifier = Modifier) {
     ProMarkdownBlocks(blocks, MaterialTheme.colorScheme.onSurface, modifier)
 }
 

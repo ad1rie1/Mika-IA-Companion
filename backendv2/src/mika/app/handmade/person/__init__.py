@@ -59,6 +59,8 @@ from mika.app.handmade.blocks import tab as blocks_tab
 from mika.app.handmade.exchanges import exchanges
 from mika.app.handmade.lists import Roles, drawn, listing
 from mika.app.handmade.person.files import files
+from mika.app.handmade.person.identifies import contacts as person_contacts
+from mika.app.handmade.person.identifies import contacts_count, identifies, linked_sheets
 from mika.app.handmade.person.memory import memory
 from mika.app.handmade.person.senses import phone_tab, position_tab
 from mika.app.handmade.person.voyages import GPX as TRIP_GPX
@@ -603,7 +605,9 @@ def owned(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str],
 TABS: dict[str, Callable[[UI, str, Sequence[Any], Mapping[str, str]], Any]] = {
     "echanges": exchanges,
     "memoire": memory,
-    "adresses": drawn(Roles(title="moyen de communication", badges=("confiance",), tiles=True), "adresses"),
+    # ce qui l'identifie : ses moyens de communication, et les identifiants des fiches de l'annuaire qui lui sont
+    # reliées (« Détacher » sur ceux-là) ; ses contacts (ADR 0298)
+    "adresses": identifies, "contacts": person_contacts,
     # ce qu'elle a envoyé et ce qu'on lui a envoyé, en deux sous-onglets (``joined``), « Retirer » sur chacun
     # (ADR 0205) ; les pièces seules, sans l'autre
     "fichiers": files,
@@ -627,7 +631,7 @@ TABS: dict[str, Callable[[UI, str, Sequence[Any], Mapping[str, str]], Any]] = {
 #: les onglets dessinés qui posent aussi les formulaires de la console (``Forms``) : le détail bloc par bloc (la
 #: Synthèse : « C'est la personne dont on lui a parlé »), les voyages (« Supprimer »), les fichiers (« Retirer ») et
 #: Comptes (« Retirer » un partage, par le jeton de la page) ; les autres n'en ont pas
-FORMED = (blocks_tab, voyages, files, owned)
+FORMED = (blocks_tab, voyages, files, owned, identifies)
 
 # ── le compte de ses onglets ──
 
@@ -670,8 +674,10 @@ def tab_counts(look: Look, who: Who) -> dict[str, int]:
     boxes, teams = _accounts(look, who)
     shared = shares(look, who)
     trips, goals, projects = _slice(look, TRIPS.name), _slice(look, "goals"), _slice(look, "projects")
+    linked = sum(len(x.identifiers) for x in linked_sheets(look, person))
     return {
-        "adresses": len(who.handles),
+        "adresses": len(who.handles) + linked,
+        "contacts": contacts_count(look, person),
         "echanges": _count(look, select(func.count()).select_from(t).where(t.c.person.in_(handles))),
         "memoire": 0 if isinstance(known, Failed) else known,
         # Comptes réunit Teams (``joined``) ; sans Comptes, Teams est un onglet à lui
@@ -696,7 +702,8 @@ class PersonOverview(Overview):
 
     slug = "ensemble"
     title = "Vue d'ensemble"
-    styles = ("handmade/person.css", "handmade/sens.css")
+    # et celles de l'annuaire : « Ce qui l'identifie » et « Contacts » (ADR 0298)
+    styles = ("handmade/person.css", "handmade/sens.css", "handmade/personnes.css", "handmade/personnes_annuaire.css")
     scripts = ("handmade/live.js",)
     #: ce que la vue d'ensemble résume (son ressenti, leur lien, ce qu'elle lit d'elle, ses pensées, et la mécanique
     #: de ce qu'elle peut lui dire) : le détail reste à un clic, au bout de la barre
@@ -746,6 +753,12 @@ class PersonOverview(Overview):
             return None
         look = Look.of(ui, DAY)
         return Markup(env.get_template("handmade/person/head.html").render(h=heading(look, who_of(look, key))))
+
+    def hidden(self, ui: UI, key: str) -> Sequence[str]:
+        """Contacts (ADR 0298) seulement pour qui en a : ses comptes, ceux qu'on lui partage, ceux de personne."""
+        if not self.known(ui, key):
+            return ()
+        return () if contacts_count(Look.of(ui, DAY), key) else ("contacts",)
 
     def shows(self, ui: UI, key: str) -> Sequence[str]:
         """Comptes (``boites``) aussi pour qui n'a pas de boîte à elle mais a branché un service ou partage quelque

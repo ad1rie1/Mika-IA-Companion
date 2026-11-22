@@ -43,13 +43,22 @@ class MoiApi(
     suspend fun get(path: String, query: Map<String, String?> = emptyMap()): Result<JsonObject> =
         send(path, query) { it.get() }
 
+    /** Une lecture sous sa forme ([reader]) : lue **hors du fil principal**, avec la réponse ([read]). */
     suspend fun <T> get(path: String, query: Map<String, String?> = emptyMap(), reader: DeserializationStrategy<T>): Result<T> =
-        get(path, query).decode(reader)
+        read(path, query) { Result.Ok(it).decode(reader) }
+
+    /**
+     * Une lecture dont [shape] fait la forme. Le JSON est lu et mis en forme là où la réponse arrive ([io]), jamais sur
+     * le fil de qui appelle : une grosse réponse (un fichier, un diff de milliers de lignes) coûterait des images à
+     * l'écran qui l'attend.
+     */
+    suspend fun <T> read(path: String, query: Map<String, String?> = emptyMap(), shape: (JsonObject) -> Result<T>): Result<T> =
+        exchange(path, query, null, "application/json", { it.get() }) { shape(parseObject(it) ?: JsonObject(emptyMap())) }
 
     /** Une lecture qui n'est pas du JSON (le HTML d'un mail, `/mail/frame`) : son texte tel quel. Un refus se lit
      *  comme les autres (le serveur le dit en JSON). */
     suspend fun text(path: String, query: Map<String, String?> = emptyMap(), accept: String = "text/html"): Result<String> =
-        exchange(path, query, null, accept) { it.get() }
+        exchange(path, query, null, accept, { it.get() }) { Result.Ok(it) }
 
     /** Une écriture. [key] : sa clé d'envoi (`Idempotency-Key`) — la même redite ne refait rien (protocole § 1). */
     suspend fun post(path: String, body: JsonObject = JsonObject(emptyMap()), key: String? = newKey()): Result<JsonObject> =
@@ -76,19 +85,20 @@ class MoiApi(
         query: Map<String, String?>,
         key: String? = null,
         method: (Request.Builder) -> Request.Builder,
-    ): Result<JsonObject> = when (val got = exchange(path, query, key, "application/json", method)) {
-        is Result.Ok -> Result.Ok(parseObject(got.value) ?: JsonObject(emptyMap()))
-        is Result.Failed -> got
-    }
+    ): Result<JsonObject> = exchange(path, query, key, "application/json", method) { Result.Ok(parseObject(it) ?: JsonObject(emptyMap())) }
 
-    /** Une requête sous le jeton : le corps d'une réponse réussie, tel quel ; un refus, lu dans son JSON. */
-    private suspend fun exchange(
+    /**
+     * Une requête sous le jeton : le corps d'une réponse réussie, lu par [read] là où elle arrive ([io], hors du fil de
+     * qui appelle) ; un refus, lu dans son JSON.
+     */
+    private suspend fun <T> exchange(
         path: String,
         query: Map<String, String?>,
         key: String?,
         accept: String,
         method: (Request.Builder) -> Request.Builder,
-    ): Result<String> {
+        read: (String) -> Result<T>,
+    ): Result<T> {
         val c = credentials() ?: return Result.Failed(MoiError(401, MoiError.SIGNED_OUT))
         val builder = Request.Builder()
             .url(build(c, path, query))
@@ -96,12 +106,12 @@ class MoiApi(
             .header(MikaProtocol.HEADER_AUTHORIZATION, "Bearer ${c.token}")
         if (key != null) builder.header("Idempotency-Key", key)
         val request = method(builder).build()
-        val result = withContext(io) {
+        val result: Result<T> = withContext(io) {
             try {
                 client.newCall(request).execute().use { response ->
                     val text = response.body.string()
                     if (response.isSuccessful) {
-                        Result.Ok(text)
+                        read(text)
                     } else {
                         Result.Failed(MoiError.of(response.code, parseObject(text)))
                     }

@@ -21,7 +21,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -137,9 +139,11 @@ internal fun PhoneTopBar(bar: PhoneBar?, tab: String) {
     }
 }
 
-/** Les teintes des applis (la feuille de la maquette : `.app-b.whatsapp`, `.app-b.sms`). */
-private val WHATSAPP = Color(0xFF25D366)
-private val MESSAGES = Color(0xFF1A73E8)
+/** Les teintes des applis (la feuille de la maquette : `.app-b.whatsapp`, `.app-b.messenger`, `.app-b.sms`). */
+private val WHATSAPP = SolidColor(Color(0xFF25D366))
+private val MESSAGES = SolidColor(Color(0xFF1A73E8))
+/** Le dégradé de Messenger (ADR 0299) : son « M » ne se confond pas avec le « M » bleu de Messages. */
+private val MESSENGER = Brush.linearGradient(listOf(Color(0xFF0099FF), Color(0xFFA033FF), Color(0xFFFF5280)))
 
 /** La pastille d'une appli : sa couleur et sa lettre (W, M), son nom dit à l'accessibilité. */
 @Composable
@@ -147,8 +151,9 @@ internal fun AppDot(app: String, appName: String, size: Dp = 18.dp) {
     val badge = appBadge(app, appName)
     val bg = when (badge.kind) {
         AppKind.WHATSAPP -> WHATSAPP
+        AppKind.MESSENGER -> MESSENGER
         AppKind.MESSAGES -> MESSAGES
-        AppKind.OTHER -> MaterialTheme.colorScheme.outline
+        AppKind.OTHER -> SolidColor(MaterialTheme.colorScheme.outline)
     }
     Box(
         Modifier
@@ -188,6 +193,7 @@ internal fun ConversationFace(title: String, group: Boolean, key: String, app: S
 internal fun appLabelRes(app: String): Int = when (PhoneApp.ofCode(app)) {
     PhoneApp.WHATSAPP -> R.string.phone_app_whatsapp
     PhoneApp.WHATSAPP_BUSINESS -> R.string.phone_app_whatsapp_business
+    PhoneApp.MESSENGER -> R.string.phone_app_messenger
     else -> R.string.phone_app_messages
 }
 

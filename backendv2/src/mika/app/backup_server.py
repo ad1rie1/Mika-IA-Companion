@@ -25,7 +25,7 @@ from sqlalchemy.pool import NullPool
 from mika.adapters.database import Target
 
 #: les bases qu'on sauvegarde (``views`` se reconstruit depuis le journal)
-KEPT = ("mind", "mail", "feeds", "teams")
+KEPT = ("mind", "mail", "feeds", "teams", "contacts")
 #: le temps qu'une copie ou un rechargement peut prendre (secondes)
 TIMEOUT_S = 3600
 

@@ -2,8 +2,8 @@
 
 Ce document est pour qui écrit un client de tous les jours, `frontendv2/` ou l'application Android (ADR 0235) : ce qu'il montre à la personne connectée,
 et seulement à elle — ses boîtes, ses comptes Teams, ses téléphones, ses services, ce qu'on lui partage, ses droits, sa
-carte et ses voyages, ses projets. Les décisions et leurs raisons sont les ADR 0187 à 0192 de [`decisions.md`](decisions.md) (et,
-pour la carte, 0193 à 0196 et 0229 ; pour les projets, 0282 et 0290) ; le code fait foi dans
+carte et ses voyages, ses projets, ses contacts. Les décisions et leurs raisons sont les ADR 0187 à 0192 de [`decisions.md`](decisions.md) (et,
+pour la carte, 0193 à 0196 et 0229 ; pour les projets, 0282 et 0290 ; pour les contacts, 0298) ; le code fait foi dans
 [`app/me/`](../src/mika/app/me/__init__.py). La conversation reste sur `/ws` ([`protocole-chat.md`](protocole-chat.md)) ;
 la console, celle des opérateurs, voit tout et ne passe pas par ici.
 
@@ -167,7 +167,8 @@ lu ; `blocked` dit pourquoi il ne peut pas partir tel quel (un `[À COMPLÉTER`)
 d'abord) : `ref`, `box`, `to`, `cc` (des personnes, à leur nom quand la boîte le connaît), `subject`, `snippet`,
 `date`, `by` (vide : elle, après un accord), `draft`, `attachments`.
 
-**`GET /api/moi/mail/contacts?q=[&box=&size=]`** — ses correspondants (ceux du courrier relevé), pour écrire :
+**`GET /api/moi/mail/contacts?q=[&box=&size=]`** — ses correspondants (ceux du courrier relevé), pour écrire (les
+destinataires proposés ; l'écran Contacts lit tout l'annuaire, § 12) :
 `address`, `name`, `received`, `sent`, `last`. Un correspondant de plusieurs boîtes est une seule fiche : ses mails
 comptés dans toutes, son dernier échange, le premier nom connu.
 
@@ -226,9 +227,10 @@ Pas de dossier, ou un manifeste illisible : 404.
 le navigateur. Message ou image inconnus : 404.
 
 **`GET /api/moi/teams/conversations[?account=&q=&size=]`** — ses conversations, la plus récente d'abord : `key`,
-`account`, `title` (son nom : celui de Teams ; sinon, pour un tête-à-tête seulement — `kind` `dm`, ou un identifiant
-en `@unq.gbl.spaces` —, l'autre personne, la dernière à y avoir écrit ; vide pour toute autre conversation sans titre
-— un groupe, un canal, une réunion —, jamais le nom de qui y a parlé en dernier ; `q` le cherche, avec l'identifiant),
+`account`, `title` (son nom : pour un tête-à-tête — `kind` `dm`, ou un identifiant en `@unq.gbl.spaces` —, l'autre
+personne, la dernière à y avoir écrit, sinon ce que Teams en dit — il ne s'y renomme pas : Teams n'en donne que la
+liste de ses membres, toi compris, qu'on ne cherche pas ; pour toute autre, celui de Teams, vide sans titre — un
+groupe, un canal, une réunion —, jamais le nom de qui y a parlé en dernier ; `q` le cherche, avec l'identifiant),
 `kind` (`dm`, `group`, `channel`, `meeting`, `other`), `last_at`, `messages`, `last` (son dernier message, texte
 coupé), `her` (`{"state", "draft"}` : une réponse de Mika en chemin, sinon `null` — toujours `null` en lecture seule,
 et pour une réponse à laquelle on a répondu autrement).
@@ -1002,7 +1004,7 @@ afficher tels quels) : sur un objectif ou une mission de la fiche, `can` — `mo
 | `POST /api/moi/projets/nouveau/creer` | `title`, `request?` (ce qu'elle veut, 2 000 caractères), `mode?`, `schedule?`, `schedule_rule?` | qui s'occupe d'elle | lui confier un projet : il naît **à cadrer**, pour elle, avec ses mots — elle pose ses questions puis propose un plan → `{"ok", "message", "project"}` |
 | `GET /api/moi/projets/archives` | — | toute personne | les projets archivés qu'elle peut restaurer (les siens ; tous, pour qui s'occupe d'elle), sous ce qu'elle en aurait une fois restaurés — ses lignes d'accès, son niveau : `{"items": [{"id", "title", "archived_at", "owner_name"}]}` (`owner_name` : vide pour le sien, et pour qui n'a pas le droit de connaître ce nom) |
 | `GET /api/moi/projets/<id>/reglages` | — | qui lit son détail | ses réglages en cinq sections : `can`, `why`, `renamable` (un projet qu'elle a ouvert d'elle-même ne se renomme pas), `archive` (`can`, `why`), `sections` — `name` (`general`, `rythme`, `accords`, `depot`, `outils`), `title`, `summary` (la section en une ligne), `can` et `why` (au moins un de ses champs se change), `fields`. L'adresse du dépôt distant n'est servie qu'à qui le projet est ; **les services branchés sur l'instance (`service_…`) ne sont servis qu'à qui peut les cocher** — les autres ne voient que ceux que le projet a |
-| `POST /api/moi/projets/<id>/reglages/enregistrer` | `section`, `values` (les champs qui changent, par leur nom) | son cadre ; un champ réservé : qui s'occupe d'elle | le reste garde sa valeur. Un champ d'une autre section, ou d'une forme fausse : 400 (`fields`) ; un champ réservé à qui s'occupe d'elle : 403 (`fields`) ; rien de changé : 409. Un projet qui n'est pour personne le reste |
+| `POST /api/moi/projets/<id>/reglages/enregistrer` | `section`, `values` (les champs qui changent, par leur nom) | son cadre ; un champ réservé : qui s'occupe d'elle | le reste garde sa valeur. Un champ d'une autre section, ou d'une forme fausse : 400 (`fields`) ; un champ réservé à qui s'occupe d'elle : 403 (`fields`) ; rien de changé : 409. Une section que deux actions se partagent (« Accords et relecture ») s'enregistre en entier sous une seule clé d'envoi. Un projet qui n'est pour personne le reste |
 | `POST /api/moi/projets/<id>/archiver` | — | son cadre | il ne travaille plus, rien n'est effacé ; il n'existe plus dans cette API, sauf dans `…/archives` |
 | `POST /api/moi/projets/<id>/restaurer` | — | son cadre, tel qu'elle l'aurait une fois le projet restauré | un projet archivé revient, en pause ; celui qu'elle ne pourrait pas régler : 404 |
 
@@ -1154,7 +1156,7 @@ en dossiers, et des images. **Enregistrer une page n'est pas un commit** : c'est
 
 | Route (écrire) | Corps | Ce que ça fait |
 |---|---|---|
-| `POST …/documentation/page/enregistrer` | `path`, `text`, `word?` (200 caractères), `base` | **une version de plus**, avec son mot. `base` nomme la version lue (`version`) ; `0` crée la page. **Si quelqu'un l'a changée depuis** : 409, en mots (« Cette page a changé depuis ta lecture : elle en est à la version N, écrite … » — par qui, selon la règle des noms : « une autre personne » pour qui n'a pas le droit de le savoir, et jamais le nom de son jeton) — rien n'est écrasé : relire, puis reprendre. Sans `base` : 400 ; une page qui existe avec `base: 0`, le même texte, 200 pages déjà : 409. Rend `{"ok", "message", "path", "version"}`. Un corps JSON est borné à 64 Kio : **une longue page s'envoie en `multipart/form-data`** (les mêmes champs) |
+| `POST …/documentation/page/enregistrer` | `path`, `text`, `word?` (200 caractères), `base` | **une version de plus**, avec son mot. `base` nomme la version lue (`version`) ; `0` crée la page. **Si quelqu'un l'a changée depuis** : 409, en mots (« Cette page a changé depuis ta lecture : elle en est à la version N, écrite … » — par qui, selon la règle des noms : « une autre personne » pour qui n'a pas le droit de le savoir, et jamais le nom de son jeton) — rien n'est écrasé : relire, puis reprendre. Sans `base` : 400 ; une page qui existe avec `base: 0`, le même texte, 200 pages déjà : 409. Rend `{"ok", "message", "path", "version"}`. **Un envoi redit avec la même clé d'envoi** (une coupure, puis le client réessaie) se reconnaît même si la page en est à la version qu'il a lui-même écrite : `deduped`, pas un conflit. Un corps JSON est borné à 64 Kio : **une longue page s'envoie en `multipart/form-data`** (les mêmes champs) |
 | `POST …/documentation/page/revenir` | `path`, `version`, `base` | revenir à une version gardée : son texte redevient celui de la page, **dans une version de plus** (`restored`, le mot « Retour à la version N ») — rien n'est perdu. Version plus gardée : 404 ; la page a changé depuis `base` : 409 |
 | `POST …/documentation/page/deplacer` | `path`, `to` | renommer ou déplacer (un autre chemin) : ses versions la suivent, les liens des autres pages ne sont pas réécrits. Un chemin pris, une page inconnue : 409 |
 | `POST …/documentation/page/supprimer` | `path` | supprimer la page et ses versions |
@@ -1174,3 +1176,94 @@ l'appel de trop répond « Trop d'appels d'affilée… », la requête suivante 
 par projet sur vingt-quatre heures, tous comptes confondus. Un jeton d'outil se rend lui-même par
 `DELETE /auth/token`, et ne s'élague pas avec les connexions d'un compte. Les décisions techniques d'un projet, que l'écran range
 sous Documentation, ont leurs routes à elles.
+
+## 12. Contacts
+
+Ce que l'écran Contacts montre (ADR 0298) : ceux que Mika connaît **pour toi**, même sans leur avoir parlé — vus dans
+tes comptes Teams et tes boîtes, sur ton téléphone, ou dont tu lui as parlé — et leurs organisations. L'annuaire a sa
+base (`contacts`, le plugin du même nom) ; le code fait foi dans [`app/me/contacts.py`](../src/mika/app/me/contacts.py).
+
+- **Tes contacts** : un contact est à qui l'a fait connaître — vu dans un compte à toi (à ton nom, ou « à toi » si tu
+  es une de ses propriétaires) ou qu'on te partage (au moins en lecture), sur ton téléphone, raconté par toi, ou par
+  un compte qui n'est à personne (un compte à Mika : à tout le monde). Un compte Teams ou une boîte est à qui ses
+  propriétaires journalisés le disent, comme pour Mail et Teams (§ 3, § 4).
+- **Ce qui s'en dit** : seulement ce que tes comptes en montrent — ses noms, son poste, ses identifiants, ses nombres
+  (le même contact, vu dans la boîte d'une autre sous un autre nom, garde ici le nom que tu lui vois). Jamais de qui
+  d'autre c'est le contact. La valeur d'une clé du téléphone ou d'un nom raconté ne se montre ni ne se cherche.
+- **Ta propre fiche** (celle que tes comptes désignent, reliée à toi) n'est pas parmi tes contacts. Un contact d'une
+  autre, ou inconnu : 404, la même réponse.
+
+**`GET /api/moi/contacts[?q=&kind=&page=&size=]`** — tes contacts, le dernier vu d'abord : `q` cherche dans leurs noms
+et leurs identifiants (un e-mail, un numéro — « 06 71 20 33 58 » se cherche comme il se range, en E.164 —, un
+identifiant Teams) ; `kind` : `person` ou `org` (vide : tous ; autre chose : 400) ; `size` : 50, 100 au plus.
+`counts` compte chaque sorte sans la recherche (les choix de l'écran).
+
+```json
+{"total": 7, "page": 1, "size": 50, "counts": {"all": 7, "person": 6, "org": 1},
+ "items": [{"id": 12, "kind": "person", "name": "Alice Durand", "title": "Cheffe de projet", "department": "",
+            "organisation": {"id": 3, "name": "Nordis"}, "linked": false, "talks": false, "members": 0,
+            "last": 1790790000000,
+            "sources": [{"source": "teams", "label": "Teams", "count": 64},
+                        {"source": "mail", "account": "perso", "label": "Personnel", "count": 23},
+                        {"source": "whatsapp", "label": "WhatsApp", "count": 4},
+                        {"source": "told", "label": "Raconté", "count": 2}],
+            "identifiers": [{"kind": "email", "value": "alice@nordis.fr"}]}]}
+```
+
+`sources` : d'où elle le connaît, avec combien de fois (0 : un profil seul) — Teams (tous tes comptes ensemble), chaque
+boîte sous son nom (`account`), le téléphone par appli (`whatsapp`, `sms`, sinon `phone`), ce que tu lui as raconté
+(`told`). `linked` : sa fiche est reliée à une personne qui a un compte ; `talks` : cette personne a déjà écrit à
+Mika (« parle aussi à Mika » ; sinon « a un compte »). `members` : pour une organisation, ses personnes parmi tes
+contacts — seulement celles dont tu vois la preuve qu'elles en sont (une adresse de son domaine, un profil Teams qui dit
+son entreprise) ; `organisation` suit la même règle. `identifiers` : quatre au plus, jamais une clé du téléphone ni un
+nom raconté.
+
+**`GET /api/moi/contacts/fiche?id=`** — sa fiche : les champs d'une ligne, plus
+
+- `first`, `last` : la première et la dernière fois qu'elle l'a vu (ms) ;
+- `identifiers` : `kind` (`teams`, `email`, `phone`, `domain`, `company`, `tenant`, `phone_app`), `label` (« E-mail »,
+  « Contact WhatsApp »…), `value` (vide pour `phone_app` : sa clé ne se dit pas, `name` dit le nom que lui donne ton
+  carnet), `where` (d'où elle le tient : « Teams », « son profil Teams », le nom d'une boîte, « ton téléphone »,
+  « raconté par toi »), `generic` (une adresse sans personne derrière, rangée à son organisation). Un nom raconté
+  n'est pas un moyen de le joindre : il n'y paraît pas ;
+- `facts` : ce que Mika en sait — ce que l'annuaire tient : `title` (« Poste »), `department` (« Service »),
+  `organisation` (avec son `id`), chacun avec `from` (« son profil Teams », « son adresse e-mail ») ; puis ce qu'elle a
+  compris de ses derniers messages (`kind` : `note`, une personne seulement), **seulement les faits d'un compte que tu
+  vois** : `id`, `value` (une phrase), `sort` (`role`, `topic`, `relation`, `expectation`, `other`), `confidence` (0 à
+  1), `from` (« ses messages dans Teams », « ses mails à Personnel », « ses messages sur ton téléphone »), `place` (où
+  était le message qui le fonde : « en tête-à-tête », « dans le groupe « Projet » », « un mail, objet « … » »), `at`
+  (sa date, ms), `forget` (il vient d'un de tes comptes : tu peux le faire oublier, ci-dessous) ;
+- `places` : où vous vous croisez, le plus récent d'abord, **seulement là où tu lis** — `teams` (`conversation` : la
+  clé de `GET …/teams/thread`, `account`, `title`, `kind`, `count` : ses messages, `last`), `mail` (`box`, `box_name`,
+  `count`, `last`, `ref` et `subject` : son dernier mail reçu dans cette boîte, vides s'il n'y en a pas), `phone`
+  (`conversation` : la clé `<appli>|<fil>` de `GET …/phone/thread`, `app`, `app_name`, `title` : un groupe, vide pour
+  un tête-à-tête, `group`, `count`, `last`). Un compte à Mika se dit dans `where`, sans y mener ;
+- `members`, `members_total` : une organisation, ses personnes parmi tes contacts (`id`, `name`, `title`,
+  `department`, `last`, `linked`, `talks` ; cinquante au plus) ;
+- `write` (`{"address", "name"}`, ou `null`) : sa première adresse (pas une adresse générique), si une de tes boîtes
+  peut envoyer ; `teams` : sa conversation Teams (le tête-à-tête, sinon la plus récente), vide sinon ; `message` : sa
+  conversation de ton téléphone, vide sinon ;
+- `privacy` : `mine` (tout ce qu'elle en sait vient de tes comptes : elle n'en parle qu'à toi) ou `shared` (aussi d'un
+  compte qu'on te partage ou d'un compte à elle) ;
+- `forget` (`{"allowed", "reason"}`) : peux-tu l'oublier d'ici (ci-dessous) — jugé, comme `privacy`, sur ce que tu en
+  vois seulement : rien ne dit s'il est aussi le contact de quelqu'un d'autre.
+
+**`POST /api/moi/contacts/forget`** `{"id"}` — l'oublier, **quand tout ce que tu en vois vient de tes comptes** (à ton
+nom, « à toi », ton téléphone, ce que tu lui as raconté). S'il ne vient de rien d'autre, c'est l'oubli de la console
+(`console.oublier.contact`) : la fiche et tout ce qui le désigne (ses identifiants Teams, ses adresses, ses clés du
+téléphone, les noms sous lesquels on lui en a parlé), c'est-à-dire ce que Teams, le courrier, le téléphone et sa mémoire
+gardaient de lui. S'il est aussi vu ailleurs, seulement ta part : ce que l'annuaire tient de tes comptes (ses vues, ce
+qu'elle en a tiré) — ce qu'il est pour une autre ne change pas, et la réponse est la même. Audité `moi.oublier.contact`.
+Une part qui vient d'un compte qu'on te partage ou d'un de ses comptes à elle : 403 (« Une part de ce qu'elle en sait
+vient d'un compte qu'on te partage… ») ; une opératrice l'oublie depuis la console. Un contact qui n'est pas à toi :
+404. Rend `{"ok", "message"}`.
+
+**`POST /api/moi/contacts/fact/forget`** `{"id"}` — qu'elle oublie un fait qu'elle a compris de ses messages (le `id`
+d'un `facts` de `kind` `note`) : il part, et ne se réapprend pas, même reformulé (seule l'empreinte de ses mots reste,
+jamais son texte) — l'action de la console `contacts.oublier_fait`, auditée `moi.contacts.oublier_fait`. **Seulement
+un fait d'un de tes comptes** (à ton nom, « à toi », ton téléphone) : d'un compte qu'on te partage ou d'un compte à
+Mika, 403 (« Ce fait vient d'un compte qui n'est pas à toi… ») ; un fait que tu ne vois pas, ou déjà oublié : 404. Rend
+`{"ok", "message", "deduped", "id"}`.
+
+Mail › Contacts a quitté l'écran Mail (ses correspondants sont ici) ; `GET …/mail/contacts` reste, pour proposer des
+destinataires quand on écrit (§ 3).

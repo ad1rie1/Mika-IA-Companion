@@ -35,8 +35,8 @@ PER_PERSON = 8
 PER_THREAD = 30
 #: les réponses proposées montrées
 SHOWN = 60
-APPS = {"whatsapp": "WhatsApp", "whatsapp_business": "WhatsApp Business", "messages": "Messages",
-        "samsung_messages": "Messages (Samsung)"}
+APPS = {"whatsapp": "WhatsApp", "whatsapp_business": "WhatsApp Business", "messenger": "Messenger",
+        "messages": "Messages", "samsung_messages": "Messages (Samsung)"}
 STATES = {c.PREPARED: "préparée", c.OFFERED: "sur le téléphone, attend un geste", "sent": "partie",
           "other": "il a écrit autre chose", "copied": "copiée (plus de notification où répondre)",
           "ignored": "ignorée", "failed": "échec", c.EXPIRED: "expirée (pas de geste à temps)"}

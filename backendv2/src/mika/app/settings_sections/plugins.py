@@ -51,7 +51,8 @@ PLUGINS: dict[str, tuple[str, tuple[str, ...], tuple[str, str] | None]] = {
               ("Courrier", "courrier/reception")),
     "teams": ("Ses comptes : à qui, sa façon d'y écrire, sa signature ; la clé de chaque extension", ("teams",),
               ("Teams", "teams/conversations")),
-    "phone": ("Les messages WhatsApp et SMS que ton téléphone lui relaie, et ce qu'elle en fait", (),
+    "phone": ("Les messages WhatsApp, Messenger et SMS que ton téléphone lui relaie, et ce qu'elle en fait",
+              (),
               ("Ses sens › Messages du téléphone", "sens/messages")),
     "rss": ("Les adresses des flux qu'elle suit", ("flux",), ("Ses sens › Flux RSS", "sens/flux")),
     "web": ("Sa recherche sur le web : ses bornes", (), ("La fiche du serveur « web »", "fiche/serveur/web")),
@@ -72,6 +73,8 @@ PLUGINS: dict[str, tuple[str, tuple[str, ...], tuple[str, str] | None]] = {
                ("reveils",), ("Réveils par API", "reveils")),
     "forge": ("Le comportement du moteur qui exécute ses apps ; les réglages d'une app restent sur sa fiche", (),
               ("Apps forgées", "apps")),
+    "contacts": ("Ce qu'elle se forme de ses contacts à partir de ce qu'elle lit : la période relue, ses bornes, les "
+                 "plafonds par jour", (), ("Personnes › Annuaire", "personnes/personnes")),
 }
 #: ce qui se branche sans être un plugin (le noyau s'en sert) : (nom, ce qui s'y règle, sa page de réglages)
 SERVICES = (("Transcription vocale", "Le service qui transcrit les messages vocaux qu'on lui envoie", "transcription"),

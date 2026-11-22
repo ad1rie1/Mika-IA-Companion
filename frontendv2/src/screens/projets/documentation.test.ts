@@ -4,7 +4,7 @@ import type { Sheet } from "../../api/projects";
 import { headingsOf, pageHtml, spaceImage, type Heading } from "./docmd";
 import {
   decisionOrder, decisionRequest, decisionRoute, decisionStatusRequest, docPlace, draftKey, folderOf, folderPath, homePage, imageAlt, imageMarkdown, imageRemoveRequest, imageRoute, isDirty, moveRequest, nameOf,
-  optionLines, pagePath, pageRoute, pageTree, rebased, refused, restoreRequest, saveBody, saved, slug, startDraft, tidyMarkdown, typed,
+  movedOn, optionLines, pagePath, pageRoute, pageTree, rebased, refused, restoreRequest, saveBody, saved, slug, startDraft, tidyMarkdown, typed,
 } from "./docparts";
 import { initialState } from "./state";
 import { pagesView, type DocUi } from "./views/docs";
@@ -93,7 +93,7 @@ describe("Documentation : enregistrer une page, et son conflit", () => {
   it("la page a changé depuis : les mots du serveur se disent, et ce qui a été écrit reste entier", () => {
     const mine = "# Installation\n\nCe que j'ai écrit pendant vingt minutes.\n";
     const words = "Cette page a changé depuis ta lecture : elle en est à la version 4, écrite par elle.";
-    const d = refused(typed(startDraft(read), mine), 409, words);
+    const d = refused(typed(startDraft(read), mine), words, movedOn(typed(startDraft(read), mine), { version: 4 }));
     expect(d).toMatchObject({ text: mine, base: 3, refusal: words, conflict: true });
     expect(isDirty(d)).toBe(true);
     // une frappe de plus ne l'efface pas
@@ -102,16 +102,28 @@ describe("Documentation : enregistrer une page, et son conflit", () => {
 
   it("reprendre après avoir relu : la version actuelle devient le départ, le texte tapé ne bouge pas", () => {
     const mine = "# Installation\n\nMa version.\n";
-    const d = rebased(refused(typed(startDraft(read), mine), 409, "…"), { version: 4, text: "# Installation\n\nCelle de Mika.\n" });
+    const d = rebased(refused(typed(startDraft(read), mine), "…", true), { version: 4, text: "# Installation\n\nCelle de Mika.\n" });
     expect(d).toMatchObject({ base: 4, text: mine, refusal: "", conflict: false });
     expect(isDirty(d)).toBe(true);
     expect(saveBody(d, "ma version, relue").base).toBe(4);
   });
 
   it("un autre refus (un champ, une panne) se dit sans être un conflit, et ne perd rien non plus", () => {
-    const d = refused(typed(startDraft(read), "x\n"), 400, "Ce chemin n'est pas celui d'une page.");
+    const d = refused(typed(startDraft(read), "x\n"), "Ce chemin n'est pas celui d'une page.");
     expect(d).toMatchObject({ text: "x\n", refusal: "Ce chemin n'est pas celui d'une page.", conflict: false });
-    expect(refused(d, 0, "Le serveur de Mika ne répond pas.")).toMatchObject({ text: "x\n", conflict: false });
+    expect(refused(d, "Le serveur de Mika ne répond pas.")).toMatchObject({ text: "x\n", conflict: false });
+  });
+
+  it("un 409 n'est un conflit que si la page a bougé : le même texte, une page disparue n'en sont pas", () => {
+    const d = typed(startDraft(read), "# Installation\n\n");
+    // relue après le 409 : elle en est toujours à la version lue (le serveur a refusé le même texte)
+    expect(movedOn(d, { version: 3 })).toBe(false);
+    expect(refused(d, "Ce texte est déjà celui de la page.", movedOn(d, { version: 3 }))).toMatchObject({ conflict: false, text: "# Installation\n\n" });
+    // elle n'existe plus : rien à reprendre
+    expect(movedOn(d, null)).toBe(false);
+    // elle a bougé, ou une page nouvelle existe déjà
+    expect(movedOn(d, { version: 4 })).toBe(true);
+    expect(movedOn(startDraft({ path: "neuve.md", version: 0, text: "" }), { version: 1 })).toBe(true);
   });
 
   it("le mode Modifier dit ce qui attend, le refus du serveur, et de quoi reprendre", () => {
@@ -120,7 +132,7 @@ describe("Documentation : enregistrer une page, et son conflit", () => {
     const sheet = { project: { id: 3, title: "Outils réseau" }, rights: {} } as unknown as Sheet;
     const p: DocPageText = { ...page("guide/installation.md", { version: 4 }), text: "# Installation\n", forgotten: false, can: { write: true } };
     const space: DocSpace = { project: 3, rights: { read: true, write: true }, limits: { page_chars: 1, pages: 1, versions: 50, path_chars: 1, depth: 1, word_chars: 200, image_bytes: 1, images: 1, space_bytes: 1, image_kinds: [] }, pages: [p], folders: ["guide"], images: [], space_used: 0 };
-    const draft = refused(typed(startDraft({ path: p.path, version: 3, text: p.text }), "# Installation\n\n<script>alert(1)</script>\n"), 409, "Cette page a changé depuis ta lecture : elle en est à la version 4.");
+    const draft = refused(typed(startDraft({ path: p.path, version: 3, text: p.text }), "# Installation\n\n<script>alert(1)</script>\n"), "Cette page a changé depuis ta lecture : elle en est à la version 4.", true);
     const data = { space, mode: "modifier" as const, wanted: p.path, page: { value: p, error: null }, history: null, version: null, found: null, draft: () => draft };
     const html = pagesView(sheet, data, ui, ctx);
     expect(html).toContain("Cette page a changé depuis ta lecture : elle en est à la version 4.");

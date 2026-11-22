@@ -17,6 +17,8 @@ la conversation et, en mode pro, pour le fil ouvert (un fil en auto suit la conv
 le réglage de la console, ADR 0285). Il se règle aussi dans la fenêtre « Le fil » et par `/effort` ; un fil forcé le
 dit dans la liste des fils. `?effort=1` ouvre le menu d'emblée.
 
+**Validé le 2026-11-22** (« nikel la maquette ») : l'écran **Contacts** (`ecrans/contacts.js`, `contacts.css`, ADR 0298) — tous ceux que Mika connaît pour toi, vus dans ton Teams, tes boîtes, ton téléphone ou dont tu lui as parlé, et leurs organisations : ce qui les identifie, ce que Mika en sait, où vous vous croisez. Il remplace l'onglet Contacts du courrier.
+
 ## L'ouvrir
 
 - **Avec la VRM** (servie en HTTP, depuis la racine du dépôt) :
@@ -43,9 +45,10 @@ mode pro), `?notes=1` (panneau des notes ouvert), et la route après `#` :
 | Chat | `#chat` (le bouton Pro du champ passe en mode pro) |
 | Projets | `#projets/a-faire` (et `/a-faire/3/ticket-4`, `/3/pr-11`…), `#projets/projets`, puis la fiche `#projets/projets/3` et ses onglets : `/objectifs/o2` (et `/rendus`, `/modifier`), `/objectifs/m1`, `/objectifs/diagramme/avancement` et `/objectifs/diagramme/temps` (et `/o2`, `/o2/3` pour un jalon), `/tickets/4` (et `/description`, `/plan`, `/fil`, `/historique`, `/modifier`), `/code/fichiers/<branche>/<chemin>`, `/code/commits/<empreinte>`, `/code/pulls/11` (et `/commits`, `/fichiers`, `/echanges`, `/modifier`), `/code/branches/<branche>`, `/code/issues/9` (et `/echanges`), `/code/ci/57` (et `/journal`), `/documentation/pages/<page>` (et `/modifier/<page>`, `/historique/<page>`, `/images/<image>`, `/decisions/3`, `/decisions/3/options`, `/decisions/3/modifier`), `/activite` (le fil ; et `/executions/61`, `/carnet`), `/dependances/lit-7` (le schéma ; et `/demandes/d3`), `/reglages/general` (« Modifier le projet » ; et `/rythme`, `/accords`, `/depot`, `/outils`) ; `#projets/projets/5/listes/entreprises` (un projet qui a des listes) |
 | Outils | `#outils/droits` (la matrice des droits, ressource par ressource), `#outils/services`, `#outils/accords` |
-| Mail | `#mail/messages`, `#mail/messages/m-claire`, `#mail/messages/d-lefevre`, `#mail/contacts` |
+| Mail | `#mail/messages`, `#mail/messages/m-claire`, `#mail/messages/d-lefevre` |
 | Teams | `#teams/discussions/lumen`, `#teams/discussions/claire`, `#teams/brouillons` |
 | Téléphone | `#telephone/messages/julien`, `#telephone/notifications`, `#telephone/position` (le sélecteur en haut passe d'un téléphone à l'autre) |
+| Contacts | `#contacts/claire` (une collègue vue dans Teams et au courrier), `#contacts/lea` (qui parle aussi à Mika), `#contacts/ines` (dont tu lui as seulement parlé), `#contacts/lumen` (une organisation) |
 | Carte | `#carte/explorer`, `#carte/itineraire`, `#carte/voyages`, `#carte/voyages/alpes` (et sa carte dans le chat, en bas de `#chat`) |
 | Paramètres | `#parametres/compte`, `#parametres/comptes-mail/pro`, `#parametres/teams`, `#parametres/telephones`, `#parametres/partages`, `#parametres/mcp/factures` |
 

@@ -211,6 +211,12 @@ internal fun MessagesPage(graph: AppGraph) {
                 onChange = { on -> scope.launch { graph.settings.setPhoneWhatsApp(on) } },
             )
             CheckRow(
+                title = stringResource(R.string.settings_phone_messenger),
+                summary = stringResource(R.string.settings_phone_messenger_summary),
+                checked = settings.phoneMessenger,
+                onChange = { on -> scope.launch { graph.settings.setPhoneMessenger(on) } },
+            )
+            CheckRow(
                 title = stringResource(R.string.settings_phone_messages),
                 summary = stringResource(R.string.settings_phone_messages_summary),
                 checked = settings.phoneMessages,

@@ -1,5 +1,6 @@
-{# Activité › Projets › un projet › Cadre (app/handmade/subjects/project.py, ADR 0121, 0176, 0177, 0281) : le gabarit du
-   paramétrage, en sous-onglets.
+{# Activité › Projets › un projet › Administration (app/handmade/subjects/project.py::administration, ADR 0121, 0176,
+   0281, 0297) : ce que seul le portail règle, dans le gabarit du paramétrage, en sous-onglets — une colonne à
+   gauche, comme « Ce qui se règle » sur l'écran Projets : le nom de chaque sujet et, dessous, ce qui vaut.
    - « Ses réglages » : le formulaire « Modifier le projet », celui que la console a préparé (``projects.modifier``),
      par groupes — Le projet, Son mode, Son rythme, Sa liberté (la relecture indépendante y est) —, une ligne par
      réglage (son nom et son aide à gauche, sa valeur à droite), « Enregistrer » collé en bas ; pas de cadre dans la
@@ -11,7 +12,10 @@
    - « Accès » : ses lignes d'accès (``acces.html``, l'onglet réuni : son ancienne adresse y mène).
    - « Tickets et issues » : qui valide le plan d'un ticket, la borne d'un petit ticket, ses fichiers protégés, la
      publication en issues — en faits, puis le formulaire qui les règle (``projects.tickets_regler``).
-   Ses liens de lecture ont leur onglet (« Liens », ``fiche_liens.html``). #}
+   - « Sous le capot » : ses identifiants, ce qui retient son exécution, ses plafonds et ses pannes, ce que son
+     atelier a laissé — en lecture.
+   Un projet sans liste de suivi : un lien y mène pour en créer une (son onglet « Listes » n'est pas dans la barre).
+   Ses liens de lecture ont leur onglet (« Dépendances », ``dependances.html``). #}
 {% import "handmade/shared/tab.html" as tab with context %}
 {% from "_forms.html" import field %}
 {% macro plumbing(f) -%}
@@ -19,11 +23,13 @@
 <input type="hidden" name="_retour" value="{{ f.back }}"><input type="hidden" name="_sujet" value="{{ f.subject }}">
 {% for k, v in f.fixed or [] %}<input type="hidden" name="_fixes" value="{{ k }}"><input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
 {%- endmacro %}
-<div class="now-page prj-fiche prj-behaviour" data-tab="project/comportement">
+<div class="now-page prj-fiche prj-behaviour pj-admin" data-tab="project/comportement">
   {% for n in notes %}<p class="person-tab-note {{ n.tone }}">{{ n.text }}</p>{% endfor %}
   <div class="hm-subtabs" data-subtabs>
-    <nav class="hm-subnav" aria-label="Son cadre">
-      {% for p in panes %}<a href="#{{ p.id }}">{{ p.label }}</a>{% endfor %}
+    <nav class="hm-subnav pj-regle" aria-label="Ce qui se règle">
+      <p class="hm-subnav-title">Ce qui se règle</p>
+      {% for p in panes %}<a href="#{{ p.id }}"><span class="pj-regle-main"><b>{{ p.label }}</b>{% if p.said %}<small>{{ p.said }}</small>{% endif %}</span></a>{% endfor %}
+      {% if lists_href %}<a class="pj-regle-out" href="{{ lists_href }}"><span class="pj-regle-main"><b>Listes de suivi</b><small>aucune encore : en créer une</small></span></a>{% endif %}
     </nav>
     <div class="hm-subpanes">
   <div id="cadre-reglages" class="prj-frame-pane" data-pane>
@@ -101,6 +107,23 @@
         <div class="form-actions"><button class="btn">{{ ticket_form.button or "Enregistrer" }}</button></div>
       </form>
       {% endif %}
+    </div>
+  </section>
+  {% endif %}
+
+  {% if engine %}
+  <section id="admin-capot" class="prj-tools" data-pane aria-labelledby="pj-capot-title">
+    <header class="prj-tools-head">
+      <h2 id="pj-capot-title">Sous le capot</h2>
+      {% if engine_help %}<p>{{ engine_help }}</p>{% endif %}
+    </header>
+    <div class="pj-capot">
+      {% for g in engine %}
+      <section class="now-card prj-settings-ro" aria-label="{{ g.title }}">
+        <header class="now-card-head"><h3>{{ g.title }}</h3></header>
+        <dl class="prj-ov-dl">{% for p in g.pairs %}<div><dt>{{ p.label }}</dt><dd>{{ tab.cell(p.value) }}</dd></div>{% endfor %}</dl>
+      </section>
+      {% endfor %}
     </div>
   </section>
   {% endif %}

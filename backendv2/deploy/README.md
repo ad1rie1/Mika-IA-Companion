@@ -169,7 +169,7 @@ MIKA_DATABASE_URL=mariadb+pymysql://mika@localhost/?unix_socket=/var/lib/mysql/m
 ```
 
 Au démarrage, ses bases sont créées (`mika_mind`, `mika_views`, `mika_mail`,
-`mika_feeds`, `mika_teams`) et passées à leur dernière révision ; chaque app
+`mika_feeds`, `mika_teams`, `mika_contacts`) et passées à leur dernière révision ; chaque app
 forgée a la sienne (`mika_forge_<app>`), et un compte du même nom qui n'a de
 droits que sur elle. Rien n'est repris des fichiers SQLite d'avant : elle
 repart d'une base vide.
@@ -760,14 +760,14 @@ mika verify /var/backups/mika/mika-AAAAMMJJ-HHMMSS.tar.gz   # noté pour la cons
 ```
 
 Une archive contient `mind.db` (sa vie : le journal, les contenus, les
-comptes, les réglages), les caches du courrier, des flux et de Teams, ses apps
-forgées, ses ateliers, les fichiers qu'elle a envoyés (`partages/`) et les
+comptes, les réglages), les caches du courrier, des flux et de Teams, son
+annuaire (`contacts.db`), ses apps forgées, ses ateliers, les fichiers qu'elle a envoyés (`partages/`) et les
 pièces jointes qu'on lui a envoyées (`pieces/`), `secret.key` quand la clé vient
 de ce fichier et `firebase-service-account.json` s'il est posé, avec un
 manifeste (sommes SHA-256, tête du journal, empreinte de l'état rejoué depuis la
 copie). `views.db` n'y est pas : projections et vecteurs se reconstruisent
 depuis le journal. Sur MariaDB, le dossier y est, et à côté une copie SQL de
-chaque base (`bases/` : `mind`, `mail`, `feeds`, `teams`, et celle de chaque app
+chaque base (`bases/` : `mind`, `mail`, `feeds`, `teams`, `contacts`, et celle de chaque app
 forgée) faite par `mariadb-dump` en un instantané cohérent ; la vérification
 recharge `mind` dans une base de travail et l'y rejoue. Les dossiers d'appel de
 Claude Code (prompts privés, jeton de session du relais) ne sont pas dans le

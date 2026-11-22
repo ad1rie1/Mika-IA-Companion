@@ -20,7 +20,6 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -65,6 +64,7 @@ import fr.qwartz.mika.data.moi.projects.decisionTone
 import fr.qwartz.mika.data.moi.projects.docRows
 import fr.qwartz.mika.data.moi.projects.folderPath
 import fr.qwartz.mika.data.moi.projects.imageMarkdown
+import fr.qwartz.mika.data.moi.projects.keyed
 import fr.qwartz.mika.data.moi.projects.pagePath
 import fr.qwartz.mika.data.moi.projects.plural
 import fr.qwartz.mika.data.moi.projects.since
@@ -89,6 +89,8 @@ internal fun DocsTab(graph: AppGraph, vm: ProjectViewModel, sheet: Sheet, now: L
     val shown = DocTabs.of(sub)
     Toasts(docs.gestures)
     OnResume(docs) { docs.resume() }
+    // quitté avant la réponse d'une création, l'onglet n'ouvre rien à son retour
+    OnLeave(docs) { docs.leave() }
     LaunchedEffect(docs, shown) { docs.show(shown) }
     LaunchedEffect(vm.refreshing) { if (vm.refreshing) docs.reload() }
     val space = docs.space.value
@@ -118,6 +120,15 @@ internal fun DocsTab(graph: AppGraph, vm: ProjectViewModel, sheet: Sheet, now: L
 private fun PagesPane(docs: DocsViewModel, sheet: Sheet, shell: Shell, now: Long) {
     var creating by rememberSaveable { mutableStateOf(false) }
     val open: (String) -> Unit = { shell.navigate(Route.ProjectPage(docs.id, SheetPages.PAGE, it)) }
+    // la page créée s'ouvre en écriture, par-dessus sa page : enregistrée ou quittée, on revient à elle — elle existe
+    LaunchedEffect(docs.created) {
+        val path = docs.created
+        if (path.isNotEmpty()) {
+            docs.createdSeen()
+            open(path)
+            shell.navigate(Route.ProjectPage(docs.id, SheetPages.EDIT, path))
+        }
+    }
     ListedPane(docs.space.load, docs.space::retry) { space ->
         item(key = "tools") {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -144,7 +155,7 @@ private fun PagesPane(docs: DocsViewModel, sheet: Sheet, shell: Shell, now: Long
                     if (found.value.items.isEmpty()) {
                         item(key = "nothing") { EmptyNote(R.drawable.ic_m_search, stringResource(R.string.proj_doc_found_none), stringResource(R.string.proj_doc_found_none_sub)) }
                     }
-                    items(found.value.items, key = { "f${it.path}" }) { p -> FoundRow(p, now) { open(p.path) } }
+                    keyedItems(found.value.items, { "f${it.path}" }) { p -> FoundRow(p, now) { open(p.path) } }
                 }
             }
             space.pages.isEmpty() -> item(key = "none") {
@@ -156,17 +167,21 @@ private fun PagesPane(docs: DocsViewModel, sheet: Sheet, shell: Shell, now: Long
                     if (space.rights.write) Button(onClick = { creating = true }) { Text(stringResource(R.string.proj_doc_new)) }
                 }
             }
-            else -> items(docRows(space.pages, docs.closed), key = { (if (it.page == null) "d" else "p") + it.path }) { node ->
+            else -> keyedItems(docRows(space.pages, docs.closed), { (if (it.page == null) "d" else "p") + it.path }) { node ->
                 TreeRow(node, node.path in docs.closed) { if (node.page == null) docs.fold(node.path) else open(node.path) }
             }
         }
     }
     val space = docs.space.value
     if (creating && space != null) {
-        NewPageSheet(sheet, space, onDismiss = { creating = false }) { path, title ->
-            creating = false
-            // une page qui existe déjà s'ouvre ; sinon elle s'écrit, et naît à son premier enregistrement
-            if (space.pages.any { it.path == path }) open(path) else shell.navigate(Route.ProjectPage(docs.id, SheetPages.NEW, path, title))
+        NewPageSheet(docs, sheet, space, onDismiss = { creating = false }) { path, title ->
+            // une page qui existe déjà s'ouvre ; sinon elle se crée tout de suite, et le serveur juge son chemin
+            if (space.pages.any { it.path == path }) {
+                creating = false
+                open(path)
+            } else {
+                docs.create(path, title)
+            }
         }
     }
 }
@@ -217,26 +232,29 @@ private fun FoundRow(p: DocPage, now: Long, onClick: () -> Unit) {
 
 /**
  * « Nouvelle page » : son titre, son dossier (un de ceux de l'espace, ou un nouveau). Son chemin se replie comme le
- * serveur l'attend — lui seul juge s'il vaut ; la page naît à son premier enregistrement.
+ * serveur l'attend — lui seul juge s'il vaut : **la page se crée à la validation**, et son refus (un chemin trop long,
+ * trop profond, déjà pris ; une documentation pleine) se dit ici, avant qu'on ait écrit quoi que ce soit.
  */
 @Composable
-private fun NewPageSheet(sheet: Sheet, space: DocSpace, onDismiss: () -> Unit, onCreate: (path: String, title: String) -> Unit) {
+private fun NewPageSheet(docs: DocsViewModel, sheet: Sheet, space: DocSpace, onDismiss: () -> Unit, onCreate: (path: String, title: String) -> Unit) {
     var title by rememberSaveable { mutableStateOf("") }
     var folder by rememberSaveable { mutableStateOf("") }
     var fresh by rememberSaveable { mutableStateOf("") }
     val root = stringResource(R.string.proj_doc_root)
     val path = pagePath(folderPath(fresh).ifEmpty { folder }, title)
+    val where = DocsViewModel.NEW
+    DoneCloses(docs.gestures, where, onDismiss)
     FormSheet(
         title = stringResource(R.string.proj_doc_new),
         sub = stringResource(R.string.proj_doc_new_sub, sheet.project.title),
         submit = stringResource(R.string.proj_doc_new_ok),
-        busy = false,
-        error = "",
+        busy = docs.gestures.busy == where,
+        error = docs.gestures.refusalAt(where),
         onDismiss = onDismiss,
         onSubmit = { onCreate(path, title.trim()) },
         enabled = path.isNotEmpty(),
     ) {
-        FormText(stringResource(R.string.proj_doc_new_title), title, { title = it }, hint = stringResource(R.string.proj_doc_new_title_hint))
+        FormText(stringResource(R.string.proj_doc_new_title), title, { title = it }, hint = stringResource(R.string.proj_doc_new_title_hint), error = docs.gestures.fieldsAt(where)["path"])
         FormChoice(stringResource(R.string.proj_doc_new_folder), listOf(Coded("", root)) + space.folders.map { Coded(it, it) }, folder, { folder = it })
         FormText(stringResource(R.string.proj_doc_new_folder_fresh), fresh, { fresh = it }, hint = stringResource(R.string.proj_doc_new_folder_hint))
         if (path.isNotEmpty()) Hint(stringResource(R.string.proj_doc_new_path, path), R.drawable.ic_m_file)
@@ -256,6 +274,8 @@ internal fun weight(bytes: Long): String = when {
 private fun ImagesPane(graph: AppGraph, docs: DocsViewModel, now: Long) {
     val shell = LocalShell.current
     var picked by rememberSaveable { mutableStateOf("") }
+    // le volet s'ouvre : le refus d'un téléversement d'un autre jour ne vaut plus
+    FreshEntry(docs.gestures, DocsViewModel.IMAGES)
     val unreadable = stringResource(R.string.proj_doc_image_unreadable)
     when (val load = docs.space.load) {
         null, Load.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
@@ -265,7 +285,7 @@ private fun ImagesPane(graph: AppGraph, docs: DocsViewModel, now: Long) {
         }
         is Load.Ready -> {
             val space = load.value
-            val pick = rememberImagePicker(space.limits.imageBytes, onPicked = { docs.upload(it) }, onUnreadable = { shell.toast(unreadable) })
+            val pick = rememberImagePicker(space.limits, onPicked = { docs.upload(it) }, onUnreadable = { shell.toast(unreadable) })
             LazyVerticalGrid(
                 GridCells.Fixed(2),
                 Modifier.fillMaxSize(),
@@ -299,7 +319,7 @@ private fun ImagesPane(graph: AppGraph, docs: DocsViewModel, now: Long) {
                         EmptyNote(R.drawable.ic_m_image, stringResource(R.string.proj_doc_images_none), stringResource(R.string.proj_doc_images_none_sub))
                     }
                 }
-                items(space.images, key = { "i${it.name}" }) { image -> ImageCard(graph, docs.id, image) { picked = image.name } }
+                items(keyed(space.images) { "i${it.name}" }, key = { it.key }) { row -> ImageCard(graph, docs.id, row.value) { picked = row.value.name } }
             }
             space.images.firstOrNull { it.name == picked }?.let { image ->
                 ImageSheet(graph, docs, image, space.rights.write, now) { picked = "" }
@@ -402,7 +422,7 @@ private fun DecisionsPane(docs: DocsViewModel, shell: Shell, now: Long) {
         if (list.items.isEmpty()) {
             item(key = "none") { EmptyNote(R.drawable.ic_m_shield_check, stringResource(R.string.proj_doc_decisions_none), stringResource(R.string.proj_doc_decisions_none_sub)) }
         }
-        items(decisionOrder(list.items), key = { "d${it.number}" }) { d ->
+        keyedItems(decisionOrder(list.items), { "d${it.number}" }) { d ->
             DecisionRow(d, now) { shell.navigate(Route.ProjectPage(docs.id, SheetPages.DECISION, d.number.toString())) }
         }
     }

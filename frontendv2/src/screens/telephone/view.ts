@@ -52,6 +52,8 @@ export function underWay(state: string): boolean {
 /** L'icône d'une appli (la classe de couleur de la feuille commune, une lettre). */
 export function appBadge(app: string, appName: string): { cls: string; letter: string } {
   if (app === "whatsapp" || app === "whatsapp_business") return { cls: "whatsapp", letter: "W" };
+  // Messenger (ADR 0299) : un « M » sur son dégradé, qui ne se confond pas avec le « M » bleu des SMS
+  if (app === "messenger") return { cls: "messenger", letter: "M" };
   if (app === "messages" || app === "samsung_messages" || app === "sms") return { cls: "sms", letter: "M" };
   return { cls: "other", letter: (appName.trim()[0] ?? "?").toUpperCase() };
 }

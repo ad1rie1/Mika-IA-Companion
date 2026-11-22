@@ -34,6 +34,7 @@
     <string name="proj_doc_empty_sub">Rien n\'y est encore écrit.</string>
     <string name="proj_doc_forgotten">Le texte de cette page n\'est plus là : il a été oublié.</string>
     <string name="proj_doc_image_missing">image introuvable : %1$s</string>
+    <string name="proj_doc_image_unloaded">image pas chargée : %1$s — touche pour réessayer</string>
     <string name="proj_doc_image_elsewhere">image d\'ailleurs, non chargée : %1$s</string>
     <string name="proj_doc_side_outline">Sur cette page</string>
     <string name="proj_doc_side_last">Dernière modification</string>
@@ -292,4 +293,6 @@
     <string name="proj_time_weeks">Semaines</string>
     <string name="proj_time_later">à suivre · sans date</string>
     <string name="proj_time_hint">De vraies dates seulement : ce qui n\'a pas commencé se range après aujourd\'hui, dans l\'ordre du plan, sans date. La piste défile en largeur.</string>
+    <string name="proj_not_sent">Rien n\'est parti : ce que tu regardes vient de se relire. Vérifie, puis réessaie — ce que tu as tapé est toujours là.</string>
+    <string name="proj_not_sent_plain">Rien n\'est parti : ce que tu regardes vient de se relire. Vérifie, puis réessaie.</string>
 </resources>

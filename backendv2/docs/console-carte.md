@@ -78,7 +78,7 @@ ses niveaux à elle. Chaque niveau mène à sa page, sauf la page même. Ainsi :
 | Rubrique | Entrées | La question de l'opératrice |
 |---|---|---|
 | **Accueil** | — | « Tout va bien ? Que dois-je faire ? » |
-| **À valider** | Tout ce qui attend · Courriers à envoyer · Réponses Teams · Identités à confirmer · Noms à relier · Historique des autorisations | « Qu'est-ce qui attend ma décision ? » |
+| **À valider** | Tout ce qui attend · Courriers à envoyer · Réponses Teams · Identités à confirmer · Rapprochements · Historique des autorisations | « Qu'est-ce qui attend ma décision ? » |
 | **Sa rubrique**, à son nom | En ce moment · **Humeur et corps** (Humeur · Postures · Besoins · Sommeil et rythme · Monde et corps · Estime et récit · Qui elle devient) · **Pensées et nuits** (Pensées · Ce qu'elle remarque · Attentes · Journal et rêves) · **Mémoire** (Souvenirs · Croyances · Promesses · La vie des autres · Voir venir · Pièces reçues · Fichiers envoyés · Consolidation) · Constellation | « Comment va-t-elle, à quoi pense-t-elle, que retient-elle ? » |
 | **Relations & échanges** | **Personnes** · **Conversations** · **Courrier** · **Teams** · **Identités**, chacune avec ses onglets | « Qui connaît-elle, qu'a-t-on dit ? » |
 | **Activité** | **Projets** (Ses projets · Exécutions · Décisions techniques) · **Buts et rappels** (Buts vivants · Clos) · **Décisions** (Table de l'arbitre · Que ferait-elle ? · En cours · Initiatives · Ses choix · Épisodes · Échéances) | « Que fait-elle, pourquoi parle-t-elle ou se tait-elle ? » |
@@ -235,22 +235,67 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
 
 - **Personnes** (`/admin/personnes`, `app/handmade/tabs/people.py`) : une carte par personne — ce qu'elle est pour
   elle, ce qu'elle ressent, ce qui se passe entre elles, ce qu'elle en sait —, qui est là (son titre « En ligne · N »
-  mène à Présents), qui lui manque, une recherche (par nom ou par moyen de communication) et un filtre de proximité :
-  la seule recherche de la destination. Ses onglets, les mêmes sur ses quatre pages : Vue d'ensemble
-  (cette page), Annuaire, Liens, Présents — la destination déclare ce premier onglet dessiné à part
-  (`Destination.lead`), ses autres onglets y ramènent. Ses onglets (dans le même module) disent une
-  personne comme la vue d'ensemble, et se parcourent, sans filtre : **Annuaire**, une entrée par personne — ses
-  moyens de communication (le principal d'abord, ce que chaque canal prouve), la certitude, depuis quand, son dernier
-  message, leurs échanges et leur lien ; **Liens**, un bandeau si quelqu'un lui manque, la bande de chiffres, puis les
-  liens par proximité (proches, amitiés, connaissances, pas encore de lien) — l'échelon déclaré ou vécu, le rythme,
-  le silence sur une jauge (à sa moitié, elle lui manque), ce qu'elle en sait ; **Présents**, une entrée par personne
-  présente et, sous elle, chacune de ses connexions (par où, le moyen de communication, l'audience). Dans la console
-  en MCP aussi, l'Annuaire et Liens n'ont pas de recherche : on y cherche quelqu'un par Moyens de communication
-  (`identity/annuaire`) ou par Conversations (`transcript/conversations`).
+  mène à Présents), qui lui manque, une recherche (par nom ou par moyen de communication) et un filtre de proximité.
+  Ses onglets, les mêmes sur ses quatre pages : Vue d'ensemble (cette page), Annuaire, Liens, Présents — la
+  destination déclare ce premier onglet dessiné à part (`Destination.lead`), ses autres onglets y ramènent. Ses
+  onglets (dans le même module) disent une personne comme la vue d'ensemble : **Annuaire** (ADR 0298,
+  `app/handmade/directory.py`), tous ceux qu'elle connaît — qui lui parle (la faculté `identity`) et qui elle connaît
+  de loin, personnes et organisations (le port `contacts`) —, du plus récemment vu, en deux colonnes : son avatar
+  (neutre et cerné d'un pointillé pour qui elle connaît de loin, carré pour une organisation), ses étiquettes
+  (propriétaire, sa proximité ; « connue de loin », son organisation ; « organisation », combien de personnes), son
+  poste et son service s'ils sont connus, ce qui l'identifie (la sorte, la valeur ; ni un nom raconté ni la clé d'un
+  expéditeur du téléphone, qui ne se lisent pas — « Aucun moyen de communication : connue seulement de nom » pour qui
+  n'est qu'un nom raconté), d'où elle la connaît (une étiquette par source, combien de fois : « Teams · 48 »,
+  « WhatsApp · 2 », « SMS · 1 », « Racontée · 3 fois »), de qui c'est le contact (« tout le monde » pour ce qui ne
+  vient du compte de personne ; un expéditeur du téléphone est le contact de la personne dont c'est le téléphone, une
+  personne racontée celui de qui la lui a racontée),
+  ses contacts et leurs échanges à un clic pour qui lui parle. Une fiche de l'annuaire reliée à une personne qui lui
+  parle ne paraît qu'une fois, comme elle, ses identifiants ajoutés. « Qui » au bout de la barre (Tout, Lui parlent,
+  Connues de loin, Organisations : ses filtres à lui, `Tab.params`), une recherche (nom, e-mail, téléphone,
+  identifiant Teams), des puces « Contacts de… » (une par personne qui a un compte, « À tout le monde »), en fiches ou
+  en tableau (`?affichage=tableau`), vingt-quatre par page ; sous la liste, l'état des portraits (lot 6 : combien de
+  contacts et d'appels en vingt-quatre heures face à leurs plafonds, combien de personnes échangent vraiment avec un
+  compte, le dernier passage) et « Régler » vers Réglages › Paramètres avancés › contacts ; **Liens**, un bandeau si quelqu'un lui manque, la bande
+  de chiffres, puis les liens par proximité (proches, amitiés, connaissances, pas encore de lien) — l'échelon déclaré
+  ou vécu, le rythme, le silence sur une jauge (à sa moitié, elle lui manque), ce qu'elle en sait ; **Présents**, une
+  entrée par personne présente et, sous elle, chacune de ses connexions (par où, le moyen de communication,
+  l'audience). Liens se parcourt sans recherche ; dans la console en MCP, on cherche quelqu'un par Moyens de
+  communication (`identity/annuaire`) ou par Conversations (`transcript/conversations`), un contact par la recherche
+  des fiches (`contact`).
+- **La fiche d'un contact** (`/admin/fiche/contact/contact:<n°>`, `app/handmade/subjects/contact.py`, ADR 0298) : une
+  personne qu'elle connaît de loin, ou une organisation. Son en-tête (avatar, « connue de loin » ou « organisation » et
+  son organisation, quand et où elle l'a vue la première fois, combien de messages lus, qu'elle ne lui a jamais écrit ;
+  ses moyens de communication, de qui c'est le contact) ; « Réunir avec… » (une autre fiche, qui rejoint celle-ci, ou
+  la personne qui lui parle à qui la relier), « Délier de la personne » quand elle l'est, et « Oublier » sous « ⋯ » :
+  l'oubli de la console, qui atteint aussi ce que Teams et le courrier gardaient d'elle (ses identifiants Teams et
+  ses adresses, jamais ceux de la personne qui lui parle et à qui elle est reliée) — tous confirmés, audités. Sa vue
+  d'ensemble : un seul bandeau (un rapprochement à valider, qui mène à la file), la bande de chiffres, ce qu'elle en
+  sait (ses profils : poste, service, organisation, ses noms ; puis « L'idée qu'elle s'en fait », lot 6 : chaque fait
+  tiré de ses derniers messages, d'où il vient — « lu dans Teams · Équipe · dans le groupe « Projet » · il y a 2 j » —,
+  sa sorte, sa confiance en jauge, et « Oublier » qui mène à sa ligne dans l'onglet), où elle la
+  voit (chaque compte, combien, quand ; ses conversations Teams, les courriers de son adresse ; chaque conversation du
+  téléphone où elle l'a lue — « 3 messages · groupe « Famille » », « 2 messages · en tête-à-tête » —, qui mène à
+  l'onglet Son téléphone de la personne ; chaque personne qui lui en a parlé — « racontée par adrien · 3 fois » —,
+  qui mène à leurs échanges), de qui c'est le
+  contact (et à qui ce qu'elle a lu d'elle se dit : jamais une interlocutrice), ce qui l'identifie, ses derniers
+  courriers lus (Teams ne se lit pas par auteur). Une organisation : ses personnes, ce qui l'identifie (domaine,
+  entreprise, organisation Teams, ses adresses sans personne derrière), de qui c'est le contact. Ses onglets :
+  **Personnes** (une organisation seulement), **Ce qui l'identifie** (une tuile par identifiant : sa sorte, sa valeur,
+  où elle l'a vu, depuis quand, réuni d'office et pourquoi, « Détacher » — il fait une fiche à lui ; un expéditeur du
+  téléphone, « Contact WhatsApp » ou « Contact SMS », sous le nom que le téléphone lui donne ; un nom raconté sous ce
+  nom), **Ce qu'elle en sait** (une personne seulement : chaque fait, « Oublier » sur sa ligne — `contacts.oublier_fait`,
+  confirmé, audité ; il ne se réapprend pas, même reformulé —, et son dernier portrait), **Où elle la voit** (la vue du
+  plugin). Une fiche qui n'est qu'un nom raconté se relie à quelqu'un qui lui
+  parle par l'identité : « Réunir avec… » une personne mène à sa fiche, « C'est la personne dont on lui a parlé »
+  pré-rempli (sa mémoire le saura ; la collecte relie alors la fiche).
 - **La fiche d'une personne** s'ouvre sur sa **vue d'ensemble** (`app/handmade/person/`) : ce qu'elle ressent
   envers elle, leur histoire, ce qu'elle sait d'elle, ce qui reste en suspens, leurs derniers mots. Les onglets des
   facultés suivent, dessinés sur leurs données (Échanges en conversation, Mémoire en cartes, les listes en
-  cartes) ; ce que la vue d'ensemble résume (Synthèse, Lien, Ce qu'elle devine, Affect, Pensées) est rangé au bout
+  cartes ; **Ce qui l'identifie**, ADR 0298 : une tuile par moyen de communication qui lui parle, puis les
+  identifiants des fiches de l'annuaire qui lui sont reliées — « son compte » quand un de ses comptes la désigne,
+  « Détacher » au nom de la fiche du contact ; **Contacts**, seulement pour qui en a : ceux que ses comptes lui ont fait
+  connaître, ceux qu'on lui partage et ceux que personne n'a, des puces par compte, une entrée chacun comme
+  l'Annuaire, `app/handmade/person/identifies.py`) ; ce que la vue d'ensemble résume (Synthèse, Lien, Ce qu'elle devine, Affect, Pensées) est rangé au bout
   de la barre, sous « Le détail ». Ses onglets disent leur compte (`PersonOverview.counts`) : ses moyens de
   communication, ses messages et ce que liste sa Mémoire (un `COUNT` chacun ; la mémoire compte aux clauses de son
   onglet, tous statuts), ce qu'il y a sous Comptes, ses voyages, ses buts, ses projets ; Fichiers n'en dit pas (deux
@@ -395,117 +440,156 @@ Ses onglets sont dans `app/handmade/tabs/projects.py` (ADR 0177).
   appels, décision). L'onglet Exécutions de la fiche d'un projet suit le même fil (`handmade/projets/_runs.html`).
 - **Décisions techniques** : rangées par projet (filtrables par projet, et par statut en bouton à choix), chacune
   avec sa question, ce qui est choisi, pourquoi, qui l'a posée et quand ; une décision remplacée s'estompe.
-- **La fiche** gouverne, onglet par onglet, rangée par ce qu'on y fait (ADR 0281) : Où il en est, Tickets, Suivi, Dépendances (« Liens » jusqu'à l'ADR 0290),
-  Dépôt, Exécutions, Cadre ; ses onglets disent leur compte (tickets, suivi, liens, exécutions) ; Décisions
-  techniques, Fichiers, Documentation et Carnet sont rangés sous « Plus » (**Documentation**, ADR 0289 : les pages
-  de sa documentation — un espace à part de son dépôt — avec leur titre, leur version, leur dernière modification et
-  qui l'a faite, et ses images ; rien ne s'y édite : elle s'écrit dans l'espace de chaque personne, par elle en
-  exécution et par MCP) ; ses objectifs se lisent sous « Où il en est » et ses
-  accès sous « Cadre » (`Overview.joined` : leurs anciennes adresses y mènent) ; en tête, la principale (« Lancer
-  maintenant », ou « Reprendre » en pause) et « Donner une consigne », le reste sous « ⋯ ». L'inventaire de ses
-  actions, et l'onglet qui porte chacune, est gardé par `tests/protocol/test_project_fiche_tabs.py`.
-  *Où il en est* (dessinée, `app/handmade/subjects/project.py`, ADR 0177, 0281 : la
-  vue d'un objet de la maquette — un seul bandeau : sa pause ou ce qui le retient ; puis deux sous-onglets. « En
-  bref » : « Ce qui t'attend » en tête (`handmade/projets/_todo.html`) — un accord (tout effet proposé pendant son
-  travail, l'appel d'un service compris : la file « À valider » s'ouvre sur lui), son plan sans réponse, une demande
-  d'aide, ses pannes, un objectif bloqué, les tickets dont la main est à toi, un point d'arrêt dit prêt, des
-  relectures refusées deux fois, ce qui est à ta charge dans ses listes —, chaque ligne avec le bouton de son geste ;
-  sans attente, une ligne le dit ; une bande de chiffres « Où il en est », ses dernières exécutions
-  en barres ; ses missions (ses objectifs constants : leur cadence, ce qui les déclenche, leur dernier passage, ce
-  qui les a éveillées) et ses objectifs en cours (leurs jalons en jauge, leur branche et leur pull request, leurs
-  vérifications, leur relecture), une ligne chacun ; son plan et sa réponse (en tête s'il attend) ; puis des tuiles
-  qui mènent à leurs onglets : ce qui vient ensuite, ses dernières
-  exécutions, ses décisions en vigueur, son cadre, son dépôt ; la prochaine exécution se dit
-  comme la prochaine séance d'un but, `projects.inspect._next_words` : « dès que possible », sa date puis pourquoi
-  pas avant — son agenda ou l'espacement, sa plage de travail, la cadence de ses objectifs —, ou ce qui la retient)
-  · *Missions et objectifs* (le second sous-onglet de « Où il en est » : l'onglet `objectifs`, réuni ; dessiné,
-  `app/handmade/subjects/project.py` : ses chiffres, puis ses missions et ses objectifs ponctuels, chacun sous
-  son titre, le filtre — ouverts et bloqués, faits, retirés, tous — en bouton à choix dans l'en-tête de la liste ;
-  une entrée par objectif — son numéro, ce qu'il vise, sa sorte et son
-  état, son rythme et qui l'a posé, son dernier compte rendu en citation (long, quatre lignes que « lire la suite »
-  déplie) et ce qu'elle en a tiré ; ses boutons sur sa ligne, deux en vue (le lancer, le premier statut), « Modifier
-  l'objectif » en panneau, le reste sous « ⋯ » ; un constant ne se coche pas ; « Ajouter un objectif » en colonne à
-  côté de la liste sur un grand écran ; le rythme d'un constant dit aussi ce qui le déclenche — la base qui
-  avance ou un objectif abouti d'un projet qu'il lit, un signal d'app, un réveil par API —, s'il est sans cadence, et les causes
-  qui attendent son passage ; les deux formulaires d'un objectif ont « Déclenché par », un déclencheur par ligne,
-  « Sur événement seulement » et « Premier passage tout de suite » (ADR 0280) ; ses jalons (ADR 0273, `faculties/projects/inspect_milestones.py`) : sa ligne dit où
-  il en est — « jalons 2/4 », « un point d'arrêt t'attend » —, puis un jalon par ligne, son état, comment il se
-  vérifie, comment elle dit l'avoir rempli, sa preuve et le commit ; à côté de « Modifier l'objectif », « Valider ou
-  refuser le point d'arrêt » quand un jalon t'attend (refuser demande ta raison) et « Ajouter un jalon » ; un constant
-  n'a pas de jalons : sa liste « À chaque passage » se règle dans « Modifier l'objectif » et se lit sur sa ligne ; les deux formulaires
-  d'un objectif portent « Fini quand », son critère (ADR 0290 ; laissé vide, il ne change pas) ;
-  sur un projet qui passe par des pull requests (ADR 0274), sa branche de travail et sa pull request — proposée,
-  ouverte, changements demandés, fermée sans fusion, fusionnée — avec le lien vers sa page chez l'hôte, et où en
-  sont les vérifications de son commit (elles tournent, sont passées, ont échoué : ADR 0275) ; le flux du
-  projet se règle avec son dépôt distant, onglet Dépôt, et la proposition d'une pull request se décide dans
-  « À valider » avec son aperçu, comme un envoi ; « Sa relecture » (ADR 0276) : le dernier verdict de la relecture
-  indépendante de son travail — le commit relu, le fournisseur qui a relu, bon ou refusé —, ses constats, et les
-  deux avis quand la main t'est revenue ; le réglage « Relecture indépendante » — jamais, avant de sortir, à chaque
-  « fait » — est dans « Modifier le projet », sous « Sa liberté », et l'aperçu d'une pull request ou d'un envoi dit
-  le verdict du commit qui part)
-  · *Exécutions* (dessiné, `app/handmade/subjects/project.py`, jour par jour comme
-  Projets › Exécutions et sur les mêmes pièces, `handmade/projets/_runs.html` : ses chiffres en tuiles — exécutions,
-  sur 24 h face à son plafond, pannes d'affilée, la dernière —, puis chaque exécution sans le projet, c'est lui :
-  l'heure, l'objectif visé, son issue, le verdict et sa preuve, le compte rendu cité, le commit, la durée, et les
-  onglets de son épisode — prompt, outils, appels, décision — que la légende explique ; sans exécution, il le dit une
-  fois, sans chiffres ; la pagination reste celle de la console) · *Décisions techniques* (dessiné, comme
-  *Missions et objectifs* et sur les mêmes pièces, `handmade/projets/_fiche.html` :
-  une entrée par décision — la question tranchée et son statut, ce qui est choisi, pourquoi en citation, le contexte
-  et les options envisagées repliés, qui l'a posée, quand, ce qu'elle remplace ; sur sa ligne, la retirer ou la
-  remettre en vigueur et « Remplacer cette décision » en panneau ; remplacée ou retirée, elle s'estompe ; « Consigner
-  une décision » en colonne à côté ; sur la fiche d'un but, « Décisions » sont les pesées de l'arbitre) · *Fichiers*
-  (dessiné bloc par bloc, `app/handmade/blocks.py`, comme les autres onglets d'un moyen de communication et ceux d'un
-  but, son arborescence en table d'exploitation : la navigation « Dossier », un fichier ouvert à lire ou à
-  télécharger, la table du dossier, « Déposer un fichier » avec le formulaire de la console) · *Tickets* et *Suivi*
-  (son registre, ADR 0268, dessinés bloc par bloc comme *Fichiers*, en table d'exploitation : *Tickets* — le filtre
-  par étape avec ses comptes (les étapes de son parcours, ADR 0270 : proposé, non lu, en analyse, en attente de
-  décision, en attente de validation, validé en cours, traité, écarté), le ticket ouvert avec ses faits et à qui est
-  la main, son fil — sa question et son plan y sont nommés, le plan qui attend sa validation avec son numéro —,
-  « Noter » (y répondre à sa question) et « Trancher » (accepter, valider son plan avec ta consigne — celui que tu
-  as sous les yeux : réécrit entre-temps, il est refusé et à relire, ADR 0272 — ou le refuser avec ton commentaire,
-  écarter avec sa raison ou confirmer qu'elle l'écarte, fermer comme traité, rouvrir), le tableau paginé avec l'étape et « la main à » sur
-  chaque ligne, « Ouvrir un ticket » ; leur réglage — qui valide un plan, la borne d'un petit ticket, la publication
-  en issues — est dans Cadre, où un lien mène (ADR 0281). Sur un
-  ticket d'un projet qui reflète ses tickets : son issue, son état et son lien ; « Publier » tant qu'il n'en a pas,
-  puis « Publier cette note » (par son numéro, que son fil dit) — une demande, dont l'aperçu attend dans
-  « À valider » ; une issue ouverte chez l'hôte y arrive « proposée », ouverte par « quelqu'un chez l'hôte » ;
-  *Suivi* — ses listes en navigation avec ce qui y reste ouvert, le filtre par statut, l'élément ouvert
-  avec son fil, « Noter » et « Changer le statut », le tableau paginé, « Ajouter un élément » et « Créer ou régler
-  une liste » : son nom, son titre, ses statuts ouverts et clos, qui agit par défaut) · *Dépendances* (dessiné,
-  `handmade/projets/fiche_liens.html`, ADR 0257, 0271, 0281, 0290 : « Il dépend de » — chaque projet lu et ce que le lien
-  donne maintenant (ses fichiers compris, par la vue de son atelier, ADR 0260 : la colonne « la vue de son atelier »
-  dit le dernier commit de sa branche de base qu'elle montre), un lien suspendu le dit, ce que son plan demande sans
-  être lié aussi, et comment une demande y naîtrait (sur l'accord de son propriétaire, directe, aucune) —, « Choisir
-  ce qu'il lit » à côté, une case par projet qu'il peut lire et, sous chaque lien posé, celle de son mode direct ;
-  « Ses demandes : envoyées » (le ticket chez le projet visé, où il en est) et « Ses demandes : reçues » (les
-  tickets que d'autres projets ont ouverts chez lui, à qui la main), côte à côte ; « Dépendent de lui » ;
-  sur un ticket qu'un autre projet a ouvert, *Tickets* dit de quel projet vient la demande) · *Dépôt*
-  (dessiné, `app/handmade/subjects/project_git.py`, ADR 0183 : un seul bandeau — un
-  envoi qui attend ton accord, GitHub qui ne répond pas, ou les deux histoires qui ont divergé ; l'atelier et son
-  dépôt distant face à face, l'atelier avec sa branche, son dernier commit et ce qui n'est pas enregistré, le distant
-  avec son hôte, le bout de sa branche, ses issues et pull requests et quand il a été lu ; entre eux l'écart (à
-  pousser, à récupérer) et « Pousser maintenant », « Récupérer », « Relire », le geste qui comble l'écart en avant ;
-  puis des sous-onglets : l'historique paginé, ceux qui restent à pousser marqués, un commit ouvert en diff coloré
-  au-dessus ; ce qui n'est pas enregistré ; ses branches de travail (ADR 0281 : une par objectif — sa branche, sa
-  pull request et sa page chez l'hôte, les vérifications de son commit, le verdict de sa relecture) ; l'histoire du distant, ceux à récupérer marqués ; ses issues et ses pull
-  requests ouvertes, qui s'ouvrent sur GitHub ; les échanges passés et ce que git a répondu ; les réglages du
-  distant) · *Cadre* (dessiné, `handmade/projets/fiche_comportement.html`, ADR 0281, dans le gabarit du
-  paramétrage et en sous-onglets — « Ses réglages » : « Modifier le projet », le formulaire de la console, par
-  groupes — le projet, son mode, son rythme, sa liberté (la relecture indépendante y est) —, une ligne par réglage
-  et « Enregistrer » collé en bas ; ce que veut dire son mode et ses plafonds sont l'aide de leur réglage, sa
-  prochaine exécution une ligne au-dessus ; archivé, ses réglages en lecture ; « Outils et services » : les lots et
-  leurs noms, et « Choisir ses outils » à côté : les lots du code, puis une case par service MCP branché, ADR 0254 ;
-  « Accès » : l'onglet `acces`, réuni ; « Tickets et issues » : ce qui vaut maintenant — qui valide le plan d'un
-  ticket, la borne d'un petit ticket, ses fichiers protégés, la publication de ses tickets en issues, la fusion qui
-  reste à toi — et le formulaire qui le règle : toujours ou seulement pour ce qui n'est pas petit, les fichiers et
-  les lignes d'un petit ticket, les fichiers protégés ; publier ses tickets en issues chez l'hôte : jamais, sur ton
-  accord, toujours — ADR 0270, 0275)
-  · *Accès* (sous Cadre ; dessiné, ADR 0133, `app/handmade/subjects/project.py` : un tableau
+- **La fiche** gouverne, onglet par onglet, calquée sur l'écran Projets du client web (ADR 0297) : Vue d'ensemble,
+  Objectifs, Tickets, Code, Documentation, Activité, Dépendances (« Liens » jusqu'à l'ADR 0290), Listes (seulement
+  si le projet a une liste de suivi : `Overview.hidden` ; son adresse marche toujours, et Administration y mène pour
+  en créer une), Administration ; Objectifs et Tickets disent leur compte (ses objectifs ouverts — ponctuels et
+  missions, ce que montre « Ouverts » —, ses tickets ouverts) ; plus rien sous « Plus ». Administration porte « Accès » en sous-onglet (`Overview.joined`) ; les adresses des onglets d'avant mènent à ce
+  qui les a remplacés sans exécuter leur vue (`Overview.moved`, ADR 0297) — `fichiers` à Code, `decisions` à
+  Documentation › Décisions, `carnet` à Activité › Carnet. En tête, son nom, son état en pastilles, son mode et pour qui
+  (`handmade/projets/tete.html`), puis la principale (« Lancer maintenant », ou « Reprendre » en pause) et « Donner
+  une consigne », le reste sous « ⋯ ». L'inventaire de ses actions, et l'onglet qui porte chacune, est gardé par
+  `tests/protocol/test_project_fiche_tabs.py`.
+  **Son cadre** (`handmade/projets/cadre.html`, `static/handmade/projets_fiche.css` et `projets_zones.css` : le
+  dessin de l'écran sur les jetons de la console) : sous la barre d'onglets, le contenu de l'onglet sur toute la
+  largeur. La liste des projets n'y est pas : on y revient par le fil d'Ariane, comme l'écran par « ‹ Projets ». Les
+  trois zones — une liste, le contenu en volets, un panneau — valent pour un onglet en liste et détail, et la liste
+  est la sienne (ses objectifs, ses tickets) : *Objectifs*, *Tickets*, *Listes* et les sous-vues de *Code* les
+  posent eux-mêmes (`app/handmade/subjects/project_goals.py`, `project_diagram.py`, `project_tickets.py`,
+  `project_code.py`, leurs aides dans `project_zones.py`). Un choix d'élément est une adresse (`?objectif=`,
+  `?element=`, `?vue=pulls&pr=`), un volet un sous-onglet ; sur
+  un écran moyen le panneau se replie en bande, sur un téléphone la liste puis le détail (avec un retour), et le
+  panneau est un volet « Infos ». Chaque geste est une action déclarée, dont la console prépare le formulaire pour
+  l'objet choisi ; il s'ouvre dans le contenu ou dans le panneau.
+  *Vue d'ensemble* (dessinée, `app/handmade/subjects/project.py`, `handmade/projets/vue.html`, ADR 0297 : un seul
+  bandeau — sa pause ou ce qui le retient — puis une grille de cartes, sans rien d'imbriqué, chacune menant à son
+  onglet. « Où il en est » : son dernier compte rendu et son cadre. « Ce qui attend » : combien de choses attendent
+  quelqu'un, les trois premières et le reste replié — un accord (tout effet proposé pendant son travail, l'appel
+  d'un service compris : la file « À valider » s'ouvre sur lui), son plan sans réponse, une demande d'aide, ses
+  pannes, un objectif bloqué, les tickets dont la main est à toi, un point d'arrêt dit prêt, des relectures refusées
+  deux fois, ce qui est à ta charge dans ses listes —, chaque ligne avec depuis quand, à qui la main et le lien de
+  son geste. « Prochain passage » : quand, sur quoi, son rythme (« Régler » mène à ses réglages), ses missions avec
+  leur cadence et ce qui les déclenche ; la prochaine exécution se dit comme la prochaine séance d'un but,
+  `projects.inspect._next_words` : « dès que possible », sa date puis pourquoi pas avant, ou ce qui la retient.
+  « Objectifs » : quatre au plus, ceux en cours d'abord, leurs jalons en une barre — un segment par jalon : atteint,
+  dit prêt, refusé, commencé, à venir ; son plan en une ligne quand il n'attend rien, qui mène à Objectifs.
+  « Code » : son dépôt distant, ses pull requests ouvertes avec leurs vérifications et leur relecture, son dernier
+  commit. « Tickets » : leur répartition par étape du parcours, en une barre. « Dépendances » : ce qu'il lit, qui
+  le lit. « Dernières exécutions » : les deux dernières, leur verdict, leur compte rendu, leur épisode. Son plan,
+  en carte et en tête, seulement quand il attend sa réponse. Ni liste à gauche ni panneau à droite : trois colonnes
+  de cartes, où il en est et ce qui attend en tête ; chaque fait s'y dit une fois — son mode et pour qui sous son
+  nom, sa plage sur « Prochain passage », sa dernière exécution sur « Où il en est » ; ce que seul le portail dit
+  (ses identifiants, ses plafonds, ses pannes) est dans Administration › Sous le capot. Ce qu'elle dessine en barres
+  vient de `faculties/projects/glance.py`, la source que lit aussi l'API par personne)
+  · *Objectifs* (l'onglet `objectifs` ; dessiné, `app/handmade/subjects/project_goals.py`,
+  `handmade/projets/objectifs.html`, calqué sur l'onglet de l'écran : la bascule Liste | Diagramme. **En liste**,
+  trois zones. À gauche : « Ajouter un objectif », le filtre en pastilles — ouverts, faits, retirés, tous (celui de
+  sa vue, `?objectifs=`) —, puis une ligne serrée par objectif, par groupes (en cours, dans l'ordre du plan ;
+  missions ; terminés ; retirés) : un point à la couleur de son état, un autre quand un point d'arrêt attend, son
+  texte, ses jalons en une barre, « 1/4 », son dernier passage ; une mission dit sa cadence ; son plan, quand il
+  n'attend rien (la demande et le plan en mots, « Lui faire écrire un plan » ou « Demander une révision »). Au centre,
+  l'objectif choisi (`?objectif=<n°>`, le premier sinon) : « Lancer maintenant » et « Modifier » dans son en-tête,
+  puis ses volets — *Jalons* : ce dont elle a besoin, chaque jalon en étape avec son état (à faire, en cours, prêt à
+  valider, refusé, atteint), comment il se vérifie (sa parole, une commande, un point d'arrêt, un élément de son
+  registre et le statut attendu), comment elle dit l'avoir rempli, sa preuve repliée et son commit, la raison d'un
+  refus ; ses gestes sur sa ligne — « Valider le jalon » et « Refuser » (avec ta raison) pour un point d'arrêt dit
+  prêt, le modifier, le retirer tant qu'il est ouvert — ; « Ajouter un jalon » ; ses jalons retirés, repliés ; ce
+  que l'hôte a dit en dernier, cité tel quel ; *Comptes rendus* : ses dernières exécutions, leur verdict, leurs mots,
+  leur commit (chacun mène à son exécution), et « Sa relecture » (ADR 0276 : son verdict, ses constats, son dernier refus). Les formulaires
+  (« Modifier l'objectif », « Ajouter un jalon », « Modifier le jalon », « Ajouter un objectif ») s'ouvrent dans le
+  contenu, et ne montrent que ce qui vaut pour sa sorte : « Fini quand » pour un ponctuel ; sa cadence, « Déclenché
+  par » (un déclencheur par ligne), « Sur événement seulement », « À chaque passage » et « Premier passage tout de
+  suite » (ADR 0280) pour une mission. À droite : ce qui le dit fini, où il en est (ses jalons en barre, son état,
+  ses passages, son résultat, sa note), sa branche et sa pull request avec leur statut (ouverte, changements
+  demandés, fusionnée, fermée ; ses vérifications, ADR 0275 ; sa relecture ; ses conflits ; son lien chez l'hôte),
+  ses tickets liés, et « Gérer » : le rouvrir, le dire terminé, le dire bloqué, le retirer. Une mission montre ce
+  que chaque passage fait, ses derniers passages, et dans le panneau son rythme et ce qui la déclenche ; elle ne se
+  coche pas. **En diagramme** (`?vue=diagramme`, `project_diagram.py`, `handmade/projets/diagramme.html`) : une
+  ligne par objectif et par mission, ses jalons en retrait ; « Avancement » (`mode` absent : la part faite de
+  chacun, puis un mot) ou « Dans le temps » (`?mode=temps`, en jours ou en semaines par `?echelle=` : un axe, une
+  barre de quand elle s'y est mise à quand c'est atteint, le trait d'aujourd'hui, une flèche d'un objectif à celui
+  qui en dépend, ce qui n'a pas commencé en fantôme, sans date) ; dessiné côté serveur en SVG, à pixels fixes — la
+  piste défile en largeur dans son cadre ; choisir une ligne ouvre dans le panneau l'objectif (de quoi l'ouvrir, le
+  modifier, lui ajouter un jalon) ou le jalon (comment on le vérifie, ses dates, ses gestes). Ses lignes et leurs
+  dates viennent de `faculties/projects/diagram.py`, la source que lit aussi `GET …/diagramme` de l'API par
+  personne. Le flux du projet se règle avec son dépôt distant, onglet Code ; la proposition d'une pull request se
+  décide dans « À valider » avec son aperçu, comme un envoi ; le réglage « Relecture indépendante » est dans
+  Administration › Ses réglages)
+  · *Documentation* (ADR 0289, 0297 ; dessiné, `app/handmade/subjects/project_docs.py`,
+  `handmade/projets/documentation.html` et `_editeur.html`, `static/handmade/projets_docs.css`, `doc_editor.js` :
+  ses sous-onglets en adresses — *Pages* : l'arborescence et la recherche (`?q=`), « Nouvelle page » ; la page choisie
+  (`?page=<chemin>`, la page d'accueil sinon) rendue par le moteur — ses titres un cran plus bas que celui de la page,
+  ses tableaux en grilles, ses images servies par la console (`/admin/image/project/<n>`), une image d'ailleurs réduite
+  à son texte, une seule sorte de lien qui s'ouvre (vers une autre page de l'espace), aucun script — ; son panneau : son
+  sommaire, sa dernière modification (qui, par où, quand, son mot), ses versions, ses images ; « ⋯ » : ses versions,
+  la renommer ou la déplacer, la supprimer ; une version (`?version=<n>`) et « Revenir à cette version » ; l'éditeur
+  (`?modifier=1`, `?nouvelle=1`) : la barre d'outils, « Écrire | Aperçu | Les deux » (l'aperçu rendu par le moteur,
+  `/admin/apercu/project/<n>`), un mot sur ce qui a changé, l'insertion d'une image, téléverser une image sans perdre
+  son texte ; enregistrer nomme la version lue ; refusé, l'éditeur revient avec le texte tapé (qui n'est pas
+  enregistré : quitter la page le demande), et dit un conflit seulement si la page a bougé (la version actuelle à côté)
+  — une page créée sur un chemin pris dit qu'elle existe déjà ; recharger la page après coup n'est ni un refus ni un
+  conflit ; renommer vers un chemin pris revient, refusé, sur la page d'où l'on vient — *Images* (`?vue=images`) : la grille, téléverser, une
+  image choisie dans le panneau (son poids, qui l'a ajoutée, les pages qui la citent, « Copier son lien Markdown »,
+  « Retirer l'image ») — *Décisions* (`?vue=decisions`, les décisions techniques ; leur filtre en pastilles) : la
+  liste, une décision choisie (« La décision » : le choix, le contexte, la raison ; « Options écartées » ; dans le
+  panneau ce qu'elle remplace, ce qui l'a remplacée, l'objectif) ; « Nouvelle décision », « Modifier », « La remplacer
+  par une autre », « Retirer la décision », « Remettre en vigueur ») · *Activité* (ADR 0290, 0297 ; dessiné,
+  `project_activity.py`, `handmade/projets/activite.html`, `projets_activite.css`) — *Fil* : jour par jour, ses
+  exécutions, ses commits, ses pull requests, ses tickets et les gestes des personnes (`faculties/projects/feed.py`,
+  la fonction que lit l'API), ses filtres (une sorte, `?sorte=` ; un objectif, `?objectif=`), « Plus anciens » ; chaque
+  ligne mène à ce qu'elle nomme ; le panneau : trente jours en barres (en tête du fil seulement : une page plus
+  ancienne ne les relit pas), le prochain passage, qui a fait quoi —
+  *Exécutions* (`?vue=executions`) : la liste jour par jour (une exécution choisie garde sa page, `avant`), sa couleur
+  celle de son verdict, une issue en échec dite à côté ; une exécution choisie (`?execution=<corrélation>`) — son
+  compte rendu, ce qu'elle a demandé, ce qu'elle a fait pas à pas (sa trace), son verdict ; ses volets « Prompt »,
+  « Outils », « Appels », « Décision » (`?volet=`) sont les onglets de son épisode, dessinés par sa page ; le panneau :
+  en bref, l'objectif, son commit, « Son épisode » — *Carnet* (`?vue=carnet`) : ses notes en cartes, ses consignes, ce
+  qu'on en a fait, ce qui sort de la machine (une demande qui attend ton accord le dit, garde sa commande et mène à la
+  file « À valider »), chacun avec sa pagination) · l'ancien onglet *Fichiers* (l'arbre de travail de l'atelier)
+  n'est plus dessiné ni lu par la fiche : son adresse mène à Code › Fichiers, et ses blocs restent ceux de sa vue (la
+  console en MCP, le repli) · *Tickets* et *Listes*
+  (son registre, ADR 0268 ; dessinés, `app/handmade/subjects/project_tickets.py`, calqués sur l'écran, ADR 0297).
+  *Tickets* (`handmade/projets/tickets.html`), trois zones — à gauche la recherche (`?q=`), « Nouveau ticket », les
+  filtres en pastilles (ceux qui attendent le propriétaire, ouverts, tous : `?filtre=`), puis une ligne par ticket :
+  son numéro, son titre, son étape en pastille (les étapes de son parcours, ADR 0270), sa priorité quand elle est
+  haute, « ailleurs » pour ce qui vient de l'hôte ou d'un autre projet, un point quand la main est au
+  propriétaire ; au centre le ticket choisi (`?element=#<n°>`, le premier sinon) : dans son en-tête les gestes que
+  son étape ouvre — « Accepter le ticket », « Valider le plan » (celui que tu as sous les yeux : son numéro part
+  avec le formulaire, réécrit entre-temps il est refusé et à relire, ADR 0272 ; ton mot devient la consigne de son
+  objectif), « Refuser » avec ton commentaire, « Écarter » avec sa raison (ou confirmer qu'elle l'écarte),
+  « Fermer », « Rouvrir » — et « Modifier » ; puis ses volets : *Description* (en Markdown ; un texte venu
+  d'ailleurs cité tel quel, en texte brut), *Plan* (son plan et son numéro, ou pourquoi il n'y en a pas), *Fil*
+  (ses notes en bulles — elle, l'opérateur, une personne, l'hôte —, sa question nommée, et de quoi y écrire ou lui
+  répondre), *Historique* (ses passages d'étape en étape, rejoués du journal : quand, par qui) ; celui qui attend
+  s'ouvre le premier (son plan à valider, sa question) ; à droite son parcours en six étapes (ADR 0293 : non lu, en
+  analyse, validation, pull request, fusion, traité — celles qu'il saute en pointillé), « En bref » (à qui la main,
+  sa priorité, sa sorte, qui l'a ouvert, accepté, validé, fermé), et « Ce qui est lié » : l'objectif qui le tient,
+  sa pull request avec son statut (son état, ses vérifications, sa relecture, son lien chez l'hôte), son issue et
+  son état, le projet qui l'a demandé ; sur un projet qui reflète ses tickets, « Publier en issue chez l'hôte » tant
+  qu'il n'en a pas, puis « Publier une note de son fil » (par son numéro) — une demande, dont l'aperçu attend dans
+  « À valider ». Leur réglage — qui valide un plan, la borne d'un petit ticket, la publication en issues — est dans
+  Administration, où un lien mène (ADR 0281, 0297).
+  *Listes* (« Suivi » jusqu'à l'ADR 0297 ; `handmade/projets/listes.html`) — une pastille par liste, « n en cours
+  sur m », la bascule Colonnes | Tableau (`?vue=tableau`), « Régler », « Ajouter » ; par statut, une colonne
+  chacun, chaque élément en carte (son titre, sa clé, ses notes, à qui il est, depuis quand, son statut ; un liseré
+  quand il est à la charge du propriétaire) ; un élément choisi (`?element=<clé>`) ouvre le panneau : « Changer son
+  statut » (parmi ceux de la liste, avec un mot), « Le confier » (à elle, au propriétaire), ses faits, son texte, son
+  fil et de quoi y écrire, son historique ; « Ajouter » et « Régler » (son nom, son titre, ses statuts ouverts et
+  clos, qui agit par défaut) ouvrent leur formulaire dans ce panneau ; un projet sans liste propose d'en créer une)
+ · *Dépendances* (ADR 0257, 0271, 0293, 0297 ; dessiné, `project_links.py`, `handmade/projets/dependances.html`) —
+  *Schéma* : le projet au centre, « Il dépend de » (les projets qu'il lit) d'un côté, « Dépendent de lui » de
+  l'autre, chaque lien avec son pourquoi, ce qu'il donne (le voir, son détail, ses fichiers, sa documentation), le
+  commit que montre sa vue et ses demandes ; un lien choisi (`?lien=<n°>`) dans le panneau : son mot et « Changer ce
+  mot », ce que le lien donne, le commit de sa vue, ses demandes et leur mode (« Les faire entrer directement » quand
+  il le peut), « Lui demander quelque chose », « Ne plus le lire » ; « Ajouter une dépendance » (`?ajouter=1`) : les
+  projets qu'il peut lire, chacun avec son pourquoi ; chaque geste est `projects.liens`, avec l'état que la page a lu
+  (ce qu'il lit a changé depuis, dans un autre onglet : refusé, rien n'est défait), et revient sur le lien visé —
+  *Demandes*
+  (`?vue=demandes`) : celles qu'il a envoyées et reçues, l'une choisie avec son ticket, son étape, à qui la main)
+  · *Accès* (sous Administration ; dessiné, ADR 0133, `app/handmade/subjects/project.py` : un tableau
   de lignes lues de haut en bas — qui et par où (les mêmes cases qu'un service), quand, voir, piloter projet (lecture seule, accord du propriétaire, modification, aucun pilotage), fichiers, ce qu'elle fait d'un outil de ses apps qui lit et d'un
   outil qui agit, à quels outils —, « + Ajouter un accès » (une ligne fermée), chaque ligne montée, descendue ou
-  retirée, la dernière, obligatoire, le comportement par défaut ; jamais réglé, il le dit) · *Carnet* (dessiné, en
-  sous-onglets — consignes, ses notes, ce qu'on en a fait, ce qui sort de la machine —, chacun avec sa pagination ;
-  une demande qui attend ton accord le dit, garde sa commande et mène à la file « À valider »). En tête : lancer maintenant, pause, reprendre, consigne, archiver, restaurer — les formulaires
+  retirée, la dernière, obligatoire, le comportement par défaut ; jamais réglé, il le dit) · *Carnet* : sous Activité (voir plus haut). En tête : lancer maintenant, pause, reprendre, consigne, archiver, restaurer — les formulaires
   d'onglet (`inline`) et les actions de ligne n'y sont jamais.
 
 **Buts et rappels** (`app/handmade/tabs/goals.py`) : les buts vivants (filtrables par sorte, rappel ou exploration,
@@ -708,8 +792,19 @@ techniques sont dans « Détails techniques ».
 ### À valider
 
 Une seule file pour tout ce qui attend une décision (ADR 0177), une seule page : ses onglets — **Tout ce qui
-attend**, **Courriers à envoyer**, **Réponses Teams**, **Identités à confirmer**, **Noms à relier** — en sont des
-filtres, puis **Historique des autorisations**. « Tout » et l'historique sont ceux de la console
+attend**, **Courriers à envoyer**, **Réponses Teams**, **Identités à confirmer**, **Rapprochements** — en sont des
+filtres, puis **Historique des autorisations**. **Rapprochements** (ADR 0298) : deux fiches au même nom, côte à côte
+dans la liseuse (`QueueItem.body`), et pourquoi elles se ressemblent (le même nom, à l'initiale près, ou — plus
+faible — le même prénom, d'un côté sans nom de famille : une personne racontée, un expéditeur du téléphone). Deux
+fiches de l'annuaire sans identifiant commun (`ContactsPort.suggestions`) : « La même personne : réunir »
+(`contacts.rapprocher` : la plus vue garde l'autre) ou « Deux personnes différentes » (`contacts.ecarter` : elles ne
+se proposent plus). Une personne dont on lui a parlé que porte quelqu'un qui lui parle (la vue « Noms à relier » de
+l'identité, `waiting_names`) : « La même personne : relier… » (sa fiche, « C'est la personne dont on lui a parlé »
+pré-rempli : `identity.name_bound`, sa mémoire le sait, la collecte relie la fiche du nom) ou « Deux personnes
+différentes » (`identity.ecarter_nom`). L'onglet « Noms à relier » n'est plus (ADR 0298, lot 5) : chacun de ses
+couples est ici, avec ses deux réponses, et son adresse (`approbations/noms`, comme `identites/noms`) mène ici, la
+requête avec elle ; une fiche qui n'est qu'un nom raconté ne se propose pas face à une fiche reliée à quelqu'un qui
+lui parle (c'est ce couple-là, décidé par l'identité). « Tout » et l'historique sont ceux de la console
 (`inspector/pages/approvals.py`) ; les autres onglets et ce qui n'est pas une demande d'envoi (une identité à
 confirmer, un nom à relier, lus dans les vues de la faculté d'identité) viennent de la composition
 (`app/handmade/waiting.py`, `InspectorDeps.queue`). Ces deux vues sont hors de la navigation : la file est le seul

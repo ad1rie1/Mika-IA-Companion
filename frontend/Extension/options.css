@@ -100,6 +100,8 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .bad-text { color: var(--bad); }
 
 .note { margin: 0; }
+.card.stale { border-color: var(--warn); }
+.card.stale .note { color: var(--text); }
 
 .waiting { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
 .waiting li { display: flex; align-items: center; justify-content: space-between; gap: 8px; overflow-wrap: anywhere; }

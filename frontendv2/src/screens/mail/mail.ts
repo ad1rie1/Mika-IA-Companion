@@ -7,7 +7,6 @@
 import {
   editDraft,
   fetchBoxes,
-  fetchContacts,
   fetchDrafts,
   fetchMessage,
   fetchMessages,
@@ -25,7 +24,6 @@ import {
   showImages,
   tidy,
   MAIL_LIMITS,
-  type Contact,
   type Gesture,
   type MailBox,
   type MailDraft,
@@ -47,12 +45,10 @@ import type { ScreenContext, ScreenDef, ScreenTab, Shell } from "../../shell/she
 import { dayAndClock } from "../chat/markup";
 import * as store from "../../shared/store";
 import { bindCounts, bindPieces, bindRecipients, errorText, openAsk, openCompose, paintPieces, readRecipients, type ComposeValues } from "./compose";
-import { answerable, caps, clip, deleteTargets, draftNotWaiting, draftReply, forwardSubject, newNonce, outgoingText, parseAddresses, personName, replySubject, replyTargets, toFill, type Caps } from "./format";
+import { answerable, caps, clip, deleteTargets, draftNotWaiting, draftReply, forwardSubject, legacyContactsHash, newNonce, outgoingText, parseAddresses, personName, replySubject, replyTargets, toFill, writeToRoute, type Caps } from "./format";
 import {
   boxesPane,
   boxViews,
-  contactCard,
-  contactRow,
   draftRow,
   emptyList,
   filtersApply,
@@ -92,7 +88,6 @@ const ASK_POLL_MS = 10_000;
 const ASK_POLL_MAX_MS = 30 * 60_000;
 const REFRESH_MS = 60_000;
 const PAGE_SIZE = 25;
-const CONTACTS_SIZE = 100;
 
 const GESTURE_ICON: Record<Gesture, IconName> = { read: "check", unread: "mail", archive: "archive", flag: "star", unflag: "star", trash: "trash", move: "folder" };
 
@@ -106,22 +101,19 @@ export function draftHash(id: string): string {
 
 const MESSAGES_SKELETON = `<div class="split mail-split" data-mail-root="messages"><aside class="pane mb-pane" data-boxes></aside>
   <section class="pane ml-pane" data-list></section><section class="pane rd-pane"><div class="pane-scroll" data-rd></div></section></div>`;
-const CONTACTS_SKELETON = `<div class="split ct-split" data-mail-root="contacts"><aside class="pane" data-ct-pane></aside><section class="pane ct-pane" data-ct-card></section></div>`;
 
 export class MailScreen {
   private section: HTMLElement | null = null;
   private body: HTMLElement | null = null;
-  private mounted: "messages" | "contacts" | null = null;
+  private mounted: "messages" | null = null;
   private started = false;
   private stale = false;
   /** Ses boîtes, lues une première fois : le niveau d'une boîte décide de ce que la liseuse offre. */
   private boxesReady: Promise<void> = Promise.resolve();
   private draftsLoaded = false;
 
-  private readonly tabs: ScreenTab[] = [
-    { id: "messages", title: "Messages" },
-    { id: "contacts", title: "Contacts" },
-  ];
+  /** Ses correspondants sont dans l'écran Contacts (ADR 0298) : `#mail/contacts` y mène (`legacyContactsHash`). */
+  private readonly tabs: ScreenTab[] = [{ id: "messages", title: "Messages" }];
 
   // ses boîtes
   private boxes: MailBox[] = [];
@@ -166,15 +158,6 @@ export class MailScreen {
   private readonly asked = new Map<string, number>();
   private readTimer = 0;
   private askTimer = 0;
-
-  // les contacts
-  private contacts: Contact[] = [];
-  private contactsLoaded = false;
-  private contactQ = "";
-  private contact = "";
-  private contactMails: MailRow[] | null = null;
-  private contactSeq = 0;
-  private showingContact = false;
 
   private refreshTimer = 0;
   private searchTimer = 0;
@@ -243,15 +226,17 @@ export class MailScreen {
   }
 
   private render(body: HTMLElement, ctx: ScreenContext): void {
+    const moved = legacyContactsHash(location.hash);
+    if (moved) {
+      // l'ancien onglet Contacts : ses correspondants sont dans l'écran Contacts
+      location.replace(moved);
+      return;
+    }
     this.body = body;
-    const tab = ctx.tab === "contacts" ? "contacts" : "messages";
-    if (this.mounted !== tab || !$("[data-mail-root]", body)) {
-      // le corps change d'onglet : ce qu'on écrivait dans la réponse en place est gardé avant qu'il ne disparaisse
-      if (this.mounted === "messages") this.captureReply();
-      body.innerHTML = tab === "contacts" ? CONTACTS_SKELETON : MESSAGES_SKELETON;
-      this.mounted = tab;
-      if (tab === "messages") this.paintMessages();
-      else this.paintContactsPane();
+    if (this.mounted !== "messages" || !$("[data-mail-root]", body)) {
+      body.innerHTML = MESSAGES_SKELETON;
+      this.mounted = "messages";
+      this.paintMessages();
     }
     if (!this.started) {
       this.started = true;
@@ -262,15 +247,13 @@ export class MailScreen {
       this.stale = false;
       void this.refresh();
     }
-    if (tab === "messages") this.route(ctx.item);
-    else this.routeContact(ctx.item);
+    this.route(ctx.item);
     if (!this.refreshTimer) this.refreshTimer = window.setInterval(() => this.tick(), REFRESH_MS);
   }
 
   private async start(): Promise<void> {
     await Promise.all([this.boxesReady, this.loadDrafts()]);
     await this.loadList();
-    void this.loadContacts();
   }
 
   /** Revenue sur l'écran, ou toutes les minutes tant qu'il est ouvert : ses boîtes, ses brouillons, la liste. */
@@ -387,25 +370,6 @@ export class MailScreen {
     if (listHolds(ref, this.rows, this.total) === false) this.closeReader();
   }
 
-  private async loadContacts(): Promise<void> {
-    try {
-      this.contacts = await fetchContacts(this.contactQ.trim(), CONTACTS_SIZE);
-    } catch (err) {
-      this.contacts = [];
-      if (this.mounted === "contacts") toast(errorText(err), { ico: "alert" });
-    }
-    this.contactsLoaded = true;
-    if (!this.contactQ) {
-      const n = this.contacts.length;
-      this.tabs[1].count = n >= CONTACTS_SIZE ? `${CONTACTS_SIZE}+` : n || undefined;
-      this.shell.refreshHead();
-    }
-    if (this.mounted === "contacts") {
-      if (!this.contact && this.contacts[0] && !isMobile()) this.selectContact(this.contacts[0].address, false);
-      this.paintContactsList();
-      this.paintContactCard();
-    }
-  }
 
   // ── Les routes ─────────────────────────────────────────────────────
 
@@ -419,17 +383,17 @@ export class MailScreen {
       }
       return;
     }
+    const to = writeToRoute(item);
+    if (to) {
+      // Contacts › « Écrire » : un mail nouveau, le destinataire posé ; la route revient à la liste
+      history.replaceState(null, "", "#mail/messages");
+      void this.boxesReady.then(() => this.newMail([to]));
+      return;
+    }
     if (item.startsWith("brouillon/")) this.openDraft(item.slice("brouillon/".length));
     else this.openMail(item);
   }
 
-  private routeContact(item: string | null): void {
-    if (item) {
-      this.showingContact = true;
-      if (item !== this.contact) this.selectContact(item, true);
-    } else this.showingContact = false;
-    this.paintContactSplit();
-  }
 
   /** La liseuse quitte son mail : une réponse commencée (ou qui part encore) y reste, pour quand on le rouvre. */
   private leaveReader(): void {
@@ -1180,68 +1144,6 @@ export class MailScreen {
     }
   }
 
-  // ── Les contacts ───────────────────────────────────────────────────
-
-  private paintContactsPane(): void {
-    if (this.mounted !== "contacts" || !this.body) return;
-    const pane = $("[data-ct-pane]", this.body);
-    if (pane) {
-      pane.innerHTML = `<div class="pane-head"><label class="search grow">${ico("search", "sm")}<input type="search" placeholder="Chercher un contact" data-qc value="${h(this.contactQ)}" aria-label="Chercher un contact" maxlength="${MAIL_LIMITS.contacts}"></label></div>
-        <div class="pane-scroll" data-ct-list></div>`;
-    }
-    this.paintContactsList();
-    this.paintContactCard();
-    this.paintContactSplit();
-  }
-
-  private paintContactsList(): void {
-    const host = this.body && $("[data-ct-list]", this.body);
-    if (!host) return;
-    const now = Date.now();
-    host.innerHTML = !this.contactsLoaded
-      ? emptyList("refresh", "Chargement…", "Ses correspondants se lisent.")
-      : this.contacts.length
-        ? this.contacts.map((c) => contactRow(c, this.contact, now)).join("")
-        : this.contactQ
-          ? emptyList("search", "Personne", `Aucun correspondant ne répond à « ${this.contactQ} ».`)
-          : emptyList("users", "Aucun correspondant", "Les personnes qui t'écrivent, et à qui tu écris, arrivent ici.");
-  }
-
-  private paintContactCard(): void {
-    const host = this.body && $("[data-ct-card]", this.body);
-    if (!host) return;
-    const c = this.contacts.find((x) => x.address === this.contact) ?? (this.contact ? { address: this.contact, name: "", received: 0, sent: 0, last: 0 } : null);
-    host.innerHTML = c
-      ? contactCard(c, this.contactMails, Date.now(), this.writable().length > 0, isMobile(), this.boxMap())
-      : `<div class="pane-scroll">${readerEmpty("user", "Choisis un correspondant", "Ses moyens de communication et ses derniers mails s'affichent ici.")}</div>`;
-  }
-
-  private paintContactSplit(): void {
-    if (this.mounted !== "contacts" || !this.body) return;
-    $(".ct-split", this.body)?.classList.toggle("lire", this.showingContact);
-  }
-
-  private selectContact(address: string, paint: boolean): void {
-    this.contact = address;
-    this.contactMails = null;
-    const seq = ++this.contactSeq;
-    fetchMessages({ q: address, size: 20 })
-      .then((page) => {
-        if (seq !== this.contactSeq) return;
-        this.contactMails = page.items.filter((m) => m.from.address.toLowerCase() === address.toLowerCase()).slice(0, 5);
-        this.paintContactCard();
-      })
-      .catch(() => {
-        if (seq !== this.contactSeq) return;
-        this.contactMails = [];
-        this.paintContactCard();
-      });
-    if (paint) {
-      this.paintContactsList();
-      this.paintContactCard();
-    }
-  }
-
   // ── Les gestes ─────────────────────────────────────────────────────
 
   private mount(section: HTMLElement): void {
@@ -1334,17 +1236,6 @@ export class MailScreen {
       const d = this.openedDraft();
       if (d) void this.decide(b.dataset.decide ?? "", d);
     });
-    on(section, "[data-ecrire-a]", "click", (_e, b) => {
-      const address = b.dataset.ecrireA ?? "";
-      const c = this.contacts.find((x) => x.address === address);
-      this.newMail([{ name: c?.name ?? "", address }]);
-    });
-    on(section, "[data-contact]", "click", (_e, b) => this.go(`#mail/contacts/${encodeURIComponent(b.dataset.contact ?? "")}`));
-    on(section, "[data-retour-c]", "click", () => {
-      this.showingContact = false;
-      this.paintContactSplit();
-      history.replaceState(null, "", "#mail/contacts");
-    });
     section.addEventListener("input", (e) => {
       const t = e.target as HTMLInputElement;
       if (t.matches("[data-mq]")) {
@@ -1360,11 +1251,6 @@ export class MailScreen {
             this.paintRows();
           } else void this.loadList({ quiet: false });
         }, 280);
-      }
-      if (t.matches("[data-qc]")) {
-        window.clearTimeout(this.searchTimer);
-        this.contactQ = t.value;
-        this.searchTimer = window.setTimeout(() => void this.loadContacts(), 250);
       }
     });
     section.addEventListener("keydown", (e) => {
@@ -1579,9 +1465,6 @@ export class MailScreen {
     }));
     for (const d of this.drafts.filter((x) => x.state === "attend")) {
       out.push({ group: "Ses brouillons", title: d.subject || "(sans objet)", sub: `à ${d.to} · attend ton accord`, icon: "pen", route: draftHash(d.id) });
-    }
-    for (const c of this.contacts.slice(0, 40)) {
-      out.push({ group: "Contacts", title: c.name || c.address, sub: c.address, icon: "user", route: `#mail/contacts/${encodeURIComponent(c.address)}` });
     }
     return out;
   }

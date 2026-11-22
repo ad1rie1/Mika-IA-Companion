@@ -1,0 +1,315 @@
+{# Activité › Projets › un projet › Code (app/handmade/subjects/project_code.py::code_page, ADR 0297) : l'onglet Code
+   de l'écran Projets, sur les jetons de la console. Sa barre de sous-onglets (des adresses : Fichiers, Commits, Pull
+   requests, Branches, Issues, CI) et, à son bout, son dépôt distant (qui mène à « l'atelier face au distant ») et
+   quand l'hôte a été relu (« relire »). Puis la sous-vue, dans les trois zones quand elle a une liste et un détail :
+   la liste, le contenu (en volets : ``[data-subtabs]``), le panneau (sur un téléphone, le volet « Infos »).
+   Tout contenu de fichier, de diff ou de l'hôte est du texte échappé ; ce qui vient d'ailleurs se dit. Aucun style
+   ni script en ligne. #}
+{% from "handmade/projets/_morceaux.html" import ico, st, tile %}
+{% from "handmade/projets/_zones.html" import pform, pone, ppop, pull, outside, plumbing, jalon %}
+{% from "_navigation.html" import pager as pagerbar %}
+{% from "handmade/projets/_code.html" import src, diffzone, filesum, timeline, cside, runs, remark, brpick, lies, mergeblock %}
+{% macro infos(label) -%}
+<div class="pj-volets solo"><nav class="hm-subnav" aria-label="Ce qu'on en lit"><a href="#" aria-current="true">{{ label }}</a></nav><label for="pj-infos" class="pj-v-infos">Infos</label></div>
+{%- endmacro %}
+<div class="pj-code" data-tab="project/git">
+  <div class="pj-cbar">
+    <nav class="pj-csub" aria-label="Son code">{% for b in bar %}<a href="{{ b.href }}"{% if b.on %} aria-current="page"{% endif %}>{{ b.label }}{% if b.count is not none %}<span class="pj-cnt">{{ b.count }}</span>{% endif %}</a>{% endfor %}</nav>
+    <div class="pj-cbar-side">
+      <a class="pj-remote{{ ' on' if view == 'distant' }}" href="{{ remote.href }}" title="L'atelier face au dépôt distant : pousser, récupérer, ses réglages">{{ ico('globe', 'xs') }}<span>{{ remote.text or 'aucun dépôt distant' }}</span></a>
+      {% if remote.fresh %}<a class="pj-relu" href="{{ remote.fresh }}" title="Relire chez l'hôte maintenant">{{ ico('refresh' if not remote.seen else 'check', 'xs') }}{{ ('relu ' ~ remote.seen) if remote.seen else 'relire' }}</a>{% endif %}
+    </div>
+  </div>
+  {% for n in notes if view != 'distant' %}{% if n.text != 'Ce diff est trop long pour tenir ici : les fichiers coupés se relisent un à un (« path »).' %}<p class="pj-banner {{ 'fail' if n.tone in ('warn', 'danger') else 'wait' }} pj-cnote">{{ ico('info', 'xs') }}<span>{{ n.text }}</span></p>{% endif %}{% endfor %}
+
+  {% if view == 'distant' %}
+  <div class="pj-legacy">{{ legacy }}</div>
+
+  {% elif view == 'fichiers' %}
+  {% if norepo %}
+  <div class="pj-empty big" id="fichiers">{{ tile('code') }}<b>Le code de ce projet</b><p>Ses fichiers, ses commits, ses pull requests, ses branches, ses issues et sa CI s'ouvrent ici, dès la première exécution qui écrit — ou dès un premier fichier déposé.</p>
+    <div class="pj-decide row">{% if can_add %}<a class="btn" href="{{ add_href }}">{{ ico('upload', 'xs') }}Déposer un fichier</a>{% endif %}<a class="btn quiet" href="{{ remote.href }}">{{ ico('globe', 'xs') }}Le dépôt distant</a></div></div>
+  {% if adding %}<div class="pj-c pj-alone">{{ pform(adding, "Déposer un fichier", "Dans l'atelier, pour qu'elle s'en serve : une donnée, un exemple, un modèle.", home, "Déposer", "upload") }}</div>{% endif %}
+  {% else %}
+  <div class="pj-split pj-files{{ ' lire' if lire }}" id="fichiers">
+    <aside class="pj-list" aria-label="Ses fichiers">
+      <div class="pj-tools">{{ brpick(ref, branches) }}{% if can_add %}<a class="btn quiet pj-add-btn" href="{{ add_href }}"{% if adding %} aria-current="page"{% endif %} title="Déposer un fichier dans l'atelier">{{ ico('upload', 'xs') }}<span>Déposer</span></a>{% endif %}</div>
+      <nav class="pj-tree" aria-label="L'arborescence">
+        {% for e in tree %}{% if e.hidden %}<span class="pj-node d{{ e.depth }} cache" title="Un fichier ou un dossier caché ne se lit pas d'ici">{{ ico('eyeoff', 'xs') }}<span>{{ e.name }}</span></span>
+        {% else %}<a class="pj-node d{{ e.depth }}{{ ' dir' if e.dir }}" href="{{ e.href }}"{% if e.on %} aria-current="true"{% endif %}>{% if e.dir %}{{ ico('down' if e.open else 'chev', 'xs') }}{{ ico('folder', 'xs') }}{% else %}{{ ico('file', 'xs') }}{% endif %}<span>{{ e.name }}</span></a>{% endif %}
+        {% else %}<p class="pj-none pad">Ce dossier est vide.</p>{% endfor %}
+      </nav>
+    </aside>
+    <div class="pj-detail">
+      <a class="pj-back" href="{{ home }}">{{ ico('back', 'xs') }}Fichiers</a>
+      {% if adding %}
+      <div class="pj-c">{{ pform(adding, "Déposer un fichier", "Dans l'atelier, pour qu'elle s'en serve : une donnée, un exemple, un modèle. Elle le lira à sa prochaine exécution.", home, "Déposer", "upload") }}</div>
+      {% elif file %}{% set f = file %}
+      <header class="pj-ph"><code class="pj-crumbs">{% for part in f.parts %}{% if loop.last %}<b>{{ part }}</b>{% else %}{{ part }}<i>/</i>{% endif %}{% endfor %}</code>{% if f.home %}<span class="pj-kind">la page d'accueil du dépôt</span>{% endif %}
+        <span class="pj-grow"></span>{% if f.lines %}<span class="pj-lines">{{ f.lines }} ligne{{ 's' if f.lines > 1 }}</span>{% endif %}
+        {% if f.md %}<nav class="seg pj-dmode" aria-label="La forme du fichier"><a href="{{ f.md_links.rendu }}"{% if not f.source %} aria-current="true"{% endif %}>{{ ico('eye', 'xs') }}Rendu</a><a href="{{ f.md_links.source }}"{% if f.source %} aria-current="true"{% endif %}>{{ ico('code', 'xs') }}Source</a></nav>{% endif %}</header>
+      <div class="pj-dz">
+        <input type="checkbox" id="pj-infos" class="sr pj-infos-box" data-volet>
+        <div class="pj-main">{{ infos("Fichier") }}
+          <div class="pj-vbody">
+            {% if f.why %}<div class="pj-nothing">{{ ico('file') }}<b>{{ f.kind }}</b><p>{{ f.why }}</p></div>
+            {% elif f.html %}<div class="pj-md pj-readme">{{ f.html }}</div>
+            {% else %}{{ src(f.src) }}{% endif %}
+          </div>
+        </div>
+        <aside class="pj-side" aria-label="Infos">
+          <section class="pj-sc"><h3>Dernier commit</h3>{% if f.last %}{{ cside(f.last) }}{% else %}<p class="pj-none">Aucun commit ne le touche sur cette branche.</p>{% endif %}</section>
+          <section class="pj-sc"><h3>Le fichier</h3>
+            <dl class="pj-props"><div><dt>Branche</dt><dd><span class="pj-br">{{ ico('branch', 'xs') }}<span>{{ ref }}</span></span></dd></div>{% if f.lines %}<div><dt>Lignes</dt><dd>{{ f.lines }}</dd></div>{% endif %}<div><dt>Poids</dt><dd>{{ f.size }}</dd></div><div><dt>Langage</dt><dd>{{ f.language }}</dd></div></dl>
+            {% if f.url %}<a class="pj-out-link" href="{{ f.url }}" rel="noopener noreferrer nofollow" target="_blank">Voir chez l'hôte{{ ico('external', 'xs') }}</a>{% endif %}
+            {% if f.download %}<a class="pj-more-link" href="{{ f.download }}">{{ ico('upload', 'xs') }}Télécharger la copie de l'atelier</a>{% endif %}
+          </section>
+          {% if f.history %}<section class="pj-sc"><h3>Son historique<span class="pj-cnt">{{ f.total }}</span></h3>{% for k in f.history %}{{ cside(k) }}{% endfor %}</section>{% endif %}
+        </aside>
+      </div>
+      {% else %}
+      <div class="pj-empty">{{ tile('file') }}<b>Choisis un fichier</b><p>Son contenu, son dernier commit et son historique s'ouvrent ici.</p></div>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% elif view == 'commits' %}
+  <div class="pj-split pj-cmts{{ ' lire' if lire }}">
+    <aside class="pj-list" aria-label="Ses commits">
+      <div class="pj-tools">{{ brpick(ref or 'Toutes les branches', branches) }}<span class="pj-lines">{{ total }} commit{{ 's' if total != 1 }}</span></div>
+      <nav class="pj-timeline" aria-label="Ses commits, par jour">{{ timeline(days) }}{% if not days %}<p class="pj-none pad">Aucun commit encore.</p>{% endif %}</nav>
+      {% if pages %}<nav class="pj-pages" aria-label="Pages">{% if pages.newer %}<a class="btn quiet" href="{{ pages.newer }}">{{ ico('back', 'xs') }}Plus récents</a>{% endif %}<span>{{ pages.said }}</span>{% if pages.older %}<a class="btn quiet" href="{{ pages.older }}">Plus anciens{{ ico('chev', 'xs') }}</a>{% endif %}</nav>{% endif %}
+    </aside>
+    <div class="pj-detail">
+      <a class="pj-back" href="{{ bar[1].href }}">{{ ico('back', 'xs') }}Commits</a>
+      {% if commit %}{% set k = commit %}
+      <header class="pj-dh">{{ tile('merge' if k.merge else 'commit', 'done' if k.merge else '') }}
+        <div class="pj-dh-main"><p class="pj-over">{{ 'Commit de fusion' if k.merge else 'Commit' }}</p><h2>{{ k.title }}</h2>
+          <p class="pj-meta"><span>{{ ico('user', 'xs') }}{{ k.author }}</span><span title="{{ k.at }}">{{ k.ago }}</span>{% if k.branch %}<span class="pj-br">{{ ico('branch', 'xs') }}<span>{{ k.branch }}</span></span>{% endif %}{% if k.outside %}<span class="pj-st out">venu d'ailleurs</span>{% endif %}</p></div>
+        <div class="pj-dh-side"><code class="pj-sha" title="Son empreinte">{{ ico('commit', 'xs') }}{{ k.sha[:12] }}</code></div></header>
+      <div class="pj-dz">
+        <input type="checkbox" id="pj-infos" class="sr pj-infos-box" data-volet>
+        <div class="pj-main">{{ infos("Diff") }}
+          <div class="pj-vbody">
+            {% set intro %}{% if k.message %}{% if k.outside %}{{ outside("le message de ce commit, venu du dépôt distant", k.message, True) }}{% else %}<p class="pj-lede pre">{{ k.message }}</p>{% endif %}{% endif %}{% endset %}
+            {{ diffzone(k.diff, k.toggle, intro) }}
+          </div>
+        </div>
+        <aside class="pj-side" aria-label="Infos">
+          <section class="pj-sc"><h3>Fichiers changés</h3>{{ filesum(k.diff) }}</section>
+          <section class="pj-sc"><h3>Le commit</h3>
+            <dl class="pj-props"><div><dt>Auteur</dt><dd>{{ k.author }}{% if k.outside %} <span class="pj-st out">ailleurs</span>{% endif %}</dd></div><div><dt>Quand</dt><dd>{{ k.at }}</dd></div>{% if k.branch %}<div><dt>Branche</dt><dd><span class="pj-br">{{ ico('branch', 'xs') }}<span>{{ k.branch }}</span></span></dd></div>{% endif %}<div><dt>Empreinte</dt><dd><code>{{ k.short }}</code></dd></div></dl>
+            {% if k.url %}<a class="pj-out-link" href="{{ k.url }}" rel="noopener noreferrer nofollow" target="_blank">Voir chez l'hôte{{ ico('external', 'xs') }}</a>{% endif %}
+          </section>
+          <section class="pj-sc"><h3>Ce qui est lié</h3>{{ lies(k.linked) }}</section>
+        </aside>
+      </div>
+      {% else %}
+      <div class="pj-empty">{{ tile('commit') }}<b>{{ "Choisis un commit" if days else "Pas encore de commit" }}</b><p>Son message, ses fichiers changés et son diff s'ouvrent ici.</p></div>
+      {% endif %}
+    </div>
+  </div>
+
+  {% elif view == 'pulls' %}
+  <div class="pj-split pj-prs{{ ' lire' if lire }}">
+    <aside class="pj-list" aria-label="Ses pull requests">
+      <div class="pj-lhead"><h2>Pull requests</h2><span>{{ open }} ouverte{{ 's' if open != 1 }}</span></div>
+      {% for r in rows %}
+      <a class="pj-row{{ ' atoi' if r.yours }}" href="{{ r.href }}"{% if r.on %} aria-current="true"{% endif %}>{{ tile('merge' if r.merged else 'pr', r.tone) }}<span class="pj-row-main"><b>{{ r.title }}</b><span class="pj-row-sub">{{ st(r.tone, r.state) }}{% if r.n %}<span>n° {{ r.n }}</span>{% endif %}<time>{{ r.ago }}</time></span></span></a>
+      {% else %}<p class="pj-none pad">Aucune pull request : elle en ouvre une quand un objectif a du code à faire entrer.</p>{% endfor %}
+    </aside>
+    <div class="pj-detail">
+      <a class="pj-back" href="{{ bar[2].href }}">{{ ico('back', 'xs') }}Pull requests</a>
+      {% if pr %}{% set d = pr %}
+      <header class="pj-dh">{{ tile('merge' if d.stage == 'merged' else 'pr', d.tone) }}
+        <div class="pj-dh-main"><p class="pj-over">{% if d.n %}Pull request n° {{ d.n }}{% else %}Pull request{% endif %}</p><h2>{{ d.title }}</h2>
+          <p class="pj-meta">{{ st(d.tone, d.state) }}<span class="pj-branchline"><span class="pj-br">{{ ico('branch', 'xs') }}<span>{{ d.branch or '—' }}</span></span>{{ ico('chev', 'xs') }}<span class="pj-br">{{ ico('branch', 'xs') }}<span>{{ d.base }}</span></span></span>{% if d.ago %}<span>{{ 'fusionnée' if d.stage == 'merged' else 'fermée' if d.stage == 'closed' else 'ouverte' }} {{ d.ago }}</span>{% endif %}</p></div>
+        <div class="pj-dh-side">{% if d.edit %}<a class="btn quiet" href="#pr-modifier">{{ ico('pen', 'xs') }}Modifier</a>{% endif %}{% if d.url %}<a class="btn quiet" href="{{ d.url }}" rel="noopener noreferrer nofollow" target="_blank">{{ ico('external', 'xs') }}Voir chez l'hôte</a>{% endif %}</div></header>
+      <div class="pj-dz">
+        <input type="checkbox" id="pj-infos" class="sr pj-infos-box" data-volet>
+        <div class="pj-main" data-subtabs>
+          <div class="pj-volets"><nav class="hm-subnav" aria-label="Ce qu'on en lit">
+            <a href="#pr-resume">Résumé</a><a href="#pr-commits">Commits<span class="pj-cnt">{{ d.commits|length }}</span></a><a href="#pr-fichiers">Fichiers<span class="pj-cnt">{{ d.diff.files|length }}</span></a><a href="#pr-echanges">Échanges<span class="pj-cnt">{{ d.talk|length }}</span></a>
+          </nav><label for="pj-infos" class="pj-v-infos">Infos</label></div>
+          <div class="hm-subpanes pj-vbody">
+            <section id="pr-resume" class="pj-c" data-pane>
+              {% if d.done_when %}<h3 class="pj-h3">Fini quand</h3><p class="pj-lede">{{ d.done_when }}</p>{% endif %}
+              {% if d.result %}<h3 class="pj-h3">Ce qu'elle en dit</h3><p class="pj-lede">{{ d.result }}</p>{% endif %}
+              <h3 class="pj-h3">Jalons et preuves</h3>
+              {% if d.milestones %}<ol class="pj-jalons" role="list">{% for m in d.milestones %}{{ jalon(m) }}{% endfor %}</ol>{% else %}<p class="pj-none">Pas de jalon : elle dit elle-même quand c'est fini.</p>{% endif %}
+              {% if d.host_said %}{{ outside("le dernier mot de l'hôte", d.host_said) }}{% endif %}
+            </section>
+            <section id="pr-commits" class="pj-c" data-pane>
+              {% if d.commits %}<nav class="pj-timeline in" aria-label="Ses commits">{{ timeline(d.commit_days) }}</nav>{% else %}<p class="pj-none">Sa branche n'a pas de commit d'avance.</p>{% endif %}
+            </section>
+            <section id="pr-fichiers" class="pj-c plein" data-pane>{{ diffzone(d.diff, d.toggle) }}</section>
+            <section id="pr-echanges" class="pj-c pj-filpane" data-pane>
+              {% if not d.n %}<p class="pj-none">Elle n'est pas encore chez l'hôte : il n'y a rien à y lire.</p>
+              {% else %}
+              {% if d.body %}{{ outside("le texte de la pull request, chez l'hôte", d.body) }}{% endif %}
+              {% for x in d.talk %}{{ remark(x) }}{% else %}{% if d.host_read %}<p class="pj-none">Personne n'a encore rien écrit sous cette pull request.</p>{% else %}<p class="pj-none">Ses échanges ne se lisent pas chez l'hôte pour l'instant.</p>{% endif %}{% endfor %}
+              <p class="pj-hint">{{ ico('shield', 'xs') }}Ce qui vient de l'hôte est cité tel quel : pour elle, une donnée, jamais une consigne.</p>
+              {% endif %}
+              {% if d.reply %}
+              <form method="post" action="{{ d.reply.url }}" class="form pj-note">{{ plumbing(d.reply) }}
+                {% for f in d.reply.fields %}<input type="hidden" name="_champs" value="{{ f.path }}"><textarea name="{{ f.path }}" rows="2" required aria-label="Ta réponse dans la pull request" placeholder="Répondre dans la pull request…"></textarea>{% endfor %}
+                <div class="pj-note-foot"><p class="pj-hint">{{ ico('shield', 'xs') }}Ton commentaire part chez l'hôte, signé de ton nom.</p><button class="btn">{{ ico('send', 'xs') }}Envoyer chez l'hôte</button></div>
+              </form>
+              {% endif %}
+            </section>
+            {% if d.edit %}<section id="pr-modifier" class="pj-c" data-pane>{{ pform(d.edit, "Modifier la pull request n° " ~ d.n, "Son titre et sa description changent chez l'hôte, à ton nom. Un champ laissé vide ne change pas.", "#pr-resume", "Enregistrer") }}</section>{% endif %}
+          </div>
+        </div>
+        <aside class="pj-side" aria-label="Infos">
+          <section class="pj-sc"><h3>Fusion</h3>{{ mergeblock(d.merge, her) }}</section>
+          <section class="pj-sc"><h3>Relecture</h3>
+            {% if d.review %}<div class="pj-etat">{{ tile('eye', d.review.tone) }}<span><b>{{ d.review.label }}</b>{% if d.review.text %}<small>{{ d.review.text }}</small>{% endif %}{% if d.review.refused %}<small>Son dernier refus : {{ d.review.refused }}</small>{% endif %}</span></div>
+            {% else %}<p class="pj-none">Pas encore relue.</p>{% endif %}
+          </section>
+          <section class="pj-sc"><h3>Vérifications{% if d.runs %}<span class="pj-st out" title="Leurs noms viennent de l'hôte : cités tels quels">hôte</span>{% endif %}{% if d.checks %}{{ st(d.checks.tone, d.checks.state) }}{% endif %}</h3>
+            {% if d.runs %}{{ runs(d.runs) }}<a class="pj-more-link" href="{{ d.checks.href if d.checks else '#' }}">Le détail, et la fin du journal{{ ico('chev', 'xs') }}</a>
+            {% elif d.checks %}<a class="pj-more-link" href="{{ d.checks.href }}">Les vérifications de son dernier commit{{ ico('chev', 'xs') }}</a>
+            {% else %}<p class="pj-none">La CI n'a pas encore tourné.</p>{% endif %}
+          </section>
+          <section class="pj-sc"><h3>Conflits</h3>
+            <div class="pj-etat">{{ tile('merge', 'fail' if d.conflicts else 'done') }}<span><b>{{ 'À résoudre' if d.conflicts else 'Aucun' }}</b><small>avec {{ d.base }}{% if d.changes %} · des changements sont demandés{% endif %}{% if d.unsent %} · un commit n'est pas encore envoyé{% endif %}</small></span></div>
+          </section>
+          {% if d.branch %}<section class="pj-sc"><h3>Sa branche</h3>
+            <a class="pj-lie" href="{{ d.branch_href }}">{{ tile('branch', 'work') }}<span class="pj-mini-main"><b><code>{{ d.branch }}</code></b><small>{{ d.commits|length }} commit{{ 's' if d.commits|length != 1 }} d'avance{% if d.head %} · tête <code>{{ d.head[:7] }}</code>{% endif %}</small></span>{{ ico('chev', 'xs') }}</a>
+          </section>{% endif %}
+          <section class="pj-sc"><h3>Ce qui est lié</h3>{{ lies({"objective": d.objective, "ticket": d.ticket}) }}</section>
+        </aside>
+      </div>
+      {% elif missing %}
+      <div class="pj-empty">{{ tile('pr') }}<b>Aucune pull request « {{ missing }} »</b><p>Elle n'est pas dans ce projet.</p></div>
+      {% else %}
+      <div class="pj-empty">{{ tile('pr') }}<b>{{ "Choisis une pull request" if rows else "Aucune pull request" }}</b><p>Son état, ses commits et son diff s'ouvrent ici.</p></div>
+      {% endif %}
+    </div>
+  </div>
+
+  {% elif view == 'branches' %}
+  <div class="pj-split sans-liste pj-brs{{ ' lire' if lire }}">
+    <div class="pj-detail">
+      <div class="pj-dz{{ ' sans-cote' if not panel }}">
+        <div class="pj-main">
+          {% if items %}
+          <div class="pj-tablewrap table-block"><table class="pj-btable">
+            <thead><tr><th scope="col">Branche</th><th scope="col">Pour</th><th scope="col">Retard · avance sur {{ base }}</th><th scope="col">Dernier commit</th><th scope="col">Pull request</th><th scope="col">CI</th></tr></thead>
+            <tbody>{% for b in items %}<tr{% if b.on %} class="on"{% endif %}>
+              <td><a class="pj-brname" href="{{ b.href }}"{% if b.on %} aria-current="true"{% endif %}>{{ ico('branch', 'xs') }}<code>{{ b.name }}</code></a>{% if b.base %}<span class="pj-kind">par défaut</span>{% endif %}</td>
+              <td>{% if b.ticket %}<span class="pj-chip">{{ ico('ticket', 'xs') }}Ticket #{{ b.ticket }}</span>{% elif b.objective %}<span class="pj-chip">{{ ico('target', 'xs') }}Objectif n° {{ b.objective }}</span>{% else %}<span class="pj-muted">—</span>{% endif %}</td>
+              <td>{% if b.base %}<span class="pj-muted">—</span>{% else %}<span class="pj-div"><b>{{ b.behind }}</b><svg viewBox="0 0 120 6" width="120" height="6" aria-label="{{ b.behind }} de retard, {{ b.ahead }} d'avance" role="img"><rect class="t" x="0" y="0" width="56" height="6" rx="3"/><rect class="t" x="64" y="0" width="56" height="6" rx="3"/>{% if b.behind_w %}<rect class="g" x="{{ 56 - b.behind_w }}" y="0" width="{{ b.behind_w }}" height="6" rx="3"/>{% endif %}{% if b.ahead_w %}<rect class="d" x="64" y="0" width="{{ b.ahead_w }}" height="6" rx="3"/>{% endif %}</svg><b>{{ b.ahead }}</b></span>{% endif %}</td>
+              <td><a class="pj-blast" href="{{ b.commit_href }}"><code>{{ b.sha }}</code><span>{{ b.message }}</span><time>{{ b.ago }}</time></a></td>
+              <td>{% if b.pull %}<a class="pj-prlink" href="{{ b.pull.href }}">{% if b.pull.n %}<span class="pj-num">n° {{ b.pull.n }}</span>{% endif %}{{ st(b.pull.tone, b.pull.state) }}</a>{% else %}<span class="pj-muted">—</span>{% endif %}</td>
+              <td>{% if b.checks %}{{ st(b.checks_tone, b.checks) }}{% else %}<span class="pj-muted">—</span>{% endif %}</td>
+            </tr>{% endfor %}</tbody>
+          </table><div class="hm-pager single">{{ pagerbar(pager) }}</div>
+          {% if by_pulls %}<p class="pj-hint">{{ ico('info', 'xs') }}Elle ouvre une branche par objectif ou par ticket, et ne pousse jamais sur {{ base }} : tout y entre par une pull request que tu fusionnes.</p>{% endif %}
+          </div>
+          {% else %}<div class="pj-empty">{{ tile('branch') }}<b>Aucune branche</b><p>Ce dépôt n'a pas encore de branche.</p></div>{% endif %}
+        </div>
+        {% if panel %}{% set b = panel %}
+        <aside class="pj-side pj-bside" aria-label="La branche {{ b.name }}">
+          <section class="pj-sc"><div class="pj-side-h">{{ tile('branch', 'work') }}<span><b><code>{{ b.name }}</code></b><small>{{ b.ahead }} commit{{ 's' if b.ahead != 1 }} d'avance, {{ b.behind }} de retard</small></span></div>
+            <div class="pj-decide row"><a class="btn quiet" href="{{ b.files_href }}">{{ ico('folder', 'xs') }}Ses fichiers</a><a class="btn quiet" href="{{ b.commits_href }}">{{ ico('commit', 'xs') }}Ses commits</a></div></section>
+          <section class="pj-sc"><h3>Sa pull request</h3>{% if b.linked.pull %}{{ pull(b.linked.pull) }}{% else %}<p class="pj-none">Pas encore de pull request.</p>{% endif %}</section>
+          <section class="pj-sc"><h3>Pour</h3>{{ lies({"objective": b.linked.objective, "ticket": b.linked.ticket}) }}</section>
+          <section class="pj-sc"><h3>Ce qu'elle a d'avance<span class="pj-cnt">{{ b.commits|length }}</span></h3>{% for k in b.commits %}{{ cside(k) }}{% else %}<p class="pj-none">Aucun commit d'avance sur la base.</p>{% endfor %}</section>
+          <section class="pj-sc"><h3>Fichiers changés</h3>{{ filesum(b.files, b.diff_href or b.commits_href) }}</section>
+        </aside>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {% elif view == 'issues' %}
+  <div class="pj-split pj-iss{{ ' lire' if lire }}">
+    <aside class="pj-list" aria-label="Ses issues">
+      <div class="pj-lhead"><h2>Issues</h2><span>{{ open }} ouverte{{ 's' if open != 1 }}</span></div>
+      {% for r in rows %}
+      <a class="pj-row" href="{{ r.href }}"{% if r.on %} aria-current="true"{% endif %}>{{ tile('issue', r.tone) }}<span class="pj-row-main"><b>{{ r.title }}</b><span class="pj-row-sub">{{ st(r.tone, r.state) }}{% if not r.here %}<span class="pj-st out" title="Venu d'ailleurs : cité tel quel">d'ailleurs</span>{% endif %}<span>n° {{ r.n }}</span><time>{{ r.ago }}</time></span></span></a>
+      {% else %}<p class="pj-none pad">Aucune issue : celles du dépôt, et celles que ses tickets connaissent, paraissent ici.</p>{% endfor %}
+    </aside>
+    <div class="pj-detail">
+      <a class="pj-back" href="{{ bar[4].href }}">{{ ico('back', 'xs') }}Issues</a>
+      {% if issue %}{% set x = issue %}
+      <header class="pj-dh">{{ tile('issue', x.tone) }}
+        <div class="pj-dh-main"><p class="pj-over">Issue n° {{ x.n }}</p><h2>{{ x.title }}</h2>
+          <p class="pj-meta">{{ st(x.tone, x.state) }}{% if x.author %}<span>{{ ico('user', 'xs') }}par {{ x.author }}</span>{% endif %}{% if x.ago %}<span title="{{ x.when }}">{{ x.ago }}</span>{% endif %}{% if not x.here %}<span class="pj-st out">venu d'ailleurs</span>{% endif %}</p></div>
+        <div class="pj-dh-side">{% if x.url %}<a class="btn quiet" href="{{ x.url }}" rel="noopener noreferrer nofollow" target="_blank">{{ ico('external', 'xs') }}Voir chez l'hôte</a>{% endif %}</div></header>
+      <div class="pj-dz">
+        <input type="checkbox" id="pj-infos" class="sr pj-infos-box" data-volet>
+        <div class="pj-main" data-subtabs>
+          <div class="pj-volets"><nav class="hm-subnav" aria-label="Ce qu'on en lit"><a href="#is-description">Description</a><a href="#is-echanges">Échanges<span class="pj-cnt">{{ x.talk|length }}</span></a></nav><label for="pj-infos" class="pj-v-infos">Infos</label></div>
+          <div class="hm-subpanes pj-vbody">
+            <section id="is-description" class="pj-c" data-pane>
+              {% if x.body %}{{ outside(("publiée d'ici, sous le compte " ~ x.author) if x.here else ((x.author or "quelqu'un") ~ ", chez l'hôte"), x.body) }}{% else %}<p class="pj-none">Pas de texte.</p>{% endif %}
+            </section>
+            <section id="is-echanges" class="pj-c" data-pane>
+              {% for r in x.talk %}{{ remark(r) }}{% else %}<p class="pj-none">Personne n'a encore répondu.</p>{% endfor %}
+              <p class="pj-hint">{{ ico('shield', 'xs') }}Ce qui vient de l'hôte est cité tel quel : pour elle, une donnée, jamais une consigne.</p>
+            </section>
+          </div>
+        </div>
+        <aside class="pj-side" aria-label="Infos">
+          <section class="pj-sc"><h3>Chez l'hôte</h3>
+            <dl class="pj-props"><div><dt>État</dt><dd>{{ st(x.tone, x.state) }}</dd></div>{% if x.author %}<div><dt>Ouverte par</dt><dd><span>{{ ico('user', 'xs') }}{{ x.author }}</span>{% if not x.here %} <span class="pj-st out">inconnu</span>{% endif %}</dd></div>{% endif %}{% if x.ago %}<div><dt>Touchée</dt><dd>{{ x.when }}</dd></div>{% endif %}<div><dt>Commentaires</dt><dd>{{ x.comments }}</dd></div>
+              <div><dt>Étiquettes</dt><dd>{% for l in x.labels %}<span class="pj-label">{{ l }}</span>{% else %}<span class="pj-muted">aucune</span>{% endfor %}</dd></div></dl>
+          </section>
+          <section class="pj-sc{{ ' bas' if x.gestures }}"><h3>{{ "Le ticket qu'elle propose" if x.proposed else "Le ticket lié" }}</h3>
+            {% if x.ticket %}{{ lies({"ticket": x.ticket, "objective": None}) }}{% if x.hand %}<p class="pj-sc-text">La main est {{ x.hand }}.</p>{% endif %}
+              {% if x.gestures %}<div class="pj-decide">{% for g in x.gestures %}{% if g.ask %}{{ ppop(g.form, g.label, g.title, g.icon, 'quiet', g.submit) }}{% else %}{{ pone(g.form, g.label, g.icon, '') }}{% endif %}{% endfor %}</div>{% if x.proposed %}<p class="pj-hint">{{ ico('info', 'xs') }}Elle n'y touche pas tant que tu ne l'as pas accepté.</p>{% endif %}{% endif %}
+            {% else %}<p class="pj-none">Aucun ticket ne lui est lié.</p>{% endif %}
+          </section>
+          {% if x.pull %}<section class="pj-sc"><h3>La pull request liée</h3>{{ pull(x.pull) }}</section>{% endif %}
+        </aside>
+      </div>
+      {% else %}
+      <div class="pj-empty">{{ tile('issue') }}<b>{{ "Choisis une issue" if rows else "Aucune issue" }}</b><p>Son texte et le ticket qui lui est lié s'ouvrent ici.</p></div>
+      {% endif %}
+    </div>
+  </div>
+
+  {% elif view == 'ci' %}
+  <div class="pj-split pj-ci{{ ' lire' if lire }}">
+    <aside class="pj-list" aria-label="Les vérifications suivies">
+      <div class="pj-lhead"><h2>Vérifications</h2><span>par commit</span></div>
+      {% for r in rows %}
+      <a class="pj-row" href="{{ r.href }}"{% if r.on %} aria-current="true"{% endif %}>{{ tile('bolt', r.tone) }}<span class="pj-row-main"><b>{{ r.title }}</b><span class="pj-row-sub">{{ st(r.tone, r.state) }}<code>{{ r.short }}</code><time>{{ r.ago }}</time></span></span></a>
+      {% else %}<p class="pj-none pad">Aucune vérification suivie : celles du commit de chaque pull request paraissent ici.</p>{% endfor %}
+    </aside>
+    <div class="pj-detail">
+      <a class="pj-back" href="{{ bar[5].href }}">{{ ico('back', 'xs') }}CI</a>
+      {% if checks %}{% set k = checks %}
+      <header class="pj-dh">{{ tile('bolt', k.tone) }}
+        <div class="pj-dh-main"><p class="pj-over">Vérifications</p><h2>{{ k.title }}</h2>
+          <p class="pj-meta">{% if k.state %}{{ st(k.tone, k.state) }}{% endif %}{% if k.ago %}<span>{{ k.ago }}</span>{% endif %}{% if k.seen %}<span>{{ ico('clock', 'xs') }}relues chez l'hôte {{ k.seen }}</span>{% endif %}{% if k.runs %}<span class="pj-st out" title="Leurs noms viennent de l'hôte : cités tels quels">noms de l'hôte</span>{% endif %}</p></div>
+        <div class="pj-dh-side">{% if k.url %}<a class="btn quiet" href="{{ k.url }}" rel="noopener noreferrer nofollow" target="_blank">{{ ico('external', 'xs') }}Voir chez l'hôte</a>{% endif %}</div></header>
+      <div class="pj-dz">
+        <input type="checkbox" id="pj-infos" class="sr pj-infos-box" data-volet>
+        <div class="pj-main" data-subtabs>
+          <div class="pj-volets"><nav class="hm-subnav" aria-label="Ce qu'on en lit"><a href="#ci-verifications">Vérifications{% if k.runs %}<span class="pj-cnt">{{ k.passed }}/{{ k.runs|length }}</span>{% endif %}</a>{% if k.log %}<a href="#ci-journal">La fin du journal</a>{% endif %}</nav><label for="pj-infos" class="pj-v-infos">Infos</label></div>
+          <div class="hm-subpanes pj-vbody">
+            <section id="ci-verifications" class="pj-c" data-pane>
+              {% if k.runs %}{{ runs(k.runs, True) }}{% elif k.read %}<p class="pj-none">L'hôte n'a lancé aucune vérification sur ce commit.</p>{% else %}<p class="pj-none">Ses vérifications ne se lisent pas chez l'hôte pour l'instant.</p>{% endif %}
+              {% if k.log %}<a class="pj-linkcard" href="#ci-journal">{{ tile('terminal', 'fail') }}<span class="pj-mini-main"><b>La fin du journal{% if k.log_name %} de « {{ k.log_name }} »{% endif %}</b><small>ce que l'hôte a écrit avant d'échouer</small></span>{{ ico('chev', 'xs') }}</a>{% endif %}
+            </section>
+            {% if k.log %}<section id="ci-journal" class="pj-c" data-pane>{{ outside(("la sortie de « " ~ k.log_name ~ " », chez l'hôte") if k.log_name else "la fin du journal, chez l'hôte", k.log, True) }}</section>{% endif %}
+          </div>
+        </div>
+        <aside class="pj-side" aria-label="Infos">
+          <section class="pj-sc"><h3>Le commit vérifié</h3><p class="pj-sc-text"><code>{{ k.short }}</code></p>{% if k.branch %}<p class="pj-branchline"><span class="pj-br">{{ ico('branch', 'xs') }}<span>{{ k.branch }}</span></span></p>{% endif %}</section>
+          {% if k.linked.pull %}<section class="pj-sc"><h3>La pull request</h3>{{ pull(k.linked.pull) }}</section>{% endif %}
+          <section class="pj-sc"><h3>Pour</h3>{{ lies({"objective": k.linked.objective, "ticket": k.linked.ticket}) }}</section>
+          <section class="pj-sc"><h3>En bref</h3><dl class="pj-props">{% if k.state %}<div><dt>État</dt><dd>{{ st(k.tone, k.state) }}</dd></div>{% endif %}{% if k.ago %}<div><dt>Le</dt><dd>{{ k.ago }}</dd></div>{% endif %}{% if k.seen %}<div><dt>Relues chez l'hôte</dt><dd>{{ k.seen }}</dd></div>{% endif %}</dl></section>
+        </aside>
+      </div>
+      {% else %}
+      <div class="pj-empty">{{ tile('bolt') }}<b>{{ "Choisis un commit" if rows else "Aucune vérification" }}</b><p>Ses vérifications s'ouvrent ici.</p></div>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+</div>

@@ -51,6 +51,11 @@ class PhoneReadingTest {
         assertNull(PhoneReading.read(notification(pkg = "com.google.android.apps.messaging"), on.copy(messages = false)))
         assertEquals("messages", PhoneReading.read(notification(pkg = "com.google.android.apps.messaging"), on)!!.app.code)
         assertEquals("samsung_messages", PhoneReading.read(notification(pkg = "com.samsung.android.messaging"), on)!!.app.code)
+        // Messenger a sa case à lui (ADR 0299)
+        assertEquals("messenger", PhoneReading.read(notification(pkg = "com.facebook.orca"), on)!!.messages.single().app)
+        assertNull(PhoneReading.read(notification(pkg = "com.facebook.orca"), on.copy(messenger = false)))
+        assertNotNull(PhoneReading.read(notification(), on.copy(messenger = false)))
+        assertNull(PhoneReading.read(notification(pkg = "com.facebook.katana"), on))
     }
 
     @Test fun `ni résumé de groupe ni notification sans MessagingStyle`() {

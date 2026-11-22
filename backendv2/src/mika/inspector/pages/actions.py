@@ -14,12 +14,14 @@ from mika.inspector import render
 from mika.inspector.catalog import Panel
 from mika.inspector.formview import action_view, prefilled, visible_fields
 from mika.inspector.ui import PREFIX
-from mika.kernel.forms import RENDERED, describe
+from mika.kernel.forms import RENDERED, Upload, describe
 from mika.kernel.inspect import Note
 from mika.runtime.operations import dynamic_fields, fixed_values, initial_values, offered, perform
 
 #: une action à plus de champs s'ouvre sur sa propre page, pas en panneau
 PANEL_FIELDS_MAX = 2
+#: le champ des fichiers qu'un geste apporte sans les déclarer dans son formulaire (``ActionContext.files``)
+FILES_FIELD = "_fichier"
 #: un champ « sujet » propose au plus tant d'objets connus
 SUBJECT_CHOICES = 300
 
@@ -137,8 +139,12 @@ class Actions:
         single, lists = got
         back = safe_back(single.get("_retour", ""))
         subject = single.get("_sujet", "")
+        # ce que le geste apporte sans être un champ de son formulaire (une image de documentation, ADR 0297) : ses
+        # fichiers, que l'action lit dans son contexte
+        files = tuple(x for x in lists.pop(FILES_FIELD, []) if isinstance(x, Upload) and x.data)
+        single.pop(FILES_FIELD, None)
         outcome = await perform(self.ui.kernel, key, lists, by=account.handle, subject=subject,
-                                nonce=single.get("_op", ""))
+                                nonce=single.get("_op", ""), files=files)
         if not outcome.ok and outcome.errors:
             fixed = fixed_values(lists)
             dynamic = dynamic_fields(self.ui.kernel, spec, subject, fixed) if spec.fields else None
@@ -160,8 +166,11 @@ class Actions:
         token = single.get("_op", "") or key
         self.ui.flash(token, outcome.tone if outcome.ok else "danger", outcome.message)
         target = render.href(outcome.go, self.ui.env()) if outcome.go else back
+        # un retour peut viser une section de la page (« …#obj-jalons », ADR 0297) : le message se pose avant l'ancre
+        target, _, anchor = target.partition("#")
         sep = "&" if "?" in target else "?"
-        return RedirectResponse(f"{target}{sep}flash={quote(token, safe='')}", status_code=303)
+        return RedirectResponse(f"{target}{sep}flash={quote(token, safe='')}{'#' + anchor if anchor else ''}",
+                                status_code=303)
 
     async def approve(self, request: Request) -> Response:
         data = await self.ui.form(request)

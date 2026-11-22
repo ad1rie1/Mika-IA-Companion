@@ -422,3 +422,29 @@ export function draftNotWaiting(state: string): string {
 export function answerable(m: { sent: boolean; received?: boolean }): boolean {
   return !m.sent || !!m.received;
 }
+
+// ── Les adresses qu'un autre écran ouvre ──────────────────────────────
+
+/** Écrire à quelqu'un depuis un autre écran (Contacts : « Écrire ») : `#mail/messages/ecrire/<adresse>[/<nom>]` ouvre
+ *  la fenêtre d'un mail nouveau, le destinataire déjà posé. */
+export function writeToHash(address: string, name = ""): string {
+  const to = `#mail/messages/ecrire/${encodeURIComponent(address)}`;
+  return name && name !== address ? `${to}/${encodeURIComponent(name)}` : to;
+}
+
+/** Le destinataire d'une adresse `ecrire/…` (l'objet de la route, déjà décodé segment par segment) ; `null` sinon. Une
+ *  adresse ne porte pas de « / » : ce qui suit le premier est son nom. */
+export function writeToRoute(item: string | null): { address: string; name: string } | null {
+  if (!item?.startsWith("ecrire/")) return null;
+  const rest = item.slice("ecrire/".length);
+  const cut = rest.indexOf("/");
+  const address = (cut < 0 ? rest : rest.slice(0, cut)).trim();
+  if (!address) return null;
+  return { address, name: cut < 0 ? "" : rest.slice(cut + 1).trim() };
+}
+
+/** L'ancien onglet Contacts du courrier (`#mail/contacts…`) mène à l'écran Contacts (ADR 0298) : sa nouvelle adresse,
+ *  ou `null` pour une autre. */
+export function legacyContactsHash(hash: string): string | null {
+  return /^#\/?mail\/+contacts(?:[/?]|$)/.test(hash) ? "#contacts" : null;
+}

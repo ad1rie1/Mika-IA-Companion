@@ -18,8 +18,9 @@ from mika.ports.teams import DEFAULT_ACCOUNT
 
 #: au plus tant d'images regardées par passage (le reste au passage suivant, aussitôt)
 PER_RUN = 4
-#: ce qu'elle en garde, au plus (caractères ; le texte du message n'en reprend que le début)
-SEEN_MAX_CHARS = 1500
+#: ce qu'elle en garde, au plus (caractères) : toute sa description (``STUDY_TOKENS`` la borne bien avant), qu'on lit
+#: sous l'image ; le texte du message n'en reprend que le début
+SEEN_MAX_CHARS = 4000
 #: un échec passager : on réessaie après ce délai
 RETRY_US = 2 * MINUTE
 

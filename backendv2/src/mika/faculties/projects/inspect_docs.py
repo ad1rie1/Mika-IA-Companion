@@ -97,7 +97,7 @@ def who_wrote(frame: Frame, author: str, by: str, via: str, tool: str = "") -> s
 # ── L'onglet « Documentation » ────────────────────────────────────────────
 
 
-@PROJECTS.inspect("documentation", title="Documentation", subject="project", order=52,
+@PROJECTS.inspect("documentation", title="Documentation", subject="project", order=34,
                   description="Sa documentation, un espace à part de son dépôt : ses pages et leur dernière "
                               "modification, ses images. Elle s'écrit dans l'espace de chaque personne, par elle "
                               "pendant ses exécutions, et par MCP.")
@@ -156,7 +156,7 @@ def _last_writer(frame: Frame, ctx: ActionContext, p: Project, path: str, via: s
     row = docs.page(ctx.store, p.id, path)
     if row is None or _via(via) != docs.CONSOLE:
         return SOMEONE
-    return who_wrote(frame, row.author, row.by, row.via, row.tool)
+    return f"par {who_wrote(frame, row.author, row.by, row.via, row.tool)}"
 
 
 class WriteArgs(BaseModel):

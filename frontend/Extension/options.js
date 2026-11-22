@@ -177,6 +177,40 @@ function fill(status) {
   err.textContent = status.lastError ? status.lastError + " (" + when(status.lastErrorAt) + ")" : "";
 }
 
+/** Ce que le service attend de la page pour recharger les onglets Teams après lui (`background.js`). */
+const RELOAD_TABS_KEY = "reloadTeamsTabs";
+/** La réponse d'un service plus ancien que cette page : il ne connaît pas la demande. */
+const OUTDATED = "demande inconnue";
+
+/**
+ * Chrome relit cette page sur le disque à chaque ouverture, mais ne recharge le service qu'avec l'extension : après
+ * une mise à jour des fichiers, la page est neuve et le service ancien. Les deux versions diffèrent : on le dit.
+ */
+async function checkVersion() {
+  const loaded = chrome.runtime.getManifest().version;
+  let onDisk = loaded;
+  try {
+    const r = await fetch(chrome.runtime.getURL("manifest.json"), { cache: "no-store" });
+    onDisk = String((await r.json()).version || loaded);
+  } catch (_) { /* rien à comparer */ }
+  if (onDisk !== loaded) {
+    showStale("La version " + onDisk + " de l'extension est sur le disque, mais Chrome fait encore tourner la "
+      + loaded + " : certains boutons ne marcheront pas.");
+  }
+}
+
+function showStale(why) {
+  $("staleText").textContent = why + " Recharge-la : l'onglet Teams sera rechargé avec elle.";
+  $("stale").hidden = false;
+}
+
+/** Le service n'a pas reconnu la demande : il est plus ancien que cette page. */
+function outdated(result) {
+  if (!result || result.error !== OUTDATED) return false;
+  showStale("Le service de l'extension est plus ancien que cette page.");
+  return true;
+}
+
 async function refresh() {
   try {
     fill(await ask("status"));
@@ -272,11 +306,19 @@ $("history").addEventListener("click", async () => {
     result = await ask("history");
   } catch (_) { /* le service dort ou a été rechargé */ }
   if (!result || !result.ok) {
-    out.textContent = (result && result.error) || "Le service de l'extension ne répond pas.";
+    out.textContent = outdated(result) ? "Le service de l'extension n'a pas encore cette fonction : recharge-la (en haut)."
+      : (result && result.error) || "Le service de l'extension ne répond pas.";
     out.className = "note bad-text";
     return;
   }
   refresh();
+});
+
+$("reload").addEventListener("click", async () => {
+  try {
+    await chrome.storage.local.set({ [RELOAD_TABS_KEY]: Date.now() });
+  } catch (_) { /* les onglets resteront à recharger à la main */ }
+  chrome.runtime.reload();
 });
 
 $("flush").addEventListener("click", async () => {
@@ -326,6 +368,7 @@ $("diagnose").addEventListener("click", async () => {
       + (r.history.error ? " — " + r.history.error : ""));
   }
   lines.push("", "Conversations dont le nom est connu : " + r.conversationTitles,
+    "Profils de personnes lus dans Teams : " + (r.profiles || 0) + " (joints aux messages de ces personnes)",
     "Messages passés à l'extension : " + r.sent);
   const rl = result.relayed;
   if (rl) {
@@ -346,5 +389,6 @@ $("diagnose").addEventListener("click", async () => {
   out.textContent = lines.join("\n");
 });
 
+checkVersion();
 refresh();
 setInterval(refresh, 3000);

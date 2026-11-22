@@ -1,7 +1,7 @@
 package fr.qwartz.mika.data.phone
 
-/** Les cases des réglages : une par famille d'applis (ADR 0120). */
-enum class PhoneFamily { WHATSAPP, MESSAGES }
+/** Les cases des réglages : une par famille d'applis (ADR 0120 ; Messenger, ADR 0299). */
+enum class PhoneFamily { WHATSAPP, MESSENGER, MESSAGES }
 
 /**
  * Les applis dont le téléphone lit les messages (« Lui montrer mes messages », ADR 0120) : une liste d'inclusion, jamais
@@ -11,6 +11,7 @@ enum class PhoneFamily { WHATSAPP, MESSAGES }
 enum class PhoneApp(val packageName: String, val code: String, val family: PhoneFamily) {
     WHATSAPP("com.whatsapp", "whatsapp", PhoneFamily.WHATSAPP),
     WHATSAPP_BUSINESS("com.whatsapp.w4b", "whatsapp_business", PhoneFamily.WHATSAPP),
+    MESSENGER("com.facebook.orca", "messenger", PhoneFamily.MESSENGER),
     MESSAGES("com.google.android.apps.messaging", "messages", PhoneFamily.MESSAGES),
     SAMSUNG_MESSAGES("com.samsung.android.messaging", "samsung_messages", PhoneFamily.MESSAGES),
     ;
@@ -34,11 +35,13 @@ enum class PhoneApp(val packageName: String, val code: String, val family: Phone
 data class PhoneGate(
     val enabled: Boolean = false,
     val whatsapp: Boolean = true,
+    val messenger: Boolean = true,
     val messages: Boolean = true,
     val groups: Boolean = false,
 ) {
     fun reads(app: PhoneApp): Boolean = enabled && when (app.family) {
         PhoneFamily.WHATSAPP -> whatsapp
+        PhoneFamily.MESSENGER -> messenger
         PhoneFamily.MESSAGES -> messages
     }
 }

@@ -6,7 +6,7 @@ l'oubli d'un objet qui est un sujet de contenus."""
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import quote, unquote, urlencode, urlsplit
+from urllib.parse import parse_qsl, quote, unquote, urlencode, urlsplit
 
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
@@ -34,6 +34,19 @@ from mika.kernel.inspect import (
 from mika.kernel.text import fold
 from mika.runtime import operations
 from mika.runtime.boundary import Failed, call
+
+#: ce qu'un aperçu rend au plus (en caractères du texte envoyé : la borne d'une page de documentation)
+PREVIEW_MAX = 100_000
+#: les images qu'une fiche peut montrer, par leurs premiers octets
+_IMAGES = ((b"\x89PNG\r\n\x1a\n", "image/png"), (b"\xff\xd8\xff", "image/jpeg"), (b"GIF87a", "image/gif"),
+           (b"GIF89a", "image/gif"))
+
+
+def image_type(data: bytes) -> str:
+    """Le type d'une image lu dans ses octets (PNG, JPEG, GIF, WebP) ; vide : ce n'en est pas une qu'on montre."""
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return next((mime for magic, mime in _IMAGES if data.startswith(magic)), "")
 
 #: Une page par type d'objet, sans plafond sur l'ensemble des résultats.
 SEARCH_PAGE = 25
@@ -156,8 +169,14 @@ class Subjects:
         joined = {host: [by_name[g] for g in guests if g in by_name and g != host]
                   for host, guests in (overview.joined.items() if overview is not None else ()) if host in by_name}
         host_of = {g.name: host for host, guests in joined.items() for g in guests}
+        # des onglets remplacés (``Overview.moved``) : leur adresse mène au sien (« git », « documentation?vue=… »),
+        # sans qu'on les exécute
+        moved = {name: target.partition("?") for name, target in (overview.moved.items() if overview else ())
+                 if name in by_name and target.partition("?")[0] in by_name}
+        host_of.update({name: host for name, (host, _, _) in moved.items()})
         if asked in host_of:
-            query = urlencode({**dict(request.query_params), "onglet": host_of[asked]})
+            extra = dict(parse_qsl(moved[asked][2])) if asked in moved else {}
+            query = urlencode({**dict(request.query_params), "onglet": host_of[asked], **extra})
             return RedirectResponse(f"{subject_url(kind, key)}?{query}#{quote(asked, safe='')}", status_code=303)
         tabs = [t for t in tabs if t.name not in host_of]
         slug = asked or (head.default_tab if isinstance(head, Head) else "") or (tabs[0].name if tabs else "")
@@ -205,6 +224,11 @@ class Subjects:
             tabs_more = [{"title": f["title"], "href": subject_url(kind, key, f["name"]),
                           "on": current is not None and current.name == f["name"]} for f in folded]
             hidden = {subject_url(kind, key, f["name"]) for f in folded}
+            # ce qu'elle tient hors de la barre tant qu'on n'y est pas (``Overview.hidden``) : l'adresse marche toujours
+            apart = call(overview.hidden, self.ui, key, label=f"onglets retirés {kind}")
+            if apart and not isinstance(apart, Failed):
+                hidden |= {subject_url(kind, key, name) for name in apart
+                           if current is None or current.name != name}
             tab_list = [t for t in tab_list if t["href"].split("&", 1)[0] not in hidden]
         actions = self.pages.head_actions(request, kind=kind, subject=key) \
             if not isinstance(head, Head) or (head.automatic_actions and
@@ -239,7 +263,8 @@ class Subjects:
             if current is not None else "",
             overview=shown, fiche_head=drawn,
             fiche_styles=overview.styles if overview is not None and (shown or drawn) else (),
-            fiche_scripts=overview.scripts if overview is not None and shown is not None and current is None else (),
+            fiche_scripts=() if overview is None or shown is None else overview.scripts if current is None
+            else overview.tab_scripts,
             tabs_more=tabs_more, tabs_more_title=overview.folded_title if overview is not None else "",
             filters=current.typed if current is not None else (), head_actions=actions, subject=key,
             console_blocks=current is not None and current.owner in self.ui.deps.plain_owners,
@@ -422,6 +447,38 @@ class Subjects:
                                             f"{agree(gone.total, 'effacé', 'effacés')}).")
         return secure(RedirectResponse(f"{PREFIX}/?flash={quote('oubli-' + key, safe='')}", status_code=303))
 
+    async def image(self, request: Request) -> Response:
+        """Une image qu'une fiche montre (ADR 0297 : celles de la documentation d'un projet), par le document que sa
+        faculté déclare : servie comme une image et rien d'autre — son type lu dans ses octets (PNG, JPEG, GIF,
+        WebP), sans script ni rien du dehors ; sinon, rien. Une adresse qui nomme sa version (``v`` : quand l'image a
+        été ajoutée — l'adresse change avec elle) se garde dans le navigateur de qui la lit : l'éditeur ne redemande
+        pas toutes ses vignettes à chaque page."""
+        kind, key = request.path_params["kind"], request.path_params["key"]
+        result = await self.ui.inspection.download(kind, key, request.query_params.get("fichier", "")[:300])
+        mime = image_type(result.data) if isinstance(result, Download) else ""
+        if not mime:
+            return secure(Response(b"", status_code=404, media_type="text/plain"))
+        kept = "private, max-age=86400" if request.query_params.get("v", "").isdecimal() else "no-store"
+        return secure(Response(result.data, media_type=mime, headers={
+            "Content-Security-Policy": "default-src 'none'; sandbox", "Content-Disposition": "inline",
+            "Cache-Control": kept, "X-Content-Type-Options": "nosniff"}))
+
+    async def preview(self, request: Request) -> Response:
+        """L'aperçu d'un texte en Markdown, rendu comme la fiche de cet objet le montrera (``Overview.preview`` ; ADR
+        0297 : l'éditeur d'une page de documentation) : un morceau de HTML, échappé par le moteur. Le jeton de la page
+        est demandé, comme pour un formulaire."""
+        kind, key = request.path_params["kind"], request.path_params["key"]
+        data = await self.ui.form(request)
+        overview = self.ui.deps.overviews.get(kind)
+        if data is None or overview is None or self.ui.operator(request) is None:
+            return secure(Response("Jeton de formulaire invalide : recharge la page.", status_code=403,
+                                   media_type="text/plain"))
+        shown = call(overview.preview, self.ui, key, str(data.get("text") or "")[:PREVIEW_MAX],
+                     str(data.get("chemin") or "")[:300], label=f"aperçu {kind}")
+        if shown is None or isinstance(shown, Failed):
+            return secure(Response("Pas d'aperçu ici.", status_code=404, media_type="text/plain"))
+        return secure(HTMLResponse(str(shown)))
+
     async def download(self, request: Request) -> Response:
         kind, key = request.path_params["kind"], request.path_params["key"]
         result = await self.ui.inspection.download(kind, key, request.query_params.get("fichier", "source")[:300])
@@ -449,6 +506,8 @@ class Subjects:
         g = self.ui.guarded
         return [Route(PREFIX + "/fiche/{kind:str}/{key:str}", g(self.page)),
                 Route(PREFIX + "/telecharger/{kind:str}/{key:str}", g(self.download)),
+                Route(PREFIX + "/image/{kind:str}/{key:str}", g(self.image)),
+                Route(PREFIX + "/apercu/{kind:str}/{key:str}", g(self.preview), methods=["POST"]),
                 Route(PREFIX + "/document/{digest:str}", g(self.document)),
                 Route(PREFIX + "/recherche", g(self.search)),
                 Route(PREFIX + "/oublier/{kind:str}/{key:str}", g(self.forget), methods=["POST"])]

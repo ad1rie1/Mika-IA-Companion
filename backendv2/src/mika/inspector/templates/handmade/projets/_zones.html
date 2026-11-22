@@ -1,0 +1,108 @@
+{# Les morceaux des onglets en liste et détail de la fiche d'un projet (ADR 0297, app/handmade/subjects/project_zones.py,
+   projets_zones.css) : les formulaires des actions déclarées, tels que la console les a préparés pour l'objet choisi
+   (son jeton, son retour, ce que la page fixe), et ce que les panneaux partagent.
+   - ``plumbing`` : ce que tout formulaire repose — le jeton, le retour, l'objet, les valeurs fixées, et les champs
+     dont la page pose la valeur sans les montrer (``posed`` : le verdict d'un bouton) ;
+   - ``pform`` : un formulaire dans la zone de contenu — son titre, ses champs sur toute la largeur, ses boutons en bas ;
+   - ``pone`` : un geste en un bouton ; ``ppop`` : un geste qui demande un mot (un panneau qui s'ouvre sous son bouton) ;
+   - ``pull`` : une pull request avec son statut — son état, ses vérifications, sa relecture, ses conflits ;
+   - ``outside`` : un texte venu d'ailleurs (l'hôte, un journal de CI), tel quel, en texte brut ;
+   - ``goal_side`` : le panneau d'un objectif ou d'une mission (l'onglet Objectifs et son diagramme). #}
+{% from "_forms.html" import field %}
+{% from "handmade/projets/_morceaux.html" import ico, st, seg, tile %}
+
+{% macro plumbing(f) -%}
+<input type="hidden" name="csrf" value="{{ f.csrf }}"><input type="hidden" name="_op" value="{{ f.nonce }}">
+<input type="hidden" name="_retour" value="{{ f.back }}"><input type="hidden" name="_sujet" value="{{ f.subject }}">
+{% for k, v in f.fixed or [] %}<input type="hidden" name="_fixes" value="{{ k }}"><input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+{% for k, v in f.posed or [] %}<input type="hidden" name="_champs" value="{{ k }}"><input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+{%- endmacro %}
+
+{% macro pform(f, title="", sub="", cancel="", submit="", icon="check") -%}
+<form method="post" action="{{ f.url }}" class="form pj-form"{% if f.multipart %} enctype="multipart/form-data"{% endif %}{% if f.confirm %} data-confirm="{{ f.confirm }}"{% endif %}>
+  {{ plumbing(f) }}
+  {% if title %}<header class="pj-form-h"><h3>{{ title }}</h3>{% if sub %}<p>{{ sub }}</p>{% endif %}</header>{% endif %}
+  <div class="pj-form-b">{% for x in f.fields %}{{ field(x) }}{% endfor %}</div>
+  <footer class="pj-form-foot">{% if cancel %}<a class="btn quiet" href="{{ cancel }}">Annuler</a>{% endif %}<button class="btn{{ ' danger' if f.danger }}">{{ ico(icon, 'xs') }}{{ submit or f.button }}</button></footer>
+</form>
+{%- endmacro %}
+
+{% macro pone(f, label, icon="", cls="quiet", title="") -%}
+<form method="post" action="{{ f.url }}" class="pj-one"{% if f.confirm %} data-confirm="{{ f.confirm }}"{% endif %}>{{ plumbing(f) }}<button class="btn {{ cls }}"{% if title %} title="{{ title }}" aria-label="{{ title }}"{% endif %}>{% if icon %}{{ ico(icon, 'xs') }}{% endif %}{{ label }}</button></form>
+{%- endmacro %}
+
+{% macro ppop(f, label, title, icon="", cls="quiet", submit="", side="") -%}
+<details class="action-pop pj-pop{{ ' ' ~ side if side }}" data-exclusive>
+  <summary class="btn {{ cls }}"{% if not label %} title="{{ title }}" aria-label="{{ title }}"{% endif %}>{% if icon %}{{ ico(icon, 'xs') }}{% endif %}{{ label }}</summary>
+  <div class="action-panel"><h3>{{ title }}</h3>
+    <form method="post" action="{{ f.url }}" class="form"{% if f.confirm %} data-confirm="{{ f.confirm }}"{% endif %}>{{ plumbing(f) }}
+      {% for x in f.fields %}{{ field(x) }}{% endfor %}
+      <div class="form-actions-inline"><button class="btn{{ ' danger' if f.danger or 'danger' in cls }}">{{ submit or title }}</button></div>
+    </form>
+  </div>
+</details>
+{%- endmacro %}
+
+{% macro pull(x) -%}
+<a class="pj-lie haut" href="{{ x.href }}">{{ tile('pr', x.tone) }}<span class="pj-mini-main"><b>{{ x.title }}</b><small>{% if x.n %}n° {{ x.n }}{% else %}pas encore ouverte{% endif %}{% if x.age %} · {{ x.age }}{% endif %}</small>
+  <span class="pj-dots">{{ st(x.tone, x.state) }}{% if x.checks %}<span title="{{ x.checks_said }}"><i class="{{ x.checks_tone }}"></i>{{ x.checks }}</span>{% endif %}{% if x.review %}<span><i class="{{ x.review_tone }}"></i>{{ x.review }}</span>{% endif %}{% if x.conflicts %}<span><i class="fail"></i>conflits</span>{% endif %}</span></span></a>
+{% if x.url %}<a class="pj-out-link" href="{{ x.url }}" rel="noopener noreferrer nofollow" target="_blank">{{ ico('external', 'xs') }}Voir chez l'hôte</a>{% endif %}
+{%- endmacro %}
+
+{% macro outside(source, text, mono=False) -%}
+<figure class="pj-out"><figcaption>{{ ico('external', 'xs') }}Venu d'ailleurs · {{ source }}<span>cité tel quel</span></figcaption>{% if mono %}<pre>{{ text }}</pre>{% else %}<blockquote>{{ text }}</blockquote>{% endif %}</figure>
+{%- endmacro %}
+
+{% macro goal_side(d) -%}
+{% if d.mission %}
+<section class="pj-sc"><h3>Son rythme</h3>
+  <dl class="pj-props">
+    <div><dt>Cadence</dt><dd>{{ d.cadence }}</dd></div>
+    <div><dt>Ce qui la déclenche</dt><dd>{% for t in d.on %}<span>{{ t }}{{ ',' if not loop.last }}</span>{% else %}—{% endfor %}</dd></div>
+    <div><dt>État</dt><dd>{{ st(d.tone, d.state) }}</dd></div>
+    <div><dt>Passages</dt><dd>{{ d.runs }}</dd></div>
+    {% if d.last %}<div><dt>Le dernier</dt><dd>{{ d.last }}</dd></div>{% endif %}
+  </dl>
+</section>
+{% else %}
+<section class="pj-sc"><h3>Fini quand</h3><p class="pj-sc-text">{{ d.done_when or "Rien de dit : elle jugera elle-même." }}</p></section>
+<section class="pj-sc"><h3>Où il en est</h3>
+  <div class="pj-prog big">{{ seg(d.marks) }}<span>{{ d.count }}</span></div>
+  <dl class="pj-props">
+    <div><dt>État</dt><dd>{{ st(d.tone, d.state) }}</dd></div>
+    <div><dt>Passages</dt><dd>{{ d.runs }}</dd></div>
+    {% if d.last %}<div><dt>Dernier passage</dt><dd>{{ d.last }}</dd></div>{% endif %}
+    {% if d.result %}<div><dt>Résultat</dt><dd>{{ d.result }}</dd></div>{% endif %}
+    {% if d.note %}<div><dt>Note</dt><dd class="pj-clamp">{{ d.note }}</dd></div>{% endif %}
+  </dl>
+</section>
+{% if d.branch or d.pull %}
+<section class="pj-sc"><h3>Branche et pull request</h3>
+  {% if d.branch %}<p class="pj-branchline">{{ ico('branch', 'xs') }}<code>{{ d.branch }}</code>{% if d.base %}{{ ico('chev', 'xs') }}<code>{{ d.base }}</code>{% endif %}</p>{% endif %}
+  {% if d.pull %}{{ pull(d.pull) }}{% endif %}
+</section>
+{% endif %}
+{% if d.tickets %}
+<section class="pj-sc"><h3>Tickets liés</h3>
+  {% for t in d.tickets %}<a class="pj-lie" href="{{ t.href }}">{{ tile('ticket') }}<span class="pj-mini-main"><b>{{ t.title }}</b><small>#{{ t.n }}</small></span>{{ st(t.tone, t.state) }}</a>{% endfor %}
+</section>
+{% endif %}
+{% endif %}
+{% if d.moves %}
+<section class="pj-sc bas"><h3>Gérer</h3>
+  <div class="pj-decide">{% for m in d.moves %}{{ pone(m.form, m.label, 'trash' if m.danger else '', 'quiet danger' if m.danger else 'quiet') }}{% endfor %}</div>
+</section>
+{% endif %}
+{%- endmacro %}
+
+{# un jalon en étape (Objectifs, et le Résumé d'une pull request dans Code) #}
+{% macro jalon(m) -%}
+<li class="{{ m.tone }}{{ ' retire' if m.dropped }}"><i>{{ ico(m.icon, 'xs') }}</i><div class="pj-j">
+  <div class="pj-j-top"><b>{{ m.text }}</b>{{ st(m.tone, m.state) }}<time>{{ m.at }}</time>
+    {% if m.edit_href or m.drop %}<span class="pj-j-edit">{% if m.edit_href %}<a class="btn quiet icon small" href="{{ m.edit_href }}" title="Modifier le jalon" aria-label="Modifier le jalon n° {{ m.id }}">{{ ico('pen', 'xs') }}</a>{% endif %}{% if m.drop %}{{ ppop(m.drop, '', 'Retirer le jalon n° ' ~ m.id, 'trash', 'quiet danger icon small', 'Retirer le jalon') }}{% endif %}</span>{% endif %}</div>
+  <p class="pj-j-how">Vérifié par {{ m.verified.by }}{% if m.verified.command %} · <code>{{ m.verified.command }}</code>{% endif %}{% if m.verified.item %} · {% if m.verified.item_href %}<a href="{{ m.verified.item_href }}"><code>{{ m.verified.item }}</code></a>{% else %}<code>{{ m.verified.item }}</code>{% endif %}{% if m.verified.item_status %} doit être « {{ m.verified.item_status }} »{% endif %}{% endif %}{% if m.verified.how %} — {{ m.verified.how }}{% endif %}{% if m.commit and not m.proof %} · commit <code>{{ m.commit }}</code>{% endif %}</p>
+  {% if m.refused %}<p class="pj-j-no">{{ ico('x', 'xs') }}Refusé : « {{ m.refused }} »</p>{% elif m.why %}<p class="pj-j-no{{ ' muted' if not m.dropped }}">{{ ico('x' if m.dropped else 'pen', 'xs') }}{{ m.why }}</p>{% endif %}
+  {% if m.proof %}<details class="pj-proof"><summary>{{ ico('chev', 'xs') }}La preuve{% if m.commit %} · commit <code>{{ m.commit }}</code>{% endif %} · {{ ico('external', 'xs') }}venue d'ailleurs</summary><pre>{{ m.proof }}</pre></details>{% endif %}
+  {% if m.validate or m.refuse %}<div class="pj-acts">{% if m.validate %}{{ pone(m.validate, 'Valider le jalon', 'check', '') }}{% endif %}{% if m.refuse %}{{ ppop(m.refuse, 'Refuser', 'Refuser le point d\'arrêt n° ' ~ m.id, 'x', 'quiet', 'Refuser', 'gauche') }}{% endif %}</div>{% endif %}
+</div></li>
+{%- endmacro %}

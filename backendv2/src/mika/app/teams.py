@@ -11,6 +11,10 @@
   compte. Un lot admis est rangé par l'adaptateur (hors du journal) ; le journal n'en garde que ``teams.received``
   (son compte, combien de messages neufs, où la personne a écrit) et, pour chaque réponse que les messages de la
   personne ont réglée, ``teams.settled``.
+- *Les profils* (ADR 0298) : un lot peut joindre le profil des auteurs et des personnes mentionnées de ses messages
+  (``profiles``) ; chacun est lu seul, comme un message (un profil illisible est laissé de côté, jamais le lot), avec
+  les formes d'identifiant que l'extension reconnaît ; une adresse mal formée est laissée vide. Rien n'en est
+  journalisé : l'annuaire les relit dans le cache.
 """
 
 from __future__ import annotations
@@ -20,9 +24,9 @@ import base64
 import binascii
 import re
 import time
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 
 from mika.adapters.web.gate import (
     SlidingWindow,
@@ -59,6 +63,7 @@ from mika.ports.teams import (
     InboxBatch,
     InboxConversation,
     InboxMessage,
+    InboxProfile,
 )
 
 #: requêtes par minute, au plus (l'extension pousse quand Teams reçoit, relève toutes les 30 s)
@@ -76,6 +81,13 @@ FAILED_BY_EXTENSION = "l'extension n'a pas pu la faire partir"
 KINDS = frozenset({"dm", "group", "channel", "meeting", "other", "system"})
 #: un identifiant de message tel que Teams les écrit (des chiffres, ou une empreinte) ; on l'assainit quand même
 _MESSAGE_ID = re.compile(r"^[\w.:@=+/-]{1,200}$")
+#: un profil (ADR 0298) : l'identifiant d'une personne (en minuscules) et une adresse, des formes que l'extension
+#: reconnaît (``frontend/Extension/lib/extract.js``, ``PROFILE_ID`` et ``PROFILE_EMAIL``) ; ses bornes
+PROFILE_ID = re.compile(r"^(8:orgid:[0-9a-f-]{36}|8:live:[a-z0-9._-]{1,80}|8:teamsvisitor:[0-9a-f-]{32,36})$")
+PROFILE_EMAIL = re.compile(r"^[^\s@<>\"',;]{1,64}@[a-z0-9.-]{1,253}\.[a-z]{2,}$")
+PROFILE_TEXT_MAX, PROFILE_EMAIL_MAX, PROFILE_PHONES, PHONE_MAX = 120, 254, 3, 40
+#: un numéro compte au moins tant de chiffres
+PHONE_DIGITS = 6
 
 
 class _InMessage(BaseModel):
@@ -105,6 +117,21 @@ class _InImage(BaseModel):
     data: str = Field(min_length=8, max_length=IMAGE_B64_MAX)
 
 
+class _InProfile(BaseModel):
+    """Le profil d'une personne (ADR 0298) : ``frontend/Extension/lib/signals.js``, ``wireProfile``."""
+
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(min_length=3, max_length=200)
+    name: str = Field(default="", max_length=PROFILE_TEXT_MAX)
+    email: str = Field(default="", max_length=PROFILE_EMAIL_MAX)
+    title: str = Field(default="", max_length=PROFILE_TEXT_MAX)
+    company: str = Field(default="", max_length=PROFILE_TEXT_MAX)
+    department: str = Field(default="", max_length=PROFILE_TEXT_MAX)
+    tenant: str = Field(default="", max_length=PROFILE_TEXT_MAX)
+    phones: list[Annotated[str, StringConstraints(max_length=PHONE_MAX)]] = Field(default_factory=list,
+                                                                                 max_length=PROFILE_PHONES)
+
+
 class _InConversation(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(min_length=3, max_length=320)
@@ -128,6 +155,8 @@ class _Inbox(BaseModel):
     messages: list[Any] = Field(default_factory=list, max_length=200)
     #: l'historique chargé à la mise en service (ADR 0251) : rangé déjà lu, rien n'est journalisé
     history: bool = False
+    #: les profils des auteurs et des mentionnés de ses messages (ADR 0298), lus un à un
+    profiles: list[Any] = Field(default_factory=list, max_length=200)
 
 
 def _message(raw: Any, now_ms: int) -> InboxMessage | None:
@@ -144,6 +173,30 @@ def _message(raw: Any, now_ms: int) -> InboxMessage | None:
         return None
     return InboxMessage(m.id, m.conv, one_line(m.author, 120), one_line(m.author_id, 200), m.time, text, m.own,
                         m.mentions_me, m.deleted, images=m.images)
+
+
+def profile_of(raw: Any) -> InboxProfile | None:
+    """Un profil reçu, validé (``None`` : illisible) : un identifiant de personne que l'extension reconnaît (lu en
+    minuscules), des textes sur une ligne et bornés, une adresse bien formée (sinon vide), trois numéros au plus qui ont
+    chacun assez de chiffres ; un profil qui ne dit rien de la personne est illisible."""
+    if isinstance(raw, dict) and isinstance(raw.get("phones"), list):
+        raw = {**raw, "phones": [clean_text(n) if isinstance(n, str) else n for n in raw["phones"]]}
+    try:
+        p = _InProfile.model_validate(clean_fields(raw))
+    except ValidationError:
+        return None
+    pid = p.id.strip().lower()
+    if not PROFILE_ID.fullmatch(pid):
+        return None
+    email = one_line(p.email, PROFILE_EMAIL_MAX).lower()
+    phones = tuple(dict.fromkeys(n for n in (one_line(x, PHONE_MAX) for x in p.phones)
+                                 if sum(c.isdigit() for c in n) >= PHONE_DIGITS))
+    found = InboxProfile(pid, one_line(p.name, PROFILE_TEXT_MAX), email if PROFILE_EMAIL.fullmatch(email) else "",
+                         one_line(p.title, PROFILE_TEXT_MAX), one_line(p.company, PROFILE_TEXT_MAX),
+                         one_line(p.department, PROFILE_TEXT_MAX), one_line(p.tenant, PROFILE_TEXT_MAX), phones)
+    if not (found.name or found.email or found.title or found.company or found.department or found.phones):
+        return None
+    return found
 
 
 def image_of(data: dict[str, Any]) -> ImageIn:
@@ -172,8 +225,10 @@ def image_of(data: dict[str, Any]) -> ImageIn:
 
 
 def batch_of(data: dict[str, Any], now_ms: int) -> tuple[InboxBatch, int]:
-    """Le lot, validé — formes, tailles, identifiants, dates plausibles — et combien de ses éléments ont été écartés
-    (un message illisible est laissé de côté, le reste passe). Lève ``ValueError`` si l'enveloppe est illisible."""
+    """Le lot, validé — formes, tailles, identifiants, dates plausibles — et combien de ses conversations et de ses
+    messages ont été écartés (un message illisible est laissé de côté, le reste passe ; un profil illisible aussi, sans
+    compter : l'extension lit ce nombre comme des messages refusés). Lève ``ValueError`` si l'enveloppe est
+    illisible."""
     try:
         got = _Inbox.model_validate({**data, "self": clean_fields(data.get("self") or {})})
     except ValidationError as exc:
@@ -199,8 +254,9 @@ def batch_of(data: dict[str, Any], now_ms: int) -> tuple[InboxBatch, int]:
             dropped += 1
             continue
         messages.append(m)
+    profiles = tuple(p for p in (profile_of(raw) for raw in got.profiles) if p is not None)
     return (InboxBatch(one_line(got.self.id, 200), one_line(got.self.name, 120), tuple(conversations),
-                       tuple(messages), history=got.history), dropped)
+                       tuple(messages), history=got.history, profiles=profiles), dropped)
 
 
 class TeamsDesk:
@@ -292,8 +348,10 @@ class TeamsDesk:
             if drafts:
                 await self.port.kernel.mind.append(drafts, emitter="teams", correlation="teams:inbox",
                                                    origin=Origin.EXTERNAL)
-        return GateResult(ACCEPTED, "Reçu.", data={"accepted": stored.new, "known": stored.known, "twins": stored.twins,
-                                                  "dropped": dropped})
+        said = {"accepted": stored.new, "known": stored.known, "twins": stored.twins, "dropped": dropped}
+        if isinstance(data, dict) and data.get("profiles"):
+            said["profiles"] = stored.profiles  # les profils neufs ou changés (un lot sans profils : la réponse d'avant)
+        return GateResult(ACCEPTED, "Reçu.", data=said)
 
     def _items(self, account: str) -> list[dict[str, Any]]:
         """La boîte d'envoi d'un compte, telle que l'extension la lit (le relevé comme la connexion en direct)."""

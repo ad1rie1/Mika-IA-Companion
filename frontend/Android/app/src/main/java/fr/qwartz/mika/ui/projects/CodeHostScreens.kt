@@ -73,12 +73,15 @@ import fr.qwartz.mika.data.moi.projects.pullWhen
 import fr.qwartz.mika.data.moi.projects.reviewTone
 import fr.qwartz.mika.data.moi.projects.runsPassed
 import fr.qwartz.mika.data.moi.projects.since
+import fr.qwartz.mika.data.moi.projects.keyed
 import fr.qwartz.mika.ui.Route
 import fr.qwartz.mika.ui.shell.AskDialog
 import fr.qwartz.mika.ui.shell.Gap
 import fr.qwartz.mika.ui.shell.Load
 import fr.qwartz.mika.ui.shell.MIcon
 import fr.qwartz.mika.ui.shell.rememberSessionKey
+import androidx.compose.runtime.DisposableEffect
+import androidx.activity.compose.LocalActivity
 
 /*
  * Les pages de détail de ce qui se joue avec l'hôte du dépôt (ADR 0296) : **une pull request** (ses volets Résumé —
@@ -108,6 +111,13 @@ internal fun PullScreen(graph: AppGraph, route: Route.ProjectCode) {
     val vm: PullViewModel = viewModel(key = "code-pull|$session|${route.id}|${route.key}") { PullViewModel(ProjectsDeps(graph), route.id, route.key) }
     Toasts(vm.gestures)
     OnResume(vm) { vm.resume() }
+    // la page qui s'ouvre ne redit pas un refus d'avant ; quittée (pas une rotation), la confirmation d'une fusion
+    // demandée là s'annule : elle ne se rouvre jamais plus tard, sur une lecture qui n'est plus celle de l'écran
+    FreshEntry(vm.gestures, PullViewModel.MERGE, PullViewModel.TALK)
+    val activity = LocalActivity.current
+    DisposableEffect(vm) {
+        onDispose { if (activity?.isChangingConfigurations != true) vm.leave() }
+    }
     val summary = frame.code.summary.value
     val remote = summary?.remote?.has == true
     val detail = vm.detail.value
@@ -121,7 +131,7 @@ internal fun PullScreen(graph: AppGraph, route: Route.ProjectCode) {
         }
     }
     var pane by rememberSaveable(route.key) { mutableStateOf(PullPanes.of(route.pane)) }
-    var editing by remember { mutableStateOf(false) }
+    var editing by rememberSaveable(route.key) { mutableStateOf(false) }
     val diffUi = rememberDiffUi()
     val p = detail?.pull
     // modifier et répondre : le droit servi, sur une pull request encore ouverte chez l'hôte
@@ -159,9 +169,10 @@ internal fun PullScreen(graph: AppGraph, route: Route.ProjectCode) {
         when (pane) {
             PullPanes.COMMITS -> {
                 if (d.commits.isEmpty()) paneBlock("none") { Muted(stringResource(R.string.proj_code_pull_no_commit)) }
-                byDay(d.commits, { it.at }, frame.now).forEachIndexed { g, day ->
+                byDay(keyed(d.commits) { it.sha }, { it.value.at }, frame.now).forEachIndexed { g, day ->
                     item(key = "day$g", contentType = "day") { GroupLabel(day.label) }
-                    itemsIndexed(day.items, key = { _, c -> c.sha }, contentType = { _, _ -> "commit" }) { i, c ->
+                    itemsIndexed(day.items, key = { _, row -> "c${row.key}" }, contentType = { _, _ -> "commit" }) { i, row ->
+                        val c = row.value
                         CommitRow(c, last = i == day.items.lastIndex) { frame.shell.navigate(Route.ProjectCode(route.id, CodePages.COMMIT, c.sha)) }
                     }
                 }
@@ -395,11 +406,28 @@ private fun MoreLink(text: String, onClick: () -> Unit) {
 private fun PullEditSheet(vm: PullViewModel, p: CodePull, remote: Boolean, onDismiss: () -> Unit) {
     val host = vm.host.load
     val read = !remote || host is Load.Ready || host is Load.Failed
-    var title by remember(read) { mutableStateOf(vm.editable().first) }
-    var body by remember(read) { mutableStateOf(vm.editable().second) }
+    // ce qui est tapé survit à une rotation. Le formulaire part de ce que l'hôte dit **une fois** : la première fois
+    // qu'il est lu (ou muet). Qu'il se relise ensuite — il était en échec, l'écran revient devant — ne vide pas ce
+    // qu'on a tapé depuis ; et ce qui part se compte sur ce dont le formulaire est parti ([fromTitle], [fromBody]),
+    // pas sur ce que l'hôte dit depuis : un champ qu'on n'a pas touché ne remet pas l'hôte à ce qu'on avait
+    var started by rememberSaveable { mutableStateOf(read) }
+    var fromTitle by rememberSaveable { mutableStateOf(vm.editable().first) }
+    var fromBody by rememberSaveable { mutableStateOf(vm.editable().second) }
+    var title by rememberSaveable { mutableStateOf(fromTitle) }
+    var body by rememberSaveable { mutableStateOf(fromBody) }
+    LaunchedEffect(read) {
+        if (read && !started) {
+            started = true
+            val (hostTitle, hostBody) = vm.editable()
+            fromTitle = hostTitle
+            fromBody = hostBody
+            title = hostTitle
+            body = hostBody
+        }
+    }
     val where = PullViewModel.EDIT
     val errors = vm.gestures.fieldsAt(where)
-    LaunchedEffect(Unit) { vm.gestures.forget(where) }
+    FreshEntry(vm.gestures, where)
     LaunchedEffect(vm.gestures.finished) {
         if (vm.gestures.finished == where) {
             vm.gestures.acknowledge()
@@ -413,10 +441,11 @@ private fun PullEditSheet(vm: PullViewModel, p: CodePull, remote: Boolean, onDis
         busy = vm.gestures.busy == where,
         error = vm.gestures.refusalAt(where),
         onDismiss = onDismiss,
-        onSubmit = { vm.edit(title, body) },
+        onSubmit = { vm.edit(title, body, fromTitle to fromBody) },
         enabled = read && title.isNotBlank(),
     ) {
-        if (!read) {
+        // une fois parti de l'hôte, le formulaire reste posé pendant qu'il se relit (seul « Enregistrer » attend)
+        if (!read && !started) {
             Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         } else {
             if (host is Load.Failed || (host as? Load.Ready)?.value?.error?.isNotBlank() == true) {
@@ -431,7 +460,7 @@ private fun PullEditSheet(vm: PullViewModel, p: CodePull, remote: Boolean, onDis
 // ── Une issue ───────────────────────────────────────────────────────────
 
 /** Un verdict sur le ticket d'une issue, qui demande un mot avant de partir. */
-private data class IssueAsk(val verdict: String, val title: String, val ask: AskFor)
+private data class IssueAsk(val verdict: String, val title: String, val ask: AskFor) : java.io.Serializable
 
 @Composable
 internal fun IssueScreen(graph: AppGraph, route: Route.ProjectCode) {
@@ -449,8 +478,9 @@ internal fun IssueScreen(graph: AppGraph, route: Route.ProjectCode) {
             frame.project.reload()
         }
     }
-    var pane by rememberSaveable { mutableStateOf(PANE_MAIN) }
-    var asking by remember { mutableStateOf<IssueAsk?>(null) }
+    var pane by rememberSaveable(route.id, route.key, route.ref) { mutableStateOf(PANE_MAIN) }
+    var asking by rememberSaveable(route.key) { mutableStateOf<IssueAsk?>(null) }
+    FreshEntry(vm.gestures, IssueViewModel.TICKET)
     CodePage(
         home = CodeTabs.ISSUES,
         projectTitle = frame.project.sheet.valueOrNull?.project?.title,
@@ -469,7 +499,8 @@ internal fun IssueScreen(graph: AppGraph, route: Route.ProjectCode) {
     ) { x ->
         when {
             pane == PANE_INFOS -> paneBlock("infos") {
-                IssueInfos(x, vm, frame, route.id, vm.gestures.busy.isNotEmpty()) { verdict, title, ask -> if (ask == AskFor.NOTHING) vm.settle(verdict) else asking = IssueAsk(verdict, title, ask) }
+                // son ticket ne se tranche pas sur l'ancienne lecture : il se relit au retour sur l'écran et après un geste
+                IssueInfos(x, vm, frame, route.id, vm.gestures.busy.isNotEmpty() || vm.stale) { verdict, title, ask -> if (ask == AskFor.NOTHING) vm.settle(verdict) else asking = IssueAsk(verdict, title, ask) }
             }
             x.veiled.isNotEmpty() -> item(key = "veiled") { EmptyNote(R.drawable.ic_m_lock, stringResource(R.string.proj_code_issue_veiled), x.veiledLabel) }
             pane == PANE_TALK -> paneBlock("talk") {
@@ -486,6 +517,7 @@ internal fun IssueScreen(graph: AppGraph, route: Route.ProjectCode) {
             }
         }
     }
+    val notSent = stringResource(R.string.proj_not_sent)
     asking?.let { a ->
         AskDialog(
             title = a.title,
@@ -498,8 +530,9 @@ internal fun IssueScreen(graph: AppGraph, route: Route.ProjectCode) {
             danger = true,
             onDismiss = { asking = null },
             onConfirm = { reason ->
-                asking = null
-                vm.settle(a.verdict, reason)
+                // rien n'est parti (son ticket se relit, un autre geste attend sa réponse) : la fenêtre reste, avec ce
+                // qui est tapé, et on le dit
+                if (vm.settle(a.verdict, reason)) asking = null else frame.shell.toast(notSent)
             },
         )
     }
@@ -567,6 +600,8 @@ private fun IssueInfos(x: Issue, vm: IssueViewModel, frame: CodeFrame, project: 
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 RefusalNote(vm.gestures.refusalAt(IssueViewModel.TICKET))
+                // sa relecture a échoué : ce qu'on montre date d'avant, rien ne s'y tranche — on le dit
+                StaleNote(vm.staleError, vm::reread)
                 TicketLinked(project, t)
                 if (t.handLabel.isNotBlank()) Muted(stringResource(R.string.proj_code_ticket_hand, t.handLabel))
                 // le ticket proposé se tranche ici quand son registre le dit (`can`) : les gestes du ticket lui-même
@@ -630,7 +665,7 @@ internal fun ChecksScreen(graph: AppGraph, route: Route.ProjectCode) {
     // ce que l'hôte en dit maintenant ne se demande que s'il y a un dépôt distant à relire
     val remote = frame.code.summary.value?.remote?.has == true
     OnResume(vm to remote) { vm.resume(remote) }
-    var pane by rememberSaveable { mutableStateOf(PANE_MAIN) }
+    var pane by rememberSaveable(route.id, route.key, route.ref) { mutableStateOf(PANE_MAIN) }
     val tracked = vm.tracked
     val live = vm.live.value
     val tail = checksTail(tracked, live)

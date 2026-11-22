@@ -238,12 +238,20 @@ class DocsRulesTest {
         assertTrue(typed.dirty)
         assertEquals(DocSave("guide/installation.md", "écrit", "mot", 3), saveOf(typed, "  mot  "))
         assertEquals(WORD_MAX, saveOf(typed, "x".repeat(500)).word.length)
-        // refusé : les mots du serveur, et ce qui est écrit reste ; un 409 est un conflit
-        val refused = typed.refused(409, "Cette page a changé depuis ta lecture : elle en est à la version 5, écrite par elle.")
+        // refusé : les mots du serveur, et ce qui est écrit reste ; c'est un conflit si la page relue a bougé
+        val current = DocPage(path = "guide/installation.md", version = 5, text = "le sien")
+        assertTrue(typed.movedOn(current))
+        val refused = typed.refused("Cette page a changé depuis ta lecture : elle en est à la version 5, écrite par elle.", typed.movedOn(current))
         assertTrue(refused.conflict)
         assertEquals("écrit", refused.text)
         assertEquals(3, refused.base)
-        assertFalse(typed.refused(403, "Tu lis la documentation de ce projet sans pouvoir l'écrire.").conflict)
+        assertFalse(typed.refused("Tu lis la documentation de ce projet sans pouvoir l'écrire.").conflict)
+        // le serveur répond 409 à d'autres refus : la page en est toujours à la version lue, ou n'existe plus — pas un conflit
+        assertFalse(typed.movedOn(current.copy(version = 3)))
+        assertFalse(typed.movedOn(null))
+        assertFalse(typed.refused("Ce texte est déjà celui de la page : rien n'a été enregistré.", typed.movedOn(current.copy(version = 3))).conflict)
+        // une page nouvelle qui existe déjà a « bougé » : on reprend sur elle
+        assertTrue(Draft.fresh("guide/installation.md", "x").movedOn(current))
         // on continue de taper : le refus reste dit
         assertEquals(refused.refusal, refused.typed("écrit encore").refusal)
         // reprendre : la version actuelle devient le départ, le texte tapé reste entier
@@ -287,5 +295,32 @@ class DocsRulesTest {
             listOf("Un fichier texte libre" to "lisible, mais chaque outil devait deviner", "Une base SQLite" to ""),
             optionLines("Un fichier texte libre : lisible, mais chaque outil devait deviner\n\n  Une base SQLite  \n"),
         )
+    }
+
+    @Test fun `une page nouvelle se crée avec son titre - et un brouillon n'est celui que de la page qu'on a lue`() {
+        assertEquals(DocSave("guide/depannage.md", "# Dépannage\n\n", NEW_PAGE_WORD, 0), newPageSave("guide/depannage.md", "  Dépannage "))
+        assertEquals("Création de la page", NEW_PAGE_WORD)
+        // supprimée puis recréée sous le même chemin, c'est une autre page : née à un autre instant
+        val read = DocPage(path = "a.md", version = 1, text = "ancien", createdAt = 100)
+        val d = Draft.of(read).typed("ancien, repris")
+        assertTrue(d.isOf(read.copy(version = 2)))
+        assertFalse(d.isOf(DocPage(path = "a.md", version = 1, text = "# Nouvelle", createdAt = 200)))
+        // reprendre sur une version, c'est écrire sur la page d'où elle vient
+        assertTrue(d.rebased(DocPage(path = "a.md", version = 1, createdAt = 200)).isOf(DocPage(createdAt = 200)))
+    }
+
+    @Test fun `une image part telle quelle si l'espace la garde - trop lourde ou d'une sorte qu'il ne garde pas, elle est réencodée`() {
+        val limits = DocLimits(imageBytes = 5_242_880, imageKinds = listOf("image/gif", "image/jpeg", "image/png", "image/webp"))
+        assertFalse(imageReencoded(limits, 800_000, "image/png"))
+        assertFalse(imageReencoded(limits, 5_242_880, "IMAGE/JPEG"))
+        // plus lourde que la borne
+        assertTrue(imageReencoded(limits, 5_242_881, "image/jpeg"))
+        // une photo HEIC, AVIF ou BMP, même légère : le serveur ne garde que PNG, JPEG, GIF et WebP
+        assertTrue(imageReencoded(limits, 800_000, "image/heic"))
+        assertTrue(imageReencoded(limits, 800_000, "image/avif"))
+        assertTrue(imageReencoded(limits, 800_000, "image/bmp"))
+        // ce que le serveur ne dit pas ne se devine pas
+        assertFalse(imageReencoded(DocLimits(), 50_000_000, "image/heic"))
+        assertFalse(imageReencoded(DocLimits(imageBytes = 5_242_880), 800_000, "image/heic"))
     }
 }

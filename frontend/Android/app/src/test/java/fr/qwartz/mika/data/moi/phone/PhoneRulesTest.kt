@@ -142,6 +142,7 @@ class PhoneRulesTest {
     @Test fun `chaque appli a sa couleur et sa lettre`() {
         assertEquals(AppBadge(AppKind.WHATSAPP, "W"), appBadge("whatsapp_business", "WhatsApp Business"))
         assertEquals(AppBadge(AppKind.MESSAGES, "M"), appBadge("samsung_messages", "Messages"))
+        assertEquals(AppBadge(AppKind.MESSENGER, "M"), appBadge("messenger", "Messenger"))
         assertEquals(AppBadge(AppKind.OTHER, "S"), appBadge("signal", "son téléphone"))
         assertEquals(AppBadge(AppKind.OTHER, "?"), appBadge("x", " "))
     }

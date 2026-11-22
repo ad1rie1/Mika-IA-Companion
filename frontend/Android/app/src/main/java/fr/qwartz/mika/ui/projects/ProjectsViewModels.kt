@@ -31,6 +31,7 @@ import fr.qwartz.mika.data.moi.projects.ProjectsApi
 import fr.qwartz.mika.data.moi.projects.Sheet
 import fr.qwartz.mika.data.moi.projects.TicketFilters
 import fr.qwartz.mika.data.moi.projects.TicketForm
+import fr.qwartz.mika.data.moi.projects.TodoDecision
 import fr.qwartz.mika.data.moi.projects.Waiting
 import fr.qwartz.mika.data.moi.projects.checkpointRequest
 import fr.qwartz.mika.data.moi.projects.gestureRead
@@ -41,16 +42,20 @@ import fr.qwartz.mika.data.moi.projects.milestoneRequest
 import fr.qwartz.mika.data.moi.projects.newProjectBody
 import fr.qwartz.mika.data.moi.projects.noteRequest
 import fr.qwartz.mika.data.moi.projects.objectiveStatusRequest
+import fr.qwartz.mika.data.moi.projects.olderKept
 import fr.qwartz.mika.data.moi.projects.pilotRequest
 import fr.qwartz.mika.data.moi.projects.refusalWords
 import fr.qwartz.mika.data.moi.projects.restoreRequest
 import fr.qwartz.mika.data.moi.projects.settleRequest
+import fr.qwartz.mika.data.moi.projects.todoDecision
 import fr.qwartz.mika.data.moi.projects.ticketRequest
 import fr.qwartz.mika.data.moi.projects.todoRequest
 import fr.qwartz.mika.data.moi.projects.waitingKey
 import fr.qwartz.mika.ui.shell.Load
 import fr.qwartz.mika.ui.shell.said
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
@@ -66,11 +71,15 @@ import kotlinx.coroutines.launch
  * contre une fausse API.
  */
 
-/** Ce dont un modèle de Projets a besoin : l'API, relire les pastilles du tiroir, l'heure. */
+/**
+ * Ce dont un modèle de Projets a besoin : l'API, relire les pastilles du tiroir, l'heure, et [compute] — là où se fait
+ * ce qui pèse (un fichier ou un diff mis en lignes, une page découpée), jamais sur le fil principal.
+ */
 class ProjectsDeps(
     val api: ProjectsApi,
     val refreshBadges: () -> Unit = {},
     val now: () -> Long = System::currentTimeMillis,
+    val compute: CoroutineDispatcher = Dispatchers.Default,
 ) {
     /** Une image téléversée part par le client sans délai global (un fichier lourd sur une liaison faible), comme une pièce de Mail. */
     constructor(graph: AppGraph) : this(
@@ -86,8 +95,9 @@ data class Refusal(val where: String, val text: String, val fields: Map<String, 
 /**
  * Les gestes d'un modèle, l'un après l'autre : celui qui part ([busy] : ses boutons attendent), son refus dit à son
  * endroit ([refusal]), son sort dit en toast ([said]), et l'endroit du dernier geste abouti ([finished] : l'écran y
- * ferme sa feuille, puis [acknowledge]). Chaque endroit a sa clé d'envoi : un double appui ne part qu'une fois, un
- * réessai après une coupure ne refait rien.
+ * ferme sa feuille, puis [acknowledge]). [finished] ne vaut que pour le geste qui vient d'aboutir : un geste qui part
+ * l'efface, et un écran ou une feuille qui s'ouvre oublie ce qu'on avait dit à son endroit ([forget]). Chaque endroit
+ * a sa clé d'envoi : un double appui ne part qu'une fois, un réessai après une coupure ne refait rien.
  */
 class GestureRunner(private val deps: ProjectsDeps, private val scope: CoroutineScope) {
     var refusal by mutableStateOf<Refusal?>(null)
@@ -128,8 +138,13 @@ class GestureRunner(private val deps: ProjectsDeps, private val scope: Coroutine
      * Un geste dans un projet. Rien ne part pendant qu'un autre attend sa réponse, ni sans route (une attente dont le
      * geste ne se fait pas par un bouton générique : la fusion, qui a sa confirmation — [MergeFlow]).
      */
-    fun send(project: Int, request: GestureRequest, where: String, after: suspend (GestureDone) -> Unit = {}): Boolean =
-        request.route.isNotEmpty() && run(where, request, { key -> deps.api.gesture(project, request, key) }, after = after)
+    fun send(
+        project: Int,
+        request: GestureRequest,
+        where: String,
+        failed: suspend (MoiError) -> Unit = {},
+        after: suspend (GestureDone) -> Unit = {},
+    ): Boolean = request.route.isNotEmpty() && run(where, request, { key -> deps.api.gesture(project, request, key) }, failed = failed, after = after)
 
     /**
      * Une écriture qui n'est pas un geste générique (lui confier un projet, fusionner) : [content] est ce qu'elle
@@ -145,6 +160,8 @@ class GestureRunner(private val deps: ProjectsDeps, private val scope: Coroutine
         if (busy.isNotEmpty()) return false
         busy = where
         refusal = null
+        // le geste d'avant n'a plus rien à fermer : seul celui qui part dira qu'il a abouti
+        finished = null
         scope.launch {
             val key = keys.getOrPut(where) { SendKey() }
             val got = call(key.of(content))
@@ -207,8 +224,17 @@ class ProjectsViewModel(private val deps: ProjectsDeps) : ViewModel() {
     /** L'attente ouverte, telle qu'on l'a lue en dernier ; `null` tant qu'elle n'est pas trouvée. */
     var shown by mutableStateOf<Waiting?>(null)
         private set
-    /** Elle n'est plus dans « À faire » : décidée ailleurs, ou plus à elle. */
+    /** Elle n'est plus dans « À faire » : décidée ailleurs, ou plus à elle — le serveur l'a dit, pas une panne. */
     var missing by mutableStateOf(false)
+        private set
+    /** Ce qu'elle dit maintenant n'a pas pu se lire (le réseau, le serveur) : son erreur, et « Réessayer ». */
+    var failure by mutableStateOf<MoiError?>(null)
+        private set
+    /**
+     * L'attente ouverte se relit — elle s'ouvre, l'écran revient devant, le serveur vient de refuser : tant qu'il n'a
+     * pas redit où elle en est, rien ne s'y décide ([decision]).
+     */
+    var rereading by mutableStateOf(false)
         private set
     var approvals by mutableStateOf<Load<Approvals>?>(null)
         private set
@@ -216,15 +242,48 @@ class ProjectsViewModel(private val deps: ProjectsDeps) : ViewModel() {
         private set
     var element by mutableStateOf<Load<EntryDetail>?>(null)
         private set
-    /** Sa réponse à une question, tapée sur place. */
+    /** Sa réponse à une question, tapée sur place : celle de la dernière attente ouverte ([last]). */
     var answer by mutableStateOf("")
 
+    /** L'attente dont l'écran est ouvert ; `null` : aucun (rien ne s'en relit). */
     private var opened: Pair<Int, String>? = null
+    /**
+     * La dernière attente ouverte, que son écran soit encore devant ou non : ce qu'on y tapait ([answer]) ne tombe que
+     * quand une autre s'ouvre — pas quand on la quitte pour son projet, son fil, sa pull request, puis qu'on y revient.
+     */
+    private var last: Pair<Int, String>? = null
     private var started = false
     private var job: Job? = null
     private var readJob: Job? = null
+    /** Les pages d'« À faire » lues, la première comprise. */
+    private var todoPages = 1
+    /** La taille d'une page d'« À faire », telle que le serveur l'a dite. */
+    private var todoSize = TODO_PAGE
+    /** La dernière page demandée n'était pas pleine : il n'y a pas de suite. */
+    private var todoEnded = false
 
     val todoTotal: Int get() = overview.valueOrNull?.todoTotal ?: 0
+
+    /** Ce qu'il reste à lire d'« À faire » (0 : tout est lu, ou la dernière page l'a dit). */
+    val todoRest: Int get() = if (todoEnded) 0 else (todoTotal - todo.size).coerceAtLeast(0)
+
+    /**
+     * Les boutons de l'attente ouverte, d'après ce qu'on vient d'en lire. Aucun tant qu'elle se relit ou que sa
+     * relecture a échoué : une décision ne se prend jamais sur l'ancienne lecture.
+     */
+    val decision: TodoDecision
+        get() {
+            val w = shown ?: return TodoDecision()
+            return if (rereading || failure != null) TodoDecision() else todoDecision(w, approval, sheet?.valueOrNull, element?.valueOrNull)
+        }
+
+    /**
+     * Une réponse se tape sur place — ce que dit la dernière lecture, même pendant qu'elle se relit ou si sa relecture
+     * a échoué : le champ reste posé, avec ce qu'on y tape (et le clavier). Seul l'envoi attend la relecture
+     * ([decision] : rien ne part d'ici là).
+     */
+    val answering: Boolean
+        get() = shown?.let { todoDecision(it, approval, sheet?.valueOrNull, element?.valueOrNull).answer } == true
 
     /** L'accord que l'attente ouverte demande de lire : exactement ce qui partirait. */
     val approval: Approval?
@@ -251,17 +310,18 @@ class ProjectsViewModel(private val deps: ProjectsDeps) : ViewModel() {
         restored = 0
     }
 
+    /** Tirer relit tout : « À faire » repart de sa première page (la suite chargée a pu vieillir). */
     fun pull() {
         refreshing = true
         viewModelScope.launch {
-            load(quiet = false).join()
+            load(quiet = false, keep = false).join()
             refreshing = false
         }
     }
 
     fun retry() {
         overview = Load.Loading
-        load(quiet = false)
+        load(quiet = false, keep = false)
     }
 
     /** Un projet filtré se retire en le touchant de nouveau (0 : tous). */
@@ -274,15 +334,23 @@ class ProjectsViewModel(private val deps: ProjectsDeps) : ViewModel() {
         filter = project
     }
 
-    /** La suite d'« À faire » : la page d'après, sans redire ce qu'on a déjà. */
+    /**
+     * La suite d'« À faire » : la page d'après celles qu'on a lues — comptées, pas déduites du nombre de lignes (une
+     * ligne déjà connue s'écarte, et la même page reviendrait sans fin) —, sans redire ce qu'on a déjà.
+     */
     fun more() {
-        if (loadingMore) return
+        if (loadingMore || todoRest <= 0) return
         loadingMore = true
+        val asked = todoPages + 1
         viewModelScope.launch {
-            when (val got = deps.api.todo(todo.size / TODO_PAGE + 1)) {
-                is MoiApi.Result.Ok -> {
+            when (val got = deps.api.todo(asked)) {
+                // la première page relue entre-temps : cette suite n'est plus la sienne
+                is MoiApi.Result.Ok -> if (asked == todoPages + 1) {
+                    todoPages = asked
+                    if (got.value.size > 0) todoSize = got.value.size
                     val known = todo.map { it.project to waitingKey(it) }.toSet()
                     todo = todo + got.value.items.filterNot { (it.project to waitingKey(it)) in known }
+                    if (got.value.items.size < maxOf(got.value.size, 1)) todoEnded = true
                 }
                 is MoiApi.Result.Failed -> gestures.say(got.error.said)
             }
@@ -290,24 +358,61 @@ class ProjectsViewModel(private val deps: ProjectsDeps) : ViewModel() {
         }
     }
 
-    private fun load(quiet: Boolean): Job {
+    /** [keep] : relue en place (un retour sur l'écran, une attente ouverte ou décidée), la suite déjà chargée reste si la page relue la rejoint. */
+    private fun load(quiet: Boolean, keep: Boolean = true): Job {
         job?.cancel()
         return viewModelScope.launch {
             when (val got = deps.api.overview()) {
                 is MoiApi.Result.Ok -> {
                     overview = Load.Ready(got.value)
-                    todo = got.value.todo
+                    firstRead(got.value.todo, keep)
                     if (filter != 0 && todo.none { it.project == filter }) filter = 0
                     found()
                 }
-                // une relecture qui échoue garde ce qui était montré
-                is MoiApi.Result.Failed -> if (overview is Load.Ready) {
-                    if (!quiet) gestures.say(got.error.said)
-                } else {
-                    overview = Load.Failed(got.error)
+                is MoiApi.Result.Failed -> {
+                    // une relecture qui échoue garde ce qui était montré
+                    if (overview is Load.Ready) {
+                        if (!quiet) gestures.say(got.error.said)
+                    } else {
+                        overview = Load.Failed(got.error)
+                    }
+                    // l'attente ouverte n'a pas pu se relire : on le dit là, et rien ne s'y décide
+                    if (opened != null) failure = got.error
                 }
             }
         }.also { job = it }
+    }
+
+    /**
+     * La première page d'« À faire » vient d'être relue ([fresh]). **Relue en place** ([keep]), la suite déjà chargée
+     * reste tant que la page relue la rejoint ([olderKept]) : ouvrir une attente, en revenir, ne la fait pas retomber.
+     * Ses pages se recomptent alors d'après ce qu'on tient — une attente partie a décalé les suivantes d'un rang : la
+     * page entamée se redemande (ce qu'on a déjà s'écarte), celle d'après aurait sauté une ligne. Sinon — tirer, une
+     * page relue qui ne rejoint plus rien, ou qui est tout ce que le serveur compte — la suite repart d'elle.
+     */
+    private fun firstRead(fresh: List<Waiting>, keep: Boolean) {
+        val listed = fresh.map { it.project to waitingKey(it) }.toSet()
+        // rien au-delà de la page relue : ce qu'on tenait de plus n'est plus à faire
+        val older: List<Waiting> = if (!keep || todoTotal <= fresh.size) {
+            emptyList()
+        } else {
+            olderKept(todo, fresh) { a, b -> a.project == b.project && waitingKey(a) == waitingKey(b) }
+                .filterNot { (it.project to waitingKey(it)) in listed }
+        }
+        todo = fresh + older
+        if (older.isEmpty()) {
+            todoPages = 1
+            todoEnded = false
+        } else {
+            todoPages = maxOf(1, todo.size / maxOf(todoSize, 1))
+            // la fin atteinte ne vaut plus si le serveur en compte davantage que ce qu'on tient
+            if (todo.size < todoTotal) todoEnded = false
+        }
+    }
+
+    /** Une attente qui n'est plus à faire — décidée d'ici, ou le serveur le dit — quitte la liste, où qu'elle y soit. */
+    private fun unlist(project: Int, key: String) {
+        todo = todo.filterNot { it.project == project && waitingKey(it) == key }
     }
 
     // ── Nouveau projet ──
@@ -339,7 +444,13 @@ class ProjectsViewModel(private val deps: ProjectsDeps) : ViewModel() {
 
     // ── L'attente ouverte ──
 
-    /** Ouvrir une attente : la retrouver dans « À faire », puis lire ce que son geste demande. */
+    /**
+     * L'écran d'une attente est devant — il s'ouvre, ou il revient (l'app sort de l'arrière-plan, l'écran tourne) :
+     * elle se relit, toujours. Une autre attente, ou la même rouverte après avoir quitté son écran, repart de rien : ni
+     * l'ancienne lecture, ni ce qu'on y avait dit. **Ce qu'on y tapait** ([answer]) **ne tombe que pour une autre
+     * attente** : quittée pour un autre écran (son projet, son fil, son objectif, sa pull request) puis retrouvée, la
+     * même le garde — et se relit quand même, sans rien offrir d'ici là.
+     */
     fun open(project: Int, key: String) {
         val target = project to key
         if (opened != target) {
@@ -349,80 +460,146 @@ class ProjectsViewModel(private val deps: ProjectsDeps) : ViewModel() {
             approvals = null
             sheet = null
             element = null
-            answer = ""
+            if (last != target) {
+                last = target
+                answer = ""
+            }
+            merge.cancel()
             gestures.forget(todoWhere(project, key))
         }
-        if (!started) resume() else found()
+        reread()
     }
 
     /**
-     * L'attente ouverte, dans ce qu'on vient de lire ; hors de la liste lue, celle qu'on montrait reste. Jamais vue
-     * (elle est plus loin que la première page d'« À faire », ou l'écran renaît), elle se cherche dans la fiche de son
-     * projet, qui rend tout ce qui y attend ; absente là aussi, elle n'est plus à faire.
+     * L'écran de l'attente est quitté : plus rien ne s'y relit, la confirmation d'une fusion demandée là s'annule, et
+     * un geste abouti qu'il n'a pas eu le temps de suivre ne le refermera pas à son retour.
+     */
+    fun leave(project: Int, key: String) {
+        if (opened != project to key) return
+        opened = null
+        readJob?.cancel()
+        rereading = false
+        failure = null
+        merge.cancel()
+        if (gestures.finished == todoWhere(project, key)) gestures.acknowledge()
+    }
+
+    /**
+     * Relire l'attente ouverte : « À faire » d'abord (y est-elle encore, que dit son geste maintenant), puis ce que son
+     * geste demande de lire. D'ici là, ce qu'on montrait reste lisible, sans ses boutons.
+     */
+    fun reread() {
+        if (opened == null) return
+        started = true
+        failure = null
+        rereading = true
+        load(quiet = true)
+    }
+
+    /**
+     * L'attente ouverte, dans ce qu'on vient de lire. Hors de la première page d'« À faire » (elle est plus loin, ou
+     * elle n'y est plus), elle se cherche dans la fiche de son projet, qui rend tout ce qui y attend : absente là
+     * aussi, elle n'est plus à faire ; la fiche illisible, c'est une panne, pas une absence.
      */
     private fun found() {
         val (project, key) = opened ?: return
-        val now = todo.firstOrNull { it.project == project && waitingKey(it) == key }
-        if (now != null) {
-            val first = shown == null
-            shown = now
-            missing = false
-            if (first) read()
-        } else if (shown == null && overview is Load.Ready) {
-            readJob?.cancel()
-            readJob = viewModelScope.launch {
-                val got = deps.api.sheet(project)
-                if (opened != project to key) return@launch
-                val there = (got as? MoiApi.Result.Ok)?.value?.todo?.firstOrNull { it.mine && waitingKey(it) == key }
-                if (there == null) {
-                    missing = true
-                } else {
-                    shown = there
-                    sheet = Load.of(got)
-                    read()
+        readJob?.cancel()
+        rereading = true
+        // dans la page qu'on vient de relire, pas dans la suite gardée : elle date d'avant
+        val listed = overview.valueOrNull?.todo.orEmpty().firstOrNull { it.project == project && waitingKey(it) == key }
+        readJob = viewModelScope.launch {
+            if (listed != null) {
+                show(listed)
+                return@launch
+            }
+            when (val got = deps.api.sheet(project)) {
+                is MoiApi.Result.Failed -> failure = got.error
+                is MoiApi.Result.Ok -> {
+                    val there = got.value.todo.firstOrNull { it.mine && waitingKey(it) == key }
+                    if (there == null) {
+                        shown = null
+                        missing = true
+                        rereading = false
+                        // plus à faire : ni sa ligne dans la suite gardée, ni ce qu'on y tapait
+                        unlist(project, key)
+                        answer = ""
+                    } else {
+                        show(there, got.value)
+                    }
                 }
             }
         }
     }
 
-    /** Ce que le geste de l'attente demande de lire avant de décider. */
+    /** L'attente telle que le serveur la dit maintenant, puis ce que son geste demande de lire ([known] : sa fiche, si on vient de la lire). */
+    private suspend fun show(w: Waiting, known: Sheet? = null) {
+        shown = w
+        missing = false
+        when (val r = gestureRead(w)) {
+            is GestureRead.Accord -> approvals = Load.of(deps.api.approvals(w.project))
+            GestureRead.ProjectPlan, is GestureRead.Checkpoint -> sheet = if (known != null) Load.Ready(known) else Load.of(deps.api.sheet(w.project))
+            is GestureRead.Element -> element = Load.of(deps.api.element(w.project, r.list, r.item))
+            GestureRead.Nothing -> Unit
+        }
+        rereading = false
+    }
+
+    /** Relire ce que le geste de l'attente demande de lire (« Réessayer », après une lecture refusée). */
     fun read() {
         val w = shown ?: return
         readJob?.cancel()
-        readJob = viewModelScope.launch {
-            when (val r = gestureRead(w)) {
-                is GestureRead.Accord -> approvals = Load.of(deps.api.approvals(w.project))
-                GestureRead.ProjectPlan, is GestureRead.Checkpoint -> sheet = Load.of(deps.api.sheet(w.project))
-                is GestureRead.Element -> element = Load.of(deps.api.element(w.project, r.list, r.item))
-                GestureRead.Nothing -> Unit
-            }
-        }
+        rereading = true
+        readJob = viewModelScope.launch { show(w) }
     }
 
     /**
      * Décider : le bouton touché ([action]), ce qui est saisi ([typed]) et ce qui a été lu — le condensé de l'accord
-     * montré, le numéro du plan montré. Abouti, l'attente n'est plus à faire : l'écran revient à la liste.
+     * montré, le numéro du plan montré. Rien ne part pendant une relecture, ni pour un bouton que la lecture du moment
+     * n'offre pas. Abouti, l'attente n'est plus à faire :
+     * l'écran revient à la liste ; refusé (la situation a changé), elle se relit — les mots du serveur restent dits.
+     * Faux : rien n'est parti (elle se relit, ce bouton ne s'offre plus, un autre geste attend sa réponse) — l'écran
+     * garde alors ce qui était tapé, et le dit.
      */
-    fun decide(action: String, typed: String = "") {
-        val w = shown ?: return
+    fun decide(action: String, typed: String = ""): Boolean {
+        val w = shown ?: return false
+        // seulement un bouton que ce qu'on vient de lire offre encore (aucun pendant une relecture)
+        val offered = decision
+        if (if (action == "answer") !offered.answer else offered.buttons.none { it.action == action && it.enabled }) return false
         val request = todoRequest(w, action, typed, element?.valueOrNull, approval?.digest)
-        gestures.send(w.project, request, todoWhere(w.project, waitingKey(w))) {
-            answer = ""
-            load(quiet = true)
+        val key = waitingKey(w)
+        return gestures.send(w.project, request, todoWhere(w.project, key), failed = { reread() }) {
+            if (last == w.project to key) answer = ""
+            settled(w.project, key)
         }
     }
 
     /**
+     * Un geste a abouti : l'attente décidée quitte la liste, et ce qu'on montrait n'est plus ce que le serveur dit —
+     * « À faire » se relit, et l'attente ouverte avec lui. Si l'écran de ce geste n'est plus devant (quitté avant la
+     * réponse, ou une autre attente ouverte depuis), personne n'y refermera rien : le geste abouti s'oublie, pour que
+     * l'attente retrouvée plus tard ne se referme pas seule.
+     */
+    private fun settled(project: Int, key: String) {
+        unlist(project, key)
+        if (opened != null) rereading = true
+        if (opened != project to key) gestures.forget(todoWhere(project, key))
+        load(quiet = true)
+    }
+
+    /**
      * Fusionner la pull request prête de l'attente ouverte : elle se relit, puis sa confirmation dit ce qui va être
-     * fusionné ([merge]). Demandée, l'attente n'est plus à faire ; refusée, « À faire » se relit.
+     * fusionné ([merge]). Demandée, l'attente n'est plus à faire ; refusée, ou plus fusionnable, elle se relit.
      */
     fun askMerge() {
         val w = shown ?: return
-        merge.ask(w.project, mergeNumber(w), 0, todoWhere(w.project, waitingKey(w))) { load(quiet = true) }
+        if (rereading || failure != null) return
+        merge.ask(w.project, mergeNumber(w), 0, todoWhere(w.project, waitingKey(w))) { reread() }
     }
 
     fun confirmMerge() {
-        merge.confirm(after = { load(quiet = true) }, failed = { load(quiet = true) })
+        // l'attente dont la fusion est confirmée : celle de l'écran qui l'a demandée
+        val (project, key) = opened ?: return
+        merge.confirm(after = { settled(project, key) }, failed = { reread() })
     }
 
     companion object {
@@ -450,6 +627,16 @@ class ProjectViewModel(private val deps: ProjectsDeps, val id: Int) : ViewModel(
     var sheet by mutableStateOf<Load<Sheet>>(Load.Loading)
         private set
     var refreshing by mutableStateOf(false)
+        private set
+    /**
+     * La fiche montrée date d'avant — l'écran revient devant, un geste vient d'aboutir ou d'être refusé — et se relit :
+     * tant que le serveur n'a pas redit où elle en est, aucun geste ne s'y offre (un plan, la preuve d'un point d'arrêt
+     * ne se décident pas sur l'ancienne lecture).
+     */
+    var stale by mutableStateOf(false)
+        private set
+    /** Sa relecture a échoué : on le dit, et « Réessayer » ([reread]). */
+    var staleError by mutableStateOf<MoiError?>(null)
         private set
 
     // ── Objectifs ──
@@ -505,7 +692,12 @@ class ProjectViewModel(private val deps: ProjectsDeps, val id: Int) : ViewModel(
         load(quiet = false)
     }
 
-    /** Après un geste : la fiche relue, et ce que ses onglets avaient lu. */
+    /** « Réessayer », après une relecture qui a échoué. */
+    fun reread() {
+        load(quiet = false)
+    }
+
+    /** Après un geste, abouti ou refusé : la fiche relue, et ce que ses onglets avaient lu. */
     fun reload() {
         load(quiet = true)
         if (tickets != null) loadTickets()
@@ -515,10 +707,17 @@ class ProjectViewModel(private val deps: ProjectsDeps, val id: Int) : ViewModel(
 
     private fun load(quiet: Boolean): Job {
         job?.cancel()
+        // ce qu'on montre date d'avant cette lecture : rien ne s'y décide tant qu'elle n'a pas abouti
+        if (sheet is Load.Ready) stale = true
+        staleError = null
         return viewModelScope.launch {
             when (val got = deps.api.sheet(id)) {
-                is MoiApi.Result.Ok -> sheet = Load.Ready(got.value)
+                is MoiApi.Result.Ok -> {
+                    sheet = Load.Ready(got.value)
+                    stale = false
+                }
                 is MoiApi.Result.Failed -> if (sheet is Load.Ready) {
+                    staleError = got.error
                     if (!quiet) gestures.say(got.error.said)
                 } else {
                     sheet = Load.Failed(got.error)
@@ -595,40 +794,50 @@ class ProjectViewModel(private val deps: ProjectsDeps, val id: Int) : ViewModel(
 
     // ── Ses gestes ──
 
+    // Aucun ne part tant que la fiche se relit ([stale]) : la garde est ici, pas seulement dans les boutons — une
+    // fenêtre ou une feuille restée ouverte (une rotation relance la relecture) ne décide pas sur l'ancienne lecture.
+    // Chacun rend faux quand rien n'est parti (elle se relit, un autre geste attend sa réponse) : l'écran garde alors
+    // ce qui était tapé. Un geste refusé relit la fiche comme un geste abouti : un refus dit le plus souvent que la
+    // situation a changé.
+
+    /** Ce qu'une feuille de la fiche dit en tête : le refus de son geste, sinon pourquoi rien ne peut en partir (sa relecture a échoué). */
+    fun saidAt(where: String): String = gestures.refusalAt(where).ifBlank { staleError?.message.orEmpty() }
+
     /** Piloter : une consigne, « vas-y maintenant » (sur un objectif, s'il est nommé), la pause, la reprise. */
-    fun pilot(what: String, text: String = "", objective: Int = 0, where: String = TOP) {
-        gestures.send(id, pilotRequest(what, text, objective), where) { reload() }
-    }
+    fun pilot(what: String, text: String = "", objective: Int = 0, where: String = TOP): Boolean =
+        !stale && gestures.send(id, pilotRequest(what, text, objective), where, failed = { reload() }) { reload() }
 
     /** Rouvrir un objectif, le dire terminé, le retirer. */
-    fun goalStatus(goal: Goal, status: String) {
-        gestures.send(id, objectiveStatusRequest(goal.id, status), goalWhere(goal.id)) { reload() }
-    }
+    fun goalStatus(goal: Goal, status: String): Boolean =
+        !stale && gestures.send(id, objectiveStatusRequest(goal.id, status), goalWhere(goal.id), failed = { reload() }) { reload() }
 
     /** Ajouter un objectif ou une mission ([before] `null`), ou le modifier : seulement ce qui change. */
-    fun saveGoal(form: GoalForm, before: GoalForm? = null, objective: Int = 0) {
-        gestures.send(id, goalRequest(form, before, objective), if (objective == 0) GOAL_NEW else goalFormWhere(objective)) { reload() }
-    }
+    fun saveGoal(form: GoalForm, before: GoalForm? = null, objective: Int = 0): Boolean =
+        !stale && gestures.send(id, goalRequest(form, before, objective), if (objective == 0) GOAL_NEW else goalFormWhere(objective), failed = { reload() }) { reload() }
 
-    fun saveMilestone(objective: Int, form: MilestoneForm, before: MilestoneForm? = null, milestone: Int = 0) {
-        gestures.send(id, milestoneRequest(objective, form, before, milestone), milestoneWhere(objective)) { reload() }
-    }
+    fun saveMilestone(objective: Int, form: MilestoneForm, before: MilestoneForm? = null, milestone: Int = 0): Boolean =
+        !stale && gestures.send(id, milestoneRequest(objective, form, before, milestone), milestoneWhere(objective), failed = { reload() }) { reload() }
 
-    fun dropMilestone(objective: Int, milestone: Int, reason: String) {
-        gestures.send(id, milestoneDropRequest(objective, milestone, reason), goalWhere(objective)) { reload() }
-    }
+    fun dropMilestone(objective: Int, milestone: Int, reason: String): Boolean =
+        !stale && gestures.send(id, milestoneDropRequest(objective, milestone, reason), goalWhere(objective), failed = { reload() }) { reload() }
 
     /** Un point d'arrêt dit prêt : validé, ou refusé avec ce qui manque. */
-    fun checkpoint(objective: Int, milestone: Int, verdict: String, reason: String = "") {
-        gestures.send(id, checkpointRequest(objective, milestone, verdict, reason), goalWhere(objective)) { reload() }
-    }
+    fun checkpoint(objective: Int, milestone: Int, verdict: String, reason: String = ""): Boolean =
+        !stale && gestures.send(id, checkpointRequest(objective, milestone, verdict, reason), goalWhere(objective), failed = { reload() }) { reload() }
 
-    fun openTicket(form: TicketForm) {
-        gestures.send(id, ticketRequest(form), TICKET_NEW) {
+    fun openTicket(form: TicketForm): Boolean =
+        !stale && gestures.send(id, ticketRequest(form), TICKET_NEW) {
             if (tickets == null) tickets = Load.Loading
             reload()
         }
-    }
+
+    /**
+     * Un geste sur ses liens — en poser un, changer son mot, le mode direct, le retirer, demander quelque chose au
+     * projet lu ([project] : celui qui reçoit la demande) : ce qu'on en montre vient de la fiche, il ne part pas non
+     * plus tant qu'elle se relit.
+     */
+    fun link(request: GestureRequest, where: String, project: Int = id): Boolean =
+        !stale && gestures.send(project, request, where) { reload() }
 
     companion object {
         /** L'en-tête de la fiche (piloter). */
@@ -671,6 +880,16 @@ class TicketViewModel(private val deps: ProjectsDeps, val project: Int, val numb
     var note by mutableStateOf("")
     var revision by mutableIntStateOf(0)
         private set
+    /**
+     * Le ticket montré date d'avant — l'écran revient devant, un geste vient d'aboutir ou d'être refusé — et se relit :
+     * tant que le serveur n'a pas redit où il en est, aucun geste ne s'y offre (sa question, son plan ne se décident
+     * pas sur l'ancienne lecture).
+     */
+    var stale by mutableStateOf(false)
+        private set
+    /** Sa relecture a échoué : on le dit, et « Réessayer » ([reread]). */
+    var staleError by mutableStateOf<MoiError?>(null)
+        private set
 
     private val item = "#$number"
     private var started = false
@@ -688,12 +907,24 @@ class TicketViewModel(private val deps: ProjectsDeps, val project: Int, val numb
         load(quiet = false)
     }
 
+    /** « Réessayer », après une relecture qui a échoué. */
+    fun reread() {
+        load(quiet = false)
+    }
+
     private fun load(quiet: Boolean): Job {
         job?.cancel()
+        // ce qu'on montre date d'avant cette lecture : rien ne s'y décide tant qu'elle n'a pas abouti
+        if (element is Load.Ready) stale = true
+        staleError = null
         return viewModelScope.launch {
             when (val got = deps.api.element(project, ProjectsApi.TICKETS, item)) {
-                is MoiApi.Result.Ok -> element = Load.Ready(got.value)
+                is MoiApi.Result.Ok -> {
+                    element = Load.Ready(got.value)
+                    stale = false
+                }
                 is MoiApi.Result.Failed -> if (element is Load.Ready) {
+                    staleError = got.error
                     if (!quiet) gestures.say(got.error.said)
                 } else {
                     element = Load.Failed(got.error)
@@ -720,17 +951,21 @@ class TicketViewModel(private val deps: ProjectsDeps, val project: Int, val numb
         if (history != null) loadStory(withActivity = around.isNotEmpty())
     }
 
-    /** Trancher : accepter, écarter, valider son plan (en nommant le plan lu), le refuser, le fermer, le rouvrir. */
-    fun settle(verdict: String, reason: String = "") {
-        val e = element.valueOrNull ?: return
-        gestures.send(project, settleRequest(e.line, verdict, reason), HERE) { changed() }
+    /**
+     * Trancher : accepter, écarter, valider son plan (en nommant le plan lu), le refuser, le fermer, le rouvrir. Faux :
+     * rien n'est parti (il se relit, un autre geste attend sa réponse) — l'écran garde ce qui était tapé, et le dit.
+     */
+    fun settle(verdict: String, reason: String = ""): Boolean {
+        val e = element.valueOrNull ?: return false
+        if (stale) return false
+        return gestures.send(project, settleRequest(e.line, verdict, reason), HERE, failed = { load(quiet = true) }) { changed() }
     }
 
     /** Une note dans son fil ; sur un ticket qui pose une question, elle y répond. */
     fun sendNote() {
         val e = element.valueOrNull ?: return
-        if (note.isBlank()) return
-        gestures.send(project, noteRequest(e.line, note), HERE) {
+        if (note.isBlank() || stale) return
+        gestures.send(project, noteRequest(e.line, note), HERE, failed = { load(quiet = true) }) {
             note = ""
             changed()
         }
@@ -739,7 +974,7 @@ class TicketViewModel(private val deps: ProjectsDeps, val project: Int, val numb
     /** Modifier son titre, sa sorte, sa priorité, sa description : seulement ce qui change. */
     fun modify(form: TicketForm) {
         val e = element.valueOrNull ?: return
-        gestures.send(project, ticketRequest(form, TicketForm.of(e), e.line.handle), EDIT) { changed() }
+        gestures.send(project, ticketRequest(form, TicketForm.of(e), e.line.handle), EDIT, failed = { load(quiet = true) }) { changed() }
     }
 
     companion object {

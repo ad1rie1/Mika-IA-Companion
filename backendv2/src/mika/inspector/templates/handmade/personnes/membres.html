@@ -1,0 +1,10 @@
+{# Les personnes d'une organisation (app/handmade/subjects/contact.py, ADR 0298) : celles qu'elle connaît de loin,
+   chacune vers sa fiche. #}
+<div class="now-page pers">
+  <section class="now-card" aria-labelledby="org-people">
+    <header class="now-card-head"><h2 id="org-people">Ses personnes</h2><span class="person-count now-num">{{ members|length }}</span></header>
+    {% if members %}<ul class="pers-dir" role="list">
+      {% for m in members %}<li class="pers-dir-item"><span class="now-avatar far" aria-hidden="true">{{ m.initial }}</span><div class="pers-dir-main"><p class="pers-head"><span class="pers-name"><a href="{{ m.href }}">{{ m.name }}</a></span><span class="now-tag far">connue de loin</span></p></div></li>{% endfor %}
+    </ul>{% else %}<p class="now-empty">Aucune personne qu'elle connaisse dans {{ name }}.</p>{% endif %}
+  </section>
+</div>

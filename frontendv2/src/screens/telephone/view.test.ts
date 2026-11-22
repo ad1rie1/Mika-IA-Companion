@@ -75,6 +75,7 @@ describe("les mots du téléphone", () => {
   it("donne à chaque appli sa couleur et sa lettre", () => {
     expect(appBadge("whatsapp_business", "WhatsApp Business")).toEqual({ cls: "whatsapp", letter: "W" });
     expect(appBadge("samsung_messages", "Messages")).toEqual({ cls: "sms", letter: "M" });
+    expect(appBadge("messenger", "Messenger")).toEqual({ cls: "messenger", letter: "M" });
     expect(appBadge("signal", "son téléphone")).toEqual({ cls: "other", letter: "S" });
   });
 

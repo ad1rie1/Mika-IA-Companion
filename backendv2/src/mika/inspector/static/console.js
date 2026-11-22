@@ -302,7 +302,10 @@
         return p.parentElement.closest("[data-subtabs]") === box;
       });
       if (!panes.length) return;
-      var links = Array.from(box.querySelectorAll(".hm-subnav a[href^='#']"));
+      // ses liens à lui : des sous-onglets dans une de ses sections ont les leurs (ADR 0297)
+      var links = Array.from(box.querySelectorAll(".hm-subnav a[href^='#']")).filter(function (a) {
+        return a.closest("[data-subtabs]") === box;
+      });
       function show() {
         var target = location.hash.length > 1 ? document.getElementById(decodeURIComponent(location.hash.slice(1))) : null;
         var on = panes.find(function (p) { return target && p.contains(target); }) || panes[0];
@@ -318,6 +321,9 @@
           ev.preventDefault();
           history.pushState(null, "", a.getAttribute("href"));
           show();
+          // le volet « Infos » d'un détail (un téléphone, ADR 0297) se referme quand on choisit un sous-onglet
+          var aside = box.parentElement && box.parentElement.querySelector("input[data-volet]");
+          if (aside) aside.checked = false;
           var top = box.getBoundingClientRect().top;
           if (top < 0) box.scrollIntoView({ block: "start" });
         });
