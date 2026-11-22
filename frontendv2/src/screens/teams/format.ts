@@ -3,7 +3,7 @@
  * suite d'un même auteur, une mention mise en valeur, qui a écrit un message. Sans DOM : tout se teste.
  */
 import { h, norm } from "../../shell/dom";
-import type { ConversationKind, OwnPending, Reply, ReplyMode, ReplyState, TeamsAccount, TeamsMessage, Thread } from "../../api/teams";
+import type { ConversationKind, OwnPending, Reply, ReplyMode, ReplyState, TeamsAccount, TeamsMessage, TeamsReaction, Thread } from "../../api/teams";
 import { clock } from "../chat/markup";
 import { ofName } from "../../shared/names";
 
@@ -54,6 +54,30 @@ export function authorLabel(m: Pick<TeamsMessage, "own" | "author">, a: AccountW
   if (!m.own) return m.author || "?";
   if (ownAccount(a)) return "Toi";
   return a?.self_name || a?.owner_name || m.author || "?";
+}
+
+// ── Les réactions (ADR 0300) ─────────────────────────────────────────
+
+/** Qui a posé une réaction, en mots (au survol de sa pastille) : les noms que le compte leur connaît, puis la personne
+ *  du compte quand elle en est (« toi » sur un compte à toi ; sur un compte qu'on te partage, sa personne), puis
+ *  combien d'autres — le serveur en nomme dix au plus. */
+export function reactionWho(r: Pick<TeamsReaction, "count" | "mine" | "names">, a: AccountWho | null | undefined): string {
+  const names = r.names.filter(Boolean);
+  if (r.mine) names.push(ownAccount(a) ? "toi" : a?.self_name || a?.owner_name || "la personne du compte");
+  const rest = Math.max(0, r.count - names.length);
+  if (!names.length) return `${r.count} personne${r.count > 1 ? "s" : ""}`;
+  return rest ? `${names.join(", ")} et ${rest} autre${rest > 1 ? "s" : ""}` : names.join(", ");
+}
+
+/** Les réactions d'un message, sous sa bulle : chacune son emoji (sa clé quand le serveur ne le connaît pas) et son
+ *  compte, la tienne en couleur — sur un compte à toi seulement : sur un compte qu'on te partage, ce n'est pas toi. */
+export function reactionsHtml(m: Pick<TeamsMessage, "reactions">, a: AccountWho | null | undefined): string {
+  const shown = (m.reactions ?? []).filter((r) => r.count > 0);
+  if (!shown.length) return "";
+  const yours = ownAccount(a);
+  return `<div class="tm-reac">${shown
+    .map((r) => `<span${r.mine && yours ? ' class="mine"' : ""} title="${h(reactionWho(r, a))}">${h(r.emoji || r.key)} ${r.count}</span>`)
+    .join("")}</div>`;
 }
 
 // ── Répondu autrement (ADR 0199) ─────────────────────────────────────

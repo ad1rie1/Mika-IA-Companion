@@ -55,6 +55,8 @@ import fr.qwartz.mika.ui.carte.TripScreen
 import fr.qwartz.mika.ui.chat.ChatScreen
 import fr.qwartz.mika.ui.chat.FilesScreen
 import fr.qwartz.mika.ui.chat.SearchScreen
+import fr.qwartz.mika.ui.contacts.ContactSheetScreen
+import fr.qwartz.mika.ui.contacts.ContactsScreen
 import fr.qwartz.mika.ui.login.LoginScreen
 import fr.qwartz.mika.ui.mail.MailComposeScreen
 import fr.qwartz.mika.ui.mail.MailDraftScreen
@@ -256,6 +258,8 @@ private fun Screen(graph: AppGraph, stack: BackStack, shell: Shell) {
         is Route.EventFiche -> EventFicheScreen(graph, top)
         is Route.Phone -> PhoneScreen(graph, top.tab)
         is Route.PhoneThread -> PhoneThreadScreen(graph, top.key)
+        Route.Contacts -> ContactsScreen(graph, if (stack.routes.size <= 2) BarNav.DRAWER else BarNav.BACK)
+        is Route.Contact -> ContactSheetScreen(graph, top)
         // le tiroir depuis le tiroir ; la flèche quand un autre écran y mène (« Comment ça part » de Teams…)
         is Route.Tools -> ToolsScreen(graph, top.tab, if (stack.routes.size <= 2) BarNav.DRAWER else BarNav.BACK)
         is Route.SettingsPage -> SettingsPageScreen(graph, top)

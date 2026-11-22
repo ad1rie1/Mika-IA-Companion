@@ -16,12 +16,20 @@ qui doit repartir.
   son condensé ; l'extension relève ce texte-là.
 - **Les profils des personnes croisées** (ADR 0298) arrivent avec les lots : gardés par compte et par personne, chaque
   changement prend un rang qui ne resert jamais (``profiles_since`` : l'annuaire les relit dans cet ordre).
+- **Les réactions d'un message** (ADR 0300) suivent ses lots, comme son texte : un message connu dont seules les
+  réactions changent est mis à jour **sans rien de neuf** — ni compté neuf (``Stored.new``, ``recent``), ni rendu à
+  remarquer, ni réglant de brouillon : la porte ne journalise rien, le tri ne se réveille pas. On les lit avec le
+  message (``Message.reactions``), chaque personne sous le nom que ce compte lui connaît (son profil, sinon son dernier
+  message).
+- **Les photos de profil** (ADR 0300) : une par compte et par personne, à l'empreinte que son profil a dite ; rien
+  d'une personne que le compte ne connaît pas (ou plus : l'oubli).
 """
 
 from __future__ import annotations
 
 import difflib
 import hashlib
+import json
 import re
 import threading
 import time
@@ -47,6 +55,7 @@ from mika.adapters.teams.models import (
     DraftRow,
     ImageRow,
     MessageRow,
+    PhotoRow,
     ProfileRow,
     fit,
 )
@@ -65,6 +74,9 @@ from mika.ports.teams import (
     OPEN_STATES,
     OUTBOX_PLACE,
     OUTBOX_SEND,
+    PHOTO_KEPT,
+    PHOTO_KNOWN,
+    PHOTO_UNKNOWN,
     PLACED,
     QUEUED,
     SENDING,
@@ -81,8 +93,11 @@ from mika.ports.teams import (
     MessageImage,
     OutboxItem,
     PeopleSince,
+    Photo,
+    PhotoIn,
     Preview,
     ProfilesSince,
+    Reaction,
     SeenAuthor,
     Settled,
     Stored,
@@ -160,10 +175,11 @@ def maybe_same_message(a: str, b: str) -> bool:
     ka, kb = id_kind(a), id_kind(b)
     return a != b and ka != kb and "autre" not in (ka, kb)
 
-#: ce qu'on lit d'un message, d'une conversation, d'un brouillon (dans l'ordre des champs de ``Message``,
-#: ``Conversation`` — son nombre de messages compté à part, puis son compte —, ``Draft``)
+#: ce qu'on lit d'un message, d'une conversation, d'un brouillon (dans l'ordre des champs de ``Message`` — ses
+#: réactions en JSON, lues par ``_messages`` —, ``Conversation`` — son nombre de messages compté à part, puis son
+#: compte —, ``Draft``)
 _MESSAGE = (MessageRow.ref, MessageRow.conversation, MessageRow.author, MessageRow.author_id, MessageRow.at,
-            MessageRow.text, MessageRow.own, MessageRow.mentions_me, MessageRow.account)
+            MessageRow.text, MessageRow.own, MessageRow.mentions_me, MessageRow.account, MessageRow.reactions)
 _CONVERSATION = (ConversationRow.id, ConversationRow.title, ConversationRow.kind, ConversationRow.last_at)
 _DRAFT = (DraftRow.draft_id, DraftRow.conversation, DraftRow.body, DraftRow.reply_to, DraftRow.author,
           DraftRow.created, DraftRow.updated, DraftRow.state, DraftRow.mode, DraftRow.digest, DraftRow.final,
@@ -209,6 +225,53 @@ def _is_one_to_one() -> Any:
 
 def _now_us() -> int:
     return time.time_ns() // 1000
+
+
+#: au plus tant d'identifiants dans une même liste ``IN`` (les noms des personnes qui ont réagi)
+_IN_CHUNK = 500
+
+
+def reactions_json(reactions: Sequence[Reaction] | None) -> str:
+    """Les réactions d'un message telles qu'elles se rangent (``MessageRow.reactions``) : vide s'il n'en a aucune."""
+    if not reactions:
+        return ""
+    return json.dumps([{"k": r.key, "n": r.count, "m": r.mine, "b": list(r.by)} for r in reactions],
+                      ensure_ascii=False, separators=(",", ":"))
+
+
+def reactions_from(text: str) -> tuple[Reaction, ...]:
+    """Les réactions rangées d'un message (sans les noms) ; un texte illisible n'en a aucune."""
+    if not text:
+        return ()
+    try:
+        raw = json.loads(text)
+    except ValueError:
+        return ()
+    out = []
+    for r in raw if isinstance(raw, list) else ():
+        if not isinstance(r, dict) or not isinstance(r.get("k"), str):
+            continue
+        by = tuple(str(b) for b in (r.get("b") or ()) if isinstance(b, str))
+        out.append(Reaction(r["k"], max(len(by), int(r.get("n") or 0)), bool(r.get("m")), by))
+    return tuple(out)
+
+
+def without_person(reactions: Sequence[Reaction], person: str) -> tuple[Reaction, ...]:
+    """Les réactions d'un message sans celle d'une personne (l'oubli) : son identifiant part, et son compte avec."""
+    out = []
+    for r in reactions:
+        if person not in r.by:
+            out.append(r)
+            continue
+        by = tuple(b for b in r.by if b != person)
+        count = max(len(by), r.count - 1)
+        if count > 0:
+            out.append(Reaction(r.key, count, r.mine, by))
+    return tuple(out)
+
+
+def _chunks(items: Sequence[str]) -> list[Sequence[str]]:
+    return [items[i:i + _IN_CHUNK] for i in range(0, len(items), _IN_CHUNK)]
 
 
 def _ratio(a: str, b: str) -> float:
@@ -381,20 +444,27 @@ class TeamsStore:
                 if m.deleted:  # supprimé dans Teams : son texte part du cache (jamais remarqué s'il ne l'était pas)
                     if row is not None:
                         known += 1
-                        row.text, row.acked = "", True
+                        row.text, row.acked, row.reactions = "", True, ""
                     continue
                 own = m.own or written_by_self(m.author_id, m.author, self_id, self_name)
-                if row is not None:  # déjà connu (rejoué, ou retouché dans Teams : son texte suit)
+                # ses réactions (ADR 0300), si l'extension en a dit quelque chose
+                reactions = None if m.reactions is None else reactions_json(m.reactions)
+                if row is not None:  # déjà connu (rejoué, retouché dans Teams, ses réactions changées : il suit) —
+                    # rien de neuf : ni remarqué, ni journalisé
                     known += 1
                     text = self._with_images(s, row.ref, m.text)
                     if row.text != text:
                         row.text = text
+                    if reactions is not None and (row.reactions or "") != reactions:
+                        row.reactions = reactions
                     continue
                 conv = fit(m.conversation, CONVERSATION_MAX)
                 author_key = fit(m.author_id.strip().lower(), AUTHOR_MAX)
                 twin = self._twin(s, key, conv, author_key, at, m.id, m.text)
                 if twin is not None:
                     twin.alias = ref
+                    if reactions is not None:
+                        twin.reactions = reactions
                     twins += 1
                     continue
                 live = not batch.history or at >= now - HISTORY_LIVE_WINDOW
@@ -404,7 +474,7 @@ class TeamsStore:
                 s.add(MessageRow(ref=ref, account=key, conversation=conv, external_id=m.id, author=m.author,
                                  author_id=m.author_id, author_key=author_key, at=at, text=m.text, own=own,
                                  mentions_me=m.mentions_me, received=now, acked=own or not live,
-                                 images_pending=max(0, min(m.images, 8))))
+                                 images_pending=max(0, min(m.images, 8)), reactions=reactions or ""))
                 found = self._conversation_row(s, seen, key, conv)
                 found.last_at = max(found.last_at or 0, at)
                 if own and live:
@@ -443,6 +513,10 @@ class TeamsStore:
                       "department": p.department, "tenant": p.tenant, "phones": "\n".join(p.phones)}
             row = s.get(ProfileRow, (account, person))
             if row is not None and all((getattr(row, k) or "") == v for k, v in values.items()):
+                # seule sa photo a changé (ADR 0300) : gardée sans rang — l'annuaire n'a rien à relire ; une empreinte
+                # qui manque (un profil d'une autre version, ou sans photo dite) ne l'efface pas
+                if p.avatar and (row.avatar or "") != p.avatar:
+                    row.avatar = p.avatar
                 continue
             counter = counter or self._profile_counter(s)
             counter.value = int(counter.value) + 1
@@ -453,6 +527,8 @@ class TeamsStore:
                 for k, v in values.items():
                     setattr(row, k, v)
             row.updated, row.seq = now, counter.value
+            if p.avatar:
+                row.avatar = p.avatar
             changed += 1
         return changed
 
@@ -614,6 +690,89 @@ class TeamsStore:
                                                                        ImageRow.image == image)).first()
         return (row[0], bytes(row[1])) if row else None
 
+    # ── les photos de profil (ADR 0300) ──
+    def keep_photo(self, account: str, photo: PhotoIn, now: int) -> str:
+        """Garder la photo d'une personne sous ce compte : seulement si le compte a son profil, et à l'empreinte que ce
+        profil dit (une photo d'avant, arrivée en retard, ne remplace pas la nouvelle) ; la même empreinte redite n'en
+        fait qu'une."""
+        key = _account_key(account)
+        person = fit(photo.person.strip().lower(), AUTHOR_MAX)
+        with self._lock, self._session.begin() as s:
+            profile = s.get(ProfileRow, (key, person))
+            if profile is None or not photo.etag or (profile.avatar or "") != photo.etag:
+                return PHOTO_UNKNOWN
+            row = s.get(PhotoRow, (key, person))
+            if row is not None and row.etag == photo.etag:
+                return PHOTO_KNOWN
+            if row is None:
+                row = PhotoRow(account=key, key=person)
+                s.add(row)
+            row.etag, row.mime, row.size, row.data, row.updated = photo.etag, photo.mime, len(photo.data), photo.data, now
+        return PHOTO_KEPT
+
+    def photo(self, account: str, person: str) -> Photo | None:
+        with self._lock, self._session() as s:
+            row = s.get(PhotoRow, (_account_key(account), fit(person.strip().lower(), AUTHOR_MAX)))
+            return Photo(row.account, row.key, row.etag, row.mime, bytes(row.data)) if row is not None else None
+
+    def photos_of(self, people: Sequence[str], *, accounts: Sequence[str] | None = None) -> dict[str, tuple[str, str]]:
+        keys = sorted({fit(p.strip().lower(), AUTHOR_MAX) for p in people if p and p.strip()})
+        if not keys or (accounts is not None and not accounts):
+            return {}
+        found: dict[str, tuple[str, str]] = {}
+        with self._lock, self._session() as s:
+            for chunk in _chunks(keys):
+                for key, account, etag in s.execute(select(PhotoRow.key, PhotoRow.account, PhotoRow.etag)
+                                                    .where(PhotoRow.key.in_(chunk),
+                                                           *_in_accounts(PhotoRow.account, accounts))
+                                                    .order_by(PhotoRow.key, PhotoRow.account)).all():
+                    found.setdefault(key, (account, etag))
+        return found
+
+    # ── les messages tels qu'on les lit, leurs réactions nommées (ADR 0300) ──
+    @staticmethod
+    def _names(s: Session, wanted: Mapping[str, set[str]]) -> dict[tuple[str, str], str]:
+        """Le nom de ces personnes (compte → leurs identifiants en minuscules) tel que chaque compte le connaît : son
+        profil, sinon le nom de son dernier message dans ce compte."""
+        keys = sorted({k for ks in wanted.values() for k in ks})
+        found: dict[tuple[str, str], str] = {}
+        for chunk in _chunks(keys):
+            for account, key, name in s.execute(select(ProfileRow.account, ProfileRow.key, ProfileRow.name)
+                                                .where(ProfileRow.key.in_(chunk), ProfileRow.name != "")).all():
+                if key in wanted.get(account, ()):
+                    found[(account, key)] = name
+        missing = sorted({k for a, ks in wanted.items() for k in ks if (a, k) not in found})
+        for chunk in _chunks(missing):
+            last = (select(func.max(MessageRow.id)).where(MessageRow.author_key.in_(chunk), MessageRow.author != "")
+                    .group_by(MessageRow.account, MessageRow.author_key))
+            for account, key, name in s.execute(select(MessageRow.account, MessageRow.author_key, MessageRow.author)
+                                                .where(MessageRow.id.in_(last))).all():
+                if key in wanted.get(account, ()) and (account, key) not in found:
+                    found[(account, key)] = name
+        return found
+
+    def _messages(self, s: Session, rows: Sequence[Any]) -> list[Message]:
+        """Des lignes lues par ``_MESSAGE``, en messages : leurs réactions nommées par le compte de chacun, la
+        personne du compte reconnue (``mine``, sans nom : c'est elle)."""
+        parsed = [(r, reactions_from(r[9] or "")) for r in rows]
+        wanted: dict[str, set[str]] = {}
+        for r, reactions in parsed:
+            for x in reactions:
+                wanted.setdefault(r[8], set()).update(x.by)
+        names = self._names(s, wanted) if wanted else {}
+        selves = dict(s.execute(select(AccountRow.key, AccountRow.self_id)
+                                .where(AccountRow.key.in_(sorted(wanted)))).all()) if wanted else {}
+        out = []
+        for r, reactions in parsed:
+            me = str(selves.get(r[8]) or "")
+            mine = [tuple(bool(me) and same_person(b, me) for b in x.by) for x in reactions]
+            named = tuple(Reaction(x.key, x.count, x.mine or any(m), x.by,
+                                   tuple("" if is_me else names.get((r[8], b), "") for b, is_me in zip(x.by, m,
+                                                                                                         strict=True)))
+                          for x, m in zip(reactions, mine, strict=True))
+            out.append(Message(*r[:9], reactions=named))
+        return out
+
     # ── ce qu'elle remarque ──
     async def fetch_new(self, limit: int, *, accounts: Sequence[str] | None = None) -> list[Message]:
         """Les messages à remarquer ; un message dont des images sont annoncées et pas arrivées, ou arrivées et pas
@@ -624,7 +783,7 @@ class TeamsStore:
             rows = s.execute(select(*_MESSAGE).where(MessageRow.acked == false(), MessageRow.own == false(),
                                                      *_in_accounts(MessageRow.account, accounts), ~waiting)
                              .order_by(MessageRow.at, MessageRow.id).limit(max(0, limit))).all()
-        return [Message(*r) for r in rows]
+            return self._messages(s, rows)
 
     def ack(self, refs: Sequence[str]) -> None:
         if not refs:
@@ -635,7 +794,7 @@ class TeamsStore:
     def message(self, ref: str) -> Message | None:
         with self._lock, self._session() as s:
             row = s.execute(select(*_MESSAGE).where(MessageRow.ref == ref)).first()
-        return Message(*row) if row else None
+            return self._messages(s, [row])[0] if row else None
 
     def thread(self, account: str, conversation: str, limit: int, *, before: int = 0) -> list[Message]:
         where = [MessageRow.account == _account_key(account),
@@ -645,7 +804,7 @@ class TeamsStore:
         with self._lock, self._session() as s:
             rows = s.execute(select(*_MESSAGE).where(*where).order_by(MessageRow.at.desc(), MessageRow.id.desc())
                              .limit(max(0, limit))).all()
-        return [Message(*r) for r in reversed(rows)]
+            return self._messages(s, list(reversed(rows)))
 
     def last_messages(self, conversations: Sequence[tuple[str, str]]) -> dict[tuple[str, str], Message]:
         """Le dernier message de chacune de ces conversations (compte, identifiant) — celui que rendrait
@@ -661,7 +820,24 @@ class TeamsStore:
         with self._lock, self._session() as s:
             rows = s.execute(select(*_MESSAGE).select_from(ConversationRow)
                              .join(MessageRow, MessageRow.id == last).where(wanted)).all()
-        return {asked[(m.account, m.conversation)]: m for m in (Message(*r) for r in rows)}
+            return {asked[(m.account, m.conversation)]: m for m in self._messages(s, rows)}
+
+    def others(self, conversations: Sequence[tuple[str, str]]) -> dict[tuple[str, str], str]:
+        """L'autre personne de chacun de ces tête-à-tête : le même message que celui dont ``_named`` prend le nom (le
+        dernier qui n'est pas de la personne du compte), son identifiant ; une requête quel que soit leur nombre."""
+        asked = {(_account_key(account), fit(cid, CONVERSATION_MAX)): (account, cid) for account, cid in conversations}
+        if not asked:
+            return {}
+        other = (select(MessageRow.author_id)
+                 .where(MessageRow.account == ConversationRow.account, MessageRow.conversation == ConversationRow.id,
+                        MessageRow.own == false(), MessageRow.author != "")
+                 .order_by(MessageRow.at.desc(), MessageRow.id.desc()).limit(1).correlate(ConversationRow)
+                 .scalar_subquery())
+        wanted = or_(*(and_(ConversationRow.account == account, ConversationRow.id == cid) for account, cid in asked))
+        with self._lock, self._session() as s:
+            rows = s.execute(select(ConversationRow.account, ConversationRow.id, other)
+                             .where(wanted, _is_one_to_one())).all()
+        return {asked[(account, cid)]: str(person) for account, cid, person in rows if person}
 
     @staticmethod
     def _conversation_in(s: Session, account: str, conversation: str) -> Conversation | None:
@@ -1021,23 +1197,25 @@ class TeamsStore:
                                                      MessageRow.at >= int(since),
                                                      *_in_accounts(MessageRow.account, accounts))
                              .order_by(MessageRow.at.desc(), MessageRow.id.desc()).limit(limit)).all()
-        return [Message(*r) for r in rows]
+            return self._messages(s, rows)
 
     # ── l'oubli ──
     def drop_account(self, account: str) -> int:
-        """Un compte supprimé des réglages (ADR 0186) : ses conversations, ses messages, ses brouillons, les profils
-        qu'il a reçus et ce que son extension en avait dit s'effacent ; le nombre de lignes effacées."""
+        """Un compte supprimé des réglages (ADR 0186), ou purgé (``mika teams purge``) : ses conversations, ses messages
+        (et leurs réactions), ses brouillons, les profils et les photos qu'il a reçus et ce que son extension en avait
+        dit s'effacent ; le nombre de lignes effacées."""
         key = _account_key(account)
         with self._lock, self._session.begin() as s:
             n = 0
-            for row in (DraftRow, ImageRow, MessageRow, ConversationRow, ProfileRow):
+            for row in (DraftRow, ImageRow, MessageRow, ConversationRow, ProfileRow, PhotoRow):
                 n += _count(s.execute(delete(row).where(row.account == key)))
             n += _count(s.execute(delete(AccountRow).where(AccountRow.key == key)))
         return n
 
     async def forget(self, subject: str) -> int:
-        """Oublier quelqu'un (``teams:<identifiant>``), dans tous les comptes : ses messages, son profil, et ses
-        tête-à-tête entiers (ce qui y a été écrit, les brouillons qui y répondaient, la conversation elle-même)."""
+        """Oublier quelqu'un (``teams:<identifiant>``), dans tous les comptes : ses messages, son profil, sa photo, ses
+        réactions aux messages des autres (ADR 0300), et ses tête-à-tête entiers (ce qui y a été écrit, les brouillons
+        qui y répondaient, la conversation elle-même)."""
         if not subject.startswith(teams_c.HANDLE_PREFIX):
             return 0
         author = subject[len(teams_c.HANDLE_PREFIX):].strip().lower()
@@ -1060,6 +1238,15 @@ class TeamsStore:
                 ImageRow.ref.in_(select(MessageRow.ref).where(MessageRow.author_key == key)))))
             n += _count(s.execute(delete(MessageRow).where(MessageRow.author_key == key)))
             n += _count(s.execute(delete(ProfileRow).where(ProfileRow.key == key)))
+            n += _count(s.execute(delete(PhotoRow).where(PhotoRow.key == key)))
+            # ses réactions aux messages des autres : son identifiant part de chacune, son compte avec
+            for mid, text in s.execute(select(MessageRow.id, MessageRow.reactions).where(
+                    MessageRow.reactions != "", func.instr(MessageRow.reactions, key) > 0)).all():
+                before = reactions_from(text)
+                after = without_person(before, key)
+                if after != before:
+                    s.execute(update(MessageRow).where(MessageRow.id == mid).values(reactions=reactions_json(after)))
+                    n += 1
             for account, conv in convs:
                 n += _count(s.execute(delete(ImageRow).where(ImageRow.ref.in_(select(MessageRow.ref).where(
                     MessageRow.account == account, MessageRow.conversation == conv)))))

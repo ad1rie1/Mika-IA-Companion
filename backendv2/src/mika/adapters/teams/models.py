@@ -15,7 +15,11 @@ est au compte ``principal`` (la migration ``a3c71e5d9b20``).
   (``key``, comme ``author_key``), tel que l'extension l'a envoyé en dernier ; ``seq`` dit l'ordre des changements
   (un profil neuf ou changé prend le rang suivant, tiré de ``counters`` : un rang ne resert jamais, même quand le
   dernier profil part) ;
-- ``counters`` : un compteur qui ne fait que monter (``profiles`` : le dernier rang donné).
+- ``counters`` : un compteur qui ne fait que monter (``profiles`` : le dernier rang donné) ;
+- ``photos`` (ADR 0300) : la photo de profil d'une personne croisée, sous son compte et son identifiant Teams en
+  minuscules (``key``), à l'empreinte que son profil a dite (``etag``).
+
+Les réactions d'un message (ADR 0300) sont dans sa ligne (``reactions``, un JSON court) : elles se lisent avec lui.
 
 **Les recherches comparent des textes repliés à l'écriture** (``fold_text`` : casse et accents ignorés, ``%`` et
 ``_`` de simples caractères), dans des colonnes à part (``title_fold``, ``id_fold``), recalculées par l'entité à chaque
@@ -135,6 +139,9 @@ class MessageRow(TeamsBase):
     acked: Mapped[bool] = mapped_column(default=False)
     #: ses images que l'extension a annoncées et qui ne sont pas encore arrivées (ADR 0258) : il attend (``HOLD``)
     images_pending: Mapped[int] = mapped_column(default=0, server_default="0")
+    #: ses réactions (ADR 0300), en JSON (``[{"k": clé, "n": combien, "m": la sienne, "b": [identifiants]}]``) ; vide :
+    #: aucune, ou rien de dit
+    reactions: Mapped[str] = mapped_column(LongText, default="", server_default="")
 
 
 class ImageRow(TeamsBase):
@@ -219,6 +226,25 @@ class ProfileRow(TeamsBase):
     updated: Mapped[int] = mapped_column(default=0)
     #: son rang dans l'ordre des changements
     seq: Mapped[int] = mapped_column(default=0)
+    #: l'empreinte de sa photo (``avatarETag``, ADR 0300) : gardée sans changer de rang (l'annuaire ne la lit pas)
+    avatar: Mapped[str] = mapped_column(LongText, default="", server_default="")
+
+
+class PhotoRow(TeamsBase):
+    """La photo de profil d'une personne croisée par un compte (ADR 0300), telle que l'extension l'a téléchargée de
+    Teams (64 px), à l'empreinte que son profil disait."""
+
+    __tablename__ = "photos"
+    __table_args__ = table_args(Index("ix_photos_key", "key"))
+
+    account: Mapped[str] = mapped_column(Key(ACCOUNT_MAX), primary_key=True)
+    key: Mapped[str] = mapped_column(Key(AUTHOR_MAX), primary_key=True)
+    etag: Mapped[str] = mapped_column(LongText, default="")
+    mime: Mapped[str] = mapped_column(Key(MIME_MAX), default="")
+    size: Mapped[int] = mapped_column(default=0)
+    data: Mapped[bytes] = mapped_column(LongBlob)
+    #: quand elle est arrivée (µs, l'horloge du serveur)
+    updated: Mapped[int] = mapped_column(default=0)
 
 
 class CounterRow(TeamsBase):
@@ -232,5 +258,6 @@ class CounterRow(TeamsBase):
 
 __all__ = [
     "ACCOUNT_MAX", "AUTHOR_MAX", "CONVERSATION_MAX", "COUNTER_MAX", "IMAGE_MAX", "MIME_MAX", "REF_MAX", "STATE_MAX",
-    "AccountRow", "ConversationRow", "CounterRow", "DraftRow", "ImageRow", "MessageRow", "ProfileRow", "fit",
+    "AccountRow", "ConversationRow", "CounterRow", "DraftRow", "ImageRow", "MessageRow", "PhotoRow", "ProfileRow",
+    "fit",
 ]

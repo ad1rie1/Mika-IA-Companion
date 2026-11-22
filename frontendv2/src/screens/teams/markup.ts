@@ -23,6 +23,7 @@ import {
   modeLabel,
   modeTitle,
   ownAccount,
+  reactionsHtml,
   replyState,
   retouched,
   sentUnder,
@@ -41,9 +42,13 @@ export const FILTERS: readonly (readonly [Filter, string])[] = [
   ["elle", "Ses réponses"],
 ];
 
-/** Le rond d'une discussion : la personne d'un tête-à-tête, un carré pour un groupe, l'agenda pour une réunion. */
-export function convAvatar(c: Pick<Conversation, "title" | "kind" | "key">, size = ""): string {
-  if (c.kind === "dm" || c.kind === "other") return avatar(c.title || "?", size, c.title || c.key);
+/** Ce qu'il faut d'une discussion pour son rond : son nom, sa sorte, sa clé, et sa photo (ADR 0300). */
+export type ConvFace = Pick<Conversation, "title" | "kind" | "key" | "photo">;
+
+/** Le rond d'une discussion : la personne d'un tête-à-tête (sa photo de Teams quand le serveur en a une, sinon ses
+ *  initiales), un carré pour un groupe (son image n'est pas captée), l'agenda pour une réunion. */
+export function convAvatar(c: ConvFace, size = ""): string {
+  if (c.kind === "dm" || c.kind === "other") return avatar(c.title || "?", size, c.title || c.key, c.photo);
   const inner = c.kind === "meeting" ? ico("calendar", "sm") : h(initials(c.title.replace(/[^\p{L}\p{N}\s]/gu, "")) || "#");
   return `<span class="av sq grp${size ? ` ${size}` : ""}" title="${h(c.title)}">${inner}</span>`;
 }
@@ -103,11 +108,12 @@ function message(m: TeamsMessage, mark: { day: string; suite: boolean }, v: Thre
   const me = fromYou(m, v.account);
   const suite = mark.suite;
   return `${day}<div class="tm-msg${me ? " me" : ""}${suite ? " suite" : ""}${m.mentions_me ? " mention" : ""}">
-    ${me || suite ? '<span class="tm-gut"></span>' : avatar(name, "sm", m.author_id || name)}
+    ${me || suite ? '<span class="tm-gut"></span>' : avatar(name, "sm", m.author_id || name, m.photo)}
     <div class="tm-body">${suite ? "" : `<div class="tm-meta"><b>${h(name)}</b><time title="${h(dayAndClock(m.at, v.now))}">${h(clock(m.at))}</time></div>`}
       ${shownText(m) ? `<div class="tm-txt">${messageHtml(shownText(m), v.selfName, m.mentions_me)}</div>` : ""}
       ${images(m)}
-      ${fromHer(m, replies) ? `<div class="by-mika">${ico("sparkle")}rédigé avec Mika</div>` : ""}</div></div>`;
+      ${fromHer(m, replies) ? `<div class="by-mika">${ico("sparkle")}rédigé avec Mika</div>` : ""}
+      ${reactionsHtml(m, v.account)}</div></div>`;
 }
 
 /** Les « [image] » du texte (ou « [image : ce que Mika y a vu] ») : l'image elle-même les remplace quand on l'a. */
@@ -225,7 +231,7 @@ export function threadBody(t: Thread, older: readonly TeamsMessage[], v: ThreadV
 }
 
 export interface ThreadHead {
-  conv: Pick<Conversation, "title" | "kind" | "key">;
+  conv: ConvFace;
   sub: string;
   infoOpen: boolean;
 }
@@ -275,7 +281,8 @@ export interface InfoView {
   conv: Pick<Conversation, "title" | "kind" | "key" | "messages">;
   /** Ton nom (le rond de « Toi »). */
   selfName: string;
-  people: readonly { name: string; key: string; own: boolean; count: number }[];
+  /** `photo` : celle de Teams (ADR 0300), vide sans photo. */
+  people: readonly { name: string; key: string; own: boolean; count: number; photo?: string }[];
   account: TeamsAccount | null;
   replies: readonly Reply[];
   now: number;
@@ -287,7 +294,7 @@ function participant(p: InfoView["people"][number], v: InfoView): string {
   const label = authorLabel({ own: p.own, author: p.name }, v.account);
   const yours = p.own && ownAccount(v.account);
   const face = yours ? v.selfName || label : label;
-  return `<li>${avatar(face, "sm", yours ? v.selfName || p.key : p.key)}<div><b>${h(label)}</b><small>${p.count} message${p.count > 1 ? "s" : ""} dans ce qui est chargé</small></div></li>`;
+  return `<li>${avatar(face, "sm", yours ? v.selfName || p.key : p.key, p.photo)}<div><b>${h(label)}</b><small>${p.count} message${p.count > 1 ? "s" : ""} dans ce qui est chargé</small></div></li>`;
 }
 
 export function infoPane(v: InfoView): string {
@@ -339,7 +346,7 @@ export function repliesTable(items: readonly Reply[], v: RepliesView): string {
   const rows = items
     .map((r) => {
       const c = v.convs.get(r.conversation);
-      const conv = { title: r.title || c?.title || "(discussion)", kind: c?.kind ?? "dm", key: r.conversation };
+      const conv = { title: r.title || c?.title || "(discussion)", kind: c?.kind ?? "dm", key: r.conversation, photo: c?.photo };
       const [tone, label] = replyState(r, v.decide(r));
       const shown = r.state === "parti" && r.sent_text ? r.sent_text : r.preview?.text ?? r.body;
       const notes = [

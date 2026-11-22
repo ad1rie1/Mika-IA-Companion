@@ -29,6 +29,8 @@
     pausesMax: 50,
     serverErrorsMax: 8, // un même lot refusé autant de fois de suite par la même erreur 5xx est écarté
     maxProfiles: 200, // par envoi : les profils des auteurs et des mentionnés de ses messages (ADR 0298)
+    maxReactions: 20, // par message (ADR 0300)
+    maxReactors: 10, // les identifiants qui partent par réaction (leur nombre, lui, part entier)
   };
 
   const KINDS = ["dm", "group", "channel", "meeting", "other"];
@@ -163,16 +165,29 @@
 
   // ── Ce qui part ────────────────────────────────────────────────────────────
 
+  /** La plus récente version vue d'un message (`ranks` : identifiant → `{r, at}`), 0 si on n'en sait rien. */
+  function rankOf(ranks, id) {
+    const e = ranks && has(ranks, String(id)) ? ranks[String(id)] : null;
+    return e ? Number(e.r) || 0 : 0;
+  }
+
   /**
    * Pourquoi un message ne part pas (« » : il part). `ctx` : `now`, `armedAt`, `seen` (clé de version → date),
-   * `paused`, `pauses`, `title`, `kind`, `people`, `exclude` (lignes), `windowMs`. Ses propres messages partent comme
-   * les autres ; une suppression part sans texte.
+   * `ranks` (identifiant → la plus récente version vue), `paused`, `pauses`, `title`, `kind`, `people`, `exclude`
+   * (lignes), `windowMs`. Ses propres messages partent comme les autres ; une suppression part sans texte. Une version
+   * plus ancienne qu'une déjà vue ne repart pas ; une clé déjà vue repart seulement comme une version plus récente que
+   * toutes (une réaction retirée : le message redevient tel qu'il était, ADR 0300).
    */
   function admit(msg, ctx) {
     if (!msg || !msg.id || (!msg.text && !msg.deleted)) return "vide";
     const seen = ctx.seen || {};
+    const rank = msg.deleted ? 0 : Number(msg.version) || 0;
+    const prev = rankOf(ctx.ranks, msg.id);
+    if (rank > 0 && prev > 0 && rank < prev) return "déjà vu"; // un cache en retard
     // `seen[id]` seul : une version d'avant les clés de version, vue telle quelle
-    if (has(seen, T.versionKey(msg)) || has(seen, String(msg.id))) return "déjà vu";
+    if ((has(seen, T.versionKey(msg)) || has(seen, String(msg.id))) && !(rank > 0 && prev > 0 && rank > prev)) {
+      return "déjà vu";
+    }
     if (!msg.deleted && has(seen, T.deletedKey(msg.id))) return "déjà vu"; // supprimé : son texte ne repart plus
     // en pause, rien n'est mis de côté pour plus tard : ce qui est écrit pendant la pause ne partira jamais
     if (ctx.paused || inPause(msg.time, ctx.pauses)) return "en pause";
@@ -198,6 +213,24 @@
     return keep;
   }
 
+  /** Noter la version d'un message vu (`ranks` : identifiant → `{r, at}`, `at` : sa date), jamais en arrière. */
+  function noteRank(ranks, msg) {
+    const rank = msg.deleted ? 0 : Number(msg.version) || 0;
+    if (!(rank > 0)) return;
+    const id = String(msg.id);
+    ranks[id] = { r: Math.max(rank, rankOf(ranks, id)), at: Number(msg.time) || 0 };
+  }
+
+  /** Les versions vues qu'il faut encore garder : celles des messages de la fenêtre, plus une marge (comme `seen`). */
+  function pruneRanks(ranks, now, windowMs) {
+    const keep = {};
+    const limit = now - (windowMs || LIMITS.windowMs) - 2 * 3600 * 1000;
+    for (const id in ranks || {}) {
+      if (has(ranks, id) && ranks[id] && Number(ranks[id].at) >= limit) keep[id] = ranks[id];
+    }
+    return keep;
+  }
+
   /** La nature d'une conversation dans le vocabulaire du serveur (`system` n'y part jamais). */
   function wireKind(kind) {
     return KINDS.indexOf(kind) >= 0 ? kind : "other";
@@ -219,7 +252,29 @@
     // ses images, envoyées à part : Mika l'attend le temps de les regarder (ADR 0258)
     const images = Math.min(8, Math.max(0, Math.floor(Number(m.images) || 0)));
     if (images && !m.deleted) wire.images = images;
+    // ses réactions, quand la source les dit (ADR 0300) : une liste vide dit qu'il n'y en a plus
+    if (Array.isArray(m.reactions) && !m.deleted) wire.reactions = wireReactions(m.reactions, selfId);
     return wire;
+  }
+
+  /**
+   * Les réactions d'un message telles qu'elles partent (ADR 0300) : `[{key, count, mine, by}]`, 20 au plus, dix
+   * identifiants par réaction ; la sienne se reconnaît aussi à l'identifiant de soi (connu après la capture).
+   */
+  function wireReactions(list, selfId) {
+    const me = selfMri(selfId);
+    const out = [];
+    for (const r of list) {
+      if (out.length >= LIMITS.maxReactions) break;
+      if (!r || typeof r.key !== "string" || !r.key) continue;
+      const by = (Array.isArray(r.by) ? r.by : []).map(function (x) { return T.cut(String(x || ""), 200); })
+        .filter(Boolean).slice(0, LIMITS.maxReactors);
+      const count = Math.max(by.length, Math.min(1000000, Math.floor(Number(r.count) || 0)));
+      if (!count) continue;
+      out.push({ key: T.cut(r.key, 40), count: count,
+        mine: r.mine === true || (Boolean(me) && by.some(function (x) { return mri(x) === me; })), by: by });
+    }
+    return out;
   }
 
   /** Une conversation, telle qu'elle part (`info` : `{title, kind}`). */
@@ -228,13 +283,18 @@
     return { id: T.cut(String(id), 300), title: clean(i.title, 120), kind: wireKind(i.kind) };
   }
 
-  /** Un profil tel qu'il part (ADR 0298) : ses champs recoupés, ses numéros bornés. */
+  /**
+   * Un profil tel qu'il part (ADR 0298) : ses champs recoupés, ses numéros bornés ; l'empreinte de sa photo
+   * (`avatar`, ADR 0300) seulement s'il en a une.
+   */
   function wireProfile(p) {
     const o = p || {};
-    return { id: T.cut(String(o.id || ""), 200), name: clean(o.name, 120), email: T.cut(String(o.email || ""), 254),
+    const out = { id: T.cut(String(o.id || ""), 200), name: clean(o.name, 120), email: T.cut(String(o.email || ""), 254),
       title: clean(o.title, 120), company: clean(o.company, 120), department: clean(o.department, 120),
       tenant: clean(o.tenant, 120),
       phones: (Array.isArray(o.phones) ? o.phones : []).slice(0, 3).map(function (n) { return T.cut(String(n), 40); }) };
+    if (typeof o.avatar === "string" && o.avatar) out.avatar = T.cut(o.avatar, 200);
+    return out;
   }
 
   /** La longueur d'une chaîne en octets UTF-8 (ce que compte le plafond du serveur). */
@@ -390,10 +450,11 @@
     return { origin: url.origin, local: local };
   }
 
-  return { LIMITS: LIMITS, admit: admit, pruneSeen: pruneSeen, exclusions: exclusions, isExcluded: isExcluded,
+  return { LIMITS: LIMITS, admit: admit, pruneSeen: pruneSeen, noteRank: noteRank, pruneRanks: pruneRanks,
+    rankOf: rankOf, exclusions: exclusions, isExcluded: isExcluded,
     named: named, held: held, isOwn: isOwn, mentionsSelf: mentionsSelf, mri: mri, isSelfId: isSelfId, clean: clean,
     selfMri: selfMri, wireKind: wireKind, wireMessage: wireMessage, wireConversation: wireConversation,
-    wireProfile: wireProfile,
+    wireProfile: wireProfile, wireReactions: wireReactions,
     utf8Length: utf8Length, batches: batches, retryAfterSeconds: retryAfterSeconds, backoffSeconds: backoffSeconds,
     serverStrike: serverStrike, notePause: notePause, prunePauses: prunePauses, pauseOpen: pauseOpen,
     inPause: inPause, serverAddress: serverAddress };

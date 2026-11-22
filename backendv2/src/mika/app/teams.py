@@ -15,6 +15,12 @@
   (``profiles``) ; chacun est lu seul, comme un message (un profil illisible est laissé de côté, jamais le lot), avec
   les formes d'identifiant que l'extension reconnaît ; une adresse mal formée est laissée vide. Rien n'en est
   journalisé : l'annuaire les relit dans le cache.
+- *Les réactions* (ADR 0300) : un message peut porter les siennes (``reactions`` : la clé de Teams, combien, la sienne,
+  dix identifiants), lues une à une (une réaction illisible est laissée de côté, jamais le message). Un message déjà
+  connu qui revient avec d'autres réactions est rangé « connu » : rien n'est journalisé, rien ne se remarque.
+- *Les photos de profil* (ADR 0300) : ``POST /api/teams/photo`` (``{person, etag, type, data}``), admise comme une
+  image, vérifiée (64 Ko, JPEG, PNG ou WebP, des octets de ce type), gardée seulement pour une personne dont ce compte a
+  le profil, à l'empreinte qu'il dit. Rien n'en est journalisé : elle ne fait rien remarquer.
 """
 
 from __future__ import annotations
@@ -58,12 +64,17 @@ from mika.ports.teams import (
     IMAGE_MAX_BYTES,
     IMAGE_NO_MESSAGE,
     KEY_PREFIX,
+    PHOTO_KEPT,
+    PHOTO_MAX_BYTES,
+    PHOTO_UNKNOWN,
     RESULTS,
     ImageIn,
     InboxBatch,
     InboxConversation,
     InboxMessage,
     InboxProfile,
+    PhotoIn,
+    Reaction,
 )
 
 #: requêtes par minute, au plus (l'extension pousse quand Teams reçoit, relève toutes les 30 s)
@@ -88,6 +99,16 @@ PROFILE_EMAIL = re.compile(r"^[^\s@<>\"',;]{1,64}@[a-z0-9.-]{1,253}\.[a-z]{2,}$"
 PROFILE_TEXT_MAX, PROFILE_EMAIL_MAX, PROFILE_PHONES, PHONE_MAX = 120, 254, 3, 40
 #: un numéro compte au moins tant de chiffres
 PHONE_DIGITS = 6
+#: l'empreinte d'une photo de profil (``avatarETag``, ADR 0300 : ``frontend/Extension/lib/extract.js``, ``AVATAR``)
+AVATAR = re.compile(r"^[A-Za-z0-9._:+/=-]{1,200}$")
+#: les photos de profil : leurs types et ce par quoi leurs octets commencent (pas de GIF : un avatar n'en est pas un)
+PHOTO_TYPES = {k: v for k, v in IMAGE_TYPES.items() if k != "image/gif"}
+PHOTO_B64_MAX = (PHOTO_MAX_BYTES * 4) // 3 + 8
+#: une réaction (ADR 0300) : sa clé de Teams ; qui l'a posée (un identifiant de personne) ; au plus tant par message,
+#: tant d'identifiants par réaction
+REACTION_KEY = re.compile(r"^[a-z0-9_+-]{1,40}$")
+REACTOR = re.compile(r"^[\w.:@-]{1,200}$")
+REACTIONS_MAX, REACTORS_MAX, REACTION_COUNT_MAX = 20, 10, 1_000_000
 
 
 class _InMessage(BaseModel):
@@ -103,6 +124,30 @@ class _InMessage(BaseModel):
     deleted: bool = False
     #: ses images, envoyées à part (ADR 0258) : il attend qu'elles soient lues
     images: int = Field(default=0, ge=0, le=8)
+    #: ses réactions (ADR 0300), lues une à une (les ``REACTIONS_MAX`` premières) ; absentes : l'extension n'en dit rien
+    #: (le cache garde les siennes)
+    reactions: list[Any] | None = None
+
+
+class _InReaction(BaseModel):
+    """Une réaction à un message (ADR 0300) : ``frontend/Extension/lib/signals.js``, ``wireReactions``."""
+
+    model_config = ConfigDict(extra="ignore")
+    key: str = Field(min_length=1, max_length=40)
+    count: int = Field(default=0, ge=0, le=REACTION_COUNT_MAX)
+    mine: bool = False
+    #: qui l'a posée (les ``REACTORS_MAX`` premiers identifiants qui en ont la forme)
+    by: list[Any] = Field(default_factory=list)
+
+
+class _InPhoto(BaseModel):
+    """La photo de profil d'une personne (ADR 0300) : son identifiant Teams, son empreinte, son type, ses octets."""
+
+    model_config = ConfigDict(extra="ignore")
+    person: str = Field(min_length=3, max_length=200)
+    etag: str = Field(min_length=1, max_length=200)
+    type: str = Field(max_length=40)
+    data: str = Field(min_length=8, max_length=PHOTO_B64_MAX)
 
 
 class _InImage(BaseModel):
@@ -130,6 +175,8 @@ class _InProfile(BaseModel):
     tenant: str = Field(default="", max_length=PROFILE_TEXT_MAX)
     phones: list[Annotated[str, StringConstraints(max_length=PHONE_MAX)]] = Field(default_factory=list,
                                                                                  max_length=PROFILE_PHONES)
+    #: l'empreinte de sa photo (ADR 0300) ; illisible, elle est laissée vide
+    avatar: str = Field(default="", max_length=200)
 
 
 class _InConversation(BaseModel):
@@ -159,6 +206,32 @@ class _Inbox(BaseModel):
     profiles: list[Any] = Field(default_factory=list, max_length=200)
 
 
+def reaction_of(raw: Any) -> Reaction | None:
+    """Une réaction reçue, validée (``None`` : illisible) : une clé de Teams (lue en minuscules), des identifiants de
+    personne (en minuscules, chacun une fois), un compte au moins égal à leur nombre."""
+    try:
+        r = _InReaction.model_validate(raw)
+    except ValidationError:
+        return None
+    key = r.key.strip().lower()
+    if not REACTION_KEY.fullmatch(key):
+        return None
+    by = tuple(dict.fromkeys(b.strip().lower() for b in r.by if isinstance(b, str) and REACTOR.fullmatch(b.strip())))
+    count = max(len(by), r.count)
+    return Reaction(key, count, r.mine, by[:REACTORS_MAX]) if count else None
+
+
+def _reactions(raw: list[Any] | None) -> tuple[Reaction, ...] | None:
+    """Les réactions d'un message (``None`` : rien de dit) : chacune lue seule, une clé une fois."""
+    if raw is None:
+        return None
+    out: dict[str, Reaction] = {}
+    for r in (reaction_of(x) for x in raw[:REACTIONS_MAX]):
+        if r is not None and r.key not in out:
+            out[r.key] = r
+    return tuple(out.values())
+
+
 def _message(raw: Any, now_ms: int) -> InboxMessage | None:
     try:
         m = _InMessage.model_validate(clean_fields(raw))
@@ -172,7 +245,8 @@ def _message(raw: Any, now_ms: int) -> InboxMessage | None:
     if not text.strip() and not m.deleted:
         return None
     return InboxMessage(m.id, m.conv, one_line(m.author, 120), one_line(m.author_id, 200), m.time, text, m.own,
-                        m.mentions_me, m.deleted, images=m.images)
+                        m.mentions_me, m.deleted, images=m.images,
+                        reactions=None if m.deleted else _reactions(m.reactions))
 
 
 def profile_of(raw: Any) -> InboxProfile | None:
@@ -191,9 +265,11 @@ def profile_of(raw: Any) -> InboxProfile | None:
     email = one_line(p.email, PROFILE_EMAIL_MAX).lower()
     phones = tuple(dict.fromkeys(n for n in (one_line(x, PHONE_MAX) for x in p.phones)
                                  if sum(c.isdigit() for c in n) >= PHONE_DIGITS))
+    avatar = p.avatar.strip()
     found = InboxProfile(pid, one_line(p.name, PROFILE_TEXT_MAX), email if PROFILE_EMAIL.fullmatch(email) else "",
                          one_line(p.title, PROFILE_TEXT_MAX), one_line(p.company, PROFILE_TEXT_MAX),
-                         one_line(p.department, PROFILE_TEXT_MAX), one_line(p.tenant, PROFILE_TEXT_MAX), phones)
+                         one_line(p.department, PROFILE_TEXT_MAX), one_line(p.tenant, PROFILE_TEXT_MAX), phones,
+                         avatar if AVATAR.fullmatch(avatar) else "")
     if not (found.name or found.email or found.title or found.company or found.department or found.phones):
         return None
     return found
@@ -222,6 +298,32 @@ def image_of(data: dict[str, Any]) -> ImageIn:
     if not any(raw.startswith(m) for m in magics) or (got.type.lower() == "image/webp" and raw[8:12] != b"WEBP"):
         raise ValueError("ces octets ne sont pas une image de ce type")
     return ImageIn(got.conv, got.id, got.image, got.position, got.type.lower(), raw)
+
+
+def photo_of(data: dict[str, Any]) -> PhotoIn:
+    """Une photo de profil envoyée (ADR 0300), validée : une personne de Teams (lue en minuscules), une empreinte, un
+    type admis (JPEG, PNG, WebP), des octets lisibles, 64 Ko au plus, qui commencent comme ce type le veut. Lève
+    ``ValueError`` sinon."""
+    try:
+        got = _InPhoto.model_validate(clean_fields(data))
+    except ValidationError as exc:
+        first = exc.errors()[0] if exc.errors() else {}
+        raise ValueError(f"photo illisible ({'.'.join(str(x) for x in first.get('loc', ())) or 'forme'})") from None
+    person, etag = got.person.strip().lower(), got.etag.strip()
+    if not PROFILE_ID.fullmatch(person) or not AVATAR.fullmatch(etag):
+        raise ValueError("photo illisible (identifiants)")
+    magics = PHOTO_TYPES.get(got.type.lower())
+    if magics is None:
+        raise ValueError("un type de photo admis : " + ", ".join(sorted(PHOTO_TYPES)))
+    try:
+        raw = base64.b64decode(got.data, validate=True)
+    except (binascii.Error, ValueError):
+        raise ValueError("photo illisible (base64)") from None
+    if not raw or len(raw) > PHOTO_MAX_BYTES:
+        raise ValueError(f"une photo de {PHOTO_MAX_BYTES // 1024} Ko au plus")
+    if not any(raw.startswith(m) for m in magics) or (got.type.lower() == "image/webp" and raw[8:12] != b"WEBP"):
+        raise ValueError("ces octets ne sont pas une image de ce type")
+    return PhotoIn(person, etag, got.type.lower(), raw)
 
 
 def batch_of(data: dict[str, Any], now_ms: int) -> tuple[InboxBatch, int]:
@@ -408,6 +510,22 @@ class TeamsDesk:
             await self.port.kernel.mind.append([IMAGES.draft(account=account)], emitter="teams",
                                                correlation="teams:image", origin=Origin.EXTERNAL)
         return GateResult(ACCEPTED, "Reçue.", data={"kept": outcome == IMAGE_KEPT})
+
+    async def photo(self, key: str, data: Any) -> GateResult:
+        """La photo de profil d'une personne (ADR 0300) : admise comme une image (la clé, l'état, la minute), validée
+        avant que rien ne soit rangé ; gardée seulement pour une personne dont ce compte a le profil, à l'empreinte que
+        ce profil dit — sinon 404, et l'extension ne la renvoie plus. Rien n'en est journalisé."""
+        account, refused = self._admit(key)
+        if refused is not None:
+            return refused
+        try:
+            photo = photo_of(data if isinstance(data, dict) else {})
+        except ValueError as exc:
+            return GateResult(INVALID, str(exc))
+        outcome = await asyncio.to_thread(self.store.keep_photo, account, photo, self.clock())
+        if outcome == PHOTO_UNKNOWN:
+            return GateResult(MISSING, "Cette personne n'est pas connue de ce compte, ou pas avec cette photo.")
+        return GateResult(ACCEPTED, "Reçue.", data={"kept": outcome == PHOTO_KEPT})
 
     async def ack(self, key: str, item: str, data: Any) -> GateResult:
         account, refused = self._admit(key)

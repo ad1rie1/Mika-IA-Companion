@@ -1,0 +1,6 @@
+/* Proposé le 2026-11-22 (ADR 0300) : la photo de profil dans l'avatar ; ta réaction en couleur sous un message. */
+.av.photo { overflow: hidden; background: var(--tint); }
+.av.photo img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
+.av.photo .pres { z-index: 1; }
+.tm-reac span[title] { cursor: default; }
+.tm-reac span.mine { border-color: var(--accent-line, var(--accent)); background: var(--accent-soft); color: var(--accent); font-weight: 600; }

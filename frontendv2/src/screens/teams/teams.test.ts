@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Conversation, OwnPending, Reply, TeamsAccount, TeamsMessage, Thread } from "../../api/teams";
+import { apiUrl } from "../../api/moi";
 import { ofName } from "../../shared/names";
 import { caps, ofName as mailOfName } from "../mail/format";
 import {
@@ -12,6 +13,7 @@ import {
   modeLabel,
   ownBubbles,
   pendingNote,
+  reactionWho,
   replyHash,
   replyState,
   retouched,
@@ -21,7 +23,7 @@ import {
   threadMarks,
   withoutSent,
 } from "./format";
-import { conversationRow, dock, imageViewer, infoPane, repliesTable, replyCard, threadBody, type ThreadView } from "./markup";
+import { conversationRow, convAvatar, dock, imageViewer, infoPane, repliesTable, replyCard, threadBody, threadHead, type ThreadView } from "./markup";
 
 const NOW = new Date(2026, 10, 4, 15, 0).getTime();
 const MIN = 60_000;
@@ -485,5 +487,70 @@ describe("Teams : les images d'un message (ADR 0258)", () => {
     const html = threadBody(withImages(undefined, "regarde [image]"), [], view("proprietaire"), false);
     expect(html).toContain("[image]");
     expect(html).not.toContain("tm-imgs");
+  });
+});
+
+describe("Teams : les photos de profil et les réactions (ADR 0300)", () => {
+  const PHOTO = "/api/moi/teams/photo?account=principal&person=8%3Aorgid%3Amarc&v=0a1b2c3d4e5f";
+  const thread = (messages: TeamsMessage[], extra: Partial<Thread> = {}): Thread =>
+    ({ key: "19:marc", account: "principal", title: "Marc Delmas", kind: "dm", messages, more: false, replies: [], under_way: false, asked: false, ...extra });
+  /** Les adresses des photos d'un rendu. */
+  const photos = (html: string) => [...html.matchAll(/<span class="av[^"]* photo"[^>]*>[^<]*<img src="([^"]+)"/g)].map((m) => m[1]);
+
+  it("la photo de Teams remplace les initiales, qui restent dessous ; sans photo, les initiales seules", () => {
+    const body = threadBody(thread([msg({ ref: "t1", photo: PHOTO }), msg({ ref: "t2", author: "Sophie Laurent", author_id: "8:sophie", at: NOW - 20 * MIN })]), [], view("proprietaire"), false);
+    const [src] = photos(body);
+    expect(src).toBe(apiUrl(PHOTO).replace(/&/g, "&amp;")); // sur le serveur, échappée
+    expect(body).toMatch(/<span class="av sm c\d photo" title="Marc Delmas">MD<img src="[^"]+" alt="" loading="lazy" decoding="async"><\/span>/);
+    expect(photos(body)).toHaveLength(1);
+    expect(body).toMatch(/<span class="av sm c\d" title="Sophie Laurent">SL<\/span>/);
+  });
+
+  it("seule une adresse de photo de l'API se charge", () => {
+    for (const photo of ["https://ailleurs.example/photo.png", "/api/moi/teams/image?message=t&image=i", "javascript:alert(1)"]) {
+      expect(threadBody(thread([msg({ photo })]), [], view("proprietaire"), false)).not.toContain("<img");
+    }
+  });
+
+  it("un tête-à-tête prend la photo de l'autre personne, dans la liste et en tête du fil ; un groupe garde son carré", () => {
+    const dm: Conversation = { key: "19:marc", account: "principal", title: "Marc Delmas", kind: "dm", photo: PHOTO, last_at: NOW, messages: 2, last: msg({ own: true, author: "Adrien Moreau", photo: "" }), her: null };
+    expect(photos(conversationRow(dm, "", NOW, false, account()))).toHaveLength(1);
+    expect(photos(threadHead({ conv: dm, sub: "Tête-à-tête", infoOpen: false }))).toHaveLength(1);
+    const group = convAvatar({ key: "19:lumen", title: "Projet Lumen", kind: "group", photo: PHOTO });
+    expect(group).toContain('class="av sq grp"');
+    expect(group).not.toContain("<img");
+    expect(convAvatar({ ...dm, photo: "" })).not.toContain("<img");
+  });
+
+  it("les participants ont leur photo", () => {
+    const conv: Conversation = { key: "19:marc", account: "principal", title: "Marc Delmas", kind: "dm", last_at: NOW, messages: 2, last: null, her: null };
+    const info = infoPane({ conv, selfName: "Adrien Moreau", people: [{ name: "Marc Delmas", key: "8:marc", own: false, count: 2, photo: PHOTO }, { name: "Adrien Moreau", key: "8:a", own: true, count: 1 }], account: account(), replies: [], now: NOW });
+    expect(photos(info)).toHaveLength(1);
+    expect(info).toContain("<b>Toi</b>");
+  });
+
+  it("sous un message, chaque réaction : son emoji et son compte, la tienne en couleur, les noms au survol", () => {
+    const m = msg({ reactions: [
+      { key: "like", emoji: "👍", count: 3, mine: true, names: ["Claire Dubois", "Sophie Laurent"] },
+      { key: "heart", emoji: "❤️", count: 1, mine: false, names: ["Karim Haddad"] },
+      { key: "1f9d0_facewithmonocle", emoji: "", count: 2, mine: false, names: [] },
+    ] });
+    const body = threadBody(thread([m]), [], view("proprietaire"), false);
+    expect(body).toContain('<div class="tm-reac"><span class="mine" title="Claire Dubois, Sophie Laurent, toi">👍 3</span><span title="Karim Haddad">❤️ 1</span><span title="2 personnes">1f9d0_facewithmonocle 2</span></div>');
+    expect(threadBody(thread([msg({})]), [], view("proprietaire"), false)).not.toContain("tm-reac");
+    expect(threadBody(thread([msg({ reactions: [] })]), [], view("proprietaire"), false)).not.toContain("tm-reac");
+  });
+
+  it("qui a réagi : les noms, toi, puis combien d'autres ; sur un compte qu'on te partage, sa personne, sans couleur", () => {
+    expect(reactionWho({ count: 2, mine: false, names: ["Claire Dubois", "Sophie Laurent"] }, account())).toBe("Claire Dubois, Sophie Laurent");
+    expect(reactionWho({ count: 14, mine: true, names: ["Claire Dubois"] }, account())).toBe("Claire Dubois, toi et 12 autres");
+    expect(reactionWho({ count: 2, mine: false, names: ["Karim Haddad"] }, account())).toBe("Karim Haddad et 1 autre");
+    expect(reactionWho({ count: 1, mine: false, names: [] }, account())).toBe("1 personne");
+    expect(reactionWho({ count: 1, mine: true, names: [] }, shared())).toBe("Adrien Moreau");
+    expect(reactionWho({ count: 1, mine: true, names: [] }, null)).toBe("la personne du compte");
+    const m = msg({ reactions: [{ key: "like", emoji: "👍", count: 1, mine: true, names: [] }] });
+    const theirs = threadBody(thread([m]), [], view("lire", { account: shared() }), false);
+    expect(theirs).toContain('<span title="Adrien Moreau">👍 1</span>');
+    expect(theirs).not.toContain('class="mine"');
   });
 });

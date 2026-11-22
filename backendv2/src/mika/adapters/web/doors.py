@@ -156,7 +156,8 @@ def door_routes(cfg: WebConfig, accounts: Accounts, *, wakeup: wakeup_p.WakeGate
     async def teams_call(request: Request, kind: str) -> Response:
         """L'extension Teams (ADR 0069) : ``POST /api/teams/inbox`` (un lot de messages), ``GET /api/teams/outbox``
         (ce qui doit repartir), ``POST /api/teams/outbox/<id>`` (un accusé), ``POST /api/teams/image`` (une image
-        d'un message, ADR 0258 : son message pas encore arrivé, 404). Sa clé en ``Authorization: Bearer`` ;
+        d'un message, ADR 0258 : son message pas encore arrivé, 404), ``POST /api/teams/photo`` (la photo de profil
+        d'une personne, ADR 0300 : une personne que ce compte ne connaît pas, 404). Sa clé en ``Authorization: Bearer`` ;
         une origine d'extension, ou aucune (une page web, jamais). Clé absente ou fausse : le même 401 (et trop
         d'échecs d'une même adresse : 429) ; Teams désactivé : 403 ; requête illisible : 400 ; trop de requêtes :
         429 ; élément inconnu : 404 ; accusé impossible : 409. Rien n'est rangé avant que la porte l'ait admis."""
@@ -185,17 +186,22 @@ def door_routes(cfg: WebConfig, accounts: Accounts, *, wakeup: wakeup_p.WakeGate
             got = await teams.outbox(key)
         elif kind == "image":
             got = await teams.image(key, data)
+        elif kind == "photo":
+            got = await teams.photo(key, data)
         else:
             got = await teams.ack(key, request.path_params["item"][:40], data)
         if got.outcome == gate_p.UNKNOWN:
             teams_failures.fail(f"ip:{ip}")
-        return gate_reply(got, headers, accepted=202 if kind in ("inbox", "image") else 200)
+        return gate_reply(got, headers, accepted=202 if kind in ("inbox", "image", "photo") else 200)
 
     async def teams_inbox(request: Request) -> Response:
         return await teams_call(request, "inbox")
 
     async def teams_image(request: Request) -> Response:
         return await teams_call(request, "image")
+
+    async def teams_photo(request: Request) -> Response:
+        return await teams_call(request, "photo")
 
     async def phone_call(request: Request, kind: str) -> Response:
         """L'application du téléphone (ADR 0120) : ``POST /api/phone/inbox`` (les messages qu'elle a lus dans ses
@@ -344,6 +350,7 @@ def door_routes(cfg: WebConfig, accounts: Accounts, *, wakeup: wakeup_p.WakeGate
         Route("/api/wake/{name:str}", wake, methods=["POST"]),
         Route("/api/teams/inbox", teams_inbox, methods=["POST"]),
         Route("/api/teams/image", teams_image, methods=["POST"]),
+        Route("/api/teams/photo", teams_photo, methods=["POST"]),
         Route("/api/teams/outbox", teams_outbox, methods=["GET"]),
         Route("/api/teams/outbox/{item:str}", teams_ack, methods=["POST"]),
         WebSocketRoute("/api/teams/live", teams_live),

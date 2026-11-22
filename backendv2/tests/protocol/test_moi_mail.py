@@ -561,8 +561,8 @@ def test_moving_mails_files_them_in_a_folder_of_their_box(world):  # noqa: F811
     assert moved.json()["moved"] == 2 and "Archives" in moved.json()["message"]
     assert all(box.cached_one(ref).folder == "Archives" for ref in perso)
     assert [a for a in box.actions if a[0] == "move"] == [("move", ref, "Archives") for ref in perso]
-    done = [(e.data.action, e.data.by) for e in journal(live, rt.OPERATED) if "deplacer" in e.data.action]
-    assert done == [("moi.email.deplacer", "user_1")] * 2  # l'action « Déplacer », audité depuis son espace
+    done = [(e.data.action, e.data.by) for e in journal(live, rt.OPERATED) if "email" in e.data.action]
+    assert done == [("moi.email.ranger", "user_1")]  # toute la sélection en une action, auditée depuis son espace
     again = post(client, "/mail/tidy", {"refs": perso[:1], "gesture": "move", "folder": "Archives"})
     assert again.status_code == 200 and again.json()["moved"] == 0  # déjà là : rien ne bouge
     both = [perso[0], PROJET]

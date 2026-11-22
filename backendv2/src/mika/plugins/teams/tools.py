@@ -43,6 +43,7 @@ from mika.plugins.teams import (
     writer_of,
 )
 from mika.plugins.teams.accounts import Accounts
+from mika.plugins.teams.reactions import reactions_said
 from mika.plugins.teams.triage import rule_of
 from mika.plugins.teams.voice import voice_text
 from mika.ports.drafts import to_fill
@@ -90,9 +91,11 @@ def _when(frame: Any, at: int) -> str:
 
 
 def _line(frame: Any, m: Any) -> str:
-    # la personne du compte (son prénom : celle à la place de qui elle écrit), ou qui a écrit
-    who = writer_of(frame, m.account) if m.own else inert(m.author, 80) or "quelqu'un"
-    return f"[{m.ref}] {_when(frame, m.at)} — {who} : {inert(m.text, 600)}"
+    # la personne du compte (son prénom : celle à la place de qui elle écrit), ou qui a écrit ; ses réactions (ADR 0300),
+    # celle de la personne du compte sous le même prénom
+    owner = writer_of(frame, m.account) if m.own or any(r.mine for r in m.reactions) else ""
+    who = owner if m.own else inert(m.author, 80) or "quelqu'un"
+    return f"[{m.ref}] {_when(frame, m.at)} — {who} : {inert(m.text, 600)}{reactions_said(m.reactions, owner)}"
 
 
 class ListArgs(BaseModel):

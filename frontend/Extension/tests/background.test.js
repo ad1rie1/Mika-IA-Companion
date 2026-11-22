@@ -387,3 +387,144 @@ test("un envoi que l'onglet n'a pas pu faire est retenté dans les secondes qui 
   assert.equal(sends.length, 2, "retenté");
   assert.ok(sends[1] - sends[0] < 8000, "dans les secondes qui suivent");
 });
+
+// ── ADR 0300 : les réactions, les photos de profil ──────────────────────────
+
+/** Attendre qu'une condition soit vraie (les envois partent quelques centaines de ms après une capture). */
+async function until(fn, ms = 3000) {
+  for (let waited = 0; waited < ms; waited += 50) {
+    const got = fn();
+    if (got) return got;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return fn();
+}
+
+const LIKE = [{ key: "like", count: 1, mine: false, by: [GILLES] }];
+
+test("une réaction qui change fait repartir le même message ; redit tel quel, il ne repart pas (ADR 0300)", async () => {
+  const s = service();
+  const at = Date.now() + 1000;
+  const m = { ...message("1800000000401", at, "la démo tourne"), version: at };
+  await s.send({ kind: "captured", self: SELF, conversations: [{ id: CONV, title: "Projet", threadType: "chat" }],
+    messages: [{ ...m, reactions: [] }] }, TAB);
+  await inboxPosts(s, 1);
+  await s.send({ kind: "captured", self: SELF, conversations: [], messages: [{ ...m, reactions: [] }] }, TAB);
+  await s.send({ kind: "captured", self: SELF, conversations: [], messages: [{ ...m, version: at + 5, reactions: LIKE }] },
+    TAB);
+  await inboxPosts(s, 2);
+  // retirée : le message redevient tel qu'il était, plus récent — il repart encore
+  await s.send({ kind: "captured", self: SELF, conversations: [], messages: [{ ...m, version: at + 9, reactions: [] }] },
+    TAB);
+  const posts = await inboxPosts(s, 3);
+  await new Promise((r) => setTimeout(r, 600));
+  const sent = s.fetched.filter((f) => f.url.endsWith("/api/teams/inbox"))
+    .map((p) => p.body.messages.map((x) => [x.id, x.text, x.reactions.map((r) => r.key + r.count)]));
+  assert.deepEqual(sent, [[["1800000000401", "la démo tourne", []]], [["1800000000401", "la démo tourne", ["like1"]]],
+    [["1800000000401", "la démo tourne", []]]], "le doublon n'est pas reparti");
+  assert.equal(posts.length, 3);
+});
+
+test("la photo d'une personne dont le profil part est demandée à l'onglet, puis envoyée une fois par empreinte", async () => {
+  const s = service({ reply: (method, url) => url.endsWith("/api/teams/photo") ? { status: 202, data: { kept: true } } : null });
+  await s.send({ kind: "captured", self: SELF, conversations: [{ id: CONV, title: "Projet", threadType: "chat" }],
+    messages: [fromGilles("1800000000501")], profiles: [{ ...PROFILE, avatar: "etag-1" }] }, TAB);
+  await inboxPosts(s, 1);
+  const asked = await until(() => s.toTabs.find((m) => m.kind === "photos"));
+  assert.deepEqual(asked.items, [{ person: GILLES, etag: "etag-1", name: "Gilles Rousseau" }]);
+  const photo = { kind: "photo", person: GILLES, etag: "etag-1", type: "image/jpeg", data: JPEG64 };
+  assert.deepEqual(await s.send(photo, TAB), { ok: true });
+  const photoPosts = () => s.fetched.filter((f) => f.url.endsWith("/api/teams/photo"));
+  assert.deepEqual(photoPosts().map((f) => f.body), [{ person: GILLES, etag: "etag-1", type: "image/jpeg", data: JPEG64 }]);
+  assert.deepEqual(await s.send(photo, TAB), { ok: true, skipped: true }, "la même empreinte : déjà partie");
+  // sa photo change : son profil repart, elle est redemandée
+  await s.send({ kind: "captured", self: SELF, conversations: [], messages: [fromGilles("1800000000502")],
+    profiles: [{ ...PROFILE, avatar: "etag-2" }] }, TAB);
+  await inboxPosts(s, 2);
+  const again = await until(() => s.toTabs.filter((m) => m.kind === "photos")[1]);
+  assert.deepEqual(again.items.map((i) => i.etag), ["etag-2"]);
+  assert.equal(photoPosts().length, 1);
+  // une page qui renverrait l'ancienne : écartée
+  assert.deepEqual(await s.send(photo, TAB), { ok: true, skipped: true });
+  assert.equal((await s.send({ kind: "status" }, PAGE)).stats.photos.sent, 1);
+});
+
+test("pas de photo pour une conversation exclue, ni pendant une pause (ADR 0300)", async () => {
+  const reply = (method, url) => url.endsWith("/api/teams/photo") ? { status: 202, data: { kept: true } } : null;
+  const photo = { kind: "photo", person: GILLES, etag: "etag-1", type: "image/jpeg", data: JPEG64 };
+  const s = service({ settings: { exclude: "Médecin" }, reply });
+  await s.send({ kind: "captured", self: SELF, conversations: [{ id: "19:med@thread.v2", title: "Médecin", threadType: "chat" }],
+    messages: [fromGilles("1800000000601", "19:med@thread.v2")], profiles: [{ ...PROFILE, avatar: "etag-1" }] }, TAB);
+  await new Promise((r) => setTimeout(r, 700));
+  assert.equal(s.toTabs.filter((m) => m.kind === "photos").length, 0, "son profil n'est pas parti : pas de photo");
+  assert.deepEqual(await s.send(photo, TAB), { ok: true, skipped: true }, "une photo que personne n'a demandée");
+  assert.equal(s.fetched.filter((f) => f.url.endsWith("/api/teams/photo")).length, 0);
+  // demandée, puis la pause : elle ne part pas
+  const p = service({ reply });
+  await p.send({ kind: "captured", self: SELF, conversations: [{ id: CONV, title: "Projet", threadType: "chat" }],
+    messages: [fromGilles("1800000000602")], profiles: [{ ...PROFILE, avatar: "etag-1" }] }, TAB);
+  await inboxPosts(p, 1);
+  await until(() => p.toTabs.find((m) => m.kind === "photos"));
+  await p.send({ kind: "save", settings: { paused: true } }, PAGE);
+  assert.deepEqual(await p.send(photo, TAB), { ok: true, skipped: true });
+  assert.equal(p.fetched.filter((f) => f.url.endsWith("/api/teams/photo")).length, 0);
+});
+
+test("une photo que Mika refuse pour de bon n'est plus redemandée ; pour l'instant, elle l'est", async () => {
+  let status = 503;
+  const s = service({ reply: (method, url) => url.endsWith("/api/teams/photo") ? { status, data: {} } : null });
+  await s.send({ kind: "captured", self: SELF, conversations: [{ id: CONV, title: "Projet", threadType: "chat" }],
+    messages: [fromGilles("1800000000701")], profiles: [{ ...PROFILE, avatar: "etag-1" }] }, TAB);
+  await inboxPosts(s, 1);
+  await until(() => s.toTabs.find((m) => m.kind === "photos"));
+  const photo = { kind: "photo", person: GILLES, etag: "etag-1", type: "image/jpeg", data: JPEG64 };
+  const later = await s.send(photo, TAB);
+  assert.equal(later.ok, false);
+  assert.equal(later.retry, true);
+  assert.ok(s.store.runtime.photosWanted[GILLES], "toujours à demander");
+  status = 404; // une personne que Mika ne connaît plus (l'oubli)
+  assert.equal((await s.send(photo, TAB)).retry, false);
+  assert.equal(s.store.runtime.photosWanted[GILLES], undefined);
+  assert.equal(s.store.runtime.photosSent[GILLES], "etag-1");
+});
+
+// ── ADR 0301 : le modèle d'envoi par le worker de Teams ─────────────────────
+
+test("le modèle d'envoi capté par un onglet est gardé par sorte, rendu à l'onglet suivant, daté dans l'état", async () => {
+  const P = require("../lib/page.js");
+  const F = require("./worker-fixture.js");
+  const one = P.workerSendTemplate(F.autoSend()).template;
+  const group = P.workerSendTemplate(F.autoSend({ conv: F.GROUP })).template;
+  const s = service();
+  assert.deepEqual((await s.send({ kind: "status" }, PAGE)).sendTemplates, { bilateral: 0, group: 0 });
+  assert.deepEqual(await s.send({ kind: "sendTemplates" }, TAB), { ok: true, templates: {} });
+  assert.deepEqual(await s.send({ kind: "sendTemplate", template: one, bilateral: true }, TAB), { ok: true });
+  assert.deepEqual(await s.send({ kind: "sendTemplate", template: group, bilateral: false }, TAB), { ok: true });
+  const got = await s.send({ kind: "sendTemplates" }, TAB);
+  assert.deepEqual(Object.keys(got.templates).sort(), ["bilateral", "group"]);
+  assert.deepEqual(got.templates.bilateral.command, one.command);
+  assert.equal(got.templates.bilateral.open, "<p><semantic-object>");
+  assert.ok(got.templates.group.at > 0);
+  const state = await s.send({ kind: "status" }, PAGE);
+  assert.ok(state.sendTemplates.bilateral > 0 && state.sendTemplates.group > 0);
+  assert.equal(JSON.stringify(state).includes("autoSendMessage"), false, "l'état ne dit que la date du modèle");
+  // un modèle plus récent remplace celui de sa sorte ; rien n'en part chez Mika
+  const newer = { ...one, breaks: "p" };
+  await s.send({ kind: "sendTemplate", template: newer, bilateral: true }, TAB);
+  assert.equal((await s.send({ kind: "sendTemplates" }, TAB)).templates.bilateral.breaks, "p");
+  assert.equal(s.fetched.filter((f) => /template/i.test(f.url)).length, 0);
+});
+
+test("un modèle d'envoi illisible ou trop gros n'est pas gardé", async () => {
+  const s = service();
+  const bad = [null, { command: "x" }, { command: { operationName: "deleteMessage" } },
+    { command: { operationName: "autoSendMessage", big: "x".repeat(70 * 1024) } }];
+  for (const template of bad) {
+    const answer = await s.send({ kind: "sendTemplate", template, bilateral: true }, TAB);
+    assert.equal(answer.ok, false);
+    assert.ok(answer.error);
+  }
+  assert.deepEqual((await s.send({ kind: "sendTemplates" }, TAB)).templates, {});
+  // demandé par autre chose qu'un onglet Teams : ignoré
+  assert.equal(await s.send({ kind: "sendTemplates" }, {}), null);
+});

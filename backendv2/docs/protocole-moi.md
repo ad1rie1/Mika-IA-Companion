@@ -179,7 +179,7 @@ comptés dans toutes, son dernier échange, le premier nom connu.
 | `POST /api/moi/mail/send` | `box`, `to`, `cc?`, `bcc?`, `subject`, `body`, `files?` | un mail nouveau ; il part tout de suite, et elle le sait (`email.sent`) |
 | `POST /api/moi/mail/reply` | `ref`, `to`, `cc?`, `bcc?`, `subject`, `body`, `quote`, `files?` | une réponse, depuis la boîte du mail reçu (à un mail parti de ta boîte sans copie reçue, `sent` sans `received` : 409, on le transfère). L'action du courrier (`email.repondre`, la même que la console) refuse dans le même geste ses brouillons qui attendaient pour ce mail, quel que soit qui répond (un brouillon décidé ailleurs pendant l'envoi n'a plus rien à refuser : la réponse partie s'écrit quand même), et une réponse demandée (« Préremplir ») est remplie : celle qu'elle finirait au travail ne se propose plus. Rien ne part deux fois (la seule fois où un partage touche aux brouillons du propriétaire, ADR 0188) |
 | `POST /api/moi/mail/forward` | `ref`, `to`, `cc?`, `bcc?`, `subject`, `body?`, `attachments`, `files?` | le transférer, ses pièces avec si `attachments`, et `files` en plus |
-| `POST /api/moi/mail/tidy` | `refs` (100 au plus), `gesture`, `folder?` | sur le serveur : `read`, `unread`, `archive`, `flag`, `unflag`, `trash` ; ou `move` avec `folder` (un dossier de leur boîte ; des mails d'une même boîte) : l'action « Déplacer », mail par mail, ce qui y est déjà y reste → `{"moved": n}` (ADR 0200). Tous demandent « s'en servir » |
+| `POST /api/moi/mail/tidy` | `refs` (100 au plus), `gesture`, `folder?` | sur le serveur : `read`, `unread`, `archive`, `flag`, `unflag`, `trash` ; ou `move` avec `folder` (un dossier de leur boîte ; des mails d'une même boîte), ce qui y est déjà y reste → `{"moved": n}` (ADR 0200). Archiver, la corbeille et `move` rangent toute la sélection en une action (« Ranger la sélection ») et en une session IMAP par boîte ; un refus partiel se dit dans `message` (ADR 0302). Tous demandent « s'en servir » |
 | `POST /api/moi/mail/prefill` | `ref`, `instruction?` | « Préremplir avec Mika » : elle écrit une réponse à son prochain moment de travail → `{"asked": true, "draft": ""}` ; un brouillon qui attend déjà : `{"draft": "<id>"}`. Jamais pour un mail parti de ta boîte (`sent`, même revenu en copie : 409) : on y répond soi-même |
 | `POST /api/moi/mail/draft/send` | `id`, `seen` | l'envoyer tel qu'il a été lu (`seen` : le `digest` de son aperçu) |
 | `POST /api/moi/mail/draft/edit` | `id`, `to`, `cc?`, `subject`, `body`, `quote` | ta version remplace la sienne (la sienne est gardée : elle apprendra) |
@@ -226,21 +226,35 @@ Pas de dossier, ou un manifeste illisible : 404.
 (`image/png`, `image/jpeg`, `image/gif`, `image/webp`), à qui peut lire le compte de ce message ; gardée un jour dans
 le navigateur. Message ou image inconnus : 404.
 
+**`GET /api/moi/teams/photo?account=&person=`** (ou `conversation=` à la place de `account` : le compte de cette
+conversation) — la photo de profil d'une personne (ADR 0300 : 64 px, `image/jpeg`, `image/png` ou `image/webp`), que
+l'extension a téléchargée de Teams, à qui peut lire ce compte : elle n'y est gardée que pour une personne qu'il a vue
+(ses messages, une mention), comme le fil. `Cache-Control: private`, gardée un jour (son adresse change avec elle :
+`v`), `X-Content-Type-Options: nosniff`. Personne inconnue, sans photo, ou un compte qui n'est pas à toi : 404. On
+n'écrit pas son adresse : les réponses la donnent (`photo`), là où une personne paraît.
+
 **`GET /api/moi/teams/conversations[?account=&q=&size=]`** — ses conversations, la plus récente d'abord : `key`,
 `account`, `title` (son nom : pour un tête-à-tête — `kind` `dm`, ou un identifiant en `@unq.gbl.spaces` —, l'autre
 personne, la dernière à y avoir écrit, sinon ce que Teams en dit — il ne s'y renomme pas : Teams n'en donne que la
 liste de ses membres, toi compris, qu'on ne cherche pas ; pour toute autre, celui de Teams, vide sans titre — un
 groupe, un canal, une réunion —, jamais le nom de qui y a parlé en dernier ; `q` le cherche, avec l'identifiant),
-`kind` (`dm`, `group`, `channel`, `meeting`, `other`), `last_at`, `messages`, `last` (son dernier message, texte
-coupé), `her` (`{"state", "draft"}` : une réponse de Mika en chemin, sinon `null` — toujours `null` en lecture seule,
-et pour une réponse à laquelle on a répondu autrement).
+`kind` (`dm`, `group`, `channel`, `meeting`, `other`), `photo` (ADR 0300 : celle d'un tête-à-tête, la photo de
+l'autre personne — la dernière à y avoir écrit, celle que nomme `title` —, même quand le dernier message est de toi ;
+vide pour toute autre conversation, dont l'image de groupe n'est pas captée, et sans photo), `last_at`, `messages`,
+`last` (son dernier message, texte coupé, comme un message du fil : ses réactions, la photo de son auteur), `her`
+(`{"state", "draft"}` : une réponse de Mika en chemin, sinon `null` — toujours `null` en lecture seule, et pour une
+réponse à laquelle on a répondu autrement).
 
 **`GET /api/moi/teams/thread?conversation=[&before=&size=]`** — le fil (les plus récents ; `before` : avant cet
-instant) : `key`, `account`, `title` (son nom, comme dans la liste), `kind`, `messages` (`ref`, `author`, `author_id`,
-`at`, `text`, `own` — écrit par la personne du compte : toi sur un compte à toi, son propriétaire sur un compte qu'on
-te partage —, `mentions_me`, `images` : ses images, ADR 0258 — `id`, `position` (son rang parmi les « [image] » du
-texte), `mime`, `seen` (ce que Mika y a vu, vide tant qu'elle ne l'a pas regardée ; le texte le reprend déjà en
-« [image : … ] ») —), `more`, `replies` (ses réponses dans cette conversation, voir ci-dessous ;
+instant) : `key`, `account`, `title` (son nom, comme dans la liste), `kind`, `photo` (comme dans la liste),
+`messages` (`ref`, `author`, `author_id`, `at`, `text`, `own` — écrit par la personne du compte : toi sur un compte
+à toi, son propriétaire sur un compte qu'on te partage —, `mentions_me`, `images` : ses images, ADR 0258 — `id`,
+`position` (son rang parmi les « [image] » du texte), `mime`, `seen` (ce que Mika y a vu, vide tant qu'elle ne l'a
+pas regardée ; le texte le reprend déjà en « [image : … ] ») —, `reactions` : ses réactions, ADR 0300, dans l'ordre
+de Teams — `key` (la clé de Teams : `like`, `heart`, `1f44f_clappinghands`…), `emoji` (vide si on ne le connaît
+pas : montrer la clé), `count`, `mine` (la personne du compte en est), `names` (qui l'a posée, sous le nom que le
+compte lui connaît, dix au plus, sans la personne du compte ; les autres se comptent) —, `photo` : l'adresse de la
+photo de son auteur, vide sans photo), `more`, `replies` (ses réponses dans cette conversation, voir ci-dessous ;
 vides en lecture seule), `pending`, `under_way` (une réponse d'elle en chemin), `asked` (une réponse demandée, dont ses
 essais ne sont pas épuisés — elle y a renoncé, « Préremplir » la relance —, sur un compte coché de Teams actif : sinon
 elle ne s'y mettra pas) — ces deux-là toujours faux en lecture seule. `pending` : ce que tu as écrit toi-même (ADR 0189) et qui
@@ -1207,7 +1221,8 @@ identifiant Teams) ; `kind` : `person` ou `org` (vide : tous ; autre chose : 400
                         {"source": "mail", "account": "perso", "label": "Personnel", "count": 23},
                         {"source": "whatsapp", "label": "WhatsApp", "count": 4},
                         {"source": "told", "label": "Raconté", "count": 2}],
-            "identifiers": [{"kind": "email", "value": "alice@nordis.fr"}]}]}
+            "identifiers": [{"kind": "email", "value": "alice@nordis.fr"}],
+            "photo": "/api/moi/teams/photo?account=equipe&person=8%3Aorgid%3A…&v=…"}]}
 ```
 
 `sources` : d'où elle le connaît, avec combien de fois (0 : un profil seul) — Teams (tous tes comptes ensemble), chaque
@@ -1216,9 +1231,10 @@ boîte sous son nom (`account`), le téléphone par appli (`whatsapp`, `sms`, si
 Mika (« parle aussi à Mika » ; sinon « a un compte »). `members` : pour une organisation, ses personnes parmi tes
 contacts — seulement celles dont tu vois la preuve qu'elles en sont (une adresse de son domaine, un profil Teams qui dit
 son entreprise) ; `organisation` suit la même règle. `identifiers` : quatre au plus, jamais une clé du téléphone ni un
-nom raconté.
+nom raconté. `photo` (ADR 0300) : l'adresse de sa photo de profil Teams (`GET …/teams/photo`, § 4), quand un compte
+Teams où tu lis la garde ; `null` sinon (un contact sans identifiant Teams, une organisation : ses initiales).
 
-**`GET /api/moi/contacts/fiche?id=`** — sa fiche : les champs d'une ligne, plus
+**`GET /api/moi/contacts/fiche?id=`** — sa fiche : les champs d'une ligne (`photo` compris), plus
 
 - `first`, `last` : la première et la dernière fois qu'elle l'a vu (ms) ;
 - `identifiers` : `kind` (`teams`, `email`, `phone`, `domain`, `company`, `tenant`, `phone_app`), `label` (« E-mail »,
@@ -1239,7 +1255,7 @@ nom raconté.
   (`conversation` : la clé `<appli>|<fil>` de `GET …/phone/thread`, `app`, `app_name`, `title` : un groupe, vide pour
   un tête-à-tête, `group`, `count`, `last`). Un compte à Mika se dit dans `where`, sans y mener ;
 - `members`, `members_total` : une organisation, ses personnes parmi tes contacts (`id`, `name`, `title`,
-  `department`, `last`, `linked`, `talks` ; cinquante au plus) ;
+  `department`, `last`, `linked`, `talks`, `photo` comme sur une ligne ; cinquante au plus) ;
 - `write` (`{"address", "name"}`, ou `null`) : sa première adresse (pas une adresse générique), si une de tes boîtes
   peut envoyer ; `teams` : sa conversation Teams (le tête-à-tête, sinon la plus récente), vide sinon ; `message` : sa
   conversation de ton téléphone, vide sinon ;

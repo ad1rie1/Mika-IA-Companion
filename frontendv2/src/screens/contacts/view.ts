@@ -96,8 +96,11 @@ export function sourceFact(s: ContactSource): string {
   return `<span>${ico(SOURCE_ICONS[s.source] ?? "user", "sm")}${h(s.label)}${s.count ? ` · ${s.count}` : ""}</span>`;
 }
 
-export function contactAvatar(c: Pick<ContactLine, "id" | "kind" | "name">, size: string): string {
-  return avatar(c.name, `${size}${c.kind === "org" ? " sq" : ""}`, `contact:${c.id}`);
+/** Le rond d'un contact : sa photo de Teams quand le serveur en a une (ADR 0300), sinon ses initiales ; une
+ *  organisation, son carré. */
+export function contactAvatar(c: Pick<ContactLine, "id" | "kind" | "name" | "photo">, size: string): string {
+  const org = c.kind === "org";
+  return avatar(c.name, `${size}${org ? " sq" : ""}`, `contact:${c.id}`, org ? "" : c.photo ?? "");
 }
 
 /** Ce qu'on cherche, côté client : rien (le serveur cherche, dans ce que tes comptes en montrent). Borné comme l'API. */
@@ -195,7 +198,7 @@ function identifiersBlock(s: ContactSheet): string {
 function membersBlock(s: ContactSheet, now: number): string {
   if (s.kind !== "org" || !s.members.length) return "";
   const rest = s.members_total - s.members.length;
-  return `<h4 class="rd-h4">Ses personnes parmi tes contacts</h4><div class="cx-membres">${s.members.map((m) => `<button class="li" type="button" data-cx="${m.id}">${contactAvatar({ id: m.id, kind: "person", name: m.name }, "sm")}<span class="li-main"><span class="li-top"><span class="li-title">${h(m.name)}</span><time>${h(shortWhen(m.last, now))}</time></span><span class="li-snip">${h(idea(m) || linkedWords(m))}</span></span></button>`).join("")}</div>
+  return `<h4 class="rd-h4">Ses personnes parmi tes contacts</h4><div class="cx-membres">${s.members.map((m) => `<button class="li" type="button" data-cx="${m.id}">${contactAvatar({ id: m.id, kind: "person", name: m.name, photo: m.photo }, "sm")}<span class="li-main"><span class="li-top"><span class="li-title">${h(m.name)}</span><time>${h(shortWhen(m.last, now))}</time></span><span class="li-snip">${h(idea(m) || linkedWords(m))}</span></span></button>`).join("")}</div>
     ${rest > 0 ? `<p class="small muted">et ${plural(rest, "autre", "autres")}</p>` : ""}`;
 }
 

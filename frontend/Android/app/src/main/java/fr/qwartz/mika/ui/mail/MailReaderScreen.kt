@@ -100,11 +100,14 @@ import fr.qwartz.mika.ui.shell.PersonAvatar
 import fr.qwartz.mika.ui.shell.SectionScaffold
 import fr.qwartz.mika.ui.shell.Tag
 import fr.qwartz.mika.ui.shell.rememberSessionKey
+import fr.qwartz.mika.ui.shell.said
 import fr.qwartz.mika.ui.theme.mika
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.UUID
 
 /** Une réponse demandée : relire ses brouillons à ce rythme, tant que la liseuse reste sur le mail… */
@@ -147,6 +150,8 @@ class MailReaderViewModel(deps: MailDeps) : MailScreenModel(deps) {
         private set
 
     private val orders = VisitOrders<ReaderOrder>()
+    /** Ses rangements partent au serveur l'un après l'autre, dans l'ordre des gestes (suivre puis ne plus suivre). */
+    private val tidying = Mutex()
 
     /** Ce que l'écran de [visit] doit suivre : un geste qui le sort de la vue (archivé, corbeille, déplacé, non lu)
      *  ramène à la liste ; « Préremplir » qui trouve un brouillon l'ouvre. */
@@ -279,28 +284,34 @@ class MailReaderViewModel(deps: MailDeps) : MailScreenModel(deps) {
         }
     }
 
-    /** Un geste de « ranger » ; ceux qui le sortent de la vue ramènent à la liste. */
+    /** Un geste de « ranger », aussitôt à l'écran (ADR 0302) : la liste le range, la liseuse le montre, ou revient à la
+     *  liste pour ceux qui le sortent de la vue ; le serveur suit, un geste après l'autre. Refusé, ce qui avait changé
+     *  revient (la liste se relit) et le refus se dit — par le cadre quand la liseuse est déjà repartie. */
     fun tidy(gesture: String, folder: String = "") {
         val m = full ?: return
         if (busy) return
-        busy = true
         val v = orders.visit
+        val id = MailChanges.nextId()
+        val stays = gesture in STAYS
+        MailChanges.tell(MailChanges.Change.Tidied(listOf(m.ref), gesture, id))
+        when (gesture) {
+            "flag", "unflag" -> mail = Load.Ready(m.copy(flagged = gesture == "flag"))
+            "read" -> mail = Load.Ready(m.copy(seen = true))
+            else -> orders.send(v, ReaderOrder.Back)
+        }
         viewModelScope.launch {
-            when (val got = api.tidy(listOf(m.ref), gesture, folder)) {
-                is MoiApi.Result.Ok -> {
-                    say(got.value.message)
-                    MailChanges.tell(MailChanges.Change.Tidied(listOf(m.ref), gesture))
-                    // la liseuse est passée à un autre mail entre-temps : celui-ci ne se pose pas sur lui
-                    val still = full?.ref == m.ref
-                    when (gesture) {
-                        "flag", "unflag" -> if (still) mail = Load.Ready(m.copy(flagged = gesture == "flag"))
-                        "read" -> if (still) mail = Load.Ready(m.copy(seen = true))
-                        else -> orders.send(v, ReaderOrder.Back)
-                    }
-                }
-                is MoiApi.Result.Failed -> say(got.error)
+            val got = tidying.withLock { api.tidy(listOf(m.ref), gesture, folder) }
+            MailChanges.tell(MailChanges.Change.Settled(id, got is MoiApi.Result.Ok))
+            val text = when (got) {
+                is MoiApi.Result.Ok -> got.value.message
+                is MoiApi.Result.Failed -> got.error.said
             }
-            busy = false
+            // refusé : la liseuse remet ce qu'elle montrait, si elle est encore sur ce mail
+            val now = full
+            if (got is MoiApi.Result.Failed && stays && now != null && now.ref == m.ref) {
+                mail = Load.Ready(now.copy(flagged = m.flagged, seen = m.seen))
+            }
+            if (stays) say(text) else if (deps.signedIn()) deps.notices.say(text)
         }
     }
 
@@ -346,6 +357,8 @@ class MailReaderViewModel(deps: MailDeps) : MailScreenModel(deps) {
     private companion object {
         /** Ce que le serveur dit d'une demande déjà en cours (`app/me/mail.py::prefill`). */
         const val ALREADY = "Elle y travaille déjà."
+        /** Les gestes après lesquels la liseuse reste sur le mail ; les autres le sortent de la vue. */
+        val STAYS = setOf("flag", "unflag", "read")
     }
 }
 

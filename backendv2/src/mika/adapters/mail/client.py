@@ -69,6 +69,7 @@ from mika.ports.mail import (
     Found,
     Mail,
     MailQuery,
+    Moved,
     Preview,
     Sent,
     SignIn,
@@ -776,32 +777,113 @@ class ImapSmtpMail:
                     if folder not in {f.name for f in self._cache.folders(key)}:
                         raise ValueError(f"dossier inconnu : {folder}")
                 s.select(mail.folder, write=True)
-                real = self._uid_sync(s, mail, uid)
-                new_uid = s.move(real, folder)
-                self._cache.relocate(key, mail.folder, real, folder, new_uid)
+                self._move_sync(s, key, mail, uid, folder)
                 self._cache.recount(key, mail.folder)
                 self._cache.recount(key, folder)
             return folder
 
         return str(await self._in_thread(key, run))
 
-    async def _to_role(self, ref: str, role: str, missing: str) -> str:
+    def _move_sync(self, s: Session, key: str, mail: Mail, uid: int, dest: str) -> None:
+        """Un mail du dossier ouvert déplacé dans ``dest`` ; le cache le suit (à son UID d'arrivée, s'il est dit)."""
+        real = self._uid_sync(s, mail, uid)
+        new_uid = s.move(real, dest)
+        self._cache.relocate(key, mail.folder, real, dest, new_uid)
+
+    async def _to_role(self, ref: str, role: str) -> str:
         key, _acc, mail, _uid = self._where(ref)
-        dest = self._cache.role_folder(key, role)
-        if dest is None:
-            await self.refresh_folders(key)
-            dest = self._cache.role_folder(key, role)
-        if dest is None:
-            raise ValueError(missing)
+        dest = await self._role_folder(key, role)
         if mail.folder == dest:
             raise ValueError("il y est déjà")
         return await self.move(ref, dest)
 
     async def archive(self, ref: str) -> str:
-        return await self._to_role(ref, "archive", "ce compte n'a pas de dossier d'archives")
+        return await self._to_role(ref, "archive")
 
     async def trash(self, ref: str) -> str:
-        return await self._to_role(ref, "trash", "ce compte n'a pas de corbeille")
+        return await self._to_role(ref, "trash")
+
+    async def move_many(self, refs: Sequence[str], *, folder: str = "", role: str = "") -> Moved:
+        """Par lot (ADR 0302) : une session par compte, chaque dossier de départ ouvert une fois, un ``MOVE`` par mail
+        (chacun garde son UID d'arrivée). Ce qui est fait le reste quand la connexion tombe en route : seul ce qui
+        restait à faire dans cette boîte est refusé."""
+        if bool(folder) == bool(role):
+            raise ValueError("un dossier ou un rôle, l'un des deux")
+        done: dict[str, str] = {}
+        refused: dict[str, str] = {}
+        by_account: dict[str, list[tuple[str, Mail, int]]] = {}
+        for ref in dict.fromkeys(refs):
+            found = self._cache.located(ref)
+            if found is None:
+                refused[ref] = "ce mail n'est plus dans le cache"
+            else:
+                by_account.setdefault(found[0].account, []).append((ref, *found))
+        for key, items in by_account.items():
+            acc = self._accounts().get(key)
+            if acc is None:
+                refused.update((ref, f"compte inconnu : {key}") for ref, _m, _u in items)
+                continue
+            try:
+                dest = folder or await self._role_folder(key, role)
+            except (OSError, ImapError, OAuthError, ValueError, EOFError) as exc:
+                refused.update((ref, _why(exc)) for ref, _m, _u in items)
+                continue
+            todo: dict[str, list[tuple[str, Mail, int]]] = {}
+            for ref, mail, uid in items:
+                if mail.folder != dest:
+                    todo.setdefault(mail.folder, []).append((ref, mail, uid))
+                elif role:
+                    refused[ref] = "il y est déjà"
+                else:
+                    done[ref] = dest
+            if not todo:
+                continue
+
+            def run(acc: MailAccount = acc, key: str = key, dest: str = dest,
+                    todo: dict[str, list[tuple[str, Mail, int]]] = todo) -> None:
+                touched: set[str] = set()
+                try:
+                    with self._session(key, acc) as s:
+                        if dest not in {f.name for f in self._cache.folders(key)}:
+                            self._list_sync(s, key)
+                            if dest not in {f.name for f in self._cache.folders(key)}:
+                                raise ValueError(f"dossier inconnu : {dest}")
+                        for source, group in todo.items():
+                            try:
+                                s.select(source, write=True)
+                            except ImapError as exc:
+                                refused.update((ref, _why(exc)) for ref, _m, _u in group)
+                                continue
+                            for ref, mail, uid in group:
+                                try:
+                                    self._move_sync(s, key, mail, uid, dest)
+                                except (ImapError, ValueError) as exc:
+                                    refused[ref] = _why(exc)
+                                else:
+                                    done[ref] = dest
+                                    touched.add(source)
+                finally:
+                    for name in touched | ({dest} if touched else set()):
+                        self._cache.recount(key, name)
+
+            try:
+                await self._in_thread(key, run)
+            except (OSError, ImapError, OAuthError, ValueError, EOFError) as exc:
+                left = [ref for group in todo.values() for ref, _m, _u in group if ref not in done and ref not in refused]
+                refused.update((ref, _why(exc)) for ref in left)
+                if not isinstance(exc, ValueError):  # un dossier inconnu n'est pas une panne de la boîte
+                    self._cache.note(key, at=self._at(), error=_why(exc))
+        return Moved(done=done, refused=refused)
+
+    async def _role_folder(self, key: str, role: str) -> str:
+        """Le dossier de ce rôle dans la boîte ; la liste des dossiers relue une fois s'il n'y est pas encore."""
+        dest = self._cache.role_folder(key, role)
+        if dest is None:
+            await self.refresh_folders(key)
+            dest = self._cache.role_folder(key, role)
+        if dest is None:
+            raise ValueError(_ROLE_MISSING.get(role, f"ce compte n'a pas de dossier « {role} »"))
+        return dest
 
     async def delete(self, ref: str) -> None:
         key, acc, mail, uid = self._where(ref)
@@ -1104,6 +1186,10 @@ def _smtp_login(server: smtplib.SMTP, acc: MailAccount, token: str) -> None:
     password = acc.smtp_password or acc.password
     if user and password:
         server.login(user, password)
+
+
+#: ce qui se dit d'une boîte sans dossier de ce rôle
+_ROLE_MISSING = {"archive": "ce compte n'a pas de dossier d'archives", "trash": "ce compte n'a pas de corbeille"}
 
 
 def _why(exc: BaseException) -> str:

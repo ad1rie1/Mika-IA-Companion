@@ -50,6 +50,9 @@ export interface ContactLine {
   sources: ContactSource[];
   /** Quatre au plus, jamais une clé du téléphone ni un nom raconté. */
   identifiers: { kind: string; value: string }[];
+  /** L'adresse de sa photo de profil Teams (ADR 0300 : `teamsPhotoUrl`), quand un compte Teams où tu lis la garde ;
+   *  `null` sinon (ses initiales ; une organisation, son carré). */
+  photo?: string | null;
 }
 
 export interface ContactsPage {
@@ -109,6 +112,8 @@ export interface ContactMember {
   last: number;
   linked: boolean;
   talks: boolean;
+  /** Comme sur une ligne (`ContactLine.photo`). */
+  photo?: string | null;
 }
 
 export interface ContactSheet extends Omit<ContactLine, "identifiers" | "members"> {

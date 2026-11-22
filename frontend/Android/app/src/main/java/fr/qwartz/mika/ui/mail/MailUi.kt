@@ -52,6 +52,7 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicLong
 
 /*
  * Ce que les écrans de Mail partagent (ADR 0235) : l'API, ce qu'un écran dit aux autres d'un geste, les petites formes
@@ -71,18 +72,25 @@ internal fun AppGraph.mailApi(): MailApi =
  */
 internal object MailChanges {
     sealed interface Change {
-        /** Un geste de « ranger » sur ces mails (`read`, `unread`, `flag`, `unflag`, `archive`, `trash`, `move`). */
-        data class Tidied(val refs: List<String>, val gesture: String) : Change
+        /** Un geste de « ranger » sur ces mails (`read`, `unread`, `flag`, `unflag`, `archive`, `trash`, `move`). Un
+         *  [id] : dit avant que le serveur ait répondu (ADR 0302) ; [Settled] dira comment il a fini. */
+        data class Tidied(val refs: List<String>, val gesture: String, val id: Long = 0L) : Change
+        /** Le serveur a répondu au rangement [id] : fait ([ok]), ou refusé — ce qu'il a déjà changé à l'écran revient. */
+        data class Settled(val id: Long, val ok: Boolean) : Change
         /** Ses brouillons ont changé (une décision, une réponse partie, une demande). */
         data object Drafts : Change
     }
 
     private val changes = MutableSharedFlow<Change>(extraBufferCapacity = 32)
     val flow: SharedFlow<Change> = changes.asSharedFlow()
+    private val ids = AtomicLong()
 
     fun tell(change: Change) {
         changes.tryEmit(change)
     }
+
+    /** Le numéro d'un rangement montré avant la réponse du serveur. */
+    fun nextId(): Long = ids.incrementAndGet()
 }
 
 /**

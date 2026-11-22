@@ -28,7 +28,6 @@ from mika.plugins.email import WAITING, EmailState, Seen, exhausted, name_of
 from mika.plugins.email.inspect.common import important, mail_key
 from mika.ports.drafts import to_fill
 from mika.ports.mail import AccountInfo, Contact, Mail, MailQuery, Sent, addresses, split_ref
-from mika.runtime.operations import SPACE, perform
 from mika.vocab.access import SHARE_PREPARE, SHARE_READ, SHARE_USE
 from mika.vocab.ownership import OWNED
 
@@ -460,8 +459,9 @@ async def tidy(call: Call) -> dict[str, Any]:
 
 
 async def _move(call: Call, refs: list[str], folder: str) -> dict[str, Any]:
-    """Les déplacer dans un dossier de leur boîte (ADR 0200) : un à un, par l'action « Déplacer » du courrier, chacun
-    audité comme fait depuis son espace. Un mail déjà dans ce dossier y reste."""
+    """Les déplacer dans un dossier de leur boîte (ADR 0200, 0302) : toute la sélection en une action (« Ranger la
+    sélection », geste ``deplacer``), en une session IMAP, auditée comme faite depuis son espace. Un mail déjà dans ce
+    dossier y reste."""
     accounts = {split_ref(r)[0] for r in refs}
     if len(accounts) != 1:
         raise Denied(400, "« refs » : des mails d'une même boîte (chacune a ses dossiers).")
@@ -469,24 +469,12 @@ async def _move(call: Call, refs: list[str], folder: str) -> dict[str, Any]:
     target = next((f for f in port.folders(accounts.pop()) if f.name == folder), None) if folder else None
     if target is None:
         raise Denied(400, "« folder » : un dossier de leur boîte.", {"folder": "un dossier de leur boîte"})
-    nonce = call.nonce()
-    outcomes = []
-    for i, ref in enumerate(dict.fromkeys(refs)):
-        kept = port.cached_one(ref)
-        if kept is not None and kept.folder == folder:
-            continue
-        outcomes.append(await perform(call.kernel, "email.deplacer", form(folder=folder), by=call.me.handle,
-                                      subject=mail_key(ref), nonce=f"{nonce}:{i}" if nonce else "", via=SPACE))
-    moved = sum(1 for o in outcomes if o.ok)
-    refused = [o for o in outcomes if not o.ok]
-    if refused and not moved:
-        return done(refused[0])
-    label = target.label or target.name
-    said = (f"{moved} mail{'s' if moved > 1 else ''} déplacé{'s' if moved > 1 else ''} dans « {label} »."
-            if moved else f"Déjà dans « {label} ».")
-    note = f" {len(refused)} refusé{'s' if len(refused) > 1 else ''} : {refused[0].message}" if refused else ""
-    return {"ok": True, "message": said + note, "deduped": bool(outcomes) and all(o.deduped for o in outcomes),
-            "moved": moved}
+    todo = [r for r in dict.fromkeys(refs) if (kept := port.cached_one(r)) is None or kept.folder != folder]
+    if not todo:
+        return {"ok": True, "message": f"Déjà dans « {target.label or target.name} ».", "deduped": False, "moved": 0}
+    got = await call.act("email.ranger", form(mails=[mail_key(r) for r in todo], geste="deplacer", dossier=folder))
+    moved = sum(1 for r in todo if (now := port.cached_one(r)) is not None and now.folder == folder)
+    return done(got, moved=moved)
 
 
 async def prefill(call: Call) -> dict[str, Any]:

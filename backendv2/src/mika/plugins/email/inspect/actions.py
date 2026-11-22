@@ -34,7 +34,7 @@ from mika.plugins.email.inspect.common import (
     view_link,
 )
 from mika.plugins.email.inspect.mail import _read_draft, apply
-from mika.ports.mail import PIECE_MAX, PIECES_MAX, PIECES_TOTAL_MAX, File, addresses
+from mika.ports.mail import PIECE_MAX, PIECES_MAX, PIECES_TOTAL_MAX, File, Moved, addresses
 from mika.ports.preprocess import inert
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
@@ -99,14 +99,21 @@ GESTURES = (("lu", "Marquer lu"), ("non_lu", "Marquer non lu"), ("archiver", "Ar
             ("ne_plus_suivre", "Ne plus suivre"), ("corbeille", "Corbeille"))
 #: au plus autant de mails rangés d'un coup (une page de la boîte en compte douze)
 TIDY_MAX = 100
+#: les gestes qui sortent les mails de leur dossier, en une session par boîte (ADR 0302) : le rôle du dossier
+#: d'arrivée (vide : ``dossier``), et ce qu'elle en sait. « deplacer » sert à l'API par personne : la barre de la
+#: console (``GESTURES``) n'a pas où choisir un dossier
+MOVES = {"archiver": ("archive", "archivé"), "corbeille": ("trash", "corbeille"), "deplacer": ("", "déplacé")}
+_TIDY_CHOICES = (*GESTURES, ("deplacer", "Déplacer dans un dossier"))
 
 
 class TidyArgs(BaseModel):
     mails: Annotated[tuple[str, ...], Knob(label="Mails", advanced=False,
                                            help="Ceux qu'on a cochés dans la liste (une clé par ligne).")] = \
         Field(min_length=1, max_length=TIDY_MAX)
-    geste: Annotated[Literal["lu", "non_lu", "archiver", "suivre", "ne_plus_suivre", "corbeille"],
-                     Knob(label="Geste", choices=GESTURES, advanced=False)] = "lu"
+    geste: Annotated[Literal["lu", "non_lu", "archiver", "suivre", "ne_plus_suivre", "corbeille", "deplacer"],
+                     Knob(label="Geste", choices=_TIDY_CHOICES, advanced=False)] = "lu"
+    dossier: Annotated[str, Knob(label="Dossier", help="Pour « deplacer » : un dossier de leur boîte.")] = \
+        Field("", max_length=300)
 
 
 def _check(to: str, cc: str, bcc: str) -> None:
@@ -293,6 +300,8 @@ async def _tidy(s: EmailState, frame: Frame, args: TidyArgs, ctx: Any) -> Done:
         note = f" ({plural(failed, 'refusé', 'refusés')} par le serveur)" if failed else ""
         said = f"{plural(done, 'mail marqué comme lu', 'mails marqués comme lus')}{note}." if todo else "Déjà lus."
         return Done(drafts=drafts, message=said, tone="info" if not todo else "ok")
+    if args.geste in MOVES:
+        return await _tidy_away(s, port, found, args, ctx.by)
     drafts_: list[Any] = []
     refused = 0
     for m in found:
@@ -308,3 +317,31 @@ async def _tidy(s: EmailState, frame: Frame, args: TidyArgs, ctx: Any) -> Done:
         raise Refused(f"Le serveur a refusé : {label}, pour {plural(refused, 'mail', 'mails')}.")
     return Done(drafts=tuple(drafts_),
                 message=f"{label.capitalize()} : {plural(len(found) - refused, 'mail', 'mails')}{note}.")
+
+
+async def _tidy_away(s: EmailState, port: Any, found: list[Any], args: TidyArgs, by: str) -> Done:
+    """Archiver, la corbeille, déplacer dans un dossier : toute la sélection en une session par boîte (ADR 0302) ;
+    elle n'en parlera plus, de ceux qui sont partis."""
+    role, how = MOVES[args.geste]
+    folder = "" if role else args.dossier.strip()
+    if not role and not folder:
+        raise Refused("Dans quel dossier ?", {"dossier": "un dossier de leur boîte"})
+    try:
+        moved = await port.move_many([m.ref for m in found], folder=folder, role=role)
+    except (OSError, RuntimeError, ValueError) as exc:  # un port qui lève malgré tout : rien n'est parti
+        moved = Moved(done={}, refused={m.ref: str(exc) for m in found})
+    done = moved.done
+    drafts = tuple(d for m in found if m.ref in done for d in _read_draft(s, m.ref, by, how))
+    refused = len(found) - len(done)
+    if role:
+        label = dict(GESTURES)[args.geste].lower()
+        if refused == len(found):
+            raise Refused(f"Le serveur a refusé : {label}, pour {plural(refused, 'mail', 'mails')}.")
+        note = f" ; {plural(refused, 'refusé', 'refusés')} par le serveur" if refused else ""
+        return Done(drafts=drafts, message=f"{label.capitalize()} : {plural(len(done), 'mail', 'mails')}{note}.")
+    named = next((f.label or f.name for f in port.folders(found[0].account) if f.name == folder), folder)
+    if refused == len(found):
+        why = next(iter(moved.refused.values()), "")
+        raise Refused(f"Le serveur a refusé de les déplacer dans « {named} »{f' : {why}' if why else ''}."[:300])
+    note = f" ; {plural(refused, 'refusé', 'refusés')} par le serveur" if refused else ""
+    return Done(drafts=drafts, message=f"{plural(len(done), 'mail déplacé', 'mails déplacés')} dans « {named} »{note}.")

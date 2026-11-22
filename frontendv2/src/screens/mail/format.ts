@@ -6,6 +6,7 @@
 import { h, hue, initials } from "../../shell/dom";
 import type { IconName } from "../../shell/icons";
 import { MAIL_LIMITS, PIECE_LIMITS, type MailBox, type MailDraft, type MailFull, type Person } from "../../api/mail";
+import { teamsPhotoUrl } from "../../api/teams";
 import { ofName } from "../../shared/names";
 
 /** « de Léa », « d'Adrien » : commun à Mail et à Teams (`shared/names.ts`), réexporté pour l'écran Mail. */
@@ -62,10 +63,14 @@ export function shareSentence(level: string, owner: string): string {
 
 // ── Les personnes ─────────────────────────────────────────────────────
 
-/** Un rond d'initiales, d'une teinte stable : `<span class="av sm c3">CD</span>`. */
-export function avatar(name: string, size = "", key = name): string {
+/** Un rond d'initiales, d'une teinte stable : `<span class="av sm c3">CD</span>`. Avec `photo` (l'adresse que l'API
+ *  donne d'une photo de profil Teams, ADR 0300 : `teamsPhotoUrl`), la photo par-dessus ; ses initiales restent dessous,
+ *  le temps qu'elle arrive, ou si elle ne vient pas. */
+export function avatar(name: string, size = "", key = name, photo = ""): string {
   const label = String(name || key || "?");
-  return `<span class="av${size ? ` ${size}` : ""} c${hue(key || label)}" title="${h(label)}">${h(initials(label.replace(/[^\p{L}\p{N}\s._-]/gu, "")) || "?")}</span>`;
+  const src = teamsPhotoUrl(photo);
+  const img = src ? `<img src="${h(src)}" alt="" loading="lazy" decoding="async">` : "";
+  return `<span class="av${size ? ` ${size}` : ""} c${hue(key || label)}${src ? " photo" : ""}" title="${h(label)}">${h(initials(label.replace(/[^\p{L}\p{N}\s._-]/gu, "")) || "?")}${img}</span>`;
 }
 
 /** Le nom à montrer d'une personne : son nom, sinon son adresse. */
@@ -354,6 +359,16 @@ export function deleteTargets(
   if (t.editable || t.tag === "TEXTAREA" || t.tag === "SELECT" || (t.tag === "INPUT" && t.type !== "checkbox")) return [];
   if (checked.length) return [...checked];
   return open?.tidy ? [open.ref] : [];
+}
+
+/** Les mails qu'un rangement sort de la vue (archiver, corbeille, déplacer) quittent la liste aussitôt, sans attendre
+ *  le serveur (ADR 0302) : sa session IMAP peut attendre derrière un relevé. `leaving` : chacun d'eux → le numéro de la
+ *  dernière lecture de la liste partie avant que le serveur ait répondu (`Infinity` tant qu'il n'a pas répondu). Une
+ *  liste lue sous le numéro `seq` ne remontre donc ni un mail en route, ni un mail que le serveur gardait encore quand
+ *  elle est partie ; partie après sa réponse, elle dit vrai, et le mail n'a plus à être écarté (il sort de `leaving`). */
+export function keptRows<T extends { ref: string }>(rows: readonly T[], leaving: Map<string, number>, seq: number): T[] {
+  for (const [ref, until] of leaving) if (until < seq) leaving.delete(ref);
+  return rows.filter((r) => !leaving.has(r.ref));
 }
 
 /** Ce que son tri a fait d'un mail (ADR 0240), en mots : sur la ligne (`row`, rien pour un envoi en masse), dans le

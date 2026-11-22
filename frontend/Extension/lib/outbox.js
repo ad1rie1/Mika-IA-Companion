@@ -72,7 +72,8 @@
   }
 
   /** Le chemin d'un envoi, tel que le journal le dit (la page rend `service` ou `zone de saisie`). */
-  const VIA = { "service": "par le service de chat", "zone de saisie": "par la zone de saisie" };
+  const VIA = { "worker": "par le worker de Teams", "service": "par le service de chat",
+    "zone de saisie": "par la zone de saisie" };
 
   function note(box, e, result, reason, text, now) {
     box.log.unshift({ at: now, id: e.id, mode: e.mode, title: e.title || "", result: result, reason: reason || "",

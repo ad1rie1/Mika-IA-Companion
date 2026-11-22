@@ -13,9 +13,10 @@ from __future__ import annotations
 import inspect
 import re
 
-from mika.app.composition import arbitration, faculties
+from mika.app.composition import arbitration, faculties, policies
 from mika.kernel.registry import Registry
 from mika.runtime.state import RUNTIME
+from mika.vocab.episodes import Kind
 
 #: une ligne de la matrice d'Outils : au-delà, le client coupait une description
 LABEL_MAX = 56
@@ -94,3 +95,17 @@ def test_a_label_is_not_shared():
             twins.append((seen[key], s.name))
         seen.setdefault(key, s.name)
     assert twins == []
+
+
+def test_a_tool_declared_for_an_episode_is_offered_in_it():
+    """Un outil qui se déclare pour une conversation (``episodes=[Kind.REPLY]``, l'initiative) y est offert : son lot
+    figure parmi ceux de sa politique. ``contacts_lookup`` (ADR 0298) se déclarait pour répondre, mais le lot « contacts » manquait à la
+    réponse : elle ne l'a jamais eu en main, et a dit ne pas trouver sa base de contacts (le 2026-11-22)."""
+    registry = _registry()
+    known = policies()
+    # la conversation a une liste fixe de lots ; un travail prend ceux de son projet ou de son réveil
+    talking = {Kind.REPLY, Kind.INITIATIVE}
+    unreachable = sorted(f"{s.name} ({kind})" for s in registry.tools.values() for kind in s.episodes
+                         if kind in talking and kind in known and s.bundle not in known[kind].tool_bundles
+                         and s.bundle not in (known[kind].core_bundles or frozenset()))
+    assert unreachable == [], f"outils jamais offerts là où ils se déclarent : {unreachable}"

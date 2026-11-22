@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -55,6 +54,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -77,9 +81,11 @@ import fr.qwartz.mika.data.moi.Tone
 import fr.qwartz.mika.data.moi.caps
 import fr.qwartz.mika.data.moi.chars
 import fr.qwartz.mika.data.moi.thousands
+import fr.qwartz.mika.data.moi.contacts.ContactsApi
+import fr.qwartz.mika.data.moi.contacts.RecipientProposal
+import fr.qwartz.mika.data.moi.contacts.RecipientSuggester
 import fr.qwartz.mika.data.moi.mail.DraftReply
 import fr.qwartz.mika.data.moi.mail.MailBox
-import fr.qwartz.mika.data.moi.mail.MailContact
 import fr.qwartz.mika.data.moi.mail.MailDone
 import fr.qwartz.mika.data.moi.mail.MailDraft
 import fr.qwartz.mika.data.moi.mail.MailFull
@@ -104,6 +110,7 @@ import fr.qwartz.mika.data.moi.mail.sizeLabel
 import fr.qwartz.mika.data.moi.mail.uniquePeople
 import fr.qwartz.mika.data.moi.mail.writableBoxes
 import fr.qwartz.mika.ui.Route
+import fr.qwartz.mika.ui.contacts.contactsApi
 import fr.qwartz.mika.ui.shell.BarNav
 import fr.qwartz.mika.ui.shell.Gap
 import fr.qwartz.mika.ui.shell.Load
@@ -127,21 +134,20 @@ import java.util.UUID
 /** Une réponse demandée depuis « Écrire » : ses brouillons se relisent à ce rythme, au plus si longtemps. */
 private const val ASK_POLL_MS = 10_000L
 private const val ASK_POLL_MAX_MS = 30 * 60_000L
-/** Ses correspondants proposés sous un champ : au plus tant. */
-private const val SUGGESTED = 6
 
 /** Les champs de destinataires. */
 enum class RecipientField { TO, CC, BCC }
 
 /**
  * Écrire (`Route.MailCompose`) : un mail nouveau, une réponse (à tous), un transfert, ou la retouche d'un de ses
- * brouillons. De quelle boîte, à qui (ses correspondants proposés), l'objet, le texte, citer, les pièces ; « Préremplir
- * avec Mika » en réponse. Une clé d'envoi par geste : un double appui ne part qu'une fois.
+ * brouillons. De quelle boîte, à qui (tous tes contacts proposés, une adresse générique marquée : [directory], ADR
+ * 0298 ; sans lui, tes correspondants), l'objet, le texte, citer, les pièces ; « Préremplir avec Mika » en réponse. Une
+ * clé d'envoi par geste : un double appui ne part qu'une fois.
  *
  * Le modèle sert toutes les écritures de la session : ce qui répond (un chargement, « Préremplir », un envoi) ne pose
  * rien que si l'écriture qui l'a demandé est toujours là — même route, même visite.
  */
-class MailComposeViewModel(deps: MailDeps) : MailScreenModel(deps) {
+class MailComposeViewModel(deps: MailDeps, directory: ContactsApi? = null) : MailScreenModel(deps) {
     var route by mutableStateOf<Route.MailCompose?>(null)
         private set
     var setup by mutableStateOf<Load<Unit>>(Load.Loading)
@@ -188,9 +194,12 @@ class MailComposeViewModel(deps: MailDeps) : MailScreenModel(deps) {
         private set
     var prefilling by mutableStateOf(false)
         private set
-    var suggestions by mutableStateOf<List<MailContact>>(emptyList())
+    var suggestions by mutableStateOf<List<RecipientProposal>>(emptyList())
         private set
     var suggestFor by mutableStateOf<RecipientField?>(null)
+        private set
+    /** Ce qui a été cherché sans rien trouver : la ligne sous le champ le dit. */
+    var noMatch by mutableStateOf("")
         private set
     /** Quelque chose a été tapé ou choisi : quitter demande confirmation. */
     var touched by mutableStateOf(false)
@@ -198,6 +207,7 @@ class MailComposeViewModel(deps: MailDeps) : MailScreenModel(deps) {
 
     private val sendKey = SendKey()
     private val unsent = deps.unsent
+    private val suggester = RecipientSuggester(directory, api)
     private var suggestJob: Job? = null
     /** Le chargement de l'écriture ouverte : une autre ouverte, ou « Réessayer », l'arrête. */
     private var loadJob: Job? = null
@@ -257,8 +267,10 @@ class MailComposeViewModel(deps: MailDeps) : MailScreenModel(deps) {
         problem = ""
         fromDraft = ""
         asked = false
+        suggestJob?.cancel()
         suggestions = emptyList()
         suggestFor = null
+        noMatch = ""
         touched = false
         // un envoi ou une demande de l'écriture d'avant peut courir encore : il ne retient pas celle-ci
         sending = false
@@ -313,6 +325,12 @@ class MailComposeViewModel(deps: MailDeps) : MailScreenModel(deps) {
             is Start.Edit -> startEdit(start.draft)
             Start.New -> {
                 from = writableBoxes(boxes).firstOrNull()?.key.orEmpty()
+                // « Écrire » depuis une fiche de Contacts : son adresse posée (posée, jamais ajoutée : un second
+                // chargement de la même écriture ne la double pas)
+                if (r.to.isNotBlank()) {
+                    to.clear()
+                    to.addAll(uniquePeople(listOf(MailPerson(r.toName, r.to.trim()))))
+                }
                 if (from.isEmpty()) MoiError(409, NO_BOX) else null
             }
         }
@@ -457,8 +475,7 @@ class MailComposeViewModel(deps: MailDeps) : MailScreenModel(deps) {
         }
     }
 
-    /** Ce qu'on tape dans un champ : une virgule ou un point-virgule pose la puce ; sinon ses correspondants sont
-     *  proposés. */
+    /** Ce qu'on tape dans un champ : une virgule ou un point-virgule pose la puce ; sinon tes contacts sont proposés. */
     fun type(f: RecipientField, text: String) {
         touched = true
         if (text.endsWith(",") || text.endsWith(";")) {
@@ -482,14 +499,22 @@ class MailComposeViewModel(deps: MailDeps) : MailScreenModel(deps) {
         return true
     }
 
-    fun pick(f: RecipientField, c: MailContact) {
-        add(f, listOf(MailPerson(c.name, c.address)))
+    fun pick(f: RecipientField, p: RecipientProposal) {
+        add(f, listOf(MailPerson(p.name, p.address)))
         setTyped(f, "")
         clearSuggestions()
     }
 
     fun remove(f: RecipientField, p: MailPerson) {
         peopleOf(f).remove(p)
+        touched = true
+    }
+
+    /** Retour arrière dans un champ vide : la dernière puce s'en va. */
+    fun removeLast(f: RecipientField) {
+        val list = peopleOf(f)
+        if (typedOf(f).isNotEmpty() || list.isEmpty()) return
+        list.removeAt(list.lastIndex)
         touched = true
     }
 
@@ -505,21 +530,24 @@ class MailComposeViewModel(deps: MailDeps) : MailScreenModel(deps) {
         suggestJob?.cancel()
         suggestions = emptyList()
         suggestFor = null
+        noMatch = ""
     }
 
+    /** Tous tes contacts proposés (`RecipientSuggester`), une ligne par adresse ; rien trouvé, [noMatch] le dit. */
     private fun suggest(f: RecipientField, text: String) {
         suggestJob?.cancel()
-        if (text.isEmpty() || chars(text) > MailLimits.CONTACTS) {
+        if (text.isEmpty()) {
             clearSuggestions()
             return
         }
         suggestJob = viewModelScope.launch {
             delay(SUGGEST_DEBOUNCE_MS)
-            val got = api.contacts(text, SUGGESTED + 4)
-            // pas deux fois la même personne : ce qui est déjà en puce n'est plus proposé
+            // pas deux fois la même personne : ce qui est déjà en puce, dans À, Cc ou Cci, n'est plus proposé
             val chosen = (to + cc + bcc).mapTo(HashSet()) { it.address.lowercase() }
-            suggestions = (got as? MoiApi.Result.Ok)?.value.orEmpty().filter { it.address.lowercase() !in chosen }.take(SUGGESTED)
+            val got = suggester.lookup(text, chosen)
+            suggestions = got
             suggestFor = f
+            noMatch = if (got.isEmpty()) text else ""
         }
     }
 
@@ -769,7 +797,7 @@ class MailComposeViewModel(deps: MailDeps) : MailScreenModel(deps) {
 fun MailComposeScreen(graph: AppGraph, route: Route.MailCompose) {
     val shell = LocalShell.current
     val session = rememberSessionKey(graph)
-    val vm: MailComposeViewModel = viewModel(key = "mail.compose|$session") { MailComposeViewModel(MailDeps(graph)) }
+    val vm: MailComposeViewModel = viewModel(key = "mail.compose|$session") { MailComposeViewModel(MailDeps(graph), graph.contactsApi()) }
     val context = LocalContext.current
     // une visite par écriture ouverte : une autre route au même endroit (un lien profond) en est une autre
     val visit = rememberSaveable(route) { UUID.randomUUID().toString() }
@@ -1047,7 +1075,7 @@ private fun FromLine(vm: MailComposeViewModel) {
     }
 }
 
-/** Un champ de destinataires : ses puces, ce qu'on tape, et ses correspondants proposés juste dessous. */
+/** Un champ de destinataires : ses puces, ce qu'on tape, et tes contacts proposés juste dessous ([RecipientSuggestions]). */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun RecipientsLine(vm: MailComposeViewModel, field: RecipientField, label: String, trailing: @Composable () -> Unit = {}) {
@@ -1082,33 +1110,19 @@ private fun RecipientsLine(vm: MailComposeViewModel, field: RecipientField, labe
                 modifier = Modifier
                     .widthIn(min = 120.dp)
                     .padding(vertical = 6.dp)
-                    .onFocusChanged { if (!it.isFocused) vm.commit(field) },
+                    .onFocusChanged { if (!it.isFocused) vm.commit(field) }
+                    // Retour arrière dans un champ vide : la dernière puce s'en va (un clavier qui ne le dit pas : ×)
+                    .onPreviewKeyEvent { e ->
+                        val last = e.type == KeyEventType.KeyDown && e.key == Key.Backspace && vm.typedOf(field).isEmpty() && people.isNotEmpty()
+                        if (last) vm.removeLast(field)
+                        last
+                    },
             )
         }
         trailing()
     }
-    if (vm.suggestFor == field && vm.suggestions.isNotEmpty() && vm.typedOf(field).isNotBlank()) {
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-        ) {
-            Column {
-                for (c in vm.suggestions) {
-                    Row(
-                        Modifier.fillMaxWidth().clickable { vm.pick(field, c) }.padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        PersonAvatar(c.name.ifBlank { c.address }, c.address, 32.dp)
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(c.name.ifBlank { c.address }, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(c.address, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                    }
-                }
-            }
-        }
+    if (vm.suggestFor == field) {
+        RecipientSuggestions(vm.typedOf(field), vm.suggestions, vm.noMatch) { vm.pick(field, it) }
     }
 }
 

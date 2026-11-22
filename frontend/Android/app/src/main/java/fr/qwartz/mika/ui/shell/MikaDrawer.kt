@@ -44,6 +44,9 @@ private val DESTINATIONS = listOf(
     Destination(Route.Teams, R.drawable.ic_m_teams, R.string.nav_teams) { it?.counts?.teams ?: 0 },
     Destination(Route.Carte(), R.drawable.ic_m_map, R.string.nav_map),
     Destination(Route.Phone(), R.drawable.ic_m_phone, R.string.nav_phone) { it?.counts?.phone ?: 0 },
+    // après Téléphone (ADR 0298, la maquette `ecrans/contacts.js`) : il ferme les rubriques où l'on parle aux gens ; sans
+    // pastille, rien n'y attend ta décision
+    Destination(Route.Contacts, R.drawable.ic_m_contacts, R.string.nav_contacts),
     Destination(Route.Tools(), R.drawable.ic_m_tools, R.string.nav_tools),
     Destination(Route.Settings, R.drawable.ic_m_settings, R.string.nav_settings),
 )

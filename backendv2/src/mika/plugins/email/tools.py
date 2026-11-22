@@ -638,25 +638,21 @@ def _folders_line(account: str, folders: list[Any]) -> str:
                   folders=", ".join(named) or phrase("email.tools.tidy.no_folders"))
 
 
-def _refusal(exc: Exception) -> str:
+def _refusal(why: Exception | str) -> str:
     """Ce que le serveur a répondu, dit comme une donnée (une réponse IMAP peut porter ce qu'elle veut)."""
-    return phrase("email.tools.tidy.refused", why=inert(str(exc), 200) or type(exc).__name__)
+    text = why if isinstance(why, str) else str(why) or type(why).__name__
+    return phrase("email.tools.tidy.refused", why=inert(text, 200))
 
 
-async def _gesture(port: Any, ref: str, action: str, folder: str) -> str:
-    """Un geste sur un mail, sur le serveur ; rend le dossier d'arrivée quand il en change (sinon rien). Jamais de
+async def _gesture(port: Any, ref: str, action: str) -> None:
+    """Un drapeau sur un mail, sur le serveur (ce qui le change de dossier passe par ``move_many``). Jamais de
     suppression définitive : ``port.delete`` n'est pas un geste d'elle."""
     if action == "unread":
         await port.set_flags(ref, seen=False)
-        return ""
-    if action in ("flag", "unflag"):
+    elif action in ("flag", "unflag"):
         await port.set_flags(ref, flagged=action == "flag")
-        return ""
-    if action == "archive":
-        return str(await port.archive(ref))
-    if action == "trash":
-        return str(await port.trash(ref))
-    return str(await port.move(ref, folder))
+    else:
+        raise ValueError(f"geste inconnu : {action}")
 
 
 @EMAIL.tool("email_tidy", acts=True, description=phrase("email.tools.tidy.description"),
@@ -733,15 +729,33 @@ async def email_tidy(args: TidyArgs, ctx: Any) -> Any:
                 now = await port.get(m.ref)
                 outcome[m.ref] = (done["read"], DONE) if now is not None and now.seen else \
                     (phrase("email.tools.tidy.missed"), REFUSED)
+    elif action in ("archive", "trash", "move"):
+        # par lot : une session par boîte (ADR 0302), un appel par dossier d'arrivée
+        groups: dict[str, list[Any]] = {}
+        for m in todo:
+            groups.setdefault(targets.get(m.ref, ""), []).append(m)
+        for target, group in groups.items():
+            try:
+                moved = await port.move_many([m.ref for m in group], folder=target,
+                                             role="" if action == "move" else action)
+            except (OSError, RuntimeError, ValueError) as exc:
+                outcome.update((m.ref, (_refusal(exc), REFUSED)) for m in group)
+                continue
+            for m in group:
+                where = moved.done.get(m.ref)
+                if where is None:
+                    outcome[m.ref] = (_refusal(moved.refused.get(m.ref, "")), REFUSED)
+                else:
+                    into = phrase("email.tools.tidy.into", folder=inert(where, 80)) if where else ""
+                    outcome[m.ref] = (done[action] + into, DONE)
     else:
         for m in todo:
             try:
-                where = await _gesture(port, m.ref, action, targets.get(m.ref, ""))
+                await _gesture(port, m.ref, action)
             except (OSError, RuntimeError, ValueError) as exc:
                 outcome[m.ref] = (_refusal(exc), REFUSED)
                 continue
-            into = phrase("email.tools.tidy.into", folder=inert(where, 80)) if where else ""
-            outcome[m.ref] = (done[action] + into, DONE)
+            outcome[m.ref] = (done[action], DONE)
     # elle n'en parlera plus : un mail qu'elle avait remarqué et pas lu, lu ou rangé par elle (``by`` vide)
     state, how, who = ctx.frame.state("email"), TIDY_HOW.get(action, ""), keepers(ctx.frame)
     quiet, lines = [], []

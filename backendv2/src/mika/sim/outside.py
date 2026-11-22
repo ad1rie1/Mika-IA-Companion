@@ -27,6 +27,7 @@ from mika.ports.mail import (
     Mail,
     MailHit,
     MailQuery,
+    Moved,
     Preview,
     Sent,
     SignIn,
@@ -425,6 +426,19 @@ class FakeMail:
 
     async def trash(self, ref: str) -> str:
         return await self.move(ref, "Corbeille")
+
+    async def move_many(self, refs: Sequence[str], *, folder: str = "", role: str = "") -> Moved:
+        """Mail par mail, par ``archive``, ``trash`` ou ``move`` (qu'un faux de test surcharge pour refuser) ; un refus
+        ne lève pas, il est rendu."""
+        one = {"archive": self.archive, "trash": self.trash}.get(role)
+        done: dict[str, str] = {}
+        refused: dict[str, str] = {}
+        for ref in dict.fromkeys(refs):
+            try:
+                done[ref] = await (one(ref) if one is not None else self.move(ref, folder))
+            except (OSError, RuntimeError, ValueError) as exc:
+                refused[ref] = str(exc) or type(exc).__name__
+        return Moved(done=done, refused=refused)
 
     async def delete(self, ref: str) -> None:
         i = self._find(ref)

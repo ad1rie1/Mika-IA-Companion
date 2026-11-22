@@ -77,9 +77,9 @@ async def teams_command(settings: Settings, args: argparse.Namespace) -> dict[st
 
 def purge_teams(data: Path, settings: Settings, account: str) -> dict[str, object]:
     """``mika teams purge`` (serveur arrêté) : tout ce que l'extension d'un compte a apporté s'efface — conversations,
-    messages, images, brouillons, profils — et ses vues dans l'annuaire avec (ADR 0298 : sinon le rechargement les
-    compterait deux fois). Sa clé reste : on recharge ensuite tout l'historique depuis l'extension, plutôt que de
-    convertir ce qui avait été rangé de travers."""
+    messages et leurs réactions, images, brouillons, profils, photos (ADR 0300) — et ses vues dans l'annuaire avec
+    (ADR 0298 : sinon le rechargement les compterait deux fois). Sa clé reste : on recharge ensuite tout l'historique
+    depuis l'extension, plutôt que de convertir ce qui avait été rangé de travers."""
     datadir.hold(data)
     try:
         bases = schema.targets(data)

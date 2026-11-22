@@ -45,7 +45,7 @@ import type { ScreenContext, ScreenDef, ScreenTab, Shell } from "../../shell/she
 import { dayAndClock } from "../chat/markup";
 import * as store from "../../shared/store";
 import { bindCounts, bindPieces, bindRecipients, errorText, openAsk, openCompose, paintPieces, readRecipients, type ComposeValues } from "./compose";
-import { answerable, caps, clip, deleteTargets, draftNotWaiting, draftReply, forwardSubject, legacyContactsHash, newNonce, outgoingText, parseAddresses, personName, replySubject, replyTargets, toFill, writeToRoute, type Caps } from "./format";
+import { answerable, caps, clip, deleteTargets, draftNotWaiting, keptRows, draftReply, forwardSubject, legacyContactsHash, newNonce, outgoingText, parseAddresses, personName, replySubject, replyTargets, toFill, writeToRoute, type Caps } from "./format";
 import {
   boxesPane,
   boxViews,
@@ -136,6 +136,8 @@ export class MailScreen {
   private listError = "";
   private listSeq = 0;
   private readonly checked = new Set<string>();
+  /** Les mails rangés hors de la vue dont le serveur n'a pas encore dit le rangement à toutes les lectures (`keptRows`). */
+  private readonly leaving = new Map<string, number>();
 
   // ses brouillons
   private drafts: MailDraft[] = [];
@@ -339,9 +341,12 @@ export class MailScreen {
       } else {
         const got = await fetchMessages(this.queryOf(v));
         if (seq !== this.listSeq) return false;
-        const same = opts.quiet && JSON.stringify(got.items) === JSON.stringify(this.rows) && got.total === this.total;
-        this.rows = got.items;
-        this.total = got.total;
+        // un mail qu'on vient de ranger ne revient pas d'une lecture qui ne le sait pas encore
+        const items = keptRows(got.items, this.leaving, seq);
+        const total = Math.max(items.length, got.total - (got.items.length - items.length));
+        const same = opts.quiet && JSON.stringify(items) === JSON.stringify(this.rows) && total === this.total;
+        this.rows = items;
+        this.total = total;
         this.page = got.page;
         this.size = got.size;
         if (same && !this.listLoading) return true;
@@ -755,37 +760,72 @@ export class MailScreen {
     }, delay);
   }
 
+  /** Un geste se voit aussitôt (ADR 0302) : le serveur range ensuite (une session IMAP par boîte, parfois derrière un
+   *  relevé), et ce qu'il refuse revient. */
   private async gesture(refs: string[], g: Gesture, quiet = false, folder = ""): Promise<void> {
+    const gone = g === "archive" || g === "trash" || g === "move";
+    const undo = gone ? null : this.mark(refs, g);
+    if (gone) {
+      for (const r of refs) this.leaving.set(r, Infinity);
+      const before = this.rows.length;
+      this.rows = this.rows.filter((r) => !refs.includes(r.ref));
+      this.total = Math.max(0, this.total - (before - this.rows.length));
+      if (this.open?.kind === "mail" && refs.includes(this.open.ref)) this.closeReader();
+    }
+    for (const r of refs) this.checked.delete(r);
+    this.paintListHead();
+    this.paintRows();
+    if (this.mail && refs.includes(this.mail.ref)) this.paintReaderTidy();
     try {
       const done = await tidy(refs, g, folder);
-      const gone = g === "archive" || g === "trash" || g === "move";
-      for (const r of this.rows) {
-        if (!refs.includes(r.ref)) continue;
-        if (g === "read" || g === "unread") r.seen = g === "read";
-        if (g === "flag" || g === "unflag") r.flagged = g === "flag";
-      }
-      if (this.mail && refs.includes(this.mail.ref)) {
-        if (g === "read" || g === "unread") this.mail.seen = g === "read";
-        if (g === "flag" || g === "unflag") this.mail.flagged = g === "flag";
-      }
       if (gone) {
-        this.rows = this.rows.filter((r) => !refs.includes(r.ref));
-        this.total = Math.max(0, this.total - refs.length);
-        if (this.open?.kind === "mail" && refs.includes(this.open.ref)) this.closeReader();
+        // les lectures parties d'ici diront vrai ; celles déjà parties le gardaient peut-être encore
+        for (const r of refs) if (this.leaving.has(r)) this.leaving.set(r, this.listSeq);
+      } else {
+        // une lecture arrivée pendant ce temps a pu remettre l'état d'avant
+        this.mark(refs, g);
+        this.paintRows();
+        if (this.mail && refs.includes(this.mail.ref)) this.paintReaderTidy();
       }
-      for (const r of refs) this.checked.delete(r);
-      this.paintListHead();
-      this.paintRows();
-      if (this.mail && refs.includes(this.mail.ref)) this.paintReaderTidy();
       if (!quiet) toast(done.message, { ico: GESTURE_ICON[g] });
       void this.loadBoxes();
       void refreshCounts();
-      // ce que la vue montre a pu changer (un suivi retiré, un lu dans « non lus ») : la relire sans bruit
-      if (!quiet && (this.view.kind === "flagged" || this.filter === "unread")) void this.loadList({ quiet: true });
+      // ce que la vue montre a pu changer (un suivi retiré, un lu dans « non lus », une page à compléter, un mail que
+      // le serveur a refusé de ranger avec les autres) : la relire sans bruit
+      if (gone || (!quiet && (this.view.kind === "flagged" || this.filter === "unread"))) void this.loadList({ quiet: true });
     } catch (err) {
+      if (gone) {
+        for (const r of refs) this.leaving.delete(r);
+        void this.loadList({ quiet: true });
+      } else undo?.();
       // le « lu » posé de lui-même à l'ouverture échoue sans bruit ; un geste de toi dit pourquoi
       if (!quiet) toast(errorText(err), { ico: "alert" });
     }
+  }
+
+  /** Lu, non lu, suivi, plus suivi : posé sur les lignes et la liseuse (sans les repeindre) ; rend de quoi le défaire,
+   *  qui les repeint. */
+  private mark(refs: string[], g: Gesture): () => void {
+    const field = g === "read" || g === "unread" ? "seen" : "flagged";
+    const value = g === "read" || g === "flag";
+    const before = new Map<string, boolean>();
+    for (const r of this.rows) {
+      if (!refs.includes(r.ref)) continue;
+      before.set(r.ref, r[field]);
+      r[field] = value;
+    }
+    const m = this.mail && refs.includes(this.mail.ref) ? this.mail : null;
+    const was = m ? m[field] : value;
+    if (m) m[field] = value;
+    return () => {
+      for (const r of this.rows) {
+        const b = before.get(r.ref);
+        if (b !== undefined) r[field] = b;
+      }
+      if (m && this.mail === m) m[field] = was;
+      this.paintRows();
+      if (m && this.mail === m) this.paintReaderTidy();
+    };
   }
 
   /** Les seuls gestes de la liseuse (sans la redessiner : une réponse peut être en cours). */

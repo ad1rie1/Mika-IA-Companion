@@ -374,6 +374,49 @@ def test_tidying_acts_on_the_server_and_quiets_her(tmp_path):
     assert nav and "Archives" in [i.text for i in nav[-1].items]
 
 
+class _Batched(FakeMail):
+    """Retient chaque lot que le port reçoit, et refuse un mail (le serveur ne le trouve plus)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.batches: list[tuple[tuple[str, ...], str, str]] = []
+
+    async def move_many(self, refs, *, folder="", role=""):
+        self.batches.append((tuple(refs), folder, role))
+        return await super().move_many(refs, folder=folder, role=role)
+
+    async def trash(self, ref: str) -> str:
+        if ref.endswith("<m2@exemple.fr>"):
+            raise ValueError("ce mail n'est plus sur le serveur")
+        return await super().trash(ref)
+
+
+def test_a_selection_leaves_its_folder_in_one_batch_and_what_the_server_refuses_is_said(tmp_path):
+    # ADR 0302 : la corbeille, archiver, déplacer : toute la sélection en un appel au port, une session par boîte
+    box = _Batched()
+    for n, subject in enumerate(("Un", "Deux", "Trois"), start=1):
+        box.deliver(mail(n, subject, "Rien d'urgent.", account=""))
+    keys = ("<m1@exemple.fr>", "<m2@exemple.fr>", "<m3@exemple.fr>")
+
+    async def scenario(kernel, llm):
+        await sleep(15 * MINUTE)
+        out = {"trash": await perform(kernel, "email.ranger", tidy("corbeille", *keys), by="user_1", nonce="t1")}
+        out["nowhere"] = await perform(kernel, "email.ranger", tidy("deplacer", keys[1]), by="user_1", nonce="t2")
+        out["move"] = await perform(kernel, "email.ranger", {**tidy("deplacer", keys[1]), "_champs": [
+            "mails", "geste", "dossier"], "dossier": ["Archives"]}, by="user_1", nonce="t3")
+        out["how"] = {k: m.how for k, m in kernel.mind.frame().state("email").mails.items()}
+        return out
+
+    out = live(tmp_path, box, Model(), scenario)
+    assert out["trash"].ok and out["trash"].message == "Corbeille : 2 mails ; 1 refusé par le serveur."
+    assert [(len(refs), folder, role) for refs, folder, role in box.batches] == [(3, "", "trash"), (1, "Archives", "")]
+    assert not out["nowhere"].ok and out["nowhere"].errors == {"dossier": "un dossier de leur boîte"}
+    assert out["move"].ok and out["move"].message == "1 mail déplacé dans « Archives »."
+    # elle n'en parlera plus, de ceux qui sont partis ; le refusé est resté, puis a été déplacé
+    assert out["how"]["<m1@exemple.fr>"] == "corbeille" and out["how"]["<m3@exemple.fr>"] == "corbeille"
+    assert out["how"]["<m2@exemple.fr>"] == "déplacé"
+
+
 # ── Les décisions : génériques, et bornées ────────────────────────────────
 
 

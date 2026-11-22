@@ -19,6 +19,8 @@ dit dans la liste des fils. `?effort=1` ouvre le menu d'emblée.
 
 **Validé le 2026-11-22** (« nikel la maquette ») : l'écran **Contacts** (`ecrans/contacts.js`, `contacts.css`, ADR 0298) — tous ceux que Mika connaît pour toi, vus dans ton Teams, tes boîtes, ton téléphone ou dont tu lui as parlé, et leurs organisations : ce qui les identifie, ce que Mika en sait, où vous vous croisez. Il remplace l'onglet Contacts du courrier.
 
+**Validé le 2026-11-22** (« oui ») (ADR 0300) : les **photos de profil** de Teams à la place des initiales, partout où une personne a un avatar (fil Teams, conversations, participants, Contacts, Mail) — seulement pour qui Teams montre une photo, un proche vu au téléphone garde ses initiales ; et les **réactions** sous un message (déjà dans la maquette validée) : la tienne en couleur, qui a réagi au survol. Les portraits sont dessinés (pas de vraies photos ici). `ecrans/teams-photos.js` et `.css`, chargés avant les écrans ; `?photos=0` pour comparer avec les initiales. Routes : `#teams/discussions/lumen`, `#teams/discussions/marc`, `#contacts/claire`.
+
 ## L'ouvrir
 
 - **Avec la VRM** (servie en HTTP, depuis la racine du dépôt) :

@@ -48,6 +48,7 @@ from mika.plugins.teams import (
     task_message,
     writer_of,
 )
+from mika.plugins.teams.reactions import reactions_said
 from mika.ports.preprocess import inert
 from mika.ports.teams import Voice, conversation_key
 from mika.vocab.access import SELF, SHARE_PREPARE, SHARE_READ
@@ -242,13 +243,16 @@ def _task(s: TeamsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody
     where = where_of(seen.where if seen is not None else "")
     titled = phrase("teams.titled", title=inert(title, 80)) if title and (seen is None or seen.where != "dm") else ""
     someone = phrase("teams.noticed.someone")
+    # leurs réactions (ADR 0300) : celle de la personne du compte se dit « toi », comme ses messages (elle écrit à sa
+    # place)
+    you = phrase("teams.reactions.you")
     lines = [phrase("teams.task.line", who=phrase("teams.task.own") if x.own else inert(x.author, 80) or someone,
-                    text=x.text[:1500])
+                    text=x.text[:1500] + reactions_said(x.reactions, you))
              for x in thread if x.ref != m.ref][-THREAD_SHOWN:]
     text = f"[{m.ref}] {where}{titled}" + ("\n" + phrase("teams.task.earlier") + "\n" + "\n".join(lines)
                                           if lines else "")
     text += "\n" + phrase("teams.task.message") + "\n" + phrase("teams.task.line", who=inert(m.author, 80) or someone,
-                                                               text=m.text[:3000])
+                                                               text=m.text[:3000] + reactions_said(m.reactions, you))
     return SectionBody(text, level=LEVEL, witness=True)
 
 

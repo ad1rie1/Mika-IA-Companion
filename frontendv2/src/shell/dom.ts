@@ -52,6 +52,26 @@ export function hue(name: string): number {
   return x % 8;
 }
 
+/**
+ * Une photo de profil qui ne vient pas (ADR 0300 : retirée depuis, la session perdue, le serveur muet) laisse voir les
+ * initiales de son rond, dessous : l'image en échec se retire, sinon le navigateur dessine son icône d'image cassée.
+ * L'erreur d'une image ne remonte pas : on l'écoute à la capture, une fois pour toute la page.
+ */
+export function keepInitialsOnBrokenPhotos(root: Document | HTMLElement = document): void {
+  root.addEventListener(
+    "error",
+    (event) => {
+      const img = event.target;
+      if (!(img instanceof HTMLImageElement)) return;
+      const face = img.parentElement;
+      if (!face?.matches(".av.photo")) return;
+      face.classList.remove("photo");
+      img.remove();
+    },
+    true,
+  );
+}
+
 export const MOBILE_QUERY = "(max-width: 760px)";
 
 export function isMobile(): boolean {

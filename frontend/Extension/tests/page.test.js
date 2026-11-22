@@ -181,3 +181,33 @@ test("le curseur n'avance jamais en arrière, et ne prend la marque que si les f
   assert.equal(P.caughtUp({ lastMessageTimeUtc: 10_000 }, 4_000, 5_000), false, "la fiche est en avance sur ses fils");
   assert.equal(P.caughtUp({}, 0, 5_000), true);
 });
+
+// ── Les photos de profil (ADR 0300) ─────────────────────────────────────────
+
+const SELF_UUID = "3e51ce13-6eb8-463b-a75a-a40b2ab67602";
+const AVATAR = `https://teams.cloud.microsoft/api/mt/part/emea-02/beta/users/${SELF_UUID}/profilepicturev2/8:orgid:7c2e41d0-5b8a-4f0e-9d21-3a6e0c1f91ab?displayname=Gilles&size=HR64x64&avatarETag=abc`;
+
+test("la base des avatars se lit sur un avatar de la page : sur son origine, et pour soi seulement", () => {
+  const base = `https://teams.cloud.microsoft/api/mt/part/emea-02/beta/users/${SELF_UUID}`;
+  assert.equal(P.avatarBase(AVATAR, "https://teams.cloud.microsoft", SELF_UUID), base);
+  assert.equal(P.avatarBase(AVATAR, "https://teams.cloud.microsoft", ""), base, "soi pas encore connu");
+  assert.equal(P.avatarBase(AVATAR, "https://teams.microsoft.com", SELF_UUID), "", "une autre origine : d'autres cookies");
+  assert.equal(P.avatarBase(AVATAR, "https://teams.cloud.microsoft", "00000000-0000-4000-8000-000000000000"), "",
+    "l'avatar d'un autre compte");
+  assert.equal(P.avatarBase("https://evil.example/api/mt/part/emea/beta/users/" + SELF_UUID + "/x",
+    "https://evil.example", ""), "");
+  assert.equal(P.avatarBase(`https://teams.cloud.microsoft/api/mt/part/emea/beta/users/${SELF_UUID}/threads/19:a@thread.v2/properties/pictureV2`,
+    "https://teams.cloud.microsoft", SELF_UUID), `https://teams.cloud.microsoft/api/mt/part/emea/beta/users/${SELF_UUID}`,
+    "l'image d'un groupe donne la même base");
+});
+
+test("l'adresse d'une photo : construite sur la base, 64 px, pour une personne de Teams seulement", () => {
+  const base = `https://teams.cloud.microsoft/api/mt/part/emea-02/beta/users/${SELF_UUID}`;
+  const person = "8:orgid:7c2e41d0-5b8a-4f0e-9d21-3a6e0c1f91ab";
+  assert.equal(P.photoUrl(base, person, "Gilles Rousseau & co", "0x8D/+="),
+    `${base}/profilepicturev2/${person}?displayname=Gilles%20Rousseau%20%26%20co&size=HR64x64&avatarETag=0x8D%2F%2B%3D`);
+  assert.equal(P.photoUrl(base, "../../autre", "x", "e"), "");
+  assert.equal(P.photoUrl(base, person, "x", "<e>"), "");
+  assert.equal(P.photoUrl("https://ailleurs.example/api", person, "x", "e"), "", "jamais une autre adresse");
+  assert.equal(P.photoUrl("", person, "x", "e"), "");
+});

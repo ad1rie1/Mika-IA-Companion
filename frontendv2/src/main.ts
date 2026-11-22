@@ -34,7 +34,7 @@ import { projetsScreen } from "./screens/projets";
 import { teamsScreen } from "./screens/teams";
 import { telephoneScreen } from "./screens/telephone";
 import { startCounts } from "./shell/counts";
-import { MOBILE_QUERY } from "./shell/dom";
+import { keepInitialsOnBrokenPhotos, MOBILE_QUERY } from "./shell/dom";
 import { injectSprite } from "./shell/icons";
 import { Shell, type Account } from "./shell/shell";
 import { applyTheme, currentChoice, followSystem } from "./shell/theme";
@@ -56,6 +56,7 @@ function accountOf(state: AuthState): Account {
 
 async function boot(): Promise<void> {
   injectSprite();
+  keepInitialsOnBrokenPhotos();
   applyTheme(currentChoice(), false);
   followSystem();
   const loginRoot = document.getElementById("login")!;

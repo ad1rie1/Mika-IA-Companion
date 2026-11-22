@@ -269,3 +269,26 @@ describe("Mail › Contacts a quitté le courrier (ADR 0298)", () => {
     expect((def.tabs ?? []).map((t) => t.id)).toEqual(["messages"]);
   });
 });
+
+describe("Contacts : la photo de Teams à la place des initiales (ADR 0300)", () => {
+  const PHOTO = "/api/moi/teams/photo?account=equipe&person=8%3Aorgid%3A7c2e&v=0a1b2c3d4e5f";
+  const img = (html: string) => ((html.match(/<span class="av[^"]* photo"[^>]*>[^<]*<img src="([^"]+)"/) ?? [])[1] ?? "").replace(/&amp;/g, "&");
+
+  it("une ligne, la fiche et les personnes d'une organisation montrent sa photo ; sans photo, ses initiales", () => {
+    expect(img(contactItem(line({ photo: PHOTO }), false, NOW))).toContain(PHOTO);
+    expect(contactItem(line({ photo: null }), false, NOW)).not.toContain("<img");
+    expect(contactItem(line(), false, NOW)).toMatch(/<span class="av sm c\d" title="Claire Dubois">CD<\/span>/);
+    expect(img(sheetMarkup(sheet({ photo: PHOTO }), NOW))).toContain(PHOTO);
+    const org = sheet({ id: 3, kind: "org", name: "Lumen Conseil", organisation: null, photo: null,
+      members: [{ id: 12, name: "Claire Dubois", title: "Cheffe de projet", department: "", last: at(22, 13, 40), linked: false, talks: false, photo: PHOTO },
+        { id: 13, name: "Bob Martin", title: "", department: "", last: at(22, 12, 0), linked: false, talks: false, photo: null }],
+      members_total: 2 });
+    const html = sheetMarkup(org, NOW);
+    expect([...html.matchAll(/<img src="([^"]+)"/g)].map((m) => m[1])).toHaveLength(1);
+    expect(html).toMatch(/<span class="av xl sq c\d" title="Lumen Conseil">LC<\/span>/);
+  });
+
+  it("une organisation garde son carré, même si une photo lui était donnée", () => {
+    expect(contactItem(line({ kind: "org", name: "Lumen Conseil", photo: PHOTO }), false, NOW)).not.toContain("<img");
+  });
+});

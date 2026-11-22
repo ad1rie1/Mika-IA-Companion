@@ -53,32 +53,49 @@
   }
 
   /**
-   * La clé d'une version de message : son identifiant et un condensé de son texte. Un message modifié garde son
-   * identifiant mais change de clé : il repart, et le serveur met son texte à jour. (`#` n'entre dans aucun
-   * identifiant que le serveur accepte.)
+   * Ce que disent les réactions d'un message (ADR 0300) : « » quand la source ne les dit pas (on n'en sait rien), « 0 »
+   * quand elle dit qu'il n'y en a aucune, sinon chaque réaction (sa clé, combien, la sienne, qui).
+   */
+  function reactionsSignature(m) {
+    if (!Array.isArray(m.reactions)) return "";
+    if (!m.reactions.length) return "0";
+    return m.reactions.map(function (r) {
+      return [r.key, r.count, r.mine ? 1 : 0, (r.by || []).join(",")].join(":");
+    }).join("|");
+  }
+
+  /**
+   * La clé d'une version de message : son identifiant, un condensé de son texte et, s'il en a de dites, de ses
+   * réactions (ADR 0300). Un message modifié, ou dont les réactions ont changé, garde son identifiant mais change de
+   * clé : il repart, et le serveur met le sien à jour. Un message sans réactions dites garde la clé d'avant. (`#` et
+   * `~` n'entrent dans aucun identifiant que le serveur accepte.)
    */
   function versionKey(m) {
-    return m.deleted ? deletedKey(m.id) : String(m.id) + "#" + hash(m.text);
+    if (m.deleted) return deletedKey(m.id);
+    const reactions = reactionsSignature(m);
+    return String(m.id) + "#" + hash(m.text) + (reactions ? "~" + hash(reactions) : "");
   }
 
   /**
    * Cette version du message est à faire passer : sa clé n'est pas déjà passée (`sent`, un `Set`), ce n'est pas le
    * texte d'un message déjà vu supprimé, ni une version plus ancienne qu'une déjà vue (`latest`, une `Map`
    * identifiant → version ; comparé seulement quand les deux versions sont connues — un cache en retard ne fait pas
-   * revenir un ancien texte). Met `sent` et `latest` à jour quand elle passe.
+   * revenir un ancien texte). Une clé déjà passée repasse seulement comme une version plus récente que toutes celles
+   * vues : une réaction retirée (le message redevient tel qu'il était), un texte remis comme avant. Met `sent` et
+   * `latest` à jour quand elle passe.
    */
   function freshVersion(m, sent, latest) {
     const key = versionKey(m);
-    if (sent.has(key)) return false;
     const prev = latest.get(m.id);
     const rank = m.deleted ? Infinity : Number(m.version) || 0;
     if (prev === Infinity && !m.deleted) return false;
     if (rank > 0 && prev > 0 && rank < prev) return false;
+    if (sent.has(key) && !(rank > 0 && prev > 0 && rank > prev)) return false;
     sent.add(key);
     latest.set(m.id, Math.max(prev || 0, rank));
     return true;
   }
 
   return { wellFormed: wellFormed, cut: cut, clip: clip, hash: hash, versionKey: versionKey, deletedKey: deletedKey,
-    freshVersion: freshVersion };
+    freshVersion: freshVersion, reactionsSignature: reactionsSignature };
 });

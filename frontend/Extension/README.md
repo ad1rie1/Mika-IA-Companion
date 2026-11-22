@@ -81,16 +81,40 @@ leur message (exclusions, pauses ; en direct, la fenêtre de 24 h) et les envoie
 type). L'historique envoie les images de chaque paquet juste après lui. Chez Mika, ce qu'elle y voit remplace
 « [image] » dans le texte (« [image : … ] »), et frontendv2 les montre dans le fil.
 
+**Les réactions** (ADR 0300, depuis 0.7.0) : un message part avec ses réactions quand la source les dit
+(`properties.emotions`, un texte JSON ou une liste : `[{key, users: [{mri, time, value}]}]` ; à défaut le seul compte,
+`annotationsSummary.emotions`) : `reactions: [{key, count, mine, by}]` — la clé de Teams (`like`, `heart`,
+`1f44f_clappinghands`…), combien l'ont posée, si c'est la tienne, et qui (dix identifiants au plus, les premiers à
+l'avoir posée ; le compte, lui, est entier) ; 20 réactions au plus par message. Une source qui n'en dit rien n'envoie
+pas `reactions` (Mika garde les siennes) ; `[]` dit qu'il n'y en a plus. Un message dont les réactions changent
+**repart**, sous le même identifiant (voir « dédoublonnées par version », plus bas) : Mika met les siennes à jour, sans
+en faire un message neuf — une réaction ne lui fait rien remarquer, elle la lira avec le message.
+
 **Les profils** (ADR 0298, depuis 0.6.0) : Teams garde dans le navigateur le profil des personnes croisées (base
 `Teams:profiles`). La page le relit au plus toutes les 10 minutes et joint à chaque lot, dans `profiles`, celui des
-auteurs et des personnes mentionnées de ses messages : `{id, name, email, title, company, department, tenant, phones}`
-(l'identifiant Teams, le nom, l'e-mail ou à défaut l'identifiant de connexion s'il en a la forme — jamais celui d'un
-invité, `…#ext#@…` —, le poste, l'entreprise, le service, l'organisation, trois numéros au plus). Un profil ne part
+auteurs et des personnes mentionnées de ses messages : `{id, name, email, title, company, department, tenant, phones,
+avatar}` (l'identifiant Teams, le nom, l'e-mail ou à défaut l'identifiant de connexion s'il en a la forme — jamais celui
+d'un invité, `…#ext#@…` —, le poste, l'entreprise, le service, l'organisation, trois numéros au plus, et l'empreinte de
+sa photo, `avatarETag`, seulement s'il en a une : ADR 0300). Un profil ne part
 qu'avec un message de cette personne (ou qui la mentionne) qui part lui-même — jamais pour une conversation exclue, rien
 d'appris pendant une pause — et une seule fois tant qu'il ne change pas ; un profil qu'un envoi n'a pas pu joindre (plus
 de 200 dans un paquet de l'historique) n'est pas marqué parti, et repartira. Mika en tire son annuaire : le contact de chaque personne, son
 organisation, et la même personne reconnue au courrier par son e-mail. Le diagnostic de l'onglet dit combien de
 profils il a lus.
+
+**Les photos de profil** (ADR 0300, depuis 0.7.0) : quand un profil vient de partir (donc avec un message qui part :
+jamais pour une conversation exclue, rien pendant une pause) et que l'empreinte de sa photo n'est pas déjà partie, le
+service demande sa photo à l'onglet Teams (20 à la fois ; sans nouvelles, redemandée 5 min plus tard, six fois au
+plus). La page la télécharge par l'adresse que Teams donne lui-même à ses avatars,
+`https://<hôte de Teams>/api/mt/part/<région>/beta/users/<toi>/profilepicturev2/<personne>?displayname=…&size=HR64x64&avatarETag=…`,
+avec les cookies du navigateur : la base se lit sur un avatar déjà affiché dans la page (sur son origine, et pour toi
+seulement), et aucune autre adresse n'est jamais ouverte (`lib/page.js`, `avatarBase`, `photoUrl`). 64 px, 64 Ko au
+plus, JPEG, PNG ou WebP. Le service ne l'envoie que si elle a été demandée, à cette empreinte, hors pause :
+`POST /api/teams/photo` (`{person, etag, type, data}`, `data` en base64, sous la clé du compte) — 202 (gardée), 404
+(une personne que Mika ne connaît pas, ou plus, ou une autre empreinte que celle de son profil) et 400 (pas une photo
+de ce type) la règlent pour cette empreinte ; une coupure, un 403, un 429 ou un 5xx la font redemander (trois fois).
+Une photo ne part qu'une fois par empreinte ; charger l'historique les renvoie toutes (comme les profils). Les images
+de groupe ne partent pas encore.
 
 Un message vu **sans sa conversation** (Teams diffuse parfois ainsi un message qu'on vient d'envoyer, puis complet)
 n'est ni passé ni noté comme vu : sa version complète passe.
@@ -161,23 +185,49 @@ messages se règle aussi dans ses réglages : l'extension pose le texte tel qu'e
 Un message à envoyer est d'abord **réclamé** auprès de Mika (`{"result": "sending"}`) : un seul navigateur obtient la
 réclamation, une seule fois (un 409 veut dire qu'un autre navigateur, ou une tentative d'avant dont la réponse s'est
 perdue, l'a déjà : il n'est jamais envoyé d'ici), et l'élément disparaît alors de la liste pour tous. Puis il part par
-le **service de chat** du client Teams, avec l'authentification que le client utilise lui-même pour ses propres
-requêtes (l'extension la voit passer, sur un hôte de Teams seulement, et la garde dans la mémoire de l'onglet : elle
-n'est jamais transmise, ni à l'extension, ni à Mika, ni journalisée), avec un `clientmessageid` tiré de l'identifiant
-de l'élément (le même à chaque tentative), et 20 s au plus. Si l'authentification n'a pas encore été vue (ou est
-périmée), le texte est placé dans la zone de saisie de la conversation ouverte puis envoyé (bouton « Envoyer »).
+la première de ces trois voies qui s'offre, toutes avec le même identifiant client, tiré de l'identifiant de l'élément
+(le même à chaque tentative : Teams reconnaît un message à lui) :
+
+1. **Le worker de Teams** (ADR 0301, depuis 0.8.0), pour un tête-à-tête (`…@unq.gbl.spaces`) ou un groupe
+   (`…@thread.v2`) — pas un canal (`@thread.tacv2`, `@thread.skype`), pas une réunion (`19:meeting_…`) : **la
+   conversation n'a pas besoin d'être ouverte**. La page passe à son worker des commandes GraphQL en texte JSON ;
+   envoyer, c'est `mutation autoSendMessage`. L'extension rejoue cette commande d'après un **modèle** capté lors d'un
+   vrai envoi dans la page, texte, conversation, identifiants et heure refaits, et le worker envoie lui-même, avec sa
+   propre connexion : aucun jeton n'est jamais lu ni touché. Il faut donc qu'un message soit parti **une fois** de la
+   page (à la main, ou par la zone de saisie) depuis l'installation de 0.8.0 : le modèle est gardé par le service et
+   survit aux rechargements. Un modèle de tête-à-tête et un de groupe, le plus récent de chacun ; à défaut, l'autre
+   sert. Puis la réponse du worker est attendue 10 s.
+2. **Le service de chat** du client Teams, avec l'authentification que le client utilise lui-même pour ses propres
+   requêtes (l'extension la voit passer, sur un hôte de Teams seulement, et la garde dans la mémoire de l'onglet : elle
+   n'est jamais transmise, ni à l'extension, ni à Mika, ni journalisée), 20 s au plus. Le Teams d'aujourd'hui fait ces
+   requêtes dans son worker : l'authentification n'y est presque jamais vue.
+3. **La zone de saisie** de la conversation ouverte : le texte y est placé puis envoyé (bouton « Envoyer »).
+
+On ne passe à la voie suivante, dans la même tentative, que sur un « rien n'est parti » sûr : pour le worker, une
+erreur explicite (un `status` d'échec, ou `response.errors` sans résultat) — l'élément ne repasse alors plus par le
+worker dans cet onglet ; pour le service de chat, un 401 ou un 403. Le worker **muet** 10 s, ou qui répond avec des
+erreurs **et** un résultat : le message est peut-être parti, l'issue est douteuse, et rien n'est renvoyé — jamais deux
+envois. Une conversation pas ouverte, quand il ne reste que la zone de saisie : « rien n'a commencé » (on réessaie
+plus loin).
+
+Cette première voie repose sur le fonctionnement interne de Teams, que Microsoft change sans prévenir : une mise à jour
+peut la casser. Une commande d'une autre forme n'est pas prise pour modèle (le diagnostic dit pourquoi), un worker qui
+refuse passe la main, un worker qui se tait laisse l'issue douteuse ; la zone de saisie reste la voie sûre, et le
+journal de l'extension dit par où chaque envoi est parti.
 
 Une issue n'est dite que si elle est **sûre** :
 
-- **envoyé** : le service de chat a répondu 2xx, ou la zone de saisie s'est vidée après « Envoyer » ;
+- **envoyé** : le worker de Teams a répondu `success` sans erreur, le service de chat a répondu 2xx, ou la zone de
+  saisie s'est vidée après « Envoyer » ;
 - **échec** : rien n'est parti — le service a refusé le message (une 4xx autre que 408 et 429 ; un 401 ou un 403,
   l'authentification périmée, passe la main à la zone de saisie), la conversation est exclue, ou l'échéance est
   passée sans que l'envoi ait pu commencer ;
 - **rien n'a commencé** (pas d'onglet Teams, onglet sans le script, page qui n'a pas pris la demande, conversation pas
   ouverte, zone de saisie occupée) : ce navigateur garde la réclamation et réessaie 4 s plus tard, six fois au plus
   (un onglet qui se charge, une zone de saisie pas encore là), puis à la relève suivante ;
-- **douteux** (5xx, 408, 429, coupure, plus de 20 s, texte resté dans la zone de saisie, onglet fermé ou muet après
-  avoir pris la demande, service arrêté au milieu) : ni dit à Mika, ni **jamais** retenté. Mika le tranche elle-même :
+- **douteux** (le worker de Teams muet 10 s, ou qui répond avec des erreurs et un résultat ; 5xx, 408, 429, coupure,
+  plus de 20 s ; texte resté dans la zone de saisie ; onglet fermé ou muet après avoir pris la demande — 45 s —,
+  service arrêté au milieu) : ni dit à Mika, ni **jamais** retenté. Mika le tranche elle-même :
   « envoyé » si ton message apparaît dans la conversation, « échec incertain » à l'échéance. Le journal de
   l'extension le note « issue incertaine ».
 
@@ -190,10 +240,13 @@ avec 120 caractères du texte au plus.
 
 - Le texte des messages va de l'onglet Teams au serveur de Mika (local par défaut). De là, quand elle les lit, il
   part chez le **fournisseur du modèle** qu'elle utilise (Ollama Cloud, l'API Claude…), comme tout ce qu'elle lit.
-- Le profil des personnes dont un message part (voir plus haut) va au même serveur.
+- Le profil des personnes dont un message part (voir plus haut) va au même serveur, et leur photo de profil (64 px).
 - Dans le navigateur, l'extension garde (`chrome.storage.local`) la clé, les messages en attente d'envoi, les
-  identifiants déjà vus (24 heures), les profils des personnes (3000 au plus) et l'empreinte de ceux déjà partis, ce que Mika veut écrire et ce qui en est advenu (les 30 dernières issues ; le
-  bouton « Effacer » les retire).
+  identifiants déjà vus et leur dernière version (24 heures), les profils des personnes (3000 au plus) et l'empreinte de
+  ceux déjà partis, l'empreinte des photos parties et celles à demander (jamais leurs octets), ce que Mika veut écrire
+  et ce qui en est advenu (les 30 dernières issues ; le bouton « Effacer » les retire), et le modèle d'envoi par le
+  worker de Teams (une commande sans texte, sans conversation, sans identifiant : ADR 0301). Ce modèle ne quitte
+  jamais le navigateur.
 - L'authentification du service de chat de Teams ne quitte jamais l'onglet.
 
 Si c'est le Teams de ton travail, ce sont des échanges internes, et les messages de tes collègues, qui sortent de
@@ -241,9 +294,13 @@ nouvelles depuis 3 min (l'onglet fermé en route), il est tenu pour interrompu e
 un message à son identifiant, et le même message sous un autre (sa version en attente, une empreinte) est écarté
 comme doublon.
 
-Les deux sources sont dédoublonnées par **version** : l'identifiant du message et un condensé de son texte. Un message
-modifié repasse ; une version plus ancienne qu'une déjà vue (un cache en retard) ne revient pas, ni le texte d'un
-message déjà vu supprimé.
+Les deux sources sont dédoublonnées par **version** : l'identifiant du message, un condensé de son texte et, quand la
+source les dit, de ses réactions (ADR 0300 ; sans réactions dites, la clé d'avant). Un message modifié, ou dont les
+réactions ont changé, repasse ; une version plus ancienne qu'une déjà vue (un cache en retard) ne revient pas, ni le
+texte d'un message déjà vu supprimé. Une clé déjà passée ne repasse que comme une version plus récente que toutes
+celles vues (`version` avance quand une réaction change) : une réaction retirée, et le message redevient tel qu'il
+était, repart quand même ; sans version dite, on ne saurait pas trancher, il ne repart pas. Le service garde la plus
+récente version vue de chaque message (`ranks`, 24 h) pour juger de même.
 
 `lib/extract.js` reconnaît un message à sa **forme**, et non à une adresse : un contenu, une date, et un type, un
 auteur ou une conversation. C'est la forme des messages du service de chat, stable depuis Skype. Les frappes en
@@ -265,6 +322,25 @@ Pour écrire (`lib/page.js` pour ce qui se calcule sans la page) :
   sans instance connue (jamais `innerHTML`, que les Trusted Types interdisent). Le bouton est
   `[data-tid="sendMessageCommands-send"]` (puis `newMessageCommands-send`, `button[name="send"]`) ; le journal de
   l'extension dit par où chaque envoi est parti ;
+- l'**envoi par le worker de Teams** (ADR 0301) : `Worker.prototype.postMessage` est enveloppé — ce que la page passe
+  à un worker de Teams (pas celui de la télémétrie) part tel quel, par le même appel. Au passage, une commande en texte
+  JSON est lue sans être décodée (`P.workerCommandHead`) : le worker qui la reçoit, le plus haut numéro de requête vu,
+  `rendererId` et `windowId`. Une commande `autoSendMessage` est décodée hors de l'appel de la page et donne le
+  **modèle** (`P.workerSendTemplate`) : `content` vide, les listes de `computed` (mentions, liens…) vidées, `convId`,
+  `originalConvId`, `correlationId`, `clientMessageId`, `actionId`, `originalSendPipelineTime` effacés, la file
+  d'attente réduite à son préfixe (`<préfixe>_{mika:conversation}`), sans `requestId`, `rendererId` ni `windowId` ;
+  la conversation ailleurs dans la commande devient une marque, et ce qui en reprend le texte est vidé. Elle est
+  écartée si ce n'est pas une création (`action: "Create"`), si ce n'est ni un tête-à-tête ni un groupe, si le message
+  porte une citation, un transfert, une pièce jointe, des données jointes, ou s'il reste une trace du message. Le modèle
+  retient aussi la forme du contenu (les balises autour du texte, comme `<p><semantic-object>`…, et `<br>` ou un `<p>`
+  par ligne ; sans attribut qui agisse ou porte un identifiant ; à défaut `<p>`, des `<br>`). Le relais le revérifie
+  (demande `sendTemplate`), le service le garde, et le rend à l'onglet suivant (`sendTemplates`). Pour envoyer,
+  `P.workerSendCommand` refait la commande : la conversation, `originalConvId`, `isBilateralChat` (la conversation finit
+  par `@unq.gbl.spaces`), la file `<préfixe>_<conversation>`, `actionId` = `send_<clientMessageId>`, un
+  `correlationId` neuf, l'heure, le texte échappé dans la forme lue, `requestId` = `m-<n>` avec `n` mille au-dessus du
+  compteur de la page (jamais le numéro d'une requête en cours de la page) et au-dessus de notre dernière, `rendererId`
+  et `windowId` de la page vivante. Elle part en texte JSON (un objet est ignoré) par le `postMessage` d'origine ; la
+  réponse est celle qui porte ce `requestId` (`P.workerReplyOutcome`) ;
 - l'**envoi par le service de chat** est un `POST <base>/v1/users/ME/conversations/<id>/messages`
   (`RichText/Html`, texte échappé, retours à la ligne en `<br>`, `clientmessageid` stable — 19 chiffres d'un condensé
   FNV-1a 64 bits de l'identifiant de l'élément —, ton nom d'affichage), avec les en-têtes `authentication`,
@@ -286,12 +362,12 @@ et chaque lot capté y tombait sans bruit. La page et le relais ne partagent don
 
 ### Limites
 
-Le chemin d'écriture n'a **pas encore été vérifié contre le vrai Teams** : il a été éprouvé sur une page de banc
-(zone de saisie, historique de navigation, service de chat simulés), pas sur le client de Microsoft. Les sélecteurs
-de la zone de saisie et du bouton « Envoyer », la forme de l'historique de navigation, et la forme exacte de la
-requête d'envoi (en-têtes que le service exigerait en plus de l'authentification) sont à calibrer. Le client récent
-fait une grande partie de ses requêtes depuis un worker, que l'extension ne voit pas : l'envoi passera alors par la
-zone de saisie de la conversation ouverte.
+L'envoi par le worker de Teams a été **sondé à la main** sur le vrai Teams (2026-11-22 : une commande rejouée en
+texte JSON est partie dans une conversation fermée), mais le code de 0.8.0 n'y a pas encore tourné : la forme exacte
+du modèle et de la réponse du worker sont à confirmer au premier essai. Le reste du chemin d'écriture (zone de saisie,
+historique de navigation, service de chat) a été éprouvé sur une page de banc et dans Teams pour la zone de saisie ;
+les sélecteurs de la zone et du bouton « Envoyer », et la requête au service de chat, restent à calibrer si Teams
+change.
 
 ### Quand Teams change
 
@@ -302,12 +378,23 @@ Microsoft modifie son client sans prévenir. Si plus rien n'arrive, ou que Mika 
 - la base locale : les synchros, leur durée, les conversations suivies, celles relues de façon ciblée, les messages ;
 - les réponses et trames lues côté réseau, et les messages qu'on en a tirés ;
 - si ton identité a été trouvée (pour reconnaître tes propres messages et les mentions) ;
-- **zone de saisie trouvée**, **conversation active connue**, **envoi par le service de chat possible** (oui ou
-  non : l'existence de l'en-tête, jamais sa valeur), et ce qui a été placé ou envoyé depuis l'ouverture de l'onglet.
+- les photos de profil : demandées, téléchargées, envoyées, écartées, en échec — et combien de fois aucun avatar n'était
+  encore affiché dans l'onglet (sans lui, la page ne sait pas l'adresse des photos : ouvrir la liste des conversations) ;
+- **zone de saisie trouvée**, **conversation active connue**, **envoi par le worker de Teams possible** (oui ou non,
+  et la date du modèle : sans modèle, envoyer une fois un message à la main ; sans commande vue de la page à son
+  worker, l'onglet vient de s'ouvrir), **envoi par le service de chat possible** (oui ou non : l'existence de
+  l'en-tête, jamais sa valeur), et ce qui a été placé ou envoyé depuis l'ouverture de l'onglet, par quelle voie ;
+- les commandes de la page à son worker : combien, combien d'envois lus comme modèle, combien écartés et pourquoi (le
+  dernier), et, pour l'envoi par le worker, les refus (passés à la voie suivante), les silences (issue douteuse) et les
+  réponses arrivées trop tard. La fenêtre de l'extension dit aussi, hors diagnostic, si l'envoi sans ouvrir la
+  conversation est possible et depuis quand.
 
 Le diagnostic ne montre aucun contenu. Si le réseau et la base locale ne donnent plus rien, c'est le format des
 messages qui a changé : c'est `lib/extract.js` qu'il faut adapter. Si la zone de saisie ou la conversation active ne
-sont plus trouvées, ce sont les sélecteurs de `page/capture.js` ou la lecture de l'historique dans `lib/page.js`.
+sont plus trouvées, ce sont les sélecteurs de `page/capture.js` ou la lecture de l'historique dans `lib/page.js`. Si les
+envois de la page ne donnent plus de modèle, ou que le worker refuse ou se tait, c'est la commande `autoSendMessage`
+qui a changé : `P.workerSendTemplate` et `P.workerSendCommand` dans `lib/page.js` ; d'ici là, tout part par la zone de
+saisie.
 
 ## Tests
 
@@ -318,7 +405,8 @@ cd frontend/Extension && npm test     # node --test, sans dépendance
 Ils couvrent la coupe des textes (un emoji à la frontière, une moitié de paire déjà seule) et les versions d'un
 message (modification, cache en retard, texte après suppression) ; la reconnaissance des messages (réponse du service
 de chat, trame du WebSocket, enregistrement de la base locale, pièce jointe, suppression, modification, HTML d'une
-réponse citée) ; ce qui part (nouveauté, pause jugée à l'heure du message et intervalles bornés, exclusion par le nom,
+réponse citée ; les réactions sous leurs deux formes, leur compte seul, rien de dit ou aucune ; l'empreinte d'une photo
+de profil) ; ce qui part (nouveauté, pause jugée à l'heure du message et intervalles bornés, exclusion par le nom,
 l'identifiant ou la personne, retenue le temps d'apprendre un nom, déjà vu, conversation inconnue, soi exact, les deux
 voix et la mention, lots coupés sous 200 messages, 200 conversations et 512 Kio comptés en octets, recoupe après un
 413, nom appris après coup, Retry-After, attente croissante, erreurs 5xx comptées, adresse https hors de cette
@@ -334,4 +422,13 @@ marque d'une fiche de conversation, ce qu'il faut relire et depuis quand, un cur
 `tests/relay.test.js` fait tourner le relais seul, comme Chrome le charge (sources, curseurs, demandes au service,
 l'ordre de l'historique) ; `tests/background.test.js` fait tourner le service tel quel avec de fausses API de Chrome,
 `fetch` et `WebSocket` (curseurs gardés et rendus, historique marqué et trié, refus de Mika, la boîte poussée en
-direct traitée sans relevé, la connexion fermée en pause ou sans clé).
+direct traitée sans relevé, la connexion fermée en pause ou sans clé, un message qui repart quand ses réactions
+changent, une photo demandée puis envoyée une fois par empreinte, jamais pour une conversation exclue ni en pause) ;
+`tests/reactions.test.js` garde les réactions (lecture, clé de version, ce qui part) et `tests/page.test.js` l'adresse
+d'une photo de profil. L'envoi par le worker de Teams (ADR 0301) : `tests/worker-send.test.js` garde le modèle (rien du
+message n'y reste, les refus), la commande refaite (texte JSON, conversation, tête-à-tête ou groupe, file, identifiants,
+heure, texte échappé ligne à ligne dans la forme lue, numéro de requête), le début d'une commande et la réponse du
+worker ; `tests/capture.test.js` fait tourner le script de la page tel quel avec un faux `Worker` (la commande de la
+page passe telle quelle, son modèle part sans rien du message, l'envoi par le worker et sa réponse, le silence douteux
+jamais renvoyé, le refus qui passe à la voie suivante, canaux et réunions, le modèle rendu après un rechargement) ; le
+relais et le service gardent le modèle vérifié (`tests/relay.test.js`, `tests/background.test.js`).

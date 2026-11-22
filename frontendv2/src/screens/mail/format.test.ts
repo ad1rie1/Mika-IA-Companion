@@ -14,6 +14,7 @@ import {
   forwardSubject,
   howLabel,
   deleteTargets,
+  keptRows,
   triageLabel,
   markToFill,
   ofName,
@@ -291,5 +292,26 @@ describe("la touche Suppr", () => {
     expect(deleteTargets(key({ tag: "DIV", editable: true }), ["a"], null)).toEqual([]);
     expect(deleteTargets(key(row, "Backspace"), ["a"], null)).toEqual([]);
     expect(deleteTargets(key(row, "Delete", true), ["a"], null)).toEqual([]);
+  });
+});
+
+describe("un rangement se voit aussitôt (le serveur range ensuite)", () => {
+  const rows = [{ ref: "a" }, { ref: "b" }, { ref: "c" }];
+  it("un mail en route ne revient avec aucune liste", () => {
+    const leaving = new Map([["b", Infinity]]);
+    expect(keptRows(rows, leaving, 7).map((r) => r.ref)).toEqual(["a", "c"]);
+    expect(keptRows(rows, leaving, 1000).map((r) => r.ref)).toEqual(["a", "c"]);
+    expect(leaving.has("b")).toBe(true);
+  });
+  it("une liste partie avant la réponse du serveur ne le remontre pas", () => {
+    // la réponse est arrivée alors que la lecture n° 4 était la dernière partie
+    const leaving = new Map([["b", 4]]);
+    expect(keptRows(rows, leaving, 4).map((r) => r.ref)).toEqual(["a", "c"]);
+    expect(leaving.has("b")).toBe(true);
+  });
+  it("une liste partie après dit vrai : un mail refusé en partie revient, et n'est plus écarté", () => {
+    const leaving = new Map([["b", 4]]);
+    expect(keptRows(rows, leaving, 5).map((r) => r.ref)).toEqual(["a", "b", "c"]);
+    expect(leaving.size).toBe(0);
   });
 });

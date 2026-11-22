@@ -1,5 +1,8 @@
 """Trier ce que l'extension de chaque compte a poussé : chaque message reçu devient un signal ; ceux qui posent une
-question à la personne du compte, à laquelle elle peut aider, appellent une réponse préparée."""
+question à la personne du compte, à laquelle elle peut aider, appellent une réponse préparée.
+
+Le tri lit les réactions d'un message et de ceux d'avant (ADR 0300, ``reactions_said``) ; une réaction seule ne le
+réveille jamais : un message dont seules les réactions changent ne fait pas de lot neuf (``teams.received``)."""
 
 from __future__ import annotations
 
@@ -14,6 +17,7 @@ from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
 from mika.plugins.teams import BUNDLE, RECEIVED, TEAMS, TeamsParams, TeamsState, her, owner_of, params_of
+from mika.plugins.teams.reactions import reactions_said
 from mika.ports.llm import LLMRequest, Message, json_object
 from mika.ports.preprocess import cite, inert
 from mika.vocab.access import SELF
@@ -130,8 +134,10 @@ class Triage:
         fetched = await port.fetch_new(p.per_run, accounts=[a.key for a in port.accounts()])
         name = her(ctx.frame)
         persona = ctx.frame.get(self_c.PORTRAYED("compact"))
-        #: la consigne du tri, par compte : les messages de la personne de ce compte
+        #: la consigne du tri, par compte : les messages de la personne de ce compte ; et comment elle s'y dit (ses
+        #: réactions, ADR 0300)
         systems: dict[str, str] = {}
+        owners: dict[str, str] = {}
         drafts: list[Any] = []
         asked = 0
         for m in fetched:
@@ -139,9 +145,11 @@ class Triage:
                 continue
             if m.account not in systems:
                 owner = port.voice(m.account).display_name or phrase("teams.triage.caretaker", name=name)
-                systems[m.account] = triage_system(inert(owner, 60), name, persona,
-                                                   own=owner_of(ctx.frame, m.account) == SELF)
+                own = owner_of(ctx.frame, m.account) == SELF
+                systems[m.account] = triage_system(inert(owner, 60), name, persona, own=own)
+                owners[m.account] = name if own else inert(owner, 60)
             system = systems[m.account]
+            me = owners[m.account]
             kind, title = where_of(port, m.account, m.conversation)
             if kind == "system":
                 continue
@@ -155,12 +163,15 @@ class Triage:
                 asked += 1
                 before = [x for x in port.thread(m.account, m.conversation, CONTEXT + 1, before=m.at) if x.ref != m.ref]
                 lines = [phrase("teams.triage.line", who=phrase("teams.triage.own") if x.own else inert(x.author, 60),
-                                text=inert(x.text, 300)) for x in before[-CONTEXT:]]
+                                text=inert(x.text, 300) + reactions_said(x.reactions, me)) for x in before[-CONTEXT:]]
+                said = reactions_said(m.reactions, me).strip()
                 body = "\n".join([phrase("teams.triage.place", place=place),
                                   *([phrase("teams.triage.before"), *lines] if lines else []),
                                   # ce qu'un message dit vient d'ailleurs : cité, comme le fil au-dessus est
                                   # rendu inerte (ADR 0198, 0266)
-                                  phrase("teams.triage.message", who=inert(m.author, 80), text=cite(m.text, 3000))])
+                                  phrase("teams.triage.message", who=inert(m.author, 80), text=cite(m.text, 3000)),
+                                  # ses réactions, après la citation : ce n'est pas son texte (ADR 0300)
+                                  *([said] if said else [])])
                 req = LLMRequest(role="triage", call_id=f"{ctx.run_id}#{m.ref}", system_stable=system,
                                  messages=(Message("user", body),), max_tokens=200, lane="background", priority=3,
                                  output_schema=TRIAGE_SCHEMA)

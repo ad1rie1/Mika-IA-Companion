@@ -145,6 +145,34 @@ def test_moving_without_the_move_extension_copies_then_expunges(tmp_path, server
     assert any(c.upper().startswith("EXPUNGE") for c in Imap.commands)
 
 
+def test_a_selection_moves_in_one_session_each_mail_at_its_own_uid(tmp_path, servers):
+    # ADR 0302 : une connexion pour le lot, un SELECT par dossier de départ ; chaque mail suit son UID d'arrivée
+    box = box_for(tmp_path, ("perso", account(*servers)))
+    box.ack([m.ref for m in go(box.fetch_new(10))])
+    coucou, lettre, lost = "perso:<mail-3@exemple.fr>", "perso:<mail-7@exemple.fr>", "perso:<inconnu@exemple.fr>"
+    logins = len(Imap.logins)
+    moved = go(box.move_many([coucou, lettre, lost], role="trash"))
+    assert moved.done == {coucou: "Corbeille", lettre: "Corbeille"}
+    assert moved.refused == {lost: "ce mail n'est plus dans le cache"}
+    assert len(Imap.logins) == logins + 1
+    assert sum(c.upper().startswith("SELECT") for c in Imap.commands) == 1
+    trash = Imap.boxes["Corbeille"]
+    assert Imap.boxes["INBOX"].mails == {} and sorted(trash.mails) == [1, 2]
+    assert {box.cached_one(r).folder for r in (coucou, lettre)} == {"Corbeille"}
+    assert {f.name: f.total for f in box.folders("perso")}["Corbeille"] == 2  # les comptes suivent
+    go(box.delete(lettre))  # le cache le tient à sa place : c'est bien lui qui part
+    assert [b"Lettre" in raw for _flags, raw in trash.mails.values()] == [False]
+    assert box.cached_one(coucou).folder == "Corbeille" and box.cached_one(lettre) is None
+    # déjà à la corbeille : refusé sans se connecter ; dans un dossier nommé, il y est, c'est fait
+    logins = len(Imap.logins)
+    assert go(box.move_many([coucou], role="trash")).refused == {coucou: "il y est déjà"}
+    assert go(box.move_many([coucou], folder="Corbeille")).done == {coucou: "Corbeille"}
+    assert len(Imap.logins) == logins
+    # un dossier qui n'existe pas : refusé pour chacun, et ce n'est pas une panne de la boîte
+    assert go(box.move_many([coucou], folder="Nulle part")).refused == {coucou: "dossier inconnu : Nulle part"}
+    assert box.status("perso").error == ""
+
+
 def test_folder_names_travel_in_modified_utf7():
     assert utf7.encode("Envoyés") == "Envoy&AOk-s" and utf7.decode("Envoy&AOk-s") == "Envoyés"
     assert utf7.encode("R&D") == "R&-D" and utf7.decode("R&-D") == "R&D"

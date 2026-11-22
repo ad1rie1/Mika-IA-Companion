@@ -37,6 +37,9 @@
 .tm-file.sm { max-width: none; }
 .tm-reac { display: flex; gap: 4px; }
 .tm-reac span { display: inline-flex; align-items: center; gap: 3px; height: 22px; padding: 0 7px; border: 1px solid var(--border); border-radius: 11px; font-size: 12px; background: var(--raised); }
+/* Ta réaction en couleur, qui a réagi au survol (ADR 0300, maquette ecrans/teams-photos.css). */
+.tm-reac span[title] { cursor: default; }
+.tm-reac span.mine { border-color: var(--accent-line, var(--accent)); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .tm-sys { align-self: center; display: inline-flex; align-items: center; gap: 6px; margin: 6px 0; padding: 4px 10px; border-radius: 12px; background: var(--tint); color: var(--text-2); font-size: 12px; }
 .tm-draft { margin: 10px 10px 4px 46px; padding: 10px 12px; border: 1px dashed var(--mika-line); border-radius: 10px; background: var(--mika-soft); display: flex; flex-direction: column; gap: 6px; }
 .tm-draft-head { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; font-size: 12px; color: var(--mika-strong); }

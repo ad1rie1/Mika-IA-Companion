@@ -40,6 +40,18 @@ function yes(v) {
   return v ? "oui" : "non";
 }
 
+/** Le modèle d'envoi par le worker de Teams (ADR 0301) : capté quand, pour quelles conversations. */
+function sendTemplateText(at) {
+  const t = at || {};
+  const latest = Math.max(Number(t.bilateral) || 0, Number(t.group) || 0);
+  if (!latest) {
+    return "pas encore : envoie une fois un message à la main dans Teams (le modèle d'envoi se capte alors)";
+  }
+  const kinds = [t.bilateral ? "tête-à-tête" : "", t.group ? "groupes" : ""].filter(Boolean).join(" et ");
+  return "possible pour les tête-à-tête et les groupes (modèle capté le " + when(latest) + " sur des " + kinds
+    + ") ; canaux et réunions par la zone de saisie";
+}
+
 function fillStats(status) {
   const st = status.stats;
   const out = status.outbox.stats;
@@ -56,8 +68,11 @@ function fillStats(status) {
     ["Captés", st.received + " (en direct : " + (st.bySource.worker || 0) + ", réseau : " + (st.bySource.network || 0)
       + ", base locale : " + (st.bySource.idb || 0) + ")"],
     ["Connexion en direct", liveText(status.live)],
+    ["Envoi sans ouvrir la conversation", sendTemplateText(status.sendTemplates)],
     ["Images envoyées à Mika", st.images ? st.images.sent + " (écartées : " + st.images.skipped + ", échecs : "
       + st.images.failed + ")" : "0"],
+    ["Photos de profil envoyées à Mika", st.photos ? st.photos.sent + " (écartées : " + st.photos.skipped
+      + ", échecs : " + st.photos.failed + ")" : "0"],
     ["Écartés", dropped || "aucun"],
     ["Conversations connues", String(status.conversations)],
     ["Ton identité Teams", status.selfFound ? (status.selfNameFound ? "connue, avec ton nom" : "connue, nom pas encore vu")
@@ -333,6 +348,15 @@ $("clearLog").addEventListener("click", async () => {
   fill(await ask("clearLog"));
 });
 
+/** La ligne du diagnostic sur l'envoi par le worker de Teams (ADR 0301) : possible ou non, et pourquoi. */
+function workerSendText(c) {
+  const at = c.workerTemplates || {};
+  const latest = Math.max(Number(at.bilateral) || 0, Number(at.group) || 0);
+  if (c.workerSendPossible) return "oui (modèle capté le " + when(latest) + ")";
+  if (!latest) return "non (aucun modèle : envoie une fois un message à la main dans Teams)";
+  return "non (modèle capté le " + when(latest) + ", mais le worker de Teams n'a encore rien reçu dans cet onglet)";
+}
+
 $("diagnose").addEventListener("click", async () => {
   const out = $("diagnostic");
   out.hidden = false;
@@ -354,6 +378,9 @@ $("diagnose").addEventListener("click", async () => {
     "Worker de Teams : " + (r.worker ? (r.worker.hooked ? "écouté" : "pas vu (onglet ouvert avant l'extension ?)")
       + ", " + r.worker.received + " réponse(s), " + r.worker.kept + " avec des messages, " + r.worker.messages
       + " message(s), " + r.worker.errors + " erreur(s)" : "—"),
+    "Commandes de la page au worker : " + (r.worker ? (r.worker.commands || 0) + " vue(s), " + (r.worker.templates || 0)
+      + " envoi(s) de la page lu(s) comme modèle" + (r.worker.templateRefused ? ", " + r.worker.templateRefused
+        + " écarté(s)" + (r.worker.templateIssue ? " (le dernier : " + r.worker.templateIssue + ")" : "") : "") : "—"),
     "Base locale : " + (r.idb.available ? r.idb.syncs + " synchro(s), la dernière en " + r.idb.lastSyncMs + " ms, "
       + r.idb.conversations + " conversation(s) suivie(s), " + r.idb.read + " relue(s) ciblées, " + r.idb.messages
       + " message(s), " + r.idb.errors + " erreur(s)" : "indisponible dans ce navigateur"),
@@ -361,6 +388,11 @@ $("diagnose").addEventListener("click", async () => {
   if (r.images) {
     lines.push("Images : " + r.images.downloaded + " téléchargée(s), " + r.images.sent + " envoyée(s), "
       + r.images.skipped + " écartée(s), " + r.images.failed + " échec(s)");
+  }
+  if (r.photos) {
+    lines.push("Photos de profil : " + r.photos.asked + " demandée(s), " + r.photos.downloaded + " téléchargée(s), "
+      + r.photos.sent + " envoyée(s), " + r.photos.skipped + " écartée(s), " + r.photos.failed + " échec(s)"
+      + (r.photos.noAvatarSeen ? " — aucun avatar encore affiché dans l'onglet (" + r.photos.noAvatarSeen + " fois)" : ""));
   }
   if (r.history && (r.history.running || r.history.total)) {
     lines.push("Historique dans cet onglet : " + (r.history.running ? "en cours, " : "") + r.history.done + " / "
@@ -381,11 +413,18 @@ $("diagnose").addEventListener("click", async () => {
   lines.push("",
     "Zone de saisie trouvée : " + yes(c.editorFound),
     "Conversation active connue : " + yes(c.activeConversationKnown),
+    "Envoi par le worker de Teams possible : " + workerSendText(c),
     "Envoi par le service de chat possible : " + yes(c.chatSendPossible),
     "Brouillons en attente dans cet onglet : " + (c.drafts || 0),
-    "Depuis l'ouverture : " + (c.placed || 0) + " brouillon(s) placé(s), " + (c.sentByService || 0)
-      + " envoi(s) par le service de chat, " + (c.sentByComposeBox || 0) + " par la zone de saisie, "
-      + (c.uncertain || 0) + " incertain(s), " + (c.errors || 0) + " erreur(s)");
+    "Depuis l'ouverture : " + (c.placed || 0) + " brouillon(s) placé(s), " + (c.sentByWorker || 0)
+      + " envoi(s) par le worker de Teams, " + (c.sentByService || 0) + " par le service de chat, "
+      + (c.sentByComposeBox || 0) + " par la zone de saisie, " + (c.uncertain || 0) + " incertain(s), "
+      + (c.errors || 0) + " erreur(s)");
+  if (c.workerRefused || c.workerSilent || c.workerLate) {
+    lines.push("Worker de Teams : " + (c.workerRefused || 0) + " envoi(s) refusé(s) (passés à la voie suivante), "
+      + (c.workerSilent || 0) + " sans réponse à temps (issue incertaine), " + (c.workerLate || 0)
+      + " réponse(s) arrivée(s) trop tard");
+  }
   out.textContent = lines.join("\n");
 });
 

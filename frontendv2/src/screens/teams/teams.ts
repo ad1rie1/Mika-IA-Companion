@@ -50,6 +50,7 @@ import {
   threadHead,
   type DockView,
   type Filter,
+  type InfoView,
   type ThreadView,
 } from "./markup";
 
@@ -544,7 +545,9 @@ export class TeamsScreen {
     const a = this.account(conv.account);
     const shared = !!a && a.level !== "proprietaire";
     const sub = [kindLabel(conv.kind), this.accounts.length > 1 || shared ? `compte ${a?.name ?? conv.account}${shared && a.owner_name ? ` ${ofName(a.owner_name)}` : ""}` : ""].filter(Boolean).join(" · ");
-    host.innerHTML = `<div class="pane-head thread-head" data-tm-head>${threadHead({ conv: { title: conv.title, kind: conv.kind, key: conv.key }, sub, infoOpen: this.info })}</div>
+    // sa photo (ADR 0300) : celle que dit le fil, sinon la liste (un moteur qui ne la dit pas dans le fil)
+    const photo = t?.photo || c?.photo || "";
+    host.innerHTML = `<div class="pane-head thread-head" data-tm-head>${threadHead({ conv: { title: conv.title, kind: conv.kind, key: conv.key, photo }, sub, infoOpen: this.info })}</div>
       <div class="chat-scroll" data-scroll><div class="tm-msgs" data-tm-msgs></div></div>
       <div class="tm-dock" data-tm-dock></div>`;
     this.paintMessages(true);
@@ -645,13 +648,16 @@ export class TeamsScreen {
     else this.typed.delete(input.dataset.for);
   }
 
-  private people(t: Thread): { name: string; key: string; own: boolean; count: number }[] {
-    const map = new Map<string, { name: string; key: string; own: boolean; count: number }>();
+  private people(t: Thread): InfoView["people"][number][] {
+    const map = new Map<string, InfoView["people"][number]>();
     for (const m of [...this.older, ...t.messages]) {
       const key = m.own ? "__toi" : m.author_id || m.author;
       const got = map.get(key);
-      if (got) got.count += 1;
-      else map.set(key, { name: m.author, key: m.author_id || m.author, own: m.own, count: 1 });
+      if (got) {
+        got.count += 1;
+        // la photo la plus récente de qui a écrit (ADR 0300) : celle de son dernier message qui en porte une
+        got.photo = m.photo || got.photo;
+      } else map.set(key, { name: m.author, key: m.author_id || m.author, own: m.own, count: 1, photo: m.photo ?? "" });
     }
     return [...map.values()].sort((a, b) => Number(a.own) - Number(b.own) || b.count - a.count);
   }

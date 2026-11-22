@@ -691,3 +691,79 @@ a { color: inherit; text-decoration: none; }
 .li .lead.thumb { position: relative; width: 48px; height: 48px; border-radius: 12px; overflow: hidden; background: var(--s2); }
 .li .lead.thumb img, .li .lead.thumb .ph-fake { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .thumb-mk { position: absolute; right: 3px; bottom: 3px; width: 10px; height: 10px; border-radius: 50%; background: var(--mika-fill); border: 2px solid var(--surface); }
+
+/* ── Contacts (proposé le 2026-11-22, pas encore validé ; ecrans/contacts.js, ADR 0298) ── */
+.av.sq { border-radius: 12px; }
+.av.sm.sq { border-radius: 9px; }
+.av.xs.sq { border-radius: 7px; }
+.av.xl { width: 80px; height: 80px; font-size: 28px; font-weight: 500; }
+.av.xl.sq { border-radius: 24px; }
+.cx-search { flex: none; padding: 2px 16px 0; }
+.cx-search .field { height: 48px; }
+.cx-row { align-items: flex-start; padding-top: 12px; padding-bottom: 12px; }
+.cx-row .trail { padding-top: 2px; }
+.cx-srcs { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 4px; }
+.cx-src { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; line-height: 16px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.cx-src .ico { width: 14px; height: 14px; }
+.cx-empty { display: grid; justify-items: center; gap: 6px; padding: 56px 32px; text-align: center; color: var(--on-2); }
+.cx-empty .ico { width: 32px; height: 32px; color: var(--muted); }
+.cx-empty b { font-size: 16px; font-weight: 500; color: var(--on); }
+/* la fiche */
+.cx-card { padding-bottom: 8px; }
+.cx-hero { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 0 24px 14px; text-align: center; }
+.cx-hero h1 { font-size: 24px; line-height: 32px; font-weight: 400; margin-top: 8px; }
+.cx-hero p { color: var(--on-2); font-size: 14px; line-height: 20px; }
+.cx-hero .tag { margin-top: 6px; }
+.cx-link { color: var(--primary); font-weight: 500; }
+.cx-acts { display: flex; justify-content: center; gap: 24px; padding: 0 16px 14px; }
+.cx-acts button { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 64px; font-size: 12.5px; font-weight: 500; color: var(--on-2); }
+.cx-acts .ci { width: 56px; height: 40px; border-radius: 20px; display: grid; place-items: center; background: var(--sc); color: var(--on-sc); }
+.cx-acts .main .ci { background: var(--pc); color: var(--on-pc); }
+.cx-facts { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; padding: 0 16px 4px; }
+.cx-facts .tag .ico { width: 14px; height: 14px; }
+.set-h.mk { color: var(--mika); display: flex; align-items: center; gap: 6px; }
+.set-h .ico { width: 16px; height: 16px; }
+.set-group.mk { background: var(--mika-soft); border: 1px solid var(--mika-line); }
+.set-group.mk > * + * { border-top: 1px solid var(--mika-line); }
+.cx-id { align-items: center; }
+.cx-id .txt b { font-size: 15.5px; white-space: normal; overflow-wrap: anywhere; }
+.cx-go { flex: none; color: var(--primary); display: grid; place-items: center; width: 32px; }
+.cx-kv { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 12px; padding: 11px 14px; font-size: 14.5px; line-height: 20px; }
+.cx-kv > span:first-child { color: var(--muted); font-size: 13.5px; }
+.cx-kv b { display: block; font-weight: 400; }
+.cx-kv .cx-link { display: block; text-align: left; }
+.cx-kv small, .cx-fait small { display: block; color: var(--muted); font-size: 12px; line-height: 16px; margin-top: 2px; }
+.cx-fait { display: flex; align-items: flex-start; gap: 2px; padding: 11px 2px 11px 14px; }
+.cx-fait .txt { flex: 1; min-width: 0; }
+.cx-fait p { font-size: 14.5px; line-height: 20px; }
+.cx-fait .cx-x { width: 40px; height: 40px; margin-top: -8px; color: var(--muted); }
+.cx-privacy { display: flex; gap: 8px; padding: 16px 24px 4px; }
+.cx-privacy .ico { flex: none; margin-top: 1px; width: 14px; height: 14px; }
+.btn.danger.filled { background: var(--danger); color: var(--surface); }
+.cx-sheet-p { padding: 0 24px 10px; font-size: 14.5px; line-height: 21px; color: var(--on-2); }
+.cx-sheet-p q { quotes: "« " " »"; color: var(--on); }
+.cx-sheet-btns { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; padding: 8px 24px 6px; }
+/* Écrire : les destinataires en puces, tes contacts proposés sous le champ */
+.cx-rcpt { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.cx-rcpt input { flex: 1; min-width: 90px; border: 0; outline: 0; background: none; font-size: 15.5px; padding: 4px 0; color: var(--on); }
+.cx-rcpt input::placeholder { color: var(--muted); }
+.cx-chip { display: inline-flex; align-items: center; gap: 6px; height: 32px; max-width: 100%; padding: 0 2px 0 4px; border-radius: 16px; background: var(--s2);
+  border: 1px solid var(--line); font-size: 13.5px; font-weight: 500; color: var(--on); }
+.cx-chip > span:not(.av) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.cx-chip button { width: 26px; height: 26px; flex: none; display: grid; place-items: center; border-radius: 50%; color: var(--on-2); }
+.cx-chip button .ico { width: 15px; height: 15px; }
+.line-field .cx-cc { width: 36px; height: 36px; margin-right: -8px; }
+.cx-ac { margin: 6px 16px 8px; border-radius: 12px; background: var(--s3); overflow: hidden; box-shadow: 0 2px 10px rgb(0 0 0 / 12%); }
+.cx-ac-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 58px; padding: 8px 12px; text-align: left; }
+.cx-ac-row + .cx-ac-row { border-top: 1px solid var(--line); }
+.cx-ac-row:active { background: color-mix(in srgb, var(--on) 6%, transparent); }
+.cx-ac-row .txt { flex: 1; min-width: 0; }
+.cx-ac-row .nm { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.cx-ac-row .nm b { font-weight: 500; font-size: 14.5px; line-height: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: none; max-width: 70%; }
+.cx-ac-row .nm .org { color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.cx-ac-row .nm .tag { height: 20px; font-size: 11.5px; padding: 0 6px; }
+.cx-ac-row small { display: block; font-size: 13px; line-height: 18px; color: var(--on-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cx-hint { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 1px; max-width: 92px; font-size: 11.5px; line-height: 15px; color: var(--muted); text-align: right; }
+.cx-hint span { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.cx-hint .ico { width: 13px; height: 13px; flex: none; }
+.cx-ac-none { padding: 12px 14px; font-size: 13.5px; color: var(--on-2); }

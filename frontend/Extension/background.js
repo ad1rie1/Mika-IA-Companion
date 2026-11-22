@@ -4,8 +4,11 @@
  *     pause), le garde en file et l'envoie (`POST /api/teams/inbox`), ses propres messages compris ;
  *   - il relève toutes les 30 s ce qu'elle a écrit (`GET /api/teams/outbox`) : un brouillon est annoncé par une
  *     notification puis placé dans la zone de saisie quand la conversation est ouverte ; un message à envoyer est
- *     d'abord réclamé auprès du serveur (un seul navigateur l'obtient), puis part par un onglet Teams ; chaque issue
- *     sûre lui est rendue (`POST /api/teams/outbox/<id>`), une issue douteuse ne l'est jamais.
+ *     d'abord réclamé auprès du serveur (un seul navigateur l'obtient), puis part par un onglet Teams (par le worker de
+ *     Teams, le service de chat ou la zone de saisie : ADR 0301) ; chaque issue sûre lui est rendue
+ *     (`POST /api/teams/outbox/<id>`), une issue douteuse ne l'est jamais ;
+ *   - il garde le modèle d'envoi par le worker de Teams qu'un onglet a capté (sans texte ni conversation), pour que
+ *     l'onglet suivant l'ait.
  *
  * Un service d'extension MV3 peut être arrêté à tout moment : tout l'état vit dans `chrome.storage.local`, et chaque
  * lecture-écriture passe par un même verrou pour que deux événements simultanés ne s'écrasent pas. Les appels
@@ -42,7 +45,10 @@ const LIVE_CLOSE = { 4400: "demande illisible", 4401: "clé refusée", 4403: "re
 const HISTORY_RETRIES = 4;
 const HISTORY_CHUNK_BUDGET_MS = 120000;
 const HISTORY_STALE_MS = 3 * 60 * 1000;
-const TAB_SEND_TIMEOUT_MS = 45000; // au-delà du relais (30 s) : un onglet figé ne bloque pas la tournée
+const TAB_SEND_TIMEOUT_MS = 60000; // au-delà du relais (45 s) : un onglet figé ne bloque pas la tournée
+// le modèle d'envoi par le worker de Teams (ADR 0301) : une commande sans texte ni conversation, bornée
+const SEND_TEMPLATE_MAX_CHARS = 64 * 1024;
+const SEND_TEMPLATE_KINDS = ["bilateral", "group"];
 const RUNTIME_VERSION = 2;
 const NOTE_PREFIX = "mika-draft:";
 const ICON = "icons/icon-128.png";
@@ -55,7 +61,7 @@ function freshRuntime() {
     armedAt: 0, seen: {}, queue: [], titles: {}, people: {}, pauses: [], self: "", selfName: "",
     batchMax: S.LIMITS.maxMessages,
     stats: { received: 0, admitted: 0, delivered: 0, own: 0, posts: 0, dropped: {}, bySource: { network: 0, idb: 0 },
-      images: { sent: 0, skipped: 0, failed: 0 } },
+      images: { sent: 0, skipped: 0, failed: 0 }, photos: { sent: 0, skipped: 0, failed: 0 } },
     lastError: "", lastErrorAt: 0, lastOkAt: 0, lastPollAt: 0, retryAt: 0, authFailed: false, failures: 0,
     ackRetryAt: 0, ackFailures: 0, inboxStrike: null,
     outbox: O.freshBox(),
@@ -66,6 +72,15 @@ function freshRuntime() {
     // les profils Teams des personnes (ADR 0298) : identifiant → `{p, d, at}` ; ce qui en est parti, par empreinte
     profiles: {},
     profilesSent: {},
+    // la plus récente version vue de chaque message (identifiant → `{r, at}`) : une réaction retirée repart (ADR 0300)
+    ranks: {},
+    // les photos de profil (ADR 0300) : celles à demander à l'onglet (personne → `{etag, name, at, askedAt, asks,
+    // tries}`), et l'empreinte de celles déjà parties (personne → empreinte)
+    photosWanted: {},
+    photosSent: {},
+    // le modèle d'envoi par le worker de Teams (ADR 0301), par sorte de conversation (`bilateral` : un tête-à-tête,
+    // `group`) : `{command, open, close, breaks, at}` — ni texte, ni conversation, ni identifiants
+    sendTemplates: {},
   };
 }
 
@@ -241,13 +256,16 @@ function ingest(state, batch) {
     else if (m.author) learnPerson(rt, m.conv, m.author, now);
     const c = describe(rt, m.conv);
     const reason = S.admit(m, {
-      now: now, armedAt: rt.armedAt, seen: rt.seen, paused: settings.paused, pauses: rt.pauses, title: c.title,
-      kind: c.kind, people: c.people, exclude: exclude,
+      now: now, armedAt: rt.armedAt, seen: rt.seen, ranks: rt.ranks, paused: settings.paused, pauses: rt.pauses,
+      title: c.title, kind: c.kind, people: c.people, exclude: exclude,
     });
     if (reason === "déjà vu") continue;
     // écarté pour de bon (vide, ancien, exclu…) : déjà vu ; écarté faute de conversation, non — Teams diffuse parfois un
     // message qu'on vient d'envoyer sans elle, puis complet : la version complète doit passer (le bug du 2026-11-22)
-    if (reason !== "vide" && reason !== "sans conversation") rt.seen[T.versionKey(m)] = m.time;
+    if (reason !== "vide" && reason !== "sans conversation") {
+      rt.seen[T.versionKey(m)] = m.time;
+      S.noteRank(rt.ranks, m);
+    }
     if (reason) {
       rt.stats.dropped[reason] = (rt.stats.dropped[reason] || 0) + 1;
       continue;
@@ -257,10 +275,14 @@ function ingest(state, batch) {
     const entry = { id: m.id, conv: m.conv, author: m.author, authorId: m.authorId, time: m.time, text: m.text,
       mentions: (m.mentions || []).slice(0, 20), at: now };
     if (m.images > 0) entry.images = Math.min(8, Number(m.images) || 0);
+    // ses réactions (ADR 0300), quand la page les a lues ; sa version
+    if (Array.isArray(m.reactions)) entry.reactions = m.reactions.slice(0, S.LIMITS.maxReactions);
+    if (Number(m.version) > 0) entry.version = Number(m.version);
     if (m.deleted) {
       entry.deleted = true;
       entry.text = "";
       entry.mentions = [];
+      delete entry.reactions;
     }
     rt.queue.push(entry);
     rt.stats.admitted++;
@@ -273,6 +295,7 @@ function ingest(state, batch) {
     rt.stats.dropped["file pleine"] = (rt.stats.dropped["file pleine"] || 0) + over;
   }
   rt.seen = S.pruneSeen(rt.seen, now);
+  rt.ranks = S.pruneRanks(rt.ranks, now);
 }
 
 // ── Le serveur ─────────────────────────────────────────────────────────────
@@ -415,6 +438,116 @@ function markProfilesSent(rt, ids) {
   if (sent.length > PROFILES_SENT_MAX) for (const id of sent.slice(0, sent.length - PROFILES_SENT_MAX)) delete rt.profilesSent[id];
 }
 
+// ── Les photos de profil (ADR 0300) ─────────────────────────────────────────
+//
+// Un profil qui vient de partir (donc avec un message qui part : jamais pour une conversation exclue, rien pendant une
+// pause) et dont l'empreinte de la photo (`avatar`) n'est pas déjà partie fait demander sa photo à l'onglet Teams, qui
+// la télécharge et la passe ici ; elle part à Mika (`POST /api/teams/photo`) une fois par empreinte. Rien n'en est
+// gardé ici que l'empreinte.
+
+const PHOTOS_WANTED_MAX = 500;
+const PHOTOS_PER_ASK = 20;
+const PHOTO_ASK_AGAIN_MS = 5 * 60 * 1000; // une photo demandée sans nouvelles est redemandée après ce temps
+const PHOTO_ASKS_MAX = 6; // puis oubliée (un onglet qui n'affiche aucun avatar, Teams personnel)
+const PHOTO_TRIES = 3; // les refus de l'instant de Mika (coupure, 429, 5xx)
+const PHOTOS_SENT_MAX = 6000;
+
+/** Les profils partis (`ids`) dont la photo est à demander : une empreinte, pas encore partie, pas déjà demandée. */
+function wantPhotos(rt, ids, now) {
+  rt.photosWanted = rt.photosWanted || {};
+  rt.photosSent = rt.photosSent || {};
+  for (const id of ids || []) {
+    const e = rt.profiles && rt.profiles[id];
+    const etag = e && e.p ? e.p.avatar : "";
+    if (!etag || rt.photosSent[id] === etag) continue;
+    const prev = rt.photosWanted[id];
+    if (prev && prev.etag === etag) continue;
+    rt.photosWanted[id] = { etag: etag, name: e.p.name || "", at: now, askedAt: 0, asks: 0, tries: 0 };
+  }
+  const ids2 = Object.keys(rt.photosWanted);
+  if (ids2.length > PHOTOS_WANTED_MAX) {
+    ids2.sort(function (a, b) { return rt.photosWanted[a].at - rt.photosWanted[b].at; });
+    for (const id of ids2.slice(0, ids2.length - PHOTOS_WANTED_MAX)) delete rt.photosWanted[id];
+  }
+}
+
+function markPhotoSent(rt, person, etag) {
+  rt.photosSent = rt.photosSent || {};
+  delete rt.photosSent[person]; // la plus récente en dernier : c'est la plus ancienne qui part au-delà du plafond
+  rt.photosSent[person] = etag;
+  const sent = Object.keys(rt.photosSent);
+  if (sent.length > PHOTOS_SENT_MAX) for (const id of sent.slice(0, sent.length - PHOTOS_SENT_MAX)) delete rt.photosSent[id];
+}
+
+/** Demander à un onglet Teams les photos qui attendent (20 à la fois) ; rien en pause ni sans clé valable. */
+async function askPhotos() {
+  // rien à demander (le cas ordinaire) : pas d'écriture de l'état
+  if (!Object.keys((await load()).runtime.photosWanted || {}).length) return;
+  const items = await mutate(function (state) {
+    const rt = state.runtime;
+    const now = Date.now();
+    if (!ready(state, now)) return [];
+    const wanted = rt.photosWanted || {};
+    const out = [];
+    for (const id of Object.keys(wanted)) {
+      const w = wanted[id];
+      if (w.asks >= PHOTO_ASKS_MAX) {
+        delete wanted[id];
+        continue;
+      }
+      if (out.length >= PHOTOS_PER_ASK || now - (w.askedAt || 0) < PHOTO_ASK_AGAIN_MS) continue;
+      w.askedAt = now;
+      w.asks = (w.asks || 0) + 1;
+      out.push({ person: id, etag: w.etag, name: w.name });
+    }
+    return out;
+  });
+  if (!items.length) return;
+  for (const tab of await teamsTabs().catch(function () { return []; })) {
+    try {
+      const answer = await chrome.tabs.sendMessage(tab.id, { kind: "photos", items: items });
+      if (answer && answer.ok) return;
+    } catch (_) { /* onglet sans script */ }
+  }
+}
+
+/** Une photo que l'onglet a téléchargée : seulement si elle a été demandée, à cette empreinte, et hors pause. */
+async function photoUpload(msg) {
+  if (!msg.person || !msg.etag || !msg.type || !msg.data) return { ok: false, error: "photo illisible" };
+  const state = await load();
+  const s = state.settings;
+  if (!s.key || state.runtime.authFailed) return { ok: false, error: "pas de clé Teams valable" };
+  const wanted = (state.runtime.photosWanted || {})[msg.person];
+  if (s.paused || !wanted || wanted.etag !== msg.etag) {
+    await mutate(function (st) { st.runtime.stats.photos.skipped++; });
+    return { ok: true, skipped: true };
+  }
+  const result = await request(s, "POST", "/api/teams/photo", { person: msg.person, etag: msg.etag, type: msg.type,
+    data: msg.data });
+  // pour l'instant (coupure, Teams coupé chez Mika, 429, 5xx) : redemandée plus tard ; refusée pour de bon (une personne
+  // que Mika ne connaît pas ou plus, une image illisible) : plus pour cette empreinte
+  const retry = result.status === 0 || result.status === 403 || result.status === 429 || result.status >= 500;
+  await mutate(function (st) {
+    const rt = st.runtime;
+    const w = (rt.photosWanted || {})[msg.person];
+    const same = Boolean(w) && w.etag === msg.etag;
+    if (result.status === 401) {
+      rt.authFailed = true;
+      fail(rt, "Clé refusée. Collez la clé Teams de Mika (Console › Configuration › Teams).");
+    } else if (!retry) {
+      markPhotoSent(rt, msg.person, msg.etag);
+      if (same) delete rt.photosWanted[msg.person];
+    } else if (same) {
+      w.tries = (w.tries || 0) + 1;
+      w.askedAt = 0; // redemandée au prochain tour
+      if (w.tries >= PHOTO_TRIES) delete rt.photosWanted[msg.person];
+    }
+    rt.stats.photos[result.status === 202 ? "sent" : "failed"]++;
+  });
+  return result.status === 202 ? { ok: true }
+    : { ok: false, retry: retry, error: result.error || "Mika a répondu " + result.status };
+}
+
 /** Les messages de la file retenus le temps d'apprendre le nom de leur conversation. */
 function heldMessages(rt, exclude, now) {
   return rt.queue.filter(function (m) { return S.held(m, describe(rt, m.conv), exclude, now); });
@@ -462,6 +595,7 @@ function afterInbox(state, batch, result) {
     rt.stats.posts++;
     for (const conv of batch.convs) markShared(rt, conv, now);
     markProfilesSent(rt, batch.profiles);
+    wantPhotos(rt, batch.profiles, now);
     rt.batchMax = Math.min(S.LIMITS.maxMessages, (rt.batchMax || 1) * 2);
     rt.lastOkAt = now;
     rt.inboxStrike = null;
@@ -520,7 +654,10 @@ async function flushOnce() {
     if (result.status === 202) delivered = true;
     if (!go) break;
   }
-  if (delivered) schedulePoll(1500); // une réponse de Mika suit souvent ce qu'elle vient de lire
+  if (delivered) {
+    schedulePoll(1500); // une réponse de Mika suit souvent ce qu'elle vient de lire
+    askPhotos().catch(function () { /* l'onglet les aura au prochain tour */ });
+  }
   // ce qui reste retenu repart dès que sa retenue prend fin (l'alarme de 30 s le rattrape si le service dort)
   const state = await load();
   const exclude = S.exclusions(state.settings.exclude);
@@ -1002,8 +1139,10 @@ async function startHistory() {
   const run = "h" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   await mutate(function (s) {
     s.runtime.history = freshHistory(Date.now(), run);
-    // une mise en service (ou une remise à zéro côté Mika, `mika teams purge`) : les profils repartent avec l'historique
+    // une mise en service (ou une remise à zéro côté Mika, `mika teams purge`) : les profils repartent avec l'historique,
+    // et leurs photos (ADR 0300)
     s.runtime.profilesSent = {};
+    s.runtime.photosSent = {};
   });
   for (const tab of tabs) {
     try {
@@ -1103,9 +1242,12 @@ async function historyChunk(msg) {
         h.dropped++;
         continue;
       }
-      kept.push({ id: m.id, conv: m.conv, author: m.author, authorId: m.authorId, time: m.time, text: m.text,
+      const entry = { id: m.id, conv: m.conv, author: m.author, authorId: m.authorId, time: m.time, text: m.text,
         mentions: (m.mentions || []).slice(0, 20), deleted: m.deleted === true,
-        images: Math.min(8, Number(m.images) || 0) });
+        images: Math.min(8, Number(m.images) || 0) };
+      // ses réactions (ADR 0300), quand la page les a lues
+      if (Array.isArray(m.reactions) && !entry.deleted) entry.reactions = m.reactions.slice(0, S.LIMITS.maxReactions);
+      kept.push(entry);
     }
     prunePeople(rt);
     const info = {};
@@ -1132,7 +1274,10 @@ async function historyChunk(msg) {
   const totals = { sent: 0, accepted: 0, known: 0, twins: 0, dropped: 0 };
   const result = await historyPost(prepared.settings, prepared.kept, opts, deadline, totals);
   await mutate(function (s) {
-    if (result.ok) markProfilesSent(s.runtime, totals.profiles || []);
+    if (result.ok) {
+      markProfilesSent(s.runtime, totals.profiles || []);
+      wantPhotos(s.runtime, totals.profiles || [], Date.now());
+    }
     if (staleRun(s.runtime, msg.run)) return;
     const h = s.runtime.history;
     h.lastAt = Date.now();
@@ -1147,6 +1292,7 @@ async function historyChunk(msg) {
       fail(s.runtime, "Clé refusée. Collez la clé Teams de Mika (Console › Configuration › Teams).");
     }
   });
+  if (result.ok) askPhotos().catch(function () { /* l'onglet les aura au prochain tour */ });
   return result.ok ? { ok: true } : { ok: false, error: result.error };
 }
 
@@ -1256,7 +1402,38 @@ function status(state) {
     live: { connected: live.connected, since: live.since, lastPushAt: live.lastPushAt, lastError: live.lastError,
       retryMs: live.retryMs },
     history: rt.history,
+    // quand le modèle d'envoi par le worker de Teams a été capté (ADR 0301), par sorte ; 0 : jamais
+    sendTemplates: Object.fromEntries(SEND_TEMPLATE_KINDS.map(function (k) {
+      const t = rt.sendTemplates && rt.sendTemplates[k];
+      return [k, t ? Number(t.at) || 0 : 0];
+    })),
   };
+}
+
+/**
+ * Le modèle d'envoi qu'un onglet a tiré d'un envoi de la page (vérifié par le relais) : gardé par sorte de
+ * conversation, le plus récent l'emporte. Rien n'y est jamais écrit d'un message.
+ */
+async function keepSendTemplate(msg) {
+  const t = msg.template;
+  if (!t || typeof t !== "object" || !t.command || typeof t.command !== "object"
+    || t.command.operationName !== "autoSendMessage") {
+    return { ok: false, error: "modèle d'envoi illisible" };
+  }
+  let size = 0;
+  try {
+    size = JSON.stringify(t).length;
+  } catch (_) {
+    size = Infinity;
+  }
+  if (size > SEND_TEMPLATE_MAX_CHARS) return { ok: false, error: "modèle d'envoi trop gros" };
+  const kind = msg.bilateral === true ? "bilateral" : "group";
+  await mutate(function (state) {
+    const rt = state.runtime;
+    rt.sendTemplates = Object.assign({}, rt.sendTemplates, { [kind]: { command: t.command, open: String(t.open || ""),
+      close: String(t.close || ""), breaks: t.breaks === "p" ? "p" : "br", at: Date.now() } });
+  });
+  return { ok: true };
 }
 
 async function testConnection() {
@@ -1290,7 +1467,7 @@ async function diagnose() {
 
 /** Les demandes que peut faire un onglet Teams ; le reste ne vient que des pages de l'extension elle-même. */
 const FROM_TABS = new Set(["captured", "pendingDrafts", "claim", "placedResult", "cursors", "historyChunk",
-  "historyProgress", "historyDone", "image"]);
+  "historyProgress", "historyDone", "image", "photo", "sendTemplate", "sendTemplates"]);
 
 async function handle(msg) {
   switch (msg && msg.kind) {
@@ -1331,6 +1508,12 @@ async function handle(msg) {
       return startHistory();
     case "image":
       return imageUpload(msg);
+    case "photo":
+      return photoUpload(msg);
+    case "sendTemplate":
+      return keepSendTemplate(msg);
+    case "sendTemplates":
+      return { ok: true, templates: (await load()).runtime.sendTemplates || {} };
     case "pendingDrafts":
       return { items: currentDrafts(await load()) };
     case "claim": {
@@ -1428,7 +1611,8 @@ chrome.notifications.onClicked.addListener(function (noteId) {
 
 function tick() {
   liveEnsure().catch(function () { /* rien */ });
-  return flush().then(function () { return poll(); }).catch(function () { /* noté dans l'état */ });
+  return flush().then(function () { return poll(); }).then(function () { return askPhotos(); })
+    .catch(function () { /* noté dans l'état */ });
 }
 
 function arm() {

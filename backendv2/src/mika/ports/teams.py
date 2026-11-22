@@ -98,10 +98,62 @@ def split_conversation_key(key: str) -> tuple[str, str]:
     return DEFAULT_ACCOUNT, key
 
 
+#: un compte d'organisation, quelle que soit la forme de son identifiant (« orgid:<uuid> », une adresse qui le contient)
+_ORGID = re.compile(r"orgid:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})", re.IGNORECASE)
+
+
+def person_key(identifier: str) -> str:
+    """L'identifiant d'une personne tel que ses profils et ses photos se rangent (ADR 0298, 0300) : ``8:orgid:<uuid>``
+    en minuscules pour un compte d'organisation, quelle que soit la forme reçue ; sinon tel quel, en minuscules."""
+    found = _ORGID.search(identifier or "")
+    return f"8:orgid:{found.group(1).lower()}" if found else (identifier or "").strip().lower()
+
+
 def plain(text: str) -> str:
     """Un texte comparé à un autre : blancs repliés, casse ignorée (un brouillon envoyé tel quel l'est encore si
     l'éditeur de Teams a touché aux espaces)."""
     return " ".join(unicodedata.normalize("NFKC", text or "").split()).casefold()
+
+
+@dataclass(frozen=True, slots=True)
+class Reaction:
+    """Une réaction à un message (👍, ❤️…, ADR 0300) : sa clé dans Teams (``like``, ``heart``, ``1f44f_clappinghands``…),
+    combien l'ont posée, si la personne du compte en est (``mine``), et qui — ``by`` : leurs identifiants Teams en
+    minuscules (dix au plus, les premiers à l'avoir posée ; le compte, lui, est entier) ; ``names`` : leurs noms tels
+    que ce compte les connaît, au même rang (vide : inconnu, ou la personne du compte)."""
+
+    key: str
+    count: int
+    mine: bool = False
+    by: tuple[str, ...] = ()
+    names: tuple[str, ...] = ()
+
+
+#: les réactions classiques de Teams, et quelques alias de Skype ; une clé qui commence par ses points de code
+#: (``1f44f_clappinghands``, ``2764-fe0f_heart``) se lit par eux (``emoji_of``)
+REACTION_EMOJI: dict[str, str] = {
+    "like": "👍", "heart": "❤️", "laugh": "😆", "surprised": "😮", "sad": "😢", "angry": "😡",
+    "yes": "👍", "smile": "🙂", "cry": "😢", "wink": "😉", "clap": "👏", "fire": "🔥", "ok": "👌", "pray": "🙏",
+    "party": "🎉", "celebrate": "🎉", "rocket": "🚀", "eyes": "👀", "thinking": "🤔", "muscle": "💪", "100": "💯",
+}
+_CODE_POINTS = re.compile(r"((?:[0-9a-f]{4,6})(?:-[0-9a-f]{4,6})*)(?:_[a-z0-9_+-]*)?")
+
+
+def emoji_of(key: str) -> str:
+    """L'emoji d'une réaction : celui de sa clé connue, ou de ses points de code ; vide si on ne sait pas (le code
+    montre alors la clé)."""
+    if key in REACTION_EMOJI:
+        return REACTION_EMOJI[key]
+    found = _CODE_POINTS.fullmatch(key or "")
+    groups = found.group(1).split("-") if found is not None else []
+    # un mot fait de lettres hexadécimales (« face », « cafe ») n'est pas un point de code : ceux des emojis ont tous un
+    # chiffre
+    if not groups or not all(any(c.isdigit() for c in h) for h in groups):
+        return ""
+    points = [int(h, 16) for h in groups]
+    if not all(0x20 < p <= 0x10FFFF and not 0xD800 <= p <= 0xDFFF for p in points):
+        return ""
+    return "".join(chr(p) for p in points)
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +170,8 @@ class Message:
     mentions_me: bool = False  # il mentionne cette personne
     #: le compte Teams qui l'a reçu (ADR 0186)
     account: str = DEFAULT_ACCOUNT
+    #: ses réactions (ADR 0300), dans l'ordre de Teams : lues avec lui, elles ne déclenchent jamais rien
+    reactions: tuple[Reaction, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,6 +268,9 @@ class InboxMessage:
     deleted: bool = False
     #: ses images, que l'extension annonce et enverra à part (ADR 0258) : il attend qu'elles soient lues
     images: int = 0
+    #: ses réactions (ADR 0300), sans ``names`` ; ``None`` : l'extension n'en a rien dit (le cache garde les siennes),
+    #: ``()`` : aucune (le cache efface les siennes)
+    reactions: tuple[Reaction, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -262,6 +319,38 @@ IMAGE_NO_MESSAGE = "no_message"
 
 
 @dataclass(frozen=True, slots=True)
+class PhotoIn:
+    """La photo de profil d'une personne (ADR 0300), telle que l'extension l'envoie (déjà validée par la porte) : son
+    identifiant Teams (en minuscules), l'empreinte que Teams donne à cette photo (``avatarETag``), son type, ses
+    octets (64 px)."""
+
+    person: str
+    etag: str
+    mime: str
+    data: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class Photo:
+    """Une photo de profil gardée (ADR 0300) : son compte, sa personne, son empreinte, son type, ses octets."""
+
+    account: str
+    person: str
+    etag: str
+    mime: str
+    data: bytes
+
+
+#: une photo de profil, au plus (octets : 64 px, ADR 0300)
+PHOTO_MAX_BYTES = 64 * 1024
+#: ce que devient une photo envoyée : gardée, déjà là (la même empreinte), ou d'une personne que ce compte ne connaît
+#: pas (ou plus : l'oubli), ou d'une autre empreinte que celle de son profil
+PHOTO_KEPT = "kept"
+PHOTO_KNOWN = "known"
+PHOTO_UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True, slots=True)
 class InboxConversation:
     id: str
     title: str = ""
@@ -273,7 +362,8 @@ class InboxProfile:
     """Le profil d'une personne croisée dans Teams (ADR 0298), tel que l'extension le lit dans la base du client et
     le joint aux messages de cette personne (ou qui la mentionnent) : son identifiant Teams (``8:orgid:<guid>``…, en
     minuscules), son nom, son e-mail (vide s'il n'en a pas une bien formée), son poste, son entreprise, son service,
-    l'organisation Teams du compte (pas forcément son employeur), trois numéros au plus. Déjà validé par la porte."""
+    l'organisation Teams du compte (pas forcément son employeur), trois numéros au plus, et l'empreinte de sa photo
+    (``avatar``, ADR 0300 : vide sans photo). Déjà validé par la porte."""
 
     id: str
     name: str = ""
@@ -283,6 +373,7 @@ class InboxProfile:
     department: str = ""
     tenant: str = ""
     phones: tuple[str, ...] = ()
+    avatar: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -444,6 +535,13 @@ class TeamsPort(Protocol):
         leur nombre. Une conversation sans message n'y est pas."""
         ...
 
+    def others(self, conversations: Sequence[tuple[str, str]]) -> dict[tuple[str, str], str]:
+        """L'autre personne de chacun de ces tête-à-tête (compte, identifiant) : l'identifiant Teams du dernier à y
+        avoir écrit qui n'est pas la personne du compte — celle dont ``title`` dit le nom —, en une seule requête (ADR
+        0300 : sa photo est celle de la conversation). Une conversation qui n'est pas un tête-à-tête, ou où l'autre
+        n'a encore rien écrit, n'y est pas."""
+        ...
+
     def conversation(self, account: str, conversation: str) -> Conversation | None: ...
 
     def conversations(self, limit: int, *, text: str = "", accounts: Sequence[str] | None = None) \
@@ -547,6 +645,22 @@ class TeamsPort(Protocol):
         """Le type et les octets d'une image (``None`` : pas d'image)."""
         ...
 
+    # ── les photos de profil (ADR 0300) ──
+    def keep_photo(self, account: str, photo: PhotoIn, now: int) -> str:
+        """Garder la photo d'une personne que ce compte connaît, à l'empreinte que son profil a dite (``PHOTO_KEPT``,
+        ``PHOTO_KNOWN`` ou ``PHOTO_UNKNOWN``)."""
+        ...
+
+    def photo(self, account: str, person: str) -> Photo | None:
+        """La photo d'une personne (son identifiant Teams, sans casse) gardée sous ce compte."""
+        ...
+
+    def photos_of(self, people: Sequence[str], *, accounts: Sequence[str] | None = None) -> dict[str, tuple[str, str]]:
+        """Parmi ces personnes (leurs identifiants Teams, sans casse), celles qui ont une photo dans ces comptes
+        (``None`` : tous) : identifiant en minuscules → (le compte qui la garde, son empreinte) — le premier compte,
+        dans l'ordre de leurs clés."""
+        ...
+
 
 class TeamsKeys(Protocol):
     """Les clés de l'extension, une par compte (le port ``teams_keys`` : ``app/teams.TeamsDesk``). Une clé neuve
@@ -574,6 +688,8 @@ class TeamsGate(Protocol):
     async def ack(self, key: str, item: str, data: object) -> GateResult: ...
 
     async def image(self, key: str, data: object) -> GateResult: ...
+
+    async def photo(self, key: str, data: object) -> GateResult: ...
 
     async def live(self, key: str) -> GateResult: ...
 

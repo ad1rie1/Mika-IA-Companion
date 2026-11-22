@@ -241,18 +241,95 @@
     return Boolean(props && deletionMark(first(props, DELETED_KEYS)));
   }
 
-  /** La version d'un message (la date de sa dernière modification), 0 si elle n'est pas dite. */
+  /**
+   * La version d'un message (la date de sa dernière modification : la plus tardive de celles qu'il dit — `version`
+   * avance aussi quand une réaction change, `edittime` seulement quand le texte change), 0 si elle n'est pas dite.
+   */
   function versionOf(o) {
     const props = isObject(o.properties) ? o.properties : {};
-    return Math.max(toMillis(first(o, VERSION_KEYS)), toMillis(first(props, VERSION_KEYS)));
+    let most = 0;
+    for (const k of VERSION_KEYS) most = Math.max(most, toMillis(o[k]), toMillis(props[k]));
+    return most;
+  }
+
+  // ── Les réactions (ADR 0300) ───────────────────────────────────────────────
+
+  /** La clé d'une réaction de Teams (« like », « heart », « 1f44f_clappinghands »…), en minuscules. */
+  const REACTION_KEY = /^[a-z0-9_+-]{1,40}$/;
+  const MAX_REACTIONS = 20; // par message
+  const MAX_REACTORS = 10; // les identifiants gardés par réaction (leur nombre, lui, est entier)
+  const ORGID = /orgid:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
+
+  /** Un identifiant de personne comparable : `8:orgid:<uuid>` en minuscules, quelle que soit sa forme. */
+  function personKey(id) {
+    const s = String(id || "").trim();
+    const org = ORGID.exec(s);
+    return org ? "8:orgid:" + org[1].toLowerCase() : s.toLowerCase();
+  }
+
+  function parsedList(raw) {
+    if (typeof raw !== "string") return raw;
+    try {
+      return JSON.parse(raw);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /**
+   * Les réactions d'un message (ADR 0300) : `[{key, count, mine, by}]` — sa clé de Teams, combien l'ont posée, si
+   * `self` (l'uuid de soi, s'il est connu) en est, et qui (dix identifiants au plus, les premiers à l'avoir posée).
+   * `properties.emotions` (un texte JSON ou une liste : `[{key, users: [{mri, time, value}]}]`), sinon le seul compte
+   * (`annotationsSummary.emotions` : `{like: 3}`). `undefined` quand le message n'en dit rien (une source qui ne les
+   * porte pas : le serveur garde ce qu'il savait) ; `[]` quand il dit qu'il n'y en a aucune.
+   */
+  function reactionsOf(o, self) {
+    const props = isObject(o.properties) ? o.properties : {};
+    const raw = parsedList(props.emotions !== undefined ? props.emotions : o.emotions);
+    const me = self ? personKey(String(self).indexOf(":") >= 0 ? self : "8:orgid:" + self) : "";
+    if (Array.isArray(raw)) {
+      const out = [];
+      const keys = new Set();
+      for (const r of raw) {
+        if (out.length >= MAX_REACTIONS) break;
+        if (!isObject(r)) continue;
+        const key = String(r.key || "").trim().toLowerCase();
+        if (!REACTION_KEY.test(key) || keys.has(key)) continue;
+        const users = (Array.isArray(r.users) ? r.users : []).filter(isObject)
+          .map(function (u) { return { id: personKey(u.mri || u.id), time: toMillis(u.time) }; })
+          .filter(function (u) { return u.id; })
+          .sort(function (a, b) { return a.time - b.time; });
+        const ids = [];
+        for (const u of users) if (ids.indexOf(u.id) < 0) ids.push(u.id);
+        if (!ids.length) continue; // plus personne ne la porte : retirée
+        keys.add(key);
+        out.push({ key: key, count: ids.length, mine: Boolean(me) && ids.indexOf(me) >= 0,
+          by: ids.slice(0, MAX_REACTORS) });
+      }
+      return out;
+    }
+    const summary = [o.annotationsSummary, props.annotationsSummary].find(function (s) {
+      return isObject(s) && isObject(s.emotions);
+    });
+    if (!summary) return undefined;
+    const out = [];
+    for (const k of Object.keys(summary.emotions)) {
+      const key = k.trim().toLowerCase();
+      const count = Math.floor(Number(summary.emotions[k]) || 0);
+      if (REACTION_KEY.test(key) && count > 0 && out.length < MAX_REACTIONS) {
+        out.push({ key: key, count: Math.min(count, 1000000), mine: false, by: [] });
+      }
+    }
+    return out;
   }
 
   /**
    * Un message, ou `null` si l'objet n'en a pas la forme ou n'est pas un message lisible (frappe en cours,
    * activité du fil, appel…). Un message supprimé devient un enregistrement de suppression : même identifiant,
-   * même conversation, même date, `deleted: true` et un texte vide — le serveur efface sa copie.
+   * même conversation, même date, `deleted: true` et un texte vide — le serveur efface sa copie. `self` : l'uuid de
+   * soi, s'il est connu (sa réaction se reconnaît : `mine`).
    */
-  function normalizeMessage(o, inheritedConv) {
+  function normalizeMessage(o, inheritedConv, self) {
     if (!isObject(o) || typeof o.content !== "string") return null;
     const time = toMillis(first(o, TIME_KEYS));
     if (!time) return null;
@@ -288,6 +365,8 @@
       version: versionOf(o), mentions: mentionsOf(o) };
     const images = /^richtext\/media/i.test(type) ? [] : imagesOf(o.content);
     if (images.length) out.images = images;
+    const reactions = reactionsOf(o, self);
+    if (reactions) out.reactions = reactions;
     return out;
   }
 
@@ -333,7 +412,8 @@
 
   /**
    * Parcourt une valeur (réponse, trame, enregistrement) et rend les messages et conversations qu'elle contient.
-   * Borné en profondeur et en nombre de nœuds ; une chaîne qui porte du JSON est ouverte (`parseStrings`).
+   * Borné en profondeur et en nombre de nœuds ; une chaîne qui porte du JSON est ouverte (`parseStrings`) ; `self` :
+   * l'uuid de soi, s'il est connu (ses réactions se reconnaissent).
    */
   function extract(value, opts) {
     const options = opts || {};
@@ -357,7 +437,7 @@
         for (let i = v.length - 1; i >= 0; i--) stack.push({ v: v[i], depth: item.depth + 1, conv: item.conv });
         continue;
       }
-      const message = normalizeMessage(v, item.conv);
+      const message = normalizeMessage(v, item.conv, options.self);
       if (message) {
         messages.push(message);
         continue;
@@ -385,12 +465,20 @@
   const PROFILE_ID = /^(8:orgid:[0-9a-f-]{36}|8:live:[a-z0-9._-]{1,80}|8:teamsvisitor:[0-9a-f-]{32,36})$/;
   const PROFILE_EMAIL = /^[^\s@<>"',;]{1,64}@[a-z0-9.-]{1,253}\.[a-z]{2,}$/;
   const PROFILE_PHONES = 3;
+  /** L'empreinte de sa photo (`avatarETag`, ADR 0300) : ce qui change quand la photo change. */
+  const AVATAR = /^[A-Za-z0-9._:+/=-]{1,200}$/;
+
+  /** L'empreinte de la photo d'un profil, sans les guillemets ni le « W/ » d'une empreinte HTTP ; « » sinon. */
+  function avatarOf(v) {
+    const s = typeof v === "string" ? v.trim().replace(/^W\//, "").replace(/^"|"$/g, "") : "";
+    return AVATAR.test(s) ? s : "";
+  }
 
   /**
    * Le profil d'une personne tel que Teams le garde dans ce navigateur (base `Teams:profiles`, magasin `profiles`) :
    * son identifiant, son nom, son e-mail (sinon celui de connexion, s'il en a la forme), son poste, son entreprise, son
-   * service, son organisation et jusqu'à trois numéros. `null` sans identifiant reconnu, ou sans rien qui dise qui
-   * c'est.
+   * service, son organisation, jusqu'à trois numéros et l'empreinte de sa photo (`avatar`, s'il en a une : ADR 0300).
+   * `null` sans identifiant reconnu, ou sans rien qui dise qui c'est.
    */
   function profileOf(o) {
     if (!isObject(o)) return null;
@@ -412,11 +500,14 @@
     const out = { id: id, name: pick(o.displayName, 120), email: emailOf(o.email) || emailOf(o.mail)
       || emailOf(o.userPrincipalName), title: pick(o.jobTitle, 120), company: pick(o.companyName, 120),
       department: pick(o.department, 120), tenant: pick(o.tenantName, 120), phones: phones };
+    const avatar = avatarOf(o.avatarETag);
+    if (avatar) out.avatar = avatar;
     return out.name || out.email || out.title || out.company ? out : null;
   }
 
   return { extract: extract, normalizeMessage: normalizeMessage, normalizeConversation: normalizeConversation,
     conversationKind: conversationKind, conversationFromUrl: conversationFromUrl, htmlToText: htmlToText,
-    imagesOf: imagesOf, profileOf: profileOf, PROFILE_ID: PROFILE_ID, PROFILE_EMAIL: PROFILE_EMAIL,
-    parseEmbedded: parseEmbedded, toMillis: toMillis };
+    imagesOf: imagesOf, profileOf: profileOf, reactionsOf: reactionsOf, PROFILE_ID: PROFILE_ID,
+    PROFILE_EMAIL: PROFILE_EMAIL, AVATAR: AVATAR, REACTION_KEY: REACTION_KEY, parseEmbedded: parseEmbedded,
+    toMillis: toMillis };
 });

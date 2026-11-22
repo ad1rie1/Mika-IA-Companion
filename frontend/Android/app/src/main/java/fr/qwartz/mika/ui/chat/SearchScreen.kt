@@ -448,6 +448,7 @@ private fun screenCatalog(): List<ScreenEntry> {
         ScreenEntry(phone, stringResource(R.string.search_sub_phone), Route.Phone(), icon = R.drawable.ic_m_phone),
         ScreenEntry(sub(phone, stringResource(R.string.phone_tab_messages)), "", Route.Phone("messages"), icon = R.drawable.ic_m_chat),
         ScreenEntry(sub(phone, stringResource(R.string.phone_tab_position)), "", Route.Phone("position"), icon = R.drawable.ic_m_pin),
+        ScreenEntry(stringResource(R.string.nav_contacts), stringResource(R.string.search_sub_contacts), Route.Contacts, icon = R.drawable.ic_m_contacts),
         ScreenEntry(tools, stringResource(R.string.search_sub_tools), Route.Tools(), icon = R.drawable.ic_m_tools),
         ScreenEntry(sub(tools, stringResource(R.string.tools_tab_rights)), "", Route.Tools("droits"), icon = R.drawable.ic_m_shield),
         ScreenEntry(sub(tools, stringResource(R.string.tools_tab_services)), "", Route.Tools("services"), icon = R.drawable.ic_m_plug),

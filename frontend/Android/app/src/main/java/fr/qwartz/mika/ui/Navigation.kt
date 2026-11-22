@@ -10,8 +10,8 @@ import kotlinx.serialization.builtins.ListSerializer
 /**
  * Les écrans d'une session ouverte. La connexion n'en fait pas partie : c'est la session qui la montre.
  *
- * Les rubriques du tiroir (ADR 0235, 0296) sont [isTopLevel] : le chat, Projets, Mail, Teams, Carte, Téléphone, Outils,
- * Paramètres.
+ * Les rubriques du tiroir (ADR 0235, 0296, 0298) sont [isTopLevel] : le chat, Projets, Mail, Teams, Carte, Téléphone,
+ * Contacts, Outils, Paramètres.
  * Les autres s'ouvrent par-dessus l'écran qui les montre (un mail, un fil, un voyage, une page de réglages).
  */
 @Serializable
@@ -96,9 +96,16 @@ sealed interface Route {
     @Serializable @SerialName("mail_draft")
     data class MailDraft(val id: String) : Route
 
-    /** Écrire : [mode] `new`, `reply`, `reply_all`, `forward` ou `edit` (retoucher son brouillon [draft]). */
+    /** Écrire : [mode] `new`, `reply`, `reply_all`, `forward` ou `edit` (retoucher son brouillon [draft]). Un mail
+     *  nouveau peut naître à quelqu'un ([to], son adresse, et [toName] : « Écrire » depuis sa fiche de Contacts). */
     @Serializable @SerialName("mail_compose")
-    data class MailCompose(val mode: String = "new", val ref: String = "", val draft: String = "") : Route
+    data class MailCompose(
+        val mode: String = "new",
+        val ref: String = "",
+        val draft: String = "",
+        val to: String = "",
+        val toName: String = "",
+    ) : Route
 
     // ── Teams ───────────────────────────────────────────────────────────
     @Serializable @SerialName("teams")
@@ -144,6 +151,15 @@ sealed interface Route {
     @Serializable @SerialName("phone_thread")
     data class PhoneThread(val key: String) : Route
 
+    // ── Contacts (ADR 0298) ─────────────────────────────────────────────
+    /** Tous ceux qu'elle connaît pour toi, et leurs organisations. */
+    @Serializable @SerialName("contacts")
+    data object Contacts : Route
+
+    /** La fiche d'un contact, par son numéro. */
+    @Serializable @SerialName("contact")
+    data class Contact(val id: Int) : Route
+
     // ── Outils, recherche, fichiers ─────────────────────────────────────
     /** [tab] : `droits`, `services`, `accords`. */
     @Serializable @SerialName("tools")
@@ -160,7 +176,7 @@ sealed interface Route {
 /** Une rubrique du tiroir : on y arrive depuis le chat, et « retour » y ramène. */
 val Route.isTopLevel: Boolean
     get() = this == Route.Chat || this is Route.Projects || this == Route.Mail || this == Route.Teams || this is Route.Carte ||
-        this is Route.Phone || this is Route.Tools || this == Route.Settings
+        this is Route.Phone || this == Route.Contacts || this is Route.Tools || this == Route.Settings
 
 /**
  * La pile d'écrans — une petite pile plutôt que navigation-compose. Immuable : chaque geste rend une nouvelle pile, que

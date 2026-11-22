@@ -1,7 +1,7 @@
 /*
  * Le relais (monde isolé de l'extension), entre le script de la page et le service d'arrière-plan :
  *   - vers le service : ce que la page a capté, la demande de placer un brouillon (« claim »), et ce qu'il en est
- *     advenu (« placed ») ;
+ *     advenu (« placed ») ; le modèle d'envoi par le worker de Teams (ADR 0301), sans texte ni conversation ;
  *   - vers la page : la liste des brouillons à placer, un message à envoyer (et son issue, rendue au service), une
  *     demande de diagnostic ou de la conversation ouverte, et la demande de redire les noms de conversation.
  * La page peut tout poster sur `window` : on ne relaie que des formes connues, bornées.
@@ -40,13 +40,29 @@
   const IMAGE_B64_MAX = Math.ceil((8 * 1024 * 1024 * 4) / 3) + 8;
   const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
   const IMAGE_ID = /^[A-Za-z0-9._:-]{1,200}$/;
+  // les photos de profil (ADR 0300) : 64 px, 64 Ko au plus, de ces types ; leur empreinte (`avatarETag`)
+  const PHOTO_TYPES = ["image/png", "image/jpeg", "image/webp"];
+  const PHOTO_B64_MAX = Math.ceil((64 * 1024 * 4) / 3) + 8;
+  const AVATAR = /^[A-Za-z0-9._:+/=-]{1,200}$/;
+  const MAX_PHOTOS = 20;
+  // les réactions d'un message (ADR 0300) : leur clé de Teams, qui les a posées
+  const REACTION_KEY = /^[a-z0-9_+-]{1,40}$/;
+  const REACTOR = /^[\w.:@-]{1,200}$/;
   const SOURCES = ["network", "idb", "worker"];
   const MAX_DRAFTS = 50;
   const MAX_OUT_TEXT = 20000;
   const ASK_TIMEOUT_MS = { diagnose: 8000, where: 2000 };
   const START_DEADLINE_MS = 1500; // la page ne commence plus un envoi demandé il y a plus longtemps
   const SEND_START_MS = 4000; // sans « commencé » d'ici là : rien n'est parti
-  const SEND_TIMEOUT_MS = 30000; // commencé, sans issue d'ici là : douteux
+  // commencé, sans issue d'ici là : douteux — au-delà des trois voies de la page mises bout à bout (le worker 10 s,
+  // le service de chat 20 s, la zone de saisie 3 s, les modèles d'envoi 3 s)
+  const SEND_TIMEOUT_MS = 45000;
+  // le modèle d'envoi par le worker de Teams (ADR 0301) : une commande `autoSendMessage` sans texte ni conversation
+  const TEMPLATE_MAX_CHARS = 64 * 1024;
+  const TEMPLATE_DEPTH = 24;
+  const CHAT_ID_IN = /19:[^\s"\\]{1,200}@(?:thread\.[a-z0-9]+|unq\.gbl\.spaces)/i;
+  const FRAME_OPEN = /^(?:<[a-z][a-z0-9-]{0,40}(?:\s[^<>]{0,200})?>){1,6}$/i;
+  const FRAME_CLOSE = /^(?:<\/[a-z][a-z0-9-]{0,40}>){1,6}$/i;
   const RESULTS = ["sent", "retry", "failed", "uncertain"];
   const waiting = new Map();
   const sending = new Map();
@@ -74,7 +90,20 @@
     // ses images : leur nombre seulement (la page les télécharge et les envoie à part, ADR 0258)
     const images = Array.isArray(m.images) ? m.images.length : Number(m.images) || 0;
     if (images > 0 && !deleted) out.images = Math.min(8, Math.floor(images));
+    // sa version (la date de sa dernière modification) : une version plus ancienne qu'une déjà vue ne repart pas
+    const version = Number(m.version);
+    if (isFinite(version) && version > 0) out.version = Math.floor(version);
+    // ses réactions, quand la page les a lues (ADR 0300) : une liste vide dit qu'il n'y en a plus
+    if (Array.isArray(m.reactions) && !deleted) out.reactions = list(m.reactions, 20, reaction);
     return out;
+  }
+
+  /** Une réaction (ADR 0300) : une clé de Teams, combien, la sienne, dix identifiants au plus. */
+  function reaction(r) {
+    if (!r || typeof r !== "object" || !REACTION_KEY.test(String(r.key || ""))) return null;
+    const by = list(r.by, 10, function (x) { return typeof x === "string" && REACTOR.test(x) ? x : null; });
+    const n = Math.max(by.length, Math.min(1000000, count(r.count)));
+    return n ? { key: r.key, count: n, mine: r.mine === true, by: by } : null;
   }
 
   /** Un profil de personne (ADR 0298) : un identifiant de Teams reconnu, des champs bornés, un e-mail bien formé. */
@@ -83,9 +112,20 @@
   function profile(p) {
     if (!p || typeof p !== "object" || !PROFILE_ID.test(String(p.id || ""))) return null;
     const email = str(p.email, 254);
-    return { id: p.id, name: str(p.name, 120), email: PROFILE_EMAIL.test(email) ? email : "", title: str(p.title, 120),
-      company: str(p.company, 120), department: str(p.department, 120), tenant: str(p.tenant, 120),
-      phones: list(p.phones, 3, function (n) { return str(n, 40) || null; }) };
+    const out = { id: p.id, name: str(p.name, 120), email: PROFILE_EMAIL.test(email) ? email : "",
+      title: str(p.title, 120), company: str(p.company, 120), department: str(p.department, 120),
+      tenant: str(p.tenant, 120), phones: list(p.phones, 3, function (n) { return str(n, 40) || null; }) };
+    // l'empreinte de sa photo (ADR 0300)
+    if (AVATAR.test(String(p.avatar || ""))) out.avatar = p.avatar;
+    return out;
+  }
+
+  /** Une photo à télécharger (ADR 0300), telle que le service la demande à la page : qui, son empreinte, son nom. */
+  function photoWanted(p) {
+    if (!p || typeof p !== "object" || !PROFILE_ID.test(String(p.person || "")) || !AVATAR.test(String(p.etag || ""))) {
+      return null;
+    }
+    return { person: p.person, etag: p.etag, name: str(p.name, 120) };
   }
 
   /** Un curseur de synchro (ADR 0251) : une conversation, le plus tard livré qu'on y ait lu (ms), la fiche vue. */
@@ -93,6 +133,55 @@
     if (!c || typeof c !== "object" || !str(c.conv, 300)) return null;
     const w = Number(c.w);
     return isFinite(w) && w >= 0 ? { conv: str(c.conv, 300), w: Math.floor(w), m: str(c.m, 200) } : null;
+  }
+
+  function isPlain(v) {
+    return v !== null && typeof v === "object" && !Array.isArray(v);
+  }
+
+  function depth(v, d) {
+    if (d > TEMPLATE_DEPTH) return d;
+    let most = d;
+    if (v && typeof v === "object") {
+      for (const k of Object.keys(v)) most = Math.max(most, depth(v[k], d + 1));
+    }
+    return most;
+  }
+
+  /**
+   * Le modèle d'envoi par le worker de Teams (ADR 0301), tel que la page l'a tiré d'un envoi : une commande
+   * `autoSendMessage` de création, sans `requestId`, `rendererId` ni `windowId` (ils viennent de la page vivante), au
+   * texte vide, sans identifiant de conversation, bornée ; la forme du message (ses balises autour du texte, sans
+   * attribut qui agisse). Une copie, ou `null`.
+   */
+  function sendTemplate(t) {
+    if (!isPlain(t) || !isPlain(t.command)) return null;
+    let json;
+    try {
+      json = JSON.stringify(t.command);
+    } catch (_) {
+      return null;
+    }
+    if (!json || json.length > TEMPLATE_MAX_CHARS || CHAT_ID_IN.test(json)) return null;
+    const c = JSON.parse(json);
+    if (c.operationName !== "autoSendMessage" || c.type !== "graphql" || "requestId" in c || "rendererId" in c
+      || "windowId" in c || depth(c, 0) > TEMPLATE_DEPTH) {
+      return null;
+    }
+    const p = c.payload;
+    const v = isPlain(p) ? p.variables : null;
+    const m = isPlain(v) ? v.message : null;
+    if (!isPlain(p) || typeof p.graphqlQuery !== "string" || p.graphqlQuery.indexOf("autoSendMessage") < 0
+      || !isPlain(v) || !isPlain(m) || v.action !== "Create" || m.content !== "" || v.convId !== "") {
+      return null;
+    }
+    if (isPlain(m.computed) && Array.isArray(m.computed.mentions) && m.computed.mentions.length) return null;
+    const open = typeof t.open === "string" ? t.open : "";
+    const close = typeof t.close === "string" ? t.close : "";
+    const frame = FRAME_OPEN.test(open) && FRAME_CLOSE.test(close) && open.length <= 300
+      && !/\son[a-z]+\s*=|javascript:/i.test(open);
+    return { command: c, open: frame ? open : "<p>", close: frame ? close : "</p>",
+      breaks: t.breaks === "p" ? "p" : "br" };
   }
 
   function list(v, max, fn) {
@@ -106,7 +195,8 @@
 
   /**
    * Ce que la page peut demander au service, et la forme qu'on laisse passer : ses curseurs ; un paquet de
-   * l'historique (attendu avant le suivant) ; où en est l'historique ; sa fin.
+   * l'historique (attendu avant le suivant) ; où en est l'historique ; sa fin ; une image, une photo de profil ; le
+   * modèle d'envoi par le worker de Teams, à garder ou à relire.
    */
   const ASKS = {
     cursors: function () { return {}; },
@@ -124,6 +214,13 @@
         position: position, type: type, data: data, time: Number(p.time) || 0, author: str(p.author, 120),
         authorId: str(p.authorId, 200), history: p.history === true };
     },
+    photo: function (p) {
+      // la photo de profil d'une personne (ADR 0300) : rien ne passe qui n'en ait la forme
+      const type = PHOTO_TYPES.indexOf(p.type) >= 0 ? p.type : "";
+      const data = typeof p.data === "string" && p.data.length <= PHOTO_B64_MAX && BASE64.test(p.data) ? p.data : "";
+      return { person: PROFILE_ID.test(String(p.person || "")) ? p.person : "",
+        etag: AVATAR.test(String(p.etag || "")) ? p.etag : "", type: type, data: data };
+    },
     historyProgress: function (p) {
       return { run: str(p.run, 40), done: count(p.done), total: count(p.total), messages: count(p.messages) };
     },
@@ -131,6 +228,11 @@
       return { run: str(p.run, 40), done: count(p.done), total: count(p.total), messages: count(p.messages),
         error: str(p.error, 200) };
     },
+    // le modèle d'envoi par le worker de Teams (ADR 0301) : à garder ; ceux que le service garde
+    sendTemplate: function (p) {
+      return { template: sendTemplate(p.template), bilateral: p.bilateral === true };
+    },
+    sendTemplates: function () { return {}; },
   };
 
   function conversation(c) {
@@ -237,9 +339,17 @@
       send(Object.assign({ kind: what }, payload)).then(function (answer) {
         const ok = Boolean(answer && answer.ok === true);
         let out = null;
-        if (what === "image") {
+        if (what === "image" || what === "photo") {
           out = { skipped: Boolean(answer && answer.skipped), retry: Boolean(answer && answer.retry),
             error: str(answer && answer.error, 200) };
+        } else if (what === "sendTemplates" && ok && isPlain(answer.templates)) {
+          // rendus vérifiés comme ils sont partis : sans texte, sans conversation
+          out = {};
+          for (const kind of ["bilateral", "group"]) {
+            const entry = answer.templates[kind];
+            const t = isPlain(entry) ? sendTemplate(entry) : null;
+            if (t) out[kind] = Object.assign(t, { at: count(entry.at) });
+          }
         } else if (what === "cursors" && ok && answer.cursors && typeof answer.cursors === "object") {
           out = {};
           for (const conv of Object.keys(answer.cursors).slice(0, MAX_CURSORS)) {
@@ -316,6 +426,12 @@
     }
     if (msg.kind === "resendTitles") {
       toPage("resendTitles");
+      reply({ ok: true });
+      return false;
+    }
+    if (msg.kind === "photos") {
+      // les photos de profil à télécharger (ADR 0300) : seulement des personnes dont le profil est parti
+      toPage("photos", { items: list(msg.items, MAX_PHOTOS, photoWanted) });
       reply({ ok: true });
       return false;
     }

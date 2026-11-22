@@ -1,6 +1,7 @@
 package fr.qwartz.mika.ui.mail
 
 import fr.qwartz.mika.data.moi.MoiApi
+import fr.qwartz.mika.data.moi.MoiError
 import fr.qwartz.mika.data.moi.mail.DraftPreview
 import fr.qwartz.mika.data.moi.mail.DraftStates
 import fr.qwartz.mika.data.moi.mail.MailDone
@@ -17,6 +18,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -120,6 +122,31 @@ class MailReaderModelTest {
         reader.tidy("archive")
         advanceUntilIdle()
         assertEquals(ReaderOrder.Back, reader.orders("v1").next())
+    }
+
+    // ── aussitôt (ADR 0302) ──
+
+    @Test fun `mis à la corbeille, la liseuse revient à la liste avant la réponse du serveur`() = runTest {
+        reader.open(a, "v1")
+        advanceUntilIdle()
+        api.hold("tidy")
+        reader.tidy("trash")
+        assertEquals(ReaderOrder.Back, reader.orders("v1").next())
+        api.release("tidy")
+        advanceUntilIdle()
+        assertEquals(listOf("tidy:trash"), api.calls.filter { it.startsWith("tidy") })
+    }
+
+    @Test fun `suivi puis refusé par le serveur, l'étoile revient`() = runTest {
+        api.tidyFail = MoiError(502, "Le serveur a refusé : boîte injoignable.")
+        reader.open(a, "v1")
+        advanceUntilIdle()
+        api.hold("tidy")
+        reader.tidy("flag")
+        assertTrue((reader.mail as Load.Ready).value.flagged)
+        api.release("tidy")
+        advanceUntilIdle()
+        assertFalse((reader.mail as Load.Ready).value.flagged)
     }
 
     @Test fun `un brouillon envoyé puis quitté - rouvert plus tard depuis « Partis », sa page reste`() = runTest {

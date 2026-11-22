@@ -39,6 +39,8 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Ce que les écrans de Mail prennent de la session : l'API, les mails commencés, relire les pastilles, savoir si la
@@ -113,21 +115,23 @@ class MailListViewModel(deps: MailDeps) : MailScreenModel(deps) {
         private set
     var selected by mutableStateOf<Set<String>>(emptySet())
         private set
-    var busy by mutableStateOf(false)
-        private set
 
     private var started = false
     private var generation = 0
     private var listJob: Job? = null
     private var searchJob: Job? = null
 
-    /** Un rangement fait ici ou depuis la liseuse, dans l'ordre. */
-    private class Tidy(val seq: Int, val refs: Set<String>, val gesture: String)
+    /** Un rangement fait ici ou depuis la liseuse, dans l'ordre. [id] : montré avant la réponse du serveur (ADR 0302) ;
+     *  tant qu'elle n'est pas venue, son [seq] est [PENDING]. */
+    private class Tidy(var seq: Int, val refs: Set<String>, val gesture: String, val id: Long = 0L)
 
     /** Les derniers rangements : une lecture partie avant l'un d'eux le rejoue sur ce qu'elle rapporte (le serveur a
-     *  pu répondre avant d'avoir rangé) — un mail archivé pendant la lecture ne revient pas. */
+     *  pu répondre avant d'avoir rangé) — un mail archivé pendant la lecture ne revient pas. Un rangement en route se
+     *  rejoue sur toutes : le serveur n'a peut-être pas encore rangé. */
     private val tidies = ArrayDeque<Tidy>()
     private var tidySeq = 0
+    /** Les rangements de la sélection partent au serveur l'un après l'autre, dans l'ordre des gestes. */
+    private val tidying = Mutex()
 
     private fun replay(rows: List<MailRow>, since: Int): List<MailRow> =
         tidies.filter { it.seq > since }.fold(rows) { acc, t -> tidiedRows(acc, t.refs, t.gesture) }
@@ -338,22 +342,40 @@ class MailListViewModel(deps: MailDeps) : MailScreenModel(deps) {
         return box to moveTargets(box, current)
     }
 
+    /** Aussitôt à l'écran (ADR 0302) : la sélection se range et se vide, le serveur suit ; s'il refuse, la liste se
+     *  relit (ce qui n'a pas bougé revient) et le refus se dit. */
     fun tidySelected(gesture: String, folder: String = "") {
         val refs = selected.toList()
-        if (refs.isEmpty() || busy) return
-        busy = true
+        if (refs.isEmpty()) return
+        val id = MailChanges.nextId()
+        patch(refs, gesture, id)
+        selected = emptySet()
         viewModelScope.launch {
-            when (val got = api.tidy(refs, gesture, folder)) {
+            when (val got = tidying.withLock { api.tidy(refs, gesture, folder) }) {
                 is MoiApi.Result.Ok -> {
+                    settle(id, ok = true)
                     say(got.value.message)
-                    patch(refs, gesture)
-                    selected = emptySet()
                     afterTidy()
                 }
-                is MoiApi.Result.Failed -> say(got.error)
+                is MoiApi.Result.Failed -> {
+                    settle(id, ok = false)
+                    say(got.error)
+                }
             }
-            busy = false
         }
+    }
+
+    /** Le serveur a répondu au rangement [id] : fait, les lectures parties d'ici le savent ; refusé, il ne se rejoue
+     *  plus, et la liste se relit sans bruit (au-delà de cent lignes, ses premières seulement). */
+    private fun settle(id: Long, ok: Boolean) {
+        val t = tidies.firstOrNull { it.id == id } ?: return
+        if (ok) {
+            t.seq = ++tidySeq
+            return
+        }
+        tidies.remove(t)
+        loadList(keep = true, silent = true, pages = currentPages())
+        viewModelScope.launch { loadBoxes() }
     }
 
     /** Après un rangement : les boîtes (leurs non-lus) ; sous « Non lus » ou « Suivis », la liste, qui a pu changer. */
@@ -422,7 +444,7 @@ class MailListViewModel(deps: MailDeps) : MailScreenModel(deps) {
      *  qu'elle montrait (sinon, la prochaine relecture le dira). */
     private fun restore(t: Trashed) {
         val ref = t.row.ref
-        val kept = tidies.map { if (it.gesture == TRASH && ref in it.refs) Tidy(it.seq, it.refs - ref, it.gesture) else it }
+        val kept = tidies.map { if (it.gesture == TRASH && ref in it.refs) Tidy(it.seq, it.refs - ref, it.gesture, it.id) else it }
         tidies.clear()
         tidies.addAll(kept)
         val cur = listing.valueOrNull ?: return
@@ -432,10 +454,11 @@ class MailListViewModel(deps: MailDeps) : MailScreenModel(deps) {
         listing = Load.Ready(cur.copy(rows = rows, total = cur.total + 1, drift = (cur.drift - 1).coerceAtLeast(0)))
     }
 
-    /** Ce qu'un geste change aux lignes montrées, sans tout relire ; retenu pour les lectures en cours. */
-    private fun patch(refs: List<String>, gesture: String) {
+    /** Ce qu'un geste change aux lignes montrées, sans tout relire ; retenu pour les lectures en cours (en route, [id],
+     *  pour toutes jusqu'à la réponse du serveur). */
+    private fun patch(refs: List<String>, gesture: String, id: Long = 0L) {
         val set = refs.toSet()
-        tidies.addLast(Tidy(++tidySeq, set, gesture))
+        tidies.addLast(Tidy(if (id == 0L) ++tidySeq else PENDING, set, gesture, id))
         while (tidies.size > TIDIES_KEPT) tidies.removeFirst()
         val cur = listing.valueOrNull ?: return
         val rows = tidiedRows(cur.rows, set, gesture)
@@ -452,9 +475,13 @@ class MailListViewModel(deps: MailDeps) : MailScreenModel(deps) {
     private fun apply(change: MailChanges.Change) {
         when (change) {
             is MailChanges.Change.Tidied -> {
-                patch(change.refs, change.gesture)
+                patch(change.refs, change.gesture, change.id)
                 selected = selected - change.refs.toSet()
-                viewModelScope.launch { loadBoxes() }
+                if (change.id == 0L) viewModelScope.launch { loadBoxes() }
+            }
+            is MailChanges.Change.Settled -> {
+                settle(change.id, change.ok)
+                if (change.ok) viewModelScope.launch { loadBoxes() }
             }
             MailChanges.Change.Drafts -> if (started) refreshQuietly()
         }
@@ -498,6 +525,8 @@ class MailListViewModel(deps: MailDeps) : MailScreenModel(deps) {
         const val SEARCH_DEBOUNCE_MS = 350L
         const val POLL_SETTLE_MS = 3_000L
         const val TIDIES_KEPT = 64
+        /** Le [Tidy.seq] d'un rangement en route : toute lecture le rejoue. */
+        const val PENDING = Int.MAX_VALUE
         const val TRASH = "trash"
         const val MOVE = "move"
     }

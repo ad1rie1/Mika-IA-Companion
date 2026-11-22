@@ -20,6 +20,27 @@ par-dessus l'écran Chat sans le retoucher. Le menu ⋮ gagne « Effort de réfl
 ou forcé à un niveau) : pour toute la conversation, ou, en mode pro, pour le fil ouvert (aussi dans « Régler ce fil »).
 Forcé, il se voit dans le champ, à côté de « Pro ». Routes : `#chat/effort`, `#chat/pro/effort`.
 
+**Validé le 2026-11-22** (« je valide ta maquette ») : les Contacts (ADR 0298), l'écran Contacts du web validé le même jour
+(`frontendv2/maquette/ecrans/contacts.js`) adapté au téléphone, dans `ecrans/contacts.js` (ses styles : la section
+« Contacts » de `maquette.css`). Il se pose par-dessus sans retoucher les écrans validés :
+
+- une rubrique « Contacts » dans le tiroir, après Téléphone (sous « Plus » dans la variante barre), et la ligne
+  « Contacts » de la feuille des boîtes de Mail y mène ;
+- la liste : chercher par nom, e-mail ou numéro, Tous · Personnes · Organisations, d'où elle connaît chacun et combien,
+  le dernier échange, « Lui présenter quelqu'un » ;
+- la fiche en page : Écrire, Teams, Message ; ce qui l'identifie ; ce que Mika en sait, chaque fait oubliable après
+  confirmation ; où vous vous croisez (vers Mail, Teams, Téléphone) ; « Oublier ce contact », ou pourquoi on ne le peut
+  pas d'ici. Celle d'une organisation montre ses personnes, son domaine, son organisation Teams et ses adresses
+  génériques ;
+- dans Écrire, À, Cc et Cci proposent tous tes contacts, une ligne par adresse, une adresse générique marquée ; les
+  destinataires choisis en puces.
+
+Deux icônes neuves dans le sprite (`contacts`, `user-plus`), que `tools/icones.py` a tirées dans l'app
+(`ic_m_contacts`, `ic_m_user_plus`) ; l'app en a fait l'écran (`frontend/Android/README.md`, « Contacts »). Routes : `#contacts`, `#contacts/tiroir` (le tiroir ouvert), `#contacts/claire`,
+`#contacts/sophie` (deux adresses), `#contacts/lea`, `#contacts/ines` (seulement racontée), `#contacts/maman` (oubli
+refusé), `#contacts/lumen` (une organisation), `#contacts/claire/fait/1` et `#contacts/claire/oublier` (les feuilles
+ouvertes), `#mail/ecrire/a/<adresse>`, `#mail/ecrire/suggestions`.
+
 ## L'ouvrir
 
 ```bash
@@ -38,7 +59,7 @@ Ouverte sur une fenêtre de 760 px ou moins, la maquette prend tout l'écran, sa
 
 Paramètres d'adresse : `?theme=dark|light`, `?nav=barre|tiroir`, puis la route après `#` (`#chat`, `#chat/accord`,
 `#chat/pro`, `#mail`, `#mail/lire/m-claire`, `#mail/brouillon/d-lefevre`, `#teams/d/claire`, `#carte`,
-`#carte/voyage/alpes`, `#telephone/c/rando`, `#outils`, `#plus`, `#parametres`, `#mika`…).
+`#carte/voyage/alpes`, `#telephone/c/rando`, `#outils`, `#plus`, `#parametres`, `#mika`, `#contacts`…).
 
 ## Ce qu'elle lit ailleurs, sans le copier
 
@@ -55,3 +76,4 @@ Paramètres d'adresse : `?theme=dark|light`, `?nav=barre|tiroir`, puis la route 
 | `maquette.css` | les jetons (clair, sombre) et les composants Material 3 |
 | `maquette.js` | le moteur : routes, barre du haut, barre du bas ou tiroir, feuilles, menus, fenêtres, son visage, le panneau |
 | `ecrans/<écran>.js` | un écran chacun : chat (avec la recherche, les fichiers et « Ce qu'elle fait »), mail, teams, carte, telephone, outils, plus (avec Paramètres) |
+| `ecrans/chat-effort.js`, `ecrans/carte-avis.js`, `ecrans/contacts.js` | des propositions posées par-dessus les écrans validés, sans les retoucher |

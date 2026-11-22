@@ -261,6 +261,11 @@ input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; a
 .av.mika { background: radial-gradient(circle at 50% 30%, #ffe3ec, #f6c5d6); overflow: hidden; }
 .av.mika img { position: absolute; max-width: none; pointer-events: none; }
 :root[data-theme="dark"] .av.mika { background: radial-gradient(circle at 50% 30%, #5a2a40, #2a1320); }
+/* La photo de profil Teams (ADR 0300, maquette ecrans/teams-photos.css) : par-dessus ses initiales, qui restent
+   dessous le temps qu'elle arrive, ou si elle ne vient pas. */
+.av.photo { overflow: hidden; }
+.av.photo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: inherit; pointer-events: none; }
+.av.photo .pres { z-index: 1; }
 .av .pres { position: absolute; right: -1px; bottom: -1px; width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--bg); background: var(--faint); }
 .av.lg .pres { width: 11px; height: 11px; }
 .av .pres.on { background: var(--ok); } .av .pres.busy { background: var(--danger); } .av.mika .pres { z-index: 1; }

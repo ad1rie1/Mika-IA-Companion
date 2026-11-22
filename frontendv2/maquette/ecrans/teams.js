@@ -8,12 +8,12 @@
   const DISC = [
     { id: 'lumen', groupe: true, titre: 'Projet Lumen', membres: ['claire', 'sophie', 'karim'], nonlus: 3, mention: true, t: '12:58', msgs: [
       { jour: 'Aujourd\'hui' },
-      { de: 'claire', t: '10:02', txt: 'Bonjour à tous, point d\'étape : la maquette est validée côté client 🎉', reac: [['🎉', 3]] },
+      { de: 'claire', t: '10:02', txt: 'Bonjour à tous, point d\'étape : la maquette est validée côté client 🎉', reac: [['🎉', 3, 'Karim, Sophie, toi', true]] },
       { de: 'karim', t: '10:05', txt: 'top ! je pousse la démo sur la préprod cet aprem' },
       { de: 'adrien', t: '10:11', txt: 'Bravo à tous. Je prépare le support pour jeudi.' },
       { de: 'sophie', t: '12:40', txt: '@Adrien Moreau tu peux valider les chiffres du T3 avant jeudi ? Je les ai mis dans le dossier partagé.', mention: true,
         piece: { nom: 'chiffres-T3-v2.xlsx', taille: '84 Ko', ico: 'file' } },
-      { de: 'karim', t: '12:58', txt: 'la démo tourne sur la préprod 🎉', reac: [['🎉', 2], ['👍', 1]] },
+      { de: 'karim', t: '12:58', txt: 'la démo tourne sur la préprod 🎉', reac: [['🎉', 2, 'Claire, Sophie'], ['👍', 1, 'toi', true]] },
     ], brouillon: { txt: 'Je regarde les chiffres demain matin et je te dis avant midi.', etat: 'pose', t: '12:59' } },
     { id: 'claire', qui: 'claire', titre: 'Claire Dubois', nonlus: 1, t: '13:41', msgs: [
       { jour: 'Aujourd\'hui' },
@@ -25,7 +25,7 @@
       { de: 'adrien', t: '21:55', txt: 'Bonsoir Marc, tu aurais dix minutes demain matin ? J\'aimerais revenir sur la réunion.' },
       { de: 'marc', t: '22:10', txt: 'Oui. 11h dans mon bureau.' },
       { jour: 'Aujourd\'hui' },
-      { de: 'marc', t: '11:32', txt: 'Merci pour l\'échange de ce matin. Tu as eu raison de m\'en parler. On en reparle vendredi.' },
+      { de: 'marc', t: '11:32', txt: 'Merci pour l\'échange de ce matin. Tu as eu raison de m\'en parler. On en reparle vendredi.', reac: [['❤️', 1, 'toi', true]] },
     ] },
     { id: 'sophie', qui: 'sophie', titre: 'Sophie Laurent', t: '10:20', msgs: [
       { jour: 'Aujourd\'hui' },
@@ -89,7 +89,7 @@
         ${m.txt ? `<div class="tm-txt">${txt}</div>` : ''}
         ${m.piece ? `<div class="tm-file">${ico(m.piece.ico)}<span><b>${h(m.piece.nom)}</b><small>${h(m.piece.taille)} · Excel</small></span>${ico('download', 'sm')}</div>` : ''}
         ${m.mika ? `<div class="by-mika">${ico('sparkle')}rédigé avec Mika</div>` : ''}
-        ${m.reac ? `<div class="tm-reac">${m.reac.map(([e, n]) => `<span>${e} ${n}</span>`).join('')}</div>` : ''}</div></div>`;
+        ${m.reac ? `<div class="tm-reac">${m.reac.map(([e, n, qui, mien]) => `<span${mien ? ' class="mine"' : ''}${qui ? ` title="${h(qui)}"` : ''}>${e} ${n}</span>`).join('')}</div>` : ''}</div></div>`;
   }
 
   function brouillonCarte(d) {

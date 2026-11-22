@@ -122,6 +122,63 @@ class MailListModelTest {
         assertEquals(api.inbox.map { it.ref }, rows)
     }
 
+    // ── la sélection, aussitôt (ADR 0302) ──
+
+    @Test fun `archivé, il quitte la liste avant la réponse du serveur, et une relecture d'ici là ne le remonte pas`() = runTest {
+        inbox(5)
+        list.resume()
+        advanceUntilIdle()
+        val two = shown(2)
+        api.hold("tidy")
+        archive(2)
+        assertFalse(ref(2) in rows)
+        assertTrue(list.selected.isEmpty())
+        // le serveur ne l'a pas encore rangé : sa liste le rapporte encore
+        api.inbox.add(1, two)
+        list.pull()
+        advanceUntilIdle()
+        assertFalse(ref(2) in rows)
+        api.release("tidy")
+        advanceUntilIdle()
+        // il a répondu : une lecture partie après dit ce qu'il sait (ici, le mail remis à la main dans sa réception)
+        list.pull()
+        advanceUntilIdle()
+        assertTrue(ref(2) in rows)
+    }
+
+    @Test fun `refusés par le serveur, ils reviennent et le refus se dit`() = runTest {
+        inbox(5)
+        list.resume()
+        advanceUntilIdle()
+        val (said, _) = listen()
+        api.tidyFail = MoiError(502, "Le serveur a refusé : boîte injoignable.")
+        api.hold("tidy")
+        list.toggle(shown(3), "lecture seule")
+        list.toggle(shown(4), "lecture seule")
+        list.tidySelected("trash")
+        assertEquals(listOf(ref(1), ref(2), ref(5)), rows)
+        api.release("tidy")
+        advanceUntilIdle()
+        assertEquals((1..5).map { ref(it) }, rows)
+        assertEquals(listOf("Le serveur a refusé : boîte injoignable."), said)
+    }
+
+    @Test fun `rangé depuis la liseuse puis refusé, il revient dans la liste`() = runTest {
+        inbox(3)
+        list.resume()
+        advanceUntilIdle()
+        val id = MailChanges.nextId()
+        MailChanges.tell(MailChanges.Change.Tidied(listOf(ref(2)), "archive", id))
+        advanceUntilIdle()
+        assertEquals(listOf(ref(1), ref(3)), rows)
+        list.pull()  // une relecture d'ici là ne le remonte pas
+        advanceUntilIdle()
+        assertEquals(listOf(ref(1), ref(3)), rows)
+        MailChanges.tell(MailChanges.Change.Settled(id, ok = false))
+        advanceUntilIdle()
+        assertEquals((1..3).map { ref(it) }, rows)
+    }
+
     // ── glisser vers la corbeille ──
 
     @Test fun `glissée, une ligne part à la corbeille et s'offre à « Annuler »`() = runTest {

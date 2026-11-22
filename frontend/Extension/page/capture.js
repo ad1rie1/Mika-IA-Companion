@@ -15,10 +15,13 @@
  * L'autre sens, ce que Mika écrit, ne passe que par deux gestes :
  *   - un brouillon se place dans la zone de saisie, et seulement quand la conversation ouverte est la sienne, que la
  *     zone est vide et qu'on n'est pas en train d'écrire ailleurs dans Teams ; c'est l'utilisateur qui l'envoie ;
- *   - un message à envoyer part par le service de chat du client, avec l'authentification que le client utilise
- *     lui-même (vue passer, gardée dans la mémoire de ce script seulement : jamais postée ni journalisée), sinon par
- *     la zone de saisie de la conversation ouverte. Un envoi commencé dans cette page ne l'est jamais deux fois, et
- *     son issue n'est dite « envoyé » ou « échec » que si elle est sûre ; sinon elle est « incertaine ».
+ *   - un message à envoyer part d'abord par le worker de Teams (ADR 0301), pour un tête-à-tête ou un groupe : la
+ *     commande d'envoi que la page lui passe, rejouée depuis un modèle capté lors d'un vrai envoi, sans que la
+ *     conversation soit ouverte ; sinon (ou sur un refus explicite) par le service de chat du client, avec
+ *     l'authentification que le client utilise lui-même (vue passer, gardée dans la mémoire de ce script seulement :
+ *     jamais postée ni journalisée) ; sinon par la zone de saisie de la conversation ouverte. Un envoi commencé dans
+ *     cette page ne l'est jamais deux fois, et son issue n'est dite « envoyé » ou « échec » que si elle est sûre ;
+ *     sinon elle est « incertaine ».
  *
  * Tout passe au script isolé de l'extension par `window.postMessage` ; rien ne doit jamais casser la page : chaque
  * crochet est enveloppé, et une erreur ici n'est qu'un compteur du diagnostic.
@@ -63,6 +66,13 @@
   // le worker de Teams (où vivent son service de chat et sa connexion en direct) : ce qu'il passe à la page
   const MAX_WORKER_CHARS = 2 * 1024 * 1024;
   const WORKER_PENDING_MAX = 200;
+  // l'envoi par le worker de Teams (ADR 0301) : les commandes que la page lui passe (lues sans les changer), le modèle
+  // d'envoi gardé par le service, la réponse attendue à notre commande ; sans elle, l'issue est douteuse
+  const WORKER_COMMAND_MAX_CHARS = 1024 * 1024;
+  const WORKER_SEND_TIMEOUT_MS = 10000;
+  const TEMPLATE_ASK_MS = 3000;
+  const WORKER_LATE_MAX = 50;
+  const WORKER_REFUSED_MAX = 1000;
   // les images (ADR 0258) : téléchargées une à une du service d'images de Teams (avec les cookies du navigateur, comme
   // Teams lui-même), 8 Mo au plus, de ces types ; une image dont le message n'est pas encore chez Mika est retentée
   const IMAGE_HOST = /^https:\/\/[a-z0-9-]{1,40}\.asm\.skype\.com\/v1\/objects\/[A-Za-z0-9._:-]{1,200}\/views\/imgo$/;
@@ -73,6 +83,12 @@
   const IMAGE_TRIES = 3;
   const IMAGE_ASK_MS = 120000;
   const WORKER_PER_TASK = 5;
+  // les photos de profil (ADR 0300) : téléchargées par l'adresse que Teams donne à ses avatars (`P.photoUrl`), 64 px,
+  // 64 Ko au plus, de ces types
+  const PHOTO_TYPES = ["image/png", "image/jpeg", "image/webp"];
+  const PHOTO_MAX_BYTES = 64 * 1024;
+  const PHOTO_QUEUE_MAX = 200;
+  const PHOTO_ASK_MS = 30000;
   const FLUSH_MS = 300;
   // les profils des personnes (ADR 0298) : la base que Teams garde dans ce navigateur, relue au plus toutes les 10 min
   const PROFILES_DB = /^Teams:profiles:/;
@@ -96,13 +112,16 @@
     network: { responses: 0, frames: 0, messages: 0, errors: 0 },
     idb: { available: typeof indexedDB !== "undefined" && typeof indexedDB.databases === "function",
       syncs: 0, lastSyncMs: 0, conversations: 0, read: 0, messages: 0, errors: 0 },
-    worker: { hooked: 0, received: 0, kept: 0, messages: 0, errors: 0 },
+    worker: { hooked: 0, received: 0, kept: 0, messages: 0, errors: 0, commands: 0, templates: 0, templateRefused: 0,
+      templateIssue: "" },
     history: { running: false, done: 0, total: 0, messages: 0, images: 0, error: "" },
     images: { downloaded: 0, sent: 0, skipped: 0, failed: 0 },
+    photos: { asked: 0, downloaded: 0, sent: 0, skipped: 0, failed: 0, noAvatarSeen: 0 },
     conversations: 0,
     profiles: 0,
     sent: 0,
-    compose: { placed: 0, sentByService: 0, sentByComposeBox: 0, uncertain: 0, errors: 0 },
+    compose: { placed: 0, sentByWorker: 0, sentByService: 0, sentByComposeBox: 0, uncertain: 0, errors: 0,
+      workerRefused: 0, workerSilent: 0, workerLate: 0 },
   };
 
   // ── Ce qu'on a déjà fait passer (dans cette page) ─────────────────────────
@@ -258,7 +277,7 @@
 
   function inspect(value, source, conversation) {
     try {
-      take(X.extract(value, { parseStrings: true, conversation: conversation || "" }), source);
+      take(X.extract(value, { parseStrings: true, conversation: conversation || "", self: selfId() }), source);
     } catch (_) {
       stats[source].errors++;
     }
@@ -401,10 +420,157 @@
     if (workerFrames.length) workerTimer = setTimeout(readWorkerFrames, 0);
   }
 
+  // ── L'envoi par le worker de Teams (ADR 0301) ──────────────────────────────
+  //
+  // La page passe à son worker des commandes GraphQL en texte JSON ; envoyer y est `autoSendMessage`. On regarde
+  // passer ces commandes sans jamais les changer : le worker qui les reçoit, `rendererId`, `windowId` et le plus haut
+  // numéro de requête vus ; et, d'un envoi de la page, un modèle de la commande, sans rien de ce message
+  // (`P.workerSendTemplate`), gardé par le service : il survit à l'onglet. Pour envoyer, on rejoue ce modèle, en texte
+  // JSON, par le `postMessage` d'origine : le worker envoie lui-même, avec sa propre connexion. Aucun jeton n'est lu.
+
+  const hookedWorkers = new WeakSet(); // les workers de Teams (pas celui de la télémétrie)
+  const commandState = new WeakMap(); // worker → { highest, rendererId, windowId }
+  let commandWorker = null; // celui qui reçoit les commandes de la page — celui d'un envoi, de préférence
+  let commandWorkerSends = false;
+  let ownRequest = 0; // le numéro de notre dernière requête : jamais deux fois le même
+  const sendTemplates = { bilateral: null, group: null }; // `{command, open, close, breaks, at}`
+  let templatesLoaded = false;
+  let templatesLoading = null;
+  const workerWaits = new Map(); // requestId → ce qui attend sa réponse
+  const workerLate = new Set(); // nos requêtes restées sans réponse à temps (une réponse tardive est comptée)
+  const workerRefused = new Set(); // les éléments que le worker a refusés ici : ils prennent la voie suivante
+
+  /** Une commande que la page passe à un worker de Teams : lue, jamais changée ; un envoi donne son modèle. */
+  function noteCommand(worker, data) {
+    if (data.length > WORKER_COMMAND_MAX_CHARS || data.indexOf('"requestId"') < 0) return;
+    const head = P.workerCommandHead(data);
+    if (!head) return;
+    stats.worker.commands++;
+    const known = commandState.get(worker) || { highest: 0, rendererId: undefined, windowId: undefined };
+    known.highest = Math.max(known.highest, head.number);
+    if (head.rendererId !== undefined) known.rendererId = head.rendererId;
+    if (head.windowId !== undefined) known.windowId = head.windowId;
+    commandState.set(worker, known);
+    if (head.operation === "autoSendMessage") {
+      commandWorker = worker;
+      commandWorkerSends = true;
+      // décodé hors de l'appel de la page : son envoi n'attend pas
+      setTimeout(function () { learnTemplate(data); }, 0);
+    } else if (!commandWorker || !commandWorkerSends) {
+      commandWorker = worker;
+    }
+  }
+
+  function sameTemplate(a, b) {
+    const pick = function (t) { return JSON.stringify([t.command, t.open, t.close, t.breaks]); };
+    return Boolean(a && b) && pick(a) === pick(b);
+  }
+
+  /** Le modèle d'un envoi de la page (son texte, sa conversation, ses identifiants retirés), gardé par le service. */
+  function learnTemplate(data) {
+    try {
+      let command;
+      try {
+        command = JSON.parse(data);
+      } catch (_) {
+        return;
+      }
+      const got = P.workerSendTemplate(command);
+      if (!got.template) {
+        stats.worker.templateRefused++;
+        stats.worker.templateIssue = got.reason;
+        return;
+      }
+      const kind = got.bilateral ? "bilateral" : "group";
+      const before = sendTemplates[kind];
+      stats.worker.templates++;
+      stats.worker.templateIssue = "";
+      if (sameTemplate(before, got.template)) return; // le même : rien de neuf à garder
+      sendTemplates[kind] = Object.assign({ at: Date.now() }, got.template);
+      askService("sendTemplate", { template: got.template, bilateral: got.bilateral }, TEMPLATE_ASK_MS);
+    } catch (_) {
+      stats.worker.errors++;
+    }
+  }
+
+  /** Les modèles gardés par le service (une fois par page) ; un modèle capté ici, plus récent, l'emporte. */
+  function loadSendTemplates() {
+    if (templatesLoaded) return Promise.resolve();
+    if (!templatesLoading) {
+      templatesLoading = askService("sendTemplates", {}, TEMPLATE_ASK_MS).then(function (answer) {
+        if (!answer || !answer.ok) return;
+        const got = answer.data && typeof answer.data === "object" ? answer.data : {};
+        for (const kind of ["bilateral", "group"]) {
+          const t = got[kind];
+          const mine = sendTemplates[kind];
+          if (t && t.command && !(mine && mine.at >= (Number(t.at) || 0))) sendTemplates[kind] = t;
+        }
+        templatesLoaded = true;
+      }).finally(function () { templatesLoading = null; });
+    }
+    return templatesLoading;
+  }
+
+  /** Le worker où l'on peut rejouer une commande, et ce que la page vivante lui a dit ; `null` sinon. */
+  function liveCommand() {
+    const worker = commandWorker;
+    const known = worker ? commandState.get(worker) : null;
+    if (!known || known.rendererId === undefined || known.windowId === undefined) return null;
+    return { worker: worker, known: known };
+  }
+
+  function templatesAt() {
+    return { bilateral: sendTemplates.bilateral ? Number(sendTemplates.bilateral.at) || 0 : 0,
+      group: sendTemplates.group ? Number(sendTemplates.group.at) || 0 : 0 };
+  }
+
+  /** Une réponse du worker : celle qu'attend notre commande d'envoi, ou une qui arrive après qu'on l'a crue perdue. */
+  function noteReply(data) {
+    let reply = data;
+    if (typeof data === "string") {
+      if (data.length > MAX_WORKER_CHARS || data.indexOf('"requestId"') < 0) return;
+      let hit = false;
+      for (const id of workerWaits.keys()) if (data.indexOf('"' + id + '"') >= 0) hit = true;
+      for (const id of workerLate) if (data.indexOf('"' + id + '"') >= 0) hit = true;
+      if (!hit) return;
+      try {
+        reply = JSON.parse(data);
+      } catch (_) {
+        return;
+      }
+    }
+    const id = reply && typeof reply === "object" && typeof reply.requestId === "string" ? reply.requestId : "";
+    if (workerWaits.has(id)) {
+      const outcome = P.workerReplyOutcome(reply);
+      if (outcome.result) workerWaits.get(id)(outcome);
+    } else if (workerLate.has(id)) {
+      workerLate.delete(id);
+      stats.compose.workerLate++;
+    }
+  }
+
+  /** La réponse du worker à notre requête `id`, ou `null` après `WORKER_SEND_TIMEOUT_MS`. */
+  function workerReply(id) {
+    return new Promise(function (resolve) {
+      const timer = setTimeout(function () {
+        workerWaits.delete(id);
+        if (workerLate.size >= WORKER_LATE_MAX) workerLate.clear();
+        workerLate.add(id);
+        resolve(null);
+      }, WORKER_SEND_TIMEOUT_MS);
+      workerWaits.set(id, function (outcome) {
+        clearTimeout(timer);
+        workerWaits.delete(id);
+        resolve(outcome);
+      });
+    });
+  }
+
   function onWorkerMessage(event) {
     try {
       stats.worker.received++;
       const data = event.data;
+      if (workerWaits.size || workerLate.size) noteReply(data);
       if (typeof data !== "string" || data.length > MAX_WORKER_CHARS || data.indexOf('"content"') < 0) return;
       if (data.indexOf('"messagetype"') < 0 && data.indexOf('"messageType"') < 0) return;
       stats.worker.kept++;
@@ -417,6 +583,9 @@
   }
 
   const NativeWorker = window.Worker;
+  const workerProto = typeof NativeWorker === "function" ? NativeWorker.prototype : null;
+  const nativeWorkerPost = workerProto && typeof workerProto.postMessage === "function" ? workerProto.postMessage
+    : null;
   if (typeof NativeWorker === "function" && typeof Proxy === "function") {
     try {
       window.Worker = new Proxy(NativeWorker, {
@@ -426,6 +595,7 @@
             const url = String(args[0] && args[0].href ? args[0].href : args[0] || "");
             if (!/telemetry/i.test(url)) {
               worker.addEventListener("message", onWorkerMessage);
+              hookedWorkers.add(worker);
               stats.worker.hooked++;
             }
           } catch (_) {
@@ -436,6 +606,33 @@
       });
     } catch (_) {
       stats.worker.errors++;
+    }
+    // ce que la page passe à ses workers : lu au passage, transmis tel quel, par le même appel
+    if (nativeWorkerPost) {
+      try {
+        workerProto.postMessage = function (data) {
+          try {
+            if (typeof data === "string" && hookedWorkers.has(this)) noteCommand(this, data);
+          } catch (_) {
+            stats.worker.errors++;
+          }
+          return nativeWorkerPost.apply(this, arguments);
+        };
+        const nativeTerminate = workerProto.terminate;
+        if (typeof nativeTerminate === "function") {
+          workerProto.terminate = function () {
+            try {
+              if (this === commandWorker) {
+                commandWorker = null;
+                commandWorkerSends = false;
+              }
+            } catch (_) { /* rien */ }
+            return nativeTerminate.apply(this, arguments);
+          };
+        }
+      } catch (_) {
+        stats.worker.errors++;
+      }
     }
   }
 
@@ -664,7 +861,7 @@
         const marker = P.conversationMarker(record);
         const cursor = cursors.get(record.id);
         const since = P.syncSince(marker, cursor, started, { windowMs: SYNC_WINDOW_MS, overlapMs: overlapMs });
-        if (firstSync || since !== null) take(X.extract(record, { parseStrings: false }), "idb"); // son nom, son dernier message
+        if (firstSync || since !== null) take(X.extract(record, { parseStrings: false, self: selfId() }), "idb"); // son nom, son dernier message
         if (since === null) continue;
         if (processed && Date.now() - started > SYNC_BUDGET_MS) {
           syncAgain = true;
@@ -673,7 +870,7 @@
         }
         processed++;
         const latest = data.chains ? await readChains(data.chains, record.id, since, function (value) {
-          take(X.extract(value, { parseStrings: false }), "idb");
+          take(X.extract(value, { parseStrings: false, self: selfId() }), "idb");
         }) : 0;
         stats.idb.read++;
         // une fiche en avance sur ses fils (Teams range l'une puis les autres) : retentée pendant `CATCHUP_MS`, au
@@ -718,6 +915,8 @@
   setTimeout(function loop() {
     sync().finally(function () { setTimeout(loop, SYNC_EVERY_MS); });
   }, SYNC_FIRST_MS);
+  // les modèles d'envoi par le worker que garde le service (ADR 0301) : prêts avant le premier envoi
+  setTimeout(function () { loadSendTemplates().catch(function () { /* au premier envoi */ }); }, SYNC_FIRST_MS);
 
   // le titre de l'onglet compte les non-lus : il change quand un message arrive ailleurs
   let titleWatched = false;
@@ -819,6 +1018,95 @@
       }
     } finally {
       imagesPumping = false;
+    }
+  }
+
+  // ── Les photos de profil (ADR 0300) ─────────────────────────────────────────
+  //
+  // Le service demande la photo des personnes dont le profil vient de partir (jamais d'une conversation exclue, rien
+  // pendant une pause) et dont l'empreinte (`avatarETag`) a changé. On la télécharge ici, avec les cookies du
+  // navigateur comme Teams lui-même, par l'adresse que Teams donne à ses avatars, puis on la passe au service, qui
+  // l'envoie à Mika. Une à la fois.
+
+  const photoQueue = [];
+  const photosQueued = new Set(); // personne|empreinte en file ou en cours dans cette page
+  let photosPumping = false;
+  let photoBase = "";
+
+  /** La base des avatars de Teams (`…/api/mt/part/<région>/beta/users/<soi>`), lue sur un avatar de la page. */
+  function avatarBase() {
+    if (photoBase) return photoBase;
+    try {
+      for (const img of document.querySelectorAll('img[src*="/api/mt/part/"]')) {
+        photoBase = P.avatarBase(img.src, location.origin, selfId());
+        if (photoBase) break;
+      }
+    } catch (_) { /* une page sans avatar pour l'instant */ }
+    return photoBase;
+  }
+
+  function queuePhotos(items) {
+    for (const p of items) {
+      const key = p.person + "|" + p.etag;
+      if (photosQueued.has(key) || photoQueue.length >= PHOTO_QUEUE_MAX) continue;
+      photosQueued.add(key);
+      photoQueue.push(p);
+      stats.photos.asked++;
+    }
+    pumpPhotos();
+  }
+
+  /** Les octets d'une photo, en base64, et son type ; `null` : pas d'avatar vu, ou pas une photo admise. */
+  async function downloadPhoto(p) {
+    const base = avatarBase();
+    if (!base) {
+      stats.photos.noAvatarSeen++;
+      return null;
+    }
+    const url = P.photoUrl(base, p.person, p.name, p.etag);
+    if (!url) return null; // jamais une autre adresse avec les cookies du navigateur
+    const response = await nativeFetch.call(window, url, { credentials: "include", cache: "force-cache" });
+    if (!response.ok) return null;
+    const blob = await response.blob();
+    const type = String(blob.type || "").split(";")[0].trim().toLowerCase(); // « image/jpeg; charset=… » : son type
+    if (!blob.size || blob.size > PHOTO_MAX_BYTES || PHOTO_TYPES.indexOf(type) < 0) return null;
+    const data = await new Promise(function (resolve) {
+      const reader = new FileReader();
+      reader.onload = function () { resolve(String(reader.result || "").split(",")[1] || ""); };
+      reader.onerror = function () { resolve(""); };
+      reader.readAsDataURL(blob);
+    });
+    return data ? { type: type, data: data } : null;
+  }
+
+  async function pumpPhotos() {
+    if (photosPumping) return;
+    photosPumping = true;
+    try {
+      while (photoQueue.length) {
+        const p = photoQueue.shift();
+        let got = null;
+        try {
+          got = await downloadPhoto(p);
+        } catch (_) {
+          got = null;
+        }
+        if (got) {
+          stats.photos.downloaded++;
+          const answer = await askService("photo", { person: p.person, etag: p.etag, type: got.type, data: got.data },
+            PHOTO_ASK_MS);
+          const d = answer && answer.data ? answer.data : {};
+          if (answer && answer.ok) stats.photos[d.skipped ? "skipped" : "sent"]++;
+          else stats.photos.failed++;
+        } else {
+          stats.photos.failed++;
+        }
+        // réglée ici : le service la redemandera s'il le faut
+        photosQueued.delete(p.person + "|" + p.etag);
+        await pause(200);
+      }
+    } finally {
+      photosPumping = false;
     }
   }
 
@@ -924,25 +1212,27 @@
       h.total = ids.size;
       askService("historyProgress", { run: run, done: 0, total: h.total, messages: 0 }, 2000);
       for (const id of ids) {
-        const messages = [];
         const conversations = [];
-        const seen = new Set();
+        // un message lu deux fois (sa fiche, deux magasins de fils) part une fois, à sa version la plus récente — ses
+        // réactions comprises (ADR 0300) ; à version égale, la dernière lue (un fil dit plus qu'une fiche) ; une
+        // suppression l'emporte
+        const byId = new Map();
         const add = function (got) {
           for (const c of got.conversations) conversations.push(c);
           for (const m of got.messages) {
-            const key = T.versionKey(m);
-            if (seen.has(key)) continue;
-            seen.add(key);
+            const prev = byId.get(m.id);
+            if (prev && (prev.deleted || (!m.deleted && (Number(m.version) || 0) < (Number(prev.version) || 0)))) continue;
             m.source = "idb";
-            messages.push(m);
+            byId.set(m.id, m);
           }
         };
-        if (records.has(id)) add(X.extract(records.get(id), { parseStrings: false }));
+        if (records.has(id)) add(X.extract(records.get(id), { parseStrings: false, self: selfId() }));
         if (data.chains) await readAllChains(data.chains, id, function (value) {
-          add(X.extract(value, { parseStrings: false }));
+          add(X.extract(value, { parseStrings: false, self: selfId() }));
         });
         // les plus récents d'abord retenus, puis envoyés du plus ancien au plus récent
-        const kept = messages.sort(function (a, b) { return b.time - a.time; }).slice(0, HISTORY_KEEP).reverse();
+        const kept = Array.from(byId.values()).sort(function (a, b) { return b.time - a.time; })
+          .slice(0, HISTORY_KEEP).reverse();
         for (let i = 0; i === 0 || i < kept.length; i += HISTORY_CHUNK) {
           const part = kept.slice(i, i + HISTORY_CHUNK);
           if (!part.length && !conversations.length) break;
@@ -1250,6 +1540,62 @@
     }
   }
 
+  function newCorrelationId() {
+    try {
+      if (window.crypto && typeof window.crypto.randomUUID === "function") return window.crypto.randomUUID();
+      const b = window.crypto.getRandomValues(new Uint8Array(16));
+      b[6] = (b[6] & 0x0f) | 0x40;
+      b[8] = (b[8] & 0x3f) | 0x80;
+      const h = Array.from(b, function (x) { return (x + 0x100).toString(16).slice(1); }).join("");
+      return h.slice(0, 8) + "-" + h.slice(8, 12) + "-" + h.slice(12, 16) + "-" + h.slice(16, 20) + "-" + h.slice(20);
+    } catch (_) {
+      return "";
+    }
+  }
+
+  /**
+   * L'envoi par le worker de Teams (ADR 0301) : le modèle rejoué pour cette conversation, en texte JSON, la réponse
+   * attendue. `{refused: true, reason}` : rien n'est parti (une erreur explicite, ou la commande pas passée), la voie
+   * suivante peut servir ; sans réponse à temps, l'issue est douteuse — peut-être parti : jamais deux envois.
+   */
+  async function sendViaWorker(item, template, live) {
+    const requestNumber = P.nextRequestNumber(live.known.highest, ownRequest);
+    const command = P.workerSendCommand(template, { conversation: item.conversation, text: item.text,
+      clientMessageId: P.clientMessageIdFor(item.id), correlationId: newCorrelationId(), now: Date.now(),
+      requestNumber: requestNumber, rendererId: live.known.rendererId, windowId: live.known.windowId });
+    if (!command) return { refused: true, reason: "le modèle d'envoi de Teams ne s'applique pas à ce message" };
+    ownRequest = requestNumber;
+    const id = P.workerRequestId(requestNumber);
+    startedSends.add(item.id);
+    try {
+      // le `postMessage` d'origine : notre commande n'a rien à faire parmi celles de la page
+      nativeWorkerPost.call(live.worker, command);
+    } catch (_) {
+      startedSends.delete(item.id); // rien n'a quitté la page
+      return { refused: true, reason: "le worker de Teams n'a pas pris la commande" };
+    }
+    const outcome = await workerReply(id);
+    if (!outcome) {
+      stats.compose.workerSilent++;
+      return uncertain("le worker de Teams n'a pas répondu (10 s) : peut-être parti, à vérifier dans Teams");
+    }
+    if (outcome.result === "sent") {
+      stats.compose.sentByWorker++;
+      return { result: "sent", via: "worker", message_id: outcome.messageId || "" };
+    }
+    if (outcome.result === "uncertain") {
+      return uncertain("le worker de Teams a répondu avec une erreur"
+        + (outcome.reason ? " (" + outcome.reason + ")" : "") + " : peut-être parti, à vérifier dans Teams");
+    }
+    // un refus explicite : rien n'est parti ; cet élément prend la voie suivante, ici et aux essais suivants
+    stats.compose.workerRefused++;
+    startedSends.delete(item.id);
+    if (workerRefused.size >= WORKER_REFUSED_MAX) workerRefused.clear();
+    workerRefused.add(item.id);
+    return { refused: true,
+      reason: "le worker de Teams a refusé l'envoi" + (outcome.reason ? " (" + outcome.reason + ")" : "") };
+  }
+
   async function sendViaComposeBox(item) {
     if (!P.sameConversation(activeConversation(), item.conversation)) {
       return { result: "retry", reason: "conversation pas ouverte dans Teams" };
@@ -1281,12 +1627,28 @@
     }
     sendingNow.add(item.id);
     try {
+      // d'abord le worker de Teams (ADR 0301) : un tête-à-tête ou un groupe, un modèle d'envoi, un worker vivant ; la
+      // conversation n'a pas à être ouverte. Seul un refus explicite laisse prendre la voie suivante : rien n'est
+      // parti.
+      let refusedBy = "";
+      if (P.workerSendable(item.conversation) && !workerRefused.has(item.id) && nativeWorkerPost) {
+        await loadSendTemplates();
+        const template = P.pickSendTemplate(sendTemplates, item.conversation);
+        const live = liveCommand();
+        if (template && live) {
+          const viaWorker = await sendViaWorker(item, template, live);
+          if (!viaWorker.refused) return viaWorker;
+          refusedBy = viaWorker.reason;
+        }
+      }
       if (chatAuth) {
         const viaService = await sendViaChatService(item);
         // seul un refus d'authentification laisse prendre l'autre chemin : rien n'est parti
         if (!viaService.authLost) return viaService;
       }
-      return await sendViaComposeBox(item);
+      const viaBox = await sendViaComposeBox(item);
+      return refusedBy && viaBox.result !== "sent"
+        ? Object.assign({}, viaBox, { reason: refusedBy + " ; " + viaBox.reason }) : viaBox;
     } catch (_) {
       stats.compose.errors++;
       // une erreur après le début de l'envoi laisse l'issue douteuse
@@ -1303,17 +1665,25 @@
     const data = event.data;
     if (event.source !== window || !data || data.__mika !== TAG || data.dir !== "in") return;
     if (data.kind === "diagnose") {
-      const report = JSON.parse(JSON.stringify(stats));
-      report.url = location.origin + location.pathname;
-      report.selfFound = Boolean(selfId());
-      report.conversationTitles = Array.from(titles.values()).filter(function (c) { return c.title; }).length;
-      let editor = null;
-      try { editor = findEditor(); } catch (_) { /* rien */ }
-      report.compose.editorFound = Boolean(editor);
-      report.compose.activeConversationKnown = Boolean(activeConversation());
-      report.compose.chatSendPossible = Boolean(chatAuth); // l'existence de l'en-tête, jamais sa valeur
-      report.compose.drafts = drafts.length;
-      post("report", { nonce: data.nonce, report: report });
+      // les modèles d'envoi du service d'abord (une fois par page, 3 s au plus : le relais en attend 8)
+      loadSendTemplates().catch(function () { /* sans eux */ }).then(function () {
+        const report = JSON.parse(JSON.stringify(stats));
+        report.url = location.origin + location.pathname;
+        report.selfFound = Boolean(selfId());
+        report.conversationTitles = Array.from(titles.values()).filter(function (c) { return c.title; }).length;
+        let editor = null;
+        try { editor = findEditor(); } catch (_) { /* rien */ }
+        report.compose.editorFound = Boolean(editor);
+        report.compose.activeConversationKnown = Boolean(activeConversation());
+        report.compose.chatSendPossible = Boolean(chatAuth); // l'existence de l'en-tête, jamais sa valeur
+        // l'envoi par le worker (ADR 0301) : un worker qui reçoit les commandes de la page, et un modèle (sa date)
+        const at = templatesAt();
+        report.compose.workerSeen = Boolean(liveCommand());
+        report.compose.workerTemplates = at;
+        report.compose.workerSendPossible = Boolean(liveCommand() && nativeWorkerPost && (at.bilateral || at.group));
+        report.compose.drafts = drafts.length;
+        post("report", { nonce: data.nonce, report: report });
+      });
     } else if (data.kind === "where") {
       post("report", { nonce: data.nonce, report: { conversation: activeConversation() } });
     } else if (data.kind === "drafts") {
@@ -1324,6 +1694,10 @@
       // la pause est levée : les noms appris pendant qu'elle durait n'avaient pas été gardés, on les redit
       for (const c of titles.values()) pendingConversations.push(c);
       if (pendingConversations.length) schedule();
+    } else if (data.kind === "photos" && Array.isArray(data.items)) {
+      queuePhotos(data.items.filter(function (p) {
+        return p && typeof p.person === "string" && typeof p.etag === "string" && p.person && p.etag;
+      }).slice(0, 20));
     } else if (data.kind === "answer" && answers.has(data.nonce)) {
       const resolve = answers.get(data.nonce);
       answers.delete(data.nonce);

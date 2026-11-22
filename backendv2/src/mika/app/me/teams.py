@@ -8,17 +8,23 @@ elle-même part par l'extension de son compte, sous son nom, sans accord à dema
 réponses de Mika qui attendaient un accord dans la discussion ne partiront plus : le plugin les refuse, pas cette
 couche (ADR 0199) ; ce qu'elle décide d'une réponse de Mika passe par les actions de la console, en son nom.
 Une conversation s'appelle comme dans Teams, sinon (un tête-à-tête) comme l'autre personne (``port.title``).
+
+Les réactions d'un message (ADR 0300) se lisent avec lui, chaque personne sous le nom que le compte lui connaît (elle
+est dans la conversation : qui la lit la voit) ; la photo de profil d'une personne se sert à qui peut lire le compte où
+elle a été vue (``GET …/teams/photo``), son adresse donnée là où une personne paraît (``photo``).
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import hashlib
+from collections.abc import Mapping, Sequence
 from typing import Any
+from urllib.parse import urlencode
 
 from starlette.responses import Response
 from starlette.routing import Route
 
-from mika.app.me.api import Call, Denied, MeApiBase, done, form, missing
+from mika.app.me.api import PREFIX, Call, Denied, MeApiBase, done, form, missing
 from mika.app.me.common import allows, held_by, millis, only_owner, opened, snippet
 from mika.app.me.teams_extension import download, version_of
 from mika.plugins import teams as teams_p
@@ -43,7 +49,10 @@ from mika.ports.teams import (
     AccountInfo,
     Message,
     MessageImage,
+    Reaction,
     conversation_key,
+    emoji_of,
+    person_key,
     split_conversation_key,
 )
 from mika.vocab.access import SHARE_PREPARE, SHARE_READ, SHARE_USE
@@ -109,11 +118,42 @@ def state(call: Call) -> TeamsState:
 # ── ce qui se montre ──
 
 
-def message_json(m: Message, images: Sequence[MessageImage] = ()) -> dict[str, Any]:
-    """Un message ; ``images`` : les siennes (ADR 0258), sans leurs octets — ``GET …/teams/image`` les sert."""
+def photo_url(account: str, person: str, etag: str) -> str:
+    """L'adresse de la photo de profil d'une personne (ADR 0300) : ``GET …/teams/photo`` ; ``v`` change avec la photo
+    (le navigateur la garde un jour)."""
+    version = hashlib.sha256(etag.encode()).hexdigest()[:12]
+    return f"{PREFIX}/teams/photo?{urlencode({'account': account, 'person': person, 'v': version})}"
+
+
+def photos_in(port: Any, account: str, people: Sequence[str]) -> dict[str, str]:
+    """Les photos de ces personnes (leurs identifiants Teams) gardées sous ce compte : identifiant en minuscules → son
+    adresse. Une requête, quel que soit leur nombre."""
+    found = port.photos_of([person_key(p) for p in people if p], accounts=[account]) if port is not None else {}
+    return {person: photo_url(acct, person, etag) for person, (acct, etag) in found.items()}
+
+
+def photo_in(photos: Mapping[str, str] | None, person: str) -> str:
+    """L'adresse de la photo de cette personne parmi ``photos`` (``photos_in``), vide sans photo ou sans personne."""
+    return (photos or {}).get(person_key(person), "") if person else ""
+
+
+def reaction_json(r: Reaction) -> dict[str, Any]:
+    """Une réaction (ADR 0300) : sa clé de Teams, son emoji (vide : inconnu, le client montre la clé), combien, la
+    tienne (la personne du compte), et les noms de qui l'a posée que le compte connaît (dix au plus, sans elle)."""
+    return {"key": r.key, "emoji": emoji_of(r.key), "count": r.count, "mine": r.mine,
+            "names": [n for n in r.names if n]}
+
+
+def message_json(m: Message, images: Sequence[MessageImage] = (), photos: Mapping[str, str] | None = None) \
+        -> dict[str, Any]:
+    """Un message ; ``images`` : les siennes (ADR 0258), sans leurs octets — ``GET …/teams/image`` les sert ; ses
+    réactions (ADR 0300) ; ``photo`` : l'adresse de la photo de son auteur (``photos`` : par identifiant en minuscules),
+    vide sans photo."""
     return {"ref": m.ref, "author": m.author, "author_id": m.author_id, "at": millis(m.at), "text": m.text,
             "own": m.own, "mentions_me": m.mentions_me,
-            "images": [{"id": i.image, "position": i.position, "mime": i.mime, "seen": i.seen} for i in images]}
+            "images": [{"id": i.image, "position": i.position, "mime": i.mime, "seen": i.seen} for i in images],
+            "reactions": [reaction_json(r) for r in m.reactions],
+            "photo": photo_in(photos, m.author_id)}
 
 
 def _notes(call: Call, seens: list[DraftSeen]) -> dict[str, str]:
@@ -188,14 +228,27 @@ async def conversations(call: Call) -> dict[str, Any]:
             pending.setdefault((d.account, d.conversation), d)
     found = port.conversations(call.number("size", 50, high=LIMIT), text=call.arg("q", limit=100), accounts=keys)
     lasts = port.last_messages([(conv.account, conv.id) for conv in found])
+    # l'autre personne de chaque tête-à-tête : sa photo est celle de la conversation (ADR 0300), même quand le dernier
+    # message est de toi
+    others = port.others([(conv.account, conv.id) for conv in found])
+    # la photo de l'auteur de chaque dernier message, et celle de chaque autre personne, une requête par compte
+    authors: dict[str, list[str]] = {}
+    for (acct, _cid), m in lasts.items():
+        authors.setdefault(acct, []).append(m.author_id)
+    for (acct, _cid), person in others.items():
+        authors.setdefault(acct, []).append(person)
+    photos = {acct: photos_in(port, acct, ids) for acct, ids in authors.items()}
     out = []
     for conv in found:
         last = lasts.get((conv.account, conv.id))
         # sa réponse en chemin : pas pour qui ne fait que lire ce compte (ADR 0188)
         hers = pending.get((conv.account, conv.id)) if allows(mine[conv.account][1], SHARE_PREPARE) else None
         out.append({"key": conversation_key(conv.account, conv.id), "account": conv.account, "title": conv.title,
-                    "kind": conv.kind, "last_at": millis(conv.last_at), "messages": conv.messages,
-                    "last": {**message_json(last), "text": snippet(last.text, SNIPPET)} if last is not None else None,
+                    "kind": conv.kind,
+                    "photo": photo_in(photos.get(conv.account), others.get((conv.account, conv.id), "")),
+                    "last_at": millis(conv.last_at), "messages": conv.messages,
+                    "last": {**message_json(last, photos=photos.get(conv.account)),
+                             "text": snippet(last.text, SNIPPET)} if last is not None else None,
                     "her": {"state": hers.state, "draft": hers.draft} if hers is not None else None})
     return {"items": out}
 
@@ -238,10 +291,13 @@ async def thread(call: Call) -> dict[str, Any]:
     images: dict[str, list[MessageImage]] = {}
     for i in port.images_of([m.ref for m in found]):
         images.setdefault(i.ref, []).append(i)
+    # la photo de chaque auteur (ADR 0300), et celle de la conversation (l'autre personne d'un tête-à-tête), d'un coup
+    other = port.others([(account, conversation)]).get((account, conversation), "")
+    photos = photos_in(port, account, [*(m.author_id for m in found), other])
     # son nom, comme dans la liste : celui de Teams, sinon (un tête-à-tête) l'autre personne
     return {"key": conversation_key(account, conversation), "account": account,
-            "title": port.title(account, conversation), "kind": conv.kind,
-            "messages": [message_json(m, images.get(m.ref, ())) for m in found], "more": more,
+            "title": port.title(account, conversation), "kind": conv.kind, "photo": photo_in(photos, other),
+            "messages": [message_json(m, images.get(m.ref, ()), photos) for m in found], "more": more,
             "replies": [_reply_json(call, d, notes) for d in replies], "pending": pending[::-1],
             "under_way": prepares and under_way(s, account, conversation),
             "asked": asked}
@@ -346,10 +402,26 @@ async def image(call: Call) -> Response:
                                                     "X-Content-Type-Options": "nosniff"})
 
 
+async def photo(call: Call) -> Response:
+    """``GET …/teams/photo?account=&person=`` (ou ``conversation=`` : le compte de cette conversation) : la photo de
+    profil d'une personne (ADR 0300), à qui peut lire ce compte — elle n'y est gardée que pour une personne qu'il a
+    vue (ses messages, une mention), comme le fil ; inconnue, ou un compte qui n'est pas à toi : 404. Gardée un jour
+    dans le navigateur (son adresse change avec elle)."""
+    conversation = call.arg("conversation", limit=400)
+    account = _conversation(call, conversation)[0] if conversation else call.arg("account", limit=40)
+    if account not in accounts(call):
+        raise missing()
+    found = _port(call).photo(account, person_key(call.arg("person", limit=200)))
+    if found is None:
+        raise missing()
+    return Response(found.data, media_type=found.mime, headers={"Cache-Control": "private, max-age=86400",
+                                                                "X-Content-Type-Options": "nosniff"})
+
+
 def routes(api: MeApiBase) -> list[Route]:
     r = api.route
     return [r("/teams/accounts", list_accounts), r("/teams/extension", download, raw=True),
-            r("/teams/image", image, raw=True),
+            r("/teams/image", image, raw=True), r("/teams/photo", photo, raw=True),
             r("/teams/conversations", conversations),
             r("/teams/thread", thread), r("/teams/replies", replies),
             r("/teams/send", send, write=True), r("/teams/prefill", prefill, write=True),

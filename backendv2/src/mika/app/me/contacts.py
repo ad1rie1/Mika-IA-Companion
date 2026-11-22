@@ -24,12 +24,14 @@ boîtes, sur son téléphone, ou dont elle lui a parlé — et leurs organisatio
   console.
 - **Il lui parle aussi** (``linked``) : sa fiche est reliée à une personne qui a un compte ; ``talks`` dit si cette
   personne lui a écrit (« parle aussi à Mika ») ou n'a qu'un compte.
+- **Sa photo** (ADR 0300) : celle de son profil Teams, gardée sous un compte Teams où tu lis (``photo`` : son adresse,
+  ``GET …/teams/photo`` ; ``None`` sinon — un contact sans identifiant Teams garde ses initiales).
 """
 
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -38,6 +40,7 @@ from starlette.routing import Route
 from mika.app.handmade.directory import Accounts, merged, take
 from mika.app.me.api import Call, Denied, MeApiBase, done, form, missing
 from mika.app.me.common import allows, held_by, millis
+from mika.app.me.teams import photo_url
 from mika.contracts import identity as identity_c
 from mika.contracts import transcript as transcript_c
 from mika.plugins import email as email_p
@@ -205,9 +208,27 @@ def talks(call: Call, linked: str) -> bool:
     return any(call.frame.get(transcript_c.LAST_FROM(h)) for h in handles)
 
 
-def line_json(c: ContactLine, r: Reach, person: str, call: Call | None = None) -> dict[str, Any]:
+def photos_for(call: Call, r: Reach, identifiers: Sequence[tuple[str, str]]) -> dict[str, str]:
+    """Les photos de profil (ADR 0300) de ces identifiants Teams (``(sorte, valeur)`` : les autres sortes sont
+    ignorées), gardées sous un compte Teams où tu lis : identifiant → son adresse. Une requête pour toute une page."""
+    teams = call.port("teams")
+    mine = sorted(r.readable.get(TEAMS, {}))
+    ids = sorted({v for k, v in identifiers if k == TEAMS_ID})
+    if teams is None or not mine or not ids:
+        return {}
+    return {person: photo_url(account, person, etag)
+            for person, (account, etag) in teams.photos_of(ids, accounts=mine).items()}
+
+
+def photo_of(identifiers: Sequence[tuple[str, str]], photos: Mapping[str, str]) -> str | None:
+    """L'adresse de la photo d'un contact : celle de son premier identifiant Teams qui en a une (``None`` : aucune)."""
+    return next((photos[v] for k, v in identifiers if k == TEAMS_ID and v in photos), None)
+
+
+def line_json(c: ContactLine, r: Reach, person: str, call: Call | None = None,
+              photos: Mapping[str, str] | None = None) -> dict[str, Any]:
     """Un contact dans la liste : ce qu'en voit qui demande — jamais ses autres propriétaires. Son entreprise, quand
-    c'est son nom même, n'est pas redite."""
+    c'est son nom même, n'est pas redite ; sa photo (ADR 0300), d'après ``photos`` (``photos_for``)."""
     shown = [{"kind": k, "value": shown_value(k, v, c.name)} for k, v in c.identifiers
              if k not in OPAQUE_KINDS and not (k == COMPANY and shown_value(k, v, c.name) == c.name)]
     return {"id": c.id, "kind": c.kind, "name": safe_name(c.name, c.identifiers), "title": c.title,
@@ -217,7 +238,7 @@ def line_json(c: ContactLine, r: Reach, person: str, call: Call | None = None) -
             "talks": bool(c.person) and c.person != person and call is not None and talks(call, c.person),
             "members": max(0, c.members - r.self_orgs.get(c.id, 0)) if c.kind == ORG else 0,
             "last": millis(c.last), "sources": sources(c.places, c.apps, r.accounts.label),
-            "identifiers": shown[:IDS_SHOWN]}
+            "identifiers": shown[:IDS_SHOWN], "photo": photo_of(c.identifiers, photos or {})}
 
 
 def _where(r: Reach, person: str, kind: str, source: str, account: str, count: int) -> str:
@@ -361,14 +382,18 @@ def places_json(call: Call, sheet: ContactSheet, r: Reach) -> list[dict[str, Any
 
 def members_json(port: Any, sheet: ContactSheet, r: Reach, call: Call | None = None) \
         -> tuple[list[dict[str, Any]], int]:
-    """Ses personnes parmi tes contacts (une organisation), les dernières vues d'abord ; combien en tout."""
+    """Ses personnes parmi tes contacts (une organisation), les dernières vues d'abord, chacune avec sa photo (ADR
+    0300, comme une ligne) ; combien en tout."""
     if sheet.kind != ORG:
         return [], 0
     got = port.page(visible=r.visible, kind=PERSON_KIND, org=sheet.id, size=MEMBERS_MAX)
+    shown = [c for c in got.items if c.id not in r.selves]
+    photos = photos_for(call, r, [i for c in shown for i in c.identifiers]) if call is not None else {}
     items = [{"id": c.id, "name": safe_name(c.name, c.identifiers), "title": c.title, "department": c.department,
               "last": millis(c.last), "linked": bool(c.person),
-              "talks": bool(c.person) and call is not None and talks(call, c.person)}
-             for c in got.items if c.id not in r.selves]
+              "talks": bool(c.person) and call is not None and talks(call, c.person),
+              "photo": photo_of(c.identifiers, photos)}
+             for c in shown]
     return items, max(0, got.total - r.self_orgs.get(sheet.id, 0))
 
 
@@ -446,9 +471,10 @@ async def listing(call: Call) -> dict[str, Any]:
     people = len(talking) if not q and kind == PERSON_KIND else len(linked(PERSON_KIND, ""))
     persons = far(PERSON_KIND, "")(1, 1).total + people
     orgs = far(ORG, "")(1, 1).total
+    photos = photos_for(call, r, [i for c in window for i in c.identifiers])
     return {"total": total, "page": number, "size": size,
             "counts": {"all": persons + orgs, "person": persons, "org": orgs},
-            "items": [line_json(c, r, person, call) for c in window]}
+            "items": [line_json(c, r, person, call, photos) for c in window]}
 
 
 def _id(call: Call) -> int:
@@ -497,6 +523,7 @@ async def fiche(call: Call) -> dict[str, Any]:
         next((p for p in places if p["source"] == TEAMS), None)
     phone = next((p for p in places if p["source"] == PHONE_SOURCE), None)
     allowed = forgettable(sheet, r)
+    photo = photo_of(idents, photos_for(call, r, idents))
     return {"id": sheet.id, "kind": sheet.kind, "name": safe_name(sheet.name, idents), "title": sheet.title,
             "department": sheet.department,
             "organisation": {"id": sheet.org.id, "name": sheet.org.name} if sheet.org is not None else None,
@@ -509,7 +536,7 @@ async def fiche(call: Call) -> dict[str, Any]:
             "places": places, "members": members, "members_total": members_total,
             "write": _writer(call, sheet, r), "teams": dm["conversation"] if dm else "",
             "message": phone["conversation"] if phone else "", "privacy": _privacy(sheet, r),
-            "forget": {"allowed": allowed, "reason": "" if allowed else NOT_ALL_YOURS}}
+            "forget": {"allowed": allowed, "reason": "" if allowed else NOT_ALL_YOURS}, "photo": photo}
 
 
 # ── oublier ──
@@ -559,5 +586,5 @@ def routes(api: MeApiBase) -> list[Route]:
 
 
 __all__ = ["Reach", "facts_json", "fiche", "forget", "forget_fact", "forgettable", "identifiers_json", "line_json",
-           "listing", "note_from", "notes_json", "reach", "routes", "safe_name", "sources", "talks",
-           "whole_is_yours"]
+           "listing", "note_from", "notes_json", "photo_of", "photos_for", "reach", "routes", "safe_name", "sources",
+           "talks", "whole_is_yours"]

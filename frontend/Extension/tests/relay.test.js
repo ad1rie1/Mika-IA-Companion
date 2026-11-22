@@ -177,3 +177,99 @@ test("les profils joints passent vérifiés : un identifiant de Teams reconnu, u
   assert.deepEqual(sent.profiles[0].phones, ["+33 6 12 34 56 78", "5", "1"]);
   assert.equal(sent.profiles[1].email, "");
 });
+
+// ── ADR 0300 : les réactions, les photos de profil ──────────────────────────
+
+test("les réactions d'un message passent vérifiées, avec sa version ; une liste vide passe aussi (aucune)", async () => {
+  const r = relay();
+  const base = { id: "1700000000002", conv: "19:a@thread.v2", author: "Alice", authorId: "8:orgid:x", time: 1700000000002,
+    type: "Text", text: "bravo", source: "worker", mentions: [], version: 1700000000999 };
+  r.fromPage({ kind: "captured", conversations: [], messages: [
+    { ...base, reactions: [{ key: "like", count: 3, mine: true, by: ["8:orgid:a", "<b>", 5] },
+      { key: "Pas Une Clé", count: 1, by: [] }, { key: "heart", count: -4, by: [] }, "x"] },
+    { ...base, id: "1700000000003", reactions: [] },
+    { ...base, id: "1700000000004" }] });
+  await settle();
+  const [a, b, c] = r.sent.find((p) => p.kind === "captured").messages;
+  assert.deepEqual(a.reactions, [{ key: "like", count: 3, mine: true, by: ["8:orgid:a"] }]);
+  assert.equal(a.version, 1700000000999);
+  assert.deepEqual(b.reactions, []);
+  assert.equal("reactions" in c, false, "rien de dit, rien ne passe");
+});
+
+test("une photo de profil passe vérifiée : un identifiant de Teams, une empreinte, un type admis, 64 Ko au plus", async () => {
+  const r = relay({ photo: { ok: true, skipped: true } });
+  const good = { person: "8:orgid:7c2e41d0-5b8a-4f0e-9d21-3a6e0c1f91ab", etag: "0x8DCF1A2B3C", type: "image/jpeg",
+    data: Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2]).toString("base64") };
+  r.fromPage({ kind: "ask", nonce: "p1", what: "photo", payload: good });
+  await settle();
+  assert.deepEqual(r.sent.at(-1), { kind: "photo", ...good });
+  assert.deepEqual(r.toPage.find((d) => d.kind === "answer" && d.nonce === "p1").data,
+    { skipped: true, retry: false, error: "" });
+  r.fromPage({ kind: "ask", nonce: "p2", what: "photo", payload: { person: "javascript:x", etag: "<x>",
+    type: "image/gif", data: "A".repeat(100 * 1024) } });
+  await settle();
+  assert.deepEqual(r.sent.at(-1), { kind: "photo", person: "", etag: "", type: "", data: "" },
+    "rien ne passe qui n'en ait la forme : le service la refuse");
+});
+
+test("les photos que le service demande atteignent la page vérifiées : 20 au plus, des personnes de Teams", () => {
+  const r = relay();
+  const person = (i) => `8:orgid:00000000-0000-4000-8000-${String(i).padStart(12, "0")}`;
+  const items = [{ person: "https://ailleurs.example/x", etag: "e" }, { person: person(0), etag: "e/0", name: "Léa" },
+    ...Array.from({ length: 30 }, (_, i) => ({ person: person(i + 1), etag: "e" + i }))];
+  assert.equal(r.fromService({ kind: "photos", items }).ok, true);
+  const sent = r.toPage.find((d) => d.kind === "photos");
+  assert.equal(sent.items.length, 19, "les 20 premières, moins celle qui n'est pas une personne de Teams");
+  assert.deepEqual(sent.items[0], { person: person(0), etag: "e/0", name: "Léa" });
+});
+
+// ── ADR 0301 : le modèle d'envoi par le worker de Teams ─────────────────────
+
+test("le modèle d'envoi passe au service vérifié : une création, sans texte, sans conversation, sans requête", async () => {
+  const P = require("../lib/page.js");
+  const F = require("./worker-fixture.js");
+  const { template } = P.workerSendTemplate(F.autoSend());
+  const r = relay();
+  r.fromPage({ kind: "ask", nonce: "w1", what: "sendTemplate", payload: { template, bilateral: true, extra: "x" } });
+  await settle();
+  assert.deepEqual(r.sent.at(-1), { kind: "sendTemplate", template, bilateral: true });
+  const bad = [
+    { ...template, command: { ...template.command, requestId: "m-1" } },
+    { ...template, command: { ...template.command, operationName: "deleteMessage" } },
+    { ...template, command: JSON.parse(JSON.stringify(template.command).replace('"content":""', '"content":"<p>secret</p>"')) },
+    { ...template, command: JSON.parse(JSON.stringify(template.command).replace('"convId":""', `"convId":"${F.ALBERT}"`)) },
+    { ...template, command: JSON.parse(JSON.stringify(template.command).replace('"action":"Create"', '"action":"Edit"')) },
+    { ...template, command: { ...template.command, note: "dans " + F.GROUP } },
+    { ...template, command: { ...template.command, big: "x".repeat(70 * 1024) } },
+    { ...template, command: "pas un objet" },
+  ];
+  for (const [i, t] of bad.entries()) {
+    r.fromPage({ kind: "ask", nonce: "b" + i, what: "sendTemplate", payload: { template: t, bilateral: false } });
+  }
+  await settle();
+  assert.deepEqual(r.sent.slice(-bad.length).map((p) => p.template), bad.map(() => null),
+    "rien ne passe qui n'en ait la forme : le service le refuse");
+  // une forme qui agirait est ramenée à la forme par défaut
+  r.fromPage({ kind: "ask", nonce: "w2", what: "sendTemplate", payload: { template: { ...template,
+    open: "<p onmouseover=\"x()\">", close: "</p>", breaks: "autre" }, bilateral: true } });
+  await settle();
+  const safe = r.sent.at(-1).template;
+  assert.deepEqual([safe.open, safe.close, safe.breaks], ["<p>", "</p>", "br"]);
+});
+
+test("les modèles que le service garde reviennent à la page vérifiés, avec leur date", async () => {
+  const P = require("../lib/page.js");
+  const F = require("./worker-fixture.js");
+  const { template } = P.workerSendTemplate(F.autoSend({ conv: F.GROUP }));
+  const leaked = JSON.parse(JSON.stringify(template).replace('"convId":""', `"convId":"${F.ALBERT}"`));
+  const r = relay({ sendTemplates: { ok: true, templates: { group: { ...template, at: 1763900000000 },
+    bilateral: { ...leaked, at: 5 }, autre: { ...template, at: 1 } } } });
+  r.fromPage({ kind: "ask", nonce: "t1", what: "sendTemplates", payload: { extra: 1 } });
+  await settle();
+  assert.deepEqual(r.sent.at(-1), { kind: "sendTemplates" });
+  const answer = r.toPage.find((d) => d.kind === "answer" && d.nonce === "t1");
+  assert.equal(answer.ok, true);
+  assert.deepEqual(Object.keys(answer.data), ["group"], "un modèle qui nomme une conversation ne revient pas");
+  assert.deepEqual(answer.data.group, { ...template, at: 1763900000000 });
+});

@@ -20,6 +20,7 @@ from mika.ports.mail import (
     Found,
     Mail,
     MailQuery,
+    Moved,
     Preview,
     Sent,
     split_ref,
@@ -114,6 +115,12 @@ class Boxes:
 
     async def trash(self, ref: str) -> str:
         return await self.port.trash(ref) if self._ref(ref) else ""
+
+    async def move_many(self, refs: Sequence[str], *, folder: str = "", role: str = "") -> Moved:
+        """Ses outils ne nomment que des mails de ces boîtes (``get`` ne rend pas les autres) : un autre, rien ne bouge."""
+        if not all(self._ref(r) for r in refs):
+            raise ValueError("move_many : un mail hors de ces boîtes")
+        return await self.port.move_many(refs, folder=folder, role=role) if refs else Moved(done={}, refused={})
 
     async def create_folder(self, account: str, name: str) -> str:
         if not self._mine(account):

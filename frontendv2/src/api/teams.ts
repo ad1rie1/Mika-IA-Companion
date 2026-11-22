@@ -57,6 +57,23 @@ export interface TeamsMessage {
   mentions_me: boolean;
   /** Ses images (ADR 0258), sans leurs octets : `teamsImageUrl` les sert ; `seen` : ce que Mika y a vu. */
   images?: TeamsImage[];
+  /** Ses réactions (ADR 0300), dans l'ordre de Teams ; absent d'un moteur qui ne les dit pas. */
+  reactions?: TeamsReaction[];
+  /** L'adresse de la photo de profil de son auteur (ADR 0300 : `teamsPhotoUrl`), vide sans photo. */
+  photo?: string;
+}
+
+/** Une réaction à un message (ADR 0300). */
+export interface TeamsReaction {
+  /** Sa clé dans Teams (`like`, `heart`, `1f44f_clappinghands`…). */
+  key: string;
+  /** Son emoji ; vide quand le serveur ne le connaît pas : on montre la clé. */
+  emoji: string;
+  count: number;
+  /** La personne du compte en est : toi sur un compte à toi, son propriétaire sur un compte qu'on te partage. */
+  mine: boolean;
+  /** Qui l'a posée, sous le nom que le compte lui connaît (dix au plus, sans la personne du compte). */
+  names: string[];
 }
 
 export interface TeamsImage {
@@ -79,6 +96,9 @@ export interface Conversation {
    *  Teams (vide sans titre). */
   title: string;
   kind: ConversationKind;
+  /** Sa photo (ADR 0300) : celle de l'autre personne d'un tête-à-tête, même quand le dernier message est le tien ;
+   *  vide pour une autre conversation, ou sans photo. */
+  photo?: string;
   last_at: number;
   messages: number;
   last: TeamsMessage | null;
@@ -147,6 +167,8 @@ export interface Thread {
   account: string;
   title: string;
   kind: ConversationKind;
+  /** Sa photo, comme dans la liste (`Conversation.photo`). */
+  photo?: string;
   messages: TeamsMessage[];
   /** Il y a des messages plus anciens (`before`). */
   more: boolean;
@@ -169,6 +191,18 @@ const T = `${MOI}/teams`;
 /** L'adresse des octets d'une image d'un message (derrière la connexion). */
 export function teamsImageUrl(message: string, image: string): string {
   return apiUrl(`${T}/image${query({ message, image })}`);
+}
+
+/** Le début de l'adresse d'une photo de profil (ADR 0300), telle que l'API la donne (`photo`). */
+const PHOTO_PATH = `${T}/photo?`;
+
+/**
+ * L'adresse à charger d'une photo de profil (ADR 0300) : celle que l'API donne (`photo` d'un message, d'une
+ * conversation, d'un contact), sur le serveur et derrière la connexion, comme les images des messages. Toute autre
+ * adresse ne se charge pas (vide : les initiales).
+ */
+export function teamsPhotoUrl(path: string | null | undefined): string {
+  return path && path.startsWith(PHOTO_PATH) ? apiUrl(path) : "";
 }
 
 export function fetchAccounts(): Promise<AccountsReply> {

@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Contacts (ADR 0298, la maquette validée `maquette/ecrans/contacts.js`) : la rubrique du tiroir, la liste, la fiche d'un
+  contact et ses feuilles ; et, dans Écrire, les destinataires proposés depuis tes contacts. Les mots qui se calculent
+  (la ligne d'un contact, d'où vient un fait, où vous vous croisez) sont dans data/moi/contacts/ContactsRules.kt, testés
+  sur la JVM ; les refus sont ceux du serveur.
+-->
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <string name="nav_contacts">Contacts</string>
+    <string name="search_sub_contacts">tous ceux qu\'elle connaît pour toi</string>
+
+    <!-- La liste -->
+    <!-- « 3 pour toi » : rien ne s'accorde au nombre -->
+    <string name="contacts_for_you" tools:ignore="PluralsCandidate">%1$d pour toi</string>
+    <string name="contacts_search_hint">Un nom, un e-mail, un numéro…</string>
+    <string name="contacts_search_label">Chercher un contact</string>
+    <string name="contacts_search_clear">Effacer la recherche</string>
+    <string name="contacts_kind_all">Tous</string>
+    <string name="contacts_kind_person">Personnes</string>
+    <string name="contacts_kind_org">Organisations</string>
+    <string name="contacts_list_note" tools:ignore="Typos">Ceux que Mika connaît pour toi : vus dans ton Teams, tes boîtes, ton téléphone, ou dont tu lui as parlé. Le dernier vu d\'abord.</string>
+    <string name="contacts_empty_search_title">Personne</string>
+    <string name="contacts_empty_search">Aucun contact ne correspond à « %1$s ».</string>
+    <string name="contacts_empty_org_title">Aucune organisation</string>
+    <string name="contacts_empty_org">Une organisation naît du domaine d\'une adresse ou d\'un profil Teams.</string>
+    <string name="contacts_empty_title">Aucun contact</string>
+    <string name="contacts_empty" tools:ignore="Typos">Ceux que Mika lit dans tes comptes Teams, tes boîtes, ton téléphone, ou dont tu lui parles, arrivent ici.</string>
+    <string name="contacts_introduce">Lui présenter quelqu\'un</string>
+    <string name="contacts_more_failed">La suite ne se lit pas : %1$s</string>
+
+    <!-- La fiche -->
+    <string name="contacts_write">Écrire</string>
+    <string name="contacts_teams">Teams</string>
+    <string name="contacts_message">Message</string>
+    <string name="contacts_identifies">Ce qui l\'identifie</string>
+    <string name="contacts_no_ways">Aucun moyen de communication : tu lui en as seulement parlé.</string>
+    <string name="contacts_no_ways_org">Rien d\'autre que son nom.</string>
+    <string name="contacts_write_at">Écrire à %1$s</string>
+    <string name="contacts_members">Ses personnes parmi tes contacts</string>
+    <plurals name="contacts_members_more">
+        <item quantity="one">et %d autre</item>
+        <item quantity="many">et %d autres</item>
+        <item quantity="other">et %d autres</item>
+    </plurals>
+    <string name="contacts_knows">Ce que Mika en sait</string>
+    <string name="contacts_knows_nothing">Rien de plus que ce qui l\'identifie.</string>
+    <string name="contacts_fact_forget_label">Qu\'elle oublie ce fait</string>
+    <string name="contacts_fact_locked_label">Pourquoi elle ne peut pas l\'oublier d\'ici</string>
+    <!-- « vous vous croisez » : le pronom réfléchi, pas une faute -->
+    <string name="contacts_crossed" tools:ignore="Typos">Où vous vous croisez</string>
+    <string name="contacts_forget">Oublier ce contact</string>
+    <string name="contacts_forget_title">Oublier %1$s ?</string>
+    <string name="contacts_forget_refused_title">Oublier %1$s</string>
+    <string name="contacts_forget_fact_title">Oublier ce fait ?</string>
+    <string name="contacts_forget_fact_locked_title">Oublier ce fait</string>
+    <string name="contacts_forget_fact_after">Elle ne le réapprendra pas, même dit autrement ; les messages restent où ils sont.</string>
+    <!-- Les mots du serveur (app/me/contacts.py, NOT_YOUR_FACT) : la fiche dit seulement qu'un fait n'est pas à oublier
+         d'ici (`forget` faux), pas pourquoi. -->
+    <string name="contacts_not_your_fact">Ce fait vient d\'un compte qui n\'est pas à toi : elle l\'a lu ailleurs que dans tes comptes. Une opératrice peut l\'oublier depuis la console.</string>
+    <string name="contacts_forget_confirm">Oublier</string>
+    <string name="contacts_understood">Compris</string>
+    <string name="contacts_menu_ask">En parler à Mika</string>
+    <string name="contacts_menu_copy">Copier son adresse</string>
+    <string name="contacts_copied">Copié : %1$s</string>
+    <string name="contacts_open_org">Ouvrir la fiche de %1$s</string>
+
+    <!-- Écrire : les destinataires proposés -->
+    <string name="mail_suggest_generic">générique</string>
+    <string name="mail_suggest_none_kept">Aucun contact : « %1$s » sera pris tel quel.</string>
+    <string name="mail_suggest_none">Aucun contact ne correspond à « %1$s ».</string>
+</resources>

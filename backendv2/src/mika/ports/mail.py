@@ -406,6 +406,15 @@ class Preview:
 
 
 @dataclass(frozen=True, slots=True)
+class Moved:
+    """Ce qu'a fait un déplacement par lot (``MailPort.move_many``, ADR 0302) : chaque mail déplacé et son dossier
+    d'arrivée, chaque mail refusé et pourquoi (ce que le serveur a répondu, une donnée)."""
+
+    done: dict[str, str]
+    refused: dict[str, str]
+
+
+@dataclass(frozen=True, slots=True)
 class AccountStatus:
     key: str
     #: le dernier relevé (µs), 0 : jamais
@@ -593,6 +602,13 @@ class MailPort(Protocol):
     async def archive(self, ref: str) -> str: ...
 
     async def trash(self, ref: str) -> str: ...
+
+    async def move_many(self, refs: Sequence[str], *, folder: str = "", role: str = "") -> Moved:
+        """Déplace ces mails **par lot** (ADR 0302) : une session par compte, chaque dossier de départ ouvert une fois.
+        ``folder`` : ce dossier, dans la boîte de chacun (un mail qui y est déjà compte comme déplacé) ; ``role``
+        (``archive``, ``trash``) : le dossier de ce rôle dans sa boîte (un mail qui y est déjà est refusé, comme
+        ``archive`` et ``trash``). Ne lève pas pour un mail : ce qui n'a pas pu se faire est rendu refusé."""
+        ...
 
     async def delete(self, ref: str) -> None:
         """Supprime définitivement (seulement depuis la corbeille)."""
