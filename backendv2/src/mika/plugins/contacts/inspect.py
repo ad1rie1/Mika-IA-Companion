@@ -55,8 +55,9 @@ from mika.kernel.inspect import (
     plural,
 )
 from mika.kernel.operate import Done, Refused
-from mika.plugins.contacts import CONTACTS, ContactsState
+from mika.plugins.contacts import CONTACTS, ContactsState, params
 from mika.ports.contacts import (
+    APART,
     COMPANY,
     CONTACT_PREFIX,
     DOMAIN,
@@ -69,6 +70,7 @@ from mika.ports.contacts import (
     PHONE_APP,
     PHONE_PREFIX,
     PHONE_SOURCE,
+    SAME,
     SMS,
     TEAMS,
     TEAMS_ID,
@@ -79,6 +81,7 @@ from mika.ports.contacts import (
     WHATSAPP,
     ContactSheet,
     app_family,
+    pair_basis,
     person_accounts,
     subject_aliases,
     visible_sources,
@@ -346,6 +349,75 @@ def _knows(s: ContactsState, frame: Frame, ctx: InspectContext) -> list[Block]:
                   empty="rien encore : elle ne relit que qui échange vraiment avec un compte"),
             Note("Chaque fait vient de ses derniers messages dans un compte : il ne se dit qu'à qui voit ce compte. "
                  "Un fait oublié ne se réapprend pas, même reformulé.", tone="muted")]
+
+
+# ── Les rapprochements (ADR 0304) ─────────────────────────────────────────
+
+#: pourquoi deux fiches se ressemblent, en mots (``Suggestion.reason``, ``Likeness.rule``)
+RULE_WORDS = {"same_name": "le même nom", "initial": "le même nom, à l'initiale près",
+              "first_name": "le même prénom, d'un côté sans nom de famille",
+              "words": "des mots rares de leurs noms en commun"}
+#: ce que le juge en dit, en mots
+VERDICT_WORDS = {SAME: "la même personne", APART: "deux personnes"}
+#: les réunions d'office comptées par la vue, au plus (elle n'en montre qu'une page)
+JOINED_COUNTED = 1000
+
+
+def verdict_words(verdict: str, sure: bool) -> str:
+    """L'avis du juge sur une paire, en mots (« la même personne, sans en être sûr ») ; « pas encore jugée » sans
+    avis."""
+    if verdict not in VERDICT_WORDS:
+        return "pas encore jugée"
+    return VERDICT_WORDS[verdict] + ("" if sure else ", sans en être sûr")
+
+
+# hors de la navigation : la file « À valider » les montre, et c'est là qu'on en décide ; lue telle quelle par la
+# console de Mika en MCP (outil « vue », clé « contacts/rapprochements »)
+@CONTACTS.inspect("rapprochements", title="Rapprochements de l'annuaire", section="personnes", hidden=True,
+                  description="Les fiches qui pourraient être la même personne : celles qui t'attendent, avec l'avis "
+                              "du juge (le rôle « match »), ce qu'il a réuni d'office et ce qu'il sait deux personnes.")
+def _matches(s: ContactsState, frame: Frame, ctx: InspectContext) -> list[Block]:
+    port = ctx.ports.get("contacts")
+    if port is None:
+        return [Note(NO_PORT, tone="muted")]
+    waiting = port.suggestions(200)
+    page, pager = paginate(waiting, ctx.pager(size=PAGE))
+    rows = tuple(Row((contact_ref(x.a.id, x.a.name), contact_ref(x.b.id, x.b.name), RULE_WORDS.get(x.reason, x.reason),
+                      verdict_words(x.verdict, False) if x.verdict else "pas encore jugée", x.why or "—"))
+                 for x in page)
+    joined = port.joined(limit=JOINED_COUNTED)
+    said = [j for j in port.judgements() if j.verdict == APART and j.sure]
+    bases = port.bases({c for j in said for c in (j.a, j.b)})
+    # un avis ne vaut que sur ce qu'il a vu : une fiche changée depuis est revenue dans la file
+    apart = sorted((j for j in said if j.a in bases and j.b in bases
+                    and j.basis == pair_basis(bases[j.a], bases[j.b])), key=lambda j: -j.at)
+    names = {}
+    for j in apart[:PAGE]:
+        for cid in (j.a, j.b):
+            if cid not in names:
+                sheet = port.sheet(cid)
+                names[cid] = sheet.name if sheet is not None else f"fiche n° {cid}"
+    today = port.judge_calls(since=frame.now - 86_400_000_000)
+    p = params(frame.env.params_of(CONTACTS.name, frame.root))
+    return [
+        Stats((Stat("à valider", len(waiting)), Stat("réunies d'office", len(joined)),
+               Stat("dites deux personnes", len(apart)),
+               Stat("appels du juge en 24 h", f"{len(today)} / {p.match_calls_per_day}"))),
+        Table(("fiche", "et la fiche", "pourquoi", "le juge", "ce qu'il en dit"), rows, title="À valider",
+              pager=pager, empty="aucune fiche n'en rappelle une autre"),
+        Table(("quand", "fiche gardée", "a rejoint", "pourquoi", "appel"),
+              tuple(Row((When(j.at), contact_ref(j.keep, j.kept), f"« {j.gone} »", j.reason or "—",
+                         Text(j.call_id, "mono") if j.call_id else "—")) for j in joined[:PAGE]),
+              title="Réunies d'office par le juge", empty="rien encore"),
+        Table(("quand", "fiche", "et la fiche", "pourquoi"),
+              tuple(Row((When(j.at), contact_ref(j.a, names[j.a]), contact_ref(j.b, names[j.b]), j.reason or "—"))
+                    for j in apart[:PAGE]),
+              title="Dites deux personnes par le juge", empty="rien encore"),
+        Note("Ce qu'un identifiant prouve se réunit d'office ; ce dont le juge est sûr aussi, et se défait en "
+             "détachant ses identifiants (« Détacher » sur la fiche gardée). Le juge ne réunit jamais deux fiches que tu as séparées, ni reliées à "
+             "deux personnes différentes. " + ("" if p.matching else "Le juge est coupé (Réglages › Paramètres "
+                                                                      "avancés › contacts)."), tone="muted"),
+    ]
 
 
 # ── Sur la fiche d'une personne : ses contacts ────────────────────────────

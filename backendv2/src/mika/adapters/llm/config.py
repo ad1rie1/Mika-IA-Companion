@@ -270,6 +270,7 @@ ROLE_LABELS = {"reply": "répondre (voix)", "initiative": "prendre la parole (vo
                "murmur": "murmurer (voix)", "journal": "tenir son journal (voix)", "dream": "rêver (voix)",
                "narrative": "se raconter (voix)", "extract": "retenir (mémoire)", "validate": "vérifier",
                "profile": "comprendre les gens", "portrait": "se faire une idée de ses contacts (ce qu'elle lit)",
+               "match": "rapprocher ses contacts (la même personne ?)",
                "interpret": "interpréter", "triage": "trier le courrier",
                "caption": "décrire une image", "compact": "résumer le fil", "plan": "planifier",
                "project": "travailler sur un projet (voix)", "job": "exécuter un projet (impersonnel)",

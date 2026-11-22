@@ -17,7 +17,7 @@ from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
 from mika.plugins.teams import BUNDLE, RECEIVED, TEAMS, TeamsParams, TeamsState, her, owner_of, params_of
-from mika.plugins.teams.reactions import reactions_said
+from mika.plugins.teams.reactions import quote_said, reactions_said
 from mika.ports.llm import LLMRequest, Message, json_object
 from mika.ports.preprocess import cite, inert
 from mika.vocab.access import SELF
@@ -163,12 +163,15 @@ class Triage:
                 asked += 1
                 before = [x for x in port.thread(m.account, m.conversation, CONTEXT + 1, before=m.at) if x.ref != m.ref]
                 lines = [phrase("teams.triage.line", who=phrase("teams.triage.own") if x.own else inert(x.author, 60),
-                                text=inert(x.text, 300) + reactions_said(x.reactions, me)) for x in before[-CONTEXT:]]
+                                text=quote_said(x.quote) + inert(x.text, 300) + reactions_said(x.reactions, me))
+                         for x in before[-CONTEXT:]]
                 said = reactions_said(m.reactions, me).strip()
                 body = "\n".join([phrase("teams.triage.place", place=place),
                                   *([phrase("teams.triage.before"), *lines] if lines else []),
                                   # ce qu'un message dit vient d'ailleurs : cité, comme le fil au-dessus est
                                   # rendu inerte (ADR 0198, 0266)
+                                  # le message auquel il répond (ADR 0305), avant lui
+                                  *([quote_said(m.quote).strip()] if m.quote is not None else []),
                                   phrase("teams.triage.message", who=inert(m.author, 80), text=cite(m.text, 3000)),
                                   # ses réactions, après la citation : ce n'est pas son texte (ADR 0300)
                                   *([said] if said else [])])

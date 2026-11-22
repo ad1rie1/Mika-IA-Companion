@@ -113,7 +113,7 @@
     idb: { available: typeof indexedDB !== "undefined" && typeof indexedDB.databases === "function",
       syncs: 0, lastSyncMs: 0, conversations: 0, read: 0, messages: 0, errors: 0 },
     worker: { hooked: 0, received: 0, kept: 0, messages: 0, errors: 0, commands: 0, templates: 0, templateRefused: 0,
-      templateIssue: "" },
+      templateIssue: "", templateShape: "" },
     history: { running: false, done: 0, total: 0, messages: 0, images: 0, error: "" },
     images: { downloaded: 0, sent: 0, skipped: 0, failed: 0 },
     photos: { asked: 0, downloaded: 0, sent: 0, skipped: 0, failed: 0, noAvatarSeen: 0 },
@@ -479,12 +479,15 @@
       if (!got.template) {
         stats.worker.templateRefused++;
         stats.worker.templateIssue = got.reason;
+        // sa forme (chemins et types, jamais une valeur) : de quoi corriger la lecture sans renvoyer d'essai
+        stats.worker.templateShape = P.commandShape(command, 3000);
         return;
       }
       const kind = got.bilateral ? "bilateral" : "group";
       const before = sendTemplates[kind];
       stats.worker.templates++;
       stats.worker.templateIssue = "";
+      stats.worker.templateShape = "";
       if (sameTemplate(before, got.template)) return; // le même : rien de neuf à garder
       sendTemplates[kind] = Object.assign({ at: Date.now() }, got.template);
       askService("sendTemplate", { template: got.template, bilateral: got.bilateral }, TEMPLATE_ASK_MS);
@@ -1505,7 +1508,7 @@
     const url = auth.base + "/v1/users/ME/conversations/" + encodeURIComponent(item.conversation) + "/messages";
     const headers = Object.assign({ "content-type": "application/json" }, auth.headers);
     // le même identifiant client à chaque tentative, d'où qu'elle vienne
-    const body = P.messageBody(item.text, item.selfName, P.clientMessageIdFor(item.id));
+    const body = P.messageBody(item.text, item.selfName, P.clientMessageIdFor(item.id), item.quote);
     const controller = typeof AbortController === "function" ? new AbortController() : null;
     const timer = controller ? setTimeout(function () { controller.abort(); }, CHAT_SEND_TIMEOUT_MS) : 0;
     try {
@@ -1560,7 +1563,7 @@
    */
   async function sendViaWorker(item, template, live) {
     const requestNumber = P.nextRequestNumber(live.known.highest, ownRequest);
-    const command = P.workerSendCommand(template, { conversation: item.conversation, text: item.text,
+    const command = P.workerSendCommand(template, { conversation: item.conversation, text: item.text, quote: item.quote,
       clientMessageId: P.clientMessageIdFor(item.id), correlationId: newCorrelationId(), now: Date.now(),
       requestNumber: requestNumber, rendererId: live.known.rendererId, windowId: live.known.windowId });
     if (!command) return { refused: true, reason: "le modèle d'envoi de Teams ne s'applique pas à ce message" };

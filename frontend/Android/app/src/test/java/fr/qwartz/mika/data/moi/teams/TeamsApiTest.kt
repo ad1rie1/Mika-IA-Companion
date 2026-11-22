@@ -112,6 +112,25 @@ class TeamsApiTest {
         assertEquals("1790790060000", server.takeRequest().url.queryParameter("before"))
     }
 
+    @Test fun `un message qui en cite un autre porte sa citation, sans citation null`() = runBlocking {
+        ok(
+            """{"key":"19:lumen","kind":"group","messages":[
+               {"ref":"t1","author":"Karim Haddad","author_id":"8:k","at":5,"text":"La démo tourne ?","quote":null},
+               {"ref":"t2","author":"Léa Martin","author_id":"8:l","at":6,"text":"Chez moi, oui.",
+                "quote":{"author":"Karim Haddad","author_id":"8:orgid:k","preview":"La démo tourne ?","at":5,"ref":"t1","futur":1}},
+               {"ref":"t3","author":"Léa Martin","at":7,"text":"Et là ?",
+                "quote":{"author":"Marc Delmas","author_id":"8:orgid:m","preview":"un vieux message","at":4,"ref":""}},
+               {"ref":"t4","author":"Marc Delmas","at":8,"text":"d'avant l'ADR 0305"}]}""",
+        )
+        val m = (api.thread("19:lumen") as MoiApi.Result.Ok).value.messages
+        assertNull(m[0].quote)
+        assertEquals(TeamsQuote(author = "Karim Haddad", authorId = "8:orgid:k", preview = "La démo tourne ?", at = 5, ref = "t1"), m[1].quote)
+        assertEquals("Chez moi, oui.", m[1].text)
+        // le message cité n'est pas chez elle : sa référence est vide
+        assertEquals("", m[2].quote!!.ref)
+        assertNull(m[3].quote)
+    }
+
     @Test fun `ses réponses dans tes comptes`() = runBlocking {
         ok(
             """{"items":[{"id":"r1","account":"principal","conversation":"19:marc","title":"Marc Delmas","state":"refuse",

@@ -4,7 +4,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.viewModelScope
-import fr.qwartz.mika.core.AppGraph
 import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.SendKey
 import fr.qwartz.mika.data.moi.chars
@@ -12,11 +11,14 @@ import fr.qwartz.mika.data.moi.teams.ConversationThread
 import fr.qwartz.mika.data.moi.teams.SentHere
 import fr.qwartz.mika.data.moi.teams.TeamsLimits
 import fr.qwartz.mika.data.moi.teams.TeamsMessage
+import fr.qwartz.mika.data.moi.teams.TeamsQuote
 import fr.qwartz.mika.data.moi.teams.TeamsReply
 import fr.qwartz.mika.data.moi.teams.UNDER_WAY
+import fr.qwartz.mika.data.moi.teams.citable
 import fr.qwartz.mika.data.moi.teams.lastReceived
 import fr.qwartz.mika.data.moi.teams.messageProblem
 import fr.qwartz.mika.data.moi.teams.prefillOff
+import fr.qwartz.mika.data.moi.teams.quoteTarget
 import fr.qwartz.mika.data.moi.teams.stillSentHere
 import fr.qwartz.mika.data.moi.teams.withoutSent
 import fr.qwartz.mika.ui.shell.Load
@@ -29,12 +31,16 @@ internal const val ASK_POLL_MS = 10_000L
 internal const val ASK_POLL_MAX_MS = 30 * 60_000L
 internal const val THREAD_REFRESH_MS = 20_000L
 
+/** Aller au message qu'une citation désigne ([ref]) ; [n] : le geste (deux appuis sur la même citation, deux allers). */
+data class QuoteJump(val ref: String, val n: Int)
+
 /**
  * Un fil (`Route.TeamsThread`) : la conversation ouverte, les messages plus anciens lus en plus, tes envois d'ici que
- * le moteur n'a pas encore dits, ce que tu tapes (discussion par discussion), ses réponses et ce que tu en décides, ta
- * demande à Mika et sa réponse guettée. Un modèle par session : rouvrir une discussion la relit sans bruit.
+ * le moteur n'a pas encore dits, ce que tu tapes et le message que tu cites (discussion par discussion), ses réponses
+ * et ce que tu en décides, ta demande à Mika et sa réponse guettée, le message cité où aller. Un modèle par session :
+ * rouvrir une discussion la relit sans bruit.
  */
-class TeamsThreadViewModel(graph: AppGraph) : TeamsScreenModel(graph) {
+class TeamsThreadViewModel(deps: TeamsDeps) : TeamsScreenModel(deps) {
     var key by mutableStateOf("")
         private set
     var thread by mutableStateOf<Load<ConversationThread>>(Load.Loading)
@@ -63,6 +69,12 @@ class TeamsThreadViewModel(graph: AppGraph) : TeamsScreenModel(graph) {
     private val gaveUp = mutableSetOf<String>()
     /** Ce que tu as commencé d'écrire, discussion par discussion. */
     private val typed = mutableMapOf<String, String>()
+    /** Le message que tu cites, discussion par discussion (« Citer », ADR 0305) : il part avec ton prochain message. */
+    private var quoted by mutableStateOf<Map<String, TeamsMessage>>(emptyMap())
+    /** Le message cité où le fil doit aller (un appui sur une citation), jusqu'à ce que l'écran y soit allé. */
+    var jump by mutableStateOf<QuoteJump?>(null)
+        private set
+    private var jumps = 0
     private val sendKey = SendKey()
     private val prefillKey = SendKey()
     private var job: Job? = null
@@ -70,7 +82,7 @@ class TeamsThreadViewModel(graph: AppGraph) : TeamsScreenModel(graph) {
     /** Ce qu'on dit quand sa réponse demandée est arrivée (le texte vient de l'écran). */
     private var arrivedText = ""
 
-    private fun now(): Long = graph.clock.wallMs()
+    private fun now(): Long = deps.now()
 
     /** Le fil de la discussion ouverte ([key], la clé demandée : le serveur rend la sienne, normalisée — `principal~`
      *  en moins —, et une lecture d'une autre discussion n'arrive jamais ici). */
@@ -94,6 +106,7 @@ class TeamsThreadViewModel(graph: AppGraph) : TeamsScreenModel(graph) {
         }
         key = k
         text = typed[k].orEmpty()
+        jump = null
         thread = Load.Loading
         older = emptyList()
         olderMore = false
@@ -156,7 +169,7 @@ class TeamsThreadViewModel(graph: AppGraph) : TeamsScreenModel(graph) {
         if (t.underWay) askedSince = askedSince - key
         if (came) {
             say(arrivedText)
-            graph.me.refresh()
+            deps.refreshBadges()
         }
     }
 
@@ -185,13 +198,42 @@ class TeamsThreadViewModel(graph: AppGraph) : TeamsScreenModel(graph) {
 
     // ── Écrire ──
 
+    /** Le message que tu cites dans la discussion ouverte (sa carte au-dessus du champ) ; `null` : aucun. */
+    val citing: TeamsMessage? get() = quoted[key]
+
+    /** « Citer » (l'appui long sur un message) : sa carte se pose au-dessus du champ, et ton prochain message le cite. Un
+     *  autre message cité la remplace ; un message qui ne se cite pas ici ([citable]) ne change rien. */
+    fun cite(m: TeamsMessage) {
+        val t = current ?: return
+        if (!citable(m, t.kind, account(t.account))) return
+        quoted = quoted + (key to m)
+    }
+
+    /** Le × de sa carte : ton message ne citera rien. */
+    fun uncite() {
+        quoted = quoted - key
+    }
+
+    /** Un appui sur une citation : le fil va au message cité s'il est parmi les messages chargés ; sinon rien. */
+    fun jumpTo(q: TeamsQuote) {
+        val ref = quoteTarget(q, messages) ?: return
+        jump = QuoteJump(ref, ++jumps)
+    }
+
+    /** L'écran y est allé (ou ne l'a pas trouvé) : ce geste est fait. */
+    fun jumped(j: QuoteJump) {
+        if (jump == j) jump = null
+    }
+
     fun type(value: String) {
         if (chars(value) > TeamsLimits.BODY) return
         text = value
         if (value.isEmpty()) typed -= key else typed[key] = value
     }
 
-    /** Ton message (ADR 0189) : il part par l'extension du compte, sous le nom de sa personne ; une clé par geste. */
+    /** Ton message (ADR 0189) : il part par l'extension du compte, sous le nom de sa personne ; une clé par geste. Le
+     *  message que tu cites part avec lui (`reply_to`) ; parti, sa carte s'en va — une autre choisie pendant l'envoi
+     *  reste ; refusé, elle reste avec ton texte. */
     fun send() {
         val t = current ?: return
         if (sending) return
@@ -202,9 +244,10 @@ class TeamsThreadViewModel(graph: AppGraph) : TeamsScreenModel(graph) {
         sending = true
         // [k] : ce que tu tapes ici, et la discussion ouverte ; [t.key] : la clé du serveur (tes envois d'ici)
         val k = key
-        val keyOf = sendKey.of(t.key to body)
+        val replyTo = citing?.ref.orEmpty()
+        val keyOf = sendKey.of(Triple(t.key, body, replyTo))
         viewModelScope.launch {
-            val got = api.send(t.key, body, key = keyOf)
+            val got = api.send(t.key, body, replyTo = replyTo, key = keyOf)
             sendKey.settled(networkFailure = got is MoiApi.Result.Failed && got.error.network)
             sending = false
             when (got) {
@@ -216,10 +259,11 @@ class TeamsThreadViewModel(graph: AppGraph) : TeamsScreenModel(graph) {
                         else -> typed[k] = rest
                     }
                     if (key == k) text = typed[k].orEmpty()
+                    if (replyTo.isNotEmpty() && quoted[k]?.ref == replyTo) quoted = quoted - k
                     sent = sent + SentHere(t.key, body, now())
                     say(got.value.message)
                     // sa réponse qui attendait ici ne partira plus (ADR 0199) : la pastille le suit
-                    if (t.replies.any { it.waiting && !it.answered }) graph.me.refresh()
+                    if (t.replies.any { it.waiting && !it.answered }) deps.refreshBadges()
                     if (key == k) load(quiet = true, force = true)
                 }
                 is MoiApi.Result.Failed -> say(got.error)

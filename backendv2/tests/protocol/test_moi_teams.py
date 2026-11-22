@@ -105,6 +105,19 @@ def test_the_list_of_conversations_reads_their_last_messages_in_one_go(world, mo
     assert item["her"] == {"state": WAITING, "draft": draft}  # sa réponse en chemin, toujours là
 
 
+
+def test_an_extension_that_only_polls_is_still_seen(world):  # noqa: F811
+    """Le 2026-11-22 (un dimanche), frontendv2 disait « l'extension ne s'est pas manifestée depuis 9 h » : il jugeait sur
+    le dernier lot, et rien de neuf n'était arrivé dans Teams, alors que l'extension relevait sa boîte toutes les 30 s.
+    Un relevé (ou la connexion en direct) la montre là : ``last_seen``, jamais plus tôt que ``last_batch``."""
+    client, live, key = with_teams(world)
+    before = client.get(API + "/teams/accounts").json()["accounts"][0]
+    assert before["last_seen"] >= before["last_batch"] > 0
+    time.sleep(0.01)
+    assert client.get("/api/teams/outbox", headers=headers(key)).status_code == 200
+    after = client.get(API + "/teams/accounts").json()["accounts"][0]
+    assert after["last_batch"] == before["last_batch"] and after["last_seen"] > before["last_batch"]
+
 def test_a_person_sees_only_her_own_account(world):  # noqa: F811
     client, live, _ = with_teams(world)
     lea = second_person(client, live)

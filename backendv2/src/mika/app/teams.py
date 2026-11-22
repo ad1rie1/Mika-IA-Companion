@@ -74,6 +74,7 @@ from mika.ports.teams import (
     InboxMessage,
     InboxProfile,
     PhotoIn,
+    Quote,
     Reaction,
 )
 
@@ -127,6 +128,8 @@ class _InMessage(BaseModel):
     #: ses réactions (ADR 0300), lues une à une (les ``REACTIONS_MAX`` premières) ; absentes : l'extension n'en dit rien
     #: (le cache garde les siennes)
     reactions: list[Any] | None = None
+    #: le message qu'il cite (ADR 0305), séparé de son texte par l'extension ; illisible, il est ignoré, jamais le message
+    quote: Any = None
 
 
 class _InReaction(BaseModel):
@@ -232,6 +235,27 @@ def _reactions(raw: list[Any] | None) -> tuple[Reaction, ...] | None:
     return tuple(out.values())
 
 
+#: une citation reçue (ADR 0305) : l'identifiant de service du message cité, l'identifiant Teams de son auteur
+QUOTE_MESSAGE = re.compile(r"\d{10,16}")
+QUOTE_AUTHOR = re.compile(r"\d{1,2}:[A-Za-z0-9:._-]{1,200}")
+#: l'extrait d'une citation reçue, au plus (ce que Teams en a mis : souvent tout le message cité)
+QUOTE_KEPT_MAX = 300
+
+
+def quote_of(raw: Any) -> Quote | None:
+    """La citation d'un message reçu (``frontend/Extension/lib/extract.js``, ``quoteIn``), validée ; ``None`` si elle
+    est absente ou illisible : un identifiant de service, un auteur Teams, un nom et un extrait sur une ligne, bornés."""
+    if not isinstance(raw, dict):
+        return None
+    message, author_id = str(raw.get("message") or ""), str(raw.get("author_id") or "")
+    if not QUOTE_MESSAGE.fullmatch(message) or not QUOTE_AUTHOR.fullmatch(author_id):
+        return None
+    at = raw.get("at")
+    at_ms = int(at) if isinstance(at, int | float) and not isinstance(at, bool) and at > 0 else int(message)
+    return Quote(message, author_id, one_line(str(raw.get("author") or ""), 120), at_ms,
+                 one_line(str(raw.get("preview") or ""), QUOTE_KEPT_MAX))
+
+
 def _message(raw: Any, now_ms: int) -> InboxMessage | None:
     try:
         m = _InMessage.model_validate(clean_fields(raw))
@@ -246,7 +270,8 @@ def _message(raw: Any, now_ms: int) -> InboxMessage | None:
         return None
     return InboxMessage(m.id, m.conv, one_line(m.author, 120), one_line(m.author_id, 200), m.time, text, m.own,
                         m.mentions_me, m.deleted, images=m.images,
-                        reactions=None if m.deleted else _reactions(m.reactions))
+                        reactions=None if m.deleted else _reactions(m.reactions),
+                        quote=None if m.deleted else quote_of(m.quote))
 
 
 def profile_of(raw: Any) -> InboxProfile | None:
@@ -376,6 +401,9 @@ class TeamsDesk:
         self._lock = asyncio.Lock()
         #: les connexions en direct (ADR 0251) : la clé reconnue, son compte, et quand on l'a vérifiée
         self._live_checked: dict[str, tuple[str, float]] = {}
+        #: la dernière fois que l'extension de chaque compte s'est manifestée (µs, en mémoire depuis le démarrage) : un
+        #: relevé, la connexion en direct, un lot, un accusé — un dimanche sans message neuf, elle est là quand même
+        self._contact: dict[str, int] = {}
 
     # ── les clés ──
     def key_state(self, account: str) -> KeyState | None:
@@ -393,6 +421,14 @@ class TeamsDesk:
 
     async def revoke_key(self, account: str) -> bool:
         return await self.settings.revoke_teams_key(account)
+
+    def last_contact(self, account: str) -> int:
+        """La dernière fois que l'extension de ce compte s'est manifestée depuis le démarrage (µs ; 0 : pas encore) —
+        le dernier lot (``last_batch``) dit seulement quand elle a eu du neuf à pousser."""
+        return self._contact.get(account, 0)
+
+    def _heard(self, account: str) -> None:
+        self._contact[account] = int(self.clock())
 
     # ── la porte ──
     def _recognized(self, key: str) -> str:
@@ -425,6 +461,7 @@ class TeamsDesk:
             return account, refused
         if not self._minute.allow(key=account):
             return account, GateResult(BUSY, "Trop de requêtes.", retry_after=self._minute.wait_s(account))
+        self._heard(account)
         return account, None
 
     async def inbox(self, key: str, data: Any) -> GateResult:
@@ -458,7 +495,10 @@ class TeamsDesk:
     def _items(self, account: str) -> list[dict[str, Any]]:
         """La boîte d'envoi d'un compte, telle que l'extension la lit (le relevé comme la connexion en direct)."""
         return [{"id": i.id, "conversation": i.conversation, "title": i.title, "kind": i.kind, "mode": i.mode,
-                 "status": i.status, "text": i.text, "created_at": i.created_at, "expires_at": i.expires_at}
+                 "status": i.status, "text": i.text, "created_at": i.created_at, "expires_at": i.expires_at,
+                 # le message qu'il cite (ADR 0305), ou rien
+                 "quote": {"message": i.quote.message, "author_id": i.quote.author_id, "author": i.quote.author,
+                           "at": i.quote.at, "preview": i.quote.preview} if i.quote is not None else None}
                 for i in self.store.outbox(account, self.clock())]
 
     async def outbox(self, key: str) -> GateResult:
@@ -488,6 +528,7 @@ class TeamsDesk:
             self._live_checked[key] = known
             if len(self._live_checked) > 64:  # des clés d'avant (retirées, remplacées) : on oublie la plus vieille
                 self._live_checked.pop(min(self._live_checked, key=lambda k: self._live_checked[k][1]))
+        self._heard(known[0])  # connectée en direct : elle est là
         return GateResult(ACCEPTED, "", data={"items": await asyncio.to_thread(self._items, known[0])})
 
     async def image(self, key: str, data: Any) -> GateResult:

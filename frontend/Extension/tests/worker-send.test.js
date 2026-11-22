@@ -145,10 +145,14 @@ test("rejoué au même endroit avec le même message, le modèle redonne la comm
   assert.deepEqual(again, page);
 });
 
-test("un tête-à-tête ou un groupe : `isBilateralChat` et la file d'attente suivent la conversation", () => {
+test("un tête-à-tête ou un groupe : la file d'attente suit la conversation ; `isBilateralChat`, jamais vrai pour un "
+  + "groupe, et pour un tête-à-tête ce que Teams avait mis", () => {
   const { template } = templateOf(F.autoSend({ conv: F.GROUP }));
   const one = JSON.parse(build(template, { conversation: F.ALBERT })).payload.variables;
-  assert.equal(one.isBilateralChat, true);
+  assert.equal(one.isBilateralChat, false, "la valeur du modèle (Teams envoyait `false` chez Albert)");
+  const fromOne = templateOf(F.autoSend()).template;
+  assert.equal(JSON.parse(build(fromOne, { conversation: F.ALBERT })).payload.variables.isBilateralChat, true);
+  assert.equal(JSON.parse(build(fromOne, { conversation: F.GROUP })).payload.variables.isBilateralChat, false);
   assert.equal(one.convId, F.ALBERT);
   assert.equal(one.offlineActionOptions.queueId, "sendMessage_" + F.ALBERT);
   const group = JSON.parse(build(template, { conversation: F.GROUP })).payload.variables;
@@ -241,4 +245,100 @@ test("la réponse du worker : envoyé, refusé (rien n'est parti), douteux, ou p
     "un résultat et une erreur : peut-être parti");
   assert.equal(P.workerReplyOutcome(F.reply("m-1412", { status: "pending" })).result, "", "pas une issue : on attend");
   assert.equal(P.workerReplyOutcome("texte").result, "");
+});
+
+// ── La vraie commande de Teams (relevée le 2026-11-22) ──────────────────────
+
+test("la vraie commande d'envoi de Teams donne un modèle : ses options `include…` ne sont pas une réponse citée", () => {
+  const { template, bilateral } = templateOf(F.realSend());
+  assert.equal(bilateral, true);
+  const json = JSON.stringify(template);
+  for (const trace of [F.ALBERT, F.TEXT, F.CLIENT_ID, F.CORRELATION, "m-905", "5d0c7a4e-2b1f"]) {
+    assert.equal(json.includes(trace), false, "« " + trace + " » est resté dans le modèle");
+  }
+  const v = template.command.payload.variables;
+  assert.equal(v.includeRepliesSummary, true, "l'option de la requête reste telle que Teams l'a mise");
+  assert.equal(v.isBilateralChat, false);
+});
+
+test("rejouée, la vraie commande garde ce que Teams y avait mis et refait l'heure du brouillon", () => {
+  const { template } = templateOf(F.realSend());
+  const c = JSON.parse(build(template, { conversation: F.ALBERT, text: "Essai 7" }));
+  const v = c.payload.variables;
+  assert.equal(v.convId, F.ALBERT);
+  assert.equal(v.originalConvId, F.ALBERT);
+  assert.equal(v.isBilateralChat, false, "la valeur de Teams, avec laquelle l'essai 7 est parti");
+  assert.equal(v.includeRepliesSummary, true);
+  assert.equal(v.message.draftCreationTime, String(NOW));
+  assert.equal(v.message.originalSendPipelineTime, String(NOW));
+  assert.equal(v.message.content, "<p><semantic-object>Essai 7</semantic-object></p>");
+  assert.equal(v.offlineActionOptions.queueId, "chats_" + F.ALBERT);
+  assert.equal(v.offlineActionOptions.actionId, "send_" + P.clientMessageIdFor(ITEM));
+  assert.deepEqual(c.cdlOperationCustomContext, F.realSend().cdlOperationCustomContext);
+  assert.equal(c.windowId, F.WINDOW, "de la page vivante, jamais du modèle");
+});
+
+test("un vrai transfert ou une pièce jointe reste écarté, et le refus nomme toutes les clés en cause", () => {
+  const forwarded = F.realSend();
+  forwarded.payload.variables.message.forwardMessageIds = ["1763800000001"];
+  forwarded.payload.variables.message.isForwardedMessage = true;
+  const got = P.workerSendTemplate(forwarded);
+  assert.equal(got.template, null);
+  assert.match(got.reason, /forwardMessageIds/);
+  assert.match(got.reason, /isForwardedMessage/);
+  const quoted = F.realSend();
+  quoted.payload.variables.message.replyChainId = "1763800000002";
+  assert.match(P.workerSendTemplate(quoted).reason, /replyChainId/);
+  // une option `include…` qui n'est pas un booléen n'est pas une option de la requête
+  const odd = F.realSend();
+  odd.payload.variables.includeRepliesSummary = { id: "1763800000003" };
+  assert.match(P.workerSendTemplate(odd).reason, /includeRepliesSummary/);
+});
+
+test("la forme d'une commande écartée, pour le diagnostic : des chemins et des types, jamais une valeur", () => {
+  const shape = P.commandShape(F.realSend());
+  assert.match(shape, /payload\.variables\.includeRepliesSummary:b/);
+  assert.match(shape, /payload\.variables\.message\.content:s/);
+  assert.match(shape, /payload\.variables\.message\.files\[\]/);
+  for (const value of [F.ALBERT, F.TEXT, F.CLIENT_ID, "adrien.exemple", "mutation", "Create", "main"]) {
+    assert.equal(shape.includes(value), false, "« " + value + " » est dans la forme");
+  }
+});
+
+// ── ADR 0305 : citer le message auquel elle répond ──────────────────────────
+
+const QUOTE = { message: "1795384015721", author_id: "28:ed349f0c-53ac-4a32-a4c8-2bd6e5244865", author: "Albert <le robot>",
+  at: 1795384015721, preview: "Bonjour Adrien, votre prochaine leçon n'est pas encore disponible & « bientôt »" };
+
+test("une citation part comme Teams l'écrit : le bloc avant le texte, échappé, et son entrée dans `computed`", () => {
+  const { template } = templateOf(F.realSend());
+  const c = JSON.parse(build(template, { conversation: F.ALBERT, text: "Oui, je regarde.", quote: QUOTE }));
+  const m = c.payload.variables.message;
+  assert.equal(m.content,
+    '<blockquote itemtype="http://schema.skype.com/Reply" itemid="1795384015721">'
+    + '<strong itemprop="mri" itemid="28:ed349f0c-53ac-4a32-a4c8-2bd6e5244865">Albert &lt;le robot&gt;</strong>'
+    + '<span itemprop="time" itemid="1795384015721"></span>'
+    + '<p itemprop="preview">Bonjour Adrien, votre prochaine leçon n&#39;est pas encore disponible &amp; « bientôt »</p>'
+    + "</blockquote><p><semantic-object>Oui, je regarde.</semantic-object></p>");
+  assert.deepEqual(m.computed.quotedMessages,
+    [{ messageId: "1795384015721", sender: "28:ed349f0c-53ac-4a32-a4c8-2bd6e5244865", time: 1795384015721 }]);
+});
+
+test("sans citation, ou une citation mal formée, rien n'est cité ; le service de chat cite de même", () => {
+  const { template } = templateOf(F.realSend());
+  for (const quote of [undefined, null, { ...QUOTE, message: "abc" }, { ...QUOTE, author_id: "\"><x>" }]) {
+    const m = JSON.parse(build(template, { conversation: F.ALBERT, text: "Oui.", quote })).payload.variables.message;
+    assert.equal(m.content, "<p><semantic-object>Oui.</semantic-object></p>", JSON.stringify(quote));
+    assert.deepEqual(m.computed.quotedMessages || [], []);
+  }
+  const body = P.messageBody("Oui.", "Adrien", "4123456789012345678", QUOTE);
+  assert.ok(body.content.startsWith('<blockquote itemtype="http://schema.skype.com/Reply" itemid="1795384015721">'));
+  assert.ok(body.content.endsWith("</blockquote>Oui."));
+  assert.equal(P.messageBody("Oui.", "Adrien", "4123456789012345678").content, "Oui.");
+});
+
+test("un envoi de la page qui cite ne devient jamais un modèle : il recollerait sa citation à chaque envoi", () => {
+  const quoted = F.realSend();
+  quoted.payload.variables.message.computed.quotedMessages = [{ messageId: "1795384015721", sender: "28:x", time: 1 }];
+  assert.match(P.workerSendTemplate(quoted).reason, /quotedMessages/);
 });

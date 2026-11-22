@@ -285,6 +285,7 @@ PROCESS_LABELS: dict[str, str] = {
     "teams.images": "Regarder les images des messages Teams",
     "contacts.ingest": "Ranger dans l'annuaire qui elle lit dans Teams et le courrier",
     "contacts.portrait": "Se faire une idée de qui échange avec un compte, à partir de ses derniers messages",
+    "contacts.match": "Réunir les fiches de l'annuaire qui sont la même personne (le juge des rapprochements)",
     "teams.expire": "Laisser tomber les réponses Teams restées sans accord ou sans envoi",
     "teams.answered": "Refuser ses réponses Teams auxquelles on a répondu autrement dans la discussion",
     "phone.expire": "Laisser tomber les réponses proposées sur le téléphone restées sans geste",

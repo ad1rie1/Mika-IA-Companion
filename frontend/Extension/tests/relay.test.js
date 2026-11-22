@@ -273,3 +273,28 @@ test("les modèles que le service garde reviennent à la page vérifiés, avec l
   assert.deepEqual(Object.keys(answer.data), ["group"], "un modèle qui nomme une conversation ne revient pas");
   assert.deepEqual(answer.data.group, { ...template, at: 1763900000000 });
 });
+
+test("un envoi atteint la page avec le message qu'il cite, revérifié (ADR 0305) ; une citation mal formée en tombe", () => {
+  const quote = { message: "1795384015721", author_id: "28:ed349f0c-53ac-4a32-a4c8-2bd6e5244865", author: "Albert", at: 1795384015721, preview: "Bonjour Adrien, votre prochaine leçon…" };
+  const r = relay();
+  const item = { id: "t0123456789ab", conversation: "19:a_b@unq.gbl.spaces", text: "Oui.", selfName: "Adrien" };
+  r.fromService({ kind: "send", item: { ...item, quote: { ...quote, extra: "x" } } });
+  assert.deepEqual(r.toPage.filter((d) => d.kind === "send").at(-1).item.quote, quote);
+  r.fromService({ kind: "send", item: { ...item, id: "t0123456789ac", quote: { ...quote, author_id: "<img>" } } });
+  assert.equal("quote" in r.toPage.filter((d) => d.kind === "send").at(-1).item, false);
+});
+
+test("la citation d'un message capté passe vérifiée (ADR 0305) ; illisible, elle tombe, pas le message", async () => {
+  const quote = { message: "1795384015721", author_id: "28:ed349f0c-53ac-4a32-a4c8-2bd6e5244865", author: "Albert",
+    at: 1795384015721, preview: "Bonjour" };
+  const r = relay();
+  const base = { conv: "19:a_b@unq.gbl.spaces", author: "Adrien", authorId: "8:orgid:x", time: 1795384100000,
+    type: "RichText/Html", source: "worker", mentions: [] };
+  r.fromPage({ kind: "captured", messages: [{ ...base, id: "1", text: "Oui.", quote: { ...quote, extra: 1 } },
+    { ...base, id: "2", text: "Non.", quote: { ...quote, author_id: "<x>" } }], conversations: [], self: "x" });
+  await settle();
+  const sent = r.sent.find((p) => p.kind === "captured");
+  assert.deepEqual(sent.messages[0].quote, quote);
+  assert.equal("quote" in sent.messages[1], false);
+  assert.equal(sent.messages[1].text, "Non.");
+});

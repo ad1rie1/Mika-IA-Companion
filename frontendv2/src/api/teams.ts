@@ -22,8 +22,11 @@ export interface TeamsAccount {
   name: string;
   level: Level;
   enabled: boolean;
-  /** Le dernier lot de son extension (0 : jamais). */
+  /** Le dernier lot de son extension (0 : jamais) : quand elle a eu du neuf à pousser. */
   last_batch: number;
+  /** La dernière fois que son extension s'est manifestée — un relevé, la connexion en direct, un lot (0 : jamais
+   *  depuis le démarrage du serveur). C'est sur lui qu'on juge si elle est là ; absent d'un serveur d'avant. */
+  last_seen?: number;
   /** Son nom dans Teams. */
   self_name: string;
   /** La clé de son extension, jamais en clair (`null` : pas de clé, ou un compte partagé). */
@@ -61,6 +64,20 @@ export interface TeamsMessage {
   reactions?: TeamsReaction[];
   /** L'adresse de la photo de profil de son auteur (ADR 0300 : `teamsPhotoUrl`), vide sans photo. */
   photo?: string;
+  /** Le message qu'il cite (ADR 0305) — son texte ne le reprend pas ; `null` : aucun. */
+  quote?: TeamsQuote | null;
+}
+
+/** Le message qu'un message cite (ADR 0305). */
+export interface TeamsQuote {
+  author: string;
+  author_id: string;
+  /** Un extrait (ce que Teams en a gardé). */
+  preview: string;
+  /** Son heure (ms). */
+  at: number;
+  /** Sa référence chez Mika, pour y aller ; vide : elle ne l'a pas. */
+  ref: string;
 }
 
 /** Une réaction à un message (ADR 0300). */

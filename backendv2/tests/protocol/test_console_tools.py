@@ -399,6 +399,9 @@ def test_what_she_exposes_is_set_from_the_console(world):  # noqa: F811
         return client.portal.call(getattr(settings, what), *args)
     page = client.get(f"{BASE}/expose")
     ConsoleHTML(page.text).check()
+    # ce qui attend ta décision se prête aussi, d'office (ADR 0304)
+    assert re.search(r'id="servi-a_valider" name="servi" value="a_valider" checked', page.text)
+    assert "La file « À valider »" in html_of(page)
     made = _expose(client, "console_jeton")
     assert made.status_code == 303 and "montrer=" in made.headers["location"]
     digest = read("console_mcp_digest")

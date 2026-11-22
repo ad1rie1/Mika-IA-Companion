@@ -20,7 +20,8 @@ import java.time.ZoneId
  * Les règles de Teams, pures (portées de `frontendv2/src/screens/teams/format.ts` et `markup.ts`, sans les réinventer) :
  * qui a écrit — « Toi » sur un compte à toi seulement —, l'état de ses réponses et de tes messages en attente, les
  * repères de jour du fil, une mention de toi, ce qui reste du champ une fois parti, ce qui empêche d'écrire ou de
- * préremplir. Tout se teste sur la JVM.
+ * préremplir ; et la citation (ADR 0305, calquée sur « Citer » de Teams mobile, pas encore dans le web) : ce qui se
+ * cite, son extrait, son heure, où elle mène. Tout se teste sur la JVM.
  */
 
 /** Les bornes que l'API tient (`app/me/teams.py`, en caractères) : au-delà, elle refuse — elle ne coupe jamais. */
@@ -274,6 +275,45 @@ fun mentionRanges(text: String, selfName: String, mentioned: Boolean): List<IntR
 
 /** Le dernier message de quelqu'un d'autre (celui auquel « Préremplir » répond). */
 fun lastReceived(messages: List<TeamsMessage>): TeamsMessage? = messages.lastOrNull { !it.own }
+
+// ── La citation (ADR 0305, « Citer » de Teams) ──────────────────────────
+
+/** Les conversations où un envoi cite : un tête-à-tête, un groupe (`QUOTE_KINDS` du serveur). Dans un canal ou une
+ *  réunion, une réponse est un fil : le serveur n'y cite pas, l'écran n'offre pas « Citer ». */
+val QUOTE_KINDS: Set<String> = setOf(Kinds.DM, Kinds.GROUP)
+
+/** « Citer » s'offre sur ce message : il a sa référence (le serveur cite d'après elle), la conversation cite, et tu
+ *  peux écrire de ce compte (un compte qu'on ne connaît pas encore n'ouvre que la lecture). */
+fun citable(m: TeamsMessage, kind: String, a: TeamsAccount?): Boolean =
+    m.ref.isNotBlank() && kind in QUOTE_KINDS && capsOf(a).write
+
+/** L'extrait d'un message cité, ses blancs serrés en une ligne (l'écran le coupe à deux lignes au-dessus du champ, à
+ *  trois dans la bulle). */
+fun quoteExcerpt(text: String): String = text.replace(Regex("""\s+"""), " ").trim()
+
+/** Quand le message cité a été écrit, en petit : l'heure aujourd'hui, sinon le jour et l'heure (« hier 21:41 »,
+ *  « lun. 08:12 », « 28 oct. 13:31 ») ; vide sans heure. */
+fun quoteWhen(at: Long, now: Long, zone: ZoneId = ZoneId.systemDefault()): String {
+    val day = MoiDates.short(at, now, zone)
+    val time = MoiDates.clock(at, zone)
+    return if (day.isEmpty() || day == time) day else "$day $time"
+}
+
+/** Le message du fil chargé qu'une citation désigne (sa référence), pour y aller ; `null` : le message cité n'est pas
+ *  chez Mika, ou pas parmi les messages chargés — l'appui ne mène à rien. */
+fun quoteTarget(q: TeamsQuote, messages: List<TeamsMessage>): String? =
+    q.ref.takeIf { ref -> ref.isNotBlank() && messages.any { it.ref == ref } }
+
+/** Qui a écrit le message cité, tel que la citation le dit ; à défaut, l'auteur du message désigné s'il est chargé
+ *  (comme le fil le nomme) ; sinon « Quelqu'un » (comme le web). */
+fun quoteAuthor(q: TeamsQuote, messages: List<TeamsMessage>, a: TeamsAccount?): String =
+    q.author.trim().ifEmpty {
+        val target = quoteTarget(q, messages)?.let { ref -> messages.first { it.ref == ref } }
+        target?.let { authorLabel(it, a) } ?: SOMEONE
+    }
+
+/** Ce que dit une citation dont on ne sait pas l'auteur. */
+const val SOMEONE = "Quelqu'un"
 
 // ── Ce que tu as écrit toi-même et qui n'est pas encore dans le fil (ADR 0189) ──
 

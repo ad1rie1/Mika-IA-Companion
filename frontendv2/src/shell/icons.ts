@@ -18,6 +18,8 @@ export const ICONS = {
   archive: `<rect x="3" y="4" width="18" height="4.5" rx="1"/><path d="M5 8.5V19a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8.5M10 12.5h4"/>`,
   trash: `<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>`,
   reply: `<path d="M9.5 14.5 4.5 9.5l5-5"/><path d="M4.5 9.5H14a6 6 0 0 1 6 6v4"/>`,
+  // les guillemets du « Citer » de Teams
+  quote: `<path d="M10 7H6.5A1.5 1.5 0 0 0 5 8.5V11a1 1 0 0 0 1 1h3.5v.5c0 2-1.2 3.4-3 4"/><path d="M19 7h-3.5A1.5 1.5 0 0 0 14 8.5V11a1 1 0 0 0 1 1h3.5v.5c0 2-1.2 3.4-3 4"/>`,
   "reply-all": `<path d="M7.5 14.5 2.5 9.5l5-5"/><path d="M12.5 14.5l-5-5 5-5"/><path d="M7.5 9.5H15a6 6 0 0 1 6 6v4"/>`,
   forward: `<path d="m14.5 14.5 5-5-5-5"/><path d="M19.5 9.5H10a6 6 0 0 0-6 6v4"/>`,
   more: `<circle cx="5.5" cy="12" r="1.3" fill="currentColor"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/><circle cx="18.5" cy="12" r="1.3" fill="currentColor"/>`,

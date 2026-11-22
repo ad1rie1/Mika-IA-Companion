@@ -381,6 +381,8 @@ $("diagnose").addEventListener("click", async () => {
     "Commandes de la page au worker : " + (r.worker ? (r.worker.commands || 0) + " vue(s), " + (r.worker.templates || 0)
       + " envoi(s) de la page lu(s) comme modèle" + (r.worker.templateRefused ? ", " + r.worker.templateRefused
         + " écarté(s)" + (r.worker.templateIssue ? " (le dernier : " + r.worker.templateIssue + ")" : "") : "") : "—"),
+    // la forme de la dernière commande écartée (chemins et types, jamais une valeur) : à joindre à un signalement
+    ...(r.worker && r.worker.templateShape ? ["Forme de la commande écartée : " + r.worker.templateShape] : []),
     "Base locale : " + (r.idb.available ? r.idb.syncs + " synchro(s), la dernière en " + r.idb.lastSyncMs + " ms, "
       + r.idb.conversations + " conversation(s) suivie(s), " + r.idb.read + " relue(s) ciblées, " + r.idb.messages
       + " message(s), " + r.idb.errors + " erreur(s)" : "indisponible dans ce navigateur"),

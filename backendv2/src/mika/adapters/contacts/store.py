@@ -11,7 +11,10 @@
   (``visible``) ne disent que ce que ses vues visibles disent : le nom qu'il porte là, ces identifiants-là.
 - **Réunir, séparer** : ``merge`` (une opératrice, ou une preuve) déplace identifiants, vues et membres ; ``detach``
   sépare un identifiant et écarte la paire des suggestions ; ``suggestions`` rapproche par le nom seul, sans jamais
-  réunir.
+  réunir. Le juge (ADR 0304) : ``likenesses`` lui soumet ce qui pourrait être la même personne (les suggestions, des
+  mots rares des noms en commun) ; ses avis (``judgements``) valent sur l'empreinte des fiches (``bases``) ; ce dont il
+  est sûr se réunit (``unite``, comme une preuve, gardé dans ``unions``). Ses avis et ses réunions partent avec leurs
+  fiches ; réunie, une fiche perd ses avis (ils se refont), et ses réunions suivent la fiche gardée.
 - **Un profil Teams** (``Observation.joins``) : son e-mail et ses numéros vont au contact de sa personne ; l'e-mail
   déjà à un autre contact les réunit (``_prove`` : on garde celui qui a le plus d'histoire ; jamais deux contacts
   reliés à deux personnes différentes de l'identité), un numéro déjà à quelqu'un d'autre reste où il est. Son
@@ -53,6 +56,7 @@ from sqlalchemy.orm import Session, aliased, sessionmaker
 from mika.adapters.contacts.models import (
     ACCOUNT,
     PERSON,
+    PRINT,
     REF,
     VALUE,
     WORD,
@@ -61,15 +65,19 @@ from mika.adapters.contacts.models import (
     DismissedRow,
     ForgottenRow,
     IdentifierRow,
+    JudgeCallRow,
+    JudgementRow,
     NoteForgottenRow,
     NoteRow,
     PortraitRow,
     SightingRow,
     ThreadRow,
+    UnionRow,
     fit,
 )
 from mika.adapters.database import Target, as_target
 from mika.ports.contacts import (
+    APART,
     COMPANY,
     CONTACT_PREFIX,
     DOMAIN,
@@ -85,6 +93,8 @@ from mika.ports.contacts import (
     PHONE,
     PHONE_APP,
     PHONE_PREFIX,
+    REASON_MAX,
+    SAME,
     TEAMS_ID,
     TEAMS_PREFIX,
     TENANT,
@@ -93,6 +103,10 @@ from mika.ports.contacts import (
     ContactRef,
     ContactSheet,
     Identifier,
+    Joined,
+    JudgeCall,
+    Judgement,
+    Likeness,
     Note,
     Observation,
     Portrait,
@@ -105,6 +119,7 @@ from mika.ports.contacts import (
     normalized,
     note_print,
     org_domain,
+    pair_basis,
     phone_app_values,
     relearned,
 )
@@ -112,6 +127,7 @@ from mika.ports.paging import Page, fold_text, words_of
 from mika.ports.sql import CONTACTS, insert_ignore, upsert
 
 C, N, S, D, T = ContactRow, IdentifierRow, SightingRow, DismissedRow, ThreadRow
+JR = JudgementRow
 NT, NF, P = NoteRow, NoteForgottenRow, PortraitRow
 
 #: un nom vu, au plus (caractères)
@@ -126,6 +142,13 @@ SAME_NAME_MAX = 20
 THREADS_MAX = 20
 #: un prénom seul se propose s'il a au moins tant de lettres (« Jo » ne rapproche personne)
 FIRST_NAME_MIN = 3
+#: le juge des rapprochements (ADR 0304) : au plus tant de paires à lui soumettre ; un mot du nom les rapproche s'il a
+#: au moins tant de lettres et que peu de fiches le portent (au plus tant) — un nom de famille, pas « ext » ni un prénom
+#: courant ; ses appels gardés tant de temps (ses plafonds se comptent sur un jour)
+LIKENESSES_MAX = 2000
+RARE_WORD_MIN = 4
+RARE_WORD_HOLDERS = 10
+JUDGE_CALLS_KEPT = 30 * 86_400_000_000
 #: ce qui sépare les mots d'un nom comparé (``Rousseau, Gilles`` : deux mots)
 _NAME_MARKS = str.maketrans({c: " " for c in ".,;:()[]{}\"'«»“”‘’/\\|_"})
 
@@ -666,6 +689,10 @@ class ContactsStore:
             if peer != int(keep.id):
                 insert_ignore(s, D, {"a": min(peer, int(keep.id)), "b": max(peer, int(keep.id))})
         s.execute(delete(D).where(or_(D.a == other.id, D.b == other.id)))
+        # les avis du juge sur elle ne valent plus (la fiche gardée a changé) ; les réunions qu'il avait faites dans
+        # elle suivent la fiche gardée (ADR 0304)
+        s.execute(delete(JR).where(or_(JR.a == other.id, JR.b == other.id)))
+        s.execute(update(UnionRow).where(UnionRow.keep == other.id).values(keep=keep.id))
         s.delete(other)
         s.flush()
         self._refresh(s, keep.id)
@@ -689,6 +716,10 @@ class ContactsStore:
             s.add(row)
             s.flush()
             ident.contact, ident.generic = row.id, False
+            if old is not None:  # ce que le juge y avait réuni sous ce nom n'y est plus (ADR 0304)
+                left = set(s.scalars(select(S.name).where(S.identifier == ident.id, S.name != "")))
+                if left:
+                    s.execute(delete(UnionRow).where(UnionRow.keep == old.id, UnionRow.gone.in_(sorted(left))))
             if old is not None:  # séparés : les suggestions ne les rapprochent plus
                 insert_ignore(s, D, {"a": min(row.id, old.id), "b": max(row.id, old.id)})
             s.flush()
@@ -706,76 +737,190 @@ class ContactsStore:
 
     def suggestions(self, limit: int = 50) -> list[Suggestion]:
         with self._lock, self._session() as s:
-            rows = s.execute(select(C.id, C.name, C.person).where(C.kind == PERSON_KIND).order_by(C.id)).all()
-            dismissed = {(int(a), int(b)) for a, b in s.execute(select(D.a, D.b)).all()}
-            # ceux qu'on nomme d'un prénom seul : une personne dont on lui a parlé, un expéditeur du téléphone
-            informal = {int(c) for c in s.scalars(select(N.contact).where(N.kind.in_(OPAQUE_KINDS)).distinct())}
-            # ceux qui ne sont qu'un nom raconté : face à une fiche reliée à une personne qui lui parle, c'est l'identité
-            # qui décide (« C'est la personne dont on lui a parlé » : sa mémoire le saura), pas l'annuaire
-            told_only = {int(c) for c in s.scalars(select(N.contact).where(N.kind == TOLD_NAME).distinct())} - {
-                int(c) for c in s.scalars(select(N.contact).where(N.kind != TOLD_NAME).distinct())}
-        refs = {int(r.id): (ContactRef(int(r.id), PERSON_KIND, r.name), r.person or "") for r in rows}
-        full: dict[str, list[int]] = {}
-        spelled: dict[tuple[str, str], list[int]] = {}
-        initials: dict[tuple[str, str], list[int]] = {}
-        #: un prénom seul (des fiches qu'on nomme ainsi) ; le prénom des noms complets
-        alone: dict[str, list[int]] = {}
-        firsts: dict[str, list[int]] = {}
-        for r in rows:
-            words = name_words(r.name)
-            if not _lettered(r.name) or "@" in r.name:
+            people = self._people(s)
+            rules = _rule_pairs(people.rows, people.informal)
+            said = {(j.a, j.b): j for j in self._judgements_in(s, None) if j.verdict}
+            bases = self._bases(s, {x for pair in (*rules, *said) for x in pair})
+        valid = {pair: j for pair, j in said.items()
+                 if pair[0] in bases and pair[1] in bases and j.basis == pair_basis(bases[pair[0]], bases[pair[1]])}
+        found: list[tuple[tuple[int, int, int, int], Suggestion]] = []
+        rank = {"same_name": 0, "initial": 1, "first_name": 2, "words": 3}
+        for (a, b), reason in {**{p: "words" for p, j in valid.items() if j.verdict == SAME}, **rules}.items():
+            if a not in people.refs or b not in people.refs or not people.allowed(a, b):
                 continue
-            if len(words) == 1:
-                if int(r.id) in informal and len(words[0]) >= FIRST_NAME_MIN:
-                    alone.setdefault(words[0], []).append(int(r.id))
+            j = valid.get((a, b))
+            if j is not None and j.verdict == APART and j.sure:
+                continue  # le juge les sait deux : elles ne t'attendent plus
+            if j is None and reason == "words":
                 continue
-            if len(words) < 2:
+            # ce que le juge croit la même personne d'abord, puis ce qu'il n'a pas vu, puis ce qu'il croit deux
+            order = 0 if j is not None and j.verdict == SAME else 2 if j is not None else 1
+            found.append(((order, rank.get(reason, 4), a, b), Suggestion(
+                people.refs[a], people.refs[b], reason, verdict=j.verdict if j is not None else "",
+                why=j.reason if j is not None else "")))
+        found.sort(key=lambda kv: kv[0])
+        return [x for _, x in found[:max(1, limit)]]
+
+    def _people(self, s: Session) -> _People:
+        """Les personnes de l'annuaire, et ce qui borne leurs rapprochements : les paires qu'une opératrice a dites
+        différentes, celles qu'on nomme d'un prénom seul, celles qui ne sont qu'un nom raconté."""
+        rows = s.execute(select(C.id, C.name, C.person).where(C.kind == PERSON_KIND).order_by(C.id)).all()
+        dismissed = {(int(a), int(b)) for a, b in s.execute(select(D.a, D.b)).all()}
+        # ceux qu'on nomme d'un prénom seul : une personne dont on lui a parlé, un expéditeur du téléphone
+        informal = {int(c) for c in s.scalars(select(N.contact).where(N.kind.in_(OPAQUE_KINDS)).distinct())}
+        # ceux qui ne sont qu'un nom raconté : face à une fiche reliée à une personne qui lui parle, c'est l'identité
+        # qui décide (« C'est la personne dont on lui a parlé » : sa mémoire le saura), pas l'annuaire
+        told_only = {int(c) for c in s.scalars(select(N.contact).where(N.kind == TOLD_NAME).distinct())} - {
+            int(c) for c in s.scalars(select(N.contact).where(N.kind != TOLD_NAME).distinct())}
+        return _People(rows, dismissed, informal, told_only)
+
+    # ── le juge des rapprochements (ADR 0304) ──
+    def likenesses(self, limit: int = LIKENESSES_MAX) -> list[Likeness]:
+        with self._lock, self._session() as s:
+            people = self._people(s)
+            rules = _rule_pairs(people.rows, people.informal)
+            names: dict[int, set[str]] = {int(r.id): {r.name} for r in people.rows if r.name}
+            for cid, name in s.execute(select(N.contact, S.name).join(S, S.identifier == N.id)
+                                       .join(C, C.id == N.contact)
+                                       .where(C.kind == PERSON_KIND, S.name != "").distinct()).all():
+                names.setdefault(int(cid), set()).add(name)
+        words: dict[int, set[str]] = {}
+        #: le premier mot de chacun de ses noms : un prénom, le plus souvent
+        firsts: dict[int, set[str]] = {}
+        for cid, found in names.items():
+            for n in found:
+                tokens = name_tokens(n) if _lettered(n) and "@" not in n else []
+                words.setdefault(cid, set()).update(tokens)
+                if tokens:
+                    firsts.setdefault(cid, set()).add(tokens[0])
+        holders: dict[str, list[int]] = {}
+        for cid, mine in words.items():
+            for w in mine:
+                holders.setdefault(w, []).append(cid)
+        # un mot rare de plusieurs lettres que deux fiches portent : un nom de famille, quelle que soit sa forme —
+        # deux de ces mots, ou un seul qui n'ouvre pas les deux noms (le même prénom seul ne rapproche personne)
+        shared: dict[tuple[int, int], int] = {}
+        opening: dict[tuple[int, int], int] = {}
+        for w, ids in holders.items():
+            if len(w) < RARE_WORD_MIN or not 1 < len(ids) <= RARE_WORD_HOLDERS:
                 continue
-            if len(words[0]) >= FIRST_NAME_MIN:
-                firsts.setdefault(words[0], []).append(int(r.id))
-            short = [w for w in words if len(w) == 1]
-            if short:  # « G. Rousseau » : une initiale et un nom
-                if len(words) == 2 and len(short) == 1:
-                    initials.setdefault((short[0], next(w for w in words if len(w) > 1)), []).append(int(r.id))
+            ids.sort()
+            for x, a in enumerate(ids):
+                for b in ids[x + 1:]:
+                    shared[(a, b)] = shared.get((a, b), 0) + 1
+                    if w in firsts.get(a, set()) and w in firsts.get(b, set()):
+                        opening[(a, b)] = opening.get((a, b), 0) + 1
+        strength = {"same_name": 100, "initial": 80, "first_name": 40}
+        out: dict[tuple[int, int], Likeness] = {}
+        for (a, b), n in shared.items():
+            if n < 2 and opening.get((a, b), 0) >= n:
                 continue
-            full.setdefault(" ".join(sorted(words)), []).append(int(r.id))
-            for i, w in enumerate(words):
-                for j, v in enumerate(words):
-                    if i != j:
-                        spelled.setdefault((w[0], v), []).append(int(r.id))
-        pairs: dict[tuple[int, int], str] = {}
-        for ids in full.values():
-            if 1 < len(ids) <= SAME_NAME_MAX:
-                for x, a in enumerate(ids):
-                    for b in ids[x + 1:]:
-                        pairs.setdefault((min(a, b), max(a, b)), "same_name")
-        for key, ids in initials.items():
-            whole = sorted(set(spelled.get(key, ())))
-            if len(whole) > SAME_NAME_MAX:
-                continue
-            for a in ids:
-                for b in whole:
-                    if a != b:
-                        pairs.setdefault((min(a, b), max(a, b)), "initial")
-        for word, ids in alone.items():  # plus faible : le même prénom, d'un côté sans nom de famille
-            others = sorted({*ids, *firsts.get(word, ())})
-            if len(others) > SAME_NAME_MAX:
-                continue
-            for a in ids:
-                for b in others:
-                    if a != b:
-                        pairs.setdefault((min(a, b), max(a, b)), "first_name")
-        rank = {"same_name": 0, "initial": 1, "first_name": 2}
+            common = len(words.get(a, set()) & words.get(b, set()))
+            out[(a, b)] = Likeness(a, b, "words", 10 * n + 2 * common)
+        for (a, b), rule in rules.items():
+            extra = out[(a, b)].strength if (a, b) in out else 0
+            out[(a, b)] = Likeness(a, b, rule, strength[rule] + extra)
+        kept = [x for x in out.values() if people.allowed(x.a, x.b)]
+        kept.sort(key=lambda x: (-x.strength, x.a, x.b))
+        return kept[:max(1, limit)]
+
+    def bases(self, ids: Collection[int]) -> dict[int, str]:
+        with self._lock, self._session() as s:
+            return self._bases(s, ids)
+
+    @staticmethod
+    def _bases(s: Session, ids: Collection[int]) -> dict[int, str]:
+        wanted = sorted({int(i) for i in ids})
+        parts: dict[int, list[str]] = {}
+        for chunk in _chunks(wanted):
+            for r in s.execute(select(C.id, C.kind, C.person, C.org).where(C.id.in_(chunk))).all():
+                parts[int(r.id)] = [r.kind, r.person or "", str(int(r.org or 0))]
+            for cid, kind, value in s.execute(select(N.contact, N.kind, N.value).where(N.contact.in_(chunk))).all():
+                if int(cid) in parts:
+                    parts[int(cid)].append(f"id\n{kind}\n{value}")
+            for cid, name in s.execute(select(N.contact, S.name).join(S, S.identifier == N.id)
+                                       .where(N.contact.in_(chunk), S.name != "").distinct()).all():
+                if int(cid) in parts:
+                    parts[int(cid)].append(f"name\n{fold_text(name)}")
+        return {cid: hashlib.sha256("\n\n".join([*got[:3], *sorted(set(got[3:]))]).encode("utf-8", "surrogatepass"))
+                .hexdigest()[:32] for cid, got in parts.items()}
+
+    def judgements(self, pairs: Collection[tuple[int, int]] | None = None) -> list[Judgement]:
+        with self._lock, self._session() as s:
+            return self._judgements_in(s, pairs)
+
+    @staticmethod
+    def _judgements_in(s: Session, pairs: Collection[tuple[int, int]] | None) -> list[Judgement]:
+        wanted = None if pairs is None else {(min(int(a), int(b)), max(int(a), int(b))) for a, b in pairs}
+        if wanted is not None and not wanted:
+            return []
+        query = select(JR)
+        if wanted is not None:
+            query = query.where(JR.a.in_(sorted({a for a, _ in wanted})))
         out = []
-        for (a, b), reason in sorted(pairs.items(), key=lambda kv: (rank.get(kv[1], 3), kv[0])):
-            (ra, pa), (rb, pb) = refs[a], refs[b]
-            if (a, b) in dismissed or (pa and pb and pa != pb) or (a in told_only and pb and not pa) \
-                    or (b in told_only and pa and not pb):
-                continue
-            out.append(Suggestion(ra, rb, reason))
-            if len(out) >= max(1, limit):
-                break
+        for r in s.scalars(query.order_by(JR.a, JR.b)):
+            if wanted is None or (int(r.a), int(r.b)) in wanted:
+                out.append(Judgement(int(r.a), int(r.b), r.verdict or "", bool(r.sure), r.reason or "", r.basis or "",
+                                     int(r.at or 0), r.call_id or ""))
         return out
+
+    def judged(self, call: JudgeCall | None, verdicts: Sequence[Judgement]) -> int:
+        n = 0
+        with self._lock, self._session.begin() as s:
+            if call is not None:
+                s.add(JudgeCallRow(at=int(call.at), call_id=fit(call.call_id, REF), cards=max(0, int(call.cards)),
+                                   ok=bool(call.ok)))
+                s.execute(delete(JudgeCallRow).where(JudgeCallRow.at < int(call.at) - JUDGE_CALLS_KEPT))
+            for v in verdicts:
+                a, b = sorted((int(v.a), int(v.b)))
+                if a == b or v.verdict not in (SAME, APART, "") or s.get(C, a) is None or s.get(C, b) is None:
+                    continue  # une fiche réunie ou oubliée pendant l'appel : rien à en dire
+                upsert(s, JR, {"a": a, "b": b, "basis": fit(v.basis, PRINT), "verdict": v.verdict,
+                               "sure": bool(v.sure and v.verdict), "reason": (v.reason or "")[:REASON_MAX],
+                               "at": int(v.at or (call.at if call is not None else 0)),
+                               "call_id": fit(v.call_id or (call.call_id if call is not None else ""), REF)},
+                       keys=("a", "b"))
+                n += 1
+        return n
+
+    def judge_calls(self, *, since: int = 0) -> list[JudgeCall]:
+        with self._lock, self._session() as s:
+            rows = s.scalars(select(JudgeCallRow).where(JudgeCallRow.at >= int(since))
+                             .order_by(JudgeCallRow.at.desc(), JudgeCallRow.id.desc())).all()
+        return [JudgeCall(int(r.at or 0), r.call_id or "", int(r.cards or 0), bool(r.ok)) for r in rows]
+
+    def unite(self, a: int, b: int, *, reason: str = "", call_id: str = "") -> int:
+        if int(a) == int(b):
+            return 0
+        with self._lock, self._session.begin() as s:
+            ra, rb = s.get(C, int(a)), s.get(C, int(b))
+            if ra is None or rb is None or self._told_apart(s, ra, rb):
+                return 0
+            names = {int(ra.id): ra.name or "", int(rb.id): rb.name or ""}
+            keep = self._prove(s, int(a), int(b), set())
+            if not keep:
+                return 0
+            gone = int(b) if keep == int(a) else int(a)
+            s.add(UnionRow(keep=keep, kept=names[keep], gone=names[gone], reason=(reason or "")[:REASON_MAX],
+                           at=self._now(), call_id=fit(call_id, REF)))
+            return keep
+
+    @staticmethod
+    def _told_apart(s: Session, ra: ContactRow, rb: ContactRow) -> bool:
+        """Une fiche qui porte un nom raconté, reliée à personne, face à une fiche reliée à quelqu'un qui lui parle :
+        c'est l'identité qui les relie (sa mémoire le saura), jamais le juge — même quand le nom raconté a d'abord
+        rejoint une autre fiche (la chaîne ne contourne pas la règle)."""
+        def told(cid: int) -> bool:
+            return s.scalar(select(N.id).where(N.contact == cid, N.kind == TOLD_NAME).limit(1)) is not None
+        return bool((ra.person and not rb.person and told(int(rb.id)))
+                    or (rb.person and not ra.person and told(int(ra.id))))
+
+    def joined(self, *, since: int = 0, limit: int = 100) -> list[Joined]:
+        with self._lock, self._session() as s:
+            rows = s.scalars(select(UnionRow).where(UnionRow.at >= int(since))
+                             .order_by(UnionRow.at.desc(), UnionRow.id.desc()).limit(max(1, int(limit)))).all()
+        return [Joined(int(r.keep), r.kept or "", r.gone or "", r.reason or "", int(r.at or 0), r.call_id or "")
+                for r in rows]
 
     # ── les curseurs des sources ──
     def cursor(self, name: str) -> int:
@@ -935,6 +1080,9 @@ class ContactsStore:
                         if subject.startswith(MAIL_PREFIX) else TOLD_NAME
                     raw = subject if kind == TOLD_NAME else subject.split(":", 1)[1]
                     wanted = [(kind, fit(normalized(kind, raw), VALUE))]
+                    if kind == TEAMS_ID:  # sa forme reçue telle quelle, rangée avant la forme canonique (ADR 0304)
+                        wanted.append((kind, fit(raw.strip().lower(), VALUE)))
+                    wanted = list(dict.fromkeys(wanted))
                 wanted = [(k, v) for k, v in wanted if v]
                 if not wanted:
                     return 0
@@ -975,7 +1123,7 @@ class ContactsStore:
         row = s.get(C, contact)
         if row is None:
             return 0
-        n = self._drop_notes_naming(s, contact) if row.kind == PERSON_KIND else 0
+        n = self._drop_notes_naming(s, contact) + self._drop_judged_naming(s, contact) if row.kind == PERSON_KIND else 0
         rows = s.execute(select(N.id, N.kind, N.value).where(N.contact == contact)).all()
         marks += [(r.kind, r.value) for r in rows]
         n += self._drop_identifiers(s, [int(r.id) for r in rows])
@@ -1000,6 +1148,27 @@ class ContactsStore:
         gone = [int(i) for i, text in s.execute(select(NT.id, NT.text).where(NT.contact != contact))
                 if _names_in(text or "", wanted)]
         return int(s.execute(delete(NT).where(NT.id.in_(gone))).rowcount or 0) if gone else 0
+
+    @staticmethod
+    def _drop_judged_naming(s: Session, contact: int) -> int:
+        """Les avis du juge et ses réunions qui nomment cette personne (un de ses noms vus), même sur d'autres paires :
+        oubliée, elle ne se redit pas par eux (ADR 0304). Rend combien de lignes."""
+        names = set(s.scalars(select(S.name).join(N, N.id == S.identifier).where(N.contact == contact, S.name != "")))
+        row = s.get(C, contact)
+        if row is not None and row.name:
+            names.add(row.name)
+        wanted = _name_index(names)
+        if not wanted:
+            return 0
+        pairs = [(int(a), int(b)) for a, b, reason in s.execute(select(JR.a, JR.b, JR.reason))
+                 if _names_in(reason or "", wanted)]
+        n = 0
+        for a, b in pairs:
+            n += int(s.execute(delete(JR).where(JR.a == a, JR.b == b)).rowcount or 0)
+        gone = [int(i) for i, kept, left, reason in s.execute(select(UnionRow.id, UnionRow.kept, UnionRow.gone,
+                                                                      UnionRow.reason))
+                if _names_in(" · ".join((kept or "", left or "", reason or "")), wanted)]
+        return n + (int(s.execute(delete(UnionRow).where(UnionRow.id.in_(gone))).rowcount or 0) if gone else 0)
 
     def _prune_org(self, s: Session, org: int) -> int:
         """Une organisation sans membre ni adresse générique part (elle n'existait que par ceux qui sont partis), avec
@@ -1029,6 +1198,9 @@ class ContactsStore:
             return 0
         s.execute(update(C).where(C.org.in_(ids)).values(org=0))
         s.execute(delete(D).where(or_(D.a.in_(ids), D.b.in_(ids))))
+        # ce que le juge en a dit, les réunions qu'il y a faites (leurs noms) : partis avec elles (ADR 0304)
+        s.execute(delete(JR).where(or_(JR.a.in_(ids), JR.b.in_(ids))))
+        s.execute(delete(UnionRow).where(UnionRow.keep.in_(ids)))
         n = 0
         for row in (NT, NF, P):  # ce qu'elle en savait, ses empreintes d'oubli, ses portraits : partis avec lui
             n += int(s.execute(delete(row).where(row.contact.in_(ids))).rowcount or 0)
@@ -1104,6 +1276,99 @@ class ContactsStore:
     def close(self) -> None:
         with self._lock:
             self._engine.dispose()
+
+
+class _People:
+    """Les personnes de l'annuaire (``refs`` : leur référence et la personne qui leur est reliée) et ce qui borne
+    leurs rapprochements (``allowed``)."""
+
+    __slots__ = ("dismissed", "informal", "person", "refs", "rows", "told_only")
+
+    def __init__(self, rows: Sequence[Any], dismissed: set[tuple[int, int]], informal: set[int],
+                 told_only: set[int]) -> None:
+        self.rows, self.dismissed, self.informal, self.told_only = rows, dismissed, informal, told_only
+        self.refs = {int(r.id): ContactRef(int(r.id), PERSON_KIND, r.name) for r in rows}
+        self.person = {int(r.id): r.person or "" for r in rows}
+
+    def allowed(self, a: int, b: int) -> bool:
+        """Deux fiches qui peuvent se rapprocher : pas dites différentes par une opératrice, pas reliées à deux
+        personnes différentes, pas un nom raconté face à quelqu'un qui lui parle (l'identité en décide)."""
+        pa, pb = self.person.get(a, ""), self.person.get(b, "")
+        return not ((min(a, b), max(a, b)) in self.dismissed or (pa and pb and pa != pb)
+                    or (a in self.told_only and pb and not pa) or (b in self.told_only and pa and not pb))
+
+
+def _rule_pairs(rows: Sequence[Any], informal: set[int]) -> dict[tuple[int, int], str]:
+    """Les paires que le nom seul rapproche (``Suggestion.reason``) : le même nom complet, une initiale et le même nom,
+    et, plus faible, un prénom seul (d'une fiche qu'on nomme ainsi) et le prénom d'un nom complet."""
+    full: dict[str, list[int]] = {}
+    spelled: dict[tuple[str, str], list[int]] = {}
+    initials: dict[tuple[str, str], list[int]] = {}
+    #: un prénom seul (des fiches qu'on nomme ainsi) ; le prénom des noms complets
+    alone: dict[str, list[int]] = {}
+    firsts: dict[str, list[int]] = {}
+    for r in rows:
+        words = name_words(r.name)
+        if not _lettered(r.name) or "@" in r.name:
+            continue
+        if len(words) == 1:
+            if int(r.id) in informal and len(words[0]) >= FIRST_NAME_MIN:
+                alone.setdefault(words[0], []).append(int(r.id))
+            continue
+        if len(words) < 2:
+            continue
+        if len(words[0]) >= FIRST_NAME_MIN:
+            firsts.setdefault(words[0], []).append(int(r.id))
+        short = [w for w in words if len(w) == 1]
+        if short:  # « G. Rousseau » : une initiale et un nom
+            if len(words) == 2 and len(short) == 1:
+                initials.setdefault((short[0], next(w for w in words if len(w) > 1)), []).append(int(r.id))
+            continue
+        full.setdefault(" ".join(sorted(words)), []).append(int(r.id))
+        for i, w in enumerate(words):
+            for j, v in enumerate(words):
+                if i != j:
+                    spelled.setdefault((w[0], v), []).append(int(r.id))
+    pairs: dict[tuple[int, int], str] = {}
+    for ids in full.values():
+        if 1 < len(ids) <= SAME_NAME_MAX:
+            for x, a in enumerate(ids):
+                for b in ids[x + 1:]:
+                    pairs.setdefault((min(a, b), max(a, b)), "same_name")
+    for key, ids in initials.items():
+        whole = sorted(set(spelled.get(key, ())))
+        if len(whole) > SAME_NAME_MAX:
+            continue
+        for a in ids:
+            for b in whole:
+                if a != b:
+                    pairs.setdefault((min(a, b), max(a, b)), "initial")
+    for word, ids in alone.items():  # plus faible : le même prénom, d'un côté sans nom de famille
+        others = sorted({*ids, *firsts.get(word, ())})
+        if len(others) > SAME_NAME_MAX:
+            continue
+        for a in ids:
+            for b in others:
+                if a != b:
+                    pairs.setdefault((min(a, b), max(a, b)), "first_name")
+    return pairs
+
+
+#: les mots d'un nom comparés par le juge : ses lettres et ses chiffres, repliés — un trait d'union, une parenthèse,
+#: un crochet séparent (« MASSOL-EXT » : ``massol``, ``ext``)
+_TOKENS = re.compile(r"[a-z0-9]+")
+
+
+def name_tokens(name: str) -> list[str]:
+    """Les mots d'un nom tels que le juge les rapproche (ADR 0304) : repliés, séparés par tout ce qui n'est ni lettre
+    ni chiffre, ceux qui ont une lettre — sans rien retirer d'autre : c'est leur rareté dans l'annuaire qui dit s'ils
+    comptent (« ext », que portent tous les prestataires, ne rapproche personne)."""
+    return [w for w in _TOKENS.findall(fold_text(name or "")) if any(c.isalpha() for c in w)]
+
+
+def _chunks(values: Sequence[int], size: int = 500) -> Iterable[list[int]]:
+    for i in range(0, len(values), size):
+        yield list(values[i:i + size])
 
 
 class _Seen:

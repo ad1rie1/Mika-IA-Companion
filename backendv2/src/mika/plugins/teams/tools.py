@@ -43,7 +43,7 @@ from mika.plugins.teams import (
     writer_of,
 )
 from mika.plugins.teams.accounts import Accounts
-from mika.plugins.teams.reactions import reactions_said
+from mika.plugins.teams.reactions import quote_said, reactions_said
 from mika.plugins.teams.triage import rule_of
 from mika.plugins.teams.voice import voice_text
 from mika.ports.drafts import to_fill
@@ -95,7 +95,8 @@ def _line(frame: Any, m: Any) -> str:
     # celle de la personne du compte sous le même prénom
     owner = writer_of(frame, m.account) if m.own or any(r.mine for r in m.reactions) else ""
     who = owner if m.own else inert(m.author, 80) or "quelqu'un"
-    return f"[{m.ref}] {_when(frame, m.at)} — {who} : {inert(m.text, 600)}{reactions_said(m.reactions, owner)}"
+    return (f"[{m.ref}] {_when(frame, m.at)} — {who} : {quote_said(m.quote)}{inert(m.text, 600)}"
+            f"{reactions_said(m.reactions, owner)}")
 
 
 class ListArgs(BaseModel):
@@ -105,7 +106,13 @@ class ListArgs(BaseModel):
 
 class ReadArgs(BaseModel):
     message: str = Field(min_length=1, max_length=40, description=phrase("teams.tools.read.message"))
-    limit: int = Field(default=15, ge=1, le=40)
+    limit: int = Field(default=15, ge=1, le=40, description=phrase("teams.tools.read.limit"))
+
+
+#: un fil relu, au plus (caractères) : au-delà, les plus anciens tombent d'abord, et la fin dit d'où remonter
+READ_CHARS = 12_000
+#: après le message relu, ses suivants s'ils sont au plus tant (les derniers du fil) ; au-delà, la fin dit combien
+AFTER = 5
 
 
 class DraftArgs(BaseModel):
@@ -146,14 +153,45 @@ async def teams_read(args: ReadArgs, ctx: Any) -> Any:
     m = port.message(args.message.strip().strip("[]"))
     if m is None:
         return ToolResult(ok=False, content="Je ne trouve pas ce message.")
-    before = port.thread(m.account, m.conversation, args.limit, before=m.at + 1)
-    after = [x for x in port.thread(m.account, m.conversation, 5) if x.at > m.at]
+    shown, older, newer, total = read_span(ctx.frame, port, m, args.limit)
     title = inert(port.title(m.account, m.conversation), 80) or "sans nom"
-    text = "\n".join(_line(ctx.frame, x) for x in [*before, *after])
-    out = f"{DATA}\nConversation « {title} » :\n{cite(text, 8000)}"
+    text = "\n".join(_line(ctx.frame, x) for x in shown)
+    out = f"{DATA}\nConversation « {title} » :\n{cite(text, READ_CHARS)}\n{span_said(shown, older, newer, total)}"
     mode = MODE_OF.get(rule_of(params_of(ctx.frame), port, m.account, m.conversation, m.author).reply, "validation")
     return out + (f"\n\n--- Pour y répondre (teams_draft, message=[{m.ref}]) ---\n"
                   f"{voice_text(port.voice(m.account), mode, own=owner_of(ctx.frame, m.account) == SELF)}")
+
+
+def read_span(frame: Any, port: Any, m: Any, limit: int) -> tuple[list[Any], int, int, int]:
+    """Ce qu'elle relit d'un fil jusqu'au message ``m`` (ADR 0303) : ses ``limit`` messages jusqu'à lui, puis ses
+    suivants s'ils sont les derniers du fil (``AFTER`` au plus : plus loin, ce ne seraient pas ses suivants), le tout
+    dans ``READ_CHARS`` — les plus anciens tombent d'abord, jamais la fin qu'on a demandée. Rend ces messages, combien
+    le fil en a de plus anciens que le premier, combien de plus récents restent hors de la lecture, et combien il en
+    compte."""
+    total = port.thread_count(m.account, m.conversation)
+    upto = port.thread_count(m.account, m.conversation, before=m.at + 1)  # lui et tout ce qui le précède
+    newer = total - upto
+    before = list(port.thread(m.account, m.conversation, limit, before=m.at + 1))  # les derniers de ces ``upto``
+    after = [x for x in port.thread(m.account, m.conversation, AFTER) if x.at > m.at] if 0 < newer <= AFTER else []
+    shown = [*before, *after]
+    sizes = [len(_line(frame, x)) + 1 for x in shown]
+    while len(shown) > 1 and sum(sizes) > READ_CHARS:
+        shown, sizes = shown[1:], sizes[1:]
+    dropped = len(before) + len(after) - len(shown)  # les plus anciens, tombés de la lecture
+    kept_before = max(0, len(before) - dropped)
+    # compté sur ce que la lecture a pris, jamais sur une date : deux messages du même instant ne font pas de trou
+    return shown, upto - kept_before, newer - (len(shown) - kept_before), total
+
+
+def span_said(shown: list[Any], older: int, newer: int, total: int) -> str:
+    """La fin d'un fil relu : combien elle en a lu sur combien, d'où remonter (la référence du plus ancien lu), et
+    combien de plus récents restent hors de la lecture."""
+    said = phrase("teams.tools.read.span.read", shown=len(shown), total=total)
+    if older and shown:
+        said += phrase("teams.tools.read.span.older", older=older, ref=shown[0].ref)
+    if newer > 0:
+        said += phrase("teams.tools.read.span.newer", newer=newer)
+    return phrase("teams.tools.read.span.frame", said=said)
 
 
 def _asker(ctx: Any) -> tuple[str, ...]:
@@ -192,7 +230,10 @@ async def teams_draft(args: DraftArgs, ctx: Any) -> Any:
         return ToolResult(ok=False, content="Ta règle d'envoi ne te fait plus préparer de réponse d'elle-même dans "
                                             "cette conversation : n'en propose pas.")
     # récrite par l'autrice de Teams, s'il y en a une (ADR 0124)
-    body = await flows.written(ctx, flows.TEAMS, args.body.strip(), f"{inert(m.author, 80)} :\n{cite(m.text, 2000)}")
+    # le message auquel elle répond, et celui qu'il cite lui-même (ADR 0305)
+    answered = f"{inert(m.author, 80)} :\n" + (quote_said(m.quote).strip() + "\n" if m.quote is not None else "") \
+        + cite(m.text, 2000)
+    body = await flows.written(ctx, flows.TEAMS, args.body.strip(), answered)
     # gardée sous le compte de la conversation : elle partira de lui, sous le nom de sa personne
     draft = port.save_draft(Draft(id="", conversation=m.conversation, body=body.strip(), reply_to=m.ref,
                                   account=m.account))

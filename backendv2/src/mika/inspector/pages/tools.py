@@ -92,7 +92,9 @@ CONSOLE_ADDRESS, LENT_ADDRESS, LOCAL_ORIGIN = console_mcp.PREFIX, "/mcp/pret", "
 #: ce que la console en MCP sert au-delà de ses pages, en mots
 SERVED_PARTS = ((console_mcp.VIEWS, "Les vues de ses facultés (ses souvenirs, ses pensées, ses liens…)"),
                 (console_mcp.SUBJECTS, "Les fiches (une personne, un but, une app…) et la recherche"),
-                (console_mcp.WHY, "« Pourquoi a-t-elle dit ça ? »"))
+                (console_mcp.WHY, "« Pourquoi a-t-elle dit ça ? »"),
+                (console_mcp.QUEUE, "La file « À valider » (identités, noms à relier, rapprochements et l'avis du "
+                                    "juge)"))
 
 
 @dataclass(frozen=True, slots=True)

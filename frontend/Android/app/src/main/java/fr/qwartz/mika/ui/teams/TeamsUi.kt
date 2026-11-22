@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import fr.qwartz.mika.R
+import fr.qwartz.mika.core.AndroidClock
 import fr.qwartz.mika.core.AppGraph
 import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.MoiDates
@@ -87,13 +88,23 @@ import kotlinx.coroutines.launch
 /** Teams sur l'API du téléphone. */
 internal fun AppGraph.teamsApi(): TeamsApi = TeamsApi(moi)
 
+/** Ce que les écrans de Teams prennent de la session : l'API, relire les pastilles, l'heure. Un test JVM les donne sans
+ *  le graphe de l'app. */
+class TeamsDeps(
+    val api: TeamsApi,
+    val refreshBadges: () -> Unit = {},
+    val now: () -> Long = AndroidClock::wallMs,
+) {
+    constructor(graph: AppGraph) : this(graph.teamsApi(), { graph.me.refresh() }, graph.clock::wallMs)
+}
+
 /**
  * Ce que tous les écrans de Teams ont : l'API, ses comptes (leur niveau décide de ce qui s'offre), le sort d'un geste
  * à dire (l'écran le montre en toast), et les décisions sur ses réponses — une à la fois, une clé d'envoi par geste ;
  * faites, les pastilles se relisent ([afterDecision] : ce que l'écran relit de plus).
  */
-abstract class TeamsScreenModel(protected val graph: AppGraph) : ViewModel() {
-    protected val api = graph.teamsApi()
+abstract class TeamsScreenModel(protected val deps: TeamsDeps) : ViewModel() {
+    protected val api = deps.api
     private val notices = Channel<String>(Channel.BUFFERED)
 
     /** Le sort des gestes, une fois chacun. */
@@ -150,7 +161,7 @@ abstract class TeamsScreenModel(protected val graph: AppGraph) : ViewModel() {
             when (got) {
                 is MoiApi.Result.Ok -> {
                     say(got.value.message)
-                    graph.me.refresh()
+                    deps.refreshBadges()
                     afterDecision(r, redo = content.first() == "redo")
                 }
                 is MoiApi.Result.Failed -> {

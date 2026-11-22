@@ -91,7 +91,7 @@ private const val SEARCH_DEBOUNCE_MS = 300L
  * Les discussions (`Route.Teams`) : ses comptes (leur niveau, qui y est connecté), le compte choisi (tous, ou un
  * seul), la recherche, et les conversations, la plus récente d'abord, avec sa réponse en chemin.
  */
-class TeamsListViewModel(graph: AppGraph) : TeamsScreenModel(graph) {
+class TeamsListViewModel(deps: TeamsDeps) : TeamsScreenModel(deps) {
     var loaded by mutableStateOf<Load<Unit>>(Load.Loading)
         private set
     /** Le compte dont on lit les discussions ; vide : tous. */
@@ -199,7 +199,7 @@ class TeamsListViewModel(graph: AppGraph) : TeamsScreenModel(graph) {
 fun TeamsListScreen(graph: AppGraph) {
     val shell = LocalShell.current
     val session = rememberSessionKey(graph)
-    val vm: TeamsListViewModel = viewModel(key = "teams.list|$session") { TeamsListViewModel(graph) }
+    val vm: TeamsListViewModel = viewModel(key = "teams.list|$session") { TeamsListViewModel(TeamsDeps(graph)) }
     var sheet by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(vm) { vm.said.collect { shell.toast(it) } }
     val lifecycle = LocalLifecycleOwner.current.lifecycle

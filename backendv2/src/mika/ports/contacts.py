@@ -6,9 +6,14 @@ monde de Teams et du courrier. La faculté ``identity`` reste celle de qui lui p
 (``person`` : elle lui parle aussi), sans que ses identifiants deviennent des moyens de communication de l'identité.
 
 - **Un identifiant, un contact** : une sorte (``TEAMS_ID``, ``EMAIL``, ``PHONE``, ``DOMAIN``, ``COMPANY``,
-  ``TENANT``) et une valeur normalisée (``normalized``). Deux observations du même identifiant vont au même contact :
-  c'est la preuve qui réunit (même adresse, même compte Microsoft). Un même nom seul ne réunit jamais : il se propose
-  (``suggestions``).
+  ``TENANT``) et une valeur normalisée (``normalized`` : un identifiant Teams sous sa forme canonique, quelle que soit
+  celle reçue). Deux observations du même identifiant vont au même contact : c'est la preuve qui réunit (même adresse,
+  même compte Microsoft). Un même nom seul ne réunit jamais : il se propose (``suggestions``).
+- **Le juge des rapprochements** (ADR 0304) : ce qui pourrait être la même personne sans rien qui le prouve
+  (``likenesses``) est jugé par le modèle ; son avis sur chaque paire (``Judgement``) vaut sur l'empreinte des deux
+  fiches (``bases``, ``pair_basis``). Sûr de la même personne, il les réunit (``unite``, gardé : ``Joined``) ; sûr de
+  deux, elles ne se proposent plus ; sinon elles se proposent avec son avis. Ses appels (``JudgeCall``) bornent son
+  coût.
 - **Un profil Teams** (lot 2) dit d'une personne son e-mail, ses numéros, son poste, son service et son entreprise :
   une observation peut ainsi aller au contact d'un autre identifiant (``joins``) — l'e-mail le prouve (``proof`` : deux
   contacts qui le portent se réunissent, sauf reliés à deux personnes différentes de l'identité), un numéro non (un
@@ -37,10 +42,11 @@ monde de Teams et du courrier. La faculté ``identity`` reste celle de qui lui p
   d'une personne de l'identité (ses contacts reliés, et ce que son téléphone et ses récits avaient apporté) ; chaque
   identifiant oublié laisse une empreinte et l'instant de l'oubli : ce qui le revoit, daté d'avant, ne le ramène pas.
 - **Ce qu'elle en sait** (lot 6) : des faits courts (``Note``) qu'un portrait (le rôle ``portrait``) tire de ses
-  derniers messages, rangés sous la vue (source, compte) d'où ils viennent : visibles de qui voit cette vue, remplacés
-  au portrait suivant de la même vue, oubliables un à un — un fait oublié laisse son empreinte (``note_print`` : ses
-  mots, réduits à des empreintes), et le même fait reformulé ne se réapprend pas (``relearned``). Chaque passage est
-  gardé (``Portrait``) : les plafonds par jour et « assez de nouveau depuis le dernier » se lisent sur eux.
+  derniers messages, rangés sous la vue (source, compte) d'où ils viennent : visibles de qui voit cette vue, repris
+  au portrait suivant de la même vue, qui reçoit ses faits d'avant et rend la fiche entière (ADR 0303) ; oubliables
+  un à un — un fait oublié laisse son empreinte (``note_print`` : ses mots, réduits à des empreintes), et le même fait
+  reformulé ne se réapprend pas (``relearned``). Chaque passage est gardé (``Portrait``) : les plafonds par jour et
+  « assez de nouveau depuis le dernier » se lisent sur eux.
 """
 
 from __future__ import annotations
@@ -53,11 +59,13 @@ from typing import Protocol
 
 from mika.ports.paging import Page, fold_text
 from mika.ports.phone import APPS as PHONE_APPS
+from mika.ports.teams import person_key
 from mika.vocab.access import PERSON, SELF, SHARE_READ, reaches
 from mika.vocab.ownership import holds
 
 # ── les sortes d'identifiants ──
-#: l'identifiant Teams d'une personne (son MRI, ``8:orgid:<guid>``, en minuscules)
+#: l'identifiant Teams d'une personne (son MRI, ``8:orgid:<guid>`` en minuscules, quelle que soit la forme reçue :
+#: ``person_key``)
 TEAMS_ID = "teams"
 EMAIL = "email"
 PHONE = "phone"
@@ -147,12 +155,15 @@ _SPACES = re.compile(r"\s+")
 
 
 def normalized(kind: str, value: str) -> str:
-    """La valeur d'un identifiant telle qu'elle se range et se compare : un identifiant Teams, une adresse, un domaine
+    """La valeur d'un identifiant telle qu'elle se range et se compare : un identifiant Teams sous sa forme comparable
+    (``ports.teams.person_key`` : ``8:orgid:<uuid>`` quelle que soit la forme reçue, ADR 0304) ; une adresse, un domaine
     en minuscules et sans blancs autour ; un numéro en E.164 quand on le peut (``e164``), sinon sans ce qui n'est ni
     chiffre ni « + » en tête ; un nom d'entreprise ou d'organisation Teams replié (casse et accents ignorés, blancs
     repliés), s'il a au moins deux lettres ou chiffres. Vide : rien à ranger (une adresse sans « @ », un numéro sans
     chiffre, « - » pour entreprise, une clé du téléphone sans « : »)."""
     raw = (value or "").strip()
+    if kind == TEAMS_ID:
+        return person_key(raw)
     if kind == PHONE:
         return e164(raw)
     if kind in (COMPANY, TENANT):
@@ -451,24 +462,96 @@ class ContactSheet:
 
 @dataclass(frozen=True, slots=True)
 class Suggestion:
-    """Deux contacts qui se ressemblent par le nom seul (jamais réunis d'office) : à valider."""
+    """Deux contacts qui pourraient être la même personne, sans rien qui le prouve : à valider — sauf ce que le juge
+    (ADR 0304) a tranché sûrement, réuni d'office ou mis à part."""
 
     a: ContactRef
     b: ContactRef
     #: ``same_name`` (le même nom complet), ``initial`` (« G. Rousseau » et « Gilles Rousseau ») ou, plus faible,
     #: ``first_name`` (« Léa », dont on lui a parlé ou vue sur un téléphone, et « Léa Martin » : le même prénom, d'un
-    #: côté sans nom de famille)
+    #: côté sans nom de famille) ; ``words`` : des mots rares de leurs noms en commun, que seul le juge propose
     reason: str
+    #: ce que le juge en a dit (``SAME``, ``APART`` ; vide : pas encore jugée, ou rien de lisible) et pourquoi, en ses
+    #: mots — jamais sûr ici : ce qui l'est s'est fait d'office
+    verdict: str = ""
+    why: str = ""
+
+
+# ── le juge des rapprochements (ADR 0304) ──
+#: ce qu'il dit d'une paire : la même personne, deux personnes ; « » : rien de lisible (la paire attend du nouveau)
+SAME, APART = "same", "apart"
+#: un nom des fiches se dit au juge, au plus (caractères) ; sa raison, au plus
+REASON_MAX = 300
+
+
+@dataclass(frozen=True, slots=True)
+class Likeness:
+    """Deux personnes de l'annuaire qui pourraient être la même, à soumettre au juge : une règle de nom (``same_name``,
+    ``initial``, ``first_name`` : celles des suggestions) ou ``words`` (des mots rares de leurs noms en commun, quelle
+    que soit leur forme — « Kévin Massol » et « Kévin MASSOL-EXT ») ; ``strength`` les range, la plus forte d'abord."""
+
+    a: int
+    b: int
+    rule: str
+    strength: int
+
+
+@dataclass(frozen=True, slots=True)
+class Judgement:
+    """Ce que le juge a dit d'une paire (``a`` < ``b``) : ``verdict`` (``SAME``, ``APART``, « » : rien de lisible),
+    s'il en est sûr, pourquoi, sur quoi (``basis`` : l'empreinte de ce qu'il a vu des deux fiches, ``pair_basis`` —
+    une fiche qui change se rejuge), quand, par quel appel."""
+
+    a: int
+    b: int
+    verdict: str
+    sure: bool = False
+    reason: str = ""
+    basis: str = ""
+    at: int = 0
+    call_id: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class Joined:
+    """Une réunion faite d'office par le juge : la fiche gardée (son numéro d'aujourd'hui), son nom et celui de la
+    fiche qui l'a rejointe au moment de la réunion, pourquoi, quand, par quel appel — de quoi la défaire (« Détacher »)."""
+
+    keep: int
+    kept: str
+    gone: str
+    reason: str = ""
+    at: int = 0
+    call_id: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class JudgeCall:
+    """Un appel du juge : quand, lequel, combien de fiches il a vues, si sa réponse se lisait — les plafonds par jour
+    se comptent sur eux."""
+
+    at: int
+    call_id: str
+    cards: int = 0
+    ok: bool = True
+
+
+def pair_basis(a: str, b: str) -> str:
+    """L'empreinte d'une paire à juger, d'après celles de ses deux fiches (``ContactsPort.bases``), dans n'importe quel
+    ordre : la même tant qu'aucune ne change."""
+    first, second = sorted((a or "", b or ""))
+    return hashlib.sha256(f"pair\n{first}\n{second}".encode()).hexdigest()[:32]
 
 
 # ── ce qu'elle en sait, à partir de ce qu'elle lit (lot 6) ──
 #: la sorte d'un fait tiré de ses messages : son rôle, un de ses sujets, avec quelle équipe elle travaille (sans nommer
-#: personne), ce qu'elle attend
-NOTE_KINDS = ("role", "topic", "relation", "expectation", "other")
+#: personne), ce qu'elle attend ; sa façon d'être et d'écrire (``manner``), ce qu'il y a entre elle et la personne du
+#: compte (``bond``, ADR 0303)
+NOTE_KINDS = ("role", "topic", "relation", "expectation", "manner", "bond", "other")
 #: un fait, au plus (caractères)
 NOTE_MAX = 160
-#: les faits d'un portrait, au plus
-NOTES_MAX = 6
+#: les faits d'une vue, au plus : la fiche qu'un portrait rend entière (ADR 0303)
+NOTES_MAX = 12
 #: deux faits dont les mots se recouvrent à ce point sont le même (un fait oublié ne se réapprend pas reformulé)
 SAME_NOTE = 0.6
 
@@ -589,7 +672,48 @@ class ContactsPort(Protocol):
 
     def suggestions(self, limit: int = 50) -> list[Suggestion]:
         """Les personnes qui se ressemblent par le nom (le même nom complet, ou une initiale et le même nom), sans
-        identifiant commun, ni écartées (``dismiss``), ni reliées à deux personnes différentes."""
+        identifiant commun, ni écartées (``dismiss``), ni reliées à deux personnes différentes — moins celles que le
+        juge a mises à part sûrement, plus celles qu'il croit la même personne sans en être sûr (ADR 0304), avec ce
+        qu'il en dit, celles-là d'abord. Un avis ne vaut que sur ce qu'il a vu : une fiche qui a changé depuis ne le
+        porte plus."""
+        ...
+
+    # ── le juge des rapprochements (ADR 0304) ──
+    def likenesses(self, limit: int = 2000) -> list[Likeness]:
+        """Les paires de personnes à soumettre au juge, la plus forte d'abord : celles des suggestions, et celles qui
+        ont des mots rares de leurs noms en commun — jamais deux fiches écartées par une opératrice, ni reliées à deux
+        personnes différentes, ni un nom raconté face à quelqu'un qui lui parle (c'est l'identité qui les relie)."""
+        ...
+
+    def bases(self, ids: Collection[int]) -> dict[int, str]:
+        """L'empreinte de chacune de ces fiches : sa sorte, la personne qui lui est reliée, son organisation, ses
+        identifiants et ses noms vus — ce qui fait qu'un avis du juge vaut encore."""
+        ...
+
+    def judgements(self, pairs: Collection[tuple[int, int]] | None = None) -> list[Judgement]:
+        """Ce que le juge a dit de ces paires (``None`` : de toutes), la dernière fois."""
+        ...
+
+    def judged(self, call: JudgeCall | None, verdicts: Sequence[Judgement]) -> int:
+        """Un appel du juge et ce qu'il a dit de chaque paire, gardés (un avis remplace celui d'avant sur la même
+        paire) ; ``call`` vide : des avis sans appel (une paire qu'on n'a pas pu lui montrer). Une paire dont une fiche
+        n'existe plus (réunie ou oubliée pendant l'appel) n'est pas gardée. Rend combien d'avis."""
+        ...
+
+    def judge_calls(self, *, since: int = 0) -> list[JudgeCall]:
+        """Les appels du juge depuis ``since``, le plus récent d'abord."""
+        ...
+
+    def unite(self, a: int, b: int, *, reason: str = "", call_id: str = "") -> int:
+        """Le juge est sûr que ces deux personnes sont la même : réunies dans celle qui a le plus d'histoire, comme une
+        preuve les réunirait (jamais deux fiches qu'une opératrice a séparées, ni reliées à deux personnes
+        différentes, ni autre chose que deux personnes, ni une fiche qui porte un nom raconté, reliée à personne, face à
+        une fiche reliée à quelqu'un qui lui parle), la réunion gardée (``joined`` ; « Détacher » l'en retire). Rend
+        la fiche gardée, 0 si rien n'a changé."""
+        ...
+
+    def joined(self, *, since: int = 0, limit: int = 100) -> list[Joined]:
+        """Les réunions faites d'office par le juge depuis ``since``, la plus récente d'abord."""
         ...
 
     def cursor(self, name: str) -> int:
@@ -654,8 +778,9 @@ class ContactsPort(Protocol):
         ...
 
     def portrayed(self, portrait: Portrait, notes: Sequence[Note] | None) -> int:
-        """Un passage du portrait sur une vue d'un contact (``portrait``), gardé ; ``notes`` : ses faits, qui
-        **remplacent** ceux de la même vue (contact, source, compte) — sauf ceux qu'on lui a fait oublier
+        """Un passage du portrait sur une vue d'un contact (``portrait``), gardé ; ``notes`` : ses faits — la fiche
+        entière qu'il rend, ce qui tenait encore repris (ADR 0303) —, qui **remplacent** ceux de la même vue (contact,
+        source, compte) — sauf ceux qu'on lui a fait oublier
         (``relearned``) ; ``None`` : rien de lisible, les faits d'avant restent. Rend combien de faits gardés (rien
         pour un contact qui n'existe plus)."""
         ...
@@ -675,9 +800,11 @@ __all__ = [
     "HOSTED_DOMAINS", "KINDS", "MAIL",
     "MAIL_PREFIX", "NAME_PREFIX", "NOTES_MAX", "NOTE_KINDS", "NOTE_MAX", "OPAQUE_KINDS", "ORG", "ORG_KINDS",
     "PERSON_KIND", "PERSON_SOURCES", "PHONE", "PHONE_APP", "PHONE_PREFIX", "PHONE_SOURCE", "PUBLIC_DOMAINS",
-    "SAME_NOTE", "SMS", "SOURCES", "TEAMS", "TEAMS_ID", "TEAMS_PREFIX", "TENANT", "TOLD", "TOLD_NAME", "WHATSAPP",
-    "ContactLine", "ContactRef", "ContactSheet", "ContactsPort", "Identifier", "Note", "Observation", "Portrait",
+    "APART", "REASON_MAX", "SAME", "SAME_NOTE", "SMS", "SOURCES", "TEAMS", "TEAMS_ID", "TEAMS_PREFIX", "TENANT", "TOLD",
+    "TOLD_NAME", "WHATSAPP",
+    "ContactLine", "ContactRef", "ContactSheet", "ContactsPort", "Identifier", "JudgeCall", "Joined", "Judgement",
+    "Likeness", "Note", "Observation", "Portrait",
     "Sighting", "Suggestion", "Thread", "account_person", "app_family", "e164", "generic_address", "mail_domain",
-    "normalized", "note_print", "note_words", "number_in_name", "org_domain", "person_accounts", "phone_app_value",
-    "phone_app_values", "relearned", "sender_digest", "subject_aliases", "visible_sources",
+    "normalized", "note_print", "note_words", "number_in_name", "org_domain", "pair_basis", "person_accounts",
+    "phone_app_value", "phone_app_values", "relearned", "sender_digest", "subject_aliases", "visible_sources",
 ]

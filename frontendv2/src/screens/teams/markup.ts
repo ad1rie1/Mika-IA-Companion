@@ -7,7 +7,7 @@ import { h, initials } from "../../shell/dom";
 import { ico } from "../../shell/icons";
 import { mikaAvatar } from "../../mika/face";
 import { clock, dayAndClock, shortWhen } from "../chat/markup";
-import { TEAMS_LIMITS, teamsImageUrl, type Conversation, type Reply, type TeamsAccount, type TeamsImage, type TeamsMessage, type Thread } from "../../api/teams";
+import { TEAMS_LIMITS, teamsImageUrl, type Conversation, type Reply, type TeamsAccount, type TeamsImage, type TeamsMessage, type TeamsQuote, type Thread } from "../../api/teams";
 import { pageHtml } from "../projets/docmd";
 import { ago, avatar, caps, firstName, levelTag, markToFill, type Caps } from "../mail/format";
 import { countSpan } from "../mail/markup";
@@ -101,15 +101,31 @@ export interface ThreadView {
   pending: readonly OwnBubble[];
 }
 
-function message(m: TeamsMessage, mark: { day: string; suite: boolean }, v: ThreadView, replies: readonly Reply[]): string {
+/** La citation d'un message (ADR 0305), comme Teams la montre dans la bulle : l'auteur, l'heure, l'extrait ; elle mène
+ *  au message cité quand il est dans le fil (`ref`). */
+export function quoteCard(q: TeamsQuote, now: number): string {
+  const inner = `<span class="tm-quote-head"><b>${h(q.author || "Quelqu'un")}</b>${q.at ? `<time>${h(dayAndClock(q.at, now))}</time>` : ""}</span><span class="tm-quote-text">${h(q.preview)}</span>`;
+  return q.ref
+    ? `<button type="button" class="tm-quote" data-tm-goto="${h(q.ref)}" title="Aller au message cité">${inner}</button>`
+    : `<div class="tm-quote">${inner}</div>`;
+}
+
+/** Les discussions où un message part cité (ADR 0305, `QUOTE_KINDS` du serveur) : ni un canal (une réponse y est un
+ *  fil), ni une réunion. */
+const CITABLE = new Set(["dm", "group"]);
+
+function message(m: TeamsMessage, mark: { day: string; suite: boolean }, v: ThreadView, replies: readonly Reply[], citable = false): string {
   const day = mark.day ? `<div class="day"><span>${h(mark.day)}</span></div>` : "";
   const name = authorLabel(m, v.account);
   // à droite seulement ce que tu as écrit, sur un compte à toi : sur un compte qu'on te partage, c'est son propriétaire
   const me = fromYou(m, v.account);
   const suite = mark.suite;
-  return `${day}<div class="tm-msg${me ? " me" : ""}${suite ? " suite" : ""}${m.mentions_me ? " mention" : ""}">
+  // « Citer », comme la barre que Teams montre au survol d'un message (ADR 0305) : là où tu peux écrire
+  const tools = v.caps.write && citable ? `<div class="tm-tools"><button class="btn icon ghost xs" type="button" data-tm-quote="${h(m.ref)}" title="Citer" aria-label="Citer ce message">${ico("quote", "sm")}</button></div>` : "";
+  return `${day}<div class="tm-msg${me ? " me" : ""}${suite ? " suite" : ""}${m.mentions_me ? " mention" : ""}" data-ref="${h(m.ref)}">
     ${me || suite ? '<span class="tm-gut"></span>' : avatar(name, "sm", m.author_id || name, m.photo)}
-    <div class="tm-body">${suite ? "" : `<div class="tm-meta"><b>${h(name)}</b><time title="${h(dayAndClock(m.at, v.now))}">${h(clock(m.at))}</time></div>`}
+    <div class="tm-body">${tools}${suite ? "" : `<div class="tm-meta"><b>${h(name)}</b><time title="${h(dayAndClock(m.at, v.now))}">${h(clock(m.at))}</time></div>`}
+      ${m.quote ? quoteCard(m.quote, v.now) : ""}
       ${shownText(m) ? `<div class="tm-txt">${messageHtml(shownText(m), v.selfName, m.mentions_me)}</div>` : ""}
       ${images(m)}
       ${fromHer(m, replies) ? `<div class="by-mika">${ico("sparkle")}rédigé avec Mika</div>` : ""}
@@ -225,7 +241,7 @@ export function threadBody(t: Thread, older: readonly TeamsMessage[], v: ThreadV
       : "";
   const cards = threadCards(t.replies, messages.length ? messages[messages.length - 1].at : 0).map((r) => replyCard(r, v)).join("");
   const body = messages.length
-    ? messages.map((m, i) => message(m, marks[i], v, t.replies)).join("")
+    ? messages.map((m, i) => message(m, marks[i], v, t.replies, CITABLE.has(t.kind))).join("")
     : `<div class="empty tm-empty">${ico("teams")}<b>Rien encore</b><p>L'extension n'a rien vu passer dans cette discussion.</p></div>`;
   return `${more}${body}${v.pending.map((p) => pendingMessage(p, v)).join("")}${cards}`;
 }
@@ -258,6 +274,9 @@ export interface DockView {
   /** L'extension ne s'est pas manifestée depuis longtemps (ou jamais). */
   quiet: string;
   sending: boolean;
+  /** Le message que tu cites (ADR 0305), au-dessus du champ : son auteur, son heure, un extrait ; `null` : aucun. */
+  quoting?: { author: string; at: number; preview: string } | null;
+  now?: number;
 }
 
 export function dock(v: DockView): string {
@@ -269,7 +288,9 @@ export function dock(v: DockView): string {
       : `Ce compte t'est partagé en lecture : tu lis ses discussions, sans y écrire.`;
     return `${asked}<div class="tm-readonly">${ico("lock", "sm")}<span>${h(text)}</span>${v.caps.prepare ? `<button class="btn sm mika" type="button" data-tm="preremplir"${v.canPrefill && !v.underWay ? "" : ` disabled${v.prefillOff ? ` title="${h(v.prefillOff)}"` : ""}`}>${ico("sparkle", "sm")}<span class="lbl">Préremplir avec Mika</span></button>` : ""}</div>`;
   }
-  return `${asked}${quiet}<div class="composer tm-cmp">
+  // la citation en cours, comme Teams la pose au-dessus du champ : un × l'enlève
+  const quoting = v.quoting ? `<div class="tm-quoting"><div class="tm-quote"><span class="tm-quote-head"><b>${h(v.quoting.author || "Quelqu'un")}</b>${v.quoting.at ? `<time>${h(dayAndClock(v.quoting.at, v.now ?? Date.now()))}</time>` : ""}</span><span class="tm-quote-text">${h(v.quoting.preview)}</span></div><button class="btn icon ghost xs" type="button" data-tm="sans-citation" title="Ne plus citer" aria-label="Ne plus citer">${ico("x", "sm")}</button></div>` : "";
+  return `${asked}${quiet}<div class="composer tm-cmp">${quoting}
     <textarea rows="2" data-tm-input placeholder="${v.title.trim() ? `Répondre dans « ${h(v.title.trim())} »…` : "Répondre…"}" aria-label="Ton message" maxlength="${TEAMS_LIMITS.body}"></textarea>
     <div class="cmp-bar"><button class="btn icon ghost sm" type="button" data-tm="emoji" title="Emojis">${ico("smile")}</button>
       <button class="btn sm mika" type="button" data-tm="preremplir"${v.canPrefill ? "" : ` disabled title="${h(v.prefillOff || "Aucun message reçu à quoi répondre")}"`}>${ico("sparkle", "sm")}<span class="lbl">Préremplir avec Mika</span></button>
@@ -370,12 +391,14 @@ export function repliesTable(items: readonly Reply[], v: RepliesView): string {
     <table class="tbl tm-replies"><thead><tr><th>Discussion</th><th>Ce qu'elle a écrit</th><th>Comment ça part</th><th>Où ça en est</th><th>Quand</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 
-/** La pastille de l'extension (en haut à droite) : ce que le serveur sait d'elle, son dernier lot. */
+/** La pastille de l'extension (en haut à droite) : ce que le serveur sait d'elle — si elle est là, son dernier lot. */
 export function extensionChip(a: TeamsAccount | null, now: number): string {
   if (!a) return "";
-  const age = a.last_batch ? now - a.last_batch : Infinity;
-  const dot = !a.last_batch ? "" : age < 15 * 60_000 ? "ok" : age < 24 * 3600_000 ? "warn" : "danger";
-  return `<span class="ext-chip" title="Ce que le serveur sait de l'extension « Mika · Teams » de ce compte : son dernier lot">${ico("plug", "sm")}<span class="dot ${dot}"></span><b>Extension</b><span class="muted">${a.last_batch ? `dernier lot ${h(ago(a.last_batch, now))}` : "jamais branchée"}</span></span>`;
+  // la pastille dit si elle est là (son dernier signe de vie) ; le texte, quand elle a poussé du neuf
+  const seen = Math.max(a.last_seen || 0, a.last_batch || 0);
+  const age = seen ? now - seen : Infinity;
+  const dot = !seen ? "" : age < 15 * 60_000 ? "ok" : age < 24 * 3600_000 ? "warn" : "danger";
+  return `<span class="ext-chip" title="Ce que le serveur sait de l'extension « Mika · Teams » de ce compte : son dernier signe de vie (la pastille), son dernier lot">${ico("plug", "sm")}<span class="dot ${dot}"></span><b>Extension</b><span class="muted">${a.last_batch ? `dernier lot ${h(ago(a.last_batch, now))}` : "jamais branchée"}</span></span>`;
 }
 
 export function capsOf(a: Pick<TeamsAccount, "level"> | null | undefined): Caps {

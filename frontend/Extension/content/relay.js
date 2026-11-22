@@ -64,6 +64,9 @@
   const FRAME_OPEN = /^(?:<[a-z][a-z0-9-]{0,40}(?:\s[^<>]{0,200})?>){1,6}$/i;
   const FRAME_CLOSE = /^(?:<\/[a-z][a-z0-9-]{0,40}>){1,6}$/i;
   const RESULTS = ["sent", "retry", "failed", "uncertain"];
+  // une citation (ADR 0305) : l'identifiant de service du message cité, l'identifiant Teams de son auteur
+  const QUOTE_MESSAGE = /^\d{10,16}$/;
+  const QUOTE_AUTHOR = /^\d{1,2}:[A-Za-z0-9:._-]{1,200}$/;
   const waiting = new Map();
   const sending = new Map();
 
@@ -95,6 +98,9 @@
     if (isFinite(version) && version > 0) out.version = Math.floor(version);
     // ses réactions, quand la page les a lues (ADR 0300) : une liste vide dit qu'il n'y en a plus
     if (Array.isArray(m.reactions) && !deleted) out.reactions = list(m.reactions, 20, reaction);
+    // le message qu'il cite (ADR 0305)
+    const quote = deleted ? null : quoted(m.quote);
+    if (quote) out.quote = quote;
     return out;
   }
 
@@ -245,7 +251,24 @@
     const id = str(d.id, 64);
     const conv = str(d.conversation, 300);
     const text = typeof d.text === "string" ? T.cut(d.text, MAX_OUT_TEXT) : "";
-    return id && conv && text ? { id: id, conversation: conv, text: text } : null;
+    if (!(id && conv && text)) return null;
+    const out = { id: id, conversation: conv, text: text };
+    const q = quoted(d.quote);
+    if (q) out.quote = q;
+    return out;
+  }
+
+  /** Le message qu'un envoi cite (ADR 0305), revérifié comme `MikaTeamsText.quoteOf` (absent de ce monde) ; `null`. */
+  function quoted(q) {
+    if (!q || typeof q !== "object" || !QUOTE_MESSAGE.test(String(q.message || ""))
+      || !QUOTE_AUTHOR.test(String(q.author_id || ""))) {
+      return null;
+    }
+    const at = Number(q.at);
+    return { message: String(q.message), author_id: String(q.author_id),
+      author: T.cut(typeof q.author === "string" ? q.author.replace(/\s+/g, " ").trim() : "", 120),
+      at: isFinite(at) && at > 0 ? Math.floor(at) : Number(q.message),
+      preview: T.cut(typeof q.preview === "string" ? q.preview.replace(/\s+/g, " ").trim() : "", 300) };
   }
 
   function drafts(list) {

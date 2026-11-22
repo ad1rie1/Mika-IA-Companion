@@ -172,6 +172,8 @@ class Message:
     account: str = DEFAULT_ACCOUNT
     #: ses réactions (ADR 0300), dans l'ordre de Teams : lues avec lui, elles ne déclenchent jamais rien
     reactions: tuple[Reaction, ...] = ()
+    #: le message qu'il cite (ADR 0305) — son texte (``text``) ne le reprend pas
+    quote: Quote | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,9 +230,32 @@ class Preview:
     blocked: str = ""
 
 
+#: l'extrait d'un message cité, au plus (caractères) : Teams montre le message cité d'après son identifiant, l'extrait
+#: n'est que ce que dit la citation elle-même (ADR 0305)
+QUOTE_PREVIEW_MAX = 160
+#: les conversations où un envoi cite le message auquel il répond (ADR 0305) : un tête-à-tête (sous condition), un groupe
+QUOTE_KINDS = ("dm", "group")
+
+
+@dataclass(frozen=True, slots=True)
+class Quote:
+    """Le message que cite un envoi, ou un message reçu (ADR 0305) : son identifiant chez Teams (l'heure de son
+    arrivée, en ms — le seul que Teams sache citer), son auteur (son identifiant Teams, ``8:orgid:…`` ou ``28:…`` pour
+    un robot, et son nom), son heure (ms) et un court extrait ; ``ref`` : la référence du message cité chez elle, quand
+    elle l'a (de quoi y aller depuis la citation)."""
+
+    message: str
+    author_id: str
+    author: str
+    at: int
+    preview: str
+    ref: str = ""
+
+
 @dataclass(frozen=True, slots=True)
 class OutboxItem:
-    """Ce que l'extension relève : un brouillon à poser, ou un message à envoyer."""
+    """Ce que l'extension relève : un brouillon à poser, ou un message à envoyer — avec, s'il y a lieu, le message
+    qu'il cite (ADR 0305)."""
 
     id: str
     conversation: str
@@ -241,6 +266,7 @@ class OutboxItem:
     text: str
     created_at: int  # ms (pour le navigateur)
     expires_at: int  # ms, 0 : jamais
+    quote: Quote | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -271,6 +297,8 @@ class InboxMessage:
     #: ses réactions (ADR 0300), sans ``names`` ; ``None`` : l'extension n'en a rien dit (le cache garde les siennes),
     #: ``()`` : aucune (le cache efface les siennes)
     reactions: tuple[Reaction, ...] | None = None
+    #: le message qu'il cite (ADR 0305), séparé de son texte par l'extension ; ``None`` : rien de dit
+    quote: Quote | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -530,6 +558,11 @@ class TeamsPort(Protocol):
         récent."""
         ...
 
+    def thread_count(self, account: str, conversation: str, *, before: int = 0) -> int:
+        """Combien de messages compte une conversation (avant ``before`` µs, 0 : tous) — de quoi dire, à qui relit un
+        fil, combien il en reste avant ce qu'il vient de lire (ADR 0303)."""
+        ...
+
     def last_messages(self, conversations: Sequence[tuple[str, str]]) -> dict[tuple[str, str], Message]:
         """Le dernier message de chacune de ces conversations (compte, identifiant), en une seule requête quel que soit
         leur nombre. Une conversation sans message n'y est pas."""
@@ -674,6 +707,11 @@ class TeamsKeys(Protocol):
 
     async def revoke_key(self, account: str) -> bool:
         """Retirer la clé de ce compte ; ``False`` s'il n'en avait pas."""
+        ...
+
+    def last_contact(self, account: str) -> int:
+        """La dernière fois que l'extension de ce compte s'est manifestée depuis le démarrage — un relevé, la
+        connexion en direct, un lot (µs ; 0 : pas encore)."""
         ...
 
 

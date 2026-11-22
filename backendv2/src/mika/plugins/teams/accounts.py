@@ -55,6 +55,9 @@ class Accounts:
     def thread(self, account: str, conversation: str, limit: int, *, before: int = 0) -> list[Message]:
         return self.port.thread(account, conversation, limit, before=before) if self._mine(account) else []
 
+    def thread_count(self, account: str, conversation: str, *, before: int = 0) -> int:
+        return self.port.thread_count(account, conversation, before=before) if self._mine(account) else 0
+
     def conversation(self, account: str, conversation: str) -> Conversation | None:
         return self.port.conversation(account, conversation) if self._mine(account) else None
 

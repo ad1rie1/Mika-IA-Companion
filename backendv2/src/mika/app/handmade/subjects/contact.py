@@ -447,7 +447,7 @@ def notes_of(ui: UI, look: Look, acc: Accounts, sheet: ContactSheet) -> list[dic
 
 #: la sorte d'un fait, en mots
 NOTE_WORDS = {"role": "son rôle", "topic": "un sujet", "relation": "avec qui", "expectation": "ce qu'elle attend",
-              "other": ""}
+              "manner": "sa façon d'être", "bond": "avec la personne du compte", "other": ""}
 
 
 def fact_forms(ui: UI, key: str, ids: Sequence[int], query: Mapping[str, str], forms: Any) -> dict[int, Any]:

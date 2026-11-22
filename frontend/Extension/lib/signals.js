@@ -254,6 +254,9 @@
     if (images && !m.deleted) wire.images = images;
     // ses réactions, quand la source les dit (ADR 0300) : une liste vide dit qu'il n'y en a plus
     if (Array.isArray(m.reactions) && !m.deleted) wire.reactions = wireReactions(m.reactions, selfId);
+    // le message qu'il cite (ADR 0305), à part de son texte
+    const quote = m.deleted ? null : T.quoteOf(m.quote);
+    if (quote) wire.quote = quote;
     return wire;
   }
 

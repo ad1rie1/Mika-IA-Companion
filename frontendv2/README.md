@@ -215,7 +215,11 @@ Mika n'a qu'un élément (`#mika-corner`) : son visage dans la pastille du haut,
   même quand le dernier message est le tien), la tête du fil, les participants ; un groupe garde son carré (son image
   n'est pas captée). Sous un message, ses réactions : chacune son emoji (sa clé de Teams quand le serveur ne le
   connaît pas) et son compte, la tienne en couleur (sur un compte à toi seulement), qui a réagi au survol (« Claire
-  Dubois, Sophie Laurent, toi et 2 autres »).
+  Dubois, Sophie Laurent, toi et 2 autres »). La citation (ADR 0305), comme dans Teams : « Citer » au survol d'un
+  message (au doigt, en le touchant), dans un tête-à-tête ou un groupe où tu peux écrire (ni canal ni réunion : le
+  serveur n'y cite pas) ; sa carte au-dessus du champ (un × l'enlève), et ton
+  message part avec `reply_to` ; une réponse citée montre sa carte au-dessus de son texte, qui mène au message cité
+  quand il est chargé (`quoteCard`, `TeamsScreen.quote`, `goToMessage`).
 - **Téléphone** : ses téléphones, les conversations que l'application a lues, leurs fils, ses propositions et leur
   sort, sa dernière position — sur une vraie carte quand le serveur en sert une qui la couvre (ADR 0193 : ses tuiles,
   polices et icônes viennent du serveur seul, `GET /api/moi/carte/fond` ; MapLibre se charge avec l'onglet), sinon sur

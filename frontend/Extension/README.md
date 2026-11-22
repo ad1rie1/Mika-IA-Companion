@@ -90,6 +90,12 @@ pas `reactions` (Mika garde les siennes) ; `[]` dit qu'il n'y en a plus. Un mess
 **repart**, sous le même identifiant (voir « dédoublonnées par version », plus bas) : Mika met les siennes à jour, sans
 en faire un message neuf — une réaction ne lui fait rien remarquer, elle la lira avec le message.
 
+**Les citations reçues** (ADR 0305, depuis 0.8.3) : une réponse qui cite un message (le bloc
+`<blockquote itemtype="http://schema.skype.com/Reply">` que Teams met devant son texte) part avec `quote: {message,
+author_id, author, at, preview}` (`X.quoteIn`, vérifiée par `MikaTeamsText.quoteOf`, revérifiée par le relais), et son
+texte ne la reprend plus ; illisible, la citation reste dans le texte, en ligne (« « Bob on part à 9h ? » »), comme
+avant.
+
 **Les profils** (ADR 0298, depuis 0.6.0) : Teams garde dans le navigateur le profil des personnes croisées (base
 `Teams:profiles`). La page le relit au plus toutes les 10 minutes et joint à chaque lot, dans `profiles`, celui des
 auteurs et des personnes mentionnées de ses messages : `{id, name, email, title, company, department, tenant, phones,
@@ -202,6 +208,16 @@ la première de ces trois voies qui s'offre, toutes avec le même identifiant cl
    n'est jamais transmise, ni à l'extension, ni à Mika, ni journalisée), 20 s au plus. Le Teams d'aujourd'hui fait ces
    requêtes dans son worker : l'authentification n'y est presque jamais vue.
 3. **La zone de saisie** de la conversation ouverte : le texte y est placé puis envoyé (bouton « Envoyer »).
+
+**La citation** (ADR 0305, depuis 0.8.2). Un élément qui répond à un message précis porte `quote` (sinon `null`) :
+`{"message": "<identifiant de service du message cité, l'heure de son arrivée>", "author_id": "8:orgid:…" | "28:…",
+"author": "<son nom>", "at": <ms>, "preview": "<extrait, 160 caractères>"}` — Mika l'y met dans un groupe, et dans un
+tête-à-tête si d'autres messages ont suivi. Vérifiée par le service (`MikaTeamsText.quoteOf`), revérifiée par le
+relais, elle part comme Teams l'écrit quand on « cite » (relevé le 2026-11-22) : un bloc
+`<blockquote itemtype="http://schema.skype.com/Reply" itemid="<message>">` (l'auteur, l'heure, l'extrait, échappés)
+avant le texte (`P.quoteHtml`) et, par le worker, l'entrée `computed.quotedMessages` (`messageId`, `sender`, `time`).
+Le service de chat met le même bloc ; par la zone de saisie, le message part sans citation. Un envoi de la page qui
+cite n'est jamais pris pour modèle.
 
 On ne passe à la voie suivante, dans la même tentative, que sur un « rien n'est parti » sûr : pour le worker, une
 erreur explicite (un `status` d'échec, ou `response.errors` sans résultat) — l'élément ne repasse alors plus par le
@@ -331,13 +347,17 @@ Pour écrire (`lib/page.js` pour ce qui se calcule sans la page) :
   d'attente réduite à son préfixe (`<préfixe>_{mika:conversation}`), sans `requestId`, `rendererId` ni `windowId` ;
   la conversation ailleurs dans la commande devient une marque, et ce qui en reprend le texte est vidé. Elle est
   écartée si ce n'est pas une création (`action: "Create"`), si ce n'est ni un tête-à-tête ni un groupe, si le message
-  porte une citation, un transfert, une pièce jointe, des données jointes, ou s'il reste une trace du message. Le modèle
+  porte une citation, un transfert, une pièce jointe, des données jointes, ou s'il reste une trace du message ; le refus
+  nomme toutes les clés en cause. Une option de la requête (`include…`, un booléen, comme `includeRepliesSummary` que
+  Teams met dans chaque envoi) n'en est pas une : en 0.8.0, ce mot « Repl » faisait écarter chaque envoi, et aucun
+  modèle n'était jamais appris (corrigé en 0.8.1). Le modèle
   retient aussi la forme du contenu (les balises autour du texte, comme `<p><semantic-object>`…, et `<br>` ou un `<p>`
   par ligne ; sans attribut qui agisse ou porte un identifiant ; à défaut `<p>`, des `<br>`). Le relais le revérifie
   (demande `sendTemplate`), le service le garde, et le rend à l'onglet suivant (`sendTemplates`). Pour envoyer,
-  `P.workerSendCommand` refait la commande : la conversation, `originalConvId`, `isBilateralChat` (la conversation finit
-  par `@unq.gbl.spaces`), la file `<préfixe>_<conversation>`, `actionId` = `send_<clientMessageId>`, un
-  `correlationId` neuf, l'heure, le texte échappé dans la forme lue, `requestId` = `m-<n>` avec `n` mille au-dessus du
+  `P.workerSendCommand` refait la commande : la conversation, `originalConvId`, `isBilateralChat` (jamais vrai pour un
+  groupe ; pour un tête-à-tête, la valeur que Teams avait mise dans le modèle — `false` chez Albert), la file
+  `<préfixe>_<conversation>`, `actionId` = `send_<clientMessageId>`, un `correlationId` neuf, l'heure (et celle du
+  brouillon, `draftCreationTime`), le texte échappé dans la forme lue, `requestId` = `m-<n>` avec `n` mille au-dessus du
   compteur de la page (jamais le numéro d'une requête en cours de la page) et au-dessus de notre dernière, `rendererId`
   et `windowId` de la page vivante. Elle part en texte JSON (un objet est ignoré) par le `postMessage` d'origine ; la
   réponse est celle qui porte ce `requestId` (`P.workerReplyOutcome`) ;
@@ -363,8 +383,10 @@ et chaque lot capté y tombait sans bruit. La page et le relais ne partagent don
 ### Limites
 
 L'envoi par le worker de Teams a été **sondé à la main** sur le vrai Teams (2026-11-22 : une commande rejouée en
-texte JSON est partie dans une conversation fermée), mais le code de 0.8.0 n'y a pas encore tourné : la forme exacte
-du modèle et de la réponse du worker sont à confirmer au premier essai. Le reste du chemin d'écriture (zone de saisie,
+texte JSON est partie dans une conversation fermée). La 0.8.0 n'en apprenait aucun modèle (voir plus haut) ; la vraie
+commande, relevée le soir même (essai 6 chez Albert), est dans le banc (`tests/worker-fixture.js`, `realSend`), et le
+modèle qu'en tire la 0.8.1, rejoué conversation fermée, est parti (essai 7). Le premier envoi après l'installation
+passe encore par la zone de saisie (la conversation ouverte) : c'est lui qui apprend le modèle. Le reste du chemin d'écriture (zone de saisie,
 historique de navigation, service de chat) a été éprouvé sur une page de banc et dans Teams pour la zone de saisie ;
 les sélecteurs de la zone et du bouton « Envoyer », et la requête au service de chat, restent à calibrer si Teams
 change.
@@ -385,7 +407,7 @@ Microsoft modifie son client sans prévenir. Si plus rien n'arrive, ou que Mika 
   worker, l'onglet vient de s'ouvrir), **envoi par le service de chat possible** (oui ou non : l'existence de
   l'en-tête, jamais sa valeur), et ce qui a été placé ou envoyé depuis l'ouverture de l'onglet, par quelle voie ;
 - les commandes de la page à son worker : combien, combien d'envois lus comme modèle, combien écartés et pourquoi (le
-  dernier), et, pour l'envoi par le worker, les refus (passés à la voie suivante), les silences (issue douteuse) et les
+  dernier, avec la forme de sa commande : ses chemins et leurs types, jamais une valeur), et, pour l'envoi par le worker, les refus (passés à la voie suivante), les silences (issue douteuse) et les
   réponses arrivées trop tard. La fenêtre de l'extension dit aussi, hors diagnostic, si l'envoi sans ouvrir la
   conversation est possible et depuis quand.
 

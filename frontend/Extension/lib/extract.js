@@ -181,6 +181,38 @@
     return out;
   }
 
+  // la citation d'une réponse (ADR 0305), telle que Teams l'écrit devant son texte (relevé le 2026-11-22) :
+  // `<blockquote itemtype="http://schema.skype.com/Reply" itemid="<message>">` — l'auteur (`<strong itemprop="mri"
+  // itemid="<son identifiant>">`), l'heure (`<span itemprop="time" itemid="…">`), l'extrait (`<p itemprop="preview">`)
+  const QUOTE_BLOCK = /<blockquote\b[^>]*itemtype=["']?http:\/\/schema\.skype\.com\/Reply["']?[^>]*>([\s\S]*?)<\/blockquote>/i;
+
+  function plainOf(html) {
+    return decodeEntities(String(html || "").replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+  }
+
+  /**
+   * La citation d'un message (`{message, author_id, author, at, preview}`, vérifiée par `MikaTeamsText.quoteOf`) et
+   * son contenu sans elle ; `null` sans citation lisible (le contenu reste alors tel quel : la citation s'y lit en ligne).
+   */
+  function quoteIn(html) {
+    const s = String(html || "");
+    const found = QUOTE_BLOCK.exec(s);
+    if (!found) return null;
+    const open = found[0].slice(0, found[0].indexOf(">") + 1);
+    const inner = found[1];
+    const mri = /<strong\b[^>]*itemprop=["']?mri["']?[^>]*>([\s\S]*?)<\/strong>/i.exec(inner);
+    const time = /<span\b[^>]*itemprop=["']?time["']?[^>]*>/i.exec(inner);
+    const preview = /<p\b[^>]*itemprop=["']?preview["']?[^>]*>([\s\S]*?)<\/p>/i.exec(inner);
+    const quote = T.quoteOf({
+      message: (/\bitemid=["']?(\d{10,16})/i.exec(open) || [])[1] || "",
+      author_id: mri ? (/\bitemid=["']?([^"'\s>]+)/i.exec(mri[0]) || [])[1] || "" : "",
+      author: mri ? plainOf(mri[1]) : "",
+      at: time ? Number((/\bitemid=["']?(\d{10,16})/i.exec(time[0]) || [])[1]) || 0 : 0,
+      preview: preview ? plainOf(preview[1]) : "",
+    });
+    return quote ? { quote: quote, html: s.replace(found[0], "") } : null;
+  }
+
   function htmlToText(html) {
     let s = String(html || "");
     if (s.indexOf("<") < 0 && s.indexOf("&") < 0) return s.trim();
@@ -350,13 +382,18 @@
         deleted: true, version: versionOf(o), mentions: [] };
     }
     let text;
+    let quote = null;
     if (/^richtext\/media/i.test(type)) {
       const original = /<OriginalName[^>]*\bv=["']([^"']+)["']/i.exec(o.content);
       const title = original ? original[1] : (/<Title>([^<]*)<\/Title>/i.exec(o.content) || [])[1];
       const name = title ? decodeEntities(title).replace(/^Title:\s*/i, "").trim() : "";
       text = "[pièce jointe" + (name ? " : " + name : "") + "]";
     } else {
-      text = htmlToText(o.content);
+      // la citation à part (ADR 0305) : son texte ne la reprend pas ; une réponse qui ne serait qu'une citation la garde
+      const quoted = quoteIn(o.content);
+      text = quoted ? htmlToText(quoted.html) : "";
+      if (text) quote = quoted.quote;
+      else text = htmlToText(o.content);
     }
     if (!text) return null;
     text = T.clip(text, MAX_TEXT);
@@ -367,6 +404,7 @@
     if (images.length) out.images = images;
     const reactions = reactionsOf(o, self);
     if (reactions) out.reactions = reactions;
+    if (quote) out.quote = quote;
     return out;
   }
 
@@ -507,7 +545,7 @@
 
   return { extract: extract, normalizeMessage: normalizeMessage, normalizeConversation: normalizeConversation,
     conversationKind: conversationKind, conversationFromUrl: conversationFromUrl, htmlToText: htmlToText,
-    imagesOf: imagesOf, profileOf: profileOf, reactionsOf: reactionsOf, PROFILE_ID: PROFILE_ID,
+    imagesOf: imagesOf, profileOf: profileOf, reactionsOf: reactionsOf, quoteIn: quoteIn, PROFILE_ID: PROFILE_ID,
     PROFILE_EMAIL: PROFILE_EMAIL, AVATAR: AVATAR, REACTION_KEY: REACTION_KEY, parseEmbedded: parseEmbedded,
     toMillis: toMillis };
 });

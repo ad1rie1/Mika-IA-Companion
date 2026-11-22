@@ -23,6 +23,9 @@
   messages et en tire quelques faits courts, gardés avec le contact sous la vue d'où ils viennent ; des plafonds par
   jour bornent le coût. Pour le téléphone, la tranche garde où la personne a écrit elle-même (``replied``). Mika les
   consulte par ``contacts_lookup`` (``tools``), seulement en tête-à-tête et ce que la personne en face voit.
+- **Le juge des rapprochements** (ADR 0304, ``contacts.match``) : deux fiches qui pourraient être la même personne
+  sans identifiant qui le prouve sont soumises au rôle ``match`` avec ce que l'annuaire en sait ; ce dont il est sûr
+  se fait d'office (réunies, ou plus proposées), le reste attend dans À valider avec son avis.
 """
 
 from __future__ import annotations
@@ -105,6 +108,21 @@ class ContactsParams(BaseModel):
         label="Portraits par passage", group="Ce qu'elle en sait", lo=1, hi=50,
         help="Au plus autant d'appels à chaque passage (toutes les heures, ou peu après un message) : la journée "
              "se répartit.")] = 5
+    # le juge des rapprochements (ADR 0304)
+    matching: Annotated[bool, Knob(
+        label="Réunir ses contacts d'elle-même", group="Rapprochements",
+        help="Deux fiches qui pourraient être la même personne (le même nom sous une autre forme, un invité de "
+             "réunion, un nom qu'on lui a raconté) sont soumises au modèle (rôle « match ») avec tout ce que "
+             "l'annuaire en sait : ce dont il est sûr se réunit d'office (et se défait par « Détacher »), ou n'est "
+             "plus proposé ; le reste t'attend dans À valider › Rapprochements, avec son avis. Coupé : rien ne se "
+             "réunit sans toi, sauf ce qu'un identifiant prouve.")] = True
+    match_calls_per_day: Annotated[int, Knob(
+        label="Appels du juge par jour", group="Rapprochements", lo=0, hi=500,
+        help="Au plus autant d'appels au modèle en vingt-quatre heures (un par groupe de fiches qui se ressemblent ; "
+             "ceux qui ne se lisent pas comptent). Le coût se lit dans Système › Appels, rôle « match ».")] = 40
+    match_per_run: Annotated[int, Knob(
+        label="Appels du juge par passage", group="Rapprochements", lo=1, hi=50,
+        help="Au plus autant d'appels à chaque passage (toutes les heures, ou peu après un message).")] = 5
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,6 +198,7 @@ def _forgotten(s: ContactsState, e, cx) -> ContactsState:
 
 from mika.plugins.contacts import ingest as ingest  # noqa: E402 — s'enregistre sur CONTACTS
 from mika.plugins.contacts import inspect as inspect  # noqa: E402 — sa console : la fiche d'un contact, ses gestes
+from mika.plugins.contacts import matching as matching  # noqa: E402 — le juge des rapprochements (ADR 0304)
 from mika.plugins.contacts import portrait as portrait  # noqa: E402 — ce qu'elle en sait (lot 6)
 from mika.plugins.contacts import tools as tools  # noqa: E402 — contacts_lookup
 

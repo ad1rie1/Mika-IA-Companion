@@ -86,7 +86,7 @@ export interface ContactFact {
   id?: number;
   /** « son profil Teams », « son adresse e-mail » ; un fait : « ses messages dans Teams », « ses mails à Pro ». */
   from: string;
-  /** Un fait : sa sorte (`role`, `topic`, `relation`, `expectation`, `other`). */
+  /** Un fait : sa sorte (`role`, `topic`, `relation`, `expectation`, `manner`, `bond`, `other`). */
   sort?: string;
   /** Un fait : sa confiance, de 0 à 1. */
   confidence?: number;

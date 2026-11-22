@@ -246,3 +246,29 @@ test("les images à télécharger : du service d'images de Teams seulement, à l
   assert.deepEqual(m.images.map((i) => i.id), ["0-neu-d4-ccc"]);
   assert.equal(m.text, "regarde [image]");
 });
+
+// ── ADR 0305 : la citation d'une réponse, à part de son texte ───────────────
+
+// le contenu d'une réponse citée, tel que Teams l'a envoyé le 2026-11-22 (essai 8 chez Albert)
+const QUOTED = '<blockquote itemtype="http://schema.skype.com/Reply" itemid="1795384015721"><strong itemprop="mri" itemid="28:ed349f0c-53ac-4a32-a4c8-2bd6e5244865">Albert</strong><span itemprop="time" itemid="1795384015721"></span><p itemprop="preview">Bonjour Adrien, votre prochaine le&ccedil;on n&#39;est pas encore disponible.</p></blockquote><p><semantic-object>SONDE-MIKA essai 8 (citation, à ignorer)</semantic-object></p>';
+
+test("une réponse citée garde sa citation à part : son texte ne la reprend pas (ADR 0305)", () => {
+  const m = X.normalizeMessage(chatsvcMessage({ content: QUOTED }));
+  assert.equal(m.text, "SONDE-MIKA essai 8 (citation, à ignorer)");
+  assert.deepEqual(m.quote, { message: "1795384015721", author_id: "28:ed349f0c-53ac-4a32-a4c8-2bd6e5244865",
+    author: "Albert", at: 1795384015721,
+    preview: "Bonjour Adrien, votre prochaine leçon n'est pas encore disponible." });
+});
+
+test("une citation illisible, ou un simple bloc cité, reste dans le texte comme avant", () => {
+  const odd = QUOTED.replace('itemid="1795384015721">', 'itemid="abc">');
+  const m = X.normalizeMessage(chatsvcMessage({ content: odd }));
+  assert.equal(m.quote, undefined);
+  assert.match(m.text, /^« Albert Bonjour Adrien/);
+  const plain = X.normalizeMessage(chatsvcMessage({ content: "<blockquote>dit-il</blockquote><p>oui</p>" }));
+  assert.equal(plain.quote, undefined);
+  assert.match(plain.text, /« dit-il »/);
+  // une réponse qui ne serait qu'une citation la garde en texte
+  const only = QUOTED.replace(/<p><semantic-object>.*$/, "");
+  assert.match(X.normalizeMessage(chatsvcMessage({ content: only })).text, /« Albert/);
+});

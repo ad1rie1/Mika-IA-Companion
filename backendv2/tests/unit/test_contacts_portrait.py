@@ -9,7 +9,11 @@ appel réel).
   par jour (contacts, appels) et par passage ;
 - **le prompt** vient de sa voix (``contacts.portrait``), ses messages cités, jamais un fait oublié ;
 - **la réponse** est relue strictement : illisible, rien n'est gardé et la vue attend du nouveau ; un appel en panne
-  n'est pas compté ; un fait oublié, redit, ne se garde pas.
+  n'est pas compté ; un fait oublié, redit, ne se garde pas ;
+- **une fiche qui s'enrichit** (ADR 0303) : le portrait suivant reçoit ce qu'elle en savait et la complète — un fait
+  récrit garde ce qui le fondait, un fait précisé prend le message nouveau, un fait retiré part, un fait qu'il ne cite
+  pas reste ; un fait dont le message n'est plus, ou oublié pendant l'appel, ne revient pas ; sa façon d'être et ce
+  qu'il y a entre elle et la personne du compte y ont leur sorte.
 """
 
 from __future__ import annotations
@@ -37,11 +41,12 @@ from mika.plugins.contacts.portrait import (
     Line,
     Portraits,
     fair,
+    left,
     parse,
     phone_exchange,
     thread_people,
 )
-from mika.ports.contacts import EMAIL, MAIL, PHONE_SOURCE, TEAMS, TEAMS_ID, Observation
+from mika.ports.contacts import EMAIL, MAIL, NOTES_MAX, PHONE_SOURCE, TEAMS, TEAMS_ID, Observation
 from mika.ports.llm import LLMResponse
 from mika.ports.mail import AccountInfo, Mail
 from mika.ports.teams import InboxBatch, InboxConversation, InboxMessage
@@ -248,7 +253,7 @@ def test_reading_the_whole_history_is_a_choice_of_the_operator(world):
     assert "Un vieux message de Gilles" in gilles.messages[0].content
 
 
-def test_a_portrait_is_redone_after_enough_new_messages_and_replaces_the_former(world):
+def test_a_portrait_is_redone_after_enough_new_messages_and_completes_the_former(world):
     seed(world)
     world.run()
     gilles = world.contacts.contact_of(TEAMS_ID, GILLES)
@@ -261,7 +266,8 @@ def test_a_portrait_is_redone_after_enough_new_messages_and_replaces_the_former(
                                                 "sorte": "expectation", "confiance": 0.7, "message": 1}]})
     asked = world.run()
     assert len(asked) == 1 and "Message 20 de Gilles" in asked[0].messages[0].content
-    assert [n.text for n in world.contacts.notes(gilles)] == ["Il attend la recette avant vendredi."]
+    # le fait d'avant, que la réponse ne cite pas, reste (ADR 0303) ; le nouveau s'y ajoute
+    assert {n.text for n in world.contacts.notes(gilles)} == {"Il attend la recette avant vendredi.", FACT["texte"]}
 
 
 def test_a_first_portrait_waits_for_a_few_messages(world):
@@ -325,9 +331,20 @@ def test_the_answer_is_read_strictly():
                    json.dumps({"faits": [{**good, "confiance": True}]})):
         assert parse(broken, 2) is None, broken
     mixed = parse(json.dumps({"faits": [good, {**good, "message": 0}, {**good, "sorte": "santé"},
-                                        *({**good, "texte": f"Fait {i}."} for i in range(9))]}), 2)
-    assert len(mixed) == 6 and mixed[0].text == "Elle suit le budget."  # au plus six, le doublon tombe
+                                        *({**good, "texte": f"Fait {i}."} for i in range(15))]}), 2)
+    assert len(mixed) == NOTES_MAX == 12 and mixed[0].text == "Elle suit le budget."  # au plus douze, sans doublon
     assert parse(json.dumps({"faits": [{**good, "sorte": "santé", "texte": "Autre."}]}), 2)[0].kind == "other"
+    # un fait d'avant repris : « avant » le désigne parmi ceux qu'elle savait, sans message nouveau
+    kept = {**good, "message": 0, "avant": 2}
+    assert [(f.message, f.before) for f in parse(json.dumps({"faits": [kept]}), 2, known=3)] == [(0, 2)]
+    assert parse(json.dumps({"faits": [kept]}), 2, known=1) is None  # un fait d'avant qu'elle n'avait pas
+    assert parse(json.dumps({"faits": [{**kept, "avant": True}]}), 2, known=3) is None
+    assert parse(json.dumps({"faits": [{**good, "avant": 1}]}), 2, known=1)[0].message == 2  # précisé : le message
+    # « laisse » : les faits d'avant retirés, ceux qu'elle avait seulement ; sans « laisse », rien ne part
+    assert left(json.dumps({"faits": [], "laisse": [1, 3, 9, True, "2"]}), 3) == {1, 3}
+    assert left(json.dumps({"faits": []}), 3) == set() and left("pas de JSON", 3) == set()
+    for kind in ("manner", "bond"):  # sa façon d'être, ce qu'il y a entre elle et la personne du compte
+        assert parse(json.dumps({"faits": [{**good, "sorte": kind}]}), 2)[0].kind == kind
 
 
 def test_the_process_wakes_after_what_is_noticed_and_hourly_otherwise(world):
@@ -450,3 +467,109 @@ def test_a_fact_that_names_someone_else_is_not_kept(world):
     gilles = world.contacts.contact_of(TEAMS_ID, GILLES)
     assert [n.text for n in world.contacts.notes(gilles)] == ["Il suit le support des centrales."]
     assert "un fait qui nomme quelqu'un d'autre n'est pas gardé" in phrase("contacts.portrait.system", name="Mika")
+
+
+def test_the_next_portrait_completes_the_sheet_it_was_given(world):
+    """« C'est pour ça qu'un contact a une fiche » (2026-11-22) : six faits de son travail, remplacés à chaque passage,
+    ne disaient rien de Kévin après 310 messages. Le portrait suivant reçoit ce qu'elle en sait et le complète."""
+    seed(world)
+    world.run()
+    gilles = world.contacts.contact_of(TEAMS_ID, GILLES)
+    (before,) = world.contacts.notes(gilles)
+    world.now += HOUR
+    world.teams_says(*gilles_writes(5, start=40, at=world.now // 1000 - 1000))
+    world.model.answer = json.dumps({"faits": [
+        {**FACT, "message": 0, "avant": 1},  # repris tel quel
+        {"texte": "Il écrit vite, sans majuscules, et glisse souvent une blague.", "sorte": "manner",
+         "confiance": 0.7, "message": 2, "avant": 0},
+        {"texte": "Il tutoie la personne du compte et lui demande de ses nouvelles.", "sorte": "bond",
+         "confiance": 0.8, "message": 1, "avant": 0}]})
+    (asked,) = world.run()
+    text = asked.messages[0].content
+    known = phrase("contacts.portrait.known_line", n=1, kind="role", text=FACT["texte"])
+    assert known in text and text.index(known) < text.index("Message 44 de Gilles")  # sa fiche, puis ses messages
+    assert text.startswith(phrase("contacts.portrait.known", who="Gilles Rousseau", facts="")[:30])
+    notes = {n.kind: n for n in world.contacts.notes(gilles)}
+    assert set(notes) == {"role", "manner", "bond"}
+    kept = notes["role"]  # ce qui le fondait reste : son message, sa date, quand elle l'avait appris
+    assert (kept.text, kept.ref, kept.said_at, kept.at) == (before.text, before.ref, before.said_at, before.at)
+    assert kept.call_id == asked.call_id  # le texte est celui de ce passage
+    assert notes["bond"].said_at == (world.now // 1000 - 1000 + 4) * 1000 and notes["bond"].at == world.now
+
+
+def test_a_fact_made_more_precise_takes_the_new_message_and_a_fact_let_go_leaves(world):
+    seed(world)
+    topic = "Il suit le support des centrales."
+    world.model.answer = json.dumps({"faits": [FACT, {"texte": topic, "sorte": "topic", "confiance": 0.6,
+                                                      "message": 2}]})
+    world.run()
+    gilles = world.contacts.contact_of(TEAMS_ID, GILLES)
+    role = next(n for n in world.contacts.notes(gilles) if n.text == FACT["texte"])
+    world.now += HOUR
+    world.teams_says(*gilles_writes(5, start=50, at=world.now // 1000 - 1000))
+    number = {n.text: i for i, n in enumerate(world.contacts.notes(gilles), 1)}
+    world.model.answer = json.dumps({"faits": [
+        {"texte": "Il pilote la migration des centrales vers le VPN, à finir en décembre.", "sorte": "role",
+         "confiance": 0.9, "message": 1, "avant": number[FACT["texte"]]}], "laisse": [number[topic]]})
+    (asked,) = world.run()
+    # chaque fait d'avant sous son numéro, distinct de ceux des messages
+    for text, n in number.items():
+        assert phrase("contacts.portrait.known_line", n=n, kind="role" if text == FACT["texte"] else "topic",
+                      text=text) in asked.messages[0].content
+    (now_,) = world.contacts.notes(gilles)  # précisé, il remplace l'ancien ; le sujet, laissé, part
+    assert now_.text.endswith("à finir en décembre.") and now_.ref != role.ref and now_.at == world.now
+
+
+def test_a_partial_answer_erases_nothing(world):
+    """Relecture du 2026-11-22 : la fiche entière demandée au modèle, une réponse qui n'en rendait qu'une part (ou un
+    fait mal formé, la CLI ne garantissant pas le schéma) effaçait le reste pour de bon."""
+    seed(world)
+    world.run()
+    gilles = world.contacts.contact_of(TEAMS_ID, GILLES)
+    (before,) = world.contacts.notes(gilles)
+    world.now += HOUR
+    world.teams_says(*gilles_writes(5, start=60, at=world.now // 1000 - 1000))
+    world.model.answer = json.dumps({"faits": [
+        {"texte": "Il glisse souvent une blague.", "sorte": "manner", "confiance": 0.7, "message": 1, "avant": 0},
+        {**FACT, "message": 0, "avant": "1"}]})  # un numéro mal écrit : ce fait-là tombe, l'ancien reste
+    world.run()
+    notes = {n.text: n for n in world.contacts.notes(gilles)}
+    assert set(notes) == {"Il glisse souvent une blague.", FACT["texte"]}
+    assert (notes[FACT["texte"]].ref, notes[FACT["texte"]].at) == (before.ref, before.at)  # tel quel
+
+
+def test_a_fact_whose_message_is_gone_is_neither_shown_nor_kept(world):
+    seed(world)
+    world.run()
+    gilles = world.contacts.contact_of(TEAMS_ID, GILLES)
+    (before,) = world.contacts.notes(gilles)
+    # son message est supprimé dans Teams : le cache en efface le texte
+    world.teams_says(InboxMessage("g3", DM, "Gilles Rousseau", GILLES, MS - HOUR_MS + 3, "", deleted=True))
+    world.now += HOUR
+    world.teams_says(*gilles_writes(5, start=70, at=world.now // 1000 - 1000))
+    world.model.answer = json.dumps({"faits": [], "laisse": []})  # rien de nouveau
+    (asked,) = world.run()
+    assert before.text not in asked.messages[0].content
+    assert world.contacts.notes(gilles) == []  # parti, comme avant que la fiche ne s'enrichisse
+
+
+def test_what_is_forgotten_during_the_call_does_not_come_back(world):
+    seed(world)
+    world.model.answer = json.dumps({"faits": [FACT, {"texte": "Il suit le support des centrales.", "sorte": "topic",
+                                                      "confiance": 0.6, "message": 2}]})
+    world.run()
+    gilles = world.contacts.contact_of(TEAMS_ID, GILLES)
+    number = {n.text: (i, n.id) for i, n in enumerate(world.contacts.notes(gilles), 1)}
+    world.now += HOUR
+    world.teams_says(*gilles_writes(5, start=80, at=world.now // 1000 - 1000))
+
+    def meanwhile(request):  # pendant l'appel, on lui fait oublier les deux faits
+        for _n, note_id in number.values():
+            world.contacts.forget_note(note_id)
+        return json.dumps({"faits": [{"texte": "Il pilote toujours la migration des centrales vers le VPN.",
+                                      "sorte": "role", "confiance": 0.9, "message": 0,
+                                      "avant": number[FACT["texte"]][0]}], "laisse": []})
+
+    world.model.answer = meanwhile
+    world.run()
+    assert world.contacts.notes(gilles) == []  # ni repris, ni tel quel

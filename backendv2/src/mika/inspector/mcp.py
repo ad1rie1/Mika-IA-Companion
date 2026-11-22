@@ -55,9 +55,11 @@ SERVABLE = (*PAGES, "accueil.maintenant", "accueil.aujourdhui", "decisions.maint
             "decisions.echeances", "systeme.passerelle", "systeme.monde", "systeme.stockage", "systeme.operations",
             "outils.tous")
 #: ce qu'elle sert au-delà des pages : les vues que déclarent ses facultés (outil « vue »), les fiches d'objets et la
-#: recherche (« chercher », « fiche »), « pourquoi a-t-elle dit ça ? » (« pourquoi »)
-VIEWS, SUBJECTS, WHY = "vues", "fiches", "pourquoi"
-PARTS = (VIEWS, SUBJECTS, WHY)
+#: recherche (« chercher », « fiche »), « pourquoi a-t-elle dit ça ? » (« pourquoi ») ; ce qui attend ta décision,
+#: les vues que lit la file « À valider » (``QUEUE`` : celles que la composition déclare, ``InspectorDeps.queue.views``
+#: — les identités à confirmer, les noms à relier, les rapprochements de l'annuaire ; ADR 0304)
+VIEWS, SUBJECTS, WHY, QUEUE = "vues", "fiches", "pourquoi", "a_valider"
+PARTS = (VIEWS, SUBJECTS, WHY, QUEUE)
 #: ce qu'elle sert d'office (aucun choix enregistré)
 DEFAULT_SERVED = (*PAGES, *PARTS)
 
@@ -108,6 +110,13 @@ class ConsoleHost:
         chosen = self.served() if self.served is not None else None
         return frozenset(DEFAULT_SERVED if chosen is None else (k for k in chosen if k in (*SERVABLE, *PARTS)))
 
+    def queue_views(self) -> frozenset[tuple[str, str]]:
+        """Les vues que lit la file « À valider », telles que la composition les déclare (``queue.views`` : des
+        (propriétaire, vue)) : elles se servent par leur part (``QUEUE``), pas par celle des vues. Sans les pages de la
+        console, aucune."""
+        deps = getattr(getattr(self.pages, "ui", None), "deps", None)
+        return frozenset((str(o), str(n)) for o, n in getattr(getattr(deps, "queue", None), "views", ()))
+
     def tools(self) -> Sequence[Tool]:
         on = self.serves()
         hidden = {"pourquoi"} if WHY not in on else set()
@@ -135,7 +144,8 @@ class ConsoleHost:
             tab = self._pages().get(f"{owner}.{view}")
             if tab is not None:
                 return await self._page(f"{owner}.{view}", tab.title, params)
-            spec = self.inspection.find(owner, view) if VIEWS in on else None
+            part = QUEUE if (owner, view) in self.queue_views() else VIEWS
+            spec = self.inspection.find(owner, view) if part in on else None
             if spec is None or spec.subject:
                 return Outcome(f"vue inconnue : {arguments.get('cle')} (voir lister_vues)", is_error=True)
             return Outcome(f"# {spec.title}\n" + self.text(await self.inspection.arun(spec, params, self.when)))
@@ -186,12 +196,17 @@ class ConsoleHost:
                 continue
             lines.append(f"- {destination}/{slug} — {tab.title} [{destination}]"
                          + (f" : {tab.description}" if tab.description else ""))
-        for v in self.inspection.views() if VIEWS in self.serves() else ():
-            if v.hidden or v.subject or (section and v.section != section):
+        # les vues hors de la navigation aussi, en lecture comme les autres ; celles que lit la file « À valider » (les
+        # identités à confirmer, les noms à relier, les rapprochements de l'annuaire) par leur part (ADR 0304)
+        on, queue = self.serves(), self.queue_views()
+        for v in self.inspection.views():
+            mine = (v.owner, v.name) in queue
+            if v.subject or (section and v.section != section) or (QUEUE if mine else VIEWS) not in on:
                 continue
             params = ", ".join(p.name for p in v.typed)
-            lines.append(f"- {v.owner}/{v.name} — {v.title} [{v.section or '—'}]" + (f" ; paramètres : {params}"
-                                                                                       if params else ""))
+            lines.append(f"- {v.owner}/{v.name} — {v.title} [{v.section or '—'}]"
+                         + (" (la file « À valider »)" if mine else " (hors de la navigation)" if v.hidden else "")
+                         + (f" ; paramètres : {params}" if params else ""))
         if not section and SUBJECTS in self.serves():
             lines.append("\nFiches (outil « fiche ») :")
             for kind, spec in sorted(self.kernel.registry.subjects.items()):

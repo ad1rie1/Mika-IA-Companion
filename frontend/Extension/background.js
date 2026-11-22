@@ -277,6 +277,8 @@ function ingest(state, batch) {
     if (m.images > 0) entry.images = Math.min(8, Number(m.images) || 0);
     // ses réactions (ADR 0300), quand la page les a lues ; sa version
     if (Array.isArray(m.reactions)) entry.reactions = m.reactions.slice(0, S.LIMITS.maxReactions);
+    // le message qu'il cite (ADR 0305)
+    if (m.quote && typeof m.quote === "object") entry.quote = m.quote;
     if (Number(m.version) > 0) entry.version = Number(m.version);
     if (m.deleted) {
       entry.deleted = true;
@@ -887,7 +889,8 @@ async function sendOne(id) {
       return { acks: true };
     }
     if (!O.beginSend(box, id, now)) return null;
-    return { item: { id: e.id, conversation: e.conversation, text: e.text, selfName: rt.selfName } };
+    return { item: { id: e.id, conversation: e.conversation, text: e.text, selfName: rt.selfName,
+      quote: e.quote || null } };
   });
   if (!job) return;
   if (job.acks) {
@@ -1247,6 +1250,7 @@ async function historyChunk(msg) {
         images: Math.min(8, Number(m.images) || 0) };
       // ses réactions (ADR 0300), quand la page les a lues
       if (Array.isArray(m.reactions) && !entry.deleted) entry.reactions = m.reactions.slice(0, S.LIMITS.maxReactions);
+      if (m.quote && typeof m.quote === "object" && !entry.deleted) entry.quote = m.quote;
       kept.push(entry);
     }
     prunePeople(rt);

@@ -1,14 +1,21 @@
 package fr.qwartz.mika.ui.teams
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -17,39 +24,54 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -68,10 +90,12 @@ import fr.qwartz.mika.data.moi.teams.OwnBubble
 import fr.qwartz.mika.data.moi.teams.TeamsAccount
 import fr.qwartz.mika.data.moi.teams.TeamsLimits
 import fr.qwartz.mika.data.moi.teams.TeamsMessage
+import fr.qwartz.mika.data.moi.teams.TeamsQuote
 import fr.qwartz.mika.data.moi.teams.TeamsReply
 import fr.qwartz.mika.data.moi.teams.YOU
 import fr.qwartz.mika.data.moi.teams.authorLabel
 import fr.qwartz.mika.data.moi.teams.capsOf
+import fr.qwartz.mika.data.moi.teams.citable
 import fr.qwartz.mika.data.moi.teams.fromHer
 import fr.qwartz.mika.data.moi.teams.fromYou
 import fr.qwartz.mika.data.moi.teams.isGroup
@@ -80,6 +104,10 @@ import fr.qwartz.mika.data.moi.teams.mentionRanges
 import fr.qwartz.mika.data.moi.teams.ownBubbles
 import fr.qwartz.mika.data.moi.teams.prefillOff
 import fr.qwartz.mika.data.moi.teams.quietLine
+import fr.qwartz.mika.data.moi.teams.quoteAuthor
+import fr.qwartz.mika.data.moi.teams.quoteExcerpt
+import fr.qwartz.mika.data.moi.teams.quoteTarget
+import fr.qwartz.mika.data.moi.teams.quoteWhen
 import fr.qwartz.mika.data.moi.teams.readOnlyLine
 import fr.qwartz.mika.data.moi.teams.selfName
 import fr.qwartz.mika.data.moi.teams.sentUnder
@@ -100,6 +128,7 @@ import fr.qwartz.mika.ui.shell.MikaTopBar
 import fr.qwartz.mika.ui.shell.NoteBox
 import fr.qwartz.mika.ui.shell.PersonAvatar
 import fr.qwartz.mika.ui.shell.SectionScaffold
+import fr.qwartz.mika.ui.shell.SheetLine
 import fr.qwartz.mika.ui.shell.linked
 import fr.qwartz.mika.ui.shell.rememberSessionKey
 import fr.qwartz.mika.ui.theme.mika
@@ -110,13 +139,15 @@ import kotlinx.coroutines.delay
  * seulement sur un compte à toi ; sur un compte qu'on te partage, son propriétaire à son nom, à gauche —, tes mentions
  * marquées, « Messages plus anciens » en haut, tes messages en attente avec leur état. Ses réponses en carte rose
  * au-dessus du champ ; le champ : ✦ Préremplir à gauche, envoyer à droite, et dessous sous quel nom ça part. Un
- * compte qu'on ne te partage qu'en lecture n'a pas de champ : une phrase le dit. ⋮ : « Comment ça part ».
+ * compte qu'on ne te partage qu'en lecture n'a pas de champ : une phrase le dit. ⋮ : « Comment ça part ». La citation
+ * (ADR 0305), calquée sur Teams mobile : un appui long sur un message ouvre sa feuille, « Citer » pose sa carte
+ * au-dessus du champ ; un message qui en cite un autre le montre en haut de sa bulle, et un appui y mène.
  */
 @Composable
 fun TeamsThreadScreen(graph: AppGraph, key: String) {
     val shell = LocalShell.current
     val session = rememberSessionKey(graph)
-    val vm: TeamsThreadViewModel = viewModel(key = "teams.thread|$session") { TeamsThreadViewModel(graph) }
+    val vm: TeamsThreadViewModel = viewModel(key = "teams.thread|$session") { TeamsThreadViewModel(TeamsDeps(graph)) }
     val arrived = stringResource(R.string.teams_arrived)
     LaunchedEffect(key) { vm.open(key, arrived) }
     LaunchedEffect(vm) { vm.said.collect { shell.toast(it) } }
@@ -131,6 +162,9 @@ fun TeamsThreadScreen(graph: AppGraph, key: String) {
         }
     }
     var asking by remember { mutableStateOf<Pair<Ask, TeamsReply>?>(null) }
+    // l'appui long sur un message : sa feuille ; « Citer » rend la main au champ (le clavier monte, comme dans Teams)
+    var acting by remember { mutableStateOf<TeamsMessage?>(null) }
+    var focusAsk by remember { mutableIntStateOf(0) }
     val t = vm.current?.takeIf { vm.key == key }
     val account = t?.let { vm.account(it.account) }
     // qui est connecté : son nom, sous lequel part ce qu'on écrit d'un compte à soi, et sa mention
@@ -153,14 +187,54 @@ fun TeamsThreadScreen(graph: AppGraph, key: String) {
             }
         },
         bottomBar = {
-            if (t != null) Dock(vm, t, account, myName, onAsk = { a, r -> asking = a to r })
+            if (t != null) Dock(vm, t, account, myName, focusAsk, onAsk = { a, r -> asking = a to r })
         },
     ) { modifier ->
         LoadBox(if (vm.key == key) vm.thread else Load.Loading, onRetry = vm::retry, modifier = modifier) { thread ->
-            Messages(vm, thread, account, selfName(account, myName), modifier)
+            Messages(vm, thread, account, selfName(account, myName), acting = acting?.ref, onLong = { acting = it }, modifier = modifier)
         }
     }
     asking?.let { (a, r) -> ReplyAskDialog(a, r, vm) { asking = null } }
+    acting?.let { m ->
+        MessageSheet(
+            onCite = {
+                vm.cite(m)
+                focusAsk++
+            },
+            onDismiss = { acting = null },
+        )
+    }
+}
+
+/** Le message où une citation a mené s'éclaire ce temps-là (comme dans Teams). */
+private const val JUMP_GLOW_MS = 1_600L
+
+/** « Citer » : le champ prend la main une fois la feuille refermée. */
+private const val FOCUS_AFTER_SHEET_MS = 250L
+
+/**
+ * La feuille d'un message (l'appui long, comme dans Teams mobile) : « Citer » — sa carte se pose au-dessus du champ, et
+ * ton prochain message le cite. Seulement sur un message qui se cite ici ([citable]).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MessageSheet(onCite: () -> Unit, onDismiss: () -> Unit) {
+    val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = state) {
+        Column(Modifier.navigationBarsPadding().padding(bottom = 12.dp)) {
+            SheetLine(
+                icon = R.drawable.ic_m_quote,
+                title = stringResource(R.string.teams_cite),
+                subtitle = stringResource(R.string.teams_cite_line),
+                count = 0,
+                selected = false,
+                onClick = {
+                    onDismiss()
+                    onCite()
+                },
+            )
+        }
+    }
 }
 
 /** Une ligne du fil : un repère, un message, un des tiens en attente. */
@@ -193,7 +267,15 @@ private sealed interface Line {
 }
 
 @Composable
-private fun Messages(vm: TeamsThreadViewModel, t: ConversationThread, account: TeamsAccount?, selfName: String, modifier: Modifier) {
+private fun Messages(
+    vm: TeamsThreadViewModel,
+    t: ConversationThread,
+    account: TeamsAccount?,
+    selfName: String,
+    acting: String?,
+    onLong: (TeamsMessage) -> Unit,
+    modifier: Modifier,
+) {
     val now = rememberNow()
     val messages = vm.messages
     val caps = capsOf(account)
@@ -214,8 +296,28 @@ private fun Messages(vm: TeamsThreadViewModel, t: ConversationThread, account: T
             ownBubbles(t.pending, vm.sent.filter { it.conversation == t.key }, sentUnder(account)).forEachIndexed { i, b -> add(Line.Own(b, i)) }
         }.asReversed()
     }
+    // un appui sur une citation : le fil va au message cité (au tiers du bas), qui s'éclaire un instant
+    val list = rememberLazyListState()
+    var glowing by remember { mutableStateOf<String?>(null) }
+    val jump = vm.jump
+    LaunchedEffect(jump) {
+        if (jump == null) return@LaunchedEffect
+        glowing = null
+        val at = lines.indexOfFirst { it is Line.Message && it.m.ref == jump.ref }
+        if (at >= 0) {
+            list.animateScrollToItem(at)
+            list.animateScrollBy(-list.layoutInfo.viewportSize.height / 3f)
+            glowing = jump.ref
+        }
+        vm.jumped(jump)
+    }
+    LaunchedEffect(glowing) {
+        if (glowing == null) return@LaunchedEffect
+        delay(JUMP_GLOW_MS)
+        glowing = null
+    }
     // le plus récent en bas : la liste part du bas, les plus anciens s'ajoutent en haut sans la faire bouger
-    LazyColumn(modifier.fillMaxSize(), reverseLayout = true, contentPadding = PaddingValues(vertical = 8.dp)) {
+    LazyColumn(modifier.fillMaxSize(), state = list, reverseLayout = true, contentPadding = PaddingValues(vertical = 8.dp)) {
         items(lines, key = { it.id }) { line ->
             when (line) {
                 is Line.Older -> Box(Modifier.fillMaxWidth().padding(4.dp), contentAlignment = Alignment.Center) {
@@ -240,7 +342,19 @@ private fun Messages(vm: TeamsThreadViewModel, t: ConversationThread, account: T
                     textAlign = TextAlign.Center,
                 )
                 is Line.Day -> DayMark(line.text)
-                is Line.Message -> MessageRow(line.m, line.mark, account, group, selfName, fromHer(line.m, t.replies))
+                is Line.Message -> {
+                    val m = line.m
+                    val shown = m.quote?.let { q ->
+                        ShownQuote(q, quoteAuthor(q, messages, account), quoteWhen(q.at, now), quoteTarget(q, messages) != null)
+                    }
+                    MessageRow(
+                        m, line.mark, account, group, selfName, fromHer(m, t.replies),
+                        quote = shown,
+                        glow = m.ref == glowing || m.ref == acting,
+                        onLong = if (citable(m, t.kind, account)) ({ onLong(m) }) else null,
+                        onJump = { q -> vm.jumpTo(q) },
+                    )
+                }
                 is Line.Own -> OwnRow(line.b, canRewrite = caps.write) { vm.rewrite(line.b.id, busy) }
             }
         }
@@ -264,13 +378,35 @@ private fun DayMark(text: String) {
 private fun bubbleShape(mine: Boolean) =
     if (mine) RoundedCornerShape(20.dp, 20.dp, 6.dp, 20.dp) else RoundedCornerShape(20.dp, 20.dp, 20.dp, 6.dp)
 
+/** La citation d'un message, telle que sa bulle la montre : ce qu'il cite, qui l'a écrit et quand, et si un appui y
+ *  mène (le message cité est parmi ceux chargés). */
+private data class ShownQuote(val q: TeamsQuote, val author: String, val whenText: String, val reachable: Boolean)
+
+/** L'appui long sur une bulle (ses gestes) : sans onde au simple appui (un message ne s'ouvre pas), dit à TalkBack sous
+ *  [label]. [key] : le message (le geste se repose quand il change). */
+private fun Modifier.longPress(key: Any, label: String, action: () -> Unit): Modifier =
+    pointerInput(key) { detectTapGestures(onLongPress = { action() }) }
+        .semantics { onLongClick(label) { action(); true } }
+
 /**
  * Un message (`.tmsg` de la maquette) : les autres à gauche avec leur rond (leur nom au-dessus dans un groupe), toi à
  * droite en indigo ; la suite d'un même auteur se serre. Une mention de toi : un filet indigo à gauche de la bulle, et
- * ton nom en gras.
+ * ton nom en gras. Ce qu'il cite, en haut de sa bulle (comme Teams) ; [onLong] : l'appui long ouvre ses gestes (`null` :
+ * il ne se cite pas ici) ; [glow] : le message où une citation vient de mener, ou celui dont la feuille est ouverte.
  */
 @Composable
-private fun MessageRow(m: TeamsMessage, mark: Mark, account: TeamsAccount?, group: Boolean, selfName: String, byMika: Boolean) {
+private fun MessageRow(
+    m: TeamsMessage,
+    mark: Mark,
+    account: TeamsAccount?,
+    group: Boolean,
+    selfName: String,
+    byMika: Boolean,
+    quote: ShownQuote?,
+    glow: Boolean,
+    onLong: (() -> Unit)?,
+    onJump: (TeamsQuote) -> Unit,
+) {
     val scheme = MaterialTheme.colorScheme
     val mine = fromYou(m, account)
     val name = authorLabel(m, account)
@@ -287,8 +423,21 @@ private fun MessageRow(m: TeamsMessage, mark: Mark, account: TeamsAccount?, grou
         }
     }
     val bar = scheme.primary
+    val glowColor by animateColorAsState(if (glow) scheme.primary.copy(alpha = 0.12f) else Color.Transparent, label = "glow")
+    val haptic = LocalHapticFeedback.current
+    val actions = stringResource(R.string.teams_message_actions)
+    val long by rememberUpdatedState(onLong)
+    val press: () -> Unit = {
+        long?.let {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            it()
+        }
+    }
     Row(
-        Modifier.fillMaxWidth().padding(start = if (mine) 56.dp else 12.dp, end = if (mine) 12.dp else 40.dp, top = if (mark.suite) 1.dp else 6.dp),
+        Modifier
+            .fillMaxWidth()
+            .background(glowColor)
+            .padding(start = if (mine) 56.dp else 12.dp, end = if (mine) 12.dp else 40.dp, top = if (mark.suite) 1.dp else 6.dp),
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
     ) {
         if (!mine) {
@@ -304,16 +453,24 @@ private fun MessageRow(m: TeamsMessage, mark: Mark, account: TeamsAccount?, grou
                     modifier = Modifier.padding(start = 6.dp, bottom = 2.dp),
                 )
             }
-            Text(
-                text,
-                style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp, lineHeight = 21.sp),
-                color = fg,
-                modifier = Modifier
+            Column(
+                Modifier
+                    // la citation prend la largeur de la bulle, et la bulle celle du plus large des deux
+                    .then(if (quote != null) Modifier.width(IntrinsicSize.Max) else Modifier)
                     .clip(bubbleShape(mine))
                     .background(bg)
                     .then(if (m.mentionsMe) Modifier.drawBehind { drawRect(bar, size = Size(3.dp.toPx(), size.height)) } else Modifier)
+                    .then(if (onLong != null) Modifier.longPress(m.ref, actions, press) else Modifier)
                     .padding(horizontal = 14.dp, vertical = 8.dp),
-            )
+            ) {
+                if (quote != null) {
+                    QuoteInBubble(quote, mine, onJump = { onJump(quote.q) }, onLong = if (onLong != null) press else null)
+                }
+                if (m.text.isNotEmpty() || quote == null) {
+                    if (quote != null) Spacer(Modifier.height(6.dp))
+                    Text(text, style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp, lineHeight = 21.sp), color = fg)
+                }
+            }
             if (mine || !group || byMika) {
                 Row(Modifier.padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(MoiDates.clock(m.at), style = MaterialTheme.typography.labelSmall, color = scheme.onSurfaceVariant)
@@ -325,6 +482,69 @@ private fun MessageRow(m: TeamsMessage, mark: Mark, account: TeamsAccount?, grou
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Ce qu'un message cite, en haut de sa bulle (comme Teams) : une barre d'accent à gauche, son auteur en gras et son
+ * heure en petit, l'extrait sur trois lignes au plus. Un appui mène au message cité quand il est chargé ([ShownQuote.reachable]) ;
+ * sinon la carte n'est qu'un texte. Sur ta bulle indigo, elle prend ses teintes.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun QuoteInBubble(quote: ShownQuote, mine: Boolean, onJump: () -> Unit, onLong: (() -> Unit)?) {
+    val scheme = MaterialTheme.colorScheme
+    val fg = if (mine) scheme.onPrimary else scheme.onSurface
+    val muted = if (mine) scheme.onPrimary.copy(alpha = 0.78f) else scheme.onSurfaceVariant
+    val card = if (mine) scheme.onPrimary.copy(alpha = 0.14f) else scheme.surface
+    val bar = if (mine) scheme.onPrimary.copy(alpha = 0.85f) else scheme.primary
+    val go = stringResource(R.string.teams_quote_go)
+    val actions = stringResource(R.string.teams_message_actions)
+    val preview = quoteExcerpt(quote.q.preview)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(card)
+            .drawBehind { drawRect(bar, size = Size(3.dp.toPx(), size.height)) }
+            .then(
+                if (quote.reachable) {
+                    Modifier.combinedClickable(
+                        onClickLabel = go,
+                        onLongClickLabel = if (onLong != null) actions else null,
+                        onLongClick = onLong,
+                        // la vibration de l'appui long, la bulle la donne déjà
+                        hapticFeedbackEnabled = false,
+                        onClick = onJump,
+                    )
+                } else {
+                    Modifier
+                },
+            )
+            .padding(start = 11.dp, end = 10.dp, top = 6.dp, bottom = 6.dp),
+    ) {
+        if (quote.author.isNotEmpty() || quote.whenText.isNotEmpty()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (quote.author.isNotEmpty()) {
+                    Text(
+                        quote.author,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = fg,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                }
+                if (quote.whenText.isNotEmpty()) {
+                    if (quote.author.isNotEmpty()) Spacer(Modifier.width(6.dp))
+                    Text(quote.whenText, style = MaterialTheme.typography.labelSmall, color = muted, maxLines = 1)
+                }
+            }
+        }
+        if (preview.isNotEmpty()) {
+            Text(preview, style = MaterialTheme.typography.bodyMedium, color = muted, maxLines = 3, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -361,10 +581,11 @@ private fun OwnRow(b: OwnBubble, canRewrite: Boolean, onRewrite: () -> Unit) {
 /**
  * Le bas du fil : ses réponses en carte rose (celles en chemin, et celle à laquelle tu as répondu autrement tant que
  * rien n'est venu depuis), « Elle s'y met… », ce qui retient ce qui part, puis le champ — ou, sur un compte qu'on ne te
- * partage qu'en lecture, la phrase qui le dit (et « Préremplir » si ton partage le permet).
+ * partage qu'en lecture, la phrase qui le dit (et « Préremplir » si ton partage le permet). [focusAsk] : « Citer » vient
+ * d'être choisi, le champ prend la main.
  */
 @Composable
-private fun Dock(vm: TeamsThreadViewModel, t: ConversationThread, account: TeamsAccount?, myName: String, onAsk: (Ask, TeamsReply) -> Unit) {
+private fun Dock(vm: TeamsThreadViewModel, t: ConversationThread, account: TeamsAccount?, myName: String, focusAsk: Int, onAsk: (Ask, TeamsReply) -> Unit) {
     val scheme = MaterialTheme.colorScheme
     val now = rememberNow()
     val caps = capsOf(account)
@@ -399,6 +620,9 @@ private fun Dock(vm: TeamsThreadViewModel, t: ConversationThread, account: Teams
                 }
                 Composer(
                     vm = vm,
+                    account = account,
+                    now = now,
+                    focusAsk = focusAsk,
                     title = t.title,
                     canPrefill = lastReceived(messages) != null && prefillOff(enabled, account).isEmpty(),
                     sender = selfName(account, myName),
@@ -411,12 +635,33 @@ private fun Dock(vm: TeamsThreadViewModel, t: ConversationThread, account: Teams
     }
 }
 
-/** Le champ (`.composer` de la maquette) : ✦ Préremplir à gauche, ton message, envoyer ; dessous, sous quel nom ça
- *  part (et le compte des caractères, près de la borne). */
+/** Le champ (`.composer` de la maquette) : au-dessus, le message que tu cites ; ✦ Préremplir à gauche, ton message,
+ *  envoyer ; dessous, sous quel nom ça part (et le compte des caractères, près de la borne). [focusAsk] : « Citer »
+ *  vient d'être choisi — le champ prend la main et le clavier monte, comme dans Teams. */
 @Composable
-private fun Composer(vm: TeamsThreadViewModel, title: String, canPrefill: Boolean, sender: String, onPrefill: () -> Unit) {
+private fun Composer(
+    vm: TeamsThreadViewModel,
+    account: TeamsAccount?,
+    now: Long,
+    focusAsk: Int,
+    title: String,
+    canPrefill: Boolean,
+    sender: String,
+    onPrefill: () -> Unit,
+) {
     val scheme = MaterialTheme.colorScheme
+    val focus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    LaunchedEffect(focusAsk) {
+        if (focusAsk > 0) {
+            // la feuille d'où vient « Citer » se referme d'abord : sa fenêtre rend la main à celle du fil
+            delay(FOCUS_AFTER_SHEET_MS)
+            focus.requestFocus()
+            keyboard?.show()
+        }
+    }
     Column(Modifier.padding(start = 4.dp, end = 8.dp, top = 6.dp, bottom = 6.dp)) {
+        vm.citing?.let { m -> CitingCard(m, account, now, onCancel = vm::uncite) }
         Row(verticalAlignment = Alignment.Bottom) {
             IconButton(onClick = onPrefill, enabled = !vm.prefilling, modifier = Modifier.alpha(if (canPrefill) 1f else 0.45f)) {
                 MIcon(R.drawable.ic_m_sparkle, stringResource(R.string.teams_prefill), tint = mika.accent)
@@ -432,7 +677,7 @@ private fun Composer(vm: TeamsThreadViewModel, title: String, canPrefill: Boolea
                     textStyle = style,
                     cursorBrush = SolidColor(scheme.primary),
                     maxLines = 6,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().focusRequester(focus),
                     decorationBox = { inner ->
                         Box {
                             if (vm.text.isEmpty()) {
@@ -461,6 +706,52 @@ private fun Composer(vm: TeamsThreadViewModel, title: String, canPrefill: Boolea
             color = scheme.onSurfaceVariant,
             modifier = Modifier.padding(start = 52.dp, top = 2.dp),
         )
+    }
+}
+
+/**
+ * Le message que tu cites, au-dessus du champ (« Citer » de Teams) : une barre d'accent à gauche, qui l'a écrit et
+ * quand, en petit, l'extrait sur deux lignes au plus, et × pour ne plus le citer. Aligné sur le champ.
+ */
+@Composable
+private fun CitingCard(m: TeamsMessage, account: TeamsAccount?, now: Long, onCancel: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    val bar = scheme.primary
+    val whenText = quoteWhen(m.at, now)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 48.dp, end = 54.dp, bottom = 6.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(scheme.surfaceContainerHigh)
+            .drawBehind { drawRect(bar, size = Size(3.dp.toPx(), size.height)) }
+            .padding(start = 13.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    authorLabel(m, account),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = scheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                if (whenText.isNotEmpty()) {
+                    Spacer(Modifier.width(6.dp))
+                    Text(whenText, style = MaterialTheme.typography.labelSmall, color = scheme.onSurfaceVariant, maxLines = 1)
+                }
+            }
+            val excerpt = quoteExcerpt(m.text)
+            if (excerpt.isNotEmpty()) {
+                Text(excerpt, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        IconButton(onClick = onCancel, modifier = Modifier.size(40.dp)) {
+            MIcon(R.drawable.ic_m_x, stringResource(R.string.teams_cite_cancel), size = 18.dp, tint = scheme.onSurfaceVariant)
+        }
     }
 }
 

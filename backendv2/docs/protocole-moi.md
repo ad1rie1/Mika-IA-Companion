@@ -211,7 +211,7 @@ sa clé (`<compte>~<identifiant>`, l'identifiant seul pour le compte `principal`
 ### Lire
 
 **`GET /api/moi/teams/accounts`** — ses comptes : `key`, `name`, `level`, `owner_name` (un compte partagé),
-`enabled`, `last_batch` (le dernier lot de son extension), `self_name` (son nom dans Teams), `extension_key`
+`enabled`, `last_batch` (le dernier lot de son extension), `last_seen` (la dernière fois qu'elle s'est manifestée : un relevé, la connexion en direct, un lot — en mémoire depuis le démarrage du serveur, jamais plus tôt que `last_batch` ; c'est sur lui qu'on juge si elle est là), `self_name` (son nom dans Teams), `extension_key`
 (`{"hint", "created_at"}`, jamais la clé ; `null` : pas de clé, ou un compte qui ne t'est que partagé),
 `drafts_waiting` (0 en lecture seule), `common` (un compte « à toi », commun à ses propriétaires) ; plus `plugged`,
 `enabled` (Teams actif) et `extension` (`{"version"}` : l'extension se télécharge ; `null` : elle n'est pas à côté
@@ -254,7 +254,9 @@ pas regardée ; le texte le reprend déjà en « [image : … ] ») —, `reacti
 de Teams — `key` (la clé de Teams : `like`, `heart`, `1f44f_clappinghands`…), `emoji` (vide si on ne le connaît
 pas : montrer la clé), `count`, `mine` (la personne du compte en est), `names` (qui l'a posée, sous le nom que le
 compte lui connaît, dix au plus, sans la personne du compte ; les autres se comptent) —, `photo` : l'adresse de la
-photo de son auteur, vide sans photo), `more`, `replies` (ses réponses dans cette conversation, voir ci-dessous ;
+photo de son auteur, vide sans photo —, `quote` : le message qu'il cite, ADR 0305, ou `null` — `author`, `author_id`,
+`preview` (un extrait), `at` (ms), `ref` (sa référence ici, pour y aller ; vide : il n'est pas chez elle) ; `text` ne
+le reprend pas), `more`, `replies` (ses réponses dans cette conversation, voir ci-dessous ;
 vides en lecture seule), `pending`, `under_way` (une réponse d'elle en chemin), `asked` (une réponse demandée, dont ses
 essais ne sont pas épuisés — elle y a renoncé, « Préremplir » la relance —, sur un compte coché de Teams actif : sinon
 elle ne s'y mettra pas) — ces deux-là toujours faux en lecture seule. `pending` : ce que tu as écrit toi-même (ADR 0189) et qui
@@ -273,7 +275,7 @@ autrement », ou sur le point de l'être, ADR 0199), `body`, `sent_text` (ce qui
 
 | Route | Corps | Ce que ça fait |
 |---|---|---|
-| `POST /api/moi/teams/send` | `conversation`, `body`, `reply_to?` | ton message (ADR 0189) : en file pour l'extension du compte, qui l'envoie sous le nom de sa personne (la tienne, ou celle de son propriétaire pour un compte qu'on te partage pour t'en servir), sans signature ni accord ; un `[À COMPLÉTER` : 400. Ses réponses qui attendaient un accord dans cette discussion ne partiront plus : le plugin les refuse (`answered`, ADR 0199), et une réponse demandée avant ne se prépare plus |
+| `POST /api/moi/teams/send` | `conversation`, `body`, `reply_to?` | ton message (ADR 0189) — `reply_to` : la `ref` du message que tu cites (ADR 0305), cité dans Teams comme par « Citer » (dans un tête-à-tête aussi) : en file pour l'extension du compte, qui l'envoie sous le nom de sa personne (la tienne, ou celle de son propriétaire pour un compte qu'on te partage pour t'en servir), sans signature ni accord ; un `[À COMPLÉTER` : 400. Ses réponses qui attendaient un accord dans cette discussion ne partiront plus : le plugin les refuse (`answered`, ADR 0199), et une réponse demandée avant ne se prépare plus |
 | `POST /api/moi/teams/prefill` | `message`, `instruction?` | « Préremplir avec Mika » : elle prépare une réponse à ce message, selon le mode du compte ; une réponse en chemin : `{"draft": "<id>"}` ; déjà demandée : `{"asked": true}`. Teams coupé ou ce compte décoché : 409, elle n'y prépare rien |
 | `POST /api/moi/teams/reply/send` | `id`, `seen` | l'envoyer telle qu'elle a été lue (`seen` : le `digest` de son aperçu) ; une réponse à laquelle on a répondu autrement : 409 |
 | `POST /api/moi/teams/reply/edit` | `id`, `body` | ta version remplace la sienne |
@@ -1245,8 +1247,9 @@ Teams où tu lis la garde ; `null` sinon (un contact sans identifiant Teams, une
 - `facts` : ce que Mika en sait — ce que l'annuaire tient : `title` (« Poste »), `department` (« Service »),
   `organisation` (avec son `id`), chacun avec `from` (« son profil Teams », « son adresse e-mail ») ; puis ce qu'elle a
   compris de ses derniers messages (`kind` : `note`, une personne seulement), **seulement les faits d'un compte que tu
-  vois** : `id`, `value` (une phrase), `sort` (`role`, `topic`, `relation`, `expectation`, `other`), `confidence` (0 à
-  1), `from` (« ses messages dans Teams », « ses mails à Personnel », « ses messages sur ton téléphone »), `place` (où
+  vois** : `id`, `value` (une phrase), `sort` (`role`, `topic`, `relation`, `expectation`, `manner` — sa façon
+  d'être —, `bond` — ce qu'il y a entre elle et toi —, `other`), `confidence` (0 à 1), `from` (« ses messages dans
+  Teams », « ses mails à Personnel », « ses messages sur ton téléphone »), `place` (où
   était le message qui le fonde : « en tête-à-tête », « dans le groupe « Projet » », « un mail, objet « … » »), `at`
   (sa date, ms), `forget` (il vient d'un de tes comptes : tu peux le faire oublier, ci-dessous) ;
 - `places` : où vous vous croisez, le plus récent d'abord, **seulement là où tu lis** — `teams` (`conversation` : la

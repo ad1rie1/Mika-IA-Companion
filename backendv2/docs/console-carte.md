@@ -739,7 +739,8 @@ techniques sont dans « Détails techniques ».
 - **Prêter à un agent** (`outils/expose`) : la console en lecture — créer, renouveler ou fermer son jeton (montré
   une seule fois, avec sa ligne `claude mcp add` ; « Copier la ligne », « Copier le jeton »), l'ouvrir au réseau ou l'y fermer (ADR 0126 : sa ligne prend alors
   l'adresse par laquelle on lit la console), choisir ce qu'elle montre (ses pages d'office et d'autres, ses
-  vues, ses fiches, « pourquoi ») ; ses outils prêtés — des points `/mcp/pret/<nom>` à déclarer (`?nouveau`), régler
+  vues, ses fiches, « pourquoi », la file « À valider » — identités à confirmer, noms à relier, rapprochements de
+  l'annuaire avec l'avis du juge, ADR 0304) ; ses outils prêtés — des points `/mcp/pret/<nom>` à déclarer (`?nouveau`), régler
   (`?pret=<nom>` : lecture seule ou non, ses outils), renouveler et retirer, avec ce que chacun sert et ses derniers
   appels ; replié en bas, le relais MCP du moteur Claude Code (lu).
 - Les anciennes pages mènent ici : `outils/qui`, `outils/texte` → `outils/tous` ; `outils/outils_apps` →
@@ -796,7 +797,8 @@ attend**, **Courriers à envoyer**, **Réponses Teams**, **Identités à confirm
 filtres, puis **Historique des autorisations**. **Rapprochements** (ADR 0298) : deux fiches au même nom, côte à côte
 dans la liseuse (`QueueItem.body`), et pourquoi elles se ressemblent (le même nom, à l'initiale près, ou — plus
 faible — le même prénom, d'un côté sans nom de famille : une personne racontée, un expéditeur du téléphone). Deux
-fiches de l'annuaire sans identifiant commun (`ContactsPort.suggestions`) : « La même personne : réunir »
+fiches de l'annuaire sans identifiant commun (`ContactsPort.suggestions`), avec l'avis du juge quand il en a un (ADR
+0304 : ce dont il est sûr s'est fait d'office et n'est plus là ; sa raison s'ajoute au pourquoi) : « La même personne : réunir »
 (`contacts.rapprocher` : la plus vue garde l'autre) ou « Deux personnes différentes » (`contacts.ecarter` : elles ne
 se proposent plus). Une personne dont on lui a parlé que porte quelqu'un qui lui parle (la vue « Noms à relier » de
 l'identité, `waiting_names`) : « La même personne : relier… » (sa fiche, « C'est la personne dont on lui a parlé »

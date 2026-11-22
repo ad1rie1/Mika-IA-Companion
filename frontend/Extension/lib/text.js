@@ -96,6 +96,24 @@
     return true;
   }
 
+  // une citation (ADR 0305) : le message cité chez Teams (son identifiant de service : l'heure de son arrivée, en ms),
+  // son auteur (son identifiant Teams : « 8:orgid:… », « 28:… » pour un robot)
+  const QUOTE_MESSAGE = /^\d{10,16}$/;
+  const QUOTE_AUTHOR = /^\d{1,2}:[A-Za-z0-9:._-]{1,200}$/;
+
+  /** Une citation vérifiée, `{message, author_id, author, at, preview}` (extrait sur une ligne, borné), ou `null`. */
+  function quoteOf(q) {
+    if (!q || typeof q !== "object" || !QUOTE_MESSAGE.test(String(q.message || ""))
+      || !QUOTE_AUTHOR.test(String(q.author_id || ""))) {
+      return null;
+    }
+    const at = Number(q.at);
+    return { message: String(q.message), author_id: String(q.author_id),
+      author: cut(typeof q.author === "string" ? q.author.replace(/\s+/g, " ").trim() : "", 120),
+      at: isFinite(at) && at > 0 ? Math.floor(at) : Number(q.message),
+      preview: cut(typeof q.preview === "string" ? q.preview.replace(/\s+/g, " ").trim() : "", 300) };
+  }
+
   return { wellFormed: wellFormed, cut: cut, clip: clip, hash: hash, versionKey: versionKey, deletedKey: deletedKey,
-    freshVersion: freshVersion, reactionsSignature: reactionsSignature };
+    freshVersion: freshVersion, reactionsSignature: reactionsSignature, quoteOf: quoteOf };
 });

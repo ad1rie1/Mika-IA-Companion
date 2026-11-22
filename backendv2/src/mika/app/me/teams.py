@@ -153,7 +153,10 @@ def message_json(m: Message, images: Sequence[MessageImage] = (), photos: Mappin
             "own": m.own, "mentions_me": m.mentions_me,
             "images": [{"id": i.image, "position": i.position, "mime": i.mime, "seen": i.seen} for i in images],
             "reactions": [reaction_json(r) for r in m.reactions],
-            "photo": photo_in(photos, m.author_id)}
+            "photo": photo_in(photos, m.author_id),
+            # le message qu'il cite (ADR 0305) : son auteur, un extrait, sa référence chez elle (vide : pas chez elle)
+            "quote": {"author": m.quote.author, "author_id": m.quote.author_id, "preview": m.quote.preview,
+                      "at": m.quote.at, "ref": m.quote.ref} if m.quote is not None else None}
 
 
 def _notes(call: Call, seens: list[DraftSeen]) -> dict[str, str]:
@@ -189,7 +192,11 @@ def _account_json(call: Call, a: AccountInfo, level: str) -> dict[str, Any]:
     s = state(call)
     waiting = sum(1 for d in s.drafts.values() if d.account == a.key and d.state == WAITING and not d.answered) \
         if allows(level, SHARE_PREPARE) else 0
+    # la dernière fois que son extension s'est manifestée (un relevé, la connexion en direct, un lot) : un compte calme
+    # n'est pas un compte sans extension
+    contact = keys.last_contact(a.key) if keys is not None else 0
     return {"key": a.key, "name": a.name, "level": level, "enabled": a.enabled, "last_batch": millis(a.last_batch),
+            "last_seen": millis(max(a.last_batch, contact)),
             "self_name": a.self_name, "extension_key": {"hint": key.hint, "created_at": millis(key.created_at)}
             if key is not None and level == OWNED else None, "drafts_waiting": waiting,
             # un compte partagé se montre à son nom (ADR 0188)

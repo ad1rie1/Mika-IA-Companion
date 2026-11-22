@@ -120,6 +120,8 @@ export class TeamsScreen {
   /** Ce que le champ montre en ce moment (sa discussion et sa vue) : le redessiner à l'identique n'a pas lieu. */
   private dockSig = "";
   private sending = false;
+  /** Le message que tu cites (ADR 0305), dans une discussion : au-dessus du champ, il part avec ton message. */
+  private quoting: { conversation: string; ref: string; author: string; at: number; preview: string } | null = null;
   /** Tes envois d'ici que le moteur n'a pas encore pu dire (sa liste `pending` les remplace dès qu'il les connaît). */
   private sent: SentHere[] = [];
   /** Ce que tu as commencé d'écrire, discussion par discussion. */
@@ -589,10 +591,13 @@ export class TeamsScreen {
     }
     const a = this.account(t.account);
     const now = Date.now();
-    const quiet = !a?.last_batch
+    // elle est là si elle s'est manifestée (un relevé, la connexion en direct), pas seulement si elle a poussé du neuf :
+    // un dimanche sans message, le dernier lot vieillit sans qu'elle soit partie (le 2026-11-22)
+    const seen = a ? Math.max(a.last_seen || 0, a.last_batch || 0) : 0;
+    const quiet = !seen
       ? "L'extension de ce compte ne s'est encore jamais manifestée : rien ne partira tant que Teams web n'est pas ouvert avec elle."
-      : now - a.last_batch > QUIET_MS
-        ? `L'extension ne s'est pas manifestée depuis ${ago(a.last_batch, now).replace("il y a ", "")} : ce qui part attend que Teams web soit ouvert avec elle.`
+      : now - seen > QUIET_MS
+        ? `L'extension ne s'est pas manifestée depuis ${ago(seen, now).replace("il y a ", "")} : ce qui part attend que Teams web soit ouvert avec elle.`
         : "";
     // Teams coupé, ou ce compte décoché : rien n'en part, et elle n'y prépare rien (l'API refuse « Préremplir », 409)
     const off = !this.enabled ? "Teams est désactivé" : a && !a.enabled ? "Ce compte Teams est décoché" : "";
@@ -607,6 +612,8 @@ export class TeamsScreen {
       prefillOff: off ? `${off} : elle n'y prépare rien.` : "",
       quiet: !this.enabled ? "Teams est désactivé : rien ne part." : off ? `${off} : rien n'en part.` : quiet,
       sending: this.sending,
+      quoting: this.quoting?.conversation === t.key
+        ? { author: this.quoting.author, at: this.quoting.at, preview: this.quoting.preview } : null,
     };
     // rien de changé dans ce qu'il montre : le champ reste tel quel (le focus, une saisie en cours de composition)
     const sig = `${t.key}|${JSON.stringify(view)}`;
@@ -776,6 +783,33 @@ export class TeamsScreen {
 
   // ── Écrire ─────────────────────────────────────────────────────────
 
+  /** Citer un message de la discussion ouverte (ADR 0305), comme « Citer » dans Teams : sa carte au-dessus du champ,
+   *  le champ prêt à écrire ; `""` : ne plus citer. */
+  private quote(ref: string): void {
+    const t = this.thread;
+    const m = ref && t ? t.messages.find((x) => x.ref === ref) : undefined;
+    this.quoting = m && t
+      ? { conversation: t.key, ref: m.ref, author: authorLabel(m, this.account(t.account) ?? null), at: m.at,
+          preview: m.text.replace(/\s+/g, " ").trim().slice(0, 300) }
+      : null;
+    this.paintDock();
+    const input = this.body && $<HTMLTextAreaElement>("[data-tm-input]", this.body);
+    input?.focus();
+  }
+
+  /** Aller au message qu'une citation cite, s'il est dans le fil chargé : il défile jusqu'à lui et s'éclaire. */
+  private goToMessage(ref: string): void {
+    const target = ref && this.body ? $<HTMLElement>(`.tm-msg[data-ref="${CSS.escape(ref)}"]`, this.body) : null;
+    if (!target) {
+      toast("Ce message n'est plus dans ce qui est chargé ici.", { ico: "info" });
+      return;
+    }
+    target.scrollIntoView({ block: "center", behavior: "smooth" });
+    target.classList.remove("flash");
+    void target.offsetWidth;
+    target.classList.add("flash");
+  }
+
   private async send(): Promise<void> {
     const t = this.thread;
     const input = this.body && $<HTMLTextAreaElement>("[data-tm-input]", this.body);
@@ -795,7 +829,13 @@ export class TeamsScreen {
     const button = $<HTMLButtonElement>('[data-tm="envoyer"]', this.body!);
     if (button) button.disabled = true;
     try {
-      const done = await sendMessage(t.key, text, "", newNonce());
+      // la citation en cours part avec lui (ADR 0305) : le serveur la fait dans Teams
+      const quoted = this.quoting?.conversation === t.key ? this.quoting.ref : "";
+      const done = await sendMessage(t.key, text, quoted, newNonce());
+      if (quoted && this.quoting?.ref === quoted) {
+        this.quoting = null;
+        this.paintDock();
+      }
       // le champ de cette discussion tel qu'il est maintenant : un rafraîchissement a pu le redessiner pendant
       // l'envoi, avec ce texte dedans ; le texte parti s'en retire, ce qu'on a tapé depuis reste
       const now = this.body && $<HTMLTextAreaElement>("[data-tm-input]", this.body);
@@ -1038,12 +1078,22 @@ export class TeamsScreen {
     });
     on(section, "[data-plus-ancien]", "click", () => void this.loadOlder());
     on(section, "[data-tm-img]", "click", (_e, b) => this.openImage(b.dataset.tmRef ?? "", Number(b.dataset.tmImg) || 0));
+    on(section, "[data-tm-quote]", "click", (_e, b) => this.quote(b.dataset.tmQuote ?? ""));
+    // au doigt (pas de survol) : toucher un message montre sa barre (« Citer »), comme l'appui de Teams mobile
+    on(section, ".tm-msg[data-ref]", "click", (e, el) => {
+      if (!matchMedia("(hover: none)").matches || (e.target as HTMLElement).closest("button, a, img")) return;
+      const open = !el.classList.contains("tools-open");
+      for (const other of $$<HTMLElement>(".tm-msg.tools-open", section)) other.classList.remove("tools-open");
+      el.classList.toggle("tools-open", open);
+    });
+    on(section, "[data-tm-goto]", "click", (_e, b) => this.goToMessage(b.dataset.tmGoto ?? ""));
     on(section, "[data-mode-teams]", "click", (_e, b) => void this.howItLeaves(b));
     on(section, "[data-tm]", "click", (_e, b) => {
       const k = b.dataset.tm;
       if (k === "envoyer") void this.send();
       if (k === "preremplir") void this.prefillHere();
       if (k === "emoji") this.emojis(b);
+      if (k === "sans-citation") this.quote("");
       if (k === "reecrire") this.rewrite(b.dataset.pending ?? "");
     });
     on(section, "[data-rep]", "click", (_e, b) => {

@@ -302,6 +302,50 @@ class TeamsRulesTest {
         assertEquals("Ce compte t'est partagé en lecture : tu lis ses discussions, sans y écrire.", readOnlyLine(Levels.READ, ""))
     }
 
+    // ── la citation (ADR 0305) ──
+
+    @Test fun `« Citer » s'offre dans un tête-à-tête ou un groupe, sur un compte où tu écris, d'un message qui a sa référence`() {
+        val m = msg()
+        assertTrue(citable(m, Kinds.GROUP, account()))
+        assertTrue(citable(m, Kinds.DM, account()))
+        // tes propres messages se citent aussi, comme dans Teams
+        assertTrue(citable(msg(own = true), Kinds.DM, account()))
+        // un partage pour t'en servir : tu y écris, donc tu y cites
+        assertTrue(citable(m, Kinds.GROUP, account(level = Levels.USE, owner = "Léa")))
+        // un canal ou une réunion : une réponse y est un fil, le serveur n'y cite pas
+        assertFalse(citable(m, Kinds.CHANNEL, account()))
+        assertFalse(citable(m, Kinds.MEETING, account()))
+        assertFalse(citable(m, Kinds.OTHER, account()))
+        // en lecture (ou un compte pas encore lu), pas de champ : rien ne se cite
+        assertFalse(citable(m, Kinds.GROUP, account(level = Levels.READ)))
+        assertFalse(citable(m, Kinds.GROUP, account(level = Levels.PREPARE)))
+        assertFalse(citable(m, Kinds.GROUP, null))
+        assertFalse(citable(m.copy(ref = " "), Kinds.GROUP, account()))
+    }
+
+    @Test fun `l'extrait d'un message cité tient sur une ligne, et son heure en petit`() {
+        assertEquals("On se voit à 15 h ? Dis-moi.", quoteExcerpt("  On se voit\nà 15 h ?\n\n  Dis-moi. "))
+        assertEquals("", quoteExcerpt(" \n "))
+        assertEquals("14:30", quoteWhen(at(2026, 11, 4, 14, 30), now, paris))
+        assertEquals("hier 21:41", quoteWhen(at(2026, 11, 3, 21, 41), now, paris))
+        assertEquals("lun. 08:12", quoteWhen(at(2026, 11, 2, 8, 12), now, paris))
+        assertEquals("28 oct. 13:31", quoteWhen(at(2026, 10, 28, 13, 31), now, paris))
+        assertEquals("", quoteWhen(0, now, paris))
+    }
+
+    @Test fun `une citation mène au message cité quand il est chargé, son auteur sinon celui du message`() {
+        val loaded = listOf(msg(at = now - 3 * min, text = "La démo ?"), msg(at = now - min, own = true, text = "Je regarde"))
+        val cited = TeamsQuote(author = "Marc Delmas", authorId = "8:marc", preview = "La démo ?", at = now - 3 * min, ref = loaded[0].ref)
+        assertEquals(loaded[0].ref, quoteTarget(cited, loaded))
+        // pas chez Mika (`ref` vide), ou plus ancien que ce qui est chargé : nulle part
+        assertNull(quoteTarget(cited.copy(ref = ""), loaded))
+        assertNull(quoteTarget(cited.copy(ref = "t-ailleurs"), loaded))
+        assertEquals("Marc Delmas", quoteAuthor(cited, loaded, account()))
+        // une citation sans nom : celui du message qu'elle désigne, comme le fil le nomme (« Toi » sur un compte à toi)
+        assertEquals("Toi", quoteAuthor(TeamsQuote(ref = loaded[1].ref), loaded, account()))
+        assertEquals("Quelqu'un", quoteAuthor(TeamsQuote(ref = ""), loaded, account()))
+    }
+
     @Test fun `depuis quand, en mots`() {
         assertEquals("jamais", ago(0, now))
         assertEquals("à l'instant", ago(now - 30_000, now))

@@ -138,9 +138,23 @@
   }
 
   /** Le corps d'un envoi au service de chat. */
-  function messageBody(text, selfName, clientId) {
-    return { content: messageContent(text), messagetype: "RichText/Html", contenttype: "text",
+  function messageBody(text, selfName, clientId, quote) {
+    return { content: quoteHtml(quote) + messageContent(text), messagetype: "RichText/Html", contenttype: "text",
       clientmessageid: String(clientId), imdisplayname: String(selfName || "") };
+  }
+
+  /**
+   * Le bloc d'une citation (ADR 0305), tel que Teams l'écrit avant le texte quand on « cite » un message (relevé le
+   * 2026-11-22, essai 8 chez Albert) : le message (son identifiant de service), son auteur (identifiant et nom), son
+   * heure, un extrait. Teams montre le message cité d'après son identifiant ; « » sans citation valable.
+   */
+  function quoteHtml(q) {
+    const quote = T.quoteOf(q);
+    if (!quote) return "";
+    return '<blockquote itemtype="http://schema.skype.com/Reply" itemid="' + quote.message + '">'
+      + '<strong itemprop="mri" itemid="' + escapeHtml(quote.author_id) + '">' + escapeHtml(quote.author) + "</strong>"
+      + '<span itemprop="time" itemid="' + quote.at + '"></span>'
+      + '<p itemprop="preview">' + escapeHtml(quote.preview) + "</p></blockquote>";
   }
 
   /** L'identifiant du message envoyé, tiré de la réponse (corps JSON, ou en-tête `Location`) ; « » sinon. */
@@ -446,13 +460,44 @@
       || (Array.isArray(v) && !v.length) || (isObject(v) && !Object.keys(v).length);
   }
 
-  /** La première clé « spéciale » (citation, pièce jointe…) qui porte quelque chose ; « » sinon. */
-  function specialKey(o, skip) {
-    if (!isObject(o)) return "";
-    for (const k of Object.keys(o)) {
-      if (skip.indexOf(k) < 0 && SPECIAL_KEY.test(k) && !isEmptyValue(o[k])) return k;
-    }
-    return "";
+  // une option de la requête, pas une donnée du message : « includeRepliesSummary » (ce que la réponse doit contenir)
+  // est dans chaque envoi de Teams, et le mot « Repl » le faisait prendre pour une réponse citée (le 2026-11-22 : aucun
+  // modèle n'avait jamais été appris)
+  const QUERY_FLAG = /^include[A-Z]/;
+
+  /** Les clés « spéciales » (citation, pièce jointe…) qui portent quelque chose ; une option de la requête (`include…`,
+   *  un booléen) n'en est pas une. */
+  function specialKeys(o, skip) {
+    if (!isObject(o)) return [];
+    return Object.keys(o).filter(function (k) {
+      return skip.indexOf(k) < 0 && SPECIAL_KEY.test(k) && !isEmptyValue(o[k])
+        && !(QUERY_FLAG.test(k) && typeof o[k] === "boolean");
+    });
+  }
+
+  /**
+   * La forme d'une commande, pour le diagnostic d'un modèle écarté : chaque chemin et le type de sa valeur
+   * (`s` texte, `n` nombre, `b` booléen, `0` vide), jamais une valeur — la requête GraphQL non plus.
+   */
+  function commandShape(command, max) {
+    const out = [];
+    const walk = function (v, path, depth) {
+      if (depth > 12 || out.length > 200) return;
+      if (Array.isArray(v)) {
+        if (!v.length) out.push(path + "[]");
+        else walk(v[0], path + "[" + v.length + "]", depth + 1);
+      } else if (isObject(v)) {
+        const keys = Object.keys(v);
+        if (!keys.length) out.push(path + "{}");
+        for (const k of keys) walk(v[k], path ? path + "." + k : k, depth + 1);
+      } else {
+        const t = v === null || v === undefined ? "0" : typeof v === "string" ? (v ? "s" : "0")
+          : typeof v === "number" ? "n" : typeof v === "boolean" ? "b" : "?";
+        out.push(path + ":" + t);
+      }
+    };
+    walk(command, "", 0);
+    return T.cut(out.join(" "), max || 2000);
   }
 
   /** Chaque texte d'une valeur passé par `fn(texte, chemin)` ; `null` : trop profonde, ou une clé qui ne va pas. */
@@ -507,9 +552,12 @@
     if (typeof v.originalConvId === "string" && v.originalConvId && v.originalConvId !== conv) {
       return refuse("conversation d'origine différente");
     }
-    const special = specialKey(v, ["message", "offlineActionOptions"]) || specialKey(m, ["computed"])
-      || specialKey(m.computed, ["mentions"]) || specialKey(v.offlineActionOptions, ["pendingUploadIds"]);
-    if (special) return refuse("citation, transfert, pièce jointe ou retouche (« " + T.cut(special, 40) + " »)");
+    // toutes les clés en cause d'un coup : une seule de trop ne fait plus un aller-retour par clé
+    const special = specialKeys(v, ["message", "offlineActionOptions"]).concat(specialKeys(m, ["computed"]),
+      specialKeys(m.computed, ["mentions"]), specialKeys(v.offlineActionOptions, ["pendingUploadIds"]));
+    if (special.length) {
+      return refuse("citation, transfert, pièce jointe ou retouche (« " + T.cut(special.join(", "), 160) + " »)");
+    }
     const off = v.offlineActionOptions;
     if (isObject(off) && Array.isArray(off.pendingUploadIds) && off.pendingUploadIds.length) {
       return refuse("pièce jointe en cours d'envoi");
@@ -634,10 +682,25 @@
     v.convId = conv;
     if (typeof v.originalConvId === "string") v.originalConvId = conv;
     v.correlationId = correlation;
-    v.isBilateralChat = isBilateralChat(conv);
+    // un groupe n'est jamais « bilatéral » ; un tête-à-tête garde la valeur que Teams a mise dans le modèle : le
+    // 2026-11-22, Teams envoyait `false` dans le tête-à-tête d'Albert (`@unq.gbl.spaces`), et c'est ainsi qu'il est parti
+    v.isBilateralChat = isBilateralChat(conv) ? (typeof v.isBilateralChat === "boolean" ? v.isBilateralChat : true)
+      : false;
     m.clientMessageId = client;
-    m.content = workerContent(text, template);
+    // la citation (ADR 0305) : le bloc avant le texte, et l'entrée que Teams met dans `computed.quotedMessages`
+    const quote = T.quoteOf(opts.quote);
+    m.content = quoteHtml(quote) + workerContent(text, template);
+    if (quote) {
+      if (!isObject(m.computed)) m.computed = {};
+      m.computed.quotedMessages = [{ messageId: quote.message, sender: quote.author_id, time: quote.at }];
+    } else if (isObject(m.computed) && Array.isArray(m.computed.quotedMessages)) {
+      m.computed.quotedMessages = [];
+    }
     m.originalSendPipelineTime = String(Math.floor(Number(opts.now)));
+    // le brouillon commence maintenant (Teams y met l'heure où l'on a commencé à écrire)
+    if (typeof m.draftCreationTime === "string" && /^\d{10,16}$/.test(m.draftCreationTime)) {
+      m.draftCreationTime = String(Math.floor(Number(opts.now)));
+    }
     if (isObject(m.computed)) m.computed.mentions = [];
     const off = v.offlineActionOptions;
     if (isObject(off)) {
@@ -695,12 +758,13 @@
     workerSendable: workerSendable, isBilateralChat: isBilateralChat, workerCommandHead: workerCommandHead,
     nextRequestNumber: nextRequestNumber, workerRequestId: workerRequestId, htmlText: htmlText,
     learnShape: learnShape, workerContent: workerContent, workerSendTemplate: workerSendTemplate,
+    commandShape: commandShape,
     pickSendTemplate: pickSendTemplate, workerSendCommand: workerSendCommand,
     workerReplyOutcome: workerReplyOutcome, SEND_SLOT: SLOT,
     conversationMarker: conversationMarker, syncSince: syncSince, caughtUp: caughtUp, advanceCursor: advanceCursor,
     headerPairs: headerPairs, isAuthHeader: isAuthHeader, authFromHeaders: authFromHeaders,
     isChatServiceUrl: isChatServiceUrl, isChatServiceHost: isChatServiceHost, chatServiceBase: chatServiceBase,
-    escapeHtml: escapeHtml, messageContent: messageContent, clientMessageIdFor: clientMessageIdFor,
+    escapeHtml: escapeHtml, messageContent: messageContent, clientMessageIdFor: clientMessageIdFor, quoteHtml: quoteHtml,
     chatSendOutcome: chatSendOutcome, messageBody: messageBody,
     messageIdFrom: messageIdFrom, navEntry: navEntry, activeConversationFromNav: activeConversationFromNav,
     activeConversationFromStorage: activeConversationFromStorage, conversationFromLocation: conversationFromLocation };

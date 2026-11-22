@@ -934,6 +934,12 @@
     <string name="teams_thread_empty">Rien encore : l\'extension n\'a rien vu passer dans cette discussion.</string>
     <string name="teams_by_mika">rédigé avec Mika</string>
     <string name="teams_rewrite">Le réécrire</string>
+    <!-- La citation (ADR 0305), calquée sur « Citer » de Teams mobile. -->
+    <string name="teams_message_actions">Que faire de ce message</string>
+    <string name="teams_cite">Citer</string>
+    <string name="teams_cite_line">Ton prochain message le citera, comme dans Teams</string>
+    <string name="teams_cite_cancel">Ne plus citer ce message</string>
+    <string name="teams_quote_go">Aller au message cité</string>
     <string name="teams_field_busy">Ton champ n\'est pas vide : envoie ou efface d\'abord ce que tu y as écrit.</string>
     <string name="teams_write_to">Écrire à %1$s</string>
     <string name="teams_write">Écrire…</string>

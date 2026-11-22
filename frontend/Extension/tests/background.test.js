@@ -528,3 +528,19 @@ test("un modèle d'envoi illisible ou trop gros n'est pas gardé", async () => {
   // demandé par autre chose qu'un onglet Teams : ignoré
   assert.equal(await s.send({ kind: "sendTemplates" }, {}), null);
 });
+
+test("un envoi qui cite un message (ADR 0305) porte sa citation jusqu'à l'onglet", async () => {
+  const quote = { message: "1795384015721", author_id: "28:ed349f0c-53ac-4a32-a4c8-2bd6e5244865", author: "Albert", at: 1795384015721, preview: "Bonjour Adrien, votre prochaine leçon…" };
+  const s = service({ reply: (method, url) => (method === "POST" && url.includes("/api/teams/outbox/") ? { status: 200, data: {} }
+    : null), tab: (msg) => (msg.kind === "send" ? { result: "sent", via: "worker" } : { ok: true }) });
+  await s.settle();
+  const ws = s.sockets[0];
+  ws.onopen();
+  ws.onmessage({ data: JSON.stringify({ type: "outbox", items: [{ id: "t0123456789ab", conversation: CONV, title: "Projet",
+    kind: "group", mode: "send", status: "queued", text: "Oui, je regarde.", created_at: 1, expires_at: 0, quote }] }) });
+  await s.settle();
+  await s.settle();
+  const sent = s.toTabs.filter((m) => m.kind === "send").at(-1);
+  assert.ok(sent, "l'envoi a atteint l'onglet");
+  assert.deepEqual(sent.item.quote, quote);
+});

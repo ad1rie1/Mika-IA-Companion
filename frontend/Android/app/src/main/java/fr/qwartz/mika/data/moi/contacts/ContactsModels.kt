@@ -102,7 +102,7 @@ data class ContactFact(
     val id: Int = 0,
     /** « son profil Teams », « son adresse e-mail » ; un fait : « ses messages dans Teams », « ses mails à Pro ». */
     val from: String = "",
-    /** Un fait : sa sorte (`role`, `topic`, `relation`, `expectation`, `other`). */
+    /** Un fait : sa sorte (`role`, `topic`, `relation`, `expectation`, `manner`, `bond`, `other`). */
     val sort: String = "",
     /** Un fait : sa confiance, de 0 à 1 (`null` : ce n'est pas une lecture). */
     val confidence: Double? = null,

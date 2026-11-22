@@ -35,6 +35,23 @@
 .tm-file small { color: var(--muted); font-size: 11.5px; }
 .tm-file > .ico:last-child { color: var(--muted); }
 .tm-file.sm { max-width: none; }
+/* la citation (ADR 0305), comme Teams : dans la bulle, au-dessus du champ ; « Citer » au survol d'un message */
+.tm-msg { position: relative; }
+.tm-tools { position: absolute; top: -12px; right: 8px; display: none; padding: 2px; border: 1px solid var(--border); border-radius: 8px; background: var(--raised); box-shadow: 0 2px 6px rgb(0 0 0 / 8%); z-index: 1; }
+.tm-msg:hover .tm-tools, .tm-tools:focus-within { display: flex; }
+.tm-quote { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 6px 10px; border: 0; border-left: 3px solid var(--accent-line, var(--accent)); border-radius: 4px; background: var(--tint); color: inherit; font: inherit; text-align: left; }
+button.tm-quote { cursor: pointer; }
+button.tm-quote:hover { background: var(--select, var(--tint)); }
+.tm-quote-head { display: flex; gap: 8px; align-items: baseline; font-size: 12px; }
+.tm-quote-head time { color: var(--muted); }
+.tm-quote-text { font-size: 13px; color: var(--text-2); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.tm-msg.me .tm-quote { background: color-mix(in srgb, var(--raised) 60%, transparent); }
+.tm-quoting { display: flex; gap: 6px; align-items: flex-start; padding: 8px 8px 0; }
+.tm-quoting .tm-quote-text { -webkit-line-clamp: 2; }
+.tm-msg.flash { animation: tm-flash 1.6s ease-out; }
+@keyframes tm-flash { from { background: var(--accent-soft); box-shadow: 0 0 0 2px var(--accent-line, var(--accent)); } to { background: transparent; box-shadow: none; } }
+/* au doigt, pas de survol : la barre du message touché (comme l'appui de Teams mobile) */
+@media (hover: none) { .tm-msg:hover .tm-tools { display: none; } .tm-msg.tools-open .tm-tools { display: flex; } }
 .tm-reac { display: flex; gap: 4px; }
 .tm-reac span { display: inline-flex; align-items: center; gap: 3px; height: 22px; padding: 0 7px; border: 1px solid var(--border); border-radius: 11px; font-size: 12px; background: var(--raised); }
 /* Ta réaction en couleur, qui a réagi au survol (ADR 0300, maquette ecrans/teams-photos.css). */

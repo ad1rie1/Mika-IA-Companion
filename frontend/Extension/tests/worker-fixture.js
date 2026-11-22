@@ -59,6 +59,62 @@ function autoSend({ conv = ALBERT, content = "<p><semantic-object>" + TEXT + "</
   return command;
 }
 
+/**
+ * La commande d'envoi telle que Teams la passait vraiment le 2026-11-22 (relevée par la session principale dans le
+ * tête-à-tête d'Albert, essai 6) : les mêmes clés, dans le même ordre, avec les mêmes types — les valeurs inventées.
+ * La 0.8.0 l'écartait (« includeRepliesSummary » pris pour une réponse citée) : aucun modèle n'était jamais appris.
+ */
+function realSend({ conv = ALBERT, text = TEXT, request = 905 } = {}) {
+  return {
+    requestId: "m-" + request,
+    rendererId: "5d0c7a4e-2b1f-4c3d-9e8a-7f6b5a4c3d2e",
+    windowId: "main",
+    payload: {
+      graphqlQuery: QUERY,
+      variables: {
+        enableDiverseEmotionsNonreactive: false,
+        includeRepliesSummary: true,
+        includeRepliesSummaryNonreactive: false,
+        deferAppMetaDataFragment: false,
+        action: "Create",
+        convId: conv,
+        message: {
+          content: "<p><semantic-object>" + text + "</semantic-object></p>",
+          computed: { amsReferences: [], cards: [], embeddedLinks: [], isExpanded: false, offlineAssets: [],
+            mentions: [], onBehalfOf: [], urlPreview: null, appIdsToInstall: [], blurHash: null },
+          files: [], deeplinks: [], clientMessageId: CLIENT_ID, title: null, replyChainId: null,
+          importance: "Standard", messageType: "RichText/Html", originalArrivalTime: null, policyViolation: null,
+          subject: null, meeting: null, scheduledSendTime: null, targetedMsgRecipientId: null, forwardMessageIds: [],
+          forwardMessageOriginalConvId: null, forwardedMessageContext: null, forwardMessageRecipients: [],
+          forwardAppIdsToInstall: [], forwardMessageCardContents: null, forwardPrivateReply: false,
+          forwardTeamId: null, isForwardedMessage: false, draftCreationTime: "1763812340000", postType: null,
+          replyPermission: null, fluidUrlPermissionInfo: null, fluidProperties: null, crossPostChannels: [],
+          crossPostId: null, sendPostAsEmail: null, shareToL1: null, sharedToMessageId: null, suggestedActions: null,
+          from: null, originalSendPipelineTime: "1763812345678", overrideImDisplayNameT1: null, meetingChatType: null,
+          sendPipelineThreadType: "Chats", isNewBotSession: false, inMeetingPrivateChatContext: null,
+        },
+        originalConvId: conv,
+        correlationId: CORRELATION,
+        searchSessionId: null,
+        sendFromChannel_ToBeRefactored: false,
+        offlineActionOptions: { queueId: "chats_" + conv, actionId: "send_" + CLIENT_ID, actionType: "send",
+          pendingUploadIds: [] },
+        isBilateralChat: false,
+      },
+    },
+    operationName: "autoSendMessage",
+    type: "graphql",
+    cdlOperationCustomContext: {
+      authenticationUser: { cloud: "prod", profile: { objectId: "3e51ce13-6eb8-463b-a75a-a40b2ab67602",
+        tenantId: "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d", puid: "10032000ABCDEF12" },
+      id: "3e51ce13-6eb8-463b-a75a-a40b2ab67602", isAuthenticated: true, role: "Member", type: "Aad",
+      subType: "Default", loginUserName: "adrien.exemple@exemple.test",
+      homeAccountId: "3e51ce13-6eb8-463b-a75a-a40b2ab67602", homeTenantId: "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+      homeAccountCloud: "prod" },
+    },
+  };
+}
+
 /** Une requête quelconque de la page à son worker (son numéro fait avancer le compteur). */
 function query(request, { renderer = RENDERER, window = WINDOW } = {}) {
   return { requestId: "q-" + request, rendererId: renderer, windowId: window,
@@ -74,5 +130,5 @@ function reply(requestId, { status = "success", data = { autoSendMessage: { id: 
     status: status, response: response };
 }
 
-module.exports = { ALBERT, GROUP, CHANNEL, MEETING, TEXT, CLIENT_ID, CORRELATION, RENDERER, WINDOW, autoSend, query,
-  reply };
+module.exports = { ALBERT, GROUP, CHANNEL, MEETING, TEXT, CLIENT_ID, CORRELATION, RENDERER, WINDOW, autoSend, realSend,
+  query, reply };

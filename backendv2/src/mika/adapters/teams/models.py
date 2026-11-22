@@ -24,8 +24,8 @@ Les réactions d'un message (ADR 0300) sont dans sa ligne (``reactions``, un JSO
 **Les recherches comparent des textes repliés à l'écriture** (``fold_text`` : casse et accents ignorés, ``%`` et
 ``_`` de simples caractères), dans des colonnes à part (``title_fold``, ``id_fold``), recalculées par l'entité à chaque
 écriture du titre ou de l'identifiant : la même réponse sur les deux moteurs (``LIKE`` et ``lower`` n'y disent pas la
-même chose). L'auteur d'un message est aussi gardé en minuscules (``author_key``), comme l'oubli le désigne
-(``teams:<identifiant>``).
+même chose). L'auteur d'un message est aussi gardé sous sa forme comparable (``author_key`` : ``ports.teams.person_key``,
+``8:orgid:<uuid>`` quelle que soit la forme reçue, ADR 0304), comme l'oubli le désigne (``teams:<identifiant>``).
 
 **Un identifiant venu de Teams qui dépasse sa borne** (une conversation, un auteur) est ramené à sa borne par
 ``fit`` — son début et son empreinte, de façon déterministe : deux identifiants distincts restent distincts, et une
@@ -142,6 +142,8 @@ class MessageRow(TeamsBase):
     #: ses réactions (ADR 0300), en JSON (``[{"k": clé, "n": combien, "m": la sienne, "b": [identifiants]}]``) ; vide :
     #: aucune, ou rien de dit
     reactions: Mapped[str] = mapped_column(LongText, default="", server_default="")
+    #: le message qu'il cite (ADR 0305), un JSON court ; vide : aucun
+    quote: Mapped[str] = mapped_column(LongText, default="", server_default="")
 
 
 class ImageRow(TeamsBase):

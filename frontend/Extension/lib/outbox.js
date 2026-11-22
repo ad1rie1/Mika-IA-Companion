@@ -94,6 +94,8 @@
       id: id, conversation: conversation, title: str(raw.title, 120), kind: str(raw.kind, 20) || "other",
       mode: mode, status: status, text: text,
       created_at: Number(raw.created_at) || 0, expires_at: Number(raw.expires_at) || 0,
+      // le message qu'il cite (ADR 0305), vérifié ; `null` : il ne cite rien
+      quote: T.quoteOf(raw.quote),
     };
   }
 

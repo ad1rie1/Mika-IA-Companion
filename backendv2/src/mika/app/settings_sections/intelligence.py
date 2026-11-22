@@ -34,6 +34,7 @@ if TYPE_CHECKING:
 #: la famille de chaque rôle (la page « Qui sert quoi »)
 ROLE_FAMILIES = {**{str(r): "voix" for r in VOICE_ROLES}, "extract": "mémoire", "validate": "mémoire",
                  "compact": "mémoire", "profile": "compréhension", "portrait": "compréhension",
+                 "match": "compréhension",
                  "interpret": "compréhension",
                  "triage": "sens", "caption": "sens", "plan": "travail", "job": "travail", "review": "travail", "polish": "voix",
                  "character": "voix"}

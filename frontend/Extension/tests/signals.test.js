@@ -355,3 +355,11 @@ test("un message part avec le nombre de ses images, jamais pour une suppression"
   assert.equal(S.wireMessage({ ...base }, "").images, undefined);
   assert.equal(S.wireMessage({ ...base, images: 2, deleted: true }, "").images, undefined);
 });
+
+test("la citation d'un message part avec lui, vérifiée (ADR 0305) ; supprimé, il n'en a plus", () => {
+  const quote = { message: "1795384015721", author_id: "28:ed349f0c-53ac-4a32-a4c8-2bd6e5244865", author: "Albert",
+    at: 1795384015721, preview: "Bonjour" };
+  assert.deepEqual(S.wireMessage(msg({ quote }), SELF).quote, quote);
+  assert.equal(S.wireMessage(msg({ quote: { ...quote, message: "x" } }), SELF).quote, undefined);
+  assert.equal(S.wireMessage(msg({ quote, deleted: true, text: "" }), SELF).quote, undefined);
+});

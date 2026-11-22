@@ -8,7 +8,8 @@ const DM = "19:aaaa_bbbb@unq.gbl.spaces";
 
 function item(over) {
   return Object.assign({ id: "t12", conversation: DM, title: "Alice", kind: "dm", mode: "draft", status: "queued",
-    text: "Oui, je regarde ça cet après-midi.\n— Mika", created_at: NOW - 60000, expires_at: NOW + 3600000 },
+    text: "Oui, je regarde ça cet après-midi.\n— Mika", created_at: NOW - 60000, expires_at: NOW + 3600000,
+    quote: null },
   over || {});
 }
 
@@ -376,4 +377,16 @@ test("le journal dit par où un envoi est parti, sans le redire au serveur", () 
   O.ackResponse(box, "s1", "sent", 200, NOW + 1000);
   assert.equal(box.log[0].result, "sent");
   assert.equal(box.log[0].reason, "par la zone de saisie");
+});
+
+test("le message qu'un envoi cite (ADR 0305) est gardé vérifié avec lui ; une citation mal formée est oubliée", () => {
+  const quote = { message: "1795384015721", author_id: "28:ed349f0c-53ac-4a32-a4c8-2bd6e5244865", author: "Albert", at: 1795384015721, preview: "Bonjour Adrien, votre prochaine leçon…" };
+  assert.deepEqual(O.normalizeItem(item({ quote })).quote, quote);
+  const tidy = O.normalizeItem(item({ quote: { ...quote, author: "  Al\nbert ", preview: "a\n\n b" } })).quote;
+  assert.equal(tidy.author, "Al bert");
+  assert.equal(tidy.preview, "a b");
+  for (const bad of [{ ...quote, message: "4123456789012345678x" }, { ...quote, message: "<b>" },
+    { ...quote, author_id: "javascript:alert(1)" }, "1795384015721", null]) {
+    assert.equal(O.normalizeItem(item({ quote: bad })).quote, null, JSON.stringify(bad));
+  }
 });

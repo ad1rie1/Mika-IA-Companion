@@ -10,16 +10,24 @@
   à ``chars`` caractères, chacun avec sa conversation ou son objet et sa date. Charger l'historique n'en fait relire
   que la fin : rien d'avant la fenêtre ne compte, sauf si l'opératrice coche « Relire tout l'historique »
   (``history`` : sans fenêtre, des bornes plus larges).
+- **Une fiche qui s'enrichit** (ADR 0303) : le modèle reçoit ce qu'elle en sait déjà dans cette vue (ses faits
+  d'avant, « fait 1 »… ; jamais un fait oublié, ni un fait dont le message n'est plus — ``alive``) et rend ce que les
+  messages lui apprennent : des faits nouveaux, des faits d'avant récrits (« avant ») ou retirés (« laisse ») ; un
+  fait d'avant qu'il ne cite pas reste tel quel — une réponse partielle ou mal formée n'efface rien. Un fait récrit
+  sans message nouveau garde ce qui le fondait (son message, sa date, quand elle l'avait appris). Après l'appel, la
+  vue se relit : ce qui a été oublié entre-temps ne revient pas. Ce qu'elle en retient : qui elle est (son rôle, ses
+  sujets, avec qui elle travaille, ce qu'elle attend), comment elle est (``manner`` : son ton, sa façon d'écrire) et
+  ce qu'il y a entre elle et la personne du compte (``bond``).
 - **Quand** : un premier portrait après ``first_after`` messages, un nouveau après ``refresh_after`` messages de plus
-  depuis le dernier (il **remplace** les faits de la même vue) ; au plus ``per_run`` appels par passage, et en
-  vingt-quatre heures au plus ``contacts_per_day`` contacts et ``calls_per_day`` appels (les passages se comptent dans
-  l'annuaire, ``ContactsPort.portraits``). Chaque compte à son tour (``fair``) : un compte bavard ne prend pas toute la
+  depuis le dernier (la fiche complétée **remplace** celle de la même vue) ; au plus ``per_run`` appels par passage, et
+  en vingt-quatre heures au plus ``contacts_per_day`` contacts et ``calls_per_day`` appels (les passages se comptent
+  dans l'annuaire, ``ContactsPort.portraits``). Chaque compte à son tour (``fair``) : un compte bavard ne prend pas toute la
   journée aux autres. Un passage toutes les heures, et peu après un message remarqué.
 - **Ce qu'il voit d'elle** : son nom tel que cette vue le dit (``sheet(visible=…)`` : jamais un nom lu dans le compte
   d'une autre) ; un fait qui nomme une autre personne de l'annuaire ne se garde pas (``ContactsPort.naming``).
 - **Le modèle** : le rôle ``portrait`` (voie de fond, priorité basse), sa consigne dans ``persona/voix.yaml``
-  (``contacts.portrait``) ; une réponse en JSON (au plus six faits, chacun sa sorte, sa confiance et le message qui le
-  fonde), relue strictement : une réponse illisible ne garde rien — les faits d'avant restent —, et la vue attend de
+  (``contacts.portrait``) ; une réponse en JSON (des faits, chacun sa sorte, sa confiance, et le message qui le fonde
+  ou le fait d'avant qu'il récrit ; les faits d'avant qu'elle retire ; douze faits par vue au plus), relue strictement : une réponse illisible ne garde rien — les faits d'avant restent —, et la vue attend de
   nouveaux messages avant d'être relue (pas de rafale). Un appel qui échoue (une panne, le quota d'un abonnement
   retenu) n'est pas compté : le passage s'arrête et le suivant reprend. Un fait qu'on lui a fait oublier ne se garde
   plus, même reformulé (``ports.contacts.relearned``) ; son texte n'est jamais redonné au modèle.
@@ -31,7 +39,7 @@ import json
 import logging
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from mika.contracts import email as email_c
@@ -79,14 +87,15 @@ SCANNED = 2000
 GROUP_MAX = 8
 #: un message, au plus, dans le prompt (caractères) : un long mail n'y prend pas toute la place
 MESSAGE_MAX = 1500
-#: la sortie d'un portrait, au plus (jetons) : six faits en JSON tiennent en moins de 500
-OUTPUT_MAX = 800
+#: la sortie d'un portrait, au plus (jetons) : douze faits en JSON tiennent en moins de 1 000
+OUTPUT_MAX = 1600
 #: ce que l'annuaire retient du dernier passage (la console le dit) : combien de contacts échangent, quand
 CURSOR_ELIGIBLE, CURSOR_RUN = "portrait.eligible", "portrait.run"
 #: la forme de la réponse, que le fournisseur garantit quand il le sait (ADR 0267) ; ``parse`` relit toujours du texte
 FACT_SCHEMA = json_object(texte={"type": "string"}, sorte={"type": "string", "enum": list(NOTE_KINDS)},
-                          confiance={"type": "number"}, message={"type": "integer"})
-PORTRAIT_SCHEMA = json_object(faits={"type": "array", "items": FACT_SCHEMA})
+                          confiance={"type": "number"}, message={"type": "integer"}, avant={"type": "integer"})
+PORTRAIT_SCHEMA = json_object(faits={"type": "array", "items": FACT_SCHEMA},
+                              laisse={"type": "array", "items": {"type": "integer"}})
 _JSON = re.compile(r"\{.*\}", re.S)
 
 
@@ -118,17 +127,29 @@ class Candidate:
 
 @dataclass(frozen=True, slots=True)
 class Fact:
+    """Un fait de la réponse : ``message``, le numéro du message qui le fonde (0 : aucun nouveau) ; ``before``, celui
+    du fait d'avant qu'il remplace (0 : un fait nouveau). Un fait d'avant précisé par un message nouveau a les deux :
+    c'est le message qui le fonde désormais ; récrit sans message nouveau, il garde ce qui fondait l'ancien."""
+
     text: str
     kind: str
     confidence: float
     message: int
+    before: int = 0
 
 
-def parse(text: str, count: int) -> list[Fact] | None:
+def _number(value: object, top: int) -> int:
+    """Un numéro de 1 à ``top`` (0 : absent, ou hors de ses bornes)."""
+    return value if isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= top else 0
+
+
+def parse(text: str, count: int, known: int = 0) -> list[Fact] | None:
     """Les faits d'une réponse, relus strictement : un objet JSON qui a « faits », une liste ; chaque fait un texte
-    d'au plus ``NOTE_MAX`` caractères, une confiance de 0 à 1 et le numéro d'un des ``count`` messages (une sorte
-    inconnue devient « other »), au plus ``NOTES_MAX`` — un fait qui ne tient pas tombe. ``None`` : rien de lisible
-    (pas de JSON, pas de liste, ou une liste dont aucun fait ne tient) ; une liste vide : rien de sûr."""
+    d'au plus ``NOTE_MAX`` caractères, une confiance de 0 à 1, et le numéro d'un des ``count`` messages qui le fonde
+    — ou, pour un fait d'avant repris sans message nouveau, le numéro d'un des ``known`` faits d'avant (« avant », ADR
+    0303) ; une sorte inconnue devient « other », au plus ``NOTES_MAX`` — un fait qui ne tient pas tombe. ``None`` :
+    rien de lisible (pas de JSON, pas de liste, ou une liste dont aucun fait ne tient) ; une liste vide : rien de
+    sûr."""
     found = _JSON.search(text or "")
     if not found:
         return None
@@ -144,19 +165,33 @@ def parse(text: str, count: int) -> list[Fact] | None:
         if not isinstance(item, dict):
             continue
         said = " ".join(str(item.get("texte") or "").split()) if isinstance(item.get("texte"), str) else ""
-        confidence, message = item.get("confiance"), item.get("message")
-        if not said or len(said) > NOTE_MAX or isinstance(confidence, bool) or isinstance(message, bool):
+        confidence = item.get("confiance")
+        if not said or len(said) > NOTE_MAX or isinstance(confidence, bool):
             continue
         if not isinstance(confidence, int | float) or not 0 <= float(confidence) <= 1:
             continue
-        if not isinstance(message, int) or not 1 <= message <= count:
+        message, before = _number(item.get("message"), count), _number(item.get("avant"), known)
+        if not message and not before:
             continue
         kind = item.get("sorte") if item.get("sorte") in NOTE_KINDS else "other"
         if said.casefold() not in {f.text.casefold() for f in out}:
-            out.append(Fact(said, str(kind), float(confidence), message))
+            out.append(Fact(said, str(kind), float(confidence), message, before))
     if raw and not out:
         return None
     return out[:NOTES_MAX]
+
+
+def left(text: str, known: int) -> frozenset[int]:
+    """Les faits d'avant que la réponse retire (« laisse » : leurs numéros, de 1 à ``known``, ADR 0303) — ce que ses
+    nouveaux messages démentent, ou qu'un autre fait dit mieux. Un fait d'avant qu'elle ne cite nulle part reste tel
+    quel : une réponse partielle ou mal formée n'efface rien."""
+    found = _JSON.search(text or "")
+    try:
+        data = json.loads(found.group(0)) if found else None
+    except ValueError:
+        return frozenset()
+    raw = data.get("laisse") if isinstance(data, dict) else None
+    return frozenset(n for n in (_number(x, known) for x in raw) if n) if isinstance(raw, list) else frozenset()
 
 
 def system(name: str) -> str:
@@ -170,10 +205,12 @@ def when(frame: Frame, at: int) -> str:
                   hour=then.hour, minute=f"{then.minute:02d}")
 
 
-def ask(frame: Frame, who: str, source: str, lines: Sequence[Line], chars: int) -> tuple[str, list[Line]]:
-    """Le message du portrait : ses messages, du plus récent au plus ancien, chacun numéroté avec sa date et sa
-    conversation, son texte cité — tant que ``chars`` le permet (le premier toujours). Rend le message et les lignes
-    qu'il porte, dans l'ordre de leurs numéros."""
+def ask(frame: Frame, who: str, source: str, lines: Sequence[Line], chars: int,
+        known: Sequence[Note] = ()) -> tuple[str, list[Line]]:
+    """Le message du portrait : ce qu'elle en sait déjà dans cette vue (``known``, ses faits d'avant, numérotés : la
+    fiche qu'elle complète, ADR 0303 — jamais un fait oublié, qui n'y est plus), puis ses messages, du plus récent au
+    plus ancien, chacun numéroté avec sa date et sa conversation, son texte cité — tant que ``chars`` le permet (le
+    premier toujours). Rend le message et les lignes qu'il porte, dans l'ordre de leurs numéros."""
     where = family("contacts.portrait.where")
     shown: list[Line] = []
     parts: list[str] = []
@@ -188,7 +225,56 @@ def ask(frame: Frame, who: str, source: str, lines: Sequence[Line], chars: int) 
                      + "\n" + body)
     text = phrase("contacts.portrait.ask", who=inert(who, 80), where=where.get(source, where["teams"]),
                   count=len(shown), messages="\n\n".join(parts))
+    if known:
+        facts = "\n".join(phrase("contacts.portrait.known_line", n=i, kind=k.kind, text=inert(k.text, NOTE_MAX))
+                          for i, k in enumerate(known, 1))
+        text = phrase("contacts.portrait.known", who=inert(who, 80), facts=facts) + "\n\n" + text
     return text, shown
+
+
+def note_of(c: Candidate, fact: Fact, shown: Sequence[Line], known: Sequence[Note], now: int, call_id: str) -> Note:
+    """Le fait à garder : fondé sur le message qu'il cite (appris maintenant), ou, récrit d'avant sans message
+    nouveau, sur ce qui fondait le fait d'avant — son message, sa date, quand elle l'avait appris (ADR 0303)."""
+    if fact.message:
+        line = shown[fact.message - 1]
+        return Note(0, c.contact, c.source, c.account, fact.text, fact.kind, fact.confidence, line.ref, line.place,
+                    line.at, now, call_id)
+    was = known[fact.before - 1]
+    return Note(0, c.contact, c.source, c.account, fact.text, fact.kind, fact.confidence, was.ref, was.place,
+                was.said_at, was.at or now, call_id)
+
+
+def alive(ctx: Any, source: str, note: Note) -> bool:
+    """Le message qui fonde ce fait est-il encore là (ADR 0303) ? Un message Teams effacé (son texte vidé) ou parti, un
+    mail retiré du cache, un message du téléphone oublié (son texte n'est plus) : le fait qui en vient ne se redit plus
+    au modèle et part au passage suivant — la fiche qui s'enrichit ne garde pas ce que l'oubli a atteint."""
+    if not note.ref:
+        return False
+    if source == TEAMS:
+        teams = ctx.ports.get("teams")
+        found = teams.message(note.ref) if teams is not None else None
+        return found is not None and bool((found.text or "").strip())
+    if source == MAIL:
+        mail = ctx.ports.get("mail")
+        return mail is not None and mail.cached_one(note.ref) is not None
+    if source == PHONE_SOURCE:
+        journal, seq = ctx.ports.get("store"), phone_c.message_seq(note.ref)
+        return journal is not None and seq is not None and bool(phone_text(journal, seq))
+    return False
+
+
+def phone_text(journal: Any, seq: int) -> str:
+    """Le texte d'un message reçu sur le téléphone (l'événement ``seq``), tant que l'oubli ne l'a pas emporté."""
+    for e in journal.get_events([seq]):
+        if e.type != phone_c.RECEIVED.name:
+            continue
+        try:
+            d = json.loads(e.data)
+        except ValueError:
+            return ""
+        ref = (d.get("text") or {}).get("ref") if isinstance(d, dict) and isinstance(d.get("text"), dict) else None
+        return str(journal.content([ref]).get(ref) or "") if ref else ""
+    return ""
 
 
 def teams_place(kind: str, title: str) -> str:
@@ -286,7 +372,12 @@ class Portraits:
             fresh = [x for x in lines if previous is None or x.at > previous.upto]
             if not lines or len(fresh) < (p.refresh_after if previous is not None else p.first_after):
                 continue
-            text, shown = ask(ctx.frame, sheet.name, c.source, lines, chars)
+            # ce qu'elle en sait déjà dans cette vue : la fiche qu'elle complète (ADR 0303) ; un fait dont le message
+            # n'est plus (effacé, oublié, retiré) ne se montre plus et part avec ce passage
+            view = {(c.source, c.account)}
+            had = store.notes(c.contact, visible=view)
+            known = [n for n in had if alive(ctx, c.source, n)][:NOTES_MAX]
+            text, shown = ask(ctx.frame, sheet.name, c.source, lines, chars, known)
             request = LLMRequest(role=ROLE, call_id=f"{ctx.run_id}#{c.contact}:{c.source}:{c.account}",
                                  system_stable=system(her), messages=(Message("user", text),), max_tokens=OUTPUT_MAX,
                                  lane="background", priority=3, output_schema=PORTRAIT_SCHEMA)
@@ -295,7 +386,7 @@ class Portraits:
                 return  # une panne, un quota : pas compté, le passage suivant reprend
             made, calls = made + 1, calls + 1
             contacts.add(c.contact)
-            facts = parse(response.text, len(shown))
+            facts = parse(response.text, len(shown), len(known))
             mark = Portrait(c.contact, c.source, c.account, now, max(x.at for x in shown), len(shown),
                             ok=facts is not None, call_id=request.call_id)
             if facts is None:
@@ -306,10 +397,18 @@ class Portraits:
             if facts:  # un fait sur lui ne nomme pas un tiers (l'oublier ne l'atteindrait pas)
                 named = store.naming([f.text for f in facts], but=c.contact)
                 facts = [f for f, says in zip(facts, named, strict=True) if not says]
-            store.portrayed(mark, [Note(0, c.contact, c.source, c.account, f.text, f.kind, f.confidence,
-                                        shown[f.message - 1].ref, shown[f.message - 1].place,
-                                        shown[f.message - 1].at, now, request.call_id) for f in facts]
-                            if facts else None)
+            gone = left(response.text, len(known))
+            if store.sheet(c.contact, visible=view) is None:  # la vue est partie pendant l'appel : rien n'y revient
+                store.portrayed(mark, None)
+                continue
+            # ce qui a été oublié pendant l'appel ne revient pas, ni repris, ni tel quel
+            still = {n.id for n in store.notes(c.contact, visible=view)}
+            kept = [f for f in facts if not f.before or known[f.before - 1].id in still]
+            replaced = {f.before for f in kept} | gone
+            untouched = [replace(n, id=0) for i, n in enumerate(known, 1) if i not in replaced and n.id in still]
+            sheet_now = [note_of(c, f, shown, known, now, request.call_id) for f in kept] + untouched
+            changed = bool(kept or gone or len(known) < len(had))
+            store.portrayed(mark, sheet_now[:NOTES_MAX] if changed else None)
 
     # ── qui échange vraiment ──
     def candidates(self, ctx: Any, store: Any, since: int) -> list[Candidate]:
@@ -443,4 +542,4 @@ def phone_lines(journal: Any, kept: Sequence[int], since: int) -> dict[tuple[str
 
 
 __all__ = ["CURSOR_ELIGIBLE", "CURSOR_RUN", "GROUP_MAX", "PORTRAIT_SCHEMA", "ROLE", "Candidate", "Fact", "Line",
-           "Portraits", "ask", "fair", "parse", "phone_exchange", "phone_lines", "system", "thread_people"]
+           "Portraits", "ask", "fair", "note_of", "parse", "phone_exchange", "phone_lines", "system", "thread_people"]

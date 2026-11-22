@@ -265,7 +265,8 @@ test("après un rechargement, le modèle gardé par le service sert ; rendererId
   assert.equal(sent.rendererId, "renderer-neuf");
   assert.equal(sent.windowId, 2);
   assert.equal(sent.payload.variables.convId, F.ALBERT);
-  assert.equal(sent.payload.variables.isBilateralChat, true, "le modèle d'un groupe sert au tête-à-tête");
+  // le modèle d'un groupe sert au tête-à-tête, avec la valeur que Teams y avait mise (`false`, comme chez Albert)
+  assert.equal(sent.payload.variables.isBilateralChat, false, "le modèle d'un groupe sert au tête-à-tête");
   answer(w, F.reply(sent.requestId));
   assert.equal((await result).result, "sent");
   // deux envois de suite : deux numéros

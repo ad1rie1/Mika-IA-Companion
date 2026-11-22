@@ -18,7 +18,9 @@ MariaDB).
 - ``forgotten`` : l'empreinte d'un identifiant oublié (jamais sa valeur) et l'instant de l'oubli ;
 - ``notes`` : ce qu'elle sait d'un contact à partir de ce qu'elle lit (lot 6), chaque fait sous la vue d'où il vient ;
   ``notes_forgotten`` : l'empreinte des mots d'un fait oublié (jamais son texte) ; ``portraits`` : chaque passage du
-  portrait sur une vue.
+  portrait sur une vue ;
+- ``judgements``, ``unions``, ``judge_calls`` : le juge des rapprochements (ADR 0304) — son dernier avis sur chaque
+  paire, les réunions qu'il a faites d'office, ses appels.
 
 Ce qui se cherche est replié à l'écriture (``fold_text``) et comparé par ``instr`` : la même réponse sur les deux
 moteurs. Une valeur venue d'ailleurs trop longue pour sa clé est ramenée à sa borne par ``fit``.
@@ -216,8 +218,58 @@ class PortraitRow(ContactsBase):
     call_id: Mapped[str] = mapped_column(Key(REF), default="")
 
 
+class JudgementRow(ContactsBase):
+    """Ce que le juge des rapprochements (ADR 0304) a dit d'une paire de personnes (``a`` < ``b``), la dernière fois :
+    son avis (``verdict`` : ``same``, ``apart``, « » pour rien de lisible), s'il en est sûr, pourquoi (``reason``, ses
+    mots), sur quoi (``basis`` : l'empreinte des deux fiches qu'il a vues), quand, par quel appel. Part avec l'une des
+    deux fiches."""
+
+    __tablename__ = "judgements"
+    __table_args__ = table_args(Index("ix_judgements_b", "b"))
+
+    a: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    b: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    basis: Mapped[str] = mapped_column(Key(PRINT), default="")
+    verdict: Mapped[str] = mapped_column(Key(WORD), default="")
+    sure: Mapped[bool] = mapped_column(default=False)
+    reason: Mapped[str] = mapped_column(LongText, default="")
+    at: Mapped[int] = mapped_column(default=0)
+    call_id: Mapped[str] = mapped_column(Key(REF), default="")
+
+
+class UnionRow(ContactsBase):
+    """Une réunion faite d'office par le juge (ADR 0304) : la fiche gardée (``keep`` : elle suit les réunions
+    suivantes), son nom et celui de la fiche qui l'a rejointe à ce moment, pourquoi, quand, par quel appel. Part avec
+    la fiche gardée."""
+
+    __tablename__ = "unions"
+    __table_args__ = table_args(Index("ix_unions_keep", "keep"), Index("ix_unions_at", "at"))
+
+    id: Mapped[int] = mapped_column(Id, primary_key=True)
+    keep: Mapped[int]
+    kept: Mapped[str] = mapped_column(LongText, default="")
+    gone: Mapped[str] = mapped_column(LongText, default="")
+    reason: Mapped[str] = mapped_column(LongText, default="")
+    at: Mapped[int] = mapped_column(default=0)
+    call_id: Mapped[str] = mapped_column(Key(REF), default="")
+
+
+class JudgeCallRow(ContactsBase):
+    """Un appel du juge (ADR 0304) : quand, lequel, combien de fiches il a vues, si sa réponse se lisait — ses
+    plafonds par jour se comptent sur eux."""
+
+    __tablename__ = "judge_calls"
+    __table_args__ = table_args(Index("ix_judge_calls_at", "at"))
+
+    id: Mapped[int] = mapped_column(Id, primary_key=True)
+    at: Mapped[int] = mapped_column(default=0)
+    call_id: Mapped[str] = mapped_column(Key(REF), default="")
+    cards: Mapped[int] = mapped_column(default=0)
+    ok: Mapped[bool] = mapped_column(default=True)
+
+
 __all__ = [
     "ACCOUNT", "CURSOR", "PERSON", "PRINT", "REF", "THREAD", "VALUE", "WORD",
-    "ContactRow", "CursorRow", "DismissedRow", "ForgottenRow", "IdentifierRow", "NoteForgottenRow", "NoteRow",
-    "PortraitRow", "SightingRow", "ThreadRow", "fit",
+    "ContactRow", "CursorRow", "DismissedRow", "ForgottenRow", "IdentifierRow", "JudgeCallRow", "JudgementRow",
+    "NoteForgottenRow", "NoteRow", "PortraitRow", "SightingRow", "ThreadRow", "UnionRow", "fit",
 ]

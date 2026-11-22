@@ -13,10 +13,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+from types import SimpleNamespace
 from typing import Any
 
-from mika.inspector.mcp import TOOLS, ConsoleHost, console_app
+from mika.app.handmade.waiting import QUEUE as WAITING
+from mika.inspector.mcp import DEFAULT_SERVED, PARTS, QUEUE, TOOLS, ConsoleHost, console_app
 from mika.ports.llm import LLMResponse
+from mika.runtime.inspection import Inspection
 from mika.sim.clock import run_virtual
 from tests.fixtures.mika import at_paris, boot, build, connect, said
 
@@ -59,6 +62,56 @@ def test_the_console_reads_views_searches_and_fiches(tmp_path):
     assert "fiche:person/" in found
     assert not fiche.is_error and fiche.text.startswith("# ") and "Onglets :" in fiche.text
     assert unknown.is_error and "lister_vues" in unknown.text
+
+
+def test_the_views_the_queue_reads_are_listed_and_read_too(tmp_path):
+    """Les identités à confirmer, les noms à relier, les rapprochements de l'annuaire : hors de la navigation (la file
+    « À valider » les lit), mais listés et lus ici comme les autres (ADR 0304)."""
+    kernel, clock = _kernel_with_someone(tmp_path)
+
+    async def main():
+        await boot(kernel)
+        try:
+            host = ConsoleHost(kernel)
+            return (await host.call("lister_vues", {})).text, await host.call("vue", {"cle": "contacts/rapprochements"})
+        finally:
+            await kernel.stop()
+
+    catalogue, matches = run_virtual(clock, main)
+    lines = {line.split(" — ", 1)[0]: line for line in catalogue.splitlines() if line.startswith("- ")}
+    for key in ("identity/noms", "identity/revendications", "contacts/rapprochements"):
+        assert "(hors de la navigation)" in lines[f"- {key}"]
+    assert "(hors de la navigation)" not in lines["- memory/souvenirs"]
+    assert not matches.is_error and matches.text.startswith("# Rapprochements de l'annuaire")
+
+
+def test_what_waits_for_your_decision_is_served_by_its_own_part(tmp_path):
+    """Les vues que lit la file « À valider » (la composition les déclare) se servent par leur part, « a_valider », que
+    la page Prêter à un agent coche ou non ; les autres vues, par la leur (ADR 0304)."""
+    kernel, clock = _kernel_with_someone(tmp_path)
+    chosen: list[str] = ["vues"]
+    pages = SimpleNamespace(ui=SimpleNamespace(inspection=Inspection(kernel, sampler=kernel.series.read),
+                                               deps=SimpleNamespace(queue=WAITING)), tab=lambda key: None)
+
+    async def main():
+        await boot(kernel)
+        try:
+            host = ConsoleHost(kernel, pages, lambda: chosen)
+            out = [(await host.call("lister_vues", {})).text, await host.call("vue", {"cle": "identity/noms"}),
+                   await host.call("vue", {"cle": "transcript/messages"})]
+            chosen[:] = ["a_valider"]
+            out += [(await host.call("lister_vues", {})).text, await host.call("vue", {"cle": "identity/noms"})]
+            return out
+        finally:
+            await kernel.stop()
+
+    views_only, names_refused, messages, queue_only, names = run_virtual(clock, main)
+    assert "identity/noms" not in views_only and "- memory/souvenirs" in views_only
+    assert names_refused.is_error and not messages.is_error
+    assert "- identity/noms — Noms à relier [identites] (la file « À valider »)" in queue_only
+    assert "- contacts/rapprochements" in queue_only and "- memory/souvenirs" not in queue_only
+    assert not names.is_error and names.text.startswith("# Noms à relier")
+    assert QUEUE in PARTS and QUEUE in DEFAULT_SERVED
 
 
 def test_the_console_endpoint_is_read_only():

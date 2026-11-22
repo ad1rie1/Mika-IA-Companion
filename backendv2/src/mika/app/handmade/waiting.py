@@ -3,7 +3,8 @@ onglets (``TABS`` : les courriers à envoyer, les réponses Teams, les identité
 « Tout » et l'historique sont ceux de la console), ce qui n'est pas une demande d'envoi (``Waiting.items``) — les
 identités à confirmer, lues dans la vue de la faculté d'identité, avec leurs faits, leur source et leurs actions déjà
 orientées (``tabs/identities.py``) ; les rapprochements — deux fiches de l'annuaire au même nom, sans identifiant
-commun (ADR 0298, lues dans le port ``contacts``), et une personne dont on lui a parlé que porte quelqu'un qui lui
+commun (ADR 0298, lues dans le port ``contacts``, avec l'avis du juge quand il en a un : ADR 0304 — ce dont il est sûr
+s'est fait d'office), et une personne dont on lui a parlé que porte quelqu'un qui lui
 parle (la vue « Noms à relier » de l'identité, ``NAMES_VIEW``) —, leurs deux fiches côte à côte (``QueueItem.body``)
 et leurs deux gestes — et ce que concerne une demande (``Waiting.about``, lu dans son contexte par
 ``approval_sources.about`` : une personne, un projet, un service, une app, un canal). « Noms à relier » n'est plus un
@@ -33,7 +34,7 @@ from mika.contracts import transcript as transcript_c
 from mika.faculties.identity.inspect import handles_of
 from mika.inspector.ui import UI, QueueItem, QueueTab, env
 from mika.kernel.clock import DAY
-from mika.plugins.contacts.inspect import contact_key
+from mika.plugins.contacts.inspect import RULE_WORDS, contact_key, verdict_words
 from mika.ports.contacts import TOLD_NAME
 from mika.vocab.people import fold, named_label
 
@@ -41,14 +42,15 @@ from mika.vocab.people import fold, named_label
 CLAIM, NAME = "identite", "nom"
 #: les rapprochements de l'annuaire lus d'un coup, au plus (``ContactsPort.suggestions``)
 MATCHES_MAX = 200
-#: pourquoi deux fiches se ressemblent, en mots
-REASONS = {"same_name": "le même nom", "initial": "le même nom, à l'initiale près",
-           "first_name": "le même prénom, d'un côté sans nom de famille"}
-#: ce que dit la file de chaque rapprochement
-MATCH_RULE = ("Rien ne se réunit sur un nom sans toi ; ce qu'un identifiant prouve (la même adresse, le même compte) "
-              "se réunit d'office.")
-#: les vues de la faculté d'où ils viennent : (propriétaire, vue)
-CLAIMS_VIEW, NAMES_VIEW = ("identity", "revendications"), ("identity", "noms")
+#: pourquoi deux fiches se ressemblent, en mots (la même source que la vue des rapprochements)
+REASONS = RULE_WORDS
+#: ce que dit la file de chaque rapprochement (ADR 0304)
+MATCH_RULE = ("Ce qu'un identifiant prouve (la même adresse, le même compte) se réunit d'office, et ce dont le juge "
+              "est sûr aussi — il ne réunit jamais deux fiches que tu as séparées ; ce qui reste ici, il n'en est pas "
+              "sûr.")
+#: les vues de la faculté d'où ils viennent : (propriétaire, vue) ; celle des rapprochements de l'annuaire, que la file
+#: lit par le port mais que la console en MCP sert en texte (ADR 0304)
+CLAIMS_VIEW, NAMES_VIEW, MATCHES_VIEW = ("identity", "revendications"), ("identity", "noms"), ("contacts", "rapprochements")
 
 TABS: tuple[QueueTab, ...] = (
     QueueTab("courriers", "Courriers à envoyer", capabilities=(email_c.SEND,), order=10,
@@ -62,8 +64,8 @@ TABS: tuple[QueueTab, ...] = (
                          "relier ce moyen de communication.",
              empty="Personne ne dit être quelqu'un d'autre sans preuve en ce moment."),
     QueueTab("rapprochements", "Rapprochements", kinds=(MATCH, NAME), order=35,
-             description="Deux fiches qui portent le même nom — deux fiches de l'annuaire, ou une personne dont on lui "
-                         "a parlé et quelqu'un qui lui parle : la même personne ? " + MATCH_RULE,
+             description="Deux fiches qui pourraient être la même personne — deux fiches de l'annuaire, ou une personne "
+                         "dont on lui a parlé et quelqu'un qui lui parle : la même personne ? " + MATCH_RULE,
              empty="Aucune fiche n'en rappelle une autre par son nom."),
 )
 
@@ -156,6 +158,9 @@ def _match_item(ui: UI, look: Look, acc: Any, x: Any) -> QueueItem | None:
     sides = [contact_entry(look, acc, line_of(sheet)) for sheet in (a, b)]
     common = not {(i.kind, i.value) for i in a.identifiers} & {(i.kind, i.value) for i in b.identifiers}
     why = REASONS.get(x.reason, x.reason).capitalize() + (". Aucun identifiant en commun." if common else ".")
+    if x.verdict:  # ce qu'en dit le juge (ADR 0304) : jamais sûr ici, sinon ce serait fait
+        why += f" Le juge : {verdict_words(x.verdict, False)}" + (f" — {x.why}" if x.why else "") + \
+            ("" if x.why.endswith((".", "!", "?")) else ".")
     holders = list(dict.fromkeys(w["name"] for sheet in (a, b) for w in whose_words(look, acc, sheet)))
     if len(holders) > 1:
         why += (f" Réunies, elle serait le contact de {', '.join(holders[:-1])} et de {holders[-1]} ; ce que chacun "
@@ -178,6 +183,9 @@ class Waiting:
     #: les vues qui montrent les mêmes demandes que la file, dans leur destination : l'accueil ne les compte pas une
     #: seconde fois (``UI.attention_items(distinct=True)``)
     covers: Sequence[str] = ("courrier/brouillons", "teams/reponses", "projets/tous")
+    #: les vues de ce qui attend ta décision hors des demandes d'envoi : la console en MCP les sert sous leur part, « la
+    #: file « À valider » » (``inspector.mcp.QUEUE``), que la page Outils › Prêter à un agent montre (ADR 0304)
+    views: Sequence[tuple[str, str]] = (CLAIMS_VIEW, NAMES_VIEW, MATCHES_VIEW)
 
     def count(self, ui: UI, kinds: Sequence[str] | None) -> int:
         """Combien d'éléments de ces sortes attendent (toutes : ``kinds`` vide) — les compteurs de leurs vues."""

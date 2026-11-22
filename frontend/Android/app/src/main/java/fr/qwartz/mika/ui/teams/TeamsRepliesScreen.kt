@@ -68,7 +68,7 @@ import fr.qwartz.mika.ui.theme.mika
 import kotlinx.coroutines.launch
 
 /** Ses réponses dans tes comptes (ADR 0191), la plus récente d'abord, et tes comptes (qui décide de chacune). */
-class TeamsRepliesViewModel(graph: AppGraph) : TeamsScreenModel(graph) {
+class TeamsRepliesViewModel(deps: TeamsDeps) : TeamsScreenModel(deps) {
     var replies by mutableStateOf<Load<List<TeamsReply>>>(Load.Loading)
         private set
     var refreshing by mutableStateOf(false)
@@ -110,7 +110,7 @@ class TeamsRepliesViewModel(graph: AppGraph) : TeamsScreenModel(graph) {
 fun TeamsRepliesScreen(graph: AppGraph) {
     val shell = LocalShell.current
     val session = rememberSessionKey(graph)
-    val vm: TeamsRepliesViewModel = viewModel(key = "teams.replies|$session") { TeamsRepliesViewModel(graph) }
+    val vm: TeamsRepliesViewModel = viewModel(key = "teams.replies|$session") { TeamsRepliesViewModel(TeamsDeps(graph)) }
     LaunchedEffect(vm) { vm.load(quiet = true) }
     LaunchedEffect(vm) { vm.said.collect { shell.toast(it) } }
     var asking by remember { mutableStateOf<Pair<Ask, TeamsReply>?>(null) }

@@ -26,10 +26,10 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 | Le noyau : journal, arbitrage, pipeline | 0001, 0002, 0003, 0006, 0007, 0008, 0009, 0014, 0015, 0021, 0040, 0059, 0149, 0151, 0221, 0222, 0223 |
 | Le stockage | 0004, 0101, 0212 |
 | Sa mémoire et ce qu'elle sait | 0010, 0011, 0034, 0046, 0052, 0055, 0074, 0076, 0078, 0079, 0080, 0081, 0082, 0083, 0084, 0085, 0086, 0087, 0091, 0099, 0109, 0110, 0111, 0153, 0224, 0263, 0264 |
-| Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134, 0148, 0184, 0185, 0186, 0188, 0207, 0220, 0226, 0298 |
+| Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134, 0148, 0184, 0185, 0186, 0188, 0207, 0220, 0226, 0298, 0303, 0304 |
 | Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137, 0150, 0155, 0160, 0227, 0283 |
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144, 0145, 0161, 0253, 0254, 0257, 0260, 0262, 0265, 0268, 0270, 0271, 0272, 0273, 0274, 0275, 0276, 0277, 0278, 0279, 0280, 0289 |
-| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163, 0166, 0168, 0171, 0172, 0189, 0190, 0191, 0192, 0193, 0194, 0195, 0196, 0198, 0199, 0211, 0213, 0214, 0228, 0229, 0236, 0238, 0240, 0243, 0244, 0245, 0246, 0247, 0248, 0249, 0250, 0251, 0255, 0256, 0258, 0259, 0269, 0299, 0300, 0301, 0302 |
+| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163, 0166, 0168, 0171, 0172, 0189, 0190, 0191, 0192, 0193, 0194, 0195, 0196, 0198, 0199, 0211, 0213, 0214, 0228, 0229, 0236, 0238, 0240, 0243, 0244, 0245, 0246, 0247, 0248, 0249, 0250, 0251, 0255, 0256, 0258, 0259, 0269, 0299, 0300, 0301, 0302, 0305 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158, 0239, 0267, 0285 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159, 0261 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170, 0187, 0200, 0208, 0209, 0215, 0233, 0235, 0242, 0252, 0282, 0284, 0286, 0287, 0288, 0290, 0291, 0292, 0293, 0294, 0296 |
@@ -761,6 +761,96 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 *Pourquoi :* « toute personne et entité doit apparaître dans l'annuaire, c'est même tout le principe » ; « forcément Mika connaît XXX puisqu'elle lit les dialogues, même si elle ne lui a jamais parlé » ; « associe les contacts à des comptes […] si elle croise le même contact avec deux personnes, il sera lié à deux personnes ; si aucun : tout le monde ».
 
 *Révise 0069 (en partie : les collègues de Teams entrent dans l'annuaire, sans devenir ses interlocuteurs) et 0180 (en partie : les noms à relier se décident parmi les rapprochements).*
+
+*Révisée par 0303, 0304.*
+
+### 0303 — Une fiche qui s'enrichit, un fil qui se remonte
+
+- **La fiche d'un contact se complète au lieu de se refaire.** Chaque portrait recevait seulement les derniers messages de la personne, et ses faits remplaçaient ceux de la même vue : la fiche n'avait jamais plus de six lignes, toutes refaites. Désormais, le modèle reçoit aussi ce qu'elle en sait déjà dans cette vue (ses faits d'avant, « fait 1 »…, numérotés autrement que les messages), puis ses messages, et il rend ce qu'ils lui apprennent.
+  - Un fait nouveau cite le message qui le fonde. Un fait d'avant que les messages précisent ou corrigent est récrit (`avant`) ; un fait qu'ils démentent est retiré (`laisse`).
+  - **Un fait d'avant que la réponse ne cite pas reste tel quel.** Une réponse partielle, ou mal formée (la CLI de Claude Code ne garantit pas le schéma), n'efface donc rien : seul ce que le modèle retire part.
+  - Un fait récrit sans message nouveau garde ce qui le fondait : son message, sa date et quand elle l'avait appris. Un fait précisé prend le message nouveau.
+  - Douze faits au plus par vue, et `contacts_lookup` les montre tous, vue par vue.
+- **L'oubli atteint toujours la fiche.** Un fait oublié n'est plus dans la fiche, il n'est donc jamais redonné au modèle (0298). Un fait dont le message n'est plus (un message Teams effacé, un mail retiré, un message du téléphone oublié) ne se montre plus au modèle et part au passage suivant, comme avant que la fiche ne s'enrichisse. Après l'appel, la vue se relit : un fait oublié, ou une vue effacée par l'API par personne pendant l'appel, ne revient ni repris ni tel quel.
+- **Qui elle est, comment elle est, ce qu'il y a entre eux.** La fiche ne sert plus seulement à répondre à quelqu'un, mais aussi à pouvoir parler de lui. Aux sortes de 0298 (rôle, sujets, équipe, attentes) s'en ajoutent deux :
+  - `manner` : son ton, sa façon d'écrire, son humour, ce qui le fait réagir ;
+  - `bond` : ce qu'il y a entre lui et la personne du compte (tutoiement, familiarité, ce qu'ils font ensemble, ce qu'il lui demande).
+  - Les garde-fous restent ceux de 0298 : rien de deviné, personne d'autre de nommé, la personne du compte dite « la personne du compte ». Rien de sensible, ni sur la personne ni sur celle du compte ; un lien intime ou familial ne se dit que par son ton. Un fait ne se dit toujours qu'à qui voit sa source.
+- **Un fil Teams se remonte.** `teams_read` relit les messages jusqu'à une référence (15 par défaut, 40 au plus).
+  - La fin dit combien elle en a lu sur combien compte le fil (`TeamsPort.thread_count`), combien sont plus anciens, et la référence du plus ancien lu, jusqu'à laquelle relire pour remonter. Le compte se fait sur ce que la lecture a pris, jamais sur une date : deux messages du même instant ne font pas de trou.
+  - Après la référence, seuls ses suivants s'affichent, quand ce sont les derniers du fil (cinq au plus). Plus loin, la fin dit combien restent après, au lieu de montrer la fin du fil comme si elle suivait.
+  - Le fil relu tient dans 12 000 caractères, et ce sont les plus anciens qui tombent. Avant, la citation coupait la fin, c'est-à-dire les messages les plus récents et celui qu'on avait demandé.
+- Ce qui ne change pas : le portrait ne relit que les messages de la personne elle-même, jamais ceux de la personne du compte. Et seulement les derniers, sauf si l'opératrice coche « Relire tout l'historique ».
+
+*Pourquoi :* le 22 novembre 2026, à « que penses-tu de Kévin Massol ? », elle a résumé sa fiche, six faits de travail pour 310 messages lus, sans ouvrir un seul de ses messages. Relancée (« tu ne peux pas voir les conversations ? »), elle n'a lu que les 15 derniers des 96 messages du tête-à-tête, sans savoir qu'il en restait. « Oui pourquoi pas, c'est pour ça qu'un contact a une fiche. »
+
+*Révise 0298 (en partie : la fiche se complète, deux sortes de plus, douze faits).*
+
+### 0304 — Réunir ses contacts : d'office quand c'est sûr, un juge pour le reste
+
+- **Un identifiant Teams a une seule forme.** Un même compte arrivait parfois sous deux formes (`8:orgid:<uuid>` et
+  `worker/8:orgid:<uuid>`, selon le chemin par lequel l'extension l'a lu). Cela faisait deux auteurs dans le cache de
+  Teams, donc deux fiches dans l'annuaire : 30 des 66 rapprochements du 22 novembre 2026 étaient la même personne en
+  double.
+  - Le cache de Teams range l'auteur sous sa forme comparable (`author_key_of`, c'est-à-dire `ports.teams.person_key`,
+    celle des profils et des photos), et l'annuaire compare l'identifiant sous la même forme (`normalized`). Le sujet
+    d'oubli d'une personne de Teams (`teams.person_handle`) aussi. Le même compte est donc toujours le même auteur, la
+    même fiche et le même sujet.
+  - Ce qui avait été rangé de travers ne se convertit pas : on l'efface (`mika teams purge` du compte, qui efface aussi
+    ses vues dans l'annuaire), puis on recharge l'historique. D'ici là, oublier quelqu'un efface aussi ce qui était
+    rangé sous la forme reçue telle quelle.
+- **Ce qui n'est pas prouvé est jugé, par le modèle.** Le nom ne prouve rien. Retirer des morceaux de nom (« -EXT »,
+  « (Invité) ») ne vaudrait que pour une entreprise. Un juge, le rôle `match` (repli sur `extract`), regarde donc tout
+  ce que l'annuaire sait des fiches et dit lesquelles sont la même personne. Le processus `contacts.match` le fait
+  toutes les heures, et peu après un message remarqué.
+  - Ce qu'il voit d'une fiche : ses noms, son organisation, son poste, ses adresses et ses numéros, et la sorte de son
+    compte Teams (de son organisation, invité anonyme d'une réunion, personnel), jamais son identifiant. Il voit aussi
+    où et quand elle est lue, où elle écrit dans Teams, l'objet de ses derniers mails, les groupes du téléphone, qui
+    l'a racontée et la personne qui lui est reliée.
+  - Il rend des personnes (des fiches, s'il en est sûr ou non, et pourquoi) et les paires qu'il sait être deux
+    personnes. Sa réponse est relue strictement ; illisible, rien ne change.
+- **Ce dont il est sûr se fait seul.**
+  - Sûr de la même personne : les fiches sont réunies d'office, comme une preuve les réunirait (`unite`). La réunion
+    est gardée (`unions`) ; elle se défait en détachant ses identifiants (« Détacher »), qui en retire aussi la trace.
+    Une fiche qui a changé pendant l'appel n'est pas réunie : son avis se refait.
+  - Sûr de deux personnes : elles ne sont plus proposées. Ce n'est pas un écart d'opératrice (`dismissed`) : une preuve
+    les réunit encore.
+  - Sinon, elles attendent dans À valider › Rapprochements, avec son avis en ses mots.
+  - Ce qui ne bouge pas : il ne réunit jamais deux fiches qu'une opératrice a séparées, ni deux fiches reliées à deux
+    personnes différentes, ni une fiche qui porte un nom raconté, reliée à personne, avec une fiche reliée à quelqu'un
+    qui lui parle — même par une fiche intermédiaire (c'est l'identité qui les relie, 0298).
+- **Qui il juge.** Les paires des suggestions (le même nom, une initiale, un prénom seul), et celles qui ont des mots
+  rares de leurs noms en commun, quelle que soit leur forme (« Kévin Massol » et « Kévin MASSOL-EXT »).
+  - Un mot compte s'il a au moins quatre lettres et que dix fiches au plus le portent : « ext », que portent tous les
+    prestataires, ne rapproche personne.
+  - Il faut deux de ces mots, ou un seul qui n'ouvre pas les deux noms : le même prénom seul ne suffit pas.
+  - Par groupes de huit fiches au plus, la plus récente d'abord : un nouveau moyen de communication trouve vite sa
+    fiche.
+- **Un avis vaut sur ce qu'il a vu.** Chaque avis porte l'empreinte des deux fiches (`bases`, `pair_basis`). Une fiche
+  qui change (un identifiant, un nom, une organisation, un lien de plus) est donc rejugée. Une paire ne l'est jamais
+  deux fois sur les mêmes fiches.
+- **Ce qu'il coûte.** Au plus 5 appels par passage et 40 en vingt-quatre heures, réglables dans Réglages › Paramètres
+  avancés › contacts. Le réglage `matching` le coupe : rien ne se réunit alors sans toi, sauf ce qu'un identifiant
+  prouve.
+- **L'oubli.** Ses avis et ses réunions partent avec leurs fiches, et ceux qui nomment une personne oubliée aussi
+  (une raison, le nom d'une fiche réunie), même sur une autre paire. Sa consigne lui demande de n'en nommer aucune.
+  Quand une fiche est réunie, ses avis se refont et ses réunions suivent la fiche gardée.
+- **La console en MCP sert la file « À valider ».** Les vues qu'elle lit (les identités à confirmer, les noms à
+  relier, et une nouvelle vue, `contacts/rapprochements`) sont listées et lues. La nouvelle vue dit ce qui attend avec
+  l'avis du juge, ce qu'il a réuni d'office et ce qu'il sait deux personnes.
+  - La composition déclare ces vues (`queue.views`), et elles se servent par leur propre part (`a_valider`), cochée
+    d'office dans Outils › Prêter à un agent. Les autres vues hors de la navigation sont listées avec la part des vues.
+  - Avant, ces vues se lisaient par leur clé, mais on ne pouvait pas les trouver. Un choix déjà enregistré dans
+    Prêter à un agent ne les sert plus tant qu'on n'y coche pas la file.
+
+*Pourquoi :* le 22 novembre 2026, les 68 rapprochements de la file étaient presque tous justifiés, mais presque la
+moitié n'avait rien à y faire. 30 étaient le même identifiant Teams sous deux formes, et 28 venaient d'une seule
+personne venue huit fois en invité de réunion. Il manquait aussi « Kévin Massol » (raconté) face à « Kévin
+MASSOL-EXT ». Adrien : « pour tous les endroits où on est sûr, ça doit être automatique, et le bon profil doit être mis
+automatiquement avec le nouveau moyen de communication » ; « j'aimerais bien un truc intelligent qui fusionne :
+retirer des lettres ne rend pas le processus adaptable de manière générale ».
+
+*Révise 0298 (en partie : ce qui est sûr se réunit d'office, le juge compris ; un identifiant Teams, une forme).*
 
 ## Sa vie intérieure : affect, corps, besoins, liens, initiatives
 
@@ -2486,6 +2576,8 @@ de tout le serveur à coups d'« Actualiser ».
 
 *Révise 0251 (en partie : la voie d'envoi).*
 
+*Révisée par 0305 (en partie : un envoi peut porter une citation).*
+
 ### 0302 — Un rangement se voit aussitôt ; le serveur range la sélection en une session
 
 - **Les clients n'attendent pas le serveur** pour montrer un rangement (frontendv2 et l'app Android ; liste, liseuse, sélection) : un mail archivé, mis à la corbeille ou déplacé quitte la liste tout de suite, la liseuse revient à la liste ; lu, non lu, suivi se posent aussitôt. Une lecture de la liste partie avant la réponse ne le remontre pas. Ce que le serveur refuse revient, et le refus se dit.
@@ -2495,6 +2587,20 @@ de tout le serveur à coups d'« Actualiser ».
 *Pourquoi :* « quand je supprime un email ce n'est pas instantané, il n'y a pas cet effet de c'est fait directement » ; puis « oui aux deux » (Android, la session unique), le 2026-11-22.
 
 *Révise 0200 (en partie : déplacer une sélection se fait en une action, en un lot).*
+
+### 0305 — Teams : Mika cite le message auquel elle répond
+
+- Quand un envoi répond à un message précis (le `reply_to` de son brouillon), il le **cite**, comme on le fait dans Teams avec « Citer » : dans un **groupe**, toujours ; dans un **tête-à-tête**, seulement si d'autres messages sont arrivés après celui auquel elle répond — sinon elle répond au dernier, et la citation ne dirait rien. Ni dans un canal, ni dans une réunion (une réponse y est un fil, pas une citation).
+- Le serveur la met dans la boîte d'envoi de l'extension (`OutboxItem.quote` : l'identifiant du message chez Teams, son auteur — identifiant et nom —, son heure, un extrait de 160 caractères), seulement pour un message dont il a l'**identifiant de service** (l'heure d'arrivée, le seul que Teams sache citer) et un auteur reconnaissable ; sinon l'envoi part sans citation.
+- L'extension l'écrit comme Teams (relevé le 2026-11-22, essai 8 chez Albert) : un bloc `<blockquote itemtype="http://schema.skype.com/Reply" itemid="<message>">` (l'auteur, l'heure, l'extrait) avant le texte, et, par le worker, l'entrée `computed.quotedMessages` (`messageId`, `sender`, `time`). Par le worker et par le service de chat ; par la zone de saisie, le message part sans citation. Essai 9 : une citation construite, la conversation fermée, s'affiche comme celle de Teams.
+- Un envoi de la page qui cite ne devient jamais un modèle d'envoi (ADR 0301) : rejoué, il recollerait sa citation à chaque envoi.
+- **Quand c'est toi qui cites** (frontendv2, l'application : « Citer » sur un message, comme dans Teams), la citation part toujours, dans un tête-à-tête aussi : c'est un geste, pas une règle de Mika (un brouillon qui a un auteur, `TeamsStore._quote_in(asked=…)`).
+- **Les citations reçues** sont gardées à part du texte du message : l'extension (0.8.3) sépare le bloc de Teams (`quote` : le message cité, son auteur, un extrait), le serveur le range avec le message (`messages.quote`, migration `b8e4c2a7d915`) et retrouve le message cité quand il l'a (`ref`). L'API le rend (`quote`) ; frontendv2 et l'application montrent la carte de Teams au-dessus du texte, qui mène au message cité. Mika le lit devant le texte, partout où elle lit un message (« (en réponse à Sophie : « … ») », `teams.quote` dans sa voix). Ce qui était là avant garde sa citation en ligne dans le texte : recharger l'historique la sépare (« effacer plutôt que convertir »).
+- Pas de maquette : « pas besoin de maquette pour un truc aussi petit, calque-toi sur le fonctionnement de Teams » — « Citer » au survol d'un message (au doigt, en le touchant ; dans l'application, un appui long), la carte au-dessus du champ avec son ×.
+
+*Pourquoi :* « et pourquoi on n'implémenterait pas la citation ? » — dans un groupe qui parle de plusieurs choses, une réponse qui ne dit pas à quoi elle répond se perd.
+
+*Révise 0301 (en partie : un envoi peut porter une citation).*
 
 ## Les fournisseurs de modèles
 

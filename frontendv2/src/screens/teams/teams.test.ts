@@ -23,7 +23,7 @@ import {
   threadMarks,
   withoutSent,
 } from "./format";
-import { conversationRow, convAvatar, dock, imageViewer, infoPane, repliesTable, replyCard, threadBody, threadHead, type ThreadView } from "./markup";
+import { conversationRow, convAvatar, dock, extensionChip, imageViewer, infoPane, quoteCard, repliesTable, replyCard, threadBody, threadHead, type ThreadView } from "./markup";
 
 const NOW = new Date(2026, 10, 4, 15, 0).getTime();
 const MIN = 60_000;
@@ -552,5 +552,52 @@ describe("Teams : les photos de profil et les réactions (ADR 0300)", () => {
     const theirs = threadBody(thread([m]), [], view("lire", { account: shared() }), false);
     expect(theirs).toContain('<span title="Adrien Moreau">👍 1</span>');
     expect(theirs).not.toContain('class="mine"');
+  });
+});
+
+describe("la pastille de l'extension", () => {
+  it("la dit là quand elle relève sa boîte, même sans lot neuf depuis des heures (le 2026-11-22)", () => {
+    const calm = account({ last_batch: NOW - 9 * 60 * MIN, last_seen: NOW - MIN });
+    expect(extensionChip(calm, NOW)).toContain('class="dot ok"');
+    expect(extensionChip(calm, NOW)).toContain("dernier lot il y a 9 h");
+  });
+  it("sans signe de vie récent, elle vire à l'orange ; un serveur d'avant (sans last_seen) juge sur le lot", () => {
+    expect(extensionChip(account({ last_batch: NOW - 9 * 60 * MIN, last_seen: NOW - 9 * 60 * MIN }), NOW)).toContain('class="dot warn"');
+    expect(extensionChip(account({ last_batch: NOW - MIN }), NOW)).toContain('class="dot ok"');
+  });
+});
+
+describe("la citation, comme dans Teams (ADR 0305)", () => {
+  const quote = { author: "Albert <robot>", author_id: "28:ed349f0c", preview: "Bonjour Adrien, votre leçon…", at: NOW - 60 * MIN, ref: "t1" };
+  const thread: Thread = {
+    key: "19:marc", account: "principal", title: "Marc Delmas", kind: "group",
+    messages: [msg({ ref: "t1" }), msg({ ref: "t2", text: "Oui, je regarde.", quote, at: NOW - 10 * MIN })],
+    more: false, replies: [], under_way: false, asked: false,
+  };
+  it("une réponse citée montre sa citation au-dessus de son texte, qui mène au message cité", () => {
+    const html = threadBody(thread, [], view("proprietaire"), false);
+    expect(html).toContain('data-tm-goto="t1"');
+    expect(html).toContain("Albert &lt;robot&gt;");
+    expect(html).toContain('data-ref="t1"');
+    expect(html.indexOf("tm-quote")).toBeLessThan(html.indexOf("Oui, je regarde."));
+    // un message cité qu'elle n'a pas : la carte, sans lien
+    expect(quoteCard({ ...quote, ref: "" }, NOW)).not.toContain("data-tm-goto");
+  });
+  it("« Citer » au survol, là où tu peux écrire ; pas sur un compte qu'on te partage en lecture", () => {
+    expect(threadBody(thread, [], view("proprietaire"), false)).toContain('data-tm-quote="t2"');
+    expect(threadBody(thread, [], view("lire"), false)).not.toContain("data-tm-quote");
+    // ni dans un canal ni dans une réunion : le serveur n'y cite pas
+    for (const kind of ["channel", "meeting"] as const) {
+      expect(threadBody({ ...thread, kind }, [], view("proprietaire"), false)).not.toContain("data-tm-quote");
+    }
+  });
+  it("au-dessus du champ, la carte du message cité et son × ; rien sans citation", () => {
+    const base = { title: "Marc Delmas", owner: "", level: "proprietaire", caps: caps("proprietaire"), asked: false,
+      underWay: false, canPrefill: true, quiet: "", sending: false, now: NOW };
+    const html = dock({ ...base, quoting: { author: "Albert", at: NOW - 60 * MIN, preview: "Bonjour Adrien" } });
+    expect(html).toContain('class="tm-quoting"');
+    expect(html).toContain('data-tm="sans-citation"');
+    expect(html.indexOf("tm-quoting")).toBeLessThan(html.indexOf("<textarea"));
+    expect(dock(base)).not.toContain("tm-quoting");
   });
 });

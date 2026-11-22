@@ -35,6 +35,7 @@ from mika.ports.contacts import (
     DOMAIN,
     EMAIL,
     MAIL,
+    NOTES_MAX,
     ORG,
     PHONE,
     PHONE_APP,
@@ -56,8 +57,8 @@ from mika.vocab.phrasebook import family, phrase
 
 #: au plus tant de fiches dites d'un appel (les plus récemment vues)
 SHOWN = 3
-#: au plus tant de faits par fiche
-FACTS_SHOWN = 6
+#: au plus tant de faits par vue d'une fiche : la fiche entière qu'un portrait rend (ADR 0303)
+FACTS_SHOWN = NOTES_MAX
 #: au plus tant de moyens de la joindre, d'autres noms, de conversations par source, de mails, de membres
 WAYS_SHOWN, NAMES_SHOWN, PLACES_SHOWN, MAILS_SHOWN, MEMBERS_SHOWN = 5, 3, 3, 2, 8
 #: la source d'une vue → le mot de « sources » (voix.yaml)
@@ -161,12 +162,25 @@ def sheet_lines(ctx: Any, sheet: ContactSheet, visible: frozenset[tuple[str, str
         elif name:
             out.append(phrase("contacts.tools.lookup.has_account", name=inert(name, 80)))
     out += teams_lines(ctx, sheet, visible) + mail_lines(ctx, sheet, visible) + phone_lines(frame, sheet)
-    notes = ctx.ports.get("contacts").notes(sheet.id, visible=visible)[:FACTS_SHOWN]
+    notes = per_place(ctx.ports.get("contacts").notes(sheet.id, visible=visible))
     out += [phrase("contacts.tools.lookup.fact", text=inert(n.text, 200),
                    where=words.get(SOURCE_KEYS.get(n.source, ""), n.source),
                    place=phrase("contacts.tools.lookup.fact_place", place=inert(n.place, 120)) if n.place else "",
                    when=day(frame, n.said_at or n.at), confidence=round(n.confidence * 100),
                    ref=reference(n.ref)) for n in notes] or [phrase("contacts.tools.lookup.no_fact")]
+    return out
+
+
+def per_place(notes: list[Any]) -> list[Any]:
+    """Ses faits, ``FACTS_SHOWN`` au plus par vue (source, compte) — la fiche entière de chacune (ADR 0303) —, dans
+    leur ordre (les plus sûrs d'abord)."""
+    seen: dict[tuple[str, str], int] = {}
+    out = []
+    for n in notes:
+        place = (n.source, n.account)
+        if seen.get(place, 0) < FACTS_SHOWN:
+            seen[place] = seen.get(place, 0) + 1
+            out.append(n)
     return out
 
 
@@ -267,4 +281,4 @@ def reference(ref: str) -> str:
     """La référence d'un message, entre crochets (vide sans référence) : ``teams_read``, ``email_read`` la relisent."""
     return phrase("contacts.tools.lookup.ref", ref=inert(ref, 120)) if ref else ""
 
-__all__ = ["LookupArgs", "contacts_lookup", "day", "facing", "sheet_lines", "visible_here", "ways_of"]
+__all__ = ["LookupArgs", "contacts_lookup", "day", "facing", "per_place", "sheet_lines", "visible_here", "ways_of"]

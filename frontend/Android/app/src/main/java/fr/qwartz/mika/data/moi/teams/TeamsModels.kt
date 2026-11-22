@@ -59,6 +59,17 @@ object Kinds {
     const val OTHER = "other"
 }
 
+/** Le message qu'un message cite (ADR 0305), comme Teams le montre : son auteur, un court extrait, son heure. */
+@Serializable
+data class TeamsQuote(
+    val author: String = "",
+    @SerialName("author_id") val authorId: String = "",
+    val preview: String = "",
+    val at: Long = 0,
+    /** La référence du message cité chez Mika ; vide : il n'est pas chez elle (l'appui sur la citation ne mène à rien). */
+    val ref: String = "",
+)
+
 /** Un message d'une conversation. */
 @Serializable
 data class TeamsMessage(
@@ -66,10 +77,13 @@ data class TeamsMessage(
     val author: String = "",
     @SerialName("author_id") val authorId: String = "",
     val at: Long = 0,
+    /** Son texte, sans la citation (elle est dans [quote]). */
     val text: String = "",
     /** Écrit par la personne du compte : toi sur un compte à toi, son propriétaire sur un compte qu'on te partage. */
     val own: Boolean = false,
     @SerialName("mentions_me") val mentionsMe: Boolean = false,
+    /** Le message qu'il cite ; `null` : il n'en cite aucun (ou un serveur d'avant l'ADR 0305). */
+    val quote: TeamsQuote? = null,
 )
 
 /** Une réponse de Mika en chemin dans une conversation. */

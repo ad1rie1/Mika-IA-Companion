@@ -77,6 +77,7 @@ from mika.plugins.teams import (
     under_way,
 )
 from mika.plugins.teams.accounts import Scope
+from mika.plugins.teams.reactions import quote_said
 from mika.ports.drafts import to_fill
 from mika.ports.teams import MODES, OUTBOX_SEND, conversation_key, split_conversation_key
 from mika.ports.teams import Draft as TeamsDraft
@@ -448,7 +449,7 @@ def _thread(s: TeamsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     if port is None or port.conversation(account, conversation) is None:
         return [Note("Cette conversation n'est plus là.", tone="muted")]
     thread = port.thread(account, conversation, 60)
-    rows = tuple(Row((When(m.at), Text("toi" if m.own else _clip(m.author, 60)), Text(m.text, clamp=600),
+    rows = tuple(Row((When(m.at), Text("toi" if m.own else _clip(m.author, 60)), Text(quote_said(m.quote) + m.text, clamp=600),
                       Badge("question", "warn") if (seen := s.messages.get(m.ref)) and seen.needs_reply else "")
                      ) for m in thread)
     blocks: list[Block] = [Table((Column("quand", "fit"), Column("qui", "fit", role="title"), Column("message", role="body"), Column("question", "fit", role="badge")), rows,

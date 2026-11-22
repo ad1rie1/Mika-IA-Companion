@@ -1,5 +1,5 @@
-"""Les réactions d'un message Teams (ADR 0300), telles qu'elle les lit derrière son texte : le tri, le message auquel
-elle prépare une réponse, ses outils de lecture.
+"""Les réactions d'un message Teams (ADR 0300), telles qu'elle les lit derrière son texte, et sa citation (ADR 0305),
+devant : le tri, le message auquel elle prépare une réponse, ses outils de lecture.
 
 Elle les voit quand elle lit le message ; une réaction ne déclenche jamais rien — ni remarque, ni tri, ni réponse :
 l'adaptateur range un message dont seules les réactions changent comme un message connu, sans rien journaliser, et
@@ -12,11 +12,20 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from mika.ports.preprocess import inert
-from mika.ports.teams import Reaction, emoji_of
+from mika.ports.teams import Quote, Reaction, emoji_of
 from mika.vocab.phrasebook import phrase
 
 #: les réactions dites par message, au plus ; les noms dits par réaction, au plus (les autres se comptent)
 SHOWN, NAMES_SHOWN = 8, 5
+
+
+def quote_said(quote: Quote | None) -> str:
+    """Ce qu'elle lit de la citation d'un message, devant son texte (« (en réponse à Gilles : « Tu viens ? ») ») ;
+    vide sans citation. Le nom et l'extrait viennent de Teams : inertes."""
+    if quote is None:
+        return ""
+    return phrase("teams.quote", who=inert(quote.author, 60) or phrase("teams.noticed.someone"),
+                  text=inert(quote.preview, 200))
 
 
 def reactions_said(reactions: Sequence[Reaction], me: str) -> str:
