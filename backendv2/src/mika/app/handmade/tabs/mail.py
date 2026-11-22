@@ -210,35 +210,8 @@ def drafts(got: Got) -> Any:
     return page, [], got.head(items=actions)
 
 
-def _contact(table: Mapping[str, Any], row: Mapping[str, Any], forms: Mapping[str, Any]) -> dict[str, Any]:
-    """Un contact : son nom (sinon son adresse), son adresse, ses échanges dans chaque sens, le dernier ; « Écrire »."""
-    cells = _cells(table, row)
-    address, name = text(cells.get("adresse"), dash=False), text(cells.get("nom"), dash=False)
-    write = next((forms.get(d["slot"]) for d in row.get("detail", []) if d["t"] == "action"), None)
-    return {"name": name or address, "address": address if name else "", "initial": (name or address or "?")[:1].upper(),
-            "received": text(cells.get("reçus"), dash=False) or "0", "sent": text(cells.get("envoyés"), dash=False) or "0",
-            "last": cells.get("dernier échange") if text(cells.get("dernier échange"), dash=False) else None,
-            "href": row.get("href", ""), "write": {**write, "title": "Écrire"} if write else None}
-
-
-def contacts(got: Got) -> Any:
-    """Courrier › Contacts : une ligne par adresse, ses échanges en un clic, « Écrire » à côté."""
-    space, tables = _space(got)
-    forms = got.forms
-    if space is None or not tables:
-        return drawn_blocks.page(got.ui, got.raw, got.query, forms=forms, tab="courrier/contacts")
-    table = tables[0]
-    actions, before = drawn_blocks.lift([d for d in space["items"] if d is not table])
-    page = Markup(env.get_template("handmade/courrier/contacts.html").render(
-        side=space["sidebar"], before=before, table=table,
-        people=[_contact(table, r, forms) for r in table["rows"]], forms=forms,
-        note=str(table.get("caption") or "").split(". ")[0].rstrip(".")))
-    return page, [], got.head(items=actions)
-
-
 TABS: dict[str, Any] = {
     "courrier/reception": Tab(partial(box, tab="courrier/reception"), *STYLES),
     "courrier/envoyes": Tab(partial(box, tab="courrier/envoyes"), *STYLES),
     "courrier/brouillons": Tab(drafts, *STYLES),
-    "courrier/contacts": Tab(contacts, *STYLES),
 }

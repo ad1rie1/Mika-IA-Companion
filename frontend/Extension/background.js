@@ -245,7 +245,9 @@ function ingest(state, batch) {
       kind: c.kind, people: c.people, exclude: exclude,
     });
     if (reason === "déjà vu") continue;
-    if (reason !== "vide") rt.seen[T.versionKey(m)] = m.time;
+    // écarté pour de bon (vide, ancien, exclu…) : déjà vu ; écarté faute de conversation, non — Teams diffuse parfois un
+    // message qu'on vient d'envoyer sans elle, puis complet : la version complète doit passer (le bug du 2026-11-22)
+    if (reason !== "vide" && reason !== "sans conversation") rt.seen[T.versionKey(m)] = m.time;
     if (reason) {
       rt.stats.dropped[reason] = (rt.stats.dropped[reason] || 0) + 1;
       continue;
@@ -757,7 +759,26 @@ async function sendOne(id) {
   }
   const outcome = await sendThroughTabs(job.item);
   await mutate(function (state) { O.sendOutcome(state.runtime.outbox, id, outcome, Date.now()); });
-  if (outcome.result === "sent" || outcome.result === "failed") await deliverAcks();
+  if (outcome.result === "sent" || outcome.result === "failed") {
+    quickRetries.delete(id);
+    await deliverAcks();
+  } else if (outcome.result === "retry") {
+    retrySoon(id);
+  }
+}
+
+// Rien n'est parti (l'onglet se charge, la zone de saisie pas encore là, la conversation pas ouverte) : on réessaie
+// vite, quelques fois, plutôt que d'attendre le relevé de secours (30 s) — la connexion en direct ne repousse pas un
+// envoi qui n'a pas changé.
+const SEND_RETRY_MS = 4000;
+const SEND_QUICK_RETRIES = 6;
+const quickRetries = new Map();
+
+function retrySoon(id) {
+  const n = (quickRetries.get(id) || 0) + 1;
+  quickRetries.set(id, n);
+  if (quickRetries.size > 200) quickRetries.delete(quickRetries.keys().next().value);
+  if (n <= SEND_QUICK_RETRIES) schedulePoll(SEND_RETRY_MS);
 }
 
 let polling = null;
@@ -979,7 +1000,11 @@ async function startHistory() {
   // l'état d'abord : l'onglet envoie son premier paquet aussitôt ; un chargement d'avant, encore en route, ne compte
   // plus (ses paquets portent un autre identifiant)
   const run = "h" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-  await mutate(function (s) { s.runtime.history = freshHistory(Date.now(), run); });
+  await mutate(function (s) {
+    s.runtime.history = freshHistory(Date.now(), run);
+    // une mise en service (ou une remise à zéro côté Mika, `mika teams purge`) : les profils repartent avec l'historique
+    s.runtime.profilesSent = {};
+  });
   for (const tab of tabs) {
     try {
       const answer = await chrome.tabs.sendMessage(tab.id, { kind: "history", run: run });

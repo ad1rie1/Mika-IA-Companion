@@ -7,7 +7,6 @@ from typing import Any
 
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
-    ActionSlot,
     Badge,
     Block,
     Column,
@@ -21,21 +20,17 @@ from mika.kernel.inspect import (
     Text,
     When,
 )
-from mika.plugins.email import EMAIL, EmailState, name_of
+from mika.plugins.email import EMAIL, EmailState
 from mika.plugins.email.inspect.common import (
     BOX_PAGE,
     NO_PORT,
-    PAGE,
     SECTION,
-    WHOSE,
     account_scope,
     author,
     clip,
     fold,
     mail_key,
     scoped,
-    view_link,
-    whose,
     workspace,
 )
 from mika.ports.mail import MailQuery, mail_ref, split_ref
@@ -78,32 +73,3 @@ def _outbox(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
                         layout="list", link_label="Lire le message"))
     return [workspace(port, ctx, blocks, view="envoyes", filters=(Param("q", "Recherche", placeholder="objet, destinataire, texte"),),
                       state=s, frame=frame)]
-
-
-@EMAIL.inspect("contacts", title="Contacts", section=SECTION, order=40,
-               description="Les adresses de ses échanges, avec leur volume ; écrire à l'une d'elles.",
-               params=[Param("compte", "Boîte", kind="hidden"), Param("q", "Recherche", placeholder="nom ou adresse")])
-def _contacts(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    port = scoped(ctx.ports.get("mail"), ctx)
-    if port is None:
-        return [Note(NO_PORT, tone="muted")]
-    account = account_scope(port, ctx)
-    query = fold(ctx.value("q") or "")
-    request = ctx.pager(size=PAGE)
-    result = port.contacts_page(account, query, request.number, request.size)
-    page = [dict(address=e.address, name=name_of(e.name), received=e.received, sent=e.sent, last=e.last) for e in result.items]
-    pager = Pager(number=result.number, size=result.size, total=result.total)
-    rows = tuple(Row((Text(clip(e["name"], 60) or "—"), Text(e["address"], "mono"), Text(str(e["received"]), "num"),
-                      Text(str(e["sent"]), "num"), When(e["last"]) if e["last"] else "—"),
-                     href=view_link("reception", "",
-                                    tuple((k, v) for k, v in (("compte", account), ("dossier", "*"), ("de", e["address"]),
-                                                              (WHOSE, whose(ctx))) if v)),
-                     detail=(ActionSlot("email.ecrire", (("to", e["address"]),) + ((("account", account),) if account
-                                                                                   else ()),
-                                        title=f"Écrire à {e['address']}", compact=True),))
-                 for e in page)
-    return [workspace(port, ctx, [Table(("nom", "adresse", Column("reçus", "num"), Column("envoyés", "num"), Column("dernier échange", "fit")),
-                  rows, title="Contacts", pager=pager,
-                  empty="aucun contact ne correspond" if query else "aucun échange encore",
-                  caption="Comptés sur tous les messages synchronisés et les envois conservés. Un clic ouvre les échanges ; déplie une ligne pour écrire.")], view="contacts", filters=(Param("q", "Recherche", placeholder="nom ou adresse"),), state=s,
-                      frame=frame)]

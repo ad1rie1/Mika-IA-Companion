@@ -333,8 +333,8 @@ def _views(port: Any, ctx: InspectContext, s: EmailState | None, view: str, acco
 
     return Nav((box("Réception", count=inbox),
                 box(VIEWS["a_traiter"], "a_traiter", sum(1 for k, m in mine if to_answer(m) and not answered(port, k))),
-                box(VIEWS["suivis"], "suivis"), tab("Ses brouillons", "brouillons", pending), tab("Envoyés", "envoyes"),
-                tab("Contacts", "contacts")), title="Courrier")
+                box(VIEWS["suivis"], "suivis"), tab("Ses brouillons", "brouillons", pending), tab("Envoyés", "envoyes")),
+               title="Courrier")
 
 
 def workspace(port: Any, ctx: InspectContext, items: list[Block], *, view: str = "reception",

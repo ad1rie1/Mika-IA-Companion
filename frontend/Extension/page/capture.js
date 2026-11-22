@@ -236,6 +236,12 @@
       }
     }
     for (const m of result.messages) {
+      // sans conversation (Teams diffuse parfois ainsi un message qu'on vient d'envoyer) : pas passé, pas noté —
+      // sa version complète, qui suit, passera (le bug du 2026-11-22)
+      if (!m.conv) {
+        stats.noConversation = (stats.noConversation || 0) + 1;
+        continue;
+      }
       if (sentKeys.size >= SENT_IN_PAGE_MAX) {
         sentKeys.clear();
         latest.clear();

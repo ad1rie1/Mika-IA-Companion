@@ -69,3 +69,13 @@ test("un nom de connexion d'invité n'est pas une adresse (relecture de l'ADR 02
   assert.equal(X.profileOf({ mri: GILLES, displayName: "Jean", userPrincipalName: "jean@lumen.onmicrosoft.com" }).email,
     "jean@lumen.onmicrosoft.com");
 });
+
+test("ses propres messages restent les siens, quelle que soit la forme de l'identifiant de l'auteur", () => {
+  const self = "3e51ce13-6eb8-463b-a75a-a40b2ab67602";
+  for (const authorId of ["8:orgid:" + self, "orgid:" + self.toUpperCase(),
+    "https://emea.ng.msg.teams.microsoft.com/v1/users/ME/contacts/8:orgid:" + self]) {
+    assert.equal(S.isOwn({ authorId }, self), true, authorId);
+  }
+  assert.equal(S.isOwn({ authorId: "8:orgid:de50c847-308e-4100-a076-6163609ba794" }, self), false);
+  assert.equal(S.isOwn({ authorId: "" }, self), false);
+});

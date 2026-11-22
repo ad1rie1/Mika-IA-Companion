@@ -41,7 +41,7 @@ def test_account_scope_survives_tabs_search_pagination_and_composing(world, tmp_
     export_page(client, "/admin/courrier/reception?compte=pro", tmp_path / 'review')
     assert "Personnel · message 000" in page and "Maquettes du projet" not in page
     assert '<span class="person-count now-num">530</span>' in page  # pas seulement les 500 premiers du cache
-    for tab in ("brouillons", "envoyes", "contacts"):
+    for tab in ("brouillons", "envoyes"):  # ses contacts sont dans l'annuaire (ADR 0298)
         assert f'href="/admin/courrier/{tab}?compte=perso"' in page
         get(client, f"/admin/courrier/{tab}?compte=perso")
     assert 'value="perso" selected' in page  # composer depuis le compte choisi
@@ -57,7 +57,7 @@ def test_account_scope_survives_tabs_search_pagination_and_composing(world, tmp_
     assert "Gérer les comptes" not in page
     assert client.get("/admin/courrier/comptes", follow_redirects=False).status_code == 301
     # écrire et relever : les actions de la page, dans sa barre de titre, la roue au bout (ADR 0176)
-    for tab in ("reception", "brouillons", "contacts"):
+    for tab in ("reception", "brouillons"):
         shown = get(client, f"/admin/courrier/{tab}?compte=perso")
         head, body = shown.split('<div class="page-head-side">')[1].split('<div class="stack">', 1)
         assert head.index("Nouveau message") < head.index("gear-link")
@@ -331,13 +331,14 @@ def test_the_side_names_what_you_read_on_every_mail_page(world):  # noqa: F811
     client, _ = setup(world)
     page = get(client, "/admin/courrier/reception?compte=perso")
     side = page.split('aria-label="Le courrier, ses comptes et ses dossiers"')[1].split("</aside>")[0]
-    for label in ("Réception", "À traiter", "Suivis", "Ses brouillons", "Envoyés", "Contacts", "Comptes", "Dossiers"):
+    for label in ("Réception", "À traiter", "Suivis", "Ses brouillons", "Envoyés", "Comptes", "Dossiers"):
         assert label in side, label
+    assert ">Contacts<" not in side  # ses contacts sont dans l'annuaire (ADR 0298)
     assert "/admin/courrier/reception?compte=perso&etat=a_traiter&dossier=%2A" in side
     assert 'class="hm-workspace mail-views"' in page
     assert "<h2>Suivis</h2>" in get(client, "/admin/courrier/reception?compte=perso&etat=suivis&dossier=*")
     assert "<h2>À traiter</h2>" in get(client, "/admin/courrier/reception?compte=perso&etat=a_traiter&dossier=*")
-    for tab in ("brouillons", "envoyes", "contacts"):
+    for tab in ("brouillons", "envoyes"):  # ses contacts sont dans l'annuaire (ADR 0298)
         assert "Dossiers" in get(client, f"/admin/courrier/{tab}?compte=perso")
     # les dossiers du serveur qui portent le nom d'une vue de la colonne le disent : un « Envoyés », pas deux
     # (audit du 2026-11-05, C4-09)

@@ -171,6 +171,28 @@ _DRAFT = (DraftRow.draft_id, DraftRow.conversation, DraftRow.body, DraftRow.repl
           DraftRow.edited_by, DraftRow.reason, DraftRow.account)
 #: un tête-à-tête se reconnaît aussi à son identifiant (``19:a_b@unq.gbl.spaces``)
 _DM_SUFFIX = "@unq.gbl.spaces"
+
+#: un identifiant de personne de Teams, quelle que soit sa forme (« 8:orgid:<uuid> », « orgid:<uuid> », une adresse qui
+#: finit par « /contacts/8:orgid:<uuid> »…)
+_ORGID = re.compile(r"orgid:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})", re.IGNORECASE)
+
+
+def same_person(author_id: str, self_id: str) -> bool:
+    """Deux identifiants de Teams désignent la même personne : le même uuid d'organisation, sinon la même chaîne."""
+    a, b = _ORGID.search(author_id or ""), _ORGID.search(self_id or "")
+    if a and b:
+        return a.group(1).lower() == b.group(1).lower()
+    return bool(author_id.strip()) and author_id.strip().lower() == (self_id or "").strip().lower()
+
+
+def written_by_self(author_id: str, author: str, self_id: str, self_name: str) -> bool:
+    """Un message de la personne du compte, que l'extension l'ait dit ou non : son identifiant, ou — sans identifiant —
+    son nom tel que Teams l'affiche. L'extension ne reconnaissait plus ses messages captés en direct (ADR 0251) quand
+    leur auteur n'avait pas la forme exacte attendue : le serveur, qui connaît le compte, ne s'y fie plus seul. Ce qui
+    avait été rangé de travers ne se convertit pas : on l'efface (``mika teams purge``) et on recharge l'historique."""
+    if self_id and author_id and same_person(author_id, self_id):
+        return True
+    return not (author_id or "").strip() and bool(self_name.strip()) and author.strip() == self_name.strip()
 #: un groupe où l'on échange vraiment (``exchanged``, ADR 0298) : au plus tant d'auteurs, la personne du compte comprise
 EXCHANGE_GROUP_MAX = 8
 
@@ -335,15 +357,16 @@ class TeamsStore:
         settled: list[Settled] = []
         key = _account_key(account)
         with self._lock, self._session.begin() as s:
-            row = self._account_in(s, key)
-            if row is None:
-                row = AccountRow(key=key, last_batch=0, self_id="", self_name="")
-                s.add(row)
+            acct = self._account_in(s, key)
+            if acct is None:
+                acct = AccountRow(key=key, last_batch=0, self_id="", self_name="")
+                s.add(acct)
             if batch.self_id:
-                row.self_id = batch.self_id
+                acct.self_id = batch.self_id
             if batch.self_name:
-                row.self_name = batch.self_name
-            row.last_batch = now
+                acct.self_name = batch.self_name
+            acct.last_batch = now
+            self_id, self_name = acct.self_id or "", acct.self_name or ""
             seen: dict[str, ConversationRow] = {}
             for c in batch.conversations:
                 found = self._conversation_row(s, seen, key, fit(c.id, CONVERSATION_MAX))
@@ -360,6 +383,7 @@ class TeamsStore:
                         known += 1
                         row.text, row.acked = "", True
                     continue
+                own = m.own or written_by_self(m.author_id, m.author, self_id, self_name)
                 if row is not None:  # déjà connu (rejoué, ou retouché dans Teams : son texte suit)
                     known += 1
                     text = self._with_images(s, row.ref, m.text)
@@ -378,12 +402,12 @@ class TeamsStore:
                 recent += live
                 touched.add(conv)
                 s.add(MessageRow(ref=ref, account=key, conversation=conv, external_id=m.id, author=m.author,
-                                 author_id=m.author_id, author_key=author_key, at=at, text=m.text, own=m.own,
-                                 mentions_me=m.mentions_me, received=now, acked=m.own or not live,
+                                 author_id=m.author_id, author_key=author_key, at=at, text=m.text, own=own,
+                                 mentions_me=m.mentions_me, received=now, acked=own or not live,
                                  images_pending=max(0, min(m.images, 8))))
                 found = self._conversation_row(s, seen, key, conv)
                 found.last_at = max(found.last_at or 0, at)
-                if m.own and live:
+                if own and live:
                     replied[conv] = max(replied.get(conv, 0), at)
                     settled.extend(self._answered_by_owner(s, key, conv, at, m.text, now))
             if touched:

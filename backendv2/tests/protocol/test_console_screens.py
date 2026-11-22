@@ -41,7 +41,6 @@ PARITY: dict[str, tuple[str, str]] = {
     "Modules › Email": ("/admin/courrier/reception", "Réception"),
     "Modules › Email (brouillons)": ("/admin/courrier/brouillons", "Ses brouillons"),
     "Modules › Email (envoyés)": ("/admin/courrier/envoyes", "Envoyés"),
-    "Modules › Email (contacts)": ("/admin/courrier/contacts", "Contacts"),
     "Modules › Email (comptes)": ("/admin/courrier/comptes", "Ses boîtes"),
     "Modules › RSS": ("/admin/sens/flux", "Flux RSS"),
     "Modules › Caméra": ("/admin/sens/camera", "Caméra"),

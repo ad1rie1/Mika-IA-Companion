@@ -7,9 +7,12 @@ import asyncio
 import json
 from pathlib import Path
 
+from mika.adapters.contacts import ContactsStore
 from mika.adapters.mail import LEGACY_ACCOUNT
 from mika.adapters.mcp.hub import McpHub
 from mika.adapters.system import RealClock
+from mika.adapters.teams import TeamsStore
+from mika.app import datadir, schema
 from mika.app.cli.common import _with_settings
 from mika.app.settings import Settings
 from mika.app.teams import TeamsDesk
@@ -60,6 +63,8 @@ async def teams_command(settings: Settings, args: argparse.Namespace) -> dict[st
                          "/api/teams/…"}
     if args.teams_cmd == "revoke":
         return {"ok": await desk.revoke_key(account), "compte": account}
+    if args.teams_cmd == "purge":
+        return purge_teams(args.data, settings, account)
     cfg = settings.teams()
     teams_rules = [a.model_dump() for a in settings.canals().table("teams").lines]
     accounts = {}
@@ -68,6 +73,28 @@ async def teams_command(settings: Settings, args: argparse.Namespace) -> dict[st
         accounts[name] = {"label": a.label, "owner": a.owner or "toi", "sign": a.sign,
                           "key": f"{key.hint}…" if key is not None else None}
     return {"ok": True, "enabled": cfg.enabled, "comptes": accounts, "envoi": teams_rules}
+
+
+def purge_teams(data: Path, settings: Settings, account: str) -> dict[str, object]:
+    """``mika teams purge`` (serveur arrêté) : tout ce que l'extension d'un compte a apporté s'efface — conversations,
+    messages, images, brouillons, profils — et ses vues dans l'annuaire avec (ADR 0298 : sinon le rechargement les
+    compterait deux fois). Sa clé reste : on recharge ensuite tout l'historique depuis l'extension, plutôt que de
+    convertir ce qui avait été rangé de travers."""
+    datadir.hold(data)
+    try:
+        bases = schema.targets(data)
+        schema.migrate_data(data, bases)
+        now = RealClock().now
+        teams, contacts = TeamsStore(settings.teams, bases["teams"], now=now), ContactsStore(bases["contacts"], now=now)
+        try:
+            rows, seen = teams.drop_account(account), contacts.drop_source("teams", account)
+        finally:
+            teams.close()
+            contacts.close()
+    finally:
+        datadir.release(data)
+    return {"ok": True, "compte": account, "lignes_teams": rows, "vues_annuaire": seen,
+            "ensuite": "relancer le serveur, recharger l'extension et l'onglet Teams, puis « Charger tout l'historique »"}
 
 
 async def wakeup_command(settings: Settings, args: argparse.Namespace) -> dict[str, object]:
@@ -255,6 +282,9 @@ def add_plugins(sub) -> None:  # type: ignore[no-untyped-def]
     tmk.add_argument("--compte", default=DEFAULT_TEAMS_ACCOUNT, help="le compte Teams (par défaut : principal)")
     tmr = tmsub.add_parser("revoke", help="retirer la clé de l'extension d'un compte (plus rien ne passe pour lui)")
     tmr.add_argument("--compte", default=DEFAULT_TEAMS_ACCOUNT, help="le compte Teams (par défaut : principal)")
+    tmp = tmsub.add_parser("purge", help="effacer ce que l'extension d'un compte a apporté (sa clé reste ; serveur "
+                                         "arrêté), puis recharger l'historique depuis l'extension")
+    tmp.add_argument("--compte", default=DEFAULT_TEAMS_ACCOUNT, help="le compte Teams (par défaut : principal)")
     tmsub.add_parser("status", help="l'état de Teams, sans secret")
     wk = sub.add_parser("wakeup", help="les réveils par API (POST /api/wake/<nom>, ADR 0068 ; serveur arrêté)")
     wksub = wk.add_subparsers(dest="wakeup_cmd", required=True)

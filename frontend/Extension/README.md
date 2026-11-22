@@ -92,6 +92,9 @@ de 200 dans un paquet de l'historique) n'est pas marqué parti, et repartira. Mi
 organisation, et la même personne reconnue au courrier par son e-mail. Le diagnostic de l'onglet dit combien de
 profils il a lus.
 
+Un message vu **sans sa conversation** (Teams diffuse parfois ainsi un message qu'on vient d'envoyer, puis complet)
+n'est ni passé ni noté comme vu : sa version complète passe.
+
 Un message **modifié** repart avec son nouveau texte (même identifiant : Mika met le sien à jour) ; un message
 **supprimé** part comme une suppression (`deleted: true`, texte vide : Mika efface sa copie), et plus aucun texte de
 ce message ne repart ensuite. C'est soi exact qui compte pour `own` : l'identifiant de l'auteur doit être le tien
@@ -171,7 +174,8 @@ Une issue n'est dite que si elle est **sûre** :
   l'authentification périmée, passe la main à la zone de saisie), la conversation est exclue, ou l'échéance est
   passée sans que l'envoi ait pu commencer ;
 - **rien n'a commencé** (pas d'onglet Teams, onglet sans le script, page qui n'a pas pris la demande, conversation pas
-  ouverte, zone de saisie occupée) : ce navigateur garde la réclamation et réessaie à la relève suivante ;
+  ouverte, zone de saisie occupée) : ce navigateur garde la réclamation et réessaie 4 s plus tard, six fois au plus
+  (un onglet qui se charge, une zone de saisie pas encore là), puis à la relève suivante ;
 - **douteux** (5xx, 408, 429, coupure, plus de 20 s, texte resté dans la zone de saisie, onglet fermé ou muet après
   avoir pris la demande, service arrêté au milieu) : ni dit à Mika, ni **jamais** retenté. Mika le tranche elle-même :
   « envoyé » si ton message apparaît dans la conversation, « échec incertain » à l'échéance. Le journal de

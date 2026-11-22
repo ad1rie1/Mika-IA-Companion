@@ -16,7 +16,7 @@ const PAGE = { url: "chrome-extension://xyz/options.html" };
 const plain = (v) => JSON.parse(JSON.stringify(v));
 
 /** Un service neuf : `settings` réglés, des onglets Teams (`tabs`), et ce que répond Mika (`reply(method, url)`). */
-function service({ settings = {}, tabs = [{ id: 7, active: true, lastAccessed: 1 }], reply } = {}) {
+function service({ settings = {}, tabs = [{ id: 7, active: true, lastAccessed: 1 }], reply, tab } = {}) {
   const store = { settings: { base: "https://mika.example.org", key: KEY, paused: false, exclude: "", ...settings } };
   const listeners = {};
   const fetched = [];
@@ -43,9 +43,11 @@ function service({ settings = {}, tabs = [{ id: 7, active: true, lastAccessed: 1
       onInstalled: { addListener: (f) => { listeners.installed = f; } }, onStartup: { addListener: () => {} },
       getURL: (p) => "chrome-extension://xyz/" + p },
     alarms: { clear: () => {}, create: () => {}, onAlarm: { addListener: () => {} } },
-    notifications: { onClicked: { addListener: () => {} }, create: () => {}, clear: () => {}, getAll: async () => ({}) },
+    // comme Chrome : `getAll` rend aussi la main à son rappel (sans lui, un relevé attendrait sans fin)
+    notifications: { onClicked: { addListener: () => {} }, create: async () => "", clear: async () => true,
+      getAll: (done) => { if (done) done({}); return Promise.resolve({}); } },
     permissions: { contains: async () => true },
-    tabs: { query: async () => tabs, sendMessage: async (id, msg) => { toTabs.push(plain(msg)); return { ok: true }; },
+    tabs: { query: async () => tabs, sendMessage: async (id, msg) => { toTabs.push(plain(msg)); return tab ? tab(plain(msg)) : { ok: true }; },
       reload: async (id) => { reloaded.push(id); } },
   };
   const fetch = async (url, init) => {
@@ -340,4 +342,48 @@ test("l'historique ne marque partis que les profils vraiment joints : ceux qui n
   assert.ok(joined.size > 0 && joined.size < ids.length, "un paquet en porte au plus 200");
   const sent = Object.keys(s.store.runtime.profilesSent || {});
   assert.deepEqual(sent.sort(), [...joined].sort(), "seuls ceux qui sont partis sont marqués");
+});
+
+test("charger l'historique renvoie les profils déjà partis : Mika a pu tout effacer avant (mika teams purge)", async () => {
+  const s = service();
+  await s.send({ kind: "captured", self: SELF, conversations: [], messages: [] }, TAB); // un état réel, gardé
+  s.store.runtime.profilesSent = { [GILLES]: "ancienne-empreinte" };
+  await s.send({ kind: "history" }, PAGE);
+  assert.deepEqual(s.store.runtime.profilesSent, {});
+});
+
+test("un message d'abord vu sans sa conversation passe quand il revient complet (le bug du 2026-11-22)", async () => {
+  const s = service();
+  const m = message("1800000000301", Date.now() + 1000, "test");
+  await s.send({ kind: "captured", self: SELF, conversations: [], messages: [{ ...m, conv: "" }] }, TAB);
+  await s.send({ kind: "captured", self: SELF, conversations: [{ id: CONV, title: "Albert", threadType: "chat" }],
+    messages: [m] }, TAB);
+  const posts = await inboxPosts(s, 1);
+  assert.deepEqual(posts.flatMap((p) => p.body.messages.map((x) => x.text)), ["test"]);
+});
+
+test("un envoi que l'onglet n'a pas pu faire est retenté dans les secondes qui suivent, pas au relevé de 30 s", async () => {
+  const item = { id: "t0123456789ac", conversation: CONV, title: "Albert", kind: "dm", mode: "send", status: "queued",
+    text: "test", created_at: 1, expires_at: 0 };
+  const sends = [];
+  const s = service({
+    reply: (method, url) => {
+      if (method === "GET" && url.endsWith("/api/teams/outbox")) return { status: 200, data: { items: [item] } };
+      if (method === "POST" && url.includes("/api/teams/outbox/")) return { status: 200, data: {} };
+      return null;
+    },
+    tab: (msg) => {
+      if (msg.kind !== "send") return { ok: true };
+      sends.push(Date.now());
+      return sends.length === 1 ? { result: "retry", reason: "la zone de saisie n'est pas encore là" }
+        : { result: "sent", via: "compose" };
+    },
+  });
+  await s.settle();
+  const ws = s.sockets[0];
+  ws.onopen();
+  ws.onmessage({ data: JSON.stringify({ type: "outbox", items: [item] }) });
+  for (let waited = 0; sends.length < 2 && waited < 9000; waited += 100) await new Promise((r) => setTimeout(r, 100));
+  assert.equal(sends.length, 2, "retenté");
+  assert.ok(sends[1] - sends[0] < 8000, "dans les secondes qui suivent");
 });

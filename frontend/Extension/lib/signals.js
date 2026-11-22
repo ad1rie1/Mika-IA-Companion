@@ -60,8 +60,14 @@
   }
 
   /** Un identifiant de personne comparable : `8:orgid:<uuid>` en minuscules (sans l'adresse qui l'entoure parfois). */
+  const ORGID = /orgid:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
+
   function mri(id) {
     const s = String(id || "").trim();
+    // un compte d'organisation, quelle que soit sa forme (« orgid:<uuid> », une adresse qui le contient) : celle
+    // qu'on compare, sinon ses propres messages ne sont plus reconnus comme les siens (le bug du 2026-11-22)
+    const org = ORGID.exec(s);
+    if (org) return "8:orgid:" + org[1].toLowerCase();
     const i = s.lastIndexOf("/contacts/");
     return (i >= 0 ? s.slice(i + "/contacts/".length) : s).toLowerCase();
   }

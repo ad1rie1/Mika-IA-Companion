@@ -189,7 +189,7 @@ def test_every_page_a_faculty_or_a_plugin_names_leads_somewhere(world):  # noqa:
     bootstrap(client)
     named = _named_pages()
     assert len(named) > 15  # la recherche trouve bien ce que le code nomme
-    assert render.href(Ref.view("email", "contacts", "")) in named  # y compris par une aide locale : tab(), workspace()
+    assert render.href(Ref.view("email", "envoyes", "")) in named  # y compris par une aide locale : tab(), workspace()
 
     def unknown(address: str) -> bool:
         """404, ou renvoyée à sa destination : un onglet qu'elle ne connaît pas y redirige."""

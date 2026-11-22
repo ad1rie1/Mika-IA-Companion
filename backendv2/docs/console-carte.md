@@ -344,9 +344,9 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
   cocher ; le message ouvert dans une liseuse, `?lire=`, à côté de la liste dès que la place le permet, dessous
   sinon, avec le précédent et le suivant — j, k, Échap — et, en tête, ce qu'elle en sait), Ses brouillons (« À décider »
   en enveloppes : à qui, depuis quelle boîte et dans quelle voix, en réponse à quoi, d'où il vient ; « Déjà décidés »
-  en lignes), Contacts (une ligne par adresse, « Ses échanges » et « Écrire »), tous dans le même espace : à côté, ce
-  qu'on lit (Réception, À traiter, Suivis, ses brouillons, Envoyés, Contacts — à la place des onglets, que la page
-  tait), à qui sont les boîtes montrées (« Les boîtes de » : tout le monde, toi, elle par son nom, chaque personne
+  en lignes), tous dans le même espace : à côté, ce
+  qu'on lit (Réception, À traiter, Suivis, ses brouillons, Envoyés — à la place des onglets, que la page
+  tait ; ses contacts sont dans l'annuaire, et `courrier/contacts` y mène, ADR 0298), à qui sont les boîtes montrées (« Les boîtes de » : tout le monde, toi, elle par son nom, chaque personne
   qui a une boîte — `?qui=`, ADR 0185), les comptes et leurs dossiers ; au-dessus, écrire, relever (ou actualiser le
   dossier ouvert) et chercher — « Afficher » n'offre que ce que la colonne ne porte pas (non lus, importants non lus,
   remarqués ou pas par elle) ; dans « À traiter » ou « Suivis », la vue est le filtre et la recherche y reste. La

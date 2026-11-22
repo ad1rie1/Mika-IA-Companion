@@ -464,12 +464,9 @@ def test_drafts_and_contacts_are_drawn_in_the_mail_space(world):  # noqa: F811
     # Envoyés ne redit pas ce que la colonne compte déjà, « Ses brouillons 1 », en lien (C4-R2)
     sent = html.unescape(client.get("/admin/courrier/envoyes").text)
     assert "Envoyés" in sent and "attend(ent)" not in sent and "brouillon(s)" not in sent
-    contacts = drawn(client, "/admin/courrier/contacts")
-    assert 'mail-contacts-page' in contacts and "lea@example.test" in contacts and "Ses échanges" in contacts
-    assert "/admin/action/email.ecrire" in contacts and 'value="lea@example.test"' in contacts  # « Écrire »
-    assert "reception?dossier=%2A&de=lea%40example.test" in contacts  # ses échanges, dans la réception
-    empty = drawn(client, "/admin/courrier/contacts?q=personne-inconnue")
-    assert "aucun contact ne correspond" in empty.lower()
+    # ses contacts sont dans l'annuaire, avec ceux de Teams et du téléphone (ADR 0298) : l'ancienne adresse y mène
+    moved = client.get("/admin/courrier/contacts", follow_redirects=False)
+    assert moved.status_code == 301 and moved.headers["location"].endswith("/admin/personnes/personnes")
 
 
 def test_every_fiche_kind_is_registered_once():

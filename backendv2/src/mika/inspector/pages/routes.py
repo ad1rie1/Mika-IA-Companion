@@ -81,6 +81,8 @@ MOVED_TABS = {("reglages", "apps"): "apps", ("sens", "courrier"): "courrier/rece
               ("identites", "revendications"): "approbations/identites",
               # les noms à relier sont des rapprochements (ADR 0298) : l'onglet est parti, son adresse y mène
               ("identites", "noms"): "approbations/rapprochements", ("approbations", "noms"): "approbations/rapprochements",
+              # les contacts du courrier sont dans l'annuaire, avec ceux de Teams et du téléphone (ADR 0298)
+              ("courrier", "contacts"): "personnes/personnes",
               # le fil de tous les messages : Conversations s'ouvre sur les personnes, leur filtre gardé (ADR 0181)
               ("fil", "messages"): "fil/conversations",
               # la place de chacun se lit avec les pièces, en sous-onglet (une ancre : « #… », après la requête)
