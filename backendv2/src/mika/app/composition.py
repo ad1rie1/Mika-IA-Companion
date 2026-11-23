@@ -283,7 +283,8 @@ def arbitration() -> ArbitrationPolicy:
     quelqu'un qui arrive) se déclenche en secondes ; le fond (une présence
     sans raison) presque jamais ; une humeur qui déborde, en minutes. Un pas de
     travail, en quelques minutes quand l'envie est là ; rarement quand elle
-    s'use. Un réveil par API, en quelques secondes : quelqu'un l'attend."""
+    s'use. Un réveil par API, en quelques secondes : quelqu'un l'attend. Ce qu'on lui demande et qu'on attend
+    (« Préremplir avec Mika », une ligne attendue : ADR 0306), en une seconde environ, quelle qu'en soit la sorte."""
     return ArbitrationPolicy(
         thresholds={Kind.INITIATIVE: 9.0, Kind.STEP: 8.0, Kind.TASK: 8.0, Kind.WORK: 8.0, Kind.JOB: 8.0,
                     Kind.WAKE: 8.0, Kind.WAKE_JOB: 8.0},
@@ -291,6 +292,7 @@ def arbitration() -> ArbitrationPolicy:
                    Kind.JOB: 1 / 120, Kind.WAKE: 0.1, Kind.WAKE_JOB: 0.1},
         aging_per_hour={Kind.INITIATIVE: 0.0, Kind.STEP: 0.0, Kind.TASK: 0.0, Kind.WORK: 0.0, Kind.JOB: 0.0,
                         Kind.WAKE: 0.0, Kind.WAKE_JOB: 0.0},
+        awaited_rate=1.0,
     )
 
 

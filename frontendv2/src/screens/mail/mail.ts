@@ -8,6 +8,7 @@ import {
   editDraft,
   fetchBoxes,
   fetchDrafts,
+  fetchMailWork,
   fetchMessage,
   fetchMessages,
   fetchSent,
@@ -29,6 +30,7 @@ import {
   type MailDraft,
   type MailFull,
   type MailRow,
+  type MailWork,
   type MailState,
   type MessagesQuery,
   type Outgoing,
@@ -43,8 +45,9 @@ import { ico, type IconName } from "../../shell/icons";
 import type { PaletteEntry } from "../../shell/palette";
 import type { ScreenContext, ScreenDef, ScreenTab, Shell } from "../../shell/shell";
 import { dayAndClock } from "../chat/markup";
+import { tickWork, WORK_POLL_MS } from "../../mika/work";
 import * as store from "../../shared/store";
-import { bindCounts, bindPieces, bindRecipients, errorText, openAsk, openCompose, paintPieces, readRecipients, type ComposeValues } from "./compose";
+import { bindCounts, bindPieces, bindRecipients, canCorrect, correctField, errorText, openAsk, openCompose, paintPieces, readRecipients, type ComposeValues } from "./compose";
 import { answerable, caps, clip, deleteTargets, draftNotWaiting, keptRows, draftReply, forwardSubject, legacyContactsHash, newNonce, outgoingText, parseAddresses, personName, replySubject, replyTargets, toFill, writeToRoute, type Caps } from "./format";
 import {
   boxesPane,
@@ -67,6 +70,7 @@ import {
   readerEmpty,
   readerMail,
   readerTidy,
+  readerWork,
   sentRow,
   viewHolds,
   viewKey,
@@ -82,9 +86,8 @@ type Open = { kind: "mail"; ref: string } | { kind: "draft"; id: string } | null
 
 /** Quand un mail ouvert devient lu (ADR 0175) ; `null` : jamais. */
 const READ_DELAY: Record<ReadOnOpen, number | null> = { jamais: null, aussitot: 0, "3s": 3000, "10s": 10_000 };
-/** Une réponse demandée : relire ses brouillons à ce rythme, tant que la liseuse reste sur le mail. */
-const ASK_POLL_MS = 10_000;
-/** Au plus si longtemps (elle travaille à son prochain moment, qui peut tarder). */
+/** Une réponse demandée : on la guette au plus si longtemps (elle s'y met tout de suite, ADR 0306 ; au-delà, la relecture
+ *  ordinaire la verra arriver). */
 const ASK_POLL_MAX_MS = 30 * 60_000;
 const REFRESH_MS = 60_000;
 const PAGE_SIZE = 25;
@@ -158,6 +161,9 @@ export class MailScreen {
   private readonly parked = new Map<string, InlineReply>();
   /** Les mails pour lesquels on lui a demandé une réponse (et depuis quand). */
   private readonly asked = new Map<string, number>();
+  /** Depuis quand on guette où elle en est, par mail (ADR 0306) : une demande, ou ce qu'elle prépare d'elle-même — à
+   *  part de `asked`, qui seul dit « on le lui a demandé ». */
+  private readonly watchSince = new Map<string, number>();
   private readTimer = 0;
   private askTimer = 0;
 
@@ -661,6 +667,7 @@ export class MailScreen {
     this.captureReply();
     host.innerHTML = this.readerMarkup();
     this.shownReply = $("[data-reply]", host) ? this.reply : null;
+    if ($("[data-work-since]", host)) tickWork();
     if (caret) {
       const t = $<HTMLTextAreaElement>("[data-rd-txt]", host);
       if (t) {
@@ -700,7 +707,8 @@ export class MailScreen {
           imagesOnce: this.imagesOnce.has(m.ref),
           draft,
           asked,
-          composer: this.reply ? inlineReply(this.reply, bv, c.prepare && !m.sent) : "",
+          work: m.work ?? null,
+          composer: this.reply ? inlineReply(this.reply, bv, c.prepare && !m.sent, canCorrect()) : "",
           taken: !!this.reply?.fromDraft,
           mobile,
           owner: store.me.value?.owner === true,
@@ -925,8 +933,12 @@ export class MailScreen {
         }
         return;
       }
-      this.asked.set(m.ref, Date.now());
-      toast(got.message && got.message !== "Elle y travaille déjà." ? "Demandé : elle l'écrit à son prochain moment de travail ; sa réponse arrivera ici." : got.message, { mika: true });
+      const now = Date.now();
+      this.asked.set(m.ref, now);
+      this.watchSince.delete(m.ref); // une nouvelle demande : son plafond repart d'ici
+      // elle s'y met tout de suite (ADR 0306) : sa ligne paraît sans attendre la relecture, qui la corrige
+      m.work ??= { step: "waiting", label: "", since: now, started: now };
+      toast(got.message && got.message !== "Elle y travaille déjà." ? "Demandé : elle s'y met tout de suite ; sa réponse arrivera ici." : got.message, { mika: true });
       this.paintReader();
       this.watchAsk();
     } catch (err) {
@@ -934,33 +946,79 @@ export class MailScreen {
     }
   }
 
-  /** Une réponse demandée : relire ses brouillons, tant que la liseuse reste sur ce mail, jusqu'à ce qu'elle arrive. */
+  /** Une réponse qu'elle prépare pour ce mail, demandée ou d'elle-même : relire où elle en est toutes les deux
+   *  secondes (ADR 0306), sans relire le mail, tant que la liseuse reste dessus, jusqu'à ce qu'elle arrive. */
   private watchAsk(): void {
     window.clearTimeout(this.askTimer);
     const m = this.mail;
     if (!m) return;
-    const since = this.asked.get(m.ref) ?? (m.her?.asked ? Date.now() : 0);
-    if (!since || this.draftFor(m.ref)) return;
-    if (!this.asked.has(m.ref)) this.asked.set(m.ref, since);
+    const busy = !!m.her?.asked || !!m.work || this.asked.has(m.ref);
+    if (!busy || this.draftFor(m.ref)) {
+      this.watchSince.delete(m.ref);
+      return;
+    }
+    const since = this.watchSince.get(m.ref) ?? this.asked.get(m.ref) ?? Date.now();
+    this.watchSince.set(m.ref, since);
     const ref = m.ref;
-    this.askTimer = window.setTimeout(async () => {
-      if (this.open?.kind !== "mail" || this.open.ref !== ref) return;
-      if (Date.now() - since > ASK_POLL_MAX_MS) return;
-      if (!this.visible()) {
-        this.watchAsk();
-        return;
-      }
-      await this.loadDrafts();
-      if (this.open?.kind !== "mail" || this.open.ref !== ref) return;
-      const d = this.draftFor(ref);
-      if (d) {
-        this.asked.delete(ref);
-        toast("Sa réponse est arrivée : elle t'attend ici.", { mika: true });
-        this.paintReader();
-        return;
-      }
+    this.askTimer = window.setTimeout(() => void this.pollWork(ref, since), WORK_POLL_MS);
+  }
+
+  private async pollWork(ref: string, since: number): Promise<void> {
+    const here = () => this.open?.kind === "mail" && this.open.ref === ref && this.mail?.ref === ref;
+    if (!here() || Date.now() - since > ASK_POLL_MAX_MS) return;
+    if (!this.visible()) {
       this.watchAsk();
-    }, ASK_POLL_MS);
+      return;
+    }
+    let got: MailWork;
+    try {
+      got = await fetchMailWork(ref);
+    } catch {
+      if (here()) this.watchAsk(); // une relecture manquée : la suivante
+      return;
+    }
+    if (!here() || !this.mail) return;
+    if (got.draft) {
+      await this.loadDrafts();
+      if (!here() || !this.mail) return;
+      this.asked.delete(ref);
+      this.watchSince.delete(ref);
+      this.mail.work = null;
+      toast("Sa réponse est arrivée : elle t'attend ici.", { mika: true });
+      this.paintReader();
+      return;
+    }
+    this.mail.work = got.work;
+    if (!got.asked && !got.work) {
+      // elle a fini sans en rendre, ou y a renoncé : plus rien n'est en cours ici
+      this.asked.delete(ref);
+      this.watchSince.delete(ref);
+      if (this.mail.her) this.mail.her.asked = false;
+      this.paintWork();
+      return;
+    }
+    this.paintWork();
+    this.watchAsk();
+  }
+
+  /** Où elle en est (ADR 0306), dans sa case de « Ce qu'elle en sait » : repeinte quand l'étape change, sans
+   *  redessiner la liseuse (le mail, son cadre) ; son chrono court seul. Sans case encore, la liseuse entière. */
+  private paintWork(): void {
+    const m = this.mail;
+    if (!m) return;
+    const asked = this.asked.has(m.ref) || !!m.her?.asked;
+    const draft = this.draftFor(m.ref);
+    const slot = this.body && $<HTMLElement>("[data-rd-work]", this.body);
+    if (!slot) {
+      if (!draft && (asked || m.work)) this.paintReader();
+      return;
+    }
+    const work = m.work ?? null;
+    const sig = JSON.stringify([work, asked, !!draft]);
+    if (slot.dataset.sig === sig) return;
+    slot.dataset.sig = sig;
+    slot.innerHTML = readerWork({ draft, asked, work, now: Date.now() });
+    if (work && !draft) tickWork();
   }
 
   private async sendReply(): Promise<void> {
@@ -1166,7 +1224,7 @@ export class MailScreen {
     if (kind === "reprendre") {
       openAsk({
         title: "Lui demander de le reprendre",
-        lede: `Celui-ci est refusé ; elle en écrira un autre à son prochain moment de travail, en tenant compte de ce que tu dis. Tu le reliras avant qu'il parte.`,
+        lede: `Celui-ci est refusé ; elle en écrit un autre tout de suite, en tenant compte de ce que tu dis. Tu le reliras avant qu'il parte.`,
         label: "Ce qu'il faut changer",
         placeholder: "« plus court », « dis-lui oui pour jeudi »…",
         required: true,
@@ -1341,6 +1399,11 @@ export class MailScreen {
         return;
       case "preremplir":
         if (m && !m.sent) void this.prefillMail();
+        return;
+      case "corriger":
+        // ADR 0307 : les fautes de ta réponse, sans changer ses mots (le champ tel qu'il est à l'écran à la fin)
+        void correctField(() => (this.body ? $<HTMLTextAreaElement>("[data-rd-txt]", this.body) : null),
+          b instanceof HTMLButtonElement ? b : null);
         return;
       case "reprendre-brouillon": {
         const d = m ? this.draftFor(m.ref) ?? this.drafts.find((x) => x.id === m.her?.draft) : null;

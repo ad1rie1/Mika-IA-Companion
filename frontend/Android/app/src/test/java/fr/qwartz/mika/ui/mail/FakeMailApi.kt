@@ -1,5 +1,6 @@
 package fr.qwartz.mika.ui.mail
 
+import fr.qwartz.mika.data.moi.Corrected
 import fr.qwartz.mika.data.moi.Levels
 import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.MoiError
@@ -11,6 +12,7 @@ import fr.qwartz.mika.data.moi.mail.MailDraft
 import fr.qwartz.mika.data.moi.mail.MailFull
 import fr.qwartz.mika.data.moi.mail.MailPage
 import fr.qwartz.mika.data.moi.mail.MailRow
+import fr.qwartz.mika.data.moi.mail.MailWork
 import fr.qwartz.mika.data.moi.mail.Outgoing
 import fr.qwartz.mika.data.moi.mail.OutgoingPiece
 import kotlinx.coroutines.CompletableDeferred
@@ -39,13 +41,16 @@ class FakeMailApi : MailApi(MoiApi(OkHttpClient(), { null }, {})) {
     var tidyFail: MoiError? = null
     var sendResult: MoiApi.Result<MailDone> = MoiApi.Result.Ok(MailDone(ok = true, message = "Parti."))
     var prefillResult: MoiApi.Result<MailDone> = MoiApi.Result.Ok(MailDone(ok = true, asked = true))
+    /** Où elle en est d'une réponse (`/mail/work`, ADR 0306) : ce qu'en dit le faux serveur. */
+    var workResult: MoiApi.Result<MailWork> = MoiApi.Result.Ok(MailWork())
 
     /** Les appels, dans l'ordre (« reply », « draftSend:d1 », « messages:1:50 », « tidy:move:INBOX »…). */
     val calls = mutableListOf<String>()
 
     private val gates = HashMap<String, CompletableDeferred<Unit>>()
 
-    /** Retenir le prochain appel de ce nom (`boxes`, `message:<ref>`, `drafts`, `prefill`, `send`, `tidy`, `messages`). */
+    /** Retenir le prochain appel de ce nom (`boxes`, `message:<ref>`, `drafts`, `prefill`, `work`, `send`, `tidy`,
+     *  `messages`, `correct`). */
     fun hold(name: String) {
         gates[name] = CompletableDeferred()
     }
@@ -71,6 +76,11 @@ class FakeMailApi : MailApi(MoiApi(OkHttpClient(), { null }, {})) {
         calls += "drafts"
         val got = draftsFail?.let { MoiApi.Result.Failed(it) } ?: MoiApi.Result.Ok(drafts)
         return answer("drafts", got)
+    }
+
+    override suspend fun work(ref: String): MoiApi.Result<MailWork> {
+        calls += "work:$ref"
+        return answer("work", workResult)
     }
 
     override suspend fun messages(query: Map<String, String?>): MoiApi.Result<MailPage> {
@@ -127,5 +137,13 @@ class FakeMailApi : MailApi(MoiApi(OkHttpClient(), { null }, {})) {
     override suspend fun images(ref: String, shown: Boolean, key: String?): MoiApi.Result<MailDone> {
         calls += "images:$ref:$shown"
         return answer("images", MoiApi.Result.Ok(MailDone(ok = true)))
+    }
+
+    /** Ce que rend « Corriger » (ADR 0307) pour le texte reçu ; sinon : rien à corriger, le texte tel quel. */
+    var correctResult: (String) -> MoiApi.Result<Corrected> = { MoiApi.Result.Ok(Corrected(it, 0)) }
+
+    override suspend fun correct(text: String): MoiApi.Result<Corrected> {
+        calls += "correct:$text"
+        return answer("correct", correctResult(text))
     }
 }

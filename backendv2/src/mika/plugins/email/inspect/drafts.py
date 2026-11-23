@@ -382,5 +382,5 @@ def _redo(s: EmailState, frame: Frame, args: RedoArgs, ctx: Any) -> Done:
                                 instruction=Content.of(args.instruction.strip(), level=int(Sensitivity.PERSONAL)),
                                 about=(ctx.by,) if ctx.by else ())
     return Done(drafts=(asked,), decide=(Decision(seen.proposal, False, note=f"à reprendre : {args.instruction}"[:500]),),
-                message="Demandé : elle reprendra ce brouillon à son prochain moment de travail.",
+                message="Demandé : elle reprend ce brouillon tout de suite.",
                 go=view_link("brouillons"))

@@ -83,6 +83,7 @@ import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
 import fr.qwartz.mika.data.moi.Caps
 import fr.qwartz.mika.data.moi.MoiDates
+import fr.qwartz.mika.data.moi.WORK_POLL_MS
 import fr.qwartz.mika.data.moi.chars
 import fr.qwartz.mika.data.moi.teams.ConversationThread
 import fr.qwartz.mika.data.moi.teams.Mark
@@ -116,32 +117,38 @@ import fr.qwartz.mika.data.moi.teams.threadMarks
 import fr.qwartz.mika.data.moi.teams.threadSubtitle
 import fr.qwartz.mika.data.moi.thousands
 import fr.qwartz.mika.ui.Route
+import fr.qwartz.mika.ui.components.WorkLine
 import fr.qwartz.mika.ui.components.rememberNow
 import fr.qwartz.mika.ui.shell.BarMenu
 import fr.qwartz.mika.ui.shell.BarNav
+import fr.qwartz.mika.ui.shell.CorrectIconButton
+import fr.qwartz.mika.ui.shell.CorrectNotices
 import fr.qwartz.mika.ui.shell.Load
 import fr.qwartz.mika.ui.shell.LoadBox
 import fr.qwartz.mika.ui.shell.LocalShell
 import fr.qwartz.mika.ui.shell.MIcon
 import fr.qwartz.mika.ui.shell.MenuEntry
+import fr.qwartz.mika.ui.shell.MikaFace
 import fr.qwartz.mika.ui.shell.MikaTopBar
 import fr.qwartz.mika.ui.shell.NoteBox
 import fr.qwartz.mika.ui.shell.PersonAvatar
 import fr.qwartz.mika.ui.shell.SectionScaffold
 import fr.qwartz.mika.ui.shell.SheetLine
 import fr.qwartz.mika.ui.shell.linked
+import fr.qwartz.mika.ui.shell.rememberCorrectWords
 import fr.qwartz.mika.ui.shell.rememberSessionKey
 import fr.qwartz.mika.ui.theme.mika
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * Une discussion (la maquette, `vueFil`) : les autres à gauche (leur nom dans un groupe), toi à droite — « Toi »
  * seulement sur un compte à toi ; sur un compte qu'on te partage, son propriétaire à son nom, à gauche —, tes mentions
  * marquées, « Messages plus anciens » en haut, tes messages en attente avec leur état. Ses réponses en carte rose
- * au-dessus du champ ; le champ : ✦ Préremplir à gauche, envoyer à droite, et dessous sous quel nom ça part. Un
- * compte qu'on ne te partage qu'en lecture n'a pas de champ : une phrase le dit. ⋮ : « Comment ça part ». La citation
- * (ADR 0305), calquée sur Teams mobile : un appui long sur un message ouvre sa feuille, « Citer » pose sa carte
- * au-dessus du champ ; un message qui en cite un autre le montre en haut de sa bulle, et un appui y mène.
+ * au-dessus du champ ; le champ : ✦ Préremplir et ✓ Corriger (ADR 0307) à gauche, envoyer à droite, et dessous sous
+ * quel nom ça part. Un compte qu'on ne te partage qu'en lecture n'a pas de champ : une phrase le dit. ⋮ : « Comment ça
+ * part ». La citation (ADR 0305), calquée sur Teams mobile : un appui long sur un message ouvre sa feuille, « Citer »
+ * pose sa carte au-dessus du champ ; un message qui en cite un autre le montre en haut de sa bulle, et un appui y mène.
  */
 @Composable
 fun TeamsThreadScreen(graph: AppGraph, key: String) {
@@ -151,12 +158,21 @@ fun TeamsThreadScreen(graph: AppGraph, key: String) {
     val arrived = stringResource(R.string.teams_arrived)
     LaunchedEffect(key) { vm.open(key, arrived) }
     LaunchedEffect(vm) { vm.said.collect { shell.toast(it) } }
-    // le fil se relit tant qu'il est à l'écran ; une réponse demandée, de plus près
+    // « Corriger » (ADR 0307) : combien de fautes, avec « Annuler » quand ton texte a été remplacé
+    CorrectNotices(vm.corrector)
+    // le fil se relit tant qu'il est à l'écran ; où elle en est d'une réponse, toutes les deux secondes (ADR 0306 :
+    // `pollWork` ne relit que si on guette)
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(vm, key, lifecycle) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            launch {
+                while (true) {
+                    delay(WORK_POLL_MS)
+                    vm.pollWork()
+                }
+            }
             while (true) {
-                delay(if (vm.watching) ASK_POLL_MS else THREAD_REFRESH_MS)
+                delay(THREAD_REFRESH_MS)
                 vm.refresh()
             }
         }
@@ -187,7 +203,7 @@ fun TeamsThreadScreen(graph: AppGraph, key: String) {
             }
         },
         bottomBar = {
-            if (t != null) Dock(vm, t, account, myName, focusAsk, onAsk = { a, r -> asking = a to r })
+            if (t != null) Dock(vm, t, account, myName, me?.correct == true, focusAsk, onAsk = { a, r -> asking = a to r })
         },
     ) { modifier ->
         LoadBox(if (vm.key == key) vm.thread else Load.Loading, onRetry = vm::retry, modifier = modifier) { thread ->
@@ -580,12 +596,21 @@ private fun OwnRow(b: OwnBubble, canRewrite: Boolean, onRewrite: () -> Unit) {
 
 /**
  * Le bas du fil : ses réponses en carte rose (celles en chemin, et celle à laquelle tu as répondu autrement tant que
- * rien n'est venu depuis), « Elle s'y met… », ce qui retient ce qui part, puis le champ — ou, sur un compte qu'on ne te
- * partage qu'en lecture, la phrase qui le dit (et « Préremplir » si ton partage le permet). [focusAsk] : « Citer » vient
- * d'être choisi, le champ prend la main.
+ * rien n'est venu depuis), où elle en est d'une réponse ([WorkSlot], ADR 0306), ce qui retient ce qui part, puis le
+ * champ — ou, sur un compte qu'on ne te partage qu'en lecture, la phrase qui le dit (et « Préremplir » si ton partage
+ * le permet). [canCorrect] : un modèle corrige (ADR 0307). [focusAsk] : « Citer » vient d'être choisi, le champ prend
+ * la main.
  */
 @Composable
-private fun Dock(vm: TeamsThreadViewModel, t: ConversationThread, account: TeamsAccount?, myName: String, focusAsk: Int, onAsk: (Ask, TeamsReply) -> Unit) {
+private fun Dock(
+    vm: TeamsThreadViewModel,
+    t: ConversationThread,
+    account: TeamsAccount?,
+    myName: String,
+    canCorrect: Boolean,
+    focusAsk: Int,
+    onAsk: (Ask, TeamsReply) -> Unit,
+) {
     val scheme = MaterialTheme.colorScheme
     val now = rememberNow()
     val caps = capsOf(account)
@@ -593,6 +618,8 @@ private fun Dock(vm: TeamsThreadViewModel, t: ConversationThread, account: Teams
     val cards = threadCards(t.replies, messages.lastOrNull()?.at ?: 0)
     val enabled = vm.accounts?.enabled ?: true
     val noReceived = stringResource(R.string.teams_no_received)
+    val askedText = stringResource(R.string.teams_prefill_asked)
+    val correctWords = rememberCorrectWords()
     Surface(color = scheme.surface) {
         Column(Modifier.navigationBarsPadding().imePadding()) {
             HorizontalDivider()
@@ -606,13 +633,7 @@ private fun Dock(vm: TeamsThreadViewModel, t: ConversationThread, account: Teams
                     }
                 }
             }
-            if (vm.asked) {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    MIcon(R.drawable.ic_m_sparkle, null, size = 16.dp, tint = mika.accent)
-                    Spacer(Modifier.width(8.dp))
-                    Text(stringResource(R.string.teams_working), style = MaterialTheme.typography.bodySmall, color = mika.accent)
-                }
-            }
+            WorkSlot(vm, underWay = t.underWay)
             if (caps.write) {
                 val quiet = quietLine(enabled, account, now)
                 if (quiet.isNotEmpty()) {
@@ -626,18 +647,42 @@ private fun Dock(vm: TeamsThreadViewModel, t: ConversationThread, account: Teams
                     title = t.title,
                     canPrefill = lastReceived(messages) != null && prefillOff(enabled, account).isEmpty(),
                     sender = selfName(account, myName),
-                    onPrefill = { vm.prefill(noReceived) },
+                    onPrefill = { vm.prefill(noReceived, askedText) },
+                    canCorrect = canCorrect,
+                    onCorrect = { vm.correct(canCorrect, correctWords) },
                 )
             } else {
-                ReadOnly(account, caps, onPrefill = { vm.prefill(noReceived) }, prefilling = vm.prefilling)
+                ReadOnly(account, caps, onPrefill = { vm.prefill(noReceived, askedText) }, prefilling = vm.prefilling)
             }
         }
     }
 }
 
-/** Le champ (`.composer` de la maquette) : au-dessus, le message que tu cites ; ✦ Préremplir à gauche, ton message,
- *  envoyer ; dessous, sous quel nom ça part (et le compte des caractères, près de la borne). [focusAsk] : « Citer »
- *  vient d'être choisi — le champ prend la main et le clavier monte, comme dans Teams. */
+/**
+ * Où elle en est d'une réponse ici (ADR 0306), au-dessus du champ, sur une ligne : son visage, l'étape et son chrono.
+ * Elle seule lit [TeamsThreadViewModel.work] : quand l'étape change, rien d'autre ne se redessine (ni le fil, ni le
+ * champ et ce qu'on y tape). Sa réponse en chemin : plus rien (sa carte rose est là). Un serveur d'avant qui ne dit pas
+ * l'étape : « Elle s'y met… », comme avant.
+ */
+@Composable
+private fun WorkSlot(vm: TeamsThreadViewModel, underWay: Boolean) {
+    if (underWay) return
+    val work = vm.work
+    val line = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)
+    when {
+        work != null -> WorkLine(work, line) { MikaFace(20.dp) }
+        vm.asked -> Row(line, verticalAlignment = Alignment.CenterVertically) {
+            MikaFace(20.dp)
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(R.string.teams_working), style = MaterialTheme.typography.bodySmall, color = mika.accent)
+        }
+    }
+}
+
+/** Le champ (`.composer` de la maquette) : au-dessus, le message que tu cites ; ✦ Préremplir et ✓ Corriger (ADR 0307)
+ *  à gauche, ton message, envoyer ; dessous, sous quel nom ça part (et le compte des caractères, près de la borne), ou
+ *  « Correction… » pendant que ses fautes se corrigent. [focusAsk] : « Citer » vient d'être choisi — le champ prend la
+ *  main et le clavier monte, comme dans Teams. */
 @Composable
 private fun Composer(
     vm: TeamsThreadViewModel,
@@ -648,6 +693,8 @@ private fun Composer(
     canPrefill: Boolean,
     sender: String,
     onPrefill: () -> Unit,
+    canCorrect: Boolean,
+    onCorrect: () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
     val focus = remember { FocusRequester() }
@@ -666,6 +713,7 @@ private fun Composer(
             IconButton(onClick = onPrefill, enabled = !vm.prefilling, modifier = Modifier.alpha(if (canPrefill) 1f else 0.45f)) {
                 MIcon(R.drawable.ic_m_sparkle, stringResource(R.string.teams_prefill), tint = mika.accent)
             }
+            CorrectIconButton(on = canCorrect, busy = vm.correcting, onClick = onCorrect)
             Box(
                 Modifier.weight(1f).heightIn(min = 48.dp).clip(RoundedCornerShape(24.dp)).background(scheme.surfaceContainerHigh).padding(horizontal = 16.dp, vertical = 12.dp),
                 contentAlignment = Alignment.CenterStart,
@@ -700,11 +748,16 @@ private fun Composer(
         }
         val n = chars(vm.text)
         val count = if (n > TeamsLimits.BODY * 3 / 4) " · " + stringResource(R.string.teams_count, thousands(n), thousands(TeamsLimits.BODY)) else ""
+        val correcting = vm.correcting
         Text(
-            (if (sender.isNotBlank()) stringResource(R.string.teams_sent_as, sender) else stringResource(R.string.teams_sent_as_you)) + count,
+            when {
+                correcting -> stringResource(R.string.correct_busy)
+                sender.isNotBlank() -> stringResource(R.string.teams_sent_as, sender) + count
+                else -> stringResource(R.string.teams_sent_as_you) + count
+            },
             style = MaterialTheme.typography.labelSmall,
-            color = scheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 52.dp, top = 2.dp),
+            color = if (correcting) mika.accent else scheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 100.dp, top = 2.dp),
         )
     }
 }
@@ -721,7 +774,8 @@ private fun CitingCard(m: TeamsMessage, account: TeamsAccount?, now: Long, onCan
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(start = 48.dp, end = 54.dp, bottom = 6.dp)
+            // aligné sur le champ, après ✦ et ✓ (deux boutons de 48 dp)
+            .padding(start = 96.dp, end = 54.dp, bottom = 6.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(scheme.surfaceContainerHigh)
             .drawBehind { drawRect(bar, size = Size(3.dp.toPx(), size.height)) }

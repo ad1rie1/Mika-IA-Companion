@@ -12,6 +12,7 @@ import {
   fetchConversations,
   fetchReplies,
   fetchThread,
+  fetchThreadWork,
   prefill,
   redoReply,
   refuseReply,
@@ -23,6 +24,7 @@ import {
   type TeamsAccount,
   type TeamsMessage,
   type Thread,
+  type ThreadWork,
 } from "../../api/teams";
 import { ofName } from "../../shared/names";
 import { rights } from "../../shared/store";
@@ -32,14 +34,16 @@ import { closeModal, openMenu, openModal, toast, type MenuItem } from "../../she
 import { ico } from "../../shell/icons";
 import type { PaletteEntry } from "../../shell/palette";
 import type { ScreenContext, ScreenDef, ScreenTab, Shell } from "../../shell/shell";
-import { bindCounts, errorText, openAsk, paintCount } from "../mail/compose";
+import { bindCounts, canCorrect, correctField, errorText, openAsk, paintCount } from "../mail/compose";
 import { ago, chars, newNonce, thousands, toFill } from "../mail/format";
 import { dayAndClock } from "../chat/markup";
+import { tickWork, WORK_POLL_MS } from "../../mika/work";
 import { authorLabel, kindLabel, ownAccount, ownBubbles, sentUnder, stillSentHere, UNDER_WAY, withoutSent, type SentHere } from "./format";
 import {
   capsOf,
   conversationRow,
   dock,
+  dockWork,
   extensionChip,
   imageViewer,
   imagesInOrder,
@@ -55,7 +59,6 @@ import {
 } from "./markup";
 
 const REFRESH_MS = 20_000;
-const ASK_POLL_MS = 10_000;
 const ASK_POLL_MAX_MS = 30 * 60_000;
 const MAX_CHARS = TEAMS_LIMITS.body;
 /** Au-delà, l'extension ne s'est pas manifestée depuis trop longtemps pour que ce qui part parte vite. */
@@ -128,6 +131,9 @@ export class TeamsScreen {
   private readonly typed = new Map<string, string>();
   /** Les conversations où on lui a demandé une réponse (et depuis quand). */
   private readonly asked = new Map<string, number>();
+  /** Depuis quand on guette où elle en est, par conversation (ADR 0306) : une demande, ou ce qu'elle prépare
+   *  d'elle-même — à part de `asked`, qui seul dit au champ « on le lui a demandé ». */
+  private readonly watchSince = new Map<string, number>();
   /** Les demandes attendues ici sans réponse au-delà du plafond : on ne les réarme pas (une nouvelle demande, si). */
   private readonly askGaveUp = new Set<string>();
 
@@ -339,7 +345,8 @@ export class TeamsScreen {
       // elle a fini (ou renoncé) : le moteur ne dit plus qu'on le lui a demandé
       if (before?.asked && !t.asked) this.asked.delete(key);
       if (quiet && before && !settled && sameThread(before, t)) {
-        // rien de neuf : la relecture d'une réponse demandée continue
+        // rien de neuf : la relecture d'une réponse demandée continue (où elle en est a pu changer : sa ligne seule)
+        this.paintDock();
         this.watchAsk();
         return;
       }
@@ -614,10 +621,16 @@ export class TeamsScreen {
       sending: this.sending,
       quoting: this.quoting?.conversation === t.key
         ? { author: this.quoting.author, at: this.quoting.at, preview: this.quoting.preview } : null,
+      work: t.work ?? null,
+      correct: canCorrect(),
     };
-    // rien de changé dans ce qu'il montre : le champ reste tel quel (le focus, une saisie en cours de composition)
-    const sig = `${t.key}|${JSON.stringify(view)}`;
-    if (sig === this.dockSig && host.firstElementChild) return;
+    // rien de changé dans ce qu'il montre : le champ reste tel quel (le focus, une saisie en cours de composition) ;
+    // où elle en est (ADR 0306) change à chaque étape : sa ligne se repeint seule, dans sa case
+    const sig = `${t.key}|${JSON.stringify({ ...view, work: null })}`;
+    if (sig === this.dockSig && host.firstElementChild) {
+      this.paintWork(host, view);
+      return;
+    }
     this.dockSig = sig;
     this.keepTyped();
     this.keepingFocus(() => {
@@ -629,6 +642,19 @@ export class TeamsScreen {
         paintCount(input);
       }
     });
+    this.paintWork(host, view);
+  }
+
+  /** Où elle en est ici (ADR 0306), dans sa case au-dessus du champ : repeinte quand l'étape change, son chrono
+   *  court seul (`tickWork`). */
+  private paintWork(host: HTMLElement, view: DockView): void {
+    const slot = $<HTMLElement>("[data-tm-work]", host);
+    if (!slot) return;
+    const sig = JSON.stringify([view.work, view.asked, view.underWay]);
+    if (slot.dataset.sig === sig) return;
+    slot.dataset.sig = sig;
+    slot.innerHTML = dockWork(view);
+    if (view.work && !view.underWay) tickWork();
   }
 
   /** Redessiner sans voler la saisie : le champ qui avait le focus le retrouve, son curseur à sa place. */
@@ -724,36 +750,63 @@ export class TeamsScreen {
 
   // ── Demander, poll ─────────────────────────────────────────────────
 
+  /** Une réponse qu'elle prépare ici, demandée ou d'elle-même : relire où elle en est toutes les deux secondes
+   *  (ADR 0306), sans relire le fil, tant que la discussion reste ouverte ; le fil se relit quand sa réponse arrive,
+   *  ou quand elle a fini sans en rendre. */
   private watchAsk(): void {
     window.clearTimeout(this.askTimer);
     const t = this.thread;
     if (!t) return;
-    if (t.under_way || !t.asked) this.askGaveUp.delete(t.key); // arrivée, ou plus demandée : le plafond s'oublie
+    const busy = t.asked || !!t.work || this.asked.has(t.key);
+    if (t.under_way || !busy) this.askGaveUp.delete(t.key); // arrivée, ou plus demandée : le plafond s'oublie
     if (this.askGaveUp.has(t.key)) return;
-    const since = this.asked.get(t.key) ?? (t.asked ? Date.now() : 0);
-    if (!since || t.under_way) {
+    if (!busy || t.under_way) {
       if (t.under_way) this.asked.delete(t.key);
+      this.watchSince.delete(t.key);
       return;
     }
-    if (!this.asked.has(t.key)) this.asked.set(t.key, since);
+    const since = this.watchSince.get(t.key) ?? this.asked.get(t.key) ?? Date.now();
+    this.watchSince.set(t.key, since);
     const key = t.key;
-    this.askTimer = window.setTimeout(() => {
-      if (this.open !== key) return;
-      if (Date.now() - since > ASK_POLL_MAX_MS) {
-        // elle n'a rien rendu depuis si longtemps : on cesse d'attendre ici, pour de bon (la relecture générale la
-        // verra arriver) — une relecture qui rappelle watchAsk ne le réarme pas
-        this.askGaveUp.add(key);
-        this.asked.delete(key);
-        this.paintDock();
-        return;
-      }
-      if (!this.visible()) {
-        this.watchAsk();
-        return;
-      }
-      // la relecture la réarme tant que rien n'est arrivé, et repeint le champ, ses réponses et les compteurs sinon
+    this.askTimer = window.setTimeout(() => void this.pollWork(key, since), WORK_POLL_MS);
+  }
+
+  private async pollWork(key: string, since: number): Promise<void> {
+    if (this.open !== key) return;
+    if (Date.now() - since > ASK_POLL_MAX_MS) {
+      // elle n'a rien rendu depuis si longtemps : on cesse d'attendre ici, pour de bon (la relecture générale la
+      // verra arriver) — une relecture qui rappelle watchAsk ne le réarme pas
+      this.askGaveUp.add(key);
+      this.asked.delete(key);
+      this.watchSince.delete(key);
+      this.paintDock();
+      return;
+    }
+    if (!this.visible()) {
+      this.watchAsk();
+      return;
+    }
+    let got: ThreadWork;
+    try {
+      got = await fetchThreadWork(key);
+    } catch {
+      if (this.open === key) this.watchAsk(); // une relecture manquée : la suivante
+      return;
+    }
+    const t = this.thread;
+    if (this.open !== key || !t || t.key !== key) return;
+    if (got.under_way || (!got.asked && !got.work)) {
+      // sa réponse est arrivée, ou elle a fini sans en rendre : plus rien à guetter ici ; le fil, ses réponses, le
+      // champ et les compteurs
+      this.asked.delete(key);
+      this.watchSince.delete(key);
       void this.loadThread(true);
-    }, ASK_POLL_MS);
+      return;
+    }
+    t.work = got.work;
+    t.asked = got.asked;
+    this.paintDock();
+    this.watchAsk();
   }
 
   private async prefillHere(): Promise<void> {
@@ -771,9 +824,14 @@ export class TeamsScreen {
         this.body && $(`[data-reply-card="${CSS.escape(got.draft)}"]`, this.body)?.scrollIntoView({ block: "center", behavior: "smooth" });
         return;
       }
-      this.asked.set(t.key, Date.now());
+      const now = Date.now();
+      this.asked.set(t.key, now);
       this.askGaveUp.delete(t.key);
-      toast(got.message === "Elle y travaille déjà." ? got.message : "Demandé : elle prépare une réponse à son prochain moment de travail ; elle arrivera ici.", { mika: true });
+      this.watchSince.delete(t.key); // une nouvelle demande : son plafond repart d'ici
+      // elle s'y met tout de suite (ADR 0306) : sa ligne paraît sans attendre la relecture, qui la corrige
+      t.asked = true;
+      t.work ??= { step: "waiting", label: "", since: now, started: now };
+      toast(got.message === "Elle y travaille déjà." ? got.message : "Demandé : elle s'y met tout de suite ; sa réponse arrivera ici.", { mika: true });
       this.paintDock();
       this.watchAsk();
     } catch (err) {
@@ -956,7 +1014,7 @@ export class TeamsScreen {
     if (kind === "reprendre") {
       openAsk({
         title: "Lui demander de la reprendre",
-        lede: "Celle-ci est refusée ; elle en écrira une autre à son prochain moment de travail, en tenant compte de ce que tu dis.",
+        lede: "Celle-ci est refusée ; elle en écrit une autre tout de suite, en tenant compte de ce que tu dis.",
         label: "Ce qu'il faut changer",
         placeholder: "« plus court », « propose plutôt 16 h »…",
         required: true,
@@ -967,6 +1025,7 @@ export class TeamsScreen {
           const done = await redoReply(r.id, instruction);
           this.asked.set(r.conversation, Date.now());
           this.askGaveUp.delete(r.conversation);
+          this.watchSince.delete(r.conversation);
           await this.afterDecision();
           return done.message;
         },
@@ -1092,6 +1151,11 @@ export class TeamsScreen {
       const k = b.dataset.tm;
       if (k === "envoyer") void this.send();
       if (k === "preremplir") void this.prefillHere();
+      // ADR 0307 : les fautes de ton message, sans changer ses mots (le champ tel qu'il est à l'écran à la fin)
+      if (k === "corriger") {
+        void correctField(() => (this.body ? $<HTMLTextAreaElement>("[data-tm-input]", this.body) : null),
+          b instanceof HTMLButtonElement ? b : null);
+      }
       if (k === "emoji") this.emojis(b);
       if (k === "sans-citation") this.quote("");
       if (k === "reecrire") this.rewrite(b.dataset.pending ?? "");

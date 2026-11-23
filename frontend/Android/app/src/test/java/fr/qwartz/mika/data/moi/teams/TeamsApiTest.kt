@@ -4,6 +4,8 @@ import fr.qwartz.mika.core.MikaJson
 import fr.qwartz.mika.data.auth.Credentials
 import fr.qwartz.mika.data.moi.Levels
 import fr.qwartz.mika.data.moi.MoiApi
+import fr.qwartz.mika.data.moi.Work
+import fr.qwartz.mika.data.moi.WorkSteps
 import fr.qwartz.mika.data.moi.refusalText
 import fr.qwartz.mika.data.net.ServerBase
 import kotlinx.coroutines.Dispatchers
@@ -112,6 +114,37 @@ class TeamsApiTest {
         assertEquals("1790790060000", server.takeRequest().url.queryParameter("before"))
     }
 
+    @Test fun `où elle en est dans le fil - présent, null, ou absent d'un serveur d'avant`() = runBlocking {
+        ok(
+            """{"key":"19:marc","messages":[],"asked":true,"work":{"step":"tool","label":"Relire une de tes conversations Teams",
+               "since":1790000004000,"started":1790000000000,"futur":1}}""",
+        )
+        val t = (api.thread("19:marc") as MoiApi.Result.Ok).value
+        assertEquals(Work(WorkSteps.TOOL, "Relire une de tes conversations Teams", 1_790_000_004_000, 1_790_000_000_000), t.work)
+        ok("""{"key":"19:marc","messages":[],"work":null}""")
+        assertNull((api.thread("19:marc") as MoiApi.Result.Ok).value.work)
+        // un serveur d'avant l'ADR 0306 ne le dit pas
+        ok("""{"key":"19:marc","messages":[]}""")
+        assertNull((api.thread("19:marc") as MoiApi.Result.Ok).value.work)
+    }
+
+    @Test fun `où elle en est se relit par sa route légère, la clé de la conversation passée telle quelle`() = runBlocking {
+        ok("""{"work":{"step":"waiting","label":"","since":5,"started":5},"asked":true,"under_way":false}""")
+        val going = (api.work("lea~19:marc") as MoiApi.Result.Ok).value
+        assertEquals(TeamsWork(Work(WorkSteps.WAITING, "", 5, 5), asked = true, underWay = false), going)
+        val url = server.takeRequest().url
+        assertEquals("/api/moi/teams/work", url.encodedPath)
+        assertEquals("lea~19:marc", url.queryParameter("conversation"))
+        // sa réponse est arrivée : plus d'étape
+        ok("""{"work":null,"asked":false,"under_way":true}""")
+        val arrived = (api.work("19:marc") as MoiApi.Result.Ok).value
+        assertTrue(arrived.underWay)
+        assertNull(arrived.work)
+        // ce qui manque prend son défaut
+        ok("""{}""")
+        assertEquals(TeamsWork(), (api.work("19:marc") as MoiApi.Result.Ok).value)
+    }
+
     @Test fun `un message qui en cite un autre porte sa citation, sans citation null`() = runBlocking {
         ok(
             """{"key":"19:lumen","kind":"group","messages":[
@@ -159,7 +192,7 @@ class TeamsApiTest {
     }
 
     @Test fun `préremplir, demandé, déjà demandé, ou une réponse en chemin`() = runBlocking {
-        ok("""{"ok":true,"message":"Demandé : elle la préparera à son prochain moment de travail.","draft":"","asked":true}""")
+        ok("""{"ok":true,"message":"Demandé : elle s'y met tout de suite.","draft":"","asked":true}""")
         val asked = (api.prefill("t1", key = "cle-2") as MoiApi.Result.Ok).value
         assertTrue(asked.asked)
         val req = server.takeRequest()

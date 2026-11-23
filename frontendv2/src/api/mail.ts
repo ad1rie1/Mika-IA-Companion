@@ -4,6 +4,7 @@
  * ranger, lui demander une réponse, décider de ses brouillons. Les instants sont en millisecondes (0 : jamais).
  */
 import { apiUrl, getJson, MOI, sendForm, sendJson, type Done } from "./moi";
+import type { Work } from "../mika/work";
 
 /**
  * Les bornes des chaînes que l'API reçoit (`app/me/mail.py`, en caractères) : au-delà, elle refuse (400, avec
@@ -149,6 +150,17 @@ export interface MailFull extends Omit<MailRow, "attachments"> {
   /** Une copie reçue ailleurs que dans « Envoyés » (en copie à soi) : on y répond. */
   received?: boolean;
   images: { remote: boolean; shown: boolean };
+  /** Où elle en est d'une réponse à ce mail, en direct (ADR 0306) ; `null` : rien en cours ni demandé ; absent d'un
+   *  moteur qui ne le dit pas. */
+  work?: Work | null;
+}
+
+/** Ce qu'on relit toutes les deux secondes pendant qu'elle y travaille, sans relire le mail (ADR 0306). */
+export interface MailWork {
+  work: Work | null;
+  asked: boolean;
+  /** Son brouillon qui attend, dès qu'il est arrivé ; `""` sinon. */
+  draft: string;
 }
 
 export type DraftState = "attend" | "approuve" | "parti" | "refuse" | "echec";
@@ -231,7 +243,7 @@ export type Gesture = "read" | "unread" | "archive" | "flag" | "unflag" | "trash
 export interface PrefillReply extends Done {
   /** Un brouillon d'elle qui attend déjà pour ce mail : la saisie le reprend. */
   draft: string;
-  /** Elle l'écrira à son prochain moment de travail. */
+  /** Elle s'y met tout de suite (ADR 0306). */
   asked: boolean;
 }
 
@@ -311,6 +323,10 @@ export function forwardMail(ref: string, mail: Outgoing & { attachments: boolean
 
 export function tidy(refs: string[], gesture: Gesture, folder = ""): Promise<Done> {
   return sendJson(`${M}/tidy`, folder ? { refs, gesture, folder } : { refs, gesture });
+}
+
+export function fetchMailWork(ref: string): Promise<MailWork> {
+  return getJson<MailWork>(`${M}/work${query({ ref })}`);
 }
 
 export function prefill(ref: string, instruction = ""): Promise<PrefillReply> {

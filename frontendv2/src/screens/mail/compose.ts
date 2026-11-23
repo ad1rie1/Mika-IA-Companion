@@ -1,15 +1,18 @@
 /**
  * Écrire : les destinataires en puces, proposés depuis ses correspondants (`/mail/contacts?q=`, flèches et Entrée
- * comme dans la maquette), et la fenêtre d'un mail (nouveau, transfert, retouche d'un de ses brouillons).
+ * comme dans la maquette), la fenêtre d'un mail (nouveau, transfert, retouche d'un de ses brouillons), et « Corriger »
+ * (ADR 0307), que le champ de Teams partage.
  */
 import { BackendUnreachableError } from "@web/network/api";
+import { correctText } from "../../api/me";
 import { ApiError } from "../../api/moi";
 import { fetchContacts, MAIL_LIMITS, type Contact, type Person } from "../../api/mail";
+import { me } from "../../shared/store";
 import { $, $$, h } from "../../shell/dom";
 import { closeModal, openModal, toast } from "../../shell/float";
 import { ico } from "../../shell/icons";
 import { addPieces, chars, countLabel, outgoingText, parseAddresses, type OutgoingText, type Piece } from "./format";
-import { chip, composeForm, pieceChips, suggestions, type ComposeForm } from "./markup";
+import { chip, composeForm, correctButton, pieceChips, suggestions, type ComposeForm } from "./markup";
 
 // ── Les destinataires ────────────────────────────────────────────────
 
@@ -64,6 +67,75 @@ const FIELD_LABEL: Record<string, string> = {
 };
 
 /** Le compte d'un texte borné (`maxlength`), dans le `[data-limit]` de son cadre : repeint à chaque frappe. */
+// ── Corriger (ADR 0307) ──────────────────────────────────────────────
+
+/** « Corriger » marche-t-il ? Un modèle est donné au rôle `correct` (`GET /api/moi` → `correct`). */
+export function canCorrect(): boolean {
+  return me.value?.correct === true;
+}
+
+/** Ce que dit « Corriger » une fois fait : combien de fautes, ou aucune. */
+export function correctedText(changes: number): string {
+  if (!changes) return "Aucune faute : ton texte reste tel quel.";
+  return changes > 1 ? `${changes} fautes corrigées.` : "1 faute corrigée.";
+}
+
+function put(t: HTMLTextAreaElement, text: string): void {
+  t.value = text;
+  // ce que l'écran suit à la frappe (le compte, ce qui est tapé) le voit comme une saisie
+  t.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+/** « Corriger » : les fautes du texte du champ, corrigées sans changer ses mots (ADR 0307). Le texte corrigé remplace
+ *  le tien aussitôt, et le toast offre « Annuler » ; rien n'est posé si tu as continué d'écrire pendant ce temps.
+ *  `field` rend le champ tel qu'il est à l'écran (il a pu être redessiné pendant l'appel). */
+export async function correctField(field: () => HTMLTextAreaElement | null, button: HTMLButtonElement | null): Promise<void> {
+  const start = field();
+  if (!start) return;
+  const before = start.value;
+  if (!before.trim()) {
+    toast("Rien à corriger : le champ est vide.", { ico: "info" });
+    return;
+  }
+  const label = button?.querySelector(".lbl");
+  if (button) {
+    button.disabled = true;
+    button.setAttribute("aria-busy", "true");
+  }
+  if (label) label.textContent = "Correction…";
+  try {
+    const got = await correctText(before);
+    const now = field();
+    if (!now) return;
+    if (now.value !== before) {
+      toast("Tu as continué d'écrire : la correction n'a pas été posée.", { ico: "info" });
+      return;
+    }
+    if (!got.changes) {
+      toast(correctedText(0));
+      return;
+    }
+    put(now, got.text);
+    toast(correctedText(got.changes), {
+      action: {
+        label: "Annuler",
+        run: () => {
+          const t = field();
+          if (t && t.value === got.text) put(t, before);
+        },
+      },
+    });
+  } catch (err) {
+    toast(errorText(err), { ico: "alert" });
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.removeAttribute("aria-busy");
+    }
+    if (label) label.textContent = "Corriger";
+  }
+}
+
 export function paintCount(t: HTMLTextAreaElement): void {
   const out = t.closest<HTMLElement>(".composer, [data-compose]")?.querySelector<HTMLElement>("[data-limit]");
   const max = Number(out?.dataset.limit) || 0;
@@ -344,7 +416,7 @@ export function openCompose(opts: ComposeOptions): HTMLElement {
     title: opts.title,
     size: "wide",
     body: composeForm(opts),
-    foot: `<span class="grow"></span><button class="btn" type="button" data-close>Annuler</button>
+    foot: `${correctButton("data-corriger", canCorrect())}<span class="grow"></span><button class="btn" type="button" data-close>Annuler</button>
       <button class="btn primary" type="button" data-envoyer-mail>${ico(opts.kind === "edit" ? "check" : "send", "sm")}${h(opts.submitLabel)}</button>`,
   });
   bindRecipients(el);
@@ -357,6 +429,8 @@ export function openCompose(opts: ComposeOptions): HTMLElement {
   };
   el.addEventListener("click", (e) => {
     const t = e.target as Element;
+    const fix = t.closest<HTMLButtonElement>("[data-corriger]");
+    if (fix) void correctField(() => $<HTMLTextAreaElement>("[data-corps]", form), fix);
     if (t.closest("[data-cc]")) {
       $<HTMLElement>("[data-ccrow]", el)!.hidden = false;
       t.closest("[data-cc]")!.remove();

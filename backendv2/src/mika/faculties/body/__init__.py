@@ -619,8 +619,10 @@ def _night(s: BodyState, frame: Frame, row: RowView) -> Modulation:
     """Elle ne prend pas la parole ni ne travaille en dormant ; tirée du
     sommeil en pleine nuit, pas davantage (elle va se rendormir) ; juste
     réveillée le matin, pas encore ; fatiguée, plus rarement. Une raison qui
-    passe à elle seule la barre de réveil (un rappel urgent) passe outre."""
-    if row.strongest >= c.WAKE_BAR:
+    passe à elle seule la barre de réveil (un rappel urgent) passe outre, et
+    ce que quelqu'un attend aussi (« Préremplir avec Mika », ADR 0306) : ce
+    n'est pas une envie à elle, et on l'attend maintenant."""
+    if row.strongest >= c.WAKE_BAR or row.awaited:
         return Modulation()
     return gate(s, frame)
 

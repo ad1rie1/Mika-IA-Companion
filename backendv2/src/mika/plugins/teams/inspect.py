@@ -673,7 +673,7 @@ def _redo(s: TeamsState, frame: Frame, args: RedoArgs, ctx: Any) -> Done:
                                 instruction=Content.of(args.instruction.strip(), level=int(Sensitivity.PERSONAL)),
                                 about=(ctx.by,) if ctx.by else (), account=seen.account)
     return Done(drafts=(asked,), decide=(Decision(seen.proposal, False, note=f"à reprendre : {args.instruction}"[:500]),),
-                message="Demandé : elle la reprendra à son prochain moment de travail.",
+                message="Demandé : elle la reprend tout de suite.",
                 go=view_link("reponses"))
 
 
@@ -692,7 +692,7 @@ def _ask(s: TeamsState, frame: Frame, args: AskArgs, ctx: Any) -> Done:
     asked = c.DRAFT_ASKED.draft(message=m.ref, conversation=m.conversation, by=ctx.by,
                                 instruction=Content.of(instruction, level=int(Sensitivity.PERSONAL)) if instruction
                                 else None, about=(ctx.by,) if ctx.by else (), account=m.account)
-    return Done(drafts=(asked,), message="Demandé : elle la préparera à son prochain moment de travail.",
+    return Done(drafts=(asked,), message="Demandé : elle s'y met tout de suite.",
                 go=view_link("reponses"))
 
 

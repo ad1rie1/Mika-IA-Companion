@@ -496,6 +496,10 @@ body.mika-en-grand .sp-static { display: block; }
 .toast .ico { color: color-mix(in srgb, var(--bg) 70%, var(--accent)); }
 .toast.mika .ico { color: var(--mika); }
 .toast.out { opacity: 0; transform: translateY(6px); transition: opacity .2s, transform .2s; }
+/* un geste dans le toast (« Annuler ») : un lien clair sur le fond sombre */
+.toast-act { margin-left: 4px; padding: 2px 8px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit;
+  font-weight: 650; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.toast-act:hover, .toast-act:focus-visible { background: color-mix(in srgb, var(--bg) 18%, transparent); }
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
 
 /* ── Ce qu'elle fait ──────────────────────────────────────────────────── */

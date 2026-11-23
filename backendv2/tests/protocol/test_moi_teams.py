@@ -20,6 +20,7 @@ from mika.plugins.teams import ANSWERED, WAITING, WRITTEN, TeamsParams
 from mika.ports.teams import Draft as TeamsDraft
 from mika.ports.teams import conversation_key
 from mika.runtime.operations import perform
+from mika.runtime.pipeline import TOOL, EpisodeStep
 from mika.vocab.episodes import Kind, task_target
 from tests.protocol.test_moi_mail import API, append, journal, login, post, second_person
 from tests.protocol.test_teams_web import DM, batch, headers, new_key
@@ -213,6 +214,45 @@ def test_a_read_share_sees_no_ask_and_an_ask_she_gave_up_is_no_longer_said(world
     assert client.get(API + f"/teams/thread?conversation={DM}").json()["asked"] is False
     again = post(client, "/teams/prefill", {"message": message.ref}).json()
     assert again["asked"] and again["message"] != "Elle y travaille déjà."  # « Préremplir » la relance
+
+
+def test_the_thread_follows_where_she_is_with_a_reply_asked(world, monkeypatch):  # noqa: F811
+    """« Préremplir avec Mika » se suit en direct (ADR 0306) : demandée, elle s'y met depuis la demande ; sa tâche en
+    cours, elle réfléchit ou tel outil tourne, depuis tel instant (ce que le pipeline tient en mémoire ; sans lui, sa
+    trace au journal : elle réfléchit depuis son départ) ; finie, plus rien. Qui ne fait que lire le compte n'en voit
+    rien."""
+    client, live, _ = with_teams(world)
+    message = first_message(client, live)
+
+    def work():
+        got = client.get(API + f"/teams/thread?conversation={DM}").json()["work"]
+        light = client.get(API + f"/teams/work?conversation={DM}").json()
+        assert light["work"] == got, "la relecture légère dit la même chose que le fil"
+        return got
+
+    assert work() is None
+    assert client.get(API + f"/teams/work?conversation={DM}").json() == {"work": None, "asked": False,
+                                                                           "under_way": False}
+    assert post(client, "/teams/prefill", {"message": message.ref}).json()["asked"]
+    [ask] = journal(live, teams_c.DRAFT_ASKED)
+    assert work() == {"step": "waiting", "label": "", "since": ask.at // 1000, "started": ask.at // 1000}
+    append(client, live, [rt.EPISODE_STARTED.draft(kind=Kind.TASK, target=task_target("teams", message.ref))])
+    [started] = journal(live, rt.EPISODE_STARTED)
+    assert work() == {"step": "thinking", "label": "", "since": started.at // 1000, "started": started.at // 1000}
+    later = started.at + 3_000_000
+    monkeypatch.setattr(live.kernel.runner, "step_of", lambda eid: EpisodeStep(
+        TOOL, started.at, later, "teams_read", "Relire une de tes conversations Teams") if eid == "moi" else None)
+    assert work() == {"step": "tool", "label": "Relire une de tes conversations Teams", "since": later // 1000,
+                      "started": started.at // 1000}
+    lea = second_person(client, live)
+    client.portal.call(live.kernel.set_params, "teams", TeamsParams(shares={"principal": {"personne:" + lea: "lire"}}))
+    login(client, "lea")
+    assert work() is None  # l'affaire d'Adrien
+    login(client, "adrien")
+    append(client, live, [rt.EPISODE_ENDED.draft(kind=Kind.TASK, target=task_target("teams", message.ref),
+                                                 outcome="done")])
+    monkeypatch.undo()
+    assert work()["step"] == "waiting"  # un essai qui n'a rien donné : la demande vit, elle s'y remet
 
 
 def test_an_unchecked_account_takes_no_request_and_says_none_is_under_way(world):  # noqa: F811

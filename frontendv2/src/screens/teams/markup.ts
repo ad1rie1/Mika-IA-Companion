@@ -6,11 +6,12 @@
 import { h, initials } from "../../shell/dom";
 import { ico } from "../../shell/icons";
 import { mikaAvatar } from "../../mika/face";
+import { workLine, type Work } from "../../mika/work";
 import { clock, dayAndClock, shortWhen } from "../chat/markup";
 import { TEAMS_LIMITS, teamsImageUrl, type Conversation, type Reply, type TeamsAccount, type TeamsImage, type TeamsMessage, type TeamsQuote, type Thread } from "../../api/teams";
 import { pageHtml } from "../projets/docmd";
 import { ago, avatar, caps, firstName, levelTag, markToFill, type Caps } from "../mail/format";
-import { countSpan } from "../mail/markup";
+import { correctButton, countSpan } from "../mail/markup";
 import { ofName } from "../../shared/names";
 import {
   authorLabel,
@@ -265,12 +266,16 @@ export interface DockView {
   level: string;
   /** Elle prépare une réponse demandée. */
   asked: boolean;
+  /** Où elle en est, en direct (ADR 0306) : l'étape et son chrono, sur une ligne ; `null` : rien en cours. */
+  work?: Work | null;
   /** Une réponse d'elle est en chemin ici. */
   underWay: boolean;
   /** Le dernier message reçu (à quoi « Préremplir » répond). */
   canPrefill: boolean;
   /** Pourquoi elle n'y prépare rien (Teams coupé, ce compte décoché) : « Préremplir » le dit, éteint. */
   prefillOff?: string;
+  /** « Corriger » marche (un modèle est donné au rôle `correct`, ADR 0307) ; sinon éteint, il dit pourquoi. */
+  correct?: boolean;
   /** L'extension ne s'est pas manifestée depuis longtemps (ou jamais). */
   quiet: string;
   sending: boolean;
@@ -279,8 +284,16 @@ export interface DockView {
   now?: number;
 }
 
+/** Où elle en est ici (ADR 0306) : sa ligne seule, que l'écran repeint dans sa case (`data-tm-work`) à chaque étape
+ *  sans redessiner le champ ; un moteur qui ne le dit pas : « elle s'y met », sans chrono. */
+export function dockWork(v: Pick<DockView, "asked" | "work" | "underWay" | "now">): string {
+  if (v.underWay) return "";
+  if (v.work) return workLine(v.work, v.now ?? Date.now(), "tm-asked");
+  return v.asked ? `<div class="tm-asked">${mikaAvatar("xs")}<span>Elle s'y met… sa réponse arrivera ici, dans la discussion.</span></div>` : "";
+}
+
 export function dock(v: DockView): string {
-  const asked = v.asked && !v.underWay ? `<div class="tm-asked">${mikaAvatar("xs")}<span>Elle s'y met… sa réponse arrivera ici, dans la discussion.</span></div>` : "";
+  const asked = `<div class="tm-work" data-tm-work role="status">${dockWork(v)}</div>`;
   const quiet = v.quiet ? `<div class="tm-quiet">${ico("plug", "xs")}<span>${h(v.quiet)}</span></div>` : "";
   if (!v.caps.write) {
     const text = v.level === "preparer"
@@ -293,7 +306,7 @@ export function dock(v: DockView): string {
   return `${asked}${quiet}<div class="composer tm-cmp">${quoting}
     <textarea rows="2" data-tm-input placeholder="${v.title.trim() ? `Répondre dans « ${h(v.title.trim())} »…` : "Répondre…"}" aria-label="Ton message" maxlength="${TEAMS_LIMITS.body}"></textarea>
     <div class="cmp-bar"><button class="btn icon ghost sm" type="button" data-tm="emoji" title="Emojis">${ico("smile")}</button>
-      <button class="btn sm mika" type="button" data-tm="preremplir"${v.canPrefill ? "" : ` disabled title="${h(v.prefillOff || "Aucun message reçu à quoi répondre")}"`}>${ico("sparkle", "sm")}<span class="lbl">Préremplir avec Mika</span></button>
+      <button class="btn sm mika" type="button" data-tm="preremplir"${v.canPrefill ? "" : ` disabled title="${h(v.prefillOff || "Aucun message reçu à quoi répondre")}"`}>${ico("sparkle", "sm")}<span class="lbl">Préremplir avec Mika</span></button>${correctButton('data-tm="corriger"', !!v.correct)}
       <span class="grow"></span>${countSpan("", TEAMS_LIMITS.body)}<span class="small muted cmp-hint">${ico("external", "xs")}partira par l'extension, dans Teams, en ton nom</span>
       <button class="btn sm primary" type="button" data-tm="envoyer"${v.sending ? " disabled" : ""}>${ico("send", "sm")}<span class="lbl">Envoyer</span></button></div></div>`;
 }

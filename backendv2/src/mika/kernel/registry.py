@@ -68,12 +68,15 @@ class CompositionError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class ArbitrationPolicy:
-    """Seuils (log-odds) et taux maximaux (par seconde) par type d'épisode."""
+    """Seuils (log-odds) et taux maximaux (par seconde) par type d'épisode ; ``awaited_rate`` : le taux maximal d'une
+    ligne que quelqu'un attend (ADR 0306), quel que soit son type — nul par défaut, comme ceux des types : une
+    politique vide ne déclenche rien."""
 
     thresholds: Mapping[str, float] = field(default_factory=dict)
     max_rates: Mapping[str, float] = field(default_factory=dict)
     aging_per_hour: Mapping[str, float] = field(default_factory=dict)
     top_k: int = 5
+    awaited_rate: float = 0.0
 
 
 class Registry:

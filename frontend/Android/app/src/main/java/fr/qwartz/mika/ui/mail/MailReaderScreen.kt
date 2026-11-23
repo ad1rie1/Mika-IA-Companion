@@ -29,6 +29,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -57,6 +58,9 @@ import fr.qwartz.mika.data.moi.Levels
 import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.MoiDates
 import fr.qwartz.mika.data.moi.Tone
+import fr.qwartz.mika.data.moi.WORK_POLL_MS
+import fr.qwartz.mika.data.moi.Work
+import fr.qwartz.mika.data.moi.WorkTurn
 import fr.qwartz.mika.data.moi.caps
 import fr.qwartz.mika.data.moi.map
 import fr.qwartz.mika.data.moi.mail.KnowsState
@@ -82,7 +86,11 @@ import fr.qwartz.mika.data.moi.mail.toLine
 import fr.qwartz.mika.data.moi.mail.triageNote
 import fr.qwartz.mika.data.moi.mail.voiceLabel
 import fr.qwartz.mika.data.moi.ofName
+import fr.qwartz.mika.data.moi.watchWork
+import fr.qwartz.mika.data.moi.workGaveUp
+import fr.qwartz.mika.data.moi.workTurn
 import fr.qwartz.mika.ui.Route
+import fr.qwartz.mika.ui.components.WorkLine
 import fr.qwartz.mika.ui.components.rememberNow
 import fr.qwartz.mika.ui.shell.BarAction
 import fr.qwartz.mika.ui.shell.BarMenu
@@ -110,11 +118,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.UUID
 
-/** Une réponse demandée : relire ses brouillons à ce rythme, tant que la liseuse reste sur le mail… */
-private const val ASK_POLL_MS = 10_000L
-/** …et au plus si longtemps (elle travaille à son prochain moment, qui peut tarder). */
-private const val ASK_POLL_MAX_MS = 30 * 60_000L
-
 /** Ce que la liseuse demande à son écran : revenir à la liste, ouvrir son brouillon. */
 sealed interface ReaderOrder {
     data object Back : ReaderOrder
@@ -123,7 +126,8 @@ sealed interface ReaderOrder {
 
 /**
  * La liseuse d'un mail (`Route.MailMessage`) : le mail entier, ses boîtes (son niveau, quand il devient lu), et son
- * brouillon pour ce mail s'il y en a un. Les gestes de « ranger » se disent à la liste ([MailChanges]). Le modèle sert
+ * brouillon pour ce mail s'il y en a un, où elle en est d'une réponse qu'elle y prépare (ADR 0306, relu toutes les deux
+ * secondes). Les gestes de « ranger » se disent à la liste ([MailChanges]). Le modèle sert
  * tous les mails de la session : un geste qui répond après qu'on a changé de mail ne pose rien sur le suivant, et ses
  * ordres ne suivent que l'écran de la visite où il a commencé.
  */
@@ -140,6 +144,13 @@ class MailReaderViewModel(deps: MailDeps) : MailScreenModel(deps) {
     /** Une réponse demandée, pas encore écrite (« Elle s'y met… »). */
     var asked by mutableStateOf(false)
         private set
+    /** Où elle en est d'une réponse à ce mail (ADR 0306) ; `null` : rien en cours. */
+    var work by mutableStateOf<Work?>(null)
+        private set
+    /** Guettée sans réponse au-delà du plafond : on cesse de relire où elle en est (une nouvelle demande, si). */
+    private var gaveUp by mutableStateOf(false)
+    /** Depuis quand on guette (0 : pas encore). */
+    private var watchSince = 0L
     var busy by mutableStateOf(false)
         private set
     /** Sa mise en page (`/mail/frame`), pour un mail HTML ; `null` : pas de HTML, ou pas encore demandée. */
@@ -169,6 +180,9 @@ class MailReaderViewModel(deps: MailDeps) : MailScreenModel(deps) {
         mail = Load.Loading
         draft = null
         asked = false
+        work = null
+        gaveUp = false
+        watchSince = 0L
         frameJob?.cancel()
         frame = null
         load(quiet = false)
@@ -192,6 +206,7 @@ class MailReaderViewModel(deps: MailDeps) : MailScreenModel(deps) {
             loadFrame(m)
             val her = m.her
             asked = her?.asked == true && her.draft.isBlank()
+            work = m.work
             draft = her?.draft?.takeIf { it.isNotBlank() }?.let { findDraft(it) }
         }
     }
@@ -316,7 +331,7 @@ class MailReaderViewModel(deps: MailDeps) : MailScreenModel(deps) {
     }
 
     /** « Préremplir avec Mika » : un brouillon qui attend déjà s'ouvre (si l'écran de ce mail est encore là) ; sinon
-     *  elle l'écrira. */
+     *  elle s'y met tout de suite (ADR 0306) — sa ligne paraît aussitôt, la relecture suivante la corrige. */
     fun prefill(askedText: String) {
         val m = full ?: return
         if (busy) return
@@ -332,7 +347,13 @@ class MailReaderViewModel(deps: MailDeps) : MailScreenModel(deps) {
                         say(got.value.message)
                         orders.send(v, ReaderOrder.OpenDraft(id))
                     } else {
-                        if (ref == m.ref) asked = true
+                        if (ref == m.ref) {
+                            val at = deps.now()
+                            asked = true
+                            if (work == null) work = Work.waiting(at)
+                            gaveUp = false
+                            watchSince = at
+                        }
                         say(if (got.value.message == ALREADY) got.value.message else askedText)
                     }
                 }
@@ -342,16 +363,42 @@ class MailReaderViewModel(deps: MailDeps) : MailScreenModel(deps) {
         }
     }
 
-    /** Relit ses brouillons : sa réponse est-elle arrivée ? */
-    suspend fun checkAsked(arrived: String): Boolean {
+    /** On guette où elle en est : une réponse demandée, ou qu'elle prépare d'elle-même, sans brouillon encore. */
+    val watching: Boolean get() = full != null && watchWork(asked, work, arrived = draft != null, gaveUp = gaveUp)
+
+    /**
+     * Où elle en est (ADR 0306), relu toutes les deux secondes tant qu'on guette ([watching]), sans relire le mail : son
+     * brouillon arrivé, il paraît ici ([arrived] le dit) ; plus rien de demandé ni d'en cours, on cesse ; sinon seule sa
+     * ligne change. Au-delà du plafond, on cesse de guetter ; une relecture manquée attend la suivante.
+     */
+    suspend fun pollWork(arrived: String) {
+        if (!watching) return
         val r = ref
-        val d = (api.drafts() as? MoiApi.Result.Ok)?.value?.firstOrNull { it.inReplyTo == r && it.waiting } ?: return false
-        if (r != ref) return true
-        draft = d
-        asked = false
-        say(arrived)
-        MailChanges.tell(MailChanges.Change.Drafts)
-        return true
+        if (watchSince == 0L) watchSince = deps.now()
+        if (workGaveUp(watchSince, deps.now())) {
+            gaveUp = true
+            return
+        }
+        val got = (api.work(r) as? MoiApi.Result.Ok)?.value ?: return
+        if (r != ref) return
+        when (workTurn(arrived = got.draft.isNotBlank(), asked = got.asked, work = got.work)) {
+            WorkTurn.ARRIVED -> {
+                // ses brouillons illisibles : la relecture suivante le retrouvera
+                val d = findDraft(got.draft) ?: return
+                if (r != ref) return
+                draft = d
+                asked = false
+                work = null
+                say(arrived)
+                MailChanges.tell(MailChanges.Change.Drafts)
+            }
+            WorkTurn.ENDED -> {
+                // elle a fini sans en rendre, ou y a renoncé : plus rien n'est en cours ici
+                asked = false
+                work = null
+            }
+            WorkTurn.GOING -> work = got.work
+        }
     }
 
     private companion object {
@@ -396,15 +443,18 @@ fun MailReaderScreen(graph: AppGraph, ref: String) {
             vm.markRead()
         }
     }
-    // une réponse demandée : ses brouillons se relisent jusqu'à ce qu'elle arrive
+    // où elle en est d'une réponse (ADR 0306) : relu toutes les deux secondes tant qu'on guette, l'app au premier plan ;
+    // l'écran ne se redessine que quand on commence ou cesse de guetter, la ligne seule à chaque étape
     val arrived = stringResource(R.string.mail_prefill_arrived)
-    LaunchedEffect(ref, vm.asked) {
-        if (!vm.asked) return@LaunchedEffect
-        var waited = 0L
-        while (waited < ASK_POLL_MAX_MS) {
-            delay(ASK_POLL_MS)
-            waited += ASK_POLL_MS
-            if (vm.checkAsked(arrived)) break
+    val watching by remember(vm) { derivedStateOf { vm.watching } }
+    val working by remember(vm) { derivedStateOf { vm.work != null } }
+    LaunchedEffect(ref, watching) {
+        if (!watching) return@LaunchedEffect
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                delay(WORK_POLL_MS)
+                vm.pollWork(arrived)
+            }
         }
     }
 
@@ -457,6 +507,8 @@ fun MailReaderScreen(graph: AppGraph, ref: String) {
                 boxes = vm.boxes?.boxes.orEmpty(),
                 draft = vm.draft,
                 asked = vm.asked,
+                working = working,
+                work = { vm.work },
                 canAnswer = canAnswer,
                 graph = graph,
                 html = ReaderHtml(
@@ -532,6 +584,8 @@ private fun ReaderBody(
     boxes: List<MailBox>,
     draft: MailDraft?,
     asked: Boolean,
+    working: Boolean,
+    work: () -> Work?,
     canAnswer: Boolean,
     graph: AppGraph,
     html: ReaderHtml,
@@ -596,7 +650,7 @@ private fun ReaderBody(
             )
         }
         // ce qu'elle en sait (en rose), et où en est son tri
-        if (knowsShown(her, m.triage, asked)) {
+        if (knowsShown(her, m.triage, asked || working)) {
             Surface(
                 shape = RoundedCornerShape(16.dp),
                 color = mika.soft,
@@ -634,10 +688,7 @@ private fun ReaderBody(
                         Gap(6.dp)
                         Text(stringResource(triageNoteText(note)), style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
                     }
-                    if (asked && draft == null) {
-                        Gap(6.dp)
-                        Text(stringResource(R.string.mail_her_working), style = MaterialTheme.typography.bodySmall, color = mika.accent)
-                    }
+                    if (draft == null) ReaderWork(asked, work)
                 }
             }
         }
@@ -675,6 +726,26 @@ private fun ReaderBody(
                 onClick = { onDraft(draft.id) },
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
+        }
+    }
+}
+
+/**
+ * Où elle en est d'une réponse à ce mail (ADR 0306), au bas de « Ce qu'elle en sait » : l'étape et son chrono, sur une
+ * ligne. Elle seule lit [work] : quand l'étape change, la liseuse (le mail, sa mise en page) ne se redessine pas. Un
+ * serveur d'avant qui ne dit pas l'étape : « Elle s'y met… », comme avant.
+ */
+@Composable
+private fun ReaderWork(asked: Boolean, work: () -> Work?) {
+    val w = work()
+    when {
+        w != null -> {
+            Gap(6.dp)
+            WorkLine(w, Modifier.fillMaxWidth())
+        }
+        asked -> {
+            Gap(6.dp)
+            Text(stringResource(R.string.mail_her_working), style = MaterialTheme.typography.bodySmall, color = mika.accent)
         }
     }
 }

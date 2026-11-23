@@ -85,10 +85,21 @@ def goal_target(goal: int) -> str:
 #: La cible d'une tâche (``Kind.TASK``) : ``task:<faculté>:<objet>`` (``task:email:perso:<id@x>``).
 #: Personne ne l'écoute non plus.
 TASK_PREFIX = "task:"
+#: ce qu'on lui demande se fait tout de suite tant qu'on l'attend : une demi-heure, comme les clients qui la suivent
+#: (ADR 0306) ; plus vieille, elle redevient une tâche ordinaire (sa file, son sommeil)
+AWAITED_FOR_US = 30 * 60 * 1_000_000
+#: la garde d'un épisode supplanté sur son bail par un épisode de premier plan (``runtime.pipeline``)
+PREEMPTION_GUARD = "préemption"
 
 
 def task_target(owner: str, key: str) -> str:
     return f"{TASK_PREFIX}{owner}:{key}"
+
+
+def gave_way(outcome: str, guard: str | None = None) -> bool:
+    """Un épisode qui a cédé la place à ce qu'on attendait (préempté dans sa voie, ou supplanté sur son bail par le
+    premier plan, ADR 0306) : ce n'est pas un essai qu'il a fait — une tâche le retentera."""
+    return outcome == Outcome.PREEMPTED or (outcome == Outcome.SUPERSEDED and guard == PREEMPTION_GUARD)
 
 
 def task_of(target: str | None) -> tuple[str, str] | None:
@@ -168,6 +179,9 @@ class Role(enum.StrEnum):
     #: écrire son caractère d'après sa matrice (ADR 0139), une fois par tempérament ; retombe sur la réponse (il faut
     #: un modèle qui écrit bien)
     CHARACTER = "character"
+    #: corriger les fautes d'un texte que la personne écrit, sans en changer les mots (« Corriger », Mail et Teams,
+    #: ADR 0307) ; sans repli : le bouton reste éteint tant qu'on ne lui donne pas de modèle
+    CORRECT = "correct"
 
 
 VOICE_ROLES = frozenset({Role.REPLY, Role.INITIATIVE, Role.STEP, Role.MURMUR, Role.JOURNAL, Role.DREAM,
@@ -186,10 +200,11 @@ FALLBACKS = {
     Role.EXTRACT: Role.REPLY, Role.CAPTION: Role.REPLY,
 }
 #: Les rôles facultatifs : sans repli (hors de ``FALLBACKS``), ils ne servent que si l'opératrice leur donne un modèle.
-#: Sans modèle, la passe qu'ils servent ne se fait pas, et aucun appel n'échoue : chacun est gardé par
-#: ``serving(rôle)`` (``runtime/second_pass.py``), et la parole part telle quelle (ADR 0140). Seule la console les
-#: lit, pour dire un tel rôle « coupé », par choix, et non « sans fournisseur » en rouge.
-OPTIONAL_ROLES = frozenset({Role.POLISH})
+#: Sans modèle, ce qu'ils servent ne se fait pas, et aucun appel n'échoue : chacun est gardé par ``serving(rôle)`` —
+#: la seconde passe (``runtime/second_pass.py`` : la parole part telle quelle, ADR 0140), « Corriger » (éteint dans
+#: Mail et Teams, ``app/me/writing.py``, ADR 0307). La console les dit « coupés », par choix, et non « sans
+#: fournisseur » en rouge.
+OPTIONAL_ROLES = frozenset({Role.POLISH, Role.CORRECT})
 
 #: Le rôle d'un essai de la console (« Rejouer avec… ») : le prompt gardé d'un épisode renvoyé à un fournisseur
 #: nommé. Hors de ``Role`` : il ne se route pas (le fournisseur est choisi à l'appel), ne parle pas en son nom (pas

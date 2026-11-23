@@ -155,3 +155,10 @@ a.msg-file:hover { text-decoration: none; background: var(--tint); }
   .ap-links .ap-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ap-links[aria-expanded="false"] ~ .approval.link { display: none; }
 }
+
+/* ── Où elle en est (ADR 0306) ────────────────────────────────────────── */
+/* « Préremplir avec Mika » : au-dessus de la saisie (Teams) ou dans « Ce qu'elle en sait » (Mail), une seule ligne —
+   l'étape et son chrono (mika/work.ts). Un libellé d'outil trop long se coupe, le chrono reste. */
+.work-line { min-width: 0; }
+.work-line .work-step { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.work-line .work-clock { flex: none; font-variant-numeric: tabular-nums; font-weight: 450; color: var(--muted); }

@@ -58,7 +58,7 @@ from mika.kernel.state import FrozenDict
 from mika.ports.mail import split_ref
 from mika.vocab.access import PERSON, SHARE_PREPARE, SHARE_READ, SHARE_USE
 from mika.vocab.canals import Canals
-from mika.vocab.episodes import Kind, task_of
+from mika.vocab.episodes import Kind, gave_way, task_of
 from mika.vocab.ownership import OWNED as OWNED
 from mika.vocab.ownership import SHARED as SHARED
 from mika.vocab.ownership import best_handle, must_approve, owns_one, reach, shared_with
@@ -164,8 +164,8 @@ class EmailParams(BaseModel):
              "seuil des tâches (8).")] = 8.5
     asked_evidence: Annotated[float, Knob(
         label="Quand on le lui demande", group="Brouillons", lo=8.0, hi=14.0, step=0.5,
-        help="La preuve d'une réponse qu'un opérateur lui demande de rédiger (endormie, elle la fera au réveil).")] \
-        = 12.0
+        help="La preuve d'une réponse qu'on lui demande de rédiger (« Préremplir ») : quelqu'un l'attend, "
+             "elle s'y met en une ou deux secondes, même endormie (ADR 0306).")] = 12.0
     draft_attempts_max: Annotated[int, Knob(
         label="Essais par mail", group="Brouillons", lo=1, hi=5,
         help="Si une tâche ne donne pas de brouillon, elle ne réessaie pas plus que ceci pour le même mail.")] = 2
@@ -295,7 +295,7 @@ class PollAsked(Payload):
 #: v6 : une réponse partie remplit la demande d'en écrire une, et se garde sur son mail (``Seen.replied``, ADR 0188)
 #: ``background_from`` (retiré le 2026-10-28) : les mails se taisaient en réponse quand le ton de la personne était
 #: lourd — une décision de comportement ; elle voit ce qui compte, et juge
-EMAIL = Faculty("email", state=EmailState, init=lambda p: EmailState(), params=EmailParams, state_version=6,
+EMAIL = Faculty("email", state=EmailState, init=lambda p: EmailState(), params=EmailParams, state_version=7,
                 retired_params=("background_from",))
 EMAIL.declare(*c.ALL)
 EMAIL.bundle(BUNDLE, phrase("email.bundle"))
@@ -423,7 +423,13 @@ def _announced(s: EmailState, e, cx) -> EmailState:
 @EMAIL.reducer(rt.EPISODE_ENDED, reads=[agency_c.RENOUNCED])
 def _settled(s: EmailState, e, cx) -> EmailState:
     """Une annonce qui finit sans avoir rien dit : le mail reste à dire. Un silence choisi ou une panne compte
-    comme un essai ; une annonce devancée, interrompue, ou dont elle s'est ravisée, non (``agency.tried``)."""
+    comme un essai ; une annonce devancée, interrompue, ou dont elle s'est ravisée, non (``agency.tried``). Une tâche
+    de rédaction qui a cédé la place à ce qu'on attendait (ADR 0306) n'a pas fait d'essai : il lui est rendu."""
+    d = e.data
+    found = task_of(d.target) if d.kind == Kind.TASK else None
+    if found is not None and found[0] == "email" and gave_way(d.outcome, d.guard):
+        n = s.attempts.get(found[1], 0)
+        return replace(s, attempts=s.attempts.set(found[1], n - 1) if n > 1 else s.attempts.delete(found[1]))
     opening = s.openings.get(e.correlation)
     if opening is None:
         return s

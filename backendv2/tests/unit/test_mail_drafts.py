@@ -27,6 +27,7 @@ from dataclasses import replace
 from mika.app import composition
 from mika.app.mindport import KernelPort
 from mika.contracts import attention as attention_c
+from mika.contracts import body as body_c
 from mika.contracts import email as email_c
 from mika.contracts import runtime as rt
 from mika.inspector import render
@@ -51,7 +52,7 @@ from mika.runtime.inspection import Inspection
 from mika.runtime.operations import perform
 from mika.sim.clock import SimClock, run_virtual
 from mika.sim.outside import FakeMail
-from mika.vocab.episodes import Kind
+from mika.vocab.episodes import PREEMPTION_GUARD, Kind, task_target
 from tests.fixtures.mika import DOC, at_paris, build, connect, effect_preview, said
 
 ALICE = "Alice <alice@exemple.fr>"
@@ -329,6 +330,32 @@ def test_a_reply_you_ask_for_goes_first_and_redoing_it_is_learnt(tmp_path):
     assert "a été refusé" in reply and "finalement non" in reply
 
 
+def test_a_reply_you_ask_for_starts_within_seconds_even_asleep(tmp_path):
+    """« Préremplir avec Mika » (ADR 0306) : quelqu'un attend. La tâche part en quelques secondes — pas au tirage des
+    tâches, une toutes les cinq minutes en moyenne —, au premier plan chez le fournisseur, même endormie."""
+    night = at_paris(2026, 9, 28, 3, 0)
+    box = FakeMail(boxes=[PERSO])
+    box.deliver(mail(1, "Un café jeudi ?", "On se voit jeudi ?", at=night))
+    ref = "perso:<m1@exemple.fr>"
+
+    async def scenario(kernel, llm):
+        await connect(kernel, "user_1", "Adrien", operator=True)
+        await sleep(MINUTE)
+        asleep = kernel.mind.frame().get(body_c.SLEEP)
+        asked = await perform(kernel, "email.rediger", form(instruction="Dis oui."), by="user_1", subject=ref,
+                              nonce="a1")
+        at = kernel.mind.clock.now()
+        await sleep(20 * US)
+        starts = [e for e in events(kernel, rt.EPISODE_STARTED) if e.data.kind == Kind.TASK]
+        return asleep, asked, at, starts, [c for c in llm.calls if c.role == "step"]
+
+    asleep, asked, at, starts, task = live(tmp_path, box, Model(bodies=("Oui pour jeudi.",)), scenario, start=night)
+    assert asleep is not body_c.SleepPhase.AWAKE and asked.ok
+    assert [e.data.target for e in starts] == [f"task:email:{ref}"]
+    assert starts[0].at - at < 5 * US
+    assert task and {c.priority for c in task} == {0}
+
+
 # ── Ranger : sur le serveur, et elle n'en parle plus ──────────────────────
 
 
@@ -477,3 +504,22 @@ def test_the_draft_actions_are_placed_on_the_fiche_with_what_was_read(tmp_path):
     waiting = next(b for b in walk(listing) if isinstance(b, Table) and b.title.startswith("À décider"))
     assert len(waiting.rows) == 1 and waiting.rows[0].href.key == f"brouillon/{draft.id}"
     assert mail_key("perso:<m1@exemple.fr>") == "perso:<m1@exemple.fr>"
+
+
+def test_a_task_that_gave_way_to_what_someone_waits_for_keeps_its_try(tmp_path):
+    """ADR 0306 : sa tâche d'elle-même préemptée dans sa voie, ou supplantée sur son bail par ce qu'on attend, n'a pas
+    fait d'essai — il lui est rendu ; une panne, ou un bail pris par un autre, en est un."""
+    target = task_target("email", "perso:<m9@exemple.fr>")
+
+    async def scenario(kernel, *_):
+        async def episode(outcome, guard=None):
+            await kernel.mind.append([rt.EPISODE_STARTED.draft(kind=Kind.TASK, target=target)], emitter="runtime",
+                                     correlation="essai")
+            await kernel.mind.append([rt.EPISODE_ENDED.draft(kind=Kind.TASK, target=target, outcome=outcome,
+                                                             guard=guard)], emitter="runtime", correlation="essai")
+            return kernel.mind.frame().state("email").attempts.get("perso:<m9@exemple.fr>", 0)
+
+        return [await episode("preempted"), await episode("superseded", PREEMPTION_GUARD),
+                await episode("superseded", "baux"), await episode("failed")]
+
+    assert live(tmp_path, FakeMail(boxes=[PERSO]), Model(), scenario) == [0, 0, 1, 2]

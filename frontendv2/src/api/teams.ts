@@ -7,6 +7,7 @@
 import type { Level } from "./mail";
 import { query } from "./mail";
 import { apiUrl, getJson, MOI, sendJson, type Done } from "./moi";
+import type { Work } from "../mika/work";
 
 /** Les bornes des chaînes que l'API reçoit (`app/me/teams.py`, en caractères) : au-delà, elle refuse (400, `fields`). */
 export const TEAMS_LIMITS = {
@@ -195,6 +196,16 @@ export interface Thread {
   pending?: OwnPending[];
   under_way: boolean;
   asked: boolean;
+  /** Où elle en est d'une réponse ici, en direct (ADR 0306) ; `null` : rien en cours ni demandé ; absent d'un
+   *  moteur qui ne le dit pas. */
+  work?: Work | null;
+}
+
+/** Ce qu'on relit toutes les deux secondes pendant qu'elle y travaille, sans relire le fil (ADR 0306). */
+export interface ThreadWork {
+  work: Work | null;
+  asked: boolean;
+  under_way: boolean;
 }
 
 export interface PrefillReply extends Done {
@@ -242,6 +253,10 @@ export async function fetchReplies(): Promise<Reply[]> {
 /** Ton message (ADR 0189) : en file pour l'extension du compte, qui l'envoie sous ton nom. */
 export function sendMessage(conversation: string, body: string, replyTo = "", nonce = ""): Promise<Done> {
   return sendJson(`${T}/send`, replyTo ? { conversation, body, reply_to: replyTo } : { conversation, body }, nonce);
+}
+
+export function fetchThreadWork(conversation: string): Promise<ThreadWork> {
+  return getJson<ThreadWork>(`${T}/work${query({ conversation })}`);
 }
 
 export function prefill(message: string, instruction = ""): Promise<PrefillReply> {

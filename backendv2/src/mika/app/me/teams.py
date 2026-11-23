@@ -25,7 +25,7 @@ from starlette.responses import Response
 from starlette.routing import Route
 
 from mika.app.me.api import PREFIX, Call, Denied, MeApiBase, done, form, missing
-from mika.app.me.common import allows, held_by, millis, only_owner, opened, snippet
+from mika.app.me.common import allows, held_by, millis, only_owner, opened, snippet, work_of
 from mika.app.me.teams_extension import download, version_of
 from mika.plugins import teams as teams_p
 from mika.plugins.teams import (
@@ -290,9 +290,7 @@ async def thread(call: Call) -> dict[str, Any]:
     # une demande en cours : pas une dont ses essais sont épuisés (elle y a renoncé ; « Préremplir » la relance), ni
     # une qu'elle ne prendra pas (Teams coupé, ce compte décoché : ses tâches l'écartent) — les aides du plugin
     # (``asked_still``, ``not_preparing``), jamais leur règle recopiée (audit du 2026-11-05, K10-03)
-    p = teams_p.params_of(call.frame)
-    asked = prepares and not not_preparing(p, account) and any(
-        asked_still(s, ref, p) for ref, a in s.asked.items() if a.account == account and a.conversation == conversation)
+    asked, work = _asked_work(call, s, account, conversation, prepares)
     conv = port.conversation(account, conversation)
     notes = _notes(call, replies)
     images: dict[str, list[MessageImage]] = {}
@@ -307,7 +305,38 @@ async def thread(call: Call) -> dict[str, Any]:
             "messages": [message_json(m, images.get(m.ref, ()), photos) for m in found], "more": more,
             "replies": [_reply_json(call, d, notes) for d in replies], "pending": pending[::-1],
             "under_way": prepares and under_way(s, account, conversation),
-            "asked": asked}
+            "asked": asked, "work": work}
+
+
+def _asked_work(call: Call, s: TeamsState, account: str, conversation: str,
+                prepares: bool) -> tuple[bool, dict[str, Any] | None]:
+    """Une réponse demandée ici, et où elle en est (ADR 0306) — qu'on la lui ait demandée ou qu'elle s'y soit mise
+    d'elle-même. Une demande en cours : pas une dont ses essais sont épuisés (elle y a renoncé ; « Préremplir » la
+    relance), ni une qu'elle ne prendra pas (Teams coupé, ce compte décoché : ses tâches l'écartent) — les aides du
+    plugin (``asked_still``, ``not_preparing``), jamais leur règle recopiée (audit du 2026-11-05, K10-03). Rien pour
+    qui ne fait que lire le compte (``prepares`` faux : ADR 0188)."""
+    if not prepares:
+        return False, None
+    p = teams_p.params_of(call.frame)
+    here = [(ref, a.at) for ref, a in s.asked.items() if a.account == account and a.conversation == conversation]
+    live = [at for ref, at in here if asked_still(s, ref, p)] if not not_preparing(p, account) else []
+
+    def ours(ref: str) -> bool:
+        m = s.messages.get(ref)
+        return any(ref == r for r, _ in here) or (m is not None and m.account == account
+                                                    and m.conversation == conversation)
+
+    return bool(live), work_of(call, teams_p.TEAMS.name, ours, max(live, default=0))
+
+
+async def progress(call: Call) -> dict[str, Any]:
+    """Où elle en est d'une réponse dans cette conversation, en direct (ADR 0306) : ce qu'un client relit toutes les
+    deux secondes tant qu'elle y travaille, sans relire le fil — ``work``, ``asked``, ``under_way``."""
+    account, conversation = _conversation(call, call.arg("conversation", limit=400))
+    s = state(call)
+    prepares = allows(accounts(call)[account][1], SHARE_PREPARE)
+    asked, work = _asked_work(call, s, account, conversation, prepares)
+    return {"work": work, "asked": asked, "under_way": prepares and under_way(s, account, conversation)}
 
 
 async def replies(call: Call) -> dict[str, Any]:
@@ -336,8 +365,8 @@ async def send(call: Call) -> dict[str, Any]:
 
 
 async def prefill(call: Call) -> dict[str, Any]:
-    """« Préremplir avec Mika » : elle prépare une réponse à ce message à son prochain moment de travail ; elle
-    suivra le mode du compte (posée dans Teams, ou à ton accord). Une réponse déjà en chemin se rend telle quelle.
+    """« Préremplir avec Mika » : elle prépare une réponse à ce message tout de suite, même endormie (ADR 0306 ; où elle
+    en est : ``work`` du fil) ; elle suivra le mode du compte (posée dans Teams, ou à ton accord). Une réponse déjà en chemin se rend telle quelle.
 
     Les gardes sont celles de l'action ``teams.rediger``, lues par les aides du plugin (``not_preparing``,
     ``pending_draft``, ``asked_still`` : audit du 2026-11-05, K10-03) ; seul apport d'ici, une réponse « ok » qui dit
@@ -430,7 +459,7 @@ def routes(api: MeApiBase) -> list[Route]:
     return [r("/teams/accounts", list_accounts), r("/teams/extension", download, raw=True),
             r("/teams/image", image, raw=True), r("/teams/photo", photo, raw=True),
             r("/teams/conversations", conversations),
-            r("/teams/thread", thread), r("/teams/replies", replies),
+            r("/teams/thread", thread), r("/teams/work", progress), r("/teams/replies", replies),
             r("/teams/send", send, write=True), r("/teams/prefill", prefill, write=True),
             r("/teams/reply/send", reply_send, write=True), r("/teams/reply/edit", reply_edit, write=True),
             r("/teams/reply/refuse", reply_refuse, write=True), r("/teams/reply/redo", reply_redo, write=True)]

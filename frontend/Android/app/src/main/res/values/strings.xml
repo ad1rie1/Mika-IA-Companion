@@ -698,6 +698,19 @@
     <string name="phone_plan_note">Plan dessiné, pas une carte</string>
     <string name="phone_plan_around">Plan autour de %1$s : le point, et le cercle de sa précision</string>
     <string name="phone_plan_empty">Plan vide : le serveur n\'a pas les coordonnées de ta position</string>
+    <!-- « Corriger » (ADR 0307), dans le champ de Mail et de Teams : les fautes de ce que tu écris, sans changer tes mots -->
+    <string name="correct">Corriger</string>
+    <string name="correct_busy">Correction…</string>
+    <string name="correct_off">Aucun modèle ne corrige : un opérateur en choisit un dans Réglages › Intelligence.</string>
+    <string name="correct_empty">Rien à corriger : le champ est vide.</string>
+    <string name="correct_none">Aucune faute : ton texte reste tel quel.</string>
+    <plurals name="correct_done">
+        <item quantity="one">%d faute corrigée.</item>
+        <item quantity="many">%d fautes corrigées.</item>
+        <item quantity="other">%d fautes corrigées.</item>
+    </plurals>
+    <string name="correct_moved">Tu as continué d\'écrire : la correction n\'a pas été posée.</string>
+    <string name="correct_undo">Annuler</string>
     <!-- Mail (ADR 0235, lot 2) -->
     <string name="mail_all_inboxes">Toutes les réceptions</string>
     <string name="mail_sheet_title">Tes boîtes</string>
@@ -790,8 +803,7 @@
     <string name="mail_forward">Transférer</string>
     <string name="mail_prefill">Préremplir avec Mika</string>
     <string name="mail_prefill_short">Mika</string>
-    <string name="mail_prefill_asked">Demandé : elle l\'écrit à son prochain moment de travail ; sa réponse arrivera dans ses brouillons, et ici.</string>
-    <string name="mail_prefill_asked_here">Demandé : elle l\'écrit à son prochain moment de travail ; sa proposition arrivera ici, à relire.</string>
+    <string name="mail_prefill_asked">Demandé : elle s\'y met tout de suite ; sa réponse arrivera ici.</string>
     <string name="mail_prefill_arrived">Sa réponse est arrivée : elle t\'attend ici.</string>
     <string name="mail_prefill_taken">Son brouillon est repris dans ta réponse : relis-le avant d\'envoyer.</string>
     <string name="mail_prefill_taken_arrived">Sa proposition est arrivée : relis-la avant d\'envoyer.</string>
@@ -857,7 +869,7 @@
     <string name="mail_draft_refuse_label">Pourquoi (facultatif)</string>
     <string name="mail_draft_refuse_hint">« trop long », « je préfère répondre moi-même »…</string>
     <string name="mail_draft_redo">Lui demander une autre version</string>
-    <string name="mail_draft_redo_lede">Celui-ci est refusé ; elle en écrira un autre à son prochain moment de travail, en tenant compte de ce que tu dis. Tu le reliras avant qu\'il parte.</string>
+    <string name="mail_draft_redo_lede">Celui-ci est refusé ; elle en écrit un autre tout de suite, en tenant compte de ce que tu dis. Tu le reliras avant qu\'il parte.</string>
     <string name="mail_draft_redo_label">Ce qu\'il faut changer</string>
     <string name="mail_draft_redo_hint">« plus court », « dis-lui oui pour jeudi »…</string>
     <string name="mail_draft_redo_confirm">Lui demander</string>
@@ -949,6 +961,7 @@
     <string name="teams_sent_as_you">part par l\'extension, sous ton nom</string>
     <string name="teams_count">%1$s / %2$s</string>
     <string name="teams_no_received">Aucun message reçu à quoi répondre ici.</string>
+    <string name="teams_prefill_asked">Demandé : elle s\'y met tout de suite ; sa réponse arrivera ici.</string>
     <string name="teams_working">Elle s\'y met… sa réponse arrivera ici, dans la discussion.</string>
     <string name="teams_arrived">Sa réponse est arrivée : elle t\'attend dans la discussion.</string>
     <string name="teams_card_waiting">Mika propose une réponse</string>
@@ -966,7 +979,7 @@
     <string name="teams_refuse_lede">« %1$s » ne partira pas ; elle le saura. Dis-lui pourquoi, si tu veux.</string>
     <string name="teams_refuse_label">Pourquoi (facultatif)</string>
     <string name="teams_refuse_hint">« pas besoin de répondre », « je préfère le dire moi-même »…</string>
-    <string name="teams_redo_lede">Celle-ci est refusée ; elle en écrira une autre à son prochain moment de travail, en tenant compte de ce que tu dis.</string>
+    <string name="teams_redo_lede">Celle-ci est refusée ; elle en écrit une autre tout de suite, en tenant compte de ce que tu dis.</string>
     <string name="teams_redo_label">Ce qu\'il faut changer</string>
     <string name="teams_redo_hint">« plus court », « propose plutôt 16 h »…</string>
     <string name="teams_redo_confirm">Lui demander</string>

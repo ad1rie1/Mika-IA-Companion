@@ -42,6 +42,7 @@ from mika.app.me import (
     settings,
     sharing,
     teams,
+    writing,
 )
 from mika.app.me.api import OUTBOUND, PROBES, ROUTES_BUSY, Call, Denied, MeApiBase, form, missing, spend
 
@@ -53,17 +54,19 @@ MODULES: tuple[Callable[[MeApiBase], list[Route]], ...] = (mail.routes, teams.ro
                                                            settings.routes, mcp.routes, sharing.routes, maps.routes,
                                                            projects.routes, project_code.routes,
                                                            project_docs.routes, project_manage.routes,
-                                                           project_activity.routes, contacts.routes)
+                                                           project_activity.routes, contacts.routes,
+                                                           writing.routes)
 COUNTERS: tuple[tuple[str, Callable[[Call], int]], ...] = (("mail", mail.count), ("teams", teams.count),
                                                             ("phone", phone.count), ("projects", projects.count))
 
 
 async def who(req: Call) -> dict[str, Any]:
-    """Qui est connecté : son compte et sa personne, ce qui l'attend (des comptes par domaine)."""
+    """Qui est connecté : son compte et sa personne, ce qui l'attend (des comptes par domaine), et si « Corriger »
+    marche (un modèle lui est donné, ADR 0307)."""
     me = req.me
     counts = {name: counter(req) for name, counter in COUNTERS}
     return {"username": me.account.username, "name": me.name, "handle": me.handle, "person": me.person,
-            "operator": me.operator, "owner": me.owner, "counts": counts}
+            "operator": me.operator, "owner": me.owner, "counts": counts, "correct": writing.available(req)}
 
 
 class MeApi(MeApiBase):

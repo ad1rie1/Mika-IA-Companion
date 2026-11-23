@@ -11,6 +11,10 @@ Le déclenchement est un processus de Poisson d'intensité
 ``λ = λ_max(type) · σ(score)`` : le prochain instant est tiré par
 amincissement, si bien que le comportement ne dépend pas de la cadence à
 laquelle on évalue, et que la gigue vient d'elle-même.
+
+Une ligne **attendue** (un candidat ``awaited`` : quelqu'un a demandé ce
+travail et en attend le résultat, ADR 0306) prend le taux des lignes attendues
+(``awaited_rate``, de l'ordre de la seconde) au lieu de celui de son type.
 """
 
 from __future__ import annotations
@@ -44,6 +48,8 @@ class Candidate:
     resources: frozenset[str] = frozenset()
     deadline: int | None = None
     guards: tuple[Guard, ...] = ()
+    #: quelqu'un attend ce qu'il produira (ADR 0306) : sa ligne part au taux des lignes attendues
+    awaited: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +69,8 @@ class RowView:
     evidence: float
     reasons: tuple[str, ...]
     strongest: float = 0.0
+    #: quelqu'un attend ce que la ligne produira (ADR 0306) : ce n'est pas une envie à elle
+    awaited: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +90,8 @@ class Row:
     aging: float = 0.0
     #: décalage par propriétaire de modulateur (triés) ; leur somme est ``shift``
     shifts: tuple[tuple[str, float], ...] = ()
+    #: quelqu'un l'attend (ADR 0306) : son taux est ``awaited_rate``
+    awaited: bool = False
 
     @property
     def key(self) -> str:
@@ -96,8 +106,13 @@ class Row:
             kind=self.kind, target=self.target, parts=self.parts, shift=round(self.shift, 6),
             vetoes=self.vetoes, score=round(self.score, 6), hazard=self.hazard,
             threshold=round(self.threshold, 6), aging=round(self.aging, 6),
-            shifts=tuple((owner, round(v, 6)) for owner, v in self.shifts),
+            shifts=tuple((owner, round(v, 6)) for owner, v in self.shifts), awaited=self.awaited,
         )
+
+
+def rate_of(policy: ArbitrationPolicy, kind: str, awaited: bool = False) -> float:
+    """Le taux maximal d'une ligne : celui des lignes attendues (ADR 0306), sinon celui de son type."""
+    return policy.awaited_rate if awaited else policy.max_rates.get(kind, 0.0)
 
 
 def sigmoid(x: float) -> float:
@@ -132,7 +147,8 @@ def pool(
         cands = extra[(kind, target)]
         evidence = sum(p[2] for p in ps)
         strongest = max((c.evidence for c in cands), default=0.0)
-        view = RowView(kind, target, evidence, tuple(sorted({p[1] for p in ps})), strongest)
+        awaited = any(c.awaited for c in cands)
+        view = RowView(kind, target, evidence, tuple(sorted({p[1] for p in ps})), strongest, awaited)
         shift = 0.0
         by_owner: dict[str, float] = {}
         vetoes: list[tuple[str, str]] = []
@@ -146,7 +162,7 @@ def pool(
         aging = policy.aging_per_hour.get(kind, 0.0) * ages_s.get(key, 0.0) / 3600.0
         threshold = policy.thresholds.get(kind, 0.0)
         score = evidence + shift + aging - threshold
-        rate = policy.max_rates.get(kind, 0.0)
+        rate = rate_of(policy, kind, awaited)
         hazard = 0.0 if vetoes else rate * sigmoid(score)
         resources: frozenset[str] = frozenset().union(*(c.resources for c in cands)) if cands else frozenset()
         guards = tuple(g for c in cands for g in c.guards)
@@ -162,7 +178,7 @@ def pool(
         rows.append(
             Row(kind, target, tuple(sorted(ps)), shift, tuple(sorted(vetoes)), score, hazard,
                 resources, guards, FrozenDict(args), min(deadlines) if deadlines else None,
-                threshold=threshold, aging=aging, shifts=tuple(sorted(by_owner.items())))
+                threshold=threshold, aging=aging, shifts=tuple(sorted(by_owner.items())), awaited=awaited)
         )
     rows = _share_any(rows, {k: sum(p[2] for p in v) for k, v in any_parts.items()}, policy)
     rows.sort(key=lambda r: (-r.hazard, r.key))
@@ -184,7 +200,7 @@ def _share_any(rows: list[Row], any_evidence: Mapping[str, float], policy: Arbit
         ev = any_evidence.get(r.kind, 0.0)
         if r.target == Anyone.NONE or not ev or r.vetoes or r.hazard <= 0.0:
             continue
-        base = policy.max_rates.get(r.kind, 0.0) * sigmoid(r.score - ev)
+        base = rate_of(policy, r.kind, r.awaited) * sigmoid(r.score - ev)
         if r.hazard > base:
             own[i], extra[i] = base, r.hazard - base
     by_kind: dict[str, list[int]] = defaultdict(list)

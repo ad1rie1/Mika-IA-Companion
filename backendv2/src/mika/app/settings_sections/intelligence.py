@@ -37,7 +37,10 @@ ROLE_FAMILIES = {**{str(r): "voix" for r in VOICE_ROLES}, "extract": "mémoire",
                  "match": "compréhension",
                  "interpret": "compréhension",
                  "triage": "sens", "caption": "sens", "plan": "travail", "job": "travail", "review": "travail", "polish": "voix",
-                 "character": "voix"}
+                 "character": "voix", "correct": "écriture"}
+#: ce que dit la page d'un rôle facultatif sans modèle (``OPTIONAL_ROLES``) : coupé, par choix
+CUT_TEXT = {"polish": "coupée : la seconde passe ne se fait pas",
+            "correct": "coupé : « Corriger » reste éteint dans Mail et Teams"}
 
 
 def _count(n: int) -> str:
@@ -128,7 +131,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                            "note": "effort sans effet ici" if idle else ""},
                           # une étiquette pour ce qui se lit d'un coup (déclaré, rien) ; la chaîne d'un repli et un
                           # rôle coupé, en texte
-                          {"head": "Comment", "text": how or ("coupée : la seconde passe ne se fait pas" if cut
+                          {"head": "Comment", "text": how or (CUT_TEXT.get(role, "coupé") if cut
                                                               else "chaque appel échoue"),
                            "tag": how in ("déclaré", "") and not cut,
                            "tone": "ok" if how == "déclaré" else "muted" if served or cut else "danger"}]}

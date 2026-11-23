@@ -1,6 +1,8 @@
 package fr.qwartz.mika.data.moi.mail
 
+import fr.qwartz.mika.data.moi.Corrected
 import fr.qwartz.mika.data.moi.MoiApi
+import fr.qwartz.mika.data.moi.correct
 import fr.qwartz.mika.data.moi.decode
 import fr.qwartz.mika.data.moi.jsonOf
 import fr.qwartz.mika.data.moi.map
@@ -42,6 +44,11 @@ open class MailApi(private val api: MoiApi, private val uploads: MoiApi = api) {
 
     open suspend fun message(ref: String): MoiApi.Result<MailFull> =
         api.get("/mail/message", mapOf("ref" to ref), MailFull.serializer())
+
+    /** Où elle en est d'une réponse à ce mail (ADR 0306) : relu toutes les deux secondes tant qu'elle y travaille,
+     *  sans relire le mail ni joindre son serveur. */
+    open suspend fun work(ref: String): MoiApi.Result<MailWork> =
+        api.get("/mail/work", mapOf("ref" to ref), MailWork.serializer())
 
     open suspend fun drafts(): MoiApi.Result<List<MailDraft>> =
         api.get("/mail/drafts", reader = MailDrafts.serializer()).map { it.items }
@@ -87,8 +94,8 @@ open class MailApi(private val api: MoiApi, private val uploads: MoiApi = api) {
         return api.post("/mail/tidy", JsonObject(body), key).decode(MailDone.serializer())
     }
 
-    /** « Préremplir avec Mika » : elle écrit une réponse à son prochain moment de travail (`asked`), ou un brouillon
-     *  attend déjà (`draft`). */
+    /** « Préremplir avec Mika » : elle s'y met tout de suite (`asked`, ADR 0306 ; où elle en est : [work]), ou un
+     *  brouillon attend déjà (`draft`). */
     open suspend fun prefill(ref: String, instruction: String = "", key: String? = MoiApi.newKey()) =
         json("/mail/prefill", listOf("ref" to ref) + (if (instruction.isNotBlank()) listOf("instruction" to instruction) else emptyList()), key)
 
@@ -110,6 +117,9 @@ open class MailApi(private val api: MoiApi, private val uploads: MoiApi = api) {
 
     /** Relever sans attendre, par une boîte que tu peux relever. */
     open suspend fun poll(box: String, key: String? = MoiApi.newKey()) = json("/mail/poll", listOf("box" to box), key)
+
+    /** « Corriger » (ADR 0307) : les fautes de ton texte, sans changer ses mots (`/api/moi/correct`). */
+    open suspend fun correct(text: String): MoiApi.Result<Corrected> = api.correct(text)
 
     private fun fieldsOf(mail: Outgoing): List<Pair<String, Any>> =
         listOf("to" to mail.to, "cc" to mail.cc, "bcc" to mail.bcc, "subject" to mail.subject, "body" to mail.body)

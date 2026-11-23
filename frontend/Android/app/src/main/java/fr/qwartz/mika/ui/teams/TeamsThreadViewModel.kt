@@ -4,9 +4,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.viewModelScope
+import fr.qwartz.mika.data.moi.CorrectWords
 import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.SendKey
+import fr.qwartz.mika.data.moi.Work
+import fr.qwartz.mika.data.moi.WorkTurn
 import fr.qwartz.mika.data.moi.chars
+import fr.qwartz.mika.data.moi.teams.ALREADY_ASKED
 import fr.qwartz.mika.data.moi.teams.ConversationThread
 import fr.qwartz.mika.data.moi.teams.SentHere
 import fr.qwartz.mika.data.moi.teams.TeamsLimits
@@ -21,14 +25,16 @@ import fr.qwartz.mika.data.moi.teams.prefillOff
 import fr.qwartz.mika.data.moi.teams.quoteTarget
 import fr.qwartz.mika.data.moi.teams.stillSentHere
 import fr.qwartz.mika.data.moi.teams.withoutSent
+import fr.qwartz.mika.data.moi.watchWork
+import fr.qwartz.mika.data.moi.workGaveUp
+import fr.qwartz.mika.data.moi.workTurn
+import fr.qwartz.mika.ui.shell.FieldCorrector
 import fr.qwartz.mika.ui.shell.Load
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
-/** Une réponse demandée se guette à ce rythme… */
-internal const val ASK_POLL_MS = 10_000L
-/** …au plus si longtemps (elle travaille à son prochain moment, qui peut tarder) ; le fil, lui, se relit à ce rythme. */
-internal const val ASK_POLL_MAX_MS = 30 * 60_000L
+/** Le fil se relit à ce rythme ; où elle en est d'une réponse, toutes les deux secondes ([fr.qwartz.mika.data.moi.WORK_POLL_MS],
+ *  ADR 0306). */
 internal const val THREAD_REFRESH_MS = 20_000L
 
 /** Aller au message qu'une citation désigne ([ref]) ; [n] : le geste (deux appuis sur la même citation, deux allers). */
@@ -37,8 +43,9 @@ data class QuoteJump(val ref: String, val n: Int)
 /**
  * Un fil (`Route.TeamsThread`) : la conversation ouverte, les messages plus anciens lus en plus, tes envois d'ici que
  * le moteur n'a pas encore dits, ce que tu tapes et le message que tu cites (discussion par discussion), ses réponses
- * et ce que tu en décides, ta demande à Mika et sa réponse guettée, le message cité où aller. Un modèle par session :
- * rouvrir une discussion la relit sans bruit.
+ * et ce que tu en décides, ta demande à Mika et où elle en est (ADR 0306, relu toutes les deux secondes), le message
+ * cité où aller, « Corriger » ce que tu tapes (ADR 0307). Un modèle par session : rouvrir une discussion la relit sans
+ * bruit.
  */
 class TeamsThreadViewModel(deps: TeamsDeps) : TeamsScreenModel(deps) {
     var key by mutableStateOf("")
@@ -67,6 +74,13 @@ class TeamsThreadViewModel(deps: TeamsDeps) : TeamsScreenModel(deps) {
     private var askedSince by mutableStateOf<Map<String, Long>>(emptyMap())
     /** Les demandes guettées sans réponse au-delà du plafond : on cesse de les guetter (une nouvelle demande, si). */
     private val gaveUp = mutableSetOf<String>()
+    /** Depuis quand on guette où elle en est, discussion par discussion (le plafond d'une demi-heure). */
+    private val watchSince = mutableMapOf<String, Long>()
+    /** Où elle en est d'une réponse dans la discussion ouverte (ADR 0306) ; `null` : rien en cours. À part du fil : sa
+     *  ligne seule se redessine quand l'étape change. */
+    var work by mutableStateOf<Work?>(null)
+        private set
+    private var workJob: Job? = null
     /** Ce que tu as commencé d'écrire, discussion par discussion. */
     private val typed = mutableMapOf<String, String>()
     /** Le message que tu cites, discussion par discussion (« Citer », ADR 0305) : il part avec ton prochain message. */
@@ -94,8 +108,10 @@ class TeamsThreadViewModel(deps: TeamsDeps) : TeamsScreenModel(deps) {
     /** Elle prépare une réponse demandée (« Elle s'y met… ») : demandée d'ici ou ailleurs, pas encore arrivée. */
     val asked: Boolean get() = current.let { t -> t != null && !t.underWay && (key in askedSince || t.asked) }
 
-    /** La réponse demandée se guette de près (toutes les dix secondes), jusqu'au plafond. */
-    val watching: Boolean get() = asked && key !in gaveUp
+    /** Où elle en est se relit toutes les deux secondes : une réponse demandée, ou qu'elle prépare d'elle-même ([work]),
+     *  pas encore arrivée, jusqu'au plafond. */
+    val watching: Boolean
+        get() = current.let { t -> t != null && watchWork(asked, work, arrived = t.underWay, gaveUp = key in gaveUp) }
 
     /** Ouvrir une discussion ; [arrived] : ce qu'on dit quand sa réponse demandée y arrive. */
     fun open(k: String, arrived: String) {
@@ -108,6 +124,8 @@ class TeamsThreadViewModel(deps: TeamsDeps) : TeamsScreenModel(deps) {
         text = typed[k].orEmpty()
         jump = null
         thread = Load.Loading
+        work = null
+        workJob?.cancel()
         older = emptyList()
         olderMore = false
         load(quiet = false)
@@ -120,13 +138,45 @@ class TeamsThreadViewModel(deps: TeamsDeps) : TeamsScreenModel(deps) {
 
     /** Relire sans bruit (le rythme de l'écran) ; une relecture déjà en cours suffit. */
     fun refresh() {
-        val since = askedSince[key]
-        if (since != null && now() - since > ASK_POLL_MAX_MS) {
-            // elle n'a rien rendu depuis si longtemps : on cesse de guetter ici (la relecture du fil la verra arriver)
-            gaveUp += key
-            askedSince = askedSince - key
-        }
         load(quiet = true)
+    }
+
+    /**
+     * Où elle en est (ADR 0306), relu toutes les deux secondes tant qu'on guette ([watching]), sans relire le fil : sa
+     * réponse arrivée (`under_way`), ou plus rien de demandé ni d'en cours, le fil se relit ; sinon seule sa ligne change.
+     * Au-delà du plafond, on cesse de guetter ici (la relecture du fil la verra arriver) ; une relecture manquée attend
+     * la suivante.
+     */
+    fun pollWork() {
+        val t = current ?: return
+        if (!watching || workJob?.isActive == true) return
+        val k = key
+        val since = watchSince.getOrPut(k) { askedSince[k] ?: now() }
+        if (workGaveUp(since, now())) {
+            gaveUp += k
+            askedSince = askedSince - k
+            watchSince -= k
+            return
+        }
+        workJob = viewModelScope.launch {
+            val got = (api.work(t.key) as? MoiApi.Result.Ok)?.value ?: return@launch
+            val shown = current
+            if (k != key || shown == null) return@launch
+            when (workTurn(arrived = got.underWay, asked = got.asked, work = got.work)) {
+                WorkTurn.ARRIVED -> load(quiet = true, force = true)
+                WorkTurn.ENDED -> {
+                    // elle a fini sans en rendre (ou y a renoncé) : plus rien ne se guette ici
+                    askedSince = askedSince - k
+                    watchSince -= k
+                    work = null
+                    load(quiet = true, force = true)
+                }
+                WorkTurn.GOING -> {
+                    work = got.work
+                    if (got.asked != shown.asked) thread = Load.Ready(shown.copy(asked = got.asked))
+                }
+            }
+        }
     }
 
     /** Relit le fil. [quiet] : ce qui est montré reste, un refus ne se dit pas ; [force] : après un geste, la relecture
@@ -165,7 +215,12 @@ class TeamsThreadViewModel(deps: TeamsDeps) : TeamsScreenModel(deps) {
         val came = quiet && before != null &&
             t.replies.any { r -> r.state in UNDER_WAY && !r.answered && before.replies.none { it.id == r.id } }
         thread = Load.Ready(t)
-        if (t.underWay || !t.asked) gaveUp -= key
+        work = t.work
+        // arrivée, ou plus rien de demandé ni d'en cours : le plafond s'oublie
+        if (t.underWay || (!t.asked && t.work == null)) {
+            gaveUp -= key
+            watchSince -= key
+        }
         if (t.underWay) askedSince = askedSince - key
         if (came) {
             say(arrivedText)
@@ -225,10 +280,30 @@ class TeamsThreadViewModel(deps: TeamsDeps) : TeamsScreenModel(deps) {
         if (jump == j) jump = null
     }
 
+    /** Ce que tu tapes, dans la borne ; un texte qui la dépasse déjà (corrigé, ADR 0307) se raccourcit encore. */
     fun type(value: String) {
-        if (chars(value) > TeamsLimits.BODY) return
-        text = value
-        if (value.isEmpty()) typed -= key else typed[key] = value
+        val n = chars(value)
+        if (n > TeamsLimits.BODY && n > chars(text)) return
+        put(key, value)
+    }
+
+    private fun put(k: String, value: String) {
+        if (value.isEmpty()) typed -= k else typed[k] = value
+        if (key == k) text = value
+    }
+
+    /** « Corriger » ce que tu tapes dans la discussion ouverte (ADR 0307), discussion par discussion. */
+    val corrector = FieldCorrector(viewModelScope) { api.correct(it) }
+
+    /** La discussion ouverte attend sa correction (« Correction… »). */
+    val correcting: Boolean get() = corrector.busy(key)
+
+    /** « Corriger » : les fautes de ce que tu tapes ici, sans changer tes mots ; le texte corrigé remplace le tien, et
+     *  « Annuler » te le rend. Changé d'ici la réponse, ou une autre discussion ouverte, rien ne s'y pose. [on] : un
+     *  modèle corrige (`GET /api/moi` → `correct`) ; sinon, [words] dit pourquoi. */
+    fun correct(on: Boolean, words: CorrectWords) {
+        val k = key
+        corrector.correct(k, on, words, read = { if (key == k) text else null }, write = { put(k, it) })
     }
 
     /** Ton message (ADR 0189) : il part par l'extension du compte, sous le nom de sa personne ; une clé par geste. Le
@@ -278,9 +353,11 @@ class TeamsThreadViewModel(deps: TeamsDeps) : TeamsScreenModel(deps) {
         type(p.body)
     }
 
-    /** « Préremplir avec Mika » : elle prépare une réponse au dernier message de quelqu'un d'autre. Ce que le serveur
-     *  répond (demandé, déjà demandé, une réponse déjà en chemin) se dit tel quel. */
-    fun prefill(noReceived: String) {
+    /** « Préremplir avec Mika » : elle s'y met tout de suite (ADR 0306) et prépare une réponse au dernier message de
+     *  quelqu'un d'autre ; sa ligne paraît aussitôt (elle s'y met, depuis maintenant), la relecture suivante la corrige.
+     *  Demandé, [askedText] le dit ; déjà demandé, ou une réponse déjà en chemin, ce que le serveur répond se dit tel
+     *  quel. */
+    fun prefill(noReceived: String, askedText: String) {
         val t = current ?: return
         if (prefilling) return
         val off = prefillOff(accounts?.enabled ?: true, account(t.account))
@@ -294,10 +371,14 @@ class TeamsThreadViewModel(deps: TeamsDeps) : TeamsScreenModel(deps) {
             prefillKey.settled(networkFailure = got is MoiApi.Result.Failed && got.error.network)
             when (got) {
                 is MoiApi.Result.Ok -> {
-                    say(got.value.message)
-                    if (got.value.draft.isBlank() && key == k) {
-                        askedSince = askedSince + (k to now())
+                    val draft = got.value.draft.isNotBlank()
+                    say(if (draft || got.value.message == ALREADY_ASKED) got.value.message else askedText)
+                    if (!draft && key == k) {
+                        val at = now()
+                        askedSince = askedSince + (k to at)
                         gaveUp -= k
+                        watchSince[k] = at
+                        if (work == null) work = Work.waiting(at)
                     }
                     if (key == k) load(quiet = true, force = true)
                 }
@@ -313,6 +394,7 @@ class TeamsThreadViewModel(deps: TeamsDeps) : TeamsScreenModel(deps) {
         if (redo) {
             askedSince = askedSince + (key to now())
             gaveUp -= key
+            watchSince -= key
         }
         load(quiet = true, force = true)
     }

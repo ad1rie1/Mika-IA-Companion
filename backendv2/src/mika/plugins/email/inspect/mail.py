@@ -650,7 +650,7 @@ def _can_ask(s: EmailState, frame: Frame, key: str, ports: Any = None) -> bool:
 
 @EMAIL.action("rediger", title="Lui demander une réponse", args=AskArgs, emits=[c.DRAFT_ASKED], subject="mail",
               order=30, available=_can_ask,
-              description="Elle l'écrit dans la voix de la boîte, à son prochain moment de travail ; le brouillon "
+              description="Elle l'écrit dans la voix de la boîte, tout de suite (ADR 0306) ; le brouillon "
                           "attendra ton accord (Courrier › Ses brouillons).")
 def _ask(s: EmailState, frame: Frame, args: AskArgs, ctx: Any) -> Done:
     port = ctx.ports.get("mail")
@@ -662,5 +662,5 @@ def _ask(s: EmailState, frame: Frame, args: AskArgs, ctx: Any) -> Done:
         if args.instruction.strip() else None
     draft = c.DRAFT_ASKED.draft(mail=ref, account=m.account if m is not None else "", by=ctx.by,
                                 instruction=instruction, about=(ctx.by,) if ctx.by else ())
-    return Done(drafts=(draft,), message="Demandé : elle préparera la réponse à son prochain moment de travail ; "
-                                         "tu la trouveras dans Ses brouillons.")
+    return Done(drafts=(draft,), message="Demandé : elle s'y met tout de suite ; tu trouveras sa réponse dans Ses "
+                                         "brouillons.")

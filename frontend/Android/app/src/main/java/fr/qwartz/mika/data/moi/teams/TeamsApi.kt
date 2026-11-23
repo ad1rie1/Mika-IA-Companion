@@ -1,6 +1,8 @@
 package fr.qwartz.mika.data.moi.teams
 
+import fr.qwartz.mika.data.moi.Corrected
 import fr.qwartz.mika.data.moi.MoiApi
+import fr.qwartz.mika.data.moi.correct
 import fr.qwartz.mika.data.moi.decode
 import fr.qwartz.mika.data.moi.jsonOf
 import fr.qwartz.mika.data.moi.map
@@ -31,6 +33,11 @@ open class TeamsApi(private val api: MoiApi) {
             ConversationThread.serializer(),
         )
 
+    /** Où elle en est d'une réponse dans cette conversation (ADR 0306) : relu toutes les deux secondes tant qu'elle y
+     *  travaille, sans relire le fil. */
+    open suspend fun work(conversation: String): MoiApi.Result<TeamsWork> =
+        api.get("/teams/work", mapOf("conversation" to conversation), TeamsWork.serializer())
+
     /** Ses réponses dans tes comptes (ADR 0191), la plus récente d'abord. */
     open suspend fun replies(): MoiApi.Result<List<TeamsReply>> =
         api.get("/teams/replies", reader = TeamsReplies.serializer()).map { it.items }
@@ -41,8 +48,8 @@ open class TeamsApi(private val api: MoiApi) {
     open suspend fun send(conversation: String, body: String, replyTo: String = "", key: String? = MoiApi.newKey()): MoiApi.Result<TeamsDone> =
         write("/teams/send", listOf("conversation" to conversation, "body" to body) + optional("reply_to", replyTo), key)
 
-    /** « Préremplir avec Mika » : elle prépare une réponse à ce message ; une réponse déjà en chemin rend `draft`, une
-     *  demande déjà faite `asked` (le serveur le dit dans `message`). */
+    /** « Préremplir avec Mika » : elle s'y met tout de suite (ADR 0306) et prépare une réponse à ce message ; une réponse
+     *  déjà en chemin rend `draft`, une demande déjà faite `asked` (le serveur le dit dans `message`). */
     open suspend fun prefill(message: String, instruction: String = "", key: String? = MoiApi.newKey()): MoiApi.Result<TeamsDone> =
         write("/teams/prefill", listOf("message" to message) + optional("instruction", instruction), key)
 
@@ -61,6 +68,9 @@ open class TeamsApi(private val api: MoiApi) {
     /** La refuser, et qu'elle en écrive une autre selon [instruction]. */
     open suspend fun replyRedo(id: String, instruction: String, key: String? = MoiApi.newKey()): MoiApi.Result<TeamsDone> =
         write("/teams/reply/redo", listOf("id" to id, "instruction" to instruction), key)
+
+    /** « Corriger » (ADR 0307) : les fautes de ton message, sans changer ses mots (`/api/moi/correct`). */
+    open suspend fun correct(text: String): MoiApi.Result<Corrected> = api.correct(text)
 
     private fun optional(name: String, value: String): List<Pair<String, Any>> =
         if (value.isBlank()) emptyList() else listOf(name to value)

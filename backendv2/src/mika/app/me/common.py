@@ -1,5 +1,5 @@
 """Ce que les routes de l'API par personne se partagent : un instant, un extrait, des textes du journal, les réglages
-et leur plafond, ses comptes et son niveau sur chacun.
+et leur plafond, ses comptes et son niveau sur chacun, où elle en est d'une réponse qu'elle prépare (ADR 0306).
 
 La règle de partage est dans ``vocab.ownership`` (ADR 0185, 0186, 0188) : ``held_by`` la lit pour un port et les
 paramètres de son greffon, et ``allows`` dit ce qu'un niveau ouvre. Mail et Teams s'en servent à l'identique.
@@ -11,7 +11,10 @@ from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 from mika.app.me.api import OWN_MAX, Call, Denied, missing
+from mika.runtime.pipeline import THINKING
+from mika.runtime.state import RUNTIME
 from mika.vocab.access import PERSON, reaches
+from mika.vocab.episodes import Kind, task_of
 from mika.vocab.ownership import OWNED, held
 
 #: un compte et le niveau de qui est connecté dessus
@@ -21,6 +24,29 @@ Held = tuple[Any, str]
 def millis(us: int) -> int:
     """Un instant du moteur (µs) tel que le client le lit (ms) ; 0 : jamais."""
     return us // 1000 if us else 0
+
+
+#: elle n'a pas encore commencé ce qu'on lui a demandé (``work_of``) : elle s'y met
+WAITING_STEP = "waiting"
+
+
+def work_of(call: Call, owner: str, ours: Callable[[str], bool], asked: int = 0) -> dict[str, Any] | None:
+    """Où elle en est d'une réponse qu'elle prépare ici (ADR 0306 : « Préremplir avec Mika » se suit en direct) : une
+    tâche de ``owner`` en cours sur un objet que ``ours`` reconnaît — elle réfléchit (``thinking``), ou tel outil tourne
+    (``tool``, son libellé), depuis tel instant, tel que le pipeline le tient en mémoire ; sinon, si on le lui a demandé
+    à ``asked`` (µs) et qu'elle n'a pas commencé, elle s'y met (``waiting``). ``None`` : rien en cours ni demandé.
+    ``since`` : le début de l'étape, ``started`` : celui du travail (ms)."""
+    for eid, o in sorted(call.frame.state(RUNTIME.name).open.items(), key=lambda kv: kv[1].started_at):
+        found = task_of(o.target) if o.kind == Kind.TASK else None
+        if found is None or found[0] != owner or not ours(found[1]):
+            continue
+        step = call.kernel.runner.step_of(eid)
+        if step is None:  # ouverte au journal, pas (ou plus) en cours ici : elle réfléchit depuis son départ
+            return {"step": THINKING, "label": "", "since": millis(o.started_at), "started": millis(o.started_at)}
+        return {"step": step.phase, "label": step.label, "since": millis(step.since), "started": millis(step.started)}
+    if asked:
+        return {"step": WAITING_STEP, "label": "", "since": millis(asked), "started": millis(asked)}
+    return None
 
 
 def snippet(text: str, limit: int) -> str:

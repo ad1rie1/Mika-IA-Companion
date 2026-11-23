@@ -23,7 +23,7 @@ import {
   threadMarks,
   withoutSent,
 } from "./format";
-import { conversationRow, convAvatar, dock, extensionChip, imageViewer, infoPane, quoteCard, repliesTable, replyCard, threadBody, threadHead, type ThreadView } from "./markup";
+import { conversationRow, convAvatar, dock, dockWork, extensionChip, imageViewer, infoPane, quoteCard, repliesTable, replyCard, threadBody, threadHead, type ThreadView } from "./markup";
 
 const NOW = new Date(2026, 10, 4, 15, 0).getTime();
 const MIN = 60_000;
@@ -194,6 +194,24 @@ describe("le champ, selon le niveau (ADR 0189)", () => {
   });
   it("une réponse demandée : « Elle s'y met… »", () => {
     expect(dock({ ...base, caps: caps("proprietaire"), level: "proprietaire", asked: true })).toContain("Elle s'y met");
+  });
+  it("où elle en est, en direct (ADR 0306) : une ligne dans sa case, l'étape et son chrono ; rien une fois sa réponse là", () => {
+    const at = 1_790_000_000_000;
+    const work = { step: "tool" as const, label: "Relire une de tes conversations Teams", since: at, started: at - 30_000 };
+    const html = dock({ ...base, caps: caps("proprietaire"), level: "proprietaire", asked: true, work, now: at + 90_000 });
+    expect(html).toContain('data-tm-work role="status"');
+    expect(html).toContain("Relire une de tes conversations Teams…");
+    expect(html).toContain(">1:30<");
+    expect(html).not.toContain("sa réponse arrivera ici"); // la ligne de l'étape remplace « elle s'y met »
+    expect(dockWork({ asked: true, work, underWay: true })).toBe("");
+    expect(dockWork({ asked: false, work: null, underWay: false })).toBe("");
+    // une lecture seule qui peut préparer voit aussi sa ligne
+    expect(dock({ ...base, caps: caps("preparer"), level: "preparer", work, now: at })).toContain("Relire une de tes conversations Teams…");
+  });
+  it("« Corriger » (ADR 0307) : à côté de « Préremplir », éteint sans modèle ; pas de champ, pas de bouton", () => {
+    expect(dock({ ...base, caps: caps("proprietaire"), level: "proprietaire", correct: true })).toContain('data-tm="corriger" title="Corriger les fautes');
+    expect(dock({ ...base, caps: caps("proprietaire"), level: "proprietaire" })).toMatch(/data-tm="corriger" title="Aucun modèle ne corrige[^"]*" disabled/);
+    expect(dock({ ...base, caps: caps("preparer"), level: "preparer", correct: true })).not.toContain("corriger");
   });
   it("un compte décoché : « Préremplir » éteint dit pourquoi", () => {
     const off = "Ce compte Teams est décoché : elle n'y prépare rien.";

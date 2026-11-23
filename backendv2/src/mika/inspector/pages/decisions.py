@@ -18,6 +18,7 @@ from mika.inspector.names import KINDS
 from mika.inspector.pages.home import episode_row
 from mika.inspector.pages.tabs import TABS
 from mika.inspector.render import PREFIX
+from mika.kernel.arbitration import rate_of
 from mika.kernel.clock import DAY, US
 from mika.kernel.inspect import (
     Badge,
@@ -109,14 +110,22 @@ def waterfall(ui: Any, r: Any, *, title: str = "Du signal au score") -> Table:
 
 def arbiter_rows(ui: Any, rows: Any, *, fired: frozenset[str] = frozenset()) -> tuple[Row, ...]:
     """Les lignes de l'arbitre en table : sorte et cible nommées, preuves en mots, détail pas à pas ; repliés, la
-    sorte, la cible et le rythme maximal de la sorte (ce que la page dessinée met en barres, ADR 0177)."""
-    top = ui.kernel.registry.arbitration.max_rates or {}
+    sorte, la cible et le rythme maximal de la sorte (ce que la page dessinée met en barres, ADR 0177) — celui des
+    lignes attendues pour une ligne que quelqu'un attend (ADR 0306)."""
+    policy = ui.kernel.registry.arbitration
+    top = policy.max_rates or {}
+
+    def most(r: Any) -> Any:
+        if getattr(r, "awaited", False):
+            return _rate(rate_of(policy, r.kind, True))
+        return _rate(top[r.kind]) if r.kind in top else None
+
     return tuple(
         Row((ui.names.arbiter_row(r.kind, r.target), Text(evidence_text(ui, r), "text"), Text(_signed(r.score), "num",
              "ok" if r.score > 0 else ""), _rate(r.hazard),
              Badge(vetoes_text(ui, r), "danger") if r.vetoes else "—",
              names.kind(r.kind), ui.names.who_cell(r.target) if r.target not in ("", "none") else None,
-             _rate(top[r.kind]) if r.kind in top else None),
+             most(r)),
             tone="ok" if f"{r.kind}:{r.target}" in fired or (not fired and r.hazard > 0 and not r.vetoes) else "",
             detail=(waterfall(ui, r),)) for r in rows)
 
@@ -243,7 +252,9 @@ async def live(ui: Any, request: Request) -> list[Any]:
     policy_fields = Fields(tuple((f"seuil · {names.kind(k)}", f"{num_fr(v, 2)} (retiré du score)")
                                  for k, v in sorted(policy.thresholds.items()))
                            + tuple((f"taux max · {names.kind(k)}", f"{_rate(v)} fois / h")
-                                   for k, v in sorted(policy.max_rates.items())), title="Politique")
+                                   for k, v in sorted(policy.max_rates.items()))
+                           + ((("taux max · ce qu'on attend d'elle (ADR 0306)", f"{_rate(policy.awaited_rate)} fois / h"),)
+                              if policy.awaited_rate else ()), title="Politique")
     anomalies = list(getattr(kernel.arbiter, "anomalies", []))[-10:]
     return [*[Note(names.detail(str(a)), "warn") for a in anomalies], table,
             Disclosure("Comprendre les seuils de décision", (policy_fields,))]

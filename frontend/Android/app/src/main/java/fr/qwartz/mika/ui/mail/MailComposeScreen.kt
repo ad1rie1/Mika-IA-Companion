@@ -44,6 +44,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -68,19 +69,30 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
 import fr.qwartz.mika.data.moi.Caps
+import fr.qwartz.mika.data.moi.CorrectWords
 import fr.qwartz.mika.data.moi.Levels
 import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.MoiError
 import fr.qwartz.mika.data.moi.SendKey
 import fr.qwartz.mika.data.moi.Tone
+import fr.qwartz.mika.data.moi.WORK_POLL_MS
+import fr.qwartz.mika.data.moi.Work
+import fr.qwartz.mika.data.moi.WorkTurn
 import fr.qwartz.mika.data.moi.caps
 import fr.qwartz.mika.data.moi.chars
 import fr.qwartz.mika.data.moi.thousands
+import fr.qwartz.mika.data.moi.watchWork
+import fr.qwartz.mika.data.moi.workGaveUp
+import fr.qwartz.mika.data.moi.workTurn
 import fr.qwartz.mika.data.moi.contacts.ContactsApi
 import fr.qwartz.mika.data.moi.contacts.RecipientProposal
 import fr.qwartz.mika.data.moi.contacts.RecipientSuggester
@@ -110,8 +122,12 @@ import fr.qwartz.mika.data.moi.mail.sizeLabel
 import fr.qwartz.mika.data.moi.mail.uniquePeople
 import fr.qwartz.mika.data.moi.mail.writableBoxes
 import fr.qwartz.mika.ui.Route
+import fr.qwartz.mika.ui.components.WorkLine
 import fr.qwartz.mika.ui.contacts.contactsApi
 import fr.qwartz.mika.ui.shell.BarNav
+import fr.qwartz.mika.ui.shell.CorrectButton
+import fr.qwartz.mika.ui.shell.CorrectNotices
+import fr.qwartz.mika.ui.shell.FieldCorrector
 import fr.qwartz.mika.ui.shell.Gap
 import fr.qwartz.mika.ui.shell.Load
 import fr.qwartz.mika.ui.shell.LoadBox
@@ -122,6 +138,7 @@ import fr.qwartz.mika.ui.shell.NoteBox
 import fr.qwartz.mika.ui.shell.PersonAvatar
 import fr.qwartz.mika.ui.shell.SectionScaffold
 import fr.qwartz.mika.ui.shell.Shell
+import fr.qwartz.mika.ui.shell.rememberCorrectWords
 import fr.qwartz.mika.ui.shell.rememberSessionKey
 import fr.qwartz.mika.ui.shell.said
 import fr.qwartz.mika.ui.theme.mika
@@ -131,21 +148,17 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import java.util.UUID
 
-/** Une réponse demandée depuis « Écrire » : ses brouillons se relisent à ce rythme, au plus si longtemps. */
-private const val ASK_POLL_MS = 10_000L
-private const val ASK_POLL_MAX_MS = 30 * 60_000L
-
 /** Les champs de destinataires. */
 enum class RecipientField { TO, CC, BCC }
 
 /**
  * Écrire (`Route.MailCompose`) : un mail nouveau, une réponse (à tous), un transfert, ou la retouche d'un de ses
  * brouillons. De quelle boîte, à qui (tous tes contacts proposés, une adresse générique marquée : [directory], ADR
- * 0298 ; sans lui, tes correspondants), l'objet, le texte, citer, les pièces ; « Préremplir avec Mika » en réponse. Une
- * clé d'envoi par geste : un double appui ne part qu'une fois.
+ * 0298 ; sans lui, tes correspondants), l'objet, le texte, citer, les pièces ; « Préremplir avec Mika » en réponse ;
+ * « Corriger » le texte (ADR 0307). Une clé d'envoi par geste : un double appui ne part qu'une fois.
  *
- * Le modèle sert toutes les écritures de la session : ce qui répond (un chargement, « Préremplir », un envoi) ne pose
- * rien que si l'écriture qui l'a demandé est toujours là — même route, même visite.
+ * Le modèle sert toutes les écritures de la session : ce qui répond (un chargement, « Préremplir », « Corriger », un
+ * envoi) ne pose rien que si l'écriture qui l'a demandé est toujours là — même route, même visite.
  */
 class MailComposeViewModel(deps: MailDeps, directory: ContactsApi? = null) : MailScreenModel(deps) {
     var route by mutableStateOf<Route.MailCompose?>(null)
@@ -192,6 +205,14 @@ class MailComposeViewModel(deps: MailDeps, directory: ContactsApi? = null) : Mai
     /** Une réponse demandée, pas encore écrite. */
     var asked by mutableStateOf(false)
         private set
+    /** Où elle en est d'une réponse au mail d'origine (ADR 0306), demandée ou qu'elle prépare d'elle-même ; `null` :
+     *  rien en cours. */
+    var work by mutableStateOf<Work?>(null)
+        private set
+    /** Guettée sans réponse au-delà du plafond : on cesse de relire où elle en est (une nouvelle demande, si). */
+    private var gaveUp by mutableStateOf(false)
+    /** Depuis quand on guette (0 : pas encore). */
+    private var watchSince = 0L
     var prefilling by mutableStateOf(false)
         private set
     var suggestions by mutableStateOf<List<RecipientProposal>>(emptyList())
@@ -267,6 +288,9 @@ class MailComposeViewModel(deps: MailDeps, directory: ContactsApi? = null) : Mai
         problem = ""
         fromDraft = ""
         asked = false
+        work = null
+        gaveUp = false
+        watchSince = 0L
         suggestJob?.cancel()
         suggestions = emptyList()
         suggestFor = null
@@ -411,6 +435,8 @@ class MailComposeViewModel(deps: MailDeps, directory: ContactsApi? = null) : Mai
         cc.addAll(copies)
         showCc = copies.isNotEmpty()
         subject = clip(replySubject(m.subject), MailLimits.SUBJECT)
+        // une réponse qu'elle y prépare déjà (demandée d'ailleurs, ou d'elle-même) : sa ligne se suit ici aussi
+        work = m.work
         return null
     }
 
@@ -593,7 +619,12 @@ class MailComposeViewModel(deps: MailDeps, directory: ContactsApi? = null) : Mai
                         }
                         id.isNotBlank() -> say(got.value.message)
                         else -> {
+                            // elle s'y met tout de suite (ADR 0306) : sa ligne paraît aussitôt, la relecture la corrige
+                            val at = deps.now()
                             asked = true
+                            if (work == null) work = Work.waiting(at)
+                            gaveUp = false
+                            watchSince = at
                             say(if (got.value.message == ALREADY) got.value.message else askedText)
                         }
                     }
@@ -621,6 +652,7 @@ class MailComposeViewModel(deps: MailDeps, directory: ContactsApi? = null) : Mai
         quote = d.quote
         fromDraft = d.id
         asked = false
+        work = null
         touched = true
     }
 
@@ -630,21 +662,68 @@ class MailComposeViewModel(deps: MailDeps, directory: ContactsApi? = null) : Mai
         body = ""
     }
 
-    /** Une réponse demandée : est-elle arrivée ? Reprise si tu n'as rien écrit, sinon dite. */
-    suspend fun checkAsked(arrived: String, waiting: String): Boolean {
-        val m = original ?: return true
-        val r = route ?: return true
+    // ── Corriger ──
+
+    /** « Corriger » ton texte (ADR 0307), écriture par écriture : celle d'avant, quittée en pleine correction, ne
+     *  retient pas celle-ci. */
+    val corrector = FieldCorrector(viewModelScope) { api.correct(it) }
+
+    /** L'écriture ouverte attend sa correction (« Correction… »). */
+    val correcting: Boolean get() = corrector.busy(visit)
+
+    /** « Corriger » : les fautes de ton texte, sans changer tes mots ; le texte corrigé remplace le tien, et « Annuler »
+     *  te le rend. Changé d'ici la réponse, ou l'écriture quittée, rien ne s'y pose. [on] : un modèle corrige
+     *  (`GET /api/moi` → `correct`) ; sinon, [words] dit pourquoi. */
+    fun correct(on: Boolean, words: CorrectWords) {
+        val r = route ?: return
         val v = visit
-        val d = (api.drafts() as? MoiApi.Result.Ok)?.value?.firstOrNull { it.inReplyTo == m.ref && it.waiting } ?: return false
-        if (!current(r, v)) return true
-        if (body.isBlank()) {
-            take(d)
-            say(arrived)
-        } else {
-            asked = false
-            say(waiting)
+        corrector.correct(v, on, words, read = { if (current(r, v) && shown) body else null }, write = ::editBody)
+    }
+
+    /** On guette où elle en est d'une réponse au mail d'origine : demandée, ou qu'elle prépare d'elle-même, tant que
+     *  son brouillon n'est pas repris ici. */
+    val watching: Boolean
+        get() = setup is Load.Ready && original != null && fromDraft.isEmpty() && watchWork(asked, work, arrived = false, gaveUp = gaveUp)
+
+    /**
+     * Où elle en est (ADR 0306), relu toutes les deux secondes tant qu'on guette ([watching]) : son brouillon arrivé, il
+     * est repris si tu n'as rien écrit ([arrived]), sinon dit ([waiting]) ; plus rien de demandé ni d'en cours, on
+     * cesse ; sinon seule sa ligne change. Au-delà du plafond, on cesse ; une relecture manquée attend la suivante. Rien
+     * ne se pose si l'écriture qui guettait n'est plus là.
+     */
+    suspend fun pollWork(arrived: String, waiting: String) {
+        val m = original ?: return
+        val r = route ?: return
+        val v = visit
+        if (!watching) return
+        if (watchSince == 0L) watchSince = deps.now()
+        if (workGaveUp(watchSince, deps.now())) {
+            gaveUp = true
+            return
         }
-        return true
+        val got = (api.work(m.ref) as? MoiApi.Result.Ok)?.value ?: return
+        if (!current(r, v)) return
+        when (workTurn(arrived = got.draft.isNotBlank(), asked = got.asked, work = got.work)) {
+            WorkTurn.ARRIVED -> {
+                // ses brouillons illisibles : la relecture suivante le retrouvera
+                val d = findDraft(got.draft) ?: return
+                if (!current(r, v)) return
+                work = null
+                if (body.isBlank()) {
+                    take(d)
+                    say(arrived)
+                } else {
+                    asked = false
+                    say(waiting)
+                }
+            }
+            WorkTurn.ENDED -> {
+                // elle a fini sans en rendre, ou y a renoncé : plus rien n'est en cours ici
+                asked = false
+                work = null
+            }
+            WorkTurn.GOING -> work = got.work
+        }
     }
 
     // ── Envoyer ──
@@ -792,7 +871,8 @@ class MailComposeViewModel(deps: MailDeps, directory: ContactsApi? = null) : Mai
 }
 
 /** Écrire (la maquette, `vueEcrire`) : De, À (Cc, Cci), l'objet, le texte ; joindre et envoyer en haut ;
- *  « Préremplir avec Mika » en bas, en réponse. */
+ *  « Préremplir avec Mika » en bas, en réponse, et « Corriger » à côté, partout (ADR 0307). */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun MailComposeScreen(graph: AppGraph, route: Route.MailCompose) {
     val shell = LocalShell.current
@@ -807,6 +887,11 @@ fun MailComposeScreen(graph: AppGraph, route: Route.MailCompose) {
     // ce qu'Écrire dit passe par le cadre (`MailNotices`), pas par cet écran : un envoi fini après qu'on est parti se
     // dit quand même. Parti, l'écran de cette visite (et lui seul) revient en arrière.
     LaunchedEffect(vm, visit) { vm.finished(visit).collect { shell.back() } }
+    // « Corriger » (ADR 0307) : combien de fautes, avec « Annuler » quand ton texte a été remplacé
+    CorrectNotices(vm.corrector)
+    val me by graph.me.me.collectAsStateWithLifecycle()
+    val canCorrect = me?.correct == true
+    val correctWords = rememberCorrectWords()
     var confirmLeave by remember { mutableStateOf(false) }
     val ours = vm.route == route && vm.visit == visit
     val stillGoing = stringResource(R.string.mail_leaving_while_sending)
@@ -834,6 +919,7 @@ fun MailComposeScreen(graph: AppGraph, route: Route.MailCompose) {
             openDrawer = shell.openDrawer,
             snackbar = shell.snackbar,
             toast = shell.toast,
+            offer = shell.offer,
         )
     }
     BackHandler(enabled = ours && vm.touched) { leave() }
@@ -862,7 +948,7 @@ fun MailComposeScreen(graph: AppGraph, route: Route.MailCompose) {
         },
     )
     val keptText = stringResource(R.string.mail_not_sent_kept)
-    val askedText = stringResource(R.string.mail_prefill_asked_here)
+    val askedText = stringResource(R.string.mail_prefill_asked)
     val takenText = stringResource(R.string.mail_prefill_taken)
     CompositionLocalProvider(LocalShell provides guarded) {
         SectionScaffold(
@@ -897,18 +983,33 @@ fun MailComposeScreen(graph: AppGraph, route: Route.MailCompose) {
             bottomBar = {
                 Surface(color = MaterialTheme.colorScheme.surface) {
                     Column(Modifier.navigationBarsPadding().imePadding()) {
-                        if (ready && vm.canPrefill) {
+                        // au-dessus du clavier : « Préremplir avec Mika » en réponse, et « Corriger » partout où l'on
+                        // écrit (ADR 0307) ; sur un écran étroit, « Corriger » passe à la ligne
+                        if (ready) {
                             HorizontalDivider()
-                            OutlinedButton(
-                                onClick = { vm.prefill(askedText, takenText) },
-                                enabled = !vm.prefilling && !vm.asked,
-                                border = BorderStroke(1.dp, mika.line),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = mika.accent),
-                                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp),
+                            FlowRow(
+                                Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
                             ) {
-                                MIcon(R.drawable.ic_m_sparkle, null, size = 18.dp)
-                                Spacer(Modifier.width(6.dp))
-                                Text(stringResource(R.string.mail_prefill))
+                                if (vm.canPrefill) {
+                                    OutlinedButton(
+                                        onClick = { vm.prefill(askedText, takenText) },
+                                        enabled = !vm.prefilling && !vm.asked,
+                                        border = BorderStroke(1.dp, mika.line),
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = mika.accent),
+                                    ) {
+                                        MIcon(R.drawable.ic_m_sparkle, null, size = 18.dp)
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(stringResource(R.string.mail_prefill))
+                                    }
+                                }
+                                CorrectButton(
+                                    on = canCorrect,
+                                    busy = vm.correcting,
+                                    enabled = !vm.sending,
+                                    onClick = { vm.correct(canCorrect, correctWords) },
+                                )
                             }
                         }
                     }
@@ -920,16 +1021,19 @@ fun MailComposeScreen(graph: AppGraph, route: Route.MailCompose) {
             }
         }
     }
-    // une réponse demandée : ses brouillons se relisent jusqu'à ce qu'elle arrive
+    // où elle en est d'une réponse (ADR 0306) : relu toutes les deux secondes tant qu'on guette, l'app au premier plan ;
+    // l'écran ne se redessine que quand on commence ou cesse de guetter, la ligne seule à chaque étape
     val arrived = stringResource(R.string.mail_prefill_taken_arrived)
     val waiting = stringResource(R.string.mail_prefill_arrived_elsewhere)
-    LaunchedEffect(route, vm.asked) {
-        if (!vm.asked) return@LaunchedEffect
-        var waited = 0L
-        while (waited < ASK_POLL_MAX_MS) {
-            delay(ASK_POLL_MS)
-            waited += ASK_POLL_MS
-            if (vm.checkAsked(arrived, waiting)) break
+    val watching by remember(vm) { derivedStateOf { vm.watching } }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(route, watching, lifecycle) {
+        if (!watching) return@LaunchedEffect
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                delay(WORK_POLL_MS)
+                vm.pollWork(arrived, waiting)
+            }
         }
     }
     // « Abandonner » ne s'offre jamais pendant un envoi : il partirait quand même
@@ -976,12 +1080,8 @@ private fun ComposeForm(vm: MailComposeViewModel, modifier: Modifier) {
                 Text(stringResource(R.string.mail_draft_taken), style = MaterialTheme.typography.bodySmall, color = mika.accent, modifier = Modifier.weight(1f))
                 TextButton(onClick = vm::dropDraft) { Text(stringResource(R.string.mail_draft_drop)) }
             }
-        } else if (vm.asked) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                MIcon(R.drawable.ic_m_sparkle, null, size = 14.dp, tint = mika.accent)
-                Spacer(Modifier.width(6.dp))
-                Text(stringResource(R.string.mail_her_working_here), style = MaterialTheme.typography.bodySmall, color = mika.accent)
-            }
+        } else {
+            ComposeWork(vm)
         }
         PlainField(
             vm.body,
@@ -1031,6 +1131,26 @@ private fun ComposeForm(vm: MailComposeViewModel, modifier: Modifier) {
             NoteBox(vm.problem, R.drawable.ic_m_alert, Modifier.padding(16.dp), Tone.DANGER)
         }
         Gap(24.dp)
+    }
+}
+
+/**
+ * Où elle en est d'une réponse (ADR 0306), au-dessus du texte, sur une ligne : ✦, l'étape et son chrono. Elle seule lit
+ * [MailComposeViewModel.work] : quand l'étape change, rien d'autre ne se redessine (ni les champs, ni ce qu'on y tape).
+ * Un serveur d'avant qui ne dit pas l'étape : « Elle s'y met… », comme avant.
+ */
+@Composable
+private fun ComposeWork(vm: MailComposeViewModel) {
+    val work = vm.work
+    val line = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+    val lead: @Composable () -> Unit = { MIcon(R.drawable.ic_m_sparkle, null, size = 14.dp, tint = mika.accent) }
+    when {
+        work != null -> WorkLine(work, line, lead)
+        vm.asked -> Row(line, verticalAlignment = Alignment.CenterVertically) {
+            lead()
+            Spacer(Modifier.width(6.dp))
+            Text(stringResource(R.string.mail_her_working_here), style = MaterialTheme.typography.bodySmall, color = mika.accent)
+        }
     }
 }
 
@@ -1138,7 +1258,8 @@ private fun LineField(label: String, content: @Composable androidx.compose.found
     }
 }
 
-/** Un champ sans cadre, borné à [max] caractères (ce que l'API refuserait au-delà). */
+/** Un champ sans cadre, borné à [max] caractères (ce que l'API refuserait au-delà) ; un texte qui la dépasse déjà
+ *  (corrigé, ADR 0307) se raccourcit encore. */
 @Composable
 private fun PlainField(
     value: String,
@@ -1153,7 +1274,7 @@ private fun PlainField(
     val scheme = MaterialTheme.colorScheme
     BasicTextField(
         value = value,
-        onValueChange = { if (chars(it) <= max) onValue(it) },
+        onValueChange = { if (chars(it) <= max || chars(it) <= chars(value)) onValue(it) },
         singleLine = singleLine,
         keyboardOptions = keyboard,
         keyboardActions = actions,

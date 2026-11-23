@@ -1,6 +1,7 @@
 package fr.qwartz.mika.data.moi.mail
 
 import fr.qwartz.mika.data.moi.Levels
+import fr.qwartz.mika.data.moi.Work
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -167,6 +168,18 @@ data class MailFull(
     /** Une copie reçue ailleurs que dans « Envoyés » (en copie à soi) : on y répond. */
     val received: Boolean = false,
     val images: MailImages = MailImages(),
+    /** Où elle en est d'une réponse qu'elle y prépare, en direct (ADR 0306) ; `null` : rien en cours, la lecture
+     *  seule, ou un serveur d'avant qui ne le dit pas. */
+    val work: Work? = null,
+)
+
+/** Ce qu'on relit toutes les deux secondes pendant qu'elle y travaille (`/mail/work`, ADR 0306), sans relire le mail. */
+@Serializable
+data class MailWork(
+    val work: Work? = null,
+    val asked: Boolean = false,
+    /** Son brouillon qui attend, dès qu'il est arrivé ; vide sinon. */
+    val draft: String = "",
 )
 
 /** Exactement ce qui partira (seulement tant qu'il attend). */
@@ -273,6 +286,6 @@ data class MailDone(
     val moved: Int = 0,
     /** `prefill` : un brouillon d'elle qui attend déjà pour ce mail. */
     val draft: String = "",
-    /** `prefill` : elle l'écrira à son prochain moment de travail. */
+    /** `prefill` : elle s'y met tout de suite (ADR 0306). */
     val asked: Boolean = false,
 )

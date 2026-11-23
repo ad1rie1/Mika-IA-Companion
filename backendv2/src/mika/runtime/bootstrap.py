@@ -191,7 +191,8 @@ class Kernel:
         self.mind.registry.closeness = deps.closeness
         self.runner.interpret = self.interpret  # une réponse s'interprète aussi : ce que le modèle a lu (ADR 0093)
         self.lanes = Lanes(self.runner, capacities=deps.lanes, max_pending=deps.max_pending)
-        self.arbiter = Arbiter(lambda: self.mind.registry, self._submit_selected, seed=deps.seed, held=self._held_kind)
+        self.arbiter = Arbiter(lambda: self.mind.registry, self._submit_selected, seed=deps.seed, held=self._held_kind,
+                               yields=self.runner.yields)
         self.mind.subscribe(self.arbiter.invalidate)
         self.mind.subscribe(self._retry_replies)
         self._retries: set[asyncio.Task[None]] = set()
@@ -638,7 +639,10 @@ class Kernel:
         subject = row.args.get("subject")
         queued = self.lanes.submit(EpisodeRequest(
             kind=row.kind, target=target, selected=row, reason=",".join(p[1] for p in row.parts),
-            trigger=f"selected:{selected if selected is not None else frame.seq}", priority=policy.priority,
+            trigger=f"selected:{selected if selected is not None else frame.seq}",
+            # ce que quelqu'un attend part au premier plan (ADR 0306) : il prend un ouvrier à ce qu'elle fait
+            # d'elle-même dans sa voie, passe devant le fond chez le fournisseur, et la retenue du quota le laisse passer
+            priority=0 if row.awaited else policy.priority,
             basis=frame.root, subject=str(subject) if subject else None, selected_seq=selected,
             # le mode que ce candidat demande (ADR 0276) : inconnu, ou pas pour cette sorte d'épisode, l'ordinaire
             mode=str(row.args.get("mode") or ""),

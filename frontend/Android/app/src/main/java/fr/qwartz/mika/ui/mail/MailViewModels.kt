@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import fr.qwartz.mika.core.AndroidClock
 import fr.qwartz.mika.core.AppGraph
 import fr.qwartz.mika.data.moi.Caps
 import fr.qwartz.mika.data.moi.Levels
@@ -44,8 +45,8 @@ import kotlinx.coroutines.sync.withLock
 
 /**
  * Ce que les écrans de Mail prennent de la session : l'API, les mails commencés, relire les pastilles, savoir si la
- * session est ouverte, et dire un sort où qu'on soit (un envoi fini après qu'on a quitté son écran). Un test JVM les
- * donne sans le graphe de l'app.
+ * session est ouverte, dire un sort où qu'on soit (un envoi fini après qu'on a quitté son écran), et l'heure (où elle
+ * en est d'une réponse, ADR 0306). Un test JVM les donne sans le graphe de l'app.
  */
 class MailDeps(
     val api: MailApi,
@@ -53,6 +54,7 @@ class MailDeps(
     val refreshBadges: () -> Unit = {},
     val signedIn: () -> Boolean = { true },
     val notices: MailNotices = MailNotices(),
+    val now: () -> Long = AndroidClock::wallMs,
 ) {
     constructor(graph: AppGraph) : this(
         api = graph.mailApi(),
@@ -60,6 +62,7 @@ class MailDeps(
         refreshBadges = { graph.me.refresh() },
         signedIn = { graph.auth.credentials() != null },
         notices = graph.mailNotices,
+        now = graph.clock::wallMs,
     )
 }
 

@@ -126,6 +126,8 @@ class RowRecord(Payload):
     aging: float = 0.0
     #: le décalage de chaque modulateur (par propriétaire) ; leur somme est ``shift``
     shifts: tuple[tuple[str, float], ...] = ()
+    #: quelqu'un l'attendait (ADR 0306) : son taux était celui des lignes attendues
+    awaited: bool = False
 
 
 class Selected(Payload):

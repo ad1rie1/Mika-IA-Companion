@@ -1,6 +1,7 @@
 package fr.qwartz.mika.data.moi.teams
 
 import fr.qwartz.mika.data.moi.Levels
+import fr.qwartz.mika.data.moi.Work
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -222,6 +223,18 @@ data class ConversationThread(
     @SerialName("under_way") val underWay: Boolean = false,
     /** Une réponse demandée, qu'elle n'a pas encore rendue. */
     val asked: Boolean = false,
+    /** Où elle en est d'une réponse ici, en direct (ADR 0306) ; `null` : rien en cours, la lecture seule, ou un serveur
+     *  d'avant qui ne le dit pas. */
+    val work: Work? = null,
+)
+
+/** Ce qu'on relit toutes les deux secondes pendant qu'elle y travaille (`/teams/work`, ADR 0306), sans relire le fil. */
+@Serializable
+data class TeamsWork(
+    val work: Work? = null,
+    val asked: Boolean = false,
+    /** Une réponse d'elle en chemin : elle est arrivée, le fil se relit. */
+    @SerialName("under_way") val underWay: Boolean = false,
 )
 
 /** Ce qu'une écriture a donné (`{"ok": true, "message": "…"}`), avec ce que « Préremplir » dit de plus. */

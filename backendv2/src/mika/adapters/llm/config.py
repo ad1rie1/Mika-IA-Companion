@@ -277,6 +277,7 @@ ROLE_LABELS = {"reply": "répondre (voix)", "initiative": "prendre la parole (vo
                "review": "relire un travail avant qu'il sorte (impersonnel)",
                "polish": "rendre naturel (voix, seconde passe)", "pro": "répondre en mode pro (voix)",
                "character": "écrire son caractère (d'après sa matrice)",
+               "correct": "corriger les fautes (Mail, Teams)",
                TRIAL_ROLE: "rejouer une parole (essai de la console)"}
 
 

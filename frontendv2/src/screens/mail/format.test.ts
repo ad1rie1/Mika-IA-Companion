@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../../api/moi";
-import { errorText, refusalText } from "./compose";
+import { correctedText, errorText, refusalText } from "./compose";
 import {
   addressText,
   ago,
@@ -313,5 +313,13 @@ describe("un rangement se voit aussitôt (le serveur range ensuite)", () => {
     const leaving = new Map([["b", 4]]);
     expect(keptRows(rows, leaving, 5).map((r) => r.ref)).toEqual(["a", "b", "c"]);
     expect(leaving.size).toBe(0);
+  });
+});
+
+describe("« Corriger » (ADR 0307) : ce qu'il dit une fois fait", () => {
+  it("combien de fautes, ou aucune", () => {
+    expect(correctedText(0)).toBe("Aucune faute : ton texte reste tel quel.");
+    expect(correctedText(1)).toBe("1 faute corrigée.");
+    expect(correctedText(3)).toBe("3 fautes corrigées.");
   });
 });

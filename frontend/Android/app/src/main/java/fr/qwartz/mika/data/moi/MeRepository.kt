@@ -9,7 +9,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 
-/** `GET /api/moi` (protocole § 2) : qui est connecté, et ce qui attend sa décision. */
+/** `GET /api/moi` (protocole § 2) : qui est connecté, ce qui attend sa décision, et si « Corriger » marche. */
 @Serializable
 data class Me(
     val username: String = "",
@@ -19,6 +19,9 @@ data class Me(
     val operator: Boolean = false,
     val owner: Boolean = false,
     val counts: Counts = Counts(),
+    /** « Corriger » marche : un modèle est donné au rôle `correct` (ADR 0307) ; faux, le bouton reste éteint et dit
+     *  pourquoi. Un serveur d'avant ne le dit pas : éteint. */
+    val correct: Boolean = false,
 ) {
     /** Le nom à montrer : celui sous lequel elle la connaît, sinon l'identifiant. */
     val shown: String get() = name.ifBlank { username }

@@ -56,6 +56,8 @@ ADDRESSES = (60, 60.0)
 #: photo la première fois, « Actualiser » une fiche, précharger autour de soi —, au plus tant par compte dans la
 #: fenêtre : une personne n'use pas seule les quotas de tout le serveur
 MAP_READS = (60, 60.0)
+#: « Corriger » (ADR 0307) : au plus tant de corrections par compte dans la fenêtre — chacune est un appel au modèle
+CORRECTIONS = (20, 60.0)
 PHOTO_READS = (120, 60.0)
 REFRESHES = (10, 60.0)
 PRELOADS = (10, 600.0)
@@ -341,6 +343,8 @@ class MeApiBase:
         self.address_tries = SlidingWindow(*ADDRESSES)
         #: l'écran Carte, par compte : les fiches et les événements lus, les photos, « Actualiser », les préchargements
         self.map_reads = SlidingWindow(*MAP_READS)
+        #: « Corriger », par compte (``CORRECTIONS``)
+        self.corrections = SlidingWindow(*CORRECTIONS)
         self.photo_reads = SlidingWindow(*PHOTO_READS)
         self.refreshes = SlidingWindow(*REFRESHES)
         self.preloads = SlidingWindow(*PRELOADS)

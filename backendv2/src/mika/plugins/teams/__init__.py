@@ -58,7 +58,7 @@ from mika.kernel.state import FrozenDict
 from mika.ports.teams import DEFAULT_ACCOUNT, conversation_key
 from mika.vocab.access import PERSON, SELF, SHARE_PREPARE, SHARE_READ, SHARE_USE
 from mika.vocab.canals import Canals, teams_rule
-from mika.vocab.episodes import Kind, task_of
+from mika.vocab.episodes import Kind, gave_way, task_of
 from mika.vocab.ownership import best_handle, must_approve, owns_one, reach, shared_with
 from mika.vocab.phrasebook import phrase
 from mika.vocab.rights import here_allowed
@@ -128,8 +128,8 @@ class TeamsParams(BaseModel):
              "au seuil des tâches (8).")] = 8.5
     asked_evidence: Annotated[float, Knob(
         label="Quand on le lui demande", group="Brouillons", lo=8.0, hi=14.0, step=0.5,
-        help="La preuve d'une réponse qu'un opérateur lui demande de préparer (endormie, elle la fera au "
-             "réveil).")] = 12.0
+        help="La preuve d'une réponse qu'on lui demande de préparer (« Préremplir ») : quelqu'un "
+             "l'attend, elle s'y met en une ou deux secondes, même endormie (ADR 0306).")] = 12.0
     draft_attempts_max: Annotated[int, Knob(
         label="Essais par message", group="Brouillons", lo=1, hi=5,
         help="Si une tâche ne donne pas de réponse, elle ne réessaie pas plus que ceci pour le même message.")] = 2
@@ -276,7 +276,7 @@ class Written(Payload):
 #: v2 : un message remarqué garde ce que sa règle d'envoi en disait (``Seen.prepare``, ``send``) ; v3 : chaque message,
 #: réponse et demande garde son compte (ADR 0186) ; v4 : une réponse sait qu'on a répondu autrement dans sa
 #: conversation (``DraftSeen.answered``, ADR 0199) ; v5 : les images arrivées (``TeamsState.images``, ADR 0258)
-TEAMS = Faculty("teams", state=TeamsState, init=lambda p: TeamsState(), params=TeamsParams, state_version=5)
+TEAMS = Faculty("teams", state=TeamsState, init=lambda p: TeamsState(), params=TeamsParams, state_version=6)
 TEAMS.declare(*c.ALL)
 TEAMS.bundle(BUNDLE, phrase("teams.bundle"))
 RECEIVED = TEAMS.event("received", Received)
@@ -411,6 +411,18 @@ def _episode(s: TeamsState, e, cx) -> TeamsState:
     if len(attempts) > KEEP:  # on oublie les essais des messages qu'elle ne garde plus en tête (les plus anciens)
         attempts = FrozenDict({k: n for k, n in attempts.items() if k in s.messages or k in s.asked})
     return replace(s, attempts=attempts)
+
+
+@TEAMS.reducer(rt.EPISODE_ENDED)
+def _gave_way(s: TeamsState, e, cx) -> TeamsState:
+    """Une tâche de rédaction qui a cédé la place à ce qu'on attendait (préemptée, ou supplantée sur son bail : ADR
+    0306) n'a pas fait d'essai : il lui est rendu."""
+    d = e.data
+    found = task_of(d.target) if d.kind == Kind.TASK else None
+    if found is None or found[0] != "teams" or not gave_way(d.outcome, d.guard):
+        return s
+    n = s.attempts.get(found[1], 0)
+    return replace(s, attempts=s.attempts.set(found[1], n - 1) if n > 1 else s.attempts.delete(found[1]))
 
 
 @TEAMS.reducer(rt.EFFECT_PROPOSED)

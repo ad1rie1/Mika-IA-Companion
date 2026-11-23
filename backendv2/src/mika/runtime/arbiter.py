@@ -6,6 +6,13 @@ processus sans mémoire le permet sans biais). À l'échéance, les lignes sont
 recalculées, l'occurrence acceptée avec la probabilité Σλ/borne, une ligne
 choisie proportionnellement à son intensité — si ses ressources sont libres,
 ``kernel.selected`` est ajouté et l'épisode demandé est lancé.
+
+Une ligne **attendue** (ADR 0306 : quelqu'un a demandé ce travail, « Préremplir avec Mika ») n'est pas une envie à
+elle : ni le décalage d'usage ni la retenue des modèles ne la touchent (elle partira au premier plan). Tant qu'une de
+ses ressources est tenue par ce qui ne lui cède pas la place, elle attend sous un veto (``BUSY``) plutôt que de perdre
+une occurrence par seconde — la fin du bail est un événement, qui la relance ; un épisode qu'elle supplante (ce qu'elle
+fait d'elle-même) ne la retient pas. Son essai qui a échoué (une panne, un délai) ou que la file a refusé attend une
+minute avant le suivant (``RETRY``) : une panne passagère ne brûle pas ses essais en deux secondes.
 """
 
 from __future__ import annotations
@@ -13,6 +20,7 @@ from __future__ import annotations
 import random
 from collections import deque
 from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from mika.kernel.arbitration import (
@@ -51,6 +59,13 @@ LAST_ROWS_KEPT = 256
 RECENT_KEPT = 512
 #: le veto d'une ligne dont le fournisseur refuserait l'appel d'avance (``LLMGateway.held``, ADR 0127)
 HELD = "held"
+#: le veto d'une ligne attendue dont une ressource est tenue (ADR 0306) : elle repart à la fin du bail
+BUSY = "busy"
+#: le veto d'une ligne attendue dont l'essai vient d'échouer (ADR 0306) : elle repart à la fin de ``RETRY_US``
+RETRY = "retry"
+RETRY_US = 60 * 1_000_000
+#: les issues d'un essai qui a échoué : le suivant attend ``RETRY_US``
+_FAILED = frozenset({"failed", "timeout"})
 #: les réglages d'usage du runtime (``RuntimeParams``, ADR 0149) : le décalage de chaque sorte d'épisode — prendre
 #: la parole, se mettre au travail ; les réveils par API n'en ont pas, quelqu'un les attend
 USAGE_SHIFTS = {Kind.INITIATIVE: "speak_shift", Kind.STEP: "work_shift", Kind.TASK: "work_shift",
@@ -59,9 +74,14 @@ USAGE_SHIFTS = {Kind.INITIATIVE: "speak_shift", Kind.STEP: "work_shift", Kind.TA
 
 class Arbiter:
     def __init__(self, registry_of: Callable[[], Registry], submit: Submit, *, seed: int | str = 0,
-                 reevaluate_us: int = REEVALUATE_US, held: Callable[[str], str] | None = None) -> None:
+                 reevaluate_us: int = REEVALUATE_US, held: Callable[[str], str] | None = None,
+                 yields: Callable[[str], bool] | None = None) -> None:
         self._registry_of = registry_of
         self._submit = submit
+        #: le détenteur d'un bail le cède-t-il au premier plan (``EpisodeRunner.yields``, ADR 0306) ?
+        self._yields = yields
+        #: une ligne attendue → la fin de son attente après un essai qui a échoué (``RETRY_US``) ; en mémoire
+        self.cooling: dict[str, int] = {}
         #: sorte d'épisode → la raison pour laquelle son fournisseur le refuserait d'avance (« » : il passerait) —
         #: le quota d'un abonnement réservé à la conversation (ADR 0127)
         self._held = held
@@ -89,7 +109,10 @@ class Arbiter:
         self._bound = 0.0
         for e in events:
             if e.type.name == "episode.ended":
-                self.queued.discard(f"{e.data.kind}:{e.data.target or 'none'}")
+                key = f"{e.data.kind}:{e.data.target or 'none'}"
+                self.queued.discard(key)
+                if e.data.outcome in _FAILED:
+                    self.cooling[key] = e.at + RETRY_US
 
     # ── lignes ──
     def rows(self, frame: Frame, *, record: bool = True) -> list[Row]:
@@ -111,7 +134,7 @@ class Arbiter:
                 lo, hi = rng
                 clamped = min(hi, max(lo, c.evidence))
                 if clamped != c.evidence:
-                    c = Candidate(c.kind, c.target, c.reason, clamped, c.args, c.resources, c.deadline, c.guards)
+                    c = replace(c, evidence=clamped)
                 proposals.append((spec.owner, c))
 
         held: dict[str, str] = {}
@@ -120,11 +143,13 @@ class Arbiter:
 
         def modulate(view: RowView) -> list[tuple[str, Modulation]]:
             out: list[tuple[str, Modulation]] = []
-            knob = USAGE_SHIFTS.get(view.kind)
+            # ce que quelqu'un attend n'est ni une envie de parler ni une envie de travailler, et part au premier plan,
+            # que la retenue des modèles laisse toujours passer (ADR 0306)
+            knob = None if view.awaited else USAGE_SHIFTS.get(view.kind)
             shift = getattr(usage, knob, 0.0) if knob is not None else 0.0
             if shift:
                 out.append((RUNTIME.name, Modulation(shift=shift)))
-            if self._held is not None:
+            if self._held is not None and not view.awaited:
                 # un épisode que son fournisseur refuserait d'avance ne se lance pas : il finirait en zéro seconde,
                 # sans rien faire, et un but le compterait (ADR 0127)
                 if view.kind not in held:
@@ -152,11 +177,34 @@ class Arbiter:
         else:
             seen = {k: self.first_seen.get(k, now) for k in keys}
         ages = {k: (now - t) / 1_000_000 for k, t in seen.items()}
-        rows = [r for r in pool(proposals, reg.arbitration, modulate, ages) if r.key not in self.queued]
+        if record:
+            self.cooling = {k: t for k, t in self.cooling.items() if t > now}
+        rows = [self._waiting(r, frame) for r in pool(proposals, reg.arbitration, modulate, ages)
+                if r.key not in self.queued]
+        rows.sort(key=lambda r: (-r.hazard, r.key))
         if record:
             self.last_rows = rows[:LAST_ROWS_KEPT]
             self.last_at, self.last_seq = now, frame.seq
         return rows
+
+    def _waiting(self, row: Row, frame: Frame) -> Row:
+        """Une ligne attendue qui doit patienter (ADR 0306) : son essai vient d'échouer (``RETRY``, jusqu'à la fin de
+        son attente), ou une de ses ressources est tenue par ce qui ne lui cède pas la place (``BUSY``, jusqu'à la fin
+        du bail) — à son taux, elle perdrait sinon une occurrence par seconde. Les autres lignes perdent la leur, comme
+        toujours."""
+        if not row.awaited or row.vetoes:
+            return row
+        if self.cooling.get(row.key, 0) > frame.now:
+            return replace(row, vetoes=(("kernel", RETRY),), hazard=0.0)
+        for res in row.resources:
+            lease = frame.get(LEASE(res))
+            if lease is not None and not self._gives_way(lease.holder):
+                return replace(row, vetoes=(("kernel", BUSY),), hazard=0.0)
+        return row
+
+    def _gives_way(self, holder: str) -> bool:
+        """Le détenteur de ce bail le cède-t-il au premier plan (ce qu'elle fait d'elle-même, ADR 0306) ?"""
+        return self._yields is not None and call(self._yields, holder, label="bail cédé") is True
 
     def _rng(self, frame: Frame, salt: str) -> random.Random:
         return random.Random(h64("arbitre", self._seed, frame.seq, self.attempts, salt))
@@ -175,6 +223,10 @@ class Arbiter:
                 self.next_at, self._bound = frame.now + self.reevaluate_us, 0.0
             else:
                 self.next_at, self._bound = frame.now + dt, bound
+            # une ligne attendue qui patiente après un essai échoué repart à la fin de son attente : une réévaluation
+            soon = min((t for t in self.cooling.values() if t > frame.now), default=None)
+            if soon is not None and soon < self.next_at:
+                self.next_at, self._bound = soon, 0.0
         return self.next_at
 
     async def run(self, ctx: ProcessContext) -> None:
@@ -192,7 +244,8 @@ class Arbiter:
         if row is None:
             return
         for res in sorted(row.resources):
-            if frame.get(LEASE(res)) is not None:
+            lease = frame.get(LEASE(res))
+            if lease is not None and not (row.awaited and self._gives_way(lease.holder)):
                 return  # ressource occupée : l'occurrence est perdue, pas reportée
         commit = await ctx.emit(
             SELECTED.draft(rows=tuple(r.record() for r in shown(rows, row, reg.arbitration.top_k)),
@@ -203,6 +256,9 @@ class Arbiter:
         # l'épisode porte le numéro exact de la sélection qui l'a choisi (``episode.started.selected``)
         if await self._submit(row, frame, commit.seqs[-1]):
             self.queued.add(row.key)
+        elif row.awaited:
+            # la file l'a refusé (pleine) : une ligne attendue ne se resélectionne pas chaque seconde
+            self.cooling[row.key] = ctx.now + RETRY_US
 
 
 def shown(rows: Sequence[Row], fired: Row, top_k: int) -> list[Row]:

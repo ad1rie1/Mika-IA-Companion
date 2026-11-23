@@ -13,6 +13,8 @@ export interface ToastOptions {
   ico?: IconName;
   /** Millisecondes. */
   duration?: number;
+  /** Un geste dans le toast (« Annuler ») : il le ferme. */
+  action?: { label: string; run: () => void };
 }
 
 export function toast(text: string, opts: ToastOptions = {}): void {
@@ -20,12 +22,21 @@ export function toast(text: string, opts: ToastOptions = {}): void {
   if (!root) return;
   const el = document.createElement("div");
   el.className = `toast${opts.mika ? " mika" : ""}`;
-  el.innerHTML = `${ico(opts.ico ?? (opts.mika ? "sparkle" : "check"))}<span>${h(text)}</span>`;
+  el.innerHTML = `${ico(opts.ico ?? (opts.mika ? "sparkle" : "check"))}<span>${h(text)}</span>${opts.action ? `<button class="toast-act" type="button">${h(opts.action.label)}</button>` : ""}`;
   root.appendChild(el);
-  window.setTimeout(() => {
+  const close = () => {
     el.classList.add("out");
     window.setTimeout(() => el.remove(), 250);
-  }, opts.duration ?? 2600);
+  };
+  if (opts.action) {
+    const run = opts.action.run;
+    el.querySelector("button")?.addEventListener("click", () => {
+      run();
+      close();
+    }, { once: true });
+  }
+  // un geste offert se laisse le temps d'être fait
+  window.setTimeout(close, opts.duration ?? (opts.action ? 6000 : 2600));
 }
 
 // ── La fenêtre ───────────────────────────────────────────────────────

@@ -23,16 +23,16 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 | Thème | Décisions |
 |---|---|
-| Le noyau : journal, arbitrage, pipeline | 0001, 0002, 0003, 0006, 0007, 0008, 0009, 0014, 0015, 0021, 0040, 0059, 0149, 0151, 0221, 0222, 0223 |
+| Le noyau : journal, arbitrage, pipeline | 0001, 0002, 0003, 0006, 0007, 0008, 0009, 0014, 0015, 0021, 0040, 0059, 0149, 0151, 0221, 0222, 0223, 0306 |
 | Le stockage | 0004, 0101, 0212 |
 | Sa mémoire et ce qu'elle sait | 0010, 0011, 0034, 0046, 0052, 0055, 0074, 0076, 0078, 0079, 0080, 0081, 0082, 0083, 0084, 0085, 0086, 0087, 0091, 0099, 0109, 0110, 0111, 0153, 0224, 0263, 0264 |
 | Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134, 0148, 0184, 0185, 0186, 0188, 0207, 0220, 0226, 0298, 0303, 0304 |
 | Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137, 0150, 0155, 0160, 0227, 0283 |
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144, 0145, 0161, 0253, 0254, 0257, 0260, 0262, 0265, 0268, 0270, 0271, 0272, 0273, 0274, 0275, 0276, 0277, 0278, 0279, 0280, 0289 |
-| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163, 0166, 0168, 0171, 0172, 0189, 0190, 0191, 0192, 0193, 0194, 0195, 0196, 0198, 0199, 0211, 0213, 0214, 0228, 0229, 0236, 0238, 0240, 0243, 0244, 0245, 0246, 0247, 0248, 0249, 0250, 0251, 0255, 0256, 0258, 0259, 0269, 0299, 0300, 0301, 0302, 0305 |
+| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163, 0166, 0168, 0171, 0172, 0189, 0190, 0191, 0192, 0193, 0194, 0195, 0196, 0198, 0199, 0211, 0213, 0214, 0228, 0229, 0236, 0238, 0240, 0243, 0244, 0245, 0246, 0247, 0248, 0249, 0250, 0251, 0255, 0256, 0258, 0259, 0269, 0299, 0300, 0301, 0302, 0305, 0307 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158, 0239, 0267, 0285 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159, 0261 |
-| Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170, 0187, 0200, 0208, 0209, 0215, 0233, 0235, 0242, 0252, 0282, 0284, 0286, 0287, 0288, 0290, 0291, 0292, 0293, 0294, 0296 |
+| Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170, 0187, 0200, 0208, 0209, 0215, 0233, 0235, 0242, 0252, 0282, 0284, 0286, 0287, 0288, 0290, 0291, 0292, 0293, 0294, 0296, 0308 |
 | La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176, 0177, 0178, 0179, 0180, 0181, 0182, 0183, 0197, 0201, 0202, 0203, 0204, 0205, 0206, 0210, 0216, 0217, 0218, 0219, 0225, 0230, 0231, 0232, 0234, 0237, 0241, 0281, 0295, 0297 |
 | Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135, 0266 |
 
@@ -171,6 +171,8 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Pourquoi :* sa fréquence ne se réglait qu'en touchant une à une les preuves de chaque faculté, et les seuils de la composition étaient hors de la console (audit des garde-fous du 2026-10-27).
 
+*Révisée par 0306.*
+
 ### 0151 — L'ordre du prompt est déclaré, pas déduit
 
 - La composition déclare l'ordre de lecture de toutes les sections du prompt, une à une (`app/composition.py::READING`) : après sa persona, la zone stable ; l'historique ; puis son état interne — le moment, le monde autour d'elle, elle, ce qu'elle fait, ce qui est en cours avec la personne, la personne en face, vos souvenirs, ce qu'elle perçoit d'elle maintenant, ce qui la fait parler, les voix d'écriture, ce qu'on lui demande — et sa parole en dernier (« CE QUE TU TE RÉPÈTES », « TA RÉPONSE »). Chaque épisode n'en lit que les siennes, dans cet ordre.
@@ -213,6 +215,23 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 *Pourquoi :* chaque passe recalculait les 55 échéances, et huit processus au quantum de 60 s en imposaient une par minute : sur S05, 35 910 passes et 35,7 s sur 45,5, et la voie rapide passée de 48 à ~85 s du 4 au 19 octobre sans commit coupable (audit du 2026-11-05 : LT, K3-01, K3-02).
 
 *Révisée par 0227.*
+
+### 0306 — « Préremplir » part tout de suite, et se suit en direct
+
+- Ce qu'une personne lui demande et attend part **tout de suite** : « Préremplir avec Mika » dans Mail et dans Teams (frontendv2, l'application), « Lui demander une réponse » de la console, une réponse à reprendre. Sa tâche est une ligne **attendue** (`Candidate.awaited`), qui prend le taux des lignes attendues (`ArbitrationPolicy.awaited_rate` : une par seconde, au lieu d'une tâche toutes les cinq minutes en moyenne). Ni le décalage d'usage (0149) ni la retenue du quota (0127) ne la touchent.
+- Elle part au **premier plan** (priorité 0) : une séance de travail en cours dans sa voie lui cède sa place (préemptée, l'arbitre la reproposera), et le fournisseur la sert avant le fond.
+- **Même endormie** : le corps ne la retient pas (sommeil, réveil de nuit, inertie du matin) ; ce n'est pas une envie à elle, et on l'attend maintenant. Rien ne la réveille.
+- Elle passe devant ce qu'elle fait d'elle-même sur la même ressource (sa tâche dans la même boîte, la même conversation) : supplantée, cette tâche ne compte pas d'essai (`vocab.episodes.gave_way`), pas plus qu'une séance préemptée dans la voie. Tant qu'une ressource est tenue par ce qui ne lui cède pas la place, elle attend sous un veto (`busy`) au lieu de perdre une occurrence par seconde ; la fin du bail la relance.
+- Un essai qui a échoué (une panne, un délai) ou que la file a refusé attend une minute avant le suivant (veto `retry`) : une panne passagère ne brûle pas ses deux essais en deux secondes.
+- On l'attend **une demi-heure** (`AWAITED_FOR_US`, le plafond des clients qui la suivent) : une demande bloquée plus longtemps redevient une tâche ordinaire, avec sa file et son sommeil.
+- Ce qu'elle prépare **d'elle-même** ne change pas : la file, son tirage, son plafond du jour, son sommeil.
+- **Où elle en est, en direct** : chaque épisode en cours tient son étape en mémoire (`EpisodeRunner.step_of` : elle réfléchit, ou tel outil tourne, son libellé, depuis quand), ni journal ni trace, comme l'activité du mode pro (0116). `/api/moi` la rend dans le fil Teams et dans un mail (`work` : `waiting` depuis la demande, `thinking`, `tool`). frontendv2 et l'application la montrent au-dessus de la saisie, sur une ligne : l'étape et son chrono, relus toutes les deux secondes.
+
+*Pourquoi :* « préremplir avec Mika était extrêmement long » ; « tous les boutons préremplir doivent être live, l'utilisateur attend une réponse maintenant ; si elle décide de préparer un message, là, ça peut aller dans une file » ; « ça vaut aussi pour Android » (le 2026-11-22). La demande passait au tirage des tâches : en moyenne cinq minutes avant de commencer, plus quand elle était fatiguée, le matin quand elle dormait. Et l'écran ne disait que « elle s'y met ». Choisis le même jour : tout de suite même endormie, et une seule ligne.
+
+*Révise 0016 (en partie : ce qu'on attend d'elle passe la porte de nuit), 0149 (en partie : « Se mettre au travail » ne décale plus ce qu'on attend d'elle), 0191 (en partie : « Préremplir » part tout de suite et se suit en direct).*
+
+*Révisée par 0308.*
 
 ## Le stockage
 
@@ -876,7 +895,7 @@ retirer des lettres ne rend pas le processus adaptable de manière générale »
 
 *Pourquoi :* en v1, le sommeil dépendait d'une fatigue inatteignable en usage réel : une soirée calme supprimait la nuit entière.
 
-*Révisée par 0036.*
+*Révisée par 0036, 0306.*
 
 ### 0017 — Évaluations déclarées, pensées, attentes, estime
 
@@ -1657,7 +1676,7 @@ retirer des lettres ne rend pas le processus adaptable de manière générale »
 
 *Pourquoi :* un mail proposé s'approuvait sans aperçu, et son corps dormait en clair au journal, hors de portée de l'oubli.
 
-*Révise 0022 (en partie), 0025 (en partie). Révisée par 0037, 0132, 0166, 0171, 0172, 0175.*
+*Révise 0022 (en partie), 0025 (en partie). Révisée par 0037, 0132, 0166, 0171, 0172, 0175, 0308.*
 
 ### 0037 — Ce qui vient d'ailleurs : borné, cité, désigné par nous, montré en privé, en arrière-plan
 
@@ -2011,7 +2030,7 @@ retirer des lettres ne rend pas le processus adaptable de manière générale »
 
 *Pourquoi :* « rendre l'extension plus temps réel » : « un cache, voir les trucs nouveaux, synchroniser, puis connecter en direct toutes les nouvelles arrivées par des synchronisations ciblées, et pour les messages du backend un service WebSocket » ; « un bouton pour charger tout l'historique pour une première mise en service » ; « côté backend, faire très attention aux doublons » (2026-11-18). La relecture de la base toutes les 45 s faisait attendre, et le relevé de la boîte d'envoi toutes les 30 s aussi.
 
-*Révise 0069 (en partie : la boîte d'envoi poussée en direct, l'historique rangé déjà lu). Révisée par 0258 (en partie : les images), 0301 (en partie : la voie d'envoi).*
+*Révise 0069 (en partie : la boîte d'envoi poussée en direct, l'historique rangé déjà lu). Révisée par 0258 (en partie : les images), 0301 (en partie : la voie d'envoi), 0308 (en partie : la boîte d'envoi poussée sans relecture).*
 
 ### 0258 — Les images de Teams : téléchargées par l'extension, gardées avec leur message, regardées par Mika
 
@@ -2034,6 +2053,8 @@ retirer des lettres ne rend pas le processus adaptable de manière générale »
 *Pourquoi :* les brouillons de Mika se relisent « dans mail, pareil pour teams ».
 
 *Révise 0185 (en partie : la carte d'accord se relit aussi là où le brouillon partira), 0186 (de même).*
+
+*Révisée par 0306.*
 
 ### 0192 — Chacun branche ses services MCP
 
@@ -2601,6 +2622,16 @@ de tout le serveur à coups d'« Actualiser ».
 *Pourquoi :* « et pourquoi on n'implémenterait pas la citation ? » — dans un groupe qui parle de plusieurs choses, une réponse qui ne dit pas à quoi elle répond se perd.
 
 *Révise 0301 (en partie : un envoi peut porter une citation).*
+
+### 0307 — « Corriger » : les fautes, sans changer les mots
+
+- Dans le champ de Mail et de Teams (frontendv2, l'application), à côté de « Préremplir avec Mika », **« Corriger »** corrige les fautes de ce que tu écris : orthographe, accents, accords, conjugaison, homophones, ponctuation et ses espaces. Jamais les mots : rien d'ajouté, de retiré ni de remplacé, pas de reformulation, le ton, les abréviations, les noms, les liens et la mise en forme tels quels.
+- Le texte corrigé **remplace** le tien aussitôt ; un message dit combien de fautes ont été corrigées, avec « Annuler » pour revenir à ton texte (« Aucune faute » sinon).
+- Un **nouveau rôle de modèle**, `correct` (« corriger les fautes », famille « écriture », dans Réglages › Intelligence), **facultatif** : sans modèle à lui, le bouton reste éteint et dit pourquoi (`GET /api/moi` → `correct`) ; aucun repli sur un autre rôle.
+- `POST /api/moi/correct` (`app/me/writing.py`) : un appel au premier plan (tu attends), sans persona (ce n'est pas elle qui parle), sa consigne dans `persona/voix.yaml` (`correct.system`), vingt par minute et par compte. Rien n'est gardé, ni au journal ni ailleurs que dans le registre des appels de modèle.
+- Ce qui revient est relu avant de remplacer ton texte : débarrassé de ce que le modèle met autour (guillemets, bloc de code), et refusé s'il ne ressemble plus assez au texte (comparés sans accents ni casse) — une reformulation, une réponse au message ne remplacent jamais ce que tu as écrit.
+
+*Pourquoi :* « peux-tu ajouter un bouton corriger pour corriger les fautes sans modifier les mots, dans Teams et Mail ? avec une nouvelle catégorie dans les paramètres pour la sélection du modèle IA » (le 2026-11-23). Choisis le même jour : remplacer avec « Annuler » plutôt que montrer puis accepter ; web et Android ; rien sans modèle choisi.
 
 ## Les fournisseurs de modèles
 
@@ -3404,6 +3435,18 @@ pour le propriétaire d'un projet confié un accord qu'il ne peut pas donner ; l
 *Pourquoi :* devant l'écran Projets du web, le propriétaire a dit qu'il en fallait un sur Android, puis « fais l'app android ». Un téléphone n'a pas la largeur des trois zones du web : la même maquette, lue à 390 px, donne la liste puis le détail, et le panneau latéral en volet.
 
 *Révise 0235 (en partie : l'app a aussi l'écran Projets, à la place que la maquette du web lui donne dans la navigation).*
+
+### 0308 — Les écrans en direct : ce qui change leur est poussé, le courrier arrive dès qu'il est là
+
+- **Un service pousse ce qui change** (`app/me/changes.py`) : il écoute le journal (`Mind.subscribe`, comme le monde) et les bases tenues à côté (le courrier relevé, Teams, l'annuaire, l'étape de son travail), qui signalent chacune de leurs écritures une fois commitée. Il regroupe ce qui arrive en ~150 ms, puis pousse à chaque personne connectée une trame `changed` sur le `/ws` qu'elle a déjà ouvert : quoi a changé (une boîte, une conversation, ses brouillons, tes pastilles…), jamais le contenu.
+- **Seulement ce qu'elle peut voir** : la trame d'une personne ne nomme que ses ressources et celles qu'on lui partage, par les mêmes règles que `/api/moi` — une boîte d'une autre n'existe pas, même dans un avis. L'écran relit la route qu'il montre : les droits et la forme des données restent à un seul endroit.
+- **Le client a son service** (frontendv2 `src/live/`, l'app `data/moi/Live.kt`) : il reçoit `changed` et réveille les écrans abonnés ; à chaque (re)connexion, tout ce qui est affiché se relit une fois — rien de ce qui a changé pendant une coupure n'est perdu. Plus de relecture à intervalles (Mail, Teams, Téléphone, Contacts, pastilles, « elle s'y met ») ; un écran au second plan se relit à son retour.
+- **Le courrier arrive dès qu'il est là, même endormie** : une connexion IMAP IDLE par boîte qui le permet, sinon une relève chaque minute ; ce qui arrive est rangé tout de suite dans le courrier relevé et se voit à l'écran. Elle, ne le remarque qu'à son rythme (éveillée, par sa relève et son tri), comme avant.
+- **Teams sort sans attendre** : la boîte d'envoi part à l'extension dès qu'elle change (plus de relecture chaque seconde), et chaque étape d'un envoi (en cours, placé, parti) se voit aussitôt. Une garde d'architecture vérifie que toute écriture des bases tenues à côté signale son changement.
+
+*Pourquoi :* « j'aimerais que les actions avec le frontend soient instantanées : réception de message, envoi, envoi de mail, réception. Tout ce qui entraîne des envois/réceptions d'information qui doivent modifier l'interface doit passer en temps réel à travers un websocket ; il faudrait un service qui gère tout ça » (le 2026-11-23). Choisis le même jour : le courrier en IDLE même endormie, frontendv2 et l'app Android dans le même chantier. La console et le client 3D ne changent pas ; les notifications Firebase de l'app fermée non plus.
+
+*Révise 0027 (en partie : le courrier relevé en direct, à part de ce qu'elle en remarque), 0251 (en partie : la boîte d'envoi poussée sans relecture), 0306 (en partie : la ligne « elle s'y met » poussée, plus relue toutes les deux secondes).*
 
 ## La console et l'exploitation
 

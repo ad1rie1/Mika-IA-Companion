@@ -4,6 +4,8 @@ import fr.qwartz.mika.core.MikaJson
 import fr.qwartz.mika.data.auth.Credentials
 import fr.qwartz.mika.data.moi.Levels
 import fr.qwartz.mika.data.moi.MoiApi
+import fr.qwartz.mika.data.moi.Work
+import fr.qwartz.mika.data.moi.WorkSteps
 import fr.qwartz.mika.data.moi.refusalText
 import fr.qwartz.mika.data.net.ServerBase
 import kotlinx.coroutines.Dispatchers
@@ -117,6 +119,33 @@ class MailApiTest {
         assertTrue(answerable(m))
         assertFalse(m.complete)
         assertEquals("pro:<a+b@x>", server.takeRequest().url.queryParameter("ref"))
+    }
+
+    @Test fun `où elle en est dans le mail entier - présent, null, ou absent d'un serveur d'avant`() = runBlocking {
+        ok("""{"ref":"pro:<a@x>","her":{"asked":true},"work":{"step":"thinking","label":"","since":1790000004000,"started":1790000000000}}""")
+        val m = (api.message("pro:<a@x>") as MoiApi.Result.Ok).value
+        assertEquals(Work(WorkSteps.THINKING, "", 1_790_000_004_000, 1_790_000_000_000), m.work)
+        ok("""{"ref":"pro:<a@x>","work":null}""")
+        assertNull((api.message("pro:<a@x>") as MoiApi.Result.Ok).value.work)
+        // un serveur d'avant l'ADR 0306 ne le dit pas
+        ok("""{"ref":"pro:<a@x>"}""")
+        assertNull((api.message("pro:<a@x>") as MoiApi.Result.Ok).value.work)
+    }
+
+    @Test fun `où elle en est se relit par sa route légère, la référence passée telle quelle`() = runBlocking {
+        ok("""{"work":{"step":"tool","label":"Lire un mail","since":7,"started":5},"asked":true,"draft":""}""")
+        val going = (api.work("pro:<a+b@x>") as MoiApi.Result.Ok).value
+        assertEquals(MailWork(Work(WorkSteps.TOOL, "Lire un mail", 7, 5), asked = true, draft = ""), going)
+        val url = server.takeRequest().url
+        assertEquals("/api/moi/mail/work", url.encodedPath)
+        assertEquals("pro:<a+b@x>", url.queryParameter("ref"))
+        // son brouillon est arrivé
+        ok("""{"work":null,"asked":false,"draft":"d7"}""")
+        val arrived = (api.work("pro:<a@x>") as MoiApi.Result.Ok).value
+        assertEquals("d7", arrived.draft)
+        assertNull(arrived.work)
+        ok("""{}""")
+        assertEquals(MailWork(), (api.work("pro:<a@x>") as MoiApi.Result.Ok).value)
     }
 
     @Test fun `ses brouillons et ses correspondants`() = runBlocking {

@@ -20,6 +20,7 @@ from mika.ports.mail import Draft as MailDraft
 from mika.runtime import decisions
 from mika.runtime.operations import perform
 from mika.sim.outside import FakeMail
+from mika.vocab.episodes import Kind, task_target
 from mika.vocab.phrasebook import phrase
 from tests.fixtures.courrier import NOW, PRO, mailbox
 from tests.protocol.test_web import bootstrap, csrf, world  # noqa: F401 — fixture partagée
@@ -292,14 +293,30 @@ def test_her_drafts_are_read_where_they_will_leave_and_decided_there(world):  # 
 
 def test_prefill_asks_her_once(world):  # noqa: F811
     client, live, box = with_mail(world)
+
+    def work():
+        got = client.get(API + f"/mail/message?ref={PROJET}").json()["work"]
+        light = client.get(API + f"/mail/work?ref={PROJET}").json()
+        assert light["work"] == got, "la relecture légère dit la même chose que le mail"
+        return got
+
+    assert work() is None
+    assert client.get(API + f"/mail/work?ref={PROJET}").json() == {"work": None, "asked": False, "draft": ""}
     r = post(client, "/mail/prefill", {"ref": PROJET, "instruction": "dis que jeudi me va"})
     assert r.status_code == 200 and r.json()["asked"], r.text
     asked = journal(live, email_c.DRAFT_ASKED)
     assert len(asked) == 1 and asked[0].data.by == "user_1" and asked[0].data.mail == PROJET
+    # elle s'y met depuis la demande, puis réfléchit depuis le départ de sa tâche (ADR 0306)
+    at = asked[0].at // 1000
+    assert work() == {"step": "waiting", "label": "", "since": at, "started": at}
+    append(client, live, [rt.EPISODE_STARTED.draft(kind=Kind.TASK, target=task_target("email", PROJET))])
+    started = journal(live, rt.EPISODE_STARTED)[-1].at // 1000
+    assert work() == {"step": "thinking", "label": "", "since": started, "started": started}
     again = post(client, "/mail/prefill", {"ref": PROJET}).json()
     assert again["asked"] and again["message"] == "Elle y travaille déjà." and len(journal(live, email_c.DRAFT_ASKED)) == 1
     waiting = propose(client, live, box)
     assert post(client, "/mail/prefill", {"ref": PROJET}).json()["draft"] == waiting  # la saisie reprend le sien
+    assert client.get(API + f"/mail/work?ref={PROJET}").json()["draft"] == waiting  # la relecture la voit arriver
 
 
 def test_replying_yourself_withdraws_her_waiting_draft_for_that_mail(world):  # noqa: F811

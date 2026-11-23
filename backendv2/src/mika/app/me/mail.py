@@ -20,7 +20,7 @@ from starlette.routing import Route
 
 from mika.adapters.web.app import safe_mime
 from mika.app.me.api import Call, Denied, MeApiBase, done, form, missing
-from mika.app.me.common import allows, held_by, millis, only_owner, opened, snippet
+from mika.app.me.common import allows, held_by, millis, only_owner, opened, snippet, work_of
 from mika.contracts import email as email_c
 from mika.inspector.framed import FRAME_CSP, FRAME_CSP_REMOTE, framed_html
 from mika.plugins import email as email_p
@@ -175,6 +175,27 @@ def _her(s: EmailState, ref: str, p: Any, level: str = OWNED, folder: str = "") 
             "filed": seen.file_to if seen is not None and seen.file_to and seen.file_to == folder else ""}
 
 
+def _work(call: Call, s: EmailState, ref: str, her: dict[str, Any] | None, level: str) -> dict[str, Any] | None:
+    """Où elle en est d'une réponse à ce mail (ADR 0306) : demandée (``her.asked``) et pas commencée, elle s'y met
+    depuis la demande ; sa tâche en cours, ce que le pipeline en tient. Rien pour qui ne fait que lire la boîte."""
+    if not allows(level, SHARE_PREPARE):
+        return None
+    ask = s.asked.get(ref) if her is not None and her["asked"] else None
+    return work_of(call, email_p.EMAIL.name, lambda r: r == ref, ask.at if ask is not None else 0)
+
+
+async def progress(call: Call) -> dict[str, Any]:
+    """Où elle en est d'une réponse à ce mail, en direct (ADR 0306) : ce qu'un client relit toutes les deux secondes
+    tant qu'elle y travaille, sans relire le mail (ni joindre son serveur) — ``work``, ``asked``, et le brouillon qui
+    attend (``draft``), dès qu'il est arrivé."""
+    ref = _ref_mine(call, call.arg("ref", limit=400))
+    s, p = state(call), email_p.params_of(call.frame)
+    level = boxes(call)[split_ref(ref)[0]][1]
+    her = _her(s, ref, p, level)
+    return {"work": _work(call, s, ref, her, level), "asked": bool(her and her["asked"]),
+            "draft": her["draft"] if her is not None else ""}
+
+
 #: ce que son tri a fait d'un mail remarqué, dit aux clients (ADR 0240)
 TRIAGE_SHOWN = {email_c.TRIAGE_MODEL: "read", email_c.TRIAGE_FALLBACK: "guessed", email_c.TRIAGE_BULK: "bulk"}
 
@@ -253,7 +274,7 @@ async def messages(call: Call) -> dict[str, Any]:
 
 async def message(call: Call) -> dict[str, Any]:
     """Un mail entier : ses en-têtes, son texte, ses pièces, s'il a un HTML (servi à part, dans son cadre), ses
-    images distantes, et ce qu'elle en sait."""
+    images distantes, ce qu'elle en sait, et où elle en est d'une réponse qu'elle y prépare (``work``, ADR 0306)."""
     m = await _mail(call, call.arg("ref"))
     port = call.port("mail")
     s, p = state(call), email_p.params_of(call.frame)
@@ -265,7 +286,8 @@ async def message(call: Call) -> dict[str, Any]:
         her["summary"] = store.content([seen.summary_ref]).get(seen.summary_ref, "") if store is not None else ""
     remote = bool(m.html) and bool(REMOTE_IMAGE.search(m.html[:400_000]))
     sent, received = _copies(port, m)
-    return {**row(m, s, p, level, port.waiting()), "her": her, "cc": _people(m.cc), "reply_to": m.reply_to, "in_reply_to": m.in_reply_to,
+    work = _work(call, s, m.ref, her, level)
+    return {**row(m, s, p, level, port.waiting()), "her": her, "work": work, "cc": _people(m.cc), "reply_to": m.reply_to, "in_reply_to": m.in_reply_to,
             "body": m.body, "complete": m.complete, "sent": sent, "received": received,
             "attachments": [{"part": str(i), "name": a.name, "mime": a.mime, "size": a.size}
                             for i, a in enumerate(m.attachments)],
@@ -478,8 +500,8 @@ async def _move(call: Call, refs: list[str], folder: str) -> dict[str, Any]:
 
 
 async def prefill(call: Call) -> dict[str, Any]:
-    """« Préremplir avec Mika » (ADR 0191) : elle écrit une réponse à ce mail à son prochain moment de travail, dans
-    ses brouillons ; la saisie la reprend quand elle arrive. Une demande en cours, ou un brouillon qui attend déjà,
+    """« Préremplir avec Mika » (ADR 0191) : elle écrit une réponse à ce mail tout de suite, même endormie (ADR 0306 ; où
+    elle en est : ``work``), dans ses brouillons ; la saisie la reprend quand elle arrive. Une demande en cours, ou un brouillon qui attend déjà,
     se rendent tels quels. Jamais pour un mail parti de ta boîte, même si une copie t'en est revenue : on y répond
     soi-même."""
     m = await _mail(call, call.arg("ref"), SHARE_PREPARE)
@@ -570,7 +592,7 @@ def count(call: Call) -> int:
 
 def routes(api: MeApiBase) -> list[Route]:
     r = api.route
-    return [r("/mail/boxes", list_boxes), r("/mail/messages", messages), r("/mail/message", message),
+    return [r("/mail/boxes", list_boxes), r("/mail/messages", messages), r("/mail/message", message), r("/mail/work", progress),
             r("/mail/frame", frame_route(api), raw=True), r("/mail/file", file, raw=True),
             r("/mail/drafts", drafts), r("/mail/sent", sent), r("/mail/contacts", contacts),
             r("/mail/send", send, write=True, upload=True), r("/mail/reply", reply, write=True, upload=True),

@@ -3,9 +3,10 @@
 Le dernier message d'une conversation qui pose à la personne une question à laquelle elle peut aider, récent, sans
 réponse de la personne depuis, dans une conversation qu'on n'a pas exclue et où aucune réponse n'est déjà en
 chemin, appelle une tâche : elle lit le fil, écrit à la place de la personne (``teams_draft``), et la réponse part
-selon le mode. Au plus quelques-unes par jour ; une tâche qui n'a rien donné n'est pas retentée sans fin. Quand un
-opérateur le lui demande (``teams.draft_asked``), la tâche passe devant, hors plafond — et endormie, elle la fera au
-réveil.
+selon le mode. Au plus quelques-unes par jour ; une tâche qui n'a rien donné n'est pas retentée sans fin. Quand on le
+lui demande (``teams.draft_asked`` : « Préremplir avec Mika »), quelqu'un attend : la tâche passe devant, hors plafond,
+et part tout de suite, même endormie (une ligne attendue, ADR 0306) — une demi-heure ; au-delà, elle redevient une tâche
+ordinaire.
 
 Ses outils : le lot ``teams`` seulement. Sa mémoire n'est pas de la partie (ses outils ne servent pas les tâches) : elle
 contient la vie de la personne et ce que d'autres lui ont confié, et une réponse part chez des collègues.
@@ -38,7 +39,7 @@ from mika.plugins.teams import (
 )
 from mika.ports.teams import conversation_key
 from mika.vocab.access import SELF
-from mika.vocab.episodes import Kind, task_target
+from mika.vocab.episodes import AWAITED_FOR_US, Kind, task_target
 from mika.vocab.phrasebook import phrase
 
 
@@ -86,7 +87,9 @@ def _prepare(s: TeamsState, frame: Frame) -> list[Candidate]:
         asker = keeper_name(frame, ask.by)
         brief = phrase("teams.task.asked", who=asker[:1].upper() + asker[1:], ref=ref,
                        fate=fate(mode_of(p, s, ref, ask.conversation, ask.account), writer_of(frame, ask.account)))
-        out.append(_candidate(ref, ask.account, ask.conversation, p.asked_evidence, brief))
+        # on l'attend une demi-heure ; plus vieille (bloquée tout ce temps), elle redevient une tâche ordinaire
+        out.append(_candidate(ref, ask.account, ask.conversation, p.asked_evidence, brief,
+                              awaited=frame.now - ask.at < AWAITED_FOR_US))
     budget = p.drafts_per_day - _today(s, frame.now)
     if budget <= 0:
         return out
@@ -109,8 +112,10 @@ def _prepare(s: TeamsState, frame: Frame) -> list[Candidate]:
     return out
 
 
-def _candidate(ref: str, account: str, conversation: str, evidence: float, brief: str) -> Candidate:
+def _candidate(ref: str, account: str, conversation: str, evidence: float, brief: str, *,
+               awaited: bool = False) -> Candidate:
+    """``awaited`` : on le lui a demandé, et on attend sa réponse (ADR 0306) ; d'elle-même, elle passe par la file."""
     return Candidate(Kind.TASK, task_target("teams", ref), c.DRAFT, evidence,
                      resources=frozenset({f"teams:{conversation_key(account, conversation)}"}),
                      args=FrozenDict({"bundles": "teams", "brief:teams": brief, "message": ref,
-                                      "conversation": conversation, "account": account}))
+                                      "conversation": conversation, "account": account}), awaited=awaited)

@@ -5,9 +5,11 @@ ailleurs, pas trop vieux), dont la règle d'envoi (sa boîte, son expéditeur ;
 ADR 0132) dit de préparer une réponse, appelle une tâche : elle lit le mail et son
 fil, écrit un brouillon dans la voix de la boîte (``email_draft``), et il
 attend l'accord d'un opérateur. Au plus quelques-unes par jour ; une tâche
-qui n'a rien donné n'est pas retentée sans fin. Quand un opérateur le lui
-demande (``email.draft_asked``), la tâche passe devant, hors plafond — et
-endormie, elle la fera au réveil.
+qui n'a rien donné n'est pas retentée sans fin. Quand on le lui demande
+(``email.draft_asked`` : « Préremplir avec Mika »), quelqu'un attend : la
+tâche passe devant, hors plafond, et part tout de suite, même endormie (une
+ligne attendue, ADR 0306) — une demi-heure ; au-delà, elle redevient une
+tâche ordinaire.
 """
 
 from __future__ import annotations
@@ -30,7 +32,7 @@ from mika.plugins.email import (
 )
 from mika.vocab.access import SELF
 from mika.vocab.canals import mail_rule
-from mika.vocab.episodes import Kind, task_target
+from mika.vocab.episodes import AWAITED_FOR_US, Kind, task_target
 from mika.vocab.phrasebook import phrase
 
 BUNDLES = "email,memory,identity"
@@ -56,7 +58,9 @@ def _prepare(s: EmailState, frame: Frame) -> list[Candidate]:
             continue
         who = keeper_name(frame, ask.by)
         out.append(_candidate(ref, ask.account or account_of(ref), p.asked_evidence,
-                              phrase("email.task.asked", who=who[:1].upper() + who[1:], ref=ref)))
+                              phrase("email.task.asked", who=who[:1].upper() + who[1:], ref=ref),
+                              # on l'attend une demi-heure ; plus vieille, elle redevient une tâche ordinaire
+                              awaited=frame.now - ask.at < AWAITED_FOR_US))
     budget = p.drafts_per_day - _today(s, frame.now)
     if budget <= 0:
         return out
@@ -79,8 +83,9 @@ def _prepare(s: EmailState, frame: Frame) -> list[Candidate]:
     return out
 
 
-def _candidate(ref: str, account: str, evidence: float, brief: str) -> Candidate:
+def _candidate(ref: str, account: str, evidence: float, brief: str, *, awaited: bool = False) -> Candidate:
+    """``awaited`` : on le lui a demandé, et on attend sa réponse (ADR 0306) ; d'elle-même, elle passe par la file."""
     return Candidate(Kind.TASK, task_target("email", ref), c.DRAFT, evidence,
                      resources=frozenset({f"mailbox:{account}"}),
                      args=FrozenDict({"bundles": BUNDLES, "brief:email": brief, "mail": ref,
-                                      "account": account}))
+                                      "account": account}), awaited=awaited)

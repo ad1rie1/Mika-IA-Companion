@@ -39,6 +39,7 @@ from mika.app.me import form
 from mika.app.mindport import KernelPort
 from mika.app.teams import TeamsDesk, batch_of, digest
 from mika.contracts import attention as attention_c
+from mika.contracts import body as body_c
 from mika.contracts import runtime as rt
 from mika.contracts import teams as teams_c
 from mika.kernel.clock import HOUR, MINUTE, US
@@ -72,7 +73,7 @@ from mika.ports.teams import message_ref
 from mika.runtime.operations import perform
 from mika.sim.clock import SimClock, run_virtual
 from mika.vocab.affect import Emotion
-from mika.vocab.episodes import Kind
+from mika.vocab.episodes import PREEMPTION_GUARD, Kind, task_target
 from mika.vocab.phrasebook import phrase
 from tests.fixtures.mika import DOC, at_paris, build, connect
 
@@ -412,6 +413,35 @@ def test_without_initiative_she_only_drafts_when_asked(tmp_path):
     text = prompt_text(task[0])
     assert "CE QU'ON TE DEMANDE D'Y RÉPONDRE" in text and "Fais court." in text
     assert len(outbox) == 1
+
+
+def test_a_reply_you_ask_for_starts_within_seconds_even_asleep(tmp_path):
+    """« Préremplir avec Mika » (ADR 0306) : quelqu'un attend. La tâche part en quelques secondes — pas au tirage des
+    tâches, une toutes les cinq minutes en moyenne —, au premier plan chez le fournisseur, même endormie : sa ligne est
+    attendue, et le corps ne la retient pas (ses lignes à elle gardent le veto du sommeil : ``test_inner_life``)."""
+    ref = message_ref(DM, "1759000000001")
+
+    async def scenario(kernel, llm, desk, store, clock):
+        await connect(kernel, "user_1", "Adrien", operator=True)
+        await push(desk, msg(clock, 1, QUESTION), conversations=[conv(DM)])
+        await sleep(MINUTE)
+        asleep = kernel.mind.frame().get(body_c.SLEEP)
+        asked = await perform(kernel, "teams.rediger", {"_champs": ["instruction"], "instruction": [""],
+                                                        "_fixes": ["message"], "message": [ref]},
+                              by="user_1", subject=DM, nonce="a1")
+        at = clock.now()
+        table = {r.target: r for r in kernel.arbiter.rows(kernel.mind.frame(), record=False)}
+        await sleep(20 * US)
+        starts = [e for e in events(kernel, rt.EPISODE_STARTED) if e.data.kind == Kind.TASK]
+        return asleep, asked, at, starts, [c for c in llm.calls if c.role == "step"], table
+
+    asleep, asked, at, starts, task, table = live(tmp_path, Model(), scenario, start=at_paris(2026, 10, 6, 3, 0))
+    assert asleep is not body_c.SleepPhase.AWAKE and asked.ok
+    assert [e.data.target for e in starts] == [f"task:teams:{ref}"]
+    mine = table[f"task:teams:{ref}"]
+    assert mine.awaited and not mine.vetoes and mine.hazard > 0.9
+    assert starts[0].at - at < 5 * US
+    assert task and {c.priority for c in task} == {0}
 
 
 def test_a_rule_tightened_after_the_triage_holds_for_what_she_writes(tmp_path):
@@ -848,3 +878,22 @@ def test_the_reply_under_way_is_the_one_still_on_its_way():
         assert pending_draft(drafts(state), PRINCIPAL, DM) is None and not under_way(drafts(state), PRINCIPAL, DM)
     assert pending_draft(drafts("attend"), PRINCIPAL, GROUP) is None  # une autre conversation
     assert pending_draft(drafts("attend"), "autre", DM) is None  # un autre compte
+
+
+def test_a_task_that_gave_way_to_what_someone_waits_for_keeps_its_try(tmp_path):
+    """ADR 0306 : sa tâche d'elle-même préemptée dans sa voie, ou supplantée sur son bail par ce qu'on attend, n'a pas
+    fait d'essai — il lui est rendu ; une panne, ou un bail pris par un autre, en est un."""
+    target = task_target("teams", "t000000000001")
+
+    async def scenario(kernel, *_):
+        async def episode(outcome, guard=None):
+            await kernel.mind.append([rt.EPISODE_STARTED.draft(kind=Kind.TASK, target=target)], emitter="runtime",
+                                     correlation="essai")
+            await kernel.mind.append([rt.EPISODE_ENDED.draft(kind=Kind.TASK, target=target, outcome=outcome,
+                                                             guard=guard)], emitter="runtime", correlation="essai")
+            return kernel.mind.frame().state("teams").attempts.get("t000000000001", 0)
+
+        return [await episode("preempted"), await episode("superseded", PREEMPTION_GUARD),
+                await episode("superseded", "baux"), await episode("failed")]
+
+    assert live(tmp_path, Model(), scenario) == [0, 0, 1, 2]

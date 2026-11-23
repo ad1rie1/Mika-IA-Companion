@@ -57,7 +57,7 @@ révoqué) est audité aussi (`moi.<geste>`). Une écriture réussie rend `{"ok"
 
 ```json
 {"username": "adrien", "name": "Adrien Moreau", "handle": "user_1", "person": "user_1", "operator": true,
- "owner": true, "counts": {"mail": 7, "teams": 1, "phone": 0, "projects": 3}}
+ "owner": true, "counts": {"mail": 7, "teams": 1, "phone": 0, "projects": 3}, "correct": true}
 ```
 
 - `person` : la clé de sa personne (ce qu'une ressource nomme dans son propriétaire, `personne:<clé>`).
@@ -66,6 +66,15 @@ révoqué) est audité aussi (`moi.<geste>`). Une écriture réussie rend `{"ok"
   dans tes boîtes seulement (les non-lus ont leurs compteurs, dossier par dossier : `GET …/mail/boxes`) ; `teams` : ses
   réponses qui attendent ta décision ; `phone` : ses réponses offertes au téléphone ; `projects` : ce qui t'attend, toi,
   dans tes projets (« À faire », § 11).
+- `correct` : « Corriger » marche — un modèle est donné au rôle `correct` (ADR 0307) ; faux, le bouton reste éteint.
+
+**`POST /api/moi/correct`** — « Corriger » (ADR 0307), dans le champ de Mail et de Teams : `text` (20 000 caractères au
+plus) → `{"text", "changes"}`, le texte, ses fautes corrigées (orthographe, accents, accords, conjugaison,
+homophones, ponctuation et ses espaces) sans en changer les mots, et combien d'endroits ont changé (0 : rien à
+corriger, le texte tel quel ; ses blancs de bord sont toujours les tiens). Un appel au modèle au premier plan, sans
+persona ; rien n'est gardé. Vide : 400 ; aucun modèle ne corrige : 409 ; plus de vingt par minute et par compte : 429 ;
+une réponse qui ne ressemble plus au texte (une reformulation) : 422, ton texte n'est pas remplacé ; le modèle n'a pas
+répondu : 502.
 
 ## 3. Mail
 
@@ -131,7 +140,21 @@ envoi qu'elle sait, ou rangé dans
 « Envoyés »), `received` (une copie reçue ailleurs, en copie à soi : on y répond), `attachments`
 (`[{"part": "0", "name", "mime", "size"}]`), `images` (`{"remote": true, "shown": false}` : des images distantes, et
 si on les montre pour cet expéditeur — la liste du serveur, que seule une de ses propriétaires règle) et, dans `her`,
-`summary` (ce qu'elle en a retenu).
+`summary` (ce qu'elle en a retenu). Au premier niveau (pas dans `her`), `work` : où elle en est d'une réponse qu'elle y
+prépare (ADR 0306), ou `null`.
+
+**`work`, en direct** (ADR 0306) — le mail entier et le fil d'une conversation Teams disent où elle en est d'une réponse
+qu'elle y prépare, demandée ou d'elle-même : `{"step", "label", "since", "started"}`. `step` : `waiting` (demandée,
+pas encore commencée : elle s'y met, en une ou deux secondes — une minute après un essai qui a échoué, ou à la fin
+de ce qui tient la conversation ou la boîte sans lui céder la place), `thinking` (elle réfléchit : elle compose, le modèle
+écrit) ou `tool` (un de ses outils tourne ; `label` : son libellé, « Relire une de tes conversations Teams »). `since` :
+le début de l'étape, `started` : celui du travail (ms ; pour `waiting`, la demande). Rien n'en est gardé : un client
+relit toutes les deux secondes tant que `work` n'est pas `null`, et fait courir le chrono entre deux lectures. `null`
+aussi en lecture seule : les réponses en préparation sont l'affaire du propriétaire.
+
+**`GET /api/moi/mail/work?ref=`** — ce qu'on relit toutes les deux secondes pendant qu'elle y travaille, sans relire le
+mail ni joindre son serveur : `{"work", "asked", "draft"}` (`draft` : son brouillon qui attend, dès qu'il est arrivé ;
+`""` sinon).
 
 **`GET /api/moi/mail/frame?ref=[&images=1]`** — le HTML du mail, purgé, dans son document isolé (ADR 0169), à poser
 dans un `<iframe sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin">` : sa politique
@@ -180,7 +203,7 @@ comptés dans toutes, son dernier échange, le premier nom connu.
 | `POST /api/moi/mail/reply` | `ref`, `to`, `cc?`, `bcc?`, `subject`, `body`, `quote`, `files?` | une réponse, depuis la boîte du mail reçu (à un mail parti de ta boîte sans copie reçue, `sent` sans `received` : 409, on le transfère). L'action du courrier (`email.repondre`, la même que la console) refuse dans le même geste ses brouillons qui attendaient pour ce mail, quel que soit qui répond (un brouillon décidé ailleurs pendant l'envoi n'a plus rien à refuser : la réponse partie s'écrit quand même), et une réponse demandée (« Préremplir ») est remplie : celle qu'elle finirait au travail ne se propose plus. Rien ne part deux fois (la seule fois où un partage touche aux brouillons du propriétaire, ADR 0188) |
 | `POST /api/moi/mail/forward` | `ref`, `to`, `cc?`, `bcc?`, `subject`, `body?`, `attachments`, `files?` | le transférer, ses pièces avec si `attachments`, et `files` en plus |
 | `POST /api/moi/mail/tidy` | `refs` (100 au plus), `gesture`, `folder?` | sur le serveur : `read`, `unread`, `archive`, `flag`, `unflag`, `trash` ; ou `move` avec `folder` (un dossier de leur boîte ; des mails d'une même boîte), ce qui y est déjà y reste → `{"moved": n}` (ADR 0200). Archiver, la corbeille et `move` rangent toute la sélection en une action (« Ranger la sélection ») et en une session IMAP par boîte ; un refus partiel se dit dans `message` (ADR 0302). Tous demandent « s'en servir » |
-| `POST /api/moi/mail/prefill` | `ref`, `instruction?` | « Préremplir avec Mika » : elle écrit une réponse à son prochain moment de travail → `{"asked": true, "draft": ""}` ; un brouillon qui attend déjà : `{"draft": "<id>"}`. Jamais pour un mail parti de ta boîte (`sent`, même revenu en copie : 409) : on y répond soi-même |
+| `POST /api/moi/mail/prefill` | `ref`, `instruction?` | « Préremplir avec Mika » : elle s'y met tout de suite, même endormie, et écrit une réponse dans ses brouillons (ADR 0306 ; où elle en est : `work`) → `{"asked": true, "draft": ""}` ; un brouillon qui attend déjà : `{"draft": "<id>"}`. Jamais pour un mail parti de ta boîte (`sent`, même revenu en copie : 409) : on y répond soi-même |
 | `POST /api/moi/mail/draft/send` | `id`, `seen` | l'envoyer tel qu'il a été lu (`seen` : le `digest` de son aperçu) |
 | `POST /api/moi/mail/draft/edit` | `id`, `to`, `cc?`, `subject`, `body`, `quote` | ta version remplace la sienne (la sienne est gardée : elle apprendra) |
 | `POST /api/moi/mail/draft/refuse` | `id`, `note?` | il ne partira pas ; elle le saura |
@@ -259,9 +282,13 @@ photo de son auteur, vide sans photo —, `quote` : le message qu'il cite, ADR 0
 le reprend pas), `more`, `replies` (ses réponses dans cette conversation, voir ci-dessous ;
 vides en lecture seule), `pending`, `under_way` (une réponse d'elle en chemin), `asked` (une réponse demandée, dont ses
 essais ne sont pas épuisés — elle y a renoncé, « Préremplir » la relance —, sur un compte coché de Teams actif : sinon
-elle ne s'y mettra pas) — ces deux-là toujours faux en lecture seule. `pending` : ce que tu as écrit toi-même (ADR 0189) et qui
+elle ne s'y mettra pas) — ces deux-là toujours faux en lecture seule —, `work` (où elle en est d'une réponse ici, en
+direct : voir le mail entier ; `null` en lecture seule). `pending` : ce que tu as écrit toi-même (ADR 0189) et qui
 n'est pas encore revenu dans le fil — `id`, `body`, `at`, `by`, `reason`, `state` : `en_file`, `envoi`, `pose`, puis,
 pendant un jour, `inutilise` (pas parti à temps : l'extension ne l'a pas pris) ou `echec`.
+
+**`GET /api/moi/teams/work?conversation=`** — ce qu'on relit toutes les deux secondes pendant qu'elle y travaille,
+sans relire le fil : `{"work", "asked", "under_way"}`, comme dans le fil (voir `work`, au mail entier).
 
 **`GET /api/moi/teams/replies`** — ses réponses dans tes comptes (ADR 0191), la plus récente d'abord : `id`,
 `account`, `conversation`, `title`, `in_reply_to`, `state` (`attend` ta décision, `approuve`, `en_file`, `pose` dans
@@ -276,7 +303,7 @@ autrement », ou sur le point de l'être, ADR 0199), `body`, `sent_text` (ce qui
 | Route | Corps | Ce que ça fait |
 |---|---|---|
 | `POST /api/moi/teams/send` | `conversation`, `body`, `reply_to?` | ton message (ADR 0189) — `reply_to` : la `ref` du message que tu cites (ADR 0305), cité dans Teams comme par « Citer » (dans un tête-à-tête aussi) : en file pour l'extension du compte, qui l'envoie sous le nom de sa personne (la tienne, ou celle de son propriétaire pour un compte qu'on te partage pour t'en servir), sans signature ni accord ; un `[À COMPLÉTER` : 400. Ses réponses qui attendaient un accord dans cette discussion ne partiront plus : le plugin les refuse (`answered`, ADR 0199), et une réponse demandée avant ne se prépare plus |
-| `POST /api/moi/teams/prefill` | `message`, `instruction?` | « Préremplir avec Mika » : elle prépare une réponse à ce message, selon le mode du compte ; une réponse en chemin : `{"draft": "<id>"}` ; déjà demandée : `{"asked": true}`. Teams coupé ou ce compte décoché : 409, elle n'y prépare rien |
+| `POST /api/moi/teams/prefill` | `message`, `instruction?` | « Préremplir avec Mika » : elle s'y met tout de suite, même endormie (ADR 0306 ; où elle en est : `work` du fil), et prépare une réponse à ce message, selon le mode du compte ; une réponse en chemin : `{"draft": "<id>"}` ; déjà demandée : `{"asked": true}`. Teams coupé ou ce compte décoché : 409, elle n'y prépare rien |
 | `POST /api/moi/teams/reply/send` | `id`, `seen` | l'envoyer telle qu'elle a été lue (`seen` : le `digest` de son aperçu) ; une réponse à laquelle on a répondu autrement : 409 |
 | `POST /api/moi/teams/reply/edit` | `id`, `body` | ta version remplace la sienne |
 | `POST /api/moi/teams/reply/refuse` | `id`, `note?` | elle ne partira pas ; elle le saura |

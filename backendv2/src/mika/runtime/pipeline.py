@@ -41,6 +41,11 @@ ajoute sa consigne ; ``live`` : chaque moment de sa boucle
 d'outils est montré en direct à la personne (le port ``activity``), puis la
 fin de l'épisode. Rien de ce qui se montre n'est gardé.
 
+**Où en est un épisode** (``EpisodeRunner.step_of``, ADR 0306) : il réfléchit
+(il se compose, le modèle écrit), ou un outil tourne — lequel, depuis quand.
+Tenu en mémoire pour chaque épisode en cours, lu par ceux qui attendent ce
+qu'il produira (« Préremplir avec Mika ») ; ni journal, ni trace.
+
 **Un fil de travail** (``EpisodeRequest.strand``, ADR 0164) est un tour à
 lui : sa garde, sa file et la portée de ses écritures ne se mêlent pas à
 celles du fil avec la personne, ni à celles d'un autre fil.
@@ -73,7 +78,7 @@ from mika.kernel.guards import Guard, Superseded, combine, floor
 from mika.kernel.prompt import Budget, ChatPrompt, Composer, ComposeTrace, SectionBody
 from mika.kernel.slots import PREEMPTED
 from mika.kernel.state import FrozenDict, Root
-from mika.ports.delivery import DONE, NOTE, Activity
+from mika.ports.delivery import DONE, NOTE, TOOL_END, TOOL_START, Activity
 from mika.ports.llm import (
     DEADLINE_AT,
     EFFORTS,
@@ -92,7 +97,7 @@ from mika.runtime.tool_offer import acting, catalogue, declare, defers_tools, ga
 from mika.runtime.tools import LoopEvent, LoopResult, ToolContext, run_tool_loop
 from mika.runtime.traces import STABLE_KEY, EpisodeTraces
 from mika.vocab import flows
-from mika.vocab.episodes import CONVERSATIONAL
+from mika.vocab.episodes import CONVERSATIONAL, PREEMPTION_GUARD
 from mika.vocab.phrasebook import phrase
 
 if TYPE_CHECKING:
@@ -147,6 +152,23 @@ class EpisodeRequest:
     effort: str = ""
 
 
+#: les étapes d'un épisode en cours (``EpisodeStep.phase``) : il réfléchit, ou un outil tourne
+THINKING = "thinking"
+TOOL = "tool"
+
+
+@dataclass(frozen=True, slots=True)
+class EpisodeStep:
+    """Où en est un épisode en cours (ADR 0306) : ``THINKING`` (il se compose, le modèle écrit) ou ``TOOL`` (l'outil
+    ``tool``, son libellé ``label``) ; ``started`` : le départ de l'épisode, ``since`` : celui de l'étape (µs)."""
+
+    phase: str
+    started: int
+    since: int
+    tool: str = ""
+    label: str = ""
+
+
 @dataclass(slots=True)
 class EpisodeReport:
     id: str
@@ -187,6 +209,8 @@ class _Live:
     mode: EpisodeMode | None = None
     #: l'échéance de l'épisode (``policy.deadline_s``), posée à son départ : une passe de plus s'y range
     deadline: asyncio.Timeout | None = None
+    #: où il en est (ADR 0306) : réfléchir, ou un outil ; posé à son départ, suivi par son regard sur sa boucle
+    step: EpisodeStep | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -248,6 +272,17 @@ class EpisodeRunner:
         self.interpret: Callable[[int, str], Awaitable[None]] | None = None
         self._live: dict[str, _Live] = {}
 
+    def yields(self, episode: str) -> bool:
+        """Cet épisode cède son bail au premier plan (ADR 0306) : en cours ici, et pas lui-même au premier plan."""
+        live = self._live.get(episode)
+        return live is not None and live.req.priority > 0
+
+    def step_of(self, episode: str) -> EpisodeStep | None:
+        """Où en est cet épisode, s'il est en cours (ADR 0306) : il réfléchit, ou tel outil tourne depuis tel instant.
+        ``None`` : il n'est pas (ou plus) en cours ici."""
+        live = self._live.get(episode)
+        return live.step if live is not None else None
+
     # ── préemption ──
     def holder_task(self, correlation: str) -> asyncio.Task[Any] | None:
         live = self._live.get(correlation)
@@ -284,6 +319,8 @@ class EpisodeRunner:
         eid = mind.ids.new(mind.clock.now())
         ep = _Live(eid, req, policy, mind.frame(), EpisodeReport(eid, req.kind, Outcome.DONE),
                    asyncio.current_task(), parent=parent, mode=mode)
+        now = mind.clock.now()
+        ep.step = EpisodeStep(THINKING, now, now)
         self._live[eid] = ep
         try:
             got = await acall(self._run, ep, label=f"épisode {req.kind}")
@@ -646,14 +683,15 @@ class EpisodeRunner:
             for _attempt in range(40):
                 lease = self.mind.view().get(LEASE(res))
                 if lease is not None and lease.holder != eid:
-                    if ep.policy.priority == 0:
+                    if ep.policy.priority == 0 or ep.req.priority == 0:
                         # Premier plan : on supplante un détenteur moins prioritaire (une initiative
-                        # vers quelqu'un qui vient d'écrire), puis on attend qu'il rende.
+                        # vers quelqu'un qui vient d'écrire ; sa tâche d'elle-même sur la boîte que quelqu'un
+                        # attend, ADR 0306), puis on attend qu'il rende.
                         holder = self._live.get(lease.holder)
                         inf = self.mind.inflight(lease.holder)
                         if inf is not None and (holder is None or holder.req.priority > 0):
                             self.mind.untrack(lease.holder)
-                            inf.on_supersede(Superseded("préemption", f"{res} demandé au premier plan"))
+                            inf.on_supersede(Superseded(PREEMPTION_GUARD, f"{res} demandé au premier plan"))
                         await asyncio.sleep(0.05)
                         continue
                     raise _Busy(res)
@@ -769,17 +807,27 @@ class EpisodeRunner:
         got = call(mode.instruction, label="consigne du mode")
         return "" if isinstance(got, Failed) else str(got or "")
 
-    def _watcher(self, ep: _Live, speaker: str) -> Callable[[LoopEvent], Awaitable[None]] | None:
-        """Le regard sur sa boucle d'outils, pour un mode qui la montre en direct à la personne (``live``) : chaque
-        moment part au port ``activity`` — ce qu'elle écrit entre deux appels, sans ses balises. ``None`` : rien à
-        montrer (pas de mode en direct, personne à qui le montrer, pas de port)."""
+    def _watcher(self, ep: _Live, speaker: str) -> Callable[[LoopEvent], Awaitable[None]]:
+        """Le regard sur sa boucle d'outils : il tient son étape à jour (``step_of``, ADR 0306) — un outil qui part,
+        puis elle réfléchit de nouveau quand il a fini — et, pour un mode qui la montre en direct à la personne
+        (``live``), envoie chaque moment au port ``activity`` : ce qu'elle écrit entre deux appels, sans ses
+        balises."""
         port = self.ports.get("activity")
         target = ep.req.target
-        if ep.mode is None or not ep.mode.live or port is None or not target:
-            return None
+        shown = ep.mode is not None and ep.mode.live and port is not None and bool(target)
+        tools = self.mind.registry.tools
 
         async def watch(event: LoopEvent) -> None:
             now = self.mind.clock.now()
+            started = ep.step.started if ep.step is not None else now
+            if event.phase == TOOL_START:
+                spec = tools.get(event.name)
+                ep.step = EpisodeStep(TOOL, started, now, event.name, (spec.label if spec is not None else "") or "")
+            elif event.phase == TOOL_END:
+                ep.step = EpisodeStep(THINKING, started, now)
+            if not shown:
+                return
+            assert port is not None and target is not None
             if event.phase == NOTE:
                 text = self._parse(event.text, speaker, markdown=ep.mode is not None and ep.mode.markdown)[0].strip()
                 if text:

@@ -6,6 +6,7 @@
 import { h } from "../../shell/dom";
 import { ico, type IconName } from "../../shell/icons";
 import { mikaAvatar } from "../../mika/face";
+import { workLine, type Work } from "../../mika/work";
 import { dayAndClock, shortWhen, sizeLabel } from "../chat/markup";
 import { MAIL_LIMITS, PIECE_LIMITS, type Contact, type DraftState, type MailAttachment, type MailBox, type MailDraft, type MailFolder, type MailFull, type MailRow, type MailState, type Person, type SentMail } from "../../api/mail";
 import {
@@ -403,6 +404,8 @@ export interface ReaderView {
   draft: MailDraft | null;
   /** Une réponse demandée, pas encore écrite (« Elle s'y met… »). */
   asked: boolean;
+  /** Où elle en est, en direct (ADR 0306) : l'étape et son chrono, sur une ligne ; `null` : rien en cours. */
+  work?: Work | null;
   /** La réponse en place, déjà rendue (vide : la bande « Répondre à … »). */
   composer: string;
   /** Son brouillon est déjà repris dans la réponse en place. */
@@ -445,6 +448,14 @@ function pieces(m: MailFull, url: (part: string) => string): string {
     .join("")}</div></div>`;
 }
 
+/** Où elle en est d'une réponse à ce mail (ADR 0306) : sa ligne seule, que l'écran repeint dans sa case
+ *  (`data-rd-work`) à chaque étape sans redessiner la liseuse ; un moteur qui ne le dit pas : « elle s'y met ». */
+export function readerWork(v: Pick<ReaderView, "draft" | "asked" | "work" | "now">): string {
+  if (v.draft) return "";
+  if (v.work) return workLine(v.work, v.now, "rd-asked", ico("sparkle", "xs"));
+  return v.asked ? `<span class="rd-asked">${ico("sparkle", "xs")}Elle s'y met… sa réponse arrivera dans « Ses brouillons », et ici.</span>` : "";
+}
+
 export function readerMail(m: MailFull, v: ReaderView, fileUrl: (part: string) => string): string {
   const box = v.box?.box ?? null;
   const shared = !!box && box.level !== "proprietaire";
@@ -477,7 +488,7 @@ export function readerMail(m: MailFull, v: ReaderView, fileUrl: (part: string) =
         ${canAnswer && !v.taken ? `<button class="btn xs ghost" type="button" data-act="reprendre-brouillon">${ico("reply", "xs")}Le reprendre dans ta réponse</button>` : ""}
         ${c.decide && v.draft.in_reply_to ? '<button class="btn xs ghost" type="button" data-act="autre-version">Lui demander une autre version</button>' : ""}</div>`
     : "";
-  const asked = !v.draft && v.asked ? `<span class="rd-asked">${ico("sparkle", "xs")}Elle s'y met… sa réponse arrivera dans « Ses brouillons », et ici.</span>` : "";
+  const asked = !v.draft && (v.asked || v.work) ? `<div class="rd-work" data-rd-work role="status">${readerWork(v)}</div>` : "";
   // son tri (ADR 0240), puis sa lecture à elle : « lu par son tri · archivé par elle »
   const triage = triageLabel(m.triage);
   const seenBy = [triage?.text ?? "", her?.read ? howLabel(her.how).text : ""].filter(Boolean).join(" · ") || (her?.noticed ? "remarqué" : "");
@@ -487,7 +498,7 @@ export function readerMail(m: MailFull, v: ReaderView, fileUrl: (part: string) =
     her?.alert ? "Tes consignes de tri demandent de te prévenir de ce mail." : "",
     her?.filed ? `Rangé dans « ${her.filed} » selon tes consignes de tri.` : "",
   ].filter(Boolean).map((line) => `<span class="small">${h(line)}</span>`).join("");
-  const knows = her?.noticed || her?.read || summary || v.draft || v.asked || triage?.note || rules;
+  const knows = her?.noticed || her?.read || summary || v.draft || v.asked || v.work || triage?.note || rules;
   const note = knows
     ? `<div class="mika-note rd-note">${mikaAvatar("sm")}<div class="mn-body"><div class="mn-title">${ico("eye", "xs")}Ce qu'elle en sait${seenBy ? ` · ${h(seenBy)}` : ""}</div>
         ${summary}${triageNote}${rules}${asked}${draftActions}</div></div>`
@@ -627,7 +638,18 @@ export interface InlineReply {
   error: string;
 }
 
-export function inlineReply(c: InlineReply, box: BoxView | null, canPrepare: boolean): string {
+// ── Corriger (ADR 0307) ──────────────────────────────────────────────
+
+/** « Corriger » éteint : pourquoi (le rôle `correct` n'a pas de modèle). */
+export const CORRECT_OFF = "Aucun modèle ne corrige : un opérateur en choisit un dans Réglages › Intelligence.";
+
+/** Le bouton « Corriger » d'un champ : `attr` le désigne à son écran (`data-tm="corriger"`, `data-act="corriger"`) ;
+ *  éteint sans modèle, il dit pourquoi. */
+export function correctButton(attr: string, on: boolean): string {
+  return `<button class="btn sm ghost" type="button" ${attr} title="${h(on ? "Corriger les fautes, sans changer les mots" : CORRECT_OFF)}"${on ? "" : " disabled"}>${ico("check", "sm")}<span class="lbl">Corriger</span></button>`;
+}
+
+export function inlineReply(c: InlineReply, box: BoxView | null, canPrepare: boolean, canCorrect = false): string {
   return `<div class="composer rd-reply${c.filled ? " filled" : ""}" data-reply data-depot>
     <div class="rd-reply-head"><span class="small muted">De</span><span class="small rd-reply-from" title="${box ? h(box.box.address) : ""}">${box ? `${h(box.title)} &lt;${h(box.box.address)}&gt;` : ""}</span>
       <span class="small muted">À</span>${recipientField("to", c.to, "Ajouter…")}${c.showCc ? "" : '<button class="btn xs ghost" type="button" data-act="cc">Cc</button>'}${c.showBcc ? "" : '<button class="btn xs ghost" type="button" data-act="cci">Cci</button>'}</div>
@@ -638,7 +660,7 @@ export function inlineReply(c: InlineReply, box: BoxView | null, canPrepare: boo
     <textarea rows="5" data-rd-txt placeholder="Ta réponse…" aria-label="Ta réponse" maxlength="${MAIL_LIMITS.body}">${h(c.body)}</textarea>
     <div class="cf-pieces-list" data-jointes>${pieceChips(c.files)}</div>
     ${c.error ? `<p class="small rd-reply-error">${ico("alert", "xs")}${h(c.error)}</p>` : ""}
-    <div class="cmp-bar"><button class="btn icon ghost sm" type="button" data-joindre title="Joindre des fichiers (${PIECE_LIMITS.each / (1024 * 1024)} Mo par pièce)" aria-label="Joindre des fichiers">${ico("clip")}</button>${FILE_INPUT}${canPrepare ? `<button class="btn sm mika" type="button" data-act="preremplir">${ico("sparkle", "sm")}<span class="lbl">Préremplir avec Mika</span></button>` : ""}
+    <div class="cmp-bar"><button class="btn icon ghost sm" type="button" data-joindre title="Joindre des fichiers (${PIECE_LIMITS.each / (1024 * 1024)} Mo par pièce)" aria-label="Joindre des fichiers">${ico("clip")}</button>${FILE_INPUT}${canPrepare ? `<button class="btn sm mika" type="button" data-act="preremplir">${ico("sparkle", "sm")}<span class="lbl">Préremplir avec Mika</span></button>` : ""}${correctButton('data-act="corriger"', canCorrect)}
       <label class="small muted row cite" title="Citer le mail auquel tu réponds"><input type="checkbox" data-quote${c.quote ? " checked" : ""}><span class="lbl">citer le mail</span></label><span class="grow"></span>
       ${countSpan(c.body, MAIL_LIMITS.body)}
       <button class="btn sm ghost" type="button" data-act="fermer-rep">Annuler</button>

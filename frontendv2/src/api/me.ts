@@ -2,7 +2,7 @@
  * Qui est connecté, selon l'API par personne (`GET /api/moi`, `backendv2/docs/protocole-moi.md` § 2) : son compte,
  * sa personne, et ce qui l'attend, domaine par domaine (les pastilles de la barre du haut).
  */
-import { getJson, MOI } from "./moi";
+import { getJson, MOI, sendJson } from "./moi";
 
 /** Ce qui attend ta décision, domaine par domaine (ADR 0200) : une pastille n'a que ce sens-là. */
 export interface Counts {
@@ -26,8 +26,20 @@ export interface Me {
   /** Une de ses propriétaires : ce qui est « à toi » est à elle. */
   owner: boolean;
   counts: Counts;
+  /** « Corriger » marche : un modèle est donné au rôle `correct` (ADR 0307) ; absent d'un moteur qui ne le dit pas. */
+  correct?: boolean;
 }
 
 export function fetchMe(): Promise<Me> {
   return getJson<Me>(MOI);
+}
+
+/** Un texte corrigé (ADR 0307) : ses fautes, sans changer ses mots ; `changes` : combien d'endroits ont changé. */
+export interface Corrected {
+  text: string;
+  changes: number;
+}
+
+export function correctText(text: string): Promise<Corrected> {
+  return sendJson<Corrected>(`${MOI}/correct`, { text });
 }

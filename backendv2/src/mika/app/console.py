@@ -241,6 +241,9 @@ VETO_LABELS: dict[str, str] = {
     "not_reachable": "La personne n'est pas là, à une heure où elle n'écrit pas d'habitude",
     # ADR 0127
     "held": "Le quota de l'abonnement est réservé à la conversation",
+    # ADR 0306
+    "busy": "On l'attend, mais ce dont elle a besoin est pris : elle s'y met dès que c'est libre",
+    "retry": "On l'attend ; son essai vient d'échouer : elle réessaie dans une minute",
 }
 
 #: Les processus de fond : ce qu'ils font.

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { MailBox, MailDraft, MailFull, MailRow, SentMail } from "../../api/mail";
 import { caps } from "./format";
-import { boxesPane, boxViews, composeForm, countSpan, draftRow, draftState, folderView, inlineReply, listFilters, pieceChips, listFoot, listHead, listHolds, mailRow, moveTargets, parseView, readerDraft, readerMail, readerTidy, sentRow, viewHolds, viewKey, type ReaderView, type RowView, type Shown } from "./markup";
+import { boxesPane, boxViews, composeForm, countSpan, draftRow, draftState, folderView, inlineReply, listFilters, pieceChips, listFoot, listHead, listHolds, mailRow, moveTargets, parseView, readerDraft, readerMail, readerTidy, readerWork, sentRow, correctButton, CORRECT_OFF, viewHolds, viewKey, type ReaderView, type RowView, type Shown } from "./markup";
 
 const NOW = new Date(2026, 10, 4, 15, 0).getTime();
 
@@ -121,6 +121,18 @@ describe("la liste", () => {
   it("la pagination, quand il y a plus d'une page", () => {
     expect(listFoot(20, 1, 25)).toBe("");
     expect(listFoot(60, 2, 25)).toContain("26–50 sur 60");
+  });
+});
+
+describe("où elle en est d'une réponse à ce mail (ADR 0306)", () => {
+  it("une ligne dans « Ce qu'elle en sait », dans sa case : l'étape et son chrono ; rien quand son brouillon est là", () => {
+    const work = { step: "thinking" as const, label: "", since: NOW - 32_000, started: NOW - 40_000 };
+    const html = readerMail({ ...full, her: null }, view("proprietaire", { asked: true, work }), (p) => p);
+    expect(html).toContain('data-rd-work role="status"');
+    expect(html).toContain("Réflexion en cours…");
+    expect(html).toContain(">0:32<");
+    expect(readerWork({ draft: null, asked: true, work: null, now: NOW })).toContain("Elle s'y met");
+    expect(readerWork({ draft: { id: "d1" } as MailDraft, asked: true, work, now: NOW })).toBe("");
   });
 });
 
@@ -395,5 +407,16 @@ describe("la liseuse quitte une vue qui ne montre plus ce qu'elle lit", () => {
     expect(listHolds("pro:<c@x>", [], 0)).toBe(false);
     // d'autres pages : peut-être plus loin, `viewHolds` a jugé
     expect(listHolds("pro:<c@x>", rows, 40)).toBe(null);
+  });
+});
+
+describe("« Corriger » dans la réponse en place (ADR 0307)", () => {
+  const reply = { all: false, to: [], cc: [], showCc: false, bcc: [], showBcc: false, files: [], subject: "Re: x", body: "salu", quote: true, fromDraft: "", filled: "", sending: false, error: "" };
+  it("allumé quand un modèle corrige ; éteint sinon, et il dit pourquoi", () => {
+    expect(inlineReply(reply, null, true, true)).toContain('data-act="corriger" title="Corriger les fautes, sans changer les mots">');
+    const off = inlineReply(reply, null, true, false);
+    expect(off).toContain('data-act="corriger"');
+    expect(off).toContain(`title="${CORRECT_OFF}" disabled`);
+    expect(correctButton("data-corriger", true)).not.toContain("disabled");
   });
 });
