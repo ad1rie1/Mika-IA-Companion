@@ -1,0 +1,87 @@
+{# Relations & échanges › Agendas › Tous les agendas (app/handmade/tabs/agendas.py, ADR 0309, lot 5 ; la maquette :
+   output/maquette-agenda-console/tous.html). À gauche, les agendas montrés par personne, cochables (handmade/agendas.js
+   pose ``?masques=``) ; au centre « Les agendas de », la période et la vue — la semaine (de 8 h à 22 h, par quart
+   d'heure : des classes, la CSP n'admet pas de style en ligne), le mois, ou la liste — et un seul bandeau quand un compte
+   est à reconnecter ; à droite, l'événement ouvert (``?ev=``). Sans script, tout reste affiché. #}
+{% import "handmade/agendas/_agendas.html" as ag %}
+<script src="{{ PREFIX }}/static/handmade/agendas.js?v={{ ASSET_VERSION }}" defer></script>
+<div class="now-page agc-page" data-tab="agendas/tous">
+<div class="agc-space{{ ' has-reader' if opened }}">
+  <details class="agc-side"{% if not opened %} open data-responsive-menu="(max-width: 1000px)"{% endif %}>
+    <summary>Agendas montrés : <b>{{ legend.shown }} sur {{ legend.total }}</b></summary>
+    <div class="agc-side-body" data-agc-legend data-base="{{ base_query }}">
+      {% for g in legend.groups %}
+      <div class="agc-leg-group">
+        <p class="agc-leg-title"><span>{{ g.title }}</span>{% if g.fiche %}<a href="{{ g.fiche }}">sa fiche</a>{% endif %}</p>
+        {% for row in g.rows %}
+        <label class="agc-leg c-{{ row.color }}{{ ' off' if not row.on }}"><input type="checkbox" data-agc-leg="{{ row.key }}"{{ ' checked' if row.on }}><span class="agc-leg-name"><b>{{ row.name }}</b><small{% if row.warn %} class="warn"{% endif %}>{{ row.sub }}</small></span>{% if row.dot %}<span class="dot {{ row.dot }}" title="{{ row.title }}"></span>{% endif %}</label>
+        {% endfor %}
+      </div>
+      {% endfor %}
+      <p class="agc-side-foot">{{ legend.accounts }} compte{{ 's' if legend.accounts != 1 }} branché{{ 's' if legend.accounts != 1 }}{% if legend.warned %} : <a href="{{ PREFIX }}/agendas/comptes">{{ legend.warned }} à reconnecter ou en panne</a>{% else %}, tous à jour{% endif %}.<br>Heures de {{ legend.zone }}.</p>
+    </div>
+  </details>
+
+  <div class="agc-main">
+    <div class="agc-bar">
+      {{ ag.chips(chips, "Les agendas de", "Les agendas de") }}
+      <div class="agc-period"><a class="btn quiet small" href="{{ period.today }}">Aujourd'hui</a><a class="btn quiet icon" href="{{ period.prev }}" aria-label="{{ period.unit }} précédente">‹</a><a class="btn quiet icon" href="{{ period.next }}" aria-label="{{ period.unit }} suivante">›</a><b>{{ period.label }}</b></div>
+    </div>
+    {% if banner %}<p class="note warn"><b>{{ banner.title }}</b>{{ banner.text }} <a href="{{ banner.href }}">Les comptes →</a></p>{% endif %}
+
+    {% if week %}{% set w = week %}
+    <div class="agc-week" role="region" aria-label="{{ w.label }}">
+      <div class="agc-wk-head"><span class="agc-tz">{{ w.zone }}</span>{% for h in w.heads %}<div class="agc-dh{{ ' today' if h.today }}"><span>{{ h.day }}</span><b>{{ h.n }}</b></div>{% endfor %}</div>
+      <div class="agc-allday"><span>journée</span><div class="agc-ad">{% for a in w.allday %}<a class="{{ a.cls|join(' ') }}" href="{{ a.href }}" data-agc-ag="{{ a.x.calendar }}" title="{{ a.tip }}">{% if a.x.marked %}<span class="agc-mk" aria-hidden="true">✦</span>{% endif %}<span>{{ a.x.title }}</span></a>{% endfor %}</div></div>
+      <div class="agc-body">
+        <div class="agc-axis" aria-hidden="true">{% for h in w.hours %}<span class="gs-{{ h.slot }}{{ ' first' if h.first }}">{{ h.text }}</span>{% endfor %}</div>
+        {% for col in w.columns %}
+        <div class="agc-day d{{ col.n }}{{ ' today' if col.today }}"><h3 class="agc-day-name">{{ col.name }}</h3>
+          {% for a in col.mobile %}<a class="{{ a.mcls|join(' ') }}" href="{{ a.href }}" data-agc-ag="{{ a.x.calendar }}">{% if a.x.marked %}<span class="agc-mk" aria-hidden="true">✦</span>{% endif %}<span>{{ a.x.title }}</span></a>{% endfor %}
+          {% for ev in col.events %}<a class="{{ ev.cls|join(' ') }}" href="{{ ev.href }}" data-agc-ag="{{ ev.x.calendar }}" title="{{ ev.tip }}"><span class="t">{% if ev.x.marked %}<span class="agc-mk" aria-hidden="true">✦</span>{% endif %}{{ ev.x.title }}</span><span class="h">{{ ev.hours }}</span></a>{% endfor %}
+          {% if col.now %}<span class="agc-now gs-{{ col.now }}" aria-hidden="true"></span>{% endif %}
+          {% if col.empty %}<p class="agc-day-empty">Rien ce jour-là.</p>{% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% elif month %}{% set m = month %}
+    <div class="agc-month" role="region" aria-label="{{ m.label }}">
+      {% for h in m.heads %}<div class="agc-mh">{{ h }}</div>{% endfor %}
+      {% for c in m.cells %}<div class="agc-mc{{ ' out' if c.out }}{{ ' today' if c.today }}"><span class="n">{{ c.n }}</span>{% for ch in c.chips %}<a class="{{ ch.cls|join(' ') }}" href="{{ ch.href }}" data-agc-ag="{{ ch.x.calendar }}" title="{{ ch.tip }}">{% if ch.hour %}<span class="h">{{ ch.hour }}</span>{% endif %}<span class="t">{{ ch.x.title }}</span></a>{% endfor %}{% if c.more %}<span class="agc-more">+{{ c.more }} autre{{ 's' if c.more > 1 }}</span>{% endif %}</div>{% endfor %}
+    </div>
+    {% else %}
+    <div class="agc-plan" role="region" aria-label="{{ period.label }}">
+      {% for d in plan %}
+      <section class="agc-plan-day{{ ' today' if d.today }}"><h3>{{ d.name }}<small>{{ d.sub }}</small></h3>
+        <ul class="agc-plan-rows">{% for row in d.rows %}<li><a class="{{ row.cls|join(' ') }}" href="{{ row.href }}" data-agc-ag="{{ row.x.calendar }}"><span class="h">{{ row.hours }}</span>{{ ag.sw(row.x.color, True) }}<span class="t">{% if row.x.marked %}<span class="agc-mk" aria-hidden="true">✦</span>{% endif %}{{ row.x.title }}{% if row.extra %}<small>{{ row.extra }}</small>{% endif %}</span><span class="w">{{ row.where }}</span></a></li>{% endfor %}</ul>
+      </section>
+      {% else %}
+      <p class="now-empty agc-plan-empty">Rien sur cette semaine.</p>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+
+  {% if opened %}{% set o = opened %}
+  <aside class="now-card agc-reader" aria-labelledby="agc-ev-titre">
+    <div class="agc-reader-top"><span class="agc-name">{{ ag.sw(o.color) }}{{ o.top }}</span><a class="btn quiet icon" href="{{ o.close }}" aria-label="Fermer">×</a></div>
+    <div>
+      <h2 id="agc-ev-titre">{% if o.marked %}<span class="agc-mk" aria-hidden="true">✦</span>{% endif %}{{ o.title }}</h2>
+      <p class="agc-when">{{ o.when }}</p>
+      {% if o.tags %}<p class="person-entry-tags">{% for t in o.tags %}{{ ag.tag(t[0], t[1]) }}{% endfor %}</p>{% endif %}
+    </div>
+    <dl class="agc-facts">
+      {% for f in o.facts %}<div><dt>{{ ('Rappel de ' ~ her) if f.label == 'rappel' else f.label }}</dt><dd>{% if f.people %}<ul class="agc-people">{% for p in f.people %}<li>{{ p.name }} {{ ag.tag(p.tag[0], p.tag[1]) }}</li>{% endfor %}</ul>{% elif f.swatch %}<span class="agc-name">{{ ag.sw(f.swatch) }}<a href="{{ f.href }}">{{ f.text }}</a></span>{% else %}{{ f.text }}{% endif %}</dd></div>{% endfor %}
+    </dl>
+    {% for b in o.blocks %}<div class="agc-reply"><span><b>{{ b.title }}</b></span>{% if b.quote %}<q>{{ b.quote }}</q>{% endif %}<span class="now-muted">{{ b.text }}</span><span><a href="{{ b.href }}">Examiner dans À valider →</a></span></div>{% endfor %}
+    {% if o.hers %}
+    <div><h3 class="now-subhead">Ce qu'elle en garde</h3><ul class="agc-know">{% for k in o.keeps %}<li>{% if loop.first %}<span class="agc-quote">« {{ k.text }} »</span>{% else %}{{ k.text }}{% endif %}{% if k.sub %}<small>{{ k.sub }}</small>{% endif %}</li>{% endfor %}</ul></div>
+    {% else %}
+    <div><h3 class="now-subhead">Ce que {{ her }} en a fait</h3>{% if o.feed %}<ol class="now-feed">{% for f in o.feed %}<li class="tone-{{ f.tone }}"><time>{{ f.time }}</time><div><p>{{ f.text }}</p>{% if f.quote %}<q>{{ f.quote }}</q>{% endif %}</div></li>{% endfor %}</ol>{% else %}<p class="now-empty">rien pour l'instant.</p>{% endif %}</div>
+    {% endif %}
+    {% if o.links %}<div class="agc-reader-actions">{% for t, h in o.links %}<a class="btn quiet small" href="{{ h }}">{{ t }}</a>{% endfor %}</div>{% endif %}
+  </aside>
+  {% endif %}
+</div>
+</div>

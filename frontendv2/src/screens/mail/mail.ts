@@ -2,7 +2,8 @@
  * Mail (ADR 0187, 0188, 0191) : ses boîtes à gauche, la liste, la liseuse à côté ; ses brouillons à elle se relisent
  * là, à côté de leur mail ; « Préremplir avec Mika » lui demande une réponse, que la saisie reprend. Ce qu'un niveau
  * de partage ne permet pas n'est pas offert (le serveur refuserait de toute façon). Le contrat :
- * `backendv2/docs/protocole-moi.md` § 3 ; le rendu : `markup.ts`.
+ * `backendv2/docs/protocole-moi.md` § 3 ; le rendu : `markup.ts`. Rien ne se relit à intervalles : le direct dit ce
+ * qui a changé (ADR 0308, § 2 bis ; ce qu'il fait relire : `live.ts`), et l'écran au second plan se relit à son retour.
  */
 import {
   editDraft,
@@ -45,9 +46,11 @@ import { ico, type IconName } from "../../shell/icons";
 import type { PaletteEntry } from "../../shell/palette";
 import type { ScreenContext, ScreenDef, ScreenTab, Shell } from "../../shell/shell";
 import { dayAndClock } from "../chat/markup";
-import { tickWork, WORK_POLL_MS } from "../../mika/work";
+import { tickWork } from "../../mika/work";
+import { Freshness, live, names, OneAtATime, pageShown, type Changed } from "../../live/live";
 import * as store from "../../shared/store";
 import { bindCounts, bindPieces, bindRecipients, canCorrect, correctField, errorText, openAsk, openCompose, paintPieces, readRecipients, type ComposeValues } from "./compose";
+import { openGone, openShows, pageShows, readerChange, viewGone } from "./live";
 import { answerable, caps, clip, deleteTargets, draftNotWaiting, keptRows, draftReply, forwardSubject, legacyContactsHash, newNonce, outgoingText, parseAddresses, personName, replySubject, replyTargets, toFill, writeToRoute, type Caps } from "./format";
 import {
   boxesPane,
@@ -86,10 +89,6 @@ type Open = { kind: "mail"; ref: string } | { kind: "draft"; id: string } | null
 
 /** Quand un mail ouvert devient lu (ADR 0175) ; `null` : jamais. */
 const READ_DELAY: Record<ReadOnOpen, number | null> = { jamais: null, aussitot: 0, "3s": 3000, "10s": 10_000 };
-/** Une réponse demandée : on la guette au plus si longtemps (elle s'y met tout de suite, ADR 0306 ; au-delà, la relecture
- *  ordinaire la verra arriver). */
-const ASK_POLL_MAX_MS = 30 * 60_000;
-const REFRESH_MS = 60_000;
 const PAGE_SIZE = 25;
 
 const GESTURE_ICON: Record<Gesture, IconName> = { read: "check", unread: "mail", archive: "archive", flag: "star", unflag: "star", trash: "trash", move: "folder" };
@@ -110,7 +109,6 @@ export class MailScreen {
   private body: HTMLElement | null = null;
   private mounted: "messages" | null = null;
   private started = false;
-  private stale = false;
   /** Ses boîtes, lues une première fois : le niveau d'une boîte décide de ce que la liseuse offre. */
   private boxesReady: Promise<void> = Promise.resolve();
   private draftsLoaded = false;
@@ -161,16 +159,25 @@ export class MailScreen {
   private readonly parked = new Map<string, InlineReply>();
   /** Les mails pour lesquels on lui a demandé une réponse (et depuis quand). */
   private readonly asked = new Map<string, number>();
-  /** Depuis quand on guette où elle en est, par mail (ADR 0306) : une demande, ou ce qu'elle prépare d'elle-même — à
-   *  part de `asked`, qui seul dit « on le lui a demandé ». */
-  private readonly watchSince = new Map<string, number>();
   private readTimer = 0;
-  private askTimer = 0;
-
-  private refreshTimer = 0;
   private searchTimer = 0;
 
-  constructor(private readonly shell: Shell) {}
+  /** Le direct (ADR 0308) : montré, l'écran relit ce qu'un changement touche ; sinon il se relit à son retour. */
+  private readonly fresh = new Freshness(() => this.started && this.visible(), () => void this.refresh());
+  /** La liste n'a pas été relue parce que des mails y étaient cochés : elle le sera quand plus rien ne l'est. */
+  private listStale = false;
+  // une lecture à la fois par route : une rafale de trames n'en lance pas dix
+  private readonly boxesRead = new OneAtATime(() => this.loadBoxes());
+  private readonly draftsRead = new OneAtATime(() => this.reloadDrafts());
+  private readonly listRead = new OneAtATime(() => this.rereadList());
+  private readonly mailRead = new OneAtATime(() => this.rereadOpen());
+  private readonly workRead = new OneAtATime(() => this.rereadWork());
+
+  constructor(private readonly shell: Shell) {
+    live.onChange("mail", (boxes) => this.fresh.touch(() => this.mailChanged(boxes)));
+    live.onChange("mail.drafts", () => this.fresh.touch(() => void this.draftsRead.run()));
+    live.onChange("mail.work", (refs) => this.fresh.touch(() => this.workChanged(refs)));
+  }
 
   screen(): ScreenDef {
     return {
@@ -219,7 +226,7 @@ export class MailScreen {
   }
 
   private visible(): boolean {
-    return !!this.section && !this.section.hidden && document.visibilityState === "visible";
+    return !!this.section && !this.section.hidden && pageShown();
   }
 
   private onMessages(): boolean {
@@ -250,13 +257,10 @@ export class MailScreen {
       this.started = true;
       // ses boîtes (leur niveau) et qui elle est (une de ses propriétaires ?) décident de ce que la liseuse offre
       this.boxesReady = Promise.all([this.loadBoxes(), store.me.load()]).then(() => undefined);
+      this.fresh.fresh();
       void this.start();
-    } else if (this.stale) {
-      this.stale = false;
-      void this.refresh();
-    }
+    } else this.fresh.back();
     this.route(ctx.item);
-    if (!this.refreshTimer) this.refreshTimer = window.setInterval(() => this.tick(), REFRESH_MS);
   }
 
   private async start(): Promise<void> {
@@ -264,35 +268,105 @@ export class MailScreen {
     await this.loadList();
   }
 
-  /** Revenue sur l'écran, ou toutes les minutes tant qu'il est ouvert : ses boîtes, ses brouillons, la liste. */
+  /** Tout ce qu'il montre, relu : revenu sur l'écran (ou l'onglet) après un changement manqué, ou à une ouverture de
+   *  la connexion (ADR 0308 : rien n'est rattrapé) — ses boîtes, ses brouillons, la liste (sauf sous une sélection), le
+   *  mail ouvert. */
   private async refresh(): Promise<void> {
-    await Promise.all([this.loadBoxes(), this.loadDrafts()]);
-    if (this.onMessages() && !this.checked.size) await this.loadList({ quiet: true });
+    await Promise.all([this.boxesRead.run(), this.draftsRead.run()]);
+    await Promise.all([this.listRead.run(), this.mailRead.run()]);
   }
 
-  private tick(): void {
-    if (!this.visible()) {
-      this.stale = true;
+  // ── Le direct (ADR 0308) ───────────────────────────────────────────
+
+  /** `mail` : ses boîtes ; la page affichée si elle montre une de ces boîtes ; le mail ouvert s'il est dans l'une
+   *  d'elles. */
+  private mailChanged(boxes: Changed): void {
+    void this.boxesRead.run();
+    if (this.onMessages() && pageShows(this.view, boxes)) void this.listRead.run();
+    if (this.open?.kind === "mail" && openShows(this.mail, boxes)) void this.mailRead.run();
+  }
+
+  /** `mail.work` : où elle en est d'une réponse au mail ouvert, s'il est nommé. */
+  private workChanged(refs: Changed): void {
+    if (this.open?.kind === "mail" && this.mail?.ref === this.open.ref && names(refs, this.open.ref)) void this.workRead.run();
+  }
+
+  /** La liste, relue sans bruit — sauf sous une sélection (ce qu'on a coché ne bouge pas sous les doigts) : elle le
+   *  sera quand plus rien n'est coché. */
+  private async rereadList(): Promise<void> {
+    if (!this.onMessages()) return;
+    if (this.checked.size) {
+      this.listStale = true;
       return;
     }
-    void this.refresh();
+    await this.loadList({ quiet: true });
+  }
+
+  /** Plus rien n'est coché : une relecture de la liste qui attendait se fait. */
+  private afterChecked(): void {
+    if (!this.checked.size && this.listStale) void this.listRead.run();
+  }
+
+  /** Ses brouillons relus ; le mail ouvert suit si son brouillon a changé (arrivé, décidé), sans perdre ta réponse. */
+  private async reloadDrafts(): Promise<void> {
+    const ref = this.open?.kind === "mail" ? this.open.ref : "";
+    const before = ref ? JSON.stringify(this.draftFor(ref)) : "";
+    await this.loadDrafts();
+    if (ref && this.open?.kind === "mail" && this.open.ref === ref && this.mail?.ref === ref && JSON.stringify(this.draftFor(ref)) !== before) {
+      this.paintReader(true);
+    }
+  }
+
+  /** Le mail ouvert, relu sans bruit : ses marques et où elle en est se repeignent en place ; ce qui change d'autre
+   *  redessine la liseuse, ta réponse commencée et le défilement gardés (`readerChange`). */
+  private async rereadOpen(): Promise<void> {
+    const open = this.open;
+    if (open?.kind !== "mail" || this.mail?.ref !== open.ref) return;
+    const ref = open.ref;
+    const seq = this.mailSeq;
+    let fresh: MailFull;
+    try {
+      fresh = await fetchMessage(ref);
+    } catch {
+      return; // le mail reste tel qu'on l'a lu ; la liste dira s'il n'y est plus
+    }
+    const before = this.mail;
+    if (seq !== this.mailSeq || this.open?.kind !== "mail" || this.open.ref !== ref || !before || before.ref !== ref) return;
+    const how = readerChange(before, fresh);
+    if (how === "same") return;
+    this.mail = fresh;
+    this.syncRow(fresh);
+    if (how === "parts") {
+      this.paintReaderTidy();
+      this.paintWork();
+    } else this.paintReader(true);
   }
 
   // ── Charger ────────────────────────────────────────────────────────
 
   private async loadBoxes(): Promise<void> {
+    let read = false;
     try {
       const got = await fetchBoxes();
       this.boxes = got.boxes;
       this.plugged = got.plugged;
       this.readOnOpen = got.read_on_open;
       this.boxesError = "";
+      read = true;
     } catch (err) {
       this.boxesError = errorText(err);
       if (err instanceof ApiError && err.status === 503) this.plugged = false;
     }
     this.paintBoxes();
     this.shell.refreshHead();
+    if (read) this.dropGone();
+  }
+
+  /** Ses boîtes relues : la boîte (ou le dossier) que la vue montre n'est plus à toi — retirée, plus partagée —, la vue
+   *  revient à « Toutes les réceptions » ; le mail ouvert d'une boîte partie se ferme. Sans un mot de « Introuvable ». */
+  private dropGone(): void {
+    if (this.open?.kind === "mail" && this.mail?.ref === this.open.ref && openGone(this.mail, this.boxes)) this.closeReader();
+    if (viewGone(this.view, this.boxes)) this.setView({ kind: "inbox" });
   }
 
   private async loadDrafts(): Promise<void> {
@@ -328,6 +402,7 @@ export class MailScreen {
   /** Rend `true` quand la liste demandée est là : ni dépassée par une autre demande, ni en erreur. */
   private async loadList(opts: { quiet?: boolean } = {}): Promise<boolean> {
     const seq = ++this.listSeq;
+    this.listStale = false; // celle-ci dira la liste telle qu'elle est
     const v = this.view;
     if (!opts.quiet) {
       this.listLoading = true;
@@ -361,6 +436,11 @@ export class MailScreen {
       this.listError = "";
     } catch (err) {
       if (seq !== this.listSeq) return false;
+      if (opts.quiet && err instanceof ApiError && err.status === 404 && "box" in v && v.box) {
+        // la boîte de la vue n'est peut-être plus à toi : ses boîtes relues le diront (et la vue y reviendra)
+        await this.boxesRead.run();
+        if (seq !== this.listSeq) return false;
+      }
       this.listLoading = false;
       this.listError = errorText(err);
     }
@@ -409,7 +489,6 @@ export class MailScreen {
   /** La liseuse quitte son mail : une réponse commencée (ou qui part encore) y reste, pour quand on le rouvre. */
   private leaveReader(): void {
     window.clearTimeout(this.readTimer);
-    window.clearTimeout(this.askTimer);
     this.captureReply();
     const r = this.reply;
     if (r && this.open?.kind === "mail" && (r.sending || r.error || r.fromDraft || r.body.trim() || r.files.length)) this.parked.set(this.open.ref, r);
@@ -440,7 +519,6 @@ export class MailScreen {
         this.syncRow(m);
         this.paintReader();
         this.scheduleRead(m);
-        this.watchAsk();
       })
       .catch((err) => {
         if (seq !== this.mailSeq) return;
@@ -657,13 +735,16 @@ export class MailScreen {
     }
   }
 
-  private paintReader(): void {
+  /** `keep` : redessinée par le direct (ADR 0308), la liseuse garde où elle avait défilé — le cadre d'un mail HTML,
+   *  qui prend sa hauteur une fois chargé, aussi. */
+  private paintReader(keep = false): void {
     if (!this.onMessages()) return;
     const host = $<HTMLElement>("[data-rd]", this.body!);
     if (!host) return;
     const active = document.activeElement as HTMLElement | null;
     const typing = active?.matches?.("[data-rd-txt]") ? (active as HTMLTextAreaElement) : null;
     const caret = typing ? [typing.selectionStart, typing.selectionEnd] : null;
+    const top = keep ? host.scrollTop : null;
     this.captureReply();
     host.innerHTML = this.readerMarkup();
     this.shownReply = $("[data-reply]", host) ? this.reply : null;
@@ -671,11 +752,12 @@ export class MailScreen {
     if (caret) {
       const t = $<HTMLTextAreaElement>("[data-rd-txt]", host);
       if (t) {
-        t.focus();
+        t.focus({ preventScroll: keep });
         t.setSelectionRange(caret[0] ?? t.value.length, caret[1] ?? t.value.length);
       }
     }
-    this.sizeFrame(host);
+    if (top !== null) host.scrollTop = top;
+    this.sizeFrame(host, top);
   }
 
   private readerMarkup(): string {
@@ -719,10 +801,13 @@ export class MailScreen {
     return readerEmpty("mail", "Choisis un mail", "Il s'ouvre ici, à côté de la liste.");
   }
 
-  /** Un mail HTML : son cadre à la hauteur de son contenu quand on peut la lire (même origine), sinon sa hauteur fixe. */
-  private sizeFrame(host: HTMLElement): void {
+  /** Un mail HTML : son cadre à la hauteur de son contenu quand on peut la lire (même origine), sinon sa hauteur fixe.
+   *  `top` : où la liseuse doit rester (redessinée par le direct), reposé une fois le cadre à sa hauteur — sauf si l'on a
+   *  défilé entre-temps. */
+  private sizeFrame(host: HTMLElement, top: number | null = null): void {
     const frame = $<HTMLIFrameElement>("[data-frame]", host);
     if (!frame) return;
+    const landed = host.scrollTop;
     frame.addEventListener("load", () => {
       try {
         const doc = frame.contentDocument;
@@ -731,6 +816,7 @@ export class MailScreen {
       } catch {
         // une autre origine (le moteur ailleurs que la page) : le cadre garde sa hauteur et défile
       }
+      if (top !== null && Math.abs(host.scrollTop - landed) < 2) host.scrollTop = top;
     });
   }
 
@@ -784,6 +870,7 @@ export class MailScreen {
     this.paintListHead();
     this.paintRows();
     if (this.mail && refs.includes(this.mail.ref)) this.paintReaderTidy();
+    this.afterChecked();
     try {
       const done = await tidy(refs, g, folder);
       if (gone) {
@@ -935,70 +1022,47 @@ export class MailScreen {
       }
       const now = Date.now();
       this.asked.set(m.ref, now);
-      this.watchSince.delete(m.ref); // une nouvelle demande : son plafond repart d'ici
-      // elle s'y met tout de suite (ADR 0306) : sa ligne paraît sans attendre la relecture, qui la corrige
+      // elle s'y met tout de suite (ADR 0306) : sa ligne paraît sans attendre que le direct dise son étape (ADR 0308)
       m.work ??= { step: "waiting", label: "", since: now, started: now };
       toast(got.message && got.message !== "Elle y travaille déjà." ? "Demandé : elle s'y met tout de suite ; sa réponse arrivera ici." : got.message, { mika: true });
       this.paintReader();
-      this.watchAsk();
     } catch (err) {
       toast(errorText(err), { ico: "alert" });
     }
   }
 
-  /** Une réponse qu'elle prépare pour ce mail, demandée ou d'elle-même : relire où elle en est toutes les deux
-   *  secondes (ADR 0306), sans relire le mail, tant que la liseuse reste dessus, jusqu'à ce qu'elle arrive. */
-  private watchAsk(): void {
-    window.clearTimeout(this.askTimer);
-    const m = this.mail;
-    if (!m) return;
-    const busy = !!m.her?.asked || !!m.work || this.asked.has(m.ref);
-    if (!busy || this.draftFor(m.ref)) {
-      this.watchSince.delete(m.ref);
-      return;
-    }
-    const since = this.watchSince.get(m.ref) ?? this.asked.get(m.ref) ?? Date.now();
-    this.watchSince.set(m.ref, since);
-    const ref = m.ref;
-    this.askTimer = window.setTimeout(() => void this.pollWork(ref, since), WORK_POLL_MS);
-  }
-
-  private async pollWork(ref: string, since: number): Promise<void> {
+  /** Où elle en est d'une réponse au mail ouvert, demandée ou d'elle-même (ADR 0306) : le direct pousse chaque étape
+   *  qui commence (`mail.work`, ADR 0308), on relit alors `work`, sans relire le mail. Son brouillon arrivé : la
+   *  liseuse le montre, et on le dit si on l'attendait ici. */
+  private async rereadWork(): Promise<void> {
+    const ref = this.open?.kind === "mail" && this.mail?.ref === this.open.ref ? this.open.ref : "";
+    if (!ref) return;
     const here = () => this.open?.kind === "mail" && this.open.ref === ref && this.mail?.ref === ref;
-    if (!here() || Date.now() - since > ASK_POLL_MAX_MS) return;
-    if (!this.visible()) {
-      this.watchAsk();
-      return;
-    }
+    // ce qu'on attendait ici avant de relire (une relecture du mail, partie en même temps, a pu l'effacer)
+    const waited = this.asked.has(ref) || !!this.mail?.work || !!this.mail?.her?.asked;
     let got: MailWork;
     try {
       got = await fetchMailWork(ref);
     } catch {
-      if (here()) this.watchAsk(); // une relecture manquée : la suivante
-      return;
+      return; // le prochain changement relira
     }
     if (!here() || !this.mail) return;
     if (got.draft) {
       await this.loadDrafts();
       if (!here() || !this.mail) return;
       this.asked.delete(ref);
-      this.watchSince.delete(ref);
       this.mail.work = null;
-      toast("Sa réponse est arrivée : elle t'attend ici.", { mika: true });
-      this.paintReader();
+      if (waited) toast("Sa réponse est arrivée : elle t'attend ici.", { mika: true });
+      this.paintReader(true);
       return;
     }
     this.mail.work = got.work;
     if (!got.asked && !got.work) {
       // elle a fini sans en rendre, ou y a renoncé : plus rien n'est en cours ici
       this.asked.delete(ref);
-      this.watchSince.delete(ref);
       if (this.mail.her) this.mail.her.asked = false;
-      this.paintWork();
-      return;
     }
     this.paintWork();
-    this.watchAsk();
   }
 
   /** Où elle en est (ADR 0306), dans sa case de « Ce qu'elle en sait » : repeinte quand l'étape change, sans
@@ -1010,7 +1074,7 @@ export class MailScreen {
     const draft = this.draftFor(m.ref);
     const slot = this.body && $<HTMLElement>("[data-rd-work]", this.body);
     if (!slot) {
-      if (!draft && (asked || m.work)) this.paintReader();
+      if (!draft && (asked || m.work)) this.paintReader(true);
       return;
     }
     const work = m.work ?? null;
@@ -1292,6 +1356,7 @@ export class MailScreen {
       if ((b as HTMLInputElement).checked) this.checked.add(ref);
       else this.checked.delete(ref);
       this.paintListHead();
+      this.afterChecked();
     });
     on(section, "[data-groupe]", "click", (_e, b) => {
       const g = b.dataset.groupe as Gesture | "none";
@@ -1299,6 +1364,7 @@ export class MailScreen {
         this.checked.clear();
         this.paintListHead();
         this.paintRows();
+        this.afterChecked();
         return;
       }
       if (g === "move") {
@@ -1403,7 +1469,7 @@ export class MailScreen {
       case "corriger":
         // ADR 0307 : les fautes de ta réponse, sans changer ses mots (le champ tel qu'il est à l'écran à la fin)
         void correctField(() => (this.body ? $<HTMLTextAreaElement>("[data-rd-txt]", this.body) : null),
-          b instanceof HTMLButtonElement ? b : null);
+          b instanceof HTMLButtonElement ? b : null, () => (this.open?.kind === "mail" ? this.open.ref : ""));
         return;
       case "reprendre-brouillon": {
         const d = m ? this.draftFor(m.ref) ?? this.drafts.find((x) => x.id === m.her?.draft) : null;
@@ -1501,8 +1567,8 @@ export class MailScreen {
       return;
     }
     try {
+      // ce que la relève apporte arrive par le direct (ADR 0308) : rien à relire d'ici
       toast((await pollBox(key)).message || "Relève demandée.", { ico: "refresh" });
-      window.setTimeout(() => void this.refresh(), 3000);
     } catch (err) {
       toast(errorText(err), { ico: "alert", duration: 4200 });
     }

@@ -420,6 +420,12 @@ def efforts(e: Efforts) -> dict[str, Any]:
             "auto": {"chat": e.auto, "pro": e.auto_pro}}
 
 
+def changed(changes: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Ce qui a changé dans ce que montrent les routes de ``/api/moi`` (ADR 0308) : un sujet par élément, et ce qu'il
+    nomme — jamais le contenu (``docs/protocole-moi.md``, § 2 bis)."""
+    return {"type": "changed", "changes": [dict(c) for c in changes]}
+
+
 def _cut(text: str, limit: int = TOOL_TEXT_MAX) -> str:
     return text if len(text) <= limit else text[: limit - len(TOOL_TEXT_CUT)] + TOOL_TEXT_CUT
 

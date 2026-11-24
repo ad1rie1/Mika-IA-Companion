@@ -1,0 +1,33 @@
+{# Relations & échanges › Agendas › Comptes (app/handmade/tabs/agendas.py, ADR 0309, lot 5 ; la maquette : comptes.html).
+   Chaque compte d'agenda en liste serrée : son nom et son fournisseur, à qui il est (sa fiche), ses agendas (leur fiche,
+   masqué, lecture seule, combien d'événements), sa synchro (l'erreur en mots, comment il se relit), avec qui ses agendas
+   sont partagés ici. « Les comptes de » choisit une personne. Chacun branche les siens dans son espace. #}
+{% import "handmade/agendas/_agendas.html" as ag %}
+{% from "_navigation.html" import pager as pages %}
+<div class="now-page agc-page" data-tab="agendas/comptes">
+  {{ ag.chips(chips, "Les comptes de", "Les comptes de") }}
+  <p class="person-entry-facts agc-facts-line"><span><span class="k">comptes</span> {{ facts.accounts }}</span><span><span class="k">agendas</span> {{ facts.calendars }}</span><span><span class="k">à jour</span> {{ facts.ok }}</span>{% if facts.warned %}<span class="warn"><span class="k">à reconnecter ou en panne</span> {{ facts.warned }}</span>{% endif %}<span><span class="k">fenêtre</span> {{ facts.window }} · <a href="{{ PREFIX }}/agendas/parametres#synchro">Paramètres</a></span></p>
+  <section class="now-card hm-table-card table-block" aria-label="Comptes d'agenda">
+    <div class="hm-table-wrap" tabindex="0" role="region" aria-label="Comptes d'agenda">
+      <table class="hm-table agc-accounts">
+        <thead><tr><th scope="col" class="w-compte">Compte</th><th scope="col">À qui</th><th scope="col" class="w-agendas">Ses agendas</th><th scope="col" class="w-synchro">Synchro</th><th scope="col">Partagé ici avec</th><th scope="col"><span class="service-hidden">Sa fiche</span></th></tr></thead>
+        <tbody>
+          {% for a in rows %}
+          <tr{% if a.warn %} class="t-warn"{% endif %}>
+            <td><div class="agc-acc"><span><b>{{ a.name }}</b> <span class="agc-prov">{{ a.kind }}</span></span>{% if not a.system and a.label %}<span class="mono">{{ a.label }}</span>{% endif %}</div></td>
+            <td>{% if a.who_href %}<a href="{{ a.who_href }}" class="now-tag owner">{{ a.who }}</a>{% else %}<span class="now-tag owner">{{ a.who }}</span>{% endif %}</td>
+            <td>{% if a.calendars %}<ul class="agc-cals">{% for c in a.calendars %}<li>{{ ag.sw(c.color) }}<a href="{{ c.href }}">{{ c.name }}</a><small>{{ c.notes }}</small></li>{% endfor %}</ul>{% else %}<span class="now-muted">aucun encore : il n'a jamais été relu</span>{% endif %}</td>
+            <td><div class="agc-sync"><span>{{ ag.tag(a.said.label, a.said.tone) }} {% if a.said.error %}<span class="warn">{{ a.said.error }}</span>{% else %}<span class="now-muted">{{ a.said.when }}</span>{% endif %}</span>{% if a.said.error %}<small>{{ a.said.when|capitalize }} ; rien n'est perdu.</small>{% elif a.mode %}<small>{{ a.mode }}</small>{% endif %}</div></td>
+            <td>{% for sh in a.shared %}{{ sh.cal }} → <a href="{{ sh.href }}">{{ sh.who }}</a> <span class="now-muted">({{ sh.level }})</span>{% if not loop.last %}<br>{% endif %}{% else %}<span class="now-muted">—</span>{% endfor %}</td>
+            <td class="fit"><div class="agc-acc-actions">{% if a.sync and csrf %}{{ ag.sync_form(a.sync, csrf, back) }}{% endif %}{% if a.warn and a.fiche %}<a class="btn small" href="{{ a.fiche }}">Sa fiche</a>{% endif %}</div></td>
+          </tr>
+          {% else %}
+          <tr><td colspan="6"><p class="now-empty">Aucun compte d'agenda ici.</p></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="hm-pager single">{{ pages(pager) }}</div>
+    <details class="person-list-help"><summary>Comprendre cette liste</summary><p>Un compte est à quelqu'un, comme une boîte aux lettres : à toi, ou à une personne qui a un compte. Ses outils ne voient que les agendas de qui est en face, et ce que leur tableau de droits ouvre. Aucun compte n'est à elle : son agenda est sa mémoire. Se reconnecter demande le compte de la personne : la fiche d'un agenda ne le propose que pour les tiens ; chacun branche ses comptes dans son espace (Paramètres › Agendas).</p></details>
+  </section>
+</div>

@@ -3,6 +3,7 @@ package fr.qwartz.mika.data.moi.teams
 import fr.qwartz.mika.data.moi.Corrected
 import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.correct
+import fr.qwartz.mika.data.moi.correctClient
 import fr.qwartz.mika.data.moi.decode
 import fr.qwartz.mika.data.moi.jsonOf
 import fr.qwartz.mika.data.moi.map
@@ -10,10 +11,11 @@ import fr.qwartz.mika.data.moi.map
 /**
  * Teams par l'API par personne (`backendv2/docs/protocole-moi.md` § 4), sous le jeton du téléphone : ses comptes, ses
  * conversations et leurs fils, les réponses qu'elle y prépare ; écrire soi-même (ADR 0189), lui demander une réponse,
- * décider des siennes. Chaque écriture porte sa clé d'envoi ([key]) : le même geste redit ne refait rien. Ouverte pour
- * qu'une fausse API la remplace (les écrans sur la JVM).
+ * décider des siennes. Chaque écriture porte sa clé d'envoi ([key]) : le même geste redit ne refait rien. [corrections]
+ * porte « Corriger » (ADR 0307) : la même API sur un client qui attend la fin d'une correction ([correctClient]).
+ * Ouverte pour qu'une fausse API la remplace (les écrans sur la JVM).
  */
-open class TeamsApi(private val api: MoiApi) {
+open class TeamsApi(private val api: MoiApi, private val corrections: MoiApi = api) {
     // ── Lire ──
     open suspend fun accounts(): MoiApi.Result<TeamsAccounts> = api.get("/teams/accounts", reader = TeamsAccounts.serializer())
 
@@ -70,7 +72,7 @@ open class TeamsApi(private val api: MoiApi) {
         write("/teams/reply/redo", listOf("id" to id, "instruction" to instruction), key)
 
     /** « Corriger » (ADR 0307) : les fautes de ton message, sans changer ses mots (`/api/moi/correct`). */
-    open suspend fun correct(text: String): MoiApi.Result<Corrected> = api.correct(text)
+    open suspend fun correct(text: String): MoiApi.Result<Corrected> = corrections.correct(text)
 
     private fun optional(name: String, value: String): List<Pair<String, Any>> =
         if (value.isBlank()) emptyList() else listOf(name to value)

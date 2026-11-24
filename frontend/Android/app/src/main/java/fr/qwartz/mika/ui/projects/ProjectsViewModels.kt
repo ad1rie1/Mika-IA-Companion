@@ -666,6 +666,11 @@ class ProjectViewModel(private val deps: ProjectsDeps, val id: Int) : ViewModel(
     private var started = false
     private var job: Job? = null
     private var ticketsJob: Job? = null
+    private val gone = Channel<Unit>(Channel.BUFFERED)
+
+    /** Relue sans bruit, la fiche n'est plus à toi (introuvable : plus partagée, retirée — ADR 0308) : l'écran revient
+     *  à la liste des projets, plutôt qu'une fiche figée sous « introuvable ». */
+    val left: Flow<Unit> = gone.receiveAsFlow()
 
     fun resume() {
         val first = !started
@@ -716,7 +721,11 @@ class ProjectViewModel(private val deps: ProjectsDeps, val id: Int) : ViewModel(
                     sheet = Load.Ready(got.value)
                     stale = false
                 }
-                is MoiApi.Result.Failed -> if (sheet is Load.Ready) {
+                is MoiApi.Result.Failed -> if (sheet is Load.Ready && quiet && got.error.gone) {
+                    // lue, puis introuvable : elle n'est plus à toi — retour à la liste, sans le refus
+                    stale = false
+                    gone.trySend(Unit)
+                } else if (sheet is Load.Ready) {
                     staleError = got.error
                     if (!quiet) gestures.say(got.error.said)
                 } else {

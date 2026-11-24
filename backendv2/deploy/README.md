@@ -169,7 +169,7 @@ MIKA_DATABASE_URL=mariadb+pymysql://mika@localhost/?unix_socket=/var/lib/mysql/m
 ```
 
 Au démarrage, ses bases sont créées (`mika_mind`, `mika_views`, `mika_mail`,
-`mika_feeds`, `mika_teams`, `mika_contacts`) et passées à leur dernière révision ; chaque app
+`mika_feeds`, `mika_teams`, `mika_contacts`, `mika_agenda`) et passées à leur dernière révision ; chaque app
 forgée a la sienne (`mika_forge_<app>`), et un compte du même nom qui n'a de
 droits que sur elle. Rien n'est repris des fichiers SQLite d'avant : elle
 repart d'une base vide.
@@ -619,7 +619,7 @@ restent toujours avec.
 
 **La clé.** Dans [Google Cloud](https://console.cloud.google.com/) : un projet, **un compte de facturation** lié (Google
 le demande, même pour ne rien payer), l'API **Places API (New)** activée, puis une clé (« API et services ›
-Identifiants »). **Restreins-la** : « Restrictions relatives aux API » → *Places API (New)* seule ; et, si l'adresse
+Identifiants »). Le même projet peut porter le client OAuth des agendas (« Les agendas Google et Outlook », plus bas). **Restreins-la** : « Restrictions relatives aux API » → *Places API (New)* seule ; et, si l'adresse
 du portable est fixe, « Restrictions relatives aux applications » → *Adresses IP* (son IPv6). Elle se pose :
 
 - **sur le portable** : dans la console, **Réglages › Carte et téléphone › Avis (Google)** (chiffrée, jamais
@@ -728,6 +728,52 @@ Puis, dans la console, Réglages › Carte et téléphone › Itinéraires : « 
 et son débit (10 demandes par seconde par défaut). Pour le mettre à jour : reconstruire sur le PC de temps en temps, recopier,
 `sudo systemctl restart valhalla`.
 
+## Les agendas Google et Outlook (ADR 0309)
+
+Chacun branche ses agendas depuis son espace (Paramètres › Agendas) ; le serveur, lui, a besoin d'**une application
+Google à lui** — son flux par code d'appareil n'admet pas l'agenda (quelques portées seulement). Outlook.com, lui, entre
+par l'application Microsoft que Mika livre, celle du courrier (ADR 0238) : rien à faire pour un compte personnel.
+
+**Le client Google, pas à pas.** Dans [Google Cloud](https://console.cloud.google.com/), le projet de la clé Places
+(plus haut) ou un autre — l'API des agendas est gratuite, sans compte de facturation :
+
+1. **API et services › Bibliothèque** : *Google Calendar API*, « Activer ».
+2. **Google Auth Platform › Branding** (l'écran de consentement) : le nom de l'application (« Mika »), une adresse
+   d'assistance, celle du développeur. **Audience** : type d'utilisateur *Externe*, statut de publication *En test* ;
+   **Utilisateurs test** : chaque adresse Google qui branchera son agenda (cent au plus).
+3. **Accès aux données › Ajouter ou supprimer des champs d'application** : `https://www.googleapis.com/auth/calendar`
+   (« Afficher, modifier, partager et supprimer définitivement tous les agendas… », un champ *sensible*).
+4. **Clients › Créer un client** : type **Application de bureau**, un nom ; garder l'**identifiant du client**
+   (`….apps.googleusercontent.com`) et son **secret** (`GOCSPX-…`).
+5. Sur le portable, serveur arrêté : `mika agenda google <identifiant> --secret GOCSPX-…` (le secret est scellé, jamais
+   réaffiché ; `mika agenda google` la montre, `--defaut` l'efface). La console le réglera aussi (lot 5).
+
+Brancher un compte : « Se connecter à Google » ouvre la page de Google ; après le consentement, le navigateur part vers
+`http://127.0.0.1:<port>/?state=…&code=…`, une page qui ne s'ouvre pas — c'est voulu : on **copie son adresse entière**
+et on la colle dans Mika, qui vérifie qu'elle vient bien de la connexion commencée (un quart d'heure pour le faire). La
+case de l'agenda doit rester cochée sur l'écran de Google. **En test, Google n'accorde l'accès que sept jours** : le
+compte passe ensuite « à reconnecter ». Pour qu'il dure, *Audience › Publier l'application* (*En production*) sans
+la faire valider : l'écran de consentement dit alors « Google n'a pas validé cette application » (*Paramètres avancés
+› Accéder à Mika*), toujours pour cent utilisateurs au plus ; au-delà, Google exige sa validation (un champ sensible).
+
+Avec une origine HTTPS (« Derrière un mandataire TLS »), un client de type **Application Web** évite de coller : son
+*URI de redirection autorisé* est `https://<ton domaine>/api/moi/agenda/google/retour`, puis
+`mika agenda google <identifiant> --secret … --web`. La route qui le reçoit vient avec l'API des agendas (lot 4) :
+d'ici là, un client de bureau.
+
+**Microsoft (Entra).** Un compte Outlook.com, Hotmail ou Live n'a rien à faire : à la connexion (un code à entrer chez
+Microsoft, comme pour une boîte), Microsoft demande lui-même l'accès à ses calendriers (`Calendars.ReadWrite`, un
+consentement dynamique : l'application n'a pas à le déclarer). Avec **une application à toi** (Courrier › Paramètres ›
+Compte Microsoft, ou `mika mail application`), dans Entra › Inscriptions d'applications › elle : *Authentification*
+› « Autoriser les flux de clients publics » à *Oui* (déjà fait pour le courrier) ; *Autorisations d'API › Ajouter ›
+Microsoft Graph › Autorisations déléguées* : `Calendars.ReadWrite` et `offline_access` — facultatif pour un compte
+personnel, utile pour qu'un administrateur y consente. **Un compte pro (Microsoft 365)** dépend de son organisation :
+l'application doit accepter les comptes de tout annuaire, et l'organisation laisser ses membres y consentir, ou son
+administrateur l'accorder pour tous (Entra › Applications d'entreprise › l'application › Autorisations › « Accorder un
+consentement d'administrateur ») ; un accès conditionnel peut encore la bloquer (le refus se dit en mots sur le
+compte). Le compte déclare alors l'annuaire (`organizations`, ou celui de l'organisation) et, s'il le faut,
+l'application que l'organisation a inscrite. Sinon, l'Outlook pro passe par CalDAV et DavMail.
+
 ## Surveiller
 
 `GET /health` est public et ne dit que des noms et des états :
@@ -761,7 +807,7 @@ mika verify /var/backups/mika/mika-AAAAMMJJ-HHMMSS.tar.gz   # noté pour la cons
 
 Une archive contient `mind.db` (sa vie : le journal, les contenus, les
 comptes, les réglages), les caches du courrier, des flux et de Teams, son
-annuaire (`contacts.db`), ses apps forgées, ses ateliers, les fichiers qu'elle a envoyés (`partages/`) et les
+annuaire (`contacts.db`), ses agendas (`agenda.db`), ses apps forgées, ses ateliers, les fichiers qu'elle a envoyés (`partages/`) et les
 pièces jointes qu'on lui a envoyées (`pieces/`), `secret.key` quand la clé vient
 de ce fichier et `firebase-service-account.json` s'il est posé, avec un
 manifeste (sommes SHA-256, tête du journal, empreinte de l'état rejoué depuis la

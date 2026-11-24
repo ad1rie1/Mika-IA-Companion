@@ -9,8 +9,9 @@ from urllib.parse import urlencode, urlsplit
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from mika.adapters.agenda.oauth import google_client_id
 from mika.adapters.mail import MailConfig
-from mika.adapters.mail.config import MailAccount
+from mika.adapters.mail.config import MailAccount, application_id
 from mika.adapters.mcp.config import McpConfig
 from mika.adapters.teams import TeamsConfig
 from mika.app.console import FACULTY_LABELS, NAVIGATION
@@ -75,11 +76,49 @@ PLUGINS: dict[str, tuple[str, tuple[str, ...], tuple[str, str] | None]] = {
               ("Apps forgées", "apps")),
     "contacts": ("Ce qu'elle se forme de ses contacts à partir de ce qu'elle lit : la période relue, ses bornes, les "
                  "plafonds par jour", (), ("Personnes › Annuaire", "personnes/personnes")),
+    "agenda": ("Les agendas de chacun : les applications Google et Microsoft du serveur, la synchronisation, ses "
+               "rappels par défaut ; chacun branche ses comptes dans son espace", ("agendas",),
+               ("Agendas", "agendas/tous")),
 }
 #: ce qui se branche sans être un plugin (le noyau s'en sert) : (nom, ce qui s'y règle, sa page de réglages)
 SERVICES = (("Transcription vocale", "Le service qui transcrit les messages vocaux qu'on lui envoie", "transcription"),
             ("Notifications du téléphone", "Firebase, pour écrire à qui a fermé l'application Android",
              "notifications"))
+
+
+class AgendaApps(BaseModel):
+    """Les applications par lesquelles entrent les agendas branchés (ADR 0309) : celle de Google, une par serveur, et
+    celle de Microsoft, la même que pour le courrier (ADR 0238)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    google_client_id: Annotated[str, Knob(
+        label="Identifiant client", group="Application Google", advanced=False, order=10,
+        help="Celui d'un client « Application de bureau » de ton projet Google Cloud (…apps.googleusercontent.com). "
+             "Vide : Google ne se branche pas sur ce serveur.")] = ""
+    google_secret: Annotated[str, Knob(
+        label="Secret client", group="Application Google", secret=True, advanced=False, order=20,
+        help="Scellé : il ne se relit plus. Vide : inchangé. Changer d'application demande de reconnecter les comptes "
+             "Google.")] = ""
+    google_web: Annotated[bool, Knob(
+        label="Un client « Application Web » (retour direct)", group="Application Google", order=30,
+        help="Avec une adresse HTTPS déclarée chez Google, le retour du consentement revient ici seul ; sinon on colle "
+             "l'adresse où Google renvoie (http://127.0.0.1/…?code=…).")] = False
+    microsoft_app: Annotated[str, Knob(
+        label="Application Microsoft (client ID)", group="Application Microsoft", advanced=False, order=40,
+        help="Vide : celle livrée d'origine. La même que celle des boîtes (Courrier › Paramètres › Compte Microsoft) : "
+             "un seul réglage pour les deux. Pour l'agenda, elle demande en plus Calendars.ReadWrite au moment de se "
+             "connecter. La changer demande de reconnecter les boîtes et les agendas qui entraient par elle.")] = ""
+
+    @field_validator("google_client_id")
+    @classmethod
+    def _google(cls, client_id: str) -> str:
+        return google_client_id(client_id)
+
+    @field_validator("microsoft_app")
+    @classmethod
+    def _microsoft(cls, client_id: str) -> str:
+        return application_id(client_id)
 
 
 class FeedsSettings(BaseModel):
@@ -282,6 +321,37 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
             log.warning("teams enregistré, paramètres non rejournalisés : %s", "; ".join(problems))
         return []
 
+    def agenda_apps() -> AgendaApps:
+        """L'application Google du serveur (son secret ouvert) et celle de Microsoft, propre à l'instance (ADR 0238)."""
+        google = settings.google_application()
+        return AgendaApps(google_client_id=google.client_id if google is not None else "",
+                          google_secret=google.secret if google is not None else "",
+                          google_web=bool(google.web) if google is not None else False,
+                          microsoft_app=settings.own_mail_application())
+
+    async def save_agenda_apps(cfg: AgendaApps) -> list[str]:
+        """L'application Google (un secret vide garde celui de la même application) ; celle de Microsoft, partagée
+        avec le courrier."""
+        if cfg.google_client_id and not cfg.google_secret:
+            known = settings.google_application()
+            if known is None or known.client_id != cfg.google_client_id:
+                return ["Le secret client de cette application Google, avec son identifiant."]
+        try:
+            await settings.save_google_application(cfg.google_client_id, cfg.google_secret, web=cfg.google_web)
+        except ValueError as exc:
+            return [str(exc)]
+        if cfg.microsoft_app != settings.own_mail_application():
+            await settings.save_mail_application(cfg.microsoft_app)
+        return []
+
+    def agenda_facts() -> list[tuple[str, Any]]:
+        accounts = settings.agenda().accounts
+        google = sum(1 for a in accounts.values() if a.kind == "google")
+        microsoft = sum(1 for a in accounts.values() if a.kind == "microsoft")
+        return [("Application Google", "réglée" if settings.google_application() is not None else "pas réglée"),
+                ("Comptes Google", str(google)), ("Comptes Microsoft", str(microsoft)),
+                ("Les comptes eux-mêmes", Ref("local", f"{PREFIX}/agendas/comptes", "Agendas › Comptes"))]
+
     def teams_facts() -> list[tuple[str, Any]]:
         """Ses comptes en chiffres, et une fois chacun, en liens, les pages où le reste se fait (C7-15). La page vit
         dans Teams (ADR 0206) : ses conversations et ses réponses sont les onglets d'à côté, pas un fait de plus."""
@@ -421,6 +491,19 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                             "Le service qui transcrit les messages vocaux qu'on lui envoie (compatible Whisper). "
                             "Sans lui, un vocal lui arrive comme « un message vocal » sans son contenu."),
                             home="sens/parametres-transcription"),)),
+        # les agendas (ADR 0309, lot 5) : dans Agendas, en haut à droite (ADR 0206) — leurs applications, et les
+        # paramètres du plugin (la synchronisation, les rappels par défaut) sur la même page
+        SettingsSection("agendas", "Agendas", "plugins", AgendaApps, agenda_apps, save_agenda_apps, order=13,
+                        lock=settings.writing, facts=agenda_facts,
+                        description="Les applications par lesquelles entrent les agendas Google et Microsoft de ce "
+                                    "serveur, ce que la synchronisation relit et à quel rythme, et le rappel qu'elle "
+                                    "propose d'office.",
+                        pages=(SettingsPage("agendas", "Paramètres", description=(
+                            "Les applications par lesquelles entrent les agendas Google et Microsoft de ce serveur, ce "
+                            "que la synchronisation relit et à quel rythme, et le rappel qu'elle propose d'office. "
+                            "Les comptes eux-mêmes, chacun les branche dans son espace."), home="agendas/parametres",
+                            params="agenda", template="handmade/agendas/parametres.html",
+                            styles=("handmade/agendas.css", "handmade/courrier_reglages.css")),)),
         SettingsSection("teams", "Teams", "plugins", TeamsConfig, settings.teams, save_teams, order=12,
                         lock=settings.writing,
                         description="Les conversations Teams que l'extension de navigateur de chaque compte lui "

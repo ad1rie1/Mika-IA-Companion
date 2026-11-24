@@ -143,10 +143,12 @@ def test_the_why_says_when_the_ceiling_closed_it(world):  # noqa: F811
     login(client, "lea")
     got = client.get(API + "/rights").json()
     registry = live.kernel.registry
-    # un outil qui agit, ouvert à tout le monde par le minimum vital de sa famille : dans un salon, le plafond le ferme
+    # un outil qui agit, ouvert à tout le monde par le minimum vital de sa famille (pas parce qu'une ressource est à
+    # elle : son agenda, ADR 0309) : dans un salon, le plafond le ferme
     acting = next(t for r in resources(got, "families").values() for t in r["tools"]
                   if registry.tools[t["name"]].acts and t["cells"]["web/reply"] is not None
-                  and t["cells"]["web/reply"]["level"] == "seule" and t["cells"]["salon/reply"] is not None)
+                  and t["cells"]["web/reply"]["level"] == "seule" and not t["cells"]["web/reply"]["owned"]
+                  and t["cells"]["salon/reply"] is not None)
     room = acting["cells"]["salon/reply"]
     assert room["level"] == "non" and room["why"].startswith("tout le monde") and "des témoins" in room["why"]
 

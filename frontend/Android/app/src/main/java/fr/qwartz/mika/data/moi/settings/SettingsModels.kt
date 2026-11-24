@@ -272,6 +272,8 @@ object ShareKinds {
     const val MAIL = "mail"
     const val TEAMS = "teams"
     const val MCP = "mcp"
+    /** Un agenda (ADR 0309) : il se partage depuis l'Agenda ou sa page de Paramètres, et se lit ici avec les autres. */
+    const val AGENDA = "agenda"
 }
 
 /** Ce que tu partages. */

@@ -2,7 +2,7 @@
 service branché (``server``), un moyen de communication (``handle``), un projet (``project``, son dépôt git dans
 ``project_git``), un but (``goal``), un réveil (``wakeup``), une conversation et une réponse Teams (``teams``), une
 boîte, un mail et un brouillon (``mail``), une fiche de l'annuaire — une personne connue de loin, une organisation
-(``contact``, ADR 0298). Chacune est une ``Overview`` ; la composition les reçoit toutes ici
+(``contact``, ADR 0298), un agenda (``agenda``, ADR 0309). Chacune est une ``Overview`` ; la composition les reçoit toutes ici
 (``OVERVIEWS``, par sorte d'objet). La fiche d'une personne a son paquet (``person/``) ; les apps de la Forge gardent
 le rendu de la console (``plain_owners``).
 
@@ -14,7 +14,7 @@ dans ses blocs ou dans l'en-tête qu'elle déclare ; le reste, par des fonctions
 
 from __future__ import annotations
 
-from mika.app.handmade.subjects import contact, goal, handle, mail, project, server, teams, wakeup
+from mika.app.handmade.subjects import agenda, contact, goal, handle, mail, project, server, teams, wakeup
 from mika.inspector.ui import Overview
 
 #: les vues d'ensemble des fiches dessinées, par sorte d'objet (``Inspection.subject``)
@@ -30,4 +30,5 @@ OVERVIEWS: dict[str, Overview] = {
     mail.MAIL: mail.MailFiche(),
     mail.DRAFT: mail.DraftFiche(),
     contact.KIND: contact.ContactFiche(),
+    agenda.KIND: agenda.AgendaFiche(),
 }

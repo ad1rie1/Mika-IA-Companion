@@ -1,0 +1,30 @@
+{# La fiche d'un agenda › Partages (app/handmade/subjects/agenda.py) : avec qui il est partagé ici, à quel niveau, ce
+   qu'elle en fait avec chacune ; « Retirer » (le geste de Réglages › Droits › Partages, ADR 0210 : confirmé, audité, qui
+   ramène ici). Le donner reste à son propriétaire. Un partage chez son fournisseur ne passe pas par ici. #}
+{% from "_navigation.html" import pager as pages %}
+<div class="now-page" data-tab="agenda/partages">
+  <div class="agc-two">
+    <section class="now-card person-list table-block">
+      <header class="now-card-head"><h2>Ici</h2><span class="person-count now-num">{{ rows|length }}</span>
+        <p>Partager ouvre l'agenda à une personne qui a un compte, à un niveau : lire ; lire et préparer ; s'en servir. Son tableau de droits dit ce qu'elle en fait avec elle. Tu peux retirer un partage ; le donner reste à {{ owner }}, depuis son espace.</p></header>
+      {% if rows %}
+      <div class="hm-table-wrap" tabindex="0" role="region" aria-label="Partages ici">
+        <table class="hm-table">
+          <thead><tr><th scope="col">Avec</th><th scope="col">Niveau</th><th scope="col">Ce qu'elle en fait avec elle</th><th scope="col"><span class="service-hidden">Retirer</span></th></tr></thead>
+          <tbody>
+            {% for s in rows %}
+            <tr><td><b><a href="{{ s.href }}">{{ s.name }}</a></b></td><td><span class="now-tag info">{{ s.level }}</span></td><td>{{ s.does }}</td>
+              <td class="fit">{% if csrf %}<form method="post" action="{{ unshare }}" class="inline" data-confirm="{{ s.ask }}"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="kind" value="agenda"><input type="hidden" name="key" value="{{ key }}"><input type="hidden" name="person" value="{{ s.person }}"><input type="hidden" name="retour" value="{{ back }}"><button class="btn quiet small danger">Retirer</button></form>{% endif %}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="hm-pager single">{{ pages(pager) }}</div>
+      {% else %}<p class="now-empty">Partagé avec personne ici.</p>{% endif %}
+    </section>
+    <section class="now-card">
+      <header class="now-card-head"><h2>{{ "Sur ce serveur" if system else "Chez " ~ provider }}</h2>
+        <p>{% if system %}C'est un agenda du système : il ne se partage qu'ici.{% else %}Ce qui est partagé chez {{ provider }} ne passe pas par ici, et ne se règle pas ici.{% endif %}</p></header>
+    </section>
+  </div>
+</div>

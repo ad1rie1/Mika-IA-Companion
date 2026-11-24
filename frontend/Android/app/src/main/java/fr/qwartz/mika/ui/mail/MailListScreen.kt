@@ -59,12 +59,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
+import fr.qwartz.mika.data.moi.MailLive
 import fr.qwartz.mika.data.moi.MoiDates
 import fr.qwartz.mika.data.moi.Tone
 import fr.qwartz.mika.data.moi.levelTag
@@ -88,6 +86,7 @@ import fr.qwartz.mika.ui.components.rememberNow
 import fr.qwartz.mika.ui.shell.BarAction
 import fr.qwartz.mika.ui.shell.BarMenu
 import fr.qwartz.mika.ui.shell.BarNav
+import fr.qwartz.mika.ui.shell.FollowLive
 import fr.qwartz.mika.ui.shell.ListHead
 import fr.qwartz.mika.ui.shell.LoadBox
 import fr.qwartz.mika.ui.shell.LocalShell
@@ -104,13 +103,9 @@ import fr.qwartz.mika.ui.shell.Tag
 import fr.qwartz.mika.ui.shell.rememberSessionKey
 import fr.qwartz.mika.ui.theme.mika
 import fr.qwartz.mika.ui.theme.states
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
-
-/** La liste se relit à ce rythme tant qu'elle est à l'écran (comme le client web). */
-private const val REFRESH_MS = 60_000L
 
 /**
  * Mail, la rubrique du tiroir (ADR 0235, la maquette `ecrans/mail.js`) : le titre est la vue et ouvre la feuille des
@@ -135,15 +130,8 @@ fun MailListScreen(graph: AppGraph) {
             if (t.row.folder.isBlank()) shell.toast(trashedText) else shell.offer(trashedText, undoText) { vm.untrash(t) }
         }
     }
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(vm, lifecycle) {
-        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            while (true) {
-                vm.resume()
-                delay(REFRESH_MS)
-            }
-        }
-    }
+    // lue à l'ouverture, relue à chaque retour, et quand le direct dit que ses boîtes ou la page affichée ont changé
+    FollowLive(graph.live, MailLive.LIST, vm, onShown = { vm.resume() }) { vm.onLive(it) }
     val selecting = vm.selected.isNotEmpty()
     LaunchedEffect(selecting) { if (!selecting) moving = false }
     BackHandler(enabled = selecting) { vm.clearSelection() }

@@ -47,6 +47,7 @@ fun shareWords(level: String): String =
 fun kindWords(kind: String): String = when (kind) {
     ShareKinds.TEAMS -> "Compte Teams"
     ShareKinds.MCP -> "Service"
+    ShareKinds.AGENDA -> "Agenda"
     else -> "Boîte"
 }
 
@@ -59,6 +60,7 @@ fun sharePhrase(kind: String, title: String, person: String, level: String): Str
     val where = when (kind) {
         ShareKinds.MCP -> "dans ses Outils"
         ShareKinds.TEAMS -> "dans son Teams"
+        ShareKinds.AGENDA -> "dans son Agenda"
         else -> "dans son Mail"
     }
     val can = when (level) {
@@ -100,12 +102,14 @@ fun shareGone(share: GivenShare, people: List<Person>, common: Boolean): Boolean
     return common && person.owner
 }
 
-/** Ce qu'ouvre ce qu'on te partage : une boîte dans Mail, un compte dans Teams, un service sur sa page. */
-enum class ShareOpens { MAIL, TEAMS, SERVICE }
+/** Ce qu'ouvre ce qu'on te partage : une boîte dans Mail, un compte dans Teams, un service sur sa page, un agenda dans
+ *  l'Agenda. */
+enum class ShareOpens { MAIL, TEAMS, SERVICE, AGENDA }
 
 fun openOf(kind: String): ShareOpens = when (kind) {
     ShareKinds.TEAMS -> ShareOpens.TEAMS
     ShareKinds.MCP -> ShareOpens.SERVICE
+    ShareKinds.AGENDA -> ShareOpens.AGENDA
     else -> ShareOpens.MAIL
 }
 

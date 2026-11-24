@@ -47,9 +47,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
@@ -210,12 +207,9 @@ fun TicketScreen(graph: AppGraph, route: Route.ProjectTicket) {
     val project = rememberProjectModel(graph, route.id)
     val vm: TicketViewModel = viewModel(key = "ticket|$session|${route.id}|${route.number}") { TicketViewModel(ProjectsDeps(graph), route.id, route.number) }
     LaunchedEffect(vm) { vm.gestures.said.collect { shell.toast(it) } }
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(vm, lifecycle) {
-        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            vm.resume()
-            project.resume()
-        }
+    OnResume(vm, project = route.id) {
+        vm.resume()
+        project.resume()
     }
     // un geste abouti change la fiche (ses comptes, ce qui t'attend) : elle se relit
     LaunchedEffect(vm.revision) { if (vm.revision > 0) project.reload() }

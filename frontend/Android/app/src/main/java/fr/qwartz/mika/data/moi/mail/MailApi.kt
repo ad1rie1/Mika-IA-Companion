@@ -3,6 +3,7 @@ package fr.qwartz.mika.data.moi.mail
 import fr.qwartz.mika.data.moi.Corrected
 import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.correct
+import fr.qwartz.mika.data.moi.correctClient
 import fr.qwartz.mika.data.moi.decode
 import fr.qwartz.mika.data.moi.jsonOf
 import fr.qwartz.mika.data.moi.map
@@ -33,9 +34,11 @@ fun carriedPieces(m: MailFull): List<Sized> = m.attachments.map { Carried(it.nam
  * leurs dossiers, une page de messages, un mail entier, ses brouillons, ses envoyés, ses correspondants ; écrire,
  * répondre, transférer (en JSON, ou en `multipart` avec des fichiers), ranger, lui demander une réponse, décider de ses
  * brouillons, relever. [uploads] porte les envois avec des pièces : sans délai global, 50 Mo ne passent pas en 60 s
- * sur une 4G faible. Ouverte : un test JVM des écrans de Mail la remplace par une fausse, qui répond quand il veut.
+ * sur une 4G faible. [corrections] porte « Corriger » (ADR 0307) : la même API sur un client qui attend la fin d'une
+ * correction ([correctClient]). Ouverte : un test JVM des écrans de Mail la remplace par une fausse, qui répond quand
+ * il veut.
  */
-open class MailApi(private val api: MoiApi, private val uploads: MoiApi = api) {
+open class MailApi(private val api: MoiApi, private val uploads: MoiApi = api, private val corrections: MoiApi = api) {
     // ── Lire ──
     open suspend fun boxes(): MoiApi.Result<MailBoxes> = api.get("/mail/boxes", reader = MailBoxes.serializer())
 
@@ -119,7 +122,7 @@ open class MailApi(private val api: MoiApi, private val uploads: MoiApi = api) {
     open suspend fun poll(box: String, key: String? = MoiApi.newKey()) = json("/mail/poll", listOf("box" to box), key)
 
     /** « Corriger » (ADR 0307) : les fautes de ton texte, sans changer ses mots (`/api/moi/correct`). */
-    open suspend fun correct(text: String): MoiApi.Result<Corrected> = api.correct(text)
+    open suspend fun correct(text: String): MoiApi.Result<Corrected> = corrections.correct(text)
 
     private fun fieldsOf(mail: Outgoing): List<Pair<String, Any>> =
         listOf("to" to mail.to, "cc" to mail.cc, "bcc" to mail.bcc, "subject" to mail.subject, "body" to mail.body)

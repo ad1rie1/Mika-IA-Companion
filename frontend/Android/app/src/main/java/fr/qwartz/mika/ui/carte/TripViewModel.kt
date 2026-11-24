@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
 import fr.qwartz.mika.data.files.DownloadStore
+import fr.qwartz.mika.data.moi.LiveSignal
 import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.MoiError
 import fr.qwartz.mika.data.moi.carte.AlongNext
@@ -38,6 +39,7 @@ import fr.qwartz.mika.data.moi.carte.stopOf
 import fr.qwartz.mika.data.moi.carte.stopOfPlace
 import fr.qwartz.mika.data.moi.carte.tripRouteKey
 import fr.qwartz.mika.data.moi.carte.tripScene
+import fr.qwartz.mika.data.net.Topics
 import fr.qwartz.mika.ui.map.MapControl
 import fr.qwartz.mika.ui.shell.Load
 import fr.qwartz.mika.ui.shell.said
@@ -179,6 +181,18 @@ class TripViewModel(private val deps: TripDeps, val id: String) : ViewModel() {
     }
 
     fun retry() = resume(force = true)
+
+    /**
+     * Le direct (ADR 0308) : tes voyages ont changé (`trips` — Mika l'a peut-être changé) : relu de suite, sauf pendant
+     * tes gestes (leur relecture, à la fin, dira ce qu'il est devenu). Rend la main quand c'est relu.
+     */
+    suspend fun onLive(signal: LiveSignal) {
+        if (!signal.touches(Topics.TRIPS) || gestures.busy) return
+        reads.invalidate(id)
+        if (unread) reloadTrip() else reads.load(id, force = true)
+        val trip = shown
+        if (trip != null && !gestures.busy) routes.want(trip, soon = true)
+    }
 
     // ── Les gestes ──────────────────────────────────────────────────────
 

@@ -26,6 +26,12 @@ standard, dans un fil), un cache à part pour ce qui est arrivé (sa base, ADR 0
   qu'une recherche ramène du serveur, ``search_server``) n'est jamais rendu par
   ``fetch_new`` : son tri ne lit que ce qui arrive (ADR 0249). Seul un mail d'un
   dossier relevé que la relève n'a pas encore atteint reste à lui rendre.
+- **Ranger n'est pas remarquer** (ADR 0308) : ranger un dossier relevé garde
+  chaque mail neuf et le met en attente de son tri (``offer``) ; ``fetch_new``
+  rend ce qui attend, et seul l'accusé (``ack``) le retire. Le courrier en
+  direct (``idle``) range donc à toute heure (``range_box``) sans rien lui
+  rendre : sa relève suivante le lui donne une fois. Ce qui a été lu ailleurs
+  attend de même, gardé dans le cache (``seen_elsewhere``).
 """
 
 from __future__ import annotations
@@ -47,6 +53,7 @@ from email.parser import BytesParser
 from pathlib import Path
 from typing import Any, Protocol
 
+from mika.adapters.changes import Listener
 from mika.adapters.database import Target
 from mika.adapters.mail import compose
 from mika.adapters.mail.cache import MailCache
@@ -87,6 +94,9 @@ SMTP_TIMEOUT = 30.0
 FLAGS_WINDOW = 200
 #: « tous les dossiers » : ce qu'un dossier seulement synchronisé (pas relevé) range au plus à chaque relève
 SYNC_ALL_BATCH = 50
+#: le courrier en direct (ADR 0308) : ce qu'un passage range au plus par dossier relevé, avant de rendre le verrou de
+#: la boîte à ses outils (un autre passage suit aussitôt s'il en reste)
+LIVE_BATCH = 25
 #: une lecture de l'historique ou d'une recherche lit les mails par paquets : jamais plus en mémoire à la fois
 HISTORY_CHUNK = 10
 #: un passage de l'historique ne commence plus de paquet au-delà (s) : le verrou de la boîte se rend vite
@@ -139,11 +149,19 @@ class ImapSmtpMail:
         self._timeout = timeout
         self._cache = MailCache(cache)
         self._locks: dict[str, asyncio.Lock] = {}
-        self._seen_elsewhere: list[str] = []
         #: les connexions Microsoft (sans endroit où garder leur jeton, aucune boîte Microsoft n'entre)
         self._microsoft = microsoft or MicrosoftSignIn()
         #: par compte, le jeton d'accès de la session qui va s'ouvrir (posé sous le verrou du compte)
         self._bearers: dict[str, str] = {}
+        #: les boîtes que le courrier en direct observe (ADR 0308 ; ``MailWatch``) : leur panne est la sienne — une
+        #: seule règle, pas un marqueur qui bascule entre lui et la relève ; la relève y range encore, sans dire de
+        #: panne ni en effacer une
+        self.observed: frozenset[str] = frozenset()
+
+    def on_change(self, fn: Listener) -> None:
+        """Prévenir ``fn`` de chaque écriture du courrier relevé, une fois validée (ADR 0308 : ``MailCache.on_change``)
+        — relève, drapeaux, dossiers, envois, brouillons, oubli. Appelé dans le fil qui a écrit."""
+        self._cache.on_change(fn)
 
     # ── comptes ──
     def _accounts(self) -> dict[str, MailAccount]:
@@ -196,10 +214,11 @@ class ImapSmtpMail:
             try:
                 await self._in_thread(key, self._poll_sync, key, account, share)
             except (OSError, ImapError, OAuthError, ValueError, EOFError) as exc:
-                self._cache.note(key, at=self._at(), error=_why(exc), polled=True)
+                if key not in self.observed:  # observée en direct : sa panne est celle du direct
+                    self._cache.note(key, at=self._at(), error=_why(exc), polled=True)
                 log.warning("courrier : relevé de %s impossible (%s)", key, type(exc).__name__)
-            # ce qui attend son accusé : ce relevé-ci (même si un dossier suivant a échoué), ou un passage
-            # interrompu avant d'avoir remarqué ce qu'on lui avait rendu
+            # ce qui attend son accusé : ce relevé-ci (même si un dossier suivant a échoué), ce que le direct a rangé
+            # depuis (ADR 0308), ou un passage interrompu avant d'avoir remarqué ce qu'on lui avait rendu
             out.extend(self._cache.offered(key, share))
         return out[:limit]
 
@@ -210,8 +229,7 @@ class ImapSmtpMail:
         return self._cache.offered_refs()
 
     def seen_elsewhere(self) -> list[str]:
-        out, self._seen_elsewhere = self._seen_elsewhere, []
-        return out
+        return self._cache.take_seen_elsewhere()
 
     def _poll_sync(self, key: str, account: MailAccount, limit: int) -> list[Mail]:
         out: list[Mail] = []
@@ -222,7 +240,7 @@ class ImapSmtpMail:
             for folder in account.folders:
                 if len(out) >= limit:
                     break
-                out += self._sync_sync(s, key, account, folder, limit - len(out), hand=True)
+                out += self._sync_sync(s, key, account, folder, limit - len(out), hand=True)[0]
             if account.sync_all or account.keep_all:
                 # les autres dossiers sont tenus à jour pour la console, sans rien lui rendre : elle ne remarque que
                 # ceux qu'elle relève ; tout garder en local laisse à part les indésirables et la corbeille (ADR 0249)
@@ -233,7 +251,7 @@ class ImapSmtpMail:
                         self._sync_sync(s, key, account, f.name, SYNC_ALL_BATCH, hand=False)
                     except ImapError as exc:  # un dossier que le serveur refuse n'arrête pas les suivants
                         log.warning("courrier : dossier %s/%s non synchronisé (%s)", key, f.name, type(exc).__name__)
-        self._cache.note(key, at=self._at(), polled=True)
+        self._cache.note(key, at=self._at(), polled=True, clears=key not in self.observed)
         return out
 
     def _list_sync(self, s: Session, key: str) -> None:
@@ -258,14 +276,21 @@ class ImapSmtpMail:
                        answered="\\answered" in flags), parts
 
     def _sync_sync(self, s: Session, key: str, account: MailAccount, folder: str, limit: int, *,
-                   hand: bool) -> list[Mail]:
+                   hand: bool) -> tuple[list[Mail], bool]:
         """Relit un dossier : ce qui est nouveau (au plus ``limit``), puis les drapeaux
-        des derniers mails connus. Rend les mails nouveaux jamais rendus (``hand``).
+        des derniers mails connus. Rend les mails nouveaux jamais rendus (``hand``), et
+        s'il en reste de nouveaux au-delà de ``limit``.
 
         Le curseur avance **mail après mail** : un relevé interrompu reprend après le dernier mail
         rangé, et un mail illisible ne revient pas à chaque relevé. Relu depuis la console
         (``hand`` faux), un dossier qu'elle relève garde le curseur de la relève : ce que la
-        console vient de ranger, elle le remarquera quand même au prochain relevé."""
+        console vient de ranger, elle le remarquera quand même au prochain relevé. Ce que le
+        dossier range se dit une fois, à la fin (ADR 0308), pas mail par mail."""
+        with self._cache.held():
+            return self._synced(s, key, account, folder, limit, hand=hand)
+
+    def _synced(self, s: Session, key: str, account: MailAccount, folder: str, limit: int, *,
+                hand: bool) -> tuple[list[Mail], bool]:
         _count, validity, uidnext = s.select(folder)
         cursor = self._cache.cursor(key, folder)
         if cursor is not None and cursor[0] and validity and cursor[0] != validity:
@@ -300,7 +325,7 @@ class ImapSmtpMail:
         else:
             self._cache.save_folder(key, folder, last_sync=self._at())
         self._cache.recount(key, folder)
-        return out
+        return out, len(taken) < len(uids)
 
     def _refresh_flags(self, s: Session, key: str, folder: str, *, hand: bool) -> None:
         known = self._cache.uids(key, folder, FLAGS_WINDOW)
@@ -317,9 +342,57 @@ class ImapSmtpMail:
             seen = "\\seen" in now
             self._cache.set_flags(key, folder, uid, seen=seen, flagged="\\flagged" in now,
                                   answered="\\answered" in now)
-            # su même quand c'est la console qui relit : la relève suivante ne le reverrait plus changer
+            # su même quand c'est la console (ou le direct) qui relit : la relève suivante ne le reverrait plus
+            # changer — gardé jusqu'à ce qu'elle le lise, même si elle dort, même après un redémarrage
             if seen and not was_seen and ref:
-                self._seen_elsewhere.append(ref)
+                self._cache.seen_elsewhere(key, ref)
+
+    # ── le direct (ADR 0308) ──
+    def watched(self) -> dict[str, MailAccount]:
+        """Les boîtes que le courrier en direct observe : celles prêtes à relever, telles que réglées à l'instant."""
+        return {k: a for k, a in sorted(self._accounts().items()) if a.ready}
+
+    async def watch_token(self, key: str, account: MailAccount) -> str:
+        """Le jeton d'une session du direct : celui d'une boîte Microsoft, renouvelé comme pour la relève (``OAuthError``
+        si elle n'est pas connectée) ; rien pour les autres."""
+        return await self._bearer(key, account)
+
+    def watch_session(self, account: MailAccount, token: str) -> Session:
+        """Une session à part, pour attendre (``Session.wait``) : hors du verrou de la boîte, que ses outils et sa
+        relève gardent. Bloquante (dans un fil)."""
+        return Session(account, timeout=self._timeout, token=token)
+
+    async def range_box(self, key: str, *, session: Session | None = None) -> bool:
+        """Range dans le courrier relevé ce qui est arrivé dans les dossiers relevés de cette boîte, et les drapeaux qui
+        ont changé — au plus ``LIVE_BATCH`` mails par dossier, sous le verrou de la boîte —, sans rien lui rendre :
+        chaque mail neuf attend son tri (``offer``), et sa relève le lui donnera une fois (``fetch_new``). Un passage
+        réussi compte comme une relève (``AccountStatus.last_poll``). Rend vrai quand tout est rangé, faux s'il en
+        reste (un autre passage suit, le verrou rendu entre deux) ; une boîte retirée ou coupée n'a rien à ranger. Une
+        panne se lève (``OSError``, ``ImapError``, ``OAuthError``…) : qui observe la note (``watch_failed``).
+        ``session`` : une connexion à qui observe (``watch_session``), gardée d'un passage à l'autre et refermée par
+        lui ; sans elle, chaque passage ouvre la sienne."""
+        account = self._accounts().get(key)
+        if account is None or not account.ready:
+            return True
+        return bool(await self._in_thread(key, self._range_sync, key, account, session))
+
+    def _range_sync(self, key: str, account: MailAccount, given: Session | None) -> bool:
+        done = True
+        with contextlib.nullcontext(given) if given is not None else self._session(key, account) as s:
+            for folder in account.folders:
+                _handed, more = self._sync_sync(s, key, account, folder, LIVE_BATCH, hand=True)
+                done = done and not more
+        self._cache.note(key, at=self._at(), polled=True)
+        return done
+
+    def watch_failed(self, key: str, exc: BaseException) -> str:
+        """Une panne du direct sur cette boîte (serveur muet, accès refusé, boîte Microsoft à reconnecter), notée comme
+        une relève manquée : la console et les écrans la montrent. Rend ce qui s'en dit ; une boîte retirée entre-temps
+        n'a plus d'état à tenir."""
+        why = _why(exc)
+        if key in self._accounts():
+            self._cache.note(key, at=self._at(), error=why, polled=True)
+        return why
 
     # ── lire le cache ──
     async def get(self, ref: str) -> Mail | None:
@@ -536,7 +609,13 @@ class ImapSmtpMail:
         """Remonte l'historique d'un dossier : jusqu'à ``limit`` mails du serveur qui ne sont pas ici, sous le
         plancher de la lecture précédente (la première : tout le dossier, pour les trous que la fenêtre du premier
         relevé laisse), les plus récents d'abord ; ``until`` (``time.monotonic``) : on ne commence plus de paquet
-        au-delà. Le dossier est complet quand il n'y en a plus. Rend combien ont été lus."""
+        au-delà. Le dossier est complet quand il n'y en a plus. Rend combien ont été lus. Ce qu'un passage range se
+        dit une fois, à sa fin (ADR 0308) : une boîte « tout garder » ne fait pas relire les écrans à chaque mail."""
+        with self._cache.held():
+            return self._history_of(s, key, account, folder, limit, until)
+
+    def _history_of(self, s: Session, key: str, account: MailAccount, folder: str, limit: int,
+                    until: float | None) -> int:
         _, validity, _ = s.select(folder)
         previous, _ = self._cache.cursor(key, folder) or (0, 0)
         if previous and validity and previous != validity:
@@ -588,7 +667,8 @@ class ImapSmtpMail:
         try:
             return int(await self._in_thread(account, run))
         except (OSError, ImapError, OAuthError, ValueError, EOFError) as exc:
-            self._cache.note(account, at=self._at(), error=_why(exc))
+            if account not in self.observed:  # observée en direct : sa panne est celle du direct
+                self._cache.note(account, at=self._at(), error=_why(exc))
             log.warning("courrier : historique de %s impossible (%s)", account, type(exc).__name__)
             return 0
 
@@ -602,7 +682,8 @@ class ImapSmtpMail:
             return Found()
 
         def run() -> Found:
-            with self._session(key, acc) as s:
+            # ce qu'elle ramène se dit une fois, à la fin (ADR 0308)
+            with self._cache.held(), self._session(key, acc) as s:
                 self._list_sync(s, key)
                 roles = {f.name: f.role for f in self._cache.folders(key, acc.folders)}
                 names = [query.folder] if query.folder else [n for n, role in roles.items() if role not in ASIDE]

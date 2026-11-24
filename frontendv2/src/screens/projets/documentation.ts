@@ -574,4 +574,10 @@ if (typeof document !== "undefined") {
   }
 }
 
-registerTab("documentation", { render, after, acts, forms });
+/** Le direct (ADR 0308) : le projet a changé — ses pages, leur historique, ses décisions, une recherche repartent du
+ *  serveur (une version lue ne change pas) ; un brouillon pas touché suit sa page (`render`). */
+function changed(): void {
+  for (const map of [spaces, pages, histories, founds, decisionLists, decisions]) map.invalidate();
+}
+
+registerTab("documentation", { render, after, acts, forms, changed });

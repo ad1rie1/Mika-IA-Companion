@@ -22,6 +22,7 @@ import {
 } from "@web/ui/approvals";
 import { read, write } from "../../shared/storage";
 import { $, on } from "../../shell/dom";
+import { readAgendaCards, type AgendaCardData } from "../agenda/chat";
 import { accordToggle, approvalsMarkup, cardKinds, elsewhere, type ApprovalNote, type CardKind } from "./markup";
 
 const APPROVAL_NOTE_MS = 6000;
@@ -48,6 +49,8 @@ export class ApprovalCards {
   private cardKinds = new Map<number, CardKind>();
   /** Sur un téléphone, les cartes-liens (Mail, Teams) dépliées sous leur ligne. */
   private linksOpen = false;
+  /** Les cartes d'un ajout à l'agenda : l'événement qu'elles ajouteraient (ADR 0309), lu à part. */
+  private agendaCards = new Map<number, AgendaCardData>();
 
   constructor(private readonly host: ApprovalsHost) {
     this.autoPreferred = read(() => sessionStorage, AUTO_KEY) === "1";
@@ -73,6 +76,13 @@ export class ApprovalCards {
 
   onApprovals(items: unknown): void {
     this.cardKinds = cardKinds(items);
+    const agenda = [...this.cardKinds].filter(([, k]) => k.capability === "agenda.write").map(([id]) => id);
+    if (agenda.length) {
+      void readAgendaCards(agenda).then((got) => {
+        this.agendaCards = got;
+        this.paintApprovals();
+      });
+    } else this.agendaCards = new Map();
     this.approvals = withApprovals(this.approvals, items);
     const ids = new Set(this.approvals.cards.map((c) => c.id));
     for (const id of [...this.approvalOpen]) if (!ids.has(id)) this.approvalOpen.delete(id);
@@ -138,6 +148,7 @@ export class ApprovalCards {
         open: this.approvalOpen,
         kinds: this.cardKinds,
         linksOpen: this.linksOpen,
+        agenda: this.agendaCards,
       });
       zone.hidden = !zone.innerHTML.trim();
     }

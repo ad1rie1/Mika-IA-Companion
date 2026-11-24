@@ -69,6 +69,11 @@ class TripReads(
         at.remove(id)
     }
 
+    /** Tes voyages ont changé ailleurs (le direct, `trips`) : la prochaine lecture de chacun repartira du serveur. */
+    fun invalidateAll() {
+        at.clear()
+    }
+
     /** Supprimé : il ne se montre plus. */
     fun forget(id: String) {
         at.remove(id)

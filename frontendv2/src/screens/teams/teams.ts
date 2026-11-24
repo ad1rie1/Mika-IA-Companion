@@ -2,7 +2,10 @@
  * Teams (ADR 0187, 0189, 0191) : tes discussions comme dans un vrai client — l'extension « Mika · Teams » lit ce que
  * Teams web reçoit et pose ce qui part. Tu réponds toi-même (ton message part par l'extension du compte, sous ton nom,
  * sans accord), ou tu demandes à Mika de préremplir ; ce qu'elle prépare se relit dans la discussion et dans « Ses
- * brouillons ». Ce qu'un partage ne permet pas n'est pas offert. Le contrat : `protocole-moi.md` § 4.
+ * brouillons ». Ce qu'un partage ne permet pas n'est pas offert. Le contrat : `protocole-moi.md` § 4. Rien ne se relit
+ * à intervalles : le direct dit ce qui a changé (ADR 0308, § 2 bis) — `teams` (ses comptes, la liste, le fil ouvert
+ * s'il est nommé), `teams.replies` (« Ses brouillons »), `teams.work` (où elle en est, dans le fil ouvert s'il est
+ * nommé) —, et l'écran au second plan se relit à son retour.
  */
 import { insertEmoji } from "@web/ui/emojis";
 import type { RuleLine } from "../../api/rights";
@@ -27,7 +30,7 @@ import {
   type ThreadWork,
 } from "../../api/teams";
 import { ofName } from "../../shared/names";
-import { rights } from "../../shared/store";
+import { me, rights } from "../../shared/store";
 import { refreshCounts } from "../../shell/counts";
 import { $, $$, h, isMobile, on } from "../../shell/dom";
 import { closeModal, openMenu, openModal, toast, type MenuItem } from "../../shell/float";
@@ -37,8 +40,10 @@ import type { ScreenContext, ScreenDef, ScreenTab, Shell } from "../../shell/she
 import { bindCounts, canCorrect, correctField, errorText, openAsk, paintCount } from "../mail/compose";
 import { ago, chars, newNonce, thousands, toFill } from "../mail/format";
 import { dayAndClock } from "../chat/markup";
-import { tickWork, WORK_POLL_MS } from "../../mika/work";
-import { authorLabel, kindLabel, ownAccount, ownBubbles, sentUnder, stillSentHere, UNDER_WAY, withoutSent, type SentHere } from "./format";
+import { tickWork } from "../../mika/work";
+import { Freshness, live, names, OneAtATime, pageShown, type Changed } from "../../live/live";
+import { ages } from "../../shell/ages";
+import { authorLabel, kindLabel, ownAccount, ownBubbles, sentUnder, stillSentHere, threadGone, UNDER_WAY, withoutSent, type SentHere } from "./format";
 import {
   capsOf,
   conversationRow,
@@ -58,8 +63,6 @@ import {
   type ThreadView,
 } from "./markup";
 
-const REFRESH_MS = 20_000;
-const ASK_POLL_MAX_MS = 30 * 60_000;
 const MAX_CHARS = TEAMS_LIMITS.body;
 /** Au-delà, l'extension ne s'est pas manifestée depuis trop longtemps pour que ce qui part parte vite. */
 const QUIET_MS = 2 * 3600_000;
@@ -84,7 +87,6 @@ export class TeamsScreen {
   private body: HTMLElement | null = null;
   private mounted: "discussions" | "brouillons" | null = null;
   private started = false;
-  private stale = false;
 
   private readonly tabs: ScreenTab[] = [
     { id: "discussions", title: "Discussions" },
@@ -131,23 +133,33 @@ export class TeamsScreen {
   private readonly typed = new Map<string, string>();
   /** Les conversations où on lui a demandé une réponse (et depuis quand). */
   private readonly asked = new Map<string, number>();
-  /** Depuis quand on guette où elle en est, par conversation (ADR 0306) : une demande, ou ce qu'elle prépare
-   *  d'elle-même — à part de `asked`, qui seul dit au champ « on le lui a demandé ». */
-  private readonly watchSince = new Map<string, number>();
-  /** Les demandes attendues ici sans réponse au-delà du plafond : on ne les réarme pas (une nouvelle demande, si). */
-  private readonly askGaveUp = new Set<string>();
 
   private replies: Reply[] = [];
   private repliesLoaded = false;
 
-  private refreshTimer = 0;
-  private askTimer = 0;
   private searchTimer = 0;
   /** La réponse que la route désigne dans « Ses brouillons » (`#teams/brouillons/<id>`), et si on y a déjà défilé. */
   private focusReply = "";
   private focusShown = false;
 
-  constructor(private readonly shell: Shell) {}
+  /** Le direct (ADR 0308) : montré, l'écran relit ce qu'un changement touche ; sinon il se relit à son retour. */
+  private readonly fresh = new Freshness(() => this.started && this.visible(), () => void this.refresh());
+  // une lecture à la fois par route : une rafale de trames n'en lance pas dix
+  private readonly accountsRead = new OneAtATime(() => this.loadAccounts());
+  private readonly convsRead = new OneAtATime(() => this.loadConversations());
+  private readonly repliesRead = new OneAtATime(() => this.loadReplies());
+  private readonly threadRead = new OneAtATime(() => (this.onDiscussions() && this.open ? this.loadThread(true) : Promise.resolve()));
+  private readonly workRead = new OneAtATime(() => this.rereadWork());
+
+  constructor(private readonly shell: Shell) {
+    // les âges (le dernier signe de l'extension, son dernier lot) avancent d'eux-mêmes, sans rien relire
+    ages.onTick(() => this.agesTick());
+    live.onChange("teams", (convs) => this.fresh.touch(() => this.teamsChanged(convs)));
+    live.onChange("teams.replies", () => this.fresh.touch(() => void this.repliesRead.run()));
+    live.onChange("teams.work", (convs) => this.fresh.touch(() => {
+      if (this.open && this.thread?.key === this.open && names(convs, this.open)) void this.workRead.run();
+    }));
+  }
 
   screen(): ScreenDef {
     return {
@@ -173,7 +185,7 @@ export class TeamsScreen {
   }
 
   private visible(): boolean {
-    return !!this.section && !this.section.hidden && document.visibilityState === "visible";
+    return !!this.section && !this.section.hidden && pageShown();
   }
 
   private onDiscussions(): boolean {
@@ -215,33 +227,45 @@ export class TeamsScreen {
     if (!this.started) {
       this.started = true;
       this.accountsReady = this.loadAccounts();
+      this.fresh.fresh();
       void this.start();
-    } else if (this.stale) {
-      this.stale = false;
-      void this.refresh();
-    }
+    } else this.fresh.back();
     if (tab === "discussions") this.route(ctx.item);
     else this.routeReply(ctx.item);
-    if (!this.refreshTimer) this.refreshTimer = window.setInterval(() => this.tick(), REFRESH_MS);
   }
 
   private async start(): Promise<void> {
+    // « Corriger » (ADR 0307) dépend de ce que dit `GET /api/moi` : lu ici aussi, l'écran peut s'ouvrir sur Teams
+    void me.load().then(() => this.paintDock(), () => undefined);
     await Promise.all([this.accountsReady, this.loadReplies()]);
     await this.loadConversations();
     if (this.onDiscussions() && !this.open && this.conversations[0] && !isMobile()) this.select(this.conversations[0].key, false);
   }
 
+  /** Tout ce qu'il montre, relu : revenu sur l'écran (ou l'onglet) après un changement manqué, ou à une ouverture de
+   *  la connexion (ADR 0308 : rien n'est rattrapé). */
   private async refresh(): Promise<void> {
-    await Promise.all([this.loadAccounts(), this.loadReplies(), this.loadConversations()]);
-    if (this.onDiscussions() && this.open) await this.loadThread(true);
+    await Promise.all([this.accountsRead.run(), this.repliesRead.run(), this.convsRead.run()]);
+    await this.threadRead.run();
   }
 
-  private tick(): void {
-    if (!this.visible()) {
-      this.stale = true;
-      return;
-    }
-    void this.refresh();
+  /** Les âges, toutes les 30 s et d'ici (`shell/ages.ts`) : la pastille « Extension » (son dernier signe de vie, son
+   *  dernier lot), le panneau d'informations, et l'avertissement du champ quand elle se tait — sauf si tu écris dans
+   *  le champ : il attend le pas suivant. */
+  private agesTick(): void {
+    if (!this.started || !this.visible()) return;
+    this.shell.refreshHead();
+    if (!this.onDiscussions() || !this.thread) return;
+    this.paintInfo();
+    const dock = $<HTMLElement>("[data-tm-dock]", this.body!);
+    if (!dock?.contains(document.activeElement)) this.paintDock();
+  }
+
+  /** `teams` (des conversations) : ses comptes (leurs niveaux, son extension), la liste, le fil ouvert s'il est nommé. */
+  private teamsChanged(convs: Changed): void {
+    void this.accountsRead.run();
+    void this.convsRead.run();
+    if (this.onDiscussions() && this.open && names(convs, this.open)) void this.threadRead.run();
   }
 
   // ── Charger ────────────────────────────────────────────────────────
@@ -254,16 +278,20 @@ export class TeamsScreen {
 
   private async loadAccounts(): Promise<void> {
     const before = this.accountsShape();
+    let read = false;
     try {
       const got = await fetchAccounts();
       this.accounts = got.accounts;
       this.plugged = got.plugged;
       this.enabled = got.enabled;
       this.accountsError = "";
+      read = true;
     } catch (err) {
       this.accountsError = errorText(err);
     }
     this.accountsLoaded = true;
+    // le compte du fil ouvert n'est plus à toi (retiré, plus partagé) : le fil se ferme, la liste reste
+    if (read && this.open && threadGone(this.thread?.account ?? this.conv(this.open)?.account, this.accounts)) this.closeThread();
     this.shell.refreshHead();
     if (this.accountsShape() !== before) {
       // un niveau arrivé (ou changé) après le fil ou le tableau : le champ, ses cartes et « Ses brouillons » le suivent
@@ -345,9 +373,9 @@ export class TeamsScreen {
       // elle a fini (ou renoncé) : le moteur ne dit plus qu'on le lui a demandé
       if (before?.asked && !t.asked) this.asked.delete(key);
       if (quiet && before && !settled && sameThread(before, t)) {
-        // rien de neuf : la relecture d'une réponse demandée continue (où elle en est a pu changer : sa ligne seule)
+        // rien de neuf : où elle en est a pu changer (sa ligne seule)
         this.paintDock();
-        this.watchAsk();
+        this.settleAsk();
         return;
       }
       const arrived = quiet && !!before && t.replies.some((r) => UNDER_WAY.has(r.state) && !r.answered && !before.replies.some((x) => x.id === r.id));
@@ -366,13 +394,13 @@ export class TeamsScreen {
         this.paintThreadPane();
         this.shell.refreshHead();
       }
-      this.watchAsk();
+      this.settleAsk();
     } catch (err) {
       if (seq !== this.threadSeq) return;
       if (!quiet) {
         this.threadError = errorText(err);
         this.paintThreadPane();
-      } else this.watchAsk();
+      }
     }
   }
 
@@ -440,8 +468,23 @@ export class TeamsScreen {
     else this.paintSplit();
   }
 
+  /** Le fil ouvert se ferme (son compte n'est plus à toi) : l'adresse revient à la liste, la discussion est oubliée. */
+  private closeThread(): void {
+    this.open = "";
+    this.thread = null;
+    this.threadError = "";
+    this.threadSeq += 1; // une lecture du fil encore en vol n'y revient pas
+    this.older = [];
+    this.olderMore = false;
+    this.editing = "";
+    this.editText = "";
+    this.reading = false;
+    if (/^#teams\/discussions\/./.test(location.hash)) history.replaceState(null, "", "#teams/discussions");
+    this.paintSelection();
+    this.paintThreadPane();
+  }
+
   private select(key: string, reading: boolean): void {
-    window.clearTimeout(this.askTimer);
     this.open = key;
     this.editing = "";
     this.editText = "";
@@ -701,6 +744,7 @@ export class TeamsScreen {
     const t = this.thread;
     if (!host || !t || !this.info) return;
     const c = this.conv(t.key);
+    const scroll = $<HTMLElement>(".pane-scroll", host)?.scrollTop ?? 0;
     host.innerHTML = infoPane({
       conv: { title: t.title, kind: t.kind, key: t.key, messages: c?.messages ?? t.messages.length },
       people: this.people(t),
@@ -709,6 +753,9 @@ export class TeamsScreen {
       replies: t.replies,
       now: Date.now(),
     });
+    // repeint (ses âges, un participant de plus) : là où on l'avait fait défiler
+    const fresh = $<HTMLElement>(".pane-scroll", host);
+    if (fresh) fresh.scrollTop = scroll;
   }
 
   private paintReplies(): void {
@@ -748,65 +795,37 @@ export class TeamsScreen {
     else toast("Cette réponse n'est plus dans « Ses brouillons ».", { ico: "info" });
   }
 
-  // ── Demander, poll ─────────────────────────────────────────────────
+  // ── Demander, où elle en est ───────────────────────────────────────
 
-  /** Une réponse qu'elle prépare ici, demandée ou d'elle-même : relire où elle en est toutes les deux secondes
-   *  (ADR 0306), sans relire le fil, tant que la discussion reste ouverte ; le fil se relit quand sa réponse arrive,
-   *  ou quand elle a fini sans en rendre. */
-  private watchAsk(): void {
-    window.clearTimeout(this.askTimer);
+  /** Le fil lu : sa réponse est arrivée ici, on ne dit plus qu'on la lui a demandée. */
+  private settleAsk(): void {
     const t = this.thread;
-    if (!t) return;
-    const busy = t.asked || !!t.work || this.asked.has(t.key);
-    if (t.under_way || !busy) this.askGaveUp.delete(t.key); // arrivée, ou plus demandée : le plafond s'oublie
-    if (this.askGaveUp.has(t.key)) return;
-    if (!busy || t.under_way) {
-      if (t.under_way) this.asked.delete(t.key);
-      this.watchSince.delete(t.key);
-      return;
-    }
-    const since = this.watchSince.get(t.key) ?? this.asked.get(t.key) ?? Date.now();
-    this.watchSince.set(t.key, since);
-    const key = t.key;
-    this.askTimer = window.setTimeout(() => void this.pollWork(key, since), WORK_POLL_MS);
+    if (t?.under_way) this.asked.delete(t.key);
   }
 
-  private async pollWork(key: string, since: number): Promise<void> {
-    if (this.open !== key) return;
-    if (Date.now() - since > ASK_POLL_MAX_MS) {
-      // elle n'a rien rendu depuis si longtemps : on cesse d'attendre ici, pour de bon (la relecture générale la
-      // verra arriver) — une relecture qui rappelle watchAsk ne le réarme pas
-      this.askGaveUp.add(key);
-      this.asked.delete(key);
-      this.watchSince.delete(key);
-      this.paintDock();
-      return;
-    }
-    if (!this.visible()) {
-      this.watchAsk();
-      return;
-    }
+  /** Où elle en est d'une réponse ici, demandée ou d'elle-même (ADR 0306) : le direct pousse chaque étape qui commence
+   *  (`teams.work`, ADR 0308), on relit alors `work`, sans relire le fil ; le fil se relit quand sa réponse arrive, ou
+   *  quand elle a fini sans en rendre. */
+  private async rereadWork(): Promise<void> {
+    const key = this.open;
+    if (!key || this.thread?.key !== key) return;
     let got: ThreadWork;
     try {
       got = await fetchThreadWork(key);
     } catch {
-      if (this.open === key) this.watchAsk(); // une relecture manquée : la suivante
-      return;
+      return; // le prochain changement relira
     }
     const t = this.thread;
     if (this.open !== key || !t || t.key !== key) return;
     if (got.under_way || (!got.asked && !got.work)) {
-      // sa réponse est arrivée, ou elle a fini sans en rendre : plus rien à guetter ici ; le fil, ses réponses, le
-      // champ et les compteurs
+      // sa réponse est arrivée, ou elle a fini sans en rendre : le fil, ses réponses, le champ et les compteurs
       this.asked.delete(key);
-      this.watchSince.delete(key);
-      void this.loadThread(true);
+      void this.threadRead.run();
       return;
     }
     t.work = got.work;
     t.asked = got.asked;
     this.paintDock();
-    this.watchAsk();
   }
 
   private async prefillHere(): Promise<void> {
@@ -826,14 +845,11 @@ export class TeamsScreen {
       }
       const now = Date.now();
       this.asked.set(t.key, now);
-      this.askGaveUp.delete(t.key);
-      this.watchSince.delete(t.key); // une nouvelle demande : son plafond repart d'ici
-      // elle s'y met tout de suite (ADR 0306) : sa ligne paraît sans attendre la relecture, qui la corrige
+      // elle s'y met tout de suite (ADR 0306) : sa ligne paraît sans attendre que le direct dise son étape (ADR 0308)
       t.asked = true;
       t.work ??= { step: "waiting", label: "", since: now, started: now };
       toast(got.message === "Elle y travaille déjà." ? got.message : "Demandé : elle s'y met tout de suite ; sa réponse arrivera ici.", { mika: true });
       this.paintDock();
-      this.watchAsk();
     } catch (err) {
       toast(errorText(err), { ico: "alert" });
     }
@@ -1024,8 +1040,6 @@ export class TeamsScreen {
         submit: async (instruction) => {
           const done = await redoReply(r.id, instruction);
           this.asked.set(r.conversation, Date.now());
-          this.askGaveUp.delete(r.conversation);
-          this.watchSince.delete(r.conversation);
           await this.afterDecision();
           return done.message;
         },
@@ -1154,7 +1168,7 @@ export class TeamsScreen {
       // ADR 0307 : les fautes de ton message, sans changer ses mots (le champ tel qu'il est à l'écran à la fin)
       if (k === "corriger") {
         void correctField(() => (this.body ? $<HTMLTextAreaElement>("[data-tm-input]", this.body) : null),
-          b instanceof HTMLButtonElement ? b : null);
+          b instanceof HTMLButtonElement ? b : null, () => this.open ?? "");
       }
       if (k === "emoji") this.emojis(b);
       if (k === "sans-citation") this.quote("");

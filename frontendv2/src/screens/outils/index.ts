@@ -4,6 +4,9 @@
  * relisent ses brouillons (Teams, Mail) ; « Services », ceux dont elle se sert pour toi, ceux que tu as branchés et
  * ceux qu'on te partage. La forme : `maquette/ecrans/outils.js` ; l'onglet « Accords » attend une route qui rende les
  * cartes et les décisions (ADR 0209).
+ *
+ * Le direct (ADR 0308, `protocole-moi.md` § 2 bis) : `settings` (tes boîtes, tes comptes Teams, tes services, tes
+ * droits) relit ce qu'il montre ; l'écran au second plan, ou l'onglet caché, se relit à son retour.
  */
 import { apiUrl } from "../../api/moi";
 import type { Rights } from "../../api/rights";
@@ -13,6 +16,8 @@ import { ico } from "../../shell/icons";
 import type { PaletteEntry } from "../../shell/palette";
 import type { ScreenContext, ScreenDef, ScreenTab, Shell } from "../../shell/shell";
 import { askMika } from "../parametres/account";
+import { AG, AgendaRightsPart } from "./agendas";
+import { Freshness, live, pageShown } from "../../live/live";
 import { errorBlock, loadingBlock } from "../../shared/kit";
 import * as store from "../../shared/store";
 import { shareWords } from "../parametres/words";
@@ -52,10 +57,19 @@ class OutilsScreen {
   /** Sur un téléphone, le canal dont la colonne se lit (ADR 0209). */
   private canal = FIRST_CANAL;
   private painted = "";
+  /** Le direct (ADR 0308) : montré, l'écran relit ; sinon il se relit à son retour. */
+  private readonly fresh = new Freshness(() => this.open() && pageShown(), () => void this.ensure(true));
+  /** Le tableau de chaque agenda (ADR 0309) : « Tes agendas », sous les ressources. */
+  private readonly agendas = new AgendaRightsPart(() => this.paint());
 
   constructor(private readonly shell: Shell) {
     // la palette (Ctrl K) cherche aussi ses outils : une lecture, un peu après le démarrage
     window.setTimeout(() => void this.loadAll(), 3500);
+    live.onChange("settings", () => this.fresh.touch(() => void this.ensure(true)));
+    live.onChange("agenda", () => {
+      this.agendas.invalidate();
+      this.fresh.touch(() => void this.ensure(true));
+    });
   }
 
   def(): ScreenDef {
@@ -80,12 +94,13 @@ class OutilsScreen {
       store.boxes.load(force),
       store.teamsAccounts.load(force),
       store.services.load(force),
+      this.agendas.load(force),
     ]);
   }
 
   private stamp(): string {
     return [this.ctx?.tab, this.ctx?.item, store.rights.version, store.boxes.version, store.teamsAccounts.version,
-      store.services.version].join("|");
+      store.services.version, this.agendas.stamp()].join("|");
   }
 
   private open(): boolean {
@@ -128,14 +143,25 @@ class OutilsScreen {
     this.body = body;
     this.ctx = ctx;
     this.paint();
-    void this.ensure();
+    if (!this.fresh.back()) void this.ensure();
   }
 
   private paint(): void {
     const body = this.body;
     const ctx = this.ctx;
     if (!body || !ctx) return;
+    // redessiné sur place (le direct) : chaque cadre garde où il avait défilé
+    const view = `${ctx.tab}/${ctx.item ?? ""}`;
+    const kept = body.dataset.view === view ? [...body.querySelectorAll<HTMLElement>(".pane-scroll, .fill-scroll, .mx-scroll")].map((el) => el.scrollTop) : [];
     this.painted = this.stamp();
+    this.paintBody(body, ctx);
+    body.dataset.view = view;
+    body.querySelectorAll<HTMLElement>(".pane-scroll, .fill-scroll, .mx-scroll").forEach((el, i) => {
+      if (kept[i]) el.scrollTop = kept[i];
+    });
+  }
+
+  private paintBody(body: HTMLElement, ctx: ScreenContext): void {
     const rights = store.rights.value;
     if (!rights) {
       body.innerHTML = store.rights.error ? errorBlock(store.rights.error, "Impossible de lire tes droits") : loadingBlock();
@@ -148,13 +174,17 @@ class OutilsScreen {
 
   private rightsMarkup(rights: Rights, selected: string | null): string {
     const all = this.resources();
+    const agenda = selected?.startsWith(AG) ? selected : null;
     const chosen = selected && all.some((r) => r.key === selected) ? selected : null;
-    const shown = chosen ? all.filter((r) => r.key === chosen) : all;
+    const shown = agenda ? [] : chosen ? all.filter((r) => r.key === chosen) : all;
     const cols = columns(rights.canals, rights.moments);
-    const tables = shown.map((r) => tableMarkup(r, cols, this.query, this.canal)).join("");
-    return `<div class="split mx-split"><aside class="pane">${navMarkup(all, chosen)}</aside>
+    const tables = shown.map((r) => tableMarkup(r, cols, this.query, this.canal)).join("") + (chosen ? "" : this.agendas.sections(agenda, this.query));
+    // « Tes agendas » : leur groupe à la fin de la liste, leurs choix à la fin du menu d'un téléphone
+    const nav = navMarkup(all, agenda ?? chosen).replace(/<\/div>\s*$/, `${this.agendas.navGroup(agenda)}</div>`);
+    const pick = selectMarkup(all, chosen).replace(/<\/select>$/, `${this.agendas.options(agenda)}</select>`);
+    return `<div class="split mx-split"><aside class="pane">${nav}</aside>
       <section class="pane"><div class="pane-scroll mx-main" data-mx-main>
-        <div class="mx-picks">${selectMarkup(all, chosen)}${canalPickMarkup(rights.canals, this.canal)}</div>
+        <div class="mx-picks">${pick}${canalPickMarkup(rights.canals, this.canal)}</div>
         <div class="mx-top"><p class="lede">Ce que Mika peut faire pour toi, ressource par ressource : chaque case est la décision même de ses règles, pour toi, selon par où tu lui parles et quand. Clique une case pour savoir pourquoi. Tes accords se décident dans le chat ; ce qu'elle prépare se relit dans <a href="#teams/brouillons">Teams</a> et dans <a href="#mail/messages">Mail</a>.</p>
           ${legendMarkup()}</div>
         <div data-mx-tables>${tables || this.nothingFound()}</div></div></section></div>`;
@@ -211,6 +241,13 @@ class OutilsScreen {
       this.detail(res, tool);
     });
     on(section, "[data-retry]", "click", () => void this.ensure(true));
+    // le tableau d'un agenda : une case, retirer un partage, revenir au tableau de départ
+    section.addEventListener("change", (e) => {
+      const s = (e.target as HTMLElement).closest<HTMLSelectElement>("[data-agdroit]");
+      if (s) void this.agendas.change(s.dataset.agdroit ?? "", s.value);
+    });
+    on(section, "[data-agdroitret]", "click", (_e, b) => void this.agendas.withdraw(b.dataset.agdroitret ?? ""));
+    on(section, "[data-agdroitreset]", "click", (_e, b) => void this.agendas.reset(b.dataset.agdroitreset ?? ""));
     on(section, "[data-relogin]", "click", () => location.reload());
     section.addEventListener("input", (e) => {
       const target = e.target as HTMLInputElement;
@@ -227,9 +264,11 @@ class OutilsScreen {
     if (!rights || !box) return;
     const all = this.resources();
     const selected = this.ctx?.item ?? null;
-    const shown = selected && all.some((r) => r.key === selected) ? all.filter((r) => r.key === selected) : all;
+    const agenda = selected?.startsWith(AG) ? selected : null;
+    const chosen = selected && all.some((r) => r.key === selected) ? selected : null;
+    const shown = agenda ? [] : chosen ? all.filter((r) => r.key === chosen) : all;
     const cols = columns(rights.canals, rights.moments);
-    box.innerHTML = shown.map((r) => tableMarkup(r, cols, this.query, this.canal)).join("") || this.nothingFound();
+    box.innerHTML = (shown.map((r) => tableMarkup(r, cols, this.query, this.canal)).join("") + (chosen ? "" : this.agendas.sections(agenda, this.query))) || this.nothingFound();
   }
 
   private find(resKey: string, toolName: string) {

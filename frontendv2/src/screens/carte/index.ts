@@ -16,6 +16,9 @@
  * fenêtres d'un voyage (`modals.ts`) et le glisser d'un arrêt (`drag.ts`). Le cadre délègue le dessin et les
  * gestes à l'onglet montré ; un contrôleur reçoit du cadre ce qu'il lui faut (`CarteFrame`, et son hôte), jamais
  * l'état d'un autre onglet.
+ *
+ * Le direct (ADR 0308, `protocole-moi.md` § 2 bis) : `trips` relit tes voyages et le voyage ouvert (pas pendant tes
+ * gestes sur lui : leur relecture suit), `phone.position` ta position ; l'écran au second plan se relit à son retour.
  */
 import {
   fetchCarte,
@@ -40,6 +43,7 @@ import { ico } from "../../shell/icons";
 import type { PaletteEntry } from "../../shell/palette";
 import type { ScreenContext, ScreenDef, ScreenTab, Shell } from "../../shell/shell";
 import { onTheme } from "../../shell/theme";
+import { Freshness, live, pageShown } from "../../live/live";
 import { Cached, CachedMap } from "../../shared/kit";
 import * as store from "../../shared/store";
 import { StopDrag } from "./drag";
@@ -118,6 +122,8 @@ class CarteScreen {
   private headTrip: boolean | null = null;
   /** Un dessin demandé pendant qu'on glisse un arrêt : fait quand il tombe. */
   private paintLater = false;
+  /** Le direct (ADR 0308) : montré, l'écran relit ; sinon il se relit à son retour. */
+  private readonly liveness = new Freshness(() => this.open() && pageShown(), () => void this.ensure(true));
 
   // ── Les lectures ──
   private readonly carte = new Cached<CarteInfo>(() => fetchCarte(), 60_000);
@@ -257,6 +263,33 @@ class CarteScreen {
     addEventListener("hashchange", () => {
       if (!/^#carte(\/|$)/.test(location.hash)) this.map.drop();
     });
+    live.onChange("trips", () => this.liveness.touch(() => void this.liveTrips()));
+    live.onChange("phone.position", () => this.liveness.touch(() => void this.reread([this.position])));
+  }
+
+  /** `trips` : tes voyages et le voyage ouvert — sauf pendant tes gestes sur lui (ce qu'ils montrent avant que le
+   *  serveur le dise ne recule pas ; leur relecture suit, `TripsTab.gesture`). Sur un autre onglet, seul leur nombre
+   *  (l'onglet « Voyages ») suit, s'ils ont déjà été lus. */
+  private async liveTrips(): Promise<void> {
+    const id = this.tripId();
+    const ours = !!id && !this.tripsTab.busy;
+    if (ours) this.tripsTab.invalidateTrip(id);
+    else this.trips.invalidate();
+    if (this.current === "voyages" || this.current === "voyage") {
+      await this.reread(ours ? [this.trips, this.tripCache.get(id)] : [this.trips]);
+      return;
+    }
+    if (!this.trips.settled) return;
+    await this.trips.load(true);
+    if (this.open()) this.syncTabs();
+  }
+
+  /** Relire ces lectures ; si l'une a changé, l'écran suit (`ensure` : ce qui en dépend, puis le dessin). */
+  private async reread(caches: Cached<unknown>[]): Promise<void> {
+    const before = caches.map((c) => c.version);
+    await Promise.all(caches.map((c) => c.load(true)));
+    if (!this.open() || caches.every((c, i) => c.version === before[i])) return;
+    await this.ensure();
   }
 
   def(): ScreenDef {
@@ -308,7 +341,7 @@ class CarteScreen {
     this.current = next;
     this.applyItem(ctx);
     this.paint();
-    void this.ensure();
+    if (!this.liveness.back()) void this.ensure();
   }
 
   /**

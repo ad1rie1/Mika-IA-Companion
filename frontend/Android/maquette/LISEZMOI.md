@@ -41,6 +41,39 @@ Deux icônes neuves dans le sprite (`contacts`, `user-plus`), que `tools/icones.
 refusé), `#contacts/lumen` (une organisation), `#contacts/claire/fait/1` et `#contacts/claire/oublier` (les feuilles
 ouvertes), `#mail/ecrire/a/<adresse>`, `#mail/ecrire/suggestions`.
 
+**Proposé le 2026-11-23, pas encore validé** : l'Agenda (`output/agenda/CONCEPTION.md`), l'écran Agenda de la maquette
+web (`frontendv2/maquette/ecrans/agenda*.js`) avec les codes d'un agenda de téléphone (Google Agenda, Samsung Calendar),
+sur les mêmes données fictives, lues dans `frontendv2/maquette/ecrans/agenda-donnees.js`. Il se pose par-dessus sans
+retoucher les écrans validés :
+
+- une rubrique « Agenda » dans le tiroir, après Teams, avec ce qui attend ta décision (sous « Plus » dans la variante
+  barre) ;
+- la barre du haut : le mois en titre, qui déplie le mini-mois ; chercher ; « Aujourd'hui » (l'icône au numéro du jour) ;
+  ⋮, qui porte les cinq vues (Planning · Jour · 3 jours · Semaine · Mois), « Agendas à afficher » (une feuille, groupée
+  et cochée) et les invitations ; on balaie pour changer de période ; la ligne de l'heure ; le bouton + ;
+- « À décider » en tête des vues : la proposition de Mika (Refuser · Modifier · Ajouter) et les deux invitations, avec
+  la réponse qu'elle a préparée ;
+- la fiche d'un événement en page ; le formulaire en plein écran (la date dans un calendrier, l'heure dans une liste) ;
+  la question d'un événement récurrent ; partager un agenda (une feuille) ; la page des invitations ; la notification
+  d'un rappel ou d'une invitation, dans le volet du téléphone dessiné ;
+- Paramètres › Agendas (une ligne après Comptes Teams) : les comptes, la page d'un compte et d'un agenda, « Brancher un
+  agenda » par sorte (système, Google et l'adresse à coller, Microsoft et son code, CalDAV, iCal) ; Outils › Droits :
+  un groupe « Tes agendas », et le tableau de chacun en cartes ; dans le chat, la carte « Ajouter à ton agenda » et un
+  rappel d'elle.
+
+Fichiers : `ecrans/agenda.js` (l'écran, ses vues, ses feuilles, la fiche, le volet), `agenda-edition.js` (le formulaire),
+`agenda-parametres.js`, `agenda-droits.js`, `agenda-chat.js`, `agenda.css` ; et `agenda-crochet.js`, chargé juste après
+`maquette.js`, qui garde la vue d'origine de chaque écran (`A.vue(id)`) pour que l'Agenda ajoute ses routes à
+Paramètres, Outils et au chat. Onze icônes neuves dans le sprite : `agenda` (celle du web), `today` (le numéro du jour
+s'écrit par-dessus), `repeat`, `video`, `server`, `eye-off` (celles du web), et les cinq vues `view-list`, `view-day`,
+`view-3`, `view-week`, `view-month` ; `tools/icones.py` ne les a pas encore tirées dans l'app. Routes : `#agenda`,
+`#agenda/jour`, `/3jours`, `/semaine`, `/mois`, `/mois-deplie`, `/agendas`, `/agendas/<agenda>`, `/tiroir`,
+`/chercher/<mot>`, `/invitations`, `/evenement/<id>` (et `/mot`, `/rappel`, `/supprimer`), `/nouveau`,
+`/modifier/<id>` (et `/question`), `/dupliquer/<id>`, `/partager/<agenda>`, `/notification` ; `#parametres/agendas`
+(`/<compte>`, `/<compte>/<agenda>`, `/brancher`, `/brancher/<sorte>`, `/brancher/google/coller`,
+`/brancher/google/sans-appli`, `/brancher/microsoft/code`, `/brancher/caldav/trouves`…) ; `#outils/droits/<agenda>` ;
+`#chat/agenda`. Captures : `output/agenda/maquette-android/` (refaites par `captures.cjs`).
+
 ## L'ouvrir
 
 ```bash
@@ -65,6 +98,7 @@ Paramètres d'adresse : `?theme=dark|light`, `?nav=barre|tiroir`, puis la route 
 
 - les personnes, l'état de Mika et ses portraits : `frontendv2/maquette/donnees.js` ;
 - le fond de carte (la France simplifiée, © OpenStreetMap) : `frontendv2/maquette/ecrans/carte-fond.js` ;
+- les agendas, leurs comptes et leurs événements (proposé) : `frontendv2/maquette/ecrans/agenda-donnees.js` ;
 - les portraits pré-rendus : `app/src/main/assets/avatar/` (sous licence, non versionnés ; sans eux, un rond coloré) ;
 - la police Inter de la console, si Roboto manque.
 
@@ -77,3 +111,4 @@ Paramètres d'adresse : `?theme=dark|light`, `?nav=barre|tiroir`, puis la route 
 | `maquette.js` | le moteur : routes, barre du haut, barre du bas ou tiroir, feuilles, menus, fenêtres, son visage, le panneau |
 | `ecrans/<écran>.js` | un écran chacun : chat (avec la recherche, les fichiers et « Ce qu'elle fait »), mail, teams, carte, telephone, outils, plus (avec Paramètres) |
 | `ecrans/chat-effort.js`, `ecrans/carte-avis.js`, `ecrans/contacts.js` | des propositions posées par-dessus les écrans validés, sans les retoucher |
+| `ecrans/agenda*.js`, `ecrans/agenda.css` | l'Agenda (proposé), posé de même ; `agenda-crochet.js` garde les vues d'origine |

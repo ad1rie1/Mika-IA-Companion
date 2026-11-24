@@ -37,6 +37,12 @@ ALLOWED = {
                                                 "(User-Agent) : le programme, pas elle",
     ("adapters/maps/tiles.py", "Mika/2 (carte de sa position)"): "l'identifiant du logiciel auprès des serveurs de "
                                                                  "carte (User-Agent, ADR 0193) : le programme, pas elle",
+    ("adapters/agenda/http.py", "Mika/2 (agenda)"): "l'identifiant du logiciel auprès des serveurs d'agendas "
+                                                    "(User-Agent, ADR 0309) : le programme, pas elle",
+    ("adapters/agenda/ics.py", "-//Mika//Agenda//FR"): "le PRODID des événements qu'elle écrit chez un fournisseur "
+                                                       "(RFC 5545, ADR 0309) : le programme qui les a écrits, pas elle",
+    ("plugins/agenda/inspect/views.py", "Supprimer de Mika"): "le geste de la fiche d'un agenda (ADR 0309, lot 5) : sa copie "
+                                                        "part du logiciel, de ce serveur — pas d'elle",
 }
 
 

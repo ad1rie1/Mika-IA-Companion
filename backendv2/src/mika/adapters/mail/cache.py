@@ -1,6 +1,7 @@
 """Le cache du courrier (``mail.db`` ; son schéma vaut aussi pour la base ``mika_mail`` de MariaDB, ADR 0101) : ce qui est
 arrivé, par compte et par dossier ; les dossiers et leur curseur IMAP ; ce qui a déjà été rendu (et ce qui l'a été
-sans être encore accusé) ; les brouillons ; ce qui est parti ; l'état de chaque compte. Les tables sont déclarées
+sans être encore accusé, ou lu ailleurs sans lui avoir encore été dit) ; les brouillons ; ce qui est parti ; l'état de
+chaque compte. Les tables sont déclarées
 dans ``models`` ; ce qui se cherche (textes repliés, Message-ID du parent, références, personnes nommées) y est
 calculé à l'écriture, si bien que le SQL n'appelle aucune fonction Python et se lit pareil sur les deux moteurs.
 
@@ -41,7 +42,7 @@ import hashlib
 import json
 import threading
 from collections.abc import Iterable, Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -49,6 +50,7 @@ from typing import Any
 from sqlalchemy import and_, bindparam, case, delete, exists, func, insert, literal, or_, select, update
 from sqlalchemy.orm import Session, aliased, sessionmaker
 
+from mika.adapters.changes import Changes, Listener
 from mika.adapters.database import Target, as_target
 from mika.adapters.mail.browse import Browse
 from mika.adapters.mail.models import (
@@ -77,6 +79,7 @@ from mika.adapters.mail.models import (
     OfferedRow,
     PartRow,
     RecipientRow,
+    SeenElsewhereRow,
     SentRow,
     StatusRow,
     address_print,
@@ -90,6 +93,7 @@ from mika.adapters.mail.models import (
     sent_values,
 )
 from mika.adapters.mail.parse import Part
+from mika.ports import changes
 from mika.ports.mail import (
     PIECE_MAX,
     AccountStatus,
@@ -122,6 +126,11 @@ INLINE_MAX = 8 * 1024 * 1024
 INLINE_TYPES = frozenset(("image/png", "image/gif", "image/jpeg", "image/jpg", "image/webp", "image/bmp"))
 
 M, F, S, D, R, P, B = MessageRow, FolderRow, SentRow, DraftRow, RecipientRow, PartRow, BlobRow
+#: ce qui attend sa relève, au plus, par boîte (ADR 0308) : rangé à toute heure, rendu à son rythme — une relève qui ne
+#: passe plus (le courrier coupé dans ses réglages, des jours sans réveil) n'en garde pas sans fin. Au-delà, le plus
+#: ancien ne lui est plus rendu (rendu ou lu ailleurs, il reste gardé et se lit dans la boîte)
+OFFERED_MAX = 1000
+SEEN_ELSEWHERE_MAX = 1000
 _MESSAGES = MessageRow.__table__
 #: ce qu'on lit d'un mail (``_mail``)
 _MAIL = (M.account, M.folder, M.uid, M.message_id, M.sender, M.address, M.reply_to, M.dest, M.cc, M.subject, M.date,
@@ -166,12 +175,29 @@ class MailCache:
         #: la session en cours (une lecture faite pendant une écriture, ou une page qui charge ses lignes, la reprend)
         self._current: Session | None = None
         self._writing = False
+        #: ce que ses écritures changent, dit une fois validées (ADR 0308)
+        self._changes = Changes()
+
+    # ── ce qui change (ADR 0308) ──
+    def on_change(self, fn: Listener) -> None:
+        """Prévenir ``fn`` de chaque écriture, une fois validée : le sujet (``mail``, ``mail.drafts``) et les boîtes
+        touchées (aucune : on ne sait pas lesquelles). Appelé dans le fil qui a écrit."""
+        self._changes.listen(fn)
+
+    def _changed(self, topic: str, *accounts: str) -> None:
+        self._changes.note(changes.Change(topic, tuple(sorted({a for a in accounts if a}))))
+
+    def held(self) -> AbstractContextManager[None]:
+        """Ce que les écritures de ce fil disent pendant le bloc part une fois, à sa fin (``Changes.held``) : un passage
+        de l'historique, le rangement d'un dossier — pas une trame par mail."""
+        return self._changes.held()
 
     # ── les sessions ──
     @contextmanager
     def _use(self, write: bool) -> Iterator[Session]:
         """La session de l'appel, sous le verrou : celle en cours s'il y en a une (une écriture ne commence jamais
-        dans une lecture), sinon une neuve — validée à la sortie pour une écriture, abandonnée pour une lecture."""
+        dans une lecture), sinon une neuve — validée à la sortie pour une écriture, abandonnée pour une lecture. Ce
+        qu'une écriture a noté (``_changed``) part à sa validation, celle de la plus extérieure."""
         with self._lock:
             if self._current is not None:
                 if write and not self._writing:
@@ -179,7 +205,7 @@ class MailCache:
                 yield self._current
                 return
             opened = self._session.begin() if write else self._session()
-            with opened as s:
+            with self._changes.writing() if write else nullcontext(), opened as s:
                 self._current, self._writing = s, write
                 try:
                     yield s
@@ -281,10 +307,16 @@ class MailCache:
             values = message_values(m, uid, ref, twin)
             if parts is not None:
                 values["parts_kept"] = True
+            # ce qui se voit : un mail neuf, une place qui change, une ligne qui n'est plus la même — pas un mail relu
+            # à l'identique (une relève qui repasse, la console qui relit, une source relue pour une pièce)
+            moved = place is None or bool(gone)
             if place is None:
                 row_id = int(s.execute(insert(_MESSAGES), values).inserted_primary_key[0])
             else:
                 row_id = int(place.id)
+                if not moved:
+                    was = s.execute(select(*(_MESSAGES.c[k] for k in values)).where(_MESSAGES.c.id == row_id)).first()
+                    moved = was is None or any(old != values[k] for old, k in zip(was, values, strict=True))
                 s.execute(update(_MESSAGES).where(_MESSAGES.c.id == bindparam("row")), {**values, "row": row_id})
                 s.execute(delete(R).where(R.kind == MESSAGE, R.owner == row_id))
             linked = people(MESSAGE, row_id, to=m.to, cc=m.cc, sender=m.sender, address=m.address)
@@ -296,6 +328,9 @@ class MailCache:
                 _collect(s, before)  # après : relu à l'identique, il garde ses octets sans les réécrire
                 if fresh:
                     _bound(s)
+                    moved = True
+            if moved:
+                self._changed(changes.MAIL, m.account)
         return replace(m, key=ref, twin=twin, parts_kept=values["parts_kept"])
 
     @staticmethod
@@ -631,17 +666,21 @@ class MailCache:
                   if value is not None}
         if not values:
             return
+        # seulement ce qui change : une relève qui relit les drapeaux sans que rien ait bougé ne dit rien (ADR 0308)
+        differs = or_(*(getattr(M, name) != value for name, value in values.items()))
         with self._use(write=True) as s:
-            s.execute(update(M).where(M.account == fit(account, ACCOUNT), M.folder == fit(folder, FOLDER),
-                                      M.uid == uid).values(**values))
+            if s.execute(update(M).where(M.account == fit(account, ACCOUNT), M.folder == fit(folder, FOLDER),
+                                         M.uid == uid, differs).values(**values)).rowcount:
+                self._changed(changes.MAIL, account)
 
     def forget_uids(self, account: str, folder: str, uids: Iterable[int]) -> None:
         wanted = sorted({int(u) for u in uids})
         if not wanted:
             return
         with self._use(write=True) as s:
-            self._drop_messages(s, M.account == fit(account, ACCOUNT), M.folder == fit(folder, FOLDER),
-                                M.uid.in_(wanted))
+            if self._drop_messages(s, M.account == fit(account, ACCOUNT), M.folder == fit(folder, FOLDER),
+                                   M.uid.in_(wanted)):
+                self._changed(changes.MAIL, account)
 
     def relocate(self, account: str, folder: str, uid: int, dest: str, new_uid: int | None) -> None:
         """Un mail déplacé : il change de dossier (et d'UID, s'il est connu ; sinon une place provisoire, négative,
@@ -657,6 +696,7 @@ class MailCache:
                 new_uid = min(0, int(lowest or 0)) - 1
             self._drop_messages(s, M.account == account, M.folder == there, M.uid == new_uid, M.id != moving)
             s.execute(update(M).where(M.id == moving).values(folder=there, uid=new_uid, sent_name=sent_name(dest)))
+            self._changed(changes.MAIL, account)
 
     def reset_folder(self, account: str, folder: str) -> None:
         """Ses UID ont changé de sens (un autre UIDVALIDITY) : ses mails s'en vont, son historique est à relire."""
@@ -664,6 +704,7 @@ class MailCache:
             self._drop_messages(s, M.account == fit(account, ACCOUNT), M.folder == fit(folder, FOLDER))
             s.execute(update(F).where(F.account == fit(account, ACCOUNT), F.name == fit(folder, FOLDER))
                       .values(floor=0, complete=False))
+            self._changed(changes.MAIL, account)
 
     def prune(self, account: str, folder: str, keep: int = KEEP_PER_FOLDER) -> None:
         """Ne garde que les ``keep`` mails les plus récents d'un dossier : lit d'abord le premier à partir, puis
@@ -672,8 +713,9 @@ class MailCache:
         with self._use(write=True) as s:
             edge = s.execute(select(M.date, M.id).where(*here).order_by(M.date.desc(), M.id.desc())
                              .offset(max(0, keep)).limit(1)).first()
-            if edge is not None:
-                self._drop_messages(s, *here, or_(M.date < edge.date, and_(M.date == edge.date, M.id <= edge.id)))
+            if edge is not None and self._drop_messages(
+                    s, *here, or_(M.date < edge.date, and_(M.date == edge.date, M.id <= edge.id))):
+                self._changed(changes.MAIL, account)
 
     # ── rendus une fois ──
     def handed(self, account: str, message_id: str) -> bool:
@@ -687,8 +729,15 @@ class MailCache:
     def offer(self, account: str, ref: str) -> None:
         """Rendu par un relevé, pas encore accusé : chaque relevé le rend encore tant qu'il ne l'est pas
         (le curseur IMAP, lui, est déjà passé)."""
+        account = fit(account, ACCOUNT)
         with self._use(write=True) as s:
-            insert_ignore(s, OfferedRow, {"account": fit(account, ACCOUNT), "ref": fit(ref, REF)})
+            if insert_ignore(s, OfferedRow, {"account": account, "ref": fit(ref, REF)}):
+                self._changed(changes.MAIL, account)  # son tri l'attend (« waiting »)
+                # une relève qui ne passe plus n'en garde pas sans fin : au-delà, le plus ancien ne lui est plus rendu
+                beyond = s.scalars(select(OfferedRow.id).where(OfferedRow.account == account)
+                                   .order_by(OfferedRow.id.desc()).offset(OFFERED_MAX)).all()
+                if beyond:
+                    s.execute(delete(OfferedRow).where(OfferedRow.id.in_(beyond)))
 
     def offered(self, account: str, limit: int) -> list[Mail]:
         """Les mails rendus et pas encore accusés de ce compte, les plus anciens d'abord ; un mail sorti du
@@ -703,9 +752,33 @@ class MailCache:
                 mail = self.one(ref)
                 if mail is None:
                     s.execute(delete(OfferedRow).where(OfferedRow.account == account, OfferedRow.ref == ref))
+                    self._changed(changes.MAIL, account)
                 else:
                     out.append(mail)
         return out
+
+    def seen_elsewhere(self, account: str, ref: str) -> None:
+        """Ce mail gardé vient d'être lu dans un autre client : sa relève le lui dira (``take_seen_elsewhere``), même
+        si elle dort jusque-là, même après un redémarrage (ADR 0308)."""
+        account = fit(account, ACCOUNT)
+        with self._use(write=True) as s:
+            if insert_ignore(s, SeenElsewhereRow, {"account": account, "ref": fit(ref, REF)}):
+                # une relève qui ne passe plus n'en garde pas sans fin (sans ordre d'arrivée : n'importe lesquels — le
+                # drapeau, lui, est gardé sur le mail)
+                beyond = s.scalars(select(SeenElsewhereRow.ref).where(SeenElsewhereRow.account == account)
+                                   .order_by(SeenElsewhereRow.ref).offset(SEEN_ELSEWHERE_MAX)).all()
+                if beyond:
+                    s.execute(delete(SeenElsewhereRow).where(SeenElsewhereRow.account == account,
+                                                             SeenElsewhereRow.ref.in_(beyond)))
+
+    def take_seen_elsewhere(self) -> list[str]:
+        """Les mails lus ailleurs depuis la dernière fois, rendus une fois (vidés à la lecture)."""
+        with self._use(write=True) as s:
+            refs = list(s.scalars(select(SeenElsewhereRow.ref).order_by(SeenElsewhereRow.account,
+                                                                        SeenElsewhereRow.ref)))
+            if refs:
+                s.execute(delete(SeenElsewhereRow))
+        return refs
 
     def offered_refs(self) -> frozenset[str]:
         """Les références de tous les mails rendus et pas encore accusés (tous comptes) : ceux qu'elle n'a pas encore
@@ -721,6 +794,7 @@ class MailCache:
                 account = fit(account, ACCOUNT)
                 insert_ignore(s, HandedRow, {"account": account, "local": fit(local, LOCAL)})
                 s.execute(delete(OfferedRow).where(OfferedRow.account == account, OfferedRow.ref == fit(ref, REF)))
+                self._changed(changes.MAIL, account)  # trié : il n'attend plus
 
     # ── dossiers ──
     @staticmethod
@@ -755,6 +829,9 @@ class MailCache:
                 row = F(account=key[0], name=key[1], role="", uidvalidity=0, uidnext=0, total=0, unseen=0,
                         last_sync=0, floor=0, complete=False)
                 s.add(row)
+                before = None
+            else:
+                before = (row.role, row.total, row.unseen, row.complete)
             if role is not None:
                 row.role = fit(role, WORD)
             for col, value in (("uidvalidity", uidvalidity), ("uidnext", uidnext), ("total", total),
@@ -762,12 +839,16 @@ class MailCache:
                                ("complete", complete)):
                 if value is not None:
                     setattr(row, col, value)
+            # ce que montrent ses dossiers (leur rôle, leurs compteurs) ; ses curseurs IMAP ne se voient pas
+            if before != (row.role, row.total, row.unseen, row.complete):
+                self._changed(changes.MAIL, account)
 
     def keep_folders(self, account: str, names: Iterable[str]) -> None:
         """La liste des dossiers vient d'être relue : ceux qui n'existent plus s'en vont."""
         kept = sorted({fit(n, FOLDER) for n in names})
         with self._use(write=True) as s:
-            s.execute(delete(F).where(F.account == fit(account, ACCOUNT), F.name.not_in(kept)))
+            if s.execute(delete(F).where(F.account == fit(account, ACCOUNT), F.name.not_in(kept))).rowcount:
+                self._changed(changes.MAIL, account)
 
     def role_folder(self, account: str, role: str) -> str | None:
         with self._use(write=False) as s:
@@ -804,6 +885,7 @@ class MailCache:
                 _collect(db, before)
                 if fresh:
                     _bound(db)
+            self._changed(changes.MAIL, s.account)
 
     def _sent_where(self, ref: str) -> list[Any]:
         account, mid = split_ref(ref)
@@ -856,6 +938,7 @@ class MailCache:
                     setattr(row, name, value)
             s.flush()
             self._relink(s, DRAFTED, row.id, people(DRAFTED, row.id, to=d.to, cc=d.cc))
+            self._changed(changes.MAIL_DRAFTS, d.account)
         return d
 
     def draft(self, draft_id: str) -> Draft | None:
@@ -924,9 +1007,17 @@ class MailCache:
             for r in rows:
                 insert_ignore(s, ForgottenRow, {"account": r.account, "fingerprint": r.fingerprint})
                 s.execute(delete(OfferedRow).where(OfferedRow.account == r.account, OfferedRow.ref == r.ref))
+                s.execute(delete(SeenElsewhereRow).where(SeenElsewhereRow.account == r.account,
+                                                         SeenElsewhereRow.ref == r.ref))
             n += self._drop_messages(s, M.id.in_([r.id for r in rows])) if rows else 0
             for account, folder in sorted({(r.account, r.folder) for r in rows}):
                 self.recount(account, folder)
+            if rows or sent:
+                self._changed(changes.MAIL, *(r.account for r in rows))
+                if sent:  # ses envois ne disent pas toujours leur boîte : toutes
+                    self._changed(changes.MAIL)
+            if drafts:
+                self._changed(changes.MAIL_DRAFTS)
         return n
 
     # ── état des comptes ──
@@ -936,18 +1027,23 @@ class MailCache:
             return AccountStatus(account, int(row.last_poll or 0), row.error or "", int(row.error_at or 0)) \
                 if row is not None else AccountStatus(account)
 
-    def note(self, account: str, *, at: int, error: str = "", polled: bool = False) -> None:
+    def note(self, account: str, *, at: int, error: str = "", polled: bool = False, clears: bool = True) -> None:
+        """L'état d'une boîte : une relève (``polled`` : son heure, et sa panne effacée — sauf ``clears`` faux), ou une
+        panne (``error``)."""
         with self._use(write=True) as s:
             row = s.get(StatusRow, fit(account, ACCOUNT))
             if row is None:
                 row = StatusRow(account=fit(account, ACCOUNT), last_poll=0, error="", error_at=0)
                 s.add(row)
+            was = row.error or ""
             if polled:
                 row.last_poll = at
             if error:
                 row.error, row.error_at = error[:300], at
-            elif polled:
+            elif polled and clears:
                 row.error = ""
+            if (row.error or "") != was:  # une panne qui commence ou qui finit se voit ; une relève sans histoire, non
+                self._changed(changes.MAIL, account)
 
     def close(self) -> None:
         with self._lock:

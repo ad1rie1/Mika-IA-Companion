@@ -105,7 +105,7 @@ internal fun ActivityTab(graph: AppGraph, vm: ProjectViewModel, sheet: Sheet, no
     val activity = rememberActivityModel(graph, vm.id)
     val shown = ActivityTabs.of(sub)
     Toasts(activity.gestures)
-    OnResume(activity) { activity.resume() }
+    OnResume(activity, project = vm.id) { activity.resume() }
     LaunchedEffect(activity, shown) { activity.show(shown) }
     LaunchedEffect(vm.refreshing) { if (vm.refreshing) activity.resume() }
     val totals = activity.totals.value
@@ -415,7 +415,7 @@ internal fun RunScreen(graph: AppGraph, route: Route.ProjectPage) {
     }
     val now = rememberNow(wallMs = graph.clock::wallMs)
     Toasts(vm.gestures)
-    OnResume(vm) {
+    OnResume(vm, project = route.id) {
         project.resume()
         vm.resume()
     }

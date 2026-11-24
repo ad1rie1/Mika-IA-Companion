@@ -9,6 +9,7 @@ import fr.qwartz.mika.data.auth.Session
 import fr.qwartz.mika.data.chat.ChatEngine
 import fr.qwartz.mika.data.location.WhereShare
 import fr.qwartz.mika.data.mind.MindStateRepository
+import fr.qwartz.mika.data.moi.Live
 import fr.qwartz.mika.data.net.ApprovalDecision
 import fr.qwartz.mika.data.net.LinkState
 import fr.qwartz.mika.data.net.MikaSocket
@@ -41,8 +42,9 @@ import kotlinx.coroutines.withContext
  * `where`, ADR 0119), seulement app au premier plan.
  *
  * Les trames reçues sont traitées une à une, jusqu'au bout (base écrite), dans le contexte sérialisé.
- * L'ouverture d'une socket passe par la même file : ce qui dépend de la socket (les cartes d'accord)
- * repart de zéro après les trames de la précédente, avant celles de la nouvelle.
+ * L'ouverture d'une socket passe par la même file : ce qui dépend de la socket (les cartes d'accord, le direct)
+ * repart de zéro après les trames de la précédente, avant celles de la nouvelle. Les trames `changed` vont au direct
+ * ([Live], ADR 0308), qui réveille les écrans abonnés.
  */
 class ConnectionManager(
     private val scope: CoroutineScope,
@@ -64,6 +66,11 @@ class ConnectionManager(
      * premier plan (rien ne part, même la socket ouverte).
      */
     private val wheres: Flow<WhereShare?> = emptyFlow(),
+    /**
+     * Le direct (ADR 0308) : chaque trame `changed`, et chaque ouverture de socket, la première comprise — les écrans
+     * relisent ce qu'ils montrent (rien de ce qui a changé avant qu'elle écoute, ni pendant une coupure, n'est rattrapé).
+     */
+    private val live: Live = Live(),
 ) : MikaSocket.Listener {
 
     enum class Holder { UI, REPLY }
@@ -95,7 +102,12 @@ class ConnectionManager(
                 frameLock.withLock {
                     if (t.epoch == epoch) {
                         val frame = t.frame
-                        if (frame == null) approvals.onOpened() else route(frame)
+                        if (frame == null) {
+                            approvals.onOpened()
+                            live.onOpened()
+                        } else {
+                            route(frame)
+                        }
                     }
                 }
             }
@@ -297,6 +309,7 @@ class ConnectionManager(
                 is ServerFrame.Tool -> chat.onTool(frame)
                 is ServerFrame.Strands -> chat.onStrands(frame)
                 is ServerFrame.StrandResult -> chat.onStrandResult(frame)
+                is ServerFrame.Changed -> live.onChanged(frame.changes)
                 is ServerFrame.Pong, is ServerFrame.Unknown -> Unit
             }
         } catch (e: CancellationException) {

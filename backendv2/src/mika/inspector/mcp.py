@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any
 
 from mika.adapters.mcp.protocol import Outcome, Tool, asgi, bearer, loopback
 from mika.adapters.web.gate import matches, token_digest
+from mika.contracts import self_ as self_c
 from mika.inspector.catalog import Builtin
 from mika.inspector.text import cell, render
 from mika.kernel.clock import US
@@ -103,6 +104,8 @@ class ConsoleHost:
         self.kernel = kernel
         self.pages = pages
         self.inspection = pages.ui.inspection if pages is not None else Inspection(kernel, sampler=kernel.series.read)
+        if pages is None:  # un titre de vue qui la nomme (ADR 0070), comme dans la console
+            self.inspection.titled = lambda text: self_c.named(text, kernel.mind.frame().get(self_c.PERSONA))
         self.served = served
 
     def serves(self) -> frozenset[str]:

@@ -146,6 +146,16 @@ def name_of(doc: PersonaDoc) -> str:
     return " ".join(doc.name.split()) or DEFAULT_NAME
 
 
+#: La place de son nom dans un libellé écrit d'avance (le titre d'un onglet de la console : « L'agenda de {nom} ») :
+#: ``named`` l'y pose, lu dans sa persona en vigueur — un libellé ne l'écrit jamais en dur (ADR 0070).
+NAME_SLOT = "{nom}"
+
+
+def named(text: str, doc: PersonaDoc) -> str:
+    """Ce libellé, son nom à la place de ``NAME_SLOT`` ; tel quel s'il ne la porte pas."""
+    return text.replace(NAME_SLOT, name_of(doc)) if NAME_SLOT in text else text
+
+
 #: Le fuseau d'une persona dont le fuseau journalisé ne se lit pas (journal d'avant la validation).
 DEFAULT_ZONE = "Europe/Paris"
 

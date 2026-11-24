@@ -704,10 +704,24 @@
     <string name="correct_off">Aucun modèle ne corrige : un opérateur en choisit un dans Réglages › Intelligence.</string>
     <string name="correct_empty">Rien à corriger : le champ est vide.</string>
     <string name="correct_none">Aucune faute : ton texte reste tel quel.</string>
+    <!-- Tout ce que le modèle proposait touchait aux mots (un mot ajouté, retiré ou remplacé) : écarté. -->
+    <string name="correct_untouched">La correction touchait aux mots : rien n\'a été changé.</string>
     <plurals name="correct_done">
         <item quantity="one">%d faute corrigée.</item>
         <item quantity="many">%d fautes corrigées.</item>
         <item quantity="other">%d fautes corrigées.</item>
+    </plurals>
+    <!-- « 3 fautes corrigées », suivi de correct_dropped quand des changements ont été écartés -->
+    <plurals name="correct_done_part">
+        <item quantity="one">%d faute corrigée</item>
+        <item quantity="many">%d fautes corrigées</item>
+        <item quantity="other">%d fautes corrigées</item>
+    </plurals>
+    <!-- %1$s : correct_done_part ; %2$d : les changements écartés parce qu'ils touchaient aux mots -->
+    <plurals name="correct_dropped">
+        <item quantity="one">%1$s ; %2$d changement écarté : il touchait aux mots.</item>
+        <item quantity="many">%1$s ; %2$d changements écartés : ils touchaient aux mots.</item>
+        <item quantity="other">%1$s ; %2$d changements écartés : ils touchaient aux mots.</item>
     </plurals>
     <string name="correct_moved">Tu as continué d\'écrire : la correction n\'a pas été posée.</string>
     <string name="correct_undo">Annuler</string>

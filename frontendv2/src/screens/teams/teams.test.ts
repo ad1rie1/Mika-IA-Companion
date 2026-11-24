@@ -20,6 +20,7 @@ import {
   sentUnder,
   stillSentHere,
   threadCards,
+  threadGone,
   threadMarks,
   withoutSent,
 } from "./format";
@@ -272,6 +273,7 @@ describe("tes messages en attente, tels que le moteur les dit (ADR 0189)", () =>
     expect(pendingNote("en_file")).toEqual({ note: "en file : l'extension l'envoie dans Teams, sous ton nom", failed: false });
     expect(pendingNote("envoi").failed).toBe(false);
     expect(pendingNote("pose").note).toContain("zone de saisie de Teams");
+    expect(pendingNote("parti")).toEqual({ note: "parti dans Teams", failed: false, sent: true });
     expect(pendingNote("inutilise")).toMatchObject({ failed: true });
     expect(pendingNote("inutilise").note).toContain("pas parti");
     expect(pendingNote("echec", "envoi sans nouvelles de l'extension").note).toBe("pas parti : l'envoi a échoué (envoi sans nouvelles de l'extension)");
@@ -617,5 +619,18 @@ describe("la citation, comme dans Teams (ADR 0305)", () => {
     expect(html).toContain('data-tm="sans-citation"');
     expect(html.indexOf("tm-quoting")).toBeLessThan(html.indexOf("<textarea"));
     expect(dock(base)).not.toContain("tm-quoting");
+  });
+});
+
+describe("un compte qui n'est plus à toi (ADR 0308 : son partage retiré)", () => {
+  it("le fil ouvert d'un compte parti se ferme ; d'un compte encore là, il reste", () => {
+    expect(threadGone("anna", [{ key: "pro" }])).toBe(true);
+    expect(threadGone("pro", [{ key: "pro" }, { key: "anna" }])).toBe(false);
+  });
+
+  it("des comptes pas encore lus, ou rien d'ouvert, ne ferment rien", () => {
+    expect(threadGone("anna", null)).toBe(false);
+    expect(threadGone("", [])).toBe(false);
+    expect(threadGone(undefined, [])).toBe(false);
   });
 });

@@ -36,6 +36,13 @@ export function sentUnder(a: AccountWho | null | undefined): string {
   return `sous le nom ${ofName(a.self_name || a.owner_name || "son propriétaire")}`;
 }
 
+/** Le fil ouvert n'est plus d'un de tes comptes (relus dans `…/teams/accounts` : retiré, plus partagé) : il se ferme,
+ *  la liste reste — plutôt qu'un fil figé qu'aucune relecture ne pourrait plus suivre. Des comptes pas encore lus ne
+ *  disent rien. */
+export function threadGone(account: string | null | undefined, accounts: readonly Pick<TeamsAccount, "key">[] | null): boolean {
+  return !!account && accounts !== null && !accounts.some((a) => a.key === account);
+}
+
 /** Ce que dit une réponse qui attend : ton accord, ou celui du propriétaire du compte quand ce n'est pas toi qui
  *  décides (un compte qu'on te partage). */
 export function awaits(decides: boolean): string {
@@ -288,11 +295,13 @@ export interface OwnBubble {
   at: number;
   note: string;
   failed: boolean;
+  /** Parti : l'extension l'a envoyé, son message n'est pas encore revenu dans le fil (ADR 0308). */
+  sent?: boolean;
 }
 
 /** Ce que dit l'état d'un de tes messages en attente ; `failed` : il ne partira pas ; `under` : sous quel nom il part
  *  (`sentUnder` : sur un compte qu'on te partage, celui de sa personne). */
-export function pendingNote(state: string, reason = "", under = "sous ton nom"): { note: string; failed: boolean } {
+export function pendingNote(state: string, reason = "", under = "sous ton nom"): { note: string; failed: boolean; sent?: boolean } {
   switch (state) {
     case "en_file":
       return { note: `en file : l'extension l'envoie dans Teams, ${under}`, failed: false };
@@ -300,6 +309,8 @@ export function pendingNote(state: string, reason = "", under = "sous ton nom"):
       return { note: "en cours d'envoi par l'extension", failed: false };
     case "pose":
       return { note: "posé dans la zone de saisie de Teams : c'est toi qui l'envoies, de là-bas", failed: false };
+    case "parti":
+      return { note: "parti dans Teams", failed: false, sent: true };
     case "inutilise":
       return { note: "pas parti : l'extension ne l'a pas relevé à temps (Teams web n'était pas ouvert avec elle)", failed: true };
     case "echec":

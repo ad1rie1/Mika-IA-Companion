@@ -4,6 +4,7 @@
  * Des fonctions pures qui rendent du HTML : tout texte venu du serveur passe par `h()`, sauf la réponse pro,
  * que `renderProMarkdown` échappe en entier avant de poser ses propres balises.
  */
+import type { AgendaCardData } from "../agenda/chat";
 import type { HistoryAttachment } from "@web/types";
 import { parseBlocks, parseInline } from "@web/ui/inlineMarkup";
 import { renderProMarkdown } from "@web/ui/proMarkdown";
@@ -374,6 +375,28 @@ function approvalCard(state: ApprovalsState, card: ApprovalCard, now: number, op
 }
 
 /**
+ * Une carte d'un ajout à l'agenda (ADR 0309, `capability: "agenda.write"`) : l'événement qu'elle ajouterait, d'où
+ * « Modifier » et la proposition qui attend dans l'Agenda (`screens/agenda/chat.ts`) ; ses boutons sont ceux de toute
+ * carte.
+ */
+function agendaApprovalCard(state: ApprovalsState, card: ApprovalCard, now: number, open: boolean, a: AgendaCardData): string {
+  const controls = cardControls(state, card, now);
+  const refusal = acceptRefusal(card, now);
+  const expiry = isExpired(card, now) ? "" : expiryLabel(card, now);
+  const meta = ["Mika demande ton accord", ...(expiry ? [`<span class="ap-exp">${h(expiry)}</span>`] : []), ...(controls.sending ? ["envoyé…"] : [])].join(" · ");
+  return `<div class="approval ag-ap${refusal ? " blocked" : ""}" data-card="${card.id}">
+    <div class="ap-line">${ico("agenda")}<div class="ap-main"><b>Mika voudrait ajouter à ton agenda « ${h(a.calendar)} »</b><span class="ap-meta">${meta}</span>${refusal ? `<span class="ap-meta ap-ko">${h(refusal)}</span>` : ""}</div>
+      <button class="btn sm" type="button" data-ap="refuse" data-id="${card.id}"${controls.refuse ? "" : " disabled"}>Refuser</button><a class="btn sm" href="${h(a.edit)}">Modifier</a>
+      <button class="btn sm primary" type="button" data-ap="accept" data-id="${card.id}"${controls.accept ? "" : " disabled"}${refusal ? ` title="${h(refusal)}"` : ""}>${ico("check", "sm")}Ajouter</button></div>
+    <div class="ag-ap-ev" style="--c:var(--ag-${h(a.color)})"><span class="ag-ap-bar"></span>
+      <div class="grow"><b>${h(a.title)}</b><span>${h(a.when)}</span>${a.place ? `<span>${ico("pin", "xs")}${h(a.place)}</span>` : ""}${a.remind ? `<span class="ag-ap-mika">${ico("sparkle", "xs")}Mika te le rappelle : ${h(a.remind)}</span>` : ""}</div>
+      <a class="small ag-ap-lien" href="${h(a.href)}">En attente dans ton Agenda ${ico("chev-right", "xs")}</a></div>
+    <details class="ap-more" data-ap-more="${card.id}"${open ? " open" : ""}><summary>${ico("chev-right", "xs")}Voir exactement ce qui partira</summary>
+      <pre class="ap-raw">${h(card.text || "(rien à montrer)")}</pre>
+      <p class="ap-help">Seuls ces boutons décident : un « oui » tapé dans la conversation ne vaut pas accord. Sans réponse, la carte expire ; la proposition reste dans ton Agenda jusqu'à sa date.</p></details></div>`;
+}
+
+/**
  * Ce qu'une carte veut faire, relevé dans la trame brute (`capability`, `draft` : `protocole-chat.md` § 4) — le
  * validateur partagé ne le garde pas.
  */
@@ -450,6 +473,8 @@ export function approvalsMarkup(
     kinds?: ReadonlyMap<number, CardKind>;
     /** Sur un téléphone, les cartes-liens dépliées sous leur ligne (`linksSummary`). */
     linksOpen?: boolean;
+    /** Les cartes d'un ajout à l'agenda, l'événement lu (ADR 0309). */
+    agenda?: ReadonlyMap<number, AgendaCardData>;
   },
 ): string {
   const out: string[] = [];
@@ -471,7 +496,8 @@ export function approvalsMarkup(
       out.push(linksSummary(links, opts.linksOpen === true));
       summarized = true;
     }
-    out.push(to ? linkCard(card, to) : approvalCard(state, card, now, opts.open.has(card.id)));
+    const event = opts.agenda?.get(card.id);
+    out.push(to ? linkCard(card, to) : event ? agendaApprovalCard(state, card, now, opts.open.has(card.id), event) : approvalCard(state, card, now, opts.open.has(card.id)));
   });
   return out.join("");
 }

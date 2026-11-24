@@ -8,8 +8,13 @@
    choix, les noms des outils ne sont que dans le repli : ils allongeaient chaque ligne sans rien dire de plus.
    « Partages » (ADR 0210) : qui a reçu quoi, de qui ; seul sous-onglet où l'on agit, et seulement pour retirer. #}
 {% from "_navigation.html" import pager as pages %}
+{% from "handmade/droits/tableau.html" import tableau %}
 <div class="now-page service rights-page" data-tab="reglages/droits">
-  {% if detail %}
+  {% if editing %}
+  {# le tableau d'un agenda, réglé ici (ADR 0309, lot 5) : ses lignes, leur ordre, sa ligne par défaut #}
+  <p class="rights-edit-back"><a class="btn quiet" href="?detail={{ ('agenda:' ~ editing.key)|urlencode }}">← Le détail des accès</a> <a class="btn quiet" href="{{ editing.fiche }}">La fiche de l'agenda</a></p>
+  {{ tableau(editing, False) }}
+  {% elif detail %}
   <section class="now-card rights-card" aria-labelledby="rights-detail">
     <header class="rights-head">
       <div>

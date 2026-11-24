@@ -8,7 +8,8 @@ import org.junit.Test
 
 /**
  * Où elle en est d'une réponse (ADR 0306, porté de `frontendv2/src/mika/work.ts`) : l'étape en mots, le chrono, sa
- * forme lue telle que le serveur la dit, et ce que décide une relecture de `…/work` — guetter, relire, cesser.
+ * forme lue telle que le serveur la dit, et ce que décide une relecture de `…/work` (faite quand le direct le dit,
+ * ADR 0308) — attendre, relire, cesser.
  */
 class WorkTest {
     private val at = 1_790_000_000_000L
@@ -69,15 +70,12 @@ class WorkTest {
         assertEquals(WorkTurn.GOING, workTurn(arrived = false, asked = false, work = w(WorkSteps.THINKING)))
     }
 
-    @Test fun `on guette une demande, ou ce qu'elle prépare d'elle-même, jusqu'à son arrivée ou au plafond`() {
-        assertTrue(watchWork(asked = true, work = null, arrived = false, gaveUp = false))
-        assertTrue(watchWork(asked = false, work = w(WorkSteps.THINKING), arrived = false, gaveUp = false))
-        assertFalse(watchWork(asked = false, work = null, arrived = false, gaveUp = false))
-        assertFalse(watchWork(asked = true, work = w(WorkSteps.THINKING), arrived = true, gaveUp = false))
-        assertFalse(watchWork(asked = true, work = w(WorkSteps.THINKING), arrived = false, gaveUp = true))
-        // le plafond : une demi-heure, pas une milliseconde de moins
-        assertFalse(workGaveUp(since = at, now = at + WORK_WATCH_MAX_MS))
-        assertTrue(workGaveUp(since = at, now = at + WORK_WATCH_MAX_MS + 1))
-        assertEquals(2_000L, WORK_POLL_MS)
+    @Test fun `on attend une demande, ou ce qu'elle prépare d'elle-même, jusqu'à son arrivée - sans plafond`() {
+        assertTrue(watchWork(asked = true, work = null, arrived = false))
+        assertTrue(watchWork(asked = false, work = w(WorkSteps.THINKING), arrived = false))
+        assertFalse(watchWork(asked = false, work = null, arrived = false))
+        assertFalse(watchWork(asked = true, work = w(WorkSteps.THINKING), arrived = true))
+        // plus de plafond ni de rythme (ADR 0308) : le direct dit chaque étape, une étape vieille d'une heure se suit encore
+        assertTrue(watchWork(asked = true, work = Work(WorkSteps.THINKING, "", since = at - 3_600_000, started = at - 3_600_000), arrived = false))
     }
 }

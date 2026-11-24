@@ -10,6 +10,8 @@ import fr.qwartz.mika.core.AndroidClock
 import fr.qwartz.mika.core.AppGraph
 import fr.qwartz.mika.data.moi.Caps
 import fr.qwartz.mika.data.moi.Levels
+import fr.qwartz.mika.data.moi.LiveSignal
+import fr.qwartz.mika.data.moi.MailLive
 import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.MoiError
 import fr.qwartz.mika.data.moi.caps
@@ -33,6 +35,7 @@ import fr.qwartz.mika.data.moi.mail.tidiedRows
 import fr.qwartz.mika.ui.shell.Load
 import fr.qwartz.mika.ui.shell.said
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -94,7 +97,8 @@ data class MailListing(
 /**
  * La liste de Mail (`Route.Mail`) : la vue choisie (toutes les réceptions, une boîte, un dossier, ses envoyés), son
  * filtre, sa recherche, ses pages, la sélection et ses gestes. Les boîtes (leur niveau, leurs dossiers et leurs non-lus)
- * se relisent avec la liste.
+ * se relisent avec la liste : à chaque retour sur l'écran, et quand le direct dit qu'elles ont changé ([onLive],
+ * ADR 0308) — jamais sous une sélection en cours, relue dès qu'elle se vide.
  */
 class MailListViewModel(deps: MailDeps) : MailScreenModel(deps) {
     var boxes by mutableStateOf<Load<MailBoxes>>(Load.Loading)
@@ -123,6 +127,8 @@ class MailListViewModel(deps: MailDeps) : MailScreenModel(deps) {
     private var generation = 0
     private var listJob: Job? = null
     private var searchJob: Job? = null
+    /** Une relecture de la liste a attendu qu'une sélection se vide : elle se fait dès qu'il n'y a plus rien de coché. */
+    private var listStale = false
 
     /** Un rangement fait ici ou depuis la liseuse, dans l'ordre. [id] : montré avant la réponse du serveur (ADR 0302) ;
      *  tant qu'elle n'est pas venue, son [seq] est [PENDING]. */
@@ -149,7 +155,7 @@ class MailListViewModel(deps: MailDeps) : MailScreenModel(deps) {
 
     fun capsOf(key: String): Caps = caps(boxOf(key)?.level ?: Levels.READ)
 
-    /** L'écran revient (ou une minute a passé) : tout lire la première fois, sinon relire sans bruit. */
+    /** L'écran revient (l'app au premier plan, ou depuis un mail) : tout lire la première fois, sinon relire sans bruit. */
     fun resume() {
         if (!started) {
             started = true
@@ -175,10 +181,37 @@ class MailListViewModel(deps: MailDeps) : MailScreenModel(deps) {
         loadList(keep = false, silent = false)
     }
 
-    private fun refreshQuietly() {
-        viewModelScope.launch { loadBoxes() }
-        // une sélection en cours ne bouge pas sous le doigt ; au-delà de cent lignes, on ne relit pas tout
-        if (selected.isEmpty() && currentPages() * PAGE <= MAX_SIZE) loadList(keep = true, silent = true, pages = currentPages())
+    private fun refreshQuietly(): List<Job> = listOfNotNull(viewModelScope.launch { loadBoxes() }, quietList())
+
+    /** La liste relue sans bruit : une sélection en cours ne bouge pas sous le doigt (relue dès qu'elle se vide) ; au-delà
+     *  de cent lignes, on ne relit pas tout. */
+    private fun quietList(): Job? {
+        if (selected.isNotEmpty()) {
+            listStale = true
+            return null
+        }
+        listStale = false
+        if (currentPages() * PAGE > MAX_SIZE) return null
+        return loadList(keep = true, silent = true, pages = currentPages())
+    }
+
+    /** La sélection vient de se vider : la relecture qui l'attendait se fait. */
+    private fun selectionCleared() {
+        if (listStale && selected.isEmpty()) quietList()
+    }
+
+    /**
+     * Le direct (ADR 0308, § 2 bis) : ses boîtes ont changé (`mail`, `mail.drafts` — leurs non-lus, leurs brouillons
+     * qui attendent) ; la page affichée si elle montre une boîte nommée (ou toutes tes réceptions). Rend la main
+     * quand c'est relu : ce qui arrive entre-temps se réunit pour la suite.
+     */
+    suspend fun onLive(signal: LiveSignal) {
+        if (!started) return
+        val jobs = buildList {
+            if (MailLive.boxes(signal)) add(viewModelScope.launch { loadBoxes() })
+            if (MailLive.pageShows(view, signal)) quietList()?.let(::add)
+        }
+        jobs.joinAll()
     }
 
     private fun currentPages(): Int = listing.valueOrNull?.pages ?: 1
@@ -217,9 +250,8 @@ class MailListViewModel(deps: MailDeps) : MailScreenModel(deps) {
     private suspend fun loadBoxes() {
         val got = api.boxes()
         if (got is MoiApi.Result.Ok || boxes !is Load.Ready) boxes = Load.of(got)
-        // la boîte de la vue n'est plus à toi (retirée, plus partagée) : retour à toutes les réceptions
-        val key = view.boxKey
-        if (got is MoiApi.Result.Ok && key != null && got.value.boxes.none { it.key == key }) showView(MailView.All)
+        // la boîte (ou le dossier) de la vue n'est plus à toi (retirée, plus partagée) : retour à toutes les réceptions
+        if (got is MoiApi.Result.Ok && MailLive.viewGone(view, got.value.boxes)) showView(MailView.All)
     }
 
     /** Relit la liste ([pages] pages d'un coup, cent lignes au plus). [keep] : ce qui est montré reste pendant la
@@ -327,6 +359,7 @@ class MailListViewModel(deps: MailDeps) : MailScreenModel(deps) {
 
     fun clearSelection() {
         selected = emptySet()
+        selectionCleared()
     }
 
     private fun selectedRows(): List<MailRow> = listing.valueOrNull?.rows.orEmpty().filter { it.ref in selected }
@@ -353,6 +386,7 @@ class MailListViewModel(deps: MailDeps) : MailScreenModel(deps) {
         val id = MailChanges.nextId()
         patch(refs, gesture, id)
         selected = emptySet()
+        selectionCleared()
         viewModelScope.launch {
             when (val got = tidying.withLock { api.tidy(refs, gesture, folder) }) {
                 is MoiApi.Result.Ok -> {
@@ -480,6 +514,7 @@ class MailListViewModel(deps: MailDeps) : MailScreenModel(deps) {
             is MailChanges.Change.Tidied -> {
                 patch(change.refs, change.gesture, change.id)
                 selected = selected - change.refs.toSet()
+                selectionCleared()
                 if (change.id == 0L) viewModelScope.launch { loadBoxes() }
             }
             is MailChanges.Change.Settled -> {
@@ -491,7 +526,8 @@ class MailListViewModel(deps: MailDeps) : MailScreenModel(deps) {
     }
 
     /** « Relever maintenant » : par la boîte de la vue si tu peux la relever, sinon la première prête ; la relève passe
-     *  sur toutes les boîtes du serveur (trente demandes par minute au plus). */
+     *  sur toutes les boîtes du serveur (trente demandes par minute au plus). Ce qu'elle range arrive par le direct
+     *  (`mail`, ADR 0308) : rien ne se relit ici. */
     fun poll(none: String) {
         val writable = boxList.filter { caps(it.level).write }
         val key = view.boxKey?.takeIf { capsOf(it).write } ?: (writable.firstOrNull { it.ready } ?: writable.firstOrNull())?.key
@@ -501,11 +537,7 @@ class MailListViewModel(deps: MailDeps) : MailScreenModel(deps) {
         }
         viewModelScope.launch {
             when (val got = api.poll(key)) {
-                is MoiApi.Result.Ok -> {
-                    say(got.value.message)
-                    delay(POLL_SETTLE_MS)
-                    refreshQuietly()
-                }
+                is MoiApi.Result.Ok -> say(got.value.message)
                 is MoiApi.Result.Failed -> say(got.error)
             }
         }
@@ -526,7 +558,6 @@ class MailListViewModel(deps: MailDeps) : MailScreenModel(deps) {
         const val PAGE = 25
         const val MAX_SIZE = 100
         const val SEARCH_DEBOUNCE_MS = 350L
-        const val POLL_SETTLE_MS = 3_000L
         const val TIDIES_KEPT = 64
         /** Le [Tidy.seq] d'un rangement en route : toute lecture le rejoue. */
         const val PENDING = Int.MAX_VALUE

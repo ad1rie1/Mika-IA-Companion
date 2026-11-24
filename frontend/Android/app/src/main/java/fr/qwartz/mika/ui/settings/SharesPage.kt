@@ -27,9 +27,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.qwartz.mika.R
@@ -58,6 +55,7 @@ import fr.qwartz.mika.data.moi.settings.shareables
 import fr.qwartz.mika.data.moi.settings.whatLabel
 import fr.qwartz.mika.data.moi.teams.TeamsAccounts
 import fr.qwartz.mika.ui.Route
+import fr.qwartz.mika.ui.shell.FollowLive
 import fr.qwartz.mika.ui.shell.BarAction
 import fr.qwartz.mika.ui.shell.BarNav
 import fr.qwartz.mika.ui.shell.Load
@@ -128,24 +126,27 @@ class SharesViewModel(deps: SettingsDeps) : SettingsModel(deps) {
     }
 
     fun resume() {
-        viewModelScope.launch {
-            val got = api.shares()
-            when (got) {
-                is MoiApi.Result.Ok -> load = Load.Ready(got.value)
-                is MoiApi.Result.Failed -> if (load !is Load.Ready) load = Load.Failed(got.error) else say(got.error)
-            }
-            (api.boxes() as? MoiApi.Result.Ok)?.let { boxes = it.value }
-            (api.teamsAccounts() as? MoiApi.Result.Ok)?.let { accounts = it.value }
-            (api.services() as? MoiApi.Result.Ok)?.let { services = it.value }
-            when (val p = api.people()) {
-                is MoiApi.Result.Ok -> people = p.value
-                is MoiApi.Result.Failed -> if (people == null && preset.isNotEmpty()) say(p.error)
-            }
-            if (preset.isNotEmpty() && got is MoiApi.Result.Ok && people != null) {
-                val (kind, key) = preset.substringBefore(':') to preset.substringAfter(':')
-                preset = ""
-                startNew(kind, key)
-            }
+        viewModelScope.launch { read() }
+    }
+
+    /** Relu sans bruit : un retour sur la page, ou le direct (ADR 0308) qui dit que ce qu'elle montre a changé. */
+    suspend fun read() {
+        val got = api.shares()
+        when (got) {
+            is MoiApi.Result.Ok -> load = Load.Ready(got.value)
+            is MoiApi.Result.Failed -> if (load !is Load.Ready) load = Load.Failed(got.error) else say(got.error)
+        }
+        (api.boxes() as? MoiApi.Result.Ok)?.let { boxes = it.value }
+        (api.teamsAccounts() as? MoiApi.Result.Ok)?.let { accounts = it.value }
+        (api.services() as? MoiApi.Result.Ok)?.let { services = it.value }
+        when (val p = api.people()) {
+            is MoiApi.Result.Ok -> people = p.value
+            is MoiApi.Result.Failed -> if (people == null && preset.isNotEmpty()) say(p.error)
+        }
+        if (preset.isNotEmpty() && got is MoiApi.Result.Ok && people != null) {
+            val (kind, key) = preset.substringBefore(':') to preset.substringAfter(':')
+            preset = ""
+            startNew(kind, key)
         }
     }
 
@@ -260,6 +261,7 @@ class SharesViewModel(deps: SettingsDeps) : SettingsModel(deps) {
 internal fun kindIcon(kind: String): Int = when (kind) {
     ShareKinds.TEAMS -> R.drawable.ic_m_teams
     ShareKinds.MCP -> R.drawable.ic_m_plug
+    ShareKinds.AGENDA -> R.drawable.ic_m_agenda
     else -> R.drawable.ic_m_mail
 }
 
@@ -269,11 +271,8 @@ internal fun SharesPage(graph: AppGraph, preset: String) {
     val session = rememberSessionKey(graph)
     val vm: SharesViewModel = viewModel(key = "settings.shares|$session") { SharesViewModel(SettingsDeps(graph)) }
     val entry = rememberSaveable { MoiApi.newKey() }
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(vm, entry, lifecycle) {
-        vm.open(preset, entry)
-        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) { vm.resume() }
-    }
+    LaunchedEffect(vm, entry) { vm.open(preset, entry) }
+    FollowLive(graph.live, SettingsLive.SHARES, vm, entry, onShown = { vm.resume() }) { vm.read() }
     SettingsEffects(vm)
     SectionScaffold(
         topBar = { MikaTopBar(stringResource(R.string.settings_shares), BarNav.BACK) },
@@ -312,6 +311,7 @@ internal fun SharesPage(graph: AppGraph, preset: String) {
                                     ShareOpens.MAIL -> shell.open(Route.Mail)
                                     ShareOpens.TEAMS -> shell.open(Route.Teams)
                                     ShareOpens.SERVICE -> shell.navigate(settingsPage(SettingsPages.SERVICE, r.key))
+                                    ShareOpens.AGENDA -> shell.open(Route.Agenda)
                                 }
                             },
                         ) { Tag(shareWords(r.level), Tone.NEUTRAL) }

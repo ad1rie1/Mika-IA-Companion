@@ -1,9 +1,9 @@
 package fr.qwartz.mika.ui.teams
 
-import fr.qwartz.mika.data.moi.CorrectWords
 import fr.qwartz.mika.data.moi.Corrected
 import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.MoiError
+import fr.qwartz.mika.data.moi.correctWords
 import fr.qwartz.mika.data.moi.teams.ConversationThread
 import fr.qwartz.mika.data.moi.teams.Kinds
 import fr.qwartz.mika.data.moi.teams.TeamsMessage
@@ -25,9 +25,10 @@ import org.junit.Test
 
 /**
  * « Corriger » dans le champ d'un fil (ADR 0307), contre une fausse API : le texte corrigé remplace le tien, le message
- * dit combien de fautes et « Annuler » te le rend (tant que le champ contient le texte corrigé) ; aucune faute, un champ
- * vide, aucun modèle ; tu as continué d'écrire pendant l'appel, ou ouvert une autre discussion : rien n'est posé ; un
- * refus dit tel quel ; un appel à la fois, « Correction… » le temps qu'il dure.
+ * dit combien de fautes (et combien de changements écartés parce qu'ils touchaient aux mots) et « Annuler » te le rend
+ * (tant que le champ contient le texte corrigé) ; aucune faute, tout écarté, un champ vide, aucun modèle ; tu as
+ * continué d'écrire pendant l'appel, ou ouvert une autre discussion : rien n'est posé ; un refus dit tel quel ; un appel
+ * à la fois, « Correction… » le temps qu'il dure.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class TeamsCorrectModelTest {
@@ -43,13 +44,8 @@ class TeamsCorrectModelTest {
     }
     private val vm by lazy { main.model { TeamsThreadViewModel(TeamsDeps(api, now = { 10_000L })) } }
 
-    private val words = CorrectWords(
-        empty = "Rien à corriger : le champ est vide.",
-        none = "Aucune faute : ton texte reste tel quel.",
-        moved = "Tu as continué d'écrire : la correction n'a pas été posée.",
-        off = "Aucun modèle ne corrige : un opérateur en choisit un dans Réglages › Intelligence.",
-        fixed = { n -> if (n <= 1) "$n faute corrigée." else "$n fautes corrigées." },
-    )
+    /** Les vrais mots de `strings.xml`. */
+    private val words = correctWords
 
     private suspend fun <T> Flow<T>.next(): T? = withTimeoutOrNull(200) { first() }
 
@@ -98,6 +94,34 @@ class TeamsCorrectModelTest {
         assertEquals("Oui, à demain.", vm.text)
         val n = said()!!
         assertEquals("Aucune faute : ton texte reste tel quel.", n.text)
+        assertNull(n.undo)
+    }
+
+    @Test fun `des changements écartés parce qu'ils touchaient aux mots - le message les compte`() = runTest {
+        api.correctResult = { MoiApi.Result.Ok(Corrected("Je viens à 9h.", 2, refused = 1)) }
+        open("19:marc")
+        advanceUntilIdle()
+        vm.type("je viens a 9h")
+        vm.correct(on = true, words)
+        advanceUntilIdle()
+        assertEquals("Je viens à 9h.", vm.text)
+        val n = said()!!
+        assertEquals("2 fautes corrigées ; 1 changement écarté : il touchait aux mots.", n.text)
+        // des fautes corrigées : « Annuler » est offert
+        n.undo!!.invoke()
+        assertEquals("je viens a 9h", vm.text)
+    }
+
+    @Test fun `tout ce qu'il proposait touchait aux mots - rien n'est posé, sans Annuler`() = runTest {
+        api.correctResult = { MoiApi.Result.Ok(Corrected(it, 0, refused = 2)) }
+        open("19:marc")
+        advanceUntilIdle()
+        vm.type("je viens a 9h")
+        vm.correct(on = true, words)
+        advanceUntilIdle()
+        assertEquals("je viens a 9h", vm.text)
+        val n = said()!!
+        assertEquals("La correction touchait aux mots : rien n'a été changé.", n.text)
         assertNull(n.undo)
     }
 
@@ -164,7 +188,7 @@ class TeamsCorrectModelTest {
     }
 
     @Test fun `un refus se dit tel que le serveur le donne, ton texte reste`() = runTest {
-        api.correctResult = { MoiApi.Result.Failed(MoiError(422, "La correction changeait trop ton texte : rien n'a été changé.")) }
+        api.correctResult = { MoiApi.Result.Failed(MoiError(413, "Ton texte est trop long pour être corrigé d'un coup : corrige-le en plusieurs fois.")) }
         open("19:marc")
         advanceUntilIdle()
         vm.type("je viens a 9h")
@@ -173,7 +197,7 @@ class TeamsCorrectModelTest {
         assertEquals("je viens a 9h", vm.text)
         val n = said()
         assertNotNull(n)
-        assertEquals("La correction changeait trop ton texte : rien n'a été changé.", n!!.text)
+        assertEquals("Ton texte est trop long pour être corrigé d'un coup : corrige-le en plusieurs fois.", n!!.text)
         assertNull(n.undo)
         assertFalse(vm.correcting)
     }

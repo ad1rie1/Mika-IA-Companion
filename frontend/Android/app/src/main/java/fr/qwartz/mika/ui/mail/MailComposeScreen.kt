@@ -44,7 +44,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -69,10 +68,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.qwartz.mika.R
@@ -84,14 +80,14 @@ import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.MoiError
 import fr.qwartz.mika.data.moi.SendKey
 import fr.qwartz.mika.data.moi.Tone
-import fr.qwartz.mika.data.moi.WORK_POLL_MS
+import fr.qwartz.mika.data.moi.LiveSignal
+import fr.qwartz.mika.data.moi.MailLive
 import fr.qwartz.mika.data.moi.Work
 import fr.qwartz.mika.data.moi.WorkTurn
 import fr.qwartz.mika.data.moi.caps
 import fr.qwartz.mika.data.moi.chars
 import fr.qwartz.mika.data.moi.thousands
 import fr.qwartz.mika.data.moi.watchWork
-import fr.qwartz.mika.data.moi.workGaveUp
 import fr.qwartz.mika.data.moi.workTurn
 import fr.qwartz.mika.data.moi.contacts.ContactsApi
 import fr.qwartz.mika.data.moi.contacts.RecipientProposal
@@ -127,6 +123,7 @@ import fr.qwartz.mika.ui.contacts.contactsApi
 import fr.qwartz.mika.ui.shell.BarNav
 import fr.qwartz.mika.ui.shell.CorrectButton
 import fr.qwartz.mika.ui.shell.CorrectNotices
+import fr.qwartz.mika.ui.shell.FollowLive
 import fr.qwartz.mika.ui.shell.FieldCorrector
 import fr.qwartz.mika.ui.shell.Gap
 import fr.qwartz.mika.ui.shell.Load
@@ -209,10 +206,6 @@ class MailComposeViewModel(deps: MailDeps, directory: ContactsApi? = null) : Mai
      *  rien en cours. */
     var work by mutableStateOf<Work?>(null)
         private set
-    /** Guettée sans réponse au-delà du plafond : on cesse de relire où elle en est (une nouvelle demande, si). */
-    private var gaveUp by mutableStateOf(false)
-    /** Depuis quand on guette (0 : pas encore). */
-    private var watchSince = 0L
     var prefilling by mutableStateOf(false)
         private set
     var suggestions by mutableStateOf<List<RecipientProposal>>(emptyList())
@@ -289,8 +282,6 @@ class MailComposeViewModel(deps: MailDeps, directory: ContactsApi? = null) : Mai
         fromDraft = ""
         asked = false
         work = null
-        gaveUp = false
-        watchSince = 0L
         suggestJob?.cancel()
         suggestions = emptyList()
         suggestFor = null
@@ -619,12 +610,9 @@ class MailComposeViewModel(deps: MailDeps, directory: ContactsApi? = null) : Mai
                         }
                         id.isNotBlank() -> say(got.value.message)
                         else -> {
-                            // elle s'y met tout de suite (ADR 0306) : sa ligne paraît aussitôt, la relecture la corrige
-                            val at = deps.now()
+                            // elle s'y met tout de suite (ADR 0306) : sa ligne paraît aussitôt, le direct la corrige
                             asked = true
-                            if (work == null) work = Work.waiting(at)
-                            gaveUp = false
-                            watchSince = at
+                            if (work == null) work = Work.waiting(deps.now())
                             say(if (got.value.message == ALREADY) got.value.message else askedText)
                         }
                     }
@@ -680,32 +668,45 @@ class MailComposeViewModel(deps: MailDeps, directory: ContactsApi? = null) : Mai
         corrector.correct(v, on, words, read = { if (current(r, v) && shown) body else null }, write = ::editBody)
     }
 
-    /** On guette où elle en est d'une réponse au mail d'origine : demandée, ou qu'elle prépare d'elle-même, tant que
-     *  son brouillon n'est pas repris ici. */
+    /** Elle peut y préparer une réponse que l'on suit ici : une réponse (pas un transfert), lue, son brouillon pas
+     *  encore repris. */
+    private val follows: Boolean
+        get() = setup is Load.Ready && original != null && replying && fromDraft.isEmpty()
+
+    /** On attend sa réponse au mail d'origine : demandée, ou qu'elle prépare d'elle-même, tant que son brouillon n'est
+     *  pas repris ici. */
     val watching: Boolean
-        get() = setup is Load.Ready && original != null && fromDraft.isEmpty() && watchWork(asked, work, arrived = false, gaveUp = gaveUp)
+        get() = setup is Load.Ready && original != null && fromDraft.isEmpty() && watchWork(asked, work, arrived = false)
+
+    /** Le direct (ADR 0308) : où elle en est d'une réponse au mail d'origine, s'il est nommé (`mail.work`) ou à une
+     *  reconnexion. Ce que tu tapes ne se relit jamais. Rend la main quand c'est relu. */
+    suspend fun onLive(signal: LiveSignal, arrived: String, waiting: String) {
+        if (follows && MailLive.workShows(original?.ref, signal)) readWork(arrived, waiting)
+    }
+
+    /** Revenue au premier plan : où elle en est se relit une fois (rien de ce qui a changé entre-temps ne se perd). */
+    fun rereadWork(arrived: String, waiting: String) {
+        if (follows) viewModelScope.launch { readWork(arrived, waiting) }
+    }
 
     /**
-     * Où elle en est (ADR 0306), relu toutes les deux secondes tant qu'on guette ([watching]) : son brouillon arrivé, il
-     * est repris si tu n'as rien écrit ([arrived]), sinon dit ([waiting]) ; plus rien de demandé ni d'en cours, on
-     * cesse ; sinon seule sa ligne change. Au-delà du plafond, on cesse ; une relecture manquée attend la suivante. Rien
-     * ne se pose si l'écriture qui guettait n'est plus là.
+     * Où elle en est (ADR 0306), relu quand le direct le dit (et à chaque retour sur l'écran) : son brouillon arrivé,
+     * alors qu'on l'attendait ([watching]), il est repris si tu n'as rien écrit ([arrived]), sinon dit ([waiting]) ;
+     * plus rien de demandé ni d'en cours, la ligne s'en va ; sinon seule sa ligne change. Une relecture manquée attend
+     * le signal suivant ; rien ne se pose si l'écriture qui l'a demandée n'est plus là.
      */
-    suspend fun pollWork(arrived: String, waiting: String) {
+    suspend fun readWork(arrived: String, waiting: String) {
         val m = original ?: return
         val r = route ?: return
         val v = visit
-        if (!watching) return
-        if (watchSince == 0L) watchSince = deps.now()
-        if (workGaveUp(watchSince, deps.now())) {
-            gaveUp = true
-            return
-        }
+        if (!follows) return
         val got = (api.work(m.ref) as? MoiApi.Result.Ok)?.value ?: return
         if (!current(r, v)) return
         when (workTurn(arrived = got.draft.isNotBlank(), asked = got.asked, work = got.work)) {
             WorkTurn.ARRIVED -> {
-                // ses brouillons illisibles : la relecture suivante le retrouvera
+                // pas attendue ici (elle l'a écrite d'elle-même, sans ligne) : elle attend dans ses brouillons
+                if (!watching) return
+                // ses brouillons illisibles : le signal suivant le retrouvera
                 val d = findDraft(got.draft) ?: return
                 if (!current(r, v)) return
                 work = null
@@ -1021,20 +1022,12 @@ fun MailComposeScreen(graph: AppGraph, route: Route.MailCompose) {
             }
         }
     }
-    // où elle en est d'une réponse (ADR 0306) : relu toutes les deux secondes tant qu'on guette, l'app au premier plan ;
-    // l'écran ne se redessine que quand on commence ou cesse de guetter, la ligne seule à chaque étape
+    // où elle en est d'une réponse (ADR 0306) : poussé par le direct (ADR 0308), relu une fois à chaque retour de l'app
+    // au premier plan ; ce que tu tapes ne se relit jamais
     val arrived = stringResource(R.string.mail_prefill_taken_arrived)
     val waiting = stringResource(R.string.mail_prefill_arrived_elsewhere)
-    val watching by remember(vm) { derivedStateOf { vm.watching } }
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(route, watching, lifecycle) {
-        if (!watching) return@LaunchedEffect
-        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            while (true) {
-                delay(WORK_POLL_MS)
-                vm.pollWork(arrived, waiting)
-            }
-        }
+    FollowLive(graph.live, MailLive.COMPOSE, vm, route, onShown = { first -> if (!first) vm.rereadWork(arrived, waiting) }) {
+        vm.onLive(it, arrived, waiting)
     }
     // « Abandonner » ne s'offre jamais pendant un envoi : il partirait quand même
     if (confirmLeave && !vm.sending) {

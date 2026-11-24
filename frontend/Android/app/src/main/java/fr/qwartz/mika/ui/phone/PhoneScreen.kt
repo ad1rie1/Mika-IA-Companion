@@ -26,16 +26,15 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
+import fr.qwartz.mika.data.moi.LiveSignal
 import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.MoiDates
+import fr.qwartz.mika.data.moi.PhoneLive
 import fr.qwartz.mika.data.moi.Tone
 import fr.qwartz.mika.data.moi.map
 import fr.qwartz.mika.data.moi.phone.EmptyWhy
@@ -49,10 +48,12 @@ import fr.qwartz.mika.data.moi.phone.proposalLine
 import fr.qwartz.mika.data.moi.phone.proposals
 import fr.qwartz.mika.data.moi.phone.snippetOf
 import fr.qwartz.mika.data.moi.phone.underWay
+import fr.qwartz.mika.data.net.Topics
 import fr.qwartz.mika.data.phone.PhoneDraft
 import fr.qwartz.mika.data.settings.Settings
 import fr.qwartz.mika.ui.Route
 import fr.qwartz.mika.ui.components.rememberNow
+import fr.qwartz.mika.ui.shell.FollowLive
 import fr.qwartz.mika.ui.shell.Load
 import fr.qwartz.mika.ui.shell.LoadBox
 import fr.qwartz.mika.ui.shell.LocalShell
@@ -65,11 +66,7 @@ import fr.qwartz.mika.ui.shell.Tag
 import fr.qwartz.mika.ui.shell.rememberSessionKey
 import fr.qwartz.mika.ui.theme.mika
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-
-/** La liste, la position et tes téléphones se relisent à ce rythme tant que l'écran est là. */
-internal const val PHONE_REFRESH_MS = 60_000L
 
 /**
  * Messages (`Route.Phone("messages")`) : les conversations que l'application a lues (la plus récente d'abord), et ce
@@ -87,7 +84,7 @@ class PhoneMessagesViewModel(graph: AppGraph) : PhoneModel(graph) {
     private var started = false
     private var job: Job? = null
 
-    /** L'écran revient (ou une minute a passé) : tout lire la première fois, sinon relire sans bruit. */
+    /** L'écran revient (l'app au premier plan, ou depuis un fil) : tout lire la première fois, sinon relire sans bruit. */
     fun resume() {
         if (!started) {
             started = true
@@ -95,6 +92,12 @@ class PhoneMessagesViewModel(graph: AppGraph) : PhoneModel(graph) {
         } else {
             load(quiet = true)
         }
+    }
+
+    /** Le direct (ADR 0308) : ses conversations ont changé (`phone` — un message, une de ses propositions) : relues
+     *  sans bruit. Rend la main quand c'est relu. */
+    suspend fun onLive(signal: LiveSignal) {
+        if (started && signal.touches(Topics.PHONE)) load(quiet = true).join()
     }
 
     /** Tirer pour relire : ce qui est montré reste jusqu'à ce que la relecture arrive. */
@@ -139,20 +142,13 @@ fun PhoneScreen(graph: AppGraph, tab: String) {
     val session = rememberSessionKey(graph)
     val phones: PhonesViewModel = viewModel(key = "phone.phones|$session") { PhonesViewModel(graph) }
     val shown = PhoneTabs.of(tab)
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(phones, lifecycle) {
-        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            while (true) {
-                phones.load()
-                delay(PHONE_REFRESH_MS)
-            }
-        }
-    }
+    // tes téléphones (la barre) : lus à l'ouverture et à chaque retour, et quand le direct dit qu'ils ont changé
+    FollowLive(graph.live, PhoneLive.PHONES, phones, onShown = { phones.load() }) { phones.onLive(it) }
     val now = rememberNow()
     SectionScaffold(topBar = { PhoneTopBar(phones.bar(now), shown) }) { modifier ->
         when (shown) {
-            PhoneTabs.POSITION -> PositionTab(graph, session, modifier, onPull = phones::load)
-            else -> MessagesTab(graph, session, modifier, onPull = phones::load, onPosition = { shell.replace(Route.Phone(PhoneTabs.POSITION)) })
+            PhoneTabs.POSITION -> PositionTab(graph, session, modifier, onPull = { phones.load() })
+            else -> MessagesTab(graph, session, modifier, onPull = { phones.load() }, onPosition = { shell.replace(Route.Phone(PhoneTabs.POSITION)) })
         }
     }
 }
@@ -160,23 +156,15 @@ fun PhoneScreen(graph: AppGraph, tab: String) {
 /**
  * L'onglet Messages : le bandeau rose de ses propositions qui attendent ton geste (`counts.phone`), puis les
  * conversations — le groupe ou qui écrit, la pastille de l'appli, le dernier message, l'heure, sa réponse en chemin en
- * rose. Tirer relit, la liste se relit chaque minute. Un compte qui n'est pas une de ses propriétaires : une phrase le
- * dit et mène à Position.
+ * rose. Tirer relit, la liste suit le direct (ADR 0308). Un compte qui n'est pas une de ses propriétaires : une phrase
+ * le dit et mène à Position.
  */
 @Composable
 private fun MessagesTab(graph: AppGraph, session: String, modifier: Modifier, onPull: () -> Unit, onPosition: () -> Unit) {
     val shell = LocalShell.current
     val vm: PhoneMessagesViewModel = viewModel(key = "phone.messages|$session") { PhoneMessagesViewModel(graph) }
     LaunchedEffect(vm) { vm.said.collect { shell.toast(it) } }
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(vm, lifecycle) {
-        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            while (true) {
-                vm.resume()
-                delay(PHONE_REFRESH_MS)
-            }
-        }
-    }
+    FollowLive(graph.live, PhoneLive.MESSAGES, vm, onShown = { vm.resume() }) { vm.onLive(it) }
     val me by graph.me.me.collectAsStateWithLifecycle()
     val settings by graph.settings.settings.collectAsStateWithLifecycle(Settings())
     PullToRefreshBox(

@@ -85,7 +85,7 @@ internal fun ListsTab(graph: AppGraph, vm: ProjectViewModel, sheet: Sheet, now: 
     val list = lists.firstOrNull { it.name == sub } ?: lists.firstOrNull()
     val model = rememberListsModel(graph, vm.id)
     Toasts(model.gestures)
-    OnResume(model) { model.resume() }
+    OnResume(model, project = vm.id) { model.resume() }
     // quitté avant la réponse d'un ajout, l'onglet n'ouvre rien à son retour
     OnLeave(model) { model.leave() }
     LaunchedEffect(model, list?.name) { list?.let { model.show(it.name) } }
@@ -266,7 +266,7 @@ internal fun ItemScreen(graph: AppGraph, route: Route.ProjectPage) {
     Toasts(vm.gestures)
     // l'élément s'ouvre : ce qu'on y avait dit avant de le quitter ne vaut plus
     FreshEntry(vm.gestures, ItemViewModel.HERE)
-    OnResume(vm) {
+    OnResume(vm, project = route.id) {
         project.resume()
         vm.resume()
     }

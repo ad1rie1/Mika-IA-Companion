@@ -177,7 +177,7 @@ fun MikaTopBar(
  * ([LocalChatCue]) — sans elle, rien ne le disait tant que l'app restait ouverte ailleurs.
  */
 @Composable
-private fun MenuButton(onClick: () -> Unit) {
+internal fun MenuButton(onClick: () -> Unit) {
     val cue = LocalChatCue.current
     val label = stringResource(if (cue) R.string.shell_menu_waiting else R.string.shell_menu)
     IconButton(onClick = onClick) {

@@ -1,0 +1,35 @@
+{# Ce que partagent les pages « Agendas » (app/handmade/tabs/agendas.py, ADR 0309, lot 5) : la pastille d'un agenda (sa
+   couleur, une classe : la CSP n'admet pas de style en ligne), une étiquette, les puces « Les agendas de », une entrée
+   d'une liste (titre, étiquettes, l'heure, ce qu'elle a dit, ses faits, ses liens). #}
+
+{% macro sw(color, round=False) -%}<span class="agc-sw c-{{ color or 'ardoise' }}{{ ' round' if round }}" aria-hidden="true"></span>{%- endmacro %}
+
+{% macro tag(text, tone="") -%}<span class="now-tag {{ tone }}">{{ text }}</span>{%- endmacro %}
+
+{% macro chips(items, title, label) -%}
+<nav class="hm-chips" aria-label="{{ label }}"><span class="hm-chips-title">{{ title }}</span>
+{% for c in items %}<a class="hm-chip{{ ' on' if c.on }}{{ ' muted' if c.muted }}" href="{{ c.href }}"{% if c.on and loop.first %} aria-current="page"{% elif c.pressed %} aria-pressed="true"{% endif %}>{{ c.text }}{% if c.count is not none %} <span class="hm-count">{{ c.count }}</span>{% endif %}</a>{% endfor %}
+</nav>
+{%- endmacro %}
+
+{% macro entry(e) -%}
+<li>
+  <div class="person-entry-top">
+    <div class="person-entry-name">
+      <p class="person-entry-title">{% if e.title_color %}<span class="agc-name">{{ sw(e.title_color) }}{% endif %}{% if e.href %}<a href="{{ e.href }}">{{ e.title }}</a>{% else %}{{ e.title }}{% endif %}{% if e.title_color %}</span>{% endif %}</p>
+      <p class="person-entry-tags">{% for t in e.tags %}{{ tag(t[0], t[1]) }}{% endfor %}{% if e.cal %}<span class="now-tag agc-name">{{ sw(e.color) }}{{ e.cal.name }}</span>{% endif %}</p>
+    </div>
+    <span class="person-entry-time">{{ e.time }}</span>
+  </div>
+  <div class="person-entry-foot">
+    {% if e.text %}<p class="person-entry-text">« {{ e.text }} »</p>{% endif %}
+    {% if e.facts %}<p class="person-entry-facts">{% for k, v in e.facts %}<span><span class="k">{{ k }}</span> {{ v }}</span>{% endfor %}</p>{% endif %}
+    {% if e.links %}<div class="person-entry-more">{% for text, href in e.links %}<a href="{{ href }}">{{ text }}</a>{% endfor %}</div>{% endif %}
+  </div>
+</li>
+{%- endmacro %}
+
+{# « Synchroniser maintenant » sur une ligne : l'action de la fiche de l'agenda (``agenda.relire``), son jeton #}
+{% macro sync_form(f, csrf, back, label="Synchroniser") -%}
+<form method="post" action="{{ f.url }}" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_op" value="{{ f.nonce }}"><input type="hidden" name="_retour" value="{{ back }}"><input type="hidden" name="_sujet" value="{{ f.subject }}"><button class="btn quiet small">{{ label }}</button></form>
+{%- endmacro %}

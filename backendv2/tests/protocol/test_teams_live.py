@@ -69,6 +69,24 @@ def test_the_outbox_comes_at_once_then_at_each_change_with_signs_of_life(world):
         assert again["type"] == "outbox" and again["items"][0]["status"] == "placed"
 
 
+def test_the_outbox_leaves_as_soon_as_it_changes_without_being_reread(world, monkeypatch):  # noqa: F811
+    """ADR 0308 : la boîte d'envoi part à l'extension dès qu'elle change — l'écriture du cache la réveille —, pas au
+    bout d'une relecture : le filet (30 s) et le signe de vie sont loin, la trame arrive quand même."""
+    monkeypatch.setattr(doors, "LIVE_EVERY_S", 30.0)
+    monkeypatch.setattr(doors, "LIVE_PING_S", 5.0)
+    client, live, _ = world
+    key = new_key(client, live)
+    assert client.post("/api/teams/inbox", json=batch(), headers=headers(key)).status_code == 202
+    with client.websocket_connect(LIVE, headers={"Origin": EXTENSION}) as ws:
+        ws.send_json({"type": "hello", "key": key})
+        assert ws.receive_json() == {"type": "outbox", "items": []}
+        started = time.monotonic()
+        draft = queue(client, live, "Oui, 14 h me va.")
+        pushed = ws.receive_json()  # pas un signe de vie (5 s) : la boîte, aussitôt
+        assert pushed["type"] == "outbox" and [i["id"] for i in pushed["items"]] == [draft]
+        assert time.monotonic() - started < 2.0
+
+
 def test_a_wrong_key_a_web_page_or_silence_close_the_connection(world):  # noqa: F811
     client, live, _ = world
     key = new_key(client, live)

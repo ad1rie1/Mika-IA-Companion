@@ -41,9 +41,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
@@ -99,11 +96,15 @@ import androidx.compose.runtime.saveable.rememberSaveable
  * [ActivityTab], [LinksTab], [ListsTab] ; « Modifier le projet » (ses réglages, la pause, l'archiver) dans [projectMenu].
  */
 
-/** Le modèle d'un projet, que ses écrans partagent (la fiche, un objectif, un ticket) : un par projet et par session. */
+/** Le modèle d'un projet, que ses écrans partagent (la fiche, un objectif, un ticket) : un par projet et par session.
+ *  Le projet qui n'est plus à toi (plus partagé, retiré) ramène l'écran qui le montre à la liste des projets. */
 @Composable
 internal fun rememberProjectModel(graph: AppGraph, id: Int): ProjectViewModel {
     val session = rememberSessionKey(graph)
-    return viewModel(key = "project|$session|$id") { ProjectViewModel(ProjectsDeps(graph), id) }
+    val vm: ProjectViewModel = viewModel(key = "project|$session|$id") { ProjectViewModel(ProjectsDeps(graph), id) }
+    val shell = LocalShell.current
+    LaunchedEffect(vm) { vm.left.collect { shell.open(Route.Projects(ProjectsTabs.PROJECTS)) } }
+    return vm
 }
 
 @Composable
@@ -111,10 +112,8 @@ fun ProjectScreen(graph: AppGraph, route: Route.Project) {
     val shell = LocalShell.current
     val vm = rememberProjectModel(graph, route.id)
     LaunchedEffect(vm) { vm.gestures.said.collect { shell.toast(it) } }
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(vm, lifecycle) {
-        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) { vm.resume() }
-    }
+    // relue à chaque retour, et quand le direct dit que ce projet a changé (ADR 0308)
+    OnResume(vm, project = route.id) { vm.resume() }
     val now = rememberNow(wallMs = graph.clock::wallMs)
     // une feuille ou une fenêtre ouverte survit à une rotation (et ce qu'on y tape aussi)
     var instructing by rememberSaveable(route.id) { mutableStateOf(false) }

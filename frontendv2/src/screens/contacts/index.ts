@@ -9,6 +9,9 @@
  * fait d'un de tes comptes s'oublie par sa croix, après confirmation ; « Lui présenter quelqu'un » ouvre le chat, où la
  * fiche naît de ce que tu lui racontes. Oublier un contact se confirme ; un contact qui ne vient pas que de tes
  * comptes ne s'oublie pas d'ici (le serveur dit pourquoi).
+ *
+ * Rien ne se relit à intervalles : le direct (ADR 0308, `protocole-moi.md` § 2 bis) dit `contacts` — la liste et la
+ * fiche ouverte se relisent —, et l'écran au second plan, ou l'onglet caché, se relit à son retour.
  */
 import { fetchContactSheet, fetchContactsPage, forgetContact, forgetContactFact, type ContactKind, type ContactLine, type ContactSheet, type ContactsPage } from "../../api/contacts";
 import { ApiError } from "../../api/moi";
@@ -17,13 +20,12 @@ import { toast } from "../../shell/float";
 import { ico } from "../../shell/icons";
 import type { PaletteEntry } from "../../shell/palette";
 import type { ScreenContext, ScreenDef, Shell } from "../../shell/shell";
+import { Freshness, live, OneAtATime, pageShown } from "../../live/live";
 import { CachedMap, confirmModal, failureText } from "../../shared/kit";
 import { clippedQuery, contactHash, forgetFactQuestion, forgetQuestion, ID, listBody, listTools, paletteSub, routeId, sheetMarkup, sheetPlaceholder, type ListView } from "./view";
 
 /** Une page de la liste ; les suivantes s'ajoutent (« Afficher les suivants »). */
 const PAGE_SIZE = 100;
-/** Relire ce qui arrive tant que l'écran est ouvert. */
-const EVERY_MS = 60_000;
 const SEARCH_DELAY_MS = 250;
 
 export interface ContactsHooks {
@@ -42,8 +44,10 @@ class ContactsScreen {
   private error = "";
   private seq = 0;
   private readonly sheets = new CachedMap<ContactSheet>((key) => fetchContactSheet(Number(key)), 30_000);
-  private timer = 0;
   private searchTimer = 0;
+  /** Le direct (ADR 0308) : la liste et la fiche ouverte, relues une fois à la fois ; l'écran caché, à son retour. */
+  private readonly reading = new OneAtATime(() => this.reread());
+  private readonly fresh = new Freshness(() => this.open() && pageShown(), () => void this.reading.run());
 
   constructor(
     private readonly shell: Shell,
@@ -53,6 +57,7 @@ class ContactsScreen {
     window.setTimeout(() => {
       if (!this.page) void this.load();
     }, 3000);
+    live.onChange("contacts", () => this.fresh.touch(() => void this.reading.run()));
   }
 
   def(): ScreenDef {
@@ -133,18 +138,12 @@ class ContactsScreen {
     if (this.open() && this.selected() === id && cached.version !== before) this.paintSheet();
   }
 
-  private schedule(): void {
-    window.clearInterval(this.timer);
-    this.timer = window.setInterval(() => {
-      if (!this.open()) {
-        window.clearInterval(this.timer);
-        return;
-      }
-      if (document.visibilityState !== "visible") return;
-      void this.load(true);
-      const id = this.selected();
-      if (id !== null) void this.loadSheet(id, true);
-    }, EVERY_MS);
+  /** Ce que l'écran montre, relu sans bruit : la liste (ce que « Afficher les suivants » a ajouté reste, si rien n'a
+   *  changé devant), et la fiche ouverte. */
+  private async reread(): Promise<void> {
+    if (!this.page) return; // pas encore lue : sa première lecture dira tout
+    const id = this.selected();
+    await Promise.all([this.load(true), id !== null ? this.loadSheet(id, true) : Promise.resolve()]);
   }
 
   // ── Le rendu ───────────────────────────────────────────────────────
@@ -157,8 +156,10 @@ class ContactsScreen {
       this.paintTools();
     }
     this.paint();
-    if (!this.page) void this.load();
-    this.schedule();
+    if (!this.page) {
+      this.fresh.fresh();
+      void this.load();
+    } else this.fresh.back();
   }
 
   private paint(): void {

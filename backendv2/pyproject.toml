@@ -25,6 +25,10 @@ dependencies = [
     "pmtiles>=3.8,<4",
     # ses réponses relues dans la console comme le chat les montre : le Markdown du mode pro (ADR 0241)
     "markdown-it-py>=3",
+    # l'agenda (ADR 0309) : les occurrences d'une série, d'après sa RRULE (RFC 5545)
+    "python-dateutil>=2.8",
+    # l'agenda (ADR 0309, lot 1) : lire et écrire l'iCalendar d'un abonnement et d'un serveur CalDAV (RFC 5545)
+    "icalendar>=7.0,<8",
 ]
 
 [project.optional-dependencies]
@@ -156,6 +160,7 @@ modules = [
     "mika.plugins.phone",
     "mika.plugins.trips",
     "mika.plugins.contacts",
+    "mika.plugins.agenda",
 ]
 
 [[tool.importlinter.contracts]]

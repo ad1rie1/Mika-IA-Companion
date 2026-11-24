@@ -10,6 +10,11 @@ UID STORE, UID MOVE (si annoncé), UID COPY, EXPUNGE / UID EXPUNGE, APPEND,
 CREATE, SUBSCRIBE et NAMESPACE (si annoncé). Un SELECT en lecture seule qui
 tenterait d'écrire est refusé : on sait ainsi qu'un relevé ne touche à rien.
 
+Il sait aussi attendre (``IDLE``, RFC 2177, s'il l'annonce) : un mail qu'on lui
+livre (``Imap.deliver``) ou un drapeau qu'on change ailleurs (``Imap.touch``) se
+dit à chaque connexion qui attend, et ``Imap.cut`` coupe ces connexions comme un
+serveur qui les ferme (le courrier en direct, ADR 0308).
+
 Les deux acceptent aussi ``XOAUTH2`` (une boîte Microsoft, ADR 0166) : le jeton
 « refuse » est refusé comme Microsoft le fait (un défi JSON, puis un refus).
 """
@@ -17,10 +22,13 @@ Les deux acceptent aussi ``XOAUTH2`` (une boîte Microsoft, ADR 0166) : le jeton
 from __future__ import annotations
 
 import base64
+import contextlib
 import email
 import email.utils
 import json
+import queue
 import re
+import socket
 import socketserver
 import threading
 import time
@@ -88,6 +96,11 @@ class Imap(socketserver.StreamRequestHandler):
     namespace: tuple[str, str] = ("", "/")
     #: les dossiers auxquels on s'est abonné
     subscribed: list[str] = []
+    #: une commande à la fois sur les dossiers (les connexions sont des fils, le test en est un autre)
+    lock = threading.Lock()
+    #: les connexions qui attendent (``IDLE``) : le dossier qu'elles ont ouvert, et ce qu'on leur dira (une ligne, ou
+    #: ``None`` : coupée)
+    idling: list[tuple[str, queue.Queue]] = []
 
     @classmethod
     def reset(cls, inbox: dict[int, bytes] | None = None, *, caps: str = "IMAP4rev1 MOVE UIDPLUS") -> None:
@@ -97,6 +110,75 @@ class Imap(socketserver.StreamRequestHandler):
             cls.boxes["INBOX"].add(raw, uid=uid)
         cls.logins, cls.bearers, cls.commands, cls.caps = [], [], [], caps
         cls.namespace, cls.subscribed = ("", "/"), []
+        cls.cut()
+
+    # ── attendre (IDLE) ──
+    @classmethod
+    def _tell(cls, line: str | None, folder: str | None = None) -> None:
+        """Dit ``line`` à qui attend sur ce dossier (sans dossier : à tous) — un serveur ne parle que du dossier
+        ouvert."""
+        for where, waiting in list(cls.idling):
+            if folder is None or where == folder:
+                waiting.put(("say", line))
+
+    @classmethod
+    def deliver(cls, raw: bytes, folder: str = "INBOX", flags: set[str] | None = None) -> int:
+        """Un mail arrive dans ce dossier : rend son UID, et le dit à qui attend."""
+        with cls.lock:
+            box = cls.boxes[folder]
+            uid = box.add(raw, flags)
+            count = len(box.mails)
+        cls._tell(f"* {count} EXISTS", folder)
+        return uid
+
+    @classmethod
+    def touch(cls, uid: int, flag: str, folder: str = "INBOX") -> None:
+        """Un drapeau posé dans un autre client : dit à qui attend."""
+        with cls.lock:
+            cls.boxes[folder].mails[uid][0].add(flag)
+            shown = " ".join(sorted(cls.boxes[folder].mails[uid][0]))
+        cls._tell(f"* 1 FETCH (FLAGS ({shown}))", folder)
+
+    @classmethod
+    def cut(cls) -> None:
+        """Coupe chaque connexion qui attend, comme un serveur qui la ferme."""
+        cls._tell(None)
+
+    @classmethod
+    def waiting(cls) -> int:
+        """Combien de connexions attendent en ce moment."""
+        return len(cls.idling)
+
+    def idle(self, tag: str) -> bool:
+        """``IDLE`` : on dit ce qui arrive jusqu'au ``DONE`` du client ; ``False`` si la connexion est finie."""
+        said: queue.Queue = queue.Queue()
+
+        def read() -> None:  # le ``DONE`` du client (ou rien : la connexion est finie)
+            try:
+                line = self.rfile.readline()
+            except (OSError, ValueError):
+                line = b""
+            said.put(("line", line))
+
+        self.say("+ idling")
+        threading.Thread(target=read, daemon=True).start()
+        entry = (self.selected or "", said)
+        type(self).idling.append(entry)
+        try:
+            while True:
+                kind, data = said.get()
+                if kind == "line":
+                    if not data:
+                        return False
+                    self.say(f"{tag} OK IDLE terminated")
+                    return True
+                if data is None:  # coupée par le serveur : la prise d'abord (le fil qui lit tient son tampon)
+                    with contextlib.suppress(OSError):
+                        self.request.shutdown(socket.SHUT_RDWR)
+                    return False
+                self.say(data)
+        finally:
+            type(self).idling.remove(entry)
 
     @classmethod
     def set_mailbox(cls, mailbox: dict[int, bytes]) -> None:
@@ -126,9 +208,14 @@ class Imap(socketserver.StreamRequestHandler):
             tag, _, rest = line.partition(" ")
             cmd = rest.upper()
             type(self).commands.append(rest)
-            try:
-                if not self.command(tag, rest, cmd, data, utf7):
+            if cmd == "IDLE" and "IDLE" in type(self).caps.split():
+                if not self.idle(tag):
                     return
+                continue
+            try:
+                with type(self).lock:
+                    if not self.command(tag, rest, cmd, data, utf7):
+                        return
             except (KeyError, ValueError, IndexError, AssertionError) as exc:
                 self.say(f"{tag} NO {exc}")
 

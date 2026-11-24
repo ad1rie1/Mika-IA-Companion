@@ -43,12 +43,13 @@ MODELS = (
     "mika.adapters.feeds.models",
     "mika.adapters.teams.models",
     "mika.adapters.contacts.models",
+    "mika.adapters.agenda.models",
     "mika.adapters.forge.bases",
 )
 
 #: le fichier de chaque base dans un dossier de données (SQLite)
 FILES = {"mind": "mind.db", "views": "views.db", "mail": "mail.db", "feeds": "feeds.db", "teams": "teams.db",
-         "contacts": "contacts.db"}
+         "contacts": "contacts.db", "agenda": "agenda.db"}
 #: l'adresse d'un serveur MariaDB, sans base (``mariadb+pymysql://mika@localhost/?unix_socket=…``) : avec elle, ses
 #: bases vivent sur ce serveur ; sans, ce sont des fichiers SQLite dans le dossier de données
 DATABASE_URL_ENV = "MIKA_DATABASE_URL"

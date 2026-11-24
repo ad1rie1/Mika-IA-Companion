@@ -92,3 +92,31 @@ async def test_le_mot_de_passe_emporte_ses_jetons(store, change) -> None:
     assert states == {by_login.id: True, given.id: False}
     assert revoked == [by_login.id]  # ses connexions se ferment
     assert not accounts.has_mobile(acc.id)
+
+
+async def test_where_a_phone_is_notified_is_told_when_it_changes(store) -> None:
+    """« Téléphones » montre si chacun reçoit ses notifications (``push``) : qu'un téléphone le dise, qu'un autre le
+    perde (le même jeton Firebase), qu'il ne veuille plus — prévient ``on_change`` (ADR 0308) ; le redire à
+    l'identique, ou retirer ce qui n'y est plus, non."""
+    accounts = Accounts(store)
+    await accounts.open()
+    acc = await accounts.create("bea", PASSWORD, operator=False)
+    first, _ = await accounts.create_token(acc.id, "Pixel", client="mobile")
+    second, _ = await accounts.create_token(acc.id, "Pixel neuf", client="mobile")
+    calls: list[int] = []
+
+    async def changed() -> None:
+        calls.append(1)
+
+    accounts.on_change = changed
+    await accounts.set_push(first.id, "fcm-1", "k1")
+    assert calls == [1]
+    await accounts.set_push(first.id, "fcm-1", "k2")  # le même téléphone le redit : rien ne se voit autrement
+    assert calls == [1]
+    await accounts.set_push(second.id, "fcm-1", "k3")  # réinstallée : l'ancien jeton le perd, le neuf le prend
+    assert calls == [1, 1]
+    assert [t.push for t in accounts.tokens(acc.id) if t.client == "mobile"] == [False, True]
+    await accounts.clear_push(first.id)  # il ne l'avait plus
+    assert calls == [1, 1]
+    await accounts.clear_push(second.id, "fcm-1")
+    assert calls == [1, 1, 1] and not any(t.push for t in accounts.tokens(acc.id))

@@ -68,9 +68,10 @@ class FieldCorrector(private val scope: CoroutineScope, private val call: suspen
      * Corriger le champ [key]. [read] rend son texte tel qu'il est au moment de le lire — `null` : il n'est plus à
      * l'écran (une autre discussion, une autre écriture), rien ne s'y pose ; [write] le remplace. [on] : un modèle
      * corrige (`GET /api/moi` → `correct`) ; sinon, on dit pourquoi. Un champ vide ne part pas. La réponse venue, le
-     * champ a changé (tu as continué d'écrire) : rien n'est posé ; rien à corriger : ton texte reste ; sinon le texte
-     * corrigé le remplace, et « Annuler » te le rend tant que le champ contient encore le texte corrigé. Un refus se
-     * dit tel que le serveur le donne.
+     * champ a changé (tu as continué d'écrire) : rien n'est posé ; rien à corriger (ou rien qui ne touchait pas aux
+     * mots) : ton texte reste ; sinon le texte corrigé le remplace, et « Annuler » te le rend tant que le champ
+     * contient encore le texte corrigé. Le message dit aussi ce qui a été écarté parce que ça touchait aux mots. Un
+     * refus se dit tel que le serveur le donne.
      */
     fun correct(key: Any, on: Boolean, words: CorrectWords, read: () -> String?, write: (String) -> Unit) {
         if (key in running) return
@@ -88,13 +89,14 @@ class FieldCorrector(private val scope: CoroutineScope, private val call: suspen
                 is MoiApi.Result.Failed -> tell(got.error.said)
                 is MoiApi.Result.Ok -> {
                     val now = read() ?: return@launch
-                    when (correctTurn(before, now, got.value)) {
+                    val c = got.value
+                    when (correctTurn(before, now, c)) {
                         CorrectTurn.MOVED -> tell(words.moved)
-                        CorrectTurn.NONE -> tell(correctedText(0, words))
+                        CorrectTurn.NONE -> tell(correctedText(0, c.refused, words))
                         CorrectTurn.PUT -> {
-                            val fixed = got.value.text
+                            val fixed = c.text
                             write(fixed)
-                            tell(correctedText(got.value.changes, words)) {
+                            tell(correctedText(c.changes, c.refused, words)) {
                                 read()?.let { undoCorrection(it, fixed, before) }?.let(write)
                             }
                         }
@@ -109,16 +111,26 @@ class FieldCorrector(private val scope: CoroutineScope, private val call: suspen
     }
 }
 
-/** Les mots de « Corriger », tirés de `strings.xml` ; le nombre de fautes, au pluriel de `correct_done`. */
+/** Les mots de « Corriger », tirés de `strings.xml` ; le nombre de fautes au pluriel de `correct_done` (ou de
+ *  `correct_done_part`, suivi des changements écartés : `correct_dropped`). */
 @Composable
 fun rememberCorrectWords(): CorrectWords {
     val res = LocalResources.current
     val empty = stringResource(R.string.correct_empty)
     val none = stringResource(R.string.correct_none)
+    val untouched = stringResource(R.string.correct_untouched)
     val moved = stringResource(R.string.correct_moved)
     val off = stringResource(R.string.correct_off)
-    return remember(res, empty, none, moved, off) {
-        CorrectWords(empty, none, moved, off) { n -> res.getQuantityString(R.plurals.correct_done, n, n) }
+    return remember(res, empty, none, untouched, moved, off) {
+        CorrectWords(
+            empty = empty,
+            none = none,
+            untouched = untouched,
+            moved = moved,
+            off = off,
+            fixed = { n -> res.getQuantityString(R.plurals.correct_done, n, n) },
+            fixedDropped = { n, r -> res.getQuantityString(R.plurals.correct_dropped, r, res.getQuantityString(R.plurals.correct_done_part, n, n), r) },
+        )
     }
 }
 

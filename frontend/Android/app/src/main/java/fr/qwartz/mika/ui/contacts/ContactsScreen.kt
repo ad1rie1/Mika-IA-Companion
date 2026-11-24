@@ -48,15 +48,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
 import fr.qwartz.mika.data.files.ComposerDraft
+import fr.qwartz.mika.data.moi.LiveSignal
 import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.MoiDates
 import fr.qwartz.mika.data.moi.contacts.CONTACT_KIND_CHOICES
@@ -67,9 +65,11 @@ import fr.qwartz.mika.data.moi.contacts.ContactsLimits
 import fr.qwartz.mika.data.moi.contacts.clippedQuery
 import fr.qwartz.mika.data.moi.contacts.lineSub
 import fr.qwartz.mika.data.moi.contacts.of
+import fr.qwartz.mika.data.net.Topics
 import fr.qwartz.mika.ui.Route
 import fr.qwartz.mika.ui.components.rememberNow
 import fr.qwartz.mika.ui.shell.BarNav
+import fr.qwartz.mika.ui.shell.FollowLive
 import fr.qwartz.mika.ui.shell.Load
 import fr.qwartz.mika.ui.shell.LoadBox
 import fr.qwartz.mika.ui.shell.LocalShell
@@ -85,8 +85,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 
-/** La liste se relit à ce rythme tant qu'elle est à l'écran. */
-private const val REFRESH_MS = 60_000L
 private const val SEARCH_DEBOUNCE_MS = 300L
 /** « Lui présenter quelqu'un » : la phrase posée dans le champ du chat (celle du web), à compléter. */
 private const val INTRODUCE = "Je voudrais te présenter quelqu'un : "
@@ -145,7 +143,8 @@ class ContactsListViewModel(deps: ContactsDeps) : ViewModel() {
         if (text.isNotBlank()) notices.trySend(text)
     }
 
-    /** L'écran revient (ou une minute a passé) : tout lire la première fois, sinon relire sans bruit. */
+    /** L'écran revient (l'app au premier plan, ou depuis une fiche) : tout lire la première fois, sinon relire sans
+     *  bruit. */
     fun resume() {
         if (!started) {
             started = true
@@ -153,6 +152,12 @@ class ContactsListViewModel(deps: ContactsDeps) : ViewModel() {
         } else {
             load(keep = true, silent = true)
         }
+    }
+
+    /** Le direct (ADR 0308) : ses contacts ont changé (`contacts`) — la liste se relit sans bruit, la suite déjà lue
+     *  gardée si rien n'a changé devant. Rend la main quand c'est relu. */
+    suspend fun onLive(signal: LiveSignal) {
+        if (started && signal.touches(Topics.CONTACTS)) load(keep = true, silent = true).join()
     }
 
     /** Tirer pour relire : ce qui est montré reste jusqu'à ce que la relecture arrive. */
@@ -261,7 +266,7 @@ class ContactsListViewModel(deps: ContactsDeps) : ViewModel() {
  * toi » sous le titre, la recherche (un nom, un e-mail, un numéro), Tous · Personnes · Organisations et leurs nombres,
  * puis une ligne par contact — son rond (un carré pour une organisation), son nom, son poste et son organisation, d'où
  * elle le connaît et combien, le dernier échange. Toucher ouvre sa fiche ; « Lui présenter quelqu'un » ouvre le chat, la
- * phrase à compléter. Tirer relit, et la liste se relit chaque minute.
+ * phrase à compléter. Tirer relit, et la liste suit le direct (ADR 0308).
  */
 @Composable
 fun ContactsScreen(graph: AppGraph, nav: BarNav) {
@@ -269,15 +274,7 @@ fun ContactsScreen(graph: AppGraph, nav: BarNav) {
     val session = rememberSessionKey(graph)
     val vm: ContactsListViewModel = viewModel(key = "contacts.list|$session") { ContactsListViewModel(ContactsDeps(graph)) }
     LaunchedEffect(vm) { vm.said.collect { shell.toast(it) } }
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(vm, lifecycle) {
-        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            while (true) {
-                vm.resume()
-                delay(REFRESH_MS)
-            }
-        }
-    }
+    FollowLive(graph.live, CONTACTS_TOPICS, vm, onShown = { vm.resume() }) { vm.onLive(it) }
     val introduce = {
         graph.scope.launch { graph.shareInbox.deposit(ComposerDraft(text = INTRODUCE)) }
         shell.open(Route.Chat)

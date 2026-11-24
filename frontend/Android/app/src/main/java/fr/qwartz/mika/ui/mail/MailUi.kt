@@ -61,9 +61,10 @@ import java.util.concurrent.atomic.AtomicLong
  */
 
 /** Mail sur l'API du téléphone ; ses envois avec des pièces par le client sans délai global (un fichier lourd sur
- *  une 4G faible). Le jeton n'y part que vers son serveur, comme partout. */
+ *  une 4G faible), « Corriger » par celui qui attend la fin d'une correction. Le jeton n'y part que vers son serveur,
+ *  comme partout. */
 internal fun AppGraph.mailApi(): MailApi =
-    MailApi(moi, MoiApi(filesHttp, { auth.credentials() }, { auth.checkAfterUnauthorized() }))
+    MailApi(moi, MoiApi(filesHttp, { auth.credentials() }, { auth.checkAfterUnauthorized() }), moiCorrect)
 
 /**
  * Ce qu'un écran de Mail dit aux autres d'un geste, pour qu'ils se mettent à jour sans tout relire : la liste efface

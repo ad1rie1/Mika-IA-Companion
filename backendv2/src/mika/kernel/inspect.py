@@ -18,6 +18,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Callable, Mapping, Sequence
+from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Any
@@ -25,6 +26,11 @@ from typing import Any
 from mika.kernel.clock import US
 from mika.kernel.events import Content
 from mika.kernel.text import fold
+
+#: l'adresse du compte qui regarde la console, le temps d'une requête (la console la pose) ; vide : personne de
+#: connu (une vue lue sans requête, par le serveur MCP). Une vue qui montre ce qui n'est qu'à son propriétaire (un
+#: événement privé) le lit pour ne le montrer qu'à lui.
+VIEWER: ContextVar[str] = ContextVar("console_viewer", default="")
 
 #: les tons d'une cellule, d'une ligne, d'une note
 TONES = ("", "info", "ok", "warn", "danger", "muted")

@@ -20,6 +20,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+from mika.contracts import agenda as agenda_c
 from mika.contracts import attention as attention_c
 from mika.contracts import email as email_c
 from mika.contracts import forge as forge_c
@@ -66,8 +67,10 @@ SECOND_THOUGHTS = "second_thoughts"
 #: colore le ton, elle ne reprend pas la promesse. Un dessin promis aussi : le montrer quand il est prêt, ou dire
 #: qu'il n'a pas pu se faire (``imaging``, ADR 0063). Rendre compte de ce qu'un réveil par API lui a fait faire, à
 #: qui il le dit (``wakeup``, ADR 0068). Dire ce qu'un service ou une app a rendu après un accord (ADR 0064, 0133).
+#: Prévenir d'un rendez-vous au délai que son agenda demande (``agenda.REMIND``, ADR 0309) : un rappel demandé, lui
+#: aussi — en réglant l'agenda plutôt qu'en mots.
 OWED = frozenset({goals_c.REMIND, memory_c.KEEP_PROMISE, imaging_c.DELIVER, imaging_c.COULD_NOT,
-                  mcp_c.ANSWERED_REASON, forge_c.ANSWERED_REASON, wakeup_c.DONE})
+                  mcp_c.ANSWERED_REASON, forge_c.ANSWERED_REASON, wakeup_c.DONE, agenda_c.REMIND})
 #: Ce qui **prévient** : ce qui ne peut pas attendre et regarde la personne au premier chef — un mail important
 #: arrivé pour sa propriétaire, un projet qu'elle lui a confié qui n'avance plus sans elle, ce qu'une de ses apps
 #: vient de trouver pour la personne que son projet concerne (ADR 0105). Prévenir n'est pas

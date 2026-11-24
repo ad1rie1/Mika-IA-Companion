@@ -38,9 +38,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
@@ -104,10 +101,8 @@ fun ProjectsScreen(graph: AppGraph, tab: String, nav: BarNav) {
     val shell = LocalShell.current
     val vm = rememberProjectsModel(graph)
     LaunchedEffect(vm) { vm.gestures.said.collect { shell.toast(it) } }
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(vm, lifecycle) {
-        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) { vm.resume() }
-    }
+    // relue à chaque retour, et quand le direct dit qu'un de tes projets a changé (ADR 0308)
+    OnResume(vm, project = ANY_PROJECT) { vm.resume() }
     // le projet qui vient d'être confié s'ouvre : il naît à cadrer
     LaunchedEffect(vm.created) {
         val id = vm.created

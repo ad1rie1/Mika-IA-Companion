@@ -111,7 +111,7 @@ GESTURES: dict[str, str] = {
     "console.comptes.sessions": "Sessions fermées",
     "console.canaux.regler": "Tableau d'un canal réglé", "console.outils.familles": "Familles d'outils réglées",
     "console.outils.place": "Place d'un outil réglée",
-    "console.droits.partage_retire": "Partage retiré",
+    "console.droits.partage_retire": "Partage retiré", "console.droits.agenda": "Tableau de droits d'un agenda réglé",
     "console.mcp.jeton": "Jeton de la console en MCP renouvelé", "console.mcp.fermer": "Console en MCP fermée",
     "console.mcp.reseau.ouvrir": "Console en MCP ouverte au réseau",
     "console.mcp.reseau.fermer": "Console en MCP réservée à cette machine",
@@ -127,6 +127,9 @@ GESTURES: dict[str, str] = {
     "moi.partage": "Partage modifié", "moi.service_branche": "Service branché", "moi.service": "Service réglé",
     "moi.service_outils": "Outils d'un service réglés", "moi.service_retire": "Service retiré",
     "moi.telephone_revoque": "Téléphone révoqué",
+    "moi.agenda_compte": "Compte d'agenda branché ou réglé", "moi.agenda_compte_retire": "Compte d'agenda retiré",
+    "moi.agenda_connexion": "Compte d'agenda connecté", "moi.agenda_deconnexion": "Compte d'agenda déconnecté",
+    "moi.agenda_reglage": "Agenda réglé", "moi.agenda_droits": "Tableau de droits d'un agenda réglé",
 }
 #: les familles de gestes que la console et la ligne de commande nomment par une partie de leur clé
 #: (« console.reglages.<section> », « console.parametres.<faculté> ») ; l'oubli à part (« …oublier.<sorte> »)

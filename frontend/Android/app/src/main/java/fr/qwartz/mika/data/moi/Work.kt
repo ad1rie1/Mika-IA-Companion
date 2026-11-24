@@ -5,8 +5,9 @@ import kotlinx.serialization.Serializable
 /*
  * Où elle en est d'une réponse qu'elle prépare (ADR 0306) : la ligne au-dessus de la saisie, dans Teams et dans Mail.
  * Une seule ligne — l'étape (elle s'y met, elle réfléchit, tel outil tourne) et son chrono, qui court entre deux
- * relectures. Le moteur la dit dans `work` (`backendv2/docs/protocole-moi.md`, « `work`, en direct ») ; rien n'en est
- * gardé. Porté de `frontendv2/src/mika/work.ts`, pur et testé sur la JVM.
+ * étapes. Le moteur la dit dans `work` (`backendv2/docs/protocole-moi.md`, « `work`, en direct ») et pousse chaque
+ * étape qui commence (`mail.work`, `teams.work`, ADR 0308) : l'écran relit alors `work` ; rien n'en est gardé. Porté
+ * de `frontendv2/src/mika/work.ts`, pur et testé sur la JVM.
  */
 
 /** Les étapes de [Work]. */
@@ -31,16 +32,10 @@ data class Work(
     val started: Long = 0,
 ) {
     companion object {
-        /** Juste après un « Préremplir » réussi : elle s'y met, depuis maintenant — la relecture suivante la corrige. */
+        /** Juste après un « Préremplir » réussi : elle s'y met, depuis maintenant — le direct la corrige. */
         fun waiting(now: Long) = Work(WorkSteps.WAITING, "", now, now)
     }
 }
-
-/** Ce qu'on relit toutes les deux secondes tant qu'elle y travaille (`…/teams/work`, `…/mail/work`)… */
-const val WORK_POLL_MS = 2_000L
-
-/** …au plus si longtemps : au-delà, on cesse de guetter ici (la relecture ordinaire de l'écran la verra arriver). */
-const val WORK_WATCH_MAX_MS = 30 * 60_000L
 
 /** Le libellé d'un outil sans nom. */
 private const val SOME_TOOL = "Un de ses outils"
@@ -65,7 +60,7 @@ fun elapsed(ms: Long): String {
     return if (hours > 0) "$hours:${m.toString().padStart(2, '0')}:$ss" else "$m:$ss"
 }
 
-/** Ce que dit une relecture de `…/work`. */
+/** Ce que dit une relecture de `…/work` (`…/teams/work`, `…/mail/work`), faite quand le direct le dit. */
 enum class WorkTurn {
     /** Sa réponse est arrivée (une réponse en chemin dans Teams, son brouillon dans Mail) : l'écran la relit. */
     ARRIVED,
@@ -84,10 +79,6 @@ fun workTurn(arrived: Boolean, asked: Boolean, work: Work?): WorkTurn = when {
     else -> WorkTurn.GOING
 }
 
-/** On guette où elle en est (toutes les deux secondes) : une réponse demandée ou qu'elle prépare d'elle-même
- *  ([work] non nul), pas encore arrivée ([arrived]), sans avoir passé le plafond ([gaveUp]). */
-fun watchWork(asked: Boolean, work: Work?, arrived: Boolean, gaveUp: Boolean): Boolean =
-    !arrived && !gaveUp && (asked || work != null)
-
-/** Le plafond est passé : guetté depuis [since], il est [now]. */
-fun workGaveUp(since: Long, now: Long): Boolean = now - since > WORK_WATCH_MAX_MS
+/** On attend sa réponse ici : demandée, ou qu'elle prépare d'elle-même ([work] non nul), pas encore arrivée
+ *  ([arrived]) — son arrivée se dira. Sans plafond : rien ne se relit à intervalles, le direct dit chaque étape. */
+fun watchWork(asked: Boolean, work: Work?, arrived: Boolean): Boolean = !arrived && (asked || work != null)

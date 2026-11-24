@@ -699,13 +699,14 @@ class Faculty(Generic[S, Pm]):
         needs: str = "",
         owned: Callable[[Any, str, Any], bool] | None = None,
         label: str = "",
+        outside: bool = False,
     ):
         def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
             self.tools.append(
                 ToolSpec(
                     self.name, name, description, args, fn, bundle or self.name,
                     frozenset(episodes), max_calls_per_episode, owner_only, when, ends_loop,
-                    rule, fits=fits, acts=acts, needs=needs, owned=owned, label=label,
+                    rule, fits=fits, acts=acts, needs=needs, owned=owned, label=label, outside=outside,
                 )
             )
             return fn

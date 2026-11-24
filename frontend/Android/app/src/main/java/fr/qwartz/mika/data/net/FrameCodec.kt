@@ -48,6 +48,7 @@ object FrameCodec {
                 MikaProtocol.TYPE_TOOL -> decodeTool(obj)
                 MikaProtocol.TYPE_STRANDS -> decodeStrands(obj)
                 MikaProtocol.TYPE_STRAND_RESULT -> decodeStrandResult(obj)
+                MikaProtocol.TYPE_CHANGED -> decodeChanged(obj)
                 else -> ServerFrame.Unknown(type)
             }
         } catch (_: IllegalArgumentException) {
@@ -142,6 +143,53 @@ object FrameCodec {
             )
         }
         return ServerFrame.Strands(out)
+    }
+
+    /**
+     * Ce qui a changé (ADR 0308, § 2 bis), sujet par sujet. Sans liste `changes` lisible, la trame est inconnue ; une
+     * entrée illisible ou d'un sujet inconnu se tait ; deux entrées d'un même sujet se réunissent (« tout le domaine »
+     * l'emporte). Une trame où aucun sujet n'est connu ne dit rien (`changes` vide).
+     */
+    private fun decodeChanged(obj: JsonObject): ServerFrame {
+        val items = obj["changes"] as? JsonArray ?: return ServerFrame.Unknown(MikaProtocol.TYPE_CHANGED)
+        val out = LinkedHashMap<String, Set<String>?>()
+        for (item in items) {
+            val entry = item as? JsonObject ?: continue
+            val topic = (entry["topic"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: continue
+            if (topic !in Topics.ALL) continue
+            val keys = changedKeys(topic, entry)
+            if (topic !in out) {
+                out[topic] = keys
+            } else {
+                val before = out[topic]
+                out[topic] = if (before == null || keys == null) null else before + keys
+            }
+        }
+        return ServerFrame.Changed(out)
+    }
+
+    /**
+     * Ce qu'une entrée nomme, ou `null` (tout le domaine) : un sujet sans clé, une clé absente, une liste vide ou
+     * illisible, un champ que le contrat ne connaît pas pour ce sujet. Les noms sont des chaînes non vides ; un
+     * entier (un numéro de projet) se lit comme du texte.
+     */
+    private fun changedKeys(topic: String, entry: JsonObject): Set<String>? {
+        val key = Topics.KEYS[topic]
+        if (entry.keys.any { it != "topic" && it != key }) return null
+        if (key == null) return null
+        val raw = entry[key] as? JsonArray ?: return null
+        if (raw.isEmpty()) return null
+        val out = LinkedHashSet<String>()
+        for (item in raw) {
+            val p = item as? JsonPrimitive ?: return null
+            val name = when {
+                p.isString -> p.content.takeIf { it.isNotEmpty() }
+                else -> p.longOrNull?.toString()
+                    ?: p.doubleOrNull?.takeIf { it.isFinite() && it == Math.floor(it) }?.toLong()?.toString()
+            } ?: return null
+            out += name
+        }
+        return out
     }
 
     private fun decodeStrandResult(obj: JsonObject): ServerFrame {

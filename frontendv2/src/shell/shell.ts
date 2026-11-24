@@ -70,9 +70,11 @@ export interface ScreenDef {
   count?: () => number | "";
 }
 
-/** L'ordre de la barre du bas d'un téléphone (la maquette : neuf entrées, Projets juste après le chat, Contacts entre
- *  Téléphone et Carte — ADR 0298). */
-export const TABBAR_ORDER = ["chat", "projets", "mail", "teams", "telephone", "contacts", "carte", "outils", "parametres"];
+/** L'ordre de la barre du bas d'un téléphone (la maquette : Projets juste après le chat, Contacts entre Téléphone et
+ *  Carte — ADR 0298 —, l'Agenda après Téléphone — ADR 0309). Dix rubriques ne tiennent pas sur 390 px : Carte, Outils
+ *  et Réglages passent sous « Plus » (`TABBAR_PLUS`), et la barre garde huit entrées. */
+export const TABBAR_ORDER = ["chat", "projets", "mail", "teams", "telephone", "agenda", "contacts", "carte", "outils", "parametres"];
+export const TABBAR_PLUS = ["carte", "outils", "parametres"];
 
 function cornerMarkup(): string {
   return `<span class="mika-corner" id="mika-corner" data-size="mini">
@@ -173,12 +175,13 @@ export class Shell {
         (d) => `<a href="#${d.id}" data-nav="${d.id}" title="${h(d.title)}" aria-label="${h(d.title)}">${ico(d.icon)}<span>${h(d.title)}</span><b class="badge" data-count="${d.id}"></b></a>`,
       )
       .join("");
+    const plus = TABBAR_PLUS.filter((id) => this.screens.has(id));
     const tabbar = TABBAR_ORDER.filter((id) => this.screens.has(id))
       .map((id) => this.screens.get(id)!)
       .map(
-        (d) => `<a href="#${d.id}" data-nav="${d.id}">${ico(d.icon)}<span>${h(d.short ?? d.title)}</span><b class="badge" data-count="${d.id}"></b></a>`,
+        (d) => `<a href="#${d.id}" data-nav="${d.id}"${plus.includes(d.id) ? " data-plus" : ""}>${ico(d.icon)}<span>${h(d.short ?? d.title)}</span><b class="badge" data-count="${d.id}"></b></a>`,
       )
-      .join("");
+      .join("") + (plus.length ? `<button class="tab-plus" type="button" data-tab-plus aria-haspopup="menu" title="${h(plus.map((id) => this.screens.get(id)!.short ?? this.screens.get(id)!.title).join(", "))}">${ico("more")}<span>Plus</span></button>` : "");
     const sections = defs.map((d) => `<section class="screen" data-screen="${d.id}" hidden></section>`).join("");
     return `<header class="top">
       <a class="brand" href="#chat" aria-label="Mika, accueil"><span class="brand-mark" aria-hidden="true">M</span><span class="brand-name">Mika</span></a>
@@ -221,6 +224,15 @@ export class Shell {
     }
     on($("#state-card")!, "[data-close-state]", "click", () => this.closeStateCard());
     $("#gsearch", this.root)!.addEventListener("click", () => this.openPalette());
+    // sur un téléphone, ce qui ne tient pas dans la barre du bas
+    $("[data-tab-plus]", this.root)?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const current = this.current?.screen;
+      openMenu(e.currentTarget as HTMLElement, TABBAR_PLUS.filter((id) => this.screens.has(id)).map((id) => {
+        const d = this.screens.get(id)!;
+        return { label: d.short ?? d.title, icon: d.icon, checked: current === id ? true : undefined, action: () => this.go(`#${id}`) };
+      }));
+    });
     const input = $<HTMLInputElement>("#palette-q")!;
     input.addEventListener("input", () => this.filterPalette());
     $("#palette")!.addEventListener("mousedown", (e) => {
@@ -317,6 +329,7 @@ export class Shell {
       if (a.dataset.nav === route.screen) a.setAttribute("aria-current", "page");
       else a.removeAttribute("aria-current");
     }
+    $("[data-tab-plus]", this.root)?.classList.toggle("on", TABBAR_PLUS.includes(route.screen));
     document.title = `${def.title} — Mika`;
     this.updateCounts();
   }

@@ -74,6 +74,7 @@ import fr.qwartz.mika.data.moi.tools.resourcesOf
 import fr.qwartz.mika.data.moi.tools.rulesOrigin
 import fr.qwartz.mika.data.moi.tools.shownTools
 import fr.qwartz.mika.data.moi.tools.summaryOf
+import fr.qwartz.mika.ui.agenda.AgendaRightsGroup
 import fr.qwartz.mika.ui.settings.SettingsPages
 import fr.qwartz.mika.ui.settings.settingsPage
 import fr.qwartz.mika.ui.shell.Gap
@@ -161,6 +162,8 @@ internal fun RightsTab(graph: AppGraph, vm: ToolsViewModel, modifier: Modifier) 
                         }
                     }
                 }
+                // « Tes agendas » (ADR 0309, la maquette `agenda-droits.js`) : le tableau de chacun, sur sa page
+                item(key = "agendas") { AgendaRightsGroup(graph) }
                 item(key = "note") {
                     Text(
                         stringResource(R.string.tools_note),

@@ -35,8 +35,10 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
+import fr.qwartz.mika.data.moi.LiveSignal
 import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.MoiDates
+import fr.qwartz.mika.data.moi.TeamsLive
 import fr.qwartz.mika.data.moi.Tone
 import fr.qwartz.mika.data.moi.map
 import fr.qwartz.mika.data.moi.teams.Kinds
@@ -53,6 +55,7 @@ import fr.qwartz.mika.data.moi.teams.replyText
 import fr.qwartz.mika.data.moi.teams.retouched
 import fr.qwartz.mika.ui.Route
 import fr.qwartz.mika.ui.components.rememberNow
+import fr.qwartz.mika.ui.shell.FollowLive
 import fr.qwartz.mika.ui.shell.BarNav
 import fr.qwartz.mika.ui.shell.Gap
 import fr.qwartz.mika.ui.shell.Load
@@ -77,6 +80,12 @@ class TeamsRepliesViewModel(deps: TeamsDeps) : TeamsScreenModel(deps) {
     fun load(quiet: Boolean = false) {
         if (!quiet && replies !is Load.Ready) replies = Load.Loading
         viewModelScope.launch { read(quiet) }
+    }
+
+    /** Le direct (ADR 0308) : ses réponses ont changé (`teams.replies`), ou un compte (`teams` : qui décide de
+     *  chacune) — relues sans bruit. Rend la main quand c'est relu. */
+    suspend fun onLive(signal: LiveSignal) {
+        if (TeamsLive.repliesShow(signal)) read(quiet = true)
     }
 
     fun pull() {
@@ -113,6 +122,8 @@ fun TeamsRepliesScreen(graph: AppGraph) {
     val vm: TeamsRepliesViewModel = viewModel(key = "teams.replies|$session") { TeamsRepliesViewModel(TeamsDeps(graph)) }
     LaunchedEffect(vm) { vm.load(quiet = true) }
     LaunchedEffect(vm) { vm.said.collect { shell.toast(it) } }
+    // relues à chaque retour de l'app au premier plan, et quand le direct dit qu'elles ont changé
+    FollowLive(graph.live, TeamsLive.REPLIES, vm, onShown = { first -> if (!first) vm.load(quiet = true) }) { vm.onLive(it) }
     var asking by remember { mutableStateOf<Pair<Ask, TeamsReply>?>(null) }
     val accounts = vm.accountList
     SectionScaffold(

@@ -343,8 +343,9 @@ class MeApiBase:
         self.address_tries = SlidingWindow(*ADDRESSES)
         #: l'écran Carte, par compte : les fiches et les événements lus, les photos, « Actualiser », les préchargements
         self.map_reads = SlidingWindow(*MAP_READS)
-        #: « Corriger », par compte (``CORRECTIONS``)
+        #: « Corriger », par compte (``CORRECTIONS``), et les comptes dont une correction est en cours (une à la fois)
         self.corrections = SlidingWindow(*CORRECTIONS)
+        self.correcting: set[int] = set()
         self.photo_reads = SlidingWindow(*PHOTO_READS)
         self.refreshes = SlidingWindow(*REFRESHES)
         self.preloads = SlidingWindow(*PRELOADS)

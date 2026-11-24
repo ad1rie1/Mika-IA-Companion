@@ -34,7 +34,8 @@ import re
 import threading
 import time
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,7 @@ from typing import Any
 from sqlalchemy import and_, case, delete, false, func, or_, select, true, update
 from sqlalchemy.orm import Session, aliased, sessionmaker
 
+from mika.adapters.changes import Changes, Listener
 from mika.adapters.database import Target, as_target
 from mika.adapters.teams.config import HER, TeamsConfig
 from mika.adapters.teams.models import (
@@ -60,6 +62,7 @@ from mika.adapters.teams.models import (
     fit,
 )
 from mika.contracts import teams as teams_c
+from mika.ports import changes
 from mika.ports.drafts import to_fill
 from mika.ports.gate import ACCEPTED, CONFLICT, MISSING
 from mika.ports.paging import fold_text
@@ -106,6 +109,7 @@ from mika.ports.teams import (
     Stored,
     TeamsProfile,
     Voice,
+    conversation_key,
     message_ref,
     person_key,
     plain,
@@ -362,8 +366,9 @@ class TeamsStore:
     comptes, leur signature, leur nom).
 
     Le cache a une seule connexion, partagée sous ``_lock`` : chaque méthode publique ouvre une session courte
-    (``begin`` pour écrire, validée à la sortie) ; les aides internes reçoivent la sienne (``s``) — deux sessions à
-    la fois sur la même connexion se marcheraient dessus."""
+    (``_writing`` pour écrire, validée à la sortie) ; les aides internes reçoivent la sienne (``s``) — deux sessions à
+    la fois sur la même connexion se marcheraient dessus. Chaque écriture dit ce qu'elle change, une fois validée
+    (``on_change``, ADR 0308)."""
 
     def __init__(self, config: Callable[[], TeamsConfig], path: Path | Target, *,
                  now: Callable[[], int] = _now_us) -> None:
@@ -375,15 +380,40 @@ class TeamsStore:
         self._engine = target.engine(shared=True)
         TEAMS.create_all(self._engine)
         self._session = sessionmaker(self._engine, expire_on_commit=False)
+        #: ce que ses écritures changent, dit une fois validées (ADR 0308)
+        self._changes = Changes()
+
+    # ── ses écritures, et ce qu'elles changent (ADR 0308) ──
+    @contextmanager
+    def _writing(self) -> Iterator[Session]:
+        """Une écriture : une session sous le verrou, validée à la sortie ; ce qu'elle a noté (``_changed``) part
+        ensuite, rien si elle est annulée."""
+        with self._lock, self._changes.writing(), self._session.begin() as s:
+            yield s
+
+    def on_change(self, fn: Listener) -> None:
+        """Prévenir ``fn`` de chaque écriture, une fois validée : son sujet (``teams`` : messages et conversations ;
+        ``teams.drafts`` : un brouillon ; ``teams.outbox`` : la boîte d'envoi), ses comptes et ses conversations
+        (``compte~id``). Appelé dans le fil qui a écrit."""
+        self._changes.listen(fn)
+
+    def _changed(self, topic: str, account: str = "", conversations: Sequence[str] = ()) -> None:
+        """Ce que l'écriture en cours change : un compte (vide : on ne sait pas lequel), ses conversations."""
+        keys = tuple(sorted({conversation_key(account, c) for c in conversations if c})) if account else ()
+        self._changes.note(changes.Change(topic, (account,) if account else (), keys))
 
     # ── ses comptes ──
     @staticmethod
     def _account_in(s: Session, account: str) -> AccountRow | None:
         return s.get(AccountRow, _account_key(account))
 
-    def accounts(self) -> list[AccountInfo]:
-        """Ses comptes réglés (dans l'ordre de leur clé), avec ce que leur extension en a dit."""
+    def accounts(self, *, extension: bool = True) -> list[AccountInfo]:
+        """Ses comptes réglés (dans l'ordre de leur clé), avec ce que leur extension en a dit ; ``extension`` faux :
+        tels que les réglages les disent, sans ce que l'extension en a dit — ni base ni verrou, que ses écritures
+        tiennent le temps d'un lot (ce qui suffit à savoir qui les voit : le direct, ADR 0308)."""
         cfg = self._config()
+        if not extension:
+            return [AccountInfo(key, a.label, a.owner, enabled=a.enabled) for key, a in sorted(cfg.accounts.items())]
         with self._lock, self._session() as s:
             rows = {r.key: r for r in s.scalars(select(AccountRow))}
         out = []
@@ -444,10 +474,14 @@ class TeamsStore:
         fenêtre du direct (``HISTORY_LIVE_WINDOW``) : en deçà, il se range comme du direct."""
         new = known = twins = recent = 0
         touched: set[str] = set()
+        #: les conversations où quelque chose se voit autrement (ADR 0308) : un message neuf, retouché, supprimé, ses
+        #: réactions, son titre ; et celles où un brouillon s'est réglé
+        moved: set[str] = set()
+        answered: set[str] = set()
         replied: dict[str, int] = {}
         settled: list[Settled] = []
         key = _account_key(account)
-        with self._lock, self._session.begin() as s:
+        with self._writing() as s:
             acct = self._account_in(s, key)
             if acct is None:
                 acct = AccountRow(key=key, last_batch=0, self_id="", self_name="")
@@ -461,6 +495,8 @@ class TeamsStore:
             seen: dict[str, ConversationRow] = {}
             for c in batch.conversations:
                 found = self._conversation_row(s, seen, key, fit(c.id, CONVERSATION_MAX))
+                if (c.title and found.title != c.title) or (c.kind != "other" and found.kind != c.kind):
+                    moved.add(found.id)
                 if c.title:  # un titre vide ou un genre inconnu n'efface pas ce qu'on savait
                     found.title = c.title
                 if c.kind != "other":
@@ -472,6 +508,8 @@ class TeamsStore:
                 if m.deleted:  # supprimé dans Teams : son texte part du cache (jamais remarqué s'il ne l'était pas)
                     if row is not None:
                         known += 1
+                        if row.text or row.reactions or row.quote:
+                            moved.add(row.conversation)
                         row.text, row.acked, row.reactions, row.quote = "", True, "", ""
                     continue
                 own = m.own or written_by_self(m.author_id, m.author, self_id, self_name)
@@ -484,10 +522,13 @@ class TeamsStore:
                     text = self._with_images(s, row.ref, m.text)
                     if row.text != text:
                         row.text = text
+                        moved.add(row.conversation)
                     if reactions is not None and (row.reactions or "") != reactions:
                         row.reactions = reactions
+                        moved.add(row.conversation)
                     if quote is not None and (row.quote or "") != quote:
                         row.quote = quote
+                        moved.add(row.conversation)
                     continue
                 conv = fit(m.conversation, CONVERSATION_MAX)
                 author_key = author_key_of(m.author_id)
@@ -499,6 +540,7 @@ class TeamsStore:
                     if quote is not None:
                         twin.quote = quote
                     twins += 1
+                    moved.add(twin.conversation)
                     continue
                 live = not batch.history or at >= now - HISTORY_LIVE_WINDOW
                 new += 1
@@ -513,10 +555,17 @@ class TeamsStore:
                 found.last_at = max(found.last_at or 0, at)
                 if own and live:
                     replied[conv] = max(replied.get(conv, 0), at)
-                    settled.extend(self._answered_by_owner(s, key, conv, at, m.text, now))
+                    done = self._answered_by_owner(s, key, conv, at, m.text, now)
+                    if done:
+                        settled.extend(done)
+                        answered.add(conv)
             if touched:
                 self._prune(s, key, touched)
             profiles = self._keep_profiles(s, key, batch.profiles, now) if batch.profiles else 0
+            if moved | touched:
+                self._changed(changes.TEAMS, key, sorted(moved | touched))
+            if answered:  # un brouillon posé qu'elle a vu partir, ou qui n'a pas servi : il quitte la boîte d'envoi
+                self._changed(changes.OUTBOX, key, sorted(answered))
         return Stored(new=new, known=known, replied=tuple(sorted(replied.items())), settled=tuple(settled),
                       twins=twins, recent=recent, profiles=profiles)
 
@@ -657,7 +706,7 @@ class TeamsStore:
         qu'une ; au-delà de la place du compte, les plus anciennes partent."""
         key = _account_key(account)
         ref = message_ref(image.conversation, image.message_id, key)
-        with self._lock, self._session.begin() as s:
+        with self._writing() as s:
             row = s.scalars(select(MessageRow).where(MessageRow.account == key,
                                                      or_(MessageRow.ref == ref, MessageRow.alias == ref))).first()
             if row is None:
@@ -670,6 +719,7 @@ class TeamsStore:
                 row.images_pending -= 1
             s.flush()
             self._prune_images(s, key)
+            self._changed(changes.TEAMS, key, [row.conversation])
         return IMAGE_KEPT
 
     @staticmethod
@@ -694,7 +744,7 @@ class TeamsStore:
     def image_read(self, image_id: int, *, seen: str, sensitive: bool, read: bool) -> str:
         """Ce que Mika a vu d'une image ; un échec passager (``read`` faux) la laisse à regarder, ``IMAGE_TRIES``
         fois au plus (puis elle est tenue pour lue, sans rien). Le texte de son message suit."""
-        with self._lock, self._session.begin() as s:
+        with self._writing() as s:
             row = s.get(ImageRow, image_id)
             if row is None:
                 return ""
@@ -707,6 +757,8 @@ class TeamsStore:
             if message is not None and row.read and row.seen:
                 s.flush()
                 message.text = self._with_images(s, row.ref, message.text)
+            if message is not None:  # ce qu'elle a vu de l'image se montre avec elle
+                self._changed(changes.TEAMS, message.account, [message.conversation])
             return row.ref
 
     def images_of(self, refs: Sequence[str]) -> list[MessageImage]:
@@ -731,7 +783,7 @@ class TeamsStore:
         fait qu'une."""
         key = _account_key(account)
         person = author_key_of(photo.person)
-        with self._lock, self._session.begin() as s:
+        with self._writing() as s:
             profile = s.get(ProfileRow, (key, person))
             if profile is None or not photo.etag or (profile.avatar or "") != photo.etag:
                 return PHOTO_UNKNOWN
@@ -742,6 +794,7 @@ class TeamsStore:
                 row = PhotoRow(account=key, key=person)
                 s.add(row)
             row.etag, row.mime, row.size, row.data, row.updated = photo.etag, photo.mime, len(photo.data), photo.data, now
+            self._changed(changes.TEAMS, key)  # sa photo, partout où cette personne paraît dans ce compte
         return PHOTO_KEPT
 
     def photo(self, account: str, person: str) -> Photo | None:
@@ -839,7 +892,7 @@ class TeamsStore:
     def ack(self, refs: Sequence[str]) -> None:
         if not refs:
             return
-        with self._lock, self._session.begin() as s:
+        with self._writing() as s:
             s.execute(update(MessageRow).where(MessageRow.ref.in_(list(refs))).values(acked=True))
 
     def message(self, ref: str) -> Message | None:
@@ -984,7 +1037,8 @@ class TeamsStore:
         now = self._now()
         if not d.id:
             d = replace(d, id=f"t{uuid.uuid4().hex[:12]}", created=now)
-        with self._lock, self._session.begin() as s:
+        with self._writing() as s:
+            self._changed(changes.TEAMS_DRAFTS, _account_key(d.account), [fit(d.conversation, CONVERSATION_MAX)])
             return self._write(s, replace(d, updated=now))
 
     @staticmethod
@@ -1004,10 +1058,11 @@ class TeamsStore:
         return [_draft(r) for r in rows]
 
     def discard_draft(self, draft_id: str) -> None:
-        with self._lock, self._session.begin() as s:
+        with self._writing() as s:
             found = self._draft_in(s, draft_id)
             if found is not None and found.state == WRITTEN:
                 self._write(s, replace(found, state=DISCARDED, updated=self._now()))
+                self._changed(changes.TEAMS_DRAFTS, found.account, [found.conversation])
 
     def _final(self, s: Session, d: Draft, her: str) -> str:
         if d.author:  # écrit par la personne elle-même (ADR 0189) : sous son nom, sans la signature de son IA
@@ -1036,7 +1091,7 @@ class TeamsStore:
 
     # ── la file ──
     def enqueue(self, draft_id: str, *, mode: str, digest: str, expires_at: int, now: int, her: str = "") -> str:
-        with self._lock, self._session.begin() as s:
+        with self._writing() as s:
             d = self._draft_in(s, draft_id)
             if d is None:
                 return "ce brouillon n'existe plus"
@@ -1051,6 +1106,7 @@ class TeamsStore:
                 return shown.blocked  # posé dans Teams, un « à compléter » se remplit ; envoyé, jamais
             self._write(s, replace(d, state=QUEUED, mode=mode, digest=shown.digest, final=shown.text,
                                    expires_at=expires_at, updated=now))
+            self._changed(changes.OUTBOX, d.account, [d.conversation])
         return ""
 
     def expire_written(self, account: str, now: int) -> int:
@@ -1059,7 +1115,7 @@ class TeamsStore:
         compte, on ne sait pas s'il est parti (``echec``). Ses propositions à elle ont leur échéance au journal
         (``teams.expire``) ; celles-ci n'y sont pas. Rend combien ont été réglés."""
         settled = 0
-        with self._lock, self._session.begin() as s:
+        with self._writing() as s:
             rows = s.execute(select(*_DRAFT).where(DraftRow.account == _account_key(account),
                                                    DraftRow.state.in_((QUEUED, PLACED, SENDING)))).all()
             for d in (_draft(r) for r in rows):
@@ -1068,6 +1124,7 @@ class TeamsStore:
                 late = d.state == SENDING
                 self._write(s, replace(d, state=FAILED if late else UNUSED, updated=now,
                                        reason="envoi sans nouvelles de l'extension" if late else "pas parti à temps"))
+                self._changed(changes.OUTBOX, d.account, [d.conversation])
                 settled += 1
         return settled
 
@@ -1114,7 +1171,7 @@ class TeamsStore:
 
     def settle(self, draft_id: str, result: str, *, now: int, text: str = "", reason: str = "",
                account: str = "") -> tuple[str, Settled | None]:
-        with self._lock, self._session.begin() as s:
+        with self._writing() as s:
             d = self._draft_in(s, draft_id)
             if d is None or (d.state not in (*OPEN_STATES, GONE, FAILED, UNUSED)):
                 return MISSING, None
@@ -1124,6 +1181,7 @@ class TeamsStore:
                 if d.state != QUEUED or d.mode != OUTBOX_SEND:
                     return CONFLICT, None  # déjà réservé (ailleurs, ou par un essai d'avant), réglé, ou à poser
                 self._write(s, replace(d, state=SENDING, updated=now))
+                self._changed(changes.OUTBOX, d.account, [d.conversation])  # en cours d'envoi : il se voit aussitôt
                 return ACCEPTED, None
             if result == "placed":
                 if d.state == PLACED:
@@ -1164,6 +1222,7 @@ class TeamsStore:
                     self._write(s, replace(d, state=UNUSED, reason=done.reason))
             else:
                 return CONFLICT, None
+            self._changed(changes.OUTBOX, d.account, [d.conversation])
         return ACCEPTED, done
 
     # ── qui elle lit (l'annuaire, ADR 0298) ──
@@ -1287,11 +1346,14 @@ class TeamsStore:
         (et leurs réactions), ses brouillons, les profils et les photos qu'il a reçus et ce que son extension en avait
         dit s'effacent ; le nombre de lignes effacées."""
         key = _account_key(account)
-        with self._lock, self._session.begin() as s:
+        with self._writing() as s:
             n = 0
             for row in (DraftRow, ImageRow, MessageRow, ConversationRow, ProfileRow, PhotoRow):
                 n += _count(s.execute(delete(row).where(row.account == key)))
             n += _count(s.execute(delete(AccountRow).where(AccountRow.key == key)))
+            if n:
+                self._changed(changes.TEAMS, key)
+                self._changed(changes.OUTBOX, key)
         return n
 
     async def forget(self, subject: str) -> int:
@@ -1307,7 +1369,7 @@ class TeamsStore:
         # la forme canonique, et celle reçue telle quelle (rangée avant qu'il n'y en ait qu'une : ADR 0304) — effacer,
         # pas convertir
         keys = sorted({key, fit(author.lower(), AUTHOR_MAX)})
-        with self._lock, self._session.begin() as s:
+        with self._writing() as s:
             # ses tête-à-tête : le genre que Teams leur donne, ou leur identifiant (le suffixe comparé ici, en
             # minuscules, pareil sur les deux moteurs)
             pairs = s.execute(select(MessageRow.account, MessageRow.conversation, ConversationRow.kind).distinct()
@@ -1341,6 +1403,9 @@ class TeamsStore:
                                                              DraftRow.conversation == conv)))
                 s.execute(delete(ConversationRow).where(ConversationRow.account == account,
                                                         ConversationRow.id == conv))
+            if n:  # ses messages, ses réactions, ses brouillons : dans tous les comptes
+                self._changed(changes.TEAMS)
+                self._changed(changes.OUTBOX)
         return n
 
     def close(self) -> None:

@@ -270,6 +270,10 @@ class EpisodeRunner:
         #: ce que les facultés tirent d'un énoncé, journalisé juste après lui (``Bootstrap.interpret``) : ce que le
         #: modèle qui a répondu a lu de la personne (ADR 0093) ; ``None`` : personne n'interprète
         self.interpret: Callable[[int, str], Awaitable[None]] | None = None
+        #: prévenu quand l'étape d'un épisode ouvert change (``step_of`` : un outil part, il réfléchit de nouveau) — ce
+        #: que l'application pousse aux écrans (ADR 0308) ; ``None`` : personne. L'étape ne vit qu'en mémoire ; son
+        #: départ et sa fin se disent au journal.
+        self.on_step: Callable[[str], None] | None = None
         self._live: dict[str, _Live] = {}
 
     def yields(self, episode: str) -> bool:
@@ -282,6 +286,11 @@ class EpisodeRunner:
         ``None`` : il n'est pas (ou plus) en cours ici."""
         live = self._live.get(episode)
         return live.step if live is not None else None
+
+    def _stepped(self, episode: str) -> None:
+        """Son étape vient de changer : qui écoute le sait (``on_step``) ; une panne de l'écouteur se tait."""
+        if self.on_step is not None:
+            call(self.on_step, episode, label="étape d'un épisode")
 
     # ── préemption ──
     def holder_task(self, correlation: str) -> asyncio.Task[Any] | None:
@@ -322,6 +331,7 @@ class EpisodeRunner:
         now = mind.clock.now()
         ep.step = EpisodeStep(THINKING, now, now)
         self._live[eid] = ep
+        # pas encore ouvert au journal : son départ se dit par ``runtime.episode_started`` (ADR 0308), pas ici
         try:
             got = await acall(self._run, ep, label=f"épisode {req.kind}")
             if isinstance(got, Failed):
@@ -823,8 +833,10 @@ class EpisodeRunner:
             if event.phase == TOOL_START:
                 spec = tools.get(event.name)
                 ep.step = EpisodeStep(TOOL, started, now, event.name, (spec.label if spec is not None else "") or "")
+                self._stepped(ep.id)
             elif event.phase == TOOL_END:
                 ep.step = EpisodeStep(THINKING, started, now)
+                self._stepped(ep.id)
             if not shown:
                 return
             assert port is not None and target is not None

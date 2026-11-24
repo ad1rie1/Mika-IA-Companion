@@ -116,6 +116,11 @@ object MikaProtocol {
     const val TYPE_READ = "read"
     /** Où est la personne (« Lui dire où je suis », ADR 0119) : sa position, ou `off` pour l'effacer. */
     const val TYPE_WHERE = "where"
+    /**
+     * Ce qui a changé dans ce que montrent les routes de `/api/moi` (ADR 0308 ; `protocol.py::changed`,
+     * `docs/protocole-moi.md` § 2 bis) : les sujets ([Topics]), jamais le contenu — l'écran relit sa route.
+     */
+    const val TYPE_CHANGED = "changed"
 
     // ── Sa position (ADR 0119 ; adapters/web/protocol.py `WHERE_*`, `note_item`) ──
     /** Le nom du lieu tient sur une ligne, borné par le serveur : au-delà, il est coupé avant de partir. */

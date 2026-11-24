@@ -186,6 +186,8 @@ object OwnStates {
     const val QUEUED = "en_file"
     const val SENDING = "envoi"
     const val PLACED = "pose"
+    /** Parti : l'extension l'a envoyé, son message n'est pas encore revenu dans le fil (ADR 0308). */
+    const val SENT = "parti"
     /** Jamais parti : l'extension ne l'a pas relevé à temps (montré un jour). */
     const val UNUSED = "inutilise"
     const val FAILED = "echec"

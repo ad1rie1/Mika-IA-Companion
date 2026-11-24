@@ -524,8 +524,9 @@ class AccountInfo:
 
 
 class TeamsPort(Protocol):
-    def accounts(self) -> list[AccountInfo]:
-        """Ses comptes réglés, dans l'ordre de leur clé."""
+    def accounts(self, *, extension: bool = True) -> list[AccountInfo]:
+        """Ses comptes réglés, dans l'ordre de leur clé ; ``extension`` faux : tels que les réglages les disent, sans
+        ce que leur extension en a dit (ni base ni verrou)."""
         ...
 
     def account(self, key: str) -> AccountInfo | None: ...
@@ -732,3 +733,9 @@ class TeamsGate(Protocol):
     async def live(self, key: str) -> GateResult: ...
 
     async def live_items(self, key: str) -> GateResult: ...
+
+    async def live_wait(self, key: str, seen: int, timeout: float) -> int: ...
+
+    def live_closed(self, key: str) -> None:
+        """La connexion en direct de cette clé s'est fermée : ce que les écrans montrent de sa présence se relit."""
+        ...

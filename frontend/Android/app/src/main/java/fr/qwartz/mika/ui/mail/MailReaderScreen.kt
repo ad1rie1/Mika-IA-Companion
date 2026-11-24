@@ -55,10 +55,11 @@ import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
 import fr.qwartz.mika.data.moi.Caps
 import fr.qwartz.mika.data.moi.Levels
+import fr.qwartz.mika.data.moi.LiveSignal
+import fr.qwartz.mika.data.moi.MailLive
 import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.MoiDates
 import fr.qwartz.mika.data.moi.Tone
-import fr.qwartz.mika.data.moi.WORK_POLL_MS
 import fr.qwartz.mika.data.moi.Work
 import fr.qwartz.mika.data.moi.WorkTurn
 import fr.qwartz.mika.data.moi.caps
@@ -87,7 +88,6 @@ import fr.qwartz.mika.data.moi.mail.triageNote
 import fr.qwartz.mika.data.moi.mail.voiceLabel
 import fr.qwartz.mika.data.moi.ofName
 import fr.qwartz.mika.data.moi.watchWork
-import fr.qwartz.mika.data.moi.workGaveUp
 import fr.qwartz.mika.data.moi.workTurn
 import fr.qwartz.mika.ui.Route
 import fr.qwartz.mika.ui.components.WorkLine
@@ -95,6 +95,7 @@ import fr.qwartz.mika.ui.components.rememberNow
 import fr.qwartz.mika.ui.shell.BarAction
 import fr.qwartz.mika.ui.shell.BarMenu
 import fr.qwartz.mika.ui.shell.BarNav
+import fr.qwartz.mika.ui.shell.FollowLive
 import fr.qwartz.mika.ui.shell.Gap
 import fr.qwartz.mika.ui.shell.Load
 import fr.qwartz.mika.ui.shell.LoadBox
@@ -126,8 +127,8 @@ sealed interface ReaderOrder {
 
 /**
  * La liseuse d'un mail (`Route.MailMessage`) : le mail entier, ses boîtes (son niveau, quand il devient lu), et son
- * brouillon pour ce mail s'il y en a un, où elle en est d'une réponse qu'elle y prépare (ADR 0306, relu toutes les deux
- * secondes). Les gestes de « ranger » se disent à la liste ([MailChanges]). Le modèle sert
+ * brouillon pour ce mail s'il y en a un, où elle en est d'une réponse qu'elle y prépare (ADR 0306, poussé par le
+ * direct, ADR 0308 : [onLive]). Les gestes de « ranger » se disent à la liste ([MailChanges]). Le modèle sert
  * tous les mails de la session : un geste qui répond après qu'on a changé de mail ne pose rien sur le suivant, et ses
  * ordres ne suivent que l'écran de la visite où il a commencé.
  */
@@ -147,10 +148,6 @@ class MailReaderViewModel(deps: MailDeps) : MailScreenModel(deps) {
     /** Où elle en est d'une réponse à ce mail (ADR 0306) ; `null` : rien en cours. */
     var work by mutableStateOf<Work?>(null)
         private set
-    /** Guettée sans réponse au-delà du plafond : on cesse de relire où elle en est (une nouvelle demande, si). */
-    private var gaveUp by mutableStateOf(false)
-    /** Depuis quand on guette (0 : pas encore). */
-    private var watchSince = 0L
     var busy by mutableStateOf(false)
         private set
     /** Sa mise en page (`/mail/frame`), pour un mail HTML ; `null` : pas de HTML, ou pas encore demandée. */
@@ -181,8 +178,6 @@ class MailReaderViewModel(deps: MailDeps) : MailScreenModel(deps) {
         draft = null
         asked = false
         work = null
-        gaveUp = false
-        watchSince = 0L
         frameJob?.cancel()
         frame = null
         load(quiet = false)
@@ -193,11 +188,20 @@ class MailReaderViewModel(deps: MailDeps) : MailScreenModel(deps) {
         load(quiet = false)
     }
 
-    private fun load(quiet: Boolean) {
+    private fun load(quiet: Boolean): Job {
         job?.cancel()
         val r = ref
-        job = viewModelScope.launch {
-            (api.boxes() as? MoiApi.Result.Ok)?.let { boxes = it.value }
+        val v = orders.visit
+        return viewModelScope.launch {
+            val read = (api.boxes() as? MoiApi.Result.Ok)?.value
+            read?.let { boxes = it }
+            // relu sans bruit, le mail montré n'est plus d'une de tes boîtes (retirée, plus partagée) : retour à la
+            // liste, plutôt qu'un mail figé qu'aucune relecture ne suit plus
+            val shown = full
+            if (quiet && read != null && shown != null && shown.ref == r && MailLive.openGone(shown.box, read.boxes)) {
+                orders.send(v, ReaderOrder.Back)
+                return@launch
+            }
             val got = api.message(r)
             if (r != ref) return@launch
             if (got is MoiApi.Result.Failed && quiet && mail is Load.Ready) return@launch
@@ -208,7 +212,7 @@ class MailReaderViewModel(deps: MailDeps) : MailScreenModel(deps) {
             asked = her?.asked == true && her.draft.isBlank()
             work = m.work
             draft = her?.draft?.takeIf { it.isNotBlank() }?.let { findDraft(it) }
-        }
+        }.also { job = it }
     }
 
     private suspend fun findDraft(id: String): MailDraft? =
@@ -348,11 +352,8 @@ class MailReaderViewModel(deps: MailDeps) : MailScreenModel(deps) {
                         orders.send(v, ReaderOrder.OpenDraft(id))
                     } else {
                         if (ref == m.ref) {
-                            val at = deps.now()
                             asked = true
-                            if (work == null) work = Work.waiting(at)
-                            gaveUp = false
-                            watchSince = at
+                            if (work == null) work = Work.waiting(deps.now())
                         }
                         say(if (got.value.message == ALREADY) got.value.message else askedText)
                     }
@@ -363,34 +364,46 @@ class MailReaderViewModel(deps: MailDeps) : MailScreenModel(deps) {
         }
     }
 
-    /** On guette où elle en est : une réponse demandée, ou qu'elle prépare d'elle-même, sans brouillon encore. */
-    val watching: Boolean get() = full != null && watchWork(asked, work, arrived = draft != null, gaveUp = gaveUp)
+    /** On attend sa réponse ici : demandée, ou qu'elle prépare d'elle-même, sans brouillon encore (son arrivée se dit). */
+    val watching: Boolean get() = full != null && watchWork(asked, work, arrived = draft != null)
 
     /**
-     * Où elle en est (ADR 0306), relu toutes les deux secondes tant qu'on guette ([watching]), sans relire le mail : son
-     * brouillon arrivé, il paraît ici ([arrived] le dit) ; plus rien de demandé ni d'en cours, on cesse ; sinon seule sa
-     * ligne change. Au-delà du plafond, on cesse de guetter ; une relecture manquée attend la suivante.
+     * Le direct (ADR 0308, § 2 bis) : le mail ouvert se relit sans bruit si sa boîte est nommée (`mail`, `mail.drafts`) ;
+     * où elle en est d'une réponse, si ce mail est nommé (`mail.work`). Une reconnexion relit les deux. [arrived] : ce
+     * qu'on dit quand sa réponse attendue arrive. Rend la main quand c'est relu.
      */
-    suspend fun pollWork(arrived: String) {
-        if (!watching) return
+    suspend fun onLive(signal: LiveSignal, arrived: String) {
+        val m = full ?: return
+        // ce qu'on attendait avant ce signal : le mail relu en même temps a pu poser son brouillon le premier
+        val waited = watching
+        val had = draft?.id
+        val reading = if (MailLive.openShows(m.box, signal)) load(quiet = true) else null
+        if (MailLive.workShows(m.ref, signal)) readWork(arrived, waited, had)
+        reading?.join()
+    }
+
+    /**
+     * Où elle en est (ADR 0306), relu sans relire le mail — le direct dit qu'elle y travaille (`mail.work`) : son
+     * brouillon arrivé, il paraît ici (et [arrived] le dit, si on l'attendait — [waited] — et qu'il n'était pas déjà
+     * là — [had]) ; plus rien de demandé ni d'en cours, la ligne s'en va ; sinon seule sa ligne change. Une relecture
+     * manquée attend le signal suivant.
+     */
+    suspend fun readWork(arrived: String, waited: Boolean = watching, had: String? = draft?.id) {
         val r = ref
-        if (watchSince == 0L) watchSince = deps.now()
-        if (workGaveUp(watchSince, deps.now())) {
-            gaveUp = true
-            return
-        }
+        if (full == null) return
         val got = (api.work(r) as? MoiApi.Result.Ok)?.value ?: return
         if (r != ref) return
         when (workTurn(arrived = got.draft.isNotBlank(), asked = got.asked, work = got.work)) {
             WorkTurn.ARRIVED -> {
-                // ses brouillons illisibles : la relecture suivante le retrouvera
+                // ses brouillons illisibles : le signal suivant le retrouvera
                 val d = findDraft(got.draft) ?: return
                 if (r != ref) return
+                val fresh = had != d.id
                 draft = d
                 asked = false
                 work = null
-                say(arrived)
-                MailChanges.tell(MailChanges.Change.Drafts)
+                if (waited && fresh) say(arrived)
+                if (fresh) MailChanges.tell(MailChanges.Change.Drafts)
             }
             WorkTurn.ENDED -> {
                 // elle a fini sans en rendre, ou y a renoncé : plus rien n'est en cours ici
@@ -443,19 +456,13 @@ fun MailReaderScreen(graph: AppGraph, ref: String) {
             vm.markRead()
         }
     }
-    // où elle en est d'une réponse (ADR 0306) : relu toutes les deux secondes tant qu'on guette, l'app au premier plan ;
-    // l'écran ne se redessine que quand on commence ou cesse de guetter, la ligne seule à chaque étape
+    // le direct (ADR 0308) : le mail se relit sans bruit quand sa boîte change, où elle en est d'une réponse quand elle
+    // y travaille ; relu une fois à chaque retour de l'app au premier plan (l'ouverture, elle, est celle de `open`).
+    // L'écran ne se redessine que quand elle commence ou cesse d'y travailler, la ligne seule à chaque étape
     val arrived = stringResource(R.string.mail_prefill_arrived)
-    val watching by remember(vm) { derivedStateOf { vm.watching } }
     val working by remember(vm) { derivedStateOf { vm.work != null } }
-    LaunchedEffect(ref, watching) {
-        if (!watching) return@LaunchedEffect
-        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            while (true) {
-                delay(WORK_POLL_MS)
-                vm.pollWork(arrived)
-            }
-        }
+    FollowLive(graph.live, MailLive.READER, vm, ref, visit, onShown = { first -> if (!first) vm.open(ref, visit) }) {
+        vm.onLive(it, arrived)
     }
 
     val c = vm.caps

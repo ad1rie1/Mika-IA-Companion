@@ -11,6 +11,11 @@ object NotificationChannels {
     const val CONNECTION = "connection"
     /** Les réponses que Mika propose pour WhatsApp ou Messages (ADR 0120) : c'est là que la personne autorise. */
     const val PHONE_DRAFTS = "phone_drafts"
+    /**
+     * L'Agenda (ADR 0309) : une invitation qui attend ta réponse, un ajout que Mika propose. Un seul canal (pas de
+     * « Rappels » à part : son rappel d'un rendez-vous est un message d'elle, déjà notifié par [MESSAGES]).
+     */
+    const val AGENDA = "agenda"
 
     /** Les identifiants des notifications : une seule conversation, une seule notification de messages. */
     const val ID_CONNECTION = 1
@@ -28,6 +33,11 @@ object NotificationChannels {
                 NotificationChannelCompat.Builder(PHONE_DRAFTS, NotificationManagerCompat.IMPORTANCE_HIGH)
                     .setName(context.getString(R.string.channel_phone_drafts_name))
                     .setDescription(context.getString(R.string.channel_phone_drafts_desc))
+                    .build(),
+                // Par défaut : une invitation, une proposition attendent ta décision, sans l'urgence d'un message.
+                NotificationChannelCompat.Builder(AGENDA, NotificationManagerCompat.IMPORTANCE_DEFAULT)
+                    .setName(context.getString(R.string.channel_agenda_name))
+                    .setDescription(context.getString(R.string.channel_agenda_desc))
                     .build(),
                 // Minimale : présente dans le volet, jamais dans la barre d'état ni sonore.
                 NotificationChannelCompat.Builder(CONNECTION, NotificationManagerCompat.IMPORTANCE_MIN)

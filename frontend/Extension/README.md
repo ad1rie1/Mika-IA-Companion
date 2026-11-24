@@ -163,7 +163,8 @@ ce délai ne repart à 2 s qu'à la première boîte reçue (Mika accepte chaque
 Le protocole de `/api/teams/live` : l'extension se présente dans les 10 s par un premier message `hello`, sa clé dans
 le champ `key` ; admise comme un relevé (la clé, l'état de Teams et du compte, la cadence), elle reçoit aussitôt
 `{"type": "outbox", "items": […]}` — les éléments tels que les rend `GET /api/teams/outbox` —, puis la même trame à
-chaque changement de la boîte (relue chaque seconde, la clé revérifiée), et `{"type": "ping"}` après 20 s sans
+chaque changement de la boîte (poussée dès qu'elle change, ADR 0308 ; relue au plus tard toutes les 30 s, la clé
+revérifiée), et `{"type": "ping"}` après 20 s sans
 changement. Ce qu'elle envoie ensuite (ses signes de vie) est lu et ignoré ; les issues restent en HTTP. Mika ferme
 en 4400 (rien de lisible), 4401 (clé refusée, ou retirée en cours de route), 4403 (une page web, Teams ou ce compte
 coupés), 4404 (pas de Teams), 4408 (pas présentée à temps), 4409 (remplacée : au-delà de 4 connexions d'une clé, la

@@ -46,6 +46,9 @@ class FakeMailApi : MailApi(MoiApi(OkHttpClient(), { null }, {})) {
 
     /** Les appels, dans l'ordre (« reply », « draftSend:d1 », « messages:1:50 », « tidy:move:INBOX »…). */
     val calls = mutableListOf<String>()
+    /** Combien de fois les boîtes se sont lues, et quels mails (à part de [calls], que d'autres tests comparent). */
+    var boxesReads = 0
+    val messageReads = mutableListOf<String>()
 
     private val gates = HashMap<String, CompletableDeferred<Unit>>()
 
@@ -65,9 +68,13 @@ class FakeMailApi : MailApi(MoiApi(OkHttpClient(), { null }, {})) {
         return value
     }
 
-    override suspend fun boxes(): MoiApi.Result<MailBoxes> = answer("boxes", MoiApi.Result.Ok(boxes))
+    override suspend fun boxes(): MoiApi.Result<MailBoxes> {
+        boxesReads++
+        return answer("boxes", MoiApi.Result.Ok(boxes))
+    }
 
     override suspend fun message(ref: String): MoiApi.Result<MailFull> {
+        messageReads += ref
         val got = mails[ref]?.let { MoiApi.Result.Ok(it) } ?: MoiApi.Result.Failed(MoiError(404, "Introuvable : ce n'est plus là."))
         return answer("message:$ref", got)
     }

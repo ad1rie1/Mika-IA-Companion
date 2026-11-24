@@ -2,7 +2,12 @@ package fr.qwartz.mika.ui.chat
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,7 +27,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
@@ -48,7 +57,12 @@ import fr.qwartz.mika.R
 import fr.qwartz.mika.data.approvals.ApprovalView
 import fr.qwartz.mika.data.moi.Tone
 import fr.qwartz.mika.data.net.ApprovalDecision
+import fr.qwartz.mika.data.moi.agenda.AgendaCard
+import fr.qwartz.mika.data.moi.agenda.CAPABILITY_AGENDA_WRITE
+import fr.qwartz.mika.data.moi.agenda.FormModes
 import fr.qwartz.mika.ui.Route
+import fr.qwartz.mika.ui.agenda.agendaColor
+import fr.qwartz.mika.ui.agenda.tintOf
 import fr.qwartz.mika.ui.shell.MIcon
 import fr.qwartz.mika.ui.shell.Tag
 import fr.qwartz.mika.ui.theme.mika
@@ -73,6 +87,7 @@ internal fun ChatTrayBand(
     acceptAll: Boolean = false,
     acceptingAll: Boolean = false,
     onAcceptAll: () -> Unit = {},
+    agenda: Map<Int, AgendaCard> = emptyMap(),
 ) {
     if (tray.isEmpty) return
     Column(
@@ -87,7 +102,9 @@ internal fun ChatTrayBand(
             ) {
                 if (acceptAll) AcceptAllRow(tray, acceptingAll, onAcceptAll)
                 for (card in tray.accords) {
-                    key(card.id) { ApprovalCardView(card, onDecide) }
+                    // un ajout à l'agenda (ADR 0309) montre l'événement qu'il ajouterait, « Modifier » et sa proposition
+                    val event = agenda[card.id.toInt()]?.takeIf { card.capability == CAPABILITY_AGENDA_WRITE }
+                    key(card.id) { ApprovalCardView(card, onDecide, event, onOpen) }
                 }
                 if (tray.drafts.isNotEmpty()) {
                     Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
@@ -200,16 +217,41 @@ private fun DraftLinkRow(d: TrayDraft, onOpen: (Route) -> Unit) {
 }
 
 @Composable
-private fun ApprovalCardView(card: ApprovalView, onDecide: (ApprovalView, ApprovalDecision) -> Unit) {
+private fun ApprovalCardView(
+    card: ApprovalView,
+    onDecide: (ApprovalView, ApprovalDecision) -> Unit,
+    event: AgendaCard? = null,
+    onOpen: (Route) -> Unit = {},
+) {
     val scheme = MaterialTheme.colorScheme
+    var raw by rememberSaveable(card.id) { mutableStateOf(false) }
     Card(
         colors = CardDefaults.cardColors(containerColor = scheme.tertiaryContainer),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(stringResource(R.string.approval_heading), style = MaterialTheme.typography.labelMedium)
-            Text(card.title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.semantics { heading() })
-            if (card.text.isNotEmpty()) {
+            if (event != null) {
+                Text(stringResource(R.string.agenda_chat_card_heading, event.calendar), style = MaterialTheme.typography.titleSmall, modifier = Modifier.semantics { heading() })
+                // « Mika demande ton accord · expire dans 1 h 40 » sous le titre : la ligne des gestes reste aux gestes
+                Text(
+                    listOf(stringResource(R.string.approval_heading), card.expiry.orEmpty()).filter { it.isNotEmpty() }.joinToString(" · "),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (card.expired) scheme.error else scheme.onTertiaryContainer.copy(alpha = 0.8f),
+                )
+                AgendaCardEvent(event) { onOpen(Route.AgendaProposal(event.id)) }
+                Row(
+                    Modifier.fillMaxWidth().clickable(role = Role.Button) { raw = !raw }.padding(vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    MIcon(if (raw) R.drawable.ic_m_chev_down else R.drawable.ic_m_chev_right, null, size = 14.dp)
+                    Spacer(Modifier.width(4.dp))
+                    Text(stringResource(R.string.agenda_chat_card_raw), style = MaterialTheme.typography.labelMedium)
+                }
+            } else {
+                Text(stringResource(R.string.approval_heading), style = MaterialTheme.typography.labelMedium)
+                Text(card.title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.semantics { heading() })
+            }
+            if (card.text.isNotEmpty() && (event == null || raw)) {
                 // Exactement ce qui partira : du texte brut, à chasse fixe, jamais interprété (ni gras, ni liens).
                 Surface(shape = RoundedCornerShape(8.dp), color = scheme.surface, modifier = Modifier.fillMaxWidth()) {
                     Text(
@@ -233,20 +275,73 @@ private fun ApprovalCardView(card: ApprovalView, onDecide: (ApprovalView, Approv
                     modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                 )
             }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    card.expiry.orEmpty(),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (card.expired) scheme.error else scheme.onTertiaryContainer.copy(alpha = 0.8f),
-                    modifier = Modifier.weight(1f),
-                )
-                OutlinedButton(onClick = { onDecide(card, ApprovalDecision.REFUSE) }, enabled = card.canRefuse) {
-                    Text(stringResource(R.string.approval_refuse))
+            if (event != null) {
+                // la maquette `agenda-chat.js` : Modifier à gauche ; Refuser, ✓ Ajouter à droite
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = { onOpen(Route.AgendaForm(FormModes.PROPOSAL, proposal = event.id)) }) {
+                        Text(stringResource(R.string.agenda_modify))
+                    }
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = { onDecide(card, ApprovalDecision.REFUSE) }, enabled = card.canRefuse) {
+                        Text(stringResource(R.string.approval_refuse))
+                    }
+                    Button(onClick = { onDecide(card, ApprovalDecision.ACCEPT) }, enabled = card.canAccept) {
+                        MIcon(R.drawable.ic_m_check, null, size = 16.dp)
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.agenda_add))
+                    }
                 }
-                Button(onClick = { onDecide(card, ApprovalDecision.ACCEPT) }, enabled = card.canAccept) {
-                    Text(stringResource(R.string.approval_accept))
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        card.expiry.orEmpty(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (card.expired) scheme.error else scheme.onTertiaryContainer.copy(alpha = 0.8f),
+                        modifier = Modifier.weight(1f),
+                    )
+                    OutlinedButton(onClick = { onDecide(card, ApprovalDecision.REFUSE) }, enabled = card.canRefuse) {
+                        Text(stringResource(R.string.approval_refuse))
+                    }
+                    Button(onClick = { onDecide(card, ApprovalDecision.ACCEPT) }, enabled = card.canAccept) {
+                        Text(stringResource(R.string.approval_accept))
+                    }
                 }
             }
+        }
+    }
+}
+
+/**
+ * L'événement qu'une carte d'ajout à l'agenda ajouterait (la maquette validée `agenda-chat.js`) : la barre de la couleur
+ * de son agenda, son titre, quand, où, « Mika te le rappelle » ; le toucher ouvre la proposition qui attend dans
+ * l'Agenda (décider ici ou là, c'est pareil).
+ */
+@Composable
+private fun AgendaCardEvent(e: AgendaCard, onClick: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    val color = agendaColor(e.color)
+    Surface(onClick = onClick, shape = RoundedCornerShape(10.dp), color = tintOf(color), modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.height(IntrinsicSize.Min)) {
+            Box(Modifier.width(4.dp).fillMaxHeight().background(color))
+            Column(Modifier.weight(1f).padding(horizontal = 10.dp, vertical = 8.dp)) {
+                Text(e.title, style = MaterialTheme.typography.titleSmall)
+                Text(e.whenWords, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+                if (e.place.isNotBlank()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        MIcon(R.drawable.ic_m_pin, null, size = 12.dp, tint = scheme.onSurfaceVariant)
+                        Spacer(Modifier.width(4.dp))
+                        Text(e.place, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                if (e.remind.isNotEmpty()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        MIcon(R.drawable.ic_m_sparkle, null, size = 12.dp, tint = mika.accent)
+                        Spacer(Modifier.width(4.dp))
+                        Text(stringResource(R.string.agenda_chat_card_remind, e.remind), style = MaterialTheme.typography.bodySmall, color = mika.accent)
+                    }
+                }
+            }
+            Box(Modifier.align(Alignment.CenterVertically).padding(end = 8.dp)) { MIcon(R.drawable.ic_m_chev_right, null, size = 16.dp) }
         }
     }
 }

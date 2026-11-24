@@ -6,7 +6,9 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import fr.qwartz.mika.core.AppGraph
+import fr.qwartz.mika.data.moi.LiveSignal
 import fr.qwartz.mika.data.moi.MoiApi
+import fr.qwartz.mika.data.moi.PhoneLive
 import fr.qwartz.mika.data.moi.chars
 import fr.qwartz.mika.data.moi.phone.OfferStates
 import fr.qwartz.mika.data.moi.phone.PhoneLimits
@@ -32,9 +34,6 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
-
-/** Le fil se relit à ce rythme tant qu'il est à l'écran. */
-internal const val PHONE_THREAD_REFRESH_MS = 20_000L
 
 /** Ce que l'écran dit du champ quand la proposition qu'il tenait s'est réglée (R3-04). */
 enum class FieldNote {
@@ -157,8 +156,15 @@ class PhoneThreadViewModel(private val deps: PhoneThreadDeps) : ViewModel() {
         load(quiet = false)
     }
 
-    /** Relire sans bruit (le rythme de l'écran) ; une relecture en cours suffit. */
+    /** Relire sans bruit (un retour sur l'écran) ; une relecture en cours suffit. */
     fun refresh() = load(quiet = true)
+
+    /** Le direct (ADR 0308) : le fil ouvert se relit sans bruit s'il est nommé (`phone` : un message, une de ses
+     *  propositions et son sort), repartant de zéro — une relecture en vol a pu partir avant ce changement. Rend la main
+     *  quand c'est relu. */
+    suspend fun onLive(signal: LiveSignal) {
+        if (current != null && PhoneLive.threadShows(key, signal)) load(quiet = true, force = true).join()
+    }
 
     /** « Messages plus anciens » : tous ceux que le serveur rend d'un fil. */
     fun loadOlder() {
@@ -175,12 +181,12 @@ class PhoneThreadViewModel(private val deps: PhoneThreadDeps) : ViewModel() {
     fun decidable(o: PhoneOffer): PhoneDraft? =
         if (o.id in decidedHere) null else decidableHere(o, key, waiting, now())
 
-    private fun load(quiet: Boolean, force: Boolean = false) {
-        if (quiet && !force && job?.isActive == true) return
+    private fun load(quiet: Boolean, force: Boolean = false): Job {
+        job?.takeIf { quiet && !force && it.isActive }?.let { return it }
         job?.cancel()
         val k = key
         val s = ++seq
-        job = viewModelScope.launch {
+        return viewModelScope.launch {
             val drafts = here.waiting()
             val got = api.thread(k, size)
             if (s != seq || k != key) return@launch
@@ -191,7 +197,7 @@ class PhoneThreadViewModel(private val deps: PhoneThreadDeps) : ViewModel() {
                 is MoiApi.Result.Ok -> settle(got.value)
                 is MoiApi.Result.Failed -> if (!quiet || thread !is Load.Ready) thread = Load.Failed(got.error)
             }
-        }
+        }.also { job = it }
     }
 
     private fun settle(t: PhoneThread) {

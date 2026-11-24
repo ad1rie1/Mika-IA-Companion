@@ -42,11 +42,13 @@ from mika.plugins.teams.inspect import not_preparing
 from mika.ports.drafts import to_fill
 from mika.ports.teams import (
     FAILED,
+    GONE,
     PLACED,
     QUEUED,
     SENDING,
     UNUSED,
     AccountInfo,
+    Draft,
     Message,
     MessageImage,
     Reaction,
@@ -66,6 +68,11 @@ TOO_LOW = {SHARE_READ: "Ce compte t'est partagé en lecture : tu le lis, sans y 
 LIMIT = 100
 #: ce que tu as écrit et qui n'est pas parti se montre encore ce temps-là (µs)
 RECENT_US = 24 * 3600 * 1_000_000
+#: ce que tu as écrit et qui est parti reste dans le fil, marqué parti, jusqu'à ce que son jumeau y arrive par
+#: l'extension — au plus ce temps-là (µs) : sans elle, il reviendra avec son lot suivant (ADR 0308)
+SENT_KEPT_US = 5 * 60 * 1_000_000
+#: son jumeau (ADR 0251) : un message de toi, le même texte aux espaces près, à moins de deux minutes de son départ
+TWIN_US = 120 * 1_000_000
 SNIPPET = 160
 
 
@@ -276,17 +283,21 @@ async def thread(call: Call) -> dict[str, Any]:
     prepares = allows(level, SHARE_PREPARE)
     replies = sorted((d for d in s.drafts.values() if d.account == account and d.conversation == conversation),
                      key=lambda d: -d.proposal)[:10] if prepares else []
-    # ce que tu as écrit toi-même (ADR 0189) : en file, en cours d'envoi, posé — il revient dans le fil une fois
-    # parti ; ce qui n'est pas parti à temps se règle ici, et se montre encore un jour (« pas parti »)
+    # ce que tu as écrit toi-même (ADR 0189) : en file, en cours d'envoi, posé, puis parti tant que son jumeau n'est
+    # pas revenu dans le fil par l'extension (au bout du fil seulement) ; ce qui n'est pas parti à temps se règle ici,
+    # et se montre encore un jour (« pas parti »)
     now = call.kernel.mind.clock.now()
     port.expire_written(account, now)
+    landed = [m for m in found if m.own] if not before else None
     pending = [{"id": d.id, "body": d.body, "at": millis(d.created), "state": d.state, "by": d.author,
                 "reason": d.reason}
                for d in port.drafts(LIMIT, accounts=[account])
                # les tiens seulement : sur un compte partagé, celui d'un autre revient dans le fil une fois parti
                if d.conversation == conversation and d.author == call.me.handle
                and (d.state in (QUEUED, SENDING, PLACED) or (
-                   d.state in (UNUSED, FAILED) and now - d.updated < RECENT_US))]
+                   d.state in (UNUSED, FAILED) and now - d.updated < RECENT_US) or (
+                   d.state == GONE and landed is not None and now - d.sent_at < SENT_KEPT_US
+                   and not _came_back(d, landed)))]
     # une demande en cours : pas une dont ses essais sont épuisés (elle y a renoncé ; « Préremplir » la relance), ni
     # une qu'elle ne prendra pas (Teams coupé, ce compte décoché : ses tâches l'écartent) — les aides du plugin
     # (``asked_still``, ``not_preparing``), jamais leur règle recopiée (audit du 2026-11-05, K10-03)
@@ -306,6 +317,14 @@ async def thread(call: Call) -> dict[str, Any]:
             "replies": [_reply_json(call, d, notes) for d in replies], "pending": pending[::-1],
             "under_way": prepares and under_way(s, account, conversation),
             "asked": asked, "work": work}
+
+
+def _came_back(d: Draft, landed: Sequence[Message]) -> bool:
+    """Ce que tu as écrit est-il revenu dans le fil, par l'extension ? Son jumeau (ADR 0251) : un de tes messages, le
+    même texte aux espaces près (ce qui est parti, ce qui était en file, ou ce que tu as écrit), à moins de deux
+    minutes de son départ."""
+    said = {" ".join(t.split()) for t in (d.sent_text, d.final, d.body) if t}
+    return any(abs(m.at - d.sent_at) <= TWIN_US and " ".join(m.text.split()) in said for m in landed)
 
 
 def _asked_work(call: Call, s: TeamsState, account: str, conversation: str,

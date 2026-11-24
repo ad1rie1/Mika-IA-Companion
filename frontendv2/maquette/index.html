@@ -22,6 +22,7 @@
 <link rel="stylesheet" href="ecrans/teams.css">
 <link rel="stylesheet" href="ecrans/telephone.css">
 <link rel="stylesheet" href="ecrans/contacts.css">
+<link rel="stylesheet" href="ecrans/agenda.css">
 <link rel="stylesheet" href="ecrans/teams-photos.css">
 <link rel="stylesheet" href="ecrans/carte.css">
 <link rel="stylesheet" href="ecrans/parametres.css">
@@ -107,6 +108,9 @@
   <symbol id="i-threads" viewBox="0 0 24 24"><path d="M4.5 6.5h15M4.5 12h10M4.5 17.5h6.5"/></symbol>
   <symbol id="i-at" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.8"/><path d="M15.8 12v1.4a2.6 2.6 0 0 0 5.2 0V12a9 9 0 1 0-3.6 7.2"/></symbol>
   <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></symbol>
+  <symbol id="i-agenda" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/><rect x="7" y="13.2" width="4" height="3.8" rx=".8"/></symbol>
+  <symbol id="i-repeat" viewBox="0 0 24 24"><path d="m17 3 3 3-3 3"/><path d="M4 11.5v-.5a5 5 0 0 1 5-5h11"/><path d="m7 21-3-3 3-3"/><path d="M20 12.5v.5a5 5 0 0 1-5 5H4"/></symbol>
+  <symbol id="i-video" viewBox="0 0 24 24"><rect x="2.5" y="6.5" width="13" height="11" rx="2"/><path d="m15.5 10.5 6-3.5v10l-6-3.5"/></symbol>
   <symbol id="i-book" viewBox="0 0 24 24"><path d="M4.5 5.5a2 2 0 0 1 2-2h13v15h-13a2 2 0 0 0-2 2Z"/><path d="M4.5 20.5a2 2 0 0 1 2-2h13v2"/></symbol>
   <symbol id="i-code" viewBox="0 0 24 24"><path d="m8 7.5-5 4.5 5 4.5M16 7.5l5 4.5-5 4.5M13.5 4.5l-3 15"/></symbol>
   <symbol id="i-logout" viewBox="0 0 24 24"><path d="M14.5 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M9.5 16.5 5 12l4.5-4.5M5 12h10"/></symbol>
@@ -142,6 +146,7 @@
       <a href="#mail" data-nav="mail" title="Mail" aria-label="Mail"><svg class="ico"><use href="#i-mail"/></svg><span>Mail</span><b class="badge" data-count="mail"></b></a>
       <a href="#teams" data-nav="teams" title="Teams" aria-label="Teams"><svg class="ico"><use href="#i-teams"/></svg><span>Teams</span><b class="badge" data-count="teams"></b></a>
       <a href="#telephone" data-nav="telephone" title="Téléphone" aria-label="Téléphone"><svg class="ico"><use href="#i-phone"/></svg><span>Téléphone</span><b class="badge" data-count="telephone"></b></a>
+      <a href="#agenda" data-nav="agenda" title="Agenda" aria-label="Agenda"><svg class="ico"><use href="#i-agenda"/></svg><span>Agenda</span><b class="badge" data-count="agenda"></b></a>
       <a href="#contacts" data-nav="contacts" title="Contacts" aria-label="Contacts"><svg class="ico"><use href="#i-users"/></svg><span>Contacts</span></a>
       <a href="#carte" data-nav="carte" title="Carte" aria-label="Carte"><svg class="ico"><use href="#i-map"/></svg><span>Carte</span></a>
       <a href="#parametres" data-nav="parametres" title="Paramètres" aria-label="Paramètres"><svg class="ico"><use href="#i-settings"/></svg><span>Paramètres</span></a>
@@ -188,6 +193,7 @@
     <section class="screen" data-screen="mail" hidden></section>
     <section class="screen" data-screen="teams" hidden></section>
     <section class="screen" data-screen="telephone" hidden></section>
+    <section class="screen" data-screen="agenda" hidden></section>
     <section class="screen" data-screen="contacts" hidden></section>
     <section class="screen" data-screen="carte" hidden></section>
     <section class="screen" data-screen="parametres" hidden></section>
@@ -201,10 +207,12 @@
     <a href="#mail" data-nav="mail"><svg class="ico"><use href="#i-mail"/></svg><span>Mail</span><b class="badge" data-count="mail"></b></a>
     <a href="#teams" data-nav="teams"><svg class="ico"><use href="#i-teams"/></svg><span>Teams</span><b class="badge" data-count="teams"></b></a>
     <a href="#telephone" data-nav="telephone"><svg class="ico"><use href="#i-phone"/></svg><span>Tél.</span><b class="badge" data-count="telephone"></b></a>
+    <a href="#agenda" data-nav="agenda"><svg class="ico"><use href="#i-agenda"/></svg><span>Agenda</span><b class="badge" data-count="agenda"></b></a>
     <a href="#contacts" data-nav="contacts"><svg class="ico"><use href="#i-users"/></svg><span>Contacts</span></a>
-    <a href="#carte" data-nav="carte"><svg class="ico"><use href="#i-map"/></svg><span>Carte</span></a>
-    <a href="#outils" data-nav="outils"><svg class="ico"><use href="#i-tools"/></svg><span>Outils</span></a>
-    <a href="#parametres" data-nav="parametres"><svg class="ico"><use href="#i-settings"/></svg><span>Réglages</span></a>
+    <a href="#carte" data-nav="carte" data-plus><svg class="ico"><use href="#i-map"/></svg><span>Carte</span></a>
+    <a href="#outils" data-nav="outils" data-plus><svg class="ico"><use href="#i-tools"/></svg><span>Outils</span></a>
+    <a href="#parametres" data-nav="parametres" data-plus><svg class="ico"><use href="#i-settings"/></svg><span>Réglages</span></a>
+    <button class="tab-plus" type="button" data-tab-plus aria-haspopup="menu" title="Carte, Outils, Réglages"><svg class="ico"><use href="#i-more"/></svg><span>Plus</span></button>
   </nav>
 </div>
 
@@ -242,9 +250,14 @@
 <script src="ecrans/teams.js"></script>
 <script src="ecrans/telephone.js"></script>
 <script src="ecrans/contacts.js"></script>
+<script src="ecrans/agenda-donnees.js"></script>
+<script src="ecrans/agenda.js"></script>
 <script src="ecrans/carte-fond.js"></script>
 <script src="ecrans/carte.js"></script>
 <script src="ecrans/parametres.js"></script>
+<script src="ecrans/agenda-parametres.js"></script>
+<script src="ecrans/agenda-droits.js"></script>
+<script src="ecrans/agenda-chat.js"></script>
 <script>M.start();</script>
 <script type="module" src="mika-vrm.js"></script>
 </body>

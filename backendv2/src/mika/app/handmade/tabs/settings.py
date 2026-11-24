@@ -220,6 +220,9 @@ def droits(got: Got) -> Markup:
     granted = rights.exact(ui, who, canal) if who is not None and canal else None
     kept = "&".join(f"{k}={v}" for k, v in (("qui", who.key if who else ""), ("canal", canal)) if v)
     shown = rights.detail(ui, query["detail"]) if query.get("detail") else None
+    # le tableau d'un agenda se règle ici même (ADR 0309, lot 5) : « Modifier » l'ouvre à la place de sa lecture
+    editing = rights.agenda_editor(ui, query["detail"], getattr(forms, "csrf", "")) \
+        if query.get("detail") and query.get("regler") and query["detail"].startswith("agenda:") else None
     listed, given = rights.sections(ui, granted, kept), rights.shared(ui)
     # « Retour » ramène à la ligne de la ressource, dans son sous-onglet
     back = next((r["id"] for s in listed for r in s["rows"] if shown and r["detail_key"] == query["detail"]), "")
@@ -228,7 +231,7 @@ def droits(got: Got) -> Markup:
         canals=[{"key": k, "label": label, "on": k == canal} for k, label in rights.CANAL_CHOICES],
         chosen=(who.label if who else "", dict(rights.CANAL_CHOICES).get(canal, "")), got=granted,
         canal_said=rights.what_of(granted["canal"]) if granted else "", sections=listed, kept=kept, back=back,
-        detail=shown, fixed=rights.FIXED, tools=rights.fixed_tools(ui), catalogue=f"{catalog.BASE}/tous",
+        detail=shown, editing=editing, fixed=rights.FIXED, tools=rights.fixed_tools(ui), catalogue=f"{catalog.BASE}/tous",
         shares=given, shares_pager=rights.one_page(len(given)), unshare=rights.UNSHARE, csrf=getattr(forms, "csrf", "")))
 
 

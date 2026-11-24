@@ -114,7 +114,7 @@ fun TodoScreen(graph: AppGraph, route: Route.ProjectTodo) {
     val where = ProjectsViewModel.todoWhere(route.project, route.key)
     LaunchedEffect(vm) { vm.gestures.said.collect { shell.toast(it) } }
     // l'attente se relit à chaque fois que son écran est devant : il s'ouvre, l'app revient de l'arrière-plan
-    OnResume(vm to route) { vm.open(route.project, route.key) }
+    OnResume(vm to route, project = ANY_PROJECT) { vm.open(route.project, route.key) }
     // l'écran quitté (pas une rotation) : plus rien ne s'y relit, la confirmation d'une fusion demandée là s'annule
     val activity = LocalActivity.current
     DisposableEffect(vm, route) {

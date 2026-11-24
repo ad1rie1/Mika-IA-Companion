@@ -349,6 +349,7 @@ const forms: Record<string, FormAct> = {
 
 registerTab("code", {
   // un accord décidé, un ticket tranché : ce que les issues en disent se relit
+  changed: () => invalidateCode(),
   invalidate: () => {
     for (const map of [accords, issuePages, issues]) map.invalidate();
   },

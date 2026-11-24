@@ -45,6 +45,7 @@ from mika.kernel.inspect import (
     short_day_fr,
 )
 from mika.kernel.registry import Registry
+from mika.ports.agenda import AgendaError
 from mika.ports.errors import OUTSIDE, describe_error
 from mika.ports.llm import MissingPersona
 from mika.runtime.state import RUNTIME
@@ -120,7 +121,7 @@ def test_the_kernel_alone_knows_no_adapter_failure():
 
 
 def test_outside_names_real_failures_of_the_adapters_and_ports():
-    raised = (UnconfiguredRole, MissingPersona, StoreSealed, ListingFailed, ClaudeCodeError, ImapError)
+    raised = (UnconfiguredRole, MissingPersona, StoreSealed, ListingFailed, ClaudeCodeError, ImapError, AgendaError)
     assert {kind.__name__ for kind in raised} == set(OUTSIDE)
     assert describe_error(UnconfiguredRole("reply")) == \
         "aucun modèle configuré : aucun modèle associé au rôle « reply »"

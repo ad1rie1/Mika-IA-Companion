@@ -2,7 +2,7 @@ package fr.qwartz.mika.ui.mail
 
 import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.MoiError
-import fr.qwartz.mika.data.moi.WORK_WATCH_MAX_MS
+import fr.qwartz.mika.data.moi.LiveSignal
 import fr.qwartz.mika.data.moi.Work
 import fr.qwartz.mika.data.moi.WorkSteps
 import fr.qwartz.mika.data.moi.mail.DraftPreview
@@ -13,6 +13,7 @@ import fr.qwartz.mika.data.moi.mail.MailDraft
 import fr.qwartz.mika.data.moi.mail.MailFull
 import fr.qwartz.mika.data.moi.mail.MailPerson
 import fr.qwartz.mika.data.moi.mail.MailWork
+import fr.qwartz.mika.data.net.Topics
 import fr.qwartz.mika.ui.Route
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -30,10 +31,10 @@ import org.junit.Test
 
 /**
  * « Préremplir avec Mika » suivi en direct dans Mail (ADR 0306), dans la liseuse et dans « Écrire », contre une fausse
- * API : sa ligne paraît aussitôt (elle s'y met, depuis maintenant) ; `/mail/work` relu sans relire le mail ; son
- * brouillon arrivé paraît ici (repris dans ta réponse si tu n'as rien écrit) ; plus rien de demandé ni d'en cours, on
- * cesse ; ce qu'elle prépare d'elle-même se guette aussi ; le plafond d'une demi-heure ; une relecture manquée, ou qui
- * répond après qu'on a changé de mail.
+ * API : sa ligne paraît aussitôt (elle s'y met, depuis maintenant) ; `/mail/work` relu sans relire le mail, quand le
+ * direct (`mail.work`, ADR 0308) nomme ce mail — un autre mail nommé ne relit rien ; son brouillon arrivé paraît ici
+ * (repris dans ta réponse si tu n'as rien écrit) ; plus rien de demandé ni d'en cours, la ligne s'en va ; ce qu'elle
+ * prépare d'elle-même se suit aussi ; plus de plafond ; une relecture manquée, ou qui répond après qu'on a changé de mail.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class MailWorkModelTest {
@@ -94,7 +95,7 @@ class MailWorkModelTest {
         assertTrue(reader.watching)
         api.calls.clear()
         api.workResult = MoiApi.Result.Ok(MailWork(tool, asked = true))
-        reader.pollWork("Sa réponse est arrivée.")
+        reader.readWork("Sa réponse est arrivée.")
         assertEquals(tool, reader.work)
         assertEquals(listOf("work:$a"), api.calls)
         assertTrue(reader.watching)
@@ -106,7 +107,7 @@ class MailWorkModelTest {
         advanceUntilIdle()
         api.drafts = listOf(herDraft)
         api.workResult = MoiApi.Result.Ok(MailWork(null, asked = false, draft = "d1"))
-        reader.pollWork("Sa réponse est arrivée.")
+        reader.readWork("Sa réponse est arrivée.")
         assertEquals("d1", reader.draft?.id)
         assertFalse(reader.asked)
         assertNull(reader.work)
@@ -120,22 +121,22 @@ class MailWorkModelTest {
         advanceUntilIdle()
         api.draftsFail = MoiError(0, MoiError.NETWORK)
         api.workResult = MoiApi.Result.Ok(MailWork(null, asked = false, draft = "d1"))
-        reader.pollWork("Sa réponse est arrivée.")
+        reader.readWork("Sa réponse est arrivée.")
         assertNull(reader.draft)
         assertTrue(reader.watching)
     }
 
-    @Test fun `finie sans en rendre - on cesse de guetter et on oublie la demande`() = runTest {
+    @Test fun `finie sans en rendre - la ligne s'en va et la demande s'oublie, un autre mail nommé ne relit rien`() = runTest {
         serverSays(a, askedHere = true, work = thinking)
         reader.open(a, "v1")
         advanceUntilIdle()
         api.workResult = MoiApi.Result.Ok(MailWork())
-        reader.pollWork("Sa réponse est arrivée.")
+        reader.onLive(LiveSignal.of(Topics.MAIL_WORK to setOf(a)), "Sa réponse est arrivée.")
         assertFalse(reader.asked)
         assertNull(reader.work)
         assertFalse(reader.watching)
         api.calls.clear()
-        reader.pollWork("Sa réponse est arrivée.")
+        reader.onLive(LiveSignal.of(Topics.MAIL_WORK to setOf(b)), "Sa réponse est arrivée.")
         assertTrue(api.calls.isEmpty())
     }
 
@@ -146,22 +147,21 @@ class MailWorkModelTest {
         assertFalse(reader.asked)
         assertTrue(reader.watching)
         api.workResult = MoiApi.Result.Ok(MailWork(tool, asked = false))
-        reader.pollWork("Sa réponse est arrivée.")
+        reader.readWork("Sa réponse est arrivée.")
         assertEquals(tool, reader.work)
     }
 
-    @Test fun `au-delà d'une demi-heure, la liseuse cesse de guetter - une nouvelle demande, si`() = runTest {
+    @Test fun `plus de plafond - une heure après la demande, l'étape que le direct dit se suit encore`() = runTest {
         reader.open(a, "v1")
         advanceUntilIdle()
         reader.prefill(asked)
         advanceUntilIdle()
-        clock += WORK_WATCH_MAX_MS + 1
+        clock += 60 * 60_000L
         api.calls.clear()
-        reader.pollWork("Sa réponse est arrivée.")
-        assertTrue(api.calls.isEmpty())
-        assertFalse(reader.watching)
-        reader.prefill(asked)
-        advanceUntilIdle()
+        api.workResult = MoiApi.Result.Ok(MailWork(tool, asked = true))
+        reader.onLive(LiveSignal.of(Topics.MAIL_WORK to setOf(a)), "Sa réponse est arrivée.")
+        assertEquals(listOf("work:$a"), api.calls)
+        assertEquals(tool, reader.work)
         assertTrue(reader.watching)
     }
 
@@ -170,7 +170,7 @@ class MailWorkModelTest {
         reader.open(a, "v1")
         advanceUntilIdle()
         api.workResult = MoiApi.Result.Failed(MoiError(0, MoiError.NETWORK))
-        reader.pollWork("Sa réponse est arrivée.")
+        reader.readWork("Sa réponse est arrivée.")
         assertEquals(thinking, reader.work)
         assertTrue(reader.watching)
     }
@@ -181,7 +181,7 @@ class MailWorkModelTest {
         advanceUntilIdle()
         api.workResult = MoiApi.Result.Ok(MailWork(tool, asked = true))
         api.hold("work")
-        launch { reader.pollWork("Sa réponse est arrivée.") }
+        launch { reader.readWork("Sa réponse est arrivée.") }
         // la relecture est partie pour A ; on passe à B avant sa réponse
         advanceUntilIdle()
         assertEquals(listOf("work:$a"), api.calls.filter { it.startsWith("work") })
@@ -216,7 +216,7 @@ class MailWorkModelTest {
         notices.clear()
         api.drafts = listOf(herDraft)
         api.workResult = MoiApi.Result.Ok(MailWork(null, asked = false, draft = "d1"))
-        compose.pollWork("Sa proposition est arrivée.", "Elle attend dans ses brouillons.")
+        compose.readWork("Sa proposition est arrivée.", "Elle attend dans ses brouillons.")
         assertEquals("d1", compose.fromDraft)
         assertEquals("Bonjour Léa, le devis suit.", compose.body)
         assertNull(compose.work)
@@ -233,7 +233,7 @@ class MailWorkModelTest {
         compose.editBody("Je regarde et je reviens vers toi.")
         api.drafts = listOf(herDraft)
         api.workResult = MoiApi.Result.Ok(MailWork(null, asked = false, draft = "d1"))
-        compose.pollWork("Sa proposition est arrivée.", "Elle attend dans ses brouillons.")
+        compose.readWork("Sa proposition est arrivée.", "Elle attend dans ses brouillons.")
         assertEquals("", compose.fromDraft)
         assertEquals("Je regarde et je reviens vers toi.", compose.body)
         assertFalse(compose.asked)
@@ -248,7 +248,7 @@ class MailWorkModelTest {
         assertEquals(thinking, compose.work)
         assertTrue(compose.watching)
         api.workResult = MoiApi.Result.Ok(MailWork(tool, asked = true))
-        compose.pollWork("Sa proposition est arrivée.", "Elle attend dans ses brouillons.")
+        compose.readWork("Sa proposition est arrivée.", "Elle attend dans ses brouillons.")
         assertEquals(tool, compose.work)
         // un transfert ne la suit pas
         compose.prepare(Route.MailCompose("forward", ref = a), "v2")

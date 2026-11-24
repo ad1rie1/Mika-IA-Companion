@@ -50,6 +50,9 @@ export interface TabView {
   forms?: Record<string, FormAct>;
   /** Après un geste de l'écran : ce que l'onglet garde et qu'un geste d'ailleurs a pu changer (un accord décidé) se relit. */
   invalidate?(): void;
+  /** Le direct (ADR 0308) : le projet montré a changé (son travail, un commit, une page) — ce que l'onglet garde repart
+   *  du serveur ; seul ce qui est montré se relit. */
+  changed?(): void;
 }
 
 export type PluggedTab = "code" | "documentation";

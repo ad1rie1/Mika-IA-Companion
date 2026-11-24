@@ -58,6 +58,7 @@ from mika.app.handmade import (
 from mika.app.handmade.blocks import tab as blocks_tab
 from mika.app.handmade.exchanges import exchanges
 from mika.app.handmade.lists import Roles, drawn, listing
+from mika.app.handmade.person.agendas import agendas as agendas_tab
 from mika.app.handmade.person.files import files
 from mika.app.handmade.person.identifies import contacts as person_contacts
 from mika.app.handmade.person.identifies import contacts_count, identifies, linked_sheets
@@ -95,6 +96,7 @@ from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import PREFIX, UI, Overview, env, secure
 from mika.kernel.clock import DAY, US
 from mika.kernel.inspect import Fields, Head, Note, Section, Table, num_fr, pct_fr, plural
+from mika.plugins.agenda.inspect.views import person_calendars
 from mika.plugins.teams.inspect import ACCOUNT as TEAMS_ACCOUNT
 from mika.plugins.teams.inspect import SECTION as TEAMS_SECTION
 from mika.plugins.teams.inspect import WHOSE as TEAMS_WHOSE
@@ -520,7 +522,7 @@ def circle(look: Look, who: Who) -> dict[str, Any]:
 OWNED = (("boites", "Courrier", Roles(title="boîte", badges=("état", "elle y écrit"), tiles=True)),
          ("teams", "Teams", Roles(title="compte", badges=("état",), tiles=True)))
 #: ce qui se partage (ADR 0188), et à quel niveau, tels que la fiche les nomme
-SHARED_KINDS = {"mail": "boîte", "teams": "compte Teams", "mcp": "service"}
+SHARED_KINDS = {"mail": "boîte", "teams": "compte Teams", "mcp": "service", "agenda": "agenda"}
 LEVEL_FR = {level: label.lower() for level, label in SHARES}
 
 
@@ -549,6 +551,8 @@ def _resource(s: Shared) -> dict[str, str]:
         href = subject_url("compte", s.key)
     elif s.kind == "teams":
         href = f"{PREFIX}/{TEAMS_SECTION}/extension?" + urlencode({TEAMS_WHOSE: s.owner or YOURS, TEAMS_ACCOUNT: s.key})
+    elif s.kind == "agenda":  # sa fiche (ADR 0309, lot 5)
+        href = subject_url("agenda", s.key)
     else:
         href = subject_url("serveur", s.key)
     return {"kind": SHARED_KINDS[s.kind], "title": s.title, "href": href}
@@ -620,6 +624,8 @@ TABS: dict[str, Callable[[UI, str, Sequence[Any], Mapping[str, str]], Any]] = {
     # service ou un partage (``shows``, ADR 0219) : Comptes les réunit alors
     "boites": owned,
     "teams": drawn(OWNED[1][2], "teams"),
+    # ses agendas, ce qu'on lui partage, ce qu'elle partage, ses prochains événements (ADR 0309, lot 5)
+    "agendas": agendas_tab,
     # ce que son téléphone lui a montré, où il dit qu'elle est (seulement s'il en a dit quelque chose)
     "telephone": phone_tab, "position": position_tab,
     # ses voyages (seulement si elle en a) : leurs arrêts jour par jour, leur GPX, « Supprimer » (ADR 0204)
@@ -631,7 +637,7 @@ TABS: dict[str, Callable[[UI, str, Sequence[Any], Mapping[str, str]], Any]] = {
 #: les onglets dessinés qui posent aussi les formulaires de la console (``Forms``) : le détail bloc par bloc (la
 #: Synthèse : « C'est la personne dont on lui a parlé »), les voyages (« Supprimer »), les fichiers (« Retirer ») et
 #: Comptes (« Retirer » un partage, par le jeton de la page) ; les autres n'en ont pas
-FORMED = (blocks_tab, voyages, files, owned, identifies)
+FORMED = (blocks_tab, voyages, files, owned, identifies, agendas_tab)
 
 # ── le compte de ses onglets ──
 
@@ -684,6 +690,8 @@ def tab_counts(look: Look, who: Who) -> dict[str, int]:
         "boites": boxes + teams + len(services(look, who)) + len(shared["given"]) + len(shared["received"]),
         "teams": teams,
         "voyages": len(trips_of(trips, frame.get, person)),
+        # ses agendas et ceux qu'on lui partage (ADR 0309, lot 5)
+        "agendas": sum(map(len, person_calendars(look.ui.kernel.ports, frame, person))),
         "buts": len(goals_of(goals, handles)) if goals is not None else 0,
         "projets": len(projects_of(projects, handles)) if projects is not None else 0,
     }
@@ -703,7 +711,8 @@ class PersonOverview(Overview):
     slug = "ensemble"
     title = "Vue d'ensemble"
     # et celles de l'annuaire : « Ce qui l'identifie » et « Contacts » (ADR 0298)
-    styles = ("handmade/person.css", "handmade/sens.css", "handmade/personnes.css", "handmade/personnes_annuaire.css")
+    styles = ("handmade/person.css", "handmade/sens.css", "handmade/personnes.css", "handmade/personnes_annuaire.css",
+              "handmade/agendas.css")
     scripts = ("handmade/live.js",)
     #: ce que la vue d'ensemble résume (son ressenti, leur lien, ce qu'elle lit d'elle, ses pensées, et la mécanique
     #: de ce qu'elle peut lui dire) : le détail reste à un clic, au bout de la barre

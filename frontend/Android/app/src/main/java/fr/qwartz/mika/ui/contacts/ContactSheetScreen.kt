@@ -60,15 +60,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
 import fr.qwartz.mika.data.files.ComposerDraft
+import fr.qwartz.mika.data.moi.LiveSignal
 import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.MoiDates
 import fr.qwartz.mika.data.moi.SendKey
@@ -95,6 +93,7 @@ import fr.qwartz.mika.data.moi.contacts.privacyNote
 import fr.qwartz.mika.data.moi.contacts.profileFacts
 import fr.qwartz.mika.data.moi.contacts.profileFrom
 import fr.qwartz.mika.data.moi.contacts.writableAt
+import fr.qwartz.mika.data.net.Topics
 import fr.qwartz.mika.ui.Route
 import fr.qwartz.mika.ui.components.rememberNow
 import fr.qwartz.mika.ui.settings.DangerButton
@@ -105,6 +104,7 @@ import fr.qwartz.mika.ui.settings.SetItem
 import fr.qwartz.mika.ui.settings.copyText
 import fr.qwartz.mika.ui.shell.BarMenu
 import fr.qwartz.mika.ui.shell.BarNav
+import fr.qwartz.mika.ui.shell.FollowLive
 import fr.qwartz.mika.ui.shell.Gap
 import fr.qwartz.mika.ui.shell.Load
 import fr.qwartz.mika.ui.shell.LoadBox
@@ -117,6 +117,7 @@ import fr.qwartz.mika.ui.shell.Tag
 import fr.qwartz.mika.ui.shell.rememberSessionKey
 import fr.qwartz.mika.ui.shell.said
 import fr.qwartz.mika.ui.theme.mika
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
@@ -166,16 +167,22 @@ class ContactSheetViewModel(deps: ContactsDeps) : ViewModel() {
 
     fun retry() = load(keep = false)
 
+    /** Le direct (ADR 0308) : ses contacts ont changé (`contacts` : tout le domaine) — la fiche se relit sans bruit.
+     *  Rend la main quand c'est relu. */
+    suspend fun onLive(signal: LiveSignal) {
+        if (id > 0 && signal.touches(Topics.CONTACTS)) load(keep = true).join()
+    }
+
     /** L'écran est revenu à la liste. */
     fun leave() {
         gone = false
     }
 
-    private fun load(keep: Boolean) {
+    private fun load(keep: Boolean): Job {
         val gen = ++generation
         val contact = id
         if (!keep || sheet !is Load.Ready) sheet = Load.Loading
-        viewModelScope.launch {
+        return viewModelScope.launch {
             val got = api.sheet(contact)
             if (gen != generation) return@launch
             when (got) {
@@ -257,8 +264,8 @@ fun ContactSheetScreen(graph: AppGraph, route: Route.Contact) {
     val session = rememberSessionKey(graph)
     val vm: ContactSheetViewModel = viewModel(key = "contacts.sheet|${route.id}|$session") { ContactSheetViewModel(ContactsDeps(graph)) }
     LaunchedEffect(vm) { vm.said.collect { shell.toast(it) } }
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(vm, lifecycle, route.id) { lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) { vm.open(route.id) } }
+    // lue à l'ouverture, relue à chaque retour, et quand le direct dit que ses contacts ont changé (ADR 0308)
+    FollowLive(graph.live, CONTACTS_TOPICS, vm, route.id, onShown = { vm.open(route.id) }) { vm.onLive(it) }
     LaunchedEffect(vm.gone) {
         if (vm.gone) {
             vm.leave()

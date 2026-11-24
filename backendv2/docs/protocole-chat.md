@@ -468,6 +468,13 @@ Une action de projet se décide par `POST /api/projects/pending/<id>/approve` (o
 sans compte, 403 pour qui n'est pas opératrice, 400 pour une autre décision, 404 pour une action inconnue ou déjà
 décidée, 409 (`status` : `changed`, `blocked`) quand ce qui partirait a changé — à décider alors depuis la console.
 
+**`changed`** — ce qui a changé dans ce que montrent les routes de l'API par personne (ADR 0308) : `{"type":
+"changed", "changes": [{"topic": "mail", "boxes": ["pro"]}, {"topic": "me"}]}`, à chaque connexion authentifiée de la
+personne (`here` faux compris), ~150 ms après le premier changement d'une rafale. Elle ne nomme que ce que la
+personne voit, jamais le contenu : l'écran relit la route qu'il montre. Les sujets, leurs clés et ce qu'on relit :
+[`protocole-moi.md`](protocole-moi.md), § 2 bis. Rien n'est rattrapé : à chaque ouverture, le client relit ce qu'il
+montre.
+
 **`pong`** — la réponse à `ping`, avec son `t`.
 
 ## 5. Notifier

@@ -85,8 +85,8 @@ import kotlinx.coroutines.launch
  * fenêtres (refuser, retoucher, la reprendre).
  */
 
-/** Teams sur l'API du téléphone. */
-internal fun AppGraph.teamsApi(): TeamsApi = TeamsApi(moi)
+/** Teams sur l'API du téléphone ; « Corriger » par le client qui attend la fin d'une correction. */
+internal fun AppGraph.teamsApi(): TeamsApi = TeamsApi(moi, moiCorrect)
 
 /** Ce que les écrans de Teams prennent de la session : l'API, relire les pastilles, l'heure. Un test JVM les donne sans
  *  le graphe de l'app. */

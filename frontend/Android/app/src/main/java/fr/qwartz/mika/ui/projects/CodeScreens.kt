@@ -80,7 +80,7 @@ private fun FileScreen(graph: AppGraph, route: Route.ProjectCode) {
         FileViewModel(ProjectsDeps(graph), route.id, route.ref, route.key)
     }
     Toasts(vm.gestures)
-    OnResume(vm) { vm.resume() }
+    OnResume(vm, project = route.id) { vm.resume() }
     var pane by rememberSaveable(route.id, route.key, route.ref) { mutableStateOf(PANE_MAIN) }
     var source by rememberSaveable(route.id, route.key, route.ref) { mutableStateOf(false) }
     val blob = vm.read.value
@@ -176,7 +176,7 @@ private fun CommitScreen(graph: AppGraph, route: Route.ProjectCode) {
     val session = rememberSessionKey(graph)
     val vm: CommitViewModel = viewModel(key = "code-commit|$session|${route.id}|${route.key}") { CommitViewModel(ProjectsDeps(graph), route.id, route.key) }
     Toasts(vm.gestures)
-    OnResume(vm) { vm.resume() }
+    OnResume(vm, project = route.id) { vm.resume() }
     var pane by rememberSaveable(route.id, route.key, route.ref) { mutableStateOf(PANE_MAIN) }
     val diffUi = rememberDiffUi()
     val copy = rememberCopy()
@@ -261,7 +261,7 @@ private fun BranchScreen(graph: AppGraph, route: Route.ProjectCode) {
     val session = rememberSessionKey(graph)
     val vm: CodeReadViewModel<BranchDetail> = viewModel(key = "code-branch|$session|${route.id}|${route.key}") { branchModel(ProjectsDeps(graph), route.id, route.key) }
     Toasts(vm.gestures)
-    OnResume(vm) { vm.resume() }
+    OnResume(vm, project = route.id) { vm.resume() }
     val base = frame.code.summary.value?.base.orEmpty()
     // « Ses fichiers », « Ses commits » : le volet de l'onglet s'ouvre sur cette branche
     val aim: (String) -> Unit = { sub ->

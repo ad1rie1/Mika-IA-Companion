@@ -74,16 +74,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
 import fr.qwartz.mika.data.moi.Caps
 import fr.qwartz.mika.data.moi.MoiDates
-import fr.qwartz.mika.data.moi.WORK_POLL_MS
+import fr.qwartz.mika.data.moi.TeamsLive
 import fr.qwartz.mika.data.moi.chars
 import fr.qwartz.mika.data.moi.teams.ConversationThread
 import fr.qwartz.mika.data.moi.teams.Mark
@@ -123,6 +120,7 @@ import fr.qwartz.mika.ui.shell.BarMenu
 import fr.qwartz.mika.ui.shell.BarNav
 import fr.qwartz.mika.ui.shell.CorrectIconButton
 import fr.qwartz.mika.ui.shell.CorrectNotices
+import fr.qwartz.mika.ui.shell.FollowLive
 import fr.qwartz.mika.ui.shell.Load
 import fr.qwartz.mika.ui.shell.LoadBox
 import fr.qwartz.mika.ui.shell.LocalShell
@@ -139,7 +137,6 @@ import fr.qwartz.mika.ui.shell.rememberCorrectWords
 import fr.qwartz.mika.ui.shell.rememberSessionKey
 import fr.qwartz.mika.ui.theme.mika
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
 /**
  * Une discussion (la maquette, `vueFil`) : les autres à gauche (leur nom dans un groupe), toi à droite — « Toi »
@@ -158,25 +155,13 @@ fun TeamsThreadScreen(graph: AppGraph, key: String) {
     val arrived = stringResource(R.string.teams_arrived)
     LaunchedEffect(key) { vm.open(key, arrived) }
     LaunchedEffect(vm) { vm.said.collect { shell.toast(it) } }
+    // le compte de ce fil n'est plus à toi (retiré, plus partagé) : retour à la liste
+    LaunchedEffect(vm, key) { vm.left.collect { if (it == key) shell.back() } }
     // « Corriger » (ADR 0307) : combien de fautes, avec « Annuler » quand ton texte a été remplacé
     CorrectNotices(vm.corrector)
-    // le fil se relit tant qu'il est à l'écran ; où elle en est d'une réponse, toutes les deux secondes (ADR 0306 :
-    // `pollWork` ne relit que si on guette)
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(vm, key, lifecycle) {
-        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            launch {
-                while (true) {
-                    delay(WORK_POLL_MS)
-                    vm.pollWork()
-                }
-            }
-            while (true) {
-                delay(THREAD_REFRESH_MS)
-                vm.refresh()
-            }
-        }
-    }
+    // le direct (ADR 0308) : le fil se relit quand il change, où elle en est d'une réponse quand elle y travaille
+    // (ADR 0306) ; relu une fois à chaque retour de l'app au premier plan (l'ouverture, elle, est celle de `open`)
+    FollowLive(graph.live, TeamsLive.THREAD, vm, key, onShown = { first -> if (!first) vm.refresh() }) { vm.onLive(it) }
     var asking by remember { mutableStateOf<Pair<Ask, TeamsReply>?>(null) }
     // l'appui long sur un message : sa feuille ; « Citer » rend la main au champ (le clavier monte, comme dans Teams)
     var acting by remember { mutableStateOf<TeamsMessage?>(null) }
@@ -579,7 +564,7 @@ private fun OwnRow(b: OwnBubble, canRewrite: Boolean, onRewrite: () -> Unit) {
             modifier = Modifier.clip(bubbleShape(true)).background(bg).padding(horizontal = 14.dp, vertical = 8.dp),
         )
         Row(Modifier.padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-            MIcon(if (b.failed) R.drawable.ic_m_alert else R.drawable.ic_m_clock, null, size = 13.dp, tint = if (b.failed) scheme.error else scheme.onSurfaceVariant)
+            MIcon(if (b.failed) R.drawable.ic_m_alert else if (b.sent) R.drawable.ic_m_check else R.drawable.ic_m_clock, null, size = 13.dp, tint = if (b.failed) scheme.error else scheme.onSurfaceVariant)
             Spacer(Modifier.width(4.dp))
             Text(
                 "$YOU · ${MoiDates.clock(b.at)} · ${b.note}",

@@ -35,8 +35,10 @@
   est noté (``portraits``). Ils suivent le contact quand il est réuni à un autre, et partent avec lui, ou avec le
   compte d'où ils viennent.
 
-Une seule connexion sous SQLite, partagée sous ``_lock`` ; une écriture est une session courte (``begin``), faite
-hors de la boucle d'événements pour ce qui peut être long (``observe``, ``forget``).
+Une seule connexion sous SQLite, partagée sous ``_lock`` ; une écriture est une session courte (``_writing``), faite
+hors de la boucle d'événements pour ce qui peut être long (``observe``, ``forget``). Chaque écriture dit ce qu'elle
+change, une fois validée (``on_change``, ADR 0308) — sauf la tenue de l'annuaire que rien ne montre à une personne
+(un curseur, une paire écartée des suggestions, un avis du juge).
 """
 
 from __future__ import annotations
@@ -46,13 +48,15 @@ import hashlib
 import re
 import threading
 import time
-from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy import String, and_, case, delete, exists, func, literal, or_, select, update
 from sqlalchemy.orm import Session, aliased, sessionmaker
 
+from mika.adapters.changes import Changes, Listener
 from mika.adapters.contacts.models import (
     ACCOUNT,
     PERSON,
@@ -76,6 +80,7 @@ from mika.adapters.contacts.models import (
     fit,
 )
 from mika.adapters.database import Target, as_target
+from mika.ports import changes
 from mika.ports.contacts import (
     APART,
     COMPANY,
@@ -211,6 +216,25 @@ class ContactsStore:
         self._engine = target.engine(shared=True)
         CONTACTS.create_all(self._engine)
         self._session = sessionmaker(self._engine, expire_on_commit=False)
+        #: ce que ses écritures changent, dit une fois validées (ADR 0308)
+        self._changes = Changes()
+
+    # ── ses écritures, et ce qu'elles changent (ADR 0308) ──
+    @contextmanager
+    def _writing(self) -> Iterator[Session]:
+        """Une écriture : une session sous le verrou, validée à la sortie ; ce qu'elle a noté (``_changed``) part
+        ensuite, rien si elle est annulée."""
+        with self._lock, self._changes.writing(), self._session.begin() as s:
+            yield s
+
+    def on_change(self, fn: Listener) -> None:
+        """Prévenir ``fn`` de chaque écriture qui change ce qu'une personne voit de l'annuaire, une fois validée : les
+        sources touchées (``(source, compte)`` ; aucune : on ne sait pas lesquelles). Appelé dans le fil qui a
+        écrit."""
+        self._changes.listen(fn)
+
+    def _changed(self, *places: tuple[str, str]) -> None:
+        self._changes.note(changes.Change(changes.CONTACTS, places=tuple(sorted(set(places)))))
 
     # ── ranger ce qu'elle voit ──
     async def observe(self, observations: Sequence[Observation], *, cursors: Mapping[str, int] | None = None) -> int:
@@ -220,7 +244,7 @@ class ContactsStore:
         """``observe``, dans le fil qui l'appelle."""
         kept = 0
         touched: set[int] = set()
-        with self._lock, self._session.begin() as s:
+        with self._writing() as s:
             for o in observations:
                 kept += self._one(s, o, touched)
             for name, value in sorted((cursors or {}).items()):
@@ -228,6 +252,8 @@ class ContactsStore:
             s.flush()
             for cid in sorted(touched):
                 self._refresh(s, cid)
+            if kept:
+                self._changed(*{(fit(o.source, WORD), fit(o.account, ACCOUNT)) for o in observations})
         return kept
 
     def _one(self, s: Session, o: Observation, touched: set[int]) -> int:
@@ -651,19 +677,20 @@ class ContactsStore:
     # ── ce qu'une opératrice (ou une preuve) décide ──
     def link(self, contact_id: int, person: str | None, *, replace: bool = True) -> bool:
         wanted = fit((person or "").strip(), PERSON)
-        with self._lock, self._session.begin() as s:
+        with self._writing() as s:
             row = s.get(C, int(contact_id))
             if row is None or row.kind != PERSON_KIND or (row.person or "") == wanted:
                 return False
             if row.person and not replace:
                 return False
             row.person = wanted
+            self._changed()
         return True
 
     def merge(self, keep_id: int, other_id: int) -> bool:
         if int(keep_id) == int(other_id):
             return False
-        with self._lock, self._session.begin() as s:
+        with self._writing() as s:
             keep, other = s.get(C, int(keep_id)), s.get(C, int(other_id))
             if keep is None or other is None:
                 return False
@@ -672,6 +699,7 @@ class ContactsStore:
             if keep.person and other.person and keep.person != other.person:
                 raise ValueError("ces deux contacts sont reliés à deux personnes différentes : délie l'un d'abord")
             self._merge_in(s, keep, other)
+            self._changed()
         return True
 
     def _merge_in(self, s: Session, keep: ContactRow, other: ContactRow) -> None:
@@ -698,7 +726,7 @@ class ContactsStore:
         self._refresh(s, keep.id)
 
     def detach(self, identifier_id: int) -> int:
-        with self._lock, self._session.begin() as s:
+        with self._writing() as s:
             ident = s.get(N, int(identifier_id))
             if ident is None:
                 return 0
@@ -726,13 +754,14 @@ class ContactsStore:
             self._refresh(s, row.id)
             if old is not None:
                 self._refresh(s, old.id)
+            self._changed()
             return int(row.id)
 
     def dismiss(self, a: int, b: int) -> bool:
         a, b = sorted((int(a), int(b)))
         if a == b:
             return False
-        with self._lock, self._session.begin() as s:
+        with self._writing() as s:
             return insert_ignore(s, D, {"a": a, "b": b}) > 0
 
     def suggestions(self, limit: int = 50) -> list[Suggestion]:
@@ -866,7 +895,7 @@ class ContactsStore:
 
     def judged(self, call: JudgeCall | None, verdicts: Sequence[Judgement]) -> int:
         n = 0
-        with self._lock, self._session.begin() as s:
+        with self._writing() as s:
             if call is not None:
                 s.add(JudgeCallRow(at=int(call.at), call_id=fit(call.call_id, REF), cards=max(0, int(call.cards)),
                                    ok=bool(call.ok)))
@@ -892,7 +921,7 @@ class ContactsStore:
     def unite(self, a: int, b: int, *, reason: str = "", call_id: str = "") -> int:
         if int(a) == int(b):
             return 0
-        with self._lock, self._session.begin() as s:
+        with self._writing() as s:
             ra, rb = s.get(C, int(a)), s.get(C, int(b))
             if ra is None or rb is None or self._told_apart(s, ra, rb):
                 return 0
@@ -903,6 +932,7 @@ class ContactsStore:
             gone = int(b) if keep == int(a) else int(a)
             s.add(UnionRow(keep=keep, kept=names[keep], gone=names[gone], reason=(reason or "")[:REASON_MAX],
                            at=self._now(), call_id=fit(call_id, REF)))
+            self._changed()
             return keep
 
     @staticmethod
@@ -929,7 +959,7 @@ class ContactsStore:
         return int(got or 0)
 
     def set_cursor(self, name: str, value: int) -> None:
-        with self._lock, self._session.begin() as s:
+        with self._writing() as s:
             self._set_cursor(s, name, value)
 
     @staticmethod
@@ -943,8 +973,11 @@ class ContactsStore:
                                                  .order_by(S.source, S.account)).all()]
 
     def drop_source(self, source: str, account: str) -> int:
-        with self._lock, self._session.begin() as s:
-            return self._drop_source(s, source, account)
+        with self._writing() as s:
+            n = self._drop_source(s, source, account)
+            if n:
+                self._changed((fit(source, WORD), fit(account, ACCOUNT)))
+            return n
 
     def _drop_source(self, s: Session, source: str, account: str,
                      marks: list[tuple[str, str]] | None = None) -> int:
@@ -973,38 +1006,44 @@ class ContactsStore:
 
     def reset_source(self, source: str) -> int:
         src = fit(source, WORD)
-        with self._lock, self._session.begin() as s:
+        with self._writing() as s:
             n = int(s.execute(delete(S).where(S.source == src)).rowcount or 0)
-            return n + int(s.execute(delete(T).where(T.source == src)).rowcount or 0)
+            n += int(s.execute(delete(T).where(T.source == src)).rowcount or 0)
+            if n:
+                self._changed()  # tous les comptes de cette source
+            return n
 
     def prune_unseen(self, kind: str) -> int:
-        with self._lock, self._session.begin() as s:
+        with self._writing() as s:
             rows = s.execute(select(N.id, N.contact).where(N.kind == fit(kind, WORD),
                                                            ~exists().where(S.identifier == N.id))).all()
             n = self._drop_identifiers(s, [int(r.id) for r in rows])
             s.flush()
             for cid in sorted({int(r.contact) for r in rows}):
                 n += self._settle(s, cid)
+            if n:
+                self._changed()
         return n
 
     def discard(self, kind: str, value: str) -> int:
         found = fit(normalized(kind, value), VALUE) if kind in KINDS else ""
         if not found:
             return 0
-        with self._lock, self._session.begin() as s:
+        with self._writing() as s:
             ident = s.scalars(select(N).where(N.kind == kind, N.value == found)).first()
             if ident is None:
                 return 0
             contact = int(ident.contact)
             n = self._drop_identifiers(s, [int(ident.id)])
             s.flush()
+            self._changed()
             return n + self._settle(s, contact)
 
     def drop_places(self, contact_id: int, places: Collection[tuple[str, str]]) -> int:
         pairs = sorted({(fit(src, WORD), fit(acc, ACCOUNT)) for src, acc in places})
         if not pairs:
             return 0
-        with self._lock, self._session.begin() as s:
+        with self._writing() as s:
             row = s.get(C, int(contact_id))
             if row is None:
                 return 0
@@ -1025,6 +1064,7 @@ class ContactsStore:
             for r in alone:  # ce qui ne se voyait que là : ce qui le reverrait daté d'avant ne le ramène pas
                 upsert(s, ForgottenRow, {"digest": _print(r.kind, r.value), "until": until}, keys=("digest",))
             s.flush()
+            self._changed(*pairs)
             return n + self._settle(s, int(row.id))
 
     def _settle(self, s: Session, contact: int) -> int:
@@ -1064,7 +1104,7 @@ class ContactsStore:
         subject = (subject or "").strip()
         if not subject:
             return 0
-        with self._lock, self._session.begin() as s:
+        with self._writing() as s:
             whole: set[int] = set()
             alone: set[int] = set()
             marks: list[tuple[str, str]] = []
@@ -1115,6 +1155,8 @@ class ContactsStore:
             until = self._now()
             for kind, value in dict.fromkeys(marks):
                 upsert(s, ForgottenRow, {"digest": _print(kind, value), "until": until}, keys=("digest",))
+            if n:
+                self._changed()
         return n
 
     def _forget_contact(self, s: Session, contact: int, marks: list[tuple[str, str]]) -> int:
@@ -1226,7 +1268,7 @@ class ContactsStore:
 
     def portrayed(self, portrait: Portrait, notes: Sequence[Note] | None) -> int:
         source, account = fit(portrait.source, WORD), fit(portrait.account, ACCOUNT)
-        with self._lock, self._session.begin() as s:
+        with self._writing() as s:
             if s.get(C, int(portrait.contact)) is None:
                 return 0  # oublié entre la lecture et la réponse : rien ne le ramène
             s.add(PortraitRow(contact=int(portrait.contact), source=source, account=account, at=int(portrait.at),
@@ -1234,6 +1276,7 @@ class ContactsStore:
                               call_id=fit(portrait.call_id, REF)))
             if notes is None:
                 return 0
+            self._changed((source, account))  # ce qu'elle en sait, de cette vue
             prints = list(s.scalars(select(NF.prints).where(NF.contact == int(portrait.contact))))
             s.execute(delete(NT).where(NT.contact == int(portrait.contact), NT.source == source,
                                        NT.account == account))
@@ -1262,7 +1305,7 @@ class ContactsStore:
                          bool(r.ok), r.call_id or "") for r in rows]
 
     def forget_note(self, note_id: int) -> Note | None:
-        with self._lock, self._session.begin() as s:
+        with self._writing() as s:
             row = s.get(NT, int(note_id))
             if row is None:
                 return None
@@ -1271,6 +1314,7 @@ class ContactsStore:
             if printed:
                 s.add(NoteForgottenRow(contact=int(row.contact), prints=printed, at=self._now()))
             s.delete(row)
+            self._changed((row.source, row.account))
         return gone
 
     def close(self) -> None:

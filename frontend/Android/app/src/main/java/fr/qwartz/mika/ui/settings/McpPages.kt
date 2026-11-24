@@ -25,9 +25,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.qwartz.mika.R
@@ -62,6 +59,7 @@ import fr.qwartz.mika.data.moi.settings.toolChoiceChanges
 import fr.qwartz.mika.data.moi.settings.toolState
 import fr.qwartz.mika.data.moi.settings.urlProblem
 import fr.qwartz.mika.data.moi.settings.whoWords
+import fr.qwartz.mika.ui.shell.FollowLive
 import fr.qwartz.mika.ui.shell.BarMenu
 import fr.qwartz.mika.ui.shell.BarNav
 import fr.qwartz.mika.ui.shell.Gap
@@ -92,11 +90,14 @@ class ServicesViewModel(graph: AppGraph) : SettingsModel(graph) {
         private set
 
     fun resume() {
-        viewModelScope.launch {
-            when (val got = api.services()) {
-                is MoiApi.Result.Ok -> load = Load.Ready(got.value)
-                is MoiApi.Result.Failed -> if (load !is Load.Ready) load = Load.Failed(got.error) else say(got.error)
-            }
+        viewModelScope.launch { read() }
+    }
+
+    /** Relu sans bruit : un retour sur la page, ou le direct (ADR 0308) qui dit que ce qu'elle montre a changé. */
+    suspend fun read() {
+        when (val got = api.services()) {
+            is MoiApi.Result.Ok -> load = Load.Ready(got.value)
+            is MoiApi.Result.Failed -> if (load !is Load.Ready) load = Load.Failed(got.error) else say(got.error)
         }
     }
 
@@ -111,8 +112,7 @@ internal fun ServicesPage(graph: AppGraph) {
     val shell = LocalShell.current
     val session = rememberSessionKey(graph)
     val vm: ServicesViewModel = viewModel(key = "settings.services|$session") { ServicesViewModel(graph) }
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(vm, lifecycle) { lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) { vm.resume() } }
+    FollowLive(graph.live, SettingsLive.SERVICES, vm, onShown = { vm.resume() }) { vm.read() }
     SettingsEffects(vm)
     SectionScaffold(
         topBar = { MikaTopBar(stringResource(R.string.settings_services), BarNav.BACK) },

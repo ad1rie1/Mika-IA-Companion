@@ -3,7 +3,9 @@
  * validée (`maquette/ecrans/projets2*.js`) — trois zones sur toute la largeur, tout se gère dans l'écran — ; ses
  * données sont celles de l'API par personne (`protocole-moi.md` § 11). L'écran ne recalcule aucune règle : pas de
  * bouton sans le droit servi (`can`, `rights`), les mots d'une étape sont ceux du serveur, et un geste refusé se dit
- * sur place avec les siens (un 409 relit ce qu'on lisait). Un envoi, puis tout se relit.
+ * sur place avec les siens (un 409 relit ce qu'on lisait). Un envoi, puis tout se relit. Le direct (ADR 0308,
+ * `protocole-moi.md` § 2 bis) : `projects` relit la liste, « À faire », et la fiche ouverte (ses onglets compris) si
+ * elle est nommée — ce qui n'a pas changé ne se redessine pas ; l'écran au second plan se relit à son retour.
  */
 import {
   createProject, fetchActivity, fetchActivityDays, fetchActivityTotals, fetchApprovals, fetchArchives, fetchDiagram, fetchElement, fetchElements, fetchHistory, fetchNewProject, fetchNotebook,
@@ -12,6 +14,7 @@ import {
   type NewProject, type NotebookPage, type Overview, type RunDetail, type RunPage, type Settings, type Sheet, type Waiting,
 } from "../../api/projects";
 import { ApiError } from "../../api/moi";
+import { Freshness, live, names, pageShown, type Changed } from "../../live/live";
 import { Cached, CachedMap, confirmModal, errorBlock, failureText, loadingBlock, newNonce, sessionGone } from "../../shared/kit";
 import { refreshCounts, countOf } from "../../shell/counts";
 import { $, $$, h, isMobile } from "../../shell/dom";
@@ -24,7 +27,7 @@ import {
 } from "./gestures";
 import { drawer as drawerMarkup, F, refusal, served, type DrawerOpts } from "./parts";
 import { parsePlace, route, sheetRoute, waitingKey, type Place } from "./routes";
-import { cacheKey, fieldErrorsAt, findGoal, followLists, initialState, refusalAt, ticketList, ticketsQuery, type UiState } from "./state";
+import { cacheKey, fieldErrorsAt, findGoal, followLists, initialState, refusalAt, sheetGone, ticketList, ticketsQuery, type UiState } from "./state";
 import { pluggedTab, pluggedTabs, type Act, type FormAct, type TabHost } from "./tabs";
 import { activityView } from "./views/activity";
 import { diagramView } from "./views/diagram";
@@ -102,7 +105,15 @@ class Projets implements TabHost {
   });
   private readonly diagram = new CachedMap<Diagram>((id) => fetchDiagram(Number(id)));
 
-  constructor(private readonly shell: Shell) {}
+  /** Le direct (ADR 0308) : montré, l'écran relit ce qu'un changement nomme ; sinon il se relit à son retour. */
+  private readonly liveness = new Freshness(() => this.shown() && pageShown(), () => this.relive(null));
+  /** Les fiches sorties de ta vue pendant qu'on les regardait (plus partagées, retirées) : le temps de revenir à la
+   *  liste, elles ne disent pas « Impossible d'ouvrir ce projet ». */
+  private readonly vanished = new Set<number>();
+
+  constructor(private readonly shell: Shell) {
+    live.onChange("projects", (ids) => this.liveness.touch(() => this.relive(ids)));
+  }
 
   screen(): ScreenDef {
     return {
@@ -111,6 +122,11 @@ class Projets implements TabHost {
       mount: () => this.mount(),
       render: (body) => {
         this.body = body;
+        if (this.liveness.pending) {
+          // revenu après un changement manqué : ce qu'il montre repart du serveur, puis le dessin
+          this.liveness.fresh();
+          this.invalidateFor(null, null);
+        }
         this.paint();
       },
       search: () => (this.overview.value?.projects ?? []).map((p) => ({ group: "Projets", title: p.title, sub: p.where || p.status_label, icon: "flag" as const, route: sheetRoute(p.id) })),
@@ -227,6 +243,61 @@ class Projets implements TabHost {
     void refreshCounts();
   }
 
+  private shown(): boolean {
+    const sc = this.shell.ctx;
+    return !!sc && sc.screen === "projets" && !!this.body?.isConnected;
+  }
+
+  /** Le projet que l'écran montre : la fiche ouverte, ou celui de l'attente choisie dans « À faire » (comme `draw`). */
+  private openProject(place: Place): number | null {
+    if (place.kind === "sheet") return place.id;
+    if (place.kind !== "todo") return null;
+    const todo = this.todo();
+    const shown = todo.filter((w) => !this.ui.todoProject || w.project === this.ui.todoProject);
+    const w = todo.find((x) => x.project === place.project && waitingKey(x) === place.key) ?? (isMobile() ? null : (shown[0] ?? null));
+    return w?.project ?? null;
+  }
+
+  /** Ce que `projects` rend périmé : la liste et « À faire » toujours ; ce que l'écran garde des projets nommés
+   *  (`null` : de tous) ; et ce qu'en gardent les onglets écrits à part, pour le projet montré s'il est nommé. */
+  private invalidateFor(ids: Changed, open: number | null): void {
+    this.overview.invalidate();
+    this.archives.invalidate();
+    const named = ids === null ? undefined : (key: string) => names(ids, key.split("|")[0]);
+    for (const map of [this.sheets, this.approvals, this.elements, this.element, this.settings, this.feed, this.totals, this.history, this.days, this.runs, this.run, this.notes, this.diagram]) map.invalidate(named);
+    if (ids === null || names(ids, open)) for (const tab of pluggedTabs()) tab.changed?.();
+  }
+
+  /** Le direct : `projects` nomme ces projets (`null` : tous). Ce que l'écran montre se relit — chaque lecture
+   *  redessine si elle a changé (`read`) : rien de neuf, rien ne bouge (ni la saisie, ni le défilement). Ce que
+   *  « Afficher les suivants » avait ajouté reste (`todo` ne le montre pas deux fois). */
+  private relive(ids: Changed): void {
+    const sc = this.shell.ctx;
+    if (!sc || sc.screen !== "projets") return;
+    const place = parsePlace(sc.tab, sc.item);
+    const sheet = place.kind === "sheet" ? this.sheets.get(String(place.id)) : null;
+    const had = !!sheet?.value;
+    this.invalidateFor(ids, this.openProject(place));
+    // la fiche montrée, relue avant le dessin : si elle n'est plus à toi, on revient à la liste (avant que le dessin ne
+    // dise son refus)
+    if (sheet && had && place.kind === "sheet") void sheet.load().then(() => this.leaveIfGone(place.id, sheet));
+    // les lectures du dessin, sans le dessin : `read` relance chacune de celles qu'on vient de rendre périmées (une
+    // déjà en vol est suivie d'une autre, `Cached`) et redessine celles qui ont changé
+    this.draw(place);
+  }
+
+  /** La fiche ouverte, relue par le direct, n'est plus à toi (404 : plus partagée, retirée) : retour à la liste des
+   *  projets, sans le refus. Une fiche qu'on n'avait jamais pu lire (une adresse fausse) le dit, elle. */
+  private leaveIfGone(id: number, sheet: Cached<Sheet>): void {
+    if (!sheetGone(true, sheet)) return;
+    const sc = this.shell.ctx;
+    const here = sc?.screen === "projets" ? parsePlace(sc.tab, sc.item) : null;
+    if (here?.kind !== "sheet" || here.id !== id) return;
+    this.vanished.add(id);
+    addEventListener("hashchange", () => this.vanished.delete(id), { once: true });
+    location.replace(route("projets"));
+  }
+
   /** Un refus : ses mots, dits à l'endroit du geste ; un 409, et ce qu'on lisait se relit. */
   private refused(err: unknown, where: string): void {
     if (sessionGone(err)) {
@@ -240,8 +311,12 @@ class Projets implements TabHost {
     this.paint();
   }
 
+  /** « À faire » : la première page, puis ce que « Afficher les suivants » a ajouté — sans ce que la première page,
+   *  relue depuis (le direct), montre déjà. */
   private todo(): Waiting[] {
-    return [...(this.overview.value?.todo ?? []), ...this.todoMore];
+    const first = this.overview.value?.todo ?? [];
+    const known = new Set(first.map((w) => `${w.project}/${waitingKey(w)}`));
+    return [...first, ...this.todoMore.filter((w) => !known.has(`${w.project}/${waitingKey(w)}`))];
   }
 
   // ── Le dessin ──────────────────────────────────────────────────────
@@ -291,7 +366,7 @@ class Projets implements TabHost {
     const sheet = got.value;
     if (!sheet) {
       const head = `<header class="page-head p2-fhead"><a class="p2-crumb" href="${route("projets")}" title="Tous les projets">${ico("chev-left", "sm")}<span>Projets</span></a><div class="ph-title"><h1>Projet</h1></div><div class="ph-actions"></div></header><nav class="p2-tabs"></nav>`;
-      return [head, got.error ? errorBlock(got.error, "Impossible d'ouvrir ce projet") : loadingBlock(), null, []];
+      return [head, got.error && !this.vanished.has(place.id) ? errorBlock(got.error, "Impossible d'ouvrir ce projet") : loadingBlock(), null, []];
     }
     const tab = sheet.rights.detail ? place.tab : "vue";
     const rest = place.rest;

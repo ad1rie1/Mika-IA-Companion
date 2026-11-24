@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../../api/moi";
-import { correctedText, errorText, refusalText } from "./compose";
+import { correctedText, correctTurn, errorText, refusalText } from "./compose";
 import {
   addressText,
   ago,
@@ -321,5 +321,16 @@ describe("« Corriger » (ADR 0307) : ce qu'il dit une fois fait", () => {
     expect(correctedText(0)).toBe("Aucune faute : ton texte reste tel quel.");
     expect(correctedText(1)).toBe("1 faute corrigée.");
     expect(correctedText(3)).toBe("3 fautes corrigées.");
+  });
+  it("ce qui a été écarté parce que ça touchait aux mots", () => {
+    expect(correctedText(2, 1)).toBe("2 fautes corrigées ; 1 changement écarté : il touchait aux mots.");
+    expect(correctedText(1, 3)).toBe("1 faute corrigée ; 3 changements écartés : ils touchaient aux mots.");
+    expect(correctedText(0, 4)).toBe("La correction touchait aux mots : rien n'a été changé.");
+  });
+  it("posée seulement là où on l'a demandée, sur le texte d'alors", () => {
+    expect(correctTurn("salu", "salu", true)).toBe("put");
+    expect(correctTurn("salu", "salut toi", true)).toBe("moved"); // tu as continué d'écrire
+    expect(correctTurn("salu", "salu", false)).toBe("gone"); // une autre discussion, un autre mail
+    expect(correctTurn("salu", null, true)).toBe("gone"); // la fenêtre fermée, le mail parti
   });
 });

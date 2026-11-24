@@ -12,7 +12,7 @@ from __future__ import annotations
 import functools
 import inspect as pyinspect
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from mika.kernel.faculty import ActionSpec, InspectSpec, SubjectSpec, VitalSpec
@@ -44,27 +44,39 @@ class Inspection:
         self.sampler = sampler
         self.timings: dict[str, Timing] = {}
         self._badges: dict[str, tuple[int, Any]] = {}
+        #: le titre d'une vue tel qu'il se montre : qui consulte y pose ce qu'un titre écrit d'avance ne peut pas
+        #: savoir (la console, son nom : ``self_.NAME_SLOT``, ADR 0070) ; le catalogue rend chaque vue sous ce titre
+        self.titled: Callable[[str], str] | None = None
 
     # ── le catalogue ──
     @property
     def registry(self) -> Any:
         return self.kernel.registry
 
+    def _shown(self, v: InspectSpec) -> InspectSpec:
+        """Cette vue sous le titre qu'elle montre (``titled``)."""
+        title = self.titled(v.title) if self.titled is not None else v.title
+        return v if title == v.title else replace(v, title=title)
+
+    def _specs(self) -> list[InspectSpec]:
+        return [self._shown(v) for v in self.registry.inspectors]
+
     def views(self) -> list[InspectSpec]:
-        return sorted(self.registry.inspectors, key=lambda v: (v.owner, v.name))
+        return sorted(self._specs(), key=lambda v: (v.owner, v.name))
 
     def find(self, owner: str, name: str) -> InspectSpec | None:
-        return next((v for v in self.registry.inspectors if v.owner == owner and v.name == name), None)
+        found = next((v for v in self.registry.inspectors if v.owner == owner and v.name == name), None)
+        return self._shown(found) if found is not None else None
 
     def in_section(self, section: str) -> list[InspectSpec]:
         """Les onglets d'une destination : ses vues, sans celles hors de la navigation (``hidden``)."""
-        return sorted((v for v in self.registry.inspectors if v.section == section and not v.hidden),
+        return sorted((v for v in self._specs() if v.section == section and not v.hidden),
                       key=lambda v: (v.order, v.title))
 
     def tabs(self, kind: str, key: str = "") -> list[InspectSpec]:
         """Les onglets de la fiche de ce type d'objet ; ``key`` : sans ceux qui n'ont rien à dire de cet objet-là
         (``InspectSpec.shown``, une panne le montre)."""
-        views = sorted((v for v in self.registry.inspectors if v.subject == kind), key=lambda v: (v.order, v.title))
+        views = sorted((v for v in self._specs() if v.subject == kind), key=lambda v: (v.order, v.title))
         if not key:
             return views
         frame = self.kernel.mind.frame()

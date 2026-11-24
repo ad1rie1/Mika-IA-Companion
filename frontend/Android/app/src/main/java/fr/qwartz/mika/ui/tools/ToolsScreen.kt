@@ -11,14 +11,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.stringResource
-import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
+import fr.qwartz.mika.data.moi.LiveSignal
 import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.MoiError
 import fr.qwartz.mika.data.moi.settings.Services
@@ -26,8 +24,10 @@ import fr.qwartz.mika.data.moi.tools.FIRST_CANAL
 import fr.qwartz.mika.data.moi.tools.Rights
 import fr.qwartz.mika.data.moi.tools.ToolsApi
 import fr.qwartz.mika.data.moi.tools.resourcesOf
+import fr.qwartz.mika.data.net.Topics
 import fr.qwartz.mika.ui.Route
 import fr.qwartz.mika.ui.shell.BarNav
+import fr.qwartz.mika.ui.shell.FollowLive
 import fr.qwartz.mika.ui.shell.Load
 import fr.qwartz.mika.ui.shell.LocalShell
 import fr.qwartz.mika.ui.shell.MikaTopBar
@@ -55,6 +55,9 @@ internal object ToolsTabs {
 
     fun of(tab: String): String = if (tab == SERVICES || tab == AGREEMENTS) tab else RIGHTS
 }
+
+/** Ce que suit Outils : tes réglages (`settings`, ADR 0308). */
+private val TOOLS_TOPICS = setOf(Topics.SETTINGS)
 
 /**
  * Ce que les trois onglets lisent, une fois pour la session (un modèle par session, pas par onglet) : la matrice et
@@ -98,6 +101,12 @@ class ToolsViewModel(private val graph: AppGraph) : ViewModel() {
         } else {
             load(quiet = true)
         }
+    }
+
+    /** Le direct (ADR 0308) : tes réglages ont changé (`settings` — droits, services, partages) : relus sans bruit, ce
+     *  qui est déplié gardé. Rend la main quand c'est relu. */
+    suspend fun onLive(signal: LiveSignal) {
+        if (started && signal.touches(Topics.SETTINGS)) load(quiet = true).join()
     }
 
     /** Tirer pour relire : ce qui est montré reste jusqu'à ce que la relecture arrive. */
@@ -164,7 +173,7 @@ class ToolsViewModel(private val graph: AppGraph) : ViewModel() {
 /**
  * Outils, la rubrique du tiroir (`Route.Tools(tab)`) ; [nav] : le tiroir depuis le tiroir, la flèche quand un autre
  * écran y mène (« Comment ça part » de Teams, la règle d'envoi de Paramètres). Les lectures se refont à chaque retour
- * sur l'écran, sans minuterie (les droits ne bougent que dans la console).
+ * sur l'écran, et quand le direct dit que tes réglages ont changé (ADR 0308), sans minuterie.
  */
 @Composable
 fun ToolsScreen(graph: AppGraph, tab: String, nav: BarNav) {
@@ -172,10 +181,7 @@ fun ToolsScreen(graph: AppGraph, tab: String, nav: BarNav) {
     val session = rememberSessionKey(graph)
     val vm: ToolsViewModel = viewModel(key = "tools|$session") { ToolsViewModel(graph) }
     LaunchedEffect(vm) { vm.said.collect { shell.toast(it) } }
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(vm, lifecycle) {
-        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) { vm.resume() }
-    }
+    FollowLive(graph.live, TOOLS_TOPICS, vm, onShown = { vm.resume() }) { vm.onLive(it) }
     val shown = ToolsTabs.of(tab)
     SectionScaffold(topBar = { ToolsTopBar(shown, nav) }) { modifier ->
         when (shown) {

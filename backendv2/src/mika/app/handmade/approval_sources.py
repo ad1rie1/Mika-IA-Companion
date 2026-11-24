@@ -6,7 +6,8 @@
   personne) — et la fiche où ça mène, s'il y en a une. La file, sa demande ouverte et l'historique le disent ainsi
   (``Waiting.about``, par ``InspectorDeps.queue``).
 - ``sources(ui, capacité, contexte, arguments)`` : sa source en liens, du plus proche au plus large — la boîte et le
-  brouillon d'un mail, la conversation et la réponse préparée d'une réponse Teams, puis ce que dit son contexte (le
+  brouillon d'un mail, la conversation et la réponse préparée d'une réponse Teams, l'agenda et sa semaine d'une
+  écriture d'agenda (ADR 0309), puis ce que dit son contexte (le
   service, l'app, le projet, la fiche de la personne et leur conversation) ; ``InspectorDeps.approval_sources``.
 """
 
@@ -26,6 +27,7 @@ from mika.contracts import phone as phone_c
 from mika.contracts import teams as teams_c
 from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import PREFIX, UI
+from mika.plugins.agenda import CAPABILITY as AGENDA_WRITE
 from mika.ports.teams import DEFAULT_ACCOUNT as DEFAULT_TEAMS_ACCOUNT
 from mika.ports.teams import conversation_key
 from mika.vocab.episodes import project_of
@@ -84,6 +86,28 @@ def _arg(args: Mapping[str, Any], name: str) -> str:
     return str(value) if isinstance(value, str | int) and str(value) else ""
 
 
+def _agenda_sources(ui: UI, args: Mapping[str, Any]) -> list[tuple[str, str]]:
+    """Une écriture d'agenda : la fiche de l'agenda ; sa semaine dans Tous les agendas, l'événement ouvert quand il est
+    déjà dans la base (une réponse d'invitation, une modification)."""
+    calendar = _arg(args, "calendar")
+    store = ui.kernel.ports.get("agenda")
+    cal = store.calendar(calendar) if store is not None and calendar else None
+    if cal is None:
+        return []
+    out = [(f"L'agenda « {cal.name or calendar} »", subject_url("agenda", calendar))]
+    uid = _arg(args, "uid")
+    found = store.find(calendar, uid, _arg(args, "original")) if uid else None
+    draft = args.get("draft") if isinstance(args.get("draft"), Mapping) else {}
+    span = draft.get("span") if isinstance(draft.get("span"), Mapping) else {}
+    start = found.span.start if found is not None else int(span.get("start") or 0)
+    if start:
+        query = {"du": ui.kernel.mind.frame().local(start).date().isoformat()}
+        if found is not None:
+            query["ev"] = f"{found.id}.{_arg(args, 'occurrence')}" if _arg(args, "occurrence") else str(found.id)
+        out.append(("Dans la semaine", f"{PREFIX}/agendas/tous?" + urlencode(query)))
+    return out
+
+
 def sources(ui: UI, capability: str, context: str, args: Mapping[str, Any]) -> list[tuple[str, str]]:
     """Les liens vers la source d'une demande (texte, adresse), du plus proche au plus large."""
     out: list[tuple[str, str]] = []
@@ -92,6 +116,8 @@ def sources(ui: UI, capability: str, context: str, args: Mapping[str, Any]) -> l
             out.append(("Le brouillon", subject_url(DRAFT, draft)))
         if account := _arg(args, "account"):
             out.append((f"La boîte « {account} »", f"{PREFIX}/courrier/reception?" + urlencode({"compte": account})))
+    elif capability == AGENDA_WRITE:  # l'agenda qu'elle touche, et sa semaine dans Tous les agendas (ADR 0309)
+        out += _agenda_sources(ui, args)
     elif capability == teams_c.SEND:
         if draft := _arg(args, "draft"):
             out.append(("La réponse préparée", subject_url(REPLY, draft)))

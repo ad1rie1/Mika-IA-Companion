@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
+import fr.qwartz.mika.data.net.Topics
 import fr.qwartz.mika.data.moi.contacts.ContactsApi
 import fr.qwartz.mika.data.moi.contacts.IdentKinds
 import fr.qwartz.mika.data.moi.contacts.PlaceIcon
@@ -35,6 +36,9 @@ import kotlinx.coroutines.flow.asSharedFlow
 
 /** Contacts sur l'API du téléphone. */
 internal fun AppGraph.contactsApi(): ContactsApi = ContactsApi(moi)
+
+/** Ce que suivent la liste et la fiche : ses contacts (`contacts`, tout le domaine — ADR 0308, § 2 bis). */
+internal val CONTACTS_TOPICS = setOf(Topics.CONTACTS)
 
 /** Ce que les écrans de Contacts prennent de la session : l'API. Un test JVM la donne sans le graphe de l'app. */
 class ContactsDeps(val api: ContactsApi) {

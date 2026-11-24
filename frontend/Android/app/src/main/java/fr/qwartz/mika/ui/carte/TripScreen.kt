@@ -62,9 +62,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
@@ -96,6 +93,7 @@ import fr.qwartz.mika.ui.settings.ConfirmDialog
 import fr.qwartz.mika.ui.shell.BarAction
 import fr.qwartz.mika.ui.shell.BarMenu
 import fr.qwartz.mika.ui.shell.BarNav
+import fr.qwartz.mika.ui.shell.FollowLive
 import fr.qwartz.mika.ui.shell.Load
 import fr.qwartz.mika.ui.shell.LocalShell
 import fr.qwartz.mika.ui.shell.MIcon
@@ -131,8 +129,8 @@ fun TripScreen(graph: AppGraph, route: Route.Trip) {
     val session = rememberSessionKey(graph)
     val store = rememberCarteStore(graph)
     val vm: TripViewModel = viewModel(key = "carte.trip|$session|${route.id}") { TripViewModel(TripDeps(graph, store), route.id) }
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(vm, lifecycle) { lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) { vm.resume() } }
+    // lu à l'ouverture, relu à chaque retour, et quand le direct dit que tes voyages ont changé (ADR 0308)
+    FollowLive(graph.live, CARTE_TRIPS, vm, onShown = { vm.resume() }) { vm.onLive(it) }
     LaunchedEffect(vm) { vm.said.collect { shell.toast(it) } }
     LaunchedEffect(vm) { vm.deleted.collect { shell.back() } }
     val trip = vm.shown

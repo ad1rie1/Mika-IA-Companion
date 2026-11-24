@@ -4,7 +4,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
@@ -29,15 +28,17 @@ data class Me(
 
 /**
  * Les pastilles du tiroir (ADR 0200) : ses brouillons de mail qui attendent, ses réponses Teams qui attendent, ses
- * réponses offertes au téléphone, ce qui t'attend dans tes projets (« À faire », ADR 0296).
+ * réponses offertes au téléphone, ce qui t'attend dans tes projets (« À faire », ADR 0296), tes invitations qui
+ * attendent ta réponse et ce que Mika propose d'écrire dans tes agendas dont tu décides (ADR 0309).
  */
 @Serializable
-data class Counts(val mail: Int = 0, val teams: Int = 0, val phone: Int = 0, val projects: Int = 0)
+data class Counts(val mail: Int = 0, val teams: Int = 0, val phone: Int = 0, val projects: Int = 0, val agenda: Int = 0)
 
 /**
- * Ce que le serveur dit de la personne connectée, relu à l'ouverture, chaque minute tant que l'app est à l'écran
- * (la boucle est celle de l'écran racine), et après chaque geste qui peut changer une pastille ([refresh]).
- * Une lecture qui échoue garde la dernière connue ; une lecture partie avant [clear] ne repose rien après.
+ * Ce que le serveur dit de la personne connectée, relu à l'ouverture et à chaque retour de l'app au premier plan,
+ * quand le direct dit `me` (ADR 0308 : l'écran racine le suit), et après chaque geste qui peut changer une pastille
+ * ([refresh]). Une rafale ne fait pas dix lectures : une en vol, une seule après. Une lecture qui échoue garde la
+ * dernière connue ; une lecture partie avant [clear] ne repose rien après.
  */
 class MeRepository(private val api: MoiApi, private val scope: CoroutineScope) {
     private val _me = MutableStateFlow<Me?>(null)
@@ -46,9 +47,10 @@ class MeRepository(private val api: MoiApi, private val scope: CoroutineScope) {
     /** Compte les sessions fermées : une lecture partie sous une autre génération ne pose rien. */
     private var generation = 0
     private val guard = Any()
+    private val reading = OneAtATime(scope) { load() }
 
     fun refresh() {
-        scope.launch { load() }
+        reading.run()
     }
 
     suspend fun load(): MoiApi.Result<Me> = lock.withLock {

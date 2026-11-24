@@ -16,19 +16,18 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.res.stringResource
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.repeatOnLifecycle
 import fr.qwartz.mika.R
 import fr.qwartz.mika.ui.components.rememberNow
+import fr.qwartz.mika.data.net.Topics
 import fr.qwartz.mika.ui.shell.BarNav
+import fr.qwartz.mika.ui.shell.FollowLive
 import fr.qwartz.mika.ui.shell.ChatCue
 import fr.qwartz.mika.ui.shell.LocalChatCue
 import fr.qwartz.mika.ui.shell.LocalShell
 import fr.qwartz.mika.ui.shell.MikaDrawerSheet
 import fr.qwartz.mika.ui.shell.Shell
 import fr.qwartz.mika.ui.shell.rememberMikaStatus
-import kotlinx.coroutines.delay
+import fr.qwartz.mika.ui.shell.rememberSessionKey
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -48,6 +47,14 @@ import fr.qwartz.mika.core.AppGraph
 import fr.qwartz.mika.data.auth.Session
 import fr.qwartz.mika.data.files.MikaFileRefs
 import fr.qwartz.mika.data.settings.Settings
+import fr.qwartz.mika.ui.agenda.AgendaEventScreen
+import fr.qwartz.mika.ui.agenda.AgendaFormScreen
+import fr.qwartz.mika.ui.agenda.AgendaHerScreen
+import fr.qwartz.mika.ui.agenda.AgendaInvitationsScreen
+import fr.qwartz.mika.ui.agenda.AgendaProposalScreen
+import fr.qwartz.mika.ui.agenda.AgendaScreen
+import fr.qwartz.mika.ui.agenda.AgendaSearchScreen
+import fr.qwartz.mika.ui.agenda.CalendarRightsScreen
 import fr.qwartz.mika.ui.carte.CarteScreen
 import fr.qwartz.mika.ui.carte.EventFicheScreen
 import fr.qwartz.mika.ui.carte.PlaceFicheScreen
@@ -102,8 +109,16 @@ fun MikaRoot(graph: AppGraph, deepLink: String?, onDeepLinkHandled: () -> Unit) 
 
 private val StackSaver = Saver<BackStack, String>(save = { it.encode() }, restore = { BackStack.decode(it) })
 
-/** Les pastilles du tiroir se relisent à ce rythme tant que l'app est à l'écran (ADR 0200, comme le frontendv2). */
-private const val ME_REFRESH_MS = 60_000L
+/** Ce que suit le cadre : qui est connecté, et ses pastilles (ADR 0200, 0308). */
+private val ME_TOPICS = setOf(Topics.ME)
+
+/** Ce que suit le canal « Agenda » : l'agenda (ADR 0309). */
+private val AGENDA_NOTIFY_TOPICS = setOf(Topics.AGENDA)
+
+/** Un écran de l'Agenda est au sommet (ce qui y arrive se voit : rien ne se notifie). */
+private val Route.isAgenda: Boolean
+    get() = this == Route.Agenda || this is Route.AgendaEvent || this is Route.AgendaProposal || this is Route.AgendaHer ||
+        this is Route.AgendaForm || this == Route.AgendaInvitations || this == Route.AgendaSearch
 
 @Composable
 private fun SignedIn(graph: AppGraph, deepLink: String?, onDeepLinkHandled: () -> Unit) {
@@ -131,16 +146,19 @@ private fun SignedIn(graph: AppGraph, deepLink: String?, onDeepLinkHandled: () -
             onDeepLinkHandled()
         }
     }
-    // qui est connecté et ce qui attend sa décision : à l'ouverture, puis chaque minute tant que l'app est à l'écran
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(lifecycle) {
-        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            while (true) {
-                graph.me.load()
-                delay(ME_REFRESH_MS)
-            }
-        }
+    // qui est connecté et ce qui attend sa décision : à l'ouverture et à chaque retour de l'app au premier plan, puis
+    // quand le direct dit `me` (ADR 0308) — une rafale, une lecture en vol et une seule après
+    FollowLive(graph.live, ME_TOPICS, graph.me, onShown = { graph.me.refresh() }) { graph.me.refresh() }
+    // le canal « Agenda » (ADR 0309) : une invitation, un ajout que Mika propose, arrivés pendant que l'app est ouverte
+    // ailleurs que dans l'Agenda (là, la vue se relit en direct et rien ne se notifie)
+    val session = rememberSessionKey(graph)
+    LaunchedEffect(session) { graph.agendaPrefs.open(session) }
+    val agendaShown = stack.top.isAgenda
+    DisposableEffect(graph, agendaShown) {
+        graph.agendaNotifier.shown = agendaShown
+        onDispose { graph.agendaNotifier.shown = false }
     }
+    FollowLive(graph.live, AGENDA_NOTIFY_TOPICS, session, onShown = { graph.scope.launch { graph.agendaNotifier.check() } }) { graph.agendaNotifier.check() }
     val snackbar = remember { SnackbarHostState() }
     val shell = remember(graph) {
         Shell(
@@ -251,6 +269,15 @@ private fun Screen(graph: AppGraph, stack: BackStack, shell: Shell) {
         Route.Teams -> TeamsListScreen(graph)
         is Route.TeamsThread -> TeamsThreadScreen(graph, top.key)
         Route.TeamsReplies -> TeamsRepliesScreen(graph)
+        // l'Agenda (ADR 0309) : la rubrique, puis la fiche, le formulaire, les invitations, chercher en page
+        Route.Agenda -> AgendaScreen(graph)
+        is Route.AgendaEvent -> AgendaEventScreen(graph, top)
+        is Route.AgendaProposal -> AgendaProposalScreen(graph, top)
+        is Route.AgendaHer -> AgendaHerScreen(graph, top)
+        is Route.AgendaForm -> AgendaFormScreen(graph, top)
+        Route.AgendaInvitations -> AgendaInvitationsScreen(graph)
+        Route.AgendaSearch -> AgendaSearchScreen(graph)
+        is Route.CalendarRights -> CalendarRightsScreen(graph, top)
         // le tiroir depuis le tiroir ; la flèche quand un autre écran y mène
         is Route.Carte -> CarteScreen(graph, top, if (stack.routes.size <= 2) BarNav.DRAWER else BarNav.BACK)
         is Route.Trip -> TripScreen(graph, top)

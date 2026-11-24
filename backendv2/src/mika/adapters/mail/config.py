@@ -60,6 +60,16 @@ def application_id(client_id: str) -> str:
     return client_id.lower()
 
 
+def tenant_id(tenant: str) -> str:
+    """Un annuaire Microsoft (``consumers``, ``organizations``, un domaine ou un GUID), vide : ``consumers`` ;
+    ``ValueError`` s'il n'en a pas la forme (il entre dans l'adresse de Microsoft). Une boîte et un compte d'agenda
+    (ADR 0309) le vérifient de même."""
+    tenant = tenant.strip() or CONSUMERS
+    if not _TENANT.match(tenant):
+        raise ValueError("l'annuaire Microsoft est « consumers », « organizations », un domaine ou un identifiant")
+    return tenant
+
+
 class MailAccount(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -207,10 +217,7 @@ class MailAccount(BaseModel):
     @field_validator("oauth_tenant")
     @classmethod
     def _tenant(cls, tenant: str) -> str:
-        tenant = tenant.strip() or CONSUMERS
-        if not _TENANT.match(tenant):
-            raise ValueError("l'annuaire Microsoft est « consumers », « organizations », un domaine ou un identifiant")
-        return tenant
+        return tenant_id(tenant)
 
     @property
     def ready(self) -> bool:

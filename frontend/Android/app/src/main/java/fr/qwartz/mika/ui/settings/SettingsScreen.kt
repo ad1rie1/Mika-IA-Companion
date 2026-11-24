@@ -19,14 +19,17 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
+import fr.qwartz.mika.data.moi.LiveSignal
+import fr.qwartz.mika.data.net.Topics
 import fr.qwartz.mika.data.moi.MoiApi
+import fr.qwartz.mika.data.moi.agenda.AgendaApi
+import fr.qwartz.mika.data.moi.agenda.accountsSummary
+import fr.qwartz.mika.data.moi.agenda.Accounts as AgendaAccounts
 import fr.qwartz.mika.data.moi.mail.MailBoxes
 import fr.qwartz.mika.data.moi.phone.PhoneDevices
 import fr.qwartz.mika.data.moi.phone.phoneBar
@@ -42,12 +45,19 @@ import fr.qwartz.mika.data.settings.Settings as AppSettings
 import fr.qwartz.mika.data.settings.ThemeMode
 import fr.qwartz.mika.service.PhoneListenerService
 import fr.qwartz.mika.ui.Route
+import fr.qwartz.mika.ui.agenda.AgendaAccountPage
+import fr.qwartz.mika.ui.agenda.AgendaCalendarPage
+import fr.qwartz.mika.ui.agenda.AgendaPlugPage
+import fr.qwartz.mika.ui.agenda.AgendasSettingsPage
+import fr.qwartz.mika.ui.components.rememberNow
+import fr.qwartz.mika.ui.shell.FollowLive
 import fr.qwartz.mika.ui.shell.BarNav
 import fr.qwartz.mika.ui.shell.ComingScreen
 import fr.qwartz.mika.ui.shell.LocalShell
 import fr.qwartz.mika.ui.shell.MikaTopBar
 import fr.qwartz.mika.ui.shell.SectionScaffold
 import fr.qwartz.mika.ui.shell.rememberSessionKey
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
 /** Les pages de Paramètres (`Route.SettingsPage.page`) ; une clé ([Route.SettingsPage.key]) dit ce qu'elles règlent. */
@@ -70,6 +80,12 @@ object SettingsPages {
     const val MESSAGES = "messages"
     const val APPEARANCE = "apparence"
     const val DATA = "donnees"
+    /** Paramètres › Agendas (ADR 0309) : ses comptes ; un compte (clé : le compte) ; un agenda (clé : l'agenda) ;
+     *  « Brancher un agenda » (clé vide, une sorte, ou `<sorte>/<compte>` pour se reconnecter). */
+    const val AGENDAS = "agendas"
+    const val AGENDA_ACCOUNT = "compte-agenda"
+    const val AGENDA_CALENDAR = "agenda"
+    const val AGENDA_PLUG = "brancher-agenda"
 }
 
 /** Une page de Paramètres, par-dessus la racine. */
@@ -90,13 +106,24 @@ class SettingsHomeViewModel(graph: AppGraph) : SettingsModel(graph) {
         private set
     var services by mutableStateOf<Services?>(null)
         private set
+    /** Ses comptes d'agenda (ADR 0309) ; `null` tant qu'ils ne se sont pas lus. */
+    var agendas by mutableStateOf<AgendaAccounts?>(null)
+        private set
+    private val agendaApi = AgendaApi(graph.moi)
 
     fun resume() {
-        viewModelScope.launch { (api.boxes() as? MoiApi.Result.Ok)?.let { boxes = it.value } }
-        viewModelScope.launch { (api.teamsAccounts() as? MoiApi.Result.Ok)?.let { accounts = it.value } }
-        viewModelScope.launch { (api.phones() as? MoiApi.Result.Ok)?.let { phones = it.value } }
-        viewModelScope.launch { (api.shares() as? MoiApi.Result.Ok)?.let { shares = it.value } }
-        viewModelScope.launch { (api.services() as? MoiApi.Result.Ok)?.let { services = it.value } }
+        viewModelScope.launch { read() }
+    }
+
+    /** Relu sans bruit : un retour sur la page, ou le direct (ADR 0308) qui dit que ce qu'elle montre a changé. */
+    suspend fun read(signal: LiveSignal = LiveSignal.RESYNC) = coroutineScope<Unit> {
+        val all = signal.touches(Topics.SETTINGS)
+        if (all || signal.touches(Topics.MAIL)) launch { (api.boxes() as? MoiApi.Result.Ok)?.let { boxes = it.value } }
+        if (all || signal.touches(Topics.TEAMS)) launch { (api.teamsAccounts() as? MoiApi.Result.Ok)?.let { accounts = it.value } }
+        if (all || signal.touches(Topics.PHONE_PHONES)) launch { (api.phones() as? MoiApi.Result.Ok)?.let { phones = it.value } }
+        if (all) launch { (api.shares() as? MoiApi.Result.Ok)?.let { shares = it.value } }
+        if (all) launch { (api.services() as? MoiApi.Result.Ok)?.let { services = it.value } }
+        if (all || signal.touches(Topics.AGENDA)) launch { (agendaApi.accounts() as? MoiApi.Result.Ok)?.let { agendas = it.value } }
     }
 }
 
@@ -110,8 +137,9 @@ fun SettingsScreen(graph: AppGraph) {
     val shell = LocalShell.current
     val session = rememberSessionKey(graph)
     val vm: SettingsHomeViewModel = viewModel(key = "settings.home|$session") { SettingsHomeViewModel(graph) }
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(vm, lifecycle) { lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) { vm.resume() } }
+    FollowLive(graph.live, SettingsLive.HOME, vm, onShown = { vm.resume() }) { vm.read(it) }
+    // « vu il y a 4 min » (tes téléphones) avance tout seul
+    val now = rememberNow(wallMs = graph.clock::wallMs)
     val me by graph.me.me.collectAsStateWithLifecycle()
     val settings by graph.settings.settings.collectAsStateWithLifecycle(AppSettings())
     val push by graph.push.state.collectAsStateWithLifecycle()
@@ -158,10 +186,19 @@ fun SettingsScreen(graph: AppGraph) {
                     boxed = false,
                 )
                 SetDivider()
+                // après Comptes Teams (ADR 0309, la maquette `agenda-parametres.js`) : ses comptes d'agenda
+                SetItem(
+                    R.drawable.ic_m_agenda,
+                    stringResource(R.string.agenda_settings_title),
+                    vm.agendas?.let { accountsSummary(it.accounts) } ?: stringResource(R.string.agenda_settings_line),
+                    onClick = { go(SettingsPages.AGENDAS) },
+                    boxed = false,
+                )
+                SetDivider()
                 SetItem(
                     R.drawable.ic_m_phone,
                     stringResource(R.string.settings_phones),
-                    vm.phones?.let { phoneBar(it.items, graph.deviceLabel, graph.auth.tokenId(), graph.clock.wallMs()).line } ?: stringResource(R.string.settings_phones_line),
+                    vm.phones?.let { phoneBar(it.items, graph.deviceLabel, graph.auth.tokenId(), now).line } ?: stringResource(R.string.settings_phones_line),
                     onClick = { go(SettingsPages.PHONES) },
                     boxed = false,
                 )
@@ -278,6 +315,10 @@ fun SettingsPageScreen(graph: AppGraph, route: Route.SettingsPage) {
             SettingsPages.MESSAGES -> MessagesPage(graph)
             SettingsPages.APPEARANCE -> AppearancePage(graph)
             SettingsPages.DATA -> DataPage(graph)
+            SettingsPages.AGENDAS -> AgendasSettingsPage(graph)
+            SettingsPages.AGENDA_ACCOUNT -> AgendaAccountPage(graph, route.key)
+            SettingsPages.AGENDA_CALENDAR -> AgendaCalendarPage(graph, route.key)
+            SettingsPages.AGENDA_PLUG -> AgendaPlugPage(graph, route.key)
             else -> ComingScreen(stringResource(R.string.nav_settings), BarNav.BACK, stringResource(R.string.settings_unknown_page))
         }
     }

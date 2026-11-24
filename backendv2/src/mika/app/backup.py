@@ -35,7 +35,7 @@ le journal au démarrage suivant.
 **Sur un serveur MariaDB** (``MIKA_DATABASE_URL``, ADR 0101 point 10), ses
 bases ne sont pas des fichiers du dossier : l'archive porte, à côté du dossier
 (``data/``), une copie SQL de chacune (``bases/`` : ``mind``, ``mail``,
-``feeds``, ``teams``, ``contacts`` et la base de chaque app forgée), faite par
+``feeds``, ``teams``, ``contacts``, ``agenda`` et la base de chaque app forgée), faite par
 ``mariadb-dump`` en un instantané cohérent, serveur en marche
 (``backup_server``). La vérification recharge ``mind`` dans une base de
 travail et l'y rejoue. La restauration vérifie les sommes et rejoue ``mind``
@@ -374,7 +374,7 @@ def _server() -> tuple[str, str]:
 
 
 #: ce qu'une archive de serveur peut nommer : ses bases, et celle d'une app forgée
-_BASE_KEY = re.compile(r"^(mind|mail|feeds|teams|contacts|forge/[a-z][a-z0-9_]{1,30})$")
+_BASE_KEY = re.compile(r"^(mind|mail|feeds|teams|contacts|agenda|forge/[a-z][a-z0-9_]{1,30})$")
 
 
 def _live(url: str, prefix: str, key: str) -> Target:
@@ -384,8 +384,8 @@ def _live(url: str, prefix: str, key: str) -> Target:
 
 
 def _server_bases(url: str, prefix: str) -> dict[str, Target]:
-    """Ce qu'on sauvegarde sur le serveur : ``mind``, ``mail``, ``feeds``, ``teams``, ``contacts`` et la base de chaque
-    app forgée (celles qui existent)."""
+    """Ce qu'on sauvegarde sur le serveur : ``mind``, ``mail``, ``feeds``, ``teams``, ``contacts``, ``agenda`` et la
+    base de chaque app forgée (celles qui existent)."""
     out = {key: _live(url, prefix, key) for key in backup_server.KEPT}
     start = f"{prefix}forge_"
     for name in backup_server.named_like(url, start):
@@ -526,14 +526,15 @@ def backup_unit(data: Path) -> str:
 
 #: ce que garde chaque base et chaque dossier connu du dossier de données, en mots (Système › Stockage et
 #: sauvegardes) ; ce que la sauvegarde en fait se lit dans ``SKIPPED`` et ``SKIPPED_DIRS``. Textes affichés,
-#: donc sans numéro d'ADR (ADR 0225) ; leurs renvois : ``mail`` ADR 0172, ``contacts`` 0298, ``pieces`` 0106,
-#: ``partages`` 0062, ``cartes`` 0193, ``PUSH_KEY_FILE`` 0077
+#: donc sans numéro d'ADR (ADR 0225) ; leurs renvois : ``mail`` ADR 0172, ``contacts`` 0298, ``agenda`` 0309,
+#: ``pieces`` 0106, ``partages`` 0062, ``cartes`` 0193, ``PUSH_KEY_FILE`` 0077
 PLACES: dict[str, str] = {
     "mind": "sa vie : le journal, ses contenus, ses instantanés, les comptes, les réglages",
     "views": "les projections et les vecteurs tirés du journal, les traces et les appels de modèle des derniers jours",
     "mail": "le courrier relevé, avec ses pièces jointes et ses images",
     "teams": "ce que l'extension Teams a apporté, et ce qui doit en repartir",
     "contacts": "l'annuaire : les personnes et les organisations qu'elle connaît, et où elle les voit",
+    "agenda": "les agendas : ceux de ce serveur, et la copie de ceux qu'on a branchés",
     "feeds": "les flux suivis et leurs articles",
     "forge": "ses apps forgées, leurs versions et leurs bases",
     "ateliers": "les ateliers de ses projets, avec leur git",

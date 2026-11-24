@@ -471,7 +471,7 @@ def test_drafts_and_contacts_are_drawn_in_the_mail_space(world):  # noqa: F811
 
 def test_every_fiche_kind_is_registered_once():
     assert set(subjects.OVERVIEWS) == {"serveur", "handle", "project", "goal", "reveil", "conversation_teams",
-                                       "reponse_teams", "compte", "mail", "brouillon", "contact"}
+                                       "reponse_teams", "compte", "mail", "brouillon", "contact", "agenda"}
     assert "app" not in subjects.OVERVIEWS  # la Forge garde le rendu de la console
     assert "person" not in subjects.OVERVIEWS  # la fiche d'une personne a son paquet (``person/``)
 

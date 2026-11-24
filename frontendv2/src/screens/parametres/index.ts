@@ -4,6 +4,12 @@
  * § 5, 7, 8 ; `app/me/sharing.py`). La forme : `maquette/ecrans/parametres.js`. Chaque onglet est une page
  * (`account.ts`, `mail.ts`…) ; ici, la lecture, le dessin, la barre d'enregistrement, les sous-onglets et les routes
  * d'action (`#parametres/mcp/+brancher` : l'onglet, puis la fenêtre que son bouton ouvre).
+ *
+ * Le direct (ADR 0308, `protocole-moi.md` § 2 bis) relit la page ouverte : `settings` (boîtes, comptes Teams,
+ * services, partages, droits), `me` (ton compte), `phone.phones`, et `mail` et `teams` (l'état d'une boîte, le dernier
+ * lot d'une extension) — sauf sous une saisie pas encore enregistrée, comme après un geste. L'écran au second plan, ou
+ * l'onglet caché, se relit à son retour. Seule la connexion Microsoft d'une boîte relit encore à son rythme : elle
+ * attend Microsoft, que rien du journal ne dit (`mail.ts::watchSignin`).
  */
 import { $, $$, on } from "../../shell/dom";
 import type { PaletteEntry } from "../../shell/palette";
@@ -12,7 +18,10 @@ import type { ScreenContext, ScreenDef, Shell } from "../../shell/shell";
 import { toast } from "../../shell/float";
 import { ico } from "../../shell/icons";
 import { accountPage } from "./account";
+import { agendasPage } from "./agendas";
 import { formOf, SaveBar } from "./form";
+import { Freshness, live, OneAtATime, pageShown, type Topic } from "../../live/live";
+import { ages } from "../../shell/ages";
 import { CachedMap, errorBlock, loadingBlock, type Cached } from "../../shared/kit";
 import { mailPage } from "./mail";
 import { mcpPage } from "./mcp";
@@ -22,7 +31,7 @@ import { sharesPage } from "./shares";
 import { teamsPage } from "./teams";
 
 const ID = "parametres";
-const PAGES: Page[] = [accountPage, mailPage, teamsPage, phonesPage, sharesPage, mcpPage];
+const PAGES: Page[] = [accountPage, mailPage, teamsPage, agendasPage, phonesPage, sharesPage, mcpPage];
 /**
  * Les routes d'action, par onglet : `#parametres/<onglet>/+<geste>` ouvre l'onglet, puis la fenêtre que son bouton
  * ouvre (son `data-act`), sur le sous-onglet qui le porte — ce qu'un bouton d'un autre écran ou la palette promet, le
@@ -44,10 +53,13 @@ const TABS = [
   { id: "compte", title: "Compte" },
   { id: "comptes-mail", title: "Comptes mail" },
   { id: "teams", title: "Teams" },
+  { id: "agendas", title: "Agendas" },
   { id: "telephones", title: "Téléphones" },
   { id: "partages", title: "Partages" },
   { id: "mcp", title: "Services MCP" },
 ];
+/** Ce que le direct fait relire à la page ouverte (ses lectures, toutes). */
+const FOLLOWED: readonly Topic[] = ["settings", "me", "phone.phones", "mail", "teams", "agenda"];
 
 class ParametresScreen {
   private body: HTMLElement | null = null;
@@ -58,8 +70,16 @@ class ParametresScreen {
   private readonly subs = new Map<string, string>();
   private readonly bar: SaveBar;
   private readonly host: Host;
+  /** Le direct (ADR 0308) : montré, l'écran relit sa page ; sinon il se relit à son retour. */
+  private readonly fresh = new Freshness(() => this.open() && pageShown(), () => void this.relive());
+  /** Une relecture de la page à la fois : demandée pendant qu'elle est en vol, elle se refait une fois après. */
+  private readonly reliving = new OneAtATime(() => this.ensure(true));
 
   constructor(private readonly shell: Shell) {
+    // ses sujets ensemble : une trame qui en nomme plusieurs (un partage : `settings`, `mail`, `me`) relit la page une fois
+    live.onAny(FOLLOWED, () => this.fresh.touch(() => void this.relive()));
+    // ses âges (« relevée il y a », « dernier envoi », « vu il y a ») avancent d'eux-mêmes, sans rien relire
+    ages.onTick(() => this.agesTick());
     this.bar = new SaveBar({
       save: (form, changes, values) => {
         const page = this.page();
@@ -128,6 +148,21 @@ class ParametresScreen {
     this.shell.refreshHead();
   }
 
+  /** Le direct : ce que la page lit repart du serveur (forcé : une lecture en vol a pu partir avant ce changement) ;
+   *  elle se redessine si ça a changé, sauf sous une saisie. Une à la fois (`reliving`). */
+  private relive(): Promise<void> {
+    return this.reliving.run();
+  }
+
+  /** Les âges, toutes les 30 s et d'ici (`shell/ages.ts`) : la page ouverte se repeint de ce qu'elle a déjà lu — pas
+   *  sous une saisie pas encore enregistrée, ni quand le curseur (ou le focus) est dans la page : elle attend le pas
+   *  suivant. */
+  private agesTick(): void {
+    const body = this.body;
+    if (!body || !this.open() || !pageShown() || this.holding() || body.contains(document.activeElement)) return;
+    this.paint();
+  }
+
   /** Un formulaire de la page a des modifications non enregistrées : un nouveau dessin les effacerait. */
   private holding(): boolean {
     return !!this.body && this.bar.holds(this.body);
@@ -159,6 +194,11 @@ class ParametresScreen {
     this.pending = action && ctx.tab ? { tab: ctx.tab, act: action.act } : null;
     if (action?.sub && ctx.tab) this.subs.set(ctx.tab, action.sub);
     this.paint();
+    if (this.fresh.pending) {
+      // revenue après un changement manqué : la page repart du serveur
+      this.fresh.fresh();
+      for (const c of this.caches()) c.invalidate();
+    }
     void this.ensure().then(() => this.runPending());
   }
 

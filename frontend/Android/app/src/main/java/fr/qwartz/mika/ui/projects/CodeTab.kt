@@ -91,7 +91,7 @@ internal fun CodeTab(graph: AppGraph, vm: ProjectViewModel, sheet: Sheet, now: L
     val code = rememberCodeModel(graph, vm.id)
     val shown = CodeTabs.of(sub)
     Toasts(code.gestures)
-    OnResume(code) { code.resume() }
+    OnResume(code, project = vm.id) { code.resume() }
     LaunchedEffect(code, shown) { code.show(shown) }
     // tirer pour relire : la fiche se relit (son modèle), et le code avec elle
     LaunchedEffect(vm.refreshing) { if (vm.refreshing) code.reload() }

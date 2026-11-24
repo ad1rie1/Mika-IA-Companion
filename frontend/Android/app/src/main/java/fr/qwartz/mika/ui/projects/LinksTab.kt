@@ -454,7 +454,7 @@ internal fun LinkScreen(graph: AppGraph, route: Route.ProjectPage) {
     val vm = rememberProjectModel(graph, route.id)
     val now = rememberNow(wallMs = graph.clock::wallMs)
     Toasts(vm.gestures)
-    OnResume(vm) { vm.resume() }
+    OnResume(vm, project = route.id) { vm.resume() }
     // la page s'ouvre : ce qu'on y avait dit avant de la quitter ne vaut plus — ni un refus d'un autre jour, ni un
     // retrait abouti après le départ, qui la refermerait aussitôt
     FreshEntry(vm.gestures, AT_LINK, AT_REMOVE)

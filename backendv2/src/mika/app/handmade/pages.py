@@ -5,6 +5,7 @@ déclarée par le module de sa destination dans ``tabs/`` ; ``DRAWN`` en est la 
 from __future__ import annotations
 
 from mika.app.handmade.tabs import (
+    agendas,
     approvals,
     apps,
     decisions,
@@ -31,10 +32,11 @@ DRAWN: dict[str, Drawn] = {
     **life.TABS,
     **thoughts.TABS,
     **memory.TABS,
-    # Relations & échanges : le détail des personnes, identités, conversations, courrier, Teams
+    # Relations & échanges : le détail des personnes, identités, conversations, courrier, Teams, agendas
     **people.TABS,
     **identities.TABS,
     **teams.TABS,
+    **agendas.TABS,
     **threads.TABS,
     **mail.TABS,
     # Activité : décisions, buts, projets

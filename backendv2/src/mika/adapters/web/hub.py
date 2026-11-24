@@ -42,6 +42,10 @@ diffusion à tout le monde.
 - **Ce qu'elle fait en mode pro se voit en direct** (ADR 0116, trame ``tool``) :
   seulement aux écrans regardés et authentifiés d'opératrice de la personne à
   qui elle répond ; rien n'en est gardé, rien n'est rattrapé.
+- **Ce qui change ce que montrent ses écrans se dit** (ADR 0308, trame
+  ``changed``) : à chaque connexion authentifiée de la personne, regardée ou
+  non ; ce qu'elle nomme, c'est ``app/me/changes.py`` qui le choisit, par les
+  droits de la personne. Rien n'est rattrapé : le client relit à sa reconnexion.
 """
 
 from __future__ import annotations
@@ -52,7 +56,7 @@ import logging
 import secrets
 import time
 from collections import OrderedDict, deque
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -178,6 +182,11 @@ class Hub:
     def operators(self) -> list[Conn]:
         return [c for c in self.conns.values() if c.operator and c.authenticated]
 
+    def signed_in(self) -> list[Conn]:
+        """Les connexions authentifiées, celles d'une application quittée depuis peu comprises : les seules qui
+        reçoivent ``changed`` (ADR 0308)."""
+        return [c for c in self.conns.values() if c.authenticated and c.account is not None]
+
     def note_asked(self, conn: Conn, client_msg_id: str) -> None:
         """Cette connexion vient d'envoyer ce message : c'est elle qui parlera la réponse."""
         conn.active_at = self._monotonic()
@@ -213,6 +222,12 @@ class Hub:
 
     async def send_to(self, handle: str, frame: dict[str, Any]) -> int:
         return await self._send(self.of(handle), frame)
+
+    async def push_changed(self, handle: str, channel: str, changes: Sequence[Mapping[str, Any]]) -> int:
+        """Ce qui a changé dans ce que la personne voit (ADR 0308), à ses connexions authentifiées de ce canal : ce
+        qu'elle voit d'un projet dépend du canal de son client, la trame est faite pour lui."""
+        conns = [c for c in self.of(handle) if c.authenticated and c.channel == channel]
+        return await self._send(conns, protocol.changed(changes)) if conns and changes else 0
 
     async def push_strands(self, handle: str) -> int:
         """La liste des fils de travail de la personne (ADR 0164), à ses écrans d'opératrice authentifiée : les

@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
+import fr.qwartz.mika.data.moi.LiveSignal
 import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.MoiError
 import fr.qwartz.mika.data.moi.carte.AddressBook
@@ -29,6 +30,7 @@ import fr.qwartz.mika.data.moi.carte.refOf
 import fr.qwartz.mika.data.moi.carte.stopOfPlace
 import fr.qwartz.mika.data.moi.phone.PhoneMoiApi
 import fr.qwartz.mika.data.moi.phone.PhonePosition
+import fr.qwartz.mika.data.net.Topics
 import fr.qwartz.mika.ui.map.MiniStore
 import fr.qwartz.mika.ui.shell.Load
 import fr.qwartz.mika.ui.shell.rememberSessionKey
@@ -185,6 +187,26 @@ class CarteStore(private val graph: AppGraph) : ViewModel() {
         loadList(force = true)
     }
 
+    /**
+     * Le direct (ADR 0308) : tes voyages ont changé (`trips` — Mika en a créé ou changé un) : la liste et chaque voyage
+     * lu se reliront à leur prochaine lecture, la liste de suite si elle est montrée ([listShown]) ; ta position a changé
+     * (`phone.position`) : relue de suite si on l'a déjà lue. Rend la main quand c'est relu.
+     */
+    suspend fun onLive(signal: LiveSignal, listShown: Boolean) {
+        if (signal.touches(Topics.TRIPS)) {
+            listAt = 0
+            tripReads.invalidateAll()
+            if (listShown) {
+                loadList(force = true)
+                listJob?.join()
+            }
+        }
+        if (signal.touches(Topics.PHONE_POSITION) && positionSettled) {
+            positionAt = 0
+            loadPosition()
+        }
+    }
+
     /** Chaque voyage lu (relu s'il a plus de dix secondes ; une relecture forcée suit celle qui était partie avant). */
     val tripReads = TripReads(viewModelScope, { trips.read(it) }, ::now)
 
@@ -250,6 +272,9 @@ class CarteStore(private val graph: AppGraph) : ViewModel() {
         const val REGARD_TTL_MS = 5 * 60_000L
     }
 }
+
+/** Ce que suivent la Carte et un voyage ouvert (ADR 0308) : tes voyages (`trips`), ta position (`phone.position`). */
+internal val CARTE_TRIPS = setOf(Topics.TRIPS, Topics.PHONE_POSITION)
 
 /** Ce que la Carte partage pour la session (une par session, comme les autres modèles de l'app). */
 @Composable

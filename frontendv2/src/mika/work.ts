@@ -1,7 +1,8 @@
 /**
  * Où elle en est d'une réponse qu'elle prépare (ADR 0306) : la ligne au-dessus de la saisie, dans Teams et dans Mail.
  * Une seule ligne — l'étape (elle s'y met, elle réfléchit, tel outil tourne) et son chrono, qui court entre deux
- * relectures (`tickWork`). Le moteur la dit dans `work` (`backendv2/docs/protocole-moi.md`) ; rien n'en est gardé.
+ * étapes (`tickWork`). Le moteur la dit dans `work` (`backendv2/docs/protocole-moi.md`) et pousse chaque étape qui
+ * commence (`mail.work`, `teams.work`, ADR 0308) : l'écran relit alors `work` ; rien n'en est gardé.
  */
 import { h } from "../shell/dom";
 import { mikaAvatar } from "./face";
@@ -18,9 +19,6 @@ export interface Work {
   /** Le début du travail (ms ; pour `waiting`, la demande). */
   started: number;
 }
-
-/** Ce qu'on relit toutes les deux secondes tant qu'elle y travaille. */
-export const WORK_POLL_MS = 2_000;
 
 /** L'étape en mots : « Elle s'y met… », « Réflexion en cours… », « Relire une de tes conversations Teams… ». */
 export function workText(w: Work): string {
@@ -48,7 +46,8 @@ export function workLine(w: Work, now: number, cls: string, lead: string = mikaA
 
 let ticker = 0;
 
-/** Fait courir chaque chrono affiché, une fois par seconde, tant qu'il y en a un à l'écran ; s'arrête seul. */
+/** Fait courir chaque chrono affiché, une fois par seconde, tant qu'il y en a un à l'écran ; s'arrête seul. Un
+ *  affichage d'ici, sans rien relire : le seul `setInterval` des écrans (`tools/timers.test.ts`). */
 export function tickWork(): void {
   if (ticker) return;
   ticker = window.setInterval(() => {

@@ -1,0 +1,23 @@
+{# La fiche d'un agenda › Droits (app/handmade/subjects/agenda.py) : son tableau Qui × Par où × Quand, lu — lire ;
+   ajouter, modifier, supprimer ; répondre aux invitations ; ce qu'elle en garde —, puis sa ligne par défaut, ses outils.
+   Son propriétaire le règle dans son espace ; un opérateur, dans Réglages › Droits (« Régler ce tableau »). #}
+{% from "_navigation.html" import pager as pages %}
+{% macro v(cell) -%}<span class="agc-v {{ cell[0] }}">{{ cell[1] }}</span>{%- endmacro %}
+<div class="now-page" data-tab="agenda/droits">
+  <section class="now-card table-block">
+    <header class="now-card-head"><h2>Qui peut quoi sur {{ name }}</h2>
+      <p>{{ rows|length }} ligne{{ 's' if rows|length != 1 }} · par défaut : fermé{{ '' if stored else ' · le tableau que son propriétaire et ses partages donnent' }}. Lues de haut en bas : la première qui correspond décide. Plafond : à plusieurs (un salon), rien de ses agendas. Un partage ajoute une ligne pour la personne. <a href="{{ detail }}">Détail des accès →</a></p></header>
+    <div class="hm-table-wrap" tabindex="0" role="region" aria-label="Qui peut quoi sur {{ name }}">
+      <table class="server-who access-summary agc-rights">
+        <thead><tr><th scope="col">#</th><th scope="col">Qui</th><th scope="col">Par où</th><th scope="col">Quand</th><th scope="col">Lire</th><th scope="col">Ajouter, modifier, supprimer</th><th scope="col">Répondre aux invitations</th><th scope="col">Ce qu'elle en garde</th></tr></thead>
+        <tbody>
+          {% for r in rows %}<tr><td class="num">{{ loop.index }}</td><th scope="row">{{ r.who }}</th><td>{{ r.canal }}</td><td>{{ r.when }}</td>{% for c in r.cells %}<td>{{ v(c) }}</td>{% endfor %}<td>{{ r.keep }}</td></tr>{% endfor %}
+          <tr class="access-default"><td class="num">—</td><th scope="row" colspan="3">Par défaut<span>personne d'autre</span></th>{% for c in default.cells %}<td>{{ v(c) }}</td>{% endfor %}<td>{{ default.keep }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="hm-pager single">{{ pages(pager) }}</div>
+    <p class="agc-tools"><span class="now-muted">Ses outils</span><span><code>agenda_list</code> <code>agenda_events</code> <code>agenda_free</code> (lire)</span><span><code>agenda_create</code> <code>agenda_edit</code> <code>agenda_delete</code> (ajouter, modifier, supprimer)</span><span><code>agenda_respond</code> (répondre)</span><span class="now-muted">Avec ton accord : une carte dans le chat de la personne, et ici dans À valider.</span></p>
+  </section>
+  <p class="person-tab-note">{{ owner|capitalize }} règle ce tableau dans son espace (Outils › Droits) ; un opérateur, dans Réglages › Droits, « détail des accès ». <a href="{{ edit }}">Régler ce tableau →</a></p>
+</div>

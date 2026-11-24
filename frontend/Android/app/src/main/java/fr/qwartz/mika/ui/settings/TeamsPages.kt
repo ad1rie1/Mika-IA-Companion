@@ -29,9 +29,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.qwartz.mika.R
@@ -60,6 +57,8 @@ import fr.qwartz.mika.data.moi.settings.teamsChanges
 import fr.qwartz.mika.data.moi.teams.TeamsAccount
 import fr.qwartz.mika.data.moi.teams.TeamsAccounts
 import fr.qwartz.mika.ui.Route
+import fr.qwartz.mika.ui.components.rememberNow
+import fr.qwartz.mika.ui.shell.FollowLive
 import fr.qwartz.mika.ui.shell.BarMenu
 import fr.qwartz.mika.ui.shell.BarNav
 import fr.qwartz.mika.ui.shell.Gap
@@ -93,11 +92,14 @@ class TeamsAccountsViewModel(graph: AppGraph) : SettingsModel(graph) {
         private set
 
     fun resume() {
-        viewModelScope.launch {
-            when (val got = api.teamsAccounts()) {
-                is MoiApi.Result.Ok -> load = Load.Ready(got.value)
-                is MoiApi.Result.Failed -> if (load !is Load.Ready) load = Load.Failed(got.error) else say(got.error)
-            }
+        viewModelScope.launch { read() }
+    }
+
+    /** Relu sans bruit : un retour sur la page, ou le direct (ADR 0308) qui dit que ce qu'elle montre a changé. */
+    suspend fun read() {
+        when (val got = api.teamsAccounts()) {
+            is MoiApi.Result.Ok -> load = Load.Ready(got.value)
+            is MoiApi.Result.Failed -> if (load !is Load.Ready) load = Load.Failed(got.error) else say(got.error)
         }
     }
 
@@ -112,10 +114,10 @@ internal fun TeamsAccountsPage(graph: AppGraph) {
     val shell = LocalShell.current
     val session = rememberSessionKey(graph)
     val vm: TeamsAccountsViewModel = viewModel(key = "settings.teams|$session") { TeamsAccountsViewModel(graph) }
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(vm, lifecycle) { lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) { vm.resume() } }
+    FollowLive(graph.live, SettingsLive.TEAMS, vm, onShown = { vm.resume() }) { vm.read() }
     SettingsEffects(vm)
-    val now = graph.clock.wallMs()
+    // « dernier envoi il y a 3 min » avance tout seul
+    val now = rememberNow(wallMs = graph.clock::wallMs)
     SectionScaffold(
         topBar = { MikaTopBar(stringResource(R.string.settings_teams), BarNav.BACK) },
         floatingActionButton = {
@@ -502,7 +504,7 @@ private fun TeamsForm(graph: AppGraph, vm: TeamsAccountViewModel, a: TeamsAccoun
     val scope = rememberCoroutineScope()
     val v = vm.values
     val e = vm.errors
-    val now = graph.clock.wallMs()
+    val now = rememberNow(wallMs = graph.clock::wallMs)
     val copied = stringResource(R.string.settings_copied)
     Column(modifier.imePadding().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
         val waiting = if (a.draftsWaiting > 0) pluralStringResource(R.plurals.settings_teams_waiting, a.draftsWaiting, a.draftsWaiting) else ""

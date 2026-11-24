@@ -102,10 +102,12 @@ OPENINGS_KEPT = 16
 class EmailParams(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    # ADR 0308 : le courrier arrive de lui-même (le direct, ``adapters/mail/idle.py``) ; ce rythme est le sien
     poll_every_us: Annotated[int, Knob(
-        label="Relever toutes les", group="Relevé", lo=MINUTE, hi=DAY,
-        help="Éveillée, elle relève ses boîtes à ce rythme (endormie, elle lira au réveil). Sans boîte "
-             "configurée, elle revérifie au plus toutes les heures.")] = 10 * MINUTE
+        label="Remarquer son courrier toutes les", group="Relevé", lo=MINUTE, hi=DAY,
+        help="Le courrier arrive de lui-même dans ses boîtes et se voit aussitôt, même quand elle dort. Éveillée, "
+             "elle le remarque à ce rythme : son tri le lit, elle peut t'en parler (endormie, elle le remarquera au "
+             "réveil). Sans boîte configurée, elle revérifie au plus toutes les heures.")] = 10 * MINUTE
     per_poll: Annotated[int, Knob(
         label="Mails lus par relevé", group="Relevé", lo=1, hi=100,
         help="Au plus autant de nouveaux mails pris à chaque relevé (tous comptes confondus) ; les autres "

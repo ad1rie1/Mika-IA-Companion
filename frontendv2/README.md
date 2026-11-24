@@ -1,7 +1,7 @@
 # Mika — le client de tous les jours (frontendv2)
 
 Le client web d'une personne qui a un compte (ADR 0187) : le chat avec Mika (et le mode pro pour une opératrice),
-puis Projets, Outils, Mail, Teams, Téléphone, Contacts, Carte et Paramètres. Il a la forme de la maquette validée (`maquette/`, à ne pas
+puis Projets, Outils, Mail, Teams, Téléphone, Agenda, Contacts, Carte et Paramètres. Il a la forme de la maquette validée (`maquette/`, à ne pas
 modifier) et parle au moteur par le protocole du chat (`backendv2/docs/protocole-chat.md`) et par l'API par personne
 (`backendv2/docs/protocole-moi.md`) : chaque écran ne montre que ce qui est à la personne connectée, ou qu'on lui
 partage (ADR 0188).
@@ -13,7 +13,8 @@ npm install
 npm run dev        # http://localhost:4173 (port fixe, admis d'office par le moteur), vise http://localhost:8001
 npm run build      # tsc (l'application, puis vite.config.ts et tools/) puis vite build : la vraie barrière
 npm test           # vitest (src/ ; tools/ : extAssets, les règles des feuilles lues sur le disque, styles.test.ts,
-                   # et chaque paquet qu'importe src/ déclaré dans package.json, dependencies.test.ts)
+                   # chaque paquet qu'importe src/ déclaré dans package.json, dependencies.test.ts, et aucune
+                   # minuterie qui relise hors de sa liste, timers.test.ts)
 npm run preview    # le résultat de build, sur le même port
 ```
 
@@ -60,29 +61,52 @@ Les modules purs du client web sont réutilisés sans copie par l'alias `@web` (
 
 | Dossier | Rôle |
 |---|---|
-| `main.ts` | le démarrage : `whoami()` → la connexion ou l'application ; `/ws` fermé en 4401 → `whoami`, puis la connexion si la session ne vaut plus |
+| `main.ts` | le démarrage : `whoami()` → la connexion ou l'application ; `/ws` fermé en 4401 → `whoami`, puis la connexion si la session ne vaut plus ; le direct branché sur chaque client de la connexion |
+| `live/` | le direct (ADR 0308, voir « Le direct » plus bas) : `live.ts` — la trame `changed` lue (`parseChanged`, pur), le service (`live` : `bind`, `onChange`, `onAny` — plusieurs sujets, un appel par trame —, `onResync`, `onVisible`), un écran face à lui (`Freshness`), une lecture à la fois (`OneAtATime`) |
 | `login/` | la carte de connexion, et celle du premier compte (`needs_bootstrap`, code de premier démarrage) |
 | `shell/` | le cadre porté de `maquette.js` : barre du haut, routes `#écran/onglet/objet`, barre de titre et onglets, palette Ctrl K, menus, fenêtres, toasts, thème, icônes |
 | `mika/` | Mika : ce qu'on sait d'elle (`state.ts`, plié des trames ; `store.ts`, qui le garde et le diffuse), sa ligne d'état, ses facettes et son visage (`view.ts`, `labels.ts` ; `view.ts` écrit aussi les lignes de la carte « Ce qu'elle fait » — une facette et une promesse, que sa colonne du chat reprend telles quelles, un projet et son statut en mots — et décide quand sa VRM se charge), son visage en rond (`face.ts`), où elle en est d'une réponse qu'elle prépare (`work.ts` : la ligne et son chrono, ADR 0306), ses portraits (`portraits.ts`), son élément unique (`corner.ts`) et sa VRM (`vrm.ts`, chargée à part) |
 | `screens/chat/` | le chat : `chat.ts` (les trames, l'état du fil, l'orchestration des gestes), `approvals.ts` (les cartes d'accord et « Tout accepter »), `strands.ts` (les fils de travail et leurs commandes), `composer.ts` (le champ : pièces jointes, emojis, compteur, phrase préremplie, envoi), `older.ts` (« Messages plus anciens » : d'où repartir, comment ce qui revient se recoud au fil chargé, pur), `markup.ts` (le balisage de la maquette, pur) |
 | `screens/projets/` | Projets (ADR 0291, d'après la maquette validée : `maquette/ecrans/projets2.js` et ses suites) : `index.ts`, `projets.ts` (l'état, les lectures gardées, les gestes : un envoi, puis tout se relit ; ce qui est saisi, où chaque cadre a défilé et le curseur tiennent d'un dessin à l'autre ; un refus se dit à l'endroit du geste), `routes.ts` (les adresses de la maquette, la clé d'une attente : pur), `state.ts` (les filtres, ce qui est choisi, les groupes d'« À faire » et des objectifs : pur), `gestures.ts` (un geste traduit en requête — trancher en nommant le plan lu, un accord avec le condensé lu, ajouter ou modifier un objectif, un jalon, un ticket, les seuls réglages changés, un lien : pur), `diagram.ts` (les calculs du diagramme des objectifs : ses lignes, la part faite, l'axe qui se resserre, les fantômes sans date, les flèches : pur), `time.ts`, `tones.ts` (la couleur d'un état, depuis les codes du serveur), `md.ts` (un petit Markdown, échappé d'abord), `parts.ts` (les morceaux partagés : les trois zones — `trio` —, les sections du panneau, pastilles, barres en segments, lignes liées, champs et formulaires, le panneau qui s'ouvre, un texte venu d'ailleurs — `outside`), `views/` (une vue par fichier : `todo.ts` « À faire », `sheet.ts` la barre de titre, la grille, la tête d'une fiche et la Vue d'ensemble, `objectives.ts`, `diagram.ts`, `tickets.ts`, `activity.ts`, `more.ts` Dépendances, Listes et « Modifier le projet »), `tabs.ts` (où se branchent les onglets écrits à part : `registerTab`) ; l'onglet **Code** : `code.ts` (ses lectures gardées, la forme du diff, la branche choisie, fusionner, modifier une pull request, y répondre), `codeparts.ts` (ses adresses, la coloration simple d'une ligne en jetons de texte, un diff mis en lignes — unifié ou côte à côte —, la demande de fusion : pur), `paint.ts` (le contenu d'un fichier et les lignes d'un diff posés après le dessin par insertion de texte, jamais en HTML), `screens/projets/views/code.ts` (Fichiers, Commits, Branches) et `screens/projets/views/codehost.ts` (Pull requests, Issues, CI : ce qui se joue avec l'hôte) ; l'onglet **Documentation** : `documentation.ts` (ses lectures gardées, les brouillons, l'éditeur gardé d'un dessin à l'autre, ses gestes), `docparts.ts` (ses adresses, l'arborescence, le chemin d'une page, le brouillon et son conflit : pur), `docmd.ts` (le rendu d'une page en lecture : échappé, rien d'ailleurs n'y est chargé ; pur), `editor.ts` (l'éditeur : Milkdown, par Crepe — chargé à la demande, son propre morceau), `screens/projets/views/docs.ts` (Pages, Images, Décisions), `dialogs.ts` (la confirmation d'une fusion, le mot sur ce qui a changé) |
-| `screens/mail/` | Mail : `index.ts` (l'écran et sa pastille), `mail.ts` (l'état, les gestes), `markup.ts` (le rendu de la maquette, pur), `compose.ts` (les destinataires proposés, la fenêtre d'un mail), `format.ts` (niveaux de partage, adresses, texte d'un mail, « [À COMPLÉTER », pur) |
+| `screens/mail/` | Mail : `index.ts` (l'écran et sa pastille), `mail.ts` (l'état, les gestes), `markup.ts` (le rendu de la maquette, pur), `compose.ts` (les destinataires proposés, la fenêtre d'un mail), `live.ts` (ce que le direct fait relire : la page affichée, le mail ouvert, ce qui se repeint en place ou redessine la liseuse — pur), `format.ts` (niveaux de partage, adresses, texte d'un mail, « [À COMPLÉTER », pur) |
 | `screens/teams/` | Teams : `index.ts`, `teams.ts` (l'état, les gestes), `markup.ts`, `format.ts` (états, modes, jours, mentions, qui a écrit — « Toi » sur un compte à toi seulement —, les réactions et qui les a posées, les cartes du fil, l'adresse d'une réponse) |
 | `screens/telephone/` | Téléphone : `index.ts`, `view.ts` (le rendu, pur ; la scène de la position, `positionScene` : son point et sa précision, que la vraie carte — `map/view.ts` et `map/live.ts`, comme la Carte — et le plan montrent) |
+| `screens/agenda/` | Agenda (ADR 0309, lot 6 ; d'après la maquette validée : `maquette/ecrans/agenda.js` et ses suites) : `index.ts` (l'écran : la route — la vue, l'événement, la proposition ou la date de sa mémoire ouverte, les invitations, les fenêtres —, les lectures gardées — ses agendas, la période affichée, l'événement ouvert, ses invitations, ce que Mika propose — et le direct `agenda`, les gestes : créer, modifier et sa portée, dupliquer, supprimer, répondre, décider de ce que Mika propose, « Mika te le rappelle », la recherche), `view.ts` (le dessin, pur : la barre de titre, la colonne de gauche, Jour et Semaine en grille horaire, Mois, Planning, la recherche, le bandeau de ce que Mika propose, la fiche d'un événement, d'une proposition, d'une date de sa mémoire, le volet des invitations), `model.ts` (pur : les occurrences d'une période, leur sorte, leur couleur — celle du fournisseur rapprochée de la palette —, les chevauchements en colonnes, les journées en bandes, les mots d'un moment, d'une répétition — et la règle RFC 5545 d'un choix du formulaire —, d'un rappel, les adresses `#agenda/…`), `dates.ts` (pur : des jours sans heure d'été, un instant à l'heure du fuseau du serveur, les bornes et les mots de chaque vue), `form.ts` (la fenêtre d'un événement — ce qu'une modification envoie : ce qui a changé, `fieldsOf` —, la portée d'une série, répondre avec un mot), `share.ts` (partager un agenda), `display.ts` (ce que ce navigateur retient : les agendas décochés, la vue), `chat.ts` (la carte d'accord d'un ajout dans le chat : l'événement qu'elle ajouterait) |
 | `screens/contacts/` | Contacts (ADR 0298, d'après la maquette validée `maquette/ecrans/contacts.js`) : `index.ts` (l'état : la liste lue par pages — la recherche, la sorte —, la fiche ouverte, gardée par contact ; les gestes : choisir, « Afficher les suivants », « Oublier ce contact » et la croix d'un fait après confirmation, « Lui présenter quelqu'un »), `view.ts` (la liste, la fiche, ses adresses vers Mail, Teams et Téléphone : pur) |
 | `screens/carte/` | Carte (ADR 0194 à 0196, 0259) : `index.ts` (le cadre : les onglets, les lectures communes, la carte gardée d'un dessin à l'autre et son cadrage, ce qui garde la main d'un dessin à l'autre, la visionneuse des photos, la palette ; il délègue le dessin et les gestes à l'onglet montré, et chaque contrôleur reçoit de lui ce qu'il lui faut, jamais l'état d'un autre onglet), `explorer.ts` (Explorer : la recherche, ses filtres et son ordre, les adresses, le regard de Mika, la fiche d'un lieu et « Actualiser », « Itinéraire jusqu'ici », « Ajouter au voyage » — son menu, que les Événements partagent), `events.ts` (Événements : quand, quoi, où, la liste, ce que Mika a trouvé, la fiche d'un événement et ses gestes), `fiche.ts` (la fiche d'un lieu — Google Maps, OpenStreetMap, l'office de tourisme, les événements tout près —, celle d'un événement, la bande des photos, la visionneuse : pur), `agenda.ts` (l'onglet Événements : les jours d'une recherche, les groupes par jour, le jour d'un voyage où tombe un événement, la phrase pour Mika : pur), `sources.ts` (ce que disent les sources et comment on les cite : liens sûrs, numéros, notes en étoiles, photos servies par ce serveur, dates de lecture, ligne de couverture : pur), `photos.ts` (les photos chargées quand elles paraissent, la visionneuse), `itinerary.ts` (Itinéraire : les points et leurs propositions, le calcul, le regard de Mika, tes choix, le GPX, « En faire un voyage »), `trip.ts` (Voyages : la liste et le voyage ouvert, ses gestes — l'un après l'autre, montrés avant que le serveur les dise —, « Sur la route », la note d'un arrêt, optimiser, un lieu ajouté à un voyage), `modals.ts` (les fenêtres « Nouveau voyage », « Le voyage », « Ajouter un arrêt »), `drag.ts` (glisser un arrêt : la cible, l'indice, le suivi du pointeur), `view.ts` (Explorer et sa liste notée, Itinéraire, Voyages et l'éditeur d'un voyage — la note d'un arrêt en place, les épingles de « Sur la route » —, les fenêtres d'un voyage, les actions d'un voyage dans la barre de titre, le cadre de la carte : pur), `format.ts` (l'ordre des arrêts et où un geste les met, une note changée, ce dont le trajet d'un voyage dépend, ce que la fenêtre d'un voyage envoie, le jour d'un lieu croisé le long du trajet, tes choix d'itinéraire face à ceux d'un trajet de Mika, jusqu'où une recherche est allée, la fiche d'un lieu dans la route, les cuisines d'une liste, le GPX d'un itinéraire, les phrases préparées pour Mika, le contrôle qui garde la main d'un dessin à l'autre : pur), `requests.ts` (ménager ce qui sort du serveur : les adresses gardées par texte, le trajet d'un voyage gardé pour ses arrêts et relu après le dernier geste, les gestes l'un après l'autre, ce qui n'est plus là (404) : sans DOM) |
-| `map/` | Ce qui sert à toute carte (Téléphone, Carte, les miniatures du chat) : `info.ts` (le fond de carte servi, `GET /api/moi/carte/fond`, lu une fois pour la page et relu toutes les cinq minutes), `mapgeo.ts` (ce qu'elle couvre, une précision en cercle, le zoom, une zone, une distance), `polyline.ts` (`decodePolyline6`, la même que `backendv2/src/mika/ports/maps.py`), `mapstyle.ts` (le style Protomaps, clair ou sombre, sans les points d'intérêt qui n'apprennent rien : une attraction sans nom, ou nommée « Immeuble », « Maison »…), `base.ts` (une carte MapLibre : adresses absolues, la session, les commandes en français, le nord toujours en haut, le thème, `restyle`, des tuiles en échec de suite qui font revenir le plan, une image vide pour une icône que la planche n'a pas), `view.ts` (`MapView` : épingles numérotées, roses pour ce que Mika a fait, secondaires — plus petites, sans numéro : les lieux de « Sur la route » —, tracés, la position et le cercle de sa précision, `fitBounds` ; une position seule s'ouvre centrée, au zoom de sa précision ; un cadrage demandé se fait même sur une scène inchangée, et une scène vide garde la vue, sauf quand l'écran demande le fond de carte), `live.ts` (le cycle de vie d'une carte vivante, le même pour la Carte et la Position du Téléphone : si elle se montre, la monter, la reposer d'un dessin à l'autre, une autre carte servie qui se repose sur elle, seul le dernier montage qui se pose, ses échecs — tuiles, chargement, WebGL — qui laissent le plan sans réessayer, et les mots de sa note), `scene.ts` et `drawn.ts` (ce qu'une carte montre, comment une vue la cadre — `sceneFraming` : sur l'écran Carte, une zone d'au moins ~200 m et jusqu'au zoom 17, sur une miniature, ~2 km et 12,5 au plus —, et son plan dessiné sans tuile ; la position peut porter sa précision, un cercle que la zone tient), `notes.ts` et `cards.ts` (ses notes de carte et leur miniature), `minis.ts` (les miniatures d'une liste : créées quand elles paraissent, quatre vivantes au plus ; ce qu'elles montrent, lu une fois pour la page et relu quand il a changé), `words.ts` (distances, durées, ce qu'un trajet en voiture peut éviter — la seule table de ces libellés —, dates d'un voyage, en long et en court), `load.ts` (MapLibre et la vue, chargés une fois et à part) |
-| `screens/outils/` | Outils : `index.ts`, `matrix.ts` (la matrice des droits et les lignes de « Services », pur) |
-| `screens/parametres/` | Paramètres : `index.ts` (routes, routes d'action, gestes délégués, sous-onglets), `page.ts` (ce qu'une page et son hôte se doivent), `form.ts` (lignes et barre d'enregistrement), `words.ts` (les mots des niveaux et des états), une page par sous-onglet (`account`, `mail`, `teams`, `phones`, `shares`, `mcp`) |
-| `api/` | `moi.ts` (`getJson`, `sendJson`, `sendForm`, `apiUrl`), `me.ts` (`GET /api/moi`), et un client typé par domaine : `mail`, `teams`, `phone`, `contacts` (ses contacts, la fiche d'un contact, l'oublier : `protocole-moi.md` § 12), `rights`, `settings`, `shares`, `mcp`, `projects` (ses projets, « À faire », la fiche, le registre, ses gestes, ses réglages, son activité, le diagramme de ses objectifs : `protocole-moi.md` § 11), `projectCode` (le code d'un projet : fichiers, commits et leur diff, branches, pull requests, issues, CI) et `projectDocs` (sa documentation — pages, versions, images, enregistrer en nommant la version lue — et ses décisions), `carte` (lieux et leurs filtres, fiches, « Actualiser », événements, photos, adresses, itinéraires, regards, voyages, et le fond de carte : `protocole-moi.md` § 10) |
+| `map/` | Ce qui sert à toute carte (Téléphone, Carte, les miniatures du chat) : `info.ts` (le fond de carte servi, `GET /api/moi/carte/fond`, lu une fois pour la page et relu, quand un écran se relit, s'il a plus de cinq minutes), `mapgeo.ts` (ce qu'elle couvre, une précision en cercle, le zoom, une zone, une distance), `polyline.ts` (`decodePolyline6`, la même que `backendv2/src/mika/ports/maps.py`), `mapstyle.ts` (le style Protomaps, clair ou sombre, sans les points d'intérêt qui n'apprennent rien : une attraction sans nom, ou nommée « Immeuble », « Maison »…), `base.ts` (une carte MapLibre : adresses absolues, la session, les commandes en français, le nord toujours en haut, le thème, `restyle`, des tuiles en échec de suite qui font revenir le plan, une image vide pour une icône que la planche n'a pas), `view.ts` (`MapView` : épingles numérotées, roses pour ce que Mika a fait, secondaires — plus petites, sans numéro : les lieux de « Sur la route » —, tracés, la position et le cercle de sa précision, `fitBounds` ; une position seule s'ouvre centrée, au zoom de sa précision ; un cadrage demandé se fait même sur une scène inchangée, et une scène vide garde la vue, sauf quand l'écran demande le fond de carte), `live.ts` (le cycle de vie d'une carte vivante, le même pour la Carte et la Position du Téléphone : si elle se montre, la monter, la reposer d'un dessin à l'autre, une autre carte servie qui se repose sur elle, seul le dernier montage qui se pose, ses échecs — tuiles, chargement, WebGL — qui laissent le plan sans réessayer, et les mots de sa note), `scene.ts` et `drawn.ts` (ce qu'une carte montre, comment une vue la cadre — `sceneFraming` : sur l'écran Carte, une zone d'au moins ~200 m et jusqu'au zoom 17, sur une miniature, ~2 km et 12,5 au plus —, et son plan dessiné sans tuile ; la position peut porter sa précision, un cercle que la zone tient), `notes.ts` et `cards.ts` (ses notes de carte et leur miniature), `minis.ts` (les miniatures d'une liste : créées quand elles paraissent, quatre vivantes au plus ; ce qu'elles montrent, lu une fois pour la page et relu quand il a changé), `words.ts` (distances, durées, ce qu'un trajet en voiture peut éviter — la seule table de ces libellés —, dates d'un voyage, en long et en court), `load.ts` (MapLibre et la vue, chargés une fois et à part) |
+| `screens/outils/` | Outils : `index.ts`, `matrix.ts` (la matrice des droits et les lignes de « Services », pur), `agendas.ts` (« Tes agendas » : le tableau de droits de chaque agenda à toi, réglé ici, ADR 0309) |
+| `screens/parametres/` | Paramètres : `index.ts` (routes, routes d'action, gestes délégués, sous-onglets), `page.ts` (ce qu'une page et son hôte se doivent), `form.ts` (lignes et barre d'enregistrement), `words.ts` (les mots des niveaux et des états), une page par sous-onglet (`account`, `mail`, `teams`, `agendas` — ses comptes d'agenda, la fiche d'un compte, « Brancher un agenda » par sorte, ADR 0309 —, `phones`, `shares`, `mcp`) |
+| `api/` | `moi.ts` (`getJson`, `sendJson`, `sendForm`, `apiUrl`), `me.ts` (`GET /api/moi`), et un client typé par domaine : `mail`, `teams`, `phone`, `contacts` (ses contacts, la fiche d'un contact, l'oublier : `protocole-moi.md` § 12), `rights`, `settings`, `shares`, `mcp`, `projects` (ses projets, « À faire », la fiche, le registre, ses gestes, ses réglages, son activité, le diagramme de ses objectifs : `protocole-moi.md` § 11), `projectCode` (le code d'un projet : fichiers, commits et leur diff, branches, pull requests, issues, CI) et `projectDocs` (sa documentation — pages, versions, images, enregistrer en nommant la version lue — et ses décisions), `carte` (lieux et leurs filtres, fiches, « Actualiser », événements, photos, adresses, itinéraires, regards, voyages, et le fond de carte : `protocole-moi.md` § 10), `agenda` (ses agendas, une période, un événement, chercher, ses invitations et ce que Mika propose, écrire, répondre, décider, ses comptes, le tableau de droits d'un agenda : `protocole-moi.md` § 13) |
 | `shell/dom.ts` | les aides du DOM ; une photo de profil qui ne vient pas laisse ses initiales (`keepInitialsOnBrokenPhotos`, posé au démarrage) |
-| `shared/` | ce que plusieurs écrans partagent : `kit.ts` (lectures en cache — une relecture forcée suit celle en cours, un 404 efface ce qu'on avait lu —, erreurs, dates, copier, confirmer), `store.ts` (les lectures partagées, dont ta dernière position, celle du Téléphone et de la Carte), `storage.ts` (le stockage du navigateur, sans jamais lever), `names.ts` (« de Léa », « d'Adrien » : `ofName`, que `screens/mail/format.ts` réexporte) |
-| `shell/counts.ts` | les pastilles de la barre du haut, relues dans `GET /api/moi` (au démarrage, chaque minute, au retour sur l'onglet, après un geste) ; la même lecture donne le nom du compte, que le menu du compte suit quand on l'a changé ailleurs (un autre appareil, la console) |
+| `shared/` | ce que plusieurs écrans partagent : `kit.ts` (lectures en cache — une relecture forcée, ou demandée après une invalidation, suit celle en cours, un 404 efface ce qu'on avait lu —, erreurs, dates, copier, confirmer), `store.ts` (les lectures partagées, dont ta dernière position, celle du Téléphone et de la Carte), `storage.ts` (le stockage du navigateur, sans jamais lever), `names.ts` (« de Léa », « d'Adrien » : `ofName`, que `screens/mail/format.ts` réexporte) |
+| `shell/ages.ts` | les âges affichés (« il y a 3 min ») repeints d'ici toutes les 30 s, l'onglet au premier plan, par chaque écran abonné (Teams, Paramètres, Téléphone), sans rien relire |
+| `shell/counts.ts` | les pastilles de la barre du haut, relues dans `GET /api/moi` (au démarrage, quand le direct dit `me`, à chaque ouverture de la connexion, après un geste ; l'onglet caché, à son retour) ; la même lecture donne le nom du compte, que le menu du compte suit quand on l'a changé ailleurs (un autre appareil, la console) |
 | `styles/` | `base.css` et `chat.css` portés de la maquette, `ecrans/` pour chaque écran, `app.css` pour ce qu'elle ne montrait pas |
 
 Mika n'a qu'un élément (`#mika-corner`) : son visage dans la pastille du haut, ou en grand dans la colonne du chat
 (`[data-mika-scene]`). Le cadre la gare avant de redessiner un écran et la reloge après (`corner.park()` /
 `corner.lodge()`), comme la maquette.
+
+## Le direct
+
+Rien ne se relit à intervalles (ADR 0308). Le serveur pousse sur `/ws` une trame `changed` qui dit quoi a changé,
+jamais le contenu — les sujets, leurs clés et ce que chaque écran relit : `backendv2/docs/protocole-moi.md`, § 2 bis,
+la seule source. `live/live.ts` la reçoit et réveille les écrans abonnés à un sujet, avec les clés nommées (ou tout le
+domaine) ; chacun relit la route qu'il montre, une lecture à la fois, et ce qui n'a pas changé ne se redessine pas ;
+un écran qui relit tout pour plusieurs sujets (Paramètres) ne le fait qu'une fois par trame (`onAny`). Ce qui ne doit
+pas sauter sous les doigts tient : une sélection cochée dans Mail retarde la relecture de la liste, la réponse
+commencée, une saisie et le défilement restent. Une boîte, un compte Teams ou un projet qui n'est plus à toi (retiré,
+plus partagé) ramène à la liste — « Toutes les réceptions » dans Mail — au lieu de dire « Introuvable ». Un écran au
+second plan, ou l'onglet caché, ne relit rien : il se relit à son retour ; à chaque ouverture de la connexion, la
+première comprise (l'écran lu au démarrage l'a été pendant la poignée de main), ce qui est affiché se relit une fois
+(rien n'est rattrapé). Les copies partagées (`shared/store.ts::followChanges`) suivent leurs sujets. Les âges affichés
+(« relevée il y a », le dernier signe de l'extension Teams, « vu il y a ») avancent d'eux-mêmes, repeints d'ici toutes
+les 30 s sans rien relire (`shell/ages.ts`), sauf sous une saisie ; Projets ne s'y abonne pas (son dessin relance ses
+lectures périmées). Les minuteries qui relisent encore — une pause de la saisie, une lecture unique au démarrage pour
+la palette, le trajet d'un voyage après tes gestes, les notes préchargées autour de toi, la connexion Microsoft d'une
+boîte (ce qu'elles attendent ne passe pas par le journal) — sont listées avec leur raison dans `tools/timers.test.ts`,
+qui échoue sur toute autre (une pause attendue dans une boucle ou un `new Promise` y compte comme une relecture).
 
 ## Ce que fait chaque écran aujourd'hui
 
@@ -95,6 +119,9 @@ Mika n'a qu'un élément (`#mika-corner`) : son visage dans la pastille du haut,
   limite aux derniers messages. À droite, Mika en grand, son humeur (les facettes de `emotion_blend`), ce à quoi elle repense et
   ce qu'elle a promis. Pour une opératrice : « Pro » (fils de travail, ses outils en direct, Markdown), 👍/👎 et
   « pourquoi ? », « Tout accepter » (pour l'onglet).
+  Une carte d'accord d'un ajout à l'agenda (`agenda.write`, ADR 0309) montre l'événement qu'elle ajouterait (son
+  agenda, quand, où, « Mika te le rappelle », lus dans `GET …/agenda/proposals`), « Modifier » (dans l'Agenda) et la
+  proposition qui y attend ; ses boutons sont ceux de toute carte.
   Une carte d'accord pour un brouillon de mail ou une réponse Teams devient un lien vers Mail ou Teams, où elle se
   relit et se décide (ADR 0191) ; « Tout accepter » ne la décide pas. Le lien ouvre le brouillon même
   (`#mail/messages/brouillon/<id>`, `#teams/brouillons/<id>`), sur une ligne compacte. Sur un téléphone, deux liens ou
@@ -198,10 +225,11 @@ Mika n'a qu'un élément (`#mika-corner`) : son visage dans la pastille du haut,
   attendre le serveur qui range mail par mail : un mail rangé quitte la liste, et une lecture qui ne le sait pas encore
   ne le remontre pas, `keptRows` ; ce que le serveur refuse revient ; ADR 0302), écrire avec les destinataires proposés, une copie cachée et des fichiers joints (nouveau message, réponse,
   transfert ; 25 Mo par pièce, ADR 0214), « Préremplir avec Mika » (elle s'y met tout de suite ; où elle en est se
-  suit sur une ligne de « Ce qu'elle en sait », relue toutes les deux secondes par `GET …/mail/work`, ADR 0306 :
+  suit sur une ligne de « Ce qu'elle en sait », relue par `GET …/mail/work` à chaque étape que le direct pousse, ADR
+  0306 et 0308 :
   `mika/work.ts`), « Corriger » dans la réponse en place et la fenêtre d'un mail (les fautes, sans changer les mots :
   le texte corrigé remplace le tien, « Annuler » dans le toast ; éteint tant qu'aucun modèle ne corrige, ADR 0307 :
-  `mail/compose.ts::correctField`), ses brouillons (exactement ce qui
+  `screens/mail/compose.ts::correctField`), ses brouillons (exactement ce qui
   partira : envoyer, retoucher, refuser, reprendre). Ses correspondants sont dans Contacts (ADR 0298) : l'ancien
   onglet `#mail/contacts` y mène ; écrire propose toujours ses correspondants (`GET …/mail/contacts`), et
   `#mail/messages/ecrire/<adresse>[/<nom>]` ouvre un mail nouveau, le destinataire posé (« Écrire » d'une fiche de
@@ -213,7 +241,8 @@ Mika n'a qu'un élément (`#mika-corner`) : son visage dans la pastille du haut,
   carte et « Ses brouillons » (une carte par réponse sur un téléphone ; `#teams/brouillons/<id>` y surligne une
   réponse), ton message par l'extension du compte, sous le nom de qui y est connecté dans Teams (ADR 0189),
   « Préremplir avec Mika » (elle s'y met tout de suite ; où elle en est se suit sur une ligne au-dessus du champ,
-  l'étape et son chrono, relue toutes les deux secondes par `GET …/teams/work` sans redessiner le champ, ADR 0306),
+  l'étape et son chrono, relue par `GET …/teams/work` à chaque étape que le direct pousse, sans redessiner le champ,
+  ADR 0306 et 0308),
   « Corriger » à côté (les fautes de ton message, sans changer ses mots, ADR 0307 : le même que dans Mail).
   Ta réponse dans une discussion rend sans objet celle qu'elle y avait préparée : refusée
   (« Répondu autrement »), sa carte le dit (ADR 0199). « Comment ça part » relit tes droits par `api/rights.ts`, la
@@ -237,10 +266,46 @@ Mika n'a qu'un élément (`#mika-corner`) : son visage dans la pastille du haut,
   d'onglet Notifications tant que l'application ne lit que les messageries (ADR 0233) : il ne ferait que redire
   Messages ; `#telephone/notifications` retombe sur Messages, et Paramètres › Téléphones dit ce que l'application lit.
   Mika ne lit les messages du téléphone que pour ses propriétaires : à un autre compte (`owner` de `GET /api/moi`),
-  Messages le dit et mène à Position. Une autre carte servie, relue pendant que l'onglet est ouvert (des
+  Messages le dit et mène à Position. Une autre carte servie, relue quand l'onglet se relit (au plus toutes les cinq
+  minutes : aucun sujet du direct ne la dit ; des
   polices ajoutées, une autre source, une autre zone), se repose sur la carte ouverte. Une carte qui ne se dessine pas
   (pas de WebGL, MapLibre qui ne vient pas, ses tuiles en échec de suite) laisse le plan dessiné et sa note, sans
   réessayer à chaque dessin — jusqu'à une autre carte servie.
+- **Agenda** (ADR 0309, lot 6 ; `protocole-moi.md` § 13) : tous ses agendas en un écran, la forme de la maquette
+  validée — celui du système (« Mon agenda »), ceux qu'elle branche (Google, Outlook, CalDAV, un abonnement), ceux qu'on
+  lui partage et « L'agenda de Mika », sa mémoire montrée comme un agenda (ce qu'elle t'a promis, ce qu'elle retient de
+  ta vie), en rose et en lecture seule. À gauche : « Créer », le mini-mois, les agendas par groupe — les cocher ne change
+  que l'affichage, retenu par ce navigateur (les masquer, dans Paramètres, coupe aussi Mika) —, leur menu (n'afficher
+  que lui, sa couleur, le partager, ses paramètres), un compte en panne, « Brancher un agenda ». Jour et Semaine en
+  grille horaire (les chevauchements en colonnes, les journées en bandes, maintenant en ligne, un créneau vide touché
+  crée un événement à son heure), Mois, Planning (quatre semaines), la recherche (titres, lieux, descriptions,
+  personnes, des 90 derniers jours à l'année qui vient, dans les agendas cochés : aucun coché, elle le dit sans rien
+  demander au serveur). Une invitation sans réponse est en pointillés, « peut-être »
+  hachuré, un refus disparaît ; ce que Mika propose d'ajouter est hachuré de rose, dans la grille et en tête de la vue
+  (Refuser · Modifier · Ajouter, tel qu'il a été lu). La fiche d'un événement, dans un volet : quand et où il en est,
+  répondre à une invitation (et la réponse que Mika a préparée : l'envoyer, en changer le mot, « Non merci » ; une
+  série : « Ta réponse vaut pour toute la série » ; d'ici sans pouvoir répondre — un partage, le privé d'une autre, un
+  serveur CalDAV qui ne transmet pas les réponses —, pas de boutons, la ligne `respond_why`), Modifier
+  (pas une invitation), Dupliquer ou « Copier dans mes agendas », Supprimer (ou Retirer une invitation : la refuser),
+  « Demander à Mika », la répétition en mots, le lieu, un lien de visio (http ou https seulement, dans un autre onglet),
+  les participants et leur réponse, les rappels du fournisseur et « Mika te le rappelle » (« Changer », son
+  propriétaire), « Ajouté par Mika ». La fenêtre d'un événement : quand (journée entière, le fuseau), la répétition et
+  « Personnalisée », le lieu, un lien de visio collé, la description, l'agenda où il s'écrit, les participants (ses
+  correspondants, ou une adresse), les rappels du fournisseur — une notification ou un e-mail, autant que le
+  fournisseur en garde (cinq chez Google et en CalDAV, un chez Outlook ; aucun pour le système, où Mika rappelle) —,
+  « Mika te le rappelle », occupé ou disponible, privé ; une modification n'envoie que ce qui a changé (une description
+  que la zone de texte a seulement relue — ses fins de ligne — ne repart pas), une série
+  demande sa portée (cet événement, celui-ci et les suivants, tous), et la fenêtre revient telle quelle si le serveur
+  refuse. Partager un agenda (le sien : lire, lire et préparer, s'en servir, avec une personne qui a un compte ; ça ne
+  change rien chez Google ou Microsoft). Sur un téléphone : Planning d'abord, le mois se déplie sous le titre, les
+  agendas dans un menu, « + » pour créer, la fiche en page. Adresses : `#agenda/<vue>`, `#agenda/evenement/<n°>[/<occurrence>]`,
+  `#agenda/proposition/<n°>`, `#agenda/memoire/<réf>`, `#agenda/invitations`, `#agenda/nouveau`,
+  `#agenda/modifier/…`, `#agenda/partager/<agenda>`. Le direct `agenda` relit ses agendas, la période affichée,
+  l'événement ouvert, ses invitations et ce que Mika propose ; l'agenda de Mika se relit à l'ouverture de l'écran.
+  Ce que l'API ne sert pas ne se montre pas : « Ce que Mika en sait » d'un événement, créer une visio chez le
+  fournisseur, « Trouver un créneau avec eux », la visibilité « Publique », « Déjà répondu » des invitations, « Voir sur
+  la carte » d'un lieu. Sa pastille : `counts.agenda` de `GET /api/moi` (ses invitations, et ce que Mika propose dont
+  elle décide).
 - **Contacts** (ADR 0298 ; `#contacts`, `#contacts/<n°>`) : tous ceux que Mika connaît pour toi — vus dans tes
   comptes Teams et tes boîtes (les tiens et ceux qu'on te partage), sur ton téléphone, ou dont tu lui as parlé — et
   leurs organisations, entre Téléphone et Carte dans les deux barres. À gauche : la recherche (un nom, un e-mail, un
@@ -351,6 +416,10 @@ Mika n'a qu'un élément (`#mika-corner`) : son visage dans la pastille du haut,
   sont ouverts (celui du système, « Le web », sous un titre et un but écrits pour elle ; ceux de l'opératrice, sans
   leur but : la ligne de son catalogue, écrite pour Mika), les siens et ceux qu'on lui partage (leur état et leur but,
   même sans case ouverte). Le pourquoi d'une case d'app redit la ligne de son app ou de son projet (ADR 0219). Ses accords se décident dans le chat : le chapeau le dit, et l'onglet « Accords » attend une route qui rende ses cartes.
+  « Tes agendas » (ADR 0309), sous les ressources : le tableau de chaque agenda à toi (`#outils/droits/ag:<agenda>`),
+  qui se règle ici, case par case — Lire ; Ajouter, modifier, supprimer ; Répondre aux invitations ; Ce qu'elle en garde
+  —, la ligne d'un partage se retire avec lui, « Revenir au tableau de départ » ; qui, par où et quand, et l'ordre des
+  lignes, restent à la console. Un agenda qu'on te partage n'y est pas : son tableau est à son propriétaire.
 - **Paramètres** : son compte (nom, mot de passe ; « Lui demander » ouvre le chat, « Qu'est-ce que tu sais de moi ? »
   posé dans le champ), ses boîtes (ajouter, régler — dont ses consignes de tri : où ranger, de quoi te prévenir,
   ADR 0243 ; « Tout garder en local », ADR 0249 —, tester, connecter à Microsoft, retirer), ses comptes Teams (les
@@ -359,7 +428,14 @@ Mika n'a qu'un élément (`#mika-corner`) : son visage dans la pastille du haut,
   restent à la console), ses téléphones (révoquer, télécharger l'application), ses partages, ses services MCP
   (brancher un service distant, régler chacun de ses outils — coupé, il lit, il agit —, le retirer ; ses en-têtes
   secrets gardés ne suivent pas une adresse qui mène à un autre serveur : la fiche les redemande sous leur champ avant
-  l'envoi, ou « Retirer ses en-têtes », ADR 0236 ; ceux qu'on lui partage, en lecture, sous « Partagé avec toi »). Une route d'action ouvre la fenêtre qu'un bouton promet, depuis un
+  l'envoi, ou « Retirer ses en-têtes », ADR 0236 ; ceux qu'on lui partage, en lecture, sous « Partagé avec toi »), ses agendas (ADR 0309 : ses comptes — leur état, leurs
+  agendas, leur panne en mots —, ce qu'on lui partage et l'agenda de Mika, « Dans l'Agenda » pour ce navigateur ; la
+  fiche d'un compte — son nom, sa connexion, se reconnecter, déconnecter, synchroniser, le retirer ; ses agendas : leur
+  nom (celui du système change pour de bon, un agenda branché en prend un à lui ici seulement), leur couleur, « Dans
+  l'Agenda » (le masquer coupe aussi Mika), « Mika te le rappelle », leurs droits ; leurs partages — ; « Brancher un
+  agenda » : un agenda de ce serveur, Google — l'adresse de retour collée, ou le retour direct —, Outlook.com /
+  Microsoft 365 — un code, la fin de son attente poussée par le direct —, CalDAV essayé puis choisi, un abonnement
+  iCal). Une route d'action ouvre la fenêtre qu'un bouton promet, depuis un
   autre écran ou la palette : `#parametres/mcp/+brancher`, `#parametres/compte/+mot-de-passe`,
   `#parametres/partages/+partager` (l'adresse redevient celle de l'onglet).
 - **Partout** : la pastille de Mika (ce qu'elle fait, son humeur) ouvre « Ce qu'elle fait » ; Ctrl K cherche un écran,
@@ -367,6 +443,7 @@ Mika n'a qu'un élément (`#mika-corner`) : son visage dans la pastille du haut,
   résultats par groupe au plus) : choisir un message ouvre son fil et l'y montre, surligné un instant ; le menu du
   compte change le thème et déconnecte. Sur un téléphone, les boutons de la barre de titre, réduits à leur icône,
   gardent leur nom (`title` et `aria-label`, posés par le cadre d'après leur libellé) ; ceux de la tête d'une section
-  de Paramètres ou d'une fenêtre gardent leur libellé. La barre du bas a huit entrées (Projets après le chat) ;
-  Paramètres s'y dit « Réglages ». Sur un écran large, les libellés des rubriques se replient sous 1360 px, et
-  « Rechercher partout » se réduit à sa loupe sous 1700 px.
+  de Paramètres ou d'une fenêtre gardent leur libellé. La barre du haut a dix rubriques (l'Agenda après Téléphone) ;
+  la barre du bas en garde huit (Projets après le chat, l'Agenda après Téléphone), Carte, Outils et Réglages passant
+  sous « Plus » (ADR 0309) ; Paramètres s'y dit « Réglages ». Sur un écran large, les libellés des rubriques se
+  replient sous 1440 px, et « Rechercher partout » se réduit à sa loupe sous 1880 px (`styles/ecrans/agenda.css`).

@@ -2,14 +2,14 @@
 
 Le client de tous les jours sur un téléphone (ADR 0235) : d'abord la conversation avec Mika — on lui écrit, on lui
 envoie des photos et des fichiers, elle répond, et comme dans une vraie messagerie elle peut écrire la première quand
-l'application est fermée —, puis, par le tiroir, ce que fait le client web `frontendv2/` : Projets, Mail, Teams, Carte,
-Téléphone, Contacts, Outils et Paramètres, pour la personne connectée. On voit aussi ce qu'elle fait : sa ligne d'état sous son
+l'application est fermée —, puis, par le tiroir, ce que fait le client web `frontendv2/` : Projets, Mail, Teams, Agenda,
+Carte, Téléphone, Contacts, Outils et Paramètres, pour la personne connectée. On voit aussi ce qu'elle fait : sa ligne d'état sous son
 nom, son visage au bout de chaque barre du haut, et l'écran « Ce qu'elle fait ».
 
 Le serveur est `backendv2/` (`python -m mika serve`). La conversation passe par
 [`backendv2/docs/protocole-chat.md`](../../backendv2/docs/protocole-chat.md), le reste par l'API par personne
 [`backendv2/docs/protocole-moi.md`](../../backendv2/docs/protocole-moi.md) ; les décisions : ADR 0062, puis 0235, et
-0296 pour les projets, 0298 pour les contacts. La
+0296 pour les projets, 0298 pour les contacts, 0309 pour l'agenda. La
 maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.md`) : on navigue par le tiroir.
 
 ## Ce que fait l'application
@@ -126,8 +126,8 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
   les siens. Un texte venu d'ailleurs (`outside` : une issue d'un inconnu, un commentaire de l'hôte, la fin d'un journal,
   la sortie d'une commande) se montre sous un liseré en tirets, « venu d'ailleurs », en texte brut ; un texte d'elle se
   lit en Markdown (le rendu du mode pro). Les couleurs d'état sont les mêmes partout : à toi (ambre), elle y travaille
-  (bleu), fait (vert), en échec ou refusé (rouge), en attente (gris-bleu). Chaque écran se relit à son retour et en
-  tirant ; hors ligne ou en erreur, il le dit et propose de réessayer.
+  (bleu), fait (vert), en échec ou refusé (rouge), en attente (gris-bleu). Chaque écran se relit à son retour, en
+  tirant, et quand le direct dit que son projet a changé (voir « Le direct ») ; hors ligne ou en erreur, il le dit et propose de réessayer.
   - **À faire** : ce qui t'attend dans tous tes projets, groupé par projet (des pastilles filtrent sur un projet ; la
     suite se lit en fin de liste, et reste chargée quand la liste se relit en place — une attente ouverte, décidée, le
     retour sur l'écran — tant que sa première page relue la rejoint ; tirer relit tout). Une ligne ouvre de quoi décider (`Route.ProjectTodo`) : pour un accord, exactement ce
@@ -302,7 +302,7 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
   n'a pas pu le lire ; rien pour un envoi en masse). La page suivante se lit en fin de liste : jusqu'à cent
   lignes, la liste se relit d'un coup depuis le début, une page de plus, et au-delà la page qui contient la première
   ligne pas encore lue — un mail rangé entre-temps ne fait rien sauter, et une page qui arrive ne défait pas un
-  rangement fait pendant sa lecture. Tirer relit, et la liste se relit chaque minute. Un appui long sélectionne (archiver, lu ou non lu, suivre, corbeille, déplacer ; le geste se voit aussitôt, sans attendre le serveur, et une relecture d'ici sa réponse ne le défait pas ; refusé, la liste se relit et le refus se dit, ADR 0302) ;
+  rangement fait pendant sa lecture. Tirer relit, et la liste suit le direct (ses boîtes, la page affichée si elle montre une boîte nommée ; jamais sous une sélection, relue dès qu'elle se vide). Un appui long sélectionne (archiver, lu ou non lu, suivre, corbeille, déplacer ; le geste se voit aussitôt, sans attendre le serveur, et une relecture d'ici sa réponse ne le défait pas ; refusé, la liste se relit et le refus se dit, ADR 0302) ;
   glisser une ligne vers la gauche ou vers la droite la met à la corbeille (le même geste `trash`, là où la sélection
   la rangerait : ni dans une boîte qu'on te partage sans t'en servir, ni dans la Corbeille elle-même, ni sur « Envoyés »), elle
   reste écartée le temps que le serveur réponde, revient s'il refuse, et « Annuler » la remet dans son dossier (`move`) ;
@@ -363,7 +363,7 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
   ou tous, « Ses brouillons », « Régler les comptes Teams ». La loupe cherche. « Ses brouillons » paraît en bandeau rose
   quand l'une de ses réponses attend ta décision. Les discussions (un tête-à-tête au nom de l'autre personne, un
   groupe à son nom) disent leur dernier message, leur heure, une mention de toi, et en rose une réponse d'elle en
-  chemin ; tirer relit, la liste se relit chaque minute. Pas de « nouvelle discussion » : l'extension « Mika · Teams »
+  chemin ; tirer relit, la liste suit le direct. Pas de « nouvelle discussion » : l'extension « Mika · Teams »
   ne sait que répondre. Ni non-lus, ni réactions, ni pièces d'un message : l'API ne les dit pas.
   - **Un fil** : les autres à gauche (leur nom dans un groupe), toi à droite — « Toi » seulement sur un compte à toi ;
     sur un compte qu'on te partage, les messages de son propriétaire sont à gauche, à son nom —, tes mentions marquées,
@@ -379,32 +379,39 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
     file et ses réponses en file disent aussi qu'ils partent sous le nom de la personne du compte, et sa réponse qui
     attend « attend l'accord de son propriétaire ». Une extension muette depuis deux heures, Teams
     coupé ou le compte décoché se disent au-dessus du champ. Un compte qu'on ne te partage qu'en lecture n'a pas de
-    champ (en lecture et préparation, « Préremplir » seul). Le fil se relit toutes les vingt secondes. ⋮ : « Comment ça
-    part » (Outils).
+    champ (en lecture et préparation, « Préremplir » seul). Le fil se relit quand le direct le nomme, sans bruit (ce que
+    tu tapes et ce que tu cites restent). ⋮ : « Comment ça part » (Outils).
   - **Où elle en est** (ADR 0306, comme le web) : une réponse qu'elle prépare ici, demandée ou d'elle-même, se suit sur
     **une seule ligne** au-dessus du champ — son visage, l'étape (« Elle s'y met… », « Réflexion en cours… », le libellé
     de l'outil qui tourne, coupé d'une ellipse s'il est long) et son chrono, atténué, en chiffres tabulaires, qui court
     chaque seconde depuis le début de l'étape. Dans Mail, la même ligne finit « Ce qu'elle en sait » dans la liseuse, et
     se pose au-dessus du texte dans « Écrire » (✦ devant). Juste après « Préremplir », elle s'y met depuis maintenant ;
-    puis `/teams/work` (ou `/mail/work`) se relit toutes les deux secondes tant qu'elle y travaille, l'app au premier
-    plan, une demi-heure au plus : sa réponse arrivée (ou son brouillon), le fil se relit (la liseuse montre le
-    brouillon) ; plus rien de demandé ni d'en cours, on cesse ; sinon seule la ligne se redessine — ni le fil, ni le
-    champ et ce qu'on y tape. TalkBack dit l'étape quand elle change, jamais le chrono. Un serveur d'avant, qui ne dit
+    puis `/teams/work` (ou `/mail/work`) se relit chaque fois que le direct dit une étape (`teams.work`, `mail.work`,
+    ADR 0308), et une fois au retour de l'app au premier plan — plus de relecture à intervalles, ni de plafond : sa
+    réponse arrivée (ou son brouillon), le fil se relit (la liseuse montre le brouillon, et le dit si on l'attendait) ;
+    plus rien de demandé ni d'en cours, la ligne s'en va ; sinon seule la ligne se redessine — ni le fil, ni le champ et
+    ce qu'on y tape. Le chrono, lui, est un affichage d'ici. TalkBack dit l'étape quand elle change, jamais le chrono. Un serveur d'avant, qui ne dit
     pas `work`, garde « Elle s'y met… » sans chrono. Code : `data/moi/Work.kt` (pur), `ui/components/WorkLine.kt`.
   - **Corriger** (ADR 0307, comme le web) : les fautes de ce que tu écris — orthographe, accents, accords, conjugaison,
     homophones, ponctuation —, sans changer tes mots (`POST /api/moi/correct`, protocole § 2). Dans le champ d'un fil,
     ✓ à côté de ✦ ; dans Mail, « Corriger » au-dessus du clavier dans toute écriture (réponse, mail nouveau, transfert,
-    retouche de son brouillon), à côté de « Préremplir avec Mika » quand il y est. Le texte corrigé remplace le tien
-    aussitôt, et un message dit « 3 fautes corrigées. » (« 1 faute corrigée. ») avec « Annuler », qui te le rend tant
-    que le champ contient encore le texte corrigé ; « Aucune faute : ton texte reste tel quel. » sinon, « Rien à
+    retouche de son brouillon), à côté de « Préremplir avec Mika » quand il y est. Le serveur n'applique que les
+    corrections qui ne touchent pas aux mots, et compte celles qu'il a écartées (`refused` ; 0 d'un serveur d'avant).
+    Le texte corrigé remplace le tien aussitôt, et un message dit « 3 fautes corrigées. » (« 1 faute corrigée. »), ou
+    « 3 fautes corrigées ; 1 changement écarté : il touchait aux mots. », avec « Annuler », qui te le rend tant que le
+    champ contient encore le texte corrigé. Rien de corrigé : « Aucune faute : ton texte reste tel quel. », ou « La
+    correction touchait aux mots : rien n'a été changé. » quand tout a été écarté — sans « Annuler » ; « Rien à
     corriger : le champ est vide. » pour un champ vide (rien ne part). Si tu as continué d'écrire pendant l'appel, rien
     n'est posé et le message le dit ; une autre discussion ou une autre écriture ouverte entre-temps, ou l'écran quitté,
     n'en reçoit rien. Pendant l'appel, le bouton est éteint et dit « Correction… » (dans Teams, ✓ tourne et la ligne
-    sous le champ le dit). Sans modèle au rôle `correct` (`GET /api/moi` → `correct` faux, ou absent d'un serveur
-    d'avant), le bouton reste atténué et, touché, dit pourquoi, comme ✦. Un refus du serveur (le modèle a trop réécrit :
-    rien n'est remplacé ; trop d'appels ; le modèle n'a pas répondu) se dit tel quel. Un texte que la correction fait
-    passer au-delà de la borne du champ y reste et peut se raccourcir (l'envoi dit qu'il est trop long). Code :
-    `data/moi/Correct.kt` (pur), `ui/shell/Correct.kt`.
+    sous le champ le dit). Le serveur se donne 50 s et ne répond qu'à la fin : l'appel passe par un client à part, dérivé
+    de celui des appels courts, qui attend 75 s de lecture et 90 s en tout (`correctClient`) ; les autres appels gardent
+    leurs 30 s et 60 s. Sans modèle au rôle `correct` (`GET /api/moi` → `correct` faux, ou absent d'un serveur d'avant),
+    le bouton reste atténué et, touché, dit pourquoi, comme ✦. Un refus du serveur se dit tel quel : trop long pour être
+    corrigé d'un coup (413), une réponse incomplète du modèle (422 : rien n'est posé), une correction déjà en cours ou
+    trop d'appels (429), le modèle n'a pas répondu (502). Un texte que la correction fait passer au-delà de la borne du
+    champ y reste et peut se raccourcir (l'envoi dit qu'il est trop long). Code : `data/moi/Correct.kt` (pur),
+    `ui/shell/Correct.kt`.
   - **La citation** (ADR 0305), calquée sur « Citer » de Teams mobile (sans maquette, à sa demande). Un appui long sur
     un message ouvre sa feuille : « Citer », ses guillemets (`quote`, l'icône du web reprise dans la maquette, puis
     `tools/icones.py`) ; le message s'éclaire tant qu'elle est ouverte. Choisi, une carte se pose au-dessus du champ —
@@ -425,6 +432,114 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
     d'elle-même, son heure, la note d'un refus). Toucher une carte ouvre sa discussion ; celle qui attend ta décision
     se décide aussi d'ici ; sur un compte qu'on te partage, elle attend l'accord de son propriétaire, et la carte dit
     qui décide.
+- **Agenda** (ADR 0309, l'API par personne : [`protocole-moi.md`](../../backendv2/docs/protocole-moi.md) § 13 ; la maquette
+  validée `maquette/ecrans/agenda*.js`, ses « À trancher » réglés par les recommandations de `output/agenda/CONCEPTION.md`),
+  une rubrique du tiroir après Teams, sa pastille : tes invitations qui attendent ta réponse et ce que Mika propose dont tu
+  décides (`counts.agenda`). Tes agendas (celui du système, ceux que tu branches, ceux qu'on te partage) et « L'agenda de
+  Mika », sa mémoire montrée comme un agenda, en lecture seule. **Rien n'y est recalculé** : un bouton n'existe que si le
+  serveur l'ouvre (`can`), un refus se dit avec ses mots, les instants se lisent à l'heure du serveur (`zone`). Le web
+  (`frontendv2/src/screens/agenda/`) est la référence des règles, portées dans `data/moi/agenda/` sans les réinventer.
+  - **La barre**, celle d'un agenda de téléphone : ☰, le mois en titre — le toucher déplie le mini-mois sous la barre (un
+    point sous les jours qui ont quelque chose, on le balaie, « Agendas à afficher · 7 sur 7 », ‹ ›) —, chercher,
+    « Aujourd'hui » (l'icône au numéro du jour), ⋮ et son visage. ⋮ porte les cinq vues (**Planning · Jour · 3 jours ·
+    Semaine · Mois**, la vue ouverte cochée), « Agendas à afficher », les invitations et leur nombre, les paramètres. La
+    vue de départ est la dernière choisie (retenue sur le téléphone, par session). On balaie de côté pour changer de
+    période (Jour, 3 jours, Semaine, Mois) ; le Planning défile, « Les quatre semaines suivantes » au bout ; tirer relit.
+  - **Les vues** : Planning (une liste par jour, la date à gauche — aujourd'hui en indigo —, « Aujourd'hui », « Demain »,
+    la ligne de l'heure entre les rendez-vous du jour, une occurrence de plusieurs jours sous chacun) ; Jour, 3 jours,
+    Semaine (la grille horaire, 48 dp l'heure, ouverte à 7 h 30, les journées entières en bandes au-dessus, ce qui se
+    chevauche côte à côte, la ligne de l'heure ; les titres de la semaine coupés à quelques lettres sur 384 dp, comme
+    Samsung ; toucher une tête de colonne ouvre son Jour, une heure vide crée un événement à cette demi-heure) ; Mois
+    (quatre lignes au plus par jour, puis « +N » ; toucher un jour ouvre son Jour). La couleur d'un agenda est la sienne,
+    sinon celle du fournisseur rapprochée de la palette ; **le rose est à Mika** : ce qu'elle a ajouté (✦), ce qu'elle
+    propose (hachuré, contour rose), sa mémoire ; une invitation en attente a un contour en pointillés ; ce qui est passé
+    pâlit.
+  - **« À décider »** en tête des vues : déplié en Planning, replié ailleurs sur une ligne rose (comme la ligne des
+    accords du chat). Ce que Mika propose d'ajouter (son visage, quand, l'agenda ; Refuser · Modifier · Ajouter — tel
+    qu'il a été lu, son `digest` ; « et N autres » dans la vue), puis les invitations : une ligne vers leur page quand la
+    proposition est là, sinon chacune (de qui, quand, ce que Mika a préparé).
+  - **« Agendas à afficher »**, une feuille : les cases de leur couleur, groupées (Mes agendas · Partagés avec moi ·
+    Abonnements · L'agenda de Mika ; un agenda masqué dans Paramètres n'y est pas) ; décocher ne change que l'affichage
+    (retenu sur le téléphone : Mika s'en sert toujours, recommandation 8) ; un compte à reconnecter ou en panne (vers sa
+    page) ; « Brancher un agenda », « Paramètres des agendas ». ⋮ d'une ligne : sa couleur (son propriétaire), l'afficher
+    seul, le partager, ce que Mika en fait (vers Outils), ses paramètres.
+  - **La fiche** en page (`Route.AgendaEvent`) : ✦ « Demander à Mika » (une phrase dans le champ du chat), Modifier (s'il
+    se modifie d'ici : pas une invitation), Supprimer (une invitation : la retirer, c'est la refuser ; une série demande
+    lequel : cet événement, celui-ci et les suivants, tous), ⋮ (Dupliquer, ou « Copier dans mes agendas » pour un agenda
+    qu'on lit seulement ; partager son agenda ; ses paramètres). Le carré de sa couleur, le titre, quand, ce qui reste
+    (« dans 40 min », « en cours ») ; l'invitation (qui t'invite, dans quel agenda, ce que tu as répondu) et **la réponse
+    que Mika a préparée** (« Envoyer sa réponse » tel qu'elle a été lue · « Modifier le mot » — une feuille : la réponse
+    et le mot, qui partent de toi — · « Non merci ») ; la répétition en mots, le lieu, la visio (« Rejoindre la
+    réunion », dans le navigateur), la description, l'agenda (vers ses paramètres), occupé ou disponible et privé, qui
+    l'organise, les participants et leurs réponses ; les rappels du fournisseur, puis en rose « Mika te le rappelle »
+    (celui de l'agenda ou le sien) et « Changer » (une feuille, son propriétaire) ; « Ajouté par Mika » ; le pied (où part
+    une modification, ou pourquoi on n'y change rien). « Participer ? » en barre du bas : Accepter · Peut-être ·
+    Refuser, la réponse donnée pleine ; pour une série, « Ta réponse vaut pour toute la série » dessous
+    (`answerNote`) ; sans réponse possible d'ici (un partage, le privé d'une autre, un serveur CalDAV qui ne transmet
+    pas les réponses), pas de barre, la ligne `respond_why` dans l'invitation. La fiche de **ce que Mika propose** (`Route.AgendaProposal`) : sa boîte rose (ses
+    mots, la conversation, Refuser · Modifier · Ajouter, ou « Son propriétaire en décide »), ce qui partirait, replié ; et
+    celle d'**une date de sa mémoire** (`Route.AgendaHer`) : d'où ça vient, « Lui en parler », en lecture seule.
+  - **Le formulaire** en plein écran (`Route.AgendaForm` : nouveau — à un jour, à un créneau touché —, modifier,
+    dupliquer, ce que Mika propose) : ✕ et « Enregistrer » (« Ajouter » pour sa proposition) ; le titre ; journée
+    entière, début et fin (la date dans le calendrier d'Android, l'heure dans une liste de demi-heures, la fin avec sa
+    durée), le fuseau, la répétition (une feuille, et « Personnalisée… » : tous les N jours, semaines, mois, ans, ses
+    jours, sa fin) ; les participants, tirés de tes contacts comme dans Mail (`RecipientSuggester`), une adresse tapée
+    prise telle quelle ; la visio (« Pas de visio » ou « Coller un lien… ») ; le lieu ; les rappels du fournisseur (ceux
+    de l'agenda au départ, cinq chez Google et en CalDAV, un chez Outlook ; l'e-mail seulement s'il le sait ; le système
+    n'en a pas : Mika rappelle ; changer d'agenda ramène ceux qu'on a mis à ce qu'il porte, `fitAlerts`, rien
+    d'invisible ne part) et « Mika te le rappelle » (son propriétaire) ; l'agenda (ceux où l'on écrit ; une
+    modification reste dans le sien) ; la description ; occupé ou disponible ; la visibilité (par défaut, privée). Une
+    modification n'envoie que ce qui a changé, une occurrence d'une série demande sa portée d'abord ; la fin avant le
+    début ne part pas ; une clé d'envoi par contenu (un double appui ne crée qu'une fois). Fini, la fiche de ce qui est
+    écrit remplace le formulaire.
+  - **Les invitations** (`Route.AgendaInvitations`) : une carte chacune (quand, où, dans quel agenda, de qui, la réponse
+    que Mika a préparée), tes trois boutons. **Chercher** (`Route.AgendaSearch`) : au serveur, dans les agendas cochés,
+    à partir de deux lettres, après une pause de frappe ; les résultats par jour ; aucun agenda coché : l'écran le dit,
+    sans rien demander au serveur.
+  - **Partager un agenda** (une feuille, depuis ⋮ d'un agenda, sa fiche, ses paramètres) : seul son propriétaire, à une
+    personne qui a un compte (`/people`), Lire · Lire et préparer · S'en servir dits en entier ; les partages en cours,
+    leur niveau à changer, à retirer ; « Ce que Mika en fait avec chacun ». Un partage dans Mika n'est pas un partage
+    chez Google ou Microsoft, la feuille le dit. Un agenda qu'on te partage, ou celui de Mika, dit pourquoi il ne se
+    partage pas d'ici (et « Ne plus l'afficher »).
+  - **Paramètres › Agendas** (une ligne après Comptes Teams) : tes comptes (la sorte, le nom, l'adresse, l'état en mots),
+    ce qu'on te partage et l'agenda de Mika (« Dans l'Agenda » : l'affichage, sur ce téléphone), le fuseau du serveur, la
+    fenêtre de synchronisation, combien de comptes, et « Notifications de l'agenda » (le canal « Agenda » dans les
+    réglages d'Android). **Un compte** : son état, sa panne et « Se reconnecter », ses agendas, « Créer un agenda » (le
+    système, ou un compte qui le sait), « Chercher d'autres agendas » ; son nom, sa connexion (Google ou Microsoft :
+    connecté, se reconnecter, déconnecter ; CalDAV : serveur, identifiant, mot de passe d'application — le redonner si le
+    serveur change —, « Essayer » ; un abonnement : son adresse, jamais relue), synchroniser, le partage de ses agendas,
+    le retirer. **Un agenda** : son nom (le système pour de bon ; un agenda branché, ici seulement), sa couleur, « Dans
+    l'Agenda » (masqué : Mika ne s'en sert plus), ce qu'on peut y faire, les rappels du fournisseur, « Mika te le
+    rappelle » (le réglage de départ de ses événements), ce que Mika en fait (vers Outils), son partage. **Brancher un
+    agenda**, un parcours par sorte : un agenda de ce serveur (nom, couleur, rappel) ; Google (le navigateur s'ouvre sur
+    la page de consentement, puis on colle l'adresse de la page qui n'a pas pu s'ouvrir — le dessin de la barre de
+    Chrome, « Coller » prend le presse-papiers — ; sans application Google réglée, un abonnement iCal ; le retour direct
+    quand le serveur est en https : le navigateur du téléphone n'a pas de session, la page du serveur demande de copier
+    son adresse, qu'on colle ici de même, `googleReturn`) ; Outlook.com / Microsoft 365 (un code, « Copier le code », « Ouvrir Microsoft » ; la
+    fin de l'attente arrive par le direct, rien ne se relit à intervalles) ; CalDAV (les aides du serveur, « Essayer »,
+    les agendas trouvés, « Brancher ») ; un abonnement iCal. Puis ses agendas, cochés ou non.
+  - **Outils › Droits** : un groupe « Tes agendas » (les tiens, ce que Mika fait avec toi en pastilles : seule, ton
+    accord, non) ; chacun son tableau (`Route.CalendarRights`) en cartes, une par ligne — qui, par où, quand ; Lire ;
+    Ajouter, modifier, supprimer ; Répondre aux invitations ; Ce qu'elle en garde —, chaque case réglée dans une feuille
+    par son propriétaire, la ligne d'un partage qui se retire avec lui, « Par défaut », « Revenir au tableau de départ ».
+  - **Dans le chat** : la carte d'accord d'un ajout (`capability: agenda.write`) montre l'événement qu'elle ajouterait
+    (sa couleur, quand, où, « Mika te le rappelle ») — le toucher ouvre la proposition dans l'Agenda —, « Ce qui partira »
+    replié, « Modifier » (le formulaire), Refuser, Ajouter : seuls ses boutons décident. Son rappel d'un rendez-vous est
+    un message d'elle, notifié comme les autres.
+  - **Le canal « Agenda »** (un seul, recommandation 11 : pas de « Rappels » à part) : une invitation qui arrive, un
+    ajout que Mika propose dont tu décides, pendant que l'app est ouverte ailleurs que dans l'Agenda (`AgendaNotifier`,
+    sur le direct `agenda`) ; chacun une fois, ce qui attendait déjà à l'ouverture ne se notifie pas, ce qui n'attend plus
+    retire sa notification. La toucher ouvre sa fiche, où l'on décide ; le volet n'a pas de bouton qui accepte. App
+    fermée, rien : le serveur n'envoie rien de l'agenda par Firebase.
+  - Le direct (ADR 0308) : le sujet `agenda` (clé `calendars`) fait relire la vue, la fiche ouverte, les invitations,
+    Paramètres › Agendas, le tableau d'un agenda, et la ligne « Agendas » de Paramètres.
+  - **Pas fait, faute d'être servi** (la liste du lot 6, et la maquette) : « Ce que Mika en sait » sur un événement,
+    créer une visio chez le fournisseur, « Trouver un créneau avec eux », la visibilité « Publique », « Déjà répondu »
+    des invitations, « Voir sur la carte » d'un lieu (et le choix d'un lieu sur la carte), le conflit d'une invitation
+    avec un autre rendez-vous, « Reçue à … par … », la note d'un rappel de Mika dans le chat, « Ajouter une ligne » à un
+    tableau de droits, le choix « À qui » d'un compte, la fréquence de relecture d'un abonnement et « Essayer » une
+    adresse iCal, le fuseau, le premier jour de la semaine et le rappel de départ propres à une personne, « Envoyer sa
+    réponse » ou « Ajouter » depuis le volet des notifications.
 - **Carte** (ADR 0193 à 0196, 0235, 0259 ; l'API par personne : [`protocole-moi.md`](../../backendv2/docs/protocole-moi.md)
   § 10), une rubrique du tiroir, quatre onglets sous la barre du haut (Explorer · Événements · Itinéraire · Voyages) qui
   se remplacent sans s'empiler. La carte est celle que sert ce serveur, et lui seul (voir [La carte](#la-carte-maplibre)) ;
@@ -579,7 +694,7 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
     encore lequel a reçu quoi), la plus récente d'abord — le groupe ou qui écrit, la pastille de l'appli, le dernier
     message, l'heure, et en rose sa réponse en chemin (partie, copiée, ou en échec en rouge). « Mika propose une
     réponse » en bandeau rose quand l'une attend ton geste (`counts.phone`), avec son texte et son échéance si ce
-    téléphone l'a reçue. Tirer relit, la liste se relit chaque minute. Vide, l'écran dit pourquoi : un compte qui n'est
+    téléphone l'a reçue. Tirer relit, la liste suit le direct. Vide, l'écran dit pourquoi : un compte qui n'est
     pas une de ses propriétaires (et le lien vers Position), « Lui montrer mes messages » coupé ici (et le lien vers
     Paramètres › Ses messages), ou rien encore.
     Pas de compteur de non-lus : l'API ne les dit pas.
@@ -598,8 +713,8 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
     elle reste et l'écran dit qu'elle partira comme ton message. Si elle n'attend plus quand tu envoies ta version, rien
     ne part tout seul. Un geste parti va au bout (son règlement sur le téléphone, son sort au serveur) même si l'écran
     se ferme ; son sort ne se dit que sur l'écran où il a commencé (jamais rejoué sur un autre fil, ni l'appli rouverte).
-    Ce que tu as décidé se montre tout de suite, et son sort part aussitôt au serveur. Le fil se relit toutes les vingt
-    secondes. Pas de ✦ « Préremplir » : le serveur n'a pas cette route pour le téléphone ; ⋮ : « Lui en parler dans le
+    Ce que tu as décidé se montre tout de suite, et son sort part aussitôt au serveur. Le fil se relit quand le direct le nomme (ses propositions
+    avec). Pas de ✦ « Préremplir » : le serveur n'a pas cette route pour le téléphone ; ⋮ : « Lui en parler dans le
     chat ».
   - **Position** : ta dernière position sur la vraie carte quand le serveur en sert une qui la couvre — centrée sur ton
     point, au zoom qui montre le cercle de sa précision ; dans la page qui défile, le doigt reste à la carte —, sinon sur
@@ -617,8 +732,8 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
     nombres (sans la recherche, comme l'API) ; une ligne par contact — son rond d'initiales (un carré pour une
     organisation), son nom, son poste et son organisation (une organisation : combien de ses personnes), d'où elle le
     connaît et combien (une icône par source), le dernier échange. La suite se lit en fin de liste (une suite en panne
-    ne se redemande qu'à « Réessayer ») ; tirer relit, la liste se relit chaque minute, et une relecture discrète garde
-    la suite déjà lue si rien n'a changé devant. « Lui présenter quelqu'un » (le bouton flottant) ouvre le chat, « Je
+    ne se redemande qu'à « Réessayer ») ; tirer relit, la liste suit le direct (`contacts`), et une relecture discrète
+    garde la suite déjà lue si rien n'a changé devant. « Lui présenter quelqu'un » (le bouton flottant) ouvre le chat, « Je
     voudrais te présenter quelqu'un : » dans le champ.
   - **La fiche** (`Route.Contact`), en page : son rond, son nom, son poste et son service — son organisation ouvre sa
     fiche —, « parle aussi à Mika » ou « a un compte » ; **Écrire** (un mail nouveau, son adresse posée), **Teams** (votre
@@ -635,7 +750,8 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
     ce contact »**, confirmé dans une feuille ; quand le serveur ne le permet pas d'ici (`forget.allowed` faux), la
     feuille dit pourquoi avec ses mots, et rien ne part. Oublié (ou déjà parti), il quitte la liste aussitôt et l'écran y
     revient. ⋮ : « En parler à Mika » (le chat, « À propos de … : » dans le champ), « Copier son adresse », « Oublier ce
-    contact ». La fiche se relit à chaque retour sur l'écran ; une relecture en panne garde ce qui était montré. Un geste
+    contact ». La fiche se relit à chaque retour sur l'écran et quand le direct dit que tes contacts ont changé ; une
+    relecture en panne garde ce qui était montré. Un geste
     à la fois, chacun sa clé d'envoi.
   - Autrement que la maquette : ni photos ni réactions (l'ADR 0300 n'est pas posée sur Android : les initiales
     restent) ; pas d'« Ouvrir la console » dans la feuille d'un refus (le serveur n'en donne pas l'adresse) ; la ligne
@@ -659,7 +775,8 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
     page `/admin/…`) et « Lui demander » (la question posée dans le champ du chat, à relire). Un compte (une boîte,
     un compte Teams à toi) ne recopie pas les outils de sa famille — une phrase et « Voir ses outils » y mènent —, il
     dit la règle d'envoi qui vaut pour lui (`rules` : qui, préparer d'elle-même, comment ça part, lue de haut en bas, et
-    d'où elle vient) et mène à sa page de Paramètres. Tirer relit ; la matrice se relit à chaque retour sur l'écran.
+    d'où elle vient) et mène à sa page de Paramètres. Tirer relit ; la matrice se relit à chaque retour sur l'écran, et
+    quand le direct dit que tes réglages ont changé (`settings`).
   - **Services** : ceux qui lui sont ouverts pour toi — le web, les tiens, ceux de l'opératrice, ceux qu'on te partage
     (`received`), même quand aucune case ne t'en ouvre encore —, à qui ils sont, leur but, leurs outils pour toi (et
     les tiens à regarder), leur état. Un des tiens ou qu'on te partage mène à sa page de Paramètres ; un service de
@@ -675,7 +792,9 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
     famille (ADR 0209) ; le nom de code d'un outil n'est que dans sa feuille (ADR 0208).
 - **Paramètres** (ADR 0235, l'API par personne : [`protocole-moi.md`](../../backendv2/docs/protocole-moi.md) § 5, 7, 8,
   9), une rubrique du tiroir : une page racine en groupes, une ligne par page, chaque ligne disant où en est ce qu'elle
-  règle (relu à chaque retour). Les formulaires ont une seule barre « Enregistrer », qui paraît dès qu'une valeur
+  règle (relu à chaque retour, et quand le direct dit que tes réglages, tes boîtes, tes comptes Teams ou tes téléphones
+  ont changé ; les listes — boîtes, comptes Teams, téléphones, partages, services — aussi ; un formulaire ne se relit
+  jamais sous ta saisie). Les formulaires ont une seule barre « Enregistrer », qui paraît dès qu'une valeur
   change (« Annuler » remet celles d'avant ; ce qui n'est pas enregistré se perd en quittant la page) ; un refus du
   serveur se dit sous son champ (`fields`), son message en toast ; une création (une boîte, un compte Teams, un
   service) porte une clé d'envoi : redite après une coupure, elle ne fait pas de doublon. Un enregistrement fige en
@@ -696,7 +815,8 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
     règle de son canal et pour le défaut, préparer d'elle-même et comment ça part, ADR 0207 ; qui écrit et l'ordre des
     lignes restent à la console), avec qui elle est partagée, Tester, Relever maintenant, Retirer. Un secret laissé vide
     reste gardé ; une connexion qui change le redemande, dit sous son champ avant l'envoi. Une boîte Microsoft montre
-    son code d'appareil et l'adresse où l'entrer, relue toutes les trois secondes jusqu'à la connexion. « Ajouter »
+    son code d'appareil et l'adresse où l'entrer, relue toutes les trois secondes jusqu'à la connexion (la seule
+    relecture à intervalles qui reste : le serveur l'écrit hors du journal, rien ne la pousse). « Ajouter »
     (bouton flottant) : Microsoft, Exchange pro (pour une opératrice seulement : DavMail vit sur la machine de Mika),
     Gmail ou une autre ; créée, une boîte Microsoft demande son code, une autre se teste, puis sa page s'ouvre.
     Quand le serveur a son application Microsoft (`microsoft_app`, ADR 0238), une boîte Microsoft ne demande que
@@ -735,6 +855,36 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
 Hors périmètre : la voix (ni messages vocaux, ni lecture à voix haute) et le monde 3D (la chambre, les déplacements :
 c'est le client Unity).
 
+## Le direct
+
+Ce qui change ce que montrent les écrans (un mail qui arrive, un message Teams, une étape de « elle s'y met », un
+projet, un voyage, tes réglages…) est poussé par le serveur sur la connexion du chat déjà ouverte, en une trame
+`changed` qui dit **quoi** a changé, jamais le contenu : l'écran relit la route qu'il montre (ADR 0308). Le contrat —
+les sujets, leurs clés, ce que chaque écran relit — est le § 2 bis de
+[`protocole-moi.md`](../../backendv2/docs/protocole-moi.md) ; il ne se recopie pas ici.
+
+- **Le service** `data/moi/Live.kt` (`AppGraph.live`) : `ConnectionManager` lui donne chaque trame `changed` (lue par
+  `FrameCodec`, tolérante : un sujet inconnu se tait, une clé inconnue ou une liste vide valent tout le domaine) et
+  chaque ouverture de la socket ; à chaque ouverture, la première comprise (au démarrage, l'écran a lu pendant la
+  poignée de main), tout écran abonné relit ce qu'il montre — et l'écran composé avant une ouverture mais abonné après
+  relit à son abonnement (`FollowLive`, `Live.opens`).
+- **Les écrans** le suivent tant qu'ils sont montrés (`ui/shell/FollowLive`, ou `OnResume(…, project)` dans Projets) ;
+  ce que chacun relit pour un signal est décidé par des règles pures (`data/moi/LiveRules.kt` : la page de Mail si elle
+  montre une boîte nommée, le mail ou le fil ouvert s'il est nommé, la fiche d'un projet par son numéro…). Une rafale
+  ne fait pas dix lectures : un signal à la fois, ce qui arrive pendant une lecture se réunit pour la suivante. Rien ne
+  se casse sous les doigts : la liste ne repasse pas en chargement, ce que tu tapes, une sélection (relue dès qu'elle se
+  vide) et le défilement restent ; un formulaire de Paramètres ne se relit pas sous ta saisie. Ce qui n'est plus à toi
+  (une boîte, un dossier, un compte Teams, un projet retiré ou plus partagé) ramène à la liste — toutes les réceptions
+  dans Mail — au lieu de dire « introuvable ».
+- **Au second plan**, un écran ne suit rien ; à son retour — l'app revenue au premier plan, ou l'écran du dessus
+  refermé —, il se relit une fois. Les pastilles du tiroir suivent `me`.
+- **Plus de relecture à intervalles** : ni la minute des listes et des pastilles, ni les vingt secondes d'un fil, ni
+  les deux secondes de « elle s'y met ». Restent des affichages d'ici (le chrono, « il y a 3 min » — tout écran qui
+  montre un âge prend son heure de `rememberNow`, Paramètres compris), le battement de la socket, les pauses de frappe,
+  et les attentes que le serveur ne pousse pas (la connexion Microsoft d'une boîte, l'hôte du code après un geste, les
+  notes préchargées d'« Autour de moi ») : `TimedLoopsTest` les liste, chacune avec sa raison et son nombre, et refuse
+  toute autre boucle qui attend, comme une fonction qui attend puis se rappelle.
+
 ## Construire
 
 Outils attendus sur cette machine : le JDK 25 (`/usr/lib/jvm/java-25-openjdk`) et le SDK Android dans
@@ -756,7 +906,8 @@ L'APK de débogage est dans `app/build/outputs/apk/debug/app-debug.apk` ; il s'i
 version minifiée, signée avec la clé de débogage (rien n'est publié sur un magasin).
 
 > La machine est partagée : une construction complète prend ~2 Gio de mémoire. Lance-la seule, sans démon
-> (`--no-daemon`), et de préférence à travers `~/recup-audit-v2-2026-10-01/outils/borne.sh`.
+> (`--no-daemon`), et de préférence à travers la borne du dépôt, [`scripts/borne.sh`](../../scripts/borne.sh) (depuis
+> `frontend/Android/` : `BORNE_MEM=5G BORNE_TEMPS=40m ../../scripts/borne.sh ./gradlew --no-daemon testDebugUnitTest`).
 
 ## Mika en fond (3D native)
 
@@ -807,7 +958,8 @@ adb shell am start -n fr.qwartz.mika.debug/fr.qwartz.mika.studio.Avatar3DStudioA
 Toutes les cartes de l'app (Carte, Téléphone › Position, les miniatures) dessinent le fond que sert ce
 serveur, et lui seul (ADR 0193, 0229) : `GET /api/moi/carte/fond` dit s'il est prêt, sa sorte (vectorielle au schéma
 Protomaps, ou en images), ses zooms, sa zone, sa mention, et les chemins de ses tuiles, polices et icônes. Il se lit à la
-première carte montrée et se relit au plus toutes les cinq minutes tant qu'une carte est à l'écran (`ui/map/MapBase`).
+première carte montrée et se relit à chaque retour d'une carte à l'écran, au plus toutes les cinq minutes, sans minuterie
+(`ui/map/MapBase`) : rien ne le pousse, il ne change qu'avec les cartes refaites (ADR 0295).
 
 - **La dépendance** : MapLibre Native pour Android, `org.maplibre.gl:android-sdk-opengl` 13.7.1 (le 2026-10-15),
   la seule ajoutée pour la carte. C'est la version OpenGL ES : depuis la 13, `android-sdk` est la version Vulkan, et
@@ -1031,7 +1183,28 @@ python3 tools/icones.py --check      # les icônes, tirées de la maquette, sont
 ./gradlew connectedDebugAndroidTest  # les exécute sur un émulateur ou un téléphone branché
 ```
 
-Les tests JVM n'ont besoin d'aucun émulateur : le moteur (protocole, fusion du fil, socket, décisions de
+Les tests JVM n'ont besoin d'aucun émulateur. L'Agenda (ADR 0309) : ses règles (`AgendaRulesTest` : les jours sans
+heure d'été, les bornes des cinq vues et le pas de chacune, le titre de la barre, le mini-mois, un instant à l'heure du
+serveur et son décalage, une occurrence placée — un rendez-vous, une journée, plusieurs jours, un privé d'une autre —, sa
+sorte, les chevauchements en colonnes et les journées en bandes, où en est un rendez-vous, le Planning et sa ligne de
+l'heure, les cases du mois, la couleur d'un agenda, ce qui s'affiche, la répétition et ses mots, les rappels, ce que le
+formulaire envoie — tout pour une création, ce qui change pour une modification —, ses valeurs de départ, « Agenda de
+Léa », ce que Mika fait d'un agenda et ses pastilles, les participants, le pied d'une fiche, « À décider », les notes du
+canal « Agenda » et ce qu'elles ouvrent, la carte d'un ajout dans le chat, l'état d'un compte, le direct), `AgendaApi`
+contre un faux serveur (`AgendaApiTest` : les exemples du protocole lus tels quels, ce que chaque lecture demande, le
+corps de chaque écriture sous le jeton, sans CSRF, avec sa clé d'envoi, le tableau d'un agenda sans ses mots, le partage
+`kind: agenda`, un refus en mots) et ses écrans contre une fausse API (`FakeAgendaApi` ; `AgendaModelTest` : la période
+lue sur les agendas montrés, la vue retenue, un pas, décocher sans relire, ajouter ce que Mika propose tel qu'il a été
+lu et une seule fois, le direct, une création qui va à sa fiche, une modification qui n'envoie que ce qui change et la
+portée d'une série d'abord, un double appui, la fin avant le début, répondre et supprimer depuis la fiche). Le direct (ADR 0308) : la trame `changed` (`ChangedFrameTest` : l'exemple
+du contrat, chaque sujet et sa clé, un sujet inconnu, une clé inconnue ou une liste vide, deux entrées réunies, les
+numéros de projet en texte), le service (`LiveTest` : chaque écran ses sujets, chaque ouverture — la première
+comprise — qui fait tout relire, l'écran abonné après une ouverture qui relit, une rafale réunie en une lecture après,
+un écran parti qui ne reçoit plus rien, une lecture à la fois), ce que chaque écran relit et ce qui n'est plus à toi
+(`LiveRulesTest`), et la garde des boucles qui attendent (`TimedLoopsTest` : examinées sans commentaires ni chaînes,
+chacune listée avec sa raison et son nombre, une fonction qui attend puis se rappelle comprise ; ni `ticker`, ni
+`Timer` ; et un écran qui montre un âge prend son heure de `rememberNow`).
+Le moteur (protocole, fusion du fil, socket, décisions de
 notification, réduction des images, partage, navigation, cartes de « Ce qu'elle fait », choix du portrait, cartes
 d'accord, ce qui part de sa position et sa petite bulle, le chat — ses notes de carte (`MapNotesTest` : les trois
 sortes, une note vidée, sous sa dernière bulle), la ligne au-dessus du champ (`ChatTrayTest` : ce qui se décide ici ou
@@ -1046,8 +1219,13 @@ gardé pour la même écriture (`UnsentMailTest`), les « où aller après » d'
 finit de charger, « Préremplir » tardif, sa réponse repartie de son brouillon, l'envoi quitté, son refus en toast ;
 `MailReaderModelTest` : un geste tardif sur la liseuse ou la page d'un brouillon ; `MailWorkModelTest` : où elle en
 est dans la liseuse et dans « Écrire » (ADR 0306) — la ligne aussitôt après « Préremplir », `/mail/work` relu sans relire
-le mail, son brouillon arrivé (repris si rien n'est écrit), fini sans en rendre, d'elle-même, le plafond, une relecture
-manquée ou tardive ; `MailCorrectModelTest` : « Corriger » dans « Écrire » (ADR 0307) — le texte corrigé posé puis
+le mail quand le direct nomme ce mail (un autre nommé ne relit rien), son brouillon arrivé (repris si rien n'est écrit),
+fini sans en rendre, d'elle-même, plus de plafond, une relecture manquée ou tardive ; `MailLiveModelTest` : Mail face au
+direct (ADR 0308) — la liste relit ses boîtes, sa page seulement si elle montre une boîte nommée (ou toutes tes
+réceptions), sans repasser en chargement, jamais sous une sélection (relue dès qu'elle se vide), et revient à toutes
+les réceptions quand la boîte ou le dossier affiché n'est plus à toi ; la liseuse relit le mail ouvert si sa boîte est
+nommée, les deux à une reconnexion, revient à la liste quand sa boîte n'est plus à toi, son brouillon arrivé par le
+direct se dit ; `MailCorrectModelTest` : « Corriger » dans « Écrire » (ADR 0307) — le texte corrigé posé puis
 « Annuler », en réponse et dans un mail nouveau, tu as continué d'écrire, une autre écriture ouverte ou l'écran quitté
 pendant l'appel, aucun modèle ; `MailReaderFrameTest` : la mise en page d'un mail HTML, ses images, un cadre tardif ou refusé ; `MailFramePageTest` : sa politique posée en tête, les liens qui s'ouvrent dehors ; `MailListModelTest` : la page
 suivante après un rangement, une ligne glissée à la corbeille, son refus, « Annuler » ; `VisitOrdersTest` : un ordre ne suit que l'écran de sa visite ; `RecipientSuggestionsModelTest` : tous tes contacts proposés, une adresse générique marquée et après les personnes, une puce qui ne se propose plus, rien trouvé, « Écrire » depuis une fiche, Retour arrière), Contacts — ses règles (`ContactsRulesTest` : la ligne d'un contact, la tête d'une fiche, ce qui l'identifie et l'adresse générique, d'où vient un fait, où vous vous croisez, les destinataires proposés et ce qu'on en dit à droite, les correspondants sans annuaire), `ContactsApi` contre un faux serveur (`ContactsApiTest` : l'exemple du protocole lu tel quel, une fiche entière, ce que la liste demande, les oublis sous le jeton avec leur clé, un refus en mots), d'où viennent les destinataires (`RecipientSuggesterTest` : l'annuaire d'abord, les correspondants quand il n'est pas là, rien sur une autre panne) et ses écrans contre une fausse API (`FakeContactsApi` ; `ContactsModelTest` : la recherche après la pause de frappe, la sorte, la suite gardée par une relecture discrète, une suite en panne, une fiche relue qui garde ce qui était montré, l'oublier et la liste qui le perd, un double appui, un oubli refusé, un fait oublié) —, les pages de Paramètres
@@ -1061,14 +1239,20 @@ notifications, tri des notifications de WhatsApp, de Messenger et de Messages, l
 réponses proposées, Mail — ses règles, ses dates, `MailApi` contre un faux serveur —, Teams — ses règles (la citation
 comprise : ce qui se cite, son extrait et son heure, où elle mène), `TeamsApi` contre un faux serveur (un message et sa
 citation, `work` présent, `null` ou absent, et `/teams/work`), où elle en est (`WorkTest` : l'étape en mots, le chrono,
-ce que décide une relecture), « Corriger » (`CorrectTest`, ADR 0307 : le message selon `changes`, la réponse posée ou
-non selon le champ changé pendant l'appel, « Annuler », `correct` lu dans `GET /api/moi` — présent, absent, `null` —,
-`POST /api/moi/correct` depuis Mail et Teams : son chemin, son corps, sans clé d'envoi, ses refus tels quels), un fil
+ce que décide une relecture), « Corriger » (`CorrectTest`, ADR 0307 : le message selon `changes` et `refused`, avec
+les vrais mots de `strings.xml` — `AppStrings` les lit pour la JVM, pluriels compris —, la réponse posée ou non selon le
+champ changé pendant l'appel, « Annuler », `correct` lu dans `GET /api/moi` — présent, absent, `null` —,
+`POST /api/moi/correct` depuis Mail et Teams : son chemin, son corps, sans clé d'envoi, `refused` absent d'un serveur
+d'avant, ses refus tels quels — 409, 413, 422, 429, 502 —, et son client qui attend plus de 70 s quand les autres
+appels gardent leurs délais), un fil
 contre une fausse API (`FakeTeamsApi` ; `TeamsCorrectModelTest` : « Corriger » dans le champ — le texte corrigé puis
-« Annuler », qui ne défait pas ce que tu as écrit depuis, aucune faute, un champ vide, aucun modèle, tu as continué
-d'écrire, une autre discussion ouverte pendant l'appel, un appel à la fois, un refus ; `TeamsWorkModelTest` : la ligne aussitôt
-après « Préremplir », `/teams/work` relu sans relire le fil, le fil relu à l'arrivée ou à la fin, d'elle-même, le
-plafond, une relecture manquée, une autre discussion ; `TeamsThreadModelTest` : la carte de citation, discussion
+« Annuler », qui ne défait pas ce que tu as écrit depuis, aucune faute, des changements écartés, tout écarté (sans
+« Annuler »), un champ vide, aucun modèle, tu as continué d'écrire, une autre discussion ouverte pendant l'appel, un appel à la fois, un refus ; `TeamsWorkModelTest` : la ligne aussitôt
+après « Préremplir », `/teams/work` relu sans relire le fil quand le direct nomme ce fil, le fil relu à l'arrivée ou à
+la fin, d'elle-même, plus de plafond, une relecture manquée, une autre discussion ; `TeamsLiveModelTest` : le fil relu
+quand le direct le nomme (sous sa clé ou celle du serveur), jamais pour une autre discussion, sans repasser en
+chargement, ce que tu tapes gardé, une reconnexion qui relit tout, son compte qui n'est plus à toi qui ramène à la
+liste ; `TeamsThreadModelTest` : la carte de citation, discussion
 par discussion, son ×, l'envoi avec `reply_to` puis la carte qui s'en va, une autre choisie pendant l'envoi, un refus
 qui la garde, la clé d'envoi qui suit la citation, ce qui ne se cite pas, l'appui sur une citation qui mène au message
 chargé ou nulle part) —, Téléphone — ses règles, ce qui se décide d'ici, `PhoneMoiApi` contre un faux
@@ -1147,7 +1331,7 @@ en mémoire (`ChatStoreTest`) et les écrans Compose (`ChatScreenTest`, `LoginSc
 | Paquet | Contenu |
 |---|---|
 | `core` | `AppGraph` (le graphe de l'app, à la main), horloges, premier plan et conversation à l'écran (`AppForeground`), réseau, localisation |
-| `data/net` | protocole, trames, `MikaSocket` (reconnexion, battement, file d'envoi), adresse du serveur |
+| `data/net` | protocole, trames (dont `changed` et ses sujets, `Topics`, ADR 0308), `MikaSocket` (reconnexion, battement, file d'envoi), adresse du serveur |
 | `data/db` | Room : messages, file d'envoi, petites valeurs |
 | `data/chat` | `ChatSync` (fusion du fil, portage du client web), `ChatEngine`, `ChatRepository` |
 | `data/mind` | l'état de Mika, ses libellés, la ligne d'état |
@@ -1157,15 +1341,15 @@ en mémoire (`ChatStoreTest`) et les écrans Compose (`ChatScreenTest`, `LoginSc
 | `data/auth` | jeton chiffré (Keystore), connexion, erreurs en français |
 | `data/files` | pièces jointes (préparation, réduction), brouillon, partages reçus, fichiers de Mika |
 | `data/location` | « Lui dire où je suis » : ce qui part (`WhereShare`, selon le réglage et le premier plan), le nom du lieu (`PlaceLabel`) ; la localisation elle-même est dans `core/LocationMonitor` |
-| `service` | connexion voulue, notifications, réponse depuis une notification (et son service de 60 s) ; le lecteur des notifications du téléphone (`PhoneListenerService`) et les réponses proposées (`PhoneDraftNotifier`, ses gestes depuis la notification ou l'écran Téléphone) |
+| `service` | connexion voulue, notifications (et le canal « Agenda », `AgendaNotifier`), réponse depuis une notification (et son service de 60 s) ; le lecteur des notifications du téléphone (`PhoneListenerService`) et les réponses proposées (`PhoneDraftNotifier`, ses gestes depuis la notification ou l'écran Téléphone) |
 | `data/phone` | « Lui montrer mes messages » (ADR 0120) : les applis lues, le tri des notifications (`PhoneReading`), les clés opaques, la file et son envoi (`PhoneOutbox`), les réponses proposées (`PhoneDrafts`), les actions « Répondre » gardées en mémoire, le sort d'un geste fait depuis l'écran (`PhoneHere`) |
 | `data/push` | les notifications par Firebase : ouvrir un message scellé (`PushPayload`), dire au serveur où notifier (`PushRegistrar`) |
 | `push` | Firebase lui-même : le jeton (`FirebasePush`) et la réception (`MikaMessagingService`) |
 | `share` | « Partager vers Mika », raccourci de conversation |
-| `data/moi` | l'API par personne (`/api/moi`, ADR 0235) : `MoiApi` (lire, écrire en JSON ou en `multipart`, clé d'envoi, refus en mots), `MeRepository` (qui est connecté, les pastilles du tiroir), les règles que les domaines partagent (`MoiRules` : niveaux, `SendKey`, « [À COMPLÉTER », refus en mots ; `MoiText` : instants, initiales ; `Correct` : « Corriger », ADR 0307 — la route, ce que décide sa réponse, « Annuler », ses mots) ; un sous-paquet par domaine, `mail/` pour Mail (ses formes, `MailApi`, ses règles pures), `teams/` pour Teams (ses formes — un message et ce qu'il cite —, `TeamsApi`, ouverte pour qu'une fausse API la remplace, `TeamsRules`), `phone/` pour Téléphone (ses formes, `PhoneMoiApi`, `PhoneRules` : sorts de ses propositions et ce qui se décide d'ici, le fil, l'état de tes téléphones et « ce téléphone », la position et son plan), `contacts/` pour Contacts (ADR 0298 ; `ContactsModels` : les formes de § 12 ; `ContactsApi` : la liste, la fiche, les oublis, ouverte pour qu'une fausse API la remplace ; `ContactsRules` : la ligne d'un contact, la tête d'une fiche, ce qui l'identifie, d'où vient un fait, où vous vous croisez, `proposals` — les destinataires proposés quand on écrit, une adresse générique marquée — ; `RecipientSuggester` : l'annuaire d'abord, les correspondants du courrier quand il n'est pas là), `settings/` pour Paramètres (ses formes, `SettingsApi` — § 5, 7, 8, 9 —, `SettingsRules` : niveaux et partages, état d'une boîte ou d'un service, ce qu'un formulaire envoie, secrets à redonner, refus par champ, règle d'envoi et sa version, outils d'un service, lignes de la page racine), `tools/` pour Outils (les formes de la matrice, `ToolsApi` — § 6 et, par `SettingsApi`, § 8 —, `ToolsRules` : les mots d'une case et de ce qu'elle garde, le canal lu, le nom d'un outil, ressources, groupes et résumés, ce qu'une opératrice voit de plus, les lignes de « Services »), `carte/` pour la Carte (ses formes et le fond servi, `CarteApi` — § 10 —, `MapGeo` et `Polyline` : zone, cercle, zoom, distance, le tracé ; `Scene` : ce qu'une carte montre et son cadrage ; `MapWords` : distances, durées, dates d'un voyage ; `CarteStyle` : le style tiré du web et ce que l'app y pose ; `MapHttp` : le client de MapLibre, ce serveur seul ; `CarteRules` : les adresses et leurs bornes, la légende, ce qu'Explorer montre, la vraie carte ou le plan, les tuiles en échec ; `FicheModels` : les formes des fiches, des événements et des photos (ADR 0259) ; `FicheRules` : les liens du dehors (http ou https), les notes et les avis, les dates de lecture, la couverture, les photos et leur crédit, ce que chaque bloc d'une fiche montre, les filtres et la ligne d'un lieu ; `EventRules` : quand, les jours, la ligne d'un événement, le jour d'un voyage, la fiche d'un événement ; `TripModels` et `TripsApi` : les formes et les appels des itinéraires, des regards et des voyages ; `TripRules` : l'ordre des arrêts et où un geste les met, ce dont le trajet d'un voyage dépend, « Sur la route », ce que la fenêtre d'un voyage envoie ; `RouteRules` : les points d'un itinéraire, tes choix face à ceux de Mika, son GPX ; `TripRequests` : le trajet d'un voyage relu après le dernier geste, les gestes l'un après l'autre, ce qu'un refus fait de la clé ; `MapMinis` : la miniature d'un voyage ou d'un regard et ce qu'elle ouvre, les places des cartes vivantes ; `GpxDownloads` : le GPX d'un itinéraire, dans Téléchargements/Mika), `projects/` pour Projets (ADR 0296 ; `ProjectsModels` : les formes de § 11 — la liste et « À faire », la fiche, un élément et son parcours, le diagramme, un champ servi ; `ProjectsApi` : ses lectures et `gesture`, l'écriture de tout geste, ouverte pour qu'une fausse API la remplace ; `ProjectsRules` : la route et le corps que chaque bouton envoie, les boutons d'une attente, les couleurs d'état, ce que l'écran range, les mots d'un instant, le diagramme ; `CodeModels` : les formes du code d'un projet — commits, diff, fichiers, branches, pull requests, issues, vérifications, tout texte de l'hôte marqué ; `CodeRules` : les volets de l'onglet Code et ses pages, la coloration d'une ligne en jetons, la mise en lignes d'un diff unifié, l'arborescence un dossier à la fois, où en est une fusion en mots, `MergeOrder` — l'ordre de fusion, né d'une pull request relue —, modifier une pull request et y répondre ; `DocsModels` : les formes de sa documentation et de ses décisions ; `DocsRules` : l'arborescence, le chemin d'une page, `docBlocks` — ce qu'une page montre, ses images de l'espace seulement —, `Draft` — le brouillon, la version lue, son conflit —, `MdEdit` — les transformations de la barre d'outils de l'éditeur ; `ActivityModels` : ses trente jours, ses exécutions, son carnet, ses réglages, les projets archivés ; `SheetRules` : où mène une ligne du fil, les gestes d'un lien, d'un élément et d'un réglage, `timeLayout` — le diagramme dans le temps) |
+| `data/moi` | l'API par personne (`/api/moi`, ADR 0235) : `MoiApi` (lire, écrire en JSON ou en `multipart`, clé d'envoi, refus en mots), `MeRepository` (qui est connecté, les pastilles du tiroir, une lecture à la fois), `Live` (le direct, ADR 0308 : les trames `changed` rendues aux écrans abonnés, sujet par sujet, la relecture de tout à chaque ouverture de la connexion, `OneAtATime`) et `LiveRules` (ce qu'un signal fait relire à chaque écran), les règles que les domaines partagent (`MoiRules` : niveaux, `SendKey`, « [À COMPLÉTER », refus en mots ; `MoiText` : instants, initiales ; `Correct` : « Corriger », ADR 0307 — la route, ce que décide sa réponse, « Annuler », ses mots) ; un sous-paquet par domaine, `mail/` pour Mail (ses formes, `MailApi`, ses règles pures), `teams/` pour Teams (ses formes — un message et ce qu'il cite —, `TeamsApi`, ouverte pour qu'une fausse API la remplace, `TeamsRules`), `phone/` pour Téléphone (ses formes, `PhoneMoiApi`, `PhoneRules` : sorts de ses propositions et ce qui se décide d'ici, le fil, l'état de tes téléphones et « ce téléphone », la position et son plan), `contacts/` pour Contacts (ADR 0298 ; `ContactsModels` : les formes de § 12 ; `ContactsApi` : la liste, la fiche, les oublis, ouverte pour qu'une fausse API la remplace ; `ContactsRules` : la ligne d'un contact, la tête d'une fiche, ce qui l'identifie, d'où vient un fait, où vous vous croisez, `proposals` — les destinataires proposés quand on écrit, une adresse générique marquée — ; `RecipientSuggester` : l'annuaire d'abord, les correspondants du courrier quand il n'est pas là), `agenda/` pour l'Agenda (ADR 0309 ; `AgendaModels` : les formes de § 13 ; `AgendaApi` : lire, écrire, décider, ses comptes, le tableau d'un agenda, le partager, ouverte pour qu'une fausse API la remplace ; `AgendaDates` : les jours, les instants à l'heure du serveur, les cinq vues ; `AgendaRules` : les occurrences, leur sorte, leur couleur, leur place, le Planning, le mois, les mots, ce que Mika fait d'un agenda, « À décider », le direct, le canal « Agenda », la carte d'un ajout dans le chat, l'état d'un compte ; `AgendaForm` : la répétition, les valeurs de départ, ce que le formulaire envoie ; `AgendaPrefs` : la vue retenue, les agendas décochés, ce qui a été notifié), `settings/` pour Paramètres (ses formes, `SettingsApi` — § 5, 7, 8, 9 —, `SettingsRules` : niveaux et partages, état d'une boîte ou d'un service, ce qu'un formulaire envoie, secrets à redonner, refus par champ, règle d'envoi et sa version, outils d'un service, lignes de la page racine), `tools/` pour Outils (les formes de la matrice, `ToolsApi` — § 6 et, par `SettingsApi`, § 8 —, `ToolsRules` : les mots d'une case et de ce qu'elle garde, le canal lu, le nom d'un outil, ressources, groupes et résumés, ce qu'une opératrice voit de plus, les lignes de « Services »), `carte/` pour la Carte (ses formes et le fond servi, `CarteApi` — § 10 —, `MapGeo` et `Polyline` : zone, cercle, zoom, distance, le tracé ; `Scene` : ce qu'une carte montre et son cadrage ; `MapWords` : distances, durées, dates d'un voyage ; `CarteStyle` : le style tiré du web et ce que l'app y pose ; `MapHttp` : le client de MapLibre, ce serveur seul ; `CarteRules` : les adresses et leurs bornes, la légende, ce qu'Explorer montre, la vraie carte ou le plan, les tuiles en échec ; `FicheModels` : les formes des fiches, des événements et des photos (ADR 0259) ; `FicheRules` : les liens du dehors (http ou https), les notes et les avis, les dates de lecture, la couverture, les photos et leur crédit, ce que chaque bloc d'une fiche montre, les filtres et la ligne d'un lieu ; `EventRules` : quand, les jours, la ligne d'un événement, le jour d'un voyage, la fiche d'un événement ; `TripModels` et `TripsApi` : les formes et les appels des itinéraires, des regards et des voyages ; `TripRules` : l'ordre des arrêts et où un geste les met, ce dont le trajet d'un voyage dépend, « Sur la route », ce que la fenêtre d'un voyage envoie ; `RouteRules` : les points d'un itinéraire, tes choix face à ceux de Mika, son GPX ; `TripRequests` : le trajet d'un voyage relu après le dernier geste, les gestes l'un après l'autre, ce qu'un refus fait de la clé ; `MapMinis` : la miniature d'un voyage ou d'un regard et ce qu'elle ouvre, les places des cartes vivantes ; `GpxDownloads` : le GPX d'un itinéraire, dans Téléchargements/Mika), `projects/` pour Projets (ADR 0296 ; `ProjectsModels` : les formes de § 11 — la liste et « À faire », la fiche, un élément et son parcours, le diagramme, un champ servi ; `ProjectsApi` : ses lectures et `gesture`, l'écriture de tout geste, ouverte pour qu'une fausse API la remplace ; `ProjectsRules` : la route et le corps que chaque bouton envoie, les boutons d'une attente, les couleurs d'état, ce que l'écran range, les mots d'un instant, le diagramme ; `CodeModels` : les formes du code d'un projet — commits, diff, fichiers, branches, pull requests, issues, vérifications, tout texte de l'hôte marqué ; `CodeRules` : les volets de l'onglet Code et ses pages, la coloration d'une ligne en jetons, la mise en lignes d'un diff unifié, l'arborescence un dossier à la fois, où en est une fusion en mots, `MergeOrder` — l'ordre de fusion, né d'une pull request relue —, modifier une pull request et y répondre ; `DocsModels` : les formes de sa documentation et de ses décisions ; `DocsRules` : l'arborescence, le chemin d'une page, `docBlocks` — ce qu'une page montre, ses images de l'espace seulement —, `Draft` — le brouillon, la version lue, son conflit —, `MdEdit` — les transformations de la barre d'outils de l'éditeur ; `ActivityModels` : ses trente jours, ses exécutions, son carnet, ses réglages, les projets archivés ; `SheetRules` : où mène une ligne du fil, les gestes d'un lien, d'un élément et d'un réglage, `timeLayout` — le diagramme dans le temps) |
 | `ui` | écrans Compose : connexion, conversation, « Ce qu'elle fait », visionneuse |
 | `ui/chat` | la conversation : `ChatScreen` et `ChatViewModel` (le fil, la saisie, la ligne au-dessus du champ et « Tout accepter », le message à montrer), `ChatParts` (la barre, le fil, ses bulles, ses miniatures, le surlignage), `ChatItems` (ce que le fil dessine), `MapNotes` (ses notes de carte, validées), `ApprovalCards` (la ligne repliée, les cartes d'accord, les liens vers ses brouillons) et `ChatTray` (ses règles pures), `StrandParts` (les fils de travail), `SearchScreen` et `SearchRules` (« Rechercher » : les puces, les groupes, le classement, Mail et Teams au serveur), `FilesScreen` et `ExchangedFiles` (« Fichiers échangés ») |
-| `ui/shell` | le cadre des rubriques : `Shell` et `LocalShell` (aller, revenir, le tiroir, les toasts), la barre du haut, le tiroir, la pastille du chat (`ChatCue`), `Load` et `LoadBox`, les icônes de la maquette (`MIcon`) ; `Parts.kt`, les petites formes que Mail et Teams partagent (rond d'initiales, marque, ligne rose, note, ⋮, recherche, ligne de feuille, fenêtre à un champ) ; `Correct.kt`, « Corriger » (ADR 0307) : `FieldCorrector` (un appel par champ, poser ou non, « Annuler »), ses messages, ses boutons |
+| `ui/shell` | le cadre des rubriques : `Shell` et `LocalShell` (aller, revenir, le tiroir, les toasts), la barre du haut, le tiroir, la pastille du chat (`ChatCue`), `Load` et `LoadBox`, `FollowLive` (un écran face au direct : abonné tant qu'il est montré, relu à son retour), les icônes de la maquette (`MIcon`) ; `Parts.kt`, les petites formes que Mail et Teams partagent (rond d'initiales, marque, ligne rose, note, ⋮, recherche, ligne de feuille, fenêtre à un champ) ; `Correct.kt`, « Corriger » (ADR 0307) : `FieldCorrector` (un appel par champ, poser ou non, « Annuler »), ses messages, ses boutons |
 | `ui/mail` | Mail : la liste et la feuille des boîtes, la liseuse, ses brouillons, écrire (et `UnsentMail` : le mail commencé, gardé pour la session ; `RecipientSuggestions` : les destinataires proposés sous un champ) ; un ViewModel par sorte d'écran, pour la session, qui prend ce qu'il lui faut par `MailDeps` (l'API, les mails commencés, `MailNotices` : le sort d'un envoi dit en toast par le cadre) ; `VisitOrders` : ses ordres à l'écran de la visite qui les a donnés |
 | `ui/teams` | Teams : les discussions et la feuille des comptes, un fil (ses cartes, le champ, la citation et la feuille d'un message), ses brouillons ; un ViewModel par écran, qui prend `TeamsDeps` (l'API, les pastilles, l'heure) : celui du fil se teste sur la JVM (`FakeTeamsApi`) |
 | `ui/contacts` | Contacts (ADR 0298) : `ContactsScreen` (la liste, sa recherche, ses sortes, « Lui présenter quelqu'un » ; `ContactsListViewModel`), `ContactSheetScreen` (la fiche, ses feuilles d'oubli, son ⋮ ; `ContactSheetViewModel`, un par contact), `ContactsUi` (l'API, `ContactsDeps`, `ContactAvatar` — le carré d'une organisation —, les icônes, `ContactsChanges` : un contact oublié quitte la liste) ; ses modèles se testent sur la JVM |
@@ -1173,6 +1357,7 @@ en mémoire (`ChatStoreTest`) et les écrans Compose (`ChatScreenTest`, `LoginSc
 | `ui/map` | ce qui sert à toute carte : MapLibre réglé une fois (`MapKit`), les calques du style lus dans les assets, le fond de la session (`MapFondViewModel`), ce qui ne s'est pas dessiné, carte par carte (`LiveRefusal`), la poignée d'un écran sur sa carte (`MapControl`) ; `SceneMap` (la vraie carte ou le plan), `LiveMap` (le `MapView`, son cycle de vie, ce qu'elle pose par-dessus le fond, ses cadrages, ses échecs), `ScenePlan` (le plan dessiné d'une scène), `PinImages` (les épingles en images), `MiniMaps` (ce que montrent les miniatures, lu une fois pour la session — `MiniStore` —, leurs quatre places et leurs refus — `MiniSlots` —, une miniature — `MiniMap`) |
 | `ui/carte` | Carte : `CarteScreen` (la barre et ses quatre onglets, « Nouveau voyage » flottant, `CarteLinks` : ce qu'un onglet demande à un autre, au chat, à un voyage ; ce que la route ouvre : un regard, « Itinéraire jusqu'ici »), `CarteStore` (ce que la Carte partage pour la session : ce qui est branché, ta position, les adresses trouvées, ses regards, tes voyages, chaque voyage lu — `TripReads`, où une relecture forcée suit celle en cours —, les miniatures), `ExplorerViewModel` et `ExplorerTab` (la recherche, ses filtres et son ordre, les adresses, le lieu choisi, un regard de Mika en rose), `PlaceFicheScreen` (la fiche d'un lieu et son modèle, « Actualiser », `TripAdder` : « Au voyage » d'une fiche), `EventsViewModel` et `EventsTab` (Événements : quand, quoi, par jour, ses épingles, ce que Mika a trouvé), `EventFicheScreen` (la fiche d'un événement), `CartePhotos` (le chargeur des photos — ce serveur seul —, la bande, la visionneuse), `FicheParts` (les étoiles, les étiquettes, les faits, la ligne d'une source, `Outside` : un lien dans le navigateur, un numéro dans le composeur), `ItineraryViewModel` et `ItineraryTab` (les points et leurs propositions, le calcul, le regard de Mika, tes choix, le GPX, « En faire un voyage »), `TripsTab` (la liste en cartes), `TripViewModel` (sur `TripDeps`) et `TripScreen` (un voyage : ses gestes l'un après l'autre et montrés d'abord, le voyage et son trajet relus après le dernier, la poignée, la note en place, « Sur la route »), `TripEditorRows` (les lignes de l'éditeur et où tombe un arrêt glissé, sans Compose), `TripDialogs` (« Nouveau voyage », « Le voyage », « Ajouter au voyage », « Ajouter un arrêt »), `CarteMinis` (une miniature et ce qu'elle ouvre ; `MapNoteCard`, pour le chat) |
 | `ui/projects` | Projets (ADR 0296) : `ProjectsScreen` (la rubrique : À faire, Projets, « Nouveau projet »), `TodoScreen` (une attente : ce qu'il faut lire, ses boutons, « Infos »), `ProjectScreen` (la fiche : son en-tête et piloter, ses onglets — `SheetTabContent` est le point d'entrée d'un onglet, `projectMenu` le menu « ⋮ » —, la Vue d'ensemble), `ObjectivesTab` (la liste serrée, le diagramme), `GoalScreen` (un objectif ou une mission), `TicketViews` (l'onglet Tickets, un ticket), `ProjectForms` (les formulaires en feuille : un objectif, un jalon, un ticket, un projet), `ProjectsParts` (ce que les vues partagent : `StatePill` et `toneOf`, `MilestoneBar`, `SegmentBar`, `OutsideMark` et `OutsideBlock`, `PaneTabs`, `ChipRow`, `GroupLabel`, `Fact`, `LinkedLine`, `PullCard`, `Bubble`, `TimelineRow`, `FormSheet`), `ProjectsViewModels` (`ProjectsDeps` ; `GestureRunner` : un geste à la fois, son refus dit à son endroit, sa clé d'envoi ; la rubrique, un projet — partagé par sa fiche, un objectif, un ticket —, un ticket ; testés sur la JVM) ; l'onglet Code : `CodeTab` (ses six volets et leurs listes ; `pullPage`), `CodeScreens` (`CodeScreen`, la page que `Route.ProjectCode` nomme : un fichier, un commit, une branche), `CodeHostScreens` (une pull request — ses volets, Modifier, répondre, Fusionner —, une issue, les vérifications d'un commit), `CodeParts` (`CodePage` : l'en-tête, les volets qui restent en haut, le contenu ; `sourceLines` et `diffZone` : le code et un diff unifié en chasse fixe, qui défilent en largeur dans leur cadre ; `repoMarkdown` ; `CommitRow`, `PullLinked`, `LinkedCode`, `RunsList`, `MergeStatus`, `MergeDialog`), `CodeViewModels` (`Kept` : une lecture gardée ; `CodeViewModel` : l'onglet, un par projet ; `MergeFlow` : relire, confirmer, demander — la même fusion depuis la page d'une pull request et depuis « À faire » ; une pull request, une issue, des vérifications, un commit ; testés sur la JVM) ; la suite de la fiche : `DocsTab` (Pages, Images, Décisions), `DocScreens` (une page et ses versions, une décision), `DocEditor` (l'éditeur natif : le champ, la barre d'outils au-dessus du clavier, Écrire | Aperçu, enregistrer et son conflit, le sélecteur de photos), `ActivityTab` (le fil, les exécutions et l'une en page, le carnet), `LinksTab` (le schéma, les demandes, un lien en page), `ListsTab` (une liste, un élément en page), `SettingsScreen` (« Modifier le projet »), `TimeDiagram` (le diagramme dans le temps), `SheetParts` (`SheetPageScreen`, la page que `Route.ProjectPage` nomme ; `DocPicture` et `DocBlockView` : une page rendue, ses images par l'API seulement), `SheetViewModels` (`DocEditViewModel` : le brouillon ; une page, l'onglet Documentation, l'activité, les listes, un élément, les réglages ; testés sur la JVM) |
+| `ui/agenda` | L'Agenda (ADR 0309) : `AgendaScreen` (la barre, ⋮ et ses vues, le mini-mois, « À décider », le bouton + ; `AgendaViewModel` : la vue retenue, la période, ce qui attend, décider), `AgendaViews` (Planning, la grille horaire de Jour, 3 jours et Semaine, Mois, le mini-mois ; balayer), `AgendaSheets` (« Agendas à afficher », un agenda, partager — `ShareViewModel`), `AgendaFicheScreens` et `AgendaItemViewModel` (la fiche d'un événement, de ce que Mika propose, d'une date de sa mémoire ; répondre, supprimer, « Mika te le rappelle »), `AgendaFormScreen` et `AgendaFormViewModel` (le formulaire en plein écran), `AgendaPages` (les invitations, chercher), `AgendaRightsScreen` (Outils › Droits : le tableau d'un agenda, le groupe « Tes agendas »), `AgendaSettingsPages` et `AgendaSettingsViewModel` (Paramètres › Agendas : ses comptes, un compte, un agenda, « Brancher un agenda »), `AgendaUi` (`AgendaDeps`, les couleurs des agendas, la carte d'une occurrence, « Demander à Mika ») ; ses modèles se testent sur la JVM (`FakeAgendaApi`) |
 | `ui/tools` | Outils : `ToolsScreen` (la barre et ses onglets, `ToolsViewModel` : la matrice, tes services, le canal lu et les cartes dépliées, un par session), `RightsTab` (Droits : le canal, les cartes, les pastilles, la règle d'un compte), `ToolSheets` (la feuille des canaux, « Ce qui décide »), `ServicesTab` (Services, Accords) |
 | `ui/settings` | Paramètres : la page racine et l'aiguillage des pages (`SettingsScreen` : `SettingsPages`), les pièces communes (`SettingsParts` : groupes, lignes, champ et son refus, choix, barre « Enregistrer », `SettingsModel`), Compte, Boîtes mail (la liste, une boîte, sa connexion Microsoft, une boîte nouvelle), la règle d'envoi (`RulesEditor`), Comptes Teams (la clé montrée une fois), Téléphones, Partages (et la fenêtre « Partager »), Services MCP (brancher, ses outils) ; « Ce téléphone » (`ThisPhonePages` : notifications, position, ses messages, apparence, données ; `WhereSwitch`, partagé avec Téléphone › Position) ; un ViewModel par sorte de page, rouvert pour chaque page qu'il sert : il prend `SettingsDeps` (l'API, ses textes, les pastilles), un geste fige ce qu'il envoie et ne pose rien sur une autre page (`stillOn`, `sayFor`, `refusedFor`) ; ceux d'une boîte, d'un compte Teams, d'un service et des partages se testent sur la JVM (`FakeSettingsApi`) |
 | `ui/avatar` | Mika en fond : chargement des portraits, l'aura, le souffle, les clignements, le sommeil, son visage dans la barre |

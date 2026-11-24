@@ -28,8 +28,10 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import contextlib
 import re
 import time
+from collections.abc import Callable
 from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
@@ -47,6 +49,7 @@ from mika.adapters.web.gate import (
 from mika.adapters.web.gate import token_digest as digest
 from mika.kernel.events import Origin
 from mika.plugins.teams import IMAGES, RECEIVED, SETTLED
+from mika.ports.changes import OUTBOX, Change
 from mika.ports.gate import (
     ACCEPTED,
     BUSY,
@@ -77,11 +80,16 @@ from mika.ports.teams import (
     Quote,
     Reaction,
 )
+from mika.runtime.boundary import call
 
 #: requêtes par minute, au plus (l'extension pousse quand Teams reçoit, relève toutes les 30 s)
 PER_MINUTE = 240
 #: une connexion en direct revérifie sa clé et l'état de Teams au plus tant de secondes après (ADR 0251)
 LIVE_RECHECK_S = 10.0
+#: la présence de l'extension (``last_seen``, ADR 0308) se dit aux écrans quand sa connexion en direct s'ouvre ou se
+#: ferme, et au plus une fois par ce délai (s) quand elle se manifeste : l'âge qu'ils en montrent ne vieillit pas sans
+#: raison (la pastille passe à l'orange après un quart d'heure de silence), et un retour après un silence se voit
+PRESENCE_EVERY_S = 5 * 60
 #: les images (ADR 0258) : les types admis et ce par quoi leurs octets commencent ; leur taille, au plus
 IMAGE_TYPES: dict[str, tuple[bytes, ...]] = {
     "image/png": (b"\x89PNG\r\n\x1a\n",), "image/jpeg": (b"\xff\xd8\xff",),
@@ -404,6 +412,15 @@ class TeamsDesk:
         #: la dernière fois que l'extension de chaque compte s'est manifestée (µs, en mémoire depuis le démarrage) : un
         #: relevé, la connexion en direct, un lot, un accusé — un dimanche sans message neuf, elle est là quand même
         self._contact: dict[str, int] = {}
+        #: la boîte d'envoi de chaque compte a changé (ADR 0308) : son numéro de version, et ce qui réveille les
+        #: connexions en direct qui l'attendent ; la boucle où elles vivent (posée à la première)
+        self._versions: dict[str, int] = {}
+        self._moved_events: dict[str, asyncio.Event] = {}
+        self._loop: asyncio.AbstractEventLoop | None = None
+        #: prévenu quand la présence de l'extension d'un compte se voit autrement (son compte) : les écrans relisent
+        #: ses comptes (ADR 0308 ; posé par le serveur) ; et la dernière présence ainsi dite, par compte (µs)
+        self.on_presence: Callable[[str], None] | None = None
+        self._told: dict[str, int] = {}
 
     # ── les clés ──
     def key_state(self, account: str) -> KeyState | None:
@@ -417,18 +434,43 @@ class TeamsDesk:
                              "(en haut à droite).")
         key = new_key(KEY_PREFIX)
         await self.settings.save_teams_key(account, digest(key), key[:len(KEY_PREFIX) + 4], self.clock(), by)
+        self._recheck(account)  # l'ancienne ne vaut plus
         return key
 
     async def revoke_key(self, account: str) -> bool:
-        return await self.settings.revoke_teams_key(account)
+        done = await self.settings.revoke_teams_key(account)
+        self._recheck(account)
+        return done
+
+    def _recheck(self, account: str) -> None:
+        """Sa clé a changé : ses connexions en direct la revérifient tout de suite (ADR 0308)."""
+        self._live_checked = {k: v for k, v in self._live_checked.items() if v[0] != account}
+        self._moved(account)
 
     def last_contact(self, account: str) -> int:
         """La dernière fois que l'extension de ce compte s'est manifestée depuis le démarrage (µs ; 0 : pas encore) —
         le dernier lot (``last_batch``) dit seulement quand elle a eu du neuf à pousser."""
         return self._contact.get(account, 0)
 
-    def _heard(self, account: str) -> None:
-        self._contact[account] = int(self.clock())
+    def _heard(self, account: str, *, tell: bool = False) -> None:
+        """L'extension de ce compte s'est manifestée : sa présence se dit aux écrans si ``tell`` (sa connexion en
+        direct s'ouvre), ou si on ne l'a pas dite depuis ``PRESENCE_EVERY_S`` (elle revient d'un silence)."""
+        now = int(self.clock())
+        self._contact[account] = now
+        if tell or now - self._told.get(account, 0) >= PRESENCE_EVERY_S * 1_000_000:
+            self._tell(account, now)
+
+    def _tell(self, account: str, now: int) -> None:
+        self._told[account] = now
+        if self.on_presence is not None:
+            call(self.on_presence, account, label="la présence de l'extension Teams")
+
+    def live_closed(self, key: str) -> None:
+        """Sa connexion en direct s'est fermée : les écrans de ce compte le relisent (son dernier signe de vie)."""
+        known = self._live_checked.get(key)
+        account = known[0] if known is not None else self._recognized(key)
+        if account:
+            self._tell(account, int(self.clock()))
 
     # ── la porte ──
     def _recognized(self, key: str) -> str:
@@ -507,16 +549,57 @@ class TeamsDesk:
             return refused
         return GateResult(ACCEPTED, "", data={"items": self._items(account)})
 
-    # ── en direct (ADR 0251) ──
+    # ── en direct (ADR 0251, 0308) ──
     async def live(self, key: str) -> GateResult:
         """Ouvrir la boîte d'envoi en direct (``/api/teams/live``) : admise comme un relevé — la clé, l'état, la
-        minute —, avec la boîte telle qu'elle est."""
-        return await self.outbox(key)
+        minute —, avec la boîte telle qu'elle est et son numéro de version (``live_wait``)."""
+        self._loop = asyncio.get_running_loop()
+        account, refused = self._admit(key)
+        if refused is not None:
+            return refused
+        self._heard(account, tell=True)  # elle est là, en direct : ses écrans le voient tout de suite
+        version = self._versions.get(account, 0)
+        return GateResult(ACCEPTED, "", data={"items": self._items(account), "version": version})
+
+    def store_changed(self, change: Change) -> None:
+        """Une écriture du cache de Teams (ADR 0308, ``TeamsStore.on_change``), depuis n'importe quel fil : la boîte
+        d'envoi d'un compte a changé (aucun compte nommé : tous), ses connexions en direct la relisent."""
+        loop = self._loop
+        if change.topic != OUTBOX or loop is None:
+            return
+        for account in change.accounts or ("",):
+            with contextlib.suppress(RuntimeError):  # la boucle s'est arrêtée : plus personne n'attend
+                loop.call_soon_threadsafe(self._moved, account)
+
+    def _moved(self, account: str) -> None:
+        """(Sur la boucle.) La boîte de ce compte a changé (vide : de tous) : sa version avance, ses attentes
+        s'éveillent."""
+        for name in (set(self._versions) | set(self._moved_events)) if not account else {account}:
+            self._versions[name] = self._versions.get(name, 0) + 1
+            event = self._moved_events.pop(name, None)
+            if event is not None:
+                event.set()
+
+    async def live_wait(self, key: str, seen: int, timeout: float) -> int:
+        """Attendre que la boîte d'envoi du compte de cette clé change, au plus ``timeout`` secondes (ADR 0308) : rend
+        son numéro de version — autre que ``seen`` si elle a changé depuis la lecture qui l'a donné (``live``,
+        ``live_items``). Rien ne se perd entre deux attentes : une version déjà passée rend aussitôt. Une clé qui ne
+        vaut plus attend son délai : la relecture qui suit la refuse."""
+        known = self._live_checked.get(key)
+        account = known[0] if known is not None else self._check(key)[0]
+        current = self._versions.get(account, 0)
+        if current != seen or timeout <= 0:
+            return current
+        event = self._moved_events.setdefault(account, asyncio.Event())
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(event.wait(), timeout)
+        return self._versions.get(account, 0)
 
     async def live_items(self, key: str) -> GateResult:
-        """La boîte d'une connexion ouverte, relue chaque seconde hors de la boucle, sans compter dans la minute ; la
-        clé et l'état revérifiés toutes les ``LIVE_RECHECK_S`` secondes (une clé retirée, un compte ou Teams coupés
-        ferment la connexion), pas à chaque relecture : ce sont deux lectures des réglages."""
+        """La boîte d'une connexion ouverte, relue hors de la boucle quand elle change (``live_wait``) et au plus
+        tard au bout du filet de la porte, sans compter dans la minute, avec son numéro de version ; la clé et l'état
+        revérifiés toutes les ``LIVE_RECHECK_S`` secondes (une clé retirée, un compte ou Teams coupés ferment la
+        connexion), pas à chaque relecture : ce sont deux lectures des réglages."""
         now = time.monotonic()
         known = self._live_checked.get(key)
         if known is None or now - known[1] >= LIVE_RECHECK_S:
@@ -529,7 +612,9 @@ class TeamsDesk:
             if len(self._live_checked) > 64:  # des clés d'avant (retirées, remplacées) : on oublie la plus vieille
                 self._live_checked.pop(min(self._live_checked, key=lambda k: self._live_checked[k][1]))
         self._heard(known[0])  # connectée en direct : elle est là
-        return GateResult(ACCEPTED, "", data={"items": await asyncio.to_thread(self._items, known[0])})
+        version = self._versions.get(known[0], 0)  # lue avant la boîte : un changement pendant la lecture se relira
+        return GateResult(ACCEPTED, "", data={"items": await asyncio.to_thread(self._items, known[0]),
+                                              "version": version})
 
     async def image(self, key: str, data: Any) -> GateResult:
         """Une image d'un message (ADR 0258) : admise comme un lot (la clé, l'état, la minute), validée avant que rien

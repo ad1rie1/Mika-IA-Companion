@@ -425,7 +425,7 @@ def _contributions(ui: UI) -> list[dict[str, Any]]:
                                 key=lambda x: x["text"].casefold()),
             "tools": [{"text": s.name, "hint": ""} for s in c.tools],
             "capabilities": [{"text": s.name, "hint": ""} for s in c.capabilities],
-            "views": [{"text": v.title, "hint": v.name} for v in c.views],
+            "views": [{"text": ui.named(v.title), "hint": v.name} for v in c.views],
             "subjects": [{"text": s.label, "hint": ""} for s in c.subjects],
             "actions": [{"text": a.title, "hint": ""} for a in c.actions],
         }

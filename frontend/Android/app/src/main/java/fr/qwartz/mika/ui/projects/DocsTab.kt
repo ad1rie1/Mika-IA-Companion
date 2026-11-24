@@ -88,7 +88,7 @@ internal fun DocsTab(graph: AppGraph, vm: ProjectViewModel, sheet: Sheet, now: L
     val docs = rememberDocsModel(graph, vm.id)
     val shown = DocTabs.of(sub)
     Toasts(docs.gestures)
-    OnResume(docs) { docs.resume() }
+    OnResume(docs, project = vm.id) { docs.resume() }
     // quitté avant la réponse d'une création, l'onglet n'ouvre rien à son retour
     OnLeave(docs) { docs.leave() }
     LaunchedEffect(docs, shown) { docs.show(shown) }

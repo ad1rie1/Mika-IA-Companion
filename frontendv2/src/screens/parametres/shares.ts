@@ -14,7 +14,7 @@ import type { Host, Page } from "./page";
 import * as store from "../../shared/store";
 import { KIND_WORDS, shareLevelsFor, sharePeople, sharePhrase, shareTarget, shareWords } from "./words";
 
-const KIND_ICONS: Record<ShareKind, IconName> = { mail: "mail", teams: "teams", mcp: "server" };
+const KIND_ICONS: Record<ShareKind, IconName> = { mail: "mail", teams: "teams", mcp: "server", agenda: "agenda" };
 
 /** Ce qu'elle peut partager : ses boîtes, ses comptes Teams, ses services. */
 export interface Shareable {
@@ -51,6 +51,7 @@ function subOf(kind: ShareKind, key: string): string {
 /** Où s'ouvre ce qu'on te partage : une boîte dans Mail, un compte dans Teams, un service sur sa fiche (Paramètres ›
  *  Services MCP, « Partagé avec toi »). */
 export function openOf(kind: ShareKind, key: string): string {
+  if (kind === "agenda") return "#agenda/semaine";
   return kind === "mail" ? "#mail/messages" : kind === "teams" ? "#teams/discussions" : `#parametres/mcp/${encodeURIComponent(key)}`;
 }
 

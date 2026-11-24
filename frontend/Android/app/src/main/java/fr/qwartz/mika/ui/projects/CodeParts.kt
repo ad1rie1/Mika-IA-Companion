@@ -72,12 +72,10 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
+import fr.qwartz.mika.data.moi.ProjectsLive
 import fr.qwartz.mika.data.moi.projects.Checks
 import fr.qwartz.mika.data.moi.projects.CheckRun
 import fr.qwartz.mika.data.moi.projects.CodeLinked
@@ -127,7 +125,9 @@ import fr.qwartz.mika.ui.Route
 import fr.qwartz.mika.ui.components.ProMarkdown
 import fr.qwartz.mika.ui.components.ProMarkdownBlocks
 import fr.qwartz.mika.ui.components.rememberNow
+import fr.qwartz.mika.data.net.Topics
 import fr.qwartz.mika.ui.shell.BarNav
+import fr.qwartz.mika.ui.shell.FollowLive
 import fr.qwartz.mika.ui.shell.Gap
 import fr.qwartz.mika.ui.shell.Load
 import fr.qwartz.mika.ui.shell.LocalShell
@@ -169,11 +169,22 @@ internal fun Toasts(runner: GestureRunner) {
     LaunchedEffect(runner) { runner.said.collect { shell.toast(it) } }
 }
 
-/** Ce qu'un écran relit à chaque fois qu'il revient devant. */
+/** Le [OnResume] de la rubrique : le direct d'un projet, quel qu'il soit. */
+internal const val ANY_PROJECT = -1
+
+/**
+ * Ce qu'un écran relit à chaque fois qu'il revient devant (l'app au premier plan, ou un écran par-dessus refermé), et
+ * quand le direct dit que son projet [project] a changé (`projects`, ADR 0308 — la fiche ouverte et ses onglets ;
+ * [ANY_PROJECT] : n'importe lequel, pour la rubrique et « À faire »). Le même geste qu'un retour : ce qu'il montre se
+ * relit sans bruit, ce qui est tapé reste.
+ */
 @Composable
-internal fun OnResume(key: Any?, block: () -> Unit) {
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(key, lifecycle) { lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) { block() } }
+internal fun OnResume(key: Any?, project: Int, block: () -> Unit) {
+    val live = LocalShell.current.graph.live
+    FollowLive(live, ProjectsLive.TOPICS, key, project, onShown = { block() }) { signal ->
+        val mine = if (project == ANY_PROJECT) signal.touches(Topics.PROJECTS) else ProjectsLive.shows(project, signal)
+        if (mine) block()
+    }
 }
 
 /** Ce qu'une page du code tient du cadre : aller ailleurs, la fiche du projet (ses droits), l'onglet Code (son dépôt), l'heure. */
@@ -185,7 +196,7 @@ internal fun rememberCodeFrame(graph: AppGraph, id: Int): CodeFrame {
     val project = rememberProjectModel(graph, id)
     val code = rememberCodeModel(graph, id)
     Toasts(code.gestures)
-    OnResume(code) {
+    OnResume(code, project = id) {
         project.resume()
         code.resume()
     }

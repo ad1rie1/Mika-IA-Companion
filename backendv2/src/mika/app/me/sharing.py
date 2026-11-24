@@ -1,12 +1,14 @@
-"""Ses partages (ADR 0188) : ce qu'elle partage — ses boîtes, ses comptes Teams, ses services — avec qui et à quel
-niveau ; ce qu'on lui partage ; les personnes à qui elle peut partager. À ne pas confondre avec la faculté ``shares``
+"""Ses partages (ADR 0188) : ce qu'elle partage — ses boîtes, ses comptes Teams, ses services, ses agendas (ADR 0309)
+— avec qui et à quel niveau ; ce qu'on lui partage ; les personnes à qui elle peut partager. À ne pas confondre avec la faculté ``shares``
 (``faculties/shares``), les fichiers que Mika envoie à qui elle parle.
 
 Seul le propriétaire partage, et seulement avec une personne qui a un compte — jamais un salon, une inconnue, « tout
 le monde ». Une boîte ou un compte Teams partagé est rangé avec sa ressource et journalisé avec ses paramètres
 (``shares``) : sa règle s'étend à la personne, au niveau donné (lire ; lire et préparer ; s'en servir). Un service
 partagé reçoit une ligne d'accès pour la personne (ADR 0192) — lire : ses outils qui lisent ; s'en servir : aussi ceux
-qui agissent, sur sa demande à elle ; retirer le partage retire la ligne.
+qui agissent, sur sa demande à elle ; retirer le partage retire la ligne. Un agenda partagé est rangé avec son agenda
+(``Settings.share_calendar``) et journalisé avec les paramètres du plugin ``agenda`` ; son tableau de droits reçoit ou
+perd la ligne de la personne.
 
 Tous se lisent ici, dans les réglages (``every_share``) : Réglages › Droits › Partages les montre tous ; Paramètres ›
 Partages (``list_shares``) et l'onglet Comptes de la fiche d'une personne y lisent ce qu'une personne donne et ce
@@ -18,7 +20,7 @@ console.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -27,20 +29,23 @@ from starlette.routing import Route
 
 from mika.adapters.mail.config import MailAccount, MailConfig
 from mika.adapters.teams import TeamsAccount
+from mika.app.me import agenda as agenda_me
 from mika.app.me import mail as mail_me
 from mika.app.me import mcp as mcp_me
 from mika.app.me import teams as teams_me
 from mika.app.me.api import Call, Denied, MeApiBase, missing, person_of, refused
 from mika.app.me.common import settings_of
 from mika.contracts import identity as identity_c
+from mika.plugins import agenda as agenda_p
 from mika.plugins import email as email_p
 from mika.plugins import teams as teams_p
+from mika.ports.agenda import split_calendar_key, system_person
 from mika.runtime.operations import audit
 from mika.vocab.access import PERSON, SHARE_PREPARE, SHARE_USE, SHARES
-from mika.vocab.ownership import holds
+from mika.vocab.ownership import OWNED, holds
 
 #: ce qui se partage
-KINDS = ("mail", "teams", "mcp")
+KINDS = ("mail", "teams", "mcp", "agenda")
 LEVELS = tuple(level for level, _label in SHARES)
 
 
@@ -83,9 +88,10 @@ def service_shares(spec: Any) -> dict[str, str]:
     return {who: level for who, (level, _line) in mcp_me.shared(spec).items()}
 
 
-def every_share(settings: Any) -> list[Shared]:
+def every_share(settings: Any, names: Mapping[str, str] | None = None) -> list[Shared]:
     """Tous les partages, ressource par ressource : ceux rangés avec chaque boîte et chaque compte Teams, puis les
-    lignes de chaque service qui a un propriétaire — ce que chaque personne lit sous « Partagé avec toi »."""
+    lignes de chaque service qui a un propriétaire, puis ceux de chaque agenda (``names`` : leur nom, tel que la base
+    de l'agenda le dit ; sinon sa clé courte) — ce que chaque personne lit sous « Partagé avec toi »."""
     out: list[Shared] = []
     for kind, accounts in (("mail", settings.email().accounts), ("teams", settings.teams().accounts)):
         for key, spec in sorted(accounts.items()):
@@ -95,6 +101,12 @@ def every_share(settings: Any) -> list[Shared]:
         if spec.owner:
             out += [Shared("mcp", name, name, spec.owner, who[len(PERSON):], level)
                     for who, level in sorted(service_shares(spec).items())]
+    for account, spec in sorted(settings.agenda().accounts.items()):
+        holder = PERSON + system_person(account) if system_person(account) else spec.owner
+        for local, setting in sorted(spec.calendars.items()):
+            calendar = f"{account}~{local}"
+            out += [Shared("agenda", calendar, (names or {}).get(calendar) or local, holder, who[len(PERSON):], level)
+                    for who, level in sorted(setting.shares.items())]
     return out
 
 
@@ -132,6 +144,8 @@ def sharer(frame: Any, s: Shared, name: Callable[[str], str]) -> str:
         return email_p.approver_name(frame, s.key)
     if s.kind == "teams":
         return teams_p.writer_of(frame, s.key)
+    if s.kind == "agenda" and not s.owner:
+        return identity_c.keepers(frame)
     return name(s.owner.removeprefix(PERSON))
 
 
@@ -141,7 +155,8 @@ async def list_shares(call: Call) -> dict[str, Any]:
     settings = call.api.settings
     if settings is None:
         return {"given": [], "received": []}
-    given, received = given_and_received(every_share(settings), call.me.person, owner=call.me.owner)
+    names = agenda_me.calendar_names(call.port("agenda"))
+    given, received = given_and_received(every_share(settings, names), call.me.person, owner=call.me.owner)
     return {"given": [{"kind": s.kind, "key": s.key, "title": s.title, "person": s.person,
                        "name": _name(call, s.person), "level": s.level} for s in given],
             "received": [{"kind": s.kind, "key": s.key, "title": s.title, "level": s.level,
@@ -161,6 +176,9 @@ async def write_share(settings: Any, reconfigure: Callable[[], Awaitable[Any]] |
     d'un seul tenant (``Settings.writing``), avec ce qui en dérive (``shares``, rejournalisé : sa règle s'étend) : un
     partage retiré ailleurs entre-temps ne revient pas. ``check`` juge la fiche relue, sous le verrou : qui a le droit,
     c'est à qui appelle de le dire."""
+    if kind == "agenda":
+        await _write_calendar_share(settings, reconfigure, key, person, level, check)
+        return
     async with settings.writing:
         cfg = settings.email() if kind == "mail" else settings.teams()
         spec = cfg.accounts.get(key)
@@ -183,14 +201,34 @@ async def write_share(settings: Any, reconfigure: Callable[[], Awaitable[Any]] |
             await reconfigure()
 
 
+async def _write_calendar_share(settings: Any, reconfigure: Callable[[], Awaitable[Any]] | None, calendar: str,
+                                person: str, level: str, check: Callable[[Any], None] | None) -> None:
+    """Le partage d'un agenda à cette personne (vide : retiré), rangé avec l'agenda (``Settings.share_calendar`` : son
+    tableau suit), relu puis réécrit sous ``Settings.writing`` ; ``check`` juge son réglage relu (``CalendarSetting``),
+    sous le verrou."""
+    account, local = split_calendar_key(calendar)
+    async with settings.writing:
+        found = settings.agenda().account(account) if account else None
+        if found is None:
+            raise missing()
+        if check is not None:
+            check(found.setting(local))
+        try:
+            await settings.share_calendar(calendar, PERSON + person, level or None)
+        except (ValidationError, ValueError) as exc:
+            raise refused(exc) from None
+        if reconfigure is not None:
+            await reconfigure()
+
+
 async def set_share(call: Call) -> dict[str, Any]:
     """Partager une de ses ressources avec une personne, à un niveau ; un niveau vide retire le partage."""
     kind = call.arg("kind", limit=10)
-    key = call.arg("key", limit=40)
+    key = call.arg("key", limit=200 if kind == "agenda" else 40)
     person = call.arg("person", limit=200)
     level = call.arg("level", limit=20)
     if kind not in KINDS:
-        raise Denied(400, "« kind » : mail, teams ou mcp.")
+        raise Denied(400, "« kind » : mail, teams, mcp ou agenda.")
     if level and level not in LEVELS:
         raise Denied(400, "« level » : lire, preparer ou servir (vide : retirer).")
     settings = settings_of(call)
@@ -204,7 +242,19 @@ async def set_share(call: Call) -> dict[str, Any]:
     # (un compte désactivé depuis, une adresse reliée ailleurs) : un partage se retire toujours d'un clic
     if level and person not in {p["person"] for p in people(call)}:
         raise Denied(400, "Un partage va à une personne qui a un compte (pas à toi).", {"person": "personne inconnue"})
-    if kind in ("mail", "teams"):
+    if kind == "agenda":
+        cal, held_level = agenda_me.mine(call).get(key) or (None, "")
+        if cal is None:
+            raise missing()
+        if held_level != OWNED:
+            raise Denied(403, "Seul son propriétaire partage cet agenda.")  # comme une boîte qu'on te partage
+        holder = agenda_me.holder_person(agenda_p.params_of(call.frame), key)
+
+        def calendar_hers(spec: Any) -> None:
+            _not_hers_already(call, holder, person, level)
+
+        await write_share(settings, call.api.reconfigure, kind, key, person, level, calendar_hers)
+    elif kind in ("mail", "teams"):
         def hers(spec: Any) -> None:
             (mail_me if kind == "mail" else teams_me).owned(call, key)
             _not_hers_already(call, spec.owner, person, level)

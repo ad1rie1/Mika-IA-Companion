@@ -12,6 +12,7 @@ import zipfile
 
 from mika.adapters.teams import TeamsAccount, TeamsConfig
 from mika.app.me import form
+from mika.app.me import teams as teams_me
 from mika.app.me.teams_extension import EXTENSION_DIR
 from mika.contracts import runtime as rt
 from mika.contracts import teams as teams_c
@@ -148,6 +149,36 @@ def test_what_you_write_leaves_by_the_extension_in_your_name(world):  # noqa: F8
     assert written.author == "user_1" and written.final == "J'arrive dans dix minutes."  # sans sa signature
     assert post(client, "/teams/send", {"conversation": DM, "body": "Je te dis [À COMPLÉTER]"}).status_code == 400
     assert post(client, "/teams/send", {"conversation": DM, "body": ""}).status_code == 400
+
+
+def test_what_you_wrote_stays_in_the_thread_once_sent_until_its_twin_comes_back(world, monkeypatch):  # noqa: F811
+    """Parti (l'accusé de l'extension), ce que tu as écrit reste dans le fil, marqué parti, jusqu'à ce que son jumeau y
+    arrive par l'extension (ADR 0251 : de toi, le même texte, à moins de deux minutes) — borné dans le temps ; il ne
+    disparaît plus jusqu'au lot suivant."""
+    client, live, key = with_teams(world)
+    body = "J'arrive dans dix minutes."
+    assert post(client, "/teams/send", {"conversation": DM, "body": body}).status_code == 200
+    [item] = client.get("/api/teams/outbox", headers=headers(key)).json()["items"]
+    for result in ("sending", "sent"):
+        acked = client.post(f"/api/teams/outbox/{item['id']}", json={"result": result}, headers=headers(key))
+        assert acked.status_code == 200, acked.text
+
+    def thread() -> dict:
+        return client.get(API + f"/teams/thread?conversation={DM}").json()
+
+    [pending] = thread()["pending"]
+    assert pending["state"] == "parti" and pending["body"] == body
+    assert client.get(API + f"/teams/thread?conversation={DM}&before={int(time.time() * 1000)}").json()[
+        "pending"] == []  # plus haut dans le fil : il n'est qu'au bout
+    monkeypatch.setattr(teams_me, "SENT_KEPT_US", 0)
+    assert thread()["pending"] == []  # au-delà de sa borne : il reviendra avec le lot suivant
+    monkeypatch.undo()
+    mine = {"id": "1759000009999", "conv": DM, "author": "Adrien", "author_id": "8:orgid:adrien",
+            "time": int(time.time() * 1000), "text": body, "own": True, "mentions_me": False}
+    twin = {**batch(0), "messages": [mine]}
+    assert client.post("/api/teams/inbox", json=twin, headers=headers(key)).status_code == 202
+    got = thread()
+    assert got["pending"] == [] and got["messages"][-1]["text"] == body  # revenu : une seule fois dans le fil
 
 
 def test_prefill_asks_her_once_and_her_replies_are_decided_here(world):  # noqa: F811

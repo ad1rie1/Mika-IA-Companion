@@ -19,6 +19,9 @@
   mot en ASCII voyage entre guillemets, un autre en littéral UTF-8, seul dans sa
   commande (``imaplib`` n'en porte qu'un) ; les ensembles se croisent ici
   (ADR 0249).
+- Attendre que le dossier ouvert change : ``IDLE`` (RFC 2177), si le serveur
+  l'annonce (``wait``) ; une attente s'interrompt depuis un autre fil
+  (``interrupt``) — le courrier en direct, ADR 0308.
 """
 
 from __future__ import annotations
@@ -26,6 +29,7 @@ from __future__ import annotations
 import functools
 import imaplib
 import re
+import socket
 import ssl
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -57,6 +61,8 @@ _FOLD = re.compile(rb"\r?\n[ \t]+")
 _START = re.compile(rb"^\d+ \(")
 #: au plus, les mots d'une recherche envoyés au serveur
 WORDS_MAX = 8
+#: ce qu'un serveur dit, pendant ``IDLE``, quand le dossier ouvert change : un mail arrivé ou parti, des drapeaux
+_CHANGED = frozenset({"EXISTS", "EXPUNGE", "FETCH", "RECENT", "VANISHED"})
 _SPECIAL = {"\\sent": "sent", "\\drafts": "drafts", "\\trash": "trash", "\\junk": "junk", "\\archive": "archive"}
 _NAMES = {
     "sent": ("sent", "sent items", "sent messages", "sent mail", "envoyés", "envoyes", "éléments envoyés",
@@ -218,6 +224,50 @@ class Session:
             self.box.logout()
         except (imaplib.IMAP4.error, OSError):
             pass
+
+    def interrupt(self) -> None:
+        """Coupe la connexion depuis un autre fil : une attente en cours (``wait``) se termine aussitôt, par une
+        ``ImapError``. La couche TLS n'est pas touchée (le fil qui lit la tient) : seule la prise est fermée."""
+        sock = getattr(self.box, "sock", None)
+        if sock is None:
+            return
+        try:
+            socket.socket.shutdown(sock, socket.SHUT_RDWR)
+        except OSError:
+            pass
+
+    # ── attendre (ADR 0308) ──
+    @property
+    def can_wait(self) -> bool:
+        """Le serveur sait-il attendre qu'un dossier change (``IDLE``), et ce Python aussi ? ``imaplib`` ne sait
+        ``IDLE`` que depuis Python 3.14 : avant, la boîte est rangée chaque minute, comme un serveur qui ne le sait
+        pas."""
+        return "IDLE" in self.caps and callable(getattr(self.box, "idle", None))
+
+    @_translated
+    def recheck(self) -> None:
+        """Ce que le serveur sait faire, redemandé une fois entré : certains n'annoncent tout qu'à qui est connecté."""
+        typ, data = self.box.capability()
+        if typ == "OK" and data and isinstance(data[-1], bytes):
+            caps = tuple(data[-1].decode("ascii", "replace").upper().split())
+            if caps:
+                self.box.capabilities = caps
+                self.caps = set(caps)
+
+    @_translated
+    def wait(self, seconds: float) -> bool:
+        """Attend que le dossier ouvert change (``IDLE``, RFC 2177), au plus ``seconds`` : vrai dès que le serveur le
+        dit (un mail arrivé ou parti, des drapeaux), faux au bout du délai. Un serveur qui ferme la connexion
+        (« BYE »), une coupure, ``interrupt`` : ``ImapError``."""
+        with self.box.idle(duration=max(0.1, seconds)) as idler:
+            for typ, data in idler:
+                said = str(typ).upper()
+                if said == "BYE":
+                    detail = b" ".join(d for d in data or () if isinstance(d, bytes)).decode("utf-8", "replace")
+                    raise ImapError(f"le serveur a fermé la connexion : {detail}"[:300])
+                if said in _CHANGED:
+                    return True
+        return False
 
     @staticmethod
     def _ok(result: tuple[str, Any], what: str) -> Any:

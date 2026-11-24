@@ -46,6 +46,7 @@ from mika.kernel.faculty import Faculty
 from mika.kernel.frame import Audience, Frame
 from mika.kernel.guards import Guard
 from mika.kernel.registry import ArbitrationPolicy
+from mika.plugins.agenda import AGENDA
 from mika.plugins.camera import CAMERA
 from mika.plugins.contacts import CONTACTS
 from mika.plugins.email import EMAIL
@@ -73,7 +74,7 @@ def faculties() -> list[Faculty[Any, Any]]:
     """Les facultés de Mika, puis ses plugins (M7)."""
     return [PRESENCE, IDENTITY, TRANSCRIPT, MEMORY, BODY, WORLD, PLACE, AFFECT, NEEDS, OTHERS, ATTENTION, SELF,
             EXPRESSION, SOCIAL, AGENCY, GOALS, PROJECTS, SHARES, ATTACHMENTS, EMAIL, RSS, CAMERA, FORGE, SENSORS,
-            IMAGING, MCP, WEB, WAKEUP, TEAMS, LOCATION, PHONE, TRIPS, CONTACTS]
+            IMAGING, MCP, WEB, WAKEUP, TEAMS, LOCATION, PHONE, TRIPS, CONTACTS, AGENDA]
 
 
 def _reply_guard(frame: Frame, target: str | None, audience: Audience | None) -> Guard | None:
@@ -159,16 +160,17 @@ READING = (
     # ce qu'elle fait : ses buts, ses projets, ses réveils, ce qu'elle prépare pour sa propriétaire
     "goals", "projects", "wake_reports", "drafts", "teams_drafts", "phone_offers",
     # ce qui est en cours avec la personne en face : ce que ses apps et ses services ont rendu, ses dessins, ce
-    # qu'elle lui a envoyé, ce qu'elle lui a promis
-    "app_calls", "services", "dessins", "sent_files", "promises",
-    # la personne en face : qui, ce qui vous lie, ce qu'elle en sait, sa vie, les gens qu'on nomme
-    "who", "crossed", "register", "stance", "about_person", "life", "their_day", "acquainted",
+    # qu'elle lui a envoyé, ce qu'elle a proposé dans ses agendas (ADR 0309), ce qu'elle lui a promis
+    "app_calls", "services", "dessins", "sent_files", "agenda_writes", "promises",
+    # la personne en face : qui, ce qui vous lie, ce qu'elle en sait, sa vie, sa journée — ce qu'elle n'en sait pas
+    # encore, puis ce que disent ses agendas (ADR 0309) —, les gens qu'on nomme
+    "who", "crossed", "register", "stance", "about_person", "life", "their_day", "agenda_day", "acquainted",
     # vos souvenirs
     "memories", "shared_memories", "past_exchanges", "veiled",
     # ce qu'elle perçoit de la personne en face, là, juste avant son message
     "their_state",
-    # une initiative : ce qui la fait parler
-    "matter", "subject", "project_share", "mail_mention", "greeting_tone",
+    # une initiative : ce qui la fait parler — le rendez-vous qu'elle rappelle (ADR 0309) compris
+    "matter", "subject", "agenda_reminder", "project_share", "mail_mention", "greeting_tone",
     # comment elle écrit ailleurs (un mail, Teams)
     "voice", "teams_voice",
     # ce qu'on lui demande : un pas sur un but, un projet, un réveil, une tâche de rédaction — la matière, puis la
@@ -188,6 +190,8 @@ READING = (
     "project_answer", "wake_text",
     "wake_order",
     "app_consignes", "app_signals", "task_mail", "edits", "task_ask", "teams_task", "teams_ask",
+    # l'invitation dont elle prépare la réponse (ADR 0309)
+    "agenda_invitation",
     # sa parole : ce qu'elle se répète, puis sa réponse
     "habits", "answer",
 )
@@ -201,13 +205,13 @@ def policies() -> dict[str, EpisodePolicy]:
                                                           "camera", "forge", "forge_apps", "self", "attention",
                                                           "social", "world", "shares", "attachments", "imaging",
                                                           "teams", "location", "phone", "trips", "contacts",
-                                                          EXTERNAL}),
+                                                          "agenda", EXTERNAL}),
                                   core_bundles=REPLY_IN_HAND),
         Kind.INITIATIVE: EpisodePolicy(kind=Kind.INITIATIVE, role=Role.INITIATIVE, priority=1, lane="conversation",
                                        brief=initiative_brief, max_tokens=600, deadline_s=180.0,
                                        tool_bundles=frozenset({"memory", "identity", "rss", "forge_apps", "self",
                                                                "attention", "social", "world", "shares",
-                                                               "attachments", "imaging", EXTERNAL}),
+                                                               "attachments", "imaging", "agenda", EXTERNAL}),
                                        core_bundles=INITIATIVE_IN_HAND),
         # un pas de travail : sa voix (compacte), pour elle seule — ni fil, ni livraison ; le verdict fait l'affect
         Kind.STEP: EpisodePolicy(kind=Kind.STEP, role=Role.STEP, priority=2, lane="background",
@@ -247,7 +251,7 @@ def policies() -> dict[str, EpisodePolicy]:
                                  persona_depth="compact", visible=False, delivered=False, brief=task_brief,
                                  max_tool_turns=6, max_tokens=2048, deadline_s=240.0,
                                  tool_bundles=frozenset({"email", "memory", "identity", "teams", "forge_signals",
-                                                         "forge_apps", EXTERNAL})),
+                                                         "forge_apps", "agenda", EXTERNAL})),
         # une pensée à voix haute : sa voix brève, pas dans le fil, à l'écran seulement
         Kind.MURMUR: EpisodePolicy(kind=Kind.MURMUR, role=Role.MURMUR, priority=1, lane="conversation",
                                    persona_depth="compact", visible=False, max_tokens=80, deadline_s=60.0,

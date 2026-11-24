@@ -42,9 +42,6 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.repeatOnLifecycle
 import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
 import fr.qwartz.mika.data.moi.projects.ActivityPage
@@ -105,10 +102,7 @@ fun GoalScreen(graph: AppGraph, route: Route.ProjectGoal) {
     val shell = LocalShell.current
     val vm = rememberProjectModel(graph, route.id)
     LaunchedEffect(vm) { vm.gestures.said.collect { shell.toast(it) } }
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(vm, lifecycle) {
-        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) { vm.resume() }
-    }
+    OnResume(vm, project = route.id) { vm.resume() }
     val now = rememberNow(wallMs = graph.clock::wallMs)
     var pane by rememberSaveable(route.id, route.key) { mutableStateOf(if (route.key.startsWith("m")) PANE_REPORTS else PANE_STEPS) }
     // une feuille ou une fenêtre ouverte survit à une rotation (et ce qu'on y tape aussi)

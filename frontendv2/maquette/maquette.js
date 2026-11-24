@@ -381,7 +381,7 @@
     M.ordre.forEach((id) => { const def = M.ecrans[id]; if (def.recherche) out.push(...def.recherche()); });
     return out;
   }
-  function navIco(id) { return { chat: 'chat', projets: 'flag', outils: 'tools', mail: 'mail', teams: 'teams', telephone: 'phone', contacts: 'users', carte: 'map', parametres: 'settings' }[id] || 'chev-right'; }
+  function navIco(id) { return { chat: 'chat', projets: 'flag', outils: 'tools', mail: 'mail', teams: 'teams', telephone: 'phone', contacts: 'users', agenda: 'agenda', carte: 'map', parametres: 'settings' }[id] || 'chev-right'; }
   function ouvrirPalette() {
     $('#palette').hidden = false;
     const q = $('#palette-q');

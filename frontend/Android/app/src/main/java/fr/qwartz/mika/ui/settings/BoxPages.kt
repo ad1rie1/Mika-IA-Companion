@@ -90,6 +90,8 @@ import fr.qwartz.mika.data.moi.settings.shareWords
 import fr.qwartz.mika.data.moi.settings.sharedBoxSentence
 import fr.qwartz.mika.data.moi.settings.sharedBoxTitle
 import fr.qwartz.mika.ui.Route
+import fr.qwartz.mika.ui.components.rememberNow
+import fr.qwartz.mika.ui.shell.FollowLive
 import fr.qwartz.mika.ui.shell.BarMenu
 import fr.qwartz.mika.ui.shell.BarNav
 import fr.qwartz.mika.ui.shell.Gap
@@ -127,13 +129,16 @@ class BoxesViewModel(graph: AppGraph) : SettingsModel(graph) {
     var load by mutableStateOf<Load<MailBoxes>>(Load.Loading)
         private set
 
-    /** Relue à chaque retour sur la page (une boîte vient peut-être d'être retirée ou renommée). */
+    /** Relue à chaque retour sur la page (une boîte vient peut-être d'être retirée ou renommée), et quand le direct
+     *  dit qu'une boîte a changé (son état, ses réglages : ADR 0308). */
     fun resume() {
-        viewModelScope.launch {
-            when (val got = api.boxes()) {
-                is MoiApi.Result.Ok -> load = Load.Ready(got.value)
-                is MoiApi.Result.Failed -> if (load !is Load.Ready) load = Load.Failed(got.error) else say(got.error)
-            }
+        viewModelScope.launch { read() }
+    }
+
+    suspend fun read() {
+        when (val got = api.boxes()) {
+            is MoiApi.Result.Ok -> load = Load.Ready(got.value)
+            is MoiApi.Result.Failed -> if (load !is Load.Ready) load = Load.Failed(got.error) else say(got.error)
         }
     }
 
@@ -148,10 +153,10 @@ internal fun BoxesPage(graph: AppGraph) {
     val shell = LocalShell.current
     val session = rememberSessionKey(graph)
     val vm: BoxesViewModel = viewModel(key = "settings.boxes|$session") { BoxesViewModel(graph) }
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(vm, lifecycle) { lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) { vm.resume() } }
+    FollowLive(graph.live, SettingsLive.BOXES, vm, onShown = { vm.resume() }) { vm.read() }
     SettingsEffects(vm)
-    val now = graph.clock.wallMs()
+    // « relevée il y a 2 min » avance tout seul
+    val now = rememberNow(wallMs = graph.clock::wallMs)
     SectionScaffold(
         topBar = { MikaTopBar(stringResource(R.string.settings_boxes), BarNav.BACK) },
         floatingActionButton = {

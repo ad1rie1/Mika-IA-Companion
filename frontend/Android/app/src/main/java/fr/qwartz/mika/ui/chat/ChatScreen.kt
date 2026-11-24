@@ -50,6 +50,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.createSavedStateHandle
 import fr.qwartz.mika.R
+import fr.qwartz.mika.data.moi.agenda.CAPABILITY_AGENDA_WRITE
 import fr.qwartz.mika.core.AppGraph
 import fr.qwartz.mika.data.chat.MessageAttachment
 import fr.qwartz.mika.data.net.LinkState
@@ -162,6 +163,9 @@ fun ChatScreen(
     LaunchedEffect(vm.trayOpen) {
         if (vm.trayOpen && (wantsMail || wantsTeams)) vm.loadTrayDrafts(wantsMail, wantsTeams)
     }
+    // les ajouts à l'agenda (ADR 0309) : l'événement de chaque carte, relu quand les cartes changent
+    val agendaCards = approvals.filter { it.capability == CAPABILITY_AGENDA_WRITE }.map { it.id.toInt() }
+    LaunchedEffect(agendaCards) { vm.loadTrayAgenda(agendaCards) }
     // plus rien n'attend (vu sur cet écran : une liste encore vide à son ouverture ne la replie pas) : elle repart repliée
     var trayShown by remember { mutableStateOf(false) }
     LaunchedEffect(tray.isEmpty) {
@@ -388,6 +392,7 @@ fun ChatScreen(
                         acceptAll = ChatTray.offersAcceptAll(proMode, operator, tray),
                         acceptingAll = vm.acceptingAll,
                         onAcceptAll = { vm.acceptAll(tray.accords) },
+                        agenda = vm.trayAgenda,
                     )
                 }
             }

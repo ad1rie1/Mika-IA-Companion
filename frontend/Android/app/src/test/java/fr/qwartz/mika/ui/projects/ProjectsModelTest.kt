@@ -30,8 +30,10 @@ import fr.qwartz.mika.ui.mail.MainDispatcherRule
 import fr.qwartz.mika.ui.shell.Load
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -881,5 +883,34 @@ class ProjectsModelTest {
         advanceUntilIdle()
         assertTrue(p.stale)
         assertEquals(MoiError.NETWORK, p.staleError?.message)
+    }
+
+    @Test fun `relue sans bruit, une fiche qui n'est plus à toi ramène à la liste - sans « introuvable »`() = runTest {
+        api.sheet = MoiApi.Result.Ok(Sheet(project = ProjectHead(id = 3, title = "Outils réseau")))
+        val vm = project()
+        vm.resume()
+        advanceUntilIdle()
+        // hors ligne : ce n'est pas une absence, la fiche reste et le dit
+        api.sheet = MoiApi.Result.Failed(MoiError(0, MoiError.NETWORK))
+        vm.resume()
+        advanceUntilIdle()
+        assertNull(withTimeoutOrNull(200) { vm.left.first() })
+        assertTrue(vm.staleError != null)
+        // plus partagée : introuvable — retour à la liste, rien de dit
+        api.sheet = MoiApi.Result.Failed(MoiError(404, "Introuvable : ce n'est plus là."))
+        vm.resume()
+        advanceUntilIdle()
+        assertEquals(Unit, withTimeoutOrNull(200) { vm.left.first() })
+        assertTrue(vm.sheet is Load.Ready)
+        assertFalse(vm.stale)
+    }
+
+    @Test fun `une fiche qu'on n'a jamais pu lire dit qu'elle est introuvable - elle ne fuit pas vers la liste`() = runTest {
+        api.sheet = MoiApi.Result.Failed(MoiError(404, "Introuvable : ce n'est plus là."))
+        val vm = project()
+        vm.resume()
+        advanceUntilIdle()
+        assertTrue(vm.sheet is Load.Failed)
+        assertNull(withTimeoutOrNull(200) { vm.left.first() })
     }
 }

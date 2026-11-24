@@ -20,9 +20,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
@@ -36,6 +33,7 @@ import fr.qwartz.mika.data.moi.carte.ficheId
 import fr.qwartz.mika.data.moi.carte.refOf
 import fr.qwartz.mika.ui.Route
 import fr.qwartz.mika.ui.shell.BarNav
+import fr.qwartz.mika.ui.shell.FollowLive
 import fr.qwartz.mika.ui.shell.LocalShell
 import fr.qwartz.mika.ui.shell.MIcon
 import fr.qwartz.mika.ui.shell.MikaTopBar
@@ -88,7 +86,7 @@ private data class NewTrip(val first: Place?)
 /**
  * La Carte, la rubrique du tiroir (`Route.Carte(tab)`) ; [nav] : le tiroir depuis le tiroir, la flèche quand un autre
  * écran y mène. Chaque onglet se relit à chaque retour sur l'écran (ce qui est branché, ta position, tes voyages), sans
- * minuterie.
+ * minuterie ; tes voyages et ta position suivent le direct (ADR 0308).
  */
 @Composable
 fun CarteScreen(graph: AppGraph, route: Route.Carte, nav: BarNav) {
@@ -100,20 +98,19 @@ fun CarteScreen(graph: AppGraph, route: Route.Carte, nav: BarNav) {
     val events: EventsViewModel = viewModel(key = "carte.evenements|$session") { EventsViewModel(graph, store) }
     val tab = CarteTabs.of(route.tab)
     val look = refOf(route.look)
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(explorer, itinerary, events, lifecycle, tab) {
-        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            when (tab) {
-                CarteTabs.EXPLORER -> explorer.resume()
-                CarteTabs.EVENTS -> events.resume()
-                CarteTabs.ROUTE -> itinerary.resume()
-                else -> {
-                    store.loadInfo()
-                    store.loadList()
-                }
+    // chaque onglet se relit à chaque retour ; le direct (ADR 0308) : tes voyages (la liste, si elle est montrée),
+    // ta position (`trips`, `phone.position`)
+    FollowLive(graph.live, CARTE_TRIPS, explorer, itinerary, events, tab, onShown = {
+        when (tab) {
+            CarteTabs.EXPLORER -> explorer.resume()
+            CarteTabs.EVENTS -> events.resume()
+            CarteTabs.ROUTE -> itinerary.resume()
+            else -> {
+                store.loadInfo()
+                store.loadList()
             }
         }
-    }
+    }) { store.onLive(it, listShown = tab == CarteTabs.TRIPS) }
     // ce que la route ouvre : un regard de Mika (ses lieux dans Explorer, son trajet dans Itinéraire)
     LaunchedEffect(tab, look) {
         when (tab) {

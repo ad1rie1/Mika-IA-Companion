@@ -554,7 +554,7 @@ async def contributions(ui: Any, request: Request) -> list[Any]:
             ("processus", _names(s.name for s in c.processes)),
             ("outils", _names(s.name for s in c.tools)),
             ("capacités", _names(s.name for s in c.capabilities)),
-            ("vues", _names(v.title for v in c.views)),
+            ("vues", _names(ui.named(v.title) for v in c.views)),
             ("fiches", _names(s.label for s in c.subjects)),
             ("actions", _names(a.title for a in c.actions)),
         ]
@@ -1082,7 +1082,8 @@ def _effort(gateway: Any, role: str) -> Text | str:
 
 
 #: ce qu'un rôle facultatif coupé ne fait pas (``OPTIONAL_ROLES``)
-OPTIONAL_CUT, OPTIONAL_CUT_ANY = {str(Role.POLISH): "la seconde passe ne se fait pas"}, "sa passe ne se fait pas"
+OPTIONAL_CUT, OPTIONAL_CUT_ANY = {str(Role.POLISH): "la seconde passe ne se fait pas",
+                                  str(Role.CORRECT): "« Corriger » reste éteint dans Mail et Teams"}, "sa passe ne se fait pas"
 
 
 def _served_by(role: str, name: str) -> Text:

@@ -35,6 +35,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
+import fr.qwartz.mika.data.moi.LiveSignal
 import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.MoiError
 import fr.qwartz.mika.data.moi.initials
@@ -44,6 +45,7 @@ import fr.qwartz.mika.data.moi.phone.PhoneDevices
 import fr.qwartz.mika.data.moi.phone.PhoneMoiApi
 import fr.qwartz.mika.data.moi.phone.appBadge
 import fr.qwartz.mika.data.moi.phone.phoneBar
+import fr.qwartz.mika.data.net.Topics
 import fr.qwartz.mika.data.phone.PhoneApp
 import fr.qwartz.mika.ui.Route
 import fr.qwartz.mika.ui.shell.BarNav
@@ -52,6 +54,7 @@ import fr.qwartz.mika.ui.shell.LocalShell
 import fr.qwartz.mika.ui.shell.MikaTopBar
 import fr.qwartz.mika.ui.shell.PersonAvatar
 import fr.qwartz.mika.ui.shell.said
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
@@ -81,13 +84,19 @@ abstract class PhoneModel(protected val graph: AppGraph) : ViewModel() {
     protected fun say(error: MoiError) = say(error.said)
 }
 
-/** Tes téléphones (`phone/phones`), pour la barre de titre des deux onglets ; relus avec l'écran. */
+/** Tes téléphones (`phone/phones`), pour la barre de titre des deux onglets ; relus avec l'écran, et quand le direct
+ *  dit qu'ils ont changé (`phone.phones`, ADR 0308). */
 class PhonesViewModel(graph: AppGraph) : PhoneModel(graph) {
     var phones by mutableStateOf<Load<PhoneDevices>>(Load.Loading)
         private set
 
-    fun load() {
-        viewModelScope.launch {
+    /** Le direct : relus sans bruit ; rend la main quand c'est relu. */
+    suspend fun onLive(signal: LiveSignal) {
+        if (signal.touches(Topics.PHONE_PHONES)) load().join()
+    }
+
+    fun load(): Job {
+        return viewModelScope.launch {
             when (val got = api.phones()) {
                 is MoiApi.Result.Ok -> phones = Load.Ready(got.value)
                 // une relecture qui échoue garde ce qu'on savait ; la barre n'en dit rien de faux

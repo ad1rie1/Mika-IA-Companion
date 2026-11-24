@@ -1,0 +1,447 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  L'Agenda (ADR 0309, la maquette validée `maquette/ecrans/agenda*.js`) : la rubrique du tiroir après Teams, ses vues,
+  « À décider », la fiche d'un événement, de ce que Mika propose, d'une date de sa mémoire, le formulaire, les invitations,
+  chercher, partager ; Paramètres › Agendas ; Outils › Droits (le tableau de chaque agenda) ; la carte d'un ajout dans le
+  chat ; le canal de notification « Agenda ». Les mots qui se calculent (un moment, une répétition, un rappel, ce que
+  Mika fait d'un agenda, l'état d'un compte) sont dans data/moi/agenda/, testés sur la JVM ; les refus sont ceux du
+  serveur.
+-->
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <string name="nav_agenda">Agenda</string>
+    <string name="channel_agenda_name">Agenda</string>
+    <string name="channel_agenda_desc">Une invitation qui attend ta réponse, ce que Mika propose d\'ajouter à tes agendas — quand l\'app est ouverte ailleurs. Ses rappels d\'un rendez-vous sont des messages d\'elle.</string>
+    <string name="agenda_notify_public">Quelque chose attend dans ton Agenda</string>
+
+    <!-- La barre, le menu, les vues -->
+    <string name="agenda_search">Chercher dans tes agendas</string>
+    <string name="agenda_go_today">Aujourd\'hui</string>
+    <string name="agenda_menu">Plus</string>
+    <string name="agenda_month_unfold">Déplier le mois</string>
+    <string name="agenda_month_fold">Replier le mois</string>
+    <string name="agenda_month_previous">Mois précédent</string>
+    <string name="agenda_month_next">Mois suivant</string>
+    <string name="agenda_view_planning">Planning</string>
+    <string name="agenda_view_day">Jour</string>
+    <string name="agenda_view_three">3 jours</string>
+    <string name="agenda_view_week">Semaine</string>
+    <string name="agenda_view_month">Mois</string>
+    <string name="agenda_calendars_sheet">Agendas à afficher</string>
+    <string name="agenda_calendars_shown">Agendas à afficher · %1$d sur %2$d</string>
+    <string name="agenda_invitations">Invitations</string>
+    <string name="agenda_invitations_n">Invitations · %1$d</string>
+    <string name="agenda_settings">Paramètres des agendas</string>
+    <string name="agenda_new">Créer un événement</string>
+    <string name="agenda_today">Aujourd\'hui</string>
+    <string name="agenda_tomorrow">Demain</string>
+    <string name="agenda_nothing">Rien de prévu</string>
+    <string name="agenda_nothing_text">Aucun événement dans les agendas cochés sur ces quatre semaines.</string>
+    <string name="agenda_next_weeks">Les quatre semaines suivantes</string>
+    <string name="agenda_grid_invited">invitation</string>
+    <string name="agenda_grid_proposed">proposé</string>
+    <string name="agenda_visio">visio</string>
+    <string name="agenda_loading">Chargement…</string>
+
+    <!-- Les étiquettes d'une occurrence -->
+    <string name="agenda_tag_invited">invitation</string>
+    <string name="agenda_tag_maybe">peut-être</string>
+    <string name="agenda_tag_proposed">proposé par Mika</string>
+    <string name="agenda_tag_promised">promis</string>
+    <string name="agenda_tag_remembers">elle s\'en souvient</string>
+    <string name="agenda_tag_added">ajouté par Mika</string>
+    <string name="agenda_tag_invitation">invitation</string>
+    <string name="agenda_tag_said_maybe">tu as dit peut-être</string>
+    <string name="agenda_tag_not_yet">pas encore dans ton agenda</string>
+
+    <!-- À décider -->
+    <string name="agenda_decide">À décider</string>
+    <string name="agenda_decide_unfold">Déplier ce qui attend ta décision</string>
+    <string name="agenda_decide_fold">Replier ce qui attend ta décision</string>
+    <string name="agenda_decide_proposes">Mika propose « %1$s »</string>
+    <plurals name="agenda_decide_others">
+        <item quantity="one">et %1$d autre dans la vue</item>
+        <item quantity="many">et %1$d autres dans la vue</item>
+        <item quantity="other">et %1$d autres dans la vue</item>
+    </plurals>
+    <string name="agenda_decide_prepared">Mika a préparé tes réponses</string>
+    <string name="agenda_invites_on">%1$s t\'invite · %2$s</string>
+    <string name="agenda_prepared_short">Mika a préparé : %1$s</string>
+    <string name="agenda_invitations_all">Toutes les invitations</string>
+    <plurals name="agenda_invitations_count">
+        <item quantity="one">%d invitation</item>
+        <item quantity="many">%d invitations</item>
+        <item quantity="other">%d invitations</item>
+    </plurals>
+
+    <!-- Les gestes -->
+    <string name="agenda_refuse">Refuser</string>
+    <string name="agenda_modify">Modifier</string>
+    <string name="agenda_add">Ajouter</string>
+    <string name="agenda_accept">Accepter</string>
+    <string name="agenda_delete">Supprimer</string>
+    <string name="agenda_remove">Retirer</string>
+    <string name="agenda_change">Changer</string>
+    <string name="agenda_save">Enregistrer</string>
+    <string name="agenda_ok">OK</string>
+    <string name="agenda_send">Envoyer</string>
+    <string name="agenda_create">Créer</string>
+    <string name="agenda_done">Terminé</string>
+    <string name="agenda_understood">Compris</string>
+    <string name="agenda_open">Ouvrir l\'Agenda</string>
+
+    <!-- Les feuilles des agendas -->
+    <string name="agenda_calendar_more">%1$s : couleur, partager, paramètres</string>
+    <string name="agenda_calendars_back">Revenir aux agendas</string>
+    <string name="agenda_account_reconnect">%1$s à reconnecter · ses agendas ne se relisent plus</string>
+    <string name="agenda_account_failing">%1$s en panne · ses agendas ne se relisent plus</string>
+    <string name="agenda_plug">Brancher un agenda</string>
+    <string name="agenda_plug_line">Google, Outlook, CalDAV, iCal, ce serveur</string>
+    <string name="agenda_calendars_note">Décocher ne change que ce que tu vois ici : Mika s\'en sert toujours. Pour qu\'elle ne s\'en serve plus, masque-le dans Paramètres.</string>
+    <string name="agenda_whose_her">à elle</string>
+    <string name="agenda_whose_mine">à toi</string>
+    <string name="agenda_whose_other">à %1$s</string>
+    <string name="agenda_color">Couleur</string>
+    <string name="agenda_color_hers">Son rose, qui ne change pas : il est à elle.</string>
+    <string name="agenda_color_help">Le rose n\'y est pas : il est à Mika.</string>
+    <string name="agenda_show_only">Afficher seulement celui-ci</string>
+    <string name="agenda_share">Partager</string>
+    <string name="agenda_share_owner_only">Partager (seul son propriétaire)</string>
+    <string name="agenda_shared_with">avec %1$s</string>
+    <string name="agenda_what_mika_does">Ce que Mika en fait</string>
+    <string name="agenda_calendar_settings">Paramètres</string>
+
+    <!-- Partager -->
+    <string name="agenda_share_title">Partager « %1$s »</string>
+    <string name="agenda_share_hers">L\'agenda de Mika ne se partage pas : c\'est ce qu\'elle retient pour toi, et ce qu\'elle retient pour chacun reste à chacun.</string>
+    <string name="agenda_share_not_owner">Seul son propriétaire, %1$s, peut partager cet agenda. Il te l\'a ouvert : %2$s.</string>
+    <string name="agenda_owner">son propriétaire</string>
+    <string name="agenda_hide_here">Ne plus l\'afficher</string>
+    <string name="agenda_hidden_here">« %1$s » ne s\'affiche plus dans ton Agenda. Son propriétaire peut toujours retirer son partage.</string>
+    <string name="agenda_caldav_server">le serveur CalDAV</string>
+    <string name="agenda_share_here_only">Ce partage se fait ici, dans Mika : la personne verra « %1$s » dans son Agenda de Mika. Il ne change rien chez %2$s, et un partage fait chez %2$s ne se voit pas ici.</string>
+    <string name="agenda_share_with">Avec qui</string>
+    <string name="agenda_share_nobody">Personne d\'autre n\'a de compte sur ce serveur : il n\'y a personne avec qui le partager.</string>
+    <string name="agenda_share_accounts_only">Seulement une personne qui a un compte sur ce serveur : jamais « tout le monde », jamais un lien public.</string>
+    <string name="agenda_share_can">Ce que la personne peut</string>
+    <string name="agenda_share_with_who">Partager avec %1$s</string>
+    <string name="agenda_shares_now">Partages en cours · %1$d</string>
+    <string name="agenda_shares_none">Personne pour l\'instant.</string>
+    <string name="agenda_share_remove">Retirer le partage avec %1$s</string>
+    <string name="agenda_what_mika_does_each">Ce que Mika en fait avec chacun</string>
+    <string name="agenda_tools_rights">Outils › Droits</string>
+    <string name="agenda_share_named">Partager « %1$s »</string>
+    <string name="agenda_share_manage">Gérer le partage</string>
+
+    <!-- La fiche d'un événement -->
+    <string name="agenda_ask_mika">Demander à Mika</string>
+    <string name="agenda_ask_about">à propos de « %1$s » (%2$s) : </string>
+    <string name="agenda_talk_to_her">Lui en parler</string>
+    <string name="agenda_talk_about">à propos de « %1$s » : </string>
+    <string name="agenda_duplicate">Dupliquer</string>
+    <string name="agenda_copy_to_mine">Copier dans mes agendas</string>
+    <string name="agenda_settings_named">Paramètres de « %1$s »</string>
+    <string name="agenda_one_of_series">Une occurrence d\'une série</string>
+    <string name="agenda_join">Rejoindre la réunion</string>
+    <string name="agenda_busy">Occupé</string>
+    <string name="agenda_free">Disponible</string>
+    <string name="agenda_private">privé</string>
+    <string name="agenda_visibility_default">visibilité par défaut</string>
+    <string name="agenda_visibility_default_cap">Visibilité par défaut</string>
+    <string name="agenda_organized_by">Organisé par %1$s, qui seul le modifie</string>
+    <string name="agenda_organizer">l\'organisateur</string>
+    <string name="agenda_added">Ajouté par Mika</string>
+    <string name="agenda_added_on">Ajouté par Mika, le %1$s</string>
+    <string name="agenda_see_conversation">Voir la conversation</string>
+    <string name="agenda_invites_you">%1$s t\'invite</string>
+    <string name="agenda_in_calendar">dans « %1$s »</string>
+    <string name="agenda_you_answered">Tu as répondu %1$s.</string>
+    <string name="agenda_prepared_title">Mika a préparé ta réponse · elle attend ton accord</string>
+    <string name="agenda_send_hers">Envoyer sa réponse</string>
+    <string name="agenda_edit_word">Modifier le mot</string>
+    <string name="agenda_no_thanks">Non merci</string>
+    <string name="agenda_participate">Participer ?</string>
+    <plurals name="agenda_participants">
+        <item quantity="one">%1$d participant</item>
+        <item quantity="many">%1$d participants</item>
+        <item quantity="other">%1$d participants</item>
+    </plurals>
+    <string name="agenda_you">(toi)</string>
+    <string name="agenda_reminders">Rappels</string>
+    <string name="agenda_remind_this">pour cet événement</string>
+    <string name="agenda_remind_calendar">le réglage de « %1$s »</string>
+    <string name="agenda_remind_how">dans le chat, ou par une notification</string>
+    <string name="agenda_remind_title">Mika te le rappelle</string>
+    <string name="agenda_remind_sheet_note">« %1$s » · elle te l\'écrit dans le chat, ou par une notification si l\'app est fermée. Par défaut, le réglage de « %2$s ».</string>
+    <string name="agenda_delete_series">Supprimer un événement récurrent</string>
+    <string name="agenda_edit_series">Modifier un événement récurrent</string>
+    <string name="agenda_remove_invitation">Retirer l\'invitation</string>
+    <string name="agenda_delete_event">Supprimer l\'événement ?</string>
+    <string name="agenda_no_title">(sans titre)</string>
+    <string name="agenda_remove_invitation_text">Retirer « %1$s » de ton agenda ? C\'est la refuser : la réponse part à qui l\'organise.</string>
+    <string name="agenda_delete_text">« %1$s » disparaît aussi %2$s.</string>
+    <string name="agenda_participants_warned">Les participants sont prévenus.</string>
+    <string name="agenda_answer_to">Répondre à %1$s</string>
+    <string name="agenda_word_label">Le mot qui part avec</string>
+    <string name="agenda_word_via">Préparé par Mika ; il part %1$s.</string>
+    <string name="agenda_word_in_agenda">dans son Agenda</string>
+
+    <!-- Ce que Mika propose, sa mémoire -->
+    <string name="agenda_proposes_to">Mika propose de l\'ajouter à « %1$s »</string>
+    <string name="agenda_your_agenda">ton agenda</string>
+    <string name="agenda_owner_decides">Son propriétaire en décide : elle attend son accord.</string>
+    <string name="agenda_invited">Invités : %1$s</string>
+    <string name="agenda_will_remind">Mika te le rappellera : %1$s</string>
+    <string name="agenda_what_leaves">Voir exactement ce qui partira</string>
+    <string name="agenda_only_buttons">Seuls ces boutons décident : un « oui » tapé dans la conversation ne vaut pas accord.</string>
+    <string name="agenda_her_promise">Ce qu\'elle t\'a promis</string>
+    <string name="agenda_her_moment">Ce qu\'elle retient de ta vie</string>
+    <string name="agenda_her_yearly">Ce qu\'elle retient, chaque année</string>
+    <string name="agenda_said_on">Dit le %1$s.</string>
+    <string name="agenda_hers">L\'agenda de Mika</string>
+    <string name="agenda_hers_line">sa mémoire · lecture seule</string>
+    <string name="agenda_hers_note">C\'est sa mémoire, montrée comme un agenda : on ne le modifie pas ici. Dis-le-lui : « c\'est fait », « c\'est reporté à lundi », « oublie ça ». Elle ne te montre que ce qui te concerne, jamais ce qu\'un autre lui a confié.</string>
+
+    <!-- Le formulaire -->
+    <string name="agenda_form_new">Nouvel événement</string>
+    <string name="agenda_form_edit">Modifier</string>
+    <string name="agenda_form_copy">Dupliquer</string>
+    <string name="agenda_form_proposal">Ce que Mika propose</string>
+    <string name="agenda_form_close">Fermer sans enregistrer</string>
+    <string name="agenda_form_proposal_title">Ce que Mika propose</string>
+    <string name="agenda_form_proposal_text">Change ce que tu veux : « Ajouter » l\'enregistre dans ton agenda, avec tes changements.</string>
+    <string name="agenda_form_title">Ajouter un titre</string>
+    <string name="agenda_form_all_day">Journée entière</string>
+    <string name="agenda_form_start">Début</string>
+    <string name="agenda_form_end">Fin</string>
+    <string name="agenda_form_zone">Fuseau horaire</string>
+    <string name="agenda_form_repeat">Se répète</string>
+    <string name="agenda_form_no_repeat">Ne se répète pas</string>
+    <string name="agenda_form_custom">Personnalisée</string>
+    <string name="agenda_form_every">Tous les</string>
+    <string name="agenda_form_ends">Se termine</string>
+    <string name="agenda_form_ends_never">jamais</string>
+    <string name="agenda_form_ends_on">le…</string>
+    <string name="agenda_form_ends_after">après…</string>
+    <string name="agenda_form_last_day">Le dernier jour</string>
+    <string name="agenda_form_times">Combien de fois</string>
+    <string name="agenda_form_guests">Ajouter des participants</string>
+    <string name="agenda_form_guest_remove">Retirer %1$s</string>
+    <string name="agenda_form_guests_system">Une personne qui a un compte ici reçoit l\'invitation dans son Agenda ; les autres, rien.</string>
+    <string name="agenda_form_guests_provider">L\'invitation part par l\'agenda choisi.</string>
+    <string name="agenda_form_visio">Visio</string>
+    <string name="agenda_form_add_visio">Ajouter une visio</string>
+    <string name="agenda_form_no_visio">Pas de visio</string>
+    <string name="agenda_form_paste_link">Coller un lien…</string>
+    <string name="agenda_form_place">Ajouter un lieu</string>
+    <string name="agenda_system_no_reminders">L\'agenda du système n\'envoie rien lui-même : c\'est Mika qui te le rappelle.</string>
+    <string name="agenda_form_no_alert">« %1$s » ne garde pas de rappel d\'ici.</string>
+    <string name="agenda_form_alert_remove">Retirer ce rappel</string>
+    <string name="agenda_form_one_alert">Outlook n\'en garde qu\'un, une notification.</string>
+    <string name="agenda_form_add_alert">Ajouter une notification</string>
+    <string name="agenda_form_calendar">Agenda</string>
+    <string name="agenda_form_stays">Un événement reste dans son agenda : pour le mettre ailleurs, duplique-le.</string>
+    <string name="agenda_form_description">Ajouter une description</string>
+    <string name="agenda_form_show_as">Afficher comme</string>
+    <string name="agenda_form_visibility">Visibilité</string>
+    <string name="agenda_form_private">Privée : on ne voit que « occupé »</string>
+
+    <!-- Les invitations, chercher -->
+    <plurals name="agenda_invitations_waiting">
+        <item quantity="one">%d attend ta réponse</item>
+        <item quantity="many">%d attendent ta réponse</item>
+        <item quantity="other">%d attendent ta réponse</item>
+    </plurals>
+    <string name="agenda_invitations_none_waiting">aucune en attente</string>
+    <string name="agenda_invitations_empty">Tout est répondu. Une invitation reçue par Outlook, Google ou CalDAV — ou d\'une personne qui a un compte ici — arrive ici, avec la réponse que Mika te prépare.</string>
+    <string name="agenda_invitations_note">Une invitation arrive par ton agenda (Outlook, Google, CalDAV) et ta réponse repart par lui. Mika prépare une réponse ; elle ne l\'envoie jamais sans ton accord.</string>
+    <string name="agenda_search_hint">Chercher dans tes agendas</string>
+    <string name="agenda_search_lede">Un titre, un lieu, une personne : dans les agendas cochés, des 90 derniers jours à l\'année qui vient. Deux lettres au moins.</string>
+    <string name="agenda_search_none">Aucun événement ne correspond à « %1$s » dans tes agendas cochés.</string>
+    <string name="agenda_answer_series">Ta réponse vaut pour toute la série.</string>
+    <string name="agenda_search_unchecked">Aucun agenda n\'est coché : coche ceux où chercher dans « Agendas à afficher ».</string>
+    <string name="agenda_search_more">les 50 plus proches</string>
+    <plurals name="agenda_search_results">
+        <item quantity="one">%d résultat</item>
+        <item quantity="many">%d résultats</item>
+        <item quantity="other">%d résultats</item>
+    </plurals>
+
+    <!-- Outils › Droits -->
+    <string name="agenda_rights_title">Agenda · %1$s</string>
+    <string name="agenda_rights_group">Tes agendas</string>
+    <string name="agenda_rights_alone">%1$d seule</string>
+    <string name="agenda_rights_ask">%1$d accord</string>
+    <string name="agenda_rights_no">%1$d non</string>
+    <string name="agenda_rights_share_tag">partage · %1$s</string>
+    <string name="agenda_rights_withdraw">Retirer le partage</string>
+    <string name="agenda_rights_withdraw_text">%1$s ne verra plus « %2$s » dans son Agenda, et sa ligne quitte le tableau.</string>
+    <string name="agenda_rights_default">Par défaut</string>
+    <string name="agenda_rights_default_reads">elle le lit</string>
+    <string name="agenda_rights_default_closed">fermé : personne d\'autre</string>
+    <string name="agenda_rights_reset">Revenir au tableau de départ</string>
+    <string name="agenda_rights_note">Avec ton accord : une carte dans le chat, avec exactement ce qui partira. « Ce qu\'elle en garde » : ce qu\'elle retient de ce qu\'elle y lit (rien · un souvenir · un savoir · une confidence). Qui, par où et quand se règlent dans la console.</string>
+    <string name="agenda_rights_its">Ses droits</string>
+    <string name="agenda_rights_its_table">Son tableau de droits</string>
+    <string name="agenda_rights_its_table_help">Son tableau : lire, ajouter, répondre aux invitations, ce qu\'elle en garde</string>
+
+    <!-- La carte d'un ajout dans le chat -->
+    <string name="agenda_chat_card_heading">Ajouter à ton agenda « %1$s »</string>
+    <string name="agenda_chat_card_raw">Ce qui partira</string>
+    <string name="agenda_chat_card_remind">Mika te le rappelle : %1$s</string>
+
+    <!-- Paramètres › Agendas -->
+    <string name="agenda_settings_title">Agendas</string>
+    <string name="agenda_settings_line">Google, Outlook, CalDAV, iCal, ce serveur</string>
+    <plurals name="agenda_settings_sub">
+        <item quantity="one">%1$d compte · à toi</item>
+        <item quantity="many">%1$d comptes · à toi</item>
+        <item quantity="other">%1$d comptes · à toi</item>
+    </plurals>
+    <string name="agenda_settings_lede">Tes agendas, d\'où qu\'ils viennent. Tu les vois tous dans l\'Agenda ; Mika s\'en sert selon ce que tu règles ici et dans Outils › Droits.</string>
+    <string name="agenda_settings_accounts">Tes comptes</string>
+    <string name="agenda_settings_shared">Partagé avec toi</string>
+    <string name="agenda_settings_shared_line">%1$s, %2$s · Dans l\'Agenda</string>
+    <string name="agenda_settings_hers_text">Ce qu\'elle t\'a promis pour une date, et ce qu\'elle retient de ta vie à venir, montrés comme un agenda, en lecture seule. Rien n\'y est recopié : c\'est sa mémoire ; on le corrige en le lui disant.</string>
+    <string name="agenda_settings_hers_note">Elle ne te montre que ce qui te concerne : ce que d\'autres lui confient n\'y paraît jamais.</string>
+    <string name="agenda_settings_all">Pour tous tes agendas</string>
+    <string name="agenda_settings_zone">Fuseau horaire</string>
+    <string name="agenda_settings_zone_help">Celui de ce serveur : l\'Agenda s\'y lit, et ce que tu écris s\'y dit, sauf un autre choisi pour un événement.</string>
+    <string name="agenda_settings_window">Ce qui se synchronise</string>
+    <string name="agenda_settings_window_help">Les 90 derniers jours et l\'année qui vient.</string>
+    <string name="agenda_settings_window_tag">90 j · 1 an</string>
+    <string name="agenda_settings_max">Combien de comptes</string>
+    <string name="agenda_settings_max_help">Ceux que tu branches, en plus de ton agenda du système.</string>
+    <string name="agenda_settings_max_tag">%1$d au plus</string>
+    <string name="agenda_settings_notifications">Notifications de l\'agenda</string>
+    <string name="agenda_settings_notifications_help">Un seul canal sur ce téléphone, « Agenda » : tes invitations et ce que Mika propose. Ses rappels sont des messages d\'elle.</string>
+    <string name="agenda_settings_adjust">Régler</string>
+    <string name="agenda_plug_short">Brancher</string>
+    <string name="agenda_account_gone">Ce compte n\'existe plus : il a été retiré, ou il n\'est pas à toi.</string>
+    <string name="agenda_calendar_gone">Cet agenda n\'existe plus : il a été retiré, ou il n\'est pas à toi.</string>
+    <string name="agenda_account_to_connect">À connecter : ses agendas ne se relisent pas en attendant.</string>
+    <string name="agenda_connect">Se connecter</string>
+    <string name="agenda_reconnect">Se reconnecter</string>
+    <string name="agenda_disconnect">Déconnecter</string>
+    <string name="agenda_disconnect_title">Déconnecter ce compte</string>
+    <string name="agenda_disconnect_text">Sa connexion est retirée (chez Google aussi) et oubliée. Le compte reste, à reconnecter ; ses agendas ne se relisent plus en attendant.</string>
+    <string name="agenda_sync">Synchroniser</string>
+    <string name="agenda_account_calendars">Ses agendas</string>
+    <string name="agenda_account_no_calendar">Pas encore d\'agenda : la synchronisation les apporte.</string>
+    <string name="agenda_default_tag">par défaut</string>
+    <string name="agenda_new_calendar">Créer un agenda</string>
+    <string name="agenda_new_calendar_provider">Il se crée chez le fournisseur de ce compte.</string>
+    <string name="agenda_find_more">Chercher d\'autres agendas</string>
+    <string name="agenda_find_more_help">sur ce compte</string>
+    <string name="agenda_account_title">Le compte</string>
+    <string name="agenda_account_name">Nom</string>
+    <string name="agenda_account_name_help">Comme tu l\'appelles, et comme elle l\'appelle.</string>
+    <string name="agenda_account_connection">Connexion</string>
+    <string name="agenda_account_connection_system">Rien à brancher : il est sur ce serveur, rien ne sort d\'ici.</string>
+    <string name="agenda_on_this_server">sur ce serveur</string>
+    <string name="agenda_account_google">Compte Google</string>
+    <string name="agenda_account_google_help">Par l\'application Google de ce serveur (OAuth 2), réglée par l\'opérateur.</string>
+    <string name="agenda_account_microsoft">Compte Microsoft</string>
+    <string name="agenda_account_microsoft_help">Par un code à entrer chez Microsoft, avec l\'application Microsoft de ce serveur.</string>
+    <string name="agenda_connected">connecté</string>
+    <string name="agenda_waiting">en attente</string>
+    <string name="agenda_to_connect">à connecter</string>
+    <string name="agenda_account_ics">Adresse .ics</string>
+    <string name="agenda_account_ics_help">Une adresse secrète donne à lire tout l\'agenda : garde-la pour toi. Elle ne se relit pas ici.</string>
+    <string name="agenda_account_ics_kept">gardée — laisse vide pour ne pas la changer</string>
+    <string name="agenda_account_ics_placeholder">https://…/basic.ics</string>
+    <string name="agenda_account_server">Adresse du serveur</string>
+    <string name="agenda_account_username">Identifiant</string>
+    <string name="agenda_account_password">Mot de passe d\'application</string>
+    <string name="agenda_account_password_help">Pas celui de ton compte : un mot de passe fait pour une application. Le serveur ou l\'identifiant changent : redonne-le.</string>
+    <string name="agenda_account_password_kept">scellé : laisse vide pour le garder</string>
+    <string name="agenda_try">Essayer</string>
+    <string name="agenda_account_sync">Synchronisation</string>
+    <string name="agenda_account_sync_help">Elle relit ce qui a changé d\'elle-même ; une modification part tout de suite.</string>
+    <string name="agenda_account_sync_ical">Un abonnement se relit à son rythme.</string>
+    <string name="agenda_account_share">Partage</string>
+    <string name="agenda_account_share_note">Un agenda se partage ici, dans Mika, avec une personne qui a un compte : elle le voit dans son Agenda de Mika. Ça ne change rien chez %1$s, et un partage fait chez %1$s ne se voit pas ici.</string>
+    <string name="agenda_nobody">Personne</string>
+    <string name="agenda_account_remove">Retirer ce compte</string>
+    <string name="agenda_account_remove_note">Ses agendas disparaissent de ton Agenda et de ce que Mika voit ; rien n\'est effacé chez le fournisseur.</string>
+    <string name="agenda_account_remove_title">Retirer ce compte ?</string>
+    <string name="agenda_account_remove_text">« %1$s » : ses agendas disparaissent de ton Agenda et de ce que Mika voit. Rien n\'est effacé chez le fournisseur ; ses partages dans Mika s\'arrêtent.</string>
+    <string name="agenda_calendar_provider_name">Chez son fournisseur : %1$s. Ce nom n\'est qu\'ici ; vide, il reprend le sien.</string>
+    <string name="agenda_calendar_rename_help">Renommer un agenda branché ne change son nom qu\'ici.</string>
+    <string name="agenda_in_agenda">Dans l\'Agenda</string>
+    <string name="agenda_in_agenda_on">Tu le vois ; Mika s\'en sert.</string>
+    <string name="agenda_in_agenda_off">Masqué : il reste branché, il ne s\'affiche plus, et Mika ne s\'en sert plus.</string>
+    <string name="agenda_can">On peut</string>
+    <string name="agenda_can_write">lire et écrire</string>
+    <string name="agenda_can_read">lire seulement</string>
+    <string name="agenda_default_title">Agenda par défaut</string>
+    <string name="agenda_default_help">Un événement créé sans dire où va ici.</string>
+    <string name="agenda_provider_reminders">Ceux du fournisseur</string>
+    <string name="agenda_remind_default_help">Le réglage de départ de ses événements ; chacun peut avoir le sien.</string>
+    <string name="agenda_by_default_plain">Par défaut (le réglage du serveur)</string>
+    <string name="agenda_remind_calendar_title">« %1$s » : Mika te le rappelle</string>
+
+    <!-- Brancher un agenda -->
+    <string name="agenda_plug_kind">Brancher · %1$s</string>
+    <string name="agenda_plug_lede">Il sera à toi. Tu choisis ceux de ses agendas que tu vois ; ce que Mika en fait se règle ensuite dans Outils › Droits.</string>
+    <string name="agenda_plug_yours">Il sera à toi. Mika s\'en sert selon son tableau, que tu règles ensuite dans Outils › Droits.</string>
+    <string name="agenda_plug_system_title">Un agenda de ce serveur</string>
+    <string name="agenda_plug_system_text">Chaque personne qui a un compte a déjà « Mon agenda ». Crée-en d\'autres pour ranger ta vie (« Sport », « Maison »…). Il vit sur ce serveur : rien ne sort d\'ici, et tu le partages avec qui a un compte.</string>
+    <string name="agenda_plug_system_example">Sport</string>
+    <string name="agenda_plug_system_create">Créer l\'agenda</string>
+    <string name="agenda_plug_google_1">Se connecter à Google</string>
+    <string name="agenda_plug_google_no_app">L\'application Google de ce serveur n\'est pas réglée : demande-le à qui s\'occupe d\'elle. Sans elle, Google refuse de te connecter.</string>
+    <string name="agenda_plug_google_ical">En attendant, tu peux t\'abonner à l\'adresse secrète iCal de ton agenda Google : en lecture seule.</string>
+    <string name="agenda_plug_ical_short">Un abonnement iCal</string>
+    <string name="agenda_plug_google_1_text">Google s\'ouvre dans ton navigateur : choisis ton compte, puis accepte que Mika lise et modifie tes agendas.</string>
+    <string name="agenda_plug_google_open">Ouvrir Google dans le navigateur</string>
+    <string name="agenda_plug_google_app">Avec l\'application Google de ce serveur, réglée par l\'opérateur.</string>
+    <string name="agenda_plug_google_2">Colle l\'adresse de la page qui n\'a pas pu s\'ouvrir</string>
+    <string name="agenda_plug_google_2_direct">Reviens de Google avec l\'adresse de sa page</string>
+    <string name="agenda_plug_google_direct">Après ton accord, Google renvoie le navigateur vers une page de ce serveur, « Encore une étape » : copie son adresse et colle-la ici. Si ce navigateur est connecté à Mika, la connexion se finit toute seule.</string>
+    <string name="agenda_waiting_google">En attente de Google…</string>
+    <string name="agenda_plug_google_2_text">Après ton accord, Google renvoie le navigateur vers une adresse qui commence par http://127.0.0.1. La page ne s\'ouvre pas, c\'est normal : son adresse porte le code qui prouve ton accord.</string>
+    <string name="agenda_plug_unreachable">Ce site est inaccessible</string>
+    <string name="agenda_plug_unreachable_text">127.0.0.1 n\'autorise pas la connexion.</string>
+    <string name="agenda_plug_google_how">Dans Chrome, touche la barre d\'adresse (l\'adresse entière se sélectionne), touche « Copier », puis reviens dans Mika et touche « Coller ».</string>
+    <string name="agenda_plug_google_field">L\'adresse de la page</string>
+    <string name="agenda_paste">Coller</string>
+    <string name="agenda_validate">Valider</string>
+    <string name="agenda_plug_google_reopen">Rouvrir la page de Google</string>
+    <string name="agenda_plug_google_https">Si ce serveur a une adresse en https, Google y revient tout seul et cette étape disparaît.</string>
+    <string name="agenda_plug_choose">Choisis tes agendas</string>
+    <string name="agenda_plug_syncing">Synchronisation… Ses agendas arrivent ici dès qu\'ils sont lus.</string>
+    <plurals name="agenda_plug_found">
+        <item quantity="one">%1$s · %2$d agenda trouvé. S\'il est décoché, il reste branché, sans s\'afficher : Mika ne s\'en sert pas.</item>
+        <item quantity="many">%1$s · %2$d agendas trouvés. Ceux que tu décoches restent branchés, sans s\'afficher : Mika ne s\'en sert pas.</item>
+        <item quantity="other">%1$s · %2$d agendas trouvés. Ceux que tu décoches restent branchés, sans s\'afficher : Mika ne s\'en sert pas.</item>
+    </plurals>
+    <string name="agenda_read_only">lecture seule</string>
+    <string name="agenda_plug_microsoft_1">Ton compte Microsoft</string>
+    <string name="agenda_plug_microsoft_no_app">L\'application Microsoft de ce serveur n\'est pas réglée : demande-le à qui s\'occupe d\'elle. Un Outlook pro passe aussi par CalDAV avec DavMail.</string>
+    <string name="agenda_plug_microsoft_1_text">Outlook.com, Hotmail, Live, ou un compte Microsoft 365. Un compte pro dépend de l\'accord de son organisation : si elle le refuse, passe par CalDAV avec DavMail.</string>
+    <string name="agenda_plug_davmail_short">CalDAV avec DavMail</string>
+    <string name="agenda_plug_address">Adresse</string>
+    <string name="agenda_plug_get_code">Obtenir un code</string>
+    <string name="agenda_plug_microsoft_2">Entre le code chez Microsoft</string>
+    <string name="agenda_plug_your_code">Ton code</string>
+    <string name="agenda_plug_until">valable jusqu\'à %1$s</string>
+    <string name="agenda_plug_copy_code">Copier le code</string>
+    <string name="agenda_plug_open_microsoft">Ouvrir Microsoft</string>
+    <string name="agenda_plug_microsoft_how">« Ouvrir Microsoft » ouvre microsoft.com/devicelogin dans le navigateur : colle le code, puis accepte. Reviens ici : Mika se connecte dès que c\'est fait, rien à coller.</string>
+    <string name="agenda_waiting_microsoft">En attente de Microsoft…</string>
+    <string name="agenda_plug_caldav_1">Le serveur</string>
+    <string name="agenda_plug_help_for">Une aide pour</string>
+    <string name="agenda_plug_caldav_2">Les agendas trouvés</string>
+    <plurals name="agenda_plug_caldav_found">
+        <item quantity="one">Connexion réussie : %1$d agenda trouvé.</item>
+        <item quantity="many">Connexion réussie : %1$d agendas trouvés.</item>
+        <item quantity="other">Connexion réussie : %1$d agendas trouvés.</item>
+    </plurals>
+    <string name="agenda_plug_button">Brancher</string>
+    <string name="agenda_plug_caldav_after">Il sera à toi. Tu choisis ensuite ceux de ses agendas que tu vois, dans sa page.</string>
+    <string name="agenda_plug_ical_1">L\'adresse de l\'abonnement</string>
+    <string name="agenda_plug_ical_text">Une adresse .ics : les jours fériés, le calendrier d\'un club, ou l\'adresse secrète d\'un agenda Google ou Outlook. Lecture seule : ni toi ni Mika n\'y écrivez.</string>
+    <string name="agenda_plug_ical_example">Jours fériés</string>
+    <string name="agenda_plug_subscribe">S\'abonner</string>
+    <string name="agenda_plug_ical_after">Il se relit aussitôt, puis à son rythme. Sa couleur se choisit ensuite, dans sa page.</string>
+</resources>

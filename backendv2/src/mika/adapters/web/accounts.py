@@ -578,25 +578,39 @@ class Accounts:
         """Où notifier ce téléphone. Le même jeton Firebase quitte tout autre jeton de l'application : une
         application réinstallée sans déconnexion laisse l'ancien jeton vivant, il ne recevrait pas en double."""
         now = int(time.time())
+        moved: list[bool] = []
 
         def write(sql: Any) -> None:
-            sql.execute(update(ClientTokenRow)
-                        .where(ClientTokenRow.push_token == device_token, ClientTokenRow.id != token_id)
-                        .values(push_token=None, push_key=None))
+            left = sql.execute(update(ClientTokenRow)
+                               .where(ClientTokenRow.push_token == device_token, ClientTokenRow.id != token_id)
+                               .values(push_token=None, push_key=None))
+            # ce que montrent ses téléphones (``push``) : un jeton qui reçoit désormais, un autre qui ne reçoit plus
+            had = sql.query(select(ClientTokenRow.push_token).where(ClientTokenRow.id == token_id,
+                                                                    ClientTokenRow.revoked_at.is_(None)))
             sql.execute(update(ClientTokenRow)
                         .where(ClientTokenRow.id == token_id, ClientTokenRow.revoked_at.is_(None))
                         .values(push_token=device_token, push_key=key, push_at=now))
+            moved.append(bool(getattr(left, "rowcount", 0)) or bool(had and had[0][0] is None))
 
         await self.store.run_mind(write)
+        if moved and moved[0]:
+            await self._changed()  # ses téléphones (ADR 0308) : ce qu'en montrent les écrans
 
     async def clear_push(self, token_id: int, device_token: str | None = None) -> None:
         """Ce téléphone ne veut plus de notifications, ou ``device_token`` (son jeton Firebase) ne vaut plus — et
         seulement s'il est toujours celui-là : un jeton neuf donné entre-temps reste."""
-        where = [ClientTokenRow.id == token_id]
+        where = [ClientTokenRow.id == token_id, ClientTokenRow.push_token.is_not(None)]
         if device_token is not None:
             where.append(ClientTokenRow.push_token == device_token)
-        await self.store.run_mind(lambda sql: sql.execute(
-            update(ClientTokenRow).where(*where).values(push_token=None, push_key=None)))
+        moved: list[bool] = []
+
+        def write(sql: Any) -> None:
+            done = sql.execute(update(ClientTokenRow).where(*where).values(push_token=None, push_key=None))
+            moved.append(bool(getattr(done, "rowcount", 0)))
+
+        await self.store.run_mind(write)
+        if moved and moved[0]:
+            await self._changed()  # ses téléphones (ADR 0308) : celui-ci ne reçoit plus
 
     def push_registrations(self, account_id: int) -> list[PushRegistration]:
         """Les téléphones vivants de ce compte qui ont dit où les notifier."""

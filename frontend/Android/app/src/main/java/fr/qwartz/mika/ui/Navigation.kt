@@ -1,6 +1,8 @@
 package fr.qwartz.mika.ui
 
 import fr.qwartz.mika.core.MikaJson
+import fr.qwartz.mika.data.moi.agenda.AgendaTarget
+import fr.qwartz.mika.data.moi.agenda.HerDate
 import fr.qwartz.mika.data.moi.carte.EventItem
 import fr.qwartz.mika.data.moi.carte.Place
 import kotlinx.serialization.SerialName
@@ -10,8 +12,8 @@ import kotlinx.serialization.builtins.ListSerializer
 /**
  * Les écrans d'une session ouverte. La connexion n'en fait pas partie : c'est la session qui la montre.
  *
- * Les rubriques du tiroir (ADR 0235, 0296, 0298) sont [isTopLevel] : le chat, Projets, Mail, Teams, Carte, Téléphone,
- * Contacts, Outils, Paramètres.
+ * Les rubriques du tiroir (ADR 0235, 0296, 0298, 0309) sont [isTopLevel] : le chat, Projets, Mail, Teams, Agenda, Carte,
+ * Téléphone, Contacts, Outils, Paramètres.
  * Les autres s'ouvrent par-dessus l'écran qui les montre (un mail, un fil, un voyage, une page de réglages).
  */
 @Serializable
@@ -119,6 +121,48 @@ sealed interface Route {
     @Serializable @SerialName("teams_replies")
     data object TeamsReplies : Route
 
+    // ── Agenda (ADR 0309) ───────────────────────────────────────────────
+    /** Ses agendas, dans la dernière vue choisie (Planning · Jour · 3 jours · Semaine · Mois). */
+    @Serializable @SerialName("agenda")
+    data object Agenda : Route
+
+    /** La fiche d'un événement (une occurrence d'une série, par sa clé). */
+    @Serializable @SerialName("agenda_event")
+    data class AgendaEvent(val event: Int, val occurrence: String = "") : Route
+
+    /** Ce que Mika propose d'ajouter, par son numéro (celui de sa carte d'accord). */
+    @Serializable @SerialName("agenda_proposal")
+    data class AgendaProposal(val id: Int) : Route
+
+    /** Une date de « L'agenda de Mika » : sa mémoire, telle que la période l'a lue. */
+    @Serializable @SerialName("agenda_her")
+    data class AgendaHer(val date: HerDate) : Route
+
+    /**
+     * Le formulaire en plein écran : [mode] `nouveau` (à [day], à [minute] si un créneau a été touché), `modifier`,
+     * `dupliquer` (l'occurrence [event]/[occurrence]), `proposition` (ce que Mika propose, [proposal]).
+     */
+    @Serializable @SerialName("agenda_form")
+    data class AgendaForm(
+        val mode: String,
+        val event: Int = 0,
+        val occurrence: String = "",
+        val proposal: Int = 0,
+        val day: String = "",
+        val minute: Int = -1,
+    ) : Route
+
+    /** Ses invitations qui attendent sa réponse. */
+    @Serializable @SerialName("agenda_invitations")
+    data object AgendaInvitations : Route
+
+    @Serializable @SerialName("agenda_search")
+    data object AgendaSearch : Route
+
+    /** Outils › Droits : le tableau de droits d'un de ses agendas. */
+    @Serializable @SerialName("calendar_rights")
+    data class CalendarRights(val calendar: String) : Route
+
     // ── Carte ───────────────────────────────────────────────────────────
     /**
      * [tab] : `explorer`, `evenements`, `itineraire`, `voyages` ; [look] : ce qu'elle a cherché ou montré
@@ -175,8 +219,8 @@ sealed interface Route {
 
 /** Une rubrique du tiroir : on y arrive depuis le chat, et « retour » y ramène. */
 val Route.isTopLevel: Boolean
-    get() = this == Route.Chat || this is Route.Projects || this == Route.Mail || this == Route.Teams || this is Route.Carte ||
-        this is Route.Phone || this == Route.Contacts || this is Route.Tools || this == Route.Settings
+    get() = this == Route.Chat || this is Route.Projects || this == Route.Mail || this == Route.Teams || this == Route.Agenda ||
+        this is Route.Carte || this is Route.Phone || this == Route.Contacts || this is Route.Tools || this == Route.Settings
 
 /**
  * La pile d'écrans — une petite pile plutôt que navigation-compose. Immuable : chaque geste rend une nouvelle pile, que
@@ -252,7 +296,13 @@ data class BackStack(val routes: List<Route> = listOf(Route.Chat)) {
             DeepLinks.MAIL_DRAFTS -> BackStack(listOf(Route.Chat, Route.Mail, Route.MailDrafts))
             DeepLinks.TEAMS_REPLIES -> BackStack(listOf(Route.Chat, Route.Teams, Route.TeamsReplies))
             DeepLinks.PHONE -> BackStack(listOf(Route.Chat, Route.Phone()))
-            else -> BackStack()
+            DeepLinks.AGENDA -> BackStack(listOf(Route.Chat, Route.Agenda))
+            else -> when (val t = AgendaTarget.decode(target)) {
+                // une notification du canal « Agenda » : l'invitation ou ce que Mika propose, par-dessus l'Agenda
+                is AgendaTarget.Event -> BackStack(listOf(Route.Chat, Route.Agenda, Route.AgendaEvent(t.event, t.occurrence)))
+                is AgendaTarget.Ask -> BackStack(listOf(Route.Chat, Route.Agenda, Route.AgendaProposal(t.proposal)))
+                null -> BackStack()
+            }
         }
     }
 }
@@ -266,4 +316,6 @@ object DeepLinks {
     const val MAIL_DRAFTS = "mail_drafts"
     const val TEAMS_REPLIES = "teams_replies"
     const val PHONE = "phone"
+    /** L'Agenda ; `agenda:e:<événement>:<occurrence>` ou `agenda:p:<proposition>` ouvre ce qu'une notification dit. */
+    const val AGENDA = "agenda"
 }

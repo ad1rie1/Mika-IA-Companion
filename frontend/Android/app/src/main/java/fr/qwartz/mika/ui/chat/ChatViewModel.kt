@@ -30,6 +30,9 @@ import fr.qwartz.mika.data.net.LinkState
 import fr.qwartz.mika.data.net.MikaProtocol
 import fr.qwartz.mika.data.net.StrandInfo
 import fr.qwartz.mika.data.moi.MoiApi
+import fr.qwartz.mika.data.moi.agenda.AgendaCard
+import fr.qwartz.mika.data.moi.agenda.agendaCards
+import fr.qwartz.mika.ui.agenda.agendaApi
 import fr.qwartz.mika.data.moi.mail.MailDraft
 import fr.qwartz.mika.data.moi.teams.TeamsReply
 import fr.qwartz.mika.ui.mail.mailApi
@@ -205,6 +208,27 @@ class ChatViewModel(
     var trayTeams by mutableStateOf<List<TeamsReply>?>(null)
         private set
     private var trayLoad: Job? = null
+
+    /** Les cartes d'un ajout à l'agenda (ADR 0309) : l'événement qu'elles ajouteraient, lu dans ce que Mika propose. */
+    var trayAgenda by mutableStateOf<Map<Int, AgendaCard>>(emptyMap())
+        private set
+    private var agendaLoad: Job? = null
+
+    /** Lire les ajouts que nomment ces cartes (leur numéro est celui de la proposition) ; rien, les cartes restent
+     *  celles de toute demande d'accord. */
+    fun loadTrayAgenda(ids: List<Int>) {
+        agendaLoad?.cancel()
+        if (ids.isEmpty()) {
+            trayAgenda = emptyMap()
+            return
+        }
+        agendaLoad = viewModelScope.launch {
+            val api = graph.agendaApi()
+            val props = (api.proposals() as? MoiApi.Result.Ok)?.value?.items ?: return@launch
+            val cals = (api.calendars() as? MoiApi.Result.Ok)?.value ?: return@launch
+            trayAgenda = agendaCards(props.filter { it.id in ids }, cals.calendars, cals.zone, graph.clock.wallMs())
+        }
+    }
 
     /** « Tout accepter » envoie ses accords, un à un. */
     var acceptingAll by mutableStateOf(false)

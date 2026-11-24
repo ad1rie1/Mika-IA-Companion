@@ -2,8 +2,8 @@
 
 Ce document est pour qui écrit un client de tous les jours, `frontendv2/` ou l'application Android (ADR 0235) : ce qu'il montre à la personne connectée,
 et seulement à elle — ses boîtes, ses comptes Teams, ses téléphones, ses services, ce qu'on lui partage, ses droits, sa
-carte et ses voyages, ses projets, ses contacts. Les décisions et leurs raisons sont les ADR 0187 à 0192 de [`decisions.md`](decisions.md) (et,
-pour la carte, 0193 à 0196 et 0229 ; pour les projets, 0282 et 0290 ; pour les contacts, 0298) ; le code fait foi dans
+carte et ses voyages, ses projets, ses contacts, ses agendas. Les décisions et leurs raisons sont les ADR 0187 à 0192 de [`decisions.md`](decisions.md) (et,
+pour la carte, 0193 à 0196 et 0229 ; pour les projets, 0282 et 0290 ; pour les contacts, 0298 ; pour l'agenda, 0309) ; le code fait foi dans
 [`app/me/`](../src/mika/app/me/__init__.py). La conversation reste sur `/ws` ([`protocole-chat.md`](protocole-chat.md)) ;
 la console, celle des opérateurs, voit tout et ne passe pas par ici.
 
@@ -21,15 +21,17 @@ la console, celle des opérateurs, voit tout et ne passe pas par ici.
   **refusé** (400, `fields: {"<nom>": "N caractères au plus"}`), jamais coupé.
 - Une écriture peut porter une clé d'envoi, `Idempotency-Key` (ou `nonce` dans le corps). Le même envoi, rejoué,
   ne refait rien et répond `"deduped": true`. Cela vaut pour ce qui passe par une action de la console (Mail, Teams,
-  ses brouillons, tes voyages) et pour les créations (une boîte, un compte Teams, un service). Pour une création, la clé vaut tant
+  ses brouillons, tes voyages, l'agenda) et pour les créations (une boîte, un compte Teams, un service, un compte
+  d'agenda). Pour une création, la clé vaut tant
   que le serveur tourne. « Préremplir », redit, ne redemande rien et rend où en est la demande (`asked`, ou le
   brouillon qui attend : `draft`). Les autres réglages s'écrivent tels quels : les redire ne change rien de plus.
 - Les réglages (boîtes, comptes Teams, services, partages) se relisent puis se réécrivent d'un seul tenant, sous le
   verrou que prend aussi la console : deux personnes qui enregistrent en même temps ne s'effacent pas. Une boîte réglée
   ailleurs pendant que tu l'enregistrais n'est pas écrasée (409 : rouvre-la, puis recommence) ; retirée entre-temps,
   elle ne revient pas (404).
-- Qui n'est pas opératrice branche au plus dix ressources de chaque sorte (boîtes, comptes Teams, services : 409
-  au-delà). Elle teste une boîte ou un service, ou relève ses boîtes, au plus trente fois par minute (429 au-delà).
+- Qui n'est pas opératrice branche au plus dix ressources de chaque sorte (boîtes, comptes Teams, services, comptes
+  d'agenda : 409 au-delà). Elle teste une boîte, un service ou un serveur CalDAV, ou relève ses boîtes, au plus trente
+  fois par minute (429 au-delà).
 - Toute réponse est `Cache-Control: no-store`, sauf les tuiles, polices et icônes du fond de carte (§ 10). Les instants sont en **millisecondes** depuis l'époque (0 : jamais).
 
 Les erreurs sont `{"error": "…"}` en français, plus `fields` (un message par champ) quand un formulaire est refusé ;
@@ -57,7 +59,7 @@ révoqué) est audité aussi (`moi.<geste>`). Une écriture réussie rend `{"ok"
 
 ```json
 {"username": "adrien", "name": "Adrien Moreau", "handle": "user_1", "person": "user_1", "operator": true,
- "owner": true, "counts": {"mail": 7, "teams": 1, "phone": 0, "projects": 3}, "correct": true}
+ "owner": true, "counts": {"mail": 7, "teams": 1, "phone": 0, "projects": 3, "agenda": 2}, "correct": true}
 ```
 
 - `person` : la clé de sa personne (ce qu'une ressource nomme dans son propriétaire, `personne:<clé>`).
@@ -65,16 +67,80 @@ révoqué) est audité aussi (`moi.<geste>`). Une écriture réussie rend `{"ok"
 - `counts` : pour la barre du haut, ce qui attend ta décision (ADR 0200) — `mail` : ses brouillons qui attendent,
   dans tes boîtes seulement (les non-lus ont leurs compteurs, dossier par dossier : `GET …/mail/boxes`) ; `teams` : ses
   réponses qui attendent ta décision ; `phone` : ses réponses offertes au téléphone ; `projects` : ce qui t'attend, toi,
-  dans tes projets (« À faire », § 11).
+  dans tes projets (« À faire », § 11) ; `agenda` : tes invitations qui attendent ta réponse, et ce que Mika propose
+  d'écrire dans tes agendas dont tu décides (§ 13).
 - `correct` : « Corriger » marche — un modèle est donné au rôle `correct` (ADR 0307) ; faux, le bouton reste éteint.
 
 **`POST /api/moi/correct`** — « Corriger » (ADR 0307), dans le champ de Mail et de Teams : `text` (20 000 caractères au
-plus) → `{"text", "changes"}`, le texte, ses fautes corrigées (orthographe, accents, accords, conjugaison,
-homophones, ponctuation et ses espaces) sans en changer les mots, et combien d'endroits ont changé (0 : rien à
-corriger, le texte tel quel ; ses blancs de bord sont toujours les tiens). Un appel au modèle au premier plan, sans
-persona ; rien n'est gardé. Vide : 400 ; aucun modèle ne corrige : 409 ; plus de vingt par minute et par compte : 429 ;
-une réponse qui ne ressemble plus au texte (une reformulation) : 422, ton texte n'est pas remplacé ; le modèle n'a pas
-répondu : 502.
+plus) → `{"text", "changes", "refused"}`, le texte, ses fautes corrigées (orthographe, accents, accords, conjugaison,
+homophones, ponctuation et ses espaces) **sans en changer les mots** : la réponse du modèle est alignée mot par mot
+sur ton texte, et seules s'appliquent les corrections qui ne touchent pas aux mots. `changes` : combien de
+corrections (0 : le texte tel quel) ; `refused` : combien de changements du modèle ont été écartés (un mot ajouté ou
+retiré, un chiffre changé, un mot remplacé par un autre) — quand il en écarte plus qu'il n'en corrige, rien n'est
+posé. Ses blancs de bord sont toujours les tiens. Un appel au modèle au premier plan, sans persona, une correction à la
+fois par compte ; rien n'est gardé. Vide : 400 ; aucun modèle ne corrige : 409 ; une correction déjà en cours, ou plus
+de vingt par minute et par compte : 429 ; trop long pour être corrigé d'un coup : 413 ; une réponse incomplète du
+modèle (un refus) : 422 — jamais posée, même en partie ; le modèle n'a pas répondu : 502.
+
+## 2 bis. Le direct : la trame `changed` (ADR 0308)
+
+Rien ne se relit à intervalles. Ce qui change ce que montrent ces routes est poussé sur la connexion du chat (`/ws`,
+[`protocole-chat.md`](protocole-chat.md)) que le client a déjà ouverte : une trame `changed` dit **quoi** a changé,
+jamais le contenu, et l'écran relit la route qu'il montre. Seule une connexion authentifiée la reçoit, y compris celle
+d'une application quittée depuis peu (`here` faux).
+
+```json
+{"type": "changed",
+ "changes": [{"topic": "mail", "boxes": ["pro"]}, {"topic": "mail.drafts"}, {"topic": "me"}]}
+```
+
+| `topic` | Clés (absentes : tout le domaine) | Ce qu'on relit |
+|---|---|---|
+| `me` | — | `GET /api/moi` (les pastilles, son nom) |
+| `mail` | `boxes` | `…/mail/boxes`, la page de `…/mail/messages` affichée (une de ces boîtes, ou toutes), le mail ouvert s'il est dans l'une d'elles, `…/mail/sent` |
+| `mail.drafts` | `boxes` | `…/mail/drafts` |
+| `mail.work` | `refs` | `…/mail/work?ref=` du mail ouvert, s'il est nommé |
+| `teams` | `conversations` | `…/teams/accounts`, `…/teams/conversations`, le fil ouvert s'il est nommé |
+| `teams.replies` | — | `…/teams/replies` |
+| `teams.work` | `conversations` | `…/teams/work?conversation=` du fil ouvert, s'il est nommé |
+| `phone` | `conversations` | `…/phone/conversations`, le fil ouvert s'il est nommé (ses `offers` avec) |
+| `phone.position` | — | `…/phone/position` |
+| `phone.phones` | — | `…/phone/phones` |
+| `contacts` | — | les contacts (§ 12) |
+| `agenda` | `calendars` | `…/agenda/calendars`, la période affichée (si elle montre un de ces agendas), l'événement ouvert, `…/agenda/invitations`, `…/agenda/proposals`, `…/agenda/accounts` (Paramètres › Agendas) — sans clé : tout l'agenda (un compte synchronisé, sa connexion, un réglage) |
+| `projects` | `projects` | `…/projets`, « À faire », « Accords », la fiche ouverte si elle est nommée (et ses onglets) |
+| `trips` | — | `…/voyages`, le voyage ouvert |
+| `settings` | — | Paramètres : boîtes, comptes Teams, services, partages, droits (§ 6 à 9) |
+
+- **Seulement ce que tu peux voir.** Une trame ne nomme que tes ressources et celles qu'on te partage, par les mêmes
+  règles que ces routes : une boîte, une conversation ou un projet d'une autre personne n'y paraît jamais, même sans
+  son contenu.
+- **Regroupée.** Ce qui change en rafale (une relève de cinquante mails, un lot de l'extension Teams) part en une
+  trame, ~150 ms après le premier changement. Un même `topic` part au plus trois fois d'affilée, puis une fois par
+  seconde tant qu'il revient (une boîte qu'on range des heures durant, une étape après l'autre) : ce qui attend son
+  tour part dès qu'il le peut, jamais perdu. Ce qui arrive pendant qu'une trame te part encore s'y réunit et part
+  juste après, en une. Un `topic` inconnu se tait ; une clé inconnue se lit comme « tout le domaine ».
+- **Sans clé, tout le domaine.** Ce qui ne se nomme pas (l'oubli d'un correspondant, une photo de profil, un contact
+  réuni à un autre) part sans clé, à qui a quelque chose dans ce domaine. Ce qui change qui voit quoi part sans clé à
+  toutes — celle qui vient de perdre l'accès doit le savoir aussi : les propriétaires et les partages d'une boîte ou
+  d'un compte Teams (`contacts` compris), les accès d'un projet, ce qu'il lit des autres, son propriétaire, son niveau,
+  archivé ou rendu (`projects`, `me`), une adresse reliée à une personne (tous les sujets), un réglage enregistré
+  (`settings`, et `mail` ou `teams` pour une boîte, sa connexion Microsoft, un compte Teams, la clé de son extension ;
+  `agenda` pour un compte d'agenda, un agenda réglé ou partagé, une connexion Google ou Microsoft),
+  comme un nom ou un téléphone qui change (`me`, `phone.phones` — un téléphone qui reçoit ses notifications, ou ne les
+  reçoit plus, compris). La fin de l'attente d'un code Microsoft part à qui lit la boîte (`mail`) et à son propriétaire
+  (`settings`) ; la présence de l'extension Teams (sa connexion en direct qui s'ouvre ou se ferme, et au plus toutes
+  les cinq minutes quand elle se manifeste) fait relire ses comptes à qui lit le compte (`teams`, sans clé — ou avec
+  celles d'un lot du même instant, qui y suffit). Ce qui ne change rien de ce que montrent ces routes (une relève sans
+  rien de neuf, un mail rangé à l'identique, un lot de l'extension déjà connu) ne dit rien.
+- **Rien n'est rattrapé.** Une trame perdue pendant une coupure ne revient pas : à chaque ouverture de la connexion,
+  le client relit une fois tout ce qu'il montre. Un écran au second plan ne relit rien ; il se relit à son retour.
+- **Le courrier arrive dès qu'il est là**, même quand elle dort : une connexion IMAP IDLE par boîte qui le permet
+  (l'attente relancée toutes les 8 min ; avant Python 3.14, `imaplib` ne la sait pas), sinon une relève chaque minute.
+  Ce qu'elle en remarque suit son rythme à elle (`her`), pas celui de l'écran. Le `last_poll` d'une boîte
+  (`…/mail/boxes`) dit son dernier rangement, par ce direct ou par sa relève ; `error`, la panne du direct pour une
+  boîte qu'il observe (sa relève n'en dit ni n'en efface), sinon celle de sa relève — une connexion coupée qui se refait
+  n'en est pas une. L'historique d'une boîte « tout garder » se dit une fois par passage et par dossier.
 
 ## 3. Mail
 
@@ -148,12 +214,12 @@ qu'elle y prépare, demandée ou d'elle-même : `{"step", "label", "since", "sta
 pas encore commencée : elle s'y met, en une ou deux secondes — une minute après un essai qui a échoué, ou à la fin
 de ce qui tient la conversation ou la boîte sans lui céder la place), `thinking` (elle réfléchit : elle compose, le modèle
 écrit) ou `tool` (un de ses outils tourne ; `label` : son libellé, « Relire une de tes conversations Teams »). `since` :
-le début de l'étape, `started` : celui du travail (ms ; pour `waiting`, la demande). Rien n'en est gardé : un client
-relit toutes les deux secondes tant que `work` n'est pas `null`, et fait courir le chrono entre deux lectures. `null`
-aussi en lecture seule : les réponses en préparation sont l'affaire du propriétaire.
+le début de l'étape, `started` : celui du travail (ms ; pour `waiting`, la demande). Rien n'en est gardé : chaque
+étape qui commence est poussée (`mail.work`, `teams.work`, § 2 bis), le client relit alors `work` et fait courir le
+chrono entre deux étapes. `null` aussi en lecture seule : les réponses en préparation sont l'affaire du propriétaire.
 
-**`GET /api/moi/mail/work?ref=`** — ce qu'on relit toutes les deux secondes pendant qu'elle y travaille, sans relire le
-mail ni joindre son serveur : `{"work", "asked", "draft"}` (`draft` : son brouillon qui attend, dès qu'il est arrivé ;
+**`GET /api/moi/mail/work?ref=`** — ce qu'on relit quand `mail.work` le nomme (§ 2 bis), pendant qu'elle y travaille,
+sans relire le mail ni joindre son serveur : `{"work", "asked", "draft"}` (`draft` : son brouillon qui attend, dès qu'il est arrivé ;
 `""` sinon).
 
 **`GET /api/moi/mail/frame?ref=[&images=1]`** — le HTML du mail, purgé, dans son document isolé (ADR 0169), à poser
@@ -284,11 +350,13 @@ vides en lecture seule), `pending`, `under_way` (une réponse d'elle en chemin),
 essais ne sont pas épuisés — elle y a renoncé, « Préremplir » la relance —, sur un compte coché de Teams actif : sinon
 elle ne s'y mettra pas) — ces deux-là toujours faux en lecture seule —, `work` (où elle en est d'une réponse ici, en
 direct : voir le mail entier ; `null` en lecture seule). `pending` : ce que tu as écrit toi-même (ADR 0189) et qui
-n'est pas encore revenu dans le fil — `id`, `body`, `at`, `by`, `reason`, `state` : `en_file`, `envoi`, `pose`, puis,
-pendant un jour, `inutilise` (pas parti à temps : l'extension ne l'a pas pris) ou `echec`.
+n'est pas encore revenu dans le fil — `id`, `body`, `at`, `by`, `reason`, `state` : `en_file`, `envoi`, `pose`,
+`parti` (au bout du fil seulement, sans `before` : l'extension l'a envoyé, son jumeau n'est pas encore revenu — un de
+tes messages, le même texte aux espaces près, à moins de deux minutes, ADR 0251 ; 5 min au plus, il revient sinon
+avec le lot suivant), puis, pendant un jour, `inutilise` (pas parti à temps : l'extension ne l'a pas pris) ou `echec`.
 
-**`GET /api/moi/teams/work?conversation=`** — ce qu'on relit toutes les deux secondes pendant qu'elle y travaille,
-sans relire le fil : `{"work", "asked", "under_way"}`, comme dans le fil (voir `work`, au mail entier).
+**`GET /api/moi/teams/work?conversation=`** — ce qu'on relit quand `teams.work` le nomme (§ 2 bis), pendant qu'elle y
+travaille, sans relire le fil : `{"work", "asked", "under_way"}`, comme dans le fil (voir `work`, au mail entier).
 
 **`GET /api/moi/teams/replies`** — ses réponses dans tes comptes (ADR 0191), la plus récente d'abord : `id`,
 `account`, `conversation`, `title`, `in_reply_to`, `state` (`attend` ta décision, `approuve`, `en_file`, `pose` dans
@@ -481,7 +549,8 @@ comme le mot de passe d'une boîte (§ 7).
 
 ## 9. Ses partages
 
-Seul le propriétaire partage, et seulement avec une personne qui a un compte (ADR 0188). Une boîte ou un compte
+Seul le propriétaire partage, et seulement avec une personne qui a un compte (ADR 0188). Un agenda partagé (ADR 0309)
+apparaît dans ses agendas (`…/agenda/calendars`, `level`), à ce qu'il ouvre (§ 13). Une boîte ou un compte
 Teams partagé apparaît chez la personne avec son niveau (`level` : `lire`, `preparer`, `servir`) et le nom de son
 propriétaire (`owner_name`), dans `GET …/mail/boxes` et `GET …/teams/accounts` ; elle n'y fait que ce que son niveau
 ouvre — `lire` : lire ; `preparer` : aussi « Préremplir avec Mika » (ses brouillons attendent l'accord du
@@ -492,14 +561,14 @@ au propriétaire : un partage n'y suffit pas (403). Un service partagé reçoit 
 pour un service : 400). Elle le lit dans `GET …/mcp/services` (`received`, § 8), sans son adresse ni ses en-têtes.
 
 Un opérateur voit tous les partages dans la console (Réglages › Droits › Partages, ADR 0210) et peut y retirer celui
-d'une boîte ou d'un compte Teams : la même écriture, qui disparaît de `given` et de `received` comme si son propriétaire
+d'une boîte, d'un compte Teams ou d'un agenda : la même écriture, qui disparaît de `given` et de `received` comme si son propriétaire
 l'avait retiré. Il n'en donne aucun : seul le propriétaire partage.
 
 | Route | Corps | Ce que ça fait |
 |---|---|---|
 | `GET /api/moi/people` | — | les personnes à qui partager : chaque compte actif sauf toi (`person`, `name`, `owner` : une de ses propriétaires, à qui ce qui est « à toi » est déjà) |
 | `GET /api/moi/shares` | — | `given` (ce que tu partages : `kind`, `key`, `title`, `person`, `name`, `level`) et `received` (ce qu'on te partage : `kind`, `key`, `title`, `level`, `owner_name`) |
-| `POST /api/moi/shares/set` | `kind` (`mail`, `teams`, `mcp`), `key`, `person`, `level` | partager à ce niveau, avec une personne qui a un compte actif (sinon 400) ; un `level` vide retire le partage, même fait à un compte fermé depuis. Toi-même : 400, pour partager comme pour retirer. Une ressource « à toi » à une de ses propriétaires : 400 (elle est déjà à elle). Une ressource qu'on te partage (un service aussi) : 403 ; ni à toi ni partagée : 404 |
+| `POST /api/moi/shares/set` | `kind` (`mail`, `teams`, `mcp`, `agenda` — `key` : la clé de l'agenda), `key`, `person`, `level` | partager à ce niveau, avec une personne qui a un compte actif (sinon 400) ; un `level` vide retire le partage, même fait à un compte fermé depuis. Toi-même : 400, pour partager comme pour retirer. Une ressource « à toi » à une de ses propriétaires : 400 (elle est déjà à elle). Une ressource qu'on te partage (un service aussi) : 403 ; ni à toi ni partagée : 404 |
 
 ## 10. Carte, lieux, itinéraires et voyages
 
@@ -1313,3 +1382,177 @@ Mika, 403 (« Ce fait vient d'un compte qui n'est pas à toi… ») ; un fait qu
 
 Mail › Contacts a quitté l'écran Mail (ses correspondants sont ici) ; `GET …/mail/contacts` reste, pour proposer des
 destinataires quand on écrit (§ 3).
+
+## 13. Agenda
+
+Ce que l'écran Agenda et Paramètres › Agendas montrent (ADR 0309) : les agendas de la personne — celui du système
+(« Mon agenda », sans rien régler), ceux qu'elle branche (Google Agenda, Outlook.com / Microsoft 365, CalDAV, un
+abonnement iCal), ceux qu'on lui partage — et « L'agenda de Mika », sa mémoire montrée comme un agenda. Le code fait foi
+dans [`app/me/agenda.py`](../src/mika/app/me/agenda.py) ; les écritures sont les actions du plugin
+([`plugins/agenda/actions.py`](../src/mika/plugins/agenda/actions.py)), auditées `moi.agenda.<action>`.
+
+- **À qui.** Un agenda est à elle quand son compte l'est : son compte du système (`moi:<sa clé>`), ou un compte
+  branché à son nom, ou « à toi » si elle est une de ses propriétaires (la règle des boîtes, § 3). Un agenda qu'on lui
+  partage s'y ajoute, à son niveau (`level` : `lire`, `preparer`, `servir`) — masqué par son propriétaire, ou sous un
+  compte décoché, il ne lui est plus ouvert. Un agenda, un événement ou une proposition qui n'est pas à elle : 404.
+- **Ce qu'un niveau ouvre à la personne.** Le sien, ou « s'en servir » : lire, créer, modifier, supprimer, dupliquer,
+  répondre aux invitations (comme le courrier, un partage qui s'en sert fait comme le propriétaire) ; « lire » et
+  « lire et préparer » : lire (écrire : 403 — « lire et préparer » laisse Mika y préparer un ajout, que le propriétaire
+  approuve). Régler un agenda, le partager, son tableau de droits, « Mika te le rappelle » d'un événement : son
+  propriétaire seulement (403 sinon).
+- **Un événement privé d'une autre personne** se lit « Occupé » : son créneau seul (`masked`, sans titre, lieu,
+  description, lien ni participants) ; il ne se modifie, ne se supprime ni ne se répond (409 ; `can.respond` faux,
+  `respond_why` dit pourquoi), ne se cherche pas, et sa copie n'emporte que son créneau. Ce que Mika propose d'en faire,
+  lu par qui n'en est ni propriétaire ni ne le décide (un partage qui prépare), se lit de même (`…/agenda/proposals`).
+- **Les instants** sont en ms (UTC) avec le nom de leur fuseau (`zone`) ; une journée entière dit aussi ses jours
+  (`first_day`, `last_day`, compris). Une période et ce qu'on écrit se lisent à l'heure du serveur (`zone` de
+  `…/agenda/calendars`), sauf un fuseau donné ; une période est faite de jours de ce fuseau, où une journée entière se
+  lit par ses dates (celle de la veille n'y est pas).
+
+### Lire
+
+**`GET /api/moi/agenda/calendars`** — `{"plugged", "zone", "calendars", "colors", "reminders"}` ; ses agendas, les
+siens d'abord (le principal en tête), puis ses abonnements, ceux qu'on lui partage, et l'agenda de Mika en dernier
+(`key` : `mika`, `kind` : `mika`, en lecture seule). Un agenda : `key` (`<compte>~<clé courte>`), `account`, `name`
+(celui qu'on lui voit : le nom qu'elle lui a donné ici, sinon celui de son fournisseur) et `provider_name` (le nom chez
+son fournisseur, quand elle lui en a donné un autre ; vide sinon), `kind` (`systeme`, `google`, `microsoft`, `caldav`, `ical`) et `kind_label`, `level` (`proprietaire`, ou celui du
+partage) et `owner_name` (un agenda partagé), `group` (`mine`, `subscriptions`, `shared`, `mika`), `color` (celle
+qu'elle a choisie, parmi `colors` ; vide : `provider_color`, celle du fournisseur), `primary`, `hidden` (masqué : Mika ne
+s'en sert plus, la vue ne le montre pas), `enabled` (son compte est coché), `reminder` (« Mika te le rappelle » : `non`,
+`15`, `30`, `60`, `veille`) et `reminder_set` (son choix ; vide : celui du serveur pour sa sorte), `writable`,
+`read_only` (le fournisseur ne le laisse pas écrire), `can` (`write`, `respond` — y répondre aboutit : son fournisseur
+transmet les réponses —, `settings`, `share`, `rights`, `remind`, `rename`), `synced_at`, `provider_reminders` (les rappels de son fournisseur : `max`, combien un événement en
+garde — 5 chez Google et en CalDAV, 1 chez Microsoft, 0 pour le système, où Mika rappelle, et pour un abonnement, qui les
+lit seulement — ; `email`, s'il sait en envoyer par e-mail ; `defaults`, ceux de l'agenda chez lui, les
+`defaultReminders` de Google) ; pour un agenda à elle, `error` (la panne de la dernière synchronisation de son compte, en mots)
+et `shares` (`person`, `name`, `level`).
+
+**`GET /api/moi/agenda/period?start=&end=&calendars=`** — une période (`start` et `end` : `AAAA-MM-JJ`, le dernier jour
+compris ; par défaut, la semaine qui commence aujourd'hui ; 100 jours au plus, 400 au-delà), sur les agendas nommés
+(`calendars` : leurs clés, séparées par des virgules, `mika` pour celui de Mika ; vide : tous sauf les masqués) →
+`{"start", "end", "zone", "items", "her", "proposals"}`. `items` : les occurrences, séries développées, dans l'ordre (un
+événement refusé n'y est pas). Une occurrence :
+
+```json
+{"event": 42, "occurrence": "20261125T130000Z", "uid": "…", "calendar": "moi:user_1~mon-agenda",
+ "title": "Point hebdo", "masked": false, "start": 1795957200000, "end": 1795959000000, "all_day": false,
+ "first_day": "", "last_day": "", "zone": "Europe/Paris", "location": "", "description": "", "conference": "",
+ "status": "confirme", "busy": true, "private": false, "recurring": true, "rule": "FREQ=WEEKLY",
+ "organizer": {"address": "claire@lumen.fr", "name": "Claire", "person": "", "response": "", "optional": false,
+               "me": false},
+ "participants": [{"…": "…"}], "response": "oui", "invitation": false, "organized": false,
+ "added": {"by": "elle", "conversation": "chat:user_1:812", "at": 1795900000000}, "remind": "", "forgotten": false,
+ "reminders": [{"method": "notification", "minutes": 10}], "reminders_default": false,
+ "can": {"edit": false, "delete": true, "respond": true, "duplicate": true, "remind": true}, "respond_why": ""}
+```
+
+`event` et `occurrence` désignent l'occurrence dans les écritures (`occurrence` vide : un événement simple, ou la
+série entière). `response` : la réponse du compte de l'agenda (`attente`, `oui`, `peut`, `non` ; vide : il n'est pas
+invité) ; `invitation` : elle attend sa réponse ; `organized` : faux pour une invitation, qui ne se modifie que chez qui
+l'organise. `added` : ce que Mika y a mis, et la conversation où elle l'a fait (`null` sinon). `remind` : « Mika te le
+rappelle » pour cet événement (vide : le choix de l'agenda). `reminders` : les rappels de son fournisseur (lot 6),
+chacun `method` (`notification` ou `email`) et `minutes` avant ; `reminders_default` : il suit ceux de son agenda (Google,
+`useDefault`), que `reminders` redit alors. `can.respond` : une réponse d'ici atteindrait l'organisatrice — elle peut
+écrire dans cet agenda, l'invitation n'est pas le privé d'une autre, et son fournisseur transmet les réponses (un
+serveur CalDAV sans planification, RFC 6638, ne les transmet pas ; tant qu'on ne l'a pas découvert, on ne le sait
+pas) ; sinon `respond_why` dit pourquoi, en une ligne, qu'un écran montre à la place des boutons. `her` : les dates de l'agenda de Mika dans la période,
+seulement ce qui la concerne (ce que Mika lui a promis, ce qu'elle lui a raconté elle-même ; jamais ce qu'une autre lui a
+confié) — `ref` (l'élément de sa mémoire), `kind` (`promesse`, `moment`, `chaque_annee`), `title`, `start`, `end`,
+`all_day`, `day`, `source` (d'où ça vient, en mots), `conversation`, `said_at`. `proposals` : ce que Mika propose
+d'ajouter dans ces agendas pendant la période (ci-dessous), qu'un écran montre hachuré.
+
+**`GET /api/moi/agenda/event?event=&occurrence=`** — une occurrence (la même forme), plus `calendar_name`, `proposals`
+(ce que Mika propose sur cet événement) et `prepared` (la réponse qu'elle a préparée à cette invitation, ou `null`).
+Une série demandée sans `occurrence` (la fiche qu'un écran ouvre après l'avoir créée) désigne sa première : ce qu'on en
+supprime ou change demande sa portée. Une `occurrence` qui ne se lit pas : 400 (`fields.occurrence`).
+
+**`GET /api/moi/agenda/search?q=&calendars=`** — chercher (`q` : 2 à 120 caractères, sans casse ni accents) dans les
+titres, lieux, descriptions et participants, de 90 jours derrière à un an devant, les plus proches d'aujourd'hui
+d'abord : `{"q", "items", "her", "more"}` (50 au plus).
+
+**`GET /api/moi/agenda/invitations`** — `{"items"}` : les invitations qui attendent sa réponse, dans ses agendas et ceux
+qu'on lui partage pour s'en servir, la plus proche d'abord (la prochaine occurrence d'une série), chacune avec
+`calendar_name` et `prepared`.
+
+**`GET /api/moi/agenda/proposals`** — `{"items"}` : ce que Mika propose d'écrire dans ses agendas et qui attend un
+accord (dans un agenda à elle, ou partagé pour préparer ou s'en servir, ou dont elle décide). Une proposition : `id`,
+`op` (`ajouter`, `modifier`, `supprimer`, `repondre`), `calendar`, `summary` (ce qu'elle propose, dans ses mots), `at`,
+`starts` (le début du rendez-vous : passé, elle tombe), `decides` (c'est elle qui décide — sinon le propriétaire de
+l'agenda, ou qui s'occupe de Mika), `conversation` (où Mika l'a proposé), `invitation` (la réponse préparée à une
+invitation : sa clé), `target` (`event`, `uid`, `occurrence` ; `null` pour un ajout), `draft` (un ajout : `title`,
+`start`, `end`, `all_day`, `zone`, `location`, `description`, `rule`, `invite`), `change`, `scope`, `answer` et
+`comment` (une réponse), `why` (pourquoi cette réponse, à qui décide seulement), `remind`, `preview` (ce qui partirait,
+à qui décide : `text`, `digest`, `blocked` ; un événement privé y est nommé à son propriétaire, « Occupé » pour un
+autre). Sur un événement privé, qui n'en est ni propriétaire ni ne décide lit `summary` avec « Occupé » à la place du
+titre, sans `change`, `answer` ni `comment`. Une réponse préparée à laquelle elle a répondu elle-même entre-temps n'y est
+plus (elle tombe, « Répondu autrement »).
+
+### Écrire
+
+Chaque geste est une action du plugin, au nom de la personne (§ 1 : dédoublonnée par la clé d'envoi). Un champ texte
+a sa borne (un titre 300 caractères, un lieu 300, une description 8 000, un lien 1 000, un mot 500) ; un champ refusé :
+400 avec `fields`. Ce que le fournisseur refuse (un conflit, un événement disparu, une invitation qu'on n'organise pas)
+ou un compte décoché, un agenda en lecture seule, une occurrence que la série ne donne plus (elle a changé depuis qu'on
+l'a lue) : 409, en mots — la copie se relit. Une création rend `made` (`calendar`, `uid`, `event`). « Mika te le
+rappelle » (`remind`) est à son propriétaire : d'un partage, 400 sur `remind`, avant toute écriture chez le
+fournisseur.
+
+| Route | Corps | Ce que ça fait |
+|---|---|---|
+| `POST /api/moi/agenda/event/create` | `calendar`, `title`, `start`, `end?`, `all_day?`, `zone?`, `location?`, `description?`, `conference?`, `rule?`, `invite?`, `free?`, `private?`, `remind?` | un événement (`agenda.creer`), parti tout de suite chez le fournisseur. `start`, `end` : `AAAA-MM-JJTHH:MM` à l'heure de `zone` (un fuseau IANA ; vide : celui de l'agenda), ou `AAAA-MM-JJ` avec `all_day` (le dernier jour compris) ; `end` vide : une heure, ou un seul jour. `rule` : une répétition RFC 5545 (`FREQ` quotidienne à annuelle, `INTERVAL`, `COUNT` ou `UNTIL`, `BYDAY`…). `invite` : des adresses — dans un agenda du système, une personne qui a un compte reçoit l'invitation dans le sien. `free` : « disponible ». `remind` : « Mika te le rappelle » (vide : le choix de l'agenda). `reminders` : les rappels de son fournisseur, `[{"method": "notification" \| "email", "minutes": n}]` (quatre semaines au plus ; absent ou `null` : ceux de l'agenda chez lui — Google, ses rappels par défaut ; Outlook, le sien ; CalDAV, aucun ; une liste vide : aucun). Google en garde cinq ; Microsoft un seul, le plus tôt, une notification (un e-mail y devient une notification) ; CalDAV les écrit en VALARM (DISPLAY ou EMAIL). L'agenda du système n'en a pas : 400 (« Mika te le rappelle » s'en charge) |
+| `POST /api/moi/agenda/event/edit` | `event`, `occurrence?`, `scope?` (`un`, `suivants`, `tous`), et ce qui change parmi les champs de `create` (`invite` : toutes les adresses ; `all_day`, `free`, `private` : vrai ou faux ; `reminders` : tous ses rappels du fournisseur, une liste vide : aucun) | le modifier (`agenda.modifier`) ; changer le moment demande `start`. Une invitation ne se modifie pas (409), sauf ses rappels du fournisseur, qui sont à elle ; « Mika te le rappelle » se change par son propriétaire |
+| `POST /api/moi/agenda/event/delete` | `event`, `occurrence?`, `scope?` | le supprimer (`agenda.supprimer`) ; supprimer une invitation, c'est la refuser |
+| `POST /api/moi/agenda/event/duplicate` | `event`, `occurrence?`, `to?` (un agenda où elle écrit ; vide : le même) | une copie de cette occurrence (`agenda.dupliquer`) ; dans le même agenda, son titre dit « (copie) ». Un agenda qu'on lui partage en lecture se copie dans un des siens |
+| `POST /api/moi/agenda/event/respond` | `event`, `occurrence?`, `answer` (`oui`, `peut`, `non`), `comment?`, `scope?` (`un`, `tous`) | répondre à une invitation (`agenda.repondre`) : la réponse repart par son fournisseur ; ce que Mika avait préparé tombe. Une invitation privée d'une autre personne : 409, comme la supprimer ; un fournisseur qui ne transmet pas les réponses : 409, en mots |
+| `POST /api/moi/agenda/event/remind` | `event`, `value` (vide, `non`, `15`, `30`, `60`, `veille`) | « Mika te le rappelle » pour cet événement (`agenda.rappel`), gardé sur ce serveur seulement — son propriétaire |
+| `POST /api/moi/agenda/proposal/accept` | `proposal`, `seen` | accepter ce que Mika propose tel qu'il a été lu (`seen` : le `digest` de son `preview` ; changé depuis : 409, relire) — `agenda.accepter` |
+| `POST /api/moi/agenda/proposal/refuse` | `proposal`, `note?` | le refuser (`agenda.refuser`) ; elle le saura |
+| `POST /api/moi/agenda/proposal/edit` | `proposal`, `calendar?`, et les champs de `create` | « Modifier » puis « Ajouter » un ajout qu'elle propose (`agenda.ajouter_modifie`) : ta version s'écrit, marquée « ajoutée par Mika » (la conversation de sa proposition) ; la proposition est retirée et Mika apprend que tu l'as ajoutée avec tes changements. Une autre sorte de proposition : 409 |
+
+Une proposition dont elle ne décide pas : 403 (dans un agenda qu'elle voit), sinon 404 ; déjà décidée : 404.
+
+### Ses comptes (Paramètres › Agendas)
+
+**`GET /api/moi/agenda/accounts`** — `{"plugged", "accounts", "google", "microsoft_app", "kinds", "services", "colors",
+"reminders", "max"}`. `accounts` : son compte du système d'abord (`system`), puis ceux qu'elle a branchés — `key`,
+`kind`, `kind_label`, `label`, `address`, `enabled`, `url` (CalDAV : l'adresse du serveur ; un abonnement ne la rend
+jamais, elle ouvre l'agenda à qui la connaît : `url_set`), `username`, `secrets` (`{"password": true}` : un mot de
+passe est gardé, jamais rendu), `oauth_client_id`, `oauth_tenant` (Microsoft), `synced_at`, `tried_at`, `failures`,
+`error` (la dernière panne, en mots), `signin` (Google et Microsoft : `state` — `connectee`, `en_attente`, `a_faire`
+—, `code` et `url` du code d'appareil, `until`, `error`), `abilities` (`write`, `calendars` : y créer un agenda) et
+`calendars` (ses agendas, comme dans `…/agenda/calendars`). `google` : `app` (l'application Google du serveur est
+réglée), `direct` (elle revient seule au serveur). `services` : les aides CalDAV (`key`, `name`, `url`, `help`). `max` :
+combien de comptes elle peut brancher (`null` : une opératrice).
+
+| Route | Corps | Ce que ça fait |
+|---|---|---|
+| `POST /api/moi/agenda/account/save` | `account?`, `kind` (sans `account` : `google`, `microsoft`, `caldav`, `ical`), `values` (`label`, `enabled`, `url`, `username`, `password`, `address`, `oauth_client_id`, `oauth_tenant`) | brancher un compte → `{"account"}` (à elle, ou « à toi » pour une propriétaire), ou régler un des siens. Un mot de passe laissé vide reste ; le serveur CalDAV ou l'identifiant changent : le redonner (400). Pour qui n'est pas opératrice, un serveur sur Internet seulement (400 sur `url` : ni cette machine — DavMail sur `localhost` —, ni le réseau privé). Dix comptes au plus (409). Un CalDAV ou un abonnement se synchronise aussitôt ; réglé par qui n'est pas opératrice, son serveur est revérifié sur Internet à chaque connexion, joint à l'adresse vérifiée. La clé d'un compte vient de son nom affiché (sinon de sa sorte), jamais de son adresse. Audité `moi.agenda_compte` |
+| `POST /api/moi/agenda/account/try` | `url`, `username`, `password` (ou `account` : un compte CalDAV à elle, son mot de passe gardé) | essayer un serveur CalDAV sans rien enregistrer → `{"ok", "message", "calendars"}` (`local`, `name`, `color`, `writable`, `primary`, `selected`) ; un refus du serveur : `ok` faux et ses mots. Trente essais par minute (§ 1) |
+| `POST /api/moi/agenda/account/google/start` | `account` | commencer la connexion Google → `{"url", "until", "direct"}` : l'adresse de consentement à ouvrir. Sans application Google réglée sur le serveur : 409 (« L'application Google de ce serveur n'est pas réglée… ») |
+| `POST /api/moi/agenda/account/google/finish` | `account`, `text` | la finir en collant l'adresse de la page qui n'a pas pu s'ouvrir (`http://127.0.0.1…`), ou celle de la page de retour du serveur (le retour direct, sans session), ou son code : connecté, son adresse retrouvée, il se synchronise. Une adresse qui ne vient pas d'une connexion commencée par elle, ou expirée, une case de l'agenda non cochée : 400 (`fields.text`, en mots). Audité `moi.agenda_connexion` |
+| `GET /api/moi/agenda/google/retour` | — | la redirection directe de Google (une application « Web » du serveur, à son origine HTTPS) : avec une session, le parcours finit ici, pour qui l'a commencé ; une page dit ce qui s'est passé, l'écran l'apprend par le direct. Sans session (le navigateur du téléphone) : une page « Encore une étape » dit de copier son adresse et de la coller dans l'application (`…/google/finish`) — le `state` seul ne finit rien : un parcours commencé par une personne et consenti par une autre rattacherait l'agenda Google de la seconde au compte de la première |
+| `POST /api/moi/agenda/account/microsoft/start` | `account` | connecter Outlook.com / Microsoft 365 : `{"code", "url", "until"}`, un code à entrer chez Microsoft ; la fin de l'attente est poussée (`agenda`), puis `…/account/sync` |
+| `POST /api/moi/agenda/account/sync` | `account` | synchroniser maintenant (`agenda.synchroniser` : le compte est relu dans les secondes qui suivent, même quand elle dort) ; un compte Google ou Microsoft connecté retrouve d'abord son adresse |
+| `POST /api/moi/agenda/account/disconnect` | `account` | Google ou Microsoft : la connexion retirée (chez Google aussi) et oubliée ; le compte reste, à reconnecter. Un autre : 409. Audité `moi.agenda_deconnexion` |
+| `POST /api/moi/agenda/account/remove` | `account` | retirer un compte branché : ses agendas et leur copie partent (son agenda du système reste : 409). Audité `moi.agenda_compte_retire` |
+| `POST /api/moi/agenda/calendar/new` | `name`, `account?` (vide : son compte du système) | un agenda de plus (`agenda.nouvel_agenda`) → `made.calendar` ; un compte qui ne le sait pas : 409 |
+| `POST /api/moi/agenda/calendar/save` | `calendar`, et ce qui change parmi `name`, `color` (vide, ou une de `colors` — le rose est à Mika), `hidden` (masqué : Mika ne s'en sert plus), `reminder` (vide, `non`, `15`, `30`, `60`, `veille`), `followed` (synchronisé ; `null` : ce que le fournisseur coche) | le régler — son propriétaire. Audité `moi.agenda_reglage`. `name` (`agenda.renommer`, audité `moi.agenda.renommer`) : un agenda du système change de nom pour de bon (un nom vide : 400) ; un agenda branché prend un nom à lui, ici seulement — ni Google, ni Microsoft, ni le serveur CalDAV ne sont touchés, sa synchronisation ne le change pas, et un nom vide (ou le sien) lui rend celui de son fournisseur. Ce nom est celui que voient aussi ses outils et la console |
+
+**Le partager** : `POST /api/moi/shares/set` avec `kind: "agenda"` et la clé de l'agenda (§ 9) — son propriétaire,
+à une personne qui a un compte ; son tableau de droits reçoit la ligne de la personne (lire ; lire et préparer : Mika y
+écrit sur l'accord du propriétaire ; s'en servir : elle y écrit et répond, sur l'accord de la personne). Un partage
+dans Mika n'est pas un partage chez Google ou Microsoft.
+
+**Son tableau de droits** (Outils › Droits) — son propriétaire seulement :
+
+- `GET /api/moi/agenda/rights?calendar=` → `{"calendar", "set", "lines", "default"}` : réglé (`set`), sinon celui que
+  son propriétaire et ses partages donnent. Une ligne : `who`, `canal`, `when`, `read`, `write` (`non`, `accord`,
+  `seule`), `respond` (`non`, `accord`), `keep` (`rien`, `prive`, `perso`, `public`), et `words` (chacune en mots) ;
+- `POST /api/moi/agenda/rights/save` `{"calendar", "lines", "default"}` (30 lignes au plus ; `words` ignoré) ou
+  `{"calendar", "reset": true}` (le tableau de départ). Audité `moi.agenda_droits`. Le propriétaire et le partage
+  restent la première porte : une ligne n'ouvre jamais un agenda à qui il n'est ni à elle ni partagé.
+
+**Le direct** : tout ce qui change ses agendas — une synchronisation, une écriture (d'elle, de Mika, d'un partage),
+une proposition de Mika et sa décision, une invitation, la connexion d'un compte, un réglage — part en `agenda` (§ 2
+bis), avec les agendas touchés (`calendars`), à elle et à qui on les partage, à personne d'autre. L'agenda de Mika se
+relit à l'ouverture de l'écran.

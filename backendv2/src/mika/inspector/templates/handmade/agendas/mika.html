@@ -1,0 +1,21 @@
+{# Relations & échanges › Agendas › L'agenda de <son nom> (app/handmade/tabs/agendas.py, ADR 0309, lot 5 ; la maquette :
+   agenda-de-mika.html). Sa mémoire montrée comme un agenda (app/her_agenda.py) : ses promesses datées, ce qu'elle voit
+   venir dans la vie de chacun, les dates qui reviennent — tout, avec à qui c'est ; « Pour » choisit une personne. Rien
+   n'y est recopié : on ne l'édite pas, on le lui dit. #}
+{% import "handmade/agendas/_agendas.html" as ag %}
+<div class="now-page person-tab agc-page" data-tab="agendas/mika">
+  {{ ag.chips(chips, "Pour", "Pour") }}
+  <ul class="person-tiles-list agc-tiles" aria-label="En chiffres">
+    <li><a href="{{ promises }}"><span class="person-tile-label">Promesses datées</span><span class="person-tile-value">{{ kinds['promesse'] }}</span><span class="person-tile-sub">Mémoire › Promesses</span></a></li>
+    <li><a href="{{ moments }}"><span class="person-tile-label">Ce qu'elle voit venir</span><span class="person-tile-value">{{ kinds['moment'] + kinds['voir_venir'] }}</span><span class="person-tile-sub">Mémoire › La vie des autres</span></a></li>
+    <li><span class="person-tile-label">Dates qui reviennent</span><span class="person-tile-value">{{ kinds['chaque_annee'] }}</span><span class="person-tile-sub">anniversaires</span></li>
+    <li><a href="{{ grid }}"><span class="person-tile-label">Dans la grille</span><span class="person-tile-value">en rose</span><span class="person-tile-sub">Tous les agendas, « {{ her }} »</span></a></li>
+  </ul>
+  <p class="person-tab-note info">Dans son espace, chacun ne voit que ce qui le concerne et qu'il lui a confié lui-même, jamais ce qu'une autre personne lui a dit ; rien de secret. Ici, tu vois tout. On ne l'édite pas comme un agenda : on le lui dit (« c'est reporté », « oublie ça »).</p>
+  <section class="now-card person-list">
+    <header class="now-card-head"><h2>{{ "Toute l'année à venir" if more else "Cette semaine" }}</h2><span class="person-count now-num">{{ entries|length }}</span>
+      <p>{% if more %}Les plus proches d'abord.{% else %}D'aujourd'hui à dimanche ({{ week }}), les plus proches d'abord.{% endif %} Une promesse tenue ou un moment passé quitte la liste ; il reste dans sa mémoire.</p>
+      {% if more %}<a class="now-more" href="{{ less_href }}">Cette semaine seulement</a>{% elif later %}<a class="now-more" href="{{ more_href }}">Plus tard : {{ later }} de plus →</a>{% endif %}</header>
+    {% if entries %}<ul class="person-entries dense">{% for e in entries %}{{ ag.entry(e) }}{% endfor %}</ul>{% else %}<p class="now-empty">Rien de daté {{ "à venir" if more else "cette semaine" }}.</p>{% endif %}
+  </section>
+</div>

@@ -45,7 +45,7 @@ from mika.inspector.names import Names
 from mika.kernel import forms
 from mika.kernel.clock import US
 from mika.kernel.faculty import InspectSpec
-from mika.kernel.inspect import Vital
+from mika.kernel.inspect import VIEWER, Vital
 from mika.runtime import health
 from mika.runtime.bootstrap import Kernel
 from mika.runtime.boundary import Failed, call
@@ -55,7 +55,7 @@ from mika.runtime.inspection import Inspection
 PREFIX = render.PREFIX
 TEMPLATES = Path(__file__).parent / "templates"
 STATIC = Path(__file__).parent / "static"
-ASSET_VERSION = "86"
+ASSET_VERSION = "87"
 
 log = logging.getLogger("mika.console")
 
@@ -319,6 +319,7 @@ class UI:
         self.settings_forms: Any = None
         sampler = deps.sampler or getattr(getattr(deps.kernel, "series", None), "read", None)
         self.inspection = Inspection(deps.kernel, sampler=sampler)
+        self.inspection.titled = self.named  # un titre de vue qui la nomme (ADR 0070)
         #: les documents HTML natifs des pages rendues, que leur cadre vient chercher (ADR 0169)
         self.documents = Documents()
         self.sampler = sampler
@@ -612,6 +613,10 @@ class UI:
         """Son nom, celui de sa persona en vigueur : la console ne l'écrit jamais en dur (ADR 0070)."""
         return self_c.name_of(self.kernel.mind.frame().get(self_c.PERSONA))
 
+    def named(self, text: str) -> str:
+        """Un libellé écrit d'avance, son nom à sa place (``self_.NAME_SLOT`` : « L'agenda de {nom} », ADR 0070)."""
+        return self_c.named(text, self.kernel.mind.frame().get(self_c.PERSONA)) if self_c.NAME_SLOT in text else text
+
     def vitals(self) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
         report = health.report(self.kernel)
@@ -713,11 +718,16 @@ class UI:
 
     def guarded(self, fn: Callable[[Request], Awaitable[Response]]) -> Callable[[Request], Awaitable[Response]]:
         async def wrapper(request: Request) -> Response:
-            if self.operator(request) is None:
+            account = self.operator(request)
+            if account is None:
                 if request.url.path.startswith(PREFIX + "/_"):
                     return secure(Response(status_code=401))
                 return secure(RedirectResponse(PREFIX + "/connexion", status_code=303))
-            return await fn(request)
+            seen = VIEWER.set(account.handle)  # qui regarde : ce qui n'est qu'à son propriétaire se lit par lui
+            try:
+                return await fn(request)
+            finally:
+                VIEWER.reset(seen)
 
         return wrapper
 

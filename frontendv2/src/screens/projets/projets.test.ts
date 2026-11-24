@@ -8,7 +8,7 @@ import {
 import { inline, markdown } from "./md";
 import { outside, outsideText, served, st, trio } from "./parts";
 import { parsePlace, route, sheetRoute, waitingHome, waitingKey, waitingRoute } from "./routes";
-import { chosenWaiting, findGoal, goalGroups, goalKey, initialState, refusalAt, ticketsQuery, todoGroups } from "./state";
+import { chosenWaiting, findGoal, goalGroups, goalKey, initialState, refusalAt, sheetGone, ticketsQuery, todoGroups } from "./state";
 import { age, dayLabel, duration, moment, when } from "./time";
 import { milestoneTone, progressTone, ticketTone } from "./tones";
 import { allDemands, demandKey, dependenciesView, itemDrawerBody, listsView, settingsView } from "./views/more";
@@ -728,5 +728,19 @@ describe("Modifier le projet : chaque champ suit `can` et `why` du serveur", () 
     expect(html).toMatch(/<input disabled name="title"/);
     expect(html).toContain("ne se renomme pas");
     expect(html).toMatch(/<textarea name="description"/);
+  });
+});
+
+describe("une fiche qui n'est plus à toi (ADR 0308 : relue par le direct)", () => {
+  const gone = { status: 404, message: "Introuvable" };
+
+  it("lue, puis introuvable : retour à la liste, sans le refus", () => {
+    expect(sheetGone(true, { value: null, error: gone })).toBe(true);
+  });
+
+  it("jamais lue (une adresse fausse), en panne, ou encore là : elle dit ce qu'elle a", () => {
+    expect(sheetGone(false, { value: null, error: gone })).toBe(false);
+    expect(sheetGone(true, { value: null, error: { status: 503 } })).toBe(false);
+    expect(sheetGone(true, { value: {}, error: null })).toBe(false);
   });
 });

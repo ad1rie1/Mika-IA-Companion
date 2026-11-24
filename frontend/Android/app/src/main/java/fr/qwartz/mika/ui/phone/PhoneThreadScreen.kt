@@ -45,14 +45,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
 import fr.qwartz.mika.data.approvals.Approvals
 import fr.qwartz.mika.data.moi.MoiApi
+import fr.qwartz.mika.data.moi.PhoneLive
 import fr.qwartz.mika.data.moi.MoiDates
 import fr.qwartz.mika.data.moi.ago
 import fr.qwartz.mika.data.moi.phone.OfferStates
@@ -76,6 +74,7 @@ import fr.qwartz.mika.ui.Route
 import fr.qwartz.mika.ui.components.rememberNow
 import fr.qwartz.mika.ui.shell.BarMenu
 import fr.qwartz.mika.ui.shell.BarNav
+import fr.qwartz.mika.ui.shell.FollowLive
 import fr.qwartz.mika.ui.shell.Load
 import fr.qwartz.mika.ui.shell.LoadBox
 import fr.qwartz.mika.ui.shell.LocalShell
@@ -88,7 +87,6 @@ import fr.qwartz.mika.ui.shell.Tag
 import fr.qwartz.mika.ui.shell.linked
 import fr.qwartz.mika.ui.shell.rememberSessionKey
 import fr.qwartz.mika.ui.theme.mika
-import kotlinx.coroutines.delay
 
 /**
  * Une conversation lue sur le téléphone (la maquette, `vueConv`) : les autres à gauche (leur nom dans un groupe), toi à
@@ -134,15 +132,9 @@ fun PhoneThreadScreen(graph: AppGraph, key: String) {
             if (said.isNotBlank()) shell.toast(said)
         }
     }
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(vm, key, lifecycle) {
-        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            while (true) {
-                delay(PHONE_THREAD_REFRESH_MS)
-                vm.refresh()
-            }
-        }
-    }
+    // le direct (ADR 0308) : le fil se relit quand il change ; relu une fois à chaque retour de l'app au premier plan
+    // (l'ouverture, elle, est celle de `open`)
+    FollowLive(graph.live, PhoneLive.THREAD, vm, key, onShown = { first -> if (!first) vm.refresh() }) { vm.onLive(it) }
     val t = vm.current?.takeIf { vm.key == key }
     SectionScaffold(
         topBar = {

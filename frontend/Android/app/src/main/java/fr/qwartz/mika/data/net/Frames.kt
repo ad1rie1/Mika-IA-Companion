@@ -142,8 +142,51 @@ sealed interface ServerFrame {
     /** Le sort d'un réglage de fil : `ok`, `invalid`, `forbidden`, `failed` ; une liste `strands` suit s'il a pris. */
     data class StrandResult(val id: String, val status: String) : ServerFrame
 
+    /**
+     * Ce qui a changé dans ce que montrent les routes de `/api/moi` (ADR 0308, `protocole-moi.md` § 2 bis) : pour
+     * chaque sujet connu ([Topics]), ce qu'il nomme — des boîtes, des mails, des conversations, des projets —, ou
+     * `null` : tout le domaine. Jamais le contenu : l'écran relit la route qu'il montre (`data/moi/Live`). Lue à la
+     * main par `FrameCodec` : un sujet inconnu se tait ; une clé inconnue, une liste vide ou illisible valent « tout
+     * le domaine » ; deux entrées d'un même sujet se réunissent.
+     */
+    data class Changed(val changes: Map<String, Set<String>?>) : ServerFrame
+
     /** Un type que cette version ne connaît pas, ou une trame illisible : ignorée, jamais fatale. */
     data class Unknown(val type: String) : ServerFrame
+}
+
+/**
+ * Les sujets de la trame `changed` (ADR 0308), dans l'ordre du contrat — `backendv2/src/mika/ports/changes.py`
+ * (`TOPICS`, `KEYS`), `docs/protocole-moi.md` § 2 bis : chacun dit quelle route se relit, et sa clé ce qui y a changé.
+ */
+object Topics {
+    const val ME = "me"
+    const val MAIL = "mail"
+    const val MAIL_DRAFTS = "mail.drafts"
+    const val MAIL_WORK = "mail.work"
+    const val TEAMS = "teams"
+    const val TEAMS_REPLIES = "teams.replies"
+    const val TEAMS_WORK = "teams.work"
+    const val PHONE = "phone"
+    const val PHONE_POSITION = "phone.position"
+    const val PHONE_PHONES = "phone.phones"
+    const val CONTACTS = "contacts"
+    /** L'agenda (ADR 0309) : ses comptes, ses agendas, leurs événements, ses invitations, ce que Mika propose. */
+    const val AGENDA = "agenda"
+    const val PROJECTS = "projects"
+    const val TRIPS = "trips"
+    const val SETTINGS = "settings"
+
+    val ALL: List<String> = listOf(
+        ME, MAIL, MAIL_DRAFTS, MAIL_WORK, TEAMS, TEAMS_REPLIES, TEAMS_WORK, PHONE, PHONE_POSITION, PHONE_PHONES,
+        CONTACTS, AGENDA, PROJECTS, TRIPS, SETTINGS,
+    )
+
+    /** La clé de chaque sujet qui en a une : ce qu'elle nomme (les autres disent tout leur domaine). */
+    val KEYS: Map<String, String> = mapOf(
+        MAIL to "boxes", MAIL_DRAFTS to "boxes", MAIL_WORK to "refs", TEAMS to "conversations",
+        TEAMS_WORK to "conversations", PHONE to "conversations", AGENDA to "calendars", PROJECTS to "projects",
+    )
 }
 
 @Serializable

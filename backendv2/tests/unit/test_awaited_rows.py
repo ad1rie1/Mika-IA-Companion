@@ -244,3 +244,18 @@ def test_what_someone_waits_for_supplants_her_own_task_on_the_same_resource(tmp_
 def test_a_task_that_gave_way_did_not_try():
     assert gave_way("preempted") and gave_way("superseded", PREEMPTION_GUARD)
     assert not gave_way("superseded", "baux") and not gave_way("failed") and not gave_way("done")
+
+
+def test_each_step_is_told_for_an_episode_open_in_the_journal(tmp_path):
+    """``on_step`` (ce que l'application pousse aux écrans, ADR 0308) : un outil qui part, un outil fini — chaque fois
+    pour un épisode déjà ouvert au journal ; son départ et sa fin, le journal les dit lui-même."""
+    told: list[tuple[str, bool]] = []
+
+    async def listen(kernel):
+        def step(episode: str) -> None:
+            told.append((episode, episode in kernel.mind.frame().state(RUNTIME.name).open))
+
+        kernel.runner.on_step = step
+
+    _run(tmp_path, awaited=True, seconds=3, during=listen)
+    assert len(told) >= 2 and all(opened for _, opened in told), told

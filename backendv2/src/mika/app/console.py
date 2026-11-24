@@ -77,6 +77,11 @@ NAVIGATION: tuple[NavGroup, ...] = (
                     subjects=("conversation_teams", "reponse_teams"),
                     # ses paramètres (« Actif », ses comptes) : en haut à droite, comme le courrier (ADR 0206)
                     builtin=("teams.parametres",), gear=("parametres",)),
+        # les agendas de chacun (ADR 0309, lot 5) : tous dans une même vue, par personne ; la fiche d'un agenda vit ici ;
+        # ses paramètres (les applications Google et Microsoft, la synchro, les rappels) : en haut à droite
+        Destination("agendas", "Agendas", "Tous les agendas du système, par personne : leurs comptes, ce qu'elle en "
+                    "fait, et le sien.", subjects=("agenda",), builtin=("agendas.parametres",), gear=("parametres",),
+                    order=("tous", "comptes", "fait", "mika")),
     )),
     NavGroup("Connexions extérieures", (
         Destination("sens", "Ses sens", "Ce qu'elle lit du monde (flux RSS), ce qu'elle voit "
@@ -129,7 +134,7 @@ FACULTY_LABELS: dict[str, str] = {
     "world": "Son monde et son corps", "shares": "Fichiers envoyés", "attachments": "Pièces reçues",
     "imaging": "Dessins", "location": "Localisation", "forge_signals": "Signaux de ses apps",
     "mcp": "Outils extérieurs", "web": "Recherche web", "wakeup": "Réveils par API", "teams": "Teams",
-    "phone": "Messages du téléphone", "trips": "Carte et voyages", "contacts": "Annuaire",
+    "phone": "Messages du téléphone", "trips": "Carte et voyages", "contacts": "Annuaire", "agenda": "Agenda",
 }
 
 #: Les sections du prompt, nommées par ce qu'elles lui montrent (Pourquoi a-t-elle dit ça ?, Prompt).
@@ -204,6 +209,11 @@ SECTION_LABELS: dict[str, str] = {
     "teams_ask": "Ce qu'on lui demande d'y répondre (Teams)",
     "phone_offers": "Ce que sont devenues ses réponses proposées sur le téléphone",
     "crossed": "Elle allait justement lui écrire (leurs messages se sont croisés)",
+    # ADR 0309
+    "agenda_day": "Sa journée dans ses agendas (aujourd'hui et demain, cité)",
+    "agenda_writes": "Ce qu'elle a proposé d'écrire dans ses agendas, et ce que c'est devenu",
+    "agenda_reminder": "Le rendez-vous qu'elle rappelle (cité)",
+    "agenda_invitation": "L'invitation dont elle prépare la réponse, et ce qui tombe en même temps (cité)",
 }
 
 #: Les raisons des preuves de l'arbitre : ce qui la pousse à agir.
@@ -228,6 +238,9 @@ REASON_LABELS: dict[str, str] = {
     "wakeup": "Un réveil par API à traiter", "wakeup_done": "Rendre compte de ce qu'un réveil par API a donné",
     # ADR 0069
     "teams_draft": "Préparer une réponse à un message Teams",
+    # ADR 0309
+    "agenda_remind": "Rappeler un rendez-vous, au délai que son agenda demande",
+    "agenda_prepare": "Préparer la réponse à une invitation",
 }
 
 #: Les vetos : ce qui l'empêche d'agir.
@@ -289,6 +302,8 @@ PROCESS_LABELS: dict[str, str] = {
     "contacts.ingest": "Ranger dans l'annuaire qui elle lit dans Teams et le courrier",
     "contacts.portrait": "Se faire une idée de qui échange avec un compte, à partir de ses derniers messages",
     "contacts.match": "Réunir les fiches de l'annuaire qui sont la même personne (le juge des rapprochements)",
+    "agenda.sync": "Relire les agendas branchés (Google, Outlook, CalDAV, abonnements)",
+    "agenda.watch": "Voir venir les rappels et les invitations des agendas, laisser tomber ce qui n'a plus lieu d'être",
     "teams.expire": "Laisser tomber les réponses Teams restées sans accord ou sans envoi",
     "teams.answered": "Refuser ses réponses Teams auxquelles on a répondu autrement dans la discussion",
     "phone.expire": "Laisser tomber les réponses proposées sur le téléphone restées sans geste",
@@ -392,6 +407,12 @@ EVENT_LABELS: dict[str, str] = {
     "trips.stop_noted": "Un arrêt de voyage noté", "trips.stop_removed": "Un arrêt retiré d'un voyage",
     "trips.removed": "Un voyage supprimé", "trips.looked": "Elle a regardé la carte (des lieux, un trajet)",
     "trips.shown": "Elle a montré une carte dans la conversation",
+    "agenda.written": "Ce qu'elle a proposé d'écrire dans un agenda est fait, ou a raté",
+    "agenda.reminder_due": "Un rendez-vous à rappeler", "agenda.reminder_dropped": "Un rappel tombé (le rendez-vous a "
+    "bougé, est parti, ou son agenda ne le demande plus)",
+    "agenda.invitation_noticed": "Une invitation dont elle prépare la réponse",
+    "agenda.invitation_settled": "Une invitation qui n'attend plus (répondue, partie, commencée)",
+    "agenda.sync_asked": "« Synchroniser maintenant » demandé pour un agenda branché",
     "memory.event_noted": "Un événement de la vie de quelqu'un, noté", "body.roused": "Réveillée par un message",
     "body.waited": "Un message attend son réveil", "attention.touched": "Une pensée effleurée par un message",
     "self.woke_with": "Ce qu'elle emporte de sa nuit", "self.touched": "Touchée par ce qu'on lui a dit",
@@ -463,6 +484,8 @@ EFFECT_LABELS: dict[str, tuple[str, str, str]] = {
     "email:effect.executed": ("agit", "Un mail parti", "elle apprend qu'il est parti, retouché ou non"),
     "teams:teams.settled": ("agit", "Une réponse Teams partie", "elle apprend qu'elle est partie, retouchée ou non"),
     "mcp:effect.executed": ("agit", "Ce qu'un service a rendu", "le résultat d'un appel à un service branché"),
+    "agenda:effect.executed": ("agit", "Une écriture dans un agenda",
+                               "elle apprend ce qu'est devenu ce qu'elle y a ajouté, modifié, supprimé ou répondu"),
     "forge:effect.executed": ("agit", "Une app installée", "une version de ses apps forgées, après ton accord"),
     "forge:effect.resolved": ("agit", "Une version d'app refusée", "mise de côté puis refusée : elle ne traîne plus"),
     "projects:effect.executed": ("agit", "Un pilotage de projet accepté",
@@ -518,6 +541,7 @@ CAPABILITY_LABELS: dict[str, str] = {
     "projects.issue": "Issue publiée", "projects.issue_state": "État d'une issue",
     "projects.issue_note": "Note publiée",
     "projects.steer": "Pilotage de projet",
+    "agenda.write": "Agenda",
 }
 
 #: Les enrichisseurs, nommés par ce qu'ils rassemblent pour le prompt avant qu'il s'écrive (l'onglet Prompt d'un
@@ -545,6 +569,9 @@ ENRICHER_LABELS: dict[str, str] = {
     "work_services": "Ses demandes aux outils extérieurs, faites en travaillant",
     "calls": "Ses demandes à ses apps", "signals": "Ce qu'une app a mis dans sa file",
     "news": "Ce que ses apps ont trouvé pour la personne", "wakeup": "Ses réveils par API",
+    "agenda": "Ses agendas (la journée de la personne, ce qu'elle y a proposé)",
+    "agenda_reminder": "Le rendez-vous qu'elle rappelle",
+    "agenda_invitation": "L'invitation dont elle prépare la réponse",
 }
 
 #: Les ports que des outils attendent (``needs=``) : pourquoi la porte ne les offre pas tant que le port n'est pas prêt
@@ -556,6 +583,9 @@ NEED_LABELS: dict[str, tuple[str, str]] = {
     "imaging": ("aucun fournisseur d'images n'est configuré", "images-fournisseurs"),
     "maps": ("les lieux, les adresses et les itinéraires ne sont pas branchés", "lieux"),
     "feeds": ("elle ne suit aucun flux", "flux"),
+    # le serveur branche toujours la base des rendez-vous (ADR 0309) : seule une composition partielle (un test) ne
+    # l'a pas ; sa page de réglages vient avec la console de l'agenda (lot 5), le lien ne paraît qu'une fois là
+    "agenda": ("ses calendriers ne sont pas branchés sur ce serveur", "agendas"),
 }
 
 #: Tout ce que la console nomme en français, d'un bloc.

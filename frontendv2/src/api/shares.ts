@@ -5,7 +5,8 @@
  */
 import { getJson, MOI, sendJson, type Done } from "./moi";
 
-export type ShareKind = "mail" | "teams" | "mcp";
+/** Une boîte, un compte Teams, un service, un agenda (ADR 0309 : il se partage depuis l'Agenda). */
+export type ShareKind = "mail" | "teams" | "mcp" | "agenda";
 /** Lire ; lire et préparer ; s'en servir. */
 export type ShareLevel = "lire" | "preparer" | "servir";
 

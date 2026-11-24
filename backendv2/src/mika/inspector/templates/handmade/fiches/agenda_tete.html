@@ -1,0 +1,7 @@
+{# L'en-tête de la fiche d'un agenda (app/handmade/subjects/agenda.py, ADR 0309, lot 5) : la vue d'un objet de la
+   maquette (ADR 0176) — sa couleur et son nom, son état en étiquettes à côté ; ses faits sur une ligne, séparés par des
+   filets ; la console met ses actions à droite. #}
+<div class="page-title">
+  <div class="page-title-row"><span class="agc-sw c-{{ color }}" aria-hidden="true"></span><h1>{{ name }}</h1><span class="badges">{% for text, tone in tags %}<span class="now-tag {{ tone }}">{{ text }}</span>{% endfor %}</span></div>
+  <div class="head-facts">{% for k, v in facts %}<span><span class="k">{{ k }}</span>{{ v }}</span>{% endfor %}</div>
+</div>

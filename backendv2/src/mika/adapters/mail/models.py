@@ -1,7 +1,7 @@
 """Les tables du cache du courrier (ADR 0101), déclarées sur ``MailBase`` : les mails à leur place, les dossiers, ce
-qui a été rendu (et ce qui l'a été sans être encore accusé), les brouillons, ce qui est parti, l'état de chaque compte,
-l'empreinte de ce qui a été oublié, les personnes que chaque ligne nomme, et les pièces de chaque mail avec leurs
-octets (ADR 0172).
+qui a été rendu (et ce qui l'a été sans être encore accusé, ou lu ailleurs sans lui avoir été dit), les brouillons, ce
+qui est parti, l'état de chaque compte, l'empreinte de ce qui a été oublié, les personnes que chaque ligne nomme, et
+les pièces de chaque mail avec leurs octets (ADR 0172).
 
 **Une ligne se désigne par son ``id``** (l'ordre d'arrivée, là où il sert : les rendus pas encore accusés, les
 pages) ; la clé naturelle (compte, dossier, UID ; Message-ID d'un envoi ; identifiant d'un brouillon) est une
@@ -220,6 +220,16 @@ class OfferedRow(MailBase):
     id: Mapped[int] = mapped_column(Id, primary_key=True)
     account: Mapped[str] = mapped_column(Key(ACCOUNT))
     ref: Mapped[str] = mapped_column(Key(REF))
+
+
+class SeenElsewhereRow(MailBase):
+    """Un mail gardé ici, lu dans un autre client, que sa relève ne lui a pas encore dit (ADR 0308) : le courrier en
+    direct relit les drapeaux même quand elle dort ; elle l'apprend à sa relève suivante, même après un redémarrage."""
+
+    __tablename__ = "seen_elsewhere"
+
+    account: Mapped[str] = mapped_column(Key(ACCOUNT), primary_key=True)
+    ref: Mapped[str] = mapped_column(Key(REF), primary_key=True)
 
 
 class DraftRow(MailBase):

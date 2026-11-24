@@ -220,6 +220,20 @@ def test_a_declined_or_expired_code_says_so_and_keeps_the_old_connection():
     assert vault.grants["hotmail"].refresh == "renouv-0"
 
 
+def test_the_end_of_a_wait_for_a_code_is_told_whatever_it_gives():
+    """Connectée, refusée, échue : ce que montre la boîte (``state``) a changé — qui écoute le sait (ADR 0308 : les
+    écrans de la boîte le relisent, plus d'attente à intervalles côté client)."""
+    for declined, pending, late in ((False, 1, False), (True, 1, False), (False, 1000, True)):
+        clock, vault, microsoft = [NOW], Vault(), Microsoft(pending=pending)
+        microsoft.declined = declined
+        oauth = signin(vault, microsoft, clock)
+        told: list[str] = []
+        oauth.on_state = told.append
+        _wait_for(oauth, microsoft, clock, late=late)
+        assert told == ["hotmail"], (declined, pending, late)
+        assert oauth.state("hotmail", hotmail()).state != SIGNIN_PENDING
+
+
 def test_a_new_code_that_expires_leaves_a_revoked_connection_revoked():
     clock, vault, microsoft = [NOW], Vault(hotmail=Grant("renouv-0", CLIENT, "consumers")), Microsoft(pending=1000)
     microsoft.revoked = True

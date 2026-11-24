@@ -2,7 +2,8 @@
  * Le démarrage : le thème, ses portraits, `whoami()` → la connexion ou l'application. L'application, c'est le
  * cadre (shell/), Mika (mika/) et les écrans (screens/), sur une connexion `/ws` du compte. Une fermeture en
  * 4401 (session révoquée, déconnexion, droits changés) ramène à la connexion, comme le veut le protocole :
- * `whoami` d'abord, et seulement si la session ne vaut plus, l'écran de connexion.
+ * `whoami` d'abord, et seulement si la session ne vaut plus, l'écran de connexion. Le direct (`live/`, ADR 0308) se
+ * branche sur chaque client de cette connexion : ce qui change est poussé aux écrans, rien ne se relit à intervalles.
  */
 import "./styles/base.css";
 import "./styles/chat.css";
@@ -14,16 +15,20 @@ import "./styles/ecrans/telephone.css";
 import "./styles/ecrans/contacts.css";
 import "./styles/ecrans/carte.css";
 import "./styles/ecrans/parametres.css";
+import "./styles/ecrans/agenda.css";
 import "./styles/app.css";
 
 import { API_BASE, logout, whoami, WS_URL, type AuthState } from "@web/network/api";
 import { WebSocketClient } from "@web/network/WebSocketClient";
 import { consoleHref } from "@web/ui/chatSync";
+import { live } from "./live/live";
 import { ensureSession } from "./login/login";
 import { setManifest } from "./mika/face";
 import { loadManifest } from "./mika/portraits";
 import { MikaStore } from "./mika/store";
 import { startVrmWhenShown } from "./mika/view";
+import { followChanges } from "./shared/store";
+import { agendaScreen } from "./screens/agenda";
 import { carteScreen } from "./screens/carte";
 import { ChatScreen } from "./screens/chat/chat";
 import { contactsScreen } from "./screens/contacts";
@@ -70,6 +75,8 @@ function startApp(state: AuthState, loginRoot: HTMLElement, appRoot: HTMLElement
   const account = accountOf(state);
   loginRoot.hidden = true;
   loginRoot.innerHTML = "";
+  // les copies partagées suivent le direct avant que les écrans ne s'y abonnent : ce qu'ils relisent repart du serveur
+  followChanges(live);
   const store = new MikaStore();
   let leaving = false;
   const page = consoleHref("/admin/");
@@ -97,6 +104,7 @@ function startApp(state: AuthState, loginRoot: HTMLElement, appRoot: HTMLElement
   // Mika » ouvrent le chat avec une phrase préremplie
   const ask = (text: string) => chat.prefill(text);
   shell.register(telephoneScreen(shell, { ask }));
+  shell.register(agendaScreen(shell, { ask }));
   shell.register(contactsScreen(shell, { ask }));
   shell.register(carteScreen(shell, { ask }));
   shell.register(parametresScreen(shell));
@@ -122,6 +130,8 @@ function startApp(state: AuthState, loginRoot: HTMLElement, appRoot: HTMLElement
       if (d.status === "unauthorized" && !leaving) void unauthorized();
     });
     chat.bind(ws);
+    // le direct (ADR 0308) : `changed`, et chaque ouverture, la première comprise, fait tout relire
+    live.bind(ws);
     ws.connect();
   };
 

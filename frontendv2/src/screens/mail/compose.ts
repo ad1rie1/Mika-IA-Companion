@@ -74,11 +74,24 @@ export function canCorrect(): boolean {
   return me.value?.correct === true;
 }
 
-/** Ce que dit « Corriger » une fois fait : combien de fautes, ou aucune. */
-export function correctedText(changes: number): string {
-  if (!changes) return "Aucune faute : ton texte reste tel quel.";
-  return changes > 1 ? `${changes} fautes corrigées.` : "1 faute corrigée.";
+/** Ce que dit « Corriger » une fois fait : combien de fautes, ou aucune ; et ce qui a été écarté parce que ça touchait
+ *  aux mots (ADR 0307). */
+export function correctedText(changes: number, refused = 0): string {
+  if (!changes) return refused ? "La correction touchait aux mots : rien n'a été changé." : "Aucune faute : ton texte reste tel quel.";
+  const done = changes > 1 ? `${changes} fautes corrigées` : "1 faute corrigée";
+  if (!refused) return `${done}.`;
+  return `${done} ; ${refused > 1 ? `${refused} changements écartés : ils touchaient` : "1 changement écarté : il touchait"} aux mots.`;
 }
+
+/** Ce que devient une correction revenue (ADR 0307) : posée, ou non — le champ n'est plus là (la fenêtre fermée,
+ *  une autre discussion ouverte : rien à dire), ou tu as continué d'écrire. */
+export function correctTurn(before: string, now: string | null, sameScope: boolean): "put" | "gone" | "moved" {
+  if (now === null || !sameScope) return "gone";
+  return now === before ? "put" : "moved";
+}
+
+/** Une correction en cours (une à la fois : un bouton redessiné pendant l'appel ne la relance pas). */
+let correcting = false;
 
 function put(t: HTMLTextAreaElement, text: string): void {
   t.value = text;
@@ -87,16 +100,20 @@ function put(t: HTMLTextAreaElement, text: string): void {
 }
 
 /** « Corriger » : les fautes du texte du champ, corrigées sans changer ses mots (ADR 0307). Le texte corrigé remplace
- *  le tien aussitôt, et le toast offre « Annuler » ; rien n'est posé si tu as continué d'écrire pendant ce temps.
- *  `field` rend le champ tel qu'il est à l'écran (il a pu être redessiné pendant l'appel). */
-export async function correctField(field: () => HTMLTextAreaElement | null, button: HTMLButtonElement | null): Promise<void> {
+ *  le tien aussitôt, et le toast offre « Annuler » ; rien n'est posé si tu as continué d'écrire pendant ce temps, ni
+ *  ailleurs que là où tu l'as demandé. `field` rend le champ tel qu'il est à l'écran (il a pu être redessiné pendant
+ *  l'appel) ; `scope` dit où l'on est (la discussion, le mail ouverts) : changé entre-temps, rien n'est posé. */
+export async function correctField(field: () => HTMLTextAreaElement | null, button: HTMLButtonElement | null,
+  scope: () => string = () => ""): Promise<void> {
   const start = field();
-  if (!start) return;
+  if (!start || correcting) return;
   const before = start.value;
+  const where = scope();
   if (!before.trim()) {
     toast("Rien à corriger : le champ est vide.", { ico: "info" });
     return;
   }
+  correcting = true;
   const label = button?.querySelector(".lbl");
   if (button) {
     button.disabled = true;
@@ -106,17 +123,18 @@ export async function correctField(field: () => HTMLTextAreaElement | null, butt
   try {
     const got = await correctText(before);
     const now = field();
-    if (!now) return;
-    if (now.value !== before) {
+    const turn = correctTurn(before, now?.isConnected ? now.value : null, scope() === where);
+    if (turn === "gone" || !now) return;
+    if (turn === "moved") {
       toast("Tu as continué d'écrire : la correction n'a pas été posée.", { ico: "info" });
       return;
     }
     if (!got.changes) {
-      toast(correctedText(0));
+      toast(correctedText(0, got.refused ?? 0), got.refused ? { ico: "info" } : {});
       return;
     }
     put(now, got.text);
-    toast(correctedText(got.changes), {
+    toast(correctedText(got.changes, got.refused ?? 0), {
       action: {
         label: "Annuler",
         run: () => {
@@ -128,6 +146,7 @@ export async function correctField(field: () => HTMLTextAreaElement | null, butt
   } catch (err) {
     toast(errorText(err), { ico: "alert" });
   } finally {
+    correcting = false;
     if (button) {
       button.disabled = false;
       button.removeAttribute("aria-busy");
@@ -430,7 +449,7 @@ export function openCompose(opts: ComposeOptions): HTMLElement {
   el.addEventListener("click", (e) => {
     const t = e.target as Element;
     const fix = t.closest<HTMLButtonElement>("[data-corriger]");
-    if (fix) void correctField(() => $<HTMLTextAreaElement>("[data-corps]", form), fix);
+    if (fix) void correctField(() => (el.isConnected ? $<HTMLTextAreaElement>("[data-corps]", form) : null), fix);
     if (t.closest("[data-cc]")) {
       $<HTMLElement>("[data-ccrow]", el)!.hidden = false;
       t.closest("[data-cc]")!.remove();

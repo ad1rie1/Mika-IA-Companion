@@ -42,6 +42,8 @@ private val DESTINATIONS = listOf(
     Destination(Route.Projects(), R.drawable.ic_m_flag, R.string.nav_projects) { it?.counts?.projects ?: 0 },
     Destination(Route.Mail, R.drawable.ic_m_mail, R.string.nav_mail) { it?.counts?.mail ?: 0 },
     Destination(Route.Teams, R.drawable.ic_m_teams, R.string.nav_teams) { it?.counts?.teams ?: 0 },
+    // après Teams (ADR 0309, la maquette validée `ecrans/agenda.js`) : ses invitations et ce que Mika propose
+    Destination(Route.Agenda, R.drawable.ic_m_agenda, R.string.nav_agenda) { it?.counts?.agenda ?: 0 },
     Destination(Route.Carte(), R.drawable.ic_m_map, R.string.nav_map),
     Destination(Route.Phone(), R.drawable.ic_m_phone, R.string.nav_phone) { it?.counts?.phone ?: 0 },
     // après Téléphone (ADR 0298, la maquette `ecrans/contacts.js`) : il ferme les rubriques où l'on parle aux gens ; sans

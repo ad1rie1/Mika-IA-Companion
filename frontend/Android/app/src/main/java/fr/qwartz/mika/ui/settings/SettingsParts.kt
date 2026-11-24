@@ -65,6 +65,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
+import fr.qwartz.mika.data.net.Topics
 import fr.qwartz.mika.data.moi.MoiError
 import fr.qwartz.mika.data.moi.Tone
 import fr.qwartz.mika.data.moi.settings.SettingsApi
@@ -94,6 +95,20 @@ import kotlinx.coroutines.flow.receiveAsFlow
 // ── Les ViewModels ──────────────────────────────────────────────────────
 
 internal fun AppGraph.settingsApi(): SettingsApi = SettingsApi(moi)
+
+/**
+ * Ce que suivent les pages de Paramètres qui montrent une liste (ADR 0308, § 2 bis) : tes réglages (`settings` — qui
+ * voit quoi, tes services, tes partages), l'état de tes boîtes (`mail`) et de tes comptes Teams (`teams`), tes
+ * téléphones (`phone.phones`). Un formulaire ne se relit pas sous ta saisie : il se relit quand on le rouvre.
+ */
+internal object SettingsLive {
+    val HOME = setOf(Topics.SETTINGS, Topics.MAIL, Topics.TEAMS, Topics.PHONE_PHONES, Topics.AGENDA)
+    val BOXES = setOf(Topics.SETTINGS, Topics.MAIL)
+    val TEAMS = setOf(Topics.SETTINGS, Topics.TEAMS)
+    val PHONES = setOf(Topics.PHONE_PHONES)
+    val SERVICES = setOf(Topics.SETTINGS)
+    val SHARES = setOf(Topics.SETTINGS)
+}
 
 /**
  * Ce dont un modèle de Paramètres a besoin : l'API, ses textes (les chaînes `settings_*`), relire les pastilles du

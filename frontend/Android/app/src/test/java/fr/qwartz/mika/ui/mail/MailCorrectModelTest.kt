@@ -1,8 +1,8 @@
 package fr.qwartz.mika.ui.mail
 
-import fr.qwartz.mika.data.moi.CorrectWords
 import fr.qwartz.mika.data.moi.Corrected
 import fr.qwartz.mika.data.moi.MoiApi
+import fr.qwartz.mika.data.moi.correctWords
 import fr.qwartz.mika.data.moi.mail.MailFull
 import fr.qwartz.mika.data.moi.mail.MailPerson
 import fr.qwartz.mika.ui.Route
@@ -39,13 +39,8 @@ class MailCorrectModelTest {
     }
     private val vm by lazy { main.model { MailComposeViewModel(MailDeps(api, unsent = UnsentMails(), notices = MailNotices())) } }
 
-    private val words = CorrectWords(
-        empty = "Rien à corriger : le champ est vide.",
-        none = "Aucune faute : ton texte reste tel quel.",
-        moved = "Tu as continué d'écrire : la correction n'a pas été posée.",
-        off = "Aucun modèle ne corrige : un opérateur en choisit un dans Réglages › Intelligence.",
-        fixed = { n -> if (n <= 1) "$n faute corrigée." else "$n fautes corrigées." },
-    )
+    /** Les vrais mots de `strings.xml`. */
+    private val words = correctWords
     private val typo = "Bonjour Léa, voici le devis que tu ma demander."
     private val fixed = "Bonjour Léa, voici le devis que tu m'as demandé."
 

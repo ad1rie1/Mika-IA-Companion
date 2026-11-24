@@ -77,7 +77,7 @@ internal fun DocPageScreen(graph: AppGraph, route: Route.ProjectPage) {
     Toasts(vm.gestures)
     // la page s'ouvre : ce qu'on y avait dit avant de la quitter (un refus d'un autre jour) ne vaut plus
     FreshEntry(vm.gestures, DocPageViewModel.HERE, DocPageViewModel.MOVE)
-    OnResume(vm) {
+    OnResume(vm, project = route.id) {
         project.resume()
         docs.space.open()
         vm.resume()
@@ -304,7 +304,7 @@ internal fun DecisionScreen(graph: AppGraph, route: Route.ProjectPage) {
     }
     val now = rememberNow(wallMs = graph.clock::wallMs)
     Toasts(vm.gestures)
-    OnResume(vm) {
+    OnResume(vm, project = route.id) {
         project.resume()
         vm.resume()
     }

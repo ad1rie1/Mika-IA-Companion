@@ -14,6 +14,8 @@ export interface Counts {
   phone: number;
   /** Ce qui t'attend, toi, dans tes projets (« À faire », `protocole-moi.md` § 11). */
   projects: number;
+  /** Ses invitations en attente, et ce que Mika propose dont elle décide (ADR 0309, § 13). */
+  agenda?: number;
 }
 
 export interface Me {
@@ -34,10 +36,12 @@ export function fetchMe(): Promise<Me> {
   return getJson<Me>(MOI);
 }
 
-/** Un texte corrigé (ADR 0307) : ses fautes, sans changer ses mots ; `changes` : combien d'endroits ont changé. */
+/** Un texte corrigé (ADR 0307) : ses fautes, sans changer ses mots ; `changes` : combien de corrections ; `refused` :
+ *  combien de changements du modèle ont été écartés parce qu'ils touchaient aux mots. */
 export interface Corrected {
   text: string;
   changes: number;
+  refused?: number;
 }
 
 export function correctText(text: string): Promise<Corrected> {

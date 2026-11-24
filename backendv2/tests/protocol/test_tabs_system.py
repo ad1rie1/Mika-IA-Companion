@@ -296,7 +296,9 @@ def test_the_gateway_view_keeps_its_alarm_for_a_real_role_only():
     assert (unserved.value, unserved.sub, unserved.tone) == (0, "aucun", "")
     polish = next(r for r in roles.rows if r.cells[1].text == "polish")
     assert polish.tone == "" and polish.cells[2].text == "coupée : aucun modèle, la seconde passe ne se fait pas"
-    assert "« rendre naturel (voix, seconde passe) » n'a pas de repli" in roles.caption
+    # les rôles facultatifs, nommés (ADR 0140, 0307) : ni l'un ni l'autre n'a de repli
+    assert "« rendre naturel (voix, seconde passe) »" in roles.caption
+    assert "« corriger les fautes (Mail, Teams) »" in roles.caption and "n'ont pas de repli" in roles.caption
     stats, _providers, roles = _gateway_view({"reply": "claude", "extract": "", "polish": ""})
     unserved = next(x for x in stats.items if x.label == "Rôles sans fournisseur")
     assert (unserved.value, unserved.sub, unserved.tone) == (1, "retenir (mémoire)", "danger")

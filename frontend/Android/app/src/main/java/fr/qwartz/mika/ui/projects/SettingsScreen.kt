@@ -81,7 +81,7 @@ internal fun SettingsScreen(graph: AppGraph, route: Route.ProjectPage) {
     FreshEntry(vm.gestures, SettingsViewModel.where(route.key), SettingsViewModel.PROJECT)
     FreshEntry(project.gestures, ProjectViewModel.TOP)
     // par page : la liste des sections et chaque section se relisent quand on y arrive
-    OnResume(vm to route.key) {
+    OnResume(vm to route.key, project = route.id) {
         project.resume()
         vm.resume()
     }

@@ -21,6 +21,20 @@ dit dans la liste des fils. `?effort=1` ouvre le menu d'emblée.
 
 **Validé le 2026-11-22** (« oui ») (ADR 0300) : les **photos de profil** de Teams à la place des initiales, partout où une personne a un avatar (fil Teams, conversations, participants, Contacts, Mail) — seulement pour qui Teams montre une photo, un proche vu au téléphone garde ses initiales ; et les **réactions** sous un message (déjà dans la maquette validée) : la tienne en couleur, qui a réagi au survol. Les portraits sont dessinés (pas de vraies photos ici). `ecrans/teams-photos.js` et `.css`, chargés avant les écrans ; `?photos=0` pour comparer avec les initiales. Routes : `#teams/discussions/lumen`, `#teams/discussions/marc`, `#contacts/claire`.
 
+**Proposé le 2026-11-23, pas encore validé** : l'écran **Agenda** (`ecrans/agenda.js`, `agenda.css`, `agenda-donnees.js`,
+d'après `output/agenda/CONCEPTION.md`) — tous tes agendas en un écran, comme Google Agenda ou Outlook : Créer, le
+mini-mois et les agendas groupés à gauche (Mes agendas · Partagés avec moi · Abonnements · L'agenda de Mika, chacun sa
+couleur, son fournisseur, son menu ⋯) ; Jour · Semaine · Mois · Planning, les chevauchements, la ligne de l'heure ; la fiche
+d'un événement dans un volet (récurrence, lieu vers la Carte, visio, participants et leur réponse, rappels, « Mika te le
+rappelle », « Ce que Mika en sait », Modifier · Dupliquer · Supprimer · Demander à Mika) ; créer et modifier (et la question
+d'un événement récurrent) ; partager un agenda (Lire · Lire et préparer · S'en servir) ; les invitations et la réponse que
+Mika prépare ; ce qu'elle propose d'ajouter, hachuré de rose ; son agenda à elle, tiré de sa mémoire, en lecture seule.
+Posés par-dessus les écrans validés, sans les retoucher : **Paramètres › Agendas** (`ecrans/agenda-parametres.js` : les
+comptes, leur fiche, « Brancher un agenda » par sorte), **Outils › Droits** (`ecrans/agenda-droits.js` : un tableau par
+agenda) et le **chat** (`ecrans/agenda-chat.js` : la carte « Ajouter à ton agenda » et un de ses rappels). Pour faire tenir
+une dixième rubrique, `agenda.css` replie les libellés de la barre du haut un peu plus tôt, et sur un téléphone la barre
+du bas passe à huit entrées : Carte, Outils et Réglages sous « Plus ». L'écran se passe le lundi 23 novembre 2026 à 14:20.
+
 ## L'ouvrir
 
 - **Avec la VRM** (servie en HTTP, depuis la racine du dépôt) :
@@ -51,8 +65,10 @@ mode pro), `?notes=1` (panneau des notes ouvert), et la route après `#` :
 | Teams | `#teams/discussions/lumen`, `#teams/discussions/claire`, `#teams/brouillons` |
 | Téléphone | `#telephone/messages/julien`, `#telephone/notifications`, `#telephone/position` (le sélecteur en haut passe d'un téléphone à l'autre) |
 | Contacts | `#contacts/claire` (une collègue vue dans Teams et au courrier), `#contacts/lea` (qui parle aussi à Mika), `#contacts/ines` (dont tu lui as seulement parlé), `#contacts/lumen` (une organisation) |
+| Agenda | `#agenda` (Semaine ; Planning sur un téléphone), `#agenda/jour`, `#agenda/semaine`, `#agenda/mois`, `#agenda/planning`, `#agenda/evenement/<id>` (`revue-budget`, `point-lumen@2026-11-23` une occurrence, `inv-afterwork` une invitation, `prop-diner` ce que Mika propose, `dentiste` ajouté par Mika, `mika-relire` son agenda, `lea-diner` partagé avec toi), `#agenda/nouveau`, `#agenda/modifier/<id>` (`escalade@2026-11-26` pose la question du récurrent), `#agenda/partager/<agenda>` (`famille`, `perso`, `lea`), `#agenda/invitations` ; et `#chat/agenda` |
 | Carte | `#carte/explorer`, `#carte/itineraire`, `#carte/voyages`, `#carte/voyages/alpes` (et sa carte dans le chat, en bas de `#chat`) |
-| Paramètres | `#parametres/compte`, `#parametres/comptes-mail/pro`, `#parametres/teams`, `#parametres/telephones`, `#parametres/partages`, `#parametres/mcp/factures` |
+| Paramètres | `#parametres/compte`, `#parametres/comptes-mail/pro`, `#parametres/teams`, `#parametres/telephones`, `#parametres/partages`, `#parametres/mcp/factures` ; `#parametres/agendas`, `#parametres/agendas/<compte>` (`systeme`, `lumen`, `google`, `outlook` en erreur, `feries`), `#parametres/agendas/brancher` et `/systeme`, `/google` (`/google/sans-appli` : l'application Google n'est pas réglée), `/microsoft`, `/caldav`, `/ical` |
+| Outils › Droits d'un agenda | `#outils/droits/ag-<agenda>` (`mon`, `travail`, `perso`, `famille`, `feries`, `lea`) |
 
 ## Les notes
 
@@ -85,6 +101,7 @@ et pas dans l'interface, que la maquette dit ce qui n'existe pas encore.
 | `donnees.js` | qui est connecté, les personnes, l'état de Mika et le fil rouge entre les écrans |
 | `mika-vrm.js` | sa VRM (module, HTTP seulement) : son visage dans la barre, son buste dans le chat |
 | `ecrans/<écran>.js` et `.css` | un écran chacun : chat, outils, mail, teams, telephone, carte, parametres (et `carte-fond.js`, le fond de France, généré) |
+| `ecrans/agenda.js`, `agenda.css`, `agenda-donnees.js` | l'écran Agenda (proposé le 2026-11-23) et ses données d'exemple ; `agenda-parametres.js`, `agenda-droits.js`, `agenda-chat.js` le posent sur Paramètres, Outils › Droits et le chat |
 | `ecrans/projets2.js`, `-travail.js`, `-diagramme.js`, `-code.js`, `-doc.js`, `-suite.js` | l'écran Projets, seconde maquette : le socle (les trois zones, les formulaires, le panneau qui s'ouvre), « À faire », la grille et la Vue d'ensemble ; Objectifs, Tickets et « Modifier le projet » ; le diagramme des objectifs (leur avancement, ou leur place dans le temps) ; Code ; Documentation (Pages, Images, Décisions, et le petit rendu Markdown de la lecture) ; Activité, Dépendances, Listes |
 | `ecrans/projets2.css`, `projets2-zones.css` | ses styles : le cadre et les morceaux partagés ; les trois zones, les formulaires et les vues refaites (l'éditeur à nos couleurs, le graphique, le schéma) |
 | `ecrans/projets2-donnees.js` | ses données d'exemple, inventées : un projet « Outils réseau » complet (dépôt, commits et diffs, pull requests, tickets, espace de documentation, décisions…) ; les gestes les modifient en mémoire |

@@ -40,6 +40,12 @@ SRC = ROOT / "src" / "mika"
 #: Protocol nouveau de ``ports/`` s'inscrit ici (``test_each_port_is_in_the_table``).
 IMPLEMENTATIONS: dict[tuple[str, str], tuple[tuple[str, str], ...]] = {
     ("contracts/entry.py", "MindPort"): (("app/mindport.py", "KernelPort"),),
+    ("ports/agenda.py", "AgendaPort"): (("adapters/agenda/store.py", "AgendaStore"),),
+    ("ports/agenda.py", "AgendaDesk"): (("app/agenda_desk.py", "AgendaSettingsDesk"),),
+    ("ports/agenda.py", "AgendaProviders"): (("adapters/agenda/__init__.py", "Providers"),),
+    ("ports/agenda.py", "CalendarProvider"): (("adapters/agenda/system.py", "SystemProvider"),
+                                              ("adapters/agenda/google.py", "GoogleProvider"),
+                                              ("adapters/agenda/graph.py", "MicrosoftProvider")),
     ("ports/camera.py", "CameraPort"): (("adapters/camera/__init__.py", "CameraBuffer"),),
     ("ports/contacts.py", "ContactsPort"): (("adapters/contacts/store.py", "ContactsStore"),),
     ("ports/delivery.py", "DeliveryPort"): (

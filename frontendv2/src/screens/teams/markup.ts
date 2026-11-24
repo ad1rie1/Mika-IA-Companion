@@ -192,7 +192,7 @@ function pendingMessage(p: OwnBubble, v: ThreadView): string {
     : "";
   return `<div class="tm-msg me pending${p.failed ? " failed" : ""}"${p.id ? ` data-own="${h(p.id)}"` : ""}><span class="tm-gut"></span>
     <div class="tm-body"><div class="tm-meta"><b>Toi</b><time title="${h(dayAndClock(p.at, v.now))}">${h(clock(p.at))}</time></div><div class="tm-txt">${h(p.text).replace(/\n/g, "<br>")}</div>
-      <div class="tm-pending-note">${ico(p.failed ? "alert" : "clock", "xs")}<span>${h(p.note)}</span>${again}</div></div></div>`;
+      <div class="tm-pending-note">${ico(p.failed ? "alert" : p.sent ? "check" : "clock", "xs")}<span>${h(p.note)}</span>${again}</div></div></div>`;
 }
 
 /** Sa réponse, quand on a répondu autrement dans la discussion (ADR 0199) : elle ne partira pas, et la carte le dit. */

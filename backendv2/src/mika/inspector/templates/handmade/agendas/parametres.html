@@ -1,0 +1,131 @@
+{# Relations & échanges › Agendas › Paramètres (la roue, ADR 0206 ; ADR 0309, lot 5 ; la maquette : parametres.html) :
+   l'application Google du serveur (pas à pas), l'application Microsoft — la même que celle du courrier (ADR 0238) —,
+   puis les paramètres du plugin ``agenda`` : la synchronisation (sa fenêtre, sa cadence par sorte, son historique), les
+   rappels qu'elle propose d'office, les invitations, les accords ; enfin ce qui se règle ailleurs. Une section à la fois
+   (des sous-onglets). Les champs, leurs noms et leurs jetons sont ceux des réglages (pages/settings_form.py,
+   app/settings_sections/plugins.py) et des paramètres avancés : rien ne s'enregistre autrement qu'ailleurs. Les
+   comptes eux-mêmes, chacun les branche dans son espace. #}
+{% from "_forms.html" import field %}
+{% set s = sections[0] %}
+{% set every = ((s.form.groups + s.form.advanced) if s.form else [])|map(attribute="fields")|sum(start=[]) %}
+{% set ids = {"Synchronisation": "synchro", "Rappels": "rappels", "Invitations": "invitations", "Accords": "accords"} %}
+{% set want = ["Synchronisation", "Rappels", "Invitations", "Accords"] %}
+{% set ordered = [] %}
+{% if params %}{% for t in want %}{% for g in params.groups if g.title == t %}{% set _ = ordered.append(g) %}{% endfor %}{% endfor %}
+{% for g in params.groups if g.title not in want %}{% set _ = ordered.append(g) %}{% endfor %}{% endif %}
+{% macro by_path(path) -%}{% for f in every if f.path == path %}{{ field(f) }}{% endfor %}{%- endmacro %}
+<div class="now-page mailset agc-page">
+{% for m in s.messages %}<div class="flash {{ m[0] }}" role="status">{{ m[1] }}</div>{% endfor %}
+{% if s.form %}{% for e in s.form.general %}<div class="flash danger">{{ e }}</div>{% endfor %}{% endif %}
+<div class="hm-subtabs" data-subtabs>
+  <nav class="hm-subnav" aria-label="Paramètres des agendas">
+    <p class="hm-subnav-title">Les agendas</p>
+    {% if s.form %}<a href="#google">Application Google</a><a href="#microsoft">Application Microsoft</a>{% endif %}
+    {% if params %}{% for g in ordered if g["items"]|selectattr("field")|rejectattr("field.readonly")|list %}<a href="#{{ ids.get(g.title, 'groupe-' ~ loop.index) }}">{{ g.title }}</a>{% endfor %}{% endif %}
+    <div class="hm-subnav-sep"></div>
+    <a href="#ailleurs">Réglé ailleurs</a>
+  </nav>
+  <div class="hm-subpanes">
+  {% if s.form %}
+  <form method="post" action="{{ action }}" class="form" id="applications">
+    <button type="submit" class="default-submit" hidden tabindex="-1">Enregistrer</button>
+    <input type="hidden" name="csrf" value="{{ s.csrf }}"><input type="hidden" name="_section" value="{{ s.key }}">
+    {% if s.form.stash %}<input type="hidden" name="_reserve" value="{{ s.form.stash }}">{% endif %}
+    {% set google = every|selectattr("path", "equalto", "google_client_id")|first %}
+    <section class="mailset-row" id="google" data-pane aria-labelledby="agc-google">
+      <div class="mailset-row-about">
+        <h2 id="agc-google">Application Google</h2>
+        <p>Google n'ouvre un agenda qu'à une application inscrite chez lui. Il n'en est pas livré : chaque serveur inscrit la sienne, une fois, pour tous ses comptes.</p>
+        <p class="agc-status">{% if google and google.value %}<span class="now-tag ok">réglée</span>{% else %}<span class="now-tag warn">pas réglée</span><span class="now-muted">brancher Google est refusé, en mots</span>{% endif %}</p>
+      </div>
+      <div class="now-card mailset-row-fields">
+        <div class="mailset-params-list">
+          <div class="mailset-param">{{ by_path("google_client_id") }}</div>
+          <div class="mailset-param">{{ by_path("google_secret") }}</div>
+          <div class="mailset-param">{{ by_path("google_web") }}</div>
+          <div class="mailset-param"><div class="field"><span class="label">Ce qu'elle demande</span><p class="agc-status"><code>calendar</code> · lire et écrire les agendas</p><span class="help">Un seul champ, « sensible » pour Google : il explique l'avertissement « application non validée ».</span></div></div>
+        </div>
+        <details class="agc-fold"><summary>La créer, pas à pas</summary>
+          <ol class="agc-steps">
+            <li><b>Un projet</b> : dans la console Google Cloud (console.cloud.google.com), créer un projet (« Mika », par exemple), avec le compte Google de l'opérateur.</li>
+            <li><b>L'API</b> : API et services › Bibliothèque › « Google Calendar API » › Activer.</li>
+            <li><b>L'écran de consentement</b> (Google Auth Platform) : type « Externe » ; le nom de l'application, ton adresse ; dans « Accès aux données », le champ <code>…/auth/calendar</code>. Puis, dans « Audience », <b>Publier l'application</b> : en « Test », Google coupe l'accès au bout de 7 jours et seuls les comptes listés entrent. Publiée sans validation, Google prévient « application non validée » : on continue par « Paramètres avancés » (jusqu'à 100 comptes).</li>
+            <li><b>Le client</b> : Clients › Créer un client › Type « <b>Application de bureau</b> » ; copier son identifiant et son secret ici, puis Enregistrer.</li>
+            <li><b>Brancher</b> : chacun ajoute son Google depuis son espace (Paramètres › Agendas › Google). Après le consentement, Google renvoie vers <code>http://127.0.0.1/…?code=…</code> : on colle cette adresse. Avec un client « Application Web » et une adresse HTTPS, le retour est direct.</li>
+          </ol>
+        </details>
+        <div class="form-actions-inline"><button class="btn">Enregistrer</button></div>
+      </div>
+    </section>
+    <section class="mailset-row" id="microsoft" data-pane aria-labelledby="agc-microsoft">
+      <div class="mailset-row-about">
+        <h2 id="agc-microsoft">Application Microsoft</h2>
+        <p>La même que celle du courrier (ADR 0238) : un seul réglage pour les deux, ici ou dans <a href="{{ PREFIX }}/courrier/parametres#microsoft">Courrier › Paramètres › Compte Microsoft</a>.</p>
+        {% set ms = every|selectattr("path", "equalto", "microsoft_app")|first %}
+        <p class="agc-status">{% if ms and ms.value %}<span class="now-tag info">propre à ce serveur</span>{% else %}<span class="now-tag info">livrée d'origine</span>{% endif %}</p>
+      </div>
+      <div class="now-card mailset-row-fields">
+        <div class="mailset-params-list">
+          <div class="mailset-param">{{ by_path("microsoft_app") }}</div>
+          <div class="mailset-param"><div class="field"><span class="label">Un compte Microsoft 365</span><p class="agc-status">dépend de son organisation</p><span class="help">Une organisation peut refuser l'application : le compte passe alors par DavMail, en CalDAV.</span></div></div>
+        </div>
+        <div class="form-actions-inline"><button class="btn">Enregistrer</button></div>
+      </div>
+    </section>
+  </form>
+  {% endif %}
+
+  {% if params %}{% set p = params %}
+  <form method="post" action="{{ p.action }}" class="form mailset-params" id="general">
+    <button type="submit" class="default-submit" hidden tabindex="-1">Enregistrer</button>
+    <input type="hidden" name="csrf" value="{{ s.csrf }}"><input type="hidden" name="_faculte" value="{{ p.owner }}">
+    <input type="hidden" name="_groupe" value=""><input type="hidden" name="_retour" value="{{ p.back }}">
+    {% for m in p.messages %}<div class="flash {{ m[0] }}" role="status">{{ m[1] }}</div>{% endfor %}
+    {% for e in p.general %}<div class="flash danger">{{ e }}</div>{% endfor %}
+    {% if p.refused %}<div class="flash danger">Des surcharges enregistrées sont refusées et ignorées : {% for k, v in p.refused.items() %}{{ k }} ({{ v }}){{ " ; " if not loop.last }}{% endfor %}.</div>{% endif %}
+    {% for g in ordered %}{% set mine = g["items"]|selectattr("field")|rejectattr("field.readonly")|list %}
+    {% if mine %}
+    <section class="mailset-row" id="{{ ids.get(g.title, 'groupe-' ~ loop.index) }}" data-pane aria-labelledby="agc-p{{ loop.index }}">
+      <div class="mailset-row-about">
+        <p class="now-kicker">Pour tous les comptes</p>
+        <h2 id="agc-p{{ loop.index }}">{{ g.title }}</h2>
+        {% if g.title == "Synchronisation" %}<p>Un processus relit chaque compte à son rythme ; une écriture part tout de suite chez le fournisseur, puis l'agenda se relit. Une panne se voit sur le compte et dans Système › Santé générale. Le système n'a rien à relire : il est sur ce serveur.</p>
+        {% elif g.title == "Rappels" %}<p>Le délai qu'elle propose d'office à un agenda dont la personne n'a pas choisi le sien ; chacun le change ensuite, agenda par agenda, dans son espace. Un abonnement iCal n'a pas de rappel. Un rappel est une initiative : l'arbitre peut le retenir.</p>
+        {% elif g.title == "Invitations" %}<p>Une invitation qui attend sa réponse : elle prépare la réponse, qui ne part qu'avec un accord.</p>
+        {% elif g.title == "Accords" %}<p>Combien de temps vaut la carte d'accord du chat ; la proposition, elle, attend jusqu'à la décision ou au début du rendez-vous.</p>{% endif %}
+      </div>
+      <div class="now-card mailset-row-fields">
+        <div class="mailset-params-list">
+          {% for it in mine %}
+          <div class="mailset-param{{ ' is-overridden' if it.overridden }}">
+            {{ field(it.field) }}
+            {% if it.source != "défaut" or it.pending %}
+            <p class="mailset-param-meta">
+              {% if it.source != "défaut" %}<span class="now-tag {{ it.tone }}" title="{{ it.source_label }}">{{ it.source }}</span>{% endif %}
+              {% if it.natural %}<span>sans surcharge : <b>{{ it.natural }}</b></span>{% endif %}
+              {% if it.pending %}<span class="st-warn">en vigueur : {{ it.pending }} (pas encore journalisé)</span>{% endif %}
+            </p>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+        <div class="form-actions-inline"><button class="btn">Enregistrer</button><span class="now-muted">Une valeur changée devient une surcharge, bornée et journalisée avec ton nom. <a href="{{ p.advanced }}">Le détail de chaque paramètre →</a></span></div>
+      </div>
+    </section>
+    {% endif %}
+    {% endfor %}
+  </form>
+  {% endif %}
+
+  <section class="mailset-row" id="ailleurs" data-pane aria-labelledby="agc-ailleurs">
+    <div class="mailset-row-about"><h2 id="agc-ailleurs">Réglé ailleurs</h2><p>Lus ici, réglés là où ils ont leur sens.</p></div>
+    <div class="now-card mailset-row-fields mailset-links">
+      <a href="{{ PREFIX }}/reglages/droits#d-agendas"><b>Réglages › Droits</b><span>Le tableau de chaque agenda : qui, par où, quand ; lire, ajouter, répondre, ce qu'elle en garde.</span></a>
+      {% if params %}<a href="{{ params.advanced }}"><b>Réglages › Paramètres avancés › Agenda</b><span>Chaque paramètre du plugin, sa valeur par défaut et ses bornes ; à qui est chaque compte, ses partages, ses agendas masqués (lus des réglages de chacun).</span></a>{% endif %}
+      <a href="{{ PREFIX }}/courrier/parametres#microsoft"><b>Courrier › Paramètres › Compte Microsoft</b><span>La même application Microsoft que pour les boîtes.</span></a>
+      <p class="now-muted">Les comptes, leurs agendas, leur couleur et leur rappel : dans l'espace de chacun (Paramètres › Agendas).</p>
+    </div>
+  </section>
+  </div>
+</div>
+</div>

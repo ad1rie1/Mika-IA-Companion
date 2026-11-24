@@ -207,6 +207,8 @@ class TeamsRulesTest {
         assertEquals("en file : l'extension l'envoie dans Teams, sous ton nom" to false, pendingNote(OwnStates.QUEUED))
         assertFalse(pendingNote(OwnStates.SENDING).second)
         assertTrue(pendingNote(OwnStates.PLACED).first.contains("zone de saisie de Teams"))
+        assertEquals("parti dans Teams" to false, pendingNote(OwnStates.SENT))
+        assertTrue(ownBubbles(listOf(OwnPending(id = "o1", body = "ok", at = 1, state = OwnStates.SENT)), emptyList()).single().sent)
         assertTrue(pendingNote(OwnStates.UNUSED).second)
         assertTrue(pendingNote(OwnStates.UNUSED).first.contains("pas parti"))
         assertEquals(

@@ -11,8 +11,14 @@
  * mène à Paramètres › Téléphones (ADR 0233). À un compte qui n'est pas propriétaire, Messages dit que Mika ne lit pas
  * ses messages (`owner` de `GET /api/moi`). « Lui en parler dans le chat » ouvre le chat avec une phrase qui nomme la
  * conversation (`TelephoneHooks.ask`).
+ *
+ * Rien ne se relit à intervalles : le direct (ADR 0308, `protocole-moi.md` § 2 bis) dit ce qui a changé — `phone` (la
+ * liste, le fil ouvert s'il est nommé), `phone.position`, `phone.phones`, `me` —, et l'écran au second plan, ou
+ * l'onglet caché, se relit à son retour.
  */
 import { fetchConversations, fetchThread, type Phone, type PhoneThread } from "../../api/phone";
+import { Freshness, live, names, pageShown, type Changed } from "../../live/live";
+import { ages } from "../../shell/ages";
 import { mapInfo } from "../../map/info";
 import { LiveMap } from "../../map/live";
 import { EMPTY_SCENE, type Scene } from "../../map/scene";
@@ -43,8 +49,6 @@ import {
 } from "./view";
 
 const ID = "telephone";
-/** Relire ce qui arrive tant que l'écran est ouvert. */
-const EVERY_MS = 30_000;
 
 export interface TelephoneHooks {
   /** Ouvrir le chat avec une phrase préremplie (« Lui en parler dans le chat », depuis un fil). */
@@ -84,7 +88,8 @@ class TelephoneScreen {
   private query = "";
   /** Ce qui a été dessiné : on ne redessine que si une lecture a changé. */
   private painted = "";
-  private timer = 0;
+  /** Le direct (ADR 0308) : montré, l'écran relit ce qu'un changement touche ; sinon il se relit à son retour. */
+  private readonly fresh = new Freshness(() => this.open() && pageShown(), () => void this.ensure(true));
 
   constructor(
     private readonly shell: Shell,
@@ -93,6 +98,17 @@ class TelephoneScreen {
     // la palette (Ctrl K) cherche aussi ses conversations : une lecture, un peu après le démarrage
     window.setTimeout(() => void this.conversations.load(), 2500);
     onTheme((dark) => this.map.view?.theme(dark));
+    // la carte de la position se rend dès qu'on quitte l'écran (comme celle de la Carte)
+    addEventListener("hashchange", () => {
+      if (!new RegExp(`^#${ID}(/|$)`).test(location.hash)) this.map.drop();
+    });
+    live.onChange("phone", (convs) => this.fresh.touch(() => void this.phoneChanged(convs)));
+    // ses âges (« vu il y a » de tes téléphones, une proposition décidée « il y a ») avancent d'eux-mêmes
+    ages.onTick(() => this.agesTick());
+    // la position relue, la carte servie aussi si elle a vieilli (au plus toutes les cinq minutes : aucun sujet ne la dit)
+    live.onChange("phone.position", () => this.fresh.touch(() => void this.reread(this.ctx?.tab === "position" ? [this.position] : [], [this.mapInfo])));
+    live.onChange("phone.phones", () => this.fresh.touch(() => void this.reread([this.phones])));
+    live.onChange("me", () => this.fresh.touch(() => void this.reread([this.me])));
   }
 
   def(): ScreenDef {
@@ -127,13 +143,18 @@ class TelephoneScreen {
   /** Lire ce que l'onglet montre ; redessiner si ça a changé et qu'on y est encore. */
   private async ensure(force = false): Promise<void> {
     const tab = this.ctx?.tab;
-    const reads: Promise<unknown>[] = [this.conversations.load(force), this.phones.load(force), this.me.load()];
+    const reads: Promise<unknown>[] = [this.conversations.load(force), this.phones.load(force), this.me.load(force)];
     if (tab === "position") reads.push(this.position.load(force), this.mapInfo.load());
     await Promise.all(reads);
     if (tab === "messages") {
       const key = this.selectedKey();
       if (key) await this.threads.get(key).load(force);
     }
+    this.settle();
+  }
+
+  /** Ce qui a été lu, à l'écran : le nombre de l'onglet, l'état des téléphones, le corps s'il a changé. */
+  private settle(): void {
     if (!this.open()) return;
     const count = this.conversations.value?.items.length;
     const before = this.tabs[0].count;
@@ -143,16 +164,24 @@ class TelephoneScreen {
     if (this.stamp() !== this.painted) this.paint();
   }
 
-  private schedule(): void {
-    window.clearInterval(this.timer);
-    this.timer = window.setInterval(() => {
-      if (!this.open()) {
-        window.clearInterval(this.timer);
-        this.map.drop();
-        return;
-      }
-      if (document.visibilityState === "visible") void this.ensure(true);
-    }, EVERY_MS);
+  /** Le direct : relire ces lectures-là (une lecture en vol suffit : la suivante se refait une fois après, `Cached`) ;
+   *  `aged` : celles-ci aussi, si elles ont vieilli. */
+  private async reread(caches: Cached<unknown>[], aged: Cached<unknown>[] = []): Promise<void> {
+    if (!caches.length) return;
+    await Promise.all([...caches.map((c) => c.load(true)), ...aged.map((c) => c.load())]);
+    this.settle();
+  }
+
+  /** `phone` (des conversations) : la liste, et le fil ouvert s'il est nommé (ses réponses offertes avec). */
+  private async phoneChanged(convs: Changed): Promise<void> {
+    const key = this.ctx?.tab === "messages" ? this.selectedKey() : null;
+    const reads: Promise<unknown>[] = [this.conversations.load(true)];
+    if (key && names(convs, key)) reads.push(this.threads.get(key).load(true));
+    await Promise.all(reads);
+    // la conversation ouverte d'office (la plus récente) a pu changer : la sienne se lit
+    const now = this.ctx?.tab === "messages" ? this.selectedKey() : null;
+    if (now && now !== key) await this.threads.get(now).load();
+    this.settle();
   }
 
   // ── Le rendu ───────────────────────────────────────────────────────
@@ -161,8 +190,7 @@ class TelephoneScreen {
     this.body = body;
     this.ctx = ctx;
     this.paint();
-    void this.ensure();
-    this.schedule();
+    if (!this.fresh.back()) void this.ensure();
   }
 
   /** La conversation ouverte : celle de la route, sinon (sur un écran large) la plus récente. */
@@ -283,6 +311,15 @@ class TelephoneScreen {
    *  quel message). */
   private actions(): string {
     return phoneStateMarkup(phoneState(this.phones.value?.items ?? [], Date.now()));
+  }
+
+  /** Les âges, toutes les 30 s et d'ici (`shell/ages.ts`) : l'état de tes téléphones, et les messages (leurs
+   *  propositions décidées) quand rien n'y a le focus. La Position ne montre que des heures : rien. */
+  private agesTick(): void {
+    if (!this.open() || !pageShown()) return;
+    this.paintHead();
+    const body = this.body;
+    if (body && this.ctx?.tab !== "position" && this.conversations.value && !body.contains(document.activeElement)) this.paint();
   }
 
   /** L'état suit la liste des téléphones sans redessiner tout l'en-tête (ni perdre une saisie). */

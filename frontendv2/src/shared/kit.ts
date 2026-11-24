@@ -16,8 +16,10 @@ import { clock, shortWhen } from "../screens/chat/markup";
  * Une ressource de l'API, lue au plus une fois à la fois et gardée `ttl` millisecondes. Une relecture qui échoue
  * garde la valeur d'avant (et dit l'erreur), sauf un 404 : ce qui n'existe plus (supprimé, oublié) ne se montre plus.
  * Une relecture forcée demandée pendant une lecture en cours suit celle-ci (elle a pu partir avant ce qu'on vient
- * d'écrire) ; une lecture partie avant un `put` (une fiche actualisée) et revenue après lui ne l'écrase pas : elle était
- * plus vieille. `version` ne bouge que si ce qui est lu change : un écran ne se redessine que pour cela.
+ * d'écrire) — de même une lecture demandée après une invalidation faite pendant elle (le direct, ADR 0308 : ce qui a
+ * changé a pu partir après elle) ; une lecture partie avant un `put` (une fiche actualisée) et revenue après lui ne
+ * l'écrase pas : elle était plus vieille. `version` ne bouge que si ce qui est lu change : un écran ne se redessine que
+ * pour cela.
  */
 export class Cached<T> {
   value: T | null = null;
@@ -30,6 +32,8 @@ export class Cached<T> {
   private again: Promise<T | null> | null = null;
   /** Combien de `put` : une lecture partie avant le dernier n'écrit rien en revenant. */
   private puts = 0;
+  /** Invalidée pendant la lecture en cours : celle-ci ne dit plus la ressource à jour. */
+  private dirty = false;
 
   constructor(
     private readonly fetcher: () => Promise<T>,
@@ -43,7 +47,7 @@ export class Cached<T> {
 
   load(force = false): Promise<T | null> {
     if (this.pending) {
-      if (!force) return this.pending;
+      if (!force && !this.dirty) return this.pending;
       this.again ??= this.pending.then(() => {
         this.again = null;
         return this.load(true);
@@ -74,15 +78,18 @@ export class Cached<T> {
         return this.value;
       })
       .finally(() => {
-        this.at = Date.now();
+        // invalidée pendant ce temps : la prochaine lecture repart du serveur
+        this.at = this.dirty ? 0 : Date.now();
+        this.dirty = false;
         this.pending = null;
       });
     return this.pending;
   }
 
-  /** La prochaine lecture repartira du serveur. */
+  /** La prochaine lecture repartira du serveur (pendant une lecture en cours : celle qui la suivra). */
   invalidate(): void {
     this.at = 0;
+    if (this.pending) this.dirty = true;
   }
 
   /** Ce qu'une écriture a rendu (une fiche actualisée) : la valeur lue, comme si elle venait d'arriver. */
@@ -115,9 +122,13 @@ export class CachedMap<T> {
     return found;
   }
 
-  invalidate(key?: string): void {
+  /** La prochaine lecture repartira du serveur : toutes, celle d'une clé, ou celles que `which` désigne (les clés d'un
+   *  projet que le direct nomme). */
+  invalidate(key?: string | ((key: string) => boolean)): void {
     if (key === undefined) for (const c of this.items.values()) c.invalidate();
-    else this.items.get(key)?.invalidate();
+    else if (typeof key === "function") {
+      for (const [k, c] of this.items) if (key(k)) c.invalidate();
+    } else this.items.get(key)?.invalidate();
   }
 }
 

@@ -35,9 +35,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.qwartz.mika.R
@@ -47,6 +44,8 @@ import fr.qwartz.mika.data.moi.MoiDates
 import fr.qwartz.mika.data.moi.Tone
 import fr.qwartz.mika.data.moi.levelTag
 import fr.qwartz.mika.data.moi.map
+import fr.qwartz.mika.data.moi.LiveSignal
+import fr.qwartz.mika.data.moi.TeamsLive
 import fr.qwartz.mika.data.moi.ofName
 import fr.qwartz.mika.data.moi.teams.Conversation
 import fr.qwartz.mika.data.moi.teams.Kinds
@@ -59,11 +58,13 @@ import fr.qwartz.mika.data.moi.teams.herMark
 import fr.qwartz.mika.data.moi.teams.lastPrefix
 import fr.qwartz.mika.data.moi.teams.orderedAccounts
 import fr.qwartz.mika.data.moi.teams.waitingYours
+import fr.qwartz.mika.data.net.Topics
 import fr.qwartz.mika.ui.Route
 import fr.qwartz.mika.ui.components.rememberNow
 import fr.qwartz.mika.ui.shell.BarAction
 import fr.qwartz.mika.ui.shell.BarMenu
 import fr.qwartz.mika.ui.shell.BarNav
+import fr.qwartz.mika.ui.shell.FollowLive
 import fr.qwartz.mika.ui.shell.ListHead
 import fr.qwartz.mika.ui.shell.Load
 import fr.qwartz.mika.ui.shell.LoadBox
@@ -83,8 +84,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-/** La liste se relit à ce rythme tant qu'elle est à l'écran. */
-private const val REFRESH_MS = 60_000L
 private const val SEARCH_DEBOUNCE_MS = 300L
 
 /**
@@ -111,7 +110,7 @@ class TeamsListViewModel(deps: TeamsDeps) : TeamsScreenModel(deps) {
     private var listJob: Job? = null
     private var searchJob: Job? = null
 
-    /** L'écran revient (ou une minute a passé) : tout lire la première fois, sinon relire sans bruit. */
+    /** L'écran revient (l'app au premier plan, ou depuis un fil) : tout lire la première fois, sinon relire sans bruit. */
     fun resume() {
         if (!started) {
             started = true
@@ -131,6 +130,12 @@ class TeamsListViewModel(deps: TeamsDeps) : TeamsScreenModel(deps) {
     }
 
     fun retry() = reload(keep = false, silent = false)
+
+    /** Le direct (ADR 0308) : ses comptes ou ses discussions ont changé (`teams`, `teams.replies` — le bandeau de ses
+     *  réponses) : relus sans bruit. Rend la main quand c'est relu. */
+    suspend fun onLive(signal: LiveSignal) {
+        if (started && signal.touchesAny(Topics.TEAMS, Topics.TEAMS_REPLIES)) reload(keep = true, silent = true).join()
+    }
 
     fun choose(key: String) {
         chosen = key
@@ -193,7 +198,7 @@ class TeamsListViewModel(deps: TeamsDeps) : TeamsScreenModel(deps) {
  * Teams, la rubrique du tiroir (ADR 0235, la maquette `ecrans/teams.js`) : le compte en sous-titre (le titre ouvre la
  * feuille des comptes), la loupe cherche, « Ses brouillons » en bandeau rose quand l'un attend ta décision, les
  * discussions (un tête-à-tête au nom de l'autre), leur dernier message et sa réponse en chemin, en rose. Tirer relit,
- * et la liste se relit chaque minute. Pas de « nouvelle discussion » : l'extension ne sait que répondre.
+ * et la liste suit le direct (ADR 0308). Pas de « nouvelle discussion » : l'extension ne sait que répondre.
  */
 @Composable
 fun TeamsListScreen(graph: AppGraph) {
@@ -202,15 +207,8 @@ fun TeamsListScreen(graph: AppGraph) {
     val vm: TeamsListViewModel = viewModel(key = "teams.list|$session") { TeamsListViewModel(TeamsDeps(graph)) }
     var sheet by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(vm) { vm.said.collect { shell.toast(it) } }
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(vm, lifecycle) {
-        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            while (true) {
-                vm.resume()
-                delay(REFRESH_MS)
-            }
-        }
-    }
+    // lue à l'ouverture, relue à chaque retour, et quand le direct dit que ses comptes ou ses discussions ont changé
+    FollowLive(graph.live, TeamsLive.LIST, vm, onShown = { vm.resume() }) { vm.onLive(it) }
     BackHandler(enabled = vm.searching) { vm.closeSearch() }
     val accounts = vm.accountList
     val chosen = vm.account(vm.chosen)

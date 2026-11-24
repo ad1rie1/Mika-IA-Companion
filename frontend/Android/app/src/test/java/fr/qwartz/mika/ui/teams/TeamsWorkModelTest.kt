@@ -2,7 +2,7 @@ package fr.qwartz.mika.ui.teams
 
 import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.MoiError
-import fr.qwartz.mika.data.moi.WORK_WATCH_MAX_MS
+import fr.qwartz.mika.data.moi.LiveSignal
 import fr.qwartz.mika.data.moi.Work
 import fr.qwartz.mika.data.moi.WorkSteps
 import fr.qwartz.mika.data.moi.teams.ALREADY_ASKED
@@ -13,6 +13,7 @@ import fr.qwartz.mika.data.moi.teams.TeamsDone
 import fr.qwartz.mika.data.moi.teams.TeamsMessage
 import fr.qwartz.mika.data.moi.teams.TeamsReply
 import fr.qwartz.mika.data.moi.teams.TeamsWork
+import fr.qwartz.mika.data.net.Topics
 import fr.qwartz.mika.ui.mail.MainDispatcherRule
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -30,9 +31,10 @@ import org.junit.Test
 
 /**
  * « Préremplir avec Mika » suivi en direct dans un fil (ADR 0306), contre une fausse API : sa ligne paraît aussitôt
- * (elle s'y met, depuis maintenant) puis suit ce que dit le serveur ; `/teams/work` relu sans relire le fil tant qu'elle
- * y travaille ; le fil relu quand sa réponse arrive ou qu'elle a fini sans en rendre ; ce qu'elle prépare d'elle-même
- * guetté aussi ; le plafond d'une demi-heure ; une relecture manquée qui attend la suivante.
+ * (elle s'y met, depuis maintenant) puis suit ce que dit le serveur ; `/teams/work` relu sans relire le fil quand le
+ * direct (`teams.work`, ADR 0308) nomme ce fil — une autre discussion nommée ne relit rien ; le fil relu quand sa
+ * réponse arrive ou qu'elle a fini sans en rendre ; ce qu'elle prépare d'elle-même suivi aussi ; plus de plafond ; une
+ * relecture manquée qui attend le signal suivant.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class TeamsWorkModelTest {
@@ -101,7 +103,7 @@ class TeamsWorkModelTest {
         assertTrue(vm.watching)
         api.calls.clear()
         api.workResult = MoiApi.Result.Ok(TeamsWork(tool, asked = true, underWay = false))
-        vm.pollWork()
+        vm.readWork()
         advanceUntilIdle()
         assertEquals(tool, vm.work)
         assertEquals(listOf("work:19:marc"), api.calls)
@@ -114,7 +116,7 @@ class TeamsWorkModelTest {
         serverSays(asked = false, work = null, underWay = true, replies = listOf(reply))
         api.workResult = MoiApi.Result.Ok(TeamsWork(null, asked = false, underWay = true))
         api.calls.clear()
-        vm.pollWork()
+        vm.readWork()
         advanceUntilIdle()
         assertEquals(listOf("work:19:marc", "thread:19:marc"), api.calls)
         assertFalse(vm.watching)
@@ -128,15 +130,15 @@ class TeamsWorkModelTest {
         serverSays(asked = false, work = null)
         api.workResult = MoiApi.Result.Ok(TeamsWork(null, asked = false, underWay = false))
         api.calls.clear()
-        vm.pollWork()
+        vm.readWork()
         advanceUntilIdle()
         assertEquals(listOf("work:19:marc", "thread:19:marc"), api.calls)
         assertNull(vm.work)
         assertFalse(vm.asked)
         assertFalse(vm.watching)
-        // plus rien à relire
+        // le direct qui nomme une autre discussion ne relit rien ici
         api.calls.clear()
-        vm.pollWork()
+        vm.onLive(LiveSignal.of(Topics.TEAMS_WORK to setOf("19:lumen")))
         advanceUntilIdle()
         assertTrue(api.calls.isEmpty())
     }
@@ -148,29 +150,27 @@ class TeamsWorkModelTest {
         assertFalse(vm.asked)
         assertTrue(vm.watching)
         api.workResult = MoiApi.Result.Ok(TeamsWork(tool, asked = false, underWay = false))
-        vm.pollWork()
+        vm.readWork()
         advanceUntilIdle()
         assertEquals(tool, vm.work)
     }
 
-    @Test fun `au-delà d'une demi-heure, on cesse de guetter ici - une nouvelle demande, si`() = runTest {
+    @Test fun `plus de plafond - une heure après la demande, l'étape que le direct dit se suit encore`() = runTest {
         prefillThenWorking()
-        clock += WORK_WATCH_MAX_MS + 1
+        clock += 60 * 60_000L
         api.calls.clear()
-        vm.pollWork()
+        api.workResult = MoiApi.Result.Ok(TeamsWork(tool, asked = true, underWay = false))
+        vm.onLive(LiveSignal.of(Topics.TEAMS_WORK to setOf("19:marc")))
         advanceUntilIdle()
-        assertTrue(api.calls.isEmpty())
-        assertFalse(vm.watching)
-        // une nouvelle demande guette de nouveau, depuis maintenant
-        prefill()
-        advanceUntilIdle()
+        assertEquals(listOf("work:19:marc"), api.calls)
+        assertEquals(tool, vm.work)
         assertTrue(vm.watching)
     }
 
     @Test fun `une relecture manquée garde la ligne et attend la suivante`() = runTest {
         prefillThenWorking()
         api.workResult = MoiApi.Result.Failed(MoiError(0, MoiError.NETWORK))
-        vm.pollWork()
+        vm.readWork()
         advanceUntilIdle()
         assertEquals(thinking, vm.work)
         assertTrue(vm.watching)

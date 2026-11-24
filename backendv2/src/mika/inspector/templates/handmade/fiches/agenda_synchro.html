@@ -1,0 +1,24 @@
+{# La fiche d'un agenda › Synchronisation (app/handmade/subjects/agenda.py) : comment il se relit, sa cadence, sa
+   fenêtre, ses pannes ; son historique — les relectures qui ont changé quelque chose, les écritures, les pannes et leur
+   reprise (``AgendaPort.sync_notes``), paginé. #}
+{% from "_navigation.html" import pager as pages %}
+<div class="now-page" data-tab="agenda/synchro">
+  <section class="now-card"><dl class="person-fields">{% for k, v in facts %}<div><dt>{{ k }}</dt><dd>{{ v }}</dd></div>{% endfor %}</dl>
+    {% if not system %}<p class="person-tab-note">La cadence de chaque sorte, la fenêtre et la durée de l'historique : <a href="{{ settings }}">Agendas › Paramètres</a>.</p>{% endif %}</section>
+  {% if system %}
+  <p class="person-tab-note">Un agenda du système n'a rien à relire : ses événements sont sur ce serveur, à jour à chaque écriture.</p>
+  {% else %}
+  <section class="now-card hm-table-card table-block">
+    <header class="now-card-head"><h2>Son historique</h2><span class="person-count now-num">{{ total }}</span><p>Les relectures qui ont changé quelque chose, les écritures, les pannes et leur reprise, sur {{ keep }} ; celles qui n'ont rien trouvé ne sont pas gardées.</p></header>
+    {% if history %}
+    <div class="hm-table-wrap" tabindex="0" role="region" aria-label="Son historique">
+      <table class="hm-table">
+        <thead><tr><th scope="col">Quand</th><th scope="col">Ce qui s'est passé</th><th scope="col">Événements</th><th scope="col">Le détail</th></tr></thead>
+        <tbody>{% for h in history %}<tr{% if h.warn %} class="t-warn"{% endif %}><td class="fit">{{ h.when }}</td><td><span class="now-tag {{ h.tone }}">{{ h.what }}</span></td><td class="fit">{{ h.changed }}</td><td>{{ h.detail }}</td></tr>{% endfor %}</tbody>
+      </table>
+    </div>
+    <div class="hm-pager{{ ' single' if pager.pages <= 1 }}">{{ pages(pager) }}</div>
+    {% else %}<p class="now-empty">Rien n'a changé depuis qu'il est branché.</p>{% endif %}
+  </section>
+  {% endif %}
+</div>

@@ -29,7 +29,6 @@ import fr.qwartz.mika.data.moi.carte.MapHttp
 import fr.qwartz.mika.ui.shell.rememberSessionKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.maplibre.android.MapLibre
@@ -87,8 +86,10 @@ internal object StyleAssets {
 }
 
 /**
- * Le fond de toutes les cartes de la session (`GET /api/moi/carte/fond`) : lu à la première carte montrée, relu au plus
- * toutes les cinq minutes tant qu'une carte est à l'écran ; une relecture qui échoue garde ce qu'on savait. Ce qui ne
+ * Le fond de toutes les cartes de la session (`GET /api/moi/carte/fond`) : lu à la première carte montrée, relu à chaque
+ * retour d'une carte à l'écran, au plus toutes les cinq minutes — sans minuterie : rien ne le pousse (il n'a pas de
+ * sujet dans le direct, ADR 0308 ; il ne change qu'avec les cartes refaites, ADR 0295) ; une relecture qui échoue garde
+ * ce qu'on savait. Ce qui ne
  * s'est pas dessiné n'est pas ici : chaque carte garde le sien ([LiveRefusal]).
  */
 class MapFondViewModel(private val graph: AppGraph) : ViewModel() {
@@ -140,19 +141,14 @@ class LiveRefusal {
     }
 }
 
-/** Le fond de la session, relu toutes les cinq minutes tant que l'écran qui l'appelle est au premier plan. */
+/** Le fond de la session, relu à chaque retour de l'écran qui l'appelle au premier plan (au plus toutes les cinq minutes). */
 @Composable
 internal fun rememberMapFond(graph: AppGraph): MapFondViewModel {
     val session = rememberSessionKey(graph)
     val vm: MapFondViewModel = viewModel(key = "map.fond|$session") { MapFondViewModel(graph) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(vm, lifecycle) {
-        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            while (true) {
-                vm.load()
-                delay(FOND_TTL_MS)
-            }
-        }
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) { vm.load() }
     }
     return vm
 }

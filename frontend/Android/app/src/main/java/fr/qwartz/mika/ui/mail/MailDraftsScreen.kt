@@ -55,6 +55,8 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
+import fr.qwartz.mika.data.moi.LiveSignal
+import fr.qwartz.mika.data.moi.MailLive
 import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.MoiDates
 import fr.qwartz.mika.data.moi.MoiError
@@ -71,11 +73,13 @@ import fr.qwartz.mika.data.moi.mail.draftPeople
 import fr.qwartz.mika.data.moi.mail.draftState
 import fr.qwartz.mika.data.moi.mail.holds
 import fr.qwartz.mika.data.moi.mail.voiceLabel
+import fr.qwartz.mika.data.net.Topics
 import fr.qwartz.mika.ui.Route
 import fr.qwartz.mika.ui.components.rememberNow
 import fr.qwartz.mika.ui.shell.AskDialog
 import fr.qwartz.mika.ui.shell.BarMenu
 import fr.qwartz.mika.ui.shell.BarNav
+import fr.qwartz.mika.ui.shell.FollowLive
 import fr.qwartz.mika.ui.shell.ListHead
 import fr.qwartz.mika.ui.shell.Load
 import fr.qwartz.mika.ui.shell.LoadBox
@@ -90,6 +94,7 @@ import fr.qwartz.mika.ui.shell.Tag
 import fr.qwartz.mika.ui.shell.ToFillText
 import fr.qwartz.mika.ui.shell.rememberSessionKey
 import fr.qwartz.mika.ui.theme.mika
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -123,10 +128,10 @@ class MailDraftsViewModel(deps: MailDeps) : MailScreenModel(deps) {
         }
     }
 
-    fun load(quiet: Boolean = false) {
+    fun load(quiet: Boolean = false): Job {
         if (!quiet && drafts !is Load.Ready) drafts = Load.Loading
         reloading = true
-        viewModelScope.launch {
+        return viewModelScope.launch {
             (api.boxes() as? MoiApi.Result.Ok)?.let { boxes = it.value.boxes }
             val got = api.drafts()
             if (got is MoiApi.Result.Failed && drafts is Load.Ready) {
@@ -136,6 +141,12 @@ class MailDraftsViewModel(deps: MailDeps) : MailScreenModel(deps) {
             }
             reloading = false
         }
+    }
+
+    /** Le direct (ADR 0308) : ses brouillons ont changé (`mail.drafts`), ou la connexion est revenue — relus sans
+     *  bruit. Rend la main quand c'est relu. */
+    suspend fun onLive(signal: LiveSignal) {
+        if (signal.touches(Topics.MAIL_DRAFTS)) load(quiet = true).join()
     }
 
     fun pull() {
@@ -213,6 +224,8 @@ fun MailDraftsScreen(graph: AppGraph) {
     val vm = rememberDraftsModel(graph)
     LaunchedEffect(vm) { vm.load(quiet = true) }
     LaunchedEffect(vm) { vm.said.collect { shell.toast(it) } }
+    // relus à chaque retour de l'app au premier plan, et quand le direct dit qu'ils ont changé (ADR 0308)
+    FollowLive(graph.live, MailLive.DRAFTS, vm, onShown = { first -> if (!first) vm.load(quiet = true) }) { vm.onLive(it) }
     SectionScaffold(
         topBar = { MikaTopBar(stringResource(R.string.mail_her_drafts), BarNav.BACK, subtitle = stringResource(R.string.mail_drafts_all_boxes)) },
     ) { modifier ->
@@ -338,6 +351,8 @@ fun MailDraftScreen(graph: AppGraph, id: String) {
     }
     LaunchedEffect(vm) { vm.said.collect { shell.toast(it) } }
     LaunchedEffect(vm, visit) { vm.leave(visit).collect { shell.back() } }
+    // décidé ailleurs, il se montre tel qu'il est devenu (ADR 0308) ; relu à chaque retour de l'app au premier plan
+    FollowLive(graph.live, MailLive.DRAFTS, vm, visit, onShown = { first -> if (!first) vm.load(quiet = true) }) { vm.onLive(it) }
     var refusing by rememberSaveable { mutableStateOf(false) }
     var redoing by rememberSaveable { mutableStateOf(false) }
     val load = vm.one(id)

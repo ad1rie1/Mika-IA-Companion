@@ -1,0 +1,29 @@
+{# La fiche d'une personne › Agendas (app/handmade/person/agendas.py, ADR 0309, lot 5 ; la maquette :
+   personne-lea-agendas.html). À gauche ses agendas, ce qu'on lui partage, ce qu'elle partage (« Retirer » : le geste de
+   Réglages › Droits › Partages, qui ramène ici) ; à droite ses prochains événements de la semaine. #}
+{% import "handmade/agendas/_agendas.html" as ag %}
+{% macro unshare_form(s) -%}{% if csrf %}<form method="post" action="{{ unshare }}" class="inline" data-confirm="{{ s.ask }}"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="kind" value="agenda"><input type="hidden" name="key" value="{{ s.key }}"><input type="hidden" name="person" value="{{ s.person }}"><input type="hidden" name="retour" value="{{ back }}"><button class="btn quiet small danger">Retirer</button></form>{% endif %}{%- endmacro %}
+<div class="now-page person-tab" data-tab="person/agendas">
+  <div class="agc-two">
+    <div class="now-stack">
+      <section class="now-card person-list">
+        <header class="now-card-head"><h2>Ses agendas</h2><span class="person-count now-num">{{ mine|length }}</span><p>Ceux qu'elle a branchés depuis son espace, et l'agenda que le serveur lui donne.</p><a class="now-more" href="{{ accounts }}">Ses comptes →</a></header>
+        {% if mine %}<ul class="person-entries">{% for c in mine %}{{ ag.entry({"title": c.name, "title_color": c.color, "href": c.href, "tags": c.tags, "time": c.time, "facts": c.facts}) }}{% endfor %}</ul>{% else %}<p class="now-empty">Aucun agenda encore.</p>{% endif %}
+      </section>
+      <section class="now-card person-list">
+        <header class="now-card-head"><h2>Ce qu'on lui partage</h2><span class="person-count now-num">{{ received|length }}</span><p>L'agenda reste à qui le partage ; tu peux retirer un partage, le donner reste au propriétaire.</p></header>
+        {% if received %}<ul class="person-entries">{% for s in received %}<li><div class="person-entry-top"><div class="person-entry-name"><p class="person-entry-title"><span class="agc-name">{{ ag.sw(s.color) }}<a href="{{ s.href }}">{{ s.name }}</a>, de {{ s.owner }}</span></p><p class="person-entry-tags"><span class="now-tag info">{{ s.level }}</span></p></div></div><div class="person-entry-foot"><div class="person-entry-more">{{ unshare_form(s) }}</div></div></li>{% endfor %}</ul>{% else %}<p class="now-empty">Rien.</p>{% endif %}
+      </section>
+      <section class="now-card person-list">
+        <header class="now-card-head"><h2>Ce qu'elle partage</h2><span class="person-count now-num">{{ given|length }}</span><p>Depuis son espace, avec une personne qui a un compte.</p></header>
+        {% if given %}<ul class="person-entries">{% for s in given %}<li><div class="person-entry-top"><div class="person-entry-name"><p class="person-entry-title"><span class="agc-name">{{ ag.sw(s.color) }}<a href="{{ s.href }}">{{ s.name }}</a> → <a href="{{ s.to_href }}">{{ s.to }}</a></span></p><p class="person-entry-tags"><span class="now-tag info">{{ s.level }}</span></p></div></div><div class="person-entry-foot"><div class="person-entry-more">{{ unshare_form(s) }}</div></div></li>{% endfor %}</ul>{% else %}<p class="now-empty">Rien.</p>{% endif %}
+      </section>
+    </div>
+    <div class="now-stack">
+      <section class="now-card person-list">
+        <header class="now-card-head"><h2>Ses prochains événements</h2><span class="person-count now-num">{{ upcoming|length }}</span><p>Ses agendas, ce qu'on lui partage et ce que son agenda à elle retient pour {{ name }}, d'ici dimanche.</p><a class="now-more" href="{{ grid }}">Dans Tous les agendas →</a></header>
+        {% if upcoming %}<ul class="agc-plan-rows">{% for u in upcoming %}<li><a class="agc-plan-row c-{{ u.x.color }}{{ ' mika' if u.x.hers }}{{ ' prop' if u.x.proposed }}" href="{{ u.href }}"><span class="h">{{ u.when }}</span>{{ ag.sw(u.x.color, True) }}<span class="t">{{ u.x.title }}</span><span class="w">{{ u.where }}</span></a></li>{% endfor %}</ul>{% else %}<p class="now-empty">Rien d'ici dimanche.</p>{% endif %}
+      </section>
+    </div>
+  </div>
+</div>

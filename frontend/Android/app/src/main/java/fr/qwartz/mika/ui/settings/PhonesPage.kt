@@ -16,9 +16,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.qwartz.mika.R
@@ -32,6 +29,8 @@ import fr.qwartz.mika.data.moi.phone.shortPhone
 import fr.qwartz.mika.data.moi.settings.doneText
 import fr.qwartz.mika.data.moi.settings.phoneRows
 import fr.qwartz.mika.data.moi.settings.pushWords
+import fr.qwartz.mika.ui.components.rememberNow
+import fr.qwartz.mika.ui.shell.FollowLive
 import fr.qwartz.mika.ui.shell.BarNav
 import fr.qwartz.mika.ui.shell.Load
 import fr.qwartz.mika.ui.shell.LoadBox
@@ -54,11 +53,14 @@ class PhonesListViewModel(graph: AppGraph) : SettingsModel(graph) {
         private set
 
     fun resume() {
-        viewModelScope.launch {
-            when (val got = api.phones()) {
-                is MoiApi.Result.Ok -> load = Load.Ready(got.value)
-                is MoiApi.Result.Failed -> if (load !is Load.Ready) load = Load.Failed(got.error) else say(got.error)
-            }
+        viewModelScope.launch { read() }
+    }
+
+    /** Relu sans bruit : un retour sur la page, ou le direct (ADR 0308) qui dit que ce qu'elle montre a changé. */
+    suspend fun read() {
+        when (val got = api.phones()) {
+            is MoiApi.Result.Ok -> load = Load.Ready(got.value)
+            is MoiApi.Result.Failed -> if (load !is Load.Ready) load = Load.Failed(got.error) else say(got.error)
         }
     }
 
@@ -82,12 +84,12 @@ class PhonesListViewModel(graph: AppGraph) : SettingsModel(graph) {
 internal fun PhonesPage(graph: AppGraph) {
     val session = rememberSessionKey(graph)
     val vm: PhonesListViewModel = viewModel(key = "settings.phones|$session") { PhonesListViewModel(graph) }
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(vm, lifecycle) { lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) { vm.resume() } }
+    FollowLive(graph.live, SettingsLive.PHONES, vm, onShown = { vm.resume() }) { vm.read() }
     SettingsEffects(vm)
     // le téléphone à révoquer (son id ; celui-ci : THIS)
     var revoking by rememberSaveable { mutableStateOf<Long?>(null) }
-    val now = graph.clock.wallMs()
+    // « vu il y a 4 min » avance tout seul
+    val now = rememberNow(wallMs = graph.clock::wallMs)
     SectionScaffold(topBar = { MikaTopBar(stringResource(R.string.settings_phones), BarNav.BACK) }) { modifier ->
         LoadBox(vm.load, onRetry = vm::retry, modifier = modifier) { got ->
             val rows = phoneRows(got.items, graph.deviceLabel, graph.auth.tokenId())

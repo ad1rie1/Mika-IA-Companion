@@ -29,7 +29,7 @@ export function shareWords(level: string): string {
 /** Ce que la personne pourra, dit en une phrase (la fenêtre « Partager »). */
 export function sharePhrase(kind: ShareKind, title: string, person: string, level: ShareLevel): string {
   const first = person.split(/\s+/)[0] || person;
-  const where = kind === "mcp" ? "dans ses Outils" : kind === "teams" ? "dans son Teams" : "dans son Mail";
+  const where = kind === "mcp" ? "dans ses Outils" : kind === "teams" ? "dans son Teams" : kind === "agenda" ? "dans son Agenda" : "dans son Mail";
   const can =
     level === "lire"
       ? kind === "mcp"
@@ -43,7 +43,7 @@ export function sharePhrase(kind: ShareKind, title: string, person: string, leve
   return `${first} verra « ${title} » ${where}, ${can}.`;
 }
 
-export const KIND_WORDS: Record<ShareKind, string> = { mail: "Boîte", teams: "Compte Teams", mcp: "Service" };
+export const KIND_WORDS: Record<ShareKind, string> = { mail: "Boîte", teams: "Compte Teams", mcp: "Service", agenda: "Agenda" };
 
 export interface ShareTarget {
   kind: ShareKind;

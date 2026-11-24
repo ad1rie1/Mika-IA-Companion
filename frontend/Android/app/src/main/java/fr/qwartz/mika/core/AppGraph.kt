@@ -31,8 +31,13 @@ import fr.qwartz.mika.data.files.OutboxFiles
 import fr.qwartz.mika.data.files.ShareInbox
 import fr.qwartz.mika.data.location.WhereShare
 import fr.qwartz.mika.data.mind.MindStateRepository
+import fr.qwartz.mika.data.moi.Live
+import fr.qwartz.mika.data.moi.agenda.AgendaApi
+import fr.qwartz.mika.data.moi.agenda.AgendaPrefs
+import fr.qwartz.mika.data.moi.agenda.StoredAgendaPrefs
 import fr.qwartz.mika.data.moi.MeRepository
 import fr.qwartz.mika.data.moi.MoiApi
+import fr.qwartz.mika.data.moi.correctClient
 import fr.qwartz.mika.data.net.BearerInterceptor
 import fr.qwartz.mika.data.net.LinkState
 import fr.qwartz.mika.data.net.OkHttpWsTransport
@@ -46,6 +51,7 @@ import fr.qwartz.mika.data.push.PushPayload
 import fr.qwartz.mika.data.push.PushRegistrar
 import fr.qwartz.mika.data.settings.SettingsStore
 import fr.qwartz.mika.push.FirebasePush
+import fr.qwartz.mika.service.AgendaNotifier
 import fr.qwartz.mika.service.AndroidServiceController
 import fr.qwartz.mika.service.ConnectionManager
 import fr.qwartz.mika.service.MessageNotifier
@@ -182,6 +188,12 @@ class AppGraph(context: Context) {
 
     val chat: ChatRepository = ChatRepository(store, files, clock, engine, { connection.socket })
 
+    /**
+     * Le direct (ADR 0308) : ce que la connexion du chat pousse de ce qui change dans `/api/moi` (trame `changed`), et
+     * la relecture de tout ce qui est montré à chaque reconnexion ; les écrans le suivent tant qu'ils sont là.
+     */
+    val live = Live()
+
     val connection: ConnectionManager = ConnectionManager(
         scope = scope,
         engineContext = engine,
@@ -206,6 +218,7 @@ class AppGraph(context: Context) {
             visible = foreground.visible,
             fixes = location::fixes,
         ),
+        live = live,
     )
 
     /**
@@ -322,8 +335,20 @@ class AppGraph(context: Context) {
      */
     val moi: MoiApi = MoiApi(http, { auth.credentials() }, { auth.checkAfterUnauthorized() })
 
+    /**
+     * « Corriger » (ADR 0307) : la même API, sur un client dérivé de [http] qui attend la fin d'une correction (le
+     * serveur s'y donne 50 s et ne répond qu'à la fin) ; les autres appels gardent leurs délais.
+     */
+    val moiCorrect: MoiApi by lazy { MoiApi(correctClient(http), { auth.credentials() }, { auth.checkAfterUnauthorized() }) }
+
     /** Qui est connecté, et ce qui attend sa décision (les pastilles du tiroir). */
     val me: MeRepository = MeRepository(moi, scope)
+
+    /** Ce que l'Agenda retient sur ce téléphone (ADR 0309) : la dernière vue, les agendas décochés, ce qu'il a notifié. */
+    val agendaPrefs: AgendaPrefs by lazy { StoredAgendaPrefs(this.context) }
+
+    /** Le canal « Agenda » : une invitation, un ajout que Mika propose, arrivés pendant que l'app est ouverte ailleurs. */
+    val agendaNotifier: AgendaNotifier by lazy { AgendaNotifier(this.context, { AgendaApi(moi) }, agendaPrefs, clock) }
 
     /** Les mails commencés et pas envoyés, en mémoire le temps de la session : un lien profond ne les jette plus. */
     val unsentMail = UnsentMails()
@@ -337,6 +362,7 @@ class AppGraph(context: Context) {
     init {
         onWipe += { notifier.wipe() }
         onWipe += { me.clear() }
+        onWipe += { agendaNotifier.wipe() }
         onWipe += {
             unsentMail.clear()
             mailNotices.clear()

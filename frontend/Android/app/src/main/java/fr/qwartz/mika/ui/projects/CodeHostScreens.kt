@@ -110,7 +110,7 @@ internal fun PullScreen(graph: AppGraph, route: Route.ProjectCode) {
     val session = rememberSessionKey(graph)
     val vm: PullViewModel = viewModel(key = "code-pull|$session|${route.id}|${route.key}") { PullViewModel(ProjectsDeps(graph), route.id, route.key) }
     Toasts(vm.gestures)
-    OnResume(vm) { vm.resume() }
+    OnResume(vm, project = route.id) { vm.resume() }
     // la page qui s'ouvre ne redit pas un refus d'avant ; quittée (pas une rotation), la confirmation d'une fusion
     // demandée là s'annule : elle ne se rouvre jamais plus tard, sur une lecture qui n'est plus celle de l'écran
     FreshEntry(vm.gestures, PullViewModel.MERGE, PullViewModel.TALK)
@@ -471,7 +471,7 @@ internal fun IssueScreen(graph: AppGraph, route: Route.ProjectCode) {
     Toasts(vm.gestures)
     // ce qui attend son accord ne se demande que pour qui peut le donner (`rights.approve`)
     val approve = frame.project.sheet.valueOrNull?.rights?.approve == true
-    OnResume(vm to approve) { vm.resume(approve) }
+    OnResume(vm to approve, project = route.id) { vm.resume(approve) }
     LaunchedEffect(vm.revision) {
         if (vm.revision > 0) {
             frame.code.reload()
@@ -664,7 +664,7 @@ internal fun ChecksScreen(graph: AppGraph, route: Route.ProjectCode) {
     Toasts(vm.gestures)
     // ce que l'hôte en dit maintenant ne se demande que s'il y a un dépôt distant à relire
     val remote = frame.code.summary.value?.remote?.has == true
-    OnResume(vm to remote) { vm.resume(remote) }
+    OnResume(vm to remote, project = route.id) { vm.resume(remote) }
     var pane by rememberSaveable(route.id, route.key, route.ref) { mutableStateOf(PANE_MAIN) }
     val tracked = vm.tracked
     val live = vm.live.value

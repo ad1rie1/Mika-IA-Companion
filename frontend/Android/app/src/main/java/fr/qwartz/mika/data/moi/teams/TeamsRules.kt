@@ -322,7 +322,11 @@ data class SentHere(val conversation: String, val text: String, val at: Long)
 
 /** Une bulle de toi qui n'est pas (encore) un message du fil : ce qu'elle dit d'elle-même, et si elle n'est pas
  *  partie. [id] : son brouillon chez le moteur (vide pour un envoi d'ici pas encore relu). */
-data class OwnBubble(val id: String, val text: String, val at: Long, val note: String, val failed: Boolean)
+data class OwnBubble(
+    val id: String, val text: String, val at: Long, val note: String, val failed: Boolean,
+    /** Parti : envoyé par l'extension, pas encore revenu dans le fil (ADR 0308). */
+    val sent: Boolean = false,
+)
 
 /** Ce que dit l'état d'un de tes messages en attente, et s'il ne partira pas. [under] : sous quel nom il part
  *  ([sentUnder] : sur un compte qu'on te partage, celui de sa personne). */
@@ -330,6 +334,7 @@ fun pendingNote(state: String, reason: String = "", under: String = "sous ton no
     OwnStates.QUEUED -> "en file : l'extension l'envoie dans Teams, $under" to false
     OwnStates.SENDING -> "en cours d'envoi par l'extension" to false
     OwnStates.PLACED -> "posé dans la zone de saisie de Teams : c'est toi qui l'envoies, de là-bas" to false
+    OwnStates.SENT -> "parti dans Teams" to false
     OwnStates.UNUSED -> "pas parti : l'extension ne l'a pas relevé à temps (Teams web n'était pas ouvert avec elle)" to true
     OwnStates.FAILED -> "pas parti : l'envoi a échoué${if (reason.isNotBlank()) " ($reason)" else ""}" to true
     else -> state.ifBlank { "en attente" } to false
@@ -358,7 +363,7 @@ fun stillSentHere(local: List<SentHere>, t: ConversationThread, started: Long): 
 fun ownBubbles(pending: List<OwnPending>?, local: List<SentHere>, under: String = "sous ton nom"): List<OwnBubble> {
     val fromEngine = pending.orEmpty().sortedBy { it.at }.map { p ->
         val (note, failed) = pendingNote(p.state, p.reason, under)
-        OwnBubble(p.id, p.body, p.at, note, failed)
+        OwnBubble(p.id, p.body, p.at, note, failed, sent = p.state == OwnStates.SENT)
     }
     val (note, failed) = pendingNote(OwnStates.QUEUED, under = under)
     return fromEngine + local.map { OwnBubble("", it.text, it.at, note, failed) }

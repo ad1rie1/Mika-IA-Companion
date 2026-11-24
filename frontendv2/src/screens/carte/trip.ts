@@ -106,6 +106,11 @@ export class TripsTab {
 
   constructor(private readonly host: TripHost) {}
 
+  /** Des gestes sur le voyage ouvert sont en cours : sa relecture les suivra (le direct ne le relit pas avant). */
+  get busy(): boolean {
+    return this.gestures.busy;
+  }
+
   /** Ce que la route ouvre : un voyage (« Sur la route » repart à vide pour un autre). */
   applyItem(item: string | null): void {
     this.optimistic = null;

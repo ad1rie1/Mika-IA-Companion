@@ -5,8 +5,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.viewModelScope
 import fr.qwartz.mika.data.moi.CorrectWords
+import fr.qwartz.mika.data.moi.LiveSignal
 import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.SendKey
+import fr.qwartz.mika.data.moi.TeamsLive
 import fr.qwartz.mika.data.moi.Work
 import fr.qwartz.mika.data.moi.WorkTurn
 import fr.qwartz.mika.data.moi.chars
@@ -26,16 +28,14 @@ import fr.qwartz.mika.data.moi.teams.quoteTarget
 import fr.qwartz.mika.data.moi.teams.stillSentHere
 import fr.qwartz.mika.data.moi.teams.withoutSent
 import fr.qwartz.mika.data.moi.watchWork
-import fr.qwartz.mika.data.moi.workGaveUp
 import fr.qwartz.mika.data.moi.workTurn
 import fr.qwartz.mika.ui.shell.FieldCorrector
 import fr.qwartz.mika.ui.shell.Load
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
-
-/** Le fil se relit à ce rythme ; où elle en est d'une réponse, toutes les deux secondes ([fr.qwartz.mika.data.moi.WORK_POLL_MS],
- *  ADR 0306). */
-internal const val THREAD_REFRESH_MS = 20_000L
 
 /** Aller au message qu'une citation désigne ([ref]) ; [n] : le geste (deux appuis sur la même citation, deux allers). */
 data class QuoteJump(val ref: String, val n: Int)
@@ -43,9 +43,9 @@ data class QuoteJump(val ref: String, val n: Int)
 /**
  * Un fil (`Route.TeamsThread`) : la conversation ouverte, les messages plus anciens lus en plus, tes envois d'ici que
  * le moteur n'a pas encore dits, ce que tu tapes et le message que tu cites (discussion par discussion), ses réponses
- * et ce que tu en décides, ta demande à Mika et où elle en est (ADR 0306, relu toutes les deux secondes), le message
- * cité où aller, « Corriger » ce que tu tapes (ADR 0307). Un modèle par session : rouvrir une discussion la relit sans
- * bruit.
+ * et ce que tu en décides, ta demande à Mika et où elle en est (ADR 0306), le message cité où aller, « Corriger » ce
+ * que tu tapes (ADR 0307). Un modèle par session : rouvrir une discussion la relit sans bruit ; le direct (ADR 0308,
+ * [onLive]) relit le fil quand il change, où elle en est quand elle y travaille.
  */
 class TeamsThreadViewModel(deps: TeamsDeps) : TeamsScreenModel(deps) {
     var key by mutableStateOf("")
@@ -72,10 +72,6 @@ class TeamsThreadViewModel(deps: TeamsDeps) : TeamsScreenModel(deps) {
         private set
     /** Les discussions où tu lui as demandé une réponse, et depuis quand. */
     private var askedSince by mutableStateOf<Map<String, Long>>(emptyMap())
-    /** Les demandes guettées sans réponse au-delà du plafond : on cesse de les guetter (une nouvelle demande, si). */
-    private val gaveUp = mutableSetOf<String>()
-    /** Depuis quand on guette où elle en est, discussion par discussion (le plafond d'une demi-heure). */
-    private val watchSince = mutableMapOf<String, Long>()
     /** Où elle en est d'une réponse dans la discussion ouverte (ADR 0306) ; `null` : rien en cours. À part du fil : sa
      *  ligne seule se redessine quand l'étape change. */
     var work by mutableStateOf<Work?>(null)
@@ -95,6 +91,11 @@ class TeamsThreadViewModel(deps: TeamsDeps) : TeamsScreenModel(deps) {
     private var seq = 0
     /** Ce qu'on dit quand sa réponse demandée est arrivée (le texte vient de l'écran). */
     private var arrivedText = ""
+    private val gone = Channel<String>(Channel.BUFFERED)
+
+    /** Les discussions (leur clé demandée) dont le compte n'est plus à toi — retiré, plus partagé — : l'écran de ce fil
+     *  revient à la liste, plutôt qu'un fil figé qu'aucune relecture ne suivrait plus. */
+    val left: Flow<String> = gone.receiveAsFlow()
 
     private fun now(): Long = deps.now()
 
@@ -108,10 +109,9 @@ class TeamsThreadViewModel(deps: TeamsDeps) : TeamsScreenModel(deps) {
     /** Elle prépare une réponse demandée (« Elle s'y met… ») : demandée d'ici ou ailleurs, pas encore arrivée. */
     val asked: Boolean get() = current.let { t -> t != null && !t.underWay && (key in askedSince || t.asked) }
 
-    /** Où elle en est se relit toutes les deux secondes : une réponse demandée, ou qu'elle prépare d'elle-même ([work]),
-     *  pas encore arrivée, jusqu'au plafond. */
+    /** On attend sa réponse ici : demandée, ou qu'elle prépare d'elle-même ([work]), pas encore arrivée. */
     val watching: Boolean
-        get() = current.let { t -> t != null && watchWork(asked, work, arrived = t.underWay, gaveUp = key in gaveUp) }
+        get() = current.let { t -> t != null && watchWork(asked, work, arrived = t.underWay) }
 
     /** Ouvrir une discussion ; [arrived] : ce qu'on dit quand sa réponse demandée y arrive. */
     fun open(k: String, arrived: String) {
@@ -136,59 +136,76 @@ class TeamsThreadViewModel(deps: TeamsDeps) : TeamsScreenModel(deps) {
         load(quiet = false)
     }
 
-    /** Relire sans bruit (le rythme de l'écran) ; une relecture déjà en cours suffit. */
+    /** Relire sans bruit (un retour sur l'écran) ; une relecture déjà en cours suffit. */
     fun refresh() {
         load(quiet = true)
     }
 
+    /** Les clés du fil ouvert : celle demandée, et celle que le serveur a rendue (normalisée). */
+    private fun keys(): List<String> = listOfNotNull(key.takeIf { it.isNotEmpty() }, current?.key)
+
     /**
-     * Où elle en est (ADR 0306), relu toutes les deux secondes tant qu'on guette ([watching]), sans relire le fil : sa
-     * réponse arrivée (`under_way`), ou plus rien de demandé ni d'en cours, le fil se relit ; sinon seule sa ligne change.
-     * Au-delà du plafond, on cesse de guetter ici (la relecture du fil la verra arriver) ; une relecture manquée attend
-     * la suivante.
+     * Le direct (ADR 0308, § 2 bis) : le fil ouvert se relit sans bruit s'il est nommé (`teams` — ses messages, ses
+     * réponses, tes envois) ; où elle en est d'une réponse, s'il est nommé par `teams.work`. Une reconnexion relit les
+     * deux. Rend la main quand c'est relu.
      */
-    fun pollWork() {
-        val t = current ?: return
-        if (!watching || workJob?.isActive == true) return
+    suspend fun onLive(signal: LiveSignal) {
+        if (current == null) return
+        val keys = keys()
+        // repartie de zéro : une relecture déjà en vol a pu partir avant ce changement
+        val reading = if (TeamsLive.threadShows(keys, signal)) load(quiet = true, force = true) else null
+        if (TeamsLive.workShows(keys, signal)) readWork()?.join()
+        reading?.join()
+    }
+
+    /**
+     * Où elle en est (ADR 0306), relu sans relire le fil — le direct dit qu'elle y travaille (`teams.work`) : sa réponse
+     * arrivée (`under_way`), ou plus rien de demandé ni d'en cours, le fil se relit ; sinon seule sa ligne change. Une
+     * relecture déjà en cours suffit ; une relecture manquée attend le signal suivant.
+     */
+    fun readWork(): Job? {
+        val t = current ?: return null
+        workJob?.takeIf { it.isActive }?.let { return it }
         val k = key
-        val since = watchSince.getOrPut(k) { askedSince[k] ?: now() }
-        if (workGaveUp(since, now())) {
-            gaveUp += k
-            askedSince = askedSince - k
-            watchSince -= k
-            return
-        }
-        workJob = viewModelScope.launch {
+        return viewModelScope.launch {
             val got = (api.work(t.key) as? MoiApi.Result.Ok)?.value ?: return@launch
             val shown = current
             if (k != key || shown == null) return@launch
             when (workTurn(arrived = got.underWay, asked = got.asked, work = got.work)) {
                 WorkTurn.ARRIVED -> load(quiet = true, force = true)
                 WorkTurn.ENDED -> {
-                    // elle a fini sans en rendre (ou y a renoncé) : plus rien ne se guette ici
+                    // elle a fini sans en rendre (ou y a renoncé) : la ligne s'en va, le fil se relit s'il le disait
+                    val said = k in askedSince || shown.asked || work != null
                     askedSince = askedSince - k
-                    watchSince -= k
                     work = null
-                    load(quiet = true, force = true)
+                    if (said) load(quiet = true, force = true)
                 }
                 WorkTurn.GOING -> {
                     work = got.work
                     if (got.asked != shown.asked) thread = Load.Ready(shown.copy(asked = got.asked))
                 }
             }
-        }
+        }.also { workJob = it }
     }
 
     /** Relit le fil. [quiet] : ce qui est montré reste, un refus ne se dit pas ; [force] : après un geste, la relecture
      *  repart de zéro (celle qui était en cours ne savait pas ce geste). */
-    private fun load(quiet: Boolean, force: Boolean = false) {
-        if (quiet && !force && job?.isActive == true) return
+    private fun load(quiet: Boolean, force: Boolean = false): Job {
+        job?.takeIf { quiet && !force && it.isActive }?.let { return it }
         job?.cancel()
         val k = key
         val s = ++seq
-        job = viewModelScope.launch {
+        return viewModelScope.launch {
             // le niveau du compte décide de ce que le champ et les cartes offrent (ADR 0188) : ses comptes d'abord
-            if (accounts == null || quiet) loadAccounts()
+            if (accounts == null || quiet) {
+                val read = (loadAccounts() as? MoiApi.Result.Ok)?.value
+                val shown = current
+                // relu sans bruit, le compte du fil n'est plus à toi : retour à la liste
+                if (quiet && read != null && shown != null && TeamsLive.threadGone(shown.account, read.accounts.map { it.key })) {
+                    gone.trySend(k)
+                    return@launch
+                }
+            }
             val started = now()
             val got = api.thread(k, size = TeamsLimits.PAGE)
             if (s != seq || k != key) return@launch
@@ -196,7 +213,7 @@ class TeamsThreadViewModel(deps: TeamsDeps) : TeamsScreenModel(deps) {
                 is MoiApi.Result.Ok -> settle(got.value, quiet, started)
                 is MoiApi.Result.Failed -> if (!quiet || thread !is Load.Ready) thread = Load.Failed(got.error)
             }
-        }
+        }.also { job = it }
     }
 
     private fun settle(t: ConversationThread, quiet: Boolean, started: Long) {
@@ -216,11 +233,6 @@ class TeamsThreadViewModel(deps: TeamsDeps) : TeamsScreenModel(deps) {
             t.replies.any { r -> r.state in UNDER_WAY && !r.answered && before.replies.none { it.id == r.id } }
         thread = Load.Ready(t)
         work = t.work
-        // arrivée, ou plus rien de demandé ni d'en cours : le plafond s'oublie
-        if (t.underWay || (!t.asked && t.work == null)) {
-            gaveUp -= key
-            watchSince -= key
-        }
         if (t.underWay) askedSince = askedSince - key
         if (came) {
             say(arrivedText)
@@ -376,8 +388,6 @@ class TeamsThreadViewModel(deps: TeamsDeps) : TeamsScreenModel(deps) {
                     if (!draft && key == k) {
                         val at = now()
                         askedSince = askedSince + (k to at)
-                        gaveUp -= k
-                        watchSince[k] = at
                         if (work == null) work = Work.waiting(at)
                     }
                     if (key == k) load(quiet = true, force = true)
@@ -391,11 +401,7 @@ class TeamsThreadViewModel(deps: TeamsDeps) : TeamsScreenModel(deps) {
     override suspend fun afterDecision(r: TeamsReply, redo: Boolean) {
         // une décision se prend depuis le fil ouvert : sa réponse est de cette discussion
         if (current?.key != r.conversation) return
-        if (redo) {
-            askedSince = askedSince + (key to now())
-            gaveUp -= key
-            watchSince -= key
-        }
+        if (redo) askedSince = askedSince + (key to now())
         load(quiet = true, force = true)
     }
 }

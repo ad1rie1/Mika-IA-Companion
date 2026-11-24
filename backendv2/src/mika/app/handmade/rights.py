@@ -22,40 +22,57 @@ import re
 import secrets
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
-from urllib.parse import quote
+from typing import Annotated, Any
+from urllib.parse import quote, urlencode
 
+from pydantic import Field, ValidationError
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 from starlette.routing import Route
 
-from mika.app.handmade.access import people_with_accounts
+from mika.app.handmade.access import KEEP_CHOICES, capitalized, people_with_accounts
 from mika.app.handmade.subjects.server import KIND as SERVICE
 from mika.app.me import Denied, missing, sharing
+from mika.app.me import agenda as agenda_me
 from mika.contracts import forge as forge_c
 from mika.inspector import render
 from mika.inspector.pages import rights
 from mika.inspector.pages import tools as catalog
 from mika.inspector.pages.actions import safe_back
+from mika.inspector.pages.rights_tables import choices, rows_of, table_args
+from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import PREFIX, UI, secure
+from mika.kernel.forms import Knob
 from mika.kernel.frame import Audience
 from mika.kernel.inspect import Pager, Ref
 from mika.kernel.rights import Grant
+from mika.plugins.agenda import params_of as agenda_params
+from mika.plugins.agenda.inspect import FLOORS as AGENDA_FLOORS
+from mika.plugins.agenda.rights import table_of as agenda_table
 from mika.runtime import operations
 from mika.vocab.access import (
     INTERNAL,
     INTERNET,
     MOBILE,
+    NO,
+    OWNER,
     PERSON,
     PRIVATE,
+    RESPONDS,
     SELF,
     SHARES,
     TOGETHER,
     WEB,
+    WRITES,
+    AgendaRule,
+    Table,
+    TableArgs,
     canal_key,
+    moved,
 )
 from mika.vocab.episodes import Kind
 from mika.vocab.privacy import ChannelTrust
+from mika.vocab.rights import rights_of
 
 #: ce que le code fixe et qui n'est pas un outil (les outils, eux, se lisent : ``fixed_tools``)
 FIXED = (
@@ -78,9 +95,14 @@ _UNSAFE = re.compile(r"[^A-Za-z0-9_-]")
 #: la page, et où « Retirer » un partage envoie son formulaire (ADR 0210)
 PAGE = f"{PREFIX}/reglages/droits"
 UNSHARE = f"{PAGE}/partages"
+#: où « Enregistrer » le tableau d'un agenda envoie son formulaire (ADR 0309, lot 5), et sa ligne qu'on ajoute : toi,
+#: par tous les canaux, toujours, fermée
+AGENDA_TABLE = f"{PAGE}/agenda"
+AGENDA_NEW_ROW = AgendaRule(who=(OWNER,))
+AGENDA_ROWS = 30
 #: ce qui se partage, dit à l'opératrice ; ce que la console retire elle-même (un service : ses lignes d'accès)
-SHARED_KINDS = {"mail": "boîte", "teams": "compte Teams", "mcp": "service"}
-RETIRED_HERE = ("mail", "teams")
+SHARED_KINDS = {"mail": "boîte", "teams": "compte Teams", "mcp": "service", "agenda": "agenda"}
+RETIRED_HERE = ("mail", "teams", "agenda")
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,6 +170,7 @@ def exact(ui: UI, who: Who, canal: str) -> dict[str, Any]:
     audience, kind = audience_for(who, canal)
     tools: dict[str, Grant] = {}
     projects: dict[str, Grant] = {}
+    agendas: dict[str, Grant] = {}
     through: Grant | None = None
     for spec, found in rights.grants(ui, audience, kind):
         sort = spec.key.rsplit(".", 1)[-1]
@@ -156,9 +179,11 @@ def exact(ui: UI, who: Who, canal: str) -> dict[str, Any]:
                 through = g
             elif sort == "projets":
                 projects[g.resource] = g
+            elif sort == "agendas":  # une ressource, comme un projet (ADR 0309) : ce qu'elle en fait, pas un outil
+                agendas[g.resource] = g
             else:
                 tools[_tool_of(ui, spec, g)] = g
-    return {"tools": tools, "projects": projects, "canal": through, "kind": kind}
+    return {"tools": tools, "projects": projects, "agendas": agendas, "canal": through, "kind": kind}
 
 
 def what_of(g: Grant | None) -> str:
@@ -183,6 +208,8 @@ def _tool_row(ui: UI, spec: Any, got: Mapping[str, Grant] | None) -> dict[str, A
 #: ce que fait chaque famille de ses propres outils, dit à l'opératrice (sa vie interne) ; une famille absente n'a pas
 #: de description, jamais celle de sa voix, écrite pour le modèle
 FAMILY_ABOUT: Mapping[str, str] = {
+    "agenda": "lire les agendas de la personne qui lui parle, lui trouver un créneau, y ajouter, modifier ou supprimer "
+              "un rendez-vous, répondre à une invitation — selon le tableau de chaque agenda",
     "attachments": "retrouver, rouvrir et relier ce qu'on lui a envoyé (photos, documents, messages vocaux)",
     "attention": "ce qui lui trotte dans la tête en ce moment",
     "camera": "regarder par la caméra, sur le moment",
@@ -216,7 +243,7 @@ FAMILY_ABOUT: Mapping[str, str] = {
 
 def sections(ui: UI, got: Mapping[str, Any] | None, query: str) -> list[dict[str, Any]]:
     """Les ressources, par sorte : sa vie interne (ses familles, par lot), les apps de la Forge, les services MCP,
-    ses projets, ses canaux — chacune avec ses outils décrits et le lien de son détail."""
+    ses projets, ses canaux, les agendas (ADR 0309) — chacune avec ses outils décrits et le lien de son détail."""
     registry, frame = ui.kernel.registry, ui.kernel.mind.frame()
     tables = {t.resource: t for _spec, found in rights.tables(ui) for t in found}
     apps = {a.name: a for a in frame.get(forge_c.APPS)}
@@ -256,6 +283,9 @@ def sections(ui: UI, got: Mapping[str, Any] | None, query: str) -> list[dict[str
                 for t in tables.values() if t.resource.startswith("project:")]
     canals = [entry(t.resource, t.title, t.note, (), t.resource) for t in tables.values()
               if t.resource.startswith("canal:")]
+    agendas_got = got.get("agendas", {}) if got else {}
+    agendas = [entry(t.resource, t.title, t.note, (), t.resource, what_of(agendas_got.get(t.resource)) if got else "")
+               for t in tables.values() if t.resource.startswith("agenda:")]
     # un sous-onglet par sorte (ADR 0176) : celles qui ont des outils les replient sous la ligne de leur ressource
     out = [{"id": "d-vie", "title": "Vie interne", "hint": "ses propres outils, famille par famille",
             "rows": internal, "folds": True},
@@ -266,7 +296,11 @@ def sections(ui: UI, got: Mapping[str, Any] | None, query: str) -> list[dict[str
            {"id": "d-projets", "title": "Projets", "hint": "le voir, le piloter, ses fichiers, ses apps",
             "rows": projects, "folds": False},
            {"id": "d-canaux", "title": "Canaux", "hint": "par où ça lui arrive : ce que chaque canal laisse au plus",
-            "rows": canals, "folds": False}]
+            "rows": canals, "folds": False},
+           # chaque agenda, son tableau (ADR 0309) : le lire, y écrire, répondre à ses invitations, ce qu'elle en garde
+           {"id": "d-agendas", "title": "Agendas",
+            "hint": "le lire, y écrire, répondre à ses invitations : son propriétaire et ses partages",
+            "rows": agendas, "folds": False}]
     for s in out:
         s["pager"] = one_page(len(s["rows"]))
     return out
@@ -282,16 +316,116 @@ def one_page(rows: int) -> Any:
 
 
 def detail(ui: UI, key: str) -> dict[str, Any] | None:
-    """Le détail des accès d'une ressource : son tableau tel qu'il est écrit, ses planchers, où il se règle."""
+    """Le détail des accès d'une ressource : son tableau tel qu'il est écrit, ses planchers, où il se règle — un
+    agenda, ici même (« Modifier », ADR 0309, lot 5)."""
     for spec, found in rights.tables(ui):
         for t in found:
             if t.resource == key:
+                edit = render.href(t.href) if t.href is not None else ""
+                if key.startswith("agenda:"):
+                    edit = f"{PAGE}?" + urlencode({"detail": key, "regler": "1"}) + "#t-agenda"
                 return {"kind": spec.title, "title": t.title, "columns": t.columns,
                         "rows": [(str(i), *r) for i, r in enumerate(t.rows, start=1)], "default": t.default,
-                        "floors": t.floors, "note": t.note,
-                        "edit": render.href(t.href) if t.href is not None else "",
+                        "floors": t.floors, "note": t.note, "edit": edit,
                         "pager": one_page(len(t.rows) + 1)}
     return None
+
+
+# ── le tableau d'un agenda, réglé ici (ADR 0309, lot 5) ──
+
+#: ses colonnes, dans l'ordre de la maquette : lire ; ajouter, modifier, supprimer ; répondre ; ce qu'elle en garde
+AGENDA_COLUMNS = (
+    {"key": "lire", "label": "Lire", "kind": "pick", "choices": choices((("oui", "Oui"), (NO, "Non"))), "help": ""},
+    {"key": "ecrire", "label": "Ajouter, modifier, supprimer", "kind": "pick", "choices": choices(capitalized(WRITES)),
+     "help": "Avec ton accord : une carte dans le chat de la personne, ou À valider."},
+    {"key": "repondre", "label": "Répondre aux invitations", "kind": "pick", "choices": choices(capitalized(RESPONDS)),
+     "help": "Une réponse ne part jamais sans un accord."},
+    {"key": "garde", "label": "Ce qu'elle en garde", "kind": "pick", "choices": choices(KEEP_CHOICES), "help": ""})
+
+
+class AgendaTableArgs(TableArgs):
+    """Le tableau d'un agenda, d'un seul envoi : ses lignes (``TableArgs``) et ses colonnes, puis sa ligne par
+    défaut ; la clé de l'agenda (``cle``)."""
+
+    cle: Annotated[str, Knob(label="Agenda")] = Field("", max_length=300)
+    lire: Annotated[dict[str, str], Knob(label="Lire", advanced=False)] = Field(default_factory=dict)
+    ecrire: Annotated[dict[str, str], Knob(label="Ajouter, modifier, supprimer", advanced=False)] = \
+        Field(default_factory=dict)
+    repondre: Annotated[dict[str, str], Knob(label="Répondre aux invitations", advanced=False)] = \
+        Field(default_factory=dict)
+    garde: Annotated[dict[str, str], Knob(label="Ce qu'elle en garde", advanced=False)] = Field(default_factory=dict)
+    defaut_lire: Annotated[str, Knob(label="Par défaut, lire")] = NO
+    defaut_ecrire: Annotated[str, Knob(label="Par défaut, ajouter")] = NO
+    defaut_repondre: Annotated[str, Knob(label="Par défaut, répondre")] = NO
+    defaut_garde: Annotated[str, Knob(label="Par défaut, ce qu'elle en garde")] = "rien"
+
+
+def _agenda_cells(line: AgendaRule) -> dict[str, Any]:
+    return {"lire": "oui" if line.read else NO, "ecrire": line.write, "repondre": line.respond, "garde": line.keep}
+
+
+def agenda_editor(ui: UI, key: str, csrf: str) -> dict[str, Any] | None:
+    """Le tableau d'un agenda, à régler (``handmade/droits/tableau.html``) : ses lignes, sa ligne par défaut, leur
+    ordre ; ``None`` : pas un agenda d'ici."""
+    calendar = key.removeprefix("agenda:")
+    store = ui.kernel.ports.get("agenda")
+    found = store.calendar(calendar) if store is not None and key.startswith("agenda:") else None
+    if found is None:
+        return None
+    frame = ui.kernel.mind.frame()
+    table = agenda_table(agenda_params(frame), rights_of(frame.env), calendar)
+    stored = calendar in rights_of(frame.env).agendas
+    rows = rows_of(ui, table.lines, _agenda_cells)
+    return {"id": "agenda", "key": calendar, "title": f"Qui peut quoi sur « {found.name or calendar} »",
+            "intro": "De haut en bas : la première ligne qui correspond (qui, par où, quand) décide ; aucune, le "
+                     "comportement par défaut — après le propriétaire et ses partages, le tableau du canal et le "
+                     "plafond de qui est en face. Un partage ajoute la ligne de la personne.",
+            "note": "" if stored else "Le tableau que son propriétaire et ses partages donnent, tant qu'on ne l'a pas "
+                                      "réglé.",
+            "below": "", "action": AGENDA_TABLE, "csrf": csrf, "rows": rows, "default": _agenda_cells(table.default),
+            "columns": list(AGENDA_COLUMNS), "show_canal": True, "show_tools": False,
+            "pager": one_page(len(rows) + 1), "floors": AGENDA_FLOORS, "set": stored,
+            "fiche": subject_url("agenda", calendar, "droits")}
+
+
+def _agenda_rows(args: AgendaTableArgs) -> list[AgendaRule]:
+    sent = args.rows(read=args.lire, write=args.ecrire, respond=args.repondre, keep=args.garde)
+    return [AgendaRule(who=r["who"], canal=r["canal"], when=r["when"], read=r["read"] == "oui",
+                       write=r["write"] or NO, respond=r["respond"] or NO, keep=r["keep"] or "rien") for r in sent]
+
+
+async def agenda_table_post(ui: UI, request: Request) -> Response:
+    """Le tableau d'un agenda, enregistré d'un coup par un opérateur (``cle``) ; « remettre » revient au tableau que
+    son propriétaire et ses partages donnent. Audité ; vaut dès son prochain épisode."""
+    got = await ui.form_lists(request)
+    account = ui.operator(request)
+    token = secrets.token_urlsafe(9)
+    data = got[0] if got is not None else {}
+    key = str(data.get("cle", ""))
+    settings, store = ui.deps.settings, ui.kernel.ports.get("agenda")
+    if got is None or account is None:
+        ui.flash(token, "danger", "Jeton de formulaire invalide : recharge la page.")
+    elif settings is None or store is None or store.calendar(key) is None:
+        ui.flash(token, "warn", "Cet agenda n'est plus là, ou les réglages ne sont pas joignables : rien n'a été "
+                                "enregistré.")
+    else:
+        try:
+            args = table_args(AgendaTableArgs, data)
+            if args.faire.strip() == "remettre":
+                await settings.save_agenda_table(key, None)
+                said = "Revenu au tableau que son propriétaire et ses partages donnent."
+            else:
+                rows, said = moved(_agenda_rows(args), args.faire.strip(), AGENDA_NEW_ROW, AGENDA_ROWS)
+                default = AgendaRule(read=args.defaut_lire == "oui", write=args.defaut_ecrire or NO,
+                                     respond=args.defaut_repondre or NO, keep=args.defaut_garde or "rien")
+                await settings.save_agenda_table(key, Table[AgendaRule](lines=tuple(rows), default=default))
+            await operations.audit(ui.kernel, "console.droits.agenda", by=account.handle, subject_kind="agenda",
+                                   subject=key)
+            ui.flash(token, "ok", f"{said} Vaut dès son prochain épisode.")
+        except (ValueError, ValidationError) as exc:
+            ui.flash(token, "danger", str(exc)[:300])
+    target = f"{PAGE}?" + urlencode({"detail": f"agenda:{key}", "regler": "1", "flash": token}) + "#t-agenda"
+    return secure(RedirectResponse(target, status_code=303))
 
 
 def fixed_tools(ui: UI) -> dict[str, Any]:
@@ -310,7 +444,8 @@ def fixed_tools(ui: UI) -> dict[str, Any]:
 
 
 def _resource(s: sharing.Shared) -> str:
-    return f"{'la' if s.kind == 'mail' else 'le'} {SHARED_KINDS[s.kind]} « {s.title} »"
+    article = "la " if s.kind == "mail" else "l'" if s.kind == "agenda" else "le "
+    return f"{article}{SHARED_KINDS[s.kind]} « {s.title} »"
 
 
 def _owner(ui: UI, owner: str) -> str:
@@ -339,7 +474,7 @@ def shared(ui: UI) -> list[dict[str, Any]]:
     if settings is None:
         return []
     out = []
-    for s in sharing.every_share(settings):
+    for s in sharing.every_share(settings, agenda_me.calendar_names(ui.kernel.ports.get("agenda"))):
         row = retiring(ui, s)
         out.append({**row, "title": s.title, "sort": SHARED_KINDS[s.kind], "owner": _owner(ui, s.owner),
                     "level": dict(SHARES).get(s.level, s.level),
@@ -399,4 +534,8 @@ def routes(ui: UI) -> list[Route]:
     async def post(request: Request) -> Response:
         return await unshare(ui, request)
 
-    return [Route(UNSHARE, ui.guarded(post), methods=["POST"])]
+    async def agenda(request: Request) -> Response:
+        return await agenda_table_post(ui, request)
+
+    return [Route(UNSHARE, ui.guarded(post), methods=["POST"]),
+            Route(AGENDA_TABLE, ui.guarded(agenda), methods=["POST"])]

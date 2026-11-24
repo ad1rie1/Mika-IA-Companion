@@ -1,0 +1,31 @@
+{# La fiche d'un agenda › Événements (app/handmade/subjects/agenda.py) : un seul bandeau quand son compte est à
+   reconnecter ou en panne, une bande de chiffres, puis ses événements — à venir ou passés (le bouton à choix de la vue),
+   paginés. Un événement privé d'une autre personne reste « Occupé · privé ». #}
+{% from "_navigation.html" import pager as pages %}
+<div class="now-page" data-tab="agenda/evenements">
+  {% if banner %}<p class="note warn"><b>{{ banner.title }}</b>{{ banner.text }}</p>{% endif %}
+  <ul class="person-tiles-list agc-tiles">
+    {% for t in tiles %}<li{% if t.tone %} class="{{ t.tone }}"{% endif %}>{% if t.href %}<a href="{{ t.href }}">{% endif %}<span class="person-tile-label">{{ t.label }}</span><span class="person-tile-value">{{ t.value }}</span><span class="person-tile-sub">{{ t.sub }}</span>{% if t.href %}</a>{% endif %}</li>{% endfor %}
+  </ul>
+  <section class="now-card hm-table-card table-block" aria-label="Événements">
+    <div class="hm-table-wrap" tabindex="0" role="region" aria-label="Événements">
+      <table class="hm-table agc-evtable">
+        <thead><tr><th scope="col">Quand</th><th scope="col">Événement</th><th scope="col">Lieu</th><th scope="col">Avec</th><th scope="col">Ce qu'elle en a fait</th></tr></thead>
+        <tbody>
+          {% for e in rows %}
+          <tr{% if e.warn %} class="t-warn"{% endif %}>
+            <td class="fit">{{ e.when }}</td>
+            <td><b>{% if e.by_her %}<span class="agc-mk" aria-hidden="true">✦</span>{% endif %}{{ e.title }}</b>{% if e.recurring %} <span class="now-tag">répété</span>{% endif %}</td>
+            <td{% if not e.place %} class="vide"{% endif %}>{{ e.place or "—" }}</td>
+            <td{% if not e.people %} class="vide"{% endif %}>{{ e.people or "—" }}</td>
+            <td{% if not e.did %} class="vide"{% endif %}>{% if e.did %}{{ e.did }}{% else %}<span class="now-muted">—</span>{% endif %}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5"><p class="now-empty">{{ "Rien de passé dans la fenêtre de la synchro." if past else "Rien à venir." }}</p></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="hm-pager{{ ' single' if pager.pages <= 1 }}">{{ pages(pager) }}</div>
+  </section>
+</div>

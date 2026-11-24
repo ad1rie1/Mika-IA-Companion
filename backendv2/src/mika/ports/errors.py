@@ -23,6 +23,7 @@ OUTSIDE: Mapping[str, str] = MappingProxyType({
     "ListingFailed": "liste indisponible",  # adapters/listing.py
     "ClaudeCodeError": "erreur de Claude Code",  # adapters/llm/claude_code.py
     "ImapError": "erreur du serveur de courrier",  # adapters/mail/imap.py
+    "AgendaError": "erreur d'un agenda",  # ports/agenda.py
 })
 
 

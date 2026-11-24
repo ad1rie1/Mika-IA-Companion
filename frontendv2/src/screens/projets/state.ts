@@ -142,3 +142,11 @@ export function ticketsQuery(filter: UiState["tickets"], q: string): ElementsQue
 export function cacheKey(...parts: Array<string | number | undefined>): string {
   return parts.map((p) => String(p ?? "")).join("|");
 }
+
+/** Une fiche qu'on montrait n'est plus à toi : relue, elle rend « introuvable » (404 — plus partagée, retirée) là où
+ *  elle s'était lue. L'écran revient alors à la liste, plutôt que de dire son refus ; une fiche qu'on n'avait jamais pu
+ *  lire (une adresse fausse), elle, le dit. */
+export function sheetGone(had: boolean, read: { value: unknown; error: unknown }): boolean {
+  const status = (read.error as { status?: unknown } | null)?.status;
+  return had && read.value === null && status === 404;
+}

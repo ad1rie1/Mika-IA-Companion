@@ -78,7 +78,7 @@ def test_it_needs_a_session_and_says_who_is_connected(world):  # noqa: F811
     bootstrap(client)
     me = client.get(API).json()
     assert me["username"] == "adrien" and me["operator"] is True and me["owner"] is True
-    assert me["handle"] == "user_1" and set(me["counts"]) == {"mail", "teams", "phone", "projects"}
+    assert me["handle"] == "user_1" and set(me["counts"]) == {"mail", "teams", "phone", "projects", "agenda"}
     assert client.get(API).headers["cache-control"] == "no-store"
 
 

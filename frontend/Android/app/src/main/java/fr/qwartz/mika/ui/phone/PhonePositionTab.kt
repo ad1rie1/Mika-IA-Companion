@@ -35,10 +35,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.qwartz.mika.R
@@ -46,7 +43,9 @@ import fr.qwartz.mika.core.AppGraph
 import fr.qwartz.mika.data.chat.Sender
 import fr.qwartz.mika.data.moi.carte.Scene
 import fr.qwartz.mika.data.moi.carte.SceneHere
+import fr.qwartz.mika.data.moi.LiveSignal
 import fr.qwartz.mika.data.moi.MoiApi
+import fr.qwartz.mika.data.moi.PhoneLive
 import fr.qwartz.mika.data.moi.phone.Look
 import fr.qwartz.mika.data.moi.phone.PhoneCoords
 import fr.qwartz.mika.data.moi.phone.PhonePosition
@@ -54,12 +53,14 @@ import fr.qwartz.mika.data.moi.phone.lookedAt
 import fr.qwartz.mika.data.moi.phone.positionLine
 import fr.qwartz.mika.data.moi.phone.whenWords
 import fr.qwartz.mika.data.net.MikaProtocol
+import fr.qwartz.mika.data.net.Topics
 import fr.qwartz.mika.ui.Route
 import fr.qwartz.mika.ui.components.rememberNow
 import fr.qwartz.mika.ui.map.MapControl
 import fr.qwartz.mika.ui.map.SceneMap
 import fr.qwartz.mika.ui.settings.WhereSwitch
 import fr.qwartz.mika.ui.settings.rememberWhereSwitch
+import fr.qwartz.mika.ui.shell.FollowLive
 import fr.qwartz.mika.ui.shell.Load
 import fr.qwartz.mika.ui.shell.LoadBox
 import fr.qwartz.mika.ui.shell.LocalShell
@@ -67,18 +68,13 @@ import fr.qwartz.mika.ui.shell.MIcon
 import fr.qwartz.mika.ui.theme.mika
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-
-/** Après « Lui dire où je suis » allumé ou coupé, la position se relit le temps que la mesure (ou l'effacement) arrive. */
-private const val WHERE_SETTLE_MS = 4_000L
 
 /**
  * Position (`Route.Phone("position")`) : ta dernière position (`phone/position`) et les regards de Mika sur elle, tels
@@ -104,15 +100,7 @@ class PhonePositionViewModel(graph: AppGraph) : PhoneModel(graph) {
     private var started = false
     private var job: Job? = null
 
-    init {
-        // allumer ou couper « Lui dire où je suis » change ce que le serveur sait : relire quand c'est arrivé
-        viewModelScope.launch {
-            graph.settings.settings.map { it.shareWhere }.distinctUntilChanged().drop(1).collect {
-                delay(WHERE_SETTLE_MS)
-                load(quiet = true)
-            }
-        }
-    }
+    // allumer ou couper « Lui dire où je suis » change ce que le serveur sait : il le pousse (`phone.position`)
 
     fun resume() {
         if (!started) {
@@ -134,6 +122,12 @@ class PhonePositionViewModel(graph: AppGraph) : PhoneModel(graph) {
     fun retry() {
         position = Load.Loading
         load(quiet = false)
+    }
+
+    /** Le direct (ADR 0308) : ta position a changé chez Mika (`phone.position`) : relue sans bruit. Rend la main quand
+     *  c'est relu. */
+    suspend fun onLive(signal: LiveSignal) {
+        if (started && signal.touches(Topics.PHONE_POSITION)) load(quiet = true).join()
     }
 
     private fun load(quiet: Boolean): Job {
@@ -162,15 +156,7 @@ internal fun PositionTab(graph: AppGraph, session: String, modifier: Modifier, o
     val shell = LocalShell.current
     val vm: PhonePositionViewModel = viewModel(key = "phone.position|$session") { PhonePositionViewModel(graph) }
     LaunchedEffect(vm) { vm.said.collect { shell.toast(it) } }
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(vm, lifecycle) {
-        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            while (true) {
-                vm.resume()
-                delay(PHONE_REFRESH_MS)
-            }
-        }
-    }
+    FollowLive(graph.live, PhoneLive.POSITION, vm, onShown = { vm.resume() }) { vm.onLive(it) }
     val looks by vm.looks.collectAsStateWithLifecycle()
     val where = rememberWhereSwitch(graph)
     PullToRefreshBox(

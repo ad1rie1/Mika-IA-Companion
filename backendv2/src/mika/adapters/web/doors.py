@@ -71,10 +71,12 @@ TEAMS_FAILURES = (20, 60.0)
 #: les origines d'une extension de navigateur : une page web ne peut pas s'en réclamer
 EXTENSION_ORIGINS = ("chrome-extension://", "moz-extension://")
 #: la boîte d'envoi en direct (``/api/teams/live``, ADR 0251) : le délai pour se présenter (sa clé, dans le premier
-#: message, jamais dans l'adresse), la relecture de la boîte, le signe de vie quand rien ne change (il garde aussi
-#: éveillé le service de l'extension), et les connexions ouvertes par compte au plus
+#: message, jamais dans l'adresse) ; le filet — la boîte relue au plus tard tant de secondes après la dernière lecture,
+#: même sans changement signalé (une échéance passée, Teams coupé dans ses réglages ; ADR 0308 : elle se relit dès
+#: qu'elle change) ; le signe de vie quand rien ne change (il garde aussi éveillé le service de l'extension) ; et les
+#: connexions ouvertes par compte au plus
 LIVE_HELLO_S = 10.0
-LIVE_EVERY_S = 1.0
+LIVE_EVERY_S = 30.0
 LIVE_PING_S = 20.0
 LIVE_PER_ACCOUNT = 4
 #: les connexions pas encore présentées, par adresse et au total (une trame se lit avant toute clé)
@@ -242,9 +244,10 @@ def door_routes(cfg: WebConfig, accounts: Accounts, *, wakeup: wakeup_p.WakeGate
     async def teams_live(ws: WebSocket) -> None:
         """La boîte d'envoi de Teams en direct (ADR 0251) : l'extension se présente par ``{"type": "hello", "key":
         "mtk_…"}`` dans les ``LIVE_HELLO_S`` secondes ; admise comme un relevé (la clé, l'état, la minute), elle reçoit
-        ``{"type": "outbox", "items": […]}`` tout de suite, puis à chaque changement de la boîte (relue chaque seconde,
-        la clé revérifiée), et ``{"type": "ping"}`` quand rien ne change pendant ``LIVE_PING_S``. Ce qu'elle envoie
-        ensuite est lu et ignoré (ses signes de vie). Les accusés restent en HTTP.
+        ``{"type": "outbox", "items": […]}`` tout de suite, puis à chaque changement de la boîte (relue dès qu'elle
+        change, ADR 0308 — ``live_wait`` —, et au plus tard au bout de ``LIVE_EVERY_S``, la clé revérifiée), et
+        ``{"type": "ping"}`` quand rien ne change pendant ``LIVE_PING_S``. Ce qu'elle envoie ensuite est lu et ignoré
+        (ses signes de vie). Les accusés restent en HTTP.
 
         Une connexion qui ne s'est pas encore présentée est acceptée avant toute clé : elles sont plafonnées par
         adresse et au total (``LIVE_UNKNOWN_PER_IP``, ``LIVE_UNKNOWN_MAX``), avant d'être acceptées. Chaque refus
@@ -316,35 +319,50 @@ def door_routes(cfg: WebConfig, accounts: Accounts, *, wakeup: wakeup_p.WakeGate
 
         listening = asyncio.ensure_future(drain())
         loop = asyncio.get_running_loop()
+        moved: asyncio.Future[int] | None = None
         try:
             items = got.data.get("items", [])
+            version = int(got.data.get("version", 0))
             await ws.send_json({"type": "outbox", "items": items})
             last, quiet_since = json.dumps(items, sort_keys=True), loop.time()
+            read_at = loop.time()
             while not listening.done():
-                await asyncio.wait({listening}, timeout=LIVE_EVERY_S)
+                # la boîte qui change (sa version), le filet, ou le signe de vie : le premier des trois
+                wait = max(0.0, min(read_at + LIVE_EVERY_S, quiet_since + LIVE_PING_S) - loop.time())
+                moved = asyncio.ensure_future(teams.live_wait(key, version, wait))
+                await asyncio.wait({listening, moved}, return_when=asyncio.FIRST_COMPLETED)
                 if listening.done() or ws not in live_open.get(mine, []):
                     break  # partie, ou remplacée par une plus récente
-                now = await teams.live_items(key)
-                if now.outcome != gate_p.ACCEPTED:
-                    await ws.close(code=LIVE_CLOSE.get(now.outcome, 4400))
-                    break
-                items = now.data.get("items", [])
-                seen = json.dumps(items, sort_keys=True)
-                if seen != last:
-                    await ws.send_json({"type": "outbox", "items": items})
-                    last, quiet_since = seen, loop.time()
-                elif loop.time() - quiet_since >= LIVE_PING_S:
+                if not moved.done():
+                    moved.cancel()
+                changed = moved.done() and not moved.cancelled() and moved.result() != version
+                if changed or loop.time() - read_at >= LIVE_EVERY_S:
+                    now = await teams.live_items(key)
+                    read_at = loop.time()
+                    if now.outcome != gate_p.ACCEPTED:
+                        await ws.close(code=LIVE_CLOSE.get(now.outcome, 4400))
+                        break
+                    version = int(now.data.get("version", version))
+                    items = now.data.get("items", [])
+                    seen = json.dumps(items, sort_keys=True)
+                    if seen != last:
+                        await ws.send_json({"type": "outbox", "items": items})
+                        last, quiet_since = seen, loop.time()
+                if loop.time() - quiet_since >= LIVE_PING_S:
                     await ws.send_json({"type": "ping"})
                     quiet_since = loop.time()
         except (WebSocketDisconnect, RuntimeError):
             pass  # partie pendant un envoi
         finally:
             listening.cancel()
+            if moved is not None and not moved.done():
+                moved.cancel()
             open_now = live_open.get(mine, [])
             if ws in open_now:
                 open_now.remove(ws)
             if not open_now:
                 live_open.pop(mine, None)
+            teams.live_closed(key)  # sa présence se relit (ADR 0308)
 
     return [
         Route("/api/wake/{name:str}", wake, methods=["POST"]),

@@ -15,9 +15,9 @@ serveur et s'audite (``moi.<geste>``) ; une création redite avec la même clé 
 Une ressource qui n'est pas à elle n'existe pas : le même 404 qu'une ressource inconnue. Le contrat, route par route :
 ``docs/protocole-moi.md``.
 
-Ce paquet réunit les modules (``mail``, ``teams``, ``contacts``…). Le cadre qu'ils emploient (``Me``, ``Call``, ``Denied``, la
-déclaration d'une route) est dans ``api.py`` ; leurs petites aides dans ``common.py`` ; la règle de partage est dans
-``vocab.ownership``, que ``common.py`` lit.
+Ce paquet réunit les modules (``mail``, ``teams``, ``contacts``, ``agenda``…). Le cadre qu'ils emploient (``Me``,
+``Call``, ``Denied``, la déclaration d'une route) est dans ``api.py`` ; leurs petites aides dans ``common.py`` ; la règle
+de partage est dans ``vocab.ownership``, que ``common.py`` lit.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ from typing import Any
 from starlette.routing import Route
 
 from mika.app.me import (
+    agenda,
     contacts,
     mail,
     maps,
@@ -55,9 +56,10 @@ MODULES: tuple[Callable[[MeApiBase], list[Route]], ...] = (mail.routes, teams.ro
                                                            projects.routes, project_code.routes,
                                                            project_docs.routes, project_manage.routes,
                                                            project_activity.routes, contacts.routes,
-                                                           writing.routes)
+                                                           writing.routes, agenda.routes)
 COUNTERS: tuple[tuple[str, Callable[[Call], int]], ...] = (("mail", mail.count), ("teams", teams.count),
-                                                            ("phone", phone.count), ("projects", projects.count))
+                                                            ("phone", phone.count), ("projects", projects.count),
+                                                            ("agenda", agenda.count))
 
 
 async def who(req: Call) -> dict[str, Any]:

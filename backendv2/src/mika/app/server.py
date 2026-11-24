@@ -30,6 +30,17 @@ from starlette.responses import RedirectResponse, Response
 from starlette.routing import Mount, Route
 
 from mika.adapters.addresses import serving_on
+from mika.adapters.agenda import (
+    AgendaStore,
+    CalDavProvider,
+    GoogleProvider,
+    GoogleSignIn,
+    IcalProvider,
+    MicrosoftProvider,
+    Providers,
+    Web,
+    microsoft_signin,
+)
 from mika.adapters.camera import CameraBuffer
 from mika.adapters.contacts import ContactsStore
 from mika.adapters.feeds import HttpFeeds
@@ -42,7 +53,7 @@ from mika.adapters.llm.claude_code import runtime_dir
 from mika.adapters.llm.config import BackendSpec, LiveGateway, ModelLimits, build_gateway
 from mika.adapters.llm.gateway import LLMTrace
 from mika.adapters.llm.models import model_limits
-from mika.adapters.mail import ImapSmtpMail
+from mika.adapters.mail import ImapSmtpMail, MailWatch
 from mika.adapters.mail.oauth import MicrosoftSignIn
 from mika.adapters.maps import MapsDesk, MapTiles
 from mika.adapters.mcp.hub import McpHub
@@ -66,6 +77,7 @@ from mika.adapters.workshop.github import GitHubRepos
 from mika.adapters.world.server import WorldHub
 from mika.app import backup, composition, datadir, embeddings, schema, settings_sections, system_mcp
 from mika.app import persona as persona_file
+from mika.app.agenda_desk import AgendaSettingsDesk
 from mika.app.console import FACULTY_LABELS, LABELS, NAVIGATION, PARAM_FAMILIES
 from mika.app.console_menu import menu_for
 from mika.app.constellation import Constellation
@@ -81,6 +93,7 @@ from mika.app.lending import Lending
 from mika.app.logs import configure_logging
 from mika.app.mcp_settings import McpSettingsStore
 from mika.app.me import MeApi
+from mika.app.me.changes import LiveChanges
 from mika.app.me.docs_mcp import PREFIX as DOCS_MCP_PREFIX
 from mika.app.me.docs_mcp import DocsPoint
 from mika.app.me.phone import APK_NAME
@@ -105,6 +118,7 @@ from mika.inspector.ui import PREFIX as CONSOLE_PREFIX
 from mika.inspector.ui import InspectorDeps
 from mika.kernel.builtin import PARAMS_CHANGED
 from mika.kernel.events import Origin
+from mika.ports.changes import ME, PHONE_PHONES
 from mika.runtime.bootstrap import Kernel
 from mika.vocab import privacy
 from mika.vocab.people import clean_display_name
@@ -160,6 +174,10 @@ class Live:
     #: la carte de sa position (ADR 0193) : ses tuiles, lues ou relayées par ce serveur ; le port des lieux, des
     #: adresses et des itinéraires, lui, est ``maps`` (``MapsDesk``, ADR 0194)
     tiles: MapTiles | None = None
+    #: le direct (ADR 0308) : ce qui change ce que montrent les écrans de tous les jours, poussé sur leur ``/ws``
+    changes: LiveChanges | None = None
+    #: le courrier en direct (ADR 0308) : une connexion IDLE par boîte, sinon une relève par minute (``serve`` seul)
+    mail_watch: MailWatch | None = None
 
     def trace(self, tr: LLMTrace) -> None:
         self.gateway.traces.append(tr)
@@ -227,6 +245,8 @@ class Live:
                         "shares": {k: dict(sorted(a.shares.items())) for k, a in sorted(teams.accounts.items())
                                    if a.shares},
                         "accounts_off": sorted(k for k, a in teams.accounts.items() if not a.enabled)}
+        # ses comptes d'agenda et leurs agendas (ADR 0309) : à qui, partagés avec qui, masqués, leur rappel
+        out["agenda"] = self.settings.agenda().params()
         return out
 
     async def reconfigure(self) -> list[str]:
@@ -287,9 +307,11 @@ async def _warm(embedder: object) -> None:
 
 def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
           gateway: LiveGateway | None = None, embedder: Any = None, reports: Path | None = None,
-          imaging: LiveImaging | None = None, **deps: Any) -> tuple[Starlette, Live]:
+          imaging: LiveImaging | None = None, mail_live: bool = False, **deps: Any) -> tuple[Starlette, Live]:
     """L'application et ce qu'elle fait vivre. Tout est construit ici ; le
-    cycle de vie ouvre, démarre et arrête."""
+    cycle de vie ouvre, démarre et arrête. ``mail_live`` : le courrier en direct
+    (ADR 0308), que ``serve`` demande — un test ou l'aperçu qui monte le serveur
+    ne joint ainsi aucun serveur de courrier sans le dire."""
     data.mkdir(parents=True, exist_ok=True)
     bases = schema.targets(data)  # des fichiers du dossier, ou les bases du serveur de MIKA_DATABASE_URL (ADR 0101)
     schema.migrate_data(data, bases)  # chaque base à sa dernière révision, avant que rien ne s'ouvre
@@ -343,6 +365,25 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     # l'annuaire (ADR 0298) : tous ceux qu'elle connaît, même sans leur avoir parlé, tirés de Teams et du courrier par
     # le plugin ``contacts`` (sa base à lui, hors du journal)
     outside["contacts"] = ContactsStore(bases["contacts"], now=clock.now)
+    # l'agenda (ADR 0309) : ses événements hors du journal (ceux du système y font foi, ceux d'un fournisseur en sont
+    # la copie), et ses fournisseurs avec les comptes des réglages, relus à chaque usage
+    outside["agenda"] = AgendaStore(bases["agenda"], now=clock.now)
+    outside["agenda_providers"] = Providers(outside["agenda"], settings.agenda_connections)
+    # un abonnement iCal (une adresse .ics, en lecture seule) et un serveur CalDAV (ADR 0309, lot 1) ; une redirection
+    # ou une adresse donnée par le serveur qui quitte son hôte ne mène qu'à Internet
+    agenda_web = Web()
+    outside["agenda_providers"].add(IcalProvider(agenda_web, now=clock.now))
+    outside["agenda_providers"].add(CalDavProvider(agenda_web, now=clock.now))
+    # Google Agenda et Outlook.com / Microsoft 365 (ADR 0309, lot 2) : leurs connexions scellées à part des comptes ;
+    # Google par l'application Google du serveur (réglée par un opérateur), Microsoft par celle du courrier (ADR 0238),
+    # chacun joignant ses hôtes seulement. Leurs parcours de connexion : ``.signin`` de chacun (lot 4 : l'API)
+    outside["agenda_providers"].add(GoogleProvider(GoogleSignIn(settings, settings.google_application,
+                                                                now=clock.now), now=clock.now))
+    outside["agenda_providers"].add(MicrosoftProvider(microsoft_signin(settings, settings.mail_application),
+                                                      now=clock.now))
+    # ce que la console change d'un compte d'agenda (ADR 0309, lot 5) : le décocher, ne plus suivre un de ses agendas,
+    # oublier sa connexion — jamais une écriture dans un agenda
+    agenda_desk = outside["agenda_desk"] = AgendaSettingsDesk(settings, outside["agenda_providers"])
     # les messages du téléphone (ADR 0120) : la porte de ``/api/phone/…``, et l'envoi d'une réponse proposée
     phone = outside["phone"] = PhoneDesk()
     # les lieux, les adresses et les itinéraires de l'écran Carte et de ses outils (ADR 0194) : l'index des lieux de
@@ -382,6 +423,11 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
         task.add_done_callback(reconfiguring.discard)
 
     kernel.mind.subscribe(reconfigure_mcp)
+    # le courrier en direct (ADR 0308) : ce qui arrive est rangé tout de suite, même quand elle dort — hors de
+    # l'ordonnanceur, que son sommeil arrête ; il se règle à chaque enregistrement des boîtes
+    mail_watch = MailWatch(outside["mail"]) if mail_live else None
+    if mail_watch is not None:
+        settings.mail_saved = mail_watch.nudge
     port = KernelPort(kernel)
     hub.port = port
     wakeups.port = port
@@ -390,7 +436,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     live = Live(kernel, hub, port, Accounts(store), settings, gateway, fixed, calls=CallLog(store),
                 persona_file=persona, data=data, imaging=imaging, imaging_fixed=imaging_fixed, mcp=mcp,
                 wakeups=wakeups, teams=teams, read_limits=None if fixed else model_limits,
-                tiles=MapTiles(data, settings.map_config))
+                tiles=MapTiles(data, settings.map_config), mail_watch=mail_watch)
+    agenda_desk.reconfigure = live.reconfigure
     # l'exemple de l'autrice « Message », quand le sien est vide : le fil de référence de sa persona (ADR 0124), lu au
     # journal (lu à chaque épisode : jamais le YAML)
     settings.reference_thread = lambda: kernel.mind.frame().get(self_c.PERSONA).reference_thread
@@ -428,7 +475,13 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
             log.warning("aucun compte n'existe : le premier (opérateur) se crée sur la page de connexion. Depuis une "
                         "autre machine que celle-ci, elle demande le code de premier démarrage : %s", web.bootstrap_code)
         await register_accounts(kernel, live.accounts)  # ceux d'avant, et ceux créés hors ligne (mika account)
-        live.accounts.on_change = lambda: register_accounts(kernel, live.accounts)
+
+        async def accounts_changed() -> None:
+            await register_accounts(kernel, live.accounts)
+            # un nom, un téléphone branché ou révoqué : ce qu'en montrent les écrans de chacune (ADR 0308)
+            live_changes.everyone(ME, PHONE_PHONES)
+
+        live.accounts.on_change = accounts_changed
         await live.calls.open()
         problems = await live.reload_llm()
         if not gateway.configured and not problems:
@@ -445,6 +498,9 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
         forge.zone = lambda: str(kernel.mind.registry.tz_of(kernel.mind.frame().root))  # son heure, dans ses apps
         mcp.start()  # chaque serveur actif est joint en tâche de fond
         hub.start()
+        live_changes.start()
+        if mail_watch is not None:
+            mail_watch.start()  # ce qu'il range part aux écrans : après le direct
         world_hub.start()
         constellation.start()
         maps_desk.start()  # le réchauffage des caches de la carte, les départements tenus en entier (ADR 0245)
@@ -457,9 +513,12 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
             yield
         finally:
             warming.cancel()
+            if mail_watch is not None:
+                await mail_watch.stop()
             await maps_desk.stop()
             await constellation.stop()
             await world_hub.stop()
+            await live_changes.stop()
             await hub.stop()
 
             async def release() -> None:
@@ -511,6 +570,24 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     # le GPX d'un voyage qu'un opérateur tire de la console, sur son compte (ADR 0204)
     moi = MeApi(kernel, live.accounts, origins=web.origins, apk=data / "telephone" / APK_NAME, extension=EXTENSION_DIR,
                 settings=live.settings, reconfigure=live.reconfigure, tiles=live.tiles)
+    # le direct (ADR 0308) : le journal, les bases tenues à côté (chacune prévient de ses écritures validées), l'étape
+    # de son travail ; à chaque personne connectée, ce qu'elle voit — et la boîte d'envoi réveille l'extension
+    live_changes = live.changes = LiveChanges(kernel, hub, moi)
+    kernel.mind.subscribe(live_changes.listen)
+    for base in (outside["mail"], teams_store, outside["contacts"], outside["agenda"]):
+        base.on_change(live_changes.touch)
+    teams_store.on_change(teams.store_changed)
+    kernel.runner.on_step = live_changes.step
+    # ce qui est tenu hors du journal sans être une base à côté : les réglages (chaque enregistrement), la fin de
+    # l'attente d'un code Microsoft, la présence de l'extension Teams (ses comptes, aux écrans qui les lisent)
+    settings.on_saved = live_changes.saved
+    microsoft.on_state = live_changes.signed
+    # la connexion Google ou Microsoft d'un compte d'agenda (ADR 0309, lot 4) : connecté, refusé, échu
+    for kind in ("google", "microsoft"):
+        agenda_signin = getattr(outside["agenda_providers"].of(kind), "signin", None)
+        if agenda_signin is not None:
+            agenda_signin.on_state = live_changes.agenda_signed
+    teams.on_presence = live_changes.presence
     return create_app(port, live.accounts, hub, web, lifespan=lifespan,
                       extra_routes=[Route("/", _root, methods=["GET", "HEAD"]), *constellation.routes(),
                                     *moi.routes(),
@@ -598,7 +675,7 @@ def serve(*, host: str = "127.0.0.1", port: int = 8001, data: Path = Path("data/
     # et écrit au journal tant qu'aucun compte n'existe (audit du 2026-10-26 : le premier arrivé devenait opérateur)
     app, live = build(data, reports=reports, web=web_config(origins=origins, cookie_secure=cookie_secure,
                                                             behind_proxy=behind_proxy,
-                                                            bootstrap_code=secrets.token_urlsafe(9)))
+                                                            bootstrap_code=secrets.token_urlsafe(9)), mail_live=True)
     live.relay_base = relay_base(host, port)
     live.console_url = console_url(host, port)
     serving_on(port)  # ni une app de la Forge ni un article d'un flux ne joignent Mika, même par une adresse relayée
