@@ -25,10 +25,21 @@ C8-12).
 from dataclasses import replace
 from pathlib import Path
 
+from mika.app.domains import DOMAINS
 from mika.inspector.catalog import MenuGroup, MenuLink
 
 #: les rubriques dont les liens ne suivent pas les onglets de leurs destinations (voir plus haut)
 SHORTCUT_GROUPS = ("Réglages",)
+
+def _link(domain: str) -> MenuLink:
+    """Le lien de menu d'un domaine qui a sa fiche (``Domain.menu``, ADR 0310) : la fiche dit ce qu'il est, ce menu dit
+    où il est rangé."""
+    found = next((d.menu for d in DOMAINS if d.name == domain), None)
+    if found is None:
+        raise ValueError(f"le domaine « {domain} » n'a pas de lien de menu dans sa fiche")
+    return found
+
+
 
 MENU = (
     MenuGroup("", "home", (MenuLink("Accueil", ""),)),
@@ -67,7 +78,7 @@ MENU = (
     ), question="Que peut-elle faire, et pour qui ?"),
     MenuGroup("Connexions extérieures", "plug", (
         MenuLink("Ses sens", "sens", hint="Ce qu'elle lit, voit et reçoit"),
-        MenuLink("Réveils par API", "reveils", hint="Ce qui peut la réveiller"),
+        _link("wakeup"),  # les réveils par API
         MenuLink("Dépôts Git", "reglages/depots", hint="Le jeton de ses dépôts distants"),
     ), short="Connexions", question="Que perçoit-elle du dehors, qui la fait agir ?"),
     MenuGroup("Réglages", "settings", (

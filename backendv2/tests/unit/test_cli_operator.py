@@ -23,6 +23,7 @@ from mika.app.cli import common as cli_common
 from mika.app.cli import journal as cli_journal
 from mika.app.cli import plugins as cli_plugins
 from mika.app.console import LABELS
+from mika.app.domains.wakeup.cli import wakeup_command
 from mika.app.domains.wakeup.desk import WakeEndpoint, WakeupConfig
 from mika.app.domains.wakeup.settings import WakeupSettings
 from mika.contracts import identity as identity_c
@@ -199,7 +200,7 @@ def test_a_key_is_taken_back_from_the_command_line(tmp_path):
             return cli_plugins.teams_command(settings, argparse.Namespace(teams_cmd=cmd, compte="principal"))
 
         def wakeup(cmd: str) -> object:
-            return cli_plugins.wakeup_command(settings, argparse.Namespace(wakeup_cmd=cmd, name="serre"))
+            return wakeup_command(settings, argparse.Namespace(wakeup_cmd=cmd, name="serre"))
 
         assert (await teams("key"))["ok"] and (await wakeup("key"))["ok"]
         assert await teams("revoke") == {"ok": True, "compte": "principal"}

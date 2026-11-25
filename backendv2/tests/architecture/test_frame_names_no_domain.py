@@ -14,10 +14,11 @@ imports de chaque source d'``app`` (``ast`` : jamais un commentaire) :
 - **un domaine ne nomme un autre domaine que s'il le déclare** (``Domain.needs``), et un besoin déclaré qui ne sert
   plus se retire ;
 - **le registre** (``app/domains/__init__.py``) liste les fiches et rien d'autre : il ne nomme aucun paquet du moteur ;
-- **une fiche n'importe rien** (``app/domains/<nom>/__init__.py`` : seulement la forme d'une fiche,
-  ``mika.app.domains.domain``) : elle nomme les modules de ses parts, que le cadre importe au moment d'assembler. Le
+- **une fiche n'importe rien d'``app``** (``app/domains/<nom>/__init__.py`` : seulement la forme d'une fiche,
+  ``mika.app.domains.domain`` ; aux couches du dessous elle ne prend que de quoi se dire — une ``Destination``, un
+  ``MenuLink``) : elle nomme les modules de ses parts, que le cadre importe au moment d'assembler. Le
   registre est donc une feuille de l'arbre des imports, que tout module d'``app`` peut lire ; et **chaque part nommée
-  existe** et porte son nom convenu (``wire``, ``routes``, ``LIVE``, ``CONSOLE``, ``preview``).
+  existe** et porte son nom convenu (``wire``, ``routes``, ``LIVE``, ``CONSOLE``, ``preview``, ``add``).
 
 Le contrôle est une fonction du texte des sources (``offences``) : les derniers tests l'essaient sur de petits
 sources factices, pour qu'il échoue vraiment quand on nomme un domaine.
@@ -94,7 +95,7 @@ STILL: dict[str, set[str]] = {
     "cli/__init__.py": {"maps"},
     "cli/maps.py": {"maps"},
     "cli/models.py": {"tools"},
-    "cli/plugins.py": {"agenda", "contacts", "mail", "teams", "tools", "wakeup"},
+    "cli/plugins.py": {"agenda", "contacts", "mail", "teams", "tools"},
     "forge_settings.py": {"forge"},
     "handmade/agenda_reads.py": {"agenda"},
     "handmade/approval_sources.py": {"agenda", "mail", "phone", "teams", "tools"},
@@ -156,7 +157,7 @@ STILL: dict[str, set[str]] = {
     "server.py": {"agenda", "contacts", "forge", "mail", "maps", "phone", "projects", "senses", "teams", "tools"},
     "settings.py": {"agenda", "mail", "maps", "teams", "tools"},
     "settings_sections/map_phone.py": {"maps"},
-    "settings_sections/plugins.py": {"agenda", "mail", "projects", "teams", "tools", "wakeup"},
+    "settings_sections/plugins.py": {"agenda", "mail", "teams", "tools"},
     "system_mcp.py": {"tools"},
     "teams.py": {"teams"},
     "warm_points.py": {"maps"},
@@ -215,9 +216,9 @@ def offences(sources: Mapping[str, str], *, packages: Mapping[str, tuple[str, ..
         else:  # le dossier d'un domaine
             own = parts[1]
             if parts[2:] == ["__init__.py"]:  # sa fiche : elle nomme ses parts, elle n'importe rien
-                out += [f"{path} importe {m} : une fiche n'importe que la forme d'une fiche ({FORM}), elle nomme "
-                        "les modules de ses parts" for m in sorted(set(imported(text)))
-                        if m.startswith("mika.") and not _within(m, FORM)]
+                out += [f"{path} importe {m} : d'``app``, une fiche n'importe que la forme d'une fiche ({FORM}) ; elle "
+                        "nomme les modules de ses parts" for m in sorted(set(imported(text)))
+                        if _within(m, "mika.app") and not _within(m, FORM)]
             if own not in packages:
                 out.append(f"{path} : « {own} » n'est pas un domaine que cette garde connaît (PACKAGES)")
                 continue
@@ -275,7 +276,7 @@ def test_every_part_a_card_names_exists_and_carries_its_name():
     """Une fiche nomme les modules de ses parts au lieu de les importer : une faute de frappe ne se verrait qu'à
     l'assemblage. Chaque module nommé s'importe ici, et porte le nom que le cadre y lit."""
     for d in DOMAINS:
-        for module in (d.wiring, d.api, d.live, d.console, d.preview):
+        for module in (d.wiring, d.api, d.live, d.console, d.preview, d.cli):
             assert module is None or _within(module, f"mika.app.{HOME}.{d.name}"), f"{d.name} : {module} est hors de son dossier"
         assert d.wiring is None or callable(part(d.wiring, "wire")), d.name
         assert d.api is None or callable(part(d.api, "routes")), d.name
@@ -283,6 +284,7 @@ def test_every_part_a_card_names_exists_and_carries_its_name():
         assert d.live is None or isinstance(part(d.live, "LIVE"), LivePart), d.name
         assert d.console is None or isinstance(part(d.console, "CONSOLE"), ConsolePart), d.name
         assert d.preview is None or callable(part(d.preview, "preview")), d.name
+        assert d.cli is None or callable(part(d.cli, "add")), d.name
         assert d.base is None or _exists(d.base.models.removeprefix("mika.")), d.name
 
 
@@ -338,10 +340,12 @@ def test_a_domain_names_another_only_if_its_card_says_so():
 def test_a_card_imports_nothing_but_its_form():
     assert _toy({"domains/mail/__init__.py": "from mika.app.domains.domain import Domain\n"}) == []
     assert _toy({"domains/mail/__init__.py": "from mika.app.domains.mail.api import routes\n"}) == [
-        "domains/mail/__init__.py importe mika.app.domains.mail.api : une fiche n'importe que la forme d'une fiche "
-        "(mika.app.domains.domain), elle nomme les modules de ses parts",
-        "domains/mail/__init__.py importe mika.app.domains.mail.api.routes : une fiche n'importe que la forme d'une "
-        "fiche (mika.app.domains.domain), elle nomme les modules de ses parts"]
+        "domains/mail/__init__.py importe mika.app.domains.mail.api : d'``app``, une fiche n'importe que la forme d'une "
+        "fiche (mika.app.domains.domain) ; elle nomme les modules de ses parts",
+        "domains/mail/__init__.py importe mika.app.domains.mail.api.routes : d'``app``, une fiche n'importe que la "
+        "forme d'une fiche (mika.app.domains.domain) ; elle nomme les modules de ses parts"]
+    # aux couches du dessous, elle prend de quoi se dire
+    assert _toy({"domains/mail/__init__.py": "from mika.inspector.catalog import Destination\n"}) == []
 
 
 def test_the_registry_lists_cards_and_a_folder_must_be_a_known_domain():

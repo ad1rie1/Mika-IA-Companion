@@ -9,7 +9,8 @@ aucun domaine.
 Une fiche *inscrit* ce que le domaine apporte ; elle ne dessine ni ne génère rien : chaque page garde son gabarit,
 chaque route son module. Tout champ est facultatif : un domaine ne dit que ce qu'il a.
 
-**Une fiche n'importe rien.** Elle nomme les modules de ses parts (``api="mika.app.domains.contacts.api"``) ; le
+**Une fiche n'importe rien d'``app``.** Elle ne prend aux couches du dessous que de quoi se dire (une
+``Destination``, un ``MenuLink`` : ``inspector.catalog``). Elle nomme les modules de ses parts (``api="mika.app.domains.contacts.api"``) ; le
 cadre les importe au moment d'assembler (``part``), et y lit un nom convenu :
 
 - ``api`` : ``routes(api)``, ses routes de ``/api/moi`` ; et, s'il compte quelque chose pour la barre du haut,
@@ -18,6 +19,7 @@ cadre les importe au moment d'assembler (``part``), et y lit un nom convenu :
 - ``console`` : ``CONSOLE``, une ``ConsolePart`` ;
 - ``wiring`` : ``wire(w)``, ce que le serveur construit pour lui avant le noyau (ses adaptateurs, ses portes), et,
   facultatif, ``bind(w)``, ce qui a besoin du noyau (``app/wiring.py::Wiring``) ;
+- ``cli`` : ``add(sub)``, sa commande et ses sous-commandes dans l'analyseur de ``mika`` ;
 - ``preview`` : ``preview(live, now, people)``, ce qu'il ajoute à la vie fictive de ``mika console apercu`` une fois
   les gens de la démonstration en place (``people`` : le moyen de communication de chacun, par son nom de compte) —
   elle rend les adresses de ses pages à exporter.
@@ -77,6 +79,9 @@ class ConsolePart:
     overviews: Mapping[str, Any] = field(default_factory=dict)
     #: « destination/onglet » → la forme dessinée de cet onglet (une ``inspector.ui.Drawn``, ADR 0177)
     drawn: Mapping[str, Any] = field(default_factory=dict)
+    #: ses rubriques de réglages : ``sections(live)`` rend des ``inspector.catalog.SettingsSection`` (leur place dans
+    #: leur rubrique : leur ``order``)
+    sections: Callable[..., tuple[Any, ...]] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +104,16 @@ class Domain:
     console: str | None = None
     #: le module de ce qu'il ajoute à l'aperçu de la console (``preview``)
     preview: str | None = None
+    #: le module de sa commande (``add``)
+    cli: str | None = None
+    #: sa destination dans la console (une ``inspector.catalog.Destination``) : ce qu'elle est. Où elle est rangée
+    #: se dit dans la carte de la console (``app/console.py``), qui la prend ici par le nom du domaine
+    destination: Any = None
+    #: son lien dans le menu de la console (une ``inspector.catalog.MenuLink``) ; sa place : ``app/console_menu.py``
+    menu: Any = None
+    #: sa ligne dans Réglages › Configuration des plugins, par plugin : ce qui s'y règle, ses rubriques de réglages,
+    #: où l'on s'en sert (nom, « destination/onglet ») ; sa place : ``app/settings_sections/plugins.py::ORDER``
+    plugins: Mapping[str, tuple[str, tuple[str, ...], tuple[str, str] | None]] = field(default_factory=dict)
     #: ses noms en français dans la console, par sorte de libellé (``inspector.catalog.Labels`` : ``faculties``,
     #: ``sections``, ``processes``, ``events``…) puis par clé ; la carte de la console les réunit
     #: (``app/console.py``), et un nom dit deux fois y est refusé

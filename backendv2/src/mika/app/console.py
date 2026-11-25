@@ -37,6 +37,15 @@ def _named(kind: str, frame: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _destination(domain: str) -> Destination:
+    """La destination d'un domaine qui a sa fiche (``Domain.destination``, ADR 0310). La fiche dit ce qu'elle est ;
+    cette carte dit où elle est rangée : l'ordre du menu se décide ici."""
+    found = next((d.destination for d in DOMAINS if d.name == domain), None)
+    if found is None:
+        raise ValueError(f"le domaine « {domain} » n'a pas de destination dans sa fiche")
+    return found
+
+
 NAVIGATION: tuple[NavGroup, ...] = (
     NavGroup("Elle", (
         Destination("vie", "Humeur et corps", "Son humeur, ses postures envers chacun, ses besoins, son "
@@ -107,11 +116,7 @@ NAVIGATION: tuple[NavGroup, ...] = (
                     # transcription des messages vocaux (ADR 0206)
                     builtin=("sens.parametres-flux", "sens.parametres-appareils", "sens.parametres-transcription"),
                     gear=("parametres-flux", "parametres-appareils", "parametres-transcription")),
-        Destination("reveils", "Réveils par API", "Les réveils que des systèmes extérieurs lui envoient "
-                    "(POST /api/wake/<nom>) : les déclarer, leurs clés, leurs appels et ce qu'ils ont donné.",
-                    subjects=("reveil",),
-                    # leurs réglages (chaque réveil, ses consignes, ses bornes) : en haut à droite (ADR 0206)
-                    builtin=("reveils.parametres",), gear=("parametres",)),
+        _destination("wakeup"),  # les réveils par API
     )),
     NavGroup("Outils", (
         Destination("apps", "Apps forgées", "Les petites apps qu'elle écrit elle-même.", subjects=("app",)),
@@ -150,7 +155,7 @@ FACULTY_LABELS: dict[str, str] = _named("faculties", {
     "sensors": "Appareils", "runtime": "Moteur", "place": "Où elle est (sa chambre)",
     "world": "Son monde et son corps", "shares": "Fichiers envoyés", "attachments": "Pièces reçues",
     "imaging": "Dessins", "location": "Localisation", "forge_signals": "Signaux de ses apps",
-    "mcp": "Outils extérieurs", "web": "Recherche web", "wakeup": "Réveils par API", "teams": "Teams",
+    "mcp": "Outils extérieurs", "web": "Recherche web", "teams": "Teams",
     "phone": "Messages du téléphone", "trips": "Carte et voyages", "agenda": "Agenda",
 })
 
@@ -252,7 +257,6 @@ REASON_LABELS: dict[str, str] = _named("reasons", {
     # ADR 0058
     "rekindle": "Reprendre des nouvelles, longtemps après (une fois)",
     # ADR 0068
-    "wakeup": "Un réveil par API à traiter", "wakeup_done": "Rendre compte de ce qu'un réveil par API a donné",
     # ADR 0069
     "teams_draft": "Préparer une réponse à un message Teams",
     # ADR 0309
@@ -313,7 +317,6 @@ PROCESS_LABELS: dict[str, str] = _named("processes", {
     "attachments.retention": "Retirer les pièces reçues trop anciennes ou de trop",
     "mcp.expire": "Refuser les accords restés sans réponse",
     "forge.calls_expire": "Refuser les appels d'apps restés sans accord",
-    "wakeup.expire": "Laisser tomber les réveils par API restés trop longtemps en attente",
     "teams.triage": "Trier les messages Teams reçus",
     "teams.images": "Regarder les images des messages Teams",
     "agenda.sync": "Relire les agendas branchés (Google, Outlook, CalDAV, abonnements)",
@@ -461,8 +464,6 @@ EVENT_LABELS: dict[str, str] = _named("events", {
     "attachments.expired": "Des pièces reçues retirées",
     "imaging.requested": "Un dessin demandé", "imaging.drawn": "Un dessin prêt",
     "imaging.failed": "Un dessin qui n'a pas pu se faire",
-    "wakeup.called": "Un réveil par API reçu", "wakeup.reported": "Le compte rendu d'un réveil par API",
-    "wakeup.expired": "Un réveil par API expiré sans avoir été traité", "wakeup.cancelled": "Un réveil par API annulé",
     "teams.noticed": "Un message Teams remarqué", "teams.sent": "Une réponse Teams partie",
     "teams.draft_asked": "Une réponse Teams demandée", "teams.received": "Des messages Teams reçus de l'extension",
     "teams.settled": "Une réponse Teams posée, partie ou laissée",
@@ -582,7 +583,7 @@ ENRICHER_LABELS: dict[str, str] = _named("enrichers", {
     "services": "Ses demandes aux outils extérieurs", "apps": "Ses apps forgées",
     "work_services": "Ses demandes aux outils extérieurs, faites en travaillant",
     "calls": "Ses demandes à ses apps", "signals": "Ce qu'une app a mis dans sa file",
-    "news": "Ce que ses apps ont trouvé pour la personne", "wakeup": "Ses réveils par API",
+    "news": "Ce que ses apps ont trouvé pour la personne",
     "agenda": "Ses agendas (la journée de la personne, ce qu'elle y a proposé)",
     "agenda_reminder": "Le rendez-vous qu'elle rappelle",
     "agenda_invitation": "L'invitation dont elle prépare la réponse",

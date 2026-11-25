@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from mika.app.domains import DOMAINS, part
 from mika.app.settings_sections import connections, intelligence, map_phone, persona, plugins
 from mika.app.settings_sections.common import parameters
 from mika.app.settings_sections.plugins import PLUGINS
@@ -36,7 +37,11 @@ RUBRICS = (SettingsTab("intelligence", "Intelligence"), SettingsTab("personnage"
 
 
 def sections(live: Live) -> tuple[SettingsSection, ...]:
-    """Toutes les sections, une rubrique après l'autre ; en tête, la vue d'ensemble des plugins, qui lit leurs pages."""
+    """Toutes les sections, une rubrique après l'autre, puis celles que chaque domaine inscrit dans sa part de la
+    console (``ConsolePart.sections``, ADR 0310 ; leur place dans leur rubrique se dit par leur ``order``) ; en tête,
+    la vue d'ensemble des plugins, qui lit leurs pages."""
+    consoles = (part(d.console, "CONSOLE") for d in DOMAINS if d.console is not None)
     declared = (*intelligence.sections(live), *persona.sections(live), *map_phone.sections(live),
-                *connections.sections(live), *plugins.sections(live))
+                *connections.sections(live), *plugins.sections(live),
+                *(s for console in consoles if console.sections is not None for s in console.sections(live)))
     return (plugins.overview(live, declared), *declared)
