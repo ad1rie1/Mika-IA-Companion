@@ -4,7 +4,7 @@ onglets, l'onglet « Contacts » de la fiche d'une personne, et les gestes d'une
 - **La fiche** (``contact``, sa clé ``contact:<n°>``, le sujet même de son oubli) : son nom, connue de loin ou
   organisation, son organisation, à qui elle est reliée ; ses onglets — ses personnes (une organisation), ce qui
   l'identifie (chaque identifiant, sa sorte, où elle l'a vu, et « Détacher »), où elle la voit (chaque compte, combien,
-  quand). La page dessinée (``app/handmade/subjects/contact.py``) lit le port elle-même ; ces vues restent la source
+  quand). La page dessinée (``app/domains/contacts/console/subject.py``) lit le port elle-même ; ces vues restent la source
   pour la console en MCP et pour le repli bloc par bloc.
 - **Oublier** est l'oubli de la console (la fiche est « oubliable ») : sa clé et ses alias — ses identifiants Teams et
   ses adresses, ``teams:<id>`` et ``mail:<adresse>``, ses clés d'expéditeur du téléphone (``phone:<empreinte>:<nom>``,

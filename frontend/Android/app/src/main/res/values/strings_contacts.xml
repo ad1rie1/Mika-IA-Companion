@@ -54,7 +54,7 @@
     <string name="contacts_forget_fact_title">Oublier ce fait ?</string>
     <string name="contacts_forget_fact_locked_title">Oublier ce fait</string>
     <string name="contacts_forget_fact_after">Elle ne le réapprendra pas, même dit autrement ; les messages restent où ils sont.</string>
-    <!-- Les mots du serveur (app/me/contacts.py, NOT_YOUR_FACT) : la fiche dit seulement qu'un fait n'est pas à oublier
+    <!-- Les mots du serveur (app/domains/contacts/api.py, NOT_YOUR_FACT) : la fiche dit seulement qu'un fait n'est pas à oublier
          d'ici (`forget` faux), pas pourquoi. -->
     <string name="contacts_not_your_fact">Ce fait vient d\'un compte qui n\'est pas à toi : elle l\'a lu ailleurs que dans tes comptes. Une opératrice peut l\'oublier depuis la console.</string>
     <string name="contacts_forget_confirm">Oublier</string>

@@ -5,7 +5,7 @@ import kotlinx.serialization.Serializable
 
 /*
  * Les formes de la Carte sur l'API par personne (`backendv2/docs/protocole-moi.md` § 10 ; le code :
- * `backendv2/src/mika/app/me/maps.py`), des défauts partout : une clé inconnue s'ignore, une absente prend son défaut.
+ * `backendv2/src/mika/app/domains/maps/api.py`), des défauts partout : une clé inconnue s'ignore, une absente prend son défaut.
  * Les itinéraires, les regards de Mika et les voyages : `TripModels.kt` ; les fiches, les événements et les photos
  * (ADR 0259) : `FicheModels.kt`.
  */

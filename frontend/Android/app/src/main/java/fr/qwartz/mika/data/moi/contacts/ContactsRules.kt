@@ -12,7 +12,7 @@ import kotlin.math.roundToInt
  * sur la JVM.
  */
 
-/** Les bornes de l'API (`app/me/contacts.py`). */
+/** Les bornes de l'API (`app/domains/contacts/api.py`). */
 object ContactsLimits {
     /** `q` de `/contacts`, en caractères. */
     const val SEARCH = 200

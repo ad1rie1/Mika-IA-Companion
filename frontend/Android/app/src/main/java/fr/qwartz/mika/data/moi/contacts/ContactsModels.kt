@@ -4,7 +4,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /*
- * Les formes de Contacts dans l'API par personne (`backendv2/docs/protocole-moi.md` § 12, code `app/me/contacts.py`,
+ * Les formes de Contacts dans l'API par personne (`backendv2/docs/protocole-moi.md` § 12, code `app/domains/contacts/api.py`,
  * ADR 0298) : ceux que Mika connaît pour toi — vus dans tes comptes Teams et tes boîtes, sur ton téléphone, ou dont tu
  * lui as parlé — et leurs organisations. Chaque champ a son défaut : `MikaJson` ignore ce qu'il ne connaît pas (la
  * photo de l'ADR 0300, que l'app ne montre pas), et un champ absent ne casse rien. Les instants sont en millisecondes.

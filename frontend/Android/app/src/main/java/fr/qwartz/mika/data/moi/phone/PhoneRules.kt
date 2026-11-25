@@ -25,7 +25,7 @@ import kotlin.math.roundToLong
  * sur la JVM.
  */
 
-/** Les bornes du Téléphone : ce que le serveur rend au plus (`app/me/phone.py`), ce que tu écris d'ici. */
+/** Les bornes du Téléphone : ce que le serveur rend au plus (`app/domains/phone/api.py`), ce que tu écris d'ici. */
 object PhoneLimits {
     /** Un fil s'ouvre sur ses messages les plus récents ; « Messages plus anciens » en lit jusqu'à [MAX]. */
     const val PAGE = 50

@@ -2,7 +2,7 @@
  * Les mots des services MCP (ADR 0192), et ce qui s'y calcule sans DOM : leur état, leurs outils servis, le choix
  * d'un outil, le nom et l'adresse d'un service, les en-têtes gardés à redonner quand l'adresse mène ailleurs. Pour
  * la page de leurs réglages (Paramètres › Services MCP : `settings.ts`) et la matrice d'Outils (`matrix.ts`). Les
- * codes sont ceux du moteur (`app/me/mcp.py`).
+ * codes sont ceux du moteur (`app/domains/tools/api.py`).
  */
 import type { ServiceTool, ToolChoice } from "../../api/mcp";
 import type { FormValue } from "../../shared/settings";
@@ -61,7 +61,7 @@ export function urlOrigin(url: string): string {
   }
 }
 
-/** Ce que dit le champ des en-têtes quand l'adresse mène ailleurs (les mots du serveur, `app/me/mcp.py`). */
+/** Ce que dit le champ des en-têtes quand l'adresse mène ailleurs (les mots du serveur, `app/domains/tools/api.py`). */
 export const HEADERS_TO_RETYPE = "à redonner : l'adresse a changé (ou à retirer)";
 
 /**

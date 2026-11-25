@@ -621,7 +621,7 @@ fun urlOrigin(url: String): String = try {
 
 private val DEFAULT_PORTS = mapOf("https" to 443, "http" to 80)
 
-/** Ce que dit le champ des en-têtes quand l'adresse mène ailleurs (les mots du serveur, `app/me/mcp.py`). */
+/** Ce que dit le champ des en-têtes quand l'adresse mène ailleurs (les mots du serveur, `app/domains/tools/api.py`). */
 const val HEADERS_TO_RETYPE = "à redonner : l'adresse a changé (ou à retirer)"
 
 /**

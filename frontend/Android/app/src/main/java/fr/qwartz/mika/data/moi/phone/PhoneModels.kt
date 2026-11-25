@@ -4,7 +4,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /*
- * Les formes du Téléphone dans l'API par personne (`backendv2/docs/protocole-moi.md` § 5, code `app/me/phone.py`) : ce
+ * Les formes du Téléphone dans l'API par personne (`backendv2/docs/protocole-moi.md` § 5, code `app/domains/phone/api.py`) : ce
  * que l'application a lu dans les notifications de WhatsApp et de Messages, rangé par conversation, les réponses que
  * Mika y a proposées, ta dernière position, tes téléphones. Chaque champ a son défaut : `MikaJson` ignore ce qu'il ne
  * connaît pas, et un champ absent ne casse rien. Les instants sont en millisecondes (0 : jamais). Une conversation se

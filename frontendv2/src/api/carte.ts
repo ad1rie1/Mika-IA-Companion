@@ -1,6 +1,6 @@
 /**
  * Carte, fond de carte (celui de toutes les cartes), lieux, itinéraires et voyages, par l'API par personne
- * (`backendv2/docs/protocole-moi.md` § 10 ; le code : `backendv2/src/mika/app/me/maps.py`, ADR 0194 à 0196) ; les
+ * (`backendv2/docs/protocole-moi.md` § 10 ; le code : `backendv2/src/mika/app/domains/maps/api.py`, ADR 0194 à 0196) ; les
  * fiches des lieux, les événements et les photos (ADR 0259 : OpenStreetMap, l'office de tourisme par DATAtourisme,
  * Google Maps). Le navigateur ne parle qu'à ce serveur : il cherche les lieux dans son index (rien ne sort), une adresse
  * à la Géoplateforme (seul le texte part), un itinéraire au serveur réglé (seuls ses points partent) ; une photo ne vient
@@ -18,7 +18,7 @@ export const MODES: readonly Mode[] = ["voiture", "velo", "pied"];
 export const AVOIDS: readonly Avoid[] = ["peages", "autoroutes", "ferries"];
 
 /**
- * Les bornes de l'API (`app/me/maps.py`, `contracts/trips.py`) : au-delà, elle refuse (400) — elle ne coupe jamais.
+ * Les bornes de l'API (`app/domains/maps/api.py`, `contracts/trips.py`) : au-delà, elle refuse (400) — elle ne coupe jamais.
  */
 export const CARTE_LIMITS = {
   query: 200,

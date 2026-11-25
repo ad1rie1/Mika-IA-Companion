@@ -8,7 +8,7 @@
 import { query } from "./mail";
 import { getJson, MOI, sendJson, type Done } from "./moi";
 
-/** Les bornes des chaînes que l'API reçoit (`app/me/contacts.py`, en caractères). */
+/** Les bornes des chaînes que l'API reçoit (`app/domains/contacts/api.py`, en caractères). */
 export const CONTACTS_LIMITS = {
   /** `q` de `/contacts`. */
   search: 200,
