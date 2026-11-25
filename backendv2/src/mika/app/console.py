@@ -73,9 +73,7 @@ NAVIGATION: tuple[NavGroup, ...] = (
                            "echeances")),
         Destination("buts", "Buts et rappels", "Ce qu'elle se propose de faire ensuite : ses rappels et ses "
                     "explorations, où ils en sont.", subjects=("goal",)),
-        Destination("projets", "Projets", "Ses projets : des espaces de travail qu'on pilote — objectifs, "
-                    "exécutions, décisions techniques, fichiers, dépôt git, mode et outils.",
-                    subjects=("project",)),
+        _destination("projects"),  # ses projets
     )),
     NavGroup("Outils", (
         Destination("outils", "Ses outils", "Ce qu'elle peut faire et avec qui, ses propres outils et leurs droits, ce "
@@ -134,7 +132,7 @@ FACULTY_LABELS: dict[str, str] = _named("faculties", {
     "affect": "Humeur et postures", "needs": "Besoins", "body": "Corps et sommeil", "self": "Estime et récit",
     "attention": "Attention et pensées", "memory": "Mémoire", "transcript": "Fil des conversations",
     "social": "Liens", "others": "Ce qu'elle devine des autres", "identity": "Identités",
-    "agency": "Initiatives", "goals": "Buts", "projects": "Projets",
+    "agency": "Initiatives", "goals": "Buts",
     "kernel": "Noyau", "presence": "Présence", "expression": "Expression",
     "runtime": "Moteur", "place": "Où elle est (sa chambre)",
     "world": "Son monde et son corps", "shares": "Fichiers envoyés", "attachments": "Pièces reçues",
@@ -153,16 +151,13 @@ SECTION_LABELS: dict[str, str] = _named("sections", {
     "absence": "Son absence (serveur arrêté, de quand à quand)",
     "yesterday": "Son fil d'hier (journal)", "dream": "Son rêve de la nuit", "style": "Sa façon de parler",
     "about_person": "Ce qu'elle sait de la personne", "step": "Ce à quoi elle travaille",
-    "subject": "Le sujet de l'initiative", "goals": "Ses buts en cours", "project": "Ce projet",
-    "project_share": "Un projet à partager", "projects": "Ses projets",
+    "subject": "Le sujet de l'initiative", "goals": "Ses buts en cours",
     # ADR 0033, 0034, 0036
     "life": "Ce qui se passe dans la vie de la personne",
     "ahead": "Ce qui vient : le monde, et ce qu'elle vivra à travers quelqu'un",
     "learned": "Ce qu'elle a appris en lisant", "acquainted": "Les gens qu'on nomme (qu'elle connaît dans son cercle)", "veiled": "Ce qu'elle peut raconter sans nommer personne", "matter": "Ce dont elle pourrait parler",
     "noticed": "Ce qu'elle a remarqué", "habits": "Ce qu'elle s'entend répéter", "answer": "Sa réponse (le dernier rappel)",
     "step_origin": "Ce qui a fait naître le but",
-    "project_network": "Ce que le réseau a rendu",
-    "project_answer": "La réponse à sa demande d'aide (un projet)",
     # ADR 0047
     "greeting_tone": "Ses petits mots pour saluer (sa persona)",
     # ADR 0046
@@ -173,25 +168,7 @@ SECTION_LABELS: dict[str, str] = _named("sections", {
     "form": "Comment elle écrit ici (les codes de son autrice)",
     # ADR 0062
     "sent_files": "Ce qu'elle lui a déjà envoyé (fichiers)", "dessins": "Ses dessins pour la personne",
-    # ADR 0257
-    "project_links": "Ce que ce projet lit des autres projets",
-    # ADR 0265
-    "project_stirs": "Ce qui amène cette exécution (ce qui a déclenché son objectif)",
-    "project_items": "Le registre du projet (ses tickets, ses listes de suivi)",
-    # ADR 0289
-    "project_docs": "La documentation de son projet, et celle des projets qu'il lit quand le lien la donne",
-    # ADR 0270
-    "project_tickets": "Les tickets à traiter (leur étape, ce qui est attendu d'elle), ou le ticket de son objectif",
-    "project_pull": "La branche où elle travaille, la pull request de son objectif et ses vérifications (ce que "
-                    "l'hôte en dit, cité)",
-    # ADR 0276
-    "review": "Ce qu'une relecture indépendante juge (la demande, le but, l'objectif, son critère, ses jalons)",
-    "review_said": "Ce que l'exécution relue a écrit de ses jalons (son dire, cité à une relecture indépendante)",
-    "review_diff": "Le diff du commit qu'une relecture indépendante relit (une donnée, citée)",
-    "project_review": "Les constats de la relecture qui a rouvert son objectif (le dire d'une autre exécution, "
-                      "cité)",
     # ADR 0271
-    "project_asks": "Ses demandes aux autres projets (où chacune en est)",
     "step_exchange": "L'échange d'où vient sa réflexion", "step_life": "Ce qui se passe dans la vie de la personne "
     "(sa réflexion)",
     # ADR 0068
@@ -207,8 +184,7 @@ REASON_LABELS: dict[str, str] = _named("reasons", {
     "comfort": "Réconforter", "recontact": "Reprendre contact après un silence", "work": "Avancer sur un but",
     "remind": "Rappeler ce qu'on lui a demandé", "share": "Partager où en est un but",
     "drawing_ready": "Montrer un dessin prêt", "drawing_failed": "Dire qu'un dessin n'a pas pu se faire",
-    "run": "Travailler sur un projet", "project_share": "Partager où en est un projet",
-    "second_thoughts": "Elle s'est ravisée", "project_need": "Demander un coup de main pour un projet", "project_plan": "Dire son plan à qui a demandé un projet",
+    "second_thoughts": "Elle s'est ravisée",
     "keep_promise": "Tenir une promesse au moment dit", "cheer": "Encourager avant un moment important",
     "celebrate": "Souhaiter ce qui se fête (un anniversaire), le jour même",
     "remembrance": "Faire signe à une proche, le jour où revient la date d'un deuil",
@@ -221,7 +197,7 @@ REASON_LABELS: dict[str, str] = _named("reasons", {
 VETO_LABELS: dict[str, str] = _named("vetoes", {
     "asleep": "Elle dort", "waking": "Elle vient de se réveiller", "woken_at_night": "Réveillée en pleine nuit",
     "daily_cap": "Budget d'initiatives du jour épuisé",
-    "unanswered": "Sa dernière initiative est restée sans réponse", "run_cap": "Assez d'exécutions pour l'heure",
+    "unanswered": "Sa dernière initiative est restée sans réponse",
     "step_cap": "Assez de séances de travail pour l'heure",
     "awaiting_reply": "Elle attend sa réponse (elle a écrit en dernier)", "farewell": "Ils viennent de se dire au revoir", "changed_mind": "Elle s'est ravisée", "hesitating": "Elle hésite encore (ses derniers essais ont fini en silence)",
     "composing": "La personne est en train de lui écrire",
@@ -247,15 +223,7 @@ PROCESS_LABELS: dict[str, str] = _named("processes", {
     # ADR 0139
     "self.character": "Écrire son caractère",
     "self.journal": "Tenir son journal", "self.dream": "Rêver", "self.reflect": "Voir ce qui la passionne", "social.profile": "Comprendre les gens",
-    "goals.seed": "Se proposer des buts", "goals.tend": "Suivre ses buts", "projects.tend": "Suivre ses projets",
-    "projects.apps": "Réparer les apps de ses projets",
-    "projects.views": "Retirer les vues d'atelier qu'un projet n'a plus le droit de lire",
-    "projects.stirs": "Juger ce qui déclenche un objectif (un commit d'un projet lu, un signal d'app)",
-    "projects.tickets": "Faire naître « Traiter les tickets », et suivre l'objectif né d'un ticket",
-    "projects.remote": "Pousser et récupérer les dépôts",
-    "projects.pulls": "Proposer la pull request d'un travail conclu, la relire chez l'hôte avec ses vérifications",
-    "projects.issues": "Tenir les issues pour le reflet des tickets : ce qui part, et ce que l'hôte en dit",
-    "projects.reviews": "Demander la relecture indépendante d'un travail conclu, hors des pull requests",
+    "goals.seed": "Se proposer des buts", "goals.tend": "Suivre ses buts",
     "memory.promises": "Tenir ou laisser filer ses promesses", "self.wake": "Se réveiller avec sa nuit",
     "social.reciprocity": "Remarquer qui écrit en premier",
     "social.bonds": "Remarquer qu'un lien a changé",
@@ -321,51 +289,10 @@ EVENT_LABELS: dict[str, str] = _named("events", {
     "goals.reframed": "Un but recadré", "goals.reopened": "Un but rouvert", "goals.resumed": "Un but repris",
     "goals.step_reported": "Une séance de travail rendue", "goals.task_added": "Une tâche ajoutée",
     "goals.task_changed": "Une tâche modifiée", "goals.task_removed": "Une tâche retirée",
-    "projects.amended": "Un projet modifié", "projects.archived": "Un projet archivé",
-    "projects.created": "Un projet créé", "projects.decided": "Une décision technique",
-    "projects.decision_changed": "Une décision technique revue", "projects.deposited": "Un fichier déposé",
-    "projects.noted": "Une note sur un projet", "projects.nudged": "Un projet relancé",
-    "projects.objective_added": "Un objectif ajouté", "projects.objective_changed": "Un objectif modifié",
-    "projects.objective_closed": "Un objectif clos", "projects.paused": "Un projet en pause",
-    "projects.reframed": "Un projet recadré", "projects.remote_requested": "Un échange avec le dépôt distant demandé",
-    "projects.pull_seen": "Ce que l'hôte dit d'une pull request (ouverte, fusionnée, fermée, changements demandés)",
-    "projects.checks_seen": "Ce que l'hôte dit des vérifications du commit d'une pull request",
-    "projects.base_seen": "La base d'un atelier, relue après une récupération (ce qu'un projet lecteur en voit)",
-    "projects.merge_asked": "Une personne demande la fusion d'une pull request, au commit qu'elle a lu",
-    "projects.merge_answered": "Ce que l'hôte a répondu à une fusion demandée (fusionnée, ou pourquoi non)",
-    "projects.decision_revised": "Les textes d'une décision technique modifiés par une personne",
-    "projects.pull_write_asked": "Une personne écrit chez l'hôte sur une pull request (son titre, son texte, un "
-                                 "commentaire)",
-    "projects.pull_write_answered": "Ce que l'hôte a répondu à ce qu'une personne a écrit sur une pull request",
-    "projects.issue_asked": "La publication d'un ticket ou d'une note chez l'hôte demandée",
-    "projects.review_asked": "Une relecture indépendante demandée pour le commit d'un objectif",
-    "projects.reviewed": "Le verdict d'une relecture indépendante (bon, ou ses constats)",
-    "projects.restored": "Un projet restauré", "projects.resumed": "Un projet repris",
-    "projects.run_reported": "Une exécution rendue",
-    "projects.access_set": "Les accès d'un projet réglés",
-    "projects.steer_asked": "Une demande de pilotage d'un projet, sur ton accord",
     "memory.event_noted": "Un événement de la vie de quelqu'un, noté", "body.roused": "Réveillée par un message",
     "body.waited": "Un message attend son réveil", "attention.touched": "Une pensée effleurée par un message",
     "self.woke_with": "Ce qu'elle emporte de sa nuit", "self.touched": "Touchée par ce qu'on lui a dit",
     "self.interest_born": "Un intérêt est né", "self.reflected": "Elle a réfléchi à ce qui la passionne",
-    "projects.network_queued": "Une commande réseau mise en file (après l'exécution)",
-    "projects.answered": "Une réponse à sa demande d'aide sur un projet",
-    "projects.plan_proposed": "Son plan pour un projet (écrit, ou revu)",
-    "projects.plan_answered": "Une réponse à son plan (validé, ou à revoir)",
-    "projects.links_set": "Ce qu'un projet lit des autres projets, réglé",
-    "projects.stirred": "Ce qui vient d'arriver a déclenché des objectifs (ou aucun)",
-    "projects.list_set": "Une liste de suivi créée ou réglée (un projet)",
-    "projects.item_added": "Un élément ajouté à une liste (un ticket ouvert)",
-    "projects.item_changed": "Un élément d'une liste changé (un ticket accepté, fermé)",
-    "projects.item_noted": "Une note dans le fil d'un élément",
-    # sa documentation (ADR 0289), un espace à part de son dépôt
-    "projects.doc_written": "Une version de plus d'une page de la documentation d'un projet",
-    "projects.doc_moved": "Une page de documentation renommée ou déplacée",
-    "projects.doc_removed": "Une page de documentation supprimée, avec ses versions",
-    "projects.doc_image_added": "Une image de plus dans la documentation d'un projet",
-    "projects.doc_image_removed": "Une image retirée de la documentation d'un projet",
-    "projects.milestone_added": "Un jalon posé sur un objectif",
-    "projects.milestone_changed": "Un jalon révisé, dit prêt, refusé, atteint ou retiré",
     "social.one_sided": "C'est presque toujours elle qui écrit",
     "social.bond_shifted": "Un lien qui a changé (elle l'a remarqué)",
     "social.bond_noted": "Un lien relevé sans le vivre (mise en service, proximité fixée, propriétaire)",
@@ -402,33 +329,8 @@ EFFECT_LABELS: dict[str, tuple[str, str, str]] = _named("effects", {
                                 "une action qui ne demande pas d'accord : elle part dès qu'elle est décidée"),
     "runtime:effect.resolved": ("agit", "Une action que tu as autorisée",
                                 "elle part après ton accord : un mail, une réponse Teams, un git push…"),
-    "projects:effect.executed": ("agit", "Un pilotage de projet accepté",
-                                 "la demande de quelqu'un sur un projet s'écrit, à son nom, après ton accord"),
     "shares:shares.expired": ("range", "Un fichier envoyé expire", "ses octets sont effacés"),
     "attachments:attachments.expired": ("range", "Une pièce reçue expire", "ses octets sont effacés"),
-    # le ménage des vues d'atelier (ADR 0260) : le même geste, relu sur l'état courant, après quatre événements
-    "projects:projects.links_set": ("range", "Ce que lit un projet change",
-                                    "les vues d'atelier qu'aucun lien n'ouvre plus sont supprimées"),
-    "projects:projects.access_set": ("range", "Les accès d'un projet changent",
-                                     "les vues de son atelier que ses lignes ne donnent plus sont supprimées"),
-    "projects:projects.archived": ("range", "Un projet est archivé",
-                                   "les vues qu'il avait, et celles que d'autres avaient de lui, sont supprimées"),
-    "projects:projects.reframed": ("range", "Un projet change de propriétaire",
-                                   "les vues d'atelier que ce changement ferme sont supprimées"),
-    # la copie de commit qu'une relecture indépendante lisait (ADR 0277) : effacée à la fin de son exécution
-    "projects:episode.ended": ("range", "Une relecture de projet se termine",
-                               "la copie du commit qu'elle relisait est effacée"),
-    # la fusion d'une pull request (ADR 0288) : le geste d'une personne, jamais le sien
-    # une image retirée de la documentation d'un projet (ADR 0289)
-    "projects:projects.doc_image_removed": ("range", "Une image de documentation retirée",
-                                            "ses octets sont effacés"),
-    # un ajout que l'espace n'a pas gardé (un nom pris au même instant, une borne atteinte) ne laisse pas ses octets
-    "projects:projects.doc_image_added": ("range", "Une image de documentation ajoutée",
-                                          "si l'espace ne l'a pas gardée, ses octets sont effacés"),
-    "projects:projects.merge_asked": ("agit", "Une fusion demandée par une personne",
-                                      "la pull request est fusionnée chez l'hôte, au commit que la personne a lu"),
-    "projects:projects.pull_write_asked": ("agit", "Ce qu'une personne écrit sur une pull request",
-                                           "son titre, son texte ou un commentaire signé partent chez l'hôte"),
 })
 #: Les familles des effets, dans l'ordre de la page ; un effet sans libellé se range avec le reste
 #: (``names.OTHER_EFFECTS``).
@@ -439,19 +341,12 @@ EFFECT_FAMILIES: tuple[tuple[str, str], ...] = (
 #: Les familles d'outils (leurs lots) qui ne se nomment pas comme leur faculté ; « préfixe.* » : les lots qu'une
 #: source ajoute (un par serveur MCP branché, un par app), nommés par ce qui suit le préfixe.
 BUNDLE_LABELS: dict[str, str] = _named("bundles", {
-    "attention": "Ses pensées", "self": "Son journal", "social": "Qui lui parle", "workshop": "L'atelier d'un projet",
-    "project_review": "Relire le travail d'un projet",
+    "attention": "Ses pensées", "self": "Son journal", "social": "Qui lui parle",
 })
 
 #: Le nom court de chaque capacité : ce qu'une ligne ou une puce de « À valider » et l'historique en disent, sans couper
 #: sa phrase. Celle-ci reste sa description, au survol et dans l'en-tête de la demande ouverte.
-CAPABILITY_LABELS: dict[str, str] = _named("capabilities", {
-    "projects.networked": "Commande réseau", "projects.push": "Push git", "projects.pull": "Pull git",
-    "projects.pull_request": "Pull request",
-    "projects.issue": "Issue publiée", "projects.issue_state": "État d'une issue",
-    "projects.issue_note": "Note publiée",
-    "projects.steer": "Pilotage de projet",
-})
+CAPABILITY_LABELS: dict[str, str] = _named("capabilities", {})
 
 #: Les enrichisseurs, nommés par ce qu'ils rassemblent pour le prompt avant qu'il s'écrive (l'onglet Prompt d'un
 #: épisode, « enrichissements »).
@@ -464,14 +359,8 @@ ENRICHER_LABELS: dict[str, str] = _named("enrichers", {
     "passions": "Ses intérêts vécus", "night": "Sa nuit (son fil d'hier, son rêve)",
     "thoughts": "Ce qui lui trotte dans la tête", "matter": "Ce dont elle pourrait parler",
     "learned": "Ce qu'elle a appris en lisant", "goals": "Ses buts en cours",
-    "goals_context": "D'où vient le but, et la vie de la personne", "projects": "Ses projets",
-    "projects_tree": "L'arbre de l'atelier d'un projet", "projects_apps": "Ce qui n'a pas marché pour ses apps",
-    "projects_views": "Les vues des ateliers que son projet lit",
-    "projects_items": "Le registre de son projet (ce qui a bougé, ses éléments ouverts)",
-    "projects_tickets": "Les tickets que regarde son exécution (entre ses mains, ou celui de son objectif)",
-    "projects_review": "Ce qu'une relecture indépendante a sous les yeux (ses textes, le diff du commit relu)",
-    "projects_asks": "Les demandes de son projet aux projets qu'il lit (où chacune en est)",
-    "projects_answer": "La réponse à sa demande d'aide (un projet)", "sent_files": "Les fichiers qu'elle a envoyés",
+    "goals_context": "D'où vient le but, et la vie de la personne",
+    "sent_files": "Les fichiers qu'elle a envoyés",
     "dessins": "Ses dessins",
 })
 

@@ -7,8 +7,6 @@ inscrit dans sa part de la console (``ConsolePart.overviews``, ADR 0310)."""
 from __future__ import annotations
 
 from mika.app.domains import DOMAINS, part
-from mika.app.domains.projects.console import subject as project_fiche
-from mika.app.domains.projects.console import tabs as projects
 from mika.app.handmade.subjects import goal as goal_fiche
 from mika.app.handmade.subjects import handle as handle_fiche
 from mika.app.handmade.tabs import (
@@ -34,7 +32,6 @@ PARTS = tuple(part(d.console, "CONSOLE") for d in DOMAINS if d.console is not No
 #: celles des domaines
 OVERVIEWS: dict[str, Overview] = {
     handle_fiche.KIND: handle_fiche.HandleOverview(),
-    project_fiche.KIND: project_fiche.ProjectFiche(),
     goal_fiche.KIND: goal_fiche.GoalFiche(),
     **{kind: overview for console in PARTS for kind, overview in console.overviews.items()},
 }
@@ -48,10 +45,9 @@ DRAWN: dict[str, Drawn] = {
     **people.TABS,
     **identities.TABS,
     **threads.TABS,
-    # Activité : décisions, buts, projets
+    # Activité : décisions, buts
     **decisions.TABS,
     **goals.TABS,
-    **projects.TABS,
     # Outils
     **tools.TABS,
     # Système : chaque page à part (des actions dans leurs lignes et leurs panneaux)

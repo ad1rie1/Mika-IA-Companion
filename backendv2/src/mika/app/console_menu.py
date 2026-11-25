@@ -68,7 +68,7 @@ MENU = (
         MenuLink("Identités", "identites", hint="Par où chacun lui parle, qui est qui"),
     ), short="Échanges", question="Qui connaît-elle, qu'a-t-on dit ?"),
     MenuGroup("Activité", "activity", (
-        MenuLink("Projets", "projets", hint="Ce qu'elle mène, pas à pas"),
+        _link("projects"),  # ses projets
         MenuLink("Buts et rappels", "buts", hint="Ce qu'elle veut faire, et quand"),
         MenuLink("Décisions", "decisions", hint="Pourquoi elle parle ou se tait"),
     ), question="Que fait-elle, pourquoi parle-t-elle ou se tait-elle ?"),

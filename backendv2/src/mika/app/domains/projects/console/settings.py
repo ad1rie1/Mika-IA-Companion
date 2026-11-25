@@ -1,4 +1,5 @@
-"""Réglages › Connexions extérieures : ses dépôts Git."""
+"""Sa rubrique de réglages (ADR 0183, 0197, 0310) : Connexions › Dépôts Git — le jeton avec lequel leurs ateliers
+poussent vers leurs dépôts distants."""
 
 from __future__ import annotations
 
@@ -7,6 +8,7 @@ from typing import TYPE_CHECKING, Annotated
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from mika.app.domains.projects.settings import ProjectsSettings
 from mika.app.settings_sections.common import tolerant
 from mika.inspector.catalog import SettingsPage, SettingsSection
 from mika.inspector.ui import PREFIX
@@ -54,7 +56,7 @@ class GitSettings(BaseModel):
 
 
 def sections(live: Live) -> tuple[SettingsSection, ...]:
-    settings = live.settings.named("projects")  # le jeton des dépôts de ses projets (``ProjectsSettings``)
+    settings = live.settings.of(ProjectsSettings)
 
     def git() -> GitSettings:
         got = settings.git()

@@ -75,7 +75,6 @@ STILL: dict[str, set[str]] = {
     "cli/models.py": {"tools"},
     "handmade/approval_sources.py": {"agenda", "mail", "phone", "teams", "tools"},
     "handmade/directory.py": {"contacts"},
-    "handmade/pages.py": {"projects"},
     "handmade/person/__init__.py": {"agenda", "maps", "projects", "teams", "tools"},
     "handmade/person/agendas.py": {"agenda"},
     "handmade/person/identifies.py": {"contacts"},
