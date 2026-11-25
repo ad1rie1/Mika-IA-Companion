@@ -12,8 +12,7 @@ import { mikaAvatar } from "../../mika/face";
 import { $, $$, h } from "../../shell/dom";
 import { closeModal, openMenu, openModal } from "../../shell/float";
 import { ico } from "../../shell/icons";
-import { bindRecipients, readRecipients } from "../mail/compose";
-import { chip } from "../mail/markup";
+import { bindRecipients, chip, readRecipients } from "../../shared/recipients";
 import { addDays, hm, localInput, shortDay } from "./dates";
 import {
   alertMinutes,

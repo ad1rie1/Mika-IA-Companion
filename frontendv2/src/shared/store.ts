@@ -15,24 +15,34 @@ import { fetchPeople, fetchShares } from "../api/shares";
 import type { Live, Topic } from "../live/live";
 import { Cached, CachedMap } from "./kit";
 
-export const me = new Cached(fetchMe, 30_000);
-export const boxes = new Cached(fetchBoxes, 15_000);
-export const boxSettings = new CachedMap(fetchBox, 10_000);
-export const teamsAccounts = new Cached(fetchTeamsAccounts, 15_000);
-export const teamsSettings = new CachedMap(fetchTeamsAccount, 10_000);
-export const phones = new Cached(fetchPhones, 15_000);
-export const position = new Cached(fetchPosition, 15_000);
-export const services = new Cached(fetchServices, 10_000);
-export const shares = new Cached(fetchShares, 15_000);
-export const people = new Cached(fetchPeople, 60_000);
-export const rights = new Cached(fetchRights, 20_000);
-/** Ses agendas et ses comptes d'agenda (ADR 0309) : l'Agenda, Paramètres › Agendas et Outils › Droits les partagent. */
-export const agendaCalendars = new Cached(fetchCalendars, 20_000);
-export const agendaAccounts = new Cached(fetchAccounts, 15_000);
-/** Le tableau de droits de chacun de ses agendas (Outils › Droits le règle, Paramètres › Agendas le résume). */
-export const agendaRights = new CachedMap(fetchAgendaRights, 20_000);
-
 type Copy = Cached<unknown> | CachedMap<unknown>;
+
+/** Toutes les copies de ce module, dans l'ordre où elles naissent : chaque ouverture de la connexion les invalide. */
+const COPIES: Copy[] = [];
+
+/** Une copie partagée, inscrite à sa création parmi celles que la resynchronisation invalide (`store.test.ts` échoue
+ *  sur une copie exportée qui ne l'est pas). */
+function shared<C extends Copy>(copy: C): C {
+  COPIES.push(copy);
+  return copy;
+}
+
+export const me = shared(new Cached(fetchMe, 30_000));
+export const boxes = shared(new Cached(fetchBoxes, 15_000));
+export const boxSettings = shared(new CachedMap(fetchBox, 10_000));
+export const teamsAccounts = shared(new Cached(fetchTeamsAccounts, 15_000));
+export const teamsSettings = shared(new CachedMap(fetchTeamsAccount, 10_000));
+export const phones = shared(new Cached(fetchPhones, 15_000));
+export const position = shared(new Cached(fetchPosition, 15_000));
+export const services = shared(new Cached(fetchServices, 10_000));
+export const shares = shared(new Cached(fetchShares, 15_000));
+export const people = shared(new Cached(fetchPeople, 60_000));
+export const rights = shared(new Cached(fetchRights, 20_000));
+/** Ses agendas et ses comptes d'agenda (ADR 0309) : l'Agenda, Paramètres › Agendas et Outils › Droits les partagent. */
+export const agendaCalendars = shared(new Cached(fetchCalendars, 20_000));
+export const agendaAccounts = shared(new Cached(fetchAccounts, 15_000));
+/** Le tableau de droits de chacun de ses agendas (Outils › Droits le règle, Paramètres › Agendas le résume). */
+export const agendaRights = shared(new CachedMap(fetchAgendaRights, 20_000));
 
 /**
  * Ce que chaque sujet du direct rend périmé ici (`protocole-moi.md`, § 2 bis) : `settings`, ce que règle Paramètres
@@ -49,8 +59,9 @@ export const STALE_ON: Readonly<Partial<Record<Topic, readonly Copy[]>>> = {
   agenda: [agendaCalendars, agendaAccounts, agendaRights, shares],
 };
 
-/** Le direct : chaque sujet invalide ses copies ; chaque ouverture de la connexion, toutes (rien n'est rattrapé). À
- *  brancher avant les écrans, pour qu'une lecture qu'ils lancent sur le même sujet reparte bien du serveur. */
+/** Le direct : chaque sujet invalide ses copies ; chaque ouverture de la connexion, toutes (`COPIES` : rien n'est
+ *  rattrapé). À brancher avant les écrans, pour qu'une lecture qu'ils lancent sur le même sujet reparte bien du
+ *  serveur. */
 export function followChanges(service: Live): void {
   for (const [topic, copies] of Object.entries(STALE_ON) as [Topic, readonly Copy[]][]) {
     service.onChange(topic, () => {
@@ -58,6 +69,6 @@ export function followChanges(service: Live): void {
     });
   }
   service.onResync(() => {
-    for (const c of [me, boxes, boxSettings, teamsAccounts, teamsSettings, phones, position, services, shares, people, rights, agendaCalendars, agendaAccounts, agendaRights]) c.invalidate();
+    for (const c of COPIES) c.invalidate();
   });
 }

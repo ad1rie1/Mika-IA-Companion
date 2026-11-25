@@ -1,10 +1,11 @@
 /**
  * Les petites formes pures de Teams : l'état d'une réponse de Mika en mots, son mode, les repères de jour du fil, la
- * suite d'un même auteur, une mention mise en valeur, qui a écrit un message. Sans DOM : tout se teste.
+ * suite d'un même auteur, une mention mise en valeur, qui a écrit un message, depuis quand (le dernier lot de
+ * l'extension, son dernier signe). Sans DOM : tout se teste.
  */
 import { h, norm } from "../../shell/dom";
 import type { ConversationKind, OwnPending, Reply, ReplyMode, ReplyState, TeamsAccount, TeamsMessage, TeamsReaction, Thread } from "../../api/teams";
-import { clock } from "../chat/markup";
+import { clock } from "../../shared/dates";
 import { ofName } from "../../shared/names";
 
 /** Une réponse encore en chemin (une autre ne se prépare pas dans la même conversation). */
@@ -356,4 +357,18 @@ export function fromHer(m: Pick<TeamsMessage, "own" | "text">, replies: readonly
 export function withoutSent(value: string, sent: string): string | null {
   const lead = value.trimStart();
   return sent && lead.startsWith(sent) ? lead.slice(sent.length).trimStart() : null;
+}
+
+// ── Depuis quand ──────────────────────────────────────────────────────
+
+/** « à l'instant », « il y a 3 min », « il y a 2 h », « il y a 4 j ». */
+export function ago(ms: number, now: number): string {
+  if (!ms) return "jamais";
+  const s = Math.max(0, Math.round((now - ms) / 1000));
+  if (s < 45) return "à l'instant";
+  const min = Math.round(s / 60);
+  if (min < 60) return `il y a ${min} min`;
+  const hours = Math.round(min / 60);
+  if (hours < 24) return `il y a ${hours} h`;
+  return `il y a ${Math.round(hours / 24)} j`;
 }

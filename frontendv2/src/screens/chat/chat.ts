@@ -56,6 +56,7 @@ import { attributionText, miniCard, pendingMini } from "../../map/cards";
 import { mapInfo } from "../../map/info";
 import { MiniMaps, slotKey } from "../../map/minis";
 import { mapNotes, sameMapNotes, type MapNote } from "../../map/notes";
+import { dayAndClock } from "../../shared/dates";
 import { read, write } from "../../shared/storage";
 import { onTheme } from "../../shell/theme";
 import { $, h, norm, on } from "../../shell/dom";
@@ -68,7 +69,7 @@ import { facetHtml, facetsOf, promiseHtml, statusLine, type LinkState } from "..
 import { ApprovalCards } from "./approvals";
 import { ACCEPTED_TYPES, ChatComposer, MAX_MESSAGE_CHARS } from "./composer";
 import { mergeOlder, mergeSeam, oldestLoaded, UNBOUNDED } from "./older";
-import { composerMarkup, dayAndClock, filesTable, messageKey, threadMarkup } from "./markup";
+import { composerMarkup, filesTable, messageKey, threadMarkup } from "./markup";
 import { WorkStrands } from "./strands";
 
 /**

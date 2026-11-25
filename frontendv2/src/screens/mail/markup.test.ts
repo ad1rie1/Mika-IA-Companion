@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { MailBox, MailDraft, MailFull, MailRow, SentMail } from "../../api/mail";
-import { caps } from "./format";
-import { boxesPane, boxViews, composeForm, countSpan, draftRow, draftState, folderView, inlineReply, listFilters, pieceChips, listFoot, listHead, listHolds, mailRow, moveTargets, parseView, readerDraft, readerMail, readerTidy, readerWork, sentRow, correctButton, CORRECT_OFF, viewHolds, viewKey, type ReaderView, type RowView, type Shown } from "./markup";
+import { CORRECT_OFF } from "../../shared/compose";
+import { caps } from "../../shared/levels";
+import { boxesPane, boxViews, composeForm, draftRow, draftState, folderView, inlineReply, listFilters, pieceChips, listFoot, listHead, listHolds, mailRow, moveTargets, parseView, readerDraft, readerMail, readerTidy, readerWork, sentRow, viewHolds, viewKey, type ReaderView, type RowView, type Shown } from "./markup";
 
 const NOW = new Date(2026, 10, 4, 15, 0).getTime();
 
@@ -261,7 +262,6 @@ describe("écrire, dans les bornes de l'API", () => {
     expect(form).toContain('data-objet value="" placeholder="Objet" maxlength="200"');
     expect(form).toContain('maxlength="20000"');
     expect(form).toMatch(/data-limit="20000" hidden>/);
-    expect(countSpan("x".repeat(4000), 4000)).toContain(" full");
   });
 });
 
@@ -417,6 +417,5 @@ describe("« Corriger » dans la réponse en place (ADR 0307)", () => {
     const off = inlineReply(reply, null, true, false);
     expect(off).toContain('data-act="corriger"');
     expect(off).toContain(`title="${CORRECT_OFF}" disabled`);
-    expect(correctButton("data-corriger", true)).not.toContain("disabled");
   });
 });

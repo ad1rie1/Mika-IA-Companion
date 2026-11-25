@@ -7,13 +7,15 @@ import { h, initials } from "../../shell/dom";
 import { ico } from "../../shell/icons";
 import { mikaAvatar } from "../../mika/face";
 import { workLine, type Work } from "../../mika/work";
-import { clock, dayAndClock, shortWhen } from "../chat/markup";
 import { TEAMS_LIMITS, teamsImageUrl, type Conversation, type Reply, type TeamsAccount, type TeamsImage, type TeamsMessage, type TeamsQuote, type Thread } from "../../api/teams";
 import { pageHtml } from "../projets/docmd";
-import { ago, avatar, caps, firstName, levelTag, markToFill, type Caps } from "../mail/format";
-import { correctButton, countSpan } from "../mail/markup";
+import { correctButton, countSpan, markToFill } from "../../shared/compose";
+import { clock, dayAndClock, shortWhen } from "../../shared/dates";
+import { caps, levelTag, type Caps } from "../../shared/levels";
 import { ofName } from "../../shared/names";
+import { avatar, firstName } from "../../shared/people";
 import {
+  ago,
   authorLabel,
   awaits,
   cardState,

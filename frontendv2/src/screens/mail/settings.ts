@@ -37,27 +37,25 @@ import {
   subTabs,
   text,
   toggle,
-} from "./form";
-import { ago, clock, confirmModal, failureText, newNonce, personAvatar, toastFailure } from "../../shared/kit";
-import type { Host, Page } from "./page";
-import { openShareModal } from "./shares";
+} from "../../shared/settings";
+import { clock } from "../../shared/dates";
+import { ago, confirmModal, failureText, newNonce, personAvatar, toastFailure } from "../../shared/kit";
+import type { FormValue, Host, Page } from "../../shared/settings";
+import { ofName, openShareModal, shareWords } from "../../shared/sharing";
 import * as store from "../../shared/store";
-import { rulesEditor, ruleUpdate, withoutRule } from "./teams";
+import { rulesEditor, ruleUpdate, withoutRule } from "../teams/settings";
 import {
   authWords,
   boxState,
-  ofName,
   providerPreset,
   PROVIDERS,
   rangeProblems,
   secretsToRetype,
   securityFor,
-  shareWords,
   SMTP_SECURITY,
   unseenOf,
   voiceWords,
   VOICES,
-  type FormValue,
   type Provider,
 } from "./words";
 

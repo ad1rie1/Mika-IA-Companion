@@ -1,15 +1,17 @@
 /**
  * L'écran « Paramètres » (ADR 0187) : ce que la personne connectée règle pour elle-même — son compte, ses boîtes, ses
  * comptes Teams, ses téléphones, ses partages et ses services MCP —, par l'API par personne (`protocole-moi.md`
- * § 5, 7, 8 ; `app/me/sharing.py`). La forme : `maquette/ecrans/parametres.js`. Chaque onglet est une page
- * (`account.ts`, `mail.ts`…) ; ici, la lecture, le dessin, la barre d'enregistrement, les sous-onglets et les routes
- * d'action (`#parametres/mcp/+brancher` : l'onglet, puis la fenêtre que son bouton ouvre).
+ * § 5, 7, 8 ; `app/me/sharing.py`). La forme : `maquette/ecrans/parametres.js`. Chaque onglet est une page : Compte
+ * et Partages ici (`account.ts`, `shares.ts`), les autres dans l'écran de leur domaine (`../mail/settings.ts`,
+ * `../teams/settings.ts`, `../agenda/settings.ts`, `../telephone/settings.ts`, `../outils/settings.ts`), toutes
+ * dessinées avec le kit de `shared/settings.ts` ; ici, la lecture, le dessin, la barre d'enregistrement, les
+ * sous-onglets et les routes d'action (`#parametres/mcp/+brancher` : l'onglet, puis la fenêtre que son bouton ouvre).
  *
  * Le direct (ADR 0308, `protocole-moi.md` § 2 bis) relit la page ouverte : `settings` (boîtes, comptes Teams,
  * services, partages, droits), `me` (ton compte), `phone.phones`, et `mail` et `teams` (l'état d'une boîte, le dernier
  * lot d'une extension) — sauf sous une saisie pas encore enregistrée, comme après un geste. L'écran au second plan, ou
  * l'onglet caché, se relit à son retour. Seule la connexion Microsoft d'une boîte relit encore à son rythme : elle
- * attend Microsoft, que rien du journal ne dit (`mail.ts::watchSignin`).
+ * attend Microsoft, que rien du journal ne dit (`../mail/settings.ts::watchSignin`).
  */
 import { $, $$, on } from "../../shell/dom";
 import type { PaletteEntry } from "../../shell/palette";
@@ -18,19 +20,20 @@ import type { ScreenContext, ScreenDef, Shell } from "../../shell/shell";
 import { toast } from "../../shell/float";
 import { ico } from "../../shell/icons";
 import { accountPage } from "./account";
-import { agendasPage } from "./agendas";
-import { formOf, SaveBar } from "./form";
+import { agendasPage } from "../agenda/settings";
 import { Freshness, live, OneAtATime, pageShown, type Topic } from "../../live/live";
 import { ages } from "../../shell/ages";
 import { CachedMap, errorBlock, loadingBlock, type Cached } from "../../shared/kit";
-import { mailPage } from "./mail";
-import { mcpPage } from "./mcp";
-import type { Host, Page } from "./page";
-import { phonesPage } from "./phones";
+import { formOf, SaveBar, type Host, type Page } from "../../shared/settings";
+import { mailPage } from "../mail/settings";
+import { mcpPage } from "../outils/settings";
+import { phonesPage } from "../telephone/settings";
 import { sharesPage } from "./shares";
-import { teamsPage } from "./teams";
+import { teamsPage } from "../teams/settings";
 
 const ID = "parametres";
+/** Les pages qu'il montre, dans l'ordre de ses onglets : la liste est écrite ici, chacune importée de l'écran de son
+ *  domaine (Compte et Partages sont à lui). */
 const PAGES: Page[] = [accountPage, mailPage, teamsPage, agendasPage, phonesPage, sharesPage, mcpPage];
 /**
  * Les routes d'action, par onglet : `#parametres/<onglet>/+<geste>` ouvre l'onglet, puis la fenêtre que son bouton

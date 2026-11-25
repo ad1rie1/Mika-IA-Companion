@@ -2,7 +2,7 @@
  * Les mots d'une carte, en français : distances, durées, modes, ce qu'un trajet peut éviter et ce qu'il évite, les
  * jours d'un voyage (en long, et en court pour un menu). Purs : le chat (ses miniatures) et l'écran Carte les partagent.
  */
-/** « 14:05 » (comme `screens/chat/markup.ts::clock`). */
+/** « 14:05 » (comme `shared/dates.ts::clock`). */
 function clock(ms: number): string {
   return new Date(ms).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
 }

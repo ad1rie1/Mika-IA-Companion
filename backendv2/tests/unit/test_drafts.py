@@ -1,7 +1,7 @@
 """La marque de ce qu'elle n'a pas su, dans un brouillon : une seule, pour le courrier et pour Teams (K0-15).
 
 Un « [À COMPLÉTER » se reconnaît sous toutes ses graphies ; le client web le relit de son côté
-(``frontendv2/src/screens/mail/format.ts``), avec les mêmes exemples.
+(``frontendv2/src/shared/compose.ts``), avec les mêmes exemples.
 """
 
 from __future__ import annotations

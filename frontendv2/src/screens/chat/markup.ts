@@ -37,59 +37,14 @@ import {
 } from "@web/ui/approvals";
 import { strandLabel, type StrandInfo } from "@web/ui/strands";
 import type { ApprovalCard, SentFile, ToolUse } from "@web/types";
+import { clock, dayAndClock, shortWhen } from "../../shared/dates";
+import { plainHtml, sizeLabel } from "../../shared/text";
 import { h } from "../../shell/dom";
 import { ico, type IconName } from "../../shell/icons";
 import { mikaAvatar } from "../../mika/face";
 import { replyHash } from "../teams/format";
 
 // ── Petites formes ────────────────────────────────────────────────────
-
-/** « 14:05 ». */
-export function clock(ts: number): string {
-  if (!Number.isFinite(ts) || ts <= 0) return "";
-  return new Date(ts).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
-}
-
-const WEEKDAYS = ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."];
-const MONTHS = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."];
-
-function dayStart(ms: number): number {
-  const d = new Date(ms);
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-}
-
-/** Quand, en court, comme une liste de messagerie : « 13:31 », « hier », « lun. », « 28 oct. ». */
-export function shortWhen(ms: number, now: number): string {
-  if (!Number.isFinite(ms) || ms <= 0) return "";
-  const days = Math.round((dayStart(now) - dayStart(ms)) / 86_400_000);
-  if (days <= 0) return clock(ms);
-  if (days === 1) return "hier";
-  const d = new Date(ms);
-  if (days < 7) return WEEKDAYS[d.getDay()];
-  const label = `${d.getDate()} ${MONTHS[d.getMonth()]}`;
-  return d.getFullYear() === new Date(now).getFullYear() ? label : `${label} ${d.getFullYear()}`;
-}
-
-/** « aujourd'hui 14:05 », « hier 21:41 », « lun. 08:12 », « 28 oct. 13:31 ». */
-export function dayAndClock(ms: number, now: number): string {
-  const day = shortWhen(ms, now);
-  if (!day) return "";
-  const time = clock(ms);
-  return day === time ? `aujourd'hui ${time}` : `${day} ${time}`;
-}
-
-/** « 212 Ko », « 1,8 Mo ». */
-export function sizeLabel(bytes: number | undefined): string {
-  if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes < 0) return "";
-  if (bytes < 1024) return `${bytes} o`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} Ko`;
-  return `${(bytes / (1024 * 1024)).toLocaleString("fr-FR", { maximumFractionDigits: 1 })} Mo`;
-}
-
-/** Le texte d'une personne : échappé, ses retours à la ligne gardés. */
-export function plainHtml(text: string): string {
-  return h(text).replace(/\n/g, "<br>");
-}
 
 /**
  * Une de ses réponses ordinaires : blocs de code, code en ligne et gras (`@web/ui/inlineMarkup`), le reste

@@ -45,13 +45,17 @@ import { modalOpen, openMenu, toast, type MenuItem } from "../../shell/float";
 import { ico, type IconName } from "../../shell/icons";
 import type { PaletteEntry } from "../../shell/palette";
 import type { ScreenContext, ScreenDef, ScreenTab, Shell } from "../../shell/shell";
-import { dayAndClock } from "../chat/markup";
+import { bindCounts, canCorrect, correctField, errorText, openAsk, toFill } from "../../shared/compose";
+import { dayAndClock } from "../../shared/dates";
+import { caps, type Caps } from "../../shared/levels";
+import { parseAddresses, personName } from "../../shared/people";
+import { bindRecipients, readRecipients } from "../../shared/recipients";
 import { tickWork } from "../../mika/work";
 import { Freshness, live, names, OneAtATime, pageShown, type Changed } from "../../live/live";
 import * as store from "../../shared/store";
-import { bindCounts, bindPieces, bindRecipients, canCorrect, correctField, errorText, openAsk, openCompose, paintPieces, readRecipients, type ComposeValues } from "./compose";
+import { bindPieces, openCompose, paintPieces, type ComposeValues } from "./compose";
 import { openGone, openShows, pageShows, readerChange, viewGone } from "./live";
-import { answerable, caps, clip, deleteTargets, draftNotWaiting, keptRows, draftReply, forwardSubject, legacyContactsHash, newNonce, outgoingText, parseAddresses, personName, replySubject, replyTargets, toFill, writeToRoute, type Caps } from "./format";
+import { answerable, clip, deleteTargets, draftNotWaiting, keptRows, draftReply, forwardSubject, legacyContactsHash, newNonce, outgoingText, replySubject, replyTargets, writeToRoute } from "./format";
 import {
   boxesPane,
   boxViews,

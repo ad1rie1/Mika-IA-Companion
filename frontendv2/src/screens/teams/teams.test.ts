@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { Conversation, OwnPending, Reply, TeamsAccount, TeamsMessage, Thread } from "../../api/teams";
 import { apiUrl } from "../../api/moi";
 import { ofName } from "../../shared/names";
-import { caps, ofName as mailOfName } from "../mail/format";
+import { caps } from "../../shared/levels";
+import { ofName as mailOfName } from "../mail/format";
 import {
+  ago,
   authorLabel,
   cardState,
   dayLabel,
@@ -632,5 +634,16 @@ describe("un compte qui n'est plus à toi (ADR 0308 : son partage retiré)", () 
     expect(threadGone("anna", null)).toBe(false);
     expect(threadGone("", [])).toBe(false);
     expect(threadGone(undefined, [])).toBe(false);
+  });
+});
+
+describe("depuis quand : l'extension, son dernier lot", () => {
+  it("« il y a… »", () => {
+    const now = 1_800_000_000_000;
+    expect(ago(0, now)).toBe("jamais");
+    expect(ago(now - 10_000, now)).toBe("à l'instant");
+    expect(ago(now - 3 * 60_000, now)).toBe("il y a 3 min");
+    expect(ago(now - 2 * 3600_000, now)).toBe("il y a 2 h");
+    expect(ago(now - 3 * 86_400_000, now)).toBe("il y a 3 j");
   });
 });

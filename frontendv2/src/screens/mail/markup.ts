@@ -7,29 +7,24 @@ import { h } from "../../shell/dom";
 import { ico, type IconName } from "../../shell/icons";
 import { mikaAvatar } from "../../mika/face";
 import { workLine, type Work } from "../../mika/work";
-import { dayAndClock, shortWhen, sizeLabel } from "../chat/markup";
-import { MAIL_LIMITS, PIECE_LIMITS, type Contact, type DraftState, type MailAttachment, type MailBox, type MailDraft, type MailFolder, type MailFull, type MailRow, type MailState, type Person, type SentMail } from "../../api/mail";
+import { MAIL_LIMITS, PIECE_LIMITS, type DraftState, type MailAttachment, type MailBox, type MailDraft, type MailFolder, type MailFull, type MailRow, type MailState, type Person, type SentMail } from "../../api/mail";
+import { correctButton, countSpan, markToFill } from "../../shared/compose";
+import { dayAndClock, shortWhen } from "../../shared/dates";
+import { caps, levelTag, type Caps } from "../../shared/levels";
+import { avatar, firstName, parseAddresses, personName } from "../../shared/people";
+import { chip } from "../../shared/recipients";
+import { sizeLabel } from "../../shared/text";
 import {
-  avatar,
   bodyLead,
   boxTitle,
   answerable,
-  caps,
-  chars,
-  countLabel,
-  firstName,
   howLabel,
   triageLabel,
-  levelTag,
-  markToFill,
   ofName,
-  parseAddresses,
-  personName,
   replyTargets,
   sameAddress,
   shareSentence,
   textHtml,
-  type Caps,
   type Piece,
 } from "./format";
 
@@ -269,13 +264,6 @@ export function listHead(title: string, total: number, checked: number): string 
 
 export function listTools(q: string, placeholder: string): string {
   return `<label class="search grow">${ico("search", "sm")}<input type="search" placeholder="${h(placeholder)}" data-mq value="${h(q)}" aria-label="Chercher" maxlength="${MAIL_LIMITS.search}"></label>`;
-}
-
-/** Le compte d'un texte borné (près de son champ) : caché tant qu'il est loin de sa borne ; `paintCount` le suit.
- *  (`data-limit`, pas `data-count` : ce nom-là est celui des pastilles de la barre du haut.) */
-export function countSpan(text: string, max: number, cls = ""): string {
-  const label = countLabel(text, max);
-  return `<span class="small muted cmp-count${cls ? ` ${cls}` : ""}${chars(text) >= max ? " full" : ""}" data-limit="${max}"${label ? "" : " hidden"}>${h(label)}</span>`;
 }
 
 export function listFilters(filter: MailState): string {
@@ -586,12 +574,6 @@ export function readerEmpty(icon: IconName, title: string, text: string): string
 
 // ── Écrire ────────────────────────────────────────────────────────────
 
-/** Un destinataire en puce (son adresse dans `data-addr`). */
-export function chip(p: Person): string {
-  const name = personName(p);
-  return `<span class="chip" title="${h(p.address)}" data-addr="${h(p.address)}" data-name="${h(p.name)}">${avatar(name, "xs", p.address)}${h(name)}<button type="button" title="Retirer" data-unchip>${ico("x", "xs")}</button></span>`;
-}
-
 const RECIPIENT_LABEL = { to: "Destinataires", cc: "Copie", bcc: "Copie cachée" } as const;
 
 export function recipientField(field: "to" | "cc" | "bcc", people: readonly Person[], placeholder: string): string {
@@ -636,17 +618,6 @@ export interface InlineReply {
   filled: string;
   sending: boolean;
   error: string;
-}
-
-// ── Corriger (ADR 0307) ──────────────────────────────────────────────
-
-/** « Corriger » éteint : pourquoi (le rôle `correct` n'a pas de modèle). */
-export const CORRECT_OFF = "Aucun modèle ne corrige : un opérateur en choisit un dans Réglages › Intelligence.";
-
-/** Le bouton « Corriger » d'un champ : `attr` le désigne à son écran (`data-tm="corriger"`, `data-act="corriger"`) ;
- *  éteint sans modèle, il dit pourquoi. */
-export function correctButton(attr: string, on: boolean): string {
-  return `<button class="btn sm ghost" type="button" ${attr} title="${h(on ? "Corriger les fautes, sans changer les mots" : CORRECT_OFF)}"${on ? "" : " disabled"}>${ico("check", "sm")}<span class="lbl">Corriger</span></button>`;
 }
 
 export function inlineReply(c: InlineReply, box: BoxView | null, canPrepare: boolean, canCorrect = false): string {
@@ -704,15 +675,6 @@ export function composeForm(f: ComposeForm): string {
     ${f.quote !== null ? `<label class="small row cf-check"><input type="checkbox" data-citer${f.quote ? " checked" : ""}>Citer le mail auquel il répond</label>` : ""}
     <p class="small cf-error" data-erreur hidden></p>
   </div>`;
-}
-
-/** Les correspondants proposés sous un champ de destinataires. */
-export function suggestions(found: readonly Contact[], typed: string, sel: number): string {
-  if (!found.length) return `<div class="ac-none">Aucun contact : « ${h(typed)} » sera pris tel quel.</div>`;
-  return found
-    .map((c, k) => `<button type="button" class="ac-item${k === sel ? " on" : ""}" data-pick="${k}">${avatar(c.name || c.address, "sm", c.address)}
-      <span><b>${h(c.name || c.address)}</b><small>${h(c.address)} · ${c.received} reçu${c.received > 1 ? "s" : ""} · ${c.sent} envoyé${c.sent > 1 ? "s" : ""}</small></span></button>`)
-    .join("");
 }
 
 /** Les capacités d'une boîte (sa boîte, ou celle d'un partage). */

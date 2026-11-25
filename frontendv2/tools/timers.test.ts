@@ -41,15 +41,15 @@ const TIMEOUTS: Record<string, string> = {
   "screens/agenda/index.ts › mount": "la recherche dans tes agendas, après une pause de la saisie",
   "screens/contacts/index.ts › constructor": "la palette (Ctrl K) : une lecture, une fois, peu après le démarrage",
   "screens/contacts/index.ts › mount": "la recherche, après une pause de la saisie",
-  "screens/mail/compose.ts › bindRecipients": "les destinataires proposés, après une pause de la saisie",
   "screens/mail/mail.ts › mount": "la recherche, après une pause de la saisie",
+  "screens/mail/settings.ts › followSignin": "la connexion Microsoft d'une boîte neuve, dans sa fenêtre : son code attend Microsoft, et `save_mail_grant` ne passe pas par le journal (rien n'est poussé)",
+  "screens/mail/settings.ts › tick": "la connexion Microsoft d'une boîte : son code attend Microsoft, qui ne passe pas par le journal (rien n'est poussé)",
+  "screens/mail/settings.ts › watchSignin": "la connexion Microsoft d'une boîte : son code attend Microsoft, qui ne passe pas par le journal (rien n'est poussé)",
   "screens/outils/index.ts › constructor": "la palette (Ctrl K) : une lecture, une fois, peu après le démarrage",
   "screens/parametres/account.ts › submit": "le mot de passe changé, ses sessions fermées : la page se recharge une fois (la connexion), le temps de lire le toast",
-  "screens/parametres/mail.ts › followSignin": "la connexion Microsoft d'une boîte neuve, dans sa fenêtre : son code attend Microsoft, et `save_mail_grant` ne passe pas par le journal (rien n'est poussé)",
-  "screens/parametres/mail.ts › tick": "la connexion Microsoft d'une boîte : son code attend Microsoft, qui ne passe pas par le journal (rien n'est poussé)",
-  "screens/parametres/mail.ts › watchSignin": "la connexion Microsoft d'une boîte : son code attend Microsoft, qui ne passe pas par le journal (rien n'est poussé)",
   "screens/telephone/index.ts › constructor": "la palette (Ctrl K) : une lecture, une fois, peu après le démarrage",
   "screens/teams/teams.ts › mount": "la recherche, après une pause de la saisie",
+  "shared/recipients.ts › bindRecipients": "les destinataires proposés (un mail, les participants d'un événement), après une pause de la saisie",
 };
 
 /** Un appel qui lit : `load`, `loadList`, `refresh`, `fetchContacts`, `search`, `relive`… (le mot, puis rien ou une

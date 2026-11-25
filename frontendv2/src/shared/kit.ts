@@ -8,7 +8,7 @@ import { ApiError } from "../api/moi";
 import { h, hue, initials } from "../shell/dom";
 import { closeModal, openModal, toast } from "../shell/float";
 import { ico } from "../shell/icons";
-import { clock, shortWhen } from "../screens/chat/markup";
+import { clock } from "./dates";
 
 // ── Une lecture gardée ───────────────────────────────────────────────
 
@@ -220,8 +220,6 @@ export function remaining(until: number, now: number): string {
   const rest = minutes % 60;
   return rest ? `dans ${hours} h ${String(rest).padStart(2, "0")}` : `dans ${hours} h`;
 }
-
-export { clock, shortWhen };
 
 // ── Copier, confirmer, la clé d'un envoi ─────────────────────────────
 

@@ -13,13 +13,10 @@ import {
   cardKinds,
   composerMarkup,
   composerPlaceholder,
-  dayAndClock,
   elsewhere,
   inlineHtml,
   messageKey,
   sentFile,
-  shortWhen,
-  sizeLabel,
   filesTable,
   threadMarkup,
   typedText,
@@ -50,23 +47,6 @@ function view(messages: StoredMessage[], extra: Partial<ThreadView> = {}): Threa
 }
 
 describe("les petites formes", () => {
-  it("shortWhen : l'heure aujourd'hui, « hier », le jour de la semaine, puis la date", () => {
-    expect(shortWhen(at(4, 13, 31), NOW)).toBe("13:31");
-    expect(shortWhen(at(3, 21, 41), NOW)).toBe("hier");
-    expect(shortWhen(at(2, 9, 0), NOW)).toBe("lun.");
-    expect(shortWhen(at(28 - 31, 9, 0), NOW)).toBe("28 oct.");
-    expect(shortWhen(new Date(2025, 0, 2).getTime(), NOW)).toBe("2 janv. 2025");
-    expect(shortWhen(0, NOW)).toBe("");
-    expect(dayAndClock(at(4, 14, 5), NOW)).toBe("aujourd'hui 14:05");
-    expect(dayAndClock(at(3, 21, 41), NOW)).toBe("hier 21:41");
-  });
-
-  it("sizeLabel", () => {
-    expect(sizeLabel(212 * 1024)).toBe("212 Ko");
-    expect(sizeLabel(1.8 * 1024 * 1024)).toBe("1,8 Mo");
-    expect(sizeLabel(undefined)).toBe("");
-  });
-
   it("inlineHtml échappe tout, ne pose que le gras, le code et les blocs", () => {
     expect(inlineHtml('<img src=x onerror="alert(1)"> **oui** `a<b`')).toBe(
       '&lt;img src=x onerror=&quot;alert(1)&quot;&gt; <strong>oui</strong> <code>a&lt;b</code>',

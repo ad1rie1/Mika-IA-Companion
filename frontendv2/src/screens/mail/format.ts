@@ -1,46 +1,19 @@
 /**
- * Les petites formes pures de Mail (et de Teams, qui partage ses niveaux et ses noms) : ce qu'un niveau de partage
- * ouvre, le nom qu'on montre d'une boîte partagée, les adresses, le texte d'un mail en HTML, les « [À COMPLÉTER ».
- * Sans DOM : tout se teste.
+ * Les petites formes pures de Mail : le nom qu'on montre d'une boîte partagée, les adresses d'un en-tête, les bornes
+ * d'un envoi, le texte d'un mail en HTML. Ce que Mail partage avec Teams (ce qu'un niveau ouvre, une personne, le
+ * compte d'un texte, les « [À COMPLÉTER ») est dans `shared/`. Sans DOM : tout se teste.
  */
-import { h, hue, initials } from "../../shell/dom";
+import { h } from "../../shell/dom";
 import type { IconName } from "../../shell/icons";
 import { MAIL_LIMITS, PIECE_LIMITS, type MailBox, type MailDraft, type MailFull, type Person } from "../../api/mail";
-import { teamsPhotoUrl } from "../../api/teams";
 import { ofName } from "../../shared/names";
+import { firstName, parseAddresses } from "../../shared/people";
+import { chars, thousands } from "../../shared/text";
 
 /** « de Léa », « d'Adrien » : commun à Mail et à Teams (`shared/names.ts`), réexporté pour l'écran Mail. */
 export { ofName };
 
-// ── Les niveaux (ADR 0188) ────────────────────────────────────────────
-
-export interface Caps {
-  /** La sienne : la régler, décider des brouillons de Mika. */
-  own: boolean;
-  /** « Préremplir avec Mika » (ses brouillons attendent alors l'accord du propriétaire). */
-  prepare: boolean;
-  /** Écrire, répondre, transférer, ranger. */
-  write: boolean;
-  /** Décider de ses brouillons : le propriétaire seulement. */
-  decide: boolean;
-}
-
-/** Ce qu'un niveau ouvre : la sienne, tout ; `servir`, comme elle sauf décider ; `preparer`, préremplir ; `lire`, lire. */
-export function caps(level: string): Caps {
-  const own = level === "proprietaire";
-  const write = own || level === "servir";
-  return { own, write, prepare: write || level === "preparer", decide: own };
-}
-
-/** L'étiquette courte d'un partage (« lecture »…) ; vide pour la sienne. */
-export function levelTag(level: string): string {
-  return ({ lire: "lecture", preparer: "préparer", servir: "s'en servir" } as Record<string, string>)[level] ?? "";
-}
-
-/** Le prénom : « Adrien Moreau » → « Adrien ». */
-export function firstName(full: string): string {
-  return String(full || "").trim().split(/\s+/)[0] ?? "";
-}
+// ── Une boîte partagée (ADR 0188) ─────────────────────────────────────
 
 /** Le nom qu'on montre d'une boîte : la sienne, son nom ; partagée, « Boîte de Léa » (ADR 0188), son nom en plus si
  *  la même personne en partage plusieurs. */
@@ -63,21 +36,6 @@ export function shareSentence(level: string, owner: string): string {
 
 // ── Les personnes ─────────────────────────────────────────────────────
 
-/** Un rond d'initiales, d'une teinte stable : `<span class="av sm c3">CD</span>`. Avec `photo` (l'adresse que l'API
- *  donne d'une photo de profil Teams, ADR 0300 : `teamsPhotoUrl`), la photo par-dessus ; ses initiales restent dessous,
- *  le temps qu'elle arrive, ou si elle ne vient pas. */
-export function avatar(name: string, size = "", key = name, photo = ""): string {
-  const label = String(name || key || "?");
-  const src = teamsPhotoUrl(photo);
-  const img = src ? `<img src="${h(src)}" alt="" loading="lazy" decoding="async">` : "";
-  return `<span class="av${size ? ` ${size}` : ""} c${hue(key || label)}${src ? " photo" : ""}" title="${h(label)}">${h(initials(label.replace(/[^\p{L}\p{N}\s._-]/gu, "")) || "?")}${img}</span>`;
-}
-
-/** Le nom à montrer d'une personne : son nom, sinon son adresse. */
-export function personName(p: Person): string {
-  return p.name || p.address;
-}
-
 export function sameAddress(a: string, b: string): boolean {
   return a.trim().toLowerCase() === b.trim().toLowerCase();
 }
@@ -87,40 +45,6 @@ export function addressText(p: Person): string {
   if (!p.name || sameAddress(p.name, p.address)) return p.address;
   const name = /[,;:<>@()[\]"\\]/.test(p.name) ? `"${p.name.replace(/["\\]/g, (c) => `\\${c}`)}"` : p.name;
   return `${name} <${p.address}>`;
-}
-
-/** Les destinataires d'un en-tête : « A <a@x>, "B, C" <b@x>, c@x » ; une entrée sans @ est écartée. */
-export function parseAddresses(field: string): Person[] {
-  const out: Person[] = [];
-  let part = "";
-  let quoted = false;
-  let angle = false;
-  const flush = () => {
-    const raw = part.trim();
-    part = "";
-    if (!raw) return;
-    const m = /^(.*?)<([^<>]+)>\s*$/.exec(raw);
-    const address = (m ? m[2] : raw).trim();
-    if (!address.includes("@")) return;
-    let name = m ? m[1].trim() : "";
-    if (name.startsWith('"') && name.endsWith('"') && name.length >= 2) name = name.slice(1, -1).replace(/\\(.)/g, "$1");
-    out.push({ name, address: address.toLowerCase() });
-  };
-  for (let i = 0; i < field.length; i++) {
-    const c = field[i];
-    if (c === "\\" && quoted) {
-      part += c + (field[i + 1] ?? "");
-      i++;
-      continue;
-    }
-    if (c === '"') quoted = !quoted;
-    else if (c === "<" && !quoted) angle = true;
-    else if (c === ">" && !quoted) angle = false;
-    if ((c === "," || c === ";") && !quoted && !angle) flush();
-    else part += c;
-  }
-  flush();
-  return out;
 }
 
 /** Une liste sans doublon d'adresse, dans l'ordre. */
@@ -166,30 +90,10 @@ export function forwardSubject(subject: string): string {
 
 // ── Les bornes d'un envoi ─────────────────────────────────────────────
 
-/** Ce qu'en compte le serveur (`len` en Python) : des caractères, pas des unités UTF-16 (un emoji compte pour un). */
-export function chars(text: string): number {
-  let n = 0;
-  for (const _ of String(text ?? "")) n++;
-  return n;
-}
-
-/** « 20 000 » : les milliers séparés d'une espace fine, comme en français. */
-export function thousands(n: number): string {
-  return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
-}
-
 /** Au plus `max` caractères, terminé d'une ellipse au besoin : pour un texte qu'on n'a pas tapé (l'objet dérivé
  *  « Re: … » d'une réponse, qui sinon serait refusé sans qu'on le voie). */
 export function clip(text: string, max: number): string {
   return chars(text) <= max ? text : `${Array.from(text).slice(0, max - 1).join("")}…`;
-}
-
-/** Le compte d'un texte borné, montré quand il approche de sa borne (« 16 400 / 20 000 », comme le champ du chat) ;
- *  vide avant. */
-export function countLabel(text: string, max: number): string {
-  const n = chars(text);
-  if (n < max * 0.8) return "";
-  return `${thousands(n)} / ${thousands(max)}${n >= max ? " — la limite" : ""}`;
 }
 
 /** Les destinataires d'un en-tête dans leur borne : « Nom <adresse> » quand tout tient, sinon leurs seules adresses —
@@ -269,25 +173,6 @@ export function addPieces<T extends Piece>(current: readonly T[], picked: readon
 }
 
 // ── Le texte ──────────────────────────────────────────────────────────
-
-const TO_FILL = /\[\s*(?:a\s*)?(?:completer|remplir|preciser)\b/;
-
-function fold(text: string): string {
-  return String(text || "")
-    .normalize("NFKD")
-    .replace(/\p{M}/gu, "")
-    .toLowerCase();
-}
-
-/** Reste-t-il un « [À COMPLÉTER » (sous toutes ses graphies, comme `ports/drafts.py::to_fill`) ? */
-export function toFill(...texts: string[]): boolean {
-  return texts.some((t) => TO_FILL.test(fold(t)));
-}
-
-/** Dans un texte déjà échappé : chaque passage à compléter en rouge (`<mark class="completer">`). */
-export function markToFill(escaped: string): string {
-  return escaped.replace(/\[[^\]\n]{0,300}(?:\]|$)/gm, (m) => (toFill(m) ? `<mark class="completer">${m}</mark>` : m));
-}
 
 /** Échappé, ses adresses web en liens (un nouvel onglet, sans référent). */
 function linked(text: string): string {
@@ -393,18 +278,6 @@ export function newNonce(): string {
   const c = globalThis.crypto as Crypto | undefined;
   if (c && typeof c.randomUUID === "function") return c.randomUUID();
   return `n${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
-}
-
-/** « à l'instant », « il y a 3 min », « il y a 2 h », « il y a 4 j ». */
-export function ago(ms: number, now: number): string {
-  if (!ms) return "jamais";
-  const s = Math.max(0, Math.round((now - ms) / 1000));
-  if (s < 45) return "à l'instant";
-  const min = Math.round(s / 60);
-  if (min < 60) return `il y a ${min} min`;
-  const hours = Math.round(min / 60);
-  if (hours < 24) return `il y a ${hours} h`;
-  return `il y a ${Math.round(hours / 24)} j`;
 }
 
 // ── Ta réponse partie de son brouillon ────────────────────────────────

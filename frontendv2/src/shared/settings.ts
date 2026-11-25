@@ -5,13 +5,20 @@
  *
  * Un champ porte son nom (`name`, celui du moteur) ; un choix à boutons est un `.seg[data-seg]` (le cadre le règle
  * d'un clic et le dit par « mika:seg ») ; une ligne qui ne vaut que pour un choix porte `data-only="champ:valeur|…"`.
+ *
+ * Chaque page de réglages vit dans le dossier de l'écran de son domaine (`screens/mail/settings.ts`,
+ * `screens/teams/settings.ts`…) ; l'écran Paramètres (`screens/parametres/index.ts`) les montre et leur sert
+ * d'hôte. Ici, ce dont toutes ont besoin : les pièces d'une page, lire un formulaire, dire un refus, la barre
+ * d'enregistrement, ce qu'une page et son hôte se doivent (`Page`, `Host`), les valeurs d'un formulaire et ce
+ * qui en a changé.
  */
-import { ApiError } from "../../api/moi";
-import { $, $$, h } from "../../shell/dom";
-import { toast } from "../../shell/float";
-import { ico } from "../../shell/icons";
-import { failureText } from "../../shared/kit";
-import { changed, fieldErrors, type FormValue } from "./words";
+import { ApiError } from "../api/moi";
+import { $, $$, h } from "../shell/dom";
+import { toast } from "../shell/float";
+import { ico } from "../shell/icons";
+import type { PaletteEntry } from "../shell/palette";
+import type { Shell } from "../shell/shell";
+import { failureText, type Cached, type CachedMap } from "./kit";
 
 // ── Les pièces ───────────────────────────────────────────────────────
 
@@ -292,6 +299,65 @@ export async function savedFirst(form: HTMLElement | null, bar: SaveBar): Promis
 /** Le formulaire où un évènement est arrivé (`[data-form]`), s'il y en a un. */
 export function formOf(target: EventTarget | null): HTMLElement | null {
   return (target as Element | null)?.closest?.<HTMLElement>("[data-form]") ?? null;
+}
+
+// ── Une page et son hôte ─────────────────────────────────────────────
+
+/**
+ * Ce qu'une page de réglages (un onglet de Paramètres) donne à l'écran qui la montre : ce qu'il faut lire avant de
+ * la montrer, ce qui peut arriver après, son dessin, ses actions de barre de titre, ses gestes (`data-act`),
+ * l'enregistrement de ses formulaires. L'écran (`screens/parametres/index.ts`) s'occupe du reste : lire, redessiner,
+ * la barre d'enregistrement, les sous-onglets.
+ */
+export interface Host {
+  shell: Shell;
+  bar: SaveBar;
+  /** Le sous-onglet choisi d'une page (`fallback` tant qu'on n'en a pas choisi). */
+  sub(page: string, fallback: string): string;
+  setSub(page: string, value: string): void;
+  /** Redessiner la page ouverte, depuis ce qui est lu. */
+  repaint(): void;
+  /** Relire ces ressources (ou toutes celles de la page), puis redessiner. */
+  reload(...caches: (Cached<unknown> | CachedMap<unknown>)[]): Promise<void>;
+  go(hash: string): void;
+}
+
+export interface Page {
+  id: string;
+  /** Ce qu'il faut avoir lu pour la dessiner. */
+  needs(item: string | null): Cached<unknown>[];
+  /** Ce qui l'enrichit quand ça arrive (elle se redessine alors). */
+  extras?(item: string | null): Cached<unknown>[];
+  view(item: string | null, host: Host): string;
+  actions?(item: string | null, host: Host): string;
+  act?(name: string, el: HTMLElement, item: string | null, host: Host): void;
+  save?(form: HTMLElement, changes: Record<string, FormValue>, values: Record<string, FormValue>, item: string | null, host: Host): Promise<boolean>;
+  /** Après chaque dessin (ses formulaires y sont déjà suivis). */
+  after?(root: HTMLElement, item: string | null, host: Host): void;
+  search?(): PaletteEntry[];
+}
+
+// ── Les formulaires ──────────────────────────────────────────────────
+
+export type FormValue = string | number | boolean | string[];
+
+/** Ce qui a changé d'un formulaire : les champs dont la valeur n'est plus celle de départ. */
+export function changed(before: Record<string, FormValue>, after: Record<string, FormValue>): Record<string, FormValue> {
+  const out: Record<string, FormValue> = {};
+  for (const [k, v] of Object.entries(after)) {
+    if (JSON.stringify(v) !== JSON.stringify(before[k])) out[k] = v;
+  }
+  return out;
+}
+
+/** Les messages d'un formulaire refusé, par champ : la dernière partie du chemin (`accounts.pro.imap_port` → `imap_port`). */
+export function fieldErrors(fields: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [path, message] of Object.entries(fields)) {
+    const name = path.split(".").pop() || path;
+    out[name] = out[name] ? `${out[name]} ; ${message}` : message;
+  }
+  return out;
 }
 
 export { $, $$ };

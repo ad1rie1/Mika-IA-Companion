@@ -37,13 +37,14 @@ import { closeModal, openMenu, openModal, toast, type MenuItem } from "../../she
 import { ico } from "../../shell/icons";
 import type { PaletteEntry } from "../../shell/palette";
 import type { ScreenContext, ScreenDef, ScreenTab, Shell } from "../../shell/shell";
-import { bindCounts, canCorrect, correctField, errorText, openAsk, paintCount } from "../mail/compose";
-import { ago, chars, newNonce, thousands, toFill } from "../mail/format";
-import { dayAndClock } from "../chat/markup";
+import { bindCounts, canCorrect, correctField, errorText, openAsk, paintCount, toFill } from "../../shared/compose";
+import { dayAndClock } from "../../shared/dates";
+import { chars, thousands } from "../../shared/text";
+import { newNonce } from "../mail/format";
 import { tickWork } from "../../mika/work";
 import { Freshness, live, names, OneAtATime, pageShown, type Changed } from "../../live/live";
 import { ages } from "../../shell/ages";
-import { authorLabel, kindLabel, ownAccount, ownBubbles, sentUnder, stillSentHere, threadGone, UNDER_WAY, withoutSent, type SentHere } from "./format";
+import { ago, authorLabel, kindLabel, ownAccount, ownBubbles, sentUnder, stillSentHere, threadGone, UNDER_WAY, withoutSent, type SentHere } from "./format";
 import {
   capsOf,
   conversationRow,

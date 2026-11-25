@@ -28,11 +28,10 @@ import { closeModal, openMenu, openModal, toast } from "../../shell/float";
 import { ico, type IconName } from "../../shell/icons";
 import { ago, confirmModal, failureText, newNonce, toastFailure } from "../../shared/kit";
 import * as store from "../../shared/store";
-import { hiddenHere, setShown } from "../agenda/display";
-import { colorOf, mikaReminderWords, MIKA_REMINDERS, PALETTE, rightsSummary, withShownNames } from "../agenda/model";
-import { backLink, password, row, section, showRefusal, subTabs, text } from "./form";
-import type { Host, Page } from "./page";
-import type { FormValue } from "./words";
+import { hiddenHere, setShown } from "./display";
+import { colorOf, mikaReminderWords, MIKA_REMINDERS, PALETTE, rightsSummary, withShownNames } from "./model";
+import { backLink, password, row, section, showRefusal, subTabs, text } from "../../shared/settings";
+import type { FormValue, Host, Page } from "../../shared/settings";
 
 const TAB = "#parametres/agendas";
 const KINDS: Record<string, { long: string; icon: IconName; help: string }> = {

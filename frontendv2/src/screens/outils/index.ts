@@ -15,12 +15,12 @@ import { closeModal, openMenu, openModal } from "../../shell/float";
 import { ico } from "../../shell/icons";
 import type { PaletteEntry } from "../../shell/palette";
 import type { ScreenContext, ScreenDef, ScreenTab, Shell } from "../../shell/shell";
-import { askMika } from "../parametres/account";
-import { AG, AgendaRightsPart } from "./agendas";
+import { askMika } from "../../shared/ask";
+import { AG, AgendaRightsPart } from "../agenda/rights";
 import { Freshness, live, pageShown } from "../../live/live";
 import { errorBlock, loadingBlock } from "../../shared/kit";
 import * as store from "../../shared/store";
-import { shareWords } from "../parametres/words";
+import { shareWords } from "../../shared/sharing";
 import {
   askFor,
   canalPickMarkup,

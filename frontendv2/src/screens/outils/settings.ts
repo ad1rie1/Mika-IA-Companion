@@ -19,12 +19,12 @@ import {
 import { h } from "../../shell/dom";
 import { closeModal, openModal, toast } from "../../shell/float";
 import { ico } from "../../shell/icons";
-import { area, backLink, readForm, row, savedFirst, section, seg, showFieldErrors, showRefusal, subTabs, text, toggle } from "./form";
+import { area, backLink, readForm, row, savedFirst, section, seg, showFieldErrors, showRefusal, subTabs, text, toggle } from "../../shared/settings";
 import { confirmModal, failureText, newNonce, toastFailure } from "../../shared/kit";
-import type { Host, Page } from "./page";
-import { openShareModal } from "./shares";
+import type { FormValue, Host, Page } from "../../shared/settings";
+import { ofName, openShareModal, shareWords } from "../../shared/sharing";
 import * as store from "../../shared/store";
-import { CHOICES, headersToRetype, ofName, serviceNameProblem, servedOf, shareWords, stateWords, urlProblem, type FormValue } from "./words";
+import { CHOICES, headersToRetype, serviceNameProblem, servedOf, stateWords, urlProblem } from "./words";
 
 const TAB = "#parametres/mcp";
 /** Les bornes de l'API pour brancher un service (`app/me/mcp.py`, en caractères) : au-delà, elle refuse. */

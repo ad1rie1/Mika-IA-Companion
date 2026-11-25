@@ -9,7 +9,8 @@ import type { ReceivedService, Service } from "../../api/mcp";
 import type { Canal, Cell, Keep, Level, Moment, Resource, Rights, Rules, ToolRow } from "../../api/rights";
 import { h, norm } from "../../shell/dom";
 import { ico, type IconName } from "../../shell/icons";
-import { servedOf, shareWords, stateWords } from "../parametres/words";
+import { shareWords } from "../../shared/sharing";
+import { servedOf, stateWords } from "./words";
 
 // ── Les mots ─────────────────────────────────────────────────────────
 

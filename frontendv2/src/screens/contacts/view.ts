@@ -9,8 +9,9 @@ import type { ContactFact, ContactKind, ContactLine, ContactPlace, ContactSheet,
 import { CONTACTS_LIMITS } from "../../api/contacts";
 import { h } from "../../shell/dom";
 import { ico, type IconName } from "../../shell/icons";
-import { dayAndClock, shortWhen } from "../chat/markup";
-import { avatar, writeToHash } from "../mail/format";
+import { dayAndClock, shortWhen } from "../../shared/dates";
+import { avatar } from "../../shared/people";
+import { writeToHash } from "../mail/format";
 
 export const ID = "contacts";
 

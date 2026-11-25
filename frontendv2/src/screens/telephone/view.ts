@@ -14,8 +14,9 @@ import { mikaAvatar } from "../../mika/face";
 import { h, initials, norm } from "../../shell/dom";
 import { ico, type IconName } from "../../shell/icons";
 import type { ScreenTab } from "../../shell/shell";
-import { plainHtml } from "../chat/markup";
-import { ago, clock, dayWords, personAvatar, remaining, shortWhen } from "../../shared/kit";
+import { clock, shortWhen } from "../../shared/dates";
+import { ago, dayWords, personAvatar, remaining } from "../../shared/kit";
+import { plainHtml } from "../../shared/text";
 
 /**
  * Les onglets de l'écran. Pas de Notifications tant que l'application ne lit que les messageries : il ne ferait que

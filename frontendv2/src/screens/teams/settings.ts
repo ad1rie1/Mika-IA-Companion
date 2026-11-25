@@ -4,7 +4,7 @@
  * — montrée une seule fois à sa création, retirée d'un clic —, et les retirer. Un compte partagé avec elle se montre en
  * lecture.
  *
- * La règle d'envoi d'un compte — Teams ici, une boîte dans `mail.ts` — se dessine et s'enregistre par les mêmes pièces
+ * La règle d'envoi d'un compte — Teams ici, une boîte dans `../mail/settings.ts` — se dessine et s'enregistre par les mêmes pièces
  * (`rulesEditor`, `withoutRule`, `ruleUpdate`).
  */
 import { API_BASE } from "@web/network/api";
@@ -25,11 +25,11 @@ import {
 import { h } from "../../shell/dom";
 import { closeModal, openModal, toast } from "../../shell/float";
 import { ico } from "../../shell/icons";
-import { area, backLink, readForm, row, section, seg, select, showRefusal, subTabs, text, toggle } from "./form";
+import { area, backLink, readForm, row, section, seg, select, showRefusal, subTabs, text, toggle } from "../../shared/settings";
 import { ago, confirmModal, copyText, dateWords, failureText, newNonce, toastFailure } from "../../shared/kit";
-import type { Host, Page } from "./page";
+import type { FormValue, Host, Page } from "../../shared/settings";
 import * as store from "../../shared/store";
-import { ofName, shareWords, type FormValue } from "./words";
+import { ofName, shareWords } from "../../shared/sharing";
 
 const TAB = "#parametres/teams";
 const SUBS = [["compte", "Ton compte Teams"], ["regles", "Comment ça part"], ["extension", "L'extension"]] as const;

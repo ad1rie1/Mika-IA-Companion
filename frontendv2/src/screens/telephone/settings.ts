@@ -7,9 +7,9 @@ import { APK_URL, revokePhone, type Phone } from "../../api/phone";
 import { h } from "../../shell/dom";
 import { toast } from "../../shell/float";
 import { ico } from "../../shell/icons";
-import { row, section } from "./form";
+import { row, section } from "../../shared/settings";
 import { ago, confirmModal, copyText, dateWords, toastFailure } from "../../shared/kit";
-import type { Host, Page } from "./page";
+import type { Host, Page } from "../../shared/settings";
 import * as store from "../../shared/store";
 
 function apkCard(apk: boolean): string {

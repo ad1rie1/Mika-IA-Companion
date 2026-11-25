@@ -14,7 +14,7 @@ import { toast } from "../../shell/float";
 import { ico } from "../../shell/icons";
 import { confirmModal, toastFailure } from "../../shared/kit";
 import * as store from "../../shared/store";
-import { colorOf, ownerLine, providerShort } from "../agenda/model";
+import { colorOf, ownerLine, providerShort } from "./model";
 
 export const AG = "ag:";
 

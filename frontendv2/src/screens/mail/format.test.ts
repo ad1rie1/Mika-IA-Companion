@@ -1,49 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { ApiError } from "../../api/moi";
-import { correctedText, correctTurn, errorText, refusalText } from "./compose";
+import { parseAddresses } from "../../shared/people";
+import { chars } from "../../shared/text";
 import {
   addressText,
-  ago,
   bodyLead,
   boxTitle,
-  caps,
-  chars,
   clip,
-  countLabel,
   draftReply,
   forwardSubject,
   howLabel,
   deleteTargets,
   keptRows,
   triageLabel,
-  markToFill,
   ofName,
   outgoingText,
   addPieces,
-  parseAddresses,
   recipientsText,
   replySubject,
   replyTargets,
   textHtml,
-  thousands,
-  toFill,
 } from "./format";
-
-describe("ce qu'un niveau ouvre (ADR 0188)", () => {
-  it("la sienne : tout, décider compris", () => {
-    expect(caps("proprietaire")).toEqual({ own: true, write: true, prepare: true, decide: true });
-  });
-  it("s'en servir : écrire et ranger, jamais décider de ses brouillons", () => {
-    expect(caps("servir")).toEqual({ own: false, write: true, prepare: true, decide: false });
-  });
-  it("préparer : seulement « Préremplir »", () => {
-    expect(caps("preparer")).toEqual({ own: false, write: false, prepare: true, decide: false });
-  });
-  it("lire, ou un niveau inconnu : rien d'autre que lire", () => {
-    expect(caps("lire")).toEqual({ own: false, write: false, prepare: false, decide: false });
-    expect(caps("autre")).toEqual({ own: false, write: false, prepare: false, decide: false });
-  });
-});
 
 describe("le nom d'une boîte partagée", () => {
   it("élide devant une voyelle ou un h", () => {
@@ -63,15 +39,6 @@ describe("le nom d'une boîte partagée", () => {
 });
 
 describe("les adresses", () => {
-  it("lit un en-tête : noms, guillemets, virgules dans un nom, adresses seules", () => {
-    expect(parseAddresses('Claire Dubois <C.Dubois@lumen.fr>, "Dupré, Élodie" <elodie@exemple.fr>; marc@lumen.fr')).toEqual([
-      { name: "Claire Dubois", address: "c.dubois@lumen.fr" },
-      { name: "Dupré, Élodie", address: "elodie@exemple.fr" },
-      { name: "", address: "marc@lumen.fr" },
-    ]);
-    expect(parseAddresses("pas une adresse")).toEqual([]);
-    expect(parseAddresses("")).toEqual([]);
-  });
   it("écrit « Nom <adresse> », cite un nom qui porte une virgule", () => {
     expect(addressText({ name: "Claire Dubois", address: "c@x.fr" })).toBe("Claire Dubois <c@x.fr>");
     expect(addressText({ name: "Dupré, Élodie", address: "e@x.fr" })).toBe('"Dupré, Élodie" <e@x.fr>');
@@ -111,21 +78,6 @@ describe("répondre", () => {
   });
 });
 
-describe("« [À COMPLÉTER »", () => {
-  it("se reconnaît sous toutes ses graphies, comme ports/drafts.py::to_fill", () => {
-    expect(toFill("Nous pourrions démarrer le [À COMPLÉTER : date].")).toBe(true);
-    expect(toFill("[a completer]")).toBe(true);
-    expect(toFill("[ À remplir ]")).toBe(true);
-    expect(toFill("［À PRÉCISER］")).toBe(true); // crochets pleine chasse
-    expect(toFill("À COMPLÉTER sans crochet")).toBe(false);
-    expect(toFill("Rien à compléter ici.", "")).toBe(false);
-  });
-  it("se marque en rouge dans un texte déjà échappé, le reste intact", () => {
-    expect(markToFill("le [À COMPLÉTER : date] et [note] &amp; fin")).toBe('le <mark class="completer">[À COMPLÉTER : date]</mark> et [note] &amp; fin');
-    expect(markToFill("ouvert [À COMPLÉTER")).toBe('ouvert <mark class="completer">[À COMPLÉTER</mark>');
-  });
-});
-
 describe("le texte d'un mail", () => {
   it("des paragraphes, ses retours à la ligne, tout échappé", () => {
     expect(textHtml("Bonjour,\n\nLigne 1\nLigne <2>\n\n\nFin")).toBe("<p>Bonjour,</p><p>Ligne 1<br>Ligne &lt;2&gt;</p><p>Fin</p>");
@@ -160,14 +112,6 @@ describe("ce qu'elle en a fait", () => {
     expect(howLabel("")).toEqual({ text: "lu par elle", icon: "eye" });
     expect(howLabel("archivé")).toEqual({ text: "archivé par elle", icon: "archive" });
     expect(howLabel("corbeille").text).toBe("mis à la corbeille par elle");
-  });
-  it("« il y a… »", () => {
-    const now = 1_800_000_000_000;
-    expect(ago(0, now)).toBe("jamais");
-    expect(ago(now - 10_000, now)).toBe("à l'instant");
-    expect(ago(now - 3 * 60_000, now)).toBe("il y a 3 min");
-    expect(ago(now - 2 * 3600_000, now)).toBe("il y a 2 h");
-    expect(ago(now - 3 * 86_400_000, now)).toBe("il y a 3 j");
   });
 });
 
@@ -237,24 +181,12 @@ describe("les bornes d'un envoi : refusé plutôt que coupé (protocole-moi.md �
     expect(outgoingText({ to: team.slice(0, 1), cc: [], subject: "x", body: "😀".repeat(20_000) }).problem).toBe("");
   });
 
-  it("un objet qu'on n'a pas tapé tient dans sa borne ; le compte se montre près de la borne", () => {
+  it("un objet qu'on n'a pas tapé tient dans sa borne", () => {
     expect(clip("Re: court", 200)).toBe("Re: court");
     const clipped = clip(`Re: ${"é".repeat(300)}`, 200);
     expect(chars(clipped)).toBe(200);
     expect(clipped.endsWith("…")).toBe(true);
     expect(chars(clip("😀".repeat(300), 200))).toBe(200);
-    expect(countLabel("x".repeat(100), 20_000)).toBe("");
-    expect(countLabel("x".repeat(16_000), 20_000)).toBe("16\u202f000 / 20\u202f000");
-    expect(countLabel("x".repeat(4000), 4000)).toBe("4\u202f000 / 4\u202f000 — la limite");
-    expect(thousands(999)).toBe("999");
-    expect(thousands(1234567)).toBe("1\u202f234\u202f567");
-  });
-
-  it("un refus de borne se dit par son champ, en mots", () => {
-    expect(refusalText("« body » : 20000 caractères au plus.", { body: "20000 caractères au plus" })).toBe("Message : 20000 caractères au plus");
-    expect(refusalText("Le formulaire a des erreurs.", { to: "adresse invalide" })).toBe("Le formulaire a des erreurs. (À : adresse invalide)");
-    expect(refusalText("Introuvable.", {})).toBe("Introuvable.");
-    expect(errorText(new ApiError(400, "« to » : 300 caractères au plus.", { to: "300 caractères au plus" }))).toBe("À : 300 caractères au plus");
   });
 });
 
@@ -313,24 +245,5 @@ describe("un rangement se voit aussitôt (le serveur range ensuite)", () => {
     const leaving = new Map([["b", 4]]);
     expect(keptRows(rows, leaving, 5).map((r) => r.ref)).toEqual(["a", "b", "c"]);
     expect(leaving.size).toBe(0);
-  });
-});
-
-describe("« Corriger » (ADR 0307) : ce qu'il dit une fois fait", () => {
-  it("combien de fautes, ou aucune", () => {
-    expect(correctedText(0)).toBe("Aucune faute : ton texte reste tel quel.");
-    expect(correctedText(1)).toBe("1 faute corrigée.");
-    expect(correctedText(3)).toBe("3 fautes corrigées.");
-  });
-  it("ce qui a été écarté parce que ça touchait aux mots", () => {
-    expect(correctedText(2, 1)).toBe("2 fautes corrigées ; 1 changement écarté : il touchait aux mots.");
-    expect(correctedText(1, 3)).toBe("1 faute corrigée ; 3 changements écartés : ils touchaient aux mots.");
-    expect(correctedText(0, 4)).toBe("La correction touchait aux mots : rien n'a été changé.");
-  });
-  it("posée seulement là où on l'a demandée, sur le texte d'alors", () => {
-    expect(correctTurn("salu", "salu", true)).toBe("put");
-    expect(correctTurn("salu", "salut toi", true)).toBe("moved"); // tu as continué d'écrire
-    expect(correctTurn("salu", "salu", false)).toBe("gone"); // une autre discussion, un autre mail
-    expect(correctTurn("salu", null, true)).toBe("gone"); // la fenêtre fermée, le mail parti
   });
 });
