@@ -60,7 +60,7 @@ PACKAGES: dict[str, tuple[str, ...]] = {
 #: les modules d'``app`` qui sont à un domaine et attendent leur déménagement dans son dossier : les importer, c'est
 #: déjà le nommer. Un module déménagé sort de cette table (il n'existe plus : la garde le dit)
 TO_MOVE: dict[str, tuple[str, ...]] = {
-    "senses": ("app.handmade.tabs.senses", "app.handmade.person.senses"),
+    "senses": ("app.handmade.tabs.senses",),
     "tools": ("app.mcp_settings", "app.system_mcp", "app.lending", "app.me.mcp", "app.handmade.subjects.server",
               "app.handmade.tabs.tools"),
     "maps": ("app.me.maps", "app.handmade.person.voyages", "app.cli.maps", "app.warm_points"),
@@ -98,7 +98,7 @@ STILL: dict[str, set[str]] = {
     "handmade/approval_sources.py": {"agenda", "mail", "phone", "teams", "tools"},
     "handmade/directory.py": {"contacts"},
     "handmade/pages.py": {"agenda", "mail", "projects", "senses", "teams", "tools"},
-    "handmade/person/__init__.py": {"agenda", "maps", "projects", "senses", "teams", "tools"},
+    "handmade/person/__init__.py": {"agenda", "maps", "projects", "teams", "tools"},
     "handmade/person/agendas.py": {"agenda"},
     "handmade/person/identifies.py": {"contacts"},
     "handmade/person/senses.py": {"maps", "phone", "senses"},
