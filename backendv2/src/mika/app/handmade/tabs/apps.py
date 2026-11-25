@@ -14,8 +14,7 @@ from typing import Any
 
 from markupsafe import Markup
 
-from mika.app.handmade.tabs import Got, Line, Tab, blank, text
-from mika.app.handmade.tabs.senses import state
+from mika.app.handmade.tabs import Got, Line, Tab, blank, state, text
 
 STYLES = ("handmade/apps.css",)
 #: l'agenda d'une app, en mots

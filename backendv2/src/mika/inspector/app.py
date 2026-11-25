@@ -9,7 +9,8 @@ ligne).
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
@@ -23,7 +24,7 @@ from mika.inspector.pages import TABS, approvals, params
 from mika.inspector.pages.routes import Pages
 from mika.inspector.pages.settings_form import SettingsForms
 from mika.inspector.pages.why import why_page
-from mika.inspector.ui import PREFIX, STATIC, UI, InspectorDeps
+from mika.inspector.ui import PREFIX, UI, InspectorDeps, static_roots
 from mika.kernel.inspect import Param
 
 __all__ = ["ConsolePages", "InspectorDeps", "assemble", "routes"]
@@ -60,6 +61,18 @@ class ConsolePages:
         return why_page(self.ui, seq) if seq > 0 else None
 
 
+class ConsoleStatic(StaticFiles):
+    """Les fichiers statiques de la console, cherchés dans plusieurs dossiers sous une même adresse : celui de
+    l'inspecteur, puis ceux des dossiers de console inscrits (``ui.console_folder``, ADR 0310)."""
+
+    def __init__(self, roots: Sequence[Path]) -> None:
+        self._more = [str(root) for root in roots[1:]]
+        super().__init__(directory=roots[0])
+
+    def get_directories(self, directory: Any = None, packages: Any = None) -> list[Any]:
+        return [*super().get_directories(directory, packages), *self._more]
+
+
 def assemble(deps: InspectorDeps, *, cookie_secure: bool = False) -> tuple[list[BaseRoute], ConsolePages]:
     """Les routes de la console, et ses pages sans requête (ce que sert la console en MCP)."""
     forms = SettingsForms(deps.sections, deps.settings_tabs) if deps.settings_tabs else None
@@ -69,7 +82,7 @@ def assemble(deps: InspectorDeps, *, cookie_secure: bool = False) -> tuple[list[
     ui = UI(deps, builtins, cookie_secure=cookie_secure)
     ui.settings_forms = forms
     pages = Pages(ui)
-    return [Mount(PREFIX + "/static", StaticFiles(directory=STATIC), name="console-static"),
+    return [Mount(PREFIX + "/static", ConsoleStatic(static_roots()), name="console-static"),
             *pages.routes(), *pages.catchall()], ConsolePages(pages)
 
 

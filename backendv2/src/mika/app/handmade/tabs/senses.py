@@ -32,6 +32,7 @@ from markupsafe import Markup
 
 from mika.app.handmade import Look, person_href
 from mika.app.handmade.tabs import (
+    HEAD,
     Got,
     Line,
     Tab,
@@ -40,6 +41,7 @@ from mika.app.handmade.tabs import (
     gauge,
     number,
     pairs,
+    state,
     subpanes,
     text,
     tiles,
@@ -57,8 +59,6 @@ from mika.plugins.phone.inspect import PAGE as MESSAGES
 from mika.vocab.people import is_internal
 
 STYLES = ("handmade/sens.css",)
-#: les liens d'une page dans sa barre de titre : ses actions en boutons, ses réglages en roue
-HEAD = "handmade/sens/head.html"
 
 
 # ── Ce que partagent les onglets ──────────────────────────────────────────
@@ -68,12 +68,6 @@ def settings(got: Got, primary: Sequence[tuple[str, str]] = ()) -> Markup:
     """La barre de titre : les actions de la page (``primary``), puis les liens de sa ``Nav`` vers ses réglages."""
     gear = [(i["text"], i["href"]) for i in (got.nav() or {}).get("items", []) if i.get("href")]
     return got.draw(HEAD, primary=list(primary), gear=gear) if primary or gear else Markup("")
-
-
-def state(got: Got) -> dict[str, Any] | None:
-    """La phrase d'état de la vue : sa première note à la racine (pas celles de ses replis)."""
-    note = next((b for b in got.items if b.get("t") == "note"), None)
-    return {"text": note["text"], "tone": note.get("tone") or ""} if note else None
 
 
 def _detail_prose(line: Line) -> str:

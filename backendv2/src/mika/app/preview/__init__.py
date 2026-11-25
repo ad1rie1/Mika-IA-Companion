@@ -55,6 +55,7 @@ from mika.contracts import trips as trips_c
 from mika.faculties.attachments import file_id
 from mika.inspector.pages.journal import EPISODE_TABS
 from mika.inspector.render import PREFIX
+from mika.inspector.ui import static_roots
 from mika.kernel.events import Content, Origin
 from mika.ports.journal import JournalEvent
 from mika.ports.llm import LLMRequest, LLMResponse, Usage
@@ -71,7 +72,6 @@ CONSOLIDATION_WAIT_STEPS = 100
 ORIGIN = "http://localhost:3000"
 HOST = "http://localhost:8001"
 PASSWORD = "une-phrase-de-passe-longue"
-STATIC = Path(__file__).resolve().parents[2] / "inspector" / "static"
 #: le cadre d'un document HTML natif dans une page (ADR 0169)
 FRAME = re.compile(r'src="' + re.escape(PREFIX) + r'/document/([0-9a-f]{40})"')
 REPLIES = itertools.cycle([
@@ -314,7 +314,8 @@ def export(out: Path) -> list[str]:
     """Rend les pages dans ``out`` ; rend la liste des adresses exportées."""
     logging.getLogger("mika").setLevel(logging.ERROR)
     out.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(STATIC, out / "static", dirs_exist_ok=True)
+    for root in static_roots():  # ceux de l'inspecteur, puis ceux de chaque domaine (ADR 0310)
+        shutil.copytree(root, out / "static", dirs_exist_ok=True)
     clock = RealClock()
     sink: list[Callable[[LLMTrace], None]] = []
     # un seul fournisseur, déclaré comme un opérateur le ferait : il sert « répondre », les autres rôles y

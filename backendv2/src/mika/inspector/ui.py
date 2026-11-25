@@ -55,7 +55,7 @@ from mika.runtime.inspection import Inspection
 PREFIX = render.PREFIX
 TEMPLATES = Path(__file__).parent / "templates"
 STATIC = Path(__file__).parent / "static"
-ASSET_VERSION = "87"
+ASSET_VERSION = "88"
 
 log = logging.getLogger("mika.console")
 
@@ -307,6 +307,32 @@ class Overview:
 env = Environment(loader=FileSystemLoader(TEMPLATES), autoescape=select_autoescape(default=True),
                   trim_blocks=True, lstrip_blocks=True)
 env.globals.update(PREFIX=PREFIX, ASSET_VERSION=ASSET_VERSION)
+
+#: les dossiers de console qui s'ajoutent à celui de l'inspecteur (ADR 0310), dans l'ordre où ils se sont inscrits
+FOLDERS: list[Path] = []
+
+
+def console_folder(folder: Path) -> None:
+    """Inscrit un dossier de console : ses gabarits (``templates/``) et ses fichiers statiques (``static/``)
+    s'ajoutent à ceux de l'inspecteur, sous les mêmes noms (``handmade/reveils/reveils.html``,
+    ``handmade/reveils.css``) et aux mêmes adresses. Le paquet de console d'un domaine le fait en s'important
+    (``app/domains/<nom>/console/__init__.py``) : ses pages trouvent leurs gabarits dès qu'on peut les appeler.
+    L'inspecteur ne nomme aucun domaine : il lit les dossiers qu'on lui donne. Un même nom n'existe que dans un
+    dossier — le premier trouvé gagnerait sans bruit —, ce que ``tests/architecture/test_package_data.py`` garde."""
+    folder = Path(folder)
+    if folder not in FOLDERS:
+        FOLDERS.append(folder)
+        env.loader = FileSystemLoader(template_roots())
+
+
+def template_roots() -> list[Path]:
+    """Les dossiers de gabarits : celui de l'inspecteur, puis ceux des dossiers de console inscrits."""
+    return [TEMPLATES, *(f / "templates" for f in FOLDERS if (f / "templates").is_dir())]
+
+
+def static_roots() -> list[Path]:
+    """Les dossiers de fichiers statiques, servis sous une même adresse (``/admin/static/…``)."""
+    return [STATIC, *(f / "static" for f in FOLDERS if (f / "static").is_dir())]
 
 
 class UI:

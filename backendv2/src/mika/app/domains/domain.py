@@ -75,6 +75,8 @@ class ConsolePart:
 
     #: sorte d'objet (``Inspection.subject``) → sa fiche dessinée (une ``inspector.ui.Overview``)
     overviews: Mapping[str, Any] = field(default_factory=dict)
+    #: « destination/onglet » → la forme dessinée de cet onglet (une ``inspector.ui.Drawn``, ADR 0177)
+    drawn: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

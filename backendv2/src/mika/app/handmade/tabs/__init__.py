@@ -319,3 +319,15 @@ class Tab(Drawn):
         # les formulaires de la console, même sans aucun pour ses blocs : ``Forms.of`` prépare ceux d'une ligne
         # (« Retirer » un fichier, ADR 0205) — un ``Forms`` vide est faux, il ne se remplace pas par ``{}``
         return self.draw(Got(ui, list(items), query, forms if forms is not None else {}))
+
+
+# ── Ce que partagent les pages des connexions extérieures (ses sens, ses apps, ses réveils) ──
+
+#: les liens d'une page dans sa barre de titre : ses actions en boutons, ses réglages en roue
+HEAD = "handmade/sens/head.html"
+
+
+def state(got: Got) -> dict[str, Any] | None:
+    """La phrase d'état de la vue : sa première note à la racine (pas celles de ses replis)."""
+    note = next((b for b in got.items if b.get("t") == "note"), None)
+    return {"text": note["text"], "tone": note.get("tone") or ""} if note else None

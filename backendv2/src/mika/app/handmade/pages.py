@@ -14,7 +14,6 @@ from mika.app.handmade.subjects import mail as mail_fiche
 from mika.app.handmade.subjects import project as project_fiche
 from mika.app.handmade.subjects import server as server_fiche
 from mika.app.handmade.subjects import teams as teams_fiche
-from mika.app.handmade.subjects import wakeup as wakeup_fiche
 from mika.app.handmade.tabs import (
     agendas,
     approvals,
@@ -34,7 +33,6 @@ from mika.app.handmade.tabs import (
     thoughts,
     threads,
     tools,
-    wakeups,
 )
 from mika.inspector.ui import Drawn, Overview
 
@@ -48,7 +46,6 @@ OVERVIEWS: dict[str, Overview] = {
     handle_fiche.KIND: handle_fiche.HandleOverview(),
     project_fiche.KIND: project_fiche.ProjectFiche(),
     goal_fiche.KIND: goal_fiche.GoalFiche(),
-    wakeup_fiche.KIND: wakeup_fiche.WakeupFiche(),
     teams_fiche.CONVERSATION: teams_fiche.ConversationFiche(),
     teams_fiche.REPLY: teams_fiche.ReplyFiche(),
     mail_fiche.ACCOUNT: mail_fiche.AccountFiche(),
@@ -77,7 +74,6 @@ DRAWN: dict[str, Drawn] = {
     # Outils, puis Connexions extérieures
     **tools.TABS,
     **senses.TABS,
-    **wakeups.TABS,
     **apps.TABS,
     # Système : chaque page à part (des actions dans leurs lignes et leurs panneaux)
     **system.TABS,
@@ -86,5 +82,7 @@ DRAWN: dict[str, Drawn] = {
     # Réglages : les chiffres et les groupes au-dessus du formulaire des paramètres de chaque faculté (son panneau,
     # dans le même vocabulaire), la vue d'ensemble, les comptes, le journal des modifications, qui peut quoi
     **settings.TABS,
+    # puis ceux que chaque domaine inscrit dans sa part de la console (``ConsolePart.drawn``, ADR 0310)
+    **{key: drawn for console in PARTS for key, drawn in console.drawn.items()},
     # l'accueil est une page à lui (home.py) ; la Forge garde ses contrats d'interface
 }

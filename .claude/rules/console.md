@@ -2,6 +2,7 @@
 paths:
   - "backendv2/src/mika/inspector/**"
   - "backendv2/src/mika/app/handmade/**"
+  - "backendv2/src/mika/app/domains/*/console/**"
   - "backendv2/src/mika/app/console.py"
   - "backendv2/src/mika/app/console_menu.py"
   - "backendv2/src/mika/app/settings_sections/**"
@@ -50,7 +51,9 @@ dans le même lot.
   la barre d'onglets, appliqué d'un clic, jamais un sélecteur et un bouton « Filtrer ». Les bascules (« Fiches /
   Tableau ») ont le même dessin.
 - **Une page est dessinée** (ADR 0121). Son gabarit est sous `templates/handmade/` et sa mise en forme sous
-  `app/handmade/`. Elle reprend le vocabulaire commun de `static/handmade/base.css` (`now-card`, `person-entries`,
+  `app/handmade/` ; celle d'un domaine qui a son dossier (ADR 0310) y vit en entier —
+  `app/domains/<nom>/console/` : sa mise en forme, ses gabarits (`templates/handmade/…`) et sa feuille
+  (`static/handmade/…`), sous les mêmes noms et aux mêmes adresses ; un même nom n'existe que dans un dossier. Elle reprend le vocabulaire commun de `static/handmade/base.css` (`now-card`, `person-entries`,
   `hm-*`), jamais des blocs génériques seuls.
 
 ## Les trois gabarits

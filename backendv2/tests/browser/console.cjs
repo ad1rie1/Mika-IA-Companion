@@ -4,11 +4,17 @@
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
+const fsSync = require('node:fs');
 const path = require('node:path');
 const { chromium } = require('playwright');
 const preview = process.env.MIKA_CONSOLE_PREVIEW;
 if (!preview) throw new Error('Définir MIKA_CONSOLE_PREVIEW vers un export de mika console apercu.');
-const assets = path.resolve(__dirname, '../../src/mika/inspector/static');
+// les fichiers statiques de la console : ceux de l'inspecteur, puis ceux du dossier de console de chaque domaine
+// (ADR 0310) — un même nom n'existe que dans un dossier
+const domains = path.resolve(__dirname, '../../src/mika/app/domains');
+const assetRoots = [path.resolve(__dirname, '../../src/mika/inspector/static'),
+  ...fsSync.readdirSync(domains).map(name => path.join(domains, name, 'console', 'static')).filter(dir => fsSync.existsSync(dir))];
+const asset = rel => assetRoots.map(root => path.join(root, rel)).find(file => fsSync.existsSync(file)) || path.join(assetRoots[0], rel);
 let browser;
 before(async () => {
   browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || '/usr/bin/google-chrome',
@@ -31,7 +37,7 @@ async function open(t, { file = 'accueil.html', width = 1440, html, vitalsStatus
     if (at !== -1) {
       const rel = url.pathname.slice(at + '/static/'.length);
       const type = { css: 'text/css', js: 'application/javascript', woff2: 'font/woff2' }[rel.split('.').pop()] || 'application/octet-stream';
-      return route.fulfill({ path: path.join(assets, rel), contentType: type });
+      return route.fulfill({ path: asset(rel), contentType: type });
     }
     if (url.pathname.endsWith('/_vitals')) return route.fulfill({ status: vitalsStatus, body: '<span>État actualisé</span>', contentType: 'text/html' });
     if (url.pathname.startsWith('/cadres/')) return route.fulfill({ path: path.join(preview, 'cadres', path.basename(url.pathname)), contentType: 'text/html' });

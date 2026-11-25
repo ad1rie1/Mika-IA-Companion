@@ -16,8 +16,7 @@ from typing import Any
 
 from markupsafe import Markup
 
-from mika.app.handmade.tabs import Got, Line, Tab, blank, number, pairs
-from mika.app.handmade.tabs.senses import HEAD, state
+from mika.app.handmade.tabs import HEAD, Got, Line, Tab, blank, number, pairs, state
 
 STYLES = ("handmade/sens.css", "handmade/reveils.css")
 

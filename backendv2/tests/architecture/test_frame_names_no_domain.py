@@ -59,7 +59,6 @@ PACKAGES: dict[str, tuple[str, ...]] = {
 #: les modules d'``app`` qui sont à un domaine et attendent leur déménagement dans son dossier : les importer, c'est
 #: déjà le nommer. Un module déménagé sort de cette table (il n'existe plus : la garde le dit)
 TO_MOVE: dict[str, tuple[str, ...]] = {
-    "wakeup": ("app.handmade.tabs.wakeups", "app.handmade.subjects.wakeup"),
     "phone": ("app.phone", "app.me.phone"),
     "forge": ("app.forge_settings", "app.handmade.tabs.apps"),
     "senses": ("app.handmade.tabs.senses", "app.handmade.person.senses"),
@@ -100,7 +99,7 @@ STILL: dict[str, set[str]] = {
     "handmade/agenda_reads.py": {"agenda"},
     "handmade/approval_sources.py": {"agenda", "mail", "phone", "teams", "tools"},
     "handmade/directory.py": {"contacts"},
-    "handmade/pages.py": {"agenda", "forge", "mail", "projects", "senses", "teams", "tools", "wakeup"},
+    "handmade/pages.py": {"agenda", "forge", "mail", "projects", "senses", "teams", "tools"},
     "handmade/person/__init__.py": {"agenda", "maps", "projects", "senses", "teams", "tools"},
     "handmade/person/agendas.py": {"agenda"},
     "handmade/person/identifies.py": {"contacts"},
@@ -121,15 +120,12 @@ STILL: dict[str, set[str]] = {
     "handmade/subjects/project_zones.py": {"projects"},
     "handmade/subjects/server.py": {"tools"},
     "handmade/subjects/teams.py": {"teams"},
-    "handmade/subjects/wakeup.py": {"wakeup"},
     "handmade/tabs/agendas.py": {"agenda"},
-    "handmade/tabs/apps.py": {"senses"},
     "handmade/tabs/mail.py": {"mail"},
     "handmade/tabs/people.py": {"contacts"},
     "handmade/tabs/senses.py": {"maps", "phone"},
     "handmade/tabs/teams.py": {"teams"},
     "handmade/tabs/thoughts.py": {"mail", "senses", "teams"},
-    "handmade/tabs/wakeups.py": {"senses"},
     "handmade/waiting.py": {"contacts", "mail", "teams"},
     "lending.py": {"tools"},
     "mcp_settings.py": {"tools"},

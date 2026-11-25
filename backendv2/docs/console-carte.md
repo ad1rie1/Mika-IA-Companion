@@ -820,7 +820,7 @@ techniques sont dans « Détails techniques ».
 - **Localisation** (`sens/positions`, ADR 0119) : une ligne par personne, ses téléphones réunis (ses autres moyens de
   communication dépliés), puis ce que les téléphones lui ont dit, par pages (`?avant=`) ; le même filtre par
   personne.
-- **Réveils par API** (ADR 0068, 0117, `app/handmade/tabs/wakeups.py`) : ses réveils en tuiles (actif, clé, en
+- **Réveils par API** (ADR 0068, 0117, `app/domains/wakeup/console/tabs.py`) : ses réveils en tuiles (actif, clé, en
   attente, dernier appel), puis leurs derniers appels en fil — ce qu'ils apportaient, pourquoi ils attendent, leur
   compte rendu, le reste replié ; « Déclarer un réveil » dans la barre de titre ; la fiche d'un réveil : État (sa clé,
   générée ici et montrée une fois ; comment l'appeler), Appels. **Paramètres**, la roue en haut à droite (ADR 0206) :

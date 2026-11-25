@@ -1,4 +1,4 @@
-"""Connexions extérieures › Réveils par API dans sa forme (``app/handmade/tabs/wakeups.py``, ADR 0177), à travers le
+"""Connexions extérieures › Réveils par API dans sa forme (``app/domains/wakeup/console/tabs.py``, ADR 0177), à travers le
 vrai serveur : « Déclarer un réveil » dans la barre de titre ; ses réveils en tuiles (un réveil sans clé le dit, en
 avant) ; ses appels en fil, ce qu'ils apportaient et pourquoi ils attendent ; ce que la page dit, vide ; son
 introduction dite une fois ; et pas de champ « nom exact » : ``?reveil=`` filtre encore, sous son titre."""

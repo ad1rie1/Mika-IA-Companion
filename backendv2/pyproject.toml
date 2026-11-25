@@ -54,7 +54,8 @@ where = ["src"]
 [tool.setuptools.package-data]
 "mika.inspector" = ["templates/**/*.html", "static/**/*"]
 "mika.faculties.world" = ["*.json"]
-"mika.app" = ["migrations/*/script.py.mako"]
+# les gabarits et les fichiers statiques de la console d'un domaine vivent dans son dossier (ADR 0310)
+"mika.app" = ["migrations/*/script.py.mako", "domains/*/console/templates/**/*.html", "domains/*/console/static/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

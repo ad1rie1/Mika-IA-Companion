@@ -1,4 +1,4 @@
-/* Connexions extérieures › Réveils par API (app/handmade/tabs/wakeups.py, ADR 0177) : ses réveils en tuiles jointes par
+/* Connexions extérieures › Réveils par API (app/domains/wakeup/console/tabs.py, ADR 0177) : ses réveils en tuiles jointes par
    un filet, puis leurs appels en fil (le vocabulaire des Connexions, handmade/sens.css). Couleurs : les jetons. */
 /* des cases jointes par un filet (comme une bande de chiffres) : chaque case porte ses bords, qui se recouvrent ; une
    rangée incomplète ne laisse pas de case vide */
