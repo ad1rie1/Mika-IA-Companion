@@ -1,6 +1,6 @@
 """La fiche d'une personne › Son téléphone et Sa position, dessinées (ADR 0119, 0120, 0123) : ses conversations et les
 réponses qu'elle a proposées ; sa dernière position, téléphone par téléphone, et son journal. Les mêmes morceaux que les
-pages de Connexions extérieures (``tabs/senses.py``), restreints à cette personne.
+pages de Connexions extérieures (``app/domains/senses/console/tabs.py``), restreints à cette personne.
 """
 
 from __future__ import annotations
@@ -10,8 +10,15 @@ from typing import Any
 
 from markupsafe import Markup
 
+from mika.app.domains.senses.console.tabs import (
+    conversation_of,
+    fix_of,
+    offers_of,
+    reader_of,
+    said_of,
+    slice_of,
+)
 from mika.app.handmade import Look
-from mika.app.handmade.tabs.senses import conversation_of, fix_of, offers_of, reader_of, said_of, slice_of
 from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import UI, env
 from mika.kernel.clock import DAY

@@ -794,7 +794,7 @@ techniques sont dans « Détails techniques ».
 
 ### Connexions extérieures
 
-- **Flux RSS** (`sens/flux`, `app/handmade/tabs/senses.py`) : la phrase d'état du relevé, un flux en panne en
+- **Flux RSS** (`sens/flux`, `app/domains/senses/console/tabs.py`) : la phrase d'état du relevé, un flux en panne en
   bandeau, la bande de chiffres ; en sous-onglets les derniers articles (pertinence, résumé), ses flux (état, dernier
   relevé replié), ce qu'elle a remarqué (courbe des jours), ce qui lui a fait penser à ses amies, les mots qui la
   touchent. Recherche dans les titres et résumés.
@@ -813,7 +813,7 @@ techniques sont dans « Détails techniques ».
   paramètres avancés de la caméra et « Connecter une caméra » (vers l'accès des appareils), les fournisseurs
   d'images et les paramètres avancés des dessins. Les anciennes adresses, Réglages › Plugins › Flux RSS, Appareils
   connectés et Transcription, y mènent.
-- **Messages du téléphone** (`sens/messages`, `app/handmade/tabs/senses.py`, ADR 0120) : le téléphone de chaque personne,
+- **Messages du téléphone** (`sens/messages`, `app/domains/senses/console/tabs.py`, ADR 0120) : le téléphone de chaque personne,
   puis ses conversations (un contact, un groupe), repliées, qui s'ouvrent en bulles jour par jour ; huit
   conversations par personne quand on regarde tout le monde, toutes quand on en choisit une (`?personne=`, des
   puces) ; puis les réponses qu'elle a proposées et leur sort.

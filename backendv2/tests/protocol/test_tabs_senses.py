@@ -1,5 +1,5 @@
-"""Connexions extérieures, chaque onglet dans sa forme (``app/handmade/tabs/senses.py``, ADR 0177), à travers le vrai
-serveur : la phrase d'état de la vue en tête, ses réglages derrière la roue de Ses sens (ADR 0206) ; un flux en panne en
+"""Connexions extérieures, chaque onglet dans sa forme (``app/domains/senses/console/tabs.py``, ADR 0177), à travers
+le vrai serveur : la phrase d'état de la vue en tête, ses réglages derrière la roue de Ses sens (ADR 0206) ; un flux en panne en
 bandeau ; ce que voit la caméra à côté de ses appareils ; un dessin dit pour qui (son nom, pas sa clé) et ce qu'elle y
 voit ; les appareils à gauche, leurs signaux à droite ; et ce que chaque page dit, vide."""
 

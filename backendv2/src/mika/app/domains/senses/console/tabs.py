@@ -1,5 +1,5 @@
 """Connexions extérieures : ses onglets, chacun dans sa forme (ADR 0177). Les onglets de la fiche d'une personne
-(« Son téléphone », « Sa position ») sont dans ``person/senses.py``, sur les mêmes morceaux.
+(« Son téléphone », « Sa position ») sont dans ``app/handmade/person/senses.py``, sur les mêmes morceaux.
 
 - Flux RSS : où en est le relevé, en une phrase et une bande de chiffres (un flux en panne, en bandeau) ; puis en
   sous-onglets les derniers articles (leur pertinence, leur résumé à lire), ses flux (leur état, leur dernier relevé),

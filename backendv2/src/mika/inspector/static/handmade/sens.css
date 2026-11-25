@@ -1,5 +1,5 @@
 /* Connexions extérieures › Messages du téléphone et Localisation, et leurs onglets sur la fiche d'une personne
-   (app/handmade/tabs/senses.py) : le filtre par personne, les conversations repliées, les positions, le journal. */
+   (app/domains/senses/console/tabs.py) : le filtre par personne, les conversations repliées, les positions, le journal. */
 .senses { display: grid; gap: 18px; }
 .senses-chips { margin: 0; }
 .senses-when { margin-left: auto; color: var(--muted); font-size: 12.5px; white-space: nowrap; }
@@ -44,7 +44,7 @@
   .senses-said li { grid-template-columns: 1fr; gap: 2px; }
 }
 
-/* ── Flux RSS, Caméra, Dessins, Appareils, dans leur forme (app/handmade/tabs/senses.py, ADR 0177) : la phrase d'état
+/* ── Flux RSS, Caméra, Dessins, Appareils, dans leur forme (app/domains/senses/console/tabs.py, ADR 0177) : la phrase d'état
    de la vue, des listes à filets (pas de carte dans la carte), deux colonnes sur un grand écran. ── */
 .sens-page { gap: 16px; }
 .sens-state { display: flex; align-items: baseline; gap: 9px; margin: 0; max-width: 110ch; color: var(--text-2); font-size: 14px; }
