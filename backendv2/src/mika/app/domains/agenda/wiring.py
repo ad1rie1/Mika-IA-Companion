@@ -24,6 +24,7 @@ from mika.adapters.agenda import (
     microsoft_signin,
 )
 from mika.app.domains.agenda.desk import AgendaSettingsDesk
+from mika.app.domains.agenda.live import signed
 from mika.app.domains.agenda.settings import AgendaSettings
 from mika.app.wiring import Wiring
 
@@ -65,7 +66,7 @@ def bind(w: Wiring) -> None:
     for kind in ("google", "microsoft"):
         agenda_signin = getattr(w.ports[PROVIDERS].of(kind), "signin", None)
         if agenda_signin is not None:
-            agenda_signin.on_state = lambda account: w.live.changes.agenda_signed(account)
+            agenda_signin.on_state = lambda account: signed(w.live.changes, account)
 
 
 def inputs(settings: Any) -> dict[str, dict[str, Any]]:

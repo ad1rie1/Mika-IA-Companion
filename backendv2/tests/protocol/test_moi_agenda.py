@@ -24,6 +24,7 @@ from mika.adapters.agenda import (
     Web,
     microsoft_signin,
 )
+from mika.app.domains.agenda.live import signed
 from mika.app.domains.agenda.settings import AgendaSettings
 from mika.contracts import runtime as rt
 from mika.kernel.events import Content
@@ -586,7 +587,7 @@ def test_microsoft_gives_a_code_and_its_wait_is_pushed(world):  # noqa: F811
 
     signin = microsoft_signin(live.settings, live.settings.mail_application, transport=graph.transport(),
                               sleep=no_wait)
-    signin.on_state = live.changes.agenda_signed
+    signin.on_state = lambda account: signed(live.changes, account)
     live.kernel.ports["agenda_providers"].add(MicrosoftProvider(signin, transport=graph.transport()))
     account = post(client, "/agenda/account/save", {"kind": "microsoft",
                                                     "values": {"label": "Outlook"}}).json()["account"]

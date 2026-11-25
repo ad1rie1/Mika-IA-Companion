@@ -7,8 +7,6 @@ inscrit dans sa part de la console (``ConsolePart.overviews``, ADR 0310)."""
 from __future__ import annotations
 
 from mika.app.domains import DOMAINS, part
-from mika.app.domains.agenda.console import subject as agenda_fiche
-from mika.app.domains.agenda.console import tabs as agendas
 from mika.app.handmade.subjects import goal as goal_fiche
 from mika.app.handmade.subjects import handle as handle_fiche
 from mika.app.handmade.subjects import mail as mail_fiche
@@ -43,7 +41,6 @@ OVERVIEWS: dict[str, Overview] = {
     mail_fiche.ACCOUNT: mail_fiche.AccountFiche(),
     mail_fiche.MAIL: mail_fiche.MailFiche(),
     mail_fiche.DRAFT: mail_fiche.DraftFiche(),
-    agenda_fiche.KIND: agenda_fiche.AgendaFiche(),
     **{kind: overview for console in PARTS for kind, overview in console.overviews.items()},
 }
 
@@ -55,7 +52,6 @@ DRAWN: dict[str, Drawn] = {
     # Relations & échanges : le détail des personnes, identités, conversations, courrier, Teams, agendas
     **people.TABS,
     **identities.TABS,
-    **agendas.TABS,
     **threads.TABS,
     **mail.TABS,
     # Activité : décisions, buts, projets

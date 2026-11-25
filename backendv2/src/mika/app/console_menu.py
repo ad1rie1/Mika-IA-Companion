@@ -64,7 +64,7 @@ MENU = (
         MenuLink("Conversations", "fil", hint="Avec qui elle parle, ce qui s'est dit"),
         MenuLink("Courrier", "courrier", hint="Ses boîtes aux lettres"),
         _link("teams"),  # Teams
-        MenuLink("Agendas", "agendas", hint="Tous les agendas du système, par personne"),
+        _link("agenda"),  # les agendas de chacun
         MenuLink("Identités", "identites", hint="Par où chacun lui parle, qui est qui"),
     ), short="Échanges", question="Qui connaît-elle, qu'a-t-on dit ?"),
     MenuGroup("Activité", "activity", (

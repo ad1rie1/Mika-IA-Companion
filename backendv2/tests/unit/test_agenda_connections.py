@@ -22,7 +22,7 @@ from mika.adapters.agenda import AgendaAccount, AgendaConfig
 from mika.adapters.agenda.oauth import pasted
 from mika.adapters.mail.oauth import Grant
 from mika.adapters.store_sql import SqlStore
-from mika.app.cli.plugins import agenda_command
+from mika.app.domains.agenda.cli import agenda_command
 from mika.app.domains.agenda.settings import AGENDA_GOOGLE_KEY, AgendaSettings
 from mika.app.settings import AGENDA_GRANTS_KEY, SecretBox, Settings
 

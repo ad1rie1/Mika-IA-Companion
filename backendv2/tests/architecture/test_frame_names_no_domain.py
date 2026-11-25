@@ -83,10 +83,10 @@ STILL: dict[str, set[str]] = {
     "authors.py": {"mail"},
     "backup.py": {"maps", "projects"},
     "cli/models.py": {"tools"},
-    "cli/plugins.py": {"agenda", "mail"},
+    "cli/plugins.py": {"mail"},
     "handmade/approval_sources.py": {"agenda", "mail", "phone", "teams", "tools"},
     "handmade/directory.py": {"contacts"},
-    "handmade/pages.py": {"agenda", "mail", "projects"},
+    "handmade/pages.py": {"mail", "projects"},
     "handmade/person/__init__.py": {"agenda", "maps", "projects", "teams", "tools"},
     "handmade/person/agendas.py": {"agenda"},
     "handmade/person/identifies.py": {"contacts"},
@@ -110,7 +110,7 @@ STILL: dict[str, set[str]] = {
     "handmade/waiting.py": {"contacts", "mail", "teams"},
     "me/api.py": {"mail"},
     "me/assembly.py": {"mail", "projects"},
-    "me/changes.py": {"agenda", "mail", "projects"},
+    "me/changes.py": {"mail", "projects"},
     "me/docs_mcp.py": {"mail", "projects", "tools"},
     "me/mail.py": {"mail"},
     "me/project_activity.py": {"projects"},
@@ -128,7 +128,7 @@ STILL: dict[str, set[str]] = {
     "preview/projects.py": {"projects"},
     "server.py": {"contacts", "mail", "projects", "tools"},
     "settings.py": {"agenda", "mail"},
-    "settings_sections/plugins.py": {"agenda", "mail", "teams"},
+    "settings_sections/plugins.py": {"mail", "teams"},
 }
 
 

@@ -99,11 +99,7 @@ NAVIGATION: tuple[NavGroup, ...] = (
                     # ses paramètres (ses boîtes, son relevé, ce qu'elle en dit) : en haut à droite (ADR 0173)
                     builtin=("courrier.parametres",), gear=("parametres",)),
         _destination("teams"),  # Teams
-        # les agendas de chacun (ADR 0309, lot 5) : tous dans une même vue, par personne ; la fiche d'un agenda vit ici ;
-        # ses paramètres (les applications Google et Microsoft, la synchro, les rappels) : en haut à droite
-        Destination("agendas", "Agendas", "Tous les agendas du système, par personne : leurs comptes, ce qu'elle en "
-                    "fait, et le sien.", subjects=("agenda",), builtin=("agendas.parametres",), gear=("parametres",),
-                    order=("tous", "comptes", "fait", "mika")),
+        _destination("agenda"),  # les agendas de chacun
     )),
     NavGroup("Connexions extérieures", (
         _destination("senses"),  # ses sens
@@ -146,7 +142,6 @@ FACULTY_LABELS: dict[str, str] = _named("faculties", {
     "runtime": "Moteur", "place": "Où elle est (sa chambre)",
     "world": "Son monde et son corps", "shares": "Fichiers envoyés", "attachments": "Pièces reçues",
     "imaging": "Dessins",
-    "agenda": "Agenda",
 })
 
 #: Les sections du prompt, nommées par ce qu'elles lui montrent (Pourquoi a-t-elle dit ça ?, Prompt).
@@ -207,11 +202,6 @@ SECTION_LABELS: dict[str, str] = _named("sections", {
     # ADR 0068
     # ADR 0069
     "crossed": "Elle allait justement lui écrire (leurs messages se sont croisés)",
-    # ADR 0309
-    "agenda_day": "Sa journée dans ses agendas (aujourd'hui et demain, cité)",
-    "agenda_writes": "Ce qu'elle a proposé d'écrire dans ses agendas, et ce que c'est devenu",
-    "agenda_reminder": "Le rendez-vous qu'elle rappelle (cité)",
-    "agenda_invitation": "L'invitation dont elle prépare la réponse, et ce qui tombe en même temps (cité)",
 })
 
 #: Les raisons des preuves de l'arbitre : ce qui la pousse à agir.
@@ -231,9 +221,6 @@ REASON_LABELS: dict[str, str] = _named("reasons", {
     # ADR 0058
     "rekindle": "Reprendre des nouvelles, longtemps après (une fois)",
     # ADR 0068
-    # ADR 0309
-    "agenda_remind": "Rappeler un rendez-vous, au délai que son agenda demande",
-    "agenda_prepare": "Préparer la réponse à une invitation",
 })
 
 #: Les vetos : ce qui l'empêche d'agir.
@@ -285,8 +272,6 @@ PROCESS_LABELS: dict[str, str] = _named("processes", {
     "shares.retention": "Retirer les fichiers envoyés trop anciens", "imaging.draw": "Dessiner",
     "attachments.study": "Lire de près les pièces reçues", "attachments.index": "Indexer les pièces reçues",
     "attachments.retention": "Retirer les pièces reçues trop anciennes ou de trop",
-    "agenda.sync": "Relire les agendas branchés (Google, Outlook, CalDAV, abonnements)",
-    "agenda.watch": "Voir venir les rappels et les invitations des agendas, laisser tomber ce qui n'a plus lieu d'être",
     "memory.relayed": "Retenir ce que le téléphone lui montre (les messages reçus)",
     "identity.expire": "Oublier les inconnues de passage restées silencieuses",
 })
@@ -369,12 +354,6 @@ EVENT_LABELS: dict[str, str] = _named("events", {
     "email.poll_asked": "Une relève demandée", "email.read": "Un mail lu", "email.sent": "Un mail envoyé",
     "projects.access_set": "Les accès d'un projet réglés",
     "projects.steer_asked": "Une demande de pilotage d'un projet, sur ton accord",
-    "agenda.written": "Ce qu'elle a proposé d'écrire dans un agenda est fait, ou a raté",
-    "agenda.reminder_due": "Un rendez-vous à rappeler", "agenda.reminder_dropped": "Un rappel tombé (le rendez-vous a "
-    "bougé, est parti, ou son agenda ne le demande plus)",
-    "agenda.invitation_noticed": "Une invitation dont elle prépare la réponse",
-    "agenda.invitation_settled": "Une invitation qui n'attend plus (répondue, partie, commencée)",
-    "agenda.sync_asked": "« Synchroniser maintenant » demandé pour un agenda branché",
     "memory.event_noted": "Un événement de la vie de quelqu'un, noté", "body.roused": "Réveillée par un message",
     "body.waited": "Un message attend son réveil", "attention.touched": "Une pensée effleurée par un message",
     "self.woke_with": "Ce qu'elle emporte de sa nuit", "self.touched": "Touchée par ce qu'on lui a dit",
@@ -434,8 +413,6 @@ EFFECT_LABELS: dict[str, tuple[str, str, str]] = _named("effects", {
     "runtime:effect.resolved": ("agit", "Une action que tu as autorisée",
                                 "elle part après ton accord : un mail, une réponse Teams, un git push…"),
     "email:effect.executed": ("agit", "Un mail parti", "elle apprend qu'il est parti, retouché ou non"),
-    "agenda:effect.executed": ("agit", "Une écriture dans un agenda",
-                               "elle apprend ce qu'est devenu ce qu'elle y a ajouté, modifié, supprimé ou répondu"),
     "projects:effect.executed": ("agit", "Un pilotage de projet accepté",
                                  "la demande de quelqu'un sur un projet s'écrit, à son nom, après ton accord"),
     "shares:shares.expired": ("range", "Un fichier envoyé expire", "ses octets sont effacés"),
@@ -486,7 +463,6 @@ CAPABILITY_LABELS: dict[str, str] = _named("capabilities", {
     "projects.issue": "Issue publiée", "projects.issue_state": "État d'une issue",
     "projects.issue_note": "Note publiée",
     "projects.steer": "Pilotage de projet",
-    "agenda.write": "Agenda",
 })
 
 #: Les enrichisseurs, nommés par ce qu'ils rassemblent pour le prompt avant qu'il s'écrive (l'onglet Prompt d'un
@@ -510,9 +486,6 @@ ENRICHER_LABELS: dict[str, str] = _named("enrichers", {
     "projects_answer": "La réponse à sa demande d'aide (un projet)", "sent_files": "Les fichiers qu'elle a envoyés",
     "mail": "Son courrier",
     "dessins": "Ses dessins",
-    "agenda": "Ses agendas (la journée de la personne, ce qu'elle y a proposé)",
-    "agenda_reminder": "Le rendez-vous qu'elle rappelle",
-    "agenda_invitation": "L'invitation dont elle prépare la réponse",
 })
 
 #: Les ports que des outils attendent (``needs=``) : pourquoi la porte ne les offre pas tant que le port n'est pas prêt
@@ -520,9 +493,6 @@ ENRICHER_LABELS: dict[str, str] = _named("enrichers", {
 #: l'autre.
 NEED_LABELS: dict[str, tuple[str, str]] = _named("needs", {
     "imaging": ("aucun fournisseur d'images n'est configuré", "images-fournisseurs"),
-    # le serveur branche toujours la base des rendez-vous (ADR 0309) : seule une composition partielle (un test) ne
-    # l'a pas ; sa page de réglages vient avec la console de l'agenda (lot 5), le lien ne paraît qu'une fois là
-    "agenda": ("ses calendriers ne sont pas branchés sur ce serveur", "agendas"),
 })
 
 #: Tout ce que la console nomme en français, d'un bloc.

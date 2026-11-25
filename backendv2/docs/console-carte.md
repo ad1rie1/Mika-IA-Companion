@@ -421,7 +421,8 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
   de sa persona, dans l'onglet comme dans la page : `self_.NAME_SLOT`) : sa mémoire montrée comme un agenda
   (`app/domains/agenda/her.py`) — ses promesses datées, ce qu'elle voit venir, les dates qui reviennent, tout, par personne
   (« Pour ») ; cette semaine, puis « Plus tard ». **Paramètres**, la roue (ADR 0206 ;
-  `handmade/agendas/parametres.html`) : l'application Google du serveur (son identifiant, son secret scellé, le pas à
+  `app/domains/agenda/console/templates/handmade/agendas/parametres.html`, sa rubrique :
+  `app/domains/agenda/console/settings.py`) : l'application Google du serveur (son identifiant, son secret scellé, le pas à
   pas), l'application Microsoft — la même que celle du courrier (ADR 0238) —, puis les paramètres du plugin : la
   synchronisation (la cadence de chaque sorte, la fenêtre, le recul après une panne, l'historique gardé), les rappels
   qu'elle propose d'office (un agenda du système, un agenda branché ; un abonnement n'en a pas ; « la veille au soir,
