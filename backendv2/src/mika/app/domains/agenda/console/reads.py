@@ -1,12 +1,12 @@
-"""Ce que lisent les pages « Agendas » de la console (ADR 0309, lot 5) : Échanges › Agendas (``tabs/agendas.py``), la
-fiche d'un agenda (``subjects/agenda.py``), l'onglet « Agendas » de la fiche d'une personne (``person/agendas.py``) et
-la file « À valider » (``approval_sources.py``).
+"""Ce que lisent les pages « Agendas » de la console (ADR 0309, lot 5) : Échanges › Agendas (``tabs.py``), la
+fiche d'un agenda (``subject.py``), l'onglet « Agendas » de la fiche d'une personne (``app/handmade/person/agendas.py``) et
+la file « À valider » (``app/handmade/approval_sources.py``).
 
 Chaque agenda est lu tel que la console le montre (``plugins/agenda/inspect/views.py::Shown`` : à qui, sa sorte, sa synchro),
 avec sa couleur — celle que son propriétaire a choisie, sinon la plus proche de celle de son fournisseur, sinon une de
 la palette (ses huit couleurs ; le rose est à elle). Une période devient une liste d'éléments (``Item``) : les
 occurrences de la base (un événement privé d'une autre personne, « Occupé »), ce qu'elle propose d'ajouter et qui
-attend un accord (hachuré, tiré de sa proposition), et son agenda à elle (sa mémoire, ``app/her_agenda.py``) pour les
+attend un accord (hachuré, tiré de sa proposition), et son agenda à elle (sa mémoire, ``app/domains/agenda/her.py``) pour les
 personnes choisies. Ce qu'elle a proposé d'écrire se relit au journal (la proposition, ses arguments) ; rien n'est
 recopié.
 """
@@ -19,8 +19,8 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any
 
+from mika.app.domains.agenda.her import HerDate, her_agenda, title_of
 from mika.app.handmade import Look
-from mika.app.her_agenda import HerDate, her_agenda, title_of
 from mika.contracts import runtime as rt
 from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import UI

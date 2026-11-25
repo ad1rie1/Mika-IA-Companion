@@ -7,13 +7,13 @@ inscrit dans sa part de la console (``ConsolePart.overviews``, ADR 0310)."""
 from __future__ import annotations
 
 from mika.app.domains import DOMAINS, part
-from mika.app.handmade.subjects import agenda as agenda_fiche
+from mika.app.domains.agenda.console import subject as agenda_fiche
+from mika.app.domains.agenda.console import tabs as agendas
 from mika.app.handmade.subjects import goal as goal_fiche
 from mika.app.handmade.subjects import handle as handle_fiche
 from mika.app.handmade.subjects import mail as mail_fiche
 from mika.app.handmade.subjects import project as project_fiche
 from mika.app.handmade.tabs import (
-    agendas,
     approvals,
     decisions,
     goals,

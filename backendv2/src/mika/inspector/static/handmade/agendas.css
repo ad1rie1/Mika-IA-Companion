@@ -1,4 +1,4 @@
-/* Relations & échanges › Agendas (ADR 0309, lot 5 ; app/handmade/tabs/agendas.py, templates/handmade/agendas/) : la
+/* Relations & échanges › Agendas (ADR 0309, lot 5 ; app/domains/agenda/console/tabs.py, templates/handmade/agendas/) : la
    grille de la semaine, le mois, la liste, l'événement ouvert à côté, la légende des agendas, les comptes, les valeurs
    d'un tableau de droits — ce qui manque au vocabulaire de la console (console.css, handmade/base.css), d'après la
    maquette validée (output/maquette-agenda-console/agenda.css). Toutes les couleurs viennent des jetons de

@@ -9,6 +9,7 @@ from mika.app.domains.domain import Base, Domain
 
 AGENDA = Domain(
     "agenda",
+    needs=("mail",),
     base=Base("agenda", models="mika.adapters.agenda.models",
               place="les agendas : ceux de ce serveur, et la copie de ceux qu'on a branchés"),
 )

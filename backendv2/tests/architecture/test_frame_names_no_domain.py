@@ -61,8 +61,6 @@ PACKAGES: dict[str, tuple[str, ...]] = {
 #: les modules d'``app`` qui sont à un domaine et attendent leur déménagement dans son dossier : les importer, c'est
 #: déjà le nommer. Un module déménagé sort de cette table (il n'existe plus : la garde le dit)
 TO_MOVE: dict[str, tuple[str, ...]] = {
-    "agenda": ("app.agenda_desk", "app.her_agenda", "app.me.agenda", "app.handmade.tabs.agendas",
-               "app.handmade.subjects.agenda", "app.handmade.agenda_reads"),
     "mail": ("app.me.mail", "app.handmade.tabs.mail", "app.handmade.subjects.mail", "app.preview.mail"),
     "projects": ("app.me.projects", "app.me.project_activity", "app.me.project_code", "app.me.project_docs",
                  "app.me.project_manage", "app.me.docs_mcp", "app.handmade.tabs.projects",
@@ -82,12 +80,10 @@ FOREVER: dict[str, str] = {
 
 #: ce qui reste à sortir du cadre : fichier d'``app`` → domaines qu'il nomme encore. Elle ne fait que rétrécir
 STILL: dict[str, set[str]] = {
-    "agenda_desk.py": {"agenda"},
     "authors.py": {"mail"},
     "backup.py": {"maps", "projects"},
     "cli/models.py": {"tools"},
     "cli/plugins.py": {"agenda", "mail"},
-    "handmade/agenda_reads.py": {"agenda"},
     "handmade/approval_sources.py": {"agenda", "mail", "phone", "teams", "tools"},
     "handmade/directory.py": {"contacts"},
     "handmade/pages.py": {"agenda", "mail", "projects"},
@@ -97,7 +93,6 @@ STILL: dict[str, set[str]] = {
     "handmade/person/senses.py": {"maps", "phone", "senses"},
     "handmade/person/voyages.py": {"maps"},
     "handmade/rights.py": {"agenda", "forge", "tools"},
-    "handmade/subjects/agenda.py": {"agenda"},
     "handmade/subjects/mail.py": {"mail"},
     "handmade/subjects/project.py": {"forge", "projects"},
     "handmade/subjects/project_activity.py": {"projects"},
@@ -109,12 +104,10 @@ STILL: dict[str, set[str]] = {
     "handmade/subjects/project_links.py": {"projects"},
     "handmade/subjects/project_tickets.py": {"projects"},
     "handmade/subjects/project_zones.py": {"projects"},
-    "handmade/tabs/agendas.py": {"agenda"},
     "handmade/tabs/mail.py": {"mail"},
     "handmade/tabs/people.py": {"contacts"},
     "handmade/tabs/thoughts.py": {"mail", "senses", "teams"},
     "handmade/waiting.py": {"contacts", "mail", "teams"},
-    "me/agenda.py": {"agenda", "mail"},
     "me/api.py": {"mail"},
     "me/assembly.py": {"agenda", "mail", "projects"},
     "me/changes.py": {"agenda", "mail", "projects"},

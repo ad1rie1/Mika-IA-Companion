@@ -1388,7 +1388,7 @@ destinataires quand on écrit (§ 3).
 Ce que l'écran Agenda et Paramètres › Agendas montrent (ADR 0309) : les agendas de la personne — celui du système
 (« Mon agenda », sans rien régler), ceux qu'elle branche (Google Agenda, Outlook.com / Microsoft 365, CalDAV, un
 abonnement iCal), ceux qu'on lui partage — et « L'agenda de Mika », sa mémoire montrée comme un agenda. Le code fait foi
-dans [`app/me/agenda.py`](../src/mika/app/me/agenda.py) ; les écritures sont les actions du plugin
+dans [`app/domains/agenda/api.py`](../src/mika/app/domains/agenda/api.py) ; les écritures sont les actions du plugin
 ([`plugins/agenda/actions.py`](../src/mika/plugins/agenda/actions.py)), auditées `moi.agenda.<action>`.
 
 - **À qui.** Un agenda est à elle quand son compte l'est : son compte du système (`moi:<sa clé>`), ou un compte

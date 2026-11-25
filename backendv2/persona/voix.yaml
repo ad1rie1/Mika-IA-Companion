@@ -8843,7 +8843,7 @@ agenda:
       t'a dit. Rien ne partira sans son accord. Si tu ne sais pas quoi répondre, ne propose rien et dis pourquoi en
       une phrase.
 
-  # « L'agenda de Mika » (app/her_agenda.py) : ses promesses datées et ce qu'elle voit venir, montrés comme un agenda.
+  # « L'agenda de Mika » (app/domains/agenda/her.py) : ses promesses datées et ce qu'elle voit venir, montrés comme un agenda.
   mine:
     # {name} : son nom (sa persona)
     title: "L'agenda de {name}"

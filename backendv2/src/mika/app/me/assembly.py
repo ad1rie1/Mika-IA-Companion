@@ -14,8 +14,8 @@ from typing import Any
 from starlette.routing import Route
 
 from mika.app.domains import DOMAINS, part
+from mika.app.domains.agenda import api as agenda
 from mika.app.me import (
-    agenda,
     mail,
     project_activity,
     project_code,

@@ -5,8 +5,8 @@ fiche d'une personne, et ce qu'un opérateur y fait.
   (``?qui=`` : ``toi``, la clé d'une personne, ``mika`` ; plusieurs, séparés par des virgules), une période (``?du=``,
   ``?vue=`` : semaine, mois ou liste), le compte à reconnecter en bandeau ; « Comptes » ; « Ce qu'elle en fait » (ses
   rappels, ce qu'elle a proposé d'ajouter, les réponses d'invitation qu'elle a préparées, ce qu'elle a ajouté seule) ;
-  « L'agenda de <son nom> » (sa mémoire montrée comme un agenda, lue par la console : ``app/her_agenda.py``). Ces vues sont la
-  source de la console en MCP et du repli ; la console les dessine à sa façon (``app/handmade/tabs/agendas.py``).
+  « L'agenda de <son nom> » (sa mémoire montrée comme un agenda, lue par la console : ``app/domains/agenda/her.py``). Ces vues sont la
+  source de la console en MCP et du repli ; la console les dessine à sa façon (``app/domains/agenda/console/tabs.py``).
 - **La fiche d'un agenda** (``KIND``, sa clé ``<compte>~<clé courte>``) : son en-tête (l'état de sa synchro, sa sorte,
   à qui il est, ses partages), ses événements (paginés, à venir ou passés), ses partages dans Mika, son tableau de
   droits, sa synchronisation (son historique, ``AgendaPort.sync_notes``).
@@ -15,7 +15,7 @@ fiche d'une personne, et ce qu'un opérateur y fait.
   ou un abonnement : décoché), retire un agenda de Mika (sa copie part, rien chez son fournisseur), retire un partage
   (Réglages › Droits) ; il ne se reconnecte qu'à ses propres comptes. Il ne crée, ne modifie ni ne répond jamais à la
   place de quelqu'un : aucune action ici n'écrit dans un agenda. Ce qui change les réglages passe par le port
-  ``agenda_desk`` (``app/agenda_desk.py``).
+  ``agenda_desk`` (``app/domains/agenda/desk.py``).
 """
 
 from __future__ import annotations

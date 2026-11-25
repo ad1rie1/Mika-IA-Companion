@@ -1,5 +1,5 @@
 """Ce qu'une personne fait de ses agendas depuis son espace (ADR 0309, lot 4) : les actions de la console
-(``@AGENDA.action``), au nom de qui agit (``ctx.by``), que l'API par personne appelle (``app/me/agenda.py``) —
+(``@AGENDA.action``), au nom de qui agit (``ctx.by``), que l'API par personne appelle (``app/domains/agenda/api.py``) —
 journalisées, dédoublonnées et auditées comme toute action (``moi.agenda.<action>``).
 
 - **À qui.** Chaque action relit ce que la personne qui agit a de l'agenda visé (``level_of``) : le sien (à son nom, ou

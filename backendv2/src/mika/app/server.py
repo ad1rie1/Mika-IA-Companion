@@ -70,11 +70,11 @@ from mika.adapters.workshop.github import GitHubRepos
 from mika.adapters.world.server import WorldHub
 from mika.app import backup, composition, datadir, embeddings, schema, settings_sections
 from mika.app import persona as persona_file
-from mika.app.agenda_desk import AgendaSettingsDesk
 from mika.app.console import FACULTY_LABELS, LABELS, NAVIGATION, PARAM_FAMILIES
 from mika.app.console_menu import menu_for
 from mika.app.constellation import Constellation
 from mika.app.domains import DOMAINS, part
+from mika.app.domains.agenda.desk import AgendaSettingsDesk
 from mika.app.handmade import access, approval_sources, rights, waiting
 from mika.app.handmade.home import HomePage
 from mika.app.handmade.now import NowPage

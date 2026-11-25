@@ -13,10 +13,10 @@ validée (``output/maquette-agenda-console/``).
   mots), avec qui ses agendas sont partagés ici.
 - **Ce qu'elle en fait** : en sous-onglets, ses rappels (dits, dus, tombés ; les prochains), ses propositions d'ajout,
   ses réponses d'invitation, ce qu'elle a ajouté seule — chacun avec sa conversation — et d'où ça vient.
-- **L'agenda de <son nom>** (l'onglet la nomme : ``self_.NAME_SLOT``) : sa mémoire montrée comme un agenda (``app/her_agenda.py``), tout, par personne.
+- **L'agenda de <son nom>** (l'onglet la nomme : ``self_.NAME_SLOT``) : sa mémoire montrée comme un agenda (``app/domains/agenda/her.py``), tout, par personne.
 
 Les données sont celles du plugin ``agenda`` (sa base, sa tranche, ses vues : la source pour la console en MCP et le
-repli), lues par ``agenda_reads.py``. Ses paramètres sont derrière la roue (``agendas/parametres``, ADR 0206).
+repli), lues par ``reads.py``. Ses paramètres sont derrière la roue (``agendas/parametres``, ADR 0206).
 """
 
 from __future__ import annotations
@@ -27,10 +27,18 @@ from datetime import date, timedelta
 from typing import Any
 from urllib.parse import urlencode
 
+from mika.app.domains.agenda.console.reads import (
+    ROSE,
+    Item,
+    Read,
+    conversation_of,
+    items,
+    proposal_args,
+    read,
+)
+from mika.app.domains.agenda.her import AHEAD, MOMENT, PROMISE, YEARLY, her_agenda
 from mika.app.handmade import WEEKDAYS
-from mika.app.handmade.agenda_reads import ROSE, Item, Read, conversation_of, items, proposal_args, read
 from mika.app.handmade.tabs import Got, Tab
-from mika.app.her_agenda import AHEAD, MOMENT, PROMISE, YEARLY, her_agenda
 from mika.contracts import agenda as agenda_c
 from mika.contracts import identity as identity_c
 from mika.inspector import render

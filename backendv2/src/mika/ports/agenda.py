@@ -1094,7 +1094,7 @@ class CalendarProvider(Protocol):
 class AgendaDesk(Protocol):
     """Ce que la console change d'un compte d'agenda dans les réglages, sans jamais écrire dans ses agendas (ADR 0309,
     lot 5) : le décocher ou le recocher, suivre ou ne plus suivre un de ses agendas, oublier sa connexion Google ou
-    Microsoft (et la retirer chez Google). Le port ``agenda_desk`` (``app/agenda_desk.py``) : chaque changement est
+    Microsoft (et la retirer chez Google). Le port ``agenda_desk`` (``app/domains/agenda/desk.py``) : chaque changement est
     écrit sous le verrou des réglages, puis les paramètres du plugin se rejournalisent. Chacun rend vrai s'il a changé
     quelque chose ; ``ValueError`` : un compte ou un agenda inconnu."""
 

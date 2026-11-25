@@ -3,7 +3,7 @@
 serveur lui donne et ceux qu'elle a branchés, leur sorte, leur synchro), ce qu'on lui partage et ce qu'elle partage —
 « Retirer » sur chaque partage (le geste de Réglages › Droits › Partages, ADR 0210 ; le donner reste au propriétaire) ;
 à droite ses prochains événements de la semaine : ses agendas, ce qu'on lui partage, et ce que l'agenda de Mika retient
-pour elle. Les données sont celles du plugin ``agenda`` (``agenda_reads.py``) ; un événement privé d'une autre personne
+pour elle. Les données sont celles du plugin ``agenda`` (``app/domains/agenda/console/reads.py``) ; un événement privé d'une autre personne
 reste « Occupé · privé ».
 """
 
@@ -16,7 +16,7 @@ from urllib.parse import urlencode
 
 from markupsafe import Markup
 
-from mika.app.handmade.agenda_reads import items, read
+from mika.app.domains.agenda.console.reads import items, read
 from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import PREFIX, UI, env
 from mika.plugins.agenda.inspect.views import (

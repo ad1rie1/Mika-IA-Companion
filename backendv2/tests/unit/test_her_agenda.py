@@ -1,5 +1,5 @@
 """« L'agenda de Mika » (ADR 0309, lot 3b) : ses promesses datées et les moments qu'elle voit venir, lus dans sa
-mémoire par sa porte et montrés comme un agenda (``app/her_agenda.py``), sur le vrai noyau composé.
+mémoire par sa porte et montrés comme un agenda (``app/domains/agenda/her.py``), sur le vrai noyau composé.
 
 - vu par Léa : ce qu'elle lui a promis, et les moments de sa vie qu'elle lui a racontés elle-même — rien de ce
   qu'Adrien a confié (sur elle comme sur lui), rien de secret, rien sans date ;
@@ -8,7 +8,7 @@ mémoire par sa porte et montrés comme un agenda (``app/her_agenda.py``), sur l
 
 from __future__ import annotations
 
-from mika.app.her_agenda import MOMENT, PROMISE, her_agenda, title_of
+from mika.app.domains.agenda.her import MOMENT, PROMISE, her_agenda, title_of
 from mika.contracts import memory as memory_c
 from mika.kernel.clock import DAY, HOUR
 from mika.kernel.events import Content, Origin

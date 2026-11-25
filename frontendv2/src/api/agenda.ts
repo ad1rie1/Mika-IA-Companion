@@ -207,7 +207,7 @@ export interface Found {
 
 /** Les bornes des champs que l'API reçoit (`plugins/agenda/actions.py`), en caractères. */
 export const AGENDA_LIMITS = { title: 300, location: 300, description: 8000, link: 1000, comment: 500, search: 120 } as const;
-/** Au plus tant de jours par période (`app/me/agenda.py::PERIOD_DAYS`). */
+/** Au plus tant de jours par période (`app/domains/agenda/api.py::PERIOD_DAYS`). */
 export const PERIOD_DAYS = 100;
 
 export function fetchCalendars(): Promise<Calendars> {

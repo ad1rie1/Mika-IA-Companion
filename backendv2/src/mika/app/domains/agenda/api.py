@@ -31,7 +31,7 @@ from starlette.routing import Route
 from mika.adapters.agenda import SERVICES, AgendaAccount, AgendaConfig, server_host
 from mika.adapters.agenda.config import ACCOUNT_KEY, COLORS
 from mika.adapters.web.session import account_of
-from mika.app.her_agenda import her_agenda, title_of
+from mika.app.domains.agenda.her import her_agenda, title_of
 from mika.app.me.api import (
     NO_STORE,
     OWN_MAX,

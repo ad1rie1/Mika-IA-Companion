@@ -398,10 +398,10 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
   tableau de Teams dans Réglages › Canaux) ;
   supprimer un compte efface ce que son extension avait apporté. L'ancienne adresse, Réglages › Plugins › Teams, y
   mène.
-- **Agendas** (ADR 0309, lot 5, `app/handmade/tabs/agendas.py`, lus par `app/handmade/agenda_reads.py` ; la vue du
+- **Agendas** (ADR 0309, lot 5, `app/domains/agenda/console/tabs.py`, lus par `app/domains/agenda/console/reads.py` ; la vue du
   plugin, source de la console en MCP et du repli : `plugins/agenda/inspect/views.py`). **Tous les agendas** : à gauche
   les agendas montrés, par personne, cochables (`?masques=` : décocher ne change que l'affichage, un agenda que son
-  propriétaire a masqué part décoché ; `handmade/agendas.js`), chacun avec l'état de sa synchro, et le compte des
+  propriétaire a masqué part décoché ; `app/domains/agenda/console/static/handmade/agendas.js`), chacun avec l'état de sa synchro, et le compte des
   comptes à reconnecter ; « Les agendas de » (`?qui=` : toi, une ou plusieurs personnes, elle) et la période (`?du=`,
   « Aujourd'hui », ‹ ›) ; Semaine · Mois · Liste en bouton à choix au bout de la barre d'onglets (`?vue=`) ; un seul
   bandeau quand un compte est à reconnecter ou en panne ; la semaine de 8 h à 22 h par quart d'heure (des classes : la
@@ -419,14 +419,14 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
   propositions d'ajout, ses réponses d'invitation (la réponse, son mot, de la part de qui, pourquoi), ce qu'elle a
   écrit seule — chacun avec sa conversation et, s'il attend, « Examiner » — et d'où ça vient. **L'agenda de Mika** (son nom tiré
   de sa persona, dans l'onglet comme dans la page : `self_.NAME_SLOT`) : sa mémoire montrée comme un agenda
-  (`app/her_agenda.py`) — ses promesses datées, ce qu'elle voit venir, les dates qui reviennent, tout, par personne
+  (`app/domains/agenda/her.py`) — ses promesses datées, ce qu'elle voit venir, les dates qui reviennent, tout, par personne
   (« Pour ») ; cette semaine, puis « Plus tard ». **Paramètres**, la roue (ADR 0206 ;
   `handmade/agendas/parametres.html`) : l'application Google du serveur (son identifiant, son secret scellé, le pas à
   pas), l'application Microsoft — la même que celle du courrier (ADR 0238) —, puis les paramètres du plugin : la
   synchronisation (la cadence de chaque sorte, la fenêtre, le recul après une panne, l'historique gardé), les rappels
   qu'elle propose d'office (un agenda du système, un agenda branché ; un abonnement n'en a pas ; « la veille au soir,
   à »), les invitations, les accords ; ce qui se règle ailleurs. **La fiche d'un agenda** (`fiche/agenda/<compte>~<clé>`,
-  `app/handmade/subjects/agenda.py`) : sa couleur et son nom, son état en étiquettes, ses faits sur une ligne ;
+  `app/domains/agenda/console/subject.py`) : sa couleur et son nom, son état en étiquettes, ses faits sur une ligne ;
   **Événements** (un seul bandeau quand son compte est à reconnecter, une bande de chiffres, ses événements paginés,
   À venir · Passés), **Partages** (ici, à quel niveau, ce qu'elle en fait avec chacune, « Retirer » : le geste de
   Réglages › Droits › Partages), **Droits** (son tableau, lu ; « Régler ce tableau » mène à Réglages › Droits),

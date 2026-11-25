@@ -24,7 +24,7 @@ from urllib.parse import urlencode
 
 from markupsafe import Markup
 
-from mika.app.handmade.agenda_reads import Read, read
+from mika.app.domains.agenda.console.reads import Read, read
 from mika.app.handmade.subjects.parts import STYLES as FICHE_STYLES
 from mika.inspector import render
 from mika.inspector.pages.subjects import subject_url
