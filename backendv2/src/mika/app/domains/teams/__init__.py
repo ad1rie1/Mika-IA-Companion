@@ -72,5 +72,6 @@ TEAMS = Domain(
                                             "elle apprend qu'elle est partie, retouchée ou non")},
         "capabilities": {"teams.send": "Réponse Teams"},
         "enrichers": {"teams": "Ses conversations Teams"},
+        "signals": {"teams_message": "un message Teams", "teams_sent": "un message Teams envoyé à sa place"},
     },
 )

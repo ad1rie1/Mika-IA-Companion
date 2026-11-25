@@ -344,6 +344,15 @@ BUNDLE_LABELS: dict[str, str] = _named("bundles", {
     "attention": "Ses pensées", "self": "Son journal", "social": "Qui lui parle",
 })
 
+#: La sorte d'un signal qu'elle remarque, en mots (Ses pensées › Ce qu'elle remarque) : celles d'une app sont libres,
+#: elles restent telles quelles. Celles d'un domaine sont dans sa fiche (``labels["signals"]``).
+SIGNAL_LABELS: dict[str, str] = _named("signals", {
+    # son monde (``faculties/world/notice.py``, ``faculties/world/__init__.py``), ses liens (``faculties/social``)
+    # et ce que lui signale un appareil (``app/mindport.py``, ``sense``)
+    "change": "un changement chez elle", "setback": "un contretemps", "gesture": "un geste",
+    "bond_shifted": "un lien qui change", "one_sided": "un lien à sens unique", "signal": "un signal",
+})
+
 #: Le nom court de chaque capacité : ce qu'une ligne ou une puce de « À valider » et l'historique en disent, sans couper
 #: sa phrase. Celle-ci reste sa description, au survol et dans l'en-tête de la demande ouverte.
 CAPABILITY_LABELS: dict[str, str] = _named("capabilities", {})

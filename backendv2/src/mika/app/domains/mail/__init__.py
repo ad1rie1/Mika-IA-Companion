@@ -65,5 +65,6 @@ MAIL = Domain(
         "effects": {"email:effect.executed": ("agit", "Un mail parti", "elle apprend qu'il est parti, retouché ou non")},
         "capabilities": {"email.send": "Mail"},
         "enrichers": {"mail": "Son courrier"},
+        "signals": {"mail": "un mail", "sent_by_operator": "un mail envoyé à sa place"},
     },
 )

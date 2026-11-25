@@ -30,7 +30,7 @@ from typing import Any
 
 from markupsafe import Markup
 
-from mika.app.console import FACULTY_LABELS
+from mika.app.console import FACULTY_LABELS, SIGNAL_LABELS
 from mika.app.handmade import date_fr
 from mika.app.handmade.lists import listing
 from mika.app.handmade.tabs import (
@@ -46,10 +46,6 @@ from mika.app.handmade.tabs import (
     subpanes,
     text,
 )
-from mika.contracts import camera as camera_c
-from mika.contracts import email as email_c
-from mika.contracts import rss as rss_c
-from mika.contracts import teams as teams_c
 from mika.faculties.attention import inspect as attention_view
 from mika.faculties.self import inspect as self_view
 from mika.inspector.ui import env
@@ -120,16 +116,9 @@ def pensees(got: Got) -> Markup | None:
 #: une source qui nomme ce qui la suit (« rss:<flux> », « forge:<app> », « appareil:<appareil> », celle de
 #: ``MindPort.sense``) : ce qu'elle en dit
 SOURCE_PREFIXES = {"rss": "le flux « {} »", "forge": "son app « {} »", "appareil": "l'appareil « {} »"}
-#: la sorte d'un signal, en mots (celles d'une app sont libres : elles restent telles quelles)
-KINDS_FR = {
-    email_c.MAIL: "un mail", email_c.SENT_KIND: "un mail envoyé à sa place",
-    teams_c.MESSAGE: "un message Teams", teams_c.SENT_KIND: "un message Teams envoyé à sa place",
-    rss_c.ENTRY: "un article", camera_c.VIEW: "ce que voit la caméra",
-    # son monde (``faculties/world/notice.py``, ``faculties/world/__init__.py``), ses liens (``faculties/social``)
-    # et ce que lui signale un appareil (``app/mindport.py``, ``sense``)
-    "change": "un changement chez elle", "setback": "un contretemps", "gesture": "un geste",
-    "bond_shifted": "un lien qui change", "one_sided": "un lien à sens unique", "signal": "un signal",
-}
+#: la sorte d'un signal, en mots (celles d'une app sont libres : elles restent telles quelles) : celles du cadre
+#: et celles que chaque domaine dit dans sa fiche (``app/console.py::SIGNAL_LABELS``)
+KINDS_FR = SIGNAL_LABELS
 
 
 def source_name(key: str) -> str:

@@ -97,7 +97,6 @@ FOREVER: dict[str, str] = {
 STILL: dict[str, set[str]] = {
     "handmade/directory.py": {"contacts"},
     "handmade/tabs/people.py": {"contacts"},
-    "handmade/tabs/thoughts.py": {"mail", "senses", "teams"},
     "mindport.py": {"maps", "projects", "senses", "wakeup"},
     "preview/__init__.py": {"mail", "maps", "projects", "teams"},
 }

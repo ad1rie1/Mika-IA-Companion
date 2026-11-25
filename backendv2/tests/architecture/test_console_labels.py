@@ -28,7 +28,11 @@ from mika.app.composition import READING, arbitration, faculties
 from mika.app.handmade.tabs.system import PROJECTIONS
 from mika.contracts import agency as agency_c
 from mika.contracts import body as body_c
+from mika.contracts import camera as camera_c
+from mika.contracts import email as email_c
+from mika.contracts import rss as rss_c
 from mika.contracts import social as social_c
+from mika.contracts import teams as teams_c
 from mika.faculties.expression import why
 from mika.inspector.names import CONTENT_FIELDS, OTHER_EFFECTS
 from mika.inspector.names import EVENTS as CONSOLE_EVENTS
@@ -200,6 +204,14 @@ def test_every_port_a_tool_needs_is_named_with_its_settings_page():
     for port, (said, page) in console.LABELS.needs.items():
         # une phrase, pas la clé du port, et une page où le régler (qu'elle existe : tests/protocol/test_console_tools.py)
         assert said and port not in said and page, port
+
+
+def test_the_kinds_of_signal_a_domain_emits_are_named_by_its_card():
+    """La sorte d'un signal (un mail, un message Teams, un article, ce que voit la caméra) est dite en mots dans la
+    fiche de son domaine (``labels["signals"]``), par sa valeur : si la constante de son contrat changeait, Ses
+    pensées › Ce qu'elle remarque montrerait son nom brut."""
+    kinds = (email_c.MAIL, email_c.SENT_KIND, teams_c.MESSAGE, teams_c.SENT_KIND, rss_c.ENTRY, camera_c.VIEW)
+    assert not [k for k in kinds if k not in console.SIGNAL_LABELS]
 
 
 def test_every_veto_the_code_can_set_is_named():
