@@ -374,7 +374,7 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
   pas au choix fait ne paraît pas, et une adresse courante propose ses serveurs, ADR 0174), puis les paramètres
   généraux du courrier (relevé, ce qu'elle en dit, ses brouillons, la lecture). L'ancienne adresse, Réglages › Plugins › Boîtes
   aux lettres, y mène.
-- **Teams** (ADR 0069, `app/handmade/tabs/teams.py`) : Conversations, comme une messagerie (le dernier message,
+- **Teams** (ADR 0069, `app/domains/teams/console/tabs.py`) : Conversations, comme une messagerie (le dernier message,
   l'heure, une question sans réponse, une réponse en chemin ; sans extension, comment la brancher) ; Réponses, celles
   qui attendent ton accord d'abord, chacune en face du message auquel elle répond (« Examiner et décider »), puis ce
   que les autres sont devenues, et en pied le tableau de Teams dans Réglages › Canaux (`?canal=teams:<clé>` pour le
@@ -385,7 +385,7 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
   ligne (à qui, clé, dernier envoi), ou le compte choisi — ses chiffres, sa clé (Nouvelle clé, Retirer la clé), le
   pas-à-pas, comment ses réponses partent : le tableau de ce compte (Réglages › Canaux, `?canal=teams:<clé>`), et sa
   voix et sa signature, « Modifier ce compte » (ses réglages, qui ramènent à son extension : son compte et sa clé côte
-  à côte). La fiche d'une conversation (`app/handmade/subjects/teams.py`) : le fil en bulles, puis « Écrire dans
+  à côte). La fiche d'une conversation (`app/domains/teams/console/subject.py`) : le fil en bulles, puis « Écrire dans
   cette conversation », sur tout compte (ADR 0231) — une note dit sous quel nom il part (« ton nom » pour un compte à
   toi, sinon le nom de la personne du compte ; puis, s'il est connu, celui que Teams lui donne), la confirmation le redit ; il part
   aussitôt par l'extension de ce compte, sans sa signature, audité ; Teams coupé ou le compte décoché, la carte dit

@@ -15,7 +15,7 @@ serveur et s'audite (``moi.<geste>``) ; une création redite avec la même clé 
 Une ressource qui n'est pas à elle n'existe pas : le même 404 qu'une ressource inconnue. Le contrat, route par route :
 ``docs/protocole-moi.md``.
 
-Ce paquet porte le cadre et les modules qui n'ont pas encore rejoint leur domaine (``mail``, ``teams``, ``agenda``…) ;
+Ce paquet porte le cadre et les modules qui n'ont pas encore rejoint leur domaine (``mail``, ``agenda``…) ;
 celui d'un domaine qui a sa fiche vit dans son dossier (``app/domains/<nom>/api.py``, ADR 0310). Le cadre qu'ils
 emploient tous (``Me``, ``Call``, ``Denied``, la déclaration d'une route) est dans ``api.py`` ; leurs petites aides
 dans ``common.py`` ; la règle de partage est dans ``vocab.ownership``, que ``common.py`` lit. ``assembly.py`` réunit

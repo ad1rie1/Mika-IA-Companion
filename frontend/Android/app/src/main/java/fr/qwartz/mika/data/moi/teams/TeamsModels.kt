@@ -6,7 +6,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /*
- * Les formes de Teams dans l'API par personne (`backendv2/docs/protocole-moi.md` § 4, code `app/me/teams.py`). Chaque
+ * Les formes de Teams dans l'API par personne (`backendv2/docs/protocole-moi.md` § 4, code `app/domains/teams/api.py`). Chaque
  * champ a son défaut : `MikaJson` ignore ce qu'il ne connaît pas, et un champ absent ne casse rien. Les instants sont en
  * millisecondes (0 : jamais). Une conversation se désigne par sa clé (`<compte>~<identifiant>`, l'identifiant seul
  * pour le compte `principal`), un message par sa référence (`ref`).

@@ -16,8 +16,8 @@ from mika.adapters.teams import TeamsStore
 from mika.app import datadir, schema
 from mika.app.cli.common import _with_settings
 from mika.app.domains import DOMAINS, part
+from mika.app.domains.teams.desk import TeamsDesk
 from mika.app.settings import Settings
-from mika.app.teams import TeamsDesk
 from mika.ports.teams import DEFAULT_ACCOUNT as DEFAULT_TEAMS_ACCOUNT
 
 

@@ -18,7 +18,7 @@ Les contrats qui traversent le réseau, lus des deux côtés :
 
 - **Chat (WebSocket et HTTP)** : `backendv2/src/mika/adapters/web/` (`protocol.py`, `app.py`, `hub.py`, `accounts.py`) et `backendv2/docs/protocole-chat.md`, face à `frontend/Web/src/types/messages.ts` et `frontend/Web/src/network/`, et à `frontend/Android/app/src/main/java/fr/qwartz/mika/data/net/` (`Frames.kt`, `FrameCodec.kt`, `MikaProtocol.kt`, `ChatFrameWriter.kt`, `OutboxPolicy.kt`).
 - **Monde 3D** : `backendv2/src/mika/contracts/world.py`, `contracts/place.py`, `adapters/world/` et `backendv2/docs/protocole-monde.md`, face au code généré `frontend/Unity/Mika/Assets/Mika/Runtime/Protocol/Generated/` (via `gen_world_protocol.py`), à `Runtime/Net/` et à ce que le client web lit (`inner_state.place`, `frontend/Web/src/vtuber/locomotion/`).
-- **Teams** : `backendv2/src/mika/plugins/teams/`, `contracts/teams.py` et `app/teams.py` (`/api/teams/inbox`, `/api/teams/outbox`, clé `mtk_…`), face à `frontend/Extension/` (`background.js`, `lib/outbox.js`, `lib/extract.js`).
+- **Teams** : `backendv2/src/mika/plugins/teams/`, `contracts/teams.py` et `app/domains/teams/desk.py` (`/api/teams/inbox`, `/api/teams/outbox`, clé `mtk_…`), face à `frontend/Extension/` (`background.js`, `lib/outbox.js`, `lib/extract.js`).
 
 Ce qui compte :
 - Un type de trame, un champ ou une valeur d'énumération émis d'un côté et ignoré, mal nommé ou mal typé de l'autre (nombre ou chaîne, optionnel ou requis, millisecondes ou secondes, UTC ou heure locale).

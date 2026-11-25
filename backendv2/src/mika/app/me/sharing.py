@@ -29,11 +29,11 @@ from starlette.routing import Route
 
 from mika.adapters.mail.config import MailAccount, MailConfig
 from mika.adapters.teams import TeamsAccount
+from mika.app.domains.teams import api as teams_me
 from mika.app.domains.tools import api as mcp_me
 from mika.app.domains.tools.settings import ToolsSettings
 from mika.app.me import agenda as agenda_me
 from mika.app.me import mail as mail_me
-from mika.app.me import teams as teams_me
 from mika.app.me.api import Call, Denied, MeApiBase, missing, person_of, refused
 from mika.app.me.common import settings_of
 from mika.contracts import identity as identity_c

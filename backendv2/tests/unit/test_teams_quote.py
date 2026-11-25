@@ -12,7 +12,7 @@ gardée avec lui, rendue à l'écran et lue par Mika.
 from __future__ import annotations
 
 from mika.adapters.teams import TeamsConfig, TeamsStore
-from mika.app.teams import TeamsDesk, batch_of
+from mika.app.domains.teams.desk import TeamsDesk, batch_of
 from mika.plugins.teams.reactions import quote_said
 from mika.ports.teams import DEFAULT_ACCOUNT as PRINCIPAL
 from mika.ports.teams import QUOTE_PREVIEW_MAX, Draft, Quote, message_ref

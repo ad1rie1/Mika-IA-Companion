@@ -60,8 +60,6 @@ PACKAGES: dict[str, tuple[str, ...]] = {
 #: les modules d'``app`` qui sont à un domaine et attendent leur déménagement dans son dossier : les importer, c'est
 #: déjà le nommer. Un module déménagé sort de cette table (il n'existe plus : la garde le dit)
 TO_MOVE: dict[str, tuple[str, ...]] = {
-    "teams": ("app.teams", "app.me.teams", "app.me.teams_extension", "app.handmade.tabs.teams",
-              "app.handmade.subjects.teams"),
     "agenda": ("app.agenda_desk", "app.her_agenda", "app.me.agenda", "app.handmade.tabs.agendas",
                "app.handmade.subjects.agenda", "app.handmade.agenda_reads"),
     "mail": ("app.me.mail", "app.handmade.tabs.mail", "app.handmade.subjects.mail", "app.preview.mail"),
@@ -110,11 +108,9 @@ STILL: dict[str, set[str]] = {
     "handmade/subjects/project_links.py": {"projects"},
     "handmade/subjects/project_tickets.py": {"projects"},
     "handmade/subjects/project_zones.py": {"projects"},
-    "handmade/subjects/teams.py": {"teams"},
     "handmade/tabs/agendas.py": {"agenda"},
     "handmade/tabs/mail.py": {"mail"},
     "handmade/tabs/people.py": {"contacts"},
-    "handmade/tabs/teams.py": {"teams"},
     "handmade/tabs/thoughts.py": {"mail", "senses", "teams"},
     "handmade/waiting.py": {"contacts", "mail", "teams"},
     "me/agenda.py": {"agenda", "mail"},
@@ -131,7 +127,6 @@ STILL: dict[str, set[str]] = {
     "me/rights.py": {"forge", "mail", "teams", "tools"},
     "me/settings.py": {"mail", "teams"},
     "me/sharing.py": {"agenda", "mail", "teams", "tools"},
-    "me/teams.py": {"teams"},
     "mindport.py": {"maps", "projects", "senses", "wakeup"},
     "preview/__init__.py": {"mail", "maps", "projects", "teams"},
     "preview/git.py": {"projects"},
@@ -140,7 +135,6 @@ STILL: dict[str, set[str]] = {
     "server.py": {"agenda", "contacts", "mail", "projects", "teams", "tools"},
     "settings.py": {"agenda", "mail", "teams"},
     "settings_sections/plugins.py": {"agenda", "mail", "teams"},
-    "teams.py": {"teams"},
 }
 
 

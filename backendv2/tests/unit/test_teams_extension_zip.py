@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from mika.app.me import teams_extension
-from mika.app.me.teams_extension import packed, version_of
+from mika.app.domains.teams import extension as teams_extension
+from mika.app.domains.teams.extension import packed, version_of
 
 
 def extension(root: Path, version: object = "1.2.3") -> Path:

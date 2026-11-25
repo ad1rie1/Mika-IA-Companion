@@ -14,7 +14,7 @@ import pytest
 from starlette.websockets import WebSocketDisconnect
 
 from mika.adapters.web import doors
-from mika.app import teams as teams_app
+from mika.app.domains.teams import desk as teams_app
 from mika.ports.teams import Draft
 from tests.protocol.test_teams_web import DM, EXTENSION, batch, headers, new_key
 from tests.protocol.test_web import world  # noqa: F401 — fixture

@@ -21,7 +21,7 @@ import pytest
 
 from mika.adapters.contacts import ContactsStore
 from mika.adapters.teams import TeamsAccount, TeamsConfig, TeamsStore
-from mika.app.teams import batch_of
+from mika.app.domains.teams.desk import batch_of
 from mika.contracts import identity as identity_c
 from mika.contracts import transcript as transcript_c
 from mika.kernel.frame import Audience

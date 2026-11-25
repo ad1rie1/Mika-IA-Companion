@@ -21,7 +21,7 @@ from types import SimpleNamespace
 import pytest
 
 from mika.adapters.teams import TeamsConfig, TeamsStore
-from mika.app.teams import batch_of, photo_of
+from mika.app.domains.teams.desk import batch_of, photo_of
 from mika.plugins.teams.reactions import reactions_said
 from mika.ports.teams import (
     PHOTO_KEPT,

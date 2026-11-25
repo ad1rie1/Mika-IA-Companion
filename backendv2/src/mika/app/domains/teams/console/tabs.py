@@ -1,5 +1,5 @@
 """Relations & échanges › Teams : ses onglets, chacun dans sa forme (ADR 0177), alignés sur les fiches Teams déjà
-dessinées (``subjects/teams.py`` : le fil en bulles, une réponse en face du message auquel elle répond).
+dessinées (``subject.py`` : le fil en bulles, une réponse en face du message auquel elle répond).
 
 - **Conversations** : comme une messagerie — une ligne par conversation, la plus récente d'abord : sa sorte, son
   dernier message (qui l'a écrit), l'heure ; les questions qui attendent une réponse et une réponse d'elle en

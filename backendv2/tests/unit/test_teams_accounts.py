@@ -29,7 +29,7 @@ from pydantic import ValidationError
 
 from mika.adapters.teams import TeamsAccount, TeamsConfig, TeamsStore
 from mika.app import schema
-from mika.app.teams import digest
+from mika.app.domains.teams.desk import digest
 from mika.contracts import identity as identity_c
 from mika.contracts import teams as teams_c
 from mika.faculties.projects.tools import caretaker

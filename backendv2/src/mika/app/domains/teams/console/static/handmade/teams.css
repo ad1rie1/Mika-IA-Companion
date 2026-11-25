@@ -1,4 +1,4 @@
-/* Relations & échanges › Teams (app/handmade/tabs/teams.py, ADR 0177) : ses conversations comme une messagerie, ses
+/* Relations & échanges › Teams (app/domains/teams/console/tabs.py, ADR 0177) : ses conversations comme une messagerie, ses
    réponses en face du message auquel elles répondent (les bulles de base.css, comme sur les fiches Teams), l'extension.
    Fond blanc et filets, pas de carte dans une carte ; les couleurs viennent des jetons. Classes teams-… */
 

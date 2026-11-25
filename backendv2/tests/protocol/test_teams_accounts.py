@@ -17,8 +17,8 @@ import re
 import time
 
 from mika.adapters.teams import TeamsConfig
+from mika.app.domains.teams.desk import digest
 from mika.app.settings import TEAMS_KEYS_KEY
-from mika.app.teams import digest
 from mika.contracts import runtime as rt
 from mika.plugins.teams import params_of
 from mika.ports.teams import Draft

@@ -24,9 +24,9 @@ from urllib.parse import urlencode
 from starlette.responses import Response
 from starlette.routing import Route
 
+from mika.app.domains.teams.extension import download, version_of
 from mika.app.me.api import PREFIX, Call, Denied, MeApiBase, done, form, missing
 from mika.app.me.common import allows, held_by, millis, only_owner, opened, snippet, work_of
-from mika.app.me.teams_extension import download, version_of
 from mika.plugins import teams as teams_p
 from mika.plugins.teams import (
     UNDER_WAY,

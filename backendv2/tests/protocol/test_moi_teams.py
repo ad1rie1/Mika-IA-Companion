@@ -11,9 +11,9 @@ import time
 import zipfile
 
 from mika.adapters.teams import TeamsAccount, TeamsConfig
+from mika.app.domains.teams import api as teams_me
+from mika.app.domains.teams.extension import EXTENSION_DIR
 from mika.app.me import form
-from mika.app.me import teams as teams_me
-from mika.app.me.teams_extension import EXTENSION_DIR
 from mika.contracts import runtime as rt
 from mika.contracts import teams as teams_c
 from mika.kernel.events import Content

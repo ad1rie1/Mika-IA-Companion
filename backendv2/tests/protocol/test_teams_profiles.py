@@ -8,7 +8,7 @@ seul, comme un message : un profil illisible est laissé de côté, jamais le lo
 
 from __future__ import annotations
 
-from mika.app.teams import profile_of
+from mika.app.domains.teams.desk import profile_of
 from tests.protocol.test_teams_web import batch, headers, new_key
 from tests.protocol.test_web import world  # noqa: F401 — fixture
 

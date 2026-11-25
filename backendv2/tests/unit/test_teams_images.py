@@ -15,7 +15,7 @@ import pytest
 from mika.adapters.teams import TeamsConfig, TeamsStore
 from mika.adapters.teams import store as store_mod
 from mika.adapters.teams.store import described
-from mika.app.teams import batch_of
+from mika.app.domains.teams.desk import batch_of
 from mika.kernel.clock import MINUTE
 from mika.plugins.teams import images as images_mod
 from mika.ports.preprocess import Studied

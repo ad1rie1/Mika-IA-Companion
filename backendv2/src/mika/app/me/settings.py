@@ -22,9 +22,9 @@ from starlette.routing import Route
 
 from mika.adapters.mail.config import MICROSOFT, MailAccount, MailConfig
 from mika.adapters.teams import TeamsAccount, TeamsConfig
+from mika.app.domains.teams import api as teams_me
 from mika.app.me import mail as mail_me
 from mika.app.me import rights as rights_me
-from mika.app.me import teams as teams_me
 from mika.app.me.api import Call, Denied, MeApiBase, done, form, missing, refused
 from mika.app.me.common import own_room, settings_of
 from mika.app.me.hosts import public_only

@@ -24,7 +24,7 @@ import java.time.ZoneId
  * cite, son extrait, son heure, où elle mène. Tout se teste sur la JVM.
  */
 
-/** Les bornes que l'API tient (`app/me/teams.py`, en caractères) : au-delà, elle refuse — elle ne coupe jamais. */
+/** Les bornes que l'API tient (`app/domains/teams/api.py`, en caractères) : au-delà, elle refuse — elle ne coupe jamais. */
 object TeamsLimits {
     const val BODY = 4000
     const val NOTE = 500
@@ -39,7 +39,7 @@ object TeamsLimits {
 /** Une réponse encore en chemin (une autre ne se prépare pas dans la même conversation). */
 val UNDER_WAY: Set<String> = setOf(ReplyStates.WAITING, ReplyStates.APPROVED, ReplyStates.QUEUED, ReplyStates.PLACED)
 
-/** Ce que dit le serveur d'une demande déjà faite (`app/me/teams.py::prefill`). */
+/** Ce que dit le serveur d'une demande déjà faite (`app/domains/teams/api.py::prefill`). */
 const val ALREADY_ASKED = "Elle y travaille déjà."
 
 /** Au-delà, l'extension ne s'est pas manifestée depuis trop longtemps pour que ce qui part parte vite. */

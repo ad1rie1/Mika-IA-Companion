@@ -22,8 +22,9 @@ from starlette.responses import Response
 
 from mika.app.me.api import Call, Denied
 
-#: le dossier de l'extension, dans le dépôt à côté du serveur (``backendv2/src/mika/app/me`` → la racine du dépôt)
-EXTENSION_DIR = Path(__file__).resolve().parents[5] / "frontend" / "Extension"
+#: le dossier de l'extension, dans le dépôt à côté du serveur (``backendv2/src/mika/app/domains/teams`` → la racine du
+#: dépôt)
+EXTENSION_DIR = Path(__file__).resolve().parents[6] / "frontend" / "Extension"
 #: ce qui reste au dépôt, à la racine de l'extension : ses tests, ce qui les lance, sa doc
 LEFT_OUT = frozenset({"tests", "node_modules", "package.json", "package-lock.json", "README.md"})
 #: le dossier que le zip crée en se décompressant

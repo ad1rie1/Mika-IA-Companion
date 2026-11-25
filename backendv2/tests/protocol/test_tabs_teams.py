@@ -1,4 +1,4 @@
-"""Relations & échanges › Teams, chaque onglet dans sa forme (``app/handmade/tabs/teams.py``, ADR 0177), à travers le
+"""Relations & échanges › Teams, chaque onglet dans sa forme (``app/domains/teams/console/tabs.py``, ADR 0177), à travers le
 vrai serveur : ses conversations comme une messagerie (leur dernier message), ses réponses qui attendent ton accord
 d'abord, en face du message auquel elles répondent ; l'extension, ses chiffres et comment la brancher."""
 

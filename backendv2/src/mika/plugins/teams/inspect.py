@@ -719,7 +719,7 @@ def _write(s: TeamsState, frame: Frame, args: WriteArgs, ctx: Any) -> Done:
     à elle reviennent ensuite dans le fil (``own``), comme ce qu'elle tape dans Teams. Le journal le sait aussitôt
     (``teams.written``, sans texte) : ses réponses qui attendaient un accord dans cette conversation n'ont plus lieu
     d'être (ADR 0199) — refusées par ``teams.answered``, jamais par ce geste, qui ne peut donc pas échouer à cause
-    d'elles une fois le message en file. Le même geste sert l'espace de la personne (``app/me/teams.py``, après sa
+    d'elles une fois le message en file. Le même geste sert l'espace de la personne (``app/domains/teams/api.py``, après sa
     garde du niveau « s'en servir ») et la console, où un opérateur écrit aussi dans le compte d'une autre personne
     (ADR 0231) : le message part sous le nom de celle-ci, le brouillon garde qui l'a écrit, l'audit aussi."""
     port = ctx.ports.get("teams")

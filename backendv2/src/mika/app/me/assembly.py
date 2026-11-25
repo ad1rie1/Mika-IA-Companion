@@ -14,6 +14,7 @@ from typing import Any
 from starlette.routing import Route
 
 from mika.app.domains import DOMAINS, part
+from mika.app.domains.teams import api as teams
 from mika.app.me import (
     agenda,
     mail,
@@ -25,7 +26,6 @@ from mika.app.me import (
     rights,
     settings,
     sharing,
-    teams,
     writing,
 )
 from mika.app.me.api import Call, MeApiBase

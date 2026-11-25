@@ -91,8 +91,8 @@ IMPLEMENTATIONS: dict[tuple[str, str], tuple[tuple[str, str], ...]] = {
     ("ports/store.py", "EventStore"): (("adapters/store_sql/store.py", "SqlStore"),),
     ("ports/store.py", "Sql"): (("adapters/store_sql/store.py", "SqlConn"),),
     ("ports/teams.py", "TeamsPort"): (("adapters/teams/store.py", "TeamsStore"),),
-    ("ports/teams.py", "TeamsGate"): (("app/teams.py", "TeamsDesk"),),
-    ("ports/teams.py", "TeamsKeys"): (("app/teams.py", "TeamsDesk"),),
+    ("ports/teams.py", "TeamsGate"): (("app/domains/teams/desk.py", "TeamsDesk"),),
+    ("ports/teams.py", "TeamsKeys"): (("app/domains/teams/desk.py", "TeamsDesk"),),
     ("ports/vectors.py", "Embedder"): (
         ("adapters/vectors/embedders.py", "HashEmbedder"),
         ("adapters/vectors/embedders.py", "SentenceEmbedder"),

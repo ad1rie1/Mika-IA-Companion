@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from mika.adapters.teams import TeamsConfig, TeamsStore
 from mika.adapters.teams.store import same_person, written_by_self
-from mika.app.teams import batch_of
+from mika.app.domains.teams.desk import batch_of
 from mika.ports.teams import DEFAULT_ACCOUNT as PRINCIPAL
 from mika.sim.clock import SimClock
 from mika.sim.lane import at_paris

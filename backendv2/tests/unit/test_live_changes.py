@@ -16,9 +16,9 @@ from mika.adapters.contacts import ContactsStore
 from mika.adapters.teams import TeamsAccount, TeamsConfig, TeamsStore
 from mika.adapters.web.accounts import Account
 from mika.adapters.web.hub import Hub
+from mika.app.domains.teams.desk import PRESENCE_EVERY_S, TeamsDesk
 from mika.app.me.api import Call, me_of
 from mika.app.me.changes import LiveChanges, Reader, Touch, touches_from, touches_of
-from mika.app.teams import PRESENCE_EVERY_S, TeamsDesk
 from mika.contracts import identity as identity_c
 from mika.contracts import location as location_c
 from mika.contracts import phone as phone_c
