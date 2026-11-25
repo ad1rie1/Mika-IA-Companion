@@ -66,3 +66,7 @@ class WakeupSettings(SettingsPart):
         del keys[name]
         await self._put(WAKEUP_KEYS_KEY, keys)
         return True
+
+
+#: la classe que le cadre prend par le nom du domaine (``Settings.named``)
+SETTINGS = WakeupSettings

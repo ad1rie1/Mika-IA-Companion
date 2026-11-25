@@ -13,10 +13,10 @@ from typing import Any
 
 from mika.app.domains.domain import LivePart
 from mika.app.domains.teams import api as teams_me
+from mika.app.domains.teams.settings import TEAMS_KEY, TEAMS_KEYS_KEY
 from mika.app.me.api import Call
 from mika.app.me.touches import OWN, PREPARE, Touch
 from mika.app.me.touches import state_of as _state
-from mika.app.settings import TEAMS_KEY, TEAMS_KEYS_KEY
 from mika.contracts import teams as teams_c
 from mika.plugins import teams as teams_p
 from mika.ports.changes import (
@@ -131,6 +131,8 @@ LIVE = LivePart(
     changes={TEAMS: from_change, TEAMS_DRAFTS: from_change, OUTBOX: from_change},
     levels={ACCOUNTS: levels},
     owner_of={ACCOUNTS: owner_of},
+    # ses comptes tels que ses réglages les disent, sans son extension : lus une fois par envoi, sur la boucle
+    listed={"teams": lambda port: port.accounts(extension=False)},
     effects=effect,
     tasks={teams_c.OWNER: work},
 )

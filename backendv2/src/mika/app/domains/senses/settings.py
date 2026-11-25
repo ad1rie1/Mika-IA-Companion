@@ -21,3 +21,7 @@ class SensesSettings(SettingsPart):
         clean = sorted({u.strip() for u in urls if u.strip().startswith(("http://", "https://"))})
         await self._put(FEEDS_KEY, clean)
         return clean
+
+
+#: la classe que le cadre prend par le nom du domaine (``Settings.named``)
+SETTINGS = SensesSettings

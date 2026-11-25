@@ -25,6 +25,7 @@ MAPS = Domain(
     "maps",
     places={"cartes": "la carte de sa position, l'index des lieux et les caches de la carte ; ses compteurs du "
                       "mois, eux, se sauvegardent"},
+    settings="mika.app.domains.maps.settings",
     wiring="mika.app.domains.maps.wiring",
     api="mika.app.domains.maps.api",
     live="mika.app.domains.maps.live",

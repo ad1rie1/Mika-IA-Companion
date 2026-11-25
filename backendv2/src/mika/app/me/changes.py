@@ -112,6 +112,8 @@ SEEN = {rule: seen for part in PARTS for rule, seen in part.seen.items()}
 #: règle → les niveaux de la personne sur ses propriétaires ; règle → le propriétaire d'une clé
 LEVELS = {rule: levels for part in PARTS for rule, levels in part.levels.items()}
 OWNER_OF = {rule: owner for part in PARTS for rule, owner in part.owner_of.items()}
+#: port du noyau → ses comptes, à lire une fois par envoi sur la boucle
+LISTED = {name: read for part in PARTS for name, read in part.listed.items()}
 #: propriétaire d'une tâche → où elle en est (la traduction de son domaine)
 TASKS = {owner: work for part in PARTS for owner, work in part.tasks.items()}
 
@@ -633,8 +635,7 @@ class LiveChanges:
         """(Sur la boucle.) Les boîtes et les comptes Teams que disent les réglages, lus une fois pour cet envoi : leur
         lecture passe par la base du journal, que seule la boucle lit. Illisibles : aucun (rien ne part qui les nomme)."""
         out: dict[str, Listed] = {}
-        for name, read in (("mail", lambda port: port.accounts()),
-                           ("teams", lambda port: port.accounts(extension=False))):
+        for name, read in (("mail", lambda port: port.accounts()), *LISTED.items()):
             port = self.kernel.ports.get(name)
             if port is not None:
                 got = call(functools.partial(read, port), label=f"le direct (les comptes de {name})")

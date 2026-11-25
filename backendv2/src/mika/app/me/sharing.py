@@ -94,7 +94,7 @@ def every_share(settings: Any, names: Mapping[str, str] | None = None) -> list[S
     lignes de chaque service qui a un propriétaire, puis ceux de chaque agenda (``names`` : leur nom, tel que la base
     de l'agenda le dit ; sinon sa clé courte) — ce que chaque personne lit sous « Partagé avec toi »."""
     out: list[Shared] = []
-    for kind, accounts in (("mail", settings.email().accounts), ("teams", settings.teams().accounts)):
+    for kind, accounts in (("mail", settings.email().accounts), ("teams", settings.named("teams").teams().accounts)):
         for key, spec in sorted(accounts.items()):
             out += [Shared(kind, key, spec.label or key, spec.owner, who[len(PERSON):], level)
                     for who, level in sorted(spec.shares.items())]
@@ -181,7 +181,7 @@ async def write_share(settings: Any, reconfigure: Callable[[], Awaitable[Any]] |
         await _write_calendar_share(settings, reconfigure, key, person, level, check)
         return
     async with settings.writing:
-        cfg = settings.email() if kind == "mail" else settings.teams()
+        cfg = settings.email() if kind == "mail" else settings.named("teams").teams()
         spec = cfg.accounts.get(key)
         if spec is None:
             raise missing()
@@ -195,7 +195,7 @@ async def write_share(settings: Any, reconfigure: Callable[[], Awaitable[Any]] |
                     {**spec.model_dump(), "shares": shares})}))
             else:
                 account = TeamsAccount.model_validate({**spec.model_dump(), "shares": shares})
-                await settings.save_teams(cfg.model_copy(update={"accounts": {**cfg.accounts, key: account}}))
+                await settings.named("teams").save_teams(cfg.model_copy(update={"accounts": {**cfg.accounts, key: account}}))
         except ValidationError as exc:
             raise refused(exc) from None
         if reconfigure is not None:

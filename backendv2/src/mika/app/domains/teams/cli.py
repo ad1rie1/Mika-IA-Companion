@@ -15,6 +15,7 @@ from mika.adapters.teams import TeamsStore
 from mika.app import datadir, schema
 from mika.app.cli.common import _with_settings
 from mika.app.domains.teams.desk import TeamsDesk
+from mika.app.domains.teams.settings import TeamsSettings
 from mika.app.settings import Settings
 from mika.ports.teams import DEFAULT_ACCOUNT as DEFAULT_TEAMS_ACCOUNT
 
@@ -22,7 +23,7 @@ from mika.ports.teams import DEFAULT_ACCOUNT as DEFAULT_TEAMS_ACCOUNT
 async def teams_command(settings: Settings, args: argparse.Namespace) -> dict[str, object]:
     """Teams (ADR 0069, 0186) hors ligne : la clé de l'extension d'un compte (neuve, montrée une fois ; retirée), et
     l'état de chaque compte."""
-    desk = TeamsDesk(settings, RealClock().now, None)
+    desk = TeamsDesk(settings.of(TeamsSettings), RealClock().now, None)
     account = getattr(args, "compte", "") or DEFAULT_TEAMS_ACCOUNT
     if args.teams_cmd == "key":
         try:
@@ -36,7 +37,7 @@ async def teams_command(settings: Settings, args: argparse.Namespace) -> dict[st
         return {"ok": await desk.revoke_key(account), "compte": account}
     if args.teams_cmd == "purge":
         return purge_teams(args.data, settings, account)
-    cfg = settings.teams()
+    cfg = settings.of(TeamsSettings).teams()
     teams_rules = [a.model_dump() for a in settings.canals().table("teams").lines]
     accounts = {}
     for name, a in sorted(cfg.accounts.items()):
@@ -56,7 +57,7 @@ def purge_teams(data: Path, settings: Settings, account: str) -> dict[str, objec
         bases = schema.targets(data)
         schema.migrate_data(data, bases)
         now = RealClock().now
-        teams, contacts = TeamsStore(settings.teams, bases["teams"], now=now), ContactsStore(bases["contacts"], now=now)
+        teams, contacts = TeamsStore(settings.of(TeamsSettings).teams, bases["teams"], now=now), ContactsStore(bases["contacts"], now=now)
         try:
             rows, seen = teams.drop_account(account), contacts.drop_source("teams", account)
         finally:

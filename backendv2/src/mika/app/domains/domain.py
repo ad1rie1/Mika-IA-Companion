@@ -13,6 +13,9 @@ chaque route son module. Tout champ est facultatif : un domaine ne dit que ce qu
 ``Destination``, un ``MenuLink`` : ``inspector.catalog``). Elle nomme les modules de ses parts (``api="mika.app.domains.contacts.api"``) ; le
 cadre les importe au moment d'assembler (``part``), et y lit un nom convenu :
 
+- ``settings`` : ``SETTINGS``, la classe de ses réglages (une ``app/settings.py::SettingsPart``). Le domaine la prend
+  lui-même par ``settings.of(SaClasse)`` ; une page du cadre qui croise plusieurs domaines, par son nom
+  (``settings.named("teams")``) ;
 - ``api`` : ``routes(api)``, ses routes de ``/api/moi`` ; et, s'il compte quelque chose pour la barre du haut,
   ``COUNTERS`` (son nom → ``count(call)``) ;
 - ``live`` : ``LIVE``, une ``LivePart`` ;
@@ -72,6 +75,10 @@ class LivePart:
     #: (une boîte, un compte) et son niveau (le sien, ce qu'on lui partage : lire, préparer, s'en servir). Le service
     #: y applique ce que la touche demande (``Touch.need``)
     levels: Mapping[str, Callable[..., Mapping[str, str]]] = field(default_factory=dict)
+    #: port du noyau → ses comptes tels que ses réglages les disent : ``listed(port)``, lu une fois par envoi sur la
+    #: boucle d'événements (leur lecture passe par la base du journal, que seule la boucle lit) ; les règles les
+    #: relisent ensuite dans un fil, par ce même nom de port
+    listed: Mapping[str, Callable[..., Any]] = field(default_factory=dict)
     #: règle d'une touche → le propriétaire d'une clé qu'elle nomme : ``owner_of(topic, key)`` (le compte d'une
     #: conversation, la boîte d'une référence) ; sans cela, une clé est son propre propriétaire
     owner_of: Mapping[str, Callable[..., str]] = field(default_factory=dict)
@@ -116,6 +123,8 @@ class Domain:
     places: Mapping[str, str] = field(default_factory=dict)
     #: le module de son câblage (``wire``, ``bind``)
     wiring: str | None = None
+    #: le module de ses réglages (``SETTINGS`` : sa ``SettingsPart``), pour qui les prend par le nom du domaine
+    settings: str | None = None
     #: le module de son API par personne (``routes``, ``COUNTERS``)
     api: str | None = None
     #: le module de sa part du direct (``LIVE``)

@@ -14,6 +14,7 @@ from mika.inspector.catalog import Destination, MenuLink
 WAKEUP = Domain(
     "wakeup",
     needs=("projects",),
+    settings="mika.app.domains.wakeup.settings",
     wiring="mika.app.domains.wakeup.wiring",
     console="mika.app.domains.wakeup.console",
     cli="mika.app.domains.wakeup.cli",

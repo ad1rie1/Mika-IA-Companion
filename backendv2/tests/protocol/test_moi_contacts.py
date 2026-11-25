@@ -6,6 +6,7 @@ contact d'une autre n'existe pas (le même 404) ; elle n'oublie que ce qui ne vi
 from __future__ import annotations
 
 from mika.adapters.teams import TeamsAccount, TeamsConfig
+from mika.app.domains.teams.settings import TeamsSettings
 from mika.contracts import runtime as rt
 from mika.plugins.email import EmailParams
 from mika.ports.contacts import (
@@ -49,7 +50,7 @@ def seed(world):  # noqa: F811
     bootstrap(client)
     adrien = client.get(API).json()["person"]
     lea = second_person(client, live)
-    client.portal.call(lambda: live.settings.save_teams(TeamsConfig(accounts={"equipe": TeamsAccount(
+    client.portal.call(lambda: live.settings.of(TeamsSettings).save_teams(TeamsConfig(accounts={"equipe": TeamsAccount(
         label="Équipe")})))
     # l'historique d'il y a trois jours, rangé déjà lu : rien n'est remarqué, la collecte de l'annuaire ne passe pas
     old = NOW // 1000 - 3 * 24 * 3_600_000

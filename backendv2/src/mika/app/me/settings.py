@@ -305,7 +305,7 @@ def _teams_settings(key: str, a: TeamsAccount, call: Call) -> dict[str, Any]:
 async def teams_get(call: Call) -> dict[str, Any]:
     key = call.arg("account", limit=40)
     teams_me.owned(call, key)
-    found = settings_of(call).teams().accounts.get(key)
+    found = settings_of(call).named("teams").teams().accounts.get(key)
     if found is None:
         raise missing()
     return {**_teams_settings(key, found, call), "rules": _rules_json(call, f"{TEAMS}:{key}")}
@@ -326,7 +326,7 @@ async def _teams_save(call: Call) -> dict[str, Any]:
 
 
 async def _teams_write(call: Call, settings: Any) -> dict[str, Any]:
-    cfg = settings.teams()
+    cfg = settings.named("teams").teams()
     values = _values(call, TEAMS_FIELDS)
     key = call.arg("account", limit=40)
     if key:
@@ -351,7 +351,7 @@ async def _teams_write(call: Call, settings: Any) -> dict[str, Any]:
         TeamsConfig.model_validate(new.model_dump())
     except ValidationError as exc:
         raise refused(exc) from None
-    await settings.save_teams(new)
+    await settings.named("teams").save_teams(new)
     await _rejournal(call)
     await audit(call.kernel, "moi.compte_teams", by=call.me.handle, subject_kind="compte_teams", subject=key)
     return {"ok": True, "message": "Compte Teams enregistré.", "account": key}
@@ -364,10 +364,10 @@ async def teams_remove(call: Call) -> dict[str, Any]:
     key = call.arg("account", limit=40)
     teams_me.owned(call, key)
     async with settings.writing:
-        cfg = settings.teams()
+        cfg = settings.named("teams").teams()
         if key not in cfg.accounts:
             raise missing()
-        await settings.save_teams(cfg.model_copy(update={"accounts": {k: a for k, a in cfg.accounts.items()
+        await settings.named("teams").save_teams(cfg.model_copy(update={"accounts": {k: a for k, a in cfg.accounts.items()
                                                                       if k != key}}))
         store = call.port("teams")
         if store is not None:

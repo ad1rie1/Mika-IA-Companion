@@ -5,6 +5,7 @@ montrée une seule fois ; comment part ce que Mika prépare depuis chacun, qu'el
 from __future__ import annotations
 
 from mika.adapters.mail.config import MailAccount, MailConfig
+from mika.app.domains.teams.settings import TeamsSettings
 from mika.app.me import common as common_me
 from mika.plugins import email as email_p
 from mika.vocab.canals import CanalRule, CanalTable, mail_rule, teams_rule
@@ -22,7 +23,7 @@ def boxes(client, live) -> dict:
 
 
 def teams_accounts(client, live) -> dict:
-    return client.portal.call(live.settings.teams).accounts
+    return client.portal.call(live.settings.of(TeamsSettings).teams).accounts
 
 
 def test_she_changes_her_name_and_her_password(world):  # noqa: F811
@@ -127,7 +128,7 @@ def test_she_removes_her_teams_account_and_its_key_goes_with_it(world):  # noqa:
     login(client, "lea")
     assert post(client, "/teams/account/remove", {"account": account}).status_code == 200
     assert account not in teams_accounts(client, live)
-    assert account not in client.portal.call(live.settings.teams_keys)
+    assert account not in client.portal.call(live.settings.of(TeamsSettings).teams_keys)
 
 
 def test_a_changed_connection_asks_for_the_password_again(world):  # noqa: F811

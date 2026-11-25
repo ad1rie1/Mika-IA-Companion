@@ -13,6 +13,7 @@ from mika.adapters.teams import TeamsStore
 from mika.app.domains.teams.desk import TeamsDesk
 from mika.app.domains.teams.extension import EXTENSION_DIR
 from mika.app.domains.teams.live import presence
+from mika.app.domains.teams.settings import TeamsSettings
 from mika.app.wiring import Wiring
 
 NAME = "teams"
@@ -22,9 +23,9 @@ KEYS = "teams_keys"
 
 def wire(w: Wiring) -> None:
     # Teams (ADR 0069) : ce que l'extension pousse, ses brouillons et la file (hors du journal), et la porte
-    store = w.ports[NAME] = TeamsStore(w.settings.teams, w.bases["teams"], now=w.clock.now)
+    store = w.ports[NAME] = TeamsStore(w.settings.of(TeamsSettings).teams, w.bases["teams"], now=w.clock.now)
     # ses clés, une par compte (ADR 0186) : la console les crée et les retire par ce port
-    desk = w.ports[KEYS] = w.parts[NAME] = w.web[NAME] = TeamsDesk(w.settings, w.clock.now, store)
+    desk = w.ports[KEYS] = w.parts[NAME] = w.web[NAME] = TeamsDesk(w.settings.of(TeamsSettings), w.clock.now, store)
     # l'extension de Teams (ADR 0246), servie en zip à qui est connecté
     w.me["extension"] = EXTENSION_DIR
     # le direct (ADR 0308) : son cache prévient de ses écritures validées — et la boîte d'envoi réveille l'extension
@@ -44,7 +45,7 @@ def inputs(settings: Any) -> dict[str, dict[str, Any]]:
     """Ce que ses réglages donnent aux paramètres du plugin ``teams`` : actif ou non, les tableaux de ses canaux (ADR
     0134 : ce qu'elle envoie à ta place), ses comptes."""
     canaux = settings.canals().model_dump(mode="json")
-    teams = settings.teams()
+    teams = settings.of(TeamsSettings).teams()
     # à qui est chaque compte Teams (ADR 0186 ; vide : à toi) : ses outils ne lui montrent que ceux de qui est en face
     return {"teams": {"enabled": teams.enabled, "canaux": canaux,
                       "owners": {k: a.owner for k, a in sorted(teams.accounts.items())},

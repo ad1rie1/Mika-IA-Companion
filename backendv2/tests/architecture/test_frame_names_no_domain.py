@@ -18,7 +18,7 @@ imports de chaque source d'``app`` (``ast`` : jamais un commentaire) :
   ``mika.app.domains.domain`` ; aux couches du dessous elle ne prend que de quoi se dire — une ``Destination``, un
   ``MenuLink``) : elle nomme les modules de ses parts, que le cadre importe au moment d'assembler. Le
   registre est donc une feuille de l'arbre des imports, que tout module d'``app`` peut lire ; et **chaque part nommée
-  existe** et porte son nom convenu (``wire``, ``routes``, ``LIVE``, ``CONSOLE``, ``preview``, ``add``).
+  existe** et porte son nom convenu (``wire``, ``SETTINGS``, ``routes``, ``LIVE``, ``CONSOLE``, ``preview``, ``add``).
 
 Le contrôle est une fonction du texte des sources (``offences``) : les derniers tests l'essaient sur de petits
 sources factices, pour qu'il échoue vraiment quand on nomme un domaine.
@@ -31,6 +31,7 @@ from collections.abc import Iterator, Mapping
 from pathlib import Path
 
 from mika.app.domains import DOMAINS, ConsolePart, LivePart, part
+from mika.app.settings import SettingsPart
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src" / "mika"
@@ -133,7 +134,7 @@ STILL: dict[str, set[str]] = {
     "preview/mail.py": {"mail"},
     "preview/projects.py": {"projects"},
     "server.py": {"agenda", "contacts", "mail", "projects", "tools"},
-    "settings.py": {"agenda", "mail", "teams"},
+    "settings.py": {"agenda", "mail"},
     "settings_sections/plugins.py": {"agenda", "mail", "teams"},
 }
 
@@ -250,9 +251,10 @@ def test_every_part_a_card_names_exists_and_carries_its_name():
     """Une fiche nomme les modules de ses parts au lieu de les importer : une faute de frappe ne se verrait qu'à
     l'assemblage. Chaque module nommé s'importe ici, et porte le nom que le cadre y lit."""
     for d in DOMAINS:
-        for module in (d.wiring, d.api, d.live, d.console, d.preview, d.cli):
+        for module in (d.wiring, d.settings, d.api, d.live, d.console, d.preview, d.cli):
             assert module is None or _within(module, f"mika.app.{HOME}.{d.name}"), f"{d.name} : {module} est hors de son dossier"
         assert d.wiring is None or callable(part(d.wiring, "wire")), d.name
+        assert d.settings is None or issubclass(part(d.settings, "SETTINGS"), SettingsPart), d.name
         assert d.api is None or callable(part(d.api, "routes")), d.name
         assert all(callable(count) for count in part(d.api, "COUNTERS", {}).values()), d.name
         assert d.live is None or isinstance(part(d.live, "LIVE"), LivePart), d.name

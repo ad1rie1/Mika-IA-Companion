@@ -108,3 +108,7 @@ class MapsSettings(SettingsPart):
         data = cfg.model_dump(mode="json")
         data["api_key_sealed"] = self.box.seal(data.pop("api_key"))
         await self._put(REVIEWS_KEY, data)
+
+
+#: la classe que le cadre prend par le nom du domaine (``Settings.named``)
+SETTINGS = MapsSettings

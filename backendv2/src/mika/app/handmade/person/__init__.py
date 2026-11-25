@@ -664,7 +664,7 @@ def _accounts(look: Look, who: Who) -> tuple[int, int]:
         return 0, 0
     mine = "" if look.frame.get(identity_c.IS_OWNER(who.person)) else PERSON + who.person
     return (sum(1 for spec in settings.email().accounts.values() if spec.owner == mine),
-            sum(1 for spec in settings.teams().accounts.values() if spec.owner == mine))
+            sum(1 for spec in settings.named("teams").teams().accounts.values() if spec.owner == mine))
 
 
 def tab_counts(look: Look, who: Who) -> dict[str, int]:

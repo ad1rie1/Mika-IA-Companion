@@ -12,6 +12,7 @@ import json
 import time
 
 from mika.adapters.teams import TeamsConfig
+from mika.app.domains.teams.settings import TeamsSettings
 from mika.ports.teams import Draft
 from tests.protocol.test_web import world  # noqa: F401 — fixture
 
@@ -87,7 +88,7 @@ def test_a_bad_batch_is_refused_before_anything_is_stored(world):  # noqa: F811
     assert huge.status_code == 413
     # Teams désactivé : refusé (403), rien de rangé
     before = client.portal.call(store.last_batch, "principal")
-    client.portal.call(live.settings.save_teams, TeamsConfig(enabled=False))
+    client.portal.call(live.settings.of(TeamsSettings).save_teams, TeamsConfig(enabled=False))
     assert client.post("/api/teams/inbox", json=batch(), headers=headers(key)).status_code == 403
     assert client.portal.call(store.last_batch, "principal") == before
 

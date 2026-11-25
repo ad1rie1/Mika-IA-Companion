@@ -43,3 +43,7 @@ class ForgeAppSettings(SettingsPart):
             data.pop(app, None)
         await self._put(FORGE_CONFIG_KEY, data)
         self._forge = data
+
+
+#: la classe que le cadre prend par le nom du domaine (``Settings.named``)
+SETTINGS = ForgeAppSettings

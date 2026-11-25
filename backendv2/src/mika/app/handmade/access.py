@@ -55,7 +55,7 @@ def instances_from_settings(ui: UI) -> Instances:
     except (AttributeError, TypeError, ValueError):  # des boîtes illisibles : aucune instance, le type reste
         boxes = {}
     out[MAIL] = [(f"{MAIL}:{key}", a.label or key) for key, a in sorted(boxes.items())]
-    teams = settings.teams().accounts if settings is not None else {}
+    teams = settings.named("teams").teams().accounts if settings is not None else {}
     out[TEAMS] = [(f"{TEAMS}:{key}", a.label or key) for key, a in sorted(teams.items())]
     for key in sorted(settings.canals().tables) if settings is not None else ():
         kind, instance = canal_key(key)

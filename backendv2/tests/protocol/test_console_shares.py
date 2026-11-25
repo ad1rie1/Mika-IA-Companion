@@ -10,6 +10,7 @@ import re
 
 from mika.adapters.mail.config import MailAccount, MailConfig
 from mika.adapters.teams import TeamsAccount, TeamsConfig
+from mika.app.domains.teams.settings import TeamsSettings
 from mika.contracts import identity as identity_c
 from mika.contracts import runtime as rt
 from tests.fixtures.courrier import mailbox
@@ -41,7 +42,7 @@ def shared_world(client, live) -> str:
     live.kernel.ports["mail"] = mailbox(3)
     client.portal.call(live.settings.save_email, MailConfig(accounts={
         "pro": MailAccount(label="Atelier", address="atelier@example.test")}))
-    client.portal.call(live.settings.save_teams, TeamsConfig(accounts={"travail": TeamsAccount(label="Travail")}))
+    client.portal.call(live.settings.of(TeamsSettings).save_teams, TeamsConfig(accounts={"travail": TeamsAccount(label="Travail")}))
     lea = second_person(client, live)
     assert post(client, "/mcp/plug", SERVICE).status_code == 200
     assert share(client, "mail", "pro", lea, "lire").status_code == 200
@@ -114,7 +115,7 @@ def test_an_operator_reads_every_share_and_takes_one_off(world):  # noqa: F811
 
     login(client, "adrien")  # le compte Teams, de même
     assert client.post(RETIRE, data=forms[1][1], follow_redirects=False).status_code == 303
-    assert client.portal.call(live.settings.teams).accounts["travail"].shares == {}
+    assert client.portal.call(live.settings.of(TeamsSettings).teams).accounts["travail"].shares == {}
     login(client, "lea")
     assert client.get(API + "/teams/accounts").json()["accounts"] == []
     assert [r["kind"] for r in client.get(API + "/shares").json()["received"]] == ["mcp"]

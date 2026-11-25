@@ -36,7 +36,8 @@ def _fill(data, now_us: int) -> None:
 def test_purge_erases_what_the_extension_brought_and_keeps_nothing_to_convert(tmp_path):
     now_us = 1_763_000_000_000_000
     _fill(tmp_path, now_us)
-    settings = SimpleNamespace(teams=lambda: TeamsConfig())
+    teams = SimpleNamespace(teams=lambda: TeamsConfig())
+    settings = SimpleNamespace(of=lambda kind: teams)  # ses réglages se prennent par leur classe (ADR 0310)
     out = purge_teams(tmp_path, settings, PRINCIPAL)
     assert out["ok"] is True and out["lignes_teams"] >= 3  # message, conversation, compte
     store = TeamsStore(lambda: TeamsConfig(), schema.targets(tmp_path)["teams"], now=lambda: now_us)

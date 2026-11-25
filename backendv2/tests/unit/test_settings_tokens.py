@@ -12,6 +12,7 @@ import stat
 from cryptography.fernet import Fernet
 
 from mika.adapters.store_sql import SqlStore
+from mika.app.domains.teams.settings import TeamsSettings
 from mika.app.settings import CONSOLE_MCP_KEY, SENSORS_KEY, SecretBox, Settings, token_digest
 
 
@@ -103,11 +104,11 @@ def test_two_teams_keys_made_at_once_both_stay(tmp_path):
             return await put(key, value)
 
         settings._put = slow_put
-        await asyncio.gather(settings.save_teams_key("pro", "d1", "mt_1", 1, "op"),
-                             settings.save_teams_key("perso", "d2", "mt_2", 2, "op"))
-        both = sorted(settings.teams_keys())
-        await asyncio.gather(settings.revoke_teams_key("pro"), settings.save_teams_key("famille", "d3", "mt_3", 3, "op"))
-        return both, sorted(settings.teams_keys())
+        await asyncio.gather(settings.of(TeamsSettings).save_teams_key("pro", "d1", "mt_1", 1, "op"),
+                             settings.of(TeamsSettings).save_teams_key("perso", "d2", "mt_2", 2, "op"))
+        both = sorted(settings.of(TeamsSettings).teams_keys())
+        await asyncio.gather(settings.of(TeamsSettings).revoke_teams_key("pro"), settings.of(TeamsSettings).save_teams_key("famille", "d3", "mt_3", 3, "op"))
+        return both, sorted(settings.of(TeamsSettings).teams_keys())
 
     both, after = _run(tmp_path, scenario)
     assert both == ["perso", "pro"] and after == ["famille", "perso"]

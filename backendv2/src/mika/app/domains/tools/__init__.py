@@ -23,6 +23,7 @@ from mika.app.domains.domain import Domain
 TOOLS = Domain(
     "tools",
     places={"mcp": "les services MCP lancés sur cette machine, chacun dans sa cage"},
+    settings="mika.app.domains.tools.settings",
     wiring="mika.app.domains.tools.wiring",
     api="mika.app.domains.tools.api",
     live="mika.app.domains.tools.live",

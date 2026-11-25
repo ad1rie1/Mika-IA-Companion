@@ -250,13 +250,13 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
     async def save_teams(cfg: TeamsConfig) -> list[str]:
         """Un compte Teams est à toi, à elle ou à une personne qui a un compte (ADR 0186) — sauf ce qui était déjà là
         (un compte fermé depuis reste affiché, pour qu'on le corrige)."""
-        before, known = settings.teams().accounts, {v for v, _ in teams_owners()}
+        before, known = settings.named("teams").teams().accounts, {v for v, _ in teams_owners()}
         problems = [f"« {name} » : il est à toi, à elle, ou à une personne qui a un compte."
                     for name, a in cfg.accounts.items()
                     if a.owner not in known and (name not in before or before[name].owner != a.owner)]
         if problems:
             return problems
-        await settings.save_teams(cfg)
+        await settings.named("teams").save_teams(cfg)
         # un compte supprimé : ce que son extension avait apporté s'efface avec lui (ADR 0186)
         store = live.kernel.ports.get("teams") if live.kernel is not None else None
         for gone in sorted(set(before) - set(cfg.accounts)):
@@ -302,7 +302,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
     def teams_facts() -> list[tuple[str, Any]]:
         """Ses comptes en chiffres, et une fois chacun, en liens, les pages où le reste se fait (C7-15). La page vit
         dans Teams (ADR 0206) : ses conversations et ses réponses sont les onglets d'à côté, pas un fait de plus."""
-        accounts, keys = settings.teams().accounts, settings.teams_keys()
+        accounts, keys = settings.named("teams").teams().accounts, settings.named("teams").teams_keys()
         store = live.kernel.ports.get("teams") if live.kernel is not None else None
         plugged = sum(1 for k in accounts if store is not None and store.configured(k))
         keyed = sum(1 for k in accounts if k in keys)
@@ -316,7 +316,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         carte d'une boîte mène à sa fiche et à ses messages, son extension (où sa clé se crée) et ses conversations."""
         store = live.kernel.ports.get("teams") if live.kernel is not None else None
         info = store.account(key) if store is not None else None
-        has_key = key in settings.teams_keys()
+        has_key = key in settings.named("teams").teams_keys()
         plugged = info is not None and bool(info.last_batch)
         tags = [("branché", "ok")] if plugged else [("clé créée", "info")] if has_key else [("sans clé", "warn")]
         if not account.enabled:  # décoché : son extension est refusée
@@ -373,7 +373,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                             "Les comptes eux-mêmes, chacun les branche dans son espace."), home="agendas/parametres",
                             params="agenda", template="handmade/agendas/parametres.html",
                             styles=("handmade/agendas.css", "handmade/courrier_reglages.css")),)),
-        SettingsSection("teams", "Teams", "plugins", TeamsConfig, settings.teams, save_teams, order=12,
+        SettingsSection("teams", "Teams", "plugins", TeamsConfig, settings.named("teams").teams, save_teams, order=12,
                         lock=settings.writing,
                         description="Les conversations Teams que l'extension de navigateur de chaque compte lui "
                                     "apporte, et ce qu'elle fait des réponses qu'elle y prépare.",

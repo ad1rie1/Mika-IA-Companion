@@ -18,7 +18,7 @@ import time
 
 from mika.adapters.teams import TeamsConfig
 from mika.app.domains.teams.desk import digest
-from mika.app.settings import TEAMS_KEYS_KEY
+from mika.app.domains.teams.settings import TEAMS_KEYS_KEY, TeamsSettings
 from mika.contracts import runtime as rt
 from mika.plugins.teams import params_of
 from mika.ports.teams import Draft
@@ -41,7 +41,7 @@ def two_accounts(client, live) -> str:
     bea = client.portal.call(lambda: live.accounts.create("bea", "un-mot-de-passe-long", operator=False,
                                                           full_name="Béa Martin"))
     owner = f"personne:{bea.handle}"
-    client.portal.call(live.settings.save_teams, TeamsConfig(accounts={
+    client.portal.call(live.settings.of(TeamsSettings).save_teams, TeamsConfig(accounts={
         "principal": {"display_name": "Adrien"}, "bea_t": {"label": "Teams de Béa", "owner": owner,
                                                           "display_name": "Béa"}}))
     client.portal.call(live.reconfigure)
@@ -72,10 +72,10 @@ def test_two_keys_two_accounts_each_sees_only_its_own(world):  # noqa: F811
     assert client.post(f"/api/teams/outbox/{d.id}", json={"result": "placed"}, headers=headers(mine)).status_code == 404
     assert client.post(f"/api/teams/outbox/{d.id}", json={"result": "placed"}, headers=headers(hers)).status_code == 200
     # un compte décoché (« Actif ») : son extension est refusée, l'autre passe ; elle n'y propose plus rien
-    cfg = client.portal.call(live.settings.teams)
+    cfg = client.portal.call(live.settings.of(TeamsSettings).teams)
     off = cfg.model_copy(update={"accounts": {**cfg.accounts,
                                               "bea_t": cfg.accounts["bea_t"].model_copy(update={"enabled": False})}})
-    client.portal.call(live.settings.save_teams, off)
+    client.portal.call(live.settings.of(TeamsSettings).save_teams, off)
     client.portal.call(live.reconfigure)
     assert client.post("/api/teams/inbox", json=batch(conv=BEA_DM, text="Encore ?"),
                        headers=headers(hers)).status_code >= 400
@@ -87,8 +87,8 @@ def test_two_keys_two_accounts_each_sees_only_its_own(world):  # noqa: F811
     assert client.get("/api/teams/outbox", headers=headers(mine)).status_code == 200
     # un compte retiré des réglages emporte sa clé
     again = new_key(client, live, "bea_t")
-    client.portal.call(live.settings.save_teams, TeamsConfig(accounts={"principal": {}}))
-    assert "bea_t" not in client.portal.call(live.settings.teams_keys)
+    client.portal.call(live.settings.of(TeamsSettings).save_teams, TeamsConfig(accounts={"principal": {}}))
+    assert "bea_t" not in client.portal.call(live.settings.of(TeamsSettings).teams_keys)
     assert client.get("/api/teams/outbox", headers=headers(again)).status_code == 401
 
 
@@ -97,7 +97,7 @@ def test_the_single_key_of_before_is_the_principal_accounts(world):  # noqa: F81
     old = "mtk_la-cle-d-avant"
     client.portal.call(live.settings._put, TEAMS_KEYS_KEY,
                        {"digest": digest(old), "hint": old[:8], "created_at": 1, "by": "avant"})
-    assert set(client.portal.call(live.settings.teams_keys)) == {"principal"}
+    assert set(client.portal.call(live.settings.of(TeamsSettings).teams_keys)) == {"principal"}
     assert client.post("/api/teams/inbox", json=batch(), headers=headers(old)).status_code == 202
     store = live.kernel.ports["teams"]
     assert client.portal.call(store.configured, "principal")
@@ -163,7 +163,7 @@ def test_an_account_belongs_to_you_to_her_or_to_a_person(world):  # noqa: F811
     assert post(client, SAVE, account).status_code == 200
     refused = post(client, SAVE, {**account, "_cle": "autre", "owner": "personne:inconnue"})
     assert refused.status_code == 400 and "à une personne qui a un compte" in html.unescape(refused.text)
-    saved = client.portal.call(live.settings.teams).accounts
+    saved = client.portal.call(live.settings.of(TeamsSettings).teams).accounts
     assert saved["sien"].owner == "elle" and saved["principal"].owner == "" and "autre" not in saved
     # le journal le sait : ses outils ne lui montreront que les comptes de qui est en face
     assert params_of(live.kernel.mind.frame()).owners == {"principal": "", "sien": "elle"}
@@ -177,7 +177,7 @@ def test_an_account_card_names_its_owner_and_leads_to_its_extension_and_conversa
     client, live, _ = world
     bootstrap(client)  # adrien, l'opérateur : user_1
     handle = two_accounts(client, live)
-    client.portal.call(live.settings.save_teams, TeamsConfig(accounts={
+    client.portal.call(live.settings.of(TeamsSettings).save_teams, TeamsConfig(accounts={
         "principal": {"display_name": "Adrien"}, "equipe": {"label": "Équipe", "owner": "personne:user_1"},
         "bea_t": {"label": "Teams de Béa", "owner": f"personne:{handle}"}}))
     client.portal.call(live.reconfigure)

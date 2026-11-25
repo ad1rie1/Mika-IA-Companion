@@ -22,6 +22,7 @@ SENSES = Domain(
     needs=("maps", "phone"),
     base=Base("feeds", models="mika.adapters.feeds.models",
               place="les flux suivis et leurs articles"),
+    settings="mika.app.domains.senses.settings",
     wiring="mika.app.domains.senses.wiring",
     console="mika.app.domains.senses.console",
     cli="mika.app.domains.senses.cli",

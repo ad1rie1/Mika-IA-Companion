@@ -13,6 +13,7 @@ import zipfile
 from mika.adapters.teams import TeamsAccount, TeamsConfig
 from mika.app.domains.teams import api as teams_me
 from mika.app.domains.teams.extension import EXTENSION_DIR
+from mika.app.domains.teams.settings import TeamsSettings
 from mika.app.me import form
 from mika.contracts import runtime as rt
 from mika.contracts import teams as teams_c
@@ -123,8 +124,8 @@ def test_an_extension_that_only_polls_is_still_seen(world):  # noqa: F811
 def test_a_person_sees_only_her_own_account(world):  # noqa: F811
     client, live, _ = with_teams(world)
     lea = second_person(client, live)
-    config = live.settings.teams()
-    client.portal.call(live.settings.save_teams, TeamsConfig(accounts={
+    config = live.settings.of(TeamsSettings).teams()
+    client.portal.call(live.settings.of(TeamsSettings).save_teams, TeamsConfig(accounts={
         **config.accounts, "lea": TeamsAccount(label="Teams de Léa", owner="personne:" + lea)}))
     client.portal.call(live.kernel.set_params, "teams", TeamsParams(owners={"lea": "personne:" + lea}))
     login(client, "lea")

@@ -17,6 +17,7 @@ FORGE = Domain(
     "forge",
     models=("mika.adapters.forge.bases",),
     places={"forge": "ses apps forgées, leurs versions et leurs bases"},
+    settings="mika.app.domains.forge.settings",
     wiring="mika.app.domains.forge.wiring",
     console="mika.app.domains.forge.console",
     cli="mika.app.domains.forge.cli",

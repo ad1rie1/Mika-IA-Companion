@@ -183,7 +183,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                         describe={"authors": lambda key, entry: drawn_authors.describe(
                             key, entry, settings.authors(), dict(author_flows())),
                                   "flows": lambda key, value: drawn_authors.flow(key,
-                                                                                 teams_on=settings.teams().enabled)},
+                                                                                 teams_on=settings.named("teams").teams().enabled)},
                         keys={"flows": author_flows},
                         description="Qui récrit ce qui part, et où : une autrice par flux — le chat, chaque boîte "
                                     "mail, Teams, le téléphone —, chacune avec ses codes d'écriture. Le sens reste "

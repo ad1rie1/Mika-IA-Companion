@@ -22,6 +22,7 @@ TEAMS = Domain(
     needs=("contacts",),
     base=Base("teams", models="mika.adapters.teams.models",
               place="ce que l'extension Teams a apporté, et ce qui doit en repartir"),
+    settings="mika.app.domains.teams.settings",
     wiring="mika.app.domains.teams.wiring",
     api="mika.app.domains.teams.api",
     live="mika.app.domains.teams.live",

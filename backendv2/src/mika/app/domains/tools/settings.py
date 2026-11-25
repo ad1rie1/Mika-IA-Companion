@@ -87,3 +87,7 @@ class ToolsSettings(SettingsPart):
         current = dict(self._get(MCP_SYSTEM_ACCESS_KEY) or {})
         current[server] = {f: fields[f] for f in SYSTEM_ACCESS_FIELDS if f in fields}
         await self._put(MCP_SYSTEM_ACCESS_KEY, current)
+
+
+#: la classe que le cadre prend par le nom du domaine (``Settings.named``)
+SETTINGS = ToolsSettings

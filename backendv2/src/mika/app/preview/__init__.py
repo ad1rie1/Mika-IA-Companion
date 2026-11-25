@@ -253,7 +253,7 @@ async def _shares(settings, bea: str, owner: str) -> None:
     who = PERSON + bea
     await settings.save_email(MailConfig(accounts={"atelier": MailAccount(
         label="Atelier", address="atelier@example.test", enabled=False, shares={who: SHARE_READ})}))
-    await settings.save_teams(TeamsConfig(accounts={"equipe": TeamsAccount(
+    await settings.named("teams").save_teams(TeamsConfig(accounts={"equipe": TeamsAccount(
         label="Équipe", owner=PERSON + owner, enabled=False, shares={who: SHARE_PREPARE})}))
 
 
