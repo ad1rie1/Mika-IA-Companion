@@ -4,11 +4,12 @@ Ce dossier porte sa porte HTTP (``desk.py`` : ``/api/teams/…``, qui est aussi 
 l'extension, une par compte), son câblage (``wiring.py`` : son cache, le port ``teams`` ; la porte ; l'extension à
 télécharger), son module de l'API par personne (``api.py`` : ses comptes, leurs conversations, les réponses qu'elle y
 prépare ; ce qui attend son geste, pour la barre du haut), les réglages d'un compte dans l'espace de chacun
-(``account_settings.py`` : ses routes, qu'``api.py`` ajoute aux siennes), l'extension à télécharger
-(``extension.py``), sa part du direct (``live.py``), sa part de la console (``console/`` : ses onglets, la fiche d'une
-conversation et celle d'une réponse, leurs gabarits et leur feuille) et sa commande (``cli.py`` : ``mika teams``). Effacer ce que l'extension
-d'un compte a apporté efface aussi ce qu'il a fait voir dans l'annuaire : il lit l'annuaire. Ses réglages
-(``settings.py``) ont leur rubrique dans sa part de la console (Teams › Paramètres).
+(``account_settings.py`` : ses routes, qu'``api.py`` ajoute aux siennes), ce qu'il partage (``sharing.py`` : ses
+comptes, avec qui), l'extension à télécharger (``extension.py``), sa part du direct (``live.py``), sa part de la
+console (``console/`` : ses onglets, la fiche d'une conversation et celle d'une réponse, leurs gabarits et leur
+feuille) et sa commande (``cli.py`` : ``mika teams``). Effacer ce que l'extension d'un compte a apporté efface aussi ce
+qu'il a fait voir dans l'annuaire : il lit l'annuaire. Ses réglages (``settings.py``) ont leur rubrique dans sa part de
+la console (Teams › Paramètres).
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ TEAMS = Domain(
     wiring="mika.app.domains.teams.wiring",
     api="mika.app.domains.teams.api",
     live="mika.app.domains.teams.live",
+    sharing="mika.app.domains.teams.sharing",
     console="mika.app.domains.teams.console",
     cli="mika.app.domains.teams.cli",
     destination=Destination(

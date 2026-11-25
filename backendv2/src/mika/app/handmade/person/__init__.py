@@ -44,6 +44,7 @@ from mika.adapters.web.accounts import Account, account_of_handle
 from mika.adapters.web.gate import SlidingWindow
 from mika.app.domains import DOMAINS, PersonPart, part
 from mika.app.domains.tools.settings import ToolsSettings
+from mika.app.domains.tools.sharing import service_shares
 from mika.app.handmade import (
     FORGOTTEN,
     MONTHS,
@@ -68,7 +69,7 @@ from mika.app.handmade.person.memory import memory
 from mika.app.handmade.rights import UNSHARE, retiring
 from mika.app.handmade.tabs import anchored
 from mika.app.me import OUTBOUND
-from mika.app.me.sharing import Shared, every_share, given_and_received, service_shares, sharer
+from mika.app.me.sharing import Shared, every_share, given_and_received, sharer
 from mika.contracts import affect as affect_c
 from mika.contracts import attention as attention_c
 from mika.contracts import goals as goals_c

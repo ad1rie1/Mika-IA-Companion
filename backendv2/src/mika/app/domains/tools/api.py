@@ -76,7 +76,7 @@ def shared(spec: McpServer) -> dict[str, tuple[str, Any]]:
     que son propriétaire — celle qu'un partage ajoute —, par personne : son niveau (lire : ses outils qui lisent ; s'en
     servir : aussi ceux qui agissent) et sa ligne. Un partage n'en écrit qu'une ; s'il y en avait plusieurs, la
     dernière. La seule lecture de cette règle : ce qu'on lui partage (``received``), Paramètres › Partages et la
-    console (``app/me/sharing.py``), la fiche d'une personne la lisent ici."""
+    console (``sharing.py::service_shares``), la fiche d'une personne la lisent ici."""
     out: dict[str, tuple[str, Any]] = {}
     for line in spec.access:
         if len(line.who) == 1 and line.who[0].startswith(PERSON) and line.who[0] != spec.owner:

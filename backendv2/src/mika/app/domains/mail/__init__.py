@@ -5,13 +5,14 @@ Microsoft de l'instance, les expéditeurs dont les images s'affichent), son câb
 port ``mail`` ; le courrier en direct), son module de l'API par personne (``api.py`` : ses boîtes et celles qu'on lui
 partage, leurs messages, les brouillons qu'elle y prépare ; ce qui attend son geste, pour la barre du haut), les
 réglages d'une boîte dans l'espace de chacun (``box_settings.py`` : ses routes, qu'``api.py`` ajoute aux siennes),
-sa part du direct (``live.py``), sa part de la console (``console/`` : ses onglets, les fiches d'une boîte, d'un mail et
-d'un brouillon, sa rubrique de réglages, leurs gabarits, leur feuille et leurs scripts), sa commande (``cli.py`` :
-``mika mail``) et le courrier fictif de l'aperçu (``demo.py`` : son port simulé, que l'aperçu du cadre pose).
+ce qu'elle partage (``sharing.py`` : ses boîtes, avec qui), sa part du direct (``live.py``), sa part de la console
+(``console/`` : ses onglets, les fiches d'une boîte, d'un mail et d'un brouillon, sa rubrique de réglages, leurs
+gabarits, leur feuille et leurs scripts), sa commande (``cli.py`` : ``mika mail``) et le courrier fictif de l'aperçu
+(``demo.py`` : son port simulé, que l'aperçu du cadre pose).
 
-Restent au cadre, parce qu'ils croisent les domaines : les partages, comment part ce qu'elle prépare depuis une boîte
-(la règle de son canal, réglée dans l'espace de chacun : ``app/me/settings.py``), « qui peut quoi », ses autrices
-(une par boîte), et la vie fictive de l'aperçu, où ses mails se mêlent au reste.
+Restent au cadre, parce qu'ils croisent les domaines : ce qui vaut pour toutes les sortes de partages, comment part ce
+qu'elle prépare depuis une boîte (la règle de son canal, réglée dans l'espace de chacun : ``app/me/settings.py``),
+« qui peut quoi », ses autrices (une par boîte), et la vie fictive de l'aperçu, où ses mails se mêlent au reste.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ MAIL = Domain(
     wiring="mika.app.domains.mail.wiring",
     api="mika.app.domains.mail.api",
     live="mika.app.domains.mail.live",
+    sharing="mika.app.domains.mail.sharing",
     console="mika.app.domains.mail.console",
     cli="mika.app.domains.mail.cli",
     destination=Destination(

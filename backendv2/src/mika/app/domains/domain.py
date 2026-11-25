@@ -19,6 +19,8 @@ cadre les importe au moment d'assembler (``part``), et y lit un nom convenu :
 - ``api`` : ``routes(api)``, ses routes de ``/api/moi`` ; et, s'il compte quelque chose pour la barre du haut,
   ``COUNTERS`` (son nom → ``count(call)``) ;
 - ``live`` : ``LIVE``, une ``LivePart`` ;
+- ``sharing`` : ``SHARING``, une ``SharingPart`` : ce qui se partage chez lui (``app/me/sharing.py`` réunit les
+  parts) ;
 - ``console`` : ``CONSOLE``, une ``ConsolePart`` ;
 - ``wiring`` : ``wire(w)``, ce que le serveur construit pour lui avant le noyau (ses adaptateurs, ses portes), et,
   facultatif, ``bind(w)``, ce qui a besoin du noyau (``app/wiring.py::Wiring``) ;
@@ -102,6 +104,40 @@ class LivePart:
     #: ce que le départ ou la fin d'un épisode change chez lui quand ce n'est la tâche de personne (une exécution
     #: d'un projet) : ``episodes(kind, target, frame, kernel)`` rend ses touches — aucune, le plus souvent
     episodes: Callable[..., list[Any]] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SharingPart:
+    """Ce qui se partage chez lui (ADR 0188) : une sorte de ressource — une boîte, un compte Teams, un service, un
+    agenda —, que son propriétaire partage avec une personne qui a un compte. Les partages (``app/me/sharing.py``)
+    réunissent les parts, dans l'ordre de leurs sortes (``KINDS``) ; ils n'en connaissent aucune."""
+
+    #: la sorte, telle que l'API la dit (« mail », « teams », « mcp », « agenda ») ; sa place :
+    #: ``app/me/sharing.py::KINDS``
+    kind: str
+    #: sa sorte en mots, telle que la console la nomme (« boîte », « compte Teams », « service », « agenda »)
+    word: str
+    #: tous ses partages rangés, ressource par ressource : ``every(settings, names)`` rend des
+    #: ``app/me/sharing.py::Shared`` (``names`` : ce que ``names`` a lu, ou ``None``)
+    every: Callable[..., list[Any]]
+    #: son propriétaire partage, change ou retire (``POST /api/moi/shares/set``) : ``share(call, settings, key,
+    #: person, level)``, asynchrone — ce que sa sorte vérifie (la ressource est à qui demande, ce niveau lui va), puis
+    #: l'écriture ; il lève ``Denied``. Ce qui vaut pour toutes les sortes (qui reçoit, le niveau, des réglages
+    #: branchés) est jugé avant, par le cadre, qui lui passe les réglages (``settings``)
+    share: Callable[..., Awaitable[None]]
+    #: ranger ou retirer un partage sans juger qui demande (l'opérateur qui le retire dans Réglages › Droits ›
+    #: Partages) : ``write(settings, reconfigure, key, person, level, check)``, asynchrone (``check`` juge sa fiche
+    #: relue, sous le verrou des réglages) ; ``None`` : il ne se range pas ainsi (un service se règle sur ses lignes
+    #: d'accès), et la console ne le retire pas
+    write: Callable[..., Awaitable[None]] | None = None
+    #: qui partage, par son nom, dit à qui reçoit : ``sharer(frame, shared, name)`` (qui décide d'une boîte, qui écrit
+    #: d'un compte Teams) ; ``None`` : le nom de son propriétaire
+    sharer: Callable[..., str] | None = None
+    #: une de ses clés fait au plus tant de caractères
+    key_limit: int = 40
+    #: le nom de ses ressources quand ses réglages ne le tiennent pas (un agenda : sa base le dit) : ``names(port)``
+    #: (``port`` : un port du noyau, par son nom — ``Call.port``) rend le nom de chacune par sa clé, lu avant ``every``
+    names: Callable[..., Mapping[str, str]] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,6 +233,8 @@ class Domain:
     api: str | None = None
     #: le module de sa part du direct (``LIVE``)
     live: str | None = None
+    #: le module de ce qu'il partage (``SHARING`` : sa ``SharingPart``)
+    sharing: str | None = None
     #: le module de sa part de la console (``CONSOLE``)
     console: str | None = None
     #: le module de ce qu'il ajoute à l'aperçu de la console (``preview``)

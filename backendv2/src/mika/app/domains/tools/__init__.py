@@ -5,15 +5,16 @@ accès réglés des serveurs du système), ce qu'un serveur MCP fait d'elle, éc
 régler, brancher, retirer), les serveurs qu'apporte un plugin système (``system.py`` : la recherche web, le plugin
 ``web``), leur câblage (``wiring.py`` : le client MCP, le port ``mcp`` ; puis, le noyau là, ce qui le reconfigure et
 ses outils prêtés à un agent, ``lending.py``, servis sous ``/mcp/pret/<nom>``), leur module de l'API par personne
-(``api.py`` : ses services), leur part du direct (``live.py``), leur commande (``cli.py`` : ``mika mcp``) et leur part
-de la console (``console/`` : la fiche d'un service branché, sa rubrique de réglages, leurs gabarits). Les services
-MCP lancés sur cette machine vivent dans le dossier ``mcp/`` (``places``).
+(``api.py`` : ses services), ce qu'ils partagent (``sharing.py`` : ses services, avec qui), leur part du direct
+(``live.py``), leur commande (``cli.py`` : ``mika mcp``) et leur part de la console (``console/`` : la fiche d'un
+service branché, sa rubrique de réglages, leurs gabarits). Les services MCP lancés sur cette machine vivent dans le
+dossier ``mcp/`` (``places``).
 
 Restent au cadre : la destination « Ses outils » et ses onglets (``app/handmade/tabs/tools.py`` : tous ses outils,
 leurs droits, ce qui vient d'ailleurs, le prêt) ; leurs points de prêt, que la console règle par les réglages du
 serveur (« Prêter à un agent », ``inspector/pages/tools.py``, lit ``Settings.lent``) ; le relais MCP des fournisseurs
 Claude Code (``adapters/mcp/relay``) ; le point MCP de la console (``inspector/mcp``) ; et les pages qui croisent les
-domaines (qui peut quoi, ce que concerne un accord, les partages, la fiche d'une personne).
+domaines (qui peut quoi, ce que concerne un accord, la fiche d'une personne).
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ TOOLS = Domain(
     wiring="mika.app.domains.tools.wiring",
     api="mika.app.domains.tools.api",
     live="mika.app.domains.tools.live",
+    sharing="mika.app.domains.tools.sharing",
     console="mika.app.domains.tools.console",
     cli="mika.app.domains.tools.cli",
     plugins={
