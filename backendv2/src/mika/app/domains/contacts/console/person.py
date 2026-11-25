@@ -8,6 +8,10 @@
 - **Contacts** (l'onglet ``contacts`` du plugin) : ceux que ses comptes lui ont fait connaître, ceux qu'on lui
   partage et ceux que personne n'a (``Accounts.visible``, les partages compris), des puces par compte, une entrée
   chacun comme l'annuaire les dit. C'est la liste que montrera l'onglet Contacts de frontendv2.
+
+Sa part de la fiche (``PERSON_PART``, ADR 0310) : ces deux onglets et leur compte — pour Ce qui l'identifie, les
+identifiants des fiches reliées, que la fiche ajoute à ses moyens de communication —, et Contacts tu pour qui n'en a
+pas (``hidden``).
 """
 
 from __future__ import annotations
@@ -19,8 +23,10 @@ from urllib.parse import urlencode
 from markupsafe import Markup
 
 from mika.app.domains.contacts.console.subject import detach_forms, sheet_of, tiles_of
+from mika.app.domains.domain import PersonPart
 from mika.app.handmade import Look
 from mika.app.handmade.directory import accounts, contact_entry, contact_url, place_name, port_of
+from mika.app.handmade.person.common import Who
 from mika.app.handmade.subjects.parts import safely
 from mika.faculties.identity.inspect import TRUST_SHORT, handle_label, handles_of
 from mika.inspector import render
@@ -155,4 +161,28 @@ def contacts(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str],
         total=got.total, pager={"pager": pager}, lede=plural(got.total, "contact", "contacts")))
 
 
-__all__ = ["contacts", "contacts_count", "identifies", "linked_sheets"]
+def _identifiers(look: Look, who: Who) -> int:
+    """Sa part du compte de Ce qui l'identifie : les identifiants des fiches de l'annuaire qui lui sont reliées (la
+    fiche y ajoute ses moyens de communication)."""
+    return sum(len(x.identifiers) for x in linked_sheets(look, who.person))
+
+
+def _contacts(look: Look, who: Who) -> int:
+    """Le compte de l'onglet Contacts."""
+    return contacts_count(look, who.person)
+
+
+def hidden(ui: UI, key: str) -> Sequence[str]:
+    """Contacts (ADR 0298) seulement pour qui en a : ses comptes, ceux qu'on lui partage, ceux de personne."""
+    return () if contacts_count(Look.of(ui, DAY), key) else ("contacts",)
+
+
+#: sa part de la fiche d'une personne (ADR 0310)
+PERSON_PART = PersonPart(
+    # ce qui l'identifie : ses moyens de communication, et les identifiants des fiches de l'annuaire qui lui sont
+    # reliées (« Détacher » sur ceux-là) ; ses contacts (ADR 0298)
+    tabs={"adresses": identifies, "contacts": contacts}, formed=("adresses",),
+    counts={"adresses": _identifiers, "contacts": _contacts}, hidden=hidden)
+
+
+__all__ = ["PERSON_PART", "contacts", "contacts_count", "hidden", "identifies", "linked_sheets"]

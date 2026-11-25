@@ -5,7 +5,7 @@ préparé avec elle ; ses arrêts jour par jour (ce qu'elle y a ajouté se dit, 
 (``trips.supprimer`` : confirmé, audité), le seul geste de la console sur un voyage — il se prépare à deux, dans
 l'écran Carte et en conversation. Un texte oublié se dit « (oublié) ».
 
-``read`` est ce que lit aussi l'onglet dessiné (``app/handmade/person/voyages.py``, qui sert le GPX) ; cette vue reste
+``read`` est ce que lit aussi l'onglet dessiné (``app/domains/maps/console/person.py``, qui sert le GPX) ; cette vue reste
 la source de la console en MCP et du repli.
 """
 

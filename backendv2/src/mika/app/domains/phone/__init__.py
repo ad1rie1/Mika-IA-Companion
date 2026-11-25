@@ -3,12 +3,13 @@
 Ce dossier porte leur porte HTTP (``desk.py`` : ``/api/phone/…``, le port ``phone``), leur câblage (``wiring.py`` :
 la porte, l'application à télécharger, puis le port d'entrée et les notifications des téléphones) et leur module de
 l'API par personne (``api.py`` : ses téléphones, ses messages, sa position, l'application ; ce qui attend son geste,
-pour la barre du haut). Sa position se lit dans la localisation : il lit la carte.
+pour la barre du haut). Sa position se lit dans la localisation : il lit la carte ; son onglet de la fiche d'une
+personne reprend les morceaux de Ses sens › Messages du téléphone : il lit ses sens.
 
 Leur part du direct est dans ``live.py`` : ses messages, ses réponses offertes, et l'effet du moteur qu'est une
 réponse proposée, décidée, partie.
-Leur part de la console (``console.py``) ne dit que le mot de leur canal dans la file « À valider » : leurs pages sont
-celles de Ses sens et de la fiche d'une personne.
+Leur part de la console (``console/``) dit le mot de leur canal dans la file « À valider » et dessine l'onglet Son
+téléphone de la fiche d'une personne (``console/person.py``) ; leurs autres pages sont celles de Ses sens.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from mika.app.domains.domain import Domain
 
 PHONE = Domain(
     "phone",
-    needs=("maps",),
+    needs=("maps", "senses"),
     wiring="mika.app.domains.phone.wiring",
     api="mika.app.domains.phone.api",
     live="mika.app.domains.phone.live",

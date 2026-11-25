@@ -1,4 +1,6 @@
-"""La fiche d'une personne › Voyages, dessinée (ADR 0195, 0204) : ses voyages, du plus récemment changé — chacun son
+"""La part de la carte dans la fiche d'une personne (ADR 0310) : Voyages, Sa position, le GPX d'un voyage.
+
+**Voyages** (ADR 0195, 0204) : ses voyages, du plus récemment changé — chacun son
 titre, comment on s'y déplace, s'il a été préparé avec elle, son départ, ce qu'il évite ; ses arrêts jour par jour,
 repliés (ce qu'elle y a ajouté se dit, sous son nom) ; son GPX ; « Supprimer » (l'action ``trips.supprimer``,
 confirmée, auditée), le seul geste de la console sur un voyage : il se prépare à deux.
@@ -8,6 +10,9 @@ reste la source de la console en MCP et du repli ; les formulaires sont ceux que
 la personne de la fiche pour objet. Le GPX se sert ici (``gpx``, opérateurs seulement) : le même document que l'écran
 Carte donne à la personne (``app/domains/maps/api.py::gpx_document``), dans la même borne, celle du compte de
 l'opérateur.
+
+**Sa position** (ADR 0119, 0123) : sa dernière position, téléphone par téléphone, et son journal — les mêmes
+morceaux que Ses sens › Localisation (``app/domains/senses/console/tabs.py``), restreints à cette personne.
 """
 
 from __future__ import annotations
@@ -19,17 +24,22 @@ from urllib.parse import quote
 from markupsafe import Markup
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse, RedirectResponse, Response
+from starlette.routing import Route
 
 from mika.adapters.web.gate import SlidingWindow
+from mika.app.domains.domain import PersonPart
 from mika.app.domains.maps.api import gpx_document, gpx_response
+from mika.app.domains.senses.console.tabs import fix_of, said_of, slice_of
 from mika.app.handmade import Look
+from mika.app.handmade.person.common import Who, _slice
 from mika.app.me import ROUTES_BUSY, spend
 from mika.inspector import render
 from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import PREFIX, UI, Forms, env, secure
 from mika.kernel.clock import DAY
 from mika.kernel.inspect import ActionSlot
-from mika.plugins.trips import TRIPS, TripsState
+from mika.plugins.location.inspect import by_person
+from mika.plugins.trips import TRIPS, TripsState, trips_of
 from mika.plugins.trips.inspect import REMOVE, TripSeen, avoid_words, day_words, mode_words, read
 
 #: où la console sert le GPX d'un voyage : ``/admin/voyages/<id>/gpx``
@@ -122,3 +132,40 @@ async def gpx(ui: UI, request: Request, outbound: SlidingWindow) -> Response:
     except _Busy:
         return secure(PlainTextResponse(ROUTES_BUSY, status_code=429))
     return secure(gpx_response(trip, body))
+
+
+def position_tab(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str]) -> Markup | None:
+    """La fiche d'une personne › Sa position : sa dernière position, téléphone par téléphone, et son journal."""
+    look = Look.of(ui, DAY)
+    s = slice_of(look, "location")
+    if s is None:
+        return None
+    fixes = by_person(s).get(key, [])
+    texts = look.texts([r for f in fixes for r in (f.coords_ref, f.label_ref)])
+    said = said_of(look, query, key, subject_url("person", key, "position"))
+    return Markup(env.get_template("handmade/person/tabs/position.html").render(
+        fixes=[fix_of(look, f, texts) for f in fixes], said=said, name=look.name(key)))
+
+
+def count(look: Look, who: Who) -> int:
+    """Le compte de l'onglet Voyages (``PersonOverview.counts``) : ses voyages."""
+    return len(trips_of(_slice(look, TRIPS.name), look.frame.get, who.person))
+
+
+def routes(ui: UI, outbound: SlidingWindow) -> list[Route]:
+    """Sa route sous la fiche d'une personne : le GPX d'un voyage, dans la borne que la fiche reçoit et lui passe
+    (``outbound`` : celle de l'écran Carte, ou une à la console seule aux mêmes nombres, ``PersonOverview.routes``)."""
+
+    async def served(request: Request) -> Response:
+        return await gpx(ui, request, outbound)
+
+    # le GPX d'un voyage, depuis son onglet (ADR 0204)
+    return [Route(GPX + "/{trip:int}/gpx", ui.guarded(served), methods=["GET"])]
+
+
+#: sa part de la fiche d'une personne (ADR 0310)
+PERSON_PART = PersonPart(
+    # où son téléphone dit qu'elle est (seulement s'il en a dit quelque chose) ;
+    # ses voyages (seulement si elle en a) : leurs arrêts jour par jour, leur GPX, « Supprimer » (ADR 0204)
+    tabs={"voyages": voyages, "position": position_tab}, formed=("voyages",), counts={"voyages": count},
+    routes=routes)

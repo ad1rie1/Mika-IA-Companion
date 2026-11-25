@@ -1,7 +1,8 @@
 """L'annuaire, tel que la couche ``app`` le relie (ADR 0298, 0310) : sa fiche.
 
 Ce dossier porte son câblage (``wiring.py`` : sa base, le port ``contacts``), son module de l'API par personne
-(``api.py``), sa part du direct (``live.py``), sa fiche dessinée dans la console (``console/``) et ce qu'il ajoute à
+(``api.py``), sa part du direct (``live.py``), sa part de la console (``console/`` : la fiche dessinée d'un contact,
+ses rapprochements dans la file « À valider », ses deux onglets de la fiche d'une personne) et ce qu'il ajoute à
 l'aperçu (``preview.py``). Il lit le courrier, Teams et le
 téléphone : un contact se voit là où on le croise.
 """

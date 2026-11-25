@@ -7,13 +7,13 @@ itinéraires, les données touristiques, le réchauffage des caches, les avis), 
 réchauffage (``warm_points.py`` : la dernière position de chacun), leur module de l'API par personne (``api.py`` : le
 fond de carte, les lieux, les fiches, les événements, les photos, les adresses, les itinéraires et tes voyages), leur
 part du direct (``live.py``), leur commande (``cli.py`` : ``mika carte``) et leur part de la console (``console/`` :
-leurs rubriques de Réglages › Carte et téléphone). Leur dossier du dossier de données est ``cartes/`` (``places``,
-ADR 0193).
+leurs rubriques de Réglages › Carte et téléphone, l'onglet Voyages et l'onglet Sa position de la fiche d'une
+personne, le GPX d'un voyage). Leur dossier du dossier de données est ``cartes/`` (``places``, ADR 0193). Ils lisent
+ses sens : Sa position reprend les morceaux de Ses sens › Localisation.
 
-Restent au cadre : l'onglet Voyages et l'onglet Sa position de la fiche d'une personne (``handmade/person/``), le port
-d'entrée (``app/mindport.py`` : la position que donne un téléphone, la case de la carte qu'elle précharge), l'aperçu de
-la console (``app/preview/`` : les voyages de Béa), la sauvegarde (``app/backup.py`` : ce qu'elle garde de
-``cartes/``), et, dans le même onglet de Réglages, les notifications du téléphone
+Restent au cadre : le port d'entrée (``app/mindport.py`` : la position que donne un téléphone, la case de la carte
+qu'elle précharge), l'aperçu de la console (``app/preview/`` : les voyages de Béa), la sauvegarde (``app/backup.py`` :
+ce qu'elle garde de ``cartes/``), et, dans le même onglet de Réglages, les notifications du téléphone
 (``app/settings_sections/map_phone.py``) ; Ses sens › Localisation est dessinée par ses sens.
 """
 
@@ -23,6 +23,7 @@ from mika.app.domains.domain import Domain
 
 MAPS = Domain(
     "maps",
+    needs=("senses",),
     backup="mika.app.domains.maps.backup",
     places={"cartes": "la carte de sa position, l'index des lieux et les caches de la carte ; ses compteurs du "
                       "mois, eux, se sauvegardent"},

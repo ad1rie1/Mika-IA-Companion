@@ -5,6 +5,9 @@ serveur lui donne et ceux qu'elle a branchés, leur sorte, leur synchro), ce qu'
 à droite ses prochains événements de la semaine : ses agendas, ce qu'on lui partage, et ce que l'agenda de Mika retient
 pour elle. Les données sont celles du plugin ``agenda`` (``app/domains/agenda/console/reads.py``) ; un événement privé d'une autre personne
 reste « Occupé · privé ».
+
+Sa part de la fiche (``PERSON_PART``, ADR 0310) : cet onglet, qui pose aussi les formulaires de la console, et son
+compte.
 """
 
 from __future__ import annotations
@@ -17,6 +20,9 @@ from urllib.parse import urlencode
 from markupsafe import Markup
 
 from mika.app.domains.agenda.console.reads import items, read
+from mika.app.domains.domain import PersonPart
+from mika.app.handmade import Look
+from mika.app.handmade.person.common import Who
 from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import PREFIX, UI, env
 from mika.plugins.agenda.inspect.views import (
@@ -26,6 +32,7 @@ from mika.plugins.agenda.inspect.views import (
     YOURS,
     bounds,
     count_events,
+    person_calendars,
     synced,
     week_of,
 )
@@ -96,4 +103,16 @@ def agendas(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str],
         csrf=getattr(forms, "csrf", ""), back=back))
 
 
-__all__ = ["agendas"]
+def count(look: Look, who: Who) -> int:
+    """Le compte de son onglet (``PersonOverview.counts``)."""
+    # ses agendas et ceux qu'on lui partage (ADR 0309, lot 5)
+    return sum(map(len, person_calendars(look.ui.kernel.ports, look.frame, who.person)))
+
+
+#: sa part de la fiche d'une personne (ADR 0310)
+PERSON_PART = PersonPart(
+    # ses agendas, ce qu'on lui partage, ce qu'elle partage, ses prochains événements (ADR 0309, lot 5)
+    tabs={"agendas": agendas}, formed=("agendas",), counts={"agendas": count})
+
+
+__all__ = ["PERSON_PART", "agendas", "count"]

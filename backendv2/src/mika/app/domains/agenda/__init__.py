@@ -6,15 +6,14 @@ l'application Google du serveur, le partage d'un agenda), son câblage (``wiring
 ses fournisseurs, le port ``agenda_providers`` ; le guichet de la console), son module de l'API par personne
 (``api.py`` : ses agendas et ceux qu'on lui partage, ses comptes, leurs réglages, leur tableau de droits ; ce qui
 attend son geste, pour la barre du haut), sa part du direct (``live.py`` : ce qui change un agenda, et à qui il
-est), sa part de la console (``console/`` : ses onglets, la fiche d'un agenda, ce qu'ils lisent, sa rubrique de
-réglages, leurs gabarits et leur script) et sa commande (``cli.py`` : ``mika agenda``). Il lit le courrier : son API dit où en est une connexion dans les mots de celles des boîtes
+est), sa part de la console (``console/`` : ses onglets, la fiche d'un agenda, l'onglet « Agendas » de la fiche
+d'une personne, ce qu'ils lisent, sa rubrique de réglages, leurs gabarits et leur script) et sa commande (``cli.py`` : ``mika agenda``). Il lit le courrier : son API dit où en est une connexion dans les mots de celles des boîtes
 (``ports.mail.SIGNED_IN``), et Microsoft entre par l'application du courrier (ADR 0238), que sa rubrique de réglages
 vérifie et enregistre.
 
 Restent au cadre : le rangement de ses droits (le tableau réglé de chaque agenda est gardé par la porte des
 réglages avec ceux des canaux et des outils, lus à chaque épisode — on les lit et on les enregistre par ses
-réglages) ; l'onglet « Agendas » de la fiche d'une personne, « qui peut quoi », les
-partages, ce que concerne un accord — des pages qui croisent les domaines.
+réglages) ; « qui peut quoi », les partages, ce que concerne un accord — des pages qui croisent les domaines.
 """
 
 from __future__ import annotations

@@ -38,7 +38,7 @@ garde, et vérifie que chaque part nommée existe et porte son nom convenu.
 from __future__ import annotations
 
 import importlib
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -136,6 +136,24 @@ class QueuePart:
 
 
 @dataclass(frozen=True, slots=True)
+class PersonPart:
+    """Sa part de la fiche d'une personne (``app/handmade/person/``) : les onglets qu'il y dessine, ce qu'il y
+    compte. La fiche réunit les parts ; elle n'en connaît aucune."""
+
+    #: onglet de sa barre → ce qui le dessine : ``draw(ui, key, blocks, query)`` (les données restent celles de sa
+    #: faculté ou de son plugin)
+    tabs: Mapping[str, Callable[..., Any]] = field(default_factory=dict)
+    #: ceux de ses onglets qui posent aussi les formulaires de la console : ``draw(ui, key, blocks, query, forms)``
+    formed: tuple[str, ...] = ()
+    #: onglet → ce qu'il y compte : ``count(look, who)``, qui s'ajoute à ce que le cadre y compte déjà
+    counts: Mapping[str, Callable[..., int]] = field(default_factory=dict)
+    #: ses onglets à taire pour cette personne : ``hidden(ui, key)`` rend leurs noms
+    hidden: Callable[..., Sequence[str]] | None = None
+    #: ses routes sous la fiche : ``routes(ui, outbound)`` rend des ``Route`` (le GPX d'un voyage)
+    routes: Callable[..., list[Any]] | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class ConsolePart:
     """Sa part de la console : ce qu'il y *inscrit*. Chaque page garde son gabarit et sa feuille, écrits à la main
     (ADR 0121, 0177) ; rien ici n'en dessine une."""
@@ -149,6 +167,8 @@ class ConsolePart:
     sections: Callable[..., tuple[Any, ...]] | None = None
     #: sa part de la file « À valider »
     queue: QueuePart | None = None
+    #: sa part de la fiche d'une personne
+    person: PersonPart | None = None
 
 
 @dataclass(frozen=True, slots=True)

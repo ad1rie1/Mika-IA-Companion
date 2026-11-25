@@ -1,6 +1,6 @@
-"""La fiche d'une personne › Son téléphone et Sa position, dessinées (ADR 0119, 0120, 0123) : ses conversations et les
-réponses qu'elle a proposées ; sa dernière position, téléphone par téléphone, et son journal. Les mêmes morceaux que les
-pages de Connexions extérieures (``app/domains/senses/console/tabs.py``), restreints à cette personne.
+"""La part du téléphone dans la fiche d'une personne (ADR 0310) : l'onglet Son téléphone (ADR 0120, 0123), ses
+conversations et les réponses qu'elle a proposées. Les mêmes morceaux que Ses sens › Messages du téléphone
+(``app/domains/senses/console/tabs.py``), restreints à cette personne.
 """
 
 from __future__ import annotations
@@ -10,19 +10,16 @@ from typing import Any
 
 from markupsafe import Markup
 
+from mika.app.domains.domain import PersonPart
 from mika.app.domains.senses.console.tabs import (
     conversation_of,
-    fix_of,
     offers_of,
     reader_of,
-    said_of,
     slice_of,
 )
 from mika.app.handmade import Look
-from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import UI, env
 from mika.kernel.clock import DAY
-from mika.plugins.location.inspect import by_person
 from mika.plugins.phone.inspect import PER_THREAD, threads
 
 
@@ -40,14 +37,7 @@ def phone_tab(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str])
         name=look.name(key)))
 
 
-def position_tab(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str]) -> Markup | None:
-    """La fiche d'une personne › Sa position : sa dernière position, téléphone par téléphone, et son journal."""
-    look = Look.of(ui, DAY)
-    s = slice_of(look, "location")
-    if s is None:
-        return None
-    fixes = by_person(s).get(key, [])
-    texts = look.texts([r for f in fixes for r in (f.coords_ref, f.label_ref)])
-    said = said_of(look, query, key, subject_url("person", key, "position"))
-    return Markup(env.get_template("handmade/person/tabs/position.html").render(
-        fixes=[fix_of(look, f, texts) for f in fixes], said=said, name=look.name(key)))
+#: sa part de la fiche d'une personne (ADR 0310)
+PERSON_PART = PersonPart(
+    # ce que son téléphone lui a montré (seulement s'il en a dit quelque chose)
+    tabs={"telephone": phone_tab})

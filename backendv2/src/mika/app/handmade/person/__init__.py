@@ -18,15 +18,17 @@ la page de sa personne.
 Son en-tête dit aussi si un de ses moyens de communication est un compte (utilisateur ou opérateur) et mène à sa page
 (Réglages › Comptes) et à ses droits exacts (Réglages › Droits). Son onglet Comptes réunit en sous-onglets ses boîtes
 et ses comptes Teams (les listes des plugins), puis les services qu'elle a branchés et ses partages, lus dans les
-réglages (``owned``). Son onglet Voyages (``voyages.py``) montre ses voyages et sert leur GPX ; un opérateur peut y en
-supprimer un, rien de plus (ADR 0204). Les onglets de sa barre disent leur compte (``PersonOverview.counts``).
+réglages (``owned``). Un onglet qu'un seul domaine nourrit (ses agendas, ses voyages et sa position, son téléphone, ce
+qui l'identifie et ses contacts, ses projets) est dans la part de ce domaine (``PersonPart``, ADR 0310), avec ce qu'il
+y compte et ce qu'il tait : la fiche réunit les parts après ce qu'elle dit elle-même (``persons``), sans nommer aucun
+domaine. Les onglets de sa barre disent leur compte (``PersonOverview.counts``).
 """
 
 from __future__ import annotations
 
+import functools
 from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 from urllib.parse import quote, urlencode
@@ -40,6 +42,7 @@ from starlette.routing import Route
 from mika.adapters.mcp.config import TRANSPORTS
 from mika.adapters.web.accounts import Account, account_of_handle
 from mika.adapters.web.gate import SlidingWindow
+from mika.app.domains import DOMAINS, PersonPart, part
 from mika.app.domains.tools.settings import ToolsSettings
 from mika.app.handmade import (
     FORGOTTEN,
@@ -59,15 +62,9 @@ from mika.app.handmade import (
 from mika.app.handmade.blocks import tab as blocks_tab
 from mika.app.handmade.exchanges import exchanges
 from mika.app.handmade.lists import Roles, drawn, listing
-from mika.app.handmade.person.agendas import agendas as agendas_tab
+from mika.app.handmade.person.common import Who, _slice
 from mika.app.handmade.person.files import files
-from mika.app.handmade.person.identifies import contacts as person_contacts
-from mika.app.handmade.person.identifies import contacts_count, identifies, linked_sheets
 from mika.app.handmade.person.memory import memory
-from mika.app.handmade.person.senses import phone_tab, position_tab
-from mika.app.handmade.person.voyages import GPX as TRIP_GPX
-from mika.app.handmade.person.voyages import gpx as trip_gpx
-from mika.app.handmade.person.voyages import voyages
 from mika.app.handmade.rights import UNSHARE, retiring
 from mika.app.handmade.tabs import anchored
 from mika.app.me import OUTBOUND
@@ -88,7 +85,6 @@ from mika.faculties.goals.inspect import STATUS_FR as GOAL_STATUS_FR
 from mika.faculties.goals.inspect import of_person as goals_of
 from mika.faculties.memory.inspect import ORIGIN_SHORT, SENSITIVITY_FR
 from mika.faculties.memory.inspect import person_total as memory_total
-from mika.faculties.projects.inspect import of_person as projects_of
 from mika.faculties.social.inspect import CLOSENESS_FR
 from mika.faculties.social.sections import profile_parts, refs_of
 from mika.inspector import render
@@ -97,12 +93,10 @@ from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import PREFIX, UI, Overview, env, secure
 from mika.kernel.clock import DAY, US
 from mika.kernel.inspect import Fields, Head, Note, Section, Table, num_fr, pct_fr, plural
-from mika.plugins.agenda.inspect.views import person_calendars
 from mika.plugins.teams.inspect import ACCOUNT as TEAMS_ACCOUNT
 from mika.plugins.teams.inspect import SECTION as TEAMS_SECTION
 from mika.plugins.teams.inspect import WHOSE as TEAMS_WHOSE
 from mika.plugins.teams.inspect import YOURS
-from mika.plugins.trips import TRIPS, trips_of
 from mika.runtime.boundary import Failed, call
 from mika.vocab import affect as A
 from mika.vocab import privacy
@@ -134,17 +128,6 @@ RELATION_FR = {"friend": "amitié", "family": "famille", "partner": "en couple",
                "acquaintance": "connaissance", "hostile": "en froid"}
 RELATION_STATUS_FR = {"ended": "fini", "uncertain": "incertain"}
 WEEKDAY_SHORT = ("lun", "", "mer", "", "ven", "", "")
-
-
-@dataclass(frozen=True, slots=True)
-class Who:
-    """La personne de la page : sa clé, son nom, ses adresses, et toutes les clés sous lesquelles sa mémoire a pu la
-    noter (ses adresses, les noms dont on lui a parlé et qui la désignent)."""
-
-    person: str
-    name: str
-    handles: tuple[str, ...]
-    keys: tuple[str, ...]
 
 
 def who_of(look: Look, person: str) -> Who:
@@ -606,39 +589,51 @@ def owned(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str],
 
 # ── la page ──
 
-#: les onglets des facultés dessinés : leur nom → ce qui les dessine (les données restent celles de la faculté)
+#: les onglets des facultés que le cadre dessine : leur nom → ce qui les dessine (les données restent celles de la
+#: faculté). Ceux qu'un seul domaine nourrit sont dans sa part (``PersonPart.tabs``) : ``every_tab`` les réunit
 TABS: dict[str, Callable[[UI, str, Sequence[Any], Mapping[str, str]], Any]] = {
     "echanges": exchanges,
     "memoire": memory,
-    # ce qui l'identifie : ses moyens de communication, et les identifiants des fiches de l'annuaire qui lui sont
-    # reliées (« Détacher » sur ceux-là) ; ses contacts (ADR 0298)
-    "adresses": identifies, "contacts": person_contacts,
     # ce qu'elle a envoyé et ce qu'on lui a envoyé, en deux sous-onglets (``joined``), « Retirer » sur chacun
     # (ADR 0205) ; les pièces seules, sans l'autre
     "fichiers": files,
     "pieces": drawn(Roles(title="nom", badges=("sorte", "état"), body=("ce qu'elle y a lu",), time="reçue",
                           tiles=True), "pieces"),
     "buts": drawn(Roles(title="titre", badges=("sorte", "statut"), time="ouvert"), "buts"),
-    "projets": drawn(Roles(title="projet", badges=("mode", "état"), time="ouvert"), "projets"),
     # ses comptes : les boîtes aux lettres et les comptes Teams qui sont à elle (ADR 0185, 0186), réunis (``joined``),
     # puis ses services et ses partages (ADR 0188, 0192) ; sans boîte, Teams reste un onglet à lui, sauf si elle a un
     # service ou un partage (``shows``, ADR 0219) : Comptes les réunit alors
     "boites": owned,
     "teams": drawn(OWNED[1][2], "teams"),
-    # ses agendas, ce qu'on lui partage, ce qu'elle partage, ses prochains événements (ADR 0309, lot 5)
-    "agendas": agendas_tab,
-    # ce que son téléphone lui a montré, où il dit qu'elle est (seulement s'il en a dit quelque chose)
-    "telephone": phone_tab, "position": position_tab,
-    # ses voyages (seulement si elle en a) : leurs arrêts jour par jour, leur GPX, « Supprimer » (ADR 0204)
-    "voyages": voyages,
     # le détail de ce que la vue d'ensemble résume : bloc par bloc, ses formulaires laissés à la console
     "synthese": blocks_tab, "lien": blocks_tab, "devine": blocks_tab, "affect": blocks_tab, "pensees_personne": blocks_tab,
 }
 
 #: les onglets dessinés qui posent aussi les formulaires de la console (``Forms``) : le détail bloc par bloc (la
-#: Synthèse : « C'est la personne dont on lui a parlé »), les voyages (« Supprimer »), les fichiers (« Retirer ») et
-#: Comptes (« Retirer » un partage, par le jeton de la page) ; les autres n'en ont pas
-FORMED = (blocks_tab, voyages, files, owned, identifies, agendas_tab)
+#: Synthèse : « C'est la personne dont on lui a parlé »), les fichiers (« Retirer ») et Comptes (« Retirer » un
+#: partage, par le jeton de la page) ; ceux des domaines le disent dans leur part (``PersonPart.formed``)
+FORMED = (blocks_tab, files, owned)
+
+
+@functools.cache
+def persons() -> tuple[PersonPart, ...]:
+    """La part de chaque domaine dans la fiche d'une personne, dans l'ordre des fiches. Lue à la demande, une fois :
+    la part d'un domaine importe un module de ce paquet (``common``), qui ne peut donc pas importer la sienne en
+    naissant."""
+    consoles = (part(d.console, "CONSOLE") for d in DOMAINS if d.console is not None)
+    return tuple(console.person for console in consoles if console.person is not None)
+
+
+def every_tab() -> dict[str, Callable[..., Any]]:
+    """Les onglets dessinés de la fiche : ceux du cadre (``TABS``), puis ceux de chaque domaine."""
+    return {**TABS, **{tab: draw for p in persons() for tab, draw in p.tabs.items()}}
+
+
+def every_formed() -> tuple[Callable[..., Any], ...]:
+    """Ce qui dessine un onglet qui pose aussi les formulaires de la console : ceux du cadre (``FORMED``), puis ceux que
+    chaque domaine nomme dans sa part."""
+    return (*FORMED, *(p.tabs[tab] for p in persons() for tab in p.formed))
+
 
 # ── le compte de ses onglets ──
 
@@ -646,14 +641,6 @@ def _count(look: Look, query: Any) -> int:
     """Un ``COUNT`` ; une lecture en panne rend 0, qui tait le compte (jamais la fiche)."""
     rows = _query(look, query)
     return int(rows[0][0]) if rows else 0
-
-
-def _slice(look: Look, name: str) -> Any:
-    """La tranche d'une faculté ou d'un plugin ; ``None`` quand il n'est pas composé ici."""
-    try:
-        return look.frame.state(name)
-    except KeyError:
-        return None
 
 
 def _accounts(look: Look, who: Who) -> tuple[int, int]:
@@ -669,33 +656,33 @@ def _accounts(look: Look, who: Who) -> tuple[int, int]:
 
 def tab_counts(look: Look, who: Who) -> dict[str, int]:
     """Combien chaque onglet de sa barre en compte, par son nom (``Overview.counts``, la vue d'un objet) : ce qui se
-    lit au frame (ses moyens de communication, ses voyages, ses buts, ses projets) et dans les réglages (Comptes :
-    ses boîtes, ses comptes Teams, ses services, ses partages), et deux ``COUNT`` d'une requête chacun — ses messages
-    (le fil, comme ``_history``) et ce que liste sa Mémoire (compté par la mémoire, aux clauses de son onglet : tous
-    statuts, comme sa bande de chiffres). Fichiers n'en a pas : ses deux listes sont à deux facultés, chacune sa
-    table ; les onglets repliés sous « Le détail » non plus."""
+    lit au frame (ses moyens de communication, ses buts) et dans les réglages (Comptes : ses boîtes, ses comptes
+    Teams, ses services, ses partages), et deux ``COUNT`` d'une requête chacun — ses messages (le fil, comme
+    ``_history``) et ce que liste sa Mémoire (compté par la mémoire, aux clauses de son onglet : tous statuts, comme sa
+    bande de chiffres) ; puis ce que chaque domaine y compte (``PersonPart.counts``, ajouté à ce que la fiche compte
+    déjà : ses voyages, ses contacts, ses agendas, ses projets, et les identifiants de l'annuaire qui lui sont reliés,
+    avec ses moyens de communication). Fichiers n'en a pas : ses deux listes sont à deux facultés, chacune sa table ;
+    les onglets repliés sous « Le détail » non plus."""
     frame, person = look.frame, who.person
     handles = sorted({person, *who.handles})
     t = transcript_c.thread_table()
     known = call(memory_total, _store(look), frame, person, label="lecture")
     boxes, teams = _accounts(look, who)
     shared = shares(look, who)
-    trips, goals, projects = _slice(look, TRIPS.name), _slice(look, "goals"), _slice(look, "projects")
-    linked = sum(len(x.identifiers) for x in linked_sheets(look, person))
-    return {
-        "adresses": len(who.handles) + linked,
-        "contacts": contacts_count(look, person),
+    goals = _slice(look, "goals")
+    counts = {
+        "adresses": len(who.handles),
         "echanges": _count(look, select(func.count()).select_from(t).where(t.c.person.in_(handles))),
         "memoire": 0 if isinstance(known, Failed) else known,
         # Comptes réunit Teams (``joined``) ; sans Comptes, Teams est un onglet à lui
         "boites": boxes + teams + len(services(look, who)) + len(shared["given"]) + len(shared["received"]),
         "teams": teams,
-        "voyages": len(trips_of(trips, frame.get, person)),
-        # ses agendas et ceux qu'on lui partage (ADR 0309, lot 5)
-        "agendas": sum(map(len, person_calendars(look.ui.kernel.ports, frame, person))),
         "buts": len(goals_of(goals, handles)) if goals is not None else 0,
-        "projets": len(projects_of(projects, handles)) if projects is not None else 0,
     }
+    for p in persons():  # ce que chaque domaine y compte, ajouté à ce que la fiche compte déjà
+        for tab, count in p.counts.items():
+            counts[tab] = counts.get(tab, 0) + count(look, who)
+    return counts
 
 
 #: chaque partie de la page, lue à part
@@ -718,8 +705,6 @@ class PersonOverview(Overview):
     #: ce que la vue d'ensemble résume (son ressenti, leur lien, ce qu'elle lit d'elle, ses pensées, et la mécanique
     #: de ce qu'elle peut lui dire) : le détail reste à un clic, au bout de la barre
     folded = ("synthese", "lien", "devine", "affect", "pensees_personne")
-    #: les onglets des facultés qu'elle dessine (``TABS``)
-    tabs = tuple(TABS)
     #: Fichiers porte aussi les pièces reçues : un onglet pour ce qui va et vient entre elles (ADR 0179) ; Comptes, ses
     #: boîtes aux lettres et ses comptes Teams (ADR 0185, 0186 — sans boîte, Teams reste un onglet à lui)
     joined = {"fichiers": ("pieces",), "boites": ("teams",)}
@@ -727,6 +712,11 @@ class PersonOverview(Overview):
     def __init__(self) -> None:
         #: la console, posée quand ses routes le sont (la fiche, elle, passe la sienne à ``render``)
         self.ui: UI | None = None
+
+    @property
+    def tabs(self) -> tuple[str, ...]:
+        """Les onglets des facultés qu'elle dessine : ceux du cadre, puis ceux des domaines (``every_tab``)."""
+        return tuple(every_tab())
 
     @staticmethod
     def snapshot(ui: UI, person: str) -> dict[str, Any]:
@@ -765,10 +755,10 @@ class PersonOverview(Overview):
         return Markup(env.get_template("handmade/person/head.html").render(h=heading(look, who_of(look, key))))
 
     def hidden(self, ui: UI, key: str) -> Sequence[str]:
-        """Contacts (ADR 0298) seulement pour qui en a : ses comptes, ceux qu'on lui partage, ceux de personne."""
+        """Ce que chaque domaine tait sur sa fiche (``PersonPart.hidden`` : Contacts, seulement pour qui en a)."""
         if not self.known(ui, key):
             return ()
-        return () if contacts_count(Look.of(ui, DAY), key) else ("contacts",)
+        return tuple(tab for p in persons() if p.hidden is not None for tab in p.hidden(ui, key))
 
     def shows(self, ui: UI, key: str) -> Sequence[str]:
         """Comptes (``boites``) aussi pour qui n'a pas de boîte à elle mais a branché un service ou partage quelque
@@ -783,10 +773,10 @@ class PersonOverview(Overview):
 
     def render_tab(self, ui: UI, key: str, tab: str, blocks: Sequence[Any], query: Mapping[str, str],
                    forms: Mapping[str, Any] | None = None) -> Any:
-        draw = TABS.get(tab)
+        draw = every_tab().get(tab)
         if draw is None or not self.known(ui, key):
             return None
-        return draw(ui, key, blocks, query, forms) if draw in FORMED else draw(ui, key, blocks, query)
+        return draw(ui, key, blocks, query, forms) if draw in every_formed() else draw(ui, key, blocks, query)
 
     async def fragment(self, request: Request) -> Response:
         assert self.ui is not None
@@ -800,16 +790,12 @@ class PersonOverview(Overview):
         return secure(RedirectResponse(subject_url("person", request.path_params["key"]), status_code=303))
 
     def routes(self, ui: UI, outbound: SlidingWindow | None = None) -> list[Route]:
-        """Ses routes. ``outbound`` : la borne des demandes au serveur d'itinéraires, celle de l'écran Carte
-        (``MeApi.outbound``), que le GPX d'un voyage use sur le compte de l'opérateur ; sans elle, une borne à la
-        console seule, aux mêmes nombres (``OUTBOUND``) — jamais aucune."""
+        """Ses routes, puis celles que chaque domaine pose sous la fiche (``PersonPart.routes`` : le GPX d'un voyage).
+        ``outbound`` : la borne des demandes au serveur d'itinéraires, celle de l'écran Carte (``MeApi.outbound``), que
+        le GPX d'un voyage use sur le compte de l'opérateur ; sans elle, une borne à la console seule, aux mêmes
+        nombres (``OUTBOUND``) — jamais aucune. Les parts reçoivent celle-ci."""
         self.ui = ui
         throttle = outbound if outbound is not None else SlidingWindow(*OUTBOUND)
-
-        async def gpx(request: Request) -> Response:
-            return await trip_gpx(ui, request, throttle)
-
         return [Route(BASE + "/{key:path}", ui.guarded(self.page), methods=["GET"]),
                 Route(FRAGMENT + "/{key:path}", ui.guarded(self.fragment), methods=["GET"]),
-                # le GPX d'un voyage, depuis son onglet (ADR 0204)
-                Route(TRIP_GPX + "/{trip:int}/gpx", ui.guarded(gpx), methods=["GET"])]
+                *(route for p in persons() if p.routes is not None for route in p.routes(ui, throttle))]

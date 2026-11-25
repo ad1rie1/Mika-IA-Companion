@@ -2,7 +2,7 @@
 projet (``subject.py``) et ses onglets — en liste et détail (``zones.py`` : ``goals.py``, ``diagram.py``,
 ``tickets.py``), son code (``code.py``) et son dépôt face au distant (``git.py``), sa documentation (``docs.py``), ses
 dépendances (``links.py``), son activité (``activity.py``) —, sa rubrique de réglages (``settings.py`` : Dépôts
-Git), leurs gabarits (``templates/``), leurs feuilles et leur script (``static/``), sous les noms et aux adresses
+Git), l'onglet Projets de la fiche d'une personne et son compte (``person.py``), leurs gabarits (``templates/``), leurs feuilles et leur script (``static/``), sous les noms et aux adresses
 qu'ils avaient dans l'inspecteur.
 """
 
@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from mika.app.domains.domain import ConsolePart
+from mika.app.domains.projects.console.person import PERSON_PART
 from mika.app.domains.projects.console.queue import QUEUE
 from mika.app.domains.projects.console.settings import sections
 from mika.app.domains.projects.console.subject import KIND, ProjectFiche
@@ -19,4 +20,5 @@ from mika.inspector.ui import console_folder
 
 console_folder(Path(__file__).parent)
 
-CONSOLE = ConsolePart(overviews={KIND: ProjectFiche()}, drawn=TABS, sections=sections, queue=QUEUE)
+CONSOLE = ConsolePart(overviews={KIND: ProjectFiche()}, drawn=TABS, sections=sections, queue=QUEUE,
+                      person=PERSON_PART)

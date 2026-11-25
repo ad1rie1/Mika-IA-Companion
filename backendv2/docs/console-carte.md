@@ -295,8 +295,10 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
   identifiants des fiches de l'annuaire qui lui sont reliées — « son compte » quand un de ses comptes la désigne,
   « Détacher » au nom de la fiche du contact ; **Contacts**, seulement pour qui en a : ceux que ses comptes lui ont fait
   connaître, ceux qu'on lui partage et ceux que personne n'a, des puces par compte, une entrée chacun comme
-  l'Annuaire, `app/handmade/person/identifies.py`) ; ce que la vue d'ensemble résume (Synthèse, Lien, Ce qu'elle devine, Affect, Pensées) est rangé au bout
-  de la barre, sous « Le détail ». Ses onglets disent leur compte (`PersonOverview.counts`) : ses moyens de
+  l'Annuaire, `app/domains/contacts/console/person.py`) ; ce que la vue d'ensemble résume (Synthèse, Lien, Ce qu'elle devine, Affect, Pensées) est rangé au bout
+  de la barre, sous « Le détail ». Un onglet qu'un seul domaine nourrit (ses agendas, ses voyages et sa position, son
+  téléphone, ce qui l'identifie et ses contacts, ses projets) est dessiné et compté par la part de ce domaine
+  (`PersonPart`, ADR 0310). Ses onglets disent leur compte (`PersonOverview.counts`) : ses moyens de
   communication, ses messages et ce que liste sa Mémoire (un `COUNT` chacun ; la mémoire compte aux clauses de son
   onglet, tous statuts), ce qu'il y a sous Comptes, ses voyages, ses buts, ses projets ; Fichiers n'en dit pas (deux
   facultés, deux tables), ni ce qui est rangé sous « Le détail ».
@@ -320,7 +322,7 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
   retour sur la fiche, `?onglet=boites#partages`), ses lignes d'accès pour un service ; rien ne s'y donne (ADR 0188).
   L'onglet paraît aussi pour qui n'a pas de boîte mais a branché un service ou partage quelque chose, dans un
   sens ou dans l'autre (`Overview.shows`, ADR 0219) ; sans rien de tout cela, Teams est un onglet à lui. **Voyages**
-  n'apparaît aussi que si elle en a (`app/handmade/person/voyages.py`, ADR 0204) : chacun de ses voyages, du plus
+  n'apparaît aussi que si elle en a (`app/domains/maps/console/person.py`, ADR 0204) : chacun de ses voyages, du plus
   récemment changé — son titre, comment on s'y déplace, s'il a été préparé avec elle, son départ, ce qu'il évite, ses
   jours et ses arrêts, sa création au journal —, ses arrêts jour par jour, repliés (sorte, note, coordonnées,
   « ajouté par » elle sous son nom), son GPX (servi par la console aux opérateurs, `/admin/voyages/<id>/gpx` ;
@@ -438,7 +440,7 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
   « ⋯ », « Déconnecter le compte » (Google ou Microsoft : sa connexion oubliée ; sinon décoché) et « Supprimer de
   Mika » (il n'est plus suivi, sa copie part ; rien chez son fournisseur). Rien ne s'y crée, ne s'y modifie ni ne s'y
   répond à la place de quelqu'un ; ce qui change les réglages passe par le port `agenda_desk`. La fiche d'une personne
-  a l'onglet **Agendas** (à côté de Comptes, `app/handmade/person/agendas.py`) : ses agendas, ce qu'on lui partage, ce
+  a l'onglet **Agendas** (à côté de Comptes, `app/domains/agenda/console/person.py`) : ses agendas, ce qu'on lui partage, ce
   qu'elle partage (« Retirer »), ses prochains événements de la semaine.
 - **Identités et moyens de communication** (`app/handmade/tabs/identities.py`) : Moyens de communication (un
   bandeau quand une revendication attend, qui mène à la file « À valider », la bande de chiffres, une ligne par moyen

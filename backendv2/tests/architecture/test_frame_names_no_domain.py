@@ -30,7 +30,8 @@ import ast
 from collections.abc import Iterator, Mapping
 from pathlib import Path
 
-from mika.app.domains import DOMAINS, ConsolePart, LivePart, part
+from mika.app.domains import DOMAINS, ConsolePart, Domain, LivePart, PersonPart, part
+from mika.app.handmade.person import TABS as PERSON_TABS
 from mika.app.settings import SettingsPart
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -78,11 +79,7 @@ FOREVER: dict[str, str] = {
 #: ce qui reste à sortir du cadre : fichier d'``app`` → domaines qu'il nomme encore. Elle ne fait que rétrécir
 STILL: dict[str, set[str]] = {
     "handmade/directory.py": {"contacts"},
-    "handmade/person/__init__.py": {"agenda", "maps", "projects", "teams", "tools"},
-    "handmade/person/agendas.py": {"agenda"},
-    "handmade/person/identifies.py": {"contacts"},
-    "handmade/person/senses.py": {"maps", "phone", "senses"},
-    "handmade/person/voyages.py": {"maps"},
+    "handmade/person/__init__.py": {"teams", "tools"},
     "handmade/rights.py": {"agenda", "forge", "tools"},
     "handmade/tabs/people.py": {"contacts"},
     "handmade/tabs/thoughts.py": {"mail", "senses", "teams"},
@@ -221,11 +218,39 @@ def test_every_part_a_card_names_exists_and_carries_its_name():
         assert all(callable(count) for count in part(d.api, "COUNTERS", {}).values()), d.name
         assert d.live is None or isinstance(part(d.live, "LIVE"), LivePart), d.name
         assert d.console is None or isinstance(part(d.console, "CONSOLE"), ConsolePart), d.name
+        sheet = _person_part(d)
+        assert sheet is None or isinstance(sheet, PersonPart), d.name
+        if sheet is not None:  # sa part de la fiche d'une personne : ce qu'elle nomme est un onglet qu'elle dessine
+            assert sheet.tabs and all(callable(draw) for draw in sheet.tabs.values()), d.name
+            assert set(sheet.formed) <= set(sheet.tabs), f"{d.name} : {sorted(set(sheet.formed) - set(sheet.tabs))}"
+            # … ou, pour un compte qui s'ajoute à celui du cadre, un onglet du cadre
+            unknown = set(sheet.counts) - {*sheet.tabs, *PERSON_TABS}
+            assert not unknown and all(callable(count) for count in sheet.counts.values()), f"{d.name} : {sorted(unknown)}"
+            assert sheet.hidden is None or callable(sheet.hidden), d.name
+            assert sheet.routes is None or callable(sheet.routes), d.name
         assert d.preview is None or callable(part(d.preview, "preview")), d.name
         assert d.cli is None or callable(part(d.cli, "add")), d.name
         kept = (*part(d.backup, "UNSAVED", ()), *part(d.backup, "SAVED", ()))
         assert d.backup is None or (kept and all(isinstance(path, str) and path for path in kept)), d.name
         assert d.base is None or _exists(d.base.models.removeprefix("mika.")), d.name
+
+
+def _person_part(d: Domain) -> PersonPart | None:
+    return part(d.console, "CONSOLE").person if d.console is not None else None
+
+
+def test_a_tab_of_the_sheet_of_a_person_is_drawn_by_one_hand():
+    """La fiche d'une personne réunit les onglets du cadre, puis ceux des parts (``every_tab``) : un onglet que deux
+    parts dessinent, ou qu'une part reprend au cadre, ne serait dessiné que par la dernière — sans bruit."""
+    seen = dict.fromkeys(PERSON_TABS, "le cadre")
+    twice = []
+    for d in DOMAINS:
+        sheet = _person_part(d)
+        for tab in sheet.tabs if sheet is not None else ():
+            if tab in seen:
+                twice.append(f"{tab} : {seen[tab]} et {d.name}")
+            seen.setdefault(tab, d.name)
+    assert not twice, twice
 
 
 # ── le contrôle, essayé sur des sources factices ──

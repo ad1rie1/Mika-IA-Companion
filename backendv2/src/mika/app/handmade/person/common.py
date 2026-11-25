@@ -1,0 +1,30 @@
+"""Ce que la fiche d'une personne et les parts des domaines lisent ensemble (ADR 0310) : la personne de la page
+(``Who``) et la tranche d'une faculté ou d'un plugin (``_slice``). La part d'un domaine (``PersonPart`` : ses onglets,
+ce qu'il y compte) les prend ici, dans un module feuille, et jamais dans ``person/__init__.py`` : la fiche lit les
+parts, une part ne lit pas la fiche."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+from mika.app.handmade import Look
+
+
+@dataclass(frozen=True, slots=True)
+class Who:
+    """La personne de la page : sa clé, son nom, ses adresses, et toutes les clés sous lesquelles sa mémoire a pu la
+    noter (ses adresses, les noms dont on lui a parlé et qui la désignent)."""
+
+    person: str
+    name: str
+    handles: tuple[str, ...]
+    keys: tuple[str, ...]
+
+
+def _slice(look: Look, name: str) -> Any:
+    """La tranche d'une faculté ou d'un plugin ; ``None`` quand il n'est pas composé ici."""
+    try:
+        return look.frame.state(name)
+    except KeyError:
+        return None
