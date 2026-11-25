@@ -112,6 +112,8 @@ SEEN = {rule: seen for part in PARTS for rule, seen in part.seen.items()}
 #: règle → les niveaux de la personne sur ses propriétaires ; règle → le propriétaire d'une clé
 LEVELS = {rule: levels for part in PARTS for rule, levels in part.levels.items()}
 OWNER_OF = {rule: owner for part in PARTS for rule, owner in part.owner_of.items()}
+#: règle → son propre jugement
+JUDGE = {rule: judge for part in PARTS for rule, judge in part.judge.items()}
 #: port du noyau → ses comptes, à lire une fois par envoi sur la boucle
 LISTED = {name: read for part in PARTS for name, read in part.listed.items()}
 #: propriétaire d'une tâche → où elle en est (la traduction de son domaine)
@@ -324,6 +326,11 @@ class Reader:
     channel: str
     _seen: dict[str, Any] = field(default_factory=dict)
 
+    def once(self, name: str, read: Any, empty: Any) -> Any:
+        """Ce que lit la règle d'un domaine (``LivePart.judge``), une fois par personne et par envoi ; illisible :
+        ``empty``."""
+        return self._once(name, read, empty)
+
     def _once(self, name: str, read: Any, empty: Any) -> Any:
         if name not in self._seen:
             got = call(read, label=f"le direct ({name})")
@@ -370,6 +377,8 @@ class Reader:
         me = self.call.me
         if t.rule == EVERYONE:
             return True, ()
+        if t.rule in JUDGE:  # la règle d'un domaine qui juge elle-même
+            return JUDGE[t.rule](self, t)
         if t.rule == CALENDARS:
             return self._agenda(t)
         if t.rule == PERSON:

@@ -75,6 +75,11 @@ class LivePart:
     #: (une boîte, un compte) et son niveau (le sien, ce qu'on lui partage : lire, préparer, s'en servir). Le service
     #: y applique ce que la touche demande (``Touch.need``)
     levels: Mapping[str, Callable[..., Mapping[str, str]]] = field(default_factory=dict)
+    #: règle d'une touche → son propre jugement, quand ni ``seen`` ni ``levels`` ne la disent (un agenda est à elle
+    #: par son compte ou par un partage encore ouvert) : ``judge(reader, touch)`` rend (la regarde-t-elle ?, les
+    #: clés qu'elle peut en voir nommées). ``reader.call`` est ce qu'une route de son espace lirait ; ``reader.once(
+    #: nom, lire, vide)`` ne lit qu'une fois par personne et par envoi
+    judge: Mapping[str, Callable[..., tuple[bool, tuple[str, ...]]]] = field(default_factory=dict)
     #: port du noyau → ses comptes tels que ses réglages les disent : ``listed(port)``, lu une fois par envoi sur la
     #: boucle d'événements (leur lecture passe par la base du journal, que seule la boucle lit) ; les règles les
     #: relisent ensuite dans un fil, par ce même nom de port
