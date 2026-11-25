@@ -64,18 +64,15 @@ from mika.app.settings import (
 )
 from mika.contracts import email as email_c
 from mika.contracts import identity as identity_c
-from mika.contracts import location as location_c
 from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
 from mika.contracts import teams as teams_c
-from mika.contracts import trips as trips_c
 from mika.faculties.projects import links
 from mika.faculties.projects.faculty import ACCESS_SET, AMENDED, ARCHIVED, LINKS_SET, RESTORED
 from mika.kernel.builtin import KERNEL, PARAMS_CHANGED
 from mika.plugins import agenda as agenda_p
 from mika.plugins import email as email_p
 from mika.plugins import teams as teams_p
-from mika.plugins import trips as trips_p
 from mika.ports.agenda import split_calendar_key
 from mika.ports.changes import (
     AGENDA,
@@ -86,7 +83,6 @@ from mika.ports.changes import (
     MAIL_WORK,
     ME,
     OUTBOX,
-    PHONE_POSITION,
     PROJECTS,
     SETTINGS,
     TEAMS,
@@ -94,7 +90,6 @@ from mika.ports.changes import (
     TEAMS_REPLIES,
     TEAMS_WORK,
     TOPICS,
-    TRIPS,
     Change,
 )
 from mika.ports.mail import split_ref
@@ -135,7 +130,6 @@ PARAMS: Mapping[str, tuple[str, ...]] = {
     email_c.OWNER: (SETTINGS, MAIL, MAIL_DRAFTS, ME, CONTACTS),
     teams_c.OWNER: (SETTINGS, TEAMS, TEAMS_REPLIES, ME, CONTACTS),
     projects_c.OWNER: (PROJECTS, ME),
-    trips_c.OWNER: (TRIPS,), location_c.OWNER: (PHONE_POSITION,),
     agenda_p.OWNER: (SETTINGS, AGENDA, ME),
     **{owner: topics for part in PARTS for owner, topics in part.params.items()}}
 
@@ -208,17 +202,6 @@ def _teams(e: Any, frame: Any, kernel: Any) -> list[Touch]:
     if name in (teams_c.SENT.name, teams_p.SETTLED.name):
         out += [Touch(TEAMS_REPLIES, ACCOUNTS, PREPARE, owners=yours), Touch(ME, ACCOUNTS, OWN, owners=yours)]
     return out
-
-
-def _location(e: Any, frame: Any, kernel: Any) -> list[Touch]:
-    return [Touch(PHONE_POSITION, PERSON, owners=_both(e.data.handle, e.data.person))]
-
-
-def _trips(e: Any, frame: Any, kernel: Any) -> list[Touch]:
-    """Un voyage est à sa personne, telle que l'identité la relie maintenant ; un regard, aussi à l'adresse qui l'a
-    demandé (la règle de ``maps``)."""
-    d = e.data
-    return [Touch(TRIPS, PERSON, owners=_both(trips_p.owner_key(frame.get, d.person), getattr(d, "handle", "")))]
 
 
 def _projects(e: Any, frame: Any, kernel: Any) -> list[Touch]:
@@ -321,9 +304,8 @@ def _identity(e: Any, frame: Any, kernel: Any) -> list[Touch]:
 
 
 #: chaque propriétaire d'événements dont le journal change ce que montrent les écrans, et sa traduction
-BY_OWNER = {email_c.OWNER: _email, teams_c.OWNER: _teams, location_c.OWNER: _location,
-            trips_c.OWNER: _trips, projects_c.OWNER: _projects, rt.OWNER: _runtime, KERNEL.name: _kernel,
-            identity_c.OWNER: _identity, agenda_p.OWNER: _agenda,
+BY_OWNER = {email_c.OWNER: _email, teams_c.OWNER: _teams, projects_c.OWNER: _projects, rt.OWNER: _runtime,
+            KERNEL.name: _kernel, identity_c.OWNER: _identity, agenda_p.OWNER: _agenda,
             **{owner: translate for part in PARTS for owner, translate in part.events.items()}}
 
 

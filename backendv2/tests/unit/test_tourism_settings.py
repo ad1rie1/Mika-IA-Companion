@@ -12,7 +12,8 @@ from pydantic import ValidationError
 
 from mika.adapters.maps.config import KEY_ENV, KEY_SET, TourismConfig, department_code, tourism_key
 from mika.adapters.store_sql import SqlStore
-from mika.app.settings import TOURISM_KEY, SecretBox, Settings
+from mika.app.domains.maps.settings import TOURISM_KEY, MapsSettings
+from mika.app.settings import SecretBox, Settings
 from mika.kernel import forms
 
 KEY = "cle-de-test-scellee-42"
@@ -25,7 +26,7 @@ def _run(tmp_path, scenario):
         try:
             settings = Settings(store, SecretBox.for_data(tmp_path))
             await settings.open()
-            return await scenario(store, settings)
+            return await scenario(store, settings.of(MapsSettings))
         finally:
             await store.close()
 

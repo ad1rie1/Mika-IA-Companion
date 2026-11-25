@@ -22,6 +22,7 @@ from mika.adapters.maps.tourism import Tourism, match_stamp
 from mika.adapters.maps.tourism_sync import KIND_FR, NO_ZONES, SyncBusy, TourismSync
 from mika.app import schema
 from mika.app.cli.common import _with_settings
+from mika.app.domains.maps.settings import MapsSettings
 from mika.kernel import forms
 
 #: d'où se tire l'index des lieux sans ``--depuis`` : l'extrait OpenStreetMap s'il est là (ADR 0244), sinon les tuiles
@@ -72,7 +73,8 @@ async def _tourism_settings(data: Path) -> tuple[TourismConfig, PlacesConfig]:
         return TourismConfig(), PlacesConfig()
 
     async def read(settings, _store):  # type: ignore[no-untyped-def]
-        return settings.tourism_config(), settings.places_config()
+        own = settings.of(MapsSettings)
+        return own.tourism_config(), own.places_config()
 
     return await _with_settings(data, read)
 

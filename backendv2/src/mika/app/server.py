@@ -52,7 +52,6 @@ from mika.adapters.llm.gateway import LLMTrace
 from mika.adapters.llm.models import model_limits
 from mika.adapters.mail import ImapSmtpMail, MailWatch
 from mika.adapters.mail.oauth import MicrosoftSignIn
-from mika.adapters.maps import MapsDesk, MapTiles
 from mika.adapters.mcp.relay import PREFIX as RELAY_PREFIX
 from mika.adapters.mcp.relay import Relay
 from mika.adapters.preprocess import LocalPreprocessor, whisper
@@ -77,7 +76,6 @@ from mika.app.console import FACULTY_LABELS, LABELS, NAVIGATION, PARAM_FAMILIES
 from mika.app.console_menu import menu_for
 from mika.app.constellation import Constellation
 from mika.app.domains import DOMAINS, part
-from mika.app.domains.maps.warm_points import last_positions
 from mika.app.handmade import access, approval_sources, rights, waiting
 from mika.app.handmade.home import HomePage
 from mika.app.handmade.now import NowPage
@@ -156,13 +154,11 @@ class Live:
     imaging_fixed: bool = False
     #: les objets vivants de chaque domaine qui a son câblage (ADR 0310), par son nom : les réveils par API
     #: (``wakeup`` : le port du même nom et la porte de ``POST /api/wake/<nom>``), ses outils venus
-    #: d'ailleurs (``tools`` : le client MCP, le port ``mcp``, ADR 0064)
+    #: d'ailleurs (``tools`` : le client MCP, le port ``mcp``, ADR 0064), la carte (``maps`` : le port du même nom,
+    #: ADR 0194 ; et ``tiles`` : les tuiles de la carte de sa position, lues ou relayées par ce serveur, ADR 0193)
     parts: dict[str, Any] = field(default_factory=dict)
     #: Teams (ADR 0069) : la clé de l'extension et la porte de ``/api/teams/…``
     teams: TeamsDesk | None = None
-    #: la carte de sa position (ADR 0193) : ses tuiles, lues ou relayées par ce serveur ; le port des lieux, des
-    #: adresses et des itinéraires, lui, est ``maps`` (``MapsDesk``, ADR 0194)
-    tiles: MapTiles | None = None
     #: le direct (ADR 0308) : ce qui change ce que montrent les écrans de tous les jours, poussé sur leur ``/ws``
     changes: LiveChanges | None = None
     #: le courrier en direct (ADR 0308) : une connexion IDLE par boîte, sinon une relève par minute (``serve`` seul)
@@ -372,15 +368,6 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     # ce que la console change d'un compte d'agenda (ADR 0309, lot 5) : le décocher, ne plus suivre un de ses agendas,
     # oublier sa connexion — jamais une écriture dans un agenda
     agenda_desk = outside["agenda_desk"] = AgendaSettingsDesk(settings, outside["agenda_providers"])
-    # les lieux, les adresses et les itinéraires de l'écran Carte et de ses outils (ADR 0194) : l'index des lieux de
-    # ``cartes/``, la Géoplateforme, Valhalla ; les données touristiques et les événements de DATAtourisme, dans
-    # ``cartes/tourisme.db`` (ADR 0245) ; les avis de Google Places, dans ``cartes/avis.db`` (ADR 0256) — réglés dans la
-    # console, relus à chaque usage ; chaque soir, leurs caches se réchauffent autour de la dernière position de chacun
-    # (``warm_points``)
-    maps_desk = outside["maps"] = MapsDesk(data, settings.places_config, settings.routing_config,
-                                           tourism=settings.tourism_config, reviews=settings.reviews_config,
-                                           warm=settings.warm_config,
-                                           warm_points=lambda: last_positions(kernel, store, clock.now))
     # ce que chaque domaine apporte (ADR 0310) : ses adaptateurs, ses ports, ses portes HTTP — sa fiche nomme son
     # câblage, que ce serveur appelle sans le connaître (``app/wiring.py``)
     wiring = Wiring(data=data, settings=settings, clock=clock, bases=bases, ports=outside, store=store)
@@ -402,8 +389,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     teams.port = port
     live = Live(kernel, hub, port, Accounts(store), settings, gateway, fixed, calls=CallLog(store),
                 persona_file=persona, data=data, imaging=imaging, imaging_fixed=imaging_fixed,
-                parts=wiring.parts, teams=teams, read_limits=None if fixed else model_limits,
-                tiles=MapTiles(data, settings.map_config), mail_watch=mail_watch)
+                parts=wiring.parts, teams=teams, read_limits=None if fixed else model_limits, mail_watch=mail_watch)
     agenda_desk.reconfigure = live.reconfigure
     # l'exemple de l'autrice « Message », quand le sien est vide : le fil de référence de sa persona (ADR 0124), lu au
     # journal (lu à chaque épisode : jamais le YAML)
@@ -470,7 +456,6 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
             mail_watch.start()  # ce qu'il range part aux écrans : après le direct
         world_hub.start()
         constellation.start()
-        maps_desk.start()  # le réchauffage des caches de la carte, les départements tenus en entier (ADR 0245)
         for module in wired:  # ce que chaque domaine démarre, une fois le direct en marche (``start``)
             await part(module, "start", _idle)(wiring)
         # sa mémoire prête avant sa première réponse : un message qui attendait au démarrage, une reprise, ne passent
@@ -486,7 +471,6 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                 await part(module, "stop", _idle)(wiring)
             if mail_watch is not None:
                 await mail_watch.stop()
-            await maps_desk.stop()
             await constellation.stop()
             await world_hub.stop()
             await live_changes.stop()
@@ -500,9 +484,6 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                 await gateway.aclose()
                 await imaging.aclose()
                 await push_sender.aclose()
-                if live.tiles is not None:
-                    await live.tiles.close()
-                await maps_desk.close()
                 await live.calls.flush()
 
             await kernel.stop(release)
@@ -539,7 +520,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     # ce que frontendv2 montre à qui est connecté, et seulement à elle (ADR 0187) ; sa borne des trajets vaut aussi pour
     # le GPX d'un voyage qu'un opérateur tire de la console, sur son compte (ADR 0204)
     moi = MeApi(kernel, live.accounts, origins=web.origins, extension=EXTENSION_DIR,
-                settings=live.settings, reconfigure=live.reconfigure, tiles=live.tiles, **wiring.me)
+                settings=live.settings, reconfigure=live.reconfigure, **wiring.me)
     # le direct (ADR 0308) : le journal, les bases tenues à côté (chacune prévient de ses écritures validées), l'étape
     # de son travail ; à chaque personne connectée, ce qu'elle voit — et la boîte d'envoi réveille l'extension
     live_changes = live.changes = LiveChanges(kernel, hub, moi)

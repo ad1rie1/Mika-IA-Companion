@@ -529,8 +529,8 @@ def backup_unit(data: Path) -> str:
 
 #: ce que garde chaque base et chaque dossier connu du dossier de données, en mots (Système › Stockage et
 #: sauvegardes) ; ce que la sauvegarde en fait se lit dans ``SKIPPED`` et ``SKIPPED_DIRS``. Textes affichés,
-#: donc sans numéro d'ADR (ADR 0225) ; leurs renvois : ``pieces`` ADR 0106, ``partages`` 0062, ``cartes`` 0193,
-#: ``PUSH_KEY_FILE`` 0077. La base d'un domaine dit la sienne dans sa fiche (``Base.place``, ADR 0310)
+#: donc sans numéro d'ADR (ADR 0225) ; leurs renvois : ``pieces`` ADR 0106, ``partages`` 0062, ``PUSH_KEY_FILE`` 0077.
+#: La base d'un domaine dit la sienne dans sa fiche (``Base.place``, ADR 0310)
 PLACES: dict[str, str] = {
     "mind": "sa vie : le journal, ses contenus, ses instantanés, les comptes, les réglages",
     "views": "les projections et les vecteurs tirés du journal, les traces et les appels de modèle des derniers jours",
@@ -542,8 +542,6 @@ PLACES: dict[str, str] = {
     "partages": "les fichiers qu'elle a envoyés",
     "documentation": "les images de la documentation de ses projets (100 Mio par projet)",
     "telephone": "l'application Android à installer",
-    "cartes": "la carte de sa position, l'index des lieux et les caches de la carte ; ses compteurs du mois, eux, se "
-              "sauvegardent",
     "cache": "le modèle de plongements",
     "claude-code": "les appels de Claude Code d'une installation d'avant",
     "secret.key": "la clé qui chiffre les secrets des réglages",

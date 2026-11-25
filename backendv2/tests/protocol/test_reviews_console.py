@@ -9,6 +9,7 @@ from __future__ import annotations
 import html
 
 from mika.adapters.maps.config import ReviewsConfig
+from mika.app.domains.maps.settings import MapsSettings
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 
 PAGE = "/admin/reglages/avis"
@@ -39,7 +40,7 @@ def test_the_key_is_kept_sealed_and_never_shown_again(world):  # noqa: F811
                           "per_second": "2", "reserve_pct": "10", "cache_days": "14", "cell_km": "2",
                           "split_depth": "2", "preload": "on"})
     assert saved.status_code in (200, 303), saved.text[:300]
-    cfg = client.portal.call(live.settings.reviews_config)
+    cfg = client.portal.call(live.settings.of(MapsSettings).reviews_config)
     assert cfg == ReviewsConfig(api_key=CANARY, searches_per_month=2000, details_per_month=1000,
                                 photos_per_month=500, per_day=800, per_second=2.0, reserve_pct=10, cache_days=14,
                                 cell_km=2, split_depth=2, preload=True, warm=False)
@@ -47,9 +48,9 @@ def test_the_key_is_kept_sealed_and_never_shown_again(world):  # noqa: F811
     assert CANARY not in again and "réglée ici" in again and "sur 2000" in again and "gardées 14 jour(s)" in again
     assert "de 1 à 21 recherches" in again
     post(client, {"_champs": ["api_key", "cache_days"], "api_key": "", "cache_days": "7"})
-    assert client.portal.call(live.settings.reviews_config).api_key == CANARY  # renvoyée vide : elle reste
+    assert client.portal.call(live.settings.of(MapsSettings).reviews_config).api_key == CANARY  # renvoyée vide : elle reste
     post(client, {"_champs": ["api_key"], "api_key": "", "_effacer": ["api_key"]})
-    assert client.portal.call(live.settings.reviews_config).api_key == ""
+    assert client.portal.call(live.settings.of(MapsSettings).reviews_config).api_key == ""
     assert "aucune : rien ne part" in html.unescape(client.get(PAGE).text)
 
 

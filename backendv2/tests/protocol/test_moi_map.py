@@ -12,6 +12,7 @@ import re
 from pmtiles.tile import Compression
 
 from mika.adapters.maps import FILE, MapConfig, MapsDesk, MapTiles, PlacesConfig, RoutingConfig
+from mika.app.domains.maps.settings import MapsSettings
 from tests.protocol.test_moi_mail import API, login, second_person
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 from tests.unit.test_maps import LILLE, TILES, archive
@@ -26,7 +27,7 @@ def with_map(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
     archive(live.data / "cartes" / "lille.pmtiles", TILES)
-    client.portal.call(live.settings.save_map_config, MapConfig(source=FILE, file="cartes/lille.pmtiles"))
+    client.portal.call(live.settings.of(MapsSettings).save_map_config, MapConfig(source=FILE, file="cartes/lille.pmtiles"))
     return client, live
 
 
@@ -141,11 +142,11 @@ def test_the_console_sets_where_the_map_comes_from(world):  # noqa: F811
                                    "_champs": ["source", "url"], "source": "serveur",
                                    "url": "https://tuiles.example.test/{z}/{x}/{y}.mvt"})
     assert saved.status_code in (200, 303), saved.text[:300]
-    cfg = client.portal.call(live.settings.map_config)
+    cfg = client.portal.call(live.settings.of(MapsSettings).map_config)
     assert cfg.source == "serveur" and cfg.zxy
     refused = client.post(url, data={"csrf": client.cookies.get("csrftoken"), "_section": "carte",
                                      "_champs": ["source", "file"], "source": "fichier", "file": "../secret.key"})
-    assert refused.status_code == 400 and client.portal.call(live.settings.map_config).source == "serveur"
+    assert refused.status_code == 400 and client.portal.call(live.settings.of(MapsSettings).map_config).source == "serveur"
 
 
 def test_a_replaced_map_gets_new_tile_addresses(world):  # noqa: F811
@@ -168,7 +169,7 @@ def test_the_kernel_has_the_maps_port(world):  # noqa: F811
     _client, live, _ = world
     desk = live.kernel.ports.get("maps")
     assert isinstance(desk, MapsDesk)
-    assert isinstance(live.tiles, MapTiles)
+    assert isinstance(live.parts["tiles"], MapTiles)
 
 
 def test_the_console_sets_places_addresses_and_routes(world):  # noqa: F811
@@ -183,7 +184,7 @@ def test_the_console_sets_places_addresses_and_routes(world):  # noqa: F811
         "csrf": client.cookies.get("csrftoken"), "_section": "lieux", "_champs": ["index", "addresses"],
         "index": "cartes/lieux.db", "addresses": "geoplateforme"})
     assert saved.status_code in (200, 303), saved.text[:300]
-    assert client.portal.call(live.settings.places_config) == PlacesConfig(addresses="geoplateforme")
+    assert client.portal.call(live.settings.of(MapsSettings).places_config) == PlacesConfig(addresses="geoplateforme")
     desk = live.kernel.ports.get("maps")
     assert client.portal.call(desk.addresses_ready)  # relu à chaque usage : sans redémarrer
     routes = client.get("/admin/reglages/itineraires")
@@ -191,12 +192,12 @@ def test_the_console_sets_places_addresses_and_routes(world):  # noqa: F811
     refused = client.post("/admin/reglages/itineraires", data={
         "csrf": client.cookies.get("csrftoken"), "_section": "itineraires", "_champs": ["source", "url"],
         "source": "valhalla", "url": ""})
-    assert refused.status_code == 400 and client.portal.call(live.settings.routing_config).source == "aucun"
+    assert refused.status_code == 400 and client.portal.call(live.settings.of(MapsSettings).routing_config).source == "aucun"
     saved = client.post("/admin/reglages/itineraires", data={
         "csrf": client.cookies.get("csrftoken"), "_section": "itineraires", "_champs": ["source", "url"],
         "source": "fossgis", "url": ""})
     assert saved.status_code in (200, 303), saved.text[:300]
-    assert client.portal.call(live.settings.routing_config) == RoutingConfig(source="fossgis")
+    assert client.portal.call(live.settings.of(MapsSettings).routing_config) == RoutingConfig(source="fossgis")
     assert client.portal.call(desk.routing_ready)
     assert client.portal.call(desk.routing_provider) == "Valhalla, serveur public de FOSSGIS"
     assert "une demande par seconde" in client.get("/admin/reglages/itineraires").text

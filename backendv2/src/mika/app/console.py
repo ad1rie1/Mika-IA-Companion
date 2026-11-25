@@ -149,9 +149,9 @@ FACULTY_LABELS: dict[str, str] = _named("faculties", {
     "kernel": "Noyau", "presence": "Présence", "expression": "Expression",
     "runtime": "Moteur", "place": "Où elle est (sa chambre)",
     "world": "Son monde et son corps", "shares": "Fichiers envoyés", "attachments": "Pièces reçues",
-    "imaging": "Dessins", "location": "Localisation",
+    "imaging": "Dessins",
     "teams": "Teams",
-    "trips": "Carte et voyages", "agenda": "Agenda",
+    "agenda": "Agenda",
 })
 
 #: Les sections du prompt, nommées par ce qu'elles lui montrent (Pourquoi a-t-elle dit ça ?, Prompt).
@@ -384,13 +384,6 @@ EVENT_LABELS: dict[str, str] = _named("events", {
     "email.poll_asked": "Une relève demandée", "email.read": "Un mail lu", "email.sent": "Un mail envoyé",
     "projects.access_set": "Les accès d'un projet réglés",
     "projects.steer_asked": "Une demande de pilotage d'un projet, sur ton accord",
-    "location.located": "Son téléphone a dit où était la personne",
-    "location.cleared": "La personne ne partage plus où elle est",
-    "trips.created": "Un voyage préparé", "trips.changed": "Un voyage modifié",
-    "trips.stop_added": "Un arrêt ajouté à un voyage", "trips.stop_moved": "Un arrêt de voyage déplacé",
-    "trips.stop_noted": "Un arrêt de voyage noté", "trips.stop_removed": "Un arrêt retiré d'un voyage",
-    "trips.removed": "Un voyage supprimé", "trips.looked": "Elle a regardé la carte (des lieux, un trajet)",
-    "trips.shown": "Elle a montré une carte dans la conversation",
     "agenda.written": "Ce qu'elle a proposé d'écrire dans un agenda est fait, ou a raté",
     "agenda.reminder_due": "Un rendez-vous à rappeler", "agenda.reminder_dropped": "Un rappel tombé (le rendez-vous a "
     "bougé, est parti, ou son agenda ne le demande plus)",
@@ -546,12 +539,9 @@ ENRICHER_LABELS: dict[str, str] = _named("enrichers", {
 
 #: Les ports que des outils attendent (``needs=``) : pourquoi la porte ne les offre pas tant que le port n'est pas prêt
 #: (``runtime.tool_offer.ready``), et la page de réglages où il se règle — la fiche d'un outil dit l'un et mène à
-#: l'autre. Le port des cartes (``adapters/maps/desk.py``, ``MapsDesk``) ne déclare pas ``configured`` : il n'est pas
-#: prêt seulement quand la composition ne le branche pas ; le serveur le branche toujours, et chaque appel dit alors ce
-#: qui manque (rien de réglé, un serveur qui ne répond pas).
+#: l'autre.
 NEED_LABELS: dict[str, tuple[str, str]] = _named("needs", {
     "imaging": ("aucun fournisseur d'images n'est configuré", "images-fournisseurs"),
-    "maps": ("les lieux, les adresses et les itinéraires ne sont pas branchés", "lieux"),
     # le serveur branche toujours la base des rendez-vous (ADR 0309) : seule une composition partielle (un test) ne
     # l'a pas ; sa page de réglages vient avec la console de l'agenda (lot 5), le lien ne paraît qu'une fois là
     "agenda": ("ses calendriers ne sont pas branchés sur ce serveur", "agendas"),

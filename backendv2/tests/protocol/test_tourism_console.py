@@ -9,6 +9,7 @@ from __future__ import annotations
 import html
 
 from mika.adapters.maps.config import TourismConfig, WarmConfig
+from mika.app.domains.maps.settings import MapsSettings
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 
 PAGE = "/admin/reglages/tourisme"
@@ -34,17 +35,17 @@ def test_the_key_is_kept_sealed_and_never_shown_again(world):  # noqa: F811
                           "per_hour": "800", "per_second": "5", "reserve_pct": "10", "cell_km": "8",
                           "places_days": "5", "events_days": "2"})
     assert saved.status_code in (200, 303), saved.text[:300]
-    cfg = client.portal.call(live.settings.tourism_config)
+    cfg = client.portal.call(live.settings.of(MapsSettings).tourism_config)
     assert cfg == TourismConfig(api_key=CANARY, zones=("59", "62"), horizon_days=60, night_hour=3, per_hour=800,
                                 per_second=5.0, reserve_pct=10, cell_km=8, places_days=5, events_days=2)
     again = html.unescape(client.get(PAGE).text)
     assert CANARY not in again and "réglée ici" in again and "sur 800" in again
     # renvoyé sans clé : elle reste
     post(client, {"_champs": ["api_key", "zones"], "api_key": "", "zones": "59"})
-    assert client.portal.call(live.settings.tourism_config).api_key == CANARY
+    assert client.portal.call(live.settings.of(MapsSettings).tourism_config).api_key == CANARY
     # effacée : la variable d'environnement prend le relais, et la page le dit
     post(client, {"_champs": ["api_key"], "api_key": "", "_effacer": ["api_key"]})
-    assert client.portal.call(live.settings.tourism_config).api_key == ""
+    assert client.portal.call(live.settings.of(MapsSettings).tourism_config).api_key == ""
     assert "aucune : rien ne part" in html.unescape(client.get(PAGE).text)
 
 
@@ -82,7 +83,7 @@ def test_the_warm_page_sets_its_hour_and_points_and_says_its_state(world):  # no
         "csrf": client.cookies.get("csrftoken"), "_section": "rechauffage", "_champs": ["hour", "people", "points"],
         "hour": "21", "people": "on", "points": "Lille\n45.90, 6.13"})
     assert saved.status_code in (200, 303), saved.text[:300]
-    assert client.portal.call(live.settings.warm_config) == WarmConfig(hour=21, points=("Lille", "45.90, 6.13"))
+    assert client.portal.call(live.settings.of(MapsSettings).warm_config) == WarmConfig(hour=21, points=("Lille", "45.90, 6.13"))
     pressed = client.post("/admin/reglages/rechauffage", data={
         "csrf": client.cookies.get("csrftoken"), "_section": "rechauffage", "_commande": "rechauffer"})
     shown = html.unescape(client.get(pressed.headers["location"]).text if pressed.status_code == 303 else pressed.text)
