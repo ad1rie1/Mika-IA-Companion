@@ -11,6 +11,7 @@ import { MAIL_LIMITS, PIECE_LIMITS, type DraftState, type MailAttachment, type M
 import { correctButton, countSpan, markToFill } from "../../shared/compose";
 import { dayAndClock, shortWhen } from "../../shared/dates";
 import { caps, levelTag, type Caps } from "../../shared/levels";
+import { ofName } from "../../shared/names";
 import { avatar, firstName, parseAddresses, personName } from "../../shared/people";
 import { chip } from "../../shared/recipients";
 import { sizeLabel } from "../../shared/text";
@@ -20,7 +21,6 @@ import {
   answerable,
   howLabel,
   triageLabel,
-  ofName,
   replyTargets,
   sameAddress,
   shareSentence,

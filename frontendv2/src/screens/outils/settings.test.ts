@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import type { AccessLine, ReceivedService, Service, ServiceTool } from "../../api/mcp";
 import type { Host } from "../../shared/settings";
 import * as store from "../../shared/store";
-import { openOf } from "../parametres/shares";
 import { mcpPage, receivedFiche, receivedList, sharedWith, splitChanges, toolsTable, whoWords } from "./settings";
 import { headersToRetype, HEADERS_TO_RETYPE, serviceNameProblem, servedOf, stateWords, urlOrigin, urlProblem } from "./words";
 
@@ -116,13 +115,12 @@ const RECEIVED: ReceivedService = {
 };
 
 describe("Services MCP : ce qu'on te partage se voit (F4-03)", () => {
-  it("une section « Partagé avec toi », en lecture, qui mène à sa fiche ; « Ouvrir » de Partages aussi", () => {
+  it("une section « Partagé avec toi », en lecture, qui mène à sa fiche", () => {
     const html = receivedList([RECEIVED]);
     expect(html).toContain("Partagé avec toi");
     expect(html).toContain("d&#39;Adrien"); // échappé
     expect(html).toContain("2 outils servis");
     expect(html).toContain('href="#parametres/mcp/agenda"');
-    expect(openOf("mcp", "agenda")).toBe("#parametres/mcp/agenda");
     expect(receivedList([])).toBe("");
   });
 

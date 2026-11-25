@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ASK_ME } from "./account";
 import { ACTION_ROUTES, routeAction } from "./index";
+import { openOf } from "./shares";
 
 describe("Téléphones et Compte : un bouton par geste, des mots sans code (F4-15, F4-08)", () => {
   it("une route d'action ouvre la fenêtre que son bouton promet ; un objet ordinaire n'en est pas une", () => {
@@ -11,5 +12,11 @@ describe("Téléphones et Compte : un bouton par geste, des mots sans code (F4-1
     expect(routeAction("mcp", "+inconnu")).toBeNull();
     expect(Object.keys(ACTION_ROUTES).sort()).toEqual(["compte", "mcp", "partages"]);
     expect(ASK_ME).toBe("Qu'est-ce que tu sais de moi ?");
+  });
+});
+
+describe("Partages : « Ouvrir » mène où se lit ce qu'on te partage (F4-03)", () => {
+  it("un service s'ouvre sur sa fiche, celle de Services MCP (« Partagé avec toi »)", () => {
+    expect(openOf("mcp", "agenda")).toBe("#parametres/mcp/agenda");
   });
 });

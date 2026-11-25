@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Conversation, OwnPending, Reply, TeamsAccount, TeamsMessage, Thread } from "../../api/teams";
 import { apiUrl } from "../../api/moi";
-import { ofName } from "../../shared/names";
 import { caps } from "../../shared/levels";
-import { ofName as mailOfName } from "../mail/format";
 import {
   ago,
   authorLabel,
@@ -374,11 +372,6 @@ describe("qui a écrit, sur un compte qu'on te partage (F2-02)", () => {
     const own = infoPane({ conv, selfName: "Adrien Moreau", people: [{ name: "Adrien Moreau", key: "8:a", own: true, count: 2 }], account: account(), replies: [], now: NOW });
     expect(own).toContain("<b>Toi</b>");
     expect(own).toContain("Elle n'a rien préparé dans cette discussion.");
-  });
-  it("« d'Adrien » : un seul `ofName`, que Mail réexporte", () => {
-    expect(ofName("Adrien Moreau")).toBe("d'Adrien Moreau");
-    expect(ofName("Léa")).toBe("de Léa");
-    expect(mailOfName).toBe(ofName);
   });
 });
 

@@ -10,9 +10,6 @@ import { ofName } from "../../shared/names";
 import { firstName, parseAddresses } from "../../shared/people";
 import { chars, thousands } from "../../shared/text";
 
-/** « de Léa », « d'Adrien » : commun à Mail et à Teams (`shared/names.ts`), réexporté pour l'écran Mail. */
-export { ofName };
-
 // ── Une boîte partagée (ADR 0188) ─────────────────────────────────────
 
 /** Le nom qu'on montre d'une boîte : la sienne, son nom ; partagée, « Boîte de Léa » (ADR 0188), son nom en plus si

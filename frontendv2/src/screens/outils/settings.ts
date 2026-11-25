@@ -22,7 +22,8 @@ import { ico } from "../../shell/icons";
 import { area, backLink, readForm, row, savedFirst, section, seg, showFieldErrors, showRefusal, subTabs, text, toggle } from "../../shared/settings";
 import { confirmModal, failureText, newNonce, toastFailure } from "../../shared/kit";
 import type { FormValue, Host, Page } from "../../shared/settings";
-import { ofName, openShareModal, shareWords } from "../../shared/sharing";
+import { ofName } from "../../shared/names";
+import { openShareModal, shareWords } from "../../shared/sharing";
 import * as store from "../../shared/store";
 import { CHOICES, headersToRetype, serviceNameProblem, servedOf, stateWords, urlProblem } from "./words";
 

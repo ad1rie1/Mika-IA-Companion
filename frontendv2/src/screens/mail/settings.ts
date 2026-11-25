@@ -41,9 +41,10 @@ import {
 import { clock } from "../../shared/dates";
 import { ago, confirmModal, failureText, newNonce, personAvatar, toastFailure } from "../../shared/kit";
 import type { FormValue, Host, Page } from "../../shared/settings";
-import { ofName, openShareModal, shareWords } from "../../shared/sharing";
+import { ofName } from "../../shared/names";
+import { rulesEditor, ruleUpdate, withoutRule } from "../../shared/sendrules";
+import { openShareModal, shareWords } from "../../shared/sharing";
 import * as store from "../../shared/store";
-import { rulesEditor, ruleUpdate, withoutRule } from "../teams/settings";
 import {
   authWords,
   boxState,

@@ -12,7 +12,6 @@ import {
   deleteTargets,
   keptRows,
   triageLabel,
-  ofName,
   outgoingText,
   addPieces,
   recipientsText,
@@ -22,13 +21,6 @@ import {
 } from "./format";
 
 describe("le nom d'une boîte partagée", () => {
-  it("élide devant une voyelle ou un h", () => {
-    expect(ofName("Léa")).toBe("de Léa");
-    expect(ofName("Adrien")).toBe("d'Adrien");
-    expect(ofName("Hélène")).toBe("d'Hélène");
-    expect(ofName("Élodie")).toBe("d'Élodie");
-    expect(ofName("")).toBe("");
-  });
   it("« Boîte de Léa », le nom de la boîte en plus si elle en partage plusieurs", () => {
     const pro = { key: "pro", name: "Boîte Pro", level: "lire" as const, owner_name: "Adrien Moreau" };
     const perso = { key: "perso", name: "Perso", level: "servir" as const, owner_name: "Adrien Moreau" };

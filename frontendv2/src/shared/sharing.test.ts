@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ofName, sharePeople, shareLevelsFor, sharePhrase, shareTarget, shareWords } from "./sharing";
+import { sharePeople, shareLevelsFor, sharePhrase, shareTarget, shareWords } from "./sharing";
 
 describe("les partages", () => {
   it("un service se partage pour lire ou s'en servir, une boîte aussi pour préparer", () => {
@@ -19,12 +19,6 @@ describe("les partages", () => {
     expect(shareTarget({ kind: "mail", key: "pro" }, { kind: "mail", key: "pro", person: "user_3" }, people)).toEqual({
       kind: "mail", key: "pro", person: "user_3", editing: false, gone: false,
     });
-  });
-
-  it("élide devant une voyelle ou un h", () => {
-    expect(ofName("Adrien")).toBe("d'Adrien");
-    expect(ofName("Hélène")).toBe("d'Hélène");
-    expect(ofName("Léa")).toBe("de Léa");
   });
 
   it("dit chaque niveau, et ce que la personne pourra", () => {

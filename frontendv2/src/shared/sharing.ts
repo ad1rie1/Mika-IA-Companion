@@ -1,10 +1,9 @@
 /**
  * Partager une de ses ressources (ADR 0188) — une boîte, un compte Teams, un service — avec une personne qui a un
  * compte : les niveaux d'un partage et leurs mots, ce que la personne pourra, ce qu'un partage enregistre, à qui le
- * partager, le nom de qui te partage (« d'Adrien »), ce qu'elle peut partager, et la fenêtre « Partager » que
- * Paramètres › Partages et les réglages d'une boîte ou d'un service ouvrent. Seul le propriétaire partage, et
- * seulement avec une personne qui a un compte (`app/me/sharing.py`) ; les codes sont ceux du moteur
- * (`vocab/access.py`).
+ * partager, ce qu'elle peut partager, et la fenêtre « Partager » que Paramètres › Partages et les réglages d'une boîte
+ * ou d'un service ouvrent. Seul le propriétaire partage, et seulement avec une personne qui a un compte
+ * (`app/me/sharing.py`) ; les codes sont ceux du moteur (`vocab/access.py`).
  */
 import { ApiError } from "../api/moi";
 import { setShare, type ShareKind, type ShareLevel } from "../api/shares";
@@ -85,11 +84,6 @@ export function shareTarget(
  *  à elles (l'API refuserait, 400). */
 export function sharePeople<P extends { owner?: boolean }>(thing: { common?: boolean } | undefined, people: readonly P[]): P[] {
   return thing?.common ? people.filter((p) => !p.owner) : [...people];
-}
-
-/** « de Léa », « d'Adrien », « d'Hélène » : l'élision devant une voyelle ou un h. */
-export function ofName(name: string): string {
-  return /^[aeiouyhàâäéèêëîïôöùûüœ]/iu.test(name.trim()) ? `d'${name.trim()}` : `de ${name.trim()}`;
 }
 
 // ── Ce qu'elle peut partager ─────────────────────────────────────────
