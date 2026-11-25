@@ -383,7 +383,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                                            warm_points=lambda: last_positions(kernel, store, clock.now))
     # ce que chaque domaine apporte (ADR 0310) : ses adaptateurs, ses ports, ses portes HTTP — sa fiche nomme son
     # câblage, que ce serveur appelle sans le connaître (``app/wiring.py``)
-    wiring = Wiring(data=data, settings=settings, clock=clock, bases=bases, ports=outside)
+    wiring = Wiring(data=data, settings=settings, clock=clock, bases=bases, ports=outside, store=store)
     wired = [d.wiring for d in DOMAINS if d.wiring is not None]
     for module in wired:
         part(module, "wire")(wiring)

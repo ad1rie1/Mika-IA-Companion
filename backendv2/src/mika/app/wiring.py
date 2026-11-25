@@ -42,6 +42,8 @@ class Wiring:
     bases: Mapping[str, Any]
     #: les ports du noyau, par leur nom : ce que le domaine y pose
     ports: dict[str, Any]
+    #: le magasin de son journal (``adapters.store_sql.SqlStore``) : ses contenus, pour qui doit en relire
+    store: Any = None
     #: ce que l'application web reçoit, par nom (ses portes HTTP)
     web: dict[str, Any] = field(default_factory=dict)
     #: les objets vivants de chaque domaine, par son nom
