@@ -7,9 +7,16 @@ ce dont il a besoin (le dossier de données, les réglages, l'horloge, ses bases
   nom), ``w.web`` (ce que l'application web reçoit par nom — ses portes HTTP : ``adapters/web/app.py::create_app``),
   ``w.me`` (ce que l'API par personne reçoit par nom : ``app/me/api.py::MeApiBase``) et ``w.parts`` (ses objets
   vivants, par le nom du domaine : ``Live.parts``) ;
-- ``bind(w)``, facultatif, une fois le noyau construit : ce qui a besoin de son port d'entrée (``w.port``), du
-  serveur vivant (``w.live`` : ses comptes, de quoi se reconfigurer) ou des notifications des téléphones
-  (``w.push``).
+- ``bind(w)``, facultatif, une fois le noyau construit : ce qui a besoin de son port d'entrée (``w.port`` ; le
+  noyau : ``w.port.kernel``), du serveur vivant (``w.live`` : ses comptes, de quoi se reconfigurer) ou des
+  notifications des téléphones (``w.push``). Il peut encore poser des routes (``w.routes`` : des montages de
+  l'application web, à côté de ceux du serveur) et ce que la console reçoit par nom (``w.inspector`` :
+  ``inspector.ui.InspectorDeps``) : l'application et la console s'assemblent après lui ;
+- ``start(w)``, ``stop(w)``, ``release(w)``, facultatifs et asynchrones, dans le cycle de vie du serveur : ``start``
+  une fois sa vie relue, ses réglages ouverts et le direct en marche, juste avant qu'elle vive (une relève, une
+  connexion tenue, des serveurs à joindre) ; ``stop`` dès l'arrêt, avant le direct ; ``release`` une fois ses
+  épisodes annulés (ce qu'on ferme en dernier : des connexions, des fichiers). Les arrêts vont dans l'ordre
+  inverse des fiches.
 
 Un domaine lit ce qu'un autre a posé par son nom (``w.ports["mail"]``), dans l'ordre des fiches ; il le déclare
 (``Domain.needs``).
@@ -41,6 +48,10 @@ class Wiring:
     parts: dict[str, Any] = field(default_factory=dict)
     #: ce que l'API par personne reçoit, par nom
     me: dict[str, Any] = field(default_factory=dict)
+    #: des routes de plus pour l'application web (des montages), posées par ``bind``
+    routes: list[Any] = field(default_factory=list)
+    #: ce que la console reçoit, par nom (``InspectorDeps``), posé par ``bind``
+    inspector: dict[str, Any] = field(default_factory=dict)
     #: une fois le noyau construit (pour ``bind``) : son port d'entrée, le serveur vivant (``server.Live``), les
     #: notifications des téléphones (``adapters.web.push.MobilePush``)
     port: Any = None

@@ -1,5 +1,5 @@
-"""Réglages › Plugins : la vue d'ensemble, le courrier, les serveurs MCP, les réveils, la transcription, Teams, les
-appareils. Leurs pages vivent là où l'on s'en sert (``SettingsPage.home``) ; elles s'enregistrent sous Réglages."""
+"""Réglages › Plugins : la vue d'ensemble, le courrier, les serveurs MCP, la transcription, Teams, les appareils — et,
+par leur fiche, les rubriques des domaines qui ont leur dossier (``ConsolePart.sections``, ADR 0310). Leurs pages vivent là où l'on s'en sert (``SettingsPage.home``) ; elles s'enregistrent sous Réglages."""
 
 from __future__ import annotations
 

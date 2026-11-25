@@ -293,6 +293,10 @@ def _unbound(wiring: Wiring) -> None:
     """Le ``bind`` d'un domaine qui n'en a pas : rien ne l'attend après le noyau."""
 
 
+async def _idle(wiring: Wiring) -> None:
+    """Le ``start``, le ``stop`` ou le ``release`` d'un domaine qui n'en a pas."""
+
+
 async def _warm(embedder: object) -> None:
     """Charge le modèle de plongements s'il sait le faire (``warm``) ; un échec n'empêche rien : le premier rappel
     le chargera, comme avant."""
@@ -499,6 +503,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
         world_hub.start()
         constellation.start()
         maps_desk.start()  # le réchauffage des caches de la carte, les départements tenus en entier (ADR 0245)
+        for module in wired:  # ce que chaque domaine démarre, une fois le direct en marche (``start``)
+            await part(module, "start", _idle)(wiring)
         # sa mémoire prête avant sa première réponse : un message qui attendait au démarrage, une reprise, ne passent
         # pas sans souvenirs parce que le modèle de plongements finissait de se charger (borné : ``WARM_WAIT_S``)
         with contextlib.suppress(TimeoutError):
@@ -508,6 +514,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
             yield
         finally:
             warming.cancel()
+            for module in reversed(wired):  # ce que chaque domaine arrête, avant le direct (``stop``)
+                await part(module, "stop", _idle)(wiring)
             if mail_watch is not None:
                 await mail_watch.stop()
             await maps_desk.stop()
@@ -519,6 +527,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
             async def release() -> None:
                 # les épisodes déjà annulés (une réponse en cours reste à reprendre) : seulement
                 # alors les fournisseurs se ferment, et le registre des appels se vide magasin ouvert
+                for module in reversed(wired):  # ce que chaque domaine ferme, ses épisodes annulés (``release``)
+                    await part(module, "release", _idle)(wiring)
                 await mcp.aclose()
                 await gateway.aclose()
                 await imaging.aclose()
@@ -548,7 +558,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                       drawn=DRAWN, approval_sources=approval_sources.sources, queue=waiting.QUEUE,
                       nameable=access.people_with_accounts, canal_instances=access.instances_from_settings,
                       family_href=access.family_href,
-                      plain_owners=frozenset({"forge"})),
+                      plain_owners=frozenset({"forge"}), **wiring.inspector),
         cookie_secure=web.cookie_secure)
     # les pages dessinées à la main dans le cadre de la console, qui croisent ses facultés (ADR 0121) : l'accueil ;
     # elle, en ce moment ; les gens qu'elle connaît
@@ -589,7 +599,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                                     *home_page.routes(), *now_page.routes(), *people_page.routes(),
                                     *person_overview.routes(console_pages.ui, outbound=moi.outbound),
                                     *rights.routes(console_pages.ui),
-                                    *inspector, relay, console_mcp, lent, docs_mcp, world_hub.route()],
+                                    *inspector, relay, console_mcp, lent, docs_mcp, world_hub.route(),
+                                    *wiring.routes],
                       preprocess=preprocess, sensor_digest=settings.sensors_digest,
                       teams=teams, push_ready=push_sender.configured, **wiring.web), live
 

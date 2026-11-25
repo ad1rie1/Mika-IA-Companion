@@ -208,12 +208,15 @@ class SecretBox:
 class SettingsPart:
     """Les réglages d'un domaine (ADR 0310) : une classe de son dossier (``app/domains/<nom>/settings.py``), posée sur
     la porte des réglages. Elle lit et écrit ses clés par cette porte seulement (``_get``, ``_put`` qui dit chaque
-    écriture, ``box`` pour sceller) : jamais le magasin lui-même, ce que
+    écriture, ``box`` pour sceller, ``writing`` pour relire puis récrire sans se croiser) : jamais le magasin lui-même,
+    ce que
     ``tests/architecture/test_changes_signalled.py`` garde. On la prend par ``Settings.of(SaClasse)``."""
 
     def __init__(self, door: Settings) -> None:
         self.door = door
         self.box = door.box
+        #: le verrou des réglages qu'on relit pour n'en changer qu'une entrée (``Settings.writing``) : le même pour tous
+        self.writing = door.writing
 
     def _get(self, key: str) -> Any:
         return self.door._get(key)
