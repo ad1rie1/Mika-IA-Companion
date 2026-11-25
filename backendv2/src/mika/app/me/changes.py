@@ -50,6 +50,8 @@ from mika.app.me import teams as teams_me
 from mika.app.me.api import Call, me_of
 from mika.app.me.common import allows
 from mika.app.me.touches import EVERYONE, OWN, PERSON, PREPARE, READ, Touch
+from mika.app.me.touches import both as _both
+from mika.app.me.touches import state_of as _state
 from mika.app.settings import (
     AGENDA_GOOGLE_KEY,
     AGENDA_GRANTS_KEY,
@@ -63,7 +65,6 @@ from mika.app.settings import (
 from mika.contracts import email as email_c
 from mika.contracts import identity as identity_c
 from mika.contracts import location as location_c
-from mika.contracts import phone as phone_c
 from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
 from mika.contracts import teams as teams_c
@@ -73,7 +74,6 @@ from mika.faculties.projects.faculty import ACCESS_SET, AMENDED, ARCHIVED, LINKS
 from mika.kernel.builtin import KERNEL, PARAMS_CHANGED
 from mika.plugins import agenda as agenda_p
 from mika.plugins import email as email_p
-from mika.plugins import phone as phone_p
 from mika.plugins import teams as teams_p
 from mika.plugins import trips as trips_p
 from mika.ports.agenda import split_calendar_key
@@ -86,7 +86,6 @@ from mika.ports.changes import (
     MAIL_WORK,
     ME,
     OUTBOX,
-    PHONE,
     PHONE_POSITION,
     PROJECTS,
     SETTINGS,
@@ -126,6 +125,8 @@ PARTS = tuple(part(d.live, "LIVE") for d in DOMAINS if d.live is not None)
 #: sujet d'une base tenue à côté → la traduction de son domaine ; règle d'une touche → ce que la personne en voit
 CHANGES = {topic: translate for part in PARTS for topic, translate in part.changes.items()}
 SEEN = {rule: seen for part in PARTS for rule, seen in part.seen.items()}
+#: propriétaire d'une tâche → où elle en est (la traduction de son domaine)
+TASKS = {owner: work for part in PARTS for owner, work in part.tasks.items()}
 
 #: ce que change le réglage d'un propriétaire (``kernel.params_changed``) : qui voit quoi, ce qui se règle — à toutes
 #: — les contacts compris : qui voit ceux d'une boîte ou d'un compte Teams suit leurs propriétaires et leurs partages
@@ -133,7 +134,7 @@ SEEN = {rule: seen for part in PARTS for rule, seen in part.seen.items()}
 PARAMS: Mapping[str, tuple[str, ...]] = {
     email_c.OWNER: (SETTINGS, MAIL, MAIL_DRAFTS, ME, CONTACTS),
     teams_c.OWNER: (SETTINGS, TEAMS, TEAMS_REPLIES, ME, CONTACTS),
-    "mcp": (SETTINGS,), phone_c.OWNER: (SETTINGS, PHONE), projects_c.OWNER: (PROJECTS, ME),
+    "mcp": (SETTINGS,), projects_c.OWNER: (PROJECTS, ME),
     trips_c.OWNER: (TRIPS,), location_c.OWNER: (PHONE_POSITION,),
     agenda_p.OWNER: (SETTINGS, AGENDA, ME),
     **{owner: topics for part in PARTS for owner, topics in part.params.items()}}
@@ -151,15 +152,6 @@ SAVED: Mapping[str, tuple[str, ...]] = {
 #: ce qui, dans un projet, change qui le voit (ses accès, ce qu'il lit des autres, son propriétaire, son sujet ou son
 #: niveau, archivé ou rendu) : le filtre lit l'état d'après — celle qui le perd doit le savoir aussi
 PROJECT_REACH = frozenset(t.name for t in (ACCESS_SET, LINKS_SET, AMENDED, ARCHIVED, RESTORED))
-
-
-def _state(frame: Any, owner: str) -> Any:
-    """La tranche d'un propriétaire, ou ``None`` s'il n'est pas dans la composition."""
-    return frame.root.slices.get(owner)
-
-
-def _both(*values: str) -> tuple[str, ...]:
-    return tuple(dict.fromkeys(v for v in values if v))
 
 
 # ── du journal ────────────────────────────────────────────────────────────
@@ -218,26 +210,6 @@ def _teams(e: Any, frame: Any, kernel: Any) -> list[Touch]:
     return out
 
 
-def _phone(e: Any, frame: Any, kernel: Any) -> list[Touch]:
-    """Ses messages, ses réponses offertes : à elle seule — son adresse ou sa personne, la règle de ``phone.api._mine``."""
-    d, name = e.data, e.type.name
-    s = _state(frame, phone_p.PHONE.name)
-    if name == phone_c.RECEIVED.name:
-        m = s.messages.get(e.seq) if s is not None else None
-        if m is None:
-            return [Touch(PHONE, PERSON, owners=_both(d.handle))]
-        return [Touch(PHONE, PERSON, keys=(f"{m.source}|{m.thread}",), owners=_both(m.handle, m.person))]
-    offer = (s.offers.get(e.seq if name == phone_c.DRAFTED.name else d.draft) if s is not None else None)
-    if offer is None:
-        return []
-    return _offered(offer)
-
-
-def _offered(o: Any) -> list[Touch]:
-    who = _both(o.handle, o.person)
-    return [Touch(PHONE, PERSON, keys=(f"{o.source}|{o.thread}",), owners=who), Touch(ME, PERSON, owners=who)]
-
-
 def _location(e: Any, frame: Any, kernel: Any) -> list[Touch]:
     return [Touch(PHONE_POSITION, PERSON, owners=_both(e.data.handle, e.data.person))]
 
@@ -270,6 +242,8 @@ def _work(kind: str, target: str | None, frame: Any, kernel: Any, *, projects: b
     if found is not None and found[0] == teams_c.OWNER:
         key = _teams_key(frame, kernel, found[1])
         return [Touch(TEAMS_WORK, ACCOUNTS, PREPARE, keys=(key,))] if key else []
+    if found is not None and found[0] in TASKS:  # la tâche d'un domaine qui a sa fiche
+        return list(TASKS[found[0]](found[1], frame, kernel))
     pid = project_of(target) if projects else None
     return [Touch(PROJECTS, PROJECT, keys=(str(pid),))] if pid else []
 
@@ -293,10 +267,10 @@ def _effect(e: Any, frame: Any, kernel: Any) -> list[Touch]:
         keys = (conversation_key(reply.account, reply.conversation),) if reply.conversation else ()
         return [Touch(TEAMS, ACCOUNTS, keys=keys, owners=yours), Touch(TEAMS_WORK, ACCOUNTS, PREPARE, keys=keys),
                 Touch(TEAMS_REPLIES, ACCOUNTS, PREPARE, owners=yours), Touch(ME, ACCOUNTS, OWN, owners=yours)]
-    phone = _state(frame, phone_p.PHONE.name)
-    offer = next((o for o in phone.offers.values() if o.proposal == proposal), None) if phone is not None else None
-    if offer is not None:
-        return _offered(offer)
+    for brought in PARTS:  # l'effet d'un domaine qui a sa fiche : le premier qui le reconnaît dit ses touches
+        mine = brought.effects(proposal, frame, kernel) if brought.effects is not None else None
+        if mine is not None:
+            return list(mine)
     agenda = _state(frame, agenda_p.OWNER)
     written = agenda.writes.get(proposal) if agenda is not None else None
     if written is not None:  # ce qu'elle propose d'écrire dans un agenda : proposé, décidé, fait
@@ -347,7 +321,7 @@ def _identity(e: Any, frame: Any, kernel: Any) -> list[Touch]:
 
 
 #: chaque propriétaire d'événements dont le journal change ce que montrent les écrans, et sa traduction
-BY_OWNER = {email_c.OWNER: _email, teams_c.OWNER: _teams, phone_c.OWNER: _phone, location_c.OWNER: _location,
+BY_OWNER = {email_c.OWNER: _email, teams_c.OWNER: _teams, location_c.OWNER: _location,
             trips_c.OWNER: _trips, projects_c.OWNER: _projects, rt.OWNER: _runtime, KERNEL.name: _kernel,
             identity_c.OWNER: _identity, agenda_p.OWNER: _agenda,
             **{owner: translate for part in PARTS for owner, translate in part.events.items()}}

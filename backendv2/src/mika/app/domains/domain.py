@@ -68,6 +68,13 @@ class LivePart:
     #: règle d'une touche (``Touch.rule``) → ce que la personne en voit : ``seen(call)`` rend les propriétaires
     #: (des comptes, des sources) dont ce qui change la regarde
     seen: Mapping[str, Callable[..., frozenset[str]]] = field(default_factory=dict)
+    #: un effet du moteur proposé, décidé ou parti (un brouillon, une réponse offerte, une écriture) est-il le sien ?
+    #: ``effects(proposal, frame, kernel)`` rend ses touches, ou ``None`` : ce n'est pas à lui. Une proposition n'est
+    #: qu'à un domaine ; le service les interroge dans l'ordre des fiches
+    effects: Callable[..., list[Any] | None] | None = None
+    #: propriétaire d'une tâche (``vocab.episodes.task_of``) → où elle en est d'une réponse (ADR 0306) :
+    #: ``work(ref, frame, kernel)`` rend les touches de cette tâche, au départ et à la fin de son épisode
+    tasks: Mapping[str, Callable[..., list[Any]]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

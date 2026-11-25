@@ -132,7 +132,7 @@ STILL: dict[str, set[str]] = {
     "me/agenda.py": {"agenda", "mail"},
     "me/api.py": {"mail"},
     "me/assembly.py": {"agenda", "mail", "maps", "projects", "teams", "tools"},
-    "me/changes.py": {"agenda", "mail", "maps", "phone", "projects", "teams"},
+    "me/changes.py": {"agenda", "mail", "maps", "projects", "teams"},
     "me/docs_mcp.py": {"mail", "projects", "tools"},
     "me/mail.py": {"mail"},
     "me/maps.py": {"maps"},

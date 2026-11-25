@@ -185,7 +185,7 @@ export interface EmptyPhone {
 
 /**
  * Pourquoi aucun message ne vient de son téléphone. La porte du téléphone refuse tout lot d'un compte qui n'est pas
- * propriétaire (`backendv2/src/mika/app/phone.py`) : à lui, la vraie raison et sa position, qui se voit — pas un réglage
+ * propriétaire (`backendv2/src/mika/app/domains/phone/desk.py`) : à lui, la vraie raison et sa position, qui se voit — pas un réglage
  * qui ne peut rien pour lui. `owner` : celui de `GET /api/moi` ; pas encore lu (`undefined`), le conseil d'une
  * propriétaire. `phones` : combien de téléphones son compte a connus.
  */

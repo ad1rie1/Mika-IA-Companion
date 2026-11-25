@@ -5,8 +5,8 @@ la porte, l'application à télécharger, puis le port d'entrée et les notifica
 l'API par personne (``api.py`` : ses téléphones, ses messages, sa position, l'application ; ce qui attend son geste,
 pour la barre du haut). Sa position se lit dans la localisation : il lit la carte.
 
-Leur part du direct reste dans ``app/me/changes.py`` : sa traduction partage une aide avec celle des effets du moteur
-(``_effect`` : une réponse proposée, décidée, partie), qui croise le courrier, Teams, l'agenda et les projets.
+Leur part du direct est dans ``live.py`` : ses messages, ses réponses offertes, et l'effet du moteur qu'est une
+réponse proposée, décidée, partie.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ PHONE = Domain(
     needs=("maps",),
     wiring="mika.app.domains.phone.wiring",
     api="mika.app.domains.phone.api",
+    live="mika.app.domains.phone.live",
     plugins={
         "phone": ("Les messages WhatsApp, Messenger et SMS que ton téléphone lui relaie, et ce qu'elle en fait",
                   (),

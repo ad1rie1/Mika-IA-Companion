@@ -221,9 +221,6 @@ SECTION_LABELS: dict[str, str] = _named("sections", {
     "step_exchange": "L'échange d'où vient sa réflexion", "step_life": "Ce qui se passe dans la vie de la personne "
     "(sa réflexion)",
     # ADR 0068
-    "wake_order": "Ce qu'un réveil par API lui demande (ses consignes)",
-    "wake_text": "Ce qu'apporte l'appel d'un réveil par API (cité)",
-    "wake_reports": "Ce que ses réveils par API ont donné",
     # ADR 0069
     "teams_messages": "Ses messages Teams récents", "teams_drafts": "Ses réponses Teams et ce qu'elles sont devenues",
     "teams_voice": "Comment elle écrit dans Teams (à ta place)",

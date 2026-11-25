@@ -30,6 +30,9 @@ WAKEUP = Domain(
     },
     labels={
         "faculties": {"wakeup": "Réveils par API"},
+        "sections": {"wake_order": "Ce qu'un réveil par API lui demande (ses consignes)",
+                     "wake_text": "Ce qu'apporte l'appel d'un réveil par API (cité)",
+                     "wake_reports": "Ce que ses réveils par API ont donné"},
         "reasons": {"wakeup": "Un réveil par API à traiter",
                     "wakeup_done": "Rendre compte de ce qu'un réveil par API a donné"},
         "processes": {"wakeup.expire": "Laisser tomber les réveils par API restés trop longtemps en attente"},

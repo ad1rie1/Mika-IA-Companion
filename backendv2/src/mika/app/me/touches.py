@@ -8,6 +8,7 @@ service, qui lit les fiches des domaines.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from mika.vocab.access import SHARE_PREPARE, SHARE_READ
 from mika.vocab.ownership import OWNED
@@ -34,3 +35,13 @@ class Touch:
     keys: tuple[str, ...] = ()
     owners: tuple[str, ...] = ()
     weak: bool = False
+
+
+def state_of(frame: Any, owner: str) -> Any:
+    """La tranche d'un propriétaire, ou ``None`` s'il n'est pas dans la composition."""
+    return frame.root.slices.get(owner)
+
+
+def both(*values: str) -> tuple[str, ...]:
+    """Ces valeurs, sans les vides ni les doublons, dans leur ordre : une adresse et sa personne."""
+    return tuple(dict.fromkeys(v for v in values if v))
