@@ -36,7 +36,7 @@ def batch(n: int = 1, *, conv: str = DM, text: str = "On se voit à 14 h ?") -> 
 
 def new_key(client, live, account: str = "principal") -> str:
     """Une clé neuve pour l'extension d'un compte (``principal`` : celui d'avant l'ADR 0186)."""
-    return client.portal.call(live.teams.new_key, account, "test")
+    return client.portal.call(live.parts["teams"].new_key, account, "test")
 
 
 def test_the_extension_gets_in_only_with_its_key_and_from_an_extension(world):  # noqa: F811
@@ -57,7 +57,7 @@ def test_the_extension_gets_in_only_with_its_key_and_from_an_extension(world):  
     newer = new_key(client, live)
     assert client.get("/api/teams/outbox", headers=headers(key)).status_code == 401
     assert client.get("/api/teams/outbox", headers=headers(newer)).status_code == 200
-    client.portal.call(live.teams.revoke_key, "principal")
+    client.portal.call(live.parts["teams"].revoke_key, "principal")
     assert client.get("/api/teams/outbox", headers=headers(newer)).status_code == 401
     # la clé en clair n'est gardée nulle part dans les réglages
     stored = str(client.portal.call(live.kernel.mind.store.query_mind, "SELECT value FROM settings", ()))

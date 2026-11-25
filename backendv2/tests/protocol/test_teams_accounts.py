@@ -82,7 +82,7 @@ def test_two_keys_two_accounts_each_sees_only_its_own(world):  # noqa: F811
     assert client.post("/api/teams/inbox", json=batch(), headers=headers(mine)).status_code == 202
     assert params_of(live.kernel.mind.frame()).accounts_off == ("bea_t",)
     # retirer la clé de Béa ne ferme que sa porte
-    client.portal.call(live.teams.revoke_key, "bea_t")
+    client.portal.call(live.parts["teams"].revoke_key, "bea_t")
     assert client.get("/api/teams/outbox", headers=headers(hers)).status_code == 401
     assert client.get("/api/teams/outbox", headers=headers(mine)).status_code == 200
     # un compte retiré des réglages emporte sa clé

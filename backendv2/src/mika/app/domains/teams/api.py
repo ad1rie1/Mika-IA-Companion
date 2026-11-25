@@ -445,6 +445,10 @@ def count(call: Call) -> int:
                if d.state == WAITING and not d.answered and mine.get(d.account, (None, ""))[1] == OWNED)
 
 
+#: ce qu'il compte pour la barre du haut
+COUNTERS = {"teams": count}
+
+
 async def image(call: Call) -> Response:
     """``GET …/teams/image?message=&image=`` : les octets d'une image d'un message (ADR 0258), à qui peut lire son
     compte ; inconnue : 404. Gardée dans le navigateur un jour (elle ne change pas)."""

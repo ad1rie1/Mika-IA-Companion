@@ -59,7 +59,6 @@ from mika.adapters.push import FcmSender
 from mika.adapters.shares import DiskShares
 from mika.adapters.store_sql import SqlStore
 from mika.adapters.system import RandomIdGen, RealClock
-from mika.adapters.teams import TeamsStore
 from mika.adapters.vectors import SqliteVectorIndex
 from mika.adapters.web import protocol
 from mika.adapters.web.accounts import Accounts
@@ -76,8 +75,6 @@ from mika.app.console import FACULTY_LABELS, LABELS, NAVIGATION, PARAM_FAMILIES
 from mika.app.console_menu import menu_for
 from mika.app.constellation import Constellation
 from mika.app.domains import DOMAINS, part
-from mika.app.domains.teams.desk import TeamsDesk
-from mika.app.domains.teams.extension import EXTENSION_DIR
 from mika.app.handmade import access, approval_sources, rights, waiting
 from mika.app.handmade.home import HomePage
 from mika.app.handmade.now import NowPage
@@ -155,10 +152,9 @@ class Live:
     #: les objets vivants de chaque domaine qui a son câblage (ADR 0310), par son nom : les réveils par API
     #: (``wakeup`` : le port du même nom et la porte de ``POST /api/wake/<nom>``), ses outils venus
     #: d'ailleurs (``tools`` : le client MCP, le port ``mcp``, ADR 0064), la carte (``maps`` : le port du même nom,
-    #: ADR 0194 ; et ``tiles`` : les tuiles de la carte de sa position, lues ou relayées par ce serveur, ADR 0193)
+    #: ADR 0194 ; et ``tiles`` : les tuiles de la carte de sa position, lues ou relayées par ce serveur, ADR 0193),
+    #: Teams (``teams`` : la clé de l'extension et la porte de ``/api/teams/…``, ADR 0069)
     parts: dict[str, Any] = field(default_factory=dict)
-    #: Teams (ADR 0069) : la clé de l'extension et la porte de ``/api/teams/…``
-    teams: TeamsDesk | None = None
     #: le direct (ADR 0308) : ce qui change ce que montrent les écrans de tous les jours, poussé sur leur ``/ws``
     changes: LiveChanges | None = None
     #: le courrier en direct (ADR 0308) : une connexion IDLE par boîte, sinon une relève par minute (``serve`` seul)
@@ -214,7 +210,7 @@ class Live:
         """Ce que les réglages d'exploitation fournissent aux paramètres des facultés
         (jamais des surcharges : une reconfiguration ne les efface pas)."""
         out: dict[str, dict[str, Any]] = {"kernel": {"tz": self.persona().timezone}}
-        # les tableaux de ses canaux (ADR 0134) : le courrier et Teams y lisent ce qu'elle envoie à ta place
+        # les tableaux de ses canaux (ADR 0134) : le courrier y lit ce qu'elle envoie à ta place
         canaux = self.settings.canals().model_dump(mode="json")
         boxes = self.settings.email().accounts
         off = sorted(k for k, a in boxes.items() if not a.enabled)
@@ -223,13 +219,6 @@ class Live:
         # avec qui chacune est partagée, et ce que la personne en a (ADR 0188)
         shares = {k: dict(sorted(a.shares.items())) for k, a in sorted(boxes.items()) if a.shares}
         out["email"] = {"canaux": canaux, "boxes_off": off, "owners": owners, "shares": shares}
-        teams = self.settings.teams()
-        # à qui est chaque compte Teams (ADR 0186 ; vide : à toi) : ses outils ne lui montrent que ceux de qui est en face
-        out["teams"] = {"enabled": teams.enabled, "canaux": canaux,
-                        "owners": {k: a.owner for k, a in sorted(teams.accounts.items())},
-                        "shares": {k: dict(sorted(a.shares.items())) for k, a in sorted(teams.accounts.items())
-                                   if a.shares},
-                        "accounts_off": sorted(k for k, a in teams.accounts.items() if not a.enabled)}
         # ses comptes d'agenda et leurs agendas (ADR 0309) : à qui, partagés avec qui, masqués, leur rappel
         out["agenda"] = self.settings.agenda().params()
         for domain in DOMAINS:  # ce que les réglages d'un domaine qui a sa fiche donnent à ses plugins (``inputs``)
@@ -350,10 +339,6 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     outside[PROJECT_DOCS_PORT] = DiskShares(data / "documentation")
     outside[attachments_c.VECTORS] = piece_vectors
     preprocess = outside["preprocess"] = LocalPreprocessor(gateway, transcribe=whisper(settings.stt))
-    # Teams (ADR 0069) : ce que l'extension pousse, ses brouillons et la file (hors du journal), et la porte
-    teams_store = outside["teams"] = TeamsStore(settings.teams, bases["teams"], now=clock.now)
-    # ses clés, une par compte (ADR 0186) : la console les crée et les retire par ce port
-    teams = outside["teams_keys"] = TeamsDesk(settings, clock.now, teams_store)
     # l'annuaire (ADR 0298) : tous ceux qu'elle connaît, même sans leur avoir parlé, tirés de Teams et du courrier par
     # le plugin ``contacts`` (sa base à lui, hors du journal)
     outside["contacts"] = ContactsStore(bases["contacts"], now=clock.now)
@@ -394,10 +379,9 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
         settings.mail_saved = mail_watch.nudge
     port = KernelPort(kernel)
     hub.port = port
-    teams.port = port
     live = Live(kernel, hub, port, Accounts(store), settings, gateway, fixed, calls=CallLog(store),
                 persona_file=persona, data=data, imaging=imaging, imaging_fixed=imaging_fixed,
-                parts=wiring.parts, teams=teams, read_limits=None if fixed else model_limits, mail_watch=mail_watch)
+                parts=wiring.parts, read_limits=None if fixed else model_limits, mail_watch=mail_watch)
     agenda_desk.reconfigure = live.reconfigure
     # l'exemple de l'autrice « Message », quand le sien est vide : le fil de référence de sa persona (ADR 0124), lu au
     # journal (lu à chaque épisode : jamais le YAML)
@@ -527,20 +511,19 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     docs_mcp = Mount(DOCS_MCP_PREFIX, app=DocsPoint(kernel, live.accounts).app())
     # ce que frontendv2 montre à qui est connecté, et seulement à elle (ADR 0187) ; sa borne des trajets vaut aussi pour
     # le GPX d'un voyage qu'un opérateur tire de la console, sur son compte (ADR 0204)
-    moi = MeApi(kernel, live.accounts, origins=web.origins, extension=EXTENSION_DIR,
+    moi = MeApi(kernel, live.accounts, origins=web.origins,
                 settings=live.settings, reconfigure=live.reconfigure, **wiring.me)
     # le direct (ADR 0308) : le journal, les bases tenues à côté (chacune prévient de ses écritures validées), l'étape
     # de son travail ; à chaque personne connectée, ce qu'elle voit — et la boîte d'envoi réveille l'extension
     live_changes = live.changes = LiveChanges(kernel, hub, moi)
     kernel.mind.subscribe(live_changes.listen)
-    for base in (outside["mail"], teams_store, outside["contacts"], outside["agenda"]):
+    for base in (outside["mail"], outside["contacts"], outside["agenda"]):
         base.on_change(live_changes.touch)
     for base in wiring.watched:  # les bases des domaines qui ont leur fiche
         base.on_change(live_changes.touch)
-    teams_store.on_change(teams.store_changed)
     kernel.runner.on_step = live_changes.step
     # ce qui est tenu hors du journal sans être une base à côté : les réglages (chaque enregistrement), la fin de
-    # l'attente d'un code Microsoft, la présence de l'extension Teams (ses comptes, aux écrans qui les lisent)
+    # l'attente d'un code Microsoft (la présence de l'extension Teams : son câblage, ``bind``)
     settings.on_saved = live_changes.saved
     microsoft.on_state = live_changes.signed
     # la connexion Google ou Microsoft d'un compte d'agenda (ADR 0309, lot 4) : connecté, refusé, échu
@@ -548,7 +531,6 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
         agenda_signin = getattr(outside["agenda_providers"].of(kind), "signin", None)
         if agenda_signin is not None:
             agenda_signin.on_state = live_changes.agenda_signed
-    teams.on_presence = live_changes.presence
     return create_app(port, live.accounts, hub, web, lifespan=lifespan,
                       extra_routes=[Route("/", _root, methods=["GET", "HEAD"]), *constellation.routes(),
                                     *moi.routes(),
@@ -558,7 +540,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                                     *inspector, relay, console_mcp, docs_mcp, world_hub.route(),
                                     *wiring.routes],
                       preprocess=preprocess, sensor_digest=settings.sensors_digest,
-                      teams=teams, push_ready=push_sender.configured, **wiring.web), live
+                      push_ready=push_sender.configured, **wiring.web), live
 
 
 async def register_accounts(kernel: Kernel, accounts: Accounts) -> int:

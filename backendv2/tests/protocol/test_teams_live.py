@@ -114,7 +114,7 @@ def test_a_key_withdrawn_or_teams_switched_off_closes_an_open_connection(world):
     with client.websocket_connect(LIVE, headers={"Origin": EXTENSION}) as ws:
         ws.send_json({"type": "hello", "key": key})
         assert ws.receive_json()["type"] == "outbox"
-        client.portal.call(live.teams.revoke_key, "principal")
+        client.portal.call(live.parts["teams"].revoke_key, "principal")
         while True:
             try:
                 got = ws.receive_json()
