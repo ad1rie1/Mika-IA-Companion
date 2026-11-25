@@ -65,8 +65,6 @@ _FRAME: dict[str, tuple[str, tuple[str, ...], tuple[str, str] | None]] = {
     "trips": ("Où chercher un lieu et une adresse, qui calcule les itinéraires, d'où viennent les données "
               "touristiques et les événements (l'écran Carte de frontendv2)",
               ("lieux", "itineraires", "tourisme", "rechauffage"), None),
-    "forge": ("Le comportement du moteur qui exécute ses apps ; les réglages d'une app restent sur sa fiche", (),
-              ("Apps forgées", "apps")),
     "contacts": ("Ce qu'elle se forme de ses contacts à partir de ce qu'elle lit : la période relue, ses bornes, les "
                  "plafonds par jour", (), ("Personnes › Annuaire", "personnes/personnes")),
     "agenda": ("Les agendas de chacun : les applications Google et Microsoft du serveur, la synchronisation, ses "

@@ -74,7 +74,7 @@ MENU = (
     ), question="Que fait-elle, pourquoi parle-t-elle ou se tait-elle ?"),
     MenuGroup("Outils", "tools", (
         MenuLink("Ses outils", "outils", hint="Ce qu'elle peut faire, d'où ça vient"),
-        MenuLink("Apps forgées", "apps", hint="Ce qu'elle a construit"),
+        _link("forge"),  # les apps forgées
     ), question="Que peut-elle faire, et pour qui ?"),
     MenuGroup("Connexions extérieures", "plug", (
         MenuLink("Ses sens", "sens", hint="Ce qu'elle lit, voit et reçoit"),

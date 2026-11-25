@@ -7,7 +7,6 @@ inscrit dans sa part de la console (``ConsolePart.overviews``, ADR 0310)."""
 from __future__ import annotations
 
 from mika.app.domains import DOMAINS, part
-from mika.app.domains.forge.console import tabs as apps
 from mika.app.handmade.subjects import agenda as agenda_fiche
 from mika.app.handmade.subjects import goal as goal_fiche
 from mika.app.handmade.subjects import handle as handle_fiche
@@ -74,7 +73,6 @@ DRAWN: dict[str, Drawn] = {
     # Outils, puis Connexions extérieures
     **tools.TABS,
     **senses.TABS,
-    **apps.TABS,
     # Système : chaque page à part (des actions dans leurs lignes et leurs panneaux)
     **system.TABS,
     # Approbations : leur historique (les demandes en attente : leur panneau, dans le même vocabulaire)

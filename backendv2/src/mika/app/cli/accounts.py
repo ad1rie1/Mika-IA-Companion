@@ -1,4 +1,4 @@
-"""Les comptes et ce qu'un opérateur sait mieux qu'elle : ``account``, ``token``, ``identity``, ``social``, ``forge``."""
+"""Les comptes et ce qu'un opérateur sait mieux qu'elle : ``account``, ``token``, ``identity``, ``social``."""
 
 from __future__ import annotations
 
@@ -178,13 +178,6 @@ def _run_social(args: argparse.Namespace) -> int:
     return 0 if out["ok"] else 1
 
 
-def _run_forge(args: argparse.Namespace) -> int:
-    action = "forge.promouvoir" if args.forge_cmd == "promote" else "forge.retrograder"
-    out = asyncio.run(operate(args.data, action, args.app, {}))
-    print(json.dumps(out, ensure_ascii=False))
-    return 0 if out["ok"] else 1
-
-
 def add_accounts(sub) -> None:  # type: ignore[no-untyped-def]
     ac = sub.add_parser("account", help="créer un compte (serveur arrêté)")
     ac.add_argument("username")
@@ -220,12 +213,3 @@ def add_accounts(sub) -> None:  # type: ignore[no-untyped-def]
     tk.set_defaults(run=_run_token)
     idp.set_defaults(run=_run_identity)
     so.set_defaults(run=_run_social)
-
-
-def add_forge(sub) -> None:  # type: ignore[no-untyped-def]
-    fo = sub.add_parser("forge", help="ce qu'un opérateur décide de ses apps (serveur arrêté)")
-    fsub = fo.add_subparsers(dest="forge_cmd", required=True)
-    for name in ("promote", "demote"):
-        f = fsub.add_parser(name, help="offrir (ou retirer) ses outils en conversation")
-        f.add_argument("app")
-    fo.set_defaults(run=_run_forge)

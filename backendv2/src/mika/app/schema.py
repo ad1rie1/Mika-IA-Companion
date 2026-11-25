@@ -39,8 +39,8 @@ REBUILT = "views"
 #: la base de chaque domaine qui en tient une, dans l'ordre des fiches (ADR 0310) : aucune n'est nommée ici
 DOMAIN_BASES = tuple(d.base for d in DOMAINS if d.base is not None)
 #: les modules qui déclarent des entités : les importer remplit les ``MetaData`` de ``mika.ports.sql`` — ceux du
-#: cœur (le journal, les comptes, les réglages, les appels, les traces, les séries, le journal des apps), puis
-#: celui de chaque base d'un domaine
+#: cœur (le journal, les comptes, les réglages, les appels, les traces, les séries), puis celui de chaque base
+#: d'un domaine, puis ceux des entités qu'un domaine range dans une base du cœur (``Domain.models``)
 MODELS = (
     "mika.ports.journal",
     "mika.adapters.web.accounts",
@@ -48,7 +48,6 @@ MODELS = (
     "mika.adapters.llm.calls",
     "mika.runtime.traces",
     "mika.runtime.series",
-    "mika.adapters.forge.bases",
     *(base.models for base in DOMAIN_BASES),
     *(module for d in DOMAINS for module in d.models),
 )

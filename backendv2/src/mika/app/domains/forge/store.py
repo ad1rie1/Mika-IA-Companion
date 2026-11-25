@@ -1,4 +1,4 @@
-"""Le port ``forge_settings`` : les réglages d'une app forgée, rangés par ``Settings``."""
+"""Le port ``forge_settings`` : les réglages d'une app forgée, rangés dans ceux du serveur (``settings.py``)."""
 
 from __future__ import annotations
 
@@ -6,16 +6,16 @@ from collections.abc import Mapping
 from typing import Any
 
 from mika.adapters.forge import ForgeHost
-from mika.app.settings import Settings
+from mika.app.domains.forge.settings import ForgeAppSettings
 
 
 class ForgeSettingsStore:
     """Le port ``forge_settings`` : ce qu'un opérateur règle pour une app forgée,
-    rangé par ``Settings``. Un secret y est **scellé** (``SecretBox``) et rendu en
+    rangé dans les réglages du serveur. Un secret y est **scellé** (``SecretBox``) et rendu en
     clair à l'app seulement (``values`` sert ``api.config``) ; une liste y est
     rangée en lignes. Ce qui n'est plus déclaré par l'app n'est plus rendu."""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: ForgeAppSettings) -> None:
         self.settings = settings
         self.host: ForgeHost | None = None
 

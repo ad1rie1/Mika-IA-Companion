@@ -106,7 +106,6 @@ LENT_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
 LENT_PREFIX = "mlp_"
 PERSONA_KEY = "persona"
 OVERRIDES_KEY = "overrides"
-FORGE_CONFIG_KEY = "forge_config"
 #: les serveurs MCP branchés (ADR 0064 ; jeton et variables secrètes scellés) et les décisions sur leurs outils
 MCP_KEY = "mcp"
 MCP_TOOLS_KEY = "mcp_tools"
@@ -236,9 +235,6 @@ class Settings:
     def __init__(self, store: Any, box: SecretBox) -> None:
         self.store = store
         self.box = box
-        #: lus depuis les fils de la Forge : tenus en mémoire (une connexion SQLite
-        #: appartient à son fil)
-        self._forge: dict[str, dict[str, Any]] = {}
         #: ses droits (ADR 0134), lus à chaque épisode : tenus en mémoire, relus à l'ouverture
         self._rights = Rights(canals=Canals())
         #: ses autrices enregistrées, lues à chaque épisode (et à chaque brouillon) : tenues en mémoire ; ``None`` :
@@ -275,8 +271,6 @@ class Settings:
         await self.store.run_mind(create)
         for key in HASHED_TOKEN_KEYS:
             await self._hash_sealed_token(key)
-        data = self._get(FORGE_CONFIG_KEY) or {}
-        self._forge = {str(k): dict(v) for k, v in data.items() if isinstance(v, dict)}
         self._rights = self._read_rights()
         self._authors = self._read_authors()
         for part in list(self._parts.values()):  # ce que les réglages d'un domaine tiennent en mémoire
@@ -1085,20 +1079,3 @@ class Settings:
     async def save_overrides(self, overrides: dict[str, dict[str, Any]]) -> None:
         """Les surcharges, par faculté (une couche vide n'est pas gardée)."""
         await self._put(OVERRIDES_KEY, {k: v for k, v in overrides.items() if v})
-
-    # ── Réglages des apps forgées (valeurs simples, surchargent le manifeste) ──
-    def forge_config(self, app: str | None = None) -> dict[str, Any]:
-        """Sans base : appelable depuis n'importe quel fil (celui d'une app)."""
-        if app is None:
-            return {k: dict(v) for k, v in self._forge.items()}
-        return dict(self._forge.get(app, {}))
-
-    async def save_forge_config(self, app: str, values: dict[str, Any]) -> None:
-        clean = {str(k)[:40]: v for k, v in values.items() if isinstance(v, str | int | float | bool)}
-        data = self.forge_config()
-        if clean:
-            data[app] = clean
-        else:
-            data.pop(app, None)
-        await self._put(FORGE_CONFIG_KEY, data)
-        self._forge = data

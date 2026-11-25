@@ -32,6 +32,7 @@ from pydantic import ValidationError
 
 from mika.adapters.forge import ForgeHost, read_manifest
 from mika.adapters.forge.manifest import coherence, signatures
+from mika.app.domains.forge.settings import ForgeAppSettings
 from mika.app.domains.forge.store import ForgeSettingsStore
 from mika.app.mindport import KernelPort
 from mika.app.settings import SecretBox, Settings
@@ -90,7 +91,7 @@ def mind_with_forge(tmp_path: Path):
     store.host = forge
     kernel, clock, _, _ = build(tmp_path, reply("d'accord [EMOTION:neutral:0.3]"),
                                 ports={"forge": forge, "forge_settings": store})
-    store.settings = Settings(kernel.mind.store, SecretBox(Fernet.generate_key()))
+    store.settings = Settings(kernel.mind.store, SecretBox(Fernet.generate_key())).of(ForgeAppSettings)
     return kernel, clock, forge, store
 
 
@@ -99,7 +100,7 @@ def run(tmp_path: Path, scenario):
 
     async def main():
         await boot(kernel)
-        await store.settings.open()
+        await store.settings.door.open()
         try:
             return await scenario(kernel, forge, store)
         finally:
@@ -690,7 +691,7 @@ def test_the_app_fiche_renders_and_its_forms_post_through_the_console(world, tmp
               "_sujet": "reglee", "_champs": ["ville", "cle", "n"], "ville": "Lyon", "cle": SECRET, "n": "4"}
     saved = client.post("/admin/action/forge.regler", data=settle)
     assert saved.status_code == 200 and "Réglages enregistrés" in html.unescape(saved.text)
-    stored = client.portal.call(live.settings.forge_config, "reglee")
+    stored = client.portal.call(live.settings.of(ForgeAppSettings).forge_config, "reglee")
     assert stored["ville"] == "Lyon" and stored["n"] == 4 and SECRET not in json.dumps(stored)
     read = client.portal.call(forge.call, "reglee", "view_lire", {"page": 1})
     assert read.ok and f"('cle', '{SECRET}')" in read.value["blocks"][0]["text"]

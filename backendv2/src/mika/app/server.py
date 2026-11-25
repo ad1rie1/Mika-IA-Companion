@@ -44,7 +44,6 @@ from mika.adapters.agenda import (
 from mika.adapters.camera import CameraBuffer
 from mika.adapters.contacts import ContactsStore
 from mika.adapters.feeds import HttpFeeds
-from mika.adapters.forge import ForgeBases, ForgeHost
 from mika.adapters.imaging.config import LiveImaging
 from mika.adapters.imaging.config import build_gateway as build_image_gateway
 from mika.adapters.imaging.gateway import ImageTrace
@@ -82,7 +81,6 @@ from mika.app.console import FACULTY_LABELS, LABELS, NAVIGATION, PARAM_FAMILIES
 from mika.app.console_menu import menu_for
 from mika.app.constellation import Constellation
 from mika.app.domains import DOMAINS, part
-from mika.app.domains.forge.store import ForgeSettingsStore
 from mika.app.handmade import access, approval_sources, rights, waiting
 from mika.app.handmade.home import HomePage
 from mika.app.handmade.now import NowPage
@@ -333,11 +331,6 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     piece_vectors = SqliteVectorIndex(store, vectors.embedder, table=attachments_c.VECTORS)
     camera = CameraBuffer(clock.now)
     settings = Settings(store, SecretBox.for_data(data))
-    forge_settings = ForgeSettingsStore(settings)
-    # une base par app, sur le même serveur que les siennes (ou des fichiers du dossier), son journal dans ``views``
-    forge_bases = ForgeBases(data / "forge", server=schema.server_url() or None, prefix=schema.database_prefix(),
-                             logs=bases["views"])
-    forge = forge_settings.host = ForgeHost(data / "forge", config=forge_settings.values, bases=forge_bases)
     def her() -> str:
         """Son nom, celui de la persona en vigueur (journalisée) : ce que signent ses mails et ses enregistrements
         d'atelier — un adaptateur ne lit pas sa persona lui-même (ADR 0070)."""
@@ -351,7 +344,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
              "workshop": BwrapWorkshop(data / "ateliers", credentials=settings.git, author=her), "camera": camera,
              # l'hôte GitHub d'un dépôt distant, lu par la console seulement (ADR 0183)
              "repo_host": GitHubRepos(settings.git),
-             "forge": forge, "forge_settings": forge_settings, "imaging": imaging}
+             "imaging": imaging}
     # les fichiers qu'elle envoie (ADR 0062) : leurs octets hors du journal, sauvegardés avec le dossier
     outside["shares"] = DiskShares(data / "partages")
     # ce qu'on lui envoie (ADR 0106) : les octets des pièces jointes, leur index, et de quoi les relire de près
@@ -502,8 +495,6 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
         for problem in await live.reload_imaging():
             log.warning("configuration des images : %s", problem)
         mcp.on_change(kernel.refresh_tools)  # son offre change : ses outils aussi (ADR 0064)
-        forge.on_change(kernel.refresh_tools)  # une app écrite ou effacée : ses outils aussi (ADR 0104)
-        forge.zone = lambda: str(kernel.mind.registry.tz_of(kernel.mind.frame().root))  # son heure, dans ses apps
         mcp.start()  # chaque serveur actif est joint en tâche de fond
         hub.start()
         live_changes.start()

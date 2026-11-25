@@ -119,7 +119,7 @@ NAVIGATION: tuple[NavGroup, ...] = (
         _destination("wakeup"),  # les réveils par API
     )),
     NavGroup("Outils", (
-        Destination("apps", "Apps forgées", "Les petites apps qu'elle écrit elle-même.", subjects=("app",)),
+        _destination("forge"),  # les apps forgées
     )),
     NavGroup("Réglages", (
         Destination("reglages", "Réglages", "Ce qu'un opérateur décide. Chaque page ne règle qu'un "
@@ -151,10 +151,10 @@ FACULTY_LABELS: dict[str, str] = _named("faculties", {
     "attention": "Attention et pensées", "memory": "Mémoire", "transcript": "Fil des conversations",
     "social": "Liens", "others": "Ce qu'elle devine des autres", "identity": "Identités",
     "agency": "Initiatives", "goals": "Buts", "projects": "Projets", "email": "Courrier", "rss": "Flux RSS", "camera": "Caméra",
-    "forge": "Moteur de la Forge", "kernel": "Noyau", "presence": "Présence", "expression": "Expression",
+    "kernel": "Noyau", "presence": "Présence", "expression": "Expression",
     "sensors": "Appareils", "runtime": "Moteur", "place": "Où elle est (sa chambre)",
     "world": "Son monde et son corps", "shares": "Fichiers envoyés", "attachments": "Pièces reçues",
-    "imaging": "Dessins", "location": "Localisation", "forge_signals": "Signaux de ses apps",
+    "imaging": "Dessins", "location": "Localisation",
     "mcp": "Outils extérieurs", "web": "Recherche web", "teams": "Teams",
     "trips": "Carte et voyages", "agenda": "Agenda",
 })
@@ -176,8 +176,7 @@ SECTION_LABELS: dict[str, str] = _named("sections", {
     "drafts": "Ses brouillons de mails", "voice": "Sa voix dans cette boîte", "task_mail": "Le mail à traiter",
     "task_ask": "Ce qu'on lui demande pour ce mail", "edits": "Ce qu'on change à ses brouillons (retouches, refus)",
     "headlines": "Les titres de ses flux",
-    "views": "Ce que voit la caméra", "apps": "Ses apps forgées", "app_news": "Ce que ses apps ont trouvé pour la personne",
-    "app_signals": "Ce qu'une app a mis dans sa file", "app_consignes": "Les consignes du projet d'une app",
+    "views": "Ce que voit la caméra",
     # ADR 0033, 0034, 0036
     "life": "Ce qui se passe dans la vie de la personne",
     "ahead": "Ce qui vient : le monde, et ce qu'elle vivra à travers quelqu'un",
@@ -196,7 +195,7 @@ SECTION_LABELS: dict[str, str] = _named("sections", {
     "form": "Comment elle écrit ici (les codes de son autrice)",
     # ADR 0062
     "sent_files": "Ce qu'elle lui a déjà envoyé (fichiers)", "dessins": "Ses dessins pour la personne",
-    "services": "Ce que ses services extérieurs lui ont rendu", "app_calls": "Ce que ses apps lui ont rendu après un accord",
+    "services": "Ce que ses services extérieurs lui ont rendu",
     # ADR 0255
     "work_services": "Ce que ses services extérieurs ont rendu à son travail (après un accord)",
     # ADR 0257
@@ -242,7 +241,7 @@ REASON_LABELS: dict[str, str] = _named("reasons", {
     "comfort": "Réconforter", "recontact": "Reprendre contact après un silence", "work": "Avancer sur un but",
     "remind": "Rappeler ce qu'on lui a demandé", "share": "Partager où en est un but",
     "drawing_ready": "Montrer un dessin prêt", "drawing_failed": "Dire qu'un dessin n'a pas pu se faire",
-    "service_answered": "Dire ce qu'un service extérieur a rendu", "app_answered": "Dire ce qu'une app a rendu après un accord", "app_news": "Dire ce qu'une app a trouvé", "app_alert": "Prévenir d'une urgence qu'une app a trouvée", "app_triage": "Lire la file de signaux d'une app",
+    "service_answered": "Dire ce qu'un service extérieur a rendu",
     "run": "Travailler sur un projet", "project_share": "Partager où en est un projet",
     "mail_mention": "Parler d'un mail reçu", "mail_draft": "Préparer une réponse à un mail",
     "rss_for": "Partager un titre qui lui a fait penser à cette personne",
@@ -301,8 +300,7 @@ PROCESS_LABELS: dict[str, str] = _named("processes", {
     "projects.reviews": "Demander la relecture indépendante d'un travail conclu, hors des pull requests",
     "email.poll": "Relever le courrier",
     "email.keep": "Télécharger l'historique du courrier",
-    "rss.poll": "Relever les flux", "mcp.watch": "Rejoindre les serveurs d'outils extérieurs", "camera.look": "Regarder par la caméra", "forge.tick": "Faire tourner les apps",
-    "forge.events": "Transmettre les événements aux apps", "forge.discover": "Découvrir les apps",
+    "rss.poll": "Relever les flux", "mcp.watch": "Rejoindre les serveurs d'outils extérieurs", "camera.look": "Regarder par la caméra",
     "memory.promises": "Tenir ou laisser filer ses promesses", "self.wake": "Se réveiller avec sa nuit",
     "social.reciprocity": "Remarquer qui écrit en premier",
     "social.bonds": "Remarquer qu'un lien a changé",
@@ -312,7 +310,6 @@ PROCESS_LABELS: dict[str, str] = _named("processes", {
     "attachments.study": "Lire de près les pièces reçues", "attachments.index": "Indexer les pièces reçues",
     "attachments.retention": "Retirer les pièces reçues trop anciennes ou de trop",
     "mcp.expire": "Refuser les accords restés sans réponse",
-    "forge.calls_expire": "Refuser les appels d'apps restés sans accord",
     "teams.triage": "Trier les messages Teams reçus",
     "teams.images": "Regarder les images des messages Teams",
     "agenda.sync": "Relire les agendas branchés (Google, Outlook, CalDAV, abonnements)",
@@ -403,15 +400,9 @@ EVENT_LABELS: dict[str, str] = _named("events", {
     "rss.noticed": "Un article remarqué", "rss.thought_of": "Un article qui lui a fait penser à quelqu'un",
     "camera.seen": "Ce que la caméra a vu",
     "mcp.status": "L'état de ses serveurs extérieurs", "mcp.answered": "Ce qu'un service extérieur a rendu",
-    "forge.answered": "Ce qu'une app a rendu après un accord", "projects.access_set": "Les accès d'un projet réglés",
-    "forge.access_set": "Les accès d'une app sans projet réglés",
+    "projects.access_set": "Les accès d'un projet réglés",
     "projects.steer_asked": "Une demande de pilotage d'un projet, sur ton accord",
-    "forge.emitted": "Une app a signalé", "forge.handled": "Une app a traité un événement",
-    "forge.proved": "Une version d'app prouvée à l'essai",
-    "forge.signaled": "Une app l'a interpellée", "forge.switched": "Une app allumée ou éteinte",
-    "forge.queued": "Un signal d'app mis en file", "forge.judged": "Une file d'app lue",
-    "forge.raised": "Une app d'un projet a signalé (son nom, sans le texte du signal)",
-    "forge.ticked": "Une app a tourné", "forge.written": "Une app écrite", "sensors.sensed": "Un appareil a signalé",
+    "sensors.sensed": "Un appareil a signalé",
     "location.located": "Son téléphone a dit où était la personne",
     "location.cleared": "La personne ne partage plus où elle est",
     "trips.created": "Un voyage préparé", "trips.changed": "Un voyage modifié",
@@ -494,8 +485,6 @@ EFFECT_LABELS: dict[str, tuple[str, str, str]] = _named("effects", {
     "mcp:effect.executed": ("agit", "Ce qu'un service a rendu", "le résultat d'un appel à un service branché"),
     "agenda:effect.executed": ("agit", "Une écriture dans un agenda",
                                "elle apprend ce qu'est devenu ce qu'elle y a ajouté, modifié, supprimé ou répondu"),
-    "forge:effect.executed": ("agit", "Une app installée", "une version de ses apps forgées, après ton accord"),
-    "forge:effect.resolved": ("agit", "Une version d'app refusée", "mise de côté puis refusée : elle ne traîne plus"),
     "projects:effect.executed": ("agit", "Un pilotage de projet accepté",
                                  "la demande de quelqu'un sur un projet s'écrit, à son nom, après ton accord"),
     "shares:shares.expired": ("range", "Un fichier envoyé expire", "ses octets sont effacés"),
@@ -534,16 +523,15 @@ EFFECT_FAMILIES: tuple[tuple[str, str], ...] = (
 #: source ajoute (un par serveur MCP branché, un par app), nommés par ce qui suit le préfixe.
 BUNDLE_LABELS: dict[str, str] = _named("bundles", {
     "attention": "Ses pensées", "self": "Son journal", "social": "Qui lui parle", "workshop": "L'atelier d'un projet",
-    "forge": "La Forge (écrire ses apps)", "forge_signals": "Ce que ses apps lui signalent",
     "project_review": "Relire le travail d'un projet",
-    "mcp.*": "Service « {} »", "forge_apps.*": "Son app « {} »",
+    "mcp.*": "Service « {} »",
 })
 
 #: Le nom court de chaque capacité : ce qu'une ligne ou une puce de « À valider » et l'historique en disent, sans couper
 #: sa phrase. Celle-ci reste sa description, au survol et dans l'en-tête de la demande ouverte.
 CAPABILITY_LABELS: dict[str, str] = _named("capabilities", {
     "email.send": "Mail", "teams.send": "Réponse Teams",
-    "mcp.call": "Outil extérieur", "forge.call": "Outil d'app", "forge.install": "Version d'app",
+    "mcp.call": "Outil extérieur",
     "projects.networked": "Commande réseau", "projects.push": "Push git", "projects.pull": "Pull git",
     "projects.pull_request": "Pull request",
     "projects.issue": "Issue publiée", "projects.issue_state": "État d'une issue",
@@ -573,10 +561,8 @@ ENRICHER_LABELS: dict[str, str] = _named("enrichers", {
     "projects_answer": "La réponse à sa demande d'aide (un projet)", "sent_files": "Les fichiers qu'elle a envoyés",
     "mail": "Son courrier", "teams": "Ses conversations Teams",
     "headlines": "Les titres de ses flux", "views": "Ce que voit la caméra", "dessins": "Ses dessins",
-    "services": "Ses demandes aux outils extérieurs", "apps": "Ses apps forgées",
+    "services": "Ses demandes aux outils extérieurs",
     "work_services": "Ses demandes aux outils extérieurs, faites en travaillant",
-    "calls": "Ses demandes à ses apps", "signals": "Ce qu'une app a mis dans sa file",
-    "news": "Ce que ses apps ont trouvé pour la personne",
     "agenda": "Ses agendas (la journée de la personne, ce qu'elle y a proposé)",
     "agenda_reminder": "Le rendez-vous qu'elle rappelle",
     "agenda_invitation": "L'invitation dont elle prépare la réponse",
