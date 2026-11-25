@@ -130,7 +130,7 @@ Mika est une psyché à **journal d'événements** : tout ce qui lui arrive s'aj
 faculté s'en déduit par des fonctions pures. On peut donc rejouer sa vie, l'expliquer et la simuler.
 
 ```
-app                         composition et processus : serveur, CLI, port d'entrée, portes HTTP, console dessinée, /api/moi…
+app                         composition et processus : serveur, CLI, port d'entrée, console dessinée, /api/moi… ; app/domains : un dossier par domaine
 inspector | sim             la console, le simulateur
 runtime                     le Mind générique : ajouts, épisodes, voies, arbitre, ordonnanceur, effets, projections, santé
 faculties | plugins | adapters
@@ -157,10 +157,13 @@ Ce qui fait échouer un changement :
   - les facultés se lisent par des faits déclarés ;
   - tout texte gardé est un `Content` qui déclare ses `subjects=` (l'oubli doit l'atteindre) ;
   - ses phrases sont dans `persona/voix.yaml`, jamais en dur, et son nom vient de sa persona ;
-  - ce qui sort de la machine est une capacité, après le commit.
+  - ce qui sort de la machine est une capacité, après le commit ;
+  - le cadre d'`app` ne nomme aucun domaine : ce qu'`app` sait du courrier, de Teams, de l'agenda… vit dans
+    `app/domains/<nom>/`, et sa fiche (`Domain`) dit ce qu'il apporte (ADR 0310).
 
 La composition (facultés, plugins, politiques d'épisode, arbitrage, modes) est dans `app/composition.py`. Pour écrire
-ou ajouter une faculté : ARCHITECTURE.md, « Écrire une faculté ».
+ou ajouter une faculté : ARCHITECTURE.md, « Écrire une faculté » ; pour ajouter un domaine (son dossier, sa fiche, ses
+parts) : « Écrire un domaine ».
 
 ## Tester
 

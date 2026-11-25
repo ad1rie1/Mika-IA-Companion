@@ -6,11 +6,10 @@ sauvegarde, l'API par personne, la console — parcourt ``DOMAINS`` et ne nomme 
 imports de chaque source d'``app`` (``ast`` : jamais un commentaire) :
 
 - **un fichier du cadre n'importe rien d'un domaine** : ni son plugin ou sa faculté, ni son adaptateur, son contrat
-  ou son port (``PACKAGES``), ni son dossier (``mika.app.domains.<nom>`` — seulement ``mika.app.domains``), ni un
-  module d'``app`` qui est à lui et attend son déménagement (``TO_MOVE``) ;
-- **ce qui reste à sortir du cadre est excusé nommément** (``STILL`` : fichier → domaines encore nommés). Cette
-  table ne fait que rétrécir : on n'y ajoute rien, et une excuse qui ne sert plus — le fichier ne nomme plus ce
-  domaine, ou n'existe plus — fait échouer la garde. ``FOREVER`` porte ce que le cadre nomme exprès, avec sa raison ;
+  ou son port (``PACKAGES``), ni son dossier (``mika.app.domains.<nom>`` — seulement ``mika.app.domains``) ;
+- **le cadre ne s'excuse pas** : le chantier qui a rangé ``app`` par domaine tenait la liste de ce qui restait à
+  sortir, fichier par fichier ; elle est vide et n'existe plus. Seul ``FOREVER`` porte ce que le cadre nomme
+  exprès, avec sa raison — une entrée qui ne sert plus (le fichier n'existe plus) fait échouer la garde ;
 - **un domaine ne nomme un autre domaine que s'il le déclare** (``Domain.needs``), et un besoin déclaré qui ne sert
   plus se retire ;
 - **le registre** (``app/domains/__init__.py``) liste les fiches et rien d'autre : il ne nomme aucun paquet du moteur ;
@@ -86,19 +85,13 @@ SHARED: dict[str, str] = {
                           "d'ailleurs",
 }
 
-#: les modules d'``app`` qui sont à un domaine et attendent leur déménagement dans son dossier : les importer, c'est
-#: déjà le nommer. Un module déménagé sort de cette table (il n'existe plus : la garde le dit)
-TO_MOVE: dict[str, tuple[str, ...]] = {}
-
 #: ce que le cadre nomme exprès, pour toujours, et pourquoi
 FOREVER: dict[str, str] = {
     "composition.py": "la liste des facultés et des plugins, les lots d'outils de chaque sorte d'épisode et l'ordre "
                       "de son prompt : des décisions, pas de la plomberie (ADR 0151)",
-}
-
-#: ce qui reste à sortir du cadre : fichier d'``app`` → domaines qu'il nomme encore. Elle ne fait que rétrécir
-STILL: dict[str, set[str]] = {
-    "preview/__init__.py": {"mail", "maps", "projects", "teams"},
+    "preview/__init__.py": "la vie fictive de l'aperçu de la console : un scénario écrit à la main, où ses mails, ses "
+                           "messages Teams, ses voyages et ses projets se mêlent dans l'ordre d'une vraie semaine ; "
+                           "un domaine neuf y ajoute sa part par sa fiche (``Domain.preview``), sans y toucher",
 }
 
 
@@ -135,8 +128,7 @@ def named(text: str, packages: Mapping[str, tuple[str, ...]], *, folders: bool =
     return out
 
 
-def offences(sources: Mapping[str, str], *, packages: Mapping[str, tuple[str, ...]],
-             still: Mapping[str, set[str]], forever: Mapping[str, str],
+def offences(sources: Mapping[str, str], *, packages: Mapping[str, tuple[str, ...]], forever: Mapping[str, str],
              needs: Mapping[str, tuple[str, ...]]) -> list[str]:
     """Ce qui enfreint la politique, en phrases. ``sources`` : le texte de chaque fichier d'``app``, par son chemin
     sous ``app/`` ; ``needs`` : ce que la fiche de chaque domaine déclare lire des autres."""
@@ -147,11 +139,8 @@ def offences(sources: Mapping[str, str], *, packages: Mapping[str, tuple[str, ..
         if parts[0] != HOME:  # le cadre
             if path in forever:
                 continue
-            got, excused = named(text, packages), still.get(path, set())
             out += [f"{path} nomme le domaine « {d} » : le cadre lit les fiches (DOMAINS), il ne nomme aucun domaine"
-                    for d in sorted(got - excused)]
-            out += [f"{path} est excusé pour « {d} » dans STILL mais ne le nomme plus : retirer l'excuse"
-                    for d in sorted(excused - got)]
+                    for d in sorted(named(text, packages))]
         elif len(parts) == 2:  # le registre et la forme d'une fiche
             out += [f"{path} nomme un paquet du domaine « {d} » : le registre liste les fiches, rien d'autre"
                     for d in sorted(named(text, packages, folders=False))]
@@ -168,7 +157,6 @@ def offences(sources: Mapping[str, str], *, packages: Mapping[str, tuple[str, ..
             used.setdefault(own, set()).update(others)
             out += [f"{path} nomme le domaine « {d} », que la fiche de « {own} » ne déclare pas (Domain.needs)"
                     for d in sorted(others - set(needs.get(own, ())))]
-    out += [f"{path} est excusé dans STILL mais n'existe plus" for path in sorted(set(still) - set(sources))]
     out += [f"{path} est excusé dans FOREVER mais n'existe plus" for path in sorted(set(forever) - set(sources))]
     out += [f"la fiche de « {own} » déclare le besoin « {d} », que son dossier ne nomme pas : le retirer"
             for own, declared in sorted(needs.items()) for d in sorted(set(declared) - used.get(own, set()))]
@@ -185,25 +173,19 @@ def _exists(module: str) -> bool:
     return path.is_dir() or path.with_suffix(".py").is_file()
 
 
-def _all(packages: Mapping[str, tuple[str, ...]], moving: Mapping[str, tuple[str, ...]]) -> dict[str, tuple[str, ...]]:
-    return {domain: (*owned, *moving.get(domain, ())) for domain, owned in packages.items()}
-
-
-def test_the_frame_names_no_domain_beyond_what_is_still_excused():
-    found = offences(_sources(), packages=_all(PACKAGES, TO_MOVE), still=STILL, forever=FOREVER,
-                     needs={d.name: d.needs for d in DOMAINS})
+def test_the_frame_names_no_domain():
+    found = offences(_sources(), packages=PACKAGES, forever=FOREVER, needs={d.name: d.needs for d in DOMAINS})
     assert not found, "\n".join(found)
 
 
 def test_every_package_of_a_domain_exists():
-    """Un paquet renommé ou un module déménagé qui resterait dans les tables ne garderait plus rien."""
-    gone = sorted(f"{domain} : {module}" for table in (PACKAGES, TO_MOVE) for domain, owned in table.items()
-                  for module in owned if not _exists(module))
+    """Un paquet renommé qui resterait dans la table ne garderait plus rien."""
+    gone = sorted(f"{domain} : {module}" for domain, owned in PACKAGES.items() for module in owned
+                  if not _exists(module))
     assert not gone, gone
     assert all(_exists(module) for module in SHARED), sorted(SHARED)
     assert all(any(_within(module, p) for owned in PACKAGES.values() for p in owned) for module in SHARED), \
         "ce qui n'est dans le paquet d'aucun domaine n'a pas à être excepté"
-    assert set(TO_MOVE) <= set(PACKAGES)
 
 
 def test_the_listed_domains_are_the_folders_and_the_guard_knows_them():
@@ -418,9 +400,9 @@ def test_the_entry_port_check_sees_a_method_said_twice():
 TOY_PACKAGES = {"mail": ("plugins.email", "adapters.mail"), "agenda": ("plugins.agenda",)}
 
 
-def _toy(sources: Mapping[str, str], *, still: Mapping[str, set[str]] | None = None,
+def _toy(sources: Mapping[str, str], *, forever: Mapping[str, str] | None = None,
          needs: Mapping[str, tuple[str, ...]] | None = None) -> list[str]:
-    return offences(sources, packages=TOY_PACKAGES, still=still or {}, forever={}, needs=needs or {})
+    return offences(sources, packages=TOY_PACKAGES, forever=forever or {}, needs=needs or {})
 
 
 def test_the_guard_passes_a_frame_that_reads_the_registry():
@@ -452,12 +434,11 @@ def test_a_comment_or_a_string_names_nothing():
                               'WHERE = "mika.plugins.agenda"\n'}) == []
 
 
-def test_what_is_still_excused_passes_and_an_excuse_that_no_longer_serves_fails():
-    sources = {"server.py": "from mika.adapters.mail import ImapSmtpMail\n"}
-    assert _toy(sources, still={"server.py": {"mail"}}) == []
-    assert _toy(sources, still={"server.py": {"mail", "agenda"}, "gone.py": {"mail"}}) == [
-        "server.py est excusé pour « agenda » dans STILL mais ne le nomme plus : retirer l'excuse",
-        "gone.py est excusé dans STILL mais n'existe plus"]
+def test_what_the_frame_names_on_purpose_passes_and_an_entry_that_no_longer_serves_fails():
+    sources = {"composition.py": "from mika.adapters.mail import ImapSmtpMail\n"}
+    assert _toy(sources, forever={"composition.py": "la liste de tout le monde"}) == []
+    assert _toy(sources, forever={"composition.py": "la liste de tout le monde", "gone.py": "un reste"}) == [
+        "gone.py est excusé dans FOREVER mais n'existe plus"]
 
 
 def test_a_domain_names_another_only_if_its_card_says_so():
