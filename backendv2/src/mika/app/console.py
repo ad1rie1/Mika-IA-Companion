@@ -348,7 +348,7 @@ BUNDLE_LABELS: dict[str, str] = _named("bundles", {
 #: elles restent telles quelles. Celles d'un domaine sont dans sa fiche (``labels["signals"]``).
 SIGNAL_LABELS: dict[str, str] = _named("signals", {
     # son monde (``faculties/world/notice.py``, ``faculties/world/__init__.py``), ses liens (``faculties/social``)
-    # et ce que lui signale un appareil (``app/mindport.py``, ``sense``)
+    # et ce que lui signale un appareil (``app/domains/senses/port.py``, ``sense``)
     "change": "un changement chez elle", "setback": "un contretemps", "gesture": "un geste",
     "bond_shifted": "un lien qui change", "one_sided": "un lien à sens unique", "signal": "un signal",
 })

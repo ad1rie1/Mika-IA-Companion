@@ -5,21 +5,21 @@ Ce dossier porte leurs réglages (``settings.py`` : le jeton de leurs dépôts g
 leur documentation, ``project_docs`` ; puis, le noyau là, le point MCP de leur documentation, ``/mcp/moi``, dont le
 code est ``docs_mcp.py``), leur module de l'API par personne (``api/`` : ses projets et « À faire », leur code, leur
 documentation, ce qu'on y gère, leur activité ; ce qui attend son geste, pour la barre du haut), leur part du direct
-(``live.py``), leur part de la console (``console/`` : Activité › Projets, la fiche d'un projet et ses onglets, la
-rubrique « Dépôts Git », l'onglet Projets de la fiche d'une personne et son compte, leurs gabarits, leurs feuilles
-et leur script) et ce que l'aperçu en montre (``demo.py`` :
-une chaîne de travail d'exemple ; ``demo_git.py`` : un dépôt face à son distant, sans réseau ; ``demo_activity.py``
-: des états fictifs de l'activité), que l'aperçu du cadre pose. Leurs dossiers du dossier de données : ``ateliers/``
-et ``documentation/`` (``places`` ; ce qu'une sauvegarde n'en prend pas : ``backup.py``). Ils lisent la Forge (les
-apps d'un projet) et les outils (le protocole MCP).
+(``live.py``), leur part du port d'entrée (``port.py`` : ce que le panneau d'une personne dit du travail en cours,
+pour une propriétaire), leur part de la console (``console/`` : Activité › Projets, la fiche d'un projet et ses
+onglets, la rubrique « Dépôts Git », l'onglet Projets de la fiche d'une personne et son compte, leurs gabarits, leurs
+feuilles et leur script) et ce que l'aperçu en montre (``demo.py`` : une chaîne de travail d'exemple ;
+``demo_git.py`` : un dépôt face à son distant, sans réseau ; ``demo_activity.py`` : des états fictifs de l'activité),
+que l'aperçu du cadre pose. Leurs dossiers du dossier de données : ``ateliers/`` et ``documentation/`` (``places`` ;
+ce qu'une sauvegarde n'en prend pas : ``backup.py``). Ils lisent la Forge (les apps d'un projet) et les outils (le
+protocole MCP).
 
 Elle est la dernière de ``DOMAINS`` : un accord d'un projet se reconnaît par le contexte de l'événement, et le direct
 ne le regarde qu'après tous les autres domaines (un brouillon de mail né dans un épisode de projet reste au courrier).
 
 Restent au cadre, parce qu'ils croisent les domaines ou qu'aucune forme de fiche ne les dit : ce que la sauvegarde
 laisse de leurs ateliers (``app/backup.py`` : les vues et les relectures, ``SKIPPED_UNDER`` ; ``ateliers`` parmi
-les dossiers des cages ; les dossiers recréés à la restauration), le port d'entrée (``app/mindport.py``), la vie
-fictive de l'aperçu, où leurs projets se
+les dossiers des cages ; les dossiers recréés à la restauration), la vie fictive de l'aperçu, où leurs projets se
 mêlent au reste, le lien « Dépôts Git » du menu (Connexions extérieures : une fiche n'a qu'un lien), et leur place
 dans la composition (``composition.py`` : la faculté, ses lots d'outils, l'ordre de son prompt).
 """
@@ -40,6 +40,7 @@ PROJECTS = Domain(
     api="mika.app.domains.projects.api",
     live="mika.app.domains.projects.live",
     console="mika.app.domains.projects.console",
+    port="mika.app.domains.projects.port",
     destination=Destination(
         "projets", "Projets", "Ses projets : des espaces de travail qu'on pilote — objectifs, "
         "exécutions, décisions techniques, fichiers, dépôt git, mode et outils.",

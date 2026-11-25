@@ -80,7 +80,7 @@ export function dreamLabel(kind: string): string {
   return DREAMS[kind] ?? "Un rêve";
 }
 
-/** Le statut d'un de ses projets, tel que le serveur l'envoie (`app/mindport.py` : `active`, `paused`). */
+/** Le statut d'un de ses projets, tel que le serveur l'envoie (`app/domains/projects/port.py` : `active`, `paused`). */
 const PROJECT_STATUSES: ReadonlyMap<string, string> = new Map([
   ["active", "en cours"],
   ["paused", "en pause"],

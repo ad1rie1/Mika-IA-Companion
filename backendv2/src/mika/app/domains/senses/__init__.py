@@ -2,14 +2,13 @@
 
 Ce dossier porte ses réglages (``settings.py`` : les flux qu'elle suit), son câblage (``wiring.py`` : ses flux, le
 port ``feeds``, et sa caméra, le port ``camera``, que l'application web remplit aussi), sa commande (``cli.py`` :
-``mika rss``) et sa part de la console (``console/`` : les onglets de Ses sens, sa rubrique de réglages, leurs
-gabarits). Ses onglets montrent aussi les messages du téléphone et sa localisation, rangés dans la même
-destination : ils lisent le téléphone et la carte.
+``mika rss``), sa part de la console (``console/`` : les onglets de Ses sens, sa rubrique de réglages, leurs
+gabarits) et sa part du port d'entrée (``port.py`` : ce que signalent ses appareils). Ses onglets montrent aussi les
+messages du téléphone et sa localisation, rangés dans la même destination : ils lisent le téléphone et la carte.
 
 Restent au cadre, parce qu'ils règlent ce que tiennent les réglages du serveur : la transcription des messages vocaux
 (elle sert le prétraitement) et le jeton des appareils (``POST /api/perceptions`` : il partage avec la console MCP le
-mécanisme des jetons hachés), leurs rubriques de réglages et leurs commandes (``mika stt``, ``mika sensors``) ; et le
-port d'entrée, qui reçoit ce que signalent ses appareils (``app/mindport.py``).
+mécanisme des jetons hachés), leurs rubriques de réglages et leurs commandes (``mika stt``, ``mika sensors``).
 """
 
 from __future__ import annotations
@@ -25,6 +24,7 @@ SENSES = Domain(
     settings="mika.app.domains.senses.settings",
     wiring="mika.app.domains.senses.wiring",
     console="mika.app.domains.senses.console",
+    port="mika.app.domains.senses.port",
     cli="mika.app.domains.senses.cli",
     destination=Destination("sens", "Ses sens", "Ce qu'elle lit du monde (flux RSS), ce qu'elle voit "
                             "(caméra), ce que ses appareils lui signalent.",

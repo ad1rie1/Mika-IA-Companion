@@ -1,9 +1,10 @@
 """Les réveils par API, tels que la couche ``app`` les relie (ADR 0068, 0310) : leur fiche.
 
-Ce dossier porte leur porte HTTP (``desk.py`` : ``POST /api/wake/<nom>``, le port ``wakeup``), leurs réglages et leurs
-clés (``settings.py``), leur câblage (``wiring.py``), leur commande (``cli.py`` : ``mika wakeup``) et leur part de la
-console (``console/`` : leur onglet, la fiche d'un réveil, leur page de réglages, leurs gabarits et leur feuille).
-Un réveil peut porter sur un projet : ils lisent les projets.
+Ce dossier porte leur porte HTTP (``desk.py`` : ``POST /api/wake/<nom>``, le port ``wakeup``), leurs réglages et
+leurs clés (``settings.py``), leur câblage (``wiring.py``), leur commande (``cli.py`` : ``mika wakeup``), leur part
+du port d'entrée (``port.py`` : un appel reçu, journalisé puis interprété) et leur part de la console (``console/`` :
+leur onglet, la fiche d'un réveil, leur page de réglages, leurs gabarits et leur feuille). Un réveil peut porter sur
+un projet : ils lisent les projets.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ WAKEUP = Domain(
     settings="mika.app.domains.wakeup.settings",
     wiring="mika.app.domains.wakeup.wiring",
     console="mika.app.domains.wakeup.console",
+    port="mika.app.domains.wakeup.port",
     cli="mika.app.domains.wakeup.cli",
     destination=Destination(
         "reveils", "Réveils par API", "Les réveils que des systèmes extérieurs lui envoient "

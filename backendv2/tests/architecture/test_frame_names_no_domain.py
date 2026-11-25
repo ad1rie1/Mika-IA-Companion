@@ -19,7 +19,8 @@ imports de chaque source d'``app`` (``ast`` : jamais un commentaire) :
   ``MenuLink``) : elle nomme les modules de ses parts, que le cadre importe au moment d'assembler. Le
   registre est donc une feuille de l'arbre des imports, que tout module d'``app`` peut lire ; et **chaque part nommée
   existe** et porte son nom convenu (``wire``, ``SETTINGS``, ``routes``, ``LIVE``, ``SHARING``, ``ACCOUNTS``,
-  ``OUTSIDE``, ``CONSOLE``, ``preview``, ``add``).
+  ``OUTSIDE``, ``CONSOLE``, ``PORT``, ``preview``, ``add``) ; les méthodes que le port d'entrée mêle aux siennes
+  ne s'y écrivent qu'une fois.
 
 Le contrôle est une fonction du texte des sources (``offences``) : les derniers tests l'essaient sur de petits
 sources factices, pour qu'il échoue vraiment quand on nomme un domaine.
@@ -39,6 +40,7 @@ from mika.app.domains import (
     LivePart,
     OutsidePart,
     PersonPart,
+    PortPart,
     SharingPart,
     TablePart,
     part,
@@ -49,6 +51,7 @@ from mika.app.handmade.rights import share_consoles
 from mika.app.me.accounts import CHANNELS
 from mika.app.me.outside import OUTSIDE
 from mika.app.me.sharing import KINDS as SHARED_KINDS
+from mika.app.mindport import MIXED, KernelPort
 from mika.app.settings import SettingsPart
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -95,7 +98,6 @@ FOREVER: dict[str, str] = {
 
 #: ce qui reste à sortir du cadre : fichier d'``app`` → domaines qu'il nomme encore. Elle ne fait que rétrécir
 STILL: dict[str, set[str]] = {
-    "mindport.py": {"maps", "projects", "senses", "wakeup"},
     "preview/__init__.py": {"mail", "maps", "projects", "teams"},
 }
 
@@ -219,8 +221,8 @@ def test_every_part_a_card_names_exists_and_carries_its_name():
     """Une fiche nomme les modules de ses parts au lieu de les importer : une faute de frappe ne se verrait qu'à
     l'assemblage. Chaque module nommé s'importe ici, et porte le nom que le cadre y lit."""
     for d in DOMAINS:
-        for module in (d.wiring, d.settings, d.api, d.live, d.sharing, d.accounts, d.outside, d.console, d.preview,
-                       d.cli, d.backup):
+        for module in (d.wiring, d.settings, d.api, d.live, d.sharing, d.accounts, d.outside, d.console, d.port,
+                       d.preview, d.cli, d.backup):
             assert module is None or _within(module, f"mika.app.{HOME}.{d.name}"), f"{d.name} : {module} est hors de son dossier"
         assert d.wiring is None or callable(part(d.wiring, "wire")), d.name
         assert d.settings is None or issubclass(part(d.settings, "SETTINGS"), SettingsPart), d.name
@@ -269,6 +271,12 @@ def test_every_part_a_card_names_exists_and_carries_its_name():
             assert not unknown and all(callable(count) for count in sheet.counts.values()), f"{d.name} : {sorted(unknown)}"
             assert sheet.hidden is None or callable(sheet.hidden), d.name
             assert sheet.routes is None or callable(sheet.routes), d.name
+        entry = part(d.port, "PORT")
+        assert entry is None or isinstance(entry, PortPart), d.name
+        if entry is not None:  # sa part du port d'entrée : ses méthodes, ce qu'il dit du travail en cours
+            assert entry.methods is not None or entry.work is not None, d.name
+            assert entry.methods is None or isinstance(entry.methods, type), d.name
+            assert entry.work is None or callable(entry.work), d.name
         assert d.preview is None or callable(part(d.preview, "preview")), d.name
         assert d.cli is None or callable(part(d.cli, "add")), d.name
         kept = (*part(d.backup, "UNSAVED", ()), *part(d.backup, "SAVED", ()))
@@ -346,6 +354,63 @@ def test_a_tab_of_the_sheet_of_a_person_is_drawn_by_one_hand():
                 twice.append(f"{tab} : {seen[tab]} et {d.name}")
             seen.setdefault(tab, d.name)
     assert not twice, twice
+
+
+class _Empty:
+    pass
+
+
+#: ce que Python pose lui-même dans le dictionnaire d'une classe : ce n'en est pas une méthode
+MACHINERY = frozenset(vars(_Empty)) | {"__qualname__", "__annotations__", "__annotate__", "__annotate_func__"}
+
+
+def _defined(cls: type, *, inherited: bool = True) -> set[str]:
+    """Ce qu'une classe définit (ses méthodes, ses attributs), et ce qu'elle hérite d'une base autre que ``object``."""
+    return {n for c in (cls.__mro__[:-1] if inherited else (cls,)) for n in vars(c) if n not in MACHINERY}
+
+
+def clashes(frame: type, parts: Mapping[str, type]) -> list[str]:
+    """Ce qu'une part du port d'entrée reprend, en phrases : une méthode que le port définit déjà (``frame`` : ce que
+    son corps définit, sans ce qu'il mêle), ou qu'une part d'avant définit aussi (``parts`` : domaine → la classe de
+    ses méthodes, dans l'ordre des fiches)."""
+    out: list[str] = []
+    held = dict.fromkeys(_defined(frame, inherited=False), "le port")
+    for name, cls in parts.items():
+        for n in sorted(_defined(cls)):
+            if n in held:
+                out.append(f"{n} : {held[n]} et {name}")
+            held.setdefault(n, name)
+    return out
+
+
+def test_a_method_of_the_entry_port_is_written_by_one_hand():
+    """``KernelPort`` mêle à ses méthodes celles des parts des domaines (``PortPart.methods``) : une méthode que deux
+    parts définissent, ou qu'une part reprend au port, ne serait servie que par la première trouvée — sans bruit."""
+    parts = {d.name: entry.methods for d in DOMAINS if d.port is not None
+             if (entry := part(d.port, "PORT")).methods is not None}
+    assert parts and tuple(parts.values()) == MIXED == KernelPort.__mro__[1:-1]
+    assert clashes(KernelPort, parts) == []
+
+
+def test_the_entry_port_check_sees_a_method_said_twice():
+    class Frame:
+        def perceive(self) -> None: ...
+
+    class Maps:
+        def locate(self) -> None: ...
+
+    class Senses:
+        def locate(self) -> None: ...
+
+        def perceive(self) -> None: ...
+
+    class Wakeup(Maps):  # ce qu'une part hérite compte aussi
+        def wake(self) -> None: ...
+
+    assert clashes(Frame, {"maps": Maps, "wakeup": Wakeup}) == ["locate : maps et wakeup"]
+    assert clashes(Frame, {"maps": Maps, "senses": Senses}) == ["locate : maps et senses",
+                                                                 "perceive : le port et senses"]
+    assert clashes(Frame, {"maps": Maps}) == []
 
 
 # ── le contrôle, essayé sur des sources factices ──

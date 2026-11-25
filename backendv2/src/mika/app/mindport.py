@@ -1,9 +1,15 @@
-"""Le port d'entrée, implémenté sur le noyau : ce que voient les adaptateurs."""
+"""Le port d'entrée, implémenté sur le noyau : ce que voient les adaptateurs.
+
+``KernelPort`` tient ce qui n'est à aucun domaine. Ce qui est à un domaine — ce que signale un appareil, la position
+d'une personne et les bulles de ses messages, un réveil par API, le travail en cours d'une propriétaire — est sa
+part (ADR 0310 : ``PortPart``, ``app/domains/<nom>/port.py``) : ``KernelPort`` mêle leurs méthodes aux siennes, et
+le panneau d'une personne prend ce que chacune dit du travail en cours (``PortPart.work``). Les parts sont lues à
+l'import de ce module, qui en fait une classe : aucune ne l'importe.
+"""
 
 from __future__ import annotations
 
 import hashlib
-import json
 from collections.abc import Sequence
 from dataclasses import replace
 from datetime import date
@@ -11,26 +17,20 @@ from typing import Any
 
 from sqlalchemy import select
 
-from mika.app.console import FACULTY_LABELS
+from mika.app.domains import DOMAINS, part
 from mika.contracts import attention as attention_c
 from mika.contracts import body as body_c
 from mika.contracts import identity as identity_c
-from mika.contracts import location as location_c
 from mika.contracts import memory as memory_c
 from mika.contracts import presence as presence_c
-from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
-from mika.contracts import sensors as sensors_c
 from mika.contracts import social as social_c
-from mika.contracts import trips as trips_c
-from mika.contracts import wakeup as wakeup_c
 from mika.contracts import world as w
 from mika.contracts.entry import (
     Admission,
     Efforts,
     HistoryRow,
-    MessageNote,
     SharedDownload,
     SharedMeta,
     StrandItem,
@@ -39,28 +39,20 @@ from mika.contracts.runtime import PerceptionReceived
 from mika.faculties import attachments, shares, transcript
 from mika.faculties.attention import prompt as attention_prompt
 from mika.faculties.identity import describe
-from mika.faculties.projects import actions as project_actions
-from mika.faculties.projects import work as projects_work
 from mika.faculties.self import night
 from mika.faculties.self.faculty import lived_date
 from mika.faculties.social.sections import profile_parts, refs_of
 from mika.faculties.world import commands as world_commands
 from mika.kernel import forms
-from mika.kernel.clock import local
-from mika.kernel.events import Content, Event, Origin
+from mika.kernel.events import Event, Origin
 from mika.kernel.frame import Audience, Frame
 from mika.kernel.guards import Superseded
 from mika.kernel.state import Root
-from mika.plugins import location
 from mika.ports.shares import MAX_SHARE_BYTES, valid_id
-from mika.ports.workshop import argv_lines
 from mika.runtime import decisions, health, operations
 from mika.runtime.bootstrap import Kernel, ReadOnlyStore
-from mika.runtime.effects import with_content
-from mika.vocab.affect import emotion_of
 from mika.vocab.circadian import day_fr
-from mika.vocab.episodes import PRO, project_of
-from mika.vocab.privacy import Sensitivity
+from mika.vocab.episodes import PRO
 
 
 def _row(r: dict) -> HistoryRow:
@@ -85,14 +77,6 @@ def _row(r: dict) -> HistoryRow:
     )
 
 
-#: ce qu'on voit d'un effet en attente qui n'appartient à aucun projet : son propriétaire, en mots
-_OWNER_WORDS = {"email": "Courrier", "forge": "Forge", "teams": "Teams"}
-
-
-def _owner_words(owner: str) -> str:
-    return _OWNER_WORDS.get(owner) or FACULTY_LABELS.get(owner) or owner
-
-
 def journal_title(day: str, today: date) -> str:
     """Le titre du journal montré : celui d'hier (le cas ordinaire — il s'écrit la nuit), d'avant-hier, ou d'un
     jour daté. Jamais « d'aujourd'hui » : la journée en cours n'est pas encore écrite."""
@@ -107,20 +91,6 @@ def journal_title(day: str, today: date) -> str:
     return f"Son journal du {day_fr(date.fromisoformat(day))}"
 
 
-def _proposal_text(summary: str, capability: str, effect: Any) -> str:
-    """Ce qu'on montre d'une demande qui attend un accord. Une commande réseau se montre **entière et exacte**, un
-    argument par ligne (lue dans ce qui partira, pas dans un résumé qu'on aurait pu couper) ; ses raisons restent ses
-    mots à elle."""
-    if capability != f"{projects_c.OWNER}.networked" or effect is None:
-        return summary
-    try:
-        argv = json.loads(effect.args_json).get("argv") or []
-    except (ValueError, AttributeError):
-        return summary
-    exact = argv_lines([str(a) for a in argv])
-    return summary if exact in summary else f"{summary}\n\nLa commande exacte, un argument par ligne :\n{exact}"
-
-
 #: ce que les écrans du monde ne reçoivent jamais, même quand le monde le réduit : ce qu'elle remarque et la prose
 #: ne regardent qu'elle ; de ses répliques, le monde ne retient que l'heure (rien ne change à l'écran, et un
 #: rattrapage qui en croiserait une rendrait un instantané pour rien)
@@ -131,12 +101,18 @@ _WORLD_SHOWN = frozenset(t.name for t in w.ALL) - _WORLD_UNSHOWN
 _STALE = "Le monde a changé entre-temps : relis-le, puis recommence."
 
 
-def wake_key(endpoint: str, idempotency: str) -> str:
-    """La clé de dédoublonnage d'un appel de réveil : un rejeu sous la même clé d'idempotence est le même appel."""
-    return f"reveil:{endpoint}:{idempotency}"
+#: la part de chaque domaine qui en a une (ADR 0310, ``PortPart``), dans l'ordre des fiches
+PORTS = tuple(part(d.port, "PORT") for d in DOMAINS if d.port is not None)
+#: leurs méthodes, que ``KernelPort`` mêle aux siennes
+MIXED: tuple[type, ...] = tuple(p.methods for p in PORTS if p.methods is not None)
+#: ce que chacune ajoute à ce que le panneau d'une personne dit, pour une propriétaire, du travail en cours
+WORKS = tuple(p.work for p in PORTS if p.work is not None)
 
 
-class KernelPort:
+class KernelPort(*MIXED):
+    """Le port d'entrée (``contracts/entry.py::MindPort``) : ses méthodes, et celles des parts des domaines
+    (``MIXED``)."""
+
     def __init__(self, kernel: Kernel) -> None:
         self.kernel = kernel
         self._store = ReadOnlyStore(kernel.deps.store)
@@ -372,114 +348,6 @@ class KernelPort:
             out["self_narrative"] = {"content": narrative}
         return out
 
-    async def sense(self, device: str, text: str, *, pertinence: float = 0.5, emotion: str = "",
-                    sensitivity: int = 1) -> int | None:
-        emotion = emotion if emotion_of(emotion) is not None else ""
-        level = max(0, min(3, int(sensitivity)))
-        draft = sensors_c.SENSED.draft(
-            source=f"appareil:{device}", kind="signal", summary=Content.of(text[:400], level=level),
-            pertinence=max(0.0, min(1.0, float(pertinence))), emotion=emotion, intensity=0.2 if emotion else 0.0,
-            sensitivity=level, device=device)
-        commit = await self.kernel.mind.append([draft], emitter="sensors", correlation=f"appareil:{device}",
-                                               origin=Origin.EXTERNAL)
-        return commit.seqs[-1] if commit.seqs else None
-
-    # ── où est la personne, d'après son téléphone (ADR 0119) ──
-    async def locate(self, handle: str, *, lat: float, lon: float, accuracy_m: int, label: str,
-                     age_ms: int) -> int | None:
-        """Une position, à son adresse et à sa personne pour sujets ; coordonnées et lieu sont personnels (l'oubli
-        de la personne les efface). Puis les avis de sa case se préchargent (ADR 0259 : le port de la carte met en file
-        la case et ses voisines, lues en fond ; seules les cases partent, jamais la position) — sans retenir la
-        réponse."""
-        mind = self.kernel.mind
-        person = mind.frame().get(identity_c.PERSON(handle)) or handle
-        level = int(Sensitivity.PERSONAL)
-        draft = location_c.LOCATED.draft(
-            handle=handle, person=person, coords=Content.of(f"{lat:.6f},{lon:.6f}", level=level),
-            label=Content.of(label, level=level) if label else None, accuracy_m=max(0, int(accuracy_m)),
-            fixed_at=mind.clock.now() - max(0, int(age_ms)) * 1000)
-        commit = await mind.append([draft], emitter=location_c.OWNER, correlation=f"lieu:{handle}",
-                                   origin=Origin.EXTERNAL)
-        maps = self.kernel.ports.get("maps")
-        if maps is not None and commit.seqs and hasattr(maps, "preload"):
-            maps.preload(lat, lon)
-        return commit.seqs[-1] if commit.seqs else None
-
-    async def unlocate(self, handle: str) -> int | None:
-        mind = self.kernel.mind
-        frame = mind.frame()
-        if not location.known(frame.root.slices.get(location_c.OWNER), handle):
-            return None
-        draft = location_c.CLEARED.draft(handle=handle, person=frame.get(identity_c.PERSON(handle)) or handle)
-        commit = await mind.append([draft], emitter=location_c.OWNER, correlation=f"lieu:{handle}",
-                                   origin=Origin.EXTERNAL)
-        return commit.seqs[-1] if commit.seqs else None
-
-    def notes(self, ids: Sequence[str]) -> list[MessageNote]:
-        """Les petites bulles de ce qu'elle a fait en écrivant ses messages, relues au journal : la position qu'elle a
-        regardée (le lieu, sinon les coordonnées), ce qu'elle a cherché sur la carte (``look:``) ou montré
-        (``map:``), le voyage qu'elle a créé ou changé (``trip:``, son titre d'aujourd'hui). Vides une fois oubliés,
-        ou le voyage supprimé — et rien à ouvrir (``ref`` vide)."""
-        located = {seq: ref for ref in ids if (seq := location_c.note_seq(ref)) is not None}
-        marked = {ref: got for ref in ids if (got := trips_c.note_of(ref)) is not None}
-        seen = {int(ident): (kind, ref) for ref, (kind, ident) in marked.items() if kind != trips_c.NOTE_TRIP}
-        mind = self.kernel.mind
-        found: dict[str, MessageNote] = {}
-        looked = {trips_c.NOTE_LOOK: (trips_c.LOOKED.name, "query"), trips_c.NOTE_MAP: (trips_c.SHOWN.name, "title")}
-        for stored in mind.store.get_events([*located, *seen]) if located or seen else ():
-            ev = mind.decode(stored)
-            if ev.type.name == location_c.LOCATED.name and ev.seq in located:
-                d = with_content(mind, ev).data
-                text = (d.label.text if d.label is not None else None) or d.coords.text or ""
-                found[located[ev.seq]] = MessageNote(id=located[ev.seq], kind=location_c.NOTE_KIND, text=text,
-                                                     at=d.fixed_at // 1000)
-            elif ev.seq in seen and looked[seen[ev.seq][0]][0] == ev.type.name:
-                kind, ref = seen[ev.seq]
-                said = getattr(with_content(mind, ev).data, looked[kind][1]).text  # None : oublié
-                found[ref] = MessageNote(id=ref, kind=kind, text=said or "", at=ev.at // 1000,
-                                         ref=str(ev.seq) if said is not None else "")
-        state = mind.frame().state(trips_c.OWNER) if any(k == trips_c.NOTE_TRIP for k, _ in marked.values()) else None
-        for ref, (kind, ident) in marked.items():
-            if kind != trips_c.NOTE_TRIP:
-                continue
-            trip = state.trips.get(ident) if state is not None else None
-            title = self._store.content([trip.title_ref]).get(trip.title_ref) if trip is not None else None
-            found[ref] = MessageNote(id=ref, kind=kind, text=title or "", at=trip.updated_at // 1000 if trip else 0,
-                                     ref=trip.id if trip is not None and title is not None else "")
-        return [found[ref] for ref in ids if ref in found]
-
-    def wake_seen(self, endpoint: str, idempotency: str) -> int | None:
-        """Le ``seq`` d'un appel déjà reçu par ce réveil sous cette clé d'idempotence (``None`` : aucun)."""
-        if not idempotency:
-            return None
-        return self.kernel.mind.store.find_dedupe(wakeup_c.CALLED.name, wake_key(endpoint, idempotency))
-
-    async def wake(self, endpoint: str, *, label: str, text: str, instructions: str, plain: bool, project: int,
-                   bundles: Sequence[str], rouse: bool, notify: str, lifetime_us: int,
-                   idempotency: str = "") -> int | None:
-        """Un appel d'un réveil par API (ADR 0068), déjà admis par la porte : journalisé avec le réglage du réveil à
-        cet instant, puis interprété (un réveil qui passe outre son rythme la tire du sommeil). Rend son ``seq`` —
-        celui du premier appel portant la même clé d'idempotence, s'il y en a eu un."""
-        frame = self.kernel.mind.frame()
-        about: tuple[str, ...] = ()
-        if notify not in (wakeup_c.NOBODY, wakeup_c.OWNERS):
-            about = (frame.get(identity_c.PERSON(notify)) or notify,)
-        now = self.kernel.mind.clock.now()
-        draft = wakeup_c.CALLED.draft(
-            endpoint=endpoint, label=label[:300], text=Content.of(text, level=int(Sensitivity.PERSONAL)),
-            instructions=Content.of(instructions) if instructions.strip() else None, plain=plain, project=project,
-            bundles=tuple(bundles), rouse=rouse, notify=notify, expires_at=now + lifetime_us if lifetime_us else 0,
-            about=about, dedupe_key=wake_key(endpoint, idempotency) if idempotency else None)
-        correlation = f"reveil:{endpoint}"
-        commit = await self.kernel.mind.append([draft], emitter=wakeup_c.OWNER, correlation=correlation,
-                                               origin=Origin.EXTERNAL)
-        if not commit.seqs:
-            return None
-        seq = commit.seqs[-1]
-        if not commit.deduped:
-            await self.kernel.interpret(seq, correlation)
-        return seq
-
     async def resolve_effect(self, proposal: int, approved: bool, *, by: str, note: str = "",
                              seen: str = "") -> str:
         """Approuver ou refuser un effet en attente (``runtime/decisions.py``) : ``approved``,
@@ -547,49 +415,6 @@ class KernelPort:
         return await self.resolve_effect(proposal, approved, by=handle, seen=seen,
                                          note="" if approved else "refusé dans la conversation")
 
-    def _work(self, frame: Any) -> dict[str, Any]:
-        """Ses projets et ce qui attend un accord — pour une propriétaire."""
-        live = frame.get(projects_c.LIVE)
-        pending = frame.get(rt.PENDING_EFFECTS)
-        refs = [p.title_ref for p in live] + [e.summary_ref for e in pending]
-        texts = self._store.content([r for r in refs if r])
-        state = frame.state("projects")
-        tz = frame.env.tz_of(frame.root)
-        projects = []
-        for v in live:
-            p = state.projects.get(v.id)
-            nxt = projects_work.next_run_at(p, state, frame) if p is not None else None
-            projects.append({
-                "id": v.id, "title": texts.get(v.title_ref, ""),
-                "status": "active" if v.status == projects_c.ACTIVE else "paused", "priority": v.priority,
-                "origin": "user" if v.authority == projects_c.USER else "self",
-                "emotion_policy": "full" if v.mode == projects_c.PERSONA else "off",
-                # ce que montre le panneau : rien pour son mode à elle, « impersonnel » pour un travail factuel
-                "mode_label": "" if v.mode == projects_c.PERSONA else "impersonnel",
-                "schedule_rule": v.schedule or "manual",
-                "schedule_label": project_actions.schedule_words(v.schedule),
-                "next_run_at": local(nxt, tz).isoformat() if nxt else None,
-                # ses objectifs ponctuels : faits sur tous (les constants n'ont pas de fin)
-                "tasks_total": v.open_once + v.done_once + v.blocked_once, "tasks_done": v.done_once,
-                "tasks_blocked": v.blocked_once})
-        actions = []
-        effects = frame.state("runtime").effects
-        capabilities = self.kernel.mind.registry.capabilities
-        for e in pending:
-            pid = project_of(e.context)
-            p = state.projects.get(pid) if pid is not None else None
-            title = self._store.content([p.title_ref]).get(p.title_ref, "") if p is not None else ""
-            spec = capabilities.get(e.capability)
-            actions.append({"id": e.proposal, "project_id": pid or 0, "project_title": title or e.owner,
-                            "proposal": _proposal_text(texts.get(e.summary_ref, ""), e.capability,
-                                                       effects.get(e.proposal)),
-                            "payload_kind": e.capability, "created_at": local(e.at, tz).isoformat(),
-                            # ce que le panneau en montre : à qui c'est (un projet, « Courrier », « Forge »), et ce
-                            # que ça fera, en mots — jamais ``email`` ni ``email.send``
-                            "owner_label": title or _owner_words(e.owner),
-                            "kind_label": spec.description if spec is not None else ""})
-        return {"projects": projects, "pending_project_actions": actions}
-
     def person_panel(self, handle: str) -> dict[str, Any] | None:
         frame = self.kernel.mind.frame()
         view = frame.get(identity_c.IDENTITY(handle))
@@ -604,7 +429,8 @@ class KernelPort:
         disclosure = frame.get(identity_c.DISCLOSURE((handle, view.channel or "web", False)))
         out.update(self._inner_life(frame, handle, disclosure))
         if frame.get(identity_c.SPEAKS_AS_OWNER(handle)):  # les droits tiennent à l'adresse qui parle
-            out.update(self._work(frame))
+            for work in WORKS:  # ce que chaque domaine dit du travail en cours (ses projets : ``PortPart.work``)
+                out.update(work(self, frame))
         if not disclosure.own_file:
             return out  # sa fiche est fermée : rien de ce qu'elle sait de la personne
         person = frame.get(identity_c.PERSON(handle))

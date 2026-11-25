@@ -26,6 +26,8 @@ cadre les importe au moment d'assembler (``part``), et y lit un nom convenu :
 - ``outside`` : ``OUTSIDE``, une ``OutsidePart`` : une sorte de ressource dont les outils viennent d'ailleurs
   (``app/me/outside.py`` réunit les parts) ;
 - ``console`` : ``CONSOLE``, une ``ConsolePart`` ;
+- ``port`` : ``PORT``, une ``PortPart`` : ses méthodes du port d'entrée, que ``app/mindport.py::KernelPort`` mêle aux
+  siennes ;
 - ``wiring`` : ``wire(w)``, ce que le serveur construit pour lui avant le noyau (ses adaptateurs, ses portes), et,
   facultatif, ``bind(w)``, ce qui a besoin du noyau (``app/wiring.py::Wiring``) ;
 - ``cli`` : ``add(sub)``, sa commande et ses sous-commandes dans l'analyseur de ``mika`` ;
@@ -318,6 +320,22 @@ class ConsolePart:
 
 
 @dataclass(frozen=True, slots=True)
+class PortPart:
+    """Sa part du port d'entrée (``app/mindport.py::KernelPort``, qui tient ``contracts/entry.py::MindPort``) : ce
+    que ses portes et ses écrans demandent au noyau. Le port réunit les parts ; il n'en connaît aucune. Il les lit à
+    son import (il en fait une classe) : une part n'importe donc pas ``mika.app.mindport``."""
+
+    #: ses méthodes du port d'entrée : une classe que ``KernelPort`` mêle aux siennes (elles lisent ``self.kernel``
+    #: et ``self._store``, comme les autres) : de vraies méthodes, que le contrat voit comme celles du port. Deux parts
+    #: n'ont pas une même méthode, et aucune ne reprend une méthode du port
+    #: (``tests/architecture/test_frame_names_no_domain.py``)
+    methods: type | None = None
+    #: ce qu'il ajoute à ce que le panneau d'une personne dit, pour une propriétaire, du travail en cours
+    #: (``KernelPort.person_panel``) : ``work(port, frame)`` rend un dictionnaire
+    work: Callable[..., Mapping[str, Any]] | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class Domain:
     #: son nom : celui de son dossier, et sa clé partout où le cadre range par domaine
     name: str
@@ -351,6 +369,8 @@ class Domain:
     outside: str | None = None
     #: le module de sa part de la console (``CONSOLE``)
     console: str | None = None
+    #: le module de sa part du port d'entrée (``PORT`` : sa ``PortPart``)
+    port: str | None = None
     #: le module de ce qu'il ajoute à l'aperçu de la console (``preview``)
     preview: str | None = None
     #: le module de sa commande (``add``)

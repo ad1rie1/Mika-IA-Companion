@@ -9,6 +9,7 @@ donc l'écart entre ce qu'ils disent et ce que font les adaptateurs : la passere
 - chaque membre public déclaré (méthode, propriété, attribut annoté) existe chez chaque implémentation : une méthode
   ou une propriété de sa classe ou d'une base de src/ dont elle hérite, un attribut de classe, ou un
   ``self.<nom> = …`` de son ``__init__`` ; une enveloppe qui délègue par ``__getattr__`` a ce qu'elle délègue ;
+  le port d'entrée a aussi les méthodes des parts des domaines, qu'il mêle aux siennes (``ASSEMBLED``) ;
 - une méthode déclarée garde chez elle chaque paramètre sous son nom (sauf ``**kwargs``), ceux qu'elle ajoute ont un
   défaut ; une propriété n'y devient pas une méthode, ni l'inverse, et ce qu'on attend (``async``) reste à attendre ;
 - chaque ``getattr(<objet>, "<nom>", …)`` de src/ (hors adapters/llm/, qui lit ses propres fournisseurs, et sim/)
@@ -26,6 +27,7 @@ from __future__ import annotations
 
 import ast
 import copy
+import fnmatch
 import functools
 import re
 from collections.abc import Iterator, Mapping
@@ -105,6 +107,10 @@ IMPLEMENTATIONS: dict[tuple[str, str], tuple[tuple[str, str], ...]] = {
         ("app/domains/projects/demo_git.py", "DemoHost"),
     ),
 }
+
+#: une implémentation que le cadre assemble des parts des domaines (ADR 0310) : ses bases dépliées (``*MIXED``) sont
+#: les classes que les modules de ce motif donnent à leur part (``PortPart(methods=…)``)
+ASSEMBLED: dict[tuple[str, str], str] = {("app/mindport.py", "KernelPort"): "app/domains/*/port.py"}
 
 #: les quatre crochets que le runtime cherche sur chaque port, écrits dans ``ports/__init__.py`` (K2-L1)
 HOOKS = ("open", "shutdown", "forget", "failing")
@@ -263,17 +269,29 @@ class _Tree:
                 return got[0], node.attr
         return None
 
+    def parts(self, pattern: str) -> list[tuple[str, str]]:
+        """Les classes que les modules de ``pattern`` donnent à leur part du port d'entrée (``PortPart(methods=…)``)."""
+        found: list[tuple[str, str]] = []
+        for rel in sorted(r for r in self.trees if fnmatch.fnmatch(r, pattern)):
+            for node in ast.walk(self.trees[rel]):
+                if isinstance(node, ast.Call) and _tail(node.func) == "PortPart":
+                    found += [(rel, k.value.id) for k in node.keywords if k.arg == "methods"
+                              and isinstance(k.value, ast.Name) and (rel, k.value.id) in self.classes]
+        return found
+
     def members(self, key: tuple[str, str]) -> tuple[dict[str, Member], bool]:
-        """Ce qu'a la classe, hérité de ses bases de src/ compris, et si elle délègue le reste (``__getattr__``)."""
+        """Ce qu'a la classe, hérité de ses bases de src/ compris (pour une classe assemblée, ``ASSEMBLED`` : les
+        classes des parts), et si elle délègue le reste (``__getattr__``)."""
         cls = self.classes[key]
         out: dict[str, Member] = {}
         delegates = False
         for b in reversed(cls.bases):
-            parent = self.base(key[0], b)
-            if parent is not None and parent in self.classes:
-                got, more = self.members(parent)
-                out.update(got)
-                delegates = delegates or more
+            assembled = isinstance(b, ast.Starred) and key in ASSEMBLED
+            for parent in reversed(self.parts(ASSEMBLED[key])) if assembled else (self.base(key[0], b),):
+                if parent is not None and parent in self.classes:
+                    got, more = self.members(parent)
+                    out.update(got)
+                    delegates = delegates or more
         own = _own_members(cls)
         out.update(own)
         return out, delegates or "__getattr__" in own
@@ -554,6 +572,25 @@ def test_the_check_sees_what_a_port_does_not_declare():
         ("getattr", "runtime/reader.py", "self.port", "strands"),  # le port d'entrée n'est que celui du transport
         ("getattr", "adapters/web/hub.py", "self.port", "read"),
     }
+
+
+def test_the_entry_port_has_the_methods_of_the_parts_it_mixes():
+    """Le port d'entrée mêle à ses méthodes celles des parts des domaines (``class KernelPort(*MIXED)``, ADR 0310) :
+    la garde les lit dans leurs modules, et y voit ce qu'elle verrait dans le port — une méthode qui manque, un
+    paramètre renommé."""
+    entry = {"contracts/entry.py": ("from typing import Protocol\n"
+                                    "class MindPort(Protocol):\n"
+                                    "    def strands(self, handle: str) -> list: ...\n"
+                                    "    def where(self, handle: str) -> str: ...\n"),
+             "app/mindport.py": "MIXED = ()\nclass KernelPort(*MIXED):\n    def strands(self, handle):\n        return []\n"}
+    table = {("contracts/entry.py", "MindPort"): (("app/mindport.py", "KernelPort"),)}
+    part = "class MapsPort:\n    def where(self, who):\n        return ''\nPORT = PortPart(methods=MapsPort)\n"
+    assert offences(entry, table) == {("missing", "app/mindport.py", "KernelPort", "where")}
+    assert offences({**entry, "app/domains/maps/port.py": part}, table) == {
+        ("renamed", "app/mindport.py", "KernelPort", "handle", "who")}
+    # et sur le vrai code : ce que le contrat déclare et que les parts écrivent
+    has, _ = _tree().members(("app/mindport.py", "KernelPort"))
+    assert {"sense", "locate", "unlocate", "notes", "wake_seen", "wake", "_work", "person_panel"} <= set(has)
 
 
 def test_the_check_would_have_seen_the_lost_output_tokens():

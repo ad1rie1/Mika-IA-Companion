@@ -6,13 +6,13 @@ itinéraires, les données touristiques, le réchauffage des caches, les avis), 
 ``maps`` et les tuiles de la carte de sa position ; le réchauffage, démarré puis arrêté avec elle), les points de ce
 réchauffage (``warm_points.py`` : la dernière position de chacun), leur module de l'API par personne (``api.py`` : le
 fond de carte, les lieux, les fiches, les événements, les photos, les adresses, les itinéraires et tes voyages), leur
-part du direct (``live.py``), leur commande (``cli.py`` : ``mika carte``) et leur part de la console (``console/`` :
-leurs rubriques de Réglages › Carte et téléphone, l'onglet Voyages et l'onglet Sa position de la fiche d'une
-personne, le GPX d'un voyage). Leur dossier du dossier de données est ``cartes/`` (``places``, ADR 0193). Ils lisent
-ses sens : Sa position reprend les morceaux de Ses sens › Localisation.
+part du direct (``live.py``), leur commande (``cli.py`` : ``mika carte``), leur part du port d'entrée (``port.py`` :
+la position que donne un téléphone et la case de la carte qui se précharge, les bulles de ses messages) et leur part
+de la console (``console/`` : leurs rubriques de Réglages › Carte et téléphone, l'onglet Voyages et l'onglet Sa
+position de la fiche d'une personne, le GPX d'un voyage). Leur dossier du dossier de données est ``cartes/``
+(``places``, ADR 0193). Ils lisent ses sens : Sa position reprend les morceaux de Ses sens › Localisation.
 
-Restent au cadre : le port d'entrée (``app/mindport.py`` : la position que donne un téléphone, la case de la carte
-qu'elle précharge), l'aperçu de la console (``app/preview/`` : les voyages de Béa), la sauvegarde (``app/backup.py`` :
+Restent au cadre : l'aperçu de la console (``app/preview/`` : les voyages de Béa), la sauvegarde (``app/backup.py`` :
 ce qu'elle garde de ``cartes/``), et, dans le même onglet de Réglages, les notifications du téléphone
 (``app/settings_sections/map_phone.py``) ; Ses sens › Localisation est dessinée par ses sens.
 """
@@ -32,6 +32,7 @@ MAPS = Domain(
     api="mika.app.domains.maps.api",
     live="mika.app.domains.maps.live",
     console="mika.app.domains.maps.console",
+    port="mika.app.domains.maps.port",
     cli="mika.app.domains.maps.cli",
     plugins={
         "location": ("D'où viennent les tuiles de la carte de sa position", ("carte",),

@@ -45,7 +45,7 @@ export interface ProjectSummary {
   priority: string;
   origin: string;
   emotion_policy: string;
-  /** Son mode, en mots (`app/mindport.py`) : vide pour son mode à elle,
+  /** Son mode, en mots (`app/domains/projects/port.py`) : vide pour son mode à elle,
    * « impersonnel » pour un travail factuel. Ce que montre le panneau —
    * jamais `emotion_policy` brut (« full »). */
   mode_label?: string;

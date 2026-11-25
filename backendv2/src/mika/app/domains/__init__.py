@@ -22,6 +22,7 @@ from mika.app.domains.domain import (
     LivePart,
     OutsidePart,
     PersonPart,
+    PortPart,
     QueuePart,
     SharingPart,
     TablePart,
@@ -38,7 +39,7 @@ from mika.app.domains.tools import TOOLS
 from mika.app.domains.wakeup import WAKEUP
 
 __all__ = ["DOMAINS", "AccountsPart", "Base", "ConsolePart", "Domain", "LivePart", "OutsidePart", "PersonPart",
-           "QueuePart", "SharingPart", "TablePart", "part"]
+           "PortPart", "QueuePart", "SharingPart", "TablePart", "part"]
 
 #: les domaines, dans l'ordre où le cadre les parcourt
 DOMAINS: tuple[Domain, ...] = (MAPS, TOOLS, MAIL, SENSES, TEAMS, PHONE, WAKEUP, CONTACTS, AGENDA, FORGE,
