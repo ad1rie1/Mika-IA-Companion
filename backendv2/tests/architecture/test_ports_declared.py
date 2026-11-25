@@ -57,7 +57,7 @@ IMPLEMENTATIONS: dict[tuple[str, str], tuple[tuple[str, str], ...]] = {
     ("ports/delivery.py", "ActivityPort"): (("adapters/web/hub.py", "Hub"),),
     ("ports/feeds.py", "FeedPort"): (("adapters/feeds/__init__.py", "HttpFeeds"), ("sim/outside.py", "FakeFeeds")),
     ("ports/forge.py", "ForgePort"): (("adapters/forge/__init__.py", "ForgeHost"),),
-    ("ports/forge.py", "ForgeSettings"): (("app/forge_settings.py", "ForgeSettingsStore"),),
+    ("ports/forge.py", "ForgeSettings"): (("app/domains/forge/store.py", "ForgeSettingsStore"),),
     ("ports/imaging.py", "ImageBackend"): (
         ("adapters/imaging/sdcpp.py", "SdCppBackend"),
         ("adapters/imaging/openai_images.py", "OpenAIImagesBackend"),

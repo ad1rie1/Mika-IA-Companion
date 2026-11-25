@@ -82,7 +82,7 @@ from mika.app.console import FACULTY_LABELS, LABELS, NAVIGATION, PARAM_FAMILIES
 from mika.app.console_menu import menu_for
 from mika.app.constellation import Constellation
 from mika.app.domains import DOMAINS, part
-from mika.app.forge_settings import ForgeSettingsStore
+from mika.app.domains.forge.store import ForgeSettingsStore
 from mika.app.handmade import access, approval_sources, rights, waiting
 from mika.app.handmade.home import HomePage
 from mika.app.handmade.now import NowPage

@@ -32,8 +32,8 @@ from pydantic import ValidationError
 
 from mika.adapters.forge import ForgeHost, read_manifest
 from mika.adapters.forge.manifest import coherence, signatures
+from mika.app.domains.forge.store import ForgeSettingsStore
 from mika.app.mindport import KernelPort
-from mika.app.server import ForgeSettingsStore
 from mika.app.settings import SecretBox, Settings
 from mika.contracts import forge as forge_c
 from mika.contracts import runtime as rt

@@ -7,6 +7,7 @@ inscrit dans sa part de la console (``ConsolePart.overviews``, ADR 0310)."""
 from __future__ import annotations
 
 from mika.app.domains import DOMAINS, part
+from mika.app.domains.forge.console import tabs as apps
 from mika.app.handmade.subjects import agenda as agenda_fiche
 from mika.app.handmade.subjects import goal as goal_fiche
 from mika.app.handmade.subjects import handle as handle_fiche
@@ -17,7 +18,6 @@ from mika.app.handmade.subjects import teams as teams_fiche
 from mika.app.handmade.tabs import (
     agendas,
     approvals,
-    apps,
     decisions,
     goals,
     identities,

@@ -1,4 +1,4 @@
-/* Outils › Apps forgées (app/handmade/tabs/apps.py, ADR 0177) : ses apps en tuiles jointes par un filet, comme un
+/* Outils › Apps forgées (app/domains/forge/console/tabs.py, ADR 0177) : ses apps en tuiles jointes par un filet, comme un
    lanceur ; une app cassée, un trait rouge et sa raison. Couleurs : les jetons. */
 /* des cases jointes par un filet : chaque case porte ses bords, qui se recouvrent ; une rangée incomplète ne laisse pas
    de case vide */

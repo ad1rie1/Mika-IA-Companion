@@ -786,7 +786,7 @@ techniques sont dans « Détails techniques ».
   appels ; replié en bas, le relais MCP du moteur Claude Code (lu).
 - Les anciennes pages mènent ici : `outils/qui`, `outils/texte` → `outils/tous` ; `outils/outils_apps` →
   `outils/serveurs` ; `reglages/serveurs-mcp` (Réglages › Plugins › Outils extérieurs) → `outils/parametres`.
-- **Apps forgées** : le catalogue en tuiles (`app/handmade/tabs/apps.py`), comme un lanceur — titre vers la fiche,
+- **Apps forgées** : le catalogue en tuiles (`app/domains/forge/console/tabs.py`), comme un lanceur — titre vers la fiche,
   nom, version et agenda, état (une app cassée : un trait rouge et sa raison), promue ; recherche par nom ou titre,
   bascule « Tableau » ; la fiche d'une app : État, Vues, Réglages, Code,
   Base, Journal, Vécu. Les commandes de maintenance sont sur État et Code ; Vues garde les actions de l'app,

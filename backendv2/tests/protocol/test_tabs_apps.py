@@ -1,6 +1,7 @@
-"""Outils › Apps forgées dans sa forme (``app/handmade/tabs/apps.py``, ADR 0177), à travers le vrai serveur : ses apps
-en tuiles vers leur fiche, une app cassée en rouge avec sa raison, une promue le dit ; la bascule « Tableau » rend la
-liste de la console ; et ce que la page dit, vide. Son introduction n'est dite qu'une fois (celle de la vue)."""
+"""Outils › Apps forgées dans sa forme (``app/domains/forge/console/tabs.py``, ADR 0177), à travers le vrai serveur :
+ses apps en tuiles vers leur fiche, une app cassée en rouge avec sa raison, une promue le dit ; la bascule « Tableau »
+rend la liste de la console ; et ce que la page dit, vide. Son introduction n'est dite qu'une fois (celle de la
+vue)."""
 
 from __future__ import annotations
 

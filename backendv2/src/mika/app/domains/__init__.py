@@ -15,6 +15,7 @@ from __future__ import annotations
 from mika.app.domains.agenda import AGENDA
 from mika.app.domains.contacts import CONTACTS
 from mika.app.domains.domain import Base, ConsolePart, Domain, LivePart, part
+from mika.app.domains.forge import FORGE
 from mika.app.domains.mail import MAIL
 from mika.app.domains.phone import PHONE
 from mika.app.domains.senses import SENSES
@@ -24,4 +25,4 @@ from mika.app.domains.wakeup import WAKEUP
 __all__ = ["DOMAINS", "Base", "ConsolePart", "Domain", "LivePart", "part"]
 
 #: les domaines, dans l'ordre où le cadre les parcourt
-DOMAINS: tuple[Domain, ...] = (MAIL, SENSES, TEAMS, PHONE, WAKEUP, CONTACTS, AGENDA)
+DOMAINS: tuple[Domain, ...] = (MAIL, SENSES, TEAMS, PHONE, WAKEUP, CONTACTS, AGENDA, FORGE)
