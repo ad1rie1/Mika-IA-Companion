@@ -41,9 +41,7 @@ from mika.adapters.agenda import (
     Web,
     microsoft_signin,
 )
-from mika.adapters.camera import CameraBuffer
 from mika.adapters.contacts import ContactsStore
-from mika.adapters.feeds import HttpFeeds
 from mika.adapters.imaging.config import LiveImaging
 from mika.adapters.imaging.config import build_gateway as build_image_gateway
 from mika.adapters.imaging.gateway import ImageTrace
@@ -329,7 +327,6 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     # les pièces jointes reçues ont leur propre index (le rapprochement de celui de la mémoire retire toute clé qui
     # n'est pas à elle), avec le même modèle de plongements (ADR 0106)
     piece_vectors = SqliteVectorIndex(store, vectors.embedder, table=attachments_c.VECTORS)
-    camera = CameraBuffer(clock.now)
     settings = Settings(store, SecretBox.for_data(data))
     def her() -> str:
         """Son nom, celui de la persona en vigueur (journalisée) : ce que signent ses mails et ses enregistrements
@@ -340,8 +337,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     # (ADR 0166), et entre par l'application de l'instance quand elle n'en déclare pas (ADR 0238)
     microsoft = MicrosoftSignIn(settings, application=settings.mail_application)
     outside = {"mail": ImapSmtpMail(settings.email, bases["mail"], her=her, microsoft=microsoft, images=settings),
-             "feeds": HttpFeeds(settings.feeds, bases["feeds"]),
-             "workshop": BwrapWorkshop(data / "ateliers", credentials=settings.git, author=her), "camera": camera,
+             "workshop": BwrapWorkshop(data / "ateliers", credentials=settings.git, author=her),
              # l'hôte GitHub d'un dépôt distant, lu par la console seulement (ADR 0183)
              "repo_host": GitHubRepos(settings.git),
              "imaging": imaging}
@@ -594,7 +590,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                                     *person_overview.routes(console_pages.ui, outbound=moi.outbound),
                                     *rights.routes(console_pages.ui),
                                     *inspector, relay, console_mcp, lent, docs_mcp, world_hub.route()],
-                      preprocess=preprocess, camera=camera, sensor_digest=settings.sensors_digest,
+                      preprocess=preprocess, sensor_digest=settings.sensors_digest,
                       teams=teams, push_ready=push_sender.configured, **wiring.web), live
 
 

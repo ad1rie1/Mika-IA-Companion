@@ -22,6 +22,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 
 from mika.adapters.llm.config import ModelLimits
 from mika.app.console import NAVIGATION
+from mika.app.domains.senses.settings import SensesSettings
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.vocab import temperament as T
@@ -255,7 +256,7 @@ def test_senses_mail_feeds_transcription_and_a_device_token_shown_once(world):  
     refused = post(client, feeds, {"_section": "flux", "_champs": ["urls"], "urls": "https://a.fr/rss\nftp://b"})
     assert refused.status_code == 400 and "non http(s)" in html_of(refused)
     post(client, feeds, {"_section": "flux", "_champs": ["urls"], "urls": "https://a.fr/rss\nhttps://b.fr/atom"})
-    assert client.portal.call(live.settings.feeds) == ["https://a.fr/rss", "https://b.fr/atom"]
+    assert client.portal.call(live.settings.of(SensesSettings).feeds) == ["https://a.fr/rss", "https://b.fr/atom"]
     post(client, f"{BASE}/transcription", {"_section": "transcription", "_champs": ["api_key"],
                                            "api_key": CANARY_STT})
     assert client.portal.call(live.settings.stt)["api_key"] == CANARY_STT

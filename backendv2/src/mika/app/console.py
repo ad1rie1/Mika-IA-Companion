@@ -110,12 +110,7 @@ NAVIGATION: tuple[NavGroup, ...] = (
                     order=("tous", "comptes", "fait", "mika")),
     )),
     NavGroup("Connexions extérieures", (
-        Destination("sens", "Ses sens", "Ce qu'elle lit du monde (flux RSS), ce qu'elle voit "
-                    "(caméra), ce que ses appareils lui signalent.",
-                    # leurs réglages, derrière une seule roue : les flux suivis, l'accès des appareils, la
-                    # transcription des messages vocaux (ADR 0206)
-                    builtin=("sens.parametres-flux", "sens.parametres-appareils", "sens.parametres-transcription"),
-                    gear=("parametres-flux", "parametres-appareils", "parametres-transcription")),
+        _destination("senses"),  # ses sens
         _destination("wakeup"),  # les réveils par API
     )),
     NavGroup("Outils", (
@@ -150,9 +145,9 @@ FACULTY_LABELS: dict[str, str] = _named("faculties", {
     "affect": "Humeur et postures", "needs": "Besoins", "body": "Corps et sommeil", "self": "Estime et récit",
     "attention": "Attention et pensées", "memory": "Mémoire", "transcript": "Fil des conversations",
     "social": "Liens", "others": "Ce qu'elle devine des autres", "identity": "Identités",
-    "agency": "Initiatives", "goals": "Buts", "projects": "Projets", "email": "Courrier", "rss": "Flux RSS", "camera": "Caméra",
+    "agency": "Initiatives", "goals": "Buts", "projects": "Projets", "email": "Courrier",
     "kernel": "Noyau", "presence": "Présence", "expression": "Expression",
-    "sensors": "Appareils", "runtime": "Moteur", "place": "Où elle est (sa chambre)",
+    "runtime": "Moteur", "place": "Où elle est (sa chambre)",
     "world": "Son monde et son corps", "shares": "Fichiers envoyés", "attachments": "Pièces reçues",
     "imaging": "Dessins", "location": "Localisation",
     "mcp": "Outils extérieurs", "web": "Recherche web", "teams": "Teams",
@@ -175,8 +170,6 @@ SECTION_LABELS: dict[str, str] = _named("sections", {
     "project_share": "Un projet à partager", "projects": "Ses projets", "mails": "Ses mails non lus",
     "drafts": "Ses brouillons de mails", "voice": "Sa voix dans cette boîte", "task_mail": "Le mail à traiter",
     "task_ask": "Ce qu'on lui demande pour ce mail", "edits": "Ce qu'on change à ses brouillons (retouches, refus)",
-    "headlines": "Les titres de ses flux",
-    "views": "Ce que voit la caméra",
     # ADR 0033, 0034, 0036
     "life": "Ce qui se passe dans la vie de la personne",
     "ahead": "Ce qui vient : le monde, et ce qu'elle vivra à travers quelqu'un",
@@ -244,7 +237,6 @@ REASON_LABELS: dict[str, str] = _named("reasons", {
     "service_answered": "Dire ce qu'un service extérieur a rendu",
     "run": "Travailler sur un projet", "project_share": "Partager où en est un projet",
     "mail_mention": "Parler d'un mail reçu", "mail_draft": "Préparer une réponse à un mail",
-    "rss_for": "Partager un titre qui lui a fait penser à cette personne",
     "second_thoughts": "Elle s'est ravisée", "project_need": "Demander un coup de main pour un projet", "project_plan": "Dire son plan à qui a demandé un projet",
     "keep_promise": "Tenir une promesse au moment dit", "cheer": "Encourager avant un moment important",
     "celebrate": "Souhaiter ce qui se fête (un anniversaire), le jour même",
@@ -300,7 +292,7 @@ PROCESS_LABELS: dict[str, str] = _named("processes", {
     "projects.reviews": "Demander la relecture indépendante d'un travail conclu, hors des pull requests",
     "email.poll": "Relever le courrier",
     "email.keep": "Télécharger l'historique du courrier",
-    "rss.poll": "Relever les flux", "mcp.watch": "Rejoindre les serveurs d'outils extérieurs", "camera.look": "Regarder par la caméra",
+    "mcp.watch": "Rejoindre les serveurs d'outils extérieurs",
     "memory.promises": "Tenir ou laisser filer ses promesses", "self.wake": "Se réveiller avec sa nuit",
     "social.reciprocity": "Remarquer qui écrit en premier",
     "social.bonds": "Remarquer qu'un lien a changé",
@@ -356,7 +348,7 @@ EVENT_LABELS: dict[str, str] = _named("events", {
     "attention.envied": "Jalouse : quelqu'un dont elle attend la réponse écrit aux autres",
     "memory.reread": "Ses lectures relues la nuit",
     "memory.delicate": "Un sujet délicat : gardé pour confidence",
-    "rss.read": "Un article lu", "mcp.consulted": "Une page consultée en travaillant",
+    "mcp.consulted": "Une page consultée en travaillant",
     "transcript.summary_reset": "Le résumé d'un salon à refaire (un secret y était repris)",
     "body.fell_asleep": "Endormie", "body.woke": "Réveillée", "needs.felt": "Un besoin ressenti",
     "others.read": "Ce qu'elle devine de quelqu'un",
@@ -397,12 +389,9 @@ EVENT_LABELS: dict[str, str] = _named("events", {
     "projects.run_reported": "Une exécution rendue",
     "email.draft_asked": "Une réponse à un mail demandée", "email.noticed": "Un mail remarqué",
     "email.poll_asked": "Une relève demandée", "email.read": "Un mail lu", "email.sent": "Un mail envoyé",
-    "rss.noticed": "Un article remarqué", "rss.thought_of": "Un article qui lui a fait penser à quelqu'un",
-    "camera.seen": "Ce que la caméra a vu",
     "mcp.status": "L'état de ses serveurs extérieurs", "mcp.answered": "Ce qu'un service extérieur a rendu",
     "projects.access_set": "Les accès d'un projet réglés",
     "projects.steer_asked": "Une demande de pilotage d'un projet, sur ton accord",
-    "sensors.sensed": "Un appareil a signalé",
     "location.located": "Son téléphone a dit où était la personne",
     "location.cleared": "La personne ne partage plus où elle est",
     "trips.created": "Un voyage préparé", "trips.changed": "Un voyage modifié",
@@ -560,7 +549,7 @@ ENRICHER_LABELS: dict[str, str] = _named("enrichers", {
     "projects_asks": "Les demandes de son projet aux projets qu'il lit (où chacune en est)",
     "projects_answer": "La réponse à sa demande d'aide (un projet)", "sent_files": "Les fichiers qu'elle a envoyés",
     "mail": "Son courrier", "teams": "Ses conversations Teams",
-    "headlines": "Les titres de ses flux", "views": "Ce que voit la caméra", "dessins": "Ses dessins",
+    "dessins": "Ses dessins",
     "services": "Ses demandes aux outils extérieurs",
     "work_services": "Ses demandes aux outils extérieurs, faites en travaillant",
     "agenda": "Ses agendas (la journée de la personne, ce qu'elle y a proposé)",
@@ -576,7 +565,6 @@ ENRICHER_LABELS: dict[str, str] = _named("enrichers", {
 NEED_LABELS: dict[str, tuple[str, str]] = _named("needs", {
     "imaging": ("aucun fournisseur d'images n'est configuré", "images-fournisseurs"),
     "maps": ("les lieux, les adresses et les itinéraires ne sont pas branchés", "lieux"),
-    "feeds": ("elle ne suit aucun flux", "flux"),
     # le serveur branche toujours la base des rendez-vous (ADR 0309) : seule une composition partielle (un test) ne
     # l'a pas ; sa page de réglages vient avec la console de l'agenda (lot 5), le lien ne paraît qu'une fois là
     "agenda": ("ses calendriers ne sont pas branchés sur ce serveur", "agendas"),

@@ -1,5 +1,5 @@
-"""Ce qui se branche : ``mail``, ``rss``, ``stt`` (ce qu'elle perçoit du dehors), ``mcp``, ``sensors``, ``teams``, ``wakeup``,
-``agenda``."""
+"""Ce qui se branche : ``mail``, ``stt`` (ce qu'elle perçoit du dehors), ``mcp``, ``sensors``, ``teams``, ``agenda`` ;
+puis la commande de chaque domaine qui a la sienne (``Domain.cli``, ADR 0310)."""
 
 from __future__ import annotations
 
@@ -100,7 +100,7 @@ def purge_teams(data: Path, settings: Settings, account: str) -> dict[str, objec
 
 
 async def outside_command(data: Path, args: argparse.Namespace) -> dict[str, object]:
-    """Le courrier, les flux, la transcription : ce qu'elle perçoit du monde."""
+    """Le courrier, la transcription : ce qu'elle perçoit du monde."""
 
     async def run(settings: Settings, store) -> dict[str, object]:  # type: ignore[no-untyped-def]
         if args.cmd == "mail":
@@ -138,13 +138,6 @@ async def outside_command(data: Path, args: argparse.Namespace) -> dict[str, obj
                     shown[secret] = "…" if shown[secret] else ""
                 out[name] = shown
             return {"accounts": out}
-        if args.cmd == "rss":
-            feeds = settings.feeds()
-            if args.rss_cmd == "add":
-                feeds = await settings.save_feeds([*feeds, *args.urls])
-            elif args.rss_cmd == "remove":
-                feeds = await settings.save_feeds([f for f in feeds if f not in args.urls])
-            return {"feeds": feeds}
         if args.stt_cmd == "set":
             await settings.save_stt(args.base_url, args.api_key, args.model)
         cfg = settings.stt()
@@ -251,12 +244,6 @@ def add_plugins(sub) -> None:  # type: ignore[no-untyped-def]
     ma.add_argument("--defaut", action="store_true", help="revient à celle livrée d'origine")
     mr = msub.add_parser("remove", help="retire un compte")
     mr.add_argument("--compte", required=True)
-    rs = sub.add_parser("rss", help="les flux qu'elle suit")
-    rsub = rs.add_subparsers(dest="rss_cmd", required=True)
-    rsub.add_parser("list")
-    for name in ("add", "remove"):
-        r = rsub.add_parser(name)
-        r.add_argument("urls", nargs="+")
     st = sub.add_parser("stt", help="la transcription des messages vocaux (/audio/transcriptions)")
     stsub = st.add_subparsers(dest="stt_cmd", required=True)
     stsub.add_parser("show")
@@ -296,7 +283,7 @@ def add_plugins(sub) -> None:  # type: ignore[no-untyped-def]
                           "au lieu qu'on colle l'adresse")
     agg.add_argument("--defaut", action="store_true", help="l'efface : brancher Google est alors refusé")
     ag.set_defaults(run=_run_agenda)
-    for parser in (ml, rs, st):
+    for parser in (ml, st):
         parser.set_defaults(run=_run_outside)
     mc.set_defaults(run=_run_mcp)
     se.set_defaults(run=_run_sensors)

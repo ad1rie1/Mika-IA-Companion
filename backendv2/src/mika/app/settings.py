@@ -73,7 +73,6 @@ MAIL_GRANTS_KEY = "mail_oauth"
 MAIL_IMAGES_KEY = "mail_images"
 #: l'application Microsoft propre à l'instance, à la place de celle que Mika livre (son client ID, ADR 0238)
 MAIL_APPLICATION_KEY = "mail_application"
-FEEDS_KEY = "feeds"
 STT_KEY = "stt"
 #: d'où vient la carte de sa position (ADR 0193)
 MAP_KEY = "carte"
@@ -529,14 +528,6 @@ class Settings:
         current = dict(self._get(MCP_SYSTEM_ACCESS_KEY) or {})
         current[server] = {f: fields[f] for f in SYSTEM_ACCESS_FIELDS if f in fields}
         await self._put(MCP_SYSTEM_ACCESS_KEY, current)
-
-    def feeds(self) -> list[str]:
-        return [str(u) for u in (self._get(FEEDS_KEY) or [])]
-
-    async def save_feeds(self, urls: list[str]) -> list[str]:
-        clean = sorted({u.strip() for u in urls if u.strip().startswith(("http://", "https://"))})
-        await self._put(FEEDS_KEY, clean)
-        return clean
 
     def stt(self) -> dict[str, str]:
         data = dict(self._get(STT_KEY) or {})

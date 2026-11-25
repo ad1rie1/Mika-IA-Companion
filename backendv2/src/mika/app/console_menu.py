@@ -77,7 +77,7 @@ MENU = (
         _link("forge"),  # les apps forgées
     ), question="Que peut-elle faire, et pour qui ?"),
     MenuGroup("Connexions extérieures", "plug", (
-        MenuLink("Ses sens", "sens", hint="Ce qu'elle lit, voit et reçoit"),
+        _link("senses"),  # ses sens
         _link("wakeup"),  # les réveils par API
         MenuLink("Dépôts Git", "reglages/depots", hint="Le jeton de ses dépôts distants"),
     ), short="Connexions", question="Que perçoit-elle du dehors, qui la fait agir ?"),

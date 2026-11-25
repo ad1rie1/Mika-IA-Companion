@@ -1,5 +1,5 @@
-"""Réglages › Plugins : la vue d'ensemble, le courrier, les serveurs MCP, les réveils, les flux, la transcription, Teams,
-les appareils. Leurs pages vivent là où l'on s'en sert (``SettingsPage.home``) ; elles s'enregistrent sous Réglages."""
+"""Réglages › Plugins : la vue d'ensemble, le courrier, les serveurs MCP, les réveils, la transcription, Teams, les
+appareils. Leurs pages vivent là où l'on s'en sert (``SettingsPage.home``) ; elles s'enregistrent sous Réglages."""
 
 from __future__ import annotations
 
@@ -50,16 +50,11 @@ _FRAME: dict[str, tuple[str, tuple[str, ...], tuple[str, str] | None]] = {
               ("Courrier", "courrier/reception")),
     "teams": ("Ses comptes : à qui, sa façon d'y écrire, sa signature ; la clé de chaque extension", ("teams",),
               ("Teams", "teams/conversations")),
-    "rss": ("Les adresses des flux qu'elle suit", ("flux",), ("Ses sens › Flux RSS", "sens/flux")),
     "web": ("Sa recherche sur le web : ses bornes", (), ("La fiche du serveur « web »", "fiche/serveur/web")),
     "mcp": ("Les serveurs MCP : à quoi ils servent pour elle, où les joindre ; qui peut quoi, sur leur fiche",
             ("serveurs-mcp",), ("Outils › Venus d'ailleurs", "outils/serveurs")),
-    "camera": ("La fréquence de ses regards et la durée de ses observations", (),
-               ("Ses sens › Caméra", "sens/camera")),
     "imaging": ("Ses fournisseurs d'images et qui dessine quoi ; sa qualité par défaut, ses quotas",
                 ("images-fournisseurs", "images-roles"), ("Ses sens › Dessins", "sens/dessins")),
-    "sensors": ("Le jeton avec lequel les appareils lui envoient leurs signaux", ("appareils",),
-                ("Ses sens › Appareils", "sens/appareils")),
     "location": ("D'où viennent les tuiles de la carte de sa position", ("carte",),
                  ("Ses sens › Localisation", "sens/positions")),
     "trips": ("Où chercher un lieu et une adresse, qui calcule les itinéraires, d'où viennent les données "
@@ -120,21 +115,6 @@ class AgendaApps(BaseModel):
     @classmethod
     def _microsoft(cls, client_id: str) -> str:
         return application_id(client_id)
-
-
-class FeedsSettings(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    urls: Annotated[tuple[str, ...], Knob(label="Flux suivis", help="Une adresse http(s) par ligne (RSS ou Atom).",
-                                          advanced=False)] = ()
-
-    @field_validator("urls")
-    @classmethod
-    def _http(cls, urls: tuple[str, ...]) -> tuple[str, ...]:
-        bad = [u for u in urls if not u.startswith(("http://", "https://"))]
-        if bad:
-            raise ValueError(f"adresse non http(s) : {bad[0][:80]}")
-        return tuple(sorted(set(urls)))
 
 
 class SttSettings(BaseModel):
@@ -281,10 +261,6 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                 ("État, outils et qui peut quoi", Ref("local", f"{PREFIX}/outils/serveurs",
                                                       "Outils › Venus d'ailleurs"))]
 
-    async def save_feeds(cfg: FeedsSettings) -> list[str]:
-        await settings.save_feeds(list(cfg.urls))
-        return []
-
     def stt() -> SttSettings:
         got = settings.stt()
         return tolerant(SttSettings, base_url=got["base_url"], model=got["model"], api_key=got["api_key"])
@@ -422,13 +398,8 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                             "de son catalogue —, puis "
                             "où le joindre (une adresse, ou une commande lancée ici, isolée) et ses bornes. Qui peut "
                             "quoi se règle sur sa fiche, dans « Accès aux outils »."), home="outils/parametres"),)),
-        # Flux, Transcription et Appareils : dans Ses sens, derrière sa roue (ADR 0206)
-        SettingsSection("flux", "Flux", "plugins", FeedsSettings, lambda: FeedsSettings(urls=tuple(settings.feeds())),
-                        save_feeds, description="Ce qu'elle lit du monde.", order=20,
-                        facts=lambda: [("Suivis", str(len(settings.feeds()))),
-                                       ("Ce qu'elle en remarque", Ref("local", f"{PREFIX}/sens/flux", "Flux RSS"))],
-                        pages=(SettingsPage("flux", "Flux suivis", description=(
-                            "Les flux RSS ou Atom qu'elle relève."), home="sens/parametres-flux"),)),
+        # Transcription et Appareils : dans Ses sens, derrière sa roue (ADR 0206), avec ses flux suivis (leur rubrique :
+        # app/domains/senses/console/settings.py)
         SettingsSection("transcription", "Transcription", "plugins", SttSettings, stt, save_stt, order=30,
                         description="Pour entendre les messages vocaux (un service compatible Whisper).",
                         pages=(SettingsPage("transcription", "Transcription vocale", description=(
