@@ -39,10 +39,9 @@ from mika.adapters.web.accounts import CLIENT_SCREEN, Account, Accounts
 from mika.adapters.web.gate import SlidingWindow, one_line
 from mika.app.domains.projects.api import docs as pages
 from mika.app.domains.projects.api.projects import Reach, Scene, audience_at, reach
-from mika.app.me.api import Denied, form, me_of
+from mika.app.me.api import Denied, Upload, form, me_of
 from mika.faculties.projects import docs, links
 from mika.faculties.projects import inspect_docs as words
-from mika.ports.mail import File
 from mika.runtime.bootstrap import Kernel
 from mika.runtime.operations import SPACE, perform
 
@@ -176,7 +175,7 @@ class PersonHost:
                 data = base64.b64decode(str(args.get("base64") or ""), validate=True)
             except (binascii.Error, ValueError):
                 return _no("« base64 » : les octets de l'image, en base64.")
-            sent = File(one_line(str(args.get("nom") or ""), 120), "", data)
+            sent = Upload(one_line(str(args.get("nom") or ""), 120), "", data)
             got = await perform(self.kernel, words.IMAGE,
                                 form(fixed={"via": docs.MCP, "tool": self.label}, name=sent.name),
                                 by=self.account.handle, subject=str(r.p.id), via=SPACE, files=(sent,))

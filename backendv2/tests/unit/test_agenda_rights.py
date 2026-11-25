@@ -142,7 +142,7 @@ def test_a_table_is_kept_in_the_settings_and_a_share_rewrites_its_line(tmp_path)
             await settings.open()
             mine = Table[AgendaRule](lines=(AgendaRule(who=("personne:user_1",), when=("conversation",), read=True,
                                                        write=ALONE),), default=CLOSED_AGENDA)
-            await settings.save_agenda_table(ADRIEN_CAL, mine)
+            await settings.of(AgendaSettings).save_agenda_table(ADRIEN_CAL, mine)
             await settings.of(AgendaSettings).share_calendar(ADRIEN_CAL, "personne:user_2", "lire")
             shared = settings.access_tables().agendas[ADRIEN_CAL]
             params = settings.of(AgendaSettings).agenda().params()

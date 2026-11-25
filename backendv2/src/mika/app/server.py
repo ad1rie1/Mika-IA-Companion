@@ -30,7 +30,6 @@ from starlette.responses import RedirectResponse, Response
 from starlette.routing import Mount, Route
 
 from mika.adapters.addresses import serving_on
-from mika.adapters.contacts import ContactsStore
 from mika.adapters.imaging.config import LiveImaging
 from mika.adapters.imaging.config import build_gateway as build_image_gateway
 from mika.adapters.imaging.gateway import ImageTrace
@@ -299,9 +298,6 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     outside[attachments_c.PORT] = DiskShares(data / "pieces")
     outside[attachments_c.VECTORS] = piece_vectors
     preprocess = outside["preprocess"] = LocalPreprocessor(gateway, transcribe=whisper(settings.stt))
-    # l'annuaire (ADR 0298) : tous ceux qu'elle connaît, même sans leur avoir parlé, tirés de Teams et du courrier par
-    # le plugin ``contacts`` (sa base à lui, hors du journal)
-    outside["contacts"] = ContactsStore(bases["contacts"], now=clock.now)
     # ce que chaque domaine apporte (ADR 0310) : ses adaptateurs, ses ports, ses portes HTTP — sa fiche nomme son
     # câblage, que ce serveur appelle sans le connaître (``app/wiring.py``)
     wiring = Wiring(data=data, settings=settings, clock=clock, bases=bases, ports=outside, store=store, her=her,
@@ -447,8 +443,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     # de son travail ; à chaque personne connectée, ce qu'elle voit — et la boîte d'envoi réveille l'extension
     live_changes = live.changes = LiveChanges(kernel, hub, moi)
     kernel.mind.subscribe(live_changes.listen)
-    outside["contacts"].on_change(live_changes.touch)
-    for base in wiring.watched:  # les bases des domaines qui ont leur fiche
+    for base in wiring.watched:  # les bases des domaines
         base.on_change(live_changes.touch)
     kernel.runner.on_step = live_changes.step
     # ce qui est tenu hors du journal sans être une base à côté : les réglages (chaque enregistrement) ; ce qu'un

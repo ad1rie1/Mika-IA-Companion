@@ -33,7 +33,6 @@ from mika.adapters.web.gate import new_key, token_digest
 from mika.app import authors as authors_m
 from mika.app.domains import DOMAINS, part
 from mika.inspector import mcp as console_mcp
-from mika.ports.agenda import split_calendar_key
 from mika.ports.imaging import ROLES as IMAGE_ROLES
 from mika.ports.sql import Key, LongText, MindBase, upsert
 from mika.runtime.boundary import call
@@ -413,12 +412,10 @@ class Settings:
         et leurs partages donnent (``plugins/agenda/rights.py::table_of``, qui lit les deux)."""
         return dict(self._rights.agendas)
 
-    async def save_agenda_table(self, calendar: str, table: Table[AgendaRule] | None) -> None:
-        """Le tableau de droits d'un agenda, enregistré — par son propriétaire (l'API par personne) ou par un opérateur
-        (Réglages › Droits) ; ``None`` : retiré, celui que son propriétaire et ses partages donnent vaut de nouveau. Lu
-        à chaque épisode (``access_tables``)."""
-        if not split_calendar_key(calendar)[0]:
-            raise ValueError(f"pas un agenda : « {calendar[:60]} »")
+    async def _save_agenda_table(self, calendar: str, table: Table[AgendaRule] | None) -> None:
+        """Le tableau de droits d'un agenda, rangé avec ses autres droits et lu à chaque épisode
+        (``access_tables``) ; ``None`` : retiré. La porte ne juge pas la clé : on enregistre par les réglages de
+        l'agenda (``AgendaSettings.save_agenda_table``), qui la jugent."""
         tables = dict(self._rights.agendas)
         if table is None:
             tables.pop(calendar, None)

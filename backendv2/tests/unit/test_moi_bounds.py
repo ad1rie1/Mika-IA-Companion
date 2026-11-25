@@ -20,7 +20,9 @@ from mika.adapters.web.gate import SlidingWindow
 from mika.app.domains.mail import api as mail_me
 from mika.app.domains.tools import api as mcp_me
 from mika.app.me import Call, Denied, hosts, sharing
+from mika.app.me import api as moi_api
 from mika.app.me import settings as settings_me
+from mika.ports.mail import PIECES_MAX, PIECES_TOTAL_MAX
 from mika.vocab.access import OWNER, PERSON, SOURCE_WORDS_OTHER, who_words
 
 
@@ -28,6 +30,14 @@ def call(api: object, key: str = "") -> Call:
     me = NS(account=NS(id=7), handle="user_7")
     request = NS(headers={"idempotency-key": key} if key else {})
     return Call(request, me, None, {}, api)  # type: ignore[arg-type]
+
+
+def test_an_upload_is_bounded_at_least_as_wide_as_what_a_mail_carries():
+    """L'API refuse un envoi trop gros avant de le lire (``UPLOAD_FILES_MAX``, ``UPLOAD_TOTAL_MAX``) ; l'action qui
+    joint les pièces d'un mail redit ses propres bornes. Les premières ne doivent jamais être plus étroites : un mail
+    permis serait refusé avant d'arriver."""
+    assert moi_api.UPLOAD_FILES_MAX >= PIECES_MAX and moi_api.UPLOAD_TOTAL_MAX >= PIECES_TOTAL_MAX
+    assert moi_api.UPLOAD_BODY_MAX > moi_api.UPLOAD_TOTAL_MAX
 
 
 def test_a_try_counted_ahead_is_given_back_when_it_succeeds():

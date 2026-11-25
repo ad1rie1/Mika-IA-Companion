@@ -86,13 +86,11 @@ from sqlalchemy import delete
 from sqlalchemy.exc import SQLAlchemyError
 
 from mika.adapters.database import Target, as_target
-from mika.adapters.maps.quota import QUOTAS_FILE
 from mika.adapters.store_sql import SqlStore
 from mika.adapters.system import RandomIdGen, RealClock
-from mika.adapters.workshop import REVIEWS_DIRNAME, VIEWS_DIRNAME
 from mika.app import backup_server, datadir, schema
 from mika.app.composition import READING, faculties
-from mika.app.domains import DOMAINS
+from mika.app.domains import DOMAINS, part
 from mika.app.settings import PUSH_KEY_FILE
 from mika.kernel.codec import digest
 from mika.kernel.registry import Registry
@@ -108,19 +106,22 @@ BASES = "bases"
 #: jetables : se reconstruisent depuis le journal
 SKIPPED = frozenset({"views.db", "views.db-wal", "views.db-shm", "sauvegardes.json", "sauvegardes.partial",
                      datadir.LOCK_NAME})
+#: ce que chaque domaine dit de ses dossiers (ADR 0310, ``Domain.backup``) : les chemins qu'une sauvegarde ne prend
+#: pas (``UNSAVED`` : un dossier, ou un sous-dossier), et les fichiers gardés quand même sous l'un d'eux (``SAVED``)
+_UNSAVED = frozenset(tuple(path.split("/")) for d in DOMAINS for path in part(d.backup, "UNSAVED", ()))
+if any(len(parts) not in (1, 2) for parts in _UNSAVED):
+    raise ValueError(f"sauvegarde : un domaine écarte un dossier, ou un sous-dossier — {sorted(_UNSAVED)}")
 #: dossiers jamais archivés : ceux des appels de la CLI de Claude Code (prompts privés, jetons de session)
 #: d'une installation d'avant leur déménagement sous XDG_RUNTIME_DIR ; ``cache`` (``HF_HOME`` de l'unité : le modèle
-#: de plongements, qui se retélécharge — 1,2 Go pour Qwen3, ADR 0109) ; ``cartes`` (la carte de sa position, ADR 0193 :
-#: quelques Go qui se réextraient)
-SKIPPED_DIRS = frozenset({"claude-code", "cache", "cartes"})
-#: sous un dossier jamais archivé, ce qui l'est quand même : les compteurs des services de la carte (quelques Ko, R3-08)
-#: — ce qui empêche la facture de Google ; une machine neuve ne repart pas d'un mois à zéro. Restaurés seulement là où
-#: il n'y en a pas : ceux du dossier, en service, sont plus récents que l'archive
-KEPT_UNDER_SKIPPED = frozenset({QUOTAS_FILE})
-#: sous un dossier archivé, ce qui ne l'est pas : les vues des ateliers lus (ADR 0260, 0262) — la copie du dernier
-#: commit d'un autre atelier, que l'archive porte déjà avec son dépôt, et qui se repose seule à l'exécution suivante ;
-#: et la copie de commit qu'une relecture indépendante lit (ADR 0277), jetable par nature
-SKIPPED_UNDER = frozenset({("ateliers", VIEWS_DIRNAME), ("ateliers", REVIEWS_DIRNAME)})
+#: de plongements, qui se retélécharge — 1,2 Go pour Qwen3, ADR 0109) ; puis ceux que les domaines écartent (la carte
+#: de sa position)
+SKIPPED_DIRS = frozenset({"claude-code", "cache"} | {parts[0] for parts in _UNSAVED if len(parts) == 1})
+#: sous un dossier jamais archivé, ce qui l'est quand même, dit par son domaine (les compteurs des services de la
+#: carte). Restaurés seulement là où il n'y en a pas : ceux du dossier, en service, sont plus récents que l'archive
+KEPT_UNDER_SKIPPED = frozenset(path for d in DOMAINS for path in part(d.backup, "SAVED", ()))
+#: sous un dossier archivé, ce qui ne l'est pas, dit par son domaine (les vues des ateliers lus, la copie de commit
+#: d'une relecture)
+SKIPPED_UNDER = frozenset(parts for parts in _UNSAVED if len(parts) == 2)
 #: dans le dossier de données, ce qu'une restauration prépare et ce qu'elle met de côté (cachés : aucune archive ne
 #: les prend, une restauration suivante ne les remplace pas)
 STAGING, ASIDE, KEPT = ".restauration-", ".avant-restauration-", ".avant-bases-"

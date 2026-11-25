@@ -58,6 +58,13 @@ PACKAGES: dict[str, tuple[str, ...]] = {
     "projects": ("faculties.projects", "contracts.projects", "adapters.workshop", "ports.workshop"),
 }
 
+#: ce qui loge dans le paquet d'un domaine sans être à lui : le nommer, ce n'est pas nommer le domaine
+SHARED: dict[str, str] = {
+    "adapters.mcp.relay": "le relais MCP par lequel la CLI de Claude Code appelle ses outils (ADR 0072) : une pièce de "
+                          "la passerelle des modèles (``adapters/llm/claude_code.py``), pas de ses outils venus "
+                          "d'ailleurs",
+}
+
 #: les modules d'``app`` qui sont à un domaine et attendent leur déménagement dans son dossier : les importer, c'est
 #: déjà le nommer. Un module déménagé sort de cette table (il n'existe plus : la garde le dit)
 TO_MOVE: dict[str, tuple[str, ...]] = {}
@@ -70,9 +77,6 @@ FOREVER: dict[str, str] = {
 
 #: ce qui reste à sortir du cadre : fichier d'``app`` → domaines qu'il nomme encore. Elle ne fait que rétrécir
 STILL: dict[str, set[str]] = {
-    "authors.py": {"mail"},
-    "backup.py": {"maps", "projects"},
-    "cli/models.py": {"tools"},
     "handmade/approval_sources.py": {"agenda", "mail", "phone", "teams", "tools"},
     "handmade/directory.py": {"contacts"},
     "handmade/person/__init__.py": {"agenda", "maps", "projects", "teams", "tools"},
@@ -84,14 +88,11 @@ STILL: dict[str, set[str]] = {
     "handmade/tabs/people.py": {"contacts"},
     "handmade/tabs/thoughts.py": {"mail", "senses", "teams"},
     "handmade/waiting.py": {"contacts", "mail", "teams"},
-    "me/api.py": {"mail"},
     "me/rights.py": {"forge", "mail", "teams", "tools"},
     "me/settings.py": {"mail", "teams"},
     "me/sharing.py": {"agenda", "mail", "teams", "tools"},
     "mindport.py": {"maps", "projects", "senses", "wakeup"},
     "preview/__init__.py": {"mail", "maps", "projects", "teams"},
-    "server.py": {"contacts", "tools"},
-    "settings.py": {"agenda"},
 }
 
 
@@ -110,14 +111,18 @@ def _within(module: str, package: str) -> bool:
     return module == package or module.startswith(package + ".")
 
 
-def named(text: str, packages: Mapping[str, tuple[str, ...]], *, folders: bool = True) -> set[str]:
+def named(text: str, packages: Mapping[str, tuple[str, ...]], *, folders: bool = True,
+          shared: Mapping[str, str] = SHARED) -> set[str]:
     """Les domaines qu'un source nomme par ses imports : un de leurs paquets (``packages``), ou leur dossier sous
-    ``app/domains/`` (``folders``)."""
+    ``app/domains/`` (``folders``). Un module logé dans le paquet d'un domaine sans être à lui (``shared``) ne le
+    nomme pas."""
     out: set[str] = set()
     for module in imported(text):
         if not module.startswith("mika."):
             continue
         rest = module[len("mika."):]
+        if any(_within(rest, own) for own in shared):
+            continue
         for domain, owned in packages.items():
             if any(_within(rest, p) for p in owned) or (folders and _within(rest, f"app.{HOME}.{domain}")):
                 out.add(domain)
@@ -189,6 +194,9 @@ def test_every_package_of_a_domain_exists():
     gone = sorted(f"{domain} : {module}" for table in (PACKAGES, TO_MOVE) for domain, owned in table.items()
                   for module in owned if not _exists(module))
     assert not gone, gone
+    assert all(_exists(module) for module in SHARED), sorted(SHARED)
+    assert all(any(_within(module, p) for owned in PACKAGES.values() for p in owned) for module in SHARED), \
+        "ce qui n'est dans le paquet d'aucun domaine n'a pas à être excepté"
     assert set(TO_MOVE) <= set(PACKAGES)
 
 
@@ -207,7 +215,7 @@ def test_every_part_a_card_names_exists_and_carries_its_name():
     """Une fiche nomme les modules de ses parts au lieu de les importer : une faute de frappe ne se verrait qu'à
     l'assemblage. Chaque module nommé s'importe ici, et porte le nom que le cadre y lit."""
     for d in DOMAINS:
-        for module in (d.wiring, d.settings, d.api, d.live, d.console, d.preview, d.cli):
+        for module in (d.wiring, d.settings, d.api, d.live, d.console, d.preview, d.cli, d.backup):
             assert module is None or _within(module, f"mika.app.{HOME}.{d.name}"), f"{d.name} : {module} est hors de son dossier"
         assert d.wiring is None or callable(part(d.wiring, "wire")), d.name
         assert d.settings is None or issubclass(part(d.settings, "SETTINGS"), SettingsPart), d.name
@@ -217,6 +225,8 @@ def test_every_part_a_card_names_exists_and_carries_its_name():
         assert d.console is None or isinstance(part(d.console, "CONSOLE"), ConsolePart), d.name
         assert d.preview is None or callable(part(d.preview, "preview")), d.name
         assert d.cli is None or callable(part(d.cli, "add")), d.name
+        kept = (*part(d.backup, "UNSAVED", ()), *part(d.backup, "SAVED", ()))
+        assert d.backup is None or (kept and all(isinstance(path, str) and path for path in kept)), d.name
         assert d.base is None or _exists(d.base.models.removeprefix("mika.")), d.name
 
 
@@ -245,6 +255,13 @@ def test_the_guard_fails_when_the_frame_names_a_domain():
         "server.py nomme le domaine « mail » : le cadre lit les fiches (DOMAINS), il ne nomme aucun domaine"]
     assert _toy({"server.py": "from mika.app.domains import mail\n"}) == [
         "server.py nomme le domaine « mail » : le cadre lit les fiches (DOMAINS), il ne nomme aucun domaine"]
+
+
+def test_what_lodges_in_a_package_of_a_domain_without_being_its_own_names_nothing():
+    sources = {"server.py": "from mika.adapters.mail.relay import Relay\n"}
+    assert _toy(sources) == ["server.py nomme le domaine « mail » : le cadre lit les fiches (DOMAINS), il ne nomme "
+                             "aucun domaine"]
+    assert named(sources["server.py"], TOY_PACKAGES, shared={"adapters.mail.relay": "une pièce du cadre"}) == set()
 
 
 def test_a_comment_or_a_string_names_nothing():

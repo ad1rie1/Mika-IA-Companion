@@ -9,8 +9,8 @@ documentation, ce qu'on y gère, leur activité ; ce qui attend son geste, pour 
 rubrique « Dépôts Git », leurs gabarits, leurs feuilles et leur script) et ce que l'aperçu en montre (``demo.py`` :
 une chaîne de travail d'exemple ; ``demo_git.py`` : un dépôt face à son distant, sans réseau ; ``demo_activity.py``
 : des états fictifs de l'activité), que l'aperçu du cadre pose. Leurs dossiers du dossier de données : ``ateliers/``
-et ``documentation/`` (``places``). Ils lisent la Forge (les apps d'un projet), le courrier (la forme d'un fichier :
-une image envoyée par MCP à leur documentation) et les outils (le protocole MCP).
+et ``documentation/`` (``places`` ; ce qu'une sauvegarde n'en prend pas : ``backup.py``). Ils lisent la Forge (les
+apps d'un projet) et les outils (le protocole MCP).
 
 Elle est la dernière de ``DOMAINS`` : un accord d'un projet se reconnaît par le contexte de l'événement, et le direct
 ne le regarde qu'après tous les autres domaines (un brouillon de mail né dans un épisode de projet reste au courrier).
@@ -30,7 +30,8 @@ from mika.inspector.catalog import Destination, MenuLink
 
 PROJECTS = Domain(
     "projects",
-    needs=("forge", "mail", "tools"),
+    needs=("forge", "tools"),
+    backup="mika.app.domains.projects.backup",
     places={"ateliers": "les ateliers de ses projets, avec leur git",
             "documentation": "les images de la documentation de ses projets (100 Mio par projet)"},
     settings="mika.app.domains.projects.settings",

@@ -19,7 +19,6 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from mika.adapters.mail.config import MailConfig
 from mika.kernel.forms import Knob
 from mika.vocab import flows
 from mika.vocab.flows import Author
@@ -129,9 +128,10 @@ def filled(cfg: Authors, reference: str = "") -> Authors:
     return cfg.model_copy(update={"authors": authors})
 
 
-def flow_list(mail: MailConfig) -> list[tuple[str, str]]:
-    """Les flux, dans l'ordre de la page : le chat, chaque boîte mail, Teams, le téléphone (clé, libellé)."""
+def flow_list(boxes: Mapping[str, Any]) -> list[tuple[str, str]]:
+    """Les flux, dans l'ordre de la page : le chat, chaque boîte mail (``boxes`` : ses boîtes par leur clé, chacune avec
+    son ``label``), Teams, le téléphone (clé, libellé)."""
     out = [(flows.CHAT, "Chat")]
-    out += [(flows.mail(key), f"Courrier · {box.label or key}") for key, box in mail.accounts.items()]
+    out += [(flows.mail(key), f"Courrier · {box.label or key}") for key, box in boxes.items()]
     out += [(flows.TEAMS, "Teams"), (flows.PHONE, "Téléphone (WhatsApp, Messenger, SMS)")]
     return out

@@ -11,8 +11,9 @@ réglages, leurs gabarits et leur script) et sa commande (``cli.py`` : ``mika ag
 (``ports.mail.SIGNED_IN``), et Microsoft entre par l'application du courrier (ADR 0238), que sa rubrique de réglages
 vérifie et enregistre.
 
-Restent au cadre : ses droits — le tableau réglé de chaque agenda (``Settings.agenda_tables``, tenu avec ceux des
-canaux et des outils, lus à chaque épisode) ; l'onglet « Agendas » de la fiche d'une personne, « qui peut quoi », les
+Restent au cadre : le rangement de ses droits (le tableau réglé de chaque agenda est gardé par la porte des
+réglages avec ceux des canaux et des outils, lus à chaque épisode — on les lit et on les enregistre par ses
+réglages) ; l'onglet « Agendas » de la fiche d'une personne, « qui peut quoi », les
 partages, ce que concerne un accord — des pages qui croisent les domaines.
 """
 

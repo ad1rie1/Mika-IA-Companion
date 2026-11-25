@@ -27,7 +27,6 @@ from mika.adapters.web.gate import SlidingWindow
 from mika.adapters.web.session import account_of, csrf_header_ok, native_token
 from mika.contracts import identity as identity_c
 from mika.kernel.forms import RENDERED, errors_fr
-from mika.ports.mail import PIECES_MAX, PIECES_TOTAL_MAX, File
 from mika.runtime.bootstrap import Kernel
 from mika.runtime.operations import FIXED_FIELD, SPACE, Outcome, perform, sent
 
@@ -65,8 +64,13 @@ PRELOADS = (10, 600.0)
 OWN_MAX = 10
 #: les créations dont on garde la réponse, pour qu'une création redite avec la même clé ne refasse rien
 CREATED_MAX = 512
-#: un envoi avec ses fichiers (``upload``), corps entier : ses pièces, et de quoi porter ses champs et ses délimiteurs
-UPLOAD_BODY_MAX = PIECES_TOTAL_MAX + 1024 * 1024
+#: un envoi avec ses fichiers (``upload``) en porte au plus tant, et tant d'octets en tout : au-delà il est refusé
+#: avant d'être lu. Ce sont les bornes d'un mail (ADR 0214), que l'action qui joint les pièces redit à sa façon — un
+#: domaine qui en accepterait plus les relèverait ici (``tests/unit/test_moi_bounds.py`` les compare)
+UPLOAD_FILES_MAX = 10
+UPLOAD_TOTAL_MAX = 50 * 1024 * 1024
+#: son corps entier : ses fichiers, et de quoi porter ses champs et ses délimiteurs
+UPLOAD_BODY_MAX = UPLOAD_TOTAL_MAX + 1024 * 1024
 #: les champs d'un envoi avec ses fichiers : ceux d'un mail, avec de la marge (chacun est borné par ``Call.arg``)
 UPLOAD_FIELDS = 32
 
@@ -173,13 +177,23 @@ def done(outcome: Outcome, **more: Any) -> dict[str, Any]:
     return {"ok": True, "message": outcome.message, "deduped": outcome.deduped, **more}
 
 
+@dataclass(frozen=True, slots=True)
+class Upload:
+    """Un fichier qu'un geste apporte (``ActionContext.files``) : son nom, sa sorte, ses octets, tels qu'ils sont
+    arrivés. L'action qui le joint le juge et en fait ce qu'il lui faut (une pièce d'un mail, une image)."""
+
+    name: str
+    mime: str
+    data: bytes
+
+
 class Call:
     """Ce qu'une route reçoit : la requête, qui la fait, le noyau, et le corps JSON lu (``{}`` pour une lecture)."""
 
     __slots__ = ("request", "me", "kernel", "data", "api", "files")
 
     def __init__(self, request: Request, me: Me, kernel: Kernel, data: dict[str, Any], api: MeApiBase,
-                 files: tuple[File, ...] = ()) -> None:
+                 files: tuple[Upload, ...] = ()) -> None:
         self.request = request
         self.me = me
         self.kernel = kernel
@@ -298,22 +312,22 @@ def _is_multipart(request: Request) -> bool:
     return request.headers.get("content-type", "").lower().startswith("multipart/form-data")
 
 
-async def read_upload(request: Request) -> tuple[dict[str, Any], tuple[File, ...]]:
+async def read_upload(request: Request) -> tuple[dict[str, Any], tuple[Upload, ...]]:
     """Un envoi en ``multipart/form-data`` : ses champs, comme un corps JSON, et ses fichiers. Le corps est borné pendant
     qu'il arrive (``PayloadTooLarge``), et les fichiers attendent sur le disque le temps de le lire. Ce qu'ils valent
     (taille, nombre, nom, sorte) se juge dans l'action qui les joint."""
-    parser = MultiPartParser(request.headers, bounded_stream(request, UPLOAD_BODY_MAX), max_files=PIECES_MAX + 1,
+    parser = MultiPartParser(request.headers, bounded_stream(request, UPLOAD_BODY_MAX), max_files=UPLOAD_FILES_MAX + 1,
                              max_fields=UPLOAD_FIELDS)
     try:
         form_data = await parser.parse()
     except (MultiPartException, ValueError):  # une erreur de ``python-multipart`` est une ValueError
-        raise Denied(400, f"Cet envoi n'a pas pu être lu : un formulaire abîmé, ou plus de {PIECES_MAX} pièces.") from None
+        raise Denied(400, f"Cet envoi n'a pas pu être lu : un formulaire abîmé, ou plus de {UPLOAD_FILES_MAX} pièces.") from None
     try:
         data: dict[str, Any] = {}
-        files: list[File] = []
+        files: list[Upload] = []
         for name, value in form_data.multi_items():
             if isinstance(value, UploadFile):
-                files.append(File(value.filename or "", value.content_type or "", await value.read()))
+                files.append(Upload(value.filename or "", value.content_type or "", await value.read()))
             else:  # un formulaire écrit ses fins de ligne en CRLF : un champ se compte comme en JSON
                 data[name] = value.replace("\r\n", "\n")
     finally:
@@ -379,7 +393,7 @@ class MeApiBase:
             if account is None:
                 return JSONResponse({"error": "Authentification requise."}, status_code=401, headers=NO_STORE)
             data: dict[str, Any] = {}
-            files: tuple[File, ...] = ()
+            files: tuple[Upload, ...] = ()
             if write:
                 token = native_token(request.headers)
                 if token:

@@ -1244,7 +1244,7 @@ async def rights_save(call: Call) -> dict[str, Any]:
         except ValidationError as exc:
             raise refused(exc) from None
     try:
-        await settings.save_agenda_table(key, table)
+        await settings.of(AgendaSettings).save_agenda_table(key, table)
     except ValueError as exc:
         raise Denied(400, str(exc)[:300]) from None
     await audit(call.kernel, "moi.agenda_droits", by=call.me.handle, subject_kind="agenda", subject=key)

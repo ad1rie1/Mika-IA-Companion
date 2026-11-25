@@ -23,6 +23,7 @@ from mika.app.domains.domain import Domain
 
 MAPS = Domain(
     "maps",
+    backup="mika.app.domains.maps.backup",
     places={"cartes": "la carte de sa position, l'index des lieux et les caches de la carte ; ses compteurs du "
                       "mois, eux, se sauvegardent"},
     settings="mika.app.domains.maps.settings",

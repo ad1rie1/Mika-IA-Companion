@@ -14,7 +14,7 @@ lignes Qui × Par où × Quand, lues de haut en bas, puis la ligne par défaut, 
   le sien. Le partage est aussi un plafond : « lire » n'écrit jamais, « lire et préparer » ne répond pas. Retirer le
   partage retire la ligne (``shared_table``, pour un tableau réglé ; sinon elle n'est plus dérivée).
 - **Réglé** par son propriétaire (l'API par personne) ou par un opérateur (Réglages › Droits), un tableau est rangé
-  dans les réglages et lu à chaque épisode (``Rights.agendas``, ``Settings.save_agenda_table``) ; sinon, celui que son
+  dans les réglages et lu à chaque épisode (``Rights.agendas``, ``AgendaSettings.save_agenda_table``) ; sinon, celui que son
   propriétaire et ses partages donnent (``table_of``).
 - **Qui donne l'accord** (``approval``) : la personne en face, sur une carte dans sa conversation ; pour un partage
   « lire et préparer », le propriétaire — dans son chat à lui (une de ses adresses), sinon la console (À valider).

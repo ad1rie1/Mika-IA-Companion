@@ -412,13 +412,14 @@ async def agenda_table_post(ui: UI, request: Request) -> Response:
         try:
             args = table_args(AgendaTableArgs, data)
             if args.faire.strip() == "remettre":
-                await settings.save_agenda_table(key, None)
+                await settings.named("agenda").save_agenda_table(key, None)
                 said = "Revenu au tableau que son propriétaire et ses partages donnent."
             else:
                 rows, said = moved(_agenda_rows(args), args.faire.strip(), AGENDA_NEW_ROW, AGENDA_ROWS)
                 default = AgendaRule(read=args.defaut_lire == "oui", write=args.defaut_ecrire or NO,
                                      respond=args.defaut_repondre or NO, keep=args.defaut_garde or "rien")
-                await settings.save_agenda_table(key, Table[AgendaRule](lines=tuple(rows), default=default))
+                await settings.named("agenda").save_agenda_table(
+                    key, Table[AgendaRule](lines=tuple(rows), default=default))
             await operations.audit(ui.kernel, "console.droits.agenda", by=account.handle, subject_kind="agenda",
                                    subject=key)
             ui.flash(token, "ok", f"{said} Vaut dès son prochain épisode.")

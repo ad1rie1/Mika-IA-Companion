@@ -23,6 +23,9 @@ cadre les importe au moment d'assembler (``part``), et y lit un nom convenu :
 - ``wiring`` : ``wire(w)``, ce que le serveur construit pour lui avant le noyau (ses adaptateurs, ses portes), et,
   facultatif, ``bind(w)``, ce qui a besoin du noyau (``app/wiring.py::Wiring``) ;
 - ``cli`` : ``add(sub)``, sa commande et ses sous-commandes dans l'analyseur de ``mika`` ;
+- ``backup`` : ce qu'une sauvegarde ne prend pas de ses dossiers — ``UNSAVED``, des chemins du dossier de données
+  (un dossier, ou un sous-dossier : ils se rebâtissent ou se retéléchargent), et ``SAVED``, les fichiers gardés quand
+  même sous un dossier qu'elle ne prend pas (``app/backup.py``) ;
 - ``preview`` : ``preview(live, now, people)``, ce qu'il ajoute à la vie fictive de ``mika console apercu`` une fois
   les gens de la démonstration en place (``people`` : le moyen de communication de chacun, par son nom de compte) —
   elle rend les adresses de ses pages à exporter.
@@ -131,6 +134,8 @@ class Domain:
     #: ses dossiers du dossier de données, et ce que chacun garde, en mots (Système › Stockage et sauvegardes) : des
     #: textes affichés, sans numéro de décision
     places: Mapping[str, str] = field(default_factory=dict)
+    #: le module de ce qu'il dit à la sauvegarde de ses dossiers (``UNSAVED``, ``SAVED``)
+    backup: str | None = None
     #: le module de son câblage (``wire``, ``bind``)
     wiring: str | None = None
     #: le module de ses réglages (``SETTINGS`` : sa ``SettingsPart``), pour qui les prend par le nom du domaine

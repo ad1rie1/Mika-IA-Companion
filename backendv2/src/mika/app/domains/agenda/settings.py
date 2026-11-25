@@ -4,9 +4,9 @@ serveur ; le partage d'un agenda.
 
 Rangés dans les réglages du serveur (``mind.db``), par leur porte (``app/settings.py::SettingsPart``) ; le domaine
 les prend par leur classe (``settings.of(AgendaSettings)``), une page du cadre par le nom du domaine
-(``Settings.named("agenda")``). Ses *droits* — le tableau réglé de chaque agenda — restent dans ``Settings``
-(``agenda_tables``, ``save_agenda_table``) : ils vivent dans le cache lu à chaque épisode avec ceux des canaux et des
-familles d'outils (``access_tables``) ; partager un agenda les lit et les écrit par la porte.
+(``Settings.named("agenda")``). Ses *droits* — le tableau réglé de chaque agenda — se lisent et s'enregistrent ici
+(``agenda_tables``, ``save_agenda_table``), mais sont rangés par la porte avec ceux des canaux et des familles
+d'outils : ils vivent dans le cache lu à chaque épisode (``Settings.access_tables``).
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from mika.adapters.mail.oauth import Grant
 from mika.app.settings import Settings, SettingsPart
 from mika.plugins.agenda.rights import shared_table
 from mika.ports.agenda import Connection, split_calendar_key
+from mika.vocab.access import AgendaRule, Table
 
 log = logging.getLogger("mika.settings")
 
@@ -158,10 +159,23 @@ class AgendaSettings(SettingsPart):
         setting = found.setting(local).model_copy(update={"shares": shares})
         changed = found.model_copy(update={"calendars": {**found.calendars, local: setting}})
         cfg = await self.save_agenda(cfg.model_copy(update={"accounts": {**cfg.accounts, account: changed}}))
-        stored = self.door.agenda_tables().get(calendar)
+        stored = self.agenda_tables().get(calendar)
         if stored is not None:
-            await self.door.save_agenda_table(calendar, shared_table(stored, person, level))
+            await self.save_agenda_table(calendar, shared_table(stored, person, level))
         return cfg
+
+    def agenda_tables(self) -> dict[str, Table[AgendaRule]]:
+        """Les tableaux de droits réglés des agendas (ADR 0309), par agenda ; les autres ont celui que leur propriétaire
+        et leurs partages donnent (``plugins/agenda/rights.py::table_of``, qui lit les deux)."""
+        return self.door.agenda_tables()
+
+    async def save_agenda_table(self, calendar: str, table: Table[AgendaRule] | None) -> None:
+        """Le tableau de droits d'un agenda, enregistré — par son propriétaire (l'API par personne) ou par un opérateur
+        (Réglages › Droits) ; ``None`` : retiré, celui que son propriétaire et ses partages donnent vaut de nouveau. Lu
+        à chaque épisode (``Settings.access_tables``)."""
+        if not split_calendar_key(calendar)[0]:
+            raise ValueError(f"pas un agenda : « {calendar[:60]} »")
+        await self.door._save_agenda_table(calendar, table)
 
 
 #: la classe que le cadre prend par le nom du domaine (``Settings.named``)
