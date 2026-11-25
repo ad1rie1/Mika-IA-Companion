@@ -233,6 +233,24 @@ class PersonPart:
 
 
 @dataclass(frozen=True, slots=True)
+class TablePart:
+    """Un tableau de droits qu'il règle dans Réglages › Droits plutôt que sur la page de sa ressource (ADR 0309, lot 5 :
+    celui d'un agenda) : « Modifier », sur le détail des accès d'une de ses ressources, l'ouvre à la place de sa
+    lecture. La page (``app/handmade/rights.py``, son onglet : ``app/handmade/tabs/settings.py``) réunit les parts ;
+    elle n'en connaît aucune."""
+
+    #: le début de la clé de ses ressources, telle que ses droits la disent (« agenda: »)
+    prefix: str
+    #: où mène « Modifier » sur le détail des accès d'une de ses ressources : ``edit(key)``
+    edit: Callable[[str], str]
+    #: le tableau d'une de ses ressources, à régler : ``editor(ui, key, csrf)`` rend ce que dessine
+    #: ``handmade/droits/tableau.html``, ou ``None`` (pas une des siennes)
+    editor: Callable[..., Any]
+    #: où son formulaire s'enregistre : ``routes(ui)`` rend des ``Route``
+    routes: Callable[..., list[Any]]
+
+
+@dataclass(frozen=True, slots=True)
 class ConsolePart:
     """Sa part de la console : ce qu'il y *inscrit*. Chaque page garde son gabarit et sa feuille, écrits à la main
     (ADR 0121, 0177) ; rien ici n'en dessine une."""
@@ -248,6 +266,8 @@ class ConsolePart:
     queue: QueuePart | None = None
     #: sa part de la fiche d'une personne
     person: PersonPart | None = None
+    #: le tableau de droits qu'il règle dans Réglages › Droits
+    table: TablePart | None = None
     #: où mène, dans la console, la ressource d'un de ses partages (sa fiche ; un compte Teams, son extension) :
     #: ``shared(s)`` (``s`` : un ``app/me/sharing.py::Shared`` de sa sorte) — Réglages › Droits › Partages et l'onglet
     #: Comptes de la fiche d'une personne la lisent (``app/handmade/rights.py::share_consoles``)

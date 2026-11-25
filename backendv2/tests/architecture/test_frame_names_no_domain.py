@@ -39,6 +39,7 @@ from mika.app.domains import (
     LivePart,
     PersonPart,
     SharingPart,
+    TablePart,
     part,
 )
 from mika.app.handmade.person import TABS as PERSON_TABS
@@ -93,7 +94,7 @@ FOREVER: dict[str, str] = {
 #: ce qui reste à sortir du cadre : fichier d'``app`` → domaines qu'il nomme encore. Elle ne fait que rétrécir
 STILL: dict[str, set[str]] = {
     "handmade/directory.py": {"contacts"},
-    "handmade/rights.py": {"agenda", "forge"},
+    "handmade/rights.py": {"forge"},
     "handmade/tabs/people.py": {"contacts"},
     "handmade/tabs/thoughts.py": {"mail", "senses", "teams"},
     "me/rights.py": {"forge", "tools"},
@@ -246,6 +247,11 @@ def test_every_part_a_card_names_exists_and_carries_its_name():
             console = part(d.console, "CONSOLE")
             assert all(f is None or callable(f) for f in (console.shared, console.unshared)), d.name
             assert console.shared is None or d.sharing is not None, f"{d.name} : un partage dans la console sans sorte"
+            # le tableau de droits qu'il règle dans Réglages › Droits : le début de ses clés, ce qu'il appelle
+            assert console.table is None or isinstance(console.table, TablePart), d.name
+            if console.table is not None:
+                assert console.table.prefix.endswith(":") and len(console.table.prefix) > 1, d.name
+                assert all(callable(f) for f in (console.table.edit, console.table.editor, console.table.routes)), d.name
         sheet = _person_part(d)
         assert sheet is None or isinstance(sheet, PersonPart), d.name
         if sheet is not None:  # sa part de la fiche d'une personne : ce qu'elle nomme est un onglet qu'elle dessine
@@ -279,6 +285,16 @@ def test_each_kind_of_share_says_where_it_leads_in_the_console():
     du domaine qui partage le dit, pour chaque sorte — sinon la première page qui en montre un échouerait, ici avant."""
     share_consoles.cache_clear()
     assert list(share_consoles()) == list(SHARED_KINDS)
+
+
+def test_a_table_set_in_the_rights_page_has_one_hand():
+    """Réglages › Droits règle ici le tableau d'une ressource par la part dont le début des clés est le sien
+    (``app/handmade/rights.py::table_of``, la première qui convient) : deux parts sur les mêmes clés, et la seconde ne
+    réglerait jamais rien — sans bruit."""
+    prefixes = [c.table.prefix for d in DOMAINS if d.console is not None
+                if (c := part(d.console, "CONSOLE")).table is not None]
+    twice = [(a, b) for i, a in enumerate(prefixes) for j, b in enumerate(prefixes) if i != j and b.startswith(a)]
+    assert prefixes and not twice, twice
 
 
 def test_each_channel_has_its_accounts_said_once():
