@@ -32,6 +32,7 @@ from mika.adapters.agenda import SERVICES, AgendaAccount, AgendaConfig, server_h
 from mika.adapters.agenda.config import ACCOUNT_KEY, COLORS
 from mika.adapters.web.session import account_of
 from mika.app.domains.agenda.her import her_agenda, title_of
+from mika.app.domains.agenda.settings import AgendaSettings
 from mika.app.me.api import (
     NO_STORE,
     OWN_MAX,
@@ -806,7 +807,7 @@ async def accounts(call: Call) -> dict[str, Any]:
     _store, providers = _ports(call)
     google = getattr(providers.of(GOOGLE), "signin", None)
     return {"plugged": True, "accounts": found,
-            "google": {"app": settings.google_application() is not None,
+            "google": {"app": settings.of(AgendaSettings).google_application() is not None,
                        "direct": bool(google is not None and google.direct())},
             "microsoft_app": bool(settings.mail_application()),
             "kinds": [{"code": k, "label": KIND_WORDS[k]} for k in PLUGGABLE],
@@ -1003,7 +1004,7 @@ async def google_start(call: Call) -> dict[str, Any]:
     """Commencer la connexion Google d'un compte : l'adresse de consentement à ouvrir ; on finit en collant l'adresse
     de la page qui n'a pas pu s'ouvrir (ou son code), ou la redirection revient seule (``direct``)."""
     key, signin, conn = _connectable(call, GOOGLE)
-    if settings_of(call).google_application() is None:
+    if settings_of(call).of(AgendaSettings).google_application() is None:
         raise Denied(409, NO_GOOGLE_APP)
     origin = call.request.headers.get("origin") or str(call.request.base_url).rstrip("/")
     try:
@@ -1270,8 +1271,11 @@ def holder_person(p: Any, calendar: str) -> str:
     return owner(p, split_calendar_key(calendar)[0])
 
 
-__all__ = ["HER", "calendar_names", "count", "event_json", "holder_person", "is_hers", "mine", "routes",
-           "seen_calendars"]
+#: ce qu'il compte pour la barre du haut
+COUNTERS = {"agenda": count}
+
+__all__ = ["COUNTERS", "HER", "calendar_names", "count", "event_json", "holder_person", "is_hers", "mine",
+           "routes", "seen_calendars"]
 
 
 def routes(api: MeApiBase) -> list[Route]:

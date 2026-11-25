@@ -67,13 +67,13 @@ async def agenda_command(settings: Settings, args: argparse.Namespace) -> dict[s
     Cloud, « Application de bureau » (ou « Application Web » avec ``--web``) —, la poser, l'effacer (``--defaut``) ou
     la montrer, jamais son secret. En changer demande de reconnecter les comptes Google."""
     if args.defaut:
-        await settings.save_google_application("")
+        await settings.named("agenda").save_google_application("")
     elif args.client_id is not None:
         try:
-            await settings.save_google_application(args.client_id, args.secret or "", web=args.web)
+            await settings.named("agenda").save_google_application(args.client_id, args.secret or "", web=args.web)
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}
-    app = settings.google_application()
+    app = settings.named("agenda").google_application()
     if app is None:
         return {"ok": True, "application": None,
                 "usage": "mika agenda google <identifiant>.apps.googleusercontent.com --secret GOCSPX-…"}

@@ -14,7 +14,6 @@ from typing import Any
 from starlette.routing import Route
 
 from mika.app.domains import DOMAINS, part
-from mika.app.domains.agenda import api as agenda
 from mika.app.me import (
     mail,
     project_activity,
@@ -35,12 +34,11 @@ __all__ = ["COUNTERS", "MODULES", "MeApi", "who"]
 MODULES: tuple[Callable[[MeApiBase], list[Route]], ...] = (
     mail.routes, rights.routes, settings.routes, sharing.routes,
     projects.routes, project_code.routes, project_docs.routes, project_manage.routes, project_activity.routes,
-    writing.routes, agenda.routes,
+    writing.routes,
     *(part(d.api, "routes") for d in DOMAINS if d.api is not None))
 #: ce que chacun compte pour la barre du haut
 COUNTERS: tuple[tuple[str, Callable[[Call], int]], ...] = (
     ("mail", mail.count), ("projects", projects.count),
-    ("agenda", agenda.count),
     *((name, count) for d in DOMAINS for name, count in part(d.api, "COUNTERS", {}).items()))
 
 

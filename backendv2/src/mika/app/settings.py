@@ -28,7 +28,6 @@ from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.orm import Mapped, mapped_column
 
 from mika.adapters.agenda.config import AgendaConfig
-from mika.adapters.agenda.oauth import GoogleApplication
 from mika.adapters.imaging.config import ImageBackendSpec, ImagingConfig
 from mika.adapters.llm.config import ROLES, BackendSpec, LLMConfig
 from mika.adapters.mail import MailAccount, MailConfig, from_stored
@@ -90,8 +89,6 @@ AGENDA_KEY = "agenda"
 #: les connexions des comptes d'agenda Google et Microsoft (ADR 0309, lot 2) : par compte, sa sorte, le jeton de
 #: renouvellement scellé, l'application et l'annuaire qui l'ont délivré — à part des comptes, comme ``mail_oauth``
 AGENDA_GRANTS_KEY = "agenda_oauth"
-#: l'application Google du serveur (ADR 0309, lot 2) : le client OAuth d'un projet Google Cloud, son secret scellé
-AGENDA_GOOGLE_KEY = "agenda_google"
 #: le tableau de droits de chaque agenda qu'on a réglé (ADR 0309), par sa clé ; les autres ont celui que leur
 #: propriétaire et leurs partages donnent (``plugins/agenda/rights.py``)
 AGENDA_RIGHTS_KEY = "agenda_droits"
@@ -609,35 +606,6 @@ class Settings:
                 return False
             await self._put(AGENDA_GRANTS_KEY, grants)
             return True
-
-    def google_application(self) -> GoogleApplication | None:
-        """L'application Google du serveur (son secret ouvert) ; aucune, ou illisible : ``None`` (brancher Google est
-        alors refusé en mots)."""
-        got = self._get(AGENDA_GOOGLE_KEY)
-        if not isinstance(got, dict) or not got.get("client_id"):
-            return None
-        try:
-            return GoogleApplication.of(str(got["client_id"]), self.box.open(str(got.get("secret_sealed") or "")),
-                                        web=bool(got.get("web")))
-        except ValueError:
-            log.warning("agenda : l'application Google gardée est illisible (le secret ne s'ouvre plus ?)")
-            return None
-
-    async def save_google_application(self, client_id: str, secret: str = "", *,
-                                      web: bool = False) -> GoogleApplication | None:
-        """Garde l'application Google du serveur (``client_id`` vide : l'efface) ; un secret vide garde celui de la
-        même application. ``ValueError`` si l'identifiant ou le secret n'en ont pas la forme. En changer demande de
-        reconnecter les comptes Google."""
-        if not client_id.strip():
-            await self._put(AGENDA_GOOGLE_KEY, {})
-            return None
-        known = self.google_application()
-        if not secret.strip() and known is not None and known.client_id == client_id.strip().lower():
-            secret = known.secret
-        app = GoogleApplication.of(client_id, secret, web=web)
-        await self._put(AGENDA_GOOGLE_KEY, {"client_id": app.client_id, "secret_sealed": self.box.seal(app.secret),
-                                            "web": app.web})
-        return app
 
     def agenda_connections(self) -> list[Connection]:
         """Les comptes d'agenda réglés, pour qui les joint (le port ``agenda_providers``, relu à chaque usage)."""

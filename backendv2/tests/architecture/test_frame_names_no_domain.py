@@ -109,7 +109,7 @@ STILL: dict[str, set[str]] = {
     "handmade/tabs/thoughts.py": {"mail", "senses", "teams"},
     "handmade/waiting.py": {"contacts", "mail", "teams"},
     "me/api.py": {"mail"},
-    "me/assembly.py": {"agenda", "mail", "projects"},
+    "me/assembly.py": {"mail", "projects"},
     "me/changes.py": {"agenda", "mail", "projects"},
     "me/docs_mcp.py": {"mail", "projects", "tools"},
     "me/mail.py": {"mail"},
@@ -126,7 +126,7 @@ STILL: dict[str, set[str]] = {
     "preview/git.py": {"projects"},
     "preview/mail.py": {"mail"},
     "preview/projects.py": {"projects"},
-    "server.py": {"agenda", "contacts", "mail", "projects", "tools"},
+    "server.py": {"contacts", "mail", "projects", "tools"},
     "settings.py": {"agenda", "mail"},
     "settings_sections/plugins.py": {"agenda", "mail", "teams"},
 }

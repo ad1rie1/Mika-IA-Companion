@@ -270,7 +270,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
 
     def agenda_apps() -> AgendaApps:
         """L'application Google du serveur (son secret ouvert) et celle de Microsoft, propre à l'instance (ADR 0238)."""
-        google = settings.google_application()
+        google = settings.named("agenda").google_application()
         return AgendaApps(google_client_id=google.client_id if google is not None else "",
                           google_secret=google.secret if google is not None else "",
                           google_web=bool(google.web) if google is not None else False,
@@ -280,11 +280,11 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         """L'application Google (un secret vide garde celui de la même application) ; celle de Microsoft, partagée
         avec le courrier."""
         if cfg.google_client_id and not cfg.google_secret:
-            known = settings.google_application()
+            known = settings.named("agenda").google_application()
             if known is None or known.client_id != cfg.google_client_id:
                 return ["Le secret client de cette application Google, avec son identifiant."]
         try:
-            await settings.save_google_application(cfg.google_client_id, cfg.google_secret, web=cfg.google_web)
+            await settings.named("agenda").save_google_application(cfg.google_client_id, cfg.google_secret, web=cfg.google_web)
         except ValueError as exc:
             return [str(exc)]
         if cfg.microsoft_app != settings.own_mail_application():
@@ -295,7 +295,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         accounts = settings.agenda().accounts
         google = sum(1 for a in accounts.values() if a.kind == "google")
         microsoft = sum(1 for a in accounts.values() if a.kind == "microsoft")
-        return [("Application Google", "réglée" if settings.google_application() is not None else "pas réglée"),
+        return [("Application Google", "réglée" if settings.named("agenda").google_application() is not None else "pas réglée"),
                 ("Comptes Google", str(google)), ("Comptes Microsoft", str(microsoft)),
                 ("Les comptes eux-mêmes", Ref("local", f"{PREFIX}/agendas/comptes", "Agendas › Comptes"))]
 

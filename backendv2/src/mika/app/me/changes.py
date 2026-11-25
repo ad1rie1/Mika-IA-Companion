@@ -44,6 +44,7 @@ from mika.adapters.web.accounts import Account
 from mika.adapters.web.hub import Hub
 from mika.app.domains import DOMAINS, part
 from mika.app.domains.agenda import api as agenda_me
+from mika.app.domains.agenda.settings import AGENDA_GOOGLE_KEY
 from mika.app.me import mail as mail_me
 from mika.app.me import projects as projects_me
 from mika.app.me.api import Call, me_of
@@ -52,7 +53,6 @@ from mika.app.me.touches import EVERYONE, OWN, PERSON, PREPARE, READ, Touch
 from mika.app.me.touches import both as _both
 from mika.app.me.touches import state_of as _state
 from mika.app.settings import (
-    AGENDA_GOOGLE_KEY,
     AGENDA_GRANTS_KEY,
     AGENDA_KEY,
     EMAIL_KEY,

@@ -30,17 +30,6 @@ from starlette.responses import RedirectResponse, Response
 from starlette.routing import Mount, Route
 
 from mika.adapters.addresses import serving_on
-from mika.adapters.agenda import (
-    AgendaStore,
-    CalDavProvider,
-    GoogleProvider,
-    GoogleSignIn,
-    IcalProvider,
-    MicrosoftProvider,
-    Providers,
-    Web,
-    microsoft_signin,
-)
 from mika.adapters.contacts import ContactsStore
 from mika.adapters.imaging.config import LiveImaging
 from mika.adapters.imaging.config import build_gateway as build_image_gateway
@@ -74,7 +63,6 @@ from mika.app.console import FACULTY_LABELS, LABELS, NAVIGATION, PARAM_FAMILIES
 from mika.app.console_menu import menu_for
 from mika.app.constellation import Constellation
 from mika.app.domains import DOMAINS, part
-from mika.app.domains.agenda.desk import AgendaSettingsDesk
 from mika.app.handmade import access, approval_sources, rights, waiting
 from mika.app.handmade.home import HomePage
 from mika.app.handmade.now import NowPage
@@ -219,8 +207,6 @@ class Live:
         # avec qui chacune est partagée, et ce que la personne en a (ADR 0188)
         shares = {k: dict(sorted(a.shares.items())) for k, a in sorted(boxes.items()) if a.shares}
         out["email"] = {"canaux": canaux, "boxes_off": off, "owners": owners, "shares": shares}
-        # ses comptes d'agenda et leurs agendas (ADR 0309) : à qui, partagés avec qui, masqués, leur rappel
-        out["agenda"] = self.settings.agenda().params()
         for domain in DOMAINS:  # ce que les réglages d'un domaine qui a sa fiche donnent à ses plugins (``inputs``)
             if domain.wiring is not None:
                 out.update(part(domain.wiring, "inputs", _no_inputs)(self.settings))
@@ -342,25 +328,6 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     # l'annuaire (ADR 0298) : tous ceux qu'elle connaît, même sans leur avoir parlé, tirés de Teams et du courrier par
     # le plugin ``contacts`` (sa base à lui, hors du journal)
     outside["contacts"] = ContactsStore(bases["contacts"], now=clock.now)
-    # l'agenda (ADR 0309) : ses événements hors du journal (ceux du système y font foi, ceux d'un fournisseur en sont
-    # la copie), et ses fournisseurs avec les comptes des réglages, relus à chaque usage
-    outside["agenda"] = AgendaStore(bases["agenda"], now=clock.now)
-    outside["agenda_providers"] = Providers(outside["agenda"], settings.agenda_connections)
-    # un abonnement iCal (une adresse .ics, en lecture seule) et un serveur CalDAV (ADR 0309, lot 1) ; une redirection
-    # ou une adresse donnée par le serveur qui quitte son hôte ne mène qu'à Internet
-    agenda_web = Web()
-    outside["agenda_providers"].add(IcalProvider(agenda_web, now=clock.now))
-    outside["agenda_providers"].add(CalDavProvider(agenda_web, now=clock.now))
-    # Google Agenda et Outlook.com / Microsoft 365 (ADR 0309, lot 2) : leurs connexions scellées à part des comptes ;
-    # Google par l'application Google du serveur (réglée par un opérateur), Microsoft par celle du courrier (ADR 0238),
-    # chacun joignant ses hôtes seulement. Leurs parcours de connexion : ``.signin`` de chacun (lot 4 : l'API)
-    outside["agenda_providers"].add(GoogleProvider(GoogleSignIn(settings, settings.google_application,
-                                                                now=clock.now), now=clock.now))
-    outside["agenda_providers"].add(MicrosoftProvider(microsoft_signin(settings, settings.mail_application),
-                                                      now=clock.now))
-    # ce que la console change d'un compte d'agenda (ADR 0309, lot 5) : le décocher, ne plus suivre un de ses agendas,
-    # oublier sa connexion — jamais une écriture dans un agenda
-    agenda_desk = outside["agenda_desk"] = AgendaSettingsDesk(settings, outside["agenda_providers"])
     # ce que chaque domaine apporte (ADR 0310) : ses adaptateurs, ses ports, ses portes HTTP — sa fiche nomme son
     # câblage, que ce serveur appelle sans le connaître (``app/wiring.py``)
     wiring = Wiring(data=data, settings=settings, clock=clock, bases=bases, ports=outside, store=store)
@@ -382,7 +349,6 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     live = Live(kernel, hub, port, Accounts(store), settings, gateway, fixed, calls=CallLog(store),
                 persona_file=persona, data=data, imaging=imaging, imaging_fixed=imaging_fixed,
                 parts=wiring.parts, read_limits=None if fixed else model_limits, mail_watch=mail_watch)
-    agenda_desk.reconfigure = live.reconfigure
     # l'exemple de l'autrice « Message », quand le sien est vide : le fil de référence de sa persona (ADR 0124), lu au
     # journal (lu à chaque épisode : jamais le YAML)
     settings.reference_thread = lambda: kernel.mind.frame().get(self_c.PERSONA).reference_thread
@@ -517,20 +483,16 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     # de son travail ; à chaque personne connectée, ce qu'elle voit — et la boîte d'envoi réveille l'extension
     live_changes = live.changes = LiveChanges(kernel, hub, moi)
     kernel.mind.subscribe(live_changes.listen)
-    for base in (outside["mail"], outside["contacts"], outside["agenda"]):
+    for base in (outside["mail"], outside["contacts"]):
         base.on_change(live_changes.touch)
     for base in wiring.watched:  # les bases des domaines qui ont leur fiche
         base.on_change(live_changes.touch)
     kernel.runner.on_step = live_changes.step
     # ce qui est tenu hors du journal sans être une base à côté : les réglages (chaque enregistrement), la fin de
-    # l'attente d'un code Microsoft (la présence de l'extension Teams : son câblage, ``bind``)
+    # l'attente d'un code Microsoft (la présence de l'extension Teams, la connexion d'un compte d'agenda : leur câblage,
+    # ``bind``)
     settings.on_saved = live_changes.saved
     microsoft.on_state = live_changes.signed
-    # la connexion Google ou Microsoft d'un compte d'agenda (ADR 0309, lot 4) : connecté, refusé, échu
-    for kind in ("google", "microsoft"):
-        agenda_signin = getattr(outside["agenda_providers"].of(kind), "signin", None)
-        if agenda_signin is not None:
-            agenda_signin.on_state = live_changes.agenda_signed
     return create_app(port, live.accounts, hub, web, lifespan=lifespan,
                       extra_routes=[Route("/", _root, methods=["GET", "HEAD"]), *constellation.routes(),
                                     *moi.routes(),
