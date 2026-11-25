@@ -82,8 +82,6 @@ from mika.app.console import FACULTY_LABELS, LABELS, NAVIGATION, PARAM_FAMILIES
 from mika.app.console_menu import menu_for
 from mika.app.constellation import Constellation
 from mika.app.domains import DOMAINS, part
-from mika.app.domains.phone.api import APK_NAME
-from mika.app.domains.phone.desk import PhoneDesk
 from mika.app.forge_settings import ForgeSettingsStore
 from mika.app.handmade import access, approval_sources, rights, waiting
 from mika.app.handmade.home import HomePage
@@ -388,8 +386,6 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     # ce que la console change d'un compte d'agenda (ADR 0309, lot 5) : le décocher, ne plus suivre un de ses agendas,
     # oublier sa connexion — jamais une écriture dans un agenda
     agenda_desk = outside["agenda_desk"] = AgendaSettingsDesk(settings, outside["agenda_providers"])
-    # les messages du téléphone (ADR 0120) : la porte de ``/api/phone/…``, et l'envoi d'une réponse proposée
-    phone = outside["phone"] = PhoneDesk()
     # les lieux, les adresses et les itinéraires de l'écran Carte et de ses outils (ADR 0194) : l'index des lieux de
     # ``cartes/``, la Géoplateforme, Valhalla ; les données touristiques et les événements de DATAtourisme, dans
     # ``cartes/tourisme.db`` (ADR 0245) ; les avis de Google Places, dans ``cartes/avis.db`` (ADR 0256) — réglés dans la
@@ -441,7 +437,6 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     port = KernelPort(kernel)
     hub.port = port
     teams.port = port
-    phone.port = port
     live = Live(kernel, hub, port, Accounts(store), settings, gateway, fixed, calls=CallLog(store),
                 persona_file=persona, data=data, imaging=imaging, imaging_fixed=imaging_fixed, mcp=mcp,
                 parts=wiring.parts, teams=teams, read_limits=None if fixed else model_limits,
@@ -453,7 +448,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     # les notifications du téléphone fermé (ADR 0077) : par Firebase, la clé relue à chaque envoi — collée dans la
     # console, sinon le fichier ``firebase-service-account.json`` du dossier de données
     push_sender = FcmSender(lambda: settings.push() or push_key_file(data))
-    hub.push = phone.push = MobilePush(live.accounts, push_sender)
+    hub.push = MobilePush(live.accounts, push_sender)
     # ce qui, dans un domaine, a besoin du noyau : son port d'entrée, le serveur vivant, les notifications
     wiring.port, wiring.live, wiring.push = port, live, hub.push
     for module in wired:
@@ -581,7 +576,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     docs_mcp = Mount(DOCS_MCP_PREFIX, app=DocsPoint(kernel, live.accounts).app())
     # ce que frontendv2 montre à qui est connecté, et seulement à elle (ADR 0187) ; sa borne des trajets vaut aussi pour
     # le GPX d'un voyage qu'un opérateur tire de la console, sur son compte (ADR 0204)
-    moi = MeApi(kernel, live.accounts, origins=web.origins, apk=data / "telephone" / APK_NAME, extension=EXTENSION_DIR,
+    moi = MeApi(kernel, live.accounts, origins=web.origins, extension=EXTENSION_DIR,
                 settings=live.settings, reconfigure=live.reconfigure, tiles=live.tiles, **wiring.me)
     # le direct (ADR 0308) : le journal, les bases tenues à côté (chacune prévient de ses écritures validées), l'étape
     # de son travail ; à chaque personne connectée, ce qu'elle voit — et la boîte d'envoi réveille l'extension
@@ -609,8 +604,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                                     *rights.routes(console_pages.ui),
                                     *inspector, relay, console_mcp, lent, docs_mcp, world_hub.route()],
                       preprocess=preprocess, camera=camera, sensor_digest=settings.sensors_digest,
-                      teams=teams, push_ready=push_sender.configured, **wiring.web,
-                      phone=phone), live
+                      teams=teams, push_ready=push_sender.configured, **wiring.web), live
 
 
 async def register_accounts(kernel: Kernel, accounts: Accounts) -> int:

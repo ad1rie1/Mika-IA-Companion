@@ -156,7 +156,7 @@ FACULTY_LABELS: dict[str, str] = _named("faculties", {
     "world": "Son monde et son corps", "shares": "Fichiers envoyés", "attachments": "Pièces reçues",
     "imaging": "Dessins", "location": "Localisation", "forge_signals": "Signaux de ses apps",
     "mcp": "Outils extérieurs", "web": "Recherche web", "teams": "Teams",
-    "phone": "Messages du téléphone", "trips": "Carte et voyages", "agenda": "Agenda",
+    "trips": "Carte et voyages", "agenda": "Agenda",
 })
 
 #: Les sections du prompt, nommées par ce qu'elles lui montrent (Pourquoi a-t-elle dit ça ?, Prompt).
@@ -229,7 +229,6 @@ SECTION_LABELS: dict[str, str] = _named("sections", {
     "teams_voice": "Comment elle écrit dans Teams (à ta place)",
     "teams_task": "Le message Teams auquel elle prépare une réponse (cité)",
     "teams_ask": "Ce qu'on lui demande d'y répondre (Teams)",
-    "phone_offers": "Ce que sont devenues ses réponses proposées sur le téléphone",
     "crossed": "Elle allait justement lui écrire (leurs messages se sont croisés)",
     # ADR 0309
     "agenda_day": "Sa journée dans ses agendas (aujourd'hui et demain, cité)",
@@ -323,7 +322,6 @@ PROCESS_LABELS: dict[str, str] = _named("processes", {
     "agenda.watch": "Voir venir les rappels et les invitations des agendas, laisser tomber ce qui n'a plus lieu d'être",
     "teams.expire": "Laisser tomber les réponses Teams restées sans accord ou sans envoi",
     "teams.answered": "Refuser ses réponses Teams auxquelles on a répondu autrement dans la discussion",
-    "phone.expire": "Laisser tomber les réponses proposées sur le téléphone restées sans geste",
     "memory.relayed": "Retenir ce que le téléphone lui montre (les messages reçus)",
     "identity.expire": "Oublier les inconnues de passage restées silencieuses",
 })
@@ -470,8 +468,6 @@ EVENT_LABELS: dict[str, str] = _named("events", {
     "teams.written": "Un message Teams écrit depuis le web, en file pour l'extension",
     "teams.images": "Une image d'un message Teams reçue de l'extension",
     "teams.image_seen": "Une image d'un message Teams regardée",
-    "phone.received": "Un message montré par le téléphone", "phone.drafted": "Une réponse préparée pour le téléphone",
-    "phone.settled": "Une réponse proposée sur le téléphone : partie, laissée ou expirée",
     "memory.relayed_read": "Des messages du téléphone relus, ou remis à la file des reprises",
 })
 
@@ -549,7 +545,7 @@ BUNDLE_LABELS: dict[str, str] = _named("bundles", {
 #: Le nom court de chaque capacité : ce qu'une ligne ou une puce de « À valider » et l'historique en disent, sans couper
 #: sa phrase. Celle-ci reste sa description, au survol et dans l'en-tête de la demande ouverte.
 CAPABILITY_LABELS: dict[str, str] = _named("capabilities", {
-    "email.send": "Mail", "teams.send": "Réponse Teams", "phone.send": "Réponse téléphone",
+    "email.send": "Mail", "teams.send": "Réponse Teams",
     "mcp.call": "Outil extérieur", "forge.call": "Outil d'app", "forge.install": "Version d'app",
     "projects.networked": "Commande réseau", "projects.push": "Push git", "projects.pull": "Pull git",
     "projects.pull_request": "Pull request",
@@ -578,7 +574,7 @@ ENRICHER_LABELS: dict[str, str] = _named("enrichers", {
     "projects_review": "Ce qu'une relecture indépendante a sous les yeux (ses textes, le diff du commit relu)",
     "projects_asks": "Les demandes de son projet aux projets qu'il lit (où chacune en est)",
     "projects_answer": "La réponse à sa demande d'aide (un projet)", "sent_files": "Les fichiers qu'elle a envoyés",
-    "mail": "Son courrier", "teams": "Ses conversations Teams", "phone": "Les messages du téléphone",
+    "mail": "Son courrier", "teams": "Ses conversations Teams",
     "headlines": "Les titres de ses flux", "views": "Ce que voit la caméra", "dessins": "Ses dessins",
     "services": "Ses demandes aux outils extérieurs", "apps": "Ses apps forgées",
     "work_services": "Ses demandes aux outils extérieurs, faites en travaillant",

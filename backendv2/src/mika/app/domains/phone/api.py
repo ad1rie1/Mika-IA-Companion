@@ -190,3 +190,7 @@ def routes(api: MeApiBase) -> list[Route]:
     r = api.route
     return [r("/phone/conversations", conversations), r("/phone/thread", thread), r("/phone/phones", phones),
             r("/phone/position", position), r("/phone/apk", apk, raw=True), r("/phone/revoke", revoke, write=True)]
+
+
+#: ce qu'il compte pour la barre du haut
+COUNTERS = {"phone": count}
