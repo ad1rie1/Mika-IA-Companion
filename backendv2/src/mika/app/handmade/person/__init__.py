@@ -39,12 +39,9 @@ from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 from starlette.routing import Route
 
-from mika.adapters.mcp.config import TRANSPORTS
 from mika.adapters.web.accounts import Account, account_of_handle
 from mika.adapters.web.gate import SlidingWindow
 from mika.app.domains import DOMAINS, PersonPart, part
-from mika.app.domains.tools.settings import ToolsSettings
-from mika.app.domains.tools.sharing import service_shares
 from mika.app.handmade import (
     FORGOTTEN,
     MONTHS,
@@ -63,7 +60,7 @@ from mika.app.handmade import (
 from mika.app.handmade.blocks import tab as blocks_tab
 from mika.app.handmade.exchanges import exchanges
 from mika.app.handmade.lists import Roles, drawn, listing
-from mika.app.handmade.person.common import Who, _slice
+from mika.app.handmade.person.common import LEVEL_FR, Who, _slice, _with
 from mika.app.handmade.person.files import files
 from mika.app.handmade.person.memory import memory
 from mika.app.handmade.rights import UNSHARE, retiring, share_consoles
@@ -99,7 +96,7 @@ from mika.kernel.inspect import Fields, Head, Note, Section, Table, num_fr, pct_
 from mika.runtime.boundary import Failed, call
 from mika.vocab import affect as A
 from mika.vocab import privacy
-from mika.vocab.access import PERSON, SHARES
+from mika.vocab.access import PERSON
 from mika.vocab.knowledge import knowns
 from mika.vocab.people import is_identifiable
 from mika.vocab.words import elided
@@ -510,29 +507,6 @@ def owned_tabs() -> tuple[tuple[str, str, Roles], ...]:
     return tuple((p.tab, p.label, Roles(title=p.noun, badges=p.badges, tiles=True)) for p in channels.parts().values())
 
 
-#: le niveau d'un partage (ADR 0188), tel que la fiche le nomme ; sa sorte, sa part la dit (``SharingPart.word``)
-LEVEL_FR = {level: label.lower() for level, label in SHARES}
-
-
-def _with(look: Look, who: str, level: str) -> dict[str, str]:
-    """Une personne d'un partage (``personne:<clé>``, ou sa clé) et son niveau, pour la fiche."""
-    person = who.removeprefix(PERSON)
-    return {"name": look.name(person), "person_href": look.href(person), "level": LEVEL_FR.get(level, level)}
-
-
-def services(look: Look, who: Who) -> list[dict[str, Any]]:
-    """Les services MCP qu'elle a branchés depuis son espace (ADR 0192 : ``McpServer.owner``), lus dans les réglages :
-    chacun, à quoi il sert, s'il est actif, avec qui elle le partage."""
-    settings = look.ui.deps.settings
-    if settings is None:
-        return []
-    mine = PERSON + who.person
-    return [{"name": name, "href": subject_url("serveur", name), "purpose": excerpt(spec.purpose, 200),
-             "on": spec.enabled, "where": dict(TRANSPORTS).get(spec.transport, spec.transport),
-             "shared": [_with(look, p, level) for p, level in sorted(service_shares(spec).items())]}
-            for name, spec in sorted(settings.of(ToolsSettings).mcp().servers.items()) if spec.owner == mine]
-
-
 def _resource(s: Shared) -> dict[str, str]:
     """La ressource d'un partage, pour la fiche : sa sorte en mots (``SharingPart.word``), son nom, où elle mène (ce
     qu'en dit la part de console de sa sorte : ``ConsolePart.shared``)."""
@@ -576,8 +550,11 @@ def owned(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str],
                                 if isinstance(b, Note)]})
     look = Look.of(ui, DAY)
     who = who_of(look, key)
-    plugged, shared = services(look, who), shares(look, who)
-    panes += [{"id": "services", "label": "Services", "count": len(plugged), "services": plugged},
+    # ce que chaque domaine y montre après les comptes des canaux (``PersonPart.owned`` : ses services), puis ses
+    # partages
+    held = [(anchor, label, rows(look, who)) for anchor, label, rows in owned_parts()]
+    shared = shares(look, who)
+    panes += [*({"id": anchor, "label": label, "count": len(found), anchor: found} for anchor, label, found in held),
               {"id": "partages", "label": "Partages", "count": len(shared["given"]) + len(shared["received"]),
                "shares": shared}]
     return Markup(env.get_template("handmade/person/tabs/comptes.html").render(
@@ -625,6 +602,12 @@ def persons() -> tuple[PersonPart, ...]:
     naissant."""
     consoles = (part(d.console, "CONSOLE") for d in DOMAINS if d.console is not None)
     return tuple(console.person for console in consoles if console.person is not None)
+
+
+def owned_parts() -> tuple[tuple[str, str, Callable[..., list[Any]]], ...]:
+    """Ce que chaque domaine montre en sous-onglet de Comptes après les comptes des canaux (``PersonPart.owned`` : les
+    services qu'elle a branchés), dans l'ordre des fiches."""
+    return tuple(p.owned for p in persons() if p.owned is not None)
 
 
 def every_tab() -> dict[str, Callable[..., Any]]:
@@ -682,8 +665,8 @@ def tab_counts(look: Look, who: Who) -> dict[str, int]:
         # Comptes, sous l'onglet du premier canal, réunit les autres (``joined``) ; sans Comptes, Teams est un onglet à
         # lui
         **held,
-        owned_tabs()[0][0]: sum(held.values()) + len(services(look, who)) + len(shared["given"])
-        + len(shared["received"]),
+        owned_tabs()[0][0]: sum(held.values()) + sum(len(rows(look, who)) for _a, _l, rows in owned_parts())
+        + len(shared["given"]) + len(shared["received"]),
         "buts": len(goals_of(goals, handles)) if goals is not None else 0,
     }
     for p in persons():  # ce que chaque domaine y compte, ajouté à ce que la fiche compte déjà
@@ -773,14 +756,16 @@ class PersonOverview(Overview):
 
     def shows(self, ui: UI, key: str) -> Sequence[str]:
         """Comptes (``boites``) aussi pour qui n'a pas de boîte à elle mais a branché un service ou partage quelque
-        chose, dans un sens ou dans l'autre (C9-02) : ses sous-onglets Services et Partages sont dessinés ici
-        (``owned``), et le plugin du courrier ne montre l'onglet qu'à qui a une boîte."""
+        chose, dans un sens ou dans l'autre (C9-02) : ses sous-onglets Services (la part de ses outils,
+        ``PersonPart.owned``) et Partages sont dessinés ici (``owned``), et le plugin du courrier ne montre l'onglet
+        qu'à qui a une boîte."""
         if not self.known(ui, key):
             return ()
         look = Look.of(ui, DAY)
         who = who_of(look, key)
         shared = shares(look, who)
-        return (owned_tabs()[0][0],) if services(look, who) or shared["given"] or shared["received"] else ()
+        mine = any(rows(look, who) for _anchor, _label, rows in owned_parts())
+        return (owned_tabs()[0][0],) if mine or shared["given"] or shared["received"] else ()
 
     def render_tab(self, ui: UI, key: str, tab: str, blocks: Sequence[Any], query: Mapping[str, str],
                    forms: Mapping[str, Any] | None = None) -> Any:

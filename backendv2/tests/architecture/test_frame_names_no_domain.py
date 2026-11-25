@@ -93,7 +93,6 @@ FOREVER: dict[str, str] = {
 #: ce qui reste à sortir du cadre : fichier d'``app`` → domaines qu'il nomme encore. Elle ne fait que rétrécir
 STILL: dict[str, set[str]] = {
     "handmade/directory.py": {"contacts"},
-    "handmade/person/__init__.py": {"tools"},
     "handmade/rights.py": {"agenda", "forge"},
     "handmade/tabs/people.py": {"contacts"},
     "handmade/tabs/thoughts.py": {"mail", "senses", "teams"},
@@ -250,7 +249,10 @@ def test_every_part_a_card_names_exists_and_carries_its_name():
         sheet = _person_part(d)
         assert sheet is None or isinstance(sheet, PersonPart), d.name
         if sheet is not None:  # sa part de la fiche d'une personne : ce qu'elle nomme est un onglet qu'elle dessine
-            assert sheet.tabs and all(callable(draw) for draw in sheet.tabs.values()), d.name
+            assert (sheet.tabs or sheet.owned) and all(callable(draw) for draw in sheet.tabs.values()), d.name
+            # … ou, en sous-onglet de Comptes, ce qu'elle a chez lui : (son ancre, son nom, ce qui le lit)
+            assert sheet.owned is None or (len(sheet.owned) == 3 and all(isinstance(x, str) and x for x in sheet.owned[:2])
+                                           and callable(sheet.owned[2])), d.name
             assert set(sheet.formed) <= set(sheet.tabs), f"{d.name} : {sorted(set(sheet.formed) - set(sheet.tabs))}"
             # … ou, pour un compte qui s'ajoute à celui du cadre, un onglet du cadre
             unknown = set(sheet.counts) - {*sheet.tabs, *PERSON_TABS, *account_tabs()}
@@ -286,6 +288,15 @@ def test_each_channel_has_its_accounts_said_once():
     found = [part(d.accounts, "ACCOUNTS") for d in DOMAINS if d.accounts is not None]
     assert sorted(p.canal for p in found) == sorted(CHANNELS), [p.canal for p in found]
     assert len({p.tab for p in found}) == len(found), [p.tab for p in found]
+
+
+def test_a_pane_of_the_accounts_of_a_person_is_said_once():
+    """L'onglet Comptes d'une personne a un sous-onglet par canal (``AccountsPart.tab``), puis un par part qui y montre
+    ce qu'elle a chez elle (``PersonPart.owned``), puis Partages : leurs ancres sont des ``id`` de la page — une ancre
+    dite deux fois ouvrirait le premier des deux sous-onglets, sans bruit."""
+    anchors = [*account_tabs(), *(s.owned[0] for d in DOMAINS if (s := _person_part(d)) is not None and s.owned),
+               "partages"]
+    assert len(anchors) == len(set(anchors)), anchors
 
 
 def _person_part(d: Domain) -> PersonPart | None:

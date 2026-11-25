@@ -226,6 +226,10 @@ class PersonPart:
     hidden: Callable[..., Sequence[str]] | None = None
     #: ses routes sous la fiche : ``routes(ui, outbound)`` rend des ``Route`` (le GPX d'un voyage)
     routes: Callable[..., list[Any]] | None = None
+    #: ce qu'elle a chez lui sans être le compte d'un canal (les services qu'elle a branchés) : un sous-onglet de
+    #: Comptes, après ceux des canaux — (son ancre, son nom, ``held(look, who)``), où ``held`` rend ses lignes, que le
+    #: gabarit de Comptes dessine sous cette ancre ; elles comptent dans Comptes, et le montrent à qui n'a pas de boîte
+    owned: tuple[str, str, Callable[..., list[Any]]] | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -7,7 +7,7 @@ régler, brancher, retirer), les serveurs qu'apporte un plugin système (``syste
 ses outils prêtés à un agent, ``lending.py``, servis sous ``/mcp/pret/<nom>``), leur module de l'API par personne
 (``api.py`` : ses services), ce qu'ils partagent (``sharing.py`` : ses services, avec qui), leur part du direct
 (``live.py``), leur commande (``cli.py`` : ``mika mcp``) et leur part de la console (``console/`` : la fiche d'un
-service branché, sa rubrique de réglages, leurs gabarits). Les services MCP lancés sur cette machine vivent dans le
+service branché, les services d'une personne sur sa fiche, sa rubrique de réglages, leurs gabarits). Les services MCP lancés sur cette machine vivent dans le
 dossier ``mcp/`` (``places``).
 
 Restent au cadre : la destination « Ses outils » et ses onglets (``app/handmade/tabs/tools.py`` : tous ses outils,
