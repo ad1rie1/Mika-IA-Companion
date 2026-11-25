@@ -1,5 +1,6 @@
 package fr.qwartz.mika.data.moi.phone
 
+import fr.qwartz.mika.core.AppGraph
 import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.decode
 import fr.qwartz.mika.data.moi.jsonOf
@@ -29,3 +30,6 @@ open class PhoneMoiApi(private val api: MoiApi) {
     suspend fun revoke(id: Long, key: String? = MoiApi.newKey()): MoiApi.Result<PhoneDone> =
         api.post("/phone/revoke", jsonOf(listOf("id" to id)), key).decode(PhoneDone.serializer())
 }
+
+/** Le Téléphone sur l'API de ce téléphone. */
+internal fun AppGraph.phoneApi(): PhoneMoiApi = PhoneMoiApi(moi)

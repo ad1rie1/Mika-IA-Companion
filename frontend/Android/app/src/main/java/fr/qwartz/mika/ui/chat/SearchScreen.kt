@@ -57,7 +57,7 @@ import fr.qwartz.mika.data.moi.mail.MailRow
 import fr.qwartz.mika.data.moi.teams.Conversation
 import fr.qwartz.mika.ui.Route
 import fr.qwartz.mika.ui.isTopLevel
-import fr.qwartz.mika.ui.mail.mailApi
+import fr.qwartz.mika.data.moi.mail.mailApi
 import fr.qwartz.mika.ui.components.SettingsPages
 import fr.qwartz.mika.ui.shell.ListHead
 import fr.qwartz.mika.ui.shell.LocalShell
@@ -68,7 +68,7 @@ import fr.qwartz.mika.ui.shell.SearchBar
 import fr.qwartz.mika.ui.shell.SectionScaffold
 import fr.qwartz.mika.ui.shell.rememberSessionKey
 import fr.qwartz.mika.ui.shell.said
-import fr.qwartz.mika.ui.teams.teamsApi
+import fr.qwartz.mika.data.moi.teams.teamsApi
 import fr.qwartz.mika.ui.theme.mika
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.coroutineScope

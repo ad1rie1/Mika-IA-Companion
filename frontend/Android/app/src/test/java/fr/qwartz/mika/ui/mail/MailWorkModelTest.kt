@@ -11,6 +11,7 @@ import fr.qwartz.mika.data.moi.mail.HerMark
 import fr.qwartz.mika.data.moi.mail.MailDone
 import fr.qwartz.mika.data.moi.mail.MailDraft
 import fr.qwartz.mika.data.moi.mail.MailFull
+import fr.qwartz.mika.data.moi.mail.MailNotices
 import fr.qwartz.mika.data.moi.mail.MailPerson
 import fr.qwartz.mika.data.moi.mail.MailWork
 import fr.qwartz.mika.data.net.Topics

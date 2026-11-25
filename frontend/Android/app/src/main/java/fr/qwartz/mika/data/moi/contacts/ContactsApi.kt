@@ -1,5 +1,6 @@
 package fr.qwartz.mika.data.moi.contacts
 
+import fr.qwartz.mika.core.AppGraph
 import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.decode
 import kotlinx.serialization.json.JsonObject
@@ -31,3 +32,6 @@ open class ContactsApi(private val api: MoiApi) {
     open suspend fun forgetFact(id: Int, key: String? = MoiApi.newKey()): MoiApi.Result<ContactsDone> =
         api.post("/contacts/fact/forget", JsonObject(mapOf("id" to JsonPrimitive(id))), key).decode(ContactsDone.serializer())
 }
+
+/** Contacts sur l'API du téléphone. */
+internal fun AppGraph.contactsApi(): ContactsApi = ContactsApi(moi)

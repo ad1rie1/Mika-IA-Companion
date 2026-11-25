@@ -1,5 +1,6 @@
 package fr.qwartz.mika.data.moi.agenda
 
+import fr.qwartz.mika.core.AppGraph
 import fr.qwartz.mika.core.MikaJson
 import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.decode
@@ -202,3 +203,6 @@ data class EventFields(
         }
     }
 }
+
+/** L'Agenda sur l'API du téléphone. */
+internal fun AppGraph.agendaApi(): AgendaApi = AgendaApi(moi)

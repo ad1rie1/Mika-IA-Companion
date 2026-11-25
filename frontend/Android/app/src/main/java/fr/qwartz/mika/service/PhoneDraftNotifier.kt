@@ -29,7 +29,7 @@ import fr.qwartz.mika.data.phone.PhoneOutbox
 import fr.qwartz.mika.data.phone.ReplyRegistry
 import fr.qwartz.mika.data.phone.SettleReason
 import fr.qwartz.mika.data.phone.Settlement
-import fr.qwartz.mika.ui.DeepLinks
+import fr.qwartz.mika.core.DeepLinks
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock

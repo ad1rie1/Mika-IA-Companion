@@ -1,5 +1,6 @@
 package fr.qwartz.mika.data.moi.settings
 
+import fr.qwartz.mika.core.AppGraph
 import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.decode
 import fr.qwartz.mika.data.moi.jsonOf
@@ -138,3 +139,5 @@ open class SettingsApi(private val api: MoiApi) {
     private suspend fun write(path: String, body: JsonObject, key: String? = MoiApi.newKey()): MoiApi.Result<SettingsDone> =
         api.post(path, body, key).decode(SettingsDone.serializer())
 }
+
+internal fun AppGraph.settingsApi(): SettingsApi = SettingsApi(moi)

@@ -94,7 +94,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontFamily
 import fr.qwartz.mika.ui.avatar.AvatarFace
-import fr.qwartz.mika.ui.avatar.LoadedPortrait
+import fr.qwartz.mika.data.avatar.LoadedPortrait
 import fr.qwartz.mika.ui.components.MikaAvatar
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch

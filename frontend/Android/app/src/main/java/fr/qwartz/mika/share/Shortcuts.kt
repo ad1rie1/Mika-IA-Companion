@@ -9,7 +9,7 @@ import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
 import fr.qwartz.mika.MainActivity
 import fr.qwartz.mika.R
-import fr.qwartz.mika.ui.DeepLinks
+import fr.qwartz.mika.core.DeepLinks
 
 /**
  * Mika comme conversation pour Android : une personne (« Mika », clé `mika`) et un raccourci durable

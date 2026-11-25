@@ -20,12 +20,15 @@ import fr.qwartz.mika.data.moi.mail.MailBox
 import fr.qwartz.mika.data.moi.mail.MailBoxes
 import fr.qwartz.mika.data.moi.mail.MailFolder
 import fr.qwartz.mika.data.moi.mail.MailLimits
+import fr.qwartz.mika.data.moi.mail.MailNotices
 import fr.qwartz.mika.data.moi.mail.MailRow
 import fr.qwartz.mika.data.moi.mail.MailStates
 import fr.qwartz.mika.data.moi.mail.MailView
 import fr.qwartz.mika.data.moi.mail.SentMail
+import fr.qwartz.mika.data.moi.mail.UnsentMails
 import fr.qwartz.mika.data.moi.mail.commonBoxes
 import fr.qwartz.mika.data.moi.mail.leftView
+import fr.qwartz.mika.data.moi.mail.mailApi
 import fr.qwartz.mika.data.moi.mail.messagesQuery
 import fr.qwartz.mika.data.moi.mail.moveTargets
 import fr.qwartz.mika.data.moi.mail.nextPage

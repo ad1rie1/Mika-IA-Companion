@@ -4,7 +4,9 @@ import fr.qwartz.mika.data.moi.Corrected
 import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.correctWords
 import fr.qwartz.mika.data.moi.mail.MailFull
+import fr.qwartz.mika.data.moi.mail.MailNotices
 import fr.qwartz.mika.data.moi.mail.MailPerson
+import fr.qwartz.mika.data.moi.mail.UnsentMails
 import fr.qwartz.mika.ui.Route
 import fr.qwartz.mika.ui.shell.CorrectNotice
 import kotlinx.coroutines.ExperimentalCoroutinesApi

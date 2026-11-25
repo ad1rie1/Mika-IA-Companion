@@ -64,9 +64,11 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.min
 import androidx.compose.ui.unit.sp
+import fr.qwartz.mika.data.avatar.AvatarAssets
 import fr.qwartz.mika.data.avatar.AvatarDirector
 import fr.qwartz.mika.data.avatar.AvatarDirector.Aura
 import fr.qwartz.mika.data.avatar.BlinkSchedule
+import fr.qwartz.mika.data.avatar.LoadedPortrait
 import kotlinx.coroutines.delay
 import kotlin.math.PI
 import kotlin.math.max

@@ -97,7 +97,7 @@ import fr.qwartz.mika.data.moi.contacts.ContactsApi
 import fr.qwartz.mika.data.moi.contacts.RecipientSuggester
 import fr.qwartz.mika.ui.Route
 import fr.qwartz.mika.ui.mail.RecipientSuggestions
-import fr.qwartz.mika.ui.mail.mailApi
+import fr.qwartz.mika.data.moi.mail.mailApi
 import fr.qwartz.mika.ui.shell.BarAction
 import fr.qwartz.mika.ui.shell.LoadBox
 import fr.qwartz.mika.ui.shell.LocalShell

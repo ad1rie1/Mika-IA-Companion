@@ -66,6 +66,7 @@ import fr.qwartz.mika.data.moi.teams.replyBlocked
 import fr.qwartz.mika.data.moi.teams.replyState
 import fr.qwartz.mika.data.moi.teams.replyText
 import fr.qwartz.mika.data.moi.teams.sentUnder
+import fr.qwartz.mika.data.moi.teams.teamsApi
 import fr.qwartz.mika.ui.shell.AskDialog
 import fr.qwartz.mika.ui.shell.Gap
 import fr.qwartz.mika.ui.shell.MIcon
@@ -84,9 +85,6 @@ import kotlinx.coroutines.launch
  * sur ses réponses (une clé d'envoi par geste), la carte rose d'une réponse, le rond d'une conversation, les petites
  * fenêtres (refuser, retoucher, la reprendre).
  */
-
-/** Teams sur l'API du téléphone ; « Corriger » par le client qui attend la fin d'une correction. */
-internal fun AppGraph.teamsApi(): TeamsApi = TeamsApi(moi, moiCorrect)
 
 /** Ce que les écrans de Teams prennent de la session : l'API, relire les pastilles, l'heure. Un test JVM les donne sans
  *  le graphe de l'app. */

@@ -36,11 +36,10 @@ import androidx.compose.ui.unit.sp
 import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
 import fr.qwartz.mika.data.files.DownloadStore
-import fr.qwartz.mika.data.moi.MoiApi
-import fr.qwartz.mika.data.moi.mail.MailApi
 import fr.qwartz.mika.data.moi.mail.MailPiece
 import fr.qwartz.mika.data.moi.mail.Triage
 import fr.qwartz.mika.data.moi.mail.bodyBlocks
+import fr.qwartz.mika.data.moi.mail.mailApi
 import fr.qwartz.mika.ui.shell.MIcon
 import fr.qwartz.mika.ui.shell.linked
 import kotlinx.coroutines.channels.Channel
@@ -55,16 +54,11 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicLong
 
 /*
- * Ce que les écrans de Mail partagent (ADR 0235) : l'API, ce qu'un écran dit aux autres d'un geste, les petites formes
- * de la maquette (`maquette/ecrans/mail.js`) qui ne servent qu'à Mail — le point du non-lu, l'icône d'un dossier, le
- * texte d'un mail, ses pièces. Celles que Teams partage sont dans `ui/shell/Parts.kt`.
+ * Ce que les écrans de Mail partagent (ADR 0235) : ce qu'un écran dit aux autres d'un geste, les petites formes de la
+ * maquette (`maquette/ecrans/mail.js`) qui ne servent qu'à Mail — le point du non-lu, l'icône d'un dossier, le texte
+ * d'un mail, ses pièces. Celles que Teams partage sont dans `ui/shell/Parts.kt`. L'API (`mailApi`), le sort d'un envoi
+ * dit où qu'on soit (`MailNotices`) et les mails commencés (`UnsentMails`) sont dans `data/moi/mail/`.
  */
-
-/** Mail sur l'API du téléphone ; ses envois avec des pièces par le client sans délai global (un fichier lourd sur
- *  une 4G faible), « Corriger » par celui qui attend la fin d'une correction. Le jeton n'y part que vers son serveur,
- *  comme partout. */
-internal fun AppGraph.mailApi(): MailApi =
-    MailApi(moi, MoiApi(filesHttp, { auth.credentials() }, { auth.checkAfterUnauthorized() }), moiCorrect)
 
 /**
  * Ce qu'un écran de Mail dit aux autres d'un geste, pour qu'ils se mettent à jour sans tout relire : la liste efface
@@ -92,24 +86,6 @@ internal object MailChanges {
 
     /** Le numéro d'un rangement montré avant la réponse du serveur. */
     fun nextId(): Long = ids.incrementAndGet()
-}
-
-/**
- * Le sort d'un geste de Mail à dire où qu'on soit : un envoi qui finit après qu'on a quitté « Écrire » (←, une
- * notification touchée) se dit quand même. Le cadre de la session le montre en toast ; ce que personne n'a encore lu
- * (une rotation) attend, et tout s'efface à la déconnexion : le compte suivant n'en hérite pas.
- */
-class MailNotices {
-    private val channel = Channel<String>(Channel.BUFFERED)
-    val flow: Flow<String> = channel.receiveAsFlow()
-
-    fun say(text: String) {
-        if (text.isNotBlank()) channel.trySend(text)
-    }
-
-    fun clear() {
-        while (channel.tryReceive().isSuccess) Unit
-    }
 }
 
 /**

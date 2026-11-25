@@ -22,7 +22,7 @@ import fr.qwartz.mika.data.db.ChatStore
 import fr.qwartz.mika.data.db.Kv
 import fr.qwartz.mika.data.push.PushPayload
 import fr.qwartz.mika.share.Shortcuts
-import fr.qwartz.mika.ui.DeepLinks
+import fr.qwartz.mika.core.DeepLinks
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow

@@ -9,7 +9,7 @@ import androidx.activity.viewModels
 import androidx.core.content.IntentCompat
 import androidx.lifecycle.lifecycleScope
 import fr.qwartz.mika.MainActivity
-import fr.qwartz.mika.ui.DeepLinks
+import fr.qwartz.mika.core.DeepLinks
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 

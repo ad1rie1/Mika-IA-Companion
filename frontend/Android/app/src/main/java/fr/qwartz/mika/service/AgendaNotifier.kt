@@ -16,7 +16,7 @@ import fr.qwartz.mika.data.moi.agenda.AgendaNote
 import fr.qwartz.mika.data.moi.agenda.AgendaPrefs
 import fr.qwartz.mika.data.moi.agenda.agendaNotes
 import fr.qwartz.mika.data.moi.agenda.localOf
-import fr.qwartz.mika.ui.DeepLinks
+import fr.qwartz.mika.core.DeepLinks
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 

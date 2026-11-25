@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
+import fr.qwartz.mika.data.moi.contacts.contactsApi
 import fr.qwartz.mika.data.net.Topics
 import fr.qwartz.mika.data.moi.contacts.ContactsApi
 import fr.qwartz.mika.data.moi.contacts.IdentKinds
@@ -33,9 +34,6 @@ import kotlinx.coroutines.flow.asSharedFlow
  * contact (un carré pour une organisation, ses initiales — l'ADR 0300 ne pose pas les photos sur Android), les icônes
  * d'une source, d'un identifiant et d'un lieu, et ce qu'une fiche dit à la liste.
  */
-
-/** Contacts sur l'API du téléphone. */
-internal fun AppGraph.contactsApi(): ContactsApi = ContactsApi(moi)
 
 /** Ce que suivent la liste et la fiche : ses contacts (`contacts`, tout le domaine — ADR 0308, § 2 bis). */
 internal val CONTACTS_TOPICS = setOf(Topics.CONTACTS)

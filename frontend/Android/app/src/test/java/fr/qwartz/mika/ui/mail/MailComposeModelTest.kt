@@ -7,7 +7,9 @@ import fr.qwartz.mika.data.moi.mail.DraftStates
 import fr.qwartz.mika.data.moi.mail.MailDone
 import fr.qwartz.mika.data.moi.mail.MailDraft
 import fr.qwartz.mika.data.moi.mail.MailFull
+import fr.qwartz.mika.data.moi.mail.MailNotices
 import fr.qwartz.mika.data.moi.mail.MailPerson
+import fr.qwartz.mika.data.moi.mail.UnsentMails
 import fr.qwartz.mika.ui.Route
 import fr.qwartz.mika.ui.shell.Load
 import kotlinx.coroutines.ExperimentalCoroutinesApi

@@ -1,5 +1,6 @@
 package fr.qwartz.mika.data.moi.mail
 
+import fr.qwartz.mika.core.AppGraph
 import fr.qwartz.mika.data.moi.Corrected
 import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.correct
@@ -162,3 +163,9 @@ private class PieceBody(private val piece: OutgoingPiece) : RequestBody() {
     override fun contentLength(): Long = inner.contentLength()
     override fun writeTo(sink: okio.BufferedSink) = inner.writeTo(sink)
 }
+
+/** Mail sur l'API du téléphone ; ses envois avec des pièces par le client sans délai global (un fichier lourd sur
+ *  une 4G faible), « Corriger » par celui qui attend la fin d'une correction. Le jeton n'y part que vers son serveur,
+ *  comme partout. */
+internal fun AppGraph.mailApi(): MailApi =
+    MailApi(moi, MoiApi(filesHttp, { auth.credentials() }, { auth.checkAfterUnauthorized() }), moiCorrect)

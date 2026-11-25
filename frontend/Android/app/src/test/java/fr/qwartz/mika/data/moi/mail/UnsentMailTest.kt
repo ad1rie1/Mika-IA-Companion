@@ -1,7 +1,5 @@
-package fr.qwartz.mika.ui.mail
+package fr.qwartz.mika.data.moi.mail
 
-import fr.qwartz.mika.data.moi.mail.MailPerson
-import fr.qwartz.mika.data.moi.mail.OutgoingPiece
 import fr.qwartz.mika.ui.Route
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull

@@ -13,7 +13,7 @@ import fr.qwartz.mika.MainActivity
 import fr.qwartz.mika.R
 import fr.qwartz.mika.data.net.LinkState
 import fr.qwartz.mika.graph
-import fr.qwartz.mika.ui.DeepLinks
+import fr.qwartz.mika.core.DeepLinks
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job

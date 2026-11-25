@@ -56,6 +56,7 @@ import fr.qwartz.mika.data.moi.agenda.MemoryAgendaPrefs
 import fr.qwartz.mika.data.moi.agenda.Occ
 import fr.qwartz.mika.data.moi.agenda.Sort
 import fr.qwartz.mika.data.moi.agenda.addedByHer
+import fr.qwartz.mika.data.moi.agenda.agendaApi
 import fr.qwartz.mika.data.moi.agenda.isPast
 import fr.qwartz.mika.data.moi.agenda.occColor
 import fr.qwartz.mika.data.moi.agenda.shortWhen
@@ -73,9 +74,6 @@ import kotlinx.coroutines.launch
  * l'API, ce que l'app retient (la dernière vue, les agendas décochés), les couleurs des agendas (`--ag-*` de
  * `agenda.css`), la carte d'une occurrence (le Planning, la recherche), « Demander à Mika ».
  */
-
-/** L'Agenda sur l'API du téléphone. */
-internal fun AppGraph.agendaApi(): AgendaApi = AgendaApi(moi)
 
 /**
  * Ce que les écrans de l'Agenda prennent de la session : l'API, ce que l'app retient, l'heure, relire les pastilles du

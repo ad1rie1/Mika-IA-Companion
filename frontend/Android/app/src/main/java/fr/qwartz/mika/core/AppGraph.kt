@@ -60,9 +60,9 @@ import fr.qwartz.mika.service.PhoneListenerService
 import fr.qwartz.mika.service.ReplySender
 import fr.qwartz.mika.service.ServiceController
 import fr.qwartz.mika.share.Shortcuts
-import fr.qwartz.mika.ui.avatar.AvatarAssets
-import fr.qwartz.mika.ui.mail.MailNotices
-import fr.qwartz.mika.ui.mail.UnsentMails
+import fr.qwartz.mika.data.avatar.AvatarAssets
+import fr.qwartz.mika.data.moi.mail.MailNotices
+import fr.qwartz.mika.data.moi.mail.UnsentMails
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher

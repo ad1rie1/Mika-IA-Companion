@@ -1,5 +1,6 @@
 package fr.qwartz.mika.ui
 
+import fr.qwartz.mika.core.DeepLinks
 import fr.qwartz.mika.data.moi.carte.Place
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

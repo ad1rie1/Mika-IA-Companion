@@ -1,4 +1,4 @@
-package fr.qwartz.mika.ui.avatar
+package fr.qwartz.mika.data.avatar
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -6,7 +6,6 @@ import android.graphics.BitmapFactory
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import fr.qwartz.mika.core.Logger
-import fr.qwartz.mika.data.avatar.AvatarManifest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock

@@ -65,6 +65,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
+import fr.qwartz.mika.data.moi.settings.settingsApi
 import fr.qwartz.mika.data.net.Topics
 import fr.qwartz.mika.data.moi.MoiError
 import fr.qwartz.mika.data.moi.Tone
@@ -94,8 +95,6 @@ import kotlinx.coroutines.flow.receiveAsFlow
  */
 
 // ── Les ViewModels ──────────────────────────────────────────────────────
-
-internal fun AppGraph.settingsApi(): SettingsApi = SettingsApi(moi)
 
 /**
  * Ce que suivent les pages de Paramètres qui montrent une liste (ADR 0308, § 2 bis) : tes réglages (`settings` — qui

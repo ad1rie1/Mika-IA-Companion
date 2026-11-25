@@ -1,5 +1,6 @@
 package fr.qwartz.mika.data.moi.teams
 
+import fr.qwartz.mika.core.AppGraph
 import fr.qwartz.mika.data.moi.Corrected
 import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.correct
@@ -80,3 +81,6 @@ open class TeamsApi(private val api: MoiApi, private val corrections: MoiApi = a
     private suspend fun write(path: String, fields: List<Pair<String, Any>>, key: String?): MoiApi.Result<TeamsDone> =
         api.post(path, jsonOf(fields), key).decode(TeamsDone.serializer())
 }
+
+/** Teams sur l'API du téléphone ; « Corriger » par le client qui attend la fin d'une correction. */
+internal fun AppGraph.teamsApi(): TeamsApi = TeamsApi(moi, moiCorrect)

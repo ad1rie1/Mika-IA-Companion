@@ -32,11 +32,11 @@ import fr.qwartz.mika.data.net.StrandInfo
 import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.agenda.AgendaCard
 import fr.qwartz.mika.data.moi.agenda.agendaCards
-import fr.qwartz.mika.ui.agenda.agendaApi
+import fr.qwartz.mika.data.moi.agenda.agendaApi
 import fr.qwartz.mika.data.moi.mail.MailDraft
 import fr.qwartz.mika.data.moi.teams.TeamsReply
-import fr.qwartz.mika.ui.mail.mailApi
-import fr.qwartz.mika.ui.teams.teamsApi
+import fr.qwartz.mika.data.moi.mail.mailApi
+import fr.qwartz.mika.data.moi.teams.teamsApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview

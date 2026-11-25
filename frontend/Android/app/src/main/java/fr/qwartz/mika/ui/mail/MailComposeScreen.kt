@@ -86,6 +86,7 @@ import fr.qwartz.mika.data.moi.Work
 import fr.qwartz.mika.data.moi.WorkTurn
 import fr.qwartz.mika.data.moi.caps
 import fr.qwartz.mika.data.moi.chars
+import fr.qwartz.mika.data.moi.mail.UnsentMail
 import fr.qwartz.mika.data.moi.thousands
 import fr.qwartz.mika.data.moi.watchWork
 import fr.qwartz.mika.data.moi.workTurn
@@ -119,7 +120,7 @@ import fr.qwartz.mika.data.moi.mail.uniquePeople
 import fr.qwartz.mika.data.moi.mail.writableBoxes
 import fr.qwartz.mika.ui.Route
 import fr.qwartz.mika.ui.components.WorkLine
-import fr.qwartz.mika.ui.contacts.contactsApi
+import fr.qwartz.mika.data.moi.contacts.contactsApi
 import fr.qwartz.mika.ui.shell.BarNav
 import fr.qwartz.mika.ui.shell.CorrectButton
 import fr.qwartz.mika.ui.shell.CorrectNotices

@@ -42,8 +42,8 @@ import fr.qwartz.mika.data.moi.initials
 import fr.qwartz.mika.data.moi.phone.AppKind
 import fr.qwartz.mika.data.moi.phone.PhoneBar
 import fr.qwartz.mika.data.moi.phone.PhoneDevices
-import fr.qwartz.mika.data.moi.phone.PhoneMoiApi
 import fr.qwartz.mika.data.moi.phone.appBadge
+import fr.qwartz.mika.data.moi.phone.phoneApi
 import fr.qwartz.mika.data.moi.phone.phoneBar
 import fr.qwartz.mika.data.net.Topics
 import fr.qwartz.mika.data.phone.PhoneApp
@@ -65,9 +65,6 @@ import kotlinx.coroutines.launch
  * dire, l'état de tes téléphones dans la barre de titre (ADR 0233) et les onglets, la pastille d'une appli et le rond
  * d'une conversation, ouvrir l'appli d'une conversation.
  */
-
-/** Le Téléphone sur l'API de ce téléphone. */
-internal fun AppGraph.phoneApi(): PhoneMoiApi = PhoneMoiApi(moi)
 
 /** Ce que tous les écrans du Téléphone ont : l'API, et le sort d'un geste à dire (l'écran le montre en toast). */
 abstract class PhoneModel(protected val graph: AppGraph) : ViewModel() {
