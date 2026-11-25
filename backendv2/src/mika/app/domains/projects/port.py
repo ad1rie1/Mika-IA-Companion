@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from mika.app.console import FACULTY_LABELS
+from mika.app.console import FACULTY_LABELS, OWNER_LABELS
 from mika.app.domains.domain import PortPart
 from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
@@ -18,12 +18,11 @@ from mika.kernel.clock import local
 from mika.ports.workshop import argv_lines
 from mika.vocab.episodes import project_of
 
-#: ce qu'on voit d'un effet en attente qui n'appartient à aucun projet : son propriétaire, en mots
-_OWNER_WORDS = {"email": "Courrier", "forge": "Forge", "teams": "Teams"}
-
 
 def _owner_words(owner: str) -> str:
-    return _OWNER_WORDS.get(owner) or FACULTY_LABELS.get(owner) or owner
+    """Ce qu'on voit d'un effet en attente qui n'appartient à aucun projet : son propriétaire, en mots — le mot court
+    que sa fiche lui donne (« Forge »), sinon le nom de sa faculté (« Courrier », « Teams »)."""
+    return OWNER_LABELS.get(owner) or FACULTY_LABELS.get(owner) or owner
 
 
 def _proposal_text(summary: str, capability: str, effect: Any) -> str:

@@ -344,6 +344,10 @@ BUNDLE_LABELS: dict[str, str] = _named("bundles", {
     "attention": "Ses pensées", "self": "Son journal", "social": "Qui lui parle",
 })
 
+#: À qui est une demande qui attend un accord, en un mot court, quand le nom de sa faculté ne le dit pas bien (« Forge »
+#: plutôt que « Moteur de la Forge ») : ce que dit la fiche de son domaine (``labels["owners"]``).
+OWNER_LABELS: dict[str, str] = _named("owners", {})
+
 #: La sorte d'un signal qu'elle remarque, en mots (Ses pensées › Ce qu'elle remarque) : celles d'une app sont libres,
 #: elles restent telles quelles. Celles d'un domaine sont dans sa fiche (``labels["signals"]``).
 SIGNAL_LABELS: dict[str, str] = _named("signals", {
