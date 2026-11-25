@@ -18,8 +18,8 @@ import fr.qwartz.mika.data.moi.agenda.rightsSummary
 import fr.qwartz.mika.data.moi.agenda.withShownNames
 import fr.qwartz.mika.data.net.Topics
 import fr.qwartz.mika.ui.Route
-import fr.qwartz.mika.ui.settings.SettingsPages
-import fr.qwartz.mika.ui.settings.settingsPage
+import fr.qwartz.mika.ui.components.SettingsPages
+import fr.qwartz.mika.ui.components.settingsPage
 import fr.qwartz.mika.ui.shell.Load
 import fr.qwartz.mika.ui.shell.said
 import kotlinx.coroutines.Job

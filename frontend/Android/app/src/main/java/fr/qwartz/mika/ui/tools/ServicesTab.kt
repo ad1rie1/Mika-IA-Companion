@@ -49,8 +49,8 @@ import fr.qwartz.mika.data.moi.tools.serviceTools
 import fr.qwartz.mika.data.moi.tools.serviceWhose
 import fr.qwartz.mika.ui.Route
 import fr.qwartz.mika.ui.components.rememberNow
-import fr.qwartz.mika.ui.settings.SettingsPages
-import fr.qwartz.mika.ui.settings.settingsPage
+import fr.qwartz.mika.ui.components.SettingsPages
+import fr.qwartz.mika.ui.components.settingsPage
 import fr.qwartz.mika.ui.shell.ChatCue
 import fr.qwartz.mika.ui.shell.Gap
 import fr.qwartz.mika.ui.shell.ListHead

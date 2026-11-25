@@ -1,4 +1,4 @@
-package fr.qwartz.mika.ui.settings
+package fr.qwartz.mika.ui.tools
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -33,32 +33,55 @@ import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.MoiError
 import fr.qwartz.mika.data.moi.Tone
 import fr.qwartz.mika.data.moi.ofName
-import fr.qwartz.mika.data.moi.settings.AccessLine
-import fr.qwartz.mika.data.moi.settings.CHOICES
-import fr.qwartz.mika.data.moi.settings.McpLimits
-import fr.qwartz.mika.data.moi.settings.ReceivedService
-import fr.qwartz.mika.data.moi.settings.SERVICE_LABELS
-import fr.qwartz.mika.data.moi.settings.Service
-import fr.qwartz.mika.data.moi.settings.ServiceTool
-import fr.qwartz.mika.data.moi.settings.Services
+import fr.qwartz.mika.data.moi.tools.AccessLine
+import fr.qwartz.mika.data.moi.tools.CHOICES
+import fr.qwartz.mika.data.moi.tools.McpLimits
+import fr.qwartz.mika.data.moi.tools.ReceivedService
+import fr.qwartz.mika.data.moi.tools.SERVICE_LABELS
+import fr.qwartz.mika.data.moi.tools.Service
+import fr.qwartz.mika.data.moi.tools.ServiceTool
+import fr.qwartz.mika.data.moi.tools.Services
 import fr.qwartz.mika.data.moi.settings.ShareKinds
-import fr.qwartz.mika.data.moi.settings.choiceWords
-import fr.qwartz.mika.data.moi.settings.defaultWords
+import fr.qwartz.mika.data.moi.tools.choiceWords
+import fr.qwartz.mika.data.moi.tools.defaultWords
 import fr.qwartz.mika.data.moi.settings.doneText
-import fr.qwartz.mika.data.moi.settings.forYou
-import fr.qwartz.mika.data.moi.settings.headersToRetype
-import fr.qwartz.mika.data.moi.settings.receivedSentence
-import fr.qwartz.mika.data.moi.settings.servedOf
-import fr.qwartz.mika.data.moi.settings.serviceChanges
-import fr.qwartz.mika.data.moi.settings.serviceNameProblem
-import fr.qwartz.mika.data.moi.settings.serviceTrouble
-import fr.qwartz.mika.data.moi.settings.sharedWith
-import fr.qwartz.mika.data.moi.settings.shownChoice
-import fr.qwartz.mika.data.moi.settings.stateWords
-import fr.qwartz.mika.data.moi.settings.toolChoiceChanges
-import fr.qwartz.mika.data.moi.settings.toolState
-import fr.qwartz.mika.data.moi.settings.urlProblem
-import fr.qwartz.mika.data.moi.settings.whoWords
+import fr.qwartz.mika.data.moi.tools.forYou
+import fr.qwartz.mika.data.moi.tools.headersToRetype
+import fr.qwartz.mika.data.moi.tools.receivedSentence
+import fr.qwartz.mika.data.moi.tools.servedOf
+import fr.qwartz.mika.data.moi.tools.serviceChanges
+import fr.qwartz.mika.data.moi.tools.serviceNameProblem
+import fr.qwartz.mika.data.moi.tools.serviceTrouble
+import fr.qwartz.mika.data.moi.tools.sharedWith
+import fr.qwartz.mika.data.moi.tools.shownChoice
+import fr.qwartz.mika.data.moi.tools.stateWords
+import fr.qwartz.mika.data.moi.tools.toolChoiceChanges
+import fr.qwartz.mika.data.moi.tools.toolState
+import fr.qwartz.mika.data.moi.tools.urlProblem
+import fr.qwartz.mika.data.moi.tools.whoWords
+import fr.qwartz.mika.ui.components.ActionButton
+import fr.qwartz.mika.ui.components.ChoiceSeg
+import fr.qwartz.mika.ui.components.ConfirmDialog
+import fr.qwartz.mika.ui.components.DangerButton
+import fr.qwartz.mika.ui.components.HeadCard
+import fr.qwartz.mika.ui.components.Move
+import fr.qwartz.mika.ui.components.SaveBar
+import fr.qwartz.mika.ui.components.SetDivider
+import fr.qwartz.mika.ui.components.SetField
+import fr.qwartz.mika.ui.components.SetGroup
+import fr.qwartz.mika.ui.components.SetHead
+import fr.qwartz.mika.ui.components.SetItem
+import fr.qwartz.mika.ui.components.SetNote
+import fr.qwartz.mika.ui.components.SetRow
+import fr.qwartz.mika.ui.components.SetSwitch
+import fr.qwartz.mika.ui.components.SettingsDeps
+import fr.qwartz.mika.ui.components.SettingsEffects
+import fr.qwartz.mika.ui.components.SettingsLive
+import fr.qwartz.mika.ui.components.SettingsLoading
+import fr.qwartz.mika.ui.components.SettingsModel
+import fr.qwartz.mika.ui.components.SettingsPages
+import fr.qwartz.mika.ui.components.settingsPage
+import fr.qwartz.mika.ui.components.shareRoute
 import fr.qwartz.mika.ui.shell.FollowLive
 import fr.qwartz.mika.ui.shell.BarMenu
 import fr.qwartz.mika.ui.shell.BarNav
@@ -80,7 +103,7 @@ import kotlinx.coroutines.launch
 /*
  * Paramètres › Services MCP (ADR 0192) : tes services — distants, par une adresse https, à toi seule —, leur état et
  * leurs outils (coupé, il lit, il agit : ADR 0129 ; un outil nouveau ou changé attend son choix), les brancher, les
- * tester, les régler, les retirer ; ceux qu'on te partage, en lecture. Porté de `frontendv2/src/screens/parametres/mcp.ts`.
+ * tester, les régler, les retirer ; ceux qu'on te partage, en lecture. Porté de `frontendv2/src/screens/outils/settings.ts`.
  */
 
 // ── La liste ────────────────────────────────────────────────────────────

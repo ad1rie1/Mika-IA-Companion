@@ -1,4 +1,4 @@
-package fr.qwartz.mika.ui.settings
+package fr.qwartz.mika.ui.components
 
 import fr.qwartz.mika.ui.Route
 import kotlinx.coroutines.flow.first

@@ -1,7 +1,6 @@
 package fr.qwartz.mika.data.moi.tools
 
 import fr.qwartz.mika.data.moi.MoiApi
-import fr.qwartz.mika.data.moi.settings.Services
 import fr.qwartz.mika.data.moi.settings.SettingsApi
 
 /**

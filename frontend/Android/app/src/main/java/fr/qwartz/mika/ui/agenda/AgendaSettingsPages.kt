@@ -79,20 +79,20 @@ import fr.qwartz.mika.data.moi.firstName
 import fr.qwartz.mika.service.NotificationChannels
 import fr.qwartz.mika.ui.Route
 import fr.qwartz.mika.ui.components.rememberNow
-import fr.qwartz.mika.ui.settings.ActionButton
-import fr.qwartz.mika.ui.settings.ConfirmDialog
-import fr.qwartz.mika.ui.settings.DangerButton
-import fr.qwartz.mika.ui.settings.SaveBar
-import fr.qwartz.mika.ui.settings.SetDivider
-import fr.qwartz.mika.ui.settings.SetField
-import fr.qwartz.mika.ui.settings.SetGroup
-import fr.qwartz.mika.ui.settings.SetHead
-import fr.qwartz.mika.ui.settings.SetItem
-import fr.qwartz.mika.ui.settings.SetNote
-import fr.qwartz.mika.ui.settings.SetRow
-import fr.qwartz.mika.ui.settings.SetSwitch
-import fr.qwartz.mika.ui.settings.SettingsPages
-import fr.qwartz.mika.ui.settings.settingsPage
+import fr.qwartz.mika.ui.components.ActionButton
+import fr.qwartz.mika.ui.components.ConfirmDialog
+import fr.qwartz.mika.ui.components.DangerButton
+import fr.qwartz.mika.ui.components.SaveBar
+import fr.qwartz.mika.ui.components.SetDivider
+import fr.qwartz.mika.ui.components.SetField
+import fr.qwartz.mika.ui.components.SetGroup
+import fr.qwartz.mika.ui.components.SetHead
+import fr.qwartz.mika.ui.components.SetItem
+import fr.qwartz.mika.ui.components.SetNote
+import fr.qwartz.mika.ui.components.SetRow
+import fr.qwartz.mika.ui.components.SetSwitch
+import fr.qwartz.mika.ui.components.SettingsPages
+import fr.qwartz.mika.ui.components.settingsPage
 import fr.qwartz.mika.ui.shell.BarAction
 import fr.qwartz.mika.ui.shell.BarNav
 import fr.qwartz.mika.ui.shell.FollowLive
@@ -824,7 +824,7 @@ private fun PlugSteps(graph: AppGraph, vm: AgendaSettingsViewModel, p: Plug, goo
                     }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilledTonalButton(onClick = { scope.launch { fr.qwartz.mika.ui.settings.copyText(clipboard, p.code) } }) {
+                    FilledTonalButton(onClick = { scope.launch { fr.qwartz.mika.ui.components.copyText(clipboard, p.code) } }) {
                         MIcon(R.drawable.ic_m_copy, null, size = 16.dp)
                         Spacer(Modifier.width(6.dp))
                         Text(stringResource(R.string.agenda_plug_copy_code))

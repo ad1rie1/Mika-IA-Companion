@@ -1,4 +1,4 @@
-package fr.qwartz.mika.ui.settings
+package fr.qwartz.mika.ui.components
 
 import android.content.ClipData
 import android.content.ClipDescription
@@ -87,9 +87,10 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
 
 /*
- * Les pièces de Paramètres (ADR 0235, la maquette `ecrans/plus.js`) : ce que ses ViewModels partagent (l'API, le sort
- * d'un geste, aller ailleurs), un titre de groupe et son groupe, une ligne qui mène à une page, une ligne de réglage,
- * un champ et son refus dessous, un choix à boutons ou en liste, la barre « Enregistrer », une confirmation.
+ * Les pièces de Paramètres (ADR 0235, la maquette `ecrans/plus.js`), que les pages de chaque domaine partagent : ce que
+ * leurs ViewModels partagent (l'API, le sort d'un geste, aller ailleurs), un titre de groupe et son groupe, une ligne qui
+ * mène à une page, une ligne de réglage, un champ et son refus dessous, un choix à boutons ou en liste, la barre
+ * « Enregistrer », une confirmation.
  */
 
 // ── Les ViewModels ──────────────────────────────────────────────────────

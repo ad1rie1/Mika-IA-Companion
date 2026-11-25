@@ -75,8 +75,8 @@ import fr.qwartz.mika.data.moi.tools.rulesOrigin
 import fr.qwartz.mika.data.moi.tools.shownTools
 import fr.qwartz.mika.data.moi.tools.summaryOf
 import fr.qwartz.mika.ui.agenda.AgendaRightsGroup
-import fr.qwartz.mika.ui.settings.SettingsPages
-import fr.qwartz.mika.ui.settings.settingsPage
+import fr.qwartz.mika.ui.components.SettingsPages
+import fr.qwartz.mika.ui.components.settingsPage
 import fr.qwartz.mika.ui.shell.Gap
 import fr.qwartz.mika.ui.shell.ListHead
 import fr.qwartz.mika.ui.shell.LoadBox

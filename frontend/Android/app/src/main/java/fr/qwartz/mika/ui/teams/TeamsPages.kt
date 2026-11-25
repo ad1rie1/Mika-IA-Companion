@@ -1,4 +1,4 @@
-package fr.qwartz.mika.ui.settings
+package fr.qwartz.mika.ui.teams
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -44,20 +44,45 @@ import fr.qwartz.mika.data.moi.settings.Replies
 import fr.qwartz.mika.data.moi.settings.RuleEdit
 import fr.qwartz.mika.data.moi.settings.RulesKind
 import fr.qwartz.mika.data.moi.settings.ShareKinds
-import fr.qwartz.mika.data.moi.settings.TEAMS_LABELS
-import fr.qwartz.mika.data.moi.settings.TeamsSettings
-import fr.qwartz.mika.data.moi.settings.TeamsValues
-import fr.qwartz.mika.data.moi.settings.batchWords
+import fr.qwartz.mika.data.moi.teams.TEAMS_LABELS
+import fr.qwartz.mika.data.moi.teams.TeamsSettings
+import fr.qwartz.mika.data.moi.teams.TeamsValues
+import fr.qwartz.mika.data.moi.teams.batchWords
 import fr.qwartz.mika.data.moi.settings.doneText
 import fr.qwartz.mika.data.moi.settings.edit
 import fr.qwartz.mika.data.moi.settings.ruleBody
 import fr.qwartz.mika.data.moi.settings.ruleChanged
-import fr.qwartz.mika.data.moi.settings.sharedAccountSentence
-import fr.qwartz.mika.data.moi.settings.teamsChanges
+import fr.qwartz.mika.data.moi.teams.sharedAccountSentence
+import fr.qwartz.mika.data.moi.teams.teamsChanges
 import fr.qwartz.mika.data.moi.teams.TeamsAccount
 import fr.qwartz.mika.data.moi.teams.TeamsAccounts
 import fr.qwartz.mika.ui.Route
+import fr.qwartz.mika.ui.components.ActionButton
+import fr.qwartz.mika.ui.components.ConfirmDialog
+import fr.qwartz.mika.ui.components.DangerButton
+import fr.qwartz.mika.ui.components.HeadCard
+import fr.qwartz.mika.ui.components.Move
+import fr.qwartz.mika.ui.components.RulesEditor
+import fr.qwartz.mika.ui.components.SaveBar
+import fr.qwartz.mika.ui.components.SetDivider
+import fr.qwartz.mika.ui.components.SetField
+import fr.qwartz.mika.ui.components.SetGroup
+import fr.qwartz.mika.ui.components.SetHead
+import fr.qwartz.mika.ui.components.SetItem
+import fr.qwartz.mika.ui.components.SetNote
+import fr.qwartz.mika.ui.components.SetRow
+import fr.qwartz.mika.ui.components.SetSwitch
+import fr.qwartz.mika.ui.components.SettingsDeps
+import fr.qwartz.mika.ui.components.SettingsEffects
+import fr.qwartz.mika.ui.components.SettingsLive
+import fr.qwartz.mika.ui.components.SettingsLoading
+import fr.qwartz.mika.ui.components.SettingsModel
+import fr.qwartz.mika.ui.components.SettingsPages
+import fr.qwartz.mika.ui.components.SharedWithGroup
+import fr.qwartz.mika.ui.components.copyText
 import fr.qwartz.mika.ui.components.rememberNow
+import fr.qwartz.mika.ui.components.settingsPage
+import fr.qwartz.mika.ui.components.shareRoute
 import fr.qwartz.mika.ui.shell.FollowLive
 import fr.qwartz.mika.ui.shell.BarMenu
 import fr.qwartz.mika.ui.shell.BarNav
@@ -82,7 +107,7 @@ import kotlinx.serialization.json.JsonPrimitive
  * Paramètres › Comptes Teams (ADR 0186, 0187) : tes comptes et ceux qu'on te partage ; un compte (comment Mika y écrit à
  * ta place, comment part ce qu'elle y prépare — ADR 0207 —, la clé de son extension — montrée une seule fois à sa
  * création, retirée d'un toucher —, le partager, le retirer) ; en ajouter un. Porté de
- * `frontendv2/src/screens/parametres/teams.ts`.
+ * `frontendv2/src/screens/teams/settings.ts`.
  */
 
 // ── La liste ────────────────────────────────────────────────────────────

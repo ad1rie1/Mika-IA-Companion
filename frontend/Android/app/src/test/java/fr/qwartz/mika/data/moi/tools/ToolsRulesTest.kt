@@ -2,14 +2,8 @@ package fr.qwartz.mika.data.moi.tools
 
 import fr.qwartz.mika.data.moi.Levels
 import fr.qwartz.mika.data.moi.Tone
-import fr.qwartz.mika.data.moi.settings.AccessLine
-import fr.qwartz.mika.data.moi.settings.ReceivedService
 import fr.qwartz.mika.data.moi.settings.RuleLine
 import fr.qwartz.mika.data.moi.settings.SendRules
-import fr.qwartz.mika.data.moi.settings.Service
-import fr.qwartz.mika.data.moi.settings.ServiceTool
-import fr.qwartz.mika.data.moi.settings.Services
-import fr.qwartz.mika.data.moi.settings.SharedTool
 import fr.qwartz.mika.data.net.ServerBase
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

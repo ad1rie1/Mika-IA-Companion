@@ -1,14 +1,9 @@
 package fr.qwartz.mika.data.moi.tools
 
 import fr.qwartz.mika.data.moi.Tone
-import fr.qwartz.mika.data.moi.settings.ReceivedService
 import fr.qwartz.mika.data.moi.settings.Replies
 import fr.qwartz.mika.data.moi.settings.SendRules
-import fr.qwartz.mika.data.moi.settings.Service
-import fr.qwartz.mika.data.moi.settings.Services
-import fr.qwartz.mika.data.moi.settings.servedOf
 import fr.qwartz.mika.data.moi.settings.shareWords
-import fr.qwartz.mika.data.moi.settings.stateWords
 import fr.qwartz.mika.data.net.ServerBase
 import okhttp3.HttpUrl
 

@@ -58,8 +58,8 @@ import fr.qwartz.mika.ui.Route
 import fr.qwartz.mika.ui.components.rememberNow
 import fr.qwartz.mika.ui.map.MapControl
 import fr.qwartz.mika.ui.map.SceneMap
-import fr.qwartz.mika.ui.settings.WhereSwitch
-import fr.qwartz.mika.ui.settings.rememberWhereSwitch
+import fr.qwartz.mika.ui.components.WhereSwitch
+import fr.qwartz.mika.ui.components.rememberWhereSwitch
 import fr.qwartz.mika.ui.shell.FollowLive
 import fr.qwartz.mika.ui.shell.Load
 import fr.qwartz.mika.ui.shell.LoadBox

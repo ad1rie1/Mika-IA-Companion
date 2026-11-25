@@ -1,4 +1,4 @@
-package fr.qwartz.mika.ui.settings
+package fr.qwartz.mika.ui.components
 
 import android.Manifest
 import android.content.ActivityNotFoundException

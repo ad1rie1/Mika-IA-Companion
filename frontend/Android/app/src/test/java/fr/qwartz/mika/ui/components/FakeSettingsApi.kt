@@ -1,4 +1,4 @@
-package fr.qwartz.mika.ui.settings
+package fr.qwartz.mika.ui.components
 
 import fr.qwartz.mika.R
 import fr.qwartz.mika.data.moi.Levels
@@ -6,13 +6,13 @@ import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.MoiError
 import fr.qwartz.mika.data.moi.mail.MailBox
 import fr.qwartz.mika.data.moi.mail.MailBoxes
-import fr.qwartz.mika.data.moi.settings.BoxSettings
+import fr.qwartz.mika.data.moi.mail.BoxSettings
 import fr.qwartz.mika.data.moi.settings.People
-import fr.qwartz.mika.data.moi.settings.Services
+import fr.qwartz.mika.data.moi.tools.Services
 import fr.qwartz.mika.data.moi.settings.SettingsApi
 import fr.qwartz.mika.data.moi.settings.SettingsDone
 import fr.qwartz.mika.data.moi.settings.Shares
-import fr.qwartz.mika.data.moi.settings.TeamsSettings
+import fr.qwartz.mika.data.moi.teams.TeamsSettings
 import fr.qwartz.mika.data.moi.teams.TeamsAccount
 import fr.qwartz.mika.data.moi.teams.TeamsAccounts
 import kotlinx.coroutines.CompletableDeferred

@@ -1,15 +1,16 @@
-package fr.qwartz.mika.ui.settings
+package fr.qwartz.mika.ui.mail
 
 import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.MoiError
-import fr.qwartz.mika.data.moi.settings.BoxSettings
-import fr.qwartz.mika.data.moi.settings.BoxValues
+import fr.qwartz.mika.data.moi.mail.BoxSettings
+import fr.qwartz.mika.data.moi.mail.BoxValues
 import fr.qwartz.mika.data.moi.settings.Replies
 import fr.qwartz.mika.data.moi.settings.RuleEdit
 import fr.qwartz.mika.data.moi.settings.RuleLine
 import fr.qwartz.mika.data.moi.settings.SendRules
 import fr.qwartz.mika.data.moi.settings.text
-import fr.qwartz.mika.ui.mail.MainDispatcherRule
+import fr.qwartz.mika.ui.components.FakeSettingsApi
+import fr.qwartz.mika.ui.components.testDeps
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher

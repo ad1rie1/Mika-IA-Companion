@@ -19,7 +19,7 @@ import fr.qwartz.mika.core.AppGraph
 import fr.qwartz.mika.data.moi.LiveSignal
 import fr.qwartz.mika.data.moi.MoiApi
 import fr.qwartz.mika.data.moi.MoiError
-import fr.qwartz.mika.data.moi.settings.Services
+import fr.qwartz.mika.data.moi.tools.Services
 import fr.qwartz.mika.data.moi.tools.FIRST_CANAL
 import fr.qwartz.mika.data.moi.tools.Rights
 import fr.qwartz.mika.data.moi.tools.ToolsApi

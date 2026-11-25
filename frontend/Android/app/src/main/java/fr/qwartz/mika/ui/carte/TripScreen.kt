@@ -89,7 +89,7 @@ import fr.qwartz.mika.data.moi.carte.tripHead
 import fr.qwartz.mika.ui.Route
 import fr.qwartz.mika.ui.map.SceneMap
 import fr.qwartz.mika.ui.map.rememberMapFond
-import fr.qwartz.mika.ui.settings.ConfirmDialog
+import fr.qwartz.mika.ui.components.ConfirmDialog
 import fr.qwartz.mika.ui.shell.BarAction
 import fr.qwartz.mika.ui.shell.BarMenu
 import fr.qwartz.mika.ui.shell.BarNav

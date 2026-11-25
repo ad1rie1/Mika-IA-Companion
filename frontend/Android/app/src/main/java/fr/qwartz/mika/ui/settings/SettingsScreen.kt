@@ -33,7 +33,7 @@ import fr.qwartz.mika.data.moi.agenda.Accounts as AgendaAccounts
 import fr.qwartz.mika.data.moi.mail.MailBoxes
 import fr.qwartz.mika.data.moi.phone.PhoneDevices
 import fr.qwartz.mika.data.moi.phone.phoneBar
-import fr.qwartz.mika.data.moi.settings.Services
+import fr.qwartz.mika.data.moi.tools.Services
 import fr.qwartz.mika.data.moi.settings.Shares
 import fr.qwartz.mika.data.moi.settings.boxesSummary
 import fr.qwartz.mika.data.moi.settings.servicesSummary
@@ -49,7 +49,22 @@ import fr.qwartz.mika.ui.agenda.AgendaAccountPage
 import fr.qwartz.mika.ui.agenda.AgendaCalendarPage
 import fr.qwartz.mika.ui.agenda.AgendaPlugPage
 import fr.qwartz.mika.ui.agenda.AgendasSettingsPage
+import fr.qwartz.mika.ui.components.ConfirmDialog
+import fr.qwartz.mika.ui.components.DangerButton
+import fr.qwartz.mika.ui.components.SetDivider
+import fr.qwartz.mika.ui.components.SetGroup
+import fr.qwartz.mika.ui.components.SetHead
+import fr.qwartz.mika.ui.components.SetItem
+import fr.qwartz.mika.ui.components.SettingsLive
+import fr.qwartz.mika.ui.components.SettingsModel
+import fr.qwartz.mika.ui.components.SettingsPages
 import fr.qwartz.mika.ui.components.rememberNow
+import fr.qwartz.mika.ui.components.rememberWhereSwitch
+import fr.qwartz.mika.ui.components.settingsPage
+import fr.qwartz.mika.ui.mail.BoxPage
+import fr.qwartz.mika.ui.mail.BoxesPage
+import fr.qwartz.mika.ui.mail.NewBoxPage
+import fr.qwartz.mika.ui.phone.PhonesPage
 import fr.qwartz.mika.ui.shell.FollowLive
 import fr.qwartz.mika.ui.shell.BarNav
 import fr.qwartz.mika.ui.shell.ComingScreen
@@ -57,39 +72,14 @@ import fr.qwartz.mika.ui.shell.LocalShell
 import fr.qwartz.mika.ui.shell.MikaTopBar
 import fr.qwartz.mika.ui.shell.SectionScaffold
 import fr.qwartz.mika.ui.shell.rememberSessionKey
+import fr.qwartz.mika.ui.teams.NewTeamsPage
+import fr.qwartz.mika.ui.teams.TeamsAccountPage
+import fr.qwartz.mika.ui.teams.TeamsAccountsPage
+import fr.qwartz.mika.ui.tools.PlugPage
+import fr.qwartz.mika.ui.tools.ServicePage
+import fr.qwartz.mika.ui.tools.ServicesPage
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
-
-/** Les pages de Paramètres (`Route.SettingsPage.page`) ; une clé ([Route.SettingsPage.key]) dit ce qu'elles règlent. */
-object SettingsPages {
-    const val ACCOUNT = "compte"
-    const val BOXES = "boites"
-    /** Une boîte ; clé vide : une boîte nouvelle. */
-    const val BOX = "boite"
-    const val TEAMS = "teams"
-    /** Un compte Teams ; clé vide : un compte nouveau. */
-    const val TEAMS_ACCOUNT = "compte-teams"
-    const val PHONES = "telephones"
-    /** Ses partages ; clé `<sorte>:<clé>` : la fenêtre « Partager » s'ouvre sur cette ressource. */
-    const val SHARES = "partages"
-    const val SERVICES = "mcp"
-    /** Un service ; nom vide : en brancher un. */
-    const val SERVICE = "service"
-    const val NOTIFICATIONS = "notifications"
-    const val POSITION = "position"
-    const val MESSAGES = "messages"
-    const val APPEARANCE = "apparence"
-    const val DATA = "donnees"
-    /** Paramètres › Agendas (ADR 0309) : ses comptes ; un compte (clé : le compte) ; un agenda (clé : l'agenda) ;
-     *  « Brancher un agenda » (clé vide, une sorte, ou `<sorte>/<compte>` pour se reconnecter). */
-    const val AGENDAS = "agendas"
-    const val AGENDA_ACCOUNT = "compte-agenda"
-    const val AGENDA_CALENDAR = "agenda"
-    const val AGENDA_PLUG = "brancher-agenda"
-}
-
-/** Une page de Paramètres, par-dessus la racine. */
-internal fun settingsPage(page: String, key: String = ""): Route = Route.SettingsPage(page, key)
 
 /**
  * Ce que la page racine dit de chaque ligne : lu à chaque retour sur elle, une lecture qui échoue laisse la ligne dire
@@ -295,7 +285,10 @@ fun SettingsScreen(graph: AppGraph) {
 
 /**
  * Une page de Paramètres (`Route.SettingsPage`), par-dessus la racine ou l'écran qui y mène (Mail › Régler les
- * boîtes, la barre du Téléphone…). Chaque route a son propre état : une boîte n'hérite rien de la précédente.
+ * boîtes, la barre du Téléphone…). Chaque route a son propre état : une boîte n'hérite rien de la précédente. La liste
+ * des pages est écrite ici ; Compte, Partages et « Ce téléphone » sont à Paramètres, les autres vivent dans le paquet de
+ * leur domaine (`ui/mail/BoxPages.kt`, `ui/teams/TeamsPages.kt`, `ui/agenda/AgendaSettingsPages.kt`,
+ * `ui/phone/PhonesPage.kt`, `ui/tools/McpPages.kt`), et leurs noms dans `ui/components/SettingsPages.kt`.
  */
 @Composable
 fun SettingsPageScreen(graph: AppGraph, route: Route.SettingsPage) {

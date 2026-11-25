@@ -4,6 +4,8 @@ import fr.qwartz.mika.data.moi.Levels
 import fr.qwartz.mika.data.moi.settings.GivenShare
 import fr.qwartz.mika.data.moi.settings.ShareKinds
 import fr.qwartz.mika.data.moi.settings.Shares
+import fr.qwartz.mika.ui.components.FakeSettingsApi
+import fr.qwartz.mika.ui.components.testDeps
 import fr.qwartz.mika.ui.mail.MainDispatcherRule
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceUntilIdle

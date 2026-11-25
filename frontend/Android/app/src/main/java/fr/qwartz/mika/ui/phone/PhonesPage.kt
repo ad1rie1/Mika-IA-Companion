@@ -1,4 +1,4 @@
-package fr.qwartz.mika.ui.settings
+package fr.qwartz.mika.ui.phone
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
@@ -27,8 +27,18 @@ import fr.qwartz.mika.data.moi.ago
 import fr.qwartz.mika.data.moi.phone.PhoneDevices
 import fr.qwartz.mika.data.moi.phone.shortPhone
 import fr.qwartz.mika.data.moi.settings.doneText
-import fr.qwartz.mika.data.moi.settings.phoneRows
-import fr.qwartz.mika.data.moi.settings.pushWords
+import fr.qwartz.mika.data.moi.phone.phoneRows
+import fr.qwartz.mika.data.moi.phone.pushWords
+import fr.qwartz.mika.ui.components.ConfirmDialog
+import fr.qwartz.mika.ui.components.SetDivider
+import fr.qwartz.mika.ui.components.SetGroup
+import fr.qwartz.mika.ui.components.SetHead
+import fr.qwartz.mika.ui.components.SetItem
+import fr.qwartz.mika.ui.components.SetNote
+import fr.qwartz.mika.ui.components.SetRow
+import fr.qwartz.mika.ui.components.SettingsEffects
+import fr.qwartz.mika.ui.components.SettingsLive
+import fr.qwartz.mika.ui.components.SettingsModel
 import fr.qwartz.mika.ui.components.rememberNow
 import fr.qwartz.mika.ui.shell.FollowLive
 import fr.qwartz.mika.ui.shell.BarNav

@@ -1,10 +1,12 @@
-package fr.qwartz.mika.ui.settings
+package fr.qwartz.mika.ui.tools
 
-import fr.qwartz.mika.data.moi.settings.HEADERS_TO_RETYPE
-import fr.qwartz.mika.data.moi.settings.Service
-import fr.qwartz.mika.data.moi.settings.ServiceTool
-import fr.qwartz.mika.data.moi.settings.Services
-import fr.qwartz.mika.data.moi.settings.ToolChoices
+import fr.qwartz.mika.data.moi.tools.HEADERS_TO_RETYPE
+import fr.qwartz.mika.data.moi.tools.Service
+import fr.qwartz.mika.data.moi.tools.ServiceTool
+import fr.qwartz.mika.data.moi.tools.Services
+import fr.qwartz.mika.data.moi.tools.ToolChoices
+import fr.qwartz.mika.ui.components.FakeSettingsApi
+import fr.qwartz.mika.ui.components.testDeps
 import fr.qwartz.mika.ui.mail.MainDispatcherRule
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceUntilIdle

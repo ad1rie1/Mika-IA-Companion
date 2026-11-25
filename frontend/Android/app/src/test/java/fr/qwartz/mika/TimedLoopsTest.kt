@@ -40,7 +40,7 @@ class TimedLoopsTest {
             once("le chrono de « elle s'y met » (ADR 0306), entre deux étapes poussées"),
         "ui/login/LoginScreen.kt" to "1000" to once("l'attente après trop d'essais de connexion, en secondes"),
         // des attentes que le direct ne peut pas pousser : rien ne passe par le journal
-        "ui/settings/BoxPages.kt" to "SIGNIN_EVERY_MS" to
+        "ui/mail/BoxPages.kt" to "SIGNIN_EVERY_MS" to
             once("la connexion Microsoft d'une boîte : `save_mail_grant` écrit hors du journal, rien n'est poussé"),
         "ui/projects/CodeViewModels.kt" to "wait" to
             once("après un geste chez l'hôte du code (GitHub…), deux relectures bornées : l'hôte n'est pas dans le journal"),

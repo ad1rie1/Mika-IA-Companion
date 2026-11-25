@@ -76,8 +76,8 @@ import fr.qwartz.mika.data.moi.agenda.rightsSummary
 import fr.qwartz.mika.data.moi.firstName
 import fr.qwartz.mika.data.moi.settings.Person
 import fr.qwartz.mika.ui.Route
-import fr.qwartz.mika.ui.settings.SettingsPages
-import fr.qwartz.mika.ui.settings.settingsPage
+import fr.qwartz.mika.ui.components.SettingsPages
+import fr.qwartz.mika.ui.components.settingsPage
 import fr.qwartz.mika.ui.shell.BarAction
 import fr.qwartz.mika.ui.shell.ListHead
 import fr.qwartz.mika.ui.shell.LocalShell

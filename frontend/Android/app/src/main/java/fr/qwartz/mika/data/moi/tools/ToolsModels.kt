@@ -8,7 +8,7 @@ import kotlinx.serialization.Serializable
  * `backendv2/docs/protocole-moi.md` § 6 ; code `app/me/rights.py`, ADR 0208, 0209, 0219). Chaque case est la décision
  * même du moteur : l'app la montre, elle ne la recalcule jamais. Chaque champ a son défaut : `MikaJson` ignore ce qu'il
  * ne connaît pas, et un champ absent ne casse rien. Ses services (`GET …/mcp/services`, § 8) ont les formes de
- * Paramètres (`settings/SettingsModels.kt` : `Services`, `Service`, `ReceivedService`), lues une seule fois pour les deux.
+ * Paramètres (`ToolsSettingsModels.kt` : `Services`, `Service`, `ReceivedService`), lues une seule fois pour les deux.
  */
 
 /** Un canal par où elle te parle (`web`, `salon`, `mobile`, `teams`, `courrier`), ou `seule` : quand elle travaille. */

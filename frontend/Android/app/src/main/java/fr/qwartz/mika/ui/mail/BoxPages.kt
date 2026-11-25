@@ -1,4 +1,4 @@
-package fr.qwartz.mika.ui.settings
+package fr.qwartz.mika.ui.mail
 
 import android.content.ActivityNotFoundException
 import android.content.Intent
@@ -54,43 +54,71 @@ import fr.qwartz.mika.data.moi.Tone
 import fr.qwartz.mika.data.moi.levelTag
 import fr.qwartz.mika.data.moi.mail.MailBox
 import fr.qwartz.mika.data.moi.mail.MailBoxes
-import fr.qwartz.mika.data.moi.settings.AUTHS
-import fr.qwartz.mika.data.moi.settings.Auths
-import fr.qwartz.mika.data.moi.settings.BOX_LABELS
-import fr.qwartz.mika.data.moi.settings.BoxSettings
-import fr.qwartz.mika.data.moi.settings.BoxValues
+import fr.qwartz.mika.data.moi.mail.AUTHS
+import fr.qwartz.mika.data.moi.mail.Auths
+import fr.qwartz.mika.data.moi.mail.BOX_LABELS
+import fr.qwartz.mika.data.moi.mail.BoxSettings
+import fr.qwartz.mika.data.moi.mail.BoxValues
 import fr.qwartz.mika.data.moi.settings.GivenShare
-import fr.qwartz.mika.data.moi.settings.NewBox
-import fr.qwartz.mika.data.moi.settings.Provider
+import fr.qwartz.mika.data.moi.mail.NewBox
+import fr.qwartz.mika.data.moi.mail.Provider
 import fr.qwartz.mika.data.moi.settings.Replies
 import fr.qwartz.mika.data.moi.settings.RuleEdit
 import fr.qwartz.mika.data.moi.settings.RulesKind
-import fr.qwartz.mika.data.moi.settings.SMTP_SECURITY
+import fr.qwartz.mika.data.moi.mail.SMTP_SECURITY
 import fr.qwartz.mika.data.moi.settings.ShareKinds
-import fr.qwartz.mika.data.moi.settings.SignIn
-import fr.qwartz.mika.data.moi.settings.VOICES
-import fr.qwartz.mika.data.moi.settings.Voices
-import fr.qwartz.mika.data.moi.settings.authWords
-import fr.qwartz.mika.data.moi.settings.boxChanges
-import fr.qwartz.mika.data.moi.settings.boxShownFields
-import fr.qwartz.mika.data.moi.settings.boxState
-import fr.qwartz.mika.data.moi.settings.boxStatusLine
+import fr.qwartz.mika.data.moi.mail.SignIn
+import fr.qwartz.mika.data.moi.mail.VOICES
+import fr.qwartz.mika.data.moi.mail.Voices
+import fr.qwartz.mika.data.moi.mail.authWords
+import fr.qwartz.mika.data.moi.mail.boxChanges
+import fr.qwartz.mika.data.moi.mail.boxShownFields
+import fr.qwartz.mika.data.moi.mail.boxState
+import fr.qwartz.mika.data.moi.mail.boxStatusLine
 import fr.qwartz.mika.data.moi.settings.doneText
 import fr.qwartz.mika.data.moi.settings.edit
-import fr.qwartz.mika.data.moi.settings.folderChoices
-import fr.qwartz.mika.data.moi.settings.foldersOf
-import fr.qwartz.mika.data.moi.settings.newBoxProblems
-import fr.qwartz.mika.data.moi.settings.newBoxValues
-import fr.qwartz.mika.data.moi.settings.providersFor
-import fr.qwartz.mika.data.moi.settings.rangeProblems
+import fr.qwartz.mika.data.moi.mail.folderChoices
+import fr.qwartz.mika.data.moi.mail.foldersOf
+import fr.qwartz.mika.data.moi.mail.newBoxProblems
+import fr.qwartz.mika.data.moi.mail.newBoxValues
+import fr.qwartz.mika.data.moi.mail.providersFor
+import fr.qwartz.mika.data.moi.mail.rangeProblems
 import fr.qwartz.mika.data.moi.settings.ruleBody
 import fr.qwartz.mika.data.moi.settings.ruleChanged
-import fr.qwartz.mika.data.moi.settings.secretsToRetype
+import fr.qwartz.mika.data.moi.mail.secretsToRetype
 import fr.qwartz.mika.data.moi.settings.shareWords
-import fr.qwartz.mika.data.moi.settings.sharedBoxSentence
-import fr.qwartz.mika.data.moi.settings.sharedBoxTitle
+import fr.qwartz.mika.data.moi.mail.sharedBoxSentence
+import fr.qwartz.mika.data.moi.mail.sharedBoxTitle
 import fr.qwartz.mika.ui.Route
+import fr.qwartz.mika.ui.components.ActionButton
+import fr.qwartz.mika.ui.components.ChoiceSeg
+import fr.qwartz.mika.ui.components.ConfirmDialog
+import fr.qwartz.mika.ui.components.DangerButton
+import fr.qwartz.mika.ui.components.FieldError
+import fr.qwartz.mika.ui.components.HeadCard
+import fr.qwartz.mika.ui.components.Move
+import fr.qwartz.mika.ui.components.PickField
+import fr.qwartz.mika.ui.components.RulesEditor
+import fr.qwartz.mika.ui.components.SaveBar
+import fr.qwartz.mika.ui.components.SetDivider
+import fr.qwartz.mika.ui.components.SetField
+import fr.qwartz.mika.ui.components.SetGroup
+import fr.qwartz.mika.ui.components.SetHead
+import fr.qwartz.mika.ui.components.SetItem
+import fr.qwartz.mika.ui.components.SetNote
+import fr.qwartz.mika.ui.components.SetRow
+import fr.qwartz.mika.ui.components.SetSwitch
+import fr.qwartz.mika.ui.components.SettingsDeps
+import fr.qwartz.mika.ui.components.SettingsEffects
+import fr.qwartz.mika.ui.components.SettingsLive
+import fr.qwartz.mika.ui.components.SettingsLoading
+import fr.qwartz.mika.ui.components.SettingsModel
+import fr.qwartz.mika.ui.components.SettingsPages
+import fr.qwartz.mika.ui.components.SharedWithGroup
+import fr.qwartz.mika.ui.components.copyText
 import fr.qwartz.mika.ui.components.rememberNow
+import fr.qwartz.mika.ui.components.settingsPage
+import fr.qwartz.mika.ui.components.shareRoute
 import fr.qwartz.mika.ui.shell.FollowLive
 import fr.qwartz.mika.ui.shell.BarMenu
 import fr.qwartz.mika.ui.shell.BarNav
@@ -113,15 +141,12 @@ import kotlinx.coroutines.launch
 /*
  * Paramètres › Boîtes mail (ADR 0185, 0187) : tes boîtes et celles qu'on te partage ; une boîte (ses réglages —
  * la boîte, la connexion de lecture, l'envoi, ce que Mika en fait —, la tester, la connecter à Microsoft, comment part
- * ce que Mika y prépare, la partager, la retirer) ; en ajouter une. Porté de `frontendv2/src/screens/parametres/mail.ts`
+ * ce que Mika y prépare, la partager, la retirer) ; en ajouter une. Porté de `frontendv2/src/screens/mail/settings.ts`
  * sans changer ses règles : un secret ne repart jamais (laissé vide, il reste), une connexion qui change le redemande.
  */
 
 /** Relire où en est une connexion Microsoft, tant que son code attend. */
 private const val SIGNIN_EVERY_MS = 3_000L
-
-/** Partager cette ressource : la page des partages, sa fenêtre ouverte sur elle. */
-internal fun shareRoute(kind: String, key: String): Route = settingsPage(SettingsPages.SHARES, "$kind:$key")
 
 // ── La liste ────────────────────────────────────────────────────────────
 
@@ -731,20 +756,6 @@ private fun BoxForm(vm: BoxViewModel, box: MailBox, s: BoxSettings, modifier: Mo
         SharedWithGroup(vm.given) { shell.navigate(shareRoute(ShareKinds.MAIL, box.key)) }
         Gap(8.dp)
         DangerButton(stringResource(R.string.settings_box_remove), onRemove)
-    }
-}
-
-/** Avec qui une ressource est partagée, et « Partager… ». */
-@Composable
-internal fun SharedWithGroup(given: List<GivenShare>, onShare: () -> Unit) {
-    SetHead(stringResource(R.string.settings_share_group))
-    SetGroup {
-        SetItem(
-            R.drawable.ic_m_users,
-            if (given.isEmpty()) stringResource(R.string.settings_share_nobody) else given.joinToString(", ") { "${it.name} · ${shareWords(it.level).lowercase()}" },
-            stringResource(R.string.settings_share_help),
-            onClick = onShare,
-        ) { MIcon(R.drawable.ic_m_chev_right, null, size = 20.dp, tint = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 }
 

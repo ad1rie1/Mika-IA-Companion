@@ -58,7 +58,7 @@ import fr.qwartz.mika.data.moi.teams.Conversation
 import fr.qwartz.mika.ui.Route
 import fr.qwartz.mika.ui.isTopLevel
 import fr.qwartz.mika.ui.mail.mailApi
-import fr.qwartz.mika.ui.settings.SettingsPages
+import fr.qwartz.mika.ui.components.SettingsPages
 import fr.qwartz.mika.ui.shell.ListHead
 import fr.qwartz.mika.ui.shell.LocalShell
 import fr.qwartz.mika.ui.shell.MIcon

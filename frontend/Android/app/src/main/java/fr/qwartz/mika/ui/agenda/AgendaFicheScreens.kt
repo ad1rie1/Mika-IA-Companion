@@ -98,8 +98,8 @@ import fr.qwartz.mika.data.moi.agenda.sortOf
 import fr.qwartz.mika.data.moi.agenda.whenWords
 import fr.qwartz.mika.ui.Route
 import fr.qwartz.mika.ui.components.rememberNow
-import fr.qwartz.mika.ui.settings.SettingsPages
-import fr.qwartz.mika.ui.settings.settingsPage
+import fr.qwartz.mika.ui.components.SettingsPages
+import fr.qwartz.mika.ui.components.settingsPage
 import fr.qwartz.mika.ui.shell.BarAction
 import fr.qwartz.mika.ui.shell.FollowLive
 import fr.qwartz.mika.ui.shell.LoadBox
