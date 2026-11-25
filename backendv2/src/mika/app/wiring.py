@@ -4,9 +4,12 @@
 ce dont il a besoin (le dossier de données, les réglages, l'horloge, ses bases) et y pose ce qu'il apporte :
 
 - ``wire(w)``, avant le noyau : ses adaptateurs et ses portes, rangés dans ``w.ports`` (les ports du noyau, par leur
-  nom), ``w.web`` (ce que l'application web reçoit par nom — ses portes HTTP : ``adapters/web/app.py::create_app``) et
-  ``w.parts`` (ses objets vivants, par le nom du domaine : ``Live.parts``) ;
-- ``bind(w)``, facultatif, une fois le noyau construit : ce qui a besoin de son port d'entrée (``w.port``).
+  nom), ``w.web`` (ce que l'application web reçoit par nom — ses portes HTTP : ``adapters/web/app.py::create_app``),
+  ``w.me`` (ce que l'API par personne reçoit par nom : ``app/me/api.py::MeApiBase``) et ``w.parts`` (ses objets
+  vivants, par le nom du domaine : ``Live.parts``) ;
+- ``bind(w)``, facultatif, une fois le noyau construit : ce qui a besoin de son port d'entrée (``w.port``), du
+  serveur vivant (``w.live`` : ses comptes, de quoi se reconfigurer) ou des notifications des téléphones
+  (``w.push``).
 
 Un domaine lit ce qu'un autre a posé par son nom (``w.ports["mail"]``), dans l'ordre des fiches ; il le déclare
 (``Domain.needs``).
@@ -36,5 +39,10 @@ class Wiring:
     web: dict[str, Any] = field(default_factory=dict)
     #: les objets vivants de chaque domaine, par son nom
     parts: dict[str, Any] = field(default_factory=dict)
-    #: le port d'entrée du noyau, une fois le noyau construit (pour ``bind``)
+    #: ce que l'API par personne reçoit, par nom
+    me: dict[str, Any] = field(default_factory=dict)
+    #: une fois le noyau construit (pour ``bind``) : son port d'entrée, le serveur vivant (``server.Live``), les
+    #: notifications des téléphones (``adapters.web.push.MobilePush``)
     port: Any = None
+    live: Any = None
+    push: Any = None

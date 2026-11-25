@@ -440,9 +440,6 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
         settings.mail_saved = mail_watch.nudge
     port = KernelPort(kernel)
     hub.port = port
-    wiring.port = port
-    for module in wired:  # ce qui, dans un domaine, a besoin du noyau
-        part(module, "bind", _unbound)(wiring)
     teams.port = port
     phone.port = port
     live = Live(kernel, hub, port, Accounts(store), settings, gateway, fixed, calls=CallLog(store),
@@ -457,6 +454,10 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     # console, sinon le fichier ``firebase-service-account.json`` du dossier de données
     push_sender = FcmSender(lambda: settings.push() or push_key_file(data))
     hub.push = phone.push = MobilePush(live.accounts, push_sender)
+    # ce qui, dans un domaine, a besoin du noyau : son port d'entrée, le serveur vivant, les notifications
+    wiring.port, wiring.live, wiring.push = port, live, hub.push
+    for module in wired:
+        part(module, "bind", _unbound)(wiring)
     # le monde (ADR 0051) : chaque lot commité qui change ce que montrent ses écrans leur part, traduit en trames
     world_hub = live.world = WorldHub(port, live.accounts, origins=web.origins, auth_required=web.auth_required)
 
@@ -581,7 +582,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     # ce que frontendv2 montre à qui est connecté, et seulement à elle (ADR 0187) ; sa borne des trajets vaut aussi pour
     # le GPX d'un voyage qu'un opérateur tire de la console, sur son compte (ADR 0204)
     moi = MeApi(kernel, live.accounts, origins=web.origins, apk=data / "telephone" / APK_NAME, extension=EXTENSION_DIR,
-                settings=live.settings, reconfigure=live.reconfigure, tiles=live.tiles)
+                settings=live.settings, reconfigure=live.reconfigure, tiles=live.tiles, **wiring.me)
     # le direct (ADR 0308) : le journal, les bases tenues à côté (chacune prévient de ses écritures validées), l'étape
     # de son travail ; à chaque personne connectée, ce qu'elle voit — et la boîte d'envoi réveille l'extension
     live_changes = live.changes = LiveChanges(kernel, hub, moi)
