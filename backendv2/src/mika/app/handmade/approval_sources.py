@@ -1,5 +1,7 @@
 """Ce qu'une demande à autoriser concerne, et d'où elle vient (ADR 0177) : le seul lecteur du contexte d'une demande
-(``EffectProposed.context``), côté composition — l'inspecteur ne nomme aucun plugin ni aucune faculté.
+(``EffectProposed.context``), côté composition — l'inspecteur ne nomme aucun plugin ni aucune faculté. Ce module non
+plus (ADR 0310) : ce qu'un contexte dit d'un domaine et la source de ses capacités sont dans sa part de la file
+(``QueuePart`` : ``contexts``, ``channels``, ``sources``), qu'il lit au moment de répondre.
 
 - ``about(ui, contexte)`` : ce qu'elle concerne, dit simplement — une personne (son nom), un projet (« projet n° 61 »),
   un service (« service « agenda » »), une app forgée, un canal (« Teams », « courrier », « téléphone » : jamais une
@@ -13,46 +15,42 @@
 
 from __future__ import annotations
 
+import functools
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlencode
 
-from mika.app.domains.mail.console.subject import DRAFT
-from mika.app.domains.teams.console.subject import CONVERSATION, REPLY
-from mika.app.domains.tools.console.subject import KIND as SERVER
+from mika.app.domains import DOMAINS, QueuePart, part
 from mika.app.handmade import person_href
-from mika.contracts import email as email_c
-from mika.contracts import phone as phone_c
-from mika.contracts import teams as teams_c
 from mika.inspector.pages.subjects import subject_url
-from mika.inspector.ui import PREFIX, UI
-from mika.plugins.agenda import CAPABILITY as AGENDA_WRITE
-from mika.ports.teams import DEFAULT_ACCOUNT as DEFAULT_TEAMS_ACCOUNT
-from mika.ports.teams import conversation_key
-from mika.vocab.episodes import project_of
+from mika.inspector.ui import UI
 from mika.vocab.words import elided
 
-#: la fiche d'une app forgée
-APP = "app"
-#: les sortes de ce qu'une demande concerne
-PERSON, PROJECT, SERVICE, FORGED, CHANNEL = "personne", "projet", "service", "app", "canal"
-#: le préfixe du contexte d'un appel à un service MCP, d'une app forgée (``mcp:agenda``, ``forge:meteo``)
-PREFIXES = {"mcp": SERVICE, "forge": FORGED}
-#: les canaux qui posent leur nom en contexte (``teams``, ``email``, ``phone``) : jamais une personne
-CHANNELS = {teams_c.OWNER: "Teams", email_c.OWNER: "courrier", phone_c.OWNER: "téléphone"}
+#: les sortes de ce qu'une demande concerne que le cadre dit lui-même : une personne, un canal (celles d'un domaine —
+#: un service, une app, un projet — sont dites par sa part de la file)
+PERSON, CHANNEL = "personne", "canal"
+
+
+@functools.cache
+def queues() -> tuple[QueuePart, ...]:
+    """La part de chaque domaine dans la file, dans l'ordre des fiches. Lue à la demande, une fois : la part d'un
+    domaine importe ce module (``Concern``, ``arg``), qui ne peut donc pas importer la sienne en naissant."""
+    consoles = (part(d.console, "CONSOLE") for d in DOMAINS if d.console is not None)
+    return tuple(console.queue for console in consoles if console.queue is not None)
 
 
 @dataclass(frozen=True, slots=True)
 class Concern:
     """Ce qu'une demande concerne, lu dans son contexte : sa sorte, ce qu'on en dit (« projet n° 61 »), son nom seul
-    (« 61 », « agenda », « Adrien »), sa fiche (vide : aucune), et la personne derrière (une personne seulement)."""
+    (« 61 », « agenda », « Adrien »), sa fiche (vide : aucune), la personne derrière (une personne seulement), et le
+    texte du lien vers sa fiche parmi les sources de la demande (« Le projet n° 61 » : ce que dit son domaine)."""
 
     kind: str
     text: str
     name: str = ""
     href: str = ""
     person: str = ""
+    link: str = ""
 
 
 def concern(ui: UI, context: str) -> Concern | None:
@@ -60,15 +58,14 @@ def concern(ui: UI, context: str) -> Concern | None:
     if not context:
         return None
     head, _, rest = context.partition(":")
-    kind = PREFIXES.get(head) if rest else None
-    if kind == SERVICE:
-        return Concern(SERVICE, f"service « {rest} »", rest, subject_url(SERVER, rest))
-    if kind == FORGED:
-        return Concern(FORGED, f"app « {rest} »", rest, subject_url(APP, rest))
-    if (project := project_of(context)) is not None:
-        return Concern(PROJECT, f"projet n° {project}", str(project), subject_url("project", str(project)))
-    if context in CHANNELS:
-        return Concern(CHANNEL, CHANNELS[context])
+    for queue in queues():  # le préfixe d'un domaine (``mcp:agenda``, ``forge:meteo``, ``project:61``)
+        read = queue.contexts.get(head) if rest else None
+        got: Concern | None = read(ui, rest) if read is not None else None
+        if got is not None:
+            return got
+    for queue in queues():  # un canal qui pose son nom (``teams``, ``email``, ``phone``) : jamais une personne
+        if context in queue.channels:
+            return Concern(CHANNEL, queue.channels[context])
     name = ui.names.name_of(context) or ui.names.who(context).removeprefix("le ")
     person = ui.names.person_of(context)
     href = person_href(person)
@@ -81,59 +78,26 @@ def about(ui: UI, context: str) -> tuple[str, str | None]:
     return ("", None) if got is None else (got.text, got.href or None)
 
 
-def _arg(args: Mapping[str, Any], name: str) -> str:
+def arg(args: Mapping[str, Any], name: str) -> str:
+    """Un argument d'une demande, en texte (vide : absent, ou ni un texte ni un nombre)."""
     value = args.get(name)
     return str(value) if isinstance(value, str | int) and str(value) else ""
 
 
-def _agenda_sources(ui: UI, args: Mapping[str, Any]) -> list[tuple[str, str]]:
-    """Une écriture d'agenda : la fiche de l'agenda ; sa semaine dans Tous les agendas, l'événement ouvert quand il est
-    déjà dans la base (une réponse d'invitation, une modification)."""
-    calendar = _arg(args, "calendar")
-    store = ui.kernel.ports.get("agenda")
-    cal = store.calendar(calendar) if store is not None and calendar else None
-    if cal is None:
-        return []
-    out = [(f"L'agenda « {cal.name or calendar} »", subject_url("agenda", calendar))]
-    uid = _arg(args, "uid")
-    found = store.find(calendar, uid, _arg(args, "original")) if uid else None
-    draft = args.get("draft") if isinstance(args.get("draft"), Mapping) else {}
-    span = draft.get("span") if isinstance(draft.get("span"), Mapping) else {}
-    start = found.span.start if found is not None else int(span.get("start") or 0)
-    if start:
-        query = {"du": ui.kernel.mind.frame().local(start).date().isoformat()}
-        if found is not None:
-            query["ev"] = f"{found.id}.{_arg(args, 'occurrence')}" if _arg(args, "occurrence") else str(found.id)
-        out.append(("Dans la semaine", f"{PREFIX}/agendas/tous?" + urlencode(query)))
-    return out
-
-
 def sources(ui: UI, capability: str, context: str, args: Mapping[str, Any]) -> list[tuple[str, str]]:
-    """Les liens vers la source d'une demande (texte, adresse), du plus proche au plus large."""
+    """Les liens vers la source d'une demande (texte, adresse), du plus proche au plus large : ceux de sa capacité, que
+    dit son domaine, puis ce que dit son contexte."""
     out: list[tuple[str, str]] = []
-    if capability == email_c.SEND:
-        if draft := _arg(args, "draft"):
-            out.append(("Le brouillon", subject_url(DRAFT, draft)))
-        if account := _arg(args, "account"):
-            out.append((f"La boîte « {account} »", f"{PREFIX}/courrier/reception?" + urlencode({"compte": account})))
-    elif capability == AGENDA_WRITE:  # l'agenda qu'elle touche, et sa semaine dans Tous les agendas (ADR 0309)
-        out += _agenda_sources(ui, args)
-    elif capability == teams_c.SEND:
-        if draft := _arg(args, "draft"):
-            out.append(("La réponse préparée", subject_url(REPLY, draft)))
-        if conversation := _arg(args, "conversation"):
-            key = conversation_key(_arg(args, "account") or DEFAULT_TEAMS_ACCOUNT, conversation)
-            out.append(("La conversation Teams", subject_url(CONVERSATION, key)))
+    for queue in queues():
+        if capability in queue.sources:
+            out += queue.sources[capability](ui, args)
+            break
     got = concern(ui, context)
     if got is None or not got.href:  # un canal n'a pas de fiche : ses liens sont ceux de sa capacité
         return out
-    if got.kind == SERVICE:
-        out.append((f"Le service « {got.name} »", got.href))
-    elif got.kind == FORGED:
-        out.append((f"L'app « {got.name} »", got.href))
-    elif got.kind == PROJECT:
-        out.append((f"Le projet n° {got.name}", got.href))
-    elif got.kind == PERSON:
+    if got.kind == PERSON:
         out.append((f"La fiche {elided(got.name, 'de')}", got.href))
         out.append(("Leur conversation", subject_url("person", got.person, "echanges")))
+    elif got.link:  # la fiche de ce que dit un domaine : son service, son app, son projet
+        out.append((got.link, got.href))
     return out

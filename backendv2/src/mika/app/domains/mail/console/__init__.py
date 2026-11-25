@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from mika.app.domains.domain import ConsolePart
+from mika.app.domains.mail.console.queue import QUEUE
 from mika.app.domains.mail.console.settings import sections
 from mika.app.domains.mail.console.subject import ACCOUNT, DRAFT, MAIL, AccountFiche, DraftFiche, MailFiche
 from mika.app.domains.mail.console.tabs import TABS
@@ -17,4 +18,4 @@ from mika.inspector.ui import console_folder
 console_folder(Path(__file__).parent)
 
 CONSOLE = ConsolePart(overviews={ACCOUNT: AccountFiche(), MAIL: MailFiche(), DRAFT: DraftFiche()}, drawn=TABS,
-                      sections=sections)
+                      sections=sections, queue=QUEUE)

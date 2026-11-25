@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from mika.app.domains.domain import ConsolePart
+from mika.app.domains.projects.console.queue import QUEUE
 from mika.app.domains.projects.console.settings import sections
 from mika.app.domains.projects.console.subject import KIND, ProjectFiche
 from mika.app.domains.projects.console.tabs import TABS
@@ -18,4 +19,4 @@ from mika.inspector.ui import console_folder
 
 console_folder(Path(__file__).parent)
 
-CONSOLE = ConsolePart(overviews={KIND: ProjectFiche()}, drawn=TABS, sections=sections)
+CONSOLE = ConsolePart(overviews={KIND: ProjectFiche()}, drawn=TABS, sections=sections, queue=QUEUE)

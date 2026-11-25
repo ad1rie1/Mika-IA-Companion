@@ -7,6 +7,8 @@ pour la barre du haut). Sa position se lit dans la localisation : il lit la cart
 
 Leur part du direct est dans ``live.py`` : ses messages, ses réponses offertes, et l'effet du moteur qu'est une
 réponse proposée, décidée, partie.
+Leur part de la console (``console.py``) ne dit que le mot de leur canal dans la file « À valider » : leurs pages sont
+celles de Ses sens et de la fiche d'une personne.
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ PHONE = Domain(
     wiring="mika.app.domains.phone.wiring",
     api="mika.app.domains.phone.api",
     live="mika.app.domains.phone.live",
+    console="mika.app.domains.phone.console",
     plugins={
         "phone": ("Les messages WhatsApp, Messenger et SMS que ton téléphone lui relaie, et ce qu'elle en fait",
                   (),

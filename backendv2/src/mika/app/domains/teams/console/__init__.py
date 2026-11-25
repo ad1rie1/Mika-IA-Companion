@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from mika.app.domains.domain import ConsolePart
+from mika.app.domains.teams.console.queue import QUEUE
 from mika.app.domains.teams.console.settings import sections
 from mika.app.domains.teams.console.subject import CONVERSATION, REPLY, ConversationFiche, ReplyFiche
 from mika.app.domains.teams.console.tabs import TABS
@@ -17,4 +18,4 @@ from mika.inspector.ui import console_folder
 console_folder(Path(__file__).parent)
 
 CONSOLE = ConsolePart(overviews={CONVERSATION: ConversationFiche(), REPLY: ReplyFiche()}, drawn=TABS,
-                      sections=sections)
+                      sections=sections, queue=QUEUE)

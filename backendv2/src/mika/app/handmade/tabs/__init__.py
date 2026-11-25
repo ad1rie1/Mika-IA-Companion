@@ -298,6 +298,14 @@ class Got:
         return Markup(env.get_template(template).render(**context))
 
 
+async def view_of(ui: UI, owner: str, name: str) -> Got | None:
+    """Une vue d'un propriétaire, lue comme un onglet dessiné la lit ; ``None`` : elle n'existe pas."""
+    spec = ui.inspection.find(owner, name)
+    if spec is None:
+        return None
+    return Got(ui, list(await ui.inspection.arun(spec, {}, ui.when_long)), {}, {})
+
+
 class Tab(Drawn):
     """Un onglet dans sa forme (ADR 0177) : ``draw(got)`` rend son HTML, un couple (HTML, blocs que la console rend
     après), un triplet (HTML, blocs, actions de la page pour la barre de titre), ou ``None`` (ses blocs, tels

@@ -38,7 +38,7 @@ garde, et vérifie que chaque part nommée existe et porte son nom convenu.
 from __future__ import annotations
 
 import importlib
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -105,6 +105,37 @@ class LivePart:
 
 
 @dataclass(frozen=True, slots=True)
+class QueuePart:
+    """Sa part de la file « À valider » (ADR 0177) : ce qu'il y inscrit, et ce qu'il dit d'une demande d'accord.
+    La file (``app/handmade/waiting.py``) et les sources d'une demande (``app/handmade/approval_sources.py``)
+    réunissent les parts ; elles n'en connaissent aucune."""
+
+    #: ses onglets de la file (des ``inspector.ui.QueueTab``) : les demandes de ses capacités, ses sortes d'éléments ;
+    #: leur place : leur ``order``
+    tabs: tuple[Any, ...] = ()
+    #: ce qui, chez lui, attend une décision sans être une demande d'envoi (les rapprochements de l'annuaire) :
+    #: ``items(ui)``, asynchrone, rend des ``inspector.ui.QueueItem``
+    items: Callable[..., Awaitable[list[Any]]] | None = None
+    #: … et ``count(ui, kinds)`` les compte (``kinds`` : les sortes voulues ; ``None`` : toutes)
+    count: Callable[..., int] | None = None
+    #: ses vues qui montrent, dans sa destination, les mêmes demandes que la file (« destination/onglet ») : l'accueil
+    #: ne les compte pas une seconde fois
+    covers: tuple[str, ...] = ()
+    #: les vues (propriétaire, vue) de ce qui attend chez lui hors des demandes d'envoi : la console en MCP les sert
+    #: sous « la file « À valider » »
+    views: tuple[tuple[str, str], ...] = ()
+    #: capacité → la source d'une demande, en liens : ``sources(ui, args)`` rend (texte, adresse), du plus proche au
+    #: plus large (le brouillon puis la boîte d'un mail)
+    sources: Mapping[str, Callable[..., list[tuple[str, str]]]] = field(default_factory=dict)
+    #: un canal qui pose son nom en contexte d'une demande (contexte → son mot : « Teams », « courrier ») : jamais une
+    #: personne
+    channels: Mapping[str, str] = field(default_factory=dict)
+    #: le préfixe du contexte d'une demande (« mcp » dans ``mcp:agenda``) → ce qu'elle concerne : ``concern(ui,
+    #: reste)`` rend un ``approval_sources.Concern`` (sa fiche, le texte de son lien), ou ``None`` : pas à lui
+    contexts: Mapping[str, Callable[..., Any]] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
 class ConsolePart:
     """Sa part de la console : ce qu'il y *inscrit*. Chaque page garde son gabarit et sa feuille, écrits à la main
     (ADR 0121, 0177) ; rien ici n'en dessine une."""
@@ -116,6 +147,8 @@ class ConsolePart:
     #: ses rubriques de réglages : ``sections(live)`` rend des ``inspector.catalog.SettingsSection`` (leur place dans
     #: leur rubrique : leur ``order``)
     sections: Callable[..., tuple[Any, ...]] | None = None
+    #: sa part de la file « À valider »
+    queue: QueuePart | None = None
 
 
 @dataclass(frozen=True, slots=True)

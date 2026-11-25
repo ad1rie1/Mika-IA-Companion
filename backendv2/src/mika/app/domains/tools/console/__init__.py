@@ -10,10 +10,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from mika.app.domains.domain import ConsolePart
+from mika.app.domains.tools.console.queue import QUEUE
 from mika.app.domains.tools.console.settings import sections
 from mika.app.domains.tools.console.subject import KIND, ServerOverview
 from mika.inspector.ui import console_folder
 
 console_folder(Path(__file__).parent)
 
-CONSOLE = ConsolePart(overviews={KIND: ServerOverview()}, sections=sections)
+CONSOLE = ConsolePart(overviews={KIND: ServerOverview()}, sections=sections, queue=QUEUE)

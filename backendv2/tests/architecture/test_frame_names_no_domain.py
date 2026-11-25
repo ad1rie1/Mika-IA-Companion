@@ -77,7 +77,6 @@ FOREVER: dict[str, str] = {
 
 #: ce qui reste à sortir du cadre : fichier d'``app`` → domaines qu'il nomme encore. Elle ne fait que rétrécir
 STILL: dict[str, set[str]] = {
-    "handmade/approval_sources.py": {"agenda", "mail", "phone", "teams", "tools"},
     "handmade/directory.py": {"contacts"},
     "handmade/person/__init__.py": {"agenda", "maps", "projects", "teams", "tools"},
     "handmade/person/agendas.py": {"agenda"},
@@ -87,7 +86,6 @@ STILL: dict[str, set[str]] = {
     "handmade/rights.py": {"agenda", "forge", "tools"},
     "handmade/tabs/people.py": {"contacts"},
     "handmade/tabs/thoughts.py": {"mail", "senses", "teams"},
-    "handmade/waiting.py": {"contacts", "mail", "teams"},
     "me/rights.py": {"forge", "mail", "teams", "tools"},
     "me/settings.py": {"mail", "teams"},
     "me/sharing.py": {"agenda", "mail", "teams", "tools"},

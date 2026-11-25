@@ -7,8 +7,9 @@ croisent l'annuaire et d'autres domaines (l'annuaire de Personnes, À valider, l
 
 from __future__ import annotations
 
+from mika.app.domains.contacts.console.queue import QUEUE
 from mika.app.domains.contacts.console.subject import ContactFiche
 from mika.app.domains.domain import ConsolePart
 from mika.plugins.contacts.inspect import KIND
 
-CONSOLE = ConsolePart(overviews={KIND: ContactFiche()})
+CONSOLE = ConsolePart(overviews={KIND: ContactFiche()}, queue=QUEUE)
