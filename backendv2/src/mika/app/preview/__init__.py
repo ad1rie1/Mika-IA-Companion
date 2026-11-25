@@ -39,7 +39,7 @@ from mika.adapters.web.app import WebConfig
 from mika.app import schema
 from mika.app.console import NAVIGATION
 from mika.app.domains import DOMAINS, part
-from mika.app.domains.mail.preview import mailbox
+from mika.app.domains.mail.demo import mailbox
 from mika.app.me import form
 from mika.app.preview.activity import activity
 from mika.app.preview.git import URL as REMOTE_URL

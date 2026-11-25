@@ -209,7 +209,7 @@ def test_a_mailbox_card_names_its_owner_even_an_operator(world):  # noqa: F811
 
 def test_the_mail_settings_count_ready_boxes_in_words(world, monkeypatch):  # noqa: F811
     """« 1 prête à relever », « 2 prêtes à relever » : une boîte — jamais « prêt(s) » (audit du 2026-11-05, C4-R1)."""
-    from mika.app.settings_sections.plugins import sections
+    from mika.app.domains.mail.console.settings import sections
 
     _, live, _ = world
 

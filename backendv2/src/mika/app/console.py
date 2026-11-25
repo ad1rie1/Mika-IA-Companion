@@ -94,10 +94,7 @@ NAVIGATION: tuple[NavGroup, ...] = (
                     order=("en_attente", "courriers", "teams", "identites", "rapprochements", "historique")),
     )),
     NavGroup("Relations & échanges", (
-        Destination("courrier", "Courrier", "Lire les messages, répondre et suivre les brouillons de chaque boîte.",
-                    subjects=("mail", "brouillon", "compte"), context=("compte",), automatic_actions=False,
-                    # ses paramètres (ses boîtes, son relevé, ce qu'elle en dit) : en haut à droite (ADR 0173)
-                    builtin=("courrier.parametres",), gear=("parametres",)),
+        _destination("mail"),  # le courrier
         _destination("teams"),  # Teams
         _destination("agenda"),  # les agendas de chacun
     )),
@@ -137,7 +134,7 @@ FACULTY_LABELS: dict[str, str] = _named("faculties", {
     "affect": "Humeur et postures", "needs": "Besoins", "body": "Corps et sommeil", "self": "Estime et récit",
     "attention": "Attention et pensées", "memory": "Mémoire", "transcript": "Fil des conversations",
     "social": "Liens", "others": "Ce qu'elle devine des autres", "identity": "Identités",
-    "agency": "Initiatives", "goals": "Buts", "projects": "Projets", "email": "Courrier",
+    "agency": "Initiatives", "goals": "Buts", "projects": "Projets",
     "kernel": "Noyau", "presence": "Présence", "expression": "Expression",
     "runtime": "Moteur", "place": "Où elle est (sa chambre)",
     "world": "Son monde et son corps", "shares": "Fichiers envoyés", "attachments": "Pièces reçues",
@@ -157,15 +154,13 @@ SECTION_LABELS: dict[str, str] = _named("sections", {
     "yesterday": "Son fil d'hier (journal)", "dream": "Son rêve de la nuit", "style": "Sa façon de parler",
     "about_person": "Ce qu'elle sait de la personne", "step": "Ce à quoi elle travaille",
     "subject": "Le sujet de l'initiative", "goals": "Ses buts en cours", "project": "Ce projet",
-    "project_share": "Un projet à partager", "projects": "Ses projets", "mails": "Ses mails non lus",
-    "drafts": "Ses brouillons de mails", "voice": "Sa voix dans cette boîte", "task_mail": "Le mail à traiter",
-    "task_ask": "Ce qu'on lui demande pour ce mail", "edits": "Ce qu'on change à ses brouillons (retouches, refus)",
+    "project_share": "Un projet à partager", "projects": "Ses projets",
     # ADR 0033, 0034, 0036
     "life": "Ce qui se passe dans la vie de la personne",
     "ahead": "Ce qui vient : le monde, et ce qu'elle vivra à travers quelqu'un",
     "learned": "Ce qu'elle a appris en lisant", "acquainted": "Les gens qu'on nomme (qu'elle connaît dans son cercle)", "veiled": "Ce qu'elle peut raconter sans nommer personne", "matter": "Ce dont elle pourrait parler",
     "noticed": "Ce qu'elle a remarqué", "habits": "Ce qu'elle s'entend répéter", "answer": "Sa réponse (le dernier rappel)",
-    "mail_mention": "Le mail important qu'elle annonce", "step_origin": "Ce qui a fait naître le but",
+    "step_origin": "Ce qui a fait naître le but",
     "project_network": "Ce que le réseau a rendu",
     "project_answer": "La réponse à sa demande d'aide (un projet)",
     # ADR 0047
@@ -213,7 +208,6 @@ REASON_LABELS: dict[str, str] = _named("reasons", {
     "remind": "Rappeler ce qu'on lui a demandé", "share": "Partager où en est un but",
     "drawing_ready": "Montrer un dessin prêt", "drawing_failed": "Dire qu'un dessin n'a pas pu se faire",
     "run": "Travailler sur un projet", "project_share": "Partager où en est un projet",
-    "mail_mention": "Parler d'un mail reçu", "mail_draft": "Préparer une réponse à un mail",
     "second_thoughts": "Elle s'est ravisée", "project_need": "Demander un coup de main pour un projet", "project_plan": "Dire son plan à qui a demandé un projet",
     "keep_promise": "Tenir une promesse au moment dit", "cheer": "Encourager avant un moment important",
     "celebrate": "Souhaiter ce qui se fête (un anniversaire), le jour même",
@@ -262,8 +256,6 @@ PROCESS_LABELS: dict[str, str] = _named("processes", {
     "projects.pulls": "Proposer la pull request d'un travail conclu, la relire chez l'hôte avec ses vérifications",
     "projects.issues": "Tenir les issues pour le reflet des tickets : ce qui part, et ce que l'hôte en dit",
     "projects.reviews": "Demander la relecture indépendante d'un travail conclu, hors des pull requests",
-    "email.poll": "Relever le courrier",
-    "email.keep": "Télécharger l'historique du courrier",
     "memory.promises": "Tenir ou laisser filer ses promesses", "self.wake": "Se réveiller avec sa nuit",
     "social.reciprocity": "Remarquer qui écrit en premier",
     "social.bonds": "Remarquer qu'un lien a changé",
@@ -350,8 +342,6 @@ EVENT_LABELS: dict[str, str] = _named("events", {
     "projects.reviewed": "Le verdict d'une relecture indépendante (bon, ou ses constats)",
     "projects.restored": "Un projet restauré", "projects.resumed": "Un projet repris",
     "projects.run_reported": "Une exécution rendue",
-    "email.draft_asked": "Une réponse à un mail demandée", "email.noticed": "Un mail remarqué",
-    "email.poll_asked": "Une relève demandée", "email.read": "Un mail lu", "email.sent": "Un mail envoyé",
     "projects.access_set": "Les accès d'un projet réglés",
     "projects.steer_asked": "Une demande de pilotage d'un projet, sur ton accord",
     "memory.event_noted": "Un événement de la vie de quelqu'un, noté", "body.roused": "Réveillée par un message",
@@ -412,7 +402,6 @@ EFFECT_LABELS: dict[str, tuple[str, str, str]] = _named("effects", {
                                 "une action qui ne demande pas d'accord : elle part dès qu'elle est décidée"),
     "runtime:effect.resolved": ("agit", "Une action que tu as autorisée",
                                 "elle part après ton accord : un mail, une réponse Teams, un git push…"),
-    "email:effect.executed": ("agit", "Un mail parti", "elle apprend qu'il est parti, retouché ou non"),
     "projects:effect.executed": ("agit", "Un pilotage de projet accepté",
                                  "la demande de quelqu'un sur un projet s'écrit, à son nom, après ton accord"),
     "shares:shares.expired": ("range", "Un fichier envoyé expire", "ses octets sont effacés"),
@@ -457,7 +446,6 @@ BUNDLE_LABELS: dict[str, str] = _named("bundles", {
 #: Le nom court de chaque capacité : ce qu'une ligne ou une puce de « À valider » et l'historique en disent, sans couper
 #: sa phrase. Celle-ci reste sa description, au survol et dans l'en-tête de la demande ouverte.
 CAPABILITY_LABELS: dict[str, str] = _named("capabilities", {
-    "email.send": "Mail",
     "projects.networked": "Commande réseau", "projects.push": "Push git", "projects.pull": "Pull git",
     "projects.pull_request": "Pull request",
     "projects.issue": "Issue publiée", "projects.issue_state": "État d'une issue",
@@ -484,7 +472,6 @@ ENRICHER_LABELS: dict[str, str] = _named("enrichers", {
     "projects_review": "Ce qu'une relecture indépendante a sous les yeux (ses textes, le diff du commit relu)",
     "projects_asks": "Les demandes de son projet aux projets qu'il lit (où chacune en est)",
     "projects_answer": "La réponse à sa demande d'aide (un projet)", "sent_files": "Les fichiers qu'elle a envoyés",
-    "mail": "Son courrier",
     "dessins": "Ses dessins",
 })
 

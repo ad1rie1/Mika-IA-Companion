@@ -82,10 +82,9 @@ STILL: dict[str, set[str]] = {
     "authors.py": {"mail"},
     "backup.py": {"maps", "projects"},
     "cli/models.py": {"tools"},
-    "cli/plugins.py": {"mail"},
     "handmade/approval_sources.py": {"agenda", "mail", "phone", "teams", "tools"},
     "handmade/directory.py": {"contacts"},
-    "handmade/pages.py": {"mail", "projects"},
+    "handmade/pages.py": {"projects"},
     "handmade/person/__init__.py": {"agenda", "maps", "projects", "teams", "tools"},
     "handmade/person/agendas.py": {"agenda"},
     "handmade/person/identifies.py": {"contacts"},
@@ -123,7 +122,6 @@ STILL: dict[str, set[str]] = {
     "preview/projects.py": {"projects"},
     "server.py": {"contacts", "projects", "tools"},
     "settings.py": {"agenda"},
-    "settings_sections/plugins.py": {"mail", "teams"},
 }
 
 

@@ -62,7 +62,7 @@ MENU = (
     MenuGroup("Relations & échanges", "people", (
         MenuLink("Personnes", "personnes", hint="Les gens qu'elle connaît"),
         MenuLink("Conversations", "fil", hint="Avec qui elle parle, ce qui s'est dit"),
-        MenuLink("Courrier", "courrier", hint="Ses boîtes aux lettres"),
+        _link("mail"),  # le courrier
         _link("teams"),  # Teams
         _link("agenda"),  # les agendas de chacun
         MenuLink("Identités", "identites", hint="Par où chacun lui parle, qui est qui"),
