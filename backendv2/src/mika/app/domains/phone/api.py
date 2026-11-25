@@ -1,7 +1,7 @@
 """Téléphone, pour qui est connecté (ADR 0187, 0190) : ses téléphones (les jetons de son application), les messages
 que l'application a lus dans ses notifications, rangés par conversation, les réponses que Mika y a proposées, sa
 dernière position, et l'application elle-même à télécharger. Le fond de carte sur lequel sa position se montre est
-celui de tous les écrans : il est servi avec la carte (``maps.py``, ADR 0229).
+celui de tous les écrans : il est servi avec la carte (``app/me/maps.py``, ADR 0229).
 
 Tout est à elle seule : ses messages sont ceux de son adresse ou de sa personne, sa position celle que son téléphone
 a donnée, ses téléphones les jetons ``mobile`` de son compte — qu'elle révoque elle-même. Les textes sont des contenus

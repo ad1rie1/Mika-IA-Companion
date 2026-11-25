@@ -57,7 +57,7 @@ PERSON = HANDLE_MAX
 CURSOR = 64
 #: une empreinte (sha256, en hexadécimal)
 PRINT = 64
-#: la clé d'une conversation (le téléphone : une empreinte en hexadécimal, ``app/phone.py``)
+#: la clé d'une conversation (le téléphone : une empreinte en hexadécimal, ``app/domains/phone/desk.py``)
 THREAD = 64
 #: la référence d'un message (Teams, un mail, ``p<seq>``), l'identifiant d'un appel du modèle
 REF = 200

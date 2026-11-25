@@ -2,9 +2,9 @@
 
 - **Ce que le téléphone donne** : l'application Android lit les notifications de WhatsApp et de Messages, si la
   personne l'a permis (un réglage coupé par défaut), et pousse chaque message (``POST /api/phone/inbox``). La porte
-  (``app/phone.py``) en fait un ``phone.received`` par message : la forme ``memory.Relayed``, que la mémoire relit
-  une fois la conversation posée — ce qu'on écrit à la personne devient un souvenir, « confié » par l'expéditeur et
-  par la personne qui le lui montre.
+  (``app/domains/phone/desk.py``) en fait un ``phone.received`` par message : la forme ``memory.Relayed``, que la
+  mémoire relit une fois la conversation posée — ce qu'on écrit à la personne devient un souvenir, « confié » par
+  l'expéditeur et par la personne qui le lui montre.
 - **Les consulter** (``phone_messages``) : en tête-à-tête, avec la personne dont c'est le téléphone, et seulement ses
   messages à elle. Ce n'est pas une section : elle regarde quand la conversation s'y prête (la leçon du décor,
   ADR 0119). Tout ce qui vient du téléphone est cité.

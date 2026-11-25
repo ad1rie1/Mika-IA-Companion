@@ -60,7 +60,6 @@ PACKAGES: dict[str, tuple[str, ...]] = {
 #: les modules d'``app`` qui sont à un domaine et attendent leur déménagement dans son dossier : les importer, c'est
 #: déjà le nommer. Un module déménagé sort de cette table (il n'existe plus : la garde le dit)
 TO_MOVE: dict[str, tuple[str, ...]] = {
-    "phone": ("app.phone", "app.me.phone"),
     "forge": ("app.forge_settings", "app.handmade.tabs.apps"),
     "senses": ("app.handmade.tabs.senses", "app.handmade.person.senses"),
     "tools": ("app.mcp_settings", "app.system_mcp", "app.lending", "app.me.mcp", "app.handmade.subjects.server",
@@ -138,7 +137,6 @@ STILL: dict[str, set[str]] = {
     "me/mail.py": {"mail"},
     "me/maps.py": {"maps"},
     "me/mcp.py": {"tools"},
-    "me/phone.py": {"maps", "phone"},
     "me/project_activity.py": {"projects"},
     "me/project_code.py": {"projects"},
     "me/project_docs.py": {"projects"},
@@ -149,7 +147,6 @@ STILL: dict[str, set[str]] = {
     "me/sharing.py": {"agenda", "mail", "teams", "tools"},
     "me/teams.py": {"teams"},
     "mindport.py": {"maps", "projects", "senses", "wakeup"},
-    "phone.py": {"phone"},
     "preview/__init__.py": {"mail", "maps", "projects", "teams"},
     "preview/git.py": {"projects"},
     "preview/mail.py": {"mail"},

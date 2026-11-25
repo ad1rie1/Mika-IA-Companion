@@ -5,7 +5,7 @@ conversation dit la réponse de Mika qui y compte : en chemin, ou partie (et son
 
 from __future__ import annotations
 
-from mika.app.me.phone import _her
+from mika.app.domains.phone.api import _her
 from mika.contracts import phone as c
 from mika.kernel.events import Content, Origin
 from mika.plugins.phone import LEVEL, Msg, Offer

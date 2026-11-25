@@ -26,7 +26,7 @@ from types import SimpleNamespace
 from sqlalchemy import select
 
 from mika.app import composition
-from mika.app.phone import PhoneDesk
+from mika.app.domains.phone.desk import PhoneDesk
 from mika.contracts import memory as mc
 from mika.contracts import phone as c
 from mika.contracts import runtime as rt

@@ -82,7 +82,7 @@ IMPLEMENTATIONS: dict[tuple[str, str], tuple[tuple[str, str], ...]] = {
     ("ports/mail.py", "MailPort"): (("adapters/mail/client.py", "ImapSmtpMail"), ("sim/outside.py", "FakeMail")),
     ("ports/maps.py", "MapsPort"): (("adapters/maps/desk.py", "MapsDesk"),),
     ("ports/mcp.py", "ExternalTools"): (("adapters/mcp/hub.py", "McpHub"),),
-    ("ports/phone.py", "PhoneGate"): (("app/phone.py", "PhoneDesk"),),
+    ("ports/phone.py", "PhoneGate"): (("app/domains/phone/desk.py", "PhoneDesk"),),
     ("ports/preprocess.py", "Preprocessor"): (("adapters/preprocess/__init__.py", "LocalPreprocessor"),),
     ("ports/shares.py", "ShareStore"): (
         ("adapters/shares/__init__.py", "MemoryShares"),

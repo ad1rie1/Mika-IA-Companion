@@ -219,7 +219,7 @@ def _teams(e: Any, frame: Any, kernel: Any) -> list[Touch]:
 
 
 def _phone(e: Any, frame: Any, kernel: Any) -> list[Touch]:
-    """Ses messages, ses réponses offertes : à elle seule — son adresse ou sa personne, la règle de ``phone._mine``."""
+    """Ses messages, ses réponses offertes : à elle seule — son adresse ou sa personne, la règle de ``phone.api._mine``."""
     d, name = e.data, e.type.name
     s = _state(frame, phone_p.PHONE.name)
     if name == phone_c.RECEIVED.name:

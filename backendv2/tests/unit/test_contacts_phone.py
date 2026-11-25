@@ -52,7 +52,7 @@ DUO = "abcdefabcdefabcd"
 
 
 def sender(person: str, app: str, key: str, name: str) -> str:
-    """La clé d'un expéditeur, comme la porte du téléphone la forme (``app/phone.py``)."""
+    """La clé d'un expéditeur, comme la porte du téléphone la forme (``app/domains/phone/desk.py``)."""
     digest = phone_c.contact_hash(person, app, key)
     return phone_c.contact_key(digest, name)
 
