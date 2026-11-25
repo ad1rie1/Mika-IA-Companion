@@ -24,6 +24,7 @@ from urllib.parse import urlencode
 from starlette.responses import Response
 from starlette.routing import Route
 
+from mika.app.domains.teams import account_settings
 from mika.app.domains.teams.extension import download, version_of
 from mika.app.me.api import PREFIX, Call, Denied, MeApiBase, done, form, missing
 from mika.app.me.common import allows, held_by, millis, only_owner, opened, snippet, work_of
@@ -118,7 +119,7 @@ def _message(call: Call, ref: str) -> Message:
 
 def state(call: Call) -> TeamsState:
     """Ce que Teams sait de sa vie (``TeamsState``) : ses brouillons, les messages vus, ses demandes. Les réglages de
-    ses comptes le lisent aussi (``settings.py``, les clés qui ont laissé une trace)."""
+    ses comptes le lisent aussi (``account_settings.py``, les clés qui ont laissé une trace)."""
     return call.frame.state(teams_p.TEAMS.name)
 
 
@@ -485,4 +486,5 @@ def routes(api: MeApiBase) -> list[Route]:
             r("/teams/thread", thread), r("/teams/work", progress), r("/teams/replies", replies),
             r("/teams/send", send, write=True), r("/teams/prefill", prefill, write=True),
             r("/teams/reply/send", reply_send, write=True), r("/teams/reply/edit", reply_edit, write=True),
-            r("/teams/reply/refuse", reply_refuse, write=True), r("/teams/reply/redo", reply_redo, write=True)]
+            r("/teams/reply/refuse", reply_refuse, write=True), r("/teams/reply/redo", reply_redo, write=True),
+            *account_settings.routes(api)]

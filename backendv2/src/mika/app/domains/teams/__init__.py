@@ -3,9 +3,10 @@
 Ce dossier porte sa porte HTTP (``desk.py`` : ``/api/teams/…``, qui est aussi le port ``teams_keys`` : les clés de
 l'extension, une par compte), son câblage (``wiring.py`` : son cache, le port ``teams`` ; la porte ; l'extension à
 télécharger), son module de l'API par personne (``api.py`` : ses comptes, leurs conversations, les réponses qu'elle y
-prépare ; ce qui attend son geste, pour la barre du haut), l'extension à télécharger (``extension.py``), sa part du
-direct (``live.py``), sa part de la console (``console/`` : ses onglets, la fiche d'une conversation et celle d'une
-réponse, leurs gabarits et leur feuille) et sa commande (``cli.py`` : ``mika teams``). Effacer ce que l'extension
+prépare ; ce qui attend son geste, pour la barre du haut), les réglages d'un compte dans l'espace de chacun
+(``account_settings.py`` : ses routes, qu'``api.py`` ajoute aux siennes), l'extension à télécharger
+(``extension.py``), sa part du direct (``live.py``), sa part de la console (``console/`` : ses onglets, la fiche d'une
+conversation et celle d'une réponse, leurs gabarits et leur feuille) et sa commande (``cli.py`` : ``mika teams``). Effacer ce que l'extension
 d'un compte a apporté efface aussi ce qu'il a fait voir dans l'annuaire : il lit l'annuaire. Ses réglages
 (``settings.py``) ont leur rubrique dans sa part de la console (Teams › Paramètres).
 """

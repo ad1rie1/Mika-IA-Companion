@@ -6,8 +6,9 @@ import kotlinx.serialization.Serializable
 
 /*
  * Les formes de Paramètres dans l'API par personne (`backendv2/docs/protocole-moi.md` § 7, 8, 9 ; code
- * `app/me/settings.py`, `mcp.py`, `sharing.py`). Chaque champ a son défaut : `MikaJson` ignore ce qu'il ne connaît pas,
- * et un champ absent ne casse rien. Les instants sont en millisecondes (0 : jamais). Un secret n'est jamais rendu :
+ * `app/me/settings.py`, `app/domains/mail/box_settings.py`, `app/domains/teams/account_settings.py`,
+ * `app/domains/tools/api.py`, `app/me/sharing.py`). Chaque champ a son défaut : `MikaJson` ignore ce qu'il ne connaît
+ * pas, et un champ absent ne casse rien. Les instants sont en millisecondes (0 : jamais). Un secret n'est jamais rendu :
  * seulement le fait qu'il est gardé.
  */
 

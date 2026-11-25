@@ -340,8 +340,8 @@ fun rangeProblems(values: Map<String, String>): Map<String, String> {
     return out
 }
 
-/** La connexion de chaque secret : quand l'une de ces valeurs change, le secret gardé se redonne (`app/me/settings.py`,
- *  `IMAP_CONNECTION` et `SMTP_CONNECTION`). */
+/** La connexion de chaque secret : quand l'une de ces valeurs change, le secret gardé se redonne
+ *  (`app/domains/mail/box_settings.py`, `IMAP_CONNECTION` et `SMTP_CONNECTION`). */
 val CONNECTION: Map<String, List<String>> = mapOf(
     "password" to listOf("auth", "imap_host", "imap_port", "imap_ssl", "user", "oauth_client_id", "oauth_tenant"),
     "smtp_password" to listOf("smtp_host", "smtp_port", "smtp_security", "smtp_user"),

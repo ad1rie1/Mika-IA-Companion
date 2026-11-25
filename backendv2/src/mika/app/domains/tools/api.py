@@ -259,7 +259,7 @@ def _origin(url: str) -> tuple[str, str, int | None]:
 def _headers_follow(spec: McpServer, changes: dict[str, Any]) -> dict[str, Any]:
     """Des en-têtes gardés ne partent jamais vers un autre serveur (ADR 0236) : une adresse qui mène ailleurs (un autre
     hôte, schéma ou port) les redemande — redonnés, ou retirés — ; sinon 400 sur leur champ, comme le mot de passe
-    d'une boîte (``settings._kept_secrets``). Sans en-têtes gardés, rien ne se redemande. Jugé sur la fiche relue sous
+    d'une boîte (``domains/mail/box_settings.py::_kept_secrets``). Sans en-têtes gardés, rien ne se redemande. Jugé sur la fiche relue sous
     le verrou des réglages (``McpSettingsStore.settle``)."""
     moved = "url" in changes and _origin(str(changes["url"])) != _origin(spec.url)
     if moved and spec.secret_headers.strip() and "secret_headers" not in changes:

@@ -295,13 +295,24 @@ def test_her_teams_extension_key_made_from_her_space_says_so(world):  # noqa: F8
     assert said.action("moi.teams.retirer_cle") == "Retirer la clé"
 
 
+def _routes_of_a_persons_space(tree: ast.Module) -> bool:
+    """Un module qui pose des routes de l'espace d'une personne : ``routes(api: MeApiBase)``."""
+    return any(isinstance(node, ast.FunctionDef) and node.name == "routes" and node.args.args
+               and isinstance(node.args.args[0].annotation, ast.Name) and node.args.args[0].annotation.id == "MeApiBase"
+               for node in tree.body)
+
+
 def test_every_path_of_a_persons_space_says_where_it_comes_from():
-    """Ce que l'espace d'une personne (``app/me/``, et son chat : ``app/mindport.py``) fait par une action déclarée
-    passe ``via=SPACE`` (``Call.act`` le fait), et ce qu'il audite lui-même a une clé « moi.… » : sinon Système ›
-    Gestes audités range dans « la console » ce qu'une opératrice a fait depuis son espace."""
+    """Ce que l'espace d'une personne (``app/me/``, son chat : ``app/mindport.py``, et chaque module d'un domaine qui y
+    pose des routes — l'API d'un domaine vit dans son dossier, ADR 0310) fait par une action déclarée passe
+    ``via=SPACE`` (``Call.act`` le fait), et ce qu'il audite lui-même a une clé « moi.… » : sinon Système › Gestes
+    audités range dans « la console » ce qu'une opératrice a fait depuis son espace."""
     unmarked: list[str] = []
     performs = audits = 0
-    for path in [*sorted((SRC / "app" / "me").glob("*.py")), SRC / "app" / "mindport.py"]:
+    domains = [path for path in sorted((SRC / "app" / "domains").rglob("*.py"))
+               if _routes_of_a_persons_space(ast.parse(path.read_text(encoding="utf-8")))]
+    assert domains  # la recherche trouve bien les modules de l'API des domaines
+    for path in [*sorted((SRC / "app" / "me").glob("*.py")), SRC / "app" / "mindport.py", *domains]:
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             f = node.func if isinstance(node, ast.Call) else None

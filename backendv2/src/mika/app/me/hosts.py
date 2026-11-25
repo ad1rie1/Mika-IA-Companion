@@ -60,7 +60,8 @@ async def public_only(call: Call, hosts: Mapping[str, Any]) -> None:
     un champ sans hôte ne compte pas) : sinon 400, chaque hôte refusé sur son champ. Seuls comptent les serveurs
     qu'elle vise (une boîte neuve ; un serveur, son port ou sa sécurité changés ; l'adresse d'un service) : une boîte
     réglée par une opératrice sur la machine (DavMail) ou le réseau local se règle encore, tant qu'on n'en change pas
-    la cible. Les boîtes (``settings.py``) et les services (``mcp.py``, brancher et régler) le vérifient ici."""
+    la cible. Les boîtes (``domains/mail/box_settings.py``) et les services (``domains/tools/api.py``, brancher et
+    régler) le vérifient ici."""
     if call.me.operator:
         return
     bad = {f: LOCAL for f, host in hosts.items() if isinstance(host, str) and await local_host(host)}

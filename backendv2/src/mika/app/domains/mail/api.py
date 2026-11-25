@@ -19,6 +19,7 @@ from starlette.responses import Response
 from starlette.routing import Route
 
 from mika.adapters.web.app import safe_mime
+from mika.app.domains.mail import box_settings
 from mika.app.domains.mail.settings import MailSettings
 from mika.app.me.api import Call, Denied, MeApiBase, done, form, missing
 from mika.app.me.common import allows, held_by, millis, only_owner, opened, snippet, work_of
@@ -116,7 +117,7 @@ async def _mail(call: Call, ref: str, need: str = SHARE_READ) -> Mail:
 
 def state(call: Call) -> EmailState:
     """Ce que le courrier sait de sa vie (``EmailState``) : ses mails remarqués, ses envois, ses brouillons, ses
-    demandes. Les réglages de ses boîtes le lisent aussi (``settings.py``, les clés qui ont laissé une trace)."""
+    demandes. Les réglages de ses boîtes le lisent aussi (``box_settings.py``, les clés qui ont laissé une trace)."""
     return call.frame.state(email_p.EMAIL.name)
 
 
@@ -605,4 +606,4 @@ def routes(api: MeApiBase) -> list[Route]:
             r("/mail/prefill", prefill, write=True), r("/mail/images", images, write=True),
             r("/mail/poll", poll, write=True), r("/mail/draft/send", draft_send, write=True),
             r("/mail/draft/edit", draft_edit, write=True), r("/mail/draft/refuse", draft_refuse, write=True),
-            r("/mail/draft/redo", draft_redo, write=True)]
+            r("/mail/draft/redo", draft_redo, write=True), *box_settings.routes(api)]
