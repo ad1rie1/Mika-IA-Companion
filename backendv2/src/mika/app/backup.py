@@ -92,6 +92,7 @@ from mika.adapters.system import RandomIdGen, RealClock
 from mika.adapters.workshop import REVIEWS_DIRNAME, VIEWS_DIRNAME
 from mika.app import backup_server, datadir, schema
 from mika.app.composition import READING, faculties
+from mika.app.domains import DOMAINS
 from mika.app.settings import PUSH_KEY_FILE
 from mika.kernel.codec import digest
 from mika.kernel.registry import Registry
@@ -534,6 +535,8 @@ PLACES: dict[str, str] = {
     "mind": "sa vie : le journal, ses contenus, ses instantanés, les comptes, les réglages",
     "views": "les projections et les vecteurs tirés du journal, les traces et les appels de modèle des derniers jours",
     **{base.name: base.place for base in schema.DOMAIN_BASES},
+    # le dossier d'un domaine qui a sa fiche dit le sien de même (``Domain.places``)
+    **{name: said for domain in DOMAINS for name, said in domain.places.items()},
     "forge": "ses apps forgées, leurs versions et leurs bases",
     "ateliers": "les ateliers de ses projets, avec leur git",
     "mcp": "les services MCP lancés sur cette machine, chacun dans sa cage",

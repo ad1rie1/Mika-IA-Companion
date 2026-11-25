@@ -223,6 +223,11 @@ class SettingsPart:
     async def _put(self, key: str, value: Any) -> None:
         await self.door._put(key, value)
 
+    async def open(self) -> None:
+        """Appelé à l'ouverture des réglages, une fois leur table là : un domaine qui tient ses réglages en mémoire
+        (lus depuis d'autres fils, ou à chaque épisode) les lit ici. Sa classe doit alors être prise avant
+        l'ouverture — dans le câblage de son domaine (``wire``)."""
+
 
 P = TypeVar("P", bound=SettingsPart)
 
@@ -259,6 +264,8 @@ class Settings:
         self._keys = asyncio.Lock()
         #: les réglages de chaque domaine, par leur classe (``of``)
         self._parts: dict[type, SettingsPart] = {}
+        #: ouverts : leur table existe, ce qu'ils tiennent en mémoire est lu
+        self._opened = False
 
     async def open(self) -> None:
         def create(sql: Any) -> None:
@@ -272,6 +279,9 @@ class Settings:
         self._forge = {str(k): dict(v) for k, v in data.items() if isinstance(v, dict)}
         self._rights = self._read_rights()
         self._authors = self._read_authors()
+        for part in list(self._parts.values()):  # ce que les réglages d'un domaine tiennent en mémoire
+            await part.open()
+        self._opened = True
 
     def _get(self, key: str) -> Any:
         try:
@@ -294,6 +304,9 @@ class Settings:
         """Les réglages d'un domaine (ADR 0310) : sa classe (une ``SettingsPart`` de son dossier), construite une
         fois sur cette porte — ce qu'elle tient en mémoire et ses verrous valent donc pour tout le serveur."""
         if kind not in self._parts:
+            if self._opened and kind.open is not SettingsPart.open:
+                raise RuntimeError(f"{kind.__name__} tient un état en mémoire, lu à l'ouverture des réglages : son "
+                                   "domaine le prend dans son câblage (``wire``), avant l'ouverture")
             self._parts[kind] = kind(self)
         return self._parts[kind]  # type: ignore[return-value]
 

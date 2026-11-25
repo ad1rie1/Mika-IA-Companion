@@ -50,6 +50,7 @@ MODELS = (
     "mika.runtime.series",
     "mika.adapters.forge.bases",
     *(base.models for base in DOMAIN_BASES),
+    *(module for d in DOMAINS for module in d.models),
 )
 
 #: le fichier de chaque base dans un dossier de données (SQLite) : ``<nom>.db``

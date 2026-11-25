@@ -101,6 +101,12 @@ class Domain:
     needs: tuple[str, ...] = ()
     #: sa base à côté du journal, s'il en tient une
     base: Base | None = None
+    #: les modules de ses entités rangées dans une base du cœur (le journal d'une app, dans ``views``) : les importer
+    #: remplit la ``MetaData`` de cette base
+    models: tuple[str, ...] = ()
+    #: ses dossiers du dossier de données, et ce que chacun garde, en mots (Système › Stockage et sauvegardes) : des
+    #: textes affichés, sans numéro de décision
+    places: Mapping[str, str] = field(default_factory=dict)
     #: le module de son câblage (``wire``, ``bind``)
     wiring: str | None = None
     #: le module de son API par personne (``routes``, ``COUNTERS``)

@@ -200,7 +200,8 @@ def test_the_settings_of_a_domain_write_only_through_the_door():
         direct = sorted({x.attr for x in ast.walk(tree) if isinstance(x, ast.Attribute) and x.attr in ("store", "run_mind")})
         assert not direct, f"{path.parent.name}/settings.py touche au magasin ({', '.join(direct)}) : il écrit par ``_put``"
     door = _methods(ast.parse((SRC / "app/settings.py").read_text(encoding="utf-8")), "SettingsPart")
-    assert set(door) == {"__init__", "_get", "_put"}, "la porte d'un domaine : lire, écrire en le disant, rien d'autre"
+    assert set(door) == {"__init__", "_get", "_put", "open"}, \
+        "la porte d'un domaine : lire, écrire en le disant, lire en mémoire à l'ouverture — rien d'autre"
 
 
 ACCOUNTS_TOY = '''
