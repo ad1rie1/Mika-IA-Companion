@@ -1,4 +1,4 @@
-"""La vue d'ensemble d'une personne (``app/person.py``), à travers le vrai serveur : le premier onglet de sa fiche,
+"""La vue d'ensemble d'une personne (``app/handmade/person/``), à travers le vrai serveur : le premier onglet de sa fiche,
 ouvert par défaut, qui croise ce qu'elle vit avec elle — son ressenti, leur histoire, ce qu'elle sait, leurs derniers
 mots — ; l'en-tête, les actions et les onglets de la fiche restent ; une lecture qui échoue tait sa carte, jamais la
 fiche."""

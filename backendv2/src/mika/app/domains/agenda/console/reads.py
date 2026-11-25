@@ -1,6 +1,6 @@
 """Ce que lisent les pages « Agendas » de la console (ADR 0309, lot 5) : Échanges › Agendas (``tabs.py``), la
 fiche d'un agenda (``subject.py``), l'onglet « Agendas » de la fiche d'une personne (``person.py``) et
-la file « À valider » (``app/handmade/approval_sources.py``).
+la file « À valider » (``queue.py``).
 
 Chaque agenda est lu tel que la console le montre (``plugins/agenda/inspect/views.py::Shown`` : à qui, sa sorte, sa synchro),
 avec sa couleur — celle que son propriétaire a choisie, sinon la plus proche de celle de son fournisseur, sinon une de

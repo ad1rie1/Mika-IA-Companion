@@ -13,7 +13,7 @@ vérifie et enregistre.
 
 Restent au cadre : le rangement de ses droits (le tableau réglé de chaque agenda est gardé par la porte des
 réglages avec ceux des canaux et des outils, lus à chaque épisode — on les lit et on les enregistre par ses
-réglages) ; « qui peut quoi », les partages, ce que concerne un accord — des pages qui croisent les domaines.
+réglages) ; « qui peut quoi » et les partages — des pages qui croisent les domaines.
 """
 
 from __future__ import annotations
