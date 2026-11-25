@@ -18,8 +18,8 @@ imports de chaque source d'``app`` (``ast`` : jamais un commentaire) :
   ``mika.app.domains.domain`` ; aux couches du dessous elle ne prend que de quoi se dire — une ``Destination``, un
   ``MenuLink``) : elle nomme les modules de ses parts, que le cadre importe au moment d'assembler. Le
   registre est donc une feuille de l'arbre des imports, que tout module d'``app`` peut lire ; et **chaque part nommée
-  existe** et porte son nom convenu (``wire``, ``SETTINGS``, ``routes``, ``LIVE``, ``SHARING``, ``CONSOLE``,
-  ``preview``, ``add``).
+  existe** et porte son nom convenu (``wire``, ``SETTINGS``, ``routes``, ``LIVE``, ``SHARING``, ``ACCOUNTS``,
+  ``CONSOLE``, ``preview``, ``add``).
 
 Le contrôle est une fonction du texte des sources (``offences``) : les derniers tests l'essaient sur de petits
 sources factices, pour qu'il échoue vraiment quand on nomme un domaine.
@@ -31,8 +31,19 @@ import ast
 from collections.abc import Iterator, Mapping
 from pathlib import Path
 
-from mika.app.domains import DOMAINS, ConsolePart, Domain, LivePart, PersonPart, SharingPart, part
+from mika.app.domains import (
+    DOMAINS,
+    AccountsPart,
+    ConsolePart,
+    Domain,
+    LivePart,
+    PersonPart,
+    SharingPart,
+    part,
+)
 from mika.app.handmade.person import TABS as PERSON_TABS
+from mika.app.handmade.person import account_tabs
+from mika.app.me.accounts import CHANNELS
 from mika.app.me.sharing import KINDS as SHARED_KINDS
 from mika.app.settings import SettingsPart
 
@@ -85,8 +96,7 @@ STILL: dict[str, set[str]] = {
     "handmade/rights.py": {"agenda", "forge", "tools"},
     "handmade/tabs/people.py": {"contacts"},
     "handmade/tabs/thoughts.py": {"mail", "senses", "teams"},
-    "me/rights.py": {"forge", "mail", "teams", "tools"},
-    "me/settings.py": {"mail", "teams"},
+    "me/rights.py": {"forge", "tools"},
     "mindport.py": {"maps", "projects", "senses", "wakeup"},
     "preview/__init__.py": {"mail", "maps", "projects", "teams"},
 }
@@ -211,7 +221,8 @@ def test_every_part_a_card_names_exists_and_carries_its_name():
     """Une fiche nomme les modules de ses parts au lieu de les importer : une faute de frappe ne se verrait qu'à
     l'assemblage. Chaque module nommé s'importe ici, et porte le nom que le cadre y lit."""
     for d in DOMAINS:
-        for module in (d.wiring, d.settings, d.api, d.live, d.sharing, d.console, d.preview, d.cli, d.backup):
+        for module in (d.wiring, d.settings, d.api, d.live, d.sharing, d.accounts, d.console, d.preview, d.cli,
+                       d.backup):
             assert module is None or _within(module, f"mika.app.{HOME}.{d.name}"), f"{d.name} : {module} est hors de son dossier"
         assert d.wiring is None or callable(part(d.wiring, "wire")), d.name
         assert d.settings is None or issubclass(part(d.settings, "SETTINGS"), SettingsPart), d.name
@@ -224,6 +235,12 @@ def test_every_part_a_card_names_exists_and_carries_its_name():
             assert shared.kind in SHARED_KINDS and shared.word and shared.key_limit > 0, d.name
             assert callable(shared.every) and callable(shared.share), d.name
             assert all(f is None or callable(f) for f in (shared.write, shared.sharer, shared.names)), d.name
+        held = part(d.accounts, "ACCOUNTS")
+        assert held is None or isinstance(held, AccountsPart), d.name
+        if held is not None:  # les comptes de son canal : un canal de CHANNELS, ses mots, ce qu'elle appelle
+            assert held.canal in CHANNELS and held.kind and held.family and held.tab and held.label, d.name
+            assert held.noun and all(isinstance(b, str) and b for b in held.badges), d.name
+            assert all(callable(f) for f in (held.held, held.owned, held.shown, held.configured)), d.name
         assert d.console is None or isinstance(part(d.console, "CONSOLE"), ConsolePart), d.name
         sheet = _person_part(d)
         assert sheet is None or isinstance(sheet, PersonPart), d.name
@@ -231,7 +248,7 @@ def test_every_part_a_card_names_exists_and_carries_its_name():
             assert sheet.tabs and all(callable(draw) for draw in sheet.tabs.values()), d.name
             assert set(sheet.formed) <= set(sheet.tabs), f"{d.name} : {sorted(set(sheet.formed) - set(sheet.tabs))}"
             # … ou, pour un compte qui s'ajoute à celui du cadre, un onglet du cadre
-            unknown = set(sheet.counts) - {*sheet.tabs, *PERSON_TABS}
+            unknown = set(sheet.counts) - {*sheet.tabs, *PERSON_TABS, *account_tabs()}
             assert not unknown and all(callable(count) for count in sheet.counts.values()), f"{d.name} : {sorted(unknown)}"
             assert sheet.hidden is None or callable(sheet.hidden), d.name
             assert sheet.routes is None or callable(sheet.routes), d.name
@@ -249,6 +266,15 @@ def test_each_kind_of_share_has_its_part_said_once():
     assert sorted(kinds) == sorted(SHARED_KINDS), kinds
 
 
+def test_each_channel_has_its_accounts_said_once():
+    """Les comptes se lisent canal par canal, dans l'ordre de ``CHANNELS`` (``app/me/accounts.py``) : un canal sans
+    part, ou dit par deux, ferait échouer la première lecture de ses comptes — ici, avant. Deux canaux ne remplissent
+    pas le même onglet de la fiche d'une personne."""
+    found = [part(d.accounts, "ACCOUNTS") for d in DOMAINS if d.accounts is not None]
+    assert sorted(p.canal for p in found) == sorted(CHANNELS), [p.canal for p in found]
+    assert len({p.tab for p in found}) == len(found), [p.tab for p in found]
+
+
 def _person_part(d: Domain) -> PersonPart | None:
     return part(d.console, "CONSOLE").person if d.console is not None else None
 
@@ -256,7 +282,7 @@ def _person_part(d: Domain) -> PersonPart | None:
 def test_a_tab_of_the_sheet_of_a_person_is_drawn_by_one_hand():
     """La fiche d'une personne réunit les onglets du cadre, puis ceux des parts (``every_tab``) : un onglet que deux
     parts dessinent, ou qu'une part reprend au cadre, ne serait dessiné que par la dernière — sans bruit."""
-    seen = dict.fromkeys(PERSON_TABS, "le cadre")
+    seen = dict.fromkeys({**PERSON_TABS, **account_tabs()}, "le cadre")
     twice = []
     for d in DOMAINS:
         sheet = _person_part(d)

@@ -21,6 +21,8 @@ cadre les importe au moment d'assembler (``part``), et y lit un nom convenu :
 - ``live`` : ``LIVE``, une ``LivePart`` ;
 - ``sharing`` : ``SHARING``, une ``SharingPart`` : ce qui se partage chez lui (``app/me/sharing.py`` réunit les
   parts) ;
+- ``accounts`` : ``ACCOUNTS``, une ``AccountsPart`` : les comptes de son canal (``app/me/accounts.py`` réunit les
+  parts) ;
 - ``console`` : ``CONSOLE``, une ``ConsolePart`` ;
 - ``wiring`` : ``wire(w)``, ce que le serveur construit pour lui avant le noyau (ses adaptateurs, ses portes), et,
   facultatif, ``bind(w)``, ce qui a besoin du noyau (``app/wiring.py::Wiring``) ;
@@ -141,6 +143,43 @@ class SharingPart:
 
 
 @dataclass(frozen=True, slots=True)
+class AccountsPart:
+    """Les comptes de son canal (ADR 0185, 0186, 0207) : ses boîtes, ses comptes Teams — ceux d'une personne, à qui
+    est chacun, et comment la console les montre. La règle d'envoi d'un compte (``app/me/settings.py``), la matrice de
+    l'écran Outils (``app/me/rights.py``) et l'onglet Comptes de la fiche d'une personne (``app/handmade/person/``)
+    réunissent les parts, dans l'ordre de leurs canaux (``app/me/accounts.py::CHANNELS``) ; ils n'en connaissent
+    aucune."""
+
+    #: son canal, tel que le moteur le dit (``vocab.access`` : « courrier », « teams ») : un de ses comptes est le canal
+    #: « <canal>:<clé> », dont la règle dit comment part ce qu'elle y prépare ; sa place :
+    #: ``app/me/accounts.py::CHANNELS``
+    canal: str
+    #: sa sorte de ressource, telle que l'API la dit (« mail », « teams »)
+    kind: str
+    #: la famille de ses outils (« email », « teams ») : la matrice mène de chacun de ses comptes à elle
+    family: str
+    #: les comptes de qui est connecté : ``held(call)`` rend, par clé, le compte et son niveau — les siens, puis ceux
+    #: qu'on lui partage
+    held: Callable[..., Mapping[str, tuple[Any, str]]]
+    #: un compte à elle (le régler, décider de ce qui en part : un partage n'y suffit pas) : ``owned(call, key)`` le
+    #: rend, ou lève ``Denied``
+    owned: Callable[..., Any]
+    #: ce que la matrice dit d'un de ses comptes, après sa clé et sa sorte : ``shown(info)`` (son nom ; une boîte, aussi
+    #: son adresse)
+    shown: Callable[..., Mapping[str, Any]]
+    #: ses comptes tels que ses réglages les tiennent, par clé (chacun dit à qui il est : ``owner``) :
+    #: ``configured(settings)``
+    configured: Callable[..., Mapping[str, Any]]
+    #: l'onglet que sa faculté remplit sur la fiche d'une personne (son ancre dans Comptes, que le premier canal porte)
+    tab: str
+    #: son nom, en sous-onglet de Comptes
+    label: str
+    #: ce que dit la liste de ses comptes : la colonne qui nomme un compte, puis celles qui sont ses étiquettes
+    noun: str
+    badges: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class QueuePart:
     """Sa part de la file « À valider » (ADR 0177) : ce qu'il y inscrit, et ce qu'il dit d'une demande d'accord.
     La file (``app/handmade/waiting.py``) et les sources d'une demande (``app/handmade/approval_sources.py``)
@@ -235,6 +274,8 @@ class Domain:
     live: str | None = None
     #: le module de ce qu'il partage (``SHARING`` : sa ``SharingPart``)
     sharing: str | None = None
+    #: le module des comptes de son canal (``ACCOUNTS`` : son ``AccountsPart``)
+    accounts: str | None = None
     #: le module de sa part de la console (``CONSOLE``)
     console: str | None = None
     #: le module de ce qu'il ajoute à l'aperçu de la console (``preview``)

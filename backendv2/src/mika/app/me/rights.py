@@ -6,7 +6,8 @@ Chaque case est la décision même de la porte d'offre (``runtime.tool_offer.jud
 condition d'un outil, une ressource à son nom), jamais une recopie ; pour un service ou une app de la Forge, la ligne de
 leurs accès, telle que leur faculté la déclare (``RightsSpec.grants``). Ses ressources s'y rangent : ses propres
 outils, famille par famille, chacun nommé pour elle (``label``, ADR 0208) ; ses comptes (chaque boîte, chaque compte
-Teams, avec la règle qui vaut pour son canal — qui, préparer d'elle-même, comment ça part) ; les services et les apps
+Teams, avec la règle qui vaut pour son canal — qui, préparer d'elle-même, comment ça part —, tels que son canal les
+dit : ``app/me/accounts.py``) ; les services et les apps
 qu'au moins une case lui ouvre (un service qu'une personne a branché, avec son but ; jamais la ligne du catalogue d'un
 service de Mika, écrite pour elle). Rien n'y dit les droits d'une autre personne : les lignes d'une famille
 ne se montrent pas, seulement ses cases à elle, et pourquoi — la part de la ligne qui la concerne, en mots (``said_to``,
@@ -22,9 +23,8 @@ from urllib.parse import urlencode
 from starlette.routing import Route
 
 from mika.app.console import LABELS
-from mika.app.domains.mail import api as mail_me
-from mika.app.domains.teams import api as teams_me
 from mika.app.domains.tools import system as system_mcp
+from mika.app.me import accounts as channels
 from mika.app.me.api import Call, Me, MeApiBase
 from mika.contracts import forge as forge_c
 from mika.contracts import identity as identity_c
@@ -288,14 +288,14 @@ async def matrix(call_: Call) -> dict[str, Any]:
              "href": href(f"famille:{b}"), "tools": rows}
             for b, rows in sorted(families.items(), key=lambda kv: names.bundle(kv[0]).casefold())
             if not b.startswith(("mcp.", "forge_apps."))]},
+        # les comptes de chaque canal, dans l'ordre des canaux (``app/me/accounts.py``)
         {"key": "accounts", "title": "Tes comptes", "resources": [
-            *({"key": f"courrier:{key}", "kind": "mail", "title": a.name, "address": a.address,
-               "family": "famille:email", "rules": _rules(canals, f"{MAIL}:{key}", name, her, sources)}
-              # les siennes seulement : la règle d'une boîte qu'on lui partage est l'affaire de son propriétaire
-              for key, (a, level) in mail_me.boxes(call_).items() if level == OWNED),
-            *({"key": f"teams:{key}", "kind": "teams", "title": a.name, "family": "famille:teams",
-               "rules": _rules(canals, f"{TEAMS}:{key}", name, her, sources)}
-              for key, (a, level) in teams_me.accounts(call_).items() if level == OWNED)]},
+            {"key": f"{channel.canal}:{key}", "kind": channel.kind, **channel.shown(a),
+             "family": f"famille:{channel.family}", "rules": _rules(canals, f"{channel.canal}:{key}", name, her, sources)}
+            # les siens seulement : la règle d'une boîte ou d'un compte qu'on lui partage est l'affaire de son
+            # propriétaire
+            for channel in channels.parts().values() for key, (a, level) in channel.held(call_).items()
+            if level == OWNED]},
         *({"key": group, "title": "Services" if group == "services" else "Apps de la Forge", "resources": [
             {"key": resource, "title": _outside_title(resource, apps, system),
              "description": _outside_about(resource, statuses, system), "href": href(resource),

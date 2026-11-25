@@ -69,6 +69,7 @@ from mika.app.handmade.person.memory import memory
 from mika.app.handmade.rights import UNSHARE, retiring
 from mika.app.handmade.tabs import anchored
 from mika.app.me import OUTBOUND
+from mika.app.me import accounts as channels
 from mika.app.me.sharing import Shared, every_share, given_and_received, sharer
 from mika.contracts import affect as affect_c
 from mika.contracts import attention as attention_c
@@ -502,10 +503,16 @@ def circle(look: Look, who: Who) -> dict[str, Any]:
 
 # ── ses comptes : ses boîtes, ses comptes Teams, ses services, ses partages ──
 
-#: les sous-onglets de Comptes que les plugins remplissent, dans l'ordre où la console passe leurs sections (l'onglet
-#: qui porte l'autre d'abord) : leur onglet (l'ancre où mène son adresse), leur nom, la forme de leurs listes
-OWNED = (("boites", "Courrier", Roles(title="boîte", badges=("état", "elle y écrit"), tiles=True)),
-         ("teams", "Teams", Roles(title="compte", badges=("état",), tiles=True)))
+
+@functools.cache
+def owned_tabs() -> tuple[tuple[str, str, Roles], ...]:
+    """Les sous-onglets de Comptes que les plugins remplissent, un par canal, dans l'ordre où la console passe leurs
+    sections (``app/me/accounts.py::CHANNELS`` : l'onglet qui porte les autres d'abord) : leur onglet (l'ancre où mène
+    son adresse), leur nom, la forme de leurs listes — ce que dit la part de chaque canal (``AccountsPart``). Lus à
+    la demande, une fois : la part d'un canal importe son API par personne."""
+    return tuple((p.tab, p.label, Roles(title=p.noun, badges=p.badges, tiles=True)) for p in channels.parts().values())
+
+
 #: ce qui se partage (ADR 0188), et à quel niveau, tels que la fiche les nomme
 SHARED_KINDS = {"mail": "boîte", "teams": "compte Teams", "mcp": "service", "agenda": "agenda"}
 LEVEL_FR = {level: label.lower() for level, label in SHARES}
@@ -566,11 +573,12 @@ def owned(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str],
     boîte ou de compte Teams (« Retirer », le geste de Réglages › Droits › Partages, ADR 0210 : confirmé, audité,
     retour sur ce sous-onglet), et mène aux lignes d'accès d'un service. Le jeton du formulaire est celui de la page
     (``forms.csrf``) : sans lui (un rendu hors d'une page), pas de « Retirer »."""
+    kinds = owned_tabs()
     sections = list(blocks) if blocks and all(isinstance(b, Section) for b in blocks) \
-        else [Section(OWNED[0][1], tuple(blocks))]
+        else [Section(kinds[0][1], tuple(blocks))]
     shown, name, counter = ui.env(), ui.names.name_of(key), [0]
     panes = []
-    for (anchor, label, roles), section in zip(OWNED, sections, strict=False):
+    for (anchor, label, roles), section in zip(kinds, sections, strict=False):
         lists = [{**anchored(listing(t, shown, query, name, roles, counter), anchor), "kind": anchor}
                  for t in section.items if isinstance(t, Table)]
         panes.append({"id": anchor, "label": label, "count": sum(x["count"] or 0 for x in lists), "lists": lists,
@@ -585,7 +593,7 @@ def owned(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str],
                "shares": shared}]
     return Markup(env.get_template("handmade/person/tabs/comptes.html").render(
         panes=panes, name=who.name, of=elided(who.name, "de"), that=elided(who.name, "que"),
-        unshare=UNSHARE, csrf=getattr(forms, "csrf", ""), back=subject_url("person", key, "boites") + "#partages"))
+        unshare=UNSHARE, csrf=getattr(forms, "csrf", ""), back=subject_url("person", key, kinds[0][0]) + "#partages"))
 
 
 # ── la page ──
@@ -601,14 +609,19 @@ TABS: dict[str, Callable[[UI, str, Sequence[Any], Mapping[str, str]], Any]] = {
     "pieces": drawn(Roles(title="nom", badges=("sorte", "état"), body=("ce qu'elle y a lu",), time="reçue",
                           tiles=True), "pieces"),
     "buts": drawn(Roles(title="titre", badges=("sorte", "statut"), time="ouvert"), "buts"),
-    # ses comptes : les boîtes aux lettres et les comptes Teams qui sont à elle (ADR 0185, 0186), réunis (``joined``),
-    # puis ses services et ses partages (ADR 0188, 0192) ; sans boîte, Teams reste un onglet à lui, sauf si elle a un
-    # service ou un partage (``shows``, ADR 0219) : Comptes les réunit alors
-    "boites": owned,
-    "teams": drawn(OWNED[1][2], "teams"),
     # le détail de ce que la vue d'ensemble résume : bloc par bloc, ses formulaires laissés à la console
     "synthese": blocks_tab, "lien": blocks_tab, "devine": blocks_tab, "affect": blocks_tab, "pensees_personne": blocks_tab,
 }
+
+@functools.cache
+def account_tabs() -> dict[str, Callable[..., Any]]:
+    """Ses comptes : les boîtes aux lettres et les comptes Teams qui sont à elle (ADR 0185, 0186), réunis (``joined``)
+    sous l'onglet du premier canal (``owned_tabs``), puis ses services et ses partages (ADR 0188, 0192) ; sans boîte,
+    Teams reste un onglet à lui, sauf si elle a un service ou un partage (``shows``, ADR 0219) : Comptes les réunit
+    alors."""
+    first, *others = owned_tabs()
+    return {first[0]: owned, **{tab: drawn(roles, tab) for tab, _label, roles in others}}
+
 
 #: les onglets dessinés qui posent aussi les formulaires de la console (``Forms``) : le détail bloc par bloc (la
 #: Synthèse : « C'est la personne dont on lui a parlé »), les fichiers (« Retirer ») et Comptes (« Retirer » un
@@ -626,8 +639,9 @@ def persons() -> tuple[PersonPart, ...]:
 
 
 def every_tab() -> dict[str, Callable[..., Any]]:
-    """Les onglets dessinés de la fiche : ceux du cadre (``TABS``), puis ceux de chaque domaine."""
-    return {**TABS, **{tab: draw for p in persons() for tab, draw in p.tabs.items()}}
+    """Les onglets dessinés de la fiche : ceux du cadre (``TABS``, puis ses comptes : ``account_tabs``), puis ceux de
+    chaque domaine."""
+    return {**TABS, **account_tabs(), **{tab: draw for p in persons() for tab, draw in p.tabs.items()}}
 
 
 def every_formed() -> tuple[Callable[..., Any], ...]:
@@ -644,15 +658,16 @@ def _count(look: Look, query: Any) -> int:
     return int(rows[0][0]) if rows else 0
 
 
-def _accounts(look: Look, who: Who) -> tuple[int, int]:
-    """Ses boîtes et ses comptes Teams, lus dans les réglages comme leurs plugins les listent (``owner`` : vide pour
-    ce qui est « à toi », quand elle est une de ses propriétaires ; ``personne:<clé>`` sinon)."""
+def _accounts(look: Look, who: Who) -> dict[str, int]:
+    """Ses comptes de chaque canal — ses boîtes, ses comptes Teams —, par l'onglet de sa faculté
+    (``AccountsPart.tab``), lus dans les réglages comme leurs plugins les listent (``owner`` : vide pour ce qui est
+    « à toi », quand elle est une de ses propriétaires ; ``personne:<clé>`` sinon)."""
     settings = look.ui.deps.settings
+    found = channels.parts().values()
     if settings is None:
-        return 0, 0
+        return {p.tab: 0 for p in found}
     mine = "" if look.frame.get(identity_c.IS_OWNER(who.person)) else PERSON + who.person
-    return (sum(1 for spec in settings.named("mail").email().accounts.values() if spec.owner == mine),
-            sum(1 for spec in settings.named("teams").teams().accounts.values() if spec.owner == mine))
+    return {p.tab: sum(1 for spec in p.configured(settings).values() if spec.owner == mine) for p in found}
 
 
 def tab_counts(look: Look, who: Who) -> dict[str, int]:
@@ -668,16 +683,18 @@ def tab_counts(look: Look, who: Who) -> dict[str, int]:
     handles = sorted({person, *who.handles})
     t = transcript_c.thread_table()
     known = call(memory_total, _store(look), frame, person, label="lecture")
-    boxes, teams = _accounts(look, who)
+    held = _accounts(look, who)
     shared = shares(look, who)
     goals = _slice(look, "goals")
     counts = {
         "adresses": len(who.handles),
         "echanges": _count(look, select(func.count()).select_from(t).where(t.c.person.in_(handles))),
         "memoire": 0 if isinstance(known, Failed) else known,
-        # Comptes réunit Teams (``joined``) ; sans Comptes, Teams est un onglet à lui
-        "boites": boxes + teams + len(services(look, who)) + len(shared["given"]) + len(shared["received"]),
-        "teams": teams,
+        # Comptes, sous l'onglet du premier canal, réunit les autres (``joined``) ; sans Comptes, Teams est un onglet à
+        # lui
+        **held,
+        owned_tabs()[0][0]: sum(held.values()) + len(services(look, who)) + len(shared["given"])
+        + len(shared["received"]),
         "buts": len(goals_of(goals, handles)) if goals is not None else 0,
     }
     for p in persons():  # ce que chaque domaine y compte, ajouté à ce que la fiche compte déjà
@@ -706,9 +723,13 @@ class PersonOverview(Overview):
     #: ce que la vue d'ensemble résume (son ressenti, leur lien, ce qu'elle lit d'elle, ses pensées, et la mécanique
     #: de ce qu'elle peut lui dire) : le détail reste à un clic, au bout de la barre
     folded = ("synthese", "lien", "devine", "affect", "pensees_personne")
-    #: Fichiers porte aussi les pièces reçues : un onglet pour ce qui va et vient entre elles (ADR 0179) ; Comptes, ses
-    #: boîtes aux lettres et ses comptes Teams (ADR 0185, 0186 — sans boîte, Teams reste un onglet à lui)
-    joined = {"fichiers": ("pieces",), "boites": ("teams",)}
+    @property
+    def joined(self) -> Mapping[str, tuple[str, ...]]:
+        """Fichiers porte aussi les pièces reçues : un onglet pour ce qui va et vient entre elles (ADR 0179) ; Comptes
+        (l'onglet du premier canal), ses boîtes aux lettres et ses comptes Teams (ADR 0185, 0186 — sans boîte, Teams
+        reste un onglet à lui : ``owned_tabs``)."""
+        first, *others = owned_tabs()
+        return {"fichiers": ("pieces",), first[0]: tuple(tab for tab, _label, _roles in others)}
 
     def __init__(self) -> None:
         #: la console, posée quand ses routes le sont (la fiche, elle, passe la sienne à ``render``)
@@ -770,7 +791,7 @@ class PersonOverview(Overview):
         look = Look.of(ui, DAY)
         who = who_of(look, key)
         shared = shares(look, who)
-        return ("boites",) if services(look, who) or shared["given"] or shared["received"] else ()
+        return (owned_tabs()[0][0],) if services(look, who) or shared["given"] or shared["received"] else ()
 
     def render_tab(self, ui: UI, key: str, tab: str, blocks: Sequence[Any], query: Mapping[str, str],
                    forms: Mapping[str, Any] | None = None) -> Any:

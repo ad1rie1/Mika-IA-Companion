@@ -25,6 +25,7 @@ from mika.app.me.api import Call, Denied, MeApiBase, done, form, missing, refuse
 from mika.app.me.common import own_room, settings_of
 from mika.app.me.hosts import public_only
 from mika.kernel import forms
+from mika.ports.mail import ACCOUNT_KEY
 from mika.runtime.operations import audit
 from mika.vocab.access import MAIL
 
@@ -141,7 +142,8 @@ async def _box_save(call: Call) -> dict[str, Any]:
         microsoft = hosts if before.microsoft else {f: merged.get(f) for f in HOSTS}
     else:
         own_room(call, sum(1 for a in cfg.accounts.values() if a.owner == settings_me._owner_for(call)))
-        key = settings_me._slug(str(values.get("label") or values.get("address") or ""), set(cfg.accounts) | _traces(call))
+        key = settings_me._slug(str(values.get("label") or values.get("address") or ""),
+                                set(cfg.accounts) | _traces(call), ACCOUNT_KEY)
         merged = {**values, "owner": settings_me._owner_for(call)}
         hosts = microsoft = {f: merged.get(f) for f in HOSTS}
     await public_only(call, hosts)
@@ -169,7 +171,8 @@ async def _box_save(call: Call) -> dict[str, Any]:
         else:
             own_room(call, sum(1 for a in cfg.accounts.values() if a.owner == settings_me._owner_for(call)))
             if key in cfg.accounts:
-                key = settings_me._slug(str(values.get("label") or values.get("address") or ""), set(cfg.accounts) | _traces(call))
+                key = settings_me._slug(str(values.get("label") or values.get("address") or ""),
+                                set(cfg.accounts) | _traces(call), ACCOUNT_KEY)
         try:
             new = MailConfig(accounts={**cfg.accounts, key: account})
         except ValidationError as exc:

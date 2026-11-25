@@ -22,6 +22,7 @@ from mika.app.me import settings as settings_me
 from mika.app.me.api import Call, Denied, MeApiBase, missing, refused
 from mika.app.me.common import own_room, settings_of
 from mika.kernel import forms
+from mika.ports.teams import ACCOUNT_KEY
 from mika.runtime.operations import audit
 from mika.vocab.access import TEAMS
 
@@ -74,7 +75,8 @@ async def _teams_write(call: Call, settings: Any) -> dict[str, Any]:
         s = teams_me.state(call)
         traces = {*(d.account for d in s.drafts.values()), *(m.account for m in s.messages.values()),
                   *(a.account for a in s.asked.values())}
-        key = settings_me._slug(str(values.get("label") or call.me.name or "teams"), set(cfg.accounts) | traces)
+        key = settings_me._slug(str(values.get("label") or call.me.name or "teams"), set(cfg.accounts) | traces,
+                                ACCOUNT_KEY)
         merged = {**values, "owner": settings_me._owner_for(call)}
     bounds = forms.within(forms.describe(TeamsAccount), merged)
     if bounds:

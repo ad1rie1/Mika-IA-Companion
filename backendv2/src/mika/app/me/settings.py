@@ -8,7 +8,8 @@ Ce qu'une personne branche est à elle (ADR 0185, 0186) : à son nom (``personne
 de ses propriétaires — jamais à quelqu'un d'autre ; le partager est une délégation (ADR 0188), pas un changement de
 propriétaire. Une ressource qui n'est pas à elle n'existe pas ici. Les secrets ne repartent jamais : un mot de passe
 laissé vide reste celui qui est gardé. Ce qui se dérive d'une boîte ou d'un compte (à qui, actif, la règle de son
-canal) est rejournalisé aussitôt (``reconfigure``), comme depuis la console.
+canal) est rejournalisé aussitôt (``reconfigure``), comme depuis la console. À qui est un compte, c'est son canal qui
+le dit (``app/me/accounts.py``).
 """
 
 from __future__ import annotations
@@ -21,16 +22,14 @@ from typing import Any
 
 from starlette.routing import Route
 
-from mika.app.domains.mail import api as mail_me
-from mika.app.domains.teams import api as teams_me
+from mika.app.me import accounts as channels
 from mika.app.me import rights as rights_me
 from mika.app.me.api import Call, Denied, MeApiBase
 from mika.app.me.common import settings_of
 from mika.contracts import self_ as self_c
 from mika.kernel.text import fold
-from mika.ports.mail import ACCOUNT_KEY
 from mika.runtime.operations import audit
-from mika.vocab.access import MAIL, PERSON, REPLIES, SOURCE_WORDS, SOURCE_WORDS_OTHER, TEAMS, Canal, canal_key
+from mika.vocab.access import MAIL, PERSON, REPLIES, SOURCE_WORDS, SOURCE_WORDS_OTHER, Canal, canal_key
 from mika.vocab.canals import CanalRule, Canals, CanalTable
 
 #: ce que la propriétaire d'un compte règle de la règle de son canal (ADR 0207), ligne par ligne et par défaut :
@@ -50,12 +49,13 @@ async def _rejournal(call: Call) -> None:
         await call.api.reconfigure()
 
 
-def _slug(text: str, taken: set[str]) -> str:
+def _slug(text: str, taken: set[str], rule: re.Pattern[str]) -> str:
     """Une clé neuve (minuscules, chiffres, - ou _) tirée d'un nom ou d'une adresse, suivie d'un suffixe tiré au
     hasard et libre parmi ``taken`` : une clé ne sert jamais deux fois, car le courrier gardé, ses pièces et ce
-    qu'elle en sait restent rangés sous la clé d'une boîte retirée (une boîte neuve ne les rouvre pas)."""
+    qu'elle en sait restent rangés sous la clé d'une boîte retirée (une boîte neuve ne les rouvre pas). ``rule`` : la
+    règle des clés de qui l'appelle (``ports.mail.ACCOUNT_KEY``, ``ports.teams.ACCOUNT_KEY``)."""
     base = re.sub(r"[^a-z0-9_-]+", "-", fold(text.split("@", 1)[0])).strip("-_")[:30]
-    base = base if base and ACCOUNT_KEY.fullmatch(base) else "boite"
+    base = base if base and rule.fullmatch(base) else "boite"
     while True:
         key = f"{base}-{secrets.token_hex(3)}"
         if key not in taken:
@@ -152,12 +152,14 @@ async def rules_save(call: Call) -> dict[str, Any]:
     """Comment part ce qu'elle prépare depuis un de ses comptes (ADR 0207) : pour chaque ligne de sa règle et pour la
     ligne par défaut, préparer d'elle-même et comment ça part. Le reste (qui, quand, ses lignes) reste à la console ;
     la règle lue (``version``) doit être celle d'aujourd'hui (409 sinon). Enregistrée, la règle est celle du compte :
-    celle de tout le canal, réglée dans la console, ne vaut plus pour lui."""
+    celle de tout le canal, réglée dans la console, ne vaut plus pour lui. Un compte est à elle selon son canal
+    (``AccountsPart.owned``)."""
     canal = call.arg("canal", limit=60)
     kind, key = canal_key(canal)
-    if kind not in (MAIL, TEAMS) or not key:
+    found = channels.parts().get(kind)
+    if found is None or not key:
         raise Denied(400, "« canal » : courrier:<ta boîte> ou teams:<ton compte>.")
-    (mail_me if kind == MAIL else teams_me).owned(call, key)
+    found.owned(call, key)
     lines, default = call.data.get("lines"), call.data.get("default")
     if not isinstance(lines, list) or not isinstance(default, dict):
         raise Denied(400, "« lines » : une entrée par ligne de la règle ; « default » : sa ligne par défaut.")

@@ -20,6 +20,7 @@ from mika.app.me import settings as settings_me
 from mika.app.me.api import PREFIX, Denied, MeApiBase
 from mika.app.me.assembly import MeApi
 from mika.app.me.common import allows, held_by, millis, only_owner, opened, snippet
+from mika.ports.mail import ACCOUNT_KEY
 from mika.vocab.access import SHARE_PREPARE, SHARE_READ, SHARE_USE
 from mika.vocab.ownership import OWNED
 
@@ -175,4 +176,4 @@ def test_without_tiles_the_map_says_unplugged_as_the_map_screen_does():
 
 
 def test_a_new_box_key_folds_accents_and_ligatures():
-    assert settings_me._slug("Cœur.Été@exemple.fr", set()).startswith("coeur-ete-")
+    assert settings_me._slug("Cœur.Été@exemple.fr", set(), ACCOUNT_KEY).startswith("coeur-ete-")
