@@ -54,7 +54,7 @@ class GitSettings(BaseModel):
 
 
 def sections(live: Live) -> tuple[SettingsSection, ...]:
-    settings = live.settings
+    settings = live.settings.named("projects")  # le jeton des dépôts de ses projets (``ProjectsSettings``)
 
     def git() -> GitSettings:
         got = settings.git()

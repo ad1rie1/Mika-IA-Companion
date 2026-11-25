@@ -63,6 +63,7 @@ from mika.app.constellation import Constellation
 from mika.app.domains import DOMAINS, part
 from mika.app.domains.projects.docs_mcp import PREFIX as DOCS_MCP_PREFIX
 from mika.app.domains.projects.docs_mcp import DocsPoint
+from mika.app.domains.projects.settings import ProjectsSettings
 from mika.app.handmade import access, approval_sources, rights, waiting
 from mika.app.handmade.home import HomePage
 from mika.app.handmade.now import NowPage
@@ -297,9 +298,10 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
         d'atelier — un adaptateur ne lit pas sa persona lui-même (ADR 0070)."""
         return name_of(kernel.mind.root.slices["self"].persona)
 
-    outside = {"workshop": BwrapWorkshop(data / "ateliers", credentials=settings.git, author=her),
+    git = settings.of(ProjectsSettings)
+    outside = {"workshop": BwrapWorkshop(data / "ateliers", credentials=git.git, author=her),
              # l'hôte GitHub d'un dépôt distant, lu par la console seulement (ADR 0183)
-             "repo_host": GitHubRepos(settings.git),
+             "repo_host": GitHubRepos(git.git),
              "imaging": imaging}
     # les fichiers qu'elle envoie (ADR 0062) : leurs octets hors du journal, sauvegardés avec le dossier
     outside["shares"] = DiskShares(data / "partages")

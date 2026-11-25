@@ -21,6 +21,7 @@ import re
 from sqlalchemy import func, insert, select
 
 from mika.app.domains.mail.settings import MailSettings
+from mika.app.domains.projects.settings import ProjectsSettings
 from mika.contracts import runtime as rt
 from mika.inspector.pages.system import OUTBOX_PAGE
 from mika.inspector.ui import env as templates
@@ -358,7 +359,7 @@ def test_settings_refuse_what_cannot_work(world):  # noqa: F811
     assert git.status_code == 400 and "n'est pas un hôte" in html_of(git)
     ok = post(client, f"{BASE}/reglages/depots", {"_section": "depots", "_champs": ["hosts"],
                                                  "hosts": "GitHub.com\ngit.exemple.org:8443"})
-    assert ok.status_code == 200 and set(client.portal.call(live.settings.git)["hosts"]) == {"github.com",
+    assert ok.status_code == 200 and set(client.portal.call(live.settings.of(ProjectsSettings).git)["hosts"]) == {"github.com",
                                                                                           "git.exemple.org:8443"}
     unnamed = post(client, f"{BASE}/reglages/identite", {"_section": "personnage", "_champs": ["name"], "name": " "})
     assert unnamed.status_code == 400 and "nom ne peut pas être vide" in html_of(unnamed)

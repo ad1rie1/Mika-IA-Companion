@@ -50,8 +50,6 @@ LLM_KEY = "llm"
 #: les fournisseurs d'images et leurs rôles (clés scellées)
 IMAGING_KEY = "imaging"
 STT_KEY = "stt"
-#: le jeton des dépôts git distants des projets (GitHub ou un autre hôte https), scellé
-GIT_KEY = "git"
 #: les notifications du téléphone (ADR 0077) : la clé du compte de service Firebase, scellée
 PUSH_KEY = "push"
 #: … ou, à défaut d'une clé collée dans la console, ce fichier du dossier de données (à côté de ``secret.key``)
@@ -335,17 +333,6 @@ class Settings:
 
     async def save_push(self, service_account: str) -> None:
         await self._put(PUSH_KEY, {"service_account_sealed": self.box.seal(service_account.strip())})
-
-    # ── Dépôts git (ses projets poussent vers un dépôt distant) ──
-    def git(self) -> dict[str, str]:
-        """``{"token": …, "user": …}`` (jeton déchiffré) : ce que l'atelier passe à git, et à lui seul."""
-        data = dict(self._get(GIT_KEY) or {})
-        return {"token": self.box.open(data.get("token_sealed", "")), "user": data.get("user", "") or "x-access-token",
-                "hosts": list(data.get("hosts") or ["github.com"])}
-
-    async def save_git(self, token: str, user: str = "", hosts: list[str] | None = None) -> None:
-        clean = sorted({h.strip().lower() for h in (hosts or []) if h.strip()}) or ["github.com"]
-        await self._put(GIT_KEY, {"token_sealed": self.box.seal(token.strip()), "user": user.strip(), "hosts": clean})
 
     # ── Ses droits (ADR 0134) : les canaux, ses familles d'outils, l'offre réglée ──
     def _read_rights(self) -> Rights:
