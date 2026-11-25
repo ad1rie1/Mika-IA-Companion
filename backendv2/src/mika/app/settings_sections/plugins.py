@@ -15,10 +15,11 @@ from mika.adapters.mail.config import MailAccount, application_id
 from mika.adapters.mcp.config import McpConfig
 from mika.adapters.teams import TeamsConfig
 from mika.app.console import FACULTY_LABELS, NAVIGATION
+from mika.app.domains.wakeup.desk import NO_PROJECT, TOOLS, WakeupConfig
+from mika.app.domains.wakeup.settings import WakeupSettings
 from mika.app.handmade import ago
 from mika.app.handmade.tabs import settings as drawn_settings
 from mika.app.settings_sections.common import tolerant
-from mika.app.wakeups import NO_PROJECT, TOOLS, WakeupConfig
 from mika.contracts import identity as identity_c
 from mika.contracts import projects as projects_c
 from mika.contracts import self_ as self_c
@@ -410,7 +411,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
     async def save_wakeup(cfg: WakeupConfig) -> list[str]:
         """Un projet, une personne, des outils qui existent — sauf ce qui était déjà là (un projet archivé depuis
         reste affiché, pour qu'on le corrige)."""
-        before = settings.wakeup().endpoints
+        before = settings.of(WakeupSettings).wakeup().endpoints
         projects, notify, tools = {v for v, _ in wake_projects()}, {v for v, _ in wake_notify()}, set(wake_tools())
         problems = []
         for name, ep in cfg.endpoints.items():
@@ -425,11 +426,12 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                                 f"(permis : {', '.join(sorted(tools))}).")
         if problems:
             return problems
-        await settings.save_wakeup(cfg)
+        await settings.of(WakeupSettings).save_wakeup(cfg)
         return []
 
     def wakeup_facts() -> list[tuple[str, Any]]:
-        endpoints, keys = settings.wakeup().endpoints, settings.wakeup_keys()
+        wakeups = settings.of(WakeupSettings)
+        endpoints, keys = wakeups.wakeup().endpoints, wakeups.wakeup_keys()
         keyed = sum(1 for n in endpoints if n in keys)
         return [("Réveils", f"{len(endpoints)} ({keyed} avec une clé)" if endpoints else "aucun"),
                 ("Lots permis", ", ".join(wake_tools())),
@@ -466,7 +468,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                             "de son catalogue —, puis "
                             "où le joindre (une adresse, ou une commande lancée ici, isolée) et ses bornes. Qui peut "
                             "quoi se règle sur sa fiche, dans « Accès aux outils »."), home="outils/parametres"),)),
-        SettingsSection("reveils", "Réveils par API", "plugins", WakeupConfig, settings.wakeup, save_wakeup, order=45,
+        SettingsSection("reveils", "Réveils par API", "plugins", WakeupConfig, settings.of(WakeupSettings).wakeup, save_wakeup, order=45,
                         description="Les réveils que des systèmes extérieurs appellent (POST /api/wake/<nom>) : ce "
                                     "qu'ils lui font faire, quand, à qui elle en rend compte. Leurs clés se génèrent "
                                     "sur leur fiche, montrées une seule fois.",

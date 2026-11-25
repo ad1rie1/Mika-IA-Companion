@@ -11,8 +11,8 @@ qu'il montre (``docs/protocole-moi.md``, § 2 bis).
   puis une fois par ``GAP_S`` : ce qui attend n'est jamais perdu, il part dès que son sujet le peut.
 - **Seulement ce que chacune peut voir.** À l'envoi, pour chaque personne connectée — et chaque canal de ses clients,
   car ce qu'elle voit d'un projet en dépend —, le service relit ce qu'elle a par les règles mêmes des routes
-  (``mail.boxes``, ``teams.accounts``, ``projects.reaches``, ``contacts.reach``, ``agenda.seen_calendars``, le
-  téléphone à sa personne) et ne
+  (``mail.boxes``, ``teams.accounts``, ``projects.reaches``, ``agenda.seen_calendars``, le téléphone à sa
+  personne ; pour un domaine qui a sa fiche, ce que dit sa part du direct : ``LivePart.seen``, ADR 0310) et ne
   garde que ses ressources : une boîte, une conversation, un projet d'une autre n'y paraissent jamais. Ce qu'on ne sait
   pas nommer part sans clé, seulement à qui a quelque chose dans ce domaine. Ce qui change qui voit quoi — les
   propriétaires et les partages d'une boîte, d'un compte Teams, les accès d'un projet, une adresse reliée à une
@@ -25,6 +25,9 @@ qu'il montre (``docs/protocole-moi.md``, § 2 bis).
 - **Envoyé en parallèle.** Chaque personne reçoit sa trame sans attendre les autres, en ``SEND_TIMEOUT_S`` au plus ; ce
   qui lui est dit pendant qu'une trame lui part s'y ajoute et part juste après, en une — rien ne s'empile.
 - **Rien n'est rattrapé.** Personne de connecté : rien ne se calcule. Le client relit tout à sa reconnexion.
+- **Par domaine** (ADR 0310). La forme d'une touche est dans ``touches.py`` ; ce qu'un domaine change et ce que
+  chacune en voit, dans la part du direct de sa fiche (``PARTS``). Ce service les réunit sans en nommer aucun ; ce
+  qui reste écrit ici (le courrier, Teams, le téléphone, les projets, l'agenda) attend que son domaine ait la sienne.
 """
 
 from __future__ import annotations
@@ -39,13 +42,14 @@ from typing import Any
 
 from mika.adapters.web.accounts import Account
 from mika.adapters.web.hub import Hub
+from mika.app.domains import DOMAINS, part
 from mika.app.me import agenda as agenda_me
-from mika.app.me import contacts as contacts_me
 from mika.app.me import mail as mail_me
 from mika.app.me import projects as projects_me
 from mika.app.me import teams as teams_me
 from mika.app.me.api import Call, me_of
 from mika.app.me.common import allows
+from mika.app.me.touches import EVERYONE, OWN, PERSON, PREPARE, READ, Touch
 from mika.app.settings import (
     AGENDA_GOOGLE_KEY,
     AGENDA_GRANTS_KEY,
@@ -98,7 +102,6 @@ from mika.ports.mail import split_ref
 from mika.ports.teams import DEFAULT_ACCOUNT, conversation_key, split_conversation_key
 from mika.runtime.boundary import Failed, acall, call
 from mika.runtime.state import RUNTIME
-from mika.vocab.access import SHARE_PREPARE, SHARE_READ
 from mika.vocab.episodes import Kind, project_of, task_of
 from mika.vocab.ownership import OWNED
 
@@ -113,14 +116,16 @@ BURST = 3
 #: une trame à une personne part en ce délai au plus (s) : une connexion lente ne retient ni les autres ni la suite
 SEND_TIMEOUT_S = 5.0
 
-#: à qui va une touche : ce que dit une boîte, un compte Teams (leurs propriétaires et leurs partages) ; une personne
-#: (son téléphone, sa position, ses voyages) ; un projet (ce qu'elle en voit) ; une source de l'annuaire ; un agenda
-#: (son compte, ses partages : ``agenda.seen_calendars``) ; tout le monde
-BOXES, ACCOUNTS, PERSON, PROJECT, DIRECTORY, EVERYONE = "boxes", "accounts", "person", "project", "directory", "all"
+#: à qui va une touche (avec ``PERSON`` et ``EVERYONE``, ``touches.py``) : ce que dit une boîte, un compte Teams
+#: (leurs propriétaires et leurs partages) ; un projet (ce qu'elle en voit) ; un agenda (son compte, ses partages :
+#: ``agenda.seen_calendars``). La règle d'un domaine qui a sa fiche est dans sa part du direct (``SEEN``)
+BOXES, ACCOUNTS, PROJECT = "boxes", "accounts", "project"
 CALENDARS = "calendars"
-#: le niveau qu'il faut sur une boîte ou un compte : le lire, y préparer (ses réponses en chemin), en être propriétaire
-#: (ce qui attend ta décision : les pastilles)
-READ, PREPARE, OWN = SHARE_READ, SHARE_PREPARE, OWNED
+#: ce que chaque domaine apporte au direct (ADR 0310) : la part de sa fiche, dans l'ordre des fiches
+PARTS = tuple(part(d.live, "LIVE") for d in DOMAINS if d.live is not None)
+#: sujet d'une base tenue à côté → la traduction de son domaine ; règle d'une touche → ce que la personne en voit
+CHANGES = {topic: translate for part in PARTS for topic, translate in part.changes.items()}
+SEEN = {rule: seen for part in PARTS for rule, seen in part.seen.items()}
 
 #: ce que change le réglage d'un propriétaire (``kernel.params_changed``) : qui voit quoi, ce qui se règle — à toutes
 #: — les contacts compris : qui voit ceux d'une boîte ou d'un compte Teams suit leurs propriétaires et leurs partages
@@ -129,8 +134,9 @@ PARAMS: Mapping[str, tuple[str, ...]] = {
     email_c.OWNER: (SETTINGS, MAIL, MAIL_DRAFTS, ME, CONTACTS),
     teams_c.OWNER: (SETTINGS, TEAMS, TEAMS_REPLIES, ME, CONTACTS),
     "mcp": (SETTINGS,), phone_c.OWNER: (SETTINGS, PHONE), projects_c.OWNER: (PROJECTS, ME),
-    "contacts": (CONTACTS,), trips_c.OWNER: (TRIPS,), location_c.OWNER: (PHONE_POSITION,),
-    agenda_p.OWNER: (SETTINGS, AGENDA, ME)}
+    trips_c.OWNER: (TRIPS,), location_c.OWNER: (PHONE_POSITION,),
+    agenda_p.OWNER: (SETTINGS, AGENDA, ME),
+    **{owner: topics for part in PARTS for owner, topics in part.params.items()}}
 
 #: ce qu'un réglage enregistré hors du journal change (``Settings._put``, par sa clé), à toutes, sans clé ; tout autre
 #: réglage, Paramètres seulement. Une boîte (ses serveurs, ses dossiers, sa connexion Microsoft), ses images permises ;
@@ -139,27 +145,12 @@ SAVED: Mapping[str, tuple[str, ...]] = {
     EMAIL_KEY: (SETTINGS, MAIL, MAIL_DRAFTS, ME, CONTACTS), MAIL_GRANTS_KEY: (SETTINGS, MAIL),
     MAIL_IMAGES_KEY: (SETTINGS, MAIL), TEAMS_KEY: (SETTINGS, TEAMS, TEAMS_REPLIES, ME, CONTACTS),
     TEAMS_KEYS_KEY: (SETTINGS, TEAMS), AGENDA_KEY: (SETTINGS, AGENDA, ME), AGENDA_GRANTS_KEY: (SETTINGS, AGENDA),
-    AGENDA_GOOGLE_KEY: (SETTINGS, AGENDA)}
+    AGENDA_GOOGLE_KEY: (SETTINGS, AGENDA),
+    **{key: topics for part in PARTS for key, topics in part.saved.items()}}
 
 #: ce qui, dans un projet, change qui le voit (ses accès, ce qu'il lit des autres, son propriétaire, son sujet ou son
 #: niveau, archivé ou rendu) : le filtre lit l'état d'après — celle qui le perd doit le savoir aussi
 PROJECT_REACH = frozenset(t.name for t in (ACCESS_SET, LINKS_SET, AMENDED, ARCHIVED, RESTORED))
-
-
-@dataclass(frozen=True, slots=True)
-class Touch:
-    """Une chose qui a changé : son sujet ; à qui elle va (``rule``) et à quel niveau (``need``) ; ce que la trame
-    nommera (``keys`` : des boîtes, des références, des conversations, des projets) ; sans clé, les comptes qu'elle
-    concerne (``owners`` : boîtes, comptes Teams, adresses et personnes, projets, sources ``source|compte`` — vide :
-    tout le domaine). Une touche ``weak`` ne demande que ce que toute trame de son sujet fait relire (les comptes de
-    Teams, quand la présence de leur extension change) : elle ne l'emporte pas sur ce qu'une autre y nomme."""
-
-    topic: str
-    rule: str
-    need: str = READ
-    keys: tuple[str, ...] = ()
-    owners: tuple[str, ...] = ()
-    weak: bool = False
 
 
 def _state(frame: Any, owner: str) -> Any:
@@ -358,7 +349,8 @@ def _identity(e: Any, frame: Any, kernel: Any) -> list[Touch]:
 #: chaque propriétaire d'événements dont le journal change ce que montrent les écrans, et sa traduction
 BY_OWNER = {email_c.OWNER: _email, teams_c.OWNER: _teams, phone_c.OWNER: _phone, location_c.OWNER: _location,
             trips_c.OWNER: _trips, projects_c.OWNER: _projects, rt.OWNER: _runtime, KERNEL.name: _kernel,
-            identity_c.OWNER: _identity, agenda_p.OWNER: _agenda}
+            identity_c.OWNER: _identity, agenda_p.OWNER: _agenda,
+            **{owner: translate for part in PARTS for owner, translate in part.events.items()}}
 
 
 def touches_of(events: Iterable[Any], frame: Any, kernel: Any) -> list[Touch]:
@@ -387,12 +379,11 @@ def touches_from(change: Change) -> list[Touch]:
     if change.topic in (TEAMS_DRAFTS, OUTBOX):  # un brouillon, ce que la boîte d'envoi en fait : son fil, ses réponses
         return [Touch(TEAMS, ACCOUNTS, keys=change.keys, owners=change.accounts),
                 Touch(TEAMS_REPLIES, ACCOUNTS, PREPARE, owners=change.accounts)]
-    if change.topic == CONTACTS:
-        return [Touch(CONTACTS, DIRECTORY, owners=tuple(f"{s}|{a}" for s, a in change.places))]
     if change.topic == AGENDA:  # un agenda relu, écrit, réglé ; un compte synchronisé (sa dernière synchro, son erreur)
         return [Touch(AGENDA, CALENDARS, keys=change.keys, owners=change.accounts),
                 Touch(ME, CALENDARS, owners=change.accounts)]
-    return []
+    translate = CHANGES.get(change.topic)  # la base d'un domaine qui a sa fiche
+    return list(translate(change)) if translate is not None else []
 
 
 
@@ -462,17 +453,6 @@ class Reader:
 
         return self._once(PROJECT, read, frozenset())
 
-    def places(self) -> frozenset[str]:
-        """Les sources de l'annuaire dont elle voit les contacts (``contacts.reach``)."""
-
-        def read() -> frozenset[str]:
-            port = self.call.port("contacts")
-            if port is None:
-                return frozenset()
-            return frozenset(f"{s}|{a}" for s, a in contacts_me.reach(self.call, port).visible)
-
-        return self._once(DIRECTORY, read, frozenset())
-
     def calendars(self) -> tuple[frozenset[str], frozenset[str]]:
         """Les agendas qu'on lui partage, et ses comptes d'agenda (``agenda.seen_calendars``)."""
         return self._once(CALENDARS, lambda: agenda_me.seen_calendars(self.call), (frozenset(), frozenset()))
@@ -499,8 +479,8 @@ class Reader:
         if t.rule == PERSON:
             mine = me.handle in t.owners or me.person in t.owners
             return mine, t.keys if mine else ()
-        if t.rule == DIRECTORY:
-            seen = self.places()
+        if t.rule in SEEN:  # la règle d'un domaine : ce que sa part du direct dit qu'elle voit
+            seen = self._once(t.rule, lambda: frozenset(SEEN[t.rule](self.call)), frozenset())
         elif t.rule == PROJECT:
             seen = self.projects()
         else:

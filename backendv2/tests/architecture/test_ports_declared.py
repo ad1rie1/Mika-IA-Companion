@@ -98,7 +98,7 @@ IMPLEMENTATIONS: dict[tuple[str, str], tuple[tuple[str, str], ...]] = {
         ("adapters/vectors/embedders.py", "SentenceEmbedder"),
     ),
     ("ports/vectors.py", "VectorIndex"): (("adapters/vectors/index.py", "SqliteVectorIndex"),),
-    ("ports/wakeup.py", "WakeDesk"): (("app/wakeups.py", "WakeupDesk"),),
+    ("ports/wakeup.py", "WakeDesk"): (("app/domains/wakeup/desk.py", "WakeupDesk"),),
     ("ports/workshop.py", "Workshop"): (("adapters/workshop/__init__.py", "BwrapWorkshop"),),
     ("ports/workshop.py", "RepoHost"): (
         ("adapters/workshop/github.py", "GitHubRepos"),

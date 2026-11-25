@@ -62,6 +62,7 @@ from mika.adapters.mail.models import (
     FOLDER,
     FROM,
     LOCAL,
+    MAIL,
     MESSAGE,
     MID,
     REF,
@@ -111,7 +112,7 @@ from mika.ports.mail import (
     split_ref,
 )
 from mika.ports.paging import words_of
-from mika.ports.sql import MAIL, insert_ignore
+from mika.ports.sql import insert_ignore
 
 #: limite d'une purge de maintenance explicite ; la synchronisation ne purge pas l'historique
 KEEP_PER_FOLDER = 2000

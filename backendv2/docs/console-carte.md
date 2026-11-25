@@ -262,7 +262,7 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
   l'audience). Liens se parcourt sans recherche ; dans la console en MCP, on cherche quelqu'un par Moyens de
   communication (`identity/annuaire`) ou par Conversations (`transcript/conversations`), un contact par la recherche
   des fiches (`contact`).
-- **La fiche d'un contact** (`/admin/fiche/contact/contact:<n°>`, `app/handmade/subjects/contact.py`, ADR 0298) : une
+- **La fiche d'un contact** (`/admin/fiche/contact/contact:<n°>`, `app/domains/contacts/console/subject.py`, ADR 0298) : une
   personne qu'elle connaît de loin, ou une organisation. Son en-tête (avatar, « connue de loin » ou « organisation » et
   son organisation, quand et où elle l'a vue la première fois, combien de messages lus, qu'elle ne lui a jamais écrit ;
   ses moyens de communication, de qui c'est le contact) ; « Réunir avec… » (une autre fiche, qui rejoint celle-ci, ou

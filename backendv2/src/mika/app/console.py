@@ -17,8 +17,25 @@ Réveils par API) : des onglets de la console, que ``app/settings_sections/`` y 
 
 from __future__ import annotations
 
+from typing import Any
+
+from mika.app.domains import DOMAINS
 from mika.inspector.catalog import Destination, Labels, NavGroup
 from mika.inspector.names import OTHER_EFFECTS
+
+
+def _named(kind: str, frame: dict[str, Any]) -> dict[str, Any]:
+    """Les libellés d'une sorte (``Labels.<kind>``) : ceux du cadre, puis ceux que chaque domaine dit dans sa fiche
+    (``Domain.labels``, ADR 0310), dans l'ordre des fiches. Un nom dit deux fois est refusé : l'un des deux mentirait."""
+    out = dict(frame)
+    for domain in DOMAINS:
+        for key, said in domain.labels.get(kind, {}).items():
+            if key in out:
+                raise ValueError(f"le libellé « {key} » ({kind}) est dit deux fois : la fiche de « {domain.name} » "
+                                 "redit un nom du cadre ou d'un autre domaine")
+            out[key] = said
+    return out
+
 
 NAVIGATION: tuple[NavGroup, ...] = (
     NavGroup("Elle", (
@@ -124,7 +141,7 @@ PARAM_FAMILIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Plugins", ("email", "teams", "phone", "rss", "web", "camera", "forge", "wakeup")),
     ("Noyau", ("kernel",)),
 )
-FACULTY_LABELS: dict[str, str] = {
+FACULTY_LABELS: dict[str, str] = _named("faculties", {
     "affect": "Humeur et postures", "needs": "Besoins", "body": "Corps et sommeil", "self": "Estime et récit",
     "attention": "Attention et pensées", "memory": "Mémoire", "transcript": "Fil des conversations",
     "social": "Liens", "others": "Ce qu'elle devine des autres", "identity": "Identités",
@@ -134,11 +151,11 @@ FACULTY_LABELS: dict[str, str] = {
     "world": "Son monde et son corps", "shares": "Fichiers envoyés", "attachments": "Pièces reçues",
     "imaging": "Dessins", "location": "Localisation", "forge_signals": "Signaux de ses apps",
     "mcp": "Outils extérieurs", "web": "Recherche web", "wakeup": "Réveils par API", "teams": "Teams",
-    "phone": "Messages du téléphone", "trips": "Carte et voyages", "contacts": "Annuaire", "agenda": "Agenda",
-}
+    "phone": "Messages du téléphone", "trips": "Carte et voyages", "agenda": "Agenda",
+})
 
 #: Les sections du prompt, nommées par ce qu'elles lui montrent (Pourquoi a-t-elle dit ça ?, Prompt).
-SECTION_LABELS: dict[str, str] = {
+SECTION_LABELS: dict[str, str] = _named("sections", {
     "who": "Qui elle a en face", "history": "Le fil de la conversation", "memories": "Ses souvenirs rappelés",
     "shared_memories": "Ce qu'ils ont vécu ensemble", "past_exchanges": "Des échanges passés",
     "promises": "Ce qu'elle a promis", "rhythm": "Son rythme (heure, énergie)",
@@ -214,10 +231,10 @@ SECTION_LABELS: dict[str, str] = {
     "agenda_writes": "Ce qu'elle a proposé d'écrire dans ses agendas, et ce que c'est devenu",
     "agenda_reminder": "Le rendez-vous qu'elle rappelle (cité)",
     "agenda_invitation": "L'invitation dont elle prépare la réponse, et ce qui tombe en même temps (cité)",
-}
+})
 
 #: Les raisons des preuves de l'arbitre : ce qui la pousse à agir.
-REASON_LABELS: dict[str, str] = {
+REASON_LABELS: dict[str, str] = _named("reasons", {
     "mood_overflow": "Une humeur qui déborde", "need_expression": "Besoin de s'exprimer",
     "need_social": "Envie de compagnie", "check_in": "Prendre des nouvelles", "follow_up": "Demander comment ça s'est passé", "thought": "Une pensée à partager",
     "greeting": "Saluer", "present": "Quelqu'un de présent", "chat": "Envie de bavarder",
@@ -241,10 +258,10 @@ REASON_LABELS: dict[str, str] = {
     # ADR 0309
     "agenda_remind": "Rappeler un rendez-vous, au délai que son agenda demande",
     "agenda_prepare": "Préparer la réponse à une invitation",
-}
+})
 
 #: Les vetos : ce qui l'empêche d'agir.
-VETO_LABELS: dict[str, str] = {
+VETO_LABELS: dict[str, str] = _named("vetoes", {
     "asleep": "Elle dort", "waking": "Elle vient de se réveiller", "woken_at_night": "Réveillée en pleine nuit",
     "daily_cap": "Budget d'initiatives du jour épuisé",
     "unanswered": "Sa dernière initiative est restée sans réponse", "run_cap": "Assez d'exécutions pour l'heure",
@@ -257,10 +274,10 @@ VETO_LABELS: dict[str, str] = {
     # ADR 0306
     "busy": "On l'attend, mais ce dont elle a besoin est pris : elle s'y met dès que c'est libre",
     "retry": "On l'attend ; son essai vient d'échouer : elle réessaie dans une minute",
-}
+})
 
 #: Les processus de fond : ce qu'ils font.
-PROCESS_LABELS: dict[str, str] = {
+PROCESS_LABELS: dict[str, str] = _named("processes", {
     "transcript.compact": "Replier les longs fils en résumé", "memory.consolidate": "Retenir (souvenirs, croyances)",
     "memory.calendar": "Se rappeler les dates proches",
     "memory.index": "Indexer la mémoire", "memory.reflect": "Repenser à ce qu'elle sait",
@@ -299,9 +316,6 @@ PROCESS_LABELS: dict[str, str] = {
     "wakeup.expire": "Laisser tomber les réveils par API restés trop longtemps en attente",
     "teams.triage": "Trier les messages Teams reçus",
     "teams.images": "Regarder les images des messages Teams",
-    "contacts.ingest": "Ranger dans l'annuaire qui elle lit dans Teams et le courrier",
-    "contacts.portrait": "Se faire une idée de qui échange avec un compte, à partir de ses derniers messages",
-    "contacts.match": "Réunir les fiches de l'annuaire qui sont la même personne (le juge des rapprochements)",
     "agenda.sync": "Relire les agendas branchés (Google, Outlook, CalDAV, abonnements)",
     "agenda.watch": "Voir venir les rappels et les invitations des agendas, laisser tomber ce qui n'a plus lieu d'être",
     "teams.expire": "Laisser tomber les réponses Teams restées sans accord ou sans envoi",
@@ -309,10 +323,10 @@ PROCESS_LABELS: dict[str, str] = {
     "phone.expire": "Laisser tomber les réponses proposées sur le téléphone restées sans geste",
     "memory.relayed": "Retenir ce que le téléphone lui montre (les messages reçus)",
     "identity.expire": "Oublier les inconnues de passage restées silencieuses",
-}
+})
 
 #: Les événements des facultés : ce qui s'est passé (ceux du noyau et du moteur sont nommés par la console).
-EVENT_LABELS: dict[str, str] = {
+EVENT_LABELS: dict[str, str] = _named("events", {
     "presence.connected": "Connexion", "presence.disconnected": "Déconnexion",
     "presence.read": "Lu jusqu'à un message (ce que dit son application)",
     "presence.composing": "Commence ou cesse d'écrire un message (ce que dit son application)",
@@ -458,13 +472,13 @@ EVENT_LABELS: dict[str, str] = {
     "phone.received": "Un message montré par le téléphone", "phone.drafted": "Une réponse préparée pour le téléphone",
     "phone.settled": "Une réponse proposée sur le téléphone : partie, laissée ou expirée",
     "memory.relayed_read": "Des messages du téléphone relus, ou remis à la file des reprises",
-}
+})
 
 #: Ce que la file de sortie fait partir, effet par effet (« propriétaire:type », la clé de ses lignes) : sa famille
 #: (``EFFECT_FAMILIES``), son nom, ce que c'est. Système › File de sortie les range par famille ; sa vue, la page
 #: dessinée et la page d'un événement disent leur nom (``Names.effect``). Un test d'architecture veut un nom pour chaque
 #: effet du registre composé.
-EFFECT_LABELS: dict[str, tuple[str, str, str]] = {
+EFFECT_LABELS: dict[str, tuple[str, str, str]] = _named("effects", {
     "expression:episode.utterance": ("dit", "Ses messages",
                                      "ce qu'elle répond ou lance, livré aux écrans et au téléphone de la personne"),
     "runtime:episode.ended": ("dit", "Une réponse qui ne viendra pas",
@@ -515,7 +529,7 @@ EFFECT_LABELS: dict[str, tuple[str, str, str]] = {
                                       "la pull request est fusionnée chez l'hôte, au commit que la personne a lu"),
     "projects:projects.pull_write_asked": ("agit", "Ce qu'une personne écrit sur une pull request",
                                            "son titre, son texte ou un commentaire signé partent chez l'hôte"),
-}
+})
 #: Les familles des effets, dans l'ordre de la page ; un effet sans libellé se range avec le reste
 #: (``names.OTHER_EFFECTS``).
 EFFECT_FAMILIES: tuple[tuple[str, str], ...] = (
@@ -524,16 +538,16 @@ EFFECT_FAMILIES: tuple[tuple[str, str], ...] = (
 
 #: Les familles d'outils (leurs lots) qui ne se nomment pas comme leur faculté ; « préfixe.* » : les lots qu'une
 #: source ajoute (un par serveur MCP branché, un par app), nommés par ce qui suit le préfixe.
-BUNDLE_LABELS: dict[str, str] = {
+BUNDLE_LABELS: dict[str, str] = _named("bundles", {
     "attention": "Ses pensées", "self": "Son journal", "social": "Qui lui parle", "workshop": "L'atelier d'un projet",
     "forge": "La Forge (écrire ses apps)", "forge_signals": "Ce que ses apps lui signalent",
     "project_review": "Relire le travail d'un projet",
     "mcp.*": "Service « {} »", "forge_apps.*": "Son app « {} »",
-}
+})
 
 #: Le nom court de chaque capacité : ce qu'une ligne ou une puce de « À valider » et l'historique en disent, sans couper
 #: sa phrase. Celle-ci reste sa description, au survol et dans l'en-tête de la demande ouverte.
-CAPABILITY_LABELS: dict[str, str] = {
+CAPABILITY_LABELS: dict[str, str] = _named("capabilities", {
     "email.send": "Mail", "teams.send": "Réponse Teams", "phone.send": "Réponse téléphone",
     "mcp.call": "Outil extérieur", "forge.call": "Outil d'app", "forge.install": "Version d'app",
     "projects.networked": "Commande réseau", "projects.push": "Push git", "projects.pull": "Pull git",
@@ -542,11 +556,11 @@ CAPABILITY_LABELS: dict[str, str] = {
     "projects.issue_note": "Note publiée",
     "projects.steer": "Pilotage de projet",
     "agenda.write": "Agenda",
-}
+})
 
 #: Les enrichisseurs, nommés par ce qu'ils rassemblent pour le prompt avant qu'il s'écrive (l'onglet Prompt d'un
 #: épisode, « enrichissements »).
-ENRICHER_LABELS: dict[str, str] = {
+ENRICHER_LABELS: dict[str, str] = _named("enrichers", {
     "thread": "Le fil de la conversation", "recall": "Ses souvenirs rappelés",
     "their_last_words": "Les derniers messages de la personne", "last_heard": "Le message auquel elle répond",
     "own_words": "Ses derniers messages", "own_openings": "Ses dernières entrées en matière",
@@ -572,21 +586,21 @@ ENRICHER_LABELS: dict[str, str] = {
     "agenda": "Ses agendas (la journée de la personne, ce qu'elle y a proposé)",
     "agenda_reminder": "Le rendez-vous qu'elle rappelle",
     "agenda_invitation": "L'invitation dont elle prépare la réponse",
-}
+})
 
 #: Les ports que des outils attendent (``needs=``) : pourquoi la porte ne les offre pas tant que le port n'est pas prêt
 #: (``runtime.tool_offer.ready``), et la page de réglages où il se règle — la fiche d'un outil dit l'un et mène à
 #: l'autre. Le port des cartes (``adapters/maps/desk.py``, ``MapsDesk``) ne déclare pas ``configured`` : il n'est pas
 #: prêt seulement quand la composition ne le branche pas ; le serveur le branche toujours, et chaque appel dit alors ce
 #: qui manque (rien de réglé, un serveur qui ne répond pas).
-NEED_LABELS: dict[str, tuple[str, str]] = {
+NEED_LABELS: dict[str, tuple[str, str]] = _named("needs", {
     "imaging": ("aucun fournisseur d'images n'est configuré", "images-fournisseurs"),
     "maps": ("les lieux, les adresses et les itinéraires ne sont pas branchés", "lieux"),
     "feeds": ("elle ne suit aucun flux", "flux"),
     # le serveur branche toujours la base des rendez-vous (ADR 0309) : seule une composition partielle (un test) ne
     # l'a pas ; sa page de réglages vient avec la console de l'agenda (lot 5), le lien ne paraît qu'une fois là
     "agenda": ("ses calendriers ne sont pas branchés sur ce serveur", "agendas"),
-}
+})
 
 #: Tout ce que la console nomme en français, d'un bloc.
 LABELS = Labels(faculties=FACULTY_LABELS, sections=SECTION_LABELS, reasons=REASON_LABELS, vetoes=VETO_LABELS,

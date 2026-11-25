@@ -21,10 +21,22 @@ from __future__ import annotations
 from typing import Any
 
 from sqlalchemy import Index
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from mika.ports.paging import fold_text
-from mika.ports.sql import FeedsBase, Key, LongText, fit, table_args
+from mika.ports.sql import TABLE_OPTIONS, TYPES, Key, LongText, database, fit, table_args
+
+#: la base des flux suivis : déclarée ici, par le paquet qui la possède (ADR 0310)
+FEEDS = database("feeds")
+
+
+class FeedsBase(DeclarativeBase):
+    """Les entités des flux."""
+
+    metadata = FEEDS
+    __table_args__ = TABLE_OPTIONS
+    type_annotation_map = TYPES
+
 
 #: un identifiant d'article : l'empreinte que l'adaptateur calcule (``_key``)
 ENTRY_ID_MAX = 24

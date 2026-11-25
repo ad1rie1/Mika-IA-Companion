@@ -81,18 +81,19 @@ from mika.app.agenda_desk import AgendaSettingsDesk
 from mika.app.console import FACULTY_LABELS, LABELS, NAVIGATION, PARAM_FAMILIES
 from mika.app.console_menu import menu_for
 from mika.app.constellation import Constellation
+from mika.app.domains import DOMAINS, part
 from mika.app.forge_settings import ForgeSettingsStore
-from mika.app.handmade import access, approval_sources, rights, subjects, waiting
+from mika.app.handmade import access, approval_sources, rights, waiting
 from mika.app.handmade.home import HomePage
 from mika.app.handmade.now import NowPage
-from mika.app.handmade.pages import DRAWN
+from mika.app.handmade.pages import DRAWN, OVERVIEWS
 from mika.app.handmade.person import PersonOverview
 from mika.app.handmade.tabs.people import PeoplePage
 from mika.app.lending import PREFIX as LENT_PREFIX
 from mika.app.lending import Lending
 from mika.app.logs import configure_logging
 from mika.app.mcp_settings import McpSettingsStore
-from mika.app.me import MeApi
+from mika.app.me.assembly import MeApi
 from mika.app.me.changes import LiveChanges
 from mika.app.me.docs_mcp import PREFIX as DOCS_MCP_PREFIX
 from mika.app.me.docs_mcp import DocsPoint
@@ -103,8 +104,8 @@ from mika.app.paths import PERSONA
 from mika.app.phone import PhoneDesk
 from mika.app.settings import SecretBox, Settings, push_key_file
 from mika.app.teams import TeamsDesk
-from mika.app.wakeups import WakeupDesk
 from mika.app.warm_points import last_positions
+from mika.app.wiring import Wiring
 from mika.contracts import attachments as attachments_c
 from mika.contracts import identity as identity_c
 from mika.contracts import self_ as self_c
@@ -167,8 +168,9 @@ class Live:
     imaging_fixed: bool = False
     #: les serveurs MCP branchés (ADR 0064), le port ``mcp``
     mcp: McpHub | None = None
-    #: les réveils par API (ADR 0068) : le port ``wakeup`` et la porte de ``POST /api/wake/<nom>``
-    wakeups: WakeupDesk | None = None
+    #: les objets vivants de chaque domaine qui a son câblage (ADR 0310), par son nom : les réveils par API
+    #: (``wakeup`` : le port du même nom et la porte de ``POST /api/wake/<nom>``)
+    parts: dict[str, Any] = field(default_factory=dict)
     #: Teams (ADR 0069) : la clé de l'extension et la porte de ``/api/teams/…``
     teams: TeamsDesk | None = None
     #: la carte de sa position (ADR 0193) : ses tuiles, lues ou relayées par ce serveur ; le port des lieux, des
@@ -293,6 +295,10 @@ class Live:
 WARM_WAIT_S = 30.0
 
 
+def _unbound(wiring: Wiring) -> None:
+    """Le ``bind`` d'un domaine qui n'en a pas : rien ne l'attend après le noyau."""
+
+
 async def _warm(embedder: object) -> None:
     """Charge le modèle de plongements s'il sait le faire (``warm``) ; un échec n'empêche rien : le premier rappel
     le chargera, comme avant."""
@@ -356,8 +362,6 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     outside[PROJECT_DOCS_PORT] = DiskShares(data / "documentation")
     outside[attachments_c.VECTORS] = piece_vectors
     preprocess = outside["preprocess"] = LocalPreprocessor(gateway, transcribe=whisper(settings.stt))
-    # les réveils par API (ADR 0068) : leurs réglages et leurs clés, et la porte qui admet un appel
-    wakeups = outside["wakeup"] = WakeupDesk(settings, clock.now)
     # Teams (ADR 0069) : ce que l'extension pousse, ses brouillons et la file (hors du journal), et la porte
     teams_store = outside["teams"] = TeamsStore(settings.teams, bases["teams"], now=clock.now)
     # ses clés, une par compte (ADR 0186) : la console les crée et les retire par ce port
@@ -403,6 +407,12 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     mcp = outside["mcp"] = McpHub(lambda: system.config(settings.mcp()), lambda: system.reviews(settings.mcp_tools()),
                                 system.saving(settings.save_mcp_tools), local_root=data / "mcp",
                                 settle=mcp_settings.settle, remove=mcp_settings.remove, system=system.plugins)
+    # ce que chaque domaine apporte (ADR 0310) : ses adaptateurs, ses ports, ses portes HTTP — sa fiche nomme son
+    # câblage, que ce serveur appelle sans le connaître (``app/wiring.py``)
+    wiring = Wiring(data=data, settings=settings, clock=clock, bases=bases, ports=outside)
+    wired = [d.wiring for d in DOMAINS if d.wiring is not None]
+    for module in wired:
+        part(module, "wire")(wiring)
     kernel = Kernel(composition.deps(store=store, clock=clock, ids=RandomIdGen(), gateway=gateway,
                                      ports={"delivery": hub, "activity": hub, "vectors": vectors, **outside},
                                      access_tables=settings.access_tables, closeness=social_c.is_close,
@@ -430,12 +440,14 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
         settings.mail_saved = mail_watch.nudge
     port = KernelPort(kernel)
     hub.port = port
-    wakeups.port = port
+    wiring.port = port
+    for module in wired:  # ce qui, dans un domaine, a besoin du noyau
+        part(module, "bind", _unbound)(wiring)
     teams.port = port
     phone.port = port
     live = Live(kernel, hub, port, Accounts(store), settings, gateway, fixed, calls=CallLog(store),
                 persona_file=persona, data=data, imaging=imaging, imaging_fixed=imaging_fixed, mcp=mcp,
-                wakeups=wakeups, teams=teams, read_limits=None if fixed else model_limits,
+                parts=wiring.parts, teams=teams, read_limits=None if fixed else model_limits,
                 tiles=MapTiles(data, settings.map_config), mail_watch=mail_watch)
     agenda_desk.reconfigure = live.reconfigure
     # l'exemple de l'autrice « Message », quand le sien est vide : le fil de référence de sa persona (ADR 0124), lu au
@@ -549,7 +561,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                       parameters=settings_sections.parameters(live), param_families=PARAM_FAMILIES,
                       faculty_labels=FACULTY_LABELS, labels=LABELS,
                       backups=lambda: backup.overview(data), relay=live.relay, lending=lending, world=world_hub,
-                      overviews={"person": person_overview, **subjects.OVERVIEWS},
+                      overviews={"person": person_overview, **OVERVIEWS},
                       drawn=DRAWN, approval_sources=approval_sources.sources, queue=waiting.QUEUE,
                       nameable=access.people_with_accounts, canal_instances=access.instances_from_settings,
                       family_href=access.family_href,
@@ -596,7 +608,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                                     *rights.routes(console_pages.ui),
                                     *inspector, relay, console_mcp, lent, docs_mcp, world_hub.route()],
                       preprocess=preprocess, camera=camera, sensor_digest=settings.sensors_digest,
-                      wakeup=wakeups.call, teams=teams, push_ready=push_sender.configured,
+                      teams=teams, push_ready=push_sender.configured, **wiring.web,
                       phone=phone), live
 
 

@@ -186,6 +186,23 @@ def test_the_settings_say_each_write_at_their_only_door():
     assert {"set_push", "clear_push", "create", "update"} <= writers  # la garde lit bien de vraies écritures
 
 
+def test_the_settings_of_a_domain_write_only_through_the_door():
+    """Les réglages d'un domaine sont une classe de son dossier (``app/domains/<nom>/settings.py``, une
+    ``SettingsPart`` : ADR 0310). Elle lit et écrit par la porte des réglages (``_get``, ``_put`` qui dit chaque
+    écriture) : jamais par le magasin, où une écriture ne se dirait pas."""
+    parts = sorted((SRC / "app" / "domains").glob("*/settings.py"))
+    assert parts, "aucun réglage de domaine : le chemin a changé"
+    for path in parts:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        classes = [n for n in tree.body if isinstance(n, ast.ClassDef)]
+        assert classes and all(any(isinstance(b, ast.Name) and b.id == "SettingsPart" for b in c.bases) for c in classes), \
+            f"{path.name} : une classe de réglages de domaine dérive de SettingsPart"
+        direct = sorted({x.attr for x in ast.walk(tree) if isinstance(x, ast.Attribute) and x.attr in ("store", "run_mind")})
+        assert not direct, f"{path.parent.name}/settings.py touche au magasin ({', '.join(direct)}) : il écrit par ``_put``"
+    door = _methods(ast.parse((SRC / "app/settings.py").read_text(encoding="utf-8")), "SettingsPart")
+    assert set(door) == {"__init__", "_get", "_put"}, "la porte d'un domaine : lire, écrire en le disant, rien d'autre"
+
+
 ACCOUNTS_TOY = '''
 class Accounts:
     async def _changed(self):

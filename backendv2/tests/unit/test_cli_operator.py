@@ -23,7 +23,8 @@ from mika.app.cli import common as cli_common
 from mika.app.cli import journal as cli_journal
 from mika.app.cli import plugins as cli_plugins
 from mika.app.console import LABELS
-from mika.app.wakeups import WakeEndpoint, WakeupConfig
+from mika.app.domains.wakeup.desk import WakeEndpoint, WakeupConfig
+from mika.app.domains.wakeup.settings import WakeupSettings
 from mika.contracts import identity as identity_c
 from mika.contracts import runtime as rt
 from mika.inspector.names import Names
@@ -192,7 +193,7 @@ def test_a_key_is_taken_back_from_the_command_line(tmp_path):
 
     async def scene(settings, _store):  # type: ignore[no-untyped-def]
         await settings.save_teams(TeamsConfig(accounts={"principal": {}}))
-        await settings.save_wakeup(WakeupConfig(endpoints={"serre": WakeEndpoint(label="serre", instructions="x")}))
+        await settings.of(WakeupSettings).save_wakeup(WakeupConfig(endpoints={"serre": WakeEndpoint(label="serre", instructions="x")}))
 
         def teams(cmd: str) -> object:
             return cli_plugins.teams_command(settings, argparse.Namespace(teams_cmd=cmd, compte="principal"))

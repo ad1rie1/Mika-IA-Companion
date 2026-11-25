@@ -39,11 +39,23 @@ from __future__ import annotations
 from typing import Any
 
 from sqlalchemy import Index, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column, validates
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, validates
 
 from mika.ports.paging import fold_text
-from mika.ports.sql import Id, Key, LongBlob, LongText, TeamsBase, fit, table_args
+from mika.ports.sql import TABLE_OPTIONS, TYPES, Id, Key, LongBlob, LongText, database, fit, table_args
 from mika.ports.teams import DEFAULT_ACCOUNT
+
+#: la base de ce que l'extension Teams apporte : déclarée ici, par le paquet qui la possède (ADR 0310)
+TEAMS = database("teams")
+
+
+class TeamsBase(DeclarativeBase):
+    """Les entités de Teams."""
+
+    metadata = TEAMS
+    __table_args__ = TABLE_OPTIONS
+    type_annotation_map = TYPES
+
 
 #: la clé d'un compte (``ports.teams.ACCOUNT_KEY`` : 40 au plus)
 ACCOUNT_MAX = 40

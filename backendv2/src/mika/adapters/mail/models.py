@@ -28,11 +28,23 @@ from collections.abc import Iterable
 from typing import Any
 
 from sqlalchemy import Index, UniqueConstraint, false
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from mika.ports.mail import Draft, Mail, Sent, addresses, assigned_ref, mail_ref, reference_key, split_ref
 from mika.ports.paging import fold_text
-from mika.ports.sql import Id, Key, LongBlob, LongText, MailBase, fit, table_args
+from mika.ports.sql import TABLE_OPTIONS, TYPES, Id, Key, LongBlob, LongText, database, fit, table_args
+
+#: la base du courrier relevé : déclarée ici, par le paquet qui la possède (ADR 0310)
+MAIL = database("mail")
+
+
+class MailBase(DeclarativeBase):
+    """Les entités du courrier."""
+
+    metadata = MAIL
+    __table_args__ = TABLE_OPTIONS
+    type_annotation_map = TYPES
+
 
 # ── les bornes ──
 #: une clé de compte (``ACCOUNT_KEY`` : 40 caractères)

@@ -18,9 +18,9 @@ from urllib.parse import urlencode
 
 from markupsafe import Markup
 
+from mika.app.domains.contacts.console.subject import detach_forms, sheet_of, tiles_of
 from mika.app.handmade import Look
 from mika.app.handmade.directory import accounts, contact_entry, contact_url, place_name, port_of
-from mika.app.handmade.subjects.contact import detach_forms, sheet_of, tiles_of
 from mika.app.handmade.subjects.parts import safely
 from mika.faculties.identity.inspect import TRUST_SHORT, handle_label, handles_of
 from mika.inspector import render

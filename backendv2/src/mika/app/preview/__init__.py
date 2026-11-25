@@ -38,9 +38,9 @@ from mika.adapters.vectors import HashEmbedder
 from mika.adapters.web.app import WebConfig
 from mika.app import schema
 from mika.app.console import NAVIGATION
+from mika.app.domains import DOMAINS, part
 from mika.app.me import form
 from mika.app.preview.activity import activity
-from mika.app.preview.contacts import directory
 from mika.app.preview.git import URL as REMOTE_URL
 from mika.app.preview.git import repository
 from mika.app.preview.inner import inner
@@ -431,8 +431,11 @@ def export(out: Path) -> list[str]:
             if bea and adrien:  # des fichiers envoyés et reçus, un de chaque retiré (ADR 0205), et leurs fiches
                 urls += client.portal.call(lambda: _files(live.kernel, adrien, bea))
                 client.portal.call(lambda: _shares(live.settings, bea, adrien))
-                # l'annuaire (ADR 0298) : connues de loin, organisations, une fiche reliée, un rapprochement
-                urls += directory(live, clock.now(), adrien, bea)
+                # ce que chaque domaine ajoute à cette vie (``Domain.preview``, ADR 0310) — l'annuaire (ADR 0298) :
+                # connues de loin, organisations, une fiche reliée, un rapprochement
+                for domain in DOMAINS:
+                    if domain.preview is not None:
+                        urls += part(domain.preview, "preview")(live, clock.now(), {"adrien": adrien, "bea": bea})
             for account in client.portal.call(live.accounts.all):
                 urls.append(f"{PREFIX}/reglages/comptes?compte={account.id}")
                 client.portal.call(lambda a=account: live.accounts.create_token(a.id, "Écran de démonstration"))

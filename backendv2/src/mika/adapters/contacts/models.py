@@ -29,9 +29,21 @@ moteurs. Une valeur venue d'ailleurs trop longue pour sa clé est ramenée à sa
 from __future__ import annotations
 
 from sqlalchemy import Index, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from mika.ports.sql import HANDLE_MAX, ContactsBase, Id, Key, LongText, fit, table_args
+from mika.ports.sql import HANDLE_MAX, TABLE_OPTIONS, TYPES, Id, Key, LongText, database, fit, table_args
+
+#: la base de l'annuaire (ADR 0298) : déclarée ici, par le paquet qui la possède (ADR 0310)
+CONTACTS = database("contacts")
+
+
+class ContactsBase(DeclarativeBase):
+    """Les entités de l'annuaire (ADR 0298)."""
+
+    metadata = CONTACTS
+    __table_args__ = TABLE_OPTIONS
+    type_annotation_map = TYPES
+
 
 #: une sorte de contact, d'identifiant, une source (des mots courts)
 WORD = 16

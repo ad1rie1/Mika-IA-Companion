@@ -2,9 +2,11 @@
 chose sur SQLite (les tests, le simulateur, le jumeau) et sur MariaDB (sa vie, en production), et les quelques
 écritures que les deux moteurs disent autrement.
 
-**Une base, une** ``MetaData`` : ``MIND`` (sa vie : sauvegardée), ``VIEWS`` (reconstructible), ``MAIL``, ``FEEDS``,
-``TEAMS``, ``CONTACTS`` (l'annuaire, ADR 0298), ``AGENDA`` (l'agenda, ADR 0309). Une entité se déclare dans le paquet qui la possède, sur la base de
-sa base (``MindBase``…), avec ``Mapped[...]`` ; une table qui ajoute des index les passe par ``table_args(...)``, qui
+**Une base, une** ``MetaData``. Celles du cœur sont ici : ``MIND`` (sa vie : sauvegardée) et ``VIEWS``
+(reconstructible). Toute autre base est déclarée par le paquet qui la possède, d'un mot (``database("mail")`` dans
+``adapters/mail/models.py``, ADR 0310), avec la base de ses entités ; ``DATABASES`` les réunit par leur nom, une fois
+leurs modules importés (``app/schema.py::load_models``). Une entité se déclare dans le paquet qui la possède, sur la
+base de sa base (``MindBase``, ``MailBase``…), avec ``Mapped[...]`` ; une table qui ajoute des index les passe par ``table_args(...)``, qui
 garde la collation binaire.
 
 **Les types.** Un entier est un ``BIGINT`` (les instants sont en microsecondes) ; une clé primaire numérique est
@@ -78,20 +80,26 @@ NAMING = {
 
 MIND = MetaData(naming_convention=NAMING)
 VIEWS = MetaData(naming_convention=NAMING)
-MAIL = MetaData(naming_convention=NAMING)
-FEEDS = MetaData(naming_convention=NAMING)
-TEAMS = MetaData(naming_convention=NAMING)
-CONTACTS = MetaData(naming_convention=NAMING)
-AGENDA = MetaData(naming_convention=NAMING)
 
 #: les tables des projections et les vues de la mémoire : déclarées pour les deux moteurs, hors des migrations
 PROJECTIONS = MetaData(naming_convention=NAMING)
 #: les colonnes des vues, pour les lire par des requêtes (jamais créées par ``create_all``)
 VIEW_COLUMNS = MetaData()
 
-#: chaque base par son nom (les migrations, la sauvegarde, les tests)
-DATABASES: dict[str, MetaData] = {"mind": MIND, "views": VIEWS, "mail": MAIL, "feeds": FEEDS, "teams": TEAMS,
-                                  "contacts": CONTACTS, "agenda": AGENDA}
+#: chaque base par son nom (les migrations, la sauvegarde, les tests) : celles du cœur, puis celles que leurs
+#: paquets déclarent (``database``)
+DATABASES: dict[str, MetaData] = {"mind": MIND, "views": VIEWS}
+
+
+def database(name: str) -> MetaData:
+    """Déclare une base par son nom et rend sa ``MetaData`` (ADR 0310) : le paquet qui la possède le fait une fois,
+    dans le module de ses entités. Son nom est celui de son fichier (``<nom>.db``), de sa base sur le serveur et de
+    son dossier de migrations ; deux paquets ne prennent pas le même."""
+    if name in DATABASES:
+        raise ValueError(f"la base « {name} » est déjà déclarée")
+    DATABASES[name] = MetaData(naming_convention=NAMING)
+    return DATABASES[name]
+
 
 #: ce que toute table déclare pour MariaDB (SQLite l'ignore)
 TABLE_OPTIONS: dict[str, str] = {
@@ -170,7 +178,8 @@ def table_args(*items: Any) -> tuple[Any, ...]:
     return (*items, dict(TABLE_OPTIONS))
 
 
-_TYPES = {int: BigInteger(), float: Double(), bool: Boolean(), bytes: LongBlob}
+#: ce qu'un ``Mapped[...]`` veut dire en colonne : la carte de types que la base de toute entité reprend
+TYPES = {int: BigInteger(), float: Double(), bool: Boolean(), bytes: LongBlob}
 
 
 class MindBase(DeclarativeBase):
@@ -178,7 +187,7 @@ class MindBase(DeclarativeBase):
 
     metadata = MIND
     __table_args__ = TABLE_OPTIONS
-    type_annotation_map = _TYPES
+    type_annotation_map = TYPES
 
 
 class ViewsBase(DeclarativeBase):
@@ -186,47 +195,7 @@ class ViewsBase(DeclarativeBase):
 
     metadata = VIEWS
     __table_args__ = TABLE_OPTIONS
-    type_annotation_map = _TYPES
-
-
-class MailBase(DeclarativeBase):
-    """Les entités du courrier."""
-
-    metadata = MAIL
-    __table_args__ = TABLE_OPTIONS
-    type_annotation_map = _TYPES
-
-
-class FeedsBase(DeclarativeBase):
-    """Les entités des flux."""
-
-    metadata = FEEDS
-    __table_args__ = TABLE_OPTIONS
-    type_annotation_map = _TYPES
-
-
-class TeamsBase(DeclarativeBase):
-    """Les entités de Teams."""
-
-    metadata = TEAMS
-    __table_args__ = TABLE_OPTIONS
-    type_annotation_map = _TYPES
-
-
-class ContactsBase(DeclarativeBase):
-    """Les entités de l'annuaire (ADR 0298)."""
-
-    metadata = CONTACTS
-    __table_args__ = TABLE_OPTIONS
-    type_annotation_map = _TYPES
-
-
-class AgendaBase(DeclarativeBase):
-    """Les entités de l'agenda (ADR 0309)."""
-
-    metadata = AGENDA
-    __table_args__ = TABLE_OPTIONS
-    type_annotation_map = _TYPES
+    type_annotation_map = TYPES
 
 
 # ── ce que les deux moteurs écrivent autrement ──
@@ -499,8 +468,8 @@ Builder = Callable[[str], Table]
 
 
 __all__ = [
-    "AGENDA", "CONTACTS", "DATABASES", "FEEDS", "FIT_DIGEST", "HANDLE_MAX", "MAIL", "MIND", "NAMING", "TABLE_OPTIONS", "TEAMS", "VIEWS",
-    "AgendaBase", "ContactsBase", "FeedsBase", "Id", "Key", "KeyTooLong", "LongBlob", "LongText", "MailBase", "MindBase", "TeamsBase", "ViewsBase",
+    "DATABASES", "FIT_DIGEST", "HANDLE_MAX", "MIND", "NAMING", "TABLE_OPTIONS", "TYPES", "VIEWS",
+    "Id", "Key", "KeyTooLong", "LongBlob", "LongText", "MindBase", "ViewsBase", "database",
     "PROJECTIONS", "VIEW_COLUMNS", "Builder", "Prepared", "alias_of", "create_view", "drop_view", "json_field", "json_has", "json_values",
     "projection_table", "view_table",
     "dialect_of", "fit", "greatest", "insert_ignore", "least", "table_args", "upsert",

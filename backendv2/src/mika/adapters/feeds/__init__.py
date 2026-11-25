@@ -53,12 +53,12 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from mika.adapters.addresses import IP, LOCAL, MACHINE, PORT, PRIVATE, refusal
 from mika.adapters.database import Target, as_target
-from mika.adapters.feeds.models import URL_MAX, EntryRow, FeedRow, entry_values, fit
+from mika.adapters.feeds.models import FEEDS, URL_MAX, EntryRow, FeedRow, entry_values, fit
 from mika.kernel.clock import DAY
 from mika.ports.feeds import Entry, shown
 from mika.ports.paging import Page, fold_text
 from mika.ports.preprocess import HTML_SKIPPED, html_text
-from mika.ports.sql import FEEDS, insert_ignore
+from mika.ports.sql import insert_ignore
 from mika.vocab.phrasebook import phrase
 
 NS_ATOM = "http://www.w3.org/2005/Atom"

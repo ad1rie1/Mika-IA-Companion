@@ -4,11 +4,13 @@ des petites aides dites une fois, la session lue une seule fois par requête."""
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 from types import SimpleNamespace as NS
 
 import pytest
 from starlette.applications import Starlette
+from starlette.routing import Match
 from starlette.testclient import TestClient
 
 import mika.app.me as me
@@ -16,6 +18,7 @@ from mika.app.me import common as common_me
 from mika.app.me import maps as maps_me
 from mika.app.me import settings as settings_me
 from mika.app.me.api import PREFIX, Denied, MeApiBase
+from mika.app.me.assembly import MeApi
 from mika.app.me.common import allows, held_by, millis, only_owner, opened, snippet
 from mika.vocab.access import SHARE_PREPARE, SHARE_READ, SHARE_USE
 from mika.vocab.ownership import OWNED
@@ -33,6 +36,24 @@ def test_the_package_imports_everything_before_anything_else():
     body = tree(PACKAGE / "__init__.py").body[1:]  # sa docstring
     started = next(i for i, node in enumerate(body) if not isinstance(node, IMPORT))
     assert not [node.lineno for node in body[started:] if isinstance(node, IMPORT)]
+
+
+def test_no_route_hides_another():
+    """Les routes viennent des modules du cadre, puis de chaque domaine, dans l'ordre des fiches (ADR 0310). Cet ordre
+    ne doit décider de rien : une adresse faite pour une route — ses paramètres remplis — n'est prise par aucune
+    route essayée avant elle."""
+    routes = MeApi(None, None).routes()  # type: ignore[arg-type]
+    assert len({(r.path, tuple(sorted(r.methods or ()))) for r in routes}) == len(routes), "une route déclarée deux fois"
+    hidden = []
+    for i, r in enumerate(routes):
+        path = re.sub(r"\{[^}:]+:path\}", "a/b", re.sub(r"\{[^}:]+:int\}", "7", r.path))
+        path = re.sub(r"\{[^}]+\}", "x", path)
+        for method in sorted((r.methods or set()) - {"HEAD"}):
+            scope = {"type": "http", "method": method, "path": path, "root_path": ""}
+            first = next(j for j, other in enumerate(routes) if other.matches(scope)[0] == Match.FULL)
+            if first != i:
+                hidden.append(f"{method} {r.path} est prise par {routes[first].path}")
+    assert not hidden, hidden
 
 
 def test_the_modules_take_the_frame_from_its_own_module():

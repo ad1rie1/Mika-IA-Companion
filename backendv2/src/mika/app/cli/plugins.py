@@ -16,9 +16,10 @@ from mika.adapters.system import RealClock
 from mika.adapters.teams import TeamsStore
 from mika.app import datadir, schema
 from mika.app.cli.common import _with_settings
+from mika.app.domains.wakeup.desk import WakeupDesk
+from mika.app.domains.wakeup.settings import WakeupSettings
 from mika.app.settings import Settings
 from mika.app.teams import TeamsDesk
-from mika.app.wakeups import WakeupDesk
 from mika.ports.teams import DEFAULT_ACCOUNT as DEFAULT_TEAMS_ACCOUNT
 
 
@@ -101,7 +102,7 @@ def purge_teams(data: Path, settings: Settings, account: str) -> dict[str, objec
 
 async def wakeup_command(settings: Settings, args: argparse.Namespace) -> dict[str, object]:
     """Les réveils par API (ADR 0068) hors ligne : les lister, leur donner une clé (montrée une fois), la retirer."""
-    desk = WakeupDesk(settings, RealClock().now)
+    desk = WakeupDesk(settings.of(WakeupSettings), RealClock().now)
     if args.wakeup_cmd == "list":
         return {"ok": True, "endpoints": [
             {"name": ep.name, "label": ep.label, "enabled": ep.enabled, "project": ep.project or None,

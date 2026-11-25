@@ -32,10 +32,22 @@ d'ailleurs trop longue pour sa clé est ramenée à sa borne par ``fit``.
 from __future__ import annotations
 
 from sqlalchemy import Index, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from mika.ports.agenda import LOCAL_MAX, SYSTEM_PREFIX
-from mika.ports.sql import HANDLE_MAX, AgendaBase, Id, Key, LongText, fit, table_args
+from mika.ports.sql import HANDLE_MAX, TABLE_OPTIONS, TYPES, Id, Key, LongText, database, fit, table_args
+
+#: la base de l'agenda (ADR 0309) : déclarée ici, par le paquet qui la possède (ADR 0310)
+AGENDA = database("agenda")
+
+
+class AgendaBase(DeclarativeBase):
+    """Les entités de l'agenda (ADR 0309)."""
+
+    metadata = AGENDA
+    __table_args__ = TABLE_OPTIONS
+    type_annotation_map = TYPES
+
 
 #: une sorte, un état, une réponse (des mots courts)
 WORD = 16

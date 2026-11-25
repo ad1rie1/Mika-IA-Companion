@@ -15,7 +15,7 @@ from sqlalchemy.dialects.mysql.mariadb import MariaDBDialect
 from sqlalchemy.schema import CreateIndex, CreateTable
 
 from mika.adapters.database import sqlite_engine
-from mika.app import schema
+from mika.app import backup, schema
 from mika.ports.sql import DATABASES, MIND, TABLE_OPTIONS, Key
 from tests.fixtures import backend
 
@@ -30,6 +30,25 @@ def _engine(tmp_path, name):
 def test_every_base_has_a_file_and_entities() -> None:
     assert set(schema.FILES) == set(DATABASES)
     assert all(DATABASES[name].tables for name in DATABASES)
+
+
+#: les bases d'un dossier de données et d'un serveur en service, le jour où leurs listes ont cessé d'être écrites à
+#: la main (ADR 0310)
+IN_SERVICE = ("mind", "views", "mail", "feeds", "teams", "contacts", "agenda")
+
+
+def test_the_bases_in_service_keep_their_names() -> None:
+    """Les listes de bases se déduisent des fiches des domaines : rien ne les nomme plus. Une base en service garde
+    donc son nom ici — c'est son fichier, sa base sur le serveur, son dossier de migrations et sa clé dans une
+    archive ; la renommer ou la retirer, c'est la perdre à la restauration. En ajouter une ne demande rien ici."""
+    assert list(schema.FILES)[:len(IN_SERVICE)] == list(IN_SERVICE), "leur ordre est celui où on les copie"
+    assert all(schema.FILES[name] == f"{name}.db" for name in schema.FILES)
+    assert schema.SAVED == tuple(name for name in schema.FILES if name != "views")
+    assert all((schema._HERE / name / "env.py").is_file() for name in schema.FILES), "un dossier de migrations chacune"
+    assert all(backup._BASE_KEY.match(name) for name in schema.SAVED)
+    assert backup._BASE_KEY.match("forge/meteo") and not backup._BASE_KEY.match("views")
+    assert not backup._BASE_KEY.match("mind; drop") and not backup._BASE_KEY.match("forge/../mind")
+    assert all(backup.PLACES[name] for name in schema.FILES), "chacune dit ce qu'elle garde (Système › Stockage)"
 
 
 @pytest.mark.sqlite_only  # les fichiers d'un dossier ; sur un serveur : la variante « on_mariadb »

@@ -28,10 +28,19 @@ from sqlalchemy import Engine, inspect
 from sqlalchemy.exc import DBAPIError
 
 from mika.adapters.database import Target, sqlite_engine
+from mika.app.domains import DOMAINS
 from mika.app.migrations import _declared
 from mika.ports.sql import DATABASES
 
-#: les modules qui déclarent des entités : les importer remplit les ``MetaData`` de ``mika.ports.sql``
+#: les bases du cœur : sa vie, et ce qui s'en reconstruit
+CORE = ("mind", "views")
+#: la base qu'on ne sauvegarde pas : elle se reconstruit depuis le journal
+REBUILT = "views"
+#: la base de chaque domaine qui en tient une, dans l'ordre des fiches (ADR 0310) : aucune n'est nommée ici
+DOMAIN_BASES = tuple(d.base for d in DOMAINS if d.base is not None)
+#: les modules qui déclarent des entités : les importer remplit les ``MetaData`` de ``mika.ports.sql`` — ceux du
+#: cœur (le journal, les comptes, les réglages, les appels, les traces, les séries, le journal des apps), puis
+#: celui de chaque base d'un domaine
 MODELS = (
     "mika.ports.journal",
     "mika.adapters.web.accounts",
@@ -39,17 +48,14 @@ MODELS = (
     "mika.adapters.llm.calls",
     "mika.runtime.traces",
     "mika.runtime.series",
-    "mika.adapters.mail.models",
-    "mika.adapters.feeds.models",
-    "mika.adapters.teams.models",
-    "mika.adapters.contacts.models",
-    "mika.adapters.agenda.models",
     "mika.adapters.forge.bases",
+    *(base.models for base in DOMAIN_BASES),
 )
 
-#: le fichier de chaque base dans un dossier de données (SQLite)
-FILES = {"mind": "mind.db", "views": "views.db", "mail": "mail.db", "feeds": "feeds.db", "teams": "teams.db",
-         "contacts": "contacts.db", "agenda": "agenda.db"}
+#: le fichier de chaque base dans un dossier de données (SQLite) : ``<nom>.db``
+FILES = {name: f"{name}.db" for name in (*CORE, *(base.name for base in DOMAIN_BASES))}
+#: les bases qu'on sauvegarde, dans l'ordre où on les copie
+SAVED = tuple(name for name in FILES if name != REBUILT)
 #: l'adresse d'un serveur MariaDB, sans base (``mariadb+pymysql://mika@localhost/?unix_socket=…``) : avec elle, ses
 #: bases vivent sur ce serveur ; sans, ce sont des fichiers SQLite dans le dossier de données
 DATABASE_URL_ENV = "MIKA_DATABASE_URL"
@@ -85,9 +91,9 @@ def load_models() -> None:
 
 
 def _config(name: str) -> Config:
+    load_models()  # les bases des domaines ne sont déclarées qu'une fois leurs entités importées
     if name not in DATABASES:
         raise ValueError(f"base inconnue : {name!r} ({', '.join(DATABASES)})")
-    load_models()
     cfg = Config()
     cfg.set_main_option("script_location", str(_HERE / name))
     cfg.attributes["metadata"] = DATABASES[name]

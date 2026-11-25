@@ -1293,7 +1293,7 @@ sous Documentation, ont leurs routes à elles.
 
 Ce que l'écran Contacts montre (ADR 0298) : ceux que Mika connaît **pour toi**, même sans leur avoir parlé — vus dans
 tes comptes Teams et tes boîtes, sur ton téléphone, ou dont tu lui as parlé — et leurs organisations. L'annuaire a sa
-base (`contacts`, le plugin du même nom) ; le code fait foi dans [`app/me/contacts.py`](../src/mika/app/me/contacts.py).
+base (`contacts`, le plugin du même nom) ; le code fait foi dans [`app/domains/contacts/api.py`](../src/mika/app/domains/contacts/api.py).
 
 - **Tes contacts** : un contact est à qui l'a fait connaître — vu dans un compte à toi (à ton nom, ou « à toi » si tu
   es une de ses propriétaires) ou qu'on te partage (au moins en lecture), sur ton téléphone, raconté par toi, ou par

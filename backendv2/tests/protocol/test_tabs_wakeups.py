@@ -5,7 +5,8 @@ introduction dite une fois ; et pas de champ « nom exact » : ``?reveil=`` filt
 
 from __future__ import annotations
 
-from mika.app.wakeups import WakeEndpoint, WakeupConfig
+from mika.app.domains.wakeup.desk import WakeEndpoint, WakeupConfig
+from mika.app.domains.wakeup.settings import WakeupSettings
 from mika.contracts import wakeup as c
 from tests.protocol.test_console_diagnostics import stop
 from tests.protocol.test_drawn_pages import drawn
@@ -23,10 +24,10 @@ def test_wakeups_are_tiles_then_their_calls_with_what_they_brought(world):  # no
     assert ">Déclarer un réveil</a>" in head and "nouveau=1" in head and "gear-link" in head  # l'action, puis la roue
     # la roue est celle de la destination (ses réglages y vivent, ADR 0206), une seule fois
     assert head.count('href="/admin/reveils/parametres"') == 1
-    client.portal.call(live.settings.save_wakeup, WakeupConfig(endpoints={
+    client.portal.call(live.settings.of(WakeupSettings).save_wakeup, WakeupConfig(endpoints={
         "serre": WakeEndpoint(label="L'alerte de la serre", instructions="Résume-la.", notify=c.NOBODY),
         "cave": WakeEndpoint(label="La sonde de la cave", enabled=False)}))
-    key = client.portal.call(live.wakeups.new_key, "serre", "test")
+    key = client.portal.call(live.parts["wakeup"].new_key, "serre", "test")
     assert client.post("/api/wake/serre", json={"text": "Il fait 41 °C dans la serre."},
                        headers={"Authorization": f"Bearer {key}"}).status_code == 202
     page = drawn(client, "/admin/reveils")

@@ -1,5 +1,6 @@
-"""Les migrations de schéma (Alembic, ADR 0101) : un dossier par base (``mind``, ``views``, ``mail``, ``feeds``,
-``teams``, ``contacts``, ``agenda``), chacun avec son ``env.py`` d'une ligne, son modèle de révision et ses ``versions/``.
+"""Les migrations de schéma (Alembic, ADR 0101) : un dossier par base, sous son nom (``mind``, ``views``, puis celle
+de chaque domaine qui en tient une : ``mail``, ``agenda``…), chacun avec son ``env.py`` d'une ligne, son modèle de
+révision et ses ``versions/``.
 
 Ce que les migrations gèrent : les **entités déclarées** de la base (``mika.ports.sql``), et rien d'autre. Les tables
 que le code crée lui-même — le journal du magasin, les projections, qui évoluent par leur version et une

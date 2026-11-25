@@ -51,6 +51,7 @@ from mika.adapters.teams.models import (
     AUTHOR_MAX,
     CONVERSATION_MAX,
     REF_MAX,
+    TEAMS,
     AccountRow,
     ConversationRow,
     CounterRow,
@@ -66,7 +67,6 @@ from mika.ports import changes
 from mika.ports.drafts import to_fill
 from mika.ports.gate import ACCEPTED, CONFLICT, MISSING
 from mika.ports.paging import fold_text
-from mika.ports.sql import TEAMS
 from mika.ports.teams import (
     DISCARDED,
     FAILED,

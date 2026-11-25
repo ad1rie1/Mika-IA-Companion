@@ -21,7 +21,8 @@ import json
 
 import pytest
 
-from mika.app.wakeups import WakeEndpoint, call_text
+from mika.app.domains.wakeup.desk import WakeEndpoint, call_text
+from mika.app.domains.wakeup.settings import WakeupSettings
 from mika.contracts import goals as goals_c
 from mika.contracts import identity as identity_c
 from mika.contracts import runtime as rt
@@ -134,7 +135,7 @@ def test_a_signed_endpoint_takes_a_github_delivery_and_nothing_false(world):  # 
     rows = client.portal.call(lambda: live_.settings.store.run_mind(
         lambda sql: sql.execute("SELECT value FROM settings").fetchall()))
     assert all(key not in r[0] for r in rows)
-    assert client.portal.call(live_.settings.wakeup_keys)["serre"]["sealed"]
+    assert client.portal.call(live_.settings.of(WakeupSettings).wakeup_keys)["serre"]["sealed"]
 
 
 def test_an_unsigned_endpoint_refuses_signatures_and_drops_the_sealed_key(world):  # noqa: F811
@@ -142,14 +143,14 @@ def test_an_unsigned_endpoint_refuses_signatures_and_drops_the_sealed_key(world)
     configure(client, live_, signed=True, max_pending=50)
     key = key_for(client, live_)
     configure(client, live_, signed=False, max_pending=50)  # il ne signe plus : la copie chiffrée part
-    assert "sealed" not in client.portal.call(live_.settings.wakeup_keys)["serre"]
+    assert "sealed" not in client.portal.call(live_.settings.of(WakeupSettings).wakeup_keys)["serre"]
     body = json.dumps({"text": "signé"}).encode()
     assert client.post(ROUTE, content=body, headers={"X-Hub-Signature-256": signed(key, body)}).status_code == 401
     assert client.post(ROUTE, content=body, headers={"Authorization": f"Bearer {key}"}).status_code == 202
     # signé de nouveau, avec la clé d'avant : rien à vérifier tant qu'une clé neuve n'est pas générée
     configure(client, live_, signed=True, max_pending=50)
     assert client.post(ROUTE, content=body, headers={"X-Hub-Signature-256": signed(key, body)}).status_code == 401
-    fiche = client.portal.call(live_.wakeups.endpoint, "serre")
+    fiche = client.portal.call(live_.parts["wakeup"].endpoint, "serre")
     assert fiche.signed and fiche.key is not None and not fiche.key.signs
     bootstrap(client)
     page = html_of(client.get("/admin/fiche/reveil/serre"))
@@ -158,7 +159,7 @@ def test_an_unsigned_endpoint_refuses_signatures_and_drops_the_sealed_key(world)
     assert client.post(ROUTE, content=body, headers={"X-Hub-Signature-256": signed(fresh, body)}).status_code == 202
     assert "aucune signature ne passe" not in html_of(client.get("/admin/fiche/reveil/serre"))
     # une copie qui ne s'ouvre plus (``secret.key`` changée) ne vérifie rien : jamais une signature par une clé vide
-    client.portal.call(live_.settings.save_wakeup_key, "serre", "0" * 64, "mwk_xxxx", 0, "test", "illisible")
+    client.portal.call(live_.settings.of(WakeupSettings).save_wakeup_key, "serre", "0" * 64, "mwk_xxxx", 0, "test", "illisible")
     other = json.dumps({"text": "forgé"}).encode()
     for key_ in ("", hashlib.sha256(b"").hexdigest(), fresh):  # ce qu'on ouvre quand il n'y a rien à ouvrir
         assert client.post(ROUTE, content=other, headers={"X-Hub-Signature-256": signed(key_, other)}).status_code == 401

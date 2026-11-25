@@ -323,7 +323,7 @@ async def read_upload(request: Request) -> tuple[dict[str, Any], tuple[File, ...
 
 class MeApiBase:
     """Le cadre de l'API par personne : ce que toute route a en commun (qui demande, le jeton CSRF, le corps, les bornes
-    par compte). Les routes elles-mêmes viennent des modules, que le paquet réunit (``mika.app.me.MeApi``)."""
+    par compte). Les routes elles-mêmes viennent des modules, que le paquet réunit (``mika.app.me.assembly.MeApi``)."""
 
     def __init__(self, kernel: Kernel, accounts: Accounts, *, origins: Iterable[str] = (),
                  apk: Path | None = None, extension: Path | None = None, settings: Any = None,

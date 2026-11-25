@@ -10,7 +10,8 @@ refuse un projet inconnu.
 from __future__ import annotations
 
 from mika.adapters.web.doors import WAKE_MAX_BYTES
-from mika.app.wakeups import WakeEndpoint, WakeupConfig
+from mika.app.domains.wakeup.desk import WakeEndpoint, WakeupConfig
+from mika.app.domains.wakeup.settings import WakeupSettings
 from mika.contracts import runtime as rt
 from mika.contracts import wakeup as c
 from mika.runtime.effects import with_content
@@ -23,11 +24,11 @@ ROUTE = "/api/wake/serre"
 
 def configure(client, live, **fields):
     endpoint = WakeEndpoint(label="l'alerte de la serre", instructions="Résume-la.", **fields)
-    client.portal.call(live.settings.save_wakeup, WakeupConfig(endpoints={"serre": endpoint}))
+    client.portal.call(live.settings.of(WakeupSettings).save_wakeup, WakeupConfig(endpoints={"serre": endpoint}))
 
 
 def key_for(client, live, name="serre"):
-    return client.portal.call(live.wakeups.new_key, name, "test")
+    return client.portal.call(live.parts["wakeup"].new_key, name, "test")
 
 
 def send(client, key, text="Il fait 41 °C dans la serre.", route=ROUTE, **headers):
@@ -97,12 +98,12 @@ def test_a_new_key_voids_the_old_one_a_revoked_key_lets_nothing_through(world): 
     old = key_for(client, live)
     new = key_for(client, live)
     assert send(client, old).status_code == 401 and send(client, new).status_code == 202
-    assert client.portal.call(live.wakeups.revoke_key, "serre") is True
+    assert client.portal.call(live.parts["wakeup"].revoke_key, "serre") is True
     assert send(client, new).status_code == 401
     # retiré de la configuration, il emporte sa clé : recréé sous ce nom, il n'en a pas
     key = key_for(client, live)
-    client.portal.call(live.settings.save_wakeup, WakeupConfig())
-    assert client.portal.call(live.settings.wakeup_keys) == {}
+    client.portal.call(live.settings.of(WakeupSettings).save_wakeup, WakeupConfig())
+    assert client.portal.call(live.settings.of(WakeupSettings).wakeup_keys) == {}
     configure(client, live)
     assert send(client, key).status_code == 401
 
@@ -144,7 +145,7 @@ def test_the_settings_page_offers_projects_and_recipients_and_refuses_an_unknown
     assert bad_tool.status_code == 400 and "workshop" in html_of(bad_tool)
     saved = post(client, url, {**record, "project": "aucun"})
     assert saved.status_code == 200
-    got = client.portal.call(live.settings.wakeup).endpoints["serre"]
+    got = client.portal.call(live.settings.of(WakeupSettings).wakeup).endpoints["serre"]
     assert got.project == "aucun" and got.tools == ("memory",) and got.notify == c.OWNERS
     assert post(client, url, {**record, "project": "aucun", "_cle": "Serre Nord"}).status_code == 400  # le nom = l'URL
     fiche = html_of(client.get("/admin/fiche/reveil/serre"))

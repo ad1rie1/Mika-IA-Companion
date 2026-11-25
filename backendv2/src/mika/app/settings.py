@@ -20,7 +20,7 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import delete, select
@@ -46,7 +46,6 @@ from mika.adapters.mcp.config import McpConfig, McpServer, StoredReview
 from mika.adapters.teams import TeamsConfig
 from mika.adapters.web.gate import new_key, token_digest
 from mika.app import authors as authors_m
-from mika.app.wakeups import WakeEndpoint, WakeupConfig
 from mika.inspector import mcp as console_mcp
 from mika.plugins.agenda.rights import shared_table
 from mika.ports.agenda import Connection, split_calendar_key
@@ -115,9 +114,6 @@ MCP_TOOLS_KEY = "mcp_tools"
 MCP_SYSTEM_ACCESS_KEY = "mcp_system_access"
 #: ce qu'on règle d'un serveur du système : ses accès seulement — le reste suit les paramètres de son plugin
 SYSTEM_ACCESS_FIELDS = ("access", "default_read", "default_act", "default_keep")
-#: les réveils par API (ADR 0068) ; leurs clés à part, dont seule l'empreinte est gardée
-WAKEUP_KEY = "wakeup"
-WAKEUP_KEYS_KEY = "wakeup_keys"
 #: Teams (ADR 0069, 0186) : ce qu'un opérateur règle, ses comptes compris ; la clé de l'extension de chaque compte
 #: à part (``TEAMS_KEYS_KEY``), dont seule l'empreinte est gardée
 TEAMS_KEY = "teams"
@@ -211,6 +207,26 @@ class SecretBox:
             return ""
 
 
+class SettingsPart:
+    """Les réglages d'un domaine (ADR 0310) : une classe de son dossier (``app/domains/<nom>/settings.py``), posée sur
+    la porte des réglages. Elle lit et écrit ses clés par cette porte seulement (``_get``, ``_put`` qui dit chaque
+    écriture, ``box`` pour sceller) : jamais le magasin lui-même, ce que
+    ``tests/architecture/test_changes_signalled.py`` garde. On la prend par ``Settings.of(SaClasse)``."""
+
+    def __init__(self, door: Settings) -> None:
+        self.door = door
+        self.box = door.box
+
+    def _get(self, key: str) -> Any:
+        return self.door._get(key)
+
+    async def _put(self, key: str, value: Any) -> None:
+        await self.door._put(key, value)
+
+
+P = TypeVar("P", bound=SettingsPart)
+
+
 class Settings:
     def __init__(self, store: Any, box: SecretBox) -> None:
         self.store = store
@@ -241,6 +257,8 @@ class Settings:
         #: les clés de l'extension Teams, relues puis réécrites d'un seul tenant (pris sous ``writing`` ou seul : il
         #: ne prend jamais ``writing``)
         self._keys = asyncio.Lock()
+        #: les réglages de chaque domaine, par leur classe (``of``)
+        self._parts: dict[type, SettingsPart] = {}
 
     async def open(self) -> None:
         def create(sql: Any) -> None:
@@ -271,6 +289,13 @@ class Settings:
     def _saved(self, key: str) -> None:
         """Ce réglage vient d'être enregistré : qui écoute le sait ; un écouteur en panne ne défait pas l'écriture."""
         call(self.on_saved, key, label="un réglage enregistré")
+
+    def of(self, kind: type[P]) -> P:
+        """Les réglages d'un domaine (ADR 0310) : sa classe (une ``SettingsPart`` de son dossier), construite une
+        fois sur cette porte — ce qu'elle tient en mémoire et ses verrous valent donc pour tout le serveur."""
+        if kind not in self._parts:
+            self._parts[kind] = kind(self)
+        return self._parts[kind]  # type: ignore[return-value]
 
     def llm(self) -> LLMConfig:
         data = self._get(LLM_KEY) or {}
@@ -610,53 +635,6 @@ class Settings:
     async def save_git(self, token: str, user: str = "", hosts: list[str] | None = None) -> None:
         clean = sorted({h.strip().lower() for h in (hosts or []) if h.strip()}) or ["github.com"]
         await self._put(GIT_KEY, {"token_sealed": self.box.seal(token.strip()), "user": user.strip(), "hosts": clean})
-
-    # ── Réveils par API (``POST /api/wake/<nom>``, ADR 0068) ──
-    def wakeup(self) -> WakeupConfig:
-        """Les réveils déclarés ; un réveil illisible est écarté, jamais bloquant."""
-        endpoints = {}
-        for name, spec in dict(dict(self._get(WAKEUP_KEY) or {}).get("endpoints") or {}).items():
-            try:
-                endpoints[str(name)] = WakeEndpoint.model_validate(spec)
-            except ValueError:
-                log.warning("réveils : « %s » est illisible, il est ignoré", str(name)[:40])
-        try:
-            return WakeupConfig(endpoints=endpoints)
-        except ValueError:
-            return WakeupConfig()
-
-    async def save_wakeup(self, cfg: WakeupConfig) -> WakeupConfig:
-        """Enregistre les réveils ; la clé d'un réveil retiré part avec lui (un réveil recréé sous ce nom n'en a
-        pas), et la copie chiffrée de la clé d'un réveil qui ne signe plus aussi (ADR 0117)."""
-        cfg = WakeupConfig.model_validate({"endpoints": dict(cfg.endpoints)})
-        await self._put(WAKEUP_KEY, {"endpoints": {n: ep.model_dump(mode="json") for n, ep in cfg.endpoints.items()}})
-        keys = self.wakeup_keys()
-        kept = {n: k if cfg.endpoints[n].signed else {f: v for f, v in k.items() if f != "sealed"}
-                for n, k in keys.items() if n in cfg.endpoints}
-        if kept != keys:
-            await self._put(WAKEUP_KEYS_KEY, kept)
-        return cfg
-
-    def wakeup_keys(self) -> dict[str, dict[str, Any]]:
-        """Réveil → ``{digest, hint, created_at, by}`` : jamais la clé en clair — et, pour un réveil signé,
-        ``sealed`` : la clé chiffrée, qu'il faut relire pour vérifier une signature."""
-        return {str(n): dict(k) for n, k in dict(self._get(WAKEUP_KEYS_KEY) or {}).items() if isinstance(k, dict)}
-
-    async def save_wakeup_key(self, name: str, digest: str, hint: str, created_at: int, by: str,
-                              sealed: str = "") -> None:
-        keys = self.wakeup_keys()
-        keys[name] = {"digest": digest, "hint": hint, "created_at": int(created_at), "by": by[:80]}
-        if sealed:
-            keys[name]["sealed"] = sealed
-        await self._put(WAKEUP_KEYS_KEY, keys)
-
-    async def revoke_wakeup_key(self, name: str) -> bool:
-        keys = self.wakeup_keys()
-        if name not in keys:
-            return False
-        del keys[name]
-        await self._put(WAKEUP_KEYS_KEY, keys)
-        return True
 
     # ── Teams (``/api/teams/…``, ADR 0069) ──
     # ── Ses droits (ADR 0134) : les canaux, ses familles d'outils, l'offre réglée ──

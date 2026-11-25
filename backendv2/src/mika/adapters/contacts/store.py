@@ -59,6 +59,7 @@ from sqlalchemy.orm import Session, aliased, sessionmaker
 from mika.adapters.changes import Changes, Listener
 from mika.adapters.contacts.models import (
     ACCOUNT,
+    CONTACTS,
     PERSON,
     PRINT,
     REF,
@@ -129,7 +130,7 @@ from mika.ports.contacts import (
     relearned,
 )
 from mika.ports.paging import Page, fold_text, words_of
-from mika.ports.sql import CONTACTS, insert_ignore, upsert
+from mika.ports.sql import insert_ignore, upsert
 
 C, N, S, D, T = ContactRow, IdentifierRow, SightingRow, DismissedRow, ThreadRow
 JR = JudgementRow

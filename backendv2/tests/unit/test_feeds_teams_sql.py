@@ -26,12 +26,12 @@ from sqlalchemy.dialects.mysql.mariadb import MariaDBDialect
 from sqlalchemy.schema import CreateIndex, CreateTable
 
 from mika.adapters.feeds import HttpFeeds
-from mika.adapters.feeds.models import FEED_NAME_MAX, URL_MAX, EntryRow, FeedRow, entry_values
+from mika.adapters.feeds.models import FEED_NAME_MAX, FEEDS, URL_MAX, EntryRow, FeedRow, entry_values
 from mika.adapters.feeds.models import fit as feeds_fit
 from mika.adapters.teams import TeamsConfig, TeamsStore
-from mika.adapters.teams.models import AUTHOR_MAX, CONVERSATION_MAX, MessageRow
+from mika.adapters.teams.models import AUTHOR_MAX, CONVERSATION_MAX, TEAMS, MessageRow
 from mika.adapters.teams.models import fit as teams_fit
-from mika.ports.sql import FEEDS, TEAMS, Key
+from mika.ports.sql import Key
 from mika.ports.teams import DEFAULT_ACCOUNT as P
 from mika.ports.teams import Draft, InboxBatch, InboxConversation, InboxMessage, message_ref
 

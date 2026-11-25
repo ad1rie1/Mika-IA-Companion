@@ -33,7 +33,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158, 0239, 0267, 0285 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159, 0261 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170, 0187, 0200, 0208, 0209, 0215, 0233, 0235, 0242, 0252, 0282, 0284, 0286, 0287, 0288, 0290, 0291, 0292, 0293, 0294, 0296, 0308 |
-| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176, 0177, 0178, 0179, 0180, 0181, 0182, 0183, 0197, 0201, 0202, 0203, 0204, 0205, 0206, 0210, 0216, 0217, 0218, 0219, 0225, 0230, 0231, 0232, 0234, 0237, 0241, 0281, 0295, 0297 |
+| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176, 0177, 0178, 0179, 0180, 0181, 0182, 0183, 0197, 0201, 0202, 0203, 0204, 0205, 0206, 0210, 0216, 0217, 0218, 0219, 0225, 0230, 0231, 0232, 0234, 0237, 0241, 0281, 0295, 0297, 0310 |
 | Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135, 0266 |
 
 ## Le noyau : journal, arbitrage, pipeline
@@ -3699,7 +3699,7 @@ pour le propriétaire d'un projet confié un accord qu'il ne peut pas donner ; l
 
 *Pourquoi :* la plupart des onglets restaient des blocs génériques (63 sur 79) : tous se ressemblaient, et aucun ne suivait les gabarits de l'ADR 0176.
 
-*Révise 0121 (en partie), 0176 (en partie). Révisée par 0178, 0180, 0183, 0201, 0202, 0218, 0281, 0297.*
+*Révise 0121 (en partie), 0176 (en partie). Révisée par 0178, 0180, 0183, 0201, 0202, 0218, 0281, 0297, 0310.*
 
 ### 0178 — Le menu montre les groupes de pages
 
@@ -4013,6 +4013,18 @@ pour le propriétaire d'un projet confié un accord qu'il ne peut pas donner ; l
 *Pourquoi :* le propriétaire a validé l'écran Projets du client web au troisième tour, puis a trouvé dans la console l'ancienne fiche — deux dessins pour le même objet, et le moins bon là où il administre.
 
 *Révise 0176 (en partie : la vue d'un objet, les sous-onglets et les étiquettes, pour cette fiche), 0177 (en partie : les onglets de la fiche d'un projet), 0281 (en partie : l'ordre et les noms de ses onglets, « Où il en est », « Cadre », « Plus »), 0282 (en partie : ce que l'API calculait pour la carte et la fiche d'un projet se lit dans `glance.py`), 0183 (en partie : l'onglet Dépôt devient « l'atelier face au distant », une sous-vue de Code), 0288 (en partie : la console fusionne aussi depuis la fiche d'une pull request ; ce que l'API calculait seule du code d'un projet se lit dans `inspect_code.py`), 0289 (en partie : la documentation d'un projet s'écrit aussi depuis la console, par les mêmes actions), 0290 (en partie : ce que l'API calculait seule du fil d'un projet se lit dans `feed.py`).*
+
+### 0310 — `app` rangé par domaine : une fiche et un dossier chacun
+
+- **Un domaine, un dossier.** Ce que la couche `app` sait d'un domaine (le courrier, Teams, l'agenda, l'annuaire, la carte, ses outils, la Forge, ses projets, les réveils, ses sens, le téléphone) vit dans `app/domains/<nom>/` : ses réglages, son câblage, son module de `/api/moi`, sa part du direct, ses pages de console, sa commande. Une page qui croise les domaines (qui peut quoi, À valider, la fiche d'une personne, Système) reste au cadre et lit les fiches.
+- **Une fiche écrite à la main** (`Domain`, `app/domains/domain.py`) dit ce qu'il apporte ; `app/domains/__init__.py` les liste (`DOMAINS`), dans un ordre voulu. Une fiche n'importe rien : elle nomme les modules de ses parts (son API, sa part du direct, sa part de la console, son aperçu), que le cadre importe au moment d'assembler et où il lit un nom convenu ; le registre est donc une feuille de l'arbre des imports, que tout module d'`app` peut lire sans tourner en rond. Le cadre (`server.py`, `schema.py`, `backup.py`, `me/`, `handmade/pages.py`, `console.py`, `cli/`) parcourt cette liste et ne nomme aucun domaine ; un domaine n'en nomme un autre que s'il le déclare (`Domain.needs`). `tests/architecture/test_frame_names_no_domain.py` le garde : ce qui reste à sortir du cadre y est excusé fichier par fichier, et cette table ne fait que rétrécir. Rien n'est découvert : ni balayage de dossiers, ni points d'entrée.
+- **Rien n'est généré.** Une fiche inscrit des pages, elle n'en dessine aucune : chaque page de la console garde son gabarit et sa feuille (ADR 0121, 0177), chaque écran des clients le sien. Les gabarits et les feuilles d'un domaine vivent dans son dossier (`console/templates/`, `console/static/`), sous les mêmes noms et aux mêmes adresses ; ceux du cadre restent dans l'inspecteur, qui reçoit les dossiers des domaines de la composition et n'en nomme aucun. Un même nom n'existe que dans un dossier.
+- **`Settings` est une porte** : lire, écrire en le disant (`_put`), sceller. Les réglages d'un domaine sont une classe de son dossier, qui n'écrit que par cette porte ; ceux qui n'ont pas de domaine (les modèles, sa persona, ses droits, ses autrices) restent dans `app/settings.py`.
+- **Restent au centre, exprès** : la liste des facultés, les lots d'outils et l'ordre de son prompt (`app/composition.py`, ADR 0151), l'ordre du menu de la console, les sujets du direct (`ports/changes.py`, le contrat), et un dossier de migrations par base (`app/migrations/<base>/`).
+
+*Pourquoi :* l'agenda (ADR 0309) a demandé de retoucher dix-sept fichiers partagés, et chaque domaine de sa taille refaisait le même tour — ces fichiers sont aussi ceux où deux sessions se heurtent.
+
+*Révise 0177 (en partie : le module qui déclare les onglets d'un domaine, leurs gabarits et leur feuille vivent dans son dossier).*
 
 ## Ce que les sondes et les audits ont fixé
 

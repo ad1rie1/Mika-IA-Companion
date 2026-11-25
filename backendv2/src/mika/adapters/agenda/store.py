@@ -47,6 +47,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from mika.adapters.agenda.models import (
     ACCOUNT,
     ADDRESS,
+    AGENDA,
     CALENDAR,
     OCCURRENCE,
     PERSON,
@@ -87,7 +88,7 @@ from mika.ports.agenda import (
     system_account,
     system_person,
 )
-from mika.ports.sql import AGENDA, json_values, upsert
+from mika.ports.sql import json_values, upsert
 from mika.vocab.access import PERSON as PERSON_PREFIX
 
 ACC, CAL, E, A, N = AccountRow, CalendarRow, EventRow, AttendeeRow, SyncNoteRow

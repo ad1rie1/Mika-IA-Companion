@@ -7,6 +7,7 @@ inventés."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 from urllib.parse import quote
 
@@ -129,3 +130,8 @@ def directory(live: Any, now: int, adrien: str, bea: str) -> list[str]:
 
 
 __all__ = ["directory"]
+
+
+def preview(live: Any, now: int, people: Mapping[str, str]) -> list[str]:
+    """Ce que l'annuaire ajoute à la vie fictive de l'aperçu (``Domain.preview``, ADR 0310)."""
+    return directory(live, now, people["adrien"], people["bea"])

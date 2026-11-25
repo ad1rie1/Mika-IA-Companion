@@ -22,7 +22,8 @@ from pathlib import Path
 from sqlalchemy import BigInteger, Boolean, Integer, LargeBinary, String, Text
 
 import mika.adapters.mail.models  # noqa: F401  (les tables s'inscrivent dans MAIL)
-from mika.ports.sql import MAIL, Key
+from mika.adapters.mail.models import MAIL
+from mika.ports.sql import Key
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = ROOT / "src" / "mika" / "adapters" / "mail"

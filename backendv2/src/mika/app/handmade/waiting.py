@@ -21,10 +21,10 @@ from typing import Any
 
 from markupsafe import Markup
 
+from mika.app.domains.contacts.console.subject import MATCH, line_of, sheet_of, whose_words
 from mika.app.handmade import Look, approval_sources
 from mika.app.handmade.directory import STYLES as DIRECTORY_STYLES
 from mika.app.handmade.directory import Talker, accounts, contact_entry, person_entry
-from mika.app.handmade.subjects.contact import MATCH, line_of, sheet_of, whose_words
 from mika.app.handmade.subjects.parts import safely
 from mika.app.handmade.tabs import Got, Line, blank, instant, raw_lines, text
 from mika.app.handmade.tabs.identities import claim_entry, handle_of, name_entry
