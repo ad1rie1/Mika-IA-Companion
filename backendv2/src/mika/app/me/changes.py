@@ -11,8 +11,8 @@ qu'il montre (``docs/protocole-moi.md``, § 2 bis).
   puis une fois par ``GAP_S`` : ce qui attend n'est jamais perdu, il part dès que son sujet le peut.
 - **Seulement ce que chacune peut voir.** À l'envoi, pour chaque personne connectée — et chaque canal de ses clients,
   car ce qu'elle voit d'un projet en dépend —, le service relit ce qu'elle a par les règles mêmes des routes
-  (``projects.reaches`` ; pour un domaine qui a sa fiche, ce que dit sa part du direct : ``LivePart.levels``, ``seen``,
-  ``judge``, ADR 0310) et ne garde que ses ressources : une boîte, une conversation, un projet d'une autre n'y paraissent jamais. Ce qu'on ne sait
+  (ce que dit la part du direct d'un domaine qui a sa fiche : ``LivePart.levels``, ``seen``, ``judge``, ADR 0310)
+  et ne garde que ses ressources : une boîte, une conversation, un projet d'une autre n'y paraissent jamais. Ce qu'on ne sait
   pas nommer part sans clé, seulement à qui a quelque chose dans ce domaine. Ce qui change qui voit quoi — les
   propriétaires et les partages d'une boîte, d'un compte Teams, les accès d'un projet, une adresse reliée à une
   personne, un réglage enregistré — part sans clé à toutes : le filtre lit l'état d'après, et celle qui vient de perdre
@@ -25,8 +25,7 @@ qu'il montre (``docs/protocole-moi.md``, § 2 bis).
   qui lui est dit pendant qu'une trame lui part s'y ajoute et part juste après, en une — rien ne s'empile.
 - **Rien n'est rattrapé.** Personne de connecté : rien ne se calcule. Le client relit tout à sa reconnexion.
 - **Par domaine** (ADR 0310). La forme d'une touche est dans ``touches.py`` ; ce qu'un domaine change et ce que
-  chacune en voit, dans la part du direct de sa fiche (``PARTS``). Ce service les réunit sans en nommer aucun ; ce
-  qui reste écrit ici (les projets) attend que son domaine ait la sienne.
+  chacune en voit, dans la part du direct de sa fiche (``PARTS``). Ce service les réunit sans en nommer aucun.
 """
 
 from __future__ import annotations
@@ -42,19 +41,14 @@ from typing import Any
 from mika.adapters.web.accounts import Account
 from mika.adapters.web.hub import Hub
 from mika.app.domains import DOMAINS, part
-from mika.app.domains.projects.api import projects as projects_me
 from mika.app.me.api import Call, me_of
 from mika.app.me.common import allows
 from mika.app.me.touches import EVERYONE, OWN, PERSON, READ, Touch
 from mika.contracts import identity as identity_c
-from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
-from mika.faculties.projects import links
-from mika.faculties.projects.faculty import ACCESS_SET, AMENDED, ARCHIVED, LINKS_SET, RESTORED
 from mika.kernel.builtin import KERNEL, PARAMS_CHANGED
 from mika.ports.changes import (
     KEYS,
-    ME,
     PROJECTS,
     SETTINGS,
     TOPICS,
@@ -62,7 +56,7 @@ from mika.ports.changes import (
 )
 from mika.runtime.boundary import Failed, acall, call
 from mika.runtime.state import RUNTIME
-from mika.vocab.episodes import Kind, project_of, task_of
+from mika.vocab.episodes import Kind, task_of
 from mika.vocab.ownership import OWNED
 
 log = logging.getLogger("mika.live")
@@ -76,9 +70,6 @@ BURST = 3
 #: une trame à une personne part en ce délai au plus (s) : une connexion lente ne retient ni les autres ni la suite
 SEND_TIMEOUT_S = 5.0
 
-#: à qui va une touche (avec ``PERSON`` et ``EVERYONE``, ``touches.py``) : un projet (ce qu'elle en voit). La règle d'un
-#: domaine qui a sa fiche est dans sa part du direct (``SEEN``, ``LEVELS``, ``JUDGE``)
-PROJECT = "project"
 #: ce que chaque domaine apporte au direct (ADR 0310) : la part de sa fiche, dans l'ordre des fiches
 PARTS = tuple(part(d.live, "LIVE") for d in DOMAINS if d.live is not None)
 #: sujet d'une base tenue à côté → la traduction de son domaine ; règle d'une touche → ce que la personne en voit
@@ -96,66 +87,46 @@ TASKS = {owner: work for part in PARTS for owner, work in part.tasks.items()}
 
 #: ce que change le réglage d'un propriétaire (``kernel.params_changed``) : qui voit quoi, ce qui se règle — à toutes
 PARAMS: Mapping[str, tuple[str, ...]] = {
-    projects_c.OWNER: (PROJECTS, ME),
-    **{owner: topics for part in PARTS for owner, topics in part.params.items()}}
+    owner: topics for part in PARTS for owner, topics in part.params.items()}
 
 #: ce qu'un réglage enregistré hors du journal change (``Settings._put``, par sa clé), à toutes, sans clé ; tout autre
 #: réglage, Paramètres seulement
 SAVED: Mapping[str, tuple[str, ...]] = {key: topics for part in PARTS for key, topics in part.saved.items()}
 
-#: ce qui, dans un projet, change qui le voit (ses accès, ce qu'il lit des autres, son propriétaire, son sujet ou son
-#: niveau, archivé ou rendu) : le filtre lit l'état d'après — celle qui le perd doit le savoir aussi
-PROJECT_REACH = frozenset(t.name for t in (ACCESS_SET, LINKS_SET, AMENDED, ARCHIVED, RESTORED))
-
 
 # ── du journal ────────────────────────────────────────────────────────────
 
 
-def _projects(e: Any, frame: Any, kernel: Any) -> list[Touch]:
-    if e.type.name in PROJECT_REACH:  # qui le voit a peut-être changé : à toutes, sans clé
-        return [Touch(PROJECTS, EVERYONE), Touch(ME, EVERYONE)]
-    pid = e.seq if e.type.name == projects_c.PROJECT_CREATED.name else getattr(e.data, "project", None)
-    return _project(pid)
-
-
-def _project(pid: Any) -> list[Touch]:
-    keys = (str(pid),) if isinstance(pid, int) and pid > 0 else ()
-    return [Touch(PROJECTS, PROJECT, keys=keys), Touch(ME, PROJECT, owners=keys)]
-
-
-def _work(kind: str, target: str | None, frame: Any, kernel: Any, *, projects: bool = True) -> list[Touch]:
+def _work(kind: str, target: str | None, frame: Any, kernel: Any, *, boundary: bool) -> list[Touch]:
     """Où elle en est d'une réponse (ADR 0306) : la tâche d'un domaine qui a sa fiche (un mail, un message de
-    Teams) ; et, au départ et à la fin d'une exécution, son projet."""
+    Teams) ; et, au départ et à la fin d'un épisode (``boundary`` ; faux à une étape), ce qu'en dit un domaine qui
+    a sa fiche (une exécution d'un projet)."""
     found = task_of(target) if kind == Kind.TASK else None
     if found is not None and found[0] in TASKS:  # la tâche d'un domaine qui a sa fiche
         return list(TASKS[found[0]](found[1], frame, kernel))
-    if projects:  # le départ, la fin d'un épisode : ce qu'un domaine qui a sa fiche en dit (``LivePart.episodes``)
-        told = [t for brought in PARTS if brought.episodes is not None
+    if boundary:  # le départ, la fin d'un épisode : ce qu'un domaine qui a sa fiche en dit (``LivePart.episodes``)
+        return [t for brought in PARTS if brought.episodes is not None
                 for t in brought.episodes(kind, target, frame, kernel)]
-        if told:
-            return told
-    pid = project_of(target) if projects else None
-    return [Touch(PROJECTS, PROJECT, keys=(str(pid),))] if pid else []
+    return []
 
 
 def _effect(e: Any, frame: Any, kernel: Any) -> list[Touch]:
     """Un brouillon proposé, décidé, parti : celui d'un domaine qui a sa fiche (une boîte, un compte Teams, le
-    téléphone, un agenda), reconnu par sa proposition ; un accord d'un projet, par son contexte."""
+    téléphone, un agenda), reconnu par sa proposition ; un accord d'un projet, par le contexte de l'événement."""
     d = e.data
     proposal = e.seq if e.type is rt.EFFECT_PROPOSED else d.proposal
     for brought in PARTS:  # l'effet d'un domaine qui a sa fiche : le premier qui le reconnaît dit ses touches
         mine = brought.effects(proposal, frame, kernel, e) if brought.effects is not None else None
         if mine is not None:
             return list(mine)
-    pid = project_of(getattr(d, "context", "") or "")
-    return _project(pid) if pid else []
+    return []
 
 
 def _runtime(e: Any, frame: Any, kernel: Any) -> list[Touch]:
     if e.type in (rt.EFFECT_PROPOSED, rt.EFFECT_RESOLVED, rt.EFFECT_EXECUTED):
         return _effect(e, frame, kernel)
     if e.type in (rt.EPISODE_STARTED, rt.EPISODE_ENDED):
-        return _work(e.data.kind, e.data.target, frame, kernel)
+        return _work(e.data.kind, e.data.target, frame, kernel, boundary=True)
     return []
 
 
@@ -173,7 +144,7 @@ def _identity(e: Any, frame: Any, kernel: Any) -> list[Touch]:
 
 
 #: chaque propriétaire d'événements dont le journal change ce que montrent les écrans, et sa traduction
-BY_OWNER = {projects_c.OWNER: _projects, rt.OWNER: _runtime,
+BY_OWNER = {rt.OWNER: _runtime,
             KERNEL.name: _kernel, identity_c.OWNER: _identity,
             **{owner: translate for part in PARTS for owner, translate in part.events.items()}}
 
@@ -266,17 +237,6 @@ class Reader:
             return {}
         return self._once(rule, lambda: dict(LEVELS[rule](self.call)), {})
 
-    def projects(self) -> frozenset[str]:
-        """Ses projets, ceux qu'elle voit par ce canal (``projects.reaches``)."""
-
-        def read() -> frozenset[str]:
-            frame = self.call.frame
-            sc = projects_me.Scene(self.call, frame, frame.state(projects_c.OWNER), links.world_of(frame),
-                                   projects_me.audience_at(frame, self.call.me, self.channel), self.call.me.person)
-            return frozenset(str(pid) for pid in projects_me.reaches(sc))
-
-        return self._once(PROJECT, read, frozenset())
-
     def judge(self, t: Touch) -> tuple[bool, tuple[str, ...]]:
         """Cette touche la concerne-t-elle, et ce qu'elle peut en voir nommé."""
         me = self.call.me
@@ -289,8 +249,6 @@ class Reader:
             return mine, t.keys if mine else ()
         if t.rule in SEEN:  # la règle d'un domaine : ce que sa part du direct dit qu'elle voit
             seen = self._once(t.rule, lambda: frozenset(SEEN[t.rule](self.call)), frozenset())
-        elif t.rule == PROJECT:
-            seen = self.projects()
         else:
             seen = frozenset(a for a, level in self.levels(t.rule).items()
                              if t.need == READ or (level == OWNED if t.need == OWN else allows(level, t.need)))
@@ -347,7 +305,7 @@ def merged(*frames: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _owner_of(t: Touch, key: str) -> str:
-    """Le compte d'une clé : un projet est sa clé. La règle d'un domaine qui a sa fiche le dit elle-même
+    """Le compte d'une clé : sa clé même, sauf quand la règle d'un domaine qui a sa fiche le dit elle-même
     (``LivePart.owner_of`` : la boîte d'un mail, le compte d'une conversation Teams)."""
     if t.rule in OWNER_OF:
         return str(OWNER_OF[t.rule](t.topic, key))
@@ -430,7 +388,7 @@ class LiveChanges:
         frame = self.kernel.mind.frame()
         opened = frame.state(RUNTIME.name).open.get(episode)
         if opened is not None:
-            self._add(_work(opened.kind, opened.target, frame, self.kernel, projects=False))
+            self._add(_work(opened.kind, opened.target, frame, self.kernel, boundary=False))
 
     def add(self, touches: Sequence[Touch]) -> None:
         """Ce qu'un domaine signale de lui-même, hors du journal et de ses bases (la présence d'une extension, une

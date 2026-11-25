@@ -17,4 +17,7 @@ PROJECTS = Domain(
     "projects",
     needs=("forge", "mail", "tools"),
     settings="mika.app.domains.projects.settings",
+    wiring="mika.app.domains.projects.wiring",
+    api="mika.app.domains.projects.api",
+    live="mika.app.domains.projects.live",
 )

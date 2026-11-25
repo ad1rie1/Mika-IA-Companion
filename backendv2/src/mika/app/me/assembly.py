@@ -14,11 +14,6 @@ from typing import Any
 from starlette.routing import Route
 
 from mika.app.domains import DOMAINS, part
-from mika.app.domains.projects.api import activity as project_activity
-from mika.app.domains.projects.api import code as project_code
-from mika.app.domains.projects.api import docs as project_docs
-from mika.app.domains.projects.api import manage as project_manage
-from mika.app.domains.projects.api import projects
 from mika.app.me import (
     rights,
     settings,
@@ -32,13 +27,11 @@ __all__ = ["COUNTERS", "MODULES", "MeApi", "who"]
 #: les modules : chacun rend ses routes — ceux du cadre, puis celui de chaque domaine
 MODULES: tuple[Callable[[MeApiBase], list[Route]], ...] = (
     rights.routes, settings.routes, sharing.routes,
-    projects.routes, project_code.routes, project_docs.routes, project_manage.routes, project_activity.routes,
     writing.routes,
     *(part(d.api, "routes") for d in DOMAINS if d.api is not None))
 #: ce que chacun compte pour la barre du haut
-COUNTERS: tuple[tuple[str, Callable[[Call], int]], ...] = (
-    ("projects", projects.count),
-    *((name, count) for d in DOMAINS for name, count in part(d.api, "COUNTERS", {}).items()))
+COUNTERS: tuple[tuple[str, Callable[[Call], int]], ...] = tuple(
+    (name, count) for d in DOMAINS for name, count in part(d.api, "COUNTERS", {}).items())
 
 
 async def who(req: Call) -> dict[str, Any]:

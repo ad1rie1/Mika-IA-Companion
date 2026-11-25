@@ -86,14 +86,12 @@ STILL: dict[str, set[str]] = {
     "handmade/tabs/thoughts.py": {"mail", "senses", "teams"},
     "handmade/waiting.py": {"contacts", "mail", "teams"},
     "me/api.py": {"mail"},
-    "me/assembly.py": {"projects"},
-    "me/changes.py": {"projects"},
     "me/rights.py": {"forge", "mail", "teams", "tools"},
     "me/settings.py": {"mail", "teams"},
     "me/sharing.py": {"agenda", "mail", "teams", "tools"},
     "mindport.py": {"maps", "projects", "senses", "wakeup"},
     "preview/__init__.py": {"mail", "maps", "projects", "teams"},
-    "server.py": {"contacts", "projects", "tools"},
+    "server.py": {"contacts", "tools"},
     "settings.py": {"agenda"},
 }
 

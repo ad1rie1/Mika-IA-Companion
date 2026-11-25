@@ -52,8 +52,6 @@ from mika.adapters.web.accounts import Accounts
 from mika.adapters.web.app import DEV_ORIGINS, WebConfig, create_app
 from mika.adapters.web.hub import Hub
 from mika.adapters.web.push import MobilePush
-from mika.adapters.workshop import BwrapWorkshop
-from mika.adapters.workshop.github import GitHubRepos
 from mika.adapters.world.server import WorldHub
 from mika.app import backup, composition, datadir, embeddings, schema, settings_sections
 from mika.app import persona as persona_file
@@ -61,9 +59,6 @@ from mika.app.console import FACULTY_LABELS, LABELS, NAVIGATION, PARAM_FAMILIES
 from mika.app.console_menu import menu_for
 from mika.app.constellation import Constellation
 from mika.app.domains import DOMAINS, part
-from mika.app.domains.projects.docs_mcp import PREFIX as DOCS_MCP_PREFIX
-from mika.app.domains.projects.docs_mcp import DocsPoint
-from mika.app.domains.projects.settings import ProjectsSettings
 from mika.app.handmade import access, approval_sources, rights, waiting
 from mika.app.handmade.home import HomePage
 from mika.app.handmade.now import NowPage
@@ -82,7 +77,6 @@ from mika.contracts import identity as identity_c
 from mika.contracts import self_ as self_c
 from mika.contracts import social as social_c
 from mika.contracts.self_ import PersonaDoc, name_of
-from mika.faculties.projects.docs import PORT as PROJECT_DOCS_PORT
 from mika.inspector.app import assemble
 from mika.inspector.mcp import PREFIX as CONSOLE_MCP_PREFIX
 from mika.inspector.mcp import console_app
@@ -298,17 +292,11 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
         d'atelier — un adaptateur ne lit pas sa persona lui-même (ADR 0070)."""
         return name_of(kernel.mind.root.slices["self"].persona)
 
-    git = settings.of(ProjectsSettings)
-    outside = {"workshop": BwrapWorkshop(data / "ateliers", credentials=git.git, author=her),
-             # l'hôte GitHub d'un dépôt distant, lu par la console seulement (ADR 0183)
-             "repo_host": GitHubRepos(git.git),
-             "imaging": imaging}
+    outside = {"imaging": imaging}
     # les fichiers qu'elle envoie (ADR 0062) : leurs octets hors du journal, sauvegardés avec le dossier
     outside["shares"] = DiskShares(data / "partages")
     # ce qu'on lui envoie (ADR 0106) : les octets des pièces jointes, leur index, et de quoi les relire de près
     outside[attachments_c.PORT] = DiskShares(data / "pieces")
-    # les images de la documentation de ses projets (ADR 0289) : leurs octets hors du journal, sauvegardés de même
-    outside[PROJECT_DOCS_PORT] = DiskShares(data / "documentation")
     outside[attachments_c.VECTORS] = piece_vectors
     preprocess = outside["preprocess"] = LocalPreprocessor(gateway, transcribe=whisper(settings.stt))
     # l'annuaire (ADR 0298) : tous ceux qu'elle connaît, même sans leur avoir parlé, tirés de Teams et du courrier par
@@ -451,8 +439,6 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     relay = Mount(RELAY_PREFIX, app=live.relay.app)
     console_mcp = Mount(CONSOLE_MCP_PREFIX, app=console_app(kernel, settings.console_mcp_digest, console_pages,
                                                             settings.console_mcp_served, settings.console_mcp_network))
-    # la documentation de ses projets, par MCP, pour qui présente un jeton de compte (ADR 0289)
-    docs_mcp = Mount(DOCS_MCP_PREFIX, app=DocsPoint(kernel, live.accounts).app())
     # ce que frontendv2 montre à qui est connecté, et seulement à elle (ADR 0187) ; sa borne des trajets vaut aussi pour
     # le GPX d'un voyage qu'un opérateur tire de la console, sur son compte (ADR 0204)
     moi = MeApi(kernel, live.accounts, origins=web.origins,
@@ -475,7 +461,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                                     *home_page.routes(), *now_page.routes(), *people_page.routes(),
                                     *person_overview.routes(console_pages.ui, outbound=moi.outbound),
                                     *rights.routes(console_pages.ui),
-                                    *inspector, relay, console_mcp, docs_mcp, world_hub.route(),
+                                    *inspector, relay, console_mcp, world_hub.route(),
                                     *wiring.routes],
                       preprocess=preprocess, sensor_digest=settings.sensors_digest,
                       push_ready=push_sender.configured, **wiring.web), live
