@@ -39,8 +39,6 @@ from mika.adapters.llm.claude_code import runtime_dir
 from mika.adapters.llm.config import BackendSpec, LiveGateway, ModelLimits, build_gateway
 from mika.adapters.llm.gateway import LLMTrace
 from mika.adapters.llm.models import model_limits
-from mika.adapters.mail import ImapSmtpMail, MailWatch
-from mika.adapters.mail.oauth import MicrosoftSignIn
 from mika.adapters.mcp.relay import PREFIX as RELAY_PREFIX
 from mika.adapters.mcp.relay import Relay
 from mika.adapters.preprocess import LocalPreprocessor, whisper
@@ -145,8 +143,6 @@ class Live:
     parts: dict[str, Any] = field(default_factory=dict)
     #: le direct (ADR 0308) : ce qui change ce que montrent les écrans de tous les jours, poussé sur leur ``/ws``
     changes: LiveChanges | None = None
-    #: le courrier en direct (ADR 0308) : une connexion IDLE par boîte, sinon une relève par minute (``serve`` seul)
-    mail_watch: MailWatch | None = None
 
     def trace(self, tr: LLMTrace) -> None:
         self.gateway.traces.append(tr)
@@ -198,15 +194,6 @@ class Live:
         """Ce que les réglages d'exploitation fournissent aux paramètres des facultés
         (jamais des surcharges : une reconfiguration ne les efface pas)."""
         out: dict[str, dict[str, Any]] = {"kernel": {"tz": self.persona().timezone}}
-        # les tableaux de ses canaux (ADR 0134) : le courrier y lit ce qu'elle envoie à ta place
-        canaux = self.settings.canals().model_dump(mode="json")
-        boxes = self.settings.named("mail").email().accounts
-        off = sorted(k for k, a in boxes.items() if not a.enabled)
-        # à qui est chaque boîte (ADR 0185 ; vide : à toi) : ses outils ne lui montrent que celles de qui est en face
-        owners = {k: a.owner for k, a in sorted(boxes.items())}
-        # avec qui chacune est partagée, et ce que la personne en a (ADR 0188)
-        shares = {k: dict(sorted(a.shares.items())) for k, a in sorted(boxes.items()) if a.shares}
-        out["email"] = {"canaux": canaux, "boxes_off": off, "owners": owners, "shares": shares}
         for domain in DOMAINS:  # ce que les réglages d'un domaine qui a sa fiche donnent à ses plugins (``inputs``)
             if domain.wiring is not None:
                 out.update(part(domain.wiring, "inputs", _no_inputs)(self.settings))
@@ -283,11 +270,12 @@ async def _warm(embedder: object) -> None:
 
 def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
           gateway: LiveGateway | None = None, embedder: Any = None, reports: Path | None = None,
-          imaging: LiveImaging | None = None, mail_live: bool = False, **deps: Any) -> tuple[Starlette, Live]:
+          imaging: LiveImaging | None = None, serving: bool = False, **deps: Any) -> tuple[Starlette, Live]:
     """L'application et ce qu'elle fait vivre. Tout est construit ici ; le
-    cycle de vie ouvre, démarre et arrête. ``mail_live`` : le courrier en direct
-    (ADR 0308), que ``serve`` demande — un test ou l'aperçu qui monte le serveur
-    ne joint ainsi aucun serveur de courrier sans le dire."""
+    cycle de vie ouvre, démarre et arrête. ``serving`` : le serveur sert pour de
+    bon, ce que ``serve`` dit — un domaine peut alors joindre le dehors de
+    lui-même (le courrier en direct, ADR 0308) ; un test ou l'aperçu qui monte
+    le serveur ne joint ainsi aucun serveur de courrier sans le dire."""
     data.mkdir(parents=True, exist_ok=True)
     bases = schema.targets(data)  # des fichiers du dossier, ou les bases du serveur de MIKA_DATABASE_URL (ADR 0101)
     schema.migrate_data(data, bases)  # chaque base à sa dernière révision, avant que rien ne s'ouvre
@@ -309,13 +297,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
         d'atelier — un adaptateur ne lit pas sa persona lui-même (ADR 0070)."""
         return name_of(kernel.mind.root.slices["self"].persona)
 
-    # une boîte Microsoft garde sa connexion (son jeton de renouvellement) scellée dans les réglages
-    # (ADR 0166), et entre par l'application de l'instance quand elle n'en déclare pas (ADR 0238)
-    mail_settings = settings.named("mail")
-    microsoft = MicrosoftSignIn(mail_settings, application=mail_settings.mail_application)
-    outside = {"mail": ImapSmtpMail(mail_settings.email, bases["mail"], her=her, microsoft=microsoft,
-                                    images=mail_settings),
-             "workshop": BwrapWorkshop(data / "ateliers", credentials=settings.git, author=her),
+    outside = {"workshop": BwrapWorkshop(data / "ateliers", credentials=settings.git, author=her),
              # l'hôte GitHub d'un dépôt distant, lu par la console seulement (ADR 0183)
              "repo_host": GitHubRepos(settings.git),
              "imaging": imaging}
@@ -332,7 +314,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     outside["contacts"] = ContactsStore(bases["contacts"], now=clock.now)
     # ce que chaque domaine apporte (ADR 0310) : ses adaptateurs, ses ports, ses portes HTTP — sa fiche nomme son
     # câblage, que ce serveur appelle sans le connaître (``app/wiring.py``)
-    wiring = Wiring(data=data, settings=settings, clock=clock, bases=bases, ports=outside, store=store)
+    wiring = Wiring(data=data, settings=settings, clock=clock, bases=bases, ports=outside, store=store, her=her,
+                    serving=serving)
     wired = [d.wiring for d in DOMAINS if d.wiring is not None]
     for module in wired:
         part(module, "wire")(wiring)
@@ -341,16 +324,11 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                                      access_tables=settings.access_tables, closeness=social_c.is_close,
                                      authors=settings.author_for, **deps))
 
-    # le courrier en direct (ADR 0308) : ce qui arrive est rangé tout de suite, même quand elle dort — hors de
-    # l'ordonnanceur, que son sommeil arrête ; il se règle à chaque enregistrement des boîtes
-    mail_watch = MailWatch(outside["mail"]) if mail_live else None
-    if mail_watch is not None:
-        mail_settings.mail_saved = mail_watch.nudge
     port = KernelPort(kernel)
     hub.port = port
     live = Live(kernel, hub, port, Accounts(store), settings, gateway, fixed, calls=CallLog(store),
                 persona_file=persona, data=data, imaging=imaging, imaging_fixed=imaging_fixed,
-                parts=wiring.parts, read_limits=None if fixed else model_limits, mail_watch=mail_watch)
+                parts=wiring.parts, read_limits=None if fixed else model_limits)
     # l'exemple de l'autrice « Message », quand le sien est vide : le fil de référence de sa persona (ADR 0124), lu au
     # journal (lu à chaque épisode : jamais le YAML)
     settings.reference_thread = lambda: kernel.mind.frame().get(self_c.PERSONA).reference_thread
@@ -412,8 +390,6 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
             log.warning("configuration des images : %s", problem)
         hub.start()
         live_changes.start()
-        if mail_watch is not None:
-            mail_watch.start()  # ce qu'il range part aux écrans : après le direct
         world_hub.start()
         constellation.start()
         for module in wired:  # ce que chaque domaine démarre, une fois le direct en marche (``start``)
@@ -429,8 +405,6 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
             warming.cancel()
             for module in reversed(wired):  # ce que chaque domaine arrête, avant le direct (``stop``)
                 await part(module, "stop", _idle)(wiring)
-            if mail_watch is not None:
-                await mail_watch.stop()
             await constellation.stop()
             await world_hub.stop()
             await live_changes.stop()
@@ -485,16 +459,14 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     # de son travail ; à chaque personne connectée, ce qu'elle voit — et la boîte d'envoi réveille l'extension
     live_changes = live.changes = LiveChanges(kernel, hub, moi)
     kernel.mind.subscribe(live_changes.listen)
-    for base in (outside["mail"], outside["contacts"]):
-        base.on_change(live_changes.touch)
+    outside["contacts"].on_change(live_changes.touch)
     for base in wiring.watched:  # les bases des domaines qui ont leur fiche
         base.on_change(live_changes.touch)
     kernel.runner.on_step = live_changes.step
-    # ce qui est tenu hors du journal sans être une base à côté : les réglages (chaque enregistrement), la fin de
-    # l'attente d'un code Microsoft (la présence de l'extension Teams, la connexion d'un compte d'agenda : leur câblage,
-    # ``bind``)
+    # ce qui est tenu hors du journal sans être une base à côté : les réglages (chaque enregistrement) ; ce qu'un
+    # domaine signale de lui-même (la fin de l'attente d'un code Microsoft, la présence de l'extension Teams, la
+    # connexion d'un compte d'agenda), son câblage le branche (``bind``)
     settings.on_saved = live_changes.saved
-    microsoft.on_state = live_changes.signed
     return create_app(port, live.accounts, hub, web, lifespan=lifespan,
                       extra_routes=[Route("/", _root, methods=["GET", "HEAD"]), *constellation.routes(),
                                     *moi.routes(),
@@ -582,7 +554,7 @@ def serve(*, host: str = "127.0.0.1", port: int = 8001, data: Path = Path("data/
     # et écrit au journal tant qu'aucun compte n'existe (audit du 2026-10-26 : le premier arrivé devenait opérateur)
     app, live = build(data, reports=reports, web=web_config(origins=origins, cookie_secure=cookie_secure,
                                                             behind_proxy=behind_proxy,
-                                                            bootstrap_code=secrets.token_urlsafe(9)), mail_live=True)
+                                                            bootstrap_code=secrets.token_urlsafe(9)), serving=True)
     live.relay_base = relay_base(host, port)
     live.console_url = console_url(host, port)
     serving_on(port)  # ni une app de la Forge ni un article d'un flux ne joignent Mika, même par une adresse relayée

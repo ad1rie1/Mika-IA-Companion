@@ -1,7 +1,8 @@
 """Le câblage d'un domaine (ADR 0310) : ce que le serveur construit pour lui, sans le nommer.
 
 ``server.build()`` tient un ``Wiring`` et le passe au module de câblage de chaque fiche (``Domain.wiring``), qui y lit
-ce dont il a besoin (le dossier de données, les réglages, l'horloge, ses bases) et y pose ce qu'il apporte :
+ce dont il a besoin (le dossier de données, les réglages, l'horloge, ses bases, son nom à elle, si le serveur sert
+pour de bon) et y pose ce qu'il apporte :
 
 - ``wire(w)``, avant le noyau : ses adaptateurs et ses portes, rangés dans ``w.ports`` (les ports du noyau, par leur
   nom), ``w.web`` (ce que l'application web reçoit par nom — ses portes HTTP : ``adapters/web/app.py::create_app``),
@@ -60,6 +61,12 @@ class Wiring:
     routes: list[Any] = field(default_factory=list)
     #: ce que la console reçoit, par nom (``InspectorDeps``), posé par ``bind``
     inspector: dict[str, Any] = field(default_factory=dict)
+    #: son nom, celui de la persona en vigueur (journalisée), lu à l'appel : ce que signent ses mails et ses
+    #: enregistrements d'atelier — un adaptateur ne lit pas sa persona lui-même (ADR 0070)
+    her: Any = None
+    #: le serveur sert pour de bon (``serve``) : un domaine peut alors joindre le dehors de lui-même (le courrier en
+    #: direct, ADR 0308). Un test ou l'aperçu qui monte le serveur ne joint ainsi rien sans le dire
+    serving: bool = False
     #: une fois le noyau construit (pour ``bind``) : son port d'entrée, le serveur vivant (``server.Live``), les
     #: notifications des téléphones (``adapters.web.push.MobilePush``)
     port: Any = None

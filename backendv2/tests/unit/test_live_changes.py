@@ -16,6 +16,7 @@ from mika.adapters.contacts import ContactsStore
 from mika.adapters.teams import TeamsAccount, TeamsConfig, TeamsStore
 from mika.adapters.web.accounts import Account
 from mika.adapters.web.hub import Hub
+from mika.app.domains.mail import live as mail_live
 from mika.app.domains.teams.desk import PRESENCE_EVERY_S, TeamsDesk
 from mika.app.domains.teams.live import presence
 from mika.app.me.api import Call, me_of
@@ -400,7 +401,7 @@ def test_a_setting_saved_outside_the_journal_goes_to_everyone(tmp_path):
         await settle()
         second = {k: screens.changes(k) for k in ("user_1", "user_2")}
         screens.forget()
-        live.signed("pro")
+        mail_live.signed(live, "pro")
         await settle()
         return first, second, {k: screens.changes(k) for k in ("user_1", "user_2")}
 

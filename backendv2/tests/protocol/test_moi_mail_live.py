@@ -6,7 +6,7 @@
   qu'elle le remarque ;
 - sa relève, à son rythme, remarque chaque mail rangé une fois, une seule.
 
-Le serveur ne démarre son courrier en direct que si on le lui demande (``mail_live``, que ``serve`` passe) : les autres
+Le serveur ne démarre son courrier en direct que s'il sert pour de bon (``serving``, que ``serve`` passe) : les autres
 tests qui règlent des boîtes ne joignent ainsi aucun serveur.
 """
 
@@ -49,7 +49,7 @@ def served(tmp_path) -> Iterator[tuple[TestClient, object, int]]:
     gateway = LiveGateway(Gateway({"fake": Echo()}, roles, clock=RealClock(), voice_roles=frozenset(roles),
                                   slots={"fake": 1}))
     app, live = build(tmp_path / "data", web=WebConfig(), gateway=gateway, embedder=HashEmbedder(),
-                      arbitration=ArbitrationPolicy(), reply_wait=None, mail_live=True)
+                      arbitration=ArbitrationPolicy(), reply_wait=None, serving=True)
     try:
         with TestClient(app, base_url="http://localhost:8001", headers={"Origin": ORIGIN}) as client:
             yield client, live, imap.server_address[1]
@@ -141,20 +141,25 @@ def test_a_mail_is_ranged_even_when_nothing_of_hers_runs(served):
 
 
 def test_only_the_real_server_watches_the_mail():
-    """Seul ``serve`` demande le courrier en direct, et seul le serveur le construit : ni une commande, ni la sonde, ni
-    l'aperçu de la console n'ouvrent de connexion IMAP d'eux-mêmes (lu dans le source, par l'AST)."""
+    """Seul ``serve`` dit que le serveur sert pour de bon, et seul le câblage du courrier construit son courrier en
+    direct : ni une commande, ni la sonde, ni l'aperçu de la console n'ouvrent de connexion IMAP d'eux-mêmes (lu dans
+    le source, par l'AST). Relayer ce qu'on a reçu (``serving=serving``, de ``build`` au câblage) n'est pas le dire."""
     asking: set[tuple[str, str]] = set()
     making: set[str] = set()
+
+    def says(value: ast.expr) -> bool:
+        relayed = isinstance(value, ast.Name) and value.id == "serving"
+        return not relayed and not (isinstance(value, ast.Constant) and value.value is False)
+
     for path in SRC.rglob("*.py"):
         where = path.relative_to(SRC).as_posix()
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for fn in (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)):
             for call in (n for n in ast.walk(fn) if isinstance(n, ast.Call)):
-                if any(k.arg == "mail_live" and not (isinstance(k.value, ast.Constant) and k.value.value is False)
-                       for k in call.keywords):
+                if any(k.arg == "serving" and says(k.value) for k in call.keywords):
                     asking.add((where, fn.name))
                 named = call.func.id if isinstance(call.func, ast.Name) else getattr(call.func, "attr", "")
                 if named == "MailWatch":
                     making.add(where)
     assert asking == {("app/server.py", "serve")}
-    assert making == {"app/server.py"}
+    assert making == {"app/domains/mail/wiring.py"}

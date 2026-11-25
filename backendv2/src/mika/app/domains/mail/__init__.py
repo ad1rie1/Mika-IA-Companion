@@ -12,4 +12,7 @@ MAIL = Domain(
     base=Base("mail", models="mika.adapters.mail.models",
               place="le courrier relevé, avec ses pièces jointes et ses images"),
     settings="mika.app.domains.mail.settings",
+    wiring="mika.app.domains.mail.wiring",
+    api="mika.app.domains.mail.api",
+    live="mika.app.domains.mail.live",
 )

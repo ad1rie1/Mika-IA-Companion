@@ -591,6 +591,10 @@ def count(call: Call) -> int:
                if d.state == WAITING and mine.get(d.account, (None, ""))[1] == OWNED)
 
 
+#: ce qu'il compte pour la barre du haut
+COUNTERS = {"mail": count}
+
+
 def routes(api: MeApiBase) -> list[Route]:
     r = api.route
     return [r("/mail/boxes", list_boxes), r("/mail/messages", messages), r("/mail/message", message), r("/mail/work", progress),
