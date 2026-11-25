@@ -62,7 +62,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
 
     # ── ses autrices (ADR 0124) ──
     def author_flows() -> list[tuple[str, str]]:
-        return authors_m.flow_list(settings.email())
+        return authors_m.flow_list(settings.named("mail").email())
 
     def polish_served() -> str:
         return live.gateway.serving(str(Role.POLISH)) if live.gateway.configured else ""

@@ -19,6 +19,7 @@ import re
 from urllib.parse import parse_qs, urlsplit
 
 from mika.adapters.mail.config import MailAccount, MailConfig
+from mika.app.domains.mail.settings import MailSettings
 from mika.contracts import runtime as rt
 from mika.plugins.email import EmailParams
 from tests.fixtures.console_html import ConsoleHTML
@@ -37,7 +38,7 @@ def boxes(client, live, *, perso: dict[str, str] | None = None, pro_owner: str =
           pro: dict[str, str] | None = None) -> None:
     """Les deux boîtes du courrier simulé (« Personnel », « Atelier »), rangées dans les réglages avec leurs partages :
     la fiche les y lit, comme Paramètres › Partages et Réglages › Droits › Partages (ADR 0210)."""
-    client.portal.call(live.settings.save_email, MailConfig(accounts={
+    client.portal.call(live.settings.of(MailSettings).save_email, MailConfig(accounts={
         "perso": MailAccount(label="Personnel", address="adrien@example.test", shares=perso or {}),
         "pro": MailAccount(label="Atelier", address="atelier@example.test", owner=pro_owner, shares=pro or {})}))
 

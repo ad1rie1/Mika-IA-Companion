@@ -157,7 +157,7 @@ def _box_settings(key: str, a: MailAccount) -> dict[str, Any]:
 async def box_get(call: Call) -> dict[str, Any]:
     key = call.arg("box", limit=40)
     mail_me.owned(call, key)
-    found = settings_of(call).email().accounts.get(key)
+    found = settings_of(call).named("mail").email().accounts.get(key)
     if found is None:
         raise missing()
     got = _box_settings(key, found)
@@ -206,7 +206,7 @@ async def box_save(call: Call) -> dict[str, Any]:
 
 async def _box_save(call: Call) -> dict[str, Any]:
     settings = settings_of(call)
-    cfg = settings.email()
+    cfg = settings.named("mail").email()
     values = _values(call, MAIL_FIELDS)
     key = call.arg("box", limit=40)
     before: MailAccount | None = None
@@ -242,7 +242,7 @@ async def _box_save(call: Call) -> dict[str, Any]:
     # relues puis réécrites d'un seul tenant : ce qu'une autre personne vient d'enregistrer reste (les serveurs, plus
     # longs à vérifier, l'ont été avant)
     async with settings.writing:
-        cfg = settings.email()
+        cfg = settings.named("mail").email()
         if before is not None:
             if key not in cfg.accounts:
                 raise missing()
@@ -256,7 +256,7 @@ async def _box_save(call: Call) -> dict[str, Any]:
             new = MailConfig(accounts={**cfg.accounts, key: account})
         except ValidationError as exc:
             raise refused(exc) from None
-        await settings.save_email(new)
+        await settings.named("mail").save_email(new)
         await _rejournal(call)
     await audit(call.kernel, "moi.boite", by=call.me.handle, subject_kind="compte", subject=key)
     return {"ok": True, "message": "Boîte enregistrée.", "box": key, "ready": account.ready}
@@ -268,10 +268,10 @@ async def box_remove(call: Call) -> dict[str, Any]:
     key = call.arg("box", limit=40)
     mail_me.owned(call, key)
     async with settings.writing:
-        cfg = settings.email()
+        cfg = settings.named("mail").email()
         if key not in cfg.accounts:
             raise missing()
-        await settings.save_email(MailConfig(accounts={k: a for k, a in cfg.accounts.items() if k != key}))
+        await settings.named("mail").save_email(MailConfig(accounts={k: a for k, a in cfg.accounts.items() if k != key}))
         await _rejournal(call)
     await audit(call.kernel, "moi.boite_retiree", by=call.me.handle, subject_kind="compte", subject=key)
     return {"ok": True, "message": "Boîte retirée."}

@@ -14,6 +14,7 @@ from pathlib import Path
 
 from mika.adapters.mail.config import MailAccount, MailConfig
 from mika.adapters.teams.config import TeamsAccount, TeamsConfig
+from mika.app.domains.mail.settings import MailSettings
 from mika.app.domains.teams.settings import TeamsSettings
 from mika.app.handmade.rights import FAMILY_ABOUT
 from mika.contracts import projects as c
@@ -262,7 +263,7 @@ def test_the_composition_gives_the_tables_what_they_show(world, monkeypatch):  #
     venue d'ailleurs viennent de la composition ; une famille qui n'a pas de fiche n'a pas de lien (K0-17)."""
     client, live, _ = world
     bootstrap(client)
-    client.portal.call(live.settings.save_email, MailConfig(accounts={
+    client.portal.call(live.settings.of(MailSettings).save_email, MailConfig(accounts={
         "perso": MailAccount(label="Personnel", address="adrien@example.test")}))
     client.portal.call(live.settings.of(TeamsSettings).save_teams, TeamsConfig(accounts={"bureau": TeamsAccount(label="Au bureau")}))
     page = html_of(client.get(CANALS))

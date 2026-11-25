@@ -20,7 +20,7 @@ async def outside_command(data: Path, args: argparse.Namespace) -> dict[str, obj
     async def run(settings: Settings, store) -> dict[str, object]:  # type: ignore[no-untyped-def]
         if args.cmd == "mail":
             if args.mail_cmd == "set":
-                await settings.save_mail_account(
+                await settings.named("mail").save_mail_account(
                     args.compte, address=args.address, imap_host=args.imap_host, imap_port=args.imap_port,
                     imap_ssl=None if args.imap_ssl is None else args.imap_ssl == "oui", user=args.user,
                     password=args.password, smtp_host=args.smtp_host, smtp_port=args.smtp_port,
@@ -32,22 +32,22 @@ async def outside_command(data: Path, args: argparse.Namespace) -> dict[str, obj
                     display_name=args.nom, auth=args.auth, oauth_client_id=args.client_id, oauth_tenant=args.tenant)
             elif args.mail_cmd == "application":
                 if args.defaut:
-                    await settings.save_mail_application("")
+                    await settings.named("mail").save_mail_application("")
                 elif args.client_id is not None:
                     try:
-                        await settings.save_mail_application(args.client_id)
+                        await settings.named("mail").save_mail_application(args.client_id)
                     except ValueError as exc:
                         raise SystemExit(str(exc)) from None
-                return {"application": settings.mail_application(),
-                        "par_defaut": not settings.own_mail_application()}
+                return {"application": settings.named("mail").mail_application(),
+                        "par_defaut": not settings.named("mail").own_mail_application()}
             elif args.mail_cmd == "remove":
-                cfg = settings.email()
+                cfg = settings.named("mail").email()
                 if args.compte not in cfg.accounts:
                     raise SystemExit(f"compte inconnu : {args.compte}")
-                await settings.save_email(cfg.model_copy(update={"accounts": {
+                await settings.named("mail").save_email(cfg.model_copy(update={"accounts": {
                     k: a for k, a in cfg.accounts.items() if k != args.compte}}))
             out = {}
-            for name, account in settings.email().accounts.items():
+            for name, account in settings.named("mail").email().accounts.items():
                 shown = account.model_dump(mode="json")
                 for secret in ("password", "smtp_password"):
                     shown[secret] = "…" if shown[secret] else ""

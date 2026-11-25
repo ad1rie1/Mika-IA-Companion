@@ -5,6 +5,7 @@ montrée une seule fois ; comment part ce que Mika prépare depuis chacun, qu'el
 from __future__ import annotations
 
 from mika.adapters.mail.config import MailAccount, MailConfig
+from mika.app.domains.mail.settings import MailSettings
 from mika.app.domains.teams.settings import TeamsSettings
 from mika.app.me import common as common_me
 from mika.plugins import email as email_p
@@ -19,7 +20,7 @@ BOX = {"label": "Rando Cassel", "address": "rando.cassel@example.test", "imap_ho
 
 def boxes(client, live) -> dict:
     """Les boîtes enregistrées, lues comme le serveur les lit (dans sa boucle : le fil du test voit une base d'avant)."""
-    return client.portal.call(live.settings.email).accounts
+    return client.portal.call(live.settings.of(MailSettings).email).accounts
 
 
 def teams_accounts(client, live) -> dict:
@@ -189,7 +190,7 @@ def test_a_box_an_operator_set_on_the_machine_still_takes_her_changes(world):  #
     lea = second_person(client, live)
     davmail = MailAccount.model_validate({**BOX, "label": "Pro de Léa", "imap_host": "127.0.0.1",
                                           "smtp_host": "127.0.0.1", "owner": "personne:" + lea})
-    client.portal.call(live.settings.save_email, MailConfig(accounts={**boxes(client, live), "davmail": davmail}))
+    client.portal.call(live.settings.of(MailSettings).save_email, MailConfig(accounts={**boxes(client, live), "davmail": davmail}))
     client.portal.call(live.reconfigure)
     login(client, "lea")
     r = post(client, "/mail/box/save", {"box": "davmail", "values": {"signature": "Léa", "enabled": False}})

@@ -11,6 +11,7 @@ import re
 from urllib.parse import parse_qs, quote, urlsplit
 
 from mika.adapters.mail.config import MailAccount, MailConfig
+from mika.app.domains.mail.settings import MailSettings
 from mika.ports.contacts import EMAIL, MAIL, PHONE_APP, PHONE_SOURCE, TOLD, TOLD_NAME, Observation
 from mika.vocab.access import SELF
 from tests.protocol.test_console_annuaire import ANNUAIRE, HOUR, _entry, fiche
@@ -48,7 +49,7 @@ def seed(client, live) -> dict[str, int]:
 def setup(client, live) -> dict[str, int]:
     bootstrap(client)
     chat(client, "salut ! moi c'est Adrien")
-    client.portal.call(lambda: live.settings.save_email(MailConfig(accounts={"perso": MailAccount(
+    client.portal.call(lambda: live.settings.of(MailSettings).save_email(MailConfig(accounts={"perso": MailAccount(
         label="Personnel", address="mika@example.test", enabled=False, owner=SELF)})))
     return seed(client, live)
 

@@ -26,6 +26,7 @@ from mika.adapters.mail import MailAccount, MailConfig
 from mika.adapters.system import RealClock
 from mika.adapters.vectors import HashEmbedder
 from mika.adapters.web.app import WebConfig
+from mika.app.domains.mail.settings import MailSettings
 from mika.app.server import build
 from mika.contracts import email as email_c
 from mika.kernel.registry import ArbitrationPolicy
@@ -69,7 +70,7 @@ def plug(client, live, port: int) -> None:
     """La boîte « pro », « à toi » (à ses propriétaires), sur le faux serveur : enregistrée, elle est observée."""
     box = MailAccount(address="atelier@exemple.fr", imap_host="127.0.0.1", imap_port=port, imap_ssl=False,
                       user="atelier", password="secret", since_days=7)
-    client.portal.call(live.settings.save_email, MailConfig(accounts={"pro": box}))
+    client.portal.call(live.settings.of(MailSettings).save_email, MailConfig(accounts={"pro": box}))
     eventually(lambda: Imap.waiting() == 1)
 
 

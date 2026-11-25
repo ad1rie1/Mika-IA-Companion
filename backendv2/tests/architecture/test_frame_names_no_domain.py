@@ -122,7 +122,7 @@ STILL: dict[str, set[str]] = {
     "preview/git.py": {"projects"},
     "preview/projects.py": {"projects"},
     "server.py": {"contacts", "mail", "projects", "tools"},
-    "settings.py": {"agenda", "mail"},
+    "settings.py": {"agenda"},
     "settings_sections/plugins.py": {"mail", "teams"},
 }
 

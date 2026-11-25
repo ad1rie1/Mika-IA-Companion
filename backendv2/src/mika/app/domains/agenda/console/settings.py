@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from mika.adapters.agenda.oauth import google_client_id
 from mika.adapters.mail.config import application_id
 from mika.app.domains.agenda.settings import AgendaSettings
+from mika.app.domains.mail.settings import MailSettings
 from mika.inspector.catalog import SettingsPage, SettingsSection
 from mika.inspector.ui import PREFIX
 from mika.kernel.forms import Knob
@@ -63,7 +64,7 @@ def sections(live: Any) -> tuple[SettingsSection, ...]:
         return AgendaApps(google_client_id=google.client_id if google is not None else "",
                           google_secret=google.secret if google is not None else "",
                           google_web=bool(google.web) if google is not None else False,
-                          microsoft_app=settings.own_mail_application())
+                          microsoft_app=settings.of(MailSettings).own_mail_application())
 
     async def save_agenda_apps(cfg: AgendaApps) -> list[str]:
         """L'application Google (un secret vide garde celui de la même application) ; celle de Microsoft, partagée
@@ -76,8 +77,8 @@ def sections(live: Any) -> tuple[SettingsSection, ...]:
             await settings.of(AgendaSettings).save_google_application(cfg.google_client_id, cfg.google_secret, web=cfg.google_web)
         except ValueError as exc:
             return [str(exc)]
-        if cfg.microsoft_app != settings.own_mail_application():
-            await settings.save_mail_application(cfg.microsoft_app)
+        if cfg.microsoft_app != settings.of(MailSettings).own_mail_application():
+            await settings.of(MailSettings).save_mail_application(cfg.microsoft_app)
         return []
 
     def agenda_facts() -> list[tuple[str, Any]]:

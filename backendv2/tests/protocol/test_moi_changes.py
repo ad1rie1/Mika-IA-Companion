@@ -11,6 +11,7 @@ import json
 import time
 
 from mika.adapters.mail.oauth import Grant
+from mika.app.domains.mail.settings import MailSettings
 from mika.contracts import runtime as rt
 from mika.kernel.events import Content
 from mika.ports.mail import Draft as MailDraft
@@ -106,7 +107,7 @@ def test_a_box_setting_saved_outside_the_journal_is_pushed(world):  # noqa: F811
     with client.websocket_connect(WS) as adrien:
         time.sleep(SETTLED_S)
         received(adrien, 1)
-        client.portal.call(live.settings.save_mail_grant, "pro", Grant("un-jeton", "client", "common"))
+        client.portal.call(live.settings.of(MailSettings).save_mail_grant, "pro", Grant("un-jeton", "client", "common"))
         time.sleep(SETTLED_S)
         said = changes(received(adrien, 2))
     assert {"topic": "mail"} in said and {"topic": "settings"} in said

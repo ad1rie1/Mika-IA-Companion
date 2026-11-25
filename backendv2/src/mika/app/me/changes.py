@@ -44,17 +44,13 @@ from mika.adapters.web.accounts import Account
 from mika.adapters.web.hub import Hub
 from mika.app.domains import DOMAINS, part
 from mika.app.domains.mail import api as mail_me
+from mika.app.domains.mail.settings import EMAIL_KEY, MAIL_GRANTS_KEY, MAIL_IMAGES_KEY
 from mika.app.me import projects as projects_me
 from mika.app.me.api import Call, me_of
 from mika.app.me.common import allows
 from mika.app.me.touches import EVERYONE, OWN, PERSON, PREPARE, READ, Touch
 from mika.app.me.touches import both as _both
 from mika.app.me.touches import state_of as _state
-from mika.app.settings import (
-    EMAIL_KEY,
-    MAIL_GRANTS_KEY,
-    MAIL_IMAGES_KEY,
-)
 from mika.contracts import email as email_c
 from mika.contracts import identity as identity_c
 from mika.contracts import projects as projects_c

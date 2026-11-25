@@ -12,6 +12,7 @@ from urllib.parse import quote
 
 from mika.adapters.mail.config import MailAccount, MailConfig
 from mika.adapters.teams import TeamsAccount, TeamsConfig
+from mika.app.domains.mail.settings import MailSettings
 from mika.app.domains.teams.settings import TeamsSettings
 from mika.contracts import runtime as rt
 from mika.ports.contacts import COMPANY, EMAIL, MAIL, PHONE, TEAMS, TEAMS_ID, Observation
@@ -37,7 +38,7 @@ def seed(client, live) -> dict[str, int]:
     par son profil (e-mail, numéro, entreprise), une adresse générique de Nordis, et « G. Rousseau » dans sa boîte à
     elle (un rapprochement)."""
     client.portal.call(lambda: live.settings.of(TeamsSettings).save_teams(TeamsConfig(accounts={"equipe": TeamsAccount(label="Équipe")})))
-    client.portal.call(lambda: live.settings.save_email(MailConfig(accounts={"perso": MailAccount(
+    client.portal.call(lambda: live.settings.of(MailSettings).save_email(MailConfig(accounts={"perso": MailAccount(
         label="Personnel", address="mika@example.test", enabled=False, owner=SELF)})))
     store = live.kernel.ports["contacts"]
     now = live.kernel.mind.frame().now

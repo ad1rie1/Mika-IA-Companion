@@ -94,7 +94,7 @@ def every_share(settings: Any, names: Mapping[str, str] | None = None) -> list[S
     lignes de chaque service qui a un propriétaire, puis ceux de chaque agenda (``names`` : leur nom, tel que la base
     de l'agenda le dit ; sinon sa clé courte) — ce que chaque personne lit sous « Partagé avec toi »."""
     out: list[Shared] = []
-    for kind, accounts in (("mail", settings.email().accounts), ("teams", settings.named("teams").teams().accounts)):
+    for kind, accounts in (("mail", settings.named("mail").email().accounts), ("teams", settings.named("teams").teams().accounts)):
         for key, spec in sorted(accounts.items()):
             out += [Shared(kind, key, spec.label or key, spec.owner, who[len(PERSON):], level)
                     for who, level in sorted(spec.shares.items())]
@@ -181,7 +181,7 @@ async def write_share(settings: Any, reconfigure: Callable[[], Awaitable[Any]] |
         await _write_calendar_share(settings, reconfigure, key, person, level, check)
         return
     async with settings.writing:
-        cfg = settings.email() if kind == "mail" else settings.named("teams").teams()
+        cfg = settings.named("mail").email() if kind == "mail" else settings.named("teams").teams()
         spec = cfg.accounts.get(key)
         if spec is None:
             raise missing()
@@ -191,7 +191,7 @@ async def write_share(settings: Any, reconfigure: Callable[[], Awaitable[Any]] |
         shares = {k: v for k, v in spec.shares.items() if k != who} | ({who: level} if level else {})
         try:
             if kind == "mail":
-                await settings.save_email(MailConfig(accounts={**cfg.accounts, key: MailAccount.model_validate(
+                await settings.named("mail").save_email(MailConfig(accounts={**cfg.accounts, key: MailAccount.model_validate(
                     {**spec.model_dump(), "shares": shares})}))
             else:
                 account = TeamsAccount.model_validate({**spec.model_dump(), "shares": shares})

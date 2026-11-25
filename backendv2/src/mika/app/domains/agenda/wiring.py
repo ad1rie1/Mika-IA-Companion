@@ -6,7 +6,7 @@ Microsoft d'un compte se dit au direct (``bind``). Ses réglages donnent aux par
 agendas (``inputs``).
 
 Ses comptes, leurs connexions et l'application Google du serveur sont ses réglages (``settings.py``) ; Microsoft
-entre par l'application du courrier (``Settings.mail_application``, ADR 0238)."""
+entre par l'application du courrier (``MailSettings.mail_application``, ADR 0238)."""
 
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ from mika.adapters.agenda import (
 from mika.app.domains.agenda.desk import AgendaSettingsDesk
 from mika.app.domains.agenda.live import signed
 from mika.app.domains.agenda.settings import AgendaSettings
+from mika.app.domains.mail.settings import MailSettings
 from mika.app.wiring import Wiring
 
 #: ses fournisseurs ; ce que la console change d'un compte (``ports/agenda.py::AgendaDesk``)
@@ -50,7 +51,7 @@ def wire(w: Wiring) -> None:
     # chacun joignant ses hôtes seulement. Leurs parcours de connexion : ``.signin`` de chacun (lot 4 : l'API)
     outside["agenda_providers"].add(GoogleProvider(GoogleSignIn(own, own.google_application, now=clock.now),
                                                    now=clock.now))
-    outside["agenda_providers"].add(MicrosoftProvider(microsoft_signin(own, settings.mail_application),
+    outside["agenda_providers"].add(MicrosoftProvider(microsoft_signin(own, settings.of(MailSettings).mail_application),
                                                       now=clock.now))
     # ce que la console change d'un compte d'agenda (ADR 0309, lot 5) : le décocher, ne plus suivre un de ses agendas,
     # oublier sa connexion — jamais une écriture dans un agenda

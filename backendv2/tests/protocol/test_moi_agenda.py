@@ -26,6 +26,7 @@ from mika.adapters.agenda import (
 )
 from mika.app.domains.agenda.live import signed
 from mika.app.domains.agenda.settings import AgendaSettings
+from mika.app.domains.mail.settings import MailSettings
 from mika.contracts import runtime as rt
 from mika.kernel.events import Content
 from mika.plugins.agenda import CAPABILITY, DONE, OWNER, SYNC_ASKED, AgendaParams
@@ -585,7 +586,7 @@ def test_microsoft_gives_a_code_and_its_wait_is_pushed(world):  # noqa: F811
     async def no_wait(_seconds: float) -> None:
         await asyncio.sleep(0)
 
-    signin = microsoft_signin(live.settings.of(AgendaSettings), live.settings.mail_application, transport=graph.transport(),
+    signin = microsoft_signin(live.settings.of(AgendaSettings), live.settings.of(MailSettings).mail_application, transport=graph.transport(),
                               sleep=no_wait)
     signin.on_state = lambda account: signed(live.changes, account)
     live.kernel.ports["agenda_providers"].add(MicrosoftProvider(signin, transport=graph.transport()))

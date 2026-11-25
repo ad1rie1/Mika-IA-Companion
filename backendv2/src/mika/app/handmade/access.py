@@ -51,7 +51,7 @@ def instances_from_settings(ui: UI) -> Instances:
     out: Instances = {WEB: [(f"{WEB}:{PRIVATE}", "en privé"), (f"{WEB}:{TOGETHER}", "en salon")]}
     settings = ui.deps.settings
     try:
-        boxes = settings.email().accounts if settings is not None else {}
+        boxes = settings.named("mail").email().accounts if settings is not None else {}
     except (AttributeError, TypeError, ValueError):  # des boîtes illisibles : aucune instance, le type reste
         boxes = {}
     out[MAIL] = [(f"{MAIL}:{key}", a.label or key) for key, a in sorted(boxes.items())]

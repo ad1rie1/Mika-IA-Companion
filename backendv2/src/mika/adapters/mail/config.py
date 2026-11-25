@@ -271,8 +271,8 @@ class MailConfig(BaseModel):
         key_pattern=ACCOUNT_KEY, key_rule=ACCOUNT_KEY_RULE)] = Field(default_factory=dict)
     #: l'application Microsoft propre à l'instance (ADR 0238 ; vide : celle que Mika livre), telle que la console la
     #: règle à côté des boîtes. Elle se
-    #: garde à part des comptes (``Settings.mail_application``) : ``Settings.email`` ne la lit pas et
-    #: ``Settings.save_email`` ne l'écrit pas, pour qu'un ``MailConfig(accounts=…)`` rebâti ne l'efface jamais.
+    #: garde à part des comptes (``MailSettings.mail_application``) : ``MailSettings.email`` ne la lit pas et
+    #: ``MailSettings.save_email`` ne l'écrit pas, pour qu'un ``MailConfig(accounts=…)`` rebâti ne l'efface jamais.
     microsoft_app: Annotated[str, Knob(
         label="Application Microsoft (client ID)", group="Compte Microsoft", advanced=False, order=20,
         help="Vide : l'application livrée d'origine, par laquelle entrent les boîtes Hotmail, Outlook.com et Live "
@@ -304,14 +304,14 @@ def from_stored(data: Mapping[str, Any]) -> dict[str, Any]:
     La forme qu'il lit : celle d'avant plusieurs boîtes (ADR 0027, le
     2026-09-30), un seul compte à plat — les champs de ``MailAccount`` au
     premier niveau, un seul dossier (``folder``), ses secrets scellés au premier
-    niveau, que ``Settings.email`` ouvre avant de l'appeler. Elle devient le
+    niveau, que ``MailSettings.email`` ouvre avant de l'appeler. Elle devient le
     compte ``LEGACY_ACCOUNT`` (« principal ») ; sans ``imap_host``, ``address``
     ni ``smtp_host``, aucun compte.
 
     Il part quand une révision de données de la base ``mind`` aura réécrit les
     réglages gardés à la forme du jour (audit du 2026-11-05 : pas avant d'avoir
     vu ce que gardent les réglages en service), avec la branche de
-    ``Settings.email`` qui l'appelle."""
+    ``MailSettings.email`` qui l'appelle."""
     data = dict(data)
     if "accounts" in data:
         return {"accounts": dict(data["accounts"] or {})}

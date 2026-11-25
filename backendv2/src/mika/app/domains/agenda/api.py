@@ -33,6 +33,7 @@ from mika.adapters.agenda.config import ACCOUNT_KEY, COLORS
 from mika.adapters.web.session import account_of
 from mika.app.domains.agenda.her import her_agenda, title_of
 from mika.app.domains.agenda.settings import AgendaSettings
+from mika.app.domains.mail.settings import MailSettings
 from mika.app.me.api import (
     NO_STORE,
     OWN_MAX,
@@ -816,7 +817,7 @@ async def accounts(call: Call) -> dict[str, Any]:
     return {"plugged": True, "accounts": found,
             "google": {"app": settings.of(AgendaSettings).google_application() is not None,
                        "direct": bool(google is not None and google.direct())},
-            "microsoft_app": bool(settings.mail_application()),
+            "microsoft_app": bool(settings.of(MailSettings).mail_application()),
             "kinds": [{"code": k, "label": KIND_WORDS[k]} for k in PLUGGABLE],
             "services": [{"key": x.key, "name": x.name, "url": x.url, "help": x.help} for x in SERVICES],
             "colors": [{"code": c, "label": w} for c, w in COLORS],

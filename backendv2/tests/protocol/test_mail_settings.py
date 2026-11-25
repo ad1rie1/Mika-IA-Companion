@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from mika.adapters.mail.config import DEFAULT_APPLICATION
+from mika.app.domains.mail.settings import MailSettings
 from mika.inspector.catalog import Builtin, Destination, NavGroup, check
 from mika.kernel.registry import CompositionError
 from tests.fixtures.console_html import ConsoleHTML
@@ -80,7 +81,7 @@ def test_a_mailbox_is_added_and_kept_on_the_mail_settings(world):  # noqa: F811
     ConsoleHTML(refused.text).check()
     again = html.unescape(refused.text)  # remontrée dans le Courrier, pas sous Réglages
     assert 'class="now-page mailset"' in again and "<h1>Paramètres</h1>" in again and "ne change pas" in again
-    assert set(client.portal.call(live.settings.email).accounts) == {"perso"}
+    assert set(client.portal.call(live.settings.of(MailSettings).email).accounts) == {"perso"}
 
 
 def test_a_mailbox_form_shows_what_serves_and_follows_the_changes(world):  # noqa: F811
@@ -169,7 +170,7 @@ def test_a_mailbox_belongs_to_you_to_her_or_to_a_person(world):  # noqa: F811
     assert post(client, SAVE, {**ACCOUNT, "_cle": "tienne", "label": "La tienne"}).status_code == 200
     refused = post(client, SAVE, {**hers, "_cle": "autre", "owner": "personne:inconnue"})
     assert refused.status_code == 400 and "à une personne qui a un compte" in html.unescape(refused.text)
-    saved = client.portal.call(live.settings.email).accounts
+    saved = client.portal.call(live.settings.of(MailSettings).email).accounts
     assert saved["sienne"].owner == "elle" and saved["tienne"].owner == "" and "autre" not in saved
     # le journal le sait : ses outils ne lui montreront que les boîtes de qui est en face
     from mika.plugins.email import params_of
@@ -195,7 +196,7 @@ def test_a_mailbox_card_names_its_owner_even_an_operator(world):  # noqa: F811
     bea = client.portal.call(lambda: live.accounts.create("bea", "un-mot-de-passe-long", operator=False,
                                                           full_name="Béa Martin"))
     box = {"address": "x@exemple.org", "imap_host": "imap.exemple.org", "user": "x"}
-    client.portal.call(live.settings.save_email, MailConfig(accounts={
+    client.portal.call(live.settings.of(MailSettings).save_email, MailConfig(accounts={
         "pro": {**box, "label": "Pro", "owner": "personne:user_1"},
         "sienne": {**box, "label": "De Béa", "owner": f"personne:{bea.handle}"}}))
     page = drawn(client, PAGE)
@@ -214,7 +215,7 @@ def test_the_mail_settings_count_ready_boxes_in_words(world, monkeypatch):  # no
 
     def facts(*ready: bool) -> str:
         boxes = {f"b{i}": SimpleNamespace(ready=r) for i, r in enumerate(ready)}
-        monkeypatch.setattr(live.settings, "email", lambda: SimpleNamespace(accounts=boxes))
+        monkeypatch.setattr(live.settings.of(MailSettings), "email", lambda: SimpleNamespace(accounts=boxes))
         return dict(next(s for s in sections(live) if s.key == "courrier").facts())["Comptes"]
 
     assert facts(True) == "1 (1 prête à relever)"
@@ -236,15 +237,15 @@ def test_the_microsoft_application_of_the_instance_is_set_beside_the_boxes(world
     field = {"_section": "courrier", "_champs": ["microsoft_app"]}
     refused = post(client, SAVE, {**field, "microsoft_app": "pas-un-guid"})
     assert refused.status_code == 400 and "client ID" in html.unescape(refused.text)
-    assert client.portal.call(live.settings.own_mail_application) == ""
+    assert client.portal.call(live.settings.of(MailSettings).own_mail_application) == ""
     saved = post(client, SAVE, {**field, "microsoft_app": app.upper()})
     assert saved.status_code == 200 and PAGE in str(saved.url) and f'value="{app}"' in html.unescape(saved.text)
-    assert client.portal.call(live.settings.mail_application) == app
-    assert set(client.portal.call(live.settings.email).accounts) == {"perso"}  # ses boîtes restent
+    assert client.portal.call(live.settings.of(MailSettings).mail_application) == app
+    assert set(client.portal.call(live.settings.of(MailSettings).email).accounts) == {"perso"}  # ses boîtes restent
     # une boîte enregistrée ensuite ne l'efface pas
     assert post(client, SAVE, {**ACCOUNT, "_ancienne": "perso", "label": "Perso"}).status_code == 200
-    assert client.portal.call(live.settings.mail_application) == app
+    assert client.portal.call(live.settings.of(MailSettings).mail_application) == app
     # vidée, l'instance revient à celle que Mika livre
     assert post(client, SAVE, {**field, "microsoft_app": ""}).status_code == 200
-    assert client.portal.call(live.settings.own_mail_application) == ""
-    assert client.portal.call(live.settings.mail_application) == DEFAULT_APPLICATION
+    assert client.portal.call(live.settings.of(MailSettings).own_mail_application) == ""
+    assert client.portal.call(live.settings.of(MailSettings).mail_application) == DEFAULT_APPLICATION

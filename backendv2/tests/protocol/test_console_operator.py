@@ -20,6 +20,7 @@ import re
 
 from sqlalchemy import func, insert, select
 
+from mika.app.domains.mail.settings import MailSettings
 from mika.contracts import runtime as rt
 from mika.inspector.pages.system import OUTBOX_PAGE
 from mika.inspector.ui import env as templates
@@ -282,7 +283,7 @@ def test_a_mailbox_keeps_its_name(world):  # noqa: F811
     assert post(client, url, account).status_code == 200
     moved = post(client, url, {**account, "_ancienne": "perso", "_cle": "pro"})
     assert moved.status_code == 400 and "ne change pas" in html_of(moved)
-    assert set(client.portal.call(live.settings.email).accounts) == {"perso"}
+    assert set(client.portal.call(live.settings.of(MailSettings).email).accounts) == {"perso"}
 
 
 def test_a_mailbox_loads_its_folders_to_tick_and_keeps_the_ticked_ones(world):  # noqa: F811
@@ -321,26 +322,26 @@ def test_a_mailbox_loads_its_folders_to_tick_and_keeps_the_ticked_ones(world):  
     assert asked == ["perso"] and "Rien n'est encore enregistré" in loaded and held == [False]
     # seul ce chargement-là se passe du verrou : une suppression qui porterait aussi « _charger » réécrit les
     # réglages, sous le verrou
-    saving = live.settings.save_email
+    saving = live.settings.of(MailSettings).save_email
     under: list[bool] = []
 
     async def watched(cfg):
         under.append(live.settings.writing.locked())
         return await saving(cfg)
 
-    live.settings.save_email = watched
+    live.settings.of(MailSettings).save_email = watched
     try:
         post(client, url, {"_section": "courrier", "_supprimer": "accounts", "_cle": "perso", "_charger": "folders"})
     finally:
-        live.settings.save_email = saving
-    assert under == [True] and "perso" not in client.portal.call(live.settings.email).accounts
+        live.settings.of(MailSettings).save_email = saving
+    assert under == [True] and "perso" not in client.portal.call(live.settings.of(MailSettings).email).accounts
     ticks = re.findall(r'<label class="check"><input type="checkbox" name="folders" value="([^"]+)"( checked)?[^>]*> '
                        r'([^<]+)</label>', loaded)
     assert ticks == [("INBOX", " checked", "Réception (INBOX)"), ("Archives", "", "Archives"),
                      ("Projets", "", "Projets")]
     saved = post(client, url, {**account, "_ancienne": "perso", "folders": ["INBOX", "Projets"], "sync_all": "on"})
     assert saved.status_code == 200
-    got = client.portal.call(live.settings.email).accounts["perso"]
+    got = client.portal.call(live.settings.of(MailSettings).email).accounts["perso"]
     assert got.folders == ("INBOX", "Projets") and got.sync_all
 
 

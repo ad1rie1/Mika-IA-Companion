@@ -116,21 +116,21 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
 
     def mail() -> MailConfig:
         """Ses boîtes, et l'application Microsoft propre à l'instance, gardée à part d'elles (ADR 0238)."""
-        return settings.email().model_copy(update={"microsoft_app": settings.own_mail_application()})
+        return settings.named("mail").email().model_copy(update={"microsoft_app": settings.named("mail").own_mail_application()})
 
     async def save_mail(cfg: MailConfig) -> list[str]:
         """Une boîte est à toi, à elle ou à une personne qui a un compte (ADR 0185) — sauf ce qui était déjà là (un
         compte fermé depuis reste affiché, pour qu'on le corrige)."""
-        before, known = settings.email().accounts, {v for v, _ in mail_owners()}
+        before, known = settings.named("mail").email().accounts, {v for v, _ in mail_owners()}
         problems = [f"« {name} » : elle est à toi, à elle, ou à une personne qui a un compte."
                     for name, a in cfg.accounts.items()
                     if a.owner not in known and (name not in before or before[name].owner != a.owner)]
         if problems:
             return problems
-        await settings.save_email(cfg)
+        await settings.named("mail").save_email(cfg)
         # l'application Microsoft de l'instance se garde à part des comptes (ADR 0238)
-        if cfg.microsoft_app != settings.own_mail_application():
-            await settings.save_mail_application(cfg.microsoft_app)
+        if cfg.microsoft_app != settings.named("mail").own_mail_application():
+            await settings.named("mail").save_mail_application(cfg.microsoft_app)
         # ce que ses proposeurs lisent (les comptes où elle prépare des réponses) est un réglage journalisé
         problems = await live.reconfigure()
         if problems:  # le courrier est enregistré ; seuls ses paramètres attendent la prochaine reconfiguration
@@ -184,12 +184,12 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                 "fiche": subject_url("compte", key), "box": f"{PREFIX}/courrier/reception?" + urlencode({"compte": key})}
 
     def mail_facts() -> list[tuple[str, Any]]:
-        accounts = settings.email().accounts
+        accounts = settings.named("mail").email().accounts
         ready = sum(1 for a in accounts.values() if a.ready)
         return [("Comptes", f"{len(accounts)} ({plural(ready, 'prête à relever', 'prêtes à relever')})"
                  if accounts else "aucun"),
                 # ADR 0238 : une boîte Microsoft entre par elle, sans donner la sienne
-                ("Application Microsoft", settings.own_mail_application() or "celle livrée d'origine"),
+                ("Application Microsoft", settings.named("mail").own_mail_application() or "celle livrée d'origine"),
                 ("Lire et envoyer", Ref("local", f"{PREFIX}/courrier/reception", "Courrier › Réception"))]
 
     def stt() -> SttSettings:

@@ -663,7 +663,7 @@ def _accounts(look: Look, who: Who) -> tuple[int, int]:
     if settings is None:
         return 0, 0
     mine = "" if look.frame.get(identity_c.IS_OWNER(who.person)) else PERSON + who.person
-    return (sum(1 for spec in settings.email().accounts.values() if spec.owner == mine),
+    return (sum(1 for spec in settings.named("mail").email().accounts.values() if spec.owner == mine),
             sum(1 for spec in settings.named("teams").teams().accounts.values() if spec.owner == mine))
 
 

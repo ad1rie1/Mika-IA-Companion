@@ -24,7 +24,8 @@ from mika.adapters.mail import ImapSmtpMail, MailAccount, MailConfig
 from mika.adapters.mail.config import DEFAULT_APPLICATION
 from mika.adapters.mail.oauth import DEVICE_GRANT, EXPIRED, REVOKED, Grant, MicrosoftSignIn, OAuthError
 from mika.adapters.store_sql import SqlStore
-from mika.app.settings import MAIL_GRANTS_KEY, SecretBox, Settings
+from mika.app.domains.mail.settings import MAIL_GRANTS_KEY, MailSettings
+from mika.app.settings import SecretBox, Settings
 from mika.ports.mail import SIGNED_IN, SIGNIN_NEEDED, SIGNIN_PENDING, SignIn
 from tests.fixtures.mail_servers import Imap, Smtp, raw_mail, serve
 
@@ -271,17 +272,17 @@ def test_the_connection_is_kept_sealed_and_leaves_with_its_box(tmp_path):
         try:
             settings = Settings(store, SecretBox.for_data(tmp_path))
             await settings.open()
-            await settings.save_email(MailConfig(accounts={"hotmail": hotmail(), "autre": hotmail()}))
-            await settings.save_mail_grant("hotmail", Grant("renouv-secret", CLIENT, "consumers"))
-            await settings.save_mail_grant("autre", Grant("renouv-autre", CLIENT, "consumers"))
+            await settings.of(MailSettings).save_email(MailConfig(accounts={"hotmail": hotmail(), "autre": hotmail()}))
+            await settings.of(MailSettings).save_mail_grant("hotmail", Grant("renouv-secret", CLIENT, "consumers"))
+            await settings.of(MailSettings).save_mail_grant("autre", Grant("renouv-autre", CLIENT, "consumers"))
             rows = [r[0] for r in store.query_mind("SELECT value FROM settings")]
-            kept = settings.mail_grant("hotmail")
+            kept = settings.of(MailSettings).mail_grant("hotmail")
             # « autre » reprend un mot de passe, « hotmail » reste : seule la connexion d'« hotmail » demeure
-            await settings.save_email(MailConfig(accounts={"hotmail": hotmail(),
+            await settings.of(MailSettings).save_email(MailConfig(accounts={"hotmail": hotmail(),
                                                            "autre": hotmail(auth="password")}))
-            after = settings.mail_grant("hotmail"), settings.mail_grant("autre")
-            await settings.save_email(MailConfig(accounts={}))  # la boîte retirée : sa connexion part avec elle
-            return rows, kept, after, settings.mail_grant("hotmail"), settings._get(MAIL_GRANTS_KEY)
+            after = settings.of(MailSettings).mail_grant("hotmail"), settings.of(MailSettings).mail_grant("autre")
+            await settings.of(MailSettings).save_email(MailConfig(accounts={}))  # la boîte retirée : sa connexion part avec elle
+            return rows, kept, after, settings.of(MailSettings).mail_grant("hotmail"), settings._get(MAIL_GRANTS_KEY)
         finally:
             await store.close()
 
@@ -331,13 +332,13 @@ def test_the_application_of_the_instance_is_kept_in_the_settings(tmp_path):
         try:
             settings = Settings(store, SecretBox.for_data(tmp_path))
             await settings.open()
-            none = settings.own_mail_application(), settings.mail_application()
+            none = settings.of(MailSettings).own_mail_application(), settings.of(MailSettings).mail_application()
             with pytest.raises(ValueError):
-                await settings.save_mail_application("pas-un-guid")
-            await settings.save_mail_application(f"  {INSTANCE.upper()} ")
-            kept = settings.own_mail_application(), settings.mail_application()
-            await settings.save_mail_application("")
-            return none, kept, settings.mail_application()
+                await settings.of(MailSettings).save_mail_application("pas-un-guid")
+            await settings.of(MailSettings).save_mail_application(f"  {INSTANCE.upper()} ")
+            kept = settings.of(MailSettings).own_mail_application(), settings.of(MailSettings).mail_application()
+            await settings.of(MailSettings).save_mail_application("")
+            return none, kept, settings.of(MailSettings).mail_application()
         finally:
             await store.close()
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 
 from mika.adapters.mail.config import MailAccount, MailConfig
+from mika.app.domains.mail.settings import MailSettings
 from mika.contracts import email as email_c
 from mika.contracts import runtime as rt
 from mika.kernel.events import Content
@@ -27,7 +28,7 @@ def test_a_shared_box_shows_in_her_mika_and_opens_only_her_level(world):  # noqa
     live.kernel.ports["mail"] = mailbox(3)
     # les boîtes du courrier simulé, rangées aussi dans les réglages (le vrai port les y lit) : leurs partages s'y
     # écrivent
-    client.portal.call(live.settings.save_email, MailConfig(accounts={
+    client.portal.call(live.settings.of(MailSettings).save_email, MailConfig(accounts={
         "perso": MailAccount(label="Personnel", address="adrien@example.test"),
         "pro": MailAccount(label="Atelier", address="atelier@example.test")}))
     lea = second_person(client, live)
@@ -106,7 +107,7 @@ def test_a_shared_service_gets_her_an_access_line(world):  # noqa: F811
 def test_a_share_to_a_closed_account_still_comes_off(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
-    client.portal.call(live.settings.save_email, MailConfig(accounts={
+    client.portal.call(live.settings.of(MailSettings).save_email, MailConfig(accounts={
         "pro": MailAccount(label="Atelier", address="atelier@example.test")}))
     live.kernel.ports["mail"] = mailbox(1)
     lea = second_person(client, live)
@@ -121,7 +122,7 @@ def test_a_share_to_a_closed_account_still_comes_off(world):  # noqa: F811
 def test_nothing_is_shared_with_yourself_nor_with_one_who_owns_it_already(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
-    client.portal.call(live.settings.save_email, MailConfig(accounts={
+    client.portal.call(live.settings.of(MailSettings).save_email, MailConfig(accounts={
         "pro": MailAccount(label="Atelier", address="atelier@example.test")}))
     live.kernel.ports["mail"] = mailbox(1)
     lea = second_person(client, live)

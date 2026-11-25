@@ -10,6 +10,7 @@ import re
 
 from mika.adapters.mail.config import MailAccount, MailConfig
 from mika.adapters.teams import TeamsAccount, TeamsConfig
+from mika.app.domains.mail.settings import MailSettings
 from mika.app.domains.teams.settings import TeamsSettings
 from mika.contracts import identity as identity_c
 from mika.contracts import runtime as rt
@@ -40,7 +41,7 @@ def shared_world(client, live) -> str:
     """Une boîte, un compte Teams et un service d'Adrien, chacun partagé à Léa : rend la clé de sa personne."""
     bootstrap(client)
     live.kernel.ports["mail"] = mailbox(3)
-    client.portal.call(live.settings.save_email, MailConfig(accounts={
+    client.portal.call(live.settings.of(MailSettings).save_email, MailConfig(accounts={
         "pro": MailAccount(label="Atelier", address="atelier@example.test")}))
     client.portal.call(live.settings.of(TeamsSettings).save_teams, TeamsConfig(accounts={"travail": TeamsAccount(label="Travail")}))
     lea = second_person(client, live)
@@ -105,7 +106,7 @@ def test_an_operator_reads_every_share_and_takes_one_off(world):  # noqa: F811
     after = html_of(client.get(done.headers["location"]))
     assert "Partage retiré : Léa Martin n'a plus accès à la boîte « Atelier »." in after
     assert [f["kind"] for _, f in forms_on(after)] == ["teams"]
-    assert client.portal.call(live.settings.email).accounts["pro"].shares == {}
+    assert client.portal.call(live.settings.of(MailSettings).email).accounts["pro"].shares == {}
     assert audited(live) == [("user_1", AUDITED, f"mail:pro:{lea}")]
 
     login(client, "lea")
@@ -138,10 +139,10 @@ def test_the_console_only_takes_off_what_is_there_and_gives_nothing(world):  # n
     # ni une ressource inconnue, ni une personne qui n'a rien reçu : rien n'est écrit, rien n'est donné
     assert "n'est plus là" in said(key="inconnue")
     assert "n'est plus là" in said(person="user_1", level="servir")
-    assert client.portal.call(live.settings.email).accounts["pro"].shares == {f"personne:{lea}": "lire"}
+    assert client.portal.call(live.settings.of(MailSettings).email).accounts["pro"].shares == {f"personne:{lea}": "lire"}
     # sans le jeton du formulaire : rien
     assert "Jeton de formulaire invalide" in said(csrf="faux")
-    assert client.portal.call(live.settings.email).accounts["pro"].shares == {f"personne:{lea}": "lire"}
+    assert client.portal.call(live.settings.of(MailSettings).email).accounts["pro"].shares == {f"personne:{lea}": "lire"}
     assert audited(live) == []
     # deux onglets : le second ne retire rien et n'audite rien de plus
     assert "Partage retiré" in said()
@@ -176,7 +177,7 @@ def test_only_an_operator_takes_a_share_off(world):  # noqa: F811
     login(client, "lea")  # elle a reçu le partage, pas la console
     done = client.post(RETIRE, data=box, follow_redirects=False)
     assert done.status_code == 303 and done.headers["location"].endswith("/admin/connexion")
-    assert client.portal.call(live.settings.email).accounts["pro"].shares == {f"personne:{lea}": "lire"}
+    assert client.portal.call(live.settings.of(MailSettings).email).accounts["pro"].shares == {f"personne:{lea}": "lire"}
     assert audited(live) == []
 
 
@@ -207,7 +208,7 @@ def test_the_fiche_of_a_person_takes_a_share_off_and_comes_back(world):  # noqa:
     after = html_of(client.get(back))
     assert "Partage retiré : Léa Martin n'a plus accès à la boîte « Atelier »." in after
     assert [f["kind"] for _, f in forms_on(after)] == ["teams"]
-    assert client.portal.call(live.settings.email).accounts["pro"].shares == {}
+    assert client.portal.call(live.settings.of(MailSettings).email).accounts["pro"].shares == {}
     assert audited(live) == [("user_1", AUDITED, f"mail:pro:{lea}")]
 
 
@@ -225,5 +226,5 @@ def test_the_way_back_stays_in_the_console(world):  # noqa: F811
     refused = client.post(RETIRE, data={**box, "csrf": "faux"}, follow_redirects=False)
     assert refused.headers["location"].startswith(f"{FICHE}/{lea}?onglet=boites&flash=")
     assert "Jeton de formulaire invalide" in html_of(client.get(refused.headers["location"]))
-    assert client.portal.call(live.settings.email).accounts["pro"].shares == {f"personne:{lea}": "lire"}
+    assert client.portal.call(live.settings.of(MailSettings).email).accounts["pro"].shares == {f"personne:{lea}": "lire"}
     assert audited(live) == []

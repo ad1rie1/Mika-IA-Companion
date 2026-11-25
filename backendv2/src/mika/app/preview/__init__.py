@@ -251,7 +251,7 @@ async def _shares(settings, bea: str, owner: str) -> None:
     """Une boîte de l'opérateur et un compte Teams à une personne, partagés à Béa : Réglages › Droits › Partages a de
     quoi se montrer (ADR 0210). Rangés seulement dans les réglages : ni l'une ni l'autre ne relève rien."""
     who = PERSON + bea
-    await settings.save_email(MailConfig(accounts={"atelier": MailAccount(
+    await settings.named("mail").save_email(MailConfig(accounts={"atelier": MailAccount(
         label="Atelier", address="atelier@example.test", enabled=False, shares={who: SHARE_READ})}))
     await settings.named("teams").save_teams(TeamsConfig(accounts={"equipe": TeamsAccount(
         label="Équipe", owner=PERSON + owner, enabled=False, shares={who: SHARE_PREPARE})}))

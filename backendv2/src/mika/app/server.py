@@ -200,7 +200,7 @@ class Live:
         out: dict[str, dict[str, Any]] = {"kernel": {"tz": self.persona().timezone}}
         # les tableaux de ses canaux (ADR 0134) : le courrier y lit ce qu'elle envoie à ta place
         canaux = self.settings.canals().model_dump(mode="json")
-        boxes = self.settings.email().accounts
+        boxes = self.settings.named("mail").email().accounts
         off = sorted(k for k, a in boxes.items() if not a.enabled)
         # à qui est chaque boîte (ADR 0185 ; vide : à toi) : ses outils ne lui montrent que celles de qui est en face
         owners = {k: a.owner for k, a in sorted(boxes.items())}
@@ -311,8 +311,10 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
 
     # une boîte Microsoft garde sa connexion (son jeton de renouvellement) scellée dans les réglages
     # (ADR 0166), et entre par l'application de l'instance quand elle n'en déclare pas (ADR 0238)
-    microsoft = MicrosoftSignIn(settings, application=settings.mail_application)
-    outside = {"mail": ImapSmtpMail(settings.email, bases["mail"], her=her, microsoft=microsoft, images=settings),
+    mail_settings = settings.named("mail")
+    microsoft = MicrosoftSignIn(mail_settings, application=mail_settings.mail_application)
+    outside = {"mail": ImapSmtpMail(mail_settings.email, bases["mail"], her=her, microsoft=microsoft,
+                                    images=mail_settings),
              "workshop": BwrapWorkshop(data / "ateliers", credentials=settings.git, author=her),
              # l'hôte GitHub d'un dépôt distant, lu par la console seulement (ADR 0183)
              "repo_host": GitHubRepos(settings.git),
@@ -343,7 +345,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     # l'ordonnanceur, que son sommeil arrête ; il se règle à chaque enregistrement des boîtes
     mail_watch = MailWatch(outside["mail"]) if mail_live else None
     if mail_watch is not None:
-        settings.mail_saved = mail_watch.nudge
+        mail_settings.mail_saved = mail_watch.nudge
     port = KernelPort(kernel)
     hub.port = port
     live = Live(kernel, hub, port, Accounts(store), settings, gateway, fixed, calls=CallLog(store),

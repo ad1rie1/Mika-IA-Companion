@@ -140,6 +140,11 @@ class SlowBoxes:
         self.cfg = cfg or MailConfig()
         self.writing = asyncio.Lock()
 
+    def named(self, name: str) -> SlowBoxes:
+        """Les réglages d'un domaine, par son nom : ici, ceux du courrier seulement."""
+        assert name == "mail"
+        return self
+
     def email(self) -> MailConfig:
         return self.cfg
 

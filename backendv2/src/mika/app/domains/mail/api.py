@@ -19,6 +19,7 @@ from starlette.responses import Response
 from starlette.routing import Route
 
 from mika.adapters.web.app import safe_mime
+from mika.app.domains.mail.settings import MailSettings
 from mika.app.me.api import Call, Denied, MeApiBase, done, form, missing
 from mika.app.me.common import allows, held_by, millis, only_owner, opened, snippet, work_of
 from mika.contracts import email as email_c
@@ -245,7 +246,7 @@ async def list_boxes(call: Call) -> dict[str, Any]:
     # l'instance a son application Microsoft : une boîte Microsoft n'a pas à donner la sienne (ADR 0238)
     settings = call.api.settings
     return {"boxes": found, "read_on_open": p.read_on_open, "plugged": call.port("mail") is not None,
-            "microsoft_app": settings is not None and bool(settings.mail_application())}
+            "microsoft_app": settings is not None and bool(settings.of(MailSettings).mail_application())}
 
 
 async def messages(call: Call) -> dict[str, Any]:

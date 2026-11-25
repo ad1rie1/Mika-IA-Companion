@@ -139,7 +139,7 @@ def accounts(look: Look) -> Accounts:
     shares: dict[tuple[str, str], Mapping[str, str]] = {}
     settings = ui.deps.settings
     if settings is not None:
-        for source, specs in ((MAIL, settings.email().accounts), (TEAMS, settings.named("teams").teams().accounts)):
+        for source, specs in ((MAIL, settings.named("mail").email().accounts), (TEAMS, settings.named("teams").teams().accounts)):
             for key, spec in specs.items():
                 shares[(source, key)] = dict(spec.shares)
     return Accounts(owner, label, shares, tuple(look.frame.get(identity_c.OWNERS) or ()))

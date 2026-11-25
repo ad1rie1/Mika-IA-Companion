@@ -22,6 +22,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 
 from mika.adapters.llm.config import ModelLimits
 from mika.app.console import NAVIGATION
+from mika.app.domains.mail.settings import MailSettings
 from mika.app.domains.senses.settings import SensesSettings
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
@@ -240,13 +241,13 @@ def test_senses_mail_feeds_transcription_and_a_device_token_shown_once(world):  
     mail = post(client, url, account)
     assert mail.status_code == 200 and CANARY_MAIL not in mail.text
     assert "/admin/courrier/parametres" in str(mail.url)  # ancien onglet : les paramètres du courrier
-    saved = client.portal.call(live.settings.email).accounts["perso"]
+    saved = client.portal.call(live.settings.of(MailSettings).email).accounts["perso"]
     assert saved.password == CANARY_MAIL and saved.voice == "proprietaire" and saved.tone == "sobre"
     # modifier sans retaper le mot de passe le garde ; un retour hors de la console est ignoré
     again = post(client, url, {**account, "_ancienne": "perso", "password": "", "tone": "chaleureux",
                                "_retour": "https://ailleurs.example/"})
     assert again.status_code == 200 and "ailleurs.example" not in str(again.url)
-    saved = client.portal.call(live.settings.email).accounts["perso"]
+    saved = client.portal.call(live.settings.of(MailSettings).email).accounts["perso"]
     assert saved.password == CANARY_MAIL and saved.tone == "chaleureux"
     assert CANARY_MAIL not in html_of(client.get("/admin/courrier/comptes"))
     assert CANARY_MAIL not in html_of(client.get("/admin/fiche/compte/perso"))
