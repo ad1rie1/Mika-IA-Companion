@@ -64,6 +64,14 @@ LONG_MONTHS = ("janvier", "février", "mars", "avril", "mai", "juin", "juillet",
                "novembre", "décembre")
 #: par page : ses événements, son historique
 EVENTS_PAGE, NOTES_PAGE = 10, 25
+
+
+def shared(s: Any) -> str:
+    """Où mène un de ses agendas, partagé (Réglages › Droits › Partages, la fiche d'une personne) : sa fiche (ADR 0309,
+    lot 5)."""
+    return subject_url("agenda", s.key)
+
+
 #: une valeur d'une case du tableau de droits → sa classe et son mot (la maquette)
 VALUES = {"oui": ("oui", "Oui"), "non": ("non", "Non"), "avec ton accord": ("accord", "Ton accord"),
           "seule": ("seule", "Seule")}

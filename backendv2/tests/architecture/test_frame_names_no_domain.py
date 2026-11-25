@@ -43,6 +43,7 @@ from mika.app.domains import (
 )
 from mika.app.handmade.person import TABS as PERSON_TABS
 from mika.app.handmade.person import account_tabs
+from mika.app.handmade.rights import share_consoles
 from mika.app.me.accounts import CHANNELS
 from mika.app.me.sharing import KINDS as SHARED_KINDS
 from mika.app.settings import SettingsPart
@@ -92,8 +93,8 @@ FOREVER: dict[str, str] = {
 #: ce qui reste à sortir du cadre : fichier d'``app`` → domaines qu'il nomme encore. Elle ne fait que rétrécir
 STILL: dict[str, set[str]] = {
     "handmade/directory.py": {"contacts"},
-    "handmade/person/__init__.py": {"teams", "tools"},
-    "handmade/rights.py": {"agenda", "forge", "tools"},
+    "handmade/person/__init__.py": {"tools"},
+    "handmade/rights.py": {"agenda", "forge"},
     "handmade/tabs/people.py": {"contacts"},
     "handmade/tabs/thoughts.py": {"mail", "senses", "teams"},
     "me/rights.py": {"forge", "tools"},
@@ -242,6 +243,10 @@ def test_every_part_a_card_names_exists_and_carries_its_name():
             assert held.noun and all(isinstance(b, str) and b for b in held.badges), d.name
             assert all(callable(f) for f in (held.held, held.owned, held.shown, held.configured)), d.name
         assert d.console is None or isinstance(part(d.console, "CONSOLE"), ConsolePart), d.name
+        if d.console is not None:  # où mène, dans la console, la ressource d'un de ses partages, où il se retire
+            console = part(d.console, "CONSOLE")
+            assert all(f is None or callable(f) for f in (console.shared, console.unshared)), d.name
+            assert console.shared is None or d.sharing is not None, f"{d.name} : un partage dans la console sans sorte"
         sheet = _person_part(d)
         assert sheet is None or isinstance(sheet, PersonPart), d.name
         if sheet is not None:  # sa part de la fiche d'une personne : ce qu'elle nomme est un onglet qu'elle dessine
@@ -264,6 +269,14 @@ def test_each_kind_of_share_has_its_part_said_once():
     dite par deux, ferait échouer le premier partage lu — ici, avant."""
     kinds = [part(d.sharing, "SHARING").kind for d in DOMAINS if d.sharing is not None]
     assert sorted(kinds) == sorted(SHARED_KINDS), kinds
+
+
+def test_each_kind_of_share_says_where_it_leads_in_the_console():
+    """Réglages › Droits › Partages et l'onglet Comptes d'une personne mènent à la ressource d'un partage, et à ses
+    lignes d'accès quand la console ne le retire pas (``app/handmade/rights.py::share_consoles``) : la part de console
+    du domaine qui partage le dit, pour chaque sorte — sinon la première page qui en montre un échouerait, ici avant."""
+    share_consoles.cache_clear()
+    assert list(share_consoles()) == list(SHARED_KINDS)
 
 
 def test_each_channel_has_its_accounts_said_once():

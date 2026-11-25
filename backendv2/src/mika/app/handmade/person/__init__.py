@@ -31,7 +31,7 @@ from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from datetime import timedelta
 from typing import Any
-from urllib.parse import quote, urlencode
+from urllib.parse import quote
 
 from markupsafe import Markup
 from sqlalchemy import func, or_, select
@@ -66,11 +66,12 @@ from mika.app.handmade.lists import Roles, drawn, listing
 from mika.app.handmade.person.common import Who, _slice
 from mika.app.handmade.person.files import files
 from mika.app.handmade.person.memory import memory
-from mika.app.handmade.rights import UNSHARE, retiring
+from mika.app.handmade.rights import UNSHARE, retiring, share_consoles
 from mika.app.handmade.tabs import anchored
 from mika.app.me import OUTBOUND
 from mika.app.me import accounts as channels
 from mika.app.me.sharing import Shared, every_share, given_and_received, sharer
+from mika.app.me.sharing import parts as share_parts
 from mika.contracts import affect as affect_c
 from mika.contracts import attention as attention_c
 from mika.contracts import goals as goals_c
@@ -95,10 +96,6 @@ from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import PREFIX, UI, Overview, env, secure
 from mika.kernel.clock import DAY, US
 from mika.kernel.inspect import Fields, Head, Note, Section, Table, num_fr, pct_fr, plural
-from mika.plugins.teams.inspect import ACCOUNT as TEAMS_ACCOUNT
-from mika.plugins.teams.inspect import SECTION as TEAMS_SECTION
-from mika.plugins.teams.inspect import WHOSE as TEAMS_WHOSE
-from mika.plugins.teams.inspect import YOURS
 from mika.runtime.boundary import Failed, call
 from mika.vocab import affect as A
 from mika.vocab import privacy
@@ -513,8 +510,7 @@ def owned_tabs() -> tuple[tuple[str, str, Roles], ...]:
     return tuple((p.tab, p.label, Roles(title=p.noun, badges=p.badges, tiles=True)) for p in channels.parts().values())
 
 
-#: ce qui se partage (ADR 0188), et à quel niveau, tels que la fiche les nomme
-SHARED_KINDS = {"mail": "boîte", "teams": "compte Teams", "mcp": "service", "agenda": "agenda"}
+#: le niveau d'un partage (ADR 0188), tel que la fiche le nomme ; sa sorte, sa part la dit (``SharingPart.word``)
 LEVEL_FR = {level: label.lower() for level, label in SHARES}
 
 
@@ -538,16 +534,9 @@ def services(look: Look, who: Who) -> list[dict[str, Any]]:
 
 
 def _resource(s: Shared) -> dict[str, str]:
-    """La ressource d'un partage, pour la fiche : sa sorte en mots, son nom, où elle mène."""
-    if s.kind == "mail":
-        href = subject_url("compte", s.key)
-    elif s.kind == "teams":
-        href = f"{PREFIX}/{TEAMS_SECTION}/extension?" + urlencode({TEAMS_WHOSE: s.owner or YOURS, TEAMS_ACCOUNT: s.key})
-    elif s.kind == "agenda":  # sa fiche (ADR 0309, lot 5)
-        href = subject_url("agenda", s.key)
-    else:
-        href = subject_url("serveur", s.key)
-    return {"kind": SHARED_KINDS[s.kind], "title": s.title, "href": href}
+    """La ressource d'un partage, pour la fiche : sa sorte en mots (``SharingPart.word``), son nom, où elle mène (ce
+    qu'en dit la part de console de sa sorte : ``ConsolePart.shared``)."""
+    return {"kind": share_parts()[s.kind].word, "title": s.title, "href": share_consoles()[s.kind].shared(s)}
 
 
 def shares(look: Look, who: Who) -> dict[str, list[dict[str, Any]]]:

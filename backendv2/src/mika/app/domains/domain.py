@@ -244,6 +244,14 @@ class ConsolePart:
     queue: QueuePart | None = None
     #: sa part de la fiche d'une personne
     person: PersonPart | None = None
+    #: où mène, dans la console, la ressource d'un de ses partages (sa fiche ; un compte Teams, son extension) :
+    #: ``shared(s)`` (``s`` : un ``app/me/sharing.py::Shared`` de sa sorte) — Réglages › Droits › Partages et l'onglet
+    #: Comptes de la fiche d'une personne la lisent (``app/handmade/rights.py::share_consoles``)
+    shared: Callable[..., str] | None = None
+    #: où se retire un de ses partages que la console ne retire pas elle-même (sa part des partages n'a pas
+    #: d'écriture, ``SharingPart.write`` : un service se règle sur ses lignes d'accès) : ``unshared(s)`` rend son
+    #: adresse
+    unshared: Callable[..., str] | None = None
 
 
 @dataclass(frozen=True, slots=True)

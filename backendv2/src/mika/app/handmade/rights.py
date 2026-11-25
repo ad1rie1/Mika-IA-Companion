@@ -10,7 +10,9 @@ Une lecture, sauf **Partages** (ADR 0210) : qui a reçu la boîte, le compte Tea
 retire le partage d'une boîte ou d'un compte Teams, par l'écriture de son propriétaire
 (``app/me/sharing.py::write_share``), confirmé et audité ; celui d'un service se retire sur ses lignes d'accès. Il n'en
 crée aucun : donner reste au propriétaire. Le même geste est sur la fiche d'une personne (Comptes › Partages,
-``retiring``), qui y revient (``retour``).
+``retiring``), qui y revient (``retour``). Chaque sorte de partage dit ses mots (``SharingPart.word``), si la console le
+retire (``SharingPart.write``), où mène sa ressource et où il se retire sinon (sa part de console :
+``ConsolePart.shared``, ``ConsolePart.unshared`` — ``share_consoles``).
 
 Une famille se décrit ici pour l'opératrice, à la troisième personne (``FAMILY_ABOUT``) : la phrase que lit le modèle
 (sa voix, ``persona/voix.yaml``) lui parle à elle (« tes rappels… »), et la console ne la recopie pas.
@@ -18,6 +20,7 @@ Une famille se décrit ici pour l'opératrice, à la troisième personne (``FAMI
 
 from __future__ import annotations
 
+import functools
 import re
 import secrets
 from collections.abc import Mapping, Sequence
@@ -30,8 +33,7 @@ from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 from starlette.routing import Route
 
-from mika.app.domains.agenda import api as agenda_me
-from mika.app.domains.tools.console.subject import KIND as SERVICE
+from mika.app.domains import DOMAINS, ConsolePart, part
 from mika.app.handmade.access import KEEP_CHOICES, capitalized, people_with_accounts
 from mika.app.me import Denied, missing, sharing
 from mika.contracts import forge as forge_c
@@ -100,9 +102,6 @@ UNSHARE = f"{PAGE}/partages"
 AGENDA_TABLE = f"{PAGE}/agenda"
 AGENDA_NEW_ROW = AgendaRule(who=(OWNER,))
 AGENDA_ROWS = 30
-#: ce qui se partage, dit à l'opératrice ; ce que la console retire elle-même (un service : ses lignes d'accès)
-SHARED_KINDS = {"mail": "boîte", "teams": "compte Teams", "mcp": "service", "agenda": "agenda"}
-RETIRED_HERE = ("mail", "teams", "agenda")
 
 
 @dataclass(frozen=True, slots=True)
@@ -444,9 +443,30 @@ def fixed_tools(ui: UI) -> dict[str, Any]:
             "count": sum(len(n) for n in reserved.values()), "guarded_count": sum(len(n) for n in guarded.values())}
 
 
+def retired_here(kind: str) -> bool:
+    """La console retire-t-elle elle-même un partage de cette sorte ? Oui quand sa part l'écrit
+    (``SharingPart.write``) ; un service, non : il se retire sur ses lignes d'accès."""
+    found = sharing.parts().get(kind)
+    return found is not None and found.write is not None
+
+
+@functools.cache
+def share_consoles() -> dict[str, ConsolePart]:
+    """La part de console de chaque sorte de partage, par sa sorte (dans l'ordre de ``app/me/sharing.py::KINDS``) :
+    celle du domaine qui la partage — où mène sa ressource (``ConsolePart.shared``) et, quand la console ne le retire
+    pas elle-même, où il se retire (``ConsolePart.unshared``). Lue à la demande, une fois ; chaque sorte a la sienne."""
+    found = {part(d.sharing, "SHARING").kind: part(d.console, "CONSOLE") for d in DOMAINS
+             if d.sharing is not None and d.console is not None}
+    lacking = sorted(kind for kind in sharing.KINDS if kind not in found or found[kind].shared is None
+                     or (not retired_here(kind) and found[kind].unshared is None))
+    if lacking:
+        raise ValueError(f"Partages : chaque sorte dit dans sa part de console où mène sa ressource — {lacking}")
+    return {kind: found[kind] for kind in sharing.KINDS}
+
+
 def _resource(s: sharing.Shared) -> str:
     article = "la " if s.kind == "mail" else "l'" if s.kind == "agenda" else "le "
-    return f"{article}{SHARED_KINDS[s.kind]} « {s.title} »"
+    return f"{article}{sharing.parts()[s.kind].word} « {s.title} »"
 
 
 def _owner(ui: UI, owner: str) -> str:
@@ -463,7 +483,7 @@ def retiring(ui: UI, s: sharing.Shared) -> dict[str, Any]:
     fois, pour que les deux endroits posent le même geste."""
     name = ui.names.who(s.person)
     return {"kind": s.kind, "key": s.key, "person": s.person, "name": name,
-            "access": "" if s.kind in RETIRED_HERE else render.href(Ref.subject(SERVICE, s.key, s.title, "fait")),
+            "access": "" if retired_here(s.kind) else share_consoles()[s.kind].unshared(s),
             "ask": f"Retirer à {name} son accès à {_resource(s)} ? Il disparaît de son espace ; seul son "
                    "propriétaire peut le lui redonner."}
 
@@ -475,9 +495,9 @@ def shared(ui: UI) -> list[dict[str, Any]]:
     if settings is None:
         return []
     out = []
-    for s in sharing.every_share(settings, agenda_me.calendar_names(ui.kernel.ports.get("agenda"))):
+    for s in sharing.every_share(settings, sharing.resource_names(ui.kernel.ports.get)):
         row = retiring(ui, s)
-        out.append({**row, "title": s.title, "sort": SHARED_KINDS[s.kind], "owner": _owner(ui, s.owner),
+        out.append({**row, "title": s.title, "sort": sharing.parts()[s.kind].word, "owner": _owner(ui, s.owner),
                     "level": dict(SHARES).get(s.level, s.level),
                     "href": render.href(Ref.subject("person", ui.names.person_of(s.person), row["name"]))})
     return out
@@ -487,7 +507,7 @@ async def _unshared(ui: UI, data: Mapping[str, Any], by: str) -> tuple[str, str]
     """Retirer ce partage : ce qu'il faut en dire. Il a pu partir entre-temps (un autre onglet, son propriétaire) : rien
     n'est alors écrit ni audité."""
     kind, key, person = (str(data.get(k, "")) for k in ("kind", "key", "person"))
-    if kind not in RETIRED_HERE:
+    if not retired_here(kind):
         return "warn", "Un service se retire sur ses lignes d'accès : rien n'a été retiré ici."
     found = next((s for s in sharing.every_share(ui.deps.settings)
                   if (s.kind, s.key, s.person) == (kind, key, person)), None)

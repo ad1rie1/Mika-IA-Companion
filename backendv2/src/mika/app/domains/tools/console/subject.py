@@ -58,6 +58,18 @@ from mika.vocab.access import KEEP_WORDS, MOMENTS, NO, PERSON, POLICY_WORDS
 from mika.vocab.episodes import Kind
 
 KIND = "serveur"
+
+
+def shared(s: Any) -> str:
+    """Où mène un de ses services, partagé (Réglages › Droits › Partages, la fiche d'une personne) : sa fiche."""
+    return subject_url("serveur", s.key)
+
+
+def unshared(s: Any) -> str:
+    """Où se retire le partage d'un service : ses lignes d'accès, sur sa fiche — la console ne le retire pas
+    d'ailleurs."""
+    return render.href(Ref.subject(KIND, s.key, s.title, "fait"))
+
 #: la ligne par défaut, dans la colonne « Qui » du résumé : comme dans les tableaux
 DEFAULT_WHO = "Comportement par défaut"
 #: les moments d'une ligne, dans sa liste à cocher

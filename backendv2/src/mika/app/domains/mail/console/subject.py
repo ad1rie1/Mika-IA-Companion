@@ -49,6 +49,12 @@ from mika.plugins.email.inspect.common import VOICE_LABEL, box_link, clip, draft
 ACCOUNT, MAIL, DRAFT = "compte", "mail", "brouillon"
 #: le fil d'un mail, à côté du message : ses premiers messages
 THREAD_SHOWN = 6
+
+
+def shared(s: Any) -> str:
+    """Où mène une de ses boîtes, partagée (Réglages › Droits › Partages, la fiche d'une personne) : sa fiche."""
+    return subject_url("compte", s.key)
+
 #: les trois façons d'écrire depuis une boîte, dites pour la page « Sa voix »
 VOICES = (("elle", "Elle écrit comme elle-même, sous son nom d'expéditrice ; tu n'apparais pas."),
           ("assistante", "Elle écrit pour toi, en assistante : l'expéditeur dit son nom, pour le tien."),

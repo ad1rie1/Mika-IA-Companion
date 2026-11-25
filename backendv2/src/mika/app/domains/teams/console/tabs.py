@@ -32,6 +32,10 @@ from mika.app.handmade.tabs import Got, Line, Tab, blank, pairs, text
 from mika.inspector.pages.subjects import subject_url_key
 from mika.inspector.ui import PREFIX
 from mika.plugins.teams import WAITING, under_way
+from mika.plugins.teams.inspect import ACCOUNT as TEAMS_ACCOUNT
+from mika.plugins.teams.inspect import SECTION as TEAMS_SECTION
+from mika.plugins.teams.inspect import WHOSE as TEAMS_WHOSE
+from mika.plugins.teams.inspect import YOURS
 from mika.ports.teams import split_conversation_key
 
 STYLES = ("handmade/teams.css",)
@@ -41,6 +45,12 @@ CONVERSATION, REPLY = "conversation_teams", "reponse_teams"
 CITED = 160
 #: la sorte d'une conversation (le mot du plugin) → sa marque
 KINDS = {"tête-à-tête": "dm", "groupe": "group", "canal": "channel", "réunion": "meeting"}
+
+
+def shared(s: Any) -> str:
+    """Où mène un de ses comptes, partagé (Réglages › Droits › Partages, la fiche d'une personne) : son extension."""
+    return f"{PREFIX}/{TEAMS_SECTION}/extension?" + urlencode({TEAMS_WHOSE: s.owner or YOURS, TEAMS_ACCOUNT: s.key})
+
 
 
 def _port(got: Got) -> Any:
