@@ -19,7 +19,7 @@ imports de chaque source d'``app`` (``ast`` : jamais un commentaire) :
   ``MenuLink``) : elle nomme les modules de ses parts, que le cadre importe au moment d'assembler. Le
   registre est donc une feuille de l'arbre des imports, que tout module d'``app`` peut lire ; et **chaque part nommée
   existe** et porte son nom convenu (``wire``, ``SETTINGS``, ``routes``, ``LIVE``, ``SHARING``, ``ACCOUNTS``,
-  ``CONSOLE``, ``preview``, ``add``).
+  ``OUTSIDE``, ``CONSOLE``, ``preview``, ``add``).
 
 Le contrôle est une fonction du texte des sources (``offences``) : les derniers tests l'essaient sur de petits
 sources factices, pour qu'il échoue vraiment quand on nomme un domaine.
@@ -37,6 +37,7 @@ from mika.app.domains import (
     ConsolePart,
     Domain,
     LivePart,
+    OutsidePart,
     PersonPart,
     SharingPart,
     TablePart,
@@ -46,6 +47,7 @@ from mika.app.handmade.person import TABS as PERSON_TABS
 from mika.app.handmade.person import account_tabs
 from mika.app.handmade.rights import share_consoles
 from mika.app.me.accounts import CHANNELS
+from mika.app.me.outside import OUTSIDE
 from mika.app.me.sharing import KINDS as SHARED_KINDS
 from mika.app.settings import SettingsPart
 
@@ -94,10 +96,8 @@ FOREVER: dict[str, str] = {
 #: ce qui reste à sortir du cadre : fichier d'``app`` → domaines qu'il nomme encore. Elle ne fait que rétrécir
 STILL: dict[str, set[str]] = {
     "handmade/directory.py": {"contacts"},
-    "handmade/rights.py": {"forge"},
     "handmade/tabs/people.py": {"contacts"},
     "handmade/tabs/thoughts.py": {"mail", "senses", "teams"},
-    "me/rights.py": {"forge", "tools"},
     "mindport.py": {"maps", "projects", "senses", "wakeup"},
     "preview/__init__.py": {"mail", "maps", "projects", "teams"},
 }
@@ -222,8 +222,8 @@ def test_every_part_a_card_names_exists_and_carries_its_name():
     """Une fiche nomme les modules de ses parts au lieu de les importer : une faute de frappe ne se verrait qu'à
     l'assemblage. Chaque module nommé s'importe ici, et porte le nom que le cadre y lit."""
     for d in DOMAINS:
-        for module in (d.wiring, d.settings, d.api, d.live, d.sharing, d.accounts, d.console, d.preview, d.cli,
-                       d.backup):
+        for module in (d.wiring, d.settings, d.api, d.live, d.sharing, d.accounts, d.outside, d.console, d.preview,
+                       d.cli, d.backup):
             assert module is None or _within(module, f"mika.app.{HOME}.{d.name}"), f"{d.name} : {module} est hors de son dossier"
         assert d.wiring is None or callable(part(d.wiring, "wire")), d.name
         assert d.settings is None or issubclass(part(d.settings, "SETTINGS"), SettingsPart), d.name
@@ -242,6 +242,13 @@ def test_every_part_a_card_names_exists_and_carries_its_name():
             assert held.canal in CHANNELS and held.kind and held.family and held.tab and held.label, d.name
             assert held.noun and all(isinstance(b, str) and b for b in held.badges), d.name
             assert all(callable(f) for f in (held.held, held.owned, held.shown, held.configured)), d.name
+        elsewhere = part(d.outside, "OUTSIDE")
+        assert elsewhere is None or isinstance(elsewhere, OutsidePart), d.name
+        if elsewhere is not None:  # ce qui vient d'ailleurs chez lui : une sorte de OUTSIDE, ses mots, ce qu'elle appelle
+            assert elsewhere.sort in OUTSIDE and elsewhere.bundle.endswith(".") and len(elsewhere.bundle) > 1, d.name
+            assert elsewhere.title and elsewhere.why, d.name
+            assert all(callable(f) for f in (elsewhere.seen, elsewhere.tool, elsewhere.allowance, elsewhere.name,
+                                             elsewhere.about, elsewhere.row)), d.name
         assert d.console is None or isinstance(part(d.console, "CONSOLE"), ConsolePart), d.name
         if d.console is not None:  # où mène, dans la console, la ressource d'un de ses partages, où il se retire
             console = part(d.console, "CONSOLE")
@@ -295,6 +302,17 @@ def test_a_table_set_in_the_rights_page_has_one_hand():
                 if (c := part(d.console, "CONSOLE")).table is not None]
     twice = [(a, b) for i, a in enumerate(prefixes) for j, b in enumerate(prefixes) if i != j and b.startswith(a)]
     assert prefixes and not twice, twice
+
+
+def test_each_sort_from_elsewhere_has_its_part_said_once():
+    """L'écran Outils lit ce qui vient d'ailleurs sorte par sorte, dans l'ordre de ``OUTSIDE`` (``app/me/outside.py``),
+    et Réglages › Droits par leur sorte : une sorte sans part, ou dite par deux, ferait échouer la première lecture —
+    ici, avant. Leurs familles d'outils ne se recouvrent pas : sinon un outil serait rangé sous deux sortes."""
+    found = [part(d.outside, "OUTSIDE") for d in DOMAINS if d.outside is not None]
+    assert sorted(p.sort for p in found) == sorted(OUTSIDE), [p.sort for p in found]
+    bundles = [p.bundle for p in found]
+    twice = [(a, b) for i, a in enumerate(bundles) for j, b in enumerate(bundles) if i != j and b.startswith(a)]
+    assert not twice, twice
 
 
 def test_each_channel_has_its_accounts_said_once():

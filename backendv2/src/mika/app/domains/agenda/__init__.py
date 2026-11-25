@@ -13,7 +13,8 @@ vérifie et enregistre.
 
 Restent au cadre : le rangement de ses droits (le tableau réglé de chaque agenda est gardé par la porte des
 réglages avec ceux des canaux et des outils, lus à chaque épisode — on les lit et on les enregistre par ses
-réglages) ; « qui peut quoi » — une page qui croise les domaines.
+réglages) ; « qui peut quoi » — une page qui croise les domaines, où sa console règle le tableau d'un agenda
+(``console/rights.py``).
 """
 
 from __future__ import annotations

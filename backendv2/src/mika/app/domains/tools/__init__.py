@@ -5,7 +5,9 @@ accès réglés des serveurs du système), ce qu'un serveur MCP fait d'elle, éc
 régler, brancher, retirer), les serveurs qu'apporte un plugin système (``system.py`` : la recherche web, le plugin
 ``web``), leur câblage (``wiring.py`` : le client MCP, le port ``mcp`` ; puis, le noyau là, ce qui le reconfigure et
 ses outils prêtés à un agent, ``lending.py``, servis sous ``/mcp/pret/<nom>``), leur module de l'API par personne
-(``api.py`` : ses services), ce qu'ils partagent (``sharing.py`` : ses services, avec qui), leur part du direct
+(``api.py`` : ses services), ce qu'ils partagent (``sharing.py`` : ses services, avec qui), ses services comme
+ressources venues d'ailleurs (``outside.py`` : leur ligne et leur nom dans l'écran Outils et Réglages › Droits), leur
+part du direct
 (``live.py``), leur commande (``cli.py`` : ``mika mcp``) et leur part de la console (``console/`` : la fiche d'un
 service branché, les services d'une personne sur sa fiche, sa rubrique de réglages, leurs gabarits). Les services MCP lancés sur cette machine vivent dans le
 dossier ``mcp/`` (``places``).
@@ -29,6 +31,7 @@ TOOLS = Domain(
     api="mika.app.domains.tools.api",
     live="mika.app.domains.tools.live",
     sharing="mika.app.domains.tools.sharing",
+    outside="mika.app.domains.tools.outside",
     console="mika.app.domains.tools.console",
     cli="mika.app.domains.tools.cli",
     plugins={

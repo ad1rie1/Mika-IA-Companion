@@ -4,7 +4,8 @@ quand elle lui parle d'elle-même), et seule quand elle travaille.
 
 Chaque case est la décision même de la porte d'offre (``runtime.tool_offer.judge`` : les deux portes, le plafond, la
 condition d'un outil, une ressource à son nom), jamais une recopie ; pour un service ou une app de la Forge, la ligne de
-leurs accès, telle que leur faculté la déclare (``RightsSpec.grants``). Ses ressources s'y rangent : ses propres
+leurs accès, telle que leur faculté la déclare (``RightsSpec.grants``), lue et nommée par la part de sa sorte
+(``app/me/outside.py``). Ses ressources s'y rangent : ses propres
 outils, famille par famille, chacun nommé pour elle (``label``, ADR 0208) ; ses comptes (chaque boîte, chaque compte
 Teams, avec la règle qui vaut pour son canal — qui, préparer d'elle-même, comment ça part —, tels que son canal les
 dit : ``app/me/accounts.py``) ; les services et les apps
@@ -23,17 +24,15 @@ from urllib.parse import urlencode
 from starlette.routing import Route
 
 from mika.app.console import LABELS
-from mika.app.domains.tools import system as system_mcp
 from mika.app.me import accounts as channels
+from mika.app.me import outside as outside_me
 from mika.app.me.api import Call, Me, MeApiBase
-from mika.contracts import forge as forge_c
 from mika.contracts import identity as identity_c
 from mika.contracts import self_ as self_c
 from mika.inspector.names import Names
 from mika.inspector.pages.accounts import RIGHTS
 from mika.inspector.pages.tools import condition
 from mika.kernel.frame import Audience
-from mika.plugins.forge import access as forge_access
 from mika.runtime.boundary import Failed, call
 from mika.runtime.inspection import Inspection
 from mika.runtime.tool_offer import FITS, NEEDS, WHEN, Judged, allowed, gate_of, judge
@@ -69,7 +68,7 @@ from mika.vocab.canals import Canals
 from mika.vocab.episodes import Kind
 from mika.vocab.ownership import OWNED
 from mika.vocab.privacy import ChannelTrust
-from mika.vocab.rights import Allowance, tool_allowance
+from mika.vocab.rights import Allowance
 
 #: les canaux de la matrice, dans l'ordre de ses colonnes : (clé, canal du moteur, libellé)
 CANALS: tuple[tuple[str, str, str], ...] = (
@@ -91,10 +90,6 @@ REASONS = {NEEDS: "son service n'est pas configuré", FITS: "les accès de sa re
 OWNED_WHY = "une boîte ou un compte à ton nom, ou qu'on te partage"
 #: le canal par où ça arrive a serré ce que la ligne laissait (``Allowance.narrowed``), dit à la personne
 NARROWED = "ce canal le restreint"
-#: une case d'ailleurs dont on ne sait pas redire la ligne (une app) : ses accès, en mots
-OUTSIDE_WHY = {"services": "les accès de ce service", "apps": "les accès de cette app"}
-#: les sortes de ressources que les facultés déclarent et que la matrice montre : (clé du type de règles, groupe)
-OUTSIDE = (("services", "services"), ("apps", "apps"))
 
 
 def audience_of(me: Me, canal: str) -> Audience:
@@ -236,24 +231,24 @@ async def matrix(call_: Call) -> dict[str, Any]:
             {"name": spec.name, "label": spec.label, "description": spec.description, "acts": spec.acts,
              "cells": cells})
 
-    # ce qui vient d'ailleurs : la ligne de son service ou de son app, telle que sa faculté la déclare
+    # ce qui vient d'ailleurs : la ligne de son service ou de son app, telle que sa faculté la déclare — chaque sorte,
+    # dans l'ordre de ses groupes, comme sa part la lit (``app/me/outside.py``)
     ctx = Inspection(kernel).context()
-    outside: dict[str, dict[str, dict[str, Any]]] = {group: {} for _key, group in OUTSIDE}
-    port = kernel.ports.get("mcp")
-    offered = {(t.server, t.remote): t for t in (port.offered() if port else ())}
-    statuses = {st.name: st for st in (port.statuses() if port else ())}
+    sorts = outside_me.parts()
+    seen = {sort: found.seen(kernel, frame) for sort, found in sorts.items()}
+    outside: dict[str, dict[str, dict[str, Any]]] = {sort: {} for sort in sorts}
     specs = {s.key.rsplit(".", 1)[-1]: s for s in registry.rights if s.grants is not None}
-    for sort, group in OUTSIDE:
+    for sort, found in sorts.items():
         rspec = specs.get(sort)
         if rspec is None:
             continue
         for c, m, aud, kind in places:
             got = call(rspec.grants, frame.state(rspec.owner), frame, ctx, aud, kind, label=f"droits {rspec.key}")
             for g in [] if isinstance(got, Failed) or got is None else got:
-                tool, resource = _outside_tool(sort, g, offered)
+                tool, resource = found.tool(seen[sort], g)
                 if not tool or tool not in tools:
                     continue
-                entry = outside[group].setdefault(resource, {})
+                entry = outside[sort].setdefault(resource, {})
                 spec = tools[tool]
                 row = entry.setdefault(tool, {"name": tool, "label": spec.label, "description": spec.description,
                                               "acts": spec.acts, "cells": {}})
@@ -262,24 +257,21 @@ async def matrix(call_: Call) -> dict[str, Any]:
                     row["cells"][f"{c}/{m}"] = _cell(judged, spec)
                     continue
                 # la lecture même de sa ligne : celle de son service, ou celle de son app (de son projet), ADR 0219
-                mirror = _service_allowance(g, offered, statuses, aud, kind, rights, close) if sort == "services" \
-                    else forge_access.resource_allowance(frame, resource, tool, spec.acts, aud, kind)
+                mirror = found.allowance(seen[sort], frame, g, resource, tool, spec.acts, aud, kind, rights, close)
 
                 def said(level: str, g: Any = g, mirror: Allowance | None = mirror, aud: Audience = aud,
-                         kind: str = kind, acts: bool = spec.acts, sort: str = sort) -> str:
+                         kind: str = kind, acts: bool = spec.acts, why: str = found.why) -> str:
                     # la ligne redite seulement si c'est bien celle qui a décidé (une app y ajoute « (de son
                     # projet n° 3) ») ; sinon, ses accès en mots
                     if mirror is not None and (mirror.why == g.why or g.why.startswith(f"{mirror.why} (")):
                         return said_to(mirror, acts, aud, kind, close, sources)
-                    return f"{OUTSIDE_WHY[sort]} " + ("ne te l'ouvrent pas" if level == NO else "te l'ouvrent")
+                    return f"{why} " + ("ne te l'ouvrent pas" if level == NO else "te l'ouvrent")
 
                 row["cells"][f"{c}/{m}"] = _grant_cell(g, said, g.why if me.operator else "")
 
     her = self_c.name_of(frame.get(self_c.PERSONA))
     name = person_name(frame)
     canals = rights.canals or Canals()
-    apps = {a.name: a for a in frame.get(forge_c.APPS) or ()}
-    system = system_mcp.shown(frame)
     # la page de la console où se lit le tableau d'une ressource : seulement pour une opératrice
     href = (lambda key: f"{RIGHTS}?{urlencode({'detail': key})}") if me.operator else (lambda _key: "")
     groups = [
@@ -287,7 +279,7 @@ async def matrix(call_: Call) -> dict[str, Any]:
             {"key": f"famille:{b}", "title": names.bundle(b), "description": registry.bundles.get(b, ""),
              "href": href(f"famille:{b}"), "tools": rows}
             for b, rows in sorted(families.items(), key=lambda kv: names.bundle(kv[0]).casefold())
-            if not b.startswith(("mcp.", "forge_apps."))]},
+            if not b.startswith(tuple(found.bundle for found in sorts.values()))]},
         # les comptes de chaque canal, dans l'ordre des canaux (``app/me/accounts.py``)
         {"key": "accounts", "title": "Tes comptes", "resources": [
             {"key": f"{channel.canal}:{key}", "kind": channel.kind, **channel.shown(a),
@@ -296,66 +288,15 @@ async def matrix(call_: Call) -> dict[str, Any]:
             # propriétaire
             for channel in channels.parts().values() for key, (a, level) in channel.held(call_).items()
             if level == OWNED]},
-        *({"key": group, "title": "Services" if group == "services" else "Apps de la Forge", "resources": [
-            {"key": resource, "title": _outside_title(resource, apps, system),
-             "description": _outside_about(resource, statuses, system), "href": href(resource),
+        *({"key": sort, "title": found.title, "resources": [
+            {"key": resource, "title": found.name(seen[sort], resource),
+             "description": found.about(seen[sort], resource), "href": href(resource),
              "tools": list(rows.values())}
-            for resource, rows in sorted(outside[group].items()) if _opens(rows.values())]}
-          for _sort, group in OUTSIDE),
+            for resource, rows in sorted(outside[sort].items()) if _opens(rows.values())]}
+          for sort, found in sorts.items()),
     ]
     return {"canals": [{"key": k, "label": label} for k, _c, label in CANALS],
             "moments": [{"key": k, "label": label} for k, _kind, label in (*MOMENTS, WORK)], "groups": groups}
-
-
-def _outside_tool(sort: str, g: Any, offered: Mapping[tuple[str, str], Any]) -> tuple[str, str]:
-    """(l'outil chez elle, sa ressource) d'une ligne d'ailleurs : un service (« « meteo » · echo »), une app (son
-    nom même)."""
-    if sort == "services":
-        found = offered.get(_served(g))
-        return (found.name if found is not None else ""), g.resource
-    return g.title, g.resource
-
-
-def _served(g: Any) -> tuple[str, str]:
-    """(son service, son outil là-bas) d'une ligne d'un service : sa ressource (``mcp:<service>``), son titre."""
-    return g.resource.partition(":")[2], g.title.rsplit(" · ", 1)[-1]
-
-
-def _service_allowance(g: Any, offered: Mapping[tuple[str, str], Any], statuses: Mapping[str, Any],
-                       aud: Audience, kind: str, rights: Any, close: Callable[[str], bool] | None) -> Allowance | None:
-    """La lecture même des lignes de son service (``tool_allowance``, comme sa faculté la fait), pour en redire la
-    ligne : ``None`` sans le service ou l'outil."""
-    server, remote = _served(g)
-    status, found = statuses.get(server), offered.get((server, remote))
-    if status is None or found is None:
-        return None
-    return tool_allowance(status.access, status.default, aud, kind, found.nature != "lecture", rights,
-                          lambda a: a.concerns(remote), close=close, outside=True)
-
-
-def _outside_title(resource: str, apps: Mapping[str, Any], system: Mapping[str, tuple[str, str]]) -> str:
-    """Le nom d'une ressource d'ailleurs : un service du système par son titre (« Le web », ADR 0219), un autre
-    service par son nom, une app par son titre quand elle en a un."""
-    kind, _, key = resource.partition(":")
-    if kind == "forge":
-        app = apps.get(key)
-        return f"App « {app.title if app is not None and app.title else key} »"
-    if kind == "mcp" and key in system:
-        return system[key][0]
-    return {"mcp": f"Service « {key} »", "project": f"Projet n° {key}"}.get(kind, resource)
-
-
-def _outside_about(resource: str, statuses: Mapping[str, Any], system: Mapping[str, tuple[str, str]]) -> str:
-    """À quoi sert un service, dit à la personne : celui qu'une personne a branché (``owner``, ADR 0192), tel qu'elle
-    l'a dit (``purpose``) — Paramètres le montre déjà à elle et à qui elle le partage ; un service du système, la
-    phrase que la composition écrit pour la personne (``system_mcp.SHOWN``, ADR 0219). Rien pour un service de
-    l'opérateur : son ``purpose`` est la ligne de son catalogue, écrite pour elle et au « tu » qui la désigne, pas pour
-    la personne (ADR 0209) ; rien pour une app."""
-    kind, _, key = resource.partition(":")
-    status = statuses.get(key) if kind == "mcp" else None
-    if status is not None and status.owner:
-        return status.purpose
-    return system[key][1] if kind == "mcp" and key in system else ""
 
 
 def _opens(rows: Iterable[Mapping[str, Any]]) -> bool:

@@ -3,7 +3,8 @@
 Ce dossier porte ses réglages (``settings.py`` : ce qu'un opérateur règle pour chaque app, tenu en mémoire pour les
 fils de la Forge), le port ``forge_settings`` (``store.py`` : ces réglages rendus à l'app, ses secrets ouverts), son
 câblage (``wiring.py`` : ses réglages, une base par app et l'hôte qui fait tourner ses apps ; puis, le noyau là, ses
-outils et son heure), sa commande (``cli.py`` : ``mika forge promote|demote``) et sa part de la console
+outils et son heure), sa commande (``cli.py`` : ``mika forge promote|demote``), ses apps comme ressources venues
+d'ailleurs (``outside.py`` : leur ligne et leur nom dans l'écran Outils et Réglages › Droits) et sa part de la console
 (``console/`` : l'onglet Apps forgées, son gabarit et sa feuille). Le journal de ses apps est rangé dans la base
 ``views`` (``models``) ; ses apps, leurs versions et leurs bases, dans le dossier ``forge/`` (``places``).
 """
@@ -19,6 +20,7 @@ FORGE = Domain(
     places={"forge": "ses apps forgées, leurs versions et leurs bases"},
     settings="mika.app.domains.forge.settings",
     wiring="mika.app.domains.forge.wiring",
+    outside="mika.app.domains.forge.outside",
     console="mika.app.domains.forge.console",
     cli="mika.app.domains.forge.cli",
     destination=Destination("apps", "Apps forgées", "Les petites apps qu'elle écrit elle-même.", subjects=("app",)),

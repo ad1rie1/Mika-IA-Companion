@@ -36,7 +36,7 @@ from starlette.routing import Route
 from mika.app.domains import DOMAINS, ConsolePart, TablePart, part
 from mika.app.handmade.access import people_with_accounts
 from mika.app.me import Denied, missing, sharing
-from mika.contracts import forge as forge_c
+from mika.app.me import outside as outside_me
 from mika.inspector import render
 from mika.inspector.pages import rights
 from mika.inspector.pages import tools as catalog
@@ -225,7 +225,6 @@ def sections(ui: UI, got: Mapping[str, Any] | None, query: str) -> list[dict[str
     ses projets, ses canaux, les agendas (ADR 0309) — chacune avec ses outils décrits et le lien de son détail."""
     registry, frame = ui.kernel.registry, ui.kernel.mind.frame()
     tables = {t.resource: t for _spec, found in rights.tables(ui) for t in found}
-    apps = {a.name: a for a in frame.get(forge_c.APPS)}
     by_bundle: dict[str, list[Any]] = {}
     for spec in sorted(registry.tools.values(), key=lambda t: t.name):
         by_bundle.setdefault(spec.bundle, []).append(spec)
@@ -245,18 +244,18 @@ def sections(ui: UI, got: Mapping[str, Any] | None, query: str) -> list[dict[str
     internal = [entry(b, ui.names.bundle(b), FAMILY_ABOUT.get(b, ""), specs, f"famille:{b}")
                 for b, specs in sorted(by_bundle.items(), key=lambda kv: ui.names.bundle(kv[0]).casefold())
                 if not any(registry.is_dynamic(s.name) for s in specs)]
-    forged = []
-    for b, specs in sorted(by_bundle.items()):
-        if not b.startswith("forge_apps."):
-            continue
-        name = b.partition(".")[2]
-        app = apps.get(name)
-        detail = f"project:{app.project}" if app is not None and app.project else f"forge:{name}"
-        label = (app.title if app is not None and app.title else name)
-        forged.append(entry(b, f"App « {label} »", registry.bundles.get(b, ""), specs, detail))
-    services = [entry(b, f"Service « {b.partition('.')[2]} »", registry.bundles.get(b, ""), specs,
-                      f"mcp:{b.partition('.')[2]}")
-                for b, specs in sorted(by_bundle.items()) if b.startswith("mcp.")]
+    def outside(sort: str) -> list[dict[str, Any]]:
+        # les familles d'une sorte venue d'ailleurs (une app, un service), chacune sur sa ligne : son libellé et le
+        # détail de ses accès, tels que sa part les dit (``OutsidePart.row``)
+        found = outside_me.parts()[sort]
+        out = []
+        for b, specs in sorted(by_bundle.items()):
+            if b.startswith(found.bundle):
+                label, detail = found.row(frame, b.partition(".")[2])
+                out.append(entry(b, label, registry.bundles.get(b, ""), specs, detail))
+        return out
+
+    forged, services = outside("apps"), outside("services")
     projects_got = got["projects"] if got else {}
     projects = [entry(t.resource, t.title, t.note, (), t.resource, what_of(projects_got.get(t.resource)) if got else "")
                 for t in tables.values() if t.resource.startswith("project:")]

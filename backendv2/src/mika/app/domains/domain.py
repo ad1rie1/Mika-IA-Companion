@@ -23,6 +23,8 @@ cadre les importe au moment d'assembler (``part``), et y lit un nom convenu :
   parts) ;
 - ``accounts`` : ``ACCOUNTS``, une ``AccountsPart`` : les comptes de son canal (``app/me/accounts.py`` réunit les
   parts) ;
+- ``outside`` : ``OUTSIDE``, une ``OutsidePart`` : une sorte de ressource dont les outils viennent d'ailleurs
+  (``app/me/outside.py`` réunit les parts) ;
 - ``console`` : ``CONSOLE``, une ``ConsolePart`` ;
 - ``wiring`` : ``wire(w)``, ce que le serveur construit pour lui avant le noyau (ses adaptateurs, ses portes), et,
   facultatif, ``bind(w)``, ce qui a besoin du noyau (``app/wiring.py::Wiring``) ;
@@ -180,6 +182,40 @@ class AccountsPart:
 
 
 @dataclass(frozen=True, slots=True)
+class OutsidePart:
+    """Une sorte de ressource dont les outils viennent d'ailleurs (ADR 0192, 0219) : un service MCP, une app de la
+    Forge. Ses outils sont rangés sous sa famille à elle (``mcp.<service>``, ``forge_apps.<app>``), et leur ligne est
+    celle de leur ressource, que sa faculté déclare (``RightsSpec.grants``). L'écran Outils (``app/me/rights.py``) et
+    Réglages › Droits (``app/handmade/rights.py``) réunissent les parts (``app/me/outside.py``), chacun dans l'ordre de
+    sa page ; ils n'en connaissent aucune."""
+
+    #: la sorte de ses droits, la fin de la clé de son ``RightsSpec`` (« services », « apps ») : son groupe dans l'écran
+    #: Outils ; sa place : ``app/me/outside.py::OUTSIDE``
+    sort: str
+    #: le début du nom de la famille de ses outils (« mcp. », « forge_apps. ») : ses outils ne sont pas à elle
+    bundle: str
+    #: son groupe dans l'écran Outils, en mots (« Services », « Apps de la Forge »)
+    title: str
+    #: pourquoi une case, quand on ne sait pas redire sa ligne : ses accès, en mots (« les accès de ce service »)
+    why: str
+    #: ce qu'il lit une fois par lecture de la matrice : ``seen(kernel, frame)`` (les outils qu'offrent ses services et
+    #: leur état ; les apps forgées) — ce que ses autres lectures reçoivent (``seen``)
+    seen: Callable[..., Any]
+    #: (l'outil chez elle, sa ressource) d'une de ses lignes : ``tool(seen, g)`` ; un outil vide : il n'est pas offert
+    tool: Callable[..., tuple[str, str]]
+    #: la lecture même de sa ligne, pour la redire à la personne : ``allowance(seen, frame, g, resource, tool, acts,
+    #: audience, kind, rights, close)`` rend une ``vocab.rights.Allowance``, ou ``None``
+    allowance: Callable[..., Any]
+    #: le nom d'une de ses ressources, dit à la personne : ``name(seen, resource)``
+    name: Callable[..., str]
+    #: à quoi elle lui sert : ``about(seen, resource)`` (vide : rien à en dire)
+    about: Callable[..., str]
+    #: sa ligne dans Réglages › Droits, pour une de ses familles (``<bundle><nom>``) : ``row(frame, nom)`` rend son
+    #: libellé et la clé du détail de ses accès
+    row: Callable[..., tuple[str, str]]
+
+
+@dataclass(frozen=True, slots=True)
 class QueuePart:
     """Sa part de la file « À valider » (ADR 0177) : ce qu'il y inscrit, et ce qu'il dit d'une demande d'accord.
     La file (``app/handmade/waiting.py``) et les sources d'une demande (``app/handmade/approval_sources.py``)
@@ -308,6 +344,8 @@ class Domain:
     sharing: str | None = None
     #: le module des comptes de son canal (``ACCOUNTS`` : son ``AccountsPart``)
     accounts: str | None = None
+    #: le module de ce qui vient d'ailleurs chez lui (``OUTSIDE`` : son ``OutsidePart``)
+    outside: str | None = None
     #: le module de sa part de la console (``CONSOLE``)
     console: str | None = None
     #: le module de ce qu'il ajoute à l'aperçu de la console (``preview``)
