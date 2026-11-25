@@ -13,7 +13,7 @@ L'écran Projets modifie ce qu'il montre. La plupart de ses gestes passent par u
   le geste d'une personne, qui pose un fait ; l'effet part ensuite chez l'hôte (``managing.py``).
 
 Des textes de console et d'écran, lus par qui décide — pas des phrases qu'elle lit. La console n'a pas encore le
-formulaire de ces actions : elles se font par l'API de la personne (``app/me/project_manage.py``).
+formulaire de ces actions : elles se font par l'API de la personne (``app/domains/projects/api/manage.py``).
 """
 
 from __future__ import annotations

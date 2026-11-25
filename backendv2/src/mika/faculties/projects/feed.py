@@ -1,5 +1,5 @@
 """Le fil d'un projet et les pas d'une exécution (ADR 0290, 0297) — pur, lu par l'API par personne
-(``app/me/project_activity.py``) et par la fiche de la console (``app/handmade/subjects/project_activity.py``).
+(``app/domains/projects/api/activity.py``) et par la fiche de la console (``app/domains/projects/console/activity.py``).
 
 - **Le fil** : ce qu'un événement de son journal donne à son fil d'activité — rien, une ligne, ou deux (une exécution
   et son commit) —, rangé par sorte (exécution, commit, pull request, ticket, geste). Un geste est ce qu'une personne

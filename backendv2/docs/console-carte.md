@@ -464,7 +464,7 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
 
 **Projets** (ADR 0031, 0133) : un projet est une boîte noire qu'on pilote, distincte d'un but.
 
-Ses onglets sont dans `app/handmade/tabs/projects.py` (ADR 0177).
+Ses onglets sont dans `app/domains/projects/console/tabs.py` (ADR 0177).
 
 - **Ses projets**, la page d'ensemble (ADR 0281) : « À faire » en tête — ce qui t'attend dans tous ses projets, dans
   l'ordre où s'en occuper (la règle : `faculties/projects/todo.py` ; ses mots : `inspect_todo.py`), chaque ligne
@@ -479,7 +479,7 @@ Ses onglets sont dans `app/handmade/tabs/projects.py` (ADR 0177).
   par ligne, ponctuels et constants), son mode et ses outils, son rythme et sa plage, sa liberté, son dépôt distant.
 - **Exécutions** : ce qui tourne en ce moment, puis le fil jour par jour (filtrable par projet et par verdict) :
   projet et objectif visé, verdict et preuve, compte rendu, commit ; chacune mène à son épisode (prompt, outils,
-  appels, décision). L'onglet Exécutions de la fiche d'un projet suit le même fil (`handmade/projets/_runs.html`).
+  appels, décision). L'onglet Exécutions de la fiche d'un projet suit le même fil (`app/domains/projects/console/templates/handmade/projets/_runs.html`).
 - **Décisions techniques** : rangées par projet (filtrables par projet, et par statut en bouton à choix), chacune
   avec sa question, ce qui est choisi, pourquoi, qui l'a posée et quand ; une décision remplacée s'estompe.
 - **La fiche** gouverne, onglet par onglet, calquée sur l'écran Projets du client web (ADR 0297) : Vue d'ensemble,
@@ -489,21 +489,21 @@ Ses onglets sont dans `app/handmade/tabs/projects.py` (ADR 0177).
   missions, ce que montre « Ouverts » —, ses tickets ouverts) ; plus rien sous « Plus ». Administration porte « Accès » en sous-onglet (`Overview.joined`) ; les adresses des onglets d'avant mènent à ce
   qui les a remplacés sans exécuter leur vue (`Overview.moved`, ADR 0297) — `fichiers` à Code, `decisions` à
   Documentation › Décisions, `carnet` à Activité › Carnet. En tête, son nom, son état en pastilles, son mode et pour qui
-  (`handmade/projets/tete.html`), puis la principale (« Lancer maintenant », ou « Reprendre » en pause) et « Donner
+  (`app/domains/projects/console/templates/handmade/projets/tete.html`), puis la principale (« Lancer maintenant », ou « Reprendre » en pause) et « Donner
   une consigne », le reste sous « ⋯ ». L'inventaire de ses actions, et l'onglet qui porte chacune, est gardé par
   `tests/protocol/test_project_fiche_tabs.py`.
-  **Son cadre** (`handmade/projets/cadre.html`, `static/handmade/projets_fiche.css` et `projets_zones.css` : le
+  **Son cadre** (`app/domains/projects/console/templates/handmade/projets/cadre.html`, `app/domains/projects/console/static/handmade/projets_fiche.css` et `projets_zones.css` : le
   dessin de l'écran sur les jetons de la console) : sous la barre d'onglets, le contenu de l'onglet sur toute la
   largeur. La liste des projets n'y est pas : on y revient par le fil d'Ariane, comme l'écran par « ‹ Projets ». Les
   trois zones — une liste, le contenu en volets, un panneau — valent pour un onglet en liste et détail, et la liste
   est la sienne (ses objectifs, ses tickets) : *Objectifs*, *Tickets*, *Listes* et les sous-vues de *Code* les
-  posent eux-mêmes (`app/handmade/subjects/project_goals.py`, `project_diagram.py`, `project_tickets.py`,
-  `project_code.py`, leurs aides dans `project_zones.py`). Un choix d'élément est une adresse (`?objectif=`,
+  posent eux-mêmes (`app/domains/projects/console/goals.py`, `diagram.py`, `tickets.py`,
+  `code.py`, leurs aides dans `zones.py`). Un choix d'élément est une adresse (`?objectif=`,
   `?element=`, `?vue=pulls&pr=`), un volet un sous-onglet ; sur
   un écran moyen le panneau se replie en bande, sur un téléphone la liste puis le détail (avec un retour), et le
   panneau est un volet « Infos ». Chaque geste est une action déclarée, dont la console prépare le formulaire pour
   l'objet choisi ; il s'ouvre dans le contenu ou dans le panneau.
-  *Vue d'ensemble* (dessinée, `app/handmade/subjects/project.py`, `handmade/projets/vue.html`, ADR 0297 : un seul
+  *Vue d'ensemble* (dessinée, `app/domains/projects/console/subject.py`, `app/domains/projects/console/templates/handmade/projets/vue.html`, ADR 0297 : un seul
   bandeau — sa pause ou ce qui le retient — puis une grille de cartes, sans rien d'imbriqué, chacune menant à son
   onglet. « Où il en est » : son dernier compte rendu et son cadre. « Ce qui attend » : combien de choses attendent
   quelqu'un, les trois premières et le reste replié — un accord (tout effet proposé pendant son travail, l'appel
@@ -523,8 +523,8 @@ Ses onglets sont dans `app/handmade/tabs/projects.py` (ADR 0177).
   nom, sa plage sur « Prochain passage », sa dernière exécution sur « Où il en est » ; ce que seul le portail dit
   (ses identifiants, ses plafonds, ses pannes) est dans Administration › Sous le capot. Ce qu'elle dessine en barres
   vient de `faculties/projects/glance.py`, la source que lit aussi l'API par personne)
-  · *Objectifs* (l'onglet `objectifs` ; dessiné, `app/handmade/subjects/project_goals.py`,
-  `handmade/projets/objectifs.html`, calqué sur l'onglet de l'écran : la bascule Liste | Diagramme. **En liste**,
+  · *Objectifs* (l'onglet `objectifs` ; dessiné, `app/domains/projects/console/goals.py`,
+  `app/domains/projects/console/templates/handmade/projets/objectifs.html`, calqué sur l'onglet de l'écran : la bascule Liste | Diagramme. **En liste**,
   trois zones. À gauche : « Ajouter un objectif », le filtre en pastilles — ouverts, faits, retirés, tous (celui de
   sa vue, `?objectifs=`) —, puis une ligne serrée par objectif, par groupes (en cours, dans l'ordre du plan ;
   missions ; terminés ; retirés) : un point à la couleur de son état, un autre quand un point d'arrêt attend, son
@@ -546,7 +546,7 @@ Ses onglets sont dans `app/handmade/tabs/projects.py` (ADR 0177).
   demandés, fusionnée, fermée ; ses vérifications, ADR 0275 ; sa relecture ; ses conflits ; son lien chez l'hôte),
   ses tickets liés, et « Gérer » : le rouvrir, le dire terminé, le dire bloqué, le retirer. Une mission montre ce
   que chaque passage fait, ses derniers passages, et dans le panneau son rythme et ce qui la déclenche ; elle ne se
-  coche pas. **En diagramme** (`?vue=diagramme`, `project_diagram.py`, `handmade/projets/diagramme.html`) : une
+  coche pas. **En diagramme** (`?vue=diagramme`, `app/domains/projects/console/diagram.py`, `app/domains/projects/console/templates/handmade/projets/diagramme.html`) : une
   ligne par objectif et par mission, ses jalons en retrait ; « Avancement » (`mode` absent : la part faite de
   chacun, puis un mot) ou « Dans le temps » (`?mode=temps`, en jours ou en semaines par `?echelle=` : un axe, une
   barre de quand elle s'y est mise à quand c'est atteint, le trait d'aujourd'hui, une flèche d'un objectif à celui
@@ -557,8 +557,8 @@ Ses onglets sont dans `app/handmade/tabs/projects.py` (ADR 0177).
   personne. Le flux du projet se règle avec son dépôt distant, onglet Code ; la proposition d'une pull request se
   décide dans « À valider » avec son aperçu, comme un envoi ; le réglage « Relecture indépendante » est dans
   Administration › Ses réglages)
-  · *Documentation* (ADR 0289, 0297 ; dessiné, `app/handmade/subjects/project_docs.py`,
-  `handmade/projets/documentation.html` et `_editeur.html`, `static/handmade/projets_docs.css`, `doc_editor.js` :
+  · *Documentation* (ADR 0289, 0297 ; dessiné, `app/domains/projects/console/docs.py`,
+  `app/domains/projects/console/templates/handmade/projets/documentation.html` et `_editeur.html`, `app/domains/projects/console/static/handmade/projets_docs.css`, `doc_editor.js` :
   ses sous-onglets en adresses — *Pages* : l'arborescence et la recherche (`?q=`), « Nouvelle page » ; la page choisie
   (`?page=<chemin>`, la page d'accueil sinon) rendue par le moteur — ses titres un cran plus bas que celui de la page,
   ses tableaux en grilles, ses images servies par la console (`/admin/image/project/<n>`), une image d'ailleurs réduite
@@ -576,7 +576,7 @@ Ses onglets sont dans `app/handmade/tabs/projects.py` (ADR 0177).
   liste, une décision choisie (« La décision » : le choix, le contexte, la raison ; « Options écartées » ; dans le
   panneau ce qu'elle remplace, ce qui l'a remplacée, l'objectif) ; « Nouvelle décision », « Modifier », « La remplacer
   par une autre », « Retirer la décision », « Remettre en vigueur ») · *Activité* (ADR 0290, 0297 ; dessiné,
-  `project_activity.py`, `handmade/projets/activite.html`, `projets_activite.css`) — *Fil* : jour par jour, ses
+  `app/domains/projects/console/activity.py`, `app/domains/projects/console/templates/handmade/projets/activite.html`, `projets_activite.css`) — *Fil* : jour par jour, ses
   exécutions, ses commits, ses pull requests, ses tickets et les gestes des personnes (`faculties/projects/feed.py`,
   la fonction que lit l'API), ses filtres (une sorte, `?sorte=` ; un objectif, `?objectif=`), « Plus anciens » ; chaque
   ligne mène à ce qu'elle nomme ; le panneau : trente jours en barres (en tête du fil seulement : une page plus
@@ -590,8 +590,8 @@ Ses onglets sont dans `app/handmade/tabs/projects.py` (ADR 0177).
   file « À valider »), chacun avec sa pagination) · l'ancien onglet *Fichiers* (l'arbre de travail de l'atelier)
   n'est plus dessiné ni lu par la fiche : son adresse mène à Code › Fichiers, et ses blocs restent ceux de sa vue (la
   console en MCP, le repli) · *Tickets* et *Listes*
-  (son registre, ADR 0268 ; dessinés, `app/handmade/subjects/project_tickets.py`, calqués sur l'écran, ADR 0297).
-  *Tickets* (`handmade/projets/tickets.html`), trois zones — à gauche la recherche (`?q=`), « Nouveau ticket », les
+  (son registre, ADR 0268 ; dessinés, `app/domains/projects/console/tickets.py`, calqués sur l'écran, ADR 0297).
+  *Tickets* (`app/domains/projects/console/templates/handmade/projets/tickets.html`), trois zones — à gauche la recherche (`?q=`), « Nouveau ticket », les
   filtres en pastilles (ceux qui attendent le propriétaire, ouverts, tous : `?filtre=`), puis une ligne par ticket :
   son numéro, son titre, son étape en pastille (les étapes de son parcours, ADR 0270), sa priorité quand elle est
   haute, « ailleurs » pour ce qui vient de l'hôte ou d'un autre projet, un point quand la main est au
@@ -611,14 +611,14 @@ Ses onglets sont dans `app/handmade/tabs/projects.py` (ADR 0177).
   qu'il n'en a pas, puis « Publier une note de son fil » (par son numéro) — une demande, dont l'aperçu attend dans
   « À valider ». Leur réglage — qui valide un plan, la borne d'un petit ticket, la publication en issues — est dans
   Administration, où un lien mène (ADR 0281, 0297).
-  *Listes* (« Suivi » jusqu'à l'ADR 0297 ; `handmade/projets/listes.html`) — une pastille par liste, « n en cours
+  *Listes* (« Suivi » jusqu'à l'ADR 0297 ; `app/domains/projects/console/templates/handmade/projets/listes.html`) — une pastille par liste, « n en cours
   sur m », la bascule Colonnes | Tableau (`?vue=tableau`), « Régler », « Ajouter » ; par statut, une colonne
   chacun, chaque élément en carte (son titre, sa clé, ses notes, à qui il est, depuis quand, son statut ; un liseré
   quand il est à la charge du propriétaire) ; un élément choisi (`?element=<clé>`) ouvre le panneau : « Changer son
   statut » (parmi ceux de la liste, avec un mot), « Le confier » (à elle, au propriétaire), ses faits, son texte, son
   fil et de quoi y écrire, son historique ; « Ajouter » et « Régler » (son nom, son titre, ses statuts ouverts et
   clos, qui agit par défaut) ouvrent leur formulaire dans ce panneau ; un projet sans liste propose d'en créer une)
- · *Dépendances* (ADR 0257, 0271, 0293, 0297 ; dessiné, `project_links.py`, `handmade/projets/dependances.html`) —
+ · *Dépendances* (ADR 0257, 0271, 0293, 0297 ; dessiné, `app/domains/projects/console/links.py`, `app/domains/projects/console/templates/handmade/projets/dependances.html`) —
   *Schéma* : le projet au centre, « Il dépend de » (les projets qu'il lit) d'un côté, « Dépendent de lui » de
   l'autre, chaque lien avec son pourquoi, ce qu'il donne (le voir, son détail, ses fichiers, sa documentation), le
   commit que montre sa vue et ses demandes ; un lien choisi (`?lien=<n°>`) dans le panneau : son mot et « Changer ce
@@ -628,7 +628,7 @@ Ses onglets sont dans `app/handmade/tabs/projects.py` (ADR 0177).
   (ce qu'il lit a changé depuis, dans un autre onglet : refusé, rien n'est défait), et revient sur le lien visé —
   *Demandes*
   (`?vue=demandes`) : celles qu'il a envoyées et reçues, l'une choisie avec son ticket, son étape, à qui la main)
-  · *Accès* (sous Administration ; dessiné, ADR 0133, `app/handmade/subjects/project.py` : un tableau
+  · *Accès* (sous Administration ; dessiné, ADR 0133, `app/domains/projects/console/subject.py` : un tableau
   de lignes lues de haut en bas — qui et par où (les mêmes cases qu'un service), quand, voir, piloter projet (lecture seule, accord du propriétaire, modification, aucun pilotage), fichiers, ce qu'elle fait d'un outil de ses apps qui lit et d'un
   outil qui agit, à quels outils —, « + Ajouter un accès » (une ligne fermée), chaque ligne montée, descendue ou
   retirée, la dernière, obligatoire, le comportement par défaut ; jamais réglé, il le dit) · *Carnet* : sous Activité (voir plus haut). En tête : lancer maintenant, pause, reprendre, consigne, archiver, restaurer — les formulaires

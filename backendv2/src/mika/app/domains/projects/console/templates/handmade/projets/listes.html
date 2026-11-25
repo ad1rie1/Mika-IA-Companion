@@ -1,0 +1,106 @@
+{# Activité › Projets › un projet › Listes (app/domains/projects/console/tickets.py::lists_page, ADR 0297) : ses listes
+   de suivi, comme sur l'écran Projets. Une barre — une pastille par liste, « n en cours sur m », la bascule
+   Colonnes | Tableau, « Régler », « Ajouter » —, puis la liste sur toute la largeur : par statut (une colonne par
+   statut, chaque élément en carte : son titre, sa clé, ses notes, à qui il est, depuis quand, son statut) ou en
+   tableau. Une vue sans liste à gauche : choisir un élément ouvre le panneau, à droite — son statut et à qui il est
+   (ils s'y changent), son texte, son fil et de quoi y écrire, son historique ; « Ajouter » et « Régler » y ouvrent
+   leur formulaire. Sur un téléphone, le panneau remplace la liste, avec un retour. Aucun style ni script en ligne. #}
+{% from "handmade/projets/_morceaux.html" import ico, st, tile %}
+{% from "handmade/projets/_zones.html" import pform, pone, ppop, outside, plumbing %}
+{% from "_navigation.html" import pager as pages %}
+{% macro who(x) -%}<span class="pj-charge">{{ ico('user', 'xs') }}{{ x.actor }}</span>{%- endmacro %}
+{% if not lst %}
+<div class="pj-split sans-liste" data-tab="project/suivi"><div class="pj-detail">
+  <div class="pj-c">
+    <div class="pj-empty">{{ tile('board') }}<b>Pas encore de liste</b><p>Ce projet ne suit aucune liste : elle en ouvre une avec son premier ajout, ou tu en crées une ici — des entreprises à contacter, des articles à relire.</p></div>
+    {% if setting %}{{ pform(setting, "Créer une liste", "Son nom, ses statuts ouverts puis clos (un par ligne), et qui a la main par défaut.", "", "Créer la liste", "plus") }}{% endif %}
+  </div>
+</div></div>
+{% else %}
+<div class="pj-split sans-liste pj-lists{{ ' lire' if lire }}" data-tab="project/suivi">
+  <div class="pj-detail">
+    <div class="pj-g-bar">
+      <nav class="pj-filters flat" aria-label="Ses listes">{% for t in tabs %}<a href="{{ t.href }}"{% if t.on %} aria-current="true"{% endif %}>{{ t.text }}<span class="pj-cnt">{{ t.count }}</span></a>{% endfor %}</nav>
+      <span class="pj-sync">{{ lst.living }} en cours sur {{ lst.total }}</span>
+      <nav class="seg" aria-label="Comment la lire"><a href="{{ links.colonnes }}"{% if not table %} aria-current="true"{% endif %}>{{ ico('board', 'xs') }}Colonnes</a><a href="{{ links.tableau }}"{% if table %} aria-current="true"{% endif %}>{{ ico('table', 'xs') }}Tableau</a></nav>
+      {% if can_set %}<a class="btn quiet" href="{{ links.regler }}">{{ ico('sliders', 'xs') }}<span>Régler</span></a>{% endif %}
+      {% if can_add %}<a class="btn pj-add-btn" href="{{ links.ajouter }}">{{ ico('plus', 'xs') }}<span>Ajouter</span></a>{% endif %}
+    </div>
+    <div class="pj-dz{{ ' sans-cote' if not (element or adding or setting or missing) }}">
+      <div class="pj-main">
+        {% if table %}
+        <div class="pj-tablefull table-block"><table class="pj-table">
+          <thead><tr><th scope="col">Nom</th><th scope="col">Statut</th><th scope="col">À la charge de</th><th scope="col">Notes</th><th scope="col">Depuis</th></tr></thead>
+          <tbody>{% for e in rows %}<tr{% if e.on %} aria-current="true"{% endif %}><td><a href="{{ e.href }}"><b>{{ e.title }}</b><small>{{ e.key }}</small></a></td><td>{{ st(e.tone, e.state) }}</td><td>{{ who(e) }}</td><td>{{ e.notes }}</td><td class="muted">{{ e.ago }}</td></tr>
+          {% else %}<tr><td colspan="5" class="pj-none">Rien dans cette liste.</td></tr>{% endfor %}</tbody>
+        </table><div class="hm-pager single">{{ pages(pager) }}</div></div>
+        {% else %}
+        <div class="pj-board">
+          {% for col in columns %}
+          <section class="pj-col" aria-label="{{ col.label }}"><header><i class="{{ col.tone }}"></i><b>{{ col.label }}</b><span class="pj-cnt">{{ col.count }}</span></header>
+            <div class="pj-col-in">
+              {% for e in col['items'] %}
+              <a class="pj-kcard{{ ' atoi' if e.yours }}" href="{{ e.href }}"{% if e.on %} aria-current="true"{% endif %}><b>{{ e.title }}</b><small>{{ e.key }}</small>{% if e.notes %}<p>{{ e.notes }} dans son fil</p>{% endif %}<span class="pj-kfoot">{{ who(e) }}<time>{{ e.ago }}</time>{{ st(e.tone, e.state) }}</span></a>
+              {% else %}<p class="pj-none">Rien ici.</p>{% endfor %}
+            </div>
+          </section>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% if more %}<p class="pj-hint pad">{{ more }} élément{{ 's' if more > 1 }} de plus, plus ancien{{ 's' if more > 1 }} : la liste montre les derniers touchés.</p>{% endif %}
+      </div>
+      {% if element or adding or setting or missing %}
+      <aside class="pj-side" aria-label="{{ 'Un élément' if element else 'Un formulaire' }}">
+        <a class="pj-close" href="{{ home }}">{{ ico('x', 'xs') }}<span>Fermer</span></a>
+        {% if adding %}
+        <section class="pj-sc">{{ pform(adding, "Ajouter un élément", "Dans « " ~ lst.title ~ " ». Une clé courte et stable ; vide, elle se déduit du titre.", home, "Ajouter", "plus") }}</section>
+        {% elif setting %}
+        <section class="pj-sc">{{ pform(setting, "Régler la liste", "Ses statuts ouverts puis clos, un par ligne, et qui a la main par défaut. Un autre nom crée une autre liste.", home, "Enregistrer") }}</section>
+        {% elif missing %}
+        <section class="pj-sc"><h3>Introuvable</h3><p class="pj-sc-text">Aucun élément « {{ missing }} » dans cette liste.</p></section>
+        {% else %}
+        {% set e = element %}
+        <section class="pj-sc">
+          <div class="pj-side-h">{{ tile('list', e.tone) }}<span><b>{{ e.title }}</b><small>{{ e.key }}</small></span>{{ st(e.tone, e.state) }}</div>
+          <div class="pj-decide row">
+            {% if e.status_form %}{{ ppop(e.status_form, 'Changer son statut', 'Changer le statut de « ' ~ e.key ~ ' »', 'refresh', 'quiet', 'Changer le statut') }}{% endif %}
+            {% if e.assign %}{{ ppop(e.assign, 'Le confier', 'À qui est « ' ~ e.key ~ ' »', 'user', 'quiet', 'Le confier') }}{% endif %}
+          </div>
+        </section>
+        <section class="pj-sc"><h3>En bref</h3>
+          <dl class="pj-props">
+            <div><dt>À la charge de</dt><dd>{{ e.actor }}</dd></div>
+            <div><dt>Ajouté par</dt><dd>{{ e.by }}</dd></div>
+            <div><dt>Ajouté</dt><dd>{{ e.added }}</dd></div>
+            <div><dt>Touché</dt><dd>{{ e.touched }}</dd></div>
+            {% if e.objective %}<div><dt>Objectif</dt><dd><a href="{{ e.objective.href }}">n° {{ e.objective.n }}</a></dd></div>{% endif %}
+            {% if e.link %}<div><dt>Référence</dt><dd>{{ e.link }}</dd></div>{% endif %}
+          </dl>
+          {% if e.body %}<p class="pj-prose">{{ e.body }}</p>{% endif %}
+        </section>
+        <section class="pj-sc" data-subtabs>
+          <div class="pj-volets court"><nav class="hm-subnav" aria-label="Ce qu'on en lit"><a href="#e-fil">Son fil<span class="pj-cnt">{{ e.thread|length }}</span></a><a href="#e-historique">Son historique<span class="pj-cnt">{{ e.history|length }}</span></a></nav></div>
+          <div class="hm-subpanes">
+            <div id="e-fil" data-pane>
+              {% if e.thread %}<div class="pj-thread">{% for n in e.thread %}{% if n.outside %}{{ outside(n.who ~ " · " ~ n.ago, n.text) }}{% else %}<div class="pj-bub {{ n.side }}"><div><span class="pj-bub-who">{{ n.who }} · <time title="{{ n.when }}">{{ n.ago }}</time></span><p>{{ n.text }}</p></div></div>{% endif %}{% endfor %}</div>
+              {% else %}<p class="pj-none">Rien dans son fil pour l'instant.</p>{% endif %}
+              {% if e.note %}
+              <form method="post" action="{{ e.note.url }}" class="form pj-note">{{ plumbing(e.note) }}
+                {% for f in e.note.fields %}<input type="hidden" name="_champs" value="{{ f.path }}"><textarea name="{{ f.path }}" rows="2" required aria-label="Une note dans son fil" placeholder="Écrire une note dans son fil…"></textarea>{% endfor %}
+                <button class="btn">{{ ico('send', 'xs') }}Ajouter la note</button>
+              </form>
+              {% endif %}
+            </div>
+            <div id="e-historique" data-pane>
+              {% if e.history %}<ol class="pj-tl col histo" role="list">{% for h in e.history %}<li><span class="pj-tl-top"><time title="{{ h.ago }}">{{ h.when }}</time></span><p>{{ h.text }} — par {{ h.who }}</p></li>{% endfor %}</ol>
+              {% else %}<p class="pj-none">Aucun changement gardé : il est tel qu'on l'a ajouté.</p>{% endif %}
+            </div>
+          </div>
+        </section>
+        {% endif %}
+      </aside>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endif %}

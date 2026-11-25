@@ -14,12 +14,12 @@ from typing import Any
 from starlette.routing import Route
 
 from mika.app.domains import DOMAINS, part
+from mika.app.domains.projects.api import activity as project_activity
+from mika.app.domains.projects.api import code as project_code
+from mika.app.domains.projects.api import docs as project_docs
+from mika.app.domains.projects.api import manage as project_manage
+from mika.app.domains.projects.api import projects
 from mika.app.me import (
-    project_activity,
-    project_code,
-    project_docs,
-    project_manage,
-    projects,
     rights,
     settings,
     sharing,

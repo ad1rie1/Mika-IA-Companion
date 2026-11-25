@@ -1,5 +1,5 @@
 """La fiche d'un projet calquée sur l'écran Projets (ADR 0297), et la page d'ensemble (ADR 0281), à travers le vrai
-serveur, sur la chaîne d'exemple de l'aperçu (``app/preview/projects.py`` : un produit, un projet qui le lit, des
+serveur, sur la chaîne d'exemple de l'aperçu (``app/domains/projects/demo.py`` : un produit, un projet qui le lit, des
 tickets à chaque étape où la main est au propriétaire, un point d'arrêt dit prêt, une liste à sa charge, un plan sans
 réponse).
 
@@ -21,7 +21,7 @@ from __future__ import annotations
 import html
 import re
 
-from mika.app.preview.projects import chain
+from mika.app.domains.projects.demo import chain
 from mika.contracts import projects as c
 from mika.kernel.events import Content
 from mika.kernel.forms import Upload

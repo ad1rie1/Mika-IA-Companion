@@ -479,27 +479,31 @@ def test_every_fiche_kind_is_registered_once():
 
 # ── où elles vivent, ce qu'elles lisent ──
 
-HANDMADE = Path(mika.__file__).parent / "app" / "handmade"
+APP = Path(mika.__file__).parent / "app"
+HANDMADE = APP / "handmade"
+#: où vivent les fiches : celles du cadre (``subjects/``), et celle d'un projet et ses onglets, dans le dossier de
+#: leur domaine (ADR 0310)
+FICHES = (HANDMADE / "subjects", APP / "domains" / "projects" / "console")
 
 #: Ce qu'une fiche lit par les fonctions d'une faculté, à côté de sa vue (ADR 0218, décision Q05 de l'audit du
-#: 2026-11-05) : par module de ``subjects/``, chaque nom importé d'une faculté hors de son ``inspect`` (ses mots et
-#: ses règles restent permis), et sa raison. Ce que sa vue montre déjà se lit dans ses blocs ou son en-tête : un nom
+#: 2026-11-05) : par module de ``subjects/`` et de la console des projets (``FICHES``), chaque nom importé d'une
+#: faculté hors de son ``inspect`` (ses mots et ses règles restent permis), et sa raison. Ce que sa vue montre déjà se lit dans ses blocs ou son en-tête : un nom
 #: qui n'est pas ici fait échouer ``test_a_fiche_reads_beside_its_view_only_what_it_declares``.
 READS: dict[str, dict[str, str]] = {
-    "goal.py": {
+    "handmade/subjects/goal.py": {
         "Goal": "le type du but lu",
         "goal_at": "le but lui-même, dans sa tranche",
         "budget": "le budget de séances, que sa vue ne dit qu'en phrase (« 2 / 8 séances ») : la fiche en dessine "
                   "la barre",
         "params": "les seuils de ses garde-fous, que sa vue ne dit qu'en phrase : la fiche en dessine les barres",
     },
-    "handle.py": {
+    "handmade/subjects/handle.py": {
         "view_of": "son verdict, par la fonction même de sa vue, que la fiche range en tuiles : son onglet « Verdict » "
                    "le dit en blocs — à reprendre sur eux",
         "known_as": "le nom de la personne derrière lui",
         "handles_of": "ses autres moyens de communication, que son onglet « Autres » liste — à reprendre sur lui",
     },
-    "project.py": {
+    "domains/projects/console/subject.py": {
         "project_at": "le projet lui-même, dans sa tranche",
         "glance": "ce qu'un projet montre d'un coup d'œil (ADR 0297) : ses objectifs et leurs jalons en barres, ses "
                   "pull requests ouvertes, ses tickets par étape, ses dépendances — la source que lit aussi l'API "
@@ -511,13 +515,13 @@ READS: dict[str, dict[str, str]] = {
     # Objectifs, Tickets et Listes sont calqués sur l'écran Projets (ADR 0297) : des listes serrées, un détail en
     # volets, un diagramme — des formes que les blocs de leur vue ne portent pas. Ils lisent la tranche du projet par
     # les fonctions mêmes que lit l'API par personne (une seule source), et la vue de la faculté garde ses blocs
-    "project_zones.py": {
+    "domains/projects/console/zones.py": {
         "project_at": "le projet lui-même, dans sa tranche",
         "glance": "où en est un jalon, en un mot : la couleur de son segment",
         "pulls": "le titre d'une pull request et son adresse chez l'hôte, composés par le moteur",
         "pull_key": "ce qui nomme une pull request dans l'adresse de Code (son numéro, ou son objectif)",
     },
-    "project_goals.py": {
+    "domains/projects/console/goals.py": {
         "glance": "où en est un jalon (``milestone_state``) et la cadence d'une mission en mots",
         "milestones_of": "ses jalons qui comptent (sans les retirés)",
         "awaiting": "le point d'arrêt qu'elle a dit prêt et qui attend d'être tranché",
@@ -527,13 +531,13 @@ READS: dict[str, dict[str, str]] = {
         "tracker": "le statut d'un ticket lié et d'un élément attendu, en mots",
         "trigger_words": "ce qui déclenche une mission, en mots",
     },
-    "project_diagram.py": {
+    "domains/projects/console/diagram.py": {
         "diagram": "le diagramme des objectifs (ADR 0297) : ses lignes et leurs vraies dates, la source que lit "
                    "aussi ``GET …/diagramme`` de l'API par personne",
         "objective_at": "l'objectif que l'adresse choisit",
         "milestone_at": "le jalon que l'adresse choisit",
     },
-    "project_tickets.py": {
+    "domains/projects/console/tickets.py": {
         "tracker": "son registre dans sa projection : une page d'une liste, un élément, son fil, son histoire "
                    "rejouée du journal (``passages``)",
         "tickets": "le parcours d'un ticket en six étapes et à qui est la main",
@@ -549,7 +553,7 @@ READS: dict[str, dict[str, str]] = {
     },
     # Code est calqué sur l'écran Projets (ADR 0297) : ses sous-vues lisent les blocs de la vue « git »
     # (``inspect_code``) ; ce que le journal sait d'une pull request, par les règles que lit aussi l'API par personne
-    "project_code.py": {
+    "domains/projects/console/code.py": {
         "inspect_code": "les mots et les titres des blocs de la vue « git », et ses pull requests (``pulled``)",
         "diff_rows": "un diff de la vue relu ligne à ligne, ses numéros avant et après",
         "pull_order": "ses pull requests dans l'ordre de l'écran (les prêtes d'abord)",
@@ -566,12 +570,12 @@ READS: dict[str, dict[str, str]] = {
     },
     # Documentation, Activité et Dépendances (ADR 0297) : l'espace de documentation, le journal et les liens, lus par
     # les fonctions mêmes de la faculté que lit l'API par personne
-    "project_docs.py": {
+    "domains/projects/console/docs.py": {
         "docs": "ses pages (l'arbre, une page, ses versions, la recherche) et ses images, lues dans leur projection",
         "objective_at": "l'objectif pendant lequel une décision a été prise",
         "who_wrote": "qui a écrit une version et par où, en mots de console",
     },
-    "project_activity.py": {
+    "domains/projects/console/activity.py": {
         "feed": "ce que chaque événement du journal donne au fil, et les pas d'une exécution : la fonction que lit "
                 "l'API par personne",
         "episode_sort": "ce qu'était une exécution (cadrage, travail, relecture) et son objectif",
@@ -579,7 +583,7 @@ READS: dict[str, dict[str, str]] = {
         "objective_at": "l'objectif qu'une ligne nomme",
         "tracker": "un ticket nommé par le fil (``tracker.entry``)",
     },
-    "project_links.py": {
+    "domains/projects/console/links.py": {
         "links": "ce qu'il lit et qui le lit, et ce que chaque lien donne (``readings``, ``readers``, ``grant``)",
         "asks": "où en est une demande, et comment elle naîtrait (directe, sur accord)",
         "tie_of": "le mot et la date d'un lien",
@@ -591,7 +595,7 @@ READS: dict[str, dict[str, str]] = {
         "tickets": "à qui la main sur le ticket d'une demande",
         "tracker": "le ticket d'une demande chez le projet visé",
     },
-    "project_git.py": {
+    "domains/projects/console/git.py": {
         "project_at": "l'adresse du distant telle qu'elle est réglée, son hôte et son nom : sa vue ne la donne qu'en "
                       "lien, et seulement en http(s) — à reprendre sur ce lien",
     },
@@ -613,7 +617,8 @@ def _faculty_reads(path: Path) -> set[str]:
 def test_a_fiche_reads_beside_its_view_only_what_it_declares():
     """La fiche d'un but recalculait sa sorte, son statut et son envie à côté de sa vue (K11-08) : la vue n'était plus
     la source, et la prochaine séance avait déjà divergé."""
-    found = {path.name: _faculty_reads(path) for path in sorted((HANDMADE / "subjects").glob("*.py"))}
+    found = {path.relative_to(APP).as_posix(): _faculty_reads(path) for folder in FICHES
+             for path in sorted(folder.glob("*.py"))}
     assert {name: reads for name, reads in found.items() if reads} == {name: set(r) for name, r in READS.items()}
 
 

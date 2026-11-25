@@ -1,6 +1,6 @@
 """La documentation d'un projet, vue de la console et écrite par une personne (ADR 0289) : l'onglet
 « Documentation » de sa fiche — ses pages et leur dernière modification, ses images, rien à y éditer — et les actions
-par lesquelles une personne l'écrit depuis son espace ou par MCP (``app/me/project_docs.py``, ``app/me/docs_mcp.py``).
+par lesquelles une personne l'écrit depuis son espace ou par MCP (``app/domains/projects/api/docs.py``, ``app/domains/projects/docs_mcp.py``).
 Des textes de console et d'écran, lus par qui décide — pas des phrases qu'elle lit. Les règles, les événements et la
 projection sont dans ``docs.py``.
 

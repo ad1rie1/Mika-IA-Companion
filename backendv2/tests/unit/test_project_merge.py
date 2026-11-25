@@ -287,7 +287,7 @@ def test_only_the_gesture_of_a_person_merges(tmp_path):
     assert callers == ["faculties/projects/inspect_merge.py"]
     # la méthode du port n'est appelée que par l'effet de ce fait ; ailleurs, elle n'est que déclarée ou implémentée
     assert _mentions("merge_pull") == {
-        "adapters/workshop/github.py": {"merge_pull"}, "app/preview/git.py": {"merge_pull"},
+        "adapters/workshop/github.py": {"merge_pull"}, "app/domains/projects/demo_git.py": {"merge_pull"},
         "ports/workshop.py": {"merge_pull"}, "faculties/projects/merge.py": {"_merge"}}
 
 

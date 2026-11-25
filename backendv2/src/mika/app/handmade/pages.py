@@ -7,9 +7,10 @@ inscrit dans sa part de la console (``ConsolePart.overviews``, ADR 0310)."""
 from __future__ import annotations
 
 from mika.app.domains import DOMAINS, part
+from mika.app.domains.projects.console import subject as project_fiche
+from mika.app.domains.projects.console import tabs as projects
 from mika.app.handmade.subjects import goal as goal_fiche
 from mika.app.handmade.subjects import handle as handle_fiche
-from mika.app.handmade.subjects import project as project_fiche
 from mika.app.handmade.tabs import (
     approvals,
     decisions,
@@ -18,7 +19,6 @@ from mika.app.handmade.tabs import (
     life,
     memory,
     people,
-    projects,
     settings,
     system,
     thoughts,

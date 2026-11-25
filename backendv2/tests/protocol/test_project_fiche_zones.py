@@ -1,5 +1,5 @@
 """Les onglets en liste et détail de la fiche d'un projet (ADR 0297) — Objectifs (sa liste, son diagramme), Tickets,
-Listes —, à travers le vrai serveur, sur la chaîne d'exemple de l'aperçu (``app/preview/projects.py``).
+Listes —, à travers le vrai serveur, sur la chaîne d'exemple de l'aperçu (``app/domains/projects/demo.py``).
 
 - Objectifs : des lignes serrées par groupes, le filtre en pastilles, et un objectif choisi dans les trois zones —
   ses jalons avec leurs gestes (valider ou refuser un point d'arrêt, modifier, retirer, ajouter), ses comptes rendus,

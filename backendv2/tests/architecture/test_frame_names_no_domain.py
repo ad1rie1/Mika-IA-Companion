@@ -60,16 +60,7 @@ PACKAGES: dict[str, tuple[str, ...]] = {
 
 #: les modules d'``app`` qui sont à un domaine et attendent leur déménagement dans son dossier : les importer, c'est
 #: déjà le nommer. Un module déménagé sort de cette table (il n'existe plus : la garde le dit)
-TO_MOVE: dict[str, tuple[str, ...]] = {
-    "projects": ("app.me.projects", "app.me.project_activity", "app.me.project_code", "app.me.project_docs",
-                 "app.me.project_manage", "app.me.docs_mcp", "app.handmade.tabs.projects",
-                 "app.handmade.subjects.project", "app.handmade.subjects.project_activity",
-                 "app.handmade.subjects.project_code", "app.handmade.subjects.project_diagram",
-                 "app.handmade.subjects.project_docs", "app.handmade.subjects.project_git",
-                 "app.handmade.subjects.project_goals", "app.handmade.subjects.project_links",
-                 "app.handmade.subjects.project_tickets", "app.handmade.subjects.project_zones",
-                 "app.preview.projects", "app.preview.git", "app.preview.activity"),
-}
+TO_MOVE: dict[str, tuple[str, ...]] = {}
 
 #: ce que le cadre nomme exprès, pour toujours, et pourquoi
 FOREVER: dict[str, str] = {
@@ -91,35 +82,17 @@ STILL: dict[str, set[str]] = {
     "handmade/person/senses.py": {"maps", "phone", "senses"},
     "handmade/person/voyages.py": {"maps"},
     "handmade/rights.py": {"agenda", "forge", "tools"},
-    "handmade/subjects/project.py": {"forge", "projects"},
-    "handmade/subjects/project_activity.py": {"projects"},
-    "handmade/subjects/project_code.py": {"projects"},
-    "handmade/subjects/project_diagram.py": {"projects"},
-    "handmade/subjects/project_docs.py": {"projects"},
-    "handmade/subjects/project_git.py": {"projects"},
-    "handmade/subjects/project_goals.py": {"projects"},
-    "handmade/subjects/project_links.py": {"projects"},
-    "handmade/subjects/project_tickets.py": {"projects"},
-    "handmade/subjects/project_zones.py": {"projects"},
     "handmade/tabs/people.py": {"contacts"},
     "handmade/tabs/thoughts.py": {"mail", "senses", "teams"},
     "handmade/waiting.py": {"contacts", "mail", "teams"},
     "me/api.py": {"mail"},
     "me/assembly.py": {"projects"},
     "me/changes.py": {"projects"},
-    "me/docs_mcp.py": {"mail", "projects", "tools"},
-    "me/project_activity.py": {"projects"},
-    "me/project_code.py": {"projects"},
-    "me/project_docs.py": {"projects"},
-    "me/project_manage.py": {"projects"},
-    "me/projects.py": {"forge", "projects"},
     "me/rights.py": {"forge", "mail", "teams", "tools"},
     "me/settings.py": {"mail", "teams"},
     "me/sharing.py": {"agenda", "mail", "teams", "tools"},
     "mindport.py": {"maps", "projects", "senses", "wakeup"},
     "preview/__init__.py": {"mail", "maps", "projects", "teams"},
-    "preview/git.py": {"projects"},
-    "preview/projects.py": {"projects"},
     "server.py": {"contacts", "projects", "tools"},
     "settings.py": {"agenda"},
 }

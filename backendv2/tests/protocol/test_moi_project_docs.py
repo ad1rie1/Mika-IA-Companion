@@ -25,8 +25,16 @@ from mika.adapters.mcp.protocol import BATCH_MAX
 from mika.adapters.web.accounts import LOGIN_TOKENS_KEPT
 from mika.adapters.web.gate import SlidingWindow
 from mika.adapters.web.hub import WS_UNAUTHORIZED
-from mika.app.me import project_docs as pages
-from mika.app.me.docs_mcp import PER_MINUTE, PREFIX, READS_ONLY, TOO_MANY, TOO_MANY_WRITES, UNKNOWN, DocsPoint
+from mika.app.domains.projects.api import docs as pages
+from mika.app.domains.projects.docs_mcp import (
+    PER_MINUTE,
+    PREFIX,
+    READS_ONLY,
+    TOO_MANY,
+    TOO_MANY_WRITES,
+    UNKNOWN,
+    DocsPoint,
+)
 from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.faculties.projects import docs

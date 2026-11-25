@@ -2,7 +2,7 @@
 Fichiers, Commits, Pull requests, Branches, Issues, CI (``?vue=``) ; « le dépôt distant » (``vue=distant``) garde ce
 que montrait l'onglet Dépôt (``inspect_git.py`` : l'atelier face au distant, pousser, récupérer, ses réglages).
 
-**D'où vient chaque chose** — comme pour l'API par personne (``app/me/project_code.py``), qui lit d'ici ses mots et ses
+**D'où vient chaque chose** — comme pour l'API par personne (``app/domains/projects/api/code.py``), qui lit d'ici ses mots et ses
 règles : les pull requests, leur CI et leur relecture viennent du journal ; les fichiers, les commits, les branches et
 les diffs, de l'atelier, par le port, à une référence (jamais l'arbre de travail) ; ce que l'hôte est seul à savoir
 (le texte d'une pull request et ses échanges, ses vérifications une à une, la fin du journal d'un échec, les issues et

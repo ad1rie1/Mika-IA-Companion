@@ -1,6 +1,6 @@
 """Ce qu'un projet montre d'un coup d'œil (ADR 0297), pur : de quoi dessiner sa carte et sa vue d'ensemble sans rien
-recalculer ailleurs. Deux lecteurs s'en servent — l'API par personne (``app/me/projects.py``), qui y ajoute ce que
-chacun a le droit d'en lire, et la fiche de la console (``app/handmade/subjects/project.py``), qui voit tout.
+recalculer ailleurs. Deux lecteurs s'en servent — l'API par personne (``app/domains/projects/api/projects.py``), qui y ajoute ce que
+chacun a le droit d'en lire, et la fiche de la console (``app/domains/projects/console/subject.py``), qui voit tout.
 
 - ``progress`` : où en sont ses objectifs ponctuels, dans l'ordre du plan ;
 - ``steps`` : ses tickets comptés par étape du parcours en six ;

@@ -23,8 +23,8 @@ import java.util.concurrent.TimeUnit
 
 /**
  * La documentation, l'activité et la gestion d'un projet sur l'API par personne (`protocole-moi.md` § 11) : leurs
- * réponses lues telles que le serveur les écrit (`backendv2/src/mika/app/me/project_docs.py`, `project_activity.py`,
- * `project_manage.py`), ce que chaque lecture demande, et **l'enregistrement d'une page** — en `multipart/form-data`,
+ * réponses lues telles que le serveur les écrit (`backendv2/src/mika/app/domains/projects/api/docs.py`, `activity.py`,
+ * `manage.py`), ce que chaque lecture demande, et **l'enregistrement d'une page** — en `multipart/form-data`,
  * sous le jeton, sans jeton CSRF, avec sa clé d'envoi, **en nommant la version lue** (`base` ; `0` pour une page
  * nouvelle) ; son conflit garde les mots du serveur.
  */

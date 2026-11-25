@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 
-from mika.app.handmade.subjects import project_activity
+from mika.app.domains.projects.console import activity as project_activity
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.faculties.projects import actions, feed

@@ -102,7 +102,7 @@ IMPLEMENTATIONS: dict[tuple[str, str], tuple[tuple[str, str], ...]] = {
     ("ports/workshop.py", "Workshop"): (("adapters/workshop/__init__.py", "BwrapWorkshop"),),
     ("ports/workshop.py", "RepoHost"): (
         ("adapters/workshop/github.py", "GitHubRepos"),
-        ("app/preview/git.py", "DemoHost"),
+        ("app/domains/projects/demo_git.py", "DemoHost"),
     ),
 }
 

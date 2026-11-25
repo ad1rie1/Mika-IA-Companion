@@ -1,0 +1,9 @@
+{# L'en-tête de la fiche d'un projet, sur tous ses onglets (app/domains/projects/console/subject.py, ADR 0297) : son nom, son
+   état en pastilles à côté, ses faits sur une ligne — ceux de l'en-tête que déclare sa faculté. Ses actions sont
+   posées à droite par la console (``page.html``). #}
+{% from "_cells.html" import cell %}
+{% from "handmade/projets/_morceaux.html" import st %}
+<div class="page-title pj-head">
+  <div class="page-title-row"><h1>{{ title }}</h1>{% for b in badges %}{{ st(b.tone, b.text) }}{% endfor %}</div>
+  {% if facts %}<div class="head-facts">{% for f in facts %}<span><span class="k">{{ f.label }}</span>{{ cell(f.cell) }}</span>{% endfor %}</div>{% endif %}
+</div>

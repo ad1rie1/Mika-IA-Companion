@@ -1,0 +1,113 @@
+{# Activité › Projets › un projet › Dépendances (app/domains/projects/console/links.py::links_page, ADR 0257, 0271,
+   0293, 0297) : l'onglet Dépendances de l'écran Projets, sur les jetons de la console. Sa barre (Schéma, Demandes ; à
+   son bout, « Ajouter une dépendance »), puis :
+   - le schéma : ce qu'il lit, lui au centre, ce qui le lit ; un lien choisi dans le panneau — son pourquoi et de quoi
+     le changer, ce qu'il donne, le commit que montre sa vue, ses demandes et leur mode, le retirer ;
+   - ajouter une dépendance : les projets qu'il peut lire, chacun avec son pourquoi ;
+   - les demandes, envoyées et reçues, l'une choisie avec son ticket.
+   Tout geste est l'action ``projects.liens`` (tout l'état posé ; le mot d'un lien en valeurs fixées). Aucun style
+   ni script en ligne. #}
+{% from "handmade/projets/_morceaux.html" import ico, st, tile %}
+{% from "handmade/projets/_zones.html" import pone, plumbing %}
+{% macro whyform(f, label, value='', submit='Enregistrer') -%}
+<form method="post" action="{{ f.url }}" class="form pj-why">{{ plumbing(f) }}<input type="hidden" name="_fixes" value="why_for"><input type="hidden" name="why_for" value="{{ f.why_for }}"><input type="hidden" name="_fixes" value="why">
+  <label class="field"><span class="field-label">{{ label }}</span><textarea name="why" rows="2" maxlength="{{ f.why_max }}" placeholder="Pourquoi il le lit : ce qu'il en tire">{{ value }}</textarea></label>
+  <div class="form-actions-inline"><button class="btn">{{ submit }}</button></div></form>
+{%- endmacro %}
+{% macro card(x) -%}
+<a class="pj-dep{{ ' off' if x.suspended }}" href="{{ x.href }}"{% if x.on %} aria-current="true"{% endif %}>
+  <span class="pj-dep-h"><span class="pj-tile">{{ x.title[:1]|upper }}</span><span class="pj-mini-main"><b>{{ x.title }}</b><small>n° {{ x.n }} · {{ x.owner }}{% if x.since %} · depuis le {{ x.since }}{% endif %}</small></span>{{ st(x.tone, x.state) }}</span>
+  {% if x.suspended %}<span class="pj-dep-why">Le lien est suspendu : il ne donne rien pour l'instant.</span>{% elif x.why %}<span class="pj-dep-why">{{ x.why }}</span>{% endif %}
+  <span class="pj-dep-gives">{% for g in x.gives if g.on %}<span class="pj-chip">{{ ico('check', 'xs') }}{{ g.label|lower }}</span>{% endfor %}</span>
+  <span class="pj-dep-foot">{% if x.commit %}<code>{{ ico('commit', 'xs') }}{{ x.commit }}</code>{% endif %}<span>{{ x.asks }} demande{{ 's' if x.asks != 1 }}</span>{% if x.direct %}<span class="pj-st done">direct</span>{% endif %}</span>
+</a>
+{%- endmacro %}
+<div class="pj-depend" data-tab="project/liens">
+  <div class="pj-cbar">
+    <nav class="pj-csub" aria-label="Ses dépendances">{% for b in bar %}<a href="{{ b.href }}"{% if b.on %} aria-current="page"{% endif %}>{{ b.label }}<span class="pj-cnt">{{ b.count }}</span></a>{% endfor %}</nav>
+    <div class="pj-cbar-side">{% if add_href %}<a class="btn quiet" href="{{ add_href }}"{% if adding %} aria-current="page"{% endif %}>{{ ico('plus', 'xs') }}Ajouter une dépendance</a>{% endif %}</div>
+  </div>
+
+  {% if view == '' %}
+  <div class="pj-split sans-liste" id="schema">
+    <div class="pj-detail">
+      <div class="pj-dz{{ ' sans-cote' if not panel and not adding }}">
+        <input type="checkbox" id="pj-infos" class="sr pj-infos-box" data-volet>
+        <div class="pj-main">
+          {% if adding %}
+          <section class="pj-c pj-adding"><header class="pj-form-h"><h3>Ajouter une dépendance</h3><p>Un projet qu'il lira, sans jamais y écrire ; ce qu'il en reçoit se lit dans les lignes d'accès du projet lu, à chaque exécution. Dis pourquoi : le mot reste sur le lien.</p></header>
+            {% for t in candidates %}<div class="pj-cand"><span class="pj-tile">{{ t.title[:1]|upper }}</span><div class="pj-mini-main"><b>{{ t.title }}</b><small>n° {{ t.n }} · {{ t.owner }}{% if t.planned %} · son plan demande à le lire{% endif %}</small>
+              <span class="pj-dep-gives">{% for g in t.gives %}<span class="pj-chip">{{ ico('check', 'xs') }}{{ g|lower }}</span>{% else %}<span class="pj-hint">Ses lignes d'accès ne lui donneraient rien pour l'instant.</span>{% endfor %}</span></div>
+              {% if t.form %}{{ whyform(t.form, 'Pourquoi il le lit (facultatif)', '', 'Le lire') }}{% endif %}</div>
+            {% else %}<p class="pj-none">Aucun projet qu'il puisse lire de plus.</p>{% endfor %}
+            <p><a class="btn quiet" href="?onglet=liens">Annuler</a></p></section>
+          {% else %}
+          <div class="pj-schema-bar"><span class="pj-hint">{{ ico('info', 'xs') }}Une flèche va du projet lu vers celui qui le lit. Choisis un projet pour voir ce que le lien donne.</span><label for="pj-infos" class="pj-v-infos">Infos</label></div>
+          <div class="pj-schema">
+            <div class="pj-col-deps"><h3>Il dépend de <span class="pj-cnt">{{ deps|length }}</span></h3><p class="pj-hint">les projets qu'il lit</p>
+              {% for x in deps %}{{ card(x) }}{% else %}<p class="pj-dep-none">Il ne lit aucun projet.</p>{% endfor %}
+              {% for n in gone %}<p class="pj-dep-none">Le projet n° {{ n }} n'existe plus : le lien ne donne rien.</p>{% endfor %}</div>
+            <div class="pj-arrow{{ ' vide' if not deps }}" aria-hidden="true"><span>lu par lui</span></div>
+            <div class="pj-center"><span class="pj-tile big">{{ center.title[:1]|upper }}</span><b>{{ center.title }}</b>{{ st(center.tone, center.state) }}{% if center.summary %}<p>{{ center.summary }}</p>{% endif %}
+              <dl><div><dt>{{ center.objectives }}</dt><dd>objectif{{ 's' if center.objectives != 1 }} en cours</dd></div><div><dt>{{ center.tickets }}</dt><dd>ticket{{ 's' if center.tickets != 1 }} ouvert{{ 's' if center.tickets != 1 }}</dd></div><div><dt>{{ center.asks }}</dt><dd>demande{{ 's' if center.asks != 1 }} envoyée{{ 's' if center.asks != 1 }}</dd></div></dl></div>
+            <div class="pj-arrow{{ ' vide' if not users }}" aria-hidden="true"><span>le lit</span></div>
+            <div class="pj-col-deps"><h3>Dépendent de lui <span class="pj-cnt">{{ users|length }}</span></h3><p class="pj-hint">les projets qui le lisent</p>
+              {% for x in users %}{{ card(x) }}{% else %}<p class="pj-dep-none">Aucun projet ne dépend de lui.</p>{% endfor %}</div>
+          </div>
+          {% if plan_asks %}<p class="pj-banner you">{{ ico('info', 'xs') }}<span>Son plan demande à lire {% for n in plan_asks %}le projet n° {{ n }}{{ ', ' if not loop.last }}{% endfor %} : le lien n'est pas encore posé.</span></p>{% endif %}
+          {% endif %}
+        </div>
+        {% if panel and not adding %}{% set x = panel %}
+        <aside class="pj-side" aria-label="Infos">
+          <section class="pj-sc"><p class="pj-side-h"><span class="pj-tile">{{ x.title[:1]|upper }}</span><span><b>{{ x.title }}</b><small>{% if x.reading %}« {{ center.title }} » le lit{% else %}il lit « {{ center.title }} »{% endif %}{% if x.since %} · depuis le {{ x.since }}{% endif %}</small></span>{{ st(x.tone, x.state) }}</p>
+            {% if x.why %}<p class="pj-sc-text">{{ x.why }}</p>{% elif x.reading %}<p class="pj-none">Aucun mot sur ce lien.</p>{% endif %}
+            {% if x.why_form %}<details class="pj-whyedit"><summary>{{ ico('pen', 'xs') }}{{ 'Changer ce mot' if x.why else 'Dire pourquoi il le lit' }}</summary>{{ whyform(x.why_form, 'Pourquoi il le lit', x.why) }}</details>{% endif %}
+            <a class="pj-more-link" href="{{ x.fiche }}">{{ ico('external', 'xs') }}Ouvrir sa fiche</a></section>
+          <section class="pj-sc"><h3>Ce que le lien {{ 'lui' if x.reading else 'leur' }} donne</h3>
+            <ul class="pj-gives" role="list">{% for g in x.gives %}<li class="{{ 'on' if g.on else 'off' }}">{{ ico('check' if g.on else 'minus', 'xs') }}<span><b>{{ g.label }}</b><small>{{ g.said }}</small></span></li>{% endfor %}</ul>
+            <p class="pj-hint">{{ ico('info', 'xs') }}Ce qu'un lien donne vient des lignes d'accès du projet lu : cela se lit ici, sans s'y régler.</p></section>
+          {% if x.commit %}<section class="pj-sc"><h3>Le commit que montre la vue</h3><p><code class="pj-sha">{{ x.commit }}</code> <span class="pj-hint">sa branche de base, en lecture seule, sous « liens/{{ x.n }}/ »</span></p></section>{% endif %}
+          <section class="pj-sc"><h3>Ses demandes<span class="pj-cnt">{{ x.requests|length }}</span></h3>
+            <p class="pj-sc-text">{{ x.mode }}</p>
+            {% if x.direct_form %}{{ pone(x.direct_form, 'Ne plus les faire entrer directement' if x.direct else 'Les faire entrer directement', 'bolt', 'quiet') }}{% elif x.direct_why %}<p class="pj-hint">Pas en direct : {{ x.direct_why }}.</p>{% endif %}
+            {% for r in x.requests %}<a class="pj-lie" href="{{ r.href }}">{{ tile('ticket', r.tone) }}<span class="pj-mini-main"><b>{{ r.title }}</b><small>#{{ r.n }} · {{ r.state }}</small></span></a>{% endfor %}
+            {% if x.ask_href %}<a class="pj-more-link" href="{{ x.ask_href }}">{{ ico('send', 'xs') }}Lui demander quelque chose</a>{% endif %}</section>
+          {% if x.drop %}<section class="pj-sc bas"><h3>Gérer</h3><div class="pj-decide">{{ pone(x.drop, 'Ne plus le lire', 'trash', 'quiet danger') }}</div></section>{% endif %}
+        </aside>{% endif %}
+      </div>
+    </div>
+  </div>
+
+  {% else %}
+  <div class="pj-split pj-asks{{ ' lire' if lire }}" id="demandes">
+    <aside class="pj-list" aria-label="Ses demandes">
+      <div class="pj-tools"><b class="pj-list-t">Demandes entre projets</b></div>
+      <div class="pj-rows">
+        {% for r in rows %}<a class="pj-row pj-drow" href="{{ r.href }}"{% if r.on %} aria-current="true"{% endif %}>{{ tile('upload' if r.sent else 'inbox', r.tone) }}<span class="pj-row-main"><b>{{ r.title }}</b><span class="pj-row-sub">{{ st(r.tone, r.state) }}<span>{{ 'à' if r.sent else 'de' }} « {{ r.to }} »</span><time>{{ r.ago }}</time></span></span></a>
+        {% else %}<p class="pj-none pad">Aucune demande entre lui et un autre projet. Une demande est un ticket ouvert chez un projet qu'il lit.</p>{% endfor %}
+      </div>
+    </aside>
+    <div class="pj-detail">
+      <a class="pj-back" href="{{ home }}">{{ ico('back', 'xs') }}Demandes</a>
+      {% if ask %}{% set a = ask %}
+      <header class="pj-dh">{{ tile('upload' if a.sent else 'inbox', a.tone) }}
+        <div class="pj-dh-main"><p class="pj-over">{{ 'Sa demande, un ticket chez lui' if a.sent else 'Une demande reçue, un ticket chez lui' }}</p><h2><span class="pj-num">#{{ a.n }}</span>{{ a.title }}</h2>
+          <p class="pj-meta">{{ st(a.tone, a.state) }}<span>{{ 'à' if a.sent else 'de' }} « {{ a.to }} »</span><span>{{ a.ago }}</span></p></div>
+        <div class="pj-dh-side"><a class="btn quiet" href="{{ a.ticket_href }}">{{ ico('ticket', 'xs') }}Ouvrir le ticket</a></div>
+      </header>
+      <div class="pj-dz">
+        <input type="checkbox" id="pj-infos" class="sr pj-infos-box" data-volet>
+        <div class="pj-main"><div class="pj-volets solo"><nav class="hm-subnav" aria-label="Ce qu'on en lit"><a href="#" aria-current="true">Demande</a></nav><label for="pj-infos" class="pj-v-infos">Infos</label></div>
+          <section class="pj-c"><p class="pj-prose">{% if a.sent %}Ce projet a ouvert ce ticket chez « {{ a.to }} » : c'est ce projet, et son propriétaire, qui le font avancer. Sa fermeture réveille l'objectif qui l'a demandé.{% else %}« {{ a.to }} » a ouvert ce ticket chez lui : il se traite dans ses Tickets, comme les autres.{% endif %}</p>
+            {% if not a.read %}<p class="pj-none">Ce ticket ne se relit plus (le lien ne donne plus son détail, ou il a été oublié).</p>{% endif %}</section></div>
+        <aside class="pj-side" aria-label="Infos">
+          <section class="pj-sc"><h3>En bref</h3><dl class="pj-props"><div><dt>Sens</dt><dd>{{ 'envoyée' if a.sent else 'reçue' }}</dd></div><div><dt>Étape</dt><dd>{{ st(a.tone, a.state) }}</dd></div>{% if a.stage %}<div><dt>Précision</dt><dd>{{ a.stage }}</dd></div>{% endif %}<div><dt>La main à</dt><dd>{{ a.hand }}</dd></div><div><dt>Depuis</dt><dd>{{ a.since }}</dd></div>{% if a.closed %}<div><dt>Fermée</dt><dd>{{ a.closed }}</dd></div>{% endif %}</dl></section>
+          {% if a.link_href %}<section class="pj-sc"><h3>Le lien</h3><a class="pj-lie" href="{{ a.link_href }}">{{ tile('link') }}<span class="pj-mini-main"><b>{{ a.to }}</b><small>{{ 'ce projet le lit' if a.sent else 'il lit ce projet' }}</small></span></a></section>{% endif %}
+          {% if a.project_href %}<section class="pj-sc"><h3>Le projet</h3><a class="pj-lie" href="{{ a.project_href }}">{{ tile('flag') }}<span class="pj-mini-main"><b>{{ a.to }}</b><small>{{ 'le projet à qui elle est adressée' if a.sent else 'le projet qui la demande' }}</small></span></a>{% if a.objective_href %}<a class="pj-more-link" href="{{ a.objective_href }}">{{ ico('target', 'xs') }}L'objectif qui l'a demandée</a>{% endif %}</section>{% endif %}
+        </aside>
+      </div>
+      {% else %}<div class="pj-empty">{{ tile('send') }}<b>Les demandes entre projets</b><p>Une demande est un ticket ouvert chez un projet qu'il lit ; celles qu'on lui fait sont des tickets chez lui.</p></div>{% endif %}
+    </div>
+  </div>
+  {% endif %}
+</div>

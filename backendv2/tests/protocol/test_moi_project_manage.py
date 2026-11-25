@@ -20,8 +20,8 @@ import ast
 from dataclasses import replace
 from pathlib import Path
 
-from mika.app.me import project_manage as manage
-from mika.app.me import projects as moi
+from mika.app.domains.projects.api import manage
+from mika.app.domains.projects.api import projects as moi
 from mika.app.me.api import form as api_form
 from mika.contracts import projects as c
 from mika.faculties.projects import actions, inspect_manage, managing
@@ -709,9 +709,9 @@ def test_only_the_gesture_of_a_person_writes_on_a_pull_request():
         return found
 
     assert mentions("edit_pull") == {
-        "adapters/workshop/github.py": {"edit_pull"}, "app/preview/git.py": {"edit_pull"},
+        "adapters/workshop/github.py": {"edit_pull"}, "app/domains/projects/demo_git.py": {"edit_pull"},
         "ports/workshop.py": {"edit_pull"}, "faculties/projects/managing.py": {"_write"},
-        "app/me/project_manage.py": {"edit_pull", "routes"}}  # la route de ce nom : elle passe par l'action
+        "app/domains/projects/api/manage.py": {"edit_pull", "routes"}}  # la route de ce nom : elle passe par l'action
     assert mentions("PULL_WRITE_ASKED") == {
         "faculties/projects/managing.py": {"writing", "_write"},  # le fait, et l'effet qui l'attend
         "faculties/projects/inspect_manage.py": {"_pull_edit", "_pull_comment"}}  # les deux actions qui l'émettent

@@ -1,6 +1,7 @@
 """Les fiches dessinées des objets (ADR 0121), une par module, comme ``inspector/pages/subjects.py`` les sert : un
 service branché (ADR 0310 : il a rejoint son domaine, ``app/domains/tools/console/subject.py``), un moyen de
-communication (``handle``), un projet (``project``, son dépôt git dans ``project_git``), un but (``goal``), un
+communication (``handle``), un projet (ADR 0310 : il a rejoint son domaine,
+``app/domains/projects/console/subject.py``, son dépôt git dans ``git.py``), un but (``goal``), un
 réveil (``wakeup``), une conversation et une réponse Teams (ADR 0310 : elles ont rejoint leur domaine,
 ``app/domains/teams/console/subject.py``), une boîte, un mail et un brouillon (``mail``), une fiche de l'annuaire —
 une personne connue de loin, une organisation (ADR 0298 : elle a rejoint son domaine, ``app/domains/contacts/console/subject.py``), un agenda

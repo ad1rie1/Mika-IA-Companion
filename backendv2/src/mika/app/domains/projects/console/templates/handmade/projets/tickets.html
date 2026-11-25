@@ -1,0 +1,135 @@
+{# Activité › Projets › un projet › Tickets (app/domains/projects/console/tickets.py::tickets_page, ADR 0297) :
+   l'onglet Tickets de l'écran Projets, sur les jetons de la console. Trois zones sur toute la largeur.
+   - La liste : la recherche (un formulaire en GET), « Nouveau ticket », les filtres en pastilles (en attente,
+     ouverts, tous), puis une ligne par ticket — son numéro, son titre, son étape en pastille, sa priorité quand elle
+     est haute, « ailleurs » pour ce qui vient de l'hôte ou d'un autre projet, depuis quand ; un point quand il
+     attend quelqu'un.
+   - Le contenu : le ticket choisi — son en-tête et les gestes du moment (accepter, écarter, valider ou refuser son
+     plan, fermer, rouvrir ; « Modifier »), puis ses volets en sous-onglets (``[data-subtabs]``) : Description, Plan,
+     Fil (de quoi y écrire en bas), Historique. Celui qui attend s'ouvre : son plan quand il est à valider, son fil
+     quand elle pose une question. Ou le formulaire « Nouveau ticket ».
+   - Le panneau : son parcours en six étapes, « En bref », « Ce qui est lié » — son objectif, sa pull request avec
+     son statut (son état, la CI, la relecture), son issue et son lien chez l'hôte.
+   Un texte venu d'ailleurs se présente comme tel, en texte brut. Aucun style ni script en ligne. #}
+{% from "handmade/projets/_morceaux.html" import ico, st, tile %}
+{% from "handmade/projets/_zones.html" import pform, pone, ppop, pull, outside, plumbing %}
+{% from "_forms.html" import field %}
+{% macro bubble(n) -%}
+{% if n.outside %}{{ outside(n.who ~ " · " ~ n.ago, n.text) }}
+{% else %}<div class="pj-bub {{ n.side }}"><div><span class="pj-bub-who">{{ n.who }}{% if n.kind %} · {{ n.kind }}{% endif %} · <time title="{{ n.when }}">{{ n.ago }}</time>{% if n.plan %} · n° {{ n.seq }}{% endif %}</span><p>{{ n.text }}</p></div></div>{% endif %}
+{%- endmacro %}
+<div class="pj-split pj-tic{{ ' lire' if lire }}" data-tab="project/tickets">
+  <aside class="pj-list" aria-label="Ses tickets">
+    <div class="pj-tools">
+      <form method="get" action="{{ base }}" class="pj-search" role="search">
+        <input type="hidden" name="onglet" value="tickets">{% if wanted %}<input type="hidden" name="filtre" value="{{ wanted }}">{% endif %}
+        {{ ico('search', 'xs') }}<input type="search" name="q" value="{{ q }}" placeholder="Chercher…" aria-label="Chercher un ticket">
+      </form>
+      {% if can_add %}<a class="btn pj-add-btn" href="{{ links.nouveau }}"{% if adding %} aria-current="page"{% endif %}>{{ ico('plus', 'xs') }}<span>Nouveau ticket</span></a>{% endif %}
+    </div>
+    <nav class="pj-filters" aria-label="Lesquels">{% for f in filters %}<a href="{{ f.href }}"{% if f.on %} aria-current="true"{% endif %}>{{ f.text }}<span class="pj-cnt">{{ f.count }}</span></a>{% endfor %}</nav>
+    <div class="pj-rows">
+      {% for r in rows %}
+      <a class="pj-row pj-trow{{ ' atoi' if r.yours }}" href="{{ r.href }}"{% if r.on %} aria-current="true"{% endif %}>
+        <span class="pj-tnum">#{{ r.n }}</span>
+        <span class="pj-row-main"><b>{{ r.title }}</b>
+          <span class="pj-row-sub">{{ st(r.tone, r.state) }}{% if r.high %}<span class="pj-prio haute" title="Priorité {{ r.priority }}">{{ ico('flag', 'xs') }}{{ r.priority }}</span>{% endif %}{% if r.outside %}<span class="pj-st out" title="Venu d'ailleurs">ailleurs</span>{% endif %}<time>{{ r.ago }}</time></span></span>
+      </a>
+      {% else %}
+      <p class="pj-none pad">{{ "Aucun ticket ici : change de filtre, ou efface la recherche." if any else "Pas encore de ticket : un ticket est une demande précise — un défaut, une évolution, une question." }}</p>
+      {% endfor %}
+      {% if more %}<p class="pj-hint pad">{{ more }} autre{{ 's' if more > 1 }} ticket{{ 's' if more > 1 }} : précise ta recherche.</p>{% endif %}
+    </div>
+    <p class="pj-list-foot"><a href="{{ settings }}">La validation des plans, les petits tickets, la publication en issues : les régler dans Administration</a></p>
+  </aside>
+  <div class="pj-detail">
+    <a class="pj-back" href="{{ home }}">{{ ico('back', 'xs') }}Tickets</a>
+    {% if adding %}
+    <div class="pj-c">{{ pform(adding, "Nouveau ticket", "Ce qu'il faut faire, en une ligne ; le contexte, et ce qui te ferait dire « c'est fait ». En Markdown : des titres (##), des listes (-), du `code`.", home, "Ouvrir le ticket", "plus") }}</div>
+    {% elif detail %}
+    {% set t = detail %}
+    <header class="pj-dh">
+      <div class="pj-dh-main"><h2><span class="pj-num">{{ t.name }}</span>{{ t.title }}</h2>
+        <p class="pj-meta">{{ st(t.tone, t.state) }}<span class="pj-kind">{{ t.kind }}</span>{% if t.high %}<span class="pj-prio haute">{{ ico('flag', 'xs') }}priorité haute</span>{% endif %}<span>ouvert par {{ t.by }}</span><span>{{ t.ago }}</span>{% if t.outside %}<span class="pj-st out">venu d'ailleurs</span>{% endif %}{% if t.stuck %}{{ st('fail', 'son objectif bloque') }}{% endif %}</p></div>
+      <div class="pj-dh-side">
+        {% for g in t.gestures %}{% if g.ask %}{{ ppop(g.form, g.label, g.title, g.icon, '' if g.main else 'quiet', g.submit) }}{% else %}{{ pone(g.form, g.label, g.icon, '' if g.main else 'quiet') }}{% endif %}{% endfor %}
+        {% if t.edit %}<a class="btn quiet" href="#t-modifier">{{ ico('pen', 'xs') }}Modifier</a>{% endif %}
+      </div>
+    </header>
+    <div class="pj-dz">
+      <input type="checkbox" id="pj-infos" class="sr pj-infos-box" data-volet>
+      <div class="pj-main" data-subtabs>
+        <div class="pj-volets"><nav class="hm-subnav" aria-label="Ce qu'on en lit">
+          <a href="#t-description">Description</a><a href="#t-plan">Plan{% if not t.plan %}<span class="pj-cnt">0</span>{% endif %}</a><a href="#t-fil">Fil<span class="pj-cnt">{{ t.thread|length }}</span></a><a href="#t-historique">Historique<span class="pj-cnt">{{ t.history|length }}</span></a>
+        </nav><label for="pj-infos" class="pj-v-infos">Infos</label></div>
+        <div class="hm-subpanes pj-vbody">
+          {% for pane in [t.first, 'description', 'plan', 'fil', 'historique']|unique %}
+          {% if pane == 'description' %}
+          <section id="t-description" class="pj-c" data-pane>
+            {% if not t.body %}<p class="pj-none">Pas de description.</p>
+            {% elif t.outside %}{{ outside(t.by, t.body) }}
+            {% else %}<div class="pj-md">{{ t.body_html }}</div>{% endif %}
+            {% if t.link %}<p class="pj-facts"><span><span class="k">référence</span> {{ t.link }}</span></p>{% endif %}
+          </section>
+          {% elif pane == 'plan' %}
+          <section id="t-plan" class="pj-c" data-pane>
+            {% if t.plan %}
+            <div class="pj-plancard{{ ' you' if t.plan.waits }}"><header>{{ ico('list') }}<b>Son plan</b>{{ st('you' if t.plan.waits else t.tone, t.plan.state) }}<span class="pj-kind">n° {{ t.plan.seq }}</span></header>
+              <div class="pj-md">{{ t.plan.html }}</div></div>
+            {% else %}<div class="pj-nothing">{{ ico('list') }}<b>Pas encore de plan</b><p>{{ t.no_plan }}</p>{% if t.asks %}<a class="btn quiet" href="#t-fil">Lire sa question</a>{% endif %}</div>{% endif %}
+          </section>
+          {% elif pane == 'fil' %}
+          <section id="t-fil" class="pj-c pj-filpane" data-pane>
+            {% if t.proposed_outside %}<p class="pj-banner you">{{ ico('ticket') }}<span>Ticket proposé depuis ailleurs : elle n'y touche pas tant qu'il n'est pas accepté.</span></p>{% endif %}
+            {% if t.thread %}<div class="pj-thread">{% for n in t.thread %}{{ bubble(n) }}{% endfor %}</div>
+            {% else %}<p class="pj-none">Personne n'a encore rien écrit dans ce fil.</p>{% endif %}
+            {% if t.note %}
+            <form method="post" action="{{ t.note.url }}" class="form pj-note">{{ plumbing(t.note) }}
+              {% for f in t.note.fields %}<input type="hidden" name="_champs" value="{{ f.path }}"><textarea name="{{ f.path }}" rows="2" required aria-label="{{ 'Ta réponse à sa question' if t.asks else 'Une note dans le fil' }}" placeholder="{{ 'Ta réponse à sa question…' if t.asks else 'Écrire une note dans le fil…' }}"></textarea>{% endfor %}
+              <button class="btn">{{ ico('send', 'xs') }}{{ 'Répondre' if t.asks else 'Ajouter la note' }}</button>
+            </form>
+            {% endif %}
+          </section>
+          {% elif pane == 'historique' %}
+          <section id="t-historique" class="pj-c" data-pane>
+            {% if t.history %}<ol class="pj-tl col histo" role="list">{% for h in t.history %}<li class="{{ h.tone }}"{% if h.title %} title="{{ h.title }}"{% endif %}><span class="pj-tl-top"><time title="{{ h.ago }}">{{ h.when }}</time>{% if h.outside %}<span class="pj-st out">venu d'ailleurs</span>{% endif %}</span><p>{{ ico(h.icon, 'xs') }}{{ h.text }}</p></li>{% endfor %}</ol>
+            {% else %}<p class="pj-none">Son histoire ne se rejoue plus : ses premiers événements ne sont plus au journal.</p>{% endif %}
+          </section>
+          {% endif %}
+          {% endfor %}
+          {% if t.edit %}<section id="t-modifier" class="pj-c" data-pane>{{ pform(t.edit, "Modifier le ticket " ~ t.name, "Le titre, la sorte, la priorité et la description. Son étape, son fil et son plan ne changent pas.", "#t-description", "Enregistrer") }}</section>{% endif %}
+        </div>
+      </div>
+      <aside class="pj-side" aria-label="Infos">
+        <section class="pj-sc"><h3>Son parcours</h3>
+          {% if t.journey.ended %}<p class="pj-ecarte">{{ ico('x', 'xs') }}{{ t.journey.ended }}</p>{% endif %}
+          <ol class="pj-steps" aria-label="Parcours du ticket" role="list">{% for s in t.journey.steps %}<li class="{{ s.cls }}"{% if s.here %} aria-current="step"{% endif %}><i>{% if s.icon %}{{ ico(s.icon, 'xs') }}{% else %}{{ s.n }}{% endif %}</i><span>{{ s.label }}</span>{% if s.sub %}<em>{{ s.sub }}</em>{% endif %}</li>{% endfor %}</ol>
+          {% if t.journey.skips %}<p class="pj-hint">{{ t.journey.skips }}</p>{% endif %}
+        </section>
+        <section class="pj-sc"><h3>En bref</h3>
+          <dl class="pj-props">{% for k, v in t.facts %}<div><dt>{{ k }}</dt><dd>{{ v }}</dd></div>{% endfor %}</dl>
+        </section>
+        <section class="pj-sc"><h3>Ce qui est lié</h3>
+          {% set l = t.linked %}
+          {% if l.objective %}<a class="pj-lie" href="{{ l.objective.href }}">{{ tile('target', l.objective.tone) }}<span class="pj-mini-main"><b>{{ l.objective.title }}</b><small>objectif n° {{ l.objective.n }}</small></span>{{ st(l.objective.tone, l.objective.state) }}</a>{% endif %}
+          {% if l.pull %}{{ pull(l.pull) }}{% endif %}
+          {% if l.issue %}<{{ 'a' if l.issue.url else 'div' }} class="pj-lie"{% if l.issue.url %} href="{{ l.issue.url }}" rel="noopener noreferrer nofollow" target="_blank"{% endif %}>{{ tile('stop', l.issue.tone) }}<span class="pj-mini-main"><b>Issue n° {{ l.issue.n }}</b><small>chez l'hôte du dépôt</small></span>{{ st(l.issue.tone, l.issue.state) }}</{{ 'a' if l.issue.url else 'div' }}>{% endif %}
+          {% if l.asker %}<a class="pj-lie" href="{{ l.asker_href }}">{{ tile('link') }}<span class="pj-mini-main"><b>Demande du projet n° {{ l.asker }}</b><small>ses demandes sont dans ses dépendances</small></span></a>{% endif %}
+          {% if not (l.objective or l.pull or l.issue or l.asker) %}<p class="pj-none">Ni objectif, ni pull request, ni issue pour l'instant.</p>{% endif %}
+          {% if t.publishing %}
+          <div class="pj-decide">
+            {% if t.publishing.publish %}{{ pone(t.publishing.publish, 'Publier en issue chez l\'hôte', 'external', 'quiet', 'Son titre et son texte partent, une fois ; ce qui partira attend dans « À valider ».') }}{% endif %}
+            {% if t.publishing.note %}{{ ppop(t.publishing.note, 'Publier une note de son fil', 'Publier une note chez l\'hôte', 'external', 'quiet', 'Publier cette note') }}{% endif %}
+            {% if t.publishing.asked %}<p class="pj-hint">Sa publication en issue est demandée : elle attend dans « À valider », ou vient de partir.</p>{% endif %}
+          </div>
+          {% endif %}
+        </section>
+      </aside>
+    </div>
+    {% elif missing %}
+    <div class="pj-empty">{{ tile('ticket') }}<b>Aucun ticket « {{ missing }} »</b><p>Il n'est pas dans ce projet.</p></div>
+    {% else %}
+    <div class="pj-empty">{{ tile('ticket') }}<b>{{ "Choisis un ticket" if any else "Pas encore de ticket" }}</b><p>{{ "Sa description, son plan, son fil et son historique s'ouvrent ici." if any else "Un ticket est une demande précise : un défaut, une évolution, une question." }}</p>{% if can_add %}<a class="btn" href="{{ links.nouveau }}">{{ ico('plus', 'xs') }}Nouveau ticket</a>{% endif %}</div>
+    {% endif %}
+  </div>
+</div>

@@ -1,4 +1,4 @@
-"""Activité › Projets, chaque onglet dans sa forme (``app/handmade/tabs/projects.py``, ADR 0177), à travers le vrai
+"""Activité › Projets, chaque onglet dans sa forme (``app/domains/projects/console/tabs.py``, ADR 0177), à travers le vrai
 serveur : une rangée par projet (où il en est, ses objectifs, sa prochaine exécution ; « Créer un projet » dans la
 barre de titre), ses exécutions jour par jour (verdict, preuve, compte rendu, commit), ses décisions techniques
 rangées par projet (ce qui est choisi, pourquoi), les objectifs et les décisions d'un projet (en clair, leurs

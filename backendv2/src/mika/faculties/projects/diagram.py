@@ -1,7 +1,7 @@
 """Le diagramme des objectifs d'un projet (ADR 0290, 0297), pur : de vraies dates seulement, lues dans sa tranche et
 dans les départs de ses exécutions — rien n'est estimé. Deux lecteurs s'en servent : l'API par personne
-(``app/me/project_activity.py``, ``GET …/diagramme``), qui y ajoute les mots et ce que chacun a le droit de lire, et la
-fiche de la console (``app/handmade/subjects/project_goals.py``), qui le dessine côté serveur.
+(``app/domains/projects/api/activity.py``, ``GET …/diagramme``), qui y ajoute les mots et ce que chacun a le droit de lire, et la
+fiche de la console (``app/domains/projects/console/goals.py``), qui le dessine côté serveur.
 
 - ``episode_sort`` : ce qu'était un épisode de ce projet (un cadrage, du travail, une relecture) et l'objectif visé ;
 - ``starts_of`` : les départs de ses exécutions de travail, par objectif, du plus ancien au plus récent ;

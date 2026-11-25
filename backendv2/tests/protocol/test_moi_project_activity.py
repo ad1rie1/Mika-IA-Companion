@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import json
 
-from mika.app.me import project_activity as activity
-from mika.app.me import projects as moi
+from mika.app.domains.projects.api import activity
+from mika.app.domains.projects.api import projects as moi
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.faculties.projects.faculty import (

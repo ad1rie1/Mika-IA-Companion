@@ -61,6 +61,8 @@ from mika.app.console import FACULTY_LABELS, LABELS, NAVIGATION, PARAM_FAMILIES
 from mika.app.console_menu import menu_for
 from mika.app.constellation import Constellation
 from mika.app.domains import DOMAINS, part
+from mika.app.domains.projects.docs_mcp import PREFIX as DOCS_MCP_PREFIX
+from mika.app.domains.projects.docs_mcp import DocsPoint
 from mika.app.handmade import access, approval_sources, rights, waiting
 from mika.app.handmade.home import HomePage
 from mika.app.handmade.now import NowPage
@@ -70,8 +72,6 @@ from mika.app.handmade.tabs.people import PeoplePage
 from mika.app.logs import configure_logging
 from mika.app.me.assembly import MeApi
 from mika.app.me.changes import LiveChanges
-from mika.app.me.docs_mcp import PREFIX as DOCS_MCP_PREFIX
-from mika.app.me.docs_mcp import DocsPoint
 from mika.app.mindport import KernelPort
 from mika.app.paths import PERSONA
 from mika.app.settings import SecretBox, Settings, push_key_file

@@ -25,7 +25,7 @@ Ce n'est pas le dépôt de l'atelier : enregistrer une page n'est pas un commit.
   projet (``SPACE_BYTES``), avec leurs sujets : l'oubli d'une personne les efface.
 
 Un chemin ne sort jamais de l'espace : chaque segment est un nom simple (``SEGMENT``), une page finit par ``.md``.
-Qui peut lire et écrire : ``links.Grant.documentation`` pour un projet qui en lit un autre ; ``app/me/project_docs``
+Qui peut lire et écrire : ``links.Grant.documentation`` pour un projet qui en lit un autre ; ``app/domains/projects/api/docs``
 pour une personne. Les actions sont dans ``inspect_docs.py``, ses outils et la section du prompt dans
 ``docs_tools.py``.
 """

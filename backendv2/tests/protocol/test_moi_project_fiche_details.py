@@ -16,7 +16,7 @@ Chaque point avec ses droits : qui pilote, qui ne fait que lire, qui ne fait que
 
 from __future__ import annotations
 
-from mika.app.me import projects as moi
+from mika.app.domains.projects.api import projects as moi
 from mika.contracts import projects as c
 from mika.contracts import self_ as self_c
 from mika.faculties.projects import tickets, tracker

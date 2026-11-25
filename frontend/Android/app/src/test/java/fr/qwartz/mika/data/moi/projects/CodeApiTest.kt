@@ -31,7 +31,7 @@ import java.util.concurrent.Executors
 
 /**
  * Le code d'un projet sur l'API par personne (`protocole-moi.md` § 11, « Le code d'un projet ») : ses réponses lues
- * telles que le serveur les écrit (`backendv2/src/mika/app/me/project_code.py`), ce que chaque lecture demande, les
+ * telles que le serveur les écrit (`backendv2/src/mika/app/domains/projects/api/code.py`), ce que chaque lecture demande, les
  * textes de l'hôte qui arrivent marqués, et **la fusion** — sa demande nomme le numéro et le commit de tête lu, sous le
  * jeton, sans jeton CSRF, avec sa clé d'envoi ; un geste générique n'atteint jamais sa route ; ses refus gardent les
  * mots du serveur.

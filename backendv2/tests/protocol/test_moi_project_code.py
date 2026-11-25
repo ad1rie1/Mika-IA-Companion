@@ -16,8 +16,8 @@ from dataclasses import replace
 
 import pytest
 
-from mika.app.me import project_code as code
-from mika.app.me import projects as moi
+from mika.app.domains.projects.api import code
+from mika.app.domains.projects.api import projects as moi
 from mika.contracts import projects as c
 from mika.faculties.projects import inspect_merge, merge, tracker
 from mika.faculties.projects.faculty import (

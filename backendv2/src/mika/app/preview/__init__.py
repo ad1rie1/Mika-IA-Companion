@@ -40,12 +40,12 @@ from mika.app import schema
 from mika.app.console import NAVIGATION
 from mika.app.domains import DOMAINS, part
 from mika.app.domains.mail.demo import mailbox
+from mika.app.domains.projects.demo import chain
+from mika.app.domains.projects.demo_activity import activity
+from mika.app.domains.projects.demo_git import URL as REMOTE_URL
+from mika.app.domains.projects.demo_git import repository
 from mika.app.me import form
-from mika.app.preview.activity import activity
-from mika.app.preview.git import URL as REMOTE_URL
-from mika.app.preview.git import repository
 from mika.app.preview.inner import inner
-from mika.app.preview.projects import chain
 from mika.app.server import build
 from mika.contracts import attachments as attachments_c
 from mika.contracts import email as email_c

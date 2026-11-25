@@ -1236,7 +1236,7 @@ NEXT_RUN_LABEL = "prochaine exécution"
                               "validation de ses tickets et leur publication en issues.")
 def _behaviour_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     """Le formulaire « Modifier le projet », puis ses réglages en faits — son mode, son rythme (et sa prochaine
-    exécution), sa liberté — et ses outils. La fiche dessinée (``app/handmade/subjects/project.py``) montre le
+    exécution), sa liberté — et ses outils. La fiche dessinée (``app/domains/projects/console/subject.py``) montre le
     formulaire et tait ces faits, qu'elle passe en aide de leur réglage ou en une ligne ; ils restent ici pour la
     console en MCP, le repli, et un projet archivé (sans formulaire), qui les montre en lecture."""
     p = _subject(s, ctx)

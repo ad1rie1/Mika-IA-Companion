@@ -1,5 +1,5 @@
 """L'API par personne, Projets (ADR 0282), à travers le vrai serveur, sur la chaîne d'exemple de l'aperçu
-(``app/preview/projects.py`` : un produit, un projet qui le lit, des tickets à chaque étape où la main est au
+(``app/domains/projects/demo.py`` : un produit, un projet qui le lit, des tickets à chaque étape où la main est au
 propriétaire, un point d'arrêt dit prêt, une liste à sa charge, un plan sans réponse).
 
 Ce que ces tests gardent, route par route : **les droits** — une personne ne voit que ses projets ; une connaissance
@@ -21,8 +21,8 @@ from __future__ import annotations
 
 import json
 
-from mika.app.me import projects as moi
-from mika.app.preview.projects import chain
+from mika.app.domains.projects.api import projects as moi
+from mika.app.domains.projects.demo import chain
 from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt

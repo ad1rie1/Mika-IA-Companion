@@ -1301,7 +1301,7 @@ et leurs adresses, une ligne en jetons qui redonne la ligne même, la mise en li
 l'arborescence un dossier à la fois, les jours d'une ligne de temps, l'ordre de fusion qui ne naît que d'une pull request
 relue que le serveur ouvre, ce que la confirmation en dit, un geste générique qui ne porte jamais la route de la fusion,
 modifier sans rien envoyer qui ne change), ses lectures contre un faux serveur (`CodeApiTest` : les réponses de
-`project_code.py` lues telles quelles, ce que chaque lecture demande, les textes de l'hôte marqués, la fusion qui nomme
+`app/domains/projects/api/code.py` lues telles quelles, ce que chaque lecture demande, les textes de l'hôte marqués, la fusion qui nomme
 le numéro et le commit de tête sous le jeton avec sa clé d'envoi, ses refus avec les mots du serveur, `gesture` qui
 n'atteint jamais sa route), **l'unique chemin vers la fusion** (`MergePathTest` : le code de l'app lu sans ses
 commentaires — la route écrite une fois, un seul appel qui l'envoie, un seul endroit qui fabrique son ordre, un seul qui
