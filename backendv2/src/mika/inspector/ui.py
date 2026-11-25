@@ -55,7 +55,7 @@ from mika.runtime.inspection import Inspection
 PREFIX = render.PREFIX
 TEMPLATES = Path(__file__).parent / "templates"
 STATIC = Path(__file__).parent / "static"
-ASSET_VERSION = "90"
+ASSET_VERSION = "91"
 
 log = logging.getLogger("mika.console")
 
@@ -117,7 +117,7 @@ class InspectorDeps:
     labels: Labels | None = None
     #: le relais MCP du moteur Claude Code (« Prêter à un agent » : ses sessions ouvertes)
     relay: Any = None
-    #: ses outils prêtés à un agent (``app/lending.py``, ADR 0122) : ce que chaque point sert, ses derniers appels
+    #: ses outils prêtés à un agent (``app/domains/tools/lending.py``, ADR 0122) : ce que chaque point sert, ses derniers appels
     lending: Any = None
     #: les clients du monde (``/ws/world``, ADR 0051) : ``overview()`` dit qui est connecté, qui tient le bail
     #: d'hôte, ce qui manque au moteur (Système › Écrans du monde)

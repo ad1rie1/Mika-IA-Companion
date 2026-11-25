@@ -87,7 +87,7 @@ PLACE_ACTION = f"{BASE}/place/regler"
 #: les situations rangées par ce qui se passe, en tête de la grille ; les autres : elle travaille seule
 MOMENTS = {Kind.REPLY: "Elle répond à…", Kind.INITIATIVE: "D'elle-même"}
 ALONE = "Elle travaille seule sur…"
-#: les adresses de ce qu'elle expose en MCP (``inspector.mcp``, ``app/lending.py``), et la machine qui les sert
+#: les adresses de ce qu'elle expose en MCP (``inspector.mcp``, ``app/domains/tools/lending.py``), et la machine qui les sert
 CONSOLE_ADDRESS, LENT_ADDRESS, LOCAL_ORIGIN = console_mcp.PREFIX, "/mcp/pret", "http://127.0.0.1:8001"
 #: ce que la console en MCP sert au-delà de ses pages, en mots
 SERVED_PARTS = ((console_mcp.VIEWS, "Les vues de ses facultés (ses souvenirs, ses pensées, ses liens…)"),

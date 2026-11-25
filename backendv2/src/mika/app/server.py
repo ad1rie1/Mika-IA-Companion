@@ -72,23 +72,24 @@ from mika.adapters.web.push import MobilePush
 from mika.adapters.workshop import BwrapWorkshop
 from mika.adapters.workshop.github import GitHubRepos
 from mika.adapters.world.server import WorldHub
-from mika.app import backup, composition, datadir, embeddings, schema, settings_sections, system_mcp
+from mika.app import backup, composition, datadir, embeddings, schema, settings_sections
 from mika.app import persona as persona_file
 from mika.app.agenda_desk import AgendaSettingsDesk
 from mika.app.console import FACULTY_LABELS, LABELS, NAVIGATION, PARAM_FAMILIES
 from mika.app.console_menu import menu_for
 from mika.app.constellation import Constellation
 from mika.app.domains import DOMAINS, part
+from mika.app.domains.tools import system as system_mcp
+from mika.app.domains.tools.lending import PREFIX as LENT_PREFIX
+from mika.app.domains.tools.lending import Lending
+from mika.app.domains.tools.store import McpSettingsStore
 from mika.app.handmade import access, approval_sources, rights, waiting
 from mika.app.handmade.home import HomePage
 from mika.app.handmade.now import NowPage
 from mika.app.handmade.pages import DRAWN, OVERVIEWS
 from mika.app.handmade.person import PersonOverview
 from mika.app.handmade.tabs.people import PeoplePage
-from mika.app.lending import PREFIX as LENT_PREFIX
-from mika.app.lending import Lending
 from mika.app.logs import configure_logging
-from mika.app.mcp_settings import McpSettingsStore
 from mika.app.me.assembly import MeApi
 from mika.app.me.changes import LiveChanges
 from mika.app.me.docs_mcp import PREFIX as DOCS_MCP_PREFIX

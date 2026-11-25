@@ -15,8 +15,8 @@ import hashlib
 import json
 from typing import Any
 
-from mika.app import lending as lending_mod
-from mika.app.lending import Lending
+from mika.app.domains.tools import lending as lending_mod
+from mika.app.domains.tools.lending import Lending
 from mika.contracts import goals as goals_c
 from mika.inspector.mcp import ConsoleHost
 from mika.ports.llm import LLMResponse

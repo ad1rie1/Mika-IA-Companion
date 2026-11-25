@@ -60,7 +60,6 @@ PACKAGES: dict[str, tuple[str, ...]] = {
 #: les modules d'``app`` qui sont à un domaine et attendent leur déménagement dans son dossier : les importer, c'est
 #: déjà le nommer. Un module déménagé sort de cette table (il n'existe plus : la garde le dit)
 TO_MOVE: dict[str, tuple[str, ...]] = {
-    "tools": ("app.mcp_settings", "app.system_mcp", "app.lending", "app.me.mcp", "app.handmade.subjects.server"),
     "maps": ("app.me.maps", "app.handmade.person.voyages", "app.cli.maps", "app.warm_points"),
     "teams": ("app.teams", "app.me.teams", "app.me.teams_extension", "app.handmade.tabs.teams",
               "app.handmade.subjects.teams"),
@@ -114,7 +113,6 @@ STILL: dict[str, set[str]] = {
     "handmade/subjects/project_links.py": {"projects"},
     "handmade/subjects/project_tickets.py": {"projects"},
     "handmade/subjects/project_zones.py": {"projects"},
-    "handmade/subjects/server.py": {"tools"},
     "handmade/subjects/teams.py": {"teams"},
     "handmade/tabs/agendas.py": {"agenda"},
     "handmade/tabs/mail.py": {"mail"},
@@ -122,8 +120,6 @@ STILL: dict[str, set[str]] = {
     "handmade/tabs/teams.py": {"teams"},
     "handmade/tabs/thoughts.py": {"mail", "senses", "teams"},
     "handmade/waiting.py": {"contacts", "mail", "teams"},
-    "lending.py": {"tools"},
-    "mcp_settings.py": {"tools"},
     "me/agenda.py": {"agenda", "mail"},
     "me/api.py": {"mail"},
     "me/assembly.py": {"agenda", "mail", "maps", "projects", "teams", "tools"},
@@ -131,7 +127,6 @@ STILL: dict[str, set[str]] = {
     "me/docs_mcp.py": {"mail", "projects", "tools"},
     "me/mail.py": {"mail"},
     "me/maps.py": {"maps"},
-    "me/mcp.py": {"tools"},
     "me/project_activity.py": {"projects"},
     "me/project_code.py": {"projects"},
     "me/project_docs.py": {"projects"},
@@ -150,7 +145,6 @@ STILL: dict[str, set[str]] = {
     "settings.py": {"agenda", "mail", "maps", "teams", "tools"},
     "settings_sections/map_phone.py": {"maps"},
     "settings_sections/plugins.py": {"agenda", "mail", "teams", "tools"},
-    "system_mcp.py": {"tools"},
     "teams.py": {"teams"},
     "warm_points.py": {"maps"},
 }

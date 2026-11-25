@@ -21,8 +21,8 @@ from urllib.parse import urlencode
 
 from starlette.routing import Route
 
-from mika.app import system_mcp
 from mika.app.console import LABELS
+from mika.app.domains.tools import system as system_mcp
 from mika.app.me import mail as mail_me
 from mika.app.me import teams as teams_me
 from mika.app.me.api import Call, Me, MeApiBase

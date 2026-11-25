@@ -522,7 +522,7 @@ class Settings:
 
     def mcp_system_access(self) -> dict[str, dict[str, Any]]:
         """Les accès réglés des serveurs du système : serveur → ses lignes et sa ligne par défaut. Rien d'enregistré
-        sur sa fiche : celles de son plugin (``system_mcp``)."""
+        sur sa fiche : celles de son plugin (``app/domains/tools/system.py``)."""
         raw = dict(self._get(MCP_SYSTEM_ACCESS_KEY) or {})
         return {str(k): {f: v[f] for f in SYSTEM_ACCESS_FIELDS if f in v} for k, v in raw.items()
                 if isinstance(v, dict)}

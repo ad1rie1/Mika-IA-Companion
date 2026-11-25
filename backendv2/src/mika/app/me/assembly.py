@@ -14,11 +14,11 @@ from typing import Any
 from starlette.routing import Route
 
 from mika.app.domains import DOMAINS, part
+from mika.app.domains.tools import api as mcp
 from mika.app.me import (
     agenda,
     mail,
     maps,
-    mcp,
     project_activity,
     project_code,
     project_docs,

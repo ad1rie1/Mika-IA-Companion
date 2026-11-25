@@ -30,8 +30,8 @@ from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 from starlette.routing import Route
 
+from mika.app.domains.tools.console.subject import KIND as SERVICE
 from mika.app.handmade.access import KEEP_CHOICES, capitalized, people_with_accounts
-from mika.app.handmade.subjects.server import KIND as SERVICE
 from mika.app.me import Denied, missing, sharing
 from mika.app.me import agenda as agenda_me
 from mika.contracts import forge as forge_c

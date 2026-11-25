@@ -478,7 +478,7 @@ la part de la ligne qui te concerne (ADR 0209).
 - `services`, `apps` : seulement ceux qu'au moins une case t'ouvre ; une app dit son titre. Un service qu'une personne
   a branché (`owner`, ADR 0192) dit son but (`description`, le `purpose` qu'elle lui a donné). Un service du système
   (`web`, son plugin actif) a un titre et un but écrits pour la personne par la composition (« Le web »,
-  `app/system_mcp.py`, `SHOWN`, ADR 0219). Un service de l'opératrice, sans propriétaire, n'en dit rien (`description`
+  `app/domains/tools/system.py`, `SHOWN`, ADR 0219). Un service de l'opératrice, sans propriétaire, n'en dit rien (`description`
   vide) : son `purpose` est la ligne de son catalogue, écrite pour elle (ADR 0209). Ceux qu'on te partage sans
   qu'aucune case ne t'en ouvre encore se lisent dans `GET …/mcp/services` (`received`, § 8).
 

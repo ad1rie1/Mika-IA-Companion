@@ -85,7 +85,7 @@
 .elsewhere-id { color: var(--muted); font-size: 11.5px; }
 .elsewhere-id code { font-size: 11px; }
 
-/* La fiche d'un service branché, « En bref » (app/handmade/subjects/server.py) : ses tuiles et ses outils non servis, ses
+/* La fiche d'un service branché, « En bref » (app/domains/tools/console/subject.py) : ses tuiles et ses outils non servis, ses
    accès, ce qu'elle en lit, pour qui et quand. */
 .server { display: grid; gap: 18px; }
 .server-alert { margin: 0; padding: 10px 14px; border-radius: var(--radius); font-size: 13.5px; }

@@ -22,8 +22,9 @@ from pydantic import ValidationError
 from mika.adapters.mcp.client import live_tool
 from mika.adapters.mcp.config import McpConfig, McpServer, StoredReview
 from mika.adapters.mcp.system import BY, Provided, SystemServers
-from mika.app import composition, system_mcp
+from mika.app import composition
 from mika.app.console import FACULTY_LABELS, PARAM_FAMILIES
+from mika.app.domains.tools import system as system_mcp
 from mika.kernel.clock import MINUTE, US
 from mika.kernel.registry import _decode_params
 from mika.plugins import web

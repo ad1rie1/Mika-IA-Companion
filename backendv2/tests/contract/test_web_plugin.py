@@ -15,7 +15,7 @@ import pytest
 from mika.adapters.mcp.config import McpConfig
 from mika.adapters.mcp.hub import McpHub
 from mika.adapters.mcp.system import Provided, SystemServers
-from mika.app import system_mcp
+from mika.app.domains.tools import system as system_mcp
 from mika.kernel.schema import problems
 from mika.plugins import web
 

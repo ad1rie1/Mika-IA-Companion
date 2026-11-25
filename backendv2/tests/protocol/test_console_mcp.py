@@ -15,8 +15,8 @@ import httpx
 import pytest
 
 from mika.adapters.mcp.http import HttpTransport
+from mika.app.domains.tools.console import subject as server_fiche
 from mika.app.handmade.access import KEEP_CHOICES, POLICY_CHOICES
-from mika.app.handmade.subjects import server as server_fiche
 from mika.kernel.inspect import Note
 from mika.plugins.mcp.inspect import access_said
 from mika.ports.mcp import KEEPS, Access

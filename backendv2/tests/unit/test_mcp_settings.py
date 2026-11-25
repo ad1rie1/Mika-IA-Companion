@@ -1,4 +1,4 @@
-"""Ce qu'un serveur MCP fait d'elle, écrit dans les réglages (``app/mcp_settings.py``, ADR 0128, 0131) — sur des
+"""Ce qu'un serveur MCP fait d'elle, écrit dans les réglages (``app/domains/tools/store.py``, ADR 0128, 0131) — sur des
 réglages réels :
 
 - brancher crée sa fiche, et refuse un nom pris, par l'opérateur ou par un serveur du système ;
@@ -20,8 +20,8 @@ from mika.adapters.mcp.config import McpConfig, McpServer
 from mika.adapters.mcp.hub import McpHub
 from mika.adapters.mcp.system import SystemServers
 from mika.adapters.store_sql.store import SqlStore
-from mika.app import system_mcp
-from mika.app.mcp_settings import McpSettingsStore
+from mika.app.domains.tools import system as system_mcp
+from mika.app.domains.tools.store import McpSettingsStore
 from mika.app.settings import SecretBox, Settings
 from mika.plugins import web
 

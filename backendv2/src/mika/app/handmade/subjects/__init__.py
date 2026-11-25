@@ -1,7 +1,8 @@
 """Les fiches dessinées des objets (ADR 0121), une par module, comme ``inspector/pages/subjects.py`` les sert : un
-service branché (``server``), un moyen de communication (``handle``), un projet (``project``, son dépôt git dans
-``project_git``), un but (``goal``), un réveil (``wakeup``), une conversation et une réponse Teams (``teams``), une
-boîte, un mail et un brouillon (``mail``), une fiche de l'annuaire — une personne connue de loin, une organisation
+service branché (ADR 0310 : il a rejoint son domaine, ``app/domains/tools/console/subject.py``), un moyen de
+communication (``handle``), un projet (``project``, son dépôt git dans ``project_git``), un but (``goal``), un
+réveil (``wakeup``), une conversation et une réponse Teams (``teams``), une boîte, un mail et un brouillon
+(``mail``), une fiche de l'annuaire — une personne connue de loin, une organisation
 (ADR 0298 : elle a rejoint son domaine, ``app/domains/contacts/console/subject.py``), un agenda (``agenda``,
 ADR 0309). Chacune est une ``Overview`` ; la composition les reçoit toutes, par sorte d'objet, dans
 ``app/handmade/pages.py`` (``OVERVIEWS``) — pas ici : la fiche d'un domaine importe ce paquet (``parts.py``), qui ne

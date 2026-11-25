@@ -1,8 +1,8 @@
 """Ce que la composition donne aux tableaux de droits (ADR 0131, 0133, 0134) — ceux de l'inspecteur (Réglages › Canaux,
-Outils › Ce qu'elle peut faire, par ``InspectorDeps``), d'un service (``subjects/server.py``), d'un projet
-(``subjects/project.py``) — et à la page « Droits » (``rights.py``) : les personnes qu'une ligne peut nommer, les
-instances de chaque canal, la fiche d'une famille d'outils venue d'ailleurs, les choix de leurs sélecteurs (ceux du
-cadre commun, ``vocab.access``). Une seule liste, une seule règle pour tous."""
+Outils › Ce qu'elle peut faire, par ``InspectorDeps``), d'un service (``app/domains/tools/console/subject.py``),
+d'un projet (``subjects/project.py``) — et à la page « Droits » (``rights.py``) : les personnes qu'une ligne peut
+nommer, les instances de chaque canal, la fiche d'une famille d'outils venue d'ailleurs, les choix de leurs
+sélecteurs (ceux du cadre commun, ``vocab.access``). Une seule liste, une seule règle pour tous."""
 
 from __future__ import annotations
 

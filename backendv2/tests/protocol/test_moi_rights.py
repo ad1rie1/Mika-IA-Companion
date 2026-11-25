@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import re
 
+from mika.app.domains.tools.system import SHOWN
+from mika.app.domains.tools.system import spec as system_spec
 from mika.app.me.rights import CANALS, MOMENTS, OWNED_WHY, WORK
-from mika.app.system_mcp import SHOWN
-from mika.app.system_mcp import spec as system_spec
 from mika.plugins import web
 from mika.plugins.mcp import specs_of
 from mika.ports.mcp import CLOSED, Access, OfferedTool, ServerStatus
