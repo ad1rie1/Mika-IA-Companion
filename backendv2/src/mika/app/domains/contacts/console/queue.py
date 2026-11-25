@@ -10,10 +10,11 @@ from typing import Any
 
 from markupsafe import Markup
 
+from mika.app.domains.contacts.console.directory import STYLES as DIRECTORY_STYLES
+from mika.app.domains.contacts.console.directory import Talker, accounts, contact_entry, person_entry
 from mika.app.domains.contacts.console.subject import MATCH, line_of, sheet_of, whose_words
 from mika.app.domains.domain import QueuePart
 from mika.app.handmade import Look
-from mika.app.handmade.directory import Talker, accounts, contact_entry, person_entry
 from mika.app.handmade.subjects.parts import safely
 from mika.app.handmade.tabs import Line, blank, instant, raw_lines, text, view_of
 from mika.app.handmade.tabs.identities import name_entry
@@ -152,4 +153,6 @@ QUEUE = QueuePart(
                      "dont on lui a parlé et quelqu'un qui lui parle : la même personne ? " + MATCH_RULE,
          empty="Aucune fiche n'en rappelle une autre par son nom."),),
     items=items, count=count, views=(NAMES_VIEW, MATCHES_VIEW),
+    # les deux fiches côte à côte d'un rapprochement : les feuilles de l'annuaire
+    styles=DIRECTORY_STYLES,
 )

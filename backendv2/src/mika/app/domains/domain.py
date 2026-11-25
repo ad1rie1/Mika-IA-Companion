@@ -229,6 +229,9 @@ class QueuePart:
     items: Callable[..., Awaitable[list[Any]]] | None = None
     #: … et ``count(ui, kinds)`` les compte (``kinds`` : les sortes voulues ; ``None`` : toutes)
     count: Callable[..., int] | None = None
+    #: les feuilles de ce qu'il dessine dans la liseuse de la file (les deux fiches côte à côte d'un rapprochement) ;
+    #: la file les charge toutes, dans l'ordre des fiches, chacune une fois
+    styles: tuple[str, ...] = ()
     #: ses vues qui montrent, dans sa destination, les mêmes demandes que la file (« destination/onglet ») : l'accueil
     #: ne les compte pas une seconde fois
     covers: tuple[str, ...] = ()

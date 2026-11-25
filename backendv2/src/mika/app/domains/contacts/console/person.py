@@ -22,10 +22,16 @@ from urllib.parse import urlencode
 
 from markupsafe import Markup
 
+from mika.app.domains.contacts.console.directory import (
+    accounts,
+    contact_entry,
+    contact_url,
+    place_name,
+    port_of,
+)
 from mika.app.domains.contacts.console.subject import detach_forms, sheet_of, tiles_of
 from mika.app.domains.domain import PersonPart
 from mika.app.handmade import Look
-from mika.app.handmade.directory import accounts, contact_entry, contact_url, place_name, port_of
 from mika.app.handmade.person.common import Who
 from mika.app.handmade.subjects.parts import safely
 from mika.faculties.identity.inspect import TRUST_SHORT, handle_label, handles_of

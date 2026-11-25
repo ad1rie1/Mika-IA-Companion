@@ -33,10 +33,17 @@ from urllib.parse import urlencode
 
 from markupsafe import Markup
 
+from mika.app.domains.contacts.console.directory import STYLES as DIRECTORY_STYLES
+from mika.app.domains.contacts.console.directory import (
+    Accounts,
+    accounts,
+    contact_url,
+    place_name,
+    port_of,
+    short,
+)
 from mika.app.handmade import Look, excerpt
 from mika.app.handmade import blocks as drawn_blocks
-from mika.app.handmade.directory import STYLES as DIRECTORY_STYLES
-from mika.app.handmade.directory import Accounts, accounts, contact_url, place_name, port_of, short
 from mika.app.handmade.subjects.parts import safely
 from mika.inspector import render
 from mika.inspector.pages.subjects import subject_url

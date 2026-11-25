@@ -37,8 +37,8 @@ from typing import Any
 
 from starlette.routing import Route
 
+from mika.app.domains.contacts.console.directory import Accounts, merged, take
 from mika.app.domains.teams.api import photo_url
-from mika.app.handmade.directory import Accounts, merged, take
 from mika.app.me.api import Call, Denied, MeApiBase, done, form, missing
 from mika.app.me.common import allows, held_by, millis
 from mika.contracts import identity as identity_c

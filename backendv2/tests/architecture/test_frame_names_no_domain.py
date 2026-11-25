@@ -95,8 +95,6 @@ FOREVER: dict[str, str] = {
 
 #: ce qui reste à sortir du cadre : fichier d'``app`` → domaines qu'il nomme encore. Elle ne fait que rétrécir
 STILL: dict[str, set[str]] = {
-    "handmade/directory.py": {"contacts"},
-    "handmade/tabs/people.py": {"contacts"},
     "mindport.py": {"maps", "projects", "senses", "wakeup"},
     "preview/__init__.py": {"mail", "maps", "projects", "teams"},
 }

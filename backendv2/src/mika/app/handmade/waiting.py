@@ -20,7 +20,6 @@ from collections.abc import Sequence
 from typing import Any
 
 from mika.app.handmade import approval_sources
-from mika.app.handmade.directory import STYLES as DIRECTORY_STYLES
 from mika.app.handmade.pages import PARTS
 from mika.app.handmade.tabs import Got, Line, instant, raw_lines, text, view_of
 from mika.app.handmade.tabs.identities import claim_entry, handle_of
@@ -66,8 +65,9 @@ class Waiting:
     """Ce que la composition met dans la file « À valider » (``InspectorDeps.queue``)."""
 
     tabs: Sequence[QueueTab] = TABS
-    #: les feuilles de ce qu'elle dessine dans la liseuse (deux fiches côte à côte)
-    styles: Sequence[str] = DIRECTORY_STYLES
+    #: les feuilles de ce qu'elle dessine dans la liseuse (deux fiches côte à côte) : celles que les parts disent, dans
+    #: l'ordre des fiches, chacune une fois
+    styles: Sequence[str] = tuple(dict.fromkeys(sheet for queue in QUEUES for sheet in queue.styles))
     #: les vues qui montrent les mêmes demandes que la file, dans leur destination : l'accueil ne les compte pas une
     #: seconde fois (``UI.attention_items(distinct=True)``)
     covers: Sequence[str] = tuple(path for queue in QUEUES for path in queue.covers)

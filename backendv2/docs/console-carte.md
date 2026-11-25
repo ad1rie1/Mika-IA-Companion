@@ -238,9 +238,10 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
   mène à Présents), qui lui manque, une recherche (par nom ou par moyen de communication) et un filtre de proximité.
   Ses onglets, les mêmes sur ses quatre pages : Vue d'ensemble (cette page), Annuaire, Liens, Présents — la
   destination déclare ce premier onglet dessiné à part (`Destination.lead`), ses autres onglets y ramènent. Ses
-  onglets (dans le même module) disent une personne comme la vue d'ensemble : **Annuaire** (ADR 0298,
-  `app/handmade/directory.py`), tous ceux qu'elle connaît — qui lui parle (la faculté `identity`) et qui elle connaît
-  de loin, personnes et organisations (le port `contacts`) —, du plus récemment vu, en deux colonnes : son avatar
+  onglets disent une personne comme la vue d'ensemble (Liens et Présents dans le même module) : **Annuaire**
+  (ADR 0298, l'onglet de l'annuaire, à son domaine : `app/domains/contacts/console/tabs.py`, sur
+  `app/domains/contacts/console/directory.py`), tous ceux qu'elle connaît — qui lui parle (la faculté `identity`)
+  et qui elle connaît de loin, personnes et organisations (le port `contacts`) —, du plus récemment vu, en deux colonnes : son avatar
   (neutre et cerné d'un pointillé pour qui elle connaît de loin, carré pour une organisation), ses étiquettes
   (propriétaire, sa proximité ; « connue de loin », son organisation ; « organisation », combien de personnes), son
   poste et son service s'ils sont connus, ce qui l'identifie (la sorte, la valeur ; ni un nom raconté ni la clé d'un
