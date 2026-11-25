@@ -68,6 +68,13 @@ class LivePart:
     #: règle d'une touche (``Touch.rule``) → ce que la personne en voit : ``seen(call)`` rend les propriétaires
     #: (des comptes, des sources) dont ce qui change la regarde
     seen: Mapping[str, Callable[..., frozenset[str]]] = field(default_factory=dict)
+    #: règle d'une touche → les niveaux de la personne sur ce qu'elle y a : ``levels(call)`` rend chaque propriétaire
+    #: (une boîte, un compte) et son niveau (le sien, ce qu'on lui partage : lire, préparer, s'en servir). Le service
+    #: y applique ce que la touche demande (``Touch.need``)
+    levels: Mapping[str, Callable[..., Mapping[str, str]]] = field(default_factory=dict)
+    #: règle d'une touche → le propriétaire d'une clé qu'elle nomme : ``owner_of(topic, key)`` (le compte d'une
+    #: conversation, la boîte d'une référence) ; sans cela, une clé est son propre propriétaire
+    owner_of: Mapping[str, Callable[..., str]] = field(default_factory=dict)
     #: un effet du moteur proposé, décidé ou parti (un brouillon, une réponse offerte, une écriture) est-il le sien ?
     #: ``effects(proposal, frame, kernel)`` rend ses touches, ou ``None`` : ce n'est pas à lui. Une proposition n'est
     #: qu'à un domaine ; le service les interroge dans l'ordre des fiches

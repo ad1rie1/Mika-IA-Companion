@@ -232,6 +232,9 @@ class Live:
                         "accounts_off": sorted(k for k, a in teams.accounts.items() if not a.enabled)}
         # ses comptes d'agenda et leurs agendas (ADR 0309) : à qui, partagés avec qui, masqués, leur rappel
         out["agenda"] = self.settings.agenda().params()
+        for domain in DOMAINS:  # ce que les réglages d'un domaine qui a sa fiche donnent à ses plugins (``inputs``)
+            if domain.wiring is not None:
+                out.update(part(domain.wiring, "inputs", _no_inputs)(self.settings))
         return out
 
     async def reconfigure(self) -> list[str]:
@@ -280,6 +283,11 @@ WARM_WAIT_S = 30.0
 
 def _unbound(wiring: Wiring) -> None:
     """Le ``bind`` d'un domaine qui n'en a pas : rien ne l'attend après le noyau."""
+
+
+def _no_inputs(settings: Settings) -> dict[str, dict[str, Any]]:
+    """Les ``inputs`` d'un domaine dont les réglages ne donnent rien aux paramètres de ses plugins."""
+    return {}
 
 
 async def _idle(wiring: Wiring) -> None:
@@ -526,6 +534,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     live_changes = live.changes = LiveChanges(kernel, hub, moi)
     kernel.mind.subscribe(live_changes.listen)
     for base in (outside["mail"], teams_store, outside["contacts"], outside["agenda"]):
+        base.on_change(live_changes.touch)
+    for base in wiring.watched:  # les bases des domaines qui ont leur fiche
         base.on_change(live_changes.touch)
     teams_store.on_change(teams.store_changed)
     kernel.runner.on_step = live_changes.step

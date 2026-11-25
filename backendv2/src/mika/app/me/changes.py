@@ -120,6 +120,9 @@ PARTS = tuple(part(d.live, "LIVE") for d in DOMAINS if d.live is not None)
 #: sujet d'une base tenue à côté → la traduction de son domaine ; règle d'une touche → ce que la personne en voit
 CHANGES = {topic: translate for part in PARTS for topic, translate in part.changes.items()}
 SEEN = {rule: seen for part in PARTS for rule, seen in part.seen.items()}
+#: règle → les niveaux de la personne sur ses propriétaires ; règle → le propriétaire d'une clé
+LEVELS = {rule: levels for part in PARTS for rule, levels in part.levels.items()}
+OWNER_OF = {rule: owner for part in PARTS for rule, owner in part.owner_of.items()}
 #: propriétaire d'une tâche → où elle en est (la traduction de son domaine)
 TASKS = {owner: work for part in PARTS for owner, work in part.tasks.items()}
 
@@ -394,7 +397,10 @@ class Reader:
         return self._seen[name]
 
     def levels(self, rule: str) -> dict[str, str]:
-        """Ses boîtes, ou ses comptes Teams : la clé et son niveau (les siens, ceux qu'on lui partage)."""
+        """Ses boîtes, ou ses comptes Teams : la clé et son niveau (les siens, ceux qu'on lui partage) ; pour la règle
+        d'un domaine qui a sa fiche, ce que dit sa part du direct (``LivePart.levels``)."""
+        if rule in LEVELS:
+            return self._once(rule, lambda: dict(LEVELS[rule](self.call)), {})
         held = mail_me.boxes if rule == BOXES else teams_me.accounts
         return self._once(rule, lambda: {key: level for key, (_, level) in held(self.call).items()}, {})
 
@@ -495,7 +501,10 @@ def merged(*frames: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _owner_of(t: Touch, key: str) -> str:
-    """Le compte d'une clé : la boîte d'une référence, le compte d'une conversation ; un projet est sa clé."""
+    """Le compte d'une clé : la boîte d'une référence, le compte d'une conversation ; un projet est sa clé. La règle
+    d'un domaine qui a sa fiche le dit elle-même (``LivePart.owner_of``)."""
+    if t.rule in OWNER_OF:
+        return str(OWNER_OF[t.rule](t.topic, key))
     if t.rule == BOXES:
         return split_ref(key)[0] if t.topic == MAIL_WORK else key
     if t.rule == ACCOUNTS:
@@ -580,6 +589,11 @@ class LiveChanges:
         opened = frame.state(RUNTIME.name).open.get(episode)
         if opened is not None:
             self._add(_work(opened.kind, opened.target, frame, self.kernel, projects=False))
+
+    def add(self, touches: Sequence[Touch]) -> None:
+        """Ce qu'un domaine signale de lui-même, hors du journal et de ses bases (la présence d'une extension, une
+        connexion qui aboutit) : ses touches, depuis n'importe quel fil."""
+        self._add(touches)
 
     def everyone(self, *topics: str) -> None:
         """Ce qui change pour qui que ce soit sans rien nommer (un compte, ses téléphones) : à toutes, sans clé."""
