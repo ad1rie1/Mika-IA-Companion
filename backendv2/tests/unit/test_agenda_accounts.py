@@ -19,7 +19,8 @@ from pydantic import ValidationError
 
 from mika.adapters.agenda import AgendaAccount, AgendaConfig, CalendarSetting
 from mika.adapters.store_sql import SqlStore
-from mika.app.settings import AGENDA_KEY, SecretBox, Settings
+from mika.app.domains.agenda.settings import AGENDA_KEY, AgendaSettings
+from mika.app.settings import SecretBox, Settings
 from mika.plugins.agenda import AgendaParams, hers, owner, reminder
 
 SECRET_ICS = "https://calendar.google.com/calendar/ical/adrien%40gmail.com/private-abc123/basic.ics"
@@ -109,9 +110,9 @@ def test_what_the_plugin_receives_is_journaled_without_an_identifier():
 
 def test_secrets_are_sealed_in_the_settings_and_read_back(tmp_path):
     async def scenario(store, settings):
-        await settings.save_agenda(config())
+        await settings.of(AgendaSettings).save_agenda(config())
         raw = [r[0] for r in store.query_mind("SELECT value FROM settings")]
-        return raw, settings._get(AGENDA_KEY), settings.agenda(), settings.agenda_connections()
+        return raw, settings._get(AGENDA_KEY), settings.of(AgendaSettings).agenda(), settings.of(AgendaSettings).agenda_connections()
 
     raw, kept, read, connections = _run(tmp_path, scenario)
     assert all(PASSWORD not in r and "private-abc123" not in r for r in raw)
@@ -125,7 +126,7 @@ def test_secrets_are_sealed_in_the_settings_and_read_back(tmp_path):
 def test_unreadable_settings_block_nothing(tmp_path):
     async def scenario(store, settings):
         await settings._put(AGENDA_KEY, {"accounts": {"Pas Valide": {"kind": "google"}}})
-        return settings.agenda(), settings.agenda_connections()
+        return settings.of(AgendaSettings).agenda(), settings.of(AgendaSettings).agenda_connections()
 
     read, connections = _run(tmp_path, scenario)
     assert read == AgendaConfig() and connections == []

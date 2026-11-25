@@ -27,7 +27,6 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.orm import Mapped, mapped_column
 
-from mika.adapters.agenda.config import AgendaConfig
 from mika.adapters.imaging.config import ImageBackendSpec, ImagingConfig
 from mika.adapters.llm.config import ROLES, BackendSpec, LLMConfig
 from mika.adapters.mail import MailAccount, MailConfig, from_stored
@@ -37,8 +36,7 @@ from mika.adapters.web.gate import new_key, token_digest
 from mika.app import authors as authors_m
 from mika.app.domains import DOMAINS, part
 from mika.inspector import mcp as console_mcp
-from mika.plugins.agenda.rights import shared_table
-from mika.ports.agenda import Connection, split_calendar_key
+from mika.ports.agenda import split_calendar_key
 from mika.ports.imaging import ROLES as IMAGE_ROLES
 from mika.ports.sql import Key, LongText, MindBase, upsert
 from mika.runtime.boundary import call
@@ -83,12 +81,6 @@ LENT_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
 LENT_PREFIX = "mlp_"
 PERSONA_KEY = "persona"
 OVERRIDES_KEY = "overrides"
-#: l'agenda (ADR 0309) : ses comptes, chacun à quelqu'un, et le réglage de chacun de leurs agendas (identifiants et
-#: adresse d'un abonnement scellés)
-AGENDA_KEY = "agenda"
-#: les connexions des comptes d'agenda Google et Microsoft (ADR 0309, lot 2) : par compte, sa sorte, le jeton de
-#: renouvellement scellé, l'application et l'annuaire qui l'ont délivré — à part des comptes, comme ``mail_oauth``
-AGENDA_GRANTS_KEY = "agenda_oauth"
 #: le tableau de droits de chaque agenda qu'on a réglé (ADR 0309), par sa clé ; les autres ont celui que leur
 #: propriétaire et leurs partages donnent (``plugins/agenda/rights.py``)
 AGENDA_RIGHTS_KEY = "agenda_droits"
@@ -542,75 +534,8 @@ class Settings:
         await self._put(IN_HAND_KEY, kept)
         self._rights = replace(self._rights, in_hand=kept)
 
-    # ── L'agenda (ADR 0309) ──
-    #: ce qu'un compte d'agenda garde scellé : son mot de passe, son adresse (celle d'un abonnement ouvre l'agenda à
-    #: qui la connaît)
-    AGENDA_SECRETS = ("password", "url")
 
-    def agenda(self) -> AgendaConfig:
-        """Les comptes d'agenda (leurs secrets ouverts) ; illisibles, aucun (jamais bloquant)."""
-        accounts = {}
-        for name, spec in dict((self._get(AGENDA_KEY) or {}).get("accounts") or {}).items():
-            spec = dict(spec)
-            for k in self.AGENDA_SECRETS:
-                spec[k] = self.box.open(spec.pop(f"{k}_sealed", ""))
-            accounts[name] = spec
-        try:
-            return AgendaConfig.model_validate({"accounts": accounts})
-        except ValueError:
-            log.warning("agenda : réglages illisibles, aucun compte")
-            return AgendaConfig()
-
-    async def save_agenda(self, cfg: AgendaConfig) -> AgendaConfig:
-        """Enregistre les comptes d'agenda (revalidés) ; leurs secrets scellés."""
-        cfg = AgendaConfig.model_validate(cfg.model_dump())
-        accounts = {}
-        for name, account in cfg.accounts.items():
-            spec = account.model_dump(mode="json")
-            for k in self.AGENDA_SECRETS:
-                spec[f"{k}_sealed"] = self.box.seal(spec.pop(k))
-            accounts[name] = spec
-        await self._put(AGENDA_KEY, {"accounts": accounts})
-        async with self._grants_lock:  # la connexion d'un compte retiré, ou qui change de sorte, ne reste pas
-            grants = dict(self._get(AGENDA_GRANTS_KEY) or {})
-            kept = {k: v for k, v in grants.items()
-                    if k in cfg.accounts and isinstance(v, dict) and v.get("kind") == cfg.accounts[k].kind}
-            if kept != grants:
-                await self._put(AGENDA_GRANTS_KEY, kept)
-        return cfg
-
-    def agenda_grant(self, account: str, kind: str) -> Grant | None:
-        """La connexion Google ou Microsoft d'un compte d'agenda (son jeton de renouvellement ouvert) ; aucune, ou
-        d'une autre sorte : ``None``."""
-        spec = dict(self._get(AGENDA_GRANTS_KEY) or {}).get(account)
-        if not isinstance(spec, dict) or spec.get("kind") != kind:
-            return None
-        refresh = self.box.open(str(spec.get("refresh_sealed") or ""))
-        if not refresh:  # un scellé qui ne s'ouvre plus (``secret.key`` changée) : il faut se reconnecter
-            return None
-        return Grant(refresh, str(spec.get("client_id") or ""), str(spec.get("tenant") or ""))
-
-    async def save_agenda_grant(self, account: str, grant: Grant, kind: str) -> None:
-        """Garde la connexion d'un compte d'agenda, son jeton de renouvellement scellé."""
-        async with self._grants_lock:
-            grants = dict(self._get(AGENDA_GRANTS_KEY) or {})
-            grants[account] = {"kind": kind, "refresh_sealed": self.box.seal(grant.refresh),
-                               "client_id": grant.client_id, "tenant": grant.tenant}
-            await self._put(AGENDA_GRANTS_KEY, grants)
-
-    async def drop_agenda_grant(self, account: str) -> bool:
-        """La connexion d'un compte d'agenda oubliée (on le déconnecte) ; vrai s'il en avait une."""
-        async with self._grants_lock:
-            grants = dict(self._get(AGENDA_GRANTS_KEY) or {})
-            if grants.pop(account, None) is None:
-                return False
-            await self._put(AGENDA_GRANTS_KEY, grants)
-            return True
-
-    def agenda_connections(self) -> list[Connection]:
-        """Les comptes d'agenda réglés, pour qui les joint (le port ``agenda_providers``, relu à chaque usage)."""
-        return self.agenda().connections()
-
+    # ── Les droits de ses agendas (ADR 0309) : avec ceux des canaux et des familles, lus à chaque épisode ──
     def agenda_tables(self) -> dict[str, Table[AgendaRule]]:
         """Les tableaux de droits réglés des agendas (ADR 0309), par agenda ; les autres ont celui que leur propriétaire
         et leurs partages donnent (``plugins/agenda/rights.py::table_of``, qui lit les deux)."""
@@ -629,32 +554,6 @@ class Settings:
             tables[calendar] = Table[AgendaRule].model_validate(table.model_dump())
         await self._put(AGENDA_RIGHTS_KEY, {k: v.model_dump(mode="json") for k, v in sorted(tables.items())})
         self._rights = replace(self._rights, agendas=tables)
-
-    async def share_calendar(self, calendar: str, person: str, level: str | None) -> AgendaConfig:
-        """Partager un agenda (ADR 0309, 0188) avec une personne (« personne:<clé> »), à un niveau — lire, lire et
-        préparer, s'en servir ; ``None`` retire son partage. Rangé avec l'agenda (ses réglages), et son tableau suit :
-        réglé, il reçoit la ligne de la personne à la place de celle qu'elle avait, ou la perd
-        (``plugins/agenda/rights.py::shared_table``) ; sinon, la ligne se dérive du partage. Seul son propriétaire
-        partage : qui appelle l'a vérifié. À appeler sous ``writing``, puis rejournaliser (``Live.reconfigure``) :
-        ce que Mika en fait se relit tel qu'il était. ``ValueError`` : pas un agenda, un compte inconnu, une personne
-        ou un niveau mal formés."""
-        account, local = split_calendar_key(calendar)
-        cfg = self.agenda()
-        found = cfg.account(account) if account else None
-        if found is None:
-            raise ValueError(f"agenda inconnu : « {calendar[:60]} »")
-        shares = dict(found.setting(local).shares)
-        if level:
-            shares[person] = level
-        else:
-            shares.pop(person, None)
-        setting = found.setting(local).model_copy(update={"shares": shares})
-        changed = found.model_copy(update={"calendars": {**found.calendars, local: setting}})
-        cfg = await self.save_agenda(cfg.model_copy(update={"accounts": {**cfg.accounts, account: changed}}))
-        stored = self._rights.agendas.get(calendar)
-        if stored is not None:
-            await self.save_agenda_table(calendar, shared_table(stored, person, level))
-        return cfg
 
     # ── Les jetons gardés en empreinte (appareils, console MCP) ──
     def _token_digest(self, key: str) -> str:

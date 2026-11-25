@@ -19,6 +19,7 @@ import asyncio
 from mika.adapters.agenda import AgendaConfig
 from mika.adapters.store_sql import SqlStore
 from mika.app.composition import arbitration, faculties
+from mika.app.domains.agenda.settings import AgendaSettings
 from mika.app.settings import SecretBox, Settings
 from mika.kernel.frame import Audience
 from mika.kernel.registry import Registry
@@ -142,14 +143,14 @@ def test_a_table_is_kept_in_the_settings_and_a_share_rewrites_its_line(tmp_path)
             mine = Table[AgendaRule](lines=(AgendaRule(who=("personne:user_1",), when=("conversation",), read=True,
                                                        write=ALONE),), default=CLOSED_AGENDA)
             await settings.save_agenda_table(ADRIEN_CAL, mine)
-            await settings.share_calendar(ADRIEN_CAL, "personne:user_2", "lire")
+            await settings.of(AgendaSettings).share_calendar(ADRIEN_CAL, "personne:user_2", "lire")
             shared = settings.access_tables().agendas[ADRIEN_CAL]
-            params = settings.agenda().params()
+            params = settings.of(AgendaSettings).agenda().params()
             reopened = Settings(store, SecretBox.for_data(tmp_path))
             await reopened.open()
-            await settings.share_calendar(ADRIEN_CAL, "personne:user_2", None)
+            await settings.of(AgendaSettings).share_calendar(ADRIEN_CAL, "personne:user_2", None)
             return shared, params, reopened.agenda_tables(), settings.access_tables().agendas[ADRIEN_CAL], \
-                settings.agenda()
+                settings.of(AgendaSettings).agenda()
         finally:
             await store.close()
 

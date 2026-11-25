@@ -14,6 +14,7 @@ from datetime import date, datetime, time, timedelta
 from urllib.parse import quote
 
 from mika.adapters.agenda import AgendaAccount, AgendaConfig
+from mika.app.domains.agenda.settings import AgendaSettings
 from mika.contracts import runtime as rt
 from mika.kernel.events import Content
 from mika.kernel.inspect import Table
@@ -127,7 +128,7 @@ def test_a_plugged_account_never_read_is_the_one_banner_and_its_line_says_so(wor
     _people(client, live)
     settings = live.settings
     cfg = _agenda(client, live)
-    client.portal.call(settings.save_agenda, AgendaConfig(accounts={
+    client.portal.call(settings.of(AgendaSettings).save_agenda, AgendaConfig(accounts={
         **cfg.accounts, "outlook": AgendaAccount(kind="microsoft", label="Outlook.com",
                                                  address="adrien@outlook.fr")}))
     client.portal.call(live.reconfigure)
@@ -167,14 +168,14 @@ def test_what_she_proposes_is_hatched_and_leads_to_the_queue(world):  # noqa: F8
 
 def _agenda(client, live) -> AgendaConfig:
     """Les comptes d'agenda tels que les réglages les gardent, lus dans la boucle du serveur."""
-    return client.portal.call(live.settings.agenda)
+    return client.portal.call(live.settings.of(AgendaSettings).agenda)
 
 
 def _subscription(client, live) -> str:
     """Un abonnement à Adrien, déjà relu une fois : son agenda et un jour férié dans la base."""
     settings, store = live.settings, live.kernel.ports["agenda"]
     cfg = _agenda(client, live)
-    client.portal.call(settings.save_agenda, AgendaConfig(accounts={
+    client.portal.call(settings.of(AgendaSettings).save_agenda, AgendaConfig(accounts={
         **cfg.accounts, "feries": AgendaAccount(kind="ical", label="Jours fériés", url="https://example.test/f.ics")}))
     client.portal.call(live.reconfigure)
     store.keep_account("feries", "ical")

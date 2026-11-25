@@ -23,8 +23,8 @@ from mika.adapters.agenda.oauth import pasted
 from mika.adapters.mail.oauth import Grant
 from mika.adapters.store_sql import SqlStore
 from mika.app.domains.agenda.cli import agenda_command
-from mika.app.domains.agenda.settings import AGENDA_GOOGLE_KEY, AgendaSettings
-from mika.app.settings import AGENDA_GRANTS_KEY, SecretBox, Settings
+from mika.app.domains.agenda.settings import AGENDA_GOOGLE_KEY, AGENDA_GRANTS_KEY, AgendaSettings
+from mika.app.settings import SecretBox, Settings
 
 CLIENT = "123456789012-abcdefgh12345678.apps.googleusercontent.com"
 SECRET = "GOCSPX-un-secret-de-client-42"
@@ -51,19 +51,19 @@ def _raw(store) -> list[str]:
 
 def test_a_connection_is_sealed_apart_and_leaves_with_its_account(tmp_path):
     async def scenario(store, settings):
-        await settings.save_agenda(AgendaConfig(accounts={"google": AgendaAccount(kind="google"),
+        await settings.of(AgendaSettings).save_agenda(AgendaConfig(accounts={"google": AgendaAccount(kind="google"),
                                                           "outlook": AgendaAccount(kind="microsoft")}))
-        await settings.save_agenda_grant("google", Grant(REFRESH, CLIENT, ""), "google")
-        await settings.save_agenda_grant("outlook", Grant("M.C5-renouv", "app", "consumers"), "microsoft")
+        await settings.of(AgendaSettings).save_agenda_grant("google", Grant(REFRESH, CLIENT, ""), "google")
+        await settings.of(AgendaSettings).save_agenda_grant("outlook", Grant("M.C5-renouv", "app", "consumers"), "microsoft")
         sealed = _raw(store)
-        read = (settings.agenda_grant("google", "google"), settings.agenda_grant("google", "microsoft"))
-        await settings.save_agenda(AgendaConfig(accounts={"google": AgendaAccount(kind="caldav"),
+        read = (settings.of(AgendaSettings).agenda_grant("google", "google"), settings.of(AgendaSettings).agenda_grant("google", "microsoft"))
+        await settings.of(AgendaSettings).save_agenda(AgendaConfig(accounts={"google": AgendaAccount(kind="caldav"),
                                                           "outlook": AgendaAccount(kind="microsoft")}))
-        after_kind = (settings.agenda_grant("google", "google"), settings.agenda_grant("outlook", "microsoft"))
-        await settings.save_agenda(AgendaConfig())
+        after_kind = (settings.of(AgendaSettings).agenda_grant("google", "google"), settings.of(AgendaSettings).agenda_grant("outlook", "microsoft"))
+        await settings.of(AgendaSettings).save_agenda(AgendaConfig())
         gone = settings._get(AGENDA_GRANTS_KEY)
-        await settings.save_agenda_grant("x", Grant(REFRESH, CLIENT, ""), "google")
-        dropped = await settings.drop_agenda_grant("x"), await settings.drop_agenda_grant("x")
+        await settings.of(AgendaSettings).save_agenda_grant("x", Grant(REFRESH, CLIENT, ""), "google")
+        dropped = await settings.of(AgendaSettings).drop_agenda_grant("x"), await settings.of(AgendaSettings).drop_agenda_grant("x")
         return sealed, read, after_kind, gone, dropped
 
     sealed, read, after_kind, gone, dropped = _run(tmp_path, scenario)

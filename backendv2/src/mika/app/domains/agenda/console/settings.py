@@ -81,7 +81,7 @@ def sections(live: Any) -> tuple[SettingsSection, ...]:
         return []
 
     def agenda_facts() -> list[tuple[str, Any]]:
-        accounts = settings.agenda().accounts
+        accounts = settings.of(AgendaSettings).agenda().accounts
         google = sum(1 for a in accounts.values() if a.kind == "google")
         microsoft = sum(1 for a in accounts.values() if a.kind == "microsoft")
         return [("Application Google", "réglée" if settings.of(AgendaSettings).google_application() is not None else "pas réglée"),

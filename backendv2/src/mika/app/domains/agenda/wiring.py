@@ -5,8 +5,8 @@ base. Une fois le noyau construit, ce guichet reçoit de quoi rejournaliser les 
 Microsoft d'un compte se dit au direct (``bind``). Ses réglages donnent aux paramètres du plugin ses comptes et leurs
 agendas (``inputs``).
 
-Ses comptes et leurs connexions se lisent encore dans les réglages du serveur (``Settings.agenda_connections``,
-``agenda_grant``…) ; Microsoft entre par l'application du courrier (``Settings.mail_application``, ADR 0238)."""
+Ses comptes, leurs connexions et l'application Google du serveur sont ses réglages (``settings.py``) ; Microsoft
+entre par l'application du courrier (``Settings.mail_application``, ADR 0238)."""
 
 from __future__ import annotations
 
@@ -35,10 +35,11 @@ PROVIDERS, DESK = "agenda_providers", "agenda_desk"
 def wire(w: Wiring) -> None:
     """Avant le noyau : sa base, ses fournisseurs et le guichet de la console, dans les ports du noyau."""
     outside, settings, clock, bases = w.ports, w.settings, w.clock, w.bases
+    own = settings.of(AgendaSettings)
     # l'agenda (ADR 0309) : ses événements hors du journal (ceux du système y font foi, ceux d'un fournisseur en sont
     # la copie), et ses fournisseurs avec les comptes des réglages, relus à chaque usage
     outside["agenda"] = AgendaStore(bases["agenda"], now=clock.now)
-    outside["agenda_providers"] = Providers(outside["agenda"], settings.agenda_connections)
+    outside["agenda_providers"] = Providers(outside["agenda"], own.agenda_connections)
     # un abonnement iCal (une adresse .ics, en lecture seule) et un serveur CalDAV (ADR 0309, lot 1) ; une redirection
     # ou une adresse donnée par le serveur qui quitte son hôte ne mène qu'à Internet
     agenda_web = Web()
@@ -47,13 +48,13 @@ def wire(w: Wiring) -> None:
     # Google Agenda et Outlook.com / Microsoft 365 (ADR 0309, lot 2) : leurs connexions scellées à part des comptes ;
     # Google par l'application Google du serveur (réglée par un opérateur), Microsoft par celle du courrier (ADR 0238),
     # chacun joignant ses hôtes seulement. Leurs parcours de connexion : ``.signin`` de chacun (lot 4 : l'API)
-    outside["agenda_providers"].add(GoogleProvider(GoogleSignIn(settings, settings.of(AgendaSettings).google_application,
-                                                                now=clock.now), now=clock.now))
-    outside["agenda_providers"].add(MicrosoftProvider(microsoft_signin(settings, settings.mail_application),
+    outside["agenda_providers"].add(GoogleProvider(GoogleSignIn(own, own.google_application, now=clock.now),
+                                                   now=clock.now))
+    outside["agenda_providers"].add(MicrosoftProvider(microsoft_signin(own, settings.mail_application),
                                                       now=clock.now))
     # ce que la console change d'un compte d'agenda (ADR 0309, lot 5) : le décocher, ne plus suivre un de ses agendas,
     # oublier sa connexion — jamais une écriture dans un agenda
-    outside[DESK] = AgendaSettingsDesk(settings, outside["agenda_providers"])
+    outside[DESK] = AgendaSettingsDesk(own, outside["agenda_providers"])
     # le direct (ADR 0308) : sa base prévient de ses écritures validées
     w.watched.append(outside["agenda"])
 
@@ -72,4 +73,4 @@ def bind(w: Wiring) -> None:
 def inputs(settings: Any) -> dict[str, dict[str, Any]]:
     """Ce que ses réglages donnent aux paramètres du plugin ``agenda``."""
     # ses comptes d'agenda et leurs agendas (ADR 0309) : à qui, partagés avec qui, masqués, leur rappel
-    return {"agenda": settings.agenda().params()}
+    return {"agenda": settings.of(AgendaSettings).agenda().params()}

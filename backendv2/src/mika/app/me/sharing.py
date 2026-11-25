@@ -7,8 +7,8 @@ le monde ». Une boîte ou un compte Teams partagé est rangé avec sa ressource
 (``shares``) : sa règle s'étend à la personne, au niveau donné (lire ; lire et préparer ; s'en servir). Un service
 partagé reçoit une ligne d'accès pour la personne (ADR 0192) — lire : ses outils qui lisent ; s'en servir : aussi ceux
 qui agissent, sur sa demande à elle ; retirer le partage retire la ligne. Un agenda partagé est rangé avec son agenda
-(``Settings.share_calendar``) et journalisé avec les paramètres du plugin ``agenda`` ; son tableau de droits reçoit ou
-perd la ligne de la personne.
+(``AgendaSettings.share_calendar``) et journalisé avec les paramètres du plugin ``agenda`` ; son tableau de droits
+reçoit ou perd la ligne de la personne.
 
 Tous se lisent ici, dans les réglages (``every_share``) : Réglages › Droits › Partages les montre tous ; Paramètres ›
 Partages (``list_shares``) et l'onglet Comptes de la fiche d'une personne y lisent ce qu'une personne donne et ce
@@ -102,7 +102,7 @@ def every_share(settings: Any, names: Mapping[str, str] | None = None) -> list[S
         if spec.owner:
             out += [Shared("mcp", name, name, spec.owner, who[len(PERSON):], level)
                     for who, level in sorted(service_shares(spec).items())]
-    for account, spec in sorted(settings.agenda().accounts.items()):
+    for account, spec in sorted(settings.named("agenda").agenda().accounts.items()):
         holder = PERSON + system_person(account) if system_person(account) else spec.owner
         for local, setting in sorted(spec.calendars.items()):
             calendar = f"{account}~{local}"
@@ -204,18 +204,18 @@ async def write_share(settings: Any, reconfigure: Callable[[], Awaitable[Any]] |
 
 async def _write_calendar_share(settings: Any, reconfigure: Callable[[], Awaitable[Any]] | None, calendar: str,
                                 person: str, level: str, check: Callable[[Any], None] | None) -> None:
-    """Le partage d'un agenda à cette personne (vide : retiré), rangé avec l'agenda (``Settings.share_calendar`` : son
+    """Le partage d'un agenda à cette personne (vide : retiré), rangé avec l'agenda (``AgendaSettings.share_calendar`` : son
     tableau suit), relu puis réécrit sous ``Settings.writing`` ; ``check`` juge son réglage relu (``CalendarSetting``),
     sous le verrou."""
     account, local = split_calendar_key(calendar)
     async with settings.writing:
-        found = settings.agenda().account(account) if account else None
+        found = settings.named("agenda").agenda().account(account) if account else None
         if found is None:
             raise missing()
         if check is not None:
             check(found.setting(local))
         try:
-            await settings.share_calendar(calendar, PERSON + person, level or None)
+            await settings.named("agenda").share_calendar(calendar, PERSON + person, level or None)
         except (ValidationError, ValueError) as exc:
             raise refused(exc) from None
         if reconfigure is not None:

@@ -11,12 +11,11 @@ from __future__ import annotations
 from typing import Any
 
 from mika.app.domains.agenda.api import seen_calendars
-from mika.app.domains.agenda.settings import AGENDA_GOOGLE_KEY
+from mika.app.domains.agenda.settings import AGENDA_GOOGLE_KEY, AGENDA_GRANTS_KEY, AGENDA_KEY
 from mika.app.domains.domain import LivePart
 from mika.app.me.touches import Touch
 from mika.app.me.touches import both as _both
 from mika.app.me.touches import state_of as _state
-from mika.app.settings import AGENDA_GRANTS_KEY, AGENDA_KEY
 from mika.plugins import agenda as agenda_p
 from mika.ports.agenda import split_calendar_key
 from mika.ports.changes import AGENDA, ME, SETTINGS, Change

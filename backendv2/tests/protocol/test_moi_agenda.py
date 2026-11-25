@@ -342,7 +342,7 @@ def _google(client, live) -> tuple[FakeGoogle, str]:
     google = FakeGoogle()
     providers = live.kernel.ports["agenda_providers"]
     client.portal.call(lambda: live.settings.of(AgendaSettings).save_google_application(google.client_id, google.secret))
-    signin = GoogleSignIn(live.settings, live.settings.of(AgendaSettings).google_application, transport=google.transport())
+    signin = GoogleSignIn(live.settings.of(AgendaSettings), live.settings.of(AgendaSettings).google_application, transport=google.transport())
     provider = GoogleProvider(signin, transport=google.transport())
     providers.add(provider)
     account = post(client, "/agenda/account/save", {"kind": "google", "values": {"label": "Perso"}}).json()["account"]
@@ -558,7 +558,7 @@ def test_google_is_connected_by_pasting_the_return_address(world):  # noqa: F811
     google = FakeGoogle()
     providers = live.kernel.ports["agenda_providers"]
     client.portal.call(lambda: live.settings.of(AgendaSettings).save_google_application(google.client_id, google.secret))
-    signin = GoogleSignIn(live.settings, live.settings.of(AgendaSettings).google_application, transport=google.transport())
+    signin = GoogleSignIn(live.settings.of(AgendaSettings), live.settings.of(AgendaSettings).google_application, transport=google.transport())
     providers.add(GoogleProvider(signin, transport=google.transport()))
     account = post(client, "/agenda/account/save", {"kind": "google", "values": {"label": "Perso"}}).json()["account"]
     started = post(client, "/agenda/account/google/start", {"account": account}).json()
@@ -585,7 +585,7 @@ def test_microsoft_gives_a_code_and_its_wait_is_pushed(world):  # noqa: F811
     async def no_wait(_seconds: float) -> None:
         await asyncio.sleep(0)
 
-    signin = microsoft_signin(live.settings, live.settings.mail_application, transport=graph.transport(),
+    signin = microsoft_signin(live.settings.of(AgendaSettings), live.settings.mail_application, transport=graph.transport(),
                               sleep=no_wait)
     signin.on_state = lambda account: signed(live.changes, account)
     live.kernel.ports["agenda_providers"].add(MicrosoftProvider(signin, transport=graph.transport()))
@@ -694,9 +694,9 @@ def test_a_server_given_by_a_person_who_is_not_an_operator_stays_on_internet(wor
     assert bypass.status_code == 400  # elle ne le règle pas elle-même
     hers = post(client, "/agenda/account/save", {"kind": "ical", "values": {
         "label": "Club", "url": "https://calendrier.example.org/c.ics"}}).json()["account"]
-    accounts = client.portal.call(live.settings.agenda).accounts
+    accounts = client.portal.call(live.settings.of(AgendaSettings).agenda).accounts
     assert accounts[hers].internet and not accounts[mine_].internet  # une opératrice peut viser DavMail en local
-    [conn] = [c for c in client.portal.call(live.settings.agenda).connections() if c.key == hers]
+    [conn] = [c for c in client.portal.call(live.settings.of(AgendaSettings).agenda).connections() if c.key == hers]
     assert conn.internet
 
 
@@ -720,7 +720,7 @@ def test_google_returning_without_a_session_asks_to_paste_its_address_in_the_app
     google = FakeGoogle()
     providers = live.kernel.ports["agenda_providers"]
     client.portal.call(lambda: live.settings.of(AgendaSettings).save_google_application(google.client_id, google.secret, web=True))
-    signin = GoogleSignIn(live.settings, live.settings.of(AgendaSettings).google_application, transport=google.transport())
+    signin = GoogleSignIn(live.settings.of(AgendaSettings), live.settings.of(AgendaSettings).google_application, transport=google.transport())
     providers.add(GoogleProvider(signin, transport=google.transport()))
     account = post(client, "/agenda/account/save", {"kind": "google", "values": {"label": "Perso"}}).json()["account"]
     started = client.post(API + "/agenda/account/google/start", json={"account": account},

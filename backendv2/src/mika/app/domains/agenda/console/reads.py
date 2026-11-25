@@ -20,6 +20,7 @@ from datetime import date, datetime
 from typing import Any
 
 from mika.app.domains.agenda.her import HerDate, her_agenda, title_of
+from mika.app.domains.agenda.settings import AgendaSettings
 from mika.app.handmade import Look
 from mika.contracts import runtime as rt
 from mika.inspector.pages.subjects import subject_url
@@ -138,7 +139,7 @@ def read(ui: UI) -> Read:
     labels: dict[str, str] = {}
     if settings is not None:
         try:
-            cfg = settings.agenda()
+            cfg = settings.of(AgendaSettings).agenda()
             labels = {key: account.label for key, account in cfg.accounts.items() if account.label}
             for key, account in cfg.accounts.items():
                 for local, setting in account.calendars.items():

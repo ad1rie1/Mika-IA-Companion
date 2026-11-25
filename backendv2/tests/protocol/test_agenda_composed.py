@@ -11,6 +11,7 @@ du noyau qui atteint sa base.
 from __future__ import annotations
 
 from mika.adapters.agenda import AgendaAccount, AgendaConfig, AgendaStore, CalendarSetting, Providers
+from mika.app.domains.agenda.settings import AgendaSettings
 from mika.plugins.agenda import AgendaParams, hers, owner
 from mika.ports.agenda import US_PER_S, EventDraft, Participant, Span
 from tests.protocol.test_web import world  # noqa: F401 — fixture partagée
@@ -26,7 +27,7 @@ def test_the_server_composes_the_agenda_and_journals_its_settings(world):  # noq
     assert "agenda" in kernel.registry.faculties
     mon = providers.system.default_calendar("user_1")
     assert mon.name == "Mon agenda" and providers.connection("moi:user_1").owner == "personne:user_1"
-    client.portal.call(lambda: live.settings.save_agenda(AgendaConfig(accounts={
+    client.portal.call(lambda: live.settings.of(AgendaSettings).save_agenda(AgendaConfig(accounts={
         "feries": AgendaAccount(kind="ical", url="https://secret.example/abc.ics"),
         "moi:user_1": AgendaAccount(kind="systeme", calendars={
             "mon-agenda": CalendarSetting(shares={"personne:user_2": "lire"}, reminder="60")}),
