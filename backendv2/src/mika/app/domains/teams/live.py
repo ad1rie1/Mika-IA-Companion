@@ -85,7 +85,7 @@ def from_change(change: Change) -> list[Touch]:
     return []
 
 
-def effect(proposal: int, frame: Any, kernel: Any) -> list[Touch] | None:
+def effect(proposal: int, frame: Any, kernel: Any, event: Any = None) -> list[Touch] | None:
     """Un effet du moteur est-il une de ses réponses Teams (ce que sa tranche en garde, par sa proposition) ? Ses
     touches, ou ``None``."""
     teams = _state(frame, teams_p.TEAMS.name)

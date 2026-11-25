@@ -77,8 +77,9 @@ class LivePart:
     levels: Mapping[str, Callable[..., Mapping[str, str]]] = field(default_factory=dict)
     #: règle d'une touche → son propre jugement, quand ni ``seen`` ni ``levels`` ne la disent (un agenda est à elle
     #: par son compte ou par un partage encore ouvert) : ``judge(reader, touch)`` rend (la regarde-t-elle ?, les
-    #: clés qu'elle peut en voir nommées). ``reader.call`` est ce qu'une route de son espace lirait ; ``reader.once(
-    #: nom, lire, vide)`` ne lit qu'une fois par personne et par envoi
+    #: clés qu'elle peut en voir nommées). ``reader.call`` est ce qu'une route de son espace lirait,
+    #: ``reader.channel`` le canal de ses clients ; ``reader.once(nom, lire, vide)`` ne lit qu'une fois par personne
+    #: et par envoi
     judge: Mapping[str, Callable[..., tuple[bool, tuple[str, ...]]]] = field(default_factory=dict)
     #: port du noyau → ses comptes tels que ses réglages les disent : ``listed(port)``, lu une fois par envoi sur la
     #: boucle d'événements (leur lecture passe par la base du journal, que seule la boucle lit) ; les règles les
@@ -88,12 +89,16 @@ class LivePart:
     #: conversation, la boîte d'une référence) ; sans cela, une clé est son propre propriétaire
     owner_of: Mapping[str, Callable[..., str]] = field(default_factory=dict)
     #: un effet du moteur proposé, décidé ou parti (un brouillon, une réponse offerte, une écriture) est-il le sien ?
-    #: ``effects(proposal, frame, kernel)`` rend ses touches, ou ``None`` : ce n'est pas à lui. Une proposition n'est
-    #: qu'à un domaine ; le service les interroge dans l'ordre des fiches
+    #: ``effects(proposal, frame, kernel, event)`` rend ses touches, ou ``None`` : ce n'est pas à lui. Il le
+    #: reconnaît par sa proposition (ce que sa tranche en garde) ou par l'événement même (son contexte). Une
+    #: proposition n'est qu'à un domaine ; le service les interroge dans l'ordre des fiches
     effects: Callable[..., list[Any] | None] | None = None
     #: propriétaire d'une tâche (``vocab.episodes.task_of``) → où elle en est d'une réponse (ADR 0306) :
     #: ``work(ref, frame, kernel)`` rend les touches de cette tâche, au départ et à la fin de son épisode
     tasks: Mapping[str, Callable[..., list[Any]]] = field(default_factory=dict)
+    #: ce que le départ ou la fin d'un épisode change chez lui quand ce n'est la tâche de personne (une exécution
+    #: d'un projet) : ``episodes(kind, target, frame, kernel)`` rend ses touches — aucune, le plus souvent
+    episodes: Callable[..., list[Any]] | None = None
 
 
 @dataclass(frozen=True, slots=True)

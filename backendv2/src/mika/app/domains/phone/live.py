@@ -36,7 +36,7 @@ def _offered(o: Any) -> list[Touch]:
     return [Touch(PHONE, PERSON, keys=(f"{o.source}|{o.thread}",), owners=who), Touch(ME, PERSON, owners=who)]
 
 
-def effect(proposal: int, frame: Any, kernel: Any) -> list[Touch] | None:
+def effect(proposal: int, frame: Any, kernel: Any, event: Any = None) -> list[Touch] | None:
     """Un effet du moteur est-il une réponse offerte sur le téléphone ? Ses touches, ou ``None``."""
     phone = state_of(frame, PLUGIN.name)
     offer = next((o for o in phone.offers.values() if o.proposal == proposal), None) if phone is not None else None

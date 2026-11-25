@@ -44,7 +44,7 @@ def _agenda(e: Any, frame: Any, kernel: Any) -> list[Touch]:
     return []
 
 
-def effect(proposal: int, frame: Any, kernel: Any) -> list[Touch] | None:
+def effect(proposal: int, frame: Any, kernel: Any, event: Any = None) -> list[Touch] | None:
     """Un effet du moteur est-il ce qu'elle propose d'écrire dans un agenda (ce que sa tranche en garde, par sa
     proposition) ? Ses touches, ou ``None``."""
     agenda = _state(frame, agenda_p.OWNER)

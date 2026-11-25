@@ -129,6 +129,11 @@ def _work(kind: str, target: str | None, frame: Any, kernel: Any, *, projects: b
     found = task_of(target) if kind == Kind.TASK else None
     if found is not None and found[0] in TASKS:  # la tâche d'un domaine qui a sa fiche
         return list(TASKS[found[0]](found[1], frame, kernel))
+    if projects:  # le départ, la fin d'un épisode : ce qu'un domaine qui a sa fiche en dit (``LivePart.episodes``)
+        told = [t for brought in PARTS if brought.episodes is not None
+                for t in brought.episodes(kind, target, frame, kernel)]
+        if told:
+            return told
     pid = project_of(target) if projects else None
     return [Touch(PROJECTS, PROJECT, keys=(str(pid),))] if pid else []
 
@@ -139,7 +144,7 @@ def _effect(e: Any, frame: Any, kernel: Any) -> list[Touch]:
     d = e.data
     proposal = e.seq if e.type is rt.EFFECT_PROPOSED else d.proposal
     for brought in PARTS:  # l'effet d'un domaine qui a sa fiche : le premier qui le reconnaît dit ses touches
-        mine = brought.effects(proposal, frame, kernel) if brought.effects is not None else None
+        mine = brought.effects(proposal, frame, kernel, e) if brought.effects is not None else None
         if mine is not None:
             return list(mine)
     pid = project_of(getattr(d, "context", "") or "")

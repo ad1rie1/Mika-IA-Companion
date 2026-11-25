@@ -47,7 +47,7 @@ def from_change(change: Change) -> list[Touch]:
     return [Touch(change.topic, BOXES, PREPARE if change.topic == MAIL_DRAFTS else READ, keys=change.accounts)]
 
 
-def effect(proposal: int, frame: Any, kernel: Any) -> list[Touch] | None:
+def effect(proposal: int, frame: Any, kernel: Any, event: Any = None) -> list[Touch] | None:
     """Un effet du moteur est-il un de ses brouillons (ce que sa tranche en garde, par sa proposition) ? Ses touches,
     ou ``None``."""
     mail = _state(frame, email_p.EMAIL.name)
