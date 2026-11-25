@@ -17,6 +17,7 @@ from mika.adapters.teams import TeamsAccount, TeamsConfig, TeamsStore
 from mika.adapters.web.accounts import Account
 from mika.adapters.web.hub import Hub
 from mika.app.domains.teams.desk import PRESENCE_EVERY_S, TeamsDesk
+from mika.app.domains.teams.live import presence
 from mika.app.me.api import Call, me_of
 from mika.app.me.changes import LiveChanges, Reader, Touch, touches_from, touches_of
 from mika.contracts import identity as identity_c
@@ -414,11 +415,11 @@ def test_the_presence_of_the_extension_never_erases_what_a_batch_names(tmp_path)
     suffit (toute trame ``teams`` relit les comptes)."""
     async def scenario():
         kernel, live, screens = await world(tmp_path, "user_1", "user_2")
-        live.presence("principal")
+        presence(live, "principal")
         await settle()
         alone = {k: screens.changes(k) for k in ("user_1", "user_2")}
         screens.forget()
-        live.presence("principal")
+        presence(live, "principal")
         live.touch(Change(TEAMS, ("principal",), ("19:a",)))
         await settle()
         return alone, screens.changes("user_1")

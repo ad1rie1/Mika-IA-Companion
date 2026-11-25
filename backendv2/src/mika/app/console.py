@@ -98,11 +98,7 @@ NAVIGATION: tuple[NavGroup, ...] = (
                     subjects=("mail", "brouillon", "compte"), context=("compte",), automatic_actions=False,
                     # ses paramètres (ses boîtes, son relevé, ce qu'elle en dit) : en haut à droite (ADR 0173)
                     builtin=("courrier.parametres",), gear=("parametres",)),
-        Destination("teams", "Teams", "Les conversations Teams que l'extension lui apporte, et les réponses "
-                    "qu'elle prépare à ta place : posées, à accepter, parties.",
-                    subjects=("conversation_teams", "reponse_teams"),
-                    # ses paramètres (« Actif », ses comptes) : en haut à droite, comme le courrier (ADR 0206)
-                    builtin=("teams.parametres",), gear=("parametres",)),
+        _destination("teams"),  # Teams
         # les agendas de chacun (ADR 0309, lot 5) : tous dans une même vue, par personne ; la fiche d'un agenda vit ici ;
         # ses paramètres (les applications Google et Microsoft, la synchro, les rappels) : en haut à droite
         Destination("agendas", "Agendas", "Tous les agendas du système, par personne : leurs comptes, ce qu'elle en "
@@ -150,7 +146,6 @@ FACULTY_LABELS: dict[str, str] = _named("faculties", {
     "runtime": "Moteur", "place": "Où elle est (sa chambre)",
     "world": "Son monde et son corps", "shares": "Fichiers envoyés", "attachments": "Pièces reçues",
     "imaging": "Dessins",
-    "teams": "Teams",
     "agenda": "Agenda",
 })
 
@@ -211,10 +206,6 @@ SECTION_LABELS: dict[str, str] = _named("sections", {
     "(sa réflexion)",
     # ADR 0068
     # ADR 0069
-    "teams_messages": "Ses messages Teams récents", "teams_drafts": "Ses réponses Teams et ce qu'elles sont devenues",
-    "teams_voice": "Comment elle écrit dans Teams (à ta place)",
-    "teams_task": "Le message Teams auquel elle prépare une réponse (cité)",
-    "teams_ask": "Ce qu'on lui demande d'y répondre (Teams)",
     "crossed": "Elle allait justement lui écrire (leurs messages se sont croisés)",
     # ADR 0309
     "agenda_day": "Sa journée dans ses agendas (aujourd'hui et demain, cité)",
@@ -240,8 +231,6 @@ REASON_LABELS: dict[str, str] = _named("reasons", {
     # ADR 0058
     "rekindle": "Reprendre des nouvelles, longtemps après (une fois)",
     # ADR 0068
-    # ADR 0069
-    "teams_draft": "Préparer une réponse à un message Teams",
     # ADR 0309
     "agenda_remind": "Rappeler un rendez-vous, au délai que son agenda demande",
     "agenda_prepare": "Préparer la réponse à une invitation",
@@ -296,12 +285,8 @@ PROCESS_LABELS: dict[str, str] = _named("processes", {
     "shares.retention": "Retirer les fichiers envoyés trop anciens", "imaging.draw": "Dessiner",
     "attachments.study": "Lire de près les pièces reçues", "attachments.index": "Indexer les pièces reçues",
     "attachments.retention": "Retirer les pièces reçues trop anciennes ou de trop",
-    "teams.triage": "Trier les messages Teams reçus",
-    "teams.images": "Regarder les images des messages Teams",
     "agenda.sync": "Relire les agendas branchés (Google, Outlook, CalDAV, abonnements)",
     "agenda.watch": "Voir venir les rappels et les invitations des agendas, laisser tomber ce qui n'a plus lieu d'être",
-    "teams.expire": "Laisser tomber les réponses Teams restées sans accord ou sans envoi",
-    "teams.answered": "Refuser ses réponses Teams auxquelles on a répondu autrement dans la discussion",
     "memory.relayed": "Retenir ce que le téléphone lui montre (les messages reçus)",
     "identity.expire": "Oublier les inconnues de passage restées silencieuses",
 })
@@ -424,12 +409,6 @@ EVENT_LABELS: dict[str, str] = _named("events", {
     "attachments.expired": "Des pièces reçues retirées",
     "imaging.requested": "Un dessin demandé", "imaging.drawn": "Un dessin prêt",
     "imaging.failed": "Un dessin qui n'a pas pu se faire",
-    "teams.noticed": "Un message Teams remarqué", "teams.sent": "Une réponse Teams partie",
-    "teams.draft_asked": "Une réponse Teams demandée", "teams.received": "Des messages Teams reçus de l'extension",
-    "teams.settled": "Une réponse Teams posée, partie ou laissée",
-    "teams.written": "Un message Teams écrit depuis le web, en file pour l'extension",
-    "teams.images": "Une image d'un message Teams reçue de l'extension",
-    "teams.image_seen": "Une image d'un message Teams regardée",
     "memory.relayed_read": "Des messages du téléphone relus, ou remis à la file des reprises",
 })
 
@@ -455,7 +434,6 @@ EFFECT_LABELS: dict[str, tuple[str, str, str]] = _named("effects", {
     "runtime:effect.resolved": ("agit", "Une action que tu as autorisée",
                                 "elle part après ton accord : un mail, une réponse Teams, un git push…"),
     "email:effect.executed": ("agit", "Un mail parti", "elle apprend qu'il est parti, retouché ou non"),
-    "teams:teams.settled": ("agit", "Une réponse Teams partie", "elle apprend qu'elle est partie, retouchée ou non"),
     "agenda:effect.executed": ("agit", "Une écriture dans un agenda",
                                "elle apprend ce qu'est devenu ce qu'elle y a ajouté, modifié, supprimé ou répondu"),
     "projects:effect.executed": ("agit", "Un pilotage de projet accepté",
@@ -502,7 +480,7 @@ BUNDLE_LABELS: dict[str, str] = _named("bundles", {
 #: Le nom court de chaque capacité : ce qu'une ligne ou une puce de « À valider » et l'historique en disent, sans couper
 #: sa phrase. Celle-ci reste sa description, au survol et dans l'en-tête de la demande ouverte.
 CAPABILITY_LABELS: dict[str, str] = _named("capabilities", {
-    "email.send": "Mail", "teams.send": "Réponse Teams",
+    "email.send": "Mail",
     "projects.networked": "Commande réseau", "projects.push": "Push git", "projects.pull": "Pull git",
     "projects.pull_request": "Pull request",
     "projects.issue": "Issue publiée", "projects.issue_state": "État d'une issue",
@@ -530,7 +508,7 @@ ENRICHER_LABELS: dict[str, str] = _named("enrichers", {
     "projects_review": "Ce qu'une relecture indépendante a sous les yeux (ses textes, le diff du commit relu)",
     "projects_asks": "Les demandes de son projet aux projets qu'il lit (où chacune en est)",
     "projects_answer": "La réponse à sa demande d'aide (un projet)", "sent_files": "Les fichiers qu'elle a envoyés",
-    "mail": "Son courrier", "teams": "Ses conversations Teams",
+    "mail": "Son courrier",
     "dessins": "Ses dessins",
     "agenda": "Ses agendas (la journée de la personne, ce qu'elle y a proposé)",
     "agenda_reminder": "Le rendez-vous qu'elle rappelle",

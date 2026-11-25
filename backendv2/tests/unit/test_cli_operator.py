@@ -21,8 +21,8 @@ from mika.app import cli
 from mika.app.cli import accounts as cli_accounts
 from mika.app.cli import common as cli_common
 from mika.app.cli import journal as cli_journal
-from mika.app.cli import plugins as cli_plugins
 from mika.app.console import LABELS
+from mika.app.domains.teams.cli import teams_command
 from mika.app.domains.wakeup.cli import wakeup_command
 from mika.app.domains.wakeup.desk import WakeEndpoint, WakeupConfig
 from mika.app.domains.wakeup.settings import WakeupSettings
@@ -197,7 +197,7 @@ def test_a_key_is_taken_back_from_the_command_line(tmp_path):
         await settings.of(WakeupSettings).save_wakeup(WakeupConfig(endpoints={"serre": WakeEndpoint(label="serre", instructions="x")}))
 
         def teams(cmd: str) -> object:
-            return cli_plugins.teams_command(settings, argparse.Namespace(teams_cmd=cmd, compte="principal"))
+            return teams_command(settings, argparse.Namespace(teams_cmd=cmd, compte="principal"))
 
         def wakeup(cmd: str) -> object:
             return wakeup_command(settings, argparse.Namespace(wakeup_cmd=cmd, name="serre"))

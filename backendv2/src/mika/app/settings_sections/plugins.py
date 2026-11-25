@@ -47,8 +47,6 @@ log = logging.getLogger("mika.reglages")
 _FRAME: dict[str, tuple[str, tuple[str, ...], tuple[str, str] | None]] = {
     "email": ("Ses boîtes : serveurs, identifiants, sa façon d'y écrire ; son relevé, ses brouillons", ("boites",),
               ("Courrier", "courrier/reception")),
-    "teams": ("Ses comptes : à qui, sa façon d'y écrire, sa signature ; la clé de chaque extension", ("teams",),
-              ("Teams", "teams/conversations")),
     "imaging": ("Ses fournisseurs d'images et qui dessine quoi ; sa qualité par défaut, ses quotas",
                 ("images-fournisseurs", "images-roles"), ("Ses sens › Dessins", "sens/dessins")),
     "contacts": ("Ce qu'elle se forme de ses contacts à partir de ce qu'elle lit : la période relue, ses bornes, les "

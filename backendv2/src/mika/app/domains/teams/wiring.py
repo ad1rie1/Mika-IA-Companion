@@ -12,6 +12,7 @@ from typing import Any
 from mika.adapters.teams import TeamsStore
 from mika.app.domains.teams.desk import TeamsDesk
 from mika.app.domains.teams.extension import EXTENSION_DIR
+from mika.app.domains.teams.live import presence
 from mika.app.wiring import Wiring
 
 NAME = "teams"
@@ -36,7 +37,7 @@ def bind(w: Wiring) -> None:
     écrans qui les lisent), dite au direct — lu à l'appel : il naît après."""
     desk = w.parts[NAME]
     desk.port = w.port
-    desk.on_presence = lambda account: w.live.changes.presence(account)
+    desk.on_presence = lambda account: presence(w.live.changes, account)
 
 
 def inputs(settings: Any) -> dict[str, dict[str, Any]]:

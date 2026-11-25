@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 from mika.adapters.teams import TeamsConfig, TeamsStore
 from mika.app import schema
-from mika.app.cli.plugins import purge_teams
+from mika.app.domains.teams.cli import purge_teams
 from mika.app.domains.teams.desk import batch_of
 from mika.ports.teams import DEFAULT_ACCOUNT as PRINCIPAL
 
