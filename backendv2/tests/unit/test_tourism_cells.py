@@ -23,7 +23,7 @@ from mika.adapters.maps.quota import HOUR, QuotaExceeded
 from mika.adapters.maps.tourism import Tourism
 from mika.adapters.maps.tourism_cells import LIVE_PAGES, LIVE_READS_MAX, TourismCells
 from mika.adapters.maps.warm import ERRORS_MAX, Warmer, WarmTask
-from mika.app.warm_points import last_positions
+from mika.app.domains.maps.warm_points import last_positions
 from tests.fixtures import tourism as tf
 
 LILLE = (50.6365, 3.0635)

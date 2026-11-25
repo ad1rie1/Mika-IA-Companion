@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 from mika.app import datadir, envfile
-from mika.app.cli import accounts, console, journal, maps, models, plugins, sim
+from mika.app.cli import accounts, console, journal, models, plugins, sim
 
 __all__ = ["FIRST_STEPS", "main"]
 
@@ -40,7 +40,7 @@ Démarrage local pas à pas : backendv2/README.md ; en service (systemd) : deplo
 
 #: les familles de commandes, dans l'ordre où ``mika --help`` les montre
 FAMILIES = (journal.add_journal, sim.add_sim, console.add_serve, journal.add_archives, models.add_models,
-            accounts.add_accounts, plugins.add_plugins, console.add_console, maps.add_maps)
+            accounts.add_accounts, plugins.add_plugins, console.add_console)
 
 
 def main(argv: list[str] | None = None) -> int:

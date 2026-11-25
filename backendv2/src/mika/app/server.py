@@ -77,6 +77,7 @@ from mika.app.console import FACULTY_LABELS, LABELS, NAVIGATION, PARAM_FAMILIES
 from mika.app.console_menu import menu_for
 from mika.app.constellation import Constellation
 from mika.app.domains import DOMAINS, part
+from mika.app.domains.maps.warm_points import last_positions
 from mika.app.handmade import access, approval_sources, rights, waiting
 from mika.app.handmade.home import HomePage
 from mika.app.handmade.now import NowPage
@@ -93,7 +94,6 @@ from mika.app.mindport import KernelPort
 from mika.app.paths import PERSONA
 from mika.app.settings import SecretBox, Settings, push_key_file
 from mika.app.teams import TeamsDesk
-from mika.app.warm_points import last_positions
 from mika.app.wiring import Wiring
 from mika.contracts import attachments as attachments_c
 from mika.contracts import identity as identity_c

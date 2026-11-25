@@ -296,7 +296,7 @@ def test_a_long_line_is_simplified_to_a_few_hundred_points():
 
 
 async def test_without_an_index_only_the_console_says_how_to_build_it(tmp_path):
-    """Ce qu'une recherche lève arrive à une personne (``app/me/maps.py``) et au modèle (les outils de voyage) : ce qui
+    """Ce qu'une recherche lève arrive à une personne (``app/domains/maps/api.py``) et au modèle (les outils de voyage) : ce qui
     manque, jamais une consigne d'exploitation, qui n'est pas pour eux. La console la lit (``IndexInfo.reason``,
     ``describe``) — audit du 2026-11-05, LR2."""
     places = pl.Places(tmp_path, lambda: PlacesConfig())

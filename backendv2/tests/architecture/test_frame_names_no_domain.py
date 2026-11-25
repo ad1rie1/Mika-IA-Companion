@@ -60,7 +60,6 @@ PACKAGES: dict[str, tuple[str, ...]] = {
 #: les modules d'``app`` qui sont à un domaine et attendent leur déménagement dans son dossier : les importer, c'est
 #: déjà le nommer. Un module déménagé sort de cette table (il n'existe plus : la garde le dit)
 TO_MOVE: dict[str, tuple[str, ...]] = {
-    "maps": ("app.me.maps", "app.cli.maps", "app.warm_points"),
     "teams": ("app.teams", "app.me.teams", "app.me.teams_extension", "app.handmade.tabs.teams",
               "app.handmade.subjects.teams"),
     "agenda": ("app.agenda_desk", "app.her_agenda", "app.me.agenda", "app.handmade.tabs.agendas",
@@ -87,8 +86,6 @@ STILL: dict[str, set[str]] = {
     "agenda_desk.py": {"agenda"},
     "authors.py": {"mail"},
     "backup.py": {"maps", "projects"},
-    "cli/__init__.py": {"maps"},
-    "cli/maps.py": {"maps"},
     "cli/models.py": {"tools"},
     "cli/plugins.py": {"agenda", "contacts", "mail", "teams"},
     "handmade/agenda_reads.py": {"agenda"},
@@ -126,7 +123,6 @@ STILL: dict[str, set[str]] = {
     "me/changes.py": {"agenda", "mail", "maps", "projects", "teams"},
     "me/docs_mcp.py": {"mail", "projects", "tools"},
     "me/mail.py": {"mail"},
-    "me/maps.py": {"maps"},
     "me/project_activity.py": {"projects"},
     "me/project_code.py": {"projects"},
     "me/project_docs.py": {"projects"},
@@ -146,7 +142,6 @@ STILL: dict[str, set[str]] = {
     "settings_sections/map_phone.py": {"maps"},
     "settings_sections/plugins.py": {"agenda", "mail", "teams"},
     "teams.py": {"teams"},
-    "warm_points.py": {"maps"},
 }
 
 

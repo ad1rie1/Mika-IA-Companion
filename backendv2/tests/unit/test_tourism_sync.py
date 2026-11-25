@@ -22,7 +22,7 @@ from mika.adapters.maps.config import DEPARTMENTS, TOURISM_FILE, PlacesConfig, R
 from mika.adapters.maps.desk import MapsDesk
 from mika.adapters.maps.tourism_sync import ALL_PARTS, COMPLETE, INCREMENTAL, SyncBusy, SyncLock, last_slot
 from mika.app import cli
-from mika.app.cli import maps as cli_maps
+from mika.app.domains.maps import cli as cli_maps
 from mika.ports.maps import MapsUnavailable
 from tests.fixtures import tourism as tf
 

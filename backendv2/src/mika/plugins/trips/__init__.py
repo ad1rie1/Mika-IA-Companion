@@ -6,7 +6,7 @@
   sorte et la note d'un arrêt) est un contenu, la personne pour sujet — la tranche n'en voit que les références.
   L'identifiant d'un voyage est le ``seq`` de sa création, celui d'un arrêt le ``seq`` de son ajout.
 - **La personne** le prépare dans l'écran Carte, par les actions de la console (``actions.py``, au nom de qui agit),
-  que l'API par personne appelle (``app/me/maps.py``) ; **elle**, en conversation, quand on le lui demande
+  que l'API par personne appelle (``app/domains/maps/api.py``) ; **elle**, en conversation, quand on le lui demande
   (``tools.py``). Ce qu'elle a fait porte ``by = BY_HER`` : l'écran le montre en rose, et on le retire d'un geste.
 - **La console** le montre sur la fiche de la personne, onglet Voyages (``inspect.py``, ADR 0204) : un opérateur peut
   l'y supprimer, rien de plus.

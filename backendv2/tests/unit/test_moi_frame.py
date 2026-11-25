@@ -14,8 +14,8 @@ from starlette.routing import Match
 from starlette.testclient import TestClient
 
 import mika.app.me as me
+from mika.app.domains.maps import api as maps_me
 from mika.app.me import common as common_me
-from mika.app.me import maps as maps_me
 from mika.app.me import settings as settings_me
 from mika.app.me.api import PREFIX, Denied, MeApiBase
 from mika.app.me.assembly import MeApi

@@ -6,7 +6,8 @@ confirmée, auditée), le seul geste de la console sur un voyage : il se prépar
 Lu par ``plugins/trips/inspect.py::read`` (la tranche du plugin, ses textes au magasin), comme la vue du plugin, qui
 reste la source de la console en MCP et du repli ; les formulaires sont ceux que la console prépare (``Forms.of``),
 la personne de la fiche pour objet. Le GPX se sert ici (``gpx``, opérateurs seulement) : le même document que l'écran
-Carte donne à la personne (``app/me/maps.py::gpx_document``), dans la même borne, celle du compte de l'opérateur.
+Carte donne à la personne (``app/domains/maps/api.py::gpx_document``), dans la même borne, celle du compte de
+l'opérateur.
 """
 
 from __future__ import annotations
@@ -20,9 +21,9 @@ from starlette.requests import Request
 from starlette.responses import PlainTextResponse, RedirectResponse, Response
 
 from mika.adapters.web.gate import SlidingWindow
+from mika.app.domains.maps.api import gpx_document, gpx_response
 from mika.app.handmade import Look
 from mika.app.me import ROUTES_BUSY, spend
-from mika.app.me.maps import gpx_document, gpx_response
 from mika.inspector import render
 from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import PREFIX, UI, Forms, env, secure

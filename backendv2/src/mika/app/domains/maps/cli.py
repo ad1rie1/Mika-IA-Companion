@@ -201,7 +201,7 @@ def _run_maps(args: argparse.Namespace) -> int:
     return maps_command(args.data, args)
 
 
-def add_maps(sub) -> None:  # type: ignore[no-untyped-def]
+def add(sub) -> None:  # type: ignore[no-untyped-def]
     ca = sub.add_parser("carte", help="la carte de sa position (ADR 0193) : une zone extraite, ses polices")
     casub = ca.add_subparsers(dest="carte_cmd", required=True)
     cx = casub.add_parser("extraire", help="extraire une zone de la carte Protomaps de la planète, sous cartes/")

@@ -42,7 +42,7 @@ from mika.adapters.maps.mvt import read_points
 from mika.adapters.maps.tiles import BROKEN, DIR_MAX_BYTES, read_directory
 from mika.ports.maps import MapsUnavailable, OsmFacts, PlaceDetail, PlaceHit
 
-#: ce qu'une recherche lève quand l'index manque ou s'abîme : une personne (``app/me/maps.py``) et le modèle (les outils
+#: ce qu'une recherche lève quand l'index manque ou s'abîme : une personne (``app/domains/maps/api.py``) et le modèle (les outils
 #: de voyage) le lisent, sans consigne d'exploitation — la console dit comment le refaire (``IndexInfo.reason``)
 NOT_READY = "L'index des lieux n'est pas prêt."
 DAMAGED = "L'index des lieux est illisible."

@@ -57,8 +57,8 @@ def snippet(text: str, limit: int) -> str:
 
 def texts_of(call: Call, refs: Iterable[str]) -> dict[str, str]:
     """Les textes du journal que ces références désignent (un contenu : lu à la demande, jamais dans la tranche),
-    chacun une fois, les vides écartés ; sans magasin, rien. Le téléphone et la carte les lisent ici (``phone.py``,
-    ``maps.py``) ; ``teams._notes`` a sa propre lecture, qui écarte ce qui est à elle."""
+    chacun une fois, les vides écartés ; sans magasin, rien. Le téléphone et la carte les lisent ici (``domains/phone/api.py``,
+    ``domains/maps/api.py``) ; ``teams._notes`` a sa propre lecture, qui écarte ce qui est à elle."""
     wanted = [r for r in dict.fromkeys(refs) if r]
     store = call.port("store")
     return dict(store.content(wanted)) if wanted and store is not None else {}
