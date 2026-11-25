@@ -17,9 +17,9 @@ from mika.adapters import addresses
 from mika.adapters.mail.config import MailAccount, MailConfig
 from mika.adapters.mcp.config import AccessRule, McpServer
 from mika.adapters.web.gate import SlidingWindow
+from mika.app.domains.mail import api as mail_me
 from mika.app.domains.tools import api as mcp_me
 from mika.app.me import Call, Denied, hosts, sharing
-from mika.app.me import mail as mail_me
 from mika.app.me import settings as settings_me
 from mika.vocab.access import OWNER, PERSON, SOURCE_WORDS_OTHER, who_words
 

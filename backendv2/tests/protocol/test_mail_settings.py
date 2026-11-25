@@ -85,7 +85,7 @@ def test_a_mailbox_is_added_and_kept_on_the_mail_settings(world):  # noqa: F811
 
 def test_a_mailbox_form_shows_what_serves_and_follows_the_changes(world):  # noqa: F811
     """La boîte d'abord, puis comment elle y entre ; ce qui ne sert pas au choix fait ne paraît pas, et le
-    navigateur suit chaque changement (``data-only``, ``static/handmade/courrier_boite.js``)."""
+    navigateur suit chaque changement (``data-only``, ``app/domains/mail/console/static/handmade/courrier_boite.js``)."""
     client, _, _ = world
     bootstrap(client)
     form = drawn(client, f"{PAGE}?enregistrement=accounts&cle=&nouveau=1")

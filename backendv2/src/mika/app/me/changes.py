@@ -43,7 +43,7 @@ from typing import Any
 from mika.adapters.web.accounts import Account
 from mika.adapters.web.hub import Hub
 from mika.app.domains import DOMAINS, part
-from mika.app.me import mail as mail_me
+from mika.app.domains.mail import api as mail_me
 from mika.app.me import projects as projects_me
 from mika.app.me.api import Call, me_of
 from mika.app.me.common import allows

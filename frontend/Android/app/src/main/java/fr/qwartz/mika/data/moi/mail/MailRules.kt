@@ -15,7 +15,7 @@ import fr.qwartz.mika.data.moi.toFill
  * partir et ce qu'on peut joindre. Tout se teste sur la JVM.
  */
 
-/** Les bornes que l'API tient (`app/me/mail.py`, en caractères) : au-delà, elle refuse — elle ne coupe jamais. */
+/** Les bornes que l'API tient (`app/domains/mail/api.py`, en caractères) : au-delà, elle refuse — elle ne coupe jamais. */
 object MailLimits {
     const val RECIPIENTS = 300
     const val SUBJECT = 200

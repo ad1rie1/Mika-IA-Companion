@@ -14,8 +14,8 @@ from typing import Any
 from starlette.routing import Route
 
 from mika.app.domains import DOMAINS, part
+from mika.app.domains.mail import api as mail
 from mika.app.me import (
-    mail,
     project_activity,
     project_code,
     project_docs,

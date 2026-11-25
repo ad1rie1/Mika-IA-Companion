@@ -415,7 +415,7 @@ class MailReaderViewModel(deps: MailDeps) : MailScreenModel(deps) {
     }
 
     private companion object {
-        /** Ce que le serveur dit d'une demande déjà en cours (`app/me/mail.py::prefill`). */
+        /** Ce que le serveur dit d'une demande déjà en cours (`app/domains/mail/api.py::prefill`). */
         const val ALREADY = "Elle y travaille déjà."
         /** Les gestes après lesquels la liseuse reste sur le mail ; les autres le sortent de la vue. */
         val STAYS = setOf("flag", "unflag", "read")

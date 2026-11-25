@@ -17,8 +17,9 @@ from urllib.parse import quote
 import pytest
 
 import mika
+from mika.app.domains.mail.console import subject as mail
 from mika.app.handmade import pages
-from mika.app.handmade.subjects import goal, mail, parts
+from mika.app.handmade.subjects import goal, parts
 from mika.contracts import email as email_c
 from mika.contracts import goals as goals_c
 from mika.contracts import runtime as rt

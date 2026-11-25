@@ -61,7 +61,6 @@ PACKAGES: dict[str, tuple[str, ...]] = {
 #: les modules d'``app`` qui sont à un domaine et attendent leur déménagement dans son dossier : les importer, c'est
 #: déjà le nommer. Un module déménagé sort de cette table (il n'existe plus : la garde le dit)
 TO_MOVE: dict[str, tuple[str, ...]] = {
-    "mail": ("app.me.mail", "app.handmade.tabs.mail", "app.handmade.subjects.mail", "app.preview.mail"),
     "projects": ("app.me.projects", "app.me.project_activity", "app.me.project_code", "app.me.project_docs",
                  "app.me.project_manage", "app.me.docs_mcp", "app.handmade.tabs.projects",
                  "app.handmade.subjects.project", "app.handmade.subjects.project_activity",
@@ -93,7 +92,6 @@ STILL: dict[str, set[str]] = {
     "handmade/person/senses.py": {"maps", "phone", "senses"},
     "handmade/person/voyages.py": {"maps"},
     "handmade/rights.py": {"agenda", "forge", "tools"},
-    "handmade/subjects/mail.py": {"mail"},
     "handmade/subjects/project.py": {"forge", "projects"},
     "handmade/subjects/project_activity.py": {"projects"},
     "handmade/subjects/project_code.py": {"projects"},
@@ -104,7 +102,6 @@ STILL: dict[str, set[str]] = {
     "handmade/subjects/project_links.py": {"projects"},
     "handmade/subjects/project_tickets.py": {"projects"},
     "handmade/subjects/project_zones.py": {"projects"},
-    "handmade/tabs/mail.py": {"mail"},
     "handmade/tabs/people.py": {"contacts"},
     "handmade/tabs/thoughts.py": {"mail", "senses", "teams"},
     "handmade/waiting.py": {"contacts", "mail", "teams"},
@@ -112,7 +109,6 @@ STILL: dict[str, set[str]] = {
     "me/assembly.py": {"mail", "projects"},
     "me/changes.py": {"mail", "projects"},
     "me/docs_mcp.py": {"mail", "projects", "tools"},
-    "me/mail.py": {"mail"},
     "me/project_activity.py": {"projects"},
     "me/project_code.py": {"projects"},
     "me/project_docs.py": {"projects"},
@@ -124,7 +120,6 @@ STILL: dict[str, set[str]] = {
     "mindport.py": {"maps", "projects", "senses", "wakeup"},
     "preview/__init__.py": {"mail", "maps", "projects", "teams"},
     "preview/git.py": {"projects"},
-    "preview/mail.py": {"mail"},
     "preview/projects.py": {"projects"},
     "server.py": {"contacts", "mail", "projects", "tools"},
     "settings.py": {"agenda", "mail"},
