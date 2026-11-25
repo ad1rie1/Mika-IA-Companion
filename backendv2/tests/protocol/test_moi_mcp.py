@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from mika.app.domains.tools.settings import ToolsSettings
 from mika.app.me import common as common_me
 from mika.ports.mcp import LiveTool, ToolReview
 from tests.protocol.test_moi_mail import API, login, post, second_person
@@ -17,7 +18,7 @@ SERVICE = {"name": "factures", "purpose": "Ses factures et ses devis, pour les r
 
 
 def servers(client, live) -> dict:
-    return client.portal.call(live.settings.mcp).servers
+    return client.portal.call(live.settings.of(ToolsSettings).mcp).servers
 
 
 def test_a_service_she_plugs_is_hers_with_one_access_line(world):  # noqa: F811

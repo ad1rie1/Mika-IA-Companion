@@ -538,7 +538,6 @@ PLACES: dict[str, str] = {
     # le dossier d'un domaine qui a sa fiche dit le sien de même (``Domain.places``)
     **{name: said for domain in DOMAINS for name, said in domain.places.items()},
     "ateliers": "les ateliers de ses projets, avec leur git",
-    "mcp": "les services MCP lancés sur cette machine, chacun dans sa cage",
     "pieces": "les pièces jointes qu'on lui a envoyées (2 Gio par personne)",
     "partages": "les fichiers qu'elle a envoyés",
     "documentation": "les images de la documentation de ses projets (100 Mio par projet)",

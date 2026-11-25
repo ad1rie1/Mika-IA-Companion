@@ -20,6 +20,7 @@ from pydantic import ValidationError
 from starlette.routing import Route
 
 from mika.adapters.mcp.config import McpServer
+from mika.app.domains.tools.settings import ToolsSettings
 from mika.app.me.api import Call, Denied, MeApiBase, missing, refused
 from mika.app.me.common import own_room
 from mika.app.me.hosts import public_only, url_host
@@ -67,7 +68,7 @@ def mine(call: Call) -> dict[str, McpServer]:
     if call.api.settings is None:
         return {}
     me = PERSON + call.me.person
-    return {n: s for n, s in call.api.settings.mcp().servers.items() if s.owner == me}
+    return {n: s for n, s in call.api.settings.of(ToolsSettings).mcp().servers.items() if s.owner == me}
 
 
 def shared(spec: McpServer) -> dict[str, tuple[str, Any]]:
@@ -90,7 +91,7 @@ def received(call: Call) -> dict[str, tuple[McpServer, str, Any]]:
         return {}
     me = PERSON + call.me.person
     out: dict[str, tuple[McpServer, str, Any]] = {}
-    for n, s in call.api.settings.mcp().servers.items():
+    for n, s in call.api.settings.of(ToolsSettings).mcp().servers.items():
         if s.owner and s.owner != me and me in (lines := shared(s)):
             out[n] = (s, *lines[me])
     return out

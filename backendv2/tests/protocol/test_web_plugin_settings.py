@@ -50,6 +50,6 @@ def test_its_settings_have_a_page_and_changing_them_reconfigures_the_mcp_client(
         assert _wait(client, live, present=True) == TOOLS  # actif d'office : joint au démarrage, sans accord
         client.portal.call(live.kernel.set_params, "web", WebParams(enabled=False))
         _wait(client, live, present=False)
-        assert live.mcp.status("web") is None
+        assert live.parts["tools"].status("web") is None
         client.portal.call(live.kernel.set_params, "web", WebParams(parallel_pages=1))
         assert _wait(client, live, present=True) == {"mcp_web_search", "mcp_web_read"}

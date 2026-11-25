@@ -150,7 +150,7 @@ FACULTY_LABELS: dict[str, str] = _named("faculties", {
     "runtime": "Moteur", "place": "Où elle est (sa chambre)",
     "world": "Son monde et son corps", "shares": "Fichiers envoyés", "attachments": "Pièces reçues",
     "imaging": "Dessins", "location": "Localisation",
-    "mcp": "Outils extérieurs", "web": "Recherche web", "teams": "Teams",
+    "teams": "Teams",
     "trips": "Carte et voyages", "agenda": "Agenda",
 })
 
@@ -188,9 +188,6 @@ SECTION_LABELS: dict[str, str] = _named("sections", {
     "form": "Comment elle écrit ici (les codes de son autrice)",
     # ADR 0062
     "sent_files": "Ce qu'elle lui a déjà envoyé (fichiers)", "dessins": "Ses dessins pour la personne",
-    "services": "Ce que ses services extérieurs lui ont rendu",
-    # ADR 0255
-    "work_services": "Ce que ses services extérieurs ont rendu à son travail (après un accord)",
     # ADR 0257
     "project_links": "Ce que ce projet lit des autres projets",
     # ADR 0265
@@ -234,7 +231,6 @@ REASON_LABELS: dict[str, str] = _named("reasons", {
     "comfort": "Réconforter", "recontact": "Reprendre contact après un silence", "work": "Avancer sur un but",
     "remind": "Rappeler ce qu'on lui a demandé", "share": "Partager où en est un but",
     "drawing_ready": "Montrer un dessin prêt", "drawing_failed": "Dire qu'un dessin n'a pas pu se faire",
-    "service_answered": "Dire ce qu'un service extérieur a rendu",
     "run": "Travailler sur un projet", "project_share": "Partager où en est un projet",
     "mail_mention": "Parler d'un mail reçu", "mail_draft": "Préparer une réponse à un mail",
     "second_thoughts": "Elle s'est ravisée", "project_need": "Demander un coup de main pour un projet", "project_plan": "Dire son plan à qui a demandé un projet",
@@ -292,7 +288,6 @@ PROCESS_LABELS: dict[str, str] = _named("processes", {
     "projects.reviews": "Demander la relecture indépendante d'un travail conclu, hors des pull requests",
     "email.poll": "Relever le courrier",
     "email.keep": "Télécharger l'historique du courrier",
-    "mcp.watch": "Rejoindre les serveurs d'outils extérieurs",
     "memory.promises": "Tenir ou laisser filer ses promesses", "self.wake": "Se réveiller avec sa nuit",
     "social.reciprocity": "Remarquer qui écrit en premier",
     "social.bonds": "Remarquer qu'un lien a changé",
@@ -301,7 +296,6 @@ PROCESS_LABELS: dict[str, str] = _named("processes", {
     "shares.retention": "Retirer les fichiers envoyés trop anciens", "imaging.draw": "Dessiner",
     "attachments.study": "Lire de près les pièces reçues", "attachments.index": "Indexer les pièces reçues",
     "attachments.retention": "Retirer les pièces reçues trop anciennes ou de trop",
-    "mcp.expire": "Refuser les accords restés sans réponse",
     "teams.triage": "Trier les messages Teams reçus",
     "teams.images": "Regarder les images des messages Teams",
     "agenda.sync": "Relire les agendas branchés (Google, Outlook, CalDAV, abonnements)",
@@ -348,7 +342,6 @@ EVENT_LABELS: dict[str, str] = _named("events", {
     "attention.envied": "Jalouse : quelqu'un dont elle attend la réponse écrit aux autres",
     "memory.reread": "Ses lectures relues la nuit",
     "memory.delicate": "Un sujet délicat : gardé pour confidence",
-    "mcp.consulted": "Une page consultée en travaillant",
     "transcript.summary_reset": "Le résumé d'un salon à refaire (un secret y était repris)",
     "body.fell_asleep": "Endormie", "body.woke": "Réveillée", "needs.felt": "Un besoin ressenti",
     "others.read": "Ce qu'elle devine de quelqu'un",
@@ -389,7 +382,6 @@ EVENT_LABELS: dict[str, str] = _named("events", {
     "projects.run_reported": "Une exécution rendue",
     "email.draft_asked": "Une réponse à un mail demandée", "email.noticed": "Un mail remarqué",
     "email.poll_asked": "Une relève demandée", "email.read": "Un mail lu", "email.sent": "Un mail envoyé",
-    "mcp.status": "L'état de ses serveurs extérieurs", "mcp.answered": "Ce qu'un service extérieur a rendu",
     "projects.access_set": "Les accès d'un projet réglés",
     "projects.steer_asked": "Une demande de pilotage d'un projet, sur ton accord",
     "location.located": "Son téléphone a dit où était la personne",
@@ -471,7 +463,6 @@ EFFECT_LABELS: dict[str, tuple[str, str, str]] = _named("effects", {
                                 "elle part après ton accord : un mail, une réponse Teams, un git push…"),
     "email:effect.executed": ("agit", "Un mail parti", "elle apprend qu'il est parti, retouché ou non"),
     "teams:teams.settled": ("agit", "Une réponse Teams partie", "elle apprend qu'elle est partie, retouchée ou non"),
-    "mcp:effect.executed": ("agit", "Ce qu'un service a rendu", "le résultat d'un appel à un service branché"),
     "agenda:effect.executed": ("agit", "Une écriture dans un agenda",
                                "elle apprend ce qu'est devenu ce qu'elle y a ajouté, modifié, supprimé ou répondu"),
     "projects:effect.executed": ("agit", "Un pilotage de projet accepté",
@@ -513,14 +504,12 @@ EFFECT_FAMILIES: tuple[tuple[str, str], ...] = (
 BUNDLE_LABELS: dict[str, str] = _named("bundles", {
     "attention": "Ses pensées", "self": "Son journal", "social": "Qui lui parle", "workshop": "L'atelier d'un projet",
     "project_review": "Relire le travail d'un projet",
-    "mcp.*": "Service « {} »",
 })
 
 #: Le nom court de chaque capacité : ce qu'une ligne ou une puce de « À valider » et l'historique en disent, sans couper
 #: sa phrase. Celle-ci reste sa description, au survol et dans l'en-tête de la demande ouverte.
 CAPABILITY_LABELS: dict[str, str] = _named("capabilities", {
     "email.send": "Mail", "teams.send": "Réponse Teams",
-    "mcp.call": "Outil extérieur",
     "projects.networked": "Commande réseau", "projects.push": "Push git", "projects.pull": "Pull git",
     "projects.pull_request": "Pull request",
     "projects.issue": "Issue publiée", "projects.issue_state": "État d'une issue",
@@ -550,8 +539,6 @@ ENRICHER_LABELS: dict[str, str] = _named("enrichers", {
     "projects_answer": "La réponse à sa demande d'aide (un projet)", "sent_files": "Les fichiers qu'elle a envoyés",
     "mail": "Son courrier", "teams": "Ses conversations Teams",
     "dessins": "Ses dessins",
-    "services": "Ses demandes aux outils extérieurs",
-    "work_services": "Ses demandes aux outils extérieurs, faites en travaillant",
     "agenda": "Ses agendas (la journée de la personne, ce qu'elle y a proposé)",
     "agenda_reminder": "Le rendez-vous qu'elle rappelle",
     "agenda_invitation": "L'invitation dont elle prépare la réponse",

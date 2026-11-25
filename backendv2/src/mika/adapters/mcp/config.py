@@ -146,8 +146,8 @@ class McpServer(BaseModel):
         """Un réglage retiré, encore dans une configuration gardée, ne la rend pas illisible.
 
         La forme qu'il lit : un serveur d'avant l'ADR 0163 (2026-10-30), qui porte encore « Réponse lue »
-        (``max_result_chars``, ``RETIRED``) ; il se lit sans lui. Sans ce lecteur, ``Settings.mcp`` jugerait ce
-        serveur illisible et l'ignorerait (un champ inconnu est refusé) : il ne part qu'après une révision de
+        (``max_result_chars``, ``RETIRED``) ; il se lit sans lui. Sans ce lecteur, ``ToolsSettings.mcp`` jugerait
+        ce serveur illisible et l'ignorerait (un champ inconnu est refusé) : il ne part qu'après une révision de
         données de la base ``mind`` qui aura réécrit les réglages gardés à la forme du jour (audit du 2026-11-05)."""
         return {k: v for k, v in data.items() if k not in RETIRED} if isinstance(data, dict) else data
 

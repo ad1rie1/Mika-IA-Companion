@@ -17,7 +17,7 @@ import json
 import logging
 import os
 import re
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, TypeVar
@@ -42,7 +42,6 @@ from mika.adapters.maps import (
     TourismConfig,
     WarmConfig,
 )
-from mika.adapters.mcp.config import McpConfig, McpServer, StoredReview
 from mika.adapters.teams import TeamsConfig
 from mika.adapters.web.gate import new_key, token_digest
 from mika.app import authors as authors_m
@@ -105,13 +104,6 @@ LENT_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
 LENT_PREFIX = "mlp_"
 PERSONA_KEY = "persona"
 OVERRIDES_KEY = "overrides"
-#: les serveurs MCP branchés (ADR 0064 ; jeton et variables secrètes scellés) et les décisions sur leurs outils
-MCP_KEY = "mcp"
-MCP_TOOLS_KEY = "mcp_tools"
-#: les lignes d'accès des serveurs du système (la recherche web), réglées sur leur fiche (ADR 0131)
-MCP_SYSTEM_ACCESS_KEY = "mcp_system_access"
-#: ce qu'on règle d'un serveur du système : ses accès seulement — le reste suit les paramètres de son plugin
-SYSTEM_ACCESS_FIELDS = ("access", "default_read", "default_act", "default_keep")
 #: Teams (ADR 0069, 0186) : ce qu'un opérateur règle, ses comptes compris ; la clé de l'extension de chaque compte
 #: à part (``TEAMS_KEYS_KEY``), dont seule l'empreinte est gardée
 TEAMS_KEY = "teams"
@@ -470,67 +462,6 @@ class Settings:
         current.update({k: v for k, v in fields.items() if v is not None})
         account = MailAccount.model_validate(current)
         return await self.save_email(MailConfig(accounts={**cfg.accounts, name: account}))
-
-    # ── Outils extérieurs (MCP, ADR 0064) ──
-    #: les secrets d'un serveur MCP (scellés à part)
-    MCP_SECRETS = ("token", "secret_env", "secret_headers")
-
-    def mcp(self) -> McpConfig:
-        """Les serveurs MCP (secrets déchiffrés) ; un serveur illisible est écarté, jamais bloquant."""
-        servers = {}
-        for name, spec in dict(dict(self._get(MCP_KEY) or {}).get("servers") or {}).items():
-            spec = dict(spec)
-            for k in self.MCP_SECRETS:
-                spec[k] = self.box.open(spec.pop(f"{k}_sealed", ""))
-            try:
-                servers[name] = McpServer.model_validate(spec)
-            except ValueError:
-                log.warning("mcp : le serveur « %s » est illisible, il est ignoré", str(name)[:40])
-        try:
-            return McpConfig(servers=servers)
-        except ValueError:
-            return McpConfig()
-
-    async def save_mcp(self, cfg: McpConfig) -> McpConfig:
-        cfg = McpConfig.model_validate({"servers": dict(cfg.servers)})
-        servers = {}
-        for name, server in cfg.servers.items():
-            spec = server.model_dump(mode="json")
-            for k in self.MCP_SECRETS:
-                spec[f"{k}_sealed"] = self.box.seal(spec.pop(k))
-            servers[name] = spec
-        await self._put(MCP_KEY, {"servers": servers})
-        return cfg
-
-    def mcp_tools(self) -> dict[str, dict[str, StoredReview]]:
-        """Les décisions de l'opérateur sur les outils des serveurs : serveur → outil → décision."""
-        out: dict[str, dict[str, StoredReview]] = {}
-        for server, tools in dict(self._get(MCP_TOOLS_KEY) or {}).items():
-            kept = {}
-            for remote, raw in dict(tools or {}).items():
-                try:
-                    kept[str(remote)] = StoredReview.model_validate(raw)
-                except ValueError:
-                    continue
-            out[str(server)] = kept
-        return out
-
-    async def save_mcp_tools(self, reviews: dict[str, dict[str, StoredReview]]) -> None:
-        """Les décisions sur les outils : serveur → outil → décision."""
-        await self._put(MCP_TOOLS_KEY, {s: {r: v.model_dump(mode="json", by_alias=True) for r, v in tools.items()}
-                                        for s, tools in reviews.items()})
-
-    def mcp_system_access(self) -> dict[str, dict[str, Any]]:
-        """Les accès réglés des serveurs du système : serveur → ses lignes et sa ligne par défaut. Rien d'enregistré
-        sur sa fiche : celles de son plugin (``app/domains/tools/system.py``)."""
-        raw = dict(self._get(MCP_SYSTEM_ACCESS_KEY) or {})
-        return {str(k): {f: v[f] for f in SYSTEM_ACCESS_FIELDS if f in v} for k, v in raw.items()
-                if isinstance(v, dict)}
-
-    async def save_mcp_system_access(self, server: str, fields: Mapping[str, Any]) -> None:
-        current = dict(self._get(MCP_SYSTEM_ACCESS_KEY) or {})
-        current[server] = {f: fields[f] for f in SYSTEM_ACCESS_FIELDS if f in fields}
-        await self._put(MCP_SYSTEM_ACCESS_KEY, current)
 
     def stt(self) -> dict[str, str]:
         data = dict(self._get(STT_KEY) or {})

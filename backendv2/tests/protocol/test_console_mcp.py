@@ -16,6 +16,7 @@ import pytest
 
 from mika.adapters.mcp.http import HttpTransport
 from mika.app.domains.tools.console import subject as server_fiche
+from mika.app.domains.tools.settings import ToolsSettings
 from mika.app.handmade.access import KEEP_CHOICES, POLICY_CHOICES
 from mika.kernel.inspect import Note
 from mika.plugins.mcp.inspect import access_said
@@ -66,7 +67,7 @@ def test_an_operator_plugs_tests_approves_and_sees_a_server_change(world):  # no
     bootstrap(client)
     fake = FakeServer()
     transport = httpx.AsyncClient(transport=httpx.ASGITransport(app=fake))
-    live.mcp._connect = lambda name, spec: HttpTransport(spec.url, headers=spec.headers(), client=transport)
+    live.parts["tools"]._connect = lambda name, spec: HttpTransport(spec.url, headers=spec.headers(), client=transport)
     # brancher : le jeton scellé, jamais réaffiché ; un nom mal formé refusé
     page = html_of(client.get(SETTINGS))
     # ses réglages vivent dans Ses outils, derrière sa roue (ADR 0206) : l'ancienne adresse y mène ; la page se nomme
@@ -87,7 +88,7 @@ def test_an_operator_plugs_tests_approves_and_sees_a_server_change(world):  # no
     assert TOKEN not in r.text
     stored = client.portal.call(live.kernel.mind.store.query_mind, "SELECT value FROM settings")
     assert TOKEN not in repr(stored)
-    assert client.portal.call(live.settings.mcp).servers["meteo"].token == TOKEN
+    assert client.portal.call(live.settings.of(ToolsSettings).mcp).servers["meteo"].token == TOKEN
     # sa fiche : le tester charge ce qu'il propose ; rien n'est servi avant l'accord
     fiche = html_of(client.get("/admin/fiche/serveur/meteo"))
     assert "La météo et les prévisions d'une ville" in fiche and TOKEN not in fiche
@@ -108,7 +109,7 @@ def test_an_operator_plugs_tests_approves_and_sees_a_server_change(world):  # no
     # le servir en lecture, laisser « boom » coupé ; « slow », sans choix, reste à regarder
     done = submit(client, tools_tab, "mcp.revoir", **{"outils.echo": "lecture", "outils.boom": "non"})
     assert done.status_code == 200 and "Servis : echo. 1 laissé coupé." in html_of(done)
-    assert client.portal.call(live.mcp.status, "meteo").new == ("slow",)
+    assert client.portal.call(live.parts["tools"].status, "meteo").new == ("slow",)
     # servi, mais personne n'y a accès : un service branché est fermé, comme un pare-feu (ADR 0131)
     assert not live.kernel.registry.is_dynamic("mcp_meteo_echo")
     made = html_of(client.get("/admin/fiche/serveur/meteo", params={"onglet": "fait"}))
@@ -129,7 +130,7 @@ def test_an_operator_plugs_tests_approves_and_sees_a_server_change(world):  # no
     added = submit(client, made, "mcp.acces", faire="ajouter", defaut_lecture="non", defaut_action="non",
                    defaut_garde="rien")
     assert added.status_code == 200 and "Ligne 1 ajoutée, fermée" in html_of(added)
-    spec = client.portal.call(live.settings.mcp).servers["meteo"]
+    spec = client.portal.call(live.settings.of(ToolsSettings).mcp).servers["meteo"]
     assert [(a.who, a.when, a.read, a.act, a.keep, a.tools) for a in spec.access] == [
         ((OWNER,), (), "non", "non", "rien", ())]
     assert not live.kernel.registry.is_dynamic("mcp_meteo_echo")
@@ -150,7 +151,7 @@ def test_an_operator_plugs_tests_approves_and_sees_a_server_change(world):  # no
     assert saved.status_code == 200 and "Accès enregistrés." in html_of(saved)
     lined = access_page()  # les sélecteurs d'une ligne se nomment comme ses colonnes
     assert 'aria-label="Ce qu\'elle en garde, ligne 2"' in lined and "Politique de" not in lined
-    spec = client.portal.call(live.settings.mcp).servers["meteo"]
+    spec = client.portal.call(live.settings.of(ToolsSettings).mcp).servers["meteo"]
     assert [(a.who, a.when, a.read, a.act, a.keep, a.tools) for a in spec.access] == [
         ((OWNER,), ("conversation",), "seule", "toi", "prive", ()), ((CLOSE,), (), "carte", "non", "rien", ("echo",))]
     # une ligne sans source se refuse
@@ -167,11 +168,11 @@ def test_an_operator_plugs_tests_approves_and_sees_a_server_change(world):  # no
     refused = submit(client, access_page(), "mcp.acces", faire="",
                      **{k: v for k, v in rows.items() if k != "prend.2|echo"})
     assert "Ligne 2 : coche au moins un outil, ou « tous »." in html_of(refused)
-    assert len(client.portal.call(live.settings.mcp).servers["meteo"].access) == 2
+    assert len(client.portal.call(live.settings.of(ToolsSettings).mcp).servers["meteo"].access) == 2
     # monter la seconde : l'ordre change, rien d'autre
     moved = submit(client, access_page(), "mcp.acces", faire="monter:2", **rows)
     assert "Ligne 2 montée." in html_of(moved)
-    assert [a.who for a in client.portal.call(live.settings.mcp).servers["meteo"].access] == [(CLOSE,), (OWNER,)]
+    assert [a.who for a in client.portal.call(live.settings.of(ToolsSettings).mcp).servers["meteo"].access] == [(CLOSE,), (OWNER,)]
     submit(client, access_page(), "mcp.acces", faire="", **rows)
     # « En bref » : ses lignes d'un regard ; plus de grille où l'on retirerait un outil (ADR 0134 : « Ce qu'elle peut
     # faire » renvoie un service à sa fiche) — « Accès aux outils » seul (audit du 2026-11-05, C6-02)
@@ -259,7 +260,7 @@ def test_an_operator_plugs_tests_approves_and_sees_a_server_change(world):  # no
                      a_quoi="Les factures et les devis de mon activité.", adresse="http://factures.lan/mcp",
                      entetes="Authorization: Bearer abc\nX-Tenant: moi")
     assert plugged.status_code == 200 and "« factures » branché" in html_of(plugged)
-    spec = client.portal.call(live.settings.mcp).servers["factures"]
+    spec = client.portal.call(live.settings.of(ToolsSettings).mcp).servers["factures"]
     assert (spec.access, spec.default_read, spec.default_act, spec.url) == ((), "non", "non", "http://factures.lan/mcp")
     assert spec.headers() == {"Authorization": "Bearer abc", "X-Tenant": "moi"}
     assert "Bearer abc" not in repr(client.portal.call(live.kernel.mind.store.query_mind, "SELECT value FROM settings"))
@@ -275,16 +276,16 @@ def test_the_web_search_access_is_set_on_its_page_and_kept_apart(world):  # noqa
     elles remplacent celles de son plugin ; le reste (sa commande, sa cage) ne se règle pas ici."""
     client, live, _ = world
     bootstrap(client)
-    assert "web" in client.portal.call(live.mcp.statuses).__repr__()
+    assert "web" in client.portal.call(live.parts["tools"].statuses).__repr__()
     rows = [{"who": [OWNER], "when": ["conversation"], "read": "seule", "act": "non", "keep": "public", "tools": []}]
-    client.portal.call(live.mcp.settle, "web", {"access": rows, "default_read": "non", "default_act": "non",
+    client.portal.call(live.parts["tools"].settle, "web", {"access": rows, "default_read": "non", "default_act": "non",
                                                 "default_keep": "rien"})
-    assert client.portal.call(live.settings.mcp_system_access)["web"]["access"] == rows
-    (row,) = client.portal.call(live.mcp.status, "web").access
+    assert client.portal.call(live.settings.of(ToolsSettings).mcp_system_access)["web"]["access"] == rows
+    (row,) = client.portal.call(live.parts["tools"].status, "web").access
     assert (row.who, row.when, row.act) == ((OWNER,), ("conversation",), "non")
     with pytest.raises(ValueError):
-        client.portal.call(live.mcp.settle, "web", {"command": "sh"})
-    assert "web" not in client.portal.call(live.settings.mcp).servers  # pas rangé comme un serveur de l'opérateur
+        client.portal.call(live.parts["tools"].settle, "web", {"command": "sh"})
+    assert "web" not in client.portal.call(live.settings.of(ToolsSettings).mcp).servers  # pas rangé comme un serveur de l'opérateur
     made = html_of(client.get("/admin/fiche/serveur/web", params={"onglet": "fait"}))
     assert "ses accès, eux, se règlent ici" in made and "+ Ajouter un accès aux outils" in made
 
@@ -296,7 +297,7 @@ def test_the_web_search_fiche_leads_to_its_plugin_not_to_a_new_server(world):  #
     vient de son plugin. Ses outils › Paramètres le nomme."""
     client, live, _ = world
     bootstrap(client)
-    assert client.portal.call(live.mcp.status, "web").plugin == "web"
+    assert client.portal.call(live.parts["tools"].status, "web").plugin == "web"
     for tab in ("", "etat", "fait", "outils"):
         page = html_of(client.get("/admin/fiche/serveur/web", params={"onglet": tab} if tab else {}))
         forms = [h for h in re.findall(r'href="([^"]*)"', page) if "outils/parametres?" in h and "cle=web" in h]
@@ -360,13 +361,13 @@ def test_the_services_settings_count_in_words(world, monkeypatch):  # noqa: F811
     « actif(s) et prêt(s) » (audit du 2026-11-05, C4-R1)."""
     from types import SimpleNamespace
 
-    from mika.app.settings_sections.plugins import sections
+    from mika.app.domains.tools.console.settings import sections
 
     _, live, _ = world
 
     def facts(*ready: bool) -> str:
         servers = {f"s{i}": SimpleNamespace(enabled=True, ready=r) for i, r in enumerate(ready)}
-        monkeypatch.setattr(live.settings, "mcp", lambda: SimpleNamespace(servers=servers))
+        monkeypatch.setattr(live.settings.of(ToolsSettings), "mcp", lambda: SimpleNamespace(servers=servers))
         return dict(next(s for s in sections(live) if s.key == "mcp").facts())["Réglés ici"]
 
     assert facts(True) == "1 (1 actif et prêt)"

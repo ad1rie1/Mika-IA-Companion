@@ -1,4 +1,4 @@
-"""Réglages › Plugins : la vue d'ensemble, le courrier, les serveurs MCP, la transcription, Teams, les appareils — et,
+"""Réglages › Plugins : la vue d'ensemble, le courrier, la transcription, Teams, les appareils — et,
 par leur fiche, les rubriques des domaines qui ont leur dossier (``ConsolePart.sections``, ADR 0310). Leurs pages vivent là où l'on s'en sert (``SettingsPage.home``) ; elles s'enregistrent sous Réglages."""
 
 from __future__ import annotations
@@ -12,7 +12,6 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from mika.adapters.agenda.oauth import google_client_id
 from mika.adapters.mail import MailConfig
 from mika.adapters.mail.config import MailAccount, application_id
-from mika.adapters.mcp.config import McpConfig
 from mika.adapters.teams import TeamsConfig
 from mika.app.console import FACULTY_LABELS, NAVIGATION
 from mika.app.domains import DOMAINS
@@ -50,9 +49,6 @@ _FRAME: dict[str, tuple[str, tuple[str, ...], tuple[str, str] | None]] = {
               ("Courrier", "courrier/reception")),
     "teams": ("Ses comptes : à qui, sa façon d'y écrire, sa signature ; la clé de chaque extension", ("teams",),
               ("Teams", "teams/conversations")),
-    "web": ("Sa recherche sur le web : ses bornes", (), ("La fiche du serveur « web »", "fiche/serveur/web")),
-    "mcp": ("Les serveurs MCP : à quoi ils servent pour elle, où les joindre ; qui peut quoi, sur leur fiche",
-            ("serveurs-mcp",), ("Outils › Venus d'ailleurs", "outils/serveurs")),
     "imaging": ("Ses fournisseurs d'images et qui dessine quoi ; sa qualité par défaut, ses quotas",
                 ("images-fournisseurs", "images-roles"), ("Ses sens › Dessins", "sens/dessins")),
     "location": ("D'où viennent les tuiles de la carte de sa position", ("carte",),
@@ -242,25 +238,6 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                 ("Application Microsoft", settings.own_mail_application() or "celle livrée d'origine"),
                 ("Lire et envoyer", Ref("local", f"{PREFIX}/courrier/reception", "Courrier › Réception"))]
 
-    async def save_mcp(cfg: McpConfig) -> list[str]:
-        await settings.save_mcp(cfg)
-        if live.mcp is not None:  # les sessions dont la connexion a changé sont fermées, les serveurs actifs rejoints
-            await live.mcp.reconfigure()
-        return []
-
-    def mcp_facts() -> list[tuple[str, Any]]:
-        """Les serveurs réglés ici, puis ceux qu'un plugin système apporte (ADR 0066) : ils ne se règlent pas sur
-        cette page, mais ils sont là — leur fiche dit où se règlent leurs bornes."""
-        servers = settings.mcp().servers
-        ready = sum(1 for x in servers.values() if x.enabled and x.ready)
-        system = [st.name for st in (live.mcp.statuses() if live.mcp is not None else ()) if st.plugin]
-        return [("Réglés ici", f"{len(servers)} ({plural(ready, 'actif et prêt', 'actifs et prêts')})"
-                 if servers else "aucun"),
-                *(("Du système", Ref("local", subject_url("serveur", name), f"{name}, réglé par son plugin"))
-                  for name in system),
-                ("État, outils et qui peut quoi", Ref("local", f"{PREFIX}/outils/serveurs",
-                                                      "Outils › Venus d'ailleurs"))]
-
     def stt() -> SttSettings:
         got = settings.stt()
         return tolerant(SttSettings, base_url=got["base_url"], model=got["model"], api_key=got["api_key"])
@@ -382,22 +359,6 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                             "fait le courrier de toutes : son relevé, ce qu'elle en dit, les réponses qu'elle "
                             "prépare."), home="courrier/parametres", params="email",
                             template="handmade/courrier/parametres.html", styles=("handmade/courrier_reglages.css",)),)),
-        SettingsSection("mcp", "Outils extérieurs", "plugins", McpConfig, settings.mcp, save_mcp, order=15,
-                        lock=settings.writing,
-                        description="Les serveurs MCP dont elle peut utiliser les outils. Jetons et variables "
-                                    "secrètes chiffrés, jamais réaffichés.", facts=mcp_facts,
-                        fixed_names=("servers",),
-                        # qui peut quoi : sur la fiche du serveur, en lignes d'accès (« Accès aux outils », ADR 0131)
-                        # — ici, la connexion seulement
-                        exclude=tuple(f"servers.{k}" for k in ("access", "default_read", "default_act",
-                                                               "default_keep")),
-                        # dans Ses outils, en haut à droite, à côté de Venus d'ailleurs (ADR 0206) ; « Paramètres »,
-                        # comme la roue à une page de Courrier, Teams et Réveils (audit du 2026-11-05, C6-Q3)
-                        pages=(SettingsPage("serveurs-mcp", "Paramètres", ("servers",), description=(
-                            "Chaque service branché (un serveur MCP) a sa page : à quoi il sert, pour elle — la ligne "
-                            "de son catalogue —, puis "
-                            "où le joindre (une adresse, ou une commande lancée ici, isolée) et ses bornes. Qui peut "
-                            "quoi se règle sur sa fiche, dans « Accès aux outils »."), home="outils/parametres"),)),
         # Transcription et Appareils : dans Ses sens, derrière sa roue (ADR 0206), avec ses flux suivis (leur rubrique :
         # app/domains/senses/console/settings.py)
         SettingsSection("transcription", "Transcription", "plugins", SttSettings, stt, save_stt, order=30,

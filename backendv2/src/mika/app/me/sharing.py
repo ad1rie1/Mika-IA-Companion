@@ -30,6 +30,7 @@ from starlette.routing import Route
 from mika.adapters.mail.config import MailAccount, MailConfig
 from mika.adapters.teams import TeamsAccount
 from mika.app.domains.tools import api as mcp_me
+from mika.app.domains.tools.settings import ToolsSettings
 from mika.app.me import agenda as agenda_me
 from mika.app.me import mail as mail_me
 from mika.app.me import teams as teams_me
@@ -97,7 +98,7 @@ def every_share(settings: Any, names: Mapping[str, str] | None = None) -> list[S
         for key, spec in sorted(accounts.items()):
             out += [Shared(kind, key, spec.label or key, spec.owner, who[len(PERSON):], level)
                     for who, level in sorted(spec.shares.items())]
-    for name, spec in sorted(settings.mcp().servers.items()):
+    for name, spec in sorted(settings.of(ToolsSettings).mcp().servers.items()):
         if spec.owner:
             out += [Shared("mcp", name, name, spec.owner, who[len(PERSON):], level)
                     for who, level in sorted(service_shares(spec).items())]
@@ -263,7 +264,7 @@ async def set_share(call: Call) -> dict[str, Any]:
     else:
         spec_m = mcp_me.mine(call).get(key)
         if spec_m is None:
-            other = settings.mcp().servers.get(key)
+            other = settings.of(ToolsSettings).mcp().servers.get(key)
             if other is not None and other.owner and PERSON + call.me.person in service_shares(other):
                 raise Denied(403, "Seul son propriétaire partage ce service.")  # comme une boîte qu'on te partage
             raise missing()

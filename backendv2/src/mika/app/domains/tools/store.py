@@ -13,14 +13,14 @@ from typing import Any
 
 from mika.adapters.mcp.config import McpConfig, McpServer
 from mika.adapters.mcp.system import SystemServers
-from mika.app.settings import SYSTEM_ACCESS_FIELDS, Settings
+from mika.app.domains.tools.settings import SYSTEM_ACCESS_FIELDS, ToolsSettings
 
 
 class McpSettingsStore:
-    """Les fiches des serveurs MCP de l'opérateur et des personnes, rangées par ``Settings`` ; ``system`` : les
+    """Les fiches des serveurs MCP de l'opérateur et des personnes, rangées par ``ToolsSettings`` ; ``system`` : les
     serveurs qu'apportent ses plugins système, qu'on ne réécrit pas ici."""
 
-    def __init__(self, settings: Settings, system: SystemServers) -> None:
+    def __init__(self, settings: ToolsSettings, system: SystemServers) -> None:
         self.settings = settings
         self.system = system
 

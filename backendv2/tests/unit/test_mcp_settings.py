@@ -21,6 +21,7 @@ from mika.adapters.mcp.hub import McpHub
 from mika.adapters.mcp.system import SystemServers
 from mika.adapters.store_sql.store import SqlStore
 from mika.app.domains.tools import system as system_mcp
+from mika.app.domains.tools.settings import ToolsSettings
 from mika.app.domains.tools.store import McpSettingsStore
 from mika.app.settings import SecretBox, Settings
 from mika.plugins import web
@@ -35,11 +36,11 @@ async def settings(tmp_path):
     await store.open()
     s = Settings(store, SecretBox.for_data(tmp_path))
     await s.open()
-    yield s
+    yield s.of(ToolsSettings)
     await store.close()
 
 
-def _store(settings: Settings) -> McpSettingsStore:
+def _store(settings: ToolsSettings) -> McpSettingsStore:
     """Le magasin des fiches, avec le serveur ``web`` qu'apporte le plugin système du même nom."""
     system = SystemServers(lambda: system_mcp.provided(lambda owner: web.WebParams() if owner == "web" else None),
                            access=settings.mcp_system_access)

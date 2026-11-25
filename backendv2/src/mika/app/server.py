@@ -53,10 +53,8 @@ from mika.adapters.llm.models import model_limits
 from mika.adapters.mail import ImapSmtpMail, MailWatch
 from mika.adapters.mail.oauth import MicrosoftSignIn
 from mika.adapters.maps import MapsDesk, MapTiles
-from mika.adapters.mcp.hub import McpHub
 from mika.adapters.mcp.relay import PREFIX as RELAY_PREFIX
 from mika.adapters.mcp.relay import Relay
-from mika.adapters.mcp.system import SystemServers
 from mika.adapters.preprocess import LocalPreprocessor, whisper
 from mika.adapters.push import FcmSender
 from mika.adapters.shares import DiskShares
@@ -79,10 +77,6 @@ from mika.app.console import FACULTY_LABELS, LABELS, NAVIGATION, PARAM_FAMILIES
 from mika.app.console_menu import menu_for
 from mika.app.constellation import Constellation
 from mika.app.domains import DOMAINS, part
-from mika.app.domains.tools import system as system_mcp
-from mika.app.domains.tools.lending import PREFIX as LENT_PREFIX
-from mika.app.domains.tools.lending import Lending
-from mika.app.domains.tools.store import McpSettingsStore
 from mika.app.handmade import access, approval_sources, rights, waiting
 from mika.app.handmade.home import HomePage
 from mika.app.handmade.now import NowPage
@@ -112,7 +106,6 @@ from mika.inspector.mcp import PREFIX as CONSOLE_MCP_PREFIX
 from mika.inspector.mcp import console_app
 from mika.inspector.ui import PREFIX as CONSOLE_PREFIX
 from mika.inspector.ui import InspectorDeps
-from mika.kernel.builtin import PARAMS_CHANGED
 from mika.kernel.events import Origin
 from mika.ports.changes import ME, PHONE_PHONES
 from mika.runtime.bootstrap import Kernel
@@ -161,10 +154,9 @@ class Live:
     imaging: LiveImaging = field(default_factory=LiveImaging)
     #: une génération d'images fournie de l'extérieur (tests) n'est pas rechargée
     imaging_fixed: bool = False
-    #: les serveurs MCP branchés (ADR 0064), le port ``mcp``
-    mcp: McpHub | None = None
     #: les objets vivants de chaque domaine qui a son câblage (ADR 0310), par son nom : les réveils par API
-    #: (``wakeup`` : le port du même nom et la porte de ``POST /api/wake/<nom>``)
+    #: (``wakeup`` : le port du même nom et la porte de ``POST /api/wake/<nom>``), ses outils venus
+    #: d'ailleurs (``tools`` : le client MCP, le port ``mcp``, ADR 0064)
     parts: dict[str, Any] = field(default_factory=dict)
     #: Teams (ADR 0069) : la clé de l'extension et la porte de ``/api/teams/…``
     teams: TeamsDesk | None = None
@@ -389,14 +381,6 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                                            tourism=settings.tourism_config, reviews=settings.reviews_config,
                                            warm=settings.warm_config,
                                            warm_points=lambda: last_positions(kernel, store, clock.now))
-    # les outils venus d'ailleurs (ADR 0064) : la configuration relue à chaque usage, les décisions aussi — plus les
-    # serveurs de ses plugins système, d'après leurs paramètres, approuvés d'office (ADR 0066)
-    system = SystemServers(lambda: system_mcp.provided(
-        lambda owner: kernel.mind.registry.params_of(owner, kernel.mind.root)), access=settings.mcp_system_access)
-    mcp_settings = McpSettingsStore(settings, system)
-    mcp = outside["mcp"] = McpHub(lambda: system.config(settings.mcp()), lambda: system.reviews(settings.mcp_tools()),
-                                system.saving(settings.save_mcp_tools), local_root=data / "mcp",
-                                settle=mcp_settings.settle, remove=mcp_settings.remove, system=system.plugins)
     # ce que chaque domaine apporte (ADR 0310) : ses adaptateurs, ses ports, ses portes HTTP — sa fiche nomme son
     # câblage, que ce serveur appelle sans le connaître (``app/wiring.py``)
     wiring = Wiring(data=data, settings=settings, clock=clock, bases=bases, ports=outside)
@@ -408,21 +392,6 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                                      access_tables=settings.access_tables, closeness=social_c.is_close,
                                      authors=settings.author_for, **deps))
 
-    reconfiguring: set[asyncio.Task[None]] = set()
-
-    def reconfigure_mcp(events: Sequence[Any], root: Any) -> None:
-        """Les paramètres d'un plugin qui apporte un serveur ont changé (activé, désactivé, réglé) : le client MCP
-        ferme ce qui a changé et rejoint ce qui doit l'être ; ses outils suivent."""
-        if not any(e.type is PARAMS_CHANGED and e.data.owner in system_mcp.OWNERS for e in events):
-            return
-        try:
-            task = asyncio.get_running_loop().create_task(mcp.reconfigure())
-        except RuntimeError:  # pas de boucle (une commande hors ligne) : il se reconfigurera au démarrage
-            return
-        reconfiguring.add(task)
-        task.add_done_callback(reconfiguring.discard)
-
-    kernel.mind.subscribe(reconfigure_mcp)
     # le courrier en direct (ADR 0308) : ce qui arrive est rangé tout de suite, même quand elle dort — hors de
     # l'ordonnanceur, que son sommeil arrête ; il se règle à chaque enregistrement des boîtes
     mail_watch = MailWatch(outside["mail"]) if mail_live else None
@@ -432,7 +401,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     hub.port = port
     teams.port = port
     live = Live(kernel, hub, port, Accounts(store), settings, gateway, fixed, calls=CallLog(store),
-                persona_file=persona, data=data, imaging=imaging, imaging_fixed=imaging_fixed, mcp=mcp,
+                persona_file=persona, data=data, imaging=imaging, imaging_fixed=imaging_fixed,
                 parts=wiring.parts, teams=teams, read_limits=None if fixed else model_limits,
                 tiles=MapTiles(data, settings.map_config), mail_watch=mail_watch)
     agenda_desk.reconfigure = live.reconfigure
@@ -495,8 +464,6 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
             log.warning("configuration des modèles : %s", problem)
         for problem in await live.reload_imaging():
             log.warning("configuration des images : %s", problem)
-        mcp.on_change(kernel.refresh_tools)  # son offre change : ses outils aussi (ADR 0064)
-        mcp.start()  # chaque serveur actif est joint en tâche de fond
         hub.start()
         live_changes.start()
         if mail_watch is not None:
@@ -530,7 +497,6 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                 # alors les fournisseurs se ferment, et le registre des appels se vide magasin ouvert
                 for module in reversed(wired):  # ce que chaque domaine ferme, ses épisodes annulés (``release``)
                     await part(module, "release", _idle)(wiring)
-                await mcp.aclose()
                 await gateway.aclose()
                 await imaging.aclose()
                 await push_sender.aclose()
@@ -544,7 +510,6 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
 
     # la vue d'ensemble d'une personne, dessinée à la main (ADR 0121) : le premier onglet de sa fiche
     person_overview = PersonOverview()
-    lending = Lending(kernel, settings.lent)  # ses outils prêtés à un agent (ADR 0122)
     # la console, et ses pages sans requête : la console en MCP lit les mêmes (santé, épisodes, « pourquoi »…)
     inspector, console_pages = assemble(
         InspectorDeps(kernel, live.accounts, live.settings, gateway.traces, port=port, calls=live.calls,
@@ -554,7 +519,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                       sections=settings_sections.sections(live), settings_tabs=settings_sections.RUBRICS,
                       parameters=settings_sections.parameters(live), param_families=PARAM_FAMILIES,
                       faculty_labels=FACULTY_LABELS, labels=LABELS,
-                      backups=lambda: backup.overview(data), relay=live.relay, lending=lending, world=world_hub,
+                      backups=lambda: backup.overview(data), relay=live.relay, world=world_hub,
                       overviews={"person": person_overview, **OVERVIEWS},
                       drawn=DRAWN, approval_sources=approval_sources.sources, queue=waiting.QUEUE,
                       nameable=access.people_with_accounts, canal_instances=access.instances_from_settings,
@@ -569,7 +534,6 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     relay = Mount(RELAY_PREFIX, app=live.relay.app)
     console_mcp = Mount(CONSOLE_MCP_PREFIX, app=console_app(kernel, settings.console_mcp_digest, console_pages,
                                                             settings.console_mcp_served, settings.console_mcp_network))
-    lent = Mount(LENT_PREFIX, app=lending.app())
     # la documentation de ses projets, par MCP, pour qui présente un jeton de compte (ADR 0289)
     docs_mcp = Mount(DOCS_MCP_PREFIX, app=DocsPoint(kernel, live.accounts).app())
     # ce que frontendv2 montre à qui est connecté, et seulement à elle (ADR 0187) ; sa borne des trajets vaut aussi pour
@@ -600,7 +564,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                                     *home_page.routes(), *now_page.routes(), *people_page.routes(),
                                     *person_overview.routes(console_pages.ui, outbound=moi.outbound),
                                     *rights.routes(console_pages.ui),
-                                    *inspector, relay, console_mcp, lent, docs_mcp, world_hub.route(),
+                                    *inspector, relay, console_mcp, docs_mcp, world_hub.route(),
                                     *wiring.routes],
                       preprocess=preprocess, sensor_digest=settings.sensors_digest,
                       teams=teams, push_ready=push_sender.configured, **wiring.web), live

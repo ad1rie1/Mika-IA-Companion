@@ -1,4 +1,4 @@
-"""Ce qui se branche : ``mail``, ``stt`` (ce qu'elle perçoit du dehors), ``mcp``, ``sensors``, ``teams``, ``agenda`` ;
+"""Ce qui se branche : ``mail``, ``stt`` (ce qu'elle perçoit du dehors), ``sensors``, ``teams``, ``agenda`` ;
 puis la commande de chaque domaine qui a la sienne (``Domain.cli``, ADR 0310)."""
 
 from __future__ import annotations
@@ -11,7 +11,6 @@ from pathlib import Path
 from mika.adapters.agenda.oauth import RETURN_PATH
 from mika.adapters.contacts import ContactsStore
 from mika.adapters.mail import LEGACY_ACCOUNT
-from mika.adapters.mcp.hub import McpHub
 from mika.adapters.system import RealClock
 from mika.adapters.teams import TeamsStore
 from mika.app import datadir, schema
@@ -20,34 +19,6 @@ from mika.app.domains import DOMAINS, part
 from mika.app.settings import Settings
 from mika.app.teams import TeamsDesk
 from mika.ports.teams import DEFAULT_ACCOUNT as DEFAULT_TEAMS_ACCOUNT
-
-
-async def mcp_command(settings: Settings, args: argparse.Namespace) -> dict[str, object]:
-    """``mika mcp serveurs`` / ``mika mcp essai <serveur>`` : ce qui est branché, et ce qu'un serveur propose
-    maintenant (avec, pour chaque outil, ce que l'opérateur en a décidé). Aucun secret n'est rendu."""
-    hub = McpHub(settings.mcp, settings.mcp_tools, settings.save_mcp_tools, local_root=args.data / "mcp")
-    try:
-        if args.mcp_cmd == "serveurs":
-            return {"ok": True, "serveurs": [
-                {"nom": n, "ou": s.transport, "actif": s.enabled, "a_quoi": s.purpose,
-                 "adresse": s.url if not s.local else s.command,
-                 "acces": [{"qui": a.who, "quand": list(a.when) or "toujours", "lecture": a.read, "action": a.act, "garde": a.keep,
-                            "outils": list(a.tools) or "tous"} for a in s.access],
-                 "par_defaut": {"lecture": s.default_read, "action": s.default_act, "garde": s.default_keep},
-                 "manque": s.problems()}
-                for n, s in sorted(settings.mcp().servers.items())]}
-        ok, message = await hub.test(args.serveur)
-        status = hub.status(args.serveur)
-        tools = []
-        for t in status.live if status is not None else ():
-            review = status.reviews.get(t.remote) if status is not None else None
-            state = ("à regarder" if review is None else "suspendu (changé)" if review.enabled
-                     and review.fingerprint != t.fingerprint else "approuvé" if review.enabled else "désactivé")
-            tools.append({"outil": t.remote, "description": t.description, "lecture_seule": t.read_only_hint,
-                          "etat": state})
-        return {"ok": ok, "message": message, "outils": tools}
-    finally:
-        await hub.aclose()
 
 
 async def teams_command(settings: Settings, args: argparse.Namespace) -> dict[str, object]:
@@ -171,21 +142,6 @@ def _run_outside(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_mcp(args: argparse.Namespace) -> int:
-    if args.mcp_cmd in ("serveurs", "essai"):
-        out = asyncio.run(_with_settings(args.data, lambda settings, _store: mcp_command(settings, args)))
-        print(json.dumps(out, ensure_ascii=False, indent=2))
-        return 0 if out.get("ok", True) else 1
-
-    async def mcp_token(settings: Settings, store) -> dict[str, object]:  # type: ignore[no-untyped-def]
-        token = await settings.new_console_mcp_token()
-        return {"token": token, "usage": "claude mcp add --transport http mika http://127.0.0.1:8001/mcp/console/ "
-                                          f"--header \"Authorization: Bearer {token}\""}
-
-    print(json.dumps(asyncio.run(_with_settings(args.data, mcp_token)), ensure_ascii=False, indent=2))
-    return 0
-
-
 def _run_sensors(args: argparse.Namespace) -> int:
     async def token(settings: Settings, store) -> dict[str, object]:  # type: ignore[no-untyped-def]
         return {"token": await settings.new_sensors_token(),
@@ -251,12 +207,6 @@ def add_plugins(sub) -> None:  # type: ignore[no-untyped-def]
     sts.add_argument("base_url")
     sts.add_argument("api_key")
     sts.add_argument("--model", default="whisper-1")
-    mc = sub.add_parser("mcp", help="la lire depuis ton Claude Code (point /mcp/console, lecture seule)")
-    mcsub = mc.add_subparsers(dest="mcp_cmd", required=True)
-    mcsub.add_parser("token", help="un jeton neuf (l'ancien ne vaut plus), montré une fois")
-    mcsub.add_parser("serveurs", help="les serveurs MCP branchés (ADR 0064) et leurs réglages, sans secret")
-    mce = mcsub.add_parser("essai", help="joindre un serveur MCP branché et lister ses outils (rien n'est approuvé)")
-    mce.add_argument("serveur")
     se = sub.add_parser("sensors", help="le jeton des appareils (POST /api/perceptions)")
     sesub = se.add_subparsers(dest="sensors_cmd", required=True)
     sesub.add_parser("token", help="un jeton neuf (l'ancien ne vaut plus), montré une fois")
@@ -285,7 +235,6 @@ def add_plugins(sub) -> None:  # type: ignore[no-untyped-def]
     ag.set_defaults(run=_run_agenda)
     for parser in (ml, st):
         parser.set_defaults(run=_run_outside)
-    mc.set_defaults(run=_run_mcp)
     se.set_defaults(run=_run_sensors)
     tm.set_defaults(run=_run_teams)
     # puis la commande de chaque domaine qui a la sienne (``Domain.cli``, ADR 0310)

@@ -134,7 +134,7 @@ TASKS = {owner: work for part in PARTS for owner, work in part.tasks.items()}
 PARAMS: Mapping[str, tuple[str, ...]] = {
     email_c.OWNER: (SETTINGS, MAIL, MAIL_DRAFTS, ME, CONTACTS),
     teams_c.OWNER: (SETTINGS, TEAMS, TEAMS_REPLIES, ME, CONTACTS),
-    "mcp": (SETTINGS,), projects_c.OWNER: (PROJECTS, ME),
+    projects_c.OWNER: (PROJECTS, ME),
     trips_c.OWNER: (TRIPS,), location_c.OWNER: (PHONE_POSITION,),
     agenda_p.OWNER: (SETTINGS, AGENDA, ME),
     **{owner: topics for part in PARTS for owner, topics in part.params.items()}}

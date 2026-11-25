@@ -235,6 +235,10 @@ class SlowServices:
         self.servers = servers
         self.writing = asyncio.Lock()
 
+    def of(self, kind: type) -> SlowServices:
+        """Les réglages d'un domaine (``Settings.of``) : ce faux tient lui-même ceux des services."""
+        return self
+
     def mcp(self) -> NS:
         return NS(servers=dict(self.servers))
 

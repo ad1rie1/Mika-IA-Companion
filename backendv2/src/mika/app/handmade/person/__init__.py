@@ -40,6 +40,7 @@ from starlette.routing import Route
 from mika.adapters.mcp.config import TRANSPORTS
 from mika.adapters.web.accounts import Account, account_of_handle
 from mika.adapters.web.gate import SlidingWindow
+from mika.app.domains.tools.settings import ToolsSettings
 from mika.app.handmade import (
     FORGOTTEN,
     MONTHS,
@@ -542,7 +543,7 @@ def services(look: Look, who: Who) -> list[dict[str, Any]]:
     return [{"name": name, "href": subject_url("serveur", name), "purpose": excerpt(spec.purpose, 200),
              "on": spec.enabled, "where": dict(TRANSPORTS).get(spec.transport, spec.transport),
              "shared": [_with(look, p, level) for p, level in sorted(service_shares(spec).items())]}
-            for name, spec in sorted(settings.mcp().servers.items()) if spec.owner == mine]
+            for name, spec in sorted(settings.of(ToolsSettings).mcp().servers.items()) if spec.owner == mine]
 
 
 def _resource(s: Shared) -> dict[str, str]:
