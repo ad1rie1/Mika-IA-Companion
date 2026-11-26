@@ -39,6 +39,7 @@ const TIMEOUTS: Record<string, string> = {
   "screens/carte/itinerary.ts › mount": "les lieux proposés pour un point, après une pause de la saisie",
   "screens/carte/requests.ts › want": "le trajet d'un voyage, une fois ses arrêts immobiles après tes gestes (un calcul du serveur, borné par compte)",
   "screens/agenda/index.ts › mount": "la recherche dans tes agendas, après une pause de la saisie",
+  "screens/chat/panel.ts › bindSearch": "la recherche dans les fichiers de la conversation, après une pause de la saisie",
   "screens/contacts/index.ts › constructor": "la palette (Ctrl K) : une lecture, une fois, peu après le démarrage",
   "screens/contacts/index.ts › mount": "la recherche, après une pause de la saisie",
   "screens/mail/mail.ts › mount": "la recherche, après une pause de la saisie",

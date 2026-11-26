@@ -9,8 +9,11 @@ from mika.faculties.attachments.faculty import (
     PORT,
     AttachmentsParams,
     AttachmentsState,
+    Pending,
     file_id,
+    waiting,
 )
 from mika.faculties.attachments.tables import FileRow, row, rows
 
-__all__ = ["ATTACHMENTS", "PORT", "AttachmentsParams", "AttachmentsState", "FileRow", "file_id", "row", "rows"]
+__all__ = ["ATTACHMENTS", "PORT", "AttachmentsParams", "AttachmentsState", "FileRow", "Pending", "file_id", "row", "rows",
+           "waiting"]

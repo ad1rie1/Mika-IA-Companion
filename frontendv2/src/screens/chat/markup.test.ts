@@ -15,12 +15,13 @@ import {
   composerPlaceholder,
   elsewhere,
   inlineHtml,
+  bubbleFiles,
+  herFiles,
   messageKey,
-  sentFile,
-  filesTable,
   threadMarkup,
   typedText,
   userMessage,
+  userPieces,
   workCard,
   type ThreadView,
 } from "./markup";
@@ -87,24 +88,6 @@ describe("les petites formes", () => {
     const loading = threadMarkup(view(conversation, { older: "loading" }));
     expect(loading).toContain("data-older disabled");
     expect(loading).toContain("Chargement…");
-  });
-
-  it("les fichiers échangés : ta propre copie s'enregistre, tant qu'elle est gardée", () => {
-    const id = "a".repeat(32);
-    const html = filesTable([{
-      text: "tiens [a.txt, b.txt, c.txt]",
-      sender: "user",
-      ts: NOW,
-      attachments: [
-        { name: "a.txt", kind: "file", id, url: `/files/${id}`, available: true },
-        { name: "b.txt", kind: "file", id, url: `/files/${id}`, available: false },
-        { name: "c.txt", kind: "file" },
-      ],
-    } as StoredMessage], "http://m", NOW);
-    expect(html).toContain(`href="http://m/files/${id}"`);
-    expect(html.match(/Enregistrer/g)).toHaveLength(1);
-    expect(html).toContain("plus disponible");
-    expect(html).not.toContain("envoyé par toi");
   });
 });
 
@@ -226,15 +209,61 @@ describe("threadMarkup", () => {
   });
 });
 
-describe("sentFile", () => {
-  const api = "http://localhost:8001";
-  it("une image en vignette, un fichier en lien, retiré : son nom barré", () => {
-    const id = "0123456789abcdef0123456789abcdef";
-    expect(sentFile({ id, name: "dessin.png", kind: "image", size: 2048, url: `/files/${id}`, available: true }, api)).toContain(
-      `<img src="${api}/files/${id}"`,
-    );
-    expect(sentFile({ id, name: "courses.md", kind: "file", url: `/files/${id}`, available: true }, api)).toContain('download="courses.md"');
-    expect(sentFile({ id, name: "vieux.md", kind: "file", url: `/files/${id}`, available: false }, api)).toContain("plus disponible");
+describe("les fichiers dans les bulles (ADR 0312)", () => {
+  const id = "0123456789abcdef0123456789abcdef";
+  const msg = (attachments: StoredMessage["attachments"], extra: Partial<StoredMessage> = {}): StoredMessage =>
+    ({ text: "tiens", sender: "user", ts: NOW, id: 40, cid: "c9", attachments, ...extra }) as StoredMessage;
+
+  it("ta pièce gardée s'ouvre et s'enregistre par son adresse ; une image en vignette, à lire par le cache", () => {
+    const html = userMessage(msg([{ name: "tableau.jpg", kind: "image", id, url: `/files/${id}`, size: 2048, available: true }]), true, view([]));
+    expect(html).toContain(`<img data-file="/files/${id}"`);
+    expect(html).not.toContain("src=");  // jamais l'adresse du serveur en direct : 60 téléchargements par minute, sans cache
+    expect(html).toContain('data-file-open data-mk="40" data-fi="0" data-from="toi"');
+    expect(html).toContain("tableau.jpg · 2 Ko");
+  });
+
+  it("une pièce qu'on vient d'envoyer se montre par la copie du navigateur, avec « envoi… »", () => {
+    const pending = msg([{ name: "note.pdf", kind: "file", mime: "application/pdf", size: 4096 }, { name: "a.png", kind: "image" }],
+      { id: undefined, status: "pending" });
+    const pieces = userPieces(pending, (key) => key === "local:c9:1");
+    expect(pieces.map((p) => [p.sorte, p.src])).toEqual([["pdf", undefined], ["image", "local:c9:1"]]);
+    const html = userMessage(pending, false, view([], { local: (key) => key === "local:c9:1" }));
+    expect(html).toContain('<img data-file="local:c9:1"');
+    expect(html).toContain("envoi…");
+    // sans adresse ni copie : la carte s'ouvre quand même (la visionneuse demande au serveur), sans « Enregistrer »
+    const pdf = html.slice(html.indexOf("msg-file doc"), html.indexOf("mf-grid") > 0 ? html.indexOf("mf-grid") : html.indexOf("msg-file img"));
+    expect(pdf).toContain("data-file-open");
+    expect(pdf).not.toContain("data-file-save");
+    expect(html).toContain("4 Ko · PDF");
+  });
+
+  it("une pièce retirée garde son nom, barré d'un mot, et ne s'ouvre plus", () => {
+    const html = userMessage(msg([{ name: "vieux.txt", kind: "file", id, url: `/files/${id}`, available: false }]), true, view([]));
+    expect(html).toContain("msg-file gone");
+    expect(html).toContain("plus disponible");
+    expect(html).not.toContain("data-file-open");
+  });
+
+  it("ses fichiers à elle : les mêmes formes ; plusieurs images côte à côte", () => {
+    const files = herFiles([
+      { id, name: "dessin.png", kind: "image", size: 2048, url: `/files/${id}`, available: true },
+      { id, name: "photo.jpg", kind: "image", url: `/files/${id}`, available: true },
+    ]);
+    const html = bubbleFiles(files, "41", "mika");
+    expect(html.startsWith('<div class="mf-grid">')).toBe(true);
+    expect(html.match(/data-from="mika"/g)).toHaveLength(2);
+    const doc = bubbleFiles(herFiles([{ id, name: "courses.md", kind: "file", mime: "text/markdown", url: `/files/${id}`, available: true }]), "41", "mika");
+    expect(doc).toContain("data-file-save");
+    expect(doc).toContain("Markdown");
+    expect(doc).not.toContain("mf-grid");
+    const gone = bubbleFiles(herFiles([{ id, name: "vieux.md", kind: "file", url: `/files/${id}`, available: false }]), "41", "mika");
+    expect(gone).toContain("plus disponible");
+  });
+
+  it("un nom de fichier est échappé partout", () => {
+    const html = bubbleFiles(herFiles([{ id, name: '<img src=x onerror="alert(1)">.png', kind: "image", url: `/files/${id}`, available: true }]), "41", "mika");
+    expect(html).not.toContain("<img src=x");
+    expect(html).toContain("&lt;img src=x");
   });
 });
 

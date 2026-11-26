@@ -202,6 +202,13 @@ ATTACHMENTS.projector(c.TABLE, version=1, tier=Tier.T0,
                       types=[rt.PERCEPTION_RECEIVED, *c.ALL, *MEMORY_LINKS])(ReceivedFiles)
 
 
+def waiting(state: AttachmentsState | None, file: str, handle: str | None = None) -> Pending | None:
+    """Une pièce gardée au bord mais pas encore lue de près (ADR 0312) : ses octets sont déjà là, et la personne qui
+    l'a envoyée la reprend sans attendre sa lecture. ``handle`` : seulement si c'est cette adresse qui l'a envoyée."""
+    p = state.pending.get(file) if state is not None else None
+    return p if p is not None and (handle is None or p.handle == handle) else None
+
+
 def holder(state: AttachmentsState, file: str) -> str | None:
     """L'adresse qui garde cette pièce, ses octets là (``None`` : retirée, pas encore lue, ou inconnue) — ce qu'un
     opérateur peut retirer (ADR 0205)."""

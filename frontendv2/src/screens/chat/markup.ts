@@ -5,7 +5,6 @@
  * que `renderProMarkdown` échappe en entier avant de poser ses propres balises.
  */
 import type { AgendaCardData } from "../agenda/chat";
-import type { HistoryAttachment } from "@web/types";
 import { parseBlocks, parseInline } from "@web/ui/inlineMarkup";
 import { renderProMarkdown } from "@web/ui/proMarkdown";
 import { noteLine } from "@web/ui/messageNotes";
@@ -37,8 +36,10 @@ import {
 } from "@web/ui/approvals";
 import { strandLabel, type StrandInfo } from "@web/ui/strands";
 import type { ApprovalCard, SentFile, ToolUse } from "@web/types";
-import { clock, dayAndClock, shortWhen } from "../../shared/dates";
+import { clock, shortWhen } from "../../shared/dates";
 import { plainHtml, sizeLabel } from "../../shared/text";
+import type { FileSort } from "../../api/chat";
+import { localKey, reasonWords, sortOf, tile, typeLabel } from "./files";
 import { h } from "../../shell/dom";
 import { ico, type IconName } from "../../shell/icons";
 import { mikaAvatar } from "../../mika/face";
@@ -111,6 +112,8 @@ export interface ThreadView {
   mapCards?: (msg: StoredMessage) => string;
   /** Le message que la palette vient de montrer (sa `messageKey`) : surligné un instant. */
   found?: string;
+  /** Ce navigateur garde-t-il la copie de cette pièce envoyée (`files.ts::localKey`) ? */
+  local?: (key: string) => boolean;
 }
 
 /**
@@ -138,39 +141,91 @@ function userStatus(msg: StoredMessage, answered: boolean): string {
   return answered ? ` · ${ico("checks", "xs")} lu` : ` · ${ico("check", "xs")} envoyé`;
 }
 
-function userFiles(pieces: readonly HistoryAttachment[]): string {
-  return pieces
-    .map((a) => `<div class="msg-file">${ico(a.kind === "image" ? "image" : "file")}<b>${h(a.name)}</b></div>`)
-    .join("");
+// ── Les fichiers dans les bulles (ADR 0312) ───────────────────────────
+
+/** Un fichier tel qu'une bulle le montre : les tiens comme les siens. */
+export interface BubbleFile {
+  name: string;
+  sorte: FileSort;
+  size?: number;
+  mime?: string;
+  /** Où lire ses octets (`blobs.ts`) : `/files/<id>`, ou la copie de ce navigateur ; rien : pas encore connu. */
+  src?: string;
+  /** Retiré : son nom seul, et pourquoi s'il est connu. */
+  gone: boolean;
+  reason?: string;
 }
 
-export function userMessage(msg: StoredMessage, answered: boolean, view: Pick<ThreadView, "api" | "operator" | "found">): string {
+/**
+ * Un fichier dans une bulle : une image en vignette, un document en carte (sa marque, son nom, sa taille), un fichier
+ * retiré barré d'un mot. Un clic l'ouvre dans la visionneuse (`data-file-open`, avec la clé de son message et sa
+ * place) ; « Enregistrer » le télécharge. Une pièce dont l'adresse n'est pas encore connue s'ouvre aussi : la
+ * visionneuse la demande au serveur.
+ */
+export function bubbleFile(f: BubbleFile, mk: string, index: number, from: "toi" | "mika", sending = false): string {
+  const ref = ` data-mk="${h(mk)}" data-fi="${index}" data-from="${from}"`;
+  if (f.gone) {
+    const why = f.reason ? reasonWords(f.reason) : "";
+    return `<div class="msg-file gone">${tile({ ...f, available: false })}<span class="mf-txt"><b>${h(f.name)}</b><small>plus disponible${why ? ` · ${h(why)}` : ""}</small></span></div>`;
+  }
+  // une pièce gardée pas encore lue de près n'a pas encore de taille (0) : rien plutôt que « 0 o »
+  const size = sizeLabel(f.size || undefined);
+  if (f.sorte === "image" && f.src) {
+    return `<button class="msg-file img mf-open" type="button" data-file-open${ref} data-thumb title="Voir en grand">
+      <img data-file="${h(f.src)}" alt="">${sending ? `<span class="mf-wait">${ico("clock", "xs")}envoi…</span>` : ""}<span class="mf-zoom">${ico("expand", "sm")}</span>
+      <span class="mf-cap">${h(f.name)}${size ? ` · ${h(size)}` : ""}</span></button>`;
+  }
+  const sub = [size, typeLabel(f.name, f.sorte, f.mime)].filter(Boolean).join(" · ");
+  const save = f.src
+    ? `<button class="btn icon ghost xs" type="button" data-file-save${ref} title="Enregistrer" aria-label="Enregistrer ${h(f.name)}">${ico("download", "sm")}</button>`
+    : "";
+  return `<div class="msg-file doc"><button class="mf-open mf-main" type="button" data-file-open${ref} title="Ouvrir l'aperçu">${tile({ ...f, src: undefined, available: true })}<span class="mf-txt"><b>${h(f.name)}</b><small>${h(sub)}</small></span></button>${save}</div>`;
+}
+
+/** Les fichiers d'un message : plusieurs images côte à côte, sinon l'un sous l'autre. */
+export function bubbleFiles(files: readonly BubbleFile[], mk: string, from: "toi" | "mika", sending = false): string {
+  const html = files.map((f, i) => bubbleFile(f, mk, i, from, sending));
+  const images = files.every((f) => f.sorte === "image" && f.src && !f.gone);
+  return files.length > 1 && images ? `<div class="mf-grid">${html.join("")}</div>` : html.join("");
+}
+
+/**
+ * Tes pièces d'un message, telles qu'une bulle les montre : par l'adresse que le serveur leur donne une fois gardées
+ * (ADR 0215), sinon par la copie que ce navigateur a gardée à l'envoi (`local`) ; marquées retirées, leur nom seul.
+ */
+export function userPieces(msg: Pick<StoredMessage, "attachments" | "cid">, local?: (key: string) => boolean): BubbleFile[] {
+  return (msg.attachments ?? []).map((a, i) => {
+    const mine = msg.cid ? localKey(msg.cid, i) : "";
+    const src = a.url && a.available !== false ? a.url : mine && local?.(mine) ? mine : undefined;
+    return { name: a.name, sorte: sortOf(a.name, a.mime, a.kind), size: a.size, mime: a.mime, src, gone: !src && a.available === false };
+  });
+}
+
+/** Les fichiers qu'elle a envoyés avec un message. */
+export function herFiles(files: readonly SentFile[]): BubbleFile[] {
+  return files.map((f) => ({
+    name: f.name,
+    sorte: sortOf(f.name, f.mime, f.kind),
+    size: f.size,
+    mime: f.mime,
+    src: f.available === false ? undefined : f.url,
+    gone: f.available === false,
+  }));
+}
+
+export function userMessage(msg: StoredMessage, answered: boolean, view: Pick<ThreadView, "api" | "operator" | "found" | "local">): string {
   const text = typedText(msg);
   const bubble = text.trim() ? `<div class="bubble">${plainHtml(text)}</div>` : "";
   const failed = msg.status === "failed";
   const meta = `<div class="msg-meta${failed ? " ko" : ""}"${msg.reason ? ` title="${h(msg.reason)}"` : ""}>${h(clock(msg.ts))}${userStatus(msg, answered)}</div>`;
   const at = msgAttrs(msg, view.found);
-  let out = `<div class="msg me${msg.status === "pending" ? " pending" : ""}${failed ? " failed" : ""}${at.found}"${at.key}>${userFiles(msg.attachments ?? [])}${bubble}${meta}</div>`;
+  let out = `<div class="msg me${msg.status === "pending" ? " pending" : ""}${failed ? " failed" : ""}${at.found}"${at.key}>${bubbleFiles(userPieces(msg, view.local), messageKey(msg), "toi", msg.status === "pending")}${bubble}${meta}</div>`;
   if (msg.note) out += sysNote(msg.note, "me", undefined, "alert");
   if (msg.replyNote) {
     const href = view.operator ? consoleHref(msg.replyHref) : undefined;
     out += sysNote(msg.replyNote, "me", href ? `${view.api}${href}` : undefined, "alert");
   }
   return out;
-}
-
-/** Un fichier qu'elle a envoyé : une image en vignette, un autre fichier en lien ; retiré, son nom barré d'un mot. */
-export function sentFile(file: SentFile, api: string): string {
-  if (file.available === false) {
-    return `<div class="msg-file gone">${ico("file")}<b>${h(file.name)}</b><span class="muted">plus disponible</span></div>`;
-  }
-  const href = `${api}${file.url}`;
-  const size = sizeLabel(file.size);
-  if (file.kind === "image") {
-    return `<a class="msg-file img" href="${h(href)}" target="_blank" rel="noopener"><img src="${h(href)}" alt="${h(file.name)}" loading="lazy">
-      <span class="mf-cap">${h(file.name)}${size ? ` · ${h(size)}` : ""}</span></a>`;
-  }
-  return `<a class="msg-file" href="${h(href)}" download="${h(file.name)}" target="_blank" rel="noopener">${ico("file")}<b>${h(file.name)}</b>${size ? `<span class="muted">${h(size)}</span>` : ""}${ico("download", "sm")}</a>`;
 }
 
 function verdictButtons(msg: StoredMessage, id: number, api: string, operator: boolean): string {
@@ -202,7 +257,7 @@ export function mikaMessage(msg: StoredMessage, view: ThreadView, carded: boolea
         .slice(0, shown)
         .map((p) => `<div class="bubble${msg.inner ? " inner" : ""}">${inlineHtml(p)}</div>`)
         .join("");
-  const files = complete ? (msg.files ?? []).map((f) => sentFile(f, view.api)).join("") : "";
+  const files = complete && msg.files?.length ? bubbleFiles(herFiles(msg.files), messageKey(msg), "mika") : "";
   const maps = complete && view.mapCards ? view.mapCards(msg) : "";
   const judged = complete && !msg.inner && typeof msg.id === "number" ? verdictButtons(msg, msg.id, view.api, view.operator) : "";
   const label = [clock(msg.ts), ...(pro ? ["mode pro"] : []), ...(msg.inner ? ["pensée à voix haute"] : [])].join(" · ");
@@ -509,6 +564,8 @@ export interface PendingAttachment {
   type: string;
   size: number;
   data: string;
+  /** Le fichier même : ce navigateur en garde la copie à l'envoi, pour le revoir avant que le serveur ne l'ait gardé. */
+  blob?: Blob;
 }
 
 export function attachmentsMarkup(pending: readonly PendingAttachment[], notices: readonly string[]): string {
@@ -553,36 +610,4 @@ export function strandHead(info: StrandInfo, note: string): string {
       ${note ? `<p class="small strand-note" role="status">${h(note)}</p>` : ""}</div>
     <button class="btn icon ghost sm" type="button" data-cmd="renommer" title="Titre et description">${ico("pen", "sm")}</button>
     <button class="btn icon ghost sm" type="button" data-cmd="${info.archived ? "desarchiver" : "archiver"}" title="${info.archived ? "Sortir le fil des archives" : "Archiver le fil"}">${ico("archive", "sm")}</button>`;
-}
-
-// ── Les fichiers échangés ─────────────────────────────────────────────
-
-function saveLink(url: string, name: string, api: string): string {
-  return `<a class="btn xs" href="${h(api + url)}" download="${h(name)}" target="_blank" rel="noopener">${ico("download", "xs")}Enregistrer</a>`;
-}
-
-/**
- * Tous les fichiers du fil chargé : les siens et les tiens se téléchargent (ADR 0215 : ta propre copie, tant qu'elle
- * est gardée). Une pièce sans adresse (pas encore lue, ou d'avant qu'elles se gardent) n'offre rien.
- */
-export function filesTable(messages: readonly StoredMessage[], api: string, now: number): string {
-  const rows: string[] = [];
-  for (const m of [...messages].reverse()) {
-    const when = dayAndClock(m.ts, now);
-    if (m.sender === "vtuber") {
-      for (const f of m.files ?? []) {
-        const action = f.available === false ? '<span class="muted">plus disponible</span>' : saveLink(f.url, f.name, api);
-        rows.push(`<tr><td>${ico(f.kind === "image" ? "image" : "file", "sm")} ${h(f.name)}</td><td>Mika</td><td>${h(when)}</td><td class="actions">${action}</td></tr>`);
-      }
-    } else {
-      for (const a of m.attachments ?? []) {
-        const action = a.available === false ? '<span class="muted">plus disponible</span>' : a.url ? saveLink(a.url, a.name, api) : "";
-        rows.push(`<tr><td>${ico(a.kind === "image" ? "image" : "file", "sm")} ${h(a.name)}</td><td>toi</td><td>${h(when)}</td><td class="actions">${action}</td></tr>`);
-      }
-    }
-  }
-  if (!rows.length) {
-    return `<div class="empty">${ico("clip")}<b>Aucun fichier dans ces messages</b><p>Ce que vous vous êtes envoyé se télécharge d'ici, tant que c'est gardé.</p></div>`;
-  }
-  return `<table class="tbl"><thead><tr><th>Fichier</th><th>De</th><th>Quand</th><th></th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
 }

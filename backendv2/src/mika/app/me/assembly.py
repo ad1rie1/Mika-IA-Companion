@@ -15,6 +15,7 @@ from starlette.routing import Route
 
 from mika.app.domains import DOMAINS, gathered, part
 from mika.app.me import (
+    chat,
     rights,
     settings,
     sharing,
@@ -27,7 +28,7 @@ __all__ = ["COUNTERS", "MODULES", "MeApi", "who"]
 #: les modules : chacun rend ses routes — ceux du cadre, puis celui de chaque domaine
 MODULES: tuple[Callable[[MeApiBase], list[Route]], ...] = (
     rights.routes, settings.routes, sharing.routes,
-    writing.routes,
+    writing.routes, chat.routes,
     *(part(d.api, "routes") for d in DOMAINS if d.api is not None))
 #: ce que chacun compte pour la barre du haut, par son nom : un nom que deux domaines disent est refusé à l'import
 #: (``gathered``), au lieu que le second remplace l'autre dans ``counts``

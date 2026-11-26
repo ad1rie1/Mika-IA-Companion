@@ -40,7 +40,7 @@ Carte des modules (le sens de leurs imports : ``marks`` ← ``faculty`` ← ``th
   sans réponse (``left_unanswered``) ;
 - ``thread`` : le fil matérialisé — les projections ``thread``, ``strands`` et ``thread_efforts`` — et les requêtes
   qui le relisent (``recent``, ``after``, ``private_thread``, ``strand_thread``, ``room_thread``, ``strand_history``,
-  ``strands_of``, ``efforts_of``…) ;
+  ``with_files``, ``strands_of``, ``efforts_of``…) ;
 - ``history`` : l'historique du prompt — l'enrichisseur ``thread``, les tours datés (``thread_turns``), sa balise
   relue (``tagged``), ce qu'elle relit en tête d'un fil de travail (``strand_about``), la section ``history`` ;
 - ``compact`` : le repli des longs fils en un résumé (processus ``transcript.compact``) ;
@@ -73,6 +73,7 @@ from mika.faculties.transcript.thread import (
     strand_history,
     strands_of,
     window_start,
+    with_files,
 )
 
 __all__ = [
@@ -95,4 +96,5 @@ __all__ = [
     "tagged",
     "thread_turns",
     "window_start",
+    "with_files",
 ]

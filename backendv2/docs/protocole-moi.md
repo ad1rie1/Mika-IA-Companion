@@ -2,8 +2,8 @@
 
 Ce document est pour qui écrit un client de tous les jours, `frontendv2/` ou l'application Android (ADR 0235) : ce qu'il montre à la personne connectée,
 et seulement à elle — ses boîtes, ses comptes Teams, ses téléphones, ses services, ce qu'on lui partage, ses droits, sa
-carte et ses voyages, ses projets, ses contacts, ses agendas. Les décisions et leurs raisons sont les ADR 0187 à 0192 de [`decisions.md`](decisions.md) (et,
-pour la carte, 0193 à 0196 et 0229 ; pour les projets, 0282 et 0290 ; pour les contacts, 0298 ; pour l'agenda, 0309) ; le code fait foi dans
+carte et ses voyages, ses projets, ses contacts, ses agendas, les fichiers de sa conversation avec Mika. Les décisions et leurs raisons sont les ADR 0187 à 0192 de [`decisions.md`](decisions.md) (et,
+pour la carte, 0193 à 0196 et 0229 ; pour les projets, 0282 et 0290 ; pour les contacts, 0298 ; pour l'agenda, 0309 ; pour les fichiers du chat, 0312) ; le code fait foi dans
 [`app/me/`](../src/mika/app/me/__init__.py). La conversation reste sur `/ws` ([`protocole-chat.md`](protocole-chat.md)) ;
 la console, celle des opérateurs, voit tout et ne passe pas par ici.
 
@@ -1556,3 +1556,38 @@ dans Mika n'est pas un partage chez Google ou Microsoft.
 une proposition de Mika et sa décision, une invitation, la connexion d'un compte, un réglage — part en `agenda` (§ 2
 bis), avec les agendas touchés (`calendars`), à elle et à qui on les partage, à personne d'autre. L'agenda de Mika se
 relit à l'ouverture de l'écran.
+
+## 14. Les fichiers du chat
+
+Ce que « Fichiers », en haut du chat, et la visionneuse montrent (ADR 0312) : tout ce que la personne a envoyé à Mika
+(ses pièces, ADR 0215) et ce que Mika lui a envoyé (ADR 0062), sur toute sa conversation — pas seulement les messages
+qu'un écran a chargés. Le code fait foi dans [`app/me/chat.py`](../src/mika/app/me/chat.py) ; la conversation elle-même
+reste sur `/ws` ([`protocole-chat.md`](protocole-chat.md)).
+
+**`GET /api/moi/chat/fichiers?q=&sorte=&de=&fil=&page=&par=`** → `{"items", "total", "page", "pages", "per", "counts",
+"unavailable"}` : les fichiers du fil, du plus récent au plus ancien (dans un message, dans son ordre).
+
+- **Le fil** : celui que le chat relit (`strand_history`, ADR 0215) — le fil avec elle, sans ses fils de travail ;
+  `fil` : un fil de travail (mode pro, ADR 0164 : seuls les messages de ce compte sur ce fil). Il relit au plus les
+  5 000 derniers messages qui portent quelque chose (un fichier, ou une petite bulle d'elle, ADR 0119).
+- **Chercher** : `q` (200 caractères au plus), chaque mot dans le **nom** du fichier, sans casse ni accents — jamais
+  dans son contenu ni dans ce que Mika en a lu ; `sorte` : `image`, `pdf`, `texte` (texte, Markdown, JSON…),
+  `tableau` (CSV), `autre` ; `de` : `toi` ou `mika`. Une autre valeur : 400, `fields`.
+- **Page par page** : `page` (à partir de 1 ; au-delà de la dernière, la dernière), `par` (12 par défaut, 60 au plus).
+  `counts` : combien de chaque sorte (`""` : toutes) parmi ce que `q` et `de` gardent, pour les filtres de l'écran ;
+  `unavailable` : ceux de la sélection qui ne se téléchargent plus.
+- **Un fichier** : `key` (sa clé dans la liste : son message et sa place — la même pièce renvoyée a le même `id` dans
+  deux messages), `id`, `name` (celui de son message : la même pièce renvoyée sous un
+  autre nom garde, là, le nouveau), `mime`, `size` (0 : pas encore connue), `sorte`, `from` (`toi`, `mika`), `at`
+  (ms), `message` (le numéro du message qui le porte) et `index` (sa place, à partir de 0), `available`. Ce qui se
+  télécharge porte `url` (`/files/<id>`, la règle de `protocole-chat.md` : à ce compte seulement) ; le reste porte
+  `reason` — `retention` (trop vieux), `budget` (la place), `operator` (retiré par une opératrice), `missing` (ses octets
+  perdus, ou retiré avant d'avoir été lu), `unkept` (un message d'avant, jamais gardé). Une pièce gardée se télécharge
+  **dès que ses octets sont là**, sans attendre que Mika l'ait lue de près.
+- **Ceux d'un message** : `?message=<numéro>` (avec `fil` s'il est dans un fil de travail) → `{"items"}`, sans
+  page : ce qu'un écran demande d'une pièce dont il n'a pas encore l'adresse (envoyée d'un autre appareil, ou avant
+  un rechargement). Un message d'une autre personne : rien, comme un message inconnu.
+
+`GET /files/<id>` reste un téléchargement (`attachment`, `nosniff`, bac à sable, sans cache) : un écran qui montre un
+fichier en lit les octets et ne l'ouvre jamais comme une page. frontendv2 (son `README.md`) garde ce qu'il a lu en
+mémoire, et une image ne se lit qu'une fois parue à l'écran (60 téléchargements par minute et par compte).

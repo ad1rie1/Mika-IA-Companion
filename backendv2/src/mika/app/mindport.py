@@ -18,6 +18,7 @@ from typing import Any
 from sqlalchemy import select
 
 from mika.app.domains import DOMAINS, part
+from mika.contracts import attachments as attachments_c
 from mika.contracts import attention as attention_c
 from mika.contracts import body as body_c
 from mika.contracts import identity as identity_c
@@ -261,16 +262,28 @@ class KernelPort(*MIXED):
 
     def pieces(self, files: Sequence[str]) -> list[SharedMeta]:
         """Les pièces reçues que cette liste désigne (les clés d'une ligne du fil de la personne qui les a
-        envoyées) : ce qu'un écran montre de sa propre copie (ADR 0215)."""
-        return [SharedMeta(id=r.id, name=r.name, kind=r.kind, mime=r.mime, size=r.size, available=not r.gone)
-                for r in attachments.rows(self._store, files)]
+        envoyées) : ce qu'un écran montre de sa propre copie (ADR 0215) — lue de près, ou seulement gardée au bord, en
+        attendant sa lecture (ADR 0312 : sa taille n'est pas encore connue, 0)."""
+        found = {r.id: r for r in attachments.rows(self._store, files)}
+        state = self.kernel.mind.root.slices.get(attachments_c.OWNER)
+        out: list[SharedMeta] = []
+        for file in dict.fromkeys(f for f in files if isinstance(f, str)):
+            r = found.get(file)
+            if r is not None:
+                out.append(SharedMeta(id=r.id, name=r.name, kind=r.kind, mime=r.mime, size=r.size,
+                                      available=not r.gone))
+            elif (p := attachments.waiting(state, file)) is not None:
+                out.append(SharedMeta(id=p.file, name=p.name, kind=p.kind, mime=p.mime, size=0))
+        return out
 
     async def _own_piece(self, file: str, handle: str) -> SharedDownload | None:
         """Une pièce que cette adresse a envoyée elle-même (ADR 0215) : à elle seule, et ses octets relus doivent être
         ceux qui ont été lus (leur empreinte). L'ADR 0106 (« elle ne renvoie jamais une pièce reçue ») vise les
         outils de Mika ; ici, c'est la personne qui reprend sa propre copie."""
         r = attachments.row(self._store, file)
-        if r is None or r.handle != handle:
+        if r is None:
+            return await self._waiting_piece(file, handle)
+        if r.handle != handle:
             return None
         if r.gone:
             return SharedDownload(r.name, r.mime, gone=True)
@@ -279,6 +292,19 @@ class KernelPort(*MIXED):
         if data is None or hashlib.sha256(data).hexdigest() != r.digest:
             return SharedDownload(r.name, r.mime, gone=True)
         return SharedDownload(r.name, r.mime, data)
+
+    async def _waiting_piece(self, file: str, handle: str) -> SharedDownload | None:
+        """Une pièce que cette adresse a envoyée, gardée au bord mais pas encore lue de près (ADR 0312) : elle la
+        reprend sans attendre. Sans empreinte gardée, ses octets doivent redonner sa clé, faite de cette adresse et de
+        leur empreinte (``attachments.file_id``)."""
+        p = attachments.waiting(self.kernel.mind.root.slices.get(attachments_c.OWNER), file, handle)
+        if p is None:
+            return None
+        store = self.kernel.ports.get(attachments.PORT)
+        data = await store.read(file, MAX_SHARE_BYTES) if store is not None else None
+        if data is None or attachments.file_id(handle, data) != file:
+            return SharedDownload(p.name, p.mime, gone=True)
+        return SharedDownload(p.name, p.mime, data)
 
     async def shared_file(self, file: str, *, handle: str) -> SharedDownload | None:
         """Un fichier parti avec un message du fil que cette adresse peut relire (``THREAD`` : la sienne, celles de

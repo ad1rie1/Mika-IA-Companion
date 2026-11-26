@@ -35,6 +35,15 @@ agenda) et le **chat** (`ecrans/agenda-chat.js` : la carte « Ajouter à ton age
 une dixième rubrique, `agenda.css` replie les libellés de la barre du haut un peu plus tôt, et sur un téléphone la barre
 du bas passe à huit entrées : Carte, Outils et Réglages sous « Plus ». L'écran se passe le lundi 23 novembre 2026 à 14:20.
 
+**Validé le 2026-11-26** (« je valide la maquette », ADR 0312) : les **fichiers du chat** (`ecrans/chat-fichiers.js`, `chat-fichiers.css`),
+posés par-dessus l'écran Chat validé sans le retoucher. Dans le fil, tes pièces se montrent comme les siennes (une image
+en vignette, un document en carte avec sa sorte, son nom et sa taille, « plus disponible » une fois retiré) ; un clic
+ouvre la **visionneuse** : une image en grand, un PDF dans le lecteur du navigateur, un texte ou un Markdown (rendu ou
+source), un CSV en tableau ; les autres sortes se disent et s'enregistrent ; ← et → parcourent les fichiers, « Dans la
+conversation » remonte au message. **Fichiers** (en haut à droite) liste tous les fichiers de la conversation, pas
+seulement les messages chargés : chercher par nom, par sorte et par qui l'a envoyé, en liste ou en vignettes, page par
+page. `?panneau=1` ouvre Fichiers, `?grille=1` en vignettes, `?voir=<id>` la visionneuse.
+
 ## L'ouvrir
 
 - **Avec la VRM** (servie en HTTP, depuis la racine du dépôt) :
@@ -58,7 +67,7 @@ mode pro), `?notes=1` (panneau des notes ouvert), et la route après `#` :
 
 | Écran | Routes |
 |---|---|
-| Chat | `#chat` (le bouton Pro du champ passe en mode pro) |
+| Chat | `#chat` (le bouton Pro du champ passe en mode pro), `#chat/fichiers` (tes pièces et les siennes ; `?voir=f-devis`, `f-tableau`, `f-notes`, `f-comp`, `f-budget`, `f-vacances`) |
 | Projets | `#projets/a-faire` (et `/a-faire/3/ticket-4`, `/3/pr-11`…), `#projets/projets`, puis la fiche `#projets/projets/3` et ses onglets : `/objectifs/o2` (et `/rendus`, `/modifier`), `/objectifs/m1`, `/objectifs/diagramme/avancement` et `/objectifs/diagramme/temps` (et `/o2`, `/o2/3` pour un jalon), `/tickets/4` (et `/description`, `/plan`, `/fil`, `/historique`, `/modifier`), `/code/fichiers/<branche>/<chemin>`, `/code/commits/<empreinte>`, `/code/pulls/11` (et `/commits`, `/fichiers`, `/echanges`, `/modifier`), `/code/branches/<branche>`, `/code/issues/9` (et `/echanges`), `/code/ci/57` (et `/journal`), `/documentation/pages/<page>` (et `/modifier/<page>`, `/historique/<page>`, `/images/<image>`, `/decisions/3`, `/decisions/3/options`, `/decisions/3/modifier`), `/activite` (le fil ; et `/executions/61`, `/carnet`), `/dependances/lit-7` (le schéma ; et `/demandes/d3`), `/reglages/general` (« Modifier le projet » ; et `/rythme`, `/accords`, `/depot`, `/outils`) ; `#projets/projets/5/listes/entreprises` (un projet qui a des listes) |
 | Outils | `#outils/droits` (la matrice des droits, ressource par ressource), `#outils/services`, `#outils/accords` |
 | Mail | `#mail/messages`, `#mail/messages/m-claire`, `#mail/messages/d-lefevre` |

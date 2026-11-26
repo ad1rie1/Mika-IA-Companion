@@ -66,6 +66,8 @@ export interface ComposerHost {
   runCommand(command: StrandCommand): void;
   noteOpener(id: string, text: string): void;
   showTyping(): void;
+  /** Garder la copie des pièces d'un envoi, pour les revoir avant que le serveur ne les ait gardées (ADR 0312). */
+  keepLocal(cid: string, pieces: readonly PendingAttachment[]): void;
 }
 
 export class ChatComposer {
@@ -109,7 +111,7 @@ export class ChatComposer {
         continue;
       }
       try {
-        this.pending.push({ name: file.name, type: file.type, size: file.size, data: await readBase64(file) });
+        this.pending.push({ name: file.name, type: file.type, size: file.size, data: await readBase64(file), blob: file });
       } catch {
         this.notices.push(`${file.name} illisible : non joint.`);
       }
@@ -156,8 +158,14 @@ export class ChatComposer {
     if (this.pending.length) {
       // la même composition que le fil relu : la ligne du serveur reconnaîtra sa bulle
       const display = withAttachments(text, this.pending.map((a) => a.name));
+      this.host.keepLocal(cid, this.pending);
       this.host.addMessage(display, { cid, status: "pending", matchText: text, mode: pro, strand,
-        attachments: this.pending.map((a) => ({ name: a.name, kind: a.type.startsWith("image/") ? "image" : a.type.startsWith("audio/") ? "audio" : "file" })) });
+        attachments: this.pending.map((a) => ({
+          name: a.name,
+          kind: a.type.startsWith("image/") ? "image" : a.type.startsWith("audio/") ? "audio" : "file",
+          ...(a.type ? { mime: a.type } : {}),
+          size: a.size,
+        })) });
       sent = this.ws.sendChatWithAttachments(text, this.pending, cid, mode, strand);
       this.pending = [];
     } else {

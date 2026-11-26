@@ -197,7 +197,8 @@ class MindPort(Protocol):
 
     def pieces(self, files: Sequence[str]) -> list[SharedMeta]:
         """Ce qu'une personne peut relire des pièces qu'elle a envoyées (ADR 0215), d'après leur clé : celles qui ont
-        été gardées, dans l'ordre ; une pièce pas encore lue, inconnue ou oubliée n'y est pas."""
+        été gardées, dans l'ordre — lues de près, ou en attendant de l'être (ADR 0312) ; une pièce inconnue ou oubliée
+        n'y est pas."""
         ...
 
     async def shared_file(self, file: str, *, handle: str) -> SharedDownload | None:

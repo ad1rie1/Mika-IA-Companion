@@ -576,10 +576,13 @@ l'ouvrira. Les fichiers d'une personne qu'on fait oublier disparaissent avec ses
 haute portent `attachments: []`.
 
 Une entrée d'`attachments` d'un message **de la personne** porte son `name` et son `kind` ; une pièce gardée
-(ADR 0106) y ajoute, une fois lue, `id`, `mime`, `size`, `url` et `available`, les mêmes champs que ci-dessus : c'est
-sa propre copie (ADR 0215). Une pièce pas encore lue, ou d'un message d'avant, n'a que son nom. `available` faux : ses
-octets ont été retirés (la place, ou un opérateur). L'ADR 0106 (« elle ne renvoie jamais une pièce reçue ») vise les
-outils de Mika, pas cette copie.
+(ADR 0106) y ajoute `id`, `mime`, `size`, `url` et `available`, les mêmes champs que ci-dessus : c'est sa propre copie
+(ADR 0215). Elle les porte dès que ses octets sont gardés, sans attendre que Mika l'ait lue de près (ADR 0312) : sa
+taille n'est connue qu'à cette lecture, `size` vaut 0 d'ici là. Une pièce d'un message d'avant, jamais gardée, n'a que
+son nom. `available` faux : ses octets ont été retirés (la place, ou un opérateur). L'ADR 0106 (« elle ne renvoie
+jamais une pièce reçue ») vise les outils de Mika, pas cette copie. Tous les fichiers d'une conversation, page par page
+et sans dépendre de ce qu'un écran a chargé : `GET /api/moi/chat/fichiers` ([`protocole-moi.md`](protocole-moi.md),
+§ 14).
 
 `GET /files/<id>` avec le jeton (ou la session d'un navigateur) — seulement pour un fichier parti avec un de ses
 messages, dans le fil de ce compte, ou une pièce que ce compte lui a envoyée : 200 en pièce jointe

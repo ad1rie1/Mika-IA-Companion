@@ -32,7 +32,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 | Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163, 0166, 0168, 0171, 0172, 0189, 0190, 0191, 0192, 0193, 0194, 0195, 0196, 0198, 0199, 0211, 0213, 0214, 0228, 0229, 0236, 0238, 0240, 0243, 0244, 0245, 0246, 0247, 0248, 0249, 0250, 0251, 0255, 0256, 0258, 0259, 0269, 0299, 0300, 0301, 0302, 0305, 0307, 0309 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158, 0239, 0267, 0285 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159, 0261 |
-| Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170, 0187, 0200, 0208, 0209, 0215, 0233, 0235, 0242, 0252, 0282, 0284, 0286, 0287, 0288, 0290, 0291, 0292, 0293, 0294, 0296, 0308 |
+| Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170, 0187, 0200, 0208, 0209, 0215, 0233, 0235, 0242, 0252, 0282, 0284, 0286, 0287, 0288, 0290, 0291, 0292, 0293, 0294, 0296, 0308, 0312 |
 | La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176, 0177, 0178, 0179, 0180, 0181, 0182, 0183, 0197, 0201, 0202, 0203, 0204, 0205, 0206, 0210, 0216, 0217, 0218, 0219, 0225, 0230, 0231, 0232, 0234, 0237, 0241, 0281, 0295, 0297, 0310 |
 | Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135, 0266 |
 
@@ -3259,6 +3259,8 @@ de tout le serveur à coups d'« Actualiser ».
 
 *Révise 0062 (en partie : `/files/<id>` sert aussi les pièces de la personne), 0164 (en partie : `strand_history` lit aussi le fil avec elle).*
 
+*Révisée par 0312.*
+
 ### 0233 — Le Téléphone ne montre que ce que le serveur sait
 
 - Le Téléphone de frontendv2 n'a pas d'onglet Notifications tant que l'application ne lit que les messageries : rangé par appli, il redisait Messages. Il reviendra sous la forme de la maquette, un fil de vraies notifications (un colis, un rendez-vous), quand l'application lira d'autres apps (ADR 0190, *À venir*).
@@ -3483,6 +3485,17 @@ pour le propriétaire d'un projet confié un accord qu'il ne peut pas donner ; l
 *Pourquoi :* « j'aimerais que les actions avec le frontend soient instantanées : réception de message, envoi, envoi de mail, réception. Tout ce qui entraîne des envois/réceptions d'information qui doivent modifier l'interface doit passer en temps réel à travers un websocket ; il faudrait un service qui gère tout ça » (le 2026-11-23). Choisis le même jour : le courrier en IDLE même endormie, frontendv2 et l'app Android dans le même chantier. La console et le client 3D ne changent pas ; les notifications Firebase de l'app fermée non plus.
 
 *Révise 0027 (en partie : le courrier relevé en direct, à part de ce qu'elle en remarque), 0251 (en partie : la boîte d'envoi poussée sans relecture), 0306 (en partie : la ligne « elle s'y met » poussée, plus relue toutes les deux secondes).*
+
+### 0312 — Les fichiers du chat : les revoir, les chercher, les reprendre
+
+- **Tes pièces se montrent comme les siennes** (frontendv2, maquette validée le 2026-11-26 : `frontendv2/maquette/ecrans/chat-fichiers.js`) : une image en vignette, un document en carte (sa sorte, son nom, sa taille), barré d'un mot une fois retiré. Un clic l'ouvre dans une **visionneuse** : une image en grand, un PDF dans le lecteur du navigateur, un texte ou un Markdown (rendu échappé, ou source), un CSV en tableau, un son ; le reste se dit et s'enregistre ; « Enregistrer », « Dans la conversation » (le fil remonte jusqu'au message), ← et →.
+- **« Fichiers » couvre toute la conversation**, pas les seuls messages chargés : `GET /api/moi/chat/fichiers` (`protocole-moi.md` § 14), page par page, cherché par **nom** (jamais dans le contenu ni dans ce qu'elle en a lu), trié par sorte et par qui l'a envoyé ; le fil avec elle, ou un fil de travail en mode pro. Ce qui ne se télécharge plus dit pourquoi.
+- **Une pièce se reprend dès que ses octets sont gardés**, sans attendre que Mika l'ait lue de près : une lecture lente, retenue par le quota ou ratée (elle se retente plus tard) ne prive plus la personne de sa propre copie. Le serveur la rend à l'adresse qui l'a envoyée, ses octets vérifiés par leur clé ; sa taille n'est connue qu'à la lecture (0 d'ici là).
+- **Rien n'est rendu ni exécuté** : `/files/<id>` reste un téléchargement (pièce jointe, `nosniff`, bac à sable, sans cache). L'écran en lit les octets une fois par session, les garde en mémoire (bornée) et ne lit une image qu'une fois parue à l'écran (60 téléchargements par minute) ; un PDF ne s'ouvre en PDF que s'il en a l'en-tête. Une pièce qu'on vient d'envoyer se revoit tout de suite, depuis la copie du navigateur.
+
+*Pourquoi :* « quand on envoie une image ou un fichier texte ou PDF dans le chat on ne peut pas le reconsulter, ni en aperçu ni rien ; et dans Fichiers on ne peut ni les retélécharger, ni les rechercher, ni paginer, ni les consulter en modal » (le 2026-11-26). La bulle ne montrait de tes pièces que leur nom ; leur adresse n'arrivait qu'à la relecture du fil, et pas du tout tant que la lecture de près n'avait pas abouti ; « Fichiers » ne voyait que les messages chargés.
+
+*Révise 0215 (en partie : la pièce se reprend avant d'être lue de près, et se liste sur toute la conversation).*
 
 ## La console et l'exploitation
 

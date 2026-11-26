@@ -59,7 +59,7 @@ import { mapNotes, sameMapNotes, type MapNote } from "../../map/notes";
 import { dayAndClock } from "../../shared/dates";
 import { read, write } from "../../shared/storage";
 import { onTheme } from "../../shell/theme";
-import { $, h, norm, on } from "../../shell/dom";
+import { $, h, initials, norm, on } from "../../shell/dom";
 import { closeModal, openModal, toast } from "../../shell/float";
 import { ico } from "../../shell/icons";
 import type { PaletteEntry } from "../../shell/palette";
@@ -69,7 +69,12 @@ import { facetHtml, facetsOf, promiseHtml, statusLine, type LinkState } from "..
 import { ApprovalCards } from "./approvals";
 import { ACCEPTED_TYPES, ChatComposer, MAX_MESSAGE_CHARS } from "./composer";
 import { mergeOlder, mergeSeam, oldestLoaded, UNBOUNDED } from "./older";
-import { composerMarkup, filesTable, messageKey, threadMarkup } from "./markup";
+import { messageFiles } from "../../api/chat";
+import { FileBlobs, saveBlob } from "./blobs";
+import { localKey, NOT_YET } from "./files";
+import { composerMarkup, herFiles, messageKey, threadMarkup, userPieces, type BubbleFile } from "./markup";
+import { openFilesPanel, viewerFile } from "./panel";
+import { openViewer, type ViewerFile } from "./viewer";
 import { WorkStrands } from "./strands";
 
 /**
@@ -84,6 +89,8 @@ const OLDER_WAIT_MS = 10_000;
 const TYPING_TIMEOUT_MS = 300_000;
 /** Le message que la palette montre reste surligné ce temps-là. */
 const FOUND_MS = 2400;
+/** « Dans la conversation » remonte au plus tant de pages pour trouver le message d'un fichier. */
+const SEEK_MAX_PAGES = 40;
 /** L'écart entre le haut du champ (et de ses cartes) et le bas des toasts, sur l'écran Chat. */
 const TOAST_GAP_PX = 8;
 /** Dans la palette, le début d'un message ; ce qu'on y trouve plus loin se montre en passage (`palette.ts::excerpt`). */
@@ -168,6 +175,10 @@ export class ChatScreen {
   private showing: string | null = null;
   private found: string | null = null;
   private foundTimer: number | null = null;
+  /** Les octets des fichiers du fil, lus une fois (ADR 0312) : vignettes, visionneuse, « Enregistrer ». */
+  private readonly blobs = new FileBlobs();
+  /** Le message qu'un fichier désigne et qu'on remonte chercher, page par page (« Dans la conversation »). */
+  private seeking: { id: number; pages: number } | null = null;
   /** Sa réponse qui s'écrit bulle par bulle (ADR 0112) : « Mika écrit… » entre deux, sa bouche à chacune. */
   private readonly reveal = new BubbleReveal<StoredMessage>((done) => {
     this.paintThread();
@@ -214,6 +225,11 @@ export class ChatScreen {
       runCommand: (command) => this.strands.runCommand(command),
       noteOpener: (id, text) => this.strands.noteOpener(id, text),
       showTyping: () => this.showTyping(),
+      keepLocal: (cid, pieces) => {
+        pieces.forEach((p, i) => {
+          if (p.blob) this.blobs.putLocal(localKey(cid, i), p.blob);
+        });
+      },
     });
     this.restore();
     store.subscribe((snap) => this.paintMika(snap));
@@ -421,23 +437,28 @@ export class ChatScreen {
     const fromBottom = scroller ? scroller.scrollHeight - scroller.scrollTop : 0;
     this.paintThread();
     if (scroller) scroller.scrollTop = scroller.scrollHeight - fromBottom;
+    this.keepSeeking();
   }
 
-  /** « Messages plus anciens » (ADR 0215) : la page d'avant, une à la fois. */
-  private askOlder(): void {
-    if (this.olderTimer !== null || !this.moreOlder || !this.ws) return;
+  /** « Messages plus anciens » (ADR 0215) : la page d'avant, une à la fois. Rend vrai si une page est en route. */
+  private askOlder(): boolean {
+    if (this.olderTimer !== null) return true;
+    if (!this.moreOlder || !this.ws) return false;
     const before = oldestLoaded(this.history);
     const sent = this.ws.requestStrandHistory({ type: "strand_history", id: "", ...(before !== undefined ? { before } : {}) });
     if (!sent) {
       toast("Hors ligne : réessaie quand la connexion est revenue.", { ico: "alert" });
-      return;
+      return false;
     }
     this.stick = false;  // on lit vers le haut : rien ne redescend tout seul
     this.olderTimer = window.setTimeout(() => {
+      // la page n'est pas venue : une recherche de message s'arrête là, sans sauter plus tard tout seul
       this.olderTimer = null;
+      this.seeking = null;
       this.paintThread();
     }, OLDER_WAIT_MS);
     this.paintThread();
+    return true;
   }
 
   private stopOlderTimer(): void {
@@ -447,6 +468,7 @@ export class ChatScreen {
 
   /** La connexion est tombée : la page demandée ne viendra pas, le bouton redevient cliquable. */
   private endOlder(): void {
+    this.seeking = null;
     if (this.olderTimer === null) return;
     this.stopOlderTimer();
     this.paintThread();
@@ -667,7 +689,10 @@ export class ChatScreen {
       filter: query ? (m) => norm(m.text).includes(query) : undefined,
       mapCards: (m) => this.mapCards(m),
       found: this.found ?? undefined,
+      local: (key) => this.blobs.has(key),
     });
+    // les vignettes de vos fichiers : celles déjà lues tout de suite, les autres quand elles paraissent
+    this.blobs.fill(el);
     // ses cartes miniatures : les vivantes se relogent, les nouvelles s'observent
     this.minis.attach(el);
     if (scroller && this.stick && !query) scroller.scrollTop = scroller.scrollHeight;
@@ -813,6 +838,145 @@ export class ChatScreen {
     toasts.style.setProperty("--toast-bottom", `${above}px`);
   }
 
+  // ── Les fichiers du fil (ADR 0312) ────────────────────────────────
+
+  /** Ton rond, tel que la barre du haut le dessine. */
+  private meAvatar(): string {
+    return `<span class="av xs c0">${h(initials(this.account.displayName || this.account.username))}</span>`;
+  }
+
+  /** Un fichier d'une bulle, tel que la visionneuse le montre. */
+  private shownFile(msg: StoredMessage, f: BubbleFile, index: number, from: "toi" | "mika"): ViewerFile {
+    return {
+      key: `${messageKey(msg)}:${from}:${index}`,
+      name: f.name,
+      sorte: f.sorte,
+      mime: f.mime ?? "",
+      size: f.size,
+      from,
+      at: msg.ts,
+      src: f.src,
+      available: !!f.src,
+      reason: f.src ? undefined : f.gone ? f.reason ?? "missing" : NOT_YET,
+      message: msg.id,
+      index,
+    };
+  }
+
+  /** Les fichiers du fil montré, dans son ordre (les retirés exceptés) : ce que ← et → parcourent. */
+  private threadFiles(): ViewerFile[] {
+    const thread = this.viewThread;
+    const local = (key: string): boolean => this.blobs.has(key);
+    const out: ViewerFile[] = [];
+    for (const m of this.history) {
+      if (threadOf(m) !== thread) continue;
+      const files = m.sender === "user" ? userPieces(m, local) : herFiles(m.files ?? []);
+      const from = m.sender === "user" ? "toi" : "mika";
+      files.forEach((f, i) => {
+        if (!f.gone) out.push(this.shownFile(m, f, i, from));
+      });
+    }
+    return out;
+  }
+
+  /** Un fichier d'une bulle, dans la visionneuse ; ← et → mènent aux autres fichiers du fil. */
+  private openThreadFile(b: HTMLElement): void {
+    const list = this.threadFiles();
+    const at = list.findIndex((f) => f.key === `${b.dataset.mk}:${b.dataset.from}:${b.dataset.fi}`);
+    if (at < 0) return;
+    openViewer(list, at, {
+      blobs: this.blobs,
+      me: this.meAvatar(),
+      resolve: (f) => this.resolvePiece(f),
+      goTo: (f) => this.goToFile(f),
+    });
+  }
+
+  /** « Enregistrer » sous un fichier d'une bulle. */
+  private saveThreadFile(b: HTMLElement): void {
+    const f = this.threadFiles().find((x) => x.key === `${b.dataset.mk}:${b.dataset.from}:${b.dataset.fi}`);
+    if (!f?.src) return;
+    this.blobs
+      .load(f.src)
+      .then((blob) => saveBlob(blob, f.name))
+      .catch((err: unknown) => toast(err instanceof Error ? err.message : "Le fichier n'a pas pu être lu.", { ico: "alert" }));
+  }
+
+  /**
+   * Une pièce dont le fil n'a pas l'adresse (envoyée d'un autre appareil, ou avant d'avoir été gardée) : le serveur dit
+   * ce qu'il en est (`GET /api/moi/chat/fichiers?message=`), et le fil le retient.
+   */
+  private async resolvePiece(f: ViewerFile): Promise<ViewerFile | null> {
+    if (typeof f.message !== "number" || typeof f.index !== "number" || f.from !== "toi") return null;
+    let items;
+    try {
+      items = await messageFiles(f.message, this.viewThread);
+    } catch {
+      return null;
+    }
+    const msg = this.history.find((m) => m.id === f.message && m.sender === "user");
+    let changed = false;
+    for (const item of items) {
+      const a = item.from === "toi" ? msg?.attachments?.[item.index] : undefined;
+      if (!msg?.attachments || !a || a.name !== item.name) continue;
+      if (item.available && item.url && a.url !== item.url) {
+        msg.attachments[item.index] = { ...a, id: item.id, url: item.url, mime: item.mime, size: item.size, available: true };
+        changed = true;
+      } else if (!item.available && a.available !== false) {
+        msg.attachments[item.index] = { ...a, available: false };
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.persist();
+      this.paintThread();
+    }
+    const item = items.find((i) => i.from === "toi" && i.index === f.index);
+    return item ? { ...viewerFile(item), key: f.key } : null;
+  }
+
+  /** « Dans la conversation » : le message d'un fichier, au milieu du fil ; pas chargé, on remonte jusqu'à lui. */
+  private goToFile(f: ViewerFile): void {
+    closeModal();
+    if (typeof f.message !== "number") return;
+    const shown = this.history.find((m) => m.id === f.message);
+    if (shown) {
+      this.showMessage(shown);
+      return;
+    }
+    // un fil de travail se relit en entier à son ouverture : ce qui n'y est pas n'est plus là
+    if (this.viewThread !== "" || !this.moreOlder) {
+      toast("Ce message n'est plus dans la conversation chargée.", { ico: "info" });
+      return;
+    }
+    this.seeking = { id: f.message, pages: 0 };
+    if (this.shell.ctx?.screen !== "chat") this.shell.go("#chat");
+    if (!this.askOlder()) {
+      this.seeking = null;
+      return;
+    }
+    toast("Je remonte la conversation jusqu'à ce message…", { ico: "history" });
+  }
+
+  /** Une page plus ancienne est arrivée : le message cherché y est-il ? Sinon la suivante, jusqu'à une borne. */
+  private keepSeeking(): void {
+    const s = this.seeking;
+    if (!s) return;
+    const found = this.history.find((m) => m.id === s.id);
+    if (found) {
+      this.seeking = null;
+      this.showMessage(found);
+      return;
+    }
+    s.pages += 1;
+    if (!this.moreOlder || s.pages >= SEEK_MAX_PAGES) {
+      this.seeking = null;
+      toast("Ce message est trop loin dans la conversation pour être chargé ici.", { ico: "info" });
+      return;
+    }
+    if (!this.askOlder()) this.seeking = null;
+  }
+
   // ── La palette mène à un message (F1-05) ──────────────────────────
 
   /**
@@ -876,13 +1040,11 @@ export class ChatScreen {
 
   private mount(section: HTMLElement): void {
     on(section, "[data-older]", "click", () => this.askOlder());
+    on(section, "[data-file-open]", "click", (_e, b) => this.openThreadFile(b));
+    on(section, "[data-file-save]", "click", (_e, b) => this.saveThreadFile(b));
     on(section, "[data-head]", "click", (_e, b) => {
       if (b.dataset.head === "fichiers") {
-        const thread = this.viewThread;
-        openModal({
-          title: "Les fichiers échangés",
-          body: filesTable(this.history.filter((m) => threadOf(m) === thread), API_BASE, Date.now()),
-        });
+        openFilesPanel({ blobs: this.blobs, me: this.meAvatar(), strand: () => this.viewThread, goTo: (f) => this.goToFile(f) });
       }
       if (b.dataset.head === "chercher") {
         this.search = this.search === null ? "" : null;

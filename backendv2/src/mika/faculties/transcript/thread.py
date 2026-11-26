@@ -332,6 +332,30 @@ def strand_history(store: Any, handle: str, strand: str, before: int | None, lim
     return [dict(zip(_COLUMNS, r, strict=True)) for r in reversed(rows[:limit])], len(rows) > limit
 
 
+#: ce qu'un message qui porte des fichiers rend à ``with_files``
+_FILE_LINE = ("id", "at", "role", "attachments")
+
+
+def with_files(store: Any, handle: str, strand: str, limit: int, message: int | None = None) -> list[dict[str, Any]]:
+    """Les messages d'un fil qui portent quelque chose, du plus récent au plus ancien, ``limit`` au plus (ADR 0312) :
+    les pièces de la personne, ce qu'elle lui a envoyé (des fichiers, mais aussi ses petites bulles, ADR 0119, que
+    le lecteur écarte) — ``id``, ``at``, ``role``, ``attachments`` (le JSON de la ligne). Le même fil que
+    ``strand_history`` : ``strand`` vide, le fil avec elle sans ses fils de travail ; ``message`` : ce seul message.
+    Un message de la personne d'avant la séparation de ses pièces (``typed`` nul) n'en annonce aucune, comme à
+    l'écran."""
+    if store is None:
+        return []
+    t = c.thread_table()
+    thread = t.c.strand == strand if strand else t.c.strand.is_(None)
+    query = (select(*(t.c[n] for n in _FILE_LINE))
+             .where(t.c.person == handle, thread, t.c.attachments.is_not(None), t.c.attachments != "[]",
+                    (t.c.role == "assistant") | t.c.typed.is_not(None)))
+    if message is not None:
+        query = query.where(t.c.id == message)
+    query = query.order_by(t.c.id.desc()).limit(limit)
+    return [dict(zip(_FILE_LINE, r, strict=True)) for r in store.query_mind(query)]
+
+
 def strand_setting(store: Any, handle: str, strand: str) -> dict[str, Any] | None:
     """Le dernier réglage d'un fil de travail (titre, description, archivé) ; ``None`` : jamais réglé."""
     t = c.strands_table()
