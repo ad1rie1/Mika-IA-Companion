@@ -51,6 +51,7 @@ from mika.faculties.projects.faculty import (
     written,
 )
 from mika.faculties.projects.faculty import params as projects_params
+from mika.faculties.projects.framing_tools import PlanArgs, _read_problems, project_plan
 from mika.faculties.projects.inspect import READERS_TITLE, READS_TITLE
 from mika.faculties.projects.prompt import _link_refs, _links_section, _run_section, _share_section, _texts
 from mika.faculties.projects.steer import SteerArgs, project_steer
@@ -58,13 +59,10 @@ from mika.faculties.projects.tools import (
     CreateArgs,
     DecideArgs,
     NoteArgs,
-    PlanArgs,
     ReportArgs,
-    _read_problems,
     create_project,
     project_decide,
     project_note,
-    project_plan,
     report_run,
 )
 from mika.kernel.events import Content, Origin

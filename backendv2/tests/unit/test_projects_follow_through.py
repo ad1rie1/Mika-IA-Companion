@@ -34,6 +34,7 @@ from mika.faculties.projects.faculty import (
     frame_subject,
 )
 from mika.faculties.projects.faculty import params as projects_params
+from mika.faculties.projects.framing_tools import PlanArgs, PlanStep, project_plan
 from mika.faculties.projects.prompt import _refs, _run_section, job_brief, work_brief
 from mika.faculties.projects.rhythm import NEVER, due_at, pick
 from mika.faculties.projects.steer import SteerArgs, project_steer
@@ -41,12 +42,9 @@ from mika.faculties.projects.tend import finished_at, pause_reason, unframed
 from mika.faculties.projects.tools import (
     ConstantArg,
     ObjectiveArgs,
-    PlanArgs,
-    PlanStep,
     ReportArgs,
     StartArgs,
     _constants,
-    project_plan,
     report_run,
     start_project,
 )

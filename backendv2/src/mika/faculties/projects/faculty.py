@@ -141,7 +141,7 @@ ASAP, ON_DEMAND = "manual", "demand"
 OUTGOING_STALE = 30 * MINUTE
 #: ce qu'une exécution garde de ce que le réseau lui a rendu (une donnée, citée dans le prompt)
 NETWORK_OUT_KEPT = 2000
-#: ses capacités se déclarent sous ces noms complets (``atelier.py``, ``tools.py``), que le journal porte : ils ne
+#: ses capacités se déclarent sous ces noms complets (``atelier.py``, ``remote.py``), que le journal porte : ils ne
 #: changent pas. Pousser vers le dépôt distant, en récupérer l'histoire, lancer une commande avec le réseau
 PUSH_CAPABILITY, PULL_CAPABILITY = f"{c.OWNER}.push", f"{c.OWNER}.pull"
 NETWORKED_CAPABILITY = f"{c.OWNER}.networked"

@@ -18,8 +18,8 @@ agisse :
 - **ce qu'une relecture ou une pull request en cite** (``cited``) : chaque jalon avec comment il a été rempli, sa
   preuve et le commit de l'atelier — une fonction pure des textes qu'on lui donne (``refs`` dit lesquels lire).
 
-``tools.py`` (le plan, le compte rendu), ``tracker.py`` (le plan validé d'un ticket), ``prompt.py`` et
-``reaching.py`` (ses outils) le lisent ; il ne lit que ``faculty.py``.
+``framing_tools.py`` (le plan), ``tools.py`` (le compte rendu), ``tracker.py`` (le plan validé d'un ticket),
+``prompt.py`` et ``reaching.py`` (ses outils) le lisent ; il ne lit que ``faculty.py``.
 """
 
 from __future__ import annotations

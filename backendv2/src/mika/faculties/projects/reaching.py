@@ -20,6 +20,10 @@ Pendant une exécution qui vise un objectif ponctuel :
 
 Un objectif constant n'a pas de jalons : les deux outils s'y refusent.
 
+Un jalon tel qu'elle le pose dans son plan (``MilestoneArg``, que lit ``PlanStep`` dans ``framing_tools.py``) et
+pourquoi un jalon demandé est refusé, en mots (``bad_milestone``, que lisent le cadrage et ``project_milestones``) sont
+ici aussi.
+
 En conversation, **``project_milestone``** : le propriétaire du projet, ou qui s'occupe d'elle, valide ou refuse un
 point d'arrêt — la forme de la validation du plan d'un ticket (``tracker_tools.project_item``). L'outil n'est offert que
 devant qui peut piloter un projet vivant dont un point d'arrêt attend. La console fait le même geste
@@ -65,7 +69,6 @@ from mika.faculties.projects.tool_common import (
     running_project,
     speaker,
 )
-from mika.faculties.projects.tools import bad_milestone
 from mika.kernel.faculty import ToolResult
 from mika.kernel.frame import Frame
 from mika.kernel.text import clipped
@@ -119,6 +122,30 @@ def _found(o: Objective, number: int) -> Milestone | ToolResult:
 def _fresh(ctx: Any, p: Project, o: Objective) -> Objective | None:
     after = ctx.mind.frame().state("projects").projects.get(p.id)
     return objective_at(after, o.id) if after is not None else None
+
+
+# ── Un jalon tel qu'elle le pose, et pourquoi il est refusé ───────────────
+
+
+class MilestoneArg(BaseModel):
+    """Un jalon tel qu'elle le pose (ADR 0273) : son texte, et comment il se vérifiera."""
+
+    text: str = Field(min_length=1, max_length=milestones.TEXT_MAX, description=phrase("projects.tools.milestone.text"))
+    check: Literal["prose", "command", "owner", "item"] = Field(
+        default="prose", description=phrase("projects.tools.milestone.check"))
+    argv: list[str] = Field(default_factory=list, max_length=milestones.ARGV_MAX,
+                            description=phrase("projects.tools.milestone.argv"))
+    item_list: str = Field(default="", max_length=40, description=phrase("projects.tools.milestone.item_list"))
+    item: str = Field(default="", max_length=61, description=phrase("projects.tools.milestone.item"))
+    item_status: str = Field(default="", max_length=24, description=phrase("projects.tools.milestone.item_status"))
+
+    def spec(self) -> milestones.Spec:
+        return milestones.Spec(self.text, self.check, tuple(self.argv), self.item_list, self.item, self.item_status)
+
+
+def bad_milestone(why: str) -> str:
+    """Pourquoi un jalon demandé est refusé, en mots (``milestones.problem``)."""
+    return family("projects.milestones.refused")[why]
 
 
 # ── Poser, réviser, retirer ───────────────────────────────────────────────

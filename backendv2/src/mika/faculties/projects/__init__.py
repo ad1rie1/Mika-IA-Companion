@@ -9,6 +9,7 @@ from mika.faculties.projects import (  # noqa: F401 — contributions
     demands,
     docs,
     docs_tools,
+    framing_tools,
     inspect,
     inspect_access,
     inspect_docs,

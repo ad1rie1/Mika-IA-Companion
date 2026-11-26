@@ -40,17 +40,16 @@ from mika.faculties.projects.faculty import (
     subjects_of,
     written,
 )
+from mika.faculties.projects.framing_tools import PlanArgs, project_plan
 from mika.faculties.projects.prompt import _live_section, _share_section, _texts
 from mika.faculties.projects.tools import (
     DecideArgs,
     NoteArgs,
     ObjectiveArgs,
-    PlanArgs,
     ReportArgs,
     project_decide,
     project_note,
     project_objective_add,
-    project_plan,
     report_run,
 )
 from mika.faculties.shares.tools import may_share

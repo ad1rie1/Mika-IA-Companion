@@ -70,8 +70,8 @@ from mika.faculties.projects.faculty import (
     review_of,
     written_for,
 )
+from mika.faculties.projects.remote import propose_push
 from mika.faculties.projects.tool_common import RUNS
-from mika.faculties.projects.tools import propose_push
 from mika.kernel.clock import MINUTE
 from mika.kernel.events import Content, Draft
 from mika.kernel.faculty import CatchUp, ToolResult, Zone
@@ -164,7 +164,7 @@ class Reviews:
 
 
 def aim_of(plan: str) -> str:
-    """Le but d'un plan : sa première ligne (``tools.plan_text`` l'écrit d'abord) — pas son approche, que
+    """Le but d'un plan : sa première ligne (``framing_tools.plan_text`` l'écrit d'abord) — pas son approche, que
     l'exécution qui a travaillé a pu suivre ou non : la relecture juge ce qui est demandé."""
     return plan.strip().split("\n", 1)[0].strip()
 

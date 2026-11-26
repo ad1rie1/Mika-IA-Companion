@@ -81,16 +81,9 @@ from mika.faculties.projects.faculty import (
 )
 from mika.faculties.projects.inspect_pulls import BASE_KEPT, BASE_PULL
 from mika.faculties.projects.inspect_reviews import review_line
+from mika.faculties.projects.remote import pending_push, pinned, propose_push, push_branch, push_summary
 from mika.faculties.projects.tool_common import gone_reply, running_project
-from mika.faculties.projects.tools import (
-    CONFLICTS_SHOWN,
-    TAKE_BASE,
-    pending_push,
-    pinned,
-    propose_push,
-    push_branch,
-    push_summary,
-)
+from mika.faculties.projects.tools import CONFLICTS_SHOWN, TAKE_BASE
 from mika.kernel.clock import MINUTE
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp, ToolResult

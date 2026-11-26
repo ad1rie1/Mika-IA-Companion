@@ -3,8 +3,10 @@
 Pendant une exécution (``WORK`` ou ``JOB``) : ``report_run`` (le verdict, qui la
 clôt), ``project_note`` (son carnet), ``project_decide`` (une décision
 technique, qui peut en remplacer une autre), ``project_objective_add`` (un
-objectif de plus), ``project_plan`` (son plan : ce qui conclut une séance de
-cadrage, ou le revoir en cours de route — ADR 0145). En conversation :
+objectif de plus). Son plan (``project_plan`` : ce qui conclut une séance de
+cadrage, ou le revoir en cours de route — ADR 0145) vit dans
+``framing_tools.py`` ; l'envoi au dépôt distant (``propose_push``), dans
+``remote.py``. En conversation :
 ``create_project`` (un projet qu'on lui
 confie — seulement quelqu'un qui s'occupe d'elle), ``start_project`` (un
 projet à elle — aussi pendant une exploration qui s'avère plus grosse qu'une
@@ -14,14 +16,14 @@ maintenant, la pause, la reprise — jamais son cadre) vit dans ``steer.py``,
 qui lit les aides d'ici (``their_words``…) et celles que partagent les outils (``tool_common.py`` : ``speaker``,
 ``contents_of``…).
 
-**Ce qu'un projet lit des autres** (ADR 0257) se demande ici de deux façons :
+**Ce qu'un projet lit des autres** (ADR 0257) se demande de deux façons :
 ``create_project`` le pose d'emblée (``reads`` : qui le confie en est le
-propriétaire), et ``project_plan`` le demande (``reads``) — le lien se pose
+propriétaire), et ``project_plan`` (``framing_tools.py``) le demande (``reads``) — le lien se pose
 alors quand le propriétaire du projet valide le plan. Les règles sont dans
 ``links.py``.
 
 **Ce qui déclenche un objectif constant** (ADR 0265) se donne avec lui :
-``project_plan`` (ses étapes), ``project_objective_add``, ``create_project`` et
+``project_plan`` (ses étapes, ``framing_tools.py``), ``project_objective_add``, ``create_project`` et
 ``start_project`` (leurs constants) prennent ``on`` et ``only_on_event``,
 vérifiés avant d'écrire (``triggers.accepted``) ; un refus dit pourquoi
 (``bad_trigger``), un ajout dit ce qui le déclenche (``triggers_said``).
@@ -37,12 +39,12 @@ un seul verdict).
 requests, ``report_run`` replace l'atelier sur la branche de ce que l'exécution
 vise avant d'enregistrer (``Workshop.work_on`` — l'enrichisseur ``projects_tree``
 l'y a déjà placé au départ), n'enregistre jamais sur la base, et dit sa branche
-dans le compte rendu. L'envoi automatique pousse cette branche, jamais la base ;
+dans le compte rendu. L'envoi automatique (``remote.propose_push``) pousse cette branche, jamais la base ;
 la pull request se propose ensuite d'elle-même (``pulls.py``).
 
 **« Fait » attend ses jalons** (ADR 0273) : tant qu'un jalon de l'objectif visé
 reste ouvert, ``report_run`` refuse « done » en disant lequel, avant tout commit.
-Le plan pose les jalons grossiers de chaque étape (``PlanStep.milestones``) et
+Le plan pose les jalons grossiers de chaque étape (``framing_tools.PlanStep.milestones``) et
 la liste de passage d'un constant (``each_pass``) ; leurs règles sont dans
 ``milestones.py``, les outils qui les tiennent pendant une exécution dans
 ``reaching.py``.
@@ -50,7 +52,6 @@ la liste de passage d'un constant (``each_pass``) ; leurs règles sont dans
 
 from __future__ import annotations
 
-import json
 from collections.abc import Awaitable, Callable, Collection, Iterable
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -61,7 +62,6 @@ from sqlalchemy import select
 from mika.contracts import goals as goals_c
 from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
-from mika.contracts import runtime as rt
 from mika.contracts import transcript as transcript_c
 from mika.faculties.projects import links, milestones, triggers
 from mika.faculties.projects.faculty import (
@@ -73,14 +73,9 @@ from mika.faculties.projects.faculty import (
     LINKS_SET,
     NOTED,
     OBJECTIVE_ADDED,
-    OBJECTIVE_CHANGED,
     OBJECTIVES_KEPT,
-    PLAN_PROPOSED,
     PROJECTS,
-    PUSH_CAPABILITY,
     REFRAMED,
-    ROUTINE_LINE_MAX,
-    ROUTINE_LINES,
     SELF_BUNDLES,
     Constant,
     Objective,
@@ -95,19 +90,16 @@ from mika.faculties.projects.faculty import (
     inherited_for,
     live,
     living,
-    milestones_of,
-    objective_at,
     objectives_of,
     open_milestones,
     opened,
     params,
-    push_reviewed,
     rereads,
-    subjects_of,
     ticket_held,
     written,
     written_for,
 )
+from mika.faculties.projects.remote import propose_push
 from mika.faculties.projects.rhythm import cadence
 from mika.faculties.projects.tool_common import (
     RUNS,
@@ -122,8 +114,7 @@ from mika.kernel.events import Content, Draft
 from mika.kernel.faculty import ToolResult, proving_tools
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard, Superseded
-from mika.ports.workshop import BASE_BRANCH
-from mika.vocab.episodes import Kind, goal_of, goal_target, project_of, project_target
+from mika.vocab.episodes import Kind, goal_of, goal_target
 from mika.vocab.phrasebook import family, phrase
 from mika.vocab.privacy import Sensitivity
 from mika.vocab.words import stems
@@ -489,62 +480,6 @@ def closing(ctx: Any, p: Project, o: Objective, status: str, result: str, notabl
         else 0.0, owner=p.owner, about=p.about, read_about=inherited_for(p, o), sensitivity=level)
 
 
-async def pinned(port: Any, project: int) -> tuple[str, str]:
-    """Le commit courant de l'atelier et son titre : ce qu'un envoi approuvé enverra, et rien d'autre."""
-    sha = await port.head(project) if port is not None and port.exists(project) else ""
-    commits = await port.commits(project, 1) if sha else []
-    return sha, commits[0].title if commits else ""
-
-
-def push_summary(p: Project, sha: str, title: str, why: str, branch: str = "") -> str:
-    return (f"Pousser le commit {sha[:12]} (« {title[:120]} ») vers {p.remote}, branche {branch or p.branch} — "
-            f"{why}")[:600]
-
-
-async def push_branch(port: Any, p: Project, branch: str = "") -> str:
-    """La branche du dépôt distant qu'un envoi de ce projet vise : la sienne (``Project.branch``) ; sur un projet qui
-    passe par des pull requests (ADR 0274), la branche de travail où l'atelier se trouve (``branch`` : celle qu'on
-    sait déjà) — et rien (``""``) s'il est sur sa base : elle ne se pousse pas."""
-    if not by_pulls(p):
-        return p.branch
-    current = branch or (await port.branch(p.id) if port is not None and port.exists(p.id) else "")
-    return "" if not current or current in (BASE_BRANCH, p.branch) else current
-
-
-def pending_push(frame: Frame, project: int) -> bool:
-    """Un envoi de ce projet attend-il déjà un accord ?"""
-    return any(v.capability == PUSH_CAPABILITY and project_of(v.context) == project
-               for v in frame.get(rt.PENDING_EFFECTS))
-
-
-async def propose_push(ctx: Any, p: Project, why: str, *, branch: str = "", reviewed: str = "") -> str:
-    """Proposer d'envoyer l'atelier au dépôt distant (exécuté tout de suite ou après accord, selon le projet) :
-    le commit est épinglé au moment de proposer — l'accord vaut pour ce qui a été montré, pas pour ce que
-    l'atelier deviendra d'ici là. Un seul envoi attend un accord à la fois : les suivants le suivront (rien ne
-    s'empile). Sur un projet qui passe par des pull requests, c'est sa branche de travail qui part (``branch`` :
-    celle de l'exécution), jamais sa base (ADR 0274). Sur un projet qui demande une relecture (ADR 0276), rien ne
-    part d'elle-même sans verdict favorable pour ce commit-là, au flux direct comme pour une branche de travail
-    (ADR 0277 ; ``reviewed`` : le commit que la relecture qui propose vient de dire bon). Rend ``proposed``, ``sent``, ``pending`` (un envoi attend déjà),
-    ``nothing``, ``base`` (l'atelier est sur sa base : rien ne s'y pousse) ou ``unreviewed``."""
-    if p.approval and pending_push(ctx.frame, p.id):
-        return "pending"
-    port = ctx.ports.get("workshop")
-    target = await push_branch(port, p, branch)
-    if not target:
-        return "base"
-    sha, title = await pinned(port, p.id)
-    if not sha:
-        return "nothing"
-    if sha != reviewed and not push_reviewed(p, sha):
-        return "unreviewed"
-    await ctx.propose(rt.EFFECT_PROPOSED.draft(
-        capability=PUSH_CAPABILITY, owner=PROJECTS.name, context=project_target(p.id), approval=p.approval,
-        args_json=json.dumps({"project": p.id, "url": p.remote, "branch": target, "sha": sha}),
-        # ses raisons sont ses mots, écrits pendant une exécution : au niveau de ce qu'elle y lit (ADR 0262)
-        summary=Content.of(push_summary(p, sha, title, why, target), level=written(p)), about=subjects_of(p)))
-    return "proposed" if p.approval else "sent"
-
-
 class NoteArgs(BaseModel):
     text: str = Field(min_length=1, max_length=2000, description=phrase("projects.tools.note.text"))
 
@@ -635,230 +570,6 @@ async def project_objective_add(args: ObjectiveArgs, ctx: Any) -> Any:
     kind = phrase("projects.tools.objective_add.constant") if args.kind == c.CONSTANT else \
         phrase("projects.tools.objective_add.once")
     return phrase("projects.tools.objective_add.done", id=number, kind=kind) + triggers_said(on, args.only_on_event)
-
-
-PLAN_TOOL = "project_plan"
-#: les étapes d'un plan, ses questions, au plus
-PLAN_STEPS, PLAN_QUESTIONS = 12, 3
-
-
-class MilestoneArg(BaseModel):
-    """Un jalon tel qu'elle le pose (ADR 0273) : son texte, et comment il se vérifiera."""
-
-    text: str = Field(min_length=1, max_length=milestones.TEXT_MAX, description=phrase("projects.tools.milestone.text"))
-    check: Literal["prose", "command", "owner", "item"] = Field(
-        default="prose", description=phrase("projects.tools.milestone.check"))
-    argv: list[str] = Field(default_factory=list, max_length=milestones.ARGV_MAX,
-                            description=phrase("projects.tools.milestone.argv"))
-    item_list: str = Field(default="", max_length=40, description=phrase("projects.tools.milestone.item_list"))
-    item: str = Field(default="", max_length=61, description=phrase("projects.tools.milestone.item"))
-    item_status: str = Field(default="", max_length=24, description=phrase("projects.tools.milestone.item_status"))
-
-    def spec(self) -> milestones.Spec:
-        return milestones.Spec(self.text, self.check, tuple(self.argv), self.item_list, self.item, self.item_status)
-
-
-def bad_milestone(why: str) -> str:
-    """Pourquoi un jalon demandé est refusé, en mots (``milestones.problem``)."""
-    return family("projects.milestones.refused")[why]
-
-
-class PlanStep(BaseModel):
-    """Une étape de son plan : un objectif, gardé (``keep``), réécrit ou nouveau."""
-
-    text: str = Field(min_length=1, max_length=500, description=phrase("projects.tools.plan.step_text"))
-    done_when: str = Field(default="", max_length=500, description=phrase("projects.tools.plan.done_when"))
-    kind: Literal["once", "constant"] = Field(default="once", description=phrase("projects.tools.objective_add.kind"))
-    cadence_hours: int = Field(default=0, ge=0, le=24 * 30,
-                               description=phrase("projects.tools.constant.cadence_hours"))
-    after: int = Field(default=0, ge=0, le=PLAN_STEPS, description=phrase("projects.tools.plan.after"))
-    keep: int = Field(default=0, ge=0, description=phrase("projects.tools.plan.keep"))
-    #: un constant : ce qui le déclenche en plus de sa cadence, et s'il n'a aucune cadence (ADR 0265)
-    on: list[str] = Field(default_factory=list, max_length=triggers.TRIGGERS_MAX,
-                          description=phrase("projects.tools.trigger.declared"))
-    only_on_event: bool = Field(default=False, description=phrase("projects.tools.trigger.only_on_event"))
-    #: un constant : son premier passage vient tout de suite, pas une cadence après (ADR 0280)
-    at_once: bool = Field(default=False, description=phrase("projects.tools.constant.at_once"))
-    #: un ponctuel : ses jalons grossiers, que sa première exécution affinera ; un constant : ce que chaque passage
-    #: doit faire (ADR 0273)
-    milestones: list[MilestoneArg] = Field(default_factory=list, max_length=c.MILESTONES_MAX,
-                                           description=phrase("projects.tools.plan.milestones"))
-    each_pass: list[str] = Field(default_factory=list, max_length=ROUTINE_LINES,
-                                 description=phrase("projects.tools.plan.each_pass"))
-
-
-class PlanQuestion(BaseModel):
-    question: str = Field(min_length=1, max_length=400, description=phrase("projects.tools.plan.question"))
-    advice: str = Field(min_length=1, max_length=400, description=phrase("projects.tools.plan.advice"))
-
-
-class PlanArgs(BaseModel):
-    aim: str = Field(min_length=1, max_length=600, description=phrase("projects.tools.plan.aim"))
-    deliverables: str = Field(min_length=1, max_length=1200, description=phrase("projects.tools.plan.deliverables"))
-    approach: str = Field(min_length=1, max_length=2500, description=phrase("projects.tools.plan.approach"))
-    out_of_scope: str = Field(default="", max_length=800, description=phrase("projects.tools.plan.out_of_scope"))
-    steps: list[PlanStep] = Field(min_length=1, max_length=PLAN_STEPS, description=phrase("projects.tools.plan.steps"))
-    questions: list[PlanQuestion] = Field(default_factory=list, max_length=PLAN_QUESTIONS,
-                                          description=phrase("projects.tools.plan.questions"))
-    tell: bool = Field(default=False, description=phrase("projects.tools.plan.tell"))
-    #: les projets que ce plan demande à lire (ADR 0257) : le lien se pose quand le propriétaire le valide
-    reads: list[int] = Field(default_factory=list, max_length=LINKS_MAX,
-                             description=phrase("projects.tools.plan.reads"))
-
-
-def plan_text(args: PlanArgs) -> str:
-    """Son plan en clair, tel qu'il se relit (exécutions, récit, console)."""
-    lines = [phrase("projects.plan.aim", text=args.aim.strip()),
-             phrase("projects.plan.deliverables", text=args.deliverables.strip()),
-             phrase("projects.plan.approach", text=args.approach.strip())]
-    if args.out_of_scope.strip():
-        lines.append(phrase("projects.plan.out_of_scope", text=args.out_of_scope.strip()))
-    return "\n".join(lines)
-
-
-def questions_text(args: PlanArgs) -> str:
-    return "\n".join(phrase("projects.plan.question", n=i, question=q.question.strip(), advice=q.advice.strip())
-                     for i, q in enumerate(args.questions, start=1))
-
-
-def _plan_problems(p: Project, steps: list[PlanStep], reads: Collection[int] | None = None) -> list[str]:
-    """Ce qui ne va pas dans ses étapes, en mots (rien : il s'écrit). ``reads`` : les projets qu'un déclencheur peut
-    nommer (ADR 0265) — ceux que le projet lit, et ceux que ce plan demande à lire ; ``None`` : ses liens."""
-    alive = {o.id for o in p.objectives if o.status in (c.OPEN, c.BLOCKED)}
-    problems: list[str] = []
-    kept: set[int] = set()
-    for i, step in enumerate(steps, start=1):
-        if step.kind == c.ONCE and not step.done_when.strip():
-            problems.append(phrase("projects.tools.plan.no_criterion", n=i))
-        if step.after and step.after >= i:
-            problems.append(phrase("projects.tools.plan.bad_after", n=i))
-        if step.keep and (step.keep not in alive or step.keep in kept):
-            problems.append(phrase("projects.tools.plan.bad_keep", n=i, id=step.keep))
-        kept.add(step.keep)
-        # ses jalons (ADR 0273) : un ponctuel seulement ; un constant a sa liste de passage, et lui seul
-        if step.kind == c.CONSTANT and step.milestones:
-            problems.append(phrase("projects.tools.plan.constant_milestones", n=i))
-        if step.kind == c.ONCE and any(x.strip() for x in step.each_pass):
-            problems.append(phrase("projects.tools.plan.once_each_pass", n=i))
-        for j, asked in enumerate(step.milestones if step.kind == c.ONCE else (), start=1):
-            if why := milestones.problem(asked.spec()):
-                problems.append(phrase("projects.tools.plan.bad_milestone", n=i, m=j, why=bad_milestone(why)))
-        try:
-            triggers.accepted(p.id, p.reads if reads is None else reads, step.kind == c.CONSTANT, step.on,
-                              step.only_on_event)
-        except triggers.BadTrigger as exc:
-            problems.append(phrase("projects.tools.plan.bad_trigger", n=i, text=exc.text,
-                                   why=family("projects.triggers.refused")[exc.why]))
-    return problems
-
-
-def _read_problems(s: ProjectsState, p: Project, wanted: tuple[int, ...], world: links.World) -> list[str]:
-    """Ce que son plan ne peut pas demander à lire, en mots (ADR 0257) : un projet que le sien ne peut pas lire
-    (``links.refusal``), ou que la personne qui a demandé le projet ne peut pas voir — son plan le nommerait
-    devant elle."""
-    _, refused = links.chosen(s, p, (*p.reads, *wanted), world)
-    why = dict(refused)
-    askable = {t.id for t in links.askable(s, p, world)}
-    words = family("projects.links.refused")
-    problems = []
-    for target in wanted:
-        reason = why.get(target) or ("" if target in p.reads or target in askable else links.HIDDEN)
-        if reason:
-            problems.append(phrase("projects.tools.plan.bad_read", id=target, why=words[reason]))
-    return problems
-
-
-@PROJECTS.tool(PLAN_TOOL, acts=True, description=phrase("projects.tools.plan.description"),
-               label=phrase("projects.tools.plan.label"), args=PlanArgs,
-               bundle="projects", episodes=RUNS, max_calls_per_episode=2)
-async def project_plan(args: PlanArgs, ctx: Any) -> Any:
-    """Écrire son plan (une séance de cadrage), ou le revoir en cours de route (ADR 0145) : ses objectifs vivants
-    deviennent ceux du plan — gardés, réécrits ou nouveaux, dans son ordre, chacun avec son critère et ce dont il
-    dépend ; ceux qu'il ne garde pas sont retirés (sauf une réparation d'app). Un plan qui pose des questions sur un
-    projet qu'on lui a demandé attend sa réponse ; sinon il vaut d'office. Ce qu'il demande à lire (``reads``, ADR
-    0257) attend de même, quand qui répondra au plan en est le propriétaire : le lien se pose à sa validation."""
-    got = running_project(ctx)
-    if got is None:
-        return gone_reply()
-    p, _ = got
-    s: ProjectsState = ctx.frame.state("projects")
-    world = links.world_of(ctx.frame)
-    wanted = tuple(dict.fromkeys(args.reads))
-    # un déclencheur peut nommer un projet que ce plan demande à lire : il ne déclenchera qu'une fois le lien posé
-    problems = [*_plan_problems(p, args.steps, {*p.reads, *wanted}), *_read_problems(s, p, wanted, world)]
-    if problems:
-        return ToolResult(ok=False, content=phrase("projects.tools.plan.refused", problems="\n".join(problems)))
-    kept = {s.keep for s in args.steps if s.keep}
-    dropped = [o for o in p.objectives if o.status in (c.OPEN, c.BLOCKED) and o.id not in kept and not o.app]
-    if living(p) - len(dropped) + sum(1 for s in args.steps if not s.keep) > OBJECTIVES_KEPT:
-        return ToolResult(ok=False, content=phrase("projects.tools.objective_add.full", count=OBJECTIVES_KEPT))
-    # son plan nomme les projets qu'il demande à lire avant tout lien : il s'écrit au niveau le plus haut parmi le
-    # sien et les leurs, et l'oubli d'une de leurs personnes l'atteint aussi (ADR 0262)
-    named = [s.projects[t] for t in wanted if t in s.projects]
-    level = max([written(p), *(written(t) for t in named)])
-    inherited = tuple(dict.fromkeys((*p.read_about, *(x for t in named for x in subjects_of(t)))))
-    who: dict[str, Any] = {"owner": p.owner, "about": p.about, "read_about": inherited}
-    ids, number = [], p.objective_seq
-    for step in args.steps:
-        if step.keep:
-            ids.append(step.keep)
-        else:
-            number += 1
-            ids.append(number)
-    drafts: list[Draft[Any]] = [OBJECTIVE_CHANGED.draft(
-        project=p.id, objective=o.id, status=c.DROPPED, note=Content.of(phrase("projects.tools.plan.dropped"),
-                                                                         level=level), **who) for o in dropped]
-    for i, (step, oid) in enumerate(zip(args.steps, ids, strict=True), start=1):
-        text = Content.of(step.text.strip(), level=level)
-        done_when = Content.of(step.done_when.strip(), level=level) if step.done_when.strip() else None
-        every = step.cadence_hours * HOUR if step.kind == c.CONSTANT else 0
-        after = ids[step.after - 1] if step.after else 0
-        # ce qui le déclenche (ADR 0265), déjà vérifié : une étape gardée le redit, comme sa cadence
-        on = triggers.kept(step.on) if step.kind == c.CONSTANT else ()
-        only = step.only_on_event and bool(on)
-        first = step.at_once and step.kind == c.CONSTANT
-        # un constant : ce que chaque passage doit faire (ADR 0273) ; une étape gardée qui n'en dit rien garde la sienne
-        each = milestones.routine_text(x[:ROUTINE_LINE_MAX] for x in step.each_pass) if step.kind == c.CONSTANT else ""
-        routine = Content.of(each, level=level) if each else None
-        specs = [m.spec() for m in step.milestones] if step.kind == c.ONCE else []
-        if step.keep:
-            old = objective_at(p, oid)
-            reopened = c.OPEN if old is not None and old.status == c.BLOCKED else None  # un plan neuf, une chance neuve
-            drafts.append(OBJECTIVE_CHANGED.draft(project=p.id, objective=oid, status=reopened, text=text,
-                                                  kind=step.kind, cadence_us=every, done_when=done_when, after=after,
-                                                  rank=i, on=on, only_on_event=only, routine=routine,
-                                                  at_once=first, **who))
-            # une étape gardée qui a déjà ses jalons les garde : ils se révisent un à un (project_milestones), avec
-            # leur raison — un plan revu ne les réécrit pas en bloc
-            if old is not None and not milestones_of(old):
-                drafts += milestones.posed(p, oid, specs, level=level, inherited=inherited, after=old.milestone_seq)
-        else:
-            drafts.append(OBJECTIVE_ADDED.draft(project=p.id, objective=oid, text=text, kind=step.kind,
-                                                cadence_us=every, done_when=done_when, after=after, rank=i,
-                                                author="self", on=on, only_on_event=only, routine=routine,
-                                                at_once=first, **who))
-            drafts += milestones.posed(p, oid, specs, level=level, inherited=inherited)
-    framing_now = p.plan_state in (c.TO_FRAME, c.PROPOSED)
-    asked = bool(p.asked_by)
-    # ce qu'il demande à lire de nouveau attend, comme une question, quand qui répondra peut poser le lien
-    new_links = tuple(t for t in wanted if t not in p.reads)
-    linking = bool(new_links) and links.may_link(p, p.asked_by or "", world)
-    approved = not framing_now or not asked or not (args.questions or linking)
-    tell = asked if framing_now else args.tell
-    questions = questions_text(args)
-    drafts.append(PLAN_PROPOSED.draft(project=p.id, plan=Content.of(plan_text(args), level=level),
-                                      questions=Content.of(questions, level=level) if questions else None,
-                                      approved=approved, tell=tell, reads=wanted, **who))
-    await ctx.emit(*drafts)
-    # ce qu'il demande à lire : lié à la validation de son propriétaire, sinon à poser dans la console
-    reading = "" if not new_links else phrase("projects.tools.plan.reads_wait") if linking and not approved \
-        else phrase("projects.tools.plan.reads_later")
-    if not framing_now:
-        return phrase("projects.tools.plan.revised", steps=len(args.steps), dropped=len(dropped)) + reading
-    # le plan conclut sa séance de cadrage : la boucle s'arrête là (ADR 0161)
-    if not approved:
-        return ToolResult(content=phrase("projects.tools.plan.waits", steps=len(args.steps)) + reading, ends=True)
-    return ToolResult(content=phrase("projects.tools.plan.starts", steps=len(args.steps)) + reading, ends=True)
 
 
 class EquipArgs(BaseModel):

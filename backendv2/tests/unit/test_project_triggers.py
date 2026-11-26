@@ -65,6 +65,7 @@ from mika.faculties.projects.faculty import (
     wake_aim,
 )
 from mika.faculties.projects.faculty import params as projects_params
+from mika.faculties.projects.framing_tools import PlanArgs, _plan_problems
 from mika.faculties.projects.prompt import _objective_line, _stirs_section, _texts
 from mika.faculties.projects.rhythm import NEVER, due_at, next_due, pick, stirred_due
 from mika.faculties.projects.tend import stirs_of
@@ -72,10 +73,8 @@ from mika.faculties.projects.tools import (
     ConstantArg,
     CreateArgs,
     ObjectiveArgs,
-    PlanArgs,
     ReportArgs,
     _constants,
-    _plan_problems,
     bad_trigger,
     project_objective_add,
     report_run,
