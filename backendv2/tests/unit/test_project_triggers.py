@@ -31,7 +31,6 @@ from mika.contracts import runtime as rt
 from mika.contracts import wakeup as wakeup_c
 from mika.faculties.projects import triggers
 from mika.faculties.projects.faculty import (
-    BASE_SEEN,
     HEARD_KEPT,
     LINKS_SET,
     OBJECTIVE_ADDED,
@@ -46,7 +45,6 @@ from mika.faculties.projects.faculty import (
     Run,
     Stir,
     _app_signaled,
-    _base_seen,
     _ended,
     _executed,
     _links_set,
@@ -67,6 +65,7 @@ from mika.faculties.projects.faculty import (
 from mika.faculties.projects.faculty import params as projects_params
 from mika.faculties.projects.framing_tools import PlanArgs, _plan_problems
 from mika.faculties.projects.prompt import _objective_line, _stirs_section, _texts
+from mika.faculties.projects.pulls import BASE_SEEN, _base_seen
 from mika.faculties.projects.rhythm import NEVER, due_at, next_due, pick, stirred_due
 from mika.faculties.projects.tend import stirs_of
 from mika.faculties.projects.tools import (

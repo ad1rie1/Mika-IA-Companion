@@ -21,7 +21,8 @@ from mika.app.domains.projects.api import reach
 from mika.contracts import projects as c
 from mika.contracts import self_ as self_c
 from mika.faculties.projects import tickets, tracker
-from mika.faculties.projects.faculty import ACCESS_SET, BASE_SEEN, LINKS_SET, NOTED
+from mika.faculties.projects.faculty import ACCESS_SET, LINKS_SET, NOTED
+from mika.faculties.projects.pulls import BASE_SEEN
 from mika.kernel.events import Content
 from mika.vocab.access import STEER_NO
 from tests.protocol.test_moi_mail import API, append, journal, login, post

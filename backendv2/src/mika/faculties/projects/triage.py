@@ -31,13 +31,11 @@ from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.faculties.projects import tickets, tools, tracker, triggers
 from mika.faculties.projects.faculty import (
-    CHECKS_SEEN,
     OBJECTIVE_ADDED,
     OBJECTIVE_CHANGED,
     OBJECTIVES_KEPT,
     PLAN_ANSWERED,
     PROJECTS,
-    PULL_SEEN,
     REFRAMED,
     RESUMED,
     REVIEWED,
@@ -54,6 +52,7 @@ from mika.faculties.projects.faculty import (
     unreviewed,
     written,
 )
+from mika.faculties.projects.pulls import CHECKS_SEEN, PULL_SEEN
 from mika.faculties.projects.rhythm import framing
 from mika.faculties.projects.tool_common import RUNS, caretaker, gone_reply, running_project
 from mika.kernel.clock import MINUTE

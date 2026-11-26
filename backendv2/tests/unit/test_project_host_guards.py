@@ -21,21 +21,18 @@ from types import SimpleNamespace
 from mika.contracts import projects as c
 from mika.faculties.projects import issues, pulls, tracker
 from mika.faculties.projects.faculty import (
-    CHECKS_SEEN,
     ISSUE_CAPABILITY,
     MOVE_CLOSE,
     MOVE_NOTE,
     MOVE_PUBLISH,
-    PULL_SEEN,
     Board,
     Item,
     Objective,
     Project,
-    _checks_seen,
-    _pull_seen,
     written,
 )
 from mika.faculties.projects.issues import PublishArgs, ticket_publish
+from mika.faculties.projects.pulls import CHECKS_SEEN, PULL_SEEN, _checks_seen, _pull_seen
 from mika.faculties.projects.tracker import ITEM_ADDED, ITEM_NOTED
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.events import Content

@@ -19,7 +19,6 @@ from mika.faculties.projects.faculty import (
     ACCESS_SET,
     NOTED,
     PULL_OPEN,
-    PULL_SEEN,
     REFRAMED,
     detail_level,
     frame_subject,
@@ -27,6 +26,7 @@ from mika.faculties.projects.faculty import (
     subject_of,
 )
 from mika.faculties.projects.milestones import MILESTONE_CHANGED
+from mika.faculties.projects.pulls import PULL_SEEN
 from mika.kernel.events import Content, Origin
 from mika.vocab.access import PERSON
 from mika.vocab.episodes import Kind, Outcome, project_target

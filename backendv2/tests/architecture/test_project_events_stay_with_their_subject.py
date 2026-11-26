@@ -25,10 +25,10 @@ ITSELF = frozenset({
 })
 
 #: les sous-sujets nés avant la règle, encore dans ``faculty.py`` : chacun en sort quand on y touche, et sa ligne
-#: s'efface alors d'ici (les jalons et les décisions techniques l'ont fait : ``milestones.py``, ``decisions.py``)
+#: s'efface alors d'ici (les jalons, les décisions techniques, les pull requests et leur CI l'ont fait :
+#: ``milestones.py``, ``decisions.py``, ``pulls.py``)
 BORN_BEFORE = {
-    "les pull requests, la CI et la fusion (pulls.py, merge.py)": frozenset({
-        "pull_seen", "checks_seen", "base_seen", "merge_asked", "merge_answered"}),
+    "la fusion (merge.py)": frozenset({"merge_asked", "merge_answered"}),
     "les issues (issues.py)": frozenset({"issue_asked"}),
     "la relecture (review.py)": frozenset({"review_asked", "reviewed"}),
 }
@@ -67,4 +67,5 @@ def test_a_subject_out_of_faculty_declares_its_own_events():
     assert declared("docs.py") >= {"doc_written", "doc_moved", "doc_removed"}
     assert declared("milestones.py") >= {"milestone_added", "milestone_changed"}
     assert declared("decisions.py") >= {"decided", "decision_changed", "decision_revised"}
+    assert declared("pulls.py") >= {"pull_seen", "checks_seen", "base_seen"}
     assert declared("merge.py") >= {"pull_write_asked", "pull_write_answered"}

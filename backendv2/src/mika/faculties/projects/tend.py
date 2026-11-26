@@ -53,7 +53,6 @@ from mika.faculties.projects.faculty import (
     OBJECTIVES_KEPT,
     PAUSED,
     PROJECTS,
-    PULL_SEEN,
     REMOTE_REQUESTED,
     STIRRED,
     Heard,
@@ -69,6 +68,7 @@ from mika.faculties.projects.faculty import (
     stuck_asking,
     written,
 )
+from mika.faculties.projects.pulls import PULL_SEEN
 from mika.faculties.projects.tools import closing
 from mika.faculties.projects.tracker import MOVES
 from mika.kernel.clock import MINUTE

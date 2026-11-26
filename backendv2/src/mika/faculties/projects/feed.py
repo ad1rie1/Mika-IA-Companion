@@ -18,7 +18,7 @@ from collections.abc import Callable, Mapping
 from typing import Any, Protocol
 
 from mika.contracts import projects as c
-from mika.faculties.projects import decisions, merge, milestones, tracker
+from mika.faculties.projects import decisions, merge, milestones, pulls, tracker
 from mika.faculties.projects import faculty as f
 from mika.faculties.projects.inspect_merge import WRITE_WORDS
 from mika.faculties.projects.inspect_words import CHECKS_FR, PULL_FR, VERDICT_FR
@@ -36,7 +36,7 @@ PEOPLE = ("operator", "owner", c.BY_OPERATOR, c.BY_PERSON)
 RUNS = (c.RUN_REPORTED,)
 # une fusion demandée, ce qu'une personne écrit chez l'hôte : lus par leur nom — ces faits ne s'écrivent que par
 # l'action d'une personne, et leurs gardes comptent qui les nomme (``tests/unit/test_project_merge.py``)
-PULLS = (f.PULL_SEEN, f.CHECKS_SEEN, "projects.merge_asked", "projects.merge_answered",
+PULLS = (pulls.PULL_SEEN, pulls.CHECKS_SEEN, "projects.merge_asked", "projects.merge_answered",
          "projects.pull_write_asked", "projects.pull_write_answered")
 TICKETS = tracker.MOVES
 GESTURES = (f.REFRAMED, f.PAUSED, f.RESUMED, f.ARCHIVED, f.RESTORED, f.NUDGED, f.OBJECTIVE_ADDED,

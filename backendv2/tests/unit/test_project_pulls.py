@@ -35,10 +35,8 @@ from mika.contracts import runtime as rt
 from mika.faculties.projects import atelier, issues, milestones, pulls, tickets, tracker, triage
 from mika.faculties.projects import prompt as project_prompt
 from mika.faculties.projects.faculty import (
-    BASE_SEEN,
     PULL_CAPABILITY,
     PULL_REQUEST_CAPABILITY,
-    PULL_SEEN,
     PUSH_CAPABILITY,
     Item,
     Objective,
@@ -49,6 +47,7 @@ from mika.faculties.projects.faculty import (
 )
 from mika.faculties.projects.inspect import PULL_LINK_TITLE, PULL_TITLE, pull_detail, pull_words
 from mika.faculties.projects.inspect_common import remote_ref
+from mika.faculties.projects.pulls import BASE_SEEN, PULL_SEEN
 from mika.faculties.projects.tools import ReportArgs, report_run
 from mika.faculties.projects.tracker_tools import AddArgs, ItemArg, items_add
 from mika.kernel.events import Origin

@@ -1,8 +1,15 @@
-"""Les pull requests d'un projet (ADR 0274) : ce qui les propose, les ouvre et les relit.
+"""Les pull requests d'un projet (ADR 0274) : leurs faits, ce qui les propose, les ouvre et les relit.
 
 Un projet au flux ``pr`` (``faculty.by_pulls``) travaille **une branche par travail** : l'atelier s'y place au départ
 de chaque exécution (l'enrichisseur ``projects_tree`` de ``prompt.py``), ``report_run`` s'y replace avant
-d'enregistrer (``tools.py``), et sa branche de base ne reçoit que ce qui est récupéré du distant. Ici :
+d'enregistrer (``tools.py``), et sa branche de base ne reçoit que ce qui est récupéré du distant. Leur forme (les
+champs d'``Objective``) et les lectures que tous en font sont dans ``faculty.py``. Ici :
+
+- **Leurs faits** (ADR 0313) : ``projects.pull_seen`` (ce que l'hôte dit de la pull request), ``projects.checks_seen``
+  (de ses vérifications), ``projects.base_seen`` (la base de l'atelier, relue), leurs charges utiles et leurs
+  réducteurs. Fusionnée, l'objectif est clos pour de bon (``_accepted``) ; refusée, en conflit, ses vérifications en
+  échec, un ponctuel abouti se rouvre (``faculty.sent_back``, que la relecture lit aussi) ; la base qui avance
+  éveille un lecteur (``faculty.with_base``, que lit aussi le compte rendu d'une exécution en flux direct).
 
 - **La proposition** (le processus ``projects.pulls``, ``due``) : quand un ponctuel a conclu « fait », ou qu'un
   passage de constant s'est achevé, sur une branche qui porte un commit que sa pull request n'a pas, la pull request
@@ -45,7 +52,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from pydantic import BaseModel
@@ -57,12 +64,11 @@ from mika.faculties.projects import merge, milestones, tracker
 from mika.faculties.projects.atelier import SEEN_KEY, commits_listed
 from mika.faculties.projects.capability_common import effect_project, hosted_remote, pin_of, project_refusal
 from mika.faculties.projects.faculty import (
-    BASE_SEEN,
-    CHECKS_SEEN,
+    BASE_REQUEST,
+    INHERITED,
     MERGE_ANSWERED,
     PROJECTS,
     PULL_REQUEST_CAPABILITY,
-    PULL_SEEN,
     PULL_TRIES_MAX,
     REFRAMED,
     REVIEW_ASKED,
@@ -81,8 +87,12 @@ from mika.faculties.projects.faculty import (
     repo_page,
     rereads,
     review_holds,
+    sent_back,
     subjects_of,
     ticket_held,
+    with_base,
+    with_objective,
+    with_project,
     writes_pulls,
     written_for,
 )
@@ -91,7 +101,7 @@ from mika.faculties.projects.inspect_reviews import UNREVIEWED, review_line
 from mika.faculties.projects.tool_common import gone_reply, running_project
 from mika.faculties.projects.tools import TAKE_BASE
 from mika.kernel.clock import HOUR, MINUTE
-from mika.kernel.events import Content, Draft
+from mika.kernel.events import Content, Draft, Payload
 from mika.kernel.faculty import CatchUp, ToolResult, Zone
 from mika.kernel.frame import Frame
 from mika.kernel.operate import Preview
@@ -421,6 +431,162 @@ def proposal(p: Project, o: Objective, span: Span) -> Draft[Any]:
         capability=PULL_REQUEST_CAPABILITY, owner=PROJECTS.name, context=project_target(p.id), approval=p.approval,
         args_json=json.dumps(args), summary=Content.of(summary[:600], level=written_for(p, o)),
         about=subjects_of(p))
+
+
+# ── Ses faits et leurs réducteurs (ADR 0313) ──────────────────────────────
+
+
+class PullSeen(Payload):
+    """Ce que l'hôte dit de la pull request d'un objectif, lu à un instant (ADR 0274) : un fait arrivé, daté — pas
+    un état qu'on recalcule. ``said`` : ce qu'il en dit (une relecture, un commentaire), le texte d'un inconnu —
+    précédé du nom de son compte là-bas, dans le même contenu : l'oubli efface l'un avec l'autre."""
+
+    project: int
+    objective: int
+    #: son numéro chez l'hôte, la branche qu'elle porte, son état (``PULL_STATES``) et si sa relecture demande des
+    #: changements
+    number: int = 0
+    branch: str = ""
+    state: str = ""
+    changes: bool = False
+    #: quand la relecture qui demande des changements a été rendue chez l'hôte (µs ; 0 : il ne le dit pas)
+    review_at: int = 0
+    said: Content | None = None
+    #: quand l'hôte dit l'avoir mise à jour (µs ; 0 : il ne le dit pas)
+    updated: int = 0
+    #: l'hôte la dit impossible à fusionner — sa branche est en conflit avec la base —, ou fusionnable (ADR 0280) ;
+    #: ``None`` : il ne le dit pas (ou pas encore) — ce qu'on en savait reste
+    conflicts: bool | None = None
+    owner: str | None = None
+    about: tuple[str, ...] = ()
+    read_about: tuple[str, ...] = ()
+
+
+class BaseSeen(Payload):
+    """Le commit au bout de la branche de base d'un atelier, lu après une récupération aboutie (ADR 0280) : un fait
+    arrivé — ce que l'atelier avait à cet instant —, pas un état qu'on recalcule. ``commit`` vide : la base ne se
+    lisait pas."""
+
+    project: int
+    commit: str = ""
+
+
+class ChecksSeen(Payload):
+    """Ce que l'hôte dit des vérifications du commit d'une pull request, lu à un instant (ADR 0275) : un fait
+    arrivé, daté. ``said`` : d'un échec, les vérifications qui ont échoué et la fin du journal — le texte d'un
+    inconnu, borné, que l'oubli atteint."""
+
+    project: int
+    objective: int
+    sha: str = ""
+    #: ``CHECKS_STATES`` du port
+    state: str = ""
+    said: Content | None = None
+    #: quand l'hôte dit la dernière achevée (µs ; 0 : il ne le dit pas)
+    updated: int = 0
+    owner: str | None = None
+    about: tuple[str, ...] = ()
+    read_about: tuple[str, ...] = ()
+
+
+PULL_SEEN = PROJECTS.event("pull_seen", PullSeen, content=("said",), subjects=("owner", "about", INHERITED))
+CHECKS_SEEN = PROJECTS.event("checks_seen", ChecksSeen, content=("said",), subjects=("owner", "about", INHERITED))
+BASE_SEEN = PROJECTS.event("base_seen", BaseSeen)
+
+
+@PROJECTS.reducer(PULL_SEEN)
+def _pull_seen(s: ProjectsState, e, cx) -> ProjectsState:
+    """Ce que l'hôte dit de la pull request d'un objectif (ADR 0274). Fusionnée : l'objectif est clos pour de bon
+    — un ponctuel rouvert entre-temps aussi (``_accepted``, ADR 0277) —, sa branche a fait son temps, et la base se
+    récupère (une demande, que ``projects.remote`` propose). Fermée sans fusion, ou des changements demandés : un
+    ponctuel abouti se rouvre, avec le mot de l'hôte sous les yeux de l'exécution qui vient. Impossible à fusionner
+    (ADR 0280 : sa branche est en conflit avec la base) : elle n'est pas prête, et l'objectif se rouvre de même —
+    une fois, quand l'hôte le dit pour la première fois ; il ne se rouvrira de nouveau qu'après que l'hôte l'a
+    redite fusionnable. Total : un objectif inconnu, un état inconnu ne changent rien."""
+    d = e.data
+    p = s.projects.get(d.project)
+    o = objective_at(p, d.objective) if p is not None else None
+    if p is None or o is None or d.state not in PULL_STATES:
+        return s
+    if o.pull_state == PULL_MERGED and d.branch == o.branch:
+        # déjà fusionnée, la même branche : rien ne se compte deux fois. Mais une fusion redite — sa branche,
+        # reprise depuis, est entrée dans la base hors de sa vue — lève « à envoyer » : sans cela la passe la
+        # redirait chaque minute, sans fin (ADR 0277)
+        if d.state != PULL_MERGED or not (o.unsent or o.pull_tries):
+            return s
+        return with_project(s, with_objective(p, _accepted(replace(o, unsent=False, pull_tries=0), e.at)))
+    said = d.said.ref or "" if d.said is not None else ""
+    changes = d.changes and d.state == PULL_OPEN
+    # un refus ne compte qu'une fois : une fermeture qu'on n'avait pas vue, une relecture plus récente que la dernière
+    # (après un nouvel envoi, l'hôte redit la même relecture tant que personne n'a relu : elle ne rouvre rien)
+    # ce que l'hôte dit de sa fusion ne vaut que pour une pull request ouverte ; s'il n'en dit rien, ce qu'on en
+    # savait reste — il le recalcule après chaque envoi, et « je ne sais pas encore » ne lève pas un conflit
+    conflicts = d.state == PULL_OPEN and (o.pull_conflicts if d.conflicts is None else d.conflicts)
+    back = (d.state == PULL_CLOSED and o.pull_state != PULL_CLOSED) or (changes and (
+        d.review_at > o.pull_review_at if d.review_at else not o.pull_changes)) or (
+        conflicts and not o.pull_conflicts)
+    o = replace(o, pull=d.number or o.pull, pull_state=d.state, pull_changes=changes,
+                pull_review_at=max(o.pull_review_at, d.review_at), pull_at=e.at,
+                pull_said_ref=said or o.pull_said_ref)
+    fresh = conflicts and not o.pull_conflicts  # ``o`` : tel qu'il était avant ce que l'hôte vient de dire
+    o = replace(o, pull_conflicts=conflicts)
+    if d.state == PULL_MERGED:
+        # fusionnée : plus aucune demande de fusion n'attend, et un refus d'avant ne se dit plus (ADR 0288)
+        o = _accepted(replace(o, unsent=False, pull_tries=0, pulls_merged=o.pulls_merged + 1, merge_asked_at=0,
+                              merge_refused=""), e.at)
+    elif back:
+        o = sent_back(o)
+    if (d.state == PULL_MERGED or fresh) and p.remote and p.status != c.ARCHIVED:
+        # la base se récupère avant l'exécution suivante : une demande, proposée sans accord (``tend.waiting``) —
+        # après une fusion, et quand l'hôte dit la pull request en conflit (ADR 0280) : sa base a avancé, et
+        # l'outil qui la ramène dans la branche de travail ne ramène que ce que l'atelier en a
+        p = replace(p, requests=(*p.requests, (e.seq, BASE_REQUEST))[-4:])
+    return with_project(s, with_objective(p, o))
+
+
+def _accepted(o: Objective, at: int) -> Objective:
+    """Sa pull request est fusionnée : ce qui est accepté chez l'hôte est clos pour de bon (ADR 0274, 0277). Un
+    ponctuel que l'hôte ou une relecture avait rouvert — ou qui bloquait — est clos : sans cela son ticket restait
+    « en attente de PR », « fait » se refusait faute de nouveau commit, et ses exécutions tournaient jusqu'au
+    blocage. Plus aucune relecture ne l'attend : celle qui était demandée tombe. Tout autre objectif ne bouge
+    pas."""
+    o = replace(o, review_due="", review_tries=0)
+    if o.kind != c.ONCE or o.status not in (c.OPEN, c.BLOCKED):
+        return o
+    return replace(o, status=c.DONE, closed_at=at, waiting_until=0, need_ref="", asked=False, ask_attempts=0)
+
+
+@PROJECTS.reducer(CHECKS_SEEN)
+def _checks_seen(s: ProjectsState, e, cx) -> ProjectsState:
+    """Ce que l'hôte dit des vérifications du commit d'une pull request (ADR 0275). En échec : un ponctuel abouti se
+    rouvre — une fois par commit en échec, pas à chaque lecture, ni quand « en cours » s'est intercalé entre deux
+    échecs du même commit (``checks_failed_sha``, ADR 0278) —, la fin du journal sous les yeux de l'exécution qui
+    vient. Total : un objectif inconnu, un état inconnu ne changent rien."""
+    d = e.data
+    p = s.projects.get(d.project)
+    o = objective_at(p, d.objective) if p is not None else None
+    if p is None or o is None or d.state not in CHECKS_STATES:
+        return s
+    failed = d.state == CHECKS_FAILED
+    failed_anew = failed and d.sha != o.checks_failed_sha
+    said = d.said.ref or "" if d.said is not None else ""
+    o = replace(o, checks=d.state, checks_sha=d.sha, checks_at=e.at,
+                checks_failed_sha=d.sha if failed else o.checks_failed_sha,
+                checks_said_ref=said or (o.checks_said_ref if failed else ""))
+    return with_project(s, with_objective(p, sent_back(o) if failed_anew else o))
+
+
+@PROJECTS.reducer(BASE_SEEN)
+def _base_seen(s: ProjectsState, e, cx) -> ProjectsState:
+    """La base d'un atelier, relue après une récupération (ADR 0280) : la fusion acceptée d'une pull request, ou
+    toute récupération qui ramène autre chose, fait avancer ce qu'un projet lecteur voit — c'est cela qui l'éveille,
+    pas le commit d'une branche de travail. Une base qui n'a pas bougé n'éveille rien. Total : un projet inconnu ne
+    change rien."""
+    p = s.projects.get(e.data.project)
+    if p is None:
+        return s
+    s = with_project(s, replace(p, base_unread=False)) if p.base_unread else s
+    return with_base(s, e, p.id, e.data.commit)
 
 
 # ── Ce que l'hôte en dit ──────────────────────────────────────────────────

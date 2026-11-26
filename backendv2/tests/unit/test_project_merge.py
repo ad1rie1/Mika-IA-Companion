@@ -31,11 +31,11 @@ from mika.faculties.projects.faculty import (
     MERGE_ANSWERED,
     MERGE_ASKED,
     MERGE_CUT,
-    PULL_SEEN,
     Objective,
     Project,
     branch_of,
 )
+from mika.faculties.projects.pulls import PULL_SEEN
 from mika.faculties.projects.tracker_tools import AddArgs, ItemArg, items_add
 from mika.kernel.clock import MINUTE
 from mika.ports.workshop import (

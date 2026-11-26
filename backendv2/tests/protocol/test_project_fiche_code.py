@@ -17,7 +17,8 @@ import pytest
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.faculties.projects import inspect_code, inspect_merge, merge, tracker
-from mika.faculties.projects.faculty import CHECKS_SEEN, MERGE_ASKED, PULL_REQUEST_CAPABILITY
+from mika.faculties.projects.faculty import MERGE_ASKED, PULL_REQUEST_CAPABILITY
+from mika.faculties.projects.pulls import CHECKS_SEEN
 from mika.kernel.events import Content
 from mika.ports.workshop import (
     CHECKS_FAILED,

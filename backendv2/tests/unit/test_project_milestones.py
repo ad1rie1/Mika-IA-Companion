@@ -24,13 +24,13 @@ from mika.faculties.projects import faculty, milestones, tend, tickets
 from mika.faculties.projects.faculty import (
     Objective,
     ProjectsState,
-    _sent_back,
     awaiting,
     milestone_at,
     milestones_of,
     next_milestone,
     objective_at,
     open_milestones,
+    sent_back,
     subject_of,
 )
 from mika.faculties.projects.framing_tools import PlanArgs, project_plan
@@ -235,7 +235,7 @@ def test_what_a_run_reads_of_its_milestones_what_a_review_quotes_and_the_pass_li
     assert "première exécution" not in "\n".join(milestones.lines(later, texts, "« Adrien »"))
     # rouvert par l'hôte, ses exécutions repartent de zéro : ce n'est pas pour autant sa première (ADR 0280) — ni
     # la phrase, ni le droit de réviser ses jalons sans dire pourquoi
-    reopened = _sent_back(replace(o, status=c.DONE, runs=3, worked=3))
+    reopened = sent_back(replace(o, status=c.DONE, runs=3, worked=3))
     assert (reopened.status, reopened.runs, reopened.worked) == (c.OPEN, 0, 3) and not milestones.refining(reopened)
     again = replace(reopened, runs=1, worked=4)  # l'exécution qui le reprend
     assert "première exécution" not in "\n".join(milestones.lines(again, texts, "« Adrien »"))
