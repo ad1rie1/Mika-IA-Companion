@@ -43,10 +43,10 @@ from mika.plugins.forge import (
     WRITTEN,
     App,
     ForgeParams,
-    _caretaker,
-    _port,
     bad_args,
+    caretaker,
     concerns,
+    forge_port,
     guide,
     has_secrets,
     outcomes,
@@ -84,9 +84,9 @@ def _may_build(ctx: Any) -> bool:
 
 
 def _refused(ctx: Any) -> ToolResult:
-    if _port(ctx) is None:
+    if forge_port(ctx) is None:
         return ToolResult(ok=False, content=phrase("forge.tools.absent"))
-    return ToolResult(ok=False, content=phrase("forge.tools.not_here", who=_caretaker(ctx.frame)))
+    return ToolResult(ok=False, content=phrase("forge.tools.not_here", who=caretaker(ctx.frame)))
 
 
 class NoArgs(BaseModel):
@@ -189,7 +189,7 @@ def guarded(app: App | None, ports: Mapping[str, Any], info: AppInfo | None) -> 
             label=phrase("forge.tools.list.label"), args=NoArgs, bundle=BUNDLE,
             episodes=BUILD, owner_only=True)
 async def forge_list(args: NoArgs, ctx: Any) -> Any:
-    port = _port(ctx)
+    port = forge_port(ctx)
     if port is None or not _may_build(ctx):
         return _refused(ctx)
     state = ctx.frame.state("forge").apps
@@ -217,7 +217,7 @@ def numbered(text: str, offset: int = 1, limit: int = 0) -> tuple[str, int]:
             label=phrase("forge.tools.read.label"), args=ReadArgs,
             bundle=BUNDLE, episodes=BUILD, owner_only=True)
 async def forge_read(args: ReadArgs, ctx: Any) -> Any:
-    port = _port(ctx)
+    port = forge_port(ctx)
     if port is None or not _may_build(ctx):
         return _refused(ctx)
     try:
@@ -330,7 +330,7 @@ async def _save(ctx: Any, port: Any, name: str, manifest: str, code: str, asked_
             label=phrase("forge.tools.write.label"), args=WriteArgs,
             bundle=BUNDLE, episodes=BUILD, max_calls_per_episode=3, owner_only=True)
 async def forge_write(args: WriteArgs, ctx: Any) -> Any:
-    port = _port(ctx)
+    port = forge_port(ctx)
     if port is None or not _may_build(ctx):
         return _refused(ctx)
     return await _save(ctx, port, args.app, args.manifest, args.code, args.project)
@@ -379,7 +379,7 @@ def _around(text: str, spans: Sequence[tuple[int, int]], margin: int = 2, most: 
             label=phrase("forge.tools.edit.label"), args=EditArgs,
             bundle=BUNDLE, episodes=BUILD, max_calls_per_episode=12, owner_only=True)
 async def forge_edit(args: EditArgs, ctx: Any) -> Any:
-    port = _port(ctx)
+    port = forge_port(ctx)
     if port is None or not _may_build(ctx):
         return _refused(ctx)
     try:
@@ -468,7 +468,7 @@ def search(sources: Mapping[str, tuple[str, str]], args: SearchArgs,
             label=phrase("forge.tools.search.label"), args=SearchArgs,
             bundle=BUNDLE, episodes=BUILD, max_calls_per_episode=8, owner_only=True)
 async def forge_search(args: SearchArgs, ctx: Any) -> Any:
-    port = _port(ctx)
+    port = forge_port(ctx)
     if port is None or not _may_build(ctx):
         return _refused(ctx)
     names = [args.app] if args.app else [i.name for i in port.apps()]
@@ -580,7 +580,7 @@ async def _settled(ctx: Any, name: str, app: App | None, out: ToolResult) -> Too
             label=phrase("forge.tools.test.label"), args=TestArgs, bundle=BUNDLE,
             episodes=BUILD, max_calls_per_episode=12, owner_only=True)
 async def forge_test(args: TestArgs, ctx: Any) -> Any:
-    port = _port(ctx)
+    port = forge_port(ctx)
     if port is None or not _may_build(ctx):
         return _refused(ctx)
     app = ctx.frame.state("forge").apps.get(args.app)
@@ -660,7 +660,7 @@ async def _test_view(port: Any, app: str, method: str, raw: dict[str, Any], secr
             label=phrase("forge.tools.logs.label"), args=AppArgs, bundle=BUNDLE,
             episodes=BUILD, owner_only=True)
 async def forge_logs(args: AppArgs, ctx: Any) -> Any:
-    port = _port(ctx)
+    port = forge_port(ctx)
     if port is None or not _may_build(ctx):
         return _refused(ctx)
     return _nothing("\n".join(port.logs(args.app, 30)) or phrase("forge.tools.logs.empty"))
@@ -670,7 +670,7 @@ async def forge_logs(args: AppArgs, ctx: Any) -> Any:
             label=phrase("forge.tools.command.label"), args=CommandArgs, bundle=BUNDLE, episodes=BUILD,
             owner_only=True)
 async def forge_command(args: CommandArgs, ctx: Any) -> Any:
-    port = _port(ctx)
+    port = forge_port(ctx)
     if port is None or not _may_build(ctx):
         return _refused(ctx)
     app = ctx.frame.state("forge").apps.get(args.app)
@@ -744,7 +744,7 @@ def rows_text(rows: list[dict[str, Any]]) -> str:
             label=phrase("forge.tools.db_schema.label"), args=AppArgs, bundle=BUNDLE,
             episodes=BUILD, owner_only=True)
 async def forge_db_schema(args: AppArgs, ctx: Any) -> Any:
-    port = _port(ctx)
+    port = forge_port(ctx)
     if port is None or not _may_build(ctx):
         return _refused(ctx)
     try:
@@ -757,7 +757,7 @@ async def forge_db_schema(args: AppArgs, ctx: Any) -> Any:
             label=phrase("forge.tools.db_query.label"), args=DbArgs, bundle=BUNDLE,
             episodes=BUILD, max_calls_per_episode=8, owner_only=True)
 async def forge_db_query(args: DbArgs, ctx: Any) -> Any:
-    port = _port(ctx)
+    port = forge_port(ctx)
     if port is None or not _may_build(ctx):
         return _refused(ctx)
     try:
@@ -770,7 +770,7 @@ async def forge_db_query(args: DbArgs, ctx: Any) -> Any:
             label=phrase("forge.tools.db_execute.label"), args=DbArgs,
             bundle=BUNDLE, episodes=BUILD, max_calls_per_episode=6, owner_only=True)
 async def forge_db_execute(args: DbArgs, ctx: Any) -> Any:
-    port = _port(ctx)
+    port = forge_port(ctx)
     if port is None or not _may_build(ctx):
         return _refused(ctx)
     try:

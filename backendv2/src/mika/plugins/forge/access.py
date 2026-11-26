@@ -28,11 +28,11 @@ from mika.plugins.forge import (
     APPS_BUNDLE,
     FORGE,
     App,
-    _caretaker,
-    _port,
     bad_args,
     calls,
+    caretaker,
     concerns,
+    forge_port,
     has_secrets,
     outcomes,
     params,
@@ -156,7 +156,7 @@ def _usable(ctx: Any, name: str, port: Any, tool: str, reads: bool) -> tuple[App
     level, keep = app_level(ctx.frame, name, tool, reads, ctx.frame.audience, ep.kind if ep is not None else "")
     if level == NO:
         # une app peut sortir ce qu'on lui passe vers le réseau : seulement pour qui ses lignes d'accès le permettent
-        return app, phrase("forge.tools.call.not_here", who=_caretaker(ctx.frame)), NO, "rien"
+        return app, phrase("forge.tools.call.not_here", who=caretaker(ctx.frame)), NO, "rien"
     working = ep is not None and (ep.kind in WORKING or (ep.kind == Kind.TASK and bool(sifting_app(ep.target))))
     if not working and not app.promoted and has_secrets(ctx.ports, port.info(name)):
         return app, phrase("forge.tools.call.secrets"), NO, "rien"
@@ -168,7 +168,7 @@ def app_tool(name: str, tool: str) -> Any:
     vit comme le reste de sa vie (jamais compté contre elle)."""
 
     async def handler(args: AppToolArgs, ctx: Any) -> ToolResult:
-        port = _port(ctx)
+        port = forge_port(ctx)
         info = port.info(name) if port is not None else None
         spec = next((t for t in info.tools if t.name == tool), None) if info is not None else None
         app, why, level, keep = _usable(ctx, name, port, f"{name}_{tool}", bool(spec is not None and spec.reads))
@@ -204,7 +204,7 @@ def app_pages(name: str) -> Any:
     disjoncteur — ce qu'elle a trouvé, à dire à qui le demande (ADR 0104)."""
 
     async def handler(args: PagesArgs, ctx: Any) -> ToolResult:
-        port = _port(ctx)
+        port = forge_port(ctx)
         app, why, level, keep = _usable(ctx, name, port, f"{name}_pages", True)
         if why or app is None:
             return ToolResult(ok=False, content=why)

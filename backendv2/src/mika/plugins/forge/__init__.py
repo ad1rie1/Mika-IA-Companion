@@ -632,7 +632,7 @@ def due_runs(a: App, tz: Any) -> list[tuple[int, str]]:
     return [(t, n) for t, n in out if t is not None]
 
 
-def _next_tick(a: App, tz: Any) -> int | None:
+def next_tick(a: App, tz: Any) -> int | None:
     runs = due_runs(a, tz)
     return min(t for t, _ in runs) if runs else None
 
@@ -661,7 +661,7 @@ def concerns(frame: Frame, app: App | None) -> tuple[tuple[str, ...], int]:
 class Tick:
     def next_due(self, s: ForgeState, frame: Frame, last_run: int | None) -> int | None:
         tz = frame.env.tz_of(frame.root)
-        times = [t for t in (_next_tick(a, tz) for a in s.apps.values()) if t is not None]
+        times = [t for t in (next_tick(a, tz) for a in s.apps.values()) if t is not None]
         return max(frame.now, min(times)) if times else None
 
     async def run(self, ctx: Any) -> None:
@@ -799,7 +799,7 @@ def written_draft(info: AppInfo, *, dedupe: bool = False, vouched: bool = False,
 # ── Ce que lisent ses outils, ceux de ses apps et la console ──────────────
 
 
-def _caretaker(frame: Frame) -> str:
+def caretaker(frame: Frame) -> str:
     """Qui s'occupe d'elle, par son prénom (jamais « ta propriétaire »)."""
     return identity_c.keepers(frame, quoted=True)
 
@@ -811,7 +811,7 @@ def bad_args(tool: Any, errors: Mapping[str, str]) -> str:
                   accepted=said_args(tool.args) or phrase("forge.tools.call.no_args"))
 
 
-def _port(ctx: Any) -> Any:
+def forge_port(ctx: Any) -> Any:
     return ctx.ports.get("forge")
 
 

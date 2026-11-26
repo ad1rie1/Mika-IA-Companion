@@ -73,9 +73,9 @@ from mika.plugins.forge import (
     WRITTEN,
     App,
     ForgeState,
-    _next_tick,
     concerns,
     has_secrets,
+    next_tick,
     outcomes,
     params,
     rules_of,
@@ -229,7 +229,7 @@ def _queue_words(app: App, now: int) -> str:
 
 def _about(name: str, app: App | None, info: AppInfo | None, port: Any, frame: Frame,
            ctx: InspectContext) -> list[tuple[str, Cell]]:
-    nxt = _next_tick(app, frame.env.tz_of(frame.root)) if app is not None else None
+    nxt = next_tick(app, frame.env.tz_of(frame.root)) if app is not None else None
     title = app.title if app is not None else info.title if info is not None else name
     pairs: list[tuple[str, Cell]] = [
         ("nom", name), ("titre", title),

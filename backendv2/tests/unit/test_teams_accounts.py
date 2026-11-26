@@ -37,7 +37,7 @@ from mika.kernel.clock import HOUR, MINUTE
 from mika.kernel.frame import Audience, EpisodeRef, Frame
 from mika.plugins import email as email_p
 from mika.plugins import teams as teams_p
-from mika.plugins.forge import _caretaker
+from mika.plugins.forge import caretaker as forge_caretaker
 from mika.plugins.teams import TEAMS, TeamsParams, accounts_here, owns_an_account
 from mika.plugins.teams.accounts import Accounts
 from mika.plugins.teams.tools import ListArgs, _port, teams_conversations
@@ -351,8 +351,8 @@ def test_her_owners_are_said_alike_everywhere():
     one, nobody = named(("user_1",), {"user_1": "Adrien"}), named(("user_1",), {})
     both = named(("user_1", "user_2"), {"user_1": "Adrien", "user_2": "Bea"})
     assert teams_p.keepers(one) == "Adrien" and teams_p.keepers(both) == "Adrien ou Bea"
-    assert caretaker(one) == _caretaker(one) == "« Adrien »"
-    assert caretaker(both) == _caretaker(both) == "« Adrien » ou « Bea »"  # jamais « la personne » quand on les connaît
-    assert caretaker(nobody) == _caretaker(nobody) == teams_p.keepers(nobody) == "la personne qui s'occupe de toi"
+    assert caretaker(one) == forge_caretaker(one) == "« Adrien »"
+    assert caretaker(both) == forge_caretaker(both) == "« Adrien » ou « Bea »"  # jamais « la personne » quand on les connaît
+    assert caretaker(nobody) == forge_caretaker(nobody) == teams_p.keepers(nobody) == "la personne qui s'occupe de toi"
     # un nom est une donnée citée : il entre nettoyé partout, jamais tel que le compte le dit
     assert caretaker(named(("user_1",), {"user_1": "« Adrien »"})) == "« Adrien »"
