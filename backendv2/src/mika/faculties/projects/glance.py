@@ -20,7 +20,6 @@ from dataclasses import dataclass
 
 from mika.contracts import projects as c
 from mika.faculties.projects import milestones, pulls, tickets, tracker, work
-from mika.faculties.projects.actions import schedule_words
 from mika.faculties.projects.faculty import (
     ON_DEMAND,
     PULL_OPEN,
@@ -34,6 +33,7 @@ from mika.faculties.projects.faculty import (
     milestones_of,
     readers_of,
 )
+from mika.faculties.projects.rhythm import schedule_words
 from mika.faculties.projects.tools import trigger_words
 from mika.kernel.clock import DAY, HOUR
 from mika.kernel.frame import Frame

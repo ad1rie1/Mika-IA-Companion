@@ -88,6 +88,7 @@ from mika.faculties.projects import (
     links,
     milestones,
     pulls,
+    rhythm,
     tickets,
     todo,
     tracker,
@@ -815,8 +816,8 @@ async def fiche(call: Call) -> dict[str, Any]:
         # ADR 0293 : son prochain passage, son rythme en une phrase, ses consignes en attente, et de quoi remplir
         # les formulaires d'un objectif et d'un jalon
         "next": _next_json(sc, r, texts),
-        "rhythm": {"schedule": actions.schedule_words(p.schedule), "window": window_words(p),
-                   "summary": f"{actions.schedule_words(p.schedule)} · {window_words(p)}"},
+        "rhythm": {"schedule": rhythm.schedule_words(p.schedule), "window": window_words(p),
+                   "summary": f"{rhythm.schedule_words(p.schedule)} · {window_words(p)}"},
         "instructions": _instructions(sc, r), "forms": _forms_json(sc, r, mine, texts),
         "plan": {"state": p.plan_state, "state_label": PLAN_WORDS.get(p.plan_state, p.plan_state),
                  "text": texts.get(p.plan_ref, "")[:TEXT_SHOWN], "questions": texts.get(p.questions_ref, "")[:TEXT_SHOWN],

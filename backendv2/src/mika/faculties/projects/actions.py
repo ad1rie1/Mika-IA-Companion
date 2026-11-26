@@ -91,15 +91,13 @@ from mika.faculties.projects.inspect_common import (
 )
 from mika.faculties.projects.inspect_reviews import REREAD_CHOICES, REREAD_HELP, REREAD_LABEL, REREAD_UNKNOWN
 from mika.faculties.projects.milestones import routine_text
-from mika.faculties.projects.rhythm import pick
-from mika.kernel import schedule
-from mika.kernel.clock import HOUR, MINUTE
+from mika.faculties.projects.rhythm import SCHEDULES, pick
+from mika.kernel.clock import HOUR
 from mika.kernel.events import Content
 from mika.kernel.forms import UPLOAD_MAX, FormField, Knob, Upload, describe
 from mika.kernel.frame import Frame
 from mika.kernel.operate import ActionContext, Done, Refused
 from mika.ports.workshop import BASE_BRANCH, OutsideWorkshop, WorkshopFull, check_branch, check_remote
-from mika.vocab.circadian import DAYS_FR
 from mika.vocab.episodes import project_of
 from mika.vocab.phrasebook import family
 from mika.vocab.privacy import Sensitivity
@@ -117,11 +115,6 @@ PRIORITY_HELP = "Entre deux projets qui peuvent avancer, le plus prioritaire pas
 DAYS_CHOICES = ((c.EVERY_DAY, "tous les jours"), (c.WEEKDAYS, "les jours ouvrés (lundi–vendredi)"),
                 (c.WEEKEND, "le week-end"))
 KIND_CHOICES = ((c.ONCE, "ponctuel — à faire une fois"), (c.CONSTANT, "constant — à entretenir, il revient"))
-SCHEDULES = (("manual", "dès que possible"), ("demand", "sur demande (seulement quand on le lance)"),
-             ("interval:30m", "toutes les 30 min"),
-             ("interval:2h", "toutes les 2 h"), ("interval:6h", "toutes les 6 h"),
-             ("cron:0 9 * * *", "chaque jour à 9 h"), ("cron:0 9 * * MON-FRI", "les jours ouvrés à 9 h"),
-             ("cron:0 18 * * SUN", "le dimanche à 18 h"))
 #: le choix de l'agenda qui ouvre le champ libre ``schedule_rule`` : un intervalle ou des horaires hors de la liste
 OTHER_RULE = "autre"
 #: l'agenda se choisit par ses mots (la valeur envoyée reste la règle), ou s'écrit à la main
@@ -131,42 +124,6 @@ SCHEDULE_HELP = ("Quand elle y travaille d'elle-même, dans sa plage de travail.
 RULE_HELP = ("Un intervalle : « interval:45m » (toutes les 45 min ; s, m, h ou d, cinq minutes au moins). Des "
              "horaires, en cron et à l'heure locale (minute, heure, jour du mois, mois, jour de la semaine) : "
              "« cron:30 8 * * MON-FRI » (les jours ouvrés à 8 h 30).")
-_DAY_SETS = {frozenset(range(7)): "chaque jour", frozenset(range(5)): "les jours ouvrés",
-             frozenset({5, 6}): "le week-end"}
-
-
-def _at(hour: int, minute: int) -> str:
-    return f"à {hour} h" + (f" {minute:02d}" if minute else "")
-
-
-def schedule_words(rule: str) -> str:
-    """L'agenda d'un projet en mots (« dès que possible », « les jours ouvrés à 9 h »), tel que la console (la liste
-    des projets, sa fiche) et le panneau de frontendv2 le disent : jamais ``manual`` ni ``cron:0 9 * * MON-FRI``.
-    Une valeur de ``SCHEDULES`` garde son libellé ; un intervalle ou un cron hors de la liste se traduit ; un cron
-    qu'on ne sait pas dire en une phrase devient « selon son agenda »."""
-    raw = (rule or "manual").strip()
-    known = next((label for value, label in SCHEDULES if value == raw), None)
-    if known:
-        return known
-    parsed = schedule.read(raw)
-    if parsed.kind == "interval":
-        minutes = parsed.every_us // MINUTE
-        if minutes % (24 * 60) == 0:
-            n = minutes // (24 * 60)
-            return "tous les jours" if n == 1 else f"tous les {n} jours"
-        if minutes % 60 == 0:
-            return f"toutes les {minutes // 60} h"
-        return f"toutes les {minutes} min"
-    if parsed.kind == "cron" and len(parsed.hours) == 1 and len(parsed.minutes) == 1 and not parsed.dom_restricted \
-            and len(parsed.months) == 12:
-        (hour,), (minute,) = tuple(parsed.hours), tuple(parsed.minutes)
-        days = _DAY_SETS.get(parsed.weekdays)
-        if days is None:
-            days = ", ".join(f"le {DAYS_FR[d]}" for d in sorted(parsed.weekdays))
-        return f"{days} {_at(hour, minute)}"
-    return "selon son agenda" if parsed.kind == "cron" else "dès que possible"
-
-
 #: les lots qu'on peut lui donner, en mots
 BUNDLE_WORDS = {"memory": "sa mémoire (souvenirs, croyances)", "mcp.web": "le web (chercher, lire des pages)",
                 "email": "le courrier (lire, proposer des envois)",

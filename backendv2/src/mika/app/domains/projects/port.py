@@ -12,7 +12,7 @@ from mika.app.console import FACULTY_LABELS, OWNER_LABELS
 from mika.app.domains.domain import PortPart
 from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
-from mika.faculties.projects import actions as project_actions
+from mika.faculties.projects import rhythm as projects_rhythm
 from mika.faculties.projects import work as projects_work
 from mika.faculties.projects.faculty import NETWORKED_CAPABILITY
 from mika.kernel.clock import local
@@ -63,7 +63,7 @@ class ProjectsPort:
                 # ce que montre le panneau : rien pour son mode à elle, « impersonnel » pour un travail factuel
                 "mode_label": "" if v.mode == projects_c.PERSONA else "impersonnel",
                 "schedule_rule": v.schedule or "manual",
-                "schedule_label": project_actions.schedule_words(v.schedule),
+                "schedule_label": projects_rhythm.schedule_words(v.schedule),
                 "next_run_at": local(nxt, tz).isoformat() if nxt else None,
                 # ses objectifs ponctuels : faits sur tous (les constants n'ont pas de fin)
                 "tasks_total": v.open_once + v.done_once + v.blocked_once, "tasks_done": v.done_once,

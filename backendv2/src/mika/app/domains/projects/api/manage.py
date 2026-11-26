@@ -58,7 +58,6 @@ from mika.faculties.projects.actions import (
     SERVICE_KNOB,
     TOOLS_ACTION,
     reserved_field,
-    schedule_words,
 )
 from mika.faculties.projects.faculty import (
     Decision,
@@ -71,6 +70,7 @@ from mika.faculties.projects.faculty import (
 from mika.faculties.projects.inspect import AUTHOR_FR, window_words
 from mika.faculties.projects.inspect_merge import NOT_WRITABLE, NOT_WRITER
 from mika.faculties.projects.inspect_milestones import HELD_WORDS
+from mika.faculties.projects.rhythm import schedule_words
 from mika.kernel.clock import HOUR
 from mika.kernel.forms import describe
 from mika.runtime.operations import dynamic_fields, initial_values

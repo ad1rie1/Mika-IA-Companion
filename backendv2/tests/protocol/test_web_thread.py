@@ -32,7 +32,7 @@ from mika.app.server import build
 from mika.contracts.runtime import AttachmentMeta, PerceptionReceived
 from mika.faculties.body import inspect as body_inspect
 from mika.faculties.needs import inspect as needs_inspect
-from mika.faculties.projects.actions import schedule_words
+from mika.faculties.projects.rhythm import schedule_words
 from mika.kernel.events import Content
 from mika.kernel.registry import ArbitrationPolicy
 from mika.vocab.episodes import VOICE_ROLES

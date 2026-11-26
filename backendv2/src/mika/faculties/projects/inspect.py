@@ -58,7 +58,6 @@ from mika.faculties.projects.actions import (
     can_run,
     link_options,
     pending_of,
-    schedule_words,
     service_words,
 )
 from mika.faculties.projects.faculty import (
@@ -93,7 +92,15 @@ from mika.faculties.projects.inspect_common import (
     subject_project,
 )
 from mika.faculties.projects.pulls import pull_url
-from mika.faculties.projects.rhythm import always, cadence, daily_cap, pick, runs_today, stirred_due
+from mika.faculties.projects.rhythm import (
+    always,
+    cadence,
+    daily_cap,
+    pick,
+    runs_today,
+    schedule_words,
+    stirred_due,
+)
 from mika.faculties.projects.tools import trigger_words
 from mika.faculties.projects.work import Why, next_run_at, why_not_now
 from mika.kernel.clock import DAY, HOUR, MINUTE
