@@ -44,6 +44,8 @@ TEAMS = Domain(
     },
     labels={
         "faculties": {"teams": "Teams"},
+        # la famille de leurs paramètres (Réglages › Paramètres avancés)
+        "parameters": {"teams": "Plugins"},
         "sections": {
             "teams_messages": "Ses messages Teams récents",
             "teams_drafts": "Ses réponses Teams et ce qu'elles sont devenues",

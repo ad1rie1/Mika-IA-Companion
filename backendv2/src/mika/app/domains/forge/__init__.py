@@ -31,6 +31,8 @@ FORGE = Domain(
     },
     labels={
         "faculties": {"forge": "Moteur de la Forge", "forge_signals": "Signaux de ses apps"},
+        # la famille de leurs paramètres (Réglages › Paramètres avancés)
+        "parameters": {"forge": "Plugins"},
         # à qui est une demande qui attend un accord, quand le nom de sa faculté ne le dit pas bien
         "owners": {"forge": "Forge"},
         "sections": {"apps": "Ses apps forgées", "app_news": "Ce que ses apps ont trouvé pour la personne",

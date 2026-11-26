@@ -43,6 +43,8 @@ SENSES = Domain(
     },
     labels={
         "faculties": {"rss": "Flux RSS", "camera": "Caméra", "sensors": "Appareils"},
+        # la famille de leurs paramètres (Réglages › Paramètres avancés)
+        "parameters": {"rss": "Plugins", "camera": "Plugins"},
         "sections": {"headlines": "Les titres de ses flux", "views": "Ce que voit la caméra"},
         "reasons": {"rss_for": "Partager un titre qui lui a fait penser à cette personne"},
         "signals": {"entry": "un article", "view": "ce que voit la caméra"},

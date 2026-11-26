@@ -32,6 +32,8 @@ PHONE = Domain(
     },
     labels={
         "faculties": {"phone": "Messages du téléphone"},
+        # la famille de leurs paramètres (Réglages › Paramètres avancés)
+        "parameters": {"phone": "Plugins"},
         "sections": {"phone_offers": "Ce que sont devenues ses réponses proposées sur le téléphone"},
         "processes": {"phone.expire": "Laisser tomber les réponses proposées sur le téléphone restées sans geste"},
         "events": {"phone.received": "Un message montré par le téléphone",

@@ -57,6 +57,8 @@ PROJECTS = Domain(
         "faculties": {
             "projects": "Projets",
         },
+        # la famille de leurs paramètres (Réglages › Paramètres avancés)
+        "parameters": {"projects": "Action"},
         "sections": {
             "project": "Ce projet",
             "project_share": "Un projet à partager",

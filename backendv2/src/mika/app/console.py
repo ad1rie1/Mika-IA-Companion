@@ -17,6 +17,7 @@ Réveils par API) : des onglets de la console, que ``app/settings_sections/`` y 
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from mika.app.domains import DOMAINS, gathered
@@ -40,6 +41,24 @@ def _destination(domain: str) -> Destination:
     if found is None:
         raise ValueError(f"le domaine « {domain} » n'a pas de destination dans sa fiche")
     return found
+
+
+def param_families(names: Sequence[str], family_of: Mapping[str, str],
+                   order: Sequence[str]) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    """Réglages › Paramètres avancés : ses facultés et ses plugins rangés par famille, les familles dans l'ordre de
+    ``names``, chacune avec les siens — ceux que ``order`` place, dans son ordre, puis les autres dans l'ordre où leur
+    famille est dite (``family_of`` : celles du cadre, puis celles des fiches). Une famille hors de ``names``, un nom de
+    ``order`` sans famille ou dit deux fois : ``ValueError``."""
+    unknown = sorted(f"{owner} → {family}" for owner, family in family_of.items() if family not in names)
+    lacking = [owner for owner in order if owner not in family_of]
+    twice = sorted({owner for owner in order if list(order).count(owner) > 1})
+    if unknown or lacking or twice:
+        raise ValueError("Paramètres avancés : chaque famille dite est une de PARAM_FAMILY_NAMES, chaque nom de "
+                         f"PARAM_ORDER a sa famille, une fois — familles inconnues : {unknown}, sans famille : "
+                         f"{lacking}, placés deux fois : {twice}")
+    rank = {owner: n for n, owner in enumerate(order)}
+    placed = sorted(family_of, key=lambda owner: rank.get(owner, len(rank)))  # stable : les autres, dans leur ordre
+    return tuple((name, tuple(owner for owner in placed if family_of[owner] == name)) for name in names)
 
 
 NAVIGATION: tuple[NavGroup, ...] = (
@@ -115,16 +134,24 @@ NAVIGATION: tuple[NavGroup, ...] = (
     )),
 )
 
-#: Réglages › Paramètres avancés : les facultés rangées par famille, et leur nom
-#: pour un opérateur (les autres tombent dans « Autres », sous leur nom technique)
-PARAM_FAMILIES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("Émotions", ("affect", "needs", "body", "self")),
-    ("Esprit", ("attention", "memory", "attachments", "transcript")),
-    ("Relations", ("social", "others", "identity")),
-    ("Action", ("agency", "runtime", "goals", "projects", "shares", "imaging", "world")),
-    ("Plugins", ("email", "teams", "phone", "rss", "web", "camera", "forge", "wakeup")),
-    ("Noyau", ("kernel",)),
+#: Réglages › Paramètres avancés : les familles où se rangent ses facultés et ses plugins, dans l'ordre de la page
+PARAM_FAMILY_NAMES: tuple[str, ...] = ("Émotions", "Esprit", "Relations", "Action", "Plugins", "Noyau")
+#: … la famille de chacun, par son nom technique : celle des facultés du cadre, puis celle que la fiche d'un domaine dit
+#: des siennes (``labels["parameters"]``) ; sans famille, il tombe dans « Autres », sous son nom technique
+#: (``inspector/pages/params.py``)
+PARAM_FAMILY: dict[str, str] = _named("parameters", {
+    "affect": "Émotions", "needs": "Émotions", "body": "Émotions", "self": "Émotions", "attention": "Esprit",
+    "memory": "Esprit", "attachments": "Esprit", "transcript": "Esprit", "social": "Relations",
+    "others": "Relations", "identity": "Relations", "agency": "Action", "runtime": "Action",
+    "goals": "Action", "shares": "Action", "imaging": "Action", "world": "Action", "kernel": "Noyau",
+})
+#: … et leur ordre dans leur famille, par leur nom technique : qui n'y est pas vient après, dans l'ordre des fiches
+PARAM_ORDER: tuple[str, ...] = (
+    "affect", "needs", "body", "self", "attention", "memory", "attachments", "transcript", "social",
+    "others", "identity", "agency", "runtime", "goals", "projects", "shares", "imaging", "world", "email",
+    "teams", "phone", "rss", "web", "camera", "forge", "wakeup", "kernel",
 )
+PARAM_FAMILIES: tuple[tuple[str, tuple[str, ...]], ...] = param_families(PARAM_FAMILY_NAMES, PARAM_FAMILY, PARAM_ORDER)
 FACULTY_LABELS: dict[str, str] = _named("faculties", {
     "affect": "Humeur et postures", "needs": "Besoins", "body": "Corps et sommeil", "self": "Estime et récit",
     "attention": "Attention et pensées", "memory": "Mémoire", "transcript": "Fil des conversations",

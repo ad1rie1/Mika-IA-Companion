@@ -39,7 +39,7 @@ import pytest
 
 from mika.app.backup import FOLDERS
 from mika.app.composition import arbitration, faculties
-from mika.app.console import NAVIGATION
+from mika.app.console import NAVIGATION, PARAM_FAMILIES, PARAM_FAMILY, PARAM_FAMILY_NAMES, param_families
 from mika.app.console_menu import MENU
 from mika.app.domains import (
     DOMAINS,
@@ -298,6 +298,27 @@ def test_each_kind_of_label_a_card_says_is_read_by_the_console():
     unknown = sorted(f"{d.name} : {kind}" for d in DOMAINS for kind in d.labels if kind not in read)
     assert not unknown, unknown
     assert _label_kinds_read('A = _named("faculties", {})\nB = _named(KIND, {})\n') == {"faculties"}
+
+
+def test_each_parameter_page_has_its_family():
+    """Réglages › Paramètres avancés range les facultés et les plugins par famille (``app/console.py::param_families``) :
+    la famille de chacun, dite par le cadre ou par la fiche de son domaine (``labels["parameters"]``), est une de
+    ``PARAM_FAMILY_NAMES`` ; une fiche ne range que ce qu'elle nomme (``labels["faculties"]``), et ``PARAM_ORDER`` ne
+    place que ce qui a sa famille, une fois. Sinon une page tomberait dans « Autres » ou dans une famille que la page
+    ne montre pas, sans bruit — ici, avant. Le contrôle voit chaque faute."""
+    assert [name for name, _ in PARAM_FAMILIES] == list(PARAM_FAMILY_NAMES)
+    assert sorted(o for _name, owners in PARAM_FAMILIES for o in owners) == sorted(PARAM_FAMILY)
+    assert any("parameters" in d.labels for d in DOMAINS)  # la lecture trouve bien ce que les fiches disent
+    strays = sorted(f"{d.name} : {owner}" for d in DOMAINS for owner in d.labels.get("parameters", {})
+                    if owner not in d.labels.get("faculties", {}))
+    assert not strays, strays
+    # ceux que l'ordre place, dans son ordre, puis les autres dans l'ordre où leur famille est dite
+    assert param_families(("a", "b"), {"x": "b", "y": "a", "z": "b"}, ("z", "y")) == (("a", ("y",)), ("b", ("z", "x")))
+    for told, order, why in (({"x": "c"}, (), r"familles inconnues : \['x → c'\]"),
+                             ({"x": "a"}, ("x", "w"), r"sans famille : \['w'\]"),
+                             ({"x": "a"}, ("x", "x"), r"placés deux fois : \['x'\]")):
+        with pytest.raises(ValueError, match=why):
+            param_families(("a", "b"), told, order)
 
 
 def test_a_name_said_twice_is_refused_at_assembly():

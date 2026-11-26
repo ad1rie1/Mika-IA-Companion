@@ -458,9 +458,11 @@ class Domain:
     #: où l'on s'en sert (nom, « destination/onglet ») ; sa place : ``app/settings_sections/plugins.py::ORDER``
     plugins: Mapping[str, tuple[str, tuple[str, ...], tuple[str, str] | None]] = field(default_factory=dict)
     #: ses noms en français dans la console, par sorte de libellé (``inspector.catalog.Labels`` : ``faculties``,
-    #: ``sections``, ``processes``, ``events``… ; et ``about`` : ce que fait chaque famille de ses outils, dit à
-    #: l'opératrice dans Réglages › Droits) puis par clé ; la carte de la console les réunit (``app/console.py``), et
-    #: un nom dit deux fois y est refusé
+    #: ``sections``, ``processes``, ``events``… ; ``about`` : ce que fait chaque famille de ses outils, dit à
+    #: l'opératrice dans Réglages › Droits ; ``parameters`` : la famille où se rangent les paramètres de chacune de ses
+    #: facultés ou de ses plugins, dans Réglages › Paramètres avancés — une de ``app/console.py::PARAM_FAMILY_NAMES``,
+    #: sa place dans la famille : ``PARAM_ORDER``, sinon après les autres ; sans famille, « Autres ») puis par clé ; la
+    #: carte de la console les réunit (``app/console.py``), et un nom dit deux fois y est refusé
     labels: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
 
 

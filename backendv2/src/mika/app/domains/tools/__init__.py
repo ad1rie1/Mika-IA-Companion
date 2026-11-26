@@ -41,6 +41,8 @@ TOOLS = Domain(
     },
     labels={
         "faculties": {"mcp": "Outils extérieurs", "web": "Recherche web"},
+        # la famille de leurs paramètres (Réglages › Paramètres avancés)
+        "parameters": {"web": "Plugins"},
         "sections": {"services": "Ce que ses services extérieurs lui ont rendu",
                      # ADR 0255
                      "work_services": "Ce que ses services extérieurs ont rendu à son travail (après un accord)"},

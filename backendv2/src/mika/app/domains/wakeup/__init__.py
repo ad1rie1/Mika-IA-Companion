@@ -33,6 +33,8 @@ WAKEUP = Domain(
     },
     labels={
         "faculties": {"wakeup": "Réveils par API"},
+        # la famille de leurs paramètres (Réglages › Paramètres avancés)
+        "parameters": {"wakeup": "Plugins"},
         "sections": {"wake_order": "Ce qu'un réveil par API lui demande (ses consignes)",
                      "wake_text": "Ce qu'apporte l'appel d'un réveil par API (cité)",
                      "wake_reports": "Ce que ses réveils par API ont donné"},

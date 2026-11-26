@@ -46,6 +46,8 @@ MAIL = Domain(
     },
     labels={
         "faculties": {"email": "Courrier"},
+        # la famille de leurs paramètres (Réglages › Paramètres avancés)
+        "parameters": {"email": "Plugins"},
         "sections": {
             "mails": "Ses mails non lus",
             "drafts": "Ses brouillons de mails", "voice": "Sa voix dans cette boîte", "task_mail": "Le mail à traiter",
