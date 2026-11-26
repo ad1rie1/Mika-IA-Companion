@@ -4,7 +4,10 @@ Ce que chaque entrée du menu de `/admin/` montre, et sous quelle forme. Le menu
 `app/console_menu.py` ; les destinations (adresses, onglets, libellés) dans `app/console.py` ; les réglages dans
 `app/settings_sections/` (un module par rubrique) ; les pages dessinées à la main dans `app/handmade/` (gabarits `inspector/templates/handmade/`,
 feuilles `inspector/static/handmade/`, la table `app/handmade/pages.py::DRAWN`, les onglets de chaque destination dans
-`app/handmade/tabs/`). Les décisions sont dans les ADR 0025, 0029, 0042, 0045, 0103, 0121 à 0124, 0176 et 0177.
+`app/handmade/tabs/`). Ce qui est à un domaine — sa destination, son lien de menu, ses libellés, ses onglets, ses
+fiches, sa rubrique de réglages, leurs gabarits et leurs feuilles — vit dans son dossier, `app/domains/<nom>/` (sa
+fiche et `console/`, ADR 0310) : la carte, le menu et ces tables les y prennent. Les décisions sont dans les ADR 0025,
+0029, 0042, 0045, 0103, 0121 à 0124, 0176, 0177 et 0310.
 
 Trois règles tiennent toute la console :
 
