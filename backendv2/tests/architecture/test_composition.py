@@ -1,12 +1,14 @@
 """Preuve M0 — le démarrage refuse une composition incohérente, et les couches
-sont vérifiées (un import interdit fait échouer import-linter) ; les sections
-des plugins restent en zone volatile (ADR 0022)."""
+sont vérifiées (un import interdit fait échouer import-linter, et sa liste
+d'indépendance nomme chaque faculté et chaque plugin) ; les sections des
+plugins restent en zone volatile (ADR 0022)."""
 
 from __future__ import annotations
 
 import shutil
 import subprocess
 import sys
+import tomllib
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -180,3 +182,67 @@ def test_a_forbidden_import_breaks_the_layers(tmp_path):
     out = _lint(copy)
     assert out.returncode != 0
     assert "BROKEN" in out.stdout or "broken" in out.stdout.lower()
+
+
+# ── la liste d'indépendance : chaque faculté et chaque plugin, ni plus ni moins ──
+
+#: le contrat d'import-linter qui tient « une faculté n'importe jamais une autre faculté ni un plugin, et l'inverse »
+INDEPENDENCE = "Les facultés et les plugins ne se connaissent pas"
+#: les couches dont chaque paquet est un propriétaire indépendant des autres
+OWNERS = ("faculties", "plugins")
+
+
+def owners_on_disk(src: Path) -> set[str]:
+    """Chaque faculté et chaque plugin, par son nom pointé : un dossier (``mika.plugins.email``) ou un module seul
+    (``mika.plugins.x``) sous ``faculties/`` et ``plugins/`` — ni ``__init__.py`` ni ``__pycache__``."""
+    return {f"mika.{layer}.{p.stem}" for layer in OWNERS for p in (src / "mika" / layer).iterdir()
+            if not p.name.startswith(("_", ".")) and (p.is_dir() or p.suffix == ".py")}
+
+
+def independence_faults(pyproject: Path, src: Path) -> list[str]:
+    """Ce que la liste d'indépendance d'import-linter (``pyproject.toml``) ne dit pas des dossiers, en phrases. Elle
+    est fermée : import-linter ne garde que ce qu'elle nomme, et un plugin qu'on oublierait d'y inscrire pourrait
+    importer n'importe quelle faculté ou n'importe quel plugin, et l'inverse — sans bruit."""
+    contracts = tomllib.loads(pyproject.read_text(encoding="utf-8"))["tool"]["importlinter"]["contracts"]
+    found = [c for c in contracts if c.get("name") == INDEPENDENCE and c.get("type") == "independence"]
+    if len(found) != 1:
+        return [f"pyproject.toml : un seul contrat d'indépendance « {INDEPENDENCE} » attendu, {len(found)} trouvé(s)"]
+    listed, present = set(found[0]["modules"]), owners_on_disk(src)
+    out = [f"{m} n'est pas dans la liste d'indépendance d'import-linter (pyproject.toml, « {INDEPENDENCE} ») : "
+           "l'y inscrire, sinon il peut importer une autre faculté ou un plugin, et l'inverse (ARCHITECTURE.md, "
+           "« Écrire une faculté », point 4)" for m in sorted(present - listed)]
+    out += [f"{m} est dans la liste d'indépendance d'import-linter (pyproject.toml) mais n'est plus un dossier de "
+            f"{' ni de '.join(OWNERS)} : l'en retirer" for m in sorted(listed - present)]
+    return out
+
+
+def test_the_independence_list_names_every_faculty_and_plugin():
+    assert len(owners_on_disk(ROOT / "src")) >= 30  # la lecture trouve bien les dossiers
+    faults = independence_faults(ROOT / "pyproject.toml", ROOT / "src")
+    assert not faults, "\n".join(faults)
+
+
+def test_the_independence_check_sees_a_forgotten_owner_and_a_stale_one(tmp_path):
+    """Un plugin neuf hors de la liste (un dossier comme un module seul) fait échouer la garde, un nom resté dans la
+    liste après son départ aussi ; ce qui n'est pas un propriétaire (``__init__.py``, ``__pycache__``) ne compte pas."""
+    for written in ("faculties/body/__init__.py", "faculties/__init__.py", "plugins/__init__.py",
+                    "plugins/email/__init__.py", "plugins/drive/__init__.py", "plugins/bank.py",
+                    "plugins/__pycache__/x.pyc"):
+        (tmp_path / "mika" / written).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / "mika" / written).write_text("")
+    assert owners_on_disk(tmp_path) == {"mika.faculties.body", "mika.plugins.email", "mika.plugins.drive",
+                                        "mika.plugins.bank"}
+    toml = tmp_path / "pyproject.toml"
+    toml.write_text(f'[[tool.importlinter.contracts]]\nname = "{INDEPENDENCE}"\ntype = "independence"\n'
+                    'modules = ["mika.faculties.body", "mika.plugins.email", "mika.plugins.gone"]\n', encoding="utf-8")
+    faults = independence_faults(toml, tmp_path)
+    assert [f.split(" ", 1)[0] for f in faults] == ["mika.plugins.bank", "mika.plugins.drive", "mika.plugins.gone"]
+    assert "l'y inscrire" in faults[0] and "l'en retirer" in faults[2]
+    toml.write_text(f'[[tool.importlinter.contracts]]\nname = "{INDEPENDENCE}"\ntype = "independence"\n'
+                    'modules = ["mika.faculties.body", "mika.plugins.email", "mika.plugins.drive", '
+                    '"mika.plugins.bank"]\n', encoding="utf-8")
+    assert independence_faults(toml, tmp_path) == []
+    toml.write_text('[[tool.importlinter.contracts]]\nname = "autre"\ntype = "layers"\nlayers = []\n',
+                    encoding="utf-8")
+    assert independence_faults(toml, tmp_path) == [
+        f"pyproject.toml : un seul contrat d'indépendance « {INDEPENDENCE} » attendu, 0 trouvé(s)"]

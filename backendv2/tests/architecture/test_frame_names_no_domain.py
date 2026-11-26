@@ -106,6 +106,63 @@ SHARED: dict[str, str] = {
                           "d'ailleurs",
 }
 
+#: les couches dont chaque paquet est à un domaine (``PACKAGES``) ou au cadre (``FRAME_OWNED``) : une liste fermée
+#: qu'un paquet neuf ne peut pas oublier sans bruit
+CLAIMED_LAYERS = ("plugins", "adapters", "contracts", "ports")
+CORE = "le cœur : le contrat d'une faculté qui n'est à aucun domaine (les facultés du cœur ne sont pas des domaines)"
+MODELS = "la passerelle des modèles : elle sert tout le moteur"
+STORAGE = "le stockage : le magasin, ses bases et leurs moteurs (ADR 0101)"
+OFF_JOURNAL = "les octets hors du journal (ADR 0062) : les fichiers envoyés, les pièces reçues, la documentation"
+DRAWINGS = "passerelle de fournisseurs, comme celle des modèles ; en faire un domaine reste à décider"
+
+#: chaque paquet de ``CLAIMED_LAYERS`` qui n'est à aucun domaine, et pourquoi : le cadre peut le nommer
+FRAME_OWNED: dict[str, str] = {
+    # les dessins (ADR 0061, 0063)
+    "plugins.imaging": DRAWINGS,
+    "adapters.imaging": DRAWINGS,
+    "contracts.imaging": DRAWINGS,
+    "ports.imaging": DRAWINGS,
+    # les adaptateurs
+    "adapters.addresses": "la règle des adresses publiques (ADR 0228), que partagent plusieurs adaptateurs",
+    "adapters.cage": "la cage bubblewrap commune (ADR 0020, 0039, 0064) : l'atelier, les apps, les serveurs MCP",
+    "adapters.changes": "ce qu'une base tenue à côté du journal dit de ses écritures (ADR 0308) : la machinerie du "
+                        "direct, commune à ces bases",
+    "adapters.database": STORAGE,
+    "adapters.listing": "ce que propose un fournisseur, lu par la passerelle des modèles et par celle des images",
+    "adapters.llm": MODELS,
+    "adapters.preprocess": "le prétraitement de ce qu'on lui envoie, au bord du cœur",
+    "adapters.push": "les notifications du téléphone (ADR 0077), que le transport web envoie",
+    "adapters.shares": OFF_JOURNAL,
+    "adapters.store_sql": STORAGE,
+    "adapters.system": "les sources réelles du temps et des identifiants",
+    "adapters.vectors": "les plongements et leur index, que lit la mémoire",
+    "adapters.web": "le transport web : le chat, les comptes, la session, les portes (ADR 0213)",
+    "adapters.world": "le transport du monde (``mika.world/1``, ADR 0050)",
+    # les contrats
+    **dict.fromkeys(("contracts.affect", "contracts.agency", "contracts.attachments", "contracts.attention",
+                     "contracts.body", "contracts.expression", "contracts.goals", "contracts.identity",
+                     "contracts.memory", "contracts.needs", "contracts.others", "contracts.place", "contracts.presence",
+                     "contracts.self_", "contracts.shares", "contracts.social", "contracts.transcript",
+                     "contracts.world"), CORE),
+    "contracts.entry": "le port d'entrée du cœur (``MindPort``), que parlent les transports web et monde",
+    "contracts.runtime": "le contrat du runtime : perceptions, épisodes, effets",
+    # les ports
+    "ports.changes": "les sujets du direct (ADR 0308), que le cadre et les domaines partagent",
+    "ports.delivery": "la livraison de sa parole vers les transports",
+    "ports.drafts": "ce qui vaut pour un brouillon, quel que soit son canal",
+    "ports.errors": "ce que veut dire une panne du dehors, pour un opérateur",
+    "ports.gate": "les issues des portes à clé que le transport web appelle (ADR 0213)",
+    "ports.journal": STORAGE,
+    "ports.llm": MODELS,
+    "ports.llm_budget": MODELS,
+    "ports.paging": "une page de données, que les ports découpent",
+    "ports.preprocess": "le prétraitement de ce qu'on lui envoie, au bord du cœur",
+    "ports.shares": OFF_JOURNAL,
+    "ports.sql": STORAGE,
+    "ports.store": STORAGE,
+    "ports.vectors": "les vecteurs, que lit la mémoire",
+}
+
 #: ce que le cadre nomme exprès, pour toujours, et pourquoi
 FOREVER: dict[str, str] = {
     "composition.py": "la liste des facultés et des plugins, les lots d'outils de chaque sorte d'épisode et l'ordre "
@@ -228,6 +285,60 @@ def test_every_package_of_a_domain_exists():
     assert all(_exists(module) for module in SHARED), sorted(SHARED)
     assert all(any(_within(module, p) for owned in PACKAGES.values() for p in owned) for module in SHARED), \
         "ce qui n'est dans le paquet d'aucun domaine n'a pas à être excepté"
+
+
+def layer_packages(src: Path = SRC, layers: tuple[str, ...] = CLAIMED_LAYERS) -> set[str]:
+    """Chaque paquet de ces couches, par son nom sous ``mika`` : un dossier (``adapters.llm``) ou un module seul
+    (``ports.sql``) — ni ``__init__.py`` ni ``__pycache__``."""
+    return {f"{layer}.{p.stem}" for layer in layers for p in (src / layer).iterdir()
+            if not p.name.startswith(("_", ".")) and (p.is_dir() or p.suffix == ".py")}
+
+
+def unclaimed(found: set[str], packages: Mapping[str, tuple[str, ...]], frame_owned: Mapping[str, str]) -> list[str]:
+    """Ce qui manque à la répartition des paquets entre les domaines et le cadre, en phrases (``found`` : les paquets
+    de ``CLAIMED_LAYERS``) : un paquet à personne — le cadre pourrait le nommer sans que la garde le voie, s'il est à
+    un domaine —, un paquet dit des deux côtés, une entrée du cadre qui ne sert plus ou sans raison."""
+    claimed = {p for owned in packages.values() for p in owned}
+    out = [f"{p} n'est à aucun domaine (PACKAGES) ni au cadre (FRAME_OWNED) : l'inscrire dans PACKAGES s'il est à "
+           "un domaine (ARCHITECTURE.md, « Écrire un domaine », point 2), sinon dans FRAME_OWNED avec sa raison"
+           for p in sorted(found - claimed - set(frame_owned))]
+    out += [f"{p} est dans PACKAGES et dans FRAME_OWNED : il est à un domaine ou au cadre, pas aux deux"
+            for p in sorted(claimed & set(frame_owned))]
+    out += [f"{p} est dans FRAME_OWNED mais n'est pas un paquet de {', '.join(CLAIMED_LAYERS)} : l'en retirer"
+            for p in sorted(set(frame_owned) - found)]
+    out += [f"{p} est dans FRAME_OWNED sans sa raison" for p, why in sorted(frame_owned.items()) if not why.strip()]
+    return out
+
+
+def test_every_package_below_app_is_of_a_domain_or_of_the_frame():
+    """Chaque paquet de ``plugins/``, ``adapters/``, ``contracts/`` et ``ports/`` est à un domaine (``PACKAGES`` :
+    ce que le cadre n'a pas le droit de nommer) ou au cadre (``FRAME_OWNED``, avec sa raison). Un paquet neuf
+    qu'on oublierait des deux côtés passerait pour du cadre : le cadre pourrait importer le domaine qu'il sert."""
+    found = layer_packages()
+    assert len(found) > 80  # la lecture trouve bien les paquets
+    faults = unclaimed(found, PACKAGES, FRAME_OWNED)
+    assert not faults, "\n".join(faults)
+
+
+def test_the_claim_check_sees_each_fault(tmp_path):
+    for written in ("plugins/__init__.py", "plugins/email/__init__.py", "plugins/vault/__init__.py",
+                    "plugins/__pycache__/x.pyc", "ports/__init__.py", "ports/sql.py", "ports/vault.py", "ports/mail.py"):
+        (tmp_path / written).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / written).write_text("")
+    found = layer_packages(tmp_path, ("plugins", "ports"))
+    assert found == {"plugins.email", "plugins.vault", "ports.sql", "ports.vault", "ports.mail"}
+    packages = {"mail": ("plugins.email", "ports.mail"), "vault": ("plugins.vault", "ports.vault")}
+    assert unclaimed(found, packages, {"ports.sql": "le stockage"}) == []
+    assert unclaimed(found, {"mail": ("plugins.email", "ports.mail")}, {"ports.sql": "le stockage"}) == [
+        f"{p} n'est à aucun domaine (PACKAGES) ni au cadre (FRAME_OWNED) : l'inscrire dans PACKAGES s'il est à un "
+        "domaine (ARCHITECTURE.md, « Écrire un domaine », point 2), sinon dans FRAME_OWNED avec sa raison"
+        for p in ("plugins.vault", "ports.vault")]
+    assert unclaimed(found, packages, {"ports.sql": "le stockage", "ports.mail": "le courrier", "ports.gone": "x",
+                                       "plugins.email": " "}) == [
+        "plugins.email est dans PACKAGES et dans FRAME_OWNED : il est à un domaine ou au cadre, pas aux deux",
+        "ports.mail est dans PACKAGES et dans FRAME_OWNED : il est à un domaine ou au cadre, pas aux deux",
+        f"ports.gone est dans FRAME_OWNED mais n'est pas un paquet de {', '.join(CLAIMED_LAYERS)} : l'en retirer",
+        "plugins.email est dans FRAME_OWNED sans sa raison"]
 
 
 def test_the_listed_domains_are_the_folders_and_the_guard_knows_them():

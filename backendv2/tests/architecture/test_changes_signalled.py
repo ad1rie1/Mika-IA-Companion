@@ -11,7 +11,11 @@ est parti, qu'un contact ou un rendez-vous a changé. Les écrans de tous les jo
 - **toute méthode publique qui écrit** (par la porte, ou par une méthode de la classe qui écrit) **dit ce qui change**
   (``self._changed(…)``, elle-même ou par une méthode de la classe qui le dit) — sauf la tenue de la base que rien ne
   montre à une personne, excusée dans ``QUIET`` avec sa raison ; une excuse qui ne sert plus fait échouer la garde ;
-- les sujets du code (``ports/changes.py``) sont ceux du contrat (``docs/protocole-moi.md``, § 2 bis), et leurs clés.
+- les sujets du code (``ports/changes.py``) sont ceux du contrat (``docs/protocole-moi.md``, § 2 bis), et leurs clés ;
+- ``STORES`` est une liste fermée : **toute classe d'``adapters/`` qui dit ses changements** — elle tient un
+  ``Changes`` (``adapters/changes.py``) ou se fait écouter par ``on_change`` — y est, ou dans ``WRITERS``, ou est
+  excusée dans ``NOT_STORES`` avec sa raison. Une base neuve qu'on oublierait d'y inscrire échapperait sinon à tout
+  ce qui précède.
 
 Deux autres s'écrivent hors du journal sans être des bases à côté, et changent aussi ce que montrent des routes de
 ``/api/moi`` : les comptes (``Accounts`` : un nom, un téléphone qui reçoit ses notifications) et les réglages
@@ -65,6 +69,19 @@ QUIET = {
 #: ce qui s'écrit hors du journal sans être une base à côté : son fichier, sa classe, ce qui y dit qu'elle a écrit
 WRITERS = (("adapters/web/accounts.py", "Accounts", "_changed"),
            ("app/settings.py", "Settings", "_saved"))
+#: ce qui, dans ``adapters/``, se fait écouter sans être une base tenue à côté du journal ni un écrivain de
+#: ``WRITERS`` : son fichier, sa classe, et pourquoi
+NOT_STORES = {
+    ("adapters/mail/client.py", "ImapSmtpMail"): "il relaie l'écoute du courrier relevé (``MailCache.on_change``, dans "
+                                                 "STORES) : il n'écrit aucune base lui-même",
+    ("adapters/mcp/hub.py", "McpHub"): "il dit que son offre d'outils a changé : le noyau relit ses outils "
+                                       "(``kernel.refresh_tools``, ``app/domains/tools/wiring.py``, ADR 0064) — ce "
+                                       "n'est pas une base tenue à côté du journal",
+    ("adapters/forge/__init__.py", "ForgeHost"): "il dit que son offre d'outils a changé (une app écrite ou effacée) : "
+                                                 "le noyau relit ses outils (``kernel.refresh_tools``, "
+                                                 "``app/domains/forge/wiring.py``, ADR 0104) — aucun écran de tous "
+                                                 "les jours ne suit les bases de ses apps",
+}
 
 
 def _self_call(node: ast.AST, name: str) -> bool:
@@ -312,6 +329,94 @@ def test_an_excuse_that_no_longer_serves_fails_the_guard():
         "Base.keep est excusé dans QUIET sans raison : il n'écrit pas, ou il le dit déjà",
         "Base.read est excusé dans QUIET sans raison : il n'écrit pas, ou il le dit déjà",
         "Base.gone est excusé dans QUIET mais n'existe plus"]
+
+
+# ── la liste des bases, fermée ──
+
+
+def _says_its_changes(node: ast.AST) -> bool:
+    """Un nœud par lequel une classe dit ses changements : sa méthode ``on_change``, un ``self.on_change`` qu'elle pose,
+    ou un ``Changes(…)`` qu'elle tient (``adapters/changes.py``)."""
+    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+        return node.name == "on_change"
+    if isinstance(node, ast.Attribute):
+        return node.attr == "on_change" and isinstance(node.ctx, ast.Store) and isinstance(node.value, ast.Name) \
+            and node.value.id == "self"
+    if isinstance(node, ast.Call):
+        return (isinstance(node.func, ast.Name) and node.func.id == "Changes") or \
+            (isinstance(node.func, ast.Attribute) and node.func.attr == "Changes")
+    return False
+
+
+def signalling(source: str) -> set[str]:
+    """Les classes d'un source qui disent leurs changements (``_says_its_changes``)."""
+    return {cls.name for cls in ast.walk(ast.parse(source)) if isinstance(cls, ast.ClassDef)
+            and any(_says_its_changes(n) for n in ast.walk(cls))}
+
+
+def unlisted(sources: dict[str, str], listed: set[tuple[str, str]],
+             excused: dict[tuple[str, str], str]) -> list[str]:
+    """Ce que la liste fermée des bases ne dit pas, en phrases : une classe qui dit ses changements sans y être ni
+    être excusée, une excuse qui ne sert plus, ou qui redit une classe de la liste. ``sources`` : le texte de chaque
+    source d'``adapters/``, par son chemin sous ``src/mika`` ; ``listed`` : ``STORES`` et ``WRITERS``."""
+    found = {(path, cls) for path, text in sources.items() for cls in signalling(text)}
+    out = [f"{path}::{cls} dit ses changements (``on_change``, ``Changes``) sans être dans STORES : une base tenue à "
+           "côté du journal y entre, avec sa porte d'écriture (ARCHITECTURE.md, « Écrire un domaine », point 7 ; "
+           "ADR 0308) ; sinon, l'excuser dans NOT_STORES avec sa raison" for path, cls in sorted(found - listed - set(excused))]
+    out += [f"{path}::{cls} est excusé dans NOT_STORES mais ne dit plus ses changements : l'en retirer"
+            for path, cls in sorted(set(excused) - found)]
+    out += [f"{path}::{cls} est dans STORES (ou WRITERS) et dans NOT_STORES : l'un ou l'autre"
+            for path, cls in sorted(listed & set(excused))]
+    return out
+
+
+def _adapters() -> dict[str, str]:
+    return {str(p.relative_to(SRC)): p.read_text(encoding="utf-8") for p in sorted((SRC / "adapters").rglob("*.py"))
+            if "__pycache__" not in p.parts}
+
+
+def test_every_base_that_says_its_changes_is_in_the_list():
+    sources = _adapters()
+    listed = {(path, cls) for path, cls, _ in (*STORES, *WRITERS)}
+    found = {(path, cls) for path, text in sources.items() for cls in signalling(text)}
+    assert {(path, cls) for path, cls, _ in STORES} <= found  # la lecture voit bien les bases de la liste
+    faults = unlisted(sources, listed, NOT_STORES)
+    assert not faults, "\n".join(faults)
+
+
+SIGNALLING_TOY = '''
+class Store:
+    def __init__(self):
+        self._changes = Changes()
+
+class Relay:
+    def on_change(self, fn):
+        self._inner.on_change(fn)
+
+class Accounts:
+    def __init__(self):
+        self.on_change: object = None
+
+class Plain:
+    def read(self, other):
+        return other.on_change
+'''
+
+
+def test_the_list_check_sees_a_forgotten_base_and_a_stale_excuse():
+    assert signalling(SIGNALLING_TOY) == {"Store", "Relay", "Accounts"}
+    sources = {"adapters/vault/store.py": SIGNALLING_TOY}
+    listed = {("adapters/vault/store.py", "Store"), ("adapters/vault/store.py", "Accounts")}
+    excused = {("adapters/vault/store.py", "Relay"): "il relaie"}
+    assert unlisted(sources, listed, excused) == []
+    assert unlisted(sources, {("adapters/vault/store.py", "Accounts")}, excused) == [
+        "adapters/vault/store.py::Store dit ses changements (``on_change``, ``Changes``) sans être dans STORES : une "
+        "base tenue à côté du journal y entre, avec sa porte d'écriture (ARCHITECTURE.md, « Écrire un domaine », "
+        "point 7 ; ADR 0308) ; sinon, l'excuser dans NOT_STORES avec sa raison"]
+    assert unlisted(sources, listed, {**excused, ("adapters/vault/store.py", "Plain"): "x",
+                                      ("adapters/vault/store.py", "Store"): "y"}) == [
+        "adapters/vault/store.py::Plain est excusé dans NOT_STORES mais ne dit plus ses changements : l'en retirer",
+        "adapters/vault/store.py::Store est dans STORES (ou WRITERS) et dans NOT_STORES : l'un ou l'autre"]
 
 
 # ── le contrat ──
