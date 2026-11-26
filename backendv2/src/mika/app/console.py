@@ -19,22 +19,18 @@ from __future__ import annotations
 
 from typing import Any
 
-from mika.app.domains import DOMAINS
+from mika.app.domains import DOMAINS, gathered
 from mika.inspector.catalog import Destination, Labels, NavGroup
 from mika.inspector.names import OTHER_EFFECTS
 
 
 def _named(kind: str, frame: dict[str, Any]) -> dict[str, Any]:
     """Les libellés d'une sorte (``Labels.<kind>``) : ceux du cadre, puis ceux que chaque domaine dit dans sa fiche
-    (``Domain.labels``, ADR 0310), dans l'ordre des fiches. Un nom dit deux fois est refusé : l'un des deux mentirait."""
-    out = dict(frame)
-    for domain in DOMAINS:
-        for key, said in domain.labels.get(kind, {}).items():
-            if key in out:
-                raise ValueError(f"le libellé « {key} » ({kind}) est dit deux fois : la fiche de « {domain.name} » "
-                                 "redit un nom du cadre ou d'un autre domaine")
-            out[key] = said
-    return out
+    (``Domain.labels``, ADR 0310), dans l'ordre des fiches. Un nom dit deux fois est refusé (``gathered``) : l'un des
+    deux mentirait. Chaque sorte qu'une fiche dit est lue ici, par son nom
+    (``tests/architecture/test_frame_names_no_domain.py``)."""
+    return gathered(f"un libellé de la sorte « {kind} »", [
+        ("le cadre", frame), *((f"la fiche de « {d.name} »", d.labels.get(kind, {})) for d in DOMAINS)])
 
 
 def _destination(domain: str) -> Destination:

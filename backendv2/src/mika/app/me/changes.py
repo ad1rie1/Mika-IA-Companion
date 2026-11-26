@@ -40,7 +40,7 @@ from typing import Any
 
 from mika.adapters.web.accounts import Account
 from mika.adapters.web.hub import Hub
-from mika.app.domains import DOMAINS, part
+from mika.app.domains import DOMAINS, gathered, part
 from mika.app.me.api import Call, me_of
 from mika.app.me.common import allows
 from mika.app.me.touches import EVERYONE, OWN, PERSON, READ, Touch
@@ -70,28 +70,32 @@ BURST = 3
 #: une trame à une personne part en ce délai au plus (s) : une connexion lente ne retient ni les autres ni la suite
 SEND_TIMEOUT_S = 5.0
 
-#: ce que chaque domaine apporte au direct (ADR 0310) : la part de sa fiche, dans l'ordre des fiches
-PARTS = tuple(part(d.live, "LIVE") for d in DOMAINS if d.live is not None)
+#: ce que chaque domaine apporte au direct (ADR 0310) : la part de sa fiche, dans l'ordre des fiches, et qui l'apporte
+BROUGHT = tuple((f"le domaine « {d.name} »", part(d.live, "LIVE")) for d in DOMAINS if d.live is not None)
+PARTS = tuple(brought for _, brought in BROUGHT)
+# chaque table réunit ce que disent les parts (``gathered``) : un nom que deux parts disent est refusé à l'import,
+# au lieu que la dernière l'emporte sans bruit
 #: sujet d'une base tenue à côté → la traduction de son domaine ; règle d'une touche → ce que la personne en voit
-CHANGES = {topic: translate for part in PARTS for topic, translate in part.changes.items()}
-SEEN = {rule: seen for part in PARTS for rule, seen in part.seen.items()}
+CHANGES = gathered("un sujet de LivePart.changes", ((who, p.changes) for who, p in BROUGHT))
+SEEN = gathered("une règle de LivePart.seen", ((who, p.seen) for who, p in BROUGHT))
 #: règle → les niveaux de la personne sur ses propriétaires ; règle → le propriétaire d'une clé
-LEVELS = {rule: levels for part in PARTS for rule, levels in part.levels.items()}
-OWNER_OF = {rule: owner for part in PARTS for rule, owner in part.owner_of.items()}
+LEVELS = gathered("une règle de LivePart.levels", ((who, p.levels) for who, p in BROUGHT))
+OWNER_OF = gathered("une règle de LivePart.owner_of", ((who, p.owner_of) for who, p in BROUGHT))
 #: règle → son propre jugement
-JUDGE = {rule: judge for part in PARTS for rule, judge in part.judge.items()}
+JUDGE = gathered("une règle de LivePart.judge", ((who, p.judge) for who, p in BROUGHT))
 #: port du noyau → ses comptes, à lire une fois par envoi sur la boucle
-LISTED = {name: read for part in PARTS for name, read in part.listed.items()}
+LISTED = gathered("un port de LivePart.listed", ((who, p.listed) for who, p in BROUGHT))
 #: propriétaire d'une tâche → où elle en est (la traduction de son domaine)
-TASKS = {owner: work for part in PARTS for owner, work in part.tasks.items()}
+TASKS = gathered("un propriétaire de LivePart.tasks", ((who, p.tasks) for who, p in BROUGHT))
 
 #: ce que change le réglage d'un propriétaire (``kernel.params_changed``) : qui voit quoi, ce qui se règle — à toutes
-PARAMS: Mapping[str, tuple[str, ...]] = {
-    owner: topics for part in PARTS for owner, topics in part.params.items()}
+PARAMS: Mapping[str, tuple[str, ...]] = gathered("un propriétaire de LivePart.params",
+                                                 ((who, p.params) for who, p in BROUGHT))
 
 #: ce qu'un réglage enregistré hors du journal change (``Settings._put``, par sa clé), à toutes, sans clé ; tout autre
 #: réglage, Paramètres seulement
-SAVED: Mapping[str, tuple[str, ...]] = {key: topics for part in PARTS for key, topics in part.saved.items()}
+SAVED: Mapping[str, tuple[str, ...]] = gathered("une clé de LivePart.saved",
+                                                ((who, p.saved) for who, p in BROUGHT))
 
 
 # ── du journal ────────────────────────────────────────────────────────────
@@ -143,10 +147,11 @@ def _identity(e: Any, frame: Any, kernel: Any) -> list[Touch]:
     return [Touch(topic, EVERYONE) for topic in TOPICS] if e.type is identity_c.LINKED else []
 
 
-#: chaque propriétaire d'événements dont le journal change ce que montrent les écrans, et sa traduction
-BY_OWNER = {rt.OWNER: _runtime,
-            KERNEL.name: _kernel, identity_c.OWNER: _identity,
-            **{owner: translate for part in PARTS for owner, translate in part.events.items()}}
+#: chaque propriétaire d'événements dont le journal change ce que montrent les écrans, et sa traduction : ceux du
+#: cadre, puis ceux des parts — un propriétaire que deux disent est refusé
+BY_OWNER = gathered("un propriétaire de LivePart.events", [
+    ("le cadre", {rt.OWNER: _runtime, KERNEL.name: _kernel, identity_c.OWNER: _identity}),
+    *((who, p.events) for who, p in BROUGHT)])
 
 
 def touches_of(events: Iterable[Any], frame: Any, kernel: Any) -> list[Touch]:

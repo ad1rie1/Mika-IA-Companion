@@ -57,7 +57,7 @@ from mika.app import persona as persona_file
 from mika.app.console import FACULTY_LABELS, LABELS, NAVIGATION, PARAM_FAMILIES
 from mika.app.console_menu import menu_for
 from mika.app.constellation import Constellation
-from mika.app.domains import DOMAINS, part
+from mika.app.domains import DOMAINS, gathered, part
 from mika.app.handmade import access, approval_sources, rights, waiting
 from mika.app.handmade.home import HomePage
 from mika.app.handmade.now import NowPage
@@ -303,8 +303,17 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     wiring = Wiring(data=data, settings=settings, clock=clock, bases=bases, ports=outside, store=store, her=her,
                     serving=serving)
     wired = [d.wiring for d in DOMAINS if d.wiring is not None]
-    for module in wired:
-        part(module, "wire")(wiring)
+    # les ports que ce serveur pose lui-même, puis ceux que chaque domaine pose : un nom repris (« vectors », le port
+    # d'un autre domaine) écraserait l'autre sans bruit dans les ports du noyau — il est refusé (``gathered``)
+    posed: list[tuple[str, dict[str, Any]]] = [
+        ("le serveur", {"delivery": hub, "activity": hub, "vectors": vectors, **outside})]
+    for d in DOMAINS:
+        if d.wiring is not None:
+            before = dict(outside)
+            part(d.wiring, "wire")(wiring)
+            posed.append((f"le domaine « {d.name} »",
+                          {k: v for k, v in outside.items() if k not in before or before[k] is not v}))
+    gathered("un port du noyau", posed)
     kernel = Kernel(composition.deps(store=store, clock=clock, ids=RandomIdGen(), gateway=gateway,
                                      ports={"delivery": hub, "activity": hub, "vectors": vectors, **outside},
                                      access_tables=settings.access_tables, closeness=social_c.is_close,

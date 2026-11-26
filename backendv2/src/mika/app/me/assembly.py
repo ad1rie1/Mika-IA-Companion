@@ -13,7 +13,7 @@ from typing import Any
 
 from starlette.routing import Route
 
-from mika.app.domains import DOMAINS, part
+from mika.app.domains import DOMAINS, gathered, part
 from mika.app.me import (
     rights,
     settings,
@@ -29,9 +29,11 @@ MODULES: tuple[Callable[[MeApiBase], list[Route]], ...] = (
     rights.routes, settings.routes, sharing.routes,
     writing.routes,
     *(part(d.api, "routes") for d in DOMAINS if d.api is not None))
-#: ce que chacun compte pour la barre du haut
-COUNTERS: tuple[tuple[str, Callable[[Call], int]], ...] = tuple(
-    (name, count) for d in DOMAINS for name, count in part(d.api, "COUNTERS", {}).items())
+#: ce que chacun compte pour la barre du haut, par son nom : un nom que deux domaines disent est refusé à l'import
+#: (``gathered``), au lieu que le second remplace l'autre dans ``counts``
+COUNTERS: tuple[tuple[str, Callable[[Call], int]], ...] = tuple(gathered(
+    "un compteur de la barre du haut, COUNTERS",
+    ((f"le domaine « {d.name} »", part(d.api, "COUNTERS", {})) for d in DOMAINS)).items())
 
 
 async def who(req: Call) -> dict[str, Any]:

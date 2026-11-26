@@ -38,6 +38,10 @@ cadre les importe au moment d'assembler (``part``), et y lit un nom convenu :
   les gens de la démonstration en place (``people`` : le moyen de communication de chacun, par son nom de compte) —
   elle rend les adresses de ses pages à exporter.
 
+Ce que plusieurs fiches disent par nom (les sujets et les règles du direct, les compteurs, les fiches et les onglets
+de la console, les libellés, les ports) se réunit par ``gathered`` : un nom dit deux fois y est refusé à
+l'assemblage, au lieu que le dernier écrase l'autre.
+
 Le registre (``mika.app.domains``) est donc une feuille de l'arbre des imports : n'importe quel module d'``app`` peut
 le lire, aucun import ne peut tourner en rond par lui. ``tests/architecture/test_frame_names_no_domain.py`` le
 garde, et vérifie que chaque part nommée existe et porte son nom convenu.
@@ -46,7 +50,7 @@ garde, et vérifie que chaque part nommée existe et porte son nom convenu.
 from __future__ import annotations
 
 import importlib
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -387,6 +391,22 @@ class Domain:
     #: ``sections``, ``processes``, ``events``…) puis par clé ; la carte de la console les réunit
     #: (``app/console.py``), et un nom dit deux fois y est refusé
     labels: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+
+
+def gathered(what: str, said: Iterable[tuple[str, Mapping[Any, Any]]]) -> dict[Any, Any]:
+    """Ce que plusieurs disent, réuni en un dictionnaire, dans l'ordre : ``said`` donne, pour chacun, qui le dit (« le
+    cadre », « le domaine « mail » ») et ce qu'il dit (nom → valeur) ; ``what`` dit ce que sont ces noms (« un sujet de
+    LivePart.changes »). Le cadre assemble ainsi ce que les fiches apportent : un nom dit deux fois, et le second
+    écraserait le premier sans bruit — il est refusé (``ValueError``), en disant le nom redit et les deux qui le
+    disent."""
+    out: dict[Any, Any] = {}
+    by: dict[Any, str] = {}
+    for who, items in said:
+        for key, value in items.items():
+            if key in by:
+                raise ValueError(f"« {key} » est dit deux fois ({what}) : par {by[key]}, puis par {who}")
+            out[key], by[key] = value, who
+    return out
 
 
 def part(module: str | None, name: str, default: Any = None) -> Any:

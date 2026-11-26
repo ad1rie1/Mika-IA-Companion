@@ -33,6 +33,10 @@ import ast
 from collections.abc import Iterator, Mapping
 from pathlib import Path
 
+import pytest
+
+from mika.app.console import NAVIGATION
+from mika.app.console_menu import MENU
 from mika.app.domains import (
     DOMAINS,
     AccountsPart,
@@ -44,6 +48,7 @@ from mika.app.domains import (
     PortPart,
     SharingPart,
     TablePart,
+    gathered,
     part,
 )
 from mika.app.handmade.person import TABS as PERSON_TABS
@@ -231,6 +236,52 @@ def test_the_projects_come_last():
     (``project:<n>``, ``app/domains/projects/live.py::effect``), quel qu'en soit le domaine : un domaine inscrit après
     elle ne verrait donc jamais ses effets nés dans un projet — sans bruit. Les projets restent la dernière fiche."""
     assert DOMAINS[-1].name == "projects", [d.name for d in DOMAINS]
+
+
+def test_every_destination_and_menu_link_of_a_card_is_placed():
+    """Une fiche dit sa destination et son lien de menu (``Domain.destination``, ``Domain.menu``) ; la carte de la
+    console (``app/console.py::NAVIGATION``) et son menu (``app/console_menu.py::MENU``) disent où ils sont rangés, en
+    les prenant par le nom du domaine. Un nom qu'ils ne citent pas, et la fiche aurait une destination sans page, un
+    lien que personne ne montre — sans bruit."""
+    placed = [destination for group in NAVIGATION for destination in group.items]
+    links = [link for group in MENU for link in group.items]
+    lost = [f"{d.name} : sa destination « {d.destination.key} »" for d in DOMAINS
+            if d.destination is not None and not any(x is d.destination for x in placed)]
+    lost += [f"{d.name} : son lien « {d.menu.label} »" for d in DOMAINS
+             if d.menu is not None and not any(x is d.menu for x in links)]
+    assert any(d.destination is not None for d in DOMAINS) and any(d.menu is not None for d in DOMAINS)
+    assert not lost, lost
+
+
+def _label_kinds_read(source: str) -> set[str]:
+    """Les sortes de libellés que la carte de la console réunit : le premier argument de chaque ``_named(…)``."""
+    return {node.args[0].value for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "_named"
+            and node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)}
+
+
+def test_each_kind_of_label_a_card_says_is_read_by_the_console():
+    """Les libellés d'une fiche (``Domain.labels``) se rangent par sorte, que la carte de la console réunit une à une
+    (``app/console.py::_named``) : une sorte qu'elle ne lit pas — mal orthographiée (« faculty »), ou qu'aucune table
+    n'y réunit — et ses noms ne seraient jamais montrés, sans bruit."""
+    read = _label_kinds_read((APP / "console.py").read_text(encoding="utf-8"))
+    assert {"faculties", "events", "owners", "signals"} <= read  # la lecture trouve bien les sortes
+    unknown = sorted(f"{d.name} : {kind}" for d in DOMAINS for kind in d.labels if kind not in read)
+    assert not unknown, unknown
+    assert _label_kinds_read('A = _named("faculties", {})\nB = _named(KIND, {})\n') == {"faculties"}
+
+
+def test_a_name_said_twice_is_refused_at_assembly():
+    """Ce que les fiches disent par nom se réunit par ``gathered`` (les tables du direct, les compteurs, les fiches et
+    les onglets de la console, les libellés, les ports) : un nom redit lève, en disant le nom et les deux qui le
+    disent ; sinon, tout est gardé, dans l'ordre."""
+    said = [("le cadre", {"a": 1, "b": 2}), ("le domaine « mail »", {"c": 3}), ("le domaine « teams »", {})]
+    assert list(gathered("un sujet", said).items()) == [("a", 1), ("b", 2), ("c", 3)]
+    with pytest.raises(ValueError, match=r"« b » est dit deux fois \(un sujet\) : par le cadre, puis par le domaine "
+                                         r"« teams »"):
+        gathered("un sujet", [*said[:2], ("le domaine « teams »", {"b": 9})])
+    with pytest.raises(ValueError, match="par le domaine « mail », puis par le domaine « teams »"):
+        gathered("un sujet", [*said[:2], ("le domaine « teams »", {"c": 3})])  # même redit à l'identique
 
 
 def test_every_part_a_card_names_exists_and_carries_its_name():
