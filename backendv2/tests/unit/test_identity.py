@@ -356,7 +356,7 @@ def test_the_same_kind_of_proof_counts_once():
     from types import SimpleNamespace
 
     from mika.faculties.identity import Claim, Handle
-    from mika.faculties.identity.faculty import _apply
+    from mika.faculties.identity.faculty import with_evidence
 
     h = Handle(channel="external", trust=privacy.ChannelTrust.ACCOUNT, first_seen=0,
                claim=Claim("Alice", "user_1", 0.1, 0, ("self_declared",)))
@@ -364,11 +364,11 @@ def test_the_same_kind_of_proof_counts_once():
     def ev(item):
         return SimpleNamespace(at=0, data=SimpleNamespace(handle="ext_9", kind=identity_c.SHARED_MEMORY, item=item))
 
-    once = _apply(h, ev(1))
+    once = with_evidence(h, ev(1))
     assert once.claim is not None and once.claim.certainty == pytest.approx(0.6)
-    assert _apply(once, ev(1)).claim.certainty == pytest.approx(0.6)  # le même souvenir
-    assert _apply(once, ev(2)).claim.certainty == pytest.approx(0.6)  # un autre : même sorte de preuve
-    assert not _apply(_apply(once, ev(2)), ev(3)).person
+    assert with_evidence(once, ev(1)).claim.certainty == pytest.approx(0.6)  # le même souvenir
+    assert with_evidence(once, ev(2)).claim.certainty == pytest.approx(0.6)  # un autre : même sorte de preuve
+    assert not with_evidence(with_evidence(once, ev(2)), ev(3)).person
 
 
 def test_the_panel_shows_a_claim_but_opens_the_file_only_once_convinced(tmp_path):

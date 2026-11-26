@@ -25,15 +25,16 @@ from mika.faculties.identity.faculty import (
     IDENTITY,
     Handle,
     IdentityState,
-    _apply,
-    _params,
-    _root,
     denial_target,
     known_as,
     owner_person,
+    params,
+    people,
+    root_person,
     view_of,
+    with_evidence,
 )
-from mika.faculties.identity.inspect import certainty_fr, free_names, people
+from mika.faculties.identity.inspect import certainty_fr, free_names
 from mika.kernel.events import Content
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
@@ -72,7 +73,7 @@ def _seen(handle: str) -> Guard:
 
 
 def _declared(frame: Frame) -> frozenset[str]:
-    return frozenset(_params(frame.env.params_of("identity", frame.root)).owners)
+    return frozenset(params(frame.env.params_of("identity", frame.root)).owners)
 
 
 def _rights(s: IdentityState, frame: Frame, handle: str, h: Handle, person: str) -> str:
@@ -104,7 +105,7 @@ def _resolve(s: IdentityState, frame: Frame, text: str) -> str:
     text = text.strip()
     known = people(s, frame)
     if text in known or text in s.handles:
-        person = _root(s, text)
+        person = root_person(s, text)
     else:
         found = sorted(p for p in known if not p.startswith("name:") and same_name(text, known_as(s, p)))
         exact = [p for p in found if fold(known_as(s, p)) == fold(text)]
@@ -349,7 +350,7 @@ def _testify(s: IdentityState, frame: Frame, args: EvidenceArgs, ctx: ActionCont
     draft = c.EVIDENCE.draft(handle=handle, kind=args.kind, by="operator", denies=denies, about=about,
                              name=Content.of(name, level=int(privacy.Sensitivity.ANODYNE)) if name else None,
                              note=Content.of(note, level=int(privacy.Sensitivity.PERSONAL)) if note else None)
-    after = _apply(h, SimpleNamespace(data=draft.data, at=frame.now))
+    after = with_evidence(h, SimpleNamespace(data=draft.data, at=frame.now))
     heavy = _heavy(s, h, after, handle)
     if heavy and not args.confirmed:
         raise confirm_first(heavy)
@@ -393,7 +394,7 @@ def _mention(args: NameArgs) -> str:
 def _nameable(s: IdentityState, frame: Frame, key: str) -> bool:
     """Une personne à qui un nom dont on lui a parlé peut se relier : identifiable, une racine (pas une adresse
     reliée à une autre), et pas elle-même « connue seulement de nom »."""
-    return is_identifiable(key) and not key.startswith("name:") and _root(s, key) == key
+    return is_identifiable(key) and not key.startswith("name:") and root_person(s, key) == key
 
 
 def _can_bind_name(s: IdentityState, frame: Frame, key: str, ports: Mapping[str, Any]) -> bool:

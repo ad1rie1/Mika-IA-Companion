@@ -17,6 +17,7 @@ from mika.kernel.builtin import SUBJECT_FORGOTTEN
 from mika.kernel.clock import DAY, US
 from mika.kernel.faculty import CatchUp, Faculty
 from mika.kernel.forms import Knob
+from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
 from mika.vocab import privacy
 from mika.vocab.people import clean_display_name, fold, is_identifiable, is_internal, named_label, same_name
@@ -130,7 +131,7 @@ IDENTITY.declare(*c.ALL)
 EXPIRY_PERIOD = DAY
 
 
-def _params(p: IdentityParams | None) -> IdentityParams:
+def params(p: IdentityParams | None) -> IdentityParams:
     return p if p is not None else IdentityParams()
 
 
@@ -261,7 +262,7 @@ class Expire:
         return period_start + EXPIRY_PERIOD
 
     async def run(self, ctx: Any) -> None:
-        p = _params(ctx.frame.env.params_of("identity", ctx.frame.root))
+        p = params(ctx.frame.env.params_of("identity", ctx.frame.root))
         ttl = p.stranger_ttl_days * DAY
         drafts = []
         for handle, h in ctx.state.handles.items():
@@ -369,7 +370,7 @@ def _hinted(h: Handle, e: Any) -> Handle:
     return replace(h, claim=replace(claim, hints=(*claim.hints, hint)[-HINTS_KEPT:]))
 
 
-def _apply(h: Handle, e: Any) -> Handle:
+def with_evidence(h: Handle, e: Any) -> Handle:
     d = e.data
     bar = privacy.POLICY.private_threshold
     if d.kind == c.SHARED_HINT:
@@ -429,7 +430,7 @@ def _evidence(s: IdentityState, e, cx) -> IdentityState:
     h = s.handles.get(e.data.handle)
     if h is None or h.authenticated:
         return s
-    return _put(s, e.data.handle, _apply(h, e))
+    return _put(s, e.data.handle, with_evidence(h, e))
 
 
 @IDENTITY.reducer(c.LINKED)
@@ -447,7 +448,7 @@ def _linked(s: IdentityState, e, cx) -> IdentityState:
     if d.person is None or d.person == d.handle:
         h = replace(_unbound(h), claim=None)
     else:
-        root = _root(s, d.person)
+        root = root_person(s, d.person)
         if root == d.handle:
             return s
         h = replace(h, person=root, certainty=privacy.BOUND, via=c.VIA_OPERATOR, claim=None)
@@ -461,7 +462,7 @@ def _name_bound(s: IdentityState, e, cx) -> IdentityState:
         return s
     if d.person is None:
         return replace(s, names=s.names.delete(d.name)) if d.name in s.names else s
-    person = _root(s, d.person)
+    person = root_person(s, d.person)
     if person.startswith(NAMED) or is_internal(person):
         return s
     return replace(s, names=s.names.set(d.name, person))
@@ -473,7 +474,7 @@ def _name_dismissed(s: IdentityState, e, cx) -> IdentityState:
     d = e.data
     if not d.name.startswith(NAMED) or not d.person:
         return s
-    person = _root(s, d.person)
+    person = root_person(s, d.person)
     if person.startswith(NAMED) or is_internal(person):
         return s
     gone = s.dismissed.get(d.name, ())
@@ -485,7 +486,7 @@ def _name_dismissed(s: IdentityState, e, cx) -> IdentityState:
 # ── Lectures ──────────────────────────────────────────────────────────────
 
 
-def _root(s: IdentityState, key: str) -> str:
+def root_person(s: IdentityState, key: str) -> str:
     """La clé de personne d'une adresse (jamais de chaîne : une liaison vise
     toujours une personne racine) ; un nom relié par un opérateur, sa personne."""
     if key.startswith(NAMED):
@@ -509,19 +510,19 @@ def thread_of(s: IdentityState, handle: str) -> tuple[str, ...]:
     h = s.handles.get(handle)
     if h is not None and not confirmed(h):
         return (handle,)  # par simple recoupement : son propre fil, rien de plus tant qu'on n'a pas confirmé
-    person = _root(s, handle)
+    person = root_person(s, handle)
     out = {handle, person} | {k for k in handles_of(s, person) if confirmed(s.handles[k])}
     return tuple(sorted(out))
 
 
-def _first_seen(s: IdentityState, person: str, fallback: int) -> int:
+def first_seen_of(s: IdentityState, person: str, fallback: int) -> int:
     """La première fois qu'elle a été vue, toutes adresses ; 0 : jamais encore (un compte créé, une adresse
     reliée avant d'avoir écrit)."""
     seen = [s.handles[k].first_seen for k in handles_of(s, person) if k in s.handles and s.handles[k].first_seen]
     return min(seen) if seen else fallback
 
 
-def _name_of(s: IdentityState, person: str) -> str:
+def name_of(s: IdentityState, person: str) -> str:
     h = s.handles.get(person)
     if h is not None and h.name:
         return h.name
@@ -531,6 +532,32 @@ def _name_of(s: IdentityState, person: str) -> str:
         if s.handles[k].name:
             return s.handles[k].name
     return ""
+
+
+def declared_owners(frame: Frame) -> tuple[str, ...]:
+    return params(frame.env.params_of("identity", frame.root)).owners
+
+
+def people(s: IdentityState, frame: Frame) -> dict[str, tuple[str, ...]]:
+    """Chaque personne connue et ses adresses (une adresse déclarée propriétaire qui
+    n'a jamais écrit est une personne sans adresse)."""
+    out: dict[str, tuple[str, ...]] = dict(s.by_person.items())
+    for key in declared_owners(frame):
+        out.setdefault(root_person(s, key), ())
+    return out
+
+
+_TRUST_RANK = {ChannelTrust.INTERNAL: 0, ChannelTrust.PUBLIC: 1, ChannelTrust.ACCOUNT: 2,
+               ChannelTrust.AUTHENTICATED: 3}
+
+
+def principal(s: IdentityState, person: str) -> str | None:
+    """Son adresse principale : celle dont le canal prouve le plus (puis elle-même,
+    puis la plus ancienne)."""
+    known = [k for k in handles_of(s, person) if k in s.handles]
+    if not known:
+        return None
+    return max(known, key=lambda k: (_TRUST_RANK[s.handles[k].trust], k == person, -s.handles[k].first_seen, k))
 
 
 #: les dernières tables des noms portés, par état (ses index immuables) : une présomption se lit pour chaque mention
@@ -549,7 +576,7 @@ def worn_names(s: IdentityState) -> dict[str, list[tuple[str, tuple[str, ...]]]]
     for person in s.by_person.keys():
         if person.startswith(NAMED) or not is_identifiable(person):
             continue
-        names = {_name_of(s, person)} | {s.handles[k].name for k in handles_of(s, person) if k in s.handles}
+        names = {name_of(s, person)} | {s.handles[k].name for k in handles_of(s, person) if k in s.handles}
         for words in sorted({tuple(fold(n).split()) for n in names if n}):
             if words:
                 out.setdefault(words[0], []).append((person, words))
@@ -594,7 +621,7 @@ def resolve_target(s: IdentityState, handle: str, name: str) -> str | None:
         if h.claim is not None and not h.person:
             continue
         person = h.person or key
-        if person != handle and same_name(name, _name_of(s, person)):
+        if person != handle and same_name(name, name_of(s, person)):
             found.add(person)
     if not found:
         return handle
@@ -630,13 +657,13 @@ def view_of(s: IdentityState, handle: str, now: int = 0) -> c.IdentityView:
         authenticated=h.authenticated, operator=h.operator, known=True, bound=bool(h.person),
         claim=claim.name if claim else "", claim_certainty=privacy.effective(claim.certainty, h.trust) if claim else 0.0,
         claim_target=claim.target if claim else None, channel=h.channel, push=h.push,
-        first_seen=_first_seen(s, person, h.first_seen), via=h.via if h.person else "",
+        first_seen=first_seen_of(s, person, h.first_seen), via=h.via if h.person else "",
     )
 
 
 @IDENTITY.fact(c.PERSON)
 def _person(s: IdentityState, cx, handle: str) -> str:
-    return _root(s, handle) or handle
+    return root_person(s, handle) or handle
 
 
 @IDENTITY.fact(c.PRESUMED)
@@ -698,20 +725,20 @@ def speaks_as_owner(s: IdentityState, handle: str, declared: set[str] | frozense
 
 @IDENTITY.fact(c.IS_OWNER)
 def _is_owner(s: IdentityState, cx, person: str) -> bool:
-    return owner_person(s, person, set(_params(cx.params).owners))
+    return owner_person(s, person, set(params(cx.params).owners))
 
 
 @IDENTITY.fact(c.SPEAKS_AS_OWNER)
 def _speaks_as_owner(s: IdentityState, cx, handle: str) -> bool:
-    return speaks_as_owner(s, handle, set(_params(cx.params).owners))
+    return speaks_as_owner(s, handle, set(params(cx.params).owners))
 
 
 @IDENTITY.fact(c.OWNERS)
 def _owners(s: IdentityState, cx) -> tuple[str, ...]:
-    declared = set(_params(cx.params).owners)
+    declared = set(params(cx.params).owners)
     # les adresses qui le prouvent : une session d'opérateur, ou une adresse déclarée (seulement elles)
     proving = [*s.operators, *(k for k in declared if proves_owner(k, s.handles.get(k), declared))]
-    out = {_root(s, k) for k in proving}
+    out = {root_person(s, k) for k in proving}
     out |= {k for k in declared if k not in s.handles}
     return tuple(sorted(out))
 
@@ -728,11 +755,11 @@ def _disclosure(s: IdentityState, cx, arg: tuple[Any, ...]) -> Disclosure:
     if h is None:
         trust = privacy.channel_trust(channel)
         return privacy.decide(privacy.effective(0.0, trust), trust, public=bool(public))
-    person = _root(s, handle)
+    person = root_person(s, handle)
     identifiable = is_identifiable(handle)
     warmth = cx.facts.get(affect_c.WARMTH(person)) if identifiable else 0.0
     closeness = cx.facts.get(social_c.CLOSENESS(person)) if identifiable else ""
-    owner = identifiable and owner_person(s, person, set(_params(cx.params).owners))
+    owner = identifiable and owner_person(s, person, set(params(cx.params).owners))
     return privacy.decide(_certainty(h, h.trust), h.trust, closeness=closeness, warmth=warmth,
                           public=bool(public) or h.trust is ChannelTrust.PUBLIC, owner=owner)
 
@@ -744,4 +771,4 @@ def _calibration(params: Any) -> str | None:
 
 def known_as(s: IdentityState, person: str) -> str:
     """Le nom sous lequel elle connaît une personne (repli : la clé)."""
-    return _name_of(s, person) or person
+    return name_of(s, person) or person

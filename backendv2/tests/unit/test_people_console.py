@@ -22,7 +22,7 @@ from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import social as social_c
 from mika.faculties.identity import Handle
-from mika.faculties.identity.faculty import IdentityState, _apply
+from mika.faculties.identity.faculty import IdentityState, with_evidence
 from mika.faculties.identity.inspect import FORGOTTEN, MAX_LEDGER, _describe_event, certainty_fr
 from mika.kernel.events import Content, Origin
 from mika.kernel.inspect import Table
@@ -191,11 +191,11 @@ def test_old_evidence_and_profiles_still_replay():
     assert ev.name is None and ev.legacy_name == "Alice" and ev.legacy_note == "elle hésite" and not ev.denies
     bound = Handle(channel="external", trust=privacy.ChannelTrust.ACCOUNT, first_seen=0, name="Alice",
                    person="user_1", certainty=privacy.BOUND, via="operator")
-    assert _apply(bound, SimpleNamespace(at=0, data=ev)).person is None  # le démenti ancien délie, comme avant
+    assert with_evidence(bound, SimpleNamespace(at=0, data=ev)).person is None  # le démenti ancien délie, comme avant
     # « c'est pas grave », lu jadis comme un démenti de « Grave » : un nom qu'elle ne lui connaît pas ne délie rien
     _t, grave = registry.events.decode("identity.evidence", 1, json.dumps(
         {"handle": "ext_5", "kind": identity_c.DENIED, "name": "Grave", "item": None, "message": 4, "by": "kernel"}))
-    kept = _apply(bound, SimpleNamespace(at=0, data=grave))
+    kept = with_evidence(bound, SimpleNamespace(at=0, data=grave))
     assert kept.person == "user_1" and kept.name == "Alice" and kept.certainty == privacy.BOUND
     _t, profile = registry.events.decode("social.profile_revised", 1, json.dumps(
         {"person": "user_1", "summary": {"ref": "9.summary", "level": 2}, "tone": "doux", "interests": ["montagne"],

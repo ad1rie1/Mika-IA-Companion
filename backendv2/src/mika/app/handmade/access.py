@@ -10,7 +10,7 @@ from __future__ import annotations
 from mika.app.me import accounts as channels
 from mika.contracts import identity as identity_c
 from mika.faculties.identity.faculty import known_as
-from mika.faculties.identity.inspect import people as people_of
+from mika.faculties.identity.faculty import people as people_of
 from mika.inspector.pages.rights_tables import Instances, canal_choices, canal_instances, who_choices
 from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import UI

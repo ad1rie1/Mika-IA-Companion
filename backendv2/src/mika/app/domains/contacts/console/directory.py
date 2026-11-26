@@ -28,8 +28,9 @@ from urllib.parse import urlencode
 from mika.app.handmade import Look, person_card, presences
 from mika.contracts import identity as identity_c
 from mika.contracts import transcript as transcript_c
-from mika.faculties.identity.inspect import handles_of, principal
-from mika.faculties.identity.inspect import people as everyone_of
+from mika.faculties.identity.faculty import people as everyone_of
+from mika.faculties.identity.faculty import principal
+from mika.faculties.identity.inspect import handles_of
 from mika.inspector.pages.subjects import subject_url
 from mika.plugins.contacts.inspect import APP_WORDS, KIND_WORDS, SOURCE_WORDS, contact_key
 from mika.plugins.contacts.inspect import KIND as CONTACT

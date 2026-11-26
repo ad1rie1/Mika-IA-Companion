@@ -43,8 +43,8 @@ from mika.app.handmade.subjects.handle import CHANNELS
 from mika.app.handmade.tabs import Got, Line, Tab, text, tiles
 from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
+from mika.faculties.identity.faculty import people as everyone_of
 from mika.faculties.identity.inspect import handle_label
-from mika.faculties.identity.inspect import people as everyone_of
 from mika.faculties.social.inspect import (
     CLOSENESS_FR,
     DECLARED,

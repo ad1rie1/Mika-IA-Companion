@@ -27,12 +27,12 @@ from mika.faculties.identity.faculty import (
     Claim,
     Handle,
     IdentityState,
-    _name_of,
-    _params,
     aims_elsewhere,
     denial_target,
     handles_of,
     live_claim,
+    name_of,
+    params,
     resolve_target,
 )
 from mika.kernel.events import Content, Draft
@@ -91,10 +91,10 @@ def _corroborate(s: IdentityState, frame: Frame, ev: Any, h: Handle, claim: Clai
     hinted = frozenset(x.item for x in claim.hints)
     target = claim.target or ""
     hit = corroboration.corroborating(text, _candidates(store, s, target, hinted),
-                                      names=(claim.name, _name_of(s, target), h.name), corpus=_corpus(store))
+                                      names=(claim.name, name_of(s, target), h.name), corpus=_corpus(store))
     if hit is None:
         return None
-    spacing = _params(frame.env.params_of("identity", frame.root)).proof_spacing_us
+    spacing = params(frame.env.params_of("identity", frame.root)).proof_spacing_us
     rare = bool(hit.rare)
     earlier = [x for x in claim.hints if x.item != hit.id and x.message != ev.seq and ev.at - x.at >= spacing]
     complete = bool(earlier) and (rare or any(x.rare for x in earlier))
@@ -114,7 +114,7 @@ def _read(s: IdentityState, frame: Frame, ev: Any, ports: Mapping[str, Any]) -> 
     if found.denial:
         # un démenti ne compte que contre un nom sous lequel elle connaît la personne ;
         # le nom démenti est gardé à part (l'oubli l'atteint), ce qu'il vise est jugé ici
-        denies = denial_target(h, found.denial, frame.now, _name_of(s, h.person) if h.person else "")
+        denies = denial_target(h, found.denial, frame.now, name_of(s, h.person) if h.person else "")
         if denies:
             about = (h.person,) if denies == c.DENIES_BINDING and h.person else \
                 ((h.claim.target,) if denies == c.DENIES_CLAIM and h.claim and h.claim.target else ())

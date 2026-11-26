@@ -28,14 +28,16 @@ from mika.faculties.identity.faculty import (
     IDENTITY,
     Handle,
     IdentityState,
-    _first_seen,
-    _params,
-    _root,
     bearers,
+    declared_owners,
+    first_seen_of,
     handles_of,
     known_as,
+    people,
     presumed,
+    principal,
     proves_owner,
+    root_person,
     view_of,
     worn_names,
 )
@@ -94,8 +96,6 @@ TRUST_SHORT = {ChannelTrust.AUTHENTICATED: "authentifiée", ChannelTrust.ACCOUNT
                ChannelTrust.PUBLIC: "publique", ChannelTrust.INTERNAL: "interne"}
 TRUST_TONE = {ChannelTrust.AUTHENTICATED: "ok", ChannelTrust.ACCOUNT: "info", ChannelTrust.PUBLIC: "warn",
               ChannelTrust.INTERNAL: "muted"}
-_TRUST_RANK = {ChannelTrust.INTERNAL: 0, ChannelTrust.PUBLIC: 1, ChannelTrust.ACCOUNT: 2,
-               ChannelTrust.AUTHENTICATED: 3}
 CERTAINTY_FR = {"unknown": "inconnue", "suspected": "soupçonnée", "claimed": "affirmée",
                 "corroborated": "recoupée", "bound": "liée", "verified": "vérifiée"}
 LEVEL_TONE = {Sensitivity.NONE: "muted", Sensitivity.ANODYNE: "muted", Sensitivity.PERSONAL: "info",
@@ -177,28 +177,6 @@ def disclosures(frame: Frame, handle: str, h: Handle) -> tuple[Disclosure, Discl
             frame.get(c.DISCLOSURE((handle, h.channel, True))))
 
 
-def _declared_owners(frame: Frame) -> tuple[str, ...]:
-    return _params(frame.env.params_of("identity", frame.root)).owners
-
-
-def people(s: IdentityState, frame: Frame) -> dict[str, tuple[str, ...]]:
-    """Chaque personne connue et ses adresses (une adresse déclarée propriétaire qui
-    n'a jamais écrit est une personne sans adresse)."""
-    out: dict[str, tuple[str, ...]] = dict(s.by_person.items())
-    for key in _declared_owners(frame):
-        out.setdefault(_root(s, key), ())
-    return out
-
-
-def principal(s: IdentityState, person: str) -> str | None:
-    """Son adresse principale : celle dont le canal prouve le plus (puis elle-même,
-    puis la plus ancienne)."""
-    known = [k for k in handles_of(s, person) if k in s.handles]
-    if not known:
-        return None
-    return max(known, key=lambda k: (_TRUST_RANK[s.handles[k].trust], k == person, -s.handles[k].first_seen, k))
-
-
 def _last_from(frame: Frame, handles: Sequence[str]) -> int:
     return max((frame.get(transcript_c.LAST_FROM(k)) for k in handles), default=0)
 
@@ -223,7 +201,7 @@ def canonical(s: IdentityState, frame: Frame, ctx: InspectContext, key: str) -> 
 
 
 def _why_owner(s: IdentityState, frame: Frame, person: str) -> str:
-    owners = set(_declared_owners(frame))
+    owners = set(declared_owners(frame))
     for k in handles_of(s, person) or (person,):
         h = s.handles.get(k)
         if h is not None and h.authenticated and h.operator:
@@ -323,7 +301,7 @@ def waiting_names(s: IdentityState, store: Any) -> list[Waiting]:
         found = bearers(s, key, worn)
         gone = s.dismissed.get(key, ())
         out += [Waiting(key, p, tuple(o for o in found if o != p)) for p in found if p not in gone]
-    out.sort(key=lambda w: (-_first_seen(s, w.person, 0), w.name, w.person))
+    out.sort(key=lambda w: (-first_seen_of(s, w.person, 0), w.name, w.person))
     return out
 
 
@@ -360,7 +338,7 @@ def _told(s: IdentityState, ctx: InspectContext, items: Sequence[tuple[str, int,
     """Qui lui en a parlé, combien, depuis quand (« Alice, 3 éléments, depuis … »)."""
     by: dict[str, list[int]] = {}
     for _kind, _level, _secret, told, at in items:
-        for who in {_root(s, h) for h in told} or {""}:
+        for who in {root_person(s, h) for h in told} or {""}:
             by.setdefault(who, []).append(at)
     return " ; ".join(
         f"{known_as(s, who) if who else 'elle-même (vécu, observé)'}, {_counted(len(ats), ('élément', 'éléments'))}, "
@@ -417,7 +395,7 @@ def _person_head(s: IdentityState, frame: Frame, ctx: InspectContext, key: str) 
     handles = handles_of(s, person)
     main = principal(s, person)
     owner = frame.get(c.IS_OWNER(person))
-    first = _first_seen(s, person, 0)
+    first = first_seen_of(s, person, 0)
     relation = _closeness_fr(frame, person)
     if not is_identifiable(person):
         subtitle = "Une connexion de passage : rien de durable ne s'y attache."
@@ -892,7 +870,7 @@ def _bearing(s: IdentityState, key: str, store: Any) -> list[Block]:
     gone = s.dismissed.get(key, ())
     rows = []
     for p in bearers(s, key):
-        first = _first_seen(s, p, 0)
+        first = first_seen_of(s, p, 0)
         badge = (Badge("écartée", "muted") if p in gone else Badge("à décider", "warn") if waits
                  else Badge("rien à relier", "muted"))
         rows.append(Row((person_ref(s, p), _where(s, handles_of(s, p)), When(first) if first else "—", badge),
@@ -920,7 +898,7 @@ def _synthesis(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Bloc
     owner = frame.get(c.IS_OWNER(person))
     why = _why_owner(s, frame, person)
     reachable = frame.get(c.REACHABLE(person))
-    first = _first_seen(s, person, 0)
+    first = first_seen_of(s, person, 0)
     blocks.append(Fields((
         ("nom", known_as(s, person)), ("clé de personne", Text(person, "mono")),
         ("propriétaire", f"oui — {why}" if owner and why else "oui" if owner else "non"),
@@ -1071,7 +1049,7 @@ def _people(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
             if closeness else "—",
             Badge("propriétaire", "info") if frame.get(c.IS_OWNER(person)) else "",
             When(last) if last else "jamais",
-            When(first) if (first := _first_seen(s, person, 0)) else "—",
+            When(first) if (first := first_seen_of(s, person, 0)) else "—",
         ), href=person_ref(s, person)))
     return [
         Stats((Stat("personnes", len(everyone)),
@@ -1185,7 +1163,7 @@ def _waiting(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]
     rows = []
     for w in page:
         said, mine = known_as(s, w.name), items.get(w.name, [])
-        first = _first_seen(s, w.person, 0)
+        first = first_seen_of(s, w.person, 0)
         detail: list[Block] = [Note(_also(s, w.name, w.homonyms), tone="warn")] if w.homonyms else []
         detail += [Fields((("relier", naming_ref(s, w.name, w.person, f"la fiche de {known_as(s, w.person)}, le "
                                                                       "formulaire pré-rempli")),)),
@@ -1236,7 +1214,7 @@ def _policy(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
               for kind, w in pol.counter_evidence.items())
     ranks = tuple((CLOSENESS_FR.get(k, k), Text(k, "mono"), rank) for k, rank in privacy.CLOSENESS_RANK.items())
     problem = pol.check()
-    owners = _declared_owners(frame)
+    owners = declared_owners(frame)
     return [
         Table(("confiance", "ce que prouve le canal", "plancher", "plafond", "au mieux"), channels,
               title="Les canaux",
