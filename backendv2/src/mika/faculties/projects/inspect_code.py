@@ -11,8 +11,8 @@ leurs échanges) se lit chez lui **par une lecture gardée et bornée** (``hoste
 ``HOST_READS`` par minute. Tout texte de l'hôte, le
 contenu d'un fichier et un diff sont des données : la console les montre en texte brut.
 
-**Ce qui est pur** et que l'API lit aussi : l'objectif d'une branche ou d'un commit (``objective_on``,
-``objective_for``), le ticket d'une issue (``issue_ticket`` ; celui d'un objectif est ``faculty.ticket_held``), où en
+**Ce qui est pur** et que l'API lit aussi : l'objectif d'un commit (``objective_for`` ; celui d'une branche est
+``faculty.objective_on``), le ticket d'une issue (``issue_ticket`` ; celui d'un objectif est ``faculty.ticket_held``), où en
 est une pull request (``pull_stage``), celles d'un projet (``pulled``), et le diff mis en texte puis relu
 (``diff_text``, ``diff_rows``).
 """
@@ -32,13 +32,12 @@ from mika.contracts import self_ as self_c
 from mika.faculties.projects import merge, pulls
 from mika.faculties.projects.actions import can_deposit
 from mika.faculties.projects.faculty import (
-    WORK_PREFIX,
     Item,
     Objective,
     Project,
     ProjectsState,
     by_pulls,
-    objective_at,
+    objective_on,
 )
 from mika.faculties.projects.inspect_common import stored_text, stored_texts
 from mika.faculties.projects.inspect_merge import BLOCK_WORDS, REFUSED_WORDS
@@ -142,19 +141,10 @@ NO_HOST = "Ce projet n'a pas de dépôt distant que l'on sache lire."
 _SECOND = 1_000_000
 _SHA = re.compile(r"^[0-9a-f]{4,40}$")
 _REF = re.compile(r"^[A-Za-z0-9._/-]{1,100}$")
-_WORK = re.compile(rf"^{re.escape(WORK_PREFIX)}objective-(\d+)(?:-\d+)?$")
 _HUNK = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 
 
 # ── Ce qui est lié : l'objectif, le ticket, la pull request ───────────────
-
-
-def objective_on(p: Project, branch: str) -> Objective | None:
-    """L'objectif qui travaille sur cette branche : celui qui la dit sienne, sinon celui que son nom désigne
-    (``faculty.branch_of`` : ``work/objective-<n>``, ou ``…-<k>`` pour un constant)."""
-    found = next((o for o in p.objectives if o.branch and o.branch == branch), None)
-    named = _WORK.match(branch or "")
-    return found or (objective_at(p, int(named.group(1))) if named is not None else None)
 
 
 def objective_for(p: Project, k: Commit) -> Objective | None:

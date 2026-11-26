@@ -43,6 +43,7 @@ ses événements font ressentir (ADR 0031).
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import Annotated, Any, NamedTuple
@@ -1820,6 +1821,18 @@ def branch_of(o: Objective | None) -> str:
     if o is None:
         return LOOSE_BRANCH
     return f"{WORK_PREFIX}objective-{o.id}" + (f"-{o.pulls_merged + 1}" if o.kind == c.CONSTANT else "")
+
+
+#: le nom d'une branche de travail tel que ``branch_of`` l'écrit : le numéro de l'objectif qu'elle désigne
+_WORK = re.compile(rf"^{re.escape(WORK_PREFIX)}objective-(\d+)(?:-\d+)?$")
+
+
+def objective_on(p: Project, branch: str) -> Objective | None:
+    """L'objectif qui travaille sur cette branche : celui qui la dit sienne, sinon celui que son nom désigne
+    (``branch_of``, juste au-dessus : ``work/objective-<n>``, ou ``…-<k>`` pour un constant)."""
+    found = next((o for o in p.objectives if o.branch and o.branch == branch), None)
+    named = _WORK.match(branch or "")
+    return found or (objective_at(p, int(named.group(1))) if named is not None else None)
 
 
 def busy(s: ProjectsState, project: int) -> bool:

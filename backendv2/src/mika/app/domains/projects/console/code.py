@@ -55,12 +55,11 @@ from mika.app.handmade.tabs.decisions import by_day
 from mika.contracts import projects as c
 from mika.faculties.projects import inspect_code as code
 from mika.faculties.projects import merge
-from mika.faculties.projects.faculty import objective_at, ticket_held
+from mika.faculties.projects.faculty import objective_at, objective_on, ticket_held
 from mika.faculties.projects.inspect import OBJ_FR
 from mika.faculties.projects.inspect_code import (
     diff_rows,
     issue_ticket,
-    objective_on,
     pull_named,
     pull_order,
     pull_stage,

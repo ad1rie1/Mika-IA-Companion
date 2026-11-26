@@ -64,6 +64,7 @@ from mika.faculties.projects.faculty import (
     Project,
     by_pulls,
     handed_over,
+    objective_on,
     ticket_held,
 )
 from mika.faculties.projects.inspect import OBJ_FR
@@ -86,7 +87,6 @@ from mika.faculties.projects.inspect_code import (  # ses mots et ses règles : 
 )
 from mika.faculties.projects.inspect_code import issue_ticket as _issue_ticket
 from mika.faculties.projects.inspect_code import objective_for as _objective_for
-from mika.faculties.projects.inspect_code import objective_on as _objective_on
 from mika.faculties.projects.inspect_code import pull_stage as _pull_state
 from mika.faculties.projects.inspect_code import pulled as _pulled
 from mika.faculties.projects.inspect_merge import ACTION as MERGE_ACTION
@@ -471,14 +471,14 @@ async def commit(call: Call) -> dict[str, Any]:
 
 
 def _branch_json(sc: Scene, r: Reach, b: Any, texts: Mapping[str, str]) -> dict[str, Any]:
-    o = None if b.base else _objective_on(r.p, b.name)
+    o = None if b.base else objective_on(r.p, b.name)
     return {"name": b.name, "base": b.base, "current": b.current, "ahead": b.ahead, "behind": b.behind,
             "head": _commit_json(sc, r, b.head, texts), **_linked(sc, r, o, texts)}
 
 
 def _branch_refs(p: Project, found: Iterable[Any]) -> list[str]:
     return [*_commit_refs(p, (b.head for b in found)),
-            *_linked_refs(p, (_objective_on(p, b.name) for b in found if not b.base))]
+            *_linked_refs(p, (objective_on(p, b.name) for b in found if not b.base))]
 
 
 async def branches(call: Call) -> dict[str, Any]:
