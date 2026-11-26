@@ -34,7 +34,8 @@ ses événements font ressentir (ADR 0031).
   ``repo_page``, ``checks_pass``) sont ici, avec ce qu'un objectif renvoyé devient (``sent_back``) et la base qui
   avance (``with_base``) ; leurs faits (``projects.pull_seen`` : ce que l'hôte en dit, daté ;
   ``projects.checks_seen``, ``projects.base_seen``), leurs réducteurs et ce qui les propose, les ouvre et les relit,
-  dans ``pulls.py`` (ADR 0313). Rien ici ne fusionne.
+  dans ``pulls.py`` ; la fusion qu'une personne demande et ce que l'hôte en répond (``projects.merge_asked``,
+  ``projects.merge_answered``), dans ``merge.py`` (ADR 0313). Rien ici ne fusionne.
 - **Ses jalons** (ADR 0273) : un objectif ponctuel dit où il en est (``Objective.milestones``, ``Milestone``). Leur
   forme et les lectures que tous en font sont ici ; leurs événements, leurs réducteurs, ce qui s'écrit et ce qu'on
   en lit, dans ``milestones.py`` (ADR 0313) ; ses outils, dans ``milestones_tools.py``. Un jalon atteint ne se défait pas ;
@@ -1301,37 +1302,6 @@ class Answered(Payload):
     about: tuple[str, ...] = ()
 
 
-class MergeAsked(Payload):
-    """Une personne demande la fusion de la pull request d'un objectif (ADR 0288) : le propriétaire du projet, ou
-    qui s'occupe d'elle — jamais elle. Ce qu'elle a vu : son numéro, sa branche, et le commit à son bout ; la
-    fusion n'a lieu que s'il n'a pas bougé. Aucun texte."""
-
-    project: int
-    objective: int
-    number: int
-    branch: str = ""
-    sha: str = ""
-    #: qui le demande (sa personne)
-    by: str = ""
-    owner: str | None = None
-    about: tuple[str, ...] = ()
-
-
-class MergeAnswered(Payload):
-    """Ce que l'hôte a répondu à une fusion demandée (ADR 0288) : fusionnée — et le commit qu'il a posé sur la
-    base —, ou pourquoi non (``why`` : un code, ``MERGE_WHYS`` du port, ``MERGE_STALE`` ou ``MERGE_CUT``). Un fait
-    arrivé ; il ne clôt rien : la fusion s'apprend à la relecture de l'hôte."""
-
-    project: int
-    objective: int
-    number: int = 0
-    merged: bool = False
-    commit: str = ""
-    why: str = ""
-    owner: str | None = None
-    about: tuple[str, ...] = ()
-
-
 class ReviewAsked(Payload):
     """Une relecture indépendante est demandée pour le commit que porte le travail conclu d'un objectif (ADR 0276) :
     ce commit-là, et aucun autre."""
@@ -1412,8 +1382,6 @@ PLAN_ANSWERED = PROJECTS.event("plan_answered", PlanAnswered, content=("words",)
                                subjects=("owner", "about", "by", INHERITED))
 DEPOSITED = PROJECTS.event("deposited", Deposited, content=("note",), subjects=("owner", "about", "by", INHERITED))
 REMOTE_REQUESTED = PROJECTS.event("remote_requested", RemoteRequested, subjects=("owner", "about"))
-MERGE_ASKED = PROJECTS.event("merge_asked", MergeAsked, subjects=("owner", "about", "by"))
-MERGE_ANSWERED = PROJECTS.event("merge_answered", MergeAnswered, subjects=("owner", "about"))
 ISSUE_ASKED = PROJECTS.event("issue_asked", IssueAsked, subjects=("owner", "about", "by", INHERITED))
 REVIEW_ASKED = PROJECTS.event("review_asked", ReviewAsked, subjects=("owner", "about"))
 REVIEWED = PROJECTS.event("reviewed", Reviewed, content=("findings",), subjects=("owner", "about", INHERITED))
@@ -2268,37 +2236,6 @@ def sent_back(o: Objective) -> Objective:
         return o
     return replace(o, status=c.OPEN, closed_at=0, runs=0, silent=0, stale=0, unproven=0, evidence=0,
                    waiting_until=0, result_ref="", notable=0.0, shared=False)
-
-
-#: pourquoi une fusion demandée n'a pas eu lieu, en plus de ce que dit l'hôte (``MERGE_WHYS`` du port) : la pull
-#: request n'était plus celle que la personne avait vue quand la demande est partie ; la demande a été interrompue
-#: sans qu'on sache si elle a eu lieu
-MERGE_STALE, MERGE_CUT = "stale", "cut"
-
-
-@PROJECTS.reducer(MERGE_ASKED)
-def _merge_asked(s: ProjectsState, e, cx) -> ProjectsState:
-    """Une personne a demandé la fusion (ADR 0288) : la demande attend la réponse de l'hôte, et le refus d'avant ne
-    se dit plus. Total : un objectif inconnu ne change rien."""
-    d = e.data
-    p = s.projects.get(d.project)
-    o = objective_at(p, d.objective) if p is not None else None
-    if p is None or o is None:
-        return s
-    return with_project(s, with_objective(p, replace(o, merge_asked_at=e.at, merge_by=d.by, merge_refused="")))
-
-
-@PROJECTS.reducer(MERGE_ANSWERED)
-def _merge_answered(s: ProjectsState, e, cx) -> ProjectsState:
-    """L'hôte a répondu à la fusion demandée (ADR 0288) : plus rien n'attend ; refusée, l'objectif garde pourquoi.
-    Fusionnée, rien ne se clôt ici — le processus qui relit l'hôte le verra, comme toute fusion. Total."""
-    d = e.data
-    p = s.projects.get(d.project)
-    o = objective_at(p, d.objective) if p is not None else None
-    if p is None or o is None:
-        return s
-    return with_project(s, with_objective(p, replace(o, merge_asked_at=0, merge_answered_at=e.at,
-                                         merge_refused="" if d.merged else (d.why or MERGE_CUT))))
 
 
 def checks_pass(o: Objective) -> bool:

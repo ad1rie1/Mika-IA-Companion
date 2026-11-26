@@ -66,7 +66,6 @@ from mika.faculties.projects.capability_common import effect_project, hosted_rem
 from mika.faculties.projects.faculty import (
     BASE_REQUEST,
     INHERITED,
-    MERGE_ANSWERED,
     PROJECTS,
     PULL_REQUEST_CAPABILITY,
     PULL_TRIES_MAX,
@@ -98,6 +97,7 @@ from mika.faculties.projects.faculty import (
 )
 from mika.faculties.projects.inspect_pulls import CANNOT, DESCRIPTION, OPENED, PREVIEW, SUMMARY
 from mika.faculties.projects.inspect_reviews import UNREVIEWED, review_line
+from mika.faculties.projects.merge import MERGE_ANSWERED
 from mika.faculties.projects.tool_common import gone_reply, running_project
 from mika.faculties.projects.tools import TAKE_BASE
 from mika.kernel.clock import HOUR, MINUTE

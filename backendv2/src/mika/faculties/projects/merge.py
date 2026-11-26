@@ -16,6 +16,11 @@ pourrait proposer, aucun processus n'a de quoi fusionner. Il y a **une** porte :
 ``blocked`` dit, de l'état seul, pourquoi une pull request ne peut pas être fusionnée maintenant : la règle que
 l'action applique, et que l'écran lit d'avance.
 
+**Ses faits** (ADR 0313) sont ici, avec leurs charges utiles et leurs réducteurs : ``projects.merge_asked`` (la
+demande attend l'hôte, le refus d'avant ne se dit plus) et ``projects.merge_answered`` (plus rien n'attend ; refusée,
+l'objectif garde pourquoi — ``MERGE_WHYS`` du port, ``MERGE_STALE``, ``MERGE_CUT``). Les champs d'``Objective``
+qu'ils écrivent sont dans ``faculty.py``.
+
 Ce que la relecture adverse a fixé (ADR 0292) : **la fusion relit la CI** — juste après un envoi, l'hôte n'a pas
 encore créé les vérifications du commit, qui se lisent « aucune » : tant que la pull request est fraîche
 (``CHECKS_GRACE_US``), « aucune » ne laisse pas fusionner (``UNCHECKED``), et l'action relit chez l'hôte les
@@ -34,16 +39,13 @@ interrompue n'est jamais rejouée.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Any
 
 from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.faculties.projects.faculty import (
     INHERITED,
-    MERGE_ANSWERED,
-    MERGE_ASKED,
-    MERGE_CUT,
-    MERGE_STALE,
     PROJECTS,
     Objective,
     Project,
@@ -52,6 +54,8 @@ from mika.faculties.projects.faculty import (
     inherited_for,
     live,
     objective_at,
+    with_objective,
+    with_project,
     written_for,
 )
 from mika.kernel.clock import MINUTE
@@ -71,6 +75,77 @@ from mika.ports.workshop import (
     PULL_OPEN,
 )
 from mika.vocab.phrasebook import phrase
+
+# ── Ses faits et leurs réducteurs (ADR 0313) ──────────────────────────────
+
+
+class MergeAsked(Payload):
+    """Une personne demande la fusion de la pull request d'un objectif (ADR 0288) : le propriétaire du projet, ou
+    qui s'occupe d'elle — jamais elle. Ce qu'elle a vu : son numéro, sa branche, et le commit à son bout ; la
+    fusion n'a lieu que s'il n'a pas bougé. Aucun texte."""
+
+    project: int
+    objective: int
+    number: int
+    branch: str = ""
+    sha: str = ""
+    #: qui le demande (sa personne)
+    by: str = ""
+    owner: str | None = None
+    about: tuple[str, ...] = ()
+
+
+class MergeAnswered(Payload):
+    """Ce que l'hôte a répondu à une fusion demandée (ADR 0288) : fusionnée — et le commit qu'il a posé sur la
+    base —, ou pourquoi non (``why`` : un code, ``MERGE_WHYS`` du port, ``MERGE_STALE`` ou ``MERGE_CUT``). Un fait
+    arrivé ; il ne clôt rien : la fusion s'apprend à la relecture de l'hôte."""
+
+    project: int
+    objective: int
+    number: int = 0
+    merged: bool = False
+    commit: str = ""
+    why: str = ""
+    owner: str | None = None
+    about: tuple[str, ...] = ()
+
+
+MERGE_ASKED = PROJECTS.event("merge_asked", MergeAsked, subjects=("owner", "about", "by"))
+MERGE_ANSWERED = PROJECTS.event("merge_answered", MergeAnswered, subjects=("owner", "about"))
+
+
+#: pourquoi une fusion demandée n'a pas eu lieu, en plus de ce que dit l'hôte (``MERGE_WHYS`` du port) : la pull
+#: request n'était plus celle que la personne avait vue quand la demande est partie ; la demande a été interrompue
+#: sans qu'on sache si elle a eu lieu
+MERGE_STALE, MERGE_CUT = "stale", "cut"
+
+
+@PROJECTS.reducer(MERGE_ASKED)
+def _merge_asked(s: ProjectsState, e, cx) -> ProjectsState:
+    """Une personne a demandé la fusion (ADR 0288) : la demande attend la réponse de l'hôte, et le refus d'avant ne
+    se dit plus. Total : un objectif inconnu ne change rien."""
+    d = e.data
+    p = s.projects.get(d.project)
+    o = objective_at(p, d.objective) if p is not None else None
+    if p is None or o is None:
+        return s
+    return with_project(s, with_objective(p, replace(o, merge_asked_at=e.at, merge_by=d.by, merge_refused="")))
+
+
+@PROJECTS.reducer(MERGE_ANSWERED)
+def _merge_answered(s: ProjectsState, e, cx) -> ProjectsState:
+    """L'hôte a répondu à la fusion demandée (ADR 0288) : plus rien n'attend ; refusée, l'objectif garde pourquoi.
+    Fusionnée, rien ne se clôt ici — le processus qui relit l'hôte le verra, comme toute fusion. Total."""
+    d = e.data
+    p = s.projects.get(d.project)
+    o = objective_at(p, d.objective) if p is not None else None
+    if p is None or o is None:
+        return s
+    return with_project(s, with_objective(p, replace(o, merge_asked_at=0, merge_answered_at=e.at,
+                                         merge_refused="" if d.merged else (d.why or MERGE_CUT))))
+
+
+# ── La fusionner ──────────────────────────────────────────────────────────
 
 #: pourquoi une pull request ne peut pas être fusionnée maintenant (``blocked``) : cet objectif n'en a pas ; sa
 #: proposition attend encore un accord ; elle est déjà fusionnée ; elle est fermée ; l'hôte ne l'a pas encore dite ;
@@ -345,5 +420,6 @@ async def _write(ev: Any, ports: Mapping[str, Any]) -> list[Any] | None:
     return _write_answer(ev, p, ok=sent, why="" if sent else REFUSED)
 
 
-__all__ = ["BLOCKS", "CHECKS_GRACE_US", "COMMENT", "EDIT", "PULL_WRITE_ANSWERED", "PULL_WRITE_ASKED", "WHYS", "alone",
-           "asking", "blocked", "merging", "reply_mark", "signed", "unchecked", "unsure", "writable", "writing"]
+__all__ = ["BLOCKS", "CHECKS_GRACE_US", "COMMENT", "EDIT", "MERGE_ANSWERED", "MERGE_ASKED", "PULL_WRITE_ANSWERED",
+           "PULL_WRITE_ASKED", "WHYS", "alone", "asking", "blocked", "merging", "reply_mark", "signed", "unchecked",
+           "unsure", "writable", "writing"]

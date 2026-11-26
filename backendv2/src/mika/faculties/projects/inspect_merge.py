@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 
 from mika.faculties.projects import merge, tracker
 from mika.faculties.projects.actions import can_edit
-from mika.faculties.projects.faculty import MERGE_ASKED, MERGE_CUT, MERGE_STALE, PROJECTS, ProjectsState
+from mika.faculties.projects.faculty import PROJECTS, ProjectsState
 from mika.faculties.projects.inspect_common import (
     LIVE,
     acting_person,
@@ -26,6 +26,7 @@ from mika.faculties.projects.inspect_common import (
     target_project,
     unchanged,
 )
+from mika.faculties.projects.merge import MERGE_ASKED, MERGE_CUT, MERGE_STALE
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.operate import ActionContext, Done, Refused

@@ -28,13 +28,11 @@ from mika.app.me.api import form as fixed_form
 from mika.contracts import projects as c
 from mika.faculties.projects import inspect_merge, merge
 from mika.faculties.projects.faculty import (
-    MERGE_ANSWERED,
-    MERGE_ASKED,
-    MERGE_CUT,
     Objective,
     Project,
     branch_of,
 )
+from mika.faculties.projects.merge import MERGE_ANSWERED, MERGE_ASKED, MERGE_CUT
 from mika.faculties.projects.pulls import PULL_SEEN
 from mika.faculties.projects.tracker_tools import AddArgs, ItemArg, items_add
 from mika.kernel.clock import MINUTE
@@ -266,17 +264,19 @@ def test_only_the_gesture_of_a_person_merges(tmp_path):
     assert names and processes and not [n for n in (*names, *processes) if "merge" in n or "fusion" in n]
     assert emitting == [inspect_merge.ACTION] and effects == [MERGE_ASKED.name, merge.PULL_WRITE_ASKED.name]
     # le fait n'est écrit que par ``merge.asking``, que seule l'action d'une personne appelle (un décorateur compte
-    # pour sa fonction : le réducteur du fait, l'action qui le déclare, l'effet qu'il déclenche)
+    # pour sa fonction : le réducteur du fait, l'action qui le déclare, l'effet qu'il déclenche — tous trois, avec sa
+    # déclaration, dans ``merge.py`` depuis que la fusion y garde ses faits, ADR 0313)
     assert _mentions("MERGE_ASKED") == {
-        "faculties/projects/faculty.py": {"", "_merge_asked"}, "faculties/projects/inspect_merge.py": {"", "_fuse"},
-        "faculties/projects/merge.py": {"", "_merge", "asking"}}
+        "faculties/projects/inspect_merge.py": {"", "_fuse"},
+        "faculties/projects/merge.py": {"", "_merge", "_merge_asked", "asking"}}
     trees = {str(path.relative_to(SRC)): ast.parse(path.read_text("utf-8")) for path in sorted(SRC.rglob("*.py"))}
     # le fait se nomme aussi par sa chaîne — c'est son nom d'événement que le journal porte, pas celui d'une
-    # constante : qui le nomme ainsi est compté aussi, et ne fait que le lire (ni brouillon, ni émission)
+    # constante : qui le nomme ainsi est compté aussi, et ne fait que le lire (ni brouillon, ni émission) ; hors du
+    # module qui le déclare par cette chaîne, ``merge.py``, dont les brouillons sont comptés juste après
     named_so = {**_mentions(MERGE_ASKED.name), **_mentions(MERGE_ASKED.name.rsplit(".", 1)[-1])}
     assert MERGE_ASKED.name == "projects.merge_asked" and set(named_so) == {
-        "app/domains/projects/__init__.py", "faculties/projects/feed.py", "faculties/projects/faculty.py"}
-    writers = [where for where in named_so if where != "faculties/projects/faculty.py" for node in ast.walk(trees[where])
+        "app/domains/projects/__init__.py", "faculties/projects/feed.py", "faculties/projects/merge.py"}
+    writers = [where for where in named_so if where != "faculties/projects/merge.py" for node in ast.walk(trees[where])
                if isinstance(node, ast.Attribute) and node.attr in ("draft", "emit")]
     assert writers == []
     drafts = [where for where, tree in trees.items() for node in ast.walk(tree)

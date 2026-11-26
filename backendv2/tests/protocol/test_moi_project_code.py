@@ -22,11 +22,10 @@ from mika.contracts import projects as c
 from mika.faculties.projects import inspect_merge, merge, tracker
 from mika.faculties.projects.faculty import (
     ACCESS_SET,
-    MERGE_ANSWERED,
-    MERGE_ASKED,
     PULL_OPEN,
     REFRAMED,
 )
+from mika.faculties.projects.merge import MERGE_ANSWERED, MERGE_ASKED
 from mika.faculties.projects.pulls import CHECKS_SEEN, PULL_SEEN
 from mika.kernel.events import Content
 from mika.ports.workshop import (
