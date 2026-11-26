@@ -147,6 +147,8 @@ ONCE_MORE = frozenset({social_c.REKINDLE})
 #: des ensembles ci-dessus ; sinon elle deviendrait ordinaire sans que personne l'ait dit (un rappel dû oublié
 #: d'``OWED`` partirait trop tard, ou pas du tout devant une rancune). Rien ne lit cet ensemble que la garde qui le
 #: vérifie (``tests/architecture/test_initiative_reasons_are_classed.py``) : il ne change aucun comportement.
+#: « Dire son plan à qui a demandé un projet » (``projects_c.PLAN``) y est exprès, décidé le 2026-11-27 : elle est
+#: autonome, elle choisit son moment comme pour toute prise de parole — ce n'est ni un dû ni une alerte.
 ORDINARY = frozenset({social_c.PRESENT_PERSON, social_c.RECONTACT, social_c.COMFORT, social_c.CHAT,
                       needs_c.NEED_SOCIAL, needs_c.NEED_EXPRESSION, affect_c.MOOD_OVERFLOW, rss_c.FOR_FRIEND,
                       projects_c.PLAN, SECOND_THOUGHTS})
