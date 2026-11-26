@@ -1,11 +1,18 @@
 """Les vues d'inspection de la mémoire : ses souvenirs, ses croyances, ses
-promesses (la projection ``memory_items``), la relecture et les nuits qui les
-produisent (la tranche et le journal : la consolidation des conversations, le
-tri de la nuit, ses lectures relues la nuit), et l'onglet « Mémoire » de la
-fiche d'une personne.
+promesses (la projection ``memory_items``) et les moments de la vie des autres
+(lus dans l'archive, ``memory_life``) ; ce qu'elle voit venir (ce qu'elle
+attendait des moments annoncés, et qui tient ce qu'il annonce, ADR 0086) ; la
+relecture et les nuits qui les produisent (la tranche et le journal : la
+consolidation des conversations et ses passages à reprendre, le tri de la
+nuit, ses lectures relues la nuit) ; et l'onglet « Mémoire » de la fiche d'une
+personne.
 
-Lecture seule, paginée, bornée ; un texte effacé par l'oubli se montre comme
-tel. Les filtres sont typés : une valeur inconnue est dite, jamais devinée.
+Une action, ``reprendre`` : relire un passage de la file des reprises avec le
+modèle configuré. Les corrections de l'opératrice sont dans ``actions.py``.
+
+Les vues sont en lecture seule, paginées, bornées ; un texte effacé par
+l'oubli se montre comme tel. Les filtres sont typés : une valeur inconnue est
+dite, jamais devinée.
 """
 
 from __future__ import annotations
@@ -292,7 +299,7 @@ def _detail(k: Kept, frame: Frame, names: dict[str, str]) -> tuple[Block, ...]:
     return (Prose(item.text or FORGOTTEN, title="En entier", reading=True), Fields(tuple(pairs), title="Détail"))
 
 
-# ── Les trois listes ──────────────────────────────────────────────────────
+# ── Les quatre listes ─────────────────────────────────────────────────────
 
 
 @dataclass(frozen=True, slots=True)
@@ -605,6 +612,9 @@ def _consolidation(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Bl
             Disclosure("Historique des lectures relues la nuit", (_rereads(ctx),))]
 
 
+# ── Voir venir ────────────────────────────────────────────────────────────
+
+
 #: la sorte d'une annonce (``likelihood.nature_of``), en mots
 NATURE_FR = {c.FIRST_HAND: "de la bouche de la personne", c.REPORTED: "rapporté par un autre",
              c.OFFICIAL: "une date officielle", c.PREDICTION: "une prévision"}
@@ -647,6 +657,9 @@ def _seeing_ahead(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Blo
     """Ses attentes sur les moments annoncés et qui tient ce qu'il annonce (ADR 0086)."""
     p = params(frame.env.params_of("memory", frame.root))
     return [_calibration(s, p), _tellers(s, frame, p)]
+
+
+# ── Les passages à reprendre ──────────────────────────────────────────────
 
 
 class RetryExtractionArgs(BaseModel):

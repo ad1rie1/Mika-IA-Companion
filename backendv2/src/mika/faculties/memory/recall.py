@@ -42,9 +42,20 @@ moins vite.
 
 Toute panne → rien (le tour part sans mémoire, jamais avec trop).
 
-Ce module cherche ; ce qu'il a trouvé se dit en mots, section par section, dans ``recall_sections.py`` (qui lit
-d'ici ``when_words``, ``knowledge_label``, ``happens_today`` : les outils et l'enrichisseur les lisent aussi). La règle des
-sujets délicats — ce qui en devient une confidence (ADR 0099) — est dans ``delicate.py``.
+Ce module cherche et trie ; ce qu'il a trouvé se dit en mots, section par section, dans ``recall_sections.py``. Il
+porte aussi deux blocs que d'autres lisent d'ici :
+
+- **le verdict d'un élément**, ce qui décide s'il peut se dire devant qui écoute (``verdict_of``, ``hearing``,
+  ``felt_here``, ``heard_confidence``), avec ce qu'il lit : l'élément relu par son numéro (``items_by_id``,
+  ``item_columns``) et les personnes que ses clés désignent maintenant (``names_of``, ``canon``, ``presumed_of``) —
+  les outils, la relecture de la nuit (``reread``) et la console (``inspect``) s'en servent ;
+- **les mots d'une ligne** : ce qui en fait douter (``doubted``, ``contested_line``), ce qu'on en ressent
+  (``feelings``, ``tone``), qui il concerne (``concerned_name``), sa nature et selon qui (``knowledge_label``), un
+  jour dit comme on le dit (``when_words``), ce qu'elle en attend (``expected_line``), et le temps d'un moment
+  (``happens_today``, ``followed_lately``) — l'enrichisseur s'en sert, les sections et les outils en lisent une
+  part.
+
+La règle des sujets délicats — ce qui en devient une confidence (ADR 0099) — est dans ``delicate.py``.
 """
 
 from __future__ import annotations

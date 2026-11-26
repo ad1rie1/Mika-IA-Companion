@@ -1,8 +1,16 @@
 """Situations et dates durables ; la tranche n'en est qu'un cache d'attention.
 
-``memory_life`` garde chaque moment en JSON (``payload``) avec ce qui le cherche : sa date (``when_at``), s'il revient
-chaque année (``yearly``) et son jour de l'année (``ordinal``, calculé ici en UTC — le ``strftime('%j', …,
-'unixepoch')`` d'avant n'existe pas sous MariaDB)."""
+``memory_life`` (``LifeArchive``) garde chaque moment en JSON (``payload``) avec ce qui le cherche : sa date
+(``when_at``), s'il revient chaque année (``yearly``) et son jour de l'année (``ordinal``, calculé ici en UTC — le
+``strftime('%j', …, 'unixepoch')`` d'avant n'existe pas sous MariaDB).
+
+L'archive recharge la tranche (``memory.life_recalled``) de deux façons, sans recopier ce qu'elle a déjà tel quel :
+
+- **quand quelqu'un lui écrit** (``recall_life``, un interprète de ``runtime.perception_received``) : les moments de
+  cette personne que la tranche garderait (``for_people``) ;
+- **chaque jour** (``Calendar``, le processus ``memory.calendar``) : les prochaines dates, même si personne n'en a
+  reparlé depuis des années — les moments datés de la semaine passée et à venir, et les dates qui reviennent chaque
+  année, à partir de l'avant-veille."""
 from __future__ import annotations
 
 import json

@@ -742,6 +742,23 @@ def heavy_date(ev: LifeEvent) -> bool:
     return ev.yearly and not ev.festive and ev.importance >= HEAVY_DATE
 
 
+class LifeRecalled(Payload):
+    """Des moments relus dans l'archive de leur vie (``memory_life``) pour revenir dans la tranche, qui n'en garde
+    qu'un cache d'attention : ceux d'une personne qui lui écrit, que la tranche garderait, ou, une fois par jour
+    (``daily``), les prochaines dates, même celles dont personne n'a reparlé depuis des années. Seulement ce que la
+    tranche n'a pas déjà tel quel."""
+
+    items: tuple[LifeEvent, ...] = ()
+    daily: bool = False
+
+
+#: le dernier venu, compté à la suite des autres dans ``ALL``
+LIFE_RECALLED = event_type("memory.life_recalled", OWNER, LifeRecalled, public=True)
+ALL = (*ALL, LIFE_RECALLED)
+#: l'archive de leur vie, une ligne par moment (``faculties.memory.archive``)
+LIFE_TABLE = "memory_life"
+
+
 # ── Ce qui se retire (ADR 0082) ────────────────────────────────────────────
 #
 # Un texte tiré de ce qu'elle sait (un portrait, son récit, une pensée, un rêve, son journal) dépend de ses sources.
@@ -1014,13 +1031,3 @@ def concerning(view: Table, keys: Any) -> Any:
     """La condition « l'élément de cette vue concerne l'une de ces clés » (``KNOWLEDGE_ABOUT``, indexée par
     personne) : ``view.c.id IN (SELECT item FROM memory_knowledge_about WHERE person IN (…))``."""
     return view.c.id.in_(select(KNOWLEDGE_ABOUT.c.item).where(KNOWLEDGE_ABOUT.c.person.in_(list(keys))))
-
-
-class LifeRecalled(Payload):
-    items: tuple[LifeEvent, ...] = ()
-    daily: bool = False
-
-
-LIFE_RECALLED = event_type("memory.life_recalled", OWNER, LifeRecalled, public=True)
-ALL = (*ALL, LIFE_RECALLED)
-LIFE_TABLE = "memory_life"

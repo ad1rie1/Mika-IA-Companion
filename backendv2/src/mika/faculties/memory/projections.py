@@ -1,11 +1,29 @@
 """Les projections T0 de la mémoire (dans la transaction d'ajout) :
 
-- ``memory_items`` : souvenirs, croyances, promesses, moments de la vie des
-  autres, avec ce qui les fait durer (importance, renforcements, rappels),
-  leur statut, et ce qui décide devant qui ils peuvent ressortir (qui l'a
-  confié, qui l'a entendu, secret ou non) ;
-- ``memory_chunks`` : les échanges bruts avec chacun (sa question, sa
-  réponse), retrouvables sans que la consolidation ait décidé de les garder.
+- ``memory_items`` (``Items``) : souvenirs, croyances, promesses, moments de
+  la vie des autres, avec ce qui les fait durer (importance, renforcements,
+  rappels), leur statut, et ce qui décide devant qui ils peuvent ressortir
+  (qui l'a confié, qui l'a entendu, secret ou non). Dans la même transaction,
+  ce qui la sert : qui concerne chaque élément (``memory_about``), la référence
+  de son texte (``memory_refs``), le dernier événement qui l'a touché
+  (``memory_changes``), le compte des oublis (``memory_forgets``), les
+  témoignages et les contestations d'une croyance (``memory_testimonies``,
+  ``memory_contests``), ce que chacun en ressent (``memory_feelings``), et les
+  vues de la porte (``contracts.memory``) ;
+- ``memory_chunks`` (``Chunks``) : les échanges bruts avec chacun (sa
+  question, sa réponse), retrouvables sans que la consolidation ait décidé de
+  les garder ;
+- ``memory_told`` (``Told``) : à qui elle a répété quoi, d'après la provenance
+  de ce qu'elle a dit, et ``memory_told_lines``, chaque énoncé qui lui montrait
+  un récit sans nom (ADR 0091, 0092) ; la vue ``memory_retold`` naît et meurt
+  avec elles ;
+- ``memory_extraction_queue`` (``ExtractionQueue``) : les extractions remises
+  à plus tard, de son fil ou de messages reçus ailleurs (ADR 0224) ;
+- ``memory_readings`` (``Readings``) : ce qu'elle a lu, en attendant la
+  relecture de la nuit (ADR 0085).
+
+La sixième, ``memory_life`` (les situations et les dates durables), est dans
+``archive.py``.
 
 **Montré, ou dit.** Un élément montré dans un prompt n'est pas un élément
 dont elle s'est servie : être montré date seulement l'anti-répétition

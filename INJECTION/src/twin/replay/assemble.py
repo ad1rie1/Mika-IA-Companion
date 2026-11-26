@@ -12,8 +12,8 @@ et attend l'outil ``record_memories``. On sait ce que chaque ``seq`` du journal 
 l'archive (le pilote le note en déroulant le script). On rend donc les éléments annotés
 **dont le dernier message d'ancrage tombe dans la fenêtre** : un élément à cheval sur deux
 fenêtres sort une seule fois, dans la seconde. Les numéros de l'archive deviennent des
-``seq``, les personnes des jetons (``[P1]``) ou des noms. Les plafonds du moteur sont
-respectés (les plus importants d'abord).
+``seq``, les personnes des jetons (``[P1]``) ou des noms. Le rejoueur borne lui-même ce
+qu'il rend par sorte (``CAPS``, les plus importants d'abord) : le moteur, lui, ne borne plus rien.
 """
 
 from __future__ import annotations
@@ -27,7 +27,10 @@ from typing import Any
 
 from mika.vocab.phrasebook import phrase
 
-#: ce que ``mika.faculties.memory.extraction.parse`` garde au plus par appel
+#: au plus tant d'éléments par sorte et par fenêtre, les plus importants d'abord : les plafonds du
+#: rejoueur, à lui. Le moteur ne borne plus rien depuis le 2026-10-08 :
+#: ``mika.faculties.memory.extraction.parse`` garde chaque élément valide, et seule la sortie du
+#: fournisseur est bornée. Ces nombres sont ceux qu'il gardait avant.
 CAPS = {"souvenirs": 12, "croyances": 20, "promesses": 6, "evenements": 8}
 _SEQ = re.compile(r"^\[#(\d+)\]", re.M)
 #: les en-têtes « Conversation privée avec Julie Martin [P1]. » / « Un salon de groupe (…) : A [P1], B [P2]. »,
