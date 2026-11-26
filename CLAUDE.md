@@ -165,7 +165,10 @@ Ce qui fait échouer un changement :
   - un nom privé (`_nom`) ne se lit pas d'un autre module : ce qu'un autre module lit porte un nom public, une
     aide partagée a un module à elle (ADR 0314) ;
   - dans les projets, un sous-sujet garde ses événements, leurs réducteurs et sa projection dans son module,
-    pas dans `faculty.py` (ADR 0313).
+    pas dans `faculty.py` (ADR 0313) ; la mémoire réduit les siens dans `faculty.py` seul (ADR 0315) ;
+  - les droits d'une ressource sont à son propriétaire : son type de ligne au contrat, son calcul dans son plugin
+    ou sa faculté, ses tableaux réglés dans les réglages de son domaine — rien de cela dans `vocab` ni dans
+    `app/settings.py` (ADR 0316).
 
 La composition (facultés, plugins, politiques d'épisode, arbitrage, modes) est dans `app/composition.py`. Pour écrire
 ou ajouter une faculté : ARCHITECTURE.md, « Écrire une faculté » ; pour ajouter un domaine (son dossier, sa fiche, ses
