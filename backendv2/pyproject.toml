@@ -102,13 +102,11 @@ ignore = ["E501", "UP040", "UP046", "UP047", "B008"]
 "src/mika/runtime/boundary.py" = ["BLE001"]
 "src/mika/sim/**" = ["TID251", "BLE001"]
 # Dans app, seuls les modules du processus qui vivent au temps de la machine, hors de sa vie : l'horodatage d'une
-# sauvegarde, d'une vérification et d'une restauration (chacune prend un ``now`` injecté), la durée de l'appel d'essai
-# de la CLI Claude Code (``claude_code_check``) ; et le point MCP d'une personne (``/mcp/moi``), qui note l'usage d'un
-# jeton au plus une fois par minute (un débit, au vrai temps). Ailleurs dans app, une lecture du temps, du hasard ou
-# d'un identifiant se dit sur sa ligne (``# noqa: TID251 — sa raison``).
+# sauvegarde, d'une vérification et d'une restauration (chacune prend un ``now`` injecté), et la durée de l'appel
+# d'essai de la CLI Claude Code (``claude_code_check``). Ailleurs dans app, une lecture du temps, du hasard ou d'un
+# identifiant se dit sur sa ligne (``# noqa: TID251 — sa raison``).
 "src/mika/app/backup.py" = ["TID251"]
 "src/mika/app/cli/models.py" = ["TID251"]
-"src/mika/app/domains/projects/docs_mcp.py" = ["TID251"]
 # le serveur MCP du plugin web : un programme à part, lancé dans sa cage, qui vit au vrai temps (débit, délais)
 "src/mika/plugins/web/server.py" = ["TID251"]
 "tests/**" = ["TID251", "BLE001", "PLC0415", "DTZ", "B"]

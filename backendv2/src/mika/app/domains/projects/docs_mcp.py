@@ -224,7 +224,7 @@ class DocsPoint:
         key = f"compte:{account.id}"
         if not self._minute.allow(key=key):
             return 429
-        now = time.monotonic()
+        now = time.monotonic()  # noqa: TID251 — le débit d'un jeton d'outil : le vrai temps du serveur
         if now - self._noted.get(token_id, -USE_NOTED_S) >= USE_NOTED_S:
             # un jeton d'outil qui sert se voit servir (ADR 0292) : sinon il passe pour abandonné
             if len(self._noted) > 10_000:

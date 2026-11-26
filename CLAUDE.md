@@ -149,7 +149,7 @@ Ce qui fait échouer un changement :
   un plugin ; le runtime n'importe aucun adaptateur, l'inspecteur pas le simulateur.
 - **`ruff`** : pas d'import dans une fonction ; pas de `except Exception` aveugle (sauf `runtime/boundary.py`,
   `adapters/**`, `sim/**` ; ailleurs, seulement avec `# noqa: BLE001` et sa raison) ; ni l'heure, ni le hasard, ni un
-  identifiant lus directement (sauf `adapters/**`, `sim/**`, `plugins/web/server.py`, ADR 0066, et les trois modules
+  identifiant lus directement (sauf `adapters/**`, `sim/**`, `plugins/web/server.py`, ADR 0066, et les deux modules
   d'`app` que nomme `pyproject.toml` ; ailleurs dans `app`, seulement avec `# noqa: TID251` et sa raison) : le temps
   vient de `kernel.clock`, le hasard du rng de l'événement, les identifiants de l'`IdGen` injecté.
 - **Les gardes d'architecture** (`tests/architecture/`, leur table dans ARCHITECTURE.md), dont :

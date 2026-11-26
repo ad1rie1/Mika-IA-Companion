@@ -24,8 +24,8 @@ ITSELF = frozenset({
     "access_set", "links_set", "stirred", "steer_asked",
 })
 
-#: les sous-sujets nés avant la règle, encore dans ``faculty.py`` : chacun en sort quand on y touche (les jalons
-#: d'abord), et sa ligne s'efface alors d'ici
+#: les sous-sujets nés avant la règle, encore dans ``faculty.py`` : chacun en sort quand on y touche, et sa ligne
+#: s'efface alors d'ici (les jalons et les décisions techniques l'ont fait : ``milestones.py``, ``decisions.py``)
 BORN_BEFORE = {
     "les pull requests, la CI et la fusion (pulls.py, merge.py)": frozenset({
         "pull_seen", "checks_seen", "base_seen", "merge_asked", "merge_answered"}),
