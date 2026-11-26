@@ -49,6 +49,7 @@ from mika.contracts import self_ as self_c
 from mika.faculties.projects import (
     access,
     actions,
+    asks,
     glance,
     inspect_todo,
     links,
@@ -898,7 +899,7 @@ def _yours(sc: Scene, mine: Mapping[int, Reach], names: Mapping[str, str], targe
 def _received(sc: Scene, r: Reach, mine: Mapping[int, Reach], names: Mapping[str, str]) -> list[dict[str, Any]]:
     """Les demandes que d'autres projets lui ont adressées, parmi les tickets que son état garde (les ouverts, les
     derniers touchés), les plus récentes d'abord."""
-    found = [x for x in r.p.board.items if x.list_name == c.TICKETS and c.asking_project(x.author)]
+    found = asks.received(r.p)
     texts = _texts(sc.call, [x.title_ref for x in found])
     return [_demand(sc, mine, names, r, x, c.asking_project(x.author), direction="received", sender="project",
                     title=texts.get(x.title_ref, "")) for x in sorted(found, key=lambda x: -x.at)[:ASKS_SHOWN]]

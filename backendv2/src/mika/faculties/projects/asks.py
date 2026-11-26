@@ -122,6 +122,14 @@ def reads(s: ProjectsState, asker: Project, target: int, world: links.World) -> 
     return t is not None and target in asker.reads and links.grant(asker, t, world).detail
 
 
+def received(p: Project, target: int | None = None) -> list[Item]:
+    """Les demandes que ``p`` a reçues d'autres projets : ses tickets qu'un projet a ouverts (``asking_project``),
+    parmi ceux que son état garde, dans l'ordre de son registre — ceux du projet ``target`` seulement, s'il est
+    dit."""
+    return [x for x in p.board.items if x.list_name == c.TICKETS and (asker := c.asking_project(x.author))
+            and (target is None or asker == target)]
+
+
 # ── Ce que le demandeur suit (appelé par les réducteurs du registre) ──────
 
 

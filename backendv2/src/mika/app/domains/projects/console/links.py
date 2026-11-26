@@ -64,7 +64,7 @@ def _card(sc: Scene, t: Any, grant: Any, names: Mapping[str, str], why_ref: str,
     """Un projet lié, sur le schéma : son nom, son état, à qui, le pourquoi du lien, ce qu'il donne, sa vue, ses
     demandes."""
     sent = [a for a in sc.p.asks if a.target == t.id] if reading else \
-        [x for x in sc.p.board.items if x.list_name == c.TICKETS and c.asking_project(x.author) == t.id]
+        asks.received(sc.p, t.id)
     return {"n": t.id, "title": names.get(t.title_ref, FORGOTTEN), "state": STATUS_FR.get(t.status, t.status),
             "tone": STATE_TONES.get(t.status, WAIT), "owner": _owner(sc, t), "why": names.get(why_ref, ""),
             "since": sc.day(since) if since else "", "suspended": suspended,
@@ -82,7 +82,7 @@ def links_page(sc: Scene) -> Markup | None:
         return None
     world = links.world_of(sc.frame)
     read, readers = links.readings(sc.s, p, world), links.readers(sc.s, p, world)
-    received = [x for x in p.board.items if x.list_name == c.TICKETS and c.asking_project(x.author)]
+    received = asks.received(p)
     view = sc.query.get("vue", "")
     view = view if view == ASKS else SCHEMA
     form = sc.form("liens", sc.url(TAB))
@@ -181,7 +181,7 @@ def _requests(sc: Scene, t: Any, reading: bool) -> list[dict[str, Any]]:
         return [{"n": a.number, "title": e.title if e is not None else f"Ticket #{a.number}",
                  "state": ASK_WORDS[asks.state(a.status)], "tone": ASK_TONES[asks.state(a.status)],
                  "href": sc.url(TAB, vue=ASKS, demande=f"{t.id}-{a.number}")} for a, e in found]
-    got = [x for x in sc.p.board.items if x.list_name == c.TICKETS and c.asking_project(x.author) == t.id]
+    got = asks.received(sc.p, t.id)
     words = sc.texts(x.title_ref for x in got)
     return [{"n": x.number, "title": words.get(x.title_ref, FORGOTTEN), "state": ASK_WORDS[asks.state(x.status)],
              "tone": ASK_TONES[asks.state(x.status)], "href": sc.url(TAB, vue=ASKS, demande=f"r-{x.number}")}

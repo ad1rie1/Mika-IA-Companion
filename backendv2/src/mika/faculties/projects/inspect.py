@@ -1445,7 +1445,7 @@ def _links_section(p: Project, s: ProjectsState, frame: Frame, ctx: InspectConte
             title=ASKS_TITLE,
             caption="Une demande est un ticket ouvert chez un projet qu'il lit : c'est ce projet, et son "
                     "propriétaire, qui la font avancer."))
-    received = [x for x in p.board.items if x.list_name == c.TICKETS and c.asking_project(x.author)]
+    received = asks.received(p)
     if received:  # ce que d'autres projets lui ont demandé : des tickets chez lui, que son onglet Tickets ouvre
         titles = stored_texts(ctx, [x.title_ref for x in received])
         items.append(Table(

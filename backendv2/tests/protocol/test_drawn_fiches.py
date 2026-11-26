@@ -588,7 +588,7 @@ READS: dict[str, dict[str, str]] = {
     },
     "domains/projects/console/links.py": {
         "links": "ce qu'il lit et qui le lit, et ce que chaque lien donne (``readings``, ``readers``, ``grant``)",
-        "asks": "où en est une demande, et comment elle naîtrait (directe, sur accord)",
+        "asks": "où en est une demande, comment elle naîtrait (directe, sur accord), et celles qu'il a reçues",
         "tie_of": "le mot et la date d'un lien",
         "link_options": "les projets qu'il peut lire : ceux que propose « Ajouter une dépendance »",
         "link_knob": "la case d'un lien dans ``projects.liens``, que la page pose pour un geste",
