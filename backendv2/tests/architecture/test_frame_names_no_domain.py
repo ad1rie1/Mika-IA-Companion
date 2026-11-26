@@ -53,6 +53,7 @@ from mika.app.domains import (
     PortPart,
     QueuePart,
     RightsSort,
+    ShareWrite,
     SharingPart,
     gathered,
     part,
@@ -354,6 +355,8 @@ def test_every_part_a_card_names_exists_and_carries_its_name():
             assert shared.article.strip() and shared.article.endswith((" ", "'")), d.name
             assert callable(shared.every) and callable(shared.share), d.name
             assert all(f is None or callable(f) for f in (shared.write, shared.sharer, shared.names)), d.name
+            # … son écriture prend, par position, ce que sa forme dit (``ShareWrite``) : le cadre l'appelle ainsi
+            assert shared.write is None or takes_like(shared.write, ShareWrite), d.name
         held = part(d.accounts, "ACCOUNTS")
         assert held is None or isinstance(held, AccountsPart), d.name
         if held is not None:  # les comptes de son canal : un canal de CHANNELS, ses mots, ce qu'elle appelle
@@ -563,6 +566,24 @@ def takes_forms(draw: Callable[..., object]) -> bool:
     (``draw(ui, key, blocks, query, forms=…)``, ``app/handmade/person/__init__.py::PersonOverview.render_tab``)."""
     params = inspect.signature(draw).parameters.values()
     return any(p.name == "forms" or p.kind is p.VAR_KEYWORD for p in params)
+
+
+def takes_like(fn: Callable[..., object], form: type) -> bool:
+    """Une part appelable prend, par position, les arguments que sa forme dit (un ``Protocol`` : son ``__call__``) :
+    sinon elle n'échouerait qu'au premier appel, à la première page qui la lit."""
+    wanted = [p for p in inspect.signature(form.__call__).parameters.values() if p.name != "self"]
+    try:
+        inspect.signature(fn).bind(*range(len(wanted)))
+    except TypeError:
+        return False
+    return True
+
+
+def test_a_part_takes_what_its_form_says():
+    """Le contrôle de ``takes_like`` voit une part qui prend un argument de moins, ou qui en veut un par son nom."""
+    assert takes_like(lambda a, b, c, d, e, f=None: None, ShareWrite) and takes_like(lambda *a: None, ShareWrite)
+    assert not takes_like(lambda a, b, c, d, e: None, ShareWrite)
+    assert not takes_like(lambda a, b, c, d, e, *, check: None, ShareWrite)
 
 
 def served(sheet: str) -> bool:

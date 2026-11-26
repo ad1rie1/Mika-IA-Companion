@@ -20,7 +20,7 @@ cadre les importe au moment d'assembler (``part``), et y lit un nom convenu :
   ``COUNTERS`` (son nom → ``count(call)``) ;
 - ``live`` : ``LIVE``, une ``LivePart`` ;
 - ``sharing`` : ``SHARING``, une ``SharingPart`` : ce qui se partage chez lui (``app/me/sharing.py`` réunit les
-  parts) ;
+  parts ; une ressource rangée dans les réglages avec ses partages fait la sienne par ``kept_in_settings``) ;
 - ``accounts`` : ``ACCOUNTS``, une ``AccountsPart`` : les comptes de son canal (``app/me/accounts.py`` réunit les
   parts) ;
 - ``outside`` : ``OUTSIDE``, une ``OutsidePart`` : une sorte de ressource dont les outils viennent d'ailleurs
@@ -49,7 +49,7 @@ from __future__ import annotations
 import importlib
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,6 +140,19 @@ class LivePart:
     episodes: Callable[..., list[Any]] | None = None
 
 
+class ShareWrite(Protocol):
+    """Ranger ou retirer un partage d'une ressource sans juger qui demande (``SharingPart.write``) : appelée par le cadre
+    pour l'opérateur qui retire un partage (``app/me/sharing.py::write_share``), et par la part même quand son
+    propriétaire partage, après ses vérifications. Six arguments, par position (leurs noms sont à chaque part : une clé
+    d'agenda est son ``calendar``) : les réglages ; ce qui rejournalise ce qui en dérive (``reconfigure``, ou ``None``) ;
+    la clé de la ressource ; la personne qui reçoit (sa clé) ; le niveau (vide : retiré) ; ``check``, qui juge la fiche
+    relue sous le verrou des réglages (ou ``None``) et lève ``Denied``. Asynchrone ; une ressource inconnue lève
+    ``Denied`` (404), une fiche refusée aussi (400)."""
+
+    def __call__(self, settings: Any, reconfigure: Callable[[], Awaitable[Any]] | None, key: str, person: str,
+                 level: str, check: Callable[[Any], None] | None, /) -> Awaitable[None]: ...
+
+
 @dataclass(frozen=True, slots=True)
 class SharingPart:
     """Ce qui se partage chez lui (ADR 0188) : une sorte de ressource — une boîte, un compte Teams, un service, un
@@ -163,10 +176,10 @@ class SharingPart:
     #: « Retirer à Léa son accès à la boîte « Perso » ? » (Réglages › Droits › Partages, la fiche d'une personne)
     article: str
     #: ranger ou retirer un partage sans juger qui demande (l'opérateur qui le retire dans Réglages › Droits ›
-    #: Partages) : ``write(settings, reconfigure, key, person, level, check)``, asynchrone (``check`` juge sa fiche
-    #: relue, sous le verrou des réglages) ; ``None`` : il ne se range pas ainsi (un service se règle sur ses lignes
-    #: d'accès), et la console ne le retire pas
-    write: Callable[..., Awaitable[None]] | None = None
+    #: Partages) : ``write(settings, reconfigure, key, person, level, check)``, une ``ShareWrite`` (sa signature, dite
+    #: là, que la garde vérifie) ; ``None`` : il ne se range pas ainsi (un service se règle sur ses lignes d'accès), et
+    #: la console ne le retire pas
+    write: ShareWrite | None = None
     #: qui partage, par son nom, dit à qui reçoit : ``sharer(frame, shared, name)`` (qui décide d'une boîte, qui écrit
     #: d'un compte Teams) ; ``None`` : le nom de son propriétaire
     sharer: Callable[..., str] | None = None
