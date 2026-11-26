@@ -23,6 +23,9 @@ Ce module ne juge aucun droit et ne connaît aucun état : qu'un projet soit lu 
 l'appelant en sait (ses liens) ; ce que le lien donne quand l'événement arrive se relit ailleurs (``links.py``, le
 processus ``projects.stirs``). Qu'une app ou un réveil existe ne se vérifie pas ici non plus : un plan peut nommer
 l'app qu'il va écrire, et un déclencheur sans rien pour le déclencher ne fait rien.
+
+Un déclencheur se dit en mots ici aussi, par sa voix (``trigger_words``, et ``triggers_said`` pour ceux d'un
+objectif) : ce que disent la ligne d'un objectif, la réponse de ses outils, son coup d'œil et la console.
 """
 
 from __future__ import annotations
@@ -30,6 +33,8 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass
+
+from mika.vocab.phrasebook import phrase
 
 #: les sortes
 PROJECT, APP, WAKE, ITEM = "project", "app", "wake", "item"
@@ -211,3 +216,35 @@ def asked(key: str) -> int:
     """Le projet visé par la demande dont la fermeture fait cette cause ; 0 : ce n'en est pas une."""
     sort, _, number = (key or "").partition(":")
     return int(number) if sort == ASK and number.isdecimal() else 0
+
+
+# ── En mots ───────────────────────────────────────────────────────────────
+
+
+def trigger_words(key: str) -> str:
+    """Un déclencheur en mots (ADR 0265) — « un commit du projet n° 3 », « un signal de l'app veille » : ce que
+    disent la ligne d'un objectif, la réponse de ses outils et la console. Une sorte de plus (``SORTS``) y ajoute sa
+    phrase."""
+    t = read(key)
+    if t is None:
+        return key
+    if t.sort == PROJECT:
+        return phrase("projects.triggers.commit", id=t.project) if t.name == COMMIT else \
+            phrase("projects.triggers.done", id=t.project)
+    if t.sort == APP:
+        return phrase("projects.triggers.app", name=t.name)
+    if t.sort == WAKE:
+        return phrase("projects.triggers.wake", name=t.name)
+    if t.sort == ITEM:
+        return phrase("projects.triggers.item", name=t.name)
+    return key
+
+
+def triggers_said(on: Iterable[str], only_on_event: bool = False) -> str:
+    """Ce qui déclenche un objectif, à la suite de ce qu'on en dit (vide : rien ne le déclenche) : ses déclencheurs
+    en mots, et s'il ne passe que sur événement."""
+    listed = ", ".join(trigger_words(k) for k in on)
+    if not listed:
+        return ""
+    return phrase("projects.triggers.only", triggers=listed) if only_on_event else \
+        phrase("projects.triggers.also", triggers=listed)

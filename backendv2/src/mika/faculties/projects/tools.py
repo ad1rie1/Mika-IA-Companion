@@ -26,7 +26,7 @@ alors quand le propriétaire du projet valide le plan. Les règles sont dans
 ``project_plan`` (ses étapes, ``framing_tools.py``), ``project_objective_add``, ``create_project`` et
 ``start_project`` (leurs constants) prennent ``on`` et ``only_on_event``,
 vérifiés avant d'écrire (``triggers.accepted``) ; un refus dit pourquoi
-(``bad_trigger``), un ajout dit ce qui le déclenche (``triggers_said``).
+(``bad_trigger``), un ajout dit ce qui le déclenche (``triggers.triggers_said``).
 
 **« Fait » se prouve** : pour un objectif ponctuel, un commit non vide pendant
 l'objectif (ce qu'elle a écrit dans l'atelier), ou un brouillon de mail, une
@@ -109,6 +109,7 @@ from mika.faculties.projects.tool_common import (
     running_project,
     speaker,
 )
+from mika.faculties.projects.triggers import triggers_said
 from mika.kernel.clock import HOUR
 from mika.kernel.events import Content, Draft
 from mika.kernel.faculty import ToolResult, proving_tools
@@ -238,35 +239,6 @@ def refused_lines(refused: tuple[tuple[int, str], ...]) -> str:
     """Les projets qu'un lien ne peut pas viser, un par ligne, chacun avec sa raison (``links.refusal``)."""
     words = family("projects.links.refused")
     return "\n".join(phrase("projects.links.refused_line", id=t, why=words[why]) for t, why in refused)
-
-
-def trigger_words(key: str) -> str:
-    """Un déclencheur en mots (ADR 0265) — « un commit du projet n° 3 », « un signal de l'app veille » : ce que
-    disent la ligne d'un objectif, la réponse de ses outils et la console. Une sorte de plus (``triggers.SORTS``) y
-    ajoute sa phrase."""
-    t = triggers.read(key)
-    if t is None:
-        return key
-    if t.sort == triggers.PROJECT:
-        return phrase("projects.triggers.commit", id=t.project) if t.name == triggers.COMMIT else \
-            phrase("projects.triggers.done", id=t.project)
-    if t.sort == triggers.APP:
-        return phrase("projects.triggers.app", name=t.name)
-    if t.sort == triggers.WAKE:
-        return phrase("projects.triggers.wake", name=t.name)
-    if t.sort == triggers.ITEM:
-        return phrase("projects.triggers.item", name=t.name)
-    return key
-
-
-def triggers_said(on: Iterable[str], only_on_event: bool = False) -> str:
-    """Ce qui déclenche un objectif, à la suite de ce qu'on en dit (vide : rien ne le déclenche) : ses déclencheurs
-    en mots, et s'il ne passe que sur événement."""
-    listed = ", ".join(trigger_words(k) for k in on)
-    if not listed:
-        return ""
-    return phrase("projects.triggers.only", triggers=listed) if only_on_event else \
-        phrase("projects.triggers.also", triggers=listed)
 
 
 def bad_trigger(exc: triggers.BadTrigger) -> str:

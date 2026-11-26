@@ -78,9 +78,8 @@ from mika.faculties.projects.tools import (
     bad_trigger,
     project_objective_add,
     report_run,
-    trigger_words,
-    triggers_said,
 )
+from mika.faculties.projects.triggers import trigger_words, triggers_said
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.events import Content, Origin
 from mika.plugins.forge import WRITTEN, outcomes, signal_draft

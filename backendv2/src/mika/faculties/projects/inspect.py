@@ -101,7 +101,7 @@ from mika.faculties.projects.rhythm import (
     schedule_words,
     stirred_due,
 )
-from mika.faculties.projects.tools import trigger_words
+from mika.faculties.projects.triggers import trigger_words
 from mika.faculties.projects.work import Why, next_run_at, why_not_now
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.events import Content, Event

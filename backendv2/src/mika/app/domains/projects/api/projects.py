@@ -133,7 +133,7 @@ from mika.faculties.projects.inspect_tracker import (
     NOTE_WORDS,
     PRIORITY_WORDS,
 )
-from mika.faculties.projects.tools import trigger_words
+from mika.faculties.projects.triggers import trigger_words
 from mika.kernel.clock import HOUR
 from mika.runtime import decisions
 from mika.runtime.operations import audit

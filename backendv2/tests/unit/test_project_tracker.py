@@ -35,7 +35,6 @@ from mika.faculties.projects.faculty import params as projects_params
 from mika.faculties.projects.prompt import ITEM_LINE_CLIP, ITEMS_LINES, _items, _items_section
 from mika.faculties.projects.rhythm import stirred_due
 from mika.faculties.projects.tend import stirs_of
-from mika.faculties.projects.tools import trigger_words
 from mika.faculties.projects.tracker import ITEM_ADDED, ITEM_CHANGED, ITEM_NOTED, LIST_SET
 from mika.faculties.projects.tracker_tools import (
     AddArgs,
@@ -52,6 +51,7 @@ from mika.faculties.projects.tracker_tools import (
     project_item,
     project_items,
 )
+from mika.faculties.projects.triggers import trigger_words
 from mika.kernel.clock import HOUR
 from mika.kernel.events import Content
 from mika.kernel.faculty import ToolResult

@@ -34,7 +34,7 @@ from mika.faculties.projects.faculty import (
     readers_of,
 )
 from mika.faculties.projects.rhythm import schedule_words
-from mika.faculties.projects.tools import trigger_words
+from mika.faculties.projects.triggers import trigger_words
 from mika.kernel.clock import DAY, HOUR
 from mika.kernel.frame import Frame
 
