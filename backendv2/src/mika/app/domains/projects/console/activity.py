@@ -35,12 +35,11 @@ from mika.faculties.projects.inspect import (
     DECIDE_LABEL,
     EFFECTS_CURSOR,
     NOTES_CURSOR,
-    OBJ_FR,
     OPERATIONS_CURSOR,
-    VERDICT_FR,
     window_words,
 )
 from mika.faculties.projects.inspect_common import FORGOTTEN
+from mika.faculties.projects.inspect_words import OBJ_FR, VERDICT_FR
 from mika.inspector.pages.episode_drawn import episode_panel
 from mika.inspector.pages.journal import episode_head
 from mika.inspector.pages.why import trace_of

@@ -67,9 +67,10 @@ from mika.faculties.projects.faculty import (
     milestone_at,
     objective_at,
 )
-from mika.faculties.projects.inspect import AUTHOR_FR, window_words
+from mika.faculties.projects.inspect import window_words
 from mika.faculties.projects.inspect_merge import NOT_WRITABLE, NOT_WRITER
 from mika.faculties.projects.inspect_milestones import HELD_WORDS
+from mika.faculties.projects.inspect_words import AUTHOR_FR
 from mika.faculties.projects.rhythm import schedule_words
 from mika.kernel.clock import HOUR
 from mika.kernel.forms import describe

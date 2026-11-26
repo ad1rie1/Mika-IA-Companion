@@ -41,7 +41,6 @@ from mika.app.domains.projects.console.zones import (
 from mika.contracts import projects as c
 from mika.faculties.projects import issues, tickets, tracker
 from mika.faculties.projects.faculty import MOVE_PUBLISH, by_pulls, issue_move, objective_at, reflected
-from mika.faculties.projects.inspect import OBJ_FR
 from mika.faculties.projects.inspect_common import FORGOTTEN
 from mika.faculties.projects.inspect_issues import ISSUE_FR
 from mika.faculties.projects.inspect_tracker import (
@@ -54,6 +53,7 @@ from mika.faculties.projects.inspect_tracker import (
     shown_changer,
     shown_hand,
 )
+from mika.faculties.projects.inspect_words import OBJ_FR
 from mika.inspector import render
 from mika.inspector.ui import env
 from mika.kernel.inspect import Pager, plural

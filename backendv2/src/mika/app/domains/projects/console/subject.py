@@ -88,12 +88,9 @@ from mika.faculties.projects import docs, glance
 from mika.faculties.projects.access import STEER_WORDS, who_named
 from mika.faculties.projects.faculty import access_of, project_at
 from mika.faculties.projects.inspect import (
-    CHECKS_FR,
     ENGINE_TITLE,
     LIVING,
     NEXT_RUN_LABEL,
-    OBJ_FR,
-    PULL_FR,
     TICKETS_SETTING_TITLE,
     window_words,
 )
@@ -101,6 +98,7 @@ from mika.faculties.projects.inspect_code import PULLS, REMOTE, VIEW
 from mika.faculties.projects.inspect_common import FORGOTTEN
 from mika.faculties.projects.inspect_todo import TITLE as TODO_TITLE
 from mika.faculties.projects.inspect_tracker import JOURNEY_WORDS
+from mika.faculties.projects.inspect_words import CHECKS_FR, OBJ_FR, PULL_FR
 from mika.inspector import render
 from mika.inspector.pages.episode_drawn import EPISODE_STYLES
 from mika.inspector.pages.subjects import subject_url

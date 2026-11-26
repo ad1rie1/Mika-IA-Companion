@@ -55,9 +55,9 @@ from mika.faculties.projects.faculty import (
     Project,
     written,
 )
-from mika.faculties.projects.inspect import OBJ_FR, VERDICT_FR
 from mika.faculties.projects.inspect_milestones import CHECK_WORDS
 from mika.faculties.projects.inspect_milestones import STATE_FR as MILESTONE_FR
+from mika.faculties.projects.inspect_words import OBJ_FR, VERDICT_FR
 from mika.kernel.clock import DAY
 from mika.vocab.episodes import outcome_words, project_target
 

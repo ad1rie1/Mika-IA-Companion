@@ -35,9 +35,9 @@ from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.faculties.projects import diagram
 from mika.faculties.projects.faculty import milestone_at, objective_at
-from mika.faculties.projects.inspect import OBJ_FR
 from mika.faculties.projects.inspect_common import FORGOTTEN
 from mika.faculties.projects.inspect_milestones import STATE_FR
+from mika.faculties.projects.inspect_words import OBJ_FR
 from mika.inspector.ui import env
 from mika.kernel.clock import DAY, US
 from mika.kernel.inspect import plural

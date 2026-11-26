@@ -20,8 +20,8 @@ from typing import Any, Protocol
 from mika.contracts import projects as c
 from mika.faculties.projects import decisions, merge, tracker
 from mika.faculties.projects import faculty as f
-from mika.faculties.projects.inspect import CHECKS_FR, PULL_FR, VERDICT_FR
 from mika.faculties.projects.inspect_merge import WRITE_WORDS
+from mika.faculties.projects.inspect_words import CHECKS_FR, PULL_FR, VERDICT_FR
 from mika.ports.workshop import CHECKS_FAILED, CHECKS_PASSED
 
 # ── Les sortes du fil ─────────────────────────────────────────────────────

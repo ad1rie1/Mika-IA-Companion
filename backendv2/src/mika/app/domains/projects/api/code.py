@@ -70,7 +70,6 @@ from mika.faculties.projects.faculty import (
     ticket_held,
 )
 from mika.faculties.projects.faculty import objective_for as _objective_for
-from mika.faculties.projects.inspect import OBJ_FR
 from mika.faculties.projects.inspect_code import (  # ses mots : ceux de la console (ADR 0297)
     BINARY,
     CHECK_WORDS,
@@ -89,6 +88,7 @@ from mika.faculties.projects.inspect_code import (  # ses mots : ceux de la cons
 from mika.faculties.projects.inspect_merge import ACTION as MERGE_ACTION
 from mika.faculties.projects.inspect_merge import REFUSED_WORDS
 from mika.faculties.projects.inspect_reviews import REVIEW_WORDS
+from mika.faculties.projects.inspect_words import OBJ_FR
 from mika.faculties.projects.issues import issue_ticket as _issue_ticket
 from mika.faculties.projects.pulls import PULL_ORDER, READY
 from mika.faculties.projects.pulls import pull_stage as _pull_state

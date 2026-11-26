@@ -120,7 +120,7 @@ from mika.faculties.projects.faculty import (
     written,
     written_on,
 )
-from mika.faculties.projects.inspect import CHECKS_FR, OBJ_FR, PULL_FR, STATUS_FR, pull_words, window_words
+from mika.faculties.projects.inspect import pull_words, window_words
 from mika.faculties.projects.inspect_milestones import CHECK_WORDS
 from mika.faculties.projects.inspect_milestones import STATE_FR as MILESTONE_FR
 from mika.faculties.projects.inspect_reviews import REVIEW_WORDS
@@ -133,6 +133,7 @@ from mika.faculties.projects.inspect_tracker import (
     NOTE_WORDS,
     PRIORITY_WORDS,
 )
+from mika.faculties.projects.inspect_words import CHECKS_FR, OBJ_FR, PULL_FR, STATUS_FR
 from mika.faculties.projects.triggers import trigger_words
 from mika.kernel.clock import HOUR
 from mika.runtime import decisions

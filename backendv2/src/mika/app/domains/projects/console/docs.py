@@ -38,9 +38,10 @@ from mika.app.domains.projects.console.zones import DONE, FAIL, WAIT, WORK, Scen
 from mika.contracts import projects as c
 from mika.faculties.projects import docs
 from mika.faculties.projects.faculty import DOC_IMAGES_MAX, DOC_PAGES_MAX, DOC_VERSIONS_KEPT, objective_at
-from mika.faculties.projects.inspect import AUTHOR_FR, DECISION_FR, DECISION_PARAM, OBJ_FR
+from mika.faculties.projects.inspect import DECISION_PARAM
 from mika.faculties.projects.inspect_common import FORGOTTEN
 from mika.faculties.projects.inspect_docs import who_wrote
+from mika.faculties.projects.inspect_words import AUTHOR_FR, DECISION_FR, OBJ_FR
 from mika.inspector.ui import PREFIX, env
 from mika.kernel.inspect import plural, size_fr
 

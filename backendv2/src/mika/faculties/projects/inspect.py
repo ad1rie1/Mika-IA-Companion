@@ -19,7 +19,8 @@
   Documentation et Accès vivent à part (``inspect_tracker.py``,
   ``inspect_git.py`` et ``inspect_code.py``, ``inspect_files.py``,
   ``inspect_docs.py``, ``inspect_access.py``) ; les aides que partagent les vues
-  sont dans ``inspect_common.py``, leurs mots ici.
+  sont dans ``inspect_common.py``, les mots et les tons de leurs états dans
+  ``inspect_words.py``, le reste de leurs mots ici.
 - **Sur la fiche d'une personne** : les projets qui la concernent.
 
 Lecture seule : les compteurs viennent de la tranche, l'histoire (exécutions,
@@ -91,6 +92,27 @@ from mika.faculties.projects.inspect_common import (
     stored_texts,
     subject_project,
 )
+from mika.faculties.projects.inspect_words import (
+    AUTHOR_FR,
+    CHECKS_FR,
+    DECISION_FR,
+    DECISION_TONE,
+    ISSUES_FR,
+    KIND_FR,
+    KIND_TONE,
+    MODE_FR,
+    MODE_TONE,
+    OBJ_FR,
+    OBJ_TONE,
+    PLAN_FR,
+    PRIORITY_TONE,
+    PULL_FR,
+    REVIEW_FR,
+    STATUS_FR,
+    STATUS_TONE,
+    VERDICT_FR,
+    VERDICT_TONE,
+)
 from mika.faculties.projects.pulls import pull_url
 from mika.faculties.projects.rhythm import (
     always,
@@ -139,39 +161,17 @@ from mika.kernel.inspect import (
     plural,
 )
 from mika.kernel.text import fold
-from mika.ports.workshop import (
-    CHECKS_FAILED,
-    CHECKS_PASSED,
-    CHECKS_PENDING,
-    PULL_CLOSED,
-    PULL_MERGED,
-    PULL_OPEN,
-    argv_lines,
-)
+from mika.ports.workshop import PULL_OPEN, argv_lines
 from mika.vocab.episodes import Kind, outcome_words, project_target
 
 PAGE = 25
 SUMMARY_CLAMP = 260
 
-MODE_FR = {c.PERSONA: "elle-même", c.PLAIN: "impersonnel"}
 MODE_LONG = dict(MODE_CHOICES)
-MODE_TONE = {c.PERSONA: "info", c.PLAIN: "muted"}
-STATUS_FR = {c.ACTIVE: "actif", c.PAUSED: "en pause", c.ARCHIVED: "archivé"}
-STATUS_TONE = {c.ACTIVE: "ok", c.PAUSED: "warn", c.ARCHIVED: "muted"}
-KIND_FR = {c.ONCE: "ponctuel", c.CONSTANT: "constant"}
-KIND_TONE = {c.ONCE: "", c.CONSTANT: "info"}
-OBJ_FR = {c.OPEN: "ouvert", c.DONE: "fait", c.BLOCKED: "bloqué", c.DROPPED: "retiré"}
-OBJ_TONE = {c.OPEN: "", c.DONE: "ok", c.BLOCKED: "danger", c.DROPPED: "muted"}
 #: l'ordre des objectifs : ce qui revient, ce qui reste à faire, ce qui bloque, puis ce qui est fait ou retiré
 OBJ_ORDER = {(c.CONSTANT, c.OPEN): 0, (c.ONCE, c.OPEN): 1, (c.ONCE, c.BLOCKED): 2, (c.CONSTANT, c.BLOCKED): 2,
              (c.ONCE, c.DONE): 3}
-VERDICT_FR = {c.CONTINUE: "continuer", c.DONE: "fait", c.BLOCKED: "bloqué", c.WAIT: "attendre"}
-VERDICT_TONE = {c.CONTINUE: "info", c.DONE: "ok", c.BLOCKED: "danger", c.WAIT: "muted"}
-DECISION_FR = {c.IN_FORCE: "en vigueur", c.SUPERSEDED: "remplacée", c.WITHDRAWN: "retirée"}
-DECISION_TONE = {c.IN_FORCE: "ok", c.SUPERSEDED: "muted", c.WITHDRAWN: "muted"}
 PRIORITY_FR = dict(PRIORITY_CHOICES)
-PRIORITY_TONE = {c.LOW: "muted", c.NORMAL: "", c.HIGH: "warn", c.URGENT: "danger"}
-AUTHOR_FR = {"operator": "toi", "owner": "qui le lui a confié", "self": "elle"}
 
 STATE_PARAM = Param("etat", "État", kind="select", default="vivants",
                     choices=(("vivants", "actifs et en pause"), (c.ACTIVE, "actifs"), (c.PAUSED, "en pause"),
@@ -738,10 +738,6 @@ def _state_notes(p: Project, s: ProjectsState, frame: Frame, ctx: InspectContext
 #: sur la ligne d'un objectif (ADR 0274) : sa branche et l'état de sa pull request, puis sa page chez l'hôte — la
 #: fiche dessinée les reprend par ces titres
 PULL_TITLE, PULL_LINK_TITLE = "Sa branche et sa pull request", "Sa pull request chez l'hôte"
-PULL_FR = {PULL_OPEN: "ouverte, en attente de fusion", PULL_MERGED: "fusionnée", PULL_CLOSED: "fermée sans fusion"}
-#: les vérifications du commit d'une pull request ouverte (ADR 0275) ; un dépôt sans CI n'en dit rien
-CHECKS_FR = {CHECKS_PENDING: "ses vérifications tournent encore", CHECKS_PASSED: "ses vérifications sont passées",
-             CHECKS_FAILED: "ses vérifications ont échoué (l'objectif est rouvert)"}
 
 
 def pull_words(o: Any) -> str:
@@ -823,10 +819,6 @@ def _approvals(p: Project, s: ProjectsState, frame: Frame, texts: Mapping[str, s
                    description="Ce qu'elle veut faire sortir de la machine : rien ne part sans ton accord. Ce qui est "
                                "montré est ce qui partira ; ses raisons sont ses mots, pas une description de la "
                                "commande.")
-
-
-PLAN_FR = {c.TO_FRAME: ("à cadrer", "info"), c.PROPOSED: ("plan proposé, il attend une réponse", "warn"),
-           c.PLANNED: ("planifié", "ok")}
 
 
 def _plan_section(p: Project, frame: Frame, texts: Mapping[str, str]) -> Section | None:
@@ -1303,9 +1295,6 @@ def _engine_section(p: Project, s: ProjectsState, frame: Frame, ctx: InspectCont
 #: le réglage de ses tickets, sur « Administration » (ADR 0270, 0275, 0281, 0297) : la fiche dessinée le retrouve par
 #: ce titre
 TICKETS_SETTING_TITLE = "Ses tickets et ses issues"
-REVIEW_FR = {c.REVIEW_ALWAYS: "toujours par toi", c.REVIEW_LARGE: "par toi, sauf pour un petit ticket"}
-ISSUES_FR = {c.ISSUES_NEVER: "jamais", c.ISSUES_ASK: "sur ton accord, ticket par ticket",
-             c.ISSUES_ALWAYS: "toujours (la synchronisation)"}
 
 
 def _tickets_section(p: Project, editable: bool) -> Section:

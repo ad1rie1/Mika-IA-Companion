@@ -22,7 +22,7 @@ from mika.faculties.projects.faculty import (
     ProjectsState,
     by_pulls,
 )
-from mika.faculties.projects.inspect import CHECKS_FR, PAGE, PULL_FR
+from mika.faculties.projects.inspect import PAGE
 from mika.faculties.projects.inspect_common import (
     cut_noted,
     effect_state,
@@ -32,6 +32,7 @@ from mika.faculties.projects.inspect_common import (
     stored_texts,
     subject_project,
 )
+from mika.faculties.projects.inspect_words import CHECKS_FR, PULL_FR
 from mika.faculties.projects.pulls import pull_url
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (

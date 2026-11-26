@@ -26,8 +26,8 @@ from mika.app.handmade.subjects.parts import texts
 from mika.contracts import projects as c
 from mika.faculties.projects import glance, pulls
 from mika.faculties.projects.faculty import project_at
-from mika.faculties.projects.inspect import CHECKS_FR, PULL_FR
 from mika.faculties.projects.inspect_code import PULLS
+from mika.faculties.projects.inspect_words import CHECKS_FR, PULL_FR
 from mika.faculties.projects.pulls import pull_key
 from mika.inspector import render
 from mika.inspector.document import readable_markdown
