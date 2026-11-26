@@ -305,7 +305,7 @@ class Milestone:
     item_list: str = ""
     item_key: str = ""
     item_status: str = ""
-    #: ouvert, atteint, retiré (``c.MILESTONE_STATUSES``) ; qui l'a posé (``operator`` | ``owner`` | ``self``), quand
+    #: ouvert, atteint, retiré (``c.OPEN``, ``c.REACHED``, ``c.DROPPED``) ; qui l'a posé (``operator`` | ``owner`` | ``self``), quand
     status: str = c.OPEN
     author: str = "self"
     at: int = 0
@@ -2543,12 +2543,6 @@ def _remote_requested(s: ProjectsState, e, cx) -> ProjectsState:
     if p is None or e.data.what not in ("push", "pull") or p.status == c.ARCHIVED:
         return s
     return _set(s, replace(p, requests=(*p.requests, (e.seq, e.data.what))[-4:]))
-
-
-def pull_returned(o: Objective) -> bool:
-    """La pull request de cet objectif lui est-elle revenue — fermée sans fusion, des changements demandés, ou
-    impossible à fusionner (ADR 0280) ?"""
-    return o.pull_state == PULL_CLOSED or (o.pull_state == PULL_OPEN and (o.pull_changes or o.pull_conflicts))
 
 
 @PROJECTS.reducer(PULL_SEEN)

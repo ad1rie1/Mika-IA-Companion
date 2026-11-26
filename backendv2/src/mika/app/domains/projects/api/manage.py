@@ -305,9 +305,6 @@ async def restore(call: Call) -> dict[str, Any]:
 
 # ── Ses objectifs ─────────────────────────────────────────────────────────
 
-OBJECTIVE_FIELDS = ("text", "kind", "cadence_hours", "on", "only_on_event", "each_pass", "at_once", "done_when")
-
-
 def _edits(r: Reach) -> None:
     _steers(r, edit=True)
 
@@ -375,9 +372,6 @@ async def move_objective(call: Call) -> dict[str, Any]:
 
 
 # ── Ses jalons ────────────────────────────────────────────────────────────
-
-MILESTONE_FIELDS = ("text", "check", "command", "item_list", "item", "item_status")
-
 
 def _milestone_values(call: Call, known: Mapping[str, Any]) -> dict[str, Any]:
     out = dict(known)
@@ -457,15 +451,6 @@ async def edit_ticket(call: Call) -> dict[str, Any]:
 
 
 # ── Une pull request : son titre, son texte, un commentaire ───────────────
-
-
-def pull_write_refusal(r: Reach, o: Objective | None) -> str:
-    """Pourquoi elle n'écrit pas chez l'hôte sur la pull request de cet objectif (vide : elle le peut)."""
-    if why := edit_refusal(r):
-        return why
-    if not r.reader.settles:
-        return NOT_WRITER
-    return "" if managing.writable(r.p, o) else NOT_WRITABLE
 
 
 def _pull(call: Call, r: Reach) -> Objective:

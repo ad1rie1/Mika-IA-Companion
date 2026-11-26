@@ -121,7 +121,6 @@ MILESTONES_MAX = 5
 CHECK_COMMAND, CHECK_OWNER, CHECK_ITEM, CHECK_PROSE = "command", "owner", "item", "prose"
 CHECKS = (CHECK_PROSE, CHECK_COMMAND, CHECK_OWNER, CHECK_ITEM)
 REACHED = "reached"
-MILESTONE_STATUSES = (OPEN, REACHED, DROPPED)
 #: les sortes d'un ticket : un défaut, une tâche, une idée, une question
 BUG, TASK, IDEA, QUESTION = "bug", "task", "idea", "question"
 TICKET_KINDS = (BUG, TASK, IDEA, QUESTION)

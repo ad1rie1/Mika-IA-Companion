@@ -40,7 +40,6 @@ from mika.kernel.frame import Frame
 
 #: où en est un objectif ponctuel sur la carte de son projet
 DONE, DOING, TODO, BLOCKED = "done", "doing", "todo", "blocked"
-PROGRESS = (DONE, DOING, TODO, BLOCKED)
 #: où en est un jalon : atteint, retiré, dit prêt (il attend qu'on le tranche), refusé, commencé, à venir
 M_REACHED, M_DROPPED, M_READY, M_REFUSED, M_STARTED, M_TODO = "reached", "dropped", "ready", "refused", "started", "todo"
 #: où en est son prochain passage : en cours, daté, en pause, sur demande, rien en vue

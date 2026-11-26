@@ -1771,7 +1771,7 @@ async def items_list(args: ListArgs, ctx: Any) -> Any:
 # ── En conversation ───────────────────────────────────────────────────────
 
 READ, WRITE = "project_items", "project_item"
-TICKET, STATUS_OF, NOTE_ON, ACCEPT, DISMISS = "ticket", "status", "note", "accept", "dismiss"
+TICKET, NOTE_ON, ACCEPT, DISMISS = "ticket", "note", "accept", "dismiss"
 #: le plan d'un ticket, validé ou refusé par le propriétaire (ADR 0270)
 VALIDATE, REFUSE = "validate", "refuse"
 

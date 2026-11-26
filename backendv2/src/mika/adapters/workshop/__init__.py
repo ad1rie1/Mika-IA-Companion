@@ -214,10 +214,9 @@ _PATCH_CUT = "\n[… le diff est plus long : la suite se lit fichier par fichier
 #: ce que git dit d'un enregistrement (``--shortstat``)
 _STAT = re.compile(r"(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?")
 REMOTE_TIMEOUT_S = 180.0
-#: le dépôt lu à une référence (ADR 0288). Qui signe ses enregistrements a une adresse d'ici (``author_identity``) ;
-#: l'en-tête d'un passage de diff ; les branches qu'on rend, au plus ; le message d'un commit, au plus (caractères) ;
-#: ce qu'on regarde d'un fichier pour le dire binaire (un octet nul, comme git)
-_LOCAL_MAIL = "@atelier.local"
+#: le dépôt lu à une référence (ADR 0288) : l'en-tête d'un passage de diff ; les branches qu'on rend, au plus ; le
+#: message d'un commit, au plus (caractères) ; ce qu'on regarde d'un fichier pour le dire binaire (un octet nul,
+#: comme git)
 _HUNK = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 BRANCHES_MAX = 100
 BODY_MAX_CHARS = 4000
