@@ -4,8 +4,14 @@ ressource par sous-onglet (ADR 0176), chaque outil par son libellé, et pour cha
 détail de ses accès** : son tableau de règles, lu tel qu'il est écrit, avec « Modifier » vers la page qui le règle et
 « Retour » (vers sa ligne). Les droits exacts, outil par outil, seulement quand on a choisi **qui** et **par quel
 canal** : la règle du moteur, appliquée à cette personne par ce canal (les deux portes, le plafond) — jamais une
-recopie. Le tableau d'un agenda se règle ici même (ADR 0309, lot 5) : sa part, dans la console de l'agenda
-(``TablePart``), dit où mène « Modifier », ce qu'on règle et où le formulaire s'enregistre (``tables``).
+recopie.
+
+Les sous-onglets se rangent dans l'ordre de ``SUBTABS`` (``subtabs``) : sa vie interne et ses canaux sont au cadre
+(``OWN``) ; le reste, chaque domaine l'apporte par sa part — des outils venus d'ailleurs (``OutsidePart`` : une app de
+la Forge, un service, chacune sa famille sur sa ligne) ou une sorte de ressource réglée par son propre tableau
+(``RightsSort``, dans sa part de console : un projet, un agenda — ses ressources, et ce que les droits exacts en
+rangent sous sa sorte). Le tableau d'un agenda se règle ici même (ADR 0309, lot 5) : sa ``RightsSort`` dit aussi où
+mène « Modifier », ce qu'on règle et où le formulaire s'enregistre (``table_of``).
 
 Une lecture, sauf **Partages** (ADR 0210) : qui a reçu la boîte, le compte Teams ou le service de qui. Un opérateur y
 retire le partage d'une boîte ou d'un compte Teams, par l'écriture de son propriétaire
@@ -25,7 +31,7 @@ from __future__ import annotations
 import functools
 import re
 import secrets
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote
@@ -35,7 +41,7 @@ from starlette.responses import RedirectResponse, Response
 from starlette.routing import Route
 
 from mika.app.console import FAMILY_ABOUT
-from mika.app.domains import DOMAINS, ConsolePart, TablePart, part
+from mika.app.domains import DOMAINS, ConsolePart, OutsidePart, RightsSort, gathered, part
 from mika.app.handmade.access import people_with_accounts
 from mika.app.me import Denied, missing, sharing
 from mika.app.me import outside as outside_me
@@ -84,6 +90,17 @@ _UNSAFE = re.compile(r"[^A-Za-z0-9_-]")
 #: la page, et où « Retirer » un partage envoie son formulaire (ADR 0210)
 PAGE = f"{PREFIX}/reglages/droits"
 UNSHARE = f"{PAGE}/partages"
+#: les sous-onglets des ressources, dans l'ordre de la page, par leur nom (leur ancre : ``d-<nom>``) : ceux du cadre
+#: (``OWN``) et ceux que les domaines apportent — des outils venus d'ailleurs (``OutsidePart.tab``), une sorte de
+#: ressource réglée par son tableau (``RightsSort.name``). Chaque nom a son sous-onglet, dit une fois, et chaque
+#: sous-onglet sa place (``subtabs``) ; après eux, Partages et Ce que le code fixe, au gabarit
+SUBTABS = ("vie", "forge", "services", "projets", "canaux", "agendas")
+#: ceux du cadre : leur titre, leur aide, et s'ils replient des outils sous chaque ligne — sa vie interne (ses
+#: familles, chacune ses outils), ses canaux (chacun son tableau)
+OWN: Mapping[str, tuple[str, str, bool]] = {
+    "vie": ("Vie interne", "ses propres outils, famille par famille", True),
+    "canaux": ("Canaux", "par où ça lui arrive : ce que chaque canal laisse au plus", False),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,25 +163,24 @@ def _tool_of(ui: UI, spec: Any, g: Grant) -> str:
 
 
 def exact(ui: UI, who: Who, canal: str) -> dict[str, Any]:
-    """Les droits exacts de cette personne par ce canal : par outil (son niveau, sa garde, pourquoi), par projet, et
-    ce que le canal laisse au plus."""
+    """Les droits exacts de cette personne par ce canal : par outil (son niveau, sa garde, pourquoi), par ressource
+    d'une sorte qu'un domaine apporte (``sorts`` : sous sa sorte de droits, ``RightsSort.sort`` — un projet, un
+    agenda), et ce que le canal laisse au plus."""
     audience, kind = audience_for(who, canal)
     tools: dict[str, Grant] = {}
-    projects: dict[str, Grant] = {}
-    agendas: dict[str, Grant] = {}
+    # une ressource réglée par son tableau (un projet, un agenda, ADR 0309) : ce qu'elle en fait, pas un outil
+    by_sort: dict[str, dict[str, Grant]] = {s.sort: {} for s in sorts()}
     through: Grant | None = None
     for spec, found in rights.grants(ui, audience, kind):
         sort = spec.key.rsplit(".", 1)[-1]
         for g in found:
             if sort == "canaux":
                 through = g
-            elif sort == "projets":
-                projects[g.resource] = g
-            elif sort == "agendas":  # une ressource, comme un projet (ADR 0309) : ce qu'elle en fait, pas un outil
-                agendas[g.resource] = g
+            elif sort in by_sort:
+                by_sort[sort][g.resource] = g
             else:
                 tools[_tool_of(ui, spec, g)] = g
-    return {"tools": tools, "projects": projects, "agendas": agendas, "canal": through, "kind": kind}
+    return {"tools": tools, "sorts": by_sort, "canal": through, "kind": kind}
 
 
 def what_of(g: Grant | None) -> str:
@@ -187,8 +203,10 @@ def _tool_row(ui: UI, spec: Any, got: Mapping[str, Grant] | None) -> dict[str, A
 
 
 def sections(ui: UI, got: Mapping[str, Any] | None, query: str) -> list[dict[str, Any]]:
-    """Les ressources, par sorte : sa vie interne (ses familles, par lot), les apps de la Forge, les services MCP,
-    ses projets, ses canaux, les agendas (ADR 0309) — chacune avec ses outils décrits et le lien de son détail."""
+    """Les ressources, par sorte, un sous-onglet chacune, dans l'ordre de ``SUBTABS`` (``subtabs``) : sa vie interne
+    (ses familles, par lot) et ses canaux, au cadre ; ce que les domaines apportent — des outils venus d'ailleurs
+    (``OutsidePart`` : les apps de la Forge, les services MCP), une sorte réglée par son tableau (``RightsSort`` :
+    ses projets, les agendas, ADR 0309) — chacune avec ses outils décrits et le lien de son détail."""
     registry, frame = ui.kernel.registry, ui.kernel.mind.frame()
     tables = {t.resource: t for _spec, found in rights.tables(ui) for t in found}
     by_bundle: dict[str, list[Any]] = {}
@@ -210,10 +228,9 @@ def sections(ui: UI, got: Mapping[str, Any] | None, query: str) -> list[dict[str
     internal = [entry(b, ui.names.bundle(b), FAMILY_ABOUT.get(b, ""), specs, f"famille:{b}")
                 for b, specs in sorted(by_bundle.items(), key=lambda kv: ui.names.bundle(kv[0]).casefold())
                 if not any(registry.is_dynamic(s.name) for s in specs)]
-    def outside(sort: str) -> list[dict[str, Any]]:
+    def outside(found: OutsidePart) -> list[dict[str, Any]]:
         # les familles d'une sorte venue d'ailleurs (une app, un service), chacune sur sa ligne : son libellé et le
         # détail de ses accès, tels que sa part les dit (``OutsidePart.row``)
-        found = outside_me.parts()[sort]
         out = []
         for b, specs in sorted(by_bundle.items()):
             if b.startswith(found.bundle):
@@ -221,32 +238,27 @@ def sections(ui: UI, got: Mapping[str, Any] | None, query: str) -> list[dict[str
                 out.append(entry(b, label, registry.bundles.get(b, ""), specs, detail))
         return out
 
-    forged, services = outside("apps"), outside("services")
-    projects_got = got["projects"] if got else {}
-    projects = [entry(t.resource, t.title, t.note, (), t.resource, what_of(projects_got.get(t.resource)) if got else "")
-                for t in tables.values() if t.resource.startswith("project:")]
+    def ruled(found: RightsSort) -> list[dict[str, Any]]:
+        # les ressources d'une sorte réglée par son tableau (un projet, un agenda), chacune sur sa ligne, et ce que la
+        # personne choisie en a (``exact`` le range sous sa sorte de droits, ``RightsSort.sort``)
+        had = got["sorts"][found.sort] if got else {}
+        return [entry(t.resource, t.title, t.note, (), t.resource, what_of(had.get(t.resource)) if got else "")
+                for t in tables.values() if t.resource.startswith(found.prefix)]
+
     canals = [entry(t.resource, t.title, t.note, (), t.resource) for t in tables.values()
               if t.resource.startswith("canal:")]
-    agendas_got = got.get("agendas", {}) if got else {}
-    agendas = [entry(t.resource, t.title, t.note, (), t.resource, what_of(agendas_got.get(t.resource)) if got else "")
-               for t in tables.values() if t.resource.startswith("agenda:")]
+    mine = {"vie": internal, "canaux": canals}
     # un sous-onglet par sorte (ADR 0176) : celles qui ont des outils les replient sous la ligne de leur ressource
-    out = [{"id": "d-vie", "title": "Vie interne", "hint": "ses propres outils, famille par famille",
-            "rows": internal, "folds": True},
-           {"id": "d-forge", "title": "Apps de la Forge",
-            "hint": "une app suit son projet ; sans projet, ses propres lignes", "rows": forged, "folds": True},
-           {"id": "d-services", "title": "Services MCP", "hint": "les outils venus d'ailleurs, service par service",
-            "rows": services, "folds": True},
-           {"id": "d-projets", "title": "Projets", "hint": "le voir, le piloter, ses fichiers, ses apps",
-            "rows": projects, "folds": False},
-           {"id": "d-canaux", "title": "Canaux", "hint": "par où ça lui arrive : ce que chaque canal laisse au plus",
-            "rows": canals, "folds": False},
-           # chaque agenda, son tableau (ADR 0309) : le lire, y écrire, répondre à ses invitations, ce qu'elle en garde
-           {"id": "d-agendas", "title": "Agendas",
-            "hint": "le lire, y écrire, répondre à ses invitations : son propriétaire et ses partages",
-            "rows": agendas, "folds": False}]
-    for s in out:
-        s["pager"] = one_page(len(s["rows"]))
+    out = []
+    for name, found in subtabs().items():
+        if isinstance(found, OutsidePart):
+            title, hint, rows, folds = found.tab_title, found.tab_hint, outside(found), True
+        elif isinstance(found, RightsSort):
+            title, hint, rows, folds = found.title, found.hint, ruled(found), False
+        else:  # un des siens (``OWN``) : sa vie interne, ses canaux
+            (title, hint, folds), rows = found, mine[name]
+        out.append({"id": f"d-{name}", "title": title, "hint": hint, "rows": rows, "folds": folds,
+                    "pager": one_page(len(rows))})
     return out
 
 
@@ -259,23 +271,50 @@ def one_page(rows: int) -> Any:
     return render._pager(Pager(size=max(1, rows), total=max(1, rows)), {})
 
 
+def placed(order: Sequence[str], said: Iterable[tuple[str, Mapping[str, Any]]]) -> dict[str, Any]:
+    """Les sous-onglets dans l'ordre de ``order`` : ``said`` donne, pour chacun qui en dit (le cadre, une part), ses
+    sous-onglets par leur nom — un nom dit deux fois est refusé (``gathered``). Chaque nom de l'ordre a son
+    sous-onglet, chaque sous-onglet a sa place, et l'ordre ne dit un nom qu'une fois ; sinon ``ValueError``."""
+    found = gathered("un sous-onglet de Réglages › Droits", said)
+    lacking = [name for name in order if name not in found]
+    unplaced = [name for name in found if name not in order]
+    twice = sorted({name for name in order if list(order).count(name) > 1})
+    if lacking or unplaced or twice:
+        raise ValueError("Réglages › Droits : chaque sous-onglet a sa place dans SUBTABS, une seule, et chaque nom de "
+                         f"SUBTABS son sous-onglet — sans sous-onglet : {lacking}, sans place : {unplaced}, placés "
+                         f"deux fois : {twice}")
+    return {name: found[name] for name in order}
+
+
 @functools.cache
-def tables() -> tuple[TablePart, ...]:
-    """Les tableaux de droits que les domaines règlent ici (``ConsolePart.table`` : celui d'un agenda), dans l'ordre des
-    fiches. Lus à la demande, une fois : une part importe ce module (``PAGE``, ``one_page``)."""
-    consoles = (part(d.console, "CONSOLE") for d in DOMAINS if d.console is not None)
-    return tuple(c.table for c in consoles if c.table is not None)
+def subtabs() -> dict[str, tuple[str, str, bool] | OutsidePart | RightsSort]:
+    """Les sous-onglets des ressources, dans l'ordre de ``SUBTABS`` (``placed``) : ceux du cadre (``OWN``), ceux des
+    outils venus d'ailleurs (``OutsidePart``, par son ``tab`` ; ``app/me/outside.py`` réunit les parts) et ceux des
+    sortes réglées par leur tableau que les domaines apportent (``ConsolePart.rights``, une ``RightsSort``, par son
+    ``name``). Lus à la demande, une fois : une part importe ce module (``PAGE``, ``one_page``)."""
+    return placed(SUBTABS, [
+        ("le cadre", OWN),
+        *((f"ce qui vient d'ailleurs « {p.sort} »", {p.tab: p}) for p in outside_me.parts().values()),
+        *((f"le domaine « {d.name} »", {s.name: s}) for d in DOMAINS
+          if d.console is not None and (s := part(d.console, "CONSOLE").rights) is not None)])
 
 
-def table_of(key: str) -> TablePart | None:
-    """La part qui règle ici le tableau de cette ressource (sa clé commence par son ``prefix``), s'il y en a une."""
-    return next((t for t in tables() if key.startswith(t.prefix)), None)
+def sorts() -> tuple[RightsSort, ...]:
+    """Les sortes réglées par leur tableau que les domaines apportent ici (``ConsolePart.rights`` : un projet, un
+    agenda), dans l'ordre de ``SUBTABS``."""
+    return tuple(s for s in subtabs().values() if isinstance(s, RightsSort))
+
+
+def table_of(key: str) -> RightsSort | None:
+    """La sorte qui règle ici même le tableau de cette ressource (sa clé commence par son ``prefix``, et elle a un
+    ``editor``), s'il y en a une."""
+    return next((s for s in sorts() if s.editor is not None and key.startswith(s.prefix)), None)
 
 
 def editor(ui: UI, key: str, csrf: str) -> dict[str, Any] | None:
-    """Le tableau d'une ressource qui se règle ici, à régler (``TablePart.editor`` : celui d'un agenda), avec la clé
+    """Le tableau d'une ressource qui se règle ici, à régler (``RightsSort.editor`` : celui d'un agenda), avec la clé
     de son détail des accès, où « ← Le détail des accès » ramène (``detail``), et le nom du lien vers sa fiche
-    (``named``, ``TablePart.named``) ; ``None`` : aucune part ne règle le sien ici."""
+    (``named``, ``RightsSort.named``) ; ``None`` : aucune part ne règle le sien ici."""
     ruled = table_of(key)
     found = ruled.editor(ui, key, csrf) if ruled is not None else None
     return {**found, "detail": key, "named": ruled.named} if ruled is not None and found is not None else None
@@ -289,7 +328,7 @@ def detail(ui: UI, key: str) -> dict[str, Any] | None:
             if t.resource == key:
                 edit = render.href(t.href) if t.href is not None else ""
                 ruled = table_of(key)
-                if ruled is not None:  # un tableau qui se règle ici même (``TablePart.edit``)
+                if ruled is not None:  # un tableau qui se règle ici même (``RightsSort.edit``)
                     edit = ruled.edit(key)
                 return {"kind": spec.title, "title": t.title, "columns": t.columns,
                         "rows": [(str(i), *r) for i, r in enumerate(t.rows, start=1)], "default": t.default,
@@ -426,5 +465,6 @@ def routes(ui: UI) -> list[Route]:
     async def post(request: Request) -> Response:
         return await unshare(ui, request)
 
-    # puis où s'enregistre un tableau qu'un domaine règle ici (``TablePart.routes`` : celui d'un agenda)
-    return [Route(UNSHARE, ui.guarded(post), methods=["POST"]), *(route for t in tables() for route in t.routes(ui))]
+    # puis où s'enregistre un tableau qu'un domaine règle ici (``RightsSort.routes`` : celui d'un agenda)
+    return [Route(UNSHARE, ui.guarded(post), methods=["POST"]),
+            *(route for s in sorts() if s.routes is not None for route in s.routes(ui))]

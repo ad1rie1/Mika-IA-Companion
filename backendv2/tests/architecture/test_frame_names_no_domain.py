@@ -38,6 +38,7 @@ from pathlib import Path
 import pytest
 
 from mika.app.backup import FOLDERS
+from mika.app.composition import arbitration, faculties
 from mika.app.console import NAVIGATION
 from mika.app.console_menu import MENU
 from mika.app.domains import (
@@ -51,14 +52,14 @@ from mika.app.domains import (
     Place,
     PortPart,
     QueuePart,
+    RightsSort,
     SharingPart,
-    TablePart,
     gathered,
     part,
 )
 from mika.app.handmade.person import TABS as PERSON_TABS
 from mika.app.handmade.person import account_tabs, every_tab
-from mika.app.handmade.rights import share_consoles
+from mika.app.handmade.rights import SUBTABS, placed, share_consoles, sorts, subtabs
 from mika.app.handmade.waiting import TABS as QUEUE_TABS
 from mika.app.me.accounts import CHANNELS
 from mika.app.me.outside import OUTSIDE
@@ -67,6 +68,8 @@ from mika.app.mindport import MIXED, KernelPort
 from mika.app.settings import SettingsPart
 from mika.inspector.pages.approvals import HISTORY_ORDER
 from mika.inspector.ui import QueueTab, static_roots
+from mika.kernel.registry import Registry
+from mika.runtime.state import RUNTIME
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src" / "mika"
@@ -343,17 +346,24 @@ def test_every_part_a_card_names_exists_and_carries_its_name():
             assert elsewhere.title and elsewhere.why, d.name
             assert all(callable(f) for f in (elsewhere.seen, elsewhere.tool, elsewhere.allowance, elsewhere.name,
                                              elsewhere.about, elsewhere.row)), d.name
+            # … et son sous-onglet dans Réglages › Droits : un nom de SUBTABS, son titre et son aide
+            assert elsewhere.tab in SUBTABS and elsewhere.tab_title.strip() and elsewhere.tab_hint.strip(), d.name
         assert d.console is None or isinstance(part(d.console, "CONSOLE"), ConsolePart), d.name
         if d.console is not None:  # où mène, dans la console, la ressource d'un de ses partages, où il se retire
             console = part(d.console, "CONSOLE")
             assert all(f is None or callable(f) for f in (console.shared, console.unshared)), d.name
             assert console.shared is None or d.sharing is not None, f"{d.name} : un partage dans la console sans sorte"
-            # le tableau de droits qu'il règle dans Réglages › Droits : le début de ses clés, ce qu'il appelle
-            assert console.table is None or isinstance(console.table, TablePart), d.name
-            if console.table is not None:
-                assert console.table.prefix.endswith(":") and len(console.table.prefix) > 1, d.name
-                assert console.table.named.strip(), d.name  # le lien vers la fiche de sa ressource, en mots
-                assert all(callable(f) for f in (console.table.edit, console.table.editor, console.table.routes)), d.name
+            # la sorte de ressource qu'il apporte à Réglages › Droits : son sous-onglet (un nom de SUBTABS, ses mots),
+            # le début de ses clés, sa sorte de droits ; et le tableau qu'il y fait régler — ce qu'il appelle et le lien
+            # vers la fiche de sa ressource, en mots : les quatre, ou aucun
+            sort = console.rights
+            assert sort is None or isinstance(sort, RightsSort), d.name
+            if sort is not None:
+                assert sort.name in SUBTABS and sort.title.strip() and sort.hint.strip(), d.name
+                assert sort.prefix.endswith(":") and len(sort.prefix) > 1 and sort.sort.strip(), d.name
+                ruled = (sort.edit, sort.editor, sort.routes)
+                assert (all(callable(f) for f in ruled) and sort.named.strip()) or \
+                    (all(f is None for f in ruled) and not sort.named), d.name
         sheet = _person_part(d)
         assert sheet is None or isinstance(sheet, PersonPart), d.name
         if sheet is not None:  # sa part de la fiche d'une personne : ce qu'elle nomme est un onglet qu'elle dessine
@@ -456,14 +466,40 @@ def test_each_kind_of_share_says_where_it_leads_in_the_console():
     assert list(share_consoles()) == list(SHARED_KINDS)
 
 
-def test_a_table_set_in_the_rights_page_has_one_hand():
-    """Réglages › Droits règle ici le tableau d'une ressource par la part dont le début des clés est le sien
-    (``app/handmade/rights.py::table_of``, la première qui convient) : deux parts sur les mêmes clés, et la seconde ne
-    réglerait jamais rien — sans bruit."""
-    prefixes = [c.table.prefix for d in DOMAINS if d.console is not None
-                if (c := part(d.console, "CONSOLE")).table is not None]
+def test_a_resource_of_the_rights_page_has_one_sort():
+    """Réglages › Droits range une ressource sous la sorte dont le début des clés est le sien (``RightsSort.prefix`` :
+    son sous-onglet, ``app/handmade/rights.py::sections``) et y règle son tableau par la première qui convient
+    (``table_of``) : deux sortes sur les mêmes clés — ou sur celles des canaux, que le cadre range lui-même —, et une
+    ressource serait montrée deux fois, son tableau réglé par une seule, sans bruit. Deux sortes ne rangent pas non plus
+    les mêmes droits (``RightsSort.sort``) : les droits exacts d'une personne n'en verraient qu'une."""
+    found = [c.rights for d in DOMAINS if d.console is not None if (c := part(d.console, "CONSOLE")).rights is not None]
+    prefixes = ["canal:", *(s.prefix for s in found)]  # les canaux : un sous-onglet du cadre, par le début de leurs clés
     twice = [(a, b) for i, a in enumerate(prefixes) for j, b in enumerate(prefixes) if i != j and b.startswith(a)]
-    assert prefixes and not twice, twice
+    assert found and not twice, twice
+    assert len({s.sort for s in found}) == len(found), [s.sort for s in found]
+
+
+def test_each_subtab_of_the_rights_page_has_its_place_said_once():
+    """Réglages › Droits range ses sous-onglets dans l'ordre de ``SUBTABS`` (``app/handmade/rights.py::subtabs``) :
+    ceux du cadre, et ce que chaque part apporte — des outils venus d'ailleurs (``OutsidePart.tab``), une sorte réglée
+    par son tableau (``RightsSort.name``). Un nom sans sous-onglet, un sous-onglet sans place ou dit deux fois ferait
+    échouer la page à sa première lecture — ici, avant. Et chaque sorte de droits que les facultés déclarent y a sa
+    part : sans elle, ses ressources n'auraient pas de sous-onglet, et ses droits passeraient pour des outils."""
+    subtabs.cache_clear()
+    assert list(subtabs()) == list(SUBTABS)
+    declared = {spec.key.rsplit(".", 1)[-1] for spec in Registry([RUNTIME, *faculties()], arbitration=arbitration()).rights}
+    homed = {*OUTSIDE, *(s.sort for s in sorts())}
+    assert declared == homed, sorted(declared ^ homed)
+    # le contrôle voit chaque faute : un nom sans sous-onglet, un sous-onglet sans place, un nom placé ou dit deux fois
+    said = [("le cadre", {"a": 1}), ("le domaine « x »", {"b": 2})]
+    assert list(placed(("b", "a"), said).items()) == [("b", 2), ("a", 1)]
+    for order, told, why in ((("a", "b", "c"), said, r"sans sous-onglet : \['c'\], sans place : \[\]"),
+                             (("a",), said, r"sans place : \['b'\]"),
+                             (("a", "b", "a"), said, r"placés deux fois : \['a'\]"),
+                             (("a", "b"), [*said, ("le domaine « y »", {"a": 3})],
+                              "« a » est dit deux fois .*: par le cadre, puis par le domaine « y »")):
+        with pytest.raises(ValueError, match=why):
+            placed(order, told)
 
 
 def test_each_sort_from_elsewhere_has_its_part_said_once():

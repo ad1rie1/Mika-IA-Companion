@@ -3,7 +3,7 @@
 Une app a sa famille d'outils (``forge_apps.<app>``) ; l'écran Outils redit, case par case, la ligne de ses accès —
 celle de son projet, pour une app d'un projet (``forge_access.resource_allowance``) — et la nomme par son titre.
 Réglages › Droits la range sur sa ligne, « App « … » », le détail de ses accès sous celui de son projet
-(``project:<n>``), sinon sous le sien (``forge:<app>``).
+(``project:<n>``), sinon sous le sien (``forge:<app>``), dans le sous-onglet des apps (``tab``).
 """
 
 from __future__ import annotations
@@ -59,4 +59,5 @@ def row(frame: Any, name: str) -> tuple[str, str]:
 
 
 OUTSIDE = OutsidePart("apps", bundle="forge_apps.", title="Apps de la Forge", why="les accès de cette app", seen=seen,
-                      tool=tool, allowance=allowance, name=name, about=about, row=row)
+                      tool=tool, allowance=allowance, name=name, about=about, row=row, tab="forge",
+                      tab_title="Apps de la Forge", tab_hint="une app suit son projet ; sans projet, ses propres lignes")

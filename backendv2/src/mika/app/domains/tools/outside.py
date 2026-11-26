@@ -3,7 +3,8 @@
 Un service a sa famille d'outils (``mcp.<service>``) ; l'écran Outils redit, case par case, la ligne de ses accès que
 sa faculté déclare, lue comme elle la lit (``tool_allowance``), et le nomme pour la personne : un service du système
 par son titre (« Le web »), un autre par son nom, à quoi il lui sert quand une personne l'a branché. Réglages › Droits
-le range sur sa ligne, « Service « … » », le détail de ses accès sous ``mcp:<service>``.
+le range sur sa ligne, « Service « … » », le détail de ses accès sous ``mcp:<service>``, dans le sous-onglet des
+services (``tab``).
 """
 
 from __future__ import annotations
@@ -91,4 +92,5 @@ def row(frame: Any, server: str) -> tuple[str, str]:
 
 
 OUTSIDE = OutsidePart("services", bundle="mcp.", title="Services", why="les accès de ce service", seen=seen, tool=tool,
-                      allowance=allowance, name=name, about=about, row=row)
+                      allowance=allowance, name=name, about=about, row=row, tab="services",
+                      tab_title="Services MCP", tab_hint="les outils venus d'ailleurs, service par service")

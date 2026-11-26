@@ -246,6 +246,13 @@ class OutsidePart:
     #: sa ligne dans Réglages › Droits, pour une de ses familles (``<bundle><nom>``) : ``row(frame, nom)`` rend son
     #: libellé et la clé du détail de ses accès
     row: Callable[..., tuple[str, str]]
+    #: son sous-onglet dans Réglages › Droits, où ses familles ont chacune leur ligne : son nom (« forge ») — son ancre
+    #: (``d-<nom>``) et sa place dans l'ordre de la page, ``app/handmade/rights.py::SUBTABS`` —, son titre et son aide
+    #: (« Services MCP » ; « les outils venus d'ailleurs, service par service ») : ceux de cette page, pas ceux de
+    #: son groupe dans l'écran Outils (``title``)
+    tab: str
+    tab_title: str
+    tab_hint: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -309,24 +316,40 @@ class PersonPart:
 
 
 @dataclass(frozen=True, slots=True)
-class TablePart:
-    """Un tableau de droits qu'il règle dans Réglages › Droits plutôt que sur la page de sa ressource (ADR 0309, lot 5 :
-    celui d'un agenda) : « Modifier », sur le détail des accès d'une de ses ressources, l'ouvre à la place de sa
-    lecture. La page (``app/handmade/rights.py``, son onglet : ``app/handmade/tabs/settings.py``) réunit les parts ;
-    elle n'en connaît aucune."""
+class RightsSort:
+    """Une sorte de ressource qu'il apporte à Réglages › Droits, chacune réglée par son propre tableau (ADR 0133,
+    0310) : un projet, un agenda. Elle y a son sous-onglet, une ligne par ressource et le lien du détail de ses accès ;
+    les droits exacts d'une personne y disent, sur chaque ligne, ce qu'elle en a. La page (``app/handmade/rights.py``,
+    son onglet : ``app/handmade/tabs/settings.py``) réunit les parts, dans l'ordre de ses sous-onglets
+    (``SUBTABS``) ; elle n'en connaît aucune.
 
-    #: le début de la clé de ses ressources, telle que ses droits la disent (« agenda: »)
+    Il peut aussi y faire régler le tableau d'une de ses ressources plutôt que sur la page de celle-ci (ADR 0309,
+    lot 5 : celui d'un agenda) : « Modifier », sur le détail de ses accès, l'ouvre alors à la place de sa lecture
+    (``edit``, ``editor``, ``routes``, ``named`` : les quatre, ou aucun — sans eux, « Modifier » mène où son tableau
+    dit qu'il se règle)."""
+
+    #: le nom de son sous-onglet (« projets ») : son ancre (``d-<nom>``) et sa place dans l'ordre de la page,
+    #: ``app/handmade/rights.py::SUBTABS``
+    name: str
+    #: son sous-onglet, en mots : son titre et son aide (« Projets » ; « le voir, le piloter, ses fichiers, ses apps »)
+    title: str
+    hint: str
+    #: le début de la clé de ses ressources, telle que ses tableaux et ses droits la disent (« project: », « agenda: »)
     prefix: str
-    #: où mène « Modifier » sur le détail des accès d'une de ses ressources : ``edit(key)``
-    edit: Callable[[str], str]
+    #: la sorte de droits que sa faculté déclare, la fin de la clé de son ``RightsSpec`` (« projets », « agendas ») :
+    #: les droits exacts d'une personne rangent sous elle ce qu'elle a de chacune de ses ressources — une ressource,
+    #: pas un outil
+    sort: str
+    #: où mène « Modifier » sur le détail des accès d'une de ses ressources, réglée ici même : ``edit(key)``
+    edit: Callable[[str], str] | None = None
     #: le tableau d'une de ses ressources, à régler : ``editor(ui, key, csrf)`` rend ce que dessine
     #: ``handmade/droits/tableau.html``, ou ``None`` (pas une des siennes)
-    editor: Callable[..., Any]
+    editor: Callable[..., Any] | None = None
     #: où son formulaire s'enregistre : ``routes(ui)`` rend des ``Route``
-    routes: Callable[..., list[Any]]
+    routes: Callable[..., list[Any]] | None = None
     #: au-dessus du tableau à régler, le lien vers la fiche de sa ressource, en mots (« La fiche de l'agenda ») ; son
     #: adresse : ``fiche``, dans ce que rend ``editor``
-    named: str
+    named: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -345,8 +368,9 @@ class ConsolePart:
     queue: QueuePart | None = None
     #: sa part de la fiche d'une personne
     person: PersonPart | None = None
-    #: le tableau de droits qu'il règle dans Réglages › Droits
-    table: TablePart | None = None
+    #: la sorte de ressource qu'il apporte à Réglages › Droits : son sous-onglet, la sorte de droits qu'elle range, et
+    #: le tableau qu'il y fait régler, s'il en a un
+    rights: RightsSort | None = None
     #: où mène, dans la console, la ressource d'un de ses partages (sa fiche ; un compte Teams, son extension) :
     #: ``shared(s)`` (``s`` : un ``app/me/sharing.py::Shared`` de sa sorte) — Réglages › Droits › Partages et l'onglet
     #: Comptes de la fiche d'une personne la lisent (``app/handmade/rights.py::share_consoles``)

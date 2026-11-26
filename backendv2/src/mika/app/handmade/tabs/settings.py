@@ -220,8 +220,8 @@ def droits(got: Got) -> Markup:
     granted = rights.exact(ui, who, canal) if who is not None and canal else None
     kept = "&".join(f"{k}={v}" for k, v in (("qui", who.key if who else ""), ("canal", canal)) if v)
     shown = rights.detail(ui, query["detail"]) if query.get("detail") else None
-    # le tableau d'un agenda se règle ici même (ADR 0309, lot 5 ; sa part : ``TablePart``) : « Modifier » l'ouvre à
-    # la place de sa lecture
+    # le tableau d'un agenda se règle ici même (ADR 0309, lot 5 ; sa part : ``RightsSort.editor``) : « Modifier »
+    # l'ouvre à la place de sa lecture
     editing = rights.editor(ui, query["detail"], getattr(forms, "csrf", "")) \
         if query.get("detail") and query.get("regler") else None
     listed, given = rights.sections(ui, granted, kept), rights.shared(ui)

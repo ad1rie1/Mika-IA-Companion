@@ -1,7 +1,8 @@
-"""Le tableau de droits d'un agenda, réglé dans Réglages › Droits (ADR 0309, lot 5 ; ADR 0310) : ses lignes, leur
-ordre, sa ligne par défaut, que l'opérateur enregistre d'un coup — la part de l'agenda dans cette page
-(``TablePart`` ; la page, ``app/handmade/rights.py``, et son gabarit, ``handmade/droits/tableau.html``, restent au
-cadre). « Modifier », sur le détail des accès d'un agenda, l'ouvre à la place de sa lecture (``edit``).
+"""Les agendas dans Réglages › Droits (ADR 0309, lot 5 ; ADR 0310) : leur sous-onglet, un agenda par ligne, et le
+tableau de droits de chacun, réglé là — ses lignes, leur ordre, sa ligne par défaut, que l'opérateur enregistre d'un
+coup. La part de l'agenda dans cette page (``SORT``, une ``RightsSort`` ; la page, ``app/handmade/rights.py``, et son
+gabarit, ``handmade/droits/tableau.html``, restent au cadre). « Modifier », sur le détail des accès d'un agenda,
+l'ouvre à la place de sa lecture (``edit``).
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 from starlette.routing import Route
 
-from mika.app.domains.domain import TablePart
+from mika.app.domains.domain import RightsSort
 from mika.app.handmade.access import KEEP_CHOICES, capitalized
 from mika.app.handmade.rights import PAGE, one_page
 from mika.inspector.pages.rights_tables import choices, rows_of, table_args
@@ -143,4 +144,9 @@ def routes(ui: UI) -> list[Route]:
     return [Route(AGENDA_TABLE, ui.guarded(agenda), methods=["POST"])]
 
 
-TABLE = TablePart("agenda:", edit=edit, editor=agenda_editor, routes=routes, named="La fiche de l'agenda")
+#: sa sorte dans Réglages › Droits : chaque agenda, son tableau (ADR 0309) — le lire, y écrire, répondre à ses
+#: invitations, ce qu'elle en garde —, réglé ici même ; ce qu'une personne a de chacun, rangé sous « agendas »
+SORT = RightsSort("agendas", title="Agendas",
+                  hint="le lire, y écrire, répondre à ses invitations : son propriétaire et ses partages",
+                  prefix="agenda:", sort="agendas", edit=edit, editor=agenda_editor, routes=routes,
+                  named="La fiche de l'agenda")
