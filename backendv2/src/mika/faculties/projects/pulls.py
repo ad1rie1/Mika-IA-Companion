@@ -34,6 +34,10 @@ d'enregistrer (``tools.py``), et sa branche de base ne reçoit que ce qui est r�
   proposition n'a lieu qu'avec un verdict favorable pour le commit au bout de la branche ; sans lui, la passe demande
   la relecture de ce commit-là (``projects.review_asked``) — une fois —, et ``compose`` refuse ce qui n'a pas été
   relu. L'aperçu porte le verdict : qui a relu, quel commit.
+- **Où elle en est, pour qui la regarde** (``pull_stage`` : proposée, ouverte, prête à fusionner, fusionnée,
+  fermée), celles d'un projet (``pulled``, ``pull_order``) et ce qui en nomme une dans une adresse (``pull_key``,
+  ``pull_named``) : des règles pures, que lisent l'onglet Code de la console (``inspect_code.py``) et l'API par
+  personne.
 """
 
 from __future__ import annotations
@@ -165,6 +169,52 @@ def retry_in(failed: int) -> int:
 def pull_url(p: Project, o: Objective) -> str:
     """La page de sa pull request chez l'hôte, composée du dépôt et de son numéro (jamais reprise d'une réponse)."""
     return f"{repo_page(p)}/pull/{o.pull}" if p.remote and o.pull else ""
+
+
+# ── Où elle en est, pour qui la regarde ───────────────────────────────────
+
+#: où en est une pull request, pour qui la regarde : proposée (elle attend un accord avant de partir), ouverte,
+#: prête à fusionner, fusionnée, fermée
+PROPOSED, OPEN, READY, MERGED, CLOSED = "proposed", "open", "ready", "merged", "closed"
+PULL_ORDER = {READY: 0, OPEN: 1, PROPOSED: 2, MERGED: 3, CLOSED: 4}
+
+
+def pull_stage(p: Project, o: Objective) -> str:
+    """Où en est la pull request de cet objectif : proposée, ouverte, prête à fusionner (rien ne la retient,
+    ``merge.blocked``), fusionnée, fermée."""
+    if o.pull_state == PULL_MERGED:
+        return MERGED
+    if o.pull_state == PULL_CLOSED:
+        return CLOSED
+    if o.pull_state != PULL_OPEN:
+        return PROPOSED
+    return OPEN if merge.blocked(p, o) else READY
+
+
+def pulled(p: Project) -> list[Objective]:
+    """Ses objectifs qui ont une pull request — proposée, ouverte, fusionnée ou fermée."""
+    return [o for o in p.objectives if o.pull_state or o.pull or o.pull_proposal] if by_pulls(p) else []
+
+
+def pull_key(o: Objective) -> str:
+    """Ce qui nomme une pull request dans une adresse : son numéro, ou ``o<objectif>`` quand elle n'en a pas encore."""
+    return str(o.pull) if o.pull else f"o{o.id}"
+
+
+def pull_named(p: Project, key: str) -> Objective | None:
+    """La pull request qu'une adresse nomme (``pull_key``)."""
+    key = (key or "").strip()
+    if key.isdecimal():
+        return next((o for o in pulled(p) if o.pull == int(key)), None)
+    if key[:1] == "o" and key[1:].isdecimal():
+        return next((o for o in pulled(p) if o.id == int(key[1:]) and not o.pull), None)
+    return None
+
+
+def pull_order(p: Project) -> list[Objective]:
+    """Ses pull requests, les prêtes d'abord, puis les ouvertes, les proposées, les fusionnées et les fermées ; les plus
+    récentes d'abord dans chacune."""
+    return sorted(pulled(p), key=lambda o: (PULL_ORDER[pull_stage(p, o)], -o.pull_at, -o.id))
 
 
 # ── Sa relecture, avant de la proposer ────────────────────────────────────

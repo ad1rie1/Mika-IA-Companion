@@ -65,6 +65,7 @@ from mika.kernel.faculty import Faculty
 from mika.kernel.forms import Knob
 from mika.kernel.state import FrozenDict
 from mika.ports.workshop import (
+    BASE_BRANCH,
     CHECKS_FAILED,
     CHECKS_NONE,
     CHECKS_PASSED,
@@ -76,6 +77,7 @@ from mika.ports.workshop import (
     PULL_STATES,
     REFUSED,
     TIMED_OUT,
+    Commit,
     run_status,
 )
 from mika.vocab import causes
@@ -1850,6 +1852,13 @@ def objective_on(p: Project, branch: str) -> Objective | None:
     found = next((o for o in p.objectives if o.branch and o.branch == branch), None)
     named = _WORK.match(branch or "")
     return found or (objective_at(p, int(named.group(1))) if named is not None else None)
+
+
+def objective_for(p: Project, k: Commit) -> Objective | None:
+    """L'objectif lié à un commit : celui de sa branche de travail ; sur la base, celui qui l'a laissé."""
+    if k.branch and k.branch != BASE_BRANCH:
+        return objective_on(p, k.branch)
+    return next((o for o in p.objectives if o.commit and o.commit == k.sha), None)
 
 
 def busy(s: ProjectsState, project: int) -> bool:

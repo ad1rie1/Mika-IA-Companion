@@ -27,7 +27,8 @@ accord — le défaut —, toujours) ; ici :
 - **Un ticket ne se publie qu'une fois.** L'issue porte un repère (``ticket_mark``) : l'hôte retrouve celle qui le
   porte déjà, et c'est à sa lecture que le ticket reçoit le numéro de son issue — un fait arrivé, posé une fois.
 
-Les règles sont pures (``reasons``, ``unpublishable``, ``verdict``) ; les textes de console sont dans
+Les règles sont pures (``reasons``, ``unpublishable``, ``verdict`` ; le ticket que reflète une issue, que lisent la
+console et l'API par personne : ``issue_ticket``) ; les textes de console sont dans
 ``inspect_issues.py``, ses phrases et ce qui part dans la voix (``projects.issues``).
 """
 
@@ -125,6 +126,12 @@ def note_mark(project: int, seq: int) -> str:
 def issue_page(p: Project, number: int) -> str:
     """La page d'une issue chez l'hôte, composée du dépôt et de son numéro (jamais reprise d'une réponse)."""
     return f"{repo_page(p)}/issues/{number}" if p.remote and number > 0 else ""
+
+
+def issue_ticket(p: Project, number: int) -> Item | None:
+    """Le ticket que reflète cette issue : celui qui porte son numéro, ou qui en est né (``issue-<n>``)."""
+    return next((x for x in p.board.items if x.list_name == c.TICKETS
+                 and (x.issue == number or x.key == f"issue-{number}")), None)
 
 
 def reasons(p: Project, item: Item) -> tuple[str, ...]:

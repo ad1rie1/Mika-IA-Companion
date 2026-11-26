@@ -558,8 +558,10 @@ READS: dict[str, dict[str, str]] = {
     # Code est calqué sur l'écran Projets (ADR 0297) : ses sous-vues lisent les blocs de la vue « git »
     # (``inspect_code``) ; ce que le journal sait d'une pull request, par les règles que lit aussi l'API par personne
     "domains/projects/console/code.py": {
-        "inspect_code": "les mots et les titres des blocs de la vue « git », et ses pull requests (``pulled``)",
+        "inspect_code": "les mots et les titres des blocs de la vue « git »",
         "diff_rows": "un diff de la vue relu ligne à ligne, ses numéros avant et après",
+        "pulls": "ses pull requests (``pulled``), leurs étapes (``READY``…) et ce qui en nomme une dans l'adresse de "
+                 "Code (``pull_key``)",
         "pull_order": "ses pull requests dans l'ordre de l'écran (les prêtes d'abord)",
         "pull_named": "la pull request que l'adresse nomme",
         "pull_stage": "où en est une pull request : proposée, ouverte, prête, fusionnée, fermée",

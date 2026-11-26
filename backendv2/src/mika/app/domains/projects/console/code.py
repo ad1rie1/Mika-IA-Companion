@@ -20,7 +20,7 @@ un détail (``code.html``, ``_code.html``, ``projets_code.css``).
 **Ce qu'il lit.** Les blocs de la vue ``git`` de la faculté (``inspect_code.py``), tels qu'elle les déclare (``Got.raw``) :
 ce que lit l'atelier, et ce que l'hôte est seul à savoir, par sa lecture gardée et bornée. Ce que le journal sait d'une
 pull request — son étape, ce qui retient sa fusion, sa relecture, ses jalons — par les fonctions de la faculté que lit
-aussi l'API par personne (``pull_stage``, ``merge.blocked``…), déclarées dans ``tests/protocol/test_drawn_fiches.py``.
+aussi l'API par personne (``pulls.pull_stage``, ``merge.blocked``…), déclarées dans ``tests/protocol/test_drawn_fiches.py``.
 **Tout texte de l'hôte, tout contenu de fichier et tout diff** est rendu en texte brut, échappé ; ce qui vient
 d'ailleurs se présente comme tel. Un Markdown rendu ne charge aucune image et n'ouvre aucun lien.
 """
@@ -54,20 +54,16 @@ from mika.app.handmade.tabs import Got, raw_rows
 from mika.app.handmade.tabs.decisions import by_day
 from mika.contracts import projects as c
 from mika.faculties.projects import inspect_code as code
-from mika.faculties.projects import merge
+from mika.faculties.projects import merge, pulls
 from mika.faculties.projects.faculty import objective_at, objective_on, repo_page, ticket_held
 from mika.faculties.projects.inspect import OBJ_FR
-from mika.faculties.projects.inspect_code import (
-    diff_rows,
-    issue_ticket,
-    pull_named,
-    pull_order,
-    pull_stage,
-)
+from mika.faculties.projects.inspect_code import diff_rows
 from mika.faculties.projects.inspect_common import FORGOTTEN
 from mika.faculties.projects.inspect_merge import BLOCK_WORDS, MOVED_THERE, REFUSED_WORDS
 from mika.faculties.projects.inspect_reviews import REVIEW_WORDS
+from mika.faculties.projects.issues import issue_ticket
 from mika.faculties.projects.managing import writable
+from mika.faculties.projects.pulls import pull_named, pull_order, pull_stage
 from mika.faculties.projects.tracker import status_words
 from mika.inspector import render
 from mika.inspector.ui import env
@@ -86,7 +82,7 @@ BAR = ((code.FILES, "Fichiers", ""), (code.COMMITS, "Commits", "commits"),
        (code.PULLS, "Pull requests", "pull requests ouvertes"), (code.BRANCHES, "Branches", "branches"),
        (code.ISSUES, "Issues", "issues ouvertes"), (code.CI, "CI", "vérifications en échec"))
 #: l'étape d'une pull request → sa couleur
-STAGE_TONES = {code.PROPOSED: YOU, code.OPEN: WORK, code.READY: YOU, code.MERGED: DONE, code.CLOSED: WAIT}
+STAGE_TONES = {pulls.PROPOSED: YOU, pulls.OPEN: WORK, pulls.READY: YOU, pulls.MERGED: DONE, pulls.CLOSED: WAIT}
 #: l'état de vérifications (``CHECKS_*`` ou ses mots) → sa couleur, son icône
 CHECK_TONES = {CHECKS_PASSED: DONE, CHECKS_FAILED: FAIL, CHECKS_PENDING: WORK}
 CHECK_ICONS = {DONE: "check", FAIL: "x", WORK: "refresh", WAIT: "clock"}
@@ -510,18 +506,18 @@ def _merge(sc: Scene, o: Any, info: Mapping[str, Any], d: dict[str, Any], title:
     out: dict[str, Any] = {"stage": stage, "base": sc.p.branch, "head": head, "short": head[:12], "n": o.pull,
                            "branch": o.branch,
                            "refused": REFUSED_WORDS.get(o.merge_refused, "") if o.merge_refused else "",
-                           "asked": stage == code.OPEN and merge.merging(o), "why": "", "form": None}
-    if stage == code.MERGED:
+                           "asked": stage == pulls.OPEN and merge.merging(o), "why": "", "form": None}
+    if stage == pulls.MERGED:
         return out
     # le geste ne s'offre que si l'action l'acceptera : la règle à l'instant de la page (``merge.blocked`` avec
     # ``now`` — une pull request fraîche dont l'hôte ne dit encore aucune vérification attend, ADR 0292), comme
     # l'API (``merge_refusal``), puis ce que l'hôte lu en dirait (``_hosted_block``)
     if block and block != merge.ASKED:
         out["why"] = BLOCK_WORDS.get(block, block)
-    hosted = _hosted_block(sc, o, raw, head) if stage == code.READY and head and not out["why"] else ""
+    hosted = _hosted_block(sc, o, raw, head) if stage == pulls.READY and head and not out["why"] else ""
     if hosted:  # l'action le refuserait : la page le dit, sans offrir le geste
         out["why"] = hosted
-    elif stage == code.READY and head and not out["why"]:
+    elif stage == pulls.READY and head and not out["why"]:
         form = shown(sc.form("fusionner", _pull_href(sc, o), objective=str(o.id), head=head))
         out["form"] = form
         out["facts"] = [("commit", plural(len(d["commits"]), "commit", "commits")),
@@ -541,9 +537,9 @@ def pulls_view(sc: Scene, raw: Raw, head: Mapping[str, Any]) -> dict[str, Any]:
     words = sc.texts(o.text_ref for o in order)
     wanted = sc.query.get("pr", "")
     chosen = pull_named(p, wanted) if wanted else (order[0] if order else None)
-    rows = [{"key": code.pull_key(o), "n": o.pull, "title": words.get(o.text_ref, FORGOTTEN),
+    rows = [{"key": pulls.pull_key(o), "n": o.pull, "title": words.get(o.text_ref, FORGOTTEN),
              "stage": pull_stage(p, o), "state": code.PULL_WORDS[pull_stage(p, o)].split(",")[0],
-             "tone": STAGE_TONES[pull_stage(p, o)], "ago": sc.age(o.pull_at), "yours": pull_stage(p, o) == code.READY,
+             "tone": STAGE_TONES[pull_stage(p, o)], "ago": sc.age(o.pull_at), "yours": pull_stage(p, o) == pulls.READY,
              "on": chosen is not None and o.id == chosen.id, "merged": o.pull_state == "merged",
              "href": _pull_href(sc, o)} for o in order]
     out: dict[str, Any] = {"rows": rows, "open": sum(1 for o in order if o.pull_state == PULL_OPEN),
@@ -583,8 +579,8 @@ def pulls_view(sc: Scene, raw: Raw, head: Mapping[str, Any]) -> dict[str, Any]:
         "changes": o.pull_changes, "unsent": o.unsent, "head": said(info.get("tête")),
         "branch_href": sc.url("git", vue=code.BRANCHES, branche=o.branch) if o.branch else "",
         "objective": linked_objective(sc, o, said_), "ticket": linked_ticket(sc, item, ticket_words),
-        "toggle": {"unifie": sc.url("git", "pr-fichiers", vue=code.PULLS, pr=code.pull_key(o)),
-                   "cote": sc.url("git", "pr-fichiers", vue=code.PULLS, pr=code.pull_key(o), diff="cote")}}
+        "toggle": {"unifie": sc.url("git", "pr-fichiers", vue=code.PULLS, pr=pulls.pull_key(o)),
+                   "cote": sc.url("git", "pr-fichiers", vue=code.PULLS, pr=pulls.pull_key(o), diff="cote")}}
     d["merge"] = _merge(sc, o, info, d, title, raw)
     live = writable(p, o)
     d["edit"] = shown(sc.form("pull_modifier", back + "#pr-resume", objective=str(o.id),
@@ -626,7 +622,7 @@ def branches_view(sc: Scene, raw: Raw, head: Mapping[str, Any]) -> dict[str, Any
             "commit_href": sc.url("git", vue=code.COMMITS, sha=sha) if sha else ""})
     out: dict[str, Any] = {"items": items, "base": head.get("branche de base") or "main", "panel": None,
                            "pager": render.pager_ctx(Pager(size=max(1, len(items)), total=max(1, len(items))), {}),
-                           "by_pulls": bool(code.pulled(p)) or p.flow == c.FLOW_PR, "lire": bool(wanted)}
+                           "by_pulls": bool(pulls.pulled(p)) or p.flow == c.FLOW_PR, "lire": bool(wanted)}
     picked = next((b for b in items if b["on"]), None)
     if picked is None:
         return out
@@ -717,7 +713,7 @@ def checks_view(sc: Scene, raw: Raw, head: Mapping[str, Any]) -> dict[str, Any]:
     wanted = chosen or sc.query.get("sha", "")
     if not wanted:
         return out
-    o = next((x for x in code.pulled(p) if x.checks_sha and x.checks_sha.startswith(wanted)), None)
+    o = next((x for x in pulls.pulled(p) if x.checks_sha and x.checks_sha.startswith(wanted)), None)
     row = next((r for r in rows if r["sha"] == wanted), None)
     log = raw.code(code.LOG_TITLE, prefix=True)
     state = said(info.get("étape"))

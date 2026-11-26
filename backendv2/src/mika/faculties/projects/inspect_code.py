@@ -2,8 +2,8 @@
 Fichiers, Commits, Pull requests, Branches, Issues, CI (``?vue=``) ; « le dépôt distant » (``vue=distant``) garde ce
 que montrait l'onglet Dépôt (``inspect_git.py`` : l'atelier face au distant, pousser, récupérer, ses réglages).
 
-**D'où vient chaque chose** — comme pour l'API par personne (``app/domains/projects/api/code.py``), qui lit d'ici ses mots et ses
-règles : les pull requests, leur CI et leur relecture viennent du journal ; les fichiers, les commits, les branches et
+**D'où vient chaque chose** — comme pour l'API par personne (``app/domains/projects/api/code.py``), qui lit d'ici ses mots :
+les pull requests, leur CI et leur relecture viennent du journal ; les fichiers, les commits, les branches et
 les diffs, de l'atelier, par le port, à une référence (jamais l'arbre de travail) ; ce que l'hôte est seul à savoir
 (le texte d'une pull request et ses échanges, ses vérifications une à une, la fin du journal d'un échec, les issues et
 leurs échanges) se lit chez lui **par une lecture gardée et bornée** (``hosted``) : gardée ``HOST_KEPT_S`` secondes
@@ -11,10 +11,10 @@ leurs échanges) se lit chez lui **par une lecture gardée et bornée** (``hoste
 ``HOST_READS`` par minute. Tout texte de l'hôte, le
 contenu d'un fichier et un diff sont des données : la console les montre en texte brut.
 
-**Ce qui est pur** et que l'API lit aussi : l'objectif d'un commit (``objective_for`` ; celui d'une branche est
-``faculty.objective_on``), le ticket d'une issue (``issue_ticket`` ; celui d'un objectif est ``faculty.ticket_held``), où en
-est une pull request (``pull_stage``), celles d'un projet (``pulled``), et le diff mis en texte puis relu
-(``diff_text``, ``diff_rows``).
+**Ce qui est pur** et que l'API lit aussi : le diff mis en texte puis relu (``diff_text``, ``diff_rows``). Les règles
+que la vue lit vivent chez leur sujet : l'objectif d'un commit ou d'une branche (``faculty.objective_for``,
+``faculty.objective_on``), le ticket d'une issue (``issues.issue_ticket`` ; celui d'un objectif est
+``faculty.ticket_held``), où en est une pull request et celles d'un projet (``pulls.pull_stage``, ``pulls.pulled``).
 """
 
 from __future__ import annotations
@@ -32,16 +32,29 @@ from mika.contracts import self_ as self_c
 from mika.faculties.projects import merge, pulls
 from mika.faculties.projects.actions import can_deposit
 from mika.faculties.projects.faculty import (
-    Item,
     Objective,
     Project,
     ProjectsState,
     by_pulls,
+    objective_for,
     objective_on,
     repo_page,
 )
 from mika.faculties.projects.inspect_common import stored_text, stored_texts
 from mika.faculties.projects.inspect_merge import BLOCK_WORDS, REFUSED_WORDS
+from mika.faculties.projects.issues import issue_ticket
+from mika.faculties.projects.pulls import (
+    CLOSED,
+    MERGED,
+    OPEN,
+    PROPOSED,
+    READY,
+    pull_key,
+    pull_named,
+    pull_order,
+    pull_stage,
+    pulled,
+)
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
     ActionSlot,
@@ -78,8 +91,6 @@ from mika.ports.workshop import (
     LINE_ADDED,
     LINE_REMOVED,
     LINE_SAME,
-    PULL_CLOSED,
-    PULL_MERGED,
     PULL_OPEN,
     Commit,
     FileDiff,
@@ -93,12 +104,9 @@ T = TypeVar("T")
 
 ENTRY_WORDS = {ENTRY_DIR: "dossier", ENTRY_FILE: "fichier", ENTRY_LINK: "lien symbolique", ENTRY_MODULE: "sous-module"}
 FILE_WORDS = {FILE_ADDED: "ajouté", FILE_MODIFIED: "modifié", FILE_DELETED: "supprimé"}
-#: où en est une pull request, pour qui la regarde : proposée (elle attend un accord avant de partir), ouverte,
-#: prête à fusionner, fusionnée, fermée
-PROPOSED, OPEN, READY, MERGED, CLOSED = "proposed", "open", "ready", "merged", "closed"
+#: où en est une pull request (``pulls.pull_stage``), en mots
 PULL_WORDS = {PROPOSED: "proposée, elle attend un accord", OPEN: "ouverte", READY: "prête à fusionner",
               MERGED: "fusionnée", CLOSED: "fermée sans fusion"}
-PULL_ORDER = {READY: 0, OPEN: 1, PROPOSED: 2, MERGED: 3, CLOSED: 4}
 CHECK_WORDS = {CHECKS_NONE: "aucune vérification", CHECKS_PENDING: "en cours", CHECKS_PASSED: "passée",
                CHECKS_FAILED: "en échec"}
 ISSUE_WORDS = {ISSUE_OPEN: "ouverte", ISSUE_CLOSED: "fermée", "": "état inconnu"}
@@ -143,60 +151,6 @@ _SECOND = 1_000_000
 _SHA = re.compile(r"^[0-9a-f]{4,40}$")
 _REF = re.compile(r"^[A-Za-z0-9._/-]{1,100}$")
 _HUNK = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
-
-
-# ── Ce qui est lié : l'objectif, le ticket, la pull request ───────────────
-
-
-def objective_for(p: Project, k: Commit) -> Objective | None:
-    """L'objectif lié à un commit : celui de sa branche de travail ; sur la base, celui qui l'a laissé."""
-    if k.branch and k.branch != BASE_BRANCH:
-        return objective_on(p, k.branch)
-    return next((o for o in p.objectives if o.commit and o.commit == k.sha), None)
-
-
-def issue_ticket(p: Project, number: int) -> Item | None:
-    """Le ticket que reflète cette issue : celui qui porte son numéro, ou qui en est né (``issue-<n>``)."""
-    return next((x for x in p.board.items if x.list_name == c.TICKETS
-                 and (x.issue == number or x.key == f"issue-{number}")), None)
-
-
-def pull_stage(p: Project, o: Objective) -> str:
-    """Où en est la pull request de cet objectif : proposée, ouverte, prête à fusionner (rien ne la retient,
-    ``merge.blocked``), fusionnée, fermée."""
-    if o.pull_state == PULL_MERGED:
-        return MERGED
-    if o.pull_state == PULL_CLOSED:
-        return CLOSED
-    if o.pull_state != PULL_OPEN:
-        return PROPOSED
-    return OPEN if merge.blocked(p, o) else READY
-
-
-def pulled(p: Project) -> list[Objective]:
-    """Ses objectifs qui ont une pull request — proposée, ouverte, fusionnée ou fermée."""
-    return [o for o in p.objectives if o.pull_state or o.pull or o.pull_proposal] if by_pulls(p) else []
-
-
-def pull_key(o: Objective) -> str:
-    """Ce qui nomme une pull request dans une adresse : son numéro, ou ``o<objectif>`` quand elle n'en a pas encore."""
-    return str(o.pull) if o.pull else f"o{o.id}"
-
-
-def pull_named(p: Project, key: str) -> Objective | None:
-    """La pull request qu'une adresse nomme (``pull_key``)."""
-    key = (key or "").strip()
-    if key.isdecimal():
-        return next((o for o in pulled(p) if o.pull == int(key)), None)
-    if key[:1] == "o" and key[1:].isdecimal():
-        return next((o for o in pulled(p) if o.id == int(key[1:]) and not o.pull), None)
-    return None
-
-
-def pull_order(p: Project) -> list[Objective]:
-    """Ses pull requests, les prêtes d'abord, puis les ouvertes, les proposées, les fusionnées et les fermées ; les plus
-    récentes d'abord dans chacune."""
-    return sorted(pulled(p), key=lambda o: (PULL_ORDER[pull_stage(p, o)], -o.pull_at, -o.id))
 
 
 # ── Un diff, mis en texte puis relu ───────────────────────────────────────
