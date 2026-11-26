@@ -35,8 +35,7 @@ from mika.faculties.projects.faculty import (
 )
 from mika.faculties.projects.framing_tools import PlanArgs, project_plan
 from mika.faculties.projects.milestones import MILESTONE_ADDED, MILESTONE_CHANGED
-from mika.faculties.projects.prompt import _live_section, _run_section, _texts
-from mika.faculties.projects.reaching import (
+from mika.faculties.projects.milestones_tools import (
     PoseArgs,
     ReachArgs,
     SettleArgs,
@@ -44,6 +43,7 @@ from mika.faculties.projects.reaching import (
     project_milestone,
     project_milestones,
 )
+from mika.faculties.projects.prompt import _live_section, _run_section, _texts
 from mika.faculties.projects.rhythm import held_back, pick, ready
 from mika.faculties.projects.tools import ReportArgs, report_run
 from mika.faculties.projects.tracker_tools import AddArgs, ItemArg, items_add

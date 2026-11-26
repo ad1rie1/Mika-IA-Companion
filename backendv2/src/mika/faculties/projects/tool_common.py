@@ -1,5 +1,5 @@
 """Ce que partagent les outils des projets, en conversation et pendant une exécution (``tools.py``, ``steer.py``,
-``tracker_tools.py``, ``framing_tools.py``, ``reaching.py``, ``triage.py``, l'atelier…).
+``tracker_tools.py``, ``framing_tools.py``, ``milestones_tools.py``, ``triage.py``, l'atelier…).
 
 Les sortes d'épisode d'une exécution (``RUNS``), le projet qu'elle fait et l'objectif qu'elle vise
 (``running_project``), la réponse quand il n'est plus actif (``gone_reply``) ; qui lui parle (``speaker``), qui

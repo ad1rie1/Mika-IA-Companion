@@ -6,7 +6,7 @@ son critère et ce dont il dépend ; ceux qu'il ne garde pas sont retirés (sauf
 des questions sur un projet qu'on lui a demandé attend sa réponse ; sinon il vaut d'office.
 
 - **Ses arguments** (``PlanArgs``, ``PlanStep``, ``PlanQuestion``) : les jalons grossiers de chaque étape
-  (``PlanStep.milestones``, des ``reaching.MilestoneArg``, ADR 0273), la liste de passage d'un constant
+  (``PlanStep.milestones``, des ``milestones_tools.MilestoneArg``, ADR 0273), la liste de passage d'un constant
   (``each_pass``), ce qui le déclenche (``on``, ADR 0265), les projets que le plan demande à lire (``reads``,
   ADR 0257 : le lien se pose quand le propriétaire le valide).
 - **Ses règles** (``_plan_problems``, ``_read_problems``) : ce qui ne va pas dans ses étapes, et ce qu'il ne peut pas
@@ -40,7 +40,7 @@ from mika.faculties.projects.faculty import (
     subjects_of,
     written,
 )
-from mika.faculties.projects.reaching import MilestoneArg, bad_milestone
+from mika.faculties.projects.milestones_tools import MilestoneArg, bad_milestone
 from mika.faculties.projects.tool_common import RUNS, gone_reply, running_project
 from mika.kernel.clock import HOUR
 from mika.kernel.events import Content, Draft

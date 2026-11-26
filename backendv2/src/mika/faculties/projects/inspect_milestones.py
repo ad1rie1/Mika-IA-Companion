@@ -18,7 +18,7 @@ from typing import Annotated, Any
 from pydantic import BaseModel, Field
 
 from mika.contracts import projects as c
-from mika.faculties.projects import milestones, reaching, tracker
+from mika.faculties.projects import milestones, milestones_tools, tracker
 from mika.faculties.projects.actions import can_edit
 from mika.faculties.projects.faculty import (
     PROJECTS,
@@ -55,8 +55,8 @@ CHECK_WORDS = {c.CHECK_PROSE: "sa parole", c.CHECK_COMMAND: "une commande", c.CH
 STATE_FR = {c.OPEN: "à faire", c.REACHED: "atteint", c.DROPPED: "retiré"}
 STATE_TONE = {c.OPEN: "", c.REACHED: "ok", c.DROPPED: "muted"}
 WAITING = Badge("t'attend", "warn")
-VERDICTS = ((reaching.VALIDATE, "valider : le jalon est atteint, elle reprend"),
-            (reaching.REFUSE, "refuser, avec ta raison : il lui revient"))
+VERDICTS = ((milestones_tools.VALIDATE, "valider : le jalon est atteint, elle reprend"),
+            (milestones_tools.REFUSE, "refuser, avec ta raison : il lui revient"))
 COLUMNS = (Column("n°", "fit"), Column("jalon"), Column("vérifié par"), Column("état", "fit"),
            Column("comment, et sa preuve"), Column("commit", "fit"))
 FORGOTTEN = "(oublié)"
@@ -134,7 +134,7 @@ def detail(o: Objective, texts: Mapping[str, str], editable: bool) -> list[Any]:
     if held is not None:
         out.append(Disclosure(f"Valider ou refuser le point d'arrêt n° {held.id}", (
             ActionSlot("projects.jalon_trancher", (("objective", str(o.id)), ("milestone", str(held.id)),
-                                                   ("verdict", reaching.VALIDATE)), title="Trancher", compact=True),),
+                                                   ("verdict", milestones_tools.VALIDATE)), title="Trancher", compact=True),),
             open=True))
     if o.status in (c.OPEN, c.BLOCKED) and len(milestones_of(o)) < c.MILESTONES_MAX:
         out.append(Disclosure("Ajouter un jalon", (
@@ -194,7 +194,7 @@ class SettleArgs(BaseModel):
     objective: Annotated[str, Knob(label="Objectif", widget="hidden")] = Field(min_length=1, max_length=12)
     milestone: Annotated[str, Knob(label="Jalon", widget="hidden")] = Field(min_length=1, max_length=12)
     verdict: Annotated[str, Knob(label="Ce que tu en fais", choices=VERDICTS, advanced=False, order=1)
-                       ] = reaching.VALIDATE
+                       ] = milestones_tools.VALIDATE
     reason: Annotated[str, Knob(label="Ta raison, ou ton mot", widget="textarea", advanced=False, order=2,
                                 help="Demandée pour refuser : elle la lira à sa prochaine exécution. Gardée avec le "
                                      "jalon.")] = Field(default="", max_length=milestones.REASON_MAX)
@@ -210,12 +210,12 @@ def _settle(s: ProjectsState, frame: Frame, args: SettleArgs, ctx: ActionContext
     m = milestone_at(o, args.milestone)
     if m is None or m.status != c.OPEN or not m.ready_at:
         raise Refused("Ce jalon n'attend pas ta validation.")
-    if args.verdict not in (reaching.VALIDATE, reaching.REFUSE):
+    if args.verdict not in (milestones_tools.VALIDATE, milestones_tools.REFUSE):
         raise Refused("Verdict inconnu.", {"verdict": "valider ou refuser"})
-    if args.verdict == reaching.REFUSE and not args.reason.strip():
+    if args.verdict == milestones_tools.REFUSE and not args.reason.strip():
         raise Refused("Un point d'arrêt ne se refuse pas sans dire pourquoi.", {"reason": "valeur requise"})
-    draft = reaching.settling(p, o, m, args.verdict, author="operator", by=acting_person(frame, ctx), text=args.reason)
-    said = "validé : elle reprend" if args.verdict == reaching.VALIDATE else "refusé : il lui revient"
+    draft = milestones_tools.settling(p, o, m, args.verdict, author="operator", by=acting_person(frame, ctx), text=args.reason)
+    said = "validé : elle reprend" if args.verdict == milestones_tools.VALIDATE else "refusé : il lui revient"
     return Done(drafts=(draft,), message=f"Jalon n° {m.id} de l'objectif n° {o.id} {said}.",
                 guard=unchanged(p.id, LIVE))
 

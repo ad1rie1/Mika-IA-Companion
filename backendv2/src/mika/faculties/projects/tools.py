@@ -47,7 +47,7 @@ reste ouvert, ``report_run`` refuse « done » en disant lequel, avant tout comm
 Le plan pose les jalons grossiers de chaque étape (``framing_tools.PlanStep.milestones``) et
 la liste de passage d'un constant (``each_pass``) ; leurs règles sont dans
 ``milestones.py``, les outils qui les tiennent pendant une exécution dans
-``reaching.py``.
+``milestones_tools.py``.
 """
 
 from __future__ import annotations

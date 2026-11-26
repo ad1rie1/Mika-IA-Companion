@@ -7,7 +7,7 @@
 - **En conversation** : ``project_items`` (lire) et ``project_item`` (ouvrir un ticket, changer un statut, noter,
   accepter ou écarter un ticket proposé, valider ou refuser son plan, ADR 0270), pour qui les lignes d'accès du projet
   le permettent (ADR 0133) ; ce qui s'y dit est ce que la personne en face entend du projet (ADR 0272).
-- **Les aides de ses outils**, que les jalons lisent aussi (``reaching.py``) : la liste et l'élément qu'un outil
+- **Les aides de ses outils**, que les jalons lisent aussi (``milestones_tools.py``) : la liste et l'élément qu'un outil
   désigne (``found_entry``), le projet dont il s'agit parmi ceux qu'on peut désigner ici (``chosen_project``).
 
 Le registre lui-même — ses règles, ses événements, ses réducteurs, sa projection, ses mots, et qui le lit

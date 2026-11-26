@@ -34,7 +34,7 @@ ses événements font ressentir (ADR 0031).
   les ouvre et les relit, dans ``pulls.py``. Rien ici ne fusionne.
 - **Ses jalons** (ADR 0273) : un objectif ponctuel dit où il en est (``Objective.milestones``, ``Milestone``). Leur
   forme et les lectures que tous en font sont ici ; leurs événements, leurs réducteurs, ce qui s'écrit et ce qu'on
-  en lit, dans ``milestones.py`` (ADR 0313) ; ses outils, dans ``reaching.py``. Un jalon atteint ne se défait pas ;
+  en lit, dans ``milestones.py`` (ADR 0313) ; ses outils, dans ``milestones_tools.py``. Un jalon atteint ne se défait pas ;
   un objectif qui en a bloque quand il n'en atteint plus (``Objective.stale``, ``tend.py``) ; un constant n'en a pas
   — il a sa liste de passage (``routine_ref``). En exécution, elle ne défait ni un point d'arrêt, ni un jalon qu'un
   autre a posé ou qu'un plan validé par une personne a fixé (``milestones.milestone_guard``, ADR 0278 : la règle,

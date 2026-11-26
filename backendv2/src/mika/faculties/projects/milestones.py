@@ -24,7 +24,7 @@ Un objectif ponctuel dit où il en est par ses jalons — cinq vivants au plus, 
   preuve et le commit de l'atelier — une fonction pure des textes qu'on lui donne (``refs`` dit lesquels lire).
 
 ``framing_tools.py`` (le plan), ``tools.py`` (le compte rendu), ``tracker.py`` (le plan validé d'un ticket),
-``prompt.py`` et ``reaching.py`` (ses outils) le lisent ; il ne lit que ``faculty.py``.
+``prompt.py`` et ``milestones_tools.py`` (ses outils) le lisent ; il ne lit que ``faculty.py``.
 """
 
 from __future__ import annotations
