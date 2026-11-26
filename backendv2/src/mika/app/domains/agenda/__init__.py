@@ -2,7 +2,8 @@
 
 Ce dossier porte ce que la console change d'un compte (``store.py`` : le port ``agenda_desk``), « L'agenda de Mika »
 (``her.py`` : sa mémoire montrée comme un agenda), ses réglages (``settings.py`` : ses comptes, leurs connexions,
-l'application Google du serveur, le partage d'un agenda), son câblage (``wiring.py`` : sa base, le port ``agenda`` ;
+l'application Google du serveur, le partage d'un agenda, le tableau de droits réglé de chaque agenda — que la porte
+des réglages tire de là, ADR 0316), son câblage (``wiring.py`` : sa base, le port ``agenda`` ;
 ses fournisseurs, le port ``agenda_providers`` ; le guichet de la console), son module de l'API par personne
 (``api.py`` : ses agendas et ceux qu'on lui partage, leur tableau de droits ; ce qui attend son geste, pour la barre
 du haut), ses comptes (``account_settings.py`` : leurs routes, leurs réglages, un agenda neuf ou réglé — Paramètres
@@ -13,9 +14,7 @@ fiche d'un agenda, l'onglet « Agendas » de la fiche d'une personne, ce qu'ils 
 (``ports.mail.SIGNED_IN``), et Microsoft entre par l'application du courrier (ADR 0238), que sa rubrique de réglages
 vérifie et enregistre.
 
-Restent au cadre : le rangement de ses droits (le tableau réglé de chaque agenda est gardé par la porte des
-réglages avec ceux des canaux et des outils, lus à chaque épisode — on les lit et on les enregistre par ses
-réglages) ; « qui peut quoi » — une page qui croise les domaines, où sa console règle le tableau d'un agenda
+Reste au cadre « qui peut quoi » — une page qui croise les domaines, où sa console règle le tableau d'un agenda
 (``console/rights.py``).
 """
 

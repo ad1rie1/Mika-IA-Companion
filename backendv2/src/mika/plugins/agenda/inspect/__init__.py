@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from mika.contracts import identity as identity_c
+from mika.contracts.agenda import RIGHTS_SORT, WRITE_WORDS, AgendaRule
 from mika.kernel.frame import Frame
 from mika.kernel.rights import Grant, RuleTable
 from mika.plugins.agenda import AGENDA, AgendaState, owner, params_of
@@ -18,8 +19,6 @@ from mika.vocab.access import (
     KEEP_WORDS,
     NO,
     PERSON,
-    WRITE_WORDS,
-    AgendaRule,
     canal_words,
     when_words,
     who_words,
@@ -81,7 +80,7 @@ def _agenda_grants(s: AgendaState, frame: Frame, ctx: Any, audience: Any, kind: 
     return out
 
 
-@AGENDA.rights("agendas", title="Agendas", order=25, grants=_agenda_grants,
+@AGENDA.rights(RIGHTS_SORT, title="Agendas", order=25, grants=_agenda_grants,
                description="Qui peut lire chaque agenda par elle, y faire ajouter, modifier ou supprimer un "
                            "rendez-vous, répondre à ses invitations, et ce qu'elle en garde (ADR 0309) : réglé par son "
                            "propriétaire, ou ici par un opérateur ; un partage ajoute la ligne de la personne.")
@@ -91,7 +90,7 @@ def _agenda_tables(s: AgendaState, frame: Frame, ctx: Any) -> list[RuleTable]:
     for cal in _calendars(ctx):
         table = table_of(p, rights, cal.key)
         holder = owner(p, split_calendar_key(cal.key)[0])
-        note = "" if cal.key in rights.agendas else "tableau par défaut (son propriétaire et ses partages)"
+        note = "" if cal.key in rights.sort(RIGHTS_SORT) else "tableau par défaut (son propriétaire et ses partages)"
         out.append(RuleTable(f"agenda:{cal.key}", _title(frame, cal, holder, _kind(ctx, cal.key)), COLUMNS,
                              tuple(_row(line, frame) for line in table.lines), _row(table.default, frame),
                              floors=FLOORS, note=note))

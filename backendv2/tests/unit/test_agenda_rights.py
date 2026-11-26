@@ -7,9 +7,10 @@ ce qu'un partage y ajoute, et où il se range.
   à qui il le partage ; jamais dans un salon, jamais une inconnue, jamais masqué ni sous un compte décoché.
 - **Un partage ajoute la ligne de la personne**, et il est un plafond : « lire » n'écrit pas ; « lire et préparer »
   écrit sur l'accord du propriétaire, sans répondre ; « s'en servir » comme le propriétaire. Retiré, la ligne part.
-- **Rangé dans les réglages**, lu à chaque épisode (``Rights.agendas``) ; partager un agenda au tableau réglé y pose ou
-  y retire la ligne de la personne, d'une seule écriture. Il vaut dès l'ouverture, sans que rien ait pris les réglages
-  de l'agenda, et un enregistrement vaut à l'épisode suivant.
+- **Rangé dans les réglages de l'agenda** (``agenda_droits``), lu à chaque épisode sous sa sorte
+  (``Rights.sort(RIGHTS_SORT)``, ADR 0316) ; partager un agenda au tableau réglé y pose ou y retire la ligne de la
+  personne, d'une seule écriture. Il vaut dès l'ouverture, sans que rien ait pris les réglages de l'agenda — la porte
+  les tire —, et un enregistrement vaut à l'épisode suivant.
 - **La page « Droits »** de la console connaît cette sorte de tableau.
 """
 
@@ -22,6 +23,7 @@ from mika.adapters.store_sql import SqlStore
 from mika.app.composition import arbitration, faculties
 from mika.app.domains.agenda.settings import AgendaSettings
 from mika.app.settings import SecretBox, Settings
+from mika.contracts.agenda import AGREE, CLOSED_AGENDA, RIGHTS_SORT, AgendaRule
 from mika.kernel.frame import Audience
 from mika.kernel.registry import ArbitrationPolicy, Registry
 from mika.plugins.agenda import AgendaParams
@@ -37,15 +39,12 @@ from mika.plugins.agenda.rights import (
 from mika.runtime.state import RUNTIME
 from mika.sim.clock import SimClock, run_virtual
 from mika.vocab.access import (
-    AGREE,
     ALONE,
     CARD,
-    CLOSED_AGENDA,
     NO,
     OWNER,
     OWNER_OK,
     SELF,
-    AgendaRule,
     Table,
 )
 from mika.vocab.episodes import Kind
@@ -123,8 +122,8 @@ def test_a_share_adds_her_line_and_caps_what_she_gets():
     # le partage est un plafond : une ligne réglée plus large ne le dépasse pas
     wide = Table[AgendaRule](lines=(AgendaRule(who=("personne:user_2",), read=True, write=ALONE, respond=AGREE),),
                              default=CLOSED_AGENDA)
-    capped = here(AgendaParams(shares={ADRIEN_CAL: {"personne:user_2": "lire"}}), Rights(agendas={ADRIEN_CAL: wide}),
-                  ADRIEN_CAL, BEA, Kind.REPLY)
+    capped = here(AgendaParams(shares={ADRIEN_CAL: {"personne:user_2": "lire"}}),
+                  Rights(tables={RIGHTS_SORT: {ADRIEN_CAL: wide}}), ADRIEN_CAL, BEA, Kind.REPLY)
     assert capped is not None and capped.write == NO
 
 
@@ -148,13 +147,13 @@ def test_a_table_is_kept_in_the_settings_and_a_share_rewrites_its_line(tmp_path)
                                                        write=ALONE),), default=CLOSED_AGENDA)
             await settings.of(AgendaSettings).save_agenda_table(ADRIEN_CAL, mine)
             await settings.of(AgendaSettings).share_calendar(ADRIEN_CAL, "personne:user_2", "lire")
-            shared = settings.access_tables().agendas[ADRIEN_CAL]
+            shared = settings.access_tables().sort(RIGHTS_SORT)[ADRIEN_CAL]
             params = settings.of(AgendaSettings).agenda().params()
             reopened = Settings(store, SecretBox.for_data(tmp_path))
             await reopened.open()
             await settings.of(AgendaSettings).share_calendar(ADRIEN_CAL, "personne:user_2", None)
-            return shared, params, reopened.agenda_tables(), settings.access_tables().agendas[ADRIEN_CAL], \
-                settings.of(AgendaSettings).agenda()
+            return shared, params, reopened.access_tables().sort(RIGHTS_SORT), \
+                settings.access_tables().sort(RIGHTS_SORT)[ADRIEN_CAL], settings.of(AgendaSettings).agenda()
         finally:
             await store.close()
 

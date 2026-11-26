@@ -37,7 +37,7 @@ from mika.ports.imaging import ROLES as IMAGE_ROLES
 from mika.ports.sql import Key, LongText, MindBase, upsert
 from mika.runtime.boundary import call
 from mika.runtime.tool_offer import RULES as TOOL_RULES
-from mika.vocab.access import AgendaRule, Table, ToolRule
+from mika.vocab.access import Table, ToolRule
 from mika.vocab.canals import Canals, CanalTable
 from mika.vocab.rights import Rights
 
@@ -67,10 +67,8 @@ LENT_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
 LENT_PREFIX = "mlp_"
 PERSONA_KEY = "persona"
 OVERRIDES_KEY = "overrides"
-#: le tableau de droits de chaque agenda qu'on a réglé (ADR 0309), par sa clé ; les autres ont celui que leur
-#: propriétaire et leurs partages donnent (``plugins/agenda/rights.py``)
-AGENDA_RIGHTS_KEY = "agenda_droits"
-#: ses droits (ADR 0134) : les tableaux de ses canaux, de ses familles d'outils, et l'offre réglée de ses outils
+#: ses droits (ADR 0134) : les tableaux de ses canaux, de ses familles d'outils, et l'offre réglée de ses outils —
+#: ceux des ressources d'un domaine sont dans ses réglages, sous sa clé (``SettingsPart.access_tables``, ADR 0316)
 CANALS_KEY = "canaux"
 FAMILIES_KEY = "outils_familles"
 IN_HAND_KEY = "outils_en_main"
@@ -192,9 +190,9 @@ class SettingsPart:
         l'ouverture — dans le câblage de son domaine (``wire``)."""
 
     def access_tables(self) -> Mapping[str, Mapping[str, Table[Any]]]:
-        """Les tableaux de droits réglés des ressources du domaine (ADR 0316), par sorte de ressource (« agendas »)
-        puis par ressource : ceux qu'il range sous sa clé, avec son type de ligne, lus par ``_get`` — jamais dans un
-        état que ``open`` charge, car la porte les tire avant d'ouvrir les parts. La porte les réunit dans
+        """Les tableaux de droits réglés des ressources du domaine (ADR 0316), par sorte de ressource (le nom qu'il lui
+        donne) puis par ressource : ceux qu'il range sous sa clé, avec son type de ligne, lus par ``_get`` — jamais
+        dans un état que ``open`` charge, car la porte les tire avant d'ouvrir les parts. La porte les réunit dans
         ``Rights.tables`` à son ouverture, que quelqu'un ait pris cette part ou non, puis quand la part le lui demande
         après avoir écrit les siens (``Settings.reread_rights``) : un tableau réglé vaut dès l'ouverture, et à
         l'épisode qui suit un enregistrement. Une sorte qu'il range, il la rend toujours, même vide : deux domaines
@@ -362,7 +360,7 @@ class Settings:
     async def save_push(self, service_account: str) -> None:
         await self._put(PUSH_KEY, {"service_account_sealed": self.box.seal(service_account.strip())})
 
-    # ── Ses droits (ADR 0134) : les canaux, ses familles d'outils, l'offre réglée ──
+    # ── Ses droits (ADR 0134) : les canaux, ses familles d'outils, l'offre réglée ; les tableaux des domaines ──
     def _read_rights(self) -> Rights:
         """Ce qui est rangé ; un tableau illisible est écarté (son minimum vital vaut), jamais bloquant."""
         try:
@@ -379,14 +377,7 @@ class Settings:
                             str(bundle)[:40])
         raw_hand = dict(self._get(IN_HAND_KEY) or {})
         in_hand = {str(k): str(v) for k, v in raw_hand.items() if v in TOOL_RULES}
-        agendas: dict[str, Table[AgendaRule]] = {}
-        for calendar, raw in dict(self._get(AGENDA_RIGHTS_KEY) or {}).items():
-            try:
-                agendas[str(calendar)] = Table[AgendaRule].model_validate(raw)
-            except ValueError:
-                log.warning("droits : le tableau d'un agenda est illisible, celui de son propriétaire vaut")
-        return Rights(canals=canals, families=families, in_hand=in_hand, agendas=agendas,
-                      tables=self._domain_tables())
+        return Rights(canals=canals, families=families, in_hand=in_hand, tables=self._domain_tables())
 
     def _domain_tables(self) -> dict[str, Mapping[str, Table[Any]]]:
         """Les tableaux réglés que les domaines rangent dans leurs réglages (ADR 0316), réunis par sorte : la porte
@@ -455,25 +446,6 @@ class Settings:
             kept[tool] = rule
         await self._put(IN_HAND_KEY, kept)
         self._rights = replace(self._rights, in_hand=kept)
-
-
-    # ── Les droits de ses agendas (ADR 0309) : avec ceux des canaux et des familles, lus à chaque épisode ──
-    def agenda_tables(self) -> dict[str, Table[AgendaRule]]:
-        """Les tableaux de droits réglés des agendas (ADR 0309), par agenda ; les autres ont celui que leur propriétaire
-        et leurs partages donnent (``plugins/agenda/rights.py::table_of``, qui lit les deux)."""
-        return dict(self._rights.agendas)
-
-    async def _save_agenda_table(self, calendar: str, table: Table[AgendaRule] | None) -> None:
-        """Le tableau de droits d'un agenda, rangé avec ses autres droits et lu à chaque épisode
-        (``access_tables``) ; ``None`` : retiré. La porte ne juge pas la clé : on enregistre par les réglages de
-        l'agenda (``AgendaSettings.save_agenda_table``), qui la jugent."""
-        tables = dict(self._rights.agendas)
-        if table is None:
-            tables.pop(calendar, None)
-        else:
-            tables[calendar] = Table[AgendaRule].model_validate(table.model_dump())
-        await self._put(AGENDA_RIGHTS_KEY, {k: v.model_dump(mode="json") for k, v in sorted(tables.items())})
-        self._rights = replace(self._rights, agendas=tables)
 
     # ── Les jetons gardés en empreinte (appareils, console MCP) ──
     def _token_digest(self, key: str) -> str:

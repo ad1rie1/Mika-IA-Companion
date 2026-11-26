@@ -26,6 +26,7 @@ from markupsafe import Markup
 
 from mika.app.domains.agenda.console.reads import Read, read
 from mika.app.handmade.subjects.parts import STYLES as FICHE_STYLES
+from mika.contracts.agenda import RIGHTS_SORT
 from mika.inspector import render
 from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import PREFIX, UI, Overview, env
@@ -227,7 +228,7 @@ class AgendaFiche(Overview):
     @staticmethod
     def _rights(r: Read, c: Shown) -> Markup:
         table = table_of(params_of(r.frame), rights_of(r.frame.env), c.key)
-        stored = c.key in rights_of(r.frame.env).agendas
+        stored = c.key in rights_of(r.frame.env).sort(RIGHTS_SORT)
 
         def cells(line: Any) -> dict[str, Any]:
             words = rule_words(r.frame, line)

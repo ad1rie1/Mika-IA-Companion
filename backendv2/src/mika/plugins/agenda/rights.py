@@ -1,11 +1,12 @@
 """Le tableau de droits de chaque agenda (ADR 0309), sur le moteur commun (``vocab.access``, ADR 0133–0134) : des
 lignes Qui × Par où × Quand, lues de haut en bas, puis la ligne par défaut, fermée ; ses colonnes : le lire, y écrire
-(ajouter, modifier, supprimer), répondre à ses invitations, ce qu'elle en garde (``vocab.access.AgendaRule``).
+(ajouter, modifier, supprimer), répondre à ses invitations, ce qu'elle en garde (``contracts.agenda.AgendaRule``). Son
+type de ligne est au contrat de l'agenda, son calcul ici (ADR 0316).
 
 - **Deux portes** : le propriétaire et le partage d'abord (``reach``) — un agenda sert à son propriétaire, en
   tête-à-tête, et à qui il le partage, à son niveau ; ni masqué, ni sous un compte décoché (``hers``) ; puis son
-  tableau, serré par celui du canal et par le plafond de qui est en face (``vocab.rights.agenda_allowance``) : rien dans
-  un salon ni pour une inconnue.
+  tableau, serré par celui du canal et par le plafond de qui est en face (``agenda_allowance``) : rien dans un salon
+  ni pour une inconnue.
 - **Le tableau par défaut** (``default_lines``) : son propriétaire, quand elle lui répond, lire, écrire et répondre avec
   son accord (elle en garde un souvenir) ; son propriétaire, quand elle prend la parole (ses rappels), lire ; elle
   seule, au travail (les invitations à préparer), lire et répondre avec accord ; personne d'autre.
@@ -14,8 +15,9 @@ lignes Qui × Par où × Quand, lues de haut en bas, puis la ligne par défaut, 
   le sien. Le partage est aussi un plafond : « lire » n'écrit jamais, « lire et préparer » ne répond pas. Retirer le
   partage retire la ligne (``shared_table``, pour un tableau réglé ; sinon elle n'est plus dérivée).
 - **Réglé** par son propriétaire (l'API par personne) ou par un opérateur (Réglages › Droits), un tableau est rangé
-  dans les réglages et lu à chaque épisode (``Rights.agendas``, ``AgendaSettings.save_agenda_table``) ; sinon, celui que son
-  propriétaire et ses partages donnent (``table_of``).
+  dans les réglages de l'agenda (``AgendaSettings.save_agenda_table``, clé ``agenda_droits``) et lu à chaque épisode
+  sous sa sorte (``Rights.sort(RIGHTS_SORT)``) ; sinon, celui que son propriétaire et ses partages donnent
+  (``table_of``).
 - **Qui donne l'accord** (``approval``) : la personne en face, sur une carte dans sa conversation ; pour un partage
   « lire et préparer », le propriétaire — dans son chat à lui (une de ses adresses), sinon la console (À valider).
 
@@ -36,33 +38,40 @@ from typing import Any
 
 from mika.contracts import identity as identity_c
 from mika.contracts import presence as presence_c
+from mika.contracts.agenda import AGENDA_POLICY, AGREE, CLOSED_AGENDA, RIGHTS_SORT, AgendaRule
 from mika.kernel.frame import Audience, Frame
 from mika.plugins.agenda import AgendaParams, hers, owner, params_of
 from mika.ports.agenda import DEFAULT_CALENDAR, calendar_key, split_calendar_key, system_account
 from mika.vocab.access import (
-    AGREE,
     ALONE,
     AT_OWNER,
     CARD,
-    CLOSED_AGENDA,
     INTERNAL,
+    KEEP_RANK,
     NO,
     OWNER,
     OWNER_OK,
     PERSON,
+    POLICY_RANK,
+    ROOM,
     SELF,
     SHARE_PREPARE,
     SHARE_READ,
     SHARE_USE,
     WORK,
-    AgendaRule,
+    Ceiling,
     Table,
+    Verdict,
+    ceiling,
     situation,
+    tighten,
+    verdict,
 )
+from mika.vocab.canals import CanalRule, Canals, canal_verdict
 from mika.vocab.episodes import Kind
 from mika.vocab.ownership import best_handle, shared_with
 from mika.vocab.privacy import ChannelTrust
-from mika.vocab.rights import AgendaAllowance, Rights, agenda_allowance, closeness_of, rights_of
+from mika.vocab.rights import Rights, closeness_of, decided_by, rights_of
 
 #: comment un agenda sert ici : à qui est en face (son propriétaire ; « à toi » pour une de ses propriétaires ; elle
 #: seule, au travail), ou par un partage (son niveau, ``vocab.access.SHARES``)
@@ -102,7 +111,7 @@ def shared_table(table: Table[AgendaRule], person: str, level: str | None) -> Ta
 
 def table_of(p: AgendaParams, rights: Rights, calendar: str) -> Table[AgendaRule]:
     """Le tableau de cet agenda : celui qu'on a réglé, sinon celui que son propriétaire et ses partages donnent."""
-    stored = rights.agendas.get(calendar)
+    stored = rights.sort(RIGHTS_SORT).get(calendar)
     if stored is not None:
         return stored
     account, _local = split_calendar_key(calendar)
@@ -141,6 +150,52 @@ def as_seen(lines: Iterable[AgendaRule], audience: Any, kind: str) -> tuple[Agen
     me = PERSON + person
     return tuple(line.model_copy(update={"who": tuple(dict.fromkeys(OWNER if w == me else w for w in line.who))})
                  if me in line.who else line for line in lines)
+
+
+@dataclass(frozen=True, slots=True)
+class AgendaAllowance:
+    """Ce qu'elle fait d'un agenda ici (ADR 0309), une fois les deux portes passées : le lire ; y écrire et répondre à
+    ses invitations (``POLICIES`` : seule, sur une carte, sur ton accord, non — jamais sans le lire) ; ce qu'elle en
+    garde ; ``why`` : les lignes qui ont décidé."""
+
+    read: bool
+    write: str
+    respond: str
+    keep: str
+    why: str
+    resource: Verdict[Any]
+    canal: Verdict[CanalRule]
+    canal_key: str
+    ceiling: Ceiling
+
+
+def agenda_allowance(lines: Iterable[Any], default: Any, audience: Any, kind: str, rights: Rights, *,
+                     close: Callable[[str], bool] | None = None) -> AgendaAllowance | None:
+    """Ce qu'un agenda laisse à qui est en face, à ce moment : sa ligne, serrée par celle du canal (la colonne « un
+    outil qui lit » pour le lire, « un outil qui agit » pour y écrire et répondre) et par le plafond. Ce qu'il dit vient
+    du dehors : devant des témoins, rien. ``None`` hors de toute situation."""
+    cap = ceiling(audience, kind)
+    if cap is not None and situation(audience, kind) == ROOM:
+        cap = Ceiling(read=NO, act=NO, keep="rien", steer=cap.steer, files=cap.files,
+                      why="venu d'ailleurs, devant des témoins")
+    through = canal_verdict(rights.canals or Canals(), audience, kind, close=close)
+    got = verdict(tuple(lines), default, audience, kind, close=close)
+    if cap is None or through is None or got is None:
+        return None
+    canal_line, key = through
+    line, via = got.line, canal_line.line
+    read = POLICY_RANK[tighten(tighten(ALONE if line.read else NO, via.read, POLICY_RANK), cap.read, POLICY_RANK)] > 0
+
+    def acting(value: str) -> str:
+        return tighten(tighten(AGENDA_POLICY.get(value, NO), via.act, POLICY_RANK), cap.act, POLICY_RANK) \
+            if read else NO
+
+    write, respond = acting(line.write), acting(line.respond)
+    keep = tighten(tighten(line.keep, via.keep, KEEP_RANK), cap.keep, KEEP_RANK)
+    narrowed = POLICY_RANK[via.act] < POLICY_RANK[AGENDA_POLICY.get(line.write, NO)] or (line.read and via.read == NO)
+    capped = POLICY_RANK[cap.act] < POLICY_RANK[AGENDA_POLICY.get(line.write, NO)] or (line.read and cap.read == NO)
+    return AgendaAllowance(read, write, respond, keep, decided_by(key, got, canal_line, narrowed, cap, capped), got,
+                           canal_line, key, cap)
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,6 +328,6 @@ def holders(p: AgendaParams, calendars: Sequence[str]) -> dict[str, str]:
     return {c: owner(p, split_calendar_key(c)[0]) for c in calendars}
 
 
-__all__ = ["OWNED", "SHARE_COLUMNS", "WORKING", "Here", "approval", "as_seen", "at_work", "audience_at", "candidates",
-           "default_lines", "here", "here_all", "holders", "offered", "policy_of", "reach", "share_line",
-           "shared_table", "table_of"]
+__all__ = ["OWNED", "SHARE_COLUMNS", "WORKING", "AgendaAllowance", "Here", "agenda_allowance", "approval", "as_seen",
+           "at_work", "audience_at", "candidates", "default_lines", "here", "here_all", "holders", "offered",
+           "policy_of", "reach", "share_line", "shared_table", "table_of"]

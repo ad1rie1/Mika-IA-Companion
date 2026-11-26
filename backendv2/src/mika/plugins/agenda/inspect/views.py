@@ -30,6 +30,7 @@ from pydantic import BaseModel, Field
 from mika.contracts import agenda as agenda_c
 from mika.contracts import identity as identity_c
 from mika.contracts import self_ as self_c
+from mika.contracts.agenda import WRITE_WORDS
 from mika.kernel.clock import MINUTE, instant, local
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
@@ -103,7 +104,7 @@ from mika.ports.agenda import (
     system_person,
 )
 from mika.ports.mail import SIGNED_IN, SIGNIN_PENDING
-from mika.vocab.access import KEEP_WORDS, PERSON, SHARES, WRITE_WORDS, canal_words, when_words, who_words
+from mika.vocab.access import KEEP_WORDS, PERSON, SHARES, canal_words, when_words, who_words
 from mika.vocab.ownership import OWNED
 from mika.vocab.people import ACCOUNT_PREFIX
 from mika.vocab.rights import rights_of

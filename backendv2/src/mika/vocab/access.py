@@ -354,31 +354,6 @@ class ToolRule(Rule):
 #: une ligne d'outils fermée (la ligne par défaut d'un tableau qu'on n'a pas réglé)
 CLOSED_TOOLS = ToolRule()
 
-#: un agenda (ADR 0309) : y écrire — ajouter, modifier, supprimer — seule, avec l'accord de qui s'en sert (une carte
-#: d'accord), ou non ; répondre à ses invitations avec cet accord, ou non
-AGREE = "accord"
-WRITES = ((NO, "non"), (AGREE, "avec ton accord"), (ALONE, "seule"))
-RESPONDS = ((NO, "non"), (AGREE, "avec ton accord"))
-WRITE_WORDS = dict(WRITES)
-#: ce qu'une colonne d'agenda vaut parmi les règles d'un outil (``POLICIES``) : l'accord est une carte
-AGENDA_POLICY = {NO: NO, AGREE: CARD, ALONE: ALONE}
-Write = Literal["non", "accord", "seule"]
-Respond = Literal["non", "accord"]
-
-
-class AgendaRule(Rule):
-    """Une ligne du tableau d'un agenda (ADR 0309), dans le cadre commun (qui, par où, quand) : le lire, y écrire
-    (``WRITES``), répondre à ses invitations (``RESPONDS``), et ce qu'elle garde de ce qu'elle y lit (``KEEPS``)."""
-
-    read: Annotated[bool, Knob(label="Lire", advanced=False)] = False
-    write: Annotated[Write, Knob(label="Ajouter, modifier, supprimer", choices=WRITES, advanced=False)] = NO
-    respond: Annotated[Respond, Knob(label="Répondre aux invitations", choices=RESPONDS, advanced=False)] = NO
-    keep: Annotated[Keep, Knob(label="Ce qu'elle en garde", choices=KEEPS, advanced=False)] = "rien"
-
-
-#: une ligne d'agenda fermée (la ligne par défaut : personne d'autre)
-CLOSED_AGENDA = AgendaRule()
-
 R = TypeVar("R", bound=Rule)
 
 

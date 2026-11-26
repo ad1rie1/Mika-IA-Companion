@@ -1,12 +1,13 @@
 """Les réglages de l'agenda (ADR 0309, 0310) : ses comptes (chacun à quelqu'un, leurs secrets scellés) et le
 réglage de chacun de leurs agendas ; les connexions Google et Microsoft de ses comptes ; l'application Google du
-serveur ; le partage d'un agenda.
+serveur ; le partage d'un agenda ; le tableau de droits réglé de chaque agenda.
 
 Rangés dans les réglages du serveur (``mind.db``), par leur porte (``app/settings.py::SettingsPart``) ; le domaine
 les prend par leur classe (``settings.of(AgendaSettings)``), une page du cadre par le nom du domaine
-(``Settings.named("agenda")``). Ses *droits* — le tableau réglé de chaque agenda — se lisent et s'enregistrent ici
-(``agenda_tables``, ``save_agenda_table``), mais sont rangés par la porte avec ceux des canaux et des familles
-d'outils : ils vivent dans le cache lu à chaque épisode (``Settings.access_tables``).
+(``Settings.named("agenda")``). Ses *droits* — le tableau réglé de chaque agenda — se lisent, s'écrivent et se rangent
+ici, sous ``agenda_droits`` (``agenda_tables``, ``save_agenda_table``) ; la porte les tire de cette part
+(``access_tables``, ADR 0316) à son ouverture et après chaque enregistrement, et les garde avec ceux des canaux et des
+familles d'outils dans ce qu'elle rend à chaque épisode (``Settings.access_tables``, ``Rights.sort``).
 """
 
 from __future__ import annotations
@@ -18,9 +19,10 @@ from mika.adapters.agenda.config import AgendaConfig
 from mika.adapters.agenda.oauth import GoogleApplication
 from mika.adapters.mail.oauth import Grant
 from mika.app.settings import Settings, SettingsPart
+from mika.contracts.agenda import RIGHTS_SORT, AgendaRule
 from mika.plugins.agenda.rights import shared_table
 from mika.ports.agenda import Connection, split_calendar_key
-from mika.vocab.access import AgendaRule, Table
+from mika.vocab.access import Table
 
 log = logging.getLogger("mika.settings")
 
@@ -32,6 +34,9 @@ AGENDA_KEY = "agenda"
 AGENDA_GRANTS_KEY = "agenda_oauth"
 #: l'application Google du serveur (ADR 0309, lot 2) : le client OAuth d'un projet Google Cloud, son secret scellé
 AGENDA_GOOGLE_KEY = "agenda_google"
+#: le tableau de droits de chaque agenda qu'on a réglé (ADR 0309), par sa clé ; les autres ont celui que leur
+#: propriétaire et leurs partages donnent (``plugins/agenda/rights.py``)
+AGENDA_RIGHTS_KEY = "agenda_droits"
 #: ce qu'une connexion garde scellé : son jeton de renouvellement ; l'application Google : son secret
 GRANT_SECRETS = ("refresh",)
 GOOGLE_SECRETS = ("secret",)
@@ -159,18 +164,38 @@ class AgendaSettings(SettingsPart):
             await self.save_agenda_table(calendar, shared_table(stored, person, level))
         return cfg
 
+    # ── Les droits de ses agendas (ADR 0309, 0316) : rangés ici, lus à chaque épisode par la porte ──
+    def access_tables(self) -> dict[str, dict[str, Table[AgendaRule]]]:
+        """Les tableaux de droits réglés de ses agendas, rangés sous ``agenda_droits``, par agenda, sous la sorte des
+        agendas (``RIGHTS_SORT``) : ce que la porte tire à l'ouverture et après chaque enregistrement
+        (``SettingsPart.access_tables``). Ce qui est rangé ; un tableau illisible est écarté (celui de son
+        propriétaire vaut), jamais bloquant."""
+        agendas: dict[str, Table[AgendaRule]] = {}
+        for calendar, raw in dict(self._get(AGENDA_RIGHTS_KEY) or {}).items():
+            try:
+                agendas[str(calendar)] = Table[AgendaRule].model_validate(raw)
+            except ValueError:
+                log.warning("droits : le tableau d'un agenda est illisible, celui de son propriétaire vaut")
+        return {RIGHTS_SORT: agendas}
+
     def agenda_tables(self) -> dict[str, Table[AgendaRule]]:
         """Les tableaux de droits réglés des agendas (ADR 0309), par agenda ; les autres ont celui que leur propriétaire
         et leurs partages donnent (``plugins/agenda/rights.py::table_of``, qui lit les deux)."""
-        return self.door.agenda_tables()
+        return dict(self.door.access_tables().sort(RIGHTS_SORT))
 
     async def save_agenda_table(self, calendar: str, table: Table[AgendaRule] | None) -> None:
         """Le tableau de droits d'un agenda, enregistré — par son propriétaire (l'API par personne) ou par un opérateur
         (Réglages › Droits) ; ``None`` : retiré, celui que son propriétaire et ses partages donnent vaut de nouveau. Lu
-        à chaque épisode (``Settings.access_tables``)."""
+        à chaque épisode (``Settings.access_tables``) : la porte relit ses tableaux (``Settings.reread_rights``)."""
         if not split_calendar_key(calendar)[0]:
             raise ValueError(f"pas un agenda : « {calendar[:60]} »")
-        await self.door._save_agenda_table(calendar, table)
+        tables = self.agenda_tables()
+        if table is None:
+            tables.pop(calendar, None)
+        else:
+            tables[calendar] = Table[AgendaRule].model_validate(table.model_dump())
+        await self._put(AGENDA_RIGHTS_KEY, {k: v.model_dump(mode="json") for k, v in sorted(tables.items())})
+        self.door.reread_rights()
 
 
 #: la classe que le cadre prend par le nom du domaine (``Settings.named``)

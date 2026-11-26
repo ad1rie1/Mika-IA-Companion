@@ -23,6 +23,7 @@ from mika.contracts import agenda as agenda_c
 from mika.contracts import body as body_c
 from mika.contracts import identity as identity_c
 from mika.contracts import runtime as rt
+from mika.contracts.agenda import AGREE, CLOSED_AGENDA, RIGHTS_SORT, AgendaRule
 from mika.kernel.clock import MINUTE, US
 from mika.kernel.events import Origin
 from mika.kernel.registry import ArbitrationPolicy
@@ -39,7 +40,7 @@ from mika.plugins.agenda import (
 from mika.ports.agenda import CANCELLED, NEEDS, NO, YES, EventDraft, Participant, Span
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
 from mika.sim.clock import SimClock, run_virtual
-from mika.vocab.access import AGREE, CLOSED_AGENDA, AgendaRule, Table
+from mika.vocab.access import Table
 from mika.vocab.episodes import Kind
 from mika.vocab.rights import Rights
 from tests.fixtures import backend
@@ -182,7 +183,7 @@ def test_no_reminder_when_her_table_does_not_let_her_read_it_of_her_own_accord(t
                 if any(reason == agenda_c.REMIND for _o, reason, _e in r.parts)]
         return events(kernel, REMINDER_DUE), rows, reminded(kernel)
 
-    due, rows, started = live(tmp_path, scenario, rights=Rights(agendas={BEA_CAL: replying}))
+    due, rows, started = live(tmp_path, scenario, rights=Rights(tables={RIGHTS_SORT: {BEA_CAL: replying}}))
     assert len(due) == 1 and not rows and not started
 
 

@@ -2,11 +2,12 @@
 accorde — la plus stricte gagne, sous le plafond de qui est en face.
 
 ``tool_allowance`` : ce qu'elle fait d'un outil (un service, une app, une de ses familles) et ce qu'elle en garde ;
-``project_allowance`` : le voir, le piloter, ses fichiers, ses apps ; ``agenda_allowance`` : le lire, y écrire, répondre à
-ses invitations (ADR 0309). Chaque réponse dit les lignes qui ont décidé
-(``why``). Les tableaux réglés viennent du registre (``rights_of`` : ``Registry.access_tables``, donné par
-l'application) ; sans eux, les minimums vitaux. Une famille de ses propres outils naît de ce que ses outils déclarent
-(``vital_family`` : ``owner_only``).
+``project_allowance`` : le voir, le piloter, ses fichiers, ses apps — que lisent deux propriétaires, les projets et les
+fichiers envoyés. Chaque réponse dit les lignes qui ont décidé (``why``, que ``decided_by`` écrit pour toutes les
+sortes). Le calcul d'une sorte de ressource qu'un seul propriétaire lit est chez lui, sur ce moteur (ADR 0316).
+Les tableaux réglés viennent du registre (``rights_of`` : ``Registry.access_tables``, donné par l'application) ; sans
+eux, les minimums vitaux. Une famille de ses propres outils naît de ce que ses outils déclarent (``vital_family`` :
+``owner_only``).
 """
 
 from __future__ import annotations
@@ -16,7 +17,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from mika.vocab.access import (
-    AGENDA_POLICY,
     ALONE,
     EVERYONE,
     INTERNAL,
@@ -28,7 +28,6 @@ from mika.vocab.access import (
     SELF,
     STEER_NO,
     STEER_RANK,
-    AgendaRule,
     Ceiling,
     Table,
     ToolRule,
@@ -49,19 +48,16 @@ class Rights:
     """Les tableaux de droits qu'un opérateur a réglés (ADR 0134), tels que l'application les donne au registre
     (``Registry.access_tables``) : ``canals`` (les tableaux des canaux, ``vocab.canals.Canals``), ``families``
     (famille d'outils → tableau, ``vocab.access.Table[ToolRule]``), ``in_hand`` (outil → « hand » ou « ask »,
-    l'offre réglée), ``agendas`` (agenda → tableau, ``vocab.access.Table[AgendaRule]``, ADR 0309), ``tables`` (les
-    tableaux réglés des ressources d'un domaine, par sorte puis par ressource, ADR 0316 : ``sort``)."""
+    l'offre réglée), ``tables`` (les tableaux réglés des ressources d'un domaine, par sorte puis par ressource,
+    ADR 0316 : ``sort``)."""
 
     canals: Canals | None = None
     families: Mapping[str, Table[ToolRule]] = field(default_factory=dict)
     in_hand: Mapping[str, str] = field(default_factory=dict)
-    #: le tableau réglé de chaque agenda (ADR 0309), par sa clé ; absent, celui que son propriétaire et ses partages
-    #: donnent (``plugins/agenda/rights.py``)
-    agendas: Mapping[str, Table[AgendaRule]] = field(default_factory=dict)
-    #: les tableaux réglés des ressources d'un domaine (ADR 0316) : par sorte de ressource (« agendas »), puis par
-    #: ressource (sa clé). Chaque domaine range les siens dans ses réglages, sous sa clé, avec son type de ligne ; la
-    #: porte des réglages les réunit ici sans en nommer aucun (``SettingsPart.access_tables``). Une ressource absente
-    #: a le tableau que son propriétaire calcule
+    #: les tableaux réglés des ressources d'un domaine (ADR 0316) : par sorte de ressource (le nom que son domaine lui
+    #: donne), puis par ressource (sa clé). Chaque domaine range les siens dans ses réglages, sous sa clé, avec son
+    #: type de ligne ; la porte des réglages les réunit ici sans en nommer aucun (``SettingsPart.access_tables``). Une
+    #: ressource absente a le tableau que son propriétaire calcule
     tables: Mapping[str, Mapping[str, Table[Any]]] = field(default_factory=dict)
 
     def sort(self, name: str) -> Mapping[str, Table[Any]]:
@@ -128,9 +124,11 @@ class Allowance:
     narrowed: bool = False
 
 
-def _why(canal_key: str, got: Verdict[Any], through: Verdict[Any], narrowed: bool, cap: Ceiling, capped: bool) -> str:
+def decided_by(canal_key: str, got: Verdict[Any], through: Verdict[Any], narrowed: bool, cap: Ceiling,
+               capped: bool) -> str:
     """Les lignes qui ont décidé, en mots : celle de la ressource (« ligne 2 », « comportement par défaut ») ; le
-    canal, seulement s'il a serré (sa ligne) ; le plafond, seulement s'il a serré (sa raison)."""
+    canal, seulement s'il a serré (sa ligne) ; le plafond, seulement s'il a serré (sa raison). Le ``why`` de chaque
+    sorte de tableau, ici comme dans le calcul qu'un propriétaire tient chez lui (ADR 0316)."""
     said = why_words(got.index)
     if narrowed:
         said += f" — serré par le canal {canal_words((canal_key,))} ({why_words(through.index)})"
@@ -162,7 +160,7 @@ def tool_allowance(lines: Iterable[Any], default: Any, audience: Any, kind: str,
     keep = tighten(tighten(getattr(got.line, "keep", "public"), canal_line.line.keep, KEEP_RANK), cap.keep, KEEP_RANK)
     narrowed = POLICY_RANK[yours] < POLICY_RANK[mine]
     capped = POLICY_RANK[top] < POLICY_RANK[tighten(mine, yours, POLICY_RANK)]
-    return Allowance(level, keep, _why(key, got, canal_line, narrowed, cap, capped), got, canal_line, key, cap,
+    return Allowance(level, keep, decided_by(key, got, canal_line, narrowed, cap, capped), got, canal_line, key, cap,
                      capped, narrowed)
 
 
@@ -211,54 +209,8 @@ def project_allowance(lines: Iterable[Any], default: Any, audience: Any, kind: s
     narrowed = see and (STEER_RANK[via.steer] < STEER_RANK[line.steer] or (bool(line.files) and not via.files))
     capped = see and (STEER_RANK[cap.steer] < STEER_RANK[tighten(line.steer, via.steer, STEER_RANK)]
                       or (bool(line.files) and via.files and not cap.files))
-    return ProjectAllowance(see, steer, files, read, act, _why(key, got, canal_line, narrowed, cap, capped), got,
+    return ProjectAllowance(see, steer, files, read, act, decided_by(key, got, canal_line, narrowed, cap, capped), got,
                             canal_line, key, cap, docs)
-
-
-@dataclass(frozen=True, slots=True)
-class AgendaAllowance:
-    """Ce qu'elle fait d'un agenda ici (ADR 0309), une fois les deux portes passées : le lire ; y écrire et répondre à
-    ses invitations (``POLICIES`` : seule, sur une carte, sur ton accord, non — jamais sans le lire) ; ce qu'elle en
-    garde ; ``why`` : les lignes qui ont décidé."""
-
-    read: bool
-    write: str
-    respond: str
-    keep: str
-    why: str
-    resource: Verdict[Any]
-    canal: Verdict[CanalRule]
-    canal_key: str
-    ceiling: Ceiling
-
-
-def agenda_allowance(lines: Iterable[Any], default: Any, audience: Any, kind: str, rights: Rights, *,
-                     close: Callable[[str], bool] | None = None) -> AgendaAllowance | None:
-    """Ce qu'un agenda laisse à qui est en face, à ce moment : sa ligne, serrée par celle du canal (la colonne « un
-    outil qui lit » pour le lire, « un outil qui agit » pour y écrire et répondre) et par le plafond. Ce qu'il dit vient
-    du dehors : devant des témoins, rien. ``None`` hors de toute situation."""
-    cap = ceiling(audience, kind)
-    if cap is not None and situation(audience, kind) == ROOM:
-        cap = Ceiling(read=NO, act=NO, keep="rien", steer=cap.steer, files=cap.files,
-                      why="venu d'ailleurs, devant des témoins")
-    through = canal_verdict(rights.canals or Canals(), audience, kind, close=close)
-    got = verdict(tuple(lines), default, audience, kind, close=close)
-    if cap is None or through is None or got is None:
-        return None
-    canal_line, key = through
-    line, via = got.line, canal_line.line
-    read = POLICY_RANK[tighten(tighten(ALONE if line.read else NO, via.read, POLICY_RANK), cap.read, POLICY_RANK)] > 0
-
-    def acting(value: str) -> str:
-        return tighten(tighten(AGENDA_POLICY.get(value, NO), via.act, POLICY_RANK), cap.act, POLICY_RANK) \
-            if read else NO
-
-    write, respond = acting(line.write), acting(line.respond)
-    keep = tighten(tighten(line.keep, via.keep, KEEP_RANK), cap.keep, KEEP_RANK)
-    narrowed = POLICY_RANK[via.act] < POLICY_RANK[AGENDA_POLICY.get(line.write, NO)] or (line.read and via.read == NO)
-    capped = POLICY_RANK[cap.act] < POLICY_RANK[AGENDA_POLICY.get(line.write, NO)] or (line.read and cap.read == NO)
-    return AgendaAllowance(read, write, respond, keep, _why(key, got, canal_line, narrowed, cap, capped), got,
-                           canal_line, key, cap)
 
 
 def here_allowed(frame: Any, bundle: str, tool: str = "", acts: bool = False,

@@ -234,13 +234,13 @@ def test_an_operator_sets_the_table_of_a_calendar_in_rights(world):  # noqa: F81
             "faire": ""}
     got = client.post("/admin/reglages/droits/agenda", data=data, follow_redirects=False)
     assert got.status_code == 303 and "regler=1" in got.headers["location"]
-    table = client.portal.call(live.settings.agenda_tables)[adrien]
+    table = client.portal.call(live.settings.named("agenda").agenda_tables)[adrien]
     assert len(table.lines) == 1 and table.lines[0].write == "seule" and table.lines[0].respond == "accord"
     again = drawn(client, got.headers["location"])
     assert "Revenir au minimum vital" in again  # réglé : on peut revenir au tableau de départ
     data["faire"] = "remettre"
     client.post("/admin/reglages/droits/agenda", data=data, follow_redirects=False)
-    assert adrien not in client.portal.call(live.settings.agenda_tables)
+    assert adrien not in client.portal.call(live.settings.named("agenda").agenda_tables)
 
 
 def test_the_agendas_tab_of_a_person(world):  # noqa: F811

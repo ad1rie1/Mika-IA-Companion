@@ -9,11 +9,19 @@ avec un agenda (lot 3b), la provenance d'un rappel dit, et où en sont un rappel
   rendez-vous quand elle a parlé porte la même clé (sa provenance) : c'est dit.
 - **Les invitations préparées** : une invitation qui attend sa réponse appelle une tâche (``PREPARE``) qui prépare la
   réponse ; elle part toujours sur l'accord de la personne.
+- **Le tableau de droits d'un agenda** : son type de ligne (``AgendaRule``, dans le cadre commun de ``vocab.access`` :
+  qui, par où, quand) et ses colonnes, que lisent son plugin, ses réglages, son API et sa console ; les tableaux
+  réglés se rangent sous sa sorte (``RIGHTS_SORT``, ``Rights.sort``). Le type de ligne d'une sorte de ressource est au
+  contrat de son propriétaire, son calcul dans son plugin (``plugins/agenda/rights.py``, ADR 0316).
 """
 
 from __future__ import annotations
 
+from typing import Annotated, Literal
+
 from mika.kernel.facts import FactFamily
+from mika.kernel.forms import Knob
+from mika.vocab.access import ALONE, CARD, KEEPS, NO, Keep, Rule
 
 OWNER = "agenda"
 #: sa famille d'outils
@@ -48,5 +56,39 @@ def reminder_of(subject: str | None) -> str:
     return subject[len(REMINDER_PREFIX):] if subject and subject.startswith(REMINDER_PREFIX) else ""
 
 
-__all__ = ["BUNDLE", "DROPPED", "DUE", "INVITATION", "OWNER", "PENDING", "PREPARE", "REMIND", "REMINDER",
-           "REMINDER_PREFIX", "SETTLED", "TOLD", "reminder_of", "reminder_subject"]
+# ── son tableau de droits ───────────────────────────────────────────────────
+
+#: la sorte de ses tableaux de droits (ADR 0316) : celle sous laquelle ses réglages rendent le tableau réglé de chaque
+#: agenda (``Rights.sort``) — la même chaîne que la sorte de droits que son plugin déclare (``@AGENDA.rights``) et que
+#: son sous-onglet de Réglages › Droits (``RightsSort``)
+RIGHTS_SORT = "agendas"
+
+#: un agenda (ADR 0309) : y écrire — ajouter, modifier, supprimer — seule, avec l'accord de qui s'en sert (une carte
+#: d'accord), ou non ; répondre à ses invitations avec cet accord, ou non
+AGREE = "accord"
+WRITES = ((NO, "non"), (AGREE, "avec ton accord"), (ALONE, "seule"))
+RESPONDS = ((NO, "non"), (AGREE, "avec ton accord"))
+WRITE_WORDS = dict(WRITES)
+#: ce qu'une colonne d'agenda vaut parmi les règles d'un outil (``POLICIES``) : l'accord est une carte
+AGENDA_POLICY = {NO: NO, AGREE: CARD, ALONE: ALONE}
+Write = Literal["non", "accord", "seule"]
+Respond = Literal["non", "accord"]
+
+
+class AgendaRule(Rule):
+    """Une ligne du tableau d'un agenda (ADR 0309), dans le cadre commun (qui, par où, quand) : le lire, y écrire
+    (``WRITES``), répondre à ses invitations (``RESPONDS``), et ce qu'elle garde de ce qu'elle y lit (``KEEPS``)."""
+
+    read: Annotated[bool, Knob(label="Lire", advanced=False)] = False
+    write: Annotated[Write, Knob(label="Ajouter, modifier, supprimer", choices=WRITES, advanced=False)] = NO
+    respond: Annotated[Respond, Knob(label="Répondre aux invitations", choices=RESPONDS, advanced=False)] = NO
+    keep: Annotated[Keep, Knob(label="Ce qu'elle en garde", choices=KEEPS, advanced=False)] = "rien"
+
+
+#: une ligne d'agenda fermée (la ligne par défaut : personne d'autre)
+CLOSED_AGENDA = AgendaRule()
+
+
+__all__ = ["AGENDA_POLICY", "AGREE", "BUNDLE", "CLOSED_AGENDA", "DROPPED", "DUE", "INVITATION", "OWNER", "PENDING",
+           "PREPARE", "REMIND", "REMINDER", "REMINDER_PREFIX", "RESPONDS", "RIGHTS_SORT", "SETTLED", "TOLD",
+           "WRITES", "WRITE_WORDS", "AgendaRule", "Respond", "Write", "reminder_of", "reminder_subject"]

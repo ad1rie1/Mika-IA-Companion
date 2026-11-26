@@ -22,6 +22,7 @@ from mika.adapters.agenda import AgendaStore, Providers
 from mika.app import composition
 from mika.app.mindport import KernelPort
 from mika.contracts import runtime as rt
+from mika.contracts.agenda import CLOSED_AGENDA, RIGHTS_SORT, AgendaRule
 from mika.kernel.frame import Audience
 from mika.kernel.registry import ArbitrationPolicy
 from mika.plugins.agenda import DONE, WRITTEN, AgendaParams
@@ -29,7 +30,7 @@ from mika.ports.agenda import BY_HER, EventChange, EventDraft, Participant, Span
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
 from mika.runtime.tool_offer import offer
 from mika.sim.clock import SimClock, run_virtual
-from mika.vocab.access import ALONE, CLOSED_AGENDA, AgendaRule, Table
+from mika.vocab.access import ALONE, Table
 from mika.vocab.episodes import Kind
 from mika.vocab.privacy import ChannelTrust
 from mika.vocab.rights import Rights
@@ -286,7 +287,7 @@ def test_what_she_writes_alone_lands_in_the_system_agenda_marked_hers(tmp_path):
         found = [o.event for o in store.period([BEA_CAL], paris(30, 0), paris(30, 23))]
         return result, pending(kernel), found
 
-    result, waiting, found = live(tmp_path, scenario, rights=Rights(agendas={BEA_CAL: alone}))
+    result, waiting, found = live(tmp_path, scenario, rights=Rights(tables={RIGHTS_SORT: {BEA_CAL: alone}}))
     assert waiting == {} and "C'est écrit dans son agenda" in result
     (piscine,) = found
     assert piscine.title == "Piscine" and piscine.span.end - piscine.span.start == 45 * 60_000_000

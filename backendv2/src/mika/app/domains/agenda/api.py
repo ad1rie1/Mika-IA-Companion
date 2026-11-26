@@ -49,6 +49,7 @@ from mika.app.domains.agenda.settings import AgendaSettings
 from mika.app.me.api import Call, Denied, MeApiBase, done, form, missing, refused
 from mika.app.me.common import millis, settings_of
 from mika.contracts import runtime as rt
+from mika.contracts.agenda import RIGHTS_SORT, WRITE_WORDS, AgendaRule
 from mika.kernel.clock import local
 from mika.plugins.agenda import CREATE, RESPOND, WAITING, AgendaState, params_of
 from mika.plugins.agenda.actions import KEEP, handles_of, level_of
@@ -78,8 +79,6 @@ from mika.runtime.state import RUNTIME
 from mika.vocab.access import (
     KEEP_WORDS,
     SHARE_PREPARE,
-    WRITE_WORDS,
-    AgendaRule,
     Table,
     canal_words,
     reaches,
@@ -592,7 +591,7 @@ async def rights_get(call: Call) -> dict[str, Any]:
     owned_calendar(call, key)
     rights = rights_of(call.frame.env)
     table = table_of(params_of(call.frame), rights, key)
-    return {"calendar": key, "set": key in rights.agendas, "lines": [_rule_json(call, x) for x in table.lines],
+    return {"calendar": key, "set": key in rights.sort(RIGHTS_SORT), "lines": [_rule_json(call, x) for x in table.lines],
             "default": _rule_json(call, table.default)}
 
 

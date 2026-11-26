@@ -19,6 +19,7 @@ from starlette.routing import Route
 from mika.app.domains.domain import RightsSort
 from mika.app.handmade.access import KEEP_CHOICES, capitalized
 from mika.app.handmade.rights import PAGE, one_page
+from mika.contracts.agenda import RESPONDS, RIGHTS_SORT, WRITES, AgendaRule
 from mika.inspector.pages.rights_tables import choices, rows_of, table_args
 from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import UI, secure
@@ -27,7 +28,7 @@ from mika.plugins.agenda import params_of as agenda_params
 from mika.plugins.agenda.inspect import FLOORS as AGENDA_FLOORS
 from mika.plugins.agenda.rights import table_of as agenda_table
 from mika.runtime import operations
-from mika.vocab.access import NO, OWNER, RESPONDS, WRITES, AgendaRule, Table, TableArgs, moved
+from mika.vocab.access import NO, OWNER, Table, TableArgs, moved
 from mika.vocab.rights import rights_of
 
 #: où « Enregistrer » le tableau d'un agenda envoie son formulaire (ADR 0309, lot 5), et sa ligne qu'on ajoute : toi,
@@ -77,7 +78,7 @@ def agenda_editor(ui: UI, key: str, csrf: str) -> dict[str, Any] | None:
         return None
     frame = ui.kernel.mind.frame()
     table = agenda_table(agenda_params(frame), rights_of(frame.env), calendar)
-    stored = calendar in rights_of(frame.env).agendas
+    stored = calendar in rights_of(frame.env).sort(RIGHTS_SORT)
     rows = rows_of(ui, table.lines, _agenda_cells)
     return {"id": "agenda", "key": calendar, "title": f"Qui peut quoi sur « {found.name or calendar} »",
             "intro": "De haut en bas : la première ligne qui correspond (qui, par où, quand) décide ; aucune, le "
@@ -146,7 +147,7 @@ def routes(ui: UI) -> list[Route]:
 
 #: sa sorte dans Réglages › Droits : chaque agenda, son tableau (ADR 0309) — le lire, y écrire, répondre à ses
 #: invitations, ce qu'elle en garde —, réglé ici même ; ce qu'une personne a de chacun, rangé sous « agendas »
-SORT = RightsSort("agendas", title="Agendas",
+SORT = RightsSort(RIGHTS_SORT, title="Agendas",
                   hint="le lire, y écrire, répondre à ses invitations : son propriétaire et ses partages",
-                  prefix="agenda:", sort="agendas", edit=edit, editor=agenda_editor, routes=routes,
+                  prefix="agenda:", sort=RIGHTS_SORT, edit=edit, editor=agenda_editor, routes=routes,
                   named="La fiche de l'agenda")
