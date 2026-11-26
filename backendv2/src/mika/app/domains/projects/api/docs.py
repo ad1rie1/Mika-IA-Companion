@@ -37,6 +37,7 @@ from mika.app.domains.projects.api.reach import (
     nameable,
     opened_project,
     scene,
+    store_of,
 )
 from mika.app.me.api import Call, Denied, MeApiBase, done, form, missing, person_of
 from mika.app.me.common import millis
@@ -223,39 +224,35 @@ def search(sc: Scene, r: Reach, store: Any, said: str) -> dict[str, Any]:
 # ── Lire ──────────────────────────────────────────────────────────────────
 
 
-def _store(call: Call) -> Any:
-    return call.kernel.mind.store
-
-
 async def overview(call: Call) -> dict[str, Any]:
     sc, r = _docs(call)
-    return space(sc, r, _store(call))
+    return space(sc, r, store_of(call))
 
 
 async def one_page(call: Call) -> dict[str, Any]:
     sc, r = _docs(call)
-    return read_page(sc, r, _store(call), path_of(call.arg("path", limit=docs.PATH_MAX)))
+    return read_page(sc, r, store_of(call), path_of(call.arg("path", limit=docs.PATH_MAX)))
 
 
 async def page_history(call: Call) -> dict[str, Any]:
     sc, r = _docs(call)
-    return history(sc, r, _store(call), path_of(call.arg("path", limit=docs.PATH_MAX)))
+    return history(sc, r, store_of(call), path_of(call.arg("path", limit=docs.PATH_MAX)))
 
 
 async def one_version(call: Call) -> dict[str, Any]:
     sc, r = _docs(call)
-    return read_version(sc, r, _store(call), path_of(call.arg("path", limit=docs.PATH_MAX)),
+    return read_version(sc, r, store_of(call), path_of(call.arg("path", limit=docs.PATH_MAX)),
                         call.number("n", 0, low=0))
 
 
 async def find(call: Call) -> dict[str, Any]:
     sc, r = _docs(call)
-    return search(sc, r, _store(call), call.arg("q", limit=120))
+    return search(sc, r, store_of(call), call.arg("q", limit=120))
 
 
 async def images(call: Call) -> dict[str, Any]:
     sc, r = _docs(call)
-    got = space(sc, r, _store(call))
+    got = space(sc, r, store_of(call))
     return {"items": got["images"], "space_used": got["space_used"], "limits": LIMITS}
 
 
@@ -297,10 +294,10 @@ async def _write(call: Call, r: Reach, path: str, base: int, fixed: Mapping[str,
     # la redite d'un envoi déjà fait (une coupure, puis le client réessaie avec la même clé) ne se juge pas contre la
     # version que le premier envoi a écrite : l'action la reconnaît et ne refait rien (``deduped``)
     if not call.repeated():
-        stale(scene(call), r, _store(call), path, base)
+        stale(scene(call), r, store_of(call), path, base)
     outcome = await call.act(words.WRITE, form(fixed=hidden, path=path, base=base, **values), subject=str(r.p.id))
     got = done(outcome)
-    if not outcome.deduped and not docs.landed(_store(call), r.p.id, path, outcome.seqs):
+    if not outcome.deduped and not docs.landed(store_of(call), r.p.id, path, outcome.seqs):
         raise Denied(409, words.OVERTAKEN)
     return {**got, "path": path, "version": base + 1}
 
@@ -319,10 +316,10 @@ async def restore(call: Call) -> dict[str, Any]:
     _, r = _docs(call, write=True)
     path = path_of(call.arg("path", limit=docs.PATH_MAX))
     base, number = _base(call), call.number("version", 0, low=0)
-    v = docs.version(_store(call), r.p.id, path, number)
+    v = docs.version(store_of(call), r.p.id, path, number)
     if v is None:
         raise Denied(404, NO_VERSION)
-    text = docs.text_of(_store(call), v.seq)
+    text = docs.text_of(store_of(call), v.seq)
     if text is None:
         raise Denied(409, FORGOTTEN)
     return await _write(call, r, path, base, fixed={"restored": number}, text=text,
