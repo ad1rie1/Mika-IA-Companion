@@ -29,9 +29,9 @@ from mika.vocab.tag import strip_prosody
 #: fin d'épisode qui l'a réglé ; nul sinon (version 3). ``tools`` : les outils dont elle s'est servie pour écrire un
 #: de ses messages (version 6, ADR 0108). ``mode`` : le mode dans lequel le message a été écrit (version 8, ADR 0116)
 #: ; ``strand`` : son fil de travail (version 9, ADR 0164)
-_COLUMNS = ("id", "at", "role", "person", "channel", "room", "source", "kind", "text", "client_msg_id",
-            "reply_to", "emotion", "emotion_intensity", "attachments", "typed", "unanswered", "tools", "verdict",
-            "verdict_note", "mode", "strand")
+THREAD_COLUMNS = ("id", "at", "role", "person", "channel", "room", "source", "kind", "text", "client_msg_id",
+                  "reply_to", "emotion", "emotion_intensity", "attachments", "typed", "unanswered", "tools",
+                  "verdict", "verdict_note", "mode", "strand")
 
 
 class Thread:
@@ -68,7 +68,7 @@ class Thread:
 def _stored(row: tuple[Any, ...]) -> dict[str, Any]:
     """Une ligne telle qu'écrite : l'adresse et le salon bornés (``fit`` : jamais un ajout refusé pour une adresse
     trop longue), et le texte replié que cherche la console."""
-    out = dict(zip(_COLUMNS, row, strict=True))
+    out = dict(zip(THREAD_COLUMNS, row, strict=True))
     out["person"] = fit(out["person"], HANDLE_MAX)
     out["room"] = fit(out["room"], HANDLE_MAX) if out["room"] is not None else None
     out["strand"] = fit(out["strand"], c.STRAND_MAX) if out["strand"] is not None else None
@@ -250,11 +250,11 @@ def asked_effort(store: Any, req: Any) -> str:
 
 def _columns() -> list[Any]:
     t = c.thread_table()
-    return [t.c[n] for n in _COLUMNS]
+    return [t.c[n] for n in THREAD_COLUMNS]
 
 
-def _messages_of(store: Any, *where: Any, newest_first: bool = True, limit: int | None = None) -> list[Any]:
-    """Les lignes du fil qui répondent à ``where`` (les colonnes de ``_COLUMNS``), triées par numéro."""
+def messages_of(store: Any, *where: Any, newest_first: bool = True, limit: int | None = None) -> list[Any]:
+    """Les lignes du fil qui répondent à ``where`` (les colonnes de ``THREAD_COLUMNS``), triées par numéro."""
     t = c.thread_table()
     query = select(*_columns()).where(*where).order_by(t.c.id.desc() if newest_first else t.c.id)
     return store.query_mind(query.limit(limit) if limit is not None else query)
@@ -263,21 +263,21 @@ def _messages_of(store: Any, *where: Any, newest_first: bool = True, limit: int 
 def recent(store: Any, person: str, limit: int) -> list[dict[str, Any]]:
     """La fin du fil d'une personne, du plus ancien au plus récent."""
     t = c.thread_table()
-    rows = _messages_of(store, t.c.person == person, limit=limit)
-    return [dict(zip(_COLUMNS, r, strict=True)) for r in reversed(rows)]
+    rows = messages_of(store, t.c.person == person, limit=limit)
+    return [dict(zip(THREAD_COLUMNS, r, strict=True)) for r in reversed(rows)]
 
 
 def after(store: Any, person: str, after_id: int, limit: int) -> tuple[list[dict[str, Any]], bool]:
     """Tout ce qu'elle a manqué depuis ``after_id`` (les plus récents si ça
     dépasse ``limit``, et on le dit)."""
     t = c.thread_table()
-    rows = _messages_of(store, t.c.person == person, t.c.id > after_id, limit=limit + 1)
+    rows = messages_of(store, t.c.person == person, t.c.id > after_id, limit=limit + 1)
     truncated = len(rows) > limit
     rows = rows[:limit]
-    return [dict(zip(_COLUMNS, r, strict=True)) for r in reversed(rows)], truncated
+    return [dict(zip(THREAD_COLUMNS, r, strict=True)) for r in reversed(rows)], truncated
 
 
-def _count(store: Any, *where: Any) -> int:
+def message_count(store: Any, *where: Any) -> int:
     t = c.thread_table()
     rows = store.query_mind(select(func.count()).select_from(t).where(*where))
     return int(rows[0][0]) if rows else 0
@@ -296,10 +296,10 @@ def window_start(total: int, window: int, step: int) -> int:
 def _window(store: Any, where: Sequence[Any], window: int, step: int) -> list[dict[str, Any]]:
     limit = window
     if step > 1:
-        total = _count(store, *where)
+        total = message_count(store, *where)
         limit = total - window_start(total, window, step)
-    rows = _messages_of(store, *where, limit=limit)
-    return [dict(zip(_COLUMNS, r, strict=True)) for r in reversed(rows)]
+    rows = messages_of(store, *where, limit=limit)
+    return [dict(zip(THREAD_COLUMNS, r, strict=True)) for r in reversed(rows)]
 
 
 def private_thread(store: Any, handles: Sequence[str], limit: int, before: int | None = None,
@@ -328,8 +328,8 @@ def strand_history(store: Any, handle: str, strand: str, before: int | None, lim
     bound = before if before is not None else 2**62
     t = c.thread_table()
     thread = t.c.strand == strand if strand else t.c.strand.is_(None)
-    rows = _messages_of(store, t.c.person == handle, thread, t.c.id < bound, limit=limit + 1)
-    return [dict(zip(_COLUMNS, r, strict=True)) for r in reversed(rows[:limit])], len(rows) > limit
+    rows = messages_of(store, t.c.person == handle, thread, t.c.id < bound, limit=limit + 1)
+    return [dict(zip(THREAD_COLUMNS, r, strict=True)) for r in reversed(rows[:limit])], len(rows) > limit
 
 
 #: ce qu'un message qui porte des fichiers rend à ``with_files``
@@ -398,13 +398,13 @@ def room_thread(store: Any, room: str, limit: int, before: int | None = None, st
     return _window(store, (*c.thread_where(t, room=room), t.c.id < bound, t.c.id > after), limit, step)
 
 
-def _message(store: Any, seq: int) -> dict[str, Any] | None:
+def message_at(store: Any, seq: int) -> dict[str, Any] | None:
     t = c.thread_table()
-    rows = _messages_of(store, t.c.id == seq)
-    return dict(zip(_COLUMNS, rows[0], strict=True)) if rows else None
+    rows = messages_of(store, t.c.id == seq)
+    return dict(zip(THREAD_COLUMNS, rows[0], strict=True)) if rows else None
 
 
-def _any(store: Any, *where: Any) -> bool:
+def any_message(store: Any, *where: Any) -> bool:
     """Au moins un message du fil répond à ``where``."""
     t = c.thread_table()
     return bool(store.query_mind(select(t.c.id).where(*where).limit(1)))

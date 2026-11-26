@@ -86,7 +86,7 @@ TRANSCRIPT = Faculty("transcript", state=TranscriptState, init=lambda p: Transcr
 TRANSCRIPT.declare(c.COMPACTED, c.SUMMARY_RESET, c.JUDGED, c.STRAND_SET, c.EFFORT_SET)
 
 
-def _params(p: TranscriptParams | None) -> TranscriptParams:
+def params(p: TranscriptParams | None) -> TranscriptParams:
     return p if p is not None else TranscriptParams()
 
 

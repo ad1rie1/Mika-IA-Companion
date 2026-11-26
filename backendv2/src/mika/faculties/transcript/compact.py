@@ -16,9 +16,9 @@ from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import self_ as self_c
 from mika.contracts import transcript as c
-from mika.faculties.transcript.faculty import TRANSCRIPT, TranscriptParams, TranscriptState, _params
+from mika.faculties.transcript.faculty import TRANSCRIPT, TranscriptParams, TranscriptState, params
 from mika.faculties.transcript.marks import gap_mark, opening_mark
-from mika.faculties.transcript.thread import _COLUMNS, _count, _messages_of
+from mika.faculties.transcript.thread import THREAD_COLUMNS, message_count, messages_of
 from mika.kernel.clock import DAY
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp
@@ -120,7 +120,7 @@ class Compact:
         if store is None or ctx.llm is None:
             self.seen = checkpoint
             return
-        p = _params(frame.env.params_of("transcript", frame.root))
+        p = params(frame.env.params_of("transcript", frame.root))
         t = c.thread_table()
         topics = [(str(person), None) for (person,) in store.query_mind(
             select(t.c.person).distinct().where(t.c.room.is_(None)).order_by(t.c.person))]
@@ -146,15 +146,15 @@ class Compact:
             since = summary[0] if summary else 0
             where = (t.c.room == room, t.c.id > since) if room else (
                 t.c.person == person, t.c.room.is_(None), t.c.id > since)
-            total = _count(store, *where)
+            total = message_count(store, *where)
             if total <= p.compact_after:
                 continue
             # les plus anciens d'abord, par lots : jamais « résumé » ce qui n'a pas été lu ; ni ce qu'il faut garder
             # tel quel (``keep`` peut dépasser ``compact_after`` : une borne négative, SQLite la lisait « sans
             # borne » et repliait tout, MariaDB la refuse)
-            got = _messages_of(store, *where, t.c.id <= checkpoint, newest_first=False,
-                               limit=max(0, min(total - p.keep, p.compact_batch, cap)))
-            folded = [dict(zip(_COLUMNS, r, strict=True)) for r in got]
+            got = messages_of(store, *where, t.c.id <= checkpoint, newest_first=False,
+                              limit=max(0, min(total - p.keep, p.compact_batch, cap)))
+            folded = [dict(zip(THREAD_COLUMNS, r, strict=True)) for r in got]
             if not folded or (len(folded) < p.compact_min_fold and not attempts):
                 continue
             previous = store.content([summary[1]]).get(summary[1]) if summary else None

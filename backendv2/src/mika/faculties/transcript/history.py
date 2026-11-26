@@ -13,11 +13,11 @@ from zoneinfo import ZoneInfo
 
 from mika.contracts import identity as identity_c
 from mika.contracts import transcript as c
-from mika.faculties.transcript.faculty import TRANSCRIPT, TranscriptState, _params
+from mika.faculties.transcript.faculty import TRANSCRIPT, TranscriptState, params
 from mika.faculties.transcript.marks import gap_mark, left_unanswered, opening_mark, read_late
 from mika.faculties.transcript.thread import (
-    _any,
-    _message,
+    any_message,
+    message_at,
     private_thread,
     room_thread,
     strand_setting,
@@ -150,12 +150,12 @@ async def _thread(s: TranscriptState, frame: Frame, ports: Mapping[str, Any]) ->
     ep = frame.episode
     if store is None or ep is None or not ep.target:
         return None
-    p = _params(frame.env.params_of("transcript", frame.root))
+    p = params(frame.env.params_of("transcript", frame.root))
     tz = frame.env.tz_of(frame.root)
     before = ep.attrs.get("reply_to")
     room = ep.attrs.get("room")
     strand = ep.attrs.get("strand")
-    asked = _message(store, before) if before is not None else None
+    asked = message_at(store, before) if before is not None else None
     names: dict[str, str] = {}
     pinned: list[ChatTurn] = []
     gap = False
@@ -176,7 +176,7 @@ async def _thread(s: TranscriptState, frame: Frame, ports: Mapping[str, Any]) ->
     if room:
         since = summary_for(f"room:{room}")
         rows = room_thread(store, room, limit, before=before, step=p.window_step, after=since)
-        gap = bool(rows) and _any(store, *c.thread_where(t, room=room), t.c.id > since, t.c.id < rows[0]["id"])
+        gap = bool(rows) and any_message(store, *c.thread_where(t, room=room), t.c.id > since, t.c.id < rows[0]["id"])
         names = speakers(frame, [str(r["person"]) for r in rows if r["role"] != "assistant"] +
                          ([str(asked["person"])] if asked else []))
         key = f"room:{room}"
@@ -186,8 +186,8 @@ async def _thread(s: TranscriptState, frame: Frame, ports: Mapping[str, Any]) ->
         key = f"strand:{ep.target}:{strand}"
         pinned.append(ChatTurn("user", strand_about(strand_setting(store, ep.target, strand)), pinned=True))
         rows = strand_thread(store, ep.target, strand, limit, before=before, step=p.window_step)
-        gap = bool(rows) and _any(store, *c.thread_where(t, handles=(ep.target,), strand=strand),
-                                  t.c.id < rows[0]["id"])
+        gap = bool(rows) and any_message(store, *c.thread_where(t, handles=(ep.target,), strand=strand),
+                                         t.c.id < rows[0]["id"])
     else:
         aud = frame.audience
         # ses adresses dont la liaison est confirmée, si sa fiche est ouverte (une liaison par simple recoupement :
@@ -202,8 +202,8 @@ async def _thread(s: TranscriptState, frame: Frame, ports: Mapping[str, Any]) ->
         for handle in handles:
             since = summary_for(handle)
             part = private_thread(store, (handle,), limit, before=before, after=since, step=p.window_step)
-            gap |= bool(part) and _any(store, *c.thread_where(t, handles=(handle,)), t.c.id > since,
-                                       t.c.id < part[0]["id"])
+            gap |= bool(part) and any_message(store, *c.thread_where(t, handles=(handle,)), t.c.id > since,
+                                              t.c.id < part[0]["id"])
             rows += part
         rows.sort(key=lambda r: r["id"])
     if gap:

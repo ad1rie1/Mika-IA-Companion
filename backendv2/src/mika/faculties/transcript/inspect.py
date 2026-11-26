@@ -25,7 +25,7 @@ from mika.contracts import identity as identity_c
 from mika.contracts import runtime as rt
 from mika.contracts import transcript as c
 from mika.faculties.transcript.faculty import TRANSCRIPT, TranscriptState
-from mika.faculties.transcript.thread import _COLUMNS, _messages_of, strands_of
+from mika.faculties.transcript.thread import THREAD_COLUMNS, messages_of, strands_of
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
     Badge,
@@ -106,8 +106,8 @@ def _page(store: Any, clauses: Sequence[Any], before: int | None,
     where = list(clauses)
     if before:
         where.append(c.thread_table().c.id < before)
-    found = _messages_of(store, *where, limit=size + 1)
-    rows = [dict(zip(_COLUMNS, r, strict=True)) for r in found[:size]]
+    found = messages_of(store, *where, limit=size + 1)
+    rows = [dict(zip(THREAD_COLUMNS, r, strict=True)) for r in found[:size]]
     more = len(found) > size and rows
     return rows, Pager(older=(("avant", str(rows[-1]["id"])),)) if more else Pager()
 
@@ -634,8 +634,8 @@ def _conversations(s: TranscriptState, frame: Frame, ctx: InspectContext) -> lis
         people = _said(store, people, text)
     page, pager = paginate(sorted(people.items(), key=lambda kv: -kv[1].shown), ctx.pager(size=PEOPLE_PAGE))
     t = c.thread_table()
-    shown = {int(r[0]): dict(zip(_COLUMNS, r, strict=True))
-             for r in _messages_of(store, t.c.id.in_([p.shown for _k, p in page]))} if page else {}
+    shown = {int(r[0]): dict(zip(THREAD_COLUMNS, r, strict=True))
+             for r in messages_of(store, t.c.id.in_([p.shown for _k, p in page]))} if page else {}
     rows = tuple(_person_row(frame, k, p, shown.get(p.shown)) for k, p in page)
     empty = (f"« {text} » n'a été dit dans aucune conversation" if text
              else f"personne ne s'appelle « {asked} »" if wanted else "aucune conversation pour l'instant")
