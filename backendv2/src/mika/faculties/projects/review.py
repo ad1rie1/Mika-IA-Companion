@@ -11,9 +11,9 @@ relit — sans ce que la première en a dit.
   but du plan, l'objectif, son critère, ce qui est établi de ses jalons (``milestones.cited_for_review`` : leur
   vérification, et la preuve de ceux qu'une commande ou un élément du registre a vérifiés), et le diff du commit
   relu — les fichiers et le texte, borné. **Ni comptes rendus, ni carnet, ni mémoire de l'exécution qui a
-  travaillé** : ``prompt._project`` ne rend rien pour elle, donc aucune section d'exécution ne s'écrit ; les
-  siennes sont ici (``review`` ; ``review_said`` et ``review_diff``, non fiables : ce que l'exécution a écrit de
-  ses jalons est son dire, un diff est une donnée — ADR 0277).
+  travaillé** : ``prompt.episode_project`` ne rend rien pour elle, donc aucune section d'exécution ne
+  s'écrit ; les siennes sont ici (``review`` ; ``review_said`` et ``review_diff``, non fiables : ce que
+  l'exécution a écrit de ses jalons est son dire, un diff est une donnée — ADR 0277).
 - **D'où part le diff** (``material``, ADR 0277) : sur un projet qui passe par des pull requests, de la base de sa
   branche ; sur un projet au flux direct qui a un dépôt distant, du dernier commit que ce distant possède
   (``Workshop.sent``) — tout ce qui partira avec ce commit est lu, même le travail d'un autre objectif ; sans

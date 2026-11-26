@@ -186,7 +186,7 @@ def _who_for(who: tuple[str, ...], where: str | None, audience: Audience, close:
 
 def rule_json(line: Any, name: Callable[[str], str], her: str, sources: Mapping[str, str]) -> dict[str, Any]:
     """Une ligne de la règle d'un de tes comptes, en mots : qui, quand, préparer d'elle-même, comment ça part — ici
-    (``_rules``) comme dans les réglages du compte (``settings._rules_json``)."""
+    (``_rules``) comme dans les réglages du compte (``settings.rules_json``)."""
     return {"who": who_words(line.who, name, her, sources) if line.who else "", "when": when_words(line.when),
             "prepare": bool(line.prepare), "reply": line.reply, "reply_words": REPLY_WORDS.get(line.reply, line.reply)}
 
@@ -306,7 +306,7 @@ def _opens(rows: Iterable[Mapping[str, Any]]) -> bool:
 
 def person_name(frame: Any) -> Callable[[str], str]:
     """Le nom d'une personne par sa clé (ce que l'identité en sait, sinon la clé) : la matrice et la règle d'un de ses
-    comptes (``settings._rules_json``) le disent ainsi."""
+    comptes (``settings.rules_json``) le disent ainsi."""
     def name(key: str) -> str:
         view = frame.get(identity_c.IDENTITY(key))
         return getattr(view, "name", "") or key
