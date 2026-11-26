@@ -1,10 +1,11 @@
 """Les comptes d'un canal (ADR 0185, 0186, 0207, 0310) : les boîtes, les comptes Teams.
 
 Chaque canal qui a des comptes est à un domaine, qui dit dans sa part (``AccountsPart`` : l'``accounts.py`` de son
-dossier) les comptes d'une personne, à qui est un compte et comment la console les montre ; ce module garde l'ordre
-des canaux (``CHANNELS``) et réunit les parts, sans en connaître aucune. Les lisent : la règle d'envoi d'un compte
-(``app/me/settings.py::rules_save``), la matrice de l'écran Outils (« Tes comptes », ``app/me/rights.py``) et l'onglet
-Comptes de la fiche d'une personne (``app/handmade/person/``).
+dossier) les comptes d'une personne, à qui est un compte, comment part ce qu'elle y prépare (ses brouillons, le geste
+qui le règle) et comment la console les montre ; ce module garde l'ordre des canaux (``CHANNELS``) et réunit les
+parts, sans en connaître aucune. Les lisent : la règle d'envoi d'un compte (``app/me/settings.py::rules_save``), la
+matrice de l'écran Outils (« Tes comptes », ``app/me/rights.py``), l'onglet Comptes de la fiche d'une personne
+(``app/handmade/person/``) et les instances de canal des tableaux de droits (``app/handmade/access.py``).
 """
 
 from __future__ import annotations

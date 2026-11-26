@@ -2,17 +2,19 @@
 Outils › Ce qu'elle peut faire, par ``InspectorDeps``), d'un service (``app/domains/tools/console/subject.py``),
 d'un projet (``domains/projects/console/subject.py``) — et à la page « Droits » (``rights.py``) : les personnes qu'une ligne peut
 nommer, les instances de chaque canal, la fiche d'une famille d'outils venue d'ailleurs, les choix de leurs
-sélecteurs (ceux du cadre commun, ``vocab.access``). Une seule liste, une seule règle pour tous."""
+sélecteurs (ceux du cadre commun, ``vocab.access``). Une seule liste, une seule règle pour tous. Les comptes d'un canal
+sont ceux que sa part dit (``app/me/accounts.py``) : ce module n'en nomme aucun."""
 
 from __future__ import annotations
 
+from mika.app.me import accounts as channels
 from mika.contracts import identity as identity_c
 from mika.faculties.identity.faculty import known_as
 from mika.faculties.identity.inspect import people as people_of
 from mika.inspector.pages.rights_tables import Instances, canal_choices, canal_instances, who_choices
 from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import UI
-from mika.vocab.access import KEEPS, MAIL, POLICIES, PRIVATE, TEAMS, TOGETHER, WEB, canal_key
+from mika.vocab.access import KEEPS, POLICIES, PRIVATE, TOGETHER, WEB, canal_key
 from mika.vocab.people import ACCOUNT_PREFIX
 
 #: la fiche qui règle une famille d'outils venue d'ailleurs, par le début de son lot : sa sorte, son onglet des droits
@@ -46,17 +48,17 @@ def people_with_accounts(ui: UI) -> list[dict[str, str]]:
 
 
 def instances_from_settings(ui: UI) -> Instances:
-    """Les instances de chaque type de canal : le chat web (en privé, en salon), chaque boîte de courrier, chaque compte
-    Teams (ADR 0186 : son tableau, comme une boîte), et celles qu'un tableau réglé nomme déjà."""
+    """Les instances de chaque type de canal : le chat web (en privé, en salon), chaque compte d'un canal qui en a —
+    chaque boîte de courrier, chaque compte Teams (ADR 0186 : son tableau, comme une boîte), tels que leurs réglages
+    les tiennent (``AccountsPart.configured``, dans l'ordre des canaux) —, et celles qu'un tableau réglé nomme déjà."""
     out: Instances = {WEB: [(f"{WEB}:{PRIVATE}", "en privé"), (f"{WEB}:{TOGETHER}", "en salon")]}
     settings = ui.deps.settings
-    try:
-        boxes = settings.named("mail").email().accounts if settings is not None else {}
-    except (AttributeError, TypeError, ValueError):  # des boîtes illisibles : aucune instance, le type reste
-        boxes = {}
-    out[MAIL] = [(f"{MAIL}:{key}", a.label or key) for key, a in sorted(boxes.items())]
-    teams = settings.named("teams").teams().accounts if settings is not None else {}
-    out[TEAMS] = [(f"{TEAMS}:{key}", a.label or key) for key, a in sorted(teams.items())]
+    for canal, found in channels.parts().items():
+        try:
+            held = found.configured(settings) if settings is not None else {}
+        except (AttributeError, TypeError, ValueError):  # des comptes illisibles : aucune instance, le type reste
+            held = {}
+        out[canal] = [(f"{canal}:{key}", a.label or key) for key, a in sorted(held.items())]
     for key in sorted(settings.canals().tables) if settings is not None else ():
         kind, instance = canal_key(key)
         if instance and key not in {k for k, _ in out.get(kind, ())}:

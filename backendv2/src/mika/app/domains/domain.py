@@ -180,8 +180,9 @@ class SharingPart:
 @dataclass(frozen=True, slots=True)
 class AccountsPart:
     """Les comptes de son canal (ADR 0185, 0186, 0207) : ses boîtes, ses comptes Teams — ceux d'une personne, à qui
-    est chacun, et comment la console les montre. La règle d'envoi d'un compte (``app/me/settings.py``), la matrice de
-    l'écran Outils (``app/me/rights.py``) et l'onglet Comptes de la fiche d'une personne (``app/handmade/person/``)
+    est chacun, comment part ce qu'elle y prépare, et comment la console les montre. La règle d'envoi d'un compte
+    (``app/me/settings.py``), la matrice de l'écran Outils (``app/me/rights.py``), l'onglet Comptes de la fiche d'une
+    personne (``app/handmade/person/``) et les instances de canal des tableaux de droits (``app/handmade/access.py``)
     réunissent les parts, dans l'ordre de leurs canaux (``app/me/accounts.py::CHANNELS``) ; ils n'en connaissent
     aucune."""
 
@@ -202,9 +203,18 @@ class AccountsPart:
     #: ce que la matrice dit d'un de ses comptes, après sa clé et sa sorte : ``shown(info)`` (son nom ; une boîte, aussi
     #: son adresse)
     shown: Callable[..., Mapping[str, Any]]
-    #: ses comptes tels que ses réglages les tiennent, par clé (chacun dit à qui il est : ``owner``) :
-    #: ``configured(settings)``
+    #: ses comptes tels que ses réglages les tiennent, par clé (chacun dit à qui il est : ``owner`` ; son nom :
+    #: ``label``) : ``configured(settings)``
     configured: Callable[..., Mapping[str, Any]]
+    #: le geste qui règle un de ses comptes, tel que l'audit le garde — sa clé (« moi.boite ») et la sorte de son objet
+    #: (« compte », « compte_teams » : Gestes audités mène à sa fiche) : la règle d'envoi d'un compte est un de ses
+    #: réglages, et s'audite sous le geste qui le règle (``app/me/settings.py::rules_save`` ;
+    #: ``tests/protocol/test_audited_gestures.py`` lit cette clé ici)
+    audit: str
+    subject_kind: str
+    #: un de ses comptes, dit à sa propriétaire qui nomme mal le canal d'une règle (« ta boîte », « ton compte » :
+    #: « « canal » : courrier:<ta boîte> ou teams:<ton compte>. »)
+    yours: str
     #: l'onglet que sa faculté remplit sur la fiche d'une personne (son ancre dans Comptes, que le premier canal porte)
     tab: str
     #: son nom, en sous-onglet de Comptes
@@ -212,6 +222,10 @@ class AccountsPart:
     #: ce que dit la liste de ses comptes : la colonne qui nomme un compte, puis celles qui sont ses étiquettes
     noun: str
     badges: tuple[str, ...] = ()
+    #: son canal n'a pas de brouillon que sa propriétaire envoie elle-même (la console le grise) : ce que la règle
+    #: d'envoi répond à qui en demande un d'ici, après le nom de sa ligne — une ligne qui n'en est pas un ne le devient
+    #: pas (« le courrier n'a pas de brouillon… ») ; vide : il en a (Teams les pose dans Teams)
+    no_drafts: str = ""
 
 
 @dataclass(frozen=True, slots=True)

@@ -22,14 +22,15 @@ from typing import Any
 
 from starlette.routing import Route
 
+from mika.app.domains import AccountsPart
 from mika.app.me import accounts as channels
 from mika.app.me import rights as rights_me
-from mika.app.me.api import Call, Denied, MeApiBase
+from mika.app.me.api import Call, Denied, MeApiBase, either
 from mika.app.me.common import settings_of
 from mika.contracts import self_ as self_c
 from mika.kernel.text import fold
 from mika.runtime.operations import audit
-from mika.vocab.access import MAIL, PERSON, REPLIES, SOURCE_WORDS, SOURCE_WORDS_OTHER, Canal, canal_key
+from mika.vocab.access import PERSON, REPLIES, SOURCE_WORDS, SOURCE_WORDS_OTHER, Canal, canal_key
 from mika.vocab.canals import CanalRule, Canals, CanalTable
 
 #: ce que la propriétaire d'un compte règle de la règle de son canal (ADR 0207), ligne par ligne et par défaut :
@@ -134,17 +135,18 @@ def _rules_json(call: Call, canal: str) -> dict[str, Any]:
             "default": rights_me.rule_json(table.default, name, her, sources)}
 
 
-def _ruled(kind: str, canal: str, line: CanalRule, sent: Any, n: int) -> CanalRule:
-    """Une ligne de la règle, avec ce que sa propriétaire en règle d'ici : préparer d'elle-même, comment ça part. Le
-    courrier n'a pas de brouillon que tu envoies toi-même (la console le grise) : une ligne ne le devient pas d'ici."""
+def _ruled(found: AccountsPart, canal: str, line: CanalRule, sent: Any, n: int) -> CanalRule:
+    """Une ligne de la règle, avec ce que sa propriétaire en règle d'ici : préparer d'elle-même, comment ça part. Un
+    canal sans brouillon que tu envoies toi-même (``AccountsPart.no_drafts`` : le courrier, que la console grise) : une
+    ligne ne le devient pas d'ici."""
     where = f"Ligne {n}" if n else "La ligne par défaut"
     if not isinstance(sent, dict) or set(sent) - set(RULE_FIELDS):
         raise Denied(400, f"{where} : « prepare » et « reply » seulement.")
     prepare, reply = sent.get("prepare", line.prepare), sent.get("reply", line.reply)
     if not isinstance(prepare, bool) or reply not in REPLY_CODES:
         raise Denied(400, f"{where} : « prepare » vrai ou faux ; « reply » seule, accord, brouillon ou non.")
-    if kind == MAIL and reply == "brouillon" and line.reply != "brouillon":
-        raise Denied(400, f"{where} : le courrier n'a pas de brouillon que tu envoies toi-même — choisis ton accord.")
+    if found.no_drafts and reply == "brouillon" and line.reply != "brouillon":
+        raise Denied(400, f"{where} : {found.no_drafts}")
     return line.model_copy(update={"prepare": prepare, "reply": reply, "canal": (canal,)})
 
 
@@ -153,12 +155,14 @@ async def rules_save(call: Call) -> dict[str, Any]:
     ligne par défaut, préparer d'elle-même et comment ça part. Le reste (qui, quand, ses lignes) reste à la console ;
     la règle lue (``version``) doit être celle d'aujourd'hui (409 sinon). Enregistrée, la règle est celle du compte :
     celle de tout le canal, réglée dans la console, ne vaut plus pour lui. Un compte est à elle selon son canal
-    (``AccountsPart.owned``)."""
+    (``AccountsPart.owned``), qui dit aussi s'il a des brouillons (``no_drafts``) et le geste qui le règle (``audit``,
+    ``subject_kind``)."""
     canal = call.arg("canal", limit=60)
     kind, key = canal_key(canal)
     found = channels.parts().get(kind)
     if found is None or not key:
-        raise Denied(400, "« canal » : courrier:<ta boîte> ou teams:<ton compte>.")
+        yours = either(f"{p.canal}:<{p.yours}>" for p in channels.parts().values())
+        raise Denied(400, f"« canal » : {yours}.")
     found.owned(call, key)
     lines, default = call.data.get("lines"), call.data.get("default")
     if not isinstance(lines, list) or not isinstance(default, dict):
@@ -168,13 +172,12 @@ async def rules_save(call: Call) -> dict[str, Any]:
         table, _own, _common = _canal_table(settings.canals(), canal)
         if call.arg("version", limit=64) != _version(table) or len(lines) != len(table.lines):
             raise Denied(409, "Cette règle vient d'être réglée ailleurs : rouvre-la, puis recommence.")
-        rows = tuple(_ruled(kind, canal, line, sent, n)
+        rows = tuple(_ruled(found, canal, line, sent, n)
                      for n, (line, sent) in enumerate(zip(table.lines, lines, strict=True), start=1))
-        await settings.save_canal(canal, CanalTable(lines=rows, default=_ruled(kind, canal, table.default, default, 0)))
+        await settings.save_canal(canal, CanalTable(lines=rows, default=_ruled(found, canal, table.default, default, 0)))
         await _rejournal(call)
-    # la règle est un réglage du compte : son geste est celui qui le règle
-    await audit(call.kernel, "moi.boite" if kind == MAIL else "moi.compte_teams", by=call.me.handle,
-                subject_kind="compte" if kind == MAIL else "compte_teams", subject=key)
+    # la règle est un réglage du compte : son geste est celui qui le règle, que son canal dit
+    await audit(call.kernel, found.audit, by=call.me.handle, subject_kind=found.subject_kind, subject=key)
     return {"ok": True, "message": "Règle d'envoi enregistrée."}
 
 

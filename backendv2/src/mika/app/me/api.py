@@ -93,6 +93,13 @@ def missing() -> Denied:
     return Denied(404, NOT_FOUND)
 
 
+def either(choices: Iterable[str]) -> str:
+    """Ce qu'un refus propose, dans l'ordre où ses parts le disent : « a, b ou c » (un seul : lui-même). Un message
+    qui énumère les sortes ou les canaux les tire ainsi de leur liste, sans en nommer aucun."""
+    said = list(choices)
+    return " ou ".join(filter(None, (", ".join(said[:-1]), *said[-1:])))
+
+
 def refused(exc: Exception) -> Denied:
     """Un réglage refusé (400), dit en mots — la seule forme d'un refus de formulaire, pour toutes les routes. Pour
     pydantic, ``fields`` (un message par champ, que le client place sous le sien) et un message qui dit la même chose

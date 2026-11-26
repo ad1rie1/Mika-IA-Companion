@@ -12,12 +12,15 @@ console, son espace, la ligne de commande), filtrable d'un clic.
 from __future__ import annotations
 
 import ast
+import importlib
+import inspect
 import re
 from pathlib import Path
 
 import pytest
 
 from mika.app.cli import common as cli_common
+from mika.app.domains import DOMAINS, AccountsPart, part
 from mika.contracts import runtime as rt
 from mika.inspector import names
 from mika.inspector.pages.system import gesture_origin, on_title
@@ -35,6 +38,8 @@ from tests.unit.test_operations import BOARD, events, form
 
 SRC = Path(operations.__file__).resolve().parents[1]
 PAGE = "/admin/systeme/operations"
+#: la part des comptes d'un canal : sa clé d'audit (``audit=``) est celle d'un geste de l'espace d'une personne
+ACCOUNTS_PART = AccountsPart.__name__
 #: Adrien (``bootstrap``) pilote aussi la console : un geste de son espace sous une clé nue s'y lirait « la console »
 OPERATORS = frozenset({"user_1"})
 
@@ -101,7 +106,9 @@ def test_a_gesture_has_a_french_title_never_its_key_twice(tmp_path):
 
 def _audited(tree: ast.AST) -> list[tuple[str, bool]]:
     """Les clés qu'un module audite : (clé, ``True`` si ce n'en est que le début, une f-string) — passées à
-    ``audit(…)`` ou ``forget_subject(…, action=…)``, ou gardées dans une variable ``audit`` avant l'appel."""
+    ``audit(…)`` ou ``forget_subject(…, action=…)``, gardées dans une variable ``audit`` avant l'appel, ou dites par la
+    part des comptes d'un canal (``AccountsPart(audit=…)``), sous laquelle la règle d'envoi d'un compte s'audite
+    (``app/me/settings.py::rules_save`` : ``audit(…, found.audit, …)``, une clé que cette recherche ne lit pas là)."""
     found: list[tuple[str, bool]] = []
 
     def take(node: ast.AST | None) -> None:
@@ -123,6 +130,8 @@ def _audited(tree: ast.AST) -> list[tuple[str, bool]]:
                 take(node.args[1])
             if name == "forget_subject":
                 take(next((k.value for k in node.keywords if k.arg == "action"), None))
+            if name == ACCOUNTS_PART:
+                take(next((k.value for k in node.keywords if k.arg == "audit"), None))
         elif isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Tuple):
             first = node.targets[0].elts[0]
             if isinstance(first, ast.Name) and first.id == "audit":
@@ -302,17 +311,33 @@ def _routes_of_a_persons_space(tree: ast.Module) -> bool:
                for node in tree.body)
 
 
+def _accounts_of_a_channel(tree: ast.Module) -> bool:
+    """Un module qui pose la part des comptes d'un canal (``AccountsPart(…)``) : la règle d'envoi d'un de ses comptes,
+    réglée depuis l'espace d'une personne, s'audite sous la clé que cette part dit."""
+    return any(isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == ACCOUNTS_PART
+               for node in ast.walk(tree))
+
+
+def persons_space() -> list[Path]:
+    """Les modules de l'espace d'une personne : ``app/me/``, son chat (``app/mindport.py``), et chaque module d'un
+    domaine qui y pose des routes ou qui dit la clé d'un de ses gestes (la part des comptes de son canal)."""
+    domains = [path for path in sorted((SRC / "app" / "domains").rglob("*.py"))
+               if _routes_of_a_persons_space(tree := ast.parse(path.read_text(encoding="utf-8")))
+               or _accounts_of_a_channel(tree)]
+    assert domains  # la recherche trouve bien les modules de l'API des domaines
+    return [*sorted((SRC / "app" / "me").glob("*.py")), SRC / "app" / "mindport.py", *domains]
+
+
 def test_every_path_of_a_persons_space_says_where_it_comes_from():
     """Ce que l'espace d'une personne (``app/me/``, son chat : ``app/mindport.py``, et chaque module d'un domaine qui y
-    pose des routes — l'API d'un domaine vit dans son dossier, ADR 0310) fait par une action déclarée passe
-    ``via=SPACE`` (``Call.act`` le fait), et ce qu'il audite lui-même a une clé « moi.… » : sinon Système › Gestes
-    audités range dans « la console » ce qu'une opératrice a fait depuis son espace."""
+    pose des routes — l'API d'un domaine vit dans son dossier, ADR 0310 — ou qui dit la clé d'un de ses gestes : la
+    part des comptes d'un canal) fait par une action déclarée passe ``via=SPACE`` (``Call.act`` le fait), et ce qu'il
+    audite lui-même a une clé « moi.… » : sinon Système › Gestes audités range dans « la console » ce qu'une
+    opératrice a fait depuis son espace."""
     unmarked: list[str] = []
     performs = audits = 0
-    domains = [path for path in sorted((SRC / "app" / "domains").rglob("*.py"))
-               if _routes_of_a_persons_space(ast.parse(path.read_text(encoding="utf-8")))]
-    assert domains  # la recherche trouve bien les modules de l'API des domaines
-    for path in [*sorted((SRC / "app" / "me").glob("*.py")), SRC / "app" / "mindport.py", *domains]:
+    seen: dict[Path, set[str]] = {}
+    for path in persons_space():
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             f = node.func if isinstance(node, ast.Call) else None
@@ -325,7 +350,14 @@ def test_every_path_of_a_persons_space_says_where_it_comes_from():
                 unmarked.append(f"{path.relative_to(SRC)}:{node.lineno} (perform sans via=SPACE)")
         for key, _ in _audited(tree):
             audits += 1
+            seen.setdefault(path, set()).add(key)
             if not key.startswith(f"{SPACE}."):
                 unmarked.append(f"{path.relative_to(SRC)} (audite « {key} »)")
     assert performs >= 3 and audits >= 10  # la recherche trouve bien les chemins de cet espace (Call.act, le chat…)
     assert not unmarked, "un geste de l'espace d'une personne ne dit pas d'où il vient : " + ", ".join(unmarked)
+    # la clé d'un geste qu'une part dit (la règle d'envoi d'un compte s'audite sous ``AccountsPart.audit``) ne lui
+    # échappe pas : la recherche la lit dans le module même de la part (ailleurs, le même geste peut l'auditer aussi)
+    said = {Path(inspect.getfile(importlib.import_module(d.accounts))).resolve(): part(d.accounts, "ACCOUNTS").audit
+            for d in DOMAINS if d.accounts is not None}
+    lost = sorted(f"{where.relative_to(SRC)} : {key}" for where, key in said.items() if key not in seen.get(where, ()))
+    assert said and not lost, lost

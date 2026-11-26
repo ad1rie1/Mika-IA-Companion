@@ -17,7 +17,7 @@ import mika.app.me as me
 from mika.app.domains.maps import api as maps_me
 from mika.app.me import common as common_me
 from mika.app.me import settings as settings_me
-from mika.app.me.api import PREFIX, Denied, MeApiBase
+from mika.app.me.api import PREFIX, Denied, MeApiBase, either
 from mika.app.me.assembly import MeApi
 from mika.app.me.common import allows, held_by, millis, only_owner, opened, snippet
 from mika.ports.mail import ACCOUNT_KEY
@@ -104,6 +104,13 @@ def test_an_instant_and_an_extract():
     assert (millis(0), millis(1_999)) == (0, 1)
     assert snippet(" un  deux\ntrois ", 20) == "un deux trois"
     assert snippet("x" * 10, 5) == "xxxx…" and len(snippet("x" * 10, 5)) == 5
+
+
+def test_a_refusal_offers_its_choices_in_words():
+    """Un refus qui énumère des sortes ou des canaux les tire de leur liste, dans son ordre (``either``) : « a, b ou
+    c » — sans en nommer aucun lui-même."""
+    assert either(["mail"]) == "mail" and either(iter(["a", "b"])) == "a ou b" and either([]) == ""
+    assert either(("mail", "teams", "mcp", "agenda")) == "mail, teams, mcp ou agenda"
 
 
 def test_what_a_level_opens():

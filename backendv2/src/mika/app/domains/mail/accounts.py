@@ -2,7 +2,8 @@
 (``app/me/accounts.py``).
 
 Une boîte est le canal « courrier:<clé> » : sa règle dit comment part ce qu'elle y prépare, que sa propriétaire règle
-depuis son espace (``app/me/settings.py::rules_save``). La matrice de l'écran Outils montre les siennes, avec leur
+depuis son espace (``app/me/settings.py::rules_save``), sans brouillon qu'elle enverrait elle-même (``no_drafts``),
+sous le geste qui règle sa boîte (``audit``). La matrice de l'écran Outils montre les siennes, avec leur
 adresse (``app/me/rights.py``) ; l'onglet Comptes de la fiche d'une personne, sous « Courrier », la liste que le plugin
 en dresse (l'onglet ``boites``, qui porte les autres canaux).
 """
@@ -28,5 +29,6 @@ def configured(settings: Any) -> dict[str, Any]:
 
 
 ACCOUNTS = AccountsPart(MAIL, kind="mail", family="email", held=mail_me.boxes, owned=mail_me.owned, shown=shown,
-                        configured=configured, tab="boites", label="Courrier", noun="boîte",
-                        badges=("état", "elle y écrit"))
+                        configured=configured, audit="moi.boite", subject_kind="compte", yours="ta boîte",
+                        tab="boites", label="Courrier", noun="boîte", badges=("état", "elle y écrit"),
+                        no_drafts="le courrier n'a pas de brouillon que tu envoies toi-même — choisis ton accord.")

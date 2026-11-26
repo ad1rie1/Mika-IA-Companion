@@ -339,6 +339,10 @@ def test_every_part_a_card_names_exists_and_carries_its_name():
             assert held.canal in CHANNELS and held.kind and held.family and held.tab and held.label, d.name
             assert held.noun and all(isinstance(b, str) and b for b in held.badges), d.name
             assert all(callable(f) for f in (held.held, held.owned, held.shown, held.configured)), d.name
+            # … le geste qui règle un de ses comptes (un geste de son espace : « moi.<…> ») et la sorte de son objet,
+            # un compte dit à sa propriétaire, et, s'il n'a pas de brouillon, ce que la règle d'envoi en répond
+            assert held.audit.startswith("moi.") and len(held.audit) > 4 and held.subject_kind.strip(), d.name
+            assert held.yours.strip() and held.no_drafts == held.no_drafts.strip(), d.name
         elsewhere = part(d.outside, "OUTSIDE")
         assert elsewhere is None or isinstance(elsewhere, OutsidePart), d.name
         if elsewhere is not None:  # ce qui vient d'ailleurs chez lui : une sorte de OUTSIDE, ses mots, ce qu'elle appelle
@@ -516,10 +520,12 @@ def test_each_sort_from_elsewhere_has_its_part_said_once():
 def test_each_channel_has_its_accounts_said_once():
     """Les comptes se lisent canal par canal, dans l'ordre de ``CHANNELS`` (``app/me/accounts.py``) : un canal sans
     part, ou dit par deux, ferait échouer la première lecture de ses comptes — ici, avant. Deux canaux ne remplissent
-    pas le même onglet de la fiche d'une personne."""
+    pas le même onglet de la fiche d'une personne, et ne règlent pas leurs comptes sous le même geste audité."""
     found = [part(d.accounts, "ACCOUNTS") for d in DOMAINS if d.accounts is not None]
     assert sorted(p.canal for p in found) == sorted(CHANNELS), [p.canal for p in found]
     assert len({p.tab for p in found}) == len(found), [p.tab for p in found]
+    # … ni le même geste : Gestes audités ne dirait plus lequel de leurs comptes a été réglé
+    assert len({p.audit for p in found}) == len(found), [p.audit for p in found]
 
 
 def test_a_pane_of_the_accounts_of_a_person_is_said_once():
