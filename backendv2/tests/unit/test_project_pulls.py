@@ -27,11 +27,12 @@ from pathlib import Path
 
 import pytest
 
+import mika
 from mika.adapters import workshop as workshop_adapter
 from mika.adapters.workshop import BwrapWorkshop, github
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
-from mika.faculties.projects import atelier, milestones, pulls, tickets, tracker, triage
+from mika.faculties.projects import atelier, issues, milestones, pulls, tickets, tracker, triage
 from mika.faculties.projects import prompt as project_prompt
 from mika.faculties.projects.faculty import (
     BASE_SEEN,
@@ -44,6 +45,7 @@ from mika.faculties.projects.faculty import (
     Project,
     branch_of,
     objective_at,
+    repo_page,
 )
 from mika.faculties.projects.inspect import PULL_LINK_TITLE, PULL_TITLE, pull_detail, pull_words
 from mika.faculties.projects.inspect_common import remote_ref
@@ -686,3 +688,32 @@ def test_the_console_says_the_branch_and_the_pull_request_of_an_objective_with_a
     assert pull_detail(replace(p, flow=c.FLOW_DIRECT), Objective(id=3, text_ref="t")) == []
     assert "par pull request" in remote_ref(p).text and "par pull request" not in remote_ref(
         replace(p, flow=c.FLOW_DIRECT)).text
+
+
+def test_the_page_of_the_repository_has_one_rule_whatever_the_spelling_of_the_remote():
+    """La page du dépôt chez l'hôte n'a qu'une règle (``faculty.repo_page``) : l'adresse du distant sans « .git » ni
+    « / » final. La page d'une pull request, d'une issue et le lien « dépôt distant » de la fiche se composent sur
+    elle : un distant écrit avec « / » final ne donne plus deux pages (le lien de la fiche gardait « .git/ »)."""
+    page = "https://github.com/moi/site"
+    for remote in (page, f"{page}/", f"{page}.git", f"{page}.git/"):
+        p = Project(id=1, title_ref="t", authority=c.USER, created_at=0, remote=remote, flow=c.FLOW_PR)
+        assert repo_page(p) == page, remote
+        assert pulls.pull_url(p, Objective(id=3, text_ref="t", pull=12)) == f"{page}/pull/12", remote
+        assert issues.issue_page(p, 9) == f"{page}/issues/9", remote
+        link = remote_ref(p)
+        assert (link.key, link.text) == (page, "github.com/moi/site (main, par pull request)"), remote
+    bare = Project(id=1, title_ref="t", authority=c.USER, created_at=0)
+    assert repo_page(bare) == "" and remote_ref(bare) == "aucun"
+    assert pulls.pull_url(bare, Objective(id=3, text_ref="t", pull=12)) == "" == issues.issue_page(bare, 9)
+
+
+def test_no_other_reading_strips_the_tail_of_a_remote():
+    """Aucune autre lecture des projets ne recompose la page du dépôt : l'expression qui ôte « .git » d'une adresse
+    n'est écrite que dans ``faculty.py`` (lue par l'AST : un commentaire qui la cite ne compte pas). La page Code,
+    l'API par personne, la console et les accords appellent ``repo_page``."""
+    root = Path(mika.__file__).parent
+    found = sorted(path.relative_to(root).as_posix() for folder in ("faculties/projects", "app/domains/projects")
+                   for path in (root / folder).rglob("*.py")
+                   if any(isinstance(n, ast.Constant) and isinstance(n.value, str) and "\\.git" in n.value
+                          for n in ast.walk(ast.parse(path.read_text(encoding="utf-8")))))
+    assert found == ["faculties/projects/faculty.py"]

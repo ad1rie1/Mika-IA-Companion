@@ -1814,6 +1814,17 @@ def by_pulls(p: Project) -> bool:
     return p.flow == c.FLOW_PR and bool(p.remote)
 
 
+#: ce qui finit l'adresse d'un dépôt distant sans être sa page chez l'hôte : « .git », un « / »
+_REPO_TAIL = re.compile(r"(?:\.git)?/?$")
+
+
+def repo_page(p: Project) -> str:
+    """La page de son dépôt chez l'hôte, composée de l'adresse de son dépôt distant — sans « .git » ni « / » final —,
+    jamais reprise d'une réponse de l'hôte ; vide : pas de dépôt distant. La page d'une pull request, d'une issue,
+    d'un commit ou d'un fichier chez l'hôte se compose sur elle."""
+    return _REPO_TAIL.sub("", p.remote) if p.remote else ""
+
+
 def branch_of(o: Objective | None) -> str:
     """La branche de travail de ce que vise une exécution (ADR 0274) : celle de son objectif — un constant en change
     après chaque pull request fusionnée, son passage suivant repart de la base —, sinon celle des exécutions sans

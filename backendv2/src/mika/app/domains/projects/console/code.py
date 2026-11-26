@@ -55,7 +55,7 @@ from mika.app.handmade.tabs.decisions import by_day
 from mika.contracts import projects as c
 from mika.faculties.projects import inspect_code as code
 from mika.faculties.projects import merge
-from mika.faculties.projects.faculty import objective_at, objective_on, ticket_held
+from mika.faculties.projects.faculty import objective_at, objective_on, repo_page, ticket_held
 from mika.faculties.projects.inspect import OBJ_FR
 from mika.faculties.projects.inspect_code import (
     diff_rows,
@@ -104,8 +104,8 @@ DEPTH_MAX = 8
 #: fichier du dépôt n'ouvre aucune adresse qu'il contient
 _LINK_OPEN = re.compile(r'<a href="[^"]*"(?: target="_blank")? rel="noopener noreferrer nofollow">')
 _PLUS = re.compile(r"^\d+$")
-#: son dépôt distant en mots, sans son protocole ni « .git » (la vue le dit ainsi)
-_REMOTE = re.compile(r"^https?://|(?:\.git)?/?$")
+#: son dépôt distant en mots : sa page chez l'hôte (``repo_page``) sans son protocole (la vue le dit ainsi)
+_SCHEME = re.compile(r"^https?://")
 
 
 # ── Les blocs de la vue, tels qu'elle les déclare ─────────────────────────
@@ -327,7 +327,7 @@ def code_page(sc: Scene, got: Got, legacy: Markup | None = None) -> Markup | Non
     seen = instant(head.get("lu chez l'hôte"))
     context: dict[str, Any] = {
         "view": view, "bar": bar, "notes": raw.notes(), "her": sc.ui.her_name(),
-        "remote": {"text": said(remote) if isinstance(remote, Ref) else _REMOTE.sub("", sc.p.remote),
+        "remote": {"text": said(remote) if isinstance(remote, Ref) else _SCHEME.sub("", repo_page(sc.p)),
                    "href": sc.url("git", vue=code.REMOTE),
                    # « relire » : le lien de la vue — ce qu'elle ouvre, et l'instant de cette page (une fois)
                    "seen": sc.ago(seen), "fresh": raw.href(head.get("relire"))}}

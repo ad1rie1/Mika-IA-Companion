@@ -65,6 +65,7 @@ from mika.faculties.projects.faculty import (
     by_pulls,
     handed_over,
     objective_on,
+    repo_page,
     ticket_held,
 )
 from mika.faculties.projects.inspect import OBJ_FR
@@ -134,7 +135,6 @@ HEAD_NEEDED = "Nomme le commit que tu as lu : « head », l'identifiant complet 
 
 _SHA = re.compile(r"^[0-9a-f]{4,40}$")
 _FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
-_REPO_TAIL = re.compile(r"(?:\.git)?/?$")
 _host_reads: WeakKeyDictionary[MeApiBase, SlidingWindow] = WeakKeyDictionary()
 
 
@@ -164,11 +164,6 @@ def _host_read(call: Call) -> None:
     window = _host_reads.setdefault(call.api, SlidingWindow(*HOST_READS))
     if not spend(window, call.me.account):
         raise Denied(429, HOST_BUSY)
-
-
-def _page_of(p: Project) -> str:
-    """La page du dépôt chez l'hôte, composée de son adresse (jamais reprise d'une réponse) ; vide sans distant."""
-    return _REPO_TAIL.sub("", p.remote) if p.remote else ""
 
 
 def _path(call: Call) -> str:
@@ -274,7 +269,7 @@ def _commit_json(sc: Scene, r: Reach, k: Commit, texts: Mapping[str, str]) -> di
     ses comptes, et l'objectif ou le ticket qui lui est lié."""
     p = r.p
     o = _objective_for(p, k)
-    page = _page_of(p) if _host(sc.call, p) is not None else ""
+    page = repo_page(p) if _host(sc.call, p) is not None else ""
     her = self_c.name_of(sc.frame.get(self_c.PERSONA))
     return {"sha": k.sha, "short": k.sha[:7], "title": k.title[:400], "at": millis(k.at),
             "author_kind": BY_HER if k.local else BY_OTHER, "author": her if k.local else k.author[:80],
@@ -332,7 +327,7 @@ async def summary(call: Call) -> dict[str, Any]:
     found = _pulled(p)
     last = history.commits[:1] if history is not None else ()
     texts = _texts(call, _commit_refs(p, last))
-    page = _page_of(p) if _host(call, p) is not None else ""
+    page = repo_page(p) if _host(call, p) is not None else ""
     return {"has_repo": history is not None, "base": BASE_BRANCH,
             "current": next((b.name for b in branches if b.current), ""),
             "remote": {"has": bool(p.remote), "web": page, "branch": p.branch, "flow": p.flow,
@@ -401,7 +396,7 @@ async def blob(call: Call) -> dict[str, Any]:
     commits = history.commits if history is not None else ()
     texts = _texts(call, _commit_refs(r.p, commits))
     said = [_commit_json(sc, r, k, texts) for k in commits]
-    page = _page_of(r.p) if _host(call, r.p) is not None else ""
+    page = repo_page(r.p) if _host(call, r.p) is not None else ""
     return {"ref": ref, "sha": found.sha, "path": found.path, "name": found.path.rsplit("/", 1)[-1],
             "kind": found.kind, "kind_label": ENTRY_WORDS.get(found.kind, found.kind), "size": found.size,
             "binary": found.binary, "too_big": found.too_big, "readable": not why, "why": why, "text": found.text,
@@ -676,7 +671,7 @@ async def issues(call: Call) -> dict[str, Any]:
     shown = numbers[(page - 1) * size: page * size]
     items = {n: known.get(n) or _issue_ticket(p, n) for n in shown}
     texts = _texts(call, _ticket_refs(items.values()))
-    where = _page_of(p) if _host(call, p) is not None else ""
+    where = repo_page(p) if _host(call, p) is not None else ""
     return {"total": len(numbers), "page": page, "size": size, "error": error,
             "items": [_issue_json(r, where, n, seen.get(n), items[n], texts) for n in shown]}
 
@@ -693,7 +688,7 @@ async def issue(call: Call) -> dict[str, Any]:
         raise missing()
     texts = _texts(call, _ticket_refs([item]))
     found = seen.get(number)
-    out = _issue_json(r, _page_of(p) if _host(call, p) is not None else "", number, found, item, texts)
+    out = _issue_json(r, repo_page(p) if _host(call, p) is not None else "", number, found, item, texts)
     readable = not out["veiled"]
     talk = await _host(call, p).talk(p.remote, number) if found is not None and readable else None
     return {**out, "error": error or (talk.error[:300] if talk is not None else ""),

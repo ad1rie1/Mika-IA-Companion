@@ -69,6 +69,7 @@ from mika.faculties.projects.faculty import (
     board_ticket,
     issue_move,
     reflected,
+    repo_page,
     subjects_of,
     written,
 )
@@ -123,7 +124,7 @@ def note_mark(project: int, seq: int) -> str:
 
 def issue_page(p: Project, number: int) -> str:
     """La page d'une issue chez l'hôte, composée du dépôt et de son numéro (jamais reprise d'une réponse)."""
-    return f"{re.sub(r'(?:\.git)?/?$', '', p.remote)}/issues/{number}" if p.remote and number > 0 else ""
+    return f"{repo_page(p)}/issues/{number}" if p.remote and number > 0 else ""
 
 
 def reasons(p: Project, item: Item) -> tuple[str, ...]:

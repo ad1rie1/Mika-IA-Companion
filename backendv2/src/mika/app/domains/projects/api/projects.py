@@ -30,7 +30,6 @@ Un opérateur n'a ici que les droits de la personne qu'il est. Le contrat, route
 
 from __future__ import annotations
 
-import re
 import shlex
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -52,6 +51,7 @@ from mika.faculties.projects import (
     asks,
     glance,
     inspect_todo,
+    issues,
     links,
     managing,
     merge,
@@ -82,6 +82,7 @@ from mika.faculties.projects.faculty import (
     milestones_of,
     objective_at,
     readers_of,
+    repo_page,
     ticket_held,
     tie_of,
     written,
@@ -1471,14 +1472,14 @@ def _concerns(sc: Scene, r: Reach, v: Any, pending: Any) -> dict[str, Any]:
     le moteur les garde à part (une demande de pilotage) — ailleurs la raison est dans le résumé."""
     p = r.p
     args = rt.proposal_args(pending.args_json) if pending is not None else {}
-    page = re.sub(r"(?:\.git)?/?$", "", p.remote) if p.remote else ""
+    page = repo_page(p)
     item, o, where, url, why = None, None, WHERE_ELSEWHERE, "", ""
     asked = _author(sc, {}, c.BY_SELF, "", written(p))
     if v.capability in ISSUE_CAPABILITIES:
         number = _number(args.get("ticket"))
         item = board_ticket(p, number)
         where = WHERE_ISSUES
-        url = f"{page}/issues/{item.issue}" if page and item is not None and item.issue else \
+        url = issues.issue_page(p, item.issue) if page and item is not None and item.issue else \
             f"{page}/issues" if page else ""
         move = next((m for m in p.issue_moves if m.proposal == v.proposal), None)
         if move is not None and move.author and move.author != c.BY_SELF:

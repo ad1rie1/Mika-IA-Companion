@@ -24,7 +24,7 @@ from markupsafe import Markup
 
 from mika.app.domains.projects.console.zones import tab_url
 from mika.app.handmade.tabs import Got, Line, blank, lines, pairs, text, tiles
-from mika.faculties.projects.faculty import project_at
+from mika.faculties.projects.faculty import project_at, repo_page
 from mika.faculties.projects.inspect_code import ISSUES, PULLS
 from mika.inspector.ui import PREFIX
 
@@ -124,9 +124,10 @@ def git_page(got: Got, key: str) -> Markup | None:
     distant_card = None
     if p.remote:
         sha, _, said = text(tip).partition(" — ")
+        page = repo_page(p)
         distant_card = {
-            "host": HOSTS.get(host, host), "name": re.sub(r"\.git$", "", urlsplit(p.remote).path.strip("/")),
-            "url": re.sub(r"\.git$", "", p.remote), "branch": p.branch, "read": bool(tip),
+            "host": HOSTS.get(host, host), "name": urlsplit(page).path.strip("/"),
+            "url": page, "branch": p.branch, "read": bool(tip),
             "tip": tip, "sha": sha if tip and tip.get("t") == "link" else "", "said": said,
             "visibility": text(facts.get("visibilité")), "seen": facts.get("lu"),
             "issues": facts.get("issues ouvertes"), "pulls": facts.get("pull requests ouvertes"),

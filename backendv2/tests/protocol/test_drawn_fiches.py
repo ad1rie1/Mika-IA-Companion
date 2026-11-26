@@ -570,6 +570,7 @@ READS: dict[str, dict[str, str]] = {
         "ticket_held": "le ticket que tient un objectif",
         "issue_ticket": "le ticket que reflète une issue",
         "status_words": "l'étape d'un ticket lié, en mots",
+        "repo_page": "son dépôt distant en mots quand la vue ne le donne pas : sa page chez l'hôte, la règle unique",
     },
     # Documentation, Activité et Dépendances (ADR 0297) : l'espace de documentation, le journal et les liens, lus par
     # les fonctions mêmes de la faculté que lit l'API par personne
@@ -601,6 +602,7 @@ READS: dict[str, dict[str, str]] = {
     "domains/projects/console/git.py": {
         "project_at": "l'adresse du distant telle qu'elle est réglée, son hôte et son nom : sa vue ne la donne qu'en "
                       "lien, et seulement en http(s) — à reprendre sur ce lien",
+        "repo_page": "la page du dépôt chez l'hôte où mène la carte du distant, et son nom : la règle unique",
     },
 }
 

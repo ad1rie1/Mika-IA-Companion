@@ -74,6 +74,7 @@ from mika.faculties.projects.faculty import (
     milestones_of,
     objective_at,
     objective_of,
+    repo_page,
     rereads,
     review_holds,
     subjects_of,
@@ -163,7 +164,7 @@ def retry_in(failed: int) -> int:
 
 def pull_url(p: Project, o: Objective) -> str:
     """La page de sa pull request chez l'hôte, composée du dépôt et de son numéro (jamais reprise d'une réponse)."""
-    return f"{re.sub(r'(?:\.git)?/?$', '', p.remote)}/pull/{o.pull}" if p.remote and o.pull else ""
+    return f"{repo_page(p)}/pull/{o.pull}" if p.remote and o.pull else ""
 
 
 # ── Sa relecture, avant de la proposer ────────────────────────────────────

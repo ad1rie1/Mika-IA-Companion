@@ -38,6 +38,7 @@ from mika.faculties.projects.faculty import (
     ProjectsState,
     by_pulls,
     objective_on,
+    repo_page,
 )
 from mika.faculties.projects.inspect_common import stored_text, stored_texts
 from mika.faculties.projects.inspect_merge import BLOCK_WORDS, REFUSED_WORDS
@@ -326,11 +327,6 @@ def _host(p: Project, ctx: InspectContext) -> Any:
     return host if p.remote and host is not None and host.handles(p.remote) else None
 
 
-def _page_of(p: Project) -> str:
-    """La page du dépôt chez l'hôte, composée de son adresse (jamais reprise d'une réponse)."""
-    return re.sub(r"(?:\.git)?/?$", "", p.remote) if p.remote else ""
-
-
 # ── Les liens d'une sous-vue à l'autre ────────────────────────────────────
 
 
@@ -418,7 +414,7 @@ async def code_view(p: Project, s: ProjectsState, frame: Frame, ctx: InspectCont
     found = pulled(p)
     head: list[Block] = [Fields((
         ("vue", view), ("branche de base", BASE_BRANCH),
-        ("dépôt distant", Ref.url(_page_of(p), re.sub(r"^https?://", "", _page_of(p))) if p.remote else "aucun"),
+        ("dépôt distant", Ref.url(repo_page(p), re.sub(r"^https?://", "", repo_page(p))) if p.remote else "aucun"),
         ("lu chez l'hôte", When(seen.read_at) if seen is not None and seen.read_at else "—"),
         ("relire", here(p, "relire chez l'hôte", vue=view, **{k: ctx.param(k) for k in AIMS}, frais=ctx.now)
          if host is not None else "—"),
@@ -537,7 +533,7 @@ async def _blob(p: Project, frame: Frame, ctx: InspectContext, port: Any, ref: s
     why = BINARY if found.binary else TOO_BIG if found.too_big else LINK if found.kind == ENTRY_LINK else \
         MODULE if found.kind == ENTRY_MODULE else ""
     lines = found.text.count("\n") + (1 if found.text and not found.text.endswith("\n") else 0)
-    page = _page_of(p) if _host(p, ctx) is not None else ""
+    page = repo_page(p) if _host(p, ctx) is not None else ""
     commits = history.commits if history is not None else ()
     texts = _commit_texts(ctx, p, commits)
     her = _her(frame)
@@ -587,7 +583,7 @@ async def _commits(p: Project, frame: Frame, ctx: InspectContext, port: Any, bra
         return [*blocks, Note(f"Aucun commit « {sha[:12]} » dans ce dépôt.", "warn")]
     k = found.commit
     o = objective_for(p, k)
-    page = _page_of(p) if _host(p, ctx) is not None else ""
+    page = repo_page(p) if _host(p, ctx) is not None else ""
     files = await port.diff_of(p.id, k.parents[0] if k.parents else "", k.sha, lines=DIFF_LINES) or ()
     rest = found.body[len(k.title):].strip() if found.body.startswith(k.title) else found.body.strip()
     blocks.append(Fields((
@@ -748,7 +744,7 @@ async def _runs(p: Project, ctx: InspectContext, host: Any, sha: str, fresh: str
                               empty="l'hôte n'a lancé aucune vérification sur ce commit",
                               caption=f"Le commit {sha[:12]} : {CHECK_WORDS.get(got.state, got.state)} (lues "
                                       "chez l'hôte ; leurs noms sont les siens).")]
-    page = _page_of(p)
+    page = repo_page(p)
     out.append(Fields((("commit", Text(sha, "mono")), ("état", CHECK_WORDS.get(got.state, got.state)),
                        ("étape", got.state), ("finies", When(got.at) if got.at else "—"),
                        ("relues", When(at) if at else "—"),
@@ -810,7 +806,7 @@ async def _issues(p: Project, ctx: InspectContext, host: Any, fresh: str) -> lis
     if number not in seen and number not in known and issue_ticket(p, number) is None:
         return [*blocks, Note(f"Aucune issue n° {number} dans ce dépôt.", "warn")]
     x, item = seen.get(number), known.get(number) or issue_ticket(p, number)
-    page = _page_of(p) if host is not None else ""
+    page = repo_page(p) if host is not None else ""
     blocks.append(Fields((
         ("n°", number), ("titre", Text(x.title) if x is not None else "—"),
         ("état", (ISSUE_DROPPED if x.dropped else ISSUE_WORDS.get(x.state, x.state)) if x is not None else "—"),

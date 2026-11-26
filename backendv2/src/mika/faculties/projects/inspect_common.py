@@ -13,7 +13,6 @@ Ce qui dit si une action peut être offerte (``can_edit``, ``can_run``…) reste
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 from urllib.parse import urlsplit
@@ -28,6 +27,7 @@ from mika.faculties.projects.faculty import (
     by_pulls,
     objective_at,
     project_at,
+    repo_page,
 )
 from mika.kernel.events import Event
 from mika.kernel.frame import Frame
@@ -106,9 +106,10 @@ def host_of(url: str) -> str:
 def remote_ref(p: Project) -> Ref | str:
     if not p.remote:
         return "aucun"
-    shown = re.sub(r"\.git$", "", p.remote.split("://", 1)[-1])
+    page = repo_page(p)
+    shown = page.split("://", 1)[-1]
     # son flux, quand il passe par des pull requests (ADR 0274) : la branche nommée ne reçoit que ce qui est accepté
-    return Ref.url(re.sub(r"\.git$", "", p.remote), f"{shown} ({p.branch}{', par pull request' if by_pulls(p) else ''})")
+    return Ref.url(page, f"{shown} ({p.branch}{', par pull request' if by_pulls(p) else ''})")
 
 
 def effect_state(proposal: Event[Any], pending: bool, outcomes: Sequence[Event[Any]]) -> tuple[Badge, str]:
