@@ -41,8 +41,8 @@ async def inner(kernel) -> None:
         m.PROMISE_RESOLVED.draft(promise=promises.seqs[2], status=m.DROPPED),
         m.EVENT_NOTED.draft(text=Content.of("Le prochain stream d’Adrien."), when=now + 2 * DAY,
                            about=("user_1",), sources=refs),
-        m.EXTRACTION_DEFERRED.draft(key=refs[0], messages=refs, about=("user_1",), status="review", attempts=3,
-            failure_code="provider_error", detail=Content.of("Le modèle de relecture n’a pas répondu. "
+        m.EXTRACTION_DEFERRED.draft(key=refs[0], messages=refs, about=("user_1",), status=m.RETRY_REVIEW, attempts=3,
+            failure_code=m.PROVIDER_ERROR, detail=Content.of("Le modèle de relecture n’a pas répondu. "
                 "Le message source est conservé ; ce passage pourra être relu quand le fournisseur sera disponible.")),
     ])
     await emit("attention", [

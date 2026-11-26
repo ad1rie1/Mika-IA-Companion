@@ -119,14 +119,14 @@ class Consolidate:
         # ``memory.relayed`` (ADR 0224), ses messages ne sont pas dans le fil.
         queue = tb.deferred()
         jobs = store.query_mind(select(queue.c.key, queue.c.messages, queue.c.attempts, queue.c.about, queue.c.aside)
-                                .where(queue.c.source == c.FROM_THREAD, queue.c.status == "queued",
+                                .where(queue.c.source == c.FROM_THREAD, queue.c.status == c.RETRY_QUEUED,
                                        queue.c.retry_at <= frame.now)
                                 .order_by(queue.c.retry_at, queue.c.key).limit(1))
         for key, messages, attempts, about, aside in jobs:
             ids = json.loads(messages)
             retry_rows = [r for chunk in batches(sorted(set(ids))) for r in store.query_mind(
                 select(*said).where(thread.c.id.in_(chunk)).order_by(thread.c.id))]
-            drafts.append(c.EXTRACTION_DEFERRED.draft(key=key, status="resolved", attempts=attempts,
+            drafts.append(c.EXTRACTION_DEFERRED.draft(key=key, status=c.RETRY_RESOLVED, attempts=attempts,
                           about=tuple(json.loads(about)), detail=Content.of("reprise", level=3)))
             tasks.extend((conv, attempts) for conv in _conversations(frame, retry_rows, state, directory,
                                                                      aside=json.loads(aside)))
@@ -154,7 +154,7 @@ class Consolidate:
                     tasks.extend([(replace(conv, lines=conv.lines[:middle]), attempts),
                                   (replace(conv, lines=conv.lines[middle:]), attempts)])
                     continue
-            extraction, raw, reason = None, "", "invalid_output"
+            extraction, raw, reason = None, "", c.INVALID_OUTPUT
             cached = self.extracted.get((conv.key, conv.seqs))
             if cached is not None:
                 extraction, raw, model, last_call = cached
@@ -191,9 +191,9 @@ class Consolidate:
                 drafts.append(c.EXTRACTION_DEFERRED.draft(
                     key=conv.seqs[0], messages=conv.seqs, aside=tuple(ln.seq for ln in conv.lines if ln.aside),
                     about=tuple(labels), attempts=attempt,
-                    retry_at=0 if review else frame.now + delay, status="review" if review else "queued",
-                    failure_code="invalid_items" if halfway else ("invalid_output" if reason == "invalid_output" else
-                        "budget_exceeded" if reason == "PromptBudgetError" else "provider_error"),
+                    retry_at=0 if review else frame.now + delay, status=c.RETRY_REVIEW if review else c.RETRY_QUEUED,
+                    failure_code=c.INVALID_ITEMS if halfway else (c.INVALID_OUTPUT if reason == c.INVALID_OUTPUT else
+                        c.BUDGET_EXCEEDED if reason == "PromptBudgetError" else c.PROVIDER_ERROR),
                     detail=Content.of(json.dumps({"issues": extraction.issues if halfway else [reason],
                                                   "output": raw}, ensure_ascii=False), level=3)))
             if extraction is not None:
@@ -209,7 +209,7 @@ class Consolidate:
         self.retry_at = 0  # un passage mené à bout : le suivant dès qu'il y a de quoi
         queue = tb.deferred()
         due = store.query_mind(select(func.min(queue.c.retry_at)).where(queue.c.source == c.FROM_THREAD,
-                                                                       queue.c.status == "queued"))
+                                                                       queue.c.status == c.RETRY_QUEUED))
         self.next_job_at = int(due[0][0]) if due and due[0][0] is not None else None
 
     def _rooms(self, frame: Frame, store: Any) -> dict[str, set[str]]:

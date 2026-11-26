@@ -4,7 +4,8 @@ Ce que SQLite laisse passer et que MariaDB lirait autrement, épinglé ici sur S
 leur contrat déclare (les autres facultés les lisent par des requêtes) ; aucune clé n'est un texte sans borne ; une
 clé démesurée est ramenée à sa borne plutôt que de faire échouer l'ajout ; « cette liste contient ce sujet » est une
 égalité exacte (le ``LIKE`` d'avant prenait le ``_`` d'une adresse pour un joker) ; nommé une fois, nommé pour de bon,
-même dans un seul lot ; une provenance se compose et se relit par le contrat comme chacun la relisait à la main ; le
+même dans un seul lot ; la charge utile de la file des reprises épelle les mots que le contrat nomme ; une provenance
+se compose et se relit par le contrat comme chacun la relisait à la main ; le
 jour de l'année d'un moment, en UTC ; la recherche de la console, pareille sur les deux moteurs (casse et accents
 ignorés).
 """
@@ -14,6 +15,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from typing import get_args
 
 import pytest
 from sqlalchemy import Float, Integer, inspect, select
@@ -142,6 +144,20 @@ def test_the_queue_says_where_its_messages_come_from_and_an_older_entry_comes_fr
         (3, mc.FROM_THREAD, 1), (8, mc.FROM_RELAYED, 2)]
     ExtractionQueue().forget(db, "phone:ab:Léa", "")
     assert [tuple(r) for r in db.query(select(q.c.key))] == [(3,)]
+
+
+def test_the_queue_payload_spells_the_words_its_contract_names():
+    """Les états de la file et ses codes d'échec ont leur nom au contrat ; la charge utile les garde en ``Literal``
+    (pydantic veut des littéraux) : les mêmes mots, dans le même ordre, et ses défauts parmi eux."""
+    fields = mc.ExtractionDeferred.model_fields
+    assert get_args(fields["status"].annotation) == (mc.RETRY_QUEUED, mc.RETRY_REVIEW, mc.RETRY_RESOLVED) \
+        == ("queued", "review", "resolved")
+    assert get_args(fields["failure_code"].annotation) == (
+        mc.INVALID_OUTPUT, mc.INVALID_ITEMS, mc.PROVIDER_ERROR, mc.BUDGET_EXCEEDED, mc.OPERATOR_RETRY) == (
+        "invalid_output", "invalid_items", "provider_error", "budget_exceeded", "operator_retry")
+    assert get_args(fields["source"].annotation) == (mc.FROM_THREAD, mc.FROM_RELAYED)
+    assert (fields["status"].default, fields["failure_code"].default, fields["source"].default) == (
+        mc.RETRY_QUEUED, mc.INVALID_OUTPUT, mc.FROM_THREAD)
 
 
 def test_a_mention_too_long_for_its_key_is_kept_and_forgotten_by_its_bound():

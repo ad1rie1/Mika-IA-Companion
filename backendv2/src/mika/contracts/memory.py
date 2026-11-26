@@ -553,6 +553,15 @@ class Resolved(Payload):
 #: d'où viennent les messages d'un passage à reprendre (``ExtractionDeferred.source``) : son fil, ou des messages
 #: reçus ailleurs (ADR 0224)
 FROM_THREAD, FROM_RELAYED = "thread", "relayed"
+#: où en est un passage de la file des reprises (``ExtractionDeferred.status``) : en file, il se relit de lui-même à
+#: ``retry_at`` ; à examiner, il attend l'opératrice (une sortie à moitié lisible, une paire trop longue pour le
+#: contexte) ; résolu, il sort de la file
+RETRY_QUEUED, RETRY_REVIEW, RETRY_RESOLVED = "queued", "review", "resolved"
+#: pourquoi un passage va dans la file (``ExtractionDeferred.failure_code``) : la réponse du modèle illisible, des
+#: éléments illisibles dans une réponse lue, une panne du fournisseur, un prompt trop long pour son budget ; ou la
+#: reprise que l'opératrice demande depuis la console (l'action « reprendre »)
+INVALID_OUTPUT, INVALID_ITEMS, PROVIDER_ERROR, BUDGET_EXCEEDED, OPERATOR_RETRY = (
+    "invalid_output", "invalid_items", "provider_error", "budget_exceeded", "operator_retry")
 
 
 class ExtractionDeferred(Payload):

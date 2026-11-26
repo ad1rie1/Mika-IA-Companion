@@ -808,7 +808,7 @@ class ExtractionQueue:
         t = deferred(sfx)
         for e in events:
             d = e.data
-            if d.status == "resolved" or forgotten(d.detail):
+            if d.status == c.RETRY_RESOLVED or forgotten(d.detail):
                 sql.execute(delete(t).where(t.c.key == d.key))
                 continue
             upsert(sql, t, {"key": d.key, "source": d.source, "messages": json.dumps(d.messages),

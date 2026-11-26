@@ -57,9 +57,6 @@ LINES_MAX = 60
 ATTEMPTS_MAX = 3
 #: après une panne, pas de nouvel essai avant
 RETRY_US = 10 * MINUTE
-#: pourquoi une relecture va dans la file des reprises (``ExtractionDeferred.failure_code``)
-PROVIDER_ERROR, INVALID_OUTPUT, INVALID_ITEMS, BUDGET_EXCEEDED = (
-    "provider_error", "invalid_output", "invalid_items", "budget_exceeded")
 NAME_MAX = 60
 
 
@@ -142,12 +139,12 @@ def deferral(key: int, conv: Conversation, seqs: tuple[int, ...], attempt: int, 
     """La conversation dans la file des reprises (ADR 0224), comme une des siennes : une sortie partielle, ou trop
     longue pour le contexte, attend un opérateur ; le reste revient de lui-même, de plus en plus espacé. Ses
     personnes (la personne qui l'a reçue, les clés ``phone:`` des expéditeurs) font que l'oubli l'atteint."""
-    review = got.failure in (INVALID_ITEMS, BUDGET_EXCEEDED)
+    review = got.failure in (c.INVALID_ITEMS, c.BUDGET_EXCEEDED)
     delay = min(DAY, p.retry_us * 2 ** min(attempt - 1, 16))
     about = tuple(sorted({*conv.persons, *([conv.relayed] if conv.relayed else [])}))
     return c.EXTRACTION_DEFERRED.draft(
         key=key, source=c.FROM_RELAYED, messages=seqs, about=about, attempts=attempt,
-        retry_at=0 if review else frame.now + delay, status="review" if review else "queued",
+        retry_at=0 if review else frame.now + delay, status=c.RETRY_REVIEW if review else c.RETRY_QUEUED,
         failure_code=got.failure,
         detail=Content.of(json.dumps({"issues": list(got.issues), "output": got.output}, ensure_ascii=False),
                           level=3))
@@ -201,7 +198,7 @@ class Relay:
         # dans le fil).
         queue = tb.deferred()
         jobs = store.query_mind(select(queue.c.key, queue.c.messages, queue.c.attempts, queue.c.about)
-                                .where(queue.c.source == c.FROM_RELAYED, queue.c.status == "queued",
+                                .where(queue.c.source == c.FROM_RELAYED, queue.c.status == c.RETRY_QUEUED,
                                        queue.c.retry_at <= frame.now)
                                 .order_by(queue.c.retry_at, queue.c.key).limit(1))
         if not fresh and not jobs:
@@ -229,7 +226,7 @@ class Relay:
                 drafts.append(c.RELAYED_READ.draft(seqs=seqs, dedupe_key=f"relu:{seqs[0]}:{seqs[-1]}"))
                 continue
             got = await self._read(ctx, frame, state, store, vectors, directory, conv, her, system, p, n)
-            if got.failure == PROVIDER_ERROR:
+            if got.failure == c.PROVIDER_ERROR:
                 tries = self.failures.get(seqs[0], 0) + 1
                 self.failures[seqs[0]] = tries
                 if tries < ATTEMPTS_MAX:
@@ -245,7 +242,7 @@ class Relay:
             drafts.append(c.RELAYED_READ.draft(seqs=seqs, produced=len(got.kept), failed=failed, call_id=got.call_id,
                                                model=got.model, dedupe_key=f"relu:{seqs[0]}:{seqs[-1]}"))
         for key, messages, attempts, about in jobs:
-            drafts.append(c.EXTRACTION_DEFERRED.draft(key=key, source=c.FROM_RELAYED, status="resolved",
+            drafts.append(c.EXTRACTION_DEFERRED.draft(key=key, source=c.FROM_RELAYED, status=c.RETRY_RESOLVED,
                                                       attempts=attempts, about=tuple(json.loads(about)),
                                                       detail=Content.of("reprise", level=3)))
             # une entrée tient une conversation (un lot) ; relue, elle est faite, ou elle revient avec un essai de plus
@@ -267,7 +264,7 @@ class Relay:
     def _next_job(self, store: Any) -> None:
         queue = tb.deferred()
         due = store.query_mind(select(func.min(queue.c.retry_at)).where(queue.c.source == c.FROM_RELAYED,
-                                                                       queue.c.status == "queued"))
+                                                                       queue.c.status == c.RETRY_QUEUED))
         self.next_job_at = int(due[0][0]) if due and due[0][0] is not None else None
 
     @staticmethod
@@ -286,24 +283,24 @@ class Relay:
             response = await ctx.llm.call(request)
         except PromptBudgetError:
             log.warning("relecture d'une conversation reçue ailleurs : trop longue pour le contexte")
-            return Reading(failure=BUDGET_EXCEEDED, issues=("PromptBudgetError",))
+            return Reading(failure=c.BUDGET_EXCEEDED, issues=("PromptBudgetError",))
         except Exception as exc:  # noqa: BLE001 — une panne : retentée, puis mise en file de reprise
             log.warning("relecture d'une conversation reçue ailleurs : %s", type(exc).__name__)
-            return Reading(failure=PROVIDER_ERROR, issues=(type(exc).__name__,))
+            return Reading(failure=c.PROVIDER_ERROR, issues=(type(exc).__name__,))
         raw = json.dumps([dict(call.args) for call in response.tool_calls], ensure_ascii=False) \
             if response.tool_calls else response.text
         extraction = x.parse(response)
         if extraction is None:
             log.warning("relecture d'une conversation reçue ailleurs : réponse illisible")
-            return Reading(call_id=request.call_id, model=response.model, failure=INVALID_OUTPUT,
-                           issues=(INVALID_OUTPUT,), output=raw)
+            return Reading(call_id=request.call_id, model=response.model, failure=c.INVALID_OUTPUT,
+                           issues=(c.INVALID_OUTPUT,), output=raw)
         kept = await kept_from(extraction, frame, state, store, conv, people, shown.shrunk(times), vectors, p,
                                request.call_id)
         if extraction.issues:
             # leur nombre seulement : leurs textes sont dans le détail de l'entrée, qui s'oublie
             log.warning("relecture d'une conversation reçue ailleurs : %d éléments invalides écartés",
                         len(extraction.issues))
-            return Reading(tuple(kept), request.call_id, response.model, INVALID_ITEMS, tuple(extraction.issues),
+            return Reading(tuple(kept), request.call_id, response.model, c.INVALID_ITEMS, tuple(extraction.issues),
                            raw)
         return Reading(tuple(kept), request.call_id, response.model)
 

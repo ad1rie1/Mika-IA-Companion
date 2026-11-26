@@ -367,7 +367,7 @@ def _beliefs(k: KeepContext, known: Mapping[int, str], p: MemoryParams, call_id:
         if between:
             k.ours.append(fold(b.texte))
         nature = x.kind_of_genre(b.genre)
-        if x.ORIGIN.get(fold(b.origine)) == "inferred":
+        if x.ORIGIN.get(fold(b.origine)) == c.INFERRED:
             nature = "hypothesis"
         # un avis, une hypothèse sont à qui les porte ; un fait rapporté n'est à personne (ses témoins le disent)
         holder = people.one(b.point_de_vue) if b.point_de_vue else (source if nature != "claim" else None)
@@ -378,7 +378,7 @@ def _beliefs(k: KeepContext, known: Mapping[int, str], p: MemoryParams, call_id:
                 relations.append(c.Relation(subject=subject, other=other, kind=relation.kind,
                                             status=relation.status))
                 about = tuple(sorted({*about, subject, other}))
-        origin = x.ORIGIN.get(fold(b.origine), "told")
+        origin = x.ORIGIN.get(fold(b.origine), c.TOLD)
         if conv.relayed and origin == c.OBSERVED:
             origin = c.TOLD  # lu dans les messages d'autres : elle ne l'a pas vu (ADR 0120)
         pieces = pieces_of(b.pieces, b.messages, k.lines)

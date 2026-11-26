@@ -21,6 +21,8 @@ import math
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+from mika.contracts import memory as memory_c
+
 #: ce qu'un témoin de plus apporte, en part de ses log-cotes : deux témoins à 0,8 font ~0,89 (un ancien renfort
 #: corroboré ajoutait 0,1)
 CORROBORATION_WEIGHT = 0.5
@@ -37,7 +39,7 @@ class Testimony:
     secret: bool
     confidence: float
     informants: tuple[str, ...] = ()
-    origin: str = "told"
+    origin: str = memory_c.TOLD
     at: int = 0
     between_us: bool = False
     #: un témoignage d'avant (un ancien renforcement) : la confiance, jamais la diffusion
@@ -81,9 +83,9 @@ def rank(t: Testimony, *, about_self: bool = False) -> int:
     témoin de première main ; 1, rapporté ; 0, une déduction."""
     if about_self or (t.first_hand and t.told_by):
         return 3
-    if t.origin == "observed" or t.first_hand:
+    if t.origin == memory_c.OBSERVED or t.first_hand:
         return FIRST_HAND_RANK
-    if t.origin == "inferred":
+    if t.origin == memory_c.INFERRED:
         return 0
     return 1
 

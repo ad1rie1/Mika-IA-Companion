@@ -680,14 +680,14 @@ def _retry_extraction(s: MemoryState, frame: Frame, args: RetryExtractionArgs, c
     # sa source le suit : une conversation reçue ailleurs se reprend par ``memory.relayed``, pas par la consolidation
     draft = c.EXTRACTION_DEFERRED.draft(key=args.key, source=source, messages=tuple(json.loads(messages)),
         aside=tuple(json.loads(aside)), about=tuple(json.loads(about)), attempts=attempts, retry_at=frame.now,
-        status="queued", failure_code="operator_retry", detail=Content.of("Reprise demandée par l'opérateur", level=3))
+        status=c.RETRY_QUEUED, failure_code=c.OPERATOR_RETRY, detail=Content.of("Reprise demandée par l'opérateur", level=3))
     return Done(drafts=(draft,), message="Le passage sera relu.")
 
 
 #: pourquoi un passage attend une reprise, en mots
-DEFERRAL_REASONS = {"invalid_output": "Réponse du modèle illisible", "invalid_items": "Éléments extraits invalides",
-                    "provider_error": "Erreur du fournisseur", "budget_exceeded": "Budget atteint",
-                    "operator_retry": "Reprise demandée"}
+DEFERRAL_REASONS = {c.INVALID_OUTPUT: "Réponse du modèle illisible", c.INVALID_ITEMS: "Éléments extraits invalides",
+                    c.PROVIDER_ERROR: "Erreur du fournisseur", c.BUDGET_EXCEEDED: "Budget atteint",
+                    c.OPERATOR_RETRY: "Reprise demandée"}
 
 
 def _deferred_detail(text: str | None) -> Block:
@@ -725,8 +725,8 @@ def _queue(ctx: InspectContext) -> Table | Note:
                   Column("prochaine reprise"), Column("cause", role="body")),
         tuple(Row((Ref("event", str(key), PASSAGE_OF.get(source, PASSAGE_OF[c.FROM_THREAD]).format(key=key)),
                    When(since), attempts,
-                   Badge("à examiner" if status == "review" else "reprise prévue", "warn" if status == "review" else "info"),
-                   When(retry) if retry else "manuelle" if status == "review" else "dès que possible",
+                   Badge("à examiner" if status == c.RETRY_REVIEW else "reprise prévue", "warn" if status == c.RETRY_REVIEW else "info"),
+                   When(retry) if retry else "manuelle" if status == c.RETRY_REVIEW else "dès que possible",
                    DEFERRAL_REASONS.get(reason, reason)),
                   detail=(_deferred_detail(details.get(ref)),
                           ActionSlot("memory.reprendre", (("key", str(key)),))))

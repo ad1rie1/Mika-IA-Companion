@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from mika.contracts import memory as c
 from mika.contracts.memory import Relation
 from mika.kernel.clock import instant
 from mika.kernel.faculty import schema_of
@@ -43,16 +44,16 @@ SENSITIVITY = {"anodin": Sensitivity.ANODYNE, "anodine": Sensitivity.ANODYNE, "a
                "personnel": Sensitivity.PERSONAL, "personnelle": Sensitivity.PERSONAL, "personal": Sensitivity.PERSONAL,
                "confidence": Sensitivity.CONFIDENCE, "confidentiel": Sensitivity.CONFIDENCE,
                "confidential": Sensitivity.CONFIDENCE, "intime": Sensitivity.CONFIDENCE}
-ORIGIN = {"dit": "told", "observe": "observed", "observé": "observed", "deduit": "inferred", "déduit": "inferred"}
+ORIGIN = {"dit": c.TOLD, "observe": c.OBSERVED, "observé": c.OBSERVED, "deduit": c.INFERRED, "déduit": c.INFERRED}
 #: la confiance qu'une croyance peut avoir à sa naissance, selon d'où elle vient (ADR 0075) : ce qu'elle a vu plus que
 #: ce qu'on lui a dit, ce qu'on lui a dit plus que ce qu'elle en déduit. Le modèle qui l'extrait ne la rend pas plus
 #: sûre ; redire n'y ajoute rien — seule une autre personne qui le lui dit aussi (``corroborated``) la fait monter.
-CONFIDENCE_CAP = {"observed": 0.9, "told": 0.8, "inferred": 0.6, "read": 0.7}  # lu : comme un témoin qui rapporte (ADR 0085)
+CONFIDENCE_CAP = {c.OBSERVED: 0.9, c.TOLD: 0.8, c.INFERRED: 0.6, c.READ: 0.7}  # lu : comme un témoin qui rapporte (ADR 0085)
 
 
 def born_confidence(confidence: float, origin: str, kind: str = "claim") -> float:
     """La confiance d'une croyance qui naît, bornée par sa nature : une hypothèse vaut une déduction."""
-    cap = CONFIDENCE_CAP["inferred"] if kind == "hypothesis" else CONFIDENCE_CAP.get(origin, CONFIDENCE_CAP["told"])
+    cap = CONFIDENCE_CAP[c.INFERRED] if kind == "hypothesis" else CONFIDENCE_CAP.get(origin, CONFIDENCE_CAP[c.TOLD])
     return round(min(max(0.0, float(confidence)), cap), 3)
 
 
