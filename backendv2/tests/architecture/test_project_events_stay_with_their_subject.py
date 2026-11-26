@@ -19,14 +19,15 @@ FOLDER = Path(mika.__file__).parent / "faculties" / "projects"
 
 #: le projet lui-même et ses objectifs : ce que ``Project`` et ``Objective`` sont
 ITSELF = frozenset({
-    "objective_added", "objective_changed", "decided", "decision_changed", "reframed", "paused", "resumed", "archived",
-    "restored", "nudged", "noted", "amended", "plan_proposed", "plan_answered", "deposited", "remote_requested",
-    "network_queued", "answered", "access_set", "links_set", "stirred", "steer_asked",
+    "objective_added", "objective_changed", "reframed", "paused", "resumed", "archived", "restored", "nudged", "noted",
+    "amended", "plan_proposed", "plan_answered", "deposited", "remote_requested", "network_queued", "answered",
+    "access_set", "links_set", "stirred", "steer_asked",
 })
 
 #: les sous-sujets nés avant la règle, encore dans ``faculty.py`` : chacun en sort quand on y touche (les jalons
 #: d'abord), et sa ligne s'efface alors d'ici
 BORN_BEFORE = {
+    "les décisions techniques (decisions.py, qui porte déjà leur révision)": frozenset({"decided", "decision_changed"}),
     "les jalons (milestones.py)": frozenset({"milestone_added", "milestone_changed"}),
     "les pull requests, la CI et la fusion (pulls.py, merge.py)": frozenset({
         "pull_seen", "checks_seen", "base_seen", "merge_asked", "merge_answered"}),
@@ -66,3 +67,5 @@ def test_a_subject_out_of_faculty_declares_its_own_events():
     """Ce qui fait foi pour la règle : le registre et la documentation déclarent les leurs chez eux."""
     assert declared("tracker.py") >= {"list_set", "item_added", "item_changed", "item_noted"}
     assert declared("docs.py") >= {"doc_written", "doc_moved", "doc_removed"}
+    assert declared("decisions.py") >= {"decision_revised"}
+    assert declared("merge.py") >= {"pull_write_asked", "pull_write_answered"}
