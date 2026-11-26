@@ -314,7 +314,7 @@ def test_a_contact_change_goes_to_who_sees_its_source(tmp_path):
 
 
 def test_a_project_she_does_not_see_is_never_named(tmp_path):
-    """Ce qu'elle voit d'un projet est ``projects.reaches`` : sans projet à elle, un projet nommé ne lui dit rien."""
+    """Ce qu'elle voit d'un projet est ``reach.reaches`` : sans projet à elle, un projet nommé ne lui dit rien."""
     async def scenario():
         kernel, live, screens = await world(tmp_path, "user_1")
         return await live.send([Touch(PROJECTS, "project", keys=("7",)), Touch(PROJECTS, "project")])

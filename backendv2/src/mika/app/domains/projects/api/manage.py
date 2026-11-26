@@ -31,23 +31,21 @@ from typing import Any
 
 from starlette.routing import Route
 
-from mika.app.domains.projects.api.projects import (
+from mika.app.domains.projects.api.projects import PATH, found_element, subject_key
+from mika.app.domains.projects.api.reach import (
     NOT_FRAMER,
-    PATH,
     TEXT_SHOWN,
     Reach,
     Scene,
-    _found,
-    _name,
-    _nameable,
-    _opened,
-    _steers,
-    _subject,
-    _texts,
     edit_refusal,
     frame_refusal,
+    must_steer,
+    nameable,
+    opened_project,
+    person_name,
     reach,
     scene,
+    texts_of,
 )
 from mika.app.me.api import Call, Denied, MeApiBase, done, form, missing
 from mika.app.me.common import millis
@@ -88,7 +86,7 @@ OBJECTIVE_MOVES = {c.OPEN: "Rouvrir", c.DONE: "Dire terminé", c.DROPPED: "Retir
 
 
 def _frames(r: Reach) -> None:
-    _steers(r, edit=True)
+    must_steer(r, edit=True)
     if not r.reader.settles:
         raise Denied(403, NOT_FRAMER)
 
@@ -160,7 +158,7 @@ def _sections(call: Call, sc: Scene, r: Reach) -> list[dict[str, Any]]:
     for name, title, parts in SECTIONS:
         fields: list[dict[str, Any]] = []
         for key, names in parts:
-            found, initial = _fields(call, key, _subject(r))
+            found, initial = _fields(call, key, subject_key(r))
             for f in found:
                 if names is not None and f.path not in names:
                     continue
@@ -180,7 +178,7 @@ def _sections(call: Call, sc: Scene, r: Reach) -> list[dict[str, Any]]:
 async def settings(call: Call) -> dict[str, Any]:
     """``GET …/projets/<id>/reglages`` : ses réglages en sections — pour chaque champ son libellé, son aide, ses choix
     et sa valeur actuelle —, et si elle peut les changer."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     why = frame_refusal(r)
     hers = r.p.authority == c.SELF
     return {"project": r.p.id, "can": not why, "why": why, "sections": _sections(call, sc, r),
@@ -200,7 +198,7 @@ def _sent(call: Call) -> dict[str, Any]:
 async def set_settings(call: Call) -> dict[str, Any]:
     """``POST …/projets/<id>/reglages/enregistrer`` : une section de ses réglages (``section``), les champs qui changent
     (``values``). Le reste garde sa valeur : l'action de la console reçoit tout le formulaire, celui de maintenant."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     _frames(r)
     name = call.arg("section", limit=20)
     parts = next((parts for known, _, parts in SECTIONS if known == name), None)
@@ -210,7 +208,7 @@ async def set_settings(call: Call) -> dict[str, Any]:
     plans: list[tuple[str, dict[str, Any]]] = []
     known: set[str] = set()
     for key, names in parts:
-        found, initial = _fields(call, key, _subject(r))
+        found, initial = _fields(call, key, subject_key(r))
         kinds = {f.path: f.kind for f in found if names is None or f.path in names}
         known |= set(kinds)
         mine = {k: v for k, v in sent.items() if k in kinds}
@@ -233,7 +231,7 @@ async def set_settings(call: Call) -> dict[str, Any]:
         raise Denied(409, NOTHING)
     got: dict[str, Any] = {}
     for key, values in plans:  # une clé d'envoi par action : la seconde n'est pas une redite de la première
-        got = done(await call.act(key, form(**values), subject=_subject(r), part=key))
+        got = done(await call.act(key, form(**values), subject=subject_key(r), part=key))
     return got
 
 
@@ -277,11 +275,11 @@ async def archived(call: Call) -> dict[str, Any]:
     sc = scene(call)
     found = sorted((r for r in (_restorable(sc, p) for p in sc.s.projects.values()) if r is not None),
                    key=lambda r: -r.p.archived_at)
-    texts = _texts(call, [r.p.title_ref for r in found])
+    texts = texts_of(call, [r.p.title_ref for r in found])
 
     def owner_name(r: Reach) -> str:
         owner = r.p.owner or ""
-        return _name(sc, owner) if owner and not r.own and _nameable(sc, owner, r.p.sensitivity) else ""
+        return person_name(sc, owner) if owner and not r.own and nameable(sc, owner, r.p.sensitivity) else ""
 
     return {"items": [{"id": r.p.id, "title": texts.get(r.p.title_ref, ""), "archived_at": millis(r.p.archived_at),
                        "owner_name": owner_name(r)} for r in found]}
@@ -289,9 +287,9 @@ async def archived(call: Call) -> dict[str, Any]:
 
 async def archive(call: Call) -> dict[str, Any]:
     """``POST …/projets/<id>/archiver`` : il ne travaille plus ; rien n'est effacé."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     _frames(r)
-    return done(await call.act("projects.archiver", form(), subject=_subject(r)))
+    return done(await call.act("projects.archiver", form(), subject=subject_key(r)))
 
 
 async def restore(call: Call) -> dict[str, Any]:
@@ -306,7 +304,7 @@ async def restore(call: Call) -> dict[str, Any]:
 # ── Ses objectifs ─────────────────────────────────────────────────────────
 
 def _edits(r: Reach) -> None:
-    _steers(r, edit=True)
+    must_steer(r, edit=True)
 
 
 def _objective(call: Call, r: Reach) -> Objective:
@@ -337,38 +335,38 @@ def _objective_values(call: Call, known: Mapping[str, Any]) -> dict[str, Any]:
 
 async def add_objective(call: Call) -> dict[str, Any]:
     """``POST …/projets/<id>/objectif`` : un objectif ponctuel, ou une mission (``kind: constant``)."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     _edits(r)
     values = _objective_values(call, {"text": "", "kind": c.ONCE})
     before = r.p.objective_seq
-    got = done(await call.act("projects.objectif_ajouter", form(**values), subject=_subject(r)))
+    got = done(await call.act("projects.objectif_ajouter", form(**values), subject=subject_key(r)))
     return {**got, "objective": before + 1}
 
 
 async def edit_objective(call: Call) -> dict[str, Any]:
     """``POST …/projets/<id>/objectif/modifier`` : ce qui change d'un objectif ; le reste garde sa valeur."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     _edits(r)
     o = _objective(call, r)
-    texts = _texts(call, [o.text_ref, o.routine_ref])
+    texts = texts_of(call, [o.text_ref, o.routine_ref])
     known = {"text": texts.get(o.text_ref, ""), "kind": o.kind, "cadence_hours": o.cadence_us // HOUR,
              "on": list(o.on), "only_on_event": o.only_on_event, "routine": texts.get(o.routine_ref, ""),
              "at_once": o.at_once}
     return done(await call.act("projects.objectif_modifier", form(
-        fixed={"objective": str(o.id)}, **_objective_values(call, known)), subject=_subject(r)))
+        fixed={"objective": str(o.id)}, **_objective_values(call, known)), subject=subject_key(r)))
 
 
 async def move_objective(call: Call) -> dict[str, Any]:
     """``POST …/projets/<id>/objectif/statut`` : le rouvrir (``open``), le dire terminé (``done``), le retirer
     (``dropped``)."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     _edits(r)
     o = _objective(call, r)
     status = call.arg("status", limit=12)
     if status not in OBJECTIVE_MOVES:
         raise Denied(400, "« status » : open, done ou dropped.", {"status": ", ".join(OBJECTIVE_MOVES)})
     return done(await call.act("projects.objectif_statut", form(
-        fixed={"objective": str(o.id), "status": status}), subject=_subject(r)))
+        fixed={"objective": str(o.id), "status": status}), subject=subject_key(r)))
 
 
 # ── Ses jalons ────────────────────────────────────────────────────────────
@@ -384,12 +382,12 @@ def _milestone_values(call: Call, known: Mapping[str, Any]) -> dict[str, Any]:
 
 async def add_milestone(call: Call) -> dict[str, Any]:
     """``POST …/projets/<id>/jalon/ajouter`` : un jalon de plus sur un objectif ponctuel."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     _edits(r)
     o = _objective(call, r)
     return done(await call.act("projects.jalon_ajouter", form(
         fixed={"objective": str(o.id)}, **_milestone_values(call, {"text": "", "check": c.CHECK_PROSE})),
-        subject=_subject(r)))
+        subject=subject_key(r)))
 
 
 def _milestone(call: Call, r: Reach) -> tuple[Objective, Any]:
@@ -407,26 +405,26 @@ def _milestone(call: Call, r: Reach) -> tuple[Objective, Any]:
 
 async def edit_milestone(call: Call) -> dict[str, Any]:
     """``POST …/projets/<id>/jalon/modifier`` : le texte d'un jalon ouvert, et comment on le vérifie."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     _edits(r)
     o, m = _milestone(call, r)
-    texts = _texts(call, [m.text_ref, m.command_ref])
+    texts = texts_of(call, [m.text_ref, m.command_ref])
     known = {"text": texts.get(m.text_ref, ""), "check": m.check,
              "command": shlex.join(milestones.decoded(texts.get(m.command_ref))), "item_list": m.item_list,
              "item": m.item_key, "item_status": m.item_status}
     return done(await call.act("projects.jalon_modifier", form(
         fixed={"objective": str(o.id), "milestone": str(m.id)}, **_milestone_values(call, known),
-        reason=call.arg("reason", limit=milestones.REASON_MAX)), subject=_subject(r)))
+        reason=call.arg("reason", limit=milestones.REASON_MAX)), subject=subject_key(r)))
 
 
 async def drop_milestone(call: Call) -> dict[str, Any]:
     """``POST …/projets/<id>/jalon/retirer`` : un jalon ouvert n'a plus lieu d'être."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     _edits(r)
     o, m = _milestone(call, r)
     return done(await call.act("projects.jalon_retirer", form(
         fixed={"objective": str(o.id), "milestone": str(m.id)},
-        reason=call.arg("reason", limit=milestones.REASON_MAX)), subject=_subject(r)))
+        reason=call.arg("reason", limit=milestones.REASON_MAX)), subject=subject_key(r)))
 
 
 # ── Un ticket ─────────────────────────────────────────────────────────────
@@ -434,10 +432,10 @@ async def drop_milestone(call: Call) -> dict[str, Any]:
 
 async def edit_ticket(call: Call) -> dict[str, Any]:
     """``POST …/projets/<id>/ticket/modifier`` : son titre, son détail, sa sorte, sa priorité — ce qui change."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     _edits(r)
     call.data.setdefault("list", c.TICKETS)
-    lst, e = _found(sc, r)
+    lst, e = found_element(sc, r)
     if lst.name != c.TICKETS:
         raise Denied(400, "Seul un ticket se modifie ainsi.", {"list": "tickets"})
     item = e.item
@@ -447,14 +445,14 @@ async def edit_ticket(call: Call) -> dict[str, Any]:
         title=call.arg("title", limit=tracker.TITLE_MAX) if "title" in data else e.title,
         text=call.arg("text", limit=tracker.TEXT_MAX) if "text" in data else e.body,
         kind=call.arg("kind", limit=20) if "kind" in data else item.kind,
-        priority=call.arg("priority", limit=20) if "priority" in data else item.priority), subject=_subject(r)))
+        priority=call.arg("priority", limit=20) if "priority" in data else item.priority), subject=subject_key(r)))
 
 
 # ── Une pull request : son titre, son texte, un commentaire ───────────────
 
 
 def _pull(call: Call, r: Reach) -> Objective:
-    _steers(r, edit=True)
+    must_steer(r, edit=True)
     if not r.reader.settles:
         raise Denied(403, NOT_WRITER)
     number = call.number("number", 0, 0)
@@ -468,20 +466,20 @@ def _pull(call: Call, r: Reach) -> Objective:
 
 async def edit_pull(call: Call) -> dict[str, Any]:
     """``POST …/projets/<id>/code/pull/modifier`` : le titre et le texte d'une pull request, chez l'hôte."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     o = _pull(call, r)
     got = done(await call.act("projects.pull_modifier", form(
         fixed={"objective": str(o.id)}, title=call.arg("title", limit=managing.TITLE_MAX),
-        body=call.arg("body", limit=managing.BODY_MAX)), subject=_subject(r)))
+        body=call.arg("body", limit=managing.BODY_MAX)), subject=subject_key(r)))
     return {**got, "asked": True, "number": o.pull}
 
 
 async def comment_pull(call: Call) -> dict[str, Any]:
     """``POST …/projets/<id>/code/pull/commenter`` : un commentaire sur une pull request, signé de son nom."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     o = _pull(call, r)
     got = done(await call.act("projects.pull_commenter", form(
-        fixed={"objective": str(o.id)}, text=call.arg("text", limit=managing.COMMENT_MAX)), subject=_subject(r)))
+        fixed={"objective": str(o.id)}, text=call.arg("text", limit=managing.COMMENT_MAX)), subject=subject_key(r)))
     return {**got, "asked": True, "number": o.pull}
 
 
@@ -515,12 +513,12 @@ def _decision_json(sc: Scene, r: Reach, d: Decision, texts: Mapping[str, str], *
 async def decisions(call: Call) -> dict[str, Any]:
     """``GET …/projets/<id>/decisions[?status=]`` : ses décisions techniques, les plus récentes d'abord (celles en
     vigueur sans ``status`` ; ``all`` : toutes)."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     wanted = call.arg("status", c.IN_FORCE, limit=20)
     if wanted not in (*DECISION_WORDS, "all"):
         raise Denied(400, "« status » : in_force, withdrawn, superseded ou all.", {"status": "statut inconnu"})
     found = [d for d in reversed(r.p.decisions) if wanted == "all" or d.status == wanted]
-    texts = _texts(call, [ref for d in found for ref in (d.title_ref, d.choice_ref)])
+    texts = texts_of(call, [ref for d in found for ref in (d.title_ref, d.choice_ref)])
     why = edit_refusal(r)
     return {"total": len(found), "in_force": sum(1 for d in r.p.decisions if d.status == c.IN_FORCE),
             "can": not why, "why": why, "items": [_decision_json(sc, r, d, texts) for d in found]}
@@ -536,48 +534,48 @@ def _decision(call: Call, r: Reach) -> Decision:
 async def decision(call: Call) -> dict[str, Any]:
     """``GET …/projets/<id>/decision?number=`` : une décision — le choix, le contexte, les options écartées, la
     raison, ce qu'elle remplace."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     d = _decision(call, r)
-    return _decision_json(sc, r, d, _texts(call, list(_decision_refs(d).values())), full=True)
+    return _decision_json(sc, r, d, texts_of(call, list(_decision_refs(d).values())), full=True)
 
 
 async def add_decision(call: Call) -> dict[str, Any]:
     """``POST …/projets/<id>/decision/ajouter`` : consigner une décision ; ``replaces`` : celle en vigueur qu'elle
     remplace."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     _edits(r)
     before = r.p.decision_seq
     got = done(await call.act("projects.decision_ajouter", form(
         **{name: call.arg(name, limit=limit) for name, limit in DECISION_TEXTS},
-        replaces=call.number("replaces", 0, 0)), subject=_subject(r)))
+        replaces=call.number("replaces", 0, 0)), subject=subject_key(r)))
     return {**got, "number": before + 1}
 
 
 async def edit_decision(call: Call) -> dict[str, Any]:
     """``POST …/projets/<id>/decision/modifier`` : les textes d'une décision qui n'est pas remplacée — ce qui
     change."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     _edits(r)
     d = _decision(call, r)
     refs = _decision_refs(d)
-    texts = _texts(call, list(refs.values()))
+    texts = texts_of(call, list(refs.values()))
     values = {name: call.arg(name, limit=limit) if name in call.data else texts.get(refs[name], "")
               for name, limit in DECISION_TEXTS}
     return done(await call.act("projects.decision_modifier", form(fixed={"decision": str(d.id)}, **values),
-                               subject=_subject(r)))
+                               subject=subject_key(r)))
 
 
 async def move_decision(call: Call) -> dict[str, Any]:
     """``POST …/projets/<id>/decision/statut`` : la retirer (``withdrawn``), ou la remettre en vigueur
     (``in_force``)."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     _edits(r)
     d = _decision(call, r)
     status = call.arg("status", limit=12)
     if status not in (c.IN_FORCE, c.WITHDRAWN):
         raise Denied(400, "« status » : withdrawn ou in_force.", {"status": "withdrawn ou in_force"})
     return done(await call.act("projects.decision_statut", form(
-        fixed={"decision": str(d.id), "status": status}), subject=_subject(r)))
+        fixed={"decision": str(d.id), "status": status}), subject=subject_key(r)))
 
 
 def routes(api: MeApiBase) -> list[Route]:

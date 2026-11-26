@@ -17,6 +17,7 @@ Chaque point avec ses droits : qui pilote, qui ne fait que lire, qui ne fait que
 from __future__ import annotations
 
 from mika.app.domains.projects.api import projects as moi
+from mika.app.domains.projects.api import reach
 from mika.contracts import projects as c
 from mika.contracts import self_ as self_c
 from mika.faculties.projects import tickets, tracker
@@ -171,7 +172,7 @@ def test_the_fiche_serves_what_the_forms_need(world):  # noqa: F811
     _share(client, live, rid, lea, "lecture")
     login(client, "lea")
     hers = _get(client, f"/{rid}")["forms"]
-    assert not hers["can"] and hers["why"] == moi.NOT_STEERED
+    assert not hers["can"] and hers["why"] == reach.NOT_STEERED
     assert not any(t["sort"] == "project" for t in hers["triggers"])
     assert any(t["sort"] == "item" for t in hers["triggers"])
 
@@ -270,7 +271,7 @@ def test_a_ticket_tells_when_it_went_through_each_stage_and_by_whom(world):  # n
     # une demande venue d'un autre projet, pas encore acceptée : ses étapes se disent, aucun nom
     asked = next(t for t in _get(client, f"/{pid}/elements", size=50)["items"] if t["veiled"])
     veiled = _get(client, f"/{pid}/element/historique", list="tickets", item=asked["handle"])["items"]
-    assert [x["status"] for x in veiled] == ["proposed"] and veiled[0]["author"] == moi.PROJECT_WORDS
+    assert [x["status"] for x in veiled] == ["proposed"] and veiled[0]["author"] == reach.PROJECT_WORDS
     # qui ne fait que voir, qui ne voit pas
     login(client, "adrien")
     _share(client, live, pid, lea, STEER_NO)
@@ -411,7 +412,7 @@ def test_demands_are_read_both_ways_and_she_may_ask_the_project_hers_depends_on(
     _share(client, live, pid, lea, "lecture")
     login(client, "lea")
     assert _get(client, f"/{rid}")["links"]["reads"][0]["ask_here"] == {
-        "can": False, "why": moi.NOT_STEERED, "born": "", "project": pid, "route": ""}
+        "can": False, "why": reach.NOT_STEERED, "born": "", "project": pid, "route": ""}
     # qui lit le produit sans le trancher : la demande reçue se compte, le ticket proposé par un autre projet ne
     # dit pas son titre
     seen = next(x for x in _get(client, f"/{pid}")["links"]["received"] if x["status"] == "proposed")
@@ -456,7 +457,7 @@ def test_a_follow_up_list_takes_a_new_item_and_changes_whose_it_is(world):  # no
                 {"list": "tickets", "item": f"#{number}", "actor": "owner"}).status_code == 409
     # sur accord : ni ajouter, ni confier, et la fiche dit pourquoi ; en lecture seule non plus
     lea = _lea(client, live)
-    for steer, why in (("accord", moi.NEEDS_EDIT), ("lecture", moi.NOT_STEERED)):
+    for steer, why in (("accord", reach.NEEDS_EDIT), ("lecture", reach.NOT_STEERED)):
         login(client, "adrien")
         _share(client, live, rid, lea, steer)
         login(client, "lea")

@@ -1,12 +1,12 @@
 """Le code d'un projet, pour qui est connecté (ADR 0288) : ses fichiers, ses commits et leur diff, ses branches, ses
 pull requests, ses issues, sa CI — et **fusionner** une pull request, le geste d'une personne.
 
-**Aucune règle n'est d'ici**, comme pour le reste de ses projets (``projects.py``, dont viennent ``_opened`` et ce
+**Aucune règle n'est d'ici**, comme pour le reste de ses projets (``reach.py``, dont viennent ``opened_project`` et ce
 qu'elle a d'un projet) :
 
 - le **détail** d'un projet donne ses commits, ses branches, ses pull requests et ses issues en titres et en états ;
 - le **contenu** d'un fichier, l'arbre du dépôt et un diff demandent en plus le droit sur ses fichiers
-  (``projects.reads_files``) : sans lui, 403 pour un fichier, et un commit ou une pull request sans ``files`` ;
+  (``reach.reads_files``) : sans lui, 403 pour un fichier, et un commit ou une pull request sans ``files`` ;
 - une issue d'un inconnu ne dit son titre, son texte et ses échanges qu'à qui peut la trancher (``tracker.veiled``) ;
 - fusionner est au propriétaire du projet et à qui s'occupe d'elle (``tracker.settles``), par l'action
   ``projects.fusionner`` : le commit de tête qu'elle a lu est nommé, et l'action refuse s'il a bougé.
@@ -33,25 +33,26 @@ from starlette.routing import Route
 from mika.adapters.web.gate import SlidingWindow
 from mika.app.domains.projects.api.projects import (
     HAND_WORDS,
-    NO_FILES,
-    NOT_MERGER,
     PAGE_MAX,
     PATH,
-    REVIEW_WORDS,
-    TEXT_SHOWN,
     VEIL_WORDS,
+    milestone_json,
+    objective_refs,
+)
+from mika.app.domains.projects.api.reach import (
+    NO_FILES,
+    NOT_MERGER,
+    TEXT_SHOWN,
     YOU_WORDS,
     Reach,
     Scene,
-    _milestone_json,
-    _name,
-    _objective_refs,
-    _opened,
-    _outside,
-    _steers,
-    _texts,
     merge_refusal,
+    must_steer,
+    opened_project,
+    outside_text,
+    person_name,
     reads_files,
+    texts_of,
 )
 from mika.app.me.api import Call, Denied, MeApiBase, done, form, missing, spend
 from mika.app.me.common import millis
@@ -92,6 +93,7 @@ from mika.faculties.projects.inspect_code import pull_stage as _pull_state
 from mika.faculties.projects.inspect_code import pulled as _pulled
 from mika.faculties.projects.inspect_merge import ACTION as MERGE_ACTION
 from mika.faculties.projects.inspect_merge import REFUSED_WORDS
+from mika.faculties.projects.inspect_reviews import REVIEW_WORDS
 from mika.ports.workshop import (
     BASE_BRANCH,
     CHECKS_FAILED,
@@ -234,7 +236,7 @@ def _merge_json(sc: Scene, r: Reach, o: Objective) -> dict[str, Any]:
     """Peut-elle fusionner cette pull request, et sinon pourquoi — la garde de la route, dite d'avance ; et où en est
     une fusion déjà demandée."""
     why = merge_refusal(r, o, sc.frame.now)
-    by = YOU_WORDS if o.merge_by and o.merge_by == sc.person else _name(sc, o.merge_by)
+    by = YOU_WORDS if o.merge_by and o.merge_by == sc.person else person_name(sc, o.merge_by)
     refused = REFUSED_WORDS.get(o.merge_refused, "") if o.merge_refused else ""
     asked = o.pull_state == PULL_OPEN and merge.merging(o)
     return {"can": not why, "why": why, "asked": asked, "asked_at": millis(o.merge_asked_at),
@@ -319,14 +321,14 @@ async def _diff(sc: Scene, r: Reach, port: Any, since: str, head: str, *, counts
 async def summary(call: Call) -> dict[str, Any]:
     """``GET …/code`` : le dépôt en bref — sa branche de base, son dépôt distant, ce qu'elle peut y lire et y faire,
     et les comptes des sous-onglets."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     p = r.p
     port = _shop(call, r)
     history = await port.history(p.id, n=1) if port is not None else None
     branches = await port.branches(p.id) if port is not None else []
     found = _pulled(p)
     last = history.commits[:1] if history is not None else ()
-    texts = _texts(call, _commit_refs(p, last))
+    texts = texts_of(call, _commit_refs(p, last))
     page = repo_page(p) if _host(call, p) is not None else ""
     return {"has_repo": history is not None, "base": BASE_BRANCH,
             "current": next((b.name for b in branches if b.current), ""),
@@ -349,7 +351,7 @@ async def summary(call: Call) -> dict[str, Any]:
 async def tree(call: Call) -> dict[str, Any]:
     """``GET …/code/fichiers`` : un dossier du dépôt à une branche ou à un commit (``ref`` ; par défaut la base) —
     ses entrées directes, les dossiers d'abord —, son dernier commit, et son README s'il en a un."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     _files(sc, r)
     port = _shop(call, r)
     ref, path = call.arg("ref", BASE_BRANCH, limit=100) or BASE_BRANCH, _path(call)
@@ -364,7 +366,7 @@ async def tree(call: Call) -> dict[str, Any]:
         raise missing()
     here = "/".join(x for x in path.strip().split("/") if x and x != ".")
     last = history.commits[:1] if history is not None else ()
-    texts = _texts(call, _commit_refs(r.p, last))
+    texts = texts_of(call, _commit_refs(r.p, last))
     readme = next((e.path for e in entries if e.kind == ENTRY_FILE
                    and e.path.rsplit("/", 1)[-1].lower() in ("readme.md", "readme", "readme.txt")), "")
     shown = [e for e in entries if not hidden_path(e.path)]  # un fichier caché ne sort pas d'ici (ADR 0292)
@@ -378,7 +380,7 @@ async def tree(call: Call) -> dict[str, Any]:
 async def blob(call: Call) -> dict[str, Any]:
     """``GET …/code/fichier`` : un fichier à une branche ou à un commit — son texte s'il en est un et qu'il tient
     sous la borne ; sinon ce qu'il est, sans contenu —, le dernier commit qui l'a touché et son histoire courte."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     _files(sc, r)
     port = _shop(call, r)
     ref, path = call.arg("ref", BASE_BRANCH, limit=100) or BASE_BRANCH, _path(call)
@@ -394,7 +396,7 @@ async def blob(call: Call) -> dict[str, Any]:
     why = BINARY if found.binary else TOO_BIG if found.too_big else LINK if found.kind == ENTRY_LINK else \
         MODULE if found.kind == ENTRY_MODULE else ""
     commits = history.commits if history is not None else ()
-    texts = _texts(call, _commit_refs(r.p, commits))
+    texts = texts_of(call, _commit_refs(r.p, commits))
     said = [_commit_json(sc, r, k, texts) for k in commits]
     page = repo_page(r.p) if _host(call, r.p) is not None else ""
     return {"ref": ref, "sha": found.sha, "path": found.path, "name": found.path.rsplit("/", 1)[-1],
@@ -412,7 +414,7 @@ async def blob(call: Call) -> dict[str, Any]:
 async def commits(call: Call) -> dict[str, Any]:
     """``GET …/code/commits`` : l'histoire d'une branche (``ref``), ou de toutes (sans ``ref``), du plus récent, page
     par page. ``path`` : seulement ceux qui ont touché ce chemin — pour qui lit ses fichiers."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     port = _shop(call, r)
     ref, path = call.arg("ref", limit=100), _path(call)
     if path:
@@ -427,7 +429,7 @@ async def commits(call: Call) -> dict[str, Any]:
         if ref and port is not None:
             raise missing()  # une branche ou un commit que ce dépôt n'a pas
         return {"ref": ref, "total": 0, "page": page, "size": size, "items": []}
-    texts = _texts(call, _commit_refs(r.p, history.commits))
+    texts = texts_of(call, _commit_refs(r.p, history.commits))
     return {"ref": ref, "total": history.total, "page": page, "size": size,
             "items": [_commit_json(sc, r, k, texts) for k in history.commits]}
 
@@ -447,7 +449,7 @@ def _linked_refs(p: Project, found: Iterable[Objective | None]) -> list[str]:
 async def commit(call: Call) -> dict[str, Any]:
     """``GET …/code/commit`` : un commit — son message entier, ses fichiers changés avec leurs comptes et leur diff
     (pour qui lit ses fichiers), et ce qui lui est lié."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     port = _shop(call, r)
     sha = call.arg("sha", limit=40)
     found = await port.change(r.p.id, sha) if port is not None and _SHA.match(sha) else None
@@ -455,7 +457,7 @@ async def commit(call: Call) -> dict[str, Any]:
         raise missing()
     k = found.commit
     o = _objective_for(r.p, k)
-    texts = _texts(call, [*_commit_refs(r.p, [k]), *_linked_refs(r.p, [o])])
+    texts = texts_of(call, [*_commit_refs(r.p, [k]), *_linked_refs(r.p, [o])])
     # face à son premier parent : pour une fusion, ce qu'elle apporte à la branche où elle entre
     diff = await _diff(sc, r, port, k.parents[0] if k.parents else "", k.sha)
     return {"commit": {**_commit_json(sc, r, k, texts), "body": found.body, "parents": list(k.parents)}, **diff,
@@ -479,17 +481,17 @@ def _branch_refs(p: Project, found: Iterable[Any]) -> list[str]:
 async def branches(call: Call) -> dict[str, Any]:
     """``GET …/code/branches`` : ses branches, la base d'abord — pour chacune son objectif, son avance et son retard
     sur la base, son dernier commit, sa pull request."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     port = _shop(call, r)
     found = await port.branches(r.p.id) if port is not None else []
-    texts = _texts(call, _branch_refs(r.p, found))
+    texts = texts_of(call, _branch_refs(r.p, found))
     return {"base": BASE_BRANCH, "items": [_branch_json(sc, r, b, texts) for b in found]}
 
 
 async def branch(call: Call) -> dict[str, Any]:
     """``GET …/code/branche`` : une branche — ce qu'elle a d'avance sur la base (ses commits, ses fichiers et leurs
     comptes pour qui lit ses fichiers), son objectif, sa pull request."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     port = _shop(call, r)
     name = call.arg("name", limit=100)
     found = next((b for b in await port.branches(r.p.id) if b.name == name), None) if port is not None else None
@@ -498,7 +500,7 @@ async def branch(call: Call) -> dict[str, Any]:
     span = None if found.base else await port.span(r.p.id, name)
     ahead = span.commits if span is not None else ()
     labelled = [replace(k, branch=name) for k in ahead]
-    texts = _texts(call, [*_branch_refs(r.p, [found]), *_commit_refs(r.p, labelled)])
+    texts = texts_of(call, [*_branch_refs(r.p, [found]), *_commit_refs(r.p, labelled)])
     diff = await _diff(sc, r, port, span.base, span.head, counts_only=True) if span is not None and ahead else \
         {"files": [], "cut": False, "cut_label": "", "insertions": 0, "deletions": 0,
          "files_readable": reads_files(sc, r), "files_why": "" if reads_files(sc, r) else NO_FILES}
@@ -513,12 +515,12 @@ async def pull_list(call: Call) -> dict[str, Any]:
     """``GET …/code/pulls`` : ses pull requests, telles que le journal les sait — les prêtes d'abord, puis les
     ouvertes, les proposées, les fusionnées et les fermées —, chacune avec sa CI, sa relecture et si elle peut la
     fusionner."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     p = r.p
     found = sorted(_pulled(p), key=lambda o: (PULL_ORDER[_pull_state(p, o)], -o.pull_at, -o.id))
     page, size = _paged(call)
     shown = found[(page - 1) * size: page * size]
-    texts = _texts(call, _linked_refs(p, shown))
+    texts = texts_of(call, _linked_refs(p, shown))
     return {"total": len(found), "page": page, "size": size,
             "items": [_pull_json(sc, r, o, texts) for o in shown]}
 
@@ -539,13 +541,13 @@ async def pull(call: Call) -> dict[str, Any]:
     le commit à son bout (``head`` : celui à nommer pour la fusionner), les jalons de son objectif et leurs preuves,
     sa relecture indépendante, ses vérifications, ses conflits, ses commits, ses fichiers changés et leur diff, ce
     qui lui est lié, et si elle peut la fusionner."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     p = r.p
     o = _pull_named(call, p)
     port = _shop(call, r)
     span = await port.span(p.id, o.branch) if port is not None and o.branch else None
     ahead = [replace(k, branch=o.branch) for k in (span.commits if span is not None else ())]
-    texts = _texts(call, [*_linked_refs(p, [o]), *_objective_refs(o), *_commit_refs(p, ahead)])
+    texts = texts_of(call, [*_linked_refs(p, [o]), *objective_refs(o), *_commit_refs(p, ahead)])
     diff = await _diff(sc, r, port, span.base, span.head) if span is not None and ahead else \
         {"files": [], "cut": False, "cut_label": "", "insertions": 0, "deletions": 0,
          "files_readable": reads_files(sc, r), "files_why": "" if reads_files(sc, r) else NO_FILES}
@@ -555,12 +557,12 @@ async def pull(call: Call) -> dict[str, Any]:
                   "last_refusal": texts.get(o.review_refused[-1], "")[:TEXT_SHOWN] if o.review_refused else ""}
     checks = _checks_brief(o)
     if checks is not None:
-        checks = {**checks, "said": _outside(texts.get(o.checks_said_ref, ""))}
+        checks = {**checks, "said": outside_text(texts.get(o.checks_said_ref, ""))}
     return {"pull": {**_pull_json(sc, r, o, texts), "head": span.head if span is not None else "",
                      "fork": span.base if span is not None else "", "review": review, "checks": checks,
                      "done_when": texts.get(o.done_when_ref, "")[:TEXT_SHOWN],
                      "result": texts.get(o.result_ref, "")[:TEXT_SHOWN],
-                     "milestones": _milestone_json(o, texts), "said": _outside(texts.get(o.pull_said_ref, ""))},
+                     "milestones": milestone_json(o, texts), "said": outside_text(texts.get(o.pull_said_ref, ""))},
             "commits": [_commit_json(sc, r, k, texts) for k in ahead], **diff}
 
 
@@ -568,14 +570,14 @@ def _remark_json(x: Any) -> dict[str, Any]:
     """Un échange venu de l'hôte : ses mots et le compte qui les a écrits là-bas, des données d'un inconnu
     (``outside``) ; ``from_here`` : il a été publié d'ici, sous le compte du jeton."""
     return {"id": x.id, "at": millis(x.at), "from_here": bool(x.mark), "outside": True,
-            "account": _outside(x.author, 80), "text": x.body[:TEXT_SHOWN]}
+            "account": outside_text(x.author, 80), "text": x.body[:TEXT_SHOWN]}
 
 
 async def pull_host(call: Call) -> dict[str, Any]:
     """``GET …/code/pull/hote`` : ce que l'hôte est seul à savoir d'une pull request, relu maintenant — son titre
     et son texte tels qu'ils y sont, ses échanges (commentaires et relectures), ses vérifications une à une, la fin
     du journal d'un échec. Tout y est une donnée d'un inconnu. Rien n'en va au journal."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     p = r.p
     o = _pull_named(call, p)
     host = _host(call, p)
@@ -588,8 +590,8 @@ async def pull_host(call: Call) -> dict[str, Any]:
                 "head": "", "mergeable": None, "talk": [], "checks": None}
     talk = await host.talk(p.remote, o.pull, pull=True)
     checks = await _checks_read(host, p, seen.sha) if seen.sha else None
-    return {"number": o.pull, "error": talk.error[:300], "title": _outside(seen.title, 400),
-            "body": _outside(seen.body), "head": seen.sha, "mergeable": seen.mergeable,
+    return {"number": o.pull, "error": talk.error[:300], "title": outside_text(seen.title, 400),
+            "body": outside_text(seen.body), "head": seen.sha, "mergeable": seen.mergeable,
             "state": seen.state, "at": millis(seen.at), "read_at": millis(seen.read_at),
             "talk": [_remark_json(x) for x in talk.remarks], "checks": checks}
 
@@ -601,8 +603,8 @@ async def fuse(call: Call) -> dict[str, Any]:
     """``POST …/code/pull/fusionner`` : fusionner une pull request chez l'hôte — le propriétaire du projet, ou qui
     s'occupe d'elle, et personne d'autre. ``head`` nomme le commit lu : si sa branche a bougé, rien ne part (409).
     La fusion est demandée ; le moteur l'apprend en relisant l'hôte, comme toute fusion."""
-    sc, r = _opened(call)
-    _steers(r)
+    sc, r = opened_project(call)
+    must_steer(r)
     if not r.reader.settles:
         raise Denied(403, NOT_MERGER)
     o = _pull_named(call, r.p)
@@ -633,14 +635,14 @@ def _issue_json(r: Reach, page: str, number: int, seen: Any, item: Item | None,
     state = seen.state if seen is not None else ""
     label = ISSUE_DROPPED if seen is not None and seen.dropped else ISSUE_WORDS.get(state, state)
     return {"number": number, "url": f"{page}/issues/{number}" if page else "",
-            "title": _outside(seen.title, 400) if seen is not None and not veil else None, "veiled": veil,
+            "title": outside_text(seen.title, 400) if seen is not None and not veil else None, "veiled": veil,
             "veiled_label": VEIL_WORDS.get(veil, ""), "state": state, "state_label": label,
             "dropped": bool(seen is not None and seen.dropped),
-            "labels": [x for x in (_outside(t, 40) for t in (seen.labels if seen is not None and not veil else ()))
+            "labels": [x for x in (outside_text(t, 40) for t in (seen.labels if seen is not None and not veil else ()))
                        if x is not None],
             "comments": seen.comments if seen is not None else 0, "at": millis(seen.at) if seen is not None else 0,
             "from_here": bool(seen is not None and seen.mark),
-            "account": _outside(seen.author, 80) if seen is not None and not veil else None,
+            "account": outside_text(seen.author, 80) if seen is not None and not veil else None,
             "ticket": _ticket_brief(r, item, texts)}
 
 
@@ -657,7 +659,7 @@ async def _issues_read(call: Call, p: Project) -> tuple[dict[int, Any], str]:
 async def issues(call: Call) -> dict[str, Any]:
     """``GET …/code/issues`` : les issues du dépôt, relues chez l'hôte, chacune avec le ticket qui la reflète et son
     étape. Si l'hôte ne répond pas, celles que ses tickets connaissent, sans leur état (``error`` le dit)."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     p = r.p
     seen, error = await _issues_read(call, p)
     known = {x.issue: x for x in p.board.items if x.list_name == c.TICKETS and x.issue}
@@ -670,7 +672,7 @@ async def issues(call: Call) -> dict[str, Any]:
     page, size = _paged(call)
     shown = numbers[(page - 1) * size: page * size]
     items = {n: known.get(n) or _issue_ticket(p, n) for n in shown}
-    texts = _texts(call, _ticket_refs(items.values()))
+    texts = texts_of(call, _ticket_refs(items.values()))
     where = repo_page(p) if _host(call, p) is not None else ""
     return {"total": len(numbers), "page": page, "size": size, "error": error,
             "items": [_issue_json(r, where, n, seen.get(n), items[n], texts) for n in shown]}
@@ -679,20 +681,20 @@ async def issues(call: Call) -> dict[str, Any]:
 async def issue(call: Call) -> dict[str, Any]:
     """``GET …/code/issue`` : une issue — son état chez l'hôte, ses étiquettes, son texte et ses échanges (pour qui
     peut la lire), le ticket qui la reflète et son étape."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     p = r.p
     number = call.number("number", 0, 0)
     seen, error = await _issues_read(call, p)
     item = _issue_ticket(p, number)
     if number <= 0 or (number not in seen and item is None):
         raise missing()
-    texts = _texts(call, _ticket_refs([item]))
+    texts = texts_of(call, _ticket_refs([item]))
     found = seen.get(number)
     out = _issue_json(r, repo_page(p) if _host(call, p) is not None else "", number, found, item, texts)
     readable = not out["veiled"]
     talk = await _host(call, p).talk(p.remote, number) if found is not None and readable else None
     return {**out, "error": error or (talk.error[:300] if talk is not None else ""),
-            "body": _outside(found.body) if found is not None and readable else None,
+            "body": outside_text(found.body) if found is not None and readable else None,
             "talk": [_remark_json(x) for x in (talk.remarks if talk is not None else ())]}
 
 
@@ -701,7 +703,7 @@ async def issue(call: Call) -> dict[str, Any]:
 
 def _run_json(x: Any) -> dict[str, Any]:
     seconds = (x.at - x.started) // 1_000_000 if x.at and x.started and x.at >= x.started else 0
-    return {"name": _outside(x.name, 80), "state": x.state, "state_label": CHECK_WORDS.get(x.state, x.state),
+    return {"name": outside_text(x.name, 80), "state": x.state, "state_label": CHECK_WORDS.get(x.state, x.state),
             "started": millis(x.started), "at": millis(x.at), "seconds": seconds}
 
 
@@ -715,15 +717,15 @@ async def _checks_read(host: Any, p: Project, sha: str) -> dict[str, Any]:
     log = await host.check_log(p.remote, sha) if got.state == CHECKS_FAILED else None
     return {"sha": sha, "state": got.state, "state_label": CHECK_WORDS.get(got.state, got.state), "error": "",
             "at": millis(got.at), "read_at": millis(got.read_at), "runs": [_run_json(x) for x in got.runs],
-            "failed": [x for x in (_outside(n, 80) for n in got.failed) if x is not None],
-            "log": {"name": _outside(log.name, 80), "tail": _outside(log.tail)}
+            "failed": [x for x in (outside_text(n, 80) for n in got.failed) if x is not None],
+            "log": {"name": outside_text(log.name, 80), "tail": outside_text(log.tail)}
             if log is not None and not log.error and log.tail.strip() else None}
 
 
 async def ci(call: Call) -> dict[str, Any]:
     """``GET …/code/ci`` : les vérifications que le moteur suit, par commit — celles du commit de chaque pull
     request —, les plus récentes d'abord, avec le commit, sa branche et son objectif."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     p = r.p
     found = sorted((o for o in _pulled(p) if o.checks_sha), key=lambda o: -o.checks_at)[:CHECKS_SHOWN]
     port = _shop(call, r)
@@ -731,9 +733,9 @@ async def ci(call: Call) -> dict[str, Any]:
     recent = await port.history(p.id, n=CHECKS_HISTORY) if port is not None and found else None
     wanted = {o.checks_sha for o in found}
     known = {k.sha: k for k in (recent.commits if recent is not None else ()) if k.sha in wanted}
-    texts = _texts(call, [*_linked_refs(p, found), *_commit_refs(p, known.values()),
+    texts = texts_of(call, [*_linked_refs(p, found), *_commit_refs(p, known.values()),
                           *(o.checks_said_ref for o in found)])
-    return {"items": [{**(_checks_brief(o) or {}), "said": _outside(texts.get(o.checks_said_ref, "")),
+    return {"items": [{**(_checks_brief(o) or {}), "said": outside_text(texts.get(o.checks_said_ref, "")),
                        "commit": _commit_json(sc, r, known[o.checks_sha], texts) if o.checks_sha in known else None,
                        "branch": o.branch, "objective": _objective_brief(o, texts), "pull": _pull_brief(sc, r, o)}
                       for o in found]}
@@ -742,7 +744,7 @@ async def ci(call: Call) -> dict[str, Any]:
 async def ci_commit(call: Call) -> dict[str, Any]:
     """``GET …/code/ci/commit`` : les vérifications d'un commit de ce dépôt, relues chez l'hôte, une à une, et la
     fin du journal d'un échec."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     p = r.p
     port = _shop(call, r)
     sha = call.arg("sha", limit=40)
@@ -754,7 +756,7 @@ async def ci_commit(call: Call) -> dict[str, Any]:
         raise Denied(409, NO_REMOTE)
     _host_read(call)
     o = _objective_for(p, found.commit)
-    texts = _texts(call, [*_commit_refs(p, [found.commit]), *_linked_refs(p, [o])])
+    texts = texts_of(call, [*_commit_refs(p, [found.commit]), *_linked_refs(p, [o])])
     return {**await _checks_read(host, p, found.commit.sha), "commit": _commit_json(sc, r, found.commit, texts),
             "linked": _linked(sc, r, o, texts)}
 

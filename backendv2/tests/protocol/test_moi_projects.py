@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 
 from mika.app.domains.projects.api import projects as moi
+from mika.app.domains.projects.api import reach
 from mika.app.domains.projects.demo import chain
 from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
@@ -38,6 +39,7 @@ from mika.faculties.projects.faculty import (
     STEER_ASKED,
     STEER_CAPABILITY,
 )
+from mika.faculties.projects.inspect_manage import NOT_KEEPER
 from mika.faculties.projects.inspect_merge import BLOCK_WORDS
 from mika.kernel.events import Content
 from mika.vocab.access import PERSON
@@ -195,7 +197,7 @@ def test_someone_nothing_is_shared_with_sees_nothing(world):  # noqa: F811
     _lea(client, live)
     login(client, "lea")
     got = _get(client, "")
-    assert got == {"projects": [], "todo": [], "todo_total": 0, "create": {"can": False, "why": moi.NOT_KEEPER}}
+    assert got == {"projects": [], "todo": [], "todo_total": 0, "create": {"can": False, "why": NOT_KEEPER}}
     assert client.get(API).json()["counts"]["projects"] == 0
     assert _get(client, "/accords") == {"items": []}
     for path in (f"/{pid}", f"/{pid}/elements", f"/{pid}/element?list=tickets&item=%231", "/999"):
@@ -226,7 +228,7 @@ def test_an_operator_has_no_more_rights_here_than_the_person_he_is(world):  # no
     assert opened.status_code == 200 and not opened.json()["proposed"], opened.text
     assert _ticket(client, pid, opened.json()["number"])["status"] == "unread"
     r = post(client, f"/projets/{pid}/ticket/trancher", {"item": "#1", "verdict": "dismiss", "reason": "Non."})
-    assert r.status_code == 403 and r.json()["error"] == moi.NOT_SETTLER
+    assert r.status_code == 403 and r.json()["error"] == reach.NOT_SETTLER
 
 
 def test_seeing_a_project_is_not_reading_its_detail(world):  # noqa: F811
@@ -246,7 +248,7 @@ def test_seeing_a_project_is_not_reading_its_detail(world):  # noqa: F811
     assert client.get(f"{P}/{pid}/elements").status_code == 403
     assert client.get(f"{P}/{pid}/element", params={"list": "tickets", "item": "#1"}).status_code == 403
     r = post(client, f"/projets/{pid}/ticket", {"title": "Je ne fais que voir"})
-    assert r.status_code == 403 and r.json()["error"] == moi.ONLY_SEEN
+    assert r.status_code == 403 and r.json()["error"] == reach.ONLY_SEEN
     assert client.get(f"{P}/{rid}").status_code == 404
 
 
@@ -259,7 +261,7 @@ def test_a_project_is_not_heard_above_the_level_of_who_looks(world):  # noqa: F8
     _share(client, live, pid, lea, "lecture")
     login(client, "lea")
     assert _get(client, "") == {"projects": [], "todo": [], "todo_total": 0,
-                                "create": {"can": False, "why": moi.NOT_KEEPER}}
+                                "create": {"can": False, "why": NOT_KEEPER}}
     assert client.get(f"{P}/{pid}").status_code == 404 and client.get(f"{P}/{pid}/elements").status_code == 404
     # devenue une amie, elle l'entend : la même ligne lui en ouvre alors le détail
     client.portal.call(lambda: befriend(live.kernel, lea, "friend"))
@@ -282,7 +284,7 @@ def test_reading_alone_changes_nothing(world):  # noqa: F811
                        (f"/{pid}/element/noter", {"list": "tickets", "item": "#1", "text": "Un mot"}),
                        (f"/{pid}/piloter", {"what": "pause"})):
         r = post(client, "/projets" + path, body)
-        assert r.status_code == 403 and r.json()["error"] == moi.NOT_STEERED, path
+        assert r.status_code == 403 and r.json()["error"] == reach.NOT_STEERED, path
 
 
 def test_steering_on_accord_opens_a_proposed_ticket_and_settles_nothing(world):  # noqa: F811
@@ -313,14 +315,14 @@ def test_steering_on_accord_opens_a_proposed_ticket_and_settles_nothing(world): 
     # elle ne tranche rien, ne change aucun statut, ne pilote pas, ne répond pas au plan, ne donne aucun accord
     plan_ticket = numbers["Journaliser les connexions refusées"]
     for path, body, why in (
-            (f"/{pid}/ticket/trancher", {"item": "#5", "verdict": "accept"}, moi.NOT_SETTLER),
+            (f"/{pid}/ticket/trancher", {"item": "#5", "verdict": "accept"}, reach.NOT_SETTLER),
             (f"/{pid}/ticket/trancher", {"item": f"#{plan_ticket}", "verdict": "validate", "plan": plan_seq},
-             moi.NOT_SETTLER),
-            (f"/{pid}/jalon", {"objective": 1, "milestone": 2, "verdict": "validate"}, moi.NOT_SETTLER),
-            (f"/{rid}/element/statut", {"list": "entreprises", "item": "acme", "status": "contactée"}, moi.NEEDS_EDIT),
-            (f"/{pid}/piloter", {"what": "pause"}, moi.NEEDS_EDIT),
-            (f"/{rid}/plan", {"verdict": "approve"}, moi.NOT_PLAN_ASKER),
-            (f"/{rid}/liens", {"reads": []}, moi.NOT_LINKER)):
+             reach.NOT_SETTLER),
+            (f"/{pid}/jalon", {"objective": 1, "milestone": 2, "verdict": "validate"}, reach.NOT_SETTLER),
+            (f"/{rid}/element/statut", {"list": "entreprises", "item": "acme", "status": "contactée"}, reach.NEEDS_EDIT),
+            (f"/{pid}/piloter", {"what": "pause"}, reach.NEEDS_EDIT),
+            (f"/{rid}/plan", {"verdict": "approve"}, reach.NOT_PLAN_ASKER),
+            (f"/{rid}/liens", {"reads": []}, reach.NOT_LINKER)):
         r = post(client, "/projets" + path, body)
         assert r.status_code == 403 and r.json()["error"] == why, (path, r.text)
     assert _project(live, pid).status == c.ACTIVE and _project(live, rid).plan_state == c.PROPOSED
@@ -332,7 +334,7 @@ def test_steering_on_accord_opens_a_proposed_ticket_and_settles_nothing(world): 
     assert hidden["body"] == "" and hidden["thread"] == [] and not hidden["can"]["note"]
     assert _get(client, f"/{pid}/elements", q="exporter")["total"] == 0  # chercher ne lit pas ce qu'on ne lit pas
     r = post(client, f"/projets/{pid}/element/noter", {"list": "tickets", "item": f"#{demand['number']}", "text": "?"})
-    assert r.status_code == 403 and r.json()["error"] == moi.UNREADABLE
+    assert r.status_code == 403 and r.json()["error"] == reach.UNREADABLE
     # le propriétaire, lui, la lit et l'accepte — une fois
     login(client, "adrien")
     assert _ticket(client, pid, demand["number"])["title"] == "Exporter la liste des hôtes en CSV"
@@ -367,7 +369,7 @@ def test_a_ticket_above_her_level_is_not_read(world):  # noqa: F811
     assert one["title"] == "" and one["body"] == "" and one["thread"] == [] and one["veiled_label"]
     assert _get(client, f"/{pid}/elements", q="fuité")["total"] == 0
     r = post(client, f"/projets/{pid}/element/noter", {"list": "tickets", "item": "#5", "text": "Lequel ?"})
-    assert r.status_code == 403 and r.json()["error"] == moi.UNREADABLE
+    assert r.status_code == 403 and r.json()["error"] == reach.UNREADABLE
 
 
 def test_a_linked_project_is_named_only_to_who_sees_it(world):  # noqa: F811
@@ -410,7 +412,7 @@ def test_the_owner_settles_tickets_and_names_the_plan_she_read(world):  # noqa: 
         project=pid, list_name=c.TICKETS, key="plan-journal", kind=c.NOTE_PLAN, owner=p.owner, about=p.about,
         text=Content.of("Plan : tout journaliser, pour toujours, dans la base.", level=1))], "projects")
     stale = post(client, path, {"item": f"#{planned}", "verdict": "validate", "plan": seq})
-    assert stale.status_code == 409 and stale.json()["error"] == moi.PLAN_MOVED.format(number=planned)
+    assert stale.status_code == 409 and stale.json()["error"] == reach.PLAN_MOVED.format(number=planned)
     assert not tracker.held(_project(live, pid).board, c.TICKETS, "plan-journal").validated_at
     fresh = _ticket(client, pid, planned)
     assert fresh["plan"] != seq and "pour toujours" in fresh["plan_text"]
@@ -570,7 +572,7 @@ def test_what_a_project_reads_changes_link_by_link(world):  # noqa: F811
     assert post(client, path, {"remove": [pid]}).status_code == 200
     assert _project(live, rid).reads == (other,)
     late = post(client, path, {"direct_on": [pid]})
-    assert late.status_code == 400 and late.json()["error"] == moi.NOT_READ_YET.format(projects=f"n° {pid}")
+    assert late.status_code == 400 and late.json()["error"] == reach.NOT_READ_YET.format(projects=f"n° {pid}")
     after = _get(client, f"/{rid}")["links"]
     assert [x["project"] for x in after["reads"]] == [other] and [x["project"] for x in after["candidates"]] == [pid]
 
@@ -700,14 +702,14 @@ def test_a_wait_she_cannot_settle_says_why_in_the_words_of_its_route(world):  # 
     assert all(t["can"] and t["why"] == "" for t in _get(client, "")["todo"])  # son propriétaire : tout se règle ici
     login(client, "lea")
     hers = {(t["kind"], t["what"]): t for t in _get(client, f"/{pid}")["todo"]}
-    assert hers[("approval", STEER_CAPABILITY)]["why"] == moi.NOT_DECIDER
-    assert hers[("ticket", "validation")]["why"] == hers[("checkpoint", "")]["why"] == moi.NOT_SETTLER
+    assert hers[("approval", STEER_CAPABILITY)]["why"] == reach.NOT_DECIDER
+    assert hers[("ticket", "validation")]["why"] == hers[("checkpoint", "")]["why"] == reach.NOT_SETTLER
     assert hers[("ticket", "question")]["can"] and hers[("ticket", "question")]["why"] == ""  # sur accord, elle répond
     sealed = hers[("ticket", "accept")]  # la demande d'un autre projet, qu'elle ne lit pas : ni titre, ni plus de raison
-    assert sealed["veiled"] == "proposed" and sealed["why"] == moi.NOT_SETTLER and "Exporter" not in sealed["about"]
+    assert sealed["veiled"] == "proposed" and sealed["why"] == reach.NOT_SETTLER and "Exporter" not in sealed["about"]
     theirs = _get(client, f"/{rid}")["todo"]
     assert {t["kind"] for t in theirs} == {"plan", "item"}
-    assert all(not t["can"] and t["why"] == moi.NOT_STEERED for t in theirs)  # en lecture seule
+    assert all(not t["can"] and t["why"] == reach.NOT_STEERED for t in theirs)  # en lecture seule
     # chaque raison est, mot pour mot, ce que répond la route — et rien n'a bougé
     refused = [t for t in (*hers.values(), *theirs) if not t["can"]]
     assert len(refused) >= 6 and all(t["gesture"]["where"] == "ici" for t in refused)
@@ -725,7 +727,7 @@ def test_a_wait_she_cannot_settle_says_why_in_the_words_of_its_route(world):  # 
     append(client, live, [secret], "projects")
     login(client, "lea")
     veiled = next(t for t in _get(client, "")["todo"] if t["veiled"])
-    assert veiled["mine"] and not veiled["can"] and veiled["why"] == moi.UNREADABLE and "Omega" not in veiled["about"]
+    assert veiled["mine"] and not veiled["can"] and veiled["why"] == reach.UNREADABLE and "Omega" not in veiled["about"]
     r = post(client, f"/projets/{rid}/element/statut", {"list": "entreprises", "item": "omega", "status": "contactée"})
     assert r.status_code == 403 and r.json()["error"] == veiled["why"]
 
@@ -808,7 +810,7 @@ def test_an_accord_in_a_project_entrusted_to_someone_awaits_who_looks_after_her(
     fiche = _get(client, f"/{hers}")
     assert fiche["project"]["mine"] and not fiche["rights"]["approve"]
     seen = next(t for t in fiche["todo"] if t["kind"] == "approval")
-    assert not seen["mine"] and not seen["can"] and seen["why"] == moi.NOT_DECIDER
+    assert not seen["mine"] and not seen["can"] and seen["why"] == reach.NOT_DECIDER
     assert seen["waits_for"] == identity_c.person_name(frame, "user_1") != ""  # qui s'occupe d'elle, par son prénom
     got = _get(client, "")
     assert not any(t["kind"] == "approval" for t in got["todo"])
@@ -851,7 +853,7 @@ def test_an_accord_is_given_on_what_was_read(world):  # noqa: F811
     hers = [t for t in _get(client, f"/{pid}")["todo"] if t["kind"] == "approval"]
     assert len(hers) == 1 and not hers[0]["mine"] and not hers[0]["can"] and _get(client, "/accords") == {"items": []}
     r = post(client, path, {"proposal": card["id"], "decision": "accept", "seen": card["digest"]})
-    assert r.status_code == 403 and r.json()["error"] == moi.NOT_DECIDER
+    assert r.status_code == 403 and r.json()["error"] == reach.NOT_DECIDER
     assert _project(live, pid).status == c.ACTIVE
     login(client, "adrien")
     ok = post(client, path, {"proposal": card["id"], "decision": "accept", "seen": card["digest"]})

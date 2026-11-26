@@ -38,7 +38,7 @@ from mika.adapters.mcp.protocol import Outcome, Tool, asgi, bearer
 from mika.adapters.web.accounts import CLIENT_SCREEN, Account, Accounts
 from mika.adapters.web.gate import SlidingWindow, one_line
 from mika.app.domains.projects.api import docs as pages
-from mika.app.domains.projects.api.projects import Reach, Scene, audience_at, reach
+from mika.app.domains.projects.api.reach import Reach, Scene, audience_at, reach
 from mika.app.me.api import Denied, Upload, form, me_of
 from mika.faculties.projects import docs, links
 from mika.faculties.projects import inspect_docs as words
@@ -58,7 +58,7 @@ USE_NOTED_S = 60.0
 TOO_MANY = "Trop d'appels d'affilée : attends une minute avant de réessayer."
 TOO_MANY_WRITES = (f"Ce projet a déjà reçu {WRITES_PER_DAY} écritures par MCP en vingt-quatre heures : sa "
                    "documentation n'en prend plus d'ici pour l'instant. Rien n'a été écrit.")
-#: le canal par où un outil arrive : celui d'un client natif de la personne (``projects.audience_of``)
+#: le canal par où un outil arrive : celui d'un client natif de la personne (``reach.audience_of``)
 CHANNEL = "mobile"
 UNKNOWN = "Projet introuvable, ou sa documentation ne t'est pas ouverte."
 READS_ONLY = "Ce jeton ne fait que lire : écrire demande le jeton d'un outil (client « tool »)."

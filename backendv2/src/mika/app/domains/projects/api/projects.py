@@ -2,22 +2,16 @@
 projet, son registre (tickets, listes de suivi), ses liens ; et ses gestes — répondre à un plan, ouvrir un ticket,
 noter, trancher un ticket ou un point d'arrêt, changer un statut, donner un accord, piloter, poser ce qu'il lit.
 
-**Aucune règle n'est d'ici.** Ce qu'elle a d'un projet (``reach``) est la plus serrée de deux lectures du moteur :
-
-- ce que ses lignes d'accès lui donnent hors de toute conversation (``todo.reach`` : son projet en entier ; celui
-  d'un autre selon ``links.given_to`` — seule une ligne qui la désigne ouvre, la ligne par défaut jamais) ;
-- ce que la conversation lui en dirait par le canal de son client (``access.sees``, ``access.steering`` : ses deux
-  portes), au niveau qu'elle en entend (``tracker.reader_of`` : la règle de « TES PROJETS »).
+**Ses routes, pas ses droits.** Ce qu'elle a d'un projet (``reach`` : la plus serrée de ce que ses lignes d'accès lui
+donnent et de ce que la conversation lui en dirait), les refus de ses routes, dans leur ordre, et qui a écrit, en mots
+(``author_fields``), sont dans ``reach.py`` — la base de toute l'API des projets ; les règles elles-mêmes, dans le
+moteur. Ici : les routes, ce qu'elles rendent, et les mots de la fiche.
 
 Un élément du registre se lit par ``tracker.veiled`` (son niveau, le ticket proposé venu d'ailleurs) ; un projet lié
 ne dit son titre que si elle le voit elle-même, et ce que le lien donne vient de ``links``. « À faire » est
 ``todo.for_person``, filtré par ce qu'elle a de chaque projet : une attente y est comptée pour qui peut la régler
-(``todo.awaits``), et celle qu'elle ne peut pas régler ici dit pourquoi — le refus même que sa route rendrait.
-
-Qui a écrit un élément ou une note se dit par sa sorte (``author_kind``) et en mots (``author``) : le nom d'une autre
-personne seulement si sa voix le dit à tous (qui s'occupe d'elle, ``identity.keepers``) ou si ce qui concerne cette
-personne s'entend d'ici, au niveau de l'élément (``vocab.privacy.hearable``) ; celui d'un autre projet, seulement si
-elle le voit.
+(``todo.awaits``), et celle qu'elle ne peut pas régler ici dit pourquoi — le refus même que sa route rendrait, dans
+le même ordre (``_refusal``, qui compose ceux de ``reach.py``).
 
 Chaque geste passe par l'action que la console déclare pour lui (``Call.act`` : en son nom, journalisée,
 dédoublonnée, auditée ``moi.projects.<action>``), après la garde que l'outil de conversation applique au même
@@ -37,7 +31,47 @@ from typing import Any
 
 from starlette.routing import Route
 
-from mika.adapters.web.session import native_token
+from mika.app.domains.projects.api.reach import (
+    AT_CONSOLE,
+    BY_HER,
+    BY_OTHER,
+    LINE_SHOWN,
+    LINK_LABELS,
+    MERGE_GESTURE,
+    MERGE_ROUTE,
+    NEEDS_EDIT,
+    NOT_DECIDER,
+    NOT_LINKER,
+    NOT_PLAN_ASKER,
+    NOT_READ_YET,
+    NOT_SETTLER,
+    NOT_STEERED,
+    ONLY_SEEN,
+    PLAN_MOVED,
+    SEEN_NEEDED,
+    TEXT_SHOWN,
+    UNREADABLE,
+    Reach,
+    Scene,
+    answers_plan,
+    author_fields,
+    decides,
+    edit_refusal,
+    frame_refusal,
+    merge_refusal,
+    milestone_can,
+    must_steer,
+    objective_can,
+    opened_project,
+    outside_text,
+    person_name,
+    reaches,
+    reads_files,
+    scene,
+    store_of,
+    texts_of,
+    writing_projects,
+)
 from mika.app.me.api import Call, Denied, MeApiBase, done, form, missing, person_of
 from mika.app.me.common import millis, snippet
 from mika.contracts import forge as forge_c
@@ -46,15 +80,12 @@ from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.faculties.projects import (
-    access,
     actions,
     asks,
     glance,
     inspect_todo,
     issues,
     links,
-    managing,
-    merge,
     milestones,
     pulls,
     tickets,
@@ -73,11 +104,9 @@ from mika.faculties.projects.faculty import (
     Item,
     Objective,
     Project,
-    ProjectsState,
     awaiting,
     board_ticket,
     by_pulls,
-    detail_level,
     handed_over,
     milestones_of,
     objective_at,
@@ -89,8 +118,7 @@ from mika.faculties.projects.faculty import (
     written_on,
 )
 from mika.faculties.projects.inspect import CHECKS_FR, OBJ_FR, PULL_FR, STATUS_FR, pull_words, window_words
-from mika.faculties.projects.inspect_manage import HELD_WORDS, NOT_KEEPER
-from mika.faculties.projects.inspect_merge import BLOCK_WORDS
+from mika.faculties.projects.inspect_manage import NOT_KEEPER
 from mika.faculties.projects.inspect_milestones import CHECK_WORDS
 from mika.faculties.projects.inspect_milestones import STATE_FR as MILESTONE_FR
 from mika.faculties.projects.inspect_reviews import REVIEW_WORDS
@@ -105,12 +133,10 @@ from mika.faculties.projects.inspect_tracker import (
 )
 from mika.faculties.projects.tools import trigger_words
 from mika.kernel.clock import HOUR
-from mika.kernel.frame import Audience
 from mika.runtime import decisions
 from mika.runtime.operations import audit
-from mika.vocab.access import CHANGES, STEER_ASK, STEER_EDIT, STEER_NO, STEER_RANK, STEER_WORDS, tighten
-from mika.vocab.episodes import Kind, project_of
-from mika.vocab.privacy import ChannelTrust, hearable
+from mika.vocab.access import CHANGES, STEER_ASK, STEER_EDIT, STEER_NO, STEER_WORDS
+from mika.vocab.episodes import project_of
 
 #: où vivent ses routes
 PATH = "/projets"
@@ -118,8 +144,6 @@ PATH = "/projets"
 PAGE, PAGE_MAX = 25, 100
 #: ce qu'une fiche montre au plus : ses objectifs ponctuels (les ouverts d'abord), ses attentes, ses accords
 OBJECTIVES_SHOWN, WAITING_SHOWN, APPROVALS_SHOWN = 40, 60, 20
-#: un texte rendu : sa borne (un plan, le texte d'un ticket, une note), et celle d'une ligne
-TEXT_SHOWN, LINE_SHOWN = 8000, 240
 #: les projets nommés au plus dans chaque liste d'un envoi de liens (``links.LINKS_MAX`` borne ensuite ce qu'il lit)
 LINKS_SENT = 12
 
@@ -134,13 +158,8 @@ VEIL_WORDS = {tracker.PROPOSED_VEIL: "proposé par un autre : il se lit quand so
 #: où se fait un geste : ici (une route de cette API), dans la console (rien ici ne le fait), chez l'hôte du dépôt
 HERE, CONSOLE, HOST = "ici", "console", "hote"
 APPROVAL_GESTURE = "Lire et décider"
-#: qui a écrit un élément ou une note (``author_kind``) : elle, la personne connectée, une autre personne, un autre
-#: projet, quelqu'un chez l'hôte du dépôt
-BY_HER, BY_YOU, BY_OTHER, BY_PROJECT, BY_HOST = "self", "you", "person", "project", "host"
-YOU_WORDS, OTHER_WORDS, HOST_WORDS = "toi", "une autre personne", "quelqu'un chez l'hôte du dépôt"
 #: qui donne un accord, quand aucun prénom ne se sait
 KEEPER_WORDS = "qui s'occupe d'elle"
-PROJECT_WORDS, NAMED_PROJECT_WORDS = "un autre projet", "le projet « {title} »"
 
 # ── Ce que l'écran attendait encore (ADR 0293) : ses mots ─────────────────
 
@@ -178,213 +197,6 @@ WHERE_PROJECT, WHERE_ELSEWHERE = "dans ce projet", "hors de la machine"
 INSTRUCTIONS_SHOWN, ASKS_SHOWN = 8, 20
 WHY_UNREAD = "Ce mot se dit d'un projet que tu vois et que ce projet lit : « why_for », son numéro."
 
-# ── Les refus, en mots ────────────────────────────────────────────────────
-
-ONLY_SEEN = "Ce projet ne t'est ouvert qu'à voir : son détail reste à son propriétaire."
-NOT_STEERED = "Tu ne pilotes pas ce projet : tu peux le lire, pas y changer quoi que ce soit."
-NEEDS_EDIT = ("Sur ce projet, ce geste demande l'accord de son propriétaire : demande-le-lui dans le chat, elle le lui "
-              "proposera.")
-NOT_SETTLER = "Seul le propriétaire du projet, ou qui s'occupe d'elle, tranche ici."
-NOT_PLAN_ASKER = "Seule la personne qui a demandé ce projet, ou qui s'occupe d'elle, répond à son plan."
-NOT_LINKER = "Seul le propriétaire du projet pose ce qu'il lit."
-NOT_DECIDER = "Cet accord n'est pas le tien : il attend quelqu'un qui s'occupe d'elle."
-UNREADABLE = "Cet élément ne se lit pas d'ici."
-AT_CONSOLE = "Ce geste ne se fait pas d'ici : il se fait dans la console."
-NOT_MERGER = "Seul le propriétaire du projet, ou qui s'occupe d'elle, fusionne une pull request."
-NOT_FRAMER = ("Seul le propriétaire du projet, ou qui s'occupe d'elle, change son cadre : tu le pilotes, tu ne le "
-              "règles pas.")
-#: l'onglet de ce qu'un projet lit et de qui le lit (ADR 0290 : « Liens » s'appelle « Dépendances »), en mots
-LINK_LABELS = {"title": "Dépendances", "reads": "Il dépend de", "readers": "Dépendent de lui",
-               "asks": "Ses demandes"}
-NO_FILES = "Ce projet ne t'ouvre pas ses fichiers : tu en lis les titres et les états, pas le contenu ni les diffs."
-#: le geste d'une pull request prête (ADR 0288) : la route qui la fusionne, et ses mots
-MERGE_ROUTE, MERGE_GESTURE = "code/pull/fusionner", "Fusionner"
-NOT_READ_YET = "Ses demandes n'entrent directement que chez un projet qu'il lit déjà : {projects}."
-PLAN_MOVED = "Le plan du ticket #{number} n'est plus celui que tu as lu : relis-le dans son fil, puis valide-le."
-SEEN_NEEDED = "Dis ce que tu as lu : « seen », le condensé de son aperçu."
-
-
-# ── Ce qu'elle a d'un projet ──────────────────────────────────────────────
-
-
-@dataclass(frozen=True, slots=True)
-class Scene:
-    """Ce qu'une requête lit une fois : ce qu'elle vit, ses projets, le monde des règles, et qui regarde."""
-
-    call: Call
-    frame: Any
-    s: ProjectsState
-    world: links.World
-    audience: Audience
-    person: str
-
-    @property
-    def keeper(self) -> bool:
-        """Elle s'occupe d'elle : « ton accord », dans une ligne d'accès, c'est le sien (ADR 0133)."""
-        return self.world.keeper(self.person)
-
-
-@dataclass(frozen=True, slots=True)
-class Reach:
-    """Ce que la personne a d'un projet : le voir (son titre, son état), son détail, le piloter (``STEERS``), le
-    trancher (ses tickets, ses points d'arrêt), et ce qu'elle lit de son registre (``reader``)."""
-
-    p: Project
-    own: bool
-    see: bool
-    detail: bool
-    steer: str
-    reader: tracker.Reader
-
-    @property
-    def settles(self) -> bool:
-        return self.steer in CHANGES and self.reader.settles
-
-
-def audience_of(call: Call) -> Audience:
-    """L'audience de qui est connecté, par le canal de son client (le chat web, l'app du téléphone), telle que le
-    pipeline la lirait en tête-à-tête : son niveau est celui que son lien lui ouvre (``identity.DISCLOSURE``)."""
-    return audience_at(call.frame, call.me, "mobile" if native_token(call.request.headers) else "web")
-
-
-def audience_at(frame: Any, me: Any, channel: str) -> Audience:
-    """L'audience d'une personne connue par son compte (``Me``), par ce canal, en tête-à-tête — pour une requête de
-    son espace, et pour un outil qui présente son jeton au point MCP (ADR 0289)."""
-    d = frame.get(identity_c.DISCLOSURE((me.handle, channel, False)))
-    return Audience(persons=(me.handle,), channel=channel, room=None, public=False, level=int(d.level),
-                    witness_level=int(d.witness_level), private_ok=bool(d.own_file),
-                    trust=ChannelTrust.AUTHENTICATED.value, name=me.name, person=me.person,
-                    owner=bool(frame.get(identity_c.SPEAKS_AS_OWNER(me.handle))), tied_level=int(d.tied_level),
-                    veiled_level=int(d.veiled_level), untied_level=int(d.untied_level))
-
-
-def scene(call: Call) -> Scene:
-    frame = call.frame
-    return Scene(call, frame, frame.state("projects"), links.world_of(frame), audience_of(call), call.me.person)
-
-
-def reach(sc: Scene, p: Project) -> Reach:
-    """Ce qu'elle a de ce projet : la plus serrée de ce que ses lignes lui donnent hors de toute conversation et de
-    ce que la conversation lui en dirait par ce canal, au niveau qu'elle en entend."""
-    grant = todo.reach(p, sc.person, sc.world)
-    reader = tracker.reader_of(sc.frame, p, sc.person, sc.audience)
-    see = grant.see and access.sees(p, sc.audience, Kind.REPLY, sc.frame) and p.sensitivity <= reader.level
-    steer = tighten(grant.steer, access.steering(p, sc.audience, Kind.REPLY, sc.frame), STEER_RANK) if see \
-        else STEER_NO
-    detail = see and steer != STEER_NO and detail_level(p) <= reader.level
-    return Reach(p, todo.owns(p, sc.person, sc.world), see, detail, steer if detail else STEER_NO, reader)
-
-
-def reads_files(sc: Scene, r: Reach) -> bool:
-    """Lit-elle le contenu de ses fichiers et ses diffs (ADR 0288) ? Son détail, et le droit sur ses fichiers — celui
-    de ses lignes d'accès hors de toute conversation (``todo.reach``) et par le canal de son client
-    (``access.shares_files``) —, au niveau de ce que le projet écrit."""
-    p = r.p
-    return r.detail and todo.reach(p, sc.person, sc.world).files and written(p) <= r.reader.level \
-        and access.shares_files(p, sc.audience, Kind.REPLY, sc.frame)
-
-
-def merge_refusal(r: Reach, o: Objective | None, now: int = 0) -> str:
-    """Pourquoi elle ne peut pas fusionner la pull request de cet objectif (vide : elle le peut) — le refus même de
-    ``POST …/code/pull/fusionner``, dans son ordre : la piloter, la trancher, puis ce que la pull request en dit
-    (``now`` : l'instant, pour une pull request fraîche dont l'hôte n'a pas encore dit les vérifications)."""
-    if r.steer not in CHANGES:
-        return NOT_STEERED
-    if not r.reader.settles:
-        return NOT_MERGER
-    block = merge.blocked(r.p, o, now) if o is not None else merge.NO_PULL
-    return BLOCK_WORDS[block] if block else ""
-
-
-def edit_refusal(r: Reach) -> str:
-    """Pourquoi elle ne change ni ses objectifs, ni ses jalons, ni ses tickets, ni ses décisions (vide : elle le
-    peut ; ADR 0290) : cela demande de le piloter en modification — le refus même de ces routes, dit d'avance."""
-    if not r.detail:
-        return ONLY_SEEN
-    return "" if r.steer == STEER_EDIT else NOT_STEERED if r.steer not in CHANGES else NEEDS_EDIT
-
-
-def frame_refusal(r: Reach) -> str:
-    """Pourquoi elle ne change pas le cadre de ce projet — ses réglages, ses outils, son dépôt, l'archiver (vide :
-    elle le peut ; ADR 0290) : le piloter en modification, et en être le propriétaire ou s'occuper d'elle
-    (``managing.frames``, que ``Reader.settles`` lit déjà)."""
-    return edit_refusal(r) or ("" if r.reader.settles else NOT_FRAMER)
-
-
-def objective_can(r: Reach, o: Objective) -> dict[str, Any]:
-    """Ce qu'elle peut faire d'un objectif ici : la garde de ses routes, dite d'avance."""
-    why = edit_refusal(r)
-    can, once = not why, o.kind == c.ONCE
-    living = o.status in (c.OPEN, c.BLOCKED)
-    return {"modify": can and o.status != c.DROPPED, "reopen": can and o.status in (c.DONE, c.BLOCKED),
-            "done": can and once and living, "drop": can and o.status != c.DROPPED,
-            "milestone": can and once and living and len(milestones_of(o)) < c.MILESTONES_MAX, "why": why}
-
-
-def milestone_can(r: Reach, m: Any) -> dict[str, Any]:
-    """Ce qu'elle peut faire d'un jalon ici : le modifier, le retirer — et sinon pourquoi (atteint ou retiré, il ne
-    bouge plus ; un point d'arrêt et un jalon tenu restent à qui tranche, ADR 0278)."""
-    why = edit_refusal(r)
-    held = "" if why else managing.undoing(m, r.reader.settles)
-    why = why or (HELD_WORDS.get(held, HELD_WORDS["other"]) if held else "")
-    return {"modify": not why, "drop": not why, "why": why}
-
-
-def reaches(sc: Scene) -> dict[int, Reach]:
-    """Ses projets : ceux qu'elle voit, par numéro."""
-    found = ((p.id, reach(sc, p)) for p in sc.s.projects.values())
-    return {pid: r for pid, r in found if r.see}
-
-
-def _store(call: Call) -> Any:
-    return call.kernel.mind.store
-
-
-def _texts(call: Call, refs: Iterable[str]) -> dict[str, str]:
-    wanted = [r for r in dict.fromkeys(refs) if r]
-    return dict(_store(call).content(wanted)) if wanted else {}
-
-
-def _name(sc: Scene, person: str | None) -> str:
-    return (identity_c.person_name(sc.frame, person) or "") if person else ""
-
-
-def _opened(call: Call, *, detail: bool = True) -> tuple[Scene, Reach]:
-    """Le projet que nomme le chemin, s'il est à elle ou qu'on le lui laisse voir : sinon introuvable. ``detail`` :
-    la route lit ou change son détail — le voir n'y suffit pas (403)."""
-    sc = scene(call)
-    p = sc.s.projects.get(int(call.request.path_params["project"]))
-    r = reach(sc, p) if p is not None else None
-    if r is None or not r.see:
-        raise missing()
-    if detail and not r.detail:
-        raise Denied(403, ONLY_SEEN)
-    return sc, r
-
-
-def _steers(r: Reach, *, edit: bool = False) -> None:
-    """La garde des outils de conversation : y changer quelque chose demande de le piloter, sur accord ou en
-    modification ; ``edit`` — le geste ne se fait qu'en modification (sur accord, il se demande dans le chat)."""
-    if r.steer not in CHANGES:
-        raise Denied(403, NOT_STEERED)
-    if edit and r.steer != STEER_EDIT:
-        raise Denied(403, NEEDS_EDIT)
-
-
-def _answers_plan(sc: Scene, r: Reach) -> bool:
-    """Qui répond à son plan (``project_steer``) : qui l'a demandé, ou qui s'occupe d'elle."""
-    return r.steer in CHANGES and (sc.person == r.p.asked_by or sc.keeper)
-
-
-def _decides(sc: Scene, r: Reach, proposal: int) -> bool:
-    """Un accord est celui de qui s'occupe d'elle (« ton accord », ADR 0133) ; une carte adressée à quelqu'un
-    (``runtime.DECIDER``) n'est qu'à lui."""
-    if not r.detail or not sc.keeper:
-        return False
-    pending = sc.frame.state("runtime").effects.get(proposal)
-    decider = rt.proposal_args(pending.args_json).get(rt.DECIDER) if pending is not None else None
-    return not decider or decider == sc.call.me.handle
-
 
 # ── « À faire » ───────────────────────────────────────────────────────────
 
@@ -420,7 +232,7 @@ def _refusal(sc: Scene, r: Reach, w: todo.Waiting) -> str:
     if not r.detail:
         return ONLY_SEEN
     if w.kind == todo.APPROVAL:
-        return "" if _decides(sc, r, w.number) else NOT_DECIDER
+        return "" if decides(sc, r, w.number) else NOT_DECIDER
     if w.kind == todo.TICKET and w.what == todo.MERGE:
         return merge_refusal(r, todo.objective_of(r.p, w), sc.frame.now)  # son geste, ici (ADR 0288)
     if w.kind == todo.BLOCKED or (w.kind == todo.TICKET and w.what == todo.STUCK):
@@ -430,7 +242,7 @@ def _refusal(sc: Scene, r: Reach, w: todo.Waiting) -> str:
     if r.steer not in CHANGES:
         return NOT_STEERED
     if w.kind == todo.PLAN:
-        return "" if _answers_plan(sc, r) else NOT_PLAN_ASKER
+        return "" if answers_plan(sc, r) else NOT_PLAN_ASKER
     if w.kind in (todo.NEED, todo.STALLED, todo.REVIEW, todo.ITEM):
         return "" if r.steer == STEER_EDIT else NEEDS_EDIT
     if w.kind == todo.CHECKPOINT or (w.kind == todo.TICKET and w.what in SETTLED_HERE):
@@ -522,8 +334,8 @@ def _waits_for(sc: Scene, p: Project, w: todo.Waiting) -> str:
     """Qui cette attente attend, en mots (``todo.awaits``) : la personne nommée ; pour un accord, qui s'occupe d'elle,
     par son prénom — sa voix les nomme à tous (``identity.keepers``) ; vide : le propriétaire du projet."""
     if w.kind not in todo.KEEPER_ONLY:
-        return _name(sc, w.person)
-    names = [n for n in dict.fromkeys(_name(sc, o) for o in sc.frame.get(identity_c.OWNERS) or ()) if n][:3]
+        return person_name(sc, w.person)
+    names = [n for n in dict.fromkeys(person_name(sc, o) for o in sc.frame.get(identity_c.OWNERS) or ()) if n][:3]
     return " ou ".join(names) or KEEPER_WORDS
 
 
@@ -546,7 +358,7 @@ def _rights(sc: Scene, r: Reach) -> dict[str, Any]:
     return {"steer": r.steer, "steer_label": STEER_WORDS.get(r.steer, r.steer), "detail": r.detail,
             "ticket": changes, "ticket_born": "proposed" if r.steer == STEER_ASK else "open" if changes else "",
             "note": changes, "status": r.steer == STEER_EDIT, "settle": r.settles,
-            "plan": _answers_plan(sc, r), "pilot": r.steer == STEER_EDIT,
+            "plan": answers_plan(sc, r), "pilot": r.steer == STEER_EDIT,
             "links": r.detail and links.may_link(r.p, sc.person, sc.world), "approve": r.detail and sc.keeper,
             "files": reads_files(sc, r), "merge": changes and r.reader.settles,
             # ADR 0290 : son cadre (ses réglages, ses outils, son dépôt, l'archiver) ; ses objectifs, ses jalons,
@@ -561,7 +373,7 @@ def _head(sc: Scene, r: Reach, texts: Mapping[str, str], waiting: int) -> dict[s
     owner = links.owner_of(p)
     return {"id": p.id, "title": texts.get(p.title_ref, ""), "status": p.status,
             "status_label": STATUS_FR.get(p.status, p.status), "mine": r.own, "hers": not owner,
-            "owner_name": "" if r.own else _name(sc, owner), "steer": r.steer,
+            "owner_name": "" if r.own else person_name(sc, owner), "steer": r.steer,
             "steer_label": STEER_WORDS.get(r.steer, r.steer), "detail": r.detail,
             "where": snippet(texts.get(p.summary_ref, ""), LINE_SHOWN) if r.detail else "",
             "last_run": millis(p.last_run_at) if r.detail else 0,
@@ -607,7 +419,7 @@ async def overview(call: Call) -> dict[str, Any]:
     for a in hers:
         per[a.entry.project] = per.get(a.entry.project, 0) + 1
     size = call.number("size", PAGE, 1, PAGE_MAX)
-    texts = _texts(call, [*(ref for r in mine.values() for ref in (r.p.title_ref, r.p.summary_ref)),
+    texts = texts_of(call, [*(ref for r in mine.values() for ref in (r.p.title_ref, r.p.summary_ref)),
                           *_awaited_refs(hers[:size])])
     ordered = sorted(mine.values(), key=lambda r: (-per.get(r.p.id, 0), -r.p.last_run_at, r.p.id))
     return {"projects": [{**_head(sc, r, texts, per.get(r.p.id, 0)), "card": _card(sc, r, mine, texts)}
@@ -623,64 +435,18 @@ async def to_do(call: Call) -> dict[str, Any]:
     hers = [a for a in awaited(sc, reaches(sc)) if a.mine]
     page, size = _paged(call)
     shown = hers[(page - 1) * size: page * size]
-    texts = _texts(call, _awaited_refs(shown))
+    texts = texts_of(call, _awaited_refs(shown))
     return {"total": len(hers), "page": page, "size": size, "items": [_awaited_json(sc, a, texts) for a in shown]}
 
 
 # ── La fiche d'un projet ──────────────────────────────────────────────────
 
 
-def _outside(text: str, limit: int = TEXT_SHOWN) -> dict[str, Any] | None:
-    """Un texte venu d'ailleurs (un commentaire de l'hôte, la fin d'un journal, la sortie d'une commande) : le
-    client le présente comme tel, jamais comme un mot d'elle ni du propriétaire."""
-    return {"text": text[:limit], "outside": True} if text else None
-
-
-def _nameable(sc: Scene, person: str, level: int) -> bool:
-    """A-t-elle le droit de savoir le nom de cette autre personne ? Deux lectures du moteur, aucune d'ici : qui
-    s'occupe d'elle est nommé à tous par sa voix (``identity.keepers``) ; pour toute autre, « elle a écrit ceci » la
-    concerne, et ne se dit que si ce qui concerne autrui s'entend d'ici au niveau de l'élément (``privacy.hearable``,
-    appelée comme ``tracker.reader_of`` le fait pour le projet)."""
-    aud = sc.audience
-    return sc.world.keeper(person) or hearable((person,), level, sc.person, aud.level, aud.witness_level,
-                                               aud.private_ok)
-
-
-def _writers(sc: Scene, authors: Iterable[str]) -> dict[int, str]:
-    """Les projets qui ont écrit (une demande d'un projet à un autre) et qu'elle voit elle-même : leur titre, par
-    numéro. Les autres ne se nomment pas."""
-    asked = {pid for a in authors if (pid := c.asking_project(a))}
-    seen = [p for pid in sorted(asked) if (p := sc.s.projects.get(pid)) is not None and reach(sc, p).see]
-    texts = _texts(sc.call, [p.title_ref for p in seen])
-    return {p.id: texts.get(p.title_ref, "") for p in seen}
-
-
-def _author(sc: Scene, titles: Mapping[int, str], author: str, by: str, level: int, *,
-            veiled: bool = False) -> dict[str, str]:
-    """Qui a écrit un élément ou une note : sa sorte (``author_kind`` — elle, la personne connectée, une autre
-    personne, un autre projet, l'hôte du dépôt) et ses mots (``author``). Une autre personne n'est nommée que si elle
-    a le droit de le savoir (``_nameable``), un autre projet que si elle le voit (``titles`` : ``_writers``) ; rien
-    n'est nommé d'un élément qu'elle ne lit pas. Le compte de qui écrit chez l'hôte n'est jamais ici."""
-    if author == c.BY_SELF:
-        return {"author_kind": BY_HER, "author": self_c.name_of(sc.frame.get(self_c.PERSONA))}
-    if author == c.BY_HOST:
-        return {"author_kind": BY_HOST, "author": HOST_WORDS}
-    if project := c.asking_project(author):
-        title = "" if veiled else titles.get(project, "")
-        return {"author_kind": BY_PROJECT, "author": NAMED_PROJECT_WORDS.format(title=title) if title else PROJECT_WORDS}
-    person = person_of(sc.frame, by) if by else ""
-    if person and person == sc.person:
-        return {"author_kind": BY_YOU, "author": YOU_WORDS}
-    known = bool(person) and not veiled and _nameable(sc, person, level)
-    name = (identity_c.person_name(sc.frame, by) or _name(sc, person)) if known else ""
-    return {"author_kind": BY_OTHER, "author": name or OTHER_WORDS}
-
-
 def _cadence(o: Objective) -> str:
     return glance.cadence_words(o)
 
 
-def _objective_refs(o: Objective, *, files: bool = False) -> list[str]:
+def objective_refs(o: Objective, *, files: bool = False) -> list[str]:
     refs = [o.text_ref, o.done_when_ref, o.need_ref, o.note_ref, o.result_ref, o.routine_ref, o.pull_said_ref,
             o.checks_said_ref, o.review_ref, *o.review_refused[-1:]]
     for m in milestones_of(o):
@@ -696,7 +462,7 @@ def _mission_json(o: Objective, texts: Mapping[str, str]) -> dict[str, Any]:
             "each_pass": texts.get(o.routine_ref, "")[:TEXT_SHOWN], "need": texts.get(o.need_ref, "")[:TEXT_SHOWN]}
 
 
-def _milestone_json(o: Objective, texts: Mapping[str, str], *, files: bool = False) -> list[dict[str, Any]]:
+def milestone_json(o: Objective, texts: Mapping[str, str], *, files: bool = False) -> list[dict[str, Any]]:
     """Ses jalons. ``started`` : elle s'y est mise (``milestones.begun``). Ce qui le lie à un élément de son registre
     (``item_list``, ``item``, ``item_status``) se dit ; sa commande, seulement à qui lit ses fichiers (``files`` :
     elle nomme des chemins, ADR 0292)."""
@@ -710,7 +476,7 @@ def _milestone_json(o: Objective, texts: Mapping[str, str], *, files: bool = Fal
              "check_label": CHECK_WORDS.get(m.check, m.check), "status": m.status,
              "status_label": MILESTONE_FR.get(m.status, m.status), "ready": waits is not None and waits.id == m.id,
              "ready_at": millis(m.ready_at), "reached_at": millis(m.reached_at), "refused_at": millis(m.refused_at),
-             "how": texts.get(m.how_ref, "")[:TEXT_SHOWN], "proof": _outside(texts.get(m.proof_ref, ""), 2000),
+             "how": texts.get(m.how_ref, "")[:TEXT_SHOWN], "proof": outside_text(texts.get(m.proof_ref, ""), 2000),
              "reason": texts.get(m.reason_ref, "")[:TEXT_SHOWN], "commit": m.commit[:12]}
             for m in milestones_of(o)]
 
@@ -738,11 +504,11 @@ def _objective_json(p: Project, o: Objective, texts: Mapping[str, str], *, files
         pull = {"number": o.pull, "title": pulls.title_of(o), "url": pulls.pull_url(p, o), "state": o.pull_state,
                 "state_label": PULL_FR.get(o.pull_state, o.pull_state), "words": pull_words(o),
                 "changes_asked": o.pull_changes, "conflicts": o.pull_conflicts, "at": millis(o.pull_at),
-                "awaits_accord": o.pull_proposal, "said": _outside(texts.get(o.pull_said_ref, ""))}
+                "awaits_accord": o.pull_proposal, "said": outside_text(texts.get(o.pull_said_ref, ""))}
     checks = None
     if o.checks_sha:
         checks = {"state": o.checks, "state_label": CHECKS_FR.get(o.checks, ""), "sha": o.checks_sha[:12],
-                  "at": millis(o.checks_at), "said": _outside(texts.get(o.checks_said_ref, ""))}
+                  "at": millis(o.checks_at), "said": outside_text(texts.get(o.checks_said_ref, ""))}
     review = None
     if o.review_at:
         review = {"ok": o.review_ok, "label": REVIEW_WORDS[o.review_ok], "at": millis(o.review_at),
@@ -754,7 +520,7 @@ def _objective_json(p: Project, o: Objective, texts: Mapping[str, str], *, files
             "ticket": o.ticket, "need": texts.get(o.need_ref, "")[:TEXT_SHOWN],
             "note": texts.get(o.note_ref, "")[:TEXT_SHOWN], "result": texts.get(o.result_ref, "")[:TEXT_SHOWN],
             "runs": o.runs, "last_run": millis(o.last_run_at), "closed_at": millis(o.closed_at),
-            "milestones": _milestone_json(o, texts, files=files), "branch": o.branch, "pull": pull,
+            "milestones": milestone_json(o, texts, files=files), "branch": o.branch, "pull": pull,
             "checks": checks, "review": review}
 
 
@@ -768,7 +534,7 @@ def _coded(words: Mapping[str, str], codes: Iterable[str]) -> list[dict[str, str
 
 def _edit_only(r: Reach) -> str:
     """Pourquoi elle ne fait pas un geste réservé à qui le pilote en modification (vide : elle le peut) — le refus
-    de ``_steers(r, edit=True)``, dit d'avance."""
+    de ``must_steer(r, edit=True)``, dit d'avance."""
     return "" if r.steer == STEER_EDIT else NOT_STEERED if r.steer not in CHANGES else NEEDS_EDIT
 
 
@@ -876,7 +642,7 @@ def _sent(sc: Scene, r: Reach, mine: Mapping[int, Reach], names: Mapping[str, st
     out = []
     for a in sorted(r.p.asks, key=lambda a: -a.at)[:ASKS_SHOWN]:
         home = mine.get(a.target)
-        e = tracker.entry(_store(sc.call), a.target, c.TICKETS, a.key) if home is not None and home.detail else None
+        e = tracker.entry(store_of(sc.call), a.target, c.TICKETS, a.key) if home is not None and home.detail else None
         out.append(_demand(sc, mine, names, home, e.item if e is not None else None, a.target, direction="sent",
                            sender="project", number=a.number, status=a.status, at=a.at, closed_at=a.closed_at,
                            title=e.title if e is not None else ""))
@@ -891,7 +657,7 @@ def _yours(sc: Scene, mine: Mapping[int, Reach], names: Mapping[str, str], targe
         return []
     found = [x for x in home.p.board.items if x.list_name == c.TICKETS and x.number
              and x.author in (c.BY_PERSON, c.BY_OPERATOR) and x.by and person_of(sc.frame, x.by) == sc.person]
-    texts = _texts(sc.call, [x.title_ref for x in found])
+    texts = texts_of(sc.call, [x.title_ref for x in found])
     return [_demand(sc, mine, names, home, x, target, direction="sent", sender="you",
                     title=texts.get(x.title_ref, ""))
             for x in sorted(found, key=lambda x: -x.at)[:ASKS_SHOWN]]
@@ -901,7 +667,7 @@ def _received(sc: Scene, r: Reach, mine: Mapping[int, Reach], names: Mapping[str
     """Les demandes que d'autres projets lui ont adressées, parmi les tickets que son état garde (les ouverts, les
     derniers touchés), les plus récentes d'abord."""
     found = asks.received(r.p)
-    texts = _texts(sc.call, [x.title_ref for x in found])
+    texts = texts_of(sc.call, [x.title_ref for x in found])
     return [_demand(sc, mine, names, r, x, c.asking_project(x.author), direction="received", sender="project",
                     title=texts.get(x.title_ref, "")) for x in sorted(found, key=lambda x: -x.at)[:ASKS_SHOWN]]
 
@@ -918,7 +684,7 @@ async def _links_json(sc: Scene, r: Reach, mine: Mapping[int, Reach]) -> dict[st
     # ceux qu'elle peut lui faire lire : ceux qu'il peut se mettre à lire (``links.candidates``) et qu'elle voit
     offered = [t for t in links.candidates(sc.s, p, sc.world) if t.id in mine] if may else []
     ties = {reader.id: tie_of(reader, p.id) for reader, _ in readers}
-    texts = _texts(sc.call, [*(x.p.title_ref for x in mine.values()), *(t.why_ref for t in p.ties),
+    texts = texts_of(sc.call, [*(x.p.title_ref for x in mine.values()), *(t.why_ref for t in p.ties),
                              *(t.why_ref for t in ties.values())])
     sent, received = _sent(sc, r, mine, texts), _received(sc, r, mine, texts)
     reads = []
@@ -952,7 +718,7 @@ def _repo_json(r: Reach) -> dict[str, Any]:
     p = r.p
     return {"has_remote": bool(p.remote), "remote": p.remote if r.own else "", "branch": p.branch, "flow": p.flow,
             "flow_label": FLOW_WORDS.get(p.flow, p.flow), "auto_push": p.auto_push, "last_commit": p.last_commit[:12],
-            "remote_ok": p.remote_ok, "remote_at": millis(p.remote_at), "remote_line": _outside(p.remote_line, 400)}
+            "remote_ok": p.remote_ok, "remote_at": millis(p.remote_at), "remote_line": outside_text(p.remote_line, 400)}
 
 
 def _next_json(sc: Scene, r: Reach, texts: Mapping[str, str]) -> dict[str, Any]:
@@ -974,10 +740,10 @@ def _instructions(sc: Scene, r: Reach) -> list[dict[str, Any]]:
     found = [mind.decode(x) for x in mind.store.latest([AMENDED.name], INSTRUCTIONS_SHOWN, where=("project", p.id))]
     waiting = [e for e in found if e.at > p.last_run_at]
     heard = {e.seq: int(e.data.instruction.level or 0) <= r.reader.level for e in waiting}
-    texts = _texts(sc.call, [e.data.instruction.ref or "" for e in waiting if heard[e.seq]])
+    texts = texts_of(sc.call, [e.data.instruction.ref or "" for e in waiting if heard[e.seq]])
     return [{"seq": e.seq, "at": millis(e.at), "veiled": not heard[e.seq],
              "text": texts.get(e.data.instruction.ref or "", "")[:TEXT_SHOWN] if heard[e.seq] else TEXT_VEILED,
-             **_author(sc, {}, c.BY_PERSON, e.data.by, written(p))} for e in waiting]
+             **author_fields(sc, {}, c.BY_PERSON, e.data.by, written(p))} for e in waiting]
 
 
 def _triggers_json(sc: Scene, r: Reach, mine: Mapping[int, Reach], texts: Mapping[str, str]) -> list[dict[str, Any]]:
@@ -1025,7 +791,7 @@ def _with_can(r: Reach, o: Objective, shown: dict[str, Any]) -> dict[str, Any]:
 async def fiche(call: Call) -> dict[str, Any]:
     """``GET …/projets/<id>`` : où il en est — ce qui l'attend, ses missions, ses objectifs et leurs jalons, son
     plan —, ses listes, ses liens, son dépôt en bref. Qui ne fait que le voir n'en reçoit que l'en-tête."""
-    sc, r = _opened(call, detail=False)
+    sc, r = opened_project(call, detail=False)
     p = r.p
     mine = reaches(sc)
     found = [a for a in awaited(sc, mine) if a.entry.project == p.id][:WAITING_SHOWN]
@@ -1037,10 +803,10 @@ async def fiche(call: Call) -> dict[str, Any]:
     held = {o.id: _tickets_of(p, o) for o in once} if r.detail else {}
     if r.detail:
         refs += [p.plan_ref, p.questions_ref, *(lst.title_ref for lst in p.board.lists),
-                 *(ref for o in (*once, *constants) for ref in _objective_refs(o, files=files)),
+                 *(ref for o in (*once, *constants) for ref in objective_refs(o, files=files)),
                  *(x.title_ref for found_ in held.values() for x in found_),
                  *(x.p.title_ref for x in mine.values())]
-    texts = _texts(call, refs)
+    texts = texts_of(call, refs)
     head = _head(sc, r, texts, sum(1 for a in found if a.mine))
     out: dict[str, Any] = {"project": {**head, "description": texts.get(p.description_ref, "")[:TEXT_SHOWN]},
                            "rights": _rights(sc, r), "todo": [_awaited_json(sc, a, texts) for a in found]}
@@ -1059,7 +825,7 @@ async def fiche(call: Call) -> dict[str, Any]:
         "instructions": _instructions(sc, r), "forms": _forms_json(sc, r, mine, texts),
         "plan": {"state": p.plan_state, "state_label": PLAN_WORDS.get(p.plan_state, p.plan_state),
                  "text": texts.get(p.plan_ref, "")[:TEXT_SHOWN], "questions": texts.get(p.questions_ref, "")[:TEXT_SHOWN],
-                 "at": millis(p.plan_at), "version": p.plan_version, "asked_by": _name(sc, p.asked_by)},
+                 "at": millis(p.plan_at), "version": p.plan_version, "asked_by": person_name(sc, p.asked_by)},
         "lists": _lists_json(r, texts), "links": await _links_json(sc, r, mine),
         # son dernier commit, avec son message et son instant : le détail donne les titres de ses commits (ADR 0288)
         "repo": {**_repo_json(r), "commit": await _commit_at(sc, p)}})
@@ -1095,7 +861,7 @@ def _entry_json(sc: Scene, r: Reach, e: tracker.Entry, titles: Mapping[int, str]
                 full: bool = False) -> dict[str, Any]:
     """Un élément tel qu'elle peut le lire : ses faits toujours ; son titre, son texte et sa référence seulement si
     son niveau et son étape le lui laissent lire (``tracker.veiled``). Qui l'a ouvert se dit par sa sorte ; par son
-    nom, seulement si elle lit l'élément et a le droit de le savoir (``_author``)."""
+    nom, seulement si elle lit l'élément et a le droit de le savoir (``author_fields``)."""
     item = e.item
     veil = tracker.veiled(r.reader, item)
     ticket = item.list_name == c.TICKETS
@@ -1108,8 +874,8 @@ def _entry_json(sc: Scene, r: Reach, e: tracker.Entry, titles: Mapping[int, str]
         item.status not in _listing(r, item.list_name).closed, "hand": hand, "hand_label": HAND_WORDS.get(hand, ""),
         "yours": hand == c.ACTOR_OWNER and r.settles, "kind": item.kind, "kind_label": KIND_WORDS.get(item.kind, ""),
         "priority": item.priority, "priority_label": PRIORITY_WORDS.get(item.priority, ""), "actor": item.actor,
-        "actor_label": _name(sc, item.person) if item.actor == c.ACTOR_PERSON else ACTOR_WORDS.get(item.actor, ""),
-        **_author(sc, titles, item.author, item.by, written_on(r.p, item), veiled=bool(veil)),
+        "actor_label": person_name(sc, item.person) if item.actor == c.ACTOR_PERSON else ACTOR_WORDS.get(item.actor, ""),
+        **author_fields(sc, titles, item.author, item.by, written_on(r.p, item), veiled=bool(veil)),
         "outside": c.from_outside(item.author), "objective": item.objective, "notes": item.notes, "at": millis(item.at), "updated_at": millis(item.updated_at),
         "plan": item.plan_seq, "issue": item.issue, "pull": item.pull_number,
         # ADR 0293 : son étape du parcours en six (vide : écarté, ou pas un ticket), ce que l'hôte dit de son issue
@@ -1125,7 +891,7 @@ def _entry_json(sc: Scene, r: Reach, e: tracker.Entry, titles: Mapping[int, str]
 async def elements(call: Call) -> dict[str, Any]:
     """``GET …/projets/<id>/elements`` : une page d'une de ses listes (``list`` ; par défaut ses tickets), les
     derniers touchés d'abord. Une recherche ne compare que ce qu'elle peut lire."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     lst = _listing(r, call.arg("list", limit=40))
     state, status = call.arg("state", limit=10), call.arg("status", limit=tracker.STATUS_MAX)
     if state not in ("", "open", "closed"):
@@ -1135,18 +901,18 @@ async def elements(call: Call) -> dict[str, Any]:
     statuses = (status,) if status else lst.open if state == "open" else lst.closed if state == "closed" else ()
     page, size = _paged(call)
     query = {"statuses": statuses, "search": call.arg("q", limit=120), "reader": r.reader}
-    found = tracker.page(_store(call), r.p.id, lst.name, limit=size, offset=(page - 1) * size, **query)
-    titles = _writers(sc, (e.item.author for e in found))
-    return {"list": lst.name, "total": tracker.total(_store(call), r.p.id, lst.name, **query), "page": page,
+    found = tracker.page(store_of(call), r.p.id, lst.name, limit=size, offset=(page - 1) * size, **query)
+    titles = writing_projects(sc, (e.item.author for e in found))
+    return {"list": lst.name, "total": tracker.total(store_of(call), r.p.id, lst.name, **query), "page": page,
             "size": size, "items": [_entry_json(sc, r, e, titles) for e in found]}
 
 
-def _found(sc: Scene, r: Reach, *, readable: bool = True) -> tuple[tracker.Listing, tracker.Entry]:
+def found_element(sc: Scene, r: Reach, *, readable: bool = True) -> tuple[tracker.Listing, tracker.Entry]:
     """L'élément que nomme la requête (``list``, ``item`` : un ticket par ``#n``, un élément par sa clé) ;
     ``readable`` : un élément qu'elle ne peut pas lire se refuse (403)."""
     call = sc.call
     lst = _listing(r, call.arg("list", limit=40))
-    e = tracker.find(_store(call), r.p.id, lst.name, call.arg("item", limit=tracker.KEY_MAX + 1))
+    e = tracker.find(store_of(call), r.p.id, lst.name, call.arg("item", limit=tracker.KEY_MAX + 1))
     if e is None:
         raise missing()
     if readable and tracker.veiled(r.reader, e.item):
@@ -1157,25 +923,25 @@ def _found(sc: Scene, r: Reach, *, readable: bool = True) -> tuple[tracker.Listi
 async def element(call: Call) -> dict[str, Any]:
     """``GET …/projets/<id>/element`` : un élément, son fil, et pour un ticket son plan et ce qu'elle peut en faire.
     Un élément qu'elle ne peut pas lire ne rend que ses faits."""
-    sc, r = _opened(call)
-    lst, e = _found(sc, r, readable=False)
+    sc, r = opened_project(call)
+    lst, e = found_element(sc, r, readable=False)
     item = e.item
     veil = tracker.veiled(r.reader, item)
-    notes = [] if veil else tracker.thread(_store(call), r.p.id, lst.name, item.key)
-    titles = _writers(sc, (item.author, *(n.author for n in notes)))
+    notes = [] if veil else tracker.thread(store_of(call), r.p.id, lst.name, item.key)
+    titles = writing_projects(sc, (item.author, *(n.author for n in notes)))
     out = _entry_json(sc, r, e, titles, full=True)
     level = written_on(r.p, item)
-    out["thread"] = [{"seq": n.seq, "at": millis(n.at), **_author(sc, titles, n.author, n.by, level),
+    out["thread"] = [{"seq": n.seq, "at": millis(n.at), **author_fields(sc, titles, n.author, n.by, level),
                       "kind": n.kind, "kind_label": NOTE_WORDS.get(n.kind, n.kind), "text": n.text[:TEXT_SHOWN],
                       "outside": c.from_outside(n.author)} for n in notes]
     ticket = lst.name == c.TICKETS
-    plan = tracker.note_text(_store(call), item.plan_seq) if ticket and item.plan_seq and not veil else ""
+    plan = tracker.note_text(store_of(call), item.plan_seq) if ticket and item.plan_seq and not veil else ""
     out["plan_text"] = plan[:TEXT_SHOWN]
     out["small"] = item.small
     # ce qui lui est lié (ADR 0293) : l'objectif qui le tient, et sa pull request avec son titre et son état
     held = objective_at(r.p, item.objective) if ticket and item.objective else None
     if held is not None:
-        texts = _texts(call, [] if veil else [held.text_ref, held.pull_said_ref, held.checks_said_ref])
+        texts = texts_of(call, [] if veil else [held.text_ref, held.pull_said_ref, held.checks_said_ref])
         shown = _objective_json(r.p, held, texts)
         out["linked"] = {"objective": {"id": held.id, "text": shown["text"], "status": held.status,
                                        "status_label": shown["status_label"]},
@@ -1208,9 +974,9 @@ async def history(call: Call) -> dict[str, Any]:
     """``GET …/projets/<id>/element/historique`` : l'histoire des étapes d'un ticket — quand il est passé par
     chacune, par qui —, rejouée de son journal par les règles de l'état (``tracker.passages``). Des faits, aucun
     texte : un ticket qu'elle ne peut pas lire la rend aussi, sans un nom."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     call.data.setdefault("list", c.TICKETS)
-    lst, e = _found(sc, r, readable=False)
+    lst, e = found_element(sc, r, readable=False)
     if lst.name != c.TICKETS:
         raise Denied(400, "Seul un ticket a un parcours.", {"list": "tickets"})
     item, mind = e.item, call.kernel.mind
@@ -1219,98 +985,98 @@ async def history(call: Call) -> dict[str, Any]:
               if d.data.project == r.p.id and d.data.list_name == c.TICKETS]
     veil = bool(tracker.veiled(r.reader, item))
     found = tracker.passages(events)
-    titles = _writers(sc, (x.author for x in found))
+    titles = writing_projects(sc, (x.author for x in found))
     level, flow = written_on(r.p, item), by_pulls(r.p)
     return {"item": tracker.handle(item), "cut": len(raw) >= HISTORY_READ,
             "items": [{"seq": x.seq, "at": millis(x.at), "status": x.stage,
                        "status_label": tracker.status_words(c.TICKETS, x.stage), "was": x.was,
                        "was_label": tracker.status_words(c.TICKETS, x.was) if x.was else "",
                        "step": (step := tickets.step_of(x.stage, flow)), "step_label": JOURNEY_WORDS.get(step, ""),
-                       **_author(sc, titles, x.author, x.by, level, veiled=veil),
+                       **author_fields(sc, titles, x.author, x.by, level, veiled=veil),
                        "outside": c.from_outside(x.author)} for x in found]}
 
 
 # ── Ses gestes ────────────────────────────────────────────────────────────
 
 
-def _subject(r: Reach) -> str:
+def subject_key(r: Reach) -> str:
     return str(r.p.id)
 
 
 async def answer_plan(call: Call) -> dict[str, Any]:
     """``POST …/plan`` : valider son plan, ou lui demander de le reprendre (``project_steer``, approve / revise)."""
-    sc, r = _opened(call)
-    _steers(r)
-    if not _answers_plan(sc, r):
+    sc, r = opened_project(call)
+    must_steer(r)
+    if not answers_plan(sc, r):
         raise Denied(403, NOT_PLAN_ASKER)
     verdict = call.arg("verdict", limit=20)
     if verdict == "approve":
-        return done(await call.act("projects.plan_valider", form(), subject=_subject(r)))
+        return done(await call.act("projects.plan_valider", form(), subject=subject_key(r)))
     if verdict != "revise":
         raise Denied(400, "« verdict » : approve ou revise.", {"verdict": "approve ou revise"})
-    return done(await call.act("projects.plan_reviser", form(words=call.arg("words", limit=2000)), subject=_subject(r)))
+    return done(await call.act("projects.plan_reviser", form(words=call.arg("words", limit=2000)), subject=subject_key(r)))
 
 
 async def open_ticket(call: Call) -> dict[str, Any]:
     """``POST …/ticket`` : ouvrir un ticket. Qui ne pilote que sur accord le voit naître « proposé »."""
-    sc, r = _opened(call)
-    _steers(r)
+    sc, r = opened_project(call)
+    must_steer(r)
     proposed = r.steer == STEER_ASK
     title = call.arg("title", limit=tracker.TITLE_MAX)
     got = await call.act("projects.ticket_ouvrir", form(
         fixed={"born": BORN_PROPOSED} if proposed else None, title=title,
         text=call.arg("text", limit=tracker.TEXT_MAX), kind=call.arg("kind", c.TASK, limit=20),
-        priority=call.arg("priority", c.NORMAL, limit=20)), subject=_subject(r))
+        priority=call.arg("priority", c.NORMAL, limit=20)), subject=subject_key(r))
     out = done(got)
-    e = tracker.entry(_store(call), r.p.id, c.TICKETS, tracker.key_of("", title))
+    e = tracker.entry(store_of(call), r.p.id, c.TICKETS, tracker.key_of("", title))
     return {**out, "number": e.item.number if e is not None else 0, "proposed": proposed}
 
 
 async def note(call: Call) -> dict[str, Any]:
     """``POST …/element/noter`` : une note dans le fil d'un élément — ce qui répond à sa question."""
-    sc, r = _opened(call)
-    _steers(r)
-    lst, e = _found(sc, r)
+    sc, r = opened_project(call)
+    must_steer(r)
+    lst, e = found_element(sc, r)
     return done(await call.act("projects.element_noter", form(
         fixed={"list_name": lst.name, "item": tracker.handle(e.item)}, text=call.arg("text", limit=tracker.NOTE_MAX)),
-        subject=_subject(r)))
+        subject=subject_key(r)))
 
 
 async def set_status(call: Call) -> dict[str, Any]:
     """``POST …/element/statut`` : le statut d'un élément d'une liste de suivi — en modification seulement."""
-    sc, r = _opened(call)
-    _steers(r, edit=True)
-    lst, e = _found(sc, r)
+    sc, r = opened_project(call)
+    must_steer(r, edit=True)
+    lst, e = found_element(sc, r)
     return done(await call.act("projects.element_statut", form(
         fixed={"list_name": lst.name, "item": tracker.handle(e.item)},
         status=call.arg("status", limit=tracker.STATUS_MAX), note=call.arg("note", limit=tracker.NOTE_MAX)),
-        subject=_subject(r)))
+        subject=subject_key(r)))
 
 
 async def add_item(call: Call) -> dict[str, Any]:
     """``POST …/element/ajouter`` : un élément de plus dans une liste de suivi (pas un ticket : il s'ouvre par
     ``…/ticket``) — en modification seulement, comme changer un statut."""
-    sc, r = _opened(call)
-    _steers(r, edit=True)
+    sc, r = opened_project(call)
+    must_steer(r, edit=True)
     lst = _listing(r, call.arg("list", limit=40))
     title = call.arg("title", limit=tracker.TITLE_MAX)
     key = call.arg("key", limit=tracker.KEY_MAX)
     got = done(await call.act("projects.element_ajouter", form(
         list_name=lst.name, title=title, key=key, text=call.arg("text", limit=tracker.TEXT_MAX),
         status=call.arg("status", limit=tracker.STATUS_MAX), actor=call.arg("actor", limit=10),
-        link=call.arg("link", limit=tracker.LINK_MAX)), subject=_subject(r)))
+        link=call.arg("link", limit=tracker.LINK_MAX)), subject=subject_key(r)))
     return {**got, "list": lst.name, "key": tracker.key_of(key, title)}
 
 
 async def assign_item(call: Call) -> dict[str, Any]:
     """``POST …/element/confier`` : à qui est un élément d'une liste de suivi — à elle (``self``), ou au
     propriétaire du projet (``owner``). En modification seulement ; la main sur un ticket se déduit de son étape."""
-    sc, r = _opened(call)
-    _steers(r, edit=True)
-    lst, e = _found(sc, r)
+    sc, r = opened_project(call)
+    must_steer(r, edit=True)
+    lst, e = found_element(sc, r)
     return done(await call.act("projects.element_confier", form(
         fixed={"list_name": lst.name, "item": tracker.handle(e.item)}, actor=call.arg("actor", limit=10)),
-        subject=_subject(r)))
+        subject=subject_key(r)))
 
 
 #: ce qu'on tranche d'un ticket ici — ce que ``project_item`` laisse trancher en conversation, et depuis l'ADR 0290
@@ -1321,8 +1087,8 @@ VERDICTS = ("accept", "dismiss", "validate", "refuse", "done", "reopen")
 async def settle_ticket(call: Call) -> dict[str, Any]:
     """``POST …/ticket/trancher`` : accepter un ticket proposé, l'écarter (ou confirmer qu'elle l'écarte), valider
     son plan — en nommant le plan lu (ADR 0272) — ou le refuser. Le propriétaire du projet, ou qui s'occupe d'elle."""
-    sc, r = _opened(call)
-    _steers(r)
+    sc, r = opened_project(call)
+    must_steer(r)
     if not r.reader.settles:
         raise Denied(403, NOT_SETTLER)
     verdict = call.arg("verdict", limit=20)
@@ -1330,7 +1096,7 @@ async def settle_ticket(call: Call) -> dict[str, Any]:
         raise Denied(400, "« verdict » : accept, dismiss, validate, refuse, done ou reopen.",
                      {"verdict": ", ".join(VERDICTS)})
     call.data.setdefault("list", c.TICKETS)
-    lst, e = _found(sc, r)
+    lst, e = found_element(sc, r)
     if lst.name != c.TICKETS:
         raise Denied(400, "Seul un ticket se tranche.", {"list": "tickets"})
     plan = call.number("plan", 0, 0)
@@ -1341,13 +1107,13 @@ async def settle_ticket(call: Call) -> dict[str, Any]:
             raise Denied(409, PLAN_MOVED.format(number=e.item.number))
     return done(await call.act("projects.ticket_trancher", form(
         fixed={"item": tracker.handle(e.item), "plan": str(plan)}, verdict=verdict,
-        reason=call.arg("reason", limit=tracker.NOTE_MAX)), subject=_subject(r)))
+        reason=call.arg("reason", limit=tracker.NOTE_MAX)), subject=subject_key(r)))
 
 
 async def settle_milestone(call: Call) -> dict[str, Any]:
     """``POST …/jalon`` : valider ou refuser, avec sa raison, un point d'arrêt qu'elle a dit prêt."""
-    sc, r = _opened(call)
-    _steers(r)
+    sc, r = opened_project(call)
+    must_steer(r)
     if not r.reader.settles:
         raise Denied(403, NOT_SETTLER)
     verdict = call.arg("verdict", limit=20)
@@ -1355,7 +1121,7 @@ async def settle_milestone(call: Call) -> dict[str, Any]:
         raise Denied(400, "« verdict » : validate ou refuse.", {"verdict": "validate ou refuse"})
     return done(await call.act("projects.jalon_trancher", form(
         fixed={"objective": str(call.number("objective", 0, 0)), "milestone": str(call.number("milestone", 0, 0))},
-        verdict=verdict, reason=call.arg("reason", limit=1000)), subject=_subject(r)))
+        verdict=verdict, reason=call.arg("reason", limit=1000)), subject=subject_key(r)))
 
 
 #: ce qu'on demande à un projet qu'on pilote (``project_steer``) : une consigne, s'y mettre, la pause, la reprise
@@ -1366,8 +1132,8 @@ PILOT = {"instruct": "projects.consigne", "now": "projects.lancer", "pause": "pr
 async def pilot(call: Call) -> dict[str, Any]:
     """``POST …/piloter`` : une consigne, « vas-y maintenant », la pause, la reprise — pour qui le pilote en
     modification. Sur accord, la demande se fait dans le chat : elle la propose à qui s'occupe d'elle."""
-    sc, r = _opened(call)
-    _steers(r, edit=True)
+    sc, r = opened_project(call)
+    must_steer(r, edit=True)
     what = call.arg("what", limit=20)
     if what not in PILOT:
         raise Denied(400, "« what » : instruct, now, pause ou resume.", {"what": ", ".join(PILOT)})
@@ -1378,10 +1144,10 @@ async def pilot(call: Call) -> dict[str, Any]:
         if objective_at(r.p, objective) is None:
             raise missing()
         return done(await call.act("projects.lancer_objectif", form(fixed={"objective": str(objective)}),
-                                   subject=_subject(r)))
+                                   subject=subject_key(r)))
     else:
         values = form()
-    return done(await call.act(PILOT[what], values, subject=_subject(r)))
+    return done(await call.act(PILOT[what], values, subject=subject_key(r)))
 
 
 #: ce qu'un envoi de liens nomme : les projets à se mettre à lire, ceux à ne plus lire, et parmi ceux qu'il lit, ceux
@@ -1413,7 +1179,7 @@ async def set_links(call: Call) -> dict[str, Any]:
     qu'elle ne voit pas reste tel quel**, et le nommer se refuse comme un projet inconnu — la même réponse, qu'il le
     lise ou non. Les règles (qui peut être lu, la boucle, la borne, le mode direct) restent celles de ``links`` et de
     l'action de console."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     p = r.p
     if not links.may_link(p, sc.person, sc.world):
         raise Denied(403, NOT_LINKER)
@@ -1449,7 +1215,7 @@ async def set_links(call: Call) -> dict[str, Any]:
     knobs = {actions.link_knob(t.id): t.id in reads for t, _ in actions.link_options(sc.s, sc.frame, p)}
     knobs.update({actions.direct_knob(t): t in direct for t in p.reads})
     said = {"why": why, "why_for": str(why_for)} if why else None
-    got = done(await call.act("projects.liens", form(fixed=said, **knobs), subject=_subject(r)))
+    got = done(await call.act("projects.liens", form(fixed=said, **knobs), subject=subject_key(r)))
     # ses mots à elle : ceux de l'action nomment par leur numéro tous les projets lus, même ceux qu'elle ne voit pas
     return {**got, "message": LINKS_SAVED}
 
@@ -1474,7 +1240,7 @@ def _concerns(sc: Scene, r: Reach, v: Any, pending: Any) -> dict[str, Any]:
     args = rt.proposal_args(pending.args_json) if pending is not None else {}
     page = repo_page(p)
     item, o, where, url, why = None, None, WHERE_ELSEWHERE, "", ""
-    asked = _author(sc, {}, c.BY_SELF, "", written(p))
+    asked = author_fields(sc, {}, c.BY_SELF, "", written(p))
     if v.capability in ISSUE_CAPABILITIES:
         number = _number(args.get("ticket"))
         item = board_ticket(p, number)
@@ -1483,7 +1249,7 @@ def _concerns(sc: Scene, r: Reach, v: Any, pending: Any) -> dict[str, Any]:
             f"{page}/issues" if page else ""
         move = next((m for m in p.issue_moves if m.proposal == v.proposal), None)
         if move is not None and move.author and move.author != c.BY_SELF:
-            asked = _author(sc, {}, move.author, move.by, written(p))
+            asked = author_fields(sc, {}, move.author, move.by, written(p))
     elif v.capability == PULL_REQUEST_CAPABILITY:
         o = objective_at(p, _number(args.get("objective")))
         item = ticket_held(p, o)
@@ -1495,11 +1261,11 @@ def _concerns(sc: Scene, r: Reach, v: Any, pending: Any) -> dict[str, Any]:
         where = WHERE_PROJECT
         if ask is not None:
             o = objective_at(p, ask.objective) if ask.objective else None
-            asked = _author(sc, {}, c.BY_PERSON, ask.by, written(p))
-            why = _texts(sc.call, [ask.text_ref]).get(ask.text_ref, "")[:TEXT_SHOWN]
+            asked = author_fields(sc, {}, c.BY_PERSON, ask.by, written(p))
+            why = texts_of(sc.call, [ask.text_ref]).get(ask.text_ref, "")[:TEXT_SHOWN]
     elif v.capability.startswith(f"{c.OWNER}."):
         where, url = WHERE_REMOTE, page
-    texts = _texts(sc.call, [item.title_ref] if item is not None else [])
+    texts = texts_of(sc.call, [item.title_ref] if item is not None else [])
     return {"concerns": {"objective": o.id if o is not None else 0,
                          "ticket": _ticket_brief(r, item, texts) if item is not None else None,
                          "issue": item.issue if item is not None else 0,
@@ -1517,8 +1283,8 @@ async def approvals(call: Call) -> dict[str, Any]:
     effects = sc.frame.state("runtime").effects
     waiting = [(v, mine[pid]) for v in todo.pending_in(sc.frame)
                if (pid := project_of(v.context)) in mine and (not only or pid == only)]
-    waiting = [(v, r) for v, r in waiting if _decides(sc, r, v.proposal)][:APPROVALS_SHOWN]
-    texts = _texts(call, [ref for v, r in waiting for ref in (v.summary_ref, r.p.title_ref)])
+    waiting = [(v, r) for v, r in waiting if decides(sc, r, v.proposal)][:APPROVALS_SHOWN]
+    texts = texts_of(call, [ref for v, r in waiting for ref in (v.summary_ref, r.p.title_ref)])
     items = []
     for v, r in waiting:
         pending = effects.get(v.proposal)
@@ -1538,11 +1304,11 @@ async def approvals(call: Call) -> dict[str, Any]:
 async def approve(call: Call) -> dict[str, Any]:
     """``POST …/accord`` : accepter ou refuser ce qui attend un accord dans ce projet, sur le condensé de ce qu'elle
     a lu (``seen``) : ce qui partirait a changé depuis, rien ne part (409)."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     proposal = call.number("proposal", 0, 0)
     if not any(v.proposal == proposal for v in _pending(sc, r)):
         raise missing()
-    if not _decides(sc, r, proposal):
+    if not decides(sc, r, proposal):
         raise Denied(403, NOT_DECIDER)
     decision = call.arg("decision", limit=20)
     if decision not in ("accept", "refuse"):
@@ -1559,7 +1325,7 @@ async def approve(call: Call) -> dict[str, Any]:
             raise missing()
         if got.status in (decisions.CHANGED, decisions.BLOCKED):
             raise Denied(409, got.message)
-        await audit(call.kernel, "moi.projet_accord", by=call.me.handle, subject_kind="project", subject=_subject(r))
+        await audit(call.kernel, "moi.projet_accord", by=call.me.handle, subject_kind="project", subject=subject_key(r))
         return {"ok": True, "status": got.status, "deduped": False,
                 "message": "Accord donné." if got.status == decisions.APPROVED else "Refusé : rien ne partira."}
 

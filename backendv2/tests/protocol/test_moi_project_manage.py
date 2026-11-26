@@ -20,8 +20,7 @@ import ast
 from dataclasses import replace
 from pathlib import Path
 
-from mika.app.domains.projects.api import manage
-from mika.app.domains.projects.api import projects as moi
+from mika.app.domains.projects.api import manage, reach
 from mika.app.me.api import form as api_form
 from mika.contracts import projects as c
 from mika.faculties.projects import actions, inspect_manage, managing
@@ -495,7 +494,7 @@ def test_a_ticket_is_edited_by_who_pilots_and_closed_by_who_settles(world):  # n
     assert hers["modify"] and not hers["close"] and not hers["reopen"]
     _ok(client, pid, "ticket/modifier", {"item": f"#{number}", "priority": "normal"})
     closing = _post(client, pid, "ticket/trancher", {"item": f"#{number}", "verdict": "done"})
-    assert closing.status_code == 403 and closing.json()["error"] == moi.NOT_SETTLER
+    assert closing.status_code == 403 and closing.json()["error"] == reach.NOT_SETTLER
     login(client, "adrien")
     _ok(client, pid, "ticket/trancher", {"item": f"#{number}", "verdict": "done"})
     closed = _ticket(client, pid, number)
@@ -566,7 +565,7 @@ def test_every_gesture_is_refused_to_who_may_not(world):  # noqa: F811
     login(client, "lea")
     for route, body in (*FRAME, *edits):
         seen = _post(client, pid, route, body)
-        assert seen.status_code == 403 and seen.json()["error"] == moi.ONLY_SEEN, route
+        assert seen.status_code == 403 and seen.json()["error"] == reach.ONLY_SEEN, route
     assert client.get(f"/api/moi/projets/{pid}/reglages").status_code == 403
     # sur l'accord du propriétaire : rien de tout cela d'ici
     login(client, "adrien")
@@ -576,10 +575,10 @@ def test_every_gesture_is_refused_to_who_may_not(world):  # noqa: F811
     assert not rights["frame"] and not rights["edit"] and not rights["pull_write"]
     for route, body in (*FRAME, *edits):
         asked = _post(client, pid, route, body)
-        assert asked.status_code == 403 and asked.json()["error"] == moi.NEEDS_EDIT, route
+        assert asked.status_code == 403 and asked.json()["error"] == reach.NEEDS_EDIT, route
     settings = _get(client, f"/{pid}/reglages")
-    assert not settings["can"] and settings["why"] == moi.NEEDS_EDIT and not settings["archive"]["can"]
-    assert _objective(client, pid, 1)["can"]["why"] == moi.NEEDS_EDIT
+    assert not settings["can"] and settings["why"] == reach.NEEDS_EDIT and not settings["archive"]["can"]
+    assert _objective(client, pid, 1)["can"]["why"] == reach.NEEDS_EDIT
     # en modification, sans en être le propriétaire : ses objectifs, ses jalons, ses tickets, ses décisions — pas
     # son cadre
     login(client, "adrien")
@@ -589,9 +588,9 @@ def test_every_gesture_is_refused_to_who_may_not(world):  # noqa: F811
     assert rights["edit"] and not rights["frame"] and not rights["pull_write"]
     for route, body in FRAME:
         framed = _post(client, pid, route, body)
-        assert framed.status_code == 403 and framed.json()["error"] == moi.NOT_FRAMER, route
+        assert framed.status_code == 403 and framed.json()["error"] == reach.NOT_FRAMER, route
     settings = _get(client, f"/{pid}/reglages")
-    assert not settings["can"] and settings["why"] == moi.NOT_FRAMER
+    assert not settings["can"] and settings["why"] == reach.NOT_FRAMER
     assert "remote" not in {f["name"] for s in settings["sections"] for f in s["fields"]}  # l'adresse du dépôt
     for route, body in edits:
         assert _post(client, pid, route, body).status_code == 200, route

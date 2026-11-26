@@ -16,7 +16,7 @@ from dataclasses import replace
 
 import pytest
 
-from mika.app.domains.projects.api import code
+from mika.app.domains.projects.api import code, reach
 from mika.app.domains.projects.api import projects as moi
 from mika.contracts import projects as c
 from mika.faculties.projects import inspect_merge, merge, tracker
@@ -441,16 +441,16 @@ def test_reading_the_detail_gives_titles_and_states_but_neither_a_file_nor_a_dif
     # ni un fichier, ni l'arbre, ni les commits d'un chemin
     for route, params in (("/fichiers", {}), ("/fichier", {"path": "README.md"}), ("/commits", {"path": "README.md"})):
         got = r.client.get(f"{P}/{r.pid}/code{route}", params=params)
-        assert got.status_code == 403 and got.json() == {"error": moi.NO_FILES}, route
+        assert got.status_code == 403 and got.json() == {"error": reach.NO_FILES}, route
     # ni un diff : un commit, une branche, une pull request se lisent sans leurs fichiers, et disent pourquoi
     for route, params in (("/commit", {"sha": r.head}), ("/branche", {"name": r.branch}), ("/pull", {"number": 12})):
         got = r.get(route, **params)
-        assert (got["files"], got["files_readable"], got["files_why"]) == ([], False, moi.NO_FILES), route
+        assert (got["files"], got["files_readable"], got["files_why"]) == ([], False, reach.NO_FILES), route
     assert r.get("/commit", sha=r.head)["commit"]["insertions"] == 4  # ses comptes : un état, pas un contenu
     # qui pilote sans trancher ne fusionne pas
     refused = post(r.client, f"/projets/{r.pid}/code/pull/fusionner", {"number": 12, "head": r.head})
-    assert refused.status_code == 403 and refused.json()["error"] == moi.NOT_MERGER
-    assert r.get("/pulls")["items"][0]["merge"] == {"can": False, "why": moi.NOT_MERGER, "asked": False,
+    assert refused.status_code == 403 and refused.json()["error"] == reach.NOT_MERGER
+    assert r.get("/pulls")["items"][0]["merge"] == {"can": False, "why": reach.NOT_MERGER, "asked": False,
                                                     "asked_at": 0, "asked_by": "", "refused": "", "refused_at": 0}
     assert journal(r.live, MERGE_ASKED) == [] and r.host.merges == []
     # avec le droit sur ses fichiers : elle les lit
@@ -514,7 +514,7 @@ def test_what_the_host_says_of_a_pull_request_is_read_without_the_files_and_stay
     # rien de ce que l'hôte dit ne porte un fichier ni un diff ; la pull request, elle, se lit sans ses fichiers
     assert "files" not in got and "hunks" not in str(got)
     one = r.get("/pull", number=12)
-    assert (one["files"], one["files_readable"], one["files_why"]) == ([], False, moi.NO_FILES)
+    assert (one["files"], one["files_readable"], one["files_why"]) == ([], False, reach.NO_FILES)
     assert r.status("/fichier", path="outils/journal.py") == 403
 
 
@@ -536,9 +536,9 @@ def test_who_only_sees_reads_nothing_of_the_code_and_a_stranger_gets_a_404(repo)
     assert _get(r.client, f"/{r.pid}")["rights"]["detail"] is False
     for route, params in _reads(r):
         got = r.client.get(f"{P}/{r.pid}/code{route}", params=params)
-        assert got.status_code == 403 and got.json() == {"error": moi.ONLY_SEEN}, route
+        assert got.status_code == 403 and got.json() == {"error": reach.ONLY_SEEN}, route
     refused = post(r.client, fuse, {"number": 12, "head": r.head})
-    assert refused.status_code == 403 and refused.json()["error"] == moi.ONLY_SEEN
+    assert refused.status_code == 403 and refused.json()["error"] == reach.ONLY_SEEN
     assert journal(r.live, MERGE_ASKED) == [] and r.host.merges == []
 
 

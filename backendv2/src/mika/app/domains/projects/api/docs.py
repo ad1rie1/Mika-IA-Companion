@@ -2,7 +2,7 @@
 historique, la recherche, ses images — et ses gestes : enregistrer une version, revenir à l'une d'elles, créer,
 renommer, déplacer, supprimer une page, téléverser ou retirer une image.
 
-**Aucune règle n'est d'ici**, comme pour le reste de ses projets (``projects.py``, dont vient ce qu'elle a d'un
+**Aucune règle n'est d'ici**, comme pour le reste de ses projets (``reach.py``, dont vient ce qu'elle a d'un
 projet) :
 
 - **la lire** (``reads``) : le détail du projet, au niveau de ce qu'il écrit, et sa documentation — ouverte d'office
@@ -27,15 +27,15 @@ from typing import Any
 from starlette.responses import Response
 from starlette.routing import Route
 
-from mika.app.domains.projects.api.projects import (
+from mika.app.domains.projects.api.projects import PATH
+from mika.app.domains.projects.api.reach import (
     BY_HER,
     BY_YOU,
-    PATH,
     Reach,
     Scene,
-    _author,
-    _nameable,
-    _opened,
+    author_fields,
+    nameable,
+    opened_project,
     scene,
 )
 from mika.app.me.api import Call, Denied, MeApiBase, done, form, missing, person_of
@@ -96,7 +96,7 @@ def guard(sc: Scene, r: Reach, *, write: bool = False) -> None:
 
 
 def _docs(call: Call, *, write: bool = False) -> tuple[Scene, Reach]:
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     guard(sc, r, write=write)
     return sc, r
 
@@ -113,15 +113,15 @@ def path_of(raw: str, field: str = "path") -> str:
 
 
 def _by(sc: Scene, r: Reach, x: Any) -> dict[str, Any]:
-    """Qui a écrit une version ou ajouté une image : sa sorte et ses mots (``projects._author`` : une autre personne
+    """Qui a écrit une version ou ajouté une image : sa sorte et ses mots (``reach.author_fields`` : une autre personne
     n'est nommée que si elle a le droit de le savoir), et par où — un outil par MCP se dit, avec le nom de son
     jeton."""
     tool = getattr(x, "tool", "")
     # le nom d'un jeton est celui que sa personne lui a donné : il ne se sert qu'à elle, ou à qui a le droit de la
     # nommer (ADR 0292) — la même règle que son nom
     person = person_of(sc.frame, x.by) if x.by else ""
-    named = bool(person) and (person == sc.person or _nameable(sc, person, written(r.p)))
-    return {**_author(sc, {}, x.author, x.by, written(r.p)), "via": x.via, "via_label": VIA_WORDS.get(x.via, ""),
+    named = bool(person) and (person == sc.person or nameable(sc, person, written(r.p)))
+    return {**author_fields(sc, {}, x.author, x.by, written(r.p)), "via": x.via, "via_label": VIA_WORDS.get(x.via, ""),
             "tool": tool if x.via == docs.MCP and named else ""}
 
 

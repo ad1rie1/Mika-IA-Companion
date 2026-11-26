@@ -15,9 +15,9 @@ chacune a fait pas à pas, son carnet, et de quoi dessiner le diagramme de ses o
   pour un jalon, quand il a été posé, dit prêt, atteint, et — déduit de ses exécutions — quand elle s'y est mise et
   combien d'exécutions il a prises. Le moteur n'estime aucune durée.
 
-**Qui lit.** Le détail du projet (``projects._opened``), au niveau de ce que le projet écrit (``written``) : un compte
-rendu, une note de carnet, un pas d'une exécution portent ce niveau. Le titre d'un ticket ne se dit que si elle peut
-le lire (``tracker.veiled``). Le contrat, route par route : ``docs/protocole-moi.md``, § 11.
+**Qui lit.** Le détail du projet (``reach.opened_project``), au niveau de ce que le projet écrit (``written``) : un
+compte rendu, une note de carnet, un pas d'une exécution portent ce niveau. Le titre d'un ticket ne se dit que si elle
+peut le lire (``tracker.veiled``). Le contrat, route par route : ``docs/protocole-moi.md``, § 11.
 """
 
 from __future__ import annotations
@@ -28,24 +28,20 @@ from typing import Any
 
 from starlette.routing import Route
 
-from mika.app.domains.projects.api.projects import (
+from mika.app.domains.projects.api.projects import PAGE, PAGE_MAX, PATH, TEXT_VEILED
+from mika.app.domains.projects.api.reach import (
     BY_HER,
     BY_YOU,
-    CHECK_WORDS,
-    PAGE,
-    PAGE_MAX,
-    PATH,
     TEXT_SHOWN,
-    TEXT_VEILED,
     YOU_WORDS,
     Reach,
     Scene,
-    _author,
-    _opened,
-    _store,
-    _texts,
+    author_fields,
+    opened_project,
     reach,
     reads_files,
+    store_of,
+    texts_of,
 )
 from mika.app.me.api import Call, Denied, MeApiBase, missing
 from mika.app.me.common import millis, snippet
@@ -60,6 +56,7 @@ from mika.faculties.projects.faculty import (
     written,
 )
 from mika.faculties.projects.inspect import OBJ_FR, VERDICT_FR
+from mika.faculties.projects.inspect_milestones import CHECK_WORDS
 from mika.faculties.projects.inspect_milestones import STATE_FR as MILESTONE_FR
 from mika.kernel.clock import DAY
 from mika.vocab.episodes import outcome_words, project_target
@@ -85,7 +82,7 @@ _ALL = feed.ALL
 
 def _work(call: Call) -> tuple[Scene, Reach]:
     """Le projet, pour qui lit ce qu'il écrit : son détail, au niveau de ce que le projet écrit."""
-    sc, r = _opened(call)
+    sc, r = opened_project(call)
     if written(r.p) > r.reader.level:
         raise Denied(403, NO_WORK)
     return sc, r
@@ -116,7 +113,7 @@ class _Reader:
 
     def ticket(self, key: str) -> Any:
         if key not in self._tickets:
-            self._tickets[key] = tracker.entry(_store(self.sc.call), self.r.p.id, c.TICKETS, key)
+            self._tickets[key] = tracker.entry(store_of(self.sc.call), self.r.p.id, c.TICKETS, key)
         return self._tickets[key]
 
     def veiled(self, item: Any) -> bool:
@@ -126,12 +123,12 @@ class _Reader:
     def who(self, author: str, by: str) -> dict[str, Any]:
         """Qui a fait ceci : elle ; la personne connectée ; une autre personne, nommée seulement si elle a le droit
         de le savoir ; un autre projet, jamais nommé ici ; quelqu'un chez l'hôte. La règle est celle de toute l'API
-        des projets (``projects._author``) : il n'y en a qu'une. Le fil d'activité y ajoute seulement ce qu'il
+        des projets (``reach.author_fields``) : il n'y en a qu'une. Le fil d'activité y ajoute seulement ce qu'il
         tient pour d'elle — ce qui n'est signé de personne (ni une personne, ni un projet, ni l'hôte)."""
         hers = author in (c.BY_SELF, "self") or (not by and author not in feed.PEOPLE)
         if hers and author != c.BY_HOST and not c.asking_project(author):
             author = c.BY_SELF
-        return _author(self.sc, {}, author, by, self.level)
+        return author_fields(self.sc, {}, author, by, self.level)
 
 
 def heard(r: Reach, content: Any) -> str:
@@ -155,7 +152,7 @@ def _entries(look: _Reader, e: Any) -> list[dict[str, Any]]:
 
 def _filled(call: Call, entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Les lignes, leur texte lu : un compte rendu est le titre de son exécution ; ailleurs il suit le titre."""
-    texts = _texts(call, [x["text_ref"] for x in entries if x["text_ref"] != _VEILED_REF])
+    texts = texts_of(call, [x["text_ref"] for x in entries if x["text_ref"] != _VEILED_REF])
     for x in entries:
         ref = x.pop("text_ref")
         x["veiled"] = ref == _VEILED_REF  # un texte d'un niveau qu'elle n'entend pas : la ligne le dit, sans lui
@@ -340,7 +337,7 @@ def _runs(call: Call, p: Project, started: list[Any]) -> tuple[dict[str, Any], d
     refs = [o.text_ref for o in p.objectives]
     for e in reports.values():
         refs += [e.data.summary.ref or "", (e.data.need.ref or "") if e.data.need is not None else ""]
-    return ended, reports, _texts(call, refs)
+    return ended, reports, texts_of(call, refs)
 
 
 async def executions(call: Call) -> dict[str, Any]:
@@ -427,7 +424,7 @@ async def notebook(call: Call) -> dict[str, Any]:
                 break
             continue
         break
-    texts = _texts(call, [*(e.data.text.ref or "" for e in found), *(o.text_ref for o in r.p.objectives)])
+    texts = texts_of(call, [*(e.data.text.ref or "" for e in found), *(o.text_ref for o in r.p.objectives)])
     counted = [0]
 
     def one(e: Any) -> None:
@@ -453,7 +450,7 @@ async def diagram(call: Call) -> dict[str, Any]:
     p = r.p
     started = _journal(call, [rt.EPISODE_STARTED], EPISODES_READ, where=("target", project_target(p.id)))
     found = diagram_rows.rows(p, diagram_rows.starts_of(p, started))
-    texts = _texts(call, [ref for o in found for ref in (o.text_ref, *(m.text_ref for m in o.marks))])
+    texts = texts_of(call, [ref for o in found for ref in (o.text_ref, *(m.text_ref for m in o.marks))])
     rows = [{
         "id": o.id, "text": texts.get(o.text_ref, ""), "kind": o.kind, "status": o.status,
         "status_label": OBJ_FR.get(o.status, o.status), "after": o.after, "rank": o.rank, "ticket": o.ticket,

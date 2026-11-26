@@ -12,8 +12,7 @@ from __future__ import annotations
 
 import json
 
-from mika.app.domains.projects.api import activity
-from mika.app.domains.projects.api import projects as moi
+from mika.app.domains.projects.api import activity, reach
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.faculties.projects.faculty import (
@@ -286,7 +285,7 @@ def test_reading_its_activity_needs_its_detail_at_the_level_of_what_it_writes(wo
     _share(client, live, pid, lea, "non")
     login(client, "lea")
     assert statuses() == {403}  # le voir n'est pas lire ce qu'il fait
-    assert client.get(f"/api/moi/projets/{pid}/activite").json() == {"error": moi.ONLY_SEEN}
+    assert client.get(f"/api/moi/projets/{pid}/activite").json() == {"error": reach.ONLY_SEEN}
     login(client, "adrien")
     _share(client, live, pid, lea, "lecture")
     login(client, "lea")

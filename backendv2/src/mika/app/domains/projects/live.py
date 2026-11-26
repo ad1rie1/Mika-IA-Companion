@@ -1,7 +1,7 @@
 """La part des projets dans le direct (ADR 0308, 0310) : ce que le journal y change, et qui le voit.
 
 Un projet va à qui le voit par ce canal (``PROJECT``) : ses projets, ceux que les règles de ses routes lui ouvrent
-(``api.projects.reaches``) ; une règle qui juge elle-même (``judge``). Ce qui change qui voit un projet (ses accès, ce
+(``api.reach.reaches``) ; une règle qui juge elle-même (``judge``). Ce qui change qui voit un projet (ses accès, ce
 qu'il lit des autres, son propriétaire, son sujet ou son niveau, archivé ou rendu) part sans clé, à toutes. Un accord
 d'un projet se reconnaît par le contexte de l'événement (``effect``) ; le départ et la fin d'une de ses exécutions,
 par la cible de l'épisode (``episodes``).
@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from mika.app.domains.domain import LivePart
-from mika.app.domains.projects.api import projects as projects_me
+from mika.app.domains.projects.api import reach as projects_me
 from mika.app.me.touches import EVERYONE, Touch
 from mika.contracts import projects as projects_c
 from mika.faculties.projects import links
@@ -20,7 +20,7 @@ from mika.faculties.projects.faculty import ACCESS_SET, AMENDED, ARCHIVED, LINKS
 from mika.ports.changes import ME, PROJECTS
 from mika.vocab.episodes import project_of
 
-#: à qui va une touche d'un projet : à qui le voit par ce canal (``api.projects.reaches`` : ``judge``)
+#: à qui va une touche d'un projet : à qui le voit par ce canal (``api.reach.reaches`` : ``judge``)
 PROJECT = "project"
 #: ce qui, dans un projet, change qui le voit (ses accès, ce qu'il lit des autres, son propriétaire, son sujet ou son
 #: niveau, archivé ou rendu) : le filtre lit l'état d'après — celle qui le perd doit le savoir aussi
@@ -40,7 +40,7 @@ def _project(pid: Any) -> list[Touch]:
 
 
 def judge(reader: Any, t: Touch) -> tuple[bool, tuple[str, ...]]:
-    """Ses projets, ceux qu'elle voit par ce canal (``api.projects.reaches``), lus une fois par personne et par envoi.
+    """Ses projets, ceux qu'elle voit par ce canal (``api.reach.reaches``), lus une fois par personne et par envoi.
     Une touche qui nomme des projets lui dit ceux qu'elle voit ; qui nomme des propriétaires (des projets aussi), la
     concerne si elle en voit un ; qui ne nomme rien, si elle en voit un."""
 
