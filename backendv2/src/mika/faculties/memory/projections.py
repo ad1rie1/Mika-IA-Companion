@@ -590,7 +590,7 @@ class Items:
 
     @staticmethod
     def _uttered(sql: Sql, sfx: str, d: Any, at: int) -> None:
-        ids = sorted({int(p.split(":", 1)[1]) for p in d.provenance if p.startswith("memory:") and p[7:].isdigit()})
+        ids = sorted({n for n in map(c.cited_item, d.provenance) if n is not None})
         if not ids:
             return
         t = items(sfx)
@@ -727,11 +727,10 @@ class Told:
             if not d.visible or not d.target:
                 continue
             target = handle_key(d.target)
-            rows += [(int(p.split(":", 1)[1]), target, e.at, 0) for p in d.provenance
-                     if p.startswith("memory:") and p[7:].isdigit()]
+            rows += [(n, target, e.at, 0) for n in map(c.cited_item, d.provenance) if n is not None]
             # raconté sans nommer personne (ADR 0091) : compté à part — une fois nommé, il reste nommé
-            veiled = [(int(p.split(":", 1)[1]), target, e.at, 1) for p in d.provenance
-                      if p.startswith(c.VEILED_PROVENANCE) and p[len(c.VEILED_PROVENANCE):].isdigit()]
+            veiled = [(n, target, e.at, 1) for n in (c.cited_item(p, c.VEILED_PROVENANCE) for p in d.provenance)
+                      if n is not None]
             rows += veiled
             lines += [(item, handle, e.seq, at) for item, handle, at, _ in veiled]
         if lines:

@@ -88,7 +88,7 @@ def _body(recall: Recall, frame: Frame, *, witness: bool) -> SectionBody | None:
             parts.append(Fragment(heading, heading=True))
             # ce qui lui revient se redit même quand le fil le montre encore (ADR 0263 ne vaut que pour ce qu'elle a
             # dit d'elle et ce qui vous lie) : ce qu'elle a sous les yeux est ce que son usage renforce
-            parts.extend(Fragment(line, tuple(f"memory:{i}" for i in (r.evidence or (r.item.id,)))) for r, line in zip(
+            parts.extend(Fragment(line, tuple(c.provenance_of(i) for i in (r.evidence or (r.item.id,)))) for r, line in zip(
                 bucket, _lines(bucket, frame.now, beliefs=belief, names=names), strict=True))
     if hidden:
         # sonde réelle du 2026-10-02 : sans cette ligne, interrogée là-dessus, elle mentait (« il ne m'a rien dit »)
@@ -96,7 +96,7 @@ def _body(recall: Recall, frame: Frame, *, witness: bool) -> SectionBody | None:
         parts.extend(Fragment(line) for line in [*hidden, phrase("memory.recall.unsaid_advice")])
     shown = memories + beliefs  # ce qu'on lui a confié porte son étiquette (``memory.tag``), ligne par ligne
     return SectionBody("\n".join(f.text for f in parts), level=max((r.verdict.level for r in shown), default=0),
-                       provenance=tuple(f"memory:{i}" for r in shown for i in (r.evidence or (r.item.id,))), witness=witness,
+                       provenance=tuple(c.provenance_of(i) for r in shown for i in (r.evidence or (r.item.id,))), witness=witness,
                        tied=any(r.verdict.tied for r in shown),
                        fragments=tuple(parts))
 
@@ -154,8 +154,8 @@ def _exchanges(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> Secti
         who = names.get(e.person) or recall.name or phrase("memory.exchanges.someone")
         lines.append(phrase("memory.exchanges.line", age=age_words(e.at, frame.now), who=who, said=e.user_text[:240],
                             reply=e.reply_text[:240]))
-    return SectionBody("\n".join(lines), provenance=tuple(f"chunk:{e.id}" for e in exchanges),
-                       fragments=tuple(Fragment(line, (f"chunk:{e.id}",),
+    return SectionBody("\n".join(lines), provenance=tuple(c.provenance_of(e.id, c.CHUNK_PROVENANCE) for e in exchanges),
+                       fragments=tuple(Fragment(line, (c.provenance_of(e.id, c.CHUNK_PROVENANCE),),
                                                 (e.question, e.id) if e.question and not e.dated else ())
                                        for e, line in zip(exchanges, lines, strict=True)))
 
@@ -178,7 +178,7 @@ def _promises(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> Sectio
                 phrase("memory.promises.for", when=when_words(due, frame))
         now = phrase("memory.promises.now") if pid in recall.due_now else ""
         lines.append(phrase("memory.promises.line", when=when, now=now, id=pid, text=text))
-    return SectionBody("\n".join(lines), provenance=tuple(f"memory:{pid}" for pid, *_ in recall.promised))
+    return SectionBody("\n".join(lines), provenance=tuple(c.provenance_of(pid) for pid, *_ in recall.promised))
 
 
 @MEMORY.section("life", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=55,
@@ -197,7 +197,7 @@ def _life(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBod
     for m in recall.moments:
         lines.append(_moment_line(m, frame, recall.close))
     return SectionBody("\n".join(lines), level=max((m.verdict.level for m in recall.moments), default=0),
-                       provenance=tuple(f"memory:{m.event.id}" for m in recall.moments),
+                       provenance=tuple(c.provenance_of(m.event.id) for m in recall.moments),
                        tied=any(m.verdict.tied for m in recall.moments))
 
 
@@ -223,7 +223,7 @@ def _ahead(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBo
         lines.append(phrase("memory.ahead.line", when=moment_when(m.event, frame), label=m.label) +
                      (phrase("memory.ahead.likely", likely=likely) if likely else ""))
     return SectionBody("\n".join(lines), level=max((m.verdict.level for m in recall.ahead), default=0),
-                       provenance=tuple(f"memory:{m.event.id}" for m in recall.ahead),
+                       provenance=tuple(c.provenance_of(m.event.id) for m in recall.ahead),
                        tied=any(m.verdict.tied for m in recall.ahead))
 
 
@@ -302,7 +302,7 @@ def _self_said_section(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) 
     # ce que le fil montre encore ne se redit pas (ADR 0263) : le dernier message où elle l'a dit, tant qu'il est
     # frais — une redite complète ses sources, et c'est la plus récente que le fil garde ; la fenêtre glissée, ou
     # vingt jours plus tard, la ligne revient
-    return SectionBody("\n".join(lines), provenance=tuple(f"memory:{it.id}" for it in recall.self_said),
-                       fragments=tuple(Fragment(line, (f"memory:{it.id}",),
+    return SectionBody("\n".join(lines), provenance=tuple(c.provenance_of(it.id) for it in recall.self_said),
+                       fragments=tuple(Fragment(line, (c.provenance_of(it.id),),
                                                 c.shown_by_thread(it.sources, it.touched_at, frame.now, last=True))
                                        for it, line in zip(recall.self_said, lines, strict=True)))

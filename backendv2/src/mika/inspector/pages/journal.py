@@ -18,6 +18,7 @@ from typing import Any, NamedTuple
 
 from sqlalchemy import func, select
 
+from mika.contracts import memory as memory_c
 from mika.contracts import runtime as rt
 from mika.inspector import names, render
 from mika.inspector.catalog import Panel
@@ -69,7 +70,7 @@ from mika.vocab.privacy import LEVEL_WORDS
 
 EPISODE_TABS = (("resume", "Résumé"), ("deroule", "Déroulé"), ("dit", "Ce qu'elle a dit"), ("prompt", "Prompt"), ("outils", "Outils"),
                 ("appels", "Appels de modèle"), ("decision", "Décision"))
-_PROVENANCE = ("memory:", "event:", "goal:", "thought:")
+_PROVENANCE = (memory_c.PROVENANCE, "event:", "goal:", "thought:")
 #: une page d'événements d'épisode
 EPISODE_PAGE = 25
 #: « Rejouer avec… » : au plus tant d'appels de l'épisode lus (où son prompt est déjà allé, ce qu'il a coûté)

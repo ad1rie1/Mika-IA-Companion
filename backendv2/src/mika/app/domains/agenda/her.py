@@ -104,7 +104,7 @@ def her_agenda(kernel: Any, *, person: str | None = None, since: int | None = No
         seen.add(item)
         said_at, conversation = _said(store, known)
         out.append(HerDate(
-            ref=f"memory:{item}", kind=kind, title=known.text, start=start, end=end, all_day=all_day,
+            ref=memory_c.provenance_of(item), kind=kind, title=known.text, start=start, end=end, all_day=all_day,
             day=local(start, frame.env.tz_of(frame.root)).date().isoformat() if all_day else "",
             persons=persons, said_at=said_at,
             source=_source(frame, kind, persons if kind == PROMISE else _canon(frame, known.told_by) or persons,

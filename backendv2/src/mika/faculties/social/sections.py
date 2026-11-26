@@ -177,8 +177,8 @@ def _register(s: SocialState, frame: Frame, enrich: Mapping[str, Any]) -> Sectio
         # dans l'historique rendu s'y lit déjà ; quand le fil glisse hors de la fenêtre, ou qu'elle a vieilli, sa
         # ligne revient
         parts = (Fragment(tie), Fragment(phrase("social.register.ours"), heading=True),
-                 *(Fragment(f"- {to_you(text)}", (f"memory:{i}",), tuple(shown)) for i, text, shown in ours))
-        return SectionBody("\n".join(f.text for f in parts), provenance=tuple(f"memory:{i}" for i, _t, _s in ours),
+                 *(Fragment(f"- {to_you(text)}", (memory_c.provenance_of(i),), tuple(shown)) for i, text, shown in ours))
+        return SectionBody("\n".join(f.text for f in parts), provenance=tuple(memory_c.provenance_of(i) for i, _t, _s in ours),
                            fragments=parts)
     return SectionBody(tie)
 

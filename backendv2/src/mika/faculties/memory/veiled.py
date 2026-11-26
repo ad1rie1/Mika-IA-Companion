@@ -215,5 +215,5 @@ def _veiled(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> SectionB
              else phrase("memory.veiled.line", text=v.text, who=v.who) for v in shown]
     return SectionBody("\n".join([*lines, phrase("memory.veiled.advice")]),
                        level=max(v.sensitivity for v in shown),
-                       provenance=tuple(f"{c.VEILED_PROVENANCE}{v.item}" for v in shown),
+                       provenance=tuple(c.provenance_of(v.item, c.VEILED_PROVENANCE) for v in shown),
                        veils=tuple(dict.fromkeys(n for v in shown for n in v.names)))

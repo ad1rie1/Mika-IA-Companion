@@ -4,8 +4,9 @@ Ce que SQLite laisse passer et que MariaDB lirait autrement, épinglé ici sur S
 leur contrat déclare (les autres facultés les lisent par des requêtes) ; aucune clé n'est un texte sans borne ; une
 clé démesurée est ramenée à sa borne plutôt que de faire échouer l'ajout ; « cette liste contient ce sujet » est une
 égalité exacte (le ``LIKE`` d'avant prenait le ``_`` d'une adresse pour un joker) ; nommé une fois, nommé pour de bon,
-même dans un seul lot ; le jour de l'année d'un moment, en UTC ; la recherche de la console, pareille sur les deux
-moteurs (casse et accents ignorés).
+même dans un seul lot ; une provenance se compose et se relit par le contrat comme chacun la relisait à la main ; le
+jour de l'année d'un moment, en UTC ; la recherche de la console, pareille sur les deux moteurs (casse et accents
+ignorés).
 """
 
 from __future__ import annotations
@@ -178,6 +179,51 @@ def test_named_once_stays_named_even_within_one_batch():
     Told().apply(db, [event(said_to(BOB, "veiled:6"), 54, 5 * DAY)], "")
     rows = db.query(select(told.c.item, told.c.at, told.c.veiled).order_by(told.c.item))
     assert rows == [(5, 2 * DAY, 0), (6, 5 * DAY, 0)]
+
+
+#: ce qu'une provenance peut être : celle d'un élément, d'un échange, d'un récit sans nom, d'une autre faculté, vide,
+#: ou mal formée (un numéro écrit autrement, un préfixe redoublé, des chiffres d'une autre écriture)
+PROVENANCES = ("memory:12", "memory:0", "memory:007", "memory:", "memory:x", "memory:12:3", "memory: 12",
+               "memory:-1", "memory:+1", " memory:12", "Memory:12", "memory:١٢", "chunk:3", "chunk:", "veiled:5",
+               "veiled:", "veiled:memory:5", "memory:veiled:5", "goal:3", "dream:4", "", ":")
+
+
+@pytest.mark.parametrize("p", PROVENANCES)
+def test_a_provenance_reads_back_the_number_it_cites_as_each_reader_read_it(p):
+    """``cited_item`` rend ce que rendaient les lectures qu'il remplace : la nuit (``int(p[7:])``), ce qu'elle a dit
+    à qui (``int(p.split(":", 1)[1])``, d'un élément nommé ou raconté sans nom) et la constellation (un préfixe parmi
+    trois) — ``None`` là où elles ne retenaient rien ; et ce qu'il relit, ``provenance_of`` le compose."""
+    def before(prefix: str, read) -> int | None:
+        return read(p) if p.startswith(prefix) and p[len(prefix):].isdigit() else None
+
+    night = before("memory:", lambda x: int(x[7:]))
+    told = before("memory:", lambda x: int(x.split(":", 1)[1]))
+    veiled = before("veiled:", lambda x: int(x.split(":", 1)[1]))
+    assert mc.cited_item(p) == night == told
+    assert mc.cited_item(p, mc.VEILED_PROVENANCE) == veiled
+    for prefix in ("memory:", "veiled:", "chunk:"):
+        assert mc.cited_item(p, prefix) == before(prefix, lambda x, n=len(prefix): int(x[n:]))
+    for prefix in (mc.PROVENANCE, mc.CHUNK_PROVENANCE, mc.VEILED_PROVENANCE):
+        n = mc.cited_item(p, prefix)
+        assert n is None or mc.cited_item(mc.provenance_of(n, prefix), prefix) == n
+
+
+def test_a_provenance_is_composed_as_it_was_and_fails_where_it_failed():
+    """Les mêmes chaînes qu'avant (``f"memory:{i}"``, ``f"chunk:{i}"``, ``f"veiled:{i}"``) ; un chiffre qu'``int`` ne
+    lit pas (« ² ») échoue comme avant, et aucune lecture n'admettait ``None``."""
+    assert (mc.PROVENANCE, mc.CHUNK_PROVENANCE, mc.VEILED_PROVENANCE) == ("memory:", "chunk:", "veiled:")
+    assert [mc.provenance_of(i) for i in (0, 12)] == [f"memory:{i}" for i in (0, 12)] == ["memory:0", "memory:12"]
+    assert mc.provenance_of(3, mc.CHUNK_PROVENANCE) == "chunk:3"
+    assert mc.provenance_of(5, mc.VEILED_PROVENANCE) == "veiled:5"
+    odd = "memory:²"
+    with pytest.raises(ValueError):
+        _ = int(odd[7:]) if odd.startswith("memory:") and odd[7:].isdigit() else None
+    with pytest.raises(ValueError):
+        mc.cited_item(odd)
+    with pytest.raises(AttributeError):
+        (lambda p: p.startswith("memory:"))(None)
+    with pytest.raises(AttributeError):
+        mc.cited_item(None)  # type: ignore[arg-type]
 
 
 def test_a_moment_knows_its_day_of_the_year_in_utc():

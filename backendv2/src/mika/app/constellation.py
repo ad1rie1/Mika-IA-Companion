@@ -80,7 +80,7 @@ AGENTS = {Kind.REPLY: "reponse", Kind.INITIATIVE: "initiative", Kind.MURMUR: "mu
           Kind.WORK: "travail", Kind.JOB: "travail", Kind.WAKE: "travail", Kind.WAKE_JOB: "travail",
           Kind.TASK: "travail"}
 #: les références de provenance qui désignent un point de la carte
-_POINT_REFS = ("memory:", memory_c.VEILED_PROVENANCE, "chunk:")
+_POINT_REFS = (memory_c.PROVENANCE, memory_c.VEILED_PROVENANCE, memory_c.CHUNK_PROVENANCE)
 _BIRTHS = (memory_c.REMEMBERED, memory_c.BELIEVED, memory_c.PROMISE_NOTICED, memory_c.EVENT_NOTED)
 _WATCHED = frozenset({rt.UTTERANCE, *_BIRTHS, memory_c.REINFORCED, memory_c.NIGHT_SORTED, memory_c.JOINED,
                       memory_c.CONFRONTED, memory_c.REREAD, self_c.DREAMT, self_c.NARRATED, self_c.JOURNALED,
@@ -138,10 +138,9 @@ def point_refs(provenance: Sequence[str]) -> list[int]:
     out: list[int] = []
     for ref in provenance:
         for prefix in _POINT_REFS:
-            if ref.startswith(prefix) and ref[len(prefix):].isdigit():
-                n = int(ref[len(prefix):])
-                if n not in out:
-                    out.append(n)
+            n = memory_c.cited_item(ref, prefix)
+            if n is not None and n not in out:
+                out.append(n)
     return out
 
 

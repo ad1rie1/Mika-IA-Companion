@@ -158,7 +158,7 @@ def _disclosure(frame: Frame, store: Any, thought: int) -> tuple[tuple[c.Disclos
                 rules.append(c.Disclosure(about=who, told_by=who, heard_by=who,
                                           sensitivity=max(floor, int(Sensitivity.CONFIDENCE) if strong else 0),
                                           secret=strong))
-            refs = [int(p[7:]) for p in data.get("provenance", ()) if p.startswith("memory:") and p[7:].isdigit()]
+            refs = [n for n in map(c.cited_item, data.get("provenance", ())) if n is not None]
             refs += list(data.get("answers") or ())
             if data.get("reply_to"):
                 refs.append(data["reply_to"])

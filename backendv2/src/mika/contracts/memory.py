@@ -930,9 +930,31 @@ FORMER_VIEW = "memory_former"
 #: À qui elle a répété quoi (``item``, ``handle``, ``at``, ``veiled``) — ``veiled`` : seulement sans nommer personne
 #: (ADR 0091) ; la personne ne sait pas de qui il s'agit, mais elle le sait, elle.
 RETOLD_VIEW = "memory_retold"
-#: la provenance d'un élément raconté sans nommer personne (``veiled:<élément>``, ADR 0091) — celle d'un élément
-#: montré nommé est ``memory:<élément>``
+#: La provenance (``SectionBody.provenance``, puis ``Utterance.provenance``) : ce que son prompt lui montrait de sa
+#: mémoire, que sa parole cite — un élément montré nommé (``memory:<élément>``), un échange passé (``chunk:<échange>``, une ligne
+#: de ``memory_chunks``), un élément raconté sans nommer personne (``veiled:<élément>``, ADR 0091). C'est un protocole
+#: entre facultés : ``social``, ``self`` et l'agenda de Mika écrivent la provenance d'un élément pour les leurs, et
+#: ses projections comptent d'après elle ce qu'elle a dit et à qui (``RETOLD_VIEW``). On la compose par
+#: ``provenance_of`` et on la relit par ``cited_item``, jamais à la main.
+PROVENANCE = "memory:"
+CHUNK_PROVENANCE = "chunk:"
 VEILED_PROVENANCE = "veiled:"
+
+
+def provenance_of(item: int, prefix: str = PROVENANCE) -> str:
+    """La provenance qui cite cet élément (``memory:12``) ; ``prefix`` : un échange (``CHUNK_PROVENANCE``), un récit
+    sans nom (``VEILED_PROVENANCE``)."""
+    return f"{prefix}{item}"
+
+
+def cited_item(provenance: str, prefix: str = PROVENANCE) -> int | None:
+    """Le numéro qu'une provenance cite sous ce préfixe (``memory:12`` → 12) ; ``None`` pour un autre préfixe, ou
+    quand ce qui le suit n'est pas un numéro (``memory:``, ``memory:x``)."""
+    if provenance.startswith(prefix) and provenance[len(prefix):].isdigit():
+        return int(provenance[len(prefix):])
+    return None
+
+
 #: Ce qu'elle pensait d'elle-même et dont elle a changé (ADR 0087) : ses notes à elle seulement, de la remplacée
 #: (``was``, ``was_text``) à celle qu'elle tient maintenant (``item``, ``text``, ``knowledge_kind``), avec l'enveloppe
 #: la plus stricte des deux (``sensitivity``, ``secret``) et quand elle a changé (``changed_at``).

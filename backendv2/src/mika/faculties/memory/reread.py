@@ -683,7 +683,7 @@ def _learned_section(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) ->
     lines = [phrase("memory.learned.line", text=clean_tokens(lr.item.text), source=lr.source,
                     age=age_words(lr.at, frame.now)) for lr in got]
     return SectionBody("\n".join(lines), level=max(lr.level for lr in got),
-                       provenance=tuple(f"memory:{lr.item.id}" for lr in got))
+                       provenance=tuple(c.provenance_of(lr.item.id) for lr in got))
 
 
 __all__ = ["Learned", "Pair", "ReadItem", "Relecture", "Reread", "drafts_of", "pairs", "parse", "readings", "render",

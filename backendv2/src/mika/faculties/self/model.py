@@ -198,4 +198,4 @@ def _self_model(s: SelfState, frame: Frame, enrich: Mapping[str, Any]) -> Sectio
         return None
     return SectionBody("\n".join(lines),
                        level=max((ch.sensitivity for ch in changes), default=0),
-                       provenance=tuple(f"memory:{ch.item}" for ch in changes))
+                       provenance=tuple(memory_c.provenance_of(ch.item) for ch in changes))
