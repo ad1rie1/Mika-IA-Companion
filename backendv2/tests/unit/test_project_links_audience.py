@@ -25,7 +25,7 @@ from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.contracts import shares as shares_c
 from mika.contracts import social as social_c
-from mika.faculties.projects import faculty
+from mika.faculties.projects import faculty, milestones
 from mika.faculties.projects.atelier import NetworkArgs, PushArgs, network_proposal, project_push, ws_network
 from mika.faculties.projects.faculty import (
     DECIDED,
@@ -335,9 +335,10 @@ def test_a_file_shared_from_the_reader_is_judged_on_its_own_people_and_forgotten
 
 
 def _event_types() -> dict[str, EventType]:
-    """Les types d'événements des projets, par le nom sous lequel le code les écrit (``NOTED``, ``RUN_REPORTED``)."""
+    """Les types d'événements des projets, par le nom sous lequel le code les écrit (``NOTED``, ``RUN_REPORTED``) :
+    ceux de ``faculty.py``, du contrat, et des sous-sujets qui en sont sortis (les jalons, ADR 0313)."""
     found = {}
-    for module in (faculty, c):
+    for module in (faculty, c, milestones):
         for name, value in vars(module).items():
             if isinstance(value, EventType) and value.owner == PROJECTS.name:
                 found[name] = value

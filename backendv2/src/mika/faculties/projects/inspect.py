@@ -63,11 +63,23 @@ from mika.faculties.projects.actions import (
 )
 from mika.faculties.projects.faculty import (
     AMENDED,
+    ARCHIVED,
+    DECISION_CHANGED,
+    DEPOSITED,
     EXTRA_BUNDLES,
     NETWORKED_CAPABILITY,
     NOTED,
-    OPERATIONS,
+    NUDGED,
+    OBJECTIVE_ADDED,
+    OBJECTIVE_CHANGED,
+    PAUSED,
+    PLAN_ANSWERED,
+    PLAN_PROPOSED,
     PROJECTS,
+    REFRAMED,
+    REMOTE_REQUESTED,
+    RESTORED,
+    RESUMED,
     SMALL_FILES,
     SMALL_LINES,
     Decision,
@@ -113,6 +125,7 @@ from mika.faculties.projects.inspect_words import (
     VERDICT_FR,
     VERDICT_TONE,
 )
+from mika.faculties.projects.milestones import MILESTONE_ADDED, MILESTONE_CHANGED
 from mika.faculties.projects.pulls import pull_url
 from mika.faculties.projects.rhythm import (
     always,
@@ -1482,6 +1495,11 @@ def _links_section(p: Project, s: ProjectsState, frame: Frame, ctx: InspectConte
 OPERATIONS_CURSOR = "avant_ops"
 NOTES_CURSOR = "avant_notes"
 EFFECTS_CURSOR = "avant_effets"
+#: ce qu'un opérateur (ou elle) fait d'un projet — la chronologie du carnet ; composée ici, où on la lit : elle
+#: nomme aussi les faits d'un sous-sujet (les jalons, les décisions), que ``faculty.py`` n'importe pas
+OPERATIONS = (REFRAMED, PAUSED, RESUMED, ARCHIVED, RESTORED, NUDGED, OBJECTIVE_ADDED, OBJECTIVE_CHANGED,
+              DECISION_CHANGED, DEPOSITED, REMOTE_REQUESTED, PLAN_PROPOSED, PLAN_ANSWERED, MILESTONE_ADDED,
+              MILESTONE_CHANGED)
 
 
 def _operation(e: Event[Any], frame: Frame) -> Entry:

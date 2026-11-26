@@ -249,7 +249,7 @@ def test_the_objective_that_treats_tickets_comes_back_on_a_fallback_cadence_whil
     s = _add(s, T, K, at=10, author=c.BY_PERSON, by="bea")
     # elle est passée (« continue », « wait », rien) : ses causes sont parties avec ce passage — il reste dû
     passed = replace(o, last_run_at=1_000, stirred=())
-    p = faculty._objective(s.projects[1], passed)
+    p = faculty.with_objective(s.projects[1], passed)
     assert rhythm.tickets_in_hand(p) and rhythm.due_at(p, passed, PM) == 1_000 + PM.constant_cadence_us
     assert rhythm.next_due(p, PM) == 1_000 + PM.constant_cadence_us
     waiting = replace(passed, waiting_until=1_000 + 2 * PM.constant_cadence_us)  # l'attente qu'elle a demandée vaut
@@ -257,9 +257,9 @@ def test_the_objective_that_treats_tickets_comes_back_on_a_fallback_cadence_whil
     # un ticket en analyse (son objectif retiré : il lui revient sans cause) la retient aussi ; ce qui attend le
     # propriétaire, non
     analysis = _step(s, c.STAGE_UNREAD, 20, taken=True)
-    assert rhythm.due_at(faculty._objective(analysis.projects[1], passed), passed, PM) < rhythm.NEVER
+    assert rhythm.due_at(faculty.with_objective(analysis.projects[1], passed), passed, PM) < rhythm.NEVER
     planned = _note(analysis, 30, kind=c.NOTE_PLAN)
-    assert rhythm.due_at(faculty._objective(planned.projects[1], passed), passed, PM) == rhythm.NEVER
+    assert rhythm.due_at(faculty.with_objective(planned.projects[1], passed), passed, PM) == rhythm.NEVER
     # un constant sans cadence qui n'attend pas les tickets ne revient pas de lui-même
     other = Objective(2, "2.text", kind=c.CONSTANT, on=("app:veille",), only_on_event=True, last_run_at=1_000)
     assert rhythm.due_at(p, other, PM) == rhythm.NEVER

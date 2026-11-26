@@ -18,21 +18,23 @@ from dataclasses import replace
 from mika.contracts import projects as c
 from mika.faculties.projects import faculty, milestones
 from mika.faculties.projects.faculty import (
-    HELD_AGREED,
-    HELD_BREAKPOINT,
-    HELD_OTHER,
-    HELD_REFUSED,
-    MILESTONE_CHANGED,
     PLAN_ANSWERED,
     PLAN_PROPOSED,
     Milestone,
     Objective,
     awaiting,
     milestone_at,
-    milestone_guard,
-    milestone_held,
     milestones_of,
     open_milestones,
+)
+from mika.faculties.projects.milestones import (
+    HELD_AGREED,
+    HELD_BREAKPOINT,
+    HELD_OTHER,
+    HELD_REFUSED,
+    MILESTONE_CHANGED,
+    milestone_guard,
+    milestone_held,
 )
 from mika.faculties.projects.tracker_tools import AddArgs, ItemArg, items_add
 from mika.faculties.projects.triage import StepArgs, ticket_step

@@ -18,7 +18,7 @@ from collections.abc import Callable, Mapping
 from typing import Any, Protocol
 
 from mika.contracts import projects as c
-from mika.faculties.projects import decisions, merge, tracker
+from mika.faculties.projects import decisions, merge, milestones, tracker
 from mika.faculties.projects import faculty as f
 from mika.faculties.projects.inspect_merge import WRITE_WORDS
 from mika.faculties.projects.inspect_words import CHECKS_FR, PULL_FR, VERDICT_FR
@@ -40,7 +40,7 @@ PULLS = (f.PULL_SEEN, f.CHECKS_SEEN, "projects.merge_asked", "projects.merge_ans
          "projects.pull_write_asked", "projects.pull_write_answered")
 TICKETS = tracker.MOVES
 GESTURES = (f.REFRAMED, f.PAUSED, f.RESUMED, f.ARCHIVED, f.RESTORED, f.NUDGED, f.OBJECTIVE_ADDED,
-            f.OBJECTIVE_CHANGED, f.MILESTONE_ADDED, f.MILESTONE_CHANGED, f.DECIDED, f.DECISION_CHANGED,
+            f.OBJECTIVE_CHANGED, milestones.MILESTONE_ADDED, milestones.MILESTONE_CHANGED, f.DECIDED, f.DECISION_CHANGED,
             decisions.DECISION_REVISED, f.AMENDED, f.PLAN_ANSWERED, f.LINKS_SET, f.DEPOSITED)
 ALL = (*RUNS, *PULLS, *TICKETS, *GESTURES)
 #: ce qu'un filtre par sorte lit du journal : un geste peut porter sur tout sauf une exécution

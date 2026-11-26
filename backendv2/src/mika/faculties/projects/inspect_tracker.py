@@ -22,7 +22,6 @@ from mika.faculties.projects.actions import PRIORITY_CHOICES, can_edit, refuse_r
 from mika.faculties.projects.faculty import (
     ISSUE_ASKED,
     LISTS_MAX,
-    MILESTONE_ADDED,
     MOVE_NOTE,
     MOVE_PUBLISH,
     OBJECTIVE_ADDED,
@@ -51,6 +50,7 @@ from mika.faculties.projects.inspect_common import (
     unchanged,
 )
 from mika.faculties.projects.inspect_issues import CANNOT, ISSUE_FR, PUBLISH_HELP
+from mika.faculties.projects.milestones import MILESTONE_ADDED
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (

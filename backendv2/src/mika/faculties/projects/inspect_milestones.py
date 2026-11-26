@@ -21,8 +21,6 @@ from mika.contracts import projects as c
 from mika.faculties.projects import milestones, reaching, tracker
 from mika.faculties.projects.actions import can_edit
 from mika.faculties.projects.faculty import (
-    MILESTONE_ADDED,
-    MILESTONE_CHANGED,
     PROJECTS,
     Milestone,
     Objective,
@@ -40,6 +38,7 @@ from mika.faculties.projects.inspect_common import (
     target_project,
     unchanged,
 )
+from mika.faculties.projects.milestones import MILESTONE_ADDED, MILESTONE_CHANGED
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import ActionSlot, Badge, Column, Disclosure, Prose, Row, Table, Text

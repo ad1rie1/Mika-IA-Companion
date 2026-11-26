@@ -20,6 +20,7 @@ from mika.faculties.projects import (  # noqa: F401 — contributions
     inspect_tracker,
     issues,
     merge,
+    milestones,
     prompt,
     pulls,
     reaching,

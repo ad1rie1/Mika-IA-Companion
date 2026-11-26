@@ -17,7 +17,6 @@ from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.faculties.projects.faculty import (
     ACCESS_SET,
-    MILESTONE_CHANGED,
     NOTED,
     PULL_OPEN,
     PULL_SEEN,
@@ -27,6 +26,7 @@ from mika.faculties.projects.faculty import (
     review_subject,
     subject_of,
 )
+from mika.faculties.projects.milestones import MILESTONE_CHANGED
 from mika.kernel.events import Content, Origin
 from mika.vocab.access import PERSON
 from mika.vocab.episodes import Kind, Outcome, project_target

@@ -24,7 +24,8 @@ from mika.app.domains.projects.api import manage, reach
 from mika.app.me.api import form as api_form
 from mika.contracts import projects as c
 from mika.faculties.projects import access, actions, inspect_merge, inspect_milestones, merge, milestones
-from mika.faculties.projects.faculty import ACCESS_SET, EXTRA_BUNDLES, MILESTONE_CHANGED, REFRAMED, Milestone
+from mika.faculties.projects.faculty import ACCESS_SET, EXTRA_BUNDLES, REFRAMED, Milestone
+from mika.faculties.projects.milestones import MILESTONE_CHANGED
 from mika.ports.workshop import Pull, Remark
 from mika.runtime.operations import perform
 from mika.vocab.access import PERSON

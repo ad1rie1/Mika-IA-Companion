@@ -5,7 +5,7 @@ Pendant une exécution qui vise un objectif ponctuel :
 - **``project_milestones``** pose un jalon, en révise un ou en retire un. À sa première exécution elle affine ceux
   que le plan a posés, sans avoir à dire pourquoi ; ensuite une révision garde sa raison, un retrait toujours. Un
   jalon atteint ne se défait pas ; un point d'arrêt qu'elle a dit prêt est au propriétaire, elle n'y touche plus.
-  Et elle ne défait pas ce qui n'est pas à elle seule (ADR 0278, ``faculty.milestone_guard``) : ni un point
+  Et elle ne défait pas ce qui n'est pas à elle seule (ADR 0278, ``milestones.milestone_guard``) : ni un point
   d'arrêt, ni un jalon qu'un autre a posé ou que le propriétaire a refusé, ni un jalon d'un plan qu'une personne
   a validé — celui-là, elle peut seulement lui donner une vérification. L'outil le refuse en disant pourquoi, et
   de le demander (« needs_you »).
@@ -49,7 +49,6 @@ from mika.faculties.projects.faculty import (
     inherited_for,
     live,
     milestone_at,
-    milestone_guard,
     milestones_of,
     next_milestone,
     objective_at,
@@ -58,6 +57,7 @@ from mika.faculties.projects.faculty import (
     written_for,
 )
 from mika.faculties.projects.inspect_common import unchanged
+from mika.faculties.projects.milestones import milestone_guard
 from mika.faculties.projects.steer import STEERABLE, steerable
 from mika.faculties.projects.tool_common import (
     RUNS,

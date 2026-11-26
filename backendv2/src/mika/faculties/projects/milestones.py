@@ -1,9 +1,14 @@
-"""Les jalons d'un objectif (ADR 0273) : ce qui s'écrit, et ce qu'on en lit.
+"""Les jalons d'un objectif (ADR 0273) : leurs faits, ce qui s'écrit, et ce qu'on en lit.
 
-Un objectif ponctuel dit où il en est par ses jalons — cinq vivants au plus, sans sous-jalons. Leurs formes, leurs
-événements et leurs réducteurs sont dans ``faculty.py`` (``Milestone``, ``milestone_stepped``). Ici, sans rien qui
-agisse :
+Un objectif ponctuel dit où il en est par ses jalons — cinq vivants au plus, sans sous-jalons. Leur forme
+(``Milestone``) et les lectures que tous en font (``milestone_at``, ``milestones_of``, ``awaiting``…) sont dans
+``faculty.py``. Ici, sans rien qui agisse :
 
+- **leurs faits** (ADR 0313) : ``projects.milestone_added`` et ``projects.milestone_changed``, leurs charges utiles
+  et leurs réducteurs — un jalon atteint ou retiré ne bouge plus, et la seule règle de ce qu'un changement en fait
+  est ``milestone_stepped`` ;
+- **ce qu'elle n'en défait pas en exécution** (``milestone_guard``, ADR 0278 ; ``milestone_held`` dit ce qui tient
+  un jalon hors de sa seule main) : la règle pure que le réducteur applique et que l'outil lit pour refuser ;
 - **ce qu'on demande** (``Spec``) et ce qui lui manque (``problem``) : un jalon se vérifie par une commande que
   l'outil lancera dans l'atelier, par un point d'arrêt que le propriétaire tranche, par un élément du registre dans
   un statut donné, ou par ce qu'elle en dit ;
@@ -26,24 +31,28 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from mika.contracts import projects as c
 from mika.faculties.projects.faculty import (
-    MILESTONE_ADDED,
-    MILESTONE_CHANGED,
+    INHERITED,
+    PROJECTS,
     ROUTINE_LINE_MAX,
     ROUTINE_LINES,
     Milestone,
     Objective,
     Project,
+    ProjectsState,
     awaiting,
-    milestone_held,
+    milestone_at,
     milestones_of,
     next_milestone,
+    objective_at,
+    with_objective,
+    with_project,
 )
-from mika.kernel.events import Content, Draft
+from mika.kernel.events import Content, Draft, Payload
 from mika.kernel.text import clipped
 from mika.vocab.phrasebook import family, phrase
 
@@ -131,7 +140,7 @@ def routine_text(rows: Iterable[str]) -> str:
 
 
 #: pourquoi une personne ne défait pas un jalon (``undoing``) : il n'est plus ouvert (atteint ou retiré, il ne bouge
-#: plus) ; sinon les codes de ``faculty.milestone_held``
+#: plus) ; sinon les codes de ``milestone_held``
 SETTLED = "settled"
 
 
@@ -143,6 +152,221 @@ def undoing(m: Milestone, settles: bool) -> str:
     if m.status != c.OPEN:
         return SETTLED
     return "" if settles else milestone_held(m)
+
+
+# ── Ses faits et leurs réducteurs (ADR 0313) ──────────────────────────────
+
+#: les jalons qu'un objectif garde en tout, retirés compris (les vivants : ``c.MILESTONES_MAX``) : au-delà, le plus
+#: ancien retiré tombe — l'état reste borné
+MILESTONES_KEPT = 12
+
+
+class MilestoneAdded(Payload):
+    """Un jalon posé sur un objectif ponctuel (ADR 0273) : par son plan, par l'exécution qui l'affine, par le plan
+    validé d'un ticket, ou par le propriétaire dans la console."""
+
+    project: int
+    objective: int
+    milestone: int
+    text: Content
+    #: comment il se vérifie (``c.CHECKS``) ; une commande : ses arguments (un contenu : une liste JSON) ; un élément
+    #: du registre : sa liste, sa clé (ou le numéro d'un ticket), le statut attendu
+    check: str = c.CHECK_PROSE
+    command: Content | None = None
+    item_list: str = ""
+    item_key: str = ""
+    item_status: str = ""
+    #: ``operator`` | ``owner`` | ``self``
+    author: str = "self"
+    by: str = ""
+    #: posé par un plan qu'une personne vient de valider (le plan d'un ticket, ADR 0278) : il est à cette personne
+    agreed: bool = False
+    owner: str | None = None
+    about: tuple[str, ...] = ()
+    read_about: tuple[str, ...] = ()
+
+
+class MilestoneChanged(Payload):
+    """Ce qui arrive à un jalon (ADR 0273) : révisé (son texte, sa vérification — ``None`` : inchangés), dit prêt
+    (un point d'arrêt : il attend le propriétaire), refusé par lui, atteint, retiré. ``how`` : comment elle dit l'avoir
+    rempli ; ``proof`` : sa preuve, un fait arrivé et borné (le résumé de ce que sa commande a rendu, le statut de
+    son élément à ce moment-là) — jamais un état recalculé ; ``reason`` : la raison d'une révision, d'un retrait,
+    d'un refus, ou le mot de qui le valide ; ``commit`` : le commit de l'atelier à ce moment-là."""
+
+    project: int
+    objective: int
+    milestone: int
+    text: Content | None = None
+    check: str | None = None
+    command: Content | None = None
+    item_list: str | None = None
+    item_key: str | None = None
+    item_status: str | None = None
+    #: ``c.REACHED`` ou ``c.DROPPED`` (``None`` : inchangé) — un jalon atteint ne se défait pas
+    status: str | None = None
+    ready: bool = False
+    refused: bool = False
+    how: Content | None = None
+    proof: Content | None = None
+    reason: Content | None = None
+    commit: str = ""
+    #: qui l'écrit : ``self`` (elle, pendant une exécution), ``owner`` (une personne en conversation : ``by``),
+    #: ``operator`` (la console)
+    author: str = "self"
+    by: str = ""
+    owner: str | None = None
+    about: tuple[str, ...] = ()
+    read_about: tuple[str, ...] = ()
+
+
+MILESTONE_ADDED = PROJECTS.event("milestone_added", MilestoneAdded, content=("text", "command"),
+                                 subjects=("owner", "about", "by", INHERITED))
+MILESTONE_CHANGED = PROJECTS.event("milestone_changed", MilestoneChanged,
+                                   content=("text", "command", "how", "proof", "reason"),
+                                   subjects=("owner", "about", "by", INHERITED))
+
+
+@PROJECTS.reducer(MILESTONE_ADDED)
+def _milestone_added(s: ProjectsState, e, cx) -> ProjectsState:
+    """Un jalon de plus sur un objectif ponctuel encore vivant (ADR 0273), ``c.MILESTONES_MAX`` vivants au plus :
+    au-delà, ignoré. Ses tout premiers jalons — il n'en a jamais eu — font repartir de zéro le compte des exécutions
+    sans jalon atteint ; aucune autre pose (ADR 0278) : retirer ses jalons ouverts puis en poser d'autres ne remet
+    pas ce compte à zéro."""
+    d = e.data
+    p = s.projects.get(d.project)
+    o = objective_at(p, d.objective) if p is not None else None
+    if p is None or o is None or o.kind != c.ONCE or o.status not in (c.OPEN, c.BLOCKED) or not d.text.ref:
+        return s
+    alive = milestones_of(o)
+    if len(alive) >= c.MILESTONES_MAX:
+        return s
+    # deux ajouts du même numéro : le second prend le suivant ; un numéro déjà donné ne revient jamais
+    number = d.milestone if d.milestone > o.milestone_seq else o.milestone_seq + 1
+    check = d.check if d.check in c.CHECKS else c.CHECK_PROSE
+    on_item = check == c.CHECK_ITEM
+    m = Milestone(id=number, text_ref=d.text.ref, check=check,
+                  command_ref=d.command.ref or "" if d.command is not None and check == c.CHECK_COMMAND else "",
+                  item_list=d.item_list if on_item else "", item_key=d.item_key if on_item else "",
+                  item_status=d.item_status if on_item else "", author=d.author, at=e.at, agreed=d.agreed)
+    kept = (*o.milestones, m)
+    while len(kept) > MILESTONES_KEPT:  # les retirés restent lisibles tant qu'il y a la place : le plus ancien tombe
+        oldest = next(x for x in kept if x.status == c.DROPPED)
+        kept = tuple(x for x in kept if x is not oldest)
+    first = o.milestone_seq == 0  # jamais aucun jalon : la toute première pose
+    return with_project(s, with_objective(p, replace(o, milestones=kept, milestone_seq=number, stale=0 if first else o.stale)))
+
+
+#: pourquoi, en exécution, un jalon n'est pas à elle seule (ADR 0278 ; les clés de
+#: ``projects.tools.milestones.held``) : le propriétaire l'a refusé, c'est un point d'arrêt, un autre qu'elle l'a
+#: posé, le plan qui l'a posé a été validé par une personne
+HELD_REFUSED, HELD_BREAKPOINT, HELD_OTHER, HELD_AGREED = "refused", "breakpoint", "other", "agreed"
+
+
+def milestone_held(m: Milestone) -> str:
+    """Ce qui tient ce jalon hors de sa seule main en exécution (ADR 0278), ou ``""`` : il est à elle."""
+    if m.refused_at:
+        return HELD_REFUSED
+    if m.check == c.CHECK_OWNER:
+        return HELD_BREAKPOINT
+    if m.author != "self":
+        return HELD_OTHER
+    return HELD_AGREED if m.agreed else ""
+
+
+def milestone_guard(m: Milestone, d: MilestoneChanged) -> str:
+    """Pourquoi ce geste ne vaut pas quand c'est elle qui l'écrit, en exécution (ADR 0278) — un code ``HELD_…`` —,
+    ou ``""``. Pure : la règle que le réducteur applique (``milestone_stepped``) et que l'outil lit pour refuser
+    en disant pourquoi.
+
+    - Elle ne **retire** pas un jalon tenu (``milestone_held``) : posé par un autre, fixé par un plan qu'une
+      personne a validé, point d'arrêt, ou refusé par le propriétaire.
+    - Elle n'en **change pas la vérification** (sa sorte, sa commande, son élément) — sauf pour en donner une à un
+      jalon à elle, fixé par un plan validé, qui n'avait que sa parole : affiner n'est pas affaiblir.
+    - Elle n'en **réécrit le texte** que s'il est d'elle, et que personne ne l'a validé.
+
+    Dire un jalon atteint, ou un point d'arrêt prêt, n'est pas le défaire : ce n'est pas jugé ici. Ce que font le
+    propriétaire et l'opérateur non plus."""
+    if d.author != "self" or d.status == c.REACHED or d.ready or d.refused:
+        return ""
+    why = milestone_held(m)
+    if d.status == c.DROPPED:
+        return why
+    rechecks = any(x is not None for x in (d.check, d.command, d.item_list, d.item_key, d.item_status))
+    firms = why == HELD_AGREED and m.check == c.CHECK_PROSE and d.check in c.CHECKS and d.check != c.CHECK_PROSE
+    if rechecks and why and not firms:
+        return why
+    if d.text is not None and (m.author != "self" or m.agreed):
+        return HELD_AGREED if m.author == "self" else HELD_OTHER
+    return ""
+
+
+def milestone_stepped(m: Milestone, d: MilestoneChanged, at: int) -> tuple[Milestone, bool] | None:
+    """Ce qu'un changement fait d'un jalon encore ouvert, et s'il fait avancer l'objectif (ADR 0273) ; ``None`` :
+    rien. Pure : la seule règle, que lisent le réducteur et ce qui veut savoir d'avance si un geste vaudra.
+
+    - **retiré**, avec sa raison ; **atteint** — un point d'arrêt ne l'est que par un autre qu'elle, et seulement
+      quand elle l'a dit prêt ;
+    - **refusé** par le propriétaire : il est de nouveau à elle, la raison gardée ;
+    - **dit prêt** (un point d'arrêt seulement) : il attend le propriétaire — une avancée ;
+    - sinon **révisé** : son texte, sa vérification, sa raison gardée.
+
+    Tant qu'il attend le propriétaire, elle n'y touche plus ; et en exécution elle ne défait pas un jalon qui
+    n'est pas à elle seule (``milestone_guard``, ADR 0278)."""
+    hers = d.author == "self"
+    reason = d.reason.ref or "" if d.reason is not None else ""
+    how = d.how.ref or "" if d.how is not None else ""
+    if milestone_guard(m, d):
+        return None
+    if d.status == c.DROPPED:
+        if m.ready_at and hers:
+            return None
+        return replace(m, status=c.DROPPED, ready_at=0, reason_ref=reason or m.reason_ref), False
+    if d.status == c.REACHED:
+        if m.check == c.CHECK_OWNER and (hers or not m.ready_at):
+            return None
+        return replace(m, status=c.REACHED, reached_at=at, reached_by=d.by or d.author, ready_at=0,
+                       how_ref=how or m.how_ref, proof_ref=d.proof.ref or "" if d.proof is not None else "",
+                       commit=d.commit or m.commit, reason_ref=reason or m.reason_ref), True
+    if d.refused:
+        if hers or not m.ready_at:
+            return None
+        return replace(m, ready_at=0, refused_at=at, reason_ref=reason or m.reason_ref), False
+    if d.ready:
+        if m.check != c.CHECK_OWNER or m.ready_at:
+            return None
+        return replace(m, ready_at=at, refused_at=0, how_ref=how or m.how_ref, commit=d.commit or m.commit), True
+    if m.ready_at and hers:
+        return None
+    check = d.check if d.check in c.CHECKS else m.check
+    on_item = check == c.CHECK_ITEM
+    new = replace(
+        m, text_ref=d.text.ref if d.text is not None and d.text.ref else m.text_ref, check=check,
+        command_ref=(d.command.ref if d.command is not None and d.command.ref else m.command_ref)
+        if check == c.CHECK_COMMAND else "",
+        item_list=(m.item_list if d.item_list is None else d.item_list) if on_item else "",
+        item_key=(m.item_key if d.item_key is None else d.item_key) if on_item else "",
+        item_status=(m.item_status if d.item_status is None else d.item_status) if on_item else "")
+    if new == m:
+        return None
+    return replace(new, ready_at=0, revised=m.revised + 1, reason_ref=reason or m.reason_ref), False
+
+
+@PROJECTS.reducer(MILESTONE_CHANGED)
+def _milestone_changed(s: ProjectsState, e, cx) -> ProjectsState:
+    """Un jalon atteint ou retiré ne bouge plus : il ne se défait ni ne se révise. Un jalon atteint, ou un point
+    d'arrêt dit prêt, remet à zéro le compte des exécutions sans jalon atteint."""
+    d = e.data
+    p = s.projects.get(d.project)
+    o = objective_at(p, d.objective) if p is not None else None
+    m = milestone_at(o, d.milestone) if o is not None else None
+    if p is None or o is None or m is None or m.status != c.OPEN:
+        return s
+    got = milestone_stepped(m, d, e.at)
+    if got is None:
+        return s
+    new, progressed = got
+    return with_project(s, with_objective(p, replace(o, milestones=tuple(new if x.id == m.id else x for x in o.milestones),
+                                         stale=0 if progressed else o.stale)))
 
 
 # ── Écrire : les seuls endroits qui font un brouillon ─────────────────────
@@ -183,7 +407,7 @@ def changing(p: Project, objective: int, m: Milestone, *, level: int, inherited:
     """Le brouillon de ce qui arrive à un jalon : révisé (``spec`` : ce qu'il devient), dit prêt, refusé, atteint,
     retiré — avec comment, sa preuve, sa raison et le commit de l'atelier. La preuve est un fait arrivé, borné.
     Une révision ne porte que ce qu'elle change (ADR 0278) : ``same_text``, son texte reste ; ``same_check``, sa
-    vérification reste — la règle de ce qu'elle peut défaire (``faculty.milestone_guard``) juge ce qui est porté."""
+    vérification reste — la règle de ce qu'elle peut défaire (``milestone_guard``) juge ce qui est porté."""
 
     def opt(text: str, most: int) -> Content | None:
         return Content.of(clipped(text.strip(), most), level=level) if text.strip() else None

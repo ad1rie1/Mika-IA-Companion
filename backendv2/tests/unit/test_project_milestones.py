@@ -22,8 +22,6 @@ from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.faculties.projects import faculty, milestones, tend, tickets
 from mika.faculties.projects.faculty import (
-    MILESTONE_ADDED,
-    MILESTONE_CHANGED,
     Objective,
     ProjectsState,
     _sent_back,
@@ -36,6 +34,7 @@ from mika.faculties.projects.faculty import (
     subject_of,
 )
 from mika.faculties.projects.framing_tools import PlanArgs, project_plan
+from mika.faculties.projects.milestones import MILESTONE_ADDED, MILESTONE_CHANGED
 from mika.faculties.projects.prompt import _live_section, _run_section, _texts
 from mika.faculties.projects.reaching import (
     PoseArgs,
@@ -87,13 +86,13 @@ def _o(s: ProjectsState, oid: int = 1) -> Objective:
 def _pose(s: ProjectsState, number: int, at: int = 1, oid: int = 1, **fields) -> ProjectsState:
     data = MILESTONE_ADDED.payload(project=1, objective=oid, milestone=number, text=Content(ref=f"m{number}@{at}"),
                                    **fields)
-    return faculty._milestone_added(s, _ev(data, at), _cx())
+    return milestones._milestone_added(s, _ev(data, at), _cx())
 
 
 def _step(s: ProjectsState, number: int, at: int, **fields) -> ProjectsState:
     refs = {k: Content(ref=f"{k}@{at}") for k in ("text", "how", "proof", "reason") if fields.pop(k, False)}
     data = MILESTONE_CHANGED.payload(project=1, objective=1, milestone=number, **refs, **fields)
-    return faculty._milestone_changed(s, _ev(data, at), _cx())
+    return milestones._milestone_changed(s, _ev(data, at), _cx())
 
 
 def test_five_milestones_at_most_a_revision_keeps_its_reason_and_a_reached_one_is_never_undone():
@@ -128,7 +127,7 @@ def test_five_milestones_at_most_a_revision_keeps_its_reason_and_a_reached_one_i
     for n in range(7, 20):
         s = _pose(_step(s, n - 1, 100 + n, status=c.DROPPED, reason=True), n, at=100 + n)
     kept = _o(s).milestones
-    assert len(kept) == faculty.MILESTONES_KEPT and [m.id for m in milestones_of(_o(s))] == [1, 2, 3, 4, 19]
+    assert len(kept) == milestones.MILESTONES_KEPT and [m.id for m in milestones_of(_o(s))] == [1, 2, 3, 4, 19]
     assert milestone_at(_o(s), 5) is None and milestone_at(_o(s), 2).status == c.REACHED
 
 

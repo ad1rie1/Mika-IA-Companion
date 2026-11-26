@@ -32,12 +32,13 @@ ses événements font ressentir (ADR 0031).
   (``Objective.branch``, que dit le compte rendu de l'exécution) et finit en pull request (``Objective.pull``,
   ``pull_state``). Leurs faits sont ici (``projects.pull_seen`` : ce que l'hôte en dit, daté) ; ce qui les propose,
   les ouvre et les relit, dans ``pulls.py``. Rien ici ne fusionne.
-- **Ses jalons** (ADR 0273) : un objectif ponctuel dit où il en est (``Objective.milestones``, ``Milestone``). Leurs
-  événements et leurs réducteurs sont ici ; ce qui s'écrit et ce qu'on en lit, dans ``milestones.py`` ; ses outils,
-  dans ``reaching.py``. Un jalon atteint ne se défait pas ; un objectif qui en a bloque quand il n'en atteint plus
-  (``Objective.stale``, ``tend.py``) ; un constant n'en a pas — il a sa liste de passage (``routine_ref``). En
-  exécution, elle ne défait ni un point d'arrêt, ni un jalon qu'un autre a posé ou qu'un plan validé par une
-  personne a fixé (``milestone_guard``, ADR 0278) : la règle est ici, pure, lue par le réducteur et par l'outil.
+- **Ses jalons** (ADR 0273) : un objectif ponctuel dit où il en est (``Objective.milestones``, ``Milestone``). Leur
+  forme et les lectures que tous en font sont ici ; leurs événements, leurs réducteurs, ce qui s'écrit et ce qu'on
+  en lit, dans ``milestones.py`` (ADR 0313) ; ses outils, dans ``reaching.py``. Un jalon atteint ne se défait pas ;
+  un objectif qui en a bloque quand il n'en atteint plus (``Objective.stale``, ``tend.py``) ; un constant n'en a pas
+  — il a sa liste de passage (``routine_ref``). En exécution, elle ne défait ni un point d'arrêt, ni un jalon qu'un
+  autre a posé ou qu'un plan validé par une personne a fixé (``milestones.milestone_guard``, ADR 0278 : la règle,
+  pure, lue par le réducteur et par l'outil).
 """
 
 from __future__ import annotations
@@ -117,9 +118,6 @@ ASKS_OPEN_MAX = 5
 ASKS_PER_RUN = 3
 #: la liste de passage d'un constant (ADR 0273) : ses lignes, au plus, et ce qu'on garde de chacune
 ROUTINE_LINES, ROUTINE_LINE_MAX = 5, 200
-#: les jalons qu'un objectif garde en tout, retirés compris (les vivants : ``c.MILESTONES_MAX``) : au-delà, le plus
-#: ancien retiré tombe — l'état reste borné
-MILESTONES_KEPT = 12
 #: les lots d'outils que tout projet a : son atelier et ses propres outils
 BASE_BUNDLES = ("projects", "workshop")
 #: chercher et lire sur le web (ADR 0105) : un projet à elle l'a toujours en main, comme ses autres outils ; un projet
@@ -314,7 +312,7 @@ class Milestone:
     at: int = 0
     #: le plan qui l'a posé a été validé par une personne (ADR 0278) — le plan du projet, ou le plan d'un ticket :
     #: ce jalon est à cette personne. En exécution elle ne le retire pas, n'en réécrit pas le texte et n'en
-    #: affaiblit pas la vérification (``milestone_guard``)
+    #: affaiblit pas la vérification (``milestones.milestone_guard``)
     agreed: bool = False
     #: un point d'arrêt : elle l'a dit prêt à cet instant (0 : non) — il attend le propriétaire, et l'objectif avec
     #: lui ; refusé à cet instant (sa raison : ``reason_ref``), il est de nouveau à elle
@@ -1084,64 +1082,6 @@ class ObjectiveChanged(Payload):
     at_once: bool | None = None
 
 
-class MilestoneAdded(Payload):
-    """Un jalon posé sur un objectif ponctuel (ADR 0273) : par son plan, par l'exécution qui l'affine, par le plan
-    validé d'un ticket, ou par le propriétaire dans la console."""
-
-    project: int
-    objective: int
-    milestone: int
-    text: Content
-    #: comment il se vérifie (``c.CHECKS``) ; une commande : ses arguments (un contenu : une liste JSON) ; un élément
-    #: du registre : sa liste, sa clé (ou le numéro d'un ticket), le statut attendu
-    check: str = c.CHECK_PROSE
-    command: Content | None = None
-    item_list: str = ""
-    item_key: str = ""
-    item_status: str = ""
-    #: ``operator`` | ``owner`` | ``self``
-    author: str = "self"
-    by: str = ""
-    #: posé par un plan qu'une personne vient de valider (le plan d'un ticket, ADR 0278) : il est à cette personne
-    agreed: bool = False
-    owner: str | None = None
-    about: tuple[str, ...] = ()
-    read_about: tuple[str, ...] = ()
-
-
-class MilestoneChanged(Payload):
-    """Ce qui arrive à un jalon (ADR 0273) : révisé (son texte, sa vérification — ``None`` : inchangés), dit prêt
-    (un point d'arrêt : il attend le propriétaire), refusé par lui, atteint, retiré. ``how`` : comment elle dit l'avoir
-    rempli ; ``proof`` : sa preuve, un fait arrivé et borné (le résumé de ce que sa commande a rendu, le statut de
-    son élément à ce moment-là) — jamais un état recalculé ; ``reason`` : la raison d'une révision, d'un retrait,
-    d'un refus, ou le mot de qui le valide ; ``commit`` : le commit de l'atelier à ce moment-là."""
-
-    project: int
-    objective: int
-    milestone: int
-    text: Content | None = None
-    check: str | None = None
-    command: Content | None = None
-    item_list: str | None = None
-    item_key: str | None = None
-    item_status: str | None = None
-    #: ``c.REACHED`` ou ``c.DROPPED`` (``None`` : inchangé) — un jalon atteint ne se défait pas
-    status: str | None = None
-    ready: bool = False
-    refused: bool = False
-    how: Content | None = None
-    proof: Content | None = None
-    reason: Content | None = None
-    commit: str = ""
-    #: qui l'écrit : ``self`` (elle, pendant une exécution), ``owner`` (une personne en conversation : ``by``),
-    #: ``operator`` (la console)
-    author: str = "self"
-    by: str = ""
-    owner: str | None = None
-    about: tuple[str, ...] = ()
-    read_about: tuple[str, ...] = ()
-
-
 class Decided(Payload):
     """Une décision technique (la sienne pendant une exécution, ou celle d'un opérateur)."""
 
@@ -1539,11 +1479,6 @@ OBJECTIVE_ADDED = PROJECTS.event("objective_added", ObjectiveAdded,
 OBJECTIVE_CHANGED = PROJECTS.event("objective_changed", ObjectiveChanged,
                                    content=("text", "note", "done_when", "brief", "routine"),
                                    subjects=("owner", "about", "by", INHERITED))
-MILESTONE_ADDED = PROJECTS.event("milestone_added", MilestoneAdded, content=("text", "command"),
-                                 subjects=("owner", "about", "by", INHERITED))
-MILESTONE_CHANGED = PROJECTS.event("milestone_changed", MilestoneChanged,
-                                   content=("text", "command", "how", "proof", "reason"),
-                                   subjects=("owner", "about", "by", INHERITED))
 DECIDED = PROJECTS.event("decided", Decided, content=("title", "choice", "context", "options", "reason"),
                          subjects=("owner", "about", "by", INHERITED))
 DECISION_CHANGED = PROJECTS.event("decision_changed", DecisionChanged, subjects=("owner", "about"))
@@ -1579,10 +1514,6 @@ LINKS_SET = PROJECTS.event("links_set", LinksSet, content=("why",), subjects=("o
 STIRRED = PROJECTS.event("stirred", Stirred)
 STEER_ASKED = PROJECTS.event("steer_asked", SteerAsked, content=("text",),
                              subjects=("owner", "about", "by", INHERITED))
-#: ce qu'un opérateur (ou elle) fait d'un projet — la chronologie du carnet
-OPERATIONS = (REFRAMED, PAUSED, RESUMED, ARCHIVED, RESTORED, NUDGED, OBJECTIVE_ADDED, OBJECTIVE_CHANGED,
-              DECISION_CHANGED, DEPOSITED, REMOTE_REQUESTED, PLAN_PROPOSED, PLAN_ANSWERED, MILESTONE_ADDED,
-              MILESTONE_CHANGED)
 
 
 def opened(*, title: str, description: str, authority: str, mode: str, owner: str | None, address: str | None,
@@ -1958,7 +1889,7 @@ def with_project(s: ProjectsState, p: Project) -> ProjectsState:
     return replace(s, projects=s.projects.set(p.id, p))
 
 
-def _objective(p: Project, o: Objective) -> Project:
+def with_objective(p: Project, o: Objective) -> Project:
     return replace(p, objectives=tuple(o if x.id == o.id else x for x in p.objectives))
 
 
@@ -2080,7 +2011,7 @@ def _objective_changed(s: ProjectsState, e, cx) -> ProjectsState:
     if not changes:
         return s
     new = replace(o, **changes)
-    return with_project(s, replace(_objective(p, new), triage=_triage(p, new.id, new.on)))
+    return with_project(s, replace(with_objective(p, new), triage=_triage(p, new.id, new.on)))
 
 
 def _retriggered(p: Project, o: Objective, d: ObjectiveChanged, changes: Mapping[str, Any]) -> dict[str, Any]:
@@ -2102,149 +2033,6 @@ def _retriggered(p: Project, o: Objective, d: ObjectiveChanged, changes: Mapping
         if not causes:
             out.update(stirred_at=0, stirred_more=0)
     return out
-
-
-@PROJECTS.reducer(MILESTONE_ADDED)
-def _milestone_added(s: ProjectsState, e, cx) -> ProjectsState:
-    """Un jalon de plus sur un objectif ponctuel encore vivant (ADR 0273), ``c.MILESTONES_MAX`` vivants au plus :
-    au-delà, ignoré. Ses tout premiers jalons — il n'en a jamais eu — font repartir de zéro le compte des exécutions
-    sans jalon atteint ; aucune autre pose (ADR 0278) : retirer ses jalons ouverts puis en poser d'autres ne remet
-    pas ce compte à zéro."""
-    d = e.data
-    p = s.projects.get(d.project)
-    o = objective_at(p, d.objective) if p is not None else None
-    if p is None or o is None or o.kind != c.ONCE or o.status not in (c.OPEN, c.BLOCKED) or not d.text.ref:
-        return s
-    alive = milestones_of(o)
-    if len(alive) >= c.MILESTONES_MAX:
-        return s
-    # deux ajouts du même numéro : le second prend le suivant ; un numéro déjà donné ne revient jamais
-    number = d.milestone if d.milestone > o.milestone_seq else o.milestone_seq + 1
-    check = d.check if d.check in c.CHECKS else c.CHECK_PROSE
-    on_item = check == c.CHECK_ITEM
-    m = Milestone(id=number, text_ref=d.text.ref, check=check,
-                  command_ref=d.command.ref or "" if d.command is not None and check == c.CHECK_COMMAND else "",
-                  item_list=d.item_list if on_item else "", item_key=d.item_key if on_item else "",
-                  item_status=d.item_status if on_item else "", author=d.author, at=e.at, agreed=d.agreed)
-    kept = (*o.milestones, m)
-    while len(kept) > MILESTONES_KEPT:  # les retirés restent lisibles tant qu'il y a la place : le plus ancien tombe
-        oldest = next(x for x in kept if x.status == c.DROPPED)
-        kept = tuple(x for x in kept if x is not oldest)
-    first = o.milestone_seq == 0  # jamais aucun jalon : la toute première pose
-    return with_project(s, _objective(p, replace(o, milestones=kept, milestone_seq=number, stale=0 if first else o.stale)))
-
-
-#: pourquoi, en exécution, un jalon n'est pas à elle seule (ADR 0278 ; les clés de
-#: ``projects.tools.milestones.held``) : le propriétaire l'a refusé, c'est un point d'arrêt, un autre qu'elle l'a
-#: posé, le plan qui l'a posé a été validé par une personne
-HELD_REFUSED, HELD_BREAKPOINT, HELD_OTHER, HELD_AGREED = "refused", "breakpoint", "other", "agreed"
-
-
-def milestone_held(m: Milestone) -> str:
-    """Ce qui tient ce jalon hors de sa seule main en exécution (ADR 0278), ou ``""`` : il est à elle."""
-    if m.refused_at:
-        return HELD_REFUSED
-    if m.check == c.CHECK_OWNER:
-        return HELD_BREAKPOINT
-    if m.author != "self":
-        return HELD_OTHER
-    return HELD_AGREED if m.agreed else ""
-
-
-def milestone_guard(m: Milestone, d: MilestoneChanged) -> str:
-    """Pourquoi ce geste ne vaut pas quand c'est elle qui l'écrit, en exécution (ADR 0278) — un code ``HELD_…`` —,
-    ou ``""``. Pure : la règle que le réducteur applique (``milestone_stepped``) et que l'outil lit pour refuser
-    en disant pourquoi.
-
-    - Elle ne **retire** pas un jalon tenu (``milestone_held``) : posé par un autre, fixé par un plan qu'une
-      personne a validé, point d'arrêt, ou refusé par le propriétaire.
-    - Elle n'en **change pas la vérification** (sa sorte, sa commande, son élément) — sauf pour en donner une à un
-      jalon à elle, fixé par un plan validé, qui n'avait que sa parole : affiner n'est pas affaiblir.
-    - Elle n'en **réécrit le texte** que s'il est d'elle, et que personne ne l'a validé.
-
-    Dire un jalon atteint, ou un point d'arrêt prêt, n'est pas le défaire : ce n'est pas jugé ici. Ce que font le
-    propriétaire et l'opérateur non plus."""
-    if d.author != "self" or d.status == c.REACHED or d.ready or d.refused:
-        return ""
-    why = milestone_held(m)
-    if d.status == c.DROPPED:
-        return why
-    rechecks = any(x is not None for x in (d.check, d.command, d.item_list, d.item_key, d.item_status))
-    firms = why == HELD_AGREED and m.check == c.CHECK_PROSE and d.check in c.CHECKS and d.check != c.CHECK_PROSE
-    if rechecks and why and not firms:
-        return why
-    if d.text is not None and (m.author != "self" or m.agreed):
-        return HELD_AGREED if m.author == "self" else HELD_OTHER
-    return ""
-
-
-def milestone_stepped(m: Milestone, d: MilestoneChanged, at: int) -> tuple[Milestone, bool] | None:
-    """Ce qu'un changement fait d'un jalon encore ouvert, et s'il fait avancer l'objectif (ADR 0273) ; ``None`` :
-    rien. Pure : la seule règle, que lisent le réducteur et ce qui veut savoir d'avance si un geste vaudra.
-
-    - **retiré**, avec sa raison ; **atteint** — un point d'arrêt ne l'est que par un autre qu'elle, et seulement
-      quand elle l'a dit prêt ;
-    - **refusé** par le propriétaire : il est de nouveau à elle, la raison gardée ;
-    - **dit prêt** (un point d'arrêt seulement) : il attend le propriétaire — une avancée ;
-    - sinon **révisé** : son texte, sa vérification, sa raison gardée.
-
-    Tant qu'il attend le propriétaire, elle n'y touche plus ; et en exécution elle ne défait pas un jalon qui
-    n'est pas à elle seule (``milestone_guard``, ADR 0278)."""
-    hers = d.author == "self"
-    reason = d.reason.ref or "" if d.reason is not None else ""
-    how = d.how.ref or "" if d.how is not None else ""
-    if milestone_guard(m, d):
-        return None
-    if d.status == c.DROPPED:
-        if m.ready_at and hers:
-            return None
-        return replace(m, status=c.DROPPED, ready_at=0, reason_ref=reason or m.reason_ref), False
-    if d.status == c.REACHED:
-        if m.check == c.CHECK_OWNER and (hers or not m.ready_at):
-            return None
-        return replace(m, status=c.REACHED, reached_at=at, reached_by=d.by or d.author, ready_at=0,
-                       how_ref=how or m.how_ref, proof_ref=d.proof.ref or "" if d.proof is not None else "",
-                       commit=d.commit or m.commit, reason_ref=reason or m.reason_ref), True
-    if d.refused:
-        if hers or not m.ready_at:
-            return None
-        return replace(m, ready_at=0, refused_at=at, reason_ref=reason or m.reason_ref), False
-    if d.ready:
-        if m.check != c.CHECK_OWNER or m.ready_at:
-            return None
-        return replace(m, ready_at=at, refused_at=0, how_ref=how or m.how_ref, commit=d.commit or m.commit), True
-    if m.ready_at and hers:
-        return None
-    check = d.check if d.check in c.CHECKS else m.check
-    on_item = check == c.CHECK_ITEM
-    new = replace(
-        m, text_ref=d.text.ref if d.text is not None and d.text.ref else m.text_ref, check=check,
-        command_ref=(d.command.ref if d.command is not None and d.command.ref else m.command_ref)
-        if check == c.CHECK_COMMAND else "",
-        item_list=(m.item_list if d.item_list is None else d.item_list) if on_item else "",
-        item_key=(m.item_key if d.item_key is None else d.item_key) if on_item else "",
-        item_status=(m.item_status if d.item_status is None else d.item_status) if on_item else "")
-    if new == m:
-        return None
-    return replace(new, ready_at=0, revised=m.revised + 1, reason_ref=reason or m.reason_ref), False
-
-
-@PROJECTS.reducer(MILESTONE_CHANGED)
-def _milestone_changed(s: ProjectsState, e, cx) -> ProjectsState:
-    """Un jalon atteint ou retiré ne bouge plus : il ne se défait ni ne se révise. Un jalon atteint, ou un point
-    d'arrêt dit prêt, remet à zéro le compte des exécutions sans jalon atteint."""
-    d = e.data
-    p = s.projects.get(d.project)
-    o = objective_at(p, d.objective) if p is not None else None
-    m = milestone_at(o, d.milestone) if o is not None else None
-    if p is None or o is None or m is None or m.status != c.OPEN:
-        return s
-    got = milestone_stepped(m, d, e.at)
-    if got is None:
-        return s
-    new, progressed = got
-    return with_project(s, _objective(p, replace(o, milestones=tuple(new if x.id == m.id else x for x in o.milestones),
-                                         stale=0 if progressed else o.stale)))
 
 
 @PROJECTS.reducer(DECIDED)
@@ -2391,7 +2179,7 @@ def _nudged(s: ProjectsState, e, cx) -> ProjectsState:
         return s
     o = objective_at(p, d.objective) if d.objective else None
     if o is not None and o.waiting_until:  # « maintenant » l'emporte sur l'attente
-        p = _objective(p, replace(o, waiting_until=0))
+        p = with_objective(p, replace(o, waiting_until=0))
     return with_project(s, replace(p, nudged_at=e.at, nudged_objective=d.objective if o is not None else 0))
 
 
@@ -2486,7 +2274,7 @@ def _noted(s: ProjectsState, e, cx) -> ProjectsState:
     p = replace(p, notes=(*p.notes, ref)[-NOTES_KEPT:])
     o = objective_at(p, e.data.objective) if e.data.objective else None
     if o is not None:  # l'objectif qu'elle visait la garde aussi : il la retrouvera à son prochain passage
-        p = _objective(p, replace(o, notes=(*o.notes, ref)[-OBJECTIVE_NOTES_KEPT:]))
+        p = with_objective(p, replace(o, notes=(*o.notes, ref)[-OBJECTIVE_NOTES_KEPT:]))
     return with_project(s, p)
 
 
@@ -2618,7 +2406,7 @@ def _pull_seen(s: ProjectsState, e, cx) -> ProjectsState:
         # redirait chaque minute, sans fin (ADR 0277)
         if d.state != PULL_MERGED or not (o.unsent or o.pull_tries):
             return s
-        return with_project(s, _objective(p, _accepted(replace(o, unsent=False, pull_tries=0), e.at)))
+        return with_project(s, with_objective(p, _accepted(replace(o, unsent=False, pull_tries=0), e.at)))
     said = d.said.ref or "" if d.said is not None else ""
     changes = d.changes and d.state == PULL_OPEN
     # un refus ne compte qu'une fois : une fermeture qu'on n'avait pas vue, une relecture plus récente que la dernière
@@ -2645,7 +2433,7 @@ def _pull_seen(s: ProjectsState, e, cx) -> ProjectsState:
         # après une fusion, et quand l'hôte dit la pull request en conflit (ADR 0280) : sa base a avancé, et
         # l'outil qui la ramène dans la branche de travail ne ramène que ce que l'atelier en a
         p = replace(p, requests=(*p.requests, (e.seq, BASE_REQUEST))[-4:])
-    return with_project(s, _objective(p, o))
+    return with_project(s, with_objective(p, o))
 
 
 def _accepted(o: Objective, at: int) -> Objective:
@@ -2685,7 +2473,7 @@ def _merge_asked(s: ProjectsState, e, cx) -> ProjectsState:
     o = objective_at(p, d.objective) if p is not None else None
     if p is None or o is None:
         return s
-    return with_project(s, _objective(p, replace(o, merge_asked_at=e.at, merge_by=d.by, merge_refused="")))
+    return with_project(s, with_objective(p, replace(o, merge_asked_at=e.at, merge_by=d.by, merge_refused="")))
 
 
 @PROJECTS.reducer(MERGE_ANSWERED)
@@ -2697,7 +2485,7 @@ def _merge_answered(s: ProjectsState, e, cx) -> ProjectsState:
     o = objective_at(p, d.objective) if p is not None else None
     if p is None or o is None:
         return s
-    return with_project(s, _objective(p, replace(o, merge_asked_at=0, merge_answered_at=e.at,
+    return with_project(s, with_objective(p, replace(o, merge_asked_at=0, merge_answered_at=e.at,
                                          merge_refused="" if d.merged else (d.why or MERGE_CUT))))
 
 
@@ -2724,7 +2512,7 @@ def _checks_seen(s: ProjectsState, e, cx) -> ProjectsState:
     o = replace(o, checks=d.state, checks_sha=d.sha, checks_at=e.at,
                 checks_failed_sha=d.sha if failed else o.checks_failed_sha,
                 checks_said_ref=said or (o.checks_said_ref if failed else ""))
-    return with_project(s, _objective(p, _sent_back(o) if failed_anew else o))
+    return with_project(s, with_objective(p, _sent_back(o) if failed_anew else o))
 
 
 #: les relectures refusées d'affilée sur un objectif avant que la main revienne au propriétaire ; les relectures
@@ -2791,7 +2579,7 @@ def _review_asked(s: ProjectsState, e, cx) -> ProjectsState:
     o = objective_at(p, d.objective) if p is not None else None
     if p is None or o is None or not d.sha or d.sha in (o.reviewed, o.review_due) or handed_over(o):
         return s
-    return with_project(s, _objective(p, replace(o, review_due=d.sha, review_tries=0)))
+    return with_project(s, with_objective(p, replace(o, review_due=d.sha, review_tries=0)))
 
 
 @PROJECTS.reducer(REVIEWED)
@@ -2815,13 +2603,13 @@ def _reviewed(s: ProjectsState, e, cx) -> ProjectsState:
     p = replace(p, failures=0)
     if d.good:
         # en flux direct, la relecture suivante lira ce qui a changé depuis ce commit-ci
-        return with_project(s, _objective(p, replace(o, review_refused=(), since=o.since if by_pulls(p) else d.sha)))
+        return with_project(s, with_objective(p, replace(o, review_refused=(), since=o.since if by_pulls(p) else d.sha)))
     o = replace(o, review_refused=(*o.review_refused, ref)[-REVIEW_REFUSALS_MAX:])
     if not handed_over(o):
-        return with_project(s, _objective(p, _sent_back(o)))
+        return with_project(s, with_objective(p, _sent_back(o)))
     if o.kind == c.ONCE and o.status in (c.DONE, c.OPEN):
         o = replace(o, status=c.BLOCKED, closed_at=e.at)
-    return with_project(s, _objective(p, replace(o, need_ref=ref or o.need_ref, asked=False, ask_attempts=0, asked_at=0,
+    return with_project(s, with_objective(p, replace(o, need_ref=ref or o.need_ref, asked=False, ask_attempts=0, asked_at=0,
                                          answered_at=0, steered_at=0)))
 
 
@@ -2986,7 +2774,7 @@ def _started(s: ProjectsState, e, cx) -> ProjectsState:
             p = replace(p, last_run_at=e.at, tried_at=e.at)
         if o is not None:
             # une exécution de plus sans nouveau jalon atteint : un jalon atteint remettra ce compte à zéro (ADR 0273)
-            p = _objective(p, _unstirred(replace(o, runs=o.runs + 1, worked=o.worked + 1, stale=o.stale + 1,
+            p = with_objective(p, _unstirred(replace(o, runs=o.runs + 1, worked=o.worked + 1, stale=o.stale + 1,
                                                  last_run_at=e.at)))
         return with_project(s, p)
     got = objective_of(d.subject)
@@ -3050,7 +2838,7 @@ def _uttered(s: ProjectsState, e, cx) -> ProjectsState:
     if run.purpose == "need":
         # « j'ai besoin de toi pour… » est dit : elle attend la réponse de cette personne-là, à partir de maintenant
         person = (cx.facts.get(identity_c.PERSON(run.address)) or run.address) if run.address else ""
-        return with_project(s, _objective(p, replace(o, asked=True, asked_at=e.at, asked_to=person)))
+        return with_project(s, with_objective(p, replace(o, asked=True, asked_at=e.at, asked_to=person)))
     story = _story(p, run)
     return with_project(s, replace(p, objectives=tuple(
         (replace(x, told_at=e.at) if x.kind == c.CONSTANT else replace(x, shared=True)) if x.id in story else x
@@ -3065,11 +2853,11 @@ def _answered(s: ProjectsState, e, cx) -> ProjectsState:
     if p is None or o is None:
         return s
     if stuck_asking(o, e.at):  # la réponse à son blocage le rouvre (ADR 0161)
-        return with_project(s, _objective(p, reopened(o, e.at)))
+        return with_project(s, with_objective(p, reopened(o, e.at)))
     if o.status != c.OPEN:
         return s
     # sa réponse est là : l'objectif n'attend plus (l'exécution suivante part dans l'espacement normal)
-    return with_project(s, _objective(p, replace(o, waiting_until=0, answered_at=e.at)))
+    return with_project(s, with_objective(p, replace(o, waiting_until=0, answered_at=e.at)))
 
 
 def asking(o: Objective) -> bool:
@@ -3131,7 +2919,7 @@ def _ended(s: ProjectsState, e, cx) -> ProjectsState:
             p = replace(p, objectives=tuple(replace(x, share_attempts=x.share_attempts + 1) if x.id in story else x
                                             for x in p.objectives))
         elif run.purpose == "need" and not o.asked:
-            p = _objective(p, replace(o, ask_attempts=o.ask_attempts + 1))
+            p = with_objective(p, replace(o, ask_attempts=o.ask_attempts + 1))
         return with_project(s, p)
     if run.reported:
         return s
@@ -3156,12 +2944,12 @@ def _ended(s: ProjectsState, e, cx) -> ProjectsState:
         if not broke:
             s = replace(s, runs_at=tuple(t for t in s.runs_at if t != run.started))
         if o is not None:
-            p = _objective(p, _handed_back(replace(o, runs=max(0, o.runs - 1), worked=max(0, o.worked - 1),
+            p = with_objective(p, _handed_back(replace(o, runs=max(0, o.runs - 1), worked=max(0, o.worked - 1),
                                                    stale=max(0, o.stale - 1),
                                                    last_run_at=run.previous_objective), run))
         return with_project(s, p)
     if o is not None:  # le modèle a travaillé, mais n'a rien conclu
-        p = _objective(p, replace(o, silent=o.silent + 1))
+        p = with_objective(p, replace(o, silent=o.silent + 1))
     return with_project(s, replace(p, failures=0))
 
 
@@ -3186,7 +2974,7 @@ def _review_ended(p: Project, o: Objective | None, run: Run, e: Any) -> Project:
             # sans verdict, il n'est ni bon ni refusé
             o = replace(o, status=c.BLOCKED, closed_at=e.at, asked=False, ask_attempts=0, asked_at=0,
                         answered_at=0, steered_at=0)
-        p = _objective(p, o)
+        p = with_objective(p, o)
     return replace(p, failures=0)
 
 
@@ -3272,9 +3060,9 @@ def _stirred(s: ProjectsState, e, cx) -> ProjectsState:
         if p is None or o is None:
             continue
         if stirring(p, o, news.key):
-            s = with_project(s, _objective(p, stir(o, cause)))
+            s = with_project(s, with_objective(p, stir(o, cause)))
         elif answering(p, o, news.key, news.detail):
-            s = with_project(s, _objective(p, roused(o, cause)))
+            s = with_project(s, with_objective(p, roused(o, cause)))
     return s
 
 
@@ -3332,7 +3120,7 @@ def _reported(s: ProjectsState, e, cx) -> ProjectsState:
                 o = replace(o, pass_ref=d.summary.ref, pass_notable=d.notable, share_attempts=0)
         elif d.verdict == c.DONE and not d.proven:
             o = replace(o, unproven=o.unproven + 1)
-        p = _objective(p, o)
+        p = with_objective(p, o)
     if not d.commit or by_pulls(p):
         # en flux ``pr``, ce commit est sur une branche de travail : un projet lecteur ne le voit pas, et rien ne
         # s'éveille (ADR 0280) — sa base avancera à la fusion, par une récupération (``_base_seen``)
@@ -3375,7 +3163,7 @@ def _objective_closed(s: ProjectsState, e, cx) -> ProjectsState:
                 notable=d.notable, result_ref=d.result.ref or "" if d.result is not None else "")
     if o.status == c.BLOCKED and o.asked and _settled(o, e.at):  # il bloque après sa réponse : elle le dira
         o = replace(o, asked=False, ask_attempts=0)
-    s = with_project(s, _objective(p, o))
+    s = with_project(s, with_objective(p, o))
     # un objectif abouti : ce qu'attend peut-être un objectif d'un projet qui lit celui-ci (ADR 0265)
     return hear_if_listening(s, e, triggers.done_key(p.id), str(o.id), p.id) if o.status == c.DONE else s
 
@@ -3404,7 +3192,7 @@ def _proposed(s: ProjectsState, e, cx) -> ProjectsState:
     if e.data.capability == PULL_REQUEST_CAPABILITY:  # la pull request de cet objectif est proposée (ADR 0274)
         aimed = objective_at(p, _request_of(e.data.args_json, "objective"))
         if aimed is not None:
-            p = _objective(p, replace(aimed, pull_proposal=e.seq))
+            p = with_objective(p, replace(aimed, pull_proposal=e.seq))
     if e.data.capability in ISSUE_CAPABILITIES:  # un départ vers ses issues est proposé (ADR 0275)
         ticket, what = _request_of(e.data.args_json, "ticket"), _word_of(e.data.args_json, "what")
         if ticket > 0 and what in MOVES:
@@ -3512,7 +3300,7 @@ def _resolved(s: ProjectsState, e, cx) -> ProjectsState:
     refused = _pull_asked(p, e.data.proposal) if got[1] == PULL_REQUEST_CAPABILITY else None
     if refused is not None:
         # sa pull request refusée ici même : elle ne se repropose pas d'elle-même (un nouveau commit, ou la console)
-        p = _objective(p, replace(refused, pull_proposal=0, pull_tries=PULL_TRIES_MAX))
+        p = with_objective(p, replace(refused, pull_proposal=0, pull_tries=PULL_TRIES_MAX))
     unsent = _issue_asked_by(p, e.data.proposal) if got[1] in ISSUE_CAPABILITIES else None
     if unsent is not None:
         # refusé ici même : ce départ ne se repropose pas de lui-même (le redemander, ou le ticket qui change d'état)
@@ -3556,7 +3344,7 @@ def _executed(s: ProjectsState, e, cx) -> ProjectsState:
                         pull_changes=opened_for.pull_changes and again, pull_at=0, unsent=False,
                         pull_tries=0, checks="") if e.data.ok else \
             replace(opened_for, pull_proposal=0, pull_tries=opened_for.pull_tries + 1)
-        p = _objective(p, after)
+        p = with_objective(p, after)
     left = _issue_asked_by(p, e.data.proposal) if got[1] in ISSUE_CAPABILITIES else None
     if left is not None:
         # parti chez l'hôte (le fait — le numéro de l'issue, son état — viendra de sa lecture, ``projects.issues``),
