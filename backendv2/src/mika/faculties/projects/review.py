@@ -46,9 +46,9 @@ from mika.faculties.projects.atelier import (
     ListArgs,
     ReadArgs,
     RunArgs,
-    _open_views,
-    _seen,
+    open_views,
     program_time_left,
+    view_target,
     ws_list,
     ws_read,
 )
@@ -361,7 +361,7 @@ async def review_list(args: ListArgs, ctx: Any) -> Any:
     if isinstance(got, ToolResult):
         return got
     p, sha, port = got
-    if _seen(p, args.path) is not None:
+    if view_target(p, args.path) is not None:
         return await ws_list(args, ctx)
     try:
         files = await port.copy_tree(p.id, sha, args.path or ".")
@@ -378,7 +378,7 @@ async def review_read(args: ReadArgs, ctx: Any) -> Any:
     if isinstance(got, ToolResult):
         return got
     p, sha, port = got
-    if _seen(p, args.path) is not None:
+    if view_target(p, args.path) is not None:
         return await ws_read(args, ctx)
     try:
         return await port.copy_read(p.id, sha, args.path)
@@ -402,7 +402,7 @@ async def review_run(args: RunArgs, ctx: Any) -> Any:
     if left < 2:
         return ToolResult(ok=False, content=phrase("projects.workshop.no_time"))
     result = await port.copy_run(p.id, sha, args.argv, timeout_s=min(float(args.timeout_s), left),
-                                 views=await _open_views(ctx, p, port))
+                                 views=await open_views(ctx, p, port))
     return ToolResult(ok=result.ok, content=describe(result))
 
 

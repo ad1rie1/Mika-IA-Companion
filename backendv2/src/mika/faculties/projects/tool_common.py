@@ -7,7 +7,8 @@ s'occupe d'elle (``caretaker``), les textes gardés (``contents_of``) ; et ce qu
 numéro dont il s'agit (``which_one``), ceux parmi lesquels elle n'a pas su choisir (``choices_listed``), l'écrire
 sous sa garde (``emit_gesture``) et la réponse quand le projet a changé sous elle (``changed_reply``).
 
-La garde « projet inchangé » est dans ``inspect_common.py``."""
+La garde « projet inchangé » est dans ``inspect_common.py`` ; ce que partagent les capacités (après l'accord, par
+les ports), dans ``capability_common.py``."""
 
 from __future__ import annotations
 

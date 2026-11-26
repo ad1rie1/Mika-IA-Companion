@@ -46,7 +46,8 @@ from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.faculties.projects import tracker
-from mika.faculties.projects.atelier import SEEN_KEY, _gone, _pin, _project_of
+from mika.faculties.projects.atelier import SEEN_KEY
+from mika.faculties.projects.capability_common import effect_project, pin_of, project_refusal
 from mika.faculties.projects.faculty import (
     ISSUE_ASKED,
     ISSUE_CAPABILITY,
@@ -493,7 +494,7 @@ async def compose(args: Mapping[str, Any], ports: Mapping[str, Any]) -> Made | s
                     why=accord if isinstance(accord, tuple) else ())
     elif bool(item.closed) != (what == MOVE_CLOSE):
         return CANNOT["turned"]  # fermé puis rouvert (ou l'inverse) depuis la proposition : elle ne vaut plus
-    digest = _pin(url=url, **{k: v for k, v in made.items() if k != "why"})
+    digest = pin_of(url=url, **{k: v for k, v in made.items() if k != "why"})
     return Made(digest=digest, **made)
 
 
@@ -512,9 +513,9 @@ async def preview(args: Mapping[str, Any], ports: Mapping[str, Any]) -> Preview 
         return None
     made = await compose(args, ports)
     if isinstance(made, str):
-        return Preview(PREVIEW["cannot"].format(why=made), _pin(why=made), made)
+        return Preview(PREVIEW["cannot"].format(why=made), pin_of(why=made), made)
     url = str(args.get("url") or "")
-    blocked = _gone(ports, pid).removeprefix("refusé : ") or ("" if writes_issues(ports, url) else CANNOT["no_host"])
+    blocked = project_refusal(ports, pid).removeprefix("refusé : ") or ("" if writes_issues(ports, url) else CANNOT["no_host"])
     said = {"number": made.ticket, "issue": made.issue, "url": url, "how": HOW.get(made.closed, made.closed)}
     rows = [PREVIEW[made.what].format(**said)]
     if made.title:
@@ -530,10 +531,10 @@ async def _leave(args: Mapping[str, Any], context: str, ports: Mapping[str, Any]
     """Le départ lui-même, après le commit du journal : recomposé, comparé à ce que l'accord a vu, puis écrit chez
     l'hôte — et rien d'autre. Ce qu'il rend ne porte que des numéros et un lien composé."""
     host = ports.get("repo_host")
-    pid = _project_of(args, context)
+    pid = effect_project(args, context)
     if pid is None:
         return False, f"refusé : {CANNOT['missing']}"
-    if why := _gone(ports, pid):
+    if why := project_refusal(ports, pid):
         return False, why
     made = await compose(args, ports)
     if isinstance(made, str):

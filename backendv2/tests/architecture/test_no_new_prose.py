@@ -42,8 +42,12 @@ CEILING = {
     "faculties/memory/retelling.py": 1,
     # résumés d'effets que l'opératrice approuve ; +9 le 2026-11-05 : l'aperçu d'un envoi au dépôt distant et d'une
     # récupération (``REMOTE`` : où, quel commit, ce qui partira ou arrivera), lu par l'opératrice dans « À valider »
-    # avant son accord, pas par elle (audit du 2026-11-05, C1-07)
-    "faculties/projects/atelier.py": 22,
+    # avant son accord, pas par elle (audit du 2026-11-05, C1-07) ; −1 le 2026-11-26 : le refus d'un effet pour un
+    # projet archivé part avec ``_gone`` (``project_refusal``) dans ``capability_common.py`` (audit d'organisation, C1)
+    "faculties/projects/atelier.py": 21,
+    # le refus d'un effet pour un projet archivé, lu dans « À valider » (console) ; venu d'``atelier.py`` le
+    # 2026-11-26 avec ``_gone`` (audit d'organisation, C1)
+    "faculties/projects/capability_common.py": 1,
     # règle de project_steer (console) ; +1 le 2026-10-25 : la description de la capacité projects.steer, piloter sur
     # ton accord (console, ADR 0133) — venues de tools.py avec le pilotage (audit du 2026-11-05, K5-03)
     # la règle de project_milestone (console : la page « Droits » la lit sur l'outil, comme celle de project_steer),

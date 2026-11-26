@@ -35,7 +35,7 @@ from pydantic import BaseModel, Field
 from mika.contracts import projects as c
 from mika.faculties.projects import milestones, tracker
 from mika.faculties.projects.access import steering
-from mika.faculties.projects.atelier import _open_views, program_time_left
+from mika.faculties.projects.atelier import open_views, program_time_left
 from mika.faculties.projects.faculty import (
     PROJECTS,
     Milestone,
@@ -256,7 +256,7 @@ async def _run_check(ctx: Any, p: Project, m: Milestone, port: Any) -> str | Too
         return _no(phrase("projects.workshop.no_time"))
     # sans réseau, et avec les vues qui lui sont ouvertes maintenant — comme ses autres programmes (``ws_run``)
     result = await port.run(p.id, list(argv), timeout_s=min(COMMAND_TIMEOUT_S, left),
-                            views=await _open_views(ctx, p, port))
+                            views=await open_views(ctx, p, port))
     if not result.ok:
         return _no(phrase("projects.tools.reach.command_failed", id=m.id, output=describe(result, FAILED_SHOWN)))
     return proof_of(result)

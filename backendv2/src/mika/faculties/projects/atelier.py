@@ -56,9 +56,9 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator
 
 from mika.contracts import identity as identity_c
-from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.faculties.projects import links
+from mika.faculties.projects.capability_common import effect_project, hosted_remote, pin_of, project_refusal
 from mika.faculties.projects.faculty import (
     ACCESS_SET,
     ARCHIVED,
@@ -100,7 +100,6 @@ from mika.ports.workshop import (
     UNREADABLE,
     VIEWS_DIR,
     Commit,
-    Hosted,
     OutsideWorkshop,
     View,
     WorkshopFull,
@@ -137,14 +136,14 @@ PROJECTS.bundle(BUNDLE, phrase("projects.workshop.bundle"))
 # ── La vue de l'atelier d'un projet lu (ADR 0260) ─────────────────────────
 
 
-def _seen(p: Project, path: str) -> tuple[int, str] | None:
+def view_target(p: Project, path: str) -> tuple[int, str] | None:
     """Ce chemin vise-t-il la vue d'un projet que ``p`` lit (``liens/<n>/…``) ? Son numéro et le reste du chemin.
     Un lien suspendu garde sa place : ``liens/<n>/`` reste la vue, fermée, pas un dossier de l'atelier."""
     got = viewed(path)
     return got if got is not None and got[0] in p.reads else None
 
 
-async def _open_views(ctx: Any, p: Project, port: Any) -> tuple[int, ...]:
+async def open_views(ctx: Any, p: Project, port: Any) -> tuple[int, ...]:
     """Les projets dont la vue est ouverte à ``p`` **maintenant** : le droit se relit à chaque appel, dans les lignes
     d'accès de chaque projet lu. Une vue qu'il n'a plus le droit de lire est supprimée ici, avant de répondre."""
     if not p.reads:
@@ -162,7 +161,7 @@ def no_view_words(why: str) -> str:
 
 async def _view(ctx: Any, p: Project, port: Any, target: int) -> View | ToolResult:
     """La vue du projet ``target``, si elle est ouverte à ``p`` et posée ; sinon ce qu'il faut répondre."""
-    if target not in await _open_views(ctx, p, port):
+    if target not in await open_views(ctx, p, port):
         return ToolResult(ok=False, content=phrase("projects.workshop.view_closed", id=target))
     view = await port.view(p.id, target)
     if not view.sha:
@@ -180,7 +179,7 @@ def _read_only(target: int) -> ToolResult:
 async def _view_entries(ctx: Any, p: Project, port: Any) -> list[str]:
     """Une ligne par vue ouverte et posée : ce que ``ws_list`` ajoute à la racine de l'atelier, et sous ``liens``."""
     out = []
-    for target in await _open_views(ctx, p, port):
+    for target in await open_views(ctx, p, port):
         if (await port.view(p.id, target)).sha:
             out.append(phrase("projects.workshop.view_entry", path=view_place(target) + "/", id=target))
     return out
@@ -280,7 +279,7 @@ async def ws_list(args: ListArgs, ctx: Any) -> Any:
     if isinstance(got, str):
         return got
     p, port = got
-    seen = _seen(p, args.path)
+    seen = view_target(p, args.path)
     try:
         if seen is not None:  # la vue d'un projet lu : son dernier commit, si le droit tient encore
             view = await _view(ctx, p, port, seen[0])
@@ -303,7 +302,7 @@ async def ws_read(args: ReadArgs, ctx: Any) -> Any:
     if isinstance(got, str):
         return got
     p, port = got
-    seen = _seen(p, args.path)
+    seen = view_target(p, args.path)
     try:
         if seen is None:
             return await port.read(p.id, args.path)
@@ -321,7 +320,7 @@ async def ws_write(args: WriteArgs, ctx: Any) -> Any:
     if isinstance(got, str):
         return got
     p, port = got
-    if (seen := _seen(p, args.path)) is not None:  # un projet n'écrit jamais dans un autre
+    if (seen := view_target(p, args.path)) is not None:  # un projet n'écrit jamais dans un autre
         return _read_only(seen[0])
     try:
         rel = await port.write(p.id, args.path, args.content)
@@ -336,7 +335,7 @@ async def ws_edit(args: EditArgs, ctx: Any) -> Any:
     if isinstance(got, str):
         return got
     p, port = got
-    if (seen := _seen(p, args.path)) is not None:
+    if (seen := view_target(p, args.path)) is not None:
         return _read_only(seen[0])
     try:
         rel = await port.edit(p.id, args.path, args.old, args.new)
@@ -367,7 +366,7 @@ async def ws_run(args: RunArgs, ctx: Any) -> Any:
         return ToolResult(ok=False, content=phrase("projects.workshop.no_time"))
     # ses programmes lisent les vues qui lui sont ouvertes maintenant, là où ses outils les disent
     result = await port.run(p.id, args.argv, timeout_s=min(float(args.timeout_s), left),
-                            views=await _open_views(ctx, p, port))
+                            views=await open_views(ctx, p, port))
     # une commande refusée ou en échec n'est pas du travail fait (elle reste une information)
     return ToolResult(ok=result.ok, content=describe(result))
 
@@ -493,23 +492,6 @@ async def project_push(args: PushArgs, ctx: Any) -> Any:
     return phrase("projects.workshop.push_proposed") if p.approval else phrase("projects.workshop.push_sent")
 
 
-def _project_of(args: Mapping[str, Any], context: str) -> int | None:
-    pid = project_of(context)
-    return pid if pid is not None and args.get("project") == pid else None
-
-
-def _gone(ports: Mapping[str, Any], pid: int) -> str:
-    """Pourquoi un effet ne s'exécute plus pour ce projet (vide : il peut) : archivé, il ne sort plus rien,
-    même approuvé avant."""
-    frame = ports["frame"]() if "frame" in ports else None
-    p = frame.state("projects").projects.get(pid) if frame is not None else None
-    if frame is not None and p is None:
-        return "refusé : ce projet n'existe plus"
-    if p is not None and p.status == c.ARCHIVED:
-        return "refusé : ce projet est archivé"
-    return ""
-
-
 #: pourquoi une demande qui occuperait l'atelier ne s'approuve pas maintenant
 BUSY = "une exécution travaille dans l'atelier : décide quand elle aura fini"
 
@@ -546,7 +528,7 @@ async def networked_preview(args: Mapping[str, Any], ports: Mapping[str, Any]) -
             f"réseau local), au commit {head[:12] or '(aucun)'}"
             + (f", avec {plural(len(dirty), 'fichier non enregistré', 'fichiers non enregistrés')} : {shown}"
                if dirty else "") + ".")
-    blocked = _gone(ports, pid).removeprefix("refusé : ")
+    blocked = project_refusal(ports, pid).removeprefix("refusé : ")
     if not blocked and _busy(ports, pid):
         blocked = BUSY
     return Preview(text, _digest(argv, head, dirty), blocked)
@@ -557,10 +539,10 @@ async def networked_preview(args: Mapping[str, Any], ports: Mapping[str, Any]) -
                      preview=networked_preview)
 async def networked(args: Mapping[str, Any], context: str, ports: Mapping[str, Any]) -> tuple[bool, str]:
     port = ports.get("workshop")
-    pid = _project_of(args, context)
+    pid = effect_project(args, context)
     if port is None or pid is None:
         return False, "atelier introuvable"
-    if why := _gone(ports, pid):
+    if why := project_refusal(ports, pid):
         return False, why
     if _busy(ports, pid):
         return False, "refusé : une exécution travaille dans l'atelier"
@@ -601,7 +583,7 @@ def _place(sha: str, commits: Sequence[Commit]) -> int | None:
                                                                         k.sha.startswith(sha))), None)
 
 
-def _listed(said: str, commits: Sequence[Commit]) -> str:
+def commits_listed(said: str, commits: Sequence[Commit]) -> str:
     """Ce qu'un aperçu dit, puis des enregistrements, un par ligne (« 1a2b3c4 son titre »), les premiers seulement."""
     lines = [f"- {k.sha[:7]} {k.title}" for k in commits[:REMOTE_SHOWN]]
     if len(commits) > REMOTE_SHOWN:
@@ -609,23 +591,9 @@ def _listed(said: str, commits: Sequence[Commit]) -> str:
     return "\n".join([said, *lines])
 
 
-async def _remote(ports: Mapping[str, Any], url: str, branch: str) -> Hosted | None:
-    """Ce que l'hôte du dépôt distant en dit (GitHub), ou rien : pas d'hôte qui le lise, ou il n'a pas répondu."""
-    host = ports.get("repo_host")
-    if host is None or not url or not host.handles(url):
-        return None
-    got = await host.read(url, branch)
-    return None if got.error else got
-
-
-def _pin(**what: Any) -> str:
-    raw = json.dumps(what, ensure_ascii=False, sort_keys=True)
-    return hashlib.sha256(raw.encode()).hexdigest()[:24]
-
-
 def _remote_blocked(ports: Mapping[str, Any], pid: int, url: str) -> str:
     """Pourquoi un envoi ou une récupération ne peut pas partir (vide : il peut)."""
-    return _gone(ports, pid).removeprefix("refusé : ") or ("" if url else REMOTE["no_remote"])
+    return project_refusal(ports, pid).removeprefix("refusé : ") or ("" if url else REMOTE["no_remote"])
 
 
 def base_kept(ports: Mapping[str, Any], pid: int, branch: str) -> str:
@@ -648,20 +616,20 @@ async def push_preview(args: Mapping[str, Any], ports: Mapping[str, Any]) -> Pre
     local = await port.commits(pid, REMOTE_WINDOW) if port.exists(pid) else []
     at = _place(sha, local) if sha else 0
     upto = local[at:] if at is not None else []
-    hosted = await _remote(ports, url, branch) if upto else None
+    hosted = await hosted_remote(ports, url, branch) if upto else None
     leaving: list[Commit] = []
     if not upto:
         said = REMOTE["missing"]
     elif hosted is None:
-        said = _listed(f"{REMOTE['unread']}\n{REMOTE['last']}", upto)
+        said = commits_listed(f"{REMOTE['unread']}\n{REMOTE['last']}", upto)
     elif not hosted.head:  # la branche n'existe pas encore là-bas : toute l'histoire part
         leaving = upto
-        said = _listed(REMOTE["new_branch"].format(branch=branch), leaving)
+        said = commits_listed(REMOTE["new_branch"].format(branch=branch), leaving)
     elif (end := _place(hosted.head, upto)) is not None:
         leaving = upto[:end]
-        said = _listed(REMOTE["leaving"], leaving) if leaving else REMOTE["pushed"]
+        said = commits_listed(REMOTE["leaving"], leaving) if leaving else REMOTE["pushed"]
     else:
-        said = _listed(f"{REMOTE['diverged'].format(head=hosted.head[:7])}\n{REMOTE['last']}", upto)
+        said = commits_listed(f"{REMOTE['diverged'].format(head=hosted.head[:7])}\n{REMOTE['last']}", upto)
     head = REMOTE["push"].format(sha=(sha or (upto[0].sha if upto else ""))[:12],
                                  title=f" (« {upto[0].title} »)" if upto else "", url=url or REMOTE["none"],
                                  branch=branch)
@@ -672,7 +640,7 @@ async def push_preview(args: Mapping[str, Any], ports: Mapping[str, Any]) -> Pre
     judged = review_line(project, None, sha) if project is not None else ""
     if judged:
         said = f"{judged}\n\n{said}"
-    return Preview(f"{head}\n\n{said}", _pin(url=url, branch=branch, sha=sha, remote=hosted.head if hosted else None,
+    return Preview(f"{head}\n\n{said}", pin_of(url=url, branch=branch, sha=sha, remote=hosted.head if hosted else None,
                                              leaving=[k.sha for k in leaving]),
                    _remote_blocked(ports, pid, url) or base_kept(ports, pid, branch))
 
@@ -687,13 +655,13 @@ async def pull_preview(args: Mapping[str, Any], ports: Mapping[str, Any]) -> Pre
         return None
     url, branch = str(args.get("url") or ""), str(args.get("branch") or "main")
     local = await port.commits(pid, REMOTE_WINDOW) if port.exists(pid) else []
-    hosted = await _remote(ports, url, branch)
+    hosted = await hosted_remote(ports, url, branch)
     coming = [] if hosted is None else \
         list(itertools.takewhile(lambda k: _place(k.sha, local) is None, hosted.commits))
-    said = REMOTE["unread"] if hosted is None else _listed(REMOTE["coming"], coming) if coming else REMOTE["pulled"]
+    said = REMOTE["unread"] if hosted is None else commits_listed(REMOTE["coming"], coming) if coming else REMOTE["pulled"]
     blocked = _remote_blocked(ports, pid, url) or (BUSY if _busy(ports, pid) else "")
     return Preview(f"{REMOTE['pull'].format(url=url or REMOTE['none'], branch=branch)}\n\n{said}",
-                   _pin(url=url, branch=branch, head=local[0].sha if local else "",
+                   pin_of(url=url, branch=branch, head=local[0].sha if local else "",
                         remote=hosted.head if hosted else None), blocked)
 
 
@@ -702,10 +670,10 @@ async def pull_preview(args: Mapping[str, Any], ports: Mapping[str, Any]) -> Pre
                      preview=push_preview)
 async def push(args: Mapping[str, Any], context: str, ports: Mapping[str, Any]) -> tuple[bool, str]:
     port = ports.get("workshop")
-    pid = _project_of(args, context)
+    pid = effect_project(args, context)
     if port is None or pid is None:
         return False, "atelier introuvable"
-    if why := _gone(ports, pid):
+    if why := project_refusal(ports, pid):
         return False, why
     branch = str(args.get("branch") or "main")
     if kept := base_kept(ports, pid, branch):
@@ -719,10 +687,10 @@ async def push(args: Mapping[str, Any], context: str, ports: Mapping[str, Any]) 
                      preview=pull_preview)
 async def pull(args: Mapping[str, Any], context: str, ports: Mapping[str, Any]) -> tuple[bool, str]:
     port = ports.get("workshop")
-    pid = _project_of(args, context)
+    pid = effect_project(args, context)
     if port is None or pid is None:
         return False, "atelier introuvable"
-    if why := _gone(ports, pid):
+    if why := project_refusal(ports, pid):
         return False, why
     if _busy(ports, pid):
         return False, "refusé : une exécution travaille dans l'atelier — récupère quand elle a fini"

@@ -50,7 +50,8 @@ from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.faculties.projects import merge, milestones, tracker
-from mika.faculties.projects.atelier import SEEN_KEY, _gone, _listed, _pin, _project_of, _remote
+from mika.faculties.projects.atelier import SEEN_KEY, commits_listed
+from mika.faculties.projects.capability_common import effect_project, hosted_remote, pin_of, project_refusal
 from mika.faculties.projects.faculty import (
     BASE_SEEN,
     CHECKS_SEEN,
@@ -300,7 +301,7 @@ async def compose(args: Mapping[str, Any], ports: Mapping[str, Any]) -> Made | s
         ticket = PREVIEW["ticket"].format(number=item.number, title=clipped(said, 120) or PREVIEW["forgotten"],
                                           stage=tracker.status_words(c.TICKETS, item.status))
     return Made(title, body, span, cited, ticket,
-                _pin(url=url, base=base, head=head, sha=span.head, title=title, body=body),
+                pin_of(url=url, base=base, head=head, sha=span.head, title=title, body=body),
                 review_line(p, o, span.head))
 
 
@@ -314,12 +315,12 @@ async def pull_request_preview(args: Mapping[str, Any], ports: Mapping[str, Any]
         return None
     made = await compose(args, ports)
     if isinstance(made, str):
-        return Preview(PREVIEW["cannot"].format(why=made), _pin(why=made), made)
+        return Preview(PREVIEW["cannot"].format(why=made), pin_of(why=made), made)
     url, base, head = str(args.get("url") or ""), str(args.get("base") or ""), str(args.get("head") or "")
-    blocked = _gone(ports, pid).removeprefix("refusé : ")
+    blocked = project_refusal(ports, pid).removeprefix("refusé : ")
     if not blocked and not writes_pulls(ports, url):
         blocked = CANNOT["no_host"]
-    hosted = await _remote(ports, url, base) if not blocked else None
+    hosted = await hosted_remote(ports, url, base) if not blocked else None
     if hosted is not None and not hosted.head:
         blocked = CANNOT["no_base"].format(base=base)
     span = made.span
@@ -331,7 +332,7 @@ async def pull_request_preview(args: Mapping[str, Any], ports: Mapping[str, Any]
     if made.cited and not args.get("full"):
         rows.append(PREVIEW["kept"])
     rows += ["", made.ticket or PREVIEW["no_ticket"], "", made.review, "",
-             _listed(PREVIEW["span"].format(files=counted, insertions=span.insertions, deletions=span.deletions),
+             commits_listed(PREVIEW["span"].format(files=counted, insertions=span.insertions, deletions=span.deletions),
                      span.commits),
              PREVIEW["files"].format(files=files)]
     return Preview("\n".join(rows), made.digest, blocked)
@@ -340,10 +341,10 @@ async def pull_request_preview(args: Mapping[str, Any], ports: Mapping[str, Any]
 @PROJECTS.capability(PULL_REQUEST_CAPABILITY, description=DESCRIPTION, preview=pull_request_preview)
 async def pull_request(args: Mapping[str, Any], context: str, ports: Mapping[str, Any]) -> tuple[bool, str]:
     port, host = ports.get("workshop"), ports.get("repo_host")
-    pid = _project_of(args, context)
+    pid = effect_project(args, context)
     if port is None or pid is None:
         return False, "atelier introuvable"
-    if why := _gone(ports, pid):
+    if why := project_refusal(ports, pid):
         return False, why
     made = await compose(args, ports)
     if isinstance(made, str):
