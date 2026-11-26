@@ -26,7 +26,7 @@ from mika.contracts import self_ as self_c
 from mika.kernel.clock import DAY, HOUR, MINUTE, US
 from mika.kernel.events import Content, Origin
 from mika.sim import expect
-from mika.sim.inner import _asleep_at, _sleep_spans, until
+from mika.sim.inner import asleep_at, sleep_spans, until
 from mika.sim.lane import PARIS, Plan, Result, at_paris, persona_llm
 from mika.sim.rng import RngTree
 from mika.sim.world import Driver
@@ -41,9 +41,9 @@ def _of(events: list[Any], name: str) -> list[Any]:
 
 
 def _steps_asleep(events: list[Any], end: int) -> list[str]:
-    spans = _sleep_spans(events, end)
+    spans = sleep_spans(events, end)
     return [_local(e.at).strftime("%a %H:%M") for e in _of(events, rt.EPISODE_STARTED.name)
-            if e.data.kind == "STEP" and _asleep_at(spans, e.at)]
+            if e.data.kind == "STEP" and asleep_at(spans, e.at)]
 
 
 def _never_delivered(driver: Driver, events: list[Any]) -> list[str]:

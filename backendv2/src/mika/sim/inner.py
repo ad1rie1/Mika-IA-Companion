@@ -42,7 +42,7 @@ async def until(driver: Driver, t: int) -> None:
         await asyncio.sleep((t - now) / US)
 
 
-def _sleep_spans(events: list[Any], end: int) -> list[tuple[int, int]]:
+def sleep_spans(events: list[Any], end: int) -> list[tuple[int, int]]:
     spans, start = [], None
     for e in events:
         if e.type.name == body_c.FELL_ASLEEP.name:
@@ -58,7 +58,7 @@ def _sleep_spans(events: list[Any], end: int) -> list[tuple[int, int]]:
     return spans
 
 
-def _asleep_at(spans: list[tuple[int, int]], t: int) -> bool:
+def asleep_at(spans: list[tuple[int, int]], t: int) -> bool:
     return any(a <= t < b for a, b in spans)
 
 
@@ -66,14 +66,14 @@ def _initiatives(events: list[Any]) -> list[Any]:
     return [e for e in events if e.type.name == rt.UTTERANCE.name and e.data.kind == "INITIATIVE"]
 
 
-async def _sample_mood(driver: Driver, until_t: int, every: int, out: list[tuple[int, Any]]) -> None:
+async def sample_mood(driver: Driver, until_t: int, every: int, out: list[tuple[int, Any]]) -> None:
     while driver.clock.now() < until_t:
         assert driver.kernel is not None
         out.append((driver.clock.now(), driver.kernel.mind.frame().get(affect_c.MOOD)))
         await asyncio.sleep(every / US)
 
 
-def _distressed(m: affect_c.MoodReading) -> bool:
+def distressed(m: affect_c.MoodReading) -> bool:
     return A.valence(m.felt) <= DISTRESS_VALENCE and m.felt_intensity >= DISTRESS_INTENSITY
 
 
@@ -87,16 +87,16 @@ async def s06(driver: Driver, rng: RngTree, res: Result) -> None:
     await driver.connect("user_2", "Alice")  # là toute la journée, sans un mot
     end = at_paris(2026, 9, 29, 8, 0)
     samples: list[tuple[int, Any]] = []
-    await _sample_mood(driver, end, 10 * MINUTE, samples)
+    await sample_mood(driver, end, 10 * MINUTE, samples)
     events = driver.read_events()
     said = [e for e in _initiatives(events) if "greeting" not in _reason_of(events, e)]
-    spans = _sleep_spans(events, end)
+    spans = sleep_spans(events, end)
     times = [e.at for e in said]
     gaps = [(b - a) / MINUTE for a, b in zip(times, times[1:], strict=False)]
     afternoon = [m for t, m in samples if 13 <= _local(t).hour < 18]
     empty = [m for m in afternoon if m.felt in (A.Emotion.BORED, A.Emotion.LONELY, A.Emotion.MELANCHOLIC)
              and m.felt_intensity >= 0.1]
-    night = [t for t in times if _local(t).hour < 7 or _asleep_at(spans, t)]
+    night = [t for t in times if _local(t).hour < 7 or asleep_at(spans, t)]
     explored = [e for e in events if e.type.name == "goals.opened" and e.data.authority == "self"
                 and 8 <= _local(e.at).hour < 22]
     # désœuvrée, elle s'occupait d'elle-même dans sa chambre (ADR 0098) : une intention née du vide ressenti (son
@@ -118,7 +118,7 @@ async def s06(driver: Driver, rng: RngTree, res: Result) -> None:
                          "elle ne parle pas en dormant", f"{[_local(t).strftime('%H:%M') for t in night]}"),
         expect.band("de l'ennui ou de la solitude l'après-midi", len(empty) / max(1, len(afternoon)),
                     "une journée vide se ressent", lo=0.2),
-        expect.invariant("jamais de détresse", not any(_distressed(m) for _, m in samples),
+        expect.invariant("jamais de détresse", not any(distressed(m) for _, m in samples),
                          "une journée vide n'est pas un drame"),
         expect.control("elle a dormi", any((b - a) >= 6 * HOUR for a, b in spans),
                        "la nuit, elle dort au moins six heures", f"{res.metrics['sleep']}"),
@@ -151,7 +151,7 @@ async def s07(driver: Driver, rng: RngTree, res: Result) -> None:
     driver.names.update({"ext_5": "Alice", "user_3": "Bob", "user_4": "Chloé"})
     day0 = at_paris(2026, 9, 28, 0, 0)
     samples: list[tuple[int, Any]] = []
-    sampler = asyncio.ensure_future(_sample_mood(driver, day0 + 7 * DAY, 20 * MINUTE, samples))
+    sampler = asyncio.ensure_future(sample_mood(driver, day0 + 7 * DAY, 20 * MINUTE, samples))
     for d in range(7):
         weekday = d < 5
         if weekday:  # Bob, à midi, en semaine, sur l'application
@@ -178,13 +178,13 @@ async def s07(driver: Driver, rng: RngTree, res: Result) -> None:
     assert driver.kernel is not None
     end = driver.clock.now()
     events = driver.read_events()
-    spans = _sleep_spans(events, end)
+    spans = sleep_spans(events, end)
     said = _initiatives(events)
     per_day: dict[str, int] = {}
     for e in said:
         key = _local(e.at).strftime("%a")
         per_day[key] = per_day.get(key, 0) + 1
-    asleep_speaking = [e for e in said if _asleep_at(spans, e.at)]
+    asleep_speaking = [e for e in said if asleep_at(spans, e.at)]
     agency = driver.kernel.mind.frame().env.params_of("agency", driver.kernel.mind.root)
     double = _double_texts(events, round(agency.follow_up_min_us * (1.0 - agency.follow_up_jitter)))
     nights = [(a, b) for a, b in spans if (b - a) >= 5 * HOUR]
@@ -204,7 +204,7 @@ async def s07(driver: Driver, rng: RngTree, res: Result) -> None:
                          f"{double[:3]}"),
         expect.invariant("ses pensées s'éteignent", not alive_old,
                          "une pensée de plus de trois jours ne trotte plus", f"{len(alive_old)}"),
-        expect.invariant("elle ne s'enfonce jamais", not any(_distressed(m) for _, m in samples),
+        expect.invariant("elle ne s'enfonce jamais", not any(distressed(m) for _, m in samples),
                          "une semaine ordinaire ne la met jamais en détresse"),
         expect.control("quand Alice se tait, elle prend de ses nouvelles", any(
             e.data.target == "ext_5" and _local(e.at).strftime("%a") in ("Thu", "Fri", "Sat") for e in said),
@@ -283,7 +283,7 @@ async def s08(driver: Driver, rng: RngTree, res: Result) -> None:
     await until(driver, day0 + 5 * DAY + 12 * HOUR)
     events = driver.read_events()
     end = driver.clock.now()
-    spans = _sleep_spans(events, end)
+    spans = sleep_spans(events, end)
     journals = [e for e in events if e.type.name == "self.journaled"]
     days: dict[str, int] = {}
     for e in journals:
@@ -299,7 +299,7 @@ async def s08(driver: Driver, rng: RngTree, res: Result) -> None:
     digested = [e for e in events if e.type.name == "attention.digested"]
     friday = [i for e in digested if e.data.night == "2026-10-02" for i in e.data.items]
     reflective = [e for e in events if e.type.name == "memory.remembered" and "repensé cette nuit" in (e.data.text.text or "")]
-    asleep_speaking = [e for e in _initiatives(events) if _asleep_at(spans, e.at)]
+    asleep_speaking = [e for e in _initiatives(events) if asleep_at(spans, e.at)]
     morning = [r for r in llm.calls if r.role == "reply" and r.meta.get("target") == "user_2"
                and "bien dormi" in r.messages[-1].content]
     shown = morning[-1].messages[-1].content if morning else ""
