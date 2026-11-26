@@ -14,9 +14,9 @@ gère (le rouvrir, le dire terminé, le dire bloqué, le retirer). Une mission m
 derniers passages, son rythme et ce qui la déclenche.
 
 **Ce qu'il lit.** La tranche du projet (``project_at``) par les fonctions de la faculté que lit aussi l'API par
-personne — ``glance.milestone_state``, ``milestones_of``, ``awaiting``, ``pulls`` — ; ses comptes rendus, dans le
-journal (``projects.run_reported``). La console voit tout : rien n'est voilé. **Ses gestes** sont les actions
-déclarées de la faculté, préparées par la console pour l'objet choisi (``Scene.form``).
+personne — ``glance.milestone_state``, ``milestones_of``, ``awaiting``, ``objective_tickets``, ``pulls`` — ; ses
+comptes rendus, dans le journal (``projects.run_reported``). La console voit tout : rien n'est voilé. **Ses gestes**
+sont les actions déclarées de la faculté, préparées par la console pour l'objet choisi (``Scene.form``).
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ from mika.app.domains.projects.console.zones import (
 )
 from mika.contracts import projects as c
 from mika.faculties.projects import glance, milestones, tracker
-from mika.faculties.projects.faculty import awaiting, by_pulls, milestones_of, objective_at
+from mika.faculties.projects.faculty import awaiting, by_pulls, milestones_of, objective_at, objective_tickets
 from mika.faculties.projects.inspect import OBJ_FR, PLAN_FR, VERDICT_FR
 from mika.faculties.projects.inspect_common import FORGOTTEN
 from mika.faculties.projects.inspect_milestones import CHECK_CHOICES, CHECK_WORDS, STATE_FR
@@ -207,8 +207,7 @@ def _moves(sc: Scene, o: Any, back: str) -> list[dict[str, Any]]:
 
 def _tickets(sc: Scene, o: Any, said: dict[str, str]) -> list[dict[str, Any]]:
     """Les tickets liés à un objectif, parmi ceux que l'état garde : celui dont il est né, ceux qu'il tient."""
-    found = sorted((x for x in sc.p.board.items if x.list_name == c.TICKETS and x.number
-                    and (x.objective == o.id or x.number == o.ticket)), key=lambda x: x.number)
+    found = objective_tickets(sc.p, o)
     return [{"n": x.number, "title": said.get(x.title_ref, FORGOTTEN),
              "state": tracker.status_words(c.TICKETS, x.status), "tone": DONE if x.closed == c.DONE else
              WAIT if x.closed else WORK,

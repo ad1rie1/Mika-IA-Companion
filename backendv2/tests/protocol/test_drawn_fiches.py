@@ -530,6 +530,7 @@ READS: dict[str, dict[str, str]] = {
         "awaiting": "le point d'arrêt qu'elle a dit prêt et qui attend d'être tranché",
         "objective_at": "l'objectif que l'adresse choisit",
         "by_pulls": "si le projet passe par des pull requests",
+        "objective_tickets": "ses tickets liés, que l'état garde : celui dont il est né, ceux qu'il tient",
         "milestones": "la commande d'un jalon, telle qu'elle est gardée (``decoded``)",
         "tracker": "le statut d'un ticket lié et d'un élément attendu, en mots",
         "trigger_words": "ce qui déclenche une mission, en mots",

@@ -1730,6 +1730,12 @@ def ticket_held(p: Project, o: Objective | None) -> Item | None:
     return board_ticket(p, o.ticket)
 
 
+def objective_tickets(p: Project, o: Objective) -> list[Item]:
+    """Les tickets liés à un objectif, parmi ceux que l'état garde : celui dont il est né, ceux qu'il tient."""
+    return sorted((x for x in p.board.items if x.list_name == c.TICKETS and x.number
+                   and (x.objective == o.id or x.number == o.ticket)), key=lambda x: x.number)
+
+
 def written_on(p: Project, item: Item | None) -> int:
     """Le niveau de ce qui s'écrit sur un élément de son registre (ADR 0272) : celui de ce qu'écrit le projet, et au
     moins celui de l'élément — une demande venue d'un projet qui lit plus confidentiel garde son niveau dans tout ce

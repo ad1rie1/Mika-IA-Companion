@@ -110,6 +110,7 @@ from mika.faculties.projects.faculty import (
     handed_over,
     milestones_of,
     objective_at,
+    objective_tickets,
     readers_of,
     repo_page,
     ticket_held,
@@ -492,12 +493,6 @@ def _ticket_brief(r: Reach, item: Item, texts: Mapping[str, str]) -> dict[str, A
             "step_label": JOURNEY_WORDS.get(step, ""), "open": not item.closed}
 
 
-def _tickets_of(p: Project, o: Objective) -> list[Item]:
-    """Les tickets liés à un objectif, parmi ceux que l'état garde : celui dont il est né, ceux qu'il tient."""
-    return sorted((x for x in p.board.items if x.list_name == c.TICKETS and x.number
-                   and (x.objective == o.id or x.number == o.ticket)), key=lambda x: x.number)
-
-
 def _objective_json(p: Project, o: Objective, texts: Mapping[str, str], *, files: bool = False) -> dict[str, Any]:
     pull = None
     if o.pull_state or o.pull or o.pull_proposal:
@@ -800,7 +795,7 @@ async def fiche(call: Call) -> dict[str, Any]:
     constants = [o for o in p.objectives if o.kind == c.CONSTANT and o.status != c.DROPPED]
     refs = [p.title_ref, p.summary_ref, p.description_ref, *_awaited_refs(found)]
     files = r.detail and reads_files(sc, r)
-    held = {o.id: _tickets_of(p, o) for o in once} if r.detail else {}
+    held = {o.id: objective_tickets(p, o) for o in once} if r.detail else {}
     if r.detail:
         refs += [p.plan_ref, p.questions_ref, *(lst.title_ref for lst in p.board.lists),
                  *(ref for o in (*once, *constants) for ref in objective_refs(o, files=files)),
