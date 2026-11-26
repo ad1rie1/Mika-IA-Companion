@@ -30,31 +30,24 @@ from starlette.routing import Route
 
 from mika.app.domains.projects.api.projects import (
     BY_HER,
-    BY_HOST,
-    BY_OTHER,
-    BY_PROJECT,
     BY_YOU,
     CHECK_WORDS,
-    HOST_WORDS,
-    OTHER_WORDS,
     PAGE,
     PAGE_MAX,
     PATH,
-    PROJECT_WORDS,
     TEXT_SHOWN,
     TEXT_VEILED,
     YOU_WORDS,
     Reach,
     Scene,
-    _name,
-    _nameable,
+    _author,
     _opened,
     _store,
     _texts,
     reach,
     reads_files,
 )
-from mika.app.me.api import Call, Denied, MeApiBase, missing, person_of
+from mika.app.me.api import Call, Denied, MeApiBase, missing
 from mika.app.me.common import millis, snippet
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
@@ -132,21 +125,13 @@ class _Reader:
 
     def who(self, author: str, by: str) -> dict[str, Any]:
         """Qui a fait ceci : elle ; la personne connectée ; une autre personne, nommée seulement si elle a le droit
-        de le savoir ; un autre projet ; quelqu'un chez l'hôte."""
-        sc = self.sc
-        if author == c.BY_HOST:
-            return {"author_kind": BY_HOST, "author": HOST_WORDS}
-        if c.asking_project(author):
-            return {"author_kind": BY_PROJECT, "author": PROJECT_WORDS}
-        if author in (c.BY_SELF, "self") or (not by and author not in feed.PEOPLE):
-            return {"author_kind": BY_HER, "author": self_c.name_of(sc.frame.get(self_c.PERSONA))}
-        if not by:  # une personne, sans qu'on sache laquelle (un geste de vive voix)
-            return {"author_kind": BY_OTHER, "author": OTHER_WORDS}
-        person = person_of(sc.frame, by)
-        if person == sc.person:
-            return {"author_kind": BY_YOU, "author": YOU_WORDS}
-        name = _name(sc, person) if _nameable(sc, person, self.level) else ""
-        return {"author_kind": BY_OTHER, "author": name or OTHER_WORDS}
+        de le savoir ; un autre projet, jamais nommé ici ; quelqu'un chez l'hôte. La règle est celle de toute l'API
+        des projets (``projects._author``) : il n'y en a qu'une. Le fil d'activité y ajoute seulement ce qu'il
+        tient pour d'elle — ce qui n'est signé de personne (ni une personne, ni un projet, ni l'hôte)."""
+        hers = author in (c.BY_SELF, "self") or (not by and author not in feed.PEOPLE)
+        if hers and author != c.BY_HOST and not c.asking_project(author):
+            author = c.BY_SELF
+        return _author(self.sc, {}, author, by, self.level)
 
 
 def heard(r: Reach, content: Any) -> str:
