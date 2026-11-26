@@ -85,7 +85,7 @@ from mika.app.handmade.tabs import (
 )
 from mika.contracts import projects as c
 from mika.faculties.projects import docs, glance
-from mika.faculties.projects.access import STEER_WORDS, who_named
+from mika.faculties.projects.access import who_named
 from mika.faculties.projects.faculty import access_of, project_at
 from mika.faculties.projects.inspect import (
     ENGINE_TITLE,
@@ -106,7 +106,7 @@ from mika.inspector.ui import UI, Overview, env
 from mika.kernel.inspect import Head, Pager, plural, relative_fr
 from mika.plugins.forge.access import app_tool_names
 from mika.ports.workshop import PULL_OPEN
-from mika.vocab.access import MOMENTS, PERSON, when_words
+from mika.vocab.access import MOMENTS, PERSON, STEER_WORDS, when_words
 
 MOMENT_CHOICES = tuple((k, label[:1].upper() + label[1:]) for k, label in MOMENTS)
 #: les titres de ses onglets (ceux de leur vue dans la faculté) : la console passe les blocs d'un onglet réuni

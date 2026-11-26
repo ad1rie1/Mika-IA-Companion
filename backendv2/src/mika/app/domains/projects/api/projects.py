@@ -104,6 +104,7 @@ from mika.faculties.projects.faculty import (
     PULL_REQUEST_CAPABILITY,
     STEER_CAPABILITY,
     Item,
+    Listing,
     Objective,
     Project,
     awaiting,
@@ -832,7 +833,7 @@ async def fiche(call: Call) -> dict[str, Any]:
 # ── Son registre : tickets et listes de suivi ─────────────────────────────
 
 
-def _listing(r: Reach, raw: str) -> tracker.Listing:
+def _listing(r: Reach, raw: str) -> Listing:
     name = tracker.named_list(raw or c.TICKETS)
     lst = tracker.listing(r.p.board, name) if name is not None else None
     if lst is None:
@@ -904,7 +905,7 @@ async def elements(call: Call) -> dict[str, Any]:
             "size": size, "items": [_entry_json(sc, r, e, titles) for e in found]}
 
 
-def found_element(sc: Scene, r: Reach, *, readable: bool = True) -> tuple[tracker.Listing, tracker.Entry]:
+def found_element(sc: Scene, r: Reach, *, readable: bool = True) -> tuple[Listing, tracker.Entry]:
     """L'élément que nomme la requête (``list``, ``item`` : un ticket par ``#n``, un élément par sa clé) ;
     ``readable`` : un élément qu'elle ne peut pas lire se refuse (403)."""
     call = sc.call

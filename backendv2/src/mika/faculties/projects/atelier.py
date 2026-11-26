@@ -81,7 +81,7 @@ from mika.faculties.projects.faculty import (
 )
 from mika.faculties.projects.inspect_pulls import BASE_KEPT, BASE_PULL
 from mika.faculties.projects.inspect_reviews import review_line
-from mika.faculties.projects.remote import pending_push, pinned, propose_push, push_branch, push_summary
+from mika.faculties.projects.remote import pinned, propose_push, push_branch, push_summary
 from mika.faculties.projects.tool_common import gone_reply, running_project
 from mika.faculties.projects.tools import CONFLICTS_SHOWN, TAKE_BASE
 from mika.kernel.clock import MINUTE
@@ -724,4 +724,4 @@ def network_proposal(p: Project, request: int, argv: tuple[str, ...], why: str) 
         about=subjects_of(p), dedupe_key=f"reseau:{p.id}:{request}")
 
 
-__all__ = ["network_proposal", "network_summary", "no_view_words", "pending_push", "remote_proposal", "tidy_views"]
+__all__ = ["network_proposal", "network_summary", "no_view_words", "remote_proposal", "tidy_views"]

@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.faculties.projects import issues, tickets, tracker
-from mika.faculties.projects.actions import PRIORITY_CHOICES, can_edit, project_at, refuse_reserved
+from mika.faculties.projects.actions import PRIORITY_CHOICES, can_edit, refuse_reserved
 from mika.faculties.projects.faculty import (
     ISSUE_ASKED,
     LISTS_MAX,
@@ -40,6 +40,7 @@ from mika.faculties.projects.faculty import (
     Project,
     ProjectsState,
     issue_move,
+    project_at,
     reflected,
 )
 from mika.faculties.projects.inspect_common import (

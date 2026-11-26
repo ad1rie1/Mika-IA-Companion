@@ -11,7 +11,7 @@ from typing import Annotated, Any
 from pydantic import Field
 
 from mika.contracts import projects as c
-from mika.faculties.projects.access import STEER_WORDS, allowance, of_frame, who_named
+from mika.faculties.projects.access import allowance, of_frame, who_named
 from mika.faculties.projects.faculty import ACCESS_SET, PROJECTS, ProjectsState, access_of, project_at
 from mika.faculties.projects.inspect_common import unchanged
 from mika.kernel.forms import Knob
@@ -24,6 +24,7 @@ from mika.vocab.access import (
     OWNER,
     POLICIES,
     POLICY_WORDS,
+    STEER_WORDS,
     STEERS,
     Policy,
     Steer,
