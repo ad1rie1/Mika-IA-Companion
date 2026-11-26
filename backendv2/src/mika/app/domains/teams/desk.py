@@ -600,7 +600,7 @@ class TeamsDesk:
         tard au bout du filet de la porte, sans compter dans la minute, avec son numéro de version ; la clé et l'état
         revérifiés toutes les ``LIVE_RECHECK_S`` secondes (une clé retirée, un compte ou Teams coupés ferment la
         connexion), pas à chaque relecture : ce sont deux lectures des réglages."""
-        now = time.monotonic()
+        now = time.monotonic()  # noqa: TID251 — la cadence d'une porte HTTP : le vrai temps de la connexion ouverte
         known = self._live_checked.get(key)
         if known is None or now - known[1] >= LIVE_RECHECK_S:
             account, refused = self._check(key)
