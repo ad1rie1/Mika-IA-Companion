@@ -74,12 +74,14 @@ from mika.faculties.projects.faculty import (
     Project,
     ProjectsState,
     awaiting,
+    board_ticket,
     by_pulls,
     detail_level,
     handed_over,
     milestones_of,
     objective_at,
     readers_of,
+    ticket_held,
     tie_of,
     written,
     written_on,
@@ -400,7 +402,7 @@ class Awaited:
 
 def _item_of(p: Project, w: todo.Waiting) -> Item | None:
     if w.kind == todo.TICKET:
-        return next((i for i in p.board.items if i.list_name == c.TICKETS and i.number == w.number), None)
+        return board_ticket(p, w.number)
     return tracker.held(p.board, w.what, w.key) if w.kind == todo.ITEM else None
 
 
@@ -1473,7 +1475,7 @@ def _concerns(sc: Scene, r: Reach, v: Any, pending: Any) -> dict[str, Any]:
     asked = _author(sc, {}, c.BY_SELF, "", written(p))
     if v.capability in ISSUE_CAPABILITIES:
         number = _number(args.get("ticket"))
-        item = next((x for x in p.board.items if x.list_name == c.TICKETS and x.number == number), None)
+        item = board_ticket(p, number)
         where = WHERE_ISSUES
         url = f"{page}/issues/{item.issue}" if page and item is not None and item.issue else \
             f"{page}/issues" if page else ""
@@ -1482,8 +1484,7 @@ def _concerns(sc: Scene, r: Reach, v: Any, pending: Any) -> dict[str, Any]:
             asked = _author(sc, {}, move.author, move.by, written(p))
     elif v.capability == PULL_REQUEST_CAPABILITY:
         o = objective_at(p, _number(args.get("objective")))
-        item = next((x for x in p.board.items if x.list_name == c.TICKETS and o is not None and o.ticket
-                     and x.number == o.ticket), None)
+        item = ticket_held(p, o)
         where, url = WHERE_PULL, (pulls.pull_url(p, o) if o is not None else "") or (f"{page}/pulls" if page else "")
     elif v.capability == NETWORKED_CAPABILITY:
         where = WHERE_NETWORK

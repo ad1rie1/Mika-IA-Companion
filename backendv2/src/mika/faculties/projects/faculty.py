@@ -1715,12 +1715,18 @@ def subjects_of(p: Project, *more: str | None) -> tuple[str, ...]:
     return tuple(dict.fromkeys(x for x in (*more, p.owner, *p.about, *p.read_about) if x))
 
 
+def board_ticket(p: Project, number: int) -> Item | None:
+    """Le ticket de ce numéro, s'il est encore sous la main de l'état (dans ``Project.board``) — un ticket ouvert y
+    est toujours ; un autre peut n'être plus que dans la projection du registre."""
+    return next((x for x in p.board.items if x.list_name == c.TICKETS and x.number == number), None)
+
+
 def ticket_held(p: Project, o: Objective | None) -> Item | None:
     """Le ticket dont cet objectif est né (ADR 0270), s'il est encore sous la main de l'état — un ticket ouvert y
     est toujours."""
     if o is None or not o.ticket:
         return None
-    return next((x for x in p.board.items if x.list_name == c.TICKETS and x.number == o.ticket), None)
+    return board_ticket(p, o.ticket)
 
 
 def written_on(p: Project, item: Item | None) -> int:

@@ -66,6 +66,7 @@ from mika.faculties.projects.faculty import (
     Item,
     Project,
     ProjectsState,
+    board_ticket,
     issue_move,
     reflected,
     subjects_of,
@@ -270,7 +271,7 @@ def proposal(p: Project, ticket: int, what: str, *, note: int = 0, approval: boo
 
 def _ticket(p: Project, store: Any, number: int) -> Item | None:
     """Un ticket du projet par son numéro : dans l'état s'il y est encore, sinon dans la projection."""
-    held = next((x for x in _held(p) if x.number == number), None)
+    held = board_ticket(p, number)
     if held is not None or number <= 0:
         return held
     e = tracker.ticket(store, p.id, number)
