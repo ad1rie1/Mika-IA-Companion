@@ -15,8 +15,15 @@ from typing import Annotated
 from pydantic import BaseModel, Field
 
 from mika.faculties.projects import merge, tracker
-from mika.faculties.projects.actions import LIVE, _editable, _objective_of, _still, _target, operator_person
+from mika.faculties.projects.actions import can_edit
 from mika.faculties.projects.faculty import MERGE_ASKED, MERGE_CUT, MERGE_STALE, PROJECTS, ProjectsState
+from mika.faculties.projects.inspect_common import (
+    LIVE,
+    operator_person,
+    target_objective,
+    target_project,
+    unchanged,
+)
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.operate import ActionContext, Done, Refused
@@ -90,12 +97,12 @@ def writer(frame: Frame, ctx: ActionContext) -> str:
 
 
 @PROJECTS.action("fusionner", title="Fusionner la pull request", args=MergeArgs, emits=[MERGE_ASKED],
-                 subject="project", order=66, available=_editable, inline=True, danger=True, confirm=CONFIRM,
+                 subject="project", order=66, available=can_edit, inline=True, danger=True, confirm=CONFIRM,
                  description="Fusionner chez l'hôte la pull request d'un objectif, au commit que tu as lu. Ton geste, "
                              "à toi seul : elle ne fusionne jamais.")
 async def _fuse(s: ProjectsState, frame: Frame, args: MergeArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
-    o = _objective_of(p, args.objective)
+    p = target_project(s, ctx)
+    o = target_objective(p, args.objective)
     person = writer(frame, ctx)
     if not tracker.settles(frame, p, person):
         raise Refused(NOT_YOURS)
@@ -136,4 +143,4 @@ async def _fuse(s: ProjectsState, frame: Frame, args: MergeArgs, ctx: ActionCont
         if held := merge.checks_block(o, got.state, seen.at, ctx.now):
             raise Refused(BLOCK_WORDS[held])
     return Done(drafts=(merge.asking(p, o, args.head, person),), message=ASKED,
-                guard=_still(p.id, LIVE) & merge.alone(p.id, o.id))
+                guard=unchanged(p.id, LIVE) & merge.alone(p.id, o.id))

@@ -28,7 +28,6 @@ import json
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
-from urllib.parse import urlsplit
 
 from mika.contracts import identity as identity_c
 from mika.contracts import mcp as mcp_c
@@ -49,8 +48,8 @@ from mika.faculties.projects.actions import (
     MODE_CHOICES,
     OBJECTIVE_STATUS_FR,
     PRIORITY_CHOICES,
-    _editable,
-    _runnable,
+    can_edit,
+    can_run,
     link_options,
     pending_of,
     schedule_words,
@@ -77,6 +76,15 @@ from mika.faculties.projects.faculty import (
     params,
     project_at,
     readers_of,
+)
+from mika.faculties.projects.inspect_common import (
+    FORGOTTEN,
+    cut_noted,
+    effect_state,
+    remote_ref,
+    stored_text,
+    stored_texts,
+    subject_project,
 )
 from mika.faculties.projects.pulls import pull_url
 from mika.faculties.projects.rhythm import always, cadence, daily_cap, pick, runs_today, stirred_due
@@ -130,7 +138,6 @@ from mika.ports.workshop import (
 from mika.vocab.episodes import Kind, outcome_words, project_target
 
 PAGE = 25
-FORGOTTEN = "(oublié)"
 SUMMARY_CLAMP = 260
 
 MODE_FR = {c.PERSONA: "elle-même", c.PLAIN: "impersonnel"}
@@ -171,20 +178,6 @@ DECISION_PARAM = Param("statut", "Statut", kind="select", default=c.IN_FORCE,
 
 
 # ── Petits outils ─────────────────────────────────────────────────────────
-
-
-def _texts(ctx: InspectContext, refs: Iterable[str]) -> Mapping[str, str]:
-    wanted = sorted({r for r in refs if r})
-    if not wanted or ctx.store is None:
-        return {}
-    return ctx.store.content(wanted)
-
-
-def _text(texts: Mapping[str, str], ref: str, empty: str = "—") -> str:
-    if not ref:
-        return empty
-    got = texts.get(ref)
-    return got if got is not None else FORGOTTEN
 
 
 def _said(content: Content | None, empty: str = "—") -> str:
@@ -326,27 +319,6 @@ def _next_words(p: Project, s: ProjectsState, frame: Frame, ctx: InspectContext)
     return WHY_WORDS[why].format(**_cited(why, said))
 
 
-def _host(url: str) -> str:
-    return urlsplit(url).hostname or url if url else ""
-
-
-def _remote_ref(p: Project) -> Ref | str:
-    if not p.remote:
-        return "aucun"
-    shown = re.sub(r"\.git$", "", p.remote.split("://", 1)[-1])
-    # son flux, quand il passe par des pull requests (ADR 0274) : la branche nommée ne reçoit que ce qui est accepté
-    return Ref.url(re.sub(r"\.git$", "", p.remote), f"{shown} ({p.branch}{', par pull request' if by_pulls(p) else ''})")
-
-
-def _subject(s: ProjectsState, ctx: InspectContext) -> Project | Note:
-    if not ctx.subject:
-        return Note("Cette vue se lit sur la fiche d'un projet (Projets → un projet).", tone="muted")
-    p = project_at(s, ctx.subject)
-    if p is None:
-        return Note(f"Aucun projet « {ctx.subject} ».", tone="warn")
-    return p
-
-
 def _page(ctx: InspectContext, types: Sequence[Any], where: tuple[str, Any] | None,
           cursor: str = "avant") -> tuple[list[Event[Any]], Pager]:
     """Une page du journal (``?<curseur>=`` : la suite, plus ancienne)."""
@@ -354,10 +326,6 @@ def _page(ctx: InspectContext, types: Sequence[Any], where: tuple[str, Any] | No
     page = found[:PAGE]
     older = ((cursor, str(page[-1].seq)),) if len(found) > PAGE else ()
     return page, Pager(param=cursor, size=PAGE, older=older)
-
-
-def _cut(text: str, n: int) -> str:
-    return text if len(text) <= n else text[:n] + f"\n[… coupé à {n} caractères …]"
 
 
 def _ago(us: int) -> str:
@@ -396,7 +364,7 @@ def _head(s: ProjectsState, frame: Frame, ctx: InspectContext, key: str) -> Head
     p = project_at(s, key)
     if p is None:
         return None
-    texts = _texts(ctx, (p.title_ref,))
+    texts = stored_texts(ctx, (p.title_ref,))
     # la vue d'un objet (ADR 0176, la maquette) : son état à côté de son nom, puis ses faits sur une ligne — son
     # avancement, sa prochaine exécution et son dépôt sont dans sa vue d'ensemble
     badges = [_state(p)]
@@ -412,20 +380,20 @@ def _head(s: ProjectsState, frame: Frame, ctx: InspectContext, key: str) -> Head
     ]
     if p.tried_at > p.last_run_at:  # une tentative depuis, qui n'a pas eu lieu (panne, délai, préemption)
         facts.insert(3, ("dernière tentative", f"{ctx.when(p.tried_at)}, sans suite (crédit rendu)"))
-    return Head(str(p.id), _text(texts, p.title_ref, "(sans titre)"), badges=tuple(badges),
+    return Head(str(p.id), stored_text(texts, p.title_ref, "(sans titre)"), badges=tuple(badges),
                 facts=tuple(facts), default_tab="apercu")
 
 
 @PROJECTS.search("project")
 def _search(s: ProjectsState, frame: Frame, ctx: InspectContext, text: str, limit: int) -> list[Found]:
     projects = sorted(s.projects.values(), key=lambda p: -p.id)
-    texts = _texts(ctx, (p.title_ref for p in projects))
+    texts = stored_texts(ctx, (p.title_ref for p in projects))
     wanted = text.strip().lower()
     number = wanted.lstrip("#")
     out: list[Found] = []
     skip = max(0, ctx.int_param("_offset", 0))
     for p in projects:
-        title = _text(texts, p.title_ref, "(sans titre)")
+        title = stored_text(texts, p.title_ref, "(sans titre)")
         if number.isdigit():
             if str(p.id) != number:
                 continue
@@ -486,18 +454,18 @@ def _list_view(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Bloc
     found = todo.everywhere(s, todo.pending_in(frame))  # ce qui attend quelqu'un, tous projets (ADR 0281)
     waiting = todo.counts(found)
     linked = _linked(s, frame)
-    texts = _texts(ctx, [*(r for p in page for r in (p.title_ref, p.summary_ref)), *inspect_todo.refs(found),
+    texts = stored_texts(ctx, [*(r for p in page for r in (p.title_ref, p.summary_ref)), *inspect_todo.refs(found),
                          *(s.projects[w.project].title_ref for w in found if w.project in s.projects),
                          *(t.title_ref for pair in linked for t in pair[:2])])
     rows = []
     for p in page:
         rows.append(Row((
-            _link(p, _text(texts, p.title_ref, "(sans titre)")), _mode(p),
+            _link(p, stored_text(texts, p.title_ref, "(sans titre)")), _mode(p),
             "elle" if p.authority == c.SELF and not p.owner else _person(frame, p.owner), _state(p),
             Badge(plural(waiting[p.id], "chose", "choses"), "warn") if p.id in waiting else "—", _progress(p),
             _next_words(p, s, frame, ctx), When(p.last_run_at) if p.last_run_at else "—",
-            Text(_text(texts, p.summary_ref, "aucune exécution encore"), clamp=160),
-            _priority(p), window_words(p), schedule_words(p.schedule), _tools_words(p), _remote_ref(p),
+            Text(stored_text(texts, p.summary_ref, "aucune exécution encore"), clamp=160),
+            _priority(p), window_words(p), schedule_words(p.schedule), _tools_words(p), remote_ref(p),
             Badge("avec ton accord", "info") if p.approval else Badge("librement", "warn")),
             href=_link(p), tone="warn" if p.id in waiting else "muted" if p.status == c.ARCHIVED else ""))
     alive = [p for p in every if live(p)]
@@ -527,7 +495,7 @@ def _list_view(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Bloc
         # après la liste, qui reste la première table de sa vue (sa bascule « Tableau » et sa pagination gardent
         # leur clé) : la page dessinée pose « À faire » en tête
         inspect_todo.table(s, found, texts, lambda p, w: awaited(frame, p, w),
-                           named=lambda p: _link(p, _text(texts, p.title_ref, "(sans titre)")),
+                           named=lambda p: _link(p, stored_text(texts, p.title_ref, "(sans titre)")),
                            title=inspect_todo.EVERYWHERE_TITLE, empty=inspect_todo.EVERYWHERE_EMPTY,
                            most=inspect_todo.EVERYWHERE_SHOWN),
         _linked_table(linked, texts),
@@ -567,8 +535,8 @@ def _linked_table(linked: Sequence[tuple[Project, Project, links.Grant, tuple[An
                        f" ({ASK_WORDS[asks.state(first.status)]})" if len(opened) == 1 else
                        f"{plural(len(opened), 'demande', 'demandes')} en cours",
                        (("onglet", "tickets"), *((("element", f"#{first.number}"),) if len(opened) == 1 else ())))
-        rows.append(Row((_link(reader, _text(texts, reader.title_ref, "(sans titre)"), "liens"),
-                         _link(target, _text(texts, target.title_ref, "(sans titre)"), "liens"),
+        rows.append(Row((_link(reader, stored_text(texts, reader.title_ref, "(sans titre)"), "liens"),
+                         _link(target, stored_text(texts, target.title_ref, "(sans titre)"), "liens"),
                          Text(gives_words(grant) if grant.see else "rien : le lien est suspendu",
                               tone="" if grant.see else "warn"), said),
                         tone="" if grant.see else "muted"))
@@ -604,7 +572,7 @@ def _objective_words(p: Project | None, oid: int, texts: Mapping[str, str]) -> A
     o = next((x for x in p.objectives if x.id == oid), None)
     if o is None:
         return f"n° {oid}"
-    return Text(f"n° {o.id} · {_text(texts, o.text_ref)}", clamp=90)
+    return Text(f"n° {o.id} · {stored_text(texts, o.text_ref)}", clamp=90)
 
 
 _NUMBER = re.compile(r"#?\s*([0-9]{1,12})")
@@ -620,7 +588,7 @@ def _projects_named(s: ProjectsState, ctx: InspectContext, asked: str) -> tuple[
         return (int(number.group(1)),)
     wanted = fold(asked.strip())
     projects = sorted(s.projects.values(), key=lambda p: -p.id)
-    texts = _texts(ctx, (p.title_ref for p in projects))
+    texts = stored_texts(ctx, (p.title_ref for p in projects))
     return tuple(p.id for p in projects if (title := texts.get(p.title_ref)) is not None and wanted in fold(title))
 
 
@@ -646,14 +614,14 @@ def _runs_view(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Bloc
     else:
         where = ("project", chosen[0]) if chosen else ("verdict", verdict) if verdict else None
         found, pager = _page(ctx, [c.RUN_REPORTED], where)
-    texts = _texts(ctx, [r for e in found for p in (s.projects.get(e.data.project),) if p is not None
+    texts = stored_texts(ctx, [r for e in found for p in (s.projects.get(e.data.project),) if p is not None
                          for r in (p.title_ref, *(o.text_ref for o in p.objectives if o.id == e.data.objective))])
     rows = []
     for e in found:
         d = e.data
         p = s.projects.get(d.project)
         rows.append(Row((
-            When(e.at), _link(p, _text(texts, p.title_ref, "(sans titre)")) if p is not None else f"#{d.project}",
+            When(e.at), _link(p, stored_text(texts, p.title_ref, "(sans titre)")) if p is not None else f"#{d.project}",
             _objective_words(p, d.objective, texts),
             Badge(VERDICT_FR.get(d.verdict, d.verdict), VERDICT_TONE.get(d.verdict, "")), _proof(d.verdict, d.proven),
             Text(_said(d.summary), clamp=SUMMARY_CLAMP), _commit_ref(p, d.commit), MODE_FR.get(d.mode, d.mode),
@@ -662,9 +630,9 @@ def _runs_view(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Bloc
     running = [(r, s.projects.get(r.project)) for r in s.running.values() if r.purpose == "run"]
     blocks: list[Block] = [_nothing_named(asked)] if chosen == () else []
     if running:
-        names = _texts(ctx, (p.title_ref for _, p in running if p is not None))
+        names = stored_texts(ctx, (p.title_ref for _, p in running if p is not None))
         blocks.append(Note("En ce moment : " + ", ".join(
-            f"« {_text(names, p.title_ref, '(sans titre)')} »" for _, p in running if p is not None) + ".", "info"))
+            f"« {stored_text(names, p.title_ref, '(sans titre)')} »" for _, p in running if p is not None) + ".", "info"))
     blocks.append(Table(RUN_COLUMNS, tuple(rows), title="Les exécutions", pager=pager,
                         empty="aucune exécution avec ces filtres" if asked or verdict else "aucune exécution encore"))
     return blocks
@@ -709,11 +677,11 @@ def _decisions_view(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list
     every = [(p, d) for p in sorted(s.projects.values(), key=lambda p: -p.id) if chosen is None or p.id in chosen
              for d in reversed(p.decisions) if wanted == "toutes" or d.status == wanted]
     page, pager = paginate(every, ctx.pager(size=PAGE, total=len(every)))
-    texts = _texts(ctx, [r for p, d in page for r in (p.title_ref, d.title_ref, d.choice_ref, d.reason_ref)])
-    rows = [Row((_decisions_ref(p, _text(texts, p.title_ref, "(sans titre)")), f"D{d.id}",
-                 Text(_text(texts, d.title_ref), clamp=120), Text(_text(texts, d.choice_ref), clamp=220),
+    texts = stored_texts(ctx, [r for p, d in page for r in (p.title_ref, d.title_ref, d.choice_ref, d.reason_ref)])
+    rows = [Row((_decisions_ref(p, stored_text(texts, p.title_ref, "(sans titre)")), f"D{d.id}",
+                 Text(stored_text(texts, d.title_ref), clamp=120), Text(stored_text(texts, d.choice_ref), clamp=220),
                  _decision_badge(d), AUTHOR_FR.get(d.author, d.author), When(d.at),
-                 Text(_text(texts, d.reason_ref), clamp=400)), href=_decisions_ref(p, ""))
+                 Text(stored_text(texts, d.reason_ref), clamp=400)), href=_decisions_ref(p, ""))
             for p, d in page]
     return [*([_nothing_named(asked)] if chosen == () else []),
             Table(DECISION_COLUMNS, tuple(rows), title="Décisions techniques", pager=pager,
@@ -830,7 +798,7 @@ def _approvals(p: Project, s: ProjectsState, frame: Frame, texts: Mapping[str, s
     for v in pending:
         key = str(v.proposal)
         argv = exact(s, v.proposal)
-        summary = _text(texts, v.summary_ref, "(sans résumé)")
+        summary = stored_text(texts, v.summary_ref, "(sans résumé)")
         items.append(Fields(((f"demande n° {key}", Text(summary) if argv else Text(summary, clamp=600)),
                              ("ce que c'est", {f"{c.OWNER}.push": "pousser vers le dépôt distant",
                                                f"{c.OWNER}.pull": "récupérer du dépôt distant"}.get(
@@ -896,7 +864,7 @@ def _mission_row(p: Project, o: Objective, texts: Mapping[str, str], frame: Fram
         more = len(o.stirred) + o.stirred_more
         stirred = Text(f"{causes or plural(more, 'cause', 'causes')} — passage "
                        + ("dès que possible" if due <= frame.now else f"à partir de {ctx.when(due)}"), tone="info")
-    return Row((o.id, Text(_text(texts, o.text_ref), clamp=160),
+    return Row((o.id, Text(stored_text(texts, o.text_ref), clamp=160),
                 Badge(OBJ_FR.get(o.status, o.status), OBJ_TONE.get(o.status, "")),
                 back if o.status == c.OPEN else "mise de côté",
                 ", ".join(trigger_words(k) for k in o.on) or "—",
@@ -908,7 +876,7 @@ def _once_row(p: Project, o: Objective, texts: Mapping[str, str], frame: Frame, 
     """Un objectif ponctuel en une ligne : ses jalons, sa branche et sa pull request (ses vérifications comprises),
     le verdict de sa relecture, son dernier passage."""
     marks = inspect_milestones.progress(o).removeprefix("jalons ")
-    return Row((o.id, Text(_text(texts, o.text_ref), clamp=160),
+    return Row((o.id, Text(stored_text(texts, o.text_ref), clamp=160),
                 Badge(OBJ_FR.get(o.status, o.status), OBJ_TONE.get(o.status, "")),
                 Text(marks, tone="warn" if "t'attend" in marks else "") if marks else "—",
                 Text(pull_words(o), clamp=160) if (by_pulls(p) or o.pull_state) and pull_words(o) else "—",
@@ -921,14 +889,14 @@ def _once_row(p: Project, o: Objective, texts: Mapping[str, str], frame: Frame, 
                   description="Où en est le projet : ce qui t'attend en tête, son avancement, ses missions et ses "
                               "objectifs en cours, ce qui vient ensuite, son plan, ses dernières exécutions.")
 def _overview(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    p = _subject(s, ctx)
+    p = subject_project(s, ctx)
     if isinstance(p, Note):
         return [p]
     pm = params(frame.env.params_of("projects", frame.root))
     pending = pending_of(frame, p.id)
     decisions = [d for d in p.decisions if d.status == c.IN_FORCE][-5:]
     found = todo.of_project(p, todo.pending_in(frame))  # ce qui l'attend, dans l'ordre où s'en occuper (ADR 0281)
-    texts = _texts(ctx, [p.description_ref, p.summary_ref, p.request_ref, p.plan_ref, p.questions_ref,
+    texts = stored_texts(ctx, [p.description_ref, p.summary_ref, p.request_ref, p.plan_ref, p.questions_ref,
                          *(o.text_ref for o in p.objectives),
                          *(r for d in decisions for r in (d.title_ref, d.choice_ref)),
                          *(v.summary_ref for v in pending), *inspect_todo.refs(found)])
@@ -970,13 +938,13 @@ def _overview(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block
     blocks.append(Grid((
         # son mode et sa plage sont dans les faits de son en-tête ; son dernier commit, dans la bande
         Fields((("quand", _next_words(p, s, frame, ctx)),
-                ("sur quoi", Text(f"n° {target.id} · {_text(texts, target.text_ref)}", clamp=80)
+                ("sur quoi", Text(f"n° {target.id} · {stored_text(texts, target.text_ref)}", clamp=80)
                  if target is not None else "—")),
                title="Prochaine exécution"),
-        Prose(_text(texts, p.description_ref), title="Le cadre") if p.description_ref
+        Prose(stored_text(texts, p.description_ref), title="Le cadre") if p.description_ref
         else Note("Aucun cadre écrit : elle suit le titre, ses objectifs et les consignes. Il se change dans l'onglet "
                   "Administration.", "muted", title="Le cadre"),
-        Fields((("dépôt distant", _remote_ref(p)),
+        Fields((("dépôt distant", remote_ref(p)),
                 ("dernier échange", Text(p.remote_line, tone="ok" if p.remote_ok else "danger", clamp=90)
                  if p.remote_line else "aucun"),
                 ("l'histoire complète", _link(p, "onglet Code", "git"))),
@@ -984,7 +952,7 @@ def _overview(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block
     ), columns=3))
     if decisions:
         blocks.append(Table((Column("n°", "fit"), Column("la question"), Column("ce qui est choisi")), tuple(
-            Row((f"D{d.id}", Text(_text(texts, d.title_ref), clamp=100), Text(_text(texts, d.choice_ref), clamp=200)),
+            Row((f"D{d.id}", Text(stored_text(texts, d.title_ref), clamp=100), Text(stored_text(texts, d.choice_ref), clamp=200)),
                 href=_link(p, tab="decisions")) for d in reversed(decisions)),
             title="Décisions en vigueur (les dernières)"))
     return blocks
@@ -1023,26 +991,26 @@ OBJECTIVE_COLUMNS = (Column("n°", "fit"), Column("objectif"), Column("sorte", "
                               "changer son statut, ses jalons. Les ouverts et les bloqués d'abord ; les faits et les "
                               "retirés se filtrent.")
 def _objectives_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    p = _subject(s, ctx)
+    p = subject_project(s, ctx)
     if isinstance(p, Note):
         return [p]
     pm = params(frame.env.params_of("projects", frame.root))
     key = str(p.id)
-    editable = _editable(s, frame, key)
-    runnable = _runnable(s, frame, key)
+    editable = can_edit(s, frame, key)
+    runnable = can_run(s, frame, key)
     wanted = str(ctx.value("objectifs") or "vivants")
     chosen = sorted((o for o in p.objectives if wanted == "tous" or o.status == wanted
                      or (wanted == "vivants" and o.status in LIVING)),
                     key=lambda o: (OBJ_ORDER.get((o.kind, o.status), 9), o.id))
     page, pager = paginate(chosen, ctx.pager(size=PAGE, total=len(chosen)))  # une page de formulaires, pas mille
-    texts = _texts(ctx, [*(r for o in page for r in (o.text_ref, o.note_ref, o.result_ref)),
+    texts = stored_texts(ctx, [*(r for o in page for r in (o.text_ref, o.note_ref, o.result_ref)),
                          *inspect_milestones.refs(page), *inspect_reviews.refs(page)])
     rows = []
     for o in page:
-        text = _text(texts, o.text_ref)
+        text = stored_text(texts, o.text_ref)
         detail: list[Any] = []
         if o.result_ref:
-            detail.append(Prose(_text(texts, o.result_ref), title="Ce qu'elle en a tiré"))
+            detail.append(Prose(stored_text(texts, o.result_ref), title="Ce qu'elle en a tiré"))
         if editable:
             moves = [st for st in c.OBJECTIVE_STATUSES if st != o.status and not (o.kind == c.CONSTANT and st == c.DONE)]
             buttons: list[Any] = [ActionSlot("projects.objectif_statut", (("objective", str(o.id)), ("status", st)),
@@ -1076,7 +1044,7 @@ def _objectives_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list
                 ("dès que possible" if due <= frame.now else f"à partir de {ctx.when(due)}")
         rows.append(Row((o.id, Text(text, clamp=300), Badge(KIND_FR.get(o.kind, o.kind), KIND_TONE.get(o.kind, "")),
                          Badge(OBJ_FR.get(o.status, o.status), OBJ_TONE.get(o.status, "")), rhythm, o.runs,
-                         Text(_text(texts, o.note_ref, "—"), clamp=220), AUTHOR_FR.get(o.author, o.author)),
+                         Text(stored_text(texts, o.note_ref, "—"), clamp=220), AUTHOR_FR.get(o.author, o.author)),
                         detail=tuple(detail),
                         tone="danger" if o.status == c.BLOCKED else "muted" if o.status == c.DROPPED else ""))
     once = [o for o in p.objectives if o.kind == c.ONCE and o.status != c.DROPPED]
@@ -1122,7 +1090,7 @@ def _started(p: Project, ctx: InspectContext) -> tuple[list[Event[Any]], Pager]:
                               "commit qu'elle a laissé, sa durée — et de quoi relire le prompt exact, les outils "
                               "appelés, les appels de modèle et la décision.")
 def _runs_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    p = _subject(s, ctx)
+    p = subject_project(s, ctx)
     if isinstance(p, Note):
         return [p]
     pm = params(frame.env.params_of("projects", frame.root))
@@ -1132,7 +1100,7 @@ def _runs_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block
         if corrs else {}
     reports = {e.correlation: e.data for e in ctx.events([c.RUN_REPORTED], len(corrs) + 1, correlations=corrs)} \
         if corrs else {}
-    texts = _texts(ctx, (o.text_ref for o in p.objectives))
+    texts = stored_texts(ctx, (o.text_ref for o in p.objectives))
     rows = []
     for e in started:
         end = ended.get(e.correlation)
@@ -1177,21 +1145,21 @@ def _runs_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block
                   description="Les décisions techniques du projet : ce qui est choisi, pourquoi, et ce que chaque "
                               "décision remplace. Elle relit celles en vigueur à chaque exécution.")
 def _decisions_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    p = _subject(s, ctx)
+    p = subject_project(s, ctx)
     if isinstance(p, Note):
         return [p]
     wanted = str(ctx.value("statut") or c.IN_FORCE)
     chosen = [d for d in reversed(p.decisions) if wanted == "toutes" or d.status == wanted]
     page, pager = paginate(chosen, ctx.pager(size=PAGE, total=len(chosen)))
-    texts = _texts(ctx, [r for d in page for r in (d.title_ref, d.choice_ref, d.context_ref, d.options_ref,
+    texts = stored_texts(ctx, [r for d in page for r in (d.title_ref, d.choice_ref, d.context_ref, d.options_ref,
                                                    d.reason_ref)])
-    editable = _editable(s, frame, str(p.id))
+    editable = can_edit(s, frame, str(p.id))
     rows = []
     for d in page:
         detail: list[Any] = [Fields((
-            ("le contexte", Text(_text(texts, d.context_ref), clamp=800)),
-            ("les options envisagées", Text(_text(texts, d.options_ref), clamp=800)),
-            ("pourquoi", Text(_text(texts, d.reason_ref), clamp=800)),
+            ("le contexte", Text(stored_text(texts, d.context_ref), clamp=800)),
+            ("les options envisagées", Text(stored_text(texts, d.options_ref), clamp=800)),
+            ("pourquoi", Text(stored_text(texts, d.reason_ref), clamp=800)),
             ("remplace", f"D{d.replaces}" if d.replaces else "—"),
             ("pendant l'objectif", f"n° {d.objective}" if d.objective else "—")), columns=1)]
         if editable and d.status != c.SUPERSEDED:
@@ -1202,8 +1170,8 @@ def _decisions_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[
         if editable and d.status == c.IN_FORCE:
             detail.append(Disclosure("Remplacer cette décision", (ActionSlot("projects.decision_ajouter", (
                 ("title", texts.get(d.title_ref, "")), ("replaces", str(d.id))), title="Remplacer", compact=True),)))
-        rows.append(Row((f"D{d.id}", Text(_text(texts, d.title_ref), clamp=140),
-                         Text(_text(texts, d.choice_ref), clamp=300), _decision_badge(d),
+        rows.append(Row((f"D{d.id}", Text(stored_text(texts, d.title_ref), clamp=140),
+                         Text(stored_text(texts, d.choice_ref), clamp=300), _decision_badge(d),
                          AUTHOR_FR.get(d.author, d.author), When(d.at)), detail=tuple(detail),
                         tone="muted" if d.status != c.IN_FORCE else ""))
     out: list[Block] = [
@@ -1239,12 +1207,12 @@ def _behaviour_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[
     exécution), sa liberté — et ses outils. La fiche dessinée (``app/domains/projects/console/subject.py``) montre le
     formulaire et tait ces faits, qu'elle passe en aide de leur réglage ou en une ligne ; ils restent ici pour la
     console en MCP, le repli, et un projet archivé (sans formulaire), qui les montre en lecture."""
-    p = _subject(s, ctx)
+    p = subject_project(s, ctx)
     if isinstance(p, Note):
         return [p]
     pm = params(frame.env.params_of("projects", frame.root))
     key = str(p.id)
-    editable = _editable(s, frame, key)
+    editable = can_edit(s, frame, key)
     blocks: list[Block] = []
     if editable:
         blocks.append(ActionSlot("projects.modifier", title="Modifier le projet"))
@@ -1355,10 +1323,10 @@ def _tickets_section(p: Project, editable: bool) -> Section:
                   description="Ce que ce projet lit des autres et ce que chaque lien lui donne, ce qu'il leur a "
                               "demandé, ce qu'on lui a demandé, et qui le lit.")
 def _links_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    p = _subject(s, ctx)
+    p = subject_project(s, ctx)
     if isinstance(p, Note):
         return [p]
-    return [_links_section(p, s, frame, ctx, _editable(s, frame, str(p.id)))]
+    return [_links_section(p, s, frame, ctx, can_edit(s, frame, str(p.id)))]
 
 
 def _tools_section(p: Project, frame: Frame, editable: bool) -> Section:
@@ -1426,11 +1394,11 @@ def _links_section(p: Project, s: ProjectsState, frame: Frame, ctx: InspectConte
     world = links.world_of(frame)
     read, readers = links.readings(s, p, world), links.readers(s, p, world)
     asked = [s.projects[t] for t in p.plan_reads if t not in p.reads and t in s.projects]
-    texts = _texts(ctx, [t.title_ref for t in (*(r.project for r in read if r.project is not None), *asked,
+    texts = stored_texts(ctx, [t.title_ref for t in (*(r.project for r in read if r.project is not None), *asked,
                                                *(reader for reader, _ in readers))])
 
     def named(t: Project) -> Ref:
-        return _link(t, f"n° {t.id} — {_text(texts, t.title_ref)}", "liens")
+        return _link(t, f"n° {t.id} — {stored_text(texts, t.title_ref)}", "liens")
 
     def seen(t: Project, grant: links.Grant) -> Any:
         """Ce que la vue de son atelier montre : le dernier commit de sa branche de base qu'on lui connaît."""
@@ -1473,11 +1441,11 @@ def _links_section(p: Project, s: ProjectsState, frame: Frame, ctx: InspectConte
                     "propriétaire, qui la font avancer."))
     received = [x for x in p.board.items if x.list_name == c.TICKETS and c.asking_project(x.author)]
     if received:  # ce que d'autres projets lui ont demandé : des tickets chez lui, que son onglet Tickets ouvre
-        titles = _texts(ctx, [x.title_ref for x in received])
+        titles = stored_texts(ctx, [x.title_ref for x in received])
         items.append(Table(
             (Column("ticket"), Column("demandé par", "fit"), Column("où il en est", "fit"), Column("la main à", "fit"),
              Column("touché", "fit")),
-            tuple((Ref("subject", f"project/{p.id}", f"#{x.number} {_text(titles, x.title_ref)}",
+            tuple((Ref("subject", f"project/{p.id}", f"#{x.number} {stored_text(titles, x.title_ref)}",
                        (("onglet", "tickets"), ("element", f"#{x.number}"))),
                    _link(s.projects[c.asking_project(x.author)], f"projet n° {c.asking_project(x.author)}", "liens")
                    if c.asking_project(x.author) in s.projects else Text(f"projet n° {c.asking_project(x.author)}"),
@@ -1558,7 +1526,7 @@ def _operation(e: Event[Any], frame: Frame) -> Entry:
                   description="Les consignes que tu lui as données, les notes qu'elle garde pour la suite, ce qu'on a "
                               "fait du projet, et ce qu'il a voulu faire sortir de la machine.")
 def _notebook_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    p = _subject(s, ctx)
+    p = subject_project(s, ctx)
     if isinstance(p, Note):
         return [p]
     orders, orders_pager = _page(ctx, [AMENDED], ("project", p.id))
@@ -1572,8 +1540,8 @@ def _notebook_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[B
             outcomes[e.seq] = ctx.events([rt.EFFECT_RESOLVED, rt.EFFECT_EXECUTED], 4, where=("proposal", e.seq))
     effect_rows = []
     for e in proposed:
-        state, detail = _effect_state(e, e.seq in pending, outcomes.get(e.seq, ()))
-        more: list[Any] = [Code(_cut(detail, 4000), title="ce qu'il en est")] if detail else []
+        state, detail = effect_state(e, e.seq in pending, outcomes.get(e.seq, ()))
+        more: list[Any] = [Code(cut_noted(detail, 4000), title="ce qu'il en est")] if detail else []
         if e.seq in pending:  # ce qui partira, puis où le décider : la fiche ne décide plus sur place (ADR 0177)
             argv = exact(s, e.seq)
             more += [Code(argv, title=COMMAND_TITLE)] if argv else []
@@ -1594,21 +1562,6 @@ def _notebook_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[B
                Column("état", "fit")), tuple(effect_rows), title="Ce qui sort de la machine", pager=effects_pager,
               empty="aucune demande : tout s'est fait dans l'atelier"),
     ]
-
-
-def _effect_state(proposal: Event[Any], pending: bool, outcomes: Sequence[Event[Any]]) -> tuple[Badge, str]:
-    if pending:
-        return Badge("attend ton accord", "warn"), ""
-    executed = next((o for o in outcomes if o.type.name == rt.EFFECT_EXECUTED.name), None)
-    resolved = next((o for o in outcomes if o.type.name == rt.EFFECT_RESOLVED.name), None)
-    if executed is not None:
-        return (Badge("fait", "ok") if executed.data.ok else Badge("échoué", "danger")), executed.data.result
-    if resolved is not None and not resolved.data.approved:
-        note = f" : « {said} »" if (said := resolved.data.said()) else ""
-        return Badge("refusé", "muted"), f"par {resolved.data.by or 'un opérateur'}{note}"
-    if resolved is not None or not proposal.data.approval:
-        return Badge("en cours", "info"), ""
-    return Badge("inconnu", "muted"), ""
 
 
 # ── Sur la fiche d'une personne ───────────────────────────────────────────
@@ -1633,8 +1586,8 @@ def _person_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Blo
     handles = {person, *frame.get(identity_c.HANDLES(person))}
     concerned = sorted(of_person(s, handles), key=lambda p: (not live(p), -p.id))
     page, pager = paginate(concerned, ctx.pager(size=PAGE, total=len(concerned)))
-    texts = _texts(ctx, (p.title_ref for p in page))
-    rows = [Row((_link(p, _text(texts, p.title_ref, "(sans titre)")), _mode(p), _state(p), _progress(p),
+    texts = stored_texts(ctx, (p.title_ref for p in page))
+    rows = [Row((_link(p, stored_text(texts, p.title_ref, "(sans titre)")), _mode(p), _state(p), _progress(p),
                  _concern(p, handles), When(p.created_at)), href=_link(p))
             for p in page]
     out: list[Block] = []

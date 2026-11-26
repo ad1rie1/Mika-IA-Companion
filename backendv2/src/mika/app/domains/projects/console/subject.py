@@ -90,7 +90,6 @@ from mika.faculties.projects.faculty import access_of, project_at
 from mika.faculties.projects.inspect import (
     CHECKS_FR,
     ENGINE_TITLE,
-    FORGOTTEN,
     LIVING,
     NEXT_RUN_LABEL,
     OBJ_FR,
@@ -99,6 +98,7 @@ from mika.faculties.projects.inspect import (
     window_words,
 )
 from mika.faculties.projects.inspect_code import PULLS, REMOTE, VIEW
+from mika.faculties.projects.inspect_common import FORGOTTEN
 from mika.faculties.projects.inspect_todo import TITLE as TODO_TITLE
 from mika.faculties.projects.inspect_tracker import JOURNEY_WORDS
 from mika.inspector import render

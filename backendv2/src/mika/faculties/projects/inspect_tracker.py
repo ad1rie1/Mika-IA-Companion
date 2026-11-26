@@ -18,16 +18,7 @@ from pydantic import BaseModel, Field
 from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.faculties.projects import issues, tickets, tracker
-from mika.faculties.projects.actions import (
-    LIVE,
-    PRIORITY_CHOICES,
-    _editable,
-    _held,
-    _still,
-    _target,
-    operator_person,
-    project_at,
-)
+from mika.faculties.projects.actions import PRIORITY_CHOICES, can_edit, project_at, refuse_reserved
 from mika.faculties.projects.faculty import (
     ISSUE_ASKED,
     LISTS_MAX,
@@ -51,7 +42,13 @@ from mika.faculties.projects.faculty import (
     issue_move,
     reflected,
 )
-from mika.faculties.projects.inspect import _subject
+from mika.faculties.projects.inspect_common import (
+    LIVE,
+    operator_person,
+    subject_project,
+    target_project,
+    unchanged,
+)
 from mika.faculties.projects.inspect_issues import CANNOT, ISSUE_FR, PUBLISH_HELP
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
@@ -102,7 +99,7 @@ JOURNEY_STATES = {tickets.PASSED: "passée", tickets.CURRENT: "en cours", ticket
 # ── Ses mots, dans la console ─────────────────────────────────────────────
 
 
-def _by(frame: Frame, author: str, by: str = "") -> str:
+def shown_author(frame: Frame, author: str, by: str = "") -> str:
     """Qui a écrit, tel que la console le dit (elle, un projet, une personne par son nom, l'opérateur)."""
     if author == c.BY_SELF:
         return "elle"
@@ -114,12 +111,12 @@ def _by(frame: Frame, author: str, by: str = "") -> str:
     return name or ("l'opérateur" if author == c.BY_OPERATOR else "quelqu'un")
 
 
-def _changer(frame: Frame, by: str) -> str:
+def shown_changer(frame: Frame, by: str) -> str:
     """Qui a fait un changement, tel qu'un élément le garde (``tracker.writer``)."""
-    return _by(frame, by if by in (c.BY_SELF, c.BY_HOST) or by.startswith(f"{c.BY_PROJECT}:") else c.BY_PERSON, by)
+    return shown_author(frame, by if by in (c.BY_SELF, c.BY_HOST) or by.startswith(f"{c.BY_PROJECT}:") else c.BY_PERSON, by)
 
 
-def _actor(frame: Frame, item: Item) -> str:
+def shown_actor(frame: Frame, item: Item) -> str:
     if item.actor == c.ACTOR_OWNER:
         return "le propriétaire"
     if item.actor == c.ACTOR_PERSON:
@@ -127,7 +124,7 @@ def _actor(frame: Frame, item: Item) -> str:
     return "elle"
 
 
-def _hand(item: Item) -> str:
+def shown_hand(item: Item) -> str:
     """À qui est la main sur un ticket (ADR 0270) : son étape le dit."""
     who = tickets.hand(item)
     return "le propriétaire" if who == c.ACTOR_OWNER else "elle" if who == c.ACTOR_SELF else "—"
@@ -155,7 +152,7 @@ def _thread(frame: Frame, ctx: InspectContext, p: Project, e: tracker.Entry) -> 
     """Le fil d'un élément : ses derniers changements et ses notes, du plus ancien au plus récent."""
     item = e.item
     lines: list[tuple[int, tuple[Any, ...]]] = [
-        (x.at, (When(x.at), _changer(frame, x.by), tracker._change_words(item.list_name, x.what), ""))
+        (x.at, (When(x.at), shown_changer(frame, x.by), tracker._change_words(item.list_name, x.what), ""))
         for x in item.changes]
     for note in tracker.thread(ctx.store, p.id, item.list_name, item.key):
         if note.kind == tracker.CHANGE:  # ce qu'on a dit d'un changement se lit sur sa ligne, s'il est encore gardé
@@ -170,7 +167,7 @@ def _thread(frame: Frame, ctx: InspectContext, p: Project, e: tracker.Entry) -> 
             # son ticket a une issue chez l'hôte : la note dit son numéro (« Publier cette note »), et si elle y est
             sent = issue_move(p, item.number, MOVE_NOTE, note.seq)
             what += f" (n° {note.seq}{', publiée' if sent is not None and sent.sent_at else ''})"
-        lines.append((note.at, (When(note.at), _by(frame, note.author, note.by), what, note.text or "(oublié)")))
+        lines.append((note.at, (When(note.at), shown_author(frame, note.author, note.by), what, note.text or "(oublié)")))
     return Table((Column("quand", "fit"), Column("qui", "fit"), Column("quoi", "fit"), Column("ce qui est dit")),
                  tuple(cells for _, cells in sorted(lines, key=lambda x: x[0])), title="Son fil",
                  empty="rien dans son fil pour l'instant",
@@ -193,23 +190,23 @@ def _opened(frame: Frame, ctx: InspectContext, p: Project, lst: Listing, tab: st
     if ticket:
         pairs += [("sorte", KIND_WORDS.get(item.kind, item.kind)),
                   ("priorité", PRIORITY_WORDS.get(item.priority, item.priority)),
-                  ("ouvert par", _by(frame, item.author, item.by))]
+                  ("ouvert par", shown_author(frame, item.author, item.by))]
         asker = c.asking_project(item.author)
         if asker:  # une demande d'un autre projet (ADR 0271) : d'où elle vient — sa fiche montre ses demandes
             pairs.append(("demande du", Ref("subject", f"project/{asker}", f"projet n° {asker}",
                                             (("onglet", "liens"),))))
         if item.accepted_at:
-            pairs.append(("accepté", f"par {_changer(frame, item.accepted_by)}"))
+            pairs.append(("accepté", f"par {shown_changer(frame, item.accepted_by)}"))
         if item.closed:
-            pairs.append(("fermé", f"par {_changer(frame, item.closed_by)}"))
+            pairs.append(("fermé", f"par {shown_changer(frame, item.closed_by)}"))
         if item.validated_at:
-            pairs.append(("plan validé", f"par {_changer(frame, item.validated_by)}"
+            pairs.append(("plan validé", f"par {shown_changer(frame, item.validated_by)}"
                           + (" (pris comme petit)" if item.small else "")))
         if item.dismissal_at and not item.closed:
             pairs.append(("elle propose", "de l'écarter : confirme (écarter), ou réponds-lui dans son fil"))
         if item.stuck:
             pairs.append(("son objectif", Badge("bloque", "warn")))
-    pairs += [("la main à", _hand(item) if ticket else _actor(frame, item)), ("ajouté", When(item.at)),
+    pairs += [("la main à", shown_hand(item) if ticket else shown_actor(frame, item)), ("ajouté", When(item.at)),
               ("touché", When(item.updated_at))]
     if item.objective:
         pairs.append(("objectif", _ref(p, "objectifs", text=f"n° {item.objective}")))
@@ -281,10 +278,10 @@ def _list_blocks(frame: Frame, ctx: InspectContext, p: Project, lst: Listing, ta
         item = e.item
         name = f"#{item.number}" if ticket else item.key
         link = _ref(p, tab, *here, ("element", name), text=_title(e))
-        cells = (name, link, _status(lst, item.status), _hand(item), KIND_WORDS.get(item.kind, item.kind),
-                 PRIORITY_WORDS.get(item.priority, item.priority), _by(frame, item.author, item.by),
+        cells = (name, link, _status(lst, item.status), shown_hand(item), KIND_WORDS.get(item.kind, item.kind),
+                 PRIORITY_WORDS.get(item.priority, item.priority), shown_author(frame, item.author, item.by),
                  When(item.updated_at)) if ticket else \
-            (name, link, _status(lst, item.status), _actor(frame, item), When(item.updated_at))
+            (name, link, _status(lst, item.status), shown_actor(frame, item), When(item.updated_at))
         rows.append(Row(cells, href=_ref(p, tab, *here, ("element", name))))
     columns = (Column("n°", "fit"), Column("titre"), Column("étape", "fit"), Column("la main à", "fit"),
                Column("sorte", "fit"),
@@ -302,7 +299,7 @@ def _list_blocks(frame: Frame, ctx: InspectContext, p: Project, lst: Listing, ta
                               "s'est passé) et à qui est la main, le fil de chacun ; en ouvrir un, répondre à sa "
                               "question, valider ou refuser son plan, l'accepter, l'écarter.")
 def _tickets_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    p = _subject(s, ctx)
+    p = subject_project(s, ctx)
     if isinstance(p, Note):
         return [p]
     # leur réglage (qui valide un plan, la borne d'un petit ticket, la publication en issues) est dans « Cadre »
@@ -312,7 +309,7 @@ def _tickets_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Bl
             ActionSlot("projects.ticket_ouvrir", title="Ouvrir un ticket", compact=True),)),
         Fields((("la validation des plans, les petits tickets, la publication en issues",
                  _ref(p, "comportement", text="Les régler dans Administration")),), columns=1),
-    ] if _editable(s, frame, str(p.id)) else []
+    ] if can_edit(s, frame, str(p.id)) else []
     return [*_list_blocks(frame, ctx, p, tracker.TICKET_LIST, "tickets"), *opening]
 
 
@@ -320,11 +317,11 @@ def _tickets_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Bl
                   description="Ses listes de suivi (des entreprises à contacter, des articles à relire) : leurs "
                               "éléments par statut, le fil de chacun ; créer ou régler une liste, ajouter un élément.")
 def _follow_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    p = _subject(s, ctx)
+    p = subject_project(s, ctx)
     if isinstance(p, Note):
         return [p]
     lists = p.board.lists
-    editable = _editable(s, frame, str(p.id))
+    editable = can_edit(s, frame, str(p.id))
     wanted = ctx.param("liste")
     lst = next((x for x in lists if x.name == wanted), lists[0] if lists else None)
     setting = (("name", lst.name), ("open", "\n".join(lst.open)), ("closed", "\n".join(lst.closed)),
@@ -360,7 +357,7 @@ def _listing(p: Project, raw: str) -> Listing:
     return lst
 
 
-def _entry(p: Project, ctx: ActionContext, lst: Listing, said: str) -> tracker.Entry:
+def target_entry(p: Project, ctx: ActionContext, lst: Listing, said: str) -> tracker.Entry:
     e = tracker.find(ctx.store, p.id, lst.name, said)
     if e is None:
         raise Refused(f"Aucun élément « {said[:60]} » dans la liste « {lst.name} ».", {"item": "un élément de la liste"})
@@ -391,11 +388,11 @@ class ListSetArgs(BaseModel):
 
 
 @PROJECTS.action("liste_regler", title="Créer ou régler une liste", args=ListSetArgs, emits=[tracker.LIST_SET],
-                 subject="project", order=60, available=_editable, inline=True,
+                 subject="project", order=60, available=can_edit, inline=True,
                  description="Une liste de suivi de plus, ou ses statuts et qui agit par défaut. Les éléments déjà là "
                              "gardent leur statut.")
 def _list_set(s: ProjectsState, frame: Frame, args: ListSetArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
+    p = target_project(s, ctx)
     name = tracker.named_list(args.name)
     if name is None:
         raise Refused("Ce nom ne s'écrit pas ainsi.", {"name": "des minuscules, des chiffres, des tirets"})
@@ -419,7 +416,7 @@ def _list_set(s: ProjectsState, frame: Frame, args: ListSetArgs, ctx: ActionCont
         raise Refused("Qui agit : elle, ou le propriétaire du projet.", {"actor": "valeur inconnue"})
     draft = tracker.list_setting(p, name, title=args.title, opened=opened, closed=closed, actor=args.actor,
                                  author=c.BY_OPERATOR, by=_writer(frame, ctx))
-    return Done(drafts=(draft,), message=f"Liste « {name} » enregistrée.", guard=_still(p.id, LIVE))
+    return Done(drafts=(draft,), message=f"Liste « {name} » enregistrée.", guard=unchanged(p.id, LIVE))
 
 
 class ItemAddArgs(BaseModel):
@@ -441,10 +438,10 @@ class ItemAddArgs(BaseModel):
 
 
 @PROJECTS.action("element_ajouter", title="Ajouter un élément", args=ItemAddArgs, emits=[tracker.ITEM_ADDED],
-                 subject="project", order=61, available=_editable, inline=True,
+                 subject="project", order=61, available=can_edit, inline=True,
                  description="Un élément de plus dans une liste de suivi ; une clé déjà là est refusée.")
 def _item_add(s: ProjectsState, frame: Frame, args: ItemAddArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
+    p = target_project(s, ctx)
     lst = _listing(p, args.list_name)
     if lst.name == c.TICKETS:
         raise Refused("Un ticket s'ouvre par « Ouvrir un ticket ».", {"list_name": "une liste de suivi"})
@@ -459,7 +456,7 @@ def _item_add(s: ProjectsState, frame: Frame, args: ItemAddArgs, ctx: ActionCont
     actor, person = (args.actor, "") if args.actor in (c.ACTOR_SELF, c.ACTOR_OWNER) else (lst.actor, lst.person)
     draft = tracker.adding(p, lst.name, key, args.title, text=args.text, status=status, actor=actor, person=person,
                            link=args.link, author=c.BY_OPERATOR, by=_writer(frame, ctx))
-    return Done(drafts=(draft,), message=f"Élément ajouté à « {lst.name} ».", guard=_still(p.id, LIVE))
+    return Done(drafts=(draft,), message=f"Élément ajouté à « {lst.name} ».", guard=unchanged(p.id, LIVE))
 
 
 class TicketArgs(BaseModel):
@@ -480,10 +477,10 @@ BORN_PROPOSED = "proposed"
 
 
 @PROJECTS.action("ticket_ouvrir", title="Ouvrir un ticket", args=TicketArgs, emits=[tracker.ITEM_ADDED],
-                 subject="project", order=62, available=_editable, inline=True,
+                 subject="project", order=62, available=can_edit, inline=True,
                  description="Ce que tu signales ou demandes à ce projet : elle le verra à son prochain passage.")
 def _ticket_open(s: ProjectsState, frame: Frame, args: TicketArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
+    p = target_project(s, ctx)
     if not args.title.strip():
         raise Refused("Le titre est vide.", {"title": "valeur requise"})
     if args.kind not in c.TICKET_KINDS or args.priority not in c.PRIORITIES:
@@ -500,7 +497,7 @@ def _ticket_open(s: ProjectsState, frame: Frame, args: TicketArgs, ctx: ActionCo
     draft = tracker.adding(p, c.TICKETS, key, args.title, text=args.text, kind=args.kind, priority=args.priority,
                            proposed=proposed, author=c.BY_OPERATOR, by=_writer(frame, ctx))
     return Done(drafts=(draft,), message="Ticket proposé : le propriétaire du projet l'accepte ou l'écarte."
-                if proposed else "Ticket ouvert.", guard=_still(p.id, LIVE))
+                if proposed else "Ticket ouvert.", guard=unchanged(p.id, LIVE))
 
 
 class ItemStatusArgs(BaseModel):
@@ -513,14 +510,14 @@ class ItemStatusArgs(BaseModel):
 
 
 @PROJECTS.action("element_statut", title="Changer le statut", args=ItemStatusArgs, emits=[tracker.ITEM_CHANGED],
-                 subject="project", order=63, available=_editable, inline=True,
+                 subject="project", order=63, available=can_edit, inline=True,
                  description="Le statut d'un élément d'une liste de suivi, posé à la main.")
 def _item_status(s: ProjectsState, frame: Frame, args: ItemStatusArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
+    p = target_project(s, ctx)
     lst = _listing(p, args.list_name)
     if lst.name == c.TICKETS:
         raise Refused("Un ticket n'a pas de statut posé à la main : accepte-le, écarte-le ou ferme-le.")
-    e = _entry(p, ctx, lst, args.item)
+    e = target_entry(p, ctx, lst, args.item)
     status = tracker.read_status(lst, args.status)
     if status is None:
         raise Refused("Ce n'est pas un statut de cette liste.", {"status": tracker.statuses_said(lst)})
@@ -528,7 +525,7 @@ def _item_status(s: ProjectsState, frame: Frame, args: ItemStatusArgs, ctx: Acti
     if tracker.changes_nothing(draft, e.item):
         raise Refused("L'élément a déjà ce statut.")
     return Done(drafts=(draft,), message=f"{e.item.key} : {tracker.status_words(lst.name, status)}.",
-                guard=_still(p.id, LIVE))
+                guard=unchanged(p.id, LIVE))
 
 
 class ItemActorArgs(BaseModel):
@@ -538,21 +535,21 @@ class ItemActorArgs(BaseModel):
 
 
 @PROJECTS.action("element_confier", title="Changer à qui il est", args=ItemActorArgs, emits=[tracker.ITEM_CHANGED],
-                 subject="project", order=63, available=_editable, inline=True,
+                 subject="project", order=63, available=can_edit, inline=True,
                  description="À qui est un élément d'une liste de suivi : à elle, ou au propriétaire du projet.")
 def _item_actor(s: ProjectsState, frame: Frame, args: ItemActorArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
+    p = target_project(s, ctx)
     lst = _listing(p, args.list_name)
     if lst.name == c.TICKETS:
         raise Refused("La main sur un ticket se déduit de son étape : elle ne se pose pas.")
     if args.actor not in (c.ACTOR_SELF, c.ACTOR_OWNER):
         raise Refused("Qui a la main : elle, ou le propriétaire du projet.", {"actor": "valeur inconnue"})
-    e = _entry(p, ctx, lst, args.item)
+    e = target_entry(p, ctx, lst, args.item)
     if (e.item.actor, e.item.person) == (args.actor, ""):
         raise Refused("Cet élément est déjà à " + ("elle." if args.actor == c.ACTOR_SELF else "son propriétaire."))
     draft = tracker.changing(p, e.item, author=c.BY_OPERATOR, by=_writer(frame, ctx), actor=args.actor)
     return Done(drafts=(draft,), message=f"{e.item.key} : à " + dict(ACTOR_CHOICES)[args.actor] + ".",
-                guard=_still(p.id, LIVE))
+                guard=unchanged(p.id, LIVE))
 
 
 class ItemNoteArgs(BaseModel):
@@ -564,14 +561,14 @@ class ItemNoteArgs(BaseModel):
 
 
 @PROJECTS.action("element_noter", title="Noter", args=ItemNoteArgs, emits=[tracker.ITEM_NOTED], subject="project",
-                 order=64, available=_editable, inline=True, description="Une note dans le fil d'un élément.")
+                 order=64, available=can_edit, inline=True, description="Une note dans le fil d'un élément.")
 def _item_note(s: ProjectsState, frame: Frame, args: ItemNoteArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
-    e = _entry(p, ctx, _listing(p, args.list_name), args.item)
+    p = target_project(s, ctx)
+    e = target_entry(p, ctx, _listing(p, args.list_name), args.item)
     if not args.text.strip():
         raise Refused("La note est vide.", {"text": "valeur requise"})
     draft = tracker.noting(p, e.item, args.text, author=c.BY_OPERATOR, by=_writer(frame, ctx))
-    return Done(drafts=(draft,), message="Note ajoutée à son fil.", guard=_still(p.id, LIVE))
+    return Done(drafts=(draft,), message="Note ajoutée à son fil.", guard=unchanged(p.id, LIVE))
 
 
 class PublishArgs(BaseModel):
@@ -588,19 +585,19 @@ def _asked(p: Project, item: Item, what: str, note: int = 0) -> None:
 
 
 @PROJECTS.action("ticket_publier", title="Publier un ticket en issue", args=PublishArgs, emits=[ISSUE_ASKED],
-                 subject="project", order=67, available=_editable, inline=True,
+                 subject="project", order=67, available=can_edit, inline=True,
                  description="Demander la publication d'un ticket en issue chez l'hôte du dépôt distant : son titre "
                              "et son texte, une seule fois. Ce qui partira attend ton accord dans « À valider ».")
 def _ticket_publish(s: ProjectsState, frame: Frame, args: PublishArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
-    e = _entry(p, ctx, tracker.TICKET_LIST, args.item)
+    p = target_project(s, ctx)
+    e = target_entry(p, ctx, tracker.TICKET_LIST, args.item)
     _asked(p, e.item, MOVE_PUBLISH)
     why = issues.refusal(p, e.item, None, 0) or ("" if e.title.strip() else "forgotten")
     if why:
         raise Refused(f"Le ticket #{e.item.number} ne se publie pas : {CANNOT[why]}.")
     draft = issues.asking(p, e.item, author=c.BY_OPERATOR, by=_writer(frame, ctx))
     return Done(drafts=(draft,), message=f"Publication du ticket #{e.item.number} demandée : son aperçu est dans "
-                                         "« À valider ».", guard=_still(p.id, LIVE))
+                                         "« À valider ».", guard=unchanged(p.id, LIVE))
 
 
 class NotePublishArgs(BaseModel):
@@ -611,12 +608,12 @@ class NotePublishArgs(BaseModel):
 
 
 @PROJECTS.action("note_publier", title="Publier une note chez l'hôte", args=NotePublishArgs, emits=[ISSUE_ASKED],
-                 subject="project", order=68, available=_editable, inline=True,
+                 subject="project", order=68, available=can_edit, inline=True,
                  description="Demander la publication d'une note du fil d'un ticket en commentaire de son issue : "
                              "cette note-là, et rien d'autre de son fil. Ce qui partira attend dans « À valider ».")
 def _note_publish(s: ProjectsState, frame: Frame, args: NotePublishArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
-    e = _entry(p, ctx, tracker.TICKET_LIST, args.item)
+    p = target_project(s, ctx)
+    e = target_entry(p, ctx, tracker.TICKET_LIST, args.item)
     _asked(p, e.item, MOVE_NOTE, args.note)
     note = tracker.note_at(ctx.store, p.id, c.TICKETS, e.item.key, args.note)
     if why := issues.refusal(p, e.item, note, args.note):
@@ -624,7 +621,7 @@ def _note_publish(s: ProjectsState, frame: Frame, args: NotePublishArgs, ctx: Ac
                       {"note": "une note de son fil"})
     draft = issues.asking(p, e.item, note=args.note, author=c.BY_OPERATOR, by=_writer(frame, ctx))
     return Done(drafts=(draft,), message=f"Publication de la note n° {args.note} demandée : son aperçu est dans "
-                                         "« À valider ».", guard=_still(p.id, LIVE))
+                                         "« À valider ».", guard=unchanged(p.id, LIVE))
 
 
 class SettleArgs(BaseModel):
@@ -641,12 +638,12 @@ class SettleArgs(BaseModel):
 
 @PROJECTS.action("ticket_trancher", title="Trancher un ticket", args=SettleArgs,
                  emits=[tracker.ITEM_CHANGED, OBJECTIVE_ADDED, OBJECTIVE_CHANGED, MILESTONE_ADDED],
-                 subject="project", order=65, available=_editable, inline=True,
+                 subject="project", order=65, available=can_edit, inline=True,
                  description="Accepter un ticket proposé, valider ou refuser son plan, l'écarter avec sa raison (ou "
                              "confirmer qu'elle l'écarte), le fermer comme traité, ou le rouvrir.")
 def _settle(s: ProjectsState, frame: Frame, args: SettleArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
-    e = _entry(p, ctx, tracker.TICKET_LIST, args.item)
+    p = target_project(s, ctx)
+    e = target_entry(p, ctx, tracker.TICKET_LIST, args.item)
     item = e.item
     fields: dict[str, Any]
     by = _writer(frame, ctx)
@@ -663,7 +660,7 @@ def _settle(s: ProjectsState, frame: Frame, args: SettleArgs, ctx: ActionContext
         drafts = tracker.validating(p, item, plan, author=c.BY_OPERATOR, by=by, comment=args.reason)
         free = tracker.free_number(p, item)  # l'objectif qui naît prend un numéro encore libre au moment d'écrire
         return Done(drafts=tuple(drafts), message=f"Plan du ticket #{item.number} validé : un objectif le porte.",
-                    guard=_still(p.id, LIVE) & free if free is not None else _still(p.id, LIVE))
+                    guard=unchanged(p.id, LIVE) & free if free is not None else unchanged(p.id, LIVE))
     if args.verdict == "refuse":
         if item.status != c.STAGE_VALIDATION:
             raise Refused(f"Le ticket #{item.number} n'a pas de plan qui attend d'être validé.")
@@ -691,7 +688,7 @@ def _settle(s: ProjectsState, frame: Frame, args: SettleArgs, ctx: ActionContext
     else:
         raise Refused("Verdict inconnu.", {"verdict": "accepter, valider, refuser, écarter, fermer ou rouvrir"})
     draft = tracker.changing(p, item, author=c.BY_OPERATOR, by=by, note=args.reason, **fields)
-    return Done(drafts=(draft,), message=f"Ticket #{item.number} {said}.", guard=_still(p.id, LIVE))
+    return Done(drafts=(draft,), message=f"Ticket #{item.number} {said}.", guard=unchanged(p.id, LIVE))
 
 
 class ReviewArgs(BaseModel):
@@ -729,11 +726,11 @@ def _review_initial(s: ProjectsState, frame: Frame, key: str) -> dict[str, Any]:
 
 
 @PROJECTS.action("tickets_regler", title="Régler la validation des tickets", args=ReviewArgs, emits=[REFRAMED],
-                 subject="project", order=66, available=_editable, initial=_review_initial, inline=True,
+                 subject="project", order=66, available=can_edit, initial=_review_initial, inline=True,
                  description="Quand le plan d'un ticket attend ta validation, la borne d'un petit ticket (ADR "
                              "0270), et quand ses tickets se publient en issues chez l'hôte (ADR 0275).")
 def _review_set(s: ProjectsState, frame: Frame, args: ReviewArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
+    p = target_project(s, ctx)
     if args.ticket_review not in c.REVIEWS:
         raise Refused("Réglage inconnu.", {"ticket_review": "toujours, ou seulement pour ce qui n'est pas petit"})
     if args.issues not in c.ISSUES:
@@ -746,8 +743,8 @@ def _review_set(s: ProjectsState, frame: Frame, args: ReviewArgs, ctx: ActionCon
             (p.ticket_review, b.files, b.lines, p.protected, p.issues):
         raise Refused("Rien n'a changé.")
     if args.issues != p.issues:  # publier chez l'hôte : à qui s'occupe d'elle seulement (ADR 0292)
-        _held(frame, ctx, "projects.tickets_regler", ("issues",))
+        refuse_reserved(frame, ctx, "projects.tickets_regler", ("issues",))
     return Done(drafts=(REFRAMED.draft(project=p.id, ticket_review=args.ticket_review, small_files=args.small_files,
                                        small_lines=args.small_lines, protected=protected, issues=args.issues,
                                        by=ctx.by, owner=p.owner, about=p.about, read_about=p.read_about),),
-                message="Validation des tickets réglée.", guard=_still(p.id, LIVE))
+                message="Validation des tickets réglée.", guard=unchanged(p.id, LIVE))

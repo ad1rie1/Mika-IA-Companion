@@ -54,7 +54,6 @@ from mika.faculties.projects.faculty import (
     RESTORED,
     RESUMED,
     REVISE,
-    Objective,
     Project,
     ProjectsState,
     busy,
@@ -65,7 +64,6 @@ from mika.faculties.projects.faculty import (
     in_force,
     living,
     nudged,
-    objective_at,
     objectives_of,
     opened,
     outgoing,
@@ -75,6 +73,13 @@ from mika.faculties.projects.faculty import (
     writes_pulls,
     written,
 )
+from mika.faculties.projects.inspect_common import (
+    LIVE,
+    operator_person,
+    target_objective,
+    target_project,
+    unchanged,
+)
 from mika.faculties.projects.inspect_reviews import REREAD_CHOICES, REREAD_HELP, REREAD_LABEL, REREAD_UNKNOWN
 from mika.faculties.projects.milestones import routine_text
 from mika.faculties.projects.rhythm import pick
@@ -83,7 +88,6 @@ from mika.kernel.clock import HOUR, MINUTE
 from mika.kernel.events import Content
 from mika.kernel.forms import UPLOAD_MAX, FormField, Knob, Upload, describe
 from mika.kernel.frame import Frame
-from mika.kernel.guards import Guard
 from mika.kernel.operate import ActionContext, Done, Refused
 from mika.ports.workshop import BASE_BRANCH, OutsideWorkshop, WorkshopFull, check_branch, check_remote
 from mika.vocab.circadian import DAYS_FR
@@ -169,21 +173,6 @@ def _capital(words: str) -> str:
 def _label(bundle: str) -> str:
     """Le libellé d'une case d'outil : la majuscule au début, le reste tel quel (« Ses flux RSS »)."""
     return _capital(BUNDLE_WORDS[bundle])
-
-
-def _still(project: int, wanted: tuple[str, ...]) -> Guard:
-    """L'opération ne vaut que si le projet est toujours dans l'état où l'opérateur l'a vu."""
-    return Guard("projet inchangé", predicate=lambda view, p=project: view.get(c.STATUS(p)) in wanted)
-
-
-LIVE = (c.ACTIVE, c.PAUSED)
-
-
-def _target(s: ProjectsState, ctx: ActionContext) -> Project:
-    p = project_at(s, ctx.subject)
-    if p is None:
-        raise Refused(f"Aucun projet « {ctx.subject} ».")
-    return p
 
 
 def _texts(ports: Mapping[str, Any], refs: Iterable[str]) -> Mapping[str, str]:
@@ -272,7 +261,7 @@ def keeper_acts(frame: Frame, ctx: ActionContext) -> bool:
     return managing.keeps(frame, operator_person(frame, ctx))
 
 
-def _held(frame: Frame, ctx: ActionContext, action: str, changed: Iterable[str]) -> None:
+def refuse_reserved(frame: Frame, ctx: ActionContext, action: str, changed: Iterable[str]) -> None:
     """Refuse le geste si l'un des champs qu'il change est réservé à qui s'occupe d'elle et que la personne qui
     agit ne l'est pas — depuis la console comme depuis son espace : la garde est ici, pas dans une route."""
     held = [name for name in changed if reserved_field(action, name)]
@@ -489,7 +478,7 @@ class ModifyArgs(BaseModel):
                                        advanced=False, order=61, help=REREAD_HELP)] = None
 
 
-def _editable(s: ProjectsState, frame: Frame, key: str) -> bool:
+def can_edit(s: ProjectsState, frame: Frame, key: str) -> bool:
     p = project_at(s, key)
     return p is not None and p.status in LIVE
 
@@ -521,11 +510,11 @@ def _clock(minutes: int) -> str:
 
 
 @PROJECTS.action("modifier", title="Modifier le projet", args=ModifyArgs, emits=[REFRAMED], subject="project",
-                 order=60, available=_editable, initial=_modify_initial, inline=True,
+                 order=60, available=can_edit, initial=_modify_initial, inline=True,
                  description="Son cadre, pour qui, son mode, son rythme, sa plage de travail et sa liberté. La "
                              "prochaine exécution lira le nouveau cadre ; ce qui est fait reste.")
 def _modify(s: ProjectsState, frame: Frame, args: ModifyArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
+    p = target_project(s, ctx)
     texts = _texts(ctx.ports or {}, (p.title_ref, p.description_ref))
     errors: dict[str, str] = {}
     changes: dict[str, Any] = {}
@@ -540,7 +529,7 @@ def _modify(s: ProjectsState, frame: Frame, args: ModifyArgs, ctx: ActionContext
         if owner is None:
             errors["owner"] = f"personne inconnue : « {args.owner.strip()[:60]} »"
     # pour qui il est, et l'accord de ce qui sort : à qui s'occupe d'elle seulement
-    _held(frame, ctx, "projects.modifier", [name for name, moved in (
+    refuse_reserved(frame, ctx, "projects.modifier", [name for name, moved in (
         ("owner", "owner" not in errors and owner != p.owner), ("approval", args.approval != p.approval)) if moved])
     # pour quelqu'un, il parle de quelqu'un : ce qui s'y écrit (dès ce formulaire) est au moins personnel
     level = max(p.sensitivity, int(Sensitivity.PERSONAL)) if owner and owner != p.owner else p.sensitivity
@@ -592,7 +581,7 @@ def _modify(s: ProjectsState, frame: Frame, args: ModifyArgs, ctx: ActionContext
     about = (new_owner,) if changes.get("set_owner") and new_owner else p.about
     return Done(drafts=(REFRAMED.draft(project=p.id, by=ctx.by, owner=new_owner, about=about, read_about=p.read_about,
                                        **changes),),
-                message="Projet modifié : la prochaine exécution lira son nouveau cadre.", guard=_still(p.id, LIVE))
+                message="Projet modifié : la prochaine exécution lira son nouveau cadre.", guard=unchanged(p.id, LIVE))
 
 
 # ── Ses outils ────────────────────────────────────────────────────────────
@@ -640,20 +629,20 @@ def _tools_fields(s: ProjectsState, frame: Frame, key: str, fixed: Mapping[str, 
 
 
 @PROJECTS.action("outils", title="Enregistrer ses outils", args=ToolsArgs, emits=[REFRAMED], subject="project",
-                 order=61, available=_editable, initial=_tools_initial, fields=_tools_fields, inline=True,
+                 order=61, available=can_edit, initial=_tools_initial, fields=_tools_fields, inline=True,
                  description="Ce qu'elle a en main pendant une exécution, en plus de son atelier.")
 def _tools(s: ProjectsState, frame: Frame, args: Any, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
+    p = target_project(s, ctx)
     services = _services_of(p, frame)
     bundles = _bundles(args, services)
     if set(bundles) == set(p.bundles):
         raise Refused("Rien n'a changé.")
     # le courrier, la caméra, ses flux, la Forge, ses apps, un service : à qui s'occupe d'elle seulement
-    _held(frame, ctx, TOOLS_ACTION, [service_knob(b) if mcp_c.is_service(b) else knob_of(b)
+    refuse_reserved(frame, ctx, TOOLS_ACTION, [service_knob(b) if mcp_c.is_service(b) else knob_of(b)
                                      for b in (*EXTRA_BUNDLES, *services) if (b in bundles) != (b in p.bundles)])
     return Done(drafts=(REFRAMED.draft(project=p.id, bundles=bundles, by=ctx.by, owner=p.owner, about=p.about,
                                        read_about=p.read_about),),
-                message="Outils enregistrés : la prochaine exécution les aura en main.", guard=_still(p.id, LIVE))
+                message="Outils enregistrés : la prochaine exécution les aura en main.", guard=unchanged(p.id, LIVE))
 
 
 # ── Ce qu'il lit (ADR 0257) ───────────────────────────────────────────────
@@ -731,11 +720,6 @@ def refused_words(refused: Iterable[tuple[int, str]]) -> str:
     return " ; ".join(f"n° {i} ({LINK_REFUSALS.get(why, why)})" for i, why in refused)
 
 
-def operator_person(frame: Frame, ctx: ActionContext) -> str:
-    """La personne de l'opérateur qui agit (vide : inconnue)."""
-    return (frame.get(identity_c.PERSON(ctx.by)) or "") if ctx.by else ""
-
-
 def link_options(s: ProjectsState, frame: Frame, p: Project) -> list[tuple[Project, str]]:
     """Les projets qu'on peut cocher sous « Ce qu'il lit », et ce qu'il faut en dire : ceux qu'il lit déjà (un lien
     suspendu se décoche encore), puis ceux qu'il peut se mettre à lire (ce que son plan demande le dit)."""
@@ -781,13 +765,13 @@ def _links_fields(s: ProjectsState, frame: Frame, key: str, fixed: Mapping[str, 
 
 
 @PROJECTS.action("liens", title="Enregistrer ce qu'il lit", args=LinkArgs, emits=[LINKS_SET], subject="project",
-                 order=65, available=_editable, initial=_links_initial, fields=_links_fields, inline=True,
+                 order=65, available=can_edit, initial=_links_initial, fields=_links_fields, inline=True,
                  description="Les projets qu'il lit, sans jamais y écrire. Ce qu'il en reçoit se lit dans leurs lignes "
                              "d'accès, à chaque exécution. Il peut leur adresser une demande — un ticket chez eux — "
                              "quand leurs lignes donnent de les piloter : sur l'accord de leur propriétaire, ou "
                              "directement si le lien le règle ici.")
 def _links(s: ProjectsState, frame: Frame, args: Any, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
+    p = target_project(s, ctx)
     world = links.world_of(frame)
     if not links.may_link(p, operator_person(frame, ctx), world):
         owner = links.owner_of(p)
@@ -822,7 +806,7 @@ def _links(s: ProjectsState, frame: Frame, args: Any, ctx: ActionContext) -> Don
         word = {"why": Content.of(why, level=max(written(p), written(read))), "why_for": why_for, "owner": p.owner,
                 "about": p.about, "read_about": tuple(dict.fromkeys((*p.read_about, *subjects_of(read))))}
     return Done(drafts=(LINKS_SET.draft(project=p.id, reads=kept, direct=direct, by=ctx.by, **word),), message=said,
-                guard=_still(p.id, LIVE))
+                guard=unchanged(p.id, LIVE))
 
 
 # ── Son dépôt distant ─────────────────────────────────────────────────────
@@ -857,10 +841,10 @@ def _remote_initial(s: ProjectsState, frame: Frame, key: str) -> dict[str, Any]:
 
 
 @PROJECTS.action("depot_distant", title="Enregistrer le dépôt distant", args=RemoteArgs, emits=[REFRAMED],
-                 subject="project", order=62, available=_editable, initial=_remote_initial, inline=True,
+                 subject="project", order=62, available=can_edit, initial=_remote_initial, inline=True,
                  description="Où pousser son travail (GitHub ou un autre hôte https), et quand.")
 def _remote(s: ProjectsState, frame: Frame, args: RemoteArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
+    p = target_project(s, ctx)
     errors: dict[str, str] = {}
     remote = branch = ""
     try:
@@ -883,7 +867,7 @@ def _remote(s: ProjectsState, frame: Frame, args: RemoteArgs, ctx: ActionContext
         raise Refused("Rien n'a changé.")
     # le dépôt distant est atteint par le jeton git de l'instance : le brancher, le changer, y envoyer d'office
     # reste à qui s'occupe d'elle
-    _held(frame, ctx, "projects.depot_distant", [name for name, moved in (
+    refuse_reserved(frame, ctx, "projects.depot_distant", [name for name, moved in (
         ("remote", remote != p.remote), ("branch", branch != p.branch), ("auto_push", auto != p.auto_push),
         ("flow", flow != p.flow)) if moved])
     said = "Dépôt distant retiré." if not remote else "Dépôt distant enregistré." + (
@@ -891,14 +875,14 @@ def _remote(s: ProjectsState, frame: Frame, args: RemoteArgs, ctx: ActionContext
         if flow == c.FLOW_PR else "")
     return Done(drafts=(REFRAMED.draft(project=p.id, remote=remote, branch=branch, auto_push=auto, flow=flow,
                                        by=ctx.by, owner=p.owner, about=p.about, read_about=p.read_about),),
-                message=said, guard=_still(p.id, LIVE))
+                message=said, guard=unchanged(p.id, LIVE))
 
 
 class NoArgs(BaseModel):
     pass
 
 
-def _remote_ready(s: ProjectsState, frame: Frame, key: str, ports: Mapping[str, Any]) -> bool:
+def can_use_remote(s: ProjectsState, frame: Frame, key: str, ports: Mapping[str, Any]) -> bool:
     p = project_at(s, key)
     return p is not None and p.status != c.ARCHIVED and bool(p.remote) and ports.get("workshop") is not None
 
@@ -907,7 +891,7 @@ def _pushable(s: ProjectsState, frame: Frame, key: str, ports: Mapping[str, Any]
     """Pousser : seulement un atelier qui existe (l'action vérifie qu'il a plus que son commit d'amorce)."""
     p = project_at(s, key)
     port = ports.get("workshop")
-    return _remote_ready(s, frame, key, ports) and p is not None and port is not None and port.exists(p.id)
+    return can_use_remote(s, frame, key, ports) and p is not None and port is not None and port.exists(p.id)
 
 
 @PROJECTS.action("pousser", title="Pousser maintenant", args=NoArgs, emits=[REMOTE_REQUESTED], subject="project",
@@ -916,19 +900,19 @@ def _pushable(s: ProjectsState, frame: Frame, key: str, ports: Mapping[str, Any]
                          "de la machine, sans autre accord.",
                  description="Envoyer ce qui est enregistré dans l'atelier vers le dépôt distant, tout de suite.")
 async def _push(s: ProjectsState, frame: Frame, args: NoArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
+    p = target_project(s, ctx)
     if p.status == c.ARCHIVED or not p.remote:
         raise Refused("Ce projet n'a plus de dépôt distant, ou il est archivé : rien ne part.")
     port = (ctx.ports or {}).get("workshop")
     if port is None or not port.exists(p.id) or await port.count(p.id) <= 1:
         raise Refused("L'atelier n'a encore rien enregistré à envoyer (seulement son amorce).")
     return Done(drafts=(REMOTE_REQUESTED.draft(project=p.id, what="push", by=ctx.by, owner=p.owner, about=p.about),),
-                message="Envoi demandé : il part dans un instant. Son résultat s'affiche ici.", guard=_still(p.id, LIVE))
+                message="Envoi demandé : il part dans un instant. Son résultat s'affiche ici.", guard=unchanged(p.id, LIVE))
 
 
 def _pullable(s: ProjectsState, frame: Frame, key: str, ports: Mapping[str, Any]) -> bool:
     p = project_at(s, key)
-    return _remote_ready(s, frame, key, ports) and p is not None and not busy(s, p.id)
+    return can_use_remote(s, frame, key, ports) and p is not None and not busy(s, p.id)
 
 
 @PROJECTS.action("recuperer", title="Récupérer du dépôt distant", args=NoArgs, emits=[REMOTE_REQUESTED],
@@ -937,17 +921,17 @@ def _pullable(s: ProjectsState, frame: Frame, key: str, ports: Mapping[str, Any]
                  description="Avancer l'atelier jusqu'au dépôt distant (en ligne droite). Un atelier vierge prend "
                              "toute son histoire.")
 def _pull(s: ProjectsState, frame: Frame, args: NoArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
+    p = target_project(s, ctx)
     if p.status == c.ARCHIVED or not p.remote:
         raise Refused("Ce projet n'a plus de dépôt distant, ou il est archivé : rien ne se récupère.")
     return Done(drafts=(REMOTE_REQUESTED.draft(project=p.id, what="pull", by=ctx.by, owner=p.owner, about=p.about),),
-                message="Récupération demandée : elle part dans un instant.", guard=_still(p.id, LIVE))
+                message="Récupération demandée : elle part dans un instant.", guard=unchanged(p.id, LIVE))
 
 
 # ── Le piloter ────────────────────────────────────────────────────────────
 
 
-def _runnable(s: ProjectsState, frame: Frame, key: str) -> bool:
+def can_run(s: ProjectsState, frame: Frame, key: str) -> bool:
     """« Lancer maintenant » : seulement si une exécution peut vraiment partir (un objectif qu'elle viserait, rien
     en route hors de la machine)."""
     p = project_at(s, key)
@@ -959,37 +943,30 @@ def _runnable(s: ProjectsState, frame: Frame, key: str) -> bool:
 
 
 @PROJECTS.action("lancer", title="Lancer maintenant", args=NoArgs, emits=[NUDGED], subject="project", order=5,
-                 available=_runnable,
+                 available=can_run,
                  description="Sa prochaine exécution n'attend ni l'agenda, ni l'espacement, ni la plage de travail ; "
                              "elle reste sous les plafonds (par heure, par jour) et, en mode « elle-même », jamais pendant son "
                              "sommeil.")
 def _run_now(s: ProjectsState, frame: Frame, args: NoArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
+    p = target_project(s, ctx)
     return Done(drafts=(NUDGED.draft(project=p.id, by=ctx.by, owner=p.owner, about=p.about),),
-                message="Elle s'y met dès que possible.", guard=_still(p.id, (c.ACTIVE,)))
+                message="Elle s'y met dès que possible.", guard=unchanged(p.id, (c.ACTIVE,)))
 
 
 class ObjectiveArgs(BaseModel):
     objective: Annotated[str, Knob(label="Objectif", widget="hidden")] = Field(min_length=1, max_length=12)
 
 
-def _objective_of(p: Project, raw: str) -> Objective:
-    o = objective_at(p, raw)
-    if o is None:
-        raise Refused(f"Aucun objectif n° {raw[:12]} dans ce projet.")
-    return o
-
-
 @PROJECTS.action("lancer_objectif", title="Lancer cet objectif", args=ObjectiveArgs, emits=[NUDGED],
-                 subject="project", order=6, available=lambda s, frame, key: _runnable(s, frame, key),
+                 subject="project", order=6, available=lambda s, frame, key: can_run(s, frame, key),
                  description="La prochaine exécution vise cet objectif, dès que possible.")
 def _run_objective(s: ProjectsState, frame: Frame, args: ObjectiveArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
-    o = _objective_of(p, args.objective)
+    p = target_project(s, ctx)
+    o = target_objective(p, args.objective)
     if o.status != c.OPEN:
         raise Refused("Cet objectif n'est pas ouvert : rouvre-le d'abord.")
     return Done(drafts=(NUDGED.draft(project=p.id, objective=o.id, by=ctx.by, owner=p.owner, about=p.about),),
-                message=f"L'objectif n° {o.id} passe en premier.", guard=_still(p.id, (c.ACTIVE,)))
+                message=f"L'objectif n° {o.id} passe en premier.", guard=unchanged(p.id, (c.ACTIVE,)))
 
 
 def _pausable(s: ProjectsState, frame: Frame, key: str) -> bool:
@@ -1006,9 +983,9 @@ def _resumable(s: ProjectsState, frame: Frame, key: str) -> bool:
                  available=_pausable, description="Plus aucune exécution jusqu'à ce que tu le reprennes ; une "
                                                   "exécution en cours s'arrête.")
 def _pause(s: ProjectsState, frame: Frame, args: NoArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
+    p = target_project(s, ctx)
     return Done(drafts=(PAUSED.draft(project=p.id, reason="mis en pause par un opérateur", by=ctx.by, owner=p.owner,
-                                     about=p.about),), message="Projet en pause.", guard=_still(p.id, (c.ACTIVE,)))
+                                     about=p.about),), message="Projet en pause.", guard=unchanged(p.id, (c.ACTIVE,)))
 
 
 # la principale de la fiche (ADR 0176, la maquette) : « Lancer maintenant » (actif) ou « Reprendre » (en pause) — l'une
@@ -1016,9 +993,9 @@ def _pause(s: ProjectsState, frame: Frame, args: NoArgs, ctx: ActionContext) -> 
 @PROJECTS.action("reprendre", title="Reprendre", args=NoArgs, emits=[RESUMED], subject="project", order=4,
                  available=_resumable, description="Il repart d'où il en était (ses pannes oubliées).")
 def _resume(s: ProjectsState, frame: Frame, args: NoArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
+    p = target_project(s, ctx)
     return Done(drafts=(RESUMED.draft(project=p.id, by=ctx.by, owner=p.owner, about=p.about),),
-                message="Projet repris.", guard=_still(p.id, (c.PAUSED,)))
+                message="Projet repris.", guard=unchanged(p.id, (c.PAUSED,)))
 
 
 # la réponse à son plan (ADR 0145) : le valider, ou lui demander de le reprendre
@@ -1037,7 +1014,7 @@ def _plan_revisable(s: ProjectsState, frame: Frame, key: str) -> bool:
                  description="Son plan attend une réponse : validé, le projet le suit et elle s'y met. Validé par le "
                              "propriétaire du projet, ce que le plan demandait à lire se pose avec lui.")
 def _plan_approve(s: ProjectsState, frame: Frame, args: NoArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
+    p = target_project(s, ctx)
     # ce que son plan demandait à lire se pose si qui valide est le propriétaire du projet (ADR 0257)
     linking = links.approved(s, p, operator_person(frame, ctx), links.world_of(frame))
     drafts = [PLAN_ANSWERED.draft(project=p.id, verdict=APPROVE, by=ctx.by, owner=p.owner, about=p.about,
@@ -1052,7 +1029,7 @@ def _plan_approve(s: ProjectsState, frame: Frame, args: NoArgs, ctx: ActionConte
     if linking.refused:
         said += f" Ne peuvent pas être lus : {refused_words(linking.refused)}."
     return Done(drafts=tuple(drafts), message=said, tone="warn" if linking.denied or linking.refused else "ok",
-                guard=_still(p.id, (c.ACTIVE,)))
+                guard=unchanged(p.id, (c.ACTIVE,)))
 
 
 class ReviseArgs(BaseModel):
@@ -1065,13 +1042,13 @@ class ReviseArgs(BaseModel):
                  subject="project", order=4, available=_plan_revisable, inline=True,
                  description="Elle reprend son plan (une séance de cadrage), avec ce que tu lui dis.")
 def _plan_revise(s: ProjectsState, frame: Frame, args: ReviseArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
+    p = target_project(s, ctx)
     text = args.words.strip()
     if not text:
         raise Refused("Dis ce qu'il faut changer.", {"words": "valeur requise"})
     return Done(drafts=(PLAN_ANSWERED.draft(project=p.id, verdict=REVISE, words=Content.of(text, level=p.sensitivity),
                                             by=ctx.by, owner=p.owner, about=p.about, read_about=p.read_about),),
-                message="Révision demandée : elle reprendra son plan avec tes mots.", guard=_still(p.id, (c.ACTIVE,)))
+                message="Révision demandée : elle reprendra son plan avec tes mots.", guard=unchanged(p.id, (c.ACTIVE,)))
 
 
 class InstructionArgs(BaseModel):
@@ -1081,16 +1058,16 @@ class InstructionArgs(BaseModel):
 
 
 @PROJECTS.action("consigne", title="Donner une consigne", args=InstructionArgs, emits=[AMENDED], subject="project",
-                 order=7, available=_editable,
+                 order=7, available=can_edit,
                  description="Une précision sur ce qu'elle doit faire, ajoutée au cadre du projet.")
 def _amend(s: ProjectsState, frame: Frame, args: InstructionArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
+    p = target_project(s, ctx)
     text = args.instruction.strip()
     if not text:
         raise Refused("La consigne est vide.", {"instruction": "valeur requise"})
     return Done(drafts=(AMENDED.draft(project=p.id, instruction=Content.of(text, level=p.sensitivity), by=ctx.by,
                                       owner=p.owner, about=p.about, read_about=p.read_about),),
-                message="Consigne ajoutée : elle la lira à sa prochaine exécution.", guard=_still(p.id, LIVE))
+                message="Consigne ajoutée : elle la lira à sa prochaine exécution.", guard=unchanged(p.id, LIVE))
 
 
 def _archivable(s: ProjectsState, frame: Frame, key: str) -> bool:
@@ -1109,17 +1086,17 @@ def _restorable(s: ProjectsState, frame: Frame, key: str) -> bool:
                          "histoire restent, et on peut le restaurer.",
                  description="Il ne travaille plus. Rien n'est effacé : on peut le restaurer.")
 def _archive(s: ProjectsState, frame: Frame, args: NoArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
+    p = target_project(s, ctx)
     return Done(drafts=(ARCHIVED.draft(project=p.id, reason="archivé par un opérateur", by=ctx.by, owner=p.owner,
-                                       about=p.about),), message="Projet archivé.", guard=_still(p.id, LIVE))
+                                       about=p.about),), message="Projet archivé.", guard=unchanged(p.id, LIVE))
 
 
 @PROJECTS.action("restaurer", title="Restaurer", args=NoArgs, emits=[RESTORED], subject="project", order=91,
                  available=_restorable, description="Il revient, en pause : reprends-le quand tu veux.")
 def _restore(s: ProjectsState, frame: Frame, args: NoArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
+    p = target_project(s, ctx)
     return Done(drafts=(RESTORED.draft(project=p.id, by=ctx.by, owner=p.owner, about=p.about),),
-                message="Projet restauré (en pause).", guard=_still(p.id, (c.ARCHIVED,)))
+                message="Projet restauré (en pause).", guard=unchanged(p.id, (c.ARCHIVED,)))
 
 
 # ── Ses objectifs ─────────────────────────────────────────────────────────
@@ -1175,10 +1152,10 @@ class ObjectiveAddArgs(BaseModel):
 
 
 @PROJECTS.action("objectif_ajouter", title="Ajouter un objectif", args=ObjectiveAddArgs, emits=[OBJECTIVE_ADDED],
-                 subject="project", order=30, available=_editable, inline=True,
+                 subject="project", order=30, available=can_edit, inline=True,
                  description="Une ligne de plus : elle la verra à la prochaine exécution.")
 def _objective_add(s: ProjectsState, frame: Frame, args: ObjectiveAddArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
+    p = target_project(s, ctx)
     if living(p) >= OBJECTIVES_KEPT:
         raise Refused(f"Ce projet a déjà {OBJECTIVES_KEPT} objectifs ouverts ou bloqués : retires-en avant d'en "
                       "ajouter.")
@@ -1195,7 +1172,7 @@ def _objective_add(s: ProjectsState, frame: Frame, args: ObjectiveAddArgs, ctx: 
                                   routine=Content.of(each, level=p.sensitivity) if each else None,
                                   done_when=Content.of(args.done_when.strip(), level=p.sensitivity)
                                   if args.done_when.strip() else None)
-    return Done(drafts=(draft,), message="Objectif ajouté.", guard=_still(p.id, LIVE))
+    return Done(drafts=(draft,), message="Objectif ajouté.", guard=unchanged(p.id, LIVE))
 
 
 class ObjectiveStatusArgs(BaseModel):
@@ -1207,10 +1184,10 @@ OBJECTIVE_STATUS_FR = {c.OPEN: "rouvert", c.DONE: "fait", c.BLOCKED: "bloqué", 
 
 
 @PROJECTS.action("objectif_statut", title="Changer le statut", args=ObjectiveStatusArgs, emits=[OBJECTIVE_CHANGED],
-                 subject="project", order=31, available=_editable)
+                 subject="project", order=31, available=can_edit)
 def _objective_status(s: ProjectsState, frame: Frame, args: ObjectiveStatusArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
-    o = _objective_of(p, args.objective)
+    p = target_project(s, ctx)
+    o = target_objective(p, args.objective)
     if args.status not in c.OBJECTIVE_STATUSES:
         raise Refused(f"Statut inconnu : « {args.status[:12]} ».")
     if args.status == o.status:
@@ -1223,7 +1200,7 @@ def _objective_status(s: ProjectsState, frame: Frame, args: ObjectiveStatusArgs,
     draft = OBJECTIVE_CHANGED.draft(project=p.id, objective=o.id, status=args.status, by=ctx.by, owner=p.owner,
                                     about=p.about, read_about=p.read_about)
     return Done(drafts=(draft,), message=f"Objectif n° {o.id} : {OBJECTIVE_STATUS_FR[args.status]}.",
-                guard=_still(p.id, LIVE))
+                guard=unchanged(p.id, LIVE))
 
 
 class ObjectiveEditArgs(BaseModel):
@@ -1246,10 +1223,10 @@ class ObjectiveEditArgs(BaseModel):
 
 
 @PROJECTS.action("objectif_modifier", title="Modifier l'objectif", args=ObjectiveEditArgs,
-                 emits=[OBJECTIVE_CHANGED], subject="project", order=32, available=_editable)
+                 emits=[OBJECTIVE_CHANGED], subject="project", order=32, available=can_edit)
 def _objective_edit(s: ProjectsState, frame: Frame, args: ObjectiveEditArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
-    o = _objective_of(p, args.objective)
+    p = target_project(s, ctx)
+    o = target_objective(p, args.objective)
     texts = _texts(ctx.ports or {}, (o.text_ref, o.routine_ref, o.done_when_ref))
     text = texts.get(o.text_ref, "")
     changes: dict[str, Any] = {}
@@ -1283,7 +1260,7 @@ def _objective_edit(s: ProjectsState, frame: Frame, args: ObjectiveEditArgs, ctx
         raise Refused("Rien n'a changé.")
     return Done(drafts=(OBJECTIVE_CHANGED.draft(project=p.id, objective=o.id, by=ctx.by, owner=p.owner, about=p.about,
                                                 read_about=p.read_about, **changes),),
-                message=f"Objectif n° {o.id} modifié.", guard=_still(p.id, LIVE))
+                message=f"Objectif n° {o.id} modifié.", guard=unchanged(p.id, LIVE))
 
 
 # ── Ses décisions techniques ──────────────────────────────────────────────
@@ -1307,11 +1284,11 @@ class DecideArgs(BaseModel):
 
 
 @PROJECTS.action("decision_ajouter", title="Consigner une décision", args=DecideArgs, emits=[DECIDED],
-                 subject="project", order=40, available=_editable, inline=True,
+                 subject="project", order=40, available=can_edit, inline=True,
                  description="Une décision technique qu'elle relira à chaque exécution (et ne rouvrira pas sans la "
                              "remplacer).")
 def _decide(s: ProjectsState, frame: Frame, args: DecideArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
+    p = target_project(s, ctx)
     if args.replaces:
         old = decision_at(p, args.replaces)
         if old is None or old.status != c.IN_FORCE:
@@ -1329,7 +1306,7 @@ def _decide(s: ProjectsState, frame: Frame, args: DecideArgs, ctx: ActionContext
                           choice=Content.of(args.choice.strip(), level=level), context=opt(args.context),
                           options=opt(args.options), reason=opt(args.reason), replaces=args.replaces,
                           author="operator", by=ctx.by, owner=p.owner, about=p.about, read_about=p.read_about)
-    return Done(drafts=(draft,), message="Décision consignée.", guard=_still(p.id, LIVE))
+    return Done(drafts=(draft,), message="Décision consignée.", guard=unchanged(p.id, LIVE))
 
 
 class DecisionStatusArgs(BaseModel):
@@ -1341,9 +1318,9 @@ DECISION_STATUS_FR = {c.IN_FORCE: "remise en vigueur", c.WITHDRAWN: "retirée", 
 
 
 @PROJECTS.action("decision_statut", title="Changer le statut", args=DecisionStatusArgs, emits=[DECISION_CHANGED],
-                 subject="project", order=41, available=_editable)
+                 subject="project", order=41, available=can_edit)
 def _decision_status(s: ProjectsState, frame: Frame, args: DecisionStatusArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
+    p = target_project(s, ctx)
     d = decision_at(p, args.decision)
     if d is None:
         raise Refused(f"Aucune décision n° {args.decision[:12]}.")
@@ -1355,7 +1332,7 @@ def _decision_status(s: ProjectsState, frame: Frame, args: DecisionStatusArgs, c
         raise Refused(f"Ce projet a déjà {DECISIONS_KEPT} décisions en vigueur.")
     return Done(drafts=(DECISION_CHANGED.draft(project=p.id, decision=d.id, status=args.status, by=ctx.by,
                                                owner=p.owner, about=p.about),),
-                message=f"Décision n° {d.id} {DECISION_STATUS_FR[args.status]}.", guard=_still(p.id, LIVE))
+                message=f"Décision n° {d.id} {DECISION_STATUS_FR[args.status]}.", guard=unchanged(p.id, LIVE))
 
 
 # ── Déposer un fichier ────────────────────────────────────────────────────
@@ -1375,16 +1352,16 @@ class DepositArgs(BaseModel):
                                   help="Sans cette case, un fichier qui existe déjà n'est pas écrasé.")] = False
 
 
-def _depositable(s: ProjectsState, frame: Frame, key: str, ports: Mapping[str, Any]) -> bool:
+def can_deposit(s: ProjectsState, frame: Frame, key: str, ports: Mapping[str, Any]) -> bool:
     p = project_at(s, key)
     return p is not None and p.status in LIVE and ports.get("workshop") is not None
 
 
 @PROJECTS.action("deposer", title="Déposer un fichier", args=DepositArgs, emits=[DEPOSITED], subject="project",
-                 order=50, available=_depositable, inline=True,
+                 order=50, available=can_deposit, inline=True,
                  description="Une donnée, un exemple, un modèle : dans l'atelier, pour qu'elle s'en serve.")
 async def _deposit(s: ProjectsState, frame: Frame, args: DepositArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
+    p = target_project(s, ctx)
     if args.file is None or not args.file.data:
         raise Refused("Aucun fichier (ou un fichier vide).", {"file": "choisis un fichier"})
     port = (ctx.ports or {}).get("workshop")
@@ -1420,7 +1397,7 @@ async def _deposit(s: ProjectsState, frame: Frame, args: DepositArgs, ctx: Actio
         else f"Déposé dans l'atelier : {rel} — mais pas enregistré dans son dépôt (identique, ou git indisponible)."
     return Done(drafts=(DEPOSITED.draft(project=p.id, name=rel, size=len(args.file.data), note=note, by=ctx.by,
                                         owner=p.owner, about=p.about, read_about=p.read_about),),
-                message=said, tone="ok" if sha else "warn", guard=_still(p.id, LIVE))
+                message=said, tone="ok" if sha else "warn", guard=unchanged(p.id, LIVE))
 
 
 # ── Ce qui attend un accord ───────────────────────────────────────────────

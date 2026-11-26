@@ -549,10 +549,10 @@ READS: dict[str, dict[str, str]] = {
         "by_pulls": "si le projet passe par des pull requests",
         "reflected": "si le projet reflète ses tickets en issues",
         "issue_move": "si la publication d'un ticket est déjà demandée",
-        "_by": "qui a écrit, tel que la console le dit (les mots de la vue de son registre)",
-        "_changer": "qui a fait un changement, tel que la console le dit",
-        "_actor": "à qui est un élément, tel que la console le dit",
-        "_hand": "à qui est la main sur un ticket, tel que la console le dit",
+        "shown_author": "qui a écrit, tel que la console le dit (les mots de la vue de son registre)",
+        "shown_changer": "qui a fait un changement, tel que la console le dit",
+        "shown_actor": "à qui est un élément, tel que la console le dit",
+        "shown_hand": "à qui est la main sur un ticket, tel que la console le dit",
     },
     # Code est calqué sur l'écran Projets (ADR 0297) : ses sous-vues lisent les blocs de la vue « git »
     # (``inspect_code``) ; ce que le journal sait d'une pull request, par les règles que lit aussi l'API par personne

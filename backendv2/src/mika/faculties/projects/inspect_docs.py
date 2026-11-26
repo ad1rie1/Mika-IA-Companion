@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.faculties.projects import docs
-from mika.faculties.projects.actions import LIVE, _editable, _still, _target, operator_person
+from mika.faculties.projects.actions import can_edit
 from mika.faculties.projects.faculty import (
     DOC_IMAGES_MAX,
     DOC_PAGES_MAX,
@@ -29,7 +29,13 @@ from mika.faculties.projects.faculty import (
     Project,
     ProjectsState,
 )
-from mika.faculties.projects.inspect import _subject
+from mika.faculties.projects.inspect_common import (
+    LIVE,
+    operator_person,
+    subject_project,
+    target_project,
+    unchanged,
+)
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import Badge, Block, Column, InspectContext, Note, Row, Table, When, plural, size_fr
@@ -102,7 +108,7 @@ def who_wrote(frame: Frame, author: str, by: str, via: str, tool: str = "") -> s
                               "modification, ses images. Elle s'écrit dans l'espace de chaque personne, par elle "
                               "pendant ses exécutions, et par MCP.")
 def _docs_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    p = _subject(s, ctx)
+    p = subject_project(s, ctx)
     if isinstance(p, Note):
         return [p]
     store = ctx.ports.get("store")
@@ -171,11 +177,11 @@ class WriteArgs(BaseModel):
 
 
 @PROJECTS.action("doc_ecrire", title="Écrire une page de sa documentation", args=WriteArgs,
-                 emits=[docs.DOC_WRITTEN], subject="project", order=70, available=_editable, inline=True,
+                 emits=[docs.DOC_WRITTEN], subject="project", order=70, available=can_edit, inline=True,
                  description="Enregistrer une version d'une page de la documentation du projet, en nommant la "
                              "version lue : si la page a changé depuis, rien n'est écrasé.")
 def _write(s: ProjectsState, frame: Frame, args: WriteArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
+    p = target_project(s, ctx)
     path = _path(args.path)
     old = docs.page_at(p.docs, path)
     if old is None and args.base:
@@ -196,7 +202,7 @@ def _write(s: ProjectsState, frame: Frame, args: WriteArgs, ctx: ActionContext) 
     number = (old.version if old is not None else 0) + 1
     said = (RESTORED.format(version=number, path=path, restored=args.restored) if args.restored else
             SAVED.format(version=number, path=path) if old is not None else CREATED.format(path=path))
-    return Done(drafts=(draft,), message=said, guard=_still(p.id, LIVE))
+    return Done(drafts=(draft,), message=said, guard=unchanged(p.id, LIVE))
 
 
 class MoveArgs(BaseModel):
@@ -206,11 +212,11 @@ class MoveArgs(BaseModel):
 
 
 @PROJECTS.action("doc_deplacer", title="Renommer ou déplacer une page de sa documentation", args=MoveArgs,
-                 emits=[docs.DOC_MOVED], subject="project", order=71, available=_editable, inline=True,
+                 emits=[docs.DOC_MOVED], subject="project", order=71, available=can_edit, inline=True,
                  description="Donner un autre chemin à une page : ses versions la suivent ; les liens des autres "
                              "pages ne sont pas réécrits.")
 def _move(s: ProjectsState, frame: Frame, args: MoveArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
+    p = target_project(s, ctx)
     path, to = _path(args.path), _path(args.to, "to")
     if docs.page_at(p.docs, path) is None:
         raise Refused(NO_PAGE.format(path=path))
@@ -218,7 +224,7 @@ def _move(s: ProjectsState, frame: Frame, args: MoveArgs, ctx: ActionContext) ->
         raise Refused(TAKEN.format(path=to))
     author, by = _writer(frame, ctx)
     return Done(drafts=(docs.moving(p, path, to, author=author, by=by, via=_via(args.via)),),
-                message=MOVED.format(to=to), guard=_still(p.id, LIVE))
+                message=MOVED.format(to=to), guard=unchanged(p.id, LIVE))
 
 
 class RemoveArgs(BaseModel):
@@ -227,16 +233,16 @@ class RemoveArgs(BaseModel):
 
 
 @PROJECTS.action("doc_supprimer", title="Supprimer une page de sa documentation", args=RemoveArgs,
-                 emits=[docs.DOC_REMOVED], subject="project", order=72, available=_editable, inline=True, danger=True,
+                 emits=[docs.DOC_REMOVED], subject="project", order=72, available=can_edit, inline=True, danger=True,
                  description="Supprimer une page et ses versions de la documentation du projet.")
 def _remove(s: ProjectsState, frame: Frame, args: RemoveArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
+    p = target_project(s, ctx)
     path = _path(args.path)
     if docs.page_at(p.docs, path) is None:
         raise Refused(NO_PAGE.format(path=path))
     author, by = _writer(frame, ctx)
     return Done(drafts=(docs.removing(p, path, author=author, by=by, via=_via(args.via)),),
-                message=REMOVED.format(path=path), guard=_still(p.id, LIVE))
+                message=REMOVED.format(path=path), guard=unchanged(p.id, LIVE))
 
 
 # ── Ses images ────────────────────────────────────────────────────────────
@@ -272,7 +278,7 @@ class ImageArgs(BaseModel):
 
 async def add_image(s: ProjectsState, frame: Frame, ctx: ActionContext, name: str, data: bytes, via: str) -> Done:
     """Une image de plus : ses octets d'abord (hors du journal), puis le fait."""
-    p = _target(s, ctx)
+    p = target_project(s, ctx)
     store = (ctx.ports or {}).get(docs.PORT)
     if store is None:
         raise Refused(NO_STORE)
@@ -286,11 +292,11 @@ async def add_image(s: ProjectsState, frame: Frame, ctx: ActionContext, name: st
     file = docs.file_id(p.id, named, sha, ctx.now)
     await store.put(file, data, subjects=docs.image_subjects(p, by if author == c.BY_PERSON else ""))
     return Done(drafts=(docs.adding_image(p, named, file, len(data), sha, author=author, by=by, via=_via(via)),),
-                message=IMAGE_ADDED.format(name=named), guard=_still(p.id, LIVE))
+                message=IMAGE_ADDED.format(name=named), guard=unchanged(p.id, LIVE))
 
 
 @PROJECTS.action("doc_image", title="Ajouter une image à sa documentation", args=ImageArgs,
-                 emits=[docs.DOC_IMAGE_ADDED], subject="project", order=73, available=_editable, inline=True,
+                 emits=[docs.DOC_IMAGE_ADDED], subject="project", order=73, available=can_edit, inline=True,
                  description="Téléverser une image (PNG, JPEG, GIF, WebP) dans la documentation du projet : une "
                              "page la cite par « images/<nom> ».")
 async def _image(s: ProjectsState, frame: Frame, args: ImageArgs, ctx: ActionContext) -> Done:
@@ -308,13 +314,13 @@ class ImageRemoveArgs(BaseModel):
 
 
 @PROJECTS.action("doc_image_retirer", title="Retirer une image de sa documentation", args=ImageRemoveArgs,
-                 emits=[docs.DOC_IMAGE_REMOVED], subject="project", order=74, available=_editable, inline=True,
+                 emits=[docs.DOC_IMAGE_REMOVED], subject="project", order=74, available=can_edit, inline=True,
                  danger=True, description="Retirer une image de la documentation du projet : ses octets s'effacent.")
 def _image_remove(s: ProjectsState, frame: Frame, args: ImageRemoveArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
+    p = target_project(s, ctx)
     image = docs.image_at(p.docs, args.name.strip())
     if image is None:
         raise Refused(NO_IMAGE.format(name=args.name.strip()[:90]))
     author, by = _writer(frame, ctx)
     return Done(drafts=(docs.removing_image(p, image, author=author, by=by, via=_via(args.via)),),
-                message=IMAGE_REMOVED.format(name=image.name), guard=_still(p.id, LIVE))
+                message=IMAGE_REMOVED.format(name=image.name), guard=unchanged(p.id, LIVE))

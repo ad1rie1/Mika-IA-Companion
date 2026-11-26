@@ -10,7 +10,7 @@ from typing import Any
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.faculties.projects import inspect_code, inspect_merge, inspect_reviews, merge
-from mika.faculties.projects.actions import _editable, _remote_ready, pending_of
+from mika.faculties.projects.actions import can_edit, can_use_remote, pending_of
 from mika.faculties.projects.faculty import (
     PROJECTS,
     PULL_CAPABILITY,
@@ -19,17 +19,15 @@ from mika.faculties.projects.faculty import (
     ProjectsState,
     by_pulls,
 )
-from mika.faculties.projects.inspect import (
-    CHECKS_FR,
-    PAGE,
-    PULL_FR,
-    _cut,
-    _effect_state,
-    _host,
-    _remote_ref,
-    _subject,
-    _text,
-    _texts,
+from mika.faculties.projects.inspect import CHECKS_FR, PAGE, PULL_FR
+from mika.faculties.projects.inspect_common import (
+    cut_noted,
+    effect_state,
+    host_of,
+    remote_ref,
+    stored_text,
+    stored_texts,
+    subject_project,
 )
 from mika.faculties.projects.pulls import pull_url
 from mika.kernel.frame import Frame
@@ -74,7 +72,7 @@ EXCHANGE_FR = {PUSH_CAPABILITY: "pousser", PULL_CAPABILITY: "récupérer"}
                               "l'historique de chacun, ce qui n'est pas encore enregistré, les envois et "
                               "récupérations passés, ses réglages.")
 async def _git_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    p = _subject(s, ctx)
+    p = subject_project(s, ctx)
     if isinstance(p, Note):
         return [p]
     if ctx.param(inspect_code.VIEW) != inspect_code.REMOTE:  # Code, en sous-vues (ADR 0297)
@@ -95,7 +93,7 @@ async def _git_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[
     if sha:
         shown = await port.show(p.id, sha)
         blocks.append(Section(f"L'enregistrement {sha[:12]}", (
-            Code(_cut(shown, DIFF_SHOWN), title="Message et changements", lang="diff") if shown
+            Code(cut_noted(shown, DIFF_SHOWN), title="Message et changements", lang="diff") if shown
             else Note(f"Aucun enregistrement « {sha[:12]} » dans ce dépôt.", "warn"),
             Fields((("fermer", Ref("subject", f"project/{p.id}", "revenir à l'historique",
                                       (("onglet", "git"), ("vue", "distant")))),)))))
@@ -126,11 +124,11 @@ async def _git_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[
                                                             else "—", latest[0].sha[:7] if latest else ""),
                Stat("Non enregistré", plural(changed, "fichier", "fichiers") if changed else "rien", "",
                     "warn" if changed else ""),
-               Stat("Dépôt distant", _host(p.remote) or "aucun", p.branch if p.remote else "",
+               Stat("Dépôt distant", host_of(p.remote) or "aucun", p.branch if p.remote else "",
                     "" if p.remote else "muted"),
                *([Stat("Avec le distant", *_gap_words(gap, count))] if p.remote else []))),
         Disclosure(f"Ce qui n'est pas encore enregistré ({plural(changed, 'fichier', 'fichiers')})", (
-            Code(_cut(diff, DIFF_SHOWN), title="Changements depuis le dernier enregistrement", lang="diff"),),
+            Code(cut_noted(diff, DIFF_SHOWN), title="Changements depuis le dernier enregistrement", lang="diff"),),
             open=bool(changed)) if diff.strip() or changed else
         Note("Tout est enregistré : rien de changé depuis le dernier commit.", "muted"),
         Table((Column("commit", "fit"), Column("message"), Column("quand", "fit"), Column("auteur", "fit"),
@@ -158,7 +156,7 @@ def _work_branches(p: Project, ctx: InspectContext) -> list[Block]:
     worked = [o for o in p.objectives if o.branch or o.pull_state or o.pull_proposal]
     if not worked and not by_pulls(p):
         return []
-    texts = _texts(ctx, (o.text_ref for o in worked))
+    texts = stored_texts(ctx, (o.text_ref for o in worked))
     rows = []
     for o in sorted(worked, key=lambda o: (o.status not in (c.OPEN, c.BLOCKED), -o.id)):
         if o.pull_proposal:
@@ -184,7 +182,7 @@ def _work_branches(p: Project, ctx: InspectContext) -> list[Block]:
             fuse = (Note(inspect_merge.BLOCK_WORDS[merge.ASKED] if merge.merging(o) else
                          inspect_merge.REFUSED_WORDS.get(o.merge_refused, ""), "warn"),)
         rows.append(Row((
-            Ref("subject", f"project/{p.id}", f"n° {o.id} · {_text(texts, o.text_ref)}"[:90], (("onglet", "objectifs"),)),
+            Ref("subject", f"project/{p.id}", f"n° {o.id} · {stored_text(texts, o.text_ref)}"[:90], (("onglet", "objectifs"),)),
             Text(o.branch or "—", "mono"), pull,
             CHECKS_FR.get(o.checks, "—") if o.pull_state == PULL_OPEN else "—",
             Text(inspect_reviews.review_words(p, o) or "—", clamp=140)),
@@ -243,7 +241,7 @@ def _remote_section(p: Project, s: ProjectsState, frame: Frame, ctx: InspectCont
                     gap: tuple[int, int] | None) -> Section:
     key = str(p.id)
     pairs: list[tuple[str, Any]] = [
-        ("adresse", _remote_ref(p)), ("branche", p.branch if p.remote else "—"),
+        ("adresse", remote_ref(p)), ("branche", p.branch if p.remote else "—"),
         ("envoi automatique", "après chaque exécution qui enregistre quelque chose" if p.auto_push else "non"),
         ("ce qui part", "avec ton accord" if p.approval else "sans accord (réglé ainsi)"),
         ("dernier échange", Text(p.remote_line, tone="ok" if p.remote_ok else "danger", clamp=300)
@@ -268,11 +266,11 @@ def _remote_section(p: Project, s: ProjectsState, frame: Frame, ctx: InspectCont
     items: list[Any] = [Fields(tuple(pairs), columns=2)]
     if hosted is not None and hosted.error:
         items.append(Note(f"{hosted.error[:1].upper()}{hosted.error[1:]}.", "warn"))
-    if _remote_ready(s, frame, key, ctx.ports):
+    if can_use_remote(s, frame, key, ctx.ports):
         items.append(Toolbar((ActionSlot("projects.pousser", title="Pousser maintenant", presentation="button"),
                               ActionSlot("projects.recuperer", title="Récupérer", presentation="button")),
                              title="Maintenant"))
-    if _editable(s, frame, key):
+    if can_edit(s, frame, key):
         items.append(Disclosure("Régler le dépôt distant", (
             ActionSlot("projects.depot_distant", title="Enregistrer le dépôt distant", compact=True),),
             open=not p.remote))
@@ -334,10 +332,10 @@ def _exchanges(p: Project, frame: Frame, ctx: InspectContext) -> list[Block]:
     for e in asked:
         outcomes = () if e.seq in pending else ctx.events([rt.EFFECT_RESOLVED, rt.EFFECT_EXECUTED], 4,
                                                            where=("proposal", e.seq))
-        state, detail = _effect_state(e, e.seq in pending, outcomes)
+        state, detail = effect_state(e, e.seq in pending, outcomes)
         rows.append(Row((When(e.at), EXCHANGE_FR[e.data.capability], "requis" if e.data.approval else "non requis",
                          state), tone="warn" if e.seq in pending else "",
-                        detail=(Code(_cut(detail, 4000), title="ce que git a répondu"),) if detail else ()))
+                        detail=(Code(cut_noted(detail, 4000), title="ce que git a répondu"),) if detail else ()))
     return [Table((Column("quand", "fit"), Column("quoi", "fit"), Column("accord", "fit"), Column("état", "fit")),
                   tuple(rows), title="Échanges avec le distant", empty="aucun envoi ni récupération encore",
                   caption="Les plus récents d'abord ; une demande qui attend ton accord se décide dans « À valider ».")]

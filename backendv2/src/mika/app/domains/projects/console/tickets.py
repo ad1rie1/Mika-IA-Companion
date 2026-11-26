@@ -41,17 +41,18 @@ from mika.app.domains.projects.console.zones import (
 from mika.contracts import projects as c
 from mika.faculties.projects import issues, tickets, tracker
 from mika.faculties.projects.faculty import MOVE_PUBLISH, by_pulls, issue_move, objective_at, reflected
-from mika.faculties.projects.inspect import FORGOTTEN, OBJ_FR
+from mika.faculties.projects.inspect import OBJ_FR
+from mika.faculties.projects.inspect_common import FORGOTTEN
 from mika.faculties.projects.inspect_issues import ISSUE_FR
 from mika.faculties.projects.inspect_tracker import (
     JOURNEY_WORDS,
     KIND_WORDS,
     NOTE_WORDS,
     PRIORITY_WORDS,
-    _actor,
-    _by,
-    _changer,
-    _hand,
+    shown_actor,
+    shown_author,
+    shown_changer,
+    shown_hand,
 )
 from mika.inspector import render
 from mika.inspector.ui import env
@@ -129,7 +130,7 @@ def _history(sc: Scene, item: Any) -> list[dict[str, Any]]:
     out = []
     for x in tracker.passages(events):
         status = tracker.status_words(item.list_name, x.stage)
-        who = _by(sc.frame, x.author, x.by)
+        who = shown_author(sc.frame, x.author, x.by)
         out.append({"when": sc.when(x.at), "ago": sc.ago(x.at),
                     "text": f"{status[:1].upper()}{status[1:]} — par {who}" if x.was else f"Ouvert par {who} — {status}",
                     "title": f"{tracker.status_words(item.list_name, x.was)} → {status}" if x.was else "",
@@ -150,7 +151,7 @@ def _thread(sc: Scene, item: Any) -> list[dict[str, Any]]:
             continue
         side = "elle" if n.author == c.BY_SELF else "moi" if n.author in (c.BY_OPERATOR, c.BY_PERSON) else "autre"
         kind = NOTE_WORDS.get(n.kind, "") if n.kind != tracker.NOTE else ""
-        out.append({"seq": n.seq, "side": side, "who": _by(sc.frame, n.author, n.by), "kind": kind,
+        out.append({"seq": n.seq, "side": side, "who": shown_author(sc.frame, n.author, n.by), "kind": kind,
                     "plan": n.seq == item.plan_seq, "ago": sc.ago(n.at), "when": sc.when(n.at),
                     "text": n.text or FORGOTTEN, "outside": _outside(n.author)})
     return out
@@ -228,18 +229,18 @@ def _ticket(sc: Scene, e: tracker.Entry, back: str) -> dict[str, Any]:
     waits_plan = item.status == c.STAGE_VALIDATION
     proposed = item.status == c.STAGE_PROPOSED
     first = "plan" if waits_plan else "fil" if asks or proposed else "description"
-    by = _by(sc.frame, item.author, item.by)
-    facts = [("La main", "—" if item.closed else _hand(item)),
+    by = shown_author(sc.frame, item.author, item.by)
+    facts = [("La main", "—" if item.closed else shown_hand(item)),
              ("Priorité", PRIORITY_WORDS.get(item.priority, item.priority)),
              ("Sorte", KIND_WORDS.get(item.kind, item.kind)), ("Ouvert par", by),
              ("Mis à jour", sc.when(item.updated_at or item.at))]
     if item.accepted_at:
-        facts.append(("Accepté par", _changer(sc.frame, item.accepted_by)))
+        facts.append(("Accepté par", shown_changer(sc.frame, item.accepted_by)))
     if item.validated_at:
-        facts.append(("Plan validé par", _changer(sc.frame, item.validated_by) + (" (pris comme petit)" if item.small
+        facts.append(("Plan validé par", shown_changer(sc.frame, item.validated_by) + (" (pris comme petit)" if item.small
                                                                                    else "")))
     if item.closed:
-        facts.append(("Fermé par", _changer(sc.frame, item.closed_by)))
+        facts.append(("Fermé par", shown_changer(sc.frame, item.closed_by)))
     if item.dismissal_at and not item.closed:
         facts.append(("Elle propose", "de l'écarter : confirme, ou réponds-lui dans son fil"))
     return {
@@ -322,14 +323,14 @@ def _element(sc: Scene, lst: Any, e: tracker.Entry, back: str) -> dict[str, Any]
     if status is not None:
         status["fields"] = [{**f, "kind": "select", "choices": choices} if f["path"] == "status" else f
                             for f in status["fields"]]
-    history = [{"when": sc.when(x.at), "ago": sc.ago(x.at), "who": _changer(sc.frame, x.by),
+    history = [{"when": sc.when(x.at), "ago": sc.ago(x.at), "who": shown_changer(sc.frame, x.by),
                 "text": tracker._change_words(lst.name, x.what)} for x in reversed(item.changes)]
     return {"key": item.key, "title": e.title or FORGOTTEN, "tone": _status_tone(lst, item.status),
-            "state": tracker.status_words(lst.name, item.status), "actor": _actor(sc.frame, item),
+            "state": tracker.status_words(lst.name, item.status), "actor": shown_actor(sc.frame, item),
             "added": sc.when(item.at), "touched": sc.when(item.updated_at), "body": e.body, "link": e.link,
             "objective": {"n": item.objective, "href": sc.url("objectifs", objectif=item.objective)}
             if item.objective else None,
-            "by": _by(sc.frame, item.author, item.by), "thread": _thread(sc, item), "history": history,
+            "by": shown_author(sc.frame, item.author, item.by), "thread": _thread(sc, item), "history": history,
             "status_form": status, "assign": shown(sc.form("element_confier", back, actor=item.actor
                                                            if item.actor != c.ACTOR_PERSON else c.ACTOR_SELF,
                                                            **target), "actor"),
@@ -365,7 +366,7 @@ def lists_page(sc: Scene) -> Markup | None:
     def card(e: tracker.Entry) -> dict[str, Any]:
         item = e.item
         return {"key": item.key, "title": e.title or FORGOTTEN, "notes": plural(item.notes, "note", "notes")
-                if item.notes else "", "actor": _actor(sc.frame, item), "ago": sc.ago(item.updated_at or item.at),
+                if item.notes else "", "actor": shown_actor(sc.frame, item), "ago": sc.ago(item.updated_at or item.at),
                 "state": tracker.status_words(lst.name, item.status), "tone": _status_tone(lst, item.status),
                 "yours": item.actor == c.ACTOR_OWNER and item.status not in lst.closed,
                 "on": chosen is not None and chosen.item.key == item.key,

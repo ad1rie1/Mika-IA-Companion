@@ -37,7 +37,8 @@ from mika.faculties.projects.actions import (
     links_seen,
 )
 from mika.faculties.projects.faculty import tie_of
-from mika.faculties.projects.inspect import ASK_MODES, ASK_WORDS, FORGOTTEN, STATUS_FR
+from mika.faculties.projects.inspect import ASK_MODES, ASK_WORDS, STATUS_FR
+from mika.faculties.projects.inspect_common import FORGOTTEN
 from mika.inspector.ui import env
 from mika.vocab.access import STEER_NO
 

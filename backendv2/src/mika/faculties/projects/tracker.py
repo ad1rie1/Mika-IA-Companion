@@ -83,16 +83,8 @@ from mika.faculties.projects.faculty import (
     written_on,
 )
 from mika.faculties.projects.faculty import living as open_objectives
-from mika.faculties.projects.steer import (
-    STEERABLE,
-    _changed,
-    _in_state,
-    _listed,
-    _steered,
-    _which,
-    may_steer,
-    steerable,
-)
+from mika.faculties.projects.inspect_common import unchanged
+from mika.faculties.projects.steer import STEERABLE, _changed, _listed, _steered, _which, may_steer, steerable
 from mika.faculties.projects.tools import RUNS, caretaker, contents_of, current, gone, speaker
 from mika.kernel.clock import DAY
 from mika.kernel.events import Content, Draft, Payload
@@ -1896,7 +1888,7 @@ async def project_item(args: WriteArgs, ctx: Any) -> Any:
         if not args.text.strip():
             return _no(phrase("projects.tools.board.write.no_text"))
         if await _steered(ctx, noting(p, e.item, args.text, author=c.BY_PERSON, by=person),
-                          _in_state(p.id, STEERABLE)) is None:
+                          unchanged(p.id, STEERABLE)) is None:
             return _changed()
         return phrase("projects.tools.board.write.noted", handle=handle(e.item), title=title)
     if args.what in (ACCEPT, DISMISS, VALIDATE, REFUSE):
@@ -1913,7 +1905,7 @@ async def project_item(args: WriteArgs, ctx: Any) -> Any:
     draft = changing(p, e.item, author=c.BY_PERSON, by=person, status=status, note=args.text)
     if changes_nothing(draft, e.item):
         return _no(phrase("projects.tools.items.nothing"))
-    if await _steered(ctx, draft, _in_state(p.id, STEERABLE)) is None:
+    if await _steered(ctx, draft, unchanged(p.id, STEERABLE)) is None:
         return _changed()
     after = entry(_store(ctx), p.id, lst.name, e.item.key)
     if after is None or after == e:
@@ -1933,7 +1925,7 @@ async def _open_ticket(args: WriteArgs, ctx: Any, p: Project, person: str, title
     key = key_of("", args.title)
     draft = adding(p, c.TICKETS, key, args.title, text=args.text, kind=args.kind, priority=args.priority,
                    proposed=proposed, author=c.BY_PERSON, by=person)
-    commit = await _steered(ctx, draft, _in_state(p.id, STEERABLE))
+    commit = await _steered(ctx, draft, unchanged(p.id, STEERABLE))
     if commit is None:
         return _changed()
     e = entry(_store(ctx), p.id, c.TICKETS, key)
@@ -1981,7 +1973,7 @@ async def _settle(args: WriteArgs, ctx: Any, p: Project, e: Entry, person: str, 
             return _no(phrase("projects.tools.board.write.no_reason"))
         draft = changing(p, item, author=c.BY_PERSON, by=person, closed=c.DROPPED, note=args.text)
         said = phrase("projects.tools.board.write.dismissed", number=item.number, title=title)
-    if await _steered(ctx, draft, _in_state(p.id, STEERABLE)) is None:
+    if await _steered(ctx, draft, unchanged(p.id, STEERABLE)) is None:
         return _changed()
     return said
 
@@ -2001,7 +1993,7 @@ async def _validate(args: WriteArgs, ctx: Any, p: Project, e: Entry, person: str
             return _no(phrase("projects.tools.board.write.plan_changed", number=item.number, seq=item.plan_seq,
                               plan=clipped(plan, NOTE_MAX)))
         draft, *more = validating(p, item, plan, author=c.BY_PERSON, by=person, comment=args.text)
-        guard, alive = free_number(p, item), _in_state(p.id, STEERABLE)
+        guard, alive = free_number(p, item), unchanged(p.id, STEERABLE)
         if await _steered(ctx, draft, alive & guard if guard is not None else alive, *more) is not None:
             break
         fresh = ctx.mind.frame().state("projects").projects.get(p.id)

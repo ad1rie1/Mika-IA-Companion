@@ -8,9 +8,9 @@ import re
 from typing import Any
 
 from mika.faculties.projects import docs
-from mika.faculties.projects.actions import _depositable
+from mika.faculties.projects.actions import can_deposit
 from mika.faculties.projects.faculty import PROJECTS, Project, ProjectsState, project_at
-from mika.faculties.projects.inspect import _cut, _subject
+from mika.faculties.projects.inspect_common import cut_noted, subject_project
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
     ActionSlot,
@@ -85,7 +85,7 @@ def _listing(tree: list[str], folder: str) -> tuple[list[tuple[str, int, int]], 
                   description="Le dossier du projet, à parcourir : un dossier s'ouvre, un fichier se lit ici ou se "
                               "télécharge ; tu peux y déposer un fichier pour elle.")
 async def _files_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    p = _subject(s, ctx)
+    p = subject_project(s, ctx)
     if isinstance(p, Note):
         return [p]
     port = ctx.ports.get("workshop")
@@ -93,7 +93,7 @@ async def _files_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> lis
         return [Note("L'atelier n'est pas disponible ici (aucun port d'atelier).", tone="warn")]
     deposit = [Disclosure("Déposer un fichier dans l'atelier", (
         ActionSlot("projects.deposer", title="Déposer un fichier", compact=True),))] \
-        if _depositable(s, frame, str(p.id), ctx.ports) else []
+        if can_deposit(s, frame, str(p.id), ctx.ports) else []
     if not port.exists(p.id):
         return [Note("L'atelier n'est pas encore ouvert : aucune exécution n'y a encore écrit.", tone="muted"), *deposit]
     folder = ctx.param("dossier").strip("/")
@@ -144,7 +144,7 @@ async def _opened_file(p: Project, port: Any, path: str) -> list[Block]:
                 Fields((("télécharger", _download_link(p.id, path)),))]
     folder = path.rsplit("/", 1)[0] if "/" in path else ""
     lang = "diff" if path.endswith((".diff", ".patch")) else ""
-    return [Code(_cut(text, FILE_SHOWN), title=path, lang=lang),
+    return [Code(cut_noted(text, FILE_SHOWN), title=path, lang=lang),
             Fields((("fichier", Text(path, "mono")), ("télécharger", _download_link(p.id, path)),
                     ("fermer", _folder_ref(p, folder, "revenir au dossier"))), columns=3)]
 

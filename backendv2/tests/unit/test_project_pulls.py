@@ -45,7 +45,8 @@ from mika.faculties.projects.faculty import (
     branch_of,
     objective_at,
 )
-from mika.faculties.projects.inspect import PULL_LINK_TITLE, PULL_TITLE, _remote_ref, pull_detail, pull_words
+from mika.faculties.projects.inspect import PULL_LINK_TITLE, PULL_TITLE, pull_detail, pull_words
+from mika.faculties.projects.inspect_common import remote_ref
 from mika.faculties.projects.tools import ReportArgs, report_run
 from mika.faculties.projects.tracker import AddArgs, ItemArg, items_add
 from mika.kernel.events import Origin
@@ -683,5 +684,5 @@ def test_the_console_says_the_branch_and_the_pull_request_of_an_objective_with_a
     assert "des changements sont demandés" in asked
     assert "elle attend ton accord" in pull_detail(p, replace(o, pull=0, pull_state="", pull_proposal=7))[0].text
     assert pull_detail(replace(p, flow=c.FLOW_DIRECT), Objective(id=3, text_ref="t")) == []
-    assert "par pull request" in _remote_ref(p).text and "par pull request" not in _remote_ref(
+    assert "par pull request" in remote_ref(p).text and "par pull request" not in remote_ref(
         replace(p, flow=c.FLOW_DIRECT)).text

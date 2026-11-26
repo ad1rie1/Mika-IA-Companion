@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from mika.contracts import projects as c
 from mika.faculties.projects import milestones, reaching
-from mika.faculties.projects.actions import LIVE, _editable, _objective_of, _still, _target, operator_person
+from mika.faculties.projects.actions import can_edit
 from mika.faculties.projects.faculty import (
     MILESTONE_ADDED,
     MILESTONE_CHANGED,
@@ -27,6 +27,13 @@ from mika.faculties.projects.faculty import (
     milestone_at,
     milestones_of,
     written_for,
+)
+from mika.faculties.projects.inspect_common import (
+    LIVE,
+    operator_person,
+    target_objective,
+    target_project,
+    unchanged,
 )
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
@@ -147,12 +154,12 @@ class AddArgs(BaseModel):
 
 
 @PROJECTS.action("jalon_ajouter", title="Ajouter un jalon", args=AddArgs, emits=[MILESTONE_ADDED], subject="project",
-                 order=33, available=_editable, inline=True,
+                 order=33, available=can_edit, inline=True,
                  description="Un jalon de plus sur un objectif ponctuel : elle le verra à sa prochaine exécution, et "
                              "« fait » l'attendra.")
 def _add(s: ProjectsState, frame: Frame, args: AddArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
-    o = _objective_of(p, args.objective)
+    p = target_project(s, ctx)
+    o = target_objective(p, args.objective)
     if o.kind != c.ONCE:
         raise Refused("Un objectif constant n'a pas de jalons : donne-lui ce que chaque passage doit faire "
                       "(« Modifier l'objectif »).")
@@ -171,7 +178,7 @@ def _add(s: ProjectsState, frame: Frame, args: AddArgs, ctx: ActionContext) -> D
         raise Refused(REFUSALS[why], {field: "valeur requise"})
     draft = milestones.adding(p, o.id, o.milestone_seq + 1, spec, level=written_for(p, o),
                               inherited=inherited_for(p, o), author="operator", by=_writer(frame, ctx))
-    return Done(drafts=(draft,), message=f"Jalon ajouté à l'objectif n° {o.id}.", guard=_still(p.id, LIVE))
+    return Done(drafts=(draft,), message=f"Jalon ajouté à l'objectif n° {o.id}.", guard=unchanged(p.id, LIVE))
 
 
 class SettleArgs(BaseModel):
@@ -185,12 +192,12 @@ class SettleArgs(BaseModel):
 
 
 @PROJECTS.action("jalon_trancher", title="Trancher un point d'arrêt", args=SettleArgs, emits=[MILESTONE_CHANGED],
-                 subject="project", order=34, available=_editable, inline=True,
+                 subject="project", order=34, available=can_edit, inline=True,
                  description="Valider ou refuser un point d'arrêt qu'elle a dit prêt : validé, le jalon est atteint et "
                              "elle reprend ; refusé, il lui revient avec ta raison.")
 def _settle(s: ProjectsState, frame: Frame, args: SettleArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
-    o = _objective_of(p, args.objective)
+    p = target_project(s, ctx)
+    o = target_objective(p, args.objective)
     m = milestone_at(o, args.milestone)
     if m is None or m.status != c.OPEN or not m.ready_at:
         raise Refused("Ce jalon n'attend pas ta validation.")
@@ -201,4 +208,4 @@ def _settle(s: ProjectsState, frame: Frame, args: SettleArgs, ctx: ActionContext
     draft = reaching.settling(p, o, m, args.verdict, author="operator", by=_writer(frame, ctx), text=args.reason)
     said = "validé : elle reprend" if args.verdict == reaching.VALIDATE else "refusé : il lui revient"
     return Done(drafts=(draft,), message=f"Jalon n° {m.id} de l'objectif n° {o.id} {said}.",
-                guard=_still(p.id, LIVE))
+                guard=unchanged(p.id, LIVE))

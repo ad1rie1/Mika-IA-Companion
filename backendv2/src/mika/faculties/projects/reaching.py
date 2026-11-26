@@ -53,7 +53,8 @@ from mika.faculties.projects.faculty import (
     waiting_in,
     written_for,
 )
-from mika.faculties.projects.steer import STEERABLE, _changed, _in_state, _steered, steerable
+from mika.faculties.projects.inspect_common import unchanged
+from mika.faculties.projects.steer import STEERABLE, _changed, _steered, steerable
 from mika.faculties.projects.tools import RUNS, bad_milestone, caretaker, contents_of, current, gone, speaker
 from mika.kernel.faculty import ToolResult
 from mika.kernel.frame import Frame
@@ -377,7 +378,7 @@ async def project_milestone(args: SettleArgs, ctx: Any) -> Any:
     if args.what == REFUSE and not text:
         return _no(phrase("projects.tools.breakpoint.no_reason"))
     draft = settling(p, o, m, args.what, author="owner", by=person, text=text)
-    if await _steered(ctx, draft, _in_state(p.id, STEERABLE)) is None:
+    if await _steered(ctx, draft, unchanged(p.id, STEERABLE)) is None:
         return _changed()
     after = _fresh(ctx, p, o)
     now = milestone_at(after, m.id) if after is not None else None

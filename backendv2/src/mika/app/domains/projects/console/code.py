@@ -56,7 +56,7 @@ from mika.contracts import projects as c
 from mika.faculties.projects import inspect_code as code
 from mika.faculties.projects import merge
 from mika.faculties.projects.faculty import objective_at
-from mika.faculties.projects.inspect import FORGOTTEN, OBJ_FR
+from mika.faculties.projects.inspect import OBJ_FR
 from mika.faculties.projects.inspect_code import (
     diff_rows,
     issue_ticket,
@@ -66,6 +66,7 @@ from mika.faculties.projects.inspect_code import (
     pull_stage,
     ticket_of,
 )
+from mika.faculties.projects.inspect_common import FORGOTTEN
 from mika.faculties.projects.inspect_merge import BLOCK_WORDS, MOVED_THERE, REFUSED_WORDS
 from mika.faculties.projects.inspect_reviews import REVIEW_WORDS
 from mika.faculties.projects.managing import writable

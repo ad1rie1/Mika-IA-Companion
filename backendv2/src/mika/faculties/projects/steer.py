@@ -54,6 +54,7 @@ from mika.faculties.projects.faculty import (
     subjects_of,
     written,
 )
+from mika.faculties.projects.inspect_common import unchanged
 from mika.faculties.projects.rhythm import pick
 from mika.faculties.projects.tools import (
     attributed,
@@ -139,12 +140,6 @@ def _listed(rows: list[tuple[int, str]], empty: str) -> str:
     return "\n".join(phrase("projects.tools.steer.item", id=i, text=text or empty) for i, text in rows[:LISTED])
 
 
-def _in_state(project: int, wanted: tuple[str, ...]) -> Guard:
-    """Un geste ne vaut que si le projet est toujours dans cet état (un opérateur a pu le mettre en pause ou
-    l'archiver entre-temps)."""
-    return Guard("projet inchangé", predicate=lambda view, k=project: view.get(c.STATUS(k)) in wanted)
-
-
 async def _steered(ctx: Any, draft: Draft[Any], guard: Guard, *more: Draft[Any]) -> Any:
     """Écrire un geste sous sa garde (et ce qui s'écrit avec lui, ``more``) ; ``None`` quand c'est elle qui a cédé (le
     projet a changé entre-temps)."""
@@ -199,14 +194,14 @@ async def project_steer(args: SteerArgs, ctx: Any) -> Any:
         if p.status == c.PAUSED:
             return phrase("projects.tools.steer.already_paused", title=title)
         draft = PAUSED.draft(project=p.id, reason=PAUSED_IN_TALK, by=person, owner=p.owner, about=p.about)
-        if await _steered(ctx, draft, _in_state(p.id, (c.ACTIVE,))) is None:
+        if await _steered(ctx, draft, unchanged(p.id, (c.ACTIVE,))) is None:
             return _changed()
         return phrase("projects.tools.steer.paused", title=title)
     if args.what == RESUME:
         if p.status == c.ACTIVE:
             return phrase("projects.tools.steer.not_paused", title=title)
         draft = RESUMED.draft(project=p.id, by=person, owner=p.owner, about=p.about)
-        if await _steered(ctx, draft, _in_state(p.id, (c.PAUSED,))) is None:
+        if await _steered(ctx, draft, unchanged(p.id, (c.PAUSED,))) is None:
             return _changed()
         return phrase("projects.tools.steer.resumed", title=title)
     text = args.text.strip()
@@ -218,7 +213,7 @@ async def project_steer(args: SteerArgs, ctx: Any) -> Any:
         draft = AMENDED.draft(project=p.id, instruction=Content.of(text, level=p.sensitivity), by=person,
                               words=Content.of(said, level=p.sensitivity) if said else None,
                               owner=p.owner, about=p.about, read_about=p.read_about)
-        if await _steered(ctx, draft, _in_state(p.id, STEERABLE)) is None:
+        if await _steered(ctx, draft, unchanged(p.id, STEERABLE)) is None:
             return _changed()
         return phrase("projects.tools.steer.instructed", title=title)
     if len(text) > 500:
@@ -229,7 +224,7 @@ async def project_steer(args: SteerArgs, ctx: Any) -> Any:
     commit = await _steered(ctx, OBJECTIVE_ADDED.draft(
         project=p.id, objective=number, text=Content.of(text, level=written(p)), kind=args.kind,
         cadence_us=args.cadence_hours * HOUR if args.kind == c.CONSTANT else 0, author="owner", by=person,
-        owner=p.owner, about=p.about, read_about=p.read_about), _in_state(p.id, STEERABLE))
+        owner=p.owner, about=p.about, read_about=p.read_about), unchanged(p.id, STEERABLE))
     if commit is None:
         return _changed()
     number = attributed(ctx, p.id, commit, "text", "objectives", number)
@@ -260,7 +255,7 @@ async def _answer_plan(args: SteerArgs, ctx: Any, p: Project, person: str, title
     linking = links.approved(s, p, person, links.world_of(frame)) if args.what == APPROVE else links.Approved()
     link = (LINKS_SET.draft(project=p.id, reads=linking.reads, by=person, owner=p.owner, about=p.about,
                             read_about=p.read_about),) if linking.added else ()
-    if await _steered(ctx, draft, _in_state(p.id, (c.ACTIVE,)), *link) is None:
+    if await _steered(ctx, draft, unchanged(p.id, (c.ACTIVE,)), *link) is None:
         return _changed()
     if args.what == APPROVE:
         return phrase("projects.tools.steer.plan_approve", title=title) + _linked_words(ctx, s, linking)
@@ -307,7 +302,7 @@ async def _steer_now(args: SteerArgs, ctx: Any, s: ProjectsState, p: Project, pe
     if o is None and pick(p, frame.now, pm) is None \
             and not any(x.status == c.OPEN and x.kind == c.CONSTANT for x in p.objectives):
         return ToolResult(ok=False, content=phrase("projects.tools.steer.nothing_open", title=title))
-    guard = _in_state(p.id, (c.ACTIVE,)) if o is None else _in_state(p.id, (c.ACTIVE,)) & still_open(p.id, o.id)
+    guard = unchanged(p.id, (c.ACTIVE,)) if o is None else unchanged(p.id, (c.ACTIVE,)) & still_open(p.id, o.id)
     draft = NUDGED.draft(project=p.id, objective=o.id if o is not None else 0, by=person, owner=p.owner,
                          about=p.about)
     if await _steered(ctx, draft, guard) is None:

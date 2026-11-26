@@ -29,7 +29,7 @@ from weakref import WeakKeyDictionary
 from mika.contracts import projects as c
 from mika.contracts import self_ as self_c
 from mika.faculties.projects import merge, pulls
-from mika.faculties.projects.actions import _depositable
+from mika.faculties.projects.actions import can_deposit
 from mika.faculties.projects.faculty import (
     WORK_PREFIX,
     Item,
@@ -39,7 +39,7 @@ from mika.faculties.projects.faculty import (
     by_pulls,
     objective_at,
 )
-from mika.faculties.projects.inspect import _text, _texts
+from mika.faculties.projects.inspect_common import stored_text, stored_texts
 from mika.faculties.projects.inspect_merge import BLOCK_WORDS, REFUSED_WORDS
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
@@ -380,7 +380,7 @@ def _commit_row(p: Project, k: Commit, texts: Mapping[str, str], her: str, *, re
         When(k.at) if k.at else "—", _who(k, her), Text(k.branch or "—", "mono"), k.files, k.insertions,
         k.deletions, "elle" if k.local else "ailleurs",
         "oui" if len(k.parents) > 1 else "non",
-        f"n° {o.id} · {_text(texts, o.text_ref)}"[:120] if o is not None else "—"),
+        f"n° {o.id} · {stored_text(texts, o.text_ref)}"[:120] if o is not None else "—"),
         href=here(p, "", vue=COMMITS, ref=ref, sha=k.sha))
 
 
@@ -392,7 +392,7 @@ COMMIT_COLUMNS = (Column("commit", "fit"), Column("message"), Column("quand", "f
 
 def _commit_texts(ctx: InspectContext, p: Project, commits: Iterable[Commit]) -> Mapping[str, str]:
     found = [objective_for(p, k) for k in commits]
-    return _texts(ctx, (o.text_ref for o in found if o is not None))
+    return stored_texts(ctx, (o.text_ref for o in found if o is not None))
 
 
 def _changed(p: Project, files: Sequence[FileDiff]) -> list[Block]:
@@ -462,7 +462,7 @@ async def code_view(p: Project, s: ProjectsState, frame: Frame, ctx: InspectCont
 
 
 def _deposit(s: ProjectsState, frame: Frame, p: Project, ctx: InspectContext) -> list[Block]:
-    if not _depositable(s, frame, str(p.id), ctx.ports):
+    if not can_deposit(s, frame, str(p.id), ctx.ports):
         return []
     return [Disclosure(DEPOSIT_TITLE, (ActionSlot("projects.deposer", title="Déposer un fichier", compact=True),))]
 
@@ -627,14 +627,14 @@ async def _branches(p: Project, frame: Frame, ctx: InspectContext, port: Any, br
     """Ses branches, la base d'abord — son objectif, son avance et son retard sur la base, son dernier commit — ; la
     branche choisie (``branche`` ; la première de travail sinon) : ses commits d'avance et ses fichiers changés."""
     found = [objective_on(p, b.name) for b in branches if not b.base]
-    texts = _texts(ctx, (o.text_ref for o in found if o is not None))
+    texts = stored_texts(ctx, (o.text_ref for o in found if o is not None))
     rows = []
     for b in branches:
         o = None if b.base else objective_on(p, b.name)
         rows.append(Row((
             here(p, b.name, vue=BRANCHES, branche=b.name), "oui" if b.base else "non", b.ahead, b.behind,
             Text(b.head.sha, "mono"), Text(b.head.title, clamp=200), When(b.head.at) if b.head.at else "—",
-            o.id if o is not None else "—", f"{_text(texts, o.text_ref)}"[:120] if o is not None else "—",
+            o.id if o is not None else "—", f"{stored_text(texts, o.text_ref)}"[:120] if o is not None else "—",
             "oui" if b.current else "non"), href=here(p, "", vue=BRANCHES, branche=b.name)))
     blocks: list[Block] = [Table((Column("branche"), Column("base", "fit"), Column("avance", "num"),
                                   Column("retard", "num"), Column("dernier commit", "fit"), Column("message"),
@@ -674,9 +674,9 @@ async def _pulls(p: Project, frame: Frame, ctx: InspectContext, port: Any, host:
     première sinon) : sa branche et le commit à son bout (celui que nomme sa fusion), ses commits et son diff ; et, lu
     chez l'hôte, son titre et son texte, ses échanges, ses vérifications une à une, la fin du journal d'un échec."""
     order = pull_order(p)
-    texts = _texts(ctx, (o.text_ref for o in order))
+    texts = stored_texts(ctx, (o.text_ref for o in order))
     rows = tuple(Row((
-        here(p, f"n° {o.pull}" if o.pull else "proposée", vue=PULLS, pr=pull_key(o)), _text(texts, o.text_ref),
+        here(p, f"n° {o.pull}" if o.pull else "proposée", vue=PULLS, pr=pull_key(o)), stored_text(texts, o.text_ref),
         PULL_WORDS[pull_stage(p, o)], Text(o.branch or "—", "mono"), CHECK_WORDS.get(o.checks, "—")
         if o.checks_sha else "—", When(o.pull_at) if o.pull_at else "—"), href=here(p, "", vue=PULLS, pr=pull_key(o)))
         for o in order)
@@ -857,12 +857,12 @@ async def _checks(p: Project, frame: Frame, ctx: InspectContext, port: Any, host
     found = sorted((o for o in pulled(p) if o.checks_sha), key=lambda o: -o.checks_at)[:CHECKS_SHOWN]
     recent = await port.history(p.id, n=CHECKS_HISTORY) if port is not None and found else None
     known = {k.sha: k for k in (recent.commits if recent is not None else ())}
-    texts = _texts(ctx, (o.text_ref for o in found))
+    texts = stored_texts(ctx, (o.text_ref for o in found))
     rows = tuple(Row((
         here(p, o.checks_sha[:7], vue=CI, sha=o.checks_sha), CHECK_WORDS.get(o.checks, o.checks),
         When(o.checks_at) if o.checks_at else "—",
         Text(known[o.checks_sha].title if o.checks_sha in known else "—", clamp=200), Text(o.branch or "—", "mono"),
-        f"n° {o.id} · {_text(texts, o.text_ref)}"[:120], f"n° {o.pull}" if o.pull else "—", o.checks),
+        f"n° {o.id} · {stored_text(texts, o.text_ref)}"[:120], f"n° {o.pull}" if o.pull else "—", o.checks),
         href=here(p, "", vue=CI, sha=o.checks_sha)) for o in found)
     blocks: list[Block] = [Table((Column("commit", "fit"), Column("état", "fit"), Column("quand", "fit"),
                                   Column("message"), Column("branche", "fit"), Column("objectif"),

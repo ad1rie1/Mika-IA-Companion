@@ -26,17 +26,7 @@ from pydantic import BaseModel, Field
 from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.faculties.projects import managing, milestones, tracker
-from mika.faculties.projects.actions import (
-    LIVE,
-    MODE_CHOICES,
-    OTHER_RULE,
-    SCHEDULE_CHOICES,
-    _editable,
-    _objective_of,
-    _still,
-    _target,
-    operator_person,
-)
+from mika.faculties.projects.actions import MODE_CHOICES, OTHER_RULE, SCHEDULE_CHOICES, can_edit
 from mika.faculties.projects.faculty import (
     ASAP,
     MILESTONE_CHANGED,
@@ -51,8 +41,15 @@ from mika.faculties.projects.faculty import (
     opened,
     written_for,
 )
+from mika.faculties.projects.inspect_common import (
+    LIVE,
+    operator_person,
+    target_objective,
+    target_project,
+    unchanged,
+)
 from mika.faculties.projects.inspect_milestones import REFUSALS
-from mika.faculties.projects.inspect_tracker import KIND_CHOICES, PRIORITY_CHOICES, _entry
+from mika.faculties.projects.inspect_tracker import KIND_CHOICES, PRIORITY_CHOICES, target_entry
 from mika.kernel.events import Content
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
@@ -161,8 +158,8 @@ class MilestoneEditArgs(BaseModel):
 
 def _milestone(s: ProjectsState, frame: Frame, ctx: ActionContext, objective: str, milestone: str) -> tuple[Any, ...]:
     """Le jalon visé, s'il peut encore être défait par qui agit (``managing.undoing``)."""
-    p = _target(s, ctx)
-    o = _objective_of(p, objective)
+    p = target_project(s, ctx)
+    o = target_objective(p, objective)
     m = milestone_at(o, milestone)
     if m is None:
         raise Refused(f"Aucun jalon n° {milestone[:12]} sur cet objectif.")
@@ -173,7 +170,7 @@ def _milestone(s: ProjectsState, frame: Frame, ctx: ActionContext, objective: st
 
 
 @PROJECTS.action("jalon_modifier", title="Modifier un jalon", args=MilestoneEditArgs, emits=[MILESTONE_CHANGED],
-                 subject="project", order=35, available=_editable, inline=True,
+                 subject="project", order=35, available=can_edit, inline=True,
                  description="Le texte d'un jalon encore ouvert, et comment on le vérifie.")
 def _milestone_edit(s: ProjectsState, frame: Frame, args: MilestoneEditArgs, ctx: ActionContext) -> Done:
     p, o, m, person = _milestone(s, frame, ctx, args.objective, args.milestone)
@@ -189,7 +186,7 @@ def _milestone_edit(s: ProjectsState, frame: Frame, args: MilestoneEditArgs, ctx
     draft = milestones.changing(p, o.id, m, level=written_for(p, o), inherited=inherited_for(p, o),
                                 author="operator", by=person, spec=spec, reason=args.reason)
     return Done(drafts=(draft,), message=f"Jalon n° {m.id} de l'objectif n° {o.id} modifié.",
-                guard=_still(p.id, LIVE))
+                guard=unchanged(p.id, LIVE))
 
 
 class MilestoneDropArgs(BaseModel):
@@ -201,14 +198,14 @@ class MilestoneDropArgs(BaseModel):
 
 
 @PROJECTS.action("jalon_retirer", title="Retirer un jalon", args=MilestoneDropArgs, emits=[MILESTONE_CHANGED],
-                 subject="project", order=36, available=_editable, inline=True, danger=True,
+                 subject="project", order=36, available=can_edit, inline=True, danger=True,
                  description="Un jalon encore ouvert n'a plus lieu d'être : « fait » ne l'attendra plus. Il reste "
                              "lisible, retiré.")
 def _milestone_drop(s: ProjectsState, frame: Frame, args: MilestoneDropArgs, ctx: ActionContext) -> Done:
     p, o, m, person = _milestone(s, frame, ctx, args.objective, args.milestone)
     draft = milestones.changing(p, o.id, m, level=written_for(p, o), inherited=inherited_for(p, o),
                                 author="operator", by=person, status=c.DROPPED, reason=args.reason)
-    return Done(drafts=(draft,), message=f"Jalon n° {m.id} de l'objectif n° {o.id} retiré.", guard=_still(p.id, LIVE))
+    return Done(drafts=(draft,), message=f"Jalon n° {m.id} de l'objectif n° {o.id} retiré.", guard=unchanged(p.id, LIVE))
 
 
 # ── Un ticket ─────────────────────────────────────────────────────────────
@@ -225,11 +222,11 @@ class TicketEditArgs(BaseModel):
 
 
 @PROJECTS.action("ticket_modifier", title="Modifier un ticket", args=TicketEditArgs, emits=[tracker.ITEM_CHANGED],
-                 subject="project", order=68, available=_editable, inline=True,
+                 subject="project", order=68, available=can_edit, inline=True,
                  description="Le titre, le détail, la sorte et la priorité d'un ticket. Son étape ne change pas.")
 def _ticket_edit(s: ProjectsState, frame: Frame, args: TicketEditArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
-    e = _entry(p, ctx, tracker.TICKET_LIST, args.item)
+    p = target_project(s, ctx)
+    e = target_entry(p, ctx, tracker.TICKET_LIST, args.item)
     item = e.item
     title, text = args.title.strip(), args.text.strip()
     if not title:
@@ -248,7 +245,7 @@ def _ticket_edit(s: ProjectsState, frame: Frame, args: TicketEditArgs, ctx: Acti
     if not changes:
         raise Refused("Rien n'a changé.")
     draft = tracker.changing(p, item, author=c.BY_OPERATOR, by=writer(frame, ctx), **changes)
-    return Done(drafts=(draft,), message=f"Ticket #{item.number} modifié.", guard=_still(p.id, LIVE))
+    return Done(drafts=(draft,), message=f"Ticket #{item.number} modifié.", guard=unchanged(p.id, LIVE))
 
 
 # ── Une décision technique ────────────────────────────────────────────────
@@ -269,11 +266,11 @@ class DecisionEditArgs(BaseModel):
 
 
 @PROJECTS.action("decision_modifier", title="Modifier une décision", args=DecisionEditArgs,
-                 emits=[managing.DECISION_REVISED], subject="project", order=42, available=_editable, inline=True,
+                 emits=[managing.DECISION_REVISED], subject="project", order=42, available=can_edit, inline=True,
                  description="Les textes d'une décision technique. Pour revenir sur ce qu'elle choisit, remplace-la "
                              "plutôt : l'ancienne reste lisible.")
 def _decision_edit(s: ProjectsState, frame: Frame, args: DecisionEditArgs, ctx: ActionContext) -> Done:
-    p = _target(s, ctx)
+    p = target_project(s, ctx)
     d = decision_at(p, args.decision)
     if d is None:
         raise Refused(f"Aucune décision n° {args.decision[:12]}.")
@@ -299,7 +296,7 @@ def _decision_edit(s: ProjectsState, frame: Frame, args: DecisionEditArgs, ctx: 
     draft = managing.DECISION_REVISED.draft(project=p.id, decision=d.id, cleared=tuple(cleared),
                                             by=writer(frame, ctx), owner=p.owner, about=p.about,
                                             read_about=p.read_about, **changes)
-    return Done(drafts=(draft,), message=f"Décision n° {d.id} modifiée.", guard=_still(p.id, LIVE))
+    return Done(drafts=(draft,), message=f"Décision n° {d.id} modifiée.", guard=unchanged(p.id, LIVE))
 
 
 # ── Écrire chez l'hôte sur une pull request ───────────────────────────────
@@ -308,8 +305,8 @@ def _decision_edit(s: ProjectsState, frame: Frame, args: DecisionEditArgs, ctx: 
 def _pull(s: ProjectsState, frame: Frame, ctx: ActionContext, objective: str) -> tuple[Any, ...]:
     """La pull request ouverte d'un objectif, pour qui a le droit d'y écrire : le propriétaire du projet, ou qui
     s'occupe d'elle."""
-    p = _target(s, ctx)
-    o = _objective_of(p, objective)
+    p = target_project(s, ctx)
+    o = target_objective(p, objective)
     person = writer(frame, ctx)
     if not managing.frames(frame, p, person):
         raise Refused(NOT_WRITER)
@@ -327,7 +324,7 @@ class PullEditArgs(BaseModel):
 
 
 @PROJECTS.action("pull_modifier", title="Modifier la pull request", args=PullEditArgs,
-                 emits=[managing.PULL_WRITE_ASKED], subject="project", order=69, available=_editable, inline=True,
+                 emits=[managing.PULL_WRITE_ASKED], subject="project", order=69, available=can_edit, inline=True,
                  description="Le titre et le texte d'une pull request, chez l'hôte. Ton geste : elle n'y écrit pas "
                              "ainsi. Un champ laissé vide ne change pas.")
 def _pull_edit(s: ProjectsState, frame: Frame, args: PullEditArgs, ctx: ActionContext) -> Done:
@@ -335,7 +332,7 @@ def _pull_edit(s: ProjectsState, frame: Frame, args: PullEditArgs, ctx: ActionCo
     if not args.title.strip() and not args.body.strip():
         raise Refused("Dis ce qui change : son titre, son texte, ou les deux.", {"title": "valeur requise"})
     draft = managing.writing(p, o, person, title=args.title, body=args.body)
-    return Done(drafts=(draft,), message=EDIT_ASKED, guard=_still(p.id, LIVE))
+    return Done(drafts=(draft,), message=EDIT_ASKED, guard=unchanged(p.id, LIVE))
 
 
 class PullCommentArgs(BaseModel):
@@ -345,7 +342,7 @@ class PullCommentArgs(BaseModel):
 
 
 @PROJECTS.action("pull_commenter", title="Répondre dans la pull request", args=PullCommentArgs,
-                 emits=[managing.PULL_WRITE_ASKED], subject="project", order=70, available=_editable, inline=True,
+                 emits=[managing.PULL_WRITE_ASKED], subject="project", order=70, available=can_edit, inline=True,
                  description="Un commentaire sur une pull request, chez l'hôte : il part du compte du jeton, et son "
                              "texte dit qu'il est de toi.")
 def _pull_comment(s: ProjectsState, frame: Frame, args: PullCommentArgs, ctx: ActionContext) -> Done:
@@ -353,4 +350,4 @@ def _pull_comment(s: ProjectsState, frame: Frame, args: PullCommentArgs, ctx: Ac
     if not args.text.strip():
         raise Refused("Le commentaire est vide.", {"text": "valeur requise"})
     draft = managing.writing(p, o, person, comment=args.text)
-    return Done(drafts=(draft,), message=COMMENT_ASKED, guard=_still(p.id, LIVE))
+    return Done(drafts=(draft,), message=COMMENT_ASKED, guard=unchanged(p.id, LIVE))

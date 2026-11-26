@@ -42,7 +42,8 @@ from mika.app.domains.projects.console.zones import (
 from mika.contracts import projects as c
 from mika.faculties.projects import glance, milestones, tracker
 from mika.faculties.projects.faculty import awaiting, by_pulls, milestones_of, objective_at
-from mika.faculties.projects.inspect import FORGOTTEN, OBJ_FR, PLAN_FR, VERDICT_FR
+from mika.faculties.projects.inspect import OBJ_FR, PLAN_FR, VERDICT_FR
+from mika.faculties.projects.inspect_common import FORGOTTEN
 from mika.faculties.projects.inspect_milestones import CHECK_CHOICES, CHECK_WORDS, STATE_FR
 from mika.faculties.projects.inspect_reviews import REVIEW_WORDS
 from mika.faculties.projects.tools import trigger_words
