@@ -7,7 +7,7 @@ import asyncio
 import json
 
 from mika.adapters.agenda.oauth import RETURN_PATH
-from mika.app.cli.common import _with_settings
+from mika.app.cli.common import with_settings
 from mika.app.domains.agenda.settings import AgendaSettings
 from mika.app.settings import Settings
 
@@ -33,7 +33,7 @@ async def agenda_command(settings: Settings, args: argparse.Namespace) -> dict[s
 
 
 def _run_agenda(args: argparse.Namespace) -> int:
-    out = asyncio.run(_with_settings(args.data, lambda settings, _store: agenda_command(settings, args)))
+    out = asyncio.run(with_settings(args.data, lambda settings, _store: agenda_command(settings, args)))
     print(json.dumps(out, ensure_ascii=False, indent=2))
     return 0 if out.get("ok", True) else 1
 

@@ -19,7 +19,7 @@ from mika.adapters.llm.claude_code import FORBIDDEN, ClaudeCodeBackend, ClaudeCo
 from mika.adapters.llm.config import REPLY, ROLE_LABELS, ROLES, BackendSpec, LLMConfig
 from mika.adapters.mcp.relay import Relay
 from mika.adapters.system import RealClock
-from mika.app.cli.common import _with_settings
+from mika.app.cli.common import with_settings
 from mika.app.settings import Settings
 from mika.kernel import forms
 from mika.ports.imaging import ASPECTS, QUALITIES, ImageRequest
@@ -100,7 +100,7 @@ async def llm_command(data: Path, args: argparse.Namespace) -> dict[str, object]
                 "problems": cfg.problems()}
 
     try:
-        return await _with_settings(data, run)
+        return await with_settings(data, run)
     except ValidationError as exc:  # une fiche refusée (un contexte au-delà de la fenêtre lue du modèle)
         return {"ok": False, "problems": list(forms.errors_fr(exc).values())}
 
@@ -139,7 +139,7 @@ async def images_command(data: Path, args: argparse.Namespace) -> dict[str, obje
         return {"ok": True, "activée": cfg.enabled, "backends": {n: b.redacted() for n, b in cfg.backends.items()},
                 "routes": cfg.routes, "problems": cfg.problems()}
 
-    return await _with_settings(data, run)
+    return await with_settings(data, run)
 
 
 async def _image_trial(cfg: ImagingConfig, args: argparse.Namespace) -> dict[str, object]:
@@ -180,7 +180,7 @@ async def _claude_code_spec(data: Path, name: str | None) -> BackendSpec:
         return next((b for b in backends.values() if b.kind == "claude_code"),
                     BackendSpec(kind="claude_code", model=""))
 
-    return await _with_settings(data, run)
+    return await with_settings(data, run)
 
 
 async def claude_code_check(data: Path, name: str | None) -> dict[str, object]:

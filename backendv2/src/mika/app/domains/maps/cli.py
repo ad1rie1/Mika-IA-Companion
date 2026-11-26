@@ -21,7 +21,7 @@ from mika.adapters.maps.quota import QUOTAS_FILE, Limiter, QuotaStore
 from mika.adapters.maps.tourism import Tourism, match_stamp
 from mika.adapters.maps.tourism_sync import KIND_FR, NO_ZONES, SyncBusy, TourismSync
 from mika.app import schema
-from mika.app.cli.common import _with_settings
+from mika.app.cli.common import with_settings
 from mika.app.domains.maps.settings import MapsSettings
 from mika.kernel import forms
 
@@ -76,7 +76,7 @@ async def _tourism_settings(data: Path) -> tuple[TourismConfig, PlacesConfig]:
         own = settings.of(MapsSettings)
         return own.tourism_config(), own.places_config()
 
-    return await _with_settings(data, read)
+    return await with_settings(data, read)
 
 
 def _tourism(data: Path, args: argparse.Namespace) -> int:

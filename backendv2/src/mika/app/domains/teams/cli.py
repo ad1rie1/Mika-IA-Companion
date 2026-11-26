@@ -13,7 +13,7 @@ from mika.adapters.contacts import ContactsStore
 from mika.adapters.system import RealClock
 from mika.adapters.teams import TeamsStore
 from mika.app import datadir, schema
-from mika.app.cli.common import _with_settings
+from mika.app.cli.common import with_settings
 from mika.app.domains.teams.desk import TeamsDesk
 from mika.app.domains.teams.settings import TeamsSettings
 from mika.app.settings import Settings
@@ -70,7 +70,7 @@ def purge_teams(data: Path, settings: Settings, account: str) -> dict[str, objec
 
 
 def _run_teams(args: argparse.Namespace) -> int:
-    out = asyncio.run(_with_settings(args.data, lambda settings, _store: teams_command(settings, args)))
+    out = asyncio.run(with_settings(args.data, lambda settings, _store: teams_command(settings, args)))
     print(json.dumps(out, ensure_ascii=False, indent=2))
     return 0 if out.get("ok", True) else 1
 

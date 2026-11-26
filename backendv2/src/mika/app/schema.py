@@ -29,7 +29,7 @@ from sqlalchemy.exc import DBAPIError
 
 from mika.adapters.database import Target, sqlite_engine
 from mika.app.domains import DOMAINS
-from mika.app.migrations import _declared
+from mika.app.migrations import include_declared
 from mika.ports.sql import DATABASES
 
 #: les bases du cœur : sa vie, et ce qui s'en reconstruit
@@ -196,7 +196,7 @@ def differences(name: str, engine: Engine) -> list[Any]:
 
 
 def _differences(conn: Any, metadata: Any) -> list[Any]:
-    ctx = MigrationContext.configure(conn, opts={"include_object": _declared(metadata), "compare_type": True})
+    ctx = MigrationContext.configure(conn, opts={"include_object": include_declared(metadata), "compare_type": True})
     return list(compare_metadata(ctx, metadata))
 
 

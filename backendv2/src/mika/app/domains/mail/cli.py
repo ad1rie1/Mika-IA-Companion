@@ -9,7 +9,7 @@ import asyncio
 import json
 
 from mika.adapters.mail import LEGACY_ACCOUNT
-from mika.app.cli.common import _with_settings
+from mika.app.cli.common import with_settings
 from mika.app.domains.mail.settings import MailSettings
 from mika.app.settings import Settings
 
@@ -54,7 +54,7 @@ async def mail_command(settings: Settings, args: argparse.Namespace) -> dict[str
 
 
 def _run_mail(args: argparse.Namespace) -> int:
-    out = asyncio.run(_with_settings(args.data, lambda settings, _store: mail_command(settings, args)))
+    out = asyncio.run(with_settings(args.data, lambda settings, _store: mail_command(settings, args)))
     print(json.dumps(out, ensure_ascii=False, indent=2))
     return 0
 

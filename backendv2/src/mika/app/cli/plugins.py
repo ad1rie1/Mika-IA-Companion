@@ -8,7 +8,7 @@ import asyncio
 import json
 from pathlib import Path
 
-from mika.app.cli.common import _with_settings
+from mika.app.cli.common import with_settings
 from mika.app.domains import DOMAINS, part
 from mika.app.settings import Settings
 
@@ -22,7 +22,7 @@ async def outside_command(data: Path, args: argparse.Namespace) -> dict[str, obj
         cfg = settings.stt()
         return {"base_url": cfg["base_url"], "model": cfg["model"], "api_key": "…" if cfg["api_key"] else ""}
 
-    return await _with_settings(data, run)
+    return await with_settings(data, run)
 
 
 def _run_outside(args: argparse.Namespace) -> int:
@@ -35,7 +35,7 @@ def _run_sensors(args: argparse.Namespace) -> int:
         return {"token": await settings.new_sensors_token(),
                 "usage": "Authorization: Bearer <jeton> sur POST /api/perceptions"}
 
-    print(json.dumps(asyncio.run(_with_settings(args.data, token)), ensure_ascii=False, indent=2))
+    print(json.dumps(asyncio.run(with_settings(args.data, token)), ensure_ascii=False, indent=2))
     return 0
 
 

@@ -8,7 +8,7 @@ import asyncio
 import json
 
 from mika.adapters.system import RealClock
-from mika.app.cli.common import _with_settings
+from mika.app.cli.common import with_settings
 from mika.app.domains.wakeup.desk import WakeupDesk
 from mika.app.domains.wakeup.settings import WakeupSettings
 from mika.app.settings import Settings
@@ -39,7 +39,7 @@ async def wakeup_command(settings: Settings, args: argparse.Namespace) -> dict[s
 
 
 def _run_wakeup(args: argparse.Namespace) -> int:
-    out = asyncio.run(_with_settings(args.data, lambda settings, _store: wakeup_command(settings, args)))
+    out = asyncio.run(with_settings(args.data, lambda settings, _store: wakeup_command(settings, args)))
     print(json.dumps(out, ensure_ascii=False, indent=2))
     return 0 if out.get("ok", True) else 1
 

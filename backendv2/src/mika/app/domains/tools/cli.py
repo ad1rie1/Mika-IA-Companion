@@ -10,7 +10,7 @@ import asyncio
 import json
 
 from mika.adapters.mcp.hub import McpHub
-from mika.app.cli.common import _with_settings
+from mika.app.cli.common import with_settings
 from mika.app.domains.tools.settings import ToolsSettings
 from mika.app.settings import Settings
 
@@ -46,7 +46,7 @@ async def mcp_command(settings: Settings, args: argparse.Namespace) -> dict[str,
 
 def _run_mcp(args: argparse.Namespace) -> int:
     if args.mcp_cmd in ("serveurs", "essai"):
-        out = asyncio.run(_with_settings(args.data, lambda settings, _store: mcp_command(settings, args)))
+        out = asyncio.run(with_settings(args.data, lambda settings, _store: mcp_command(settings, args)))
         print(json.dumps(out, ensure_ascii=False, indent=2))
         return 0 if out.get("ok", True) else 1
 
@@ -55,7 +55,7 @@ def _run_mcp(args: argparse.Namespace) -> int:
         return {"token": token, "usage": "claude mcp add --transport http mika http://127.0.0.1:8001/mcp/console/ "
                                           f"--header \"Authorization: Bearer {token}\""}
 
-    print(json.dumps(asyncio.run(_with_settings(args.data, mcp_token)), ensure_ascii=False, indent=2))
+    print(json.dumps(asyncio.run(with_settings(args.data, mcp_token)), ensure_ascii=False, indent=2))
     return 0
 
 

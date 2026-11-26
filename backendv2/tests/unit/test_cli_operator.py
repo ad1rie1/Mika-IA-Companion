@@ -136,13 +136,13 @@ def test_identity_link_goes_through_the_console_action_and_is_audited(tmp_path):
     assert not out_again["ok"]  # déjà reliée : refusé, comme dans la console
 
     async def check() -> tuple[str, list[tuple[str, str, str]]]:
-        kernel = await cli_common._offline(tmp_path)
+        kernel = await cli_common.offline_kernel(tmp_path)
         try:
             person = kernel.mind.frame().get(identity_c.PERSON("ext_5"))
             ops = [(e.data.action, e.data.by, e.data.outcome)
                    for e in (kernel.mind.decode(s) for s in kernel.mind.store.latest([rt.OPERATED.name], 50))]
         finally:
-            await cli_common._close(kernel, tmp_path)
+            await cli_common.close_offline(kernel, tmp_path)
         return person, ops
 
     person, ops = asyncio.run(check())
@@ -150,12 +150,12 @@ def test_identity_link_goes_through_the_console_action_and_is_audited(tmp_path):
     assert ("identity.relier", cli_common.CLI_BY, "done") in ops and ("identity.relier", cli_common.CLI_BY, "refused") in ops
 
     async def named() -> tuple[str, str]:
-        kernel = await cli_common._offline(tmp_path)
+        kernel = await cli_common.offline_kernel(tmp_path)
         try:
             names = Names(kernel, LABELS)
             return names.action("cli.identity.relier"), names.action("cli.oublier.person")
         finally:
-            await cli_common._close(kernel, tmp_path)
+            await cli_common.close_offline(kernel, tmp_path)
 
     # la console nomme ce qu'a fait la ligne de commande, et dit à part d'où il vient (Système › Gestes audités)
     assert asyncio.run(named()) == ("Relier à une personne", "Oublier · personne")
@@ -179,11 +179,11 @@ def test_forge_promote_vouches_for_the_version_like_the_console(tmp_path):
     assert cli.main(["--data", str(tmp_path), "forge", "promote", "cafe"]) == 0
 
     async def states() -> list[str]:
-        kernel = await cli_common._offline(tmp_path)
+        kernel = await cli_common.offline_kernel(tmp_path)
         try:
             return [kernel.mind.decode(s).data.state for s in kernel.mind.store.latest([SWITCHED.name], 10)]
         finally:
-            await cli_common._close(kernel, tmp_path)
+            await cli_common.close_offline(kernel, tmp_path)
 
     assert sorted(asyncio.run(states())) == ["promoted", "trusted"]
     assert cli.main(["--data", str(tmp_path), "forge", "promote", "cafe"]) == 1  # déjà promue : dit, refusé
@@ -209,4 +209,4 @@ def test_a_key_is_taken_back_from_the_command_line(tmp_path):
         assert await wakeup("revoke") == {"ok": True, "name": "serre", "revoked": True}
         assert not (await wakeup("revoke"))["ok"]
 
-    asyncio.run(cli_common._with_settings(tmp_path, scene))
+    asyncio.run(cli_common.with_settings(tmp_path, scene))

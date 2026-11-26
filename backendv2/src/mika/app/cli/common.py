@@ -16,7 +16,7 @@ from mika.runtime.bootstrap import Kernel
 CLI_BY = "ligne de commande"
 
 
-async def _offline(data: Path, *, vectors: bool = False) -> Kernel:
+async def offline_kernel(data: Path, *, vectors: bool = False) -> Kernel:
     """Un noyau relu, rien de vivant : aucun processus, aucun modèle (serveur arrêté)."""
     datadir.hold(data)  # serveur arrêté : une seule écriture à la fois
     bases = schema.targets(data)
@@ -36,14 +36,14 @@ async def _offline(data: Path, *, vectors: bool = False) -> Kernel:
     return kernel
 
 
-async def _close(kernel: Kernel, data: Path) -> None:
+async def close_offline(kernel: Kernel, data: Path) -> None:
     try:
         await kernel.mind.close()
     finally:
         datadir.release(data)
 
 
-async def _with_settings(data: Path, fn):  # type: ignore[no-untyped-def]
+async def with_settings(data: Path, fn):  # type: ignore[no-untyped-def]
     bases = schema.targets(data)
     schema.migrate_data(data, bases)
     store = SqlStore(bases["mind"], bases["views"], threaded=False)

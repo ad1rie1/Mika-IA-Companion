@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from mika.adapters.web.accounts import Accounts, password_problems
-from mika.app.cli.common import CLI_BY, _close, _offline, _with_settings
+from mika.app.cli.common import CLI_BY, close_offline, offline_kernel, with_settings
 from mika.app.settings import Settings
 from mika.contracts import identity as identity_c
 from mika.kernel import forms
@@ -46,11 +46,11 @@ async def operate(data: Path, key: str, subject: str, values: dict[str, str]) ->
     """Une action d'opérateur de la console (``faculté.action``), par le même chemin qu'elle
     (``operations.perform``) : ce qu'elle refuserait est refusé, en le disant ; rien ne dit « ok »
     sans effet ; l'audit ``runtime.operated`` est écrit. La commande tapée vaut confirmation."""
-    kernel = await _offline(data)
+    kernel = await offline_kernel(data)
     try:
         return await _perform(kernel, key, subject, values)
     finally:
-        await _close(kernel, data)
+        await close_offline(kernel, data)
 
 
 async def _prelink(kernel: Kernel, handle: str, person: str) -> dict[str, object]:
@@ -77,7 +77,7 @@ async def identity_command(data: Path, cmd: str, handle: str, person: str | None
     """``identity link|unlink`` : l'action de la console sur une adresse connue (mêmes refus : jamais
     une session authentifiée, que le réducteur ignorerait) ; une adresse jamais vue ne peut qu'être
     reliée d'avance."""
-    kernel = await _offline(data)
+    kernel = await offline_kernel(data)
     try:
         view = kernel.mind.frame().get(identity_c.IDENTITY(handle))
         if cmd == "link" and person is not None:
@@ -91,7 +91,7 @@ async def identity_command(data: Path, cmd: str, handle: str, person: str | None
             return {"ok": False, "message": f"Adresse inconnue : « {handle} »."}
         return await _perform(kernel, "identity.delier", handle, {})
     finally:
-        await _close(kernel, data)
+        await close_offline(kernel, data)
 
 
 async def account_command(data: Path, args: argparse.Namespace) -> dict[str, object]:
@@ -105,7 +105,7 @@ async def account_command(data: Path, args: argparse.Namespace) -> dict[str, obj
                                     full_name=args.full_name or "")
         return {"ok": True, "person_id": acc.handle, "operator": acc.operator}
 
-    return await _with_settings(data, run)
+    return await with_settings(data, run)
 
 
 def _when(ts: int | None) -> str | None:
@@ -143,7 +143,7 @@ async def token_command(data: Path, args: argparse.Namespace) -> dict[str, objec
             return {"ok": True, "revoked": args.id}
         return {"ok": False, "error": f"Jeton inconnu ou déjà révoqué : {args.id}."}
 
-    return await _with_settings(data, run)
+    return await with_settings(data, run)
 
 
 def _run_account(args: argparse.Namespace) -> int:

@@ -14,7 +14,7 @@ import yaml
 from mika.adapters.llm.config import LLMConfig, build_backend
 from mika.app import datadir, embeddings
 from mika.app import persona as persona_file
-from mika.app.cli.common import _with_settings
+from mika.app.cli.common import with_settings
 from mika.app.composition import for_simulation
 from mika.app.paths import PERSONA
 from mika.app.settings import Settings
@@ -53,7 +53,7 @@ async def profile_command(settings: Settings, args: argparse.Namespace) -> dict[
 def _sonde(data: Path, args: argparse.Namespace) -> int:
     """Une semaine de sa vie avec le vrai modèle configuré dans ``data`` (sans y écrire : la semaine vit à part,
     dans ``--out``)."""
-    cfg = asyncio.run(_with_settings(data, _llm_of))
+    cfg = asyncio.run(with_settings(data, _llm_of))
     name = args.backend or cfg.routes.get("reply", "")
     spec = cfg.backends.get(name)
     if spec is None:
@@ -97,7 +97,7 @@ def _run_sim(args: argparse.Namespace) -> int:
 def _run_profil(args: argparse.Namespace) -> int:
     if args.nom:
         datadir.hold(args.data)  # serveur arrêté : sa persona ne change pas sous ses pieds
-    out = asyncio.run(_with_settings(args.data, lambda settings, _store: profile_command(settings, args)))
+    out = asyncio.run(with_settings(args.data, lambda settings, _store: profile_command(settings, args)))
     print(json.dumps(out, ensure_ascii=False, indent=2))
     return 0
 

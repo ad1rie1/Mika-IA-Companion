@@ -17,7 +17,7 @@ import argparse
 import asyncio
 from pathlib import Path
 
-from mika.app.cli.common import _with_settings
+from mika.app.cli.common import with_settings
 from mika.app.cli.sim import profile_command
 from mika.app.composition import faculties
 from mika.contracts import affect as affect_c
@@ -598,7 +598,7 @@ def test_the_command_line_applies_a_profile_and_keeps_her_particulars(tmp_path):
     """« mika profil anxieuse » : sa persona prend le profil (son chronotype et ses précisions gardés), et la
     commande sans nom le reconnaît."""
     async def run(nom):  # type: ignore[no-untyped-def]
-        return await _with_settings(tmp_path, lambda settings, _store: profile_command(
+        return await with_settings(tmp_path, lambda settings, _store: profile_command(
             settings, argparse.Namespace(nom=nom)))
 
     assert asyncio.run(run(None))["le_sien"] == "reflechie"

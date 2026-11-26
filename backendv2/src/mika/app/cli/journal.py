@@ -13,7 +13,7 @@ from sqlalchemy import delete, select
 from mika.adapters.store_sql import SqlStore
 from mika.adapters.system import RandomIdGen, RealClock
 from mika.app import backup, datadir, schema
-from mika.app.cli.common import CLI_BY, _close, _offline
+from mika.app.cli.common import CLI_BY, close_offline, offline_kernel
 from mika.app.composition import READING, faculties
 from mika.kernel.codec import digest
 from mika.kernel.inspect import Head
@@ -86,7 +86,7 @@ async def forget(data: Path, subject: str) -> dict[str, object]:
     la désigne — pour une personne, ses autres adresses et les noms qui ne désignent qu'elle —,
     contenus et projections, traces d'épisode, et tout port qui garde une trace dérivée (l'index
     des vecteurs). Audité. Rien ne démarre : aucun processus, aucun modèle."""
-    kernel = await _offline(data, vectors=True)
+    kernel = await offline_kernel(data, vectors=True)
     try:
         await kernel.deps.ports["vectors"].open()
         await kernel.traces.open()
@@ -95,7 +95,7 @@ async def forget(data: Path, subject: str) -> dict[str, object]:
         kind = next((k for k in kinds if isinstance(ins.head(k, subject), Head)), "")
         gone = await operations.forget_subject(kernel, kind, subject, by=CLI_BY, action=f"cli.oublier.{kind or 'cle'}")
     finally:
-        await _close(kernel, data)
+        await close_offline(kernel, data)
     return {"sujet": subject, "clés": list(gone.keys), "contenus_effacés": gone.counts.get("contents", 0),
             "traces_effacées": gone.counts.get("traces", 0), "vecteurs_effacés": gone.counts.get("vectors", 0),
             "fichiers_effacés": gone.counts.get("shares", 0)}

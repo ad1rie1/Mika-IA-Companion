@@ -21,7 +21,7 @@ from sqlalchemy import MetaData
 from mika.ports.sql import Key
 
 
-def _declared(metadata: MetaData) -> Any:
+def include_declared(metadata: MetaData) -> Any:
     def include(obj: Any, name: str | None, type_: str, reflected: bool, compare_to: Any) -> bool:
         table = obj if type_ == "table" else getattr(obj, "table", None)
         table_name = getattr(table, "name", name if type_ == "table" else None)
@@ -60,7 +60,7 @@ def run() -> None:
     context.configure(
         connection=connection,
         target_metadata=metadata,
-        include_object=_declared(metadata),
+        include_object=include_declared(metadata),
         render_item=_render,
         render_as_batch=connection.dialect.name == "sqlite",  # SQLite ne modifie pas une colonne en place
         compare_type=True,

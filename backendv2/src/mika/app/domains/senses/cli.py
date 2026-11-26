@@ -7,7 +7,7 @@ import argparse
 import asyncio
 import json
 
-from mika.app.cli.common import _with_settings
+from mika.app.cli.common import with_settings
 from mika.app.domains.senses.settings import SensesSettings
 
 
@@ -22,7 +22,7 @@ async def rss_command(settings: SensesSettings, args: argparse.Namespace) -> dic
 
 
 def _run_rss(args: argparse.Namespace) -> int:
-    out = asyncio.run(_with_settings(args.data,
+    out = asyncio.run(with_settings(args.data,
                                      lambda settings, _store: rss_command(settings.of(SensesSettings), args)))
     print(json.dumps(out, ensure_ascii=False, indent=2))
     return 0
