@@ -131,7 +131,7 @@ def issue_page(p: Project, number: int) -> str:
 def issue_ticket(p: Project, number: int) -> Item | None:
     """Le ticket que reflète cette issue : celui qui porte son numéro, ou qui en est né (``issue-<n>``)."""
     return next((x for x in p.board.items if x.list_name == c.TICKETS
-                 and (x.issue == number or x.key == f"issue-{number}")), None)
+                 and (x.issue == number or x.key == HOSTED_KEY.format(number=number))), None)
 
 
 def reasons(p: Project, item: Item) -> tuple[str, ...]:
