@@ -21,7 +21,7 @@ from sqlalchemy import func, select
 
 from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
-from mika.faculties.projects import tracker, triggers
+from mika.faculties.projects import steer, tracker, triggers
 from mika.faculties.projects.faculty import (
     ITEM_CHANGES_KEPT,
     ITEMS_RECENT,
@@ -36,11 +36,8 @@ from mika.faculties.projects.prompt import ITEM_LINE_CLIP, ITEMS_LINES, _items, 
 from mika.faculties.projects.rhythm import stirred_due
 from mika.faculties.projects.tend import stirs_of
 from mika.faculties.projects.tools import trigger_words
-from mika.faculties.projects.tracker import (
-    ITEM_ADDED,
-    ITEM_CHANGED,
-    ITEM_NOTED,
-    LIST_SET,
+from mika.faculties.projects.tracker import ITEM_ADDED, ITEM_CHANGED, ITEM_NOTED, LIST_SET
+from mika.faculties.projects.tracker_tools import (
     AddArgs,
     ChangeArgs,
     ItemArg,
@@ -406,14 +403,14 @@ def test_who_reads_changes_and_opens_follows_the_access_lines_of_the_project(tmp
         out = {"pid": pid, "frame": frame}
         # jamais réglé : une autre personne le lit (lecture seule), sans rien y changer
         out["reads_unset"] = tracker.may_read(camille, Kind.REPLY, frame)
-        out["steers_unset"] = tracker.may_steer(camille, Kind.REPLY, frame)
+        out["steers_unset"] = steer.may_steer(camille, Kind.REPLY, frame)
         out["read"] = await project_items(ReadArgs(project="le site", list_name="articles"),
                                           talking(kernel, "user_2", camille, "project_items"))
         await set_access(kernel, pid, {"who": [OWNER], "see": True, "steer": "modification"},
                          {"who": [PERSON + "user_2"], "see": True, "steer": "accord"},
                          {"who": [PERSON + "user_3"], "see": True, "steer": "modification"}, nonce="a1")
         frame = kernel.mind.frame()
-        out["steers_ask"] = tracker.may_steer(camille, Kind.REPLY, frame)
+        out["steers_ask"] = steer.may_steer(camille, Kind.REPLY, frame)
 
         async def write(handle: str, audience, **fields):
             return await project_item(WriteArgs(project="le site", **fields),

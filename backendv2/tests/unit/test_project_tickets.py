@@ -30,10 +30,8 @@ from mika.faculties.projects.faculty import (
 from mika.faculties.projects.prompt import _run_section, _texts, _tickets, _tickets_section
 from mika.faculties.projects.rhythm import ready, stirred_due
 from mika.faculties.projects.tools import ReportArgs, report_run
-from mika.faculties.projects.tracker import (
-    ITEM_ADDED,
-    ITEM_CHANGED,
-    ITEM_NOTED,
+from mika.faculties.projects.tracker import ITEM_ADDED, ITEM_CHANGED, ITEM_NOTED
+from mika.faculties.projects.tracker_tools import (
     AddArgs,
     ChangeArgs,
     ItemArg,

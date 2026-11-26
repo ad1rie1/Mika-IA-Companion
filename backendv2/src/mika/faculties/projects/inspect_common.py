@@ -1,7 +1,7 @@
 """Ce que partagent les vues et les actions de console des projets (``inspect*.py``, ``actions.py``).
 
 Les gardes et les cibles d'un geste : la garde « projet inchangé » (``unchanged`` — les gestes de conversation,
-``steer.py``, ``tracker.py`` et ``reaching.py``, la posent aussi), les états où un projet se pilote (``LIVE``), le
+``steer.py``, ``tracker_tools.py`` et ``reaching.py``, la posent aussi), les états où un projet se pilote (``LIVE``), le
 projet et l'objectif qu'un geste vise (``target_project``, ``target_objective``), la personne qui agit
 (``operator_person``), sinon son compte (``acting_person`` : qui un geste dit l'avoir fait). Les petits outils des
 vues : le projet dont une vue est la fiche (``subject_project``), les textes gardés (``stored_texts``,

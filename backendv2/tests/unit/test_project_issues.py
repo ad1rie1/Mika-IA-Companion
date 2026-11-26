@@ -40,10 +40,8 @@ from mika.faculties.projects.faculty import (
     written,
 )
 from mika.faculties.projects.issues import PublishArgs, ticket_publish
-from mika.faculties.projects.tracker import (
-    ITEM_ADDED,
-    ITEM_CHANGED,
-    ITEM_NOTED,
+from mika.faculties.projects.tracker import ITEM_ADDED, ITEM_CHANGED, ITEM_NOTED
+from mika.faculties.projects.tracker_tools import (
     AddArgs,
     ItemArg,
     ListArgs,
@@ -538,7 +536,7 @@ def test_a_comment_from_the_host_lifts_no_question_validates_nothing_and_stirs_n
     answered = tickets.noted(waiting, note.model_copy(update={"author": c.BY_OPERATOR}), 20, 9)
     assert answered.asked_at == 0
     planned = replace(waiting, asked_at=0, plan_seq=4, status=c.STAGE_VALIDATION)
-    assert tracker._noted(planned, note, 20, 9).status == c.STAGE_VALIDATION
+    assert tracker.after_note(planned, note, 20, 9).status == c.STAGE_VALIDATION
     # un objectif qui attend « item:tickets » : le mot d'un inconnu ne le réveille pas, celui de l'opérateur si
     listener = Objective(id=1, text_ref="t", kind=c.CONSTANT, on=("item:tickets",), only_on_event=True)
     p = _project(1, remote=URL, objectives=(listener,), board=Board(items=(waiting,)))

@@ -19,7 +19,7 @@ from mika.faculties.projects import pulls, triage
 from mika.faculties.projects.faculty import CHECKS_SEEN, Objective, Project, _checks_seen
 from mika.faculties.projects.inspect import pull_words
 from mika.faculties.projects.pulls import LogArgs, checks_log
-from mika.faculties.projects.tracker import AddArgs, ItemArg, items_add
+from mika.faculties.projects.tracker_tools import AddArgs, ItemArg, items_add
 from mika.kernel.events import Content
 from mika.ports.workshop import (
     CHECKS_FAILED,

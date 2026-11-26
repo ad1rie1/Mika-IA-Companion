@@ -21,7 +21,7 @@ Pendant une exécution qui vise un objectif ponctuel :
 Un objectif constant n'a pas de jalons : les deux outils s'y refusent.
 
 En conversation, **``project_milestone``** : le propriétaire du projet, ou qui s'occupe d'elle, valide ou refuse un
-point d'arrêt — la forme de la validation du plan d'un ticket (``tracker.project_item``). L'outil n'est offert que
+point d'arrêt — la forme de la validation du plan d'un ticket (``tracker_tools.project_item``). L'outil n'est offert que
 devant qui peut piloter un projet vivant dont un point d'arrêt attend. La console fait le même geste
 (``inspect_milestones.py``).
 """
@@ -33,7 +33,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from mika.contracts import projects as c
-from mika.faculties.projects import milestones, tracker
+from mika.faculties.projects import milestones, tracker, tracker_tools
 from mika.faculties.projects.access import steering
 from mika.faculties.projects.atelier import open_views, program_time_left
 from mika.faculties.projects.faculty import (
@@ -264,7 +264,7 @@ async def _run_check(ctx: Any, p: Project, m: Milestone, port: Any) -> str | Too
 
 def _item_check(ctx: Any, p: Project, m: Milestone) -> str | ToolResult:
     """Relire l'élément d'un jalon : il existe, et il a le statut attendu — sa preuve le dit ; sinon pourquoi."""
-    found = tracker._found(ctx, p, m.item_list, m.item_key)
+    found = tracker_tools.found_entry(ctx, p, m.item_list, m.item_key)
     if isinstance(found, ToolResult):
         return found
     lst, e = found
@@ -370,10 +370,10 @@ async def project_milestone(args: SettleArgs, ctx: Any) -> Any:
     person = who[1]
     s: ProjectsState = frame.state("projects")
     mine = [p for p in sorted(s.projects.values(), key=lambda x: x.id)
-            if waiting_in(p) and steerable(p, aud, frame) in c.CHANGES and tracker._hears(p, person, aud)]
+            if waiting_in(p) and steerable(p, aud, frame) in c.CHANGES and tracker.hears(p, person, aud)]
     if not mine:
         return _no(phrase("projects.tools.breakpoint.none"))
-    got = tracker._chosen(ctx, args.project, mine)
+    got = tracker_tools.chosen_project(ctx, args.project, mine)
     if isinstance(got, ToolResult):
         return got
     p, title = got

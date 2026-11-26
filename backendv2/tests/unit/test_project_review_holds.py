@@ -36,7 +36,7 @@ from mika.faculties.projects.faculty import (
     unreviewed,
 )
 from mika.faculties.projects.tools import ReportArgs, report_run
-from mika.faculties.projects.tracker import AddArgs, ItemArg, items_add
+from mika.faculties.projects.tracker_tools import AddArgs, ItemArg, items_add
 from mika.kernel.events import Origin
 from mika.kernel.faculty import ToolResult
 from mika.ports.workshop import PULL_MERGED, PULL_OPEN, REVIEW_CHANGES

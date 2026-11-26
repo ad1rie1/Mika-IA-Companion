@@ -29,7 +29,7 @@ valide.
 
 La borne d'un petit ticket (``oversize``) et la forme d'un plan (``plan_text``, ``plan_parts``) sont ici aussi. Les
 gestes — son outil d'exécution, le processus qui suit l'objectif d'un ticket, la borne mesurée au compte rendu — sont
-dans ``triage.py`` ; la validation en conversation et les brouillons, dans ``tracker.py``.
+dans ``triage.py`` ; la validation en conversation dans ``tracker_tools.py``, les brouillons dans ``tracker.py``.
 """
 
 from __future__ import annotations

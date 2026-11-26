@@ -152,7 +152,7 @@ def _thread(frame: Frame, ctx: InspectContext, p: Project, e: tracker.Entry) -> 
     """Le fil d'un élément : ses derniers changements et ses notes, du plus ancien au plus récent."""
     item = e.item
     lines: list[tuple[int, tuple[Any, ...]]] = [
-        (x.at, (When(x.at), shown_changer(frame, x.by), tracker._change_words(item.list_name, x.what), ""))
+        (x.at, (When(x.at), shown_changer(frame, x.by), tracker.change_words(item.list_name, x.what), ""))
         for x in item.changes]
     for note in tracker.thread(ctx.store, p.id, item.list_name, item.key):
         if note.kind == tracker.CHANGE:  # ce qu'on a dit d'un changement se lit sur sa ligne, s'il est encore gardé

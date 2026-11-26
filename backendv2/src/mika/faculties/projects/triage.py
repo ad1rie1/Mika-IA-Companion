@@ -141,7 +141,7 @@ def _written(args: StepArgs, p: Project, item: Item) -> list[Draft[Any]] | ToolR
     # petit, sur un projet qui ne fait valider que ce qui ne l'est pas : validé par elle, son plan quand même écrit
     # dans le fil — la validation part de l'étape que la note vient de poser, et ne nomme pas de plan (c'est celui
     # du même geste)
-    waiting = tracker._noted(item, note.data, 0, 1)
+    waiting = tracker.after_note(item, note.data, 0, 1)
     if tracker.validation_refusal(p, waiting, plan):
         return [note]
     return [note, *tracker.validating(p, waiting, plan, author=c.BY_SELF, plan_seq=0)]

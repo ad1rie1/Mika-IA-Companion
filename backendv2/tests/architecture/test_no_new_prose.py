@@ -57,8 +57,9 @@ CEILING = {
     "faculties/projects/tend.py": 4,  # raisons de pause (pannes, cadrage sans plan), gardées au journal
     "faculties/projects/tools.py": 2,  # raisons de clôture, gardées au journal
     # les règles de project_items et de project_item (console : la page « Droits » les lit sur l'outil, comme celle
-    # de project_steer), ADR 0268
-    "faculties/projects/tracker.py": 2,
+    # de project_steer), ADR 0268 ; venues de ``tracker.py`` le 2026-11-26 avec les outils du registre (audit
+    # d'organisation, C3)
+    "faculties/projects/tracker_tools.py": 2,
     "faculties/world/commands.py": 13,  # refus adressés aux clients du monde, pas à elle
     "plugins/email/tools.py": 2,  # capacité et résumé (console)
     # capacité d'installation (console) ; venue de ``plugins/forge/__init__.py`` le 2026-11-15, avec la version qui

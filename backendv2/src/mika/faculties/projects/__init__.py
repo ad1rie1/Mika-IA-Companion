@@ -28,6 +28,7 @@ from mika.faculties.projects import (  # noqa: F401 — contributions
     tend,
     tools,
     tracker,
+    tracker_tools,
     triage,
     work,
 )

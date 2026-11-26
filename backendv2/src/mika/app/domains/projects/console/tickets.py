@@ -319,7 +319,7 @@ def _element(sc: Scene, lst: Any, e: tracker.Entry, back: str) -> dict[str, Any]
         status["fields"] = [{**f, "kind": "select", "choices": choices} if f["path"] == "status" else f
                             for f in status["fields"]]
     history = [{"when": sc.when(x.at), "ago": sc.ago(x.at), "who": shown_changer(sc.frame, x.by),
-                "text": tracker._change_words(lst.name, x.what)} for x in reversed(item.changes)]
+                "text": tracker.change_words(lst.name, x.what)} for x in reversed(item.changes)]
     return {"key": item.key, "title": e.title or FORGOTTEN, "tone": _status_tone(lst, item.status),
             "state": tracker.status_words(lst.name, item.status), "actor": shown_actor(sc.frame, item),
             "added": sc.when(item.at), "touched": sc.when(item.updated_at), "body": e.body, "link": e.link,

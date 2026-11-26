@@ -36,7 +36,7 @@ from mika.faculties.projects.faculty import (
     Project,
     branch_of,
 )
-from mika.faculties.projects.tracker import AddArgs, ItemArg, items_add
+from mika.faculties.projects.tracker_tools import AddArgs, ItemArg, items_add
 from mika.kernel.clock import MINUTE
 from mika.ports.workshop import (
     CHECKS_FAILED,

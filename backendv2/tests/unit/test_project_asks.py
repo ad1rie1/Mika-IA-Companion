@@ -43,7 +43,8 @@ from mika.faculties.projects.inspect import ASKS_TITLE, READERS_TITLE, READS_TIT
 from mika.faculties.projects.prompt import _asks, _asks_section, _links_section, _stirs_section, _texts
 from mika.faculties.projects.rhythm import stirred_due
 from mika.faculties.projects.tools import BOOKKEEPING, ReportArgs, report_run
-from mika.faculties.projects.tracker import ITEM_ADDED, ITEM_CHANGED, WriteArgs, project_item
+from mika.faculties.projects.tracker import ITEM_ADDED, ITEM_CHANGED
+from mika.faculties.projects.tracker_tools import WriteArgs, project_item
 from mika.faculties.projects.triage import StepArgs, ticket_step
 from mika.faculties.shares.tools import may_share
 from mika.kernel.clock import HOUR

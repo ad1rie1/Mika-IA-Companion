@@ -36,8 +36,8 @@ from mika.faculties.projects.faculty import (
 )
 from mika.faculties.projects.prompt import _items, _items_section
 from mika.faculties.projects.tools import ReportArgs, report_run
-from mika.faculties.projects.tracker import (
-    ITEM_NOTED,
+from mika.faculties.projects.tracker import ITEM_NOTED
+from mika.faculties.projects.tracker_tools import (
     AddArgs,
     ChangeArgs,
     ItemArg,
