@@ -2,7 +2,7 @@
  * Les mots des réglages d'une boîte (Paramètres › Comptes mail : `settings.ts`), et ce qui s'y calcule sans DOM :
  * son état, sa voix, sa connexion, la sécurité de l'envoi, son non-lu, les préréglages d'un fournisseur, les bornes
  * que le serveur ne vérifie pas, les secrets gardés qu'un enregistrement doit redonner. Les codes sont ceux du
- * moteur (`adapters/mail/config.py`, `app/domains/mail/box_settings.py`).
+ * moteur (`adapters/mail/config.py`, `app/domains/mail/account_settings.py`).
  */
 import type { Box, BoxValues } from "../../api/settings";
 import type { FormValue } from "../../shared/settings";
@@ -94,7 +94,7 @@ export function rangeProblems(values: Record<string, FormValue>): Record<string,
 }
 
 /** La connexion d'une boîte, secret par secret : quand une de ces valeurs change, le secret gardé se redonne — il ne
- *  part jamais vers un autre serveur (`app/domains/mail/box_settings.py`, `IMAP_CONNECTION` et `SMTP_CONNECTION`). */
+ *  part jamais vers un autre serveur (`app/domains/mail/account_settings.py`, `IMAP_CONNECTION` et `SMTP_CONNECTION`). */
 export const CONNECTION: Readonly<Record<"password" | "smtp_password", readonly string[]>> = {
   password: ["auth", "imap_host", "imap_port", "imap_ssl", "user", "oauth_client_id", "oauth_tenant"],
   smtp_password: ["smtp_host", "smtp_port", "smtp_security", "smtp_user"],
@@ -105,7 +105,7 @@ const SECRET_HOST = { password: "imap_host", smtp_password: "smtp_host" } as con
 
 /**
  * Les secrets gardés qu'un enregistrement doit redonner : sa connexion change et rien n'est tapé à sa place — le
- * serveur le refuserait (400, `app/domains/mail/box_settings.py`, `_kept_secrets`). L'envoi sans mot de passe à lui se sert de
+ * serveur le refuserait (400, `app/domains/mail/account_settings.py`, `_kept_secrets`). L'envoi sans mot de passe à lui se sert de
  * celui de la lecture : changer le serveur d'envoi le redemande aussi, sauf s'il est redonné pour lire dans le même
  * enregistrement. Une connexion dont le serveur est vidé ne redemande rien. Une boîte qui entre par Microsoft n'a
  * aucun mot de passe à redonner (ses champs sont cachés). `auth` : la connexion choisie dans le formulaire ; `hosts` :
